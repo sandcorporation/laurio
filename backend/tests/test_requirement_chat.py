@@ -20,6 +20,8 @@ from __future__ import annotations
 import pytest
 from django.test import override_settings
 
+from django.contrib.auth import get_user_model
+
 from contests.models import Category, Contest, DeliverableType, Requirement, RequirementChatMessage
 
 CONTESTS_URL = "/api/contests"
@@ -468,3 +470,148 @@ def test_delete_nonexistent_requirement_returns_404(client, draft_contest):
     )
 
     assert response.status_code == 404
+
+
+
+# --- 코디네이터 리뷰 지적 반영 (defect 1~5) -------------------------------------------
+
+
+@pytest.mark.django_db
+def test_add_requirement_pure_markup_sanitizes_to_empty_returns_422_not_500(
+    client, draft_contest
+):
+    """sanitize_free_text가 태그를 걷어내면 빈 문자열이 될 수 있다 — 빈 Requirement가
+    체크리스트에(그리고 결국 scoring 프롬프트에) 들어가면 아무도 충족/미충족을
+    판단할 수 없다. update_requirement·chat 엔드포인트와 같은 기준으로 막는다."""
+
+    sponsor, contest = draft_contest
+
+    response = client.post(
+        _requirements_url(contest["id"]),
+        data={"text": "<br/>", "grade": "required"},
+        content_type="application/json",
+        **_auth_header(sponsor["access"]),
+    )
+
+    assert response.status_code == 422
+    assert not Requirement.objects.filter(contest_id=contest["id"]).exists()
+
+
+@pytest.mark.django_db
+def test_update_requirement_negative_order_returns_422_not_500(client, draft_contest):
+    """Requirement.order는 PositiveIntegerField라 DB CHECK가 order >= 0이다.
+    스키마에서 막지 않으면 422가 아니라 IntegrityError -> 500이 샌다."""
+
+    sponsor, contest = draft_contest
+    requirement = Requirement.objects.create(
+        contest_id=contest["id"], text="기존 항목", grade="required", order=0
+    )
+
+    response = client.patch(
+        _requirements_url(contest["id"], requirement.id),
+        data={"order": -1},
+        content_type="application/json",
+        **_auth_header(sponsor["access"]),
+    )
+
+    assert response.status_code == 422
+    requirement.refresh_from_db()
+    assert requirement.order == 0
+
+
+@pytest.mark.django_db
+def test_reading_chat_history_after_publish_still_succeeds(client, draft_contest):
+    """대화 이력 조회는 아무것도 바꾸지 않는다 — Contest가 공개된 뒤에도 Sponsor는
+    자기 대화를 계속 읽을 수 있어야 한다(편집 게이트의 409가 새어나오면 안 된다)."""
+
+    sponsor, contest = draft_contest
+
+    client.post(
+        _chat_url(contest["id"]),
+        data={"message": "로그인 기능이 있어야 해요"},
+        content_type="application/json",
+        **_auth_header(sponsor["access"]),
+    )
+    Contest.objects.filter(id=contest["id"]).update(status=Contest.Status.PUBLISHED)
+
+    response = client.get(_chat_url(contest["id"]), **_auth_header(sponsor["access"]))
+
+    assert response.status_code == 200
+    turns = response.json()
+    assert [t["role"] for t in turns] == ["sponsor", "assistant"]
+
+
+@pytest.mark.django_db
+def test_reading_chat_history_on_strangers_contest_is_hidden_as_404(client, draft_contest):
+    _owner, contest = draft_contest
+    stranger = _login(client, uid="stranger-reader", email="stranger-reader@example.com")
+
+    response = client.get(_chat_url(contest["id"]), **_auth_header(stranger["access"]))
+
+    assert response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_chat_prompt_audit_record_does_not_grow_with_conversation_length(client, draft_contest):
+    """매 턴 prompt에 대화 이력 전문을 다시 담으면 저장량이 턴 수의 제곱으로 자란다.
+    n번째 턴의 감사 프롬프트 길이가 이전 턴들의 발화 총량과 무관하게(대략) 일정해야
+    한다 — 그 턴 자신의 발화 하나만 담기 때문이다."""
+
+    sponsor, contest = draft_contest
+    long_message = "로그인 기능이 있어야 해요. " * 50  # 약 750자 안팎의 한 턴
+
+    first_resp = client.post(
+        _chat_url(contest["id"]),
+        data={"message": long_message},
+        content_type="application/json",
+        **_auth_header(sponsor["access"]),
+    )
+    assert first_resp.status_code == 200
+    first_assistant = RequirementChatMessage.objects.filter(
+        contest_id=contest["id"], role=RequirementChatMessage.Role.ASSISTANT
+    ).order_by("id").first()
+    first_prompt_len = len(first_assistant.prompt)
+
+    # 같은 길이의 발화를 9턴 더 쌓는다 — 이력을 프롬프트에 통째로 재적재했다면
+    # 매 턴 감사 프롬프트가 이전 발화 총량만큼씩 계속 길어진다.
+    last_prompt_len = first_prompt_len
+    for _ in range(9):
+        resp = client.post(
+            _chat_url(contest["id"]),
+            data={"message": long_message},
+            content_type="application/json",
+            **_auth_header(sponsor["access"]),
+        )
+        assert resp.status_code == 200
+        last_assistant = (
+            RequirementChatMessage.objects.filter(
+                contest_id=contest["id"], role=RequirementChatMessage.Role.ASSISTANT
+            )
+            .order_by("-id")
+            .first()
+        )
+        last_prompt_len = len(last_assistant.prompt)
+
+    # 이력을 다시 박았다면 10턴째 프롬프트는 1턴째보다 최소 9배(약 6,750자 이상)
+    # 커야 한다. 이번 턴 발화만 담으므로 거의 같은 길이(약간의 템플릿 차이만)여야
+    # 한다.
+    assert last_prompt_len < first_prompt_len * 2
+    # 발화 문구 자체는 감사 프롬프트에 정확히 한 번만 등장한다 — 이전 9턴의 같은
+    # 발화가 이력으로 재적재됐다면 10번 등장했을 것이다.
+    assert last_assistant.prompt.count(long_message.strip()) == 1
+
+
+@pytest.mark.django_db
+def test_requirement_chat_message_admin_blocks_direct_add(client):
+    """모든 필드가 readonly라도 has_add_permission을 막지 않으면 "빈 추가 폼"이
+    남아 contest_id NULL로 INSERT되어 NOT NULL 위반 500이 난다(payments.admin과
+    같은 원칙). 추가 폼 자체가 열리지 않아야 한다."""
+
+    get_user_model().objects.create_superuser(
+        username="chat-admin", email="chat-admin@example.com", password="operator-pw-1234"
+    )
+    assert client.login(username="chat-admin", password="operator-pw-1234")
+
+    response = client.get("/admin/contests/requirementchatmessage/add/")
+
+    assert response.status_code == 403

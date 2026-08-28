@@ -174,7 +174,7 @@ class FakeRequirementChatAdapter:
         )
 
 
-def build_chat_prompt(chat_input: RequirementChatInput) -> str:
+def build_chat_prompt(chat_input: RequirementChatInput, *, include_history: bool = True) -> str:
     """실제 LLM에 보낼 프롬프트 문자열 — 감사·재현용으로 만들어 두지만, fake
     어댑터는 이 문자열이 아니라 구조화된 `chat_input`을 직접 읽는다
     (`scoring.services._build_prompt`/`FakeLLMScoringAdapter`와 같은 관계).
@@ -182,6 +182,12 @@ def build_chat_prompt(chat_input: RequirementChatInput) -> str:
     Sponsor가 입력한 모든 자유 텍스트는 신뢰할 수 없는 데이터로 취급해 전용
     구분자로 감싸고 `neutralize_untrusted`로 무력화한다(#12 리뷰 지적 9와 같은
     방어를 재사용).
+
+    `include_history=False`는 `contests.api`가 매 턴 `RequirementChatMessage.prompt`에
+    감사 기록을 남길 때 쓴다 — 대화 이력을 매번 통째로 다시 박으면 한 Contest의
+    누적 저장량이 턴 수의 제곱에 비례해 자란다(리뷰 지적: 200턴 x 2000자 한도에서
+    턴당 약 20MB). 이번 턴에 실제로 보낸 발화만 담아도, 이전 턴들은 각자의 행에
+    이미 감사 기록으로 남아 있으므로 전체 대화를 재구성할 수 있다.
     """
 
     lines = [
@@ -207,12 +213,16 @@ def build_chat_prompt(chat_input: RequirementChatInput) -> str:
     else:
         lines.append("(없음)")
 
-    lines.append("")
-    lines.append("## 대화 이력")
-    for turn in chat_input.history:
-        lines.append(f"[{turn.role}] <<<SPONSOR_MESSAGE_START>>>")
-        lines.append(neutralize_untrusted(turn.content))
-        lines.append("<<<SPONSOR_MESSAGE_END>>>")
+    if include_history:
+        lines.append("")
+        lines.append("## 대화 이력")
+        for turn in chat_input.history:
+            lines.append(f"[{turn.role}] <<<SPONSOR_MESSAGE_START>>>")
+            lines.append(neutralize_untrusted(turn.content))
+            lines.append("<<<SPONSOR_MESSAGE_END>>>")
+    else:
+        lines.append("")
+        lines.append(f"## 대화 이력 (이전 {len(chat_input.history)}턴, 각 턴의 감사 기록에 개별 저장됨)")
 
     lines.append("")
     lines.append("## 이번 Sponsor 발화")

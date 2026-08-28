@@ -224,13 +224,12 @@ def get_contest(request: HttpRequest, contest_id: int):
 # --- AI grill — Requirement 체크리스트 대화형 생성 + Sponsor 수정/삭제/추가 (#20) -----
 
 
-def _get_owned_draft_contest(request: HttpRequest, contest_id: int) -> Contest:
-    """AI grill 대화·Requirement CRUD가 공통으로 쓰는 소유권·상태 게이트.
+def _get_owned_contest(request: HttpRequest, contest_id: int) -> Contest:
+    """소유자만 통과하는 읽기 전용 게이트 — 상태(draft/published/closed)는 안 본다.
 
-    타인의 Contest는 draft여도 (get_contest·test_owner_can_view_own_draft_but_stranger_cannot
-    과 같은 이유로) 존재 자체를 숨기려 404로 응답한다. 소유자라도 DRAFT를 벗어난
-    Contest는 편집을 막는다 — 공개된 뒤 체크리스트가 흔들리면 제출·심사·채점이
-    기준으로 삼는 대상 자체가 바뀌어 버린다.
+    Sponsor 자신의 AI grill 대화 이력을 읽는 건 아무것도 바꾸지 않으므로, Contest가
+    공개된 뒤에도 계속 볼 수 있어야 한다. 타인의 Contest는 존재 자체를 숨기려 404로
+    응답한다(get_contest·test_owner_can_view_own_draft_but_stranger_cannot과 같은 이유).
     """
 
     try:
@@ -241,6 +240,20 @@ def _get_owned_draft_contest(request: HttpRequest, contest_id: int) -> Contest:
     auth_user = getattr(request, "auth_user", None)
     if auth_user is None or contest.sponsor.user_id != auth_user.id:
         raise HttpError(404, "Contest를 찾을 수 없습니다.")
+
+    return contest
+
+
+def _get_owned_draft_contest(request: HttpRequest, contest_id: int) -> Contest:
+    """AI grill 대화 전송·Requirement CRUD가 공통으로 쓰는 소유권·상태 게이트.
+
+    읽기 전용 조회(`_get_owned_contest`)와 달리 여기는 상태를 무언가 바꾸는
+    엔드포인트용이라, 소유자라도 DRAFT를 벗어난 Contest는 편집을 막는다 — 공개된
+    뒤 체크리스트가 흔들리면 제출·심사·채점이 기준으로 삼는 대상 자체가 바뀌어
+    버린다.
+    """
+
+    contest = _get_owned_contest(request, contest_id)
 
     if contest.status != Contest.Status.DRAFT:
         raise HttpError(409, "공개된 Contest의 Requirement 체크리스트는 더 이상 수정할 수 없습니다.")
@@ -303,7 +316,10 @@ def send_requirement_chat_message(
         ],
     )
 
-    prompt = build_chat_prompt(chat_input)
+    # 감사용으로만 남기는 프롬프트라 대화 이력 전문을 매 턴 다시 담지 않는다
+    # (리뷰 지적: 안 그러면 저장량이 턴 수의 제곱으로 자란다) — 이전 턴들은 각자의
+    # RequirementChatMessage 행에 이미 자기 몫의 감사 기록을 남겨 뒀다.
+    prompt = build_chat_prompt(chat_input, include_history=False)
 
     try:
         adapter = get_requirement_chat_adapter()
@@ -348,9 +364,15 @@ def send_requirement_chat_message(
     auth=jwt_auth,
 )
 def list_requirement_chat_messages(request: HttpRequest, contest_id: int):
-    """지금까지의 AI grill 대화 이력 — 다시 들어와도 이어갈 수 있게 한다."""
+    """지금까지의 AI grill 대화 이력 — 다시 들어와도 이어갈 수 있게 한다.
 
-    contest = _get_owned_draft_contest(request, contest_id)
+    조회는 아무것도 바꾸지 않으므로 Contest가 공개된 뒤에도(더 이상 체크리스트를
+    수정할 수 없게 된 뒤에도) 자기 대화 이력은 계속 읽을 수 있어야 한다 —
+    `_get_owned_draft_contest`(편집 게이트)가 아니라 `_get_owned_contest`(읽기
+    게이트)를 쓴다.
+    """
+
+    contest = _get_owned_contest(request, contest_id)
     return [_turn_out(m) for m in contest.requirement_chat_messages.all()]
 
 
@@ -365,10 +387,14 @@ def add_requirement(request: HttpRequest, contest_id: int, payload: RequirementC
     if payload.grade not in _VALID_GRADES:
         raise HttpError(422, "Requirement grade는 required 또는 optional 이어야 합니다.")
 
+    sanitized_text = sanitize_free_text(payload.text)
+    if not sanitized_text:
+        raise HttpError(422, "Requirement 내용이 비어 있습니다.")
+
     next_order = contest.requirements.count()
     requirement = Requirement.objects.create(
         contest=contest,
-        text=sanitize_free_text(payload.text),
+        text=sanitized_text,
         grade=payload.grade,
         order=next_order,
     )
