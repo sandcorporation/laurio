@@ -1,6 +1,7 @@
 from ninja import NinjaAPI
 
 from accounts.api import router as accounts_router
+from awards.api import router as awards_router
 from contests.api import router as contests_router
 from core.api import router as core_internal_router
 from ledger.api import router as ledger_router
@@ -19,6 +20,7 @@ api.add_router("", verification_router)
 api.add_router("", contests_router)
 api.add_router("", payments_router)
 api.add_router("", submissions_router)
+api.add_router("", awards_router)
 api.add_router("/ledger", ledger_router)
 
 

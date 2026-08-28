@@ -33,6 +33,9 @@ class ContestAdmin(admin.ModelAdmin):
         "required_minimum_prize",
         "is_underfunded",
         "deadline_at",
+        "judging_ends_at",
+        "judging_extension_count",
+        "refund_disabled",
     )
-    list_filter = ("status", "category", "is_underfunded")
+    list_filter = ("status", "category", "is_underfunded", "refund_disabled")
     inlines = [RequirementInline]

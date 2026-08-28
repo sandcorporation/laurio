@@ -6,6 +6,9 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Sum
 from django.http import HttpRequest
@@ -16,6 +19,10 @@ from ninja.pagination import PageNumberPagination, paginate
 from accounts.middleware import jwt_auth
 from accounts.models import SponsorProfile
 from accounts.sanitize import sanitize_free_text
+from core.clock import Clock
+from ledger.models import Account, EntrySide
+from ledger.services import LineInput, post_journal_entry
+from payments.adapters import PGError, PGTimeoutError, get_adapter
 from verification.models import Verification
 
 from .models import Category, Contest, DeliverableType, Requirement
@@ -24,12 +31,25 @@ from .schemas import (
     ContestCreateIn,
     ContestOut,
     DeliverableTypeOut,
+    ExtendJudgingPeriodIn,
+    ExtendJudgingPeriodOut,
     QuoteIn,
     QuoteOut,
     RequirementOut,
 )
 
 router = Router(tags=["contests"])
+
+# 마감(#11) 이후 계속 공개로 남는 상태들. CLOSED뿐 아니라 AWARDED·JUDGING_ENDED도
+# 포함한다(#13) — 그렇지 않으면 심사기간이 끝나거나 Award되는 순간 목록·상세가
+# 404가 되어, #11이 만든 "마감된 Contest는 계속 공개" 계약이 그 이후 상태에서
+# 조용히 깨진다(정확히 이 티켓이 경계하라고 지시받은, 새 상태를 놓치는 실패 형태다).
+_PUBLICLY_VISIBLE_STATUSES = [
+    Contest.Status.PUBLISHED,
+    Contest.Status.CLOSED,
+    Contest.Status.AWARDED,
+    Contest.Status.JUDGING_ENDED,
+]
 
 
 def _minimum_total(deliverable_type_ids: list[int]) -> int:
@@ -59,6 +79,9 @@ def _serialize_contest(contest: Contest) -> ContestOut:
             for r in contest.requirements.all()
         ],
         created_at=contest.created_at,
+        judging_ends_at=contest.judging_ends_at,
+        judging_extension_count=contest.judging_extension_count,
+        refund_disabled=contest.refund_disabled,
     )
 
 
@@ -171,7 +194,7 @@ def list_contests(request: HttpRequest):
     """
 
     return Contest.objects.filter(
-        status__in=[Contest.Status.PUBLISHED, Contest.Status.CLOSED]
+        status__in=_PUBLICLY_VISIBLE_STATUSES
     ).select_related("category").prefetch_related("deliverable_types", "requirements")
 
 
@@ -186,11 +209,111 @@ def get_contest(request: HttpRequest, contest_id: int):
     except Contest.DoesNotExist as exc:
         raise HttpError(404, "Contest를 찾을 수 없습니다.") from exc
 
-    # PUBLISHED·CLOSED 둘 다 공개다 — list_contests와 같은 기준(위 설명 참고).
-    if contest.status not in (Contest.Status.PUBLISHED, Contest.Status.CLOSED):
+    # PUBLISHED·CLOSED·AWARDED·JUDGING_ENDED 모두 공개다 — list_contests와 같은
+    # 기준(위 _PUBLICLY_VISIBLE_STATUSES 설명 참고).
+    if contest.status not in _PUBLICLY_VISIBLE_STATUSES:
         auth_user = getattr(request, "auth_user", None)
         is_owner = auth_user is not None and contest.sponsor.user_id == auth_user.id
         if not is_owner:
             raise HttpError(404, "Contest를 찾을 수 없습니다.")
 
     return _serialize_contest(contest)
+
+
+@router.post(
+    "/contests/{contest_id}/extend-judging-period",
+    response={200: ExtendJudgingPeriodOut},
+    auth=jwt_auth,
+)
+def extend_judging_period(request: HttpRequest, contest_id: int, payload: ExtendJudgingPeriodIn):
+    """심사기간을 유료로 연장한다 (#13, REQUEST.md "기간 연장", ADR-0003).
+
+    핵심 불변식 — **전이 시각 컬럼(judging_ends_at)만 갱신한다.** core.transitions
+    레지스트리에 등록된 CLOSED -> JUDGING_ENDED 규칙은 그대로 둔 채, 그 규칙이 다음
+    틱에 읽어갈 값만 여기서 미룬다. 예약을 취소하고 다시 등록하는 코드 경로는
+    존재하지 않는다.
+
+    2회 이상(judging_extension_count가 2에 도달) 연장되면 refund_disabled가 영구히
+    True로 확정된다 — 이후 다시 False로 되돌리는 경로는 없다.
+
+    결제 실패 시(402) Contest는 전혀 건드리지 않는다 — 돈이 안 들어왔는데 심사기간만
+    늘어나는 사고를 막는다.
+    """
+
+    with transaction.atomic():
+        try:
+            contest = Contest.objects.select_for_update().select_related("sponsor").get(
+                id=contest_id
+            )
+        except Contest.DoesNotExist as exc:
+            raise HttpError(404, "Contest를 찾을 수 없습니다.") from exc
+
+        if contest.sponsor.user_id != request.auth_user.id:
+            raise HttpError(403, "본인이 개최한 Contest만 심사기간을 연장할 수 있습니다.")
+
+        if contest.status != Contest.Status.CLOSED:
+            # PUBLISHED(아직 마감 전)·DRAFT(아직 공개 전)는 심사기간 자체가 없고,
+            # AWARDED(이미 Award됨)·JUDGING_ENDED(이미 심사기간 종료)는 더 늘릴
+            # 대상이 없다.
+            raise HttpError(409, "지금은 심사기간을 연장할 수 있는 상태가 아닙니다.")
+
+        now = Clock.now()
+        if contest.judging_ends_at is None or now >= contest.judging_ends_at:
+            # status가 아직 CLOSED로 보여도(스캔 주기만큼 늦어질 수 있다, ADR-0003)
+            # 시각으로 다시 한번 확인한다 — 스케줄러가 아직 JUDGING_ENDED로 옮기지
+            # 못했다고 해서 이미 끝난 심사기간을 연장해줄 수는 없다.
+            raise HttpError(409, "이미 심사기간이 종료되어 연장할 수 없습니다.")
+
+        adapter = get_adapter()
+        order_id = f"judging-extension:{contest.id}:{contest.judging_extension_count + 1}"
+        adapter.request_payment(order_id=order_id, amount=settings.CONTEST_EXTENSION_FEE)
+        try:
+            result_status = adapter.confirm(order_id=order_id, simulate=payload.simulate)
+        except PGTimeoutError:
+            result_status = adapter.query_status(order_id=order_id)
+        except PGError as exc:
+            raise HttpError(502, str(exc)) from exc
+
+        if result_status != "paid":
+            raise HttpError(402, "연장 결제에 실패했습니다.")
+
+        new_extension_count = contest.judging_extension_count + 1
+        new_refund_disabled = contest.refund_disabled or new_extension_count >= 2
+        new_judging_ends_at = contest.judging_ends_at + timedelta(
+            days=settings.JUDGING_EXTENSION_DAYS
+        )
+
+        # 여전히 조건부 UPDATE로 남긴다 — select_for_update로 이미 직렬화됐지만,
+        # ADR-0003의 규율(WHERE state=<이전상태>)을 다른 전이들과 똑같이 지킨다.
+        Contest.objects.filter(pk=contest.pk, status=Contest.Status.CLOSED).update(
+            judging_ends_at=new_judging_ends_at,
+            judging_extension_count=new_extension_count,
+            refund_disabled=new_refund_disabled,
+        )
+
+        post_journal_entry(
+            contest_id=contest.ledger_id,
+            memo=(
+                f"Contest #{contest.id} 심사기간 연장 {new_extension_count}회차 — "
+                f"{settings.CONTEST_EXTENSION_FEE:,}원"
+            ),
+            lines=[
+                LineInput(
+                    account=Account.SPONSOR_DEPOSIT,
+                    side=EntrySide.DEBIT,
+                    amount=settings.CONTEST_EXTENSION_FEE,
+                ),
+                LineInput(
+                    account=Account.PLATFORM_FEE_REVENUE,
+                    side=EntrySide.CREDIT,
+                    amount=settings.CONTEST_EXTENSION_FEE,
+                ),
+            ],
+        )
+
+    return 200, ExtendJudgingPeriodOut(
+        contest_id=contest.id,
+        judging_ends_at=new_judging_ends_at,
+        judging_extension_count=new_extension_count,
+        refund_disabled=new_refund_disabled,
+    )

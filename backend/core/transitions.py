@@ -16,6 +16,8 @@ UPDATE 로만 수행하고, rowcount 가 1일 때만 "전이가 실제로 일어
 """
 
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Callable
 
 from django.db import models
 
@@ -75,6 +77,11 @@ class TransitionSpec:
     from_state: str
     to_state: str
     state_field: str = "state"
+    # 전이와 같은 조건부 UPDATE 문 안에서 함께 찍어야 하는 추가 컬럼(예: #13이 마감
+    # 전이와 같은 UPDATE로 judging_ends_at을 채우는 것). `as_of` 하나만 받는다 —
+    # 스캔 배치 전체가 같은 시각을 쓰므로(모듈 docstring), 값이 행마다 달라질 이유가
+    # 없다. 행마다 다른 값이 필요해지면 그때 이 계약을 넓힌다.
+    extra_fields: Callable[[datetime], dict[str, object]] | None = None
 
 
 TRANSITION_REGISTRY: list[TransitionSpec] = []
@@ -102,6 +109,7 @@ def run_due_transitions(as_of=None) -> list[dict]:
                 **{spec.state_field: spec.from_state, f"{spec.due_field}__lte": as_of}
             ).values_list("pk", flat=True)[:DEFAULT_BATCH_SIZE]
         )
+        extra_fields = spec.extra_fields(as_of) if spec.extra_fields is not None else None
         for pk in due_ids:
             if claim_transition(
                 spec.model,
@@ -110,6 +118,7 @@ def run_due_transitions(as_of=None) -> list[dict]:
                 to_state=spec.to_state,
                 state_field=spec.state_field,
                 now=as_of,
+                extra_fields=extra_fields,
             ):
                 results.append(
                     {

@@ -98,3 +98,42 @@ class DeveloperPublicProfileOut(Schema):
     display_name: str
     bio: str
     submissions: list[PublicSubmissionOut]
+
+
+# --- Sponsor 비교 화면 (#13) --------------------------------------------------
+#
+# Sponsor가 앱을 전부 설치해보지 않고도 Requirement 체크리스트를 축으로
+# Submission들을 1차로 거를 수 있게 한다(User Story 45). 소스는 이 스키마 어디에도
+# 없다 — Award 전까지 Sponsor에게 열리지 않는다(ADR-0014).
+
+
+class ComparisonEntryOut(Schema):
+    submission_id: int
+    developer_id: int
+    developer_display_name: str
+    is_met: bool
+    note: str
+    evidence: list[EvidenceOut]
+    is_linked: bool
+
+
+class RequirementComparisonOut(Schema):
+    requirement_id: int
+    text: str
+    grade: str
+    entries: list[ComparisonEntryOut]
+
+
+class ComparisonSubmissionOut(Schema):
+    submission_id: int
+    developer_id: int
+    developer_display_name: str
+    demo_video_object_key: str | None
+    demo_url: str | None
+    completion: CompletionOut
+
+
+class ContestComparisonOut(Schema):
+    contest_id: int
+    submissions: list[ComparisonSubmissionOut]
+    requirements: list[RequirementComparisonOut]

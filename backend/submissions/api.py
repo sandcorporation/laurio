@@ -8,9 +8,10 @@
   마감이 지났으면 제출·수정 모두 거부한다. "마감"은 Contest 상태 전이(#11)를 기다리지
   않고 `deadline_at`과 `core.clock.Clock.now()`를 직접 비교한다.
 - Contest의 Sponsor와 같은 CI를 가진 사람은 제출할 수 없다(자전거래 차단).
-- 소스는 어떤 API 응답에서도 소유자 본인 외에는 절대 나오지 않는다 — Award 이후
-  Sponsor에게 여는 것(Handover)은 #13/#14 소관이라 여기 새 분기가 필요할 뿐, 지금은
-  그 분기가 없다.
+- 소스는 어떤 API 응답에서도 소유자 본인 외에는 절대 나오지 않는다 — Award 자체는
+  #13(`awards` 앱)이 만들었지만, 그 이후 Sponsor에게 소스 접근 권한을 여는 것
+  (Handover)은 #14 소관이라 여기 새 분기가 필요할 뿐, 지금은 그 분기가 없다
+  (`submissions.resolvers`의 SOURCE_SLOT 분기 주석 참고).
 - 진행 중에는 다른 Developer의 Submission이 전혀 보이지 않는다. Sponsor는 데모·영상은
   볼 수 있지만 소스는 볼 수 없다. 마감 후에는 데모·영상이 전면 공개된다.
 
@@ -35,10 +36,14 @@ from verification.models import Verification
 
 from .models import Evidence, RequirementResponse, Submission
 from .schemas import (
+    ComparisonEntryOut,
+    ComparisonSubmissionOut,
     CompletionOut,
+    ContestComparisonOut,
     DeveloperPublicProfileOut,
     EvidenceOut,
     PublicSubmissionOut,
+    RequirementComparisonOut,
     RequirementResponseOut,
     SubmissionIn,
     SubmissionOut,
@@ -78,10 +83,24 @@ def _get_published_contest_or_404(contest_id: int) -> Contest:
     return contest
 
 
-def _get_viewable_contest_or_404(contest_id: int) -> Contest:
-    """PUBLISHED·CLOSED 둘 다 조회 가능하다. DRAFT만 존재를 드러내지 않는다.
+_VIEWABLE_STATUSES = (
+    Contest.Status.PUBLISHED,
+    Contest.Status.CLOSED,
+    # AWARDED·JUDGING_ENDED도 포함한다(#13) — 그렇지 않으면 Award되거나 심사기간이
+    # 끝나는 순간 Developer가 자기 제출물을 조회하지 못하게 된다. 정확히 #11이
+    # CLOSED를 추가할 때 반영했던 것과 같은 원칙을, 이 티켓이 추가한 두 상태에도
+    # 적용한다(#12 리뷰 지적 4의 재발 방지).
+    Contest.Status.AWARDED,
+    Contest.Status.JUDGING_ENDED,
+)
 
-    마감 전이(#11)가 Contest.status를 CLOSED로 옮긴 뒤에도 본인 Submission 조회
+
+def _get_viewable_contest_or_404(contest_id: int) -> Contest:
+    """PUBLISHED·CLOSED·AWARDED·JUDGING_ENDED 모두 조회 가능하다. DRAFT만 존재를
+    드러내지 않는다.
+
+    마감 전이(#11)가 Contest.status를 CLOSED로 옮긴 뒤에도, 그리고 그 뒤 Award나
+    심사기간 종료(#13)로 한 번 더 옮긴 뒤에도 본인 Submission 조회
     (get_my_submission)는 계속 성립해야 한다 — 마감이 지났다고 자기 제출물을 못
     보게 막을 이유가 없다. 단건 공개 조회(get_submission)는 애초에 status를 보지
     않고 deadline_at만 비교해 이 문제가 없었다(#12 리뷰 지적: 둘이 서로 다른
@@ -91,7 +110,7 @@ def _get_viewable_contest_or_404(contest_id: int) -> Contest:
         contest = Contest.objects.select_related("sponsor").get(id=contest_id)
     except Contest.DoesNotExist as exc:
         raise HttpError(404, "Contest를 찾을 수 없습니다.") from exc
-    if contest.status not in (Contest.Status.PUBLISHED, Contest.Status.CLOSED):
+    if contest.status not in _VIEWABLE_STATUSES:
         raise HttpError(404, "Contest를 찾을 수 없습니다.")
     return contest
 
@@ -231,7 +250,7 @@ def _serialize(
     )
 
     # 소스는 소유자 본인 외에는 절대 나오지 않는다(ADR-0014) — Sponsor는 Award
-    # 이후에만 열리는데, 그 개방은 #13/#14의 범위다. 데모·영상은 진행 중엔 본인·
+    # 이후에만 열리는데, 그 개방(Handover)은 #14의 범위다. 데모·영상은 진행 중엔 본인·
     # Sponsor, 마감 후엔 전면 공개(ADR-0014의 "데모·영상" 칸). test_account는 그
     # 칸에 없다 — 마감 후 공개되는 건 데모·영상뿐이고, 그걸 들여다볼 로그인 정보까지
     # 공개 범위에 들어가지는 않는다(#10 리뷰 지적). 그래서 test_account는 진행
@@ -448,5 +467,119 @@ def get_developer_public_profile(request: HttpRequest, developer_id: int):
                 created_at=s.created_at,
             )
             for s in submissions
+        ],
+    )
+
+
+@router.get(
+    "/contests/{contest_id}/submissions/compare",
+    response={200: ContestComparisonOut},
+    auth=jwt_auth,
+)
+def compare_submissions(request: HttpRequest, contest_id: int):
+    """Sponsor가 Requirement 체크리스트를 축으로 Submission들을 나란히 비교한다 (#13).
+
+    앱 하나에 설치·가입·탐색만 20~30분이 걸리므로(REQUEST.md), Sponsor가 전부
+    설치해보지 않고도 이 화면으로 1차로 거를 수 있어야 한다(User Story 45).
+
+    소스는 이 응답 어디에도 없다 — Award 전까지 Sponsor에게 열리지 않는다
+    (ADR-0014). 마감 전에는 열지 않는다 — 진행 중 비공개 원칙(REQUEST.md)이 여기도
+    적용된다. "마감"은 다른 곳과 같은 기준으로 deadline_at을 직접 비교한다(#11 이후
+    이 코드베이스의 일관된 규약).
+    """
+
+    try:
+        contest = Contest.objects.select_related("sponsor").get(id=contest_id)
+    except Contest.DoesNotExist as exc:
+        raise HttpError(404, "Contest를 찾을 수 없습니다.") from exc
+
+    if contest.sponsor.user_id != request.auth_user.id:
+        raise HttpError(403, "본인이 개최한 Contest만 비교할 수 있습니다.")
+
+    if Clock.now() < contest.deadline_at:
+        raise HttpError(403, "마감 전에는 Submission을 비교할 수 없습니다.")
+
+    requirements = list(Requirement.objects.filter(contest=contest).order_by("order", "id"))
+    submissions = (
+        Submission.objects.filter(contest=contest)
+        .select_related("developer")
+        .prefetch_related("requirement_responses__evidence_items")
+        .order_by("id")
+    )
+
+    submission_outs: list[ComparisonSubmissionOut] = []
+    entries_by_requirement: dict[int, list[ComparisonEntryOut]] = {r.id: [] for r in requirements}
+
+    for submission in submissions:
+        developer_name = (
+            submission.developer.display_name or f"Developer#{submission.developer_id}"
+        )
+        responses_by_requirement = {
+            r.requirement_id: r for r in submission.requirement_responses.all()
+        }
+
+        linked_count = 0
+        for requirement in requirements:
+            response = responses_by_requirement.get(requirement.id)
+            if response is None:
+                entries_by_requirement[requirement.id].append(
+                    ComparisonEntryOut(
+                        submission_id=submission.id,
+                        developer_id=submission.developer_id,
+                        developer_display_name=developer_name,
+                        is_met=False,
+                        note="",
+                        evidence=[],
+                        is_linked=False,
+                    )
+                )
+                continue
+
+            evidence_items = list(response.evidence_items.all())
+            is_linked = bool(evidence_items)
+            if is_linked:
+                linked_count += 1
+            entries_by_requirement[requirement.id].append(
+                ComparisonEntryOut(
+                    submission_id=submission.id,
+                    developer_id=submission.developer_id,
+                    developer_display_name=developer_name,
+                    is_met=response.is_met,
+                    note=response.note,
+                    evidence=[EvidenceOut(kind=e.kind, value=e.value) for e in evidence_items],
+                    is_linked=is_linked,
+                )
+            )
+
+        total = len(requirements)
+        submission_outs.append(
+            ComparisonSubmissionOut(
+                submission_id=submission.id,
+                developer_id=submission.developer_id,
+                developer_display_name=developer_name,
+                demo_video_object_key=submission.demo_video_object_key or None,
+                demo_url=submission.demo_url or None,
+                completion=CompletionOut(
+                    has_demo_video=bool(submission.demo_video_object_key),
+                    has_demo_url=bool(submission.demo_url),
+                    has_test_account=bool(submission.test_account),
+                    total_requirement_count=total,
+                    linked_requirement_count=linked_count,
+                    unlinked_requirement_count=max(total - linked_count, 0),
+                ),
+            )
+        )
+
+    return 200, ContestComparisonOut(
+        contest_id=contest.id,
+        submissions=submission_outs,
+        requirements=[
+            RequirementComparisonOut(
+                requirement_id=r.id,
+                text=r.text,
+                grade=r.grade,
+                entries=entries_by_requirement[r.id],
+            )
+            for r in requirements
         ],
     )

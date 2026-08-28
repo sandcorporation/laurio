@@ -41,7 +41,17 @@ def incomplete_contests(request):
     """
 
     payload = []
-    closed_contests = Contest.objects.filter(status=Contest.Status.CLOSED).order_by("deadline_at")
+    # CLOSED뿐 아니라 AWARDED·JUDGING_ENDED도 본다(#13) — 같은 이유로
+    # scoring.services.run_pending_scoring도 이 세 상태를 함께 스캔한다: Award는
+    # Score를 기다리지 않고 일어날 수 있어(ADR-0006/0014), 채점이 끝나기 전에
+    # Contest가 CLOSED를 벗어날 수 있다.
+    closed_contests = Contest.objects.filter(
+        status__in=[
+            Contest.Status.CLOSED,
+            Contest.Status.AWARDED,
+            Contest.Status.JUDGING_ENDED,
+        ]
+    ).order_by("deadline_at")
     for contest in closed_contests:
         submissions = Submission.objects.filter(contest=contest)
         total = submissions.count()

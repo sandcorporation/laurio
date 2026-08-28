@@ -48,6 +48,11 @@ class SubmissionTargetStateResolver:
         if slot == SOURCE_SLOT:
             # Handover(#14)가 Award 이후 Sponsor에게 여는 것은 여기 새 분기를
             # 추가하는 것으로 충분하다 — 지금은 그 분기가 없으므로 항상 Developer만.
+            # #13이 만든 awards.models.Award가 이미 "이 Contest가 Award됐는지, 어느
+            # Submission이 선정됐는지"를 담고 있다 — #14는 `Award.objects.filter(
+            # contest_id=contest_id, submission__developer__user_id=developer_user_id
+            # ).exists()`(또는 동등한 조회)로 additional_viewer_ids에 Sponsor의
+            # user_id를 더하면 된다. 이 티켓은 그 훅만 남기고 열지 않는다.
             return TargetState(visibility=Visibility.PRIVATE, owner_id=developer_user_id)
 
         # 데모·영상 등 그 외 슬롯: 마감 전엔 Developer 본인 + Sponsor, 마감 후 전면 공개.

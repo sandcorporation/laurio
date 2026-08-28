@@ -253,7 +253,20 @@ def run_pending_scoring(as_of=None) -> list[dict]:
     """
 
     pending = (
-        Submission.objects.filter(contest__status=Contest.Status.CLOSED, score__isnull=True)
+        Submission.objects.filter(
+            # CLOSED뿐 아니라 AWARDED·JUDGING_ENDED도 포함한다(#13) — Award는 Score를
+            # 기다리지 않고 일어날 수 있으므로(ADR-0006/0014, Score는 Award를 결정하지
+            # 않는다), 채점이 끝나기 전에 Contest가 CLOSED를 벗어날 수 있다. CLOSED만
+            # 보면 그 순간 이 Contest의 미채점 Submission이 이 스캔에서 영원히
+            # 빠진다 — 새 상태를 추가할 때 옛 상태만 보던 호출부를 놓치는 정확히 그
+            # 실패 형태다.
+            contest__status__in=[
+                Contest.Status.CLOSED,
+                Contest.Status.AWARDED,
+                Contest.Status.JUDGING_ENDED,
+            ],
+            score__isnull=True,
+        )
         .select_related("contest")
         .order_by("id")[:BATCH_SIZE]
     )

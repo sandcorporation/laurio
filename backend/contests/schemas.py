@@ -62,3 +62,20 @@ class ContestOut(Schema):
     is_underfunded: bool
     requirements: list[RequirementOut]
     created_at: datetime
+    # 심사기간 · 유료 연장 (#13, ADR-0003). CLOSED로 전이하기 전에는 아직 null이다.
+    judging_ends_at: datetime | None
+    judging_extension_count: int
+    refund_disabled: bool
+
+
+class ExtendJudgingPeriodIn(Schema):
+    # fake PG 전용 시나리오 선택. 실제 어댑터에서는 무시된다(payments.schemas의
+    # ConfirmPaymentIn과 같은 원칙, ADR-0007).
+    simulate: str | None = None
+
+
+class ExtendJudgingPeriodOut(Schema):
+    contest_id: int
+    judging_ends_at: datetime
+    judging_extension_count: int
+    refund_disabled: bool

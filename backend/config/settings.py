@@ -77,6 +77,7 @@ INSTALLED_APPS = [
     "storage",
     "submissions",
     "scoring",
+    "awards",
 ]
 
 MIDDLEWARE = [
@@ -252,6 +253,17 @@ if IS_PRODUCTION_DEPLOYMENT and PAYMENT_ADAPTER_MODE == "fake":
 # ADR-0004). 배포 없이 조정할 수 있는 DeliverableType.minimum_prize와 달리 이건
 # 아직 DB 조정 대상이 아니다 — 이 티켓 범위에서는 전역 고정값이면 충분하다.
 CONTEST_LISTING_FEE = int(_env("CONTEST_LISTING_FEE", "50000"))
+
+# --- 심사기간 · Award · 유료 연장 (#13, ADR-0003) --------------------------------
+# 마감 후 기본 심사기간. CLOSED 전이가 일어나는 조건부 UPDATE 안에서
+# deadline_at + 이 값으로 judging_ends_at을 채운다.
+JUDGING_PERIOD_DAYS = int(_env("JUDGING_PERIOD_DAYS", "7"))
+# 유료 연장 1회가 심사기간을 늘리는 길이. judging_ends_at 컬럼에만 더해진다 —
+# 예약된 스케줄러 규칙은 건드리지 않는다(ADR-0003).
+JUDGING_EXTENSION_DAYS = int(_env("JUDGING_EXTENSION_DAYS", "7"))
+# 연장 1회당 결제 금액(원 단위 정수, ADR-0004). CONTEST_LISTING_FEE와 같은 성격의
+# 전역 고정값이다 — 아직 DB 조정 대상이 아니다.
+CONTEST_EXTENSION_FEE = int(_env("CONTEST_EXTENSION_FEE", "30000"))
 
 # 웹훅 서명 검증 비밀키 (#9 리뷰 지적 2). `/api/payments/webhook`은 인증 없는
 # 내부 엔드포인트지만, 서명이 없으면 누구든 자신의 order_id로 "paid"를 위조해

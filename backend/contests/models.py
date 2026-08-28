@@ -57,8 +57,19 @@ class Contest(models.Model):
         # (ADR-0003). 데모·영상 전면 공개는 이 상태를 기다리지 않고
         # submissions.resolvers 가 deadline_at 을 직접 비교해 이미 판정한다 — 이
         # 상태는 "채점(#12)을 정확히 1회 시작할 지점"과 "운영자가 마감된 Contest를
-        # 식별하는 지점"으로 쓰인다.
+        # 식별하는 지점"으로 쓰인다. CLOSED에 들어서는 같은 조건부 UPDATE가
+        # judging_ends_at(마감 + 7일)도 함께 찍는다(#13) — 심사기간이 여기서 시작된다.
         CLOSED = "closed", "마감"
+        # AWARDED 는 #13 — Sponsor가 심사기간(judging_ends_at 이전) 중에 Submission
+        # 하나를 Award하면 CLOSED에서 여기로 조건부 UPDATE로 옮긴다. Handover·Escrow
+        # 해제·Payout(#14/#15)이 이 상태를 다음 단계의 시작점으로 쓴다.
+        AWARDED = "awarded", "선정 완료"
+        # JUDGING_ENDED 는 #13이 core.transitions 레지스트리에 등록한 두 번째 전이다
+        # — judging_ends_at 이 지날 때까지 아무도 Award하지 않은 CLOSED Contest를
+        # 스케줄러 틱이 옮긴다. Award된 Contest는 이미 AWARDED라 이 전이의 from_state
+        # 조건(CLOSED)에 걸리지 않는다. Distribution(#16)이 "무응답 14일" 카운트다운의
+        # 시작점으로 이 상태를 쓴다.
+        JUDGING_ENDED = "judging_ended", "심사기간 종료"
 
     sponsor = models.ForeignKey(
         "accounts.SponsorProfile", related_name="contests", on_delete=models.CASCADE
@@ -75,6 +86,19 @@ class Contest(models.Model):
     prize = models.PositiveIntegerField()
     deadline_at = models.DateTimeField()
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.DRAFT)
+
+    # 심사기간 종료 시각 (#13, ADR-0003). CLOSED 전이가 일어나는 조건부 UPDATE 안에서
+    # deadline_at + JUDGING_PERIOD_DAYS 로 함께 채워진다. 유료 연장은 이 컬럼만
+    # 갱신한다 — 예약된 스캔 규칙(core.transitions 레지스트리)은 그대로 두고 값만
+    # 바뀐다. CLOSED로 전이하기 전에는 null이다.
+    judging_ends_at = models.DateTimeField(null=True, blank=True)
+    # 지금까지 유료로 연장된 횟수. 2회 이상(즉 이 값이 2 이상)이 되는 순간
+    # refund_disabled가 영구히 True로 확정된다 — 이 카운트 자체는 감사용으로 계속
+    # 늘어난다.
+    judging_extension_count = models.PositiveIntegerField(default=0)
+    # 2회 이상 연장되면 영구히 True로 확정되는 환불 불가 플래그. 한 번 True가 되면
+    # 다시 False로 되돌리는 코드 경로는 없다 — "영구히"의 실제 구현이다.
+    refund_disabled = models.BooleanField(default=False)
 
     # ADR-0001: 재개최는 복제 후 원본을 가리킨다. 이 티켓은 필드만 마련해 두고
     # 재개최 플로우 자체는 만들지 않는다(범위 밖).
