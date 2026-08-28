@@ -1,0 +1,122 @@
+# staging 스택 — 검증용 서브 호스트에 올린다(#23). dev(compose.dev.yaml)와 분리된
+# 별도 파일이라 dev의 fake 어댑터·기본 시크릿이 여기 섞여 들어올 길이 없다.
+#
+#   docker compose -f docker/compose.staging.yaml --env-file docker/.env.staging \
+#     up -d --build
+#
+# `docker/.env.staging` 은 `docker/staging.env.example` 을 복사해 채운, 절대 커밋하지
+# 않는 파일이다(.gitignore 의 `.env.*` 규칙). `--env-file` 을 명시하지 않으면 compose가
+# 이 디렉터리의 `.env`(dev용, 없음)를 찾다가 그냥 빈 값으로 진행해 아래 `${VAR:?...}`
+# 가드에 걸려 기동이 거부된다 — 즉 "시크릿 없이 조용히 뜨는" 실패 모드는 애초에 없다.
+#
+# 어댑터 바인딩(ADR-0007, 한눈에 보기용 — 실제 값은 .env.staging):
+#   PG        : FakePGAdapter        -> 토스 "샌드박스"        (PAYMENT_ADAPTER_MODE=real)
+#   지급대행   : FakePayoutAdapter     -> 토스 지급대행 샌드박스   (PAYOUT_ADAPTER_MODE=real)
+#   스토리지   : MinIO                -> 실제 S3/OCI 버킷        (STORAGE_BACKEND=s3)
+#   소셜 로그인 : FakeSocialAdapter     -> 카카오/GitHub/구글 실물 (SOCIAL_AUTH_MODE=real)
+#   본인확인   : FakeVerificationAdapter -> 실제 PASS/NICE 연동   (VERIFICATION_ADAPTER_MODE=real)
+#   LLM 채점   : FakeLLMScoringAdapter  -> 실제 LLM 벤더(dotted path로 지정)
+#   알림 채널  : Fake*Adapter           -> 실제 카카오 알림톡/SMS·LMS 벤더(dotted path로 지정)
+# config/settings.py의 IS_DEPLOYED_ENVIRONMENT 가드가 이 중 하나라도 fake로 남으면
+# 부팅 자체를 거부한다.
+name: laurio-staging
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?staging POSTGRES_DB 를 .env.staging 에 설정하라}
+      POSTGRES_USER: ${POSTGRES_USER:?staging POSTGRES_USER 를 .env.staging 에 설정하라}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?staging POSTGRES_PASSWORD 를 .env.staging 에 설정하라}
+    volumes:
+      - laurio-staging-db:/var/lib/postgresql/data
+    healthcheck:
+      # compose.dev.yaml과 같은 이유로 -h 를 명시한다 — 초기화 중 유닉스 소켓 임시
+      # 서버에 healthy로 오판되는 걸 막는다.
+      test: [
+          "CMD-SHELL",
+          "pg_isready -h 127.0.0.1 -p 5432 -U $${POSTGRES_USER} -d $${POSTGRES_DB}",
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/backend.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # --- 배포 타깃(config/settings.py의 IS_DEPLOYED_ENVIRONMENT/IS_PRODUCTION_DEPLOYMENT
+      # 가드가 이 값을 본다) ---
+      LAURIO_DEPLOYMENT_TARGET: staging
+      DJANGO_DEBUG: "false"
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?staging DJANGO_SECRET_KEY 를 .env.staging 에 설정하라}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:?staging DJANGO_ALLOWED_HOSTS 를 .env.staging 에 설정하라}
+
+      POSTGRES_DB: ${POSTGRES_DB:?}
+      POSTGRES_USER: ${POSTGRES_USER:?}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+
+      # --- 스토리지 어댑터 (ADR-0005, ADR-0007): 실제 S3/OCI 버킷 ---
+      STORAGE_BACKEND: s3
+      STORAGE_BUCKET: ${STORAGE_BUCKET:?}
+      STORAGE_ENDPOINT_URL: ${STORAGE_ENDPOINT_URL:?}
+      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:?}
+      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:?}
+      STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
+
+      # --- Authentication (ADR-0012) ---
+      JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:?}
+
+      # --- 소셜 로그인 / 본인확인 어댑터 (ADR-0007, ADR-0011) ---
+      SOCIAL_AUTH_MODE: real
+      VERIFICATION_ADAPTER_MODE: real
+      VERIFICATION_ENCRYPTION_KEY: ${VERIFICATION_ENCRYPTION_KEY:?}
+
+      # --- 결제 · Escrow / Payout 어댑터 (ADR-0007, ADR-0008) ---
+      # "샌드박스냐 실물이냐"는 이 모드 값이 아니라 실제 어댑터 구현체(향후 티켓)가
+      # 참조하는 TOSS_* 자격증명이 어느 엔드포인트를 가리키는지로 갈린다 — 여기서는
+      # .env.staging의 TOSS_SANDBOX_SECRET_KEY 를 반드시 채워야 한다는 것만 강제한다.
+      PAYMENT_ADAPTER_MODE: real
+      PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:?}
+      PAYOUT_ADAPTER_MODE: real
+      PAYOUT_WEBHOOK_SECRET: ${PAYOUT_WEBHOOK_SECRET:?}
+
+      # --- LLM 채점 · AI grill 어댑터 (ADR-0006/0007/0014) ---
+      # 실제 벤더 어댑터가 구현되기 전까지는 "fake가 아닌" placeholder다 — 부팅은
+      # 통과하지만 실제로 채점을 시도하면 NotImplementedError를 던진다(scoring/adapters.py,
+      # contests/requirement_chat.py 문서화된 대로 이 티켓의 범위 밖). 실제 어댑터가
+      # 생기면 그 dotted path로 교체한다.
+      LLM_ADAPTER_MODE: real
+      LLM_REQUIREMENT_CHAT_ADAPTER_MODE: real
+
+      # --- 알림 채널 어댑터 (ADR-0007/0009) ---
+      # 위와 같은 이유로 placeholder dotted path다 — Fake*Adapter만 아니면 부팅
+      # 가드는 통과한다.
+      NOTIFICATION_ALIMTALK_ADAPTER: notifications.adapters.RealAlimtalkAdapter
+      NOTIFICATION_SMS_ADAPTER: notifications.adapters.RealSmsAdapter
+      NOTIFICATION_LMS_ADAPTER: notifications.adapters.RealLmsAdapter
+
+      # --- 내부 인증(스케줄러 틱, ADR-0003) ---
+      # staging의 존재 이유: 운영자가 이 토큰으로 POST /api/internal/tick 을 직접 쏴서
+      # 21일치 시나리오를 몇 초에 재현한다. 아래 ports: 로 backend를 서브 호스트에
+      # 공개하는 이유가 이것이다 — prod(compose.prod.yaml)는 이 엔드포인트를 운영자가
+      # 손으로 두드릴 일을 상정하지 않는다.
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?}
+      INTERNAL_API_BASE_URL: http://backend:8000
+    ports:
+      - "${LAURIO_API_PORT:-8000}:8000"
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             python manage.py collectstatic --noinput &&
+             gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3"
+
+volumes:
+  laurio-staging-db:

@@ -42,8 +42,28 @@ DEBUG = _env_bool("DJANGO_DEBUG", True)
 # 묶으면 "DEBUG=false인데 fake는 위험하다"는 안전장치가 CI에서도 그대로 터진다.
 # 그래서 "정말 운영 배포인가"는 별도 값으로 뗀다 — 미설정(dev·CI 포함)은 항상
 # False이고, staging/prod compose(#23)만 명시적으로 production을 준다.
+#
+# staging은 "production"이 아니지만(TLS 종단·시크릿 강도 요구사항이 다르다) "fake
+# 어댑터가 섞이면 안 된다"는 요구사항은 production과 동일하다 — ADR-0007이 그리는
+# 3단계 바인딩(dev=Fake, staging=토스 샌드박스, prod=토스 실물)에서 staging도 이미
+# 실제 연동 규약을 검증하는 자리이기 때문이다. 그래서 어댑터 fake 가드는
+# IS_PRODUCTION_DEPLOYMENT가 아니라 이 둘을 합친 IS_DEPLOYED_ENVIRONMENT를 본다 —
+# "TLS·시크릿 강도처럼 production에만 해당하는 하드닝"과 "fake 금지처럼 배포된 모든
+# 환경에 해당하는 안전장치"는 서로 다른 질문이라 별도 플래그로 뗀다.
 LAURIO_DEPLOYMENT_TARGET = _env("LAURIO_DEPLOYMENT_TARGET", "development")
 IS_PRODUCTION_DEPLOYMENT = LAURIO_DEPLOYMENT_TARGET == "production"
+IS_DEPLOYED_ENVIRONMENT = LAURIO_DEPLOYMENT_TARGET in {"staging", "production"}
+
+# production인데 DEBUG=true로 뜨면 에러 페이지가 스택 트레이스·환경변수·SQL을 그대로
+# 노출한다(Django check --deploy의 security.W018과 같은 위협). DEBUG는 개별
+# 환경변수라 LAURIO_DEPLOYMENT_TARGET=production과 따로 놀 수 있으므로 여기서
+# 조합을 직접 막는다.
+if IS_PRODUCTION_DEPLOYMENT and DEBUG:
+    raise ImproperlyConfigured(
+        "LAURIO_DEPLOYMENT_TARGET=production 인데 DJANGO_DEBUG 가 true 다. 운영 배포에서는 "
+        "반드시 DJANGO_DEBUG=false 로 띄워야 한다 — DEBUG=true는 에러 페이지에 스택 "
+        "트레이스와 설정값을 그대로 노출한다."
+    )
 
 _secret_key = os.environ.get("DJANGO_SECRET_KEY") or ""
 if not _secret_key:
@@ -55,6 +75,21 @@ if not _secret_key:
         )
     _secret_key = "dev-only-insecure-key"
 SECRET_KEY = _secret_key
+
+# manage.py check --deploy의 security.W009: 50자 미만·고유 문자 5종 미만·
+# "django-insecure-" 접두(Django가 `startproject`로 자동 생성한 키의 표식)는 전부
+# "누구나 추측 가능한 키"의 신호다. staging은 아직 실제 세션·CSRF 서명 신뢰 경계가
+# production만큼 엄격하지 않아도 되므로(하드닝은 아래 IS_PRODUCTION_DEPLOYMENT
+# 블록 참고) 이 강도 검사는 production에만 건다 — CI의 비-production 잡이 쓰는
+# 짧은 더미 키(ci-only-insecure-key)까지 걸리면 안 되기 때문이다.
+if IS_PRODUCTION_DEPLOYMENT and (
+    len(SECRET_KEY) < 50 or len(set(SECRET_KEY)) < 5 or SECRET_KEY.startswith("django-insecure-")
+):
+    raise ImproperlyConfigured(
+        "LAURIO_DEPLOYMENT_TARGET=production 인데 DJANGO_SECRET_KEY 가 약하다(50자 미만, "
+        "고유 문자 5종 미만, 또는 django-insecure- 접두사). `python -c \"import secrets; "
+        "print(secrets.token_urlsafe(64))\"` 등으로 새로 생성한 무작위 키를 주입해야 한다."
+    )
 
 ALLOWED_HOSTS = [h for h in _env("DJANGO_ALLOWED_HOSTS", "*").split(",") if h]
 
@@ -146,14 +181,15 @@ STORAGE_BACKEND = _env("STORAGE_BACKEND", "fake")
 # DJANGO_SECRET_KEY 가드(위)와 같은 이유다. STORAGE_BACKEND 를 잊고 배포하면
 # FakeStorageAdapter가 200과 함께 https://fake-storage.test/... 를 돌려주고, 업로드도
 # 다운로드도 겉보기엔 성공한 채 파일만 소리 없이 사라진다. 실제 운영 배포에서는 아예
-# 못 뜨게 막는다 — DEBUG가 아니라 LAURIO_DEPLOYMENT_TARGET을 본다. CI는 DEBUG=false로
-# 돌면서도 실제 배포가 아니므로(위 설명) 이 가드에 걸리지 않고 fake로 테스트를 돌릴 수
-# 있어야 한다.
-if IS_PRODUCTION_DEPLOYMENT and STORAGE_BACKEND == "fake":
+# 못 뜨게 막는다 — DEBUG가 아니라 LAURIO_DEPLOYMENT_TARGET을 본다. staging도 대상이다
+# (ADR-0007: staging은 S3/OCI에 실제로 붙어 연동 규약을 검증하는 자리다). CI는
+# DEBUG=false로 돌면서도 배포된 환경이 아니므로(위 설명) 이 가드에 걸리지 않고
+# fake로 테스트를 돌릴 수 있어야 한다.
+if IS_DEPLOYED_ENVIRONMENT and STORAGE_BACKEND == "fake":
     raise ImproperlyConfigured(
-        "LAURIO_DEPLOYMENT_TARGET=production 인데 STORAGE_BACKEND 가 fake 다. presigned "
-        "URL이 200으로 발급되면서 파일이 소리 없이 유실된다. 운영 배포에서는 "
-        "STORAGE_BACKEND=s3 를 반드시 설정해야 한다."
+        f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 인데 STORAGE_BACKEND 가 "
+        "fake 다. presigned URL이 200으로 발급되면서 파일이 소리 없이 유실된다. "
+        "staging/production 배포에서는 STORAGE_BACKEND=s3 를 반드시 설정해야 한다."
     )
 
 STORAGE_BUCKET = _env("STORAGE_BUCKET", "laurio-dev")
@@ -213,21 +249,24 @@ REFRESH_TOKEN_TTL = timedelta(days=int(_env("REFRESH_TOKEN_TTL_DAYS", "14")))
 # 소셜 로그인 어댑터 (ADR-0007). STORAGE_BACKEND와 같은 원칙: 기본값은 DEBUG와
 # 무관하게 항상 fake다 — "어떤 구현체를 쓸지"와 "이게 진짜 운영 배포인지"는 다른
 # 질문이기 때문이다(위 LAURIO_DEPLOYMENT_TARGET 설명 참고). 실제 카카오·GitHub·구글
-# API를 부르려면 SOCIAL_AUTH_MODE=real 을 명시해야 한다 — 운영 배포(#23)가 그렇게 한다.
+# API를 부르려면 SOCIAL_AUTH_MODE=real 을 명시해야 한다 — staging/production 배포(#23)가
+# 그렇게 한다.
 SOCIAL_AUTH_MODE = _env("SOCIAL_AUTH_MODE", "fake")
-if IS_PRODUCTION_DEPLOYMENT and SOCIAL_AUTH_MODE == "fake":
+if IS_DEPLOYED_ENVIRONMENT and SOCIAL_AUTH_MODE == "fake":
     raise ImproperlyConfigured(
-        "LAURIO_DEPLOYMENT_TARGET=production 인데 SOCIAL_AUTH_MODE 가 fake 다. "
-        "운영 배포에서는 SOCIAL_AUTH_MODE=real 을 반드시 설정해야 한다."
+        f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 인데 SOCIAL_AUTH_MODE 가 "
+        "fake 다. staging/production 배포에서는 SOCIAL_AUTH_MODE=real 을 반드시 설정해야 한다."
     )
 
 # --- Verification (ADR-0011, ADR-0007) ------------------------------------
-# 본인확인 어댑터도 같은 원칙: 기본값은 항상 fake이고, 운영 배포만 real을 명시한다.
+# 본인확인 어댑터도 같은 원칙: 기본값은 항상 fake이고, staging/production 배포만
+# real을 명시한다.
 VERIFICATION_ADAPTER_MODE = _env("VERIFICATION_ADAPTER_MODE", "fake")
-if IS_PRODUCTION_DEPLOYMENT and VERIFICATION_ADAPTER_MODE == "fake":
+if IS_DEPLOYED_ENVIRONMENT and VERIFICATION_ADAPTER_MODE == "fake":
     raise ImproperlyConfigured(
-        "LAURIO_DEPLOYMENT_TARGET=production 인데 VERIFICATION_ADAPTER_MODE 가 fake 다. "
-        "운영 배포에서는 VERIFICATION_ADAPTER_MODE=real 을 반드시 설정해야 한다."
+        f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 인데 "
+        "VERIFICATION_ADAPTER_MODE 가 fake 다. staging/production 배포에서는 "
+        "VERIFICATION_ADAPTER_MODE=real 을 반드시 설정해야 한다."
     )
 
 # 실명·생년월일·CI/DI를 저장 시 암호화하는 대칭키(Fernet). SECRET_KEY와 마찬가지로
@@ -244,13 +283,16 @@ VERIFICATION_ENCRYPTION_KEY = _verification_key
 
 # --- 결제 · Escrow 예치 (#9, ADR-0007) --------------------------------------
 # PG 어댑터도 같은 원칙: 기본값은 항상 Fake PG다 — 웹훅 재전송·타임아웃·순서 뒤바뀜을
-# 네트워크 없이 결정적으로 주입할 수 있다. 운영 배포만 PAYMENT_ADAPTER_MODE=real 로
-# 실제 토스 연동을 명시한다(#23의 범위).
+# 네트워크 없이 결정적으로 주입할 수 있다. staging은 토스 "샌드박스"(연동 규약만
+# 검증, 실제 돈은 안 움직인다), production은 토스 "실물"에 PAYMENT_ADAPTER_MODE=real로
+# 명시한다(ADR-0008, #23의 범위). 샌드박스냐 실물이냐는 이 모드 값이 아니라 함께
+# 주입하는 토스 자격증명·엔드포인트가 어디를 가리키는지로 갈린다.
 PAYMENT_ADAPTER_MODE = _env("PAYMENT_ADAPTER_MODE", "fake")
-if IS_PRODUCTION_DEPLOYMENT and PAYMENT_ADAPTER_MODE == "fake":
+if IS_DEPLOYED_ENVIRONMENT and PAYMENT_ADAPTER_MODE == "fake":
     raise ImproperlyConfigured(
-        "LAURIO_DEPLOYMENT_TARGET=production 인데 PAYMENT_ADAPTER_MODE 가 fake 다. 운영 "
-        "배포에서는 PAYMENT_ADAPTER_MODE=real 을 반드시 설정해야 한다."
+        f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 인데 PAYMENT_ADAPTER_MODE 가 "
+        "fake 다. staging/production 배포에서는 PAYMENT_ADAPTER_MODE=real 을 반드시 "
+        "설정해야 한다."
     )
 
 # Sponsor가 Contest를 개최할 때 Prize와 별도로 결제하는 개최 등록비(원 단위 정수,
@@ -318,6 +360,29 @@ NOTIFICATION_ALIMTALK_ADAPTER = _env(
 )
 NOTIFICATION_SMS_ADAPTER = _env("NOTIFICATION_SMS_ADAPTER", "notifications.adapters.FakeSmsAdapter")
 NOTIFICATION_LMS_ADAPTER = _env("NOTIFICATION_LMS_ADAPTER", "notifications.adapters.FakeLmsAdapter")
+
+# 다른 어댑터들(STORAGE_BACKEND·PAYMENT_ADAPTER_MODE 등)은 "fake"라는 별도 별칭
+# 문자열로 fake를 고르지만, 알림 채널은 처음부터 dotted path만 쓴다 — 기본값 자체가
+# `notifications.adapters.Fake*Adapter`다. 그래서 같은 "배포에 fake가 섞이면 안
+# 된다"는 안전장치를 여기서는 "dotted path가 notifications.adapters.Fake로
+# 시작하는가"로 판정한다.
+_FAKE_NOTIFICATION_ADAPTER_PREFIX = "notifications.adapters.Fake"
+for _notification_setting_name, _notification_adapter_path in (
+    ("NOTIFICATION_ALIMTALK_ADAPTER", NOTIFICATION_ALIMTALK_ADAPTER),
+    ("NOTIFICATION_SMS_ADAPTER", NOTIFICATION_SMS_ADAPTER),
+    ("NOTIFICATION_LMS_ADAPTER", NOTIFICATION_LMS_ADAPTER),
+):
+    if IS_DEPLOYED_ENVIRONMENT and _notification_adapter_path.startswith(
+        _FAKE_NOTIFICATION_ADAPTER_PREFIX
+    ):
+        raise ImproperlyConfigured(
+            f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 인데 "
+            f"{_notification_setting_name}={_notification_adapter_path!r} 가 Fake 구현체다. "
+            "staging/production 배포에서는 실제 벤더 어댑터의 dotted path를 반드시 "
+            "설정해야 한다."
+        )
+del _notification_setting_name, _notification_adapter_path
+
 NOTIFICATION_FAKE_FAILING_CHANNELS = [
     c for c in _env("NOTIFICATION_FAKE_FAILING_CHANNELS", "").split(",") if c
 ]
@@ -331,14 +396,14 @@ NOTIFICATION_FAKE_RAISING_CHANNELS = [
 # --- AI 채점 어댑터 (#12, ADR-0006, ADR-0007, ADR-0014) -----------------------------
 #
 # PAYMENT_ADAPTER_MODE·STORAGE_BACKEND와 같은 원칙: 기본값은 항상 fake다. dev/CI는
-# 네트워크 없이 결정적으로 채점 플로우 전체를 돈다. 운영 배포만 LLM_ADAPTER_MODE에
-# 실제 어댑터의 dotted path(또는 향후 등록될 별칭)를 명시한다.
+# 네트워크 없이 결정적으로 채점 플로우 전체를 돈다. staging/production 배포만
+# LLM_ADAPTER_MODE에 실제 어댑터의 dotted path(또는 향후 등록될 별칭)를 명시한다.
 LLM_ADAPTER_MODE = _env("LLM_ADAPTER_MODE", "fake")
-if IS_PRODUCTION_DEPLOYMENT and LLM_ADAPTER_MODE == "fake":
+if IS_DEPLOYED_ENVIRONMENT and LLM_ADAPTER_MODE == "fake":
     raise ImproperlyConfigured(
-        "LAURIO_DEPLOYMENT_TARGET=production 인데 LLM_ADAPTER_MODE 가 fake 다. Score가 "
-        "실제 채점 없이 만들어지면 Distribution 대상 판정이 통째로 무효가 된다. 운영 "
-        "배포에서는 실제 LLM 어댑터를 반드시 설정해야 한다."
+        f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 인데 LLM_ADAPTER_MODE 가 "
+        "fake 다. Score가 실제 채점 없이 만들어지면 Distribution 대상 판정이 통째로 "
+        "무효가 된다. staging/production 배포에서는 실제 LLM 어댑터를 반드시 설정해야 한다."
     )
 
 # 테스트가 override_settings로 특정 submission_id의 채점 실패를 흉내낼 때 쓴다
@@ -357,10 +422,11 @@ LLM_FAKE_RAISING_SUBMISSION_IDS = [
 # 새로 만들지 않는다 — `core.adapters.resolve_adapter`로 선택 로직 자체를
 # `scoring.adapters.get_adapter`와 공유한다.
 LLM_REQUIREMENT_CHAT_ADAPTER_MODE = _env("LLM_REQUIREMENT_CHAT_ADAPTER_MODE", "fake")
-if IS_PRODUCTION_DEPLOYMENT and LLM_REQUIREMENT_CHAT_ADAPTER_MODE == "fake":
+if IS_DEPLOYED_ENVIRONMENT and LLM_REQUIREMENT_CHAT_ADAPTER_MODE == "fake":
     raise ImproperlyConfigured(
-        "LAURIO_DEPLOYMENT_TARGET=production 인데 LLM_REQUIREMENT_CHAT_ADAPTER_MODE 가 "
-        "fake 다. 운영 배포에서는 실제 LLM 어댑터를 반드시 설정해야 한다."
+        f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 인데 "
+        "LLM_REQUIREMENT_CHAT_ADAPTER_MODE 가 fake 다. staging/production 배포에서는 "
+        "실제 LLM 어댑터를 반드시 설정해야 한다."
     )
 
 # 테스트가 override_settings로 특정 contest_id의 대화 응답 실패를 흉내낼 때 쓴다
@@ -378,11 +444,13 @@ HANDOVER_ACCEPTANCE_PERIOD_DAYS = int(_env("HANDOVER_ACCEPTANCE_PERIOD_DAYS", "1
 # --- Payout 실행 (#15, ADR-0004/0008) -------------------------------------------------
 #
 # 토스 지급대행 어댑터도 PAYMENT_ADAPTER_MODE와 같은 원칙: 기본값은 항상 Fake다.
+# staging은 토스 지급대행 샌드박스, production은 실물에 real로 바인딩한다(ADR-0008).
 PAYOUT_ADAPTER_MODE = _env("PAYOUT_ADAPTER_MODE", "fake")
-if IS_PRODUCTION_DEPLOYMENT and PAYOUT_ADAPTER_MODE == "fake":
+if IS_DEPLOYED_ENVIRONMENT and PAYOUT_ADAPTER_MODE == "fake":
     raise ImproperlyConfigured(
-        "LAURIO_DEPLOYMENT_TARGET=production 인데 PAYOUT_ADAPTER_MODE 가 fake 다. 운영 "
-        "배포에서는 PAYOUT_ADAPTER_MODE=real 을 반드시 설정해야 한다."
+        f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 인데 PAYOUT_ADAPTER_MODE 가 "
+        "fake 다. staging/production 배포에서는 PAYOUT_ADAPTER_MODE=real 을 반드시 "
+        "설정해야 한다."
     )
 
 # payout.changed 웹훅 서명 비밀키. payments.webhook_security의 서명 스킴을 그대로
@@ -412,3 +480,26 @@ PAYOUT_WITHHOLDING_TAX_BPS = int(_env("PAYOUT_WITHHOLDING_TAX_BPS", "330"))
 # Prize를 1/N로 배분한다 — HANDOVER_ACCEPTANCE_PERIOD_DAYS와 같은 "Sponsor의
 # 침묵이 Developer를 인질로 잡지 못한다" 원칙의 무응답 버전이다(REQUEST.md).
 DISTRIBUTION_WAIT_DAYS = int(_env("DISTRIBUTION_WAIT_DAYS", "14"))
+
+# --- 운영 배포 하드닝 (#23, 티켓 01(#1)이 미룬 `manage.py check --deploy`) --------------
+#
+# 이 검사를 처음 켰을 때 다섯 경고가 났다: HSTS 미설정(W004), SSL 리다이렉트 꺼짐
+# (W008), 약한 SECRET_KEY(W009, 위에서 해소), 세션 쿠키가 secure가 아님(W012), CSRF
+# 쿠키가 secure가 아님(W016). 침묵시키는 대신(`SILENCED_SYSTEM_CHECKS`) 실제 설정을
+# 고친다 — dev/staging은 TLS 종단 구성이 서로 다르거나(staging은 검증용 서브호스트라
+# 아직 리버스 프록시가 없을 수 있다) 아예 HTTP로도 돌아야 하므로, 이 하드닝은
+# IS_PRODUCTION_DEPLOYMENT에만 켠다. staging에서도 fake 어댑터가 섞이지 않게 막는
+# 것(위 IS_DEPLOYED_ENVIRONMENT 가드들)과는 다른 질문이라는 걸 여기서도 반복한다.
+SECURE_SSL_REDIRECT = IS_PRODUCTION_DEPLOYMENT
+SECURE_HSTS_SECONDS = int(_env("SECURE_HSTS_SECONDS", "31536000")) if IS_PRODUCTION_DEPLOYMENT else 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = IS_PRODUCTION_DEPLOYMENT
+SECURE_HSTS_PRELOAD = IS_PRODUCTION_DEPLOYMENT
+SESSION_COOKIE_SECURE = IS_PRODUCTION_DEPLOYMENT
+CSRF_COOKIE_SECURE = IS_PRODUCTION_DEPLOYMENT
+if IS_PRODUCTION_DEPLOYMENT:
+    # AWS/OCI 배포는 로드밸런서가 TLS를 종단하고 백엔드까지는 평문 HTTP로 붙는다 —
+    # 그 앞단이 원본 스킴을 이 헤더로 넘겨준다는 전제다. 이 헤더를 신뢰하는 로드밸런서를
+    # 거치지 않고 백엔드가 직접 인터넷에 노출되면 누구나 이 헤더를 위조해
+    # SECURE_SSL_REDIRECT를 우회할 수 있으므로, 실제 배포에서는 반드시 신뢰할 수 있는
+    # 프록시 뒤에만 둬야 한다(docker/compose.prod.yaml 참고).
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

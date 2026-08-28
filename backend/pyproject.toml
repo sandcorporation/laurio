@@ -14,6 +14,9 @@ dependencies = [
     "python-dotenv>=1.2.3",
     "celery>=5.4",
     "requests>=2.32",
+    # staging/prod 배포용 WSGI 서버(#23). `manage.py runserver`는 Django 자신이 문서화한
+    # 대로 개발 전용이라 dev compose에서만 쓴다.
+    "gunicorn>=23.0.0",
 ]
 
 [tool.uv]
