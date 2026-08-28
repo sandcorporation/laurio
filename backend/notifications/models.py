@@ -79,6 +79,10 @@ class Notification(models.Model):
     class Meta:
         verbose_name = "알림"
         verbose_name_plural = "알림"
+        # 야간 큐 스캔의 WHERE 절(status='deferred' AND scheduled_for<=...)이 타는 인덱스.
+        indexes = [
+            models.Index(fields=["status", "scheduled_for"], name="notif_status_sched_idx")
+        ]
 
     def __str__(self) -> str:  # pragma: no cover - admin 편의용
         return f"Notification({self.pk}, {self.notification_type}, {self.status})"
@@ -111,7 +115,12 @@ class NotificationDispatch(models.Model):
     class Meta:
         verbose_name = "채널별 발송 이력"
         verbose_name_plural = "채널별 발송 이력"
-        ordering = ["attempted_at"]
+        # attempted_at 만으로는 동시에(같은 시각으로) 남는 여러 채널 시도의 순서를
+        # 보장하지 못한다 — 이 프로젝트는 시각을 호출 스코프당 한 번만 구해 재사용하므로
+        # 같은 Notification 의 여러 채널 시도가 attempted_at 이 완전히 같은 값을 갖는
+        # 것이 정상이다. id를 2차 정렬키로 둬서 "시도한 순서"가 항상 안정적으로 나오게
+        # 한다.
+        ordering = ["attempted_at", "id"]
 
     def __str__(self) -> str:  # pragma: no cover - admin 편의용
         return f"NotificationDispatch({self.notification_id}, {self.channel}, {self.status})"

@@ -44,6 +44,9 @@ class ScheduledStateDemo(models.Model):
     class Meta:
         verbose_name = "전이 스캐폴딩"
         verbose_name_plural = "전이 스캐폴딩"
+        # 틱 스캔의 WHERE 절(state=... AND due_at<=...)이 타는 인덱스. 없으면 백로그가
+        # 쌓였을 때 매 틱마다 시퀀셜 스캔이 된다.
+        indexes = [models.Index(fields=["state", "due_at"], name="core_ssd_state_due_at_idx")]
 
     def __str__(self) -> str:  # pragma: no cover - admin 편의용
         return f"ScheduledStateDemo({self.pk}, {self.state})"

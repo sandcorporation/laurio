@@ -160,3 +160,9 @@ NOTIFICATION_LMS_ADAPTER = _env("NOTIFICATION_LMS_ADAPTER", "notifications.adapt
 NOTIFICATION_FAKE_FAILING_CHANNELS = [
     c for c in _env("NOTIFICATION_FAKE_FAILING_CHANNELS", "").split(",") if c
 ]
+# FAILING 과 달리 이건 어댑터가 실패 "응답"이 아니라 예외로 죽는(타임아웃/5xx) 상황을
+# 흉내낸다 — 실제 벤더 장애에서 더 흔한 경우이고, 이걸 잡아 다음 채널로 넘어가는지가
+# 이 티켓의 핵심 방어선이다.
+NOTIFICATION_FAKE_RAISING_CHANNELS = [
+    c for c in _env("NOTIFICATION_FAKE_RAISING_CHANNELS", "").split(",") if c
+]

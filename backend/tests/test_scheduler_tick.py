@@ -107,3 +107,27 @@ def test_clock_can_be_fixed_and_advanced_by_tests(client):
     assert response.json()["count"] == 1
     due_soon.refresh_from_db()
     assert due_soon.state == ScheduledStateDemo.State.DONE
+
+
+@pytest.mark.django_db
+def test_tick_transition_refreshes_auto_now_field_using_injected_clock(client):
+    """claim_transition 은 QuerySet.update() 라서 auto_now 필드를 자동으로 못 채운다.
+
+    이 메커니즘을 재사용하는 모든 실제 모델(#11/#13/#16)이 같은 문제를 겪지
+    않으려면 claim_transition 자체가 auto_now 필드를 주입된 시각으로 채워야 한다.
+    """
+
+    base = timezone.now().replace(microsecond=0)
+    _freeze(base)
+    due = ScheduledStateDemo.objects.create(due_at=base - timedelta(minutes=1))
+    original_updated_at = due.updated_at
+
+    frozen_tick_time = base + timedelta(seconds=5)
+    _freeze(frozen_tick_time)
+
+    response = client.post(TICK_URL, **_auth_headers())
+    assert response.json()["count"] == 1
+
+    due.refresh_from_db()
+    assert due.updated_at != original_updated_at
+    assert due.updated_at == frozen_tick_time

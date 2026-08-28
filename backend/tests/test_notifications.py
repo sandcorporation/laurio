@@ -239,3 +239,127 @@ def test_all_channels_failing_marks_notification_failed(client):
     assert [d["channel"] for d in body["dispatches"]] == ["alimtalk", "sms", "lms"]
     assert all(d["status"] == "failed" for d in body["dispatches"])
     assert all(d["failure_reason"] for d in body["dispatches"])
+
+
+@pytest.mark.django_db
+def test_adapter_exception_falls_back_to_next_channel_and_is_recorded(client):
+    """알림톡 어댑터가 실패 '응답'이 아니라 예외로 죽어도(타임아웃/5xx 흉내) SMS로
+    넘어가야 하고, 죽은 시도 자체도 이력에 남아야 한다(코드리뷰 지적 #1)."""
+
+    _freeze(datetime(2026, 1, 10, 14, 0, tzinfo=KST))
+    user = _make_user()
+
+    with override_settings(NOTIFICATION_FAKE_RAISING_CHANNELS=["alimtalk"]):
+        response = client.post(
+            CREATE_URL,
+            data={
+                "recipient_id": user.id,
+                "notification_type": NotificationType.DEADLINE_REMINDER,
+            },
+            content_type="application/json",
+            **_auth_headers(),
+        )
+
+    body = response.json()
+    # 예외로 죽었는데도 Notification 이 QUEUED 에 멈추지 않고 SENT 까지 갔다.
+    assert body["status"] == Notification.Status.SENT
+    channels = [(d["channel"], d["status"]) for d in body["dispatches"]]
+    assert channels == [("alimtalk", "failed"), ("sms", "sent")]
+    # 예외 자체가 실패사유로 보존된다 — 발송 이력에 구멍이 없다.
+    assert "FakeAdapterCrashed" in body["dispatches"][0]["failure_reason"]
+
+
+@pytest.mark.django_db
+def test_batch_of_due_notifications_is_not_stranded_by_a_crashing_channel(client):
+    """대체발송 체인의 모든 채널이 예외로 죽어도(과거였다면 배치 전체가 멈췄다) 야간
+    큐에 쌓인 여러 건이 전부 처리되고 아무 것도 QUEUED 에 갇히지 않는다
+    (코드리뷰 지적 #1/#2)."""
+
+    _freeze(datetime(2026, 1, 10, 23, 0, tzinfo=KST))
+    ids = []
+    for i in range(3):
+        user = _make_user(f"batch-dev-{i}")
+        created = client.post(
+            CREATE_URL,
+            data={
+                "recipient_id": user.id,
+                "notification_type": NotificationType.DEADLINE_REMINDER,
+            },
+            content_type="application/json",
+            **_auth_headers(),
+        ).json()
+        assert created["status"] == Notification.Status.DEFERRED
+        ids.append(created["id"])
+
+    _freeze(datetime(2026, 1, 11, 8, 0, tzinfo=KST))
+    with override_settings(NOTIFICATION_FAKE_RAISING_CHANNELS=["alimtalk", "sms", "lms"]):
+        response = client.post(DISPATCH_DUE_URL, **_auth_headers())
+
+    body = response.json()
+    assert body["count"] == 3
+    assert sorted(body["dispatched_ids"]) == sorted(ids)
+
+    for nid in ids:
+        detail = client.get(f"{CREATE_URL}/{nid}", **_auth_headers()).json()
+        # 전부 실패로 끝났을 뿐, 하나도 QUEUED 에 갇혀있지 않다.
+        assert detail["status"] == Notification.Status.FAILED
+        assert len(detail["dispatches"]) == 3
+
+    # 재스캔해도 더 처리할 것이 없다 — 아무 것도 DEFERRED 로 남아있지 않다.
+    rescan = client.post(DISPATCH_DUE_URL, **_auth_headers())
+    assert rescan.json()["count"] == 0
+
+
+@pytest.mark.django_db
+def test_delayed_scan_re_defers_instead_of_sending_during_quiet_hours(client):
+    """스캔이 크게 지연돼 처리 시점에 다시 야간(21~08시)로 들어와 있으면, 발송 시각이
+    지났다는 이유만으로 그 순간 내보내면 안 된다 — 발송 직전에 다시 검사해 다음
+    08시로 재연기해야 한다(코드리뷰 지적 #3, ADR-0010)."""
+
+    _freeze(datetime(2026, 1, 10, 23, 0, tzinfo=KST))
+    user = _make_user()
+
+    created = client.post(
+        CREATE_URL,
+        data={"recipient_id": user.id, "notification_type": NotificationType.DEADLINE_REMINDER},
+        content_type="application/json",
+        **_auth_headers(),
+    ).json()
+    assert created["status"] == Notification.Status.DEFERRED
+    notification_id = created["id"]
+    first_scheduled_for = created["scheduled_for"]
+
+    # 다음 날 08시가 아니라, 스캔이 지연돼 그날 23:30에야 처리된다 — 이미 다시 야간이다.
+    _freeze(datetime(2026, 1, 11, 23, 30, tzinfo=KST))
+    delayed_scan = client.post(DISPATCH_DUE_URL, **_auth_headers())
+    assert delayed_scan.json()["count"] == 0  # 재연기됐을 뿐, 발송되지 않았다.
+
+    still_deferred = client.get(f"{CREATE_URL}/{notification_id}", **_auth_headers()).json()
+    assert still_deferred["status"] == Notification.Status.DEFERRED
+    assert still_deferred["dispatches"] == []
+    assert still_deferred["scheduled_for"] > first_scheduled_for
+
+    # 그 다음 날 08시가 되면 그제서야 실제로 발송된다.
+    _freeze(datetime(2026, 1, 12, 8, 0, tzinfo=KST))
+    final_scan = client.post(DISPATCH_DUE_URL, **_auth_headers())
+    assert final_scan.json()["count"] == 1
+
+    final = client.get(f"{CREATE_URL}/{notification_id}", **_auth_headers()).json()
+    assert final["status"] == Notification.Status.SENT
+
+
+@pytest.mark.django_db
+def test_creating_notification_with_unknown_type_returns_422_not_500(client):
+    """모르는 notification_type 문자열은 NOTIFICATION_TYPE_FLAGS[...] 에서 KeyError로
+    500이 나던 것을, 스키마 검증으로 422까지만 가게 한다(코드리뷰 지적 #5)."""
+
+    user = _make_user()
+
+    response = client.post(
+        CREATE_URL,
+        data={"recipient_id": user.id, "notification_type": "bogus"},
+        content_type="application/json",
+        **_auth_headers(),
+    )
+
+    assert response.status_code == 422

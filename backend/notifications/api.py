@@ -23,7 +23,10 @@ router = Router(tags=["internal", "notifications"], auth=InternalAuth())
 
 class CreateNotificationIn(Schema):
     recipient_id: int
-    notification_type: str
+    # NotificationType 로 타입을 고정해두면 django-ninja/pydantic 이 유형 값 자체를
+    # 검증한다. str 이었다면 "bogus" 같은 값이 NOTIFICATION_TYPE_FLAGS[...] 조회에서
+    # KeyError -> 500 으로 터졌다. 여기서 막으면 422 로 끝난다.
+    notification_type: NotificationType
 
 
 class DispatchOut(Schema):
