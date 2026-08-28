@@ -99,25 +99,45 @@ def mark_failed(order_id) -> Payment:
     return Payment.objects.get(order_id=order_id)
 
 
+
 # --- 참여자 0명 전액 환불 (#17, ADR-0004) ------------------------------------
 #
-# mark_paid/mark_failed와 같은 조건부 UPDATE 규율을 그대로 반복한다:
+# mark_paid/mark_failed와 같은 조건부 UPDATE 규율을 그대로 반복하되, 절대
+# 되돌아가지 않는다는 규율까지 함께 지킨다:
 #
 # 1) request_refund가 PAID -> REFUND_REQUESTED로 조건부 전이시켜 "이 스캔이 이
 #    Payment의 환불을 시작할 권리를 가져갔다"를 표시한다. 두 스캔이 동시에 같은
 #    Payment를 집어도 하나만 rowcount==1을 가져간다.
-# 2) PG 어댑터의 확정 결과(성공/실패/타임아웃 후 조회)에 따라 mark_refunded 또는
-#    mark_refund_failed를 부른다. 어느 쪽도 REFUND_REQUESTED가 아닌 상태에서는
-#    조건부 UPDATE의 rowcount가 0이라 아무 일도 하지 않는다 — 같은 웹훅이 두 번
-#    오거나, 스캔이 이미 동기적으로 확정한 뒤에 뒤늦게 웹훅이 다시 와도 원장에는
-#    정확히 한 번만 반대 분개가 남는다.
+# 2) PG 어댑터의 확정 결과에 따라 mark_refunded(REFUNDED) 또는
+#    mark_refund_failed(REFUND_FAILED)를 부른다. 이 두 종결 상태 중 어느 쪽에도
+#    도달한 뒤에는 다시는 REFUND_REQUESTED로도, PAID로도 되돌아가지 않는다 —
+#    mark_paid/mark_failed가 REQUESTED에서 한 번만 전이하고 끝나는 것과 같은
+#    성격이다. 되돌아가는 경로를 허용하면(과거 버전이 REFUND_REQUESTED ->
+#    PAID로 되돌렸던 것처럼) 재전송된 실패 웹훅이 그 사이 새로 시작된 다른(더
+#    최신) 환불 시도를 잘못 취소시켜, 실제로는 PG에서 성공한 환불이 원장에
+#    반영되지 않고 다음 스캔이 같은 결제를 또 환불하는 이중 환불로 이어진다
+#    (리뷰 지적 1).
+# 3) adapter.refund()가 확정하지 못하고 "pending"으로 끝나면(타임아웃 후
+#    query_refund_status로도 아직 안 끝났거나, 실제 어댑터가 진짜 비동기라서)
+#    Payment는 REFUND_REQUESTED에 머문다. run_pending_refunds는 매 스캔마다
+#    이런 미확정 건도 함께 조회해 query_refund_status로만(=새 refund() 호출
+#    없이) 재확인한다 — PAID만 후보로 삼으면 이 건들은 웹훅이 끝내 오지 않는 한
+#    영원히 멈춰 있는다(리뷰 지적 3).
+
+
+REFUND_BATCH_SIZE = 50
+# 한 스캔에서 시도·재확인하는 최대 Payment 수. core.transitions.DEFAULT_BATCH_SIZE,
+# scoring.services.BATCH_SIZE와 같은 이유 — 무제한 스캔은 백로그가 쌓였을 때 이
+# 스캔을 호출하는 HTTP 요청 자체를 타임아웃으로 몰아넣는다(리뷰 지적 4). 배치를
+# 넘는 잔여 분량은 다음 스캔이 마저 처리한다.
 
 
 def request_refund(order_id) -> Payment | None:
     """PAID 결제를 refund_requested로 조건부 전이시킨다.
 
-    다른 스캔이 이미 선점했거나(REFUND_REQUESTED/REFUNDED),애초에 PAID가 아니면
-    None을 돌려준다 — 호출자는 그 Payment를 건드리지 않고 넘어가야 한다.
+    다른 스캔이 이미 선점했거나(REFUND_REQUESTED/REFUNDED/REFUND_FAILED), 애초에
+    PAID가 아니면 None을 돌려준다 — 호출자는 그 Payment를 건드리지 않고 넘어가야
+    한다.
     """
 
     updated = Payment.objects.filter(order_id=order_id, status=Payment.Status.PAID).update(
@@ -145,9 +165,11 @@ def mark_refunded(order_id) -> Payment:
         payment = Payment.objects.select_related("contest").get(order_id=order_id)
 
         if updated != 1:
-            # 이미 refunded다 — 같은 웹훅 재전송이거나, 스캔이 동기적으로 이미
-            # 확정한 뒤에 뒤늦게 도착한 웹훅이다. 원장에는 이미 반영되어 있으므로
-            # 다시 손대지 않는다.
+            # REFUND_REQUESTED가 아니었다 — 같은 웹훅 재전송이거나, 스캔이 동기적
+            # 으로 이미 확정(REFUNDED/REFUND_FAILED)한 뒤에 뒤늦게 도착한 신호다.
+            # REFUND_REQUESTED에서만 전이하고 다시는 되돌아가지 않으므로, 이 경우
+            # 원장에는 손대지 않는다(REFUND_FAILED로 이미 종결된 시도를 뒤늦은
+            # "성공" 신호가 되살리지도 않는다 — 그 시도는 끝났다).
             return payment
 
         entry = post_journal_entry(
@@ -183,86 +205,150 @@ def mark_refunded(order_id) -> Payment:
 
 
 def mark_refund_failed(order_id) -> Payment:
-    """환불 실패 시 PAID로 되돌려 다음 스캔이 재시도할 수 있게 한다.
+    """환불 실패를 REFUND_FAILED로 종결한다. PAID로 되돌리지 않는다.
 
-    실패 경로는 원장에 아무 흔적도 남기지 않는다 — 돈이 아직 움직이지 않았다.
+    mark_failed(Payment.FAILED)와 같은 성격의 종결 상태다 — 원장에는 아무 흔적도
+    남기지 않는다(돈이 움직이지 않았거나, 움직였더라도 이 신호만으로는 확정할 수
+    없다). REFUND_REQUESTED에서만 전이하므로 같은 실패 신호가 재전송돼도 두 번째
+    호출은 rowcount 0으로 아무 일도 하지 않는다 — REFUND_REQUESTED -> PAID처럼
+    되돌아가는 경로가 없으므로, 그 사이 이 Payment가 새 시도로 다시
+    REFUND_REQUESTED에 들어갔더라도 그 새 시도를 잘못 취소시키지 않는다(리뷰
+    지적 1). 이 스캔은 REFUND_FAILED를 자동으로 다시 집지 않는다 — 결제 실패가
+    새 Payment(새 order_id)를 요구하는 것처럼, 이 환불도 재시도하려면 별도의
+    명시적 조치가 필요하다.
     """
 
     Payment.objects.filter(order_id=order_id, status=Payment.Status.REFUND_REQUESTED).update(
-        status=Payment.Status.PAID
+        status=Payment.Status.REFUND_FAILED
     )
     return Payment.objects.get(order_id=order_id)
 
 
+def _settle_new_refund_attempt(adapter, claimed: Payment, *, simulate: str | None) -> dict:
+    """방금 request_refund로 선점한 Payment에 대해 새 refund() 호출을 시도하고
+    확정한다.
+
+    어댑터가 던지는 예외는 이 함수 밖으로 내보내지 않는다 — 배치 하나(이 한 행)의
+    실패가 나머지 배치를 막으면 안 된다(리뷰 지적 2, 4; chain A의 스케줄러 틱,
+    scoring.services.run_pending_scoring과 같은 이유). PGTimeoutError는 실패가
+    아니므로 query_refund_status로 재확인하는데, 그 재확인 호출 자체도 실패할 수
+    있어 같은 방식으로 감싼다(리뷰 지적 2) — 감싸지 않으면 그 예외가 스캔 전체를
+    500으로 죽이고, 이 Payment는 REFUND_REQUESTED에 갇힌 채(후보 쿼리가 PAID만
+    보던 시절에는) 영원히 남았다.
+    """
+
+    order_id = str(claimed.order_id)
+    try:
+        status = adapter.refund(order_id=order_id, amount=claimed.total_amount, simulate=simulate)
+    except PGTimeoutError:
+        try:
+            status = adapter.query_refund_status(order_id=order_id)
+        except Exception as exc:  # noqa: BLE001 - 이 행만 실패시키고 배치는 계속한다.
+            return {
+                "payment_id": claimed.id,
+                "contest_id": claimed.contest_id,
+                "status": "pending",
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+    except Exception as exc:  # noqa: BLE001 - PGError를 포함해 이 행만 실패시킨다.
+        mark_refund_failed(claimed.order_id)
+        return {
+            "payment_id": claimed.id,
+            "contest_id": claimed.contest_id,
+            "status": "failed",
+            "error": str(exc),
+        }
+
+    return _apply_refund_status(claimed, status)
+
+
+def _reconcile_pending_refund(adapter, payment: Payment) -> dict:
+    """이미 REFUND_REQUESTED인(=이전 스캔이 확정하지 못하고 남겨둔) Payment를 새
+    refund() 호출 없이 query_refund_status로만 재확인한다.
+
+    새로 refund()를 다시 부르지 않는 것이 핵심이다 — 이 Payment는 이미 한 번
+    선점되어 PG에 환불이 요청된 상태이므로, 여기서 또 refund()를 부르면 같은
+    금액이 PG에 중복 요청될 수 있다. 순수 조회만 반복해 안전하게 확정을
+    기다린다(리뷰 지적 3).
+    """
+
+    try:
+        status = adapter.query_refund_status(order_id=str(payment.order_id))
+    except Exception as exc:  # noqa: BLE001 - 이 행만 실패시키고 배치는 계속한다.
+        return {
+            "payment_id": payment.id,
+            "contest_id": payment.contest_id,
+            "status": "pending",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    return _apply_refund_status(payment, status)
+
+
+def _apply_refund_status(payment: Payment, status: str) -> dict:
+    if status == "refunded":
+        mark_refunded(payment.order_id)
+        return {"payment_id": payment.id, "contest_id": payment.contest_id, "status": "refunded"}
+    if status == "failed":
+        mark_refund_failed(payment.order_id)
+        return {"payment_id": payment.id, "contest_id": payment.contest_id, "status": "failed"}
+    # pending — 아직 확정할 수 없다. REFUND_REQUESTED로 남겨두고 다음 스캔의
+    # 재확인(_reconcile_pending_refund)이나 웹훅이 마저 확정한다.
+    return {"payment_id": payment.id, "contest_id": payment.contest_id, "status": "pending"}
+
+
 def run_pending_refunds(*, simulate: str | None = None) -> list[dict]:
-    """CLOSED Contest 중 Submission이 0건인 채 결제가 완료된 것을 찾아 전액 환불한다.
+    """CLOSED Contest 중 Submission이 0건인 채 결제가 완료된 것을 찾아 전액 환불하고,
+    이미 시작됐지만 아직 확정되지 못한 환불 시도를 재확인한다.
 
     Submission이 하나라도 있으면 이 스캔은 그 Contest의 Payment를 절대 건드리지
     않는다 — 참여자 0명 전액 환불은 ADR-0004가 허용하는 유일한 환불 경로다(#17).
 
-    `simulate`는 이 스캔이 집는 모든 후보에게 그대로 전달되는 fake PG 전용
-    시나리오 선택 값이다(`payments.api.ConfirmPaymentIn.simulate`와 같은 원칙 —
-    실제 어댑터는 무시한다). 운영에서는 이 스캔이 Celery beat로 짧은 주기마다
-    반복 호출되어 core의 마감 전이(#11) 직후 사실상 "마감 직후"로 수렴한다
-    (scoring.services.run_pending_scoring과 같은 구조).
+    한 번의 호출이 두 종류의 후보를 처리한다(각각 REFUND_BATCH_SIZE로 배치를
+    나눈다 — 리뷰 지적 4):
+
+    1) PAID인 새 후보 — request_refund로 선점하고 새 refund()를 호출한다.
+    2) 이미 REFUND_REQUESTED인 미확정 후보 — 새 refund()를 다시 부르지 않고
+       query_refund_status로만 재확인한다(리뷰 지적 3).
+
+    `simulate`는 새 refund() 호출(1번 경로)에만 적용되는 fake PG 전용 시나리오
+    선택 값이다(`payments.api.ConfirmPaymentIn.simulate`와 같은 원칙 — 실제
+    어댑터는 무시한다). 재확인(2번 경로)은 새 요청을 만들지 않는 순수 조회이므로
+    시나리오 선택이 의미가 없다 — FakePGAdapter가 최초 refund() 호출 시점에
+    기억해 둔 결과를 그대로 돌려준다.
     """
 
     contests_with_submissions = Submission.objects.values_list("contest_id", flat=True)
 
-    candidates = list(
-        Payment.objects.filter(
-            status=Payment.Status.PAID,
-            contest__status=Contest.Status.CLOSED,
-        )
-        .exclude(contest_id__in=contests_with_submissions)
+    eligible_contests = Contest.objects.filter(status=Contest.Status.CLOSED).exclude(
+        id__in=contests_with_submissions
+    )
+
+    new_candidates = list(
+        Payment.objects.filter(status=Payment.Status.PAID, contest__in=eligible_contests)
         .select_related("contest")
-        .order_by("id")
+        .order_by("id")[:REFUND_BATCH_SIZE]
+    )
+
+    pending_candidates = list(
+        Payment.objects.filter(
+            status=Payment.Status.REFUND_REQUESTED, contest__in=eligible_contests
+        )
+        .select_related("contest")
+        .order_by("id")[:REFUND_BATCH_SIZE]
     )
 
     adapter = get_adapter()
     results: list[dict] = []
 
-    for candidate in candidates:
+    for candidate in new_candidates:
         claimed = request_refund(candidate.order_id)
         if claimed is None:
             # 다른 스캔이 이미 이 Payment의 환불을 선점했다 — 건드리지 않는다.
             continue
+        results.append(_settle_new_refund_attempt(adapter, claimed, simulate=simulate))
 
-        try:
-            status = adapter.refund(
-                order_id=str(claimed.order_id), amount=claimed.total_amount, simulate=simulate
-            )
-        except PGTimeoutError:
-            # 타임아웃은 실패가 아니다 — 실제 결과를 조회로 확정한다
-            # (payments.api.confirm_payment와 같은 규율).
-            status = adapter.query_refund_status(order_id=str(claimed.order_id))
-        except PGError as exc:
-            mark_refund_failed(claimed.order_id)
-            results.append(
-                {
-                    "payment_id": claimed.id,
-                    "contest_id": claimed.contest_id,
-                    "status": "error",
-                    "error": str(exc),
-                }
-            )
-            continue
-
-        if status == "refunded":
-            mark_refunded(claimed.order_id)
-            results.append(
-                {"payment_id": claimed.id, "contest_id": claimed.contest_id, "status": "refunded"}
-            )
-        elif status == "failed":
-            mark_refund_failed(claimed.order_id)
-            results.append(
-                {"payment_id": claimed.id, "contest_id": claimed.contest_id, "status": "failed"}
-            )
-        else:
-            # pending — 아직 확정할 수 없다. REFUND_REQUESTED로 남겨두고 이후 웹훅이나
-            # 재스캔이 마저 확정한다.
-            results.append(
-                {"payment_id": claimed.id, "contest_id": claimed.contest_id, "status": "pending"}
-            )
+    for payment in pending_candidates:
+        results.append(_reconcile_pending_refund(adapter, payment))
 
     return results

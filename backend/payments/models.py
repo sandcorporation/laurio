@@ -24,9 +24,16 @@ class Payment(models.Model):
         FAILED = "failed", "결제실패"
         # 참여자 0명 전액 환불(#17, ADR-0004)의 유일한 경로로만 도달한다 — PAID에서만
         # 조건부 UPDATE로 REFUND_REQUESTED로 넘어가고(services.request_refund), PG
-        # 확정 결과에 따라 REFUNDED로 전이하거나 재시도를 위해 PAID로 되돌아간다.
+        # 확정 결과에 따라 REFUNDED 또는 REFUND_FAILED로 전이한다. mark_paid/mark_failed
+        # 가 REQUESTED에서 한 번만 전이하고 절대 되돌아가지 않는 것과 같은 이유로,
+        # REFUND_REQUESTED는 PAID로도 되돌아가지 않는다 — 되돌아가면 재전송된
+        # refund_failed 웹훅이 그 사이 새로 시작된 다른(더 최신) 환불 시도를 잘못
+        # 취소시킬 수 있다(리뷰 지적 1). 실패는 REFUND_FAILED라는 새로운 종결
+        # 상태로만 전진한다 — mark_failed가 만드는 Payment.FAILED와 같은 성격의
+        # 종결 상태이며, 이 스캔은 REFUND_FAILED를 자동으로 다시 집지 않는다.
         REFUND_REQUESTED = "refund_requested", "환불요청됨"
         REFUNDED = "refunded", "환불완료"
+        REFUND_FAILED = "refund_failed", "환불실패"
 
     contest = models.ForeignKey(
         "contests.Contest", related_name="payments", on_delete=models.CASCADE

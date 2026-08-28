@@ -463,11 +463,14 @@ def test_refund_survives_pg_timeout_then_success(client, category, landing_type)
 
 
 @pytest.mark.django_db
-def test_refund_reverts_to_paid_on_pg_timeout_then_failure_and_retries_succeed(
+def test_refund_failure_after_timeout_is_terminal_and_never_auto_retried(
     client, category, landing_type
 ):
-    """환불이 (타임아웃 후 확정된) 실패로 끝나면 PAID로 되돌아가 재시도 가능해야
-    하고, 원장은 아직 손대지 않아야 한다. 다음 스캔이 성공하면 그제서야 환불된다."""
+    """환불이 (타임아웃 후 확정된) 실패로 끝나면 REFUND_FAILED로 종결되고 원장은
+    손대지 않는다. mark_failed(Payment.FAILED)와 같은 성격의 종결 상태라 이
+    스캔은 REFUND_FAILED를 자동으로 다시 집지 않는다 — PAID로 되돌리면(과거
+    버전의 버그) 재전송된 실패 웹훅이 그 사이 시작된 다른 시도를 잘못 취소시켜
+    이중 환불로 이어진다(리뷰 지적 1)."""
 
     deadline = timezone.now() + timedelta(hours=1)
     sponsor, contest = _publish_contest(
@@ -481,27 +484,27 @@ def test_refund_reverts_to_paid_on_pg_timeout_then_failure_and_retries_succeed(
     assert first.json()["results"][0]["status"] == "failed"
 
     payment = Payment.objects.get(order_id=order_id)
-    assert payment.status == Payment.Status.PAID
+    assert payment.status == Payment.Status.REFUND_FAILED
     assert payment.refund_journal_entry_id is None
 
     ledger_id = Contest.objects.get(id=contest["id"]).ledger_id
     entries = _ledger_entries(client, ledger_id)
     assert len(entries) == 1  # 원장은 아직 예치 분개 하나뿐 — 환불 분개 없음.
 
+    # 다음 스캔이 자동으로 REFUND_FAILED를 다시 집지 않는다 — PAID만 새 후보다.
     second = _run_refunds(client)
     assert second.status_code == 200
-    assert second.json()["results"][0]["status"] == "refunded"
+    assert second.json()["count"] == 0
 
     payment.refresh_from_db()
-    assert payment.status == Payment.Status.REFUNDED
+    assert payment.status == Payment.Status.REFUND_FAILED
 
-    balance = client.get(f"{LEDGER_URL}/contests/{ledger_id}/balance").json()
-    assert balance["balance"] == 0
-    assert balance["is_balanced"] is True
+    entries = _ledger_entries(client, ledger_id)
+    assert len(entries) == 1  # 여전히 예치 분개 하나뿐.
 
 
 @pytest.mark.django_db
-def test_immediate_pg_failure_reverts_to_paid_without_touching_ledger(client, category, landing_type):
+def test_immediate_pg_failure_is_terminal_and_does_not_touch_ledger(client, category, landing_type):
     deadline = timezone.now() + timedelta(hours=1)
     sponsor, contest = _publish_contest(
         client, category=category, deliverable_type=landing_type, deadline_at=deadline
@@ -514,7 +517,187 @@ def test_immediate_pg_failure_reverts_to_paid_without_touching_ledger(client, ca
     assert response.json()["results"][0]["status"] == "failed"
 
     payment = Payment.objects.get(order_id=order_id)
-    assert payment.status == Payment.Status.PAID
+    assert payment.status == Payment.Status.REFUND_FAILED
+    assert payment.refund_journal_entry_id is None
+
+
+# --- 리뷰 지적 1: 실패 웹훅 재전송이 이미 종결된 시도를 다시 건드리지 않는다 --------
+
+
+@pytest.mark.django_db
+def test_redelivered_refund_failed_webhook_on_an_already_failed_payment_is_a_noop(
+    client, category, landing_type
+):
+    """가장 단순한 재전송 형태 — 같은 refund_failed 웹훅이 REFUND_FAILED에
+    이미 도달한 뒤 다시 와도 아무 일도 일어나지 않는다."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+    order_id = Payment.objects.get(contest_id=contest["id"]).order_id
+    _close_via_tick(client, at=deadline + timedelta(minutes=1))
+
+    _run_refunds(client, simulate="failed")
+    assert Payment.objects.get(order_id=order_id).status == Payment.Status.REFUND_FAILED
+
+    for _ in range(2):
+        webhook_id = f"wh-redelivered-{uuid.uuid4().hex}"
+        response = _send_webhook(
+            client, webhook_id=webhook_id, order_id=str(order_id), status="refund_failed"
+        )
+        assert response.status_code == 200
+
+    assert Payment.objects.get(order_id=order_id).status == Payment.Status.REFUND_FAILED
+
+
+# --- 리뷰 지적 2: query_refund_status 자체의 실패가 배치를 죽이지 않는다 --------
+
+
+@pytest.mark.django_db
+def test_query_refund_status_error_after_timeout_does_not_500_and_leaves_row_retryable(
+    client, category, landing_type
+):
+    """confirm과 달리, 타임아웃 뒤의 재확인 호출(query_refund_status) 자체가
+    PG 쪽 오류로 실패할 수 있다. 이 오류가 스캔 엔드포인트를 500으로 죽이면
+    안 되고, 나머지 배치도 계속 처리되어야 한다."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor_a, contest_a = _publish_contest(
+        client, category=category, deliverable_type=landing_type, sponsor_uid="sponsor-a",
+        deadline_at=deadline,
+    )
+    sponsor_b, contest_b = _publish_contest(
+        client, category=category, deliverable_type=landing_type, sponsor_uid="sponsor-b",
+        deadline_at=deadline,
+    )
+    order_id_a = Payment.objects.get(contest_id=contest_a["id"]).order_id
+    order_id_b = Payment.objects.get(contest_id=contest_b["id"]).order_id
+    _close_via_tick(client, at=deadline + timedelta(minutes=1))
+
+    # 두 Contest 모두 같은 스캔 호출 안에서 같은 simulate로 처리된다 — a는
+    # query_refund_status 자체가 에러를 내는 시나리오, b는 이 테스트에서는
+    # 같은 시나리오를 쓰지만 배치가 죽지 않는다는 것만 확인하면 충분하다.
+    response = _run_refunds(client, simulate="timeout_then_query_error")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["count"] == 2
+    statuses = {r["payment_id"]: r["status"] for r in body["results"]}
+    payment_a = Payment.objects.get(order_id=order_id_a)
+    payment_b = Payment.objects.get(order_id=order_id_b)
+    assert statuses[payment_a.id] == "pending"
+    assert statuses[payment_b.id] == "pending"
+
+    # 둘 다 REFUND_REQUESTED로 남아 다음 스캔이 재시도할 수 있다 — 영원히 갇히지
+    # 않는다.
+    assert payment_a.status == Payment.Status.REFUND_REQUESTED
+    assert payment_b.status == Payment.Status.REFUND_REQUESTED
+
+
+# --- 리뷰 지적 3: pending으로 남은 시도를 다음 스캔이 재확인해 끝낸다 -----------
+
+
+@pytest.mark.django_db
+def test_pending_refund_is_reconciled_by_a_later_scan_without_calling_refund_again(
+    client, category, landing_type
+):
+    """adapter.refund()가 예외 없이 곧바로 "pending"을 돌려주면(비동기 PG) 이
+    Payment는 REFUND_REQUESTED로 남는다. 다음 스캔은 새 refund()를 다시
+    부르지 않고(중복 요청 방지) query_refund_status로만 재확인해야 하고, PG가
+    그 사이 실제로 확정했다면(Fake의 테스트 전용 훅으로 흉내낸다) 그 결과를
+    끝내 반영해야 한다."""
+
+    from payments.adapters import FakePGAdapter
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+    order_id = Payment.objects.get(contest_id=contest["id"]).order_id
+    _close_via_tick(client, at=deadline + timedelta(minutes=1))
+
+    first = _run_refunds(client, simulate="pending")
+    assert first.status_code == 200
+    assert first.json()["results"][0]["status"] == "pending"
+    assert Payment.objects.get(order_id=order_id).status == Payment.Status.REFUND_REQUESTED
+
+    # 다음 스캔이 (아직 PG가 확정하지 못했다면) 계속 pending으로 재확인만 하고
+    # 새 refund()를 또 부르지 않는다는 것을 확인한다.
+    second = _run_refunds(client)
+    assert second.status_code == 200
+    assert second.json()["count"] == 1
+    assert second.json()["results"][0]["status"] == "pending"
+    assert Payment.objects.get(order_id=order_id).status == Payment.Status.REFUND_REQUESTED
+
+    # PG가 그 사이 실제로 환불을 확정했다 — Fake의 테스트 전용 훅으로 흉내낸다
+    # (ClockOverride로 시간을 앞당기는 것과 같은 성격의 인프라 상태 준비).
+    FakePGAdapter.resolve_pending_refund_for_testing(str(order_id), "refunded")
+
+    third = _run_refunds(client)
+    assert third.status_code == 200
+    assert third.json()["count"] == 1
+    assert third.json()["results"][0]["status"] == "refunded"
+
+    payment = Payment.objects.get(order_id=order_id)
+    assert payment.status == Payment.Status.REFUNDED
+    assert payment.refund_journal_entry_id is not None
+
+    ledger_id = Contest.objects.get(id=contest["id"]).ledger_id
+    balance = client.get(f"{LEDGER_URL}/contests/{ledger_id}/balance")
+    _as_operator(client)
+    balance = client.get(f"{LEDGER_URL}/contests/{ledger_id}/balance").json()
+    assert balance["balance"] == 0
+    assert balance["is_balanced"] is True
+
+
+# --- 리뷰 지적 4: 배치 크기가 무제한이 아니다 ------------------------------------
+
+
+@pytest.mark.django_db
+def test_refund_scan_is_bounded_by_batch_size(client, category, landing_type):
+    """한 스캔이 처리하는 후보 수가 REFUND_BATCH_SIZE로 제한된다 — 무제한 스캔은
+    백로그가 쌓였을 때 이 엔드포인트를 호출하는 HTTP 요청 자체를 타임아웃으로
+    몰아넣는다."""
+
+    from payments.services import REFUND_BATCH_SIZE
+
+    assert REFUND_BATCH_SIZE > 0
+
+    total = REFUND_BATCH_SIZE + 3
+    deadline = timezone.now() + timedelta(hours=1)
+    order_ids = []
+    for i in range(total):
+        sponsor, contest = _publish_contest(
+            client,
+            category=category,
+            deliverable_type=landing_type,
+            sponsor_uid=f"batch-sponsor-{i}",
+            deadline_at=deadline,
+        )
+        order_ids.append(Payment.objects.get(contest_id=contest["id"]).order_id)
+
+    _close_via_tick(client, at=deadline + timedelta(minutes=1))
+
+    response = _run_refunds(client)
+    assert response.status_code == 200
+    assert response.json()["count"] == REFUND_BATCH_SIZE
+
+    refunded = Payment.objects.filter(
+        order_id__in=order_ids, status=Payment.Status.REFUNDED
+    ).count()
+    still_paid = Payment.objects.filter(order_id__in=order_ids, status=Payment.Status.PAID).count()
+    assert refunded == REFUND_BATCH_SIZE
+    assert still_paid == total - REFUND_BATCH_SIZE
+
+    # 다음 스캔이 남은 잔여분을 마저 처리한다.
+    second = _run_refunds(client)
+    assert second.status_code == 200
+    assert second.json()["count"] == total - REFUND_BATCH_SIZE
+
+    refunded_after = Payment.objects.filter(
+        order_id__in=order_ids, status=Payment.Status.REFUNDED
+    ).count()
+    assert refunded_after == total
 
 
 # --- 웹훅 재전송 --------------------------------------------------------------

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import threading
 import uuid
 from datetime import timedelta
 
@@ -137,19 +138,21 @@ def _create_draft_contest(
     sponsor,
     *,
     category,
-    deliverable_type,
+    deliverable_type=None,
+    deliverable_types=None,
     deadline_at,
     title="원본 공모전",
     description="원본 설명",
     prize=1_000_000,
     requirements=None,
 ) -> dict:
+    types = deliverable_types if deliverable_types is not None else [deliverable_type]
     response = client.post(
         CONTESTS_URL,
         data={
             "title": title,
             "category_id": category.id,
-            "deliverable_type_ids": [deliverable_type.id],
+            "deliverable_type_ids": [dt.id for dt in types],
             "description": description,
             "prize": prize,
             "deadline_at": deadline_at.isoformat(),
@@ -190,7 +193,8 @@ def _lapsed_contest(
     client,
     *,
     category,
-    deliverable_type,
+    deliverable_type=None,
+    deliverable_types=None,
     sponsor_uid="sponsor-1",
     sponsor_ci="sponsor-ci-1",
     title="원본 공모전",
@@ -208,6 +212,7 @@ def _lapsed_contest(
         sponsor,
         category=category,
         deliverable_type=deliverable_type,
+        deliverable_types=deliverable_types,
         deadline_at=deadline,
         title=title,
         description=description,
@@ -262,6 +267,11 @@ def category(db):
 @pytest.fixture
 def landing_type(db):
     return DeliverableType.objects.create(name="랜딩·원페이지", minimum_prize=500_000)
+
+
+@pytest.fixture
+def admin_type(db):
+    return DeliverableType.objects.create(name="관리자 페이지", minimum_prize=1_500_000)
 
 
 # --- 핵심 경로 -----------------------------------------------------------------
@@ -499,3 +509,130 @@ def test_original_and_reopened_contest_histories_never_mix(client, category, lan
         Payment.objects.get(contest_id=original["id"]).order_id
         != Payment.objects.get(contest_id=new_contest["id"]).order_id
     )
+
+
+
+# --- 리뷰 지적 5: 재개최는 원본당 최대 한 번뿐이다 ------------------------------
+
+
+@pytest.mark.django_db
+def test_reopening_the_same_lapsed_contest_twice_is_rejected(client, category, landing_type):
+    sponsor, original = _lapsed_contest(client, category=category, deliverable_type=landing_type)
+    new_deadline = timezone.now() + timedelta(days=14)
+
+    first = _reopen(client, sponsor["access"], original["id"], prize=1_000_000, deadline_at=new_deadline)
+    assert first.status_code == 200
+
+    second = _reopen(client, sponsor["access"], original["id"], prize=1_500_000, deadline_at=new_deadline)
+    assert second.status_code == 409
+
+    successors = Contest.objects.filter(source_contest_id=original["id"])
+    assert successors.count() == 1
+
+
+@pytest.mark.django_db(transaction=True)
+def test_concurrent_reopen_requests_create_only_one_successor(django_db_blocker, category, landing_type):
+    """두 요청이 동시에 같은(이미 유찰된) Contest를 재개최하려 해도 사본은 하나만
+    남아야 한다 — original 행 잠금(select_for_update)이 직렬화한다. 순차 이중
+    호출(위 테스트)만으로는 실제 경합이 재현되지 않으므로 스레드 두 개로 진짜
+    동시 요청을 만든다(payments의 동시 결제 시작 테스트와 같은 방식)."""
+
+    from django.db import connections
+    from django.test import Client
+
+    with django_db_blocker.unblock():
+        setup_client = Client()
+        sponsor, original = _lapsed_contest(
+            setup_client, category=category, deliverable_type=landing_type
+        )
+        new_deadline = timezone.now() + timedelta(days=14)
+
+        results: list = []
+        barrier = threading.Barrier(2)
+
+        def worker():
+            try:
+                with django_db_blocker.unblock():
+                    local_client = Client()
+                    barrier.wait()
+                    response = _reopen(
+                        local_client, sponsor["access"], original["id"],
+                        prize=1_000_000, deadline_at=new_deadline,
+                    )
+                    results.append(response)
+            finally:
+                connections.close_all()
+
+        threads = [threading.Thread(target=worker) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(results) == 2
+        status_codes = sorted(r.status_code for r in results)
+        assert status_codes == [200, 409]
+
+        successors = Contest.objects.filter(source_contest_id=original["id"])
+        assert successors.count() == 1
+
+
+# --- 리뷰 지적 6: 비활성화된 Category·DeliverableType은 그대로 복제되지 않는다 ---
+
+
+@pytest.mark.django_db
+def test_reopen_excludes_retired_deliverable_type_and_recomputes_minimum_prize(
+    client, category, landing_type, admin_type
+):
+    sponsor, original = _lapsed_contest(
+        client,
+        category=category,
+        deliverable_types=[landing_type, admin_type],
+        prize=3_000_000,
+    )
+
+    # 운영자가 그 사이 landing_type을 은퇴시켰다 — create_contest라면 이제
+    # 이 DeliverableType을 신규 개최에 쓸 수 없다.
+    landing_type.is_active = False
+    landing_type.save(update_fields=["is_active"])
+
+    new_deadline = timezone.now() + timedelta(days=14)
+    response = _reopen(client, sponsor["access"], original["id"], prize=3_000_000, deadline_at=new_deadline)
+
+    assert response.status_code == 200, response.content
+    body = response.json()
+    assert [dt["id"] for dt in body["deliverable_types"]] == [admin_type.id]
+    assert body["required_minimum_prize"] == admin_type.minimum_prize
+    assert body["is_underfunded"] is False
+
+
+@pytest.mark.django_db
+def test_reopen_rejects_when_every_deliverable_type_is_retired(client, category, landing_type):
+    sponsor, original = _lapsed_contest(client, category=category, deliverable_type=landing_type)
+
+    landing_type.is_active = False
+    landing_type.save(update_fields=["is_active"])
+
+    response = _reopen(
+        client, sponsor["access"], original["id"], prize=1_000_000,
+        deadline_at=timezone.now() + timedelta(days=14),
+    )
+
+    assert response.status_code == 422
+    assert Contest.objects.filter(source_contest_id=original["id"]).count() == 0
+
+
+@pytest.mark.django_db
+def test_reopen_rejects_when_category_is_retired(client, category, landing_type):
+    sponsor, original = _lapsed_contest(client, category=category, deliverable_type=landing_type)
+
+    category.is_active = False
+    category.save(update_fields=["is_active"])
+
+    response = _reopen(
+        client, sponsor["access"], original["id"], prize=1_000_000,
+        deadline_at=timezone.now() + timedelta(days=14),
+    )
+
+    assert response.status_code == 422
+    assert Contest.objects.filter(source_contest_id=original["id"]).count() == 0
