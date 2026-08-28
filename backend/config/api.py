@@ -1,6 +1,7 @@
 from ninja import NinjaAPI
 
 from core.api import router as core_internal_router
+from notifications.api import router as notifications_internal_router
 
 api = NinjaAPI(title="Laurio API", version="0.1.0")
 
@@ -11,3 +12,4 @@ def health(request):
 
 
 api.add_router("/internal", core_internal_router)
+api.add_router("/internal/notifications", notifications_internal_router)
