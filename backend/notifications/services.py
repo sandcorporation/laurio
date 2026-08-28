@@ -21,6 +21,7 @@ SELECT 가 선형으로 쌓인다.
 import logging
 from datetime import time, timedelta, timezone as dt_timezone
 
+from django.db.models import Q
 from django.utils import timezone
 
 from core.clock import Clock
@@ -42,6 +43,12 @@ QUIET_HOURS_END = time(8, 0)
 # 야간 큐(DEFERRED) 한 번 스캔에서 처리하는 최대 건수. core.transitions.DEFAULT_BATCH_SIZE
 # 와 같은 이유(무제한 스캔이 요청 타임아웃을 만든다)로 둔다.
 DUE_SCAN_BATCH_SIZE = 500
+
+# QUEUED로 선점된 뒤 이만큼 지나도 여전히 QUEUED면 "멈췄다"고 본다(#10 리뷰 지적).
+# 정상적인 발송 시도는 어댑터 타임아웃을 포함해도 이보다 훨씬 빨리 SENT/FAILED로
+# 끝난다 — 그래서 이 문턱을 넘긴 QUEUED는 진행 중이 아니라 죽은 것으로 취급해도
+# 안전하다.
+STUCK_QUEUED_THRESHOLD = timedelta(minutes=5)
 
 
 def in_quiet_hours(at) -> bool:
@@ -114,6 +121,11 @@ def create_notification(*, recipient, notification_type: str) -> Notification:
         is_transactional=is_transactional,
         is_promotional=is_promotional,
         status=Notification.Status.QUEUED,
+        # 아래 _attempt_dispatch가 이 요청 안에서 곧바로 끝내지 못하고(어댑터가
+        # 예상 못 한 방식으로 죽는 등) 예외가 새 나가더라도, claimed_at을 남겨두면
+        # 이 행이 QUEUED에 갇힌 채 영원히 잊히지 않는다 — 야간 큐 스캐너가 나중에
+        # STUCK_QUEUED_THRESHOLD를 넘긴 QUEUED도 함께 주워 재시도한다(#10 리뷰 지적).
+        claimed_at=now,
         created_at=now,
     )
     _attempt_dispatch(notification, now=now)
@@ -184,27 +196,17 @@ def _attempt_dispatch(notification: Notification, *, now=None) -> None:
     )
 
 
-def _claim_and_process_deferred(pk: int, *, now) -> bool:
-    """DEFERRED -> QUEUED 를 조건부로 선점한 뒤, 발송을 시도(혹은 재연기)한다.
+def _process_claimed_queued_row(pk: int, *, now) -> bool:
+    """QUEUED 선점(신규든 재선점이든)에 성공한 뒤 공통으로 할 일.
 
-    선점에 실패하면(이미 다른 스캔이 가져갔거나 상태가 바뀌었으면) False.
-    스캔이 지연되어 처리 시점에 다시 야간(21~08시)로 들어와 있으면 — 예:
-    다음 날 08:00으로 연기해둔 것을 그 다음 21:30에야 스캔했다면 — 발송하지
-    않고 그 다음 08:00으로 다시 연기한다. "발송 시각이 지났다"는 것과 "지금
-    당장 내보내도 되는 시각이다"는 것은 다른 판정이라, 두 번째 것도 실제 발송
-    직전에 다시 확인해야 한다(ADR-0010).
+    스캔이 지연되어 처리 시점에 다시 야간(21~08시)로 들어와 있으면 — 예: 다음 날
+    08:00으로 연기해둔 것을 그 다음 21:30에야 스캔했다면 — 발송하지 않고 그 다음
+    08:00으로 다시 연기한다. "발송 시각이 지났다"는 것과 "지금 당장 내보내도 되는
+    시각이다"는 것은 다른 판정이라, 두 번째 것도 실제 발송 직전에 다시 확인해야
+    한다(ADR-0010). 재연기했으면 False, 실제로 발송을 시도했으면 True를 돌려준다 —
+    호출자가 "이 스캔에서 몇 건이나 실제로 처리됐는지"를 셀 때 재연기를 발송으로
+    잘못 세지 않게 하기 위해서다.
     """
-
-    claimed = claim_transition(
-        Notification,
-        pk,
-        from_state=Notification.Status.DEFERRED,
-        to_state=Notification.Status.QUEUED,
-        state_field="status",
-        now=now,
-    )
-    if not claimed:
-        return False
 
     if in_quiet_hours(now):
         Notification.objects.filter(pk=pk, status=Notification.Status.QUEUED).update(
@@ -217,31 +219,107 @@ def _claim_and_process_deferred(pk: int, *, now) -> bool:
     return True
 
 
-def dispatch_due_notifications(as_of=None) -> list[int]:
-    """야간 연기(DEFERRED)로 쌓인 것 중 scheduled_for 가 지난 것을 찾아 발송을 시도한다.
+def _claim_and_process_deferred(pk: int, *, now) -> bool:
+    """DEFERRED -> QUEUED 를 조건부로 선점한 뒤, 발송을 시도(혹은 재연기)한다.
 
-    각 행은 claim_transition 으로 DEFERRED -> QUEUED 를 먼저 조건부로 선점한 뒤에만
-    실제 발송을 시도한다. 같은 as_of 로 두 번 불러도 이미 QUEUED/SENT/FAILED/다시
-    DEFERRED 로 옮겨간 행은 다시 잡히지 않으므로 중복 발송이 없다.
+    선점에 실패하면(이미 다른 스캔이 가져갔거나 상태가 바뀌었으면) False. 상태
+    전이와 `claimed_at` 갱신은 `claim_transition` 한 번의 조건부 UPDATE로 함께
+    커밋된다(#10 리뷰 지적) — 둘을 별도 문장으로 나누면 그 사이의 예외가 "상태만
+    QUEUED로 바뀌고 claimed_at은 못 채워진" 행을 만들 수 있었다.
+    """
+
+    claimed = claim_transition(
+        Notification,
+        pk,
+        from_state=Notification.Status.DEFERRED,
+        to_state=Notification.Status.QUEUED,
+        state_field="status",
+        now=now,
+        extra_fields={"claimed_at": now},
+    )
+    if not claimed:
+        return False
+
+    return _process_claimed_queued_row(pk, now=now)
+
+
+def _reclaim_stuck_queued(pk: int, *, now, stale_before) -> bool:
+    """QUEUED에서 STUCK_QUEUED_THRESHOLD 이상 멈춰 있는 행을 다시 선점한다.
+
+    DEFERRED -> QUEUED 선점 뒤 재연기/발송 판정 사이(또는 즉시발송 경로의 발송
+    시도 자체)에서 예기치 못한 예외가 나면 그 행은 QUEUED에서 멈춘 채로 남을 수
+    있다 — 예전 스캐너는 DEFERRED만 다시 주웠으므로 그런 행은 영원히 재시도되지
+    않았다(#10 리뷰 지적: "_attempt_dispatch의 docstring이 막는다던 바로 그 상황").
+
+    `claimed_at`을 조건에 넣은 조건부 UPDATE라서 여러 스캔이 동시에 같은 행을
+    집어도 정확히 하나만 성공한다 — 먼저 이긴 스캔이 `claimed_at`을 신선한 값으로
+    갱신하면, 뒤이은 UPDATE는 더 이상 `claimed_at__lte=stale_before` 를 만족하지
+    않아 rowcount 0으로 끝난다(claim_transition의 상태 문자열 대신 시각을 조건으로
+    쓰는 같은 원리).
+    """
+
+    updated = Notification.objects.filter(
+        Q(claimed_at__isnull=True) | Q(claimed_at__lte=stale_before),
+        pk=pk,
+        status=Notification.Status.QUEUED,
+    ).update(claimed_at=now)
+    return updated == 1
+
+
+def _reclaim_and_process_stuck_queued(pk: int, *, now, stale_before) -> bool:
+    if not _reclaim_stuck_queued(pk, now=now, stale_before=stale_before):
+        return False
+    return _process_claimed_queued_row(pk, now=now)
+
+
+def dispatch_due_notifications(as_of=None) -> list[int]:
+    """야간 연기(DEFERRED)로 쌓인 것과, QUEUED에서 멈춰버린 것을 찾아 발송을 시도한다.
+
+    DEFERRED 행은 claim_transition 으로 DEFERRED -> QUEUED 를 먼저 조건부로 선점한
+    뒤에만 실제 발송을 시도한다. QUEUED 행은 STUCK_QUEUED_THRESHOLD 이상 멈춰 있는
+    것만 재선점 대상이다(#10 리뷰 지적) — 그렇지 않으면 지금 막 즉시발송 경로로
+    한창 처리 중인(아직 SENT/FAILED로 끝나지 않은) 정상적인 QUEUED 행까지 이 스캔이
+    집어 이중 발송을 시도하게 된다.
+
+    같은 as_of 로 두 번 불러도 이미 QUEUED/SENT/FAILED/다시 DEFERRED 로 옮겨간 행은
+    다시 잡히지 않으므로 중복 발송이 없다.
 
     한 행 처리 중 예기치 못한 예외가 나도(_attempt_dispatch 자체는 채널 예외를 이미
     다 잡지만, 방어적으로 한 번 더) 나머지 행 처리를 막지 않는다 — 배치 하나가 통째로
-    막혀 뒤에 있는 정상 건들까지 무기한 QUEUED 로 남는 사고를 막기 위함이다.
+    막혀 뒤에 있는 정상 건들까지 무기한 QUEUED 로 남는 사고를 막기 위함이다. 설령
+    이 처리 자체가 다시 죽더라도, claimed_at이 이미 갱신돼 있으므로 다음 스캔이
+    STUCK_QUEUED_THRESHOLD 뒤에 다시 집어간다 — 완전히 잊히는 경로가 없다.
     """
 
     as_of = as_of or Clock.now()
-    due_ids = list(
+    stale_before = as_of - STUCK_QUEUED_THRESHOLD
+
+    due_deferred_ids = list(
         Notification.objects.filter(status=Notification.Status.DEFERRED, scheduled_for__lte=as_of)
         .order_by("pk")
         .values_list("pk", flat=True)[:DUE_SCAN_BATCH_SIZE]
     )
 
+    stuck_queued_ids = list(
+        Notification.objects.filter(status=Notification.Status.QUEUED)
+        .filter(Q(claimed_at__isnull=True) | Q(claimed_at__lte=stale_before))
+        .order_by("pk")
+        .values_list("pk", flat=True)[:DUE_SCAN_BATCH_SIZE]
+    )
+
     dispatched_ids: list[int] = []
-    for pk in due_ids:
+    for pk in due_deferred_ids:
         try:
             if _claim_and_process_deferred(pk, now=as_of):
                 dispatched_ids.append(pk)
         except Exception:  # noqa: BLE001 - 한 행의 실패가 나머지 배치를 막으면 안 된다.
             logger.exception("Notification(pk=%s) 야간 큐 처리 중 예외, 다음 행으로 계속", pk)
+
+    for pk in stuck_queued_ids:
+        try:
+            if _reclaim_and_process_stuck_queued(pk, now=as_of, stale_before=stale_before):
+                dispatched_ids.append(pk)
+        except Exception:  # noqa: BLE001 - 한 행의 실패가 나머지 배치를 막으면 안 된다.
+            logger.exception("Notification(pk=%s) 멈춘 QUEUED 재처리 중 예외, 다음 행으로 계속", pk)
 
     return dispatched_ids

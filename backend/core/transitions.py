@@ -36,6 +36,7 @@ def claim_transition(
     to_state: str,
     state_field: str = "state",
     now=None,
+    extra_fields: dict[str, object] | None = None,
 ) -> bool:
     """조건부 UPDATE 한 번을 수행한다. rowcount 가 1이면 True.
 
@@ -46,11 +47,19 @@ def claim_transition(
     자동으로 갱신해주지 않는다(auto_now 는 `Model.save()` 경로에서만 동작한다). 이
     메커니즘을 재사용하는 모든 모델이 그 문제를 각자 겪지 않도록, 여기서 auto_now
     필드를 찾아 주입된 시각으로 명시적으로 채운다.
+
+    `extra_fields`는 상태 전이와 **같은** 조건부 UPDATE 문 안에서 함께 써야 하는
+    추가 컬럼을 위한 것이다(예: notifications 앱이 QUEUED 재진입 시각을 상태와
+    같이 찍어야, 그 값을 근거로 "선점됐는데 멈춘" 행을 나중에 재선점할 수 있다).
+    별도의 `.update()` 호출로 나누면 그 사이의 예외가 상태만 바뀌고 시각은 못
+    바뀐 반쪽짜리 결과를 남길 수 있다 — 하나의 UPDATE 문이므로 그 틈이 없다.
     """
 
     now = now if now is not None else Clock.now()
 
     update_fields: dict[str, object] = {state_field: to_state}
+    if extra_fields:
+        update_fields.update(extra_fields)
     for field in model._meta.get_fields():
         if getattr(field, "auto_now", False):
             update_fields[field.name] = now

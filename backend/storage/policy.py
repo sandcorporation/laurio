@@ -12,23 +12,24 @@
 
 ## 확장점
 
-`STORAGE_TARGET_RESOLVER` 설정(dotted path)을 갈아끼우면 된다. #8(Submission
-소유권), #10(Contest 마감 상태), #14(Handover 개방)가 각자 이 Protocol을
-구현해 꽂는다. 아무것도 꽂지 않은 지금은 `DenyUnknownTargetResolver`가 모든
-대상을 "소유자 없는 private"으로 취급해 실수로 새는 것보다 막히는 쪽으로
-fail-closed 한다.
+`STORAGE_TARGET_RESOLVER` 설정(dotted path)을 갈아끼우면 된다. #10(Submission
+소유권·Contest 마감 상태)이 이 Protocol을 구현해 꽂았다. #14(Handover 개방)는
+그 구현에 새 분기를 추가하는 것으로 확장한다. 아무것도 꽂지 않으면
+`DenyUnknownTargetResolver`가 모든 대상을 "소유자 없는 private"으로 취급해
+실수로 새는 것보다 막히는 쪽으로 fail-closed 한다.
 
 ## 인증 가드
 
-`request.user.is_authenticated`만 본다 — Django 세션 인증(admin과 동일)이다.
-소셜 로그인(#5, Authentication)이 이 자리를 실제 구현으로 교체한다. 지금은
-"가장 단순하게 쓸 수 있는 가드"일 뿐이다.
+`request.auth_user`를 본다 — `accounts.middleware.JWTAuthenticationMiddleware`가
+모든 요청에서 `Authorization: Bearer <access token>`을 해석해 채워두는, 이
+플랫폼이 실제로 로그인에 쓰는 신원이다(ADR-0012/0013). Django 세션 인증
+(`request.user`)은 쓰지 않는다 — 이 플랫폼의 어떤 로그인 경로도 `auth.login()`을
+호출하지 않으므로 세션은 절대 채워지지 않고, 세션 기반 가드는 실제 클라이언트
+에게 영원히 403만 돌려준다(#10 리뷰 지적).
 
-세션 쿠키는 브라우저가 자동으로 실어 보내므로 폼 전송으로 위조 가능하다(CSRF).
-그래서 이 쿠키를 신원 증거로 받아들이는 모든 지점에서 Django 표준 CSRF 검사를
-함께 태운다. #5가 착지시킨 JWT(Authorization 헤더, localStorage)로 넘어가면
-브라우저가 자동으로 실어주지 않으므로 이 검사 자체가 필요 없어진다 — 그때의
-교체는 보강이 아니라 축소다.
+JWT는 `Authorization` 헤더로만 전달되고 브라우저가 자동으로 실어 보내지 않으므로
+(localStorage에 저장 — ADR-0012), 세션 쿠키와 달리 폼 전송으로 위조할 수 없다.
+그래서 세션 인증이 요구하던 CSRF 검사는 여기서 필요 없다 — 보강이 아니라 축소다.
 """
 
 from __future__ import annotations
@@ -40,7 +41,6 @@ from typing import Protocol
 from django.conf import settings
 from django.http import HttpRequest
 from django.utils.module_loading import import_string
-from ninja.utils import check_csrf
 
 
 class StorageAccessDenied(Exception):
@@ -60,6 +60,10 @@ class TargetState:
     있을 때만 쓴다 — 예를 들어 진행 중인 Submission의 데모·영상은 제출자 본인과 그
     Contest의 Sponsor 둘 다 봐야 한다(ADR-0014). 기존 리졸버(단일 소유자만 있는
     경우)는 이 필드를 건드릴 필요가 없다 — 기본값이 빈 집합이라 동작이 그대로다.
+
+    업로드 권한은 `owner_id`만 본다(추가 열람자는 다운로드 전용) — `visibility`가
+    PUBLIC이어도 소유자가 아니면 그 namespace에 업로드할 수 없다. 리졸버 구현은
+    PUBLIC을 반환할 때도 `owner_id`를 계속 채워야 한다.
     """
 
     visibility: Visibility
@@ -70,7 +74,7 @@ class TargetState:
 class TargetStateResolver(Protocol):
     """target_ref -> TargetState.
 
-    실제 구현(#8/#10/#14)은 Submission·Contest·Handover의 DB 상태를 조회해
+    실제 구현(#10/#14)은 Submission·Contest·Handover의 DB 상태를 조회해
     이 결과를 만든다. target_ref 자체는 이 인터페이스 입장에서 불투명한 문자열이다.
     """
 
@@ -92,19 +96,11 @@ def get_target_resolver() -> TargetStateResolver:
     return resolver_cls()
 
 
-def _reject_if_forged_cookie(request: HttpRequest) -> None:
-    """`request.user`가 세션 쿠키로 신원을 얻었다면, 그 요청이 우리 프런트가 보낸
-    것인지도 Django 표준 CSRF 검사로 함께 확인한다.
+def _authenticated_user_id(request: HttpRequest) -> int | None:
+    """JWT로 확인된 호출자의 User pk. 없으면(비로그인·무효 토큰) None."""
 
-    django-ninja는 기본적으로 자신이 마운트하는 뷰를 Django의 CsrfViewMiddleware
-    에서 통째로 제외한다(`ninja.operation`). ninja의 `auth=SessionAuth()` 를
-    쓰지 않고 여기서 직접 `request.user`를 신뢰하는 이상, CSRF 검사도 직접
-    걸어야 한다 — 안 걸면 아무 사이트나 폼 전송으로 로그인된 피해자를 흉내 낸
-    업로드·다운로드 요청을 만들 수 있다.
-    """
-    error_response = check_csrf(request)
-    if error_response is not None:
-        raise StorageAccessDenied("CSRF 검증에 실패했다")
+    auth_user = getattr(request, "auth_user", None)
+    return auth_user.id if auth_user is not None else None
 
 
 class StorageAccessPolicy:
@@ -114,15 +110,21 @@ class StorageAccessPolicy:
         self._resolver = resolver or get_target_resolver()
 
     def authorize_upload(self, request: HttpRequest, target_ref: str) -> None:
-        """업로드는 대상 상태와 무관하게, 로그인한 호출자면 허용한다.
+        """target_ref가 실제로 가리키는 소유자 본인에게만 업로드를 허용한다.
 
-        누가 이 target_ref에 실제로 업로드할 자격이 있는지(예: 본인 Submission인지)는
-        #8이 안다. 여기서는 인증 여부만 본다 — 그 이상의 소유권 판정은 target_ref를
-        실제로 해석할 수 있는 티켓의 몫이다.
+        누가 이 target_ref에 실제로 업로드할 자격이 있는지는 리졸버가 안다 — 예를
+        들어 `submission:<contest_id>:<developer_user_id>:source`는 그 개발자
+        본인만 업로드할 수 있다. 리졸버를 확인하지 않고 인증 여부만 보면, 로그인한
+        아무나 다른 사람의 namespace에 파일을 심을 수 있고, 마감 후 PUBLIC이 되는
+        슬롯이라면 그 파일이 그대로 공개 다운로드된다(#10 리뷰 지적).
         """
-        if not request.user.is_authenticated:
+        caller_id = _authenticated_user_id(request)
+        if caller_id is None:
             raise StorageAccessDenied("로그인이 필요하다")
-        _reject_if_forged_cookie(request)
+
+        state = self._resolver.resolve(target_ref)
+        if state.owner_id is None or state.owner_id != caller_id:
+            raise StorageAccessDenied("이 대상에 업로드할 권한이 없다")
 
     def authorize_download(self, request: HttpRequest, target_ref: str) -> None:
         """대상이 public이면 누구에게나, 아니면 소유자(+추가 열람자)에게만 허용한다."""
@@ -131,14 +133,14 @@ class StorageAccessPolicy:
         if state.visibility is Visibility.PUBLIC:
             return
 
-        if not request.user.is_authenticated:
+        caller_id = _authenticated_user_id(request)
+        if caller_id is None:
             raise StorageAccessDenied("로그인이 필요하다")
-        _reject_if_forged_cookie(request)
 
-        if state.owner_id is not None and state.owner_id == request.user.id:
+        if state.owner_id is not None and state.owner_id == caller_id:
             return
 
-        if request.user.id in state.additional_viewer_ids:
+        if caller_id in state.additional_viewer_ids:
             return
 
         raise StorageAccessDenied("이 대상에 접근할 권한이 없다")

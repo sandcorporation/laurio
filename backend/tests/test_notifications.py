@@ -7,7 +7,7 @@ create_superuser로 만드는 것과 같은 성격), 실제 동작 — 발송되
 엔드포인트를 통해서만 확인한다.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -346,6 +346,87 @@ def test_delayed_scan_re_defers_instead_of_sending_during_quiet_hours(client):
 
     final = client.get(f"{CREATE_URL}/{notification_id}", **_auth_headers()).json()
     assert final["status"] == Notification.Status.SENT
+
+
+@pytest.mark.django_db
+def test_stuck_queued_notification_is_recovered_by_a_later_scan(client):
+    """DEFERRED -> QUEUED 선점 뒤 발송 시도 도중 죽으면(DB 장애 등, 어댑터 예외와는
+    다른 종류의 실패) 그 행은 QUEUED에 멈춘다 — 예전 스캐너는 DEFERRED만 다시
+    주웠으므로 이 행은 영원히 재시도되지 않았다(#10 리뷰 지적: _attempt_dispatch의
+    자기 docstring이 막는다고 주장하던 바로 그 시나리오).
+
+    "죽었다"는 걸 실제로 재현하려면 이 앱의 유일한 시임(HTTP)을 우회해야 하는데,
+    이 파일의 관례대로 그건 픽스처 준비로만 쓴다 — 직접 검증하는 것은 이 상태에서
+    실제로 무슨 일이 일어나는지(다음 스캔이 이 행을 찾아 발송까지 끝내는지)뿐이고,
+    그건 전부 `/api/internal/notifications/dispatch-due` 를 통해서만 확인한다.
+    """
+
+    user = _make_user()
+    stuck_at = datetime(2026, 1, 10, 14, 0, tzinfo=KST)
+    notification = Notification.objects.create(
+        recipient=user,
+        notification_type=NotificationType.DEADLINE_REMINDER,
+        is_transactional=True,
+        is_promotional=False,
+        status=Notification.Status.QUEUED,
+        claimed_at=stuck_at,
+        created_at=stuck_at,
+    )
+    assert notification.dispatches.count() == 0  # 발송 시도 흔적이 전혀 없다 — 죽은 것.
+
+    # 5분보다 짧게 지난 시점에는 아직 "정상적으로 진행 중"으로 보고 건드리지 않는다
+    # (안 그러면 지금 막 즉시발송 경로로 처리 중인 정상 QUEUED까지 이중 발송하게 된다).
+    _freeze(stuck_at + timedelta(minutes=1))
+    too_soon = client.post(DISPATCH_DUE_URL, **_auth_headers())
+    assert too_soon.json()["count"] == 0
+    still_stuck = client.get(f"{CREATE_URL}/{notification.id}", **_auth_headers()).json()
+    assert still_stuck["status"] == Notification.Status.QUEUED
+    assert still_stuck["dispatches"] == []
+
+    # STUCK_QUEUED_THRESHOLD(5분)를 넘기면 다음 스캔이 이 행을 다시 집어 끝까지
+    # 처리한다 — QUEUED에 영원히 갇히지 않는다.
+    _freeze(stuck_at + timedelta(minutes=10))
+    recovery_scan = client.post(DISPATCH_DUE_URL, **_auth_headers())
+    body = recovery_scan.json()
+    assert body["count"] == 1
+    assert body["dispatched_ids"] == [notification.id]
+
+    recovered = client.get(f"{CREATE_URL}/{notification.id}", **_auth_headers()).json()
+    assert recovered["status"] == Notification.Status.SENT
+    assert len(recovered["dispatches"]) >= 1
+
+    # 재스캔해도 더 처리할 것이 없다 — 회복된 행은 다시 잡히지 않는다.
+    rescan = client.post(DISPATCH_DUE_URL, **_auth_headers())
+    assert rescan.json()["count"] == 0
+
+
+@pytest.mark.django_db
+def test_stuck_queued_recovery_re_defers_instead_of_sending_during_quiet_hours(client):
+    """멈춘 QUEUED를 재선점하는 경로도, DEFERRED 재선점 경로와 똑같이 발송 직전에
+    다시 야간인지 확인해야 한다 — 재선점 시점이 마침 야간이면 그대로 내보내지 않고
+    다음 날 08시로 연기한다(ADR-0010)."""
+
+    user = _make_user()
+    stuck_at = datetime(2026, 1, 10, 14, 0, tzinfo=KST)
+    notification = Notification.objects.create(
+        recipient=user,
+        notification_type=NotificationType.DEADLINE_REMINDER,
+        is_transactional=True,
+        is_promotional=False,
+        status=Notification.Status.QUEUED,
+        claimed_at=stuck_at,
+        created_at=stuck_at,
+    )
+
+    # 5분 이상 지났고, 지금은 야간(23:00)이다.
+    _freeze(datetime(2026, 1, 10, 23, 0, tzinfo=KST))
+    scan = client.post(DISPATCH_DUE_URL, **_auth_headers())
+    assert scan.json()["count"] == 0  # 재연기됐을 뿐, 발송되지 않았다.
+
+    deferred = client.get(f"{CREATE_URL}/{notification.id}", **_auth_headers()).json()
+    assert deferred["status"] == Notification.Status.DEFERRED
+    assert deferred["dispatches"] == []
+    assert deferred["scheduled_for"] is not None
 
 
 @pytest.mark.django_db

@@ -74,14 +74,25 @@ class Notification(models.Model):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.QUEUED)
     # 야간 연기일 때만 채워진다 — "다음 날 08시"라는 확정된 발송 예정 시각.
     scheduled_for = models.DateTimeField(null=True, blank=True)
+    # QUEUED로 (재)진입한 시각(#10 리뷰 지적). DEFERRED->QUEUED 선점과 같은 조건부
+    # UPDATE 안에서 함께 채워진다(core.transitions.claim_transition 의 extra_fields).
+    # 이 필드가 있어야 "선점은 됐는데 발송 시도 도중 예외로 멈춘" 행을 야간 큐
+    # 스캐너가 다시 찾아 재시도할 수 있다 — DEFERRED만 다시 줍던 예전 스캐너는 이런
+    # 행을 영원히 놓쳤다. Django의 auto_now는 쓰지 않는다 — auto_now는 실제 벽시계를
+    # 쓰고 이 프로젝트의 주입 가능한 Clock을 우회하므로, 테스트가 시각을 고정해도
+    # 이 필드만 어긋난다.
+    claimed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField()
 
     class Meta:
         verbose_name = "알림"
         verbose_name_plural = "알림"
-        # 야간 큐 스캔의 WHERE 절(status='deferred' AND scheduled_for<=...)이 타는 인덱스.
         indexes = [
-            models.Index(fields=["status", "scheduled_for"], name="notif_status_sched_idx")
+            # 야간 큐 스캔의 WHERE 절(status='deferred' AND scheduled_for<=...)이 타는 인덱스.
+            models.Index(fields=["status", "scheduled_for"], name="notif_status_sched_idx"),
+            # QUEUED에 멈춰 있는 행을 찾는 WHERE 절(status='queued' AND claimed_at<=...)
+            # 이 타는 인덱스.
+            models.Index(fields=["status", "claimed_at"], name="notif_status_claimed_idx"),
         ]
 
     def __str__(self) -> str:  # pragma: no cover - admin 편의용

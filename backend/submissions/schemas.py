@@ -19,7 +19,9 @@ class EvidenceOut(Schema):
 class RequirementResponseIn(Schema):
     requirement_id: int
     is_met: bool = False
-    note: str = ""
+    # RequirementResponse.note와 같은 길이(#10 리뷰 지적) — 스키마가 막지 않으면
+    # DB CHECK(varchar(1000))이 대신 걸려 422 대신 500(DataError)이 난다.
+    note: str = Field(default="", max_length=1000)
     evidence: list[EvidenceIn] = []
 
 
@@ -34,10 +36,13 @@ class RequirementResponseOut(Schema):
 
 
 class SubmissionIn(Schema):
+    # 아래 세 max_length는 각각 submissions.models.Submission의 같은 필드와
+    # 길이를 맞춘다(#10 리뷰 지적) — 스키마가 막지 않으면 DB CHECK가 대신 걸려
+    # 422 대신 500(DataError)이 난다.
     source_object_key: str = Field(max_length=600)
-    demo_video_object_key: str | None = None
-    demo_url: str | None = None
-    test_account: str | None = None
+    demo_video_object_key: str | None = Field(default=None, max_length=600)
+    demo_url: str | None = Field(default=None, max_length=2000)
+    test_account: str | None = Field(default=None, max_length=500)
     requirement_responses: list[RequirementResponseIn] = []
 
 

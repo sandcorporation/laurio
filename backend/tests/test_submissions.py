@@ -15,7 +15,6 @@ from datetime import timedelta
 
 import pytest
 from django.conf import settings
-from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from contests.models import Category, Contest, DeliverableType
@@ -224,6 +223,55 @@ def test_developer_can_submit_with_source_only(client, category, landing_type):
     assert body["completion"]["has_demo_video"] is False
     assert body["completion"]["has_demo_url"] is False
     assert body["completion"]["has_test_account"] is False
+
+
+@pytest.mark.django_db
+def test_oversized_test_account_is_rejected_with_422_not_500(client, category, landing_type):
+    """스키마가 model의 CharField 길이를 그대로 반영하지 않으면 DB CHECK가 대신
+    걸려 422 대신 500(DataError)이 난다(#10 리뷰 지적 재현: varchar(500) 초과)."""
+
+    _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+
+    response = _submit(
+        client,
+        dev["access"],
+        contest["id"],
+        {
+            "source_object_key": _source_object_key(contest["id"], dev["user_id"]),
+            "test_account": "x" * 5000,
+        },
+    )
+
+    assert response.status_code == 422
+    assert Submission.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_oversized_requirement_note_is_rejected_with_422_not_500(client, category, landing_type):
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        requirements=[{"text": "로그인 기능", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+
+    response = _submit(
+        client,
+        dev["access"],
+        contest["id"],
+        {
+            "source_object_key": _source_object_key(contest["id"], dev["user_id"]),
+            "requirement_responses": [
+                {"requirement_id": requirement_id, "is_met": True, "note": "x" * 5000}
+            ],
+        },
+    )
+
+    assert response.status_code == 422
+    assert Submission.objects.count() == 0
 
 
 # --- Verification 필요 (ADR-0011) ---------------------------------------------
@@ -680,11 +728,18 @@ def test_owner_can_view_own_source(client, category, landing_type):
 
 
 @pytest.mark.django_db
-def test_after_deadline_demo_is_public_but_source_stays_hidden(client, category, landing_type):
-    """ADR-0014: 마감 후 데모·영상은 전면 공개되지만 소스는 계속 비공개다."""
+def test_after_deadline_demo_is_public_but_source_and_test_account_stay_hidden(
+    client, category, landing_type
+):
+    """ADR-0014: 마감 후 데모·영상은 전면 공개되지만 소스는 계속 비공개다.
+
+    test_account는 데모·영상에 딸린 로그인 정보다 — ADR-0014의 "마감 후 공개" 칸에는
+    데모·영상만 있고 test_account는 없다. 이걸 함께 공개하면 데모를 잠가둔 의미가
+    없어진다(#10 리뷰 지적).
+    """
 
     deadline = timezone.now() + timedelta(hours=1)
-    _sponsor, contest = _publish_contest(
+    sponsor, contest = _publish_contest(
         client, category=category, deliverable_type=landing_type, deadline_at=deadline
     )
     dev = _verified_user(client, "dev-1", "dev-ci-1")
@@ -694,7 +749,11 @@ def test_after_deadline_demo_is_public_but_source_stays_hidden(client, category,
         client,
         dev["access"],
         contest["id"],
-        {"source_object_key": source_key, "demo_video_object_key": demo_key},
+        {
+            "source_object_key": source_key,
+            "demo_video_object_key": demo_key,
+            "test_account": "demo-login/demo-password",
+        },
     )
     submission_id = created.json()["id"]
 
@@ -711,10 +770,26 @@ def test_after_deadline_demo_is_public_but_source_stays_hidden(client, category,
     body = response.json()
     assert body["demo_video_object_key"] == demo_key
     assert body["source_object_key"] is None
+    assert body["test_account"] is None
 
     anon_response = client.get(f"{SUBMISSIONS_URL}/{submission_id}")
     assert anon_response.status_code == 200
-    assert anon_response.json()["source_object_key"] is None
+    anon_body = anon_response.json()
+    assert anon_body["source_object_key"] is None
+    assert anon_body["test_account"] is None
+    assert anon_body["demo_video_object_key"] == demo_key
+
+    # Owner와 Sponsor는 마감 후에도 test_account를 계속 볼 수 있다 — 숨기는 대상은
+    # "낯선 사람"이지 정당한 당사자가 아니다.
+    owner_response = client.get(
+        f"{SUBMISSIONS_URL}/{submission_id}", **_auth_header(dev["access"])
+    )
+    assert owner_response.json()["test_account"] == "demo-login/demo-password"
+
+    sponsor_response = client.get(
+        f"{SUBMISSIONS_URL}/{submission_id}", **_auth_header(sponsor["access"])
+    )
+    assert sponsor_response.json()["test_account"] == "demo-login/demo-password"
 
 
 @pytest.mark.django_db
@@ -759,19 +834,14 @@ def test_get_my_submission_after_creating_one_returns_it_with_source(
 # --- STORAGE_TARGET_RESOLVER 실배선 (실제 presigned URL 발급까지) ------------------
 #
 # 위 테스트들은 Submission API 자체의 가시성 판정(파이썬 레벨)을 검증한다. 아래는
-# 그와 별개로 storage 앱의 presigned 다운로드 엔드포인트가 실제로
+# 그와 별개로 storage 앱의 presigned 업로드·다운로드 엔드포인트가 실제로
 # `submissions.resolvers.SubmissionTargetStateResolver`를 통해 같은 결론에
 # 도달하는지 — 즉 STORAGE_TARGET_RESOLVER 배선 자체가 살아있는지 — 확인한다.
 #
-# storage.policy는 아직 세션 인증(Django `request.user`)을 쓴다(#6 문서에 명시된
-# 대로, JWT로의 교체는 이 티켓 범위 밖이다). 그래서 같은 Client에 JWT 헤더(Submission
-# API용)와 세션 로그인(storage API용)을 동시에 실어, 같은 User가 양쪽에서 같은
-# 사람으로 식별되는지를 확인한다.
-
-
-def _force_login_same_user(client, user_id: int):
-    user = get_user_model().objects.get(id=user_id)
-    client.force_login(user)
+# storage.policy는 이 플랫폼의 다른 모든 API와 같은 인증(JWT, `Authorization:
+# Bearer`)을 쓴다(#10 리뷰 지적 — Django 세션은 이 플랫폼 어디에서도 만들어지지
+# 않으므로 `force_login`은 실제 클라이언트가 밟을 수 없는 경로였다). 그래서 여기서도
+# `_verified_user`가 이미 돌려주는 access token을 그대로 storage 호출에 싣는다.
 
 
 @pytest.mark.django_db
@@ -779,13 +849,13 @@ def test_resolver_wiring_grants_source_download_to_owner_only(client, category, 
     sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
     dev = _verified_user(client, "dev-1", "dev-ci-1")
 
-    # 실제 presigned 업로드 흐름 그대로: 로그인한 사람이면 누구든 업로드 URL 자체는
-    # 받을 수 있다(#6 authorize_upload는 인증 여부만 본다) — 여기서는 소유자로 받는다.
-    _force_login_same_user(client, dev["user_id"])
+    # 실제 presigned 업로드 흐름 그대로: 소유자 본인만 업로드 URL을 받을 수 있다
+    # (#10 리뷰 지적 — authorize_upload가 리졸버로 소유권을 확인한다).
     upload = client.post(
         "/api/storage/uploads",
         data={"target_ref": f"submission:{contest['id']}:{dev['user_id']}:source"},
         content_type="application/json",
+        **_auth_header(dev["access"]),
     )
     assert upload.status_code == 200
     object_key = upload.json()["object_key"]
@@ -800,11 +870,11 @@ def test_resolver_wiring_grants_source_download_to_owner_only(client, category, 
             "object_key": object_key,
         },
         content_type="application/json",
+        **_auth_header(dev["access"]),
     )
     assert download.status_code == 200
 
     # Sponsor는 같은 소스를 절대 받을 수 없다 — Award 전까지(이 티켓 범위에서는 항상).
-    _force_login_same_user(client, sponsor["user_id"])
     sponsor_download = client.post(
         "/api/storage/downloads",
         data={
@@ -812,8 +882,31 @@ def test_resolver_wiring_grants_source_download_to_owner_only(client, category, 
             "object_key": object_key,
         },
         content_type="application/json",
+        **_auth_header(sponsor["access"]),
     )
     assert sponsor_download.status_code == 403
+
+
+@pytest.mark.django_db
+def test_stranger_cannot_upload_into_someone_elses_submission_namespace(
+    client, category, landing_type
+):
+    """로그인했다고 아무 target_ref에나 업로드할 수 있는 게 아니다(#10 리뷰 지적) —
+    그렇지 않으면 남의 namespace에 파일을 심어, 그게 나중에(마감 후) 공개로 바뀌는
+    슬롯이라면 공격자의 파일이 그대로 공개 다운로드된다."""
+
+    _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+    attacker = _verified_user(client, "dev-2", "dev-ci-2")
+
+    response = client.post(
+        "/api/storage/uploads",
+        data={"target_ref": f"submission:{contest['id']}:{dev['user_id']}:demo-video"},
+        content_type="application/json",
+        **_auth_header(attacker["access"]),
+    )
+
+    assert response.status_code == 403
 
 
 @pytest.mark.django_db
@@ -827,23 +920,23 @@ def test_resolver_wiring_lets_sponsor_but_not_other_developer_download_demo_befo
     demo_target_ref = f"submission:{contest['id']}:{dev['user_id']}:demo-video"
     demo_object_key = f"{demo_target_ref}/{uuid.uuid4().hex}"
 
-    def _download_as(user_id):
-        _force_login_same_user(client, user_id)
+    def _download_as(access):
         return client.post(
             "/api/storage/downloads",
             data={"target_ref": demo_target_ref, "object_key": demo_object_key},
             content_type="application/json",
+            **_auth_header(access),
         )
 
-    assert _download_as(dev["user_id"]).status_code == 200
-    assert _download_as(sponsor["user_id"]).status_code == 200
-    assert _download_as(other_dev["user_id"]).status_code == 403
+    assert _download_as(dev["access"]).status_code == 200
+    assert _download_as(sponsor["access"]).status_code == 200
+    assert _download_as(other_dev["access"]).status_code == 403
 
 
 @pytest.mark.django_db
 def test_resolver_wiring_opens_demo_to_everyone_after_deadline(client, category, landing_type):
     deadline = timezone.now() + timedelta(hours=1)
-    sponsor, contest = _publish_contest(
+    _sponsor, contest = _publish_contest(
         client, category=category, deliverable_type=landing_type, deadline_at=deadline
     )
     dev = _verified_user(client, "dev-1", "dev-ci-1")

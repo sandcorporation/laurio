@@ -204,9 +204,13 @@ def _serialize(
 
     # 소스는 소유자 본인 외에는 절대 나오지 않는다(ADR-0014) — Sponsor는 Award
     # 이후에만 열리는데, 그 개방은 #13/#14의 범위다. 데모·영상은 진행 중엔 본인·
-    # Sponsor, 마감 후엔 전면 공개.
+    # Sponsor, 마감 후엔 전면 공개(ADR-0014의 "데모·영상" 칸). test_account는 그
+    # 칸에 없다 — 마감 후 공개되는 건 데모·영상뿐이고, 그걸 들여다볼 로그인 정보까지
+    # 공개 범위에 들어가지는 않는다(#10 리뷰 지적). 그래서 test_account는 진행
+    # 중이든 마감 후든 항상 본인·Sponsor로만 좁힌다.
     show_source = is_owner
     show_demo = is_owner or is_sponsor or past_deadline
+    show_test_account = is_owner or is_sponsor
 
     return SubmissionOut(
         id=submission.id,
@@ -216,7 +220,7 @@ def _serialize(
         source_object_key=submission.source_object_key if show_source else None,
         demo_video_object_key=(submission.demo_video_object_key or None) if show_demo else None,
         demo_url=(submission.demo_url or None) if show_demo else None,
-        test_account=(submission.test_account or None) if show_demo else None,
+        test_account=(submission.test_account or None) if show_test_account else None,
         requirement_responses=response_outs,
         completion=completion,
         created_at=submission.created_at,

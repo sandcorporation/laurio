@@ -35,6 +35,16 @@ def _env_bool(name: str, default: bool) -> bool:
 
 DEBUG = _env_bool("DJANGO_DEBUG", True)
 
+# DEBUG는 Django 자체의 동작(에러 페이지, 정적 파일 서빙)만 결정한다. "이것이 진짜
+# 운영 배포인가"라는 별개의 질문에는 답하지 않는다 — CI가 그 증거다: DEBUG=false로
+# manage.py check 가 실제 배포와 같은 코드 경로를 타는지 확인하고 싶지만, 실제
+# 운영 배포는 아니라서 Fake 어댑터로 돌아야 한다. 이 둘을 같은 스위치(DEBUG)로
+# 묶으면 "DEBUG=false인데 fake는 위험하다"는 안전장치가 CI에서도 그대로 터진다.
+# 그래서 "정말 운영 배포인가"는 별도 값으로 뗀다 — 미설정(dev·CI 포함)은 항상
+# False이고, staging/prod compose(#23)만 명시적으로 production을 준다.
+LAURIO_DEPLOYMENT_TARGET = _env("LAURIO_DEPLOYMENT_TARGET", "development")
+IS_PRODUCTION_DEPLOYMENT = LAURIO_DEPLOYMENT_TARGET == "production"
+
 _secret_key = os.environ.get("DJANGO_SECRET_KEY") or ""
 if not _secret_key:
     if not DEBUG:
@@ -129,12 +139,15 @@ STORAGE_BACKEND = _env("STORAGE_BACKEND", "fake")
 
 # DJANGO_SECRET_KEY 가드(위)와 같은 이유다. STORAGE_BACKEND 를 잊고 배포하면
 # FakeStorageAdapter가 200과 함께 https://fake-storage.test/... 를 돌려주고, 업로드도
-# 다운로드도 겉보기엔 성공한 채 파일만 소리 없이 사라진다. 배포에서는 아예 못 뜨게 막는다.
-if not DEBUG and STORAGE_BACKEND == "fake":
+# 다운로드도 겉보기엔 성공한 채 파일만 소리 없이 사라진다. 실제 운영 배포에서는 아예
+# 못 뜨게 막는다 — DEBUG가 아니라 LAURIO_DEPLOYMENT_TARGET을 본다. CI는 DEBUG=false로
+# 돌면서도 실제 배포가 아니므로(위 설명) 이 가드에 걸리지 않고 fake로 테스트를 돌릴 수
+# 있어야 한다.
+if IS_PRODUCTION_DEPLOYMENT and STORAGE_BACKEND == "fake":
     raise ImproperlyConfigured(
-        "DJANGO_DEBUG=false 인데 STORAGE_BACKEND 가 fake 다. presigned URL이 200으로 "
-        "발급되면서 파일이 소리 없이 유실된다. 배포 환경에서는 STORAGE_BACKEND=s3 를 "
-        "반드시 설정해야 한다."
+        "LAURIO_DEPLOYMENT_TARGET=production 인데 STORAGE_BACKEND 가 fake 다. presigned "
+        "URL이 200으로 발급되면서 파일이 소리 없이 유실된다. 운영 배포에서는 "
+        "STORAGE_BACKEND=s3 를 반드시 설정해야 한다."
     )
 
 STORAGE_BUCKET = _env("STORAGE_BUCKET", "laurio-dev")
@@ -191,13 +204,25 @@ if not JWT_SIGNING_KEY and not DEBUG:
 ACCESS_TOKEN_TTL = timedelta(minutes=int(_env("ACCESS_TOKEN_TTL_MINUTES", "5")))
 REFRESH_TOKEN_TTL = timedelta(days=int(_env("REFRESH_TOKEN_TTL_DAYS", "14")))
 
-# 소셜 로그인 어댑터 (ADR-0007). dev/test는 fake — 실제 카카오·GitHub·구글 API를
-# 부르지 않고 결정적으로 동작한다. prod는 SOCIAL_AUTH_MODE=real 로 실제 어댑터를 쓴다.
-SOCIAL_AUTH_MODE = _env("SOCIAL_AUTH_MODE", "fake" if DEBUG else "real")
+# 소셜 로그인 어댑터 (ADR-0007). STORAGE_BACKEND와 같은 원칙: 기본값은 DEBUG와
+# 무관하게 항상 fake다 — "어떤 구현체를 쓸지"와 "이게 진짜 운영 배포인지"는 다른
+# 질문이기 때문이다(위 LAURIO_DEPLOYMENT_TARGET 설명 참고). 실제 카카오·GitHub·구글
+# API를 부르려면 SOCIAL_AUTH_MODE=real 을 명시해야 한다 — 운영 배포(#23)가 그렇게 한다.
+SOCIAL_AUTH_MODE = _env("SOCIAL_AUTH_MODE", "fake")
+if IS_PRODUCTION_DEPLOYMENT and SOCIAL_AUTH_MODE == "fake":
+    raise ImproperlyConfigured(
+        "LAURIO_DEPLOYMENT_TARGET=production 인데 SOCIAL_AUTH_MODE 가 fake 다. "
+        "운영 배포에서는 SOCIAL_AUTH_MODE=real 을 반드시 설정해야 한다."
+    )
 
 # --- Verification (ADR-0011, ADR-0007) ------------------------------------
-# 본인확인 어댑터도 같은 원칙: dev/test는 fake로 바인딩된다.
-VERIFICATION_ADAPTER_MODE = _env("VERIFICATION_ADAPTER_MODE", "fake" if DEBUG else "real")
+# 본인확인 어댑터도 같은 원칙: 기본값은 항상 fake이고, 운영 배포만 real을 명시한다.
+VERIFICATION_ADAPTER_MODE = _env("VERIFICATION_ADAPTER_MODE", "fake")
+if IS_PRODUCTION_DEPLOYMENT and VERIFICATION_ADAPTER_MODE == "fake":
+    raise ImproperlyConfigured(
+        "LAURIO_DEPLOYMENT_TARGET=production 인데 VERIFICATION_ADAPTER_MODE 가 fake 다. "
+        "운영 배포에서는 VERIFICATION_ADAPTER_MODE=real 을 반드시 설정해야 한다."
+    )
 
 # 실명·생년월일·CI/DI를 저장 시 암호화하는 대칭키(Fernet). SECRET_KEY와 마찬가지로
 # 배포 환경에서는 반드시 주입해야 하고, dev는 저장소에 공개된 고정 키로 대체한다.
@@ -212,10 +237,15 @@ if not _verification_key:
 VERIFICATION_ENCRYPTION_KEY = _verification_key
 
 # --- 결제 · Escrow 예치 (#9, ADR-0007) --------------------------------------
-# PG 어댑터도 같은 원칙: dev/test는 Fake PG로 바인딩되어 웹훅 재전송·타임아웃·순서
-# 뒤바뀜을 네트워크 없이 결정적으로 주입할 수 있다. prod는 PAYMENT_ADAPTER_MODE=real
-# 로 실제 토스 연동을 쓴다(#23의 범위).
-PAYMENT_ADAPTER_MODE = _env("PAYMENT_ADAPTER_MODE", "fake" if DEBUG else "real")
+# PG 어댑터도 같은 원칙: 기본값은 항상 Fake PG다 — 웹훅 재전송·타임아웃·순서 뒤바뀜을
+# 네트워크 없이 결정적으로 주입할 수 있다. 운영 배포만 PAYMENT_ADAPTER_MODE=real 로
+# 실제 토스 연동을 명시한다(#23의 범위).
+PAYMENT_ADAPTER_MODE = _env("PAYMENT_ADAPTER_MODE", "fake")
+if IS_PRODUCTION_DEPLOYMENT and PAYMENT_ADAPTER_MODE == "fake":
+    raise ImproperlyConfigured(
+        "LAURIO_DEPLOYMENT_TARGET=production 인데 PAYMENT_ADAPTER_MODE 가 fake 다. 운영 "
+        "배포에서는 PAYMENT_ADAPTER_MODE=real 을 반드시 설정해야 한다."
+    )
 
 # Sponsor가 Contest를 개최할 때 Prize와 별도로 결제하는 개최 등록비(원 단위 정수,
 # ADR-0004). 배포 없이 조정할 수 있는 DeliverableType.minimum_prize와 달리 이건
