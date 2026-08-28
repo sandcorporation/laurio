@@ -1,0 +1,27 @@
+[project]
+name = "laurio-backend"
+version = "0.1.0"
+description = "Laurio — 공개 공모전 플랫폼 backend"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "django>=5.2,<6.0",
+    "django-ninja>=1.3",
+    "psycopg[binary]>=3.2",
+    "python-dotenv>=1.2.3",
+]
+
+[tool.uv]
+# 배포 가능한 패키지가 아니라 의존성 묶음이다. 빌드 백엔드가 필요 없다.
+package = false
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-django>=4.9",
+]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+python_files = ["test_*.py"]
+testpaths = ["tests"]
+addopts = "-q"

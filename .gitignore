@@ -1,9 +1,11 @@
-# 시크릿 — 절대 커밋하지 않는다
+# 시크릿 — 절대 커밋하지 않는다.
+# 부정 규칙은 반드시 마지막에 둔다. 뒤에 오는 무시 규칙이 이기기 때문이다.
 .env
 .env.*
-!.env.example
 */.env
 */.env.*
+!.env.example
+!*/.env.example
 
 # Python
 __pycache__/
@@ -18,10 +20,10 @@ htmlcov/
 .coverage
 .coverage.*
 
-# Django
+# Django — 앵커를 붙이지 않는다. STATIC_ROOT 는 backend/staticfiles 다.
 *.sqlite3
-/media/
-/staticfiles/
+media/
+staticfiles/
 
 # 도구·에디터
 .idea/
