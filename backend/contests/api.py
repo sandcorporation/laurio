@@ -16,6 +16,7 @@ from ninja.pagination import PageNumberPagination, paginate
 from accounts.middleware import jwt_auth
 from accounts.models import SponsorProfile
 from accounts.sanitize import sanitize_free_text
+from payments.models import Payment
 from verification.models import Verification
 
 from .models import Category, Contest, DeliverableType, Requirement
@@ -23,6 +24,7 @@ from .schemas import (
     CategoryOut,
     ContestCreateIn,
     ContestOut,
+    ContestReopenIn,
     DeliverableTypeOut,
     QuoteIn,
     QuoteOut,
@@ -58,6 +60,7 @@ def _serialize_contest(contest: Contest) -> ContestOut:
             RequirementOut(id=r.id, text=r.text, grade=r.grade, order=r.order)
             for r in contest.requirements.all()
         ],
+        source_contest_id=contest.source_contest_id,
         created_at=contest.created_at,
     )
 
@@ -194,3 +197,84 @@ def get_contest(request: HttpRequest, contest_id: int):
             raise HttpError(404, "Contest를 찾을 수 없습니다.")
 
     return _serialize_contest(contest)
+
+
+@router.post("/contests/{contest_id}/reopen", response=ContestOut, auth=jwt_auth)
+def reopen_contest(request: HttpRequest, contest_id: int, payload: ContestReopenIn):
+    """유찰(참여자 0명 전액 환불, #17)된 Contest를 복제해 새 Contest를 draft로 만든다
+    (#22, ADR-0001).
+
+    요구사항(`Requirement`, 이 프로젝트의 "체크리스트")·`Category`·`DeliverableType`
+    선택·제목·설명은 원본에서 그대로 복제된다 — Prize와 마감기한만 새로 받는다. 이
+    코드베이스에는 아직 Contest에 별도의 Attachment 모델이 없다(그런 필드가 추가되면
+    이 복제 로직도 함께 손봐야 한다).
+
+    새 Contest는 원본과 완전히 별개의 행이다 — `ledger_id`가 새로 발급되고(모델
+    필드의 `default=uuid.uuid4`), `source_contest`만 원본을 가리킨다. 그래서 결제·
+    제출·원장 이력이 원본과 절대 섞이지 않는다: 이 Contest에 새로 붙는 `Payment`·
+    `Submission`·`JournalEntry`는 전부 이 새 `id`/`ledger_id`를 통해서만 연결된다.
+
+    "유찰"의 판정 근거는 마감(CLOSED) + 전액 환불(REFUNDED) 완료다 — 참여자가
+    한 명이라도 있었으면 #17이 절대 환불하지 않으므로(ADR-0004), REFUNDED
+    Payment의 존재가 곧 "참여자 0명으로 유찰됐다"는 가장 직접적인 증거다. 새로
+    만들어진 Contest는 다른 draft Contest와 똑같이 결제를 다시 거쳐야 published로
+    간다 — 재개최라고 그 경로를 단축하지 않는다.
+    """
+
+    try:
+        original = (
+            Contest.objects.select_related("category", "sponsor")
+            .prefetch_related("deliverable_types", "requirements")
+            .get(id=contest_id)
+        )
+    except Contest.DoesNotExist as exc:
+        raise HttpError(404, "Contest를 찾을 수 없습니다.") from exc
+
+    if original.sponsor.user_id != request.auth_user.id:
+        raise HttpError(403, "본인이 개최한 Contest만 재개최할 수 있습니다.")
+
+    if original.status != Contest.Status.CLOSED:
+        raise HttpError(409, "마감된 Contest만 재개최할 수 있습니다.")
+
+    if not Payment.objects.filter(contest=original, status=Payment.Status.REFUNDED).exists():
+        # CLOSED이지만 환불되지 않았다 — 참여자가 있어 정상적으로 마감됐거나
+        # (Escrow: "참가자가 한 명이라도 있으면 Sponsor에게 되돌아가지 않는다"),
+        # 아직 환불 스캔(#17)이 돌지 않았다. 어느 쪽이든 재개최 대상이 아니다.
+        raise HttpError(409, "전액 환불된(유찰) Contest만 재개최할 수 있습니다.")
+
+    if not Verification.objects.filter(
+        user=request.auth_user, status=Verification.Status.VERIFIED
+    ).exists():
+        raise HttpError(403, "본인확인을 완료해야 Contest를 개최할 수 있습니다.")
+
+    minimum_total = sum(dt.minimum_prize for dt in original.deliverable_types.all())
+
+    with transaction.atomic():
+        new_contest = Contest.objects.create(
+            sponsor=original.sponsor,
+            title=original.title,
+            category=original.category,
+            description=original.description,
+            prize=payload.prize,
+            deadline_at=payload.deadline_at,
+            status=Contest.Status.DRAFT,
+            source_contest=original,
+            required_minimum_prize=minimum_total,
+            is_underfunded=payload.prize < minimum_total,
+        )
+        new_contest.deliverable_types.set(original.deliverable_types.all())
+
+        Requirement.objects.bulk_create(
+            [
+                Requirement(
+                    contest=new_contest,
+                    text=requirement.text,
+                    grade=requirement.grade,
+                    order=requirement.order,
+                )
+                for requirement in original.requirements.all()
+            ]
+        )
+
+    new_contest.refresh_from_db()
+    return _serialize_contest(new_contest)
