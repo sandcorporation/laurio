@@ -76,6 +76,7 @@ INSTALLED_APPS = [
     # 오탈자를 요청 시점 500 대신 `manage.py check`/부팅 시점에 잡기 위해서만 등록한다.
     "storage",
     "submissions",
+    "scoring",
 ]
 
 MIDDLEWARE = [
@@ -309,4 +310,24 @@ NOTIFICATION_FAKE_FAILING_CHANNELS = [
 # 이 티켓의 핵심 방어선이다.
 NOTIFICATION_FAKE_RAISING_CHANNELS = [
     c for c in _env("NOTIFICATION_FAKE_RAISING_CHANNELS", "").split(",") if c
+]
+
+# --- AI 채점 어댑터 (#12, ADR-0006, ADR-0007, ADR-0014) -----------------------------
+#
+# PAYMENT_ADAPTER_MODE·STORAGE_BACKEND와 같은 원칙: 기본값은 항상 fake다. dev/CI는
+# 네트워크 없이 결정적으로 채점 플로우 전체를 돈다. 운영 배포만 LLM_ADAPTER_MODE에
+# 실제 어댑터의 dotted path(또는 향후 등록될 별칭)를 명시한다.
+LLM_ADAPTER_MODE = _env("LLM_ADAPTER_MODE", "fake")
+if IS_PRODUCTION_DEPLOYMENT and LLM_ADAPTER_MODE == "fake":
+    raise ImproperlyConfigured(
+        "LAURIO_DEPLOYMENT_TARGET=production 인데 LLM_ADAPTER_MODE 가 fake 다. Score가 "
+        "실제 채점 없이 만들어지면 Distribution 대상 판정이 통째로 무효가 된다. 운영 "
+        "배포에서는 실제 LLM 어댑터를 반드시 설정해야 한다."
+    )
+
+# 테스트가 override_settings로 특정 submission_id의 채점 실패를 흉내낼 때 쓴다
+# (NOTIFICATION_FAKE_RAISING_CHANNELS와 같은 원칙 — 어댑터가 예외로 죽는 경로를
+# 재현해 재시도 로직을 검증한다).
+LLM_FAKE_RAISING_SUBMISSION_IDS = [
+    int(x) for x in _env("LLM_FAKE_RAISING_SUBMISSION_IDS", "").split(",") if x
 ]

@@ -15,6 +15,14 @@ from .base import PresignedDownload, PresignedUpload
 class FakeStorageAdapter:
     base_url = "https://fake-storage.test/laurio-dev"
 
+    # 클래스 레벨(인스턴스 아님) — get_storage_adapter()가 호출마다 새 인스턴스를
+    # 만들기 때문에, 한 요청(업로드 시뮬레이션)에서 쓴 바이트가 다른 요청(채점 스캔)
+    # 에서도 보이려면 인스턴스를 넘어 프로세스 수명 동안 유지되는 저장소가 필요하다.
+    # 실제 업로드는 여전히 클라이언트가 presigned URL로 스토리지에 직접 하므로
+    # (ADR-0005) 이 앱은 바이트를 중계하지 않는다 — `write_object`는 테스트가 "이미
+    # 업로드되어 있다"는 전제 상태를 준비하기 위한 것으로 FakeStorageAdapter 전용이다.
+    _store: dict[str, bytes] = {}
+
     def presign_upload(
         self,
         object_key: str,
@@ -51,3 +59,10 @@ class FakeStorageAdapter:
             "&X-Fake-Response-Content-Disposition=attachment"
         )
         return PresignedDownload(url=url, object_key=object_key, expires_at=expires_at)
+
+    def read_object(self, object_key: str) -> bytes | None:
+        return self._store.get(object_key)
+
+    def write_object(self, object_key: str, content: bytes) -> None:
+        """테스트 전용 — 실제 업로드(presigned PUT)를 흉내내 미리 바이트를 채운다."""
+        self._store[object_key] = content

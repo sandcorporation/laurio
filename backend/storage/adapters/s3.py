@@ -3,6 +3,10 @@
 ADR-0005: 버킷은 영구히 private이다. 이 클래스는 put_object_acl·copy_object 같이
 공개 전환에 쓰일 수 있는 호출을 의도적으로 두지 않는다. presigned PUT/GET URL
 발급만 한다 — 앱은 파일 바이트를 절대 거치지 않는다.
+
+`read_object`(#12)만 예외다 — get_object를 직접 호출해 바이트를 읽는다. ACL·정책을
+전혀 건드리지 않으므로(버킷은 계속 private) "공개 전환"과는 다른 성격이며, AI 채점이
+서버 프로세스 자신의 자격증명으로 소스코드를 읽는 유일한 경로다.
 """
 
 from __future__ import annotations
@@ -12,6 +16,7 @@ from functools import lru_cache
 
 import boto3
 from botocore.client import BaseClient, Config
+from botocore.exceptions import ClientError
 from django.conf import settings
 
 from .base import PresignedDownload, PresignedUpload
@@ -95,3 +100,13 @@ class S3StorageAdapter:
         )
         expires_at = datetime.now(timezone.utc) + expires_in
         return PresignedDownload(url=url, object_key=object_key, expires_at=expires_at)
+
+    def read_object(self, object_key: str) -> bytes | None:
+        try:
+            response = self._client.get_object(Bucket=self._bucket, Key=object_key)
+        except ClientError as exc:
+            error_code = exc.response.get("Error", {}).get("Code", "")
+            if error_code in {"NoSuchKey", "404"}:
+                return None
+            raise
+        return response["Body"].read()
