@@ -49,12 +49,15 @@ jobs:
       VERIFICATION_ENCRYPTION_KEY: A0crfksMrBmbSY37jIyOwcPRFpK9rc_eIaNnL89lIfo=
       # #10 리뷰: "어떤 어댑터 구현체를 쓸지"는 DEBUG(=이게 진짜 운영 배포인지)와
       # 다른 질문이다. 기본값이 이미 fake이므로 없어도 같은 값이지만, CI가 반드시
-      # fake로 돈다는 것을 여기 명시적으로 남긴다 — 운영 배포(#23)만 real로 바꾼다.
+      # fake로 돈다는 것을 여기 명시적으로 남긴다 — staging/production 배포(#23)만
+      # real(또는 실제 어댑터의 dotted path)로 바꾼다.
       STORAGE_BACKEND: fake
       SOCIAL_AUTH_MODE: fake
       VERIFICATION_ADAPTER_MODE: fake
       PAYMENT_ADAPTER_MODE: fake
       PAYOUT_ADAPTER_MODE: fake
+      LLM_ADAPTER_MODE: fake
+      LLM_REQUIREMENT_CHAT_ADAPTER_MODE: fake
 
     steps:
       - uses: actions/checkout@v4
@@ -68,8 +71,11 @@ jobs:
         working-directory: backend
         run: uv sync --locked
 
-      # --deploy 는 프로덕션 설정이 생기는 티켓 22(#23)에서 켠다. 지금 켜면
-      # HSTS·SSL 리다이렉트·보안 쿠키 경고가 매번 떠서 검사가 소음이 된다.
+      # --deploy 는 이 잡(LAURIO_DEPLOYMENT_TARGET 미설정 = "development")에는 켜지
+      # 않는다 — HSTS·SSL 리다이렉트·secure 쿠키는 config/settings.py에서 production
+      # 에만 켜지도록 설계했으므로(#23), 여기서 --deploy를 켜면 이 잡의 목적과 무관한
+      # 경고가 매번 뜬다. production 구성이 실제로 --deploy를 통과하는지는 아래
+      # `deploy-check` 잡이 별도로 검증한다.
       - name: Django system checks
         working-directory: backend
         run: uv run python manage.py check --fail-level WARNING
@@ -77,3 +83,66 @@ jobs:
       - name: Run tests
         working-directory: backend
         run: uv run pytest
+
+  deploy-check:
+    # 티켓 01(#1)이 "HSTS·SSL 리다이렉트·보안 쿠키 경고가 매번 떠서 소음이 된다"는
+    # 이유로 미룬 `manage.py check --deploy`를 여기서 켠다(#23). production
+    # 배포에서만 요구되는 하드닝(config/settings.py의 IS_PRODUCTION_DEPLOYMENT
+    # 블록)이라 위 `test` 잡(development)과는 별도 잡으로 분리했다 — 그래야 이
+    # 검사가 걸려도 `test` 잡의 매 커밋 시그널이 이 경고로 오염되지 않는다.
+    #
+    # 여기 쓰는 값은 전부 CI 전용 더미다(`test` 잡의 기존 주석과 같은 원칙) — 다만
+    # DJANGO_SECRET_KEY만은 config/settings.py의 production 강도 가드(50자 이상·
+    # 고유 문자 5종 이상·django-insecure- 접두 아님)를 실제로 통과해야 하므로 그
+    # 조건을 만족하는 무작위스러운 더미 문자열을 쓴다. `manage.py check`는 DB에
+    # 붙지 않으므로 postgres 서비스 컨테이너가 필요 없다.
+    runs-on: ubuntu-latest
+
+    env:
+      LAURIO_DEPLOYMENT_TARGET: production
+      DJANGO_DEBUG: "false"
+      DJANGO_SECRET_KEY: "ci-deploy-check-only-Kx8f3Kq0mN2pR7tYcVbGhJkLdSaWeUiOaXzCvBnMqWeRtYuIoPaSdFgHjKlZxCvB"
+      DJANGO_ALLOWED_HOSTS: "api.laurio.example"
+      POSTGRES_DB: laurio
+      POSTGRES_USER: laurio
+      POSTGRES_PASSWORD: ci-deploy-check-only-password
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "5432"
+      INTERNAL_API_TOKEN: ci-deploy-check-only-internal-token
+      JWT_SIGNING_KEY: ci-deploy-check-only-jwt-signing-key
+      PAYMENT_WEBHOOK_SECRET: ci-deploy-check-only-payment-webhook-secret
+      PAYOUT_WEBHOOK_SECRET: ci-deploy-check-only-payout-webhook-secret
+      VERIFICATION_ENCRYPTION_KEY: A0crfksMrBmbSY37jIyOwcPRFpK9rc_eIaNnL89lIfo=
+      STORAGE_BACKEND: s3
+      STORAGE_BUCKET: laurio-prod
+      STORAGE_ENDPOINT_URL: https://s3.amazonaws.com
+      STORAGE_ACCESS_KEY: ci-deploy-check-only-access-key
+      STORAGE_SECRET_KEY: ci-deploy-check-only-secret-key
+      STORAGE_REGION: us-east-1
+      SOCIAL_AUTH_MODE: real
+      VERIFICATION_ADAPTER_MODE: real
+      PAYMENT_ADAPTER_MODE: real
+      PAYOUT_ADAPTER_MODE: real
+      # 실제 벤더 어댑터는 아직 구현되지 않았다(#23 범위 밖) — "fake가 아니다"라는
+      # 것만 이 검사의 관심사다. 실제 어댑터가 생기면 그 dotted path로 바뀐다.
+      LLM_ADAPTER_MODE: real
+      LLM_REQUIREMENT_CHAT_ADAPTER_MODE: real
+      NOTIFICATION_ALIMTALK_ADAPTER: notifications.adapters.RealAlimtalkAdapter
+      NOTIFICATION_SMS_ADAPTER: notifications.adapters.RealSmsAdapter
+      NOTIFICATION_LMS_ADAPTER: notifications.adapters.RealLmsAdapter
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies from lockfile
+        working-directory: backend
+        run: uv sync --locked
+
+      - name: Django system checks (production, --deploy)
+        working-directory: backend
+        run: uv run python manage.py check --deploy --fail-level WARNING

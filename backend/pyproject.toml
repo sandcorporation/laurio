@@ -14,6 +14,14 @@ dependencies = [
     "python-dotenv>=1.2.3",
     "celery>=5.4",
     "requests>=2.32",
+    # staging/prod 배포용 WSGI 서버(#23). `manage.py runserver`는 Django 자신이 문서화한
+    # 대로 개발 전용이라 dev compose에서만 쓴다.
+    "gunicorn>=23.0.0",
+    # DEBUG=False(staging/prod)에서는 Django 자신이 정적 파일을 서빙하지 않는다 —
+    # 이 저장소에 리버스 프록시(nginx 등)가 아직 없으므로, whitenoise가 WSGI 프로세스
+    # 자신에게서 STATIC_ROOT를 직접 서빙한다. 그게 없으면 ADR-0002가 운영 백오피스로
+    # 지정한 /admin/ 이 CSS/JS 없이 깨진 채로 뜬다(코디네이터 리뷰 지적 #23).
+    "whitenoise>=6.7.0",
 ]
 
 [tool.uv]

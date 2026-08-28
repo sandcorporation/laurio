@@ -1,0 +1,202 @@
+# production 스택 — AWS/Oracle을 타깃으로 한다(#23). staging(compose.staging.yaml)과
+# 별도 파일이라 샌드박스 키·값이 여기 섞여 들어올 길이 없다.
+#
+#   docker compose -f docker/compose.prod.yaml --env-file docker/.env.prod \
+#     up -d --build
+#
+# `docker/.env.prod` 는 `docker/prod.env.example` 을 복사해 채운, 절대 커밋하지 않는
+# 파일이다(.gitignore 의 `.env.*` 규칙). `--env-file` 을 빠뜨리면 아래 `${VAR:?...}`
+# 가드에 걸려 기동이 거부된다.
+#
+# 이 파일은 단일 VM에 docker compose로 그대로 올리는 것도 가능하지만, 실제로는
+# ECS/OKE 등 관리형 오케스트레이터에 같은 환경변수 바인딩만 그대로 옮기는 참조
+# 템플릿으로도 쓸 수 있게 설계했다 — `db` 서비스는 자체 호스팅 옵션일 뿐이고,
+# 관리형 RDS/OCI DB를 쓸 경우 POSTGRES_HOST/POSTGRES_PORT 를 그 엔드포인트로 덮어쓴다.
+#
+# 어댑터 바인딩(ADR-0007, 한눈에 보기용 — 실제 값은 .env.prod):
+#   PG        : FakePGAdapter        -> 토스 "실물"            (PAYMENT_ADAPTER_MODE=real)
+#   지급대행   : FakePayoutAdapter     -> 토스 지급대행 실물      (PAYOUT_ADAPTER_MODE=real)
+#   스토리지   : MinIO                -> 실제 S3/OCI 버킷        (STORAGE_BACKEND=s3)
+#   소셜 로그인 : FakeSocialAdapter     -> 카카오/GitHub/구글 실물 (SOCIAL_AUTH_MODE=real)
+#   본인확인   : FakeVerificationAdapter -> 실제 PASS/NICE 연동   (VERIFICATION_ADAPTER_MODE=real)
+#   LLM 채점   : FakeLLMScoringAdapter  -> 실제 LLM 벤더(dotted path로 지정, 아직 미구현)
+#   알림 채널  : Fake*Adapter           -> 실제 카카오 알림톡/SMS·LMS 벤더(dotted path로
+#               지정, 아직 미구현 — .env.prod에서 반드시 채워야 하는 이유가 이것이다.
+#               구현되지 않은 클래스 이름을 여기 하드코딩하지 않는다)
+# config/settings.py의 IS_DEPLOYED_ENVIRONMENT 가드가 이 중 하나라도 fake로 남으면
+# (dotted path가 가리키는 클래스명이 Fake로 시작해도 마찬가지다) 부팅 자체를 거부한다 —
+# staging과 동일한 가드지만, production은 추가로 IS_PRODUCTION_DEPLOYMENT 하드닝
+# (HSTS·SSL 리다이렉트·secure 쿠키·강한 SECRET_KEY, `manage.py check --deploy`가 검증)
+# 도 함께 켜진다.
+#
+# 스케줄러(ADR-0003): redis 브로커 + celery-worker + celery-beat 세 서비스가 반드시
+# 함께 떠야 한다 — compose.staging.yaml과 같은 이유(core/tasks.py, config/celery.py
+# 참고). 이 셋이 없으면 Distribution/환불/Handover/알림/채점의 시간 기반 전이가
+# 배포 직후부터 조용히 멈춘다(코디네이터 리뷰 지적).
+name: laurio-prod
+
+x-backend-env: &backend-env
+  # --- 배포 타깃 ---
+  # config/settings.py: production은 IS_DEPLOYED_ENVIRONMENT(fake 어댑터 금지)에
+  # 더해 IS_PRODUCTION_DEPLOYMENT 하드닝(HSTS·SSL 리다이렉트·secure 쿠키·강한
+  # SECRET_KEY)까지 적용받는다. `SECURE_PROXY_SSL_HEADER`가 X-Forwarded-Proto
+  # 헤더를 신뢰하므로, 이 스택 앞단에는 반드시 TLS를 종단하는 신뢰할 수 있는
+  # 로드밸런서/리버스 프록시를 둬야 한다 — 아래 backend 서비스의 ports: 를
+  # 127.0.0.1에만 publish하는 이유가 이것이다(호스트 밖에서 직접 그 헤더를 위조해
+  # SECURE_SSL_REDIRECT를 우회하고 secure 쿠키를 평문으로 받아낼 길을 원천적으로
+  # 막는다). 관리형 오케스트레이터(ECS/OKE)로 옮기면 이 값 대신 그 앞단의 보안
+  # 그룹/리스너 규칙이 같은 역할을 해야 한다.
+  LAURIO_DEPLOYMENT_TARGET: production
+  DJANGO_DEBUG: "false"
+  DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?prod DJANGO_SECRET_KEY 를 .env.prod 에 설정하라 — 50자 이상, 고유 문자 5종 이상}
+  DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:?prod DJANGO_ALLOWED_HOSTS 를 .env.prod 에 설정하라}
+
+  POSTGRES_DB: ${POSTGRES_DB:?prod POSTGRES_DB 를 .env.prod 에 설정하라}
+  POSTGRES_USER: ${POSTGRES_USER:?prod POSTGRES_USER 를 .env.prod 에 설정하라}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?prod POSTGRES_PASSWORD 를 .env.prod 에 설정하라}
+  POSTGRES_HOST: ${POSTGRES_HOST:-db}
+  POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+
+  # --- 스토리지 어댑터 (ADR-0005, ADR-0007): 실제 S3/OCI 버킷 ---
+  STORAGE_BACKEND: s3
+  STORAGE_BUCKET: ${STORAGE_BUCKET:?}
+  STORAGE_ENDPOINT_URL: ${STORAGE_ENDPOINT_URL:?}
+  STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:?}
+  STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:?}
+  STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
+
+  # --- Authentication (ADR-0012 — 세 보완책 중 하나. sanitize·CSP는 코드 경로라
+  # 이 compose 파일이 바꿀 수 없고, 여기서는 짧은 액세스 토큰 수명·회전형
+  # 리프레시 토큰이라는 세 번째 보완책의 서명 키만 주입한다) ---
+  JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:?}
+
+  # --- 소셜 로그인 / 본인확인 어댑터 (ADR-0007, ADR-0011) ---
+  SOCIAL_AUTH_MODE: real
+  VERIFICATION_ADAPTER_MODE: real
+  VERIFICATION_ENCRYPTION_KEY: ${VERIFICATION_ENCRYPTION_KEY:?}
+
+  # --- 결제 · Escrow / Payout 어댑터 (ADR-0007, ADR-0008): 토스 "실물" ---
+  PAYMENT_ADAPTER_MODE: real
+  PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:?}
+  PAYOUT_ADAPTER_MODE: real
+  PAYOUT_WEBHOOK_SECRET: ${PAYOUT_WEBHOOK_SECRET:?}
+  TOSS_LIVE_SECRET_KEY: ${TOSS_LIVE_SECRET_KEY:-}
+
+  # --- LLM 채점 · AI grill 어댑터 (ADR-0006/0007/0014) ---
+  # staging과 같은 이유로 정직한 sentinel이다 — 존재하지 않는 클래스를 가리키는 척
+  # 하지 않는다. 실제 벤더 어댑터가 구현되면 그 dotted path로 교체한다.
+  LLM_ADAPTER_MODE: real
+  LLM_REQUIREMENT_CHAT_ADAPTER_MODE: real
+  OPEN_AI_API_KEY: ${OPEN_AI_API_KEY:-}
+
+  # --- 알림 채널 어댑터 (ADR-0007/0009) ---
+  # 코디네이터 리뷰 지적: 존재하지 않는 클래스 이름을 여기 하드코딩하지 않는다 —
+  # 실제 벤더 어댑터의 dotted path를 .env.prod에서 반드시 채워야 한다. staging의
+  # 샌드박스 값과 절대 같은 값을 쓰지 않는다(벤더 계정 자체가 다르다).
+  NOTIFICATION_ALIMTALK_ADAPTER: ${NOTIFICATION_ALIMTALK_ADAPTER:?실제 알림톡 벤더 어댑터의 dotted path를 .env.prod 에 채워라}
+  NOTIFICATION_SMS_ADAPTER: ${NOTIFICATION_SMS_ADAPTER:?실제 SMS 벤더 어댑터의 dotted path를 .env.prod 에 채워라}
+  NOTIFICATION_LMS_ADAPTER: ${NOTIFICATION_LMS_ADAPTER:?실제 LMS 벤더 어댑터의 dotted path를 .env.prod 에 채워라}
+  NOTIFICATION_VENDOR_API_KEY: ${NOTIFICATION_VENDOR_API_KEY:-}
+
+  # --- 내부 인증(스케줄러 틱 외 5개 내부 스캔, ADR-0003) ---
+  # 돈을 움직이는 전이를 발사하는 엔드포인트들이다. staging과 다른 값을 쓴다 — 같은
+  # 토큰이 두 환경에 걸쳐 있으면 한쪽 유출이 곧 양쪽 유출이 된다. celery-worker/
+  # celery-beat만 내부 네트워크(INTERNAL_API_BASE_URL)로 이 엔드포인트들을 부른다는
+  # 전제라, 로드밸런서/리버스 프록시 단에서 `/api/internal/*` 경로를 외부에 노출하지
+  # 않도록 별도로 막아 두는 것을 강력히 권장한다 — backend를 127.0.0.1에만 publish한
+  # 것과 별개로, 그 로드밸런서 자체가 `/api/internal/*`를 전달하지 않게 규칙을 두면
+  # 이중 방어선이 된다.
+  INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?}
+  INTERNAL_API_BASE_URL: http://backend:8000
+
+  # --- Celery (ADR-0003) ---
+  CELERY_BROKER_URL: redis://redis:6379/0
+  CELERY_RESULT_BACKEND: redis://redis:6379/0
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?prod POSTGRES_DB 를 .env.prod 에 설정하라}
+      POSTGRES_USER: ${POSTGRES_USER:?prod POSTGRES_USER 를 .env.prod 에 설정하라}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?prod POSTGRES_PASSWORD 를 .env.prod 에 설정하라}
+    volumes:
+      - laurio-prod-db:/var/lib/postgresql/data
+    healthcheck:
+      test: [
+          "CMD-SHELL",
+          "pg_isready -h 127.0.0.1 -p 5432 -U $${POSTGRES_USER} -d $${POSTGRES_DB}",
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis: # Celery 브로커 + 결과 백엔드(ADR-0003). beat/worker 전용 — 호스트에 공개하지 않는다.
+    image: redis:7-alpine
+    volumes:
+      - laurio-prod-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/backend.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment: *backend-env
+    ports:
+      # 코디네이터 리뷰 지적: 0.0.0.0으로 publish하면 SECURE_PROXY_SSL_HEADER가
+      # 신뢰하는 X-Forwarded-Proto를 인터넷 아무나 위조해 SSL 리다이렉트를 우회하고
+      # secure 쿠키를 평문으로 받아낼 수 있다. 127.0.0.1에만 publish해, 같은 호스트에
+      # 떠 있는 TLS 종단 리버스 프록시(아직 이 저장소에는 없다 — 별도 티켓)만 접근할
+      # 수 있게 막는다. 그 프록시가 없는 상태로 이 스택만 올리면 backend는 호스트
+      # 자신에서만 curl로 확인할 수 있다 — 이게 의도된 동작이다.
+      - "127.0.0.1:${LAURIO_API_PORT:-8000}:8000"
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             python manage.py collectstatic --noinput &&
+             gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 4"
+
+  celery-worker:
+    build:
+      context: ..
+      dockerfile: docker/backend.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    environment: *backend-env
+    command: celery -A config worker --loglevel info
+
+  celery-beat:
+    build:
+      context: ..
+      dockerfile: docker/backend.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    environment: *backend-env
+    command: celery -A config beat --loglevel info
+
+volumes:
+  laurio-prod-db:
+  laurio-prod-redis:
