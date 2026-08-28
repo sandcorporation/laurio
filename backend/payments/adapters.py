@@ -67,6 +67,21 @@ class PGAdapter(Protocol):
         """
         ...
 
+    def refund(self, *, order_id: str, amount: int, simulate: str | None = None) -> str:
+        """이미 승인된 결제를 환불한다. "refunded" | "failed" 를 돌려준다.
+
+        `confirm`과 같은 규율이다 — `PGTimeoutError`를 던질 수 있고, 그 경우 호출자는
+        `query_refund_status`로 실제 결과를 확정해야 한다(#17, ADR-0007).
+        """
+        ...
+
+    def query_refund_status(self, *, order_id: str) -> str:
+        """order_id의 실제 환불 상태를 조회한다. "refunded" | "failed" | "pending" 중 하나.
+
+        `query_status`와 같은 규율의 순수 조회다 — 시나리오 선택 인자를 받지 않는다.
+        """
+        ...
+
 
 class FakePGAdapter:
     """dev/test 전용. 네트워크 없이 결정적으로 동작하며 장애 흐름을 주입할 수 있다.
@@ -89,6 +104,7 @@ class FakePGAdapter:
 
     def __init__(self) -> None:
         self._final_status: dict[str, str] = {}
+        self._final_refund_status: dict[str, str] = {}
 
     def request_payment(self, *, order_id: str, amount: int) -> PaymentRequestResult:
         return PaymentRequestResult(
@@ -117,6 +133,40 @@ class FakePGAdapter:
 
     def query_status(self, *, order_id: str) -> str:
         return self._final_status.get(order_id, "pending")
+
+    def refund(self, *, order_id: str, amount: int, simulate: str | None = None) -> str:
+        """`confirm`과 같은 시나리오 이름을 쓰되 환불 어휘("refunded")로 돌려준다.
+
+        - None / "success" (기본) — 즉시 환불 성공
+        - "failed" — 즉시 환불 실패
+        - "timeout_then_success" — 이 호출은 타임아웃하지만 PG 쪽에서는 실제로
+          환불에 성공했다. 뒤이어 같은 인스턴스로 `query_refund_status`를 부르면
+          "refunded"가 나온다.
+        - "timeout_then_failed" — 이 호출은 타임아웃하고 PG 쪽에서도 환불에
+          실패했다. 뒤이어 `query_refund_status`를 부르면 "failed"가 나온다.
+        """
+
+        scenario = simulate or "success"
+        if scenario == "success":
+            return "refunded"
+        if scenario == "failed":
+            return "failed"
+        if scenario == "timeout_then_success":
+            self._final_refund_status[order_id] = "refunded"
+            raise PGTimeoutError(
+                f"fake PG timed out on refund(order_id={order_id}) — "
+                "실제 결과는 query_refund_status로 확정해야 한다."
+            )
+        if scenario == "timeout_then_failed":
+            self._final_refund_status[order_id] = "failed"
+            raise PGTimeoutError(
+                f"fake PG timed out on refund(order_id={order_id}) — "
+                "실제 결과는 query_refund_status로 확정해야 한다."
+            )
+        raise PGError(f"알 수 없는 fake PG 환불 시나리오: {scenario!r}")
+
+    def query_refund_status(self, *, order_id: str) -> str:
+        return self._final_refund_status.get(order_id, "pending")
 
 
 def get_adapter() -> PGAdapter:

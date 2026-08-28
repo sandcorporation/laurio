@@ -22,6 +22,11 @@ class Payment(models.Model):
         REQUESTED = "requested", "요청됨"
         PAID = "paid", "결제완료"
         FAILED = "failed", "결제실패"
+        # 참여자 0명 전액 환불(#17, ADR-0004)의 유일한 경로로만 도달한다 — PAID에서만
+        # 조건부 UPDATE로 REFUND_REQUESTED로 넘어가고(services.request_refund), PG
+        # 확정 결과에 따라 REFUNDED로 전이하거나 재시도를 위해 PAID로 되돌아간다.
+        REFUND_REQUESTED = "refund_requested", "환불요청됨"
+        REFUNDED = "refunded", "환불완료"
 
     contest = models.ForeignKey(
         "contests.Contest", related_name="payments", on_delete=models.CASCADE
@@ -40,6 +45,11 @@ class Payment(models.Model):
     # 중복 방지는 status의 조건부 UPDATE가 담당하므로 이 필드가 비어 있다고 해서
     # 다시 채워 넣지 않는다).
     journal_entry_id = models.PositiveIntegerField(null=True, blank=True)
+
+    # 이 결제를 취소한 반대 분개(journal_entry_id가 가리키는 원본 예치 분개를
+    # reverses한다). REFUNDED로 전이하는 순간 정확히 한 번만 채워진다 — journal_entry_id
+    # 와 같은 감사용 필드다(실제 중복 방지는 status의 조건부 UPDATE가 담당한다).
+    refund_journal_entry_id = models.PositiveIntegerField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
