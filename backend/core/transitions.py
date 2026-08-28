@@ -78,10 +78,12 @@ class TransitionSpec:
     to_state: str
     state_field: str = "state"
     # 전이와 같은 조건부 UPDATE 문 안에서 함께 찍어야 하는 추가 컬럼(예: #13이 마감
-    # 전이와 같은 UPDATE로 judging_ends_at을 채우는 것). `as_of` 하나만 받는다 —
-    # 스캔 배치 전체가 같은 시각을 쓰므로(모듈 docstring), 값이 행마다 달라질 이유가
-    # 없다. 행마다 다른 값이 필요해지면 그때 이 계약을 넓힌다.
-    extra_fields: Callable[[datetime], dict[str, object]] | None = None
+    # 전이와 같은 UPDATE로 judging_ends_at을 채우는 것). 대상 행 자신과 as_of를
+    # 받는다 — 값이 행마다 다를 수 있기 때문이다(#13 리뷰 지적: judging_ends_at은
+    # 이 행의 deadline_at에서 파생돼야지, 스캔 배치 전체가 공유하는 as_of에서
+    # 파생되면 안 된다 — 그러면 마감 시각이 서로 다른 두 Contest가 같은 틱에
+    # 우연히 같이 걸렸다는 이유만으로 동일한 judging_ends_at을 받는다).
+    extra_fields: Callable[[models.Model, datetime], dict[str, object]] | None = None
 
 
 TRANSITION_REGISTRY: list[TransitionSpec] = []
@@ -104,16 +106,20 @@ def run_due_transitions(as_of=None) -> list[dict]:
     results: list[dict] = []
 
     for spec in TRANSITION_REGISTRY:
-        due_ids = list(
+        # 전체 행(pk만이 아니라)을 가져온다 — extra_fields가 이 행 자신의 다른
+        # 컬럼(예: deadline_at)에서 값을 파생시킬 수 있어야 한다(위 TransitionSpec
+        # 설명 참고). 배치 크기가 DEFAULT_BATCH_SIZE로 이미 상한이 걸려 있으므로
+        # 쿼리 자체는 여전히 한 번이다(N+1이 아니다).
+        due_rows = list(
             spec.model.objects.filter(
                 **{spec.state_field: spec.from_state, f"{spec.due_field}__lte": as_of}
-            ).values_list("pk", flat=True)[:DEFAULT_BATCH_SIZE]
+            )[:DEFAULT_BATCH_SIZE]
         )
-        extra_fields = spec.extra_fields(as_of) if spec.extra_fields is not None else None
-        for pk in due_ids:
+        for row in due_rows:
+            extra_fields = spec.extra_fields(row, as_of) if spec.extra_fields is not None else None
             if claim_transition(
                 spec.model,
-                pk,
+                row.pk,
                 from_state=spec.from_state,
                 to_state=spec.to_state,
                 state_field=spec.state_field,
@@ -123,7 +129,7 @@ def run_due_transitions(as_of=None) -> list[dict]:
                 results.append(
                     {
                         "model": spec.model.__name__,
-                        "pk": pk,
+                        "pk": row.pk,
                         "from_state": spec.from_state,
                         "to_state": spec.to_state,
                     }

@@ -62,20 +62,40 @@ class ContestOut(Schema):
     is_underfunded: bool
     requirements: list[RequirementOut]
     created_at: datetime
-    # 심사기간 · 유료 연장 (#13, ADR-0003). CLOSED로 전이하기 전에는 아직 null이다.
+    # 심사기간 종료 시각(#13, ADR-0003) — CLOSED로 전이하기 전에는 아직 null이다.
+    # deadline_at처럼 "언제까지"를 알려주는 사실 정보라 공개해도 무방하다.
+    #
+    # judging_extension_count·refund_disabled는 **일부러 여기 넣지 않는다** —
+    # Sponsor가 유료 연장을 몇 번 샀는지, 환불이 잠겼는지는 그 Sponsor의 상업적
+    # 정보다(#13 리뷰 지적 8). 이 스키마는 인증 없이도 누구나 받는 공개 목록/상세
+    # 응답에 그대로 쓰이므로(contests.api.list_contests/get_contest), 여기 넣으면
+    # 익명 방문자도 볼 수 있게 된다. 이 값들은 JudgingExtensionPaymentOut(연장
+    # 확정 응답, Sponsor 본인 인증 필요)과 Django admin(운영자 전용)에서만 노출한다.
     judging_ends_at: datetime | None
-    judging_extension_count: int
-    refund_disabled: bool
 
 
-class ExtendJudgingPeriodIn(Schema):
+class InitiateJudgingExtensionIn(Schema):
+    pass
+
+
+class ConfirmJudgingExtensionIn(Schema):
     # fake PG 전용 시나리오 선택. 실제 어댑터에서는 무시된다(payments.schemas의
     # ConfirmPaymentIn과 같은 원칙, ADR-0007).
     simulate: str | None = None
 
 
-class ExtendJudgingPeriodOut(Schema):
+class JudgingExtensionPaymentOut(Schema):
+    """payments.schemas.PaymentOut과 같은 형태 — 결제 시도 하나의 현재 상태."""
+
+    order_id: str
     contest_id: int
-    judging_ends_at: datetime
+    amount: int
+    extension_number: int
+    status: str
+    checkout_url: str | None = None
+    created_at: datetime
+    # 이 응답을 만드는 시점 Contest의 최신 심사기간 상태(Sponsor 본인에게만
+    # 노출된다 — 이 엔드포인트들은 jwt_auth + sponsor 소유 확인을 거친다).
+    judging_ends_at: datetime | None
     judging_extension_count: int
     refund_disabled: bool

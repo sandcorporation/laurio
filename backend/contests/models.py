@@ -142,3 +142,65 @@ class Requirement(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return self.text
+
+
+class JudgingExtensionPayment(models.Model):
+    """심사기간 유료 연장 결제 시도 하나 (#13, ADR-0004/0007/0008).
+
+    `payments.models.Payment`와 같은 성격의 모델이다 — PG와의 대화 상태(요청됨/
+    완료/실패)만 들고, 완료로 전이하는 순간에만 원장에 분개를 남긴다. `Payment`를
+    그대로 재사용하지 않는 이유: `Payment.unique_active_payment_per_contest`는
+    Contest 당 결제가 평생 한 번(최초 예치)이라는 전제로 걸려 있는데, 연장은 같은
+    Contest에 대해 여러 번 반복될 수 있는 별개의 결제 종류다.
+
+    동시성·재전송에 안전한 이유는 `contests.services.mark_extension_paid`/
+    `mark_extension_failed`가 `payments.services.mark_paid`/`mark_failed`와 똑같은
+    조건부 `UPDATE ... WHERE status='requested'` 규율을 따르기 때문이다.
+    """
+
+    class Status(models.TextChoices):
+        REQUESTED = "requested", "요청됨"
+        PAID = "paid", "결제완료"
+        FAILED = "failed", "결제실패"
+
+    contest = models.ForeignKey(
+        "contests.Contest", related_name="judging_extension_payments", on_delete=models.CASCADE
+    )
+    # PG에 전달하는 주문 참조값.
+    order_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+
+    # 결제 시점의 스냅샷 — settings.CONTEST_EXTENSION_FEE가 나중에 바뀌어도 이미
+    # 요청된 결제 금액은 흔들리지 않는다(Payment.prize_amount와 같은 원칙).
+    amount = models.PositiveIntegerField()
+    # 이 결제가 성공하면 몇 번째 연장이 되는지의 스냅샷(감사·원장 메모용). 정확한
+    # 카운트는 여전히 Contest.judging_extension_count가 조건부 UPDATE로 늘리는
+    # 값이 유일한 진실이다 — 이 필드는 그 값을 미리 찍어두는 라벨일 뿐이다.
+    extension_number = models.PositiveIntegerField()
+
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.REQUESTED)
+
+    # 이 결제가 원장에 남긴 분개. 성공 시 정확히 한 번만 채워진다(Payment.journal_
+    # entry_id와 같은 원칙).
+    journal_entry_id = models.PositiveIntegerField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            # 진행 중인(REQUESTED) 연장 결제는 Contest 당 동시에 하나뿐이어야
+            # 한다 — 그렇지 않으면 더블클릭·재요청이 같은 연장을 두 번 결제하게
+            # 만든다(Payment.unique_active_payment_per_contest와 같은 방어,
+            # #13 리뷰 지적). PAID는 조건에서 뺀다 — Payment와 달리 연장은 한
+            # Contest에 여러 번 반복될 수 있는 결제라, 이전 연장이 PAID로 남아
+            # 있어도 다음 연장의 새 REQUESTED 생성을 막으면 안 된다.
+            models.UniqueConstraint(
+                fields=["contest"],
+                condition=models.Q(status="requested"),
+                name="unique_pending_judging_extension_payment_per_contest",
+            ),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"JudgingExtensionPayment(order_id={self.order_id}, status={self.status})"

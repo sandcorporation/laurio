@@ -26,7 +26,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from awards.models import Award
-from contests.models import Category, Contest, DeliverableType
+from contests.models import Category, Contest, DeliverableType, JudgingExtensionPayment
 from core.models import ClockOverride
 from core.transitions import TRANSITION_REGISTRY
 
@@ -166,6 +166,38 @@ def _close_contest(client, contest: dict, *, deadline) -> None:
     assert Contest.objects.get(id=contest["id"]).status == Contest.Status.CLOSED
 
 
+def _initiate_extension(client, sponsor: dict, contest_id: int) -> dict:
+    resp = client.post(
+        f"{CONTESTS_URL}/{contest_id}/extend-judging-period",
+        data={},
+        content_type="application/json",
+        **_auth_header(sponsor["access"]),
+    )
+    assert resp.status_code == 201, resp.content
+    return resp.json()
+
+
+def _confirm_extension(client, sponsor: dict, contest_id: int, order_id: str, *, simulate=None):
+    return client.post(
+        f"{CONTESTS_URL}/{contest_id}/extend-judging-period/{order_id}/confirm",
+        data={"simulate": simulate} if simulate is not None else {},
+        content_type="application/json",
+        **_auth_header(sponsor["access"]),
+    )
+
+
+def _extend(client, sponsor: dict, contest_id: int, *, simulate=None) -> dict:
+    """initiate + confirm을 한 번에 — payments.api의 두 단계 구조를 그대로 따르는
+    연장 결제를, 대부분의 테스트가 신경 쓰지 않아도 되는 해피 패스로 감싼다."""
+
+    initiated = _initiate_extension(client, sponsor, contest_id)
+    confirm_resp = _confirm_extension(
+        client, sponsor, contest_id, initiated["order_id"], simulate=simulate
+    )
+    assert confirm_resp.status_code == 200, confirm_resp.content
+    return confirm_resp.json()
+
+
 @pytest.fixture
 def category(db):
     return Category.objects.create(name="라이프스타일")
@@ -195,7 +227,13 @@ def test_judging_period_starts_at_close_and_scanned_by_scheduled_transition(
 
     closed = Contest.objects.get(id=contest["id"])
     assert closed.status == Contest.Status.CLOSED
-    expected_judging_ends_at = close_at + timedelta(days=settings.JUDGING_PERIOD_DAYS)
+    # judging_ends_at은 스캔이 실제로 실행된 시각(close_at)이 아니라 이 Contest
+    # 자신의 deadline_at에서 파생된다(#13 리뷰 지적 4) — REQUEST.md의 "마감 후
+    # 7일"은 마감 시각 기준이지 스캔이 도착한 시각 기준이 아니다. 이 테스트에서는
+    # deadline과 close_at이 1분밖에 안 떨어져 있어 차이가 작아 보이지만, 아래
+    # test_judging_ends_at_is_derived_from_each_contests_own_deadline이 그 차이를
+    # 직접 증명한다.
+    expected_judging_ends_at = deadline + timedelta(days=settings.JUDGING_PERIOD_DAYS)
     assert closed.judging_ends_at == expected_judging_ends_at
 
     # 아직 심사기간 중이므로 틱을 쏴도 JUDGING_ENDED로 넘어가지 않는다.
@@ -212,6 +250,75 @@ def test_judging_period_starts_at_close_and_scanned_by_scheduled_transition(
     assert matching == [
         {"model": "Contest", "pk": contest["id"], "from_state": "closed", "to_state": "judging_ended"}
     ]
+    assert Contest.objects.get(id=contest["id"]).status == Contest.Status.JUDGING_ENDED
+
+
+@pytest.mark.django_db
+def test_judging_ends_at_is_derived_from_each_contests_own_deadline(client, category, landing_type):
+    """#13 리뷰 지적 4의 핵심 증명 — 마감 시각이 서로 다른 두 Contest가 같은 틱에
+    우연히 함께 CLOSED로 넘어가도, 둘의 judging_ends_at은 서로 다르다(각자의
+    deadline_at + JUDGING_PERIOD_DAYS). extra_fields가 배치 전체가 공유하는 as_of가
+    아니라 각 행 자신에게서 값을 파생시켜야만 이게 성립한다.
+
+    두 deadline의 간격은 JUDGING_PERIOD_DAYS(기본 7일)보다 훨씬 짧게 잡는다 —
+    간격이 그보다 크면 이 틱 한 번(PUBLISHED -> CLOSED에 이어 CLOSED ->
+    JUDGING_ENDED까지 같은 as_of로 순차 처리한다, core.transitions.
+    run_due_transitions)이 먼저 닫힌 Contest의 심사기간까지 함께 끝내버려 CLOSED
+    상태로 비교할 수 없게 된다."""
+
+    early_deadline = timezone.now() + timedelta(hours=1)
+    late_deadline = early_deadline + timedelta(hours=2)
+
+    _sponsor_a, contest_a = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        sponsor_uid="sponsor-early",
+        sponsor_ci="sponsor-early-ci",
+        deadline_at=early_deadline,
+    )
+    _sponsor_b, contest_b = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        sponsor_uid="sponsor-late",
+        sponsor_ci="sponsor-late-ci",
+        deadline_at=late_deadline,
+    )
+
+    # 두 Contest 모두 이제 마감이 지난 시각으로 한 번에 틱을 쏜다 — 같은 as_of를
+    # 공유하는 같은 스캔 배치 안에서 둘 다 CLOSED로 전이한다.
+    _freeze(late_deadline + timedelta(minutes=1))
+    tick_resp = client.post(TICK_URL, **_internal_headers())
+    assert tick_resp.status_code == 200
+    transitioned_ids = {t["pk"] for t in tick_resp.json()["transitioned"] if t["model"] == "Contest"}
+    assert {contest_a["id"], contest_b["id"]} <= transitioned_ids
+
+    closed_a = Contest.objects.get(id=contest_a["id"])
+    closed_b = Contest.objects.get(id=contest_b["id"])
+    assert closed_a.status == Contest.Status.CLOSED
+    assert closed_b.status == Contest.Status.CLOSED
+
+    assert closed_a.judging_ends_at == early_deadline + timedelta(days=settings.JUDGING_PERIOD_DAYS)
+    assert closed_b.judging_ends_at == late_deadline + timedelta(days=settings.JUDGING_PERIOD_DAYS)
+    assert closed_a.judging_ends_at != closed_b.judging_ends_at
+
+
+@pytest.mark.django_db
+def test_judging_period_ends_exactly_at_judging_ends_at_boundary(client, category, landing_type):
+    """스케줄러는 judging_ends_at <= as_of일 때 전이한다 — 경계 순간(now ==
+    judging_ends_at)도 이미 끝난 것으로 본다(#13 리뷰 지적 7)."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+    _close_contest(client, contest, deadline=deadline)
+    judging_ends_at = Contest.objects.get(id=contest["id"]).judging_ends_at
+
+    _freeze(judging_ends_at)
+    tick_resp = client.post(TICK_URL, **_internal_headers())
+    assert tick_resp.status_code == 200
     assert Contest.objects.get(id=contest["id"]).status == Contest.Status.JUDGING_ENDED
 
 
@@ -531,6 +638,33 @@ def test_award_is_refused_after_judging_period_ends_even_before_the_tick_runs(
 
 
 @pytest.mark.django_db
+def test_award_is_refused_exactly_at_judging_ends_at_boundary(client, category, landing_type):
+    """now == judging_ends_at도 이미 심사기간이 끝난 것으로 본다 — 스케줄러가
+    `judging_ends_at <= as_of`에서 전이하는 것과 같은 경계(#13 리뷰 지적 7).
+    `>`였다면 이 순간에는 통과해버려 스케줄러의 판단과 어긋난다."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+    submission = _submit(client, dev, contest["id"])
+    _close_contest(client, contest, deadline=deadline)
+
+    judging_ends_at = Contest.objects.get(id=contest["id"]).judging_ends_at
+    _freeze(judging_ends_at)
+
+    resp = client.post(
+        f"{CONTESTS_URL}/{contest['id']}/award",
+        data={"submission_id": submission["id"]},
+        content_type="application/json",
+        **_auth_header(sponsor["access"]),
+    )
+    assert resp.status_code == 403
+    assert Award.objects.count() == 0
+
+
+@pytest.mark.django_db
 def test_award_is_refused_after_the_tick_has_ended_judging_period(client, category, landing_type):
     deadline = timezone.now() + timedelta(hours=1)
     sponsor, contest = _publish_contest(
@@ -556,6 +690,12 @@ def test_award_is_refused_after_the_tick_has_ended_judging_period(client, catego
 
 
 # --- 유료 연장 (REQUEST.md "기간 연장", ADR-0003) ------------------------------
+#
+# payments.api.initiate_payment/confirm_payment와 같은 두 단계 구조를 그대로
+# 따른다: initiate가 결제 의도를 영속화하고, confirm이 PG 결과를 실제로 반영한다
+# (#13 리뷰 지적 1/2/3). _extend() 헬퍼가 이 둘을 한 번에 묶어 대부분의 테스트가
+# 해피 패스에 집중할 수 있게 한다 — 두 단계 자체를 검증하는 테스트는 _initiate_
+# extension/_confirm_extension을 따로 부른다.
 
 
 @pytest.mark.django_db
@@ -575,14 +715,8 @@ def test_extension_updates_only_the_transition_time_column(client, category, lan
 
     registry_size_before = len(TRANSITION_REGISTRY)
 
-    resp = client.post(
-        f"{CONTESTS_URL}/{contest['id']}/extend-judging-period",
-        data={},
-        content_type="application/json",
-        **_auth_header(sponsor["access"]),
-    )
-    assert resp.status_code == 200
-    body = resp.json()
+    body = _extend(client, sponsor, contest["id"])
+    assert body["status"] == "paid"
     assert body["judging_extension_count"] == 1
     assert body["refund_disabled"] is False
 
@@ -607,6 +741,38 @@ def test_extension_updates_only_the_transition_time_column(client, category, lan
 
 
 @pytest.mark.django_db
+def test_extension_confirm_persists_journal_entry_and_updates_auto_now(
+    client, category, landing_type
+):
+    """#13 리뷰 지적 6 — claim_transition을 거치므로 updated_at(auto_now)이
+    실제로 갱신된다. 그리고 결제가 실제로 원장에 분개로 남는다(대사 가능성,
+    #13 리뷰 지적 1)."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+    _close_contest(client, contest, deadline=deadline)
+    before = Contest.objects.get(id=contest["id"])
+    original_updated_at = before.updated_at
+
+    _freeze(Contest.objects.get(id=contest["id"]).judging_ends_at - timedelta(minutes=30))
+    _extend(client, sponsor, contest["id"])
+
+    after = Contest.objects.get(id=contest["id"])
+    assert after.updated_at != original_updated_at
+
+    payment = JudgingExtensionPayment.objects.get(contest_id=contest["id"])
+    assert payment.status == JudgingExtensionPayment.Status.PAID
+    assert payment.journal_entry_id is not None
+
+    from ledger.services import contest_entries
+
+    entries = list(contest_entries(Contest.objects.get(id=contest["id"]).ledger_id))
+    assert any(e.id == payment.journal_entry_id for e in entries)
+
+
+@pytest.mark.django_db
 def test_two_or_more_extensions_permanently_disable_refund(client, category, landing_type):
     deadline = timezone.now() + timedelta(hours=1)
     sponsor, contest = _publish_contest(
@@ -614,44 +780,29 @@ def test_two_or_more_extensions_permanently_disable_refund(client, category, lan
     )
     _close_contest(client, contest, deadline=deadline)
 
-    first = client.post(
-        f"{CONTESTS_URL}/{contest['id']}/extend-judging-period",
-        data={},
-        content_type="application/json",
-        **_auth_header(sponsor["access"]),
-    )
-    assert first.status_code == 200
-    assert first.json()["judging_extension_count"] == 1
-    assert first.json()["refund_disabled"] is False
+    first = _extend(client, sponsor, contest["id"])
+    assert first["judging_extension_count"] == 1
+    assert first["refund_disabled"] is False
     assert Contest.objects.get(id=contest["id"]).refund_disabled is False
 
-    second = client.post(
-        f"{CONTESTS_URL}/{contest['id']}/extend-judging-period",
-        data={},
-        content_type="application/json",
-        **_auth_header(sponsor["access"]),
-    )
-    assert second.status_code == 200
-    assert second.json()["judging_extension_count"] == 2
-    assert second.json()["refund_disabled"] is True
+    second = _extend(client, sponsor, contest["id"])
+    assert second["judging_extension_count"] == 2
+    assert second["refund_disabled"] is True
     assert Contest.objects.get(id=contest["id"]).refund_disabled is True
 
     # 세 번째 연장 이후에도 계속 True로 남는다("영구히"의 실제 구현).
-    third = client.post(
-        f"{CONTESTS_URL}/{contest['id']}/extend-judging-period",
-        data={},
-        content_type="application/json",
-        **_auth_header(sponsor["access"]),
-    )
-    assert third.status_code == 200
-    assert third.json()["judging_extension_count"] == 3
-    assert third.json()["refund_disabled"] is True
+    third = _extend(client, sponsor, contest["id"])
+    assert third["judging_extension_count"] == 3
+    assert third["refund_disabled"] is True
 
-    # Contest 상세 API에도 이 확정 상태가 그대로 드러난다.
+    # judging_extension_count·refund_disabled는 공개 Contest 상세에는 없다(#13
+    # 리뷰 지적 8) — 연장 결제 응답에서만(Sponsor 본인 인증) 확인할 수 있다.
     detail = client.get(f"{CONTESTS_URL}/{contest['id']}")
     assert detail.status_code == 200
-    assert detail.json()["refund_disabled"] is True
-    assert detail.json()["judging_extension_count"] == 3
+    assert "refund_disabled" not in detail.json()
+    assert "judging_extension_count" not in detail.json()
+    assert Contest.objects.get(id=contest["id"]).judging_extension_count == 3
+    assert Contest.objects.get(id=contest["id"]).refund_disabled is True
 
 
 @pytest.mark.django_db
@@ -671,6 +822,7 @@ def test_non_sponsor_cannot_extend_judging_period(client, category, landing_type
     )
     assert resp.status_code == 403
     assert Contest.objects.get(id=contest["id"]).judging_extension_count == 0
+    assert JudgingExtensionPayment.objects.count() == 0
 
 
 @pytest.mark.django_db
@@ -687,6 +839,7 @@ def test_extension_before_contest_closes_is_rejected(client, category, landing_t
         **_auth_header(sponsor["access"]),
     )
     assert resp.status_code == 409
+    assert JudgingExtensionPayment.objects.count() == 0
 
 
 @pytest.mark.django_db
@@ -715,6 +868,29 @@ def test_extension_after_judging_period_already_ended_is_rejected(
     )
     assert resp.status_code == 409
     assert Contest.objects.get(id=contest["id"]).judging_extension_count == 0
+
+
+@pytest.mark.django_db
+def test_extension_is_rejected_exactly_at_judging_ends_at_boundary(client, category, landing_type):
+    """now == judging_ends_at도 이미 끝난 것으로 본다 — Award의 경계 판정
+    (test_award_is_refused_exactly_at_judging_ends_at_boundary)과 같은 `>=`
+    (#13 리뷰 지적 7)."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+    _close_contest(client, contest, deadline=deadline)
+    judging_ends_at = Contest.objects.get(id=contest["id"]).judging_ends_at
+
+    _freeze(judging_ends_at)
+    resp = client.post(
+        f"{CONTESTS_URL}/{contest['id']}/extend-judging-period",
+        data={},
+        content_type="application/json",
+        **_auth_header(sponsor["access"]),
+    )
+    assert resp.status_code == 409
 
 
 @pytest.mark.django_db
@@ -747,8 +923,9 @@ def test_extension_after_award_is_rejected(client, category, landing_type):
 
 @pytest.mark.django_db
 def test_failed_extension_payment_does_not_touch_the_contest(client, category, landing_type):
-    """결제 실패는 402를 돌려주고 judging_ends_at·연장 횟수 어느 것도 건드리지
-    않는다 — 돈이 안 들어왔는데 심사기간만 늘어나는 사고를 막는다."""
+    """결제 실패는 confirm 응답에 "failed"를 돌려주고 judging_ends_at·연장
+    횟수·refund_disabled 어느 것도 건드리지 않는다 — 돈이 안 들어왔는데 심사기간만
+    늘어나는 사고를 막는다."""
 
     deadline = timezone.now() + timedelta(hours=1)
     sponsor, contest = _publish_contest(
@@ -757,18 +934,198 @@ def test_failed_extension_payment_does_not_touch_the_contest(client, category, l
     _close_contest(client, contest, deadline=deadline)
     before = Contest.objects.get(id=contest["id"])
 
-    resp = client.post(
-        f"{CONTESTS_URL}/{contest['id']}/extend-judging-period",
-        data={"simulate": "failed"},
-        content_type="application/json",
-        **_auth_header(sponsor["access"]),
+    initiated = _initiate_extension(client, sponsor, contest["id"])
+    confirm_resp = _confirm_extension(
+        client, sponsor, contest["id"], initiated["order_id"], simulate="failed"
     )
-    assert resp.status_code == 402
+    assert confirm_resp.status_code == 200
+    assert confirm_resp.json()["status"] == "failed"
 
     after = Contest.objects.get(id=contest["id"])
     assert after.judging_ends_at == before.judging_ends_at
     assert after.judging_extension_count == 0
     assert after.refund_disabled is False
+    assert JudgingExtensionPayment.objects.get(order_id=initiated["order_id"]).status == (
+        JudgingExtensionPayment.Status.FAILED
+    )
+
+
+# --- 결제 규율: payments 앱과 같은 멱등성·타임아웃·동시성 방어 (#13 리뷰 지적 1/2/3) ---
+
+
+@pytest.mark.django_db
+def test_initiate_persists_intent_before_any_pg_call_so_it_is_recoverable(
+    client, category, landing_type
+):
+    """#13 리뷰 지적 1 — initiate 시점에 이미 JudgingExtensionPayment(REQUESTED)가
+    DB에 남는다. confirm을 아예 부르지 않아도(클라이언트가 죽거나, PG 콜백을
+    영영 못 받아도) 이 행이 대사 대상으로 남아 있다 — "돈이 플랫폼 관점에서
+    통째로 사라지는" 사고를 막는 최소 조건이다."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+    _close_contest(client, contest, deadline=deadline)
+
+    initiated = _initiate_extension(client, sponsor, contest["id"])
+    assert initiated["status"] == "requested"
+
+    payment = JudgingExtensionPayment.objects.get(order_id=initiated["order_id"])
+    assert payment.status == JudgingExtensionPayment.Status.REQUESTED
+    assert payment.contest_id == contest["id"]
+    assert payment.journal_entry_id is None
+
+    # 연장은 아직 전혀 적용되지 않았다 — confirm이 확정해야만 적용된다.
+    assert Contest.objects.get(id=contest["id"]).judging_extension_count == 0
+
+
+@pytest.mark.django_db
+def test_double_clicking_extend_before_confirming_reuses_the_same_pending_payment(
+    client, category, landing_type
+):
+    """#13 리뷰 지적 2 — 더블클릭(같은 REQUESTED 결제가 아직 안 끝났는데 다시
+    initiate)이 두 번째 주문을 새로 만들지 않는다.
+    unique_pending_judging_extension_payment_per_contest가 두 번째 방어선이고,
+    이 응답 레벨에서는 첫 번째 결제를 그대로 재사용해서 보인다(payments.api.
+    initiate_payment의 existing 재사용 분기와 같은 형태)."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+    _close_contest(client, contest, deadline=deadline)
+
+    first = _initiate_extension(client, sponsor, contest["id"])
+    second = _initiate_extension(client, sponsor, contest["id"])
+
+    assert first["order_id"] == second["order_id"]
+    assert JudgingExtensionPayment.objects.filter(contest_id=contest["id"]).count() == 1
+
+    # 딱 한 번만 confirm해도 정확히 한 번만 연장된다.
+    confirm_resp = _confirm_extension(client, sponsor, contest["id"], first["order_id"])
+    assert confirm_resp.status_code == 200
+    assert confirm_resp.json()["judging_extension_count"] == 1
+
+
+@pytest.mark.django_db
+def test_confirming_the_same_extension_payment_twice_does_not_double_charge(
+    client, category, landing_type
+):
+    """#13 리뷰 지적 2 — 같은 order_id로 confirm이 재전송되거나 재시도돼도
+    (payments.api.confirm_payment의 웹훅 재전송 시나리오와 같은 형태) 원장 분개와
+    심사기간 연장은 정확히 한 번만 일어난다. `JudgingExtensionPayment.status`의
+    조건부 UPDATE(REQUESTED -> PAID)가 그 방어선이다 — 순차 호출로도 그 DB 레벨
+    보장을 그대로 관찰할 수 있다(코드베이스 전체가 "틱을 두 번 쏴도 한 번만
+    통과한다"를 검증하는 방식과 동일)."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+    _close_contest(client, contest, deadline=deadline)
+    original_judging_ends_at = Contest.objects.get(id=contest["id"]).judging_ends_at
+
+    initiated = _initiate_extension(client, sponsor, contest["id"])
+
+    first_confirm = _confirm_extension(client, sponsor, contest["id"], initiated["order_id"])
+    second_confirm = _confirm_extension(client, sponsor, contest["id"], initiated["order_id"])
+
+    assert first_confirm.status_code == 200
+    assert second_confirm.status_code == 200
+    assert first_confirm.json()["status"] == "paid"
+    assert second_confirm.json()["status"] == "paid"
+    assert second_confirm.json()["judging_extension_count"] == 1
+
+    extended = Contest.objects.get(id=contest["id"])
+    assert extended.judging_extension_count == 1
+    assert extended.judging_ends_at == original_judging_ends_at + timedelta(
+        days=settings.JUDGING_EXTENSION_DAYS
+    )
+
+    payment = JudgingExtensionPayment.objects.get(order_id=initiated["order_id"])
+    assert payment.status == JudgingExtensionPayment.Status.PAID
+
+    from ledger.services import contest_entries
+
+    entries = [
+        e
+        for e in contest_entries(extended.ledger_id)
+        if e.id == payment.journal_entry_id
+    ]
+    assert len(entries) == 1
+
+
+@pytest.mark.django_db
+def test_extension_confirm_timeout_resolves_via_query_status_and_still_applies(
+    client, category, landing_type
+):
+    """#13 리뷰 지적 1 — confirm 호출이 타임아웃돼도 곧바로 실패로 단정하지 않고
+    query_status로 실제 결과를 확정한다(ADR-0008). PG 쪽에서는 실제로 성공했다면
+    연장이 정상 적용돼야 한다."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+    _close_contest(client, contest, deadline=deadline)
+
+    initiated = _initiate_extension(client, sponsor, contest["id"])
+    confirm_resp = _confirm_extension(
+        client, sponsor, contest["id"], initiated["order_id"], simulate="timeout_then_success"
+    )
+
+    assert confirm_resp.status_code == 200
+    body = confirm_resp.json()
+    assert body["status"] == "paid"
+    assert body["judging_extension_count"] == 1
+
+    payment = JudgingExtensionPayment.objects.get(order_id=initiated["order_id"])
+    assert payment.status == JudgingExtensionPayment.Status.PAID
+    assert payment.journal_entry_id is not None
+
+
+@pytest.mark.django_db
+def test_extension_confirm_timeout_then_failed_does_not_apply(client, category, landing_type):
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+    _close_contest(client, contest, deadline=deadline)
+    before = Contest.objects.get(id=contest["id"])
+
+    initiated = _initiate_extension(client, sponsor, contest["id"])
+    confirm_resp = _confirm_extension(
+        client, sponsor, contest["id"], initiated["order_id"], simulate="timeout_then_failed"
+    )
+
+    assert confirm_resp.status_code == 200
+    assert confirm_resp.json()["status"] == "failed"
+
+    after = Contest.objects.get(id=contest["id"])
+    assert after.judging_ends_at == before.judging_ends_at
+    assert after.judging_extension_count == 0
+    payment = JudgingExtensionPayment.objects.get(order_id=initiated["order_id"])
+    assert payment.status == JudgingExtensionPayment.Status.FAILED
+    assert payment.journal_entry_id is None
+
+
+@pytest.mark.django_db
+def test_extension_confirm_for_someone_elses_order_id_is_rejected(client, category, landing_type):
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+    _close_contest(client, contest, deadline=deadline)
+    outsider = _verified_user(client, "outsider", "outsider-ci")
+
+    initiated = _initiate_extension(client, sponsor, contest["id"])
+    resp = _confirm_extension(client, outsider, contest["id"], initiated["order_id"])
+    assert resp.status_code == 403
+
+    assert JudgingExtensionPayment.objects.get(
+        order_id=initiated["order_id"]
+    ).status == JudgingExtensionPayment.Status.REQUESTED
 
 
 # --- 마감 이후에도 목록·상세·아카이브가 계속 공개된다는 계약(#11)이 새 상태에서도

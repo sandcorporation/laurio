@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Category, Contest, DeliverableType, Requirement
+from .models import Category, Contest, DeliverableType, JudgingExtensionPayment, Requirement
 
 
 @admin.register(Category)
@@ -39,3 +39,21 @@ class ContestAdmin(admin.ModelAdmin):
     )
     list_filter = ("status", "category", "is_underfunded", "refund_disabled")
     inlines = [RequirementInline]
+
+
+@admin.register(JudgingExtensionPayment)
+class JudgingExtensionPaymentAdmin(admin.ModelAdmin):
+    """연장 결제 대사용 — Sponsor가 낸 돈이 원장까지 이어지는지 운영자가 확인한다."""
+
+    list_display = (
+        "id",
+        "contest",
+        "order_id",
+        "amount",
+        "extension_number",
+        "status",
+        "journal_entry_id",
+        "created_at",
+    )
+    list_filter = ("status",)
+    readonly_fields = ("order_id", "created_at", "updated_at")
