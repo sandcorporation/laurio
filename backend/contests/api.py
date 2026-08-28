@@ -111,6 +111,7 @@ def _serialize_contest(contest: Contest) -> ContestOut:
             RequirementOut(id=r.id, text=r.text, grade=r.grade, order=r.order)
             for r in contest.requirements.all()
         ],
+        source_contest_id=contest.source_contest_id,
         created_at=contest.created_at,
         judging_ends_at=contest.judging_ends_at,
     )
