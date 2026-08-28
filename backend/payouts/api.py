@@ -107,6 +107,12 @@ def _get_owned_payout(request: HttpRequest, idempotency_key: UUID) -> Payout:
     except Payout.DoesNotExist as exc:
         raise HttpError(404, "지급 요청을 찾을 수 없습니다.") from exc
 
+    if payout.handover_id is None:
+        # Distribution(#16) 경로의 Payout이다 — 이 라우터는 Award/Handover 경로
+        # 전용이라 여기서는 존재 자체를 숨긴다(Handover가 없는 Contest를 조회할
+        # 때와 같은 404).
+        raise HttpError(404, "지급 요청을 찾을 수 없습니다.")
+
     if payout.handover.award.submission.developer.user_id != request.auth_user.id:
         raise HttpError(403, "본인의 지급 요청만 접근할 수 있습니다.")
     return payout

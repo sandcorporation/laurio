@@ -37,8 +37,22 @@ class Payout(models.Model):
     # 생기는 걸 막는 건 아래 unique_active_payout_per_handover다 —
     # payments.models.Payment.unique_active_payment_per_contest와 같은 부분
     # 유니크 인덱스로, failed는 조건에서 뺀다.
+    #
+    # handover/distribution_share 둘 다 null=True다 — Payout은 두 가지 서로 다른
+    # 지급 사유 중 정확히 하나에 연결된다(#16). Award 경로는 Handover(Escrow
+    # 해제)를, 무응답 1/N 배분 경로는 DistributionShare를 가리킨다. "Distribution도
+    # 기존 Payout 경로를 재사용한다"는 #16의 요구를 새 Payout 구현을 만들지 않고
+    # 만족시키는 방법이 이 두 FK를 나란히 두는 것이다 — 아래 CheckConstraint가
+    # 정확히 하나만 채워지도록 강제한다.
     handover = models.ForeignKey(
-        "handovers.Handover", related_name="payouts", on_delete=models.CASCADE
+        "handovers.Handover", related_name="payouts", on_delete=models.CASCADE, null=True, blank=True
+    )
+    distribution_share = models.ForeignKey(
+        "distributions.DistributionShare",
+        related_name="payouts",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
     )
     idempotency_key = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
 
@@ -79,6 +93,26 @@ class Payout(models.Model):
                     status__in=["requested", "confirmed_identity_pending", "confirmed"]
                 ),
                 name="unique_active_payout_per_handover",
+            ),
+            # distribution_share 쪽도 같은 이유로 같은 모양의 부분 유니크 제약을
+            # 둔다 — 같은 몫에 동시에 두 개의 활성 Payout이 생기면 그 몫의
+            # 수수료·원천징수 분개가 두 번 남는다.
+            models.UniqueConstraint(
+                fields=["distribution_share"],
+                condition=models.Q(
+                    status__in=["requested", "confirmed_identity_pending", "confirmed"]
+                ),
+                name="unique_active_payout_per_distribution_share",
+            ),
+            # 정확히 하나의 지급 사유만 채워져야 한다 — 둘 다 비었거나 둘 다
+            # 채워진 Payout은 어느 쪽 경로의 지급인지 판정할 수 없어 원장 분개의
+            # 근거(contest·memo)를 만들 수 없다.
+            models.CheckConstraint(
+                condition=(
+                    models.Q(handover__isnull=False, distribution_share__isnull=True)
+                    | models.Q(handover__isnull=True, distribution_share__isnull=False)
+                ),
+                name="payout_exactly_one_target",
             ),
         ]
 

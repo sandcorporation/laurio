@@ -59,8 +59,13 @@ def _compute_amounts(prize_amount: int) -> tuple[int, int, int]:
     return fee, withholding, net
 
 
-def get_or_create_payout(handover) -> Payout:
-    """이 Handover에 대한 활성 Payout을 멱등하게 만든다.
+def get_or_create_payout(handover=None, *, distribution_share=None) -> Payout:
+    """이 Handover(또는 DistributionShare)에 대한 활성 Payout을 멱등하게 만든다.
+
+    정확히 하나만 넘겨야 한다 — 어느 쪽이든 그 대상이 Payout이 실제로 가리키는
+    지급 사유가 된다(`payouts.models.Payout.payout_exactly_one_target`과 같은
+    불변식). `distribution_share`는 #16 — Distribution(무응답 1/N 배분)이 Award
+    없이도 이 경로를 그대로 재사용할 수 있게 하는 두 번째 대상이다.
 
     활성(REQUESTED/CONFIRMED_IDENTITY_PENDING/CONFIRMED)이 이미 있으면 그대로
     돌려준다 — 중복 클릭·재요청이 새 idempotency_key를 계속 만들어내지 않는다
@@ -69,35 +74,77 @@ def get_or_create_payout(handover) -> Payout:
     만들어 재시도를 허용한다 — Escrow에 갇힌 상금이 재시도 경로 없이 영구히
     묶이는 사고를 막는다.
 
-    `Handover`를 `select_for_update`로 잠가 동시 요청을 직렬화한다
+    대상 행을 `select_for_update`로 잠가 동시 요청을 직렬화한다
     (payments.api.initiate_payment가 Contest를 잠그는 것과 같은 이유) — 잠금
     없이 조회-후-생성하면 두 요청이 동시에 "활성 Payout 없음"을 보고 각자 새
-    행을 만들어, `unique_active_payout_per_handover`가 최후에 하나만 통과시켜도
-    나머지 하나는 예외로 죽는다. 네트워크 호출(어댑터)은 이 함수 밖(API 레이어)
-    에서 한다 — 이 함수는 순수 DB 쓰기만 하므로 트랜잭션 안에서도 안전하다
-    ("외부 네트워크 호출을 transaction.atomic() 안에 넣지 않는다"는
-    lessons-learned 원칙).
+    행을 만들어, unique 제약이 최후에 하나만 통과시켜도 나머지 하나는 예외로
+    죽는다. 네트워크 호출(어댑터)은 이 함수 밖(API 레이어)에서 한다 — 이 함수는
+    순수 DB 쓰기만 하므로 트랜잭션 안에서도 안전하다("외부 네트워크 호출을
+    transaction.atomic() 안에 넣지 않는다"는 lessons-learned 원칙).
     """
 
-    from handovers.models import Handover
+    if (handover is None) == (distribution_share is None):
+        raise ValueError("handover 또는 distribution_share 중 정확히 하나만 넘겨야 한다.")
+
+    if handover is not None:
+        from handovers.models import Handover
+
+        with transaction.atomic():
+            locked = Handover.objects.select_for_update().get(pk=handover.pk)
+            existing = (
+                Payout.objects.filter(handover=locked, status__in=_ACTIVE_PAYOUT_STATUSES)
+                .order_by("-created_at")
+                .first()
+            )
+            if existing is not None:
+                return existing
+
+            prize_amount = locked.award.contest.prize
+            fee, withholding, net = _compute_amounts(prize_amount)
+
+            try:
+                return Payout.objects.create(
+                    handover=locked,
+                    prize_amount=prize_amount,
+                    platform_fee_amount=fee,
+                    withholding_tax_amount=withholding,
+                    net_amount=net,
+                    status=Payout.Status.REQUESTED,
+                )
+            except IntegrityError:
+                # unique_active_payout_per_handover에 걸렸다 — 위 잠금에도
+                # 불구하고 도달했다면 방어적 안전망이다(payments.api.
+                # initiate_payment와 같은 이유). 이미 있는 활성 Payout을 그대로
+                # 돌려준다.
+                existing = (
+                    Payout.objects.filter(handover=locked, status__in=_ACTIVE_PAYOUT_STATUSES)
+                    .order_by("-created_at")
+                    .first()
+                )
+                if existing is not None:
+                    return existing
+                raise
+
+    from distributions.models import DistributionShare
 
     with transaction.atomic():
-        locked_handover = Handover.objects.select_for_update().get(pk=handover.pk)
-
+        locked = DistributionShare.objects.select_for_update().get(pk=distribution_share.pk)
         existing = (
-            Payout.objects.filter(handover=locked_handover, status__in=_ACTIVE_PAYOUT_STATUSES)
+            Payout.objects.filter(
+                distribution_share=locked, status__in=_ACTIVE_PAYOUT_STATUSES
+            )
             .order_by("-created_at")
             .first()
         )
         if existing is not None:
             return existing
 
-        prize_amount = locked_handover.award.contest.prize
+        prize_amount = locked.amount
         fee, withholding, net = _compute_amounts(prize_amount)
 
         try:
             return Payout.objects.create(
-                handover=locked_handover,
+                distribution_share=locked,
                 prize_amount=prize_amount,
                 platform_fee_amount=fee,
                 withholding_tax_amount=withholding,
@@ -105,12 +152,11 @@ def get_or_create_payout(handover) -> Payout:
                 status=Payout.Status.REQUESTED,
             )
         except IntegrityError:
-            # unique_active_payout_per_handover에 걸렸다 — 위 잠금에도 불구하고
-            # 도달했다면 방어적 안전망이다(payments.api.initiate_payment와 같은
-            # 이유). 이미 있는 활성 Payout을 그대로 돌려준다.
+            # unique_active_payout_per_distribution_share에 걸렸다 — 위와 같은
+            # 방어적 안전망이다.
             existing = (
                 Payout.objects.filter(
-                    handover=locked_handover, status__in=_ACTIVE_PAYOUT_STATUSES
+                    distribution_share=locked, status__in=_ACTIVE_PAYOUT_STATUSES
                 )
                 .order_by("-created_at")
                 .first()
@@ -118,6 +164,17 @@ def get_or_create_payout(handover) -> Payout:
             if existing is not None:
                 return existing
             raise
+
+
+def _resolve_contest(payout: Payout):
+    """이 Payout이 어느 지급 사유(Handover 또는 DistributionShare)를 통해 어느
+    Contest에 속하는지 판정한다. `payout_exactly_one_target` 제약이 이미 정확히
+    하나만 채워짐을 보장하므로 분기는 여기서 끝난다.
+    """
+
+    if payout.handover_id is not None:
+        return payout.handover.award.contest
+    return payout.distribution_share.distribution.contest
 
 
 def mark_confirmed(idempotency_key) -> Payout:
@@ -133,16 +190,16 @@ def mark_confirmed(idempotency_key) -> Payout:
         updated = Payout.objects.filter(
             idempotency_key=idempotency_key, status=Payout.Status.REQUESTED
         ).update(status=Payout.Status.CONFIRMED_IDENTITY_PENDING)
-        payout = Payout.objects.select_related("handover__award__contest").get(
-            idempotency_key=idempotency_key
-        )
+        payout = Payout.objects.select_related(
+            "handover__award__contest", "distribution_share__distribution__contest"
+        ).get(idempotency_key=idempotency_key)
 
         if updated != 1:
             # 이미 확정(또는 그 이후)이거나 실패다 — 다른 채널이 먼저 이겼거나
             # 재전송이다. 원장에는 이미 반영되어 있거나 애초에 없어야 한다.
             return payout
 
-        contest = payout.handover.award.contest
+        contest = _resolve_contest(payout)
         entry = post_journal_entry(
             contest_id=contest.ledger_id,
             memo=(

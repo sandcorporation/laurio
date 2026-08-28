@@ -4,6 +4,7 @@ from accounts.api import router as accounts_router
 from awards.api import router as awards_router
 from contests.api import router as contests_router
 from core.api import router as core_internal_router
+from distributions.api import internal_router as distributions_internal_router
 from handovers.api import internal_router as handovers_internal_router
 from handovers.api import router as handovers_router
 from ledger.api import router as ledger_router
@@ -40,6 +41,7 @@ api.add_router("/internal/notifications", notifications_internal_router)
 api.add_router("/internal/scoring", scoring_internal_router)
 api.add_router("/internal/handovers", handovers_internal_router)
 api.add_router("/internal/payments", payments_internal_router)
+api.add_router("/internal/distributions", distributions_internal_router)
 
 
 @api.exception_handler(StorageAccessDenied)

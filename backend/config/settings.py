@@ -80,6 +80,7 @@ INSTALLED_APPS = [
     "awards",
     "handovers",
     "payouts",
+    "distributions",
 ]
 
 MIDDLEWARE = [
@@ -402,3 +403,11 @@ PAYOUT_WEBHOOK_SECRET = _payout_webhook_secret
 # 정책(#15 범위 밖)이 정한다.
 PAYOUT_PLATFORM_FEE_BPS = int(_env("PAYOUT_PLATFORM_FEE_BPS", "1000"))
 PAYOUT_WITHHOLDING_TAX_BPS = int(_env("PAYOUT_WITHHOLDING_TAX_BPS", "330"))
+
+# --- Distribution (#16, ADR-0003/0004/0006) -------------------------------------------
+#
+# 심사기간 종료(JUDGING_ENDED, judging_ends_at) 후 이 기간 동안 아무도 Award하지
+# 않으면 스케줄러(내부 스캔 엔드포인트)가 Score 컷라인을 통과한 Submission들에게
+# Prize를 1/N로 배분한다 — HANDOVER_ACCEPTANCE_PERIOD_DAYS와 같은 "Sponsor의
+# 침묵이 Developer를 인질로 잡지 못한다" 원칙의 무응답 버전이다(REQUEST.md).
+DISTRIBUTION_WAIT_DAYS = int(_env("DISTRIBUTION_WAIT_DAYS", "14"))
