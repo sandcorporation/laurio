@@ -10,6 +10,10 @@ x-postgres-env: &default-postgres-env
   POSTGRES_USER: laurio
   POSTGRES_PASSWORD: laurio
 
+x-minio-env: &default-minio-env
+  MINIO_ROOT_USER: laurio
+  MINIO_ROOT_PASSWORD: laurio-secret
+
 services:
   db:
     image: postgres:17-alpine
@@ -30,6 +34,41 @@ services:
       timeout: 3s
       retries: 20
 
+  # 스토리지 어댑터(ADR-0005, ADR-0007)의 dev 바인딩. S3 호환 API라 앱은 STORAGE_BACKEND=s3
+  # 그대로 두고 엔드포인트만 여기를 가리킨다. 버킷은 항상 private — 이 스택 어디에도
+  # 버킷을 public으로 만들거나 정책을 고치는 코드는 없다.
+  minio:
+    image: minio/minio:latest
+    environment:
+      <<: *default-minio-env
+    ports:
+      # API. 호스트에서 직접 붙을 때(uv run manage.py 등)를 위해 노출한다.
+      - "${LAURIO_MINIO_PORT:-19000}:9000"
+      # 콘솔. 9000/9001은 이 머신의 다른 프로젝트가 쓰고 있어 비켜 잡았다.
+      - "${LAURIO_MINIO_CONSOLE_PORT:-19001}:9001"
+    volumes:
+      - laurio-dev-minio:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # laurio-dev 버킷을 한 번 만들고 종료하는 초기화 잡. private 그대로 둔다 —
+  # `mc anonymous set` 같은 공개 전환 명령은 절대 여기 넣지 않는다(ADR-0005).
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      <<: *default-minio-env
+    entrypoint: >
+      sh -c "mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD &&
+             mc mb --ignore-existing local/laurio-dev"
+    restart: "no"
+
   backend:
     build:
       context: ..
@@ -39,6 +78,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      minio:
+        condition: service_healthy
     environment:
       <<: *default-postgres-env
       POSTGRES_HOST: db
@@ -46,6 +87,12 @@ services:
       DJANGO_DEBUG: "true"
       DJANGO_SECRET_KEY: dev-only-insecure-key
       DJANGO_ALLOWED_HOSTS: "*"
+      STORAGE_BACKEND: s3
+      STORAGE_BUCKET: laurio-dev
+      STORAGE_ENDPOINT_URL: http://minio:9000
+      STORAGE_ACCESS_KEY: laurio
+      STORAGE_SECRET_KEY: laurio-secret
+      STORAGE_REGION: us-east-1
     ports:
       - "${LAURIO_API_PORT:-58000}:8000"
     volumes:
@@ -57,3 +104,4 @@ services:
 
 volumes:
   laurio-dev-db:
+  laurio-dev-minio:

@@ -103,6 +103,28 @@ DATABASES = {
     }
 }
 
+# 스토리지 어댑터 (ADR-0005, ADR-0007): "fake"가 기본값이라 아무것도 설정하지 않아도
+# 테스트·CI는 MinIO 없이 돈다. dev compose가 backend 컨테이너에만 STORAGE_BACKEND=s3
+# 를 주입해 MinIO로 바인딩한다(docker/compose.dev.yaml). staging/prod는 같은 "s3"
+# 백엔드가 실제 S3·OCI 엔드포인트를 가리키도록 환경변수만 바꾼다.
+STORAGE_BACKEND = _env("STORAGE_BACKEND", "fake")
+STORAGE_BUCKET = _env("STORAGE_BUCKET", "laurio-dev")
+# 기본값은 호스트에서 직접 돌릴 때를 가정한다(LAURIO_MINIO_PORT). 컨테이너 안에서는
+# compose가 STORAGE_ENDPOINT_URL=http://minio:9000 을 직접 주입한다.
+STORAGE_ENDPOINT_URL = _env("STORAGE_ENDPOINT_URL", "http://127.0.0.1:19000")
+STORAGE_ACCESS_KEY = _env("STORAGE_ACCESS_KEY", "laurio")
+STORAGE_SECRET_KEY = _env("STORAGE_SECRET_KEY", "laurio-secret")
+STORAGE_REGION = _env("STORAGE_REGION", "us-east-1")
+
+# 업로드는 수백 MB 파일을 올릴 시간을 준다. 다운로드는 짧게 끊어 재사용을 막는다.
+STORAGE_UPLOAD_URL_TTL_SECONDS = int(_env("STORAGE_UPLOAD_URL_TTL_SECONDS", "900"))
+STORAGE_DOWNLOAD_URL_TTL_SECONDS = int(_env("STORAGE_DOWNLOAD_URL_TTL_SECONDS", "300"))
+
+# target_ref -> 소유자·공개상태 판정 훅(storage.policy.TargetStateResolver).
+# 비어 있으면 storage.policy.DenyUnknownTargetResolver 로 fail-closed 한다.
+# #8(Submission)·#10(Contest)·#14(Handover)가 실제 구현으로 갈아끼운다.
+STORAGE_TARGET_RESOLVER = _env("STORAGE_TARGET_RESOLVER", "")
+
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
