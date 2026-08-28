@@ -6,6 +6,8 @@ from core.api import router as core_internal_router
 from ledger.api import router as ledger_router
 from notifications.api import router as notifications_internal_router
 from payments.api import router as payments_router
+from storage.api import router as storage_router
+from storage.policy import StorageAccessDenied
 from verification.api import router as verification_router
 
 api = NinjaAPI(title="Laurio API", version="0.1.0")
@@ -24,3 +26,11 @@ def health(request):
 
 api.add_router("/internal", core_internal_router)
 api.add_router("/internal/notifications", notifications_internal_router)
+
+
+@api.exception_handler(StorageAccessDenied)
+def storage_access_denied(request, exc: StorageAccessDenied):
+    return api.create_response(request, {"detail": str(exc)}, status=403)
+
+
+api.add_router("/storage", storage_router)

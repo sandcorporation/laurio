@@ -62,6 +62,9 @@ INSTALLED_APPS = [
     "payments",
     "core",
     "notifications",
+    # 모델은 없다(#8/#10이 붙을 때까지). STORAGE_BACKEND/STORAGE_TARGET_RESOLVER
+    # 오탈자를 요청 시점 500 대신 `manage.py check`/부팅 시점에 잡기 위해서만 등록한다.
+    "storage",
 ]
 
 MIDDLEWARE = [
@@ -116,6 +119,43 @@ DATABASES = {
         "PORT": _env("POSTGRES_PORT", _DEV_DB_PORT),
     }
 }
+
+# 스토리지 어댑터 (ADR-0005, ADR-0007): "fake"가 기본값이라 아무것도 설정하지 않아도
+# 테스트·CI는 MinIO 없이 돈다. dev compose가 backend 컨테이너에만 STORAGE_BACKEND=s3
+# 를 주입해 MinIO로 바인딩한다(docker/compose.dev.yaml). staging/prod는 같은 "s3"
+# 백엔드가 실제 S3·OCI 엔드포인트를 가리키도록 환경변수만 바꾼다.
+STORAGE_BACKEND = _env("STORAGE_BACKEND", "fake")
+
+# DJANGO_SECRET_KEY 가드(위)와 같은 이유다. STORAGE_BACKEND 를 잊고 배포하면
+# FakeStorageAdapter가 200과 함께 https://fake-storage.test/... 를 돌려주고, 업로드도
+# 다운로드도 겉보기엔 성공한 채 파일만 소리 없이 사라진다. 배포에서는 아예 못 뜨게 막는다.
+if not DEBUG and STORAGE_BACKEND == "fake":
+    raise ImproperlyConfigured(
+        "DJANGO_DEBUG=false 인데 STORAGE_BACKEND 가 fake 다. presigned URL이 200으로 "
+        "발급되면서 파일이 소리 없이 유실된다. 배포 환경에서는 STORAGE_BACKEND=s3 를 "
+        "반드시 설정해야 한다."
+    )
+
+STORAGE_BUCKET = _env("STORAGE_BUCKET", "laurio-dev")
+# 기본값은 호스트에서 직접 돌릴 때를 가정한다(LAURIO_MINIO_PORT). 컨테이너 안에서는
+# compose가 STORAGE_ENDPOINT_URL=http://minio:9000 을 직접 주입한다.
+STORAGE_ENDPOINT_URL = _env("STORAGE_ENDPOINT_URL", "http://127.0.0.1:19000")
+# 비워두면 boto3 기본 자격증명 체인(IAM role·instance profile 등)을 그대로 쓴다.
+# dev(MinIO)는 정적 키가 필수라 compose·.env.example이 명시적으로 채워 넣는다.
+# 절대 기본값을 두지 않는다 — 기본값이 있으면 S3StorageAdapter가 항상 그것부터
+# boto3에 넘겨버려서 운영 환경의 자격증명 체인이 쓰일 일이 없어진다.
+STORAGE_ACCESS_KEY = _env("STORAGE_ACCESS_KEY", "")
+STORAGE_SECRET_KEY = _env("STORAGE_SECRET_KEY", "")
+STORAGE_REGION = _env("STORAGE_REGION", "us-east-1")
+
+# 업로드는 수백 MB 파일을 올릴 시간을 준다. 다운로드는 짧게 끊어 재사용을 막는다.
+STORAGE_UPLOAD_URL_TTL_SECONDS = int(_env("STORAGE_UPLOAD_URL_TTL_SECONDS", "900"))
+STORAGE_DOWNLOAD_URL_TTL_SECONDS = int(_env("STORAGE_DOWNLOAD_URL_TTL_SECONDS", "300"))
+
+# target_ref -> 소유자·공개상태 판정 훅(storage.policy.TargetStateResolver).
+# 비어 있으면 storage.policy.DenyUnknownTargetResolver 로 fail-closed 한다.
+# #8(Submission)·#10(Contest)·#14(Handover)가 실제 구현으로 갈아끼운다.
+STORAGE_TARGET_RESOLVER = _env("STORAGE_TARGET_RESOLVER", "")
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
