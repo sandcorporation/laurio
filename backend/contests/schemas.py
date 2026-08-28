@@ -99,3 +99,38 @@ class JudgingExtensionPaymentOut(Schema):
     judging_ends_at: datetime | None
     judging_extension_count: int
     refund_disabled: bool
+
+
+class RequirementCreateIn(Schema):
+    text: str = Field(min_length=1, max_length=500)
+    grade: str  # "required" | "optional"
+
+
+class RequirementUpdateIn(Schema):
+    text: str | None = Field(default=None, min_length=1, max_length=500)
+    grade: str | None = None
+    # Requirement.order는 PositiveIntegerField(0 허용)라 DB CHECK가 "order" >= 0
+    # 이다. ContestCreateIn.prize(위 Field(gt=0))와 같은 이유로 여기서 막지 않으면
+    # 음수 order가 422가 아니라 IntegrityError -> 500으로 샌다.
+    order: int | None = Field(default=None, ge=0)
+
+
+class RequirementChatMessageIn(Schema):
+    message: str = Field(min_length=1, max_length=2000)
+
+
+class RequirementProposalOut(Schema):
+    text: str
+    grade: str
+
+
+class RequirementChatTurnOut(Schema):
+    role: str
+    content: str
+    created_at: datetime
+
+
+class RequirementChatResponseOut(Schema):
+    reply: str
+    proposed_requirements: list[RequirementProposalOut]
+    messages: list[RequirementChatTurnOut]

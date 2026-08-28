@@ -204,3 +204,37 @@ class JudgingExtensionPayment(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"JudgingExtensionPayment(order_id={self.order_id}, status={self.status})"
+
+
+class RequirementChatMessage(models.Model):
+    """AI grill 대화 이력 한 턴 (#20).
+
+    Sponsor가 무엇을 적어야 할지 모르는 상태에서 시작해 여러 턴에 걸쳐 요구사항을
+    구체화하는 대화의 원문이다. 이 자체는 확정된 체크리스트가 아니다 — 대화가
+    제안한 항목을 Sponsor가 받아들여야 비로소 `Requirement` 행으로 만들어진다
+    (`contests.api`의 requirement CRUD 엔드포인트). Contest가 DRAFT를 벗어나면
+    더 이상 새 턴을 만들지 않는다(공개된 뒤에는 체크리스트가 흔들리면 안 된다).
+    """
+
+    class Role(models.TextChoices):
+        SPONSOR = "sponsor", "발주자"
+        ASSISTANT = "assistant", "AI"
+
+    contest = models.ForeignKey(
+        Contest, related_name="requirement_chat_messages", on_delete=models.CASCADE
+    )
+    role = models.CharField(max_length=16, choices=Role.choices)
+    content = models.TextField()
+    # ASSISTANT 턴에만 채워진다 — 그 응답을 만들 때 LLM에 실제로 보낸(또는 보낼)
+    # 프롬프트 감사 기록이다. scoring.models.Score.prompt와 같은 목적: Sponsor가
+    # 입력한 신뢰할 수 없는 텍스트가 프롬프트 경계 마커를 무력화한 채로 실렸는지
+    # 사후에 확인할 수 있다(ADR-0006과 같은 정신의 감사 흔적, 다만 이 대화는
+    # append-only 스냅샷은 아니다).
+    prompt = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"[{self.role}] {self.content[:30]}"

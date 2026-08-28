@@ -12,7 +12,8 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from django.conf import settings
-from django.utils.module_loading import import_string
+
+from core.adapters import resolve_adapter
 
 
 @dataclass(frozen=True)
@@ -126,13 +127,11 @@ class FakeLLMScoringAdapter:
 
 
 def get_adapter() -> LLMScoringAdapter:
-    if settings.LLM_ADAPTER_MODE == "fake":
-        return FakeLLMScoringAdapter()
-    path = getattr(settings, "LLM_ADAPTER_MODE", "")
-    try:
-        return import_string(path)()
-    except ImportError as exc:
-        raise NotImplementedError(
+    return resolve_adapter(
+        mode=settings.LLM_ADAPTER_MODE,
+        fake_factory=FakeLLMScoringAdapter,
+        not_implemented_hint=(
             "실제 LLM 연동은 아직 구현되지 않았다 — LLMScoringAdapter 계약만 만족시키는 "
             "dotted path를 LLM_ADAPTER_MODE에 설정하면 된다 (ADR-0007)."
-        ) from exc
+        ),
+    )

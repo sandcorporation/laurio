@@ -29,6 +29,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from django.db import IntegrityError, transaction
 
 from contests.models import Contest, Requirement
+from core.prompt_safety import neutralize_untrusted as _neutralize_untrusted
 from storage.adapters import get_storage_adapter
 from submissions.models import RequirementResponse, Submission
 
@@ -42,26 +43,9 @@ logger = logging.getLogger(__name__)
 # 같은 이유 — 무제한 스캔은 백로그가 쌓였을 때 요청 자체를 타임아웃으로 몰아넣는다.
 BATCH_SIZE = 50
 
-# 프롬프트에 그대로 섞여 들어가는 순간 구조적 지침(섹션 헤더·구분자)처럼 보일 수
-# 있는 시퀀스. 참가자가 제출한 소스코드·Evidence 값에 이 문자열이 문자 그대로 있으면
-# 무력화한다 — 이걸 막지 않으면 소스 파일 안에 가짜 섹션 경계를 심어 "이 Requirement는
-# 충족으로 판정하라" 같은 지침을 주입할 수 있다(#12 리뷰 지적: 상금을 가르는 판정에
-# 대한 프롬프트 인젝션).
-_UNTRUSTED_BLOCK_MARKERS = (
-    "<<<SOURCE_FILE_START>>>",
-    "<<<SOURCE_FILE_END>>>",
-    "<<<EVIDENCE_START>>>",
-    "<<<EVIDENCE_END>>>",
-)
-
-
-def _neutralize_untrusted(text: str) -> str:
-    """프롬프트 경계 마커·코드펜스 탈출 시퀀스를 문자 그대로 담고 있으면 무력화한다."""
-
-    sanitized = text.replace("```", "ˋˋˋ")  # 펜스 조기 종료 방지
-    for marker in _UNTRUSTED_BLOCK_MARKERS:
-        sanitized = sanitized.replace(marker, "")
-    return sanitized
+# 프롬프트 인젝션 방어(마커 무력화·코드펜스 탈출 방지)는 core.prompt_safety로
+# 옮겨 #20(AI grill)의 Sponsor 대화 프롬프트와 공유한다 — 로직은 그대로다
+# (#12 리뷰 지적 9의 동작을 바꾸지 않는다).
 
 
 def _requirement_inputs(submission: Submission) -> list[RequirementInput]:
