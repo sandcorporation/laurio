@@ -31,6 +31,10 @@ class WebhookIn(Schema):
     webhook_id: str
     order_id: UUID
     status: str  # "paid" | "failed"
+    # PG(Fake PG 포함)만 계산할 수 있는 HMAC-SHA256 서명. 없거나 틀리면 402가
+    # 아니라 401로 거부되고, 원장·Payment 상태 어느 것도 건드리지 않는다
+    # (payments.webhook_security, #9 리뷰 지적 2).
+    signature: str
 
 
 class WebhookOut(Schema):

@@ -175,3 +175,17 @@ PAYMENT_ADAPTER_MODE = _env("PAYMENT_ADAPTER_MODE", "fake" if DEBUG else "real")
 # ADR-0004). 배포 없이 조정할 수 있는 DeliverableType.minimum_prize와 달리 이건
 # 아직 DB 조정 대상이 아니다 — 이 티켓 범위에서는 전역 고정값이면 충분하다.
 CONTEST_LISTING_FEE = int(_env("CONTEST_LISTING_FEE", "50000"))
+
+# 웹훅 서명 검증 비밀키 (#9 리뷰 지적 2). `/api/payments/webhook`은 인증 없는
+# 내부 엔드포인트지만, 서명이 없으면 누구든 자신의 order_id로 "paid"를 위조해
+# 돈이 오가지 않은 결제를 원장에 예치 분개로 남기고 Contest를 공개시킬 수 있다.
+# dev는 저장소에 공개된 고정 키로 Fake PG와 검증 양쪽을 동작시킨다.
+_payment_webhook_secret = os.environ.get("PAYMENT_WEBHOOK_SECRET") or ""
+if not _payment_webhook_secret:
+    if not DEBUG:
+        raise ImproperlyConfigured(
+            "DJANGO_DEBUG=false 인데 PAYMENT_WEBHOOK_SECRET 이 비어 있다. "
+            "배포 환경에서는 반드시 주입해야 한다."
+        )
+    _payment_webhook_secret = "dev-only-insecure-fake-pg-webhook-secret"
+PAYMENT_WEBHOOK_SECRET = _payment_webhook_secret

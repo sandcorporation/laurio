@@ -46,6 +46,19 @@ class Payment(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        constraints = [
+            # 진행 중이거나 완료된 결제는 Contest 당 정확히 하나뿐이어야 한다
+            # (#9 리뷰 지적 3) — initiate_payment의 조회-후-생성이 락 없이 경합하면
+            # 같은 Contest에 활성 Payment가 두 개 생겨, 둘 다 확정될 경우 원장에
+            # 예치 분개가 두 번 남는다(정확히 ADR-0003이 막으려는 이중 반영이다).
+            # failed는 제외해 재시도(새 결제)를 막지 않는다 — 부분 인덱스라서
+            # status='failed'인 행끼리는 이 제약에 걸리지 않는다.
+            models.UniqueConstraint(
+                fields=["contest"],
+                condition=models.Q(status__in=["requested", "paid"]),
+                name="unique_active_payment_per_contest",
+            ),
+        ]
 
     def __str__(self) -> str:  # pragma: no cover
         return f"Payment(order_id={self.order_id}, status={self.status})"
