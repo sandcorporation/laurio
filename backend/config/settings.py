@@ -65,6 +65,7 @@ INSTALLED_APPS = [
     # 모델은 없다(#8/#10이 붙을 때까지). STORAGE_BACKEND/STORAGE_TARGET_RESOLVER
     # 오탈자를 요청 시점 500 대신 `manage.py check`/부팅 시점에 잡기 위해서만 등록한다.
     "storage",
+    "submissions",
 ]
 
 MIDDLEWARE = [
@@ -153,9 +154,12 @@ STORAGE_UPLOAD_URL_TTL_SECONDS = int(_env("STORAGE_UPLOAD_URL_TTL_SECONDS", "900
 STORAGE_DOWNLOAD_URL_TTL_SECONDS = int(_env("STORAGE_DOWNLOAD_URL_TTL_SECONDS", "300"))
 
 # target_ref -> 소유자·공개상태 판정 훅(storage.policy.TargetStateResolver).
-# 비어 있으면 storage.policy.DenyUnknownTargetResolver 로 fail-closed 한다.
-# #8(Submission)·#10(Contest)·#14(Handover)가 실제 구현으로 갈아끼운다.
-STORAGE_TARGET_RESOLVER = _env("STORAGE_TARGET_RESOLVER", "")
+# #10이 Submission의 소스·데모 가시성 판정을 여기 꽂았다(ADR-0005, ADR-0014).
+# 비어 있으면 storage.policy.DenyUnknownTargetResolver 로 fail-closed 한다 — 테스트가
+# 이 기본값을 override_settings 로 fake 리졸버로 바꿔치기할 수 있는 이유가 이것이다.
+STORAGE_TARGET_RESOLVER = _env(
+    "STORAGE_TARGET_RESOLVER", "submissions.resolvers.SubmissionTargetStateResolver"
+)
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},

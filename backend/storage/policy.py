@@ -54,10 +54,17 @@ class Visibility(str, Enum):
 
 @dataclass(frozen=True)
 class TargetState:
-    """target_ref가 지금 어떤 상태인지에 대한 판정 결과."""
+    """target_ref가 지금 어떤 상태인지에 대한 판정 결과.
+
+    `additional_viewer_ids`는 `owner_id` 한 명 외에 이 대상을 볼 수 있는 사람이 더
+    있을 때만 쓴다 — 예를 들어 진행 중인 Submission의 데모·영상은 제출자 본인과 그
+    Contest의 Sponsor 둘 다 봐야 한다(ADR-0014). 기존 리졸버(단일 소유자만 있는
+    경우)는 이 필드를 건드릴 필요가 없다 — 기본값이 빈 집합이라 동작이 그대로다.
+    """
 
     visibility: Visibility
     owner_id: int | None = None
+    additional_viewer_ids: frozenset[int] = frozenset()
 
 
 class TargetStateResolver(Protocol):
@@ -118,7 +125,7 @@ class StorageAccessPolicy:
         _reject_if_forged_cookie(request)
 
     def authorize_download(self, request: HttpRequest, target_ref: str) -> None:
-        """대상이 public이면 누구에게나, 아니면 소유자에게만 허용한다."""
+        """대상이 public이면 누구에게나, 아니면 소유자(+추가 열람자)에게만 허용한다."""
         state = self._resolver.resolve(target_ref)
 
         if state.visibility is Visibility.PUBLIC:
@@ -129,6 +136,9 @@ class StorageAccessPolicy:
         _reject_if_forged_cookie(request)
 
         if state.owner_id is not None and state.owner_id == request.user.id:
+            return
+
+        if request.user.id in state.additional_viewer_ids:
             return
 
         raise StorageAccessDenied("이 대상에 접근할 권한이 없다")

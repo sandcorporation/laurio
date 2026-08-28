@@ -8,6 +8,7 @@ from notifications.api import router as notifications_internal_router
 from payments.api import router as payments_router
 from storage.api import router as storage_router
 from storage.policy import StorageAccessDenied
+from submissions.api import router as submissions_router
 from verification.api import router as verification_router
 
 api = NinjaAPI(title="Laurio API", version="0.1.0")
@@ -16,6 +17,7 @@ api.add_router("", accounts_router)
 api.add_router("", verification_router)
 api.add_router("", contests_router)
 api.add_router("", payments_router)
+api.add_router("", submissions_router)
 api.add_router("/ledger", ledger_router)
 
 
