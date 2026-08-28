@@ -59,6 +59,7 @@ INSTALLED_APPS = [
     "verification",
     "contests",
     "ledger",
+    "payments",
 ]
 
 MIDDLEWARE = [
@@ -163,3 +164,14 @@ if not _verification_key:
         )
     _verification_key = "A0crfksMrBmbSY37jIyOwcPRFpK9rc_eIaNnL89lIfo="
 VERIFICATION_ENCRYPTION_KEY = _verification_key
+
+# --- 결제 · Escrow 예치 (#9, ADR-0007) --------------------------------------
+# PG 어댑터도 같은 원칙: dev/test는 Fake PG로 바인딩되어 웹훅 재전송·타임아웃·순서
+# 뒤바뀜을 네트워크 없이 결정적으로 주입할 수 있다. prod는 PAYMENT_ADAPTER_MODE=real
+# 로 실제 토스 연동을 쓴다(#23의 범위).
+PAYMENT_ADAPTER_MODE = _env("PAYMENT_ADAPTER_MODE", "fake" if DEBUG else "real")
+
+# Sponsor가 Contest를 개최할 때 Prize와 별도로 결제하는 개최 등록비(원 단위 정수,
+# ADR-0004). 배포 없이 조정할 수 있는 DeliverableType.minimum_prize와 달리 이건
+# 아직 DB 조정 대상이 아니다 — 이 티켓 범위에서는 전역 고정값이면 충분하다.
+CONTEST_LISTING_FEE = int(_env("CONTEST_LISTING_FEE", "50000"))

@@ -11,6 +11,7 @@
 """
 
 from __future__ import annotations
+import uuid
 
 from django.conf import settings
 from django.db import models
@@ -56,6 +57,11 @@ class Contest(models.Model):
     sponsor = models.ForeignKey(
         "accounts.SponsorProfile", related_name="contests", on_delete=models.CASCADE
     )
+    # ledger.JournalEntry.contest_id 는 (#8보다 먼저 만들어진) 불투명 UUID다 — ledger
+    # 앱은 손대지 않고(#9의 범위 밖, 이미 리뷰·검증됨) 이 필드로 Contest의 정수 PK와
+    # 원장의 UUID 세계를 잇는다. #9가 결제 웹훅을 원장에 분개로 남길 때 이 값을
+    # contest_id로 쓴다.
+    ledger_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     title = models.CharField(max_length=200)
     category = models.ForeignKey(Category, related_name="contests", on_delete=models.PROTECT)
     deliverable_types = models.ManyToManyField(DeliverableType, related_name="contests")
