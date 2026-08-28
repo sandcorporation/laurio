@@ -31,8 +31,14 @@ class Payout(models.Model):
         CONFIRMED = "confirmed", "지급 확정"
         FAILED = "failed", "지급 실패"
 
-    handover = models.OneToOneField(
-        "handovers.Handover", related_name="payout", on_delete=models.CASCADE
+    # OneToOneField가 아니라 ForeignKey다 — FAILED로 끝난 시도가 재시도를 영구히
+    # 막으면 안 된다(토스가 거절해도 Escrow에 갇힌 상금을 꺼낼 길이 있어야 한다).
+    # 동시에 하나의 Handover에 "진행 중이거나 이미 성사된" 시도가 두 개 이상
+    # 생기는 걸 막는 건 아래 unique_active_payout_per_handover다 —
+    # payments.models.Payment.unique_active_payment_per_contest와 같은 부분
+    # 유니크 인덱스로, failed는 조건에서 뺀다.
+    handover = models.ForeignKey(
+        "handovers.Handover", related_name="payouts", on_delete=models.CASCADE
     )
     idempotency_key = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
 
@@ -57,6 +63,24 @@ class Payout(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            # 진행 중이거나 이미 확정된 지급 시도는 Handover 당 정확히 하나여야
+            # 한다(payments.Payment.unique_active_payment_per_contest와 같은
+            # 이유 — 락 없는 조회-후-생성 경합이 같은 Handover에 활성 Payout을
+            # 두 개 만들면 수수료·원천징수 분개가 두 번 남는다). failed는 제외해
+            # 재시도(새 REQUESTED)를 막지 않는다 — 부분 인덱스라서 status=
+            # 'failed'인 행끼리는 이 제약에 걸리지 않는다.
+            models.UniqueConstraint(
+                fields=["handover"],
+                condition=models.Q(
+                    status__in=["requested", "confirmed_identity_pending", "confirmed"]
+                ),
+                name="unique_active_payout_per_handover",
+            ),
+        ]
 
     def __str__(self) -> str:  # pragma: no cover
         return f"Payout(idempotency_key={self.idempotency_key}, status={self.status})"

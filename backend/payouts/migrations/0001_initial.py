@@ -28,8 +28,15 @@ class Migration(migrations.Migration):
                 ('reversal_journal_entry_id', models.PositiveIntegerField(blank=True, null=True)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
-                ('handover', models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, related_name='payout', to='handovers.handover')),
+                ('handover', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='payouts', to='handovers.handover')),
             ],
+            options={
+                'ordering': ['-created_at'],
+            },
+        ),
+        migrations.AddConstraint(
+            model_name='payout',
+            constraint=models.UniqueConstraint(condition=models.Q(('status__in', ['requested', 'confirmed_identity_pending', 'confirmed'])), fields=('handover',), name='unique_active_payout_per_handover'),
         ),
         migrations.CreateModel(
             name='PayoutWebhookDelivery',

@@ -320,6 +320,33 @@ def test_developer_can_upload_and_sponsor_can_list_build_asset(client, category,
 
 
 @pytest.mark.django_db
+def test_build_asset_label_over_200_chars_is_rejected_with_422_not_500(
+    client, category, landing_type
+):
+    """BuildAsset.label은 CharField(max_length=200)이다 — 스키마가 막지 않으면
+    Postgres DataError가 500으로 샌다(리뷰 지적 3)."""
+
+    sponsor, dev, contest, submission = _publish_close_award(client, category, landing_type)
+
+    upload_resp = client.post(
+        f"{STORAGE_URL}/uploads",
+        data={"target_ref": f"submission:{contest['id']}:{dev['user_id']}:build-asset"},
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert upload_resp.status_code == 200
+    object_key = upload_resp.json()["object_key"]
+
+    record_resp = client.post(
+        f"{SUBMISSIONS_URL}/{submission['id']}/build-assets",
+        data={"kind": "build_config", "object_key": object_key, "label": "a" * 201},
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert record_resp.status_code == 422
+
+
+@pytest.mark.django_db
 def test_developer_cannot_upload_build_asset_for_non_awarded_submission(
     client, category, landing_type
 ):
@@ -491,6 +518,48 @@ def test_release_due_scan_is_idempotent_when_run_twice(client, category, landing
         if e.id == handover.escrow_release_journal_entry_id
     ]
     assert len(entries) == 1
+
+
+@pytest.mark.django_db
+def test_release_due_scan_is_bounded_by_batch_size(client, category, landing_type, monkeypatch):
+    """무제한 스캔은 백로그가 쌓였을 때 요청 자체를 타임아웃으로 몰아넣는다
+    (scoring.services.BATCH_SIZE와 같은 이유, 리뷰 지적 5) — 배치를 넘는 잔여
+    분량은 다음 스캔이 마저 처리해야 한다."""
+
+    import handovers.api as handovers_api
+
+    monkeypatch.setattr(handovers_api, "BATCH_SIZE", 2)
+
+    handovers = []
+    for i in range(3):
+        # 이전 반복의 _close_contest가 시계를 미래로 얼려 놓았다 — 그대로 두면
+        # 다음 반복이 만드는 Contest의 deadline_at(실제 현재 시각 기준)이 이미
+        # 지난 것으로 보여 제출 자체가 403으로 막힌다. 각 반복 시작 시 실제
+        # 시각으로 되돌린다.
+        ClockOverride.objects.filter(pk=1).delete()
+        _sponsor, _dev, contest, _submission = _publish_close_award(
+            client, category, landing_type, sponsor_uid=f"batch-sponsor-{i}", dev_uid=f"batch-dev-{i}"
+        )
+        handovers.append(Handover.objects.get(award__contest_id=contest["id"]))
+
+    latest_deadline = max(h.release_deadline_at for h in handovers)
+    _freeze(latest_deadline + timedelta(minutes=1))
+
+    first = client.post(INTERNAL_HANDOVER_RELEASE_DUE_URL, **_internal_headers())
+    assert first.status_code == 200
+    assert first.json()["count"] == 2
+
+    second = client.post(INTERNAL_HANDOVER_RELEASE_DUE_URL, **_internal_headers())
+    assert second.status_code == 200
+    assert second.json()["count"] == 1
+
+    third = client.post(INTERNAL_HANDOVER_RELEASE_DUE_URL, **_internal_headers())
+    assert third.json()["count"] == 0
+
+    for h in handovers:
+        h.refresh_from_db()
+        assert h.status == Handover.Status.RELEASED
+        assert h.escrow_release_journal_entry_id is not None
 
 
 @pytest.mark.django_db

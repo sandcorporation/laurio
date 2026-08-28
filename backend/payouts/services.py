@@ -33,6 +33,16 @@ from verification.crypto import encrypt
 
 from .models import Payout, TaxIdentity
 
+# REQUESTED든 그 이후 확정 상태든 "아직 실패로 끝나지 않은" 시도는 활성으로 본다
+# — models.Payout.Meta.constraints의 unique_active_payout_per_handover와 정확히
+# 같은 집합이어야 한다(그쪽은 DB 레벨 최후 방어선, 이건 애플리케이션 레벨 조회
+# 기준). FAILED만 빠진다 — 그래야 실패한 시도 뒤에 새 REQUESTED를 만들 수 있다.
+_ACTIVE_PAYOUT_STATUSES = [
+    Payout.Status.REQUESTED,
+    Payout.Status.CONFIRMED_IDENTITY_PENDING,
+    Payout.Status.CONFIRMED,
+]
+
 
 def _compute_amounts(prize_amount: int) -> tuple[int, int, int]:
     """(플랫폼 수수료, 원천징수, 실지급액)을 원 단위 정수로 계산한다.
@@ -50,39 +60,64 @@ def _compute_amounts(prize_amount: int) -> tuple[int, int, int]:
 
 
 def get_or_create_payout(handover) -> Payout:
-    """이 Handover에 대한 Payout을 멱등하게 만든다.
+    """이 Handover에 대한 활성 Payout을 멱등하게 만든다.
 
-    이미 있으면(REQUESTED든 그 이후 상태든) 그대로 돌려준다 — 중복 클릭·재요청이
-    새 idempotency_key를 계속 만들어내지 않는다(payments.api.initiate_payment와
-    같은 관용구). 네트워크 호출(어댑터)은 여기서 하지 않는다 — 이 함수는 순수
-    DB 쓰기만 하므로 트랜잭션 안에서도 안전하다("외부 네트워크 호출을
-    transaction.atomic() 안에 넣지 않는다"는 lessons-learned 원칙).
+    활성(REQUESTED/CONFIRMED_IDENTITY_PENDING/CONFIRMED)이 이미 있으면 그대로
+    돌려준다 — 중복 클릭·재요청이 새 idempotency_key를 계속 만들어내지 않는다
+    (payments.api.initiate_payment와 같은 관용구). 가장 최근 시도가 FAILED뿐이면
+    (토스가 거절했거나 fake 시나리오로 실패를 흉내낸 경우) 새 REQUESTED 행을
+    만들어 재시도를 허용한다 — Escrow에 갇힌 상금이 재시도 경로 없이 영구히
+    묶이는 사고를 막는다.
+
+    `Handover`를 `select_for_update`로 잠가 동시 요청을 직렬화한다
+    (payments.api.initiate_payment가 Contest를 잠그는 것과 같은 이유) — 잠금
+    없이 조회-후-생성하면 두 요청이 동시에 "활성 Payout 없음"을 보고 각자 새
+    행을 만들어, `unique_active_payout_per_handover`가 최후에 하나만 통과시켜도
+    나머지 하나는 예외로 죽는다. 네트워크 호출(어댑터)은 이 함수 밖(API 레이어)
+    에서 한다 — 이 함수는 순수 DB 쓰기만 하므로 트랜잭션 안에서도 안전하다
+    ("외부 네트워크 호출을 transaction.atomic() 안에 넣지 않는다"는
+    lessons-learned 원칙).
     """
 
-    existing = Payout.objects.filter(handover=handover).first()
-    if existing is not None:
-        return existing
+    from handovers.models import Handover
 
-    prize_amount = handover.award.contest.prize
-    fee, withholding, net = _compute_amounts(prize_amount)
+    with transaction.atomic():
+        locked_handover = Handover.objects.select_for_update().get(pk=handover.pk)
 
-    try:
-        with transaction.atomic():
+        existing = (
+            Payout.objects.filter(handover=locked_handover, status__in=_ACTIVE_PAYOUT_STATUSES)
+            .order_by("-created_at")
+            .first()
+        )
+        if existing is not None:
+            return existing
+
+        prize_amount = locked_handover.award.contest.prize
+        fee, withholding, net = _compute_amounts(prize_amount)
+
+        try:
             return Payout.objects.create(
-                handover=handover,
+                handover=locked_handover,
                 prize_amount=prize_amount,
                 platform_fee_amount=fee,
                 withholding_tax_amount=withholding,
                 net_amount=net,
                 status=Payout.Status.REQUESTED,
             )
-    except IntegrityError:
-        # OneToOneField(handover) 유니크 제약에 걸렸다 — 동시 요청이 경합했다는
-        # 뜻이다(payments.api.initiate_payment의 방어적 안전망과 같은 이유).
-        existing = Payout.objects.filter(handover=handover).first()
-        if existing is not None:
-            return existing
-        raise
+        except IntegrityError:
+            # unique_active_payout_per_handover에 걸렸다 — 위 잠금에도 불구하고
+            # 도달했다면 방어적 안전망이다(payments.api.initiate_payment와 같은
+            # 이유). 이미 있는 활성 Payout을 그대로 돌려준다.
+            existing = (
+                Payout.objects.filter(
+                    handover=locked_handover, status__in=_ACTIVE_PAYOUT_STATUSES
+                )
+                .order_by("-created_at")
+                .first()
+            )
+            if existing is not None:
+                return existing
+            raise
 
 
 def mark_confirmed(idempotency_key) -> Payout:
@@ -157,20 +192,24 @@ def mark_failed(idempotency_key) -> Payout:
 def submit_identity(payout: Payout, resident_registration_number: str) -> Payout:
     """주민등록번호를 암호화해 별도 테이블에 저장하고 지급을 최종 확정한다.
 
-    이미 CONFIRMED면(TaxIdentity가 이미 있으면) 아무 것도 다시 만들지 않고 그대로
-    돌려준다 — 재전송에 안전하다. `TaxIdentity`가 `Payout`과 OneToOne이므로 두 번째
-    생성 시도는 어차피 IntegrityError가 나겠지만, 조회로 먼저 걸러 예외 경로에
-    기대지 않는다.
+    `TaxIdentity`를 `update_or_create`로 upsert한다 — 재제출은 항상 최신 값으로
+    덮어쓴다. 이미 있는 값을 그대로 다시 보내면(재전송) 같은 값으로 덮어쓸 뿐이라
+    안전하고, 실수로 잘못 입력한 값을 보냈다면(오타) 정정할 수 있는 유일한
+    경로이기도 하다 — TaxIdentity는 append-only 원장이 아니라 세무 신고용
+    현재값 저장소이므로, "이미 있으면 그대로 돌려주고 두 번째 값은 버린다"는
+    구 정책은 오타를 API로 영영 고칠 수 없게 만든다(#15 리뷰 지적 4). Payout
+    상태는 CONFIRMED_IDENTITY_PENDING일 때만 CONFIRMED로 전이한다 — 이미
+    CONFIRMED인 뒤의 정정 제출은 상태를 다시 건드리지 않는다(원장 분개는
+    mark_confirmed 시점에 이미 끝났고, 신원 정보 자체는 원장에 영향을 주지
+    않는다).
     """
 
-    if TaxIdentity.objects.filter(payout=payout).exists():
-        payout.refresh_from_db()
-        return payout
-
     with transaction.atomic():
-        TaxIdentity.objects.create(
+        TaxIdentity.objects.update_or_create(
             payout=payout,
-            resident_registration_number_encrypted=encrypt(resident_registration_number),
+            defaults={
+                "resident_registration_number_encrypted": encrypt(resident_registration_number)
+            },
         )
         Payout.objects.filter(
             pk=payout.pk, status=Payout.Status.CONFIRMED_IDENTITY_PENDING

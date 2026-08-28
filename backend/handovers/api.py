@@ -34,6 +34,14 @@ from .services import release_escrow
 router = Router(tags=["handovers"])
 internal_router = Router(tags=["internal", "handovers"], auth=InternalAuth())
 
+# 한 스캔에서 시도하는 최대 Handover 수. scoring.services.BATCH_SIZE·
+# core.transitions.DEFAULT_BATCH_SIZE와 같은 이유 — 무제한 스캔은 백로그가
+# 쌓였을 때 이 요청 자체를 타임아웃으로 몰아넣는다. 이 스캔은 Escrow를
+# 해제하므로 타임아웃 중간에 끊기는 게 장식적인 문제가 아니다 — 배치를 넘는
+# 잔여분은 다음 틱이 마저 처리한다(ADR-0003이 이미 "스캔 주기만큼 늦어지는 건
+# 무해하다"고 규정했다).
+BATCH_SIZE = 50
+
 
 def _serialize_handover(handover: Handover) -> HandoverOut:
     return HandoverOut(
@@ -106,9 +114,13 @@ def release_due_handovers(request):
     """
 
     as_of = Clock.now()
-    due = Handover.objects.filter(
-        status=Handover.Status.PENDING_ACCEPTANCE, release_deadline_at__lte=as_of
-    ).select_related("award__contest")
+    due = (
+        Handover.objects.filter(
+            status=Handover.Status.PENDING_ACCEPTANCE, release_deadline_at__lte=as_of
+        )
+        .select_related("award__contest")
+        .order_by("id")[:BATCH_SIZE]
+    )
 
     released = []
     for handover in due:

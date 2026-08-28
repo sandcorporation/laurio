@@ -41,10 +41,11 @@ class WebhookOut(Schema):
 
 
 class IdentitySubmitIn(Schema):
-    # 형식만 최소 검증한다(숫자 13자리) — 실제 유효성(생년월일·성별 코드 정합)까지
-    # 검사하는 건 이 티켓 범위 밖이다. 상한을 명시적으로 두어 스키마 레벨에서
-    # 거부한다(#15 lessons-learned: "경계 없는 필드는 4xx를 500으로 만든다").
-    resident_registration_number: str = Field(min_length=13, max_length=13)
+    # 형식만 검증한다(숫자로만 이루어진 13자리) — 실제 유효성(생년월일·성별 코드
+    # 정합, 체크섬)까지 검사하는 건 이 티켓 범위 밖이다. 길이만 보고 통과시키면
+    # "13자리 문자열"이면 뭐든(공백·기호 포함) 암호화되어 저장되고 만다(#15
+    # 리뷰 지적 4) — 패턴으로 숫자만 허용한다.
+    resident_registration_number: str = Field(pattern=r"^\d{13}$")
 
 
 class ErrorOut(Schema):

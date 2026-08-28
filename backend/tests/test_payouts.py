@@ -385,6 +385,68 @@ def test_confirm_failed_leaves_no_ledger_entry(client, category, landing_type):
     assert payout.journal_entry_id is None
 
 
+@pytest.mark.django_db
+def test_payout_can_be_retried_after_failure_and_previous_attempt_stays_failed(
+    client, category, landing_type
+):
+    """FAILED로 끝난 시도가 재시도를 영구히 막지 않는다 — 그렇지 않으면 토스가
+    거절한 순간 상금이 Escrow에 영구히 갇힌다(리뷰 지적 1)."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+
+    first = _request_payout(client, dev, contest["id"])
+    failed_resp = _confirm_payout(client, dev, first["idempotency_key"], simulate="failed")
+    assert failed_resp.status_code == 200
+    assert failed_resp.json()["status"] == "failed"
+
+    # 재시도 — 실패한 시도와 다른(새) idempotency_key를 받는다.
+    second = _request_payout(client, dev, contest["id"])
+    assert second["idempotency_key"] != first["idempotency_key"]
+    assert second["status"] == "requested"
+
+    # 실패한 첫 시도는 실패인 채로 그대로 남는다 — 되돌아가는 상태 전이가 아니다.
+    first_payout = Payout.objects.get(idempotency_key=first["idempotency_key"])
+    assert first_payout.status == Payout.Status.FAILED
+
+    # 재요청은 새 idempotency_key로 새 REQUESTED 행을 만든다 — 실패한 시도를
+    # 덮어쓰지 않는다. Handover 당 두 행(실패 하나 + 새로 요청된 하나)이
+    # 존재해야 한다.
+    assert Payout.objects.filter(handover__award__contest_id=contest["id"]).count() == 2
+
+    # 재시도한 지급은 정상적으로 확정되어 원장에 분개가 남는다.
+    confirm_resp = _confirm_payout(client, dev, second["idempotency_key"])
+    assert confirm_resp.status_code == 200
+    assert confirm_resp.json()["status"] == "confirmed_identity_pending"
+
+    second_payout = Payout.objects.get(idempotency_key=second["idempotency_key"])
+    assert second_payout.journal_entry_id is not None
+
+    # GET은 가장 최근(재시도로 살아있는) 시도를 돌려준다 — 이미 실패한 첫 시도가
+    # 아니라.
+    get_resp = client.get(f"{CONTESTS_URL}/{contest['id']}/payout", **_auth_header(dev["access"]))
+    assert get_resp.status_code == 200
+    assert get_resp.json()["idempotency_key"] == second["idempotency_key"]
+
+
+@pytest.mark.django_db
+def test_repeated_requests_while_active_do_not_create_a_third_payout(
+    client, category, landing_type
+):
+    """활성(REQUESTED) 시도가 있는 동안 재요청은 새 행을 만들지 않는다 — 실패
+    이후에만 새 시도가 허용된다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+
+    first = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, first["idempotency_key"], simulate="failed")
+
+    second = _request_payout(client, dev, contest["id"])
+    third = _request_payout(client, dev, contest["id"])
+
+    assert second["idempotency_key"] == third["idempotency_key"]
+    assert Payout.objects.filter(handover__award__contest_id=contest["id"]).count() == 2
+
+
 # --- payout.changed 웹훅 ---------------------------------------------------------
 
 
@@ -596,6 +658,67 @@ def test_repeated_identity_submission_is_idempotent(client, category, landing_ty
 
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
     assert TaxIdentity.objects.filter(payout=payout).count() == 1
+
+
+@pytest.mark.django_db
+def test_identity_rejects_non_digit_or_wrong_length_values_with_422(client, category, landing_type):
+    """길이만 보고 통과시키면 공백·기호가 섞인 13글자도 암호화되어 저장된다
+    (리뷰 지적 4) — 숫자 13자리만 통과해야 한다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"])
+
+    for bad_value in ["90010112345a", "9001-0112345", "900101123456", "90010112345678"]:
+        resp = client.post(
+            f"{PAYOUTS_URL}/{requested['idempotency_key']}/identity",
+            data={"resident_registration_number": bad_value},
+            content_type="application/json",
+            **_auth_header(dev["access"]),
+        )
+        assert resp.status_code == 422, (bad_value, resp.content)
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    assert not TaxIdentity.objects.filter(payout=payout).exists()
+
+
+@pytest.mark.django_db
+def test_identity_can_be_corrected_after_a_typo(client, category, landing_type):
+    """오타로 잘못 제출한 주민등록번호를 API로 정정할 수 있어야 한다(리뷰 지적
+    4) — 이전 정책(이미 있으면 그대로 돌려주고 두 번째 값은 버림)은 오타를
+    영영 못 고치게 만들었다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"])
+
+    typo = "9001011234567"
+    corrected = "9001011234568"
+
+    first = client.post(
+        f"{PAYOUTS_URL}/{requested['idempotency_key']}/identity",
+        data={"resident_registration_number": typo},
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert first.status_code == 200
+
+    second = client.post(
+        f"{PAYOUTS_URL}/{requested['idempotency_key']}/identity",
+        data={"resident_registration_number": corrected},
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert second.status_code == 200
+    assert second.json()["status"] == "confirmed"
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    identity = TaxIdentity.objects.get(payout=payout)
+    assert TaxIdentity.objects.filter(payout=payout).count() == 1
+
+    from verification.crypto import decrypt
+
+    assert decrypt(identity.resident_registration_number_encrypted) == corrected
 
 
 @pytest.mark.django_db

@@ -28,7 +28,10 @@ class HandoverOut(Schema):
 class BuildAssetIn(Schema):
     kind: str
     object_key: str = Field(max_length=600)
-    label: str = ""
+    # BuildAsset.label은 CharField(max_length=200)이다 — 여기서 막지 않으면
+    # 200자를 넘는 label이 422가 아니라 Postgres DataError로 새어 500이 된다
+    # (ContestCreateIn.prize의 Field(gt=0)와 같은 원칙, #15 리뷰 지적 3).
+    label: str = Field(default="", max_length=200)
 
 
 class BuildAssetOut(Schema):
