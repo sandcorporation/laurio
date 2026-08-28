@@ -12,6 +12,15 @@
 호출자에게 예외를 전파하지 않는다. 스캔 함수들(`send_due_*`)은 반대로 한
 행의 예외가 배치 전체를 막지 않도록 행 단위로 잡는다
 (`distributions.services.run_due_distributions`와 같은 관용구).
+
+리뷰 지적(#19) 이후의 두 번째 규율: **완료 표시는 실제로 다 보낸 뒤에만
+남긴다.** "보내기 전에 먼저 완료로 찍고 나서 보낸다"는 순서는, 그 사이(특히
+여러 수신자를 순회하는 팬아웃 도중)에 프로세스가 죽으면 "이미 끝났다"는
+표시만 남고 알림은 일부(또는 전부) 못 나간 채로 영원히 다시 시도되지 않는
+사고를 만든다. 그래서 이 모듈의 모든 스캔·결과 알림 함수는 (1) 수신자별로
+`_safe_notify_once`(이미 보낸 적 있으면 건너뛴다)로 시도한 뒤 (2) 그 뒤에만
+완료 표시를 남긴다 — 중간에 죽어도 다음 스캔이 "아직 못 받은 수신자만" 안전하게
+마저 처리한다.
 """
 
 from __future__ import annotations
@@ -26,7 +35,7 @@ from django.utils import timezone
 from contests.models import Contest
 from core.clock import Clock
 
-from .models import NotificationType
+from .models import Notification, NotificationType
 from .services import create_notification
 
 logger = logging.getLogger(__name__)
@@ -37,6 +46,9 @@ User = get_user_model()
 # distributions.services.BATCH_SIZE와 같은 이유 — 무제한 스캔은 백로그가 쌓였을
 # 때 이 요청 자체를 타임아웃으로 몰아넣는다.
 BATCH_SIZE = 200
+
+# Award/Distribution 결과 알림 복구 스캔 한 번이 처리하는 최대 행 수. 같은 이유.
+RESULT_NOTICE_BATCH_SIZE = 200
 
 
 def _safe_notify(*, recipient, notification_type: str, context: dict) -> None:
@@ -54,6 +66,38 @@ def _safe_notify(*, recipient, notification_type: str, context: dict) -> None:
         )
 
 
+def _safe_notify_once(
+    *, recipient, notification_type: str, dedup_context: dict, context: dict
+) -> None:
+    """`recipient`에게 이 `dedup_context`에 대한 알림을 정확히 한 번만(재시도
+    안전하게) 만든다.
+
+    "완료 표시는 실제로 다 보낸 뒤에만 남긴다"(모듈 docstring)는 방식과 짝을
+    이루는 재시작 안전장치다(#19 리뷰 지적 2) — 스캔이 중간에 죽거나(타임아웃,
+    재배포) 다시 실행돼도, 이미 이 수신자에게 같은 `dedup_context`로 만들어진
+    Notification이 있으면 다시 만들지 않는다.
+
+    `dedup_context`는 보통 `{"contest_id": ...}`처럼 "이 Contest에 대해 평생
+    한 번"을 뜻하지만, 유료 연장처럼 같은 Contest에 대해 같은 유형의 알림이
+    **다시** 정당하게 나가야 하는 경우(#19 리뷰 지적 1)에는 그 "새로운 계기"를
+    구분하는 값(예: 갱신된 `judging_ends_at`)을 함께 넣어야 한다 — 그렇지
+    않으면 이 존재 검사가 예전 알림을 근거로 정당한 재발송까지 막아버린다.
+
+    동시에 실행되는 두 스캔이 이 존재 검사를 동시에 통과해 드물게 중복
+    발송될 가능성은 남아 있다 — 이는 "알림이 조용히 유실되는 것보다 드물게
+    중복되는 편이 낫다"는 이 코드베이스의 기존 입장(notifications.services의
+    STUCK_QUEUED 재선점과 같은 트레이드오프)과 일관된 선택이다.
+    """
+
+    filters = {f"context__{key}": value for key, value in dedup_context.items()}
+    already_sent = Notification.objects.filter(
+        recipient=recipient, notification_type=notification_type, **filters
+    ).exists()
+    if already_sent:
+        return
+    _safe_notify(recipient=recipient, notification_type=notification_type, context=context)
+
+
 def _participating_developer_users(contest: Contest):
     """이 Contest에 Submission을 낸 Developer들의 User 목록(중복 없이)."""
 
@@ -66,10 +110,12 @@ def _participating_developer_users(contest: Contest):
 def send_due_deadline_reminders(as_of=None) -> list[dict]:
     """마감이 다가오는 PUBLISHED Contest의 Sponsor와 참가 Developer에게 알린다.
 
-    Contest 당 한 번만 보낸다 — `deadline_reminder_sent_at`이 비어 있는 행만
-    대상으로 하고, 조건부 UPDATE로 실제 선점에 성공한 스캔만 알림을 만든다.
-    스캔이 겹쳐 돌아도(core.transitions.claim_transition과 같은 정신) 중복
-    발송되지 않는다.
+    Contest 당 한 번만 "완료"로 표시한다 — `deadline_reminder_sent_at`이 비어
+    있는 행만 대상으로 한다. 이 표시는 Sponsor·참가 Developer 전원에게 시도를
+    마친 **뒤에만** 남긴다(#19 리뷰 지적 2) — 참가자가 많은 Contest에서 팬아웃
+    도중 타임아웃·재배포로 죽으면, 표시를 먼저 찍는 예전 방식은 남은 수신자를
+    영원히 못 받게 만들었다. `_safe_notify_once`가 이미 받은 수신자에게 중복
+    발송하지 않으므로, 다음 스캔이 이 Contest를 다시 집어도 안전하다.
     """
 
     as_of = as_of or Clock.now()
@@ -82,37 +128,36 @@ def send_due_deadline_reminders(as_of=None) -> list[dict]:
             deadline_at__lte=as_of + lead,
         )
         .select_related("sponsor__user")
-        .order_by("id")[:BATCH_SIZE]
+        .order_by("deadline_at", "id")[:BATCH_SIZE]
     )
 
     results = []
     for contest in due:
         try:
-            claimed = (
-                Contest.objects.filter(
-                    pk=contest.pk, deadline_reminder_sent_at__isnull=True
-                ).update(deadline_reminder_sent_at=as_of)
-                == 1
-            )
-            if not claimed:
-                continue
-
             context = {
                 "contest_id": contest.id,
                 "contest_title": contest.title,
                 "deadline_at": contest.deadline_at.isoformat(),
             }
-            _safe_notify(
+            _safe_notify_once(
                 recipient=contest.sponsor.user,
                 notification_type=NotificationType.DEADLINE_REMINDER,
+                dedup_context={"contest_id": contest.id},
                 context={**context, "role": "sponsor"},
             )
             for dev_user in _participating_developer_users(contest):
-                _safe_notify(
+                _safe_notify_once(
                     recipient=dev_user,
                     notification_type=NotificationType.DEADLINE_REMINDER,
+                    dedup_context={"contest_id": contest.id},
                     context={**context, "role": "developer"},
                 )
+
+            # 전원(Sponsor + 참가 Developer)에게 시도를 마친 뒤에만 완료 표시를
+            # 남긴다 — 위 docstring 참고.
+            Contest.objects.filter(pk=contest.pk, deadline_reminder_sent_at__isnull=True).update(
+                deadline_reminder_sent_at=as_of
+            )
             results.append({"event": "deadline_reminder_sent", "contest_id": contest.id})
         except Exception:  # noqa: BLE001 - 한 Contest의 실패가 배치를 막으면 안 된다.
             logger.exception("Contest(pk=%s) 마감 임박 알림 처리 중 예외, 다음 건으로 계속", contest.id)
@@ -124,7 +169,13 @@ def send_due_deadline_reminders(as_of=None) -> list[dict]:
 
 
 def send_due_judging_end_reminders(as_of=None) -> list[dict]:
-    """심사기간 종료가 다가오는 CLOSED Contest의 Sponsor에게 Award를 상기시킨다."""
+    """심사기간 종료가 다가오는 CLOSED Contest의 Sponsor에게 Award를 상기시킨다.
+
+    유료 연장(`contests.services.mark_extension_paid`)이 `judging_ends_at`을
+    늘릴 때 `judging_end_reminder_sent_at`도 함께 비운다(#19 리뷰 지적 1) —
+    그래야 연장된 새 종료일이 다가올 때 이 스캔이 다시 알릴 수 있다. 여기서는
+    그 결과(비워진 플래그)를 그대로 소비할 뿐이다.
+    """
 
     as_of = as_of or Clock.now()
     lead = timedelta(hours=settings.JUDGING_END_REMINDER_LEAD_HOURS)
@@ -137,30 +188,34 @@ def send_due_judging_end_reminders(as_of=None) -> list[dict]:
             judging_ends_at__lte=as_of + lead,
         )
         .select_related("sponsor__user")
-        .order_by("id")[:BATCH_SIZE]
+        .order_by("judging_ends_at", "id")[:BATCH_SIZE]
     )
 
     results = []
     for contest in due:
         try:
-            claimed = (
-                Contest.objects.filter(
-                    pk=contest.pk, judging_end_reminder_sent_at__isnull=True
-                ).update(judging_end_reminder_sent_at=as_of)
-                == 1
-            )
-            if not claimed:
-                continue
-
-            _safe_notify(
+            # judging_ends_at을 dedup_context에 함께 넣는다 — 유료 연장이 이
+            # 값을 바꾸면서 judging_end_reminder_sent_at도 함께 비우므로(#19
+            # 리뷰 지적 1), 이 존재 검사가 "예전(연장 전) 종료일에 대한
+            # 알림"까지 같은 것으로 보고 새 알림을 막아버리면 안 된다. 새
+            # judging_ends_at은 이전 값과 다르므로, 이 필터는 "이번 종료일에
+            # 대해서는 아직 안 보냈다"만 정확히 검사한다.
+            _safe_notify_once(
                 recipient=contest.sponsor.user,
                 notification_type=NotificationType.JUDGING_PERIOD_ENDING_REMINDER,
+                dedup_context={
+                    "contest_id": contest.id,
+                    "judging_ends_at": contest.judging_ends_at.isoformat(),
+                },
                 context={
                     "contest_id": contest.id,
                     "contest_title": contest.title,
                     "judging_ends_at": contest.judging_ends_at.isoformat(),
                 },
             )
+            Contest.objects.filter(
+                pk=contest.pk, judging_end_reminder_sent_at__isnull=True
+            ).update(judging_end_reminder_sent_at=as_of)
             results.append({"event": "judging_end_reminder_sent", "contest_id": contest.id})
         except Exception:  # noqa: BLE001 - 한 Contest의 실패가 배치를 막으면 안 된다.
             logger.exception(
@@ -202,9 +257,33 @@ def send_due_distribution_final_warnings(as_of=None) -> list[dict]:
 
     아직 Distribution이 만들어지지 않은 Contest만 대상이다 — 이미 실행됐다면
     경고가 아니라 결과 통지(`notify_distribution_shares`)가 맞다.
+
+    경고 시각(`warning_target`)은 `judging_ends_at`으로부터 정확히 선형으로
+    계산되지 않는다(`_constructed_daytime_target`이 로컬 날짜 경계에서 시각을
+    고정한다) — 그래서 DB 쿼리만으로는 정확한 조건을 표현할 수 없다. 대신 아래
+    `judging_ends_at__lte=judging_ends_at_cutoff`는 "확실히 아직 멀었다"는
+    Contest만 걸러내는, **절대 과소포함하지 않는(항상 진짜 대상을 포함하는)**
+    느슨한 상한이다(#19 리뷰 지적 4) — 이 필터가 없으면 아직 멀었지만 개수가
+    많은 후보들이 LIMIT을 다 채워, 실제로 마감된 경고가 이번 스캔에서 밀려날 수
+    있다(특히 유료 연장으로 id 순서와 judging_ends_at 순서가 어긋나기 시작하면).
+    정확한 최종 판정은 여전히 아래 루프의 `_constructed_daytime_target` 비교가
+    한다.
     """
 
     as_of = as_of or Clock.now()
+
+    # warning_target은 (judging_ends_at + WAIT_DAYS - LEAD_DAYS)의 로컬 날짜를
+    # 낮 시각으로 고정한 것이므로, 그 "날짜 고정" 때문에 원래 시각에서 최대
+    # 하루(24시간)까지만 벗어난다. 그래서 "warning_target <= as_of"이려면
+    # 최소한 "judging_ends_at + WAIT_DAYS - LEAD_DAYS <= as_of + 1일"이어야
+    # 한다 — 이 필요조건을 만족하지 못하는(=judging_ends_at이 이 상한보다 큰)
+    # Contest는 진짜 대상일 수가 없으므로 안전하게 걸러낸다.
+    judging_ends_at_cutoff = (
+        as_of
+        + timedelta(days=1)
+        - timedelta(days=settings.DISTRIBUTION_WAIT_DAYS)
+        + timedelta(days=settings.DISTRIBUTION_FINAL_WARNING_LEAD_DAYS)
+    )
 
     due = list(
         Contest.objects.filter(
@@ -212,9 +291,10 @@ def send_due_distribution_final_warnings(as_of=None) -> list[dict]:
             distribution__isnull=True,
             distribution_final_warning_sent_at__isnull=True,
             judging_ends_at__isnull=False,
+            judging_ends_at__lte=judging_ends_at_cutoff,
         )
         .select_related("sponsor__user")
-        .order_by("id")[:BATCH_SIZE]
+        .order_by("judging_ends_at", "id")[:BATCH_SIZE]
     )
 
     results = []
@@ -231,18 +311,10 @@ def send_due_distribution_final_warnings(as_of=None) -> list[dict]:
             if as_of < warning_target:
                 continue
 
-            claimed = (
-                Contest.objects.filter(
-                    pk=contest.pk, distribution_final_warning_sent_at__isnull=True
-                ).update(distribution_final_warning_sent_at=as_of)
-                == 1
-            )
-            if not claimed:
-                continue
-
-            _safe_notify(
+            _safe_notify_once(
                 recipient=contest.sponsor.user,
                 notification_type=NotificationType.DISTRIBUTION_FINAL_WARNING,
+                dedup_context={"contest_id": contest.id},
                 context={
                     "contest_id": contest.id,
                     "contest_title": contest.title,
@@ -250,6 +322,9 @@ def send_due_distribution_final_warnings(as_of=None) -> list[dict]:
                     "distribution_due_at": distribution_due_at.isoformat(),
                 },
             )
+            Contest.objects.filter(
+                pk=contest.pk, distribution_final_warning_sent_at__isnull=True
+            ).update(distribution_final_warning_sent_at=as_of)
             results.append(
                 {
                     "event": "distribution_final_warning_sent",
@@ -265,14 +340,92 @@ def send_due_distribution_final_warnings(as_of=None) -> list[dict]:
     return results
 
 
+# --- 결과 알림 복구: Award / Distribution -----------------------------------------
+
+
+def send_pending_award_result_notices(as_of=None) -> list[dict]:
+    """`notify_award_result`가 끝까지 완료되지 못한 Award를 다시 찾아 마저 알린다.
+
+    awards.api.award_submission이 커밋 직후 호출하는 즉시 경로가 보통의 경우를
+    이미 처리한다 — 이 스캔은 그 즉시 경로가 프로세스 강제종료 등으로 끝까지
+    완료되지 못하고 죽은 나머지만 쓸어담는 복구 경로다(#19 리뷰 지적 3: "발송하고
+    잊어버리는" 방식이 아니라, 언젠가 누군가 실제로 재시도한다는 보장이 있어야
+    한다). `Award.result_notice_sent_at`이 비어 있는 행이 "아직 완료되지 않았다"
+    는 표식이다.
+    """
+
+    from awards.models import Award
+
+    as_of = as_of or Clock.now()
+    pending = list(
+        Award.objects.filter(result_notice_sent_at__isnull=True)
+        .select_related("submission__developer__user", "contest")
+        .order_by("id")[:RESULT_NOTICE_BATCH_SIZE]
+    )
+
+    results = []
+    for award in pending:
+        notify_award_result(award)
+        award.refresh_from_db(fields=["result_notice_sent_at"])
+        if award.result_notice_sent_at is not None:
+            results.append({"event": "award_result_notice_recovered", "award_id": award.id})
+
+    return results
+
+
+def send_pending_distribution_share_result_notices(as_of=None) -> list[dict]:
+    """`notify_distribution_shares`가 끝까지 완료되지 못한 몫을 다시 찾아 마저 알린다.
+
+    `send_pending_award_result_notices`와 같은 이유·같은 구조다(#19 리뷰 지적
+    3) — `distributions.services._create_distribution_for_contest`의 즉시
+    경로가 대부분을 처리하고, 이 스캔은 죽은 나머지만 복구한다.
+    `DistributionShare.result_notice_sent_at`이 비어 있는 몫이 대상이다.
+    """
+
+    from distributions.models import DistributionShare
+
+    as_of = as_of or Clock.now()
+    pending = list(
+        DistributionShare.objects.filter(result_notice_sent_at__isnull=True)
+        .select_related("submission__developer__user", "distribution__contest")
+        .order_by("id")[:RESULT_NOTICE_BATCH_SIZE]
+    )
+
+    # notify_distribution_shares는 (distribution, [submission, ...]) 모양을
+    # 기대한다 — Distribution별로 몫을 묶어 그 함수를 그대로 재사용한다.
+    by_distribution: dict[int, list] = {}
+    for share in pending:
+        by_distribution.setdefault(share.distribution_id, []).append(share)
+
+    results = []
+    for shares in by_distribution.values():
+        distribution = shares[0].distribution
+        submissions = [share.submission for share in shares]
+        notify_distribution_shares(distribution, submissions)
+        for share in shares:
+            share.refresh_from_db(fields=["result_notice_sent_at"])
+            if share.result_notice_sent_at is not None:
+                results.append(
+                    {
+                        "event": "distribution_result_notice_recovered",
+                        "submission_id": share.submission_id,
+                    }
+                )
+
+    return results
+
+
 def run_due_lifecycle_notifications(as_of=None) -> list[dict]:
-    """세 스캔(마감 임박·심사기간 종료 임박·Distribution 최종 경고)을 한 번에 돈다."""
+    """다섯 스캔(마감 임박·심사기간 종료 임박·Distribution 최종 경고·Award/
+    Distribution 결과 알림 복구)을 한 번에 돈다."""
 
     as_of = as_of or Clock.now()
     results: list[dict] = []
     results += send_due_deadline_reminders(as_of=as_of)
     results += send_due_judging_end_reminders(as_of=as_of)
     results += send_due_distribution_final_warnings(as_of=as_of)
+    results += send_pending_award_result_notices(as_of=as_of)
+    results += send_pending_distribution_share_result_notices(as_of=as_of)
     return results
 
 
@@ -280,13 +433,20 @@ def run_due_lifecycle_notifications(as_of=None) -> list[dict]:
 
 
 def notify_award_result(award) -> None:
-    """Award가 확정된 직후 우승 Developer에게 결과를 알린다.
+    """Award가 확정된 직후(또는 복구 스캔에 의해 나중에) 우승 Developer에게
+    결과를 알린다.
 
     호출자(`awards.api.award_submission`)의 응답을 절대 막지 않는다 — 이
-    함수 자체가 모든 예외를 삼킨다(#19 AC, ADR-0009).
+    함수 자체가 모든 예외를 삼킨다(#19 AC, ADR-0009). `result_notice_sent_at`
+    이 이미 채워져 있으면 아무 것도 다시 하지 않는다 — `send_pending_award_
+    result_notices`의 재시도가 중복 발송을 만들지 않는 이유가 이것이다(#19
+    리뷰 지적 3).
     """
 
     try:
+        if award.result_notice_sent_at is not None:
+            return
+
         submission = award.submission
         contest = award.contest
         _safe_notify(
@@ -298,6 +458,10 @@ def notify_award_result(award) -> None:
                 "outcome": "awarded",
             },
         )
+        now = Clock.now()
+        type(award).objects.filter(pk=award.pk, result_notice_sent_at__isnull=True).update(
+            result_notice_sent_at=now
+        )
     except Exception:  # noqa: BLE001 - 알림 실패가 Award 응답을 막으면 안 된다.
         logger.exception(
             "Award(pk=%s) 결과 알림 처리 중 예외 — Award 자체는 이미 커밋됐다",
@@ -306,17 +470,26 @@ def notify_award_result(award) -> None:
 
 
 def notify_distribution_shares(distribution, qualifying_submissions) -> None:
-    """Distribution이 만들어진 직후 배분받은 Developer들에게 금액과 함께 알린다.
+    """Distribution이 만들어진 직후(또는 복구 스캔에 의해 나중에) 배분받은
+    Developer들에게 금액과 함께 알린다.
 
     호출자(`distributions.services._create_distribution_for_contest`)가 이미
     DB 트랜잭션을 커밋한 뒤에 불러야 한다 — 알림 실패가 그 트랜잭션을 되돌리면
     안 된다(#19 AC: "전 채널이 미도달이어도 Distribution이 예정대로 실행된다",
-    ADR-0009). 이 함수 자체도 모든 예외를 삼킨다 — 이중으로 안전하다.
+    ADR-0009). 이 함수 자체도 모든 예외를 삼킨다 — 이중으로 안전하다. 각
+    Submission의 `DistributionShare.result_notice_sent_at`이 이미 채워져
+    있으면 그 몫만 건너뛴다 — `send_pending_distribution_share_result_notices`
+    의 재시도가 이미 보낸 몫까지 다시 보내지 않는 이유다(#19 리뷰 지적 3).
     """
 
     try:
         contest = distribution.contest
+        now = Clock.now()
         for submission in qualifying_submissions:
+            share = submission.distribution_share
+            if share.result_notice_sent_at is not None:
+                continue
+
             _safe_notify(
                 recipient=submission.developer.user,
                 notification_type=NotificationType.RESULT_NOTICE,
@@ -326,6 +499,9 @@ def notify_distribution_shares(distribution, qualifying_submissions) -> None:
                     "outcome": "distributed",
                     "amount": distribution.share_amount,
                 },
+            )
+            type(share).objects.filter(pk=share.pk, result_notice_sent_at__isnull=True).update(
+                result_notice_sent_at=now
             )
     except Exception:  # noqa: BLE001 - 알림 실패가 Distribution 실행을 막으면 안 된다.
         logger.exception(

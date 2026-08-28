@@ -99,6 +99,14 @@ def mark_extension_paid(order_id) -> JudgingExtensionPayment:
                     "judging_ends_at": new_judging_ends_at,
                     "judging_extension_count": new_count,
                     "refund_disabled": new_refund_disabled,
+                    # 심사기간 종료 임박 알림(#19)이 이미 발송된 뒤에 연장되면,
+                    # 이 표식을 비워야 새로 늘어난 종료일이 다가올 때 다시 알릴
+                    # 수 있다(#19 리뷰 지적 1). 안 비우면 "알림을 보고 연장했다"
+                    # 는 정상 경로에서 Sponsor가 두 번째 종료일 앞에서는 아무
+                    # 경고도 못 받고 바로 무응답 Distribution으로 넘어간다 —
+                    # REQUEST.md가 이 티켓의 존재 이유로 든 "발주자가 깜빡한다"
+                    # 를 정확히 재현하는 사고였다.
+                    "judging_end_reminder_sent_at": None,
                 },
             )
 

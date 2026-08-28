@@ -248,6 +248,29 @@ def _my_notifications(client, access: str) -> list[dict]:
     return response.json()
 
 
+def _extend(client, sponsor: dict, contest_id: int) -> dict:
+    """유료 심사기간 연장 결제를 initiate+confirm으로 한 번에 끝낸다
+    (test_judging_period_and_award.py의 같은 이름 헬퍼와 같은 형식)."""
+
+    initiated = client.post(
+        f"{CONTESTS_URL}/{contest_id}/extend-judging-period",
+        data={},
+        content_type="application/json",
+        **_auth_header(sponsor["access"]),
+    )
+    assert initiated.status_code == 201, initiated.content
+    order_id = initiated.json()["order_id"]
+
+    confirmed = client.post(
+        f"{CONTESTS_URL}/{contest_id}/extend-judging-period/{order_id}/confirm",
+        data={},
+        content_type="application/json",
+        **_auth_header(sponsor["access"]),
+    )
+    assert confirmed.status_code == 200, confirmed.content
+    return confirmed.json()
+
+
 @pytest.fixture
 def category(db):
     from contests.models import Category
@@ -703,3 +726,374 @@ def test_new_judging_period_ending_reminder_type_is_registered_with_flags(client
     by_value = {row["value"]: row for row in response.json()}
     assert by_value[NotificationType.JUDGING_PERIOD_ENDING_REMINDER]["is_transactional"] is True
     assert by_value[NotificationType.JUDGING_PERIOD_ENDING_REMINDER]["is_promotional"] is False
+
+
+# --- 리뷰 지적 회귀 방지 (#19) ------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_extension_clears_judging_end_reminder_flag_so_a_second_warning_can_fire(
+    client, category, landing_type
+):
+    """Sponsor가 심사기간 종료 임박 경고를 보고 유료 연장하면, 연장된 새
+    종료일이 다가올 때 다시 경고를 받아야 한다(#19 리뷰 지적 1). 이 순서(경고를
+    보고 연장한다)가 REQUEST.md가 이 티켓의 존재 이유로 든 "발주자가 깜빡한다"
+    를 실제로 막는 정상 경로다 — 두 번째 경고가 없으면 그 정상 경로에서조차
+    Sponsor는 두 번째 종료일 앞에서 아무 경고 없이 바로 무응답 Distribution을
+    맞는다.
+    """
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+    _close_contest(client, contest, deadline=deadline)
+
+    first_judging_ends_at = Contest.objects.get(id=contest["id"]).judging_ends_at
+
+    # 첫 번째 경고 — 낮 시각으로 명시적으로 고정한다.
+    _freeze(
+        _safe_daytime_at_or_after(
+            first_judging_ends_at
+            - timedelta(hours=settings.JUDGING_END_REMINDER_LEAD_HOURS)
+        )
+    )
+    first_scan = _run_lifecycle_scan(client)
+    assert any(
+        r.get("event") == "judging_end_reminder_sent" and r.get("contest_id") == contest["id"]
+        for r in first_scan["results"]
+    )
+    assert Contest.objects.get(id=contest["id"]).judging_end_reminder_sent_at is not None
+    first_notices = [
+        n
+        for n in _my_notifications(client, sponsor["access"])
+        if n["notification_type"] == NotificationType.JUDGING_PERIOD_ENDING_REMINDER
+    ]
+    assert len(first_notices) == 1
+
+    # Sponsor가 그 경고를 보고 유료 연장한다.
+    extended = _extend(client, sponsor, contest["id"])
+    assert extended["judging_extension_count"] == 1
+
+    # 연장 직후 플래그가 비워졌다 — 재스캔해도 아직 새 종료일이 멀었으므로
+    # 곧바로 다시 발송되지는 않는다(리드타임 밖).
+    contest_after_extension = Contest.objects.get(id=contest["id"])
+    assert contest_after_extension.judging_end_reminder_sent_at is None
+    new_judging_ends_at = contest_after_extension.judging_ends_at
+    assert new_judging_ends_at > first_judging_ends_at
+
+    rescan_too_early = _run_lifecycle_scan(client)
+    assert not any(
+        r.get("event") == "judging_end_reminder_sent" for r in rescan_too_early["results"]
+    )
+
+    # 연장된 새 종료일이 다가오면 두 번째 경고가 실제로 나간다.
+    _freeze(
+        _safe_daytime_at_or_after(
+            new_judging_ends_at - timedelta(hours=settings.JUDGING_END_REMINDER_LEAD_HOURS)
+        )
+    )
+    second_scan = _run_lifecycle_scan(client)
+    assert any(
+        r.get("event") == "judging_end_reminder_sent" and r.get("contest_id") == contest["id"]
+        for r in second_scan["results"]
+    )
+
+    second_notices = [
+        n
+        for n in _my_notifications(client, sponsor["access"])
+        if n["notification_type"] == NotificationType.JUDGING_PERIOD_ENDING_REMINDER
+    ]
+    assert len(second_notices) == 2
+    assert second_notices[0]["context"]["judging_ends_at"] == new_judging_ends_at.isoformat()
+
+
+@pytest.mark.django_db
+def test_deadline_reminder_recovers_remaining_developers_after_mid_fanout_crash(
+    client, category, landing_type
+):
+    """참가자가 많은 Contest에서 마감 임박 알림 팬아웃 도중(타임아웃, 재배포로)
+    죽으면, 이미 받은 사람은 다시 받지 않고 못 받은 사람만 다음 스캔이 안전하게
+    마저 보낸다(#19 리뷰 지적 2). 여기서는 3명 중 1명만 알리고 죽는 상황을
+    `_participating_developer_users`가 예외를 던지도록 흉내낸다 — 이 예외는
+    notifications.lifecycle의 개별 알림 헬퍼(_safe_notify*)가 아니라 팬아웃
+    루프 자체에서 나므로, 삼켜지지 않고 이 Contest의 "완료 표시"를 막는다.
+    """
+
+    from unittest.mock import patch
+
+    import notifications.lifecycle as lifecycle_module
+
+    deadline = timezone.now() + timedelta(hours=2)
+    sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+    devs = [_verified_user(client, f"dev-{i}", f"dev-{i}-ci") for i in range(3)]
+    for dev in devs:
+        _submit(client, dev, contest["id"], requirement_id=requirement_id, grounded=True)
+
+    _freeze(
+        _safe_daytime_at_or_after(
+            deadline - timedelta(hours=settings.DEADLINE_REMINDER_LEAD_HOURS)
+        )
+    )
+
+    real_participating = lifecycle_module._participating_developer_users
+
+    def _crash_after_first_developer(contest_arg):
+        users = list(real_participating(contest_arg))
+
+        def _gen():
+            yield users[0]
+            raise RuntimeError("simulated mid-fanout crash (timeout/redeploy)")
+
+        return _gen()
+
+    with patch.object(
+        lifecycle_module,
+        "_participating_developer_users",
+        side_effect=_crash_after_first_developer,
+    ):
+        crashed_scan = _run_lifecycle_scan(client)
+
+    # 죽었으므로 이 Contest는 "완료"로 보고되지 않는다.
+    assert not any(
+        r.get("event") == "deadline_reminder_sent" and r.get("contest_id") == contest["id"]
+        for r in crashed_scan["results"]
+    )
+    assert Contest.objects.get(id=contest["id"]).deadline_reminder_sent_at is None
+
+    notified_count = sum(
+        1
+        for dev in devs
+        if any(
+            n["notification_type"] == NotificationType.DEADLINE_REMINDER
+            for n in _my_notifications(client, dev["access"])
+        )
+    )
+    assert notified_count == 1
+
+    # 다음 스캔(패치 없이)이 나머지 수신자만 안전하게 마저 보낸다.
+    recovery_scan = _run_lifecycle_scan(client)
+    assert any(
+        r.get("event") == "deadline_reminder_sent" and r.get("contest_id") == contest["id"]
+        for r in recovery_scan["results"]
+    )
+    assert Contest.objects.get(id=contest["id"]).deadline_reminder_sent_at is not None
+
+    for dev in devs:
+        matching = [
+            n
+            for n in _my_notifications(client, dev["access"])
+            if n["notification_type"] == NotificationType.DEADLINE_REMINDER
+        ]
+        # 이미 받은 1명은 중복으로 다시 받지 않고, 나머지 2명은 정확히 한 번 받는다.
+        assert len(matching) == 1
+
+
+@pytest.mark.django_db
+def test_award_result_notice_is_recovered_after_crash_before_completion(
+    client, category, landing_type
+):
+    """Award 커밋 직후 알림 시도가 프로세스 강제종료 등으로 끝까지 완료되지
+    못하면(`Award.result_notice_sent_at`이 비어 있으면), 복구 스캔이 다시 찾아
+    마저 보낸다(#19 리뷰 지적 3) — "발송하고 잊어버리는" 방식이 아니라 언젠가
+    누군가 실제로 재시도한다는 보장이 있어야 ADR-0009의 발송 이력이 아예
+    비어버리는 사고를 막는다.
+    """
+
+    from unittest.mock import patch
+
+    import notifications.lifecycle as lifecycle_module
+    from awards.models import Award
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+    submission = _submit(client, dev, contest["id"], requirement_id=requirement_id, grounded=True)
+
+    _close_contest(client, contest, deadline=deadline)
+    _run_scoring(client)
+    _freeze(_safe_daytime_at_or_after(deadline + timedelta(minutes=1)))
+
+    with patch.object(
+        lifecycle_module,
+        "_safe_notify",
+        side_effect=RuntimeError("simulated crash before completion"),
+    ):
+        award_resp = client.post(
+            f"{AWARDS_URL}/{contest['id']}/award",
+            data={"submission_id": submission["id"]},
+            content_type="application/json",
+            **_auth_header(sponsor["access"]),
+        )
+    # Award 자체는 알림 실패로 절대 막히지 않는다(#19 AC).
+    assert award_resp.status_code == 200, award_resp.content
+
+    award = Award.objects.get(contest_id=contest["id"])
+    assert award.result_notice_sent_at is None
+    assert _my_notifications(client, dev["access"]) == []
+
+    recovery = _run_lifecycle_scan(client)
+    assert any(
+        r.get("event") == "award_result_notice_recovered" and r.get("award_id") == award.id
+        for r in recovery["results"]
+    )
+
+    award.refresh_from_db()
+    assert award.result_notice_sent_at is not None
+    result_notices = [
+        n for n in _my_notifications(client, dev["access"]) if n["notification_type"] == NotificationType.RESULT_NOTICE
+    ]
+    assert len(result_notices) == 1
+
+    # 복구 스캔을 한 번 더 돌려도 중복 발송되지 않는다.
+    rescan = _run_lifecycle_scan(client)
+    assert not any(r.get("event") == "award_result_notice_recovered" for r in rescan["results"])
+    result_notices_again = [
+        n for n in _my_notifications(client, dev["access"]) if n["notification_type"] == NotificationType.RESULT_NOTICE
+    ]
+    assert len(result_notices_again) == 1
+
+
+@pytest.mark.django_db
+def test_distribution_result_notice_is_recovered_after_crash_before_completion(
+    client, category, landing_type
+):
+    """Distribution 생성 직후 결과 알림 시도가 프로세스 강제종료 등으로 끝까지
+    완료되지 못하면(`DistributionShare.result_notice_sent_at`이 비어 있으면),
+    복구 스캔이 다시 찾아 마저 보낸다(#19 리뷰 지적 3). Distribution 자체
+    (Payout·원장 반영)는 알림 시도의 성패와 무관하게 이미 완전히 끝나 있다."""
+
+    from unittest.mock import patch
+
+    import notifications.lifecycle as lifecycle_module
+    from distributions.models import DistributionShare
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+        prize=900_000,
+    )
+    requirement_id = contest["requirements"][0]["id"]
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+    submission = _submit(client, dev, contest["id"], requirement_id=requirement_id, grounded=True)
+
+    _close_contest(client, contest, deadline=deadline)
+    _run_scoring(client)
+    _end_judging_period(client, contest["id"])
+    judging_ends_at = Contest.objects.get(id=contest["id"]).judging_ends_at
+    _freeze(
+        _safe_daytime_at_or_after(
+            judging_ends_at + timedelta(days=settings.DISTRIBUTION_WAIT_DAYS, minutes=1)
+        )
+    )
+
+    with patch.object(
+        lifecycle_module,
+        "_safe_notify",
+        side_effect=RuntimeError("simulated crash before completion"),
+    ):
+        dist_result = _run_due_distributions(client)
+
+    # Distribution 자체는 알림 시도의 성패와 무관하게 예정대로 완전히 실행됐다.
+    assert any(r.get("event") == "distribution_created" for r in dist_result["results"])
+    distribution = Distribution.objects.get(contest_id=contest["id"])
+    assert distribution.share_amount == 900_000
+
+    share = DistributionShare.objects.get(submission_id=submission["id"])
+    assert share.result_notice_sent_at is None
+    assert _my_notifications(client, dev["access"]) == []
+
+    recovery = _run_lifecycle_scan(client)
+    assert any(
+        r.get("event") == "distribution_result_notice_recovered"
+        and r.get("submission_id") == submission["id"]
+        for r in recovery["results"]
+    )
+
+    share.refresh_from_db()
+    assert share.result_notice_sent_at is not None
+    result_notices = [
+        n for n in _my_notifications(client, dev["access"]) if n["notification_type"] == NotificationType.RESULT_NOTICE
+    ]
+    assert len(result_notices) == 1
+
+
+@pytest.mark.django_db
+def test_distribution_final_warning_query_does_not_get_crowded_out_by_not_yet_due_contests(
+    client, category, landing_type
+):
+    """시각 조건이 쿼리 밖(파이썬)에만 있으면, 아직 한참 멀었지만 개수가 많은
+    후보(낮은 id, 먼저 처리됨)가 작은 배치를 다 채워 실제로 마감된 경고(높은
+    id)를 이번 스캔에서 밀어낼 수 있다(#19 리뷰 지적 4) — 특히 유료 연장으로
+    id 순서와 judging_ends_at 순서가 어긋나기 시작하면 실제로 벌어진다. 여기서는
+    BATCH_SIZE를 2로 줄이고, 먼저 만든 '아직 멀었다' Contest 2개 뒤에 나중에
+    만든 '이미 도래했다' Contest 1개를 두어 재현한다.
+    """
+
+    from unittest.mock import patch
+
+    import notifications.lifecycle as lifecycle_module
+
+    anchor = datetime(2026, 2, 1, 10, 0, tzinfo=KST)
+
+    # "아직 멀었다" — judging_ends_at이 anchor 한 시간 전이라, 경고까지는
+    # (WAIT_DAYS - LEAD_DAYS)일 가까이 남았다.
+    recent_judging_ends_at = anchor - timedelta(hours=1)
+    recent_deadline = recent_judging_ends_at - timedelta(days=settings.JUDGING_PERIOD_DAYS)
+
+    # "이미 도래했다" — 경고 시각이 정확히 anchor가 되도록 역산한다(3시간 여유를
+    # 둬 로컬 날짜 경계를 확실히 넘긴다).
+    due_judging_ends_at = anchor - timedelta(
+        days=settings.DISTRIBUTION_WAIT_DAYS - settings.DISTRIBUTION_FINAL_WARNING_LEAD_DAYS,
+        hours=3,
+    )
+    due_deadline = due_judging_ends_at - timedelta(days=settings.JUDGING_PERIOD_DAYS)
+
+    contests = []
+    for i, deadline_at in enumerate([recent_deadline, recent_deadline, due_deadline]):
+        _, contest = _publish_contest(
+            client,
+            category=category,
+            deliverable_type=landing_type,
+            deadline_at=deadline_at,
+            sponsor_uid=f"sponsor-crowd-{i}",
+        )
+        contests.append(contest)
+        _close_contest(client, contest, deadline=deadline_at)
+        contest_judging_ends_at = Contest.objects.get(id=contest["id"]).judging_ends_at
+        _freeze(contest_judging_ends_at + timedelta(minutes=1))
+        tick_resp = client.post(TICK_URL, **_internal_headers())
+        assert tick_resp.status_code == 200
+        assert Contest.objects.get(id=contest["id"]).status == Contest.Status.JUDGING_ENDED
+
+    due_contest = contests[2]
+    assert due_contest["id"] > contests[0]["id"]
+    assert due_contest["id"] > contests[1]["id"]
+
+    _freeze(anchor)
+    with patch.object(lifecycle_module, "BATCH_SIZE", 2):
+        result = _run_lifecycle_scan(client)
+
+    assert any(
+        r.get("event") == "distribution_final_warning_sent"
+        and r.get("contest_id") == due_contest["id"]
+        for r in result["results"]
+    )

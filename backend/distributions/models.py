@@ -91,6 +91,14 @@ class DistributionShare(models.Model):
     # Distribution.share_amount의 스냅샷 — 원 단위 정수(ADR-0004).
     amount = models.PositiveIntegerField()
 
+    # 결과 알림(notifications.lifecycle.notify_distribution_shares) 완료
+    # 표식(#19 리뷰 지적 3) — awards.Award.result_notice_sent_at과 같은 이유·
+    # 같은 패턴. Distribution 생성 직후 즉시 경로가 성공적으로 시도한 뒤에만
+    # 채워지고, 비어 있는 채로 남은 몫은
+    # `notifications.lifecycle.send_pending_distribution_share_result_notices`
+    # 가 다시 찾아 마저 알린다.
+    result_notice_sent_at = models.DateTimeField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
