@@ -60,6 +60,8 @@ INSTALLED_APPS = [
     "contests",
     "ledger",
     "payments",
+    "core",
+    "notifications",
 ]
 
 MIDDLEWARE = [
@@ -189,3 +191,48 @@ if not _payment_webhook_secret:
         )
     _payment_webhook_secret = "dev-only-insecure-fake-pg-webhook-secret"
 PAYMENT_WEBHOOK_SECRET = _payment_webhook_secret
+
+# --- 내부 인증 (티켓 02, ADR-0003) --------------------------------------------------
+#
+# Celery beat 와 (사용자 인증이 아직 없는) 내부 전용 엔드포인트가 쓰는 고정 토큰이다.
+# 소셜 로그인(Authentication)과는 무관하다. DEBUG 에서만 개발용 기본값을 준다 — prod
+# 에서 비어 있으면 부팅을 거부해 "토큰 없이도 열려 있는 내부 엔드포인트"를 막는다.
+INTERNAL_API_TOKEN = _env("INTERNAL_API_TOKEN", "dev-only-internal-token" if DEBUG else "")
+if not DEBUG and not INTERNAL_API_TOKEN:
+    raise ImproperlyConfigured(
+        "DJANGO_DEBUG=false 인데 INTERNAL_API_TOKEN 이 비어 있다. "
+        "내부 엔드포인트가 토큰 없이 열리는 사고를 막기 위해 배포 환경에서는 반드시 주입해야 한다."
+    )
+
+# Celery 태스크가 스케줄러 틱 엔드포인트를 호출할 때 쓰는 베이스 URL. 컨테이너 안에서는
+# backend 서비스 자기 자신을 가리키면 된다.
+INTERNAL_API_BASE_URL = _env("INTERNAL_API_BASE_URL", "http://127.0.0.1:8000")
+
+# --- Celery (티켓 02, ADR-0003) -----------------------------------------------------
+#
+# 브로커는 아직 dev compose 에 없다. 설정만 여기 있고, 실제로 워커·beat 를 띄우는 것은
+# 이 티켓 범위 밖이다(공유 인프라에 새 컨테이너/포트를 추가하지 않는다).
+CELERY_BROKER_URL = _env("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")
+CELERY_RESULT_BACKEND = _env("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_ALWAYS_EAGER = _env_bool("CELERY_TASK_ALWAYS_EAGER", False)
+
+# --- Notification 어댑터 (티켓 17, ADR-0007 / ADR-0009) ------------------------------
+#
+# dev/test 는 전부 Fake 구현체에 바인딩된다. 실제 카카오·SMS 벤더 연동은 이 티켓
+# 범위 밖이다. 콤마로 나열한 채널은 Fake 어댑터가 "실패"를 흉내내도록 만든다 — 테스트가
+# 알림톡 실패 → SMS/LMS 대체발송 경로를 override_settings 로 재현할 때 쓴다.
+NOTIFICATION_ALIMTALK_ADAPTER = _env(
+    "NOTIFICATION_ALIMTALK_ADAPTER", "notifications.adapters.FakeAlimtalkAdapter"
+)
+NOTIFICATION_SMS_ADAPTER = _env("NOTIFICATION_SMS_ADAPTER", "notifications.adapters.FakeSmsAdapter")
+NOTIFICATION_LMS_ADAPTER = _env("NOTIFICATION_LMS_ADAPTER", "notifications.adapters.FakeLmsAdapter")
+NOTIFICATION_FAKE_FAILING_CHANNELS = [
+    c for c in _env("NOTIFICATION_FAKE_FAILING_CHANNELS", "").split(",") if c
+]
+# FAILING 과 달리 이건 어댑터가 실패 "응답"이 아니라 예외로 죽는(타임아웃/5xx) 상황을
+# 흉내낸다 — 실제 벤더 장애에서 더 흔한 경우이고, 이걸 잡아 다음 채널로 넘어가는지가
+# 이 티켓의 핵심 방어선이다.
+NOTIFICATION_FAKE_RAISING_CHANNELS = [
+    c for c in _env("NOTIFICATION_FAKE_RAISING_CHANNELS", "").split(",") if c
+]

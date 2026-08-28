@@ -34,6 +34,8 @@ jobs:
       DJANGO_SECRET_KEY: ci-only-insecure-key
       DJANGO_DEBUG: "false"
       DJANGO_ALLOWED_HOSTS: "*"
+      # 티켓 02(#3): DEBUG=false 인데 비어 있으면 config/settings.py 가 부팅을 거부한다.
+      INTERNAL_API_TOKEN: ci-only-insecure-internal-token
 
     steps:
       - uses: actions/checkout@v4
