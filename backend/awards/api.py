@@ -18,6 +18,9 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
+from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.http import HttpRequest
 from ninja import Router
@@ -27,6 +30,7 @@ from accounts.middleware import jwt_auth
 from contests.models import Contest
 from core.clock import Clock
 from core.transitions import claim_transition
+from handovers.models import Handover
 from submissions.models import Submission
 
 from .models import Award
@@ -96,6 +100,15 @@ def award_submission(request: HttpRequest, contest_id: int, payload: AwardIn):
             # claim_transition의 조건부 UPDATE가 이미 직렬화했으므로 도달하지
             # 않아야 한다.
             raise HttpError(409, "이미 Award되었습니다.") from exc
+
+        # Handover(#14)는 Award와 함께 태어난다 — Sponsor의 소스 접근 권한은 이
+        # 행의 존재 자체가 아니라 `awards.Award`의 존재로 판정되므로(
+        # `submissions.resolvers`) 이미 이 시점에 열려 있다. 이 행은 그 뒤의
+        # 인수 확인·빌드 자산·Escrow 해제 흐름이 딸릴 자리를 만들 뿐이다.
+        Handover.objects.create(
+            award=award,
+            release_deadline_at=now + timedelta(days=settings.HANDOVER_ACCEPTANCE_PERIOD_DAYS),
+        )
 
     return 200, AwardOut(
         contest_id=contest.id, submission_id=submission.id, awarded_at=award.awarded_at

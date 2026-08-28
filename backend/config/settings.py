@@ -78,6 +78,7 @@ INSTALLED_APPS = [
     "submissions",
     "scoring",
     "awards",
+    "handovers",
 ]
 
 MIDDLEWARE = [
@@ -364,3 +365,39 @@ if IS_PRODUCTION_DEPLOYMENT and LLM_REQUIREMENT_CHAT_ADAPTER_MODE == "fake":
 LLM_REQUIREMENT_CHAT_FAKE_RAISING_CONTEST_IDS = [
     int(x) for x in _env("LLM_REQUIREMENT_CHAT_FAKE_RAISING_CONTEST_IDS", "").split(",") if x
 ]
+
+# --- Handover · Escrow 해제 (#14, ADR-0003/0004/0005/0014) --------------------------
+#
+# Award 후 Sponsor가 인수를 확인하지 않아도 이 기간이 지나면 스케줄러(내부 스캔
+# 엔드포인트)가 Escrow를 해제한다 — Sponsor의 침묵이 Developer를 인질로 잡지 못한다.
+HANDOVER_ACCEPTANCE_PERIOD_DAYS = int(_env("HANDOVER_ACCEPTANCE_PERIOD_DAYS", "14"))
+
+# --- Payout 실행 (#15, ADR-0004/0008) -------------------------------------------------
+#
+# 토스 지급대행 어댑터도 PAYMENT_ADAPTER_MODE와 같은 원칙: 기본값은 항상 Fake다.
+PAYOUT_ADAPTER_MODE = _env("PAYOUT_ADAPTER_MODE", "fake")
+if IS_PRODUCTION_DEPLOYMENT and PAYOUT_ADAPTER_MODE == "fake":
+    raise ImproperlyConfigured(
+        "LAURIO_DEPLOYMENT_TARGET=production 인데 PAYOUT_ADAPTER_MODE 가 fake 다. 운영 "
+        "배포에서는 PAYOUT_ADAPTER_MODE=real 을 반드시 설정해야 한다."
+    )
+
+# payout.changed 웹훅 서명 비밀키. payments.webhook_security의 서명 스킴을 그대로
+# 재사용한다(HMAC-SHA256) — 벤더가 다를 뿐 "서명 없는 웹훅으로 원장이 위조될 수
+# 있다"는 위협은 동일하다(#9 리뷰 지적 2와 같은 이유).
+_payout_webhook_secret = os.environ.get("PAYOUT_WEBHOOK_SECRET") or ""
+if not _payout_webhook_secret:
+    if not DEBUG:
+        raise ImproperlyConfigured(
+            "DJANGO_DEBUG=false 인데 PAYOUT_WEBHOOK_SECRET 이 비어 있다. "
+            "배포 환경에서는 반드시 주입해야 한다."
+        )
+    _payout_webhook_secret = "dev-only-insecure-fake-toss-payout-webhook-secret"
+PAYOUT_WEBHOOK_SECRET = _payout_webhook_secret
+
+# 플랫폼 수수료·원천징수 공제율. 1/10000(bp) 단위 정수로 다뤄 float 오차 없이
+# 원 단위 정수 금액을 계산한다(ADR-0004: "금액은 원 단위 정수로 다룬다"). 원천징수는
+# 기타소득 원천징수의 상식적인 근사치(3.3%)를 기본값으로 둔다 — 실제 세율은 세무
+# 정책(#15 범위 밖)이 정한다.
+PAYOUT_PLATFORM_FEE_BPS = int(_env("PAYOUT_PLATFORM_FEE_BPS", "1000"))
+PAYOUT_WITHHOLDING_TAX_BPS = int(_env("PAYOUT_WITHHOLDING_TAX_BPS", "330"))

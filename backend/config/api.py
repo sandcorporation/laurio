@@ -4,6 +4,8 @@ from accounts.api import router as accounts_router
 from awards.api import router as awards_router
 from contests.api import router as contests_router
 from core.api import router as core_internal_router
+from handovers.api import internal_router as handovers_internal_router
+from handovers.api import router as handovers_router
 from ledger.api import router as ledger_router
 from notifications.api import router as notifications_internal_router
 from payments.api import router as payments_router
@@ -21,6 +23,7 @@ api.add_router("", contests_router)
 api.add_router("", payments_router)
 api.add_router("", submissions_router)
 api.add_router("", awards_router)
+api.add_router("", handovers_router)
 api.add_router("/ledger", ledger_router)
 
 
@@ -32,6 +35,7 @@ def health(request):
 api.add_router("/internal", core_internal_router)
 api.add_router("/internal/notifications", notifications_internal_router)
 api.add_router("/internal/scoring", scoring_internal_router)
+api.add_router("/internal/handovers", handovers_internal_router)
 
 
 @api.exception_handler(StorageAccessDenied)

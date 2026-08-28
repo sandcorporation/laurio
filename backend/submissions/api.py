@@ -30,6 +30,7 @@ from ninja.errors import HttpError
 from accounts.middleware import jwt_auth
 from accounts.models import DeveloperProfile
 from accounts.sanitize import sanitize_free_text
+from awards.models import Award
 from contests.models import Contest, Requirement
 from core.clock import Clock
 from verification.models import Verification
@@ -249,13 +250,14 @@ def _serialize(
         unlinked_requirement_count=max(total - linked_count, 0),
     )
 
-    # 소스는 소유자 본인 외에는 절대 나오지 않는다(ADR-0014) — Sponsor는 Award
-    # 이후에만 열리는데, 그 개방(Handover)은 #14의 범위다. 데모·영상은 진행 중엔 본인·
-    # Sponsor, 마감 후엔 전면 공개(ADR-0014의 "데모·영상" 칸). test_account는 그
-    # 칸에 없다 — 마감 후 공개되는 건 데모·영상뿐이고, 그걸 들여다볼 로그인 정보까지
-    # 공개 범위에 들어가지는 않는다(#10 리뷰 지적). 그래서 test_account는 진행
-    # 중이든 마감 후든 항상 본인·Sponsor로만 좁힌다.
-    show_source = is_owner
+    # 소스는 소유자 본인과, Award된 뒤의 Sponsor에게만 나온다(ADR-0014, #14
+    # Handover) — Award되지 않은 Submission의 소스는 Sponsor에게도 절대 보이지
+    # 않는다. 데모·영상은 진행 중엔 본인·Sponsor, 마감 후엔 전면 공개(ADR-0014의
+    # "데모·영상" 칸). test_account는 그 칸에 없다 — 마감 후 공개되는 건 데모·영상
+    # 뿐이고, 그걸 들여다볼 로그인 정보까지 공개 범위에 들어가지는 않는다(#10 리뷰
+    # 지적). 그래서 test_account는 진행 중이든 마감 후든 항상 본인·Sponsor로만 좁힌다.
+    is_awarded = is_sponsor and Award.objects.filter(submission_id=submission.id).exists()
+    show_source = is_owner or is_awarded
     show_demo = is_owner or is_sponsor or past_deadline
     show_test_account = is_owner or is_sponsor
 

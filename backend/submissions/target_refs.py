@@ -12,6 +12,12 @@ from __future__ import annotations
 
 SOURCE_SLOT = "source"
 DEMO_VIDEO_SLOT = "demo-video"
+# Award 이후 Developer가 추가로 올리는 빌드 자산(빌드 설정·서명키·스토어 메타데이터·
+# 실행 문서, #14 Handover). SOURCE_SLOT과 같은 이유로 별도 슬롯을 둔다 — 소스와
+# 가시성 판정 시점이 다르기 때문은 아니고(둘 다 Award 이후 Sponsor에게 열린다),
+# 여러 파일이 한 target_ref 네임스페이스 아래 쌓일 수 있어야 해서다(각 업로드가
+# 고유한 object_key를 받으므로 이름이 겹쳐도 안전하다).
+BUILD_ASSET_SLOT = "build-asset"
 
 
 def source_target_ref(contest_id: int, developer_user_id: int) -> str:
@@ -20,3 +26,7 @@ def source_target_ref(contest_id: int, developer_user_id: int) -> str:
 
 def demo_video_target_ref(contest_id: int, developer_user_id: int) -> str:
     return f"submission:{contest_id}:{developer_user_id}:{DEMO_VIDEO_SLOT}"
+
+
+def build_asset_target_ref(contest_id: int, developer_user_id: int) -> str:
+    return f"submission:{contest_id}:{developer_user_id}:{BUILD_ASSET_SLOT}"
