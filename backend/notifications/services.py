@@ -150,8 +150,15 @@ def _attempt_dispatch(notification: Notification, *, now=None) -> None:
     from_state = notification.status
 
     for channel, adapter_factory in CHANNEL_FALLBACK_CHAIN:
-        adapter = adapter_factory()
         try:
+            # 코디네이터 리뷰 지적(#23): adapter_factory()는 원래 이 try 밖에 있었다.
+            # NOTIFICATION_*_ADAPTER가 존재하지 않는 dotted path(예: 아직 구현되지
+            # 않은 실제 벤더 어댑터)를 가리키면 import_string이 ImportError를 던지고,
+            # 그 예외가 이 함수를 그대로 빠져나가 create_notification 전체가 500으로
+            # 죽는다 — 발송 이력도 안 남고 Notification은 QUEUED에 영원히 멈춘다.
+            # .send()가 벤더 예외로 죽는 것과 같은 종류의 "이 채널을 신뢰할 수 없다"는
+            # 신호이므로 같은 try/except로 감싸 다음 채널로 넘어가게 한다.
+            adapter = adapter_factory()
             result = adapter.send(recipient=notification.recipient, notification=notification)
         except Exception as exc:  # noqa: BLE001 - 외부 벤더 어댑터 호출이라 신뢰할 수 없다.
             logger.warning(

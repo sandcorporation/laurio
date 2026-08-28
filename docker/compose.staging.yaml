@@ -15,11 +15,96 @@
 #   스토리지   : MinIO                -> 실제 S3/OCI 버킷        (STORAGE_BACKEND=s3)
 #   소셜 로그인 : FakeSocialAdapter     -> 카카오/GitHub/구글 실물 (SOCIAL_AUTH_MODE=real)
 #   본인확인   : FakeVerificationAdapter -> 실제 PASS/NICE 연동   (VERIFICATION_ADAPTER_MODE=real)
-#   LLM 채점   : FakeLLMScoringAdapter  -> 실제 LLM 벤더(dotted path로 지정)
-#   알림 채널  : Fake*Adapter           -> 실제 카카오 알림톡/SMS·LMS 벤더(dotted path로 지정)
+#   LLM 채점   : FakeLLMScoringAdapter  -> 실제 LLM 벤더(dotted path로 지정, 아직 미구현)
+#   알림 채널  : Fake*Adapter           -> 실제 카카오 알림톡/SMS·LMS 벤더(dotted path로
+#               지정, 아직 미구현 — .env.staging에서 반드시 채워야 하는 이유가 이것이다.
+#               구현되지 않은 클래스 이름을 여기 하드코딩하지 않는다)
 # config/settings.py의 IS_DEPLOYED_ENVIRONMENT 가드가 이 중 하나라도 fake로 남으면
-# 부팅 자체를 거부한다.
+# (dotted path가 가리키는 클래스명이 Fake로 시작해도 마찬가지다) 부팅 자체를 거부한다.
+#
+# 스케줄러(ADR-0003): redis 브로커 + celery-worker + celery-beat 세 서비스가 반드시
+# 함께 떠야 한다. beat가 core/tasks.py에 정의된 여섯 개 내부 스캔 태스크(틱,
+# Distribution 1/N 배분, 환불 재확인, Handover Escrow 해제, 야간 알림 발송, 채점 재시도
+# — config/celery.py의 beat_schedule 참고)를 60초마다 큐에 넣고, worker가 그걸
+# 실제로 실행해 `/api/internal/*`를 호출한다. 코디네이터 리뷰 지적: 이 세 서비스가
+# 없으면 시간 기반 전이가 전부 조용히 멈춘다 — dev/CI가 초록인 것과 무관하게, 이
+# 스택은 배포된 게 아니라 "떠 있기만 한" 상태가 된다.
 name: laurio-staging
+
+x-backend-env: &backend-env
+  # --- 배포 타깃(config/settings.py의 IS_DEPLOYED_ENVIRONMENT/IS_PRODUCTION_DEPLOYMENT
+  # 가드가 이 값을 본다) ---
+  LAURIO_DEPLOYMENT_TARGET: staging
+  DJANGO_DEBUG: "false"
+  DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?staging DJANGO_SECRET_KEY 를 .env.staging 에 설정하라}
+  DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:?staging DJANGO_ALLOWED_HOSTS 를 .env.staging 에 설정하라}
+
+  POSTGRES_DB: ${POSTGRES_DB:?staging POSTGRES_DB 를 .env.staging 에 설정하라}
+  POSTGRES_USER: ${POSTGRES_USER:?staging POSTGRES_USER 를 .env.staging 에 설정하라}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?staging POSTGRES_PASSWORD 를 .env.staging 에 설정하라}
+  POSTGRES_HOST: db
+  POSTGRES_PORT: "5432"
+
+  # --- 스토리지 어댑터 (ADR-0005, ADR-0007): 실제 S3/OCI 버킷 ---
+  STORAGE_BACKEND: s3
+  STORAGE_BUCKET: ${STORAGE_BUCKET:?}
+  STORAGE_ENDPOINT_URL: ${STORAGE_ENDPOINT_URL:?}
+  STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:?}
+  STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:?}
+  STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
+
+  # --- Authentication (ADR-0012) ---
+  JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:?}
+
+  # --- 소셜 로그인 / 본인확인 어댑터 (ADR-0007, ADR-0011) ---
+  SOCIAL_AUTH_MODE: real
+  VERIFICATION_ADAPTER_MODE: real
+  VERIFICATION_ENCRYPTION_KEY: ${VERIFICATION_ENCRYPTION_KEY:?}
+
+  # --- 결제 · Escrow / Payout 어댑터 (ADR-0007, ADR-0008) ---
+  # "샌드박스냐 실물이냐"는 이 모드 값이 아니라 실제 어댑터 구현체(향후 티켓)가
+  # 참조하는 TOSS_* 자격증명이 어느 엔드포인트를 가리키는지로 갈린다.
+  PAYMENT_ADAPTER_MODE: real
+  PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:?}
+  PAYOUT_ADAPTER_MODE: real
+  PAYOUT_WEBHOOK_SECRET: ${PAYOUT_WEBHOOK_SECRET:?}
+  TOSS_SANDBOX_SECRET_KEY: ${TOSS_SANDBOX_SECRET_KEY:-}
+
+  # --- LLM 채점 · AI grill 어댑터 (ADR-0006/0007/0014) ---
+  # 실제 벤더 어댑터가 구현되기 전까지는 "fake가 아닌" 명시적 sentinel이다 — 부팅은
+  # 통과하지만 실제로 채점을 시도하면 NotImplementedError를 던진다(scoring/adapters.py,
+  # contests/requirement_chat.py 문서화된 대로 이 티켓의 범위 밖). "real"은 존재하지
+  # 않는 클래스를 가리키는 척하지 않는 정직한 placeholder다 — 실제 어댑터가 생기면 그
+  # dotted path로 교체한다.
+  LLM_ADAPTER_MODE: real
+  LLM_REQUIREMENT_CHAT_ADAPTER_MODE: real
+  OPEN_AI_API_KEY: ${OPEN_AI_API_KEY:-}
+
+  # --- 알림 채널 어댑터 (ADR-0007/0009) ---
+  # 코디네이터 리뷰 지적: 여기 존재하지 않는 클래스 이름(RealAlimtalkAdapter 등)을
+  # 하드코딩했었다 — notifications.adapters에 그런 클래스가 없으니 이 값을 쓰는
+  # 순간(과거에는 그 시점에 500까지 났다. 지금은 notifications/services.py의
+  # try/except가 다음 채널로 넘기지만, 여전히 "설정이 뭔가를 가리키는 척하지만 실제로는
+  # 아무것도 안 한다"는 문제는 남는다) 매번 채널 폴백이 소모된다. 실제 벤더 어댑터가
+  # 구현되면 그 dotted path를 .env.staging에 채워 넣는다 — 그 전까지는 필수값으로
+  # 비워 둬 운영자가 "아직 없다"는 것을 명시적으로 알게 한다.
+  NOTIFICATION_ALIMTALK_ADAPTER: ${NOTIFICATION_ALIMTALK_ADAPTER:?실제 알림톡 벤더 어댑터의 dotted path를 .env.staging 에 채워라 — 아직 구현 전이면 이 값 자체를 비워 둘 수 없다}
+  NOTIFICATION_SMS_ADAPTER: ${NOTIFICATION_SMS_ADAPTER:?실제 SMS 벤더 어댑터의 dotted path를 .env.staging 에 채워라}
+  NOTIFICATION_LMS_ADAPTER: ${NOTIFICATION_LMS_ADAPTER:?실제 LMS 벤더 어댑터의 dotted path를 .env.staging 에 채워라}
+  NOTIFICATION_VENDOR_API_KEY: ${NOTIFICATION_VENDOR_API_KEY:-}
+
+  # --- 내부 인증(스케줄러 틱 외 5개 내부 스캔, ADR-0003) ---
+  # staging의 존재 이유 중 하나: 운영자가 이 토큰으로 POST /api/internal/tick 을 직접
+  # 쏴서 21일치 시나리오를 몇 초에 재현한다. 아래 backend 서비스의 ports: 로 서브
+  # 호스트에 공개하는 이유가 이것이다 — prod(compose.prod.yaml)는 이 엔드포인트를
+  # 운영자가 손으로 두드릴 일을 상정하지 않는다. celery-worker/celery-beat도 같은
+  # 토큰으로 같은 엔드포인트들을 내부 네트워크에서 호출한다.
+  INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?}
+  INTERNAL_API_BASE_URL: http://backend:8000
+
+  # --- Celery (ADR-0003) ---
+  CELERY_BROKER_URL: redis://redis:6379/0
+  CELERY_RESULT_BACKEND: redis://redis:6379/0
 
 services:
   db:
@@ -42,6 +127,17 @@ services:
       retries: 20
     restart: unless-stopped
 
+  redis: # Celery 브로커 + 결과 백엔드(ADR-0003). beat/worker 전용 — 호스트에 공개하지 않는다.
+    image: redis:7-alpine
+    volumes:
+      - laurio-staging-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
   backend:
     build:
       context: ..
@@ -50,67 +146,9 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    environment:
-      # --- 배포 타깃(config/settings.py의 IS_DEPLOYED_ENVIRONMENT/IS_PRODUCTION_DEPLOYMENT
-      # 가드가 이 값을 본다) ---
-      LAURIO_DEPLOYMENT_TARGET: staging
-      DJANGO_DEBUG: "false"
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?staging DJANGO_SECRET_KEY 를 .env.staging 에 설정하라}
-      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:?staging DJANGO_ALLOWED_HOSTS 를 .env.staging 에 설정하라}
-
-      POSTGRES_DB: ${POSTGRES_DB:?}
-      POSTGRES_USER: ${POSTGRES_USER:?}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
-      POSTGRES_HOST: db
-      POSTGRES_PORT: "5432"
-
-      # --- 스토리지 어댑터 (ADR-0005, ADR-0007): 실제 S3/OCI 버킷 ---
-      STORAGE_BACKEND: s3
-      STORAGE_BUCKET: ${STORAGE_BUCKET:?}
-      STORAGE_ENDPOINT_URL: ${STORAGE_ENDPOINT_URL:?}
-      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:?}
-      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:?}
-      STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
-
-      # --- Authentication (ADR-0012) ---
-      JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:?}
-
-      # --- 소셜 로그인 / 본인확인 어댑터 (ADR-0007, ADR-0011) ---
-      SOCIAL_AUTH_MODE: real
-      VERIFICATION_ADAPTER_MODE: real
-      VERIFICATION_ENCRYPTION_KEY: ${VERIFICATION_ENCRYPTION_KEY:?}
-
-      # --- 결제 · Escrow / Payout 어댑터 (ADR-0007, ADR-0008) ---
-      # "샌드박스냐 실물이냐"는 이 모드 값이 아니라 실제 어댑터 구현체(향후 티켓)가
-      # 참조하는 TOSS_* 자격증명이 어느 엔드포인트를 가리키는지로 갈린다 — 여기서는
-      # .env.staging의 TOSS_SANDBOX_SECRET_KEY 를 반드시 채워야 한다는 것만 강제한다.
-      PAYMENT_ADAPTER_MODE: real
-      PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:?}
-      PAYOUT_ADAPTER_MODE: real
-      PAYOUT_WEBHOOK_SECRET: ${PAYOUT_WEBHOOK_SECRET:?}
-
-      # --- LLM 채점 · AI grill 어댑터 (ADR-0006/0007/0014) ---
-      # 실제 벤더 어댑터가 구현되기 전까지는 "fake가 아닌" placeholder다 — 부팅은
-      # 통과하지만 실제로 채점을 시도하면 NotImplementedError를 던진다(scoring/adapters.py,
-      # contests/requirement_chat.py 문서화된 대로 이 티켓의 범위 밖). 실제 어댑터가
-      # 생기면 그 dotted path로 교체한다.
-      LLM_ADAPTER_MODE: real
-      LLM_REQUIREMENT_CHAT_ADAPTER_MODE: real
-
-      # --- 알림 채널 어댑터 (ADR-0007/0009) ---
-      # 위와 같은 이유로 placeholder dotted path다 — Fake*Adapter만 아니면 부팅
-      # 가드는 통과한다.
-      NOTIFICATION_ALIMTALK_ADAPTER: notifications.adapters.RealAlimtalkAdapter
-      NOTIFICATION_SMS_ADAPTER: notifications.adapters.RealSmsAdapter
-      NOTIFICATION_LMS_ADAPTER: notifications.adapters.RealLmsAdapter
-
-      # --- 내부 인증(스케줄러 틱, ADR-0003) ---
-      # staging의 존재 이유: 운영자가 이 토큰으로 POST /api/internal/tick 을 직접 쏴서
-      # 21일치 시나리오를 몇 초에 재현한다. 아래 ports: 로 backend를 서브 호스트에
-      # 공개하는 이유가 이것이다 — prod(compose.prod.yaml)는 이 엔드포인트를 운영자가
-      # 손으로 두드릴 일을 상정하지 않는다.
-      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?}
-      INTERNAL_API_BASE_URL: http://backend:8000
+      redis:
+        condition: service_healthy
+    environment: *backend-env
     ports:
       - "${LAURIO_API_PORT:-8000}:8000"
     command: >
@@ -118,5 +156,41 @@ services:
              python manage.py collectstatic --noinput &&
              gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3"
 
+  celery-worker:
+    build:
+      context: ..
+      dockerfile: docker/backend.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        # backend가 migrate를 마친 뒤에 뜬다 — worker/beat는 마이그레이션을 다시
+        # 시도하지 않는다(동시에 여러 컨테이너가 migrate를 레이스하는 것을 피한다).
+        condition: service_started
+    environment: *backend-env
+    command: celery -A config worker --loglevel info
+
+  celery-beat:
+    build:
+      context: ..
+      dockerfile: docker/backend.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    environment: *backend-env
+    # config/celery.py의 beat_schedule(틱 + 5개 내부 스캔)을 60초 주기로 큐에 넣는다.
+    # 스케줄 상태 파일은 컨테이너 로컬이라 재시작하면 초기화되지만, ADR-0003이 이미
+    # "스캔 주기만큼 늦어지는 건 무해하다"고 규정했으므로 영속 볼륨이 굳이 필요 없다.
+    command: celery -A config beat --loglevel info
+
 volumes:
   laurio-staging-db:
+  laurio-staging-redis:

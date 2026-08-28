@@ -270,6 +270,38 @@ def test_adapter_exception_falls_back_to_next_channel_and_is_recorded(client):
 
 
 @pytest.mark.django_db
+def test_broken_adapter_dotted_path_falls_back_instead_of_500ing(client):
+    """NOTIFICATION_ALIMTALK_ADAPTER가 존재하지 않는 dotted path를 가리켜도(운영
+    배포에서 아직 구현 안 된 실제 벤더 어댑터를 잘못 설정한 경우를 흉내낸다)
+    create_notification 자체가 500으로 죽으면 안 된다(코디네이터 리뷰 지적 #23) —
+    이전에는 adapter_factory() 호출이 try 밖에 있어서 import_string의
+    ImportError가 그대로 빠져나가 발송 이력도 안 남고 Notification이 QUEUED에
+    영원히 멈췄다. 지금은 .send() 가 예외로 죽는 것과 같은 경로로 잡혀 SMS로
+    넘어가야 한다."""
+
+    _freeze(datetime(2026, 1, 10, 14, 0, tzinfo=KST))
+    user = _make_user()
+
+    with override_settings(NOTIFICATION_ALIMTALK_ADAPTER="notifications.adapters.DoesNotExist"):
+        response = client.post(
+            CREATE_URL,
+            data={
+                "recipient_id": user.id,
+                "notification_type": NotificationType.DEADLINE_REMINDER,
+            },
+            content_type="application/json",
+            **_auth_headers(),
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == Notification.Status.SENT
+    channels = [(d["channel"], d["status"]) for d in body["dispatches"]]
+    assert channels == [("alimtalk", "failed"), ("sms", "sent")]
+    assert body["dispatches"][0]["failure_reason"]
+
+
+@pytest.mark.django_db
 def test_batch_of_due_notifications_is_not_stranded_by_a_crashing_channel(client):
     """대체발송 체인의 모든 채널이 예외로 죽어도(과거였다면 배치 전체가 멈췄다) 야간
     큐에 쌓인 여러 건이 전부 처리되고 아무 것도 QUEUED 에 갇히지 않는다

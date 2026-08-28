@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from django.test import override_settings
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 
@@ -214,3 +215,88 @@ def test_development_target_still_boots_with_every_adapter_fake():
     )
 
     assert result.returncode == 0, result.stderr
+
+
+# --- LAURIO_DEPLOYMENT_TARGET 자체의 유효성 (코디네이터 리뷰 지적) ------------------
+
+
+@pytest.mark.parametrize(
+    "bad_target", ["prod", "Production", "PRODUCTION", "stagng", "prod ", " production"]
+)
+def test_unknown_deployment_target_refuses_to_boot(bad_target):
+    """오타·대소문자 실수 하나가 조용히 "development"로 흘러 이 티켓의 모든 가드
+    (fake 어댑터 거부·SECRET_KEY 강도·DEBUG 거부·TLS 하드닝)를 무력화하면 안 된다 —
+    허용된 세 값이 아니면 그 자리에서 바로 죽어야 한다."""
+
+    env = _production_env(LAURIO_DEPLOYMENT_TARGET=bad_target)
+
+    result = _run_check(env)
+
+    assert result.returncode != 0, (
+        f"LAURIO_DEPLOYMENT_TARGET={bad_target!r} 가 조용히 통과했다 — 이 값이 "
+        "'production'/'staging'과 매치하지 않으면 모든 배포 가드가 꺼진 채로 부팅된다."
+    )
+    assert "ImproperlyConfigured" in result.stderr
+    assert "LAURIO_DEPLOYMENT_TARGET" in result.stderr
+
+
+# --- "fake"라는 별칭 문자열만 피해 가는 dotted path 우회 (코디네이터 리뷰 지적) -----
+
+_FAKE_DOTTED_PATH_BYPASSES = [
+    ("STORAGE_BACKEND", "storage.adapters.fake.FakeStorageAdapter"),
+    ("LLM_ADAPTER_MODE", "scoring.adapters.FakeLLMScoringAdapter"),
+    (
+        "LLM_REQUIREMENT_CHAT_ADAPTER_MODE",
+        "contests.requirement_chat.FakeRequirementChatAdapter",
+    ),
+]
+
+
+@pytest.mark.parametrize("target", ["staging", "production"])
+@pytest.mark.parametrize("field,fake_dotted_path", _FAKE_DOTTED_PATH_BYPASSES)
+def test_deployed_environment_refuses_a_fake_adapter_named_by_dotted_path(
+    target, field, fake_dotted_path
+):
+    """STORAGE_BACKEND는 "fake"가 별칭 dict를 거쳐 실제 dotted path로 풀리고,
+    LLM_ADAPTER_MODE/LLM_REQUIREMENT_CHAT_ADAPTER_MODE는 "fake"가 아니면 뭐든
+    dotted path로 그대로 import한다(core.adapters.resolve_adapter) — 즉 문자 그대로
+    "fake"만 피하면 실제로는 여전히 Fake 어댑터가 조용히 바인딩된다. 이전 가드는
+    `value == "fake"`만 봐서 이 경로를 놓쳤다."""
+
+    env_builder = _production_env if target == "production" else _staging_env
+    env = env_builder(**{field: fake_dotted_path})
+
+    result = _run_check(env)
+
+    assert result.returncode != 0, (
+        f"{target} config with {field}={fake_dotted_path!r} booted successfully — "
+        "'fake' 별칭 문자열만 피했을 뿐 실제로는 여전히 Fake 어댑터가 바인딩된다."
+    )
+    assert "ImproperlyConfigured" in result.stderr
+    assert field in result.stderr
+
+
+# --- Celery beat가 부르는 내부 엔드포인트는 SSL 리다이렉트에서 빠져야 한다 ----------
+# (코디네이터 리뷰 지적: production의 SECURE_SSL_REDIRECT=True가 컨테이너 내부
+# 네트워크에서 평문 HTTP로 오는 Celery의 틱 호출까지 301로 되돌려 보내면, 평문
+# gunicorn은애초에 TLS 핸드셰이크를 할 수 없어 매 틱이 SSLError로 죽는다. 이건
+# subprocess 없이도 같은 프로세스에서 override_settings로 재현 가능하다 —
+# SECURE_SSL_REDIRECT/SECURE_REDIRECT_EXEMPT는 매 요청마다 SecurityMiddleware가
+# django.conf.settings에서 다시 읽는 일반 설정이지, LAURIO_DEPLOYMENT_TARGET처럼
+# import 시점에 한 번만 평가되는 값이 아니기 때문이다.
+
+
+@pytest.mark.django_db
+def test_internal_endpoints_are_exempt_from_ssl_redirect_but_other_paths_are_not(client):
+    with override_settings(SECURE_SSL_REDIRECT=True, SECURE_REDIRECT_EXEMPT=[r"^api/internal/"]):
+        internal_response = client.post("/api/internal/tick", HTTP_X_INTERNAL_TOKEN="wrong-token")
+        other_response = client.get("/api/health")
+
+    assert internal_response.status_code not in (301, 302), (
+        "내부 엔드포인트가 SSL 리다이렉트 대상이면 Celery beat의 평문 내부 호출이 "
+        "301을 받고, 평문 gunicorn은 TLS 핸드셰이크를 못 하므로 매 틱이 죽는다."
+    )
+    assert other_response.status_code in (301, 302), (
+        "내부 엔드포인트만 예외여야 한다 — 예외 패턴이 너무 넓으면 공개 API까지 "
+        "SSL 리다이렉트가 조용히 꺼진다."
+    )
