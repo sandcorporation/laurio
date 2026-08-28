@@ -44,7 +44,10 @@ def verify(request: HttpRequest, payload: VerifyIn):
     verification.real_name = result.real_name
     verification.birth_date = result.birth_date
 
-    if is_adult(result.birth_date, on=timezone.now().date()):
+    # KST(Asia/Seoul) 기준 "오늘"이어야 한다. timezone.now().date()는 UTC 시각의 날짜를
+    # 돌려주므로 00~09시 KST 사이에는 어제 날짜가 나와 생일 당일 성인이 하루 늦게
+    # 성인 취급된다(ADR-0011).
+    if is_adult(result.birth_date, on=timezone.localdate()):
         verification.status = Verification.Status.VERIFIED
         verification.reason = ""
         verification.set_ci(result.ci)
@@ -54,6 +57,11 @@ def verify(request: HttpRequest, payload: VerifyIn):
         verification.status = Verification.Status.UNDERAGE
         verification.reason = "만 19세 미만은 본인확인을 완료할 수 없습니다."
         verification.verified_at = None
+        # 미성년자로 판정되면(재확인으로 인한 다운그레이드 포함) 플랫폼 신원을 남길
+        # 이유가 없다 — 이미 저장돼 있던 CI/DI가 있다면 함께 지운다.
+        verification.ci_encrypted = ""
+        verification.ci_hash = ""
+        verification.di_encrypted = ""
 
     verification.save()
     return _to_status_out(verification)

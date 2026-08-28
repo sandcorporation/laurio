@@ -217,3 +217,92 @@ def test_verify_rejects_malformed_token(client):
     )
 
     assert response.status_code == 422
+
+
+@pytest.mark.django_db
+def test_adult_is_verified_correctly_across_the_utc_kst_date_gap(client):
+    """UTC 23:30(6/14)은 KST로는 6/15 08:30 — 날짜만 UTC로 읽으면 아직 생일 전이라고
+    오판해 성인을 9시간 동안 거부하는 버그가 있었다(ADR-0011). timezone.localdate()가
+    KST 기준으로 날짜를 계산하는지 시계를 그 창 안에 고정해 확인한다.
+    """
+    from datetime import datetime, timezone as dt_timezone
+    from unittest.mock import patch
+
+    # 이 순간 UTC 날짜는 6/14 이지만 KST(UTC+9) 날짜는 이미 6/15 이다.
+    pinned_utc_instant = datetime(2024, 6, 14, 23, 30, tzinfo=dt_timezone.utc)
+    birth_date_of_someone_turning_19_today_in_kst = "2005-06-15"
+
+    pair = _login(client, uid="kst-boundary", email="kst@example.com")
+
+    with patch("django.utils.timezone.now", return_value=pinned_utc_instant):
+        response = client.post(
+            "/api/verification/verify",
+            data={
+                "verification_token": _fake_token(
+                    "케이에스티",
+                    birth_date_of_someone_turning_19_today_in_kst,
+                    "ci-kst-1",
+                    "di-kst-1",
+                )
+            },
+            content_type="application/json",
+            **_auth_header(pair["access"]),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "verified"
+
+
+@pytest.mark.django_db
+def test_downgrading_to_underage_clears_previously_stored_ci_and_di(client):
+    """재확인으로 성인 → 미성년 판정이 뒤집히면 이미 저장돼 있던 CI/DI도 지워야 한다.
+
+    미성년자로 판정된 사람은 플랫폼 신원(CI/DI)을 남길 이유가 없다(Verification 모델
+    docstring과 동일한 원칙).
+    """
+    pair = _login(client, uid="downgrade-subject", email="downgrade@example.com")
+
+    first = client.post(
+        "/api/verification/verify",
+        data={
+            "verification_token": _fake_token(
+                "한때성인", "1990-01-01", "ci-downgrade-1", "di-downgrade-1"
+            )
+        },
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert first.json()["status"] == "verified"
+
+    record = Verification.objects.get(user__social_accounts__provider_uid="downgrade-subject")
+    assert record.ci_encrypted != ""
+    assert record.ci_hash != ""
+    assert record.di_encrypted != ""
+
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    today = timezone.localdate()
+    clearly_minor_birth = today - timedelta(days=365 * 10)
+
+    second = client.post(
+        "/api/verification/verify",
+        data={
+            "verification_token": _fake_token(
+                "사실은미성년",
+                clearly_minor_birth.isoformat(),
+                "ci-downgrade-1",
+                "di-downgrade-1",
+            )
+        },
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert second.json()["status"] == "underage"
+
+    record.refresh_from_db()
+    assert record.status == Verification.Status.UNDERAGE
+    assert record.ci_encrypted == ""
+    assert record.ci_hash == ""
+    assert record.di_encrypted == ""

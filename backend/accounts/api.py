@@ -86,21 +86,25 @@ def refresh_token(request: HttpRequest, payload: RefreshIn):
 
 @router.post("/auth/logout", auth=jwt_auth)
 def logout(request: HttpRequest, payload: LogoutIn | None = None):
-    """현재 액세스 토큰(과 있다면 리프레시 토큰)을 즉시 블랙리스트에 올린다."""
+    """현재 액세스 토큰(과 있다면 리프레시 토큰)을 즉시 블랙리스트에 올린다.
+
+    블랙리스트 기록이 실패하면 로그아웃도 실패해야 한다. 200을 돌려주고도 토큰이
+    여전히 유효한 상태로 남는 것은 ADR-0012가 명시적으로 금지하는 상황이다 — 여기서
+    예외를 삼키지 않는다. 클라이언트가 보낸 토큰 자체가 문제면 401로, 블랙리스트
+    저장이 인프라 문제로 실패하면 그대로 전파돼 500으로 드러난다.
+    """
 
     header = request.META.get("HTTP_AUTHORIZATION", "")
     access_token = header[len("Bearer ") :].strip() if header.startswith("Bearer ") else None
-    if access_token:
-        try:
-            blacklist_token(access_token, expected_type="access")
-        except Exception:  # noqa: BLE001 - 만료 등으로 디코드가 안 돼도 로그아웃은 성공 처리
-            pass
+    if not access_token:
+        raise HttpError(400, "액세스 토큰이 필요합니다.")
 
-    if payload and payload.refresh:
-        try:
+    try:
+        blacklist_token(access_token, expected_type="access")
+        if payload and payload.refresh:
             blacklist_token(payload.refresh, expected_type="refresh")
-        except Exception:  # noqa: BLE001
-            pass
+    except TokenError as exc:
+        raise HttpError(401, "토큰이 유효하지 않아 로그아웃할 수 없습니다.") from exc
 
     return {"status": "ok"}
 
@@ -117,15 +121,26 @@ def me(request: HttpRequest):
     )
 
 
+def _apply_profile_update(profile, payload: ProfileIn) -> None:
+    """None(안 보냄)과 ""(명시적으로 비움)을 구분해 보내진 필드만 갱신한다."""
+
+    changed = False
+    if payload.display_name is not None:
+        profile.display_name = sanitize_free_text(payload.display_name)
+        changed = True
+    if payload.bio is not None:
+        profile.bio = sanitize_free_text(payload.bio)
+        changed = True
+    if changed:
+        profile.save()
+
+
 @router.post("/accounts/sponsor-profile", response=ProfileOut, auth=jwt_auth)
 def ensure_sponsor_profile(request: HttpRequest, payload: ProfileIn):
     """Sponsor 프로필을 필요할 때 처음으로 만든다(지연 생성, get-or-create)."""
 
     profile, _created = SponsorProfile.objects.get_or_create(user=request.auth_user)
-    if payload.display_name or payload.bio:
-        profile.display_name = sanitize_free_text(payload.display_name)
-        profile.bio = sanitize_free_text(payload.bio)
-        profile.save()
+    _apply_profile_update(profile, payload)
     return ProfileOut(display_name=profile.display_name, bio=profile.bio)
 
 
@@ -134,8 +149,5 @@ def ensure_developer_profile(request: HttpRequest, payload: ProfileIn):
     """Developer 프로필을 필요할 때 처음으로 만든다(지연 생성, get-or-create)."""
 
     profile, _created = DeveloperProfile.objects.get_or_create(user=request.auth_user)
-    if payload.display_name or payload.bio:
-        profile.display_name = sanitize_free_text(payload.display_name)
-        profile.bio = sanitize_free_text(payload.bio)
-        profile.save()
+    _apply_profile_update(profile, payload)
     return ProfileOut(display_name=profile.display_name, bio=profile.bio)

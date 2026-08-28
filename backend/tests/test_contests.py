@@ -151,6 +151,28 @@ def test_prize_below_sum_sets_underfunded_badge_but_still_succeeds(
 
 
 @pytest.mark.django_db
+def test_negative_prize_is_rejected_with_422_not_500(client, category, landing_type):
+    """PositiveIntegerField의 DB CHECK에 그대로 부딪히면 422가 아니라 500이 난다."""
+    pair = _login(client)
+    _verify(client, pair["access"], ci="sponsor-ci-negative")
+
+    response = client.post(
+        "/api/contests",
+        data={
+            "title": "음수 상금",
+            "category_id": category.id,
+            "deliverable_type_ids": [landing_type.id],
+            "prize": -1000,
+            "deadline_at": "2030-01-01T00:00:00Z",
+        },
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.django_db
 def test_requirement_grade_must_be_required_or_optional(client, category, landing_type):
     pair = _login(client)
     _verify(client, pair["access"], ci="sponsor-ci-3")
@@ -211,9 +233,9 @@ def test_anonymous_can_list_and_read_published_but_not_draft(
     ).json()
     draft_id = created["id"]
 
-    # draft는 목록에 없다.
+    # draft는 목록에 없다. 목록은 페이지네이션돼 {"items": [...], "count": N} 로 온다.
     listing = client.get("/api/contests").json()
-    assert all(c["id"] != draft_id for c in listing)
+    assert all(c["id"] != draft_id for c in listing["items"])
 
     # draft는 익명 상세 조회에서 404.
     anon_detail = client.get(f"/api/contests/{draft_id}")
@@ -223,7 +245,8 @@ def test_anonymous_can_list_and_read_published_but_not_draft(
     Contest.objects.filter(id=draft_id).update(status=Contest.Status.PUBLISHED)
 
     listing_after_publish = client.get("/api/contests").json()
-    assert any(c["id"] == draft_id for c in listing_after_publish)
+    assert any(c["id"] == draft_id for c in listing_after_publish["items"])
+    assert listing_after_publish["count"] >= 1
 
     detail_after_publish = client.get(f"/api/contests/{draft_id}")
     assert detail_after_publish.status_code == 200

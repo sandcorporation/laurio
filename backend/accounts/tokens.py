@@ -61,7 +61,7 @@ def issue_token_pair(user_id: int) -> TokenPair:
 
 
 def decode_token(token: str, *, expected_type: str) -> dict:
-    """서명·만료·타입·블랙리스트를 전부 검증하고 payload를 돌려준다.
+    """서명·만료·타입·블랙리스트·(리프레시라면) 회수 여부를 전부 검증한다.
 
     실패하면 항상 `TokenError`. 호출부는 이걸 401로만 번역하면 된다.
     """
@@ -78,6 +78,13 @@ def decode_token(token: str, *, expected_type: str) -> dict:
     if not jti or is_blacklisted(jti):
         raise TokenError("token has been revoked")
 
+    if expected_type == "refresh" and not RefreshToken.objects.filter(
+        jti=jti, revoked_at__isnull=True
+    ).exists():
+        # 운영자가 admin에서 이 RefreshToken 행을 직접 회수(revoked_at 기입)했을 수도
+        # 있다 — 블랙리스트에 없어도 회전은 즉시 막혀야 한다(ADR-0012).
+        raise TokenError("refresh token has been revoked")
+
     return payload
 
 
@@ -90,13 +97,25 @@ def blacklist(jti: str, expires_at: datetime) -> None:
 
 
 def blacklist_token(token: str, *, expected_type: str | None = None) -> None:
-    """서명 검증 없이도(만료돼도) jti·exp를 뽑아 블랙리스트에 올린다.
+    """서명은 검증하되 만료는 무시하고 jti·exp를 뽑아 블랙리스트에 올린다.
 
-    로그아웃 시점엔 토큰이 아직 유효해야 의미가 있으므로 보통 `decode_token`을 먼저
-    거치지만, 이 헬퍼는 exp 클레임만 신뢰해 블랙리스트 저장까지 담당한다.
+    로그아웃 대상 토큰이 이미 만료 직전이거나(레이스), 클라이언트가 뒤늦게 로그아웃을
+    호출한 경우까지 포함해 "블랙리스트에 올리는 것 자체"는 항상 성공해야 한다.
+    `jwt.decode`는 기본적으로 `exp`를 검증해 만료된 토큰에 예외를 던지므로,
+    여기서는 `verify_exp=False`로 그 검증만 끄고 서명 검증은 그대로 유지한다.
+    서명이 아예 틀리거나 타입이 안 맞으면 `TokenError`를 던진다 — 이 실패는 호출부가
+    삼키지 않고 그대로 드러내야 한다(ADR-0012).
     """
 
-    payload = jwt.decode(token, settings.JWT_SIGNING_KEY, algorithms=[ALGORITHM])
+    try:
+        payload = jwt.decode(
+            token,
+            settings.JWT_SIGNING_KEY,
+            algorithms=[ALGORITHM],
+            options={"verify_exp": False},
+        )
+    except jwt.PyJWTError as exc:
+        raise TokenError("invalid token") from exc
     if expected_type and payload.get("type") != expected_type:
         raise TokenError(f"expected a {expected_type} token")
     jti = payload["jti"]

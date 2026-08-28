@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from ninja import Schema
+from pydantic import Field
 
 
 class CategoryOut(Schema):
@@ -24,7 +25,7 @@ class QuoteOut(Schema):
 
 
 class RequirementIn(Schema):
-    text: str
+    text: str = Field(max_length=500)
     grade: str  # "required" | "optional"
 
 
@@ -36,11 +37,14 @@ class RequirementOut(Schema):
 
 
 class ContestCreateIn(Schema):
-    title: str
+    title: str = Field(max_length=200)
     category_id: int
     deliverable_type_ids: list[int]
     description: str = ""
-    prize: int
+    # Prize는 Sponsor가 실제로 예치하는 금액이다 — 0 이하는 개최로 성립하지 않는다.
+    # 스키마에서 막지 않으면 음수가 PositiveIntegerField의 DB CHECK에 걸려 422 대신
+    # 500이 난다.
+    prize: int = Field(gt=0)
     deadline_at: datetime
     requirements: list[RequirementIn] = []
 

@@ -6,10 +6,12 @@
 
 from __future__ import annotations
 
+from django.db import transaction
 from django.db.models import Sum
 from django.http import HttpRequest
 from ninja import Router
 from ninja.errors import HttpError
+from ninja.pagination import PageNumberPagination, paginate
 
 from accounts.middleware import jwt_auth
 from accounts.models import SponsorProfile
@@ -120,50 +122,60 @@ def create_contest(request: HttpRequest, payload: ContestCreateIn):
 
     minimum_total = sum(dt.minimum_prize for dt in deliverable_types)
 
-    contest = Contest.objects.create(
-        sponsor=sponsor_profile,
-        title=sanitize_free_text(payload.title),
-        category=category,
-        description=sanitize_free_text(payload.description),
-        prize=payload.prize,
-        deadline_at=payload.deadline_at,
-        status=Contest.Status.DRAFT,
-        required_minimum_prize=minimum_total,
-        is_underfunded=payload.prize < minimum_total,
-    )
-    contest.deliverable_types.set(deliverable_types)
+    # Contest 행 커밋과 Requirement 일괄 생성이 한 단위여야 한다 — 예를 들어 500자를
+    # 넘는 Requirement.text가 DB CHECK/길이 제약에 걸려 bulk_create가 실패해도,
+    # Contest만 커밋된 채 남는 고아 레코드를 만들지 않는다.
+    with transaction.atomic():
+        contest = Contest.objects.create(
+            sponsor=sponsor_profile,
+            title=sanitize_free_text(payload.title),
+            category=category,
+            description=sanitize_free_text(payload.description),
+            prize=payload.prize,
+            deadline_at=payload.deadline_at,
+            status=Contest.Status.DRAFT,
+            required_minimum_prize=minimum_total,
+            is_underfunded=payload.prize < minimum_total,
+        )
+        contest.deliverable_types.set(deliverable_types)
 
-    Requirement.objects.bulk_create(
-        [
-            Requirement(
-                contest=contest,
-                text=sanitize_free_text(r.text),
-                grade=r.grade,
-                order=index,
-            )
-            for index, r in enumerate(payload.requirements)
-        ]
-    )
+        Requirement.objects.bulk_create(
+            [
+                Requirement(
+                    contest=contest,
+                    text=sanitize_free_text(r.text),
+                    grade=r.grade,
+                    order=index,
+                )
+                for index, r in enumerate(payload.requirements)
+            ]
+        )
 
     contest.refresh_from_db()
     return _serialize_contest(contest)
 
 
 @router.get("/contests", response=list[ContestOut], auth=None)
+@paginate(PageNumberPagination, page_size=20)
 def list_contests(request: HttpRequest):
-    """공개된 Contest만 나온다 — draft는 비로그인·타인에게 보이지 않는다."""
+    """공개된 Contest만 나온다 — draft는 비로그인·타인에게 보이지 않는다.
 
-    contests = Contest.objects.filter(status=Contest.Status.PUBLISHED).prefetch_related(
-        "deliverable_types", "requirements"
-    )
-    return [_serialize_contest(c) for c in contests]
+    `select_related("category")`가 없으면 목록의 Contest마다 Category를 한 번씩 더
+    조회하는 N+1이 난다. 목록은 무한정 커질 수 있으므로 페이지네이션도 둔다.
+    """
+
+    return Contest.objects.filter(status=Contest.Status.PUBLISHED).select_related(
+        "category"
+    ).prefetch_related("deliverable_types", "requirements")
 
 
 @router.get("/contests/{contest_id}", response=ContestOut, auth=None)
 def get_contest(request: HttpRequest, contest_id: int):
     try:
-        contest = Contest.objects.prefetch_related("deliverable_types", "requirements").get(
-            id=contest_id
+        contest = (
+            Contest.objects.select_related("category")
+            .prefetch_related("deliverable_types", "requirements")
+            .get(id=contest_id)
         )
     except Contest.DoesNotExist as exc:
         raise HttpError(404, "Contest를 찾을 수 없습니다.") from exc
