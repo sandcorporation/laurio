@@ -331,3 +331,24 @@ if IS_PRODUCTION_DEPLOYMENT and LLM_ADAPTER_MODE == "fake":
 LLM_FAKE_RAISING_SUBMISSION_IDS = [
     int(x) for x in _env("LLM_FAKE_RAISING_SUBMISSION_IDS", "").split(",") if x
 ]
+
+# --- AI grill — Sponsor Requirement 체크리스트 대화형 생성 어댑터 (#20, ADR-0007) ---
+#
+# LLM_ADAPTER_MODE와 같은 원칙(기본값은 항상 fake)을 별개의 설정 키로 둔다 —
+# NOTIFICATION_ALIMTALK_ADAPTER/NOTIFICATION_SMS_ADAPTER/NOTIFICATION_LMS_ADAPTER가
+# "통지"라는 한 개념 아래 채널별로 갈아끼우는 것과 같은 구조로, "LLM"이라는 한
+# 개념 아래 용도별(채점/대화)로 갈아끼운다. 두 번째 벤더 SDK·HTTP 클라이언트를
+# 새로 만들지 않는다 — `core.adapters.resolve_adapter`로 선택 로직 자체를
+# `scoring.adapters.get_adapter`와 공유한다.
+LLM_REQUIREMENT_CHAT_ADAPTER_MODE = _env("LLM_REQUIREMENT_CHAT_ADAPTER_MODE", "fake")
+if IS_PRODUCTION_DEPLOYMENT and LLM_REQUIREMENT_CHAT_ADAPTER_MODE == "fake":
+    raise ImproperlyConfigured(
+        "LAURIO_DEPLOYMENT_TARGET=production 인데 LLM_REQUIREMENT_CHAT_ADAPTER_MODE 가 "
+        "fake 다. 운영 배포에서는 실제 LLM 어댑터를 반드시 설정해야 한다."
+    )
+
+# 테스트가 override_settings로 특정 contest_id의 대화 응답 실패를 흉내낼 때 쓴다
+# (LLM_FAKE_RAISING_SUBMISSION_IDS와 같은 원칙).
+LLM_REQUIREMENT_CHAT_FAKE_RAISING_CONTEST_IDS = [
+    int(x) for x in _env("LLM_REQUIREMENT_CHAT_FAKE_RAISING_CONTEST_IDS", "").split(",") if x
+]

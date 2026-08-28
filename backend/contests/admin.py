@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Category, Contest, DeliverableType, Requirement
+from .models import Category, Contest, DeliverableType, Requirement, RequirementChatMessage
 
 
 @admin.register(Category)
@@ -36,3 +36,12 @@ class ContestAdmin(admin.ModelAdmin):
     )
     list_filter = ("status", "category", "is_underfunded")
     inlines = [RequirementInline]
+
+
+@admin.register(RequirementChatMessage)
+class RequirementChatMessageAdmin(admin.ModelAdmin):
+    """AI grill 대화 이력을 운영자가 감사할 수 있는 화면(#20)."""
+
+    list_display = ("contest", "role", "created_at")
+    list_filter = ("role",)
+    readonly_fields = ("contest", "role", "content", "prompt", "created_at")

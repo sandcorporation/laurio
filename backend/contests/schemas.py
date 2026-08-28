@@ -62,3 +62,35 @@ class ContestOut(Schema):
     is_underfunded: bool
     requirements: list[RequirementOut]
     created_at: datetime
+
+
+class RequirementCreateIn(Schema):
+    text: str = Field(min_length=1, max_length=500)
+    grade: str  # "required" | "optional"
+
+
+class RequirementUpdateIn(Schema):
+    text: str | None = Field(default=None, min_length=1, max_length=500)
+    grade: str | None = None
+    order: int | None = None
+
+
+class RequirementChatMessageIn(Schema):
+    message: str = Field(min_length=1, max_length=2000)
+
+
+class RequirementProposalOut(Schema):
+    text: str
+    grade: str
+
+
+class RequirementChatTurnOut(Schema):
+    role: str
+    content: str
+    created_at: datetime
+
+
+class RequirementChatResponseOut(Schema):
+    reply: str
+    proposed_requirements: list[RequirementProposalOut]
+    messages: list[RequirementChatTurnOut]
