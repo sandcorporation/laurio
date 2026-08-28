@@ -1,6 +1,8 @@
 from ninja import NinjaAPI
 
 from accounts.api import router as accounts_router
+from appeals.api import internal_router as appeals_internal_router
+from appeals.api import router as appeals_router
 from awards.api import router as awards_router
 from contests.api import router as contests_router
 from core.api import router as core_internal_router
@@ -28,6 +30,7 @@ api.add_router("", submissions_router)
 api.add_router("", awards_router)
 api.add_router("", handovers_router)
 api.add_router("", payouts_router)
+api.add_router("", appeals_router)
 api.add_router("/ledger", ledger_router)
 
 
@@ -42,6 +45,7 @@ api.add_router("/internal/scoring", scoring_internal_router)
 api.add_router("/internal/handovers", handovers_internal_router)
 api.add_router("/internal/payments", payments_internal_router)
 api.add_router("/internal/distributions", distributions_internal_router)
+api.add_router("/internal", appeals_internal_router)
 
 
 @api.exception_handler(StorageAccessDenied)

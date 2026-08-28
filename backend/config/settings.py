@@ -81,6 +81,7 @@ INSTALLED_APPS = [
     "handovers",
     "payouts",
     "distributions",
+    "appeals",
 ]
 
 MIDDLEWARE = [
