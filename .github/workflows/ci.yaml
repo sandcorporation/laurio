@@ -34,6 +34,27 @@ jobs:
       DJANGO_SECRET_KEY: ci-only-insecure-key
       DJANGO_DEBUG: "false"
       DJANGO_ALLOWED_HOSTS: "*"
+      # DJANGO_DEBUG=false 인데 비어 있으면 config/settings.py 가 부팅을 거부하는
+      # 항목들. CI는 운영 배포가 아니지만(LAURIO_DEPLOYMENT_TARGET 미설정 =
+      # "development"), DEBUG=false로 실행하는 이상 이 값들은 그대로 요구된다 —
+      # 여기서 요구하는 건 "값이 비어 있지 않을 것"뿐이지 "진짜 운영 비밀일 것"이
+      # 아니다.
+      INTERNAL_API_TOKEN: ci-only-insecure-internal-token
+      JWT_SIGNING_KEY: ci-only-insecure-jwt-signing-key
+      PAYMENT_WEBHOOK_SECRET: ci-only-insecure-fake-pg-webhook-secret
+      PAYOUT_WEBHOOK_SECRET: ci-only-insecure-fake-toss-payout-webhook-secret
+      # Fernet 키는 형식이 고정돼 있다(urlsafe base64 32바이트) — settings.py의 dev
+      # fallback과 같은 값을 그대로 쓴다(둘 다 저장소에 이미 공개돼 있어 새로 유출될
+      # 비밀이 아니다).
+      VERIFICATION_ENCRYPTION_KEY: A0crfksMrBmbSY37jIyOwcPRFpK9rc_eIaNnL89lIfo=
+      # #10 리뷰: "어떤 어댑터 구현체를 쓸지"는 DEBUG(=이게 진짜 운영 배포인지)와
+      # 다른 질문이다. 기본값이 이미 fake이므로 없어도 같은 값이지만, CI가 반드시
+      # fake로 돈다는 것을 여기 명시적으로 남긴다 — 운영 배포(#23)만 real로 바꾼다.
+      STORAGE_BACKEND: fake
+      SOCIAL_AUTH_MODE: fake
+      VERIFICATION_ADAPTER_MODE: fake
+      PAYMENT_ADAPTER_MODE: fake
+      PAYOUT_ADAPTER_MODE: fake
 
     steps:
       - uses: actions/checkout@v4
