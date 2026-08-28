@@ -21,7 +21,11 @@ services:
     volumes:
       - laurio-dev-db:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U laurio -d laurio"]
+      # -h 를 반드시 준다. 없으면 유닉스 소켓으로 붙는데, postgres 엔트리포인트가
+      # 초기화 중에 띄우는 임시 서버(listen_addresses='')도 그 소켓에 응답한다.
+      # 그러면 TCP 가 아직 안 열린 상태에서 healthy 로 판정돼 backend 의 migrate 가
+      # 첫 기동(빈 볼륨)에서 connection refused 로 죽는다.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U laurio -d laurio"]
       interval: 3s
       timeout: 3s
       retries: 20
@@ -30,6 +34,8 @@ services:
     build:
       context: ..
       dockerfile: docker/backend.Dockerfile
+    # migrate 가 DB 기동 레이스로 한 번 실패해도 스스로 복구되게 한다.
+    restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy

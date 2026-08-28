@@ -6,20 +6,46 @@
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+from dotenv import load_dotenv
+
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# 호스트에서 돌릴 때 backend/.env 를 읽는다. override=False 라서 compose·CI 가 주입한
+# 실제 환경변수가 항상 파일을 이긴다.
+load_dotenv(BASE_DIR / ".env", override=False)
+
+
+def _env(name: str, default: str) -> str:
+    """빈 문자열도 '미설정'으로 본다.
+
+    os.environ.get(name, default) 은 `FOO=` 일 때 기본값이 아니라 '' 를 돌려준다.
+    .env 템플릿의 빈 항목이 그대로 설정으로 들어오면 부팅이 깨지므로 여기서 걸러낸다.
+    """
+    return os.environ.get(name) or default
 
 
 def _env_bool(name: str, default: bool) -> bool:
     raw = os.environ.get(name)
-    if raw is None:
+    if not raw:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
-# 개발용 기본값. staging·prod는 반드시 환경변수로 덮어쓴다.
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-only-insecure-key")
 DEBUG = _env_bool("DJANGO_DEBUG", True)
-ALLOWED_HOSTS = [h for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "*").split(",") if h]
+
+_secret_key = os.environ.get("DJANGO_SECRET_KEY") or ""
+if not _secret_key:
+    if not DEBUG:
+        # 저장소에 공개된 개발용 키로 프로덕션이 조용히 뜨는 것보다 못 뜨는 편이 낫다.
+        raise ImproperlyConfigured(
+            "DJANGO_DEBUG=false 인데 DJANGO_SECRET_KEY 가 비어 있다. "
+            "배포 환경에서는 반드시 주입해야 한다."
+        )
+    _secret_key = "dev-only-insecure-key"
+SECRET_KEY = _secret_key
+
+ALLOWED_HOSTS = [h for h in _env("DJANGO_ALLOWED_HOSTS", "*").split(",") if h]
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -64,16 +90,16 @@ ASGI_APPLICATION = "config.asgi.application"
 # 아래 기본값은 호스트에서 `uv run pytest` 를 돌릴 때만 쓰이므로, dev compose 가
 # 실제로 공개한 포트(LAURIO_DB_PORT)를 그대로 따라간다. 다른 프로젝트의 5432 에
 # 잘못 붙는 사고를 막기 위함이다.
-_DEV_DB_PORT = os.environ.get("LAURIO_DB_PORT", "55432")
+_DEV_DB_PORT = _env("LAURIO_DB_PORT", "55432")
 
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.environ.get("POSTGRES_DB", "laurio"),
-        "USER": os.environ.get("POSTGRES_USER", "laurio"),
-        "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "laurio"),
-        "HOST": os.environ.get("POSTGRES_HOST", "127.0.0.1"),
-        "PORT": os.environ.get("POSTGRES_PORT", _DEV_DB_PORT),
+        "NAME": _env("POSTGRES_DB", "laurio"),
+        "USER": _env("POSTGRES_USER", "laurio"),
+        "PASSWORD": _env("POSTGRES_PASSWORD", "laurio"),
+        "HOST": _env("POSTGRES_HOST", "127.0.0.1"),
+        "PORT": _env("POSTGRES_PORT", _DEV_DB_PORT),
     }
 }
 

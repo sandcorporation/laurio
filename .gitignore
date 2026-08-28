@@ -20,10 +20,10 @@ htmlcov/
 .coverage
 .coverage.*
 
-# Django
+# Django — 앵커를 붙이지 않는다. STATIC_ROOT 는 backend/staticfiles 다.
 *.sqlite3
-/media/
-/staticfiles/
+media/
+staticfiles/
 
 # 도구·에디터
 .idea/

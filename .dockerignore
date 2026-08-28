@@ -1,0 +1,37 @@
+# 빌드 컨텍스트가 저장소 전체(context: ..)이므로, 여기서 막지 않으면
+# 시크릿과 호스트 전용 산출물이 이미지 레이어에 그대로 구워진다.
+#
+# 하위 디렉터리(backend/ 등)까지 잡으려면 ** 를 써야 한다. `.venv/` 는
+# 컨텍스트 루트의 .venv 만 잡고 backend/.venv 는 놓친다.
+
+# 시크릿
+**/.env
+**/.env.*
+!**/.env.example
+
+# 호스트 전용 가상환경 — 이미지의 /opt/venv 와 플랫폼이 다르다
+**/.venv/
+**/venv/
+
+# Python 산출물
+**/__pycache__/
+**/*.py[cod]
+**/*.egg-info/
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+**/htmlcov/
+**/.coverage
+**/.coverage.*
+
+# 이미지에 들어갈 이유가 없는 것들
+.git/
+.github/
+.scratch/
+docs/
+**/*.md
+**/.idea/
+**/.vscode/
+**/*.sqlite3
+**/staticfiles/
+**/media/
