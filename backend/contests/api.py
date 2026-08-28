@@ -322,7 +322,15 @@ def reopen_contest(request: HttpRequest, contest_id: int, payload: ContestReopen
         if original.sponsor.user_id != request.auth_user.id:
             raise HttpError(403, "본인이 개최한 Contest만 재개최할 수 있습니다.")
 
-        if original.status != Contest.Status.CLOSED:
+        if original.status not in (Contest.Status.CLOSED, Contest.Status.JUDGING_ENDED):
+            # CLOSED뿐 아니라 JUDGING_ENDED도 허용한다 — 스케줄러가
+            # judging_ends_at이 지나면 CLOSED -> JUDGING_ENDED로 무조건 전이시키므로
+            # (core.transitions 레지스트리, Award 여부와 무관), 참여자 0명으로
+            # 유찰된 Contest도 이 엔드포인트가 그 사실을 알아채기 전에
+            # JUDGING_ENDED로 넘어갈 수 있다. CLOSED만 허용하면 그 순간부터
+            # 재개최가 영구히 409로 막힌다 — 실제 판정 근거는 아래
+            # REFUNDED Payment 존재 여부이지 이 status 값 자체가 아니므로, 상태
+            # 값만으로 이미 유찰이 확정된 Contest를 걸러낼 이유가 없다.
             raise HttpError(409, "마감된 Contest만 재개최할 수 있습니다.")
 
         if not Payment.objects.filter(contest=original, status=Payment.Status.REFUNDED).exists():

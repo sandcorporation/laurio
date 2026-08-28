@@ -27,6 +27,7 @@ REQUEST.md). 그 경우 컷라인을 무시하고 참여자 전원에게 배분�
 
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 
 from django.conf import settings
@@ -42,6 +43,8 @@ from payouts.services import get_or_create_payout, mark_confirmed, mark_failed
 from submissions.models import Submission
 
 from .models import Distribution, DistributionCutline, DistributionShare
+
+logger = logging.getLogger(__name__)
 
 # 한 스캔에서 시도하는 최대 행 수 — handovers.api.BATCH_SIZE와 같은 이유. 무제한
 # 스캔은 백로그가 쌓였을 때 이 요청 자체를 타임아웃으로 몰아넣는다.
@@ -218,7 +221,27 @@ def run_due_distributions(*, fail_submission_ids: set[int] | None = None) -> lis
     )
 
     for contest_id in due_contest_ids:
-        distribution = _create_distribution_for_contest(contest_id)
+        # 한 Contest의 처리가 여기서 예외를 던져도(예기치 못한 버그) 나머지
+        # 배치가 막히면 안 된다 — order_by("id")로 스캔하는 이상, 그 예외를
+        # 밖으로 흘리면 이 Contest가 항상 배치 맨 앞에서 다시 걸려 그 뒤의
+        # 정상 건들까지 영원히 처리되지 못하는 poison pill이 된다
+        # (scoring.services.run_pending_scoring이 이미 겪고 고친 것과 같은
+        # 종류의 사고 — #21 리뷰).
+        try:
+            distribution = _create_distribution_for_contest(contest_id)
+        except Exception as exc:  # noqa: BLE001 - 한 Contest의 실패가 배치를 막으면 안 된다.
+            logger.exception(
+                "Contest(pk=%s) Distribution 생성 중 예외, 다음 건으로 계속", contest_id
+            )
+            results.append(
+                {
+                    "event": "distribution_creation_failed",
+                    "contest_id": contest_id,
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
+            continue
+
         if distribution is not None:
             results.append(
                 {
@@ -240,9 +263,28 @@ def run_due_distributions(*, fail_submission_ids: set[int] | None = None) -> lis
     )
 
     for share in pending_shares:
-        outcome = _attempt_share_payout(
-            share, force_failure=share.submission_id in fail_submission_ids
-        )
+        # 같은 이유로 몫 하나의 지급 시도가 던지는 예외도 밖으로 흘리지 않는다 —
+        # FAILED로 끝난 몫은 계속 재시도 후보로 남으므로(의도된 동작, "실패한
+        # 지급만 다음 스캔이 자동으로 재시도한다"), 그 재시도 경로 자체가
+        # order_by("id")의 맨 앞을 영구히 차지한 채 예외로 죽으면 그 뒤의 배치가
+        # 통째로 막힌다.
+        try:
+            outcome = _attempt_share_payout(
+                share, force_failure=share.submission_id in fail_submission_ids
+            )
+        except Exception as exc:  # noqa: BLE001 - 한 몫의 실패가 배치를 막으면 안 된다.
+            logger.exception(
+                "DistributionShare(pk=%s) 지급 시도 중 예외, 다음 건으로 계속", share.id
+            )
+            results.append(
+                {
+                    "event": "payout_attempt_failed",
+                    "submission_id": share.submission_id,
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
+            continue
+
         outcome["event"] = "payout_attempted"
         results.append(outcome)
 

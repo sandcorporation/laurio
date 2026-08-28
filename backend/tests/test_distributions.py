@@ -607,3 +607,166 @@ def test_zero_submissions_are_not_distributed_by_this_scan(client, category, lan
     result = _run_due_distributions(client)
     assert result["count"] == 0
     assert not Distribution.objects.filter(contest_id=contest["id"]).exists()
+
+
+
+# --- 코디네이터 리뷰 회귀 방지: Distribution Payout의 신원 제출·조회, 배치 안전성 ------
+
+
+PAYOUTS_URL = "/api/payouts"
+
+
+@pytest.mark.django_db
+def test_developer_can_view_and_finalize_distribution_payout(client, category, landing_type):
+    """Distribution으로 확정된(CONFIRMED_IDENTITY_PENDING) Payout도 Award 경로와
+    똑같이 GET /contests/{id}/payout으로 조회하고 POST /payouts/{key}/identity로
+    최종 확정할 수 있어야 한다.
+
+    이전에는 `_get_owned_payout`이 `handover_id is None`인 Payout(=Distribution
+    경로 전부)을 무조건 404로 숨겨서, 신원 정보를 제출할 방법 자체가 없어
+    지급이 CONFIRMED_IDENTITY_PENDING에 영구히 갇혔다(코디네이터 리뷰 결함 2)."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+        prize=900_000,
+    )
+    requirement_id = contest["requirements"][0]["id"]
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+    submission = _submit(client, dev, contest["id"], requirement_id=requirement_id, grounded=True)
+
+    _close_contest(client, contest, deadline=deadline)
+    _run_scoring(client)
+    _end_judging_period(client, contest["id"])
+    _advance_past_distribution_wait(contest["id"])
+    _run_due_distributions(client)
+
+    payout = Payout.objects.get(distribution_share__submission_id=submission["id"])
+    assert payout.status == Payout.Status.CONFIRMED_IDENTITY_PENDING
+
+    get_resp = client.get(f"{CONTESTS_URL}/{contest['id']}/payout", **_auth_header(dev["access"]))
+    assert get_resp.status_code == 200, get_resp.content
+    body = get_resp.json()
+    assert body["idempotency_key"] == str(payout.idempotency_key)
+    assert body["contest_id"] == contest["id"]
+    assert body["status"] == "confirmed_identity_pending"
+    assert body["has_identity"] is False
+
+    identity_resp = client.post(
+        f"{PAYOUTS_URL}/{payout.idempotency_key}/identity",
+        data={"resident_registration_number": "9001011234567"},
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert identity_resp.status_code == 200, identity_resp.content
+    assert identity_resp.json()["status"] == "confirmed"
+
+    payout.refresh_from_db()
+    assert payout.status == Payout.Status.CONFIRMED
+
+    # 다른 Developer는 이 지급 요청에 접근할 수 없다(소유권 검사가 여전히 산다).
+    other_dev = _verified_user(client, "dev-2", "dev-2-ci")
+    forbidden = client.get(
+        f"{CONTESTS_URL}/{contest['id']}/payout", **_auth_header(other_dev["access"])
+    )
+    assert forbidden.status_code == 404
+
+
+@pytest.mark.django_db
+def test_one_poisoned_share_does_not_block_other_shares_in_same_scan(
+    client, category, landing_type
+):
+    """한 몫의 지급 시도가 예기치 못한 예외를 던져도(어댑터 버그 등) 같은 스캔
+    안의 다른 몫·다른 Contest는 계속 처리돼야 한다 — order_by("id")로 스캔하는
+    이상, 예외를 감싸지 않으면 그 몫이 항상 배치 맨 앞에서 다시 걸려 뒤의
+    정상 건들이 영원히 처리되지 못하는 poison pill이 된다(코디네이터 리뷰
+    결함 4, scoring.services.run_pending_scoring이 이미 겪고 고친 것과 같은
+    사고)."""
+
+    from unittest.mock import patch
+
+    from payouts.adapters import FakePayoutAdapter
+
+    deadline = timezone.now() + timedelta(hours=1)
+    poison_prize = 111_111
+    ok_prize = 222_222
+
+    _, poison_contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+        prize=poison_prize,
+        sponsor_uid="sponsor-poison",
+    )
+    poison_requirement_id = poison_contest["requirements"][0]["id"]
+    dev_poison = _verified_user(client, "dev-poison", "dev-poison-ci")
+    poison_submission = _submit(
+        client, dev_poison, poison_contest["id"], requirement_id=poison_requirement_id, grounded=True
+    )
+
+    _, ok_contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+        prize=ok_prize,
+        sponsor_uid="sponsor-ok",
+    )
+    ok_requirement_id = ok_contest["requirements"][0]["id"]
+    dev_ok = _verified_user(client, "dev-ok", "dev-ok-ci")
+    ok_submission = _submit(
+        client, dev_ok, ok_contest["id"], requirement_id=ok_requirement_id, grounded=True
+    )
+
+    for contest in (poison_contest, ok_contest):
+        _close_contest(client, contest, deadline=deadline)
+    _run_scoring(client)
+    for contest in (poison_contest, ok_contest):
+        _end_judging_period(client, contest["id"])
+    _advance_past_distribution_wait(poison_contest["id"])
+    _advance_past_distribution_wait(ok_contest["id"])
+
+    real_request_payout = FakePayoutAdapter.request_payout
+
+    def _maybe_poison(self, *, idempotency_key, amount):
+        # amount는 net_amount(수수료·원천징수 공제 후)라 prize와 다르다 — Payout을
+        # idempotency_key로 역참조해 어느 Submission의 시도인지 정확히 판별한다.
+        # 이 시점에는 이미 get_or_create_payout이 Payout 행을 만들어 둔 뒤다.
+        payout = Payout.objects.select_related("distribution_share").get(
+            idempotency_key=idempotency_key
+        )
+        if payout.distribution_share.submission_id == poison_submission["id"]:
+            raise RuntimeError("예기치 못한 어댑터 버그")
+        return real_request_payout(self, idempotency_key=idempotency_key, amount=amount)
+
+    with patch.object(FakePayoutAdapter, "request_payout", _maybe_poison):
+        resp = _run_due_distributions(client)
+
+    events = {r.get("submission_id"): r for r in resp["results"] if "submission_id" in r}
+    assert events[poison_submission["id"]]["event"] == "payout_attempt_failed"
+    # 포이즌 항목 뒤에 있는(더 큰 id) 정상 항목도 같은 스캔에서 처리됐다 —
+    # 배치가 막히지 않았다는 직접적인 증거다.
+    assert events[ok_submission["id"]]["event"] == "payout_attempted"
+    assert events[ok_submission["id"]]["status"] == "confirmed_identity_pending"
+
+    poison_payout = Payout.objects.get(distribution_share__submission_id=poison_submission["id"])
+    assert poison_payout.status == Payout.Status.REQUESTED
+    assert poison_payout.journal_entry_id is None
+
+    ok_payout = Payout.objects.get(distribution_share__submission_id=ok_submission["id"])
+    assert ok_payout.status == Payout.Status.CONFIRMED_IDENTITY_PENDING
+    assert ok_payout.journal_entry_id is not None
+
+    # 다음 스캔(포이즌 없이)이 실패했던 몫도 정상적으로 마저 확정한다 —
+    # 스캔이 살아 있다는 것 자체가 재시도 경로가 죽지 않았다는 증거다.
+    resp2 = _run_due_distributions(client)
+    assert resp2 is not None
+    poison_payout.refresh_from_db()
+    assert poison_payout.status == Payout.Status.CONFIRMED_IDENTITY_PENDING

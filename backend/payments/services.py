@@ -235,6 +235,15 @@ def _settle_new_refund_attempt(adapter, claimed: Payment, *, simulate: str | Non
     있어 같은 방식으로 감싼다(리뷰 지적 2) — 감싸지 않으면 그 예외가 스캔 전체를
     500으로 죽이고, 이 Payment는 REFUND_REQUESTED에 갇힌 채(후보 쿼리가 PAID만
     보던 시절에는) 영원히 남았다.
+
+    **REFUND_FAILED로 종결시키는 것은 `PGError`(PG가 명시적으로 거부했다는 확인된
+    결과)뿐이다.** 그 밖의 예기치 못한 예외(어댑터 버그, 네트워크 오류가 다른
+    예외 타입으로 새는 경우 등)는 "PG가 거부했다"는 확인이 아니라 "결과를 아직
+    모른다"는 뜻이므로, REFUND_FAILED로 굳히면 안 된다 — REFUND_REQUESTED로 그냥
+    남겨 다음 스캔의 재확인(_reconcile_pending_refund)이 마저 확정하게 한다.
+    REFUND_FAILED를 종결 상태로 둔 것 자체는 이중 환불을 막기 위해 의도된
+    설계이지만(#17), 그 방아쇠는 반드시 확인된 거부여야 한다 — 아니면 일시적
+    장애 하나가 재시도 경로 없는 영구 실패로 굳어버린다.
     """
 
     order_id = str(claimed.order_id)
@@ -250,13 +259,21 @@ def _settle_new_refund_attempt(adapter, claimed: Payment, *, simulate: str | Non
                 "status": "pending",
                 "error": f"{type(exc).__name__}: {exc}",
             }
-    except Exception as exc:  # noqa: BLE001 - PGError를 포함해 이 행만 실패시킨다.
+    except PGError as exc:
+        # PG가 명시적으로 거부했다는 확인된 결과다 — 이때만 종결한다.
         mark_refund_failed(claimed.order_id)
         return {
             "payment_id": claimed.id,
             "contest_id": claimed.contest_id,
             "status": "failed",
             "error": str(exc),
+        }
+    except Exception as exc:  # noqa: BLE001 - 확인되지 않은 예외는 재시도 대상으로 남긴다.
+        return {
+            "payment_id": claimed.id,
+            "contest_id": claimed.contest_id,
+            "status": "pending",
+            "error": f"{type(exc).__name__}: {exc}",
         }
 
     return _apply_refund_status(claimed, status)
@@ -320,9 +337,21 @@ def run_pending_refunds(*, simulate: str | None = None) -> list[dict]:
 
     contests_with_submissions = Submission.objects.values_list("contest_id", flat=True)
 
-    eligible_contests = Contest.objects.filter(status=Contest.Status.CLOSED).exclude(
-        id__in=contests_with_submissions
-    )
+    # CLOSED뿐 아니라 JUDGING_ENDED도 봐야 한다(#13이 JUDGING_ENDED를 도입한 뒤
+    # 반영되지 않은 채 남아 있던 격차) — 스케줄러가 judging_ends_at이 지나면
+    # CLOSED -> JUDGING_ENDED로 무조건 전이시키므로(core.transitions 레지스트리,
+    # award 여부와 무관), 참여자 0명인 Contest도 이 스캔이 따라잡기 전에
+    # JUDGING_ENDED로 넘어갈 수 있다. CLOSED만 보면 그 순간부터 이 Payment는
+    # 영원히 이 스캔의 후보 집합 밖으로 빠져 Escrow에 갇힌다 — 이 실행에서 반복된
+    # "새 상태, 낡은 호출부" 패턴 그대로다.
+    #
+    # refund_disabled인 Contest는 제외한다(#13이 만든 필드의 유일한 소비처) —
+    # REQUEST.md: 유료 연장 2회 이상이면 환불 불가로 영구 확정된다. 이 플래그가
+    # True인 Contest는 설령 참여자가 0명이어도 이 경로로 환불하지 않는다.
+    eligible_contests = Contest.objects.filter(
+        status__in=[Contest.Status.CLOSED, Contest.Status.JUDGING_ENDED],
+        refund_disabled=False,
+    ).exclude(id__in=contests_with_submissions)
 
     new_candidates = list(
         Payment.objects.filter(status=Payment.Status.PAID, contest__in=eligible_contests)

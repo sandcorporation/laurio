@@ -764,10 +764,17 @@ def test_unsigned_refund_webhook_is_rejected_and_payment_untouched(client, categ
 
 
 @pytest.mark.django_db
-def test_refund_webhook_for_payment_still_paid_is_a_noop(client, category, landing_type):
-    """스캔이 아직 이 Payment를 집지 않았는데(REFUND_REQUESTED가 아님) 환불
-    웹훅이 먼저 오면, mark_refunded는 조건부 UPDATE의 rowcount가 0이라 원장에
-    아무 것도 남기지 않아야 한다 — 위조든 시점 경합이든 이겨선 안 된다."""
+def test_refund_webhook_for_payment_still_paid_is_honored(client, category, landing_type):
+    """스캔이 아직 이 Payment를 집지 않았는데(REFUND_REQUESTED가 아님) 서명이
+    유효한 환불 웹훅이 먼저 오면(PG 콘솔에서 직접 환불했거나 차지백이 들어온
+    경우), 조용히 버리지 않고 그대로 반영해야 한다.
+
+    서명 검증(`verify_webhook_signature`)이 이미 위조를 걸러내므로, 여기 남는
+    건 "우리 스캔이 아직 request_refund로 선점하지 않은 PAID Payment"뿐이다 —
+    이 신호를 버리면 PG가 이미 실제로 환불한 돈이 원장에는 여전히 예치금으로
+    남아, 나중에 Award/Payout이 이미 돌려준 돈을 또 지급하는 사고로 이어진다.
+    웹훅 핸들러가 PAID -> REFUND_REQUESTED로 먼저 선점한 뒤 확정하므로, 반대
+    분개가 정확히 한 번 남는다."""
 
     deadline = timezone.now() + timedelta(hours=1)
     sponsor, contest = _publish_contest(
@@ -784,5 +791,146 @@ def test_refund_webhook_for_payment_still_paid_is_a_noop(client, category, landi
     assert response.status_code == 200
 
     payment = Payment.objects.get(order_id=order_id)
-    assert payment.status == Payment.Status.PAID  # refunded로 넘어가지 않았다.
+    assert payment.status == Payment.Status.REFUNDED
+    assert payment.refund_journal_entry_id is not None
+
+
+
+# --- 코디네이터 리뷰 회귀 방지: 새 상태(JUDGING_ENDED)·refund_disabled·재시도 --------
+
+
+def _end_judging_period_via_tick(client, contest_id: int) -> None:
+    """CLOSED -> JUDGING_ENDED로 옮긴다 — 스케줄러가 judging_ends_at이 지나면
+    Award 여부와 무관하게 무조건 이 전이를 시킨다(core.transitions 레지스트리).
+    """
+
+    judging_ends_at = Contest.objects.get(id=contest_id).judging_ends_at
+    assert judging_ends_at is not None
+    _close_via_tick(client, at=judging_ends_at + timedelta(minutes=1))
+    assert Contest.objects.get(id=contest_id).status == Contest.Status.JUDGING_ENDED
+
+
+@pytest.mark.django_db
+def test_zero_submission_contest_stuck_at_judging_ended_is_still_refunded(
+    client, category, landing_type
+):
+    """참여자 0명인 Contest가 환불 스캔이 따라잡기 전에 CLOSED -> JUDGING_ENDED로
+    자동 전이돼도(스케줄러는 Award 여부와 무관하게 judging_ends_at이 지나면
+    무조건 옮긴다) 여전히 환불 대상이어야 한다.
+
+    이전에는 run_pending_refunds의 후보 쿼리가 status=CLOSED만 봐서, 이 시점
+    이후로는 Payment가 PAID에 영원히 갇혔다(코디네이터 리뷰 결함 1)."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+    order_id = Payment.objects.get(contest_id=contest["id"]).order_id
+
+    _close_via_tick(client, at=deadline + timedelta(minutes=1))
+    assert Contest.objects.get(id=contest["id"]).status == Contest.Status.CLOSED
+
+    # 환불 스캔을 아직 돌리지 않은 채로 심사기간 종료 시각까지 시간을 더 흘려
+    # JUDGING_ENDED로 넘어가게 한다.
+    _end_judging_period_via_tick(client, contest["id"])
+
+    resp = _run_refunds(client)
+    assert resp.status_code == 200, resp.content
+    body = resp.json()
+    assert any(r["payment_id"] == Payment.objects.get(order_id=order_id).id for r in body["results"])
+
+    payment = Payment.objects.get(order_id=order_id)
+    assert payment.status == Payment.Status.REFUNDED
+    assert payment.refund_journal_entry_id is not None
+
+
+@pytest.mark.django_db
+def test_refund_disabled_contest_is_never_refunded_even_with_zero_submissions(
+    client, category, landing_type
+):
+    """REQUEST.md: 유료 연장 2회 이상이면 환불 불가로 영구 확정된다. 참여자가
+    0명이어도 refund_disabled인 Contest는 이 스캔이 절대 건드리면 안 된다
+    (코디네이터 리뷰 결함 5 — #13이 만든 refund_disabled의 유일한 소비처인데
+    소비하지 않고 있었다)."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+    order_id = Payment.objects.get(contest_id=contest["id"]).order_id
+    _close_via_tick(client, at=deadline + timedelta(minutes=1))
+
+    # 실제 연장 결제 두 번을 거치는 대신, 그 결과 상태(refund_disabled=True)만
+    # 직접 준비한다 — 이 테스트의 대상은 연장 로직이 아니라 환불 스캔의 필터다.
+    Contest.objects.filter(id=contest["id"]).update(refund_disabled=True)
+
+    resp = _run_refunds(client)
+    assert resp.status_code == 200, resp.content
+
+    payment = Payment.objects.get(order_id=order_id)
+    assert payment.status == Payment.Status.PAID
     assert payment.refund_journal_entry_id is None
+
+
+@pytest.mark.django_db
+def test_unexpected_adapter_exception_leaves_refund_retryable_not_terminal(
+    client, category, landing_type
+):
+    """PG가 명시적으로 거부한 것(PGError)과 예기치 못한 예외는 다르다 — 후자는
+    REFUND_FAILED(재시도 경로 없는 종결 상태)로 굳히면 안 된다(코디네이터 리뷰
+    결함 3). 어댑터가 알 수 없는 예외를 던져도 Payment는 REFUND_REQUESTED로
+    남아 다음 스캔이 재확인할 수 있어야 한다."""
+
+    from unittest.mock import patch
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+    order_id = Payment.objects.get(contest_id=contest["id"]).order_id
+    _close_via_tick(client, at=deadline + timedelta(minutes=1))
+
+    with patch(
+        "payments.adapters.FakePGAdapter.refund",
+        side_effect=RuntimeError("예기치 못한 어댑터 버그"),
+    ):
+        resp = _run_refunds(client)
+        assert resp.status_code == 200, resp.content
+
+    payment = Payment.objects.get(order_id=order_id)
+    # REFUND_FAILED(종결)가 아니라 REFUND_REQUESTED(재시도 대상)로 남아야 한다.
+    assert payment.status == Payment.Status.REFUND_REQUESTED
+    assert payment.refund_journal_entry_id is None
+
+    # PG는 실제로는 그 사이 환불을 완료했다(FakePGAdapter의 테스트 전용
+    # 훅으로 주입한다 — payments.adapters.FakePGAdapter.resolve_pending_refund_
+    # for_testing과 같은 성격, ClockOverride로 시각을 앞당기는 것과 같은
+    # 원칙). 다음 스캔의 재확인이 마저 확정한다 — REFUND_FAILED로 굳었다면
+    # candidate 쿼리 밖으로 영원히 빠져 이 재시도 경로 자체가 없었을 것이다.
+    from payments.adapters import FakePGAdapter
+
+    FakePGAdapter.resolve_pending_refund_for_testing(str(order_id), "refunded")
+
+    resp2 = _run_refunds(client)
+    assert resp2.status_code == 200, resp2.content
+    payment.refresh_from_db()
+    assert payment.status == Payment.Status.REFUNDED
+    assert payment.refund_journal_entry_id is not None
+
+
+@pytest.mark.django_db
+def test_run_refunds_accepts_body_less_request(client, category, landing_type):
+    """`core.tasks.call_scheduler_tick`처럼 Celery beat는 `requests.post(url,
+    headers=..., timeout=30)`로 본문 없이(길이 0) POST한다 — Django 테스트
+    클라이언트의 기본 `client.post(url)`은 이것과 다르다: `data=`를 생략해도
+    multipart 경계 문자열이 채워진 **비어 있지 않은** 본문을 보내므로, 실제
+    운영 호출을 재현하려면 `generic()`으로 길이 0인 본문을 직접 보내야 한다.
+
+    이 스캔도 본문 없는 호출을 받아들여야 실제로 스케줄에 걸린다(코디네이터
+    리뷰 결함 8). 이전에는 `payload: RunRefundsIn`에 기본값이 없어 본문 없는
+    요청이 400으로 거부됐다."""
+
+    response = client.generic(
+        "POST", RUN_REFUNDS_URL, data=b"", content_type="application/json", **_internal_headers()
+    )
+    assert response.status_code == 200, response.content

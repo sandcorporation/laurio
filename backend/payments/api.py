@@ -37,7 +37,14 @@ from .schemas import (
     WebhookIn,
     WebhookOut,
 )
-from .services import mark_failed, mark_paid, mark_refund_failed, mark_refunded, run_pending_refunds
+from .services import (
+    mark_failed,
+    mark_paid,
+    mark_refund_failed,
+    mark_refunded,
+    request_refund,
+    run_pending_refunds,
+)
 from .webhook_security import verify_webhook_signature
 
 router = Router(tags=["payments"])
@@ -238,6 +245,17 @@ def receive_webhook(request: HttpRequest, payload: WebhookIn):
         # 있는 결과를 PG가 비동기로 다시 통지한다. mark_refunded는 REFUND_REQUESTED
         # 에서만 전이하므로, 재전송이든 스캔보다 늦게 도착했든 원장에는 정확히
         # 한 번만 반대 분개가 남는다.
+        #
+        # 하지만 PG 콘솔에서 직접 환불했거나 차지백이 들어온 경우, 이 Payment는
+        # 아직 우리 스캔이 request_refund로 선점하지 않아 PAID에 머물러 있을 수
+        # 있다 — 그 상태에서 곧장 mark_refunded만 부르면 REFUND_REQUESTED 조건부
+        # UPDATE의 rowcount가 0이라 아무 것도 하지 않고 조용히 넘어가, 반대
+        # 분개가 전혀 남지 않은 채 예치금만 원장에 계속 잡혀 있게 된다(리뷰 지적).
+        # 여기서 먼저 PAID -> REFUND_REQUESTED로 선점한 뒤(이미 REFUND_REQUESTED/
+        # REFUNDED/REFUND_FAILED/FAILED면 request_refund가 아무 것도 하지 않고
+        # None을 돌려준다) mark_refunded로 확정한다 — PAID 이외의 상태에서는
+        # 기존의 멱등 규율을 그대로 따른다.
+        request_refund(payload.order_id)
         payment = mark_refunded(payload.order_id)
     elif payload.status == "refund_failed":
         payment = mark_refund_failed(payload.order_id)
@@ -250,7 +268,7 @@ def receive_webhook(request: HttpRequest, payload: WebhookIn):
 
 
 @internal_router.post("/run-refunds")
-def run_refunds(request: HttpRequest, payload: RunRefundsIn):
+def run_refunds(request: HttpRequest, payload: RunRefundsIn = RunRefundsIn()):
     """CLOSED Contest 중 Submission이 0건인 채 결제가 완료된 것을 스캔해 전액 환불한다.
 
     core의 마감 전이(#11)가 Contest를 PUBLISHED -> CLOSED로 옮긴 뒤, 같은 스케줄러

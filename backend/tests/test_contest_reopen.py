@@ -636,3 +636,37 @@ def test_reopen_rejects_when_category_is_retired(client, category, landing_type)
 
     assert response.status_code == 422
     assert Contest.objects.filter(source_contest_id=original["id"]).count() == 0
+
+
+
+@pytest.mark.django_db
+def test_reopen_still_allowed_after_contest_auto_transitions_to_judging_ended(
+    client, category, landing_type
+):
+    """유찰(참여자 0명 전액 환불)된 Contest는 재개최를 하기도 전에 스케줄러가
+    judging_ends_at을 지나 CLOSED -> JUDGING_ENDED로 무조건 전이시킬 수 있다
+    (core.transitions 레지스트리는 Award 여부와 무관하게 이 전이를 시킨다).
+    이전에는 reopen_contest가 status == CLOSED만 허용해서, 그 시점 이후로는
+    영구히 409였다(코디네이터 리뷰 결함 6) — 실제 판정 근거(REFUNDED Payment
+    존재)는 status 값과 무관하므로 JUDGING_ENDED도 허용해야 한다."""
+
+    sponsor, original = _lapsed_contest(client, category=category, deliverable_type=landing_type)
+    assert original["status"] == "closed"
+
+    judging_ends_at = Contest.objects.get(id=original["id"]).judging_ends_at
+    assert judging_ends_at is not None
+    _close_via_tick(client, at=judging_ends_at + timedelta(minutes=1))
+    assert Contest.objects.get(id=original["id"]).status == Contest.Status.JUDGING_ENDED
+
+    response = _reopen(
+        client,
+        sponsor["access"],
+        original["id"],
+        prize=2_000_000,
+        deadline_at=timezone.now() + timedelta(days=14),
+    )
+
+    assert response.status_code == 200, response.content
+    body = response.json()
+    assert body["source_contest_id"] == original["id"]
+    assert body["status"] == "draft"

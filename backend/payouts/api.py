@@ -27,6 +27,7 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
+from distributions.models import DistributionShare
 from handovers.models import Handover
 from payments.webhook_security import verify_webhook_signature
 
@@ -38,10 +39,30 @@ from .services import get_or_create_payout, mark_confirmed, mark_failed, submit_
 router = Router(tags=["payouts"])
 
 
+def _payout_contest_id(payout: Payout) -> int:
+    """이 Payout이 속한 Contest — Handover(Award) 경로거나 DistributionShare(#16)
+    경로거나 정확히 하나를 통해서만 판정된다(payout_exactly_one_target 제약).
+    """
+
+    if payout.handover_id is not None:
+        return payout.handover.award.contest_id
+    return payout.distribution_share.distribution.contest_id
+
+
+def _payout_owner_user_id(payout: Payout) -> int:
+    """이 Payout을 받을 Developer의 user_id — 위와 같은 이유로 두 경로 중 하나를
+    통해 판정된다.
+    """
+
+    if payout.handover_id is not None:
+        return payout.handover.award.submission.developer.user_id
+    return payout.distribution_share.submission.developer.user_id
+
+
 def _serialize(payout: Payout) -> PayoutOut:
     return PayoutOut(
         idempotency_key=payout.idempotency_key,
-        contest_id=payout.handover.award.contest_id,
+        contest_id=_payout_contest_id(payout),
         prize_amount=payout.prize_amount,
         platform_fee_amount=payout.platform_fee_amount,
         withholding_tax_amount=payout.withholding_tax_amount,
@@ -88,10 +109,46 @@ def request_payout(request: HttpRequest, contest_id: int):
     "/contests/{contest_id}/payout", response={200: PayoutOut, 403: ErrorOut, 404: ErrorOut}, auth=jwt_auth
 )
 def get_payout(request: HttpRequest, contest_id: int):
-    handover = _get_owned_handover(request, contest_id)
+    """Developer 본인의 지급 내역을 조회한다.
 
-    payout = Payout.objects.filter(handover=handover).select_related(
-        "handover__award__contest"
+    Award/Handover 경로(수동 요청)와 Distribution 경로(#16, 내부 스캔이 자동으로
+    요청)를 모두 본다 — 이전에는 Handover가 없는 Contest(=무응답 1/N 배분으로
+    지급된 Contest)를 조회하면 무조건 404였다. Distribution으로 지급받은
+    Developer가 자기 지급 내역을 확인할 방법 자체가 없었던 것이 이 조회의
+    핵심 결함이었다.
+    """
+
+    handover = (
+        Handover.objects.select_related("award__contest", "award__submission__developer")
+        .filter(award__contest_id=contest_id)
+        .first()
+    )
+    if handover is not None:
+        if handover.award.submission.developer.user_id != request.auth_user.id:
+            raise HttpError(403, "본인이 Award된 Submission의 Developer만 접근할 수 있습니다.")
+
+        payout = Payout.objects.filter(handover=handover).select_related(
+            "handover__award__contest"
+        ).first()
+        if payout is None:
+            raise HttpError(404, "아직 지급 요청이 없습니다.")
+        return 200, _serialize(payout)
+
+    share = (
+        DistributionShare.objects.select_related("distribution__contest", "submission__developer")
+        .filter(
+            distribution__contest_id=contest_id,
+            submission__developer__user_id=request.auth_user.id,
+        )
+        .first()
+    )
+    if share is None:
+        raise HttpError(
+            404, "이 Contest는 아직 Award되지 않았고, Distribution 대상도 아닙니다."
+        )
+
+    payout = Payout.objects.filter(distribution_share=share).select_related(
+        "distribution_share__distribution__contest"
     ).first()
     if payout is None:
         raise HttpError(404, "아직 지급 요청이 없습니다.")
@@ -102,18 +159,15 @@ def get_payout(request: HttpRequest, contest_id: int):
 def _get_owned_payout(request: HttpRequest, idempotency_key: UUID) -> Payout:
     try:
         payout = Payout.objects.select_related(
-            "handover__award__contest", "handover__award__submission__developer"
+            "handover__award__contest",
+            "handover__award__submission__developer",
+            "distribution_share__distribution__contest",
+            "distribution_share__submission__developer",
         ).get(idempotency_key=idempotency_key)
     except Payout.DoesNotExist as exc:
         raise HttpError(404, "지급 요청을 찾을 수 없습니다.") from exc
 
-    if payout.handover_id is None:
-        # Distribution(#16) 경로의 Payout이다 — 이 라우터는 Award/Handover 경로
-        # 전용이라 여기서는 존재 자체를 숨긴다(Handover가 없는 Contest를 조회할
-        # 때와 같은 404).
-        raise HttpError(404, "지급 요청을 찾을 수 없습니다.")
-
-    if payout.handover.award.submission.developer.user_id != request.auth_user.id:
+    if _payout_owner_user_id(payout) != request.auth_user.id:
         raise HttpError(403, "본인의 지급 요청만 접근할 수 있습니다.")
     return payout
 
