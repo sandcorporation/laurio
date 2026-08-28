@@ -4,6 +4,7 @@
 """
 
 import os
+from datetime import timedelta
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
@@ -54,6 +55,9 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "accounts",
+    "verification",
+    "contests",
 ]
 
 MIDDLEWARE = [
@@ -64,6 +68,8 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "accounts.middleware.JWTAuthenticationMiddleware",
+    "accounts.middleware.ContentSecurityPolicyMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -119,3 +125,36 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# --- Authentication (ADR-0012, ADR-0013) ---------------------------------
+# 액세스 토큰은 짧게, 리프레시 토큰은 회전시킨다. 서명 키는 SECRET_KEY와 분리해 둔다 —
+# 세션 쿠키 서명과 JWT 서명이 같은 키를 공유하지 않게 하기 위함이다.
+JWT_SIGNING_KEY = os.environ.get("JWT_SIGNING_KEY") or (
+    "dev-only-insecure-jwt-signing-key-not-for-prod" if DEBUG else ""
+)
+if not JWT_SIGNING_KEY and not DEBUG:
+    raise ImproperlyConfigured(
+        "DJANGO_DEBUG=false 인데 JWT_SIGNING_KEY 가 비어 있다. 배포 환경에서는 반드시 주입해야 한다."
+    )
+ACCESS_TOKEN_TTL = timedelta(minutes=int(_env("ACCESS_TOKEN_TTL_MINUTES", "5")))
+REFRESH_TOKEN_TTL = timedelta(days=int(_env("REFRESH_TOKEN_TTL_DAYS", "14")))
+
+# 소셜 로그인 어댑터 (ADR-0007). dev/test는 fake — 실제 카카오·GitHub·구글 API를
+# 부르지 않고 결정적으로 동작한다. prod는 SOCIAL_AUTH_MODE=real 로 실제 어댑터를 쓴다.
+SOCIAL_AUTH_MODE = _env("SOCIAL_AUTH_MODE", "fake" if DEBUG else "real")
+
+# --- Verification (ADR-0011, ADR-0007) ------------------------------------
+# 본인확인 어댑터도 같은 원칙: dev/test는 fake로 바인딩된다.
+VERIFICATION_ADAPTER_MODE = _env("VERIFICATION_ADAPTER_MODE", "fake" if DEBUG else "real")
+
+# 실명·생년월일·CI/DI를 저장 시 암호화하는 대칭키(Fernet). SECRET_KEY와 마찬가지로
+# 배포 환경에서는 반드시 주입해야 하고, dev는 저장소에 공개된 고정 키로 대체한다.
+_verification_key = os.environ.get("VERIFICATION_ENCRYPTION_KEY") or ""
+if not _verification_key:
+    if not DEBUG:
+        raise ImproperlyConfigured(
+            "DJANGO_DEBUG=false 인데 VERIFICATION_ENCRYPTION_KEY 가 비어 있다. "
+            "배포 환경에서는 반드시 주입해야 한다."
+        )
+    _verification_key = "A0crfksMrBmbSY37jIyOwcPRFpK9rc_eIaNnL89lIfo="
+VERIFICATION_ENCRYPTION_KEY = _verification_key
