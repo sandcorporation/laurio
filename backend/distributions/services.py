@@ -37,6 +37,7 @@ from contests.models import Contest
 from core.clock import Clock
 from ledger.models import Account, EntrySide
 from ledger.services import LineInput, post_journal_entry
+from notifications.lifecycle import notify_distribution_shares
 from payouts.adapters import PayoutError, PayoutTimeoutError, get_adapter
 from payouts.models import Payout
 from payouts.services import get_or_create_payout, mark_confirmed, mark_failed
@@ -84,7 +85,9 @@ def _create_distribution_for_contest(contest_id: int) -> Distribution | None:
             return None
 
         submissions = list(
-            Submission.objects.filter(contest=locked_contest).select_related("score")
+            Submission.objects.filter(contest=locked_contest).select_related(
+                "score", "developer__user"
+            )
         )
         if not submissions:
             return None
@@ -150,7 +153,13 @@ def _create_distribution_for_contest(contest_id: int) -> Distribution | None:
             )
             distribution.remainder_journal_entry_id = entry.id
 
-        return distribution
+    # 트랜잭션이 커밋된 뒤에만 알린다 — notify_distribution_shares는 내부에서 모든
+    # 예외를 삼키므로(#19 AC, ADR-0009: "전 채널이 미도달이어도 Distribution이
+    # 예정대로 실행된다") 알림 생성 실패가 위 원장·배분 트랜잭션을 되돌리거나
+    # 이 함수의 반환을 막는 일은 없다.
+    notify_distribution_shares(distribution, qualifying)
+
+    return distribution
 
 
 def _attempt_share_payout(share: DistributionShare, *, force_failure: bool) -> dict:

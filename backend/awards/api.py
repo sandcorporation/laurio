@@ -31,6 +31,7 @@ from contests.models import Contest
 from core.clock import Clock
 from core.transitions import claim_transition
 from handovers.models import Handover
+from notifications.lifecycle import notify_award_result
 from submissions.models import Submission
 
 from .models import Award
@@ -109,6 +110,10 @@ def award_submission(request: HttpRequest, contest_id: int, payload: AwardIn):
             award=award,
             release_deadline_at=now + timedelta(days=settings.HANDOVER_ACCEPTANCE_PERIOD_DAYS),
         )
+
+    # 트랜잭션이 커밋된 뒤에만 알린다 — notify_award_result는 내부에서 모든 예외를
+    # 삼키므로(#19 AC, ADR-0009) 이 응답이 알림 실패로 막히는 일은 없다.
+    notify_award_result(award)
 
     return 200, AwardOut(
         contest_id=contest.id, submission_id=submission.id, awarded_at=award.awarded_at

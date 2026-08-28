@@ -10,6 +10,7 @@ from distributions.api import internal_router as distributions_internal_router
 from handovers.api import internal_router as handovers_internal_router
 from handovers.api import router as handovers_router
 from ledger.api import router as ledger_router
+from notifications.api import public_router as notifications_router
 from notifications.api import router as notifications_internal_router
 from payments.api import internal_router as payments_internal_router
 from payments.api import router as payments_router
@@ -31,6 +32,7 @@ api.add_router("", awards_router)
 api.add_router("", handovers_router)
 api.add_router("", payouts_router)
 api.add_router("", appeals_router)
+api.add_router("/notifications", notifications_router)
 api.add_router("/ledger", ledger_router)
 
 

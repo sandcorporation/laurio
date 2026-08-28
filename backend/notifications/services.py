@@ -84,12 +84,20 @@ def _has_opt_in(user, notification_type: str) -> bool:
     ).exists()
 
 
-def create_notification(*, recipient, notification_type: str) -> Notification:
-    """Notification 한 건을 만들고, 옵트인·야간 규칙에 따라 즉시 발송하거나 연기한다."""
+def create_notification(
+    *, recipient, notification_type: str, context: dict | None = None
+) -> Notification:
+    """Notification 한 건을 만들고, 옵트인·야간 규칙에 따라 즉시 발송하거나 연기한다.
+
+    `context`는 이 알림이 무엇에 관한 것인지(대상 Contest, 금액 등)를 담는
+    구조화된 맥락이다(#19) — 옵트인·야간 판정·채널 폴백 로직에는 전혀 관여하지
+    않는다. 생략하면 빈 dict로 남는다.
+    """
 
     flags = NOTIFICATION_TYPE_FLAGS[notification_type]
     is_transactional = flags["is_transactional"]
     is_promotional = flags["is_promotional"]
+    context = context or {}
 
     now = Clock.now()
 
@@ -100,6 +108,7 @@ def create_notification(*, recipient, notification_type: str) -> Notification:
             is_transactional=is_transactional,
             is_promotional=is_promotional,
             status=Notification.Status.BLOCKED_NO_OPT_IN,
+            context=context,
             created_at=now,
         )
 
@@ -111,6 +120,7 @@ def create_notification(*, recipient, notification_type: str) -> Notification:
             is_promotional=is_promotional,
             status=Notification.Status.DEFERRED,
             scheduled_for=next_quiet_hours_end(now),
+            context=context,
             created_at=now,
         )
         return notification
@@ -126,6 +136,7 @@ def create_notification(*, recipient, notification_type: str) -> Notification:
         # 이 행이 QUEUED에 갇힌 채 영원히 잊히지 않는다 — 야간 큐 스캐너가 나중에
         # STUCK_QUEUED_THRESHOLD를 넘긴 QUEUED도 함께 주워 재시도한다(#10 리뷰 지적).
         claimed_at=now,
+        context=context,
         created_at=now,
     )
     _attempt_dispatch(notification, now=now)

@@ -412,3 +412,19 @@ PAYOUT_WITHHOLDING_TAX_BPS = int(_env("PAYOUT_WITHHOLDING_TAX_BPS", "330"))
 # Prize를 1/N로 배분한다 — HANDOVER_ACCEPTANCE_PERIOD_DAYS와 같은 "Sponsor의
 # 침묵이 Developer를 인질로 잡지 못한다" 원칙의 무응답 버전이다(REQUEST.md).
 DISTRIBUTION_WAIT_DAYS = int(_env("DISTRIBUTION_WAIT_DAYS", "14"))
+
+# --- Notification 연결: Contest 라이프사이클 (#19, ADR-0009/0010) ----------------------
+#
+# 마감·심사기간 종료·Distribution이 다가올 때 Sponsor·Developer에게 미리 알린다.
+# 실제 발송(즉시/야간 연기/대체발송)은 notifications.services(#18)가 그대로
+# 담당한다 — 여기서는 "언제 그 알림을 만들 것인가"만 정한다(notifications.lifecycle).
+DEADLINE_REMINDER_LEAD_HOURS = int(_env("DEADLINE_REMINDER_LEAD_HOURS", "24"))
+JUDGING_END_REMINDER_LEAD_HOURS = int(_env("JUDGING_END_REMINDER_LEAD_HOURS", "24"))
+
+# Distribution 최종 경고는 야간 차단의 08시 연기(ADR-0010)에 기대지 않고, 애초에
+# 낮 시각으로 스케줄을 구성한다(#19 AC) — Distribution 실행 이만큼(일) 앞서,
+# 항상 NOTIFICATION_DAYTIME_HOUR 시(로컬)로 고정된 시각에 발송을 시도한다.
+DISTRIBUTION_FINAL_WARNING_LEAD_DAYS = int(_env("DISTRIBUTION_FINAL_WARNING_LEAD_DAYS", "1"))
+# 08:00~21:00(quiet hours 밖) 중 임의로 고른 낮 시각. 이 값을 바꾸려면 반드시
+# 08~20 사이로 유지해야 한다 — 그 밖으로 나가면 "낮 시각 구성" 자체가 깨진다.
+NOTIFICATION_DAYTIME_HOUR = int(_env("NOTIFICATION_DAYTIME_HOUR", "10"))

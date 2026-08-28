@@ -11,6 +11,7 @@ class NotificationType(models.TextChoices):
     """
 
     DEADLINE_REMINDER = "deadline_reminder", "마감 임박 알림"
+    JUDGING_PERIOD_ENDING_REMINDER = "judging_period_ending_reminder", "심사기간 종료 임박 알림"
     DISTRIBUTION_FINAL_WARNING = "distribution_final_warning", "Distribution 최종 경고"
     RESULT_NOTICE = "result_notice", "결과 알림"
     NEW_CONTEST_IN_CATEGORY = "new_contest_in_category", "관심 Category 신규 Contest"
@@ -21,6 +22,10 @@ class NotificationType(models.TextChoices):
 # 지금 정의된 유형들은 전부 어느 한쪽으로만 떨어진다.
 NOTIFICATION_TYPE_FLAGS: dict[str, dict[str, bool]] = {
     NotificationType.DEADLINE_REMINDER: {"is_transactional": True, "is_promotional": False},
+    NotificationType.JUDGING_PERIOD_ENDING_REMINDER: {
+        "is_transactional": True,
+        "is_promotional": False,
+    },
     NotificationType.DISTRIBUTION_FINAL_WARNING: {
         "is_transactional": True,
         "is_promotional": False,
@@ -83,6 +88,14 @@ class Notification(models.Model):
     # 이 필드만 어긋난다.
     claimed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField()
+
+    # 실제 발송 문구를 채우는 데 쓰이는 구조화된 맥락(#19) — 예: Distribution
+    # 최종 경고의 금액(ADR-0009 "무엇을 잃게 되는지 알아야 한다"), 대상 Contest.
+    # notifications 기반(#18)의 dispatch·quiet-hours·fallback 로직은 이 필드를
+    # 전혀 참조하지 않는다 — 실제 채널 어댑터(장차 실물 카카오 연동)가 문구를
+    # 렌더링할 때 쓸 자리이자, Sponsor의 발송 이력 화면이 "무엇을 통지받았는지"를
+    # 보여주는 근거다.
+    context = models.JSONField(default=dict, blank=True)
 
     class Meta:
         verbose_name = "알림"
