@@ -79,6 +79,7 @@ INSTALLED_APPS = [
     "scoring",
     "awards",
     "handovers",
+    "payouts",
 ]
 
 MIDDLEWARE = [

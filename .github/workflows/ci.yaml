@@ -42,6 +42,7 @@ jobs:
       INTERNAL_API_TOKEN: ci-only-insecure-internal-token
       JWT_SIGNING_KEY: ci-only-insecure-jwt-signing-key
       PAYMENT_WEBHOOK_SECRET: ci-only-insecure-fake-pg-webhook-secret
+      PAYOUT_WEBHOOK_SECRET: ci-only-insecure-fake-toss-payout-webhook-secret
       # Fernet 키는 형식이 고정돼 있다(urlsafe base64 32바이트) — settings.py의 dev
       # fallback과 같은 값을 그대로 쓴다(둘 다 저장소에 이미 공개돼 있어 새로 유출될
       # 비밀이 아니다).
@@ -53,6 +54,7 @@ jobs:
       SOCIAL_AUTH_MODE: fake
       VERIFICATION_ADAPTER_MODE: fake
       PAYMENT_ADAPTER_MODE: fake
+      PAYOUT_ADAPTER_MODE: fake
 
     steps:
       - uses: actions/checkout@v4

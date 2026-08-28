@@ -9,6 +9,7 @@ from handovers.api import router as handovers_router
 from ledger.api import router as ledger_router
 from notifications.api import router as notifications_internal_router
 from payments.api import router as payments_router
+from payouts.api import router as payouts_router
 from scoring.api import router as scoring_internal_router
 from storage.api import router as storage_router
 from storage.policy import StorageAccessDenied
@@ -24,6 +25,7 @@ api.add_router("", payments_router)
 api.add_router("", submissions_router)
 api.add_router("", awards_router)
 api.add_router("", handovers_router)
+api.add_router("", payouts_router)
 api.add_router("/ledger", ledger_router)
 
 
