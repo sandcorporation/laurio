@@ -50,9 +50,15 @@ class DeliverableType(models.Model):
 class Contest(models.Model):
     class Status(models.TextChoices):
         DRAFT = "draft", "초안"
-        # PUBLISHED 는 #9(결제/Escrow)가 결제 확인 후 이 상태로 전이시킨다. 이 티켓은
-        # 그 훅만 남겨두고 draft 생성까지만 다룬다.
+        # PUBLISHED 는 #9(결제/Escrow)가 결제 확인 후 이 상태로 전이시킨다.
         PUBLISHED = "published", "공개"
+        # CLOSED 는 #11이 core.transitions 레지스트리에 등록한 전이다 — 스케줄러
+        # 틱이 deadline_at 이 지난 PUBLISHED Contest 를 조건부 UPDATE 로 옮긴다
+        # (ADR-0003). 데모·영상 전면 공개는 이 상태를 기다리지 않고
+        # submissions.resolvers 가 deadline_at 을 직접 비교해 이미 판정한다 — 이
+        # 상태는 "채점(#12)을 정확히 1회 시작할 지점"과 "운영자가 마감된 Contest를
+        # 식별하는 지점"으로 쓰인다.
+        CLOSED = "closed", "마감"
 
     sponsor = models.ForeignKey(
         "accounts.SponsorProfile", related_name="contests", on_delete=models.CASCADE

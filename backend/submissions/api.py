@@ -34,7 +34,15 @@ from core.clock import Clock
 from verification.models import Verification
 
 from .models import Evidence, RequirementResponse, Submission
-from .schemas import CompletionOut, EvidenceOut, RequirementResponseOut, SubmissionIn, SubmissionOut
+from .schemas import (
+    CompletionOut,
+    DeveloperPublicProfileOut,
+    EvidenceOut,
+    PublicSubmissionOut,
+    RequirementResponseOut,
+    SubmissionIn,
+    SubmissionOut,
+)
 from .target_refs import demo_video_target_ref, source_target_ref
 
 router = Router(tags=["submissions"])
@@ -374,4 +382,51 @@ def get_submission(request: HttpRequest, submission_id: int):
         is_owner=is_owner,
         is_sponsor=is_sponsor,
         past_deadline=past_deadline,
+    )
+
+
+@router.get(
+    "/developers/{developer_id}/profile",
+    response={200: DeveloperPublicProfileOut},
+    auth=None,
+)
+def get_developer_public_profile(request: HttpRequest, developer_id: int):
+    """Developer 공개 프로필 — 마감된 Submission이 자동으로 아카이브된다 (#11).
+
+    "마감"은 여기서도 Contest.status(#11의 스케줄러 틱)가 아니라 `deadline_at`과
+    `Clock.now()`를 직접 비교한다 — submissions.resolvers/api의 다른 가시성 판정과
+    같은 기준이다. 파일이 움직이지 않는 것처럼(ADR-0005) 이 아카이브도 틱을 기다리지
+    않고 그 순간 이미 옳다.
+
+    데모·영상만 담는다 — 소스는 Award 전까지 아무에게도 공개되지 않고(ADR-0014),
+    test_account는 "데모·영상" 칸에 없는 로그인 정보라 여기서도 내려주지 않는다
+    (submissions.api._serialize와 같은 원칙, #10 리뷰 지적).
+    """
+
+    developer = DeveloperProfile.objects.filter(id=developer_id).select_related("user").first()
+    if developer is None:
+        raise HttpError(404, "Developer를 찾을 수 없습니다.")
+
+    now = Clock.now()
+    submissions = (
+        Submission.objects.filter(developer=developer, contest__deadline_at__lte=now)
+        .select_related("contest")
+        .order_by("-contest__deadline_at")
+    )
+
+    return 200, DeveloperPublicProfileOut(
+        developer_id=developer.id,
+        display_name=developer.display_name,
+        bio=developer.bio,
+        submissions=[
+            PublicSubmissionOut(
+                submission_id=s.id,
+                contest_id=s.contest_id,
+                contest_title=s.contest.title,
+                demo_video_object_key=s.demo_video_object_key or None,
+                demo_url=s.demo_url or None,
+                created_at=s.created_at,
+            )
+            for s in submissions
+        ],
     )

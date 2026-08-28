@@ -75,3 +75,26 @@ class SubmissionOut(Schema):
     completion: CompletionOut
     created_at: datetime
     updated_at: datetime
+
+
+class PublicSubmissionOut(Schema):
+    """Developer 공개 프로필 아카이브 한 항목 (#11, ADR-0014).
+
+    마감된 Contest의 데모·영상만 담는다 — 소스·test_account는 이 스키마 자체에
+    없다("존재하지만 안 보임"이 아니라 애초에 필드가 없다). ADR-0014의 "마감 후"
+    칸에 있는 건 데모·영상뿐이다.
+    """
+
+    submission_id: int
+    contest_id: int
+    contest_title: str
+    demo_video_object_key: str | None
+    demo_url: str | None
+    created_at: datetime
+
+
+class DeveloperPublicProfileOut(Schema):
+    developer_id: int
+    display_name: str
+    bio: str
+    submissions: list[PublicSubmissionOut]
