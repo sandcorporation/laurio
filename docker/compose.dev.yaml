@@ -80,6 +80,10 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      # 이게 없으면 backend가 laurio-dev 버킷이 아직 없는 상태로 뜰 수 있고,
+      # 첫 업로드 PUT이 NoSuchBucket으로 실패한다.
+      minio-init:
+        condition: service_completed_successfully
     environment:
       <<: *default-postgres-env
       POSTGRES_HOST: db

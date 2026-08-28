@@ -23,6 +23,12 @@ fail-closed 한다.
 `request.user.is_authenticated`만 본다 — Django 세션 인증(admin과 동일)이다.
 소셜 로그인(#5, Authentication)이 이 자리를 실제 구현으로 교체한다. 지금은
 "가장 단순하게 쓸 수 있는 가드"일 뿐이다.
+
+세션 쿠키는 브라우저가 자동으로 실어 보내므로 폼 전송으로 위조 가능하다(CSRF).
+그래서 이 쿠키를 신원 증거로 받아들이는 모든 지점에서 Django 표준 CSRF 검사를
+함께 태운다. #5가 착지시킨 JWT(Authorization 헤더, localStorage)로 넘어가면
+브라우저가 자동으로 실어주지 않으므로 이 검사 자체가 필요 없어진다 — 그때의
+교체는 보강이 아니라 축소다.
 """
 
 from __future__ import annotations
@@ -34,6 +40,7 @@ from typing import Protocol
 from django.conf import settings
 from django.http import HttpRequest
 from django.utils.module_loading import import_string
+from ninja.utils import check_csrf
 
 
 class StorageAccessDenied(Exception):
@@ -78,6 +85,21 @@ def get_target_resolver() -> TargetStateResolver:
     return resolver_cls()
 
 
+def _reject_if_forged_cookie(request: HttpRequest) -> None:
+    """`request.user`가 세션 쿠키로 신원을 얻었다면, 그 요청이 우리 프런트가 보낸
+    것인지도 Django 표준 CSRF 검사로 함께 확인한다.
+
+    django-ninja는 기본적으로 자신이 마운트하는 뷰를 Django의 CsrfViewMiddleware
+    에서 통째로 제외한다(`ninja.operation`). ninja의 `auth=SessionAuth()` 를
+    쓰지 않고 여기서 직접 `request.user`를 신뢰하는 이상, CSRF 검사도 직접
+    걸어야 한다 — 안 걸면 아무 사이트나 폼 전송으로 로그인된 피해자를 흉내 낸
+    업로드·다운로드 요청을 만들 수 있다.
+    """
+    error_response = check_csrf(request)
+    if error_response is not None:
+        raise StorageAccessDenied("CSRF 검증에 실패했다")
+
+
 class StorageAccessPolicy:
     """업로드·다운로드 presigned URL 발급 시점의 권한 게이트."""
 
@@ -93,6 +115,7 @@ class StorageAccessPolicy:
         """
         if not request.user.is_authenticated:
             raise StorageAccessDenied("로그인이 필요하다")
+        _reject_if_forged_cookie(request)
 
     def authorize_download(self, request: HttpRequest, target_ref: str) -> None:
         """대상이 public이면 누구에게나, 아니면 소유자에게만 허용한다."""
@@ -103,6 +126,7 @@ class StorageAccessPolicy:
 
         if not request.user.is_authenticated:
             raise StorageAccessDenied("로그인이 필요하다")
+        _reject_if_forged_cookie(request)
 
         if state.owner_id is not None and state.owner_id == request.user.id:
             return

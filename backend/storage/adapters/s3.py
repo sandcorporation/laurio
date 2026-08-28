@@ -8,24 +8,45 @@ ADR-0005: 버킷은 영구히 private이다. 이 클래스는 put_object_acl·co
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 
 import boto3
-from botocore.client import Config
+from botocore.client import BaseClient, Config
 from django.conf import settings
 
 from .base import PresignedDownload, PresignedUpload
 
 
+@lru_cache(maxsize=1)
+def _build_client(
+    endpoint_url: str, access_key: str, secret_key: str, region: str
+) -> BaseClient:
+    """presign은 순수 로컬 서명이라 네트워크를 타지 않지만, boto3 클라이언트
+    생성 자체는 가볍지 않고 기본 세션이 동시 생성에 스레드 세이프하지도 않다.
+    요청마다 새로 만들지 않고 프로세스당 한 번만 만든다. lru_cache가 락으로
+    동시 호출을 직렬화해준다.
+
+    access_key/secret_key가 비어 있으면 boto3 기본 자격증명 체인(IAM role 등)에
+    맡긴다 — dev(MinIO)만 정적 키를 명시적으로 준다.
+    """
+    return boto3.client(
+        "s3",
+        endpoint_url=endpoint_url or None,
+        aws_access_key_id=access_key or None,
+        aws_secret_access_key=secret_key or None,
+        region_name=region,
+        config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+    )
+
+
 class S3StorageAdapter:
     def __init__(self) -> None:
         self._bucket = settings.STORAGE_BUCKET
-        self._client = boto3.client(
-            "s3",
-            endpoint_url=settings.STORAGE_ENDPOINT_URL or None,
-            aws_access_key_id=settings.STORAGE_ACCESS_KEY,
-            aws_secret_access_key=settings.STORAGE_SECRET_KEY,
-            region_name=settings.STORAGE_REGION,
-            config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+        self._client = _build_client(
+            settings.STORAGE_ENDPOINT_URL,
+            settings.STORAGE_ACCESS_KEY,
+            settings.STORAGE_SECRET_KEY,
+            settings.STORAGE_REGION,
         )
 
     def presign_upload(
@@ -62,7 +83,14 @@ class S3StorageAdapter:
     ) -> PresignedDownload:
         url = self._client.generate_presigned_url(
             "get_object",
-            Params={"Bucket": self._bucket, "Key": object_key},
+            Params={
+                "Bucket": self._bucket,
+                "Key": object_key,
+                # 이 버킷은 Developer가 올린 신뢰할 수 없는 콘텐츠(소스·빌드)를 담는다.
+                # 저장된 Content-Type과 무관하게 항상 첨부파일로 강제해, 브라우저가
+                # text/html 같은 걸 스토리지 오리진에서 인라인으로 실행하지 못하게 막는다.
+                "ResponseContentDisposition": "attachment",
+            },
             ExpiresIn=int(expires_in.total_seconds()),
         )
         expires_at = datetime.now(timezone.utc) + expires_in

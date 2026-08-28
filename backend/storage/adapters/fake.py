@@ -46,5 +46,8 @@ class FakeStorageAdapter:
         url = (
             f"{self.base_url}/{object_key}"
             f"?X-Fake-Signature=download&X-Fake-Expires={int(expires_at.timestamp())}"
+            # S3StorageAdapter가 ResponseContentDisposition=attachment 를 강제하는 것과
+            # 대응시켜, 테스트가 "다운로드는 항상 첨부파일로 강제된다"를 검증할 수 있게 한다.
+            "&X-Fake-Response-Content-Disposition=attachment"
         )
         return PresignedDownload(url=url, object_key=object_key, expires_at=expires_at)
