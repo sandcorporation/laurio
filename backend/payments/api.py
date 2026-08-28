@@ -24,14 +24,29 @@ from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
 from contests.models import Contest
+from core.auth import InternalAuth
 
 from .adapters import PGError, PGTimeoutError, get_adapter
 from .models import Payment, WebhookDelivery
-from .schemas import ConfirmPaymentIn, ErrorOut, InitiatePaymentIn, PaymentOut, WebhookIn, WebhookOut
-from .services import mark_failed, mark_paid
+from .schemas import (
+    ConfirmPaymentIn,
+    ErrorOut,
+    InitiatePaymentIn,
+    PaymentOut,
+    RunRefundsIn,
+    WebhookIn,
+    WebhookOut,
+)
+from .services import mark_failed, mark_paid, mark_refund_failed, mark_refunded, run_pending_refunds
 from .webhook_security import verify_webhook_signature
 
 router = Router(tags=["payments"])
+
+# 참여자 0명 전액 환불(#17) 전용 내부 스캔 엔드포인트. core의 내부 틱 엔드포인트,
+# scoring.api의 `/internal/scoring/run-pending`과 같은 `InternalAuth` +
+# "CLOSED Contest를 주기적으로 스캔한다" 구조를 그대로 따른다 — 사람이 아니라 운영
+# 인프라(Celery beat)가 호출한다.
+internal_router = Router(tags=["internal", "payments"], auth=InternalAuth())
 
 _ACTIVE_PAYMENT_STATUSES = [Payment.Status.REQUESTED, Payment.Status.PAID]
 
@@ -218,7 +233,37 @@ def receive_webhook(request: HttpRequest, payload: WebhookIn):
         payment = mark_paid(payload.order_id)
     elif payload.status == "failed":
         payment = mark_failed(payload.order_id)
+    elif payload.status == "refunded":
+        # #17 — 환불 스캔(run_pending_refunds)이 동기적으로 이미 확정했을 수도
+        # 있는 결과를 PG가 비동기로 다시 통지한다. mark_refunded는 REFUND_REQUESTED
+        # 에서만 전이하므로, 재전송이든 스캔보다 늦게 도착했든 원장에는 정확히
+        # 한 번만 반대 분개가 남는다.
+        payment = mark_refunded(payload.order_id)
+    elif payload.status == "refund_failed":
+        payment = mark_refund_failed(payload.order_id)
     else:
-        raise HttpError(422, "status는 paid 또는 failed 여야 합니다.")
+        raise HttpError(
+            422, "status는 paid, failed, refunded, refund_failed 중 하나여야 합니다."
+        )
 
     return 200, WebhookOut(received=True, order_id=payload.order_id, status=payment.status)
+
+
+@internal_router.post("/run-refunds")
+def run_refunds(request: HttpRequest, payload: RunRefundsIn):
+    """CLOSED Contest 중 Submission이 0건인 채 결제가 완료된 것을 스캔해 전액 환불한다.
+
+    core의 마감 전이(#11)가 Contest를 PUBLISHED -> CLOSED로 옮긴 뒤, 같은 스케줄러
+    체계(ADR-0003) 안에서 Celery beat가 이 엔드포인트를 짧은 주기로 반복 호출한다 —
+    scoring.api의 `/internal/scoring/run-pending`, notifications.api의
+    `/internal/notifications/dispatch-due`와 같은 구조다. 같은 시각에 두 번 쏴도
+    (`payments.services.request_refund`의 조건부 UPDATE 덕분에) 각 Payment는
+    정확히 한 번만 환불된다.
+
+    `simulate`는 이 스캔이 집는 모든 후보에게 그대로 전달되는 fake PG 전용
+    시나리오 선택 값이다(`ConfirmPaymentIn.simulate`와 같은 원칙 — 실제 어댑터는
+    무시한다).
+    """
+
+    results = run_pending_refunds(simulate=payload.simulate)
+    return {"count": len(results), "results": results}

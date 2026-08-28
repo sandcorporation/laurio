@@ -61,6 +61,9 @@ class ContestOut(Schema):
     required_minimum_prize: int
     is_underfunded: bool
     requirements: list[RequirementOut]
+    # 유찰 재개최(#22, ADR-0001)로 만들어진 사본이면 원본 Contest의 id를 가리킨다.
+    # 원본이면 None이다.
+    source_contest_id: int | None = None
     created_at: datetime
     # 심사기간 종료 시각(#13, ADR-0003) — CLOSED로 전이하기 전에는 아직 null이다.
     # deadline_at처럼 "언제까지"를 알려주는 사실 정보라 공개해도 무방하다.
@@ -134,3 +137,15 @@ class RequirementChatResponseOut(Schema):
     reply: str
     proposed_requirements: list[RequirementProposalOut]
     messages: list[RequirementChatTurnOut]
+
+
+class ContestReopenIn(Schema):
+    """유찰 재개최 시 새로 지정하는 값 — Prize와 마감기한뿐이다(#22).
+
+    요구사항·체크리스트·DeliverableType·Category·제목·설명은 원본에서 그대로
+    복제되므로 여기서 다시 받지 않는다(ADR-0001 — "요구사항 명세를 처음부터
+    다시 쓰지 않는다").
+    """
+
+    prize: int = Field(gt=0)
+    deadline_at: datetime

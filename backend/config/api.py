@@ -8,6 +8,7 @@ from handovers.api import internal_router as handovers_internal_router
 from handovers.api import router as handovers_router
 from ledger.api import router as ledger_router
 from notifications.api import router as notifications_internal_router
+from payments.api import internal_router as payments_internal_router
 from payments.api import router as payments_router
 from payouts.api import router as payouts_router
 from scoring.api import router as scoring_internal_router
@@ -38,6 +39,7 @@ api.add_router("/internal", core_internal_router)
 api.add_router("/internal/notifications", notifications_internal_router)
 api.add_router("/internal/scoring", scoring_internal_router)
 api.add_router("/internal/handovers", handovers_internal_router)
+api.add_router("/internal/payments", payments_internal_router)
 
 
 @api.exception_handler(StorageAccessDenied)
