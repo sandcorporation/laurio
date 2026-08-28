@@ -398,3 +398,96 @@ def test_closed_submission_appears_on_developer_public_profile(client, category,
 def test_public_profile_for_unknown_developer_is_404(client):
     response = client.get(f"/api/developers/999999/profile")
     assert response.status_code == 404
+
+
+# --- 리뷰 지적 반영: CLOSED 상태가 PUBLISHED만 보던 기존 호출부를 놓치지 않는다 -------
+
+
+@pytest.mark.django_db
+def test_developer_can_still_view_own_submission_after_contest_closes(
+    client, category, landing_type
+):
+    """#12 리뷰 지적 4 — get_my_submission이 여전히 _get_published_contest_or_404를
+    썼다면, 마감 전이가 일어나는 순간 개발자가 자기 제출물을 404로 못 보게 된다.
+    같은 데이터를 보는 GET /api/submissions/{id}는 deadline_at만 비교해 문제가
+    없었다 — 두 경로가 같은 결론을 내야 한다."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+    submit_resp = client.post(
+        f"{CONTESTS_URL}/{contest['id']}/submissions",
+        data={"source_object_key": _source_object_key(contest["id"], dev["user_id"])},
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert submit_resp.status_code == 201
+    submission_id = submit_resp.json()["id"]
+
+    _freeze(deadline + timedelta(minutes=1))
+    tick_resp = client.post(TICK_URL, **_internal_headers())
+    assert tick_resp.status_code == 200
+    assert Contest.objects.get(id=contest["id"]).status == Contest.Status.CLOSED
+
+    me_resp = client.get(
+        f"{CONTESTS_URL}/{contest['id']}/submissions/me", **_auth_header(dev["access"])
+    )
+    assert me_resp.status_code == 200
+    assert me_resp.json()["id"] == submission_id
+
+    single_resp = client.get(f"{SUBMISSIONS_URL}/{submission_id}", **_auth_header(dev["access"]))
+    assert single_resp.status_code == 200
+    assert single_resp.json()["id"] == submission_id
+
+
+@pytest.mark.django_db
+def test_closed_contest_still_appears_in_public_list_and_detail(client, category, landing_type):
+    """#12 리뷰 지적 5 — CLOSED가 list_contests/get_contest에서 빠지면, #11이 만든
+    공개 프로필 아카이브가 돌려주는 contest_id·title이 가리키는 상세 페이지가 전부
+    404가 되어 아카이브의 존재 이유 자체가 무너진다."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+
+    _freeze(deadline + timedelta(minutes=1))
+    tick_resp = client.post(TICK_URL, **_internal_headers())
+    assert tick_resp.status_code == 200
+    assert Contest.objects.get(id=contest["id"]).status == Contest.Status.CLOSED
+
+    detail_resp = client.get(f"{CONTESTS_URL}/{contest['id']}")
+    assert detail_resp.status_code == 200
+    assert detail_resp.json()["status"] == "closed"
+
+    list_resp = client.get(CONTESTS_URL)
+    assert list_resp.status_code == 200
+    listed_ids = [c["id"] for c in list_resp.json()["items"]]
+    assert contest["id"] in listed_ids
+
+
+@pytest.mark.django_db
+def test_duplicate_payment_is_rejected_after_contest_closes(client, category, landing_type):
+    """#12 리뷰 지적 6 — initiate_payment의 중복 결제 가드가 PUBLISHED만 봤다면,
+    CLOSED로 전이된 뒤에는 그 가드가 무력해진다. 하위 멱등성 조회가 지금은 감싸주고
+    있지만, 가드 자체는 새 상태를 놓치면 안 된다."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+
+    _freeze(deadline + timedelta(minutes=1))
+    tick_resp = client.post(TICK_URL, **_internal_headers())
+    assert tick_resp.status_code == 200
+    assert Contest.objects.get(id=contest["id"]).status == Contest.Status.CLOSED
+
+    response = client.post(
+        PAYMENTS_URL,
+        data={"contest_id": contest["id"]},
+        content_type="application/json",
+        **_auth_header(sponsor["access"]),
+    )
+    assert response.status_code == 409

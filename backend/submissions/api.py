@@ -71,7 +71,27 @@ def _get_published_contest_or_404(contest_id: int) -> Contest:
         raise HttpError(404, "Contest를 찾을 수 없습니다.") from exc
     if contest.status != Contest.Status.PUBLISHED:
         # draft Contest는 아직 결제가 끝나지 않아 공개되지 않았다 — 존재를
-        # 드러내지 않는다(contests.api.get_contest와 같은 원칙).
+        # 드러내지 않는다(contests.api.get_contest와 같은 원칙). CLOSED는 여기
+        # 포함하지 않는다 — 제출·수정은 어차피 _reject_if_past_deadline이 별도로
+        # 막으므로, 이 헬퍼는 "결제로 공개되었는가"만 본다.
+        raise HttpError(404, "Contest를 찾을 수 없습니다.")
+    return contest
+
+
+def _get_viewable_contest_or_404(contest_id: int) -> Contest:
+    """PUBLISHED·CLOSED 둘 다 조회 가능하다. DRAFT만 존재를 드러내지 않는다.
+
+    마감 전이(#11)가 Contest.status를 CLOSED로 옮긴 뒤에도 본인 Submission 조회
+    (get_my_submission)는 계속 성립해야 한다 — 마감이 지났다고 자기 제출물을 못
+    보게 막을 이유가 없다. 단건 공개 조회(get_submission)는 애초에 status를 보지
+    않고 deadline_at만 비교해 이 문제가 없었다(#12 리뷰 지적: 둘이 서로 다른
+    기준을 쓰고 있었다) — 이 헬퍼로 그 기준에 맞춘다.
+    """
+    try:
+        contest = Contest.objects.select_related("sponsor").get(id=contest_id)
+    except Contest.DoesNotExist as exc:
+        raise HttpError(404, "Contest를 찾을 수 없습니다.") from exc
+    if contest.status not in (Contest.Status.PUBLISHED, Contest.Status.CLOSED):
         raise HttpError(404, "Contest를 찾을 수 없습니다.")
     return contest
 
@@ -333,7 +353,7 @@ def update_submission(request: HttpRequest, contest_id: int, payload: Submission
     "/contests/{contest_id}/submissions/me", response={200: SubmissionOut}, auth=jwt_auth
 )
 def get_my_submission(request: HttpRequest, contest_id: int):
-    contest = _get_published_contest_or_404(contest_id)
+    contest = _get_viewable_contest_or_404(contest_id)
 
     developer = DeveloperProfile.objects.filter(user=request.auth_user).first()
     submission = (

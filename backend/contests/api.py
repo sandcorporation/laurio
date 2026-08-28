@@ -160,13 +160,19 @@ def create_contest(request: HttpRequest, payload: ContestCreateIn):
 def list_contests(request: HttpRequest):
     """공개된 Contest만 나온다 — draft는 비로그인·타인에게 보이지 않는다.
 
+    PUBLISHED뿐 아니라 CLOSED도 공개 목록에 남는다 — 마감 전이(#11)는 결제 취소가
+    아니라 "데모·영상이 전면 공개되는 시점"일 뿐이다(ADR-0014). CLOSED를 여기서
+    빼면 submissions.api.get_developer_public_profile이 돌려주는 contest_id·title이
+    가리키는 곳이 404가 되어, 마감된 Submission을 아카이브하는 #11의 취지 자체가
+    무너진다(#12 리뷰 지적).
+
     `select_related("category")`가 없으면 목록의 Contest마다 Category를 한 번씩 더
     조회하는 N+1이 난다. 목록은 무한정 커질 수 있으므로 페이지네이션도 둔다.
     """
 
-    return Contest.objects.filter(status=Contest.Status.PUBLISHED).select_related(
-        "category"
-    ).prefetch_related("deliverable_types", "requirements")
+    return Contest.objects.filter(
+        status__in=[Contest.Status.PUBLISHED, Contest.Status.CLOSED]
+    ).select_related("category").prefetch_related("deliverable_types", "requirements")
 
 
 @router.get("/contests/{contest_id}", response=ContestOut, auth=None)
@@ -180,7 +186,8 @@ def get_contest(request: HttpRequest, contest_id: int):
     except Contest.DoesNotExist as exc:
         raise HttpError(404, "Contest를 찾을 수 없습니다.") from exc
 
-    if contest.status != Contest.Status.PUBLISHED:
+    # PUBLISHED·CLOSED 둘 다 공개다 — list_contests와 같은 기준(위 설명 참고).
+    if contest.status not in (Contest.Status.PUBLISHED, Contest.Status.CLOSED):
         auth_user = getattr(request, "auth_user", None)
         is_owner = auth_user is not None and contest.sponsor.user_id == auth_user.id
         if not is_owner:
