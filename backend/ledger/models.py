@@ -18,13 +18,42 @@ class AppendOnlyError(Exception):
     """append-only 모델에 대한 수정·삭제 시도."""
 
 
+class AppendOnlyQuerySet(models.QuerySet):
+    """`Model.objects.filter(...).update(...)`/`.delete()` 대량 조작을 막는다.
+
+    인스턴스의 `save()`/`delete()`만 막아서는 부족하다 — `JournalEntry.objects.filter(pk=1)
+    .update(memo="...")`나 `LedgerLine.objects.filter(...).delete()`는 인스턴스 메서드를
+    타지 않고 QuerySet이 직접 UPDATE/DELETE를 날린다. 원장은 append-only이므로 이 경로도
+    막아야 한다.
+    """
+
+    def update(self, **kwargs):
+        raise AppendOnlyError(
+            f"{self.model.__name__}은(는) append-only라 대량 수정(QuerySet.update)을 "
+            "허용하지 않는다. 정정은 반대 분개를 새로 추가하는 방식으로만 한다."
+        )
+
+    def delete(self):
+        raise AppendOnlyError(
+            f"{self.model.__name__}은(는) append-only라 대량 삭제(QuerySet.delete)를 "
+            "허용하지 않는다."
+        )
+
+
+class AppendOnlyManager(models.Manager.from_queryset(AppendOnlyQuerySet)):
+    pass
+
+
 class AppendOnlyModel(models.Model):
     """한 번 저장되면 다시 저장(수정)하거나 지울 수 없는 모델.
 
     DB 레벨 트리거 대신 애플리케이션 레벨에서 막는다 — 이 프로젝트 규모에서는 충분하고,
     운영자용 조작 경로(Django admin)도 별도로 change/delete 권한을 끈다
-    (`ledger.admin`).
+    (`ledger.admin`). 인스턴스 단위(`save`/`delete`)와 QuerySet 단위(`update`/`delete`)
+    양쪽을 모두 막아야 우회 경로가 남지 않는다.
     """
+
+    objects = AppendOnlyManager()
 
     class Meta:
         abstract = True
@@ -70,7 +99,11 @@ class JournalEntry(AppendOnlyModel):
 
     contest_id = models.UUIDField(db_index=True)
     memo = models.CharField(max_length=255, blank=True, default="")
-    reverses = models.ForeignKey(
+    # OneToOneField — 한 원본은 정확히 한 번만 반대 분개로 정정될 수 있다(NULL은 여러 개
+    # 허용되므로 일반 분개끼리는 서로 막지 않는다). ForeignKey(unique=True)는 Django가
+    # 바로 이 용도로는 OneToOneField를 쓰라고 경고한다(W342) — CI가 `manage.py check
+    # --fail-level WARNING`으로 돌기 때문에 실제로 그렇게 써야 한다.
+    reverses = models.OneToOneField(
         "self",
         null=True,
         blank=True,

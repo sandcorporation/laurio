@@ -12,6 +12,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from ninja import Router
+from ninja.utils import check_csrf
 
 from ledger.models import JournalEntry
 from ledger.schemas import (
@@ -21,6 +22,8 @@ from ledger.schemas import (
     JournalEntryOut,
 )
 from ledger.services import (
+    CrossContestReversalError,
+    DuplicateReversalError,
     LineInput,
     UnbalancedEntryError,
     UnknownReversalTargetError,
@@ -39,6 +42,25 @@ def _is_operator(request) -> bool:
 
 def _forbidden() -> tuple[int, dict]:
     return 403, {"detail": "운영자만 접근할 수 있다."}
+
+
+def _csrf_rejected(request) -> tuple[int, dict] | None:
+    """세션 쿠키로 인증된 쓰기 요청에 CSRF 토큰을 강제한다.
+
+    django-ninja는 자신이 마운트하는 모든 뷰를 Django 미들웨어 레벨에서
+    `csrf_exempt`로 표시한다(`ninja.operation.PathView.get_view`) — 즉 CSRF 방어는
+    `django_auth` 계열의 쿠키 인증을 쓸 때만 알아서 켜지고, `request.user.is_staff`로
+    직접 게이트하는 이 라우터에서는 아무 데서도 CSRF를 검사하지 않는다. 그 상태로는
+    운영자가 /admin에 로그인해 있는 동안 악성 페이지를 열기만 해도 세션 쿠키가 자동
+    전송되어 분개가 위조될 수 있다 — append-only 원장에 영구히 남는다. 그래서 쓰기
+    엔드포인트에서 직접 `ninja.utils.check_csrf`로 검증한다(안전 메서드 GET은
+    CsrfViewMiddleware도 애초에 검사하지 않으므로 대상이 아니다).
+    """
+
+    error = check_csrf(request)
+    if error is not None:
+        return 403, {"detail": "CSRF 검증에 실패했다."}
+    return None
 
 
 def _entry_to_dict(entry: JournalEntry) -> dict:
@@ -62,6 +84,10 @@ def create_entry(request, payload: JournalEntryIn):
     if not _is_operator(request):
         return _forbidden()
 
+    csrf_error = _csrf_rejected(request)
+    if csrf_error is not None:
+        return csrf_error
+
     lines = [
         LineInput(account=line.account.value, side=line.side.value, amount=line.amount)
         for line in payload.lines
@@ -78,6 +104,10 @@ def create_entry(request, payload: JournalEntryIn):
         return 400, {"detail": str(exc)}
     except UnknownReversalTargetError as exc:
         return 400, {"detail": str(exc)}
+    except CrossContestReversalError as exc:
+        return 400, {"detail": str(exc)}
+    except DuplicateReversalError as exc:
+        return 400, {"detail": str(exc)}
 
     return 201, _entry_to_dict(entry)
 
@@ -92,11 +122,11 @@ def get_contest_balance(request, contest_id: UUID):
     if not _is_operator(request):
         return _forbidden()
 
-    balance = contest_balance(contest_id)
+    result = contest_balance(contest_id)
     return 200, {
         "contest_id": contest_id,
-        "balance": balance,
-        "is_balanced": balance == 0,
+        "balance": result["balance"],
+        "is_balanced": result["is_balanced"],
     }
 
 

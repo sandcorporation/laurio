@@ -15,10 +15,18 @@ from ninja import Field, Schema
 from ledger.models import Account, EntrySide
 
 
+# 1,000조 원(10^15) — PostgreSQL bigint 범위(~9.22 * 10^18)보다 훨씬 안쪽이면서
+# 실제 있을 법한 Contest 상금·수수료보다는 넉넉한 상식적 상한. 이 값을 넘는 금액은
+# 여기서 422로 거부한다 — 안 그러면 PositiveBigIntegerField의 검증(full_clean)이 API
+# 경로에서 호출되지 않으므로, bigint 범위를 넘는 값이 그대로 INSERT까지 가서 처리되지
+# 않은 DataError로 500이 난다.
+MAX_AMOUNT = 1_000_000_000_000_000
+
+
 class LedgerLineIn(Schema):
     account: Account
     side: EntrySide
-    amount: int = Field(gt=0)
+    amount: int = Field(gt=0, le=MAX_AMOUNT)
 
 
 class JournalEntryIn(Schema):

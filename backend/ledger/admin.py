@@ -35,7 +35,10 @@ class ReadOnlyAppendOnlyAdmin(admin.ModelAdmin):
 @admin.register(JournalEntry)
 class JournalEntryAdmin(ReadOnlyAppendOnlyAdmin):
     list_display = ("id", "contest_id", "memo", "reverses", "created_at")
-    list_filter = ("contest_id",)
+    # UUIDField를 list_filter에 넣으면 AllValuesFieldListFilter가 전체 테이블에 대고
+    # SELECT DISTINCT를 돌려 사이드바에 contest마다 링크를 하나씩 늘어놓는다 — 감사용
+    # 조회가 아니라 부하가 된다. 정확히 아는 contest_id로 찾아가는 검색으로 대신한다.
+    search_fields = ("=contest_id",)
     inlines = [LedgerLineInline]
 
 
