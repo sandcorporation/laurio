@@ -16,9 +16,12 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.50.0",
+    "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^22.10.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
+    "postcss": "^8.5.26",
+    "tailwindcss": "^4.3.3",
     "typescript": "^5.7.0"
   },
   "packageManager": "pnpm@10.33.0"

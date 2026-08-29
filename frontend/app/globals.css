@@ -1,0 +1,10 @@
+@import "tailwindcss";
+@import "./tokens.css";
+
+/*
+ * 토큰(app/tokens.css)을 실제 바탕·글꼴에 배선하는 곳. 리터럴 hex 는 여기서도
+ * 쓰지 않는다 — 전부 @theme 가 만든 `bg-*`/`text-*` 유틸리티로 표현한다.
+ */
+body {
+  @apply bg-paper text-ink font-sans;
+}
