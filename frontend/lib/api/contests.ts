@@ -13,6 +13,7 @@ import type { components } from "./schema.gen";
 export type Category = components["schemas"]["CategoryOut"];
 export type DeliverableType = components["schemas"]["DeliverableTypeOut"];
 export type Contest = components["schemas"]["ContestOut"];
+export type Requirement = components["schemas"]["RequirementOut"];
 
 // 목록은 페이지네이션된다(백엔드 ninja PageNumberPagination, 기본 20개/페이지).
 // FE-04(#29)의 필터·정렬은 백엔드에 쿼리 파라미터가 없어(GET /api/contests 는
@@ -35,6 +36,29 @@ export async function fetchContests(): Promise<Contest[]> {
     throw new Error("GET /api/contests: 2xx 인데 응답 본문이 비어 있다");
   }
   return res.data.items;
+}
+
+// 존재하지 않거나 draft 인 Contest 는 백엔드가 이미 404 로 답한다
+// (contests.api.get_contest, _PUBLICLY_VISIBLE_STATUSES) — 여기서는 그 상태 코드를
+// null 로 옮겨 호출부(app/contests/[id]/page.tsx)가 `notFound()` 를 부르게 한다.
+// 그 외 실패는 여전히 예외로 던져 조용히 묻히지 않게 한다.
+export async function fetchContest(id: number): Promise<Contest | null> {
+  const res = await backendClient.GET("/api/contests/{contest_id}", {
+    params: { path: { contest_id: id } },
+  });
+
+  if (res.response.status === 404) {
+    return null;
+  }
+  if (!res.response.ok) {
+    throw new Error(
+      `GET /api/contests/${id} 실패: ${res.response.status} ${res.response.statusText}`,
+    );
+  }
+  if (res.data === undefined) {
+    throw new Error(`GET /api/contests/${id}: 2xx 인데 응답 본문이 비어 있다`);
+  }
+  return res.data;
 }
 
 export async function fetchDeliverableTypes(): Promise<DeliverableType[]> {
