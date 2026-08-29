@@ -53,6 +53,17 @@ class S3StorageAdapter:
             settings.STORAGE_SECRET_KEY,
             settings.STORAGE_REGION,
         )
+        # presign_upload/presign_download는 브라우저가 직접 여는 URL을 만든다 —
+        # 서버 프로세스 자신이 스토리지에 붙는 self._client와 호스트가 다를 수
+        # 있다(FE-09, #34: dev 컨테이너 내부 DNS "minio:9000"은 브라우저가 못
+        # 푼다). STORAGE_PUBLIC_ENDPOINT_URL이 STORAGE_ENDPOINT_URL과 같으면
+        # (staging/prod처럼) lru_cache가 같은 인스턴스를 돌려준다.
+        self._public_client = _build_client(
+            settings.STORAGE_PUBLIC_ENDPOINT_URL,
+            settings.STORAGE_ACCESS_KEY,
+            settings.STORAGE_SECRET_KEY,
+            settings.STORAGE_REGION,
+        )
 
     def presign_upload(
         self,
@@ -65,7 +76,7 @@ class S3StorageAdapter:
         if content_type:
             params["ContentType"] = content_type
 
-        url = self._client.generate_presigned_url(
+        url = self._public_client.generate_presigned_url(
             "put_object",
             Params=params,
             ExpiresIn=int(expires_in.total_seconds()),
@@ -86,7 +97,7 @@ class S3StorageAdapter:
         *,
         expires_in: timedelta,
     ) -> PresignedDownload:
-        url = self._client.generate_presigned_url(
+        url = self._public_client.generate_presigned_url(
             "get_object",
             Params={
                 "Bucket": self._bucket,
