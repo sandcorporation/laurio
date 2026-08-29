@@ -49,6 +49,23 @@ cd backend && uv run pytest                           # 테스트
 
 시간은 시임이 아니라 주입 가능한 의존성이다(티켓 02, ADR-0003).
 
+## 프론트엔드
+
+Next.js + React. `frontend/`. 테스트 시임은 실행 중인 Next 앱 하나뿐이다(ADR-0017) —
+`docker compose -f docker/compose.dev.yaml up` 으로 스택을 띄운 뒤 `pnpm --dir frontend
+test` 로 Playwright 가 그걸 친다. `pnpm --dir frontend typecheck` 는 스택 없이 돈다.
+
+**API 타입은 손으로 쓰지 않는다.** `frontend/lib/api/schema.gen.ts` 는
+`pnpm --dir frontend generate:api`(`frontend/scripts/generate-api-types.mjs`)가
+백엔드의 OpenAPI 스키마에서 생성해 커밋한 산출물이다. 이 명령은 **스택이 필요
+없다** — `uv run python manage.py export_openapi_schema`(DB 접속 없이 등록된
+라우터·스키마만 읽는다, `backend/core/management/commands/
+export_openapi_schema.py`)로 스키마를 뽑은 뒤 `openapi-typescript` 로 변환한다.
+`uv sync` 만 된 신선한 체크아웃에서 바로 돈다 — CI의 `frontend-openapi-types` 잡이
+컨테이너를 기다리지 않고 이 명령을 그대로 돌려 `git diff`로 최신성을 확인하는
+이유다. 백엔드 스키마가 바뀌었는데 재생성을 안 하면(혹은 재생성해도 필드가
+없어졌는데 호출부를 안 고치면) `tsc --noEmit` 이 빌드타임에 잡는다.
+
 ## Agent skills
 
 ### Issue tracker
