@@ -197,6 +197,39 @@ services:
     environment: *backend-env
     command: celery -A config beat --loglevel info
 
+  # 프론트엔드 BFF(ADR-0016, FE-13 #38). frontend.Dockerfile의 runner 스테이지 —
+  # standalone 산출물을 `node server.js`로 그대로 돈다. instrumentation.ts가
+  # LAURIO_DEPLOYMENT_TARGET=production에서 LAURIO_WEB_ORIGIN·LAURIO_API_BASE_URL이
+  # 비어 있으면 이 컨테이너를 그 자리에서 죽인다 — restart: unless-stopped라도
+  # 값이 안 채워지면 재시작을 반복할 뿐 절대 뜨지 않는다(의도된 동작).
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/frontend.Dockerfile
+      target: runner
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    environment:
+      LAURIO_DEPLOYMENT_TARGET: production
+      LAURIO_API_BASE_URL: http://backend:8000
+      # frontend/lib/auth/origin.ts의 CSRF Origin 검증이 쓰는 값 — 비어 있으면
+      # instrumentation.ts가 부팅을 거부한다. staging의 값과 같은 값을 쓰지 않는다
+      # (실제 운영 도메인이어야 한다). .env.prod에서 반드시 채운다.
+      LAURIO_WEB_ORIGIN: ${LAURIO_WEB_ORIGIN:?prod LAURIO_WEB_ORIGIN 를 .env.prod 에 설정하라}
+    ports:
+      # backend와 같은 이유로 127.0.0.1에만 publish한다 — 이 호스트 앞단에 TLS
+      # 종단 리버스 프록시가 반드시 있어야 하고(아직 이 저장소에는 없다, 별도
+      # 티켓), 그 프록시가 없는 상태로 이 스택만 올리면 frontend는 호스트 자신
+      # 에서만 curl로 확인할 수 있다 — 인터넷에 직접 노출하지 않는 것이 의도된
+      # 동작이다.
+      - "127.0.0.1:${LAURIO_WEB_PORT:-3000}:3000"
+
 volumes:
   laurio-prod-db:
   laurio-prod-redis:

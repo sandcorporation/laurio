@@ -49,6 +49,20 @@ cd backend && uv run pytest                           # 테스트
 
 시간은 시임이 아니라 주입 가능한 의존성이다(티켓 02, ADR-0003).
 
+**`backend` pytest를 dev 컨테이너 안에서 돌리지 마라.** `docker compose -f
+docker/compose.dev.yaml exec backend uv run pytest`(또는 컨테이너 안 셸에서 직접)로
+돌리면 12건 안팎이 실패한다 — 회귀가 아니라 어댑터 불일치다. 테스트는
+`STORAGE_BACKEND=fake`(기본값)를 기대하는데, dev compose의 backend 서비스는
+`STORAGE_BACKEND=s3`로 실제 MinIO를 물려서 띄운다(업로드 e2e가 실물 스토리지를
+쳐야 하기 때문 — FE-09, #34). 항상 호스트에서 돌린다:
+
+```bash
+cd backend && LAURIO_DB_PORT=55432 uv run pytest   # 포트는 쓰는 스택에 맞춰 바꾼다
+```
+
+dev compose의 `db` 서비스는 호스트 포트로 이미 노출돼 있으므로 호스트의 `uv run
+pytest`가 그 DB에 직접 붙는다 — 컨테이너를 거칠 이유가 없다.
+
 ## 프론트엔드
 
 Next.js + React. `frontend/`. 테스트 시임은 실행 중인 Next 앱 하나뿐이다(ADR-0017) —
