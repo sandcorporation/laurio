@@ -36,3 +36,6 @@ staticfiles/
 # 디자인 캔버스 생성 산출물 — design/*.dc.html + canvas.json 에서 다시 만든다
 design/*.html
 !design/*.dc.html
+
+# 하네스가 관리하는 에이전트 워크트리 — 저장소에 들어가면 안 된다
+.claude/

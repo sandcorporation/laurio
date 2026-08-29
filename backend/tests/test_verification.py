@@ -76,7 +76,11 @@ def test_underage_is_not_verified_and_gets_a_reason(client):
 
     from django.utils import timezone
 
-    today = timezone.now().date()
+    # timezone.now().date() 가 아니라 localdate() 다. 프로덕션의 나이 게이트는
+    # KST 기준 "오늘"로 판정하는데(verification/api.py, ADR-0011), 여기서 UTC 날짜를
+    # 쓰면 KST 00:00~09:00 사이에는 테스트가 하루를 앞당겨 계산해 매일 9시간씩
+    # 빨간불이 된다 — 원래 고치려던 그 시차 버그를 테스트가 되풀이하는 꼴이다.
+    today = timezone.localdate()
     nineteenth_birthday = today + timedelta(days=1)
     almost_19_birth = date(
         nineteenth_birthday.year - 19, nineteenth_birthday.month, nineteenth_birthday.day
@@ -109,7 +113,7 @@ def test_underage_is_not_verified_and_gets_a_reason(client):
 def test_exactly_19_years_old_today_is_adult(client):
     from django.utils import timezone
 
-    today = timezone.now().date()
+    today = timezone.localdate()
     exactly_19 = date(today.year - 19, today.month, today.day)
     pair = _login(client, uid="exactly-19", email="e19@example.com")
 

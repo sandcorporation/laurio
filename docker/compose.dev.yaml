@@ -106,6 +106,28 @@ services:
       sh -c "python manage.py migrate --noinput &&
              python manage.py runserver 0.0.0.0:8000"
 
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/frontend.Dockerfile
+    depends_on:
+      backend:
+        condition: service_started
+    environment:
+      # 컨테이너 안에서는 compose 네트워크 이름으로 백엔드에 붙는다. 호스트에서
+      # `pnpm dev` 로 돌릴 때는 이 값이 없어 settings 의 기본값(127.0.0.1:58000)이 쓰인다.
+      LAURIO_API_BASE_URL: http://backend:8000
+    ports:
+      # 이 머신은 3000·5432·8000·9000·9001 을 다른 프로젝트가, 55432·58000·19000·19001 을
+      # 이 프로젝트가 이미 쓴다. 그래서 비켜 잡았고 환경변수로 바꿀 수 있다.
+      - "${LAURIO_WEB_PORT:-53000}:3000"
+    volumes:
+      # 소스를 마운트해 수정이 즉시 반영되게 한다. node_modules 는 이미지 것을 쓰도록
+      # 익명 볼륨으로 가린다 — 호스트(Windows)와 이미지(리눅스)의 바이너리가 다르다.
+      - ../frontend:/app
+      - /app/node_modules
+      - /app/.next
+
 volumes:
   laurio-dev-db:
   laurio-dev-minio:
