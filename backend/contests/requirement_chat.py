@@ -25,6 +25,15 @@ from core.prompt_safety import neutralize_untrusted
 # 대화당 제안을 과도하게 쏟아내지 않도록 한 턴에서 뽑아내는 후보 개수를 제한한다.
 _MAX_PROPOSALS_PER_TURN = 5
 
+# frontend Playwright e2e(#37 FE-12)가 "LLM 응답 실패" 경로를 실제 벤더 없이,
+# 실행 중인 스택 하나로 결정적으로 재현하기 위한 트리거 문구다.
+# `LLM_REQUIREMENT_CHAT_FAKE_RAISING_CONTEST_IDS`는 부팅 시점에 고정된 contest_id
+# 목록이 필요한데, 브라우저가 테스트 도중 방금 만든 draft Contest는 그 목록에
+# 있을 수 없다(재시작 없이는 추가할 방법이 없다) — 그래서 메시지 "내용"으로
+# 트리거하는 두 번째 경로를 둔다. 실제 Sponsor가 우연히 이 정확한 문자열을 칠
+# 가능성은 사실상 없으므로 프로덕션 동작에는 영향이 없다.
+SIMULATED_FAILURE_TRIGGER = "[[e2e-simulate-llm-failure]]"
+
 _OPTIONAL_HINT_KEYWORDS = ("선택", "옵션", "optional", "있으면 좋", "가능하면")
 
 # 사용자 발화를 항목 후보로 쪼개는 구분자 — 쉼표·세미콜론·줄바꿈·"그리고"/"그리고,".
@@ -121,18 +130,23 @@ class FakeRequirementChatAdapter:
     3. 각 후보 텍스트는 Requirement.text의 DB 제약(최대 500자)을 넘지 않도록
        자른다 — 실제 LLM이 장황한 응답을 돌려줘도 이 자르기가 그대로 적용된다.
 
-    `settings.LLM_REQUIREMENT_CHAT_FAKE_RAISING_CONTEST_IDS`에 contest_id가 있으면
-    `RequirementChatAdapterError`를 던져 벤더 장애를 흉내낸다 — 실패 경로 테스트용.
+    `settings.LLM_REQUIREMENT_CHAT_FAKE_RAISING_CONTEST_IDS`에 contest_id가 있거나
+    발화에 `SIMULATED_FAILURE_TRIGGER`가 포함되어 있으면 `RequirementChatAdapterError`를
+    던져 벤더 장애를 흉내낸다 — 둘 다 실패 경로 테스트용이며, 후자는 부팅 이후에
+    만들어진 contest_id도 재시작 없이 실패를 재현할 수 있게 한다(frontend e2e용).
     """
 
     model_version = "fake-requirement-chat-v1"
 
     def respond(self, chat_input: RequirementChatInput) -> RequirementChatOutput:
         raising_ids = getattr(settings, "LLM_REQUIREMENT_CHAT_FAKE_RAISING_CONTEST_IDS", [])
-        if chat_input.contest_id in raising_ids:
+        if (
+            chat_input.contest_id in raising_ids
+            or SIMULATED_FAILURE_TRIGGER in chat_input.latest_message
+        ):
             raise RequirementChatAdapterError(
                 f"fake requirement-chat 어댑터가 contest={chat_input.contest_id} 대화 응답에 "
-                "실패했다(설정으로 강제된 실패 시나리오)."
+                "실패했다(설정 또는 트리거 문구로 강제된 실패 시나리오)."
             )
 
         message = chat_input.latest_message.strip()

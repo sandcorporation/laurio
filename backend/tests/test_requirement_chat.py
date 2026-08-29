@@ -217,6 +217,29 @@ def test_llm_adapter_failure_degrades_gracefully_not_500(client, draft_contest):
 
 
 @pytest.mark.django_db
+def test_llm_adapter_failure_can_be_triggered_by_message_content_not_only_settings(
+    client, draft_contest
+):
+    """frontend e2e(#37)가 재시작 없이 실패를 재현하는 두 번째 경로 —
+    `SIMULATED_FAILURE_TRIGGER` 문구가 발화에 있으면 contest_id를 미리 설정에
+    등록해두지 않아도 같은 방식으로 감성한다."""
+
+    sponsor, contest = draft_contest
+
+    response = client.post(
+        _chat_url(contest["id"]),
+        data={"message": "[[e2e-simulate-llm-failure]] 아무 기능이나 만들어주세요"},
+        content_type="application/json",
+        **_auth_header(sponsor["access"]),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["proposed_requirements"] == []
+    assert body["reply"]
+
+
+@pytest.mark.django_db
 def test_add_requirement_invalid_grade_returns_422_not_500(client, draft_contest):
     sponsor, contest = draft_contest
 
