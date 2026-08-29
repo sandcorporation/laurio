@@ -11,6 +11,45 @@ import { backendClient } from "./client";
 import type { components } from "./schema.gen";
 
 export type Category = components["schemas"]["CategoryOut"];
+export type DeliverableType = components["schemas"]["DeliverableTypeOut"];
+export type Contest = components["schemas"]["ContestOut"];
+
+// 목록은 페이지네이션된다(백엔드 ninja PageNumberPagination, 기본 20개/페이지).
+// FE-04(#29)의 필터·정렬은 백엔드에 쿼리 파라미터가 없어(GET /api/contests 는
+// page/page_size 뿐) 서버 컴포넌트가 전체를 받아와 직접 좁히고 정렬한다 — 그래도
+// "서버가 렌더링한다"는 인수조건은 그대로 지켜진다: 브라우저는 다시 요청하지
+// 않는다. page_size 를 넉넉히 크게 주어 한 번에 다 받는다 — 이 플랫폼은 순수
+// 콘테스트라 동시에 열린 공모전 수가 페이지네이션이 필요할 규모가 아니다
+// (검증되지 않으면 이 값을 늘리거나 다시 페이지네이션을 도입한다).
+const LIST_PAGE_SIZE = 200;
+
+export async function fetchContests(): Promise<Contest[]> {
+  const res = await backendClient.GET("/api/contests", {
+    params: { query: { page: 1, page_size: LIST_PAGE_SIZE } },
+  });
+
+  if (!res.response.ok) {
+    throw new Error(`GET /api/contests 실패: ${res.response.status} ${res.response.statusText}`);
+  }
+  if (res.data === undefined) {
+    throw new Error("GET /api/contests: 2xx 인데 응답 본문이 비어 있다");
+  }
+  return res.data.items;
+}
+
+export async function fetchDeliverableTypes(): Promise<DeliverableType[]> {
+  const res = await backendClient.GET("/api/contests/deliverable-types");
+
+  if (!res.response.ok) {
+    throw new Error(
+      `GET /api/contests/deliverable-types 실패: ${res.response.status} ${res.response.statusText}`,
+    );
+  }
+  if (res.data === undefined) {
+    throw new Error("GET /api/contests/deliverable-types: 2xx 인데 응답 본문이 비어 있다");
+  }
+  return res.data;
+}
 
 export async function fetchContestCategories(): Promise<Category[]> {
   const res = await backendClient.GET("/api/contests/categories");

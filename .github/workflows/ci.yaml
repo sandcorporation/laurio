@@ -215,6 +215,21 @@ jobs:
                --retry 60 --retry-delay 3 --retry-all-errors --retry-connrefused \
                http://127.0.0.1:53000/healthz
 
+      # FE-04/FE-05(#29·#30) SSR 테스트가 `frontend/e2e/lib/seed.ts` 로 호스트에서
+      # `uv run manage.py seed_e2e_contests` 를 돌려 실제 Contest 를 dev DB에 심는다
+      # (하드코딩 픽스처가 아니라 백엔드가 준 값이어야 SSR 증명이 성립한다 —
+      # frontend/e2e/seam.spec.ts 상단 주석). dev compose 의 db 서비스는 호스트
+      # 55432(기본값)에 이미 노출돼 있으므로 `cd backend && uv run pytest` 와 같은
+      # 경로로 같은 DB에 붙는다.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install backend dependencies from lockfile
+        working-directory: backend
+        run: uv sync --locked
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
