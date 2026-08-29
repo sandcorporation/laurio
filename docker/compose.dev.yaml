@@ -94,6 +94,12 @@ services:
       STORAGE_BACKEND: s3
       STORAGE_BUCKET: laurio-dev
       STORAGE_ENDPOINT_URL: http://minio:9000
+      # presigned URL은 브라우저가 직접 여는 주소다(FE-09, #34) — 컨테이너 내부
+      # DNS 이름 "minio:9000"은 브라우저(호스트)가 못 푼다. 호스트에 매핑된
+      # 포트(LAURIO_MINIO_PORT)로 별도로 준다. STORAGE_ENDPOINT_URL은 서버
+      # 프로세스 자신이 스토리지에 붙는 주소로 그대로 둔다(backend/config/
+      # settings.py STORAGE_PUBLIC_ENDPOINT_URL 주석 참고).
+      STORAGE_PUBLIC_ENDPOINT_URL: http://127.0.0.1:${LAURIO_MINIO_PORT:-19000}
       STORAGE_ACCESS_KEY: laurio
       STORAGE_SECRET_KEY: laurio-secret
       STORAGE_REGION: us-east-1
@@ -104,6 +110,7 @@ services:
       - ../backend:/app
     command: >
       sh -c "python manage.py migrate --noinput &&
+             python manage.py seed_dev_data &&
              python manage.py runserver 0.0.0.0:8000"
 
   frontend:
