@@ -178,8 +178,13 @@ test.describe("소스 필수 · Evidence 연결 · 완성도", () => {
     await expect(page.getByTestId("demo-url-input")).toHaveValue("");
     await expect(page.getByTestId("test-account-input")).toHaveValue("");
 
-    // 소스가 선정 전까지 Sponsor에게 보이지 않는다는 안내가 있다.
-    await expect(page.getByTestId("source-privacy-notice")).toBeVisible();
+    // 소스가 선정 전까지 Sponsor에게 보이지 않는다는 안내가 있다 — #35의 명시적
+    // 인수조건이자 ADR-0014가 Developer에게 하는 약속이다. 노출 여부만 보면
+    // 문구가 조용히 다른 말로 바뀌어도 테스트가 못 잡는다(코드리뷰 지적) —
+    // 실제 문구까지 확인한다.
+    await expect(page.getByTestId("source-privacy-notice")).toContainText(
+      "선정(Award) 전까지 Sponsor에게 공개되지 않습니다",
+    );
 
     await page.getByTestId("submit-button").click();
     await expect(page.getByTestId("submit-success")).toBeVisible();
