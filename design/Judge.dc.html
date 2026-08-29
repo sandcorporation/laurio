@@ -1,0 +1,203 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #C4442B; text-decoration: none; }
+    a:hover { color: #93301C; }
+    * { box-sizing: border-box; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; min-height: 980px; background: #F5F3EC; color: #17160F; font-family: 'IBM Plex Sans KR', system-ui, sans-serif; display: flex; flex-direction: column;">
+
+  <div style="height: 72px; border-bottom: 1px solid #DDD9CE; display: flex; align-items: center; justify-content: space-between; padding: 0 40px; background: #FFFEFA;">
+    <div style="display: flex; align-items: center; gap: 40px;">
+      <div style="font-size: 21px; font-weight: 700; letter-spacing: -0.01em;">Laurio</div>
+      <div style="display: flex; gap: 26px; font-size: 14px; color: #55524A;">
+        <div style="color: #17160F; font-weight: 500; border-bottom: 2px solid #C4442B; padding-bottom: 3px;">내 공모전</div>
+        <div>정산</div>
+        <div>알림 이력</div>
+      </div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; font-size: 13px; color: #55524A;">
+      <div style="width: 26px; height: 26px; border-radius: 50%; background: #17160F; color: #F5F3EC; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600;">S</div>
+      <span>세인코스메틱</span>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; padding: 30px 40px 44px; gap: 22px;">
+
+    <!-- contest bar -->
+    <div style="display: flex; align-items: flex-end; justify-content: space-between;">
+      <div style="display: flex; flex-direction: column; gap: 7px;">
+        <div style="font-size: 12.5px; color: #8B877D;">심사 중 · 라이프스타일 · 웹 서비스 + 관리자 페이지</div>
+        <div style="font-size: 26px; font-weight: 600; letter-spacing: -0.02em;">[해외 런칭] 프리미엄 스킨케어 브랜드몰</div>
+      </div>
+      <div style="display: flex; align-items: stretch; gap: 0; border: 1px solid #DDD9CE; background: #FFFEFA;">
+        <div style="display: flex; flex-direction: column; gap: 3px; padding: 11px 18px; border-right: 1px solid #DDD9CE;">
+          <div style="font-size: 11px; color: #8B877D; letter-spacing: 0.06em;">상금</div>
+          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 16px; font-weight: 600;">4,000,000</div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 3px; padding: 11px 18px; border-right: 1px solid #DDD9CE;">
+          <div style="font-size: 11px; color: #8B877D; letter-spacing: 0.06em;">제출</div>
+          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 16px; font-weight: 600;">7</div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 3px; padding: 11px 18px;">
+          <div style="font-size: 11px; color: #8B877D; letter-spacing: 0.06em;">심사 마감</div>
+          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 16px; font-weight: 600; color: #C4442B;">D-2</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- warning strip -->
+    <div style="display: flex; align-items: flex-start; gap: 10px; border: 1px solid #C4442B; background: #FDF4F1; padding: 13px 16px; font-size: 13px; color: #17160F; line-height: 1.55;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C4442B" stroke-width="2" style="flex-shrink: 0; margin-top: 1px;"><path d="M12 3l9 16H3z"></path><path d="M12 9v5"></path><circle cx="12" cy="17" r="0.6" fill="#C4442B"></circle></svg>
+      <span><strong style="font-weight: 600;">심사 마감까지 2일 남았습니다.</strong> 마감 후 14일 안에 선정하지 않으면 상금은 자격을 통과한 제출작들에게 1/N로 자동 배분되며, 환불되지 않습니다.</span>
+    </div>
+
+    <!-- matrix -->
+    <div style="border: 1px solid #17160F; background: #FFFEFA;">
+
+      <!-- column heads -->
+      <div style="display: grid; grid-template-columns: 372px repeat(5, minmax(0, 1fr)); border-bottom: 1px solid #17160F;">
+        <div style="padding: 14px 18px; display: flex; flex-direction: column; justify-content: flex-end; gap: 4px; border-right: 1px solid #DDD9CE;">
+          <div style="font-size: 11px; letter-spacing: 0.08em; color: #8B877D;">요구사항 축 비교</div>
+          <div style="font-size: 12.5px; color: #55524A; line-height: 1.5;">7건 중 상위 5건</div>
+        </div>
+
+        <div style="padding: 14px 14px; display: flex; flex-direction: column; gap: 8px; border-right: 1px solid #DDD9CE;">
+          <div style="font-size: 13.5px; font-weight: 600;">유진</div>
+          <div style="display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: #55524A;">
+            <div>필수 <span style="font-family: 'IBM Plex Mono', monospace; color: #2E6A4C; font-weight: 600;">4/4</span></div>
+            <div>선택 <span style="font-family: 'IBM Plex Mono', monospace;">3/3</span></div>
+          </div>
+          <div style="display: flex; gap: 6px; font-size: 11px; color: #C4442B;"><span>영상</span><span style="color: #DDD9CE;">·</span><span>데모</span></div>
+        </div>
+
+        <div style="padding: 14px 14px; display: flex; flex-direction: column; gap: 8px; border-right: 1px solid #DDD9CE;">
+          <div style="font-size: 13.5px; font-weight: 600;">박도현</div>
+          <div style="display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: #55524A;">
+            <div>필수 <span style="font-family: 'IBM Plex Mono', monospace; color: #2E6A4C; font-weight: 600;">4/4</span></div>
+            <div>선택 <span style="font-family: 'IBM Plex Mono', monospace;">1/3</span></div>
+          </div>
+          <div style="display: flex; gap: 6px; font-size: 11px; color: #C4442B;"><span>영상</span><span style="color: #DDD9CE;">·</span><span>데모</span></div>
+        </div>
+
+        <div style="padding: 14px 14px; display: flex; flex-direction: column; gap: 8px; border-right: 1px solid #DDD9CE;">
+          <div style="font-size: 13.5px; font-weight: 600;">한서율</div>
+          <div style="display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: #55524A;">
+            <div>필수 <span style="font-family: 'IBM Plex Mono', monospace; font-weight: 600;">3/4</span></div>
+            <div>선택 <span style="font-family: 'IBM Plex Mono', monospace;">2/3</span></div>
+          </div>
+          <div style="display: flex; gap: 6px; font-size: 11px; color: #C4442B;"><span>영상</span></div>
+        </div>
+
+        <div style="padding: 14px 14px; display: flex; flex-direction: column; gap: 8px; border-right: 1px solid #DDD9CE;">
+          <div style="font-size: 13.5px; font-weight: 600;">최민</div>
+          <div style="display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: #55524A;">
+            <div>필수 <span style="font-family: 'IBM Plex Mono', monospace; font-weight: 600;">3/4</span></div>
+            <div>선택 <span style="font-family: 'IBM Plex Mono', monospace;">0/3</span></div>
+          </div>
+          <div style="display: flex; gap: 6px; font-size: 11px; color: #C4442B;"><span>데모</span></div>
+        </div>
+
+        <div style="padding: 14px 14px; display: flex; flex-direction: column; gap: 8px;">
+          <div style="font-size: 13.5px; font-weight: 600;">이레</div>
+          <div style="display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: #55524A;">
+            <div>필수 <span style="font-family: 'IBM Plex Mono', monospace; color: #C4442B; font-weight: 600;">1/4</span></div>
+            <div>선택 <span style="font-family: 'IBM Plex Mono', monospace;">0/3</span></div>
+          </div>
+          <div style="font-size: 11px; color: #8B877D;">증거 없음</div>
+        </div>
+      </div>
+
+      <!-- requirement rows -->
+      <div style="display: grid; grid-template-columns: 372px repeat(5, minmax(0, 1fr)); border-bottom: 1px solid #EDEAE1;">
+        <div style="padding: 14px 18px; border-right: 1px solid #DDD9CE; display: flex; gap: 10px; align-items: flex-start;">
+          <span style="font-size: 10.5px; font-weight: 600; color: #C4442B; padding-top: 2px; flex-shrink: 0;">필수</span>
+          <span style="font-size: 13px; line-height: 1.5;">다국어(한/영) 상품 상세와 통화 전환</span>
+        </div>
+        <div style="padding: 14px; border-right: 1px solid #DDD9CE; display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #2E6A4C;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2E6A4C" stroke-width="2.3"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg><span style="font-family: 'IBM Plex Mono', monospace;">영상 00:42</span></div>
+        <div style="padding: 14px; border-right: 1px solid #DDD9CE; display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #2E6A4C;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2E6A4C" stroke-width="2.3"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg><span style="font-family: 'IBM Plex Mono', monospace;">데모 /en</span></div>
+        <div style="padding: 14px; border-right: 1px solid #DDD9CE; display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #2E6A4C;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2E6A4C" stroke-width="2.3"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg><span style="font-family: 'IBM Plex Mono', monospace;">영상 01:30</span></div>
+        <div style="padding: 14px; border-right: 1px solid #DDD9CE; display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #2E6A4C;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2E6A4C" stroke-width="2.3"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg><span style="font-family: 'IBM Plex Mono', monospace;">스크린샷</span></div>
+        <div style="padding: 14px; display: flex; align-items: center; font-size: 12px; color: #C4442B;">증거 없음</div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 372px repeat(5, minmax(0, 1fr)); border-bottom: 1px solid #EDEAE1;">
+        <div style="padding: 14px 18px; border-right: 1px solid #DDD9CE; display: flex; gap: 10px; align-items: flex-start;">
+          <span style="font-size: 10.5px; font-weight: 600; color: #C4442B; padding-top: 2px; flex-shrink: 0;">필수</span>
+          <span style="font-size: 13px; line-height: 1.5;">해외 배송비를 국가별로 자동 계산</span>
+        </div>
+        <div style="padding: 14px; border-right: 1px solid #DDD9CE; display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #2E6A4C;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2E6A4C" stroke-width="2.3"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg><span style="font-family: 'IBM Plex Mono', monospace;">소스 shipping/</span></div>
+        <div style="padding: 14px; border-right: 1px solid #DDD9CE; display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #2E6A4C;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2E6A4C" stroke-width="2.3"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg><span style="font-family: 'IBM Plex Mono', monospace;">영상 03:05</span></div>
+        <div style="padding: 14px; border-right: 1px solid #DDD9CE; display: flex; align-items: center; font-size: 12px; color: #C4442B;">증거 없음</div>
+        <div style="padding: 14px; border-right: 1px solid #DDD9CE; display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #2E6A4C;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2E6A4C" stroke-width="2.3"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg><span style="font-family: 'IBM Plex Mono', monospace;">데모 /cart</span></div>
+        <div style="padding: 14px; display: flex; align-items: center; font-size: 12px; color: #C4442B;">증거 없음</div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 372px repeat(5, minmax(0, 1fr)); border-bottom: 1px solid #EDEAE1;">
+        <div style="padding: 14px 18px; border-right: 1px solid #DDD9CE; display: flex; gap: 10px; align-items: flex-start;">
+          <span style="font-size: 10.5px; font-weight: 600; color: #C4442B; padding-top: 2px; flex-shrink: 0;">필수</span>
+          <span style="font-size: 13px; line-height: 1.5;">관리자가 재고와 주문을 한 화면에서 관리</span>
+        </div>
+        <div style="padding: 14px; border-right: 1px solid #DDD9CE; display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #2E6A4C;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2E6A4C" stroke-width="2.3"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg><span style="font-family: 'IBM Plex Mono', monospace;">영상 05:18</span></div>
+        <div style="padding: 14px; border-right: 1px solid #DDD9CE; display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #2E6A4C;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2E6A4C" stroke-width="2.3"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg><span style="font-family: 'IBM Plex Mono', monospace;">데모 /admin</span></div>
+        <div style="padding: 14px; border-right: 1px solid #DDD9CE; display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #2E6A4C;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2E6A4C" stroke-width="2.3"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg><span style="font-family: 'IBM Plex Mono', monospace;">영상 06:02</span></div>
+        <div style="padding: 14px; border-right: 1px solid #DDD9CE; display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #2E6A4C;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2E6A4C" stroke-width="2.3"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg><span style="font-family: 'IBM Plex Mono', monospace;">데모 /admin</span></div>
+        <div style="padding: 14px; display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #2E6A4C;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2E6A4C" stroke-width="2.3"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg><span style="font-family: 'IBM Plex Mono', monospace;">스크린샷</span></div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 372px repeat(5, minmax(0, 1fr)); border-bottom: 1px solid #EDEAE1;">
+        <div style="padding: 14px 18px; border-right: 1px solid #DDD9CE; display: flex; gap: 10px; align-items: flex-start;">
+          <span style="font-size: 10.5px; font-weight: 600; color: #C4442B; padding-top: 2px; flex-shrink: 0;">필수</span>
+          <span style="font-size: 13px; line-height: 1.5;">모바일 결제 흐름이 3단계 이내</span>
+        </div>
+        <div style="padding: 14px; border-right: 1px solid #DDD9CE; display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #2E6A4C;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2E6A4C" stroke-width="2.3"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg><span style="font-family: 'IBM Plex Mono', monospace;">영상 07:40</span></div>
+        <div style="padding: 14px; border-right: 1px solid #DDD9CE; display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #2E6A4C;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2E6A4C" stroke-width="2.3"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg><span style="font-family: 'IBM Plex Mono', monospace;">데모 /pay</span></div>
+        <div style="padding: 14px; border-right: 1px solid #DDD9CE; display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #2E6A4C;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2E6A4C" stroke-width="2.3"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg><span style="font-family: 'IBM Plex Mono', monospace;">영상 09:11</span></div>
+        <div style="padding: 14px; border-right: 1px solid #DDD9CE; display: flex; align-items: center; font-size: 12px; color: #C4442B;">증거 없음</div>
+        <div style="padding: 14px; display: flex; align-items: center; font-size: 12px; color: #C4442B;">증거 없음</div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 372px repeat(5, minmax(0, 1fr)); border-bottom: 1px solid #EDEAE1; background: #FAF8F2;">
+        <div style="padding: 14px 18px; border-right: 1px solid #DDD9CE; display: flex; gap: 10px; align-items: flex-start;">
+          <span style="font-size: 10.5px; font-weight: 500; color: #8B877D; padding-top: 2px; flex-shrink: 0;">선택</span>
+          <span style="font-size: 13px; line-height: 1.5; color: #55524A;">인스타그램 피드 연동</span>
+        </div>
+        <div style="padding: 14px; border-right: 1px solid #DDD9CE; display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #2E6A4C;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2E6A4C" stroke-width="2.3"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg><span style="font-family: 'IBM Plex Mono', monospace;">데모 /</span></div>
+        <div style="padding: 14px; border-right: 1px solid #DDD9CE; display: flex; align-items: center; font-size: 12px; color: #8B877D;">—</div>
+        <div style="padding: 14px; border-right: 1px solid #DDD9CE; display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #2E6A4C;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2E6A4C" stroke-width="2.3"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg><span style="font-family: 'IBM Plex Mono', monospace;">스크린샷</span></div>
+        <div style="padding: 14px; border-right: 1px solid #DDD9CE; display: flex; align-items: center; font-size: 12px; color: #8B877D;">—</div>
+        <div style="padding: 14px; display: flex; align-items: center; font-size: 12px; color: #8B877D;">—</div>
+      </div>
+
+      <!-- action row -->
+      <div style="display: grid; grid-template-columns: 372px repeat(5, minmax(0, 1fr)); border-top: 1px solid #17160F;">
+        <div style="padding: 16px 18px; border-right: 1px solid #DDD9CE; display: flex; align-items: center; font-size: 12.5px; color: #55524A; line-height: 1.5;">선정하면 이 제출작의 소스가 열립니다</div>
+        <div style="padding: 14px; border-right: 1px solid #DDD9CE;"><div style="height: 36px; background: #17160F; color: #F5F3EC; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 500;">선정</div></div>
+        <div style="padding: 14px; border-right: 1px solid #DDD9CE;"><div style="height: 36px; border: 1px solid #17160F; display: flex; align-items: center; justify-content: center; font-size: 13px;">선정</div></div>
+        <div style="padding: 14px; border-right: 1px solid #DDD9CE;"><div style="height: 36px; border: 1px solid #DDD9CE; color: #8B877D; display: flex; align-items: center; justify-content: center; font-size: 13px;">선정</div></div>
+        <div style="padding: 14px; border-right: 1px solid #DDD9CE;"><div style="height: 36px; border: 1px solid #DDD9CE; color: #8B877D; display: flex; align-items: center; justify-content: center; font-size: 13px;">선정</div></div>
+        <div style="padding: 14px;"><div style="height: 36px; border: 1px solid #DDD9CE; color: #8B877D; display: flex; align-items: center; justify-content: center; font-size: 13px;">선정</div></div>
+      </div>
+    </div>
+
+    <div style="display: flex; align-items: flex-start; gap: 10px; font-size: 12.5px; color: #8B877D; line-height: 1.55;">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8B877D" stroke-width="1.7" style="flex-shrink: 0; margin-top: 1px;"><rect x="5" y="11" width="14" height="9" rx="1"></rect><path d="M8.5 11V7.8a3.5 3.5 0 017 0V11"></path></svg>
+      <span>제출작의 소스코드는 선정 전까지 열람할 수 없습니다. 위 표는 개발자가 연결한 증거(영상 구간·스크린샷·데모 경로·소스 위치)만 보여줍니다. AI 채점 결과는 선정에 관여하지 않으며, 무응답 배분 대상을 가릴 때만 쓰입니다.</span>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

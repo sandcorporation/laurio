@@ -1,0 +1,252 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #C4442B; text-decoration: none; }
+    a:hover { color: #93301C; }
+    * { box-sizing: border-box; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; min-height: 1180px; background: #F5F3EC; color: #17160F; font-family: 'IBM Plex Sans KR', system-ui, sans-serif; display: flex; flex-direction: column;">
+
+  <div style="height: 72px; border-bottom: 1px solid #DDD9CE; display: flex; align-items: center; justify-content: space-between; padding: 0 40px; background: #FFFEFA;">
+    <div style="display: flex; align-items: center; gap: 40px;">
+      <div style="font-size: 21px; font-weight: 700; letter-spacing: -0.01em;">Laurio</div>
+      <div style="display: flex; gap: 26px; font-size: 14px; color: #55524A;">
+        <div>공모전</div>
+        <div>개발자</div>
+        <div style="color: #17160F; font-weight: 500; border-bottom: 2px solid #C4442B; padding-bottom: 3px;">내 제출</div>
+      </div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; font-size: 13px; color: #55524A;">
+      <div style="width: 26px; height: 26px; border-radius: 50%; background: #17160F; color: #F5F3EC; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600;">유</div>
+      <span>유진</span>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; padding: 32px 40px 48px; gap: 24px;">
+
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      <div style="font-size: 12.5px; color: #8B877D;">공모전 · 라이프스타일</div>
+      <div style="display: flex; align-items: baseline; gap: 14px;">
+        <div style="font-size: 26px; font-weight: 600; letter-spacing: -0.02em;">러닝 크루 기록 앱</div>
+        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 600; color: #C4442B;">D-3 · 08.31 23:59 마감</div>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: minmax(0, 1fr) 336px; gap: 32px; align-items: start;">
+
+      <!-- form column -->
+      <div style="display: flex; flex-direction: column; gap: 28px;">
+
+        <!-- source -->
+        <div style="background: #FFFEFA; border: 1px solid #DDD9CE; display: flex; flex-direction: column;">
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid #DDD9CE;">
+            <div style="display: flex; align-items: center; gap: 9px;">
+              <div style="font-size: 15px; font-weight: 600;">소스코드</div>
+              <span style="background: #17160F; color: #F5F3EC; font-size: 10.5px; font-weight: 500; padding: 2px 6px; letter-spacing: 0.03em;">필수</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #2E6A4C;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#2E6A4C" stroke-width="2.2"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>
+              업로드 완료
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 14px; padding: 18px 20px;">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#55524A" stroke-width="1.6" style="flex-shrink: 0;"><path d="M4 6a2 2 0 012-2h5l2 2.5h5a2 2 0 012 2V18a2 2 0 01-2 2H6a2 2 0 01-2-2z"></path></svg>
+            <div style="display: flex; flex-direction: column; gap: 3px; min-width: 0;">
+              <div style="font-family: 'IBM Plex Mono', monospace; font-size: 13.5px;">runcrew-app-source.zip</div>
+              <div style="font-size: 12px; color: #8B877D;">
+                <span style="font-family: 'IBM Plex Mono', monospace;">28.4 MB</span> · 1,204개 파일 · 08.28 14:02 업로드
+              </div>
+            </div>
+            <div style="margin-left: auto; height: 32px; border: 1px solid #DDD9CE; display: flex; align-items: center; padding: 0 13px; font-size: 12.5px; color: #55524A;">교체</div>
+          </div>
+          <div style="display: flex; align-items: flex-start; gap: 9px; padding: 13px 20px; background: #F5F3EC; border-top: 1px solid #DDD9CE; font-size: 12.5px; color: #55524A; line-height: 1.55;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#55524A" stroke-width="1.7" style="flex-shrink: 0; margin-top: 1px;"><rect x="5" y="11" width="14" height="9" rx="1"></rect><path d="M8.5 11V7.8a3.5 3.5 0 017 0V11"></path></svg>
+            <span>소스는 <strong style="font-weight: 600; color: #17160F;">선정 전까지 발주자에게 보이지 않습니다.</strong> 채점 AI와 플랫폼만 열람하며, 선정되면 그때 발주자에게 접근 권한이 열립니다. 탈락 시에는 끝까지 비공개입니다.</span>
+          </div>
+        </div>
+
+        <!-- requirements -->
+        <div style="background: #FFFEFA; border: 1px solid #DDD9CE; display: flex; flex-direction: column;">
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid #DDD9CE;">
+            <div style="display: flex; align-items: center; gap: 9px;">
+              <div style="font-size: 15px; font-weight: 600;">요구사항 체크</div>
+              <span style="background: #17160F; color: #F5F3EC; font-size: 10.5px; font-weight: 500; padding: 2px 6px; letter-spacing: 0.03em;">필수</span>
+            </div>
+            <div style="font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; color: #55524A;">증거 연결 5 / 7</div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 64px minmax(0, 1fr) 200px; gap: 16px; padding: 11px 20px; border-bottom: 1px solid #DDD9CE; font-size: 11px; font-weight: 500; letter-spacing: 0.08em; color: #8B877D;">
+            <div>등급</div>
+            <div>요구사항</div>
+            <div>증거</div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 64px minmax(0, 1fr) 200px; gap: 16px; padding: 15px 20px; border-bottom: 1px solid #EDEAE1; align-items: center;">
+            <div style="font-size: 11px; font-weight: 600; color: #C4442B;">필수</div>
+            <div style="font-size: 13.5px; line-height: 1.5;">GPS로 러닝 경로를 기록하고 지도에 표시한다</div>
+            <div style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #2E6A4C;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2E6A4C" stroke-width="2.2"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>
+              <span style="font-family: 'IBM Plex Mono', monospace;">영상 01:12</span>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 64px minmax(0, 1fr) 200px; gap: 16px; padding: 15px 20px; border-bottom: 1px solid #EDEAE1; align-items: center;">
+            <div style="font-size: 11px; font-weight: 600; color: #C4442B;">필수</div>
+            <div style="font-size: 13.5px; line-height: 1.5;">크루를 만들고 초대 링크로 멤버를 받는다</div>
+            <div style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #2E6A4C;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2E6A4C" stroke-width="2.2"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>
+              <span style="font-family: 'IBM Plex Mono', monospace;">영상 02:40</span>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 64px minmax(0, 1fr) 200px; gap: 16px; padding: 15px 20px; border-bottom: 1px solid #EDEAE1; align-items: center;">
+            <div style="font-size: 11px; font-weight: 600; color: #C4442B;">필수</div>
+            <div style="font-size: 13.5px; line-height: 1.5;">주간 누적 거리를 크루 랭킹으로 보여준다</div>
+            <div style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #2E6A4C;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2E6A4C" stroke-width="2.2"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>
+              <span style="font-family: 'IBM Plex Mono', monospace;">소스 · RankingView</span>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 64px minmax(0, 1fr) 200px; gap: 16px; padding: 15px 20px; border-bottom: 1px solid #EDEAE1; align-items: center; background: #FDF4F1;">
+            <div style="font-size: 11px; font-weight: 600; color: #C4442B;">필수</div>
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <div style="font-size: 13.5px; line-height: 1.5;">개인 기록을 이미지로 저장해 공유한다</div>
+              <div style="font-size: 11.5px; color: #C4442B;">증거가 없으면 미달로 채점됩니다</div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 7px;">
+              <div style="height: 30px; border: 1px solid #C4442B; color: #C4442B; display: flex; align-items: center; gap: 5px; padding: 0 10px; font-size: 12px; font-weight: 500;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#C4442B" stroke-width="2"><path d="M12 5v14M5 12h14"></path></svg>
+                증거 연결
+              </div>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 64px minmax(0, 1fr) 200px; gap: 16px; padding: 15px 20px; border-bottom: 1px solid #EDEAE1; align-items: center;">
+            <div style="font-size: 11px; font-weight: 500; color: #8B877D;">선택</div>
+            <div style="font-size: 13.5px; line-height: 1.5;">애플 헬스킷 동기화</div>
+            <div style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #2E6A4C;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2E6A4C" stroke-width="2.2"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>
+              <span style="font-family: 'IBM Plex Mono', monospace;">스크린샷 3</span>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 64px minmax(0, 1fr) 200px; gap: 16px; padding: 15px 20px; border-bottom: 1px solid #EDEAE1; align-items: center;">
+            <div style="font-size: 11px; font-weight: 500; color: #8B877D;">선택</div>
+            <div style="font-size: 13.5px; line-height: 1.5;">다크 모드</div>
+            <div style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #2E6A4C;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2E6A4C" stroke-width="2.2"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>
+              <span style="font-family: 'IBM Plex Mono', monospace;">데모 /settings</span>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 64px minmax(0, 1fr) 200px; gap: 16px; padding: 15px 20px; align-items: center;">
+            <div style="font-size: 11px; font-weight: 500; color: #8B877D;">선택</div>
+            <div style="font-size: 13.5px; line-height: 1.5; color: #8B877D;">위젯 지원</div>
+            <div style="font-size: 12px; color: #8B877D;">미구현</div>
+          </div>
+        </div>
+
+        <!-- recommended -->
+        <div style="background: #FFFEFA; border: 1px solid #DDD9CE; display: flex; flex-direction: column;">
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid #DDD9CE;">
+            <div style="display: flex; align-items: center; gap: 9px;">
+              <div style="font-size: 15px; font-weight: 600;">권장 항목</div>
+              <span style="border: 1px solid #DDD9CE; color: #55524A; font-size: 10.5px; font-weight: 500; padding: 2px 6px; letter-spacing: 0.03em;">선택</span>
+            </div>
+            <div style="font-size: 12.5px; color: #8B877D;">채우지 않아도 제출됩니다</div>
+          </div>
+          <div style="display: flex; flex-direction: column;">
+            <div style="display: flex; align-items: center; gap: 13px; padding: 15px 20px; border-bottom: 1px solid #EDEAE1;">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#2E6A4C" stroke-width="1.8" style="flex-shrink: 0;"><rect x="3" y="6" width="13" height="12" rx="1.5"></rect><path d="M16 11l5-3v8l-5-3z"></path></svg>
+              <div style="display: flex; flex-direction: column; gap: 2px;">
+                <div style="font-size: 13.5px;">시연 영상</div>
+                <div style="font-size: 12px; color: #8B877D; font-family: 'IBM Plex Mono', monospace;">4분 12초 · 08.28 업로드</div>
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 13px; padding: 15px 20px; border-bottom: 1px solid #EDEAE1;">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#2E6A4C" stroke-width="1.8" style="flex-shrink: 0;"><path d="M10 13.5a4 4 0 006 .5l2.5-2.5a4 4 0 00-5.7-5.7L11.5 7"></path><path d="M14 10.5a4 4 0 00-6-.5L5.5 12.5a4 4 0 005.7 5.7L12.5 17"></path></svg>
+              <div style="display: flex; flex-direction: column; gap: 2px;">
+                <div style="font-size: 13.5px;">데모 링크</div>
+                <div style="font-size: 12px; color: #8B877D; font-family: 'IBM Plex Mono', monospace;">testflight.apple.com/join/xxxx</div>
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 13px; padding: 15px 20px;">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#8B877D" stroke-width="1.8" style="flex-shrink: 0;"><circle cx="12" cy="8.5" r="3.5"></circle><path d="M5.5 19a6.5 6.5 0 0113 0"></path></svg>
+              <div style="display: flex; flex-direction: column; gap: 2px;">
+                <div style="font-size: 13.5px; color: #8B877D;">테스트 계정</div>
+                <div style="font-size: 12px; color: #8B877D;">비어 있음 — 발주자가 직접 가입해야 합니다</div>
+              </div>
+              <div style="margin-left: auto; height: 30px; border: 1px solid #DDD9CE; display: flex; align-items: center; padding: 0 12px; font-size: 12.5px; color: #55524A;">입력</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- sidebar -->
+      <div style="display: flex; flex-direction: column; gap: 16px;">
+        <div style="background: #FFFEFA; border: 1px solid #17160F; display: flex; flex-direction: column;">
+          <div style="padding: 18px 20px 16px; display: flex; flex-direction: column; gap: 14px; border-bottom: 1px solid #DDD9CE;">
+            <div style="display: flex; align-items: baseline; justify-content: space-between;">
+              <div style="font-size: 13px; font-weight: 600;">제출 완성도</div>
+              <div style="font-family: 'IBM Plex Mono', monospace; font-size: 22px; font-weight: 600;">78<span style="font-size: 14px; color: #8B877D;">%</span></div>
+            </div>
+            <div style="display: flex; gap: 3px; height: 6px;">
+              <div style="flex-grow: 78; background: #17160F;"></div>
+              <div style="flex-grow: 22; background: #DDD9CE;"></div>
+            </div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; padding: 6px 0;">
+            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 20px; font-size: 13px;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2E6A4C" stroke-width="2.2" style="flex-shrink: 0;"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>
+              <span style="flex-grow: 1;">소스코드</span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #8B877D;">1 / 1</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 20px; font-size: 13px; color: #C4442B;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C4442B" stroke-width="2" style="flex-shrink: 0;"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 8v5"></path><circle cx="12" cy="16" r="0.7" fill="#C4442B"></circle></svg>
+              <span style="flex-grow: 1;">필수 요구사항 증거</span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600;">3 / 4</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 20px; font-size: 13px;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2E6A4C" stroke-width="2.2" style="flex-shrink: 0;"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>
+              <span style="flex-grow: 1;">선택 요구사항 증거</span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #8B877D;">2 / 3</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 20px; font-size: 13px;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8B877D" stroke-width="1.9" style="flex-shrink: 0;"><circle cx="12" cy="12" r="8.5"></circle></svg>
+              <span style="flex-grow: 1; color: #55524A;">권장 항목</span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #8B877D;">2 / 3</span>
+            </div>
+          </div>
+
+          <div style="padding: 16px 20px 20px; display: flex; flex-direction: column; gap: 11px; border-top: 1px solid #DDD9CE;">
+            <div style="height: 44px; background: #17160F; color: #F5F3EC; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 500;">제출하기</div>
+            <div style="font-size: 12px; color: #8B877D; line-height: 1.55; text-align: center;">마감 전까지 몇 번이든 수정할 수 있습니다</div>
+          </div>
+        </div>
+
+        <div style="border: 1px solid #DDD9CE; background: #FFFEFA; padding: 16px 18px; display: flex; flex-direction: column; gap: 9px;">
+          <div style="font-size: 12.5px; font-weight: 600;">채점은 무엇을 봅니까</div>
+          <div style="font-size: 12.5px; color: #55524A; line-height: 1.6;">자가 응답만으로는 점수가 나오지 않습니다. 각 필수 요구사항마다 <strong style="font-weight: 600; color: #17160F;">연결한 증거가 주장을 뒷받침하는지</strong>와 <strong style="font-weight: 600; color: #17160F;">소스에 그 기능이 실재하는지</strong>를 함께 봅니다.</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

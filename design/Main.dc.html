@@ -1,0 +1,192 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #C4442B; text-decoration: none; }
+    a:hover { color: #93301C; }
+    * { box-sizing: border-box; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; min-height: 920px; background: #F5F3EC; color: #17160F; font-family: 'IBM Plex Sans KR', system-ui, sans-serif; display: flex; flex-direction: column;">
+
+  <!-- header -->
+  <div style="height: 72px; border-bottom: 1px solid #DDD9CE; display: flex; align-items: center; justify-content: space-between; padding: 0 40px; background: #FFFEFA;">
+    <div style="display: flex; align-items: center; gap: 40px;">
+      <div style="font-size: 21px; font-weight: 700; letter-spacing: -0.01em;">Laurio</div>
+      <div style="display: flex; gap: 26px; font-size: 14px; color: #55524A;">
+        <div style="color: #17160F; font-weight: 500; border-bottom: 2px solid #C4442B; padding-bottom: 3px;">공모전</div>
+        <div>개발자</div>
+        <div>내 제출</div>
+      </div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 14px;">
+      <div style="display: flex; align-items: center; gap: 8px; border: 1px solid #DDD9CE; background: #F5F3EC; height: 36px; padding: 0 12px; font-size: 13px; color: #8B877D; width: 220px;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8B877D" stroke-width="1.8"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4.2-4.2"></path></svg>
+        <span>공모전 검색</span>
+      </div>
+      <div style="height: 36px; background: #17160F; color: #F5F3EC; display: flex; align-items: center; padding: 0 18px; font-size: 13.5px; font-weight: 500;">공모전 개최</div>
+    </div>
+  </div>
+
+  <!-- body -->
+  <div style="display: flex; flex-direction: column; padding: 36px 40px 48px; gap: 24px;">
+
+    <div style="display: flex; align-items: flex-end; justify-content: space-between;">
+      <div style="display: flex; flex-direction: column; gap: 7px;">
+        <div style="font-size: 11px; font-weight: 500; letter-spacing: 0.1em; color: #8B877D;">진행 중인 공모전</div>
+        <div style="display: flex; align-items: baseline; gap: 10px;">
+          <div style="font-size: 30px; font-weight: 600; letter-spacing: -0.02em;">전체</div>
+          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 17px; color: #8B877D;">24</div>
+        </div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 18px; font-size: 13px; color: #55524A;">
+        <div style="display: flex; align-items: center; gap: 6px; color: #17160F; font-weight: 500;">
+          마감 임박순
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#17160F" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg>
+        </div>
+        <div style="color: #8B877D;">상금순</div>
+        <div style="color: #8B877D;">최신순</div>
+      </div>
+    </div>
+
+    <!-- filters -->
+    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+      <div style="height: 32px; display: flex; align-items: center; padding: 0 13px; font-size: 13px; background: #17160F; color: #F5F3EC;">전체</div>
+      <div style="height: 32px; display: flex; align-items: center; padding: 0 13px; font-size: 13px; border: 1px solid #DDD9CE; color: #55524A;">웹 서비스</div>
+      <div style="height: 32px; display: flex; align-items: center; padding: 0 13px; font-size: 13px; border: 1px solid #DDD9CE; color: #55524A;">모바일 앱</div>
+      <div style="height: 32px; display: flex; align-items: center; padding: 0 13px; font-size: 13px; border: 1px solid #DDD9CE; color: #55524A;">관리자 페이지</div>
+      <div style="height: 32px; display: flex; align-items: center; padding: 0 13px; font-size: 13px; border: 1px solid #DDD9CE; color: #55524A;">랜딩·원페이지</div>
+      <div style="height: 32px; display: flex; align-items: center; padding: 0 13px; font-size: 13px; border: 1px solid #DDD9CE; color: #55524A;">데스크톱</div>
+      <div style="width: 1px; background: #DDD9CE; margin: 0 6px;"></div>
+      <div style="height: 32px; display: flex; align-items: center; gap: 7px; padding: 0 13px; font-size: 13px; border: 1px solid #C4442B; color: #C4442B;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#C4442B" stroke-width="1.8"><path d="M12 3l9 16H3z"></path><path d="M12 9v5"></path><circle cx="12" cy="17" r="0.6" fill="#C4442B"></circle></svg>
+        상금미달 숨기기
+      </div>
+    </div>
+
+    <!-- table head -->
+    <div style="display: grid; grid-template-columns: minmax(0, 1fr) 210px 150px 88px 74px; gap: 24px; padding: 0 4px 10px; border-bottom: 1px solid #17160F; font-size: 11px; font-weight: 500; letter-spacing: 0.09em; color: #8B877D;">
+      <div>공모전</div>
+      <div>요구형태</div>
+      <div style="text-align: right;">상금</div>
+      <div style="text-align: right;">마감</div>
+      <div style="text-align: right;">참여</div>
+    </div>
+
+    <!-- rows -->
+    <div style="display: flex; flex-direction: column;">
+
+      <div style="display: grid; grid-template-columns: minmax(0, 1fr) 210px 150px 88px 74px; gap: 24px; padding: 19px 4px; border-bottom: 1px solid #DDD9CE; align-items: center;">
+        <div style="display: flex; flex-direction: column; gap: 6px; min-width: 0;">
+          <div style="font-size: 15.5px; font-weight: 500; letter-spacing: -0.01em;">[해외 런칭] 프리미엄 스킨케어 브랜드몰</div>
+          <div style="font-size: 12.5px; color: #8B877D;">라이프스타일</div>
+        </div>
+        <div style="display: flex; gap: 5px; flex-wrap: wrap; font-size: 11.5px; color: #55524A;">
+          <span style="border: 1px solid #DDD9CE; padding: 3px 7px;">웹 서비스</span>
+          <span style="border: 1px solid #DDD9CE; padding: 3px 7px;">관리자 페이지</span>
+        </div>
+        <div style="text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 16px; font-weight: 500;">4,000,000</div>
+        <div style="text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 14px; color: #55524A;">D-6</div>
+        <div style="text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 14px; color: #55524A;">7</div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: minmax(0, 1fr) 210px 150px 88px 74px; gap: 24px; padding: 19px 4px; border-bottom: 1px solid #DDD9CE; align-items: center;">
+        <div style="display: flex; flex-direction: column; gap: 6px; min-width: 0;">
+          <div style="display: flex; align-items: center; gap: 9px;">
+            <span style="font-size: 15.5px; font-weight: 500; letter-spacing: -0.01em;">러닝 크루 기록 앱</span>
+            <span style="display: inline-flex; align-items: center; gap: 4px; border: 1px solid #C4442B; color: #C4442B; font-size: 10.5px; font-weight: 500; padding: 2px 6px; letter-spacing: 0.02em;">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#C4442B" stroke-width="2"><path d="M12 3l9 16H3z"></path></svg>
+              상금미달
+            </span>
+          </div>
+          <div style="font-size: 12.5px; color: #8B877D;">라이프스타일 · 최소 제안 2,500,000원</div>
+        </div>
+        <div style="display: flex; gap: 5px; flex-wrap: wrap; font-size: 11.5px; color: #55524A;">
+          <span style="border: 1px solid #DDD9CE; padding: 3px 7px;">모바일 앱</span>
+          <span style="border: 1px solid #DDD9CE; padding: 3px 7px;">iOS 포함</span>
+        </div>
+        <div style="text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 16px; font-weight: 500; color: #C4442B;">2,000,000</div>
+        <div style="text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 600; color: #C4442B;">D-3</div>
+        <div style="text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 14px; color: #55524A;">11</div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: minmax(0, 1fr) 210px 150px 88px 74px; gap: 24px; padding: 19px 4px; border-bottom: 1px solid #DDD9CE; align-items: center;">
+        <div style="display: flex; flex-direction: column; gap: 6px; min-width: 0;">
+          <div style="font-size: 15.5px; font-weight: 500; letter-spacing: -0.01em;">독립서점 재고·판매 관리</div>
+          <div style="font-size: 12.5px; color: #8B877D;">생산성</div>
+        </div>
+        <div style="display: flex; gap: 5px; flex-wrap: wrap; font-size: 11.5px; color: #55524A;">
+          <span style="border: 1px solid #DDD9CE; padding: 3px 7px;">웹 서비스</span>
+          <span style="border: 1px solid #DDD9CE; padding: 3px 7px;">관리자 페이지</span>
+        </div>
+        <div style="text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 16px; font-weight: 500;">3,200,000</div>
+        <div style="text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 14px; color: #55524A;">D-9</div>
+        <div style="text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 14px; color: #55524A;">4</div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: minmax(0, 1fr) 210px 150px 88px 74px; gap: 24px; padding: 19px 4px; border-bottom: 1px solid #DDD9CE; align-items: center;">
+        <div style="display: flex; flex-direction: column; gap: 6px; min-width: 0;">
+          <div style="display: flex; align-items: center; gap: 9px;">
+            <span style="font-size: 15.5px; font-weight: 500; letter-spacing: -0.01em;">사내 문서 검색 데스크톱 도구</span>
+            <span style="display: inline-flex; align-items: center; gap: 4px; border: 1px solid #C4442B; color: #C4442B; font-size: 10.5px; font-weight: 500; padding: 2px 6px; letter-spacing: 0.02em;">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#C4442B" stroke-width="2"><path d="M12 3l9 16H3z"></path></svg>
+              상금미달
+            </span>
+          </div>
+          <div style="font-size: 12.5px; color: #8B877D;">생산성 · 최소 제안 1,000,000원</div>
+        </div>
+        <div style="display: flex; gap: 5px; flex-wrap: wrap; font-size: 11.5px; color: #55524A;">
+          <span style="border: 1px solid #DDD9CE; padding: 3px 7px;">데스크톱 프로그램</span>
+        </div>
+        <div style="text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 16px; font-weight: 500; color: #C4442B;">900,000</div>
+        <div style="text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 14px; color: #55524A;">D-14</div>
+        <div style="text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 14px; color: #55524A;">2</div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: minmax(0, 1fr) 210px 150px 88px 74px; gap: 24px; padding: 19px 4px; border-bottom: 1px solid #DDD9CE; align-items: center;">
+        <div style="display: flex; flex-direction: column; gap: 6px; min-width: 0;">
+          <div style="font-size: 15.5px; font-weight: 500; letter-spacing: -0.01em;">요가 스튜디오 예약 랜딩</div>
+          <div style="font-size: 12.5px; color: #8B877D;">라이프스타일</div>
+        </div>
+        <div style="display: flex; gap: 5px; flex-wrap: wrap; font-size: 11.5px; color: #55524A;">
+          <span style="border: 1px solid #DDD9CE; padding: 3px 7px;">랜딩·원페이지</span>
+        </div>
+        <div style="text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 16px; font-weight: 500;">600,000</div>
+        <div style="text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 600; color: #C4442B;">D-2</div>
+        <div style="text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 14px; color: #55524A;">9</div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: minmax(0, 1fr) 210px 150px 88px 74px; gap: 24px; padding: 19px 4px; border-bottom: 1px solid #DDD9CE; align-items: center;">
+        <div style="display: flex; flex-direction: column; gap: 6px; min-width: 0;">
+          <div style="font-size: 15.5px; font-weight: 500; letter-spacing: -0.01em;">반려동물 산책 기록 앱</div>
+          <div style="font-size: 12.5px; color: #8B877D;">라이프스타일</div>
+        </div>
+        <div style="display: flex; gap: 5px; flex-wrap: wrap; font-size: 11.5px; color: #55524A;">
+          <span style="border: 1px solid #DDD9CE; padding: 3px 7px;">모바일 앱</span>
+        </div>
+        <div style="text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 16px; font-weight: 500;">1,500,000</div>
+        <div style="text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 14px; color: #55524A;">D-21</div>
+        <div style="text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 14px; color: #55524A;">3</div>
+      </div>
+
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 10px; padding-top: 4px; font-size: 12.5px; color: #8B877D; line-height: 1.55;">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8B877D" stroke-width="1.7" style="flex-shrink: 0;"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v5"></path><circle cx="12" cy="7.7" r="0.7" fill="#8B877D"></circle></svg>
+      <span>「상금미달」은 참가를 막지 않습니다. 선택한 요구형태의 최소 제안 상금 합계에 못 미친다는 표시일 뿐이며, 판단은 개발자의 몫입니다.</span>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

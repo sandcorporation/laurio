@@ -1,0 +1,194 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #C4442B; text-decoration: none; }
+    a:hover { color: #93301C; }
+    * { box-sizing: border-box; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; min-height: 980px; background: #F5F3EC; color: #17160F; font-family: 'IBM Plex Sans KR', system-ui, sans-serif; display: flex; flex-direction: column;">
+
+  <div style="height: 72px; border-bottom: 1px solid #DDD9CE; display: flex; align-items: center; justify-content: space-between; padding: 0 40px; background: #FFFEFA;">
+    <div style="display: flex; align-items: center; gap: 40px;">
+      <div style="font-size: 21px; font-weight: 700; letter-spacing: -0.01em;">Laurio</div>
+      <div style="display: flex; align-items: center; gap: 11px; font-size: 13.5px; color: #8B877D;">
+        <span>공모전 개최</span>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#DDD9CE" stroke-width="2"><path d="M9 6l6 6-6 6"></path></svg>
+        <span style="color: #17160F; font-weight: 500;">요구사항 정리</span>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#DDD9CE" stroke-width="2"><path d="M9 6l6 6-6 6"></path></svg>
+        <span>검토</span>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#DDD9CE" stroke-width="2"><path d="M9 6l6 6-6 6"></path></svg>
+        <span>결제</span>
+      </div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 14px;">
+      <div style="font-size: 13px; color: #8B877D;">임시 저장됨</div>
+      <div style="height: 34px; border: 1px solid #DDD9CE; display: flex; align-items: center; padding: 0 15px; font-size: 13px; color: #55524A;">수동으로 작성</div>
+    </div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: minmax(0, 1fr) 452px; align-items: stretch; flex-grow: 1;">
+
+    <!-- conversation -->
+    <div style="display: flex; flex-direction: column; padding: 30px 36px 28px 40px; gap: 22px; border-right: 1px solid #DDD9CE;">
+
+      <div style="display: flex; flex-direction: column; gap: 7px;">
+        <div style="font-size: 11px; font-weight: 500; letter-spacing: 0.1em; color: #8B877D;">AI와 함께 정리하기</div>
+        <div style="font-size: 24px; font-weight: 600; letter-spacing: -0.02em;">무엇을 만들어야 하는지 같이 좁혀봅시다</div>
+        <div style="font-size: 13px; color: #55524A; line-height: 1.6;">여기서 만들어지는 체크리스트가 개발자의 자가 응답, 심사, AI 채점의 <strong style="font-weight: 600; color: #17160F;">공통 기준</strong>이 됩니다. 모호하게 적으면 심사 때 분쟁이 됩니다.</div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 18px; flex-grow: 1;">
+
+        <div style="display: flex; gap: 13px;">
+          <div style="width: 28px; height: 28px; border: 1px solid #17160F; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; font-weight: 600;">AI</div>
+          <div style="display: flex; flex-direction: column; gap: 5px; padding-top: 3px;">
+            <div style="font-size: 14px; line-height: 1.65; max-width: 620px;">관리자 페이지가 필요하다고 하셨는데, 그걸 <strong style="font-weight: 600;">누가 씁니까?</strong> 사장님 혼자인지 직원 여러 명인지에 따라 권한 설계가 완전히 달라지고, 그건 상금 기준에도 영향을 줍니다.</div>
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end;">
+          <div style="background: #FFFEFA; border: 1px solid #DDD9CE; padding: 13px 16px; font-size: 14px; line-height: 1.6; max-width: 500px;">저랑 직원 2명이요. 직원은 재고만 건드리면 됩니다.</div>
+        </div>
+
+        <div style="display: flex; gap: 13px;">
+          <div style="width: 28px; height: 28px; border: 1px solid #17160F; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; font-weight: 600;">AI</div>
+          <div style="display: flex; flex-direction: column; gap: 10px; padding-top: 3px;">
+            <div style="font-size: 14px; line-height: 1.65; max-width: 620px;">그럼 <strong style="font-weight: 600;">「관리자가 재고와 주문을 한 화면에서 관리한다」</strong>를 필수로 넣었습니다. 권한 분리(직원은 재고만)는 필수와 선택 중 어디에 둘까요? 필수로 두면 최소 제안 상금이 올라갑니다.</div>
+            <div style="display: flex; gap: 8px;">
+              <div style="height: 32px; border: 1px solid #17160F; display: flex; align-items: center; padding: 0 13px; font-size: 12.5px;">필수로</div>
+              <div style="height: 32px; background: #17160F; color: #F5F3EC; display: flex; align-items: center; padding: 0 13px; font-size: 12.5px;">선택으로</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 13px;">
+          <div style="width: 28px; height: 28px; border: 1px solid #17160F; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; font-weight: 600;">AI</div>
+          <div style="display: flex; flex-direction: column; gap: 5px; padding-top: 3px;">
+            <div style="font-size: 14px; line-height: 1.65; max-width: 620px;">해외 배송비는 <strong style="font-weight: 600;">국가별 자동 계산인가요, 고정 금액인가요?</strong> "해외 런칭"이라고만 두면 제출작마다 다르게 만들어 오고, 그때 가서 어느 쪽이 맞다고 말하기 어렵습니다.</div>
+          </div>
+        </div>
+
+      </div>
+
+      <div style="border: 1px solid #17160F; background: #FFFEFA; display: flex; align-items: flex-end; gap: 12px; padding: 13px 14px;">
+        <div style="flex-grow: 1; font-size: 14px; color: #8B877D; line-height: 1.5; padding: 3px 0;">국가별로 자동 계산돼야 합니다. DHL 기준으로요.</div>
+        <div style="width: 34px; height: 34px; background: #17160F; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F5F3EC" stroke-width="2"><path d="M12 19V5"></path><path d="M6 11l6-6 6 6"></path></svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- live brief -->
+    <div style="display: flex; flex-direction: column; background: #FFFEFA;">
+      <div style="padding: 22px 28px 18px; border-bottom: 1px solid #DDD9CE; display: flex; align-items: center; justify-content: space-between;">
+        <div style="font-size: 15px; font-weight: 600;">공모전 초안</div>
+        <div style="font-size: 12px; color: #8B877D;">대화하면서 채워집니다</div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; padding: 20px 28px; gap: 20px; border-bottom: 1px solid #DDD9CE;">
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <div style="font-size: 11px; letter-spacing: 0.08em; color: #8B877D;">제목</div>
+          <div style="font-size: 15px; font-weight: 500; line-height: 1.45;">[해외 런칭] 프리미엄 스킨케어 브랜드몰</div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div style="font-size: 11px; letter-spacing: 0.08em; color: #8B877D;">요구형태 · 복수 선택</div>
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; border: 1px solid #17160F; padding: 9px 12px;">
+              <div style="display: flex; align-items: center; gap: 9px; font-size: 13.5px;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#17160F" stroke-width="2.4"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>
+                웹 서비스
+              </div>
+              <div style="font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; color: #55524A;">1,000,000</div>
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; border: 1px solid #17160F; padding: 9px 12px;">
+              <div style="display: flex; align-items: center; gap: 9px; font-size: 13.5px;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#17160F" stroke-width="2.4"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>
+                관리자 페이지
+              </div>
+              <div style="font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; color: #55524A;">500,000</div>
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; border-top: 1px solid #DDD9CE; padding: 9px 12px 0; font-size: 12.5px;">
+              <span style="color: #55524A;">최소 제안 상금 합계</span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-weight: 600;">1,500,000</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div style="font-size: 11px; letter-spacing: 0.08em; color: #8B877D;">상금</div>
+          <div style="border: 1px solid #C4442B; display: flex; align-items: center; justify-content: space-between; padding: 11px 13px;">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 19px; font-weight: 600;">1,200,000</span>
+            <span style="font-size: 13px; color: #8B877D;">원</span>
+          </div>
+          <div style="display: flex; align-items: flex-start; gap: 8px; font-size: 12px; color: #C4442B; line-height: 1.55;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#C4442B" stroke-width="2" style="flex-shrink: 0; margin-top: 1px;"><path d="M12 3l9 16H3z"></path><path d="M12 9v5"></path><circle cx="12" cy="17" r="0.6" fill="#C4442B"></circle></svg>
+            <span>합계보다 <strong style="font-weight: 600; font-family: 'IBM Plex Mono', monospace;">300,000</strong>원 적어 목록에 「상금미달」 배지가 붙습니다. 그래도 개최할 수 있습니다.</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; flex-grow: 1;">
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 28px 12px;">
+          <div style="font-size: 11px; letter-spacing: 0.08em; color: #8B877D;">요구사항 체크리스트</div>
+          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #55524A;">필수 4 · 선택 2</div>
+        </div>
+
+        <div style="display: flex; flex-direction: column;">
+          <div style="display: flex; gap: 10px; padding: 10px 28px; border-top: 1px solid #EDEAE1; align-items: flex-start;">
+            <span style="font-size: 10.5px; font-weight: 600; color: #C4442B; flex-shrink: 0; padding-top: 3px;">필수</span>
+            <span style="font-size: 13px; line-height: 1.5;">다국어(한/영) 상품 상세와 통화 전환</span>
+          </div>
+          <div style="display: flex; gap: 10px; padding: 10px 28px; border-top: 1px solid #EDEAE1; align-items: flex-start;">
+            <span style="font-size: 10.5px; font-weight: 600; color: #C4442B; flex-shrink: 0; padding-top: 3px;">필수</span>
+            <span style="font-size: 13px; line-height: 1.5;">관리자가 재고와 주문을 한 화면에서 관리</span>
+          </div>
+          <div style="display: flex; gap: 10px; padding: 10px 28px; border-top: 1px solid #EDEAE1; align-items: flex-start;">
+            <span style="font-size: 10.5px; font-weight: 600; color: #C4442B; flex-shrink: 0; padding-top: 3px;">필수</span>
+            <span style="font-size: 13px; line-height: 1.5;">모바일 결제 흐름이 3단계 이내</span>
+          </div>
+          <div style="display: flex; gap: 10px; padding: 10px 28px; border-top: 1px solid #EDEAE1; align-items: flex-start; background: #FAF8F2;">
+            <span style="font-size: 10.5px; font-weight: 600; color: #C4442B; flex-shrink: 0; padding-top: 3px;">필수</span>
+            <div style="display: flex; flex-direction: column; gap: 3px;">
+              <span style="font-size: 13px; line-height: 1.5; color: #8B877D;">해외 배송비 계산 방식</span>
+              <span style="font-size: 11.5px; color: #C4442B;">답변을 기다리는 중</span>
+            </div>
+          </div>
+          <div style="display: flex; gap: 10px; padding: 10px 28px; border-top: 1px solid #EDEAE1; align-items: flex-start;">
+            <span style="font-size: 10.5px; font-weight: 500; color: #8B877D; flex-shrink: 0; padding-top: 3px;">선택</span>
+            <span style="font-size: 13px; line-height: 1.5; color: #55524A;">직원 권한 분리 (재고만 접근)</span>
+          </div>
+          <div style="display: flex; gap: 10px; padding: 10px 28px; border-top: 1px solid #EDEAE1; align-items: flex-start;">
+            <span style="font-size: 10.5px; font-weight: 500; color: #8B877D; flex-shrink: 0; padding-top: 3px;">선택</span>
+            <span style="font-size: 13px; line-height: 1.5; color: #55524A;">인스타그램 피드 연동</span>
+          </div>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 7px; padding: 12px 28px; border-top: 1px solid #EDEAE1; font-size: 12.5px; color: #55524A;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#55524A" stroke-width="2"><path d="M12 5v14M5 12h14"></path></svg>
+          직접 추가
+        </div>
+      </div>
+
+      <div style="padding: 18px 28px 22px; border-top: 1px solid #DDD9CE; display: flex; flex-direction: column; gap: 9px;">
+        <div style="height: 44px; background: #17160F; color: #F5F3EC; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 500;">검토하고 결제로</div>
+        <div style="font-size: 12px; color: #8B877D; text-align: center; line-height: 1.5;">결제가 끝나야 공모전이 공개됩니다</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
