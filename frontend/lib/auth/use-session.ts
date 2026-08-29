@@ -10,6 +10,8 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { sessionFetch } from "./client-fetch";
+
 export interface SessionUser {
   id: number;
   username: string;
@@ -31,7 +33,7 @@ export function useSession(): SessionState {
   useEffect(() => {
     let cancelled = false;
 
-    fetch("/api/auth/session", { cache: "no-store" })
+    sessionFetch("/api/auth/session", { cache: "no-store" })
       .then(async (res) => {
         if (cancelled) return;
         if (!res.ok) {

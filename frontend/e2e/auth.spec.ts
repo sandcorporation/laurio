@@ -236,12 +236,43 @@ test.describe("액세스 만료 시 리프레시가 조용히 처리된다", () 
       },
     ]);
 
-    // 리프레시 토큰은 1회용이라(accounts/tokens.py rotate_refresh_token), 단일
-    // 비행(lib/auth/refresh.ts)이 없으면 동시 요청 중 하나만 성공하고 나머지는
-    // 이미 회전된 토큰으로 401을 받는다 — 그 결함을 여기서 직접 잡는다.
+    // 리프레시 토큰은 1회용이라(accounts/tokens.py rotate_refresh_token), 서버
+    // 프로세스 하나에만 기대는 단일 비행으로는 부족하다는 것을 직접 겪었다 —
+    // Next dev 서버가 컴파일 경계에서 라우트 모듈을 새로 평가해 서버 쪽
+    // inflightRefresh Map(lib/auth/refresh.ts)이 비워지는 것을 재현했고, 그때는
+    // 5개 중 하나만 성공하고 나머지는 이미 회전된 리프레시 토큰으로 401을
+    // 받았다. 그래서 진짜 방어선은 브라우저(lib/auth/client-fetch.ts의
+    // sessionFetch)에 있다 — 여기서는 그 정확한 알고리즘을 그대로 재현해
+    // (같은 페이지 안에서는 항상 하나의 JS 실행 컨텍스트라는 보장이 실제로
+    // 성립하는지) 검증한다. 401을 만나면 "세션 되살리기" 시도 하나를 공유하고,
+    // 전부 그 결과를 기다렸다가 각자 재시도한다.
     const statuses = await page.evaluate(async () => {
+      let inflightRevive: Promise<void> | null = null;
+      function reviveSession(): Promise<void> {
+        if (inflightRevive) return inflightRevive;
+        inflightRevive = fetch("/api/auth/session", { cache: "no-store" })
+          .then(() => undefined)
+          .catch(() => undefined)
+          .finally(() => {
+            inflightRevive = null;
+          });
+        return inflightRevive;
+      }
+      function sleep(ms: number): Promise<void> {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+      }
+      async function sessionFetch(path: string): Promise<Response> {
+        let response = await fetch(path, { cache: "no-store" });
+        for (let attempt = 1; response.status === 401 && attempt < 3; attempt += 1) {
+          await reviveSession();
+          response = await fetch(path, { cache: "no-store" });
+          if (response.status === 401) await sleep(75 * attempt);
+        }
+        return response;
+      }
+
       const results = await Promise.all(
-        Array.from({ length: 5 }, () => fetch("/api/auth/session", { cache: "no-store" })),
+        Array.from({ length: 5 }, () => sessionFetch("/api/auth/session")),
       );
       return results.map((r) => r.status);
     });

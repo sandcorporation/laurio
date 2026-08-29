@@ -29,8 +29,19 @@ export async function resolveAccessToken(request: NextRequest): Promise<AccessRe
     const pair = await refreshTokenPair(refresh);
     return { status: "authenticated", accessToken: pair.access, refreshedPair: pair };
   } catch {
-    // 리프레시도 실패했다 — 로그인으로 보낸다(FE-07 인수조건). 쿠키를 정리해
-    // 죽은 토큰이 브라우저에 남아 있지 않게 한다.
-    return { status: "unauthenticated", shouldClearCookies: true };
+    // 이 리프레시 시도가 실패한 이유를 이 요청만으로는 확신할 수 없다 — 진짜
+    // 죽은 세션(만료·탈취·로그아웃)일 수도 있지만, 리프레시 토큰이 1회용
+    // 회전이라(accounts/tokens.py rotate_refresh_token) 동시에 경합하던 다른
+    // 요청이 "방금 막" 같은 토큰으로 먼저 회전에 성공해 이 시도가 진 것일 수도
+    // 있다. 후자인데 여기서 쿠키를 지우면, 그 형제 요청이 응답에 실어 보낸
+    // 새 쿠키를 이 실패 응답이 나중에 도착해 그대로 덮어써 지워버린다 — 로그인
+    // 상태가 실제로는 살아 있는데 이 요청 하나의 실패 때문에 사라지는 것이다
+    // (직접 재현해 확인했다: 5개 동시 요청 중 1개가 성공해 새 쿠키를 심어도,
+    // 나머지 4개의 실패 응답이 쿠키를 지우면서 최종적으로 쿠키가 하나도 안
+    // 남았다). 그래서 여기서는 쿠키를 건드리지 않는다 — 진짜로 죽은 세션이면
+    // 이후 요청들도 계속 401을 내고, 클라이언트(lib/auth/client-fetch.ts)가
+    // 재시도 끝에 결국 로그인으로 보낸다. 로그아웃(app/api/auth/logout)처럼
+    // "이 브라우저가 명시적으로 요청한" 경우에만 쿠키를 지운다.
+    return { status: "unauthenticated", shouldClearCookies: false };
   }
 }
