@@ -146,3 +146,69 @@ jobs:
       - name: Django system checks (production, --deploy)
         working-directory: backend
         run: uv run python manage.py check --deploy --fail-level WARNING
+
+  # 프론트엔드 e2e. ADR-0017 — 시임은 **실행 중인 Next 앱 하나**이므로, 모킹하지 않고
+  # dev compose 로 전체 스택(db·minio·backend·frontend)을 실제로 띄운 뒤 그걸 친다.
+  # dev compose 는 모든 어댑터가 fake 로 바인딩되므로 실제 PG·LLM·알림 벤더가 필요 없다.
+  frontend-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bring up the dev stack
+        run: docker compose -f docker/compose.dev.yaml up -d --build
+
+      - name: Wait for the app to answer
+        run: |
+          curl --fail --silent --show-error \
+               --retry 60 --retry-delay 3 --retry-all-errors --retry-connrefused \
+               http://127.0.0.1:53000/healthz
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Install dependencies from lockfile
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        working-directory: frontend
+        run: pnpm typecheck
+
+      # next build 만 잡는 오류가 있다(라우트 핸들러 시그니처, output: "standalone"
+      # 산출물 등). 여기서 안 돌리면 FE-13 의 배포 시점까지 미검출로 남는다.
+      - name: Build
+        working-directory: frontend
+        run: pnpm build
+
+      - name: Install Playwright browser
+        working-directory: frontend
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run e2e against the running app
+        working-directory: frontend
+        env:
+          LAURIO_E2E_BASE_URL: http://127.0.0.1:53000
+        run: pnpm test
+
+      - name: Dump stack logs on failure
+        if: failure()
+        run: docker compose -f docker/compose.dev.yaml logs --tail 100
+
+      # playwright.config.ts 가 재시도 시 트레이스를 남긴다. 올리지 않으면 실패한
+      # CI 실행에서 그게 그대로 버려져 원인을 못 본다.
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 7

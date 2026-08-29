@@ -13,6 +13,16 @@
 **/.venv/
 **/venv/
 
+# 호스트 전용 node_modules — pnpm 은 절대경로 심볼릭 링크를 만든다. 이걸 이미지에
+# COPY 하면 컨테이너 안에서 링크가 호스트 경로(D:/...)를 가리켜 전부 깨진다.
+# 이미지는 자기 락파일로 직접 설치한다.
+**/node_modules/
+**/.next/
+**/.pnpm-store/
+**/test-results/
+**/playwright-report/
+**/blob-report/
+
 # Python 산출물
 **/__pycache__/
 **/*.py[cod]
