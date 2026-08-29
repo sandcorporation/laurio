@@ -54,12 +54,35 @@ export type SeededDeveloper = {
   sensitive_test_account: string;
 };
 
+// FE-11(#36) — 심사 비교 화면(Requirement 축 매트릭스 + Award) 테스트가 쓰는
+// 백엔드 값. `sponsor_login_seed`로 fake 로그인하면 이 Contest의 진짜 Sponsor로
+// 귀결된다(seed_e2e_contests.py의 _seed_judging_sponsor 참고) — "본인만 Award할
+// 수 있다"를 검증하려면 진짜 Sponsor로 로그인해야 하기 때문이다. `sensitive_*`
+// 넷은 developer-profile.spec.ts와 같은 원칙 — "부재"를 확인하는 용도이고, 이
+// 정확한 문자열이 심사 비교 화면의 HTML 응답 본문(SSR 페이로드·하이드레이션
+// 스크립트 포함) 어디에도 없어야 한다.
+export type SeededJudgingRequirement = SeededRequirement & { id: number };
+
+export type SeededJudgingContest = {
+  id: number;
+  title: string;
+  sponsor_login_seed: string;
+  judging_ends_at: string;
+  requirements: SeededJudgingRequirement[];
+  submissions: { id: number; developer_id: number; developer_display_name: string }[];
+  sensitive_source_object_key_a: string;
+  sensitive_source_object_key_b: string;
+  sensitive_test_account: string;
+  sensitive_score_model_version: string;
+};
+
 export type SeededContests = {
   funded: SeededContest;
   underfunded: SeededContest;
   closed: SeededContest;
   draft: SeededContest;
   developer: SeededDeveloper;
+  judging: SeededJudgingContest;
 };
 
 // dev compose 의 기본값(docker/compose.dev.yaml, config/settings.py)과 같다 —

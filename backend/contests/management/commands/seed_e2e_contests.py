@@ -26,14 +26,17 @@ from __future__ import annotations
 
 import json
 from datetime import timedelta
+from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from accounts.models import DeveloperProfile, SponsorProfile
+from accounts.models import DeveloperProfile, SocialAccount, SponsorProfile
+from awards.models import Award
 from contests.models import Category, Contest, DeliverableType, Requirement
-from submissions.models import Submission
+from scoring.models import Score
+from submissions.models import Evidence, RequirementResponse, Submission
 
 PREFIX = "[E2E] "
 
@@ -43,6 +46,27 @@ PREFIX = "[E2E] "
 # 확인하는 것이므로, 흔한 단어와 겹치지 않을 만큼 특이한 sentinel 이어야 한다).
 SENSITIVE_SOURCE_OBJECT_KEY = "submission:__e2e__:source/deadbeefdeadbeefdeadbeefdeadbeef"
 SENSITIVE_TEST_ACCOUNT = "e2e-secret-test-account:hunter2-should-never-leak"
+
+# FE-11(#36) 인수조건 — 심사 비교 화면(GET /contests/{id}/submissions/compare)의
+# HTML 응답 본문 전체(SSR 페이로드·하이드레이션 스크립트 포함)에 소스코드와 AI
+# 채점 점수(Score)가 어디에도 나오면 안 된다(ADR-0014, ADR-0006). 위
+# SENSITIVE_* 와 같은 원칙 — "존재를 확인"이 아니라 "부재를 확인"하는 sentinel
+# 이라 흔한 단어와 겹치지 않아야 한다. 두 Submission 에 서로 다른 소스 sentinel
+# 을 심어 "다른 제출작의 소스가 실수로 섞여 보이는" 사고도 같이 잡는다.
+JUDGING_SOURCE_SENTINEL_A = "submission:__e2e_judging_a__:source/f00dbabef00dbabef00dbabef00dbabe"
+JUDGING_SOURCE_SENTINEL_B = "submission:__e2e_judging_b__:source/c0ffeec0ffeec0ffeec0ffeec0ffeec0"
+JUDGING_TEST_ACCOUNT_SENTINEL = "e2e-judging-secret-test-account:hunter3-should-never-leak"
+# Score 는 실제로 DB 에 존재하게 심는다 — "화면이 그리지 않는다"가 아니라
+# "코드 경로 자체가 이 문자열을 어디서도 응답에 넣지 않는다"까지 증명하려면,
+# 안 그리는 값이 아예 없는 게 아니라 있는데도 안 새는지를 확인해야 한다.
+JUDGING_SCORE_MODEL_SENTINEL = "e2e-judging-score-model-should-never-leak-v1"
+
+# 심사 비교/Award 는 심사기간(judging_ends_at) 중 CLOSED Contest 를 전제한다 —
+# 정상 경로(마감 스케줄러 틱)를 타면 /api/internal/tick 이 필요한데, 그 경로는
+# BFF 프록시 허용목록에서 의도적으로 막혀 있다(디스패치 지침). 그래서 다른
+# 시드 Contest 들처럼 ORM 으로 CLOSED 상태를 직접 만든다 — #13 백엔드 테스트가
+# 이 전이 자체는 이미 검증했으므로 여기서 다시 검증할 필요가 없다.
+JUDGING_SPONSOR_LOGIN_SEED = "e2e-judging-sponsor"
 
 
 class Command(BaseCommand):
@@ -119,6 +143,96 @@ class Command(BaseCommand):
             requirements=[],
         )
 
+        # FE-11(#36) — 심사 비교 화면(Requirement 축 매트릭스 + Award)이 쓸 CLOSED
+        # Contest. 심사기간(judging_ends_at)이 아직 남아 있어야 Award 가 허용된다
+        # (awards.api.award_submission). Sponsor 는 fake 소셜 로그인으로 그대로
+        # 로그인할 수 있도록 SocialAccount 를 함께 심는다 — award.spec.ts 가
+        # "본인만 Award 할 수 있다"를 검증하려면 그 Contest 의 진짜 Sponsor 로
+        # 로그인해야 하기 때문이다(다른 Sponsor 로 시도하는 거부 테스트는 매번
+        # 새로 만드는 임의의 계정으로 충분하다).
+        judging_sponsor = self._seed_judging_sponsor()
+        judging = self._create_contest(
+            sponsor=judging_sponsor,
+            title=f"{PREFIX}심사 비교용 공모전",
+            category=category_productivity,
+            deliverable_types=[web_service],
+            description="Requirement 매트릭스 비교와 Award 테스트용 공모전입니다.",
+            prize=4_000_000,
+            deadline_at=now - timedelta(days=1),
+            status=Contest.Status.CLOSED,
+            requirements=[
+                ("필수 요구사항 — 로그인 기능", Requirement.Grade.REQUIRED),
+                ("선택 요구사항 — 다크모드", Requirement.Grade.OPTIONAL),
+            ],
+            judging_ends_at=now + timedelta(days=5),
+        )
+        judging_required_req, judging_optional_req = list(
+            judging.requirements.all().order_by("order", "id")
+        )
+
+        developer_a = self._seed_named_developer(
+            "e2e-judging-developer-a", f"{PREFIX}심사 개발자 A"
+        )
+        developer_b = self._seed_named_developer(
+            "e2e-judging-developer-b", f"{PREFIX}심사 개발자 B"
+        )
+
+        # Submission A — 필수 Requirement 에 Evidence 가 연결돼 있다(칸이
+        # "충족·증거 있음"으로 즉시 구분돼야 한다). Evidence 의 value 는
+        # source_location 이라도 소스 내 "위치 포인터"일 뿐 소스 내용 자체가
+        # 아니므로 노출해도 된다(submissions.schemas.EvidenceOut 이 이미 그렇게
+        # 설계돼 있다) — source_object_key(전체 소스) sentinel 과는 다른 것을
+        # 분명히 하려고 일부러 같은 테스트에서 둘 다 심는다.
+        submission_a = Submission.objects.create(
+            contest=judging,
+            developer=developer_a,
+            source_object_key=JUDGING_SOURCE_SENTINEL_A,
+            demo_url="https://example.invalid/e2e-judging-demo-a",
+            test_account=JUDGING_TEST_ACCOUNT_SENTINEL,
+        )
+        response_a_required = RequirementResponse.objects.create(
+            submission=submission_a,
+            requirement=judging_required_req,
+            is_met=True,
+            note=f"{PREFIX}로그인 폼과 세션 발급을 구현했습니다.",
+        )
+        Evidence.objects.create(
+            response=response_a_required,
+            kind=Evidence.Kind.SOURCE_LOCATION,
+            value="src/auth/login.ts",
+        )
+        RequirementResponse.objects.create(
+            submission=submission_a, requirement=judging_optional_req, is_met=False, note=""
+        )
+
+        # Submission B — 두 Requirement 모두 자가 응답 자체가 없다. "증거가 없는
+        # 칸이 즉시 구분된다"는 인수조건은 Evidence 만 비어있는 경우와, 응답
+        # 자체가 없는 경우를 둘 다 커버해야 한다.
+        submission_b = Submission.objects.create(
+            contest=judging,
+            developer=developer_b,
+            source_object_key=JUDGING_SOURCE_SENTINEL_B,
+        )
+
+        # AI Score 는 실제로 존재한다 — 심사 화면이 "코드 경로가 아예 없어서"가
+        # 아니라 "있는데도 안 새는지"를 증명하려면 DB 에 진짜 값이 있어야 한다
+        # (ADR-0006/0014, awards.api 의 award_submission 이 Score 를 아예 조회하지
+        # 않는 것과 같은 원칙 — submissions.api.compare_submissions 응답 스키마
+        # 어디에도 Score 필드가 없다).
+        Score.objects.create(
+            submission=submission_a,
+            percentage=Decimal("91.50"),
+            model_version=JUDGING_SCORE_MODEL_SENTINEL,
+            prompt=f"{PREFIX}fake prompt",
+            reasoning=[
+                {
+                    "requirement_id": judging_required_req.id,
+                    "is_met": True,
+                    "reasoning": f"{PREFIX}fake reasoning",
+                }
+            ],
+        )
+
         # FE-06(#31) — 개발자 공개 프로필(GET /api/developers/{id}/profile)이
         # 아카이브하는 것은 "마감된 Contest 의 Submission" 뿐이다(ADR-0014,
         # submissions.api.get_developer_public_profile). `closed` 는 이미 마감된
@@ -154,15 +268,37 @@ class Command(BaseCommand):
             "closed": self._serialize(closed),
             "draft": self._serialize(draft),
             "developer": self._serialize_developer(developer, closed_contest=closed),
+            "judging": self._serialize_judging(
+                judging,
+                requirements=[judging_required_req, judging_optional_req],
+                submission_a=submission_a,
+                submission_b=submission_b,
+                developer_a=developer_a,
+                developer_b=developer_b,
+            ),
         }
         self._write_stdout_utf8(json.dumps(payload, ensure_ascii=False) + "\n")
 
     def _cleanup(self) -> None:
+        # Award.submission 은 on_delete=PROTECT 다(awards/models.py) — Django의
+        # delete collector 는 "그 Award 자체도 이번 삭제로 함께 사라진다"는 걸
+        # 감안하지 않고 PROTECT 를 만나는 즉시 막는다. FE-11(#36) e2e 가 실제로
+        # POST /award 를 호출해 Award 행을 만들기 시작한 뒤로(judging-compare.spec.ts
+        # 의 "Sponsor 본인은 Award할 수 있다" 테스트), Contest 를 삭제하기 전에
+        # 그 Contest 에 걸린 Award 를 먼저 지워야 한다 — Handover.award 는 CASCADE
+        # 라 Award 를 지우면 함께 정리된다.
+        Award.objects.filter(contest__title__startswith=PREFIX).delete()
         Contest.objects.filter(title__startswith=PREFIX).delete()
         Category.objects.filter(name__startswith=PREFIX).delete()
         DeliverableType.objects.filter(name__startswith=PREFIX).delete()
         get_user_model().objects.filter(
-            username__in=["e2e-seed-sponsor", "e2e-seed-developer"]
+            username__in=[
+                "e2e-seed-sponsor",
+                "e2e-seed-developer",
+                "e2e-judging-sponsor",
+                "e2e-judging-developer-a",
+                "e2e-judging-developer-b",
+            ]
         ).delete()
 
     def _seed_sponsor(self) -> SponsorProfile:
@@ -173,17 +309,42 @@ class Command(BaseCommand):
         user.save(update_fields=["password"])
         return SponsorProfile.objects.create(user=user, display_name="E2E 시드 스폰서")
 
-    def _seed_developer(self) -> DeveloperProfile:
+    def _seed_judging_sponsor(self) -> SponsorProfile:
+        """FE-11(#36) 전용 Sponsor — fake 소셜 로그인으로 직접 로그인할 수 있도록
+        SocialAccount 를 함께 심는다(accounts.api.social_login 이 (provider,
+        provider_uid) 로만 사용자를 찾으므로, provider_uid 를 로그인 seed 문자열과
+        똑같이 맞추면 frontend/e2e 가 그 seed 로 로그인했을 때 바로 이 계정으로
+        귀결된다)."""
+
         user = get_user_model().objects.create_user(
-            username="e2e-seed-developer", email="e2e-seed-developer@example.invalid"
+            username=JUDGING_SPONSOR_LOGIN_SEED, email=f"{JUDGING_SPONSOR_LOGIN_SEED}@example.test"
         )
         user.set_unusable_password()
         user.save(update_fields=["password"])
-        return DeveloperProfile.objects.create(
+        SocialAccount.objects.create(
             user=user,
-            display_name=f"{PREFIX}개발자",
+            provider=SocialAccount.Provider.KAKAO,
+            provider_uid=JUDGING_SPONSOR_LOGIN_SEED,
+            email=f"{JUDGING_SPONSOR_LOGIN_SEED}@example.test",
+        )
+        return SponsorProfile.objects.create(user=user, display_name=f"{PREFIX}심사 스폰서")
+
+    def _seed_developer(self) -> DeveloperProfile:
+        return self._seed_named_developer(
+            "e2e-seed-developer",
+            f"{PREFIX}개발자",
             bio=f"{PREFIX}자기소개 — SSR 로 색인되어야 하는 공개 프로필입니다.",
         )
+
+    def _seed_named_developer(
+        self, username: str, display_name: str, *, bio: str = ""
+    ) -> DeveloperProfile:
+        user = get_user_model().objects.create_user(
+            username=username, email=f"{username}@example.invalid"
+        )
+        user.set_unusable_password()
+        user.save(update_fields=["password"])
+        return DeveloperProfile.objects.create(user=user, display_name=display_name, bio=bio)
 
     def _create_contest(
         self,
@@ -248,6 +409,50 @@ class Command(BaseCommand):
             # 문자열이 없어야 한다(frontend/e2e/developer-profile.spec.ts).
             "sensitive_source_object_key": SENSITIVE_SOURCE_OBJECT_KEY,
             "sensitive_test_account": SENSITIVE_TEST_ACCOUNT,
+        }
+
+    def _serialize_judging(
+        self,
+        contest: Contest,
+        *,
+        requirements: list[Requirement],
+        submission_a: Submission,
+        submission_b: Submission,
+        developer_a: DeveloperProfile,
+        developer_b: DeveloperProfile,
+    ) -> dict:
+        return {
+            "id": contest.id,
+            "title": contest.title,
+            # frontend/e2e 가 이 seed 로 fake 로그인하면 이 Contest 의 진짜
+            # Sponsor 로 귀결된다(_seed_judging_sponsor 참고) — "본인만 Award 할
+            # 수 있다"를 검증하려면 진짜 Sponsor 로 로그인해야 하기 때문이다.
+            "sponsor_login_seed": JUDGING_SPONSOR_LOGIN_SEED,
+            "judging_ends_at": (
+                contest.judging_ends_at.isoformat() if contest.judging_ends_at else None
+            ),
+            "requirements": [
+                {"id": r.id, "text": r.text, "grade": r.grade} for r in requirements
+            ],
+            "submissions": [
+                {
+                    "id": submission_a.id,
+                    "developer_id": developer_a.id,
+                    "developer_display_name": developer_a.display_name,
+                },
+                {
+                    "id": submission_b.id,
+                    "developer_id": developer_b.id,
+                    "developer_display_name": developer_b.display_name,
+                },
+            ],
+            # 아래 세 sentinel 은 "부재"를 확인하는 용도다 — 심사 비교 화면의
+            # HTML 응답 본문(SSR 페이로드·하이드레이션 스크립트 포함) 어디에도
+            # 있으면 안 된다(ADR-0006, ADR-0014, frontend/e2e/judging-compare.spec.ts).
+            "sensitive_source_object_key_a": JUDGING_SOURCE_SENTINEL_A,
+            "sensitive_source_object_key_b": JUDGING_SOURCE_SENTINEL_B,
+            "sensitive_test_account": JUDGING_TEST_ACCOUNT_SENTINEL,
+            "sensitive_score_model_version": JUDGING_SCORE_MODEL_SENTINEL,
         }
 
     def _write_stdout_utf8(self, payload: str) -> None:
