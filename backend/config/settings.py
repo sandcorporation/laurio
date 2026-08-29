@@ -235,6 +235,18 @@ STORAGE_BUCKET = _env("STORAGE_BUCKET", "laurio-dev")
 # 기본값은 호스트에서 직접 돌릴 때를 가정한다(LAURIO_MINIO_PORT). 컨테이너 안에서는
 # compose가 STORAGE_ENDPOINT_URL=http://minio:9000 을 직접 주입한다.
 STORAGE_ENDPOINT_URL = _env("STORAGE_ENDPOINT_URL", "http://127.0.0.1:19000")
+# presigned URL은 브라우저가 직접 여는 주소라 STORAGE_ENDPOINT_URL과 다를 수 있다
+# (FE-09, #34). dev compose는 backend 컨테이너 안에서 STORAGE_ENDPOINT_URL=
+# http://minio:9000(컨테이너 내부 DNS)을 쓰는데, 이 이름은 브라우저(호스트)가
+# 해석할 수 없다 — presign_upload/presign_download가 만드는 URL의 호스트가
+# 곧바로 브라우저 접속 실패로 이어지는 것을 직접 재현해 확인했다. 브라우저가
+# 실제로 열 수 있는 주소(호스트에 매핑된 포트)를 이 값으로 별도로 준다.
+# STORAGE_ENDPOINT_URL은 서버 프로세스 자신이 붙는 주소(read_object 등)로 계속
+# 쓴다 — presign은 네트워크를 타지 않는 순수 로컬 서명이라(storage/adapters/s3.py)
+# 두 값이 갈라져도 서버 쪽 동작에는 영향이 없다. staging/prod는 실제 S3/OCI
+# 엔드포인트 자체가 이미 공개 주소라 보통 값이 같으므로, 기본값은
+# STORAGE_ENDPOINT_URL을 그대로 물려받는다.
+STORAGE_PUBLIC_ENDPOINT_URL = _env("STORAGE_PUBLIC_ENDPOINT_URL", STORAGE_ENDPOINT_URL)
 # 비워두면 boto3 기본 자격증명 체인(IAM role·instance profile 등)을 그대로 쓴다.
 # dev(MinIO)는 정적 키가 필수라 compose·.env.example이 명시적으로 채워 넣는다.
 # 절대 기본값을 두지 않는다 — 기본값이 있으면 S3StorageAdapter가 항상 그것부터
