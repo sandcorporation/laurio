@@ -18,6 +18,18 @@ export type EvidenceOut = components["schemas"]["EvidenceOut"];
 export type EvidenceIn = components["schemas"]["EvidenceIn"];
 export type VerificationStatusOut = components["schemas"]["VerificationStatusOut"];
 
+// 심사 비교 화면(FE-11, #36)이 쓰는 타입. ContestComparisonOut(및 그 하위
+// 타입)은 백엔드 스키마 자체에 source_object_key·test_account·Score 필드가
+// 없다(submissions/schemas.py 상단 주석 참고) — "존재하지만 안 보임"이 아니라
+// 애초에 필드가 없으므로, 이 타입을 그대로 클라이언트 컴포넌트 props로 넘겨도
+// 하이드레이션 페이로드에 소스·점수가 실릴 수 없다.
+export type ContestComparisonOut = components["schemas"]["ContestComparisonOut"];
+export type RequirementComparisonOut = components["schemas"]["RequirementComparisonOut"];
+export type ComparisonEntryOut = components["schemas"]["ComparisonEntryOut"];
+export type ComparisonSubmissionOut = components["schemas"]["ComparisonSubmissionOut"];
+export type AwardIn = components["schemas"]["AwardIn"];
+export type AwardOut = components["schemas"]["AwardOut"];
+
 export const EVIDENCE_KINDS: { value: EvidenceIn["kind"]; label: string }[] = [
   { value: "video_timestamp", label: "영상 타임스탬프" },
   { value: "screenshot", label: "스크린샷" },
