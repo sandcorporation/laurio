@@ -41,3 +41,6 @@ design/*.html
 # .claude/ 전체가 아니라 worktrees 만 무시한다 — 나중에 .claude/settings.json 같은
 # 프로젝트 설정을 커밋해야 할 때 조용히 누락되지 않도록.
 .claude/worktrees/
+
+# playwright MCP 도구가 남기는 산출물
+/.playwright-mcp/

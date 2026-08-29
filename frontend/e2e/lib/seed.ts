@@ -104,6 +104,27 @@ export function seedE2eContests(): SeededContests {
   // 그래도 `uv run` 이 최초 실행 시 남기는 진행 로그(가상환경 생성 등)가 stdout
   // 앞에 섞일 수 있어, 마지막 줄만 파싱한다.
   const lines = output.trim().split("\n");
-  const lastLine = lines[lines.length - 1];
-  return JSON.parse(lastLine) as SeededContests;
+  const lastLine = lines[lines.length - 1] ?? "";
+
+  // 조용히 실패하지 않게 막는다. 시드 명령이 깨지면 반환값이 뭔가 이상해지고,
+  // 그 상태로 스펙이 계속 돌면 진짜 이유(시드가 죽었다)가 아니라 증상(모르는
+  // id 로 404)만 보여 진단이 멀어진다 — 실제로 Category 삭제가 ProtectedError
+  // 로 죽었을 때 그렇게 헤맸다.
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(lastLine);
+  } catch {
+    throw new Error(
+      "seed_e2e_contests 가 JSON 을 내지 않았다 — 명령이 죽었을 가능성이 크다" +
+        ` (stderr 는 위에 그대로 찍힌다). 마지막 줄: ${JSON.stringify(lastLine.slice(0, 300))}`,
+    );
+  }
+
+  const seeded = parsed as SeededContests;
+  if (!seeded?.funded?.id || !seeded?.judging?.id || !seeded?.developer?.id) {
+    throw new Error(
+      `seed_e2e_contests 의 출력에 기대한 키가 없다: ${JSON.stringify(Object.keys(seeded ?? {}))}`,
+    );
+  }
+  return seeded;
 }

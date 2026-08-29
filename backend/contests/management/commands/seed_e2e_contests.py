@@ -76,13 +76,16 @@ class Command(BaseCommand):
         self._cleanup()
 
         sponsor = self._seed_sponsor()
-        category_lifestyle = Category.objects.create(name=f"{PREFIX}라이프스타일")
-        category_productivity = Category.objects.create(name=f"{PREFIX}생산성")
-        web_service = DeliverableType.objects.create(
-            name=f"{PREFIX}웹 서비스", minimum_prize=2_000_000
+        # 삭제하고 다시 만들지 않고 **제자리에서 맞춤다**(_cleanup 주석 참고). 기준데이터라
+        # 이름이 고정이고, 유지해두면 다른 스펙이 런타임에 만든 Contest 가 이것들을
+        # 참조하고 있어도 시드가 깨지지 않는다.
+        category_lifestyle, _ = Category.objects.get_or_create(name=f"{PREFIX}라이프스타일")
+        category_productivity, _ = Category.objects.get_or_create(name=f"{PREFIX}생산성")
+        web_service, _ = DeliverableType.objects.update_or_create(
+            name=f"{PREFIX}웹 서비스", defaults={"minimum_prize": 2_000_000}
         )
-        mobile_app = DeliverableType.objects.create(
-            name=f"{PREFIX}모바일 앱", minimum_prize=1_500_000
+        mobile_app, _ = DeliverableType.objects.update_or_create(
+            name=f"{PREFIX}모바일 앱", defaults={"minimum_prize": 1_500_000}
         )
 
         now = timezone.now()
@@ -289,8 +292,19 @@ class Command(BaseCommand):
         # 라 Award 를 지우면 함께 정리된다.
         Award.objects.filter(contest__title__startswith=PREFIX).delete()
         Contest.objects.filter(title__startswith=PREFIX).delete()
-        Category.objects.filter(name__startswith=PREFIX).delete()
-        DeliverableType.objects.filter(name__startswith=PREFIX).delete()
+        # Category 와 DeliverableType 은 **지우지 않는다** — 지우려고 했다가 이
+        # 명령이 통째로 죽었다. Contest.category 는 on_delete=PROTECT 인데,
+        # submit/upload/grill 스펙은 자기 Contest 를 **런타임에** 만들면서 이
+        # "[E2E]" 기준데이터를 재사용한다. 그 Contest 들은 제목에 접두어가
+        # 없어 위의 Contest 삭제에 걸리지 않으므로, 다음 시드 실행이
+        # Category 를 지우려는 순간 ProtectedError 로 명령 전체가 죽는다 —
+        # 그러면 JSON 이 안 나오고 e2e 가 엉뚱한 id 로 404 를 맞는다.
+        # 실제로 같은 DB 에 스위트를 두 번째 돌릴 때부터 깨졌다(1회차 초록,
+        # 2회차 7개 실패, 3회차 10개 실패 — 런타임 Contest 가 쌓일수록 악화).
+        #
+        # 기준데이터는 이름이 고정이라 삭제할 이유가 애초에 없다 — 위에서
+        # get_or_create/update_or_create 로 제자리에서 맞춘다. 멱등성은 그대로고,
+        # "접두어 없는 실데이터는 절대 건드리지 않는다"는 약속도 그대로 지킨다.
         get_user_model().objects.filter(
             username__in=[
                 "e2e-seed-sponsor",
