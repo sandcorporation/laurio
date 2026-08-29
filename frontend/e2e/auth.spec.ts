@@ -72,6 +72,31 @@ test.describe("Origin 검증 — CSRF 방어의 성립 조건 (ADR-0016)", () =>
   });
 });
 
+test.describe("쿠키 Secure — 배포 여부에 따라 갈린다 (ADR-0016, FE-13 #38)", () => {
+  // lib/auth/cookies.ts의 isDeployedEnvironment()는 LAURIO_DEPLOYMENT_TARGET이
+  // "staging"|"production"일 때만 Secure를 켠다. 이 dev 스택(compose.dev.yaml)은
+  // 그 값을 절대 설정하지 않으므로 — 컨테이너 간 http로만 통신하고 Secure를 걸면
+  // 쿠키가 아예 안 실린다 — 여기서는 항상 꺼져 있어야 한다.
+  //
+  // "production에서는 켜진다"는 반대쪽 절반은 이 e2e 시임으로 증명할 수 없다 —
+  // 이 스택 자체가 production 설정으로 뜨지 않기 때문이다. 그건
+  // .github/workflows/ci.yaml의 frontend-deploy-guard 잡이 실제 프로덕션
+  // 이미지를 프로덕션 환경변수로 띄워 별도로 증명한다. 이 테스트는 그 짝 —
+  // "dev에서는 꺼져 있다"만 이 시임 안에서 확인한다.
+  test("dev(LAURIO_DEPLOYMENT_TARGET 미설정)에서는 Secure가 붙지 않는다", async ({
+    request,
+    baseURL,
+  }) => {
+    const res = await request.post("/api/auth/logout", {
+      headers: { origin: baseURL! },
+    });
+    expect(res.status()).toBe(200);
+    const setCookie = (res.headers()["set-cookie"] ?? "").toLowerCase();
+    expect(setCookie).toContain("laurio_access");
+    expect(setCookie).not.toContain("secure");
+  });
+});
+
 test.describe("소셜 로그인 → 세션 쿠키 → 보호된 화면", () => {
   test("카카오·GitHub·구글 각각 fake 어댑터로 로그인이 끝까지 된다", async ({
     request,

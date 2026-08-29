@@ -277,3 +277,129 @@ jobs:
             frontend/playwright-report/
             frontend/test-results/
           retention-days: 7
+
+  # 프론트 배포 부팅 가드 (FE-13, #38).
+  #
+  # ADR-0017은 이 프로젝트의 프론트 테스트 시임을 "실행 중인 Next 앱 하나"로
+  # 못박는다. 이 잡이 증명해야 하는 대상은 정반대다 — **앱이 뜨지 않는 것**이
+  # 관찰 대상이라, 실행 중인 앱을 치는 시임으로는 원천적으로 닿지 않는다.
+  # backend/tests/test_deployment_config.py가 같은 이유로 override_settings를
+  # 못 쓰고 subprocess로 `manage.py check`를 직접 실행하는 것과 동일한 예외
+  # 사유다. 그래서 여기서는 frontend.Dockerfile의 runner 스테이지(staging/prod가
+  # 실제로 배포하는 그 이미지)를 직접 빌드해 컨테이너로 띄우고, 프로세스
+  # 종료 코드와 로그를 확인한다.
+  #
+  # 이 형태를 고른 또 다른 이유: 처음에는 instrumentation.ts의 register()가
+  # 단순히 `throw`만 하면 될 줄 알았는데, standalone 산출물(`node server.js`)로
+  # 실제 재현해보니 Next가 그 에러를 "unhandledRejection"으로 로그만 찍고
+  # 삼켜 HTTP 서버가 계속 듣고 있었다 — 컨테이너는 Up 상태로 남고 모든 요청에
+  # 이유 없는 500만 내려줬다. "시끄럽게 실패한다"는 인수조건을 문자 그대로
+  # 어기는 조용한 실패였다. 실행 중인 프로세스를 직접 관찰하지 않았다면 이
+  # 회귀를 놓쳤을 것이다 — instrumentation.ts가 이제 `process.exit(1)`로
+  # 직접 끊는 이유이자, 이 잡이 "빌드가 성공했다"가 아니라 "컨테이너가 실제로
+  # 죽는다"를 확인하는 이유다.
+  frontend-deploy-guard:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the production frontend image (runner stage)
+        run: docker build -f docker/frontend.Dockerfile --target runner -t laurio-frontend-runner-ci .
+
+      # 이 레포가 이미 두 번 겪은 사고(CLAUDE.md 「이미 데인 곳」) — .dockerignore
+      # 패턴이 파일에 적혀 있다는 것만으로는 증명이 아니다. 가짜 시크릿을 실제로
+      # 심어서 이미지에 안 들어가는지 직접 확인한다.
+      - name: .dockerignore actually keeps secrets and host node_modules out of the image
+        run: |
+          set -euo pipefail
+          echo "OPENAI_API_KEY=sk-ci-guard-fake-secret-do-not-leak" > frontend/.env
+          docker build -f docker/frontend.Dockerfile --target builder -t laurio-frontend-builder-ci-guard .
+          docker run --rm --entrypoint sh laurio-frontend-builder-ci-guard -c '
+            set -e
+            if [ -f /app/.env ]; then
+              echo "FOUND /app/.env — .dockerignore가 시크릿을 막지 못했다" >&2
+              exit 1
+            fi
+            if grep -rl "sk-ci-guard-fake-secret" /app > /dev/null 2>&1; then
+              echo "가짜 시크릿 문자열이 이미지 어딘가에 들어갔다" >&2
+              exit 1
+            fi
+            echo "confirmed: .env excluded from the image"
+          '
+          rm -f frontend/.env
+          docker rmi laurio-frontend-builder-ci-guard
+
+      - name: Refuses to boot in production with missing config (and actually exits — not just logs)
+        run: |
+          set +e
+          output=$(timeout 20 docker run --rm -e LAURIO_DEPLOYMENT_TARGET=production laurio-frontend-runner-ci 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
+            echo "::error::LAURIO_WEB_ORIGIN/LAURIO_API_BASE_URL 없이도 컨테이너가 죽지 않았다(status=$status) — 부팅 가드가 깨졌다"
+            exit 1
+          fi
+          echo "$output" | grep -q "LAURIO_WEB_ORIGIN" || { echo "::error::에러 메시지에 원인(LAURIO_WEB_ORIGIN)이 안 남는다"; exit 1; }
+          echo "$output" | grep -q "LAURIO_API_BASE_URL" || { echo "::error::에러 메시지에 원인(LAURIO_API_BASE_URL)이 안 남는다"; exit 1; }
+
+      - name: Refuses to boot in staging with only one required value missing
+        run: |
+          set +e
+          output=$(timeout 20 docker run --rm \
+            -e LAURIO_DEPLOYMENT_TARGET=staging \
+            -e LAURIO_WEB_ORIGIN=https://staging.laurio.example \
+            laurio-frontend-runner-ci 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
+            echo "::error::LAURIO_API_BASE_URL 없이도 staging 컨테이너가 죽지 않았다(status=$status)"
+            exit 1
+          fi
+          echo "$output" | grep -q "LAURIO_API_BASE_URL" || { echo "::error::에러 메시지에 원인이 안 남는다"; exit 1; }
+
+      - name: Boots with a complete production config and forces Secure cookies
+        run: |
+          set -euo pipefail
+          docker run -d --name frontend-boot-ok \
+            -e LAURIO_DEPLOYMENT_TARGET=production \
+            -e LAURIO_WEB_ORIGIN=https://laurio.example \
+            -e LAURIO_API_BASE_URL=http://127.0.0.1:1 \
+            -p 3100:3000 \
+            laurio-frontend-runner-ci
+
+          # 백엔드가 없어 /healthz 는 503(degraded)이 정상이다 — 여기서 보는 건
+          # "완전한 설정에서는 프론트가 죽지 않고 응답한다"는 것뿐이다. 연결
+          # 자체가 안 되면(000) 컨테이너가 여전히 안 뜬 것이다.
+          status="000"
+          for _ in $(seq 1 20); do
+            status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3100/healthz || echo "000")
+            [ "$status" = "000" ] || break
+            sleep 1
+          done
+          echo "healthz status: $status"
+          if [ "$status" != "200" ] && [ "$status" != "503" ]; then
+            echo "::error::완전한 프로덕션 설정인데도 컨테이너가 응답하지 않는다(status=$status)"
+            docker logs frontend-boot-ok
+            exit 1
+          fi
+
+          # ADR-0016 성립 조건 — production에서 쿠키의 Secure가 실제로 켜지는지.
+          # frontend/app/api/auth/logout/route.ts는 access 쿠키가 없으면 백엔드를
+          # 부르지 않고 곧바로 clearSessionCookies를 실어 응답한다 — 그래서 백엔드
+          # 없이도 이 경로 하나로 쿠키 속성을 직접 관찰할 수 있다.
+          set_cookie=$(curl -s -D - -o /dev/null -X POST http://127.0.0.1:3100/api/auth/logout \
+            -H "Origin: https://laurio.example")
+          echo "$set_cookie"
+          echo "$set_cookie" | grep -qi "laurio_access=.*Secure" \
+            || { echo "::error::production인데 laurio_access 쿠키에 Secure가 없다"; exit 1; }
+          echo "$set_cookie" | grep -qi "laurio_refresh=.*Secure" \
+            || { echo "::error::production인데 laurio_refresh 쿠키에 Secure가 없다"; exit 1; }
+
+          docker rm -f frontend-boot-ok
+
+      - name: Dump container state on failure
+        if: failure()
+        run: docker ps -a

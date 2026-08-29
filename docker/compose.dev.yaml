@@ -117,6 +117,11 @@ services:
     build:
       context: ..
       dockerfile: docker/frontend.Dockerfile
+      # frontend.Dockerfile이 FE-13(#38)부터 dev/builder/runner 세 스테이지로
+      # 갈린다 — target을 명시하지 않으면 파일의 마지막 스테이지(runner, 프로덕션용)
+      # 가 골라져 소스 바인드 마운트·`next dev`가 아니라 얼어붙은 standalone 산출물이
+      # 뜬다. dev는 항상 dev 스테이지를 명시적으로 고른다.
+      target: dev
     depends_on:
       backend:
         condition: service_started

@@ -191,6 +191,36 @@ services:
     # "스캔 주기만큼 늦어지는 건 무해하다"고 규정했으므로 영속 볼륨이 굳이 필요 없다.
     command: celery -A config beat --loglevel info
 
+  # 프론트엔드 BFF(ADR-0016, FE-13 #38). frontend.Dockerfile의 runner 스테이지 —
+  # 소스 바인드 마운트도 `next dev`도 없다, standalone 산출물을 `node server.js`로
+  # 그대로 돈다. instrumentation.ts가 LAURIO_DEPLOYMENT_TARGET=staging에서
+  # LAURIO_WEB_ORIGIN·LAURIO_API_BASE_URL이 비어 있으면 이 컨테이너를 그 자리에서
+  # 죽인다 — restart: unless-stopped라도 값이 안 채워지면 재시작을 반복할 뿐 절대
+  # 뜨지 않는다(의도된 동작).
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/frontend.Dockerfile
+      target: runner
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+    environment:
+      LAURIO_DEPLOYMENT_TARGET: staging
+      # 컨테이너 안에서는 compose 네트워크 이름으로 backend에 붙는다(compose.dev.yaml
+      # 과 같은 패턴) — 이 값이 비면 lib/api/client.ts 등이 127.0.0.1로 조용히
+      # 폴백하는 것을 instrumentation.ts가 부팅 시점에 막는다.
+      LAURIO_API_BASE_URL: http://backend:8000
+      # frontend/lib/auth/origin.ts의 CSRF Origin 검증이 쓰는 값 — 비어 있으면
+      # instrumentation.ts가 부팅을 거부한다. .env.staging에서 반드시 채운다.
+      LAURIO_WEB_ORIGIN: ${LAURIO_WEB_ORIGIN:?staging LAURIO_WEB_ORIGIN 를 .env.staging 에 설정하라}
+    ports:
+      # staging은 검증용 서브 호스트에 직접 노출한다(운영자·QA가 브라우저로 바로
+      # 들어간다) — backend의 INTERNAL_API_PORT 노출과 같은 이유다. prod처럼
+      # 127.0.0.1로 좁히지 않는다.
+      - "${LAURIO_WEB_PORT:-3000}:3000"
+
 volumes:
   laurio-staging-db:
   laurio-staging-redis:
