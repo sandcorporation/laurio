@@ -125,10 +125,18 @@ services:
       # 소스를 마운트해 수정이 즉시 반영되게 한다. node_modules 는 이미지 것을 쓰도록
       # 익명 볼륨으로 가린다 — 호스트(Windows)와 이미지(리눅스)의 바이너리가 다르다.
       - ../frontend:/app
-      # 이름 있는 볼륨이다 — 익명이면 컨테이너를 다시 만들 때 옛 것이 승계되어,
-      # 의존성을 추가하고 --build 해도 낡은 node_modules 가 남는다. 복구하려면
-      # down -v 로 dev DB·MinIO 까지 날려야 한다. 이름이 있으면 이것만 지우면 된다:
-      #   docker volume rm laurio-dev_laurio-dev-web-node-modules
+      # 둘 다 이름 있는 볼륨이다 — 익명이면 컨테이너를 다시 만들 때 옛 것이
+      # 승계되는데, 이름이 없으면 그것만 골라 지울 수가 없어 down -v(= dev DB·MinIO
+      # 소실)까지 가야 한다. 이름이 있으면 하나만 버리고 나머지는 지킬 수 있다:
+      #
+      #   docker compose -f docker/compose.dev.yaml rm -sf frontend
+      #   docker volume rm laurio-dev_laurio-dev-web-next
+      #   docker compose -f docker/compose.dev.yaml up -d frontend
+      #
+      # **이 컨테이너 안에서 `pnpm build` 를 돌리지 말 것.** 프로덕션 산출물이
+      # .next 볼륨에 남아 next dev 가 그 위에서 돌다 MODULE_NOT_FOUND 로 500 을
+      # 낸다(실제로 겪었다). 프로덕션 빌드 확인은 CI 가 하고, 로컬에서 필요하면
+      # 일회용 컨테이너에서 돌린다.
       - laurio-dev-web-node-modules:/app/node_modules
       - laurio-dev-web-next:/app/.next
 
