@@ -8,3 +8,6 @@ next-env.d.ts
 /playwright-report/
 /blob-report/
 /.playwright/
+
+# pnpm 로컬 스토어(호스트에서 pnpm install/add 를 직접 돌리면 여기 생긴다).
+/.pnpm-store/
