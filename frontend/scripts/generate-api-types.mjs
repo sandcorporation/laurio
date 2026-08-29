@@ -15,14 +15,19 @@
 //      뽑아 임시 파일에 쓴다(레포에는 커밋하지 않는다 — 커밋되는 유일한 산출물은
 //      아래 2번의 타입 파일이다. 원본 JSON까지 커밋하면 같은 사실을 두 파일이
 //      따로 갖게 되어 최신성 검사가 무엇을 기준으로 삼아야 하는지 애매해진다).
-//   2. `openapi-typescript` 로 그 스키마를 `lib/api/schema.gen.ts` 로 변환한다.
+//   2. `openapi-typescript` 로 그 스키마를 `lib/api/schema.gen.ts` 로 직접
+//      써낸다(`-o`) — Node 프로세스의 stdout으로 전체 산출물을 실어 보내지
+//      않는다. 코디네이터 리뷰 지적: 예전엔 stdout으로 받아 우리가 다시
+//      파일에 썼는데, `execFileSync` 의 기본 `maxBuffer` (1MiB)가 스키마가
+//      자라면서 언젠가 `ENOBUFS` 로 터진다 — 오늘은 128KB라 안 걸렸을 뿐이다.
+//      CLI가 파일로 직접 쓰게 하면 그 상한 자체가 없어진다.
 //
 // CI(`frontend-openapi-types` 잡)는 이 스크립트를 그대로 돌린 뒤
 // `git diff --exit-code` 로 커밋된 산출물과 다르면 실패시킨다 — 재생성했을 때
 // diff 가 나면 실패한다는 티켓의 요구사항 그대로다.
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,7 +39,10 @@ const outputFile = path.resolve(frontendRoot, "lib", "api", "schema.gen.ts");
 
 function run(command, args, options) {
   console.log(`$ ${command} ${args.join(" ")}`);
-  return execFileSync(command, args, { stdio: ["ignore", "pipe", "inherit"], ...options });
+  // 세 단계 모두 결과물을 파일로 직접 쓰게 하므로(1단계 --output, 2단계 -o),
+  // stdout을 캡처할 이유가 없다 — 그대로 콘솔에 흘려보낸다. 각 도구의 진행
+  // 로그(uv/openapi-typescript)가 여기 그대로 찍힌다.
+  execFileSync(command, args, { stdio: "inherit", ...options });
 }
 
 const tmpDir = mkdtempSync(path.join(tmpdir(), "laurio-openapi-"));
@@ -48,7 +56,7 @@ try {
 
   console.log("2/2 스키마에서 TypeScript 타입을 생성한다");
   const cliPath = path.resolve(frontendRoot, "node_modules", "openapi-typescript", "bin", "cli.js");
-  const generated = run("node", [cliPath, schemaJsonPath]);
+  run("node", [cliPath, schemaJsonPath, "-o", outputFile]);
 
   const header = [
     "// 이 파일은 생성됩니다 — 손으로 고치지 마세요.",
@@ -57,7 +65,8 @@ try {
     "",
   ].join("\n");
 
-  writeFileSync(outputFile, header + generated.toString("utf-8"));
+  const generated = readFileSync(outputFile, "utf-8");
+  writeFileSync(outputFile, header + generated);
   console.log(`written: ${path.relative(frontendRoot, outputFile)}`);
 } finally {
   rmSync(tmpDir, { recursive: true, force: true });
