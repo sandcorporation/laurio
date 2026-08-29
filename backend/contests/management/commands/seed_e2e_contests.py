@@ -31,10 +31,18 @@ from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from accounts.models import SponsorProfile
+from accounts.models import DeveloperProfile, SponsorProfile
 from contests.models import Category, Contest, DeliverableType, Requirement
+from submissions.models import Submission
 
 PREFIX = "[E2E] "
+
+# FE-06(#31) 인수조건 — 소스코드와 test_account 는 developer 공개 프로필 HTML
+# 어디에도 나오면 안 된다. 두 값을 여기 심어두고 frontend/e2e 스펙이 이 정확한
+# 문자열이 응답 본문에 "없다"는 걸 단언한다(있는지를 확인하는 게 아니라 없는지를
+# 확인하는 것이므로, 흔한 단어와 겹치지 않을 만큼 특이한 sentinel 이어야 한다).
+SENSITIVE_SOURCE_OBJECT_KEY = "submission:__e2e__:source/deadbeefdeadbeefdeadbeefdeadbeef"
+SENSITIVE_TEST_ACCOUNT = "e2e-secret-test-account:hunter2-should-never-leak"
 
 
 class Command(BaseCommand):
@@ -111,11 +119,41 @@ class Command(BaseCommand):
             requirements=[],
         )
 
+        # FE-06(#31) — 개발자 공개 프로필(GET /api/developers/{id}/profile)이
+        # 아카이브하는 것은 "마감된 Contest 의 Submission" 뿐이다(ADR-0014,
+        # submissions.api.get_developer_public_profile). `closed` 는 이미 마감된
+        # Contest 이므로 여기 낸 Submission 이 프로필에 나타나야 하고, `funded` 는
+        # 아직 진행 중이므로 같은 개발자가 냈어도 프로필에 나타나면 안 된다 — 두
+        # 상태를 한 번에 검증할 수 있게 일부러 같은 developer 로 둘 다 심는다.
+        #
+        # source_object_key·test_account 는 SENSITIVE_* sentinel 을 그대로 심는다 —
+        # DeveloperPublicProfileOut/PublicSubmissionOut 스키마 자체에 이 필드가
+        # 없어(backend/submissions/schemas.py) 백엔드는 이미 안전하지만, frontend
+        # 가 API 응답 객체를 통째로 넘기는 실수를 하면 이 값이 SSR HTML 에 그대로
+        # 샐 수 있다 — 그 실수를 잡는 게 이 sentinel 의 목적이다.
+        developer = self._seed_developer()
+        Submission.objects.create(
+            contest=closed,
+            developer=developer,
+            source_object_key=SENSITIVE_SOURCE_OBJECT_KEY,
+            demo_video_object_key=f"{PREFIX}demo-video/deadbeefdeadbeefdeadbeefdeadbeef",
+            demo_url="https://example.invalid/e2e-archived-demo",
+            test_account=SENSITIVE_TEST_ACCOUNT,
+        )
+        # 아직 마감되지 않은 Contest 에 낸 Submission — 프로필에 나타나면 안 된다.
+        Submission.objects.create(
+            contest=funded,
+            developer=developer,
+            source_object_key=SENSITIVE_SOURCE_OBJECT_KEY.replace("deadbeef", "cafebabe", 1),
+            test_account=SENSITIVE_TEST_ACCOUNT,
+        )
+
         payload = {
             "funded": self._serialize(funded),
             "underfunded": self._serialize(underfunded),
             "closed": self._serialize(closed),
             "draft": self._serialize(draft),
+            "developer": self._serialize_developer(developer, closed_contest=closed),
         }
         self._write_stdout_utf8(json.dumps(payload, ensure_ascii=False) + "\n")
 
@@ -123,7 +161,9 @@ class Command(BaseCommand):
         Contest.objects.filter(title__startswith=PREFIX).delete()
         Category.objects.filter(name__startswith=PREFIX).delete()
         DeliverableType.objects.filter(name__startswith=PREFIX).delete()
-        get_user_model().objects.filter(username="e2e-seed-sponsor").delete()
+        get_user_model().objects.filter(
+            username__in=["e2e-seed-sponsor", "e2e-seed-developer"]
+        ).delete()
 
     def _seed_sponsor(self) -> SponsorProfile:
         user = get_user_model().objects.create_user(
@@ -132,6 +172,18 @@ class Command(BaseCommand):
         user.set_unusable_password()
         user.save(update_fields=["password"])
         return SponsorProfile.objects.create(user=user, display_name="E2E 시드 스폰서")
+
+    def _seed_developer(self) -> DeveloperProfile:
+        user = get_user_model().objects.create_user(
+            username="e2e-seed-developer", email="e2e-seed-developer@example.invalid"
+        )
+        user.set_unusable_password()
+        user.save(update_fields=["password"])
+        return DeveloperProfile.objects.create(
+            user=user,
+            display_name=f"{PREFIX}개발자",
+            bio=f"{PREFIX}자기소개 — SSR 로 색인되어야 하는 공개 프로필입니다.",
+        )
 
     def _create_contest(
         self,
@@ -180,6 +232,22 @@ class Command(BaseCommand):
                 {"text": r.text, "grade": r.grade}
                 for r in contest.requirements.all().order_by("order", "id")
             ],
+        }
+
+    def _serialize_developer(self, developer: DeveloperProfile, *, closed_contest: Contest) -> dict:
+        return {
+            "id": developer.id,
+            "display_name": developer.display_name,
+            "bio": developer.bio,
+            "archived_submission": {
+                "contest_id": closed_contest.id,
+                "contest_title": closed_contest.title,
+                "demo_url": "https://example.invalid/e2e-archived-demo",
+            },
+            # 단언 대상은 값의 "존재"가 아니라 "부재"다 — HTML 본문 전체에 이
+            # 문자열이 없어야 한다(frontend/e2e/developer-profile.spec.ts).
+            "sensitive_source_object_key": SENSITIVE_SOURCE_OBJECT_KEY,
+            "sensitive_test_account": SENSITIVE_TEST_ACCOUNT,
         }
 
     def _write_stdout_utf8(self, payload: str) -> None:

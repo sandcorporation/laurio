@@ -36,11 +36,30 @@ export type SeededContest = {
   requirements: SeededRequirement[];
 };
 
+// FE-06(#31) — 개발자 공개 프로필 SSR 테스트가 검증할 백엔드 값. 마감된
+// `closed` Contest 에 낸 Submission 하나를 아카이브 항목으로 심는다
+// (seed_e2e_contests.py 참고). `sensitive_*` 두 필드는 "존재"가 아니라
+// "부재"를 확인하는 용도다 — 이 정확한 문자열이 프로필 페이지의 HTML 응답
+// 본문 전체(SSR 페이로드·하이드레이션 스크립트 포함) 어디에도 없어야 한다.
+export type SeededDeveloper = {
+  id: number;
+  display_name: string;
+  bio: string;
+  archived_submission: {
+    contest_id: number;
+    contest_title: string;
+    demo_url: string;
+  };
+  sensitive_source_object_key: string;
+  sensitive_test_account: string;
+};
+
 export type SeededContests = {
   funded: SeededContest;
   underfunded: SeededContest;
   closed: SeededContest;
   draft: SeededContest;
+  developer: SeededDeveloper;
 };
 
 // dev compose 의 기본값(docker/compose.dev.yaml, config/settings.py)과 같다 —
