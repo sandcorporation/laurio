@@ -11,6 +11,7 @@
 // 아니다). 링크 클릭은 여전히 전부 진짜 내비게이션이라 "서버가 렌더링한다"는
 // 인수조건은 그대로다.
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import {
   CONTESTS_PAGE_SIZE,
@@ -94,6 +95,16 @@ export default async function ContestsPage({
     fetchContestCategories(),
     fetchDeliverableTypes(),
   ]);
+
+  // 범위를 벗어난 page 는 마지막 페이지로 정정한다. 그냥 두면 「전체 30」이라고
+  // 써놓고 바로 아래에 "조건에 맞는 공모전이 없습니다" 가 뜬다 — 있는데 없다고
+  // 말하는 화면이고, 범위 표시도 `19999961 – 30 / 30` 처럼 깨진다(직접 확인했다).
+  // URL 까지 정정하려고 redirect 를 쓴다 — 그래야 공유된 링크가 다음에도 같은
+  // 화면을 연다. 정정된 page 는 항상 totalPages 이하라 이 분기가 다시 걸리지
+  // 않는다(재귀 없음).
+  if (current.page > page.totalPages) {
+    redirect(buildHref(current, { page: page.totalPages }));
+  }
 
   return (
     <main className="flex min-h-screen flex-col gap-8 bg-paper p-10 text-ink">

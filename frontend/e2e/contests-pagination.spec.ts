@@ -29,12 +29,29 @@ function bulkUrl(extra: Record<string, string | number> = {}): string {
   return `/contests?${params.toString()}`;
 }
 
-// `locator.evaluateAll` 은 쓰지 않는다 — `javaScriptEnabled: false` 로 링크를 눌러
-// 문서를 새로 받고 나면 첫 문서에서만 값을 돌려주고 그 뒤로는 빈 배열이 온다(직접
-// 확인했다: 6페이지를 다 돌았는데 수집된 건 첫 20건뿐이었다). 그러면 "누락이
-// 없다"를 검증하려던 테스트가 오히려 조용히 아무것도 검증하지 않게 된다.
-// `all()` + `getAttribute` 는 문서를 새로 받아도 매번 정확히 센다.
-async function rowIdsOnPage(page: import("@playwright/test").Page): Promise<string[]> {
+type Page = import("@playwright/test").Page;
+
+/** 목록이 실제로 그려질 때까지 기다린다. 새 문서를 받는 모든 지점에서 먼저 부른다. */
+async function waitForList(page: Page): Promise<void> {
+  await page.getByTestId("contest-count").waitFor();
+}
+
+/** 「다음」을 눌러 다음 페이지 문서를 받고, 그려질 때까지 기다린다. */
+async function goToNextPage(page: Page): Promise<void> {
+  await page.getByTestId("page-next").click();
+  await waitForList(page);
+}
+
+// **열거 전에 반드시 기다린다.** `locator.all()` 과 `count()` 는 자동 대기를 하지
+// 않는 API 라(Playwright 문서), 링크를 눌러 문서가 교체되는 중에 부르면 0건을
+// 돌려준다. 그러면 6페이지를 다 돌고도 수집된 건 첫 20건뿐인 채로 "누락이 없다"를
+// 검증하려던 테스트가 오히려 조용히 아무것도 검증하지 않게 된다 — 실제로 이
+// 스위트에서 간헐적으로 그렇게 깨졌다(3회 중 1회).
+//
+// `evaluateAll` 도 쓰지 않는다 — `javaScriptEnabled: false` 에서 문서를 새로 받고
+// 나면 빈 배열이 온다(직접 확인했다).
+async function rowIdsOnPage(page: Page): Promise<string[]> {
+  await waitForList(page);
   const rows = await page.locator("[data-contest-row]").all();
   return Promise.all(
     rows.map(async (row) => (await row.getAttribute("data-contest-row")) ?? ""),
@@ -72,9 +89,10 @@ test.describe("자바스크립트 없이", () => {
 
     // 페이지 크기를 테스트가 다시 계산하지 않는다 — 화면이 주는 「다음」 링크만
     // 따라간다. 그래야 페이지 크기를 바꿔도 이 테스트가 그대로 유효하다.
+    await waitForList(page);
     let hops = 0;
     while ((await page.getByTestId("page-next").count()) > 0) {
-      await page.getByTestId("page-next").click();
+      await goToNextPage(page);
       hops += 1;
       expect(hops, "「다음」이 끝나지 않는다 — 페이지네이션이 순환한다").toBeLessThan(30);
     }
@@ -91,16 +109,30 @@ test.describe("자바스크립트 없이", () => {
     for (let hops = 0; hops < 30; hops += 1) {
       seen.push(...(await rowIdsOnPage(page)));
       if ((await page.getByTestId("page-next").count()) === 0) break;
-      await page.getByTestId("page-next").click();
+      await goToNextPage(page);
     }
 
     expect(seen.length).toBe(BULK);
     expect(new Set(seen).size, "같은 Contest 가 두 페이지에 걸쳐 나왔다").toBe(BULK);
   });
 
+  test("범위를 벗어난 page 는 마지막 페이지로 정정된다", async ({ page }) => {
+    // 그냥 두면 「전체 120」이라고 써놓고 바로 아래에 "조건에 맞는 공모전이
+    // 없습니다" 가 뜬다 — 있는데 없다고 말하는 화면이다.
+    await page.goto(bulkUrl({ sort: "prize", page: 999999 }));
+
+    await expect(page).not.toHaveURL(/page=999999/);
+    await expect(page.getByTestId("contest-count")).toHaveText(String(BULK));
+    expect((await rowIdsOnPage(page)).length).toBeGreaterThan(0);
+
+    // 마지막 페이지이므로 「다음」이 없고, 상금순의 꼬리가 여기 있다.
+    await expect(page.getByTestId("page-next")).toHaveCount(0);
+    expect(await page.locator("main").innerText()).toContain(bulk.lowest_prize_title);
+  });
+
   test("페이지를 넘겨도 필터와 정렬이 유지된다", async ({ page }) => {
     await page.goto(bulkUrl({ sort: "prize" }));
-    await page.getByTestId("page-next").click();
+    await goToNextPage(page);
 
     await expect(page).toHaveURL(/category=\d+/);
     await expect(page).toHaveURL(/sort=prize/);
