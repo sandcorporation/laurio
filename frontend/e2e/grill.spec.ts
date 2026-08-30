@@ -91,7 +91,7 @@ async function createDraftViaForm(
   await page.goto("/console/contests/new");
   await expect(page.getByTestId("grill-brief-heading")).toBeVisible();
 
-  await page.getByTestId("grill-brief-title").fill(`AI grill 테스트 ${runId}`);
+  await page.getByTestId("grill-brief-title").fill(`[E2E] AI grill 테스트 ${runId}`);
   await page.getByTestId("grill-brief-category").selectOption(String(categoryId));
   await page.getByTestId(`grill-brief-deliverable-type-${deliverableTypeId}-checkbox`).check();
   await page.getByTestId("grill-brief-prize").fill(String(options.prize));
@@ -122,7 +122,7 @@ test.describe("브리프 → 실시간 최소 상금 합산 → AI 대화로 체
     const adminId = await findByName(page, "/api/backend/contests/deliverable-types", "관리자 페이지");
 
     await page.goto("/console/contests/new");
-    await page.getByTestId("grill-brief-title").fill(`AI grill 견적 테스트 ${runId}`);
+    await page.getByTestId("grill-brief-title").fill(`[E2E] AI grill 견적 테스트 ${runId}`);
     await page.getByTestId("grill-brief-category").selectOption(String(categoryId));
 
     // 하나만 선택했을 때 합계는 그 하나의 최소 제안 상금과 같다.

@@ -1,4 +1,5 @@
 from datetime import datetime
+from enum import Enum
 
 from ninja import Schema
 from pydantic import Field
@@ -7,6 +8,39 @@ from pydantic import Field
 class CategoryOut(Schema):
     id: int
     name: str
+
+
+class ContestSort(str, Enum):
+    """공개 목록의 정렬 축 (#39).
+
+    값 문자열은 URL 에 그대로 보이므로 프론트의 `?sort=` 와 같은 어휘를 쓴다
+    (frontend/app/contests/page.tsx).
+    """
+
+    DEADLINE = "deadline"
+    PRIZE = "prize"
+
+
+class ContestListFilters(Schema):
+    """`GET /api/contests` 의 필터·정렬 쿼리 (#39).
+
+    api.py 가 아니라 여기 두는 이유가 있다 — api.py 는 `from __future__ import
+    annotations` 를 쓰기 때문에, 엔드포인트 함수 시그니처에 Enum 을 직접 적으면
+    ninja 가 만드는 쿼리 모델이 그 이름을 해석하지 못해 `QueryParams is not fully
+    defined` 로 **500** 이 난다(직접 재현해 확인했다). 이 모듈에는 그 임포트가
+    없으므로 Schema 로 감싸면 pydantic 이 제자리에서 해석한다.
+
+    타입이 여기 모여 있어 얻는 것도 있다 — 이 스키마가 OpenAPI 에 그대로 실리고,
+    프론트는 `pnpm generate:api` 로 같은 union 타입을 받는다(#28).
+
+    알 수 없는 값은 500 이 아니라 4xx 여야 한다 — `sort` 는 Enum 이라, id 두 개는
+    int 라 ninja 가 422 로 막는다. 존재하지 않는 id 는 오류가 아니라 빈 목록이다
+    (필터는 "그런 게 있느냐"가 아니라 "그것으로 좁혀라"이다).
+    """
+
+    category: int | None = None
+    deliverable_type: int | None = None
+    sort: ContestSort = ContestSort.DEADLINE
 
 
 class DeliverableTypeOut(Schema):

@@ -4,7 +4,12 @@
 결제가 확인되면 #9가 `status`를 `published`로 전이시킬 훅만 남겨둔다.
 """
 
-from __future__ import annotations
+# `from __future__ import annotations` 를 쓰지 않는다 — 이 모듈에는 `@paginate` 로
+# 감싼 엔드포인트가 있고(list_contests, #39), 그 래퍼는 원본 함수의 `__globals__` 를
+# 가져갈 수 없어서 문자열이 된 어노테이션(`Query[ContestListFilters]`)을 해석하지
+# 못한다 — 필터 하나 붙이려다 `QueryParams is not fully defined` 로 500 이 났다.
+# Python 3.13 은 `int | None` 같은 문법을 런타임에 그대로 지원하므로 이 임포트가
+# 없어도 아쉬울 것이 없다.
 
 import logging
 from uuid import UUID
@@ -13,7 +18,7 @@ from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import Sum
 from django.http import HttpRequest
-from ninja import Router
+from ninja import Query, Router
 from ninja.errors import HttpError
 from ninja.pagination import PageNumberPagination, paginate
 
@@ -43,6 +48,8 @@ from .requirement_chat import (
 )
 from .schemas import (
     CategoryOut,
+    ContestListFilters,
+    ContestSort,
     ConfirmJudgingExtensionIn,
     ContestCreateIn,
     ContestOut,
@@ -233,7 +240,7 @@ def create_contest(request: HttpRequest, payload: ContestCreateIn):
 
 @router.get("/contests", response=list[ContestOut], auth=None)
 @paginate(PageNumberPagination, page_size=20)
-def list_contests(request: HttpRequest):
+def list_contests(request: HttpRequest, filters: Query[ContestListFilters]):
     """공개된 Contest만 나온다 — draft는 비로그인·타인에게 보이지 않는다.
 
     PUBLISHED뿐 아니라 CLOSED도 공개 목록에 남는다 — 마감 전이(#11)는 결제 취소가
@@ -244,11 +251,45 @@ def list_contests(request: HttpRequest):
 
     `select_related("category")`가 없으면 목록의 Contest마다 Category를 한 번씩 더
     조회하는 N+1이 난다. 목록은 무한정 커질 수 있으므로 페이지네이션도 둔다.
+
+    **필터·정렬은 여기서 처리한다(#39).** FE-04(#29)를 만들 때 이 엔드포인트에
+    필터가 없어서 프론트가 `page_size=200`으로 한 번에 받아 서버 컴포넌트 안에서
+    직접 걸렀다. 그 구조는 두 가지로 조용히 틀린다 — (1) 공개 Contest가 한 페이지를
+    넘으면 뒤쪽이 목록에서 그냥 사라진다(예외도 빈 화면도 아니다), (2) 애초에
+    200이 통째로 오지도 않았다. ninja의 PageNumberPagination은 요청한 page_size를
+    `NINJA_MAX_PER_PAGE_SIZE`(기본 100)로 잘라내므로 실제 천장은 100이었다.
+    공개 표면에서 "조용한 누락"은 가장 나쁜 실패 방식이라 축을 백엔드로 내린다.
+
+    `Category`와 `DeliverableType`은 서로 다른 축이다(ADR-0001) — 둘 다 주면 AND로
+    좁혀진다. `deliverable_type`은 M2M이지만 값이 하나뿐이라 조인이 Contest당 최대
+    한 행이므로 중복이 생기지 않는다(그래서 `distinct()`가 필요 없다).
+
+    정렬에는 항상 `id`를 마지막 키로 붙인다. 상금이나 마감이 동점이면 DB가 순서를
+    보장할 이유가 없고, 페이지마다 순서가 달라지면 **같은 Contest가 두 페이지에
+    나오고 다른 하나는 어느 페이지에도 안 나온다** — 페이지네이션에서 정렬이
+    불안정하면 목록이 조용히 틀리는 그 두 번째 방식이다.
+
+    알 수 없는 값은 500이 아니라 4xx다 — `sort`는 Enum이라 ninja가 422로 막고,
+    `category`/`deliverable_type`도 int가 아니면 422다. 존재하지 않는 id는 오류가
+    아니라 빈 목록이다(필터는 "그런 게 있느냐"가 아니라 "그것으로 좁혀라"이다).
     """
 
-    return Contest.objects.filter(
-        status__in=_PUBLICLY_VISIBLE_STATUSES
-    ).select_related("category").prefetch_related("deliverable_types", "requirements")
+    queryset = Contest.objects.filter(status__in=_PUBLICLY_VISIBLE_STATUSES)
+
+    if filters.category is not None:
+        queryset = queryset.filter(category_id=filters.category)
+    if filters.deliverable_type is not None:
+        queryset = queryset.filter(deliverable_types__id=filters.deliverable_type)
+
+    ordering = (
+        ("-prize", "id") if filters.sort is ContestSort.PRIZE else ("deadline_at", "id")
+    )
+
+    return (
+        queryset.order_by(*ordering)
+        .select_related("category")
+        .prefetch_related("deliverable_types", "requirements")
+    )
 
 
 @router.get("/contests/{contest_id}", response=ContestOut, auth=None)

@@ -15,18 +15,48 @@ export type DeliverableType = components["schemas"]["DeliverableTypeOut"];
 export type Contest = components["schemas"]["ContestOut"];
 export type Requirement = components["schemas"]["RequirementOut"];
 
-// 목록은 페이지네이션된다(백엔드 ninja PageNumberPagination, 기본 20개/페이지).
-// FE-04(#29)의 필터·정렬은 백엔드에 쿼리 파라미터가 없어(GET /api/contests 는
-// page/page_size 뿐) 서버 컴포넌트가 전체를 받아와 직접 좁히고 정렬한다 — 그래도
-// "서버가 렌더링한다"는 인수조건은 그대로 지켜진다: 브라우저는 다시 요청하지
-// 않는다. page_size 를 넉넉히 크게 주어 한 번에 다 받는다 — 이 플랫폼은 순수
-// 콘테스트라 동시에 열린 공모전 수가 페이지네이션이 필요할 규모가 아니다
-// (검증되지 않으면 이 값을 늘리거나 다시 페이지네이션을 도입한다).
-const LIST_PAGE_SIZE = 200;
+export type ContestSort = components["schemas"]["ContestSort"];
 
-export async function fetchContests(): Promise<Contest[]> {
+// 한 페이지에 보여줄 개수. **필터·정렬은 백엔드가 한다**(#39) — 예전에는 이
+// 함수가 `page_size=200` 으로 전부 받아와 서버 컴포넌트가 직접 걸렀는데, 두
+// 가지로 조용히 틀렸다: 공개 Contest 가 그 수를 넘으면 뒤쪽이 목록에서 그냥
+// 사라졌고(예외도 빈 화면도 아니다), 애초에 200 이 오지도 않았다 — ninja 가
+// `page_size` 를 `NINJA_MAX_PER_PAGE_SIZE`(기본 100)로 잘라내므로 실제 천장은
+// 100 이었다. 이제 필요한 페이지만 받는다.
+export const CONTESTS_PAGE_SIZE = 20;
+
+export type ContestListQuery = {
+  category?: number;
+  deliverableType?: number;
+  sort?: ContestSort;
+  page?: number;
+};
+
+export type ContestPage = {
+  items: Contest[];
+  /** 필터가 걸린 뒤의 전체 건수 — 이 페이지에 담긴 수가 아니다. */
+  count: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+};
+
+export async function fetchContests(query: ContestListQuery = {}): Promise<ContestPage> {
+  // 백엔드는 `page` 가 1 미만이면 422 를 낸다. 공개 표면이라 손으로 친 URL
+  // (`?page=0`, `?page=-3`)이 오류 화면이 되면 안 되므로 여기서 1 로 맞춘다 —
+  // 「알 수 없는 값은 안전한 기본값으로」(#39 인수조건).
+  const page = Math.max(1, Math.trunc(query.page ?? 1));
+
   const res = await backendClient.GET("/api/contests", {
-    params: { query: { page: 1, page_size: LIST_PAGE_SIZE } },
+    params: {
+      query: {
+        category: query.category,
+        deliverable_type: query.deliverableType,
+        sort: query.sort ?? "deadline",
+        page,
+        page_size: CONTESTS_PAGE_SIZE,
+      },
+    },
   });
 
   if (!res.response.ok) {
@@ -35,7 +65,14 @@ export async function fetchContests(): Promise<Contest[]> {
   if (res.data === undefined) {
     throw new Error("GET /api/contests: 2xx 인데 응답 본문이 비어 있다");
   }
-  return res.data.items;
+
+  return {
+    items: res.data.items,
+    count: res.data.count,
+    page,
+    pageSize: CONTESTS_PAGE_SIZE,
+    totalPages: Math.max(1, Math.ceil(res.data.count / CONTESTS_PAGE_SIZE)),
+  };
 }
 
 // 존재하지 않거나 draft 인 Contest 는 백엔드가 이미 404 로 답한다

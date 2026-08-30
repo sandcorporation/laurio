@@ -72,6 +72,17 @@ JUDGING_SPONSOR_LOGIN_SEED = "e2e-judging-sponsor"
 class Command(BaseCommand):
     help = "FE-04/FE-05 SSR e2e 테스트가 검증할 공개 Contest 를 결정적으로 심는다."
 
+    def add_arguments(self, parser) -> None:
+        parser.add_argument(
+            "--bulk",
+            type=int,
+            default=0,
+            help=(
+                "전용 Category 에 공개 Contest 를 N 건 더 심는다(#39). "
+                "목록이 한 페이지를 넘어도 필터·정렬이 정확한지 e2e 로 재현할 때 쓴다."
+            ),
+        )
+
     def handle(self, *args, **options) -> None:
         self._cleanup()
 
@@ -280,7 +291,56 @@ class Command(BaseCommand):
                 developer_b=developer_b,
             ),
         }
+        bulk_count = options.get("bulk") or 0
+        if bulk_count > 0:
+            payload["bulk"] = self._seed_bulk(sponsor, web_service, count=bulk_count)
+
         self._write_stdout_utf8(json.dumps(payload, ensure_ascii=False) + "\n")
+
+    def _seed_bulk(self, sponsor, deliverable_type, *, count: int) -> dict:
+        """전용 Category 에 공개 Contest 를 count 건 심는다 (#39).
+
+        왜 필요한가 — 예전 프론트는 목록 전체를 한 번에 받아와 직접 걸렀고, 그
+        방식은 공개 Contest 가 한 번에 받을 수 있는 수(ninja 의 max page size,
+        기본 100)를 넘는 순간 뒤쪽을 **조용히 누락**했다. 그 실패를 UI 로 재현하려면
+        그 천장을 실제로 넘겨야 한다.
+
+        상금은 인덱스와 함께 내려가고 마감은 올라간다 — 그래서 상금순 첫 페이지와
+        마지막 페이지에 무엇이 와야 하는지가 코드가 아니라 **구성으로** 정해진다
+        (테스트가 정렬 로직을 그대로 다시 계산하지 않는다).
+        """
+
+        category, _ = Category.objects.get_or_create(name=f"{PREFIX}대량")
+        now = timezone.now()
+
+        contests = Contest.objects.bulk_create(
+            [
+                Contest(
+                    sponsor=sponsor,
+                    title=f"{PREFIX}대량 {i:04d}",
+                    category=category,
+                    description="목록 페이지네이션 재현용 Contest 입니다.",
+                    prize=10_000_000 - i,
+                    deadline_at=now + timedelta(days=1, minutes=i),
+                    status=Contest.Status.PUBLISHED,
+                )
+                for i in range(count)
+            ]
+        )
+        through = Contest.deliverable_types.through
+        through.objects.bulk_create(
+            [through(contest_id=c.id, deliverabletype_id=deliverable_type.id) for c in contests]
+        )
+
+        return {
+            "category": category.name,
+            "category_id": category.id,
+            "count": count,
+            # 상금순 정렬의 양 끝. 마지막 항목이 예전 구조에서 조용히 사라지던
+            # 바로 그 자리다(천장 너머).
+            "highest_prize_title": contests[0].title,
+            "lowest_prize_title": contests[-1].title,
+        }
 
     def _cleanup(self) -> None:
         # Award.submission 은 on_delete=PROTECT 다(awards/models.py) — Django의
@@ -291,6 +351,11 @@ class Command(BaseCommand):
         # 그 Contest 에 걸린 Award 를 먼저 지워야 한다 — Handover.award 는 CASCADE
         # 라 Award 를 지우면 함께 정리된다.
         Award.objects.filter(contest__title__startswith=PREFIX).delete()
+        # 다른 스펙이 런타임에 만드는 Contest(submit/upload/grill)도 제목에 이 접두어를
+        # 달아 여기서 함께 정리된다(#39). 접두어가 없던 시절에는 스위트를 돌릴 때마다
+        # 쌓이기만 해서, 목록이 페이지네이션되기 시작하면 시드 Contest 가 1페이지 밖으로
+        # 밀려나 스펙이 조용히 깨졌다 — 실제로 "제출 폼 데모용 Contest" 가 16건까지
+        # 쌓인 것을 확인했다.
         Contest.objects.filter(title__startswith=PREFIX).delete()
         # Category 와 DeliverableType 은 **지우지 않는다** — 지우려고 했다가 이
         # 명령이 통째로 죽었다. Contest.category 는 on_delete=PROTECT 인데,
@@ -400,9 +465,11 @@ class Command(BaseCommand):
             "deadline_at": contest.deadline_at.isoformat(),
             "status": contest.status,
             "category": contest.category.name,
+            "category_id": contest.category_id,
             "is_underfunded": contest.is_underfunded,
             "required_minimum_prize": contest.required_minimum_prize,
             "deliverable_types": [dt.name for dt in contest.deliverable_types.all()],
+            "deliverable_type_ids": [dt.id for dt in contest.deliverable_types.all()],
             "requirements": [
                 {"text": r.text, "grade": r.grade}
                 for r in contest.requirements.all().order_by("order", "id")

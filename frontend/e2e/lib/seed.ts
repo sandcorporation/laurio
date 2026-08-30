@@ -30,9 +30,11 @@ export type SeededContest = {
   deadline_at: string;
   status: "draft" | "published" | "closed" | "awarded" | "judging_ended";
   category: string;
+  category_id: number;
   is_underfunded: boolean;
   required_minimum_prize: number;
   deliverable_types: string[];
+  deliverable_type_ids: number[];
   requirements: SeededRequirement[];
 };
 
@@ -76,6 +78,18 @@ export type SeededJudgingContest = {
   sensitive_score_model_version: string;
 };
 
+// #39 — 목록이 한 페이지를 넘었을 때도 필터·정렬이 정확한지 재현하기 위한 대량
+// 시드. `seedE2eContests({ bulk: N })` 로 요청했을 때만 채워진다.
+export type SeededBulk = {
+  category: string;
+  category_id: number;
+  count: number;
+  /** 상금순 정렬의 첫 항목. */
+  highest_prize_title: string;
+  /** 상금순 정렬의 마지막 항목 — 예전 구조에서 조용히 사라지던 자리다. */
+  lowest_prize_title: string;
+};
+
 export type SeededContests = {
   funded: SeededContest;
   underfunded: SeededContest;
@@ -83,6 +97,7 @@ export type SeededContests = {
   draft: SeededContest;
   developer: SeededDeveloper;
   judging: SeededJudgingContest;
+  bulk?: SeededBulk;
 };
 
 // dev compose 의 기본값(docker/compose.dev.yaml, config/settings.py)과 같다 —
@@ -92,8 +107,16 @@ function backendDbPort(): string {
   return process.env.LAURIO_DB_PORT ?? "55432";
 }
 
-export function seedE2eContests(): SeededContests {
-  const output = execFileSync("uv", ["run", "python", "manage.py", "seed_e2e_contests"], {
+export type SeedOptions = {
+  /** 전용 Category 에 공개 Contest 를 이만큼 더 심는다(#39). 느리므로 필요한 스펙에서만 쓴다. */
+  bulk?: number;
+};
+
+export function seedE2eContests(options: SeedOptions = {}): SeededContests {
+  const args = ["run", "python", "manage.py", "seed_e2e_contests"];
+  if (options.bulk) args.push("--bulk", String(options.bulk));
+
+  const output = execFileSync("uv", args, {
     cwd: BACKEND_DIR,
     env: { ...process.env, LAURIO_DB_PORT: backendDbPort() },
     encoding: "utf-8",

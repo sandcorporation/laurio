@@ -56,7 +56,7 @@ async function createContestAsCurrentUser(
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          title: "제출 폼 데모용 Contest",
+          title: "[E2E] 제출 폼 데모용 Contest",
           category_id: categoryId,
           deliverable_type_ids: [deliverableTypeId],
           description: "",

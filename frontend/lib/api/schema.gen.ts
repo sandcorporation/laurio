@@ -151,6 +151,27 @@ export interface paths {
          *
          *     `select_related("category")`가 없으면 목록의 Contest마다 Category를 한 번씩 더
          *     조회하는 N+1이 난다. 목록은 무한정 커질 수 있으므로 페이지네이션도 둔다.
+         *
+         *     **필터·정렬은 여기서 처리한다(#39).** FE-04(#29)를 만들 때 이 엔드포인트에
+         *     필터가 없어서 프론트가 `page_size=200`으로 한 번에 받아 서버 컴포넌트 안에서
+         *     직접 걸렀다. 그 구조는 두 가지로 조용히 틀린다 — (1) 공개 Contest가 한 페이지를
+         *     넘으면 뒤쪽이 목록에서 그냥 사라진다(예외도 빈 화면도 아니다), (2) 애초에
+         *     200이 통째로 오지도 않았다. ninja의 PageNumberPagination은 요청한 page_size를
+         *     `NINJA_MAX_PER_PAGE_SIZE`(기본 100)로 잘라내므로 실제 천장은 100이었다.
+         *     공개 표면에서 "조용한 누락"은 가장 나쁜 실패 방식이라 축을 백엔드로 내린다.
+         *
+         *     `Category`와 `DeliverableType`은 서로 다른 축이다(ADR-0001) — 둘 다 주면 AND로
+         *     좁혀진다. `deliverable_type`은 M2M이지만 값이 하나뿐이라 조인이 Contest당 최대
+         *     한 행이므로 중복이 생기지 않는다(그래서 `distinct()`가 필요 없다).
+         *
+         *     정렬에는 항상 `id`를 마지막 키로 붙인다. 상금이나 마감이 동점이면 DB가 순서를
+         *     보장할 이유가 없고, 페이지마다 순서가 달라지면 **같은 Contest가 두 페이지에
+         *     나오고 다른 하나는 어느 페이지에도 안 나온다** — 페이지네이션에서 정렬이
+         *     불안정하면 목록이 조용히 틀리는 그 두 번째 방식이다.
+         *
+         *     알 수 없는 값은 500이 아니라 4xx다 — `sort`는 Enum이라 ninja가 422로 막고,
+         *     `category`/`deliverable_type`도 int가 아니면 422다. 존재하지 않는 id는 오류가
+         *     아니라 빈 목록이다(필터는 "그런 게 있느냐"가 아니라 "그것으로 좁혀라"이다).
          */
         get: operations["contests_api_list_contests"];
         put?: never;
@@ -1587,6 +1608,31 @@ export interface components {
             /** Title */
             title: string;
         };
+        /**
+         * ContestListFilters
+         * @description `GET /api/contests` 의 필터·정렬 쿼리 (#39).
+         *
+         *     api.py 가 아니라 여기 두는 이유가 있다 — api.py 는 `from __future__ import
+         *     annotations` 를 쓰기 때문에, 엔드포인트 함수 시그니처에 Enum 을 직접 적으면
+         *     ninja 가 만드는 쿼리 모델이 그 이름을 해석하지 못해 `QueryParams is not fully
+         *     defined` 로 **500** 이 난다(직접 재현해 확인했다). 이 모듈에는 그 임포트가
+         *     없으므로 Schema 로 감싸면 pydantic 이 제자리에서 해석한다.
+         *
+         *     타입이 여기 모여 있어 얻는 것도 있다 — 이 스키마가 OpenAPI 에 그대로 실리고,
+         *     프론트는 `pnpm generate:api` 로 같은 union 타입을 받는다(#28).
+         *
+         *     알 수 없는 값은 500 이 아니라 4xx 여야 한다 — `sort` 는 Enum 이라, id 두 개는
+         *     int 라 ninja 가 422 로 막는다. 존재하지 않는 id 는 오류가 아니라 빈 목록이다
+         *     (필터는 "그런 게 있느냐"가 아니라 "그것으로 좁혀라"이다).
+         */
+        ContestListFilters: {
+            /** Category */
+            category?: number | null;
+            /** Deliverable Type */
+            deliverable_type?: number | null;
+            /** @default deadline */
+            sort: "deadline" | "prize";
+        };
         /** ContestOut */
         ContestOut: {
             category: components["schemas"]["CategoryOut"];
@@ -1640,6 +1686,15 @@ export interface components {
             /** Prize */
             prize: number;
         };
+        /**
+         * ContestSort
+         * @description 공개 목록의 정렬 축 (#39).
+         *
+         *     값 문자열은 URL 에 그대로 보이므로 프론트의 `?sort=` 와 같은 어휘를 쓴다
+         *     (frontend/app/contests/page.tsx).
+         * @enum {string}
+         */
+        ContestSort: "deadline" | "prize";
         /** CreateNotificationIn */
         CreateNotificationIn: {
             /** Context */
@@ -2444,6 +2499,9 @@ export interface operations {
     contests_api_list_contests: {
         parameters: {
             query?: {
+                category?: number | null;
+                deliverable_type?: number | null;
+                sort?: "deadline" | "prize";
                 page?: number;
                 page_size?: number | null;
             };

@@ -4,49 +4,74 @@
 // 순간 이 인수조건이 조용히 깨진다(frontend/e2e/seam.spec.ts 상단 주석, ADR-0015
 // Consequences).
 //
-// 필터·정렬은 백엔드에 쿼리 파라미터가 없어(contests.api.list_contests 는 page만
-// 받는다) URL 의 searchParams 를 서버 컴포넌트가 직접 읽어 전체 목록에서 좁히고
-// 정렬한다 — 링크 클릭마다 Next 가 새 서버 렌더링을 하므로 "서버가 렌더링한다"는
-// 요구사항은 그대로 지켜진다.
+// 필터·정렬·페이지는 **백엔드가 처리한다**(#39). 이 서버 컴포넌트는 URL 의
+// searchParams 를 그대로 쿼리로 넘기고, 돌아온 한 페이지를 그린다 — 예전처럼
+// 전체를 받아와 여기서 거르지 않는다. 그 방식은 공개 Contest 가 한 번에 받아올
+// 수 있는 수를 넘는 순간 뒤쪽이 목록에서 **조용히 사라졌다**(예외도 빈 화면도
+// 아니다). 링크 클릭은 여전히 전부 진짜 내비게이션이라 "서버가 렌더링한다"는
+// 인수조건은 그대로다.
 import Link from "next/link";
 
 import {
+  CONTESTS_PAGE_SIZE,
   fetchContestCategories,
   fetchContests,
   fetchDeliverableTypes,
   type Category,
   type Contest,
+  type ContestSort,
   type DeliverableType,
 } from "@/lib/api/contests";
 import { formatDday, formatPrize, isImminent } from "@/lib/contest-format";
 
 type SearchParams = { [key: string]: string | string[] | undefined };
 
-type Sort = "deadline" | "prize";
+type Current = {
+  category?: number;
+  deliverableType?: number;
+  sort: ContestSort;
+  page: number;
+};
 
 function parseId(value: string | string[] | undefined): number | undefined {
   const raw = Array.isArray(value) ? value[0] : value;
   if (!raw) return undefined;
   const parsed = Number(raw);
-  return Number.isFinite(parsed) ? parsed : undefined;
+  // 손으로 친 URL 이 오류 화면이 되면 안 된다 — 숫자가 아니면 "필터 없음"으로
+  // 떨어진다(#39: 알 수 없는 값은 500 이 아니라 안전한 기본값). 정수만 통과시켜야
+  // `?category=1.5` 가 백엔드에서 422 가 되는 일도 막힌다.
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
-function parseSort(value: string | string[] | undefined): Sort {
+function parseSort(value: string | string[] | undefined): ContestSort {
   const raw = Array.isArray(value) ? value[0] : value;
   return raw === "prize" ? "prize" : "deadline";
 }
 
-// 현재 필터·정렬을 유지한 채 한 파라미터만 바꾼 링크를 만든다. `undefined` 를 주면
-// 그 파라미터를 지운다(토글) — "전체" 필터, 같은 정렬을 다시 누르는 경우.
-function buildHref(
-  current: { category?: number; deliverableType?: number; sort: Sort },
-  overrides: Partial<{ category: number | undefined; deliverableType: number | undefined; sort: Sort }>,
-): string {
-  const next = { ...current, ...overrides };
+function parsePage(value: string | string[] | undefined): number {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed >= 1 ? parsed : 1;
+}
+
+// 현재 상태를 유지한 채 일부만 바꾼 링크를 만든다. `undefined` 를 주면 그
+// 파라미터를 지운다(토글) — "전체" 필터, 같은 정렬을 다시 누르는 경우.
+//
+// **필터나 정렬을 바꾸면 페이지는 1 로 되돌린다.** 3페이지에서 카테고리를 좁히면
+// 결과가 1페이지밖에 없을 수 있고, 그때 3페이지에 그대로 남으면 "조건에 맞는
+// 공모전이 없습니다" 가 뜬다 — 실제로는 있는데 없다고 말하는 화면이다.
+function buildHref(current: Current, overrides: Partial<Current>): string {
+  const resetsPage =
+    "category" in overrides || "deliverableType" in overrides || "sort" in overrides;
+  const next = { ...current, ...(resetsPage ? { page: 1 } : {}), ...overrides };
+
   const params = new URLSearchParams();
   if (next.category !== undefined) params.set("category", String(next.category));
-  if (next.deliverableType !== undefined) params.set("deliverableType", String(next.deliverableType));
+  if (next.deliverableType !== undefined)
+    params.set("deliverableType", String(next.deliverableType));
   if (next.sort !== "deadline") params.set("sort", next.sort);
+  if (next.page > 1) params.set("page", String(next.page));
+
   const qs = params.toString();
   return qs ? `/contests?${qs}` : "/contests";
 }
@@ -57,30 +82,18 @@ export default async function ContestsPage({
   searchParams: Promise<SearchParams>;
 }) {
   const sp = await searchParams;
-  const categoryId = parseId(sp.category);
-  const deliverableTypeId = parseId(sp.deliverableType);
-  const sort = parseSort(sp.sort);
+  const current: Current = {
+    category: parseId(sp.category),
+    deliverableType: parseId(sp.deliverableType),
+    sort: parseSort(sp.sort),
+    page: parsePage(sp.page),
+  };
 
-  const [contests, categories, deliverableTypes] = await Promise.all([
-    fetchContests(),
+  const [page, categories, deliverableTypes] = await Promise.all([
+    fetchContests(current),
     fetchContestCategories(),
     fetchDeliverableTypes(),
   ]);
-
-  const filtered = contests.filter((contest) => {
-    const matchesCategory = categoryId === undefined || contest.category.id === categoryId;
-    const matchesDeliverable =
-      deliverableTypeId === undefined ||
-      contest.deliverable_types.some((dt) => dt.id === deliverableTypeId);
-    return matchesCategory && matchesDeliverable;
-  });
-
-  const sorted = [...filtered].sort((a, b) => {
-    if (sort === "prize") return b.prize - a.prize;
-    return new Date(a.deadline_at).getTime() - new Date(b.deadline_at).getTime();
-  });
-
-  const current = { category: categoryId, deliverableType: deliverableTypeId, sort };
 
   return (
     <main className="flex min-h-screen flex-col gap-8 bg-paper p-10 text-ink">
@@ -94,20 +107,24 @@ export default async function ContestsPage({
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-rule pb-4">
         <div className="flex items-baseline gap-3">
           <span className="text-lg font-semibold">전체</span>
-          <span className="font-mono text-sm text-ink/60">{sorted.length}</span>
+          {/* 이 페이지에 실린 개수가 아니라 **필터가 걸린 전체 건수**다. 페이지를
+              넘겨도 이 숫자는 그대로여야 한다. */}
+          <span data-testid="contest-count" className="font-mono text-sm text-ink/60">
+            {page.count}
+          </span>
         </div>
         <nav aria-label="정렬" className="flex items-center gap-4 text-sm">
           <Link
             href={buildHref(current, { sort: "deadline" })}
-            aria-current={sort === "deadline" ? "true" : undefined}
-            className={sort === "deadline" ? "font-medium text-ink" : "text-ink/60"}
+            aria-current={current.sort === "deadline" ? "true" : undefined}
+            className={current.sort === "deadline" ? "font-medium text-ink" : "text-ink/60"}
           >
             마감 임박순
           </Link>
           <Link
             href={buildHref(current, { sort: "prize" })}
-            aria-current={sort === "prize" ? "true" : undefined}
-            className={sort === "prize" ? "font-medium text-ink" : "text-ink/60"}
+            aria-current={current.sort === "prize" ? "true" : undefined}
+            className={current.sort === "prize" ? "font-medium text-ink" : "text-ink/60"}
           >
             상금순
           </Link>
@@ -117,7 +134,9 @@ export default async function ContestsPage({
       <CategoryFilter categories={categories} current={current} />
       <DeliverableTypeFilter deliverableTypes={deliverableTypes} current={current} />
 
-      <ContestTable contests={sorted} />
+      <ContestTable contests={page.items} />
+
+      <Pagination current={current} page={page} />
 
       <p className="flex items-start gap-2 border-t border-rule pt-4 text-xs leading-relaxed text-ink/60">
         <span aria-hidden="true">ⓘ</span>
@@ -130,12 +149,57 @@ export default async function ContestsPage({
   );
 }
 
+function Pagination({
+  current,
+  page,
+}: {
+  current: Current;
+  page: { count: number; page: number; totalPages: number };
+}) {
+  // 한 페이지에 다 들어가면 아무것도 그리지 않는다 — 지금까지의 화면 그대로다.
+  if (page.totalPages <= 1) return null;
+
+  const first = (page.page - 1) * CONTESTS_PAGE_SIZE + 1;
+  const last = Math.min(page.page * CONTESTS_PAGE_SIZE, page.count);
+
+  return (
+    <nav
+      aria-label="페이지"
+      data-testid="contest-pagination"
+      className="flex items-center justify-between border-t border-rule pt-4 text-sm"
+    >
+      <span className="font-mono text-xs text-ink/60">
+        {first}–{last} / {page.count}
+      </span>
+      <span className="flex items-center gap-4">
+        {page.page > 1 ? (
+          <Link data-testid="page-prev" href={buildHref(current, { page: page.page - 1 })}>
+            이전
+          </Link>
+        ) : (
+          <span className="text-ink/30">이전</span>
+        )}
+        <span className="font-mono text-xs text-ink/60">
+          {page.page} / {page.totalPages}
+        </span>
+        {page.page < page.totalPages ? (
+          <Link data-testid="page-next" href={buildHref(current, { page: page.page + 1 })}>
+            다음
+          </Link>
+        ) : (
+          <span className="text-ink/30">다음</span>
+        )}
+      </span>
+    </nav>
+  );
+}
+
 function CategoryFilter({
   categories,
   current,
 }: {
   categories: Category[];
-  current: { category?: number; deliverableType?: number; sort: Sort };
+  current: Current;
 }) {
   return (
     <nav aria-label="카테고리로 좁히기" className="flex flex-wrap gap-2">
@@ -173,7 +237,7 @@ function DeliverableTypeFilter({
   current,
 }: {
   deliverableTypes: DeliverableType[];
-  current: { category?: number; deliverableType?: number; sort: Sort };
+  current: Current;
 }) {
   return (
     <nav aria-label="요구형태로 좁히기" className="flex flex-wrap gap-2">
