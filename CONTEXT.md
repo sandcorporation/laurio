@@ -37,6 +37,10 @@ _Avoid_: 참가자, Entrant, Contestant, Contractor, Freelancer
 Laurio를 운영하며 Appeal에 Ruling을 내리는 당사자. Sponsor·Developer와 서로소다 — 소셜 계정을 가진 계정은 Operator가 될 수 없고, Operator는 소셜 계정을 붙일 수 없다. 이 구분이 「돈을 움직인 사람이 누구인가」를 애매하지 않게 만든다.
 _Avoid_: 관리자, 스태프, Admin, Staff, Moderator
 
+**Seller**:
+Developer가 Payout을 받기 위해 지급대행사에 등록되는 수취인 신원. 지급이 확정된 뒤에만 등록한다 — 구경하거나 떨어진 사람이 Seller가 될 이유가 없다(Verification을 행위 시점으로 미룬 것과 같은 원칙).
+_Avoid_: 판매자, 정산 계정, 수취인, Payee, Merchant
+
 ### 제출과 선정
 
 **Submission**:

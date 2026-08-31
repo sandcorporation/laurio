@@ -12,7 +12,7 @@
 # 어댑터 바인딩(ADR-0007, 한눈에 보기용 — 실제 값은 .env.staging):
 #   PG        : FakePGAdapter        -> 토스 "샌드박스"        (PAYMENT_ADAPTER_MODE=real)
 #   지급대행   : FakePayoutAdapter     -> 토스 지급대행 샌드박스   (PAYOUT_ADAPTER_MODE=real)
-#   스토리지   : MinIO                -> 실제 S3/OCI 버킷        (STORAGE_BACKEND=s3)
+#   스토리지   : MinIO(dev)           -> MinIO(서브 호스트, TLS)  (STORAGE_BACKEND=s3)
 #   소셜 로그인 : FakeSocialAdapter     -> 카카오/GitHub/구글 실물 (SOCIAL_AUTH_MODE=real)
 #   본인확인   : FakeVerificationAdapter -> 실제 PASS/NICE 연동   (VERIFICATION_ADAPTER_MODE=real)
 #   LLM 채점   : FakeLLMScoringAdapter  -> 실제 LLM 벤더(dotted path로 지정, 아직 미구현)
@@ -49,6 +49,10 @@ x-backend-env: &backend-env
   STORAGE_BACKEND: s3
   STORAGE_BUCKET: ${STORAGE_BUCKET:?}
   STORAGE_ENDPOINT_URL: ${STORAGE_ENDPOINT_URL:?}
+  # 브라우저가 presigned PUT 을 직접 쏘는 주소(ADR-0005). MinIO 를 쓰는 staging 에서는
+  # 컨테이너가 붙는 주소와 갈릴 수 있어 명시한다 — 비면 STORAGE_ENDPOINT_URL 을
+  # 물려받는다(config/settings.py).
+  STORAGE_PUBLIC_ENDPOINT_URL: ${STORAGE_PUBLIC_ENDPOINT_URL:-}
   STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:?}
   STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:?}
   STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
