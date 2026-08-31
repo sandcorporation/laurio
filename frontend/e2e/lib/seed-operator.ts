@@ -18,21 +18,12 @@ function backendDbPort(): string {
   return process.env.LAURIO_DB_PORT ?? "55432";
 }
 
-export type SeedOperatorOptions = {
-  username?: string;
-  password?: string;
-  superuser?: boolean;
-};
-
-/** `seed_e2e_operator` 관리 명령을 돌려 로그인 가능한 Operator 계정을 멱등하게
- * 만든다(backend/accounts/management/commands/seed_e2e_operator.py). */
-export function seedE2eOperator(options: SeedOperatorOptions = {}): SeededOperator {
-  const args = ["run", "python", "manage.py", "seed_e2e_operator"];
-  if (options.username) args.push("--username", options.username);
-  args.push("--password", options.password ?? E2E_OPERATOR_PASSWORD);
-  if (options.superuser) args.push("--superuser");
-
-  const output = execFileSync("uv", args, {
+/** `manage.py <command> <args>`를 돌리고 마지막 줄의 JSON을 파싱한다 —
+ * seed_e2e_operator*.py 관리 명령들이 공통으로 쓰는 관용구
+ * (frontend/e2e/lib/seed.ts의 seedE2eContests와 같은 이유: uv run이 남기는
+ * 진행 로그가 stdout 앞에 섞일 수 있어 마지막 줄만 파싱한다). */
+function runSeedCommand(command: string, args: string[]): unknown {
+  const output = execFileSync("uv", ["run", "python", "manage.py", command, ...args], {
     cwd: BACKEND_DIR,
     env: { ...process.env, LAURIO_DB_PORT: backendDbPort() },
     encoding: "utf-8",
@@ -42,21 +33,59 @@ export function seedE2eOperator(options: SeedOperatorOptions = {}): SeededOperat
   const lines = output.trim().split("\n");
   const lastLine = lines[lines.length - 1] ?? "";
 
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(lastLine);
+    return JSON.parse(lastLine);
   } catch {
     throw new Error(
-      "seed_e2e_operator 가 JSON 을 내지 않았다 — 명령이 죽었을 가능성이 크다" +
+      `${command} 가 JSON 을 내지 않았다 — 명령이 죽었을 가능성이 크다` +
         ` (stderr 는 위에 그대로 찍힌다). 마지막 줄: ${JSON.stringify(lastLine.slice(0, 300))}`,
     );
   }
+}
 
-  const seeded = parsed as SeededOperator;
+export type SeedOperatorOptions = {
+  username?: string;
+  password?: string;
+  superuser?: boolean;
+};
+
+/** `seed_e2e_operator` 관리 명령을 돌려 로그인 가능한 Operator 계정을 멱등하게
+ * 만든다(backend/accounts/management/commands/seed_e2e_operator.py). */
+export function seedE2eOperator(options: SeedOperatorOptions = {}): SeededOperator {
+  const args: string[] = [];
+  if (options.username) args.push("--username", options.username);
+  args.push("--password", options.password ?? E2E_OPERATOR_PASSWORD);
+  if (options.superuser) args.push("--superuser");
+
+  const seeded = runSeedCommand("seed_e2e_operator", args) as SeededOperator;
   if (!seeded?.id || !seeded?.username) {
     throw new Error(
       `seed_e2e_operator 의 출력에 기대한 키가 없다: ${JSON.stringify(Object.keys(seeded ?? {}))}`,
     );
   }
   return seeded;
+}
+
+export type SeededOperatorQueues = {
+  appeal?: { appeal_id: number; contest_id: number };
+  identity_pending_payout?: { idempotency_key: string; contest_id: number };
+  seller_pending_payout?: { idempotency_key: string; contest_id: number };
+};
+
+/** `seed_e2e_operator_queues` 관리 명령을 돌려 「할 일」 세 큐에 한 건씩 심는다
+ * (backend/accounts/management/commands/seed_e2e_operator_queues.py). **멱등하지
+ * 않다** — 부를 때마다 새 데이터가 쌓인다. 그래서 호출부는 항상 부르기 전
+ * baseline 대비 증분으로 검증해야 한다. `only`를 주면 그 큐 하나만 심는다. */
+export function seedE2eOperatorQueues(only?: "appeal" | "identity" | "seller"): SeededOperatorQueues {
+  const args = only ? ["--only", only] : [];
+  return runSeedCommand("seed_e2e_operator_queues", args) as SeededOperatorQueues;
+}
+
+/** 세 큐를 전부 빈 상태로 되돌린다("0건은 0건이라고 말한다"는 인수조건을 실제
+ * 0 상태에서 확인하기 위한 것) — 이 체인의 compose 스택 전용 DB에서만 안전하다. */
+export function clearE2eOperatorQueues(): { appeals_deleted: number; payouts_deleted: number } {
+  return runSeedCommand("seed_e2e_operator_queues", ["--clear"]) as {
+    appeals_deleted: number;
+    payouts_deleted: number;
+  };
 }

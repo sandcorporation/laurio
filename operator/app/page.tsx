@@ -1,15 +1,19 @@
 "use client";
 
-// 로그인 후 착지 화면(#63). 지금은 로그인이 실제로 이어지는지 볼 수 있는 최소
-// 화면이다 — 자기 아이디·등급을 보여준다. 「할 일」 세 큐 건수는 #65가 이 자리를
-// 채운다.
+// 「할 일」 홈(#65). 운영자가 이 앱을 여는 이유는 단 하나 — 자기를 기다리는 것이
+// 무엇인지 알기 위해서다. 세 큐의 건수를 보여주고, 각 건수에서 그 목록으로 바로
+// 간다. 목록 화면 자체(이의 심판 #66, 지급 큐 #68)는 다른 티켓의 몫이라 여기서는
+// 만들지 않는다 — 링크의 목적지로만 남겨 둔다.
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { QueueCard } from "@/lib/home/queue-card";
+import { useQueueCounts } from "@/lib/home/use-queue-counts";
 import { useSession } from "@/lib/auth/use-session";
 
 export default function OperatorHome() {
   const session = useSession();
+  const counts = useQueueCounts(session.status === "authenticated");
   const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
 
@@ -44,6 +48,31 @@ export default function OperatorHome() {
         {session.user.is_superuser ? "상위 등급 (계정 관리 가능)" : "일반 등급"}
       </p>
       <p data-testid="operator-home-protected-content">이 화면은 로그인해야만 보입니다.</p>
+
+      <section data-testid="operator-home-queues">
+        <QueueCard
+          testId="queue-appeals-pending"
+          label="심판 대기 중인 이의"
+          href="/appeals?status=pending"
+          state={counts}
+          pick={(c) => c.pendingAppeals}
+        />
+        <QueueCard
+          testId="queue-payouts-identity"
+          label="신원 대기 중인 지급"
+          href="/payouts?blocked_on=identity"
+          state={counts}
+          pick={(c) => c.identityPendingPayouts}
+        />
+        <QueueCard
+          testId="queue-payouts-seller"
+          label="Seller 대기 중인 지급"
+          href="/payouts?blocked_on=seller"
+          state={counts}
+          pick={(c) => c.sellerPendingPayouts}
+        />
+      </section>
+
       <button type="button" data-testid="logout-button" onClick={handleLogout} disabled={loggingOut}>
         {loggingOut ? "로그아웃 중..." : "로그아웃"}
       </button>

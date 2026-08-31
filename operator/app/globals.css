@@ -57,3 +57,36 @@ button:disabled {
   color: #b3261e;
   font-size: 0.9rem;
 }
+
+/* 「할 일」 홈의 큐 카드(#65) — 카드 전체가 링크다. */
+[data-testid="operator-home-queues"] {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+[data-testid="operator-home-queues"] a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid #cfcfcb;
+  border-radius: 6px;
+  padding: 1rem 1.25rem;
+  text-decoration: none;
+  color: inherit;
+  background: #fff;
+}
+
+[data-testid="operator-home-queues"] a:hover {
+  border-color: #1a1a1a;
+}
+
+[data-testid$="-count"] {
+  font-weight: 600;
+  font-size: 1.1rem;
+}
+
+[data-testid$="-empty"] {
+  color: #6b6b66;
+}
