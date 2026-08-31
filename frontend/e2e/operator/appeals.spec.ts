@@ -3,6 +3,7 @@ import type { Page } from "@playwright/test";
 
 import {
   E2E_OPERATOR_PASSWORD,
+  ledgerEntryCount,
   seedE2eOperator,
   seedE2eOperatorAppeal,
   sourceReadingCount,
@@ -243,5 +244,224 @@ test.describe("소스는 접혀 있다(#66 핵심, ADR-0022)", () => {
     await expect
       .poll(() => sourceReadingCount(seeded.submission_id, seeded.dev_access))
       .toBe(afterFirst + 1);
+  });
+});
+
+/** 「심판 대기」 큐 카드의 현재 표시값을 읽는다 — home.spec.ts의 readQueueValue와
+ * 같은 이유(로딩이 끝났다는 것을 자동 대기로 보장하지 않으면 "-count"/"-empty"
+ * 어느 쪽도 없는 프레임에서 읽어 통과할 수 없는 단언이 된다). */
+async function readPendingAppealsCount(page: Page): Promise<number> {
+  const countLocator = page.getByTestId("queue-appeals-pending-count");
+  const emptyLocator = page.getByTestId("queue-appeals-pending-empty");
+  await expect(countLocator.or(emptyLocator)).toBeVisible();
+
+  if ((await emptyLocator.count()) > 0) return 0;
+  const text = await countLocator.textContent();
+  return Number.parseInt(text ?? "0", 10);
+}
+
+test.describe("이의 심판 — 인용·기각과 감사 추적(#67)", () => {
+  test("정정 금액과 이유를 넣어 인용하면 심판이 확정되고, 화면이 확정된 심판을 보여주는 상태로 바뀐다", async ({
+    page,
+  }) => {
+    const operator = seedE2eOperator({ username: `e2e-op-appeals-uphold-${Date.now()}` });
+    const seeded = seedE2eOperatorAppeal();
+
+    await loginAsOperator(page, operator.username);
+    await page.goto(`/appeals/${seeded.appeal_id}`);
+    await expect(page.getByTestId("ruling-form")).toBeVisible();
+    await expect(page.getByTestId("appeal-detail-ruling")).toHaveCount(0);
+
+    await page
+      .getByTestId("ruling-note")
+      .fill("실제로는 요구사항을 충족했다고 판단해 인용합니다.");
+    await page.getByTestId("ruling-correction-amount").fill("5000");
+    await page.getByTestId("ruling-uphold-button").click();
+
+    await expect(page.getByTestId("appeal-detail-ruling")).toBeVisible();
+    await expect(page.getByTestId("appeal-detail-ruling-decision")).toContainText("인용");
+    await expect(page.getByTestId("appeal-detail-ruling-ruled-by")).toContainText(
+      operator.username,
+    );
+    await expect(page.getByTestId("appeal-detail-ruling-note")).toContainText(
+      "실제로는 요구사항을 충족했다고 판단해 인용합니다.",
+    );
+    await expect(page.getByTestId("appeal-detail-ruling-correction-amount")).toContainText(
+      "5000",
+    );
+    await expect(page.getByTestId("appeal-detail-status")).toContainText("인용");
+
+    // 폼이 사라졌다 — 숨긴 것이 아니라 없다("이미 심판된 이의에는 폼이 아예
+    // 없다", #67 AC).
+    await expect(page.getByTestId("ruling-form")).toHaveCount(0);
+    await expect(page.getByTestId("ruling-uphold-button")).toHaveCount(0);
+    await expect(page.getByTestId("ruling-reject-button")).toHaveCount(0);
+  });
+
+  test("이유를 넣어 기각하면 심판이 확정된다", async ({ page }) => {
+    const operator = seedE2eOperator({ username: `e2e-op-appeals-reject-${Date.now()}` });
+    const seeded = seedE2eOperatorAppeal();
+
+    await loginAsOperator(page, operator.username);
+    await page.goto(`/appeals/${seeded.appeal_id}`);
+    await expect(page.getByTestId("ruling-form")).toBeVisible();
+
+    await page.getByTestId("ruling-note").fill("검토했으나 동의하지 않습니다.");
+    await page.getByTestId("ruling-reject-button").click();
+
+    await expect(page.getByTestId("appeal-detail-ruling")).toBeVisible();
+    await expect(page.getByTestId("appeal-detail-ruling-decision")).toContainText("기각");
+    await expect(page.getByTestId("appeal-detail-ruling-ruled-by")).toContainText(
+      operator.username,
+    );
+    await expect(page.getByTestId("appeal-detail-ruling-note")).toContainText(
+      "검토했으나 동의하지 않습니다.",
+    );
+    // 기각은 돈이 움직이지 않았으므로 정정 금액이 없다.
+    await expect(page.getByTestId("appeal-detail-ruling-correction-amount")).toHaveCount(0);
+    await expect(page.getByTestId("appeal-detail-status")).toContainText("기각");
+    await expect(page.getByTestId("ruling-form")).toHaveCount(0);
+  });
+
+  test("정정 금액 없이 인용하려 하면 거절되고, 그 이유가 화면에 보인다", async ({ page }) => {
+    const operator = seedE2eOperator({ username: `e2e-op-appeals-noamount-${Date.now()}` });
+    const seeded = seedE2eOperatorAppeal();
+
+    await loginAsOperator(page, operator.username);
+    await page.goto(`/appeals/${seeded.appeal_id}`);
+
+    await page.getByTestId("ruling-note").fill("근거는 있는데 금액을 안 넣었다.");
+    await page.getByTestId("ruling-uphold-button").click();
+
+    await expect(page.getByTestId("ruling-error")).toContainText("correction_amount");
+    // 거절됐으므로 여전히 심판 대기 상태 — 폼이 그대로 남아 있고, 결과 섹션은
+    // 없다.
+    await expect(page.getByTestId("ruling-form")).toBeVisible();
+    await expect(page.getByTestId("appeal-detail-ruling")).toHaveCount(0);
+  });
+
+  test("이유 없이(공백만이어도) 심판하려 하면 인용·기각 양쪽 모두 거절된다", async ({
+    page,
+  }) => {
+    const operator = seedE2eOperator({ username: `e2e-op-appeals-noreason-${Date.now()}` });
+    const seeded = seedE2eOperatorAppeal();
+
+    await loginAsOperator(page, operator.username);
+    await page.goto(`/appeals/${seeded.appeal_id}`);
+
+    // 인용 시도 — 금액은 채웠지만 이유가 공백뿐이다.
+    await page.getByTestId("ruling-note").fill("   ");
+    await page.getByTestId("ruling-correction-amount").fill("1000");
+    await page.getByTestId("ruling-uphold-button").click();
+    await expect(page.getByTestId("ruling-error")).toContainText("ruling_note");
+    await expect(page.getByTestId("appeal-detail-ruling")).toHaveCount(0);
+
+    // 같은 이의에서 기각도 이유가 없으면 거절된다 — 아직 심판되지 않았으므로
+    // 폼이 그대로 남아 있어 재시도할 수 있다.
+    await page.getByTestId("ruling-note").fill("");
+    await page.getByTestId("ruling-reject-button").click();
+    await expect(page.getByTestId("ruling-error")).toContainText("ruling_note");
+    await expect(page.getByTestId("appeal-detail-ruling")).toHaveCount(0);
+    await expect(page.getByTestId("ruling-form")).toBeVisible();
+  });
+
+  test("확정된 이의에 심판 요청을 우회해서 보내면 거절되고(409), 정정 분개가 하나 더 생기지 않는다", async ({
+    page,
+    baseURL,
+  }) => {
+    const operator = seedE2eOperator({ username: `e2e-op-appeals-doublerule-${Date.now()}` });
+    const seeded = seedE2eOperatorAppeal("uphold");
+
+    const before = ledgerEntryCount(seeded.contest_id);
+
+    await loginAsOperator(page, operator.username);
+    await page.goto(`/appeals/${seeded.appeal_id}`);
+    // 이미 심판된 이의 — 화면이 폼을 아예 주지 않는다(사고 예방).
+    await expect(page.getByTestId("ruling-form")).toHaveCount(0);
+
+    // 화면을 우회해 같은 엔드포인트를 직접 친다 — 오래된 탭·더블 클릭·뒤로가기
+    // 재제출을 흉내낸다(서버가 거절하는 쪽, 방어). page.request는 브라우저
+    // 컨텍스트의 쿠키(로그인으로 얻은 운영자 세션)를 공유하므로 실제 인증된
+    // 요청이다. `page.request`는 실제 페이지의 fetch와 달리 Origin 헤더를
+    // 자동으로 싣지 않으므로(proxy.spec.ts가 이미 겪은 것과 같은 함정) 명시적으로
+    // 붙인다 — 안 그러면 BFF 자신의 Origin 검증(fail-closed)에서 403으로
+    // 막혀, 이 테스트가 확인하려는 백엔드의 409 조건부 UPDATE에 도달하지 못한다.
+    const response = await page.request.post(
+      `/api/backend/operator/appeals/${seeded.appeal_id}/rule`,
+      {
+        headers: { origin: baseURL! },
+        data: { decision: "reject", ruling_note: "재심판 시도 — 거절되어야 한다." },
+      },
+    );
+    expect(response.status()).toBe(409);
+
+    // "409가 났다"에서 멈추지 않는다 — 원장이 append-only이므로 잘못된
+    // 재심판이 정정 분개를 하나 더 만들지 않았는지 실제로 확인한다(#67 AC).
+    expect(ledgerEntryCount(seeded.contest_id)).toBe(before);
+  });
+
+  test("인용이 만든 정정이 원장에 실제로 반영됐음을 확인한다", async ({ page }) => {
+    const operator = seedE2eOperator({ username: `e2e-op-appeals-ledger-${Date.now()}` });
+    const seeded = seedE2eOperatorAppeal();
+
+    const before = ledgerEntryCount(seeded.contest_id);
+
+    await loginAsOperator(page, operator.username);
+    await page.goto(`/appeals/${seeded.appeal_id}`);
+    await page.getByTestId("ruling-note").fill("정정이 원장에 반영되는지 확인.");
+    await page.getByTestId("ruling-correction-amount").fill("7777");
+    await page.getByTestId("ruling-uphold-button").click();
+    await expect(page.getByTestId("appeal-detail-ruling")).toBeVisible();
+
+    expect(ledgerEntryCount(seeded.contest_id)).toBe(before + 1);
+  });
+
+  test("심판 후 홈의 「심판 대기」 건수가 줄어든다", async ({ page }) => {
+    const operator = seedE2eOperator({ username: `e2e-op-appeals-homecount-${Date.now()}` });
+    const seeded = seedE2eOperatorAppeal();
+
+    await loginAsOperator(page, operator.username);
+
+    await page.goto("/");
+    const before = await readPendingAppealsCount(page);
+
+    await page.goto(`/appeals/${seeded.appeal_id}`);
+    await page.getByTestId("ruling-note").fill("홈 건수 감소 확인용 기각.");
+    await page.getByTestId("ruling-reject-button").click();
+    await expect(page.getByTestId("appeal-detail-ruling")).toBeVisible();
+
+    await page.goto("/");
+    const after = await readPendingAppealsCount(page);
+
+    expect(after).toBe(before - 1);
+  });
+
+  test("심판 중 세션이 만료되면 로그인으로 돌아가고, 심판은 일어나지 않는다", async ({
+    page,
+  }) => {
+    // 실제 세션 만료(Redis에서 세션을 지우는 등)는 이 화면의 렌더링 로직과
+    // 무관한 배관이 필요하다. 401 자체는 이미 백엔드 HTTP 시임(OperatorAuth)이
+    // 커버하므로, 여기서는 route 가로채기로 그 조건만 재현한다 — 실제 동작이
+    // 이미 백엔드 HTTP 시임에서 검증됐을 때만 쓰기로 한 ADR-0021의 좁은 예외
+    // (source-reveal.tsx의 같은 분기와 같은 판단).
+    const operator = seedE2eOperator({ username: `e2e-op-appeals-expire-${Date.now()}` });
+    const seeded = seedE2eOperatorAppeal();
+
+    const before = ledgerEntryCount(seeded.contest_id);
+
+    await loginAsOperator(page, operator.username);
+    await page.goto(`/appeals/${seeded.appeal_id}`);
+
+    await page.route("**/api/backend/operator/appeals/*/rule", (route) =>
+      route.fulfill({ status: 401, body: JSON.stringify({ detail: "세션이 만료되었습니다." }) }),
+    );
+
+    await page.getByTestId("ruling-note").fill("세션 만료 시나리오.");
+    await page.getByTestId("ruling-reject-button").click();
+
+    await expect(page).toHaveURL(/\/login/);
+
+    // 심판은 일어나지 않았다 — 원장에도 변화가 없다.
+    expect(ledgerEntryCount(seeded.contest_id)).toBe(before);
   });
 });
