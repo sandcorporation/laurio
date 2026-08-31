@@ -272,9 +272,58 @@ services:
     # install은 워크스페이스 루트(/app)에서, dev는 이 앱 디렉터리(이미지의
     # WORKDIR인 /app/frontend, frontend.Dockerfile 참고)에서 돈다 — pnpm은
     # 워크스페이스 멤버 디렉터리 안에서 실행해도 루트 락파일을 그대로 찾는다.
+    #
+    # `--force`(운영자 앱 04/05 #62·#63) — 워크스페이스에 새 멤버(packages/
+    # bff-shared, operator/)가 추가된 뒤, 이미 떠 있던 스택에서 `--frozen-lockfile`
+    # 만으로는 이 서비스 자신의 node_modules 볼륨이 갱신되지 않는 것을 직접
+    # 재현해 확인했다 — frontend 자신의 의존성 집합은 안 바뀌었으니 pnpm이 "이미
+    # 최신"이라고 보고 몇 초 만에 끝내는데, 그 볼륨에 남아 있던 심볼릭 링크
+    # 일부가 다음 dev 실행에서 `next: not found` 로 깨졌다(재현 조건까지는
+    # 못 좁혔다 — 이전 컨테이너의 중단된 install이 볼륨에 반쪽짜리 상태를
+    # 남겼을 가능성이 크다). `--force` 는 매번 완전히 다시 링크해 그 볼륨이
+    # 어떤 상태로 남아 있었든 항상 같은 결과로 수렴시킨다 — 매 기동이 몇 초 대신
+    # 수십 초 걸리는 대가로 CLAUDE.md 가 이미 약속한 "볼륨이 오래됐든 매번 같은
+    # 상태로 맞춰진다"를 실제로 지킨다.
     command: >
-      sh -c "cd /app && CI=true pnpm install --frozen-lockfile &&
+      sh -c "cd /app && CI=true pnpm install --frozen-lockfile --force &&
              cd /app/frontend && pnpm dev"
+
+  # 운영자 앱(#63, ADR-0019/0021) — 공개 앱과 다른 오리진으로 뜬다. 같은
+  # 워크스페이스 멤버라서 frontend 서비스와 거의 같은 모양이다: 저장소 전체를
+  # 마운트하고, 워크스페이스 루트에서 install한 뒤 operator/에서 dev를 돈다.
+  operator:
+    build:
+      context: ..
+      dockerfile: docker/operator.Dockerfile
+      target: dev
+    depends_on:
+      backend:
+        condition: service_started
+    environment:
+      LAURIO_API_BASE_URL: http://backend:8000
+      # dev에서는 비워 둔다 — backend/config/settings.py의 OPERATOR_WEB_ORIGIN도
+      # dev에서는 비어 있고(IS_DEPLOYED_ENVIRONMENT가 아니라서 부팅 가드가 걸리지
+      # 않는다), 양쪽 다 비어 있으면 둘 다 같은 값(Host 헤더로 유도한 도착지
+      # 오리진)을 독립적으로 계산해 정확히 맞아떨어진다(lib/backend.ts의
+      # operatorOrigin 주석 참고). 배포 환경(compose.staging/prod.yaml)에서는
+      # 백엔드의 LAURIO_OPERATOR_ORIGIN과 반드시 같은 값을 준다 — #70의 몫이다.
+    ports:
+      # 공개 앱(53000)과 겹치지 않는 새 포트. 이 머신에서 이미 쓰는 포트를
+      # 피했다(디스패치 지침) — 기본값은 CLAUDE.md 포트 표와 같다.
+      - "${LAURIO_OPERATOR_WEB_PORT:-53001}:3000"
+    volumes:
+      - ..:/app
+      - laurio-dev-operator-node-modules:/app/node_modules
+      - laurio-dev-operator-app-node-modules:/app/operator/node_modules
+      - laurio-dev-operator-shared-node-modules:/app/packages/bff-shared/node_modules
+      - laurio-dev-operator-next:/app/operator/.next
+      - laurio-dev-operator-pnpm-store:/pnpm/store
+    # frontend 서비스 command 주석 참고 — `--force` 없이는 워크스페이스 멤버가
+    # 늘어난 뒤 이미 떠 있던 스택에서 이 서비스 자신의 node_modules 볼륨이
+    # 안정적으로 수렴하지 않는 것을 직접 재현해 확인했다.
+    command: >
+      sh -c "cd /app && CI=true pnpm install --frozen-lockfile --force &&
+             cd /app/operator && pnpm dev"
 
 volumes:
   laurio-dev-redis:
@@ -284,4 +333,9 @@ volumes:
   laurio-dev-web-shared-node-modules:
   laurio-dev-web-next:
   laurio-dev-web-pnpm-store:
+  laurio-dev-operator-node-modules:
+  laurio-dev-operator-app-node-modules:
+  laurio-dev-operator-shared-node-modules:
+  laurio-dev-operator-next:
+  laurio-dev-operator-pnpm-store:
   laurio-dev-minio:
