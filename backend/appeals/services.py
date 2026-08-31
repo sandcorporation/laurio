@@ -22,10 +22,12 @@ from core.clock import Clock
 from ledger.models import Account, EntrySide
 from ledger.services import LineInput, post_journal_entry
 
-from .models import Appeal
+from .models import Appeal, AppealRuling
 
 
-def uphold_appeal(appeal: Appeal, *, correction_amount: int, ruling_note: str, now=None) -> Appeal:
+def uphold_appeal(
+    appeal: Appeal, *, ruled_by, correction_amount: int, ruling_note: str, now=None
+) -> Appeal:
     """이의를 인용한다. 이미 심판이 끝나 있으면(rowcount!=1) 아무 것도 다시 하지
     않고 현재 상태를 그대로 돌려준다.
 
@@ -33,16 +35,17 @@ def uphold_appeal(appeal: Appeal, *, correction_amount: int, ruling_note: str, n
     이미 확정 배분된 다른 Developer들의 몫을 되돌리는 대신(ADR-0006), 플랫폼이
     자신의 채점 오판 비용을 부담하는 쪽을 택한다. 기존 분개는 하나도 건드리지
     않고 이 분개만 새로 추가된다(append-only, ADR-0004).
+
+    `ruled_by` 는 필수다 — 신원 없는 심판이 저장될 수 있는 경로를 남기지 않는다.
+    `AppealRuling` 은 조건부 UPDATE 를 이긴 뒤에만 만들어지므로, 정정 분개와 마찬가지로
+    정확히 한 번만 생긴다(그리고 OneToOne 이 그것을 스키마로 한 번 더 막는다).
     """
 
     now = now if now is not None else Clock.now()
 
     with transaction.atomic():
         updated = Appeal.objects.filter(pk=appeal.pk, status=Appeal.Status.PENDING).update(
-            status=Appeal.Status.UPHELD,
-            ruling_note=ruling_note,
-            correction_amount=correction_amount,
-            ruled_at=now,
+            status=Appeal.Status.UPHELD
         )
         appeal = Appeal.objects.select_related("submission__contest").get(pk=appeal.pk)
 
@@ -73,22 +76,42 @@ def uphold_appeal(appeal: Appeal, *, correction_amount: int, ruling_note: str, n
             ],
         )
 
-        Appeal.objects.filter(pk=appeal.pk).update(correction_journal_entry_id=entry.id)
-        appeal.correction_journal_entry_id = entry.id
+        AppealRuling.objects.create(
+            appeal=appeal,
+            ruled_by=ruled_by,
+            decision=AppealRuling.Decision.UPHELD,
+            note=ruling_note,
+            ruled_at=now,
+            correction_amount=correction_amount,
+            correction_journal_entry_id=entry.id,
+        )
 
     return appeal
 
 
-def reject_appeal(appeal: Appeal, *, ruling_note: str, now=None) -> Appeal:
+def reject_appeal(appeal: Appeal, *, ruled_by, ruling_note: str, now=None) -> Appeal:
     """이의를 기각한다. 원장에는 아무 것도 남기지 않는다 — 돈이 움직이지 않았다.
+
+    돈이 움직이지 않아도 신원은 남긴다. "왜 기각했는가"와 "누가 기각했는가"는
+    인용만큼이나 감사 대상이다 — Developer 에게는 이쪽이 더 아픈 결정이다.
 
     이미 심판이 끝나 있으면(rowcount!=1) 아무 것도 다시 하지 않는다.
     """
 
     now = now if now is not None else Clock.now()
 
-    Appeal.objects.filter(pk=appeal.pk, status=Appeal.Status.PENDING).update(
-        status=Appeal.Status.REJECTED, ruling_note=ruling_note, ruled_at=now
-    )
+    with transaction.atomic():
+        updated = Appeal.objects.filter(pk=appeal.pk, status=Appeal.Status.PENDING).update(
+            status=Appeal.Status.REJECTED
+        )
+        if updated == 1:
+            AppealRuling.objects.create(
+                appeal=appeal,
+                ruled_by=ruled_by,
+                decision=AppealRuling.Decision.REJECTED,
+                note=ruling_note,
+                ruled_at=now,
+            )
+
     appeal.refresh_from_db()
     return appeal

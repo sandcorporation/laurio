@@ -650,72 +650,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/internal/appeals": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Appeals
-         * @description 운영자가 검토할 이의제기 목록. `status` 쿼리로 pending/upheld/rejected를
-         *     거를 수 있다(기본은 전체).
-         */
-        get: operations["appeals_api_list_appeals"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/internal/appeals/{appeal_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Appeal Detail
-         * @description 운영자가 Score 스냅샷(점수·근거·프롬프트·모델버전)과 함께 이의를 조회한다
-         *     (#21 AC).
-         */
-        get: operations["appeals_api_get_appeal_detail"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/internal/appeals/{appeal_id}/rule": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Rule Appeal
-         * @description 운영자가 이의를 인용하거나 기각한다.
-         *
-         *     이미 심판이 끝난 이의제기를 다시 심판하려 하면 409 — 정정 분개가 두 번 남는
-         *     사고를 API 레벨에서도 막는다(`appeals.services`의 조건부 UPDATE가 최후의
-         *     방어선이다).
-         */
-        post: operations["appeals_api_rule_appeal"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/internal/distributions/run-due": {
         parameters: {
             query?: never;
@@ -1044,6 +978,72 @@ export interface paths {
         get: operations["notifications_api_list_my_notifications"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/appeals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Appeals
+         * @description Operator 가 검토할 이의제기 목록. `status` 쿼리로 pending/upheld/rejected를
+         *     거를 수 있다(기본은 전체).
+         */
+        get: operations["appeals_api_list_appeals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/appeals/{appeal_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Appeal Detail
+         * @description 운영자가 Score 스냅샷(점수·근거·프롬프트·모델버전)과 함께 이의를 조회한다
+         *     (#21 AC).
+         */
+        get: operations["appeals_api_get_appeal_detail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/appeals/{appeal_id}/rule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rule Appeal
+         * @description Operator 가 이의를 인용하거나 기각한다 — 그 신원이 함께 남는다(#44).
+         *
+         *     이미 심판이 끝난 이의제기를 다시 심판하려 하면 409 — 정정 분개가 두 번 남는
+         *     사고를 API 레벨에서도 막는다(`appeals.services`의 조건부 UPDATE가 최후의
+         *     방어선이다).
+         */
+        post: operations["appeals_api_rule_appeal"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1426,7 +1426,7 @@ export interface components {
         };
         /**
          * AppealDetailOut
-         * @description 운영자 전용 상세 — 이의제기 자체에 Score 스냅샷을 얹어 함께 돌려준다.
+         * @description 운영자 전용 상세 — 이의제기 자체에 Score 스냅샷과 심판 기록을 얹는다.
          */
         AppealDetailOut: {
             /** Correction Amount */
@@ -1442,6 +1442,7 @@ export interface components {
             reason: string;
             /** Ruled At */
             ruled_at?: string | null;
+            ruling?: components["schemas"]["RulingOut"] | null;
             /** Ruling Note */
             ruling_note: string;
             score: components["schemas"]["ScoreSnapshotOut"];
@@ -1450,7 +1451,15 @@ export interface components {
             /** Submission Id */
             submission_id: number;
         };
-        /** AppealOut */
+        /**
+         * AppealOut
+         * @description Developer 가 보는 자기 이의의 상태.
+         *
+         *     심판 결과는 이제 별도 테이블에 살지만(AppealRuling, #44) 여기 필드 구성은
+         *     그대로 둔다 — Developer 쪽 계약을 바꿀 이유가 없다. 심판 전에는 전부 비어 있고,
+         *     `ruled_by` 는 여기에 넣지 않는다: 이의를 제기한 사람에게 심판한 개인의 이름을
+         *     노출할 이유가 없고, 감사에 필요한 것은 운영자 표면에서 조회된다.
+         */
         AppealOut: {
             /** Correction Amount */
             correction_amount?: number | null;
@@ -2260,6 +2269,32 @@ export interface components {
             order?: number | null;
             /** Text */
             text?: string | null;
+        };
+        /**
+         * RulingOut
+         * @description 심판 기록 — 운영자 표면에서만 보인다.
+         *
+         *     `ruled_by_*` 가 이 스펙의 목적 그 자체다. 이 행이 존재하는데 이 필드가 비어
+         *     있는 상태는 스키마상 만들 수 없다(AppealRuling 참고).
+         */
+        RulingOut: {
+            /** Correction Amount */
+            correction_amount?: number | null;
+            /** Correction Journal Entry Id */
+            correction_journal_entry_id?: number | null;
+            /** Decision */
+            decision: string;
+            /** Note */
+            note: string;
+            /**
+             * Ruled At
+             * Format: date-time
+             */
+            ruled_at: string;
+            /** Ruled By Id */
+            ruled_by_id: number;
+            /** Ruled By Username */
+            ruled_by_username: string;
         };
         /** RunDueDistributionsIn */
         RunDueDistributionsIn: {
@@ -3231,112 +3266,6 @@ export interface operations {
             };
         };
     };
-    appeals_api_list_appeals: {
-        parameters: {
-            query?: {
-                status?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AppealOut"][];
-                };
-            };
-        };
-    };
-    appeals_api_get_appeal_detail: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                appeal_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AppealDetailOut"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOut"];
-                };
-            };
-        };
-    };
-    appeals_api_rule_appeal: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                appeal_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AppealRulingIn"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AppealOut"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOut"];
-                };
-            };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOut"];
-                };
-            };
-            /** @description Unprocessable Content */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOut"];
-                };
-            };
-        };
-    };
     distributions_api_run_due: {
         parameters: {
             query?: never;
@@ -3676,6 +3605,112 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NotificationOut"][];
+                };
+            };
+        };
+    };
+    appeals_api_list_appeals: {
+        parameters: {
+            query?: {
+                status?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppealOut"][];
+                };
+            };
+        };
+    };
+    appeals_api_get_appeal_detail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                appeal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppealDetailOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    appeals_api_rule_appeal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                appeal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AppealRulingIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppealOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
                 };
             };
         };

@@ -24,9 +24,13 @@ from datetime import timedelta
 
 import pytest
 from django.conf import settings
+from django.contrib.auth import get_user_model
+from django.core.management import call_command
+from django.db import IntegrityError, transaction
+from django.db.models import ProtectedError
 from django.utils import timezone
 
-from appeals.models import Appeal
+from appeals.models import Appeal, AppealRuling
 from contests.models import Category, Contest, DeliverableType
 from core.models import ClockOverride
 from ledger.services import contest_balance, contest_entries
@@ -37,7 +41,10 @@ CONTESTS_URL = "/api/contests"
 PAYMENTS_URL = "/api/payments"
 TICK_URL = "/api/internal/tick"
 SCORING_RUN_PENDING_URL = "/api/internal/scoring/run-pending"
-INTERNAL_APPEALS_URL = "/api/internal/appeals"
+OPERATOR_APPEALS_URL = "/api/operator/appeals"
+# Django 테스트 클라이언트의 기본 호스트. 운영자 경로의 변경 요청은 Origin 을
+# 검증한다(#43, ADR-0016 의 성립 조건).
+OPERATOR_ORIGIN = "http://testserver"
 
 
 # --- 헬퍼 (test_distributions.py/test_scoring.py와 같은 형식) -------------------
@@ -45,6 +52,53 @@ INTERNAL_APPEALS_URL = "/api/internal/appeals"
 
 def _internal_headers():
     return {"HTTP_X_INTERNAL_TOKEN": settings.INTERNAL_API_TOKEN}
+
+
+def _operator_client(username="operator-1", *, superuser=False):
+    """로그인된 Operator 용 클라이언트 (#44).
+
+    Developer 와 **다른 클라이언트**를 쓴다. 둘은 서로소인 신원이고(ADR-0018) 인증
+    수단도 다르다 — Developer 는 Bearer, Operator 는 세션 쿠키다. 한 클라이언트에
+    둘을 섞으면 테스트가 그 구분을 흐린다.
+    """
+
+    from django.test import Client
+
+    call_command("create_operator", username, password="operator-pw-9134-xyz", superuser=superuser)
+    operator = Client()
+    response = operator.post(
+        "/api/operator/login",
+        data={"username": username, "password": "operator-pw-9134-xyz"},
+        content_type="application/json",
+        HTTP_ORIGIN=OPERATOR_ORIGIN,
+    )
+    assert response.status_code == 200, response.content
+    return operator
+
+
+def _appeal_ready(client, category, landing_type):
+    """채점까지 끝난 Submission 에 이의를 하나 걸어두고 그 id 를 돌려준다."""
+
+    _sponsor, dev, _contest, submission = _scored_submission(
+        client, category, landing_type, grounded=False, prize=900_000
+    )
+    response = client.post(
+        APPEAL_URL(submission["id"]),
+        data={"reason": "Evidence가 실제로 소스에 있습니다."},
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert response.status_code == 201, response.content
+    return response.json()["id"]
+
+
+def _rule(operator, appeal_id, **payload):
+    return operator.post(
+        f"{OPERATOR_APPEALS_URL}/{appeal_id}/rule",
+        data=payload,
+        content_type="application/json",
+        HTTP_ORIGIN=OPERATOR_ORIGIN,
+    )
 
 
 def _freeze(at):
@@ -333,6 +387,7 @@ def test_duplicate_appeal_is_rejected(client, category, landing_type):
 
 @pytest.mark.django_db
 def test_operator_views_appeal_with_full_score_snapshot(client, category, landing_type):
+    operator = _operator_client()
     sponsor, dev, contest, submission = _scored_submission(
         client, category, landing_type, grounded=False
     )
@@ -346,7 +401,7 @@ def test_operator_views_appeal_with_full_score_snapshot(client, category, landin
 
     score = Score.objects.get(submission_id=submission["id"])
 
-    detail = client.get(f"{INTERNAL_APPEALS_URL}/{appeal_id}", **_internal_headers())
+    detail = operator.get(f"{OPERATOR_APPEALS_URL}/{appeal_id}")
     assert detail.status_code == 200
     body = detail.json()
     assert body["score"]["percentage"] == str(score.percentage)
@@ -354,7 +409,7 @@ def test_operator_views_appeal_with_full_score_snapshot(client, category, landin
     assert body["score"]["prompt"] == score.prompt
     assert body["score"]["reasoning"] == score.reasoning
 
-    listing = client.get(f"{INTERNAL_APPEALS_URL}?status=pending", **_internal_headers())
+    listing = operator.get(f"{OPERATOR_APPEALS_URL}?status=pending")
     assert listing.status_code == 200
     assert any(a["id"] == appeal_id for a in listing.json())
 
@@ -366,6 +421,7 @@ def test_operator_views_appeal_with_full_score_snapshot(client, category, landin
 def test_upholding_appeal_adds_correction_entry_without_touching_originals(
     client, category, landing_type
 ):
+    operator = _operator_client()
     sponsor, dev, contest, submission = _scored_submission(
         client, category, landing_type, grounded=False, prize=900_000
     )
@@ -385,16 +441,11 @@ def test_upholding_appeal_adds_correction_entry_without_touching_originals(
     ]
     assert len(original_entries_before) >= 1  # 결제 확정 분개가 이미 있다.
 
-    rule_resp = client.post(
-        f"{INTERNAL_APPEALS_URL}/{appeal_id}/rule",
-        data={
+    rule_resp = _rule(operator, appeal_id, **{
             "decision": "uphold",
             "ruling_note": "재검토 결과 근거가 확인되어 인용합니다.",
             "correction_amount": 50_000,
-        },
-        content_type="application/json",
-        **_internal_headers(),
-    )
+        })
     assert rule_resp.status_code == 200, rule_resp.content
     body = rule_resp.json()
     assert body["status"] == "upheld"
@@ -411,8 +462,10 @@ def test_upholding_appeal_adds_correction_entry_without_touching_originals(
 
     # 새 정정 분개가 추가됐다.
     appeal = Appeal.objects.get(id=appeal_id)
-    assert appeal.correction_journal_entry_id is not None
-    correction_entry = next(e for e in entries_after if e.id == appeal.correction_journal_entry_id)
+    assert appeal.ruling.correction_journal_entry_id is not None
+    correction_entry = next(
+        e for e in entries_after if e.id == appeal.ruling.correction_journal_entry_id
+    )
     lines = {(l.account, l.side): l.amount for l in correction_entry.lines.all()}
     assert lines[("platform_fee_revenue", "debit")] == 50_000
     assert lines[("developer_payable", "credit")] == 50_000
@@ -431,6 +484,7 @@ def test_upholding_appeal_adds_correction_entry_without_touching_originals(
 
 @pytest.mark.django_db
 def test_rejecting_appeal_leaves_ledger_untouched(client, category, landing_type):
+    operator = _operator_client()
     sponsor, dev, contest, submission = _scored_submission(
         client, category, landing_type, grounded=False
     )
@@ -445,12 +499,7 @@ def test_rejecting_appeal_leaves_ledger_untouched(client, category, landing_type
     contest_obj = Contest.objects.get(id=contest["id"])
     entries_before = {e.id for e in contest_entries(contest_obj.ledger_id)}
 
-    rule_resp = client.post(
-        f"{INTERNAL_APPEALS_URL}/{appeal_id}/rule",
-        data={"decision": "reject", "ruling_note": "근거 부족으로 기각합니다."},
-        content_type="application/json",
-        **_internal_headers(),
-    )
+    rule_resp = _rule(operator, appeal_id, **{"decision": "reject", "ruling_note": "근거 부족으로 기각합니다."})
     assert rule_resp.status_code == 200
     body = rule_resp.json()
     assert body["status"] == "rejected"
@@ -460,11 +509,12 @@ def test_rejecting_appeal_leaves_ledger_untouched(client, category, landing_type
     assert entries_after == entries_before
 
     appeal = Appeal.objects.get(id=appeal_id)
-    assert appeal.correction_journal_entry_id is None
+    assert appeal.ruling.correction_journal_entry_id is None
 
 
 @pytest.mark.django_db
 def test_ruling_an_already_ruled_appeal_is_rejected(client, category, landing_type):
+    operator = _operator_client()
     sponsor, dev, contest, submission = _scored_submission(
         client, category, landing_type, grounded=False
     )
@@ -476,30 +526,20 @@ def test_ruling_an_already_ruled_appeal_is_rejected(client, category, landing_ty
     )
     appeal_id = appeal_resp.json()["id"]
 
-    first = client.post(
-        f"{INTERNAL_APPEALS_URL}/{appeal_id}/rule",
-        data={"decision": "uphold", "ruling_note": "인용", "correction_amount": 10_000},
-        content_type="application/json",
-        **_internal_headers(),
-    )
+    first = _rule(operator, appeal_id, **{"decision": "uphold", "ruling_note": "인용", "correction_amount": 10_000})
     assert first.status_code == 200
 
     contest_obj = Contest.objects.get(id=contest["id"])
     entries_after_first = {e.id for e in contest_entries(contest_obj.ledger_id)}
 
-    second = client.post(
-        f"{INTERNAL_APPEALS_URL}/{appeal_id}/rule",
-        data={"decision": "uphold", "ruling_note": "다시 인용", "correction_amount": 99_999},
-        content_type="application/json",
-        **_internal_headers(),
-    )
+    second = _rule(operator, appeal_id, **{"decision": "uphold", "ruling_note": "다시 인용", "correction_amount": 99_999})
     assert second.status_code == 409
 
     entries_after_second = {e.id for e in contest_entries(contest_obj.ledger_id)}
     assert entries_after_second == entries_after_first
 
     appeal = Appeal.objects.get(id=appeal_id)
-    assert appeal.correction_amount == 10_000
+    assert appeal.ruling.correction_amount == 10_000
 
 
 # --- 재채점 경로는 존재하지 않는다 ------------------------------------------------
@@ -531,3 +571,174 @@ def test_no_rescoring_code_path_exists_in_appeals_app():
                 assert module_name.split(".")[0] != "scoring", (
                     f"{module.__name__}이 scoring에서 import한다: {module_name}"
                 )
+
+
+# --- 심판에 신원이 남는다 (#44, #24, ADR-0018) ---------------------------------
+#
+# #24 가 지목한 공백이 이것이다 — 이의를 인용하면 원장에 정정 분개가 들어가는데(돈이
+# 움직인다) 그것을 한 사람이 누구인지 어디에도 남지 않았다. 원장은 무엇이 일어났는지
+# 완벽하게 남기지만 누가 결정했는지에서 끊겼다.
+
+
+@pytest.mark.django_db
+def test_a_ruling_cannot_be_stored_without_an_author(client, category, landing_type):
+    """공백이 다시 열릴 수 없다는 것을 스키마 수준에서 확인한다.
+
+    예전에는 심판 결과가 Appeal 의 nullable 컬럼 네 개였다. 거기에 `ruled_by` 를
+    다섯 번째로 붙였다면 "신원 없는 심판" 이 여전히 표현 가능한 상태로 남았을
+    것이다. 떼어냈으므로 이제는 표현 자체가 불가능하다.
+    """
+
+    appeal_id = _appeal_ready(client, category, landing_type)
+
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            AppealRuling.objects.create(
+                appeal_id=appeal_id,
+                ruled_by=None,
+                decision=AppealRuling.Decision.REJECTED,
+                note="신원 없이",
+                ruled_at=timezone.now(),
+            )
+
+
+@pytest.mark.django_db
+def test_the_operator_who_ruled_is_traceable_from_the_correction_journal_entry(
+    client, category, landing_type
+):
+    """감사 사슬 — 돈(분개) → 심판 → 사람.
+
+    원장에는 행위자 컬럼이 없다(ADR-0018). 대신 분개 번호로 심판을 되짚으면 신원이
+    나온다. 그 되짚기가 실제로 되는지를 고정한다 — 안 되면 원장에 컬럼을 넣지
+    않기로 한 결정의 근거가 사라진다.
+    """
+
+    appeal_id = _appeal_ready(client, category, landing_type)
+    operator = _operator_client("op-tracer")
+
+    response = _rule(
+        operator,
+        appeal_id,
+        decision="uphold",
+        ruling_note="근거가 확인되어 인용합니다.",
+        correction_amount=40_000,
+    )
+    assert response.status_code == 200, response.content
+
+    entry_id = AppealRuling.objects.get(appeal_id=appeal_id).correction_journal_entry_id
+    assert entry_id is not None
+
+    # 분개 번호만 들고 시작한다 — 감사자가 실제로 가진 것이 그것뿐이다.
+    traced = AppealRuling.objects.select_related("ruled_by").get(
+        correction_journal_entry_id=entry_id
+    )
+    assert traced.ruled_by.username == "op-tracer"
+    assert traced.decision == AppealRuling.Decision.UPHELD
+    assert traced.note == "근거가 확인되어 인용합니다."
+
+
+@pytest.mark.django_db
+def test_a_rejection_also_records_who_decided(client, category, landing_type):
+    """돈이 움직이지 않아도 신원은 남는다 — Developer 에게는 이쪽이 더 아픈 결정이다."""
+
+    appeal_id = _appeal_ready(client, category, landing_type)
+    operator = _operator_client("op-rejector")
+
+    assert _rule(
+        operator, appeal_id, decision="reject", ruling_note="근거 부족으로 기각합니다."
+    ).status_code == 200
+
+    ruling = AppealRuling.objects.select_related("ruled_by").get(appeal_id=appeal_id)
+    assert ruling.ruled_by.username == "op-rejector"
+    assert ruling.decision == AppealRuling.Decision.REJECTED
+    assert ruling.correction_journal_entry_id is None
+
+
+@pytest.mark.django_db
+def test_the_operator_surface_shows_who_ruled(client, category, landing_type):
+    appeal_id = _appeal_ready(client, category, landing_type)
+    operator = _operator_client("op-viewer")
+    _rule(operator, appeal_id, decision="reject", ruling_note="기각합니다.")
+
+    detail = operator.get(f"{OPERATOR_APPEALS_URL}/{appeal_id}")
+
+    assert detail.status_code == 200
+    ruling = detail.json()["ruling"]
+    assert ruling["ruled_by_username"] == "op-viewer"
+    assert ruling["decision"] == "rejected"
+
+
+@pytest.mark.django_db
+def test_a_pending_appeal_has_no_ruling_in_the_operator_view(client, category, landing_type):
+    appeal_id = _appeal_ready(client, category, landing_type)
+    operator = _operator_client("op-early")
+
+    detail = operator.get(f"{OPERATOR_APPEALS_URL}/{appeal_id}")
+
+    assert detail.status_code == 200
+    assert detail.json()["ruling"] is None
+
+
+@pytest.mark.django_db
+def test_ruling_without_a_reason_is_refused(client, category, landing_type):
+    """돈을 움직이는 판단에 근거가 없으면 감사 기록으로서 값이 없다."""
+
+    appeal_id = _appeal_ready(client, category, landing_type)
+    operator = _operator_client("op-silent")
+
+    response = _rule(operator, appeal_id, decision="reject", ruling_note="   ")
+
+    assert response.status_code == 422, response.content
+    assert not AppealRuling.objects.filter(appeal_id=appeal_id).exists()
+
+
+@pytest.mark.django_db
+def test_the_operator_account_that_ruled_cannot_be_deleted(client, category, landing_type):
+    """PROTECT — 계정을 지우면 감사 기록이 주인을 잃는다. 비활성화는 하되 삭제는 막는다."""
+
+    appeal_id = _appeal_ready(client, category, landing_type)
+    operator = _operator_client("op-permanent")
+    _rule(operator, appeal_id, decision="reject", ruling_note="기각합니다.")
+
+    account = get_user_model().objects.get(username="op-permanent")
+
+    with pytest.raises(ProtectedError):
+        account.delete()
+
+
+@pytest.mark.django_db
+def test_the_operator_surface_is_closed_to_everyone_else(client, category, landing_type):
+    """신원 없이는 이의를 볼 수도, 심판할 수도 없다 — #24 가 지목한 그 경로다."""
+
+    appeal_id = _appeal_ready(client, category, landing_type)
+
+    assert client.get(OPERATOR_APPEALS_URL).status_code == 401
+    assert client.get(f"{OPERATOR_APPEALS_URL}/{appeal_id}").status_code == 401
+    # 공유 시크릿을 들고 와도 마찬가지다.
+    assert client.get(
+        OPERATOR_APPEALS_URL, **_internal_headers()
+    ).status_code == 401
+
+
+@pytest.mark.django_db
+def test_internal_appeals_endpoints_are_gone(client):
+    """공유 시크릿만 알면 신원 없이 돈을 움직일 수 있던 경로가 사라졌다 (#24)."""
+
+    assert client.get("/api/internal/appeals", **_internal_headers()).status_code == 404
+    assert client.get("/api/internal/appeals/1", **_internal_headers()).status_code == 404
+    assert (
+        client.post(
+            "/api/internal/appeals/1/rule",
+            data={"decision": "uphold", "ruling_note": "x", "correction_amount": 1},
+            content_type="application/json",
+            **_internal_headers(),
+        ).status_code
+        == 404
+    )
+
+
+@pytest.mark.django_db
+def test_the_remaining_internal_scan_endpoints_still_work(client):
+    """Celery beat 의 틱 전이가 흔들리면 안 된다 — InternalAuth 는 그대로 남는다."""
+
+    assert client.post(TICK_URL, **_internal_headers()).status_code == 200
