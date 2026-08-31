@@ -1,7 +1,9 @@
-"""SourceReading — Operator 의 소스 펼침이 남기는 기록 (#60, ADR-0022).
+"""SourceReading — Operator 의 소스 펼침이 남기는 기록과 그 소비처 (#60·#61, ADR-0022).
 
 #59 가 이의 상세 조회의 부수 효과로 새던 소스를 닫았다. 이 파일은 그 반대쪽을
-연다 — 소스가 필요한 심판을 위해 다시 여는 경로를, **기록과 함께**.
+연다 — 소스가 필요한 심판을 위해 다시 여는 경로를 **기록과 함께**(#60) 만들고,
+그 기록에 **읽는 사람**을 붙인다(#61) — 쓰기만 하고 아무도 읽지 않는 필드는
+이 저장소가 반복해서 겪은 결함 모양이다(ADR-0022).
 
 핵심 대상:
 
@@ -12,6 +14,9 @@
 - 열람은 사건이다 — 같은 Operator 가 다시 펼치면 행이 하나 더 쌓인다.
 - 인증·Origin 검증·404 는 다른 운영자 엔드포인트와 같은 규율을 따른다.
 - 기록 없이 소스를 얻는 다른 경로가 없다 — 운영자 표면 전체를 훑는다.
+- `GET /submissions/{id}/source-readings` — Developer 본인이 자기 Submission 의
+  열람 시각 목록을 본다. 운영자 이름은 없다. #60 의 펼침을 실제로 두 번 일으킨
+  뒤 여기서 두 건이 보이는, 두 티켓을 잇는 테스트가 있다.
 """
 
 from __future__ import annotations
@@ -209,9 +214,9 @@ def _run_scoring(client) -> dict:
     return response.json()
 
 
-def _appeal_ready(client, category, landing_type) -> tuple[int, int]:
-    """(appeal_id, submission_id)를 돌려준다 — 채점까지 끝난 Submission 에 이의를
-    하나 걸어둔다."""
+def _appeal_ready_full(client, category, landing_type) -> tuple[int, int, dict]:
+    """(appeal_id, submission_id, dev)를 돌려준다 — 채점까지 끝난 Submission 에
+    이의를 하나 걸어둔다. `dev`는 본인 조회 표면(#61) 테스트에 쓴다."""
 
     deadline = timezone.now() + timedelta(hours=1)
     sponsor, contest = _publish_contest(
@@ -231,7 +236,18 @@ def _appeal_ready(client, category, landing_type) -> tuple[int, int]:
         **_auth_header(dev["access"]),
     )
     assert response.status_code == 201, response.content
-    return response.json()["id"], submission["id"]
+    return response.json()["id"], submission["id"], dev
+
+
+def _appeal_ready(client, category, landing_type) -> tuple[int, int]:
+    """(appeal_id, submission_id)를 돌려준다 — dev 자격증명이 필요 없는 테스트용."""
+
+    appeal_id, submission_id, _dev = _appeal_ready_full(client, category, landing_type)
+    return appeal_id, submission_id
+
+
+def SOURCE_READINGS_URL(submission_id: int) -> str:
+    return f"/api/submissions/{submission_id}/source-readings"
 
 
 @pytest.fixture
@@ -410,3 +426,80 @@ def test_no_other_operator_surface_returns_source_text(client, category, landing
     assert "prompt" not in detail.json()["score"]
     for resp in (detail, listing):
         assert score.prompt not in resp.content.decode("utf-8")
+
+
+# --- Developer 가 자기 소스의 열람 기록을 본다 (#61, ADR-0022) -----------------
+
+
+@pytest.mark.django_db
+def test_developer_sees_no_readings_before_anyone_reveals(client, category, landing_type):
+    """열람이 없으면 빈 목록으로 200 — "아직 아무도 안 봤다"는 없는 리소스가 아니다."""
+
+    _appeal_id, submission_id, dev = _appeal_ready_full(client, category, landing_type)
+
+    response = client.get(SOURCE_READINGS_URL(submission_id), **_auth_header(dev["access"]))
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+@pytest.mark.django_db
+def test_two_reveals_are_visible_as_two_readings_on_the_developer_surface(
+    client, category, landing_type
+):
+    """#60 의 펼침을 실제로 두 번 일으킨 뒤 이 표면에서 두 건이 보인다 — 기록이
+    실제로 여기까지 도달한다는 것을 한 번은 끝까지 친다(#61 AC)."""
+
+    appeal_id, submission_id, dev = _appeal_ready_full(client, category, landing_type)
+    operator = _operator_client("op-twice")
+
+    assert _reveal_source(operator, appeal_id).status_code == 200
+    assert _reveal_source(operator, appeal_id).status_code == 200
+
+    response = client.get(SOURCE_READINGS_URL(submission_id), **_auth_header(dev["access"]))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 2
+    # 최신순 — 두 열람 시각이 내림차순으로 정렬되어 있다.
+    assert body[0]["read_at"] >= body[1]["read_at"]
+
+
+@pytest.mark.django_db
+def test_developer_cannot_see_another_developers_source_readings(client, category, landing_type):
+    _appeal_id, submission_id, _dev = _appeal_ready_full(client, category, landing_type)
+    other_dev = _verified_user(client, "dev-2", "dev-2-ci")
+
+    response = client.get(
+        SOURCE_READINGS_URL(submission_id), **_auth_header(other_dev["access"])
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_unauthenticated_request_for_source_readings_is_401(client, category, landing_type):
+    _appeal_id, submission_id, _dev = _appeal_ready_full(client, category, landing_type)
+
+    response = client.get(SOURCE_READINGS_URL(submission_id))
+
+    assert response.status_code == 401
+
+
+@pytest.mark.django_db
+def test_source_reading_response_does_not_expose_operator_identity(
+    client, category, landing_type
+):
+    """운영자의 이름은 주지 않는다 — 응답 본문에 신원이 없음을 직접 확인한다."""
+
+    appeal_id, submission_id, dev = _appeal_ready_full(client, category, landing_type)
+    operator = _operator_client("op-secret-name")
+    assert _reveal_source(operator, appeal_id).status_code == 200
+
+    response = client.get(SOURCE_READINGS_URL(submission_id), **_auth_header(dev["access"]))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert set(body[0].keys()) == {"read_at"}
+    assert "op-secret-name" not in response.content.decode("utf-8")

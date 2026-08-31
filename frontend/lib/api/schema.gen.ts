@@ -1464,6 +1464,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/submissions/{submission_id}/source-readings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Own Source Readings
+         * @description Developer 가 본인 Submission 의 소스 열람 기록을 본다 (#61, ADR-0022).
+         *
+         *     ADR-0022 는 열람 기록을 만들라고만 한 것이 아니라 "기록에는 읽는 사람이 있어야
+         *     한다"고 요구했다 — 이 엔드포인트가 그 요구를 채운다. 열람이 없으면 빈 목록으로
+         *     200 이다: "아직 아무도 안 봤다"는 정상적인 사실이지 없는 리소스가 아니다.
+         *
+         *     **운영자의 이름은 주지 않는다.** `SourceReadingOut` 에 `read_at` 뿐이다 — 시각과
+         *     횟수만으로 "내 소스가 심판 과정에서 몇 번 열렸다"는 약속을 검증할 수 있다.
+         */
+        get: operations["appeals_api_list_own_source_readings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/verification/lookup-by-ci": {
         parameters: {
             query?: never;
@@ -2472,6 +2499,21 @@ export interface components {
         SocialLoginIn: {
             /** Access Token */
             access_token: string;
+        };
+        /**
+         * SourceReadingOut
+         * @description Developer 가 보는 자기 Submission 의 소스 열람 기록 한 건 (#61, ADR-0022).
+         *
+         *     **누가 봤는지는 여기 없다.** 시각과 횟수만으로 "심판 과정에서 몇 번 열렸다"는
+         *     약속을 검증할 수 있고, 운영자 신원을 참가자에게 흘리면 ADR-0018 이 서로소로
+         *     갈라놓은 두 경계 사이에 새 문제가 생긴다.
+         */
+        SourceReadingOut: {
+            /**
+             * Read At
+             * Format: date-time
+             */
+            read_at: string;
         };
         /**
          * SourceRevealOut
@@ -4638,6 +4680,46 @@ export interface operations {
             };
             /** @description Unprocessable Content */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    appeals_api_list_own_source_readings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                submission_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceReadingOut"][];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

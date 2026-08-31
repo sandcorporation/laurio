@@ -5,6 +5,9 @@
   나온 것에 대한 것이다.
 - `GET /submissions/{submission_id}/appeal` — Developer 본인이 자신의 이의제기
   상태·심판 결과를 조회한다.
+- `GET /submissions/{submission_id}/source-readings` — Developer 본인이 자기
+  Submission 의 소스 열람 기록(언제·몇 번)을 조회한다(#61, ADR-0022). 누가 봤는지는
+  주지 않는다 — 운영자 신원을 참가자에게 흘리지 않는다.
 - `GET /operator/appeals`, `GET /operator/appeals/{appeal_id}`,
   `POST /operator/appeals/{appeal_id}/rule` — Operator 표면(#44, ADR-0019).
 - `POST /operator/appeals/{appeal_id}/source` — Operator 가 채점에 쓰인 소스를
@@ -41,6 +44,7 @@ from .schemas import (
     ErrorOut,
     RulingOut,
     ScoreSnapshotOut,
+    SourceReadingOut,
     SourceRevealOut,
 )
 from .services import reject_appeal, uphold_appeal
@@ -115,6 +119,28 @@ def get_own_appeal(request: HttpRequest, submission_id: int):
         raise HttpError(404, "이 Submission에 대한 이의제기가 없습니다.") from exc
 
     return 200, _serialize(appeal)
+
+
+@router.get(
+    "/submissions/{submission_id}/source-readings",
+    response={200: list[SourceReadingOut], 403: ErrorOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def list_own_source_readings(request: HttpRequest, submission_id: int):
+    """Developer 가 본인 Submission 의 소스 열람 기록을 본다 (#61, ADR-0022).
+
+    ADR-0022 는 열람 기록을 만들라고만 한 것이 아니라 "기록에는 읽는 사람이 있어야
+    한다"고 요구했다 — 이 엔드포인트가 그 요구를 채운다. 열람이 없으면 빈 목록으로
+    200 이다: "아직 아무도 안 봤다"는 정상적인 사실이지 없는 리소스가 아니다.
+
+    **운영자의 이름은 주지 않는다.** `SourceReadingOut` 에 `read_at` 뿐이다 — 시각과
+    횟수만으로 "내 소스가 심판 과정에서 몇 번 열렸다"는 약속을 검증할 수 있다.
+    """
+
+    submission = _get_owned_submission(request, submission_id)
+
+    readings = SourceReading.objects.filter(submission=submission).order_by("-read_at")
+    return 200, [SourceReadingOut(read_at=r.read_at) for r in readings]
 
 
 def _get_appeal_or_404(appeal_id: int) -> Appeal:

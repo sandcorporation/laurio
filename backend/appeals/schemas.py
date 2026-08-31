@@ -89,3 +89,14 @@ class SourceRevealOut(Schema):
     """
 
     prompt: str
+
+
+class SourceReadingOut(Schema):
+    """Developer 가 보는 자기 Submission 의 소스 열람 기록 한 건 (#61, ADR-0022).
+
+    **누가 봤는지는 여기 없다.** 시각과 횟수만으로 "심판 과정에서 몇 번 열렸다"는
+    약속을 검증할 수 있고, 운영자 신원을 참가자에게 흘리면 ADR-0018 이 서로소로
+    갈라놓은 두 경계 사이에 새 문제가 생긴다.
+    """
+
+    read_at: datetime
