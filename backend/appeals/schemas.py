@@ -79,3 +79,13 @@ class AppealRulingIn(Schema):
     # decision == "uphold"일 때만 필수다. 운영자가 근거를 검토해 직접 정하는
     # 정정 금액 — 자동으로 계산되지 않는다(재채점 경로가 없는 것과 같은 이유).
     correction_amount: int | None = Field(default=None, gt=0, le=1_000_000_000)
+
+
+class SourceRevealOut(Schema):
+    """소스 펼침 응답 (#60, ADR-0022).
+
+    #59 이전에는 상세 조회의 부수 효과로 새던 바로 그 내용(`Score.prompt`)이다 —
+    이제는 이 명시적 `POST` 요청에서만, `SourceReading` 을 함께 남기고서만 나온다.
+    """
+
+    prompt: str

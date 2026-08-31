@@ -1052,6 +1052,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operator/appeals/{appeal_id}/source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reveal Appeal Source
+         * @description Operator 가 이의 심판을 위해 채점에 쓰인 소스를 펼친다 (#60, ADR-0022).
+         *
+         *     **이 요청 자체가 `SourceReading` 을 남긴다.** 기록과 소스는 같은 요청에서
+         *     나온다 — 둘을 갈라놓으면 한쪽만 부르는(기록 없이 소스만 얻는) 경로가 생긴다.
+         *
+         *     **`POST` 인 이유.** 읽기 전용 메서드가 기록을 남기는 것은 그 메서드에 대한
+         *     거짓말이고, `OperatorOriginMiddleware` 는 변경 메서드에만 걸린다 — `GET` 으로
+         *     두면 이 표면만 CSRF 방어 밖에 남는다.
+         *
+         *     **열람은 상태가 아니라 사건이다.** 같은 Operator 가 같은 이의에서 다시 펼치면
+         *     행이 하나 더 쌓인다 — 중복 제거를 하지 않는다.
+         */
+        post: operations["appeals_api_reveal_appeal_source"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/operator/login": {
         parameters: {
             query?: never;
@@ -2443,6 +2473,17 @@ export interface components {
             /** Access Token */
             access_token: string;
         };
+        /**
+         * SourceRevealOut
+         * @description 소스 펼침 응답 (#60, ADR-0022).
+         *
+         *     #59 이전에는 상세 조회의 부수 효과로 새던 바로 그 내용(`Score.prompt`)이다 —
+         *     이제는 이 명시적 `POST` 요청에서만, `SourceReading` 을 함께 남기고서만 나온다.
+         */
+        SourceRevealOut: {
+            /** Prompt */
+            prompt: string;
+        };
         /** SubmissionIn */
         SubmissionIn: {
             /** Demo Url */
@@ -3813,6 +3854,37 @@ export interface operations {
             };
             /** @description Unprocessable Content */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    appeals_api_reveal_appeal_source: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                appeal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceRevealOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

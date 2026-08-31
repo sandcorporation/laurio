@@ -7,6 +7,9 @@
   상태·심판 결과를 조회한다.
 - `GET /operator/appeals`, `GET /operator/appeals/{appeal_id}`,
   `POST /operator/appeals/{appeal_id}/rule` — Operator 표면(#44, ADR-0019).
+- `POST /operator/appeals/{appeal_id}/source` — Operator 가 채점에 쓰인 소스를
+  펼친다. 그 요청 자체가 `SourceReading` 을 남긴다(#60, ADR-0022) — 기록 없이
+  소스를 얻는 경로는 없다.
 
 **예전에는 이 셋이 `/internal/appeals*` 에 있었다.** `InternalAuth` 는 공유 시크릿이
 맞는지만 확인하고 그 키를 그대로 돌려준다 — 호출자 신원이라는 개념 자체가 없었다.
@@ -25,10 +28,11 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
+from core.clock import Clock
 from core.operator_auth import OperatorAuth
 from submissions.models import Submission
 
-from .models import Appeal
+from .models import Appeal, SourceReading
 from .schemas import (
     AppealCreateIn,
     AppealDetailOut,
@@ -37,6 +41,7 @@ from .schemas import (
     ErrorOut,
     RulingOut,
     ScoreSnapshotOut,
+    SourceRevealOut,
 )
 from .services import reject_appeal, uphold_appeal
 
@@ -220,3 +225,34 @@ def rule_appeal(request, appeal_id: int, payload: AppealRulingIn):
         raise HttpError(422, "decision은 uphold 또는 reject 여야 합니다.")
 
     return 200, _serialize(appeal)
+
+
+@operator_router.post(
+    "/appeals/{appeal_id}/source",
+    response={200: SourceRevealOut, 404: ErrorOut},
+)
+def reveal_appeal_source(request, appeal_id: int):
+    """Operator 가 이의 심판을 위해 채점에 쓰인 소스를 펼친다 (#60, ADR-0022).
+
+    **이 요청 자체가 `SourceReading` 을 남긴다.** 기록과 소스는 같은 요청에서
+    나온다 — 둘을 갈라놓으면 한쪽만 부르는(기록 없이 소스만 얻는) 경로가 생긴다.
+
+    **`POST` 인 이유.** 읽기 전용 메서드가 기록을 남기는 것은 그 메서드에 대한
+    거짓말이고, `OperatorOriginMiddleware` 는 변경 메서드에만 걸린다 — `GET` 으로
+    두면 이 표면만 CSRF 방어 밖에 남는다.
+
+    **열람은 상태가 아니라 사건이다.** 같은 Operator 가 같은 이의에서 다시 펼치면
+    행이 하나 더 쌓인다 — 중복 제거를 하지 않는다.
+    """
+
+    appeal = _get_appeal_or_404(appeal_id)
+    score = appeal.submission.score
+
+    SourceReading.objects.create(
+        submission_id=appeal.submission_id,
+        appeal=appeal,
+        read_by=request.auth,
+        read_at=Clock.now(),
+    )
+
+    return 200, SourceRevealOut(prompt=score.prompt)
