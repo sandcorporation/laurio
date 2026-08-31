@@ -1,7 +1,9 @@
 """Appeal 도메인 모델 (#21, ADR-0004, ADR-0006).
 
 Developer가 자신의 불변 `Score` 스냅샷에 이의를 제기하고, 운영자가 그 스냅샷의
-근거(점수·reasoning·prompt·model_version)와 함께 검토해 심판한다. `Score`는
+근거(점수·reasoning·model_version)와 함께 검토해 심판한다. 소스를 담은 `prompt` 는
+그 근거에 **포함되지 않는다** — 펼치는 행위로만 나오고 그 행위가 기록된다
+(#59·#60, ADR-0022). `Score`는
 append-only라 이 앱은 그것을 절대 건드리지 않는다 — 재채점 경로는 존재하지
 않는다(ADR-0006). 인용(UPHELD)되면 `ledger`에 정정 분개가 새로 추가될 뿐, 기존
 분개는 그대로 남는다.

@@ -11,8 +11,13 @@
 - `GET /operator/appeals`, `GET /operator/appeals/{appeal_id}`,
   `POST /operator/appeals/{appeal_id}/rule` — Operator 표면(#44, ADR-0019).
 - `POST /operator/appeals/{appeal_id}/source` — Operator 가 채점에 쓰인 소스를
-  펼친다. 그 요청 자체가 `SourceReading` 을 남긴다(#60, ADR-0022) — 기록 없이
-  소스를 얻는 경로는 없다.
+  펼친다. 그 요청 자체가 `SourceReading` 을 남긴다(#60, ADR-0022) — **소스 원문**
+  을 기록 없이 얻는 경로는 없다.
+
+  경계를 정확히 적어둔다: 이의 상세가 여전히 돌려주는 `reasoning` 은 LLM 이 쓴
+  판정 근거이지 소스가 아니지만, 실물 어댑터는 근거를 쓰며 소스를 **인용**할 수
+  있다. 그 인용까지 막으려면 근거를 가리거나 상세 조회 자체를 기록해야 하는데,
+  둘 다 심판을 다르게 만드는 결정이라 여기서 몰래 정하지 않는다.
 
 **예전에는 이 셋이 `/internal/appeals*` 에 있었다.** `InternalAuth` 는 공유 시크릿이
 맞는지만 확인하고 그 키를 그대로 돌려준다 — 호출자 신원이라는 개념 자체가 없었다.
