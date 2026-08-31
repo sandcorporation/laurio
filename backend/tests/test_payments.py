@@ -556,22 +556,6 @@ def test_concurrent_initiate_payment_creates_only_one_active_payment(
 # --- admin (#9 리뷰 지적 6) ----------------------------------------------------
 
 
-@pytest.mark.django_db
-def test_payment_admin_add_page_does_not_500(client):
-    """모든 필드가 readonly인데 추가 폼 자체는 열려 있으면 NOT NULL 위반으로
-    500이 난다 — has_add_permission이 꺼져 있어야 그 폼 자체가 열리지 않는다."""
-
-    get_user_model().objects.create_superuser(
-        username="admin-operator", email="admin-operator@example.com", password="operator-pw-1234"
-    )
-    assert client.login(username="admin-operator", password="operator-pw-1234")
-
-    get_response = client.get("/admin/payments/payment/add/")
-    assert get_response.status_code == 403  # 폼 자체가 열리지 않는다.
-
-    # 폼이 열려 있었다면(mutation) 모든 필드가 readonly라 제출할 값이 없는
-    # 상태로 저장을 시도해 NOT NULL 위반 500이 났을 경로 — 잠겨 있으면 여기도
-    # 403이어야 한다.
-    post_response = client.post("/admin/payments/payment/add/", data={})
-    assert post_response.status_code != 500
-    assert post_response.status_code == 403
+# admin 의 Payment 추가 폼이 NOT NULL 위반 500 을 내지 않는지 지키던 테스트가 여기
+# 있었다. #46 이 admin 을 내리면서 그 폼 자체가 존재하지 않게 됐다 — 막으려던 실패
+# 방식이 도달 불가능해졌으므로 함께 지운다.

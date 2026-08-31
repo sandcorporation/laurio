@@ -126,7 +126,6 @@ if IS_PRODUCTION_DEPLOYMENT and (
 ALLOWED_HOSTS = [h for h in _env("DJANGO_ALLOWED_HOSTS", "*").split(",") if h]
 
 INSTALLED_APPS = [
-    "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
@@ -158,12 +157,12 @@ MIDDLEWARE = [
     # 무효).
     "accounts.middleware.ContentSecurityPolicyMiddleware",
     "django.middleware.security.SecurityMiddleware",
-    # SecurityMiddleware 바로 다음(whitenoise 공식 권장 위치). DEBUG=False인
-    # staging/prod는 Django 자신이 정적 파일을 서빙하지 않고, 이 저장소에는 아직
-    # 리버스 프록시가 없다 — 이게 없으면 ADR-0002의 운영 백오피스(/admin/)가
-    # CSS/JS 없이 깨진다(코디네이터 리뷰 지적 #23). dev도 이 미들웨어 자체는
-    # 켜져 있지만 STATIC_ROOT에 collectstatic 산출물이 없으면 그냥 통과시킬 뿐이라
-    # runserver의 자체 정적 서빙(DEBUG=True)과 충돌하지 않는다.
+    # SecurityMiddleware 바로 다음(whitenoise 공식 권장 위치). 원래는 admin 의
+    # CSS/JS 를 서빙하려고 넣었는데 admin 을 내렸으므로(#46, ADR-0019) 지금 이
+    # 백엔드에는 서빙할 정적 파일이 사실상 없다. 그래도 남겨둔다 — DEBUG=False 인
+    # staging/prod 에서 Django 는 정적 파일을 스스로 서빙하지 않고, 이 저장소에는
+    # 아직 리버스 프록시가 없다. STATIC_ROOT 에 산출물이 없으면 그냥 통과시킬
+    # 뿐이라 아무 비용도 들지 않는다.
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     # 운영자 경로의 변경 요청에 Origin 검증을 건다(#43, ADR-0016 의 성립 조건).

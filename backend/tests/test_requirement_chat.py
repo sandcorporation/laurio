@@ -624,17 +624,5 @@ def test_chat_prompt_audit_record_does_not_grow_with_conversation_length(client,
     assert last_assistant.prompt.count(long_message.strip()) == 1
 
 
-@pytest.mark.django_db
-def test_requirement_chat_message_admin_blocks_direct_add(client):
-    """모든 필드가 readonly라도 has_add_permission을 막지 않으면 "빈 추가 폼"이
-    남아 contest_id NULL로 INSERT되어 NOT NULL 위반 500이 난다(payments.admin과
-    같은 원칙). 추가 폼 자체가 열리지 않아야 한다."""
-
-    get_user_model().objects.create_superuser(
-        username="chat-admin", email="chat-admin@example.com", password="operator-pw-1234"
-    )
-    assert client.login(username="chat-admin", password="operator-pw-1234")
-
-    response = client.get("/admin/contests/requirementchatmessage/add/")
-
-    assert response.status_code == 403
+# admin 의 RequirementChatMessage 추가 폼을 막던 테스트가 여기 있었다. payments 의
+# 같은 성격 테스트와 함께, #46 이 admin 을 내리면서 대상이 사라져 지운다.

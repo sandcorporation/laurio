@@ -296,80 +296,8 @@ def test_reversing_unknown_entry_is_rejected(client):
     assert response.status_code == 400
 
 
-@pytest.mark.django_db
-def test_admin_forbids_changing_existing_journal_entry(client):
-    """append-only: 기존 분개는 admin 화면으로도 수정할 수 없다.
-
-    (has_change_permission=False라도 슈퍼유저는 열람 권한이 있어 change 화면
-    자체는 읽기 전용으로 200이 뜬다 — Django admin의 view-only 지원. 실제로
-    저장을 시도하는 POST는 여전히 막힌다.)
-    """
-
-    _login_operator(client, username="admin-operator", is_superuser=True)
-    contest_id = uuid.uuid4()
-    created = client.post(
-        f"{LEDGER_URL}/entries",
-        data=_balanced_entry_payload(contest_id),
-        content_type="application/json",
-    ).json()
-
-    response = client.post(
-        f"/admin/ledger/journalentry/{created['id']}/change/",
-        data={"contest_id": str(contest_id), "memo": "몰래 수정 시도"},
-    )
-
-    assert response.status_code == 403
 
 
-@pytest.mark.django_db
-def test_admin_forbids_deleting_existing_journal_entry(client):
-    """append-only: 기존 분개는 admin 화면으로도 삭제할 수 없다."""
-
-    _login_operator(client, username="admin-operator-2", is_superuser=True)
-    contest_id = uuid.uuid4()
-    created = client.post(
-        f"{LEDGER_URL}/entries",
-        data=_balanced_entry_payload(contest_id),
-        content_type="application/json",
-    ).json()
-
-    response = client.get(f"/admin/ledger/journalentry/{created['id']}/delete/")
-
-    assert response.status_code == 403
-
-
-@pytest.mark.django_db
-def test_admin_forbids_adding_journal_entry_directly(client):
-    """분개는 반드시 균형 검증을 거치는 API를 통해서만 생기고, admin으로 바로 못 만든다."""
-
-    _login_operator(client, username="admin-operator-3", is_superuser=True)
-
-    response = client.get("/admin/ledger/journalentry/add/")
-
-    assert response.status_code == 403
-
-
-@pytest.mark.django_db
-def test_admin_allows_read_only_listing_for_audit(client):
-    _login_operator(client, username="admin-operator-4", is_superuser=True)
-    contest_id = uuid.uuid4()
-    client.post(
-        f"{LEDGER_URL}/entries",
-        data=_balanced_entry_payload(contest_id),
-        content_type="application/json",
-    )
-
-    response = client.get("/admin/ledger/journalentry/")
-
-    assert response.status_code == 200
-
-
-# ---------------------------------------------------------------------------
-# 결함 1 (HIGH) — CSRF. 세션 쿠키로 인증된 상태에서 CSRF 토큰 없이 쓰기 요청을 보내면
-# 위조로 간주해 거부해야 한다. `django.test.Client(enforce_csrf_checks=True)`로 실제
-# Django CSRF 미들웨어 검증을 켜고 확인한다(기본 `client` fixture는 검증을 꺼둔 채라
-# 여기서는 별도 Client를 쓴다).
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.django_db
@@ -589,3 +517,17 @@ def test_amount_beyond_sane_upper_bound_is_rejected_not_500(client):
     )
 
     assert response.status_code == 422
+
+
+# admin 을 통해 원장을 지키던 테스트 넷이 여기 있었다 — #46(ADR-0019)이 admin 을
+# 내리면서 지킬 대상이 사라졌다.
+#
+# 셋은 "admin 으로 분개를 추가·수정·삭제할 수 없다" 였고, 그 성질은 사라진 것이
+# 아니라 **더 아래에서** 지켜진다: 위의 test_queryset_update_is_blocked_at_the_
+# manager_level 과 test_queryset_delete_is_blocked_at_the_manager_level 이
+# AppendOnlyModel 자체를 검증한다(ADR-0004). admin 이 있든 없든 그것이 진짜
+# 방어선이었다.
+#
+# 넷째(admin 에서 감사용으로 원장을 열람)는 **실제로 잃은 것**이다. 운영자 앱이
+# 나올 때까지 원장 열람은 /api/ledger 엔드포인트와 psql 로 한다. ADR-0019 가
+# 명시한 비용이 이것이다.

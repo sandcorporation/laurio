@@ -42,6 +42,39 @@ cd backend && uv run pytest                           # 테스트
 `POST /api/internal/tick`을 수동으로 쏴서 21일 시나리오를 몇 초에 재현할 수 있다 —
 두 파일 모두 `INTERNAL_API_TOKEN`이 없으면 부팅 자체가 거부된다.
 
+**`appeals` 마이그레이션이 다시 만들어졌다**(#44). 배포 이력이 없어 단일 initial 로
+정리했는데, 옛 `0001_initial` 을 이미 적용한 dev DB 는 Django 가 "적용 완료" 로
+보고 조용히 지나간다 — 테이블이 없다는 오류가 한참 뒤 런타임에 난다. 그 시점의
+DB 가 있다면 볼륨째 다시 만들어야 한다:
+
+```bash
+docker compose -f docker/compose.dev.yaml down -v
+docker compose -f docker/compose.dev.yaml up -d
+```
+
+## 운영
+
+**Django admin 은 없다**(#46, ADR-0019). `/admin/` 은 마운트되지 않고 각 앱의
+`admin.py` 도 없다 — admin 은 모델 행을 직접 편집할 수 있어서, `Appeal`·
+`AppealRuling` 을 그 화면에서 고칠 수 있는 한 감사 추적에 우회로가 남는다.
+
+사람이 판단하는 행위는 `/api/operator/*` 로만 한다. 운영자 앱이 나올 때까지는
+운영자가 HTTP 로 그 API 를 직접 친다.
+
+개발 중 데이터를 훑던 수단도 함께 사라졌다. 대신 이렇게 한다:
+
+```bash
+cd backend && uv run python manage.py shell      # ORM 으로 조회
+docker compose -f docker/compose.dev.yaml exec db psql -U laurio -d laurio
+```
+
+첫 Operator 는 관리 명령으로 만든다 — 계정 관리 화면이 없기 때문이다.
+`createsuperuser` 는 쓰지 않는다(Operator 와 참가자가 서로소라는 불변식을 모른다):
+
+```bash
+cd backend && uv run python manage.py create_operator <아이디> --superuser
+```
+
 ## 테스트
 
 Operator 세션은 실제 Redis 에 산다(#43, ADR-0018) — 그래서 테스트에도 `redis` 가
