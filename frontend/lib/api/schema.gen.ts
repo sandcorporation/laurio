@@ -1014,8 +1014,10 @@ export interface paths {
         };
         /**
          * Get Appeal Detail
-         * @description 운영자가 Score 스냅샷(점수·근거·프롬프트·모델버전)과 함께 이의를 조회한다
-         *     (#21 AC).
+         * @description 운영자가 Score 스냅샷(점수·근거·모델버전)과 함께 이의를 조회한다 (#21 AC).
+         *
+         *     프롬프트(=채점에 쓰인 제출 소스)는 여기 없다 — #59, ADR-0022. 소스를 보려면
+         *     별도의 명시적 펼침 요청이 필요하다(#60).
          */
         get: operations["appeals_api_get_appeal_detail"];
         put?: never;
@@ -1044,6 +1046,36 @@ export interface paths {
          *     방어선이다).
          */
         post: operations["appeals_api_rule_appeal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/appeals/{appeal_id}/source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reveal Appeal Source
+         * @description Operator 가 이의 심판을 위해 채점에 쓰인 소스를 펼친다 (#60, ADR-0022).
+         *
+         *     **이 요청 자체가 `SourceReading` 을 남긴다.** 기록과 소스는 같은 요청에서
+         *     나온다 — 둘을 갈라놓으면 한쪽만 부르는(기록 없이 소스만 얻는) 경로가 생긴다.
+         *
+         *     **`POST` 인 이유.** 읽기 전용 메서드가 기록을 남기는 것은 그 메서드에 대한
+         *     거짓말이고, `OperatorOriginMiddleware` 는 변경 메서드에만 걸린다 — `GET` 으로
+         *     두면 이 표면만 CSRF 방어 밖에 남는다.
+         *
+         *     **열람은 상태가 아니라 사건이다.** 같은 Operator 가 같은 이의에서 다시 펼치면
+         *     행이 하나 더 쌓인다 — 중복 제거를 하지 않는다.
+         */
+        post: operations["appeals_api_reveal_appeal_source"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1474,6 +1506,33 @@ export interface paths {
          *     끌어다 붙이는 시도) 거부한다.
          */
         post: operations["handovers_api_upload_build_asset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/submissions/{submission_id}/source-readings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Own Source Readings
+         * @description Developer 가 본인 Submission 의 소스 열람 기록을 본다 (#61, ADR-0022).
+         *
+         *     ADR-0022 는 열람 기록을 만들라고만 한 것이 아니라 "기록에는 읽는 사람이 있어야
+         *     한다"고 요구했다 — 이 엔드포인트가 그 요구를 채운다. 열람이 없으면 빈 목록으로
+         *     200 이다: "아직 아무도 안 봤다"는 정상적인 사실이지 없는 리소스가 아니다.
+         *
+         *     **운영자의 이름은 주지 않는다.** `SourceReadingOut` 에 `read_at` 뿐이다 — 시각과
+         *     횟수만으로 "내 소스가 심판 과정에서 몇 번 열렸다"는 약속을 검증할 수 있다.
+         */
+        get: operations["appeals_api_list_own_source_readings"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2500,8 +2559,14 @@ export interface components {
         };
         /**
          * ScoreSnapshotOut
-         * @description 운영자가 심판 근거로 보는 Score 스냅샷 그대로 — 점수·근거·프롬프트·모델버전
-         *     전부(#21 AC, ADR-0006).
+         * @description 운영자가 심판 근거로 보는 Score 스냅샷 — 점수·근거·모델버전(#21 AC, ADR-0006).
+         *
+         *     **`prompt` 는 여기 없다 (#59, ADR-0022).** 프롬프트에는 채점에 쓰인 제출 소스가
+         *     통째로 임베드되어 있어(`scoring._build_prompt`), 이의 상세를 조회하는 것만으로
+         *     소스 전문이 흘러서는 안 된다. 소스를 보려면 별도의 명시적 펼침 요청이 필요하고
+         *     그 요청은 `SourceReading` 을 남긴다(#60) — `Score` 자체는 프롬프트를 여전히
+         *     그대로 보관한다(재현성을 위한 불변 스냅샷, ADR-0006). 이 스키마가 바뀐 것은
+         *     **누가 볼 수 있는지** 뿐이다.
          */
         ScoreSnapshotOut: {
             /**
@@ -2513,8 +2578,6 @@ export interface components {
             model_version: string;
             /** Percentage */
             percentage: string;
-            /** Prompt */
-            prompt: string;
             /** Reasoning */
             reasoning: {
                 [key: string]: unknown;
@@ -2529,6 +2592,32 @@ export interface components {
         SocialLoginIn: {
             /** Access Token */
             access_token: string;
+        };
+        /**
+         * SourceReadingOut
+         * @description Developer 가 보는 자기 Submission 의 소스 열람 기록 한 건 (#61, ADR-0022).
+         *
+         *     **누가 봤는지는 여기 없다.** 시각과 횟수만으로 "심판 과정에서 몇 번 열렸다"는
+         *     약속을 검증할 수 있고, 운영자 신원을 참가자에게 흘리면 ADR-0018 이 서로소로
+         *     갈라놓은 두 경계 사이에 새 문제가 생긴다.
+         */
+        SourceReadingOut: {
+            /**
+             * Read At
+             * Format: date-time
+             */
+            read_at: string;
+        };
+        /**
+         * SourceRevealOut
+         * @description 소스 펼침 응답 (#60, ADR-0022).
+         *
+         *     #59 이전에는 상세 조회의 부수 효과로 새던 바로 그 내용(`Score.prompt`)이다 —
+         *     이제는 이 명시적 `POST` 요청에서만, `SourceReading` 을 함께 남기고서만 나온다.
+         */
+        SourceRevealOut: {
+            /** Prompt */
+            prompt: string;
         };
         /** SubmissionIn */
         SubmissionIn: {
@@ -3909,6 +3998,37 @@ export interface operations {
             };
         };
     };
+    appeals_api_reveal_appeal_source: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                appeal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceRevealOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     accounts_operator_api_operator_login: {
         parameters: {
             query?: never;
@@ -4728,6 +4848,46 @@ export interface operations {
             };
             /** @description Unprocessable Content */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    appeals_api_list_own_source_readings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                submission_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceReadingOut"][];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

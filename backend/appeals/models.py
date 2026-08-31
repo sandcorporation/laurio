@@ -1,7 +1,9 @@
 """Appeal 도메인 모델 (#21, ADR-0004, ADR-0006).
 
 Developer가 자신의 불변 `Score` 스냅샷에 이의를 제기하고, 운영자가 그 스냅샷의
-근거(점수·reasoning·prompt·model_version)와 함께 검토해 심판한다. `Score`는
+근거(점수·reasoning·model_version)와 함께 검토해 심판한다. 소스를 담은 `prompt` 는
+그 근거에 **포함되지 않는다** — 펼치는 행위로만 나오고 그 행위가 기록된다
+(#59·#60, ADR-0022). `Score`는
 append-only라 이 앱은 그것을 절대 건드리지 않는다 — 재채점 경로는 존재하지
 않는다(ADR-0006). 인용(UPHELD)되면 `ledger`에 정정 분개가 새로 추가될 뿐, 기존
 분개는 그대로 남는다.
@@ -89,3 +91,33 @@ class AppealRuling(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"AppealRuling(appeal={self.appeal_id}, decision={self.decision})"
+
+
+class SourceReading(models.Model):
+    """Operator 가 이의 심판 중 제출 소스를 펼친 사건 하나 (#60, ADR-0022).
+
+    **상태가 아니라 사건이다.** 같은 Operator 가 같은 Appeal 에서 다시 펼치면 행이
+    하나 더 쌓인다 — 중복 제거하면 "한 번 봤다"와 "열 번 봤다"가 구별되지 않아
+    기록의 값이 사라진다. `AppealRuling` 이 그랬듯(#44) 네 필드 전부 NOT NULL 이고,
+    `read_by` 는 PROTECT 다 — 열람한 Operator 계정을 지워도 감사 기록이 주인을
+    잃지 않는다.
+
+    `submission` 을 `appeal` 과 별도 필드로 둔다. `appeal.submission_id` 로도
+    구할 수 있지만(OneToOne), Developer 쪽 조회 표면(#61)이 자기 Submission 의
+    열람 기록을 appeal 을 거치지 않고 바로 찾아야 하므로 여기 직접 둔다.
+    """
+
+    submission = models.ForeignKey(
+        "submissions.Submission", related_name="source_readings", on_delete=models.CASCADE
+    )
+    appeal = models.ForeignKey(Appeal, related_name="source_readings", on_delete=models.CASCADE)
+    read_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="source_readings", on_delete=models.PROTECT
+    )
+    read_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ["-read_at"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"SourceReading(submission={self.submission_id}, appeal={self.appeal_id})"

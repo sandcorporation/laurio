@@ -34,13 +34,18 @@ class AppealOut(Schema):
 
 
 class ScoreSnapshotOut(Schema):
-    """운영자가 심판 근거로 보는 Score 스냅샷 그대로 — 점수·근거·프롬프트·모델버전
-    전부(#21 AC, ADR-0006).
+    """운영자가 심판 근거로 보는 Score 스냅샷 — 점수·근거·모델버전(#21 AC, ADR-0006).
+
+    **`prompt` 는 여기 없다 (#59, ADR-0022).** 프롬프트에는 채점에 쓰인 제출 소스가
+    통째로 임베드되어 있어(`scoring._build_prompt`), 이의 상세를 조회하는 것만으로
+    소스 전문이 흘러서는 안 된다. 소스를 보려면 별도의 명시적 펼침 요청이 필요하고
+    그 요청은 `SourceReading` 을 남긴다(#60) — `Score` 자체는 프롬프트를 여전히
+    그대로 보관한다(재현성을 위한 불변 스냅샷, ADR-0006). 이 스키마가 바뀐 것은
+    **누가 볼 수 있는지** 뿐이다.
     """
 
     percentage: str
     model_version: str
-    prompt: str
     reasoning: list[dict]
     created_at: datetime
 
@@ -74,3 +79,24 @@ class AppealRulingIn(Schema):
     # decision == "uphold"일 때만 필수다. 운영자가 근거를 검토해 직접 정하는
     # 정정 금액 — 자동으로 계산되지 않는다(재채점 경로가 없는 것과 같은 이유).
     correction_amount: int | None = Field(default=None, gt=0, le=1_000_000_000)
+
+
+class SourceRevealOut(Schema):
+    """소스 펼침 응답 (#60, ADR-0022).
+
+    #59 이전에는 상세 조회의 부수 효과로 새던 바로 그 내용(`Score.prompt`)이다 —
+    이제는 이 명시적 `POST` 요청에서만, `SourceReading` 을 함께 남기고서만 나온다.
+    """
+
+    prompt: str
+
+
+class SourceReadingOut(Schema):
+    """Developer 가 보는 자기 Submission 의 소스 열람 기록 한 건 (#61, ADR-0022).
+
+    **누가 봤는지는 여기 없다.** 시각과 횟수만으로 "심판 과정에서 몇 번 열렸다"는
+    약속을 검증할 수 있고, 운영자 신원을 참가자에게 흘리면 ADR-0018 이 서로소로
+    갈라놓은 두 경계 사이에 새 문제가 생긴다.
+    """
+
+    read_at: datetime
