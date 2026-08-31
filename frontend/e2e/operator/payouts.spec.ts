@@ -171,6 +171,54 @@ test.describe("지급 큐 — 무엇에 막혀 있는가(#68, ADR-0020)", () => 
     expect(sellerText).not.toMatch(/실패|오류|에러/);
   });
 
+  test("필터를 바꾸는 순간에도 이전 필터의 행이 새 탭 아래 보이지 않는다", async ({ page }) => {
+    // 코드리뷰 지적 — Playwright의 auto-retry는 다음 프레임을 기다려 주므로,
+    // 이 상태를 "한 프레임"으로만 재현하면 이 테스트조차 통과시켜 버린다.
+    // 그래서 seller 응답만 인위적으로 지연시켜, 그 전환 구간을 사람이 눈으로도
+    // 볼 수 있을 만큼(수백 ms 이상) 늘려 놓고 그 구간 전체에서 잘못된 조합이
+    // 없다는 것을 단언한다 — auto-retry를 우회하는 것이 아니라, auto-retry가
+    // 절대 놓칠 수 없을 만큼 창을 넓히는 쪽이다.
+    const operator = seedE2eOperator({ username: `e2e-op-payouttransition-${Date.now()}` });
+    const seeded = seedE2eOperatorQueues();
+    const identityPayout = seeded.identity_pending_payout;
+    const sellerPayout = seeded.seller_pending_payout;
+    if (!identityPayout || !sellerPayout) {
+      throw new Error("identity/seller 시드가 비어 있다");
+    }
+
+    await loginAsOperator(page, operator.username);
+    await page.goto("/payouts?blocked_on=identity");
+    await waitForQueueSettled(page);
+    await expect(page.getByTestId(`payout-row-${identityPayout.idempotency_key}`)).toBeVisible();
+
+    // seller 쪽 응답만 늦춘다 — identity 쪽은 이미 화면에 반영된 뒤라 건드릴
+    // 필요가 없다(kindsFor("seller")가 seller 하나만 부른다는 것을 이 지연이
+    // 그대로 이용한다).
+    await page.route("**/api/backend/operator/payouts?blocked_on=seller", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await route.continue();
+    });
+
+    await page.getByTestId("payout-filter-seller").click();
+
+    // 지연된 응답이 아직 오지 않은 이 구간(최대 1.5초) 내내 — 렌더 직후부터
+    // 반복해서 — identity 행이 seller 탭 아래 남아 있으면 안 된다. 이 저장소가
+    // 겪은 트랩(포함만 확인하면 깨진 필터를 못 잡는다)과 대칭으로, 여기서는
+    // "없어야 할 것이 없다"를 전환 구간 내내 반복 확인한다.
+    for (let i = 0; i < 5; i += 1) {
+      await expect(page.getByTestId(`payout-row-${identityPayout.idempotency_key}`)).toHaveCount(0);
+      await expect(page.getByTestId(`payout-blocked-badge-identity`)).toHaveCount(0);
+      await page.waitForTimeout(200);
+    }
+
+    // 지연이 끝나면 seller 행이 정상적으로 나타난다 — 전환이 로딩에서 끝난
+    // 것이 아니라 실제 데이터로 이어졌다는 것도 같이 확인한다.
+    await expect(page.getByTestId(`payout-row-${sellerPayout.idempotency_key}`)).toBeVisible({
+      timeout: 5000,
+    });
+    await expect(page.getByTestId(`payout-row-${identityPayout.idempotency_key}`)).toHaveCount(0);
+  });
+
   test("큐가 비어 있으면 명시적으로 말한다 — 빈 박스가 아니다", async ({ page }) => {
     clearE2eOperatorQueues();
 

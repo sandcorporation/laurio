@@ -56,6 +56,24 @@ function kindsFor(filter: BlockedOnFilter): BlockedOnKind[] {
 export function usePayoutQueue(filter: BlockedOnFilter, enabled: boolean): PayoutQueueState {
   const router = useRouter();
   const [state, setState] = useState<PayoutQueueState>({ status: "loading" });
+  // 지금 `state`가 어느 필터에 대한 응답인지를 따로 들고 있는다 — 필터가
+  // 바뀐 순간과 useEffect가 실제로 도는 순간 사이에는 한 틱의 간격이 있고,
+  // 그 사이에 커밋되는 렌더는 "새 탭 아래 이전 필터의 행"이라는, 이 티켓이
+  // 정확히 막으려던 상태를 그대로 화면에 그린다(코드리뷰 지적 — ADR-0020이
+  // 두 대기를 갈라 둔 이유가 운영자가 어느 쪽인지 헷갈리지 않게 하는 것인데,
+  // 잘못된 라벨 아래 잘못된 행이 한 프레임이라도 보이면 그 혼동이 실제로
+  // 일어난 것이다).
+  //
+  // "Adjusting state when a prop changes"(React) 패턴대로, effect가 아니라
+  // 렌더 도중에 곧바로 되돌린다 — 렌더 중 setState는 이 렌더를 화면에 커밋하지
+  // 않고 새 값으로 즉시 다시 렌더하므로, "이전 필터의 행 + 새 탭"이라는 조합은
+  // 애초에 화면에 그려질 기회가 없다. useEffect에서 처리하면 이미 한 번
+  // 커밋된 뒤라 늦다.
+  const [committedFilter, setCommittedFilter] = useState(filter);
+  if (filter !== committedFilter) {
+    setCommittedFilter(filter);
+    setState({ status: "loading" });
+  }
 
   useEffect(() => {
     if (!enabled) return;
