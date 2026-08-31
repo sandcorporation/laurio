@@ -40,60 +40,76 @@ export function RulingForm({
 
   async function submit(decision: "uphold" | "reject") {
     setState({ status: "submitting" });
-    try {
-      const payload: { decision: string; ruling_note: string; correction_amount?: number } = {
-        decision,
-        ruling_note: note,
-      };
-      if (decision === "uphold") {
-        const trimmed = correctionAmount.trim();
-        if (trimmed !== "") {
-          const amount = Number(trimmed);
-          // 파싱 불가한 값은 정정 금액을 아예 안 보낸 것과 같게 취급한다 —
-          // 서버가 "정정 금액이 필요합니다"로 거절하게 둔다(422).
-          if (!Number.isNaN(amount)) payload.correction_amount = amount;
-        }
-      }
 
-      const res = await fetch(`/api/backend/operator/appeals/${appealId}/rule`, {
+    const payload: { decision: string; ruling_note: string; correction_amount?: number } = {
+      decision,
+      ruling_note: note,
+    };
+    if (decision === "uphold") {
+      const trimmed = correctionAmount.trim();
+      if (trimmed !== "") {
+        const amount = Number(trimmed);
+        // 파싱 불가한 값은 정정 금액을 아예 안 보낸 것과 같게 취급한다 —
+        // 서버가 "정정 금액이 필요합니다"로 거절하게 둔다(422).
+        if (!Number.isNaN(amount)) payload.correction_amount = amount;
+      }
+    }
+
+    // **두 요청을 별도 try/catch로 가른다(코드리뷰 지적).** 심판 POST 자체가
+    // 실패한 것과, 심판은 성공했는데 뒤이은 상세 재조회가 실패한 것은 전혀
+    // 다른 사실이다 — 전자는 "아무 일도 일어나지 않았다"이고 후자는 "돈이
+    // 이미 움직였는데 화면만 그걸 못 보여준다"다. 하나의 try로 감싸면 후자가
+    // "심판 요청을 보내지 못했습니다"로 보이고, 운영자가 그 말을 믿고
+    // 재시도해 409를 만난다 — 돈을 움직이는 화면에서 "일어났다"와 "안
+    // 일어났다"를 뒤집어 말하면 안 된다.
+    let res: Response;
+    try {
+      res = await fetch(`/api/backend/operator/appeals/${appealId}/rule`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
       });
+    } catch {
+      setState({ status: "error", message: "심판 요청을 보내지 못했습니다." });
+      return;
+    }
 
-      if (res.status === 401) {
-        // 심판 중 세션이 만료됐다 — source-reveal.tsx와 같은 원칙: state를
-        // "submitting"에 남긴 채 router.replace만 부르면 이동이 늦거나 실패했을
-        // 때 비활성화된 버튼만 남고 화면이 그 상태에 갇힌다. 이동을 시작하기
-        // 전에 먼저 상태를 바꾼다. 이 분기에서 심판은 일어나지 않았다 — 서버가
-        // 401을 냈다는 것 자체가 이 요청이 인증되지 않아 아무 것도 반영되지
-        // 않았다는 뜻이다.
-        setState({ status: "redirecting" });
-        router.replace("/login");
-        return;
-      }
+    if (res.status === 401) {
+      // 심판 중 세션이 만료됐다 — source-reveal.tsx와 같은 원칙: state를
+      // "submitting"에 남긴 채 router.replace만 부르면 이동이 늦거나 실패했을
+      // 때 비활성화된 버튼만 남고 화면이 그 상태에 갇힌다. 이동을 시작하기
+      // 전에 먼저 상태를 바꾼다. 이 분기에서 심판은 일어나지 않았다 — 서버가
+      // 401을 냈다는 것 자체가 이 요청이 인증되지 않아 아무 것도 반영되지
+      // 않았다는 뜻이다.
+      setState({ status: "redirecting" });
+      router.replace("/login");
+      return;
+    }
 
-      if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { detail?: unknown } | null;
-        // detail이 항상 문자열은 아니다 — 이 폼이 명시적으로 다루는 두 거절
-        // (correction_amount 누락, ruling_note 공백)은 커스텀 HttpError라 항상
-        // 문자열이지만, pydantic 필드 검증(예: correction_amount<=0)이 걸리면
-        // ninja가 배열 형태의 422를 낸다. 문자열이 아니면 그대로 렌더하지 않고
-        // 일반 메시지로 대체한다 — "Objects are not valid as a React child"로
-        // 화면이 깨지는 것을 막는다.
-        const detail = typeof body?.detail === "string" ? body.detail : null;
-        setState({
-          status: "error",
-          message: detail ?? `심판에 실패했습니다 (${res.status}).`,
-        });
-        return;
-      }
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { detail?: unknown } | null;
+      // detail이 항상 문자열은 아니다 — 이 폼이 명시적으로 다루는 두 거절
+      // (correction_amount 누락, ruling_note 공백)은 커스텀 HttpError라 항상
+      // 문자열이지만, pydantic 필드 검증(예: correction_amount<=0)이 걸리면
+      // ninja가 배열 형태의 422를 낸다. 문자열이 아니면 그대로 렌더하지 않고
+      // 일반 메시지로 대체한다 — "Objects are not valid as a React child"로
+      // 화면이 깨지는 것을 막는다.
+      const detail = typeof body?.detail === "string" ? body.detail : null;
+      setState({
+        status: "error",
+        message: detail ?? `심판에 실패했습니다 (${res.status}).`,
+      });
+      return;
+    }
 
-      // rule 엔드포인트는 AppealOut(요약)만 돌려준다 — ruled_by_username 같은
-      // 심판자 신원은 상세 응답(AppealDetailOut.ruling)에만 있다. 손으로
-      // 재구성하지 않고 상세를 다시 조회해 그대로 쓴다 — 요청(uphold/reject)과
-      // 응답(upheld/rejected)의 어휘가 다른 함정(#66이 이미 겪었다)을 여기서
-      // 또 틀리지 않기 위해서다.
+    // 여기 도달했으면 심판은 이미 확정됐다(res.ok) — 아래는 그 결과를 화면에
+    // 옮기는 절차일 뿐이고, 여기서 무엇이 잘못돼도 "심판이 안 됐다"는 뜻이
+    // 아니다. rule 엔드포인트는 AppealOut(요약)만 돌려준다 — ruled_by_username
+    // 같은 심판자 신원은 상세 응답(AppealDetailOut.ruling)에만 있다. 손으로
+    // 재구성하지 않고 상세를 다시 조회해 그대로 쓴다 — 요청(uphold/reject)과
+    // 응답(upheld/rejected)의 어휘가 다른 함정(#66이 이미 겪었다)을 여기서
+    // 또 틀리지 않기 위해서다.
+    try {
       const detailRes = await fetch(`/api/backend/operator/appeals/${appealId}`, {
         cache: "no-store",
       });
@@ -113,13 +129,16 @@ export function RulingForm({
       if (!detail.ruling) {
         setState({
           status: "error",
-          message: "심판 결과를 확인하지 못했습니다. 새로고침해주세요.",
+          message: "심판은 반영됐지만 결과를 확인하지 못했습니다. 새로고침해주세요.",
         });
         return;
       }
       onRuled(detail.ruling);
     } catch {
-      setState({ status: "error", message: "심판 요청을 보내지 못했습니다." });
+      setState({
+        status: "error",
+        message: "심판은 반영됐지만 결과를 다시 불러오지 못했습니다. 새로고침해주세요.",
+      });
     }
   }
 

@@ -376,6 +376,11 @@ test.describe("이의 심판 — 인용·기각과 감사 추적(#67)", () => {
 
     await loginAsOperator(page, operator.username);
     await page.goto(`/appeals/${seeded.appeal_id}`);
+    // 상세가 실제로 그려질 때까지 먼저 기다린다 — 그러지 않으면 클라이언트
+    // fetch가 끝나기 전 "아직 아무 것도 안 그려진" 프레임에서 폼 부재 단언이
+    // 항상 통과해버린다(코드리뷰 지적 — 이 파일 30-38행·249-252행이 이미 경고한
+    // 바로 그 함정). 이미 심판된 이의이므로 결과 섹션이 뜨는 것을 기다린다.
+    await expect(page.getByTestId("appeal-detail-ruling")).toBeVisible();
     // 이미 심판된 이의 — 화면이 폼을 아예 주지 않는다(사고 예방).
     await expect(page.getByTestId("ruling-form")).toHaveCount(0);
 
@@ -386,11 +391,22 @@ test.describe("이의 심판 — 인용·기각과 감사 추적(#67)", () => {
     // 자동으로 싣지 않으므로(proxy.spec.ts가 이미 겪은 것과 같은 함정) 명시적으로
     // 붙인다 — 안 그러면 BFF 자신의 Origin 검증(fail-closed)에서 403으로
     // 막혀, 이 테스트가 확인하려는 백엔드의 409 조건부 UPDATE에 도달하지 못한다.
+    //
+    // **`uphold`로 재시도한다 — `reject`가 아니다(코드리뷰 지적).** `reject`는
+    // 성공해도 원장에 아무 것도 남기지 않으므로(appeals/services.py의
+    // reject_appeal), 재심판 시도를 reject로 보내면 409 가드를 통째로 지워도
+    // "정정 분개가 늘지 않았다"는 아래 단언이 항상 참이 되어 아무것도 묻지
+    // 않는 테스트가 된다. uphold + correction_amount라야 "가드가 없으면 분개가
+    // 하나 더 생긴다"가 실제로 참이 되고, 그때 이 단언이 비로소 의미를 가진다.
     const response = await page.request.post(
       `/api/backend/operator/appeals/${seeded.appeal_id}/rule`,
       {
         headers: { origin: baseURL! },
-        data: { decision: "reject", ruling_note: "재심판 시도 — 거절되어야 한다." },
+        data: {
+          decision: "uphold",
+          correction_amount: 9999,
+          ruling_note: "재심판 시도 — 거절되어야 한다.",
+        },
       },
     );
     expect(response.status()).toBe(409);

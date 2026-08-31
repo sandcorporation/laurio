@@ -25,7 +25,17 @@ export default function AppealDetailPage() {
   // 심판 직후 화면을 "확정된 심판을 보여주는 상태로" 바꾸기 위한 로컬 오버레이
   // (#67 AC). useAppealDetail은 마운트 시 한 번만 조회하므로, 심판 성공 뒤
   // 서버를 다시 조회하지 않고도 폼 대신 결과가 보이려면 이 상태가 필요하다.
-  const [ruledOverride, setRuledOverride] = useState<AppealRuling | null>(null);
+  //
+  // **어느 이의의 오버레이인지도 함께 들고 있는다(코드리뷰 지적).** appealId만
+  // 보고 override를 무조건 쓰면, 이 이의를 심판한 뒤 상세→상세로 클라이언트
+  // 내비게이션해 다른(아직 pending인) 이의를 열었을 때 useAppealDetail은 새
+  // 이의를 다시 조회하는데 override는 이전 이의의 값 그대로 남아 있어 "다른
+  // 이의의 심판 결과가 보이고 pending 이의에 폼이 안 뜨는" 사고가 난다.
+  // override가 지금 보고 있는 appealId의 것일 때만 쓴다.
+  const [ruledOverride, setRuledOverride] = useState<{
+    appealId: string;
+    ruling: AppealRuling;
+  } | null>(null);
 
   if (session.status === "loading") {
     return (
@@ -71,9 +81,13 @@ export default function AppealDetailPage() {
 
   const { appeal } = state;
   // 심판 직후에는 서버를 다시 조회하지 않고 로컬 오버레이를 우선한다 — 화면이
-  // "확정된 심판을 보여주는 상태로 바뀐다"는 AC를 즉시 만족시킨다(#67).
-  const ruling = ruledOverride ?? appeal.ruling;
-  const status = ruledOverride ? ruledOverride.decision : appeal.status;
+  // "확정된 심판을 보여주는 상태로 바뀐다"는 AC를 즉시 만족시킨다(#67). 단,
+  // 오버레이가 지금 appealId의 것일 때만 — 다른 이의를 심판한 뒤 이 이의로
+  // 넘어온 경우까지 덮어써서는 안 된다(코드리뷰 지적).
+  const activeOverride =
+    ruledOverride && ruledOverride.appealId === appealId ? ruledOverride.ruling : null;
+  const ruling = activeOverride ?? appeal.ruling;
+  const status = activeOverride ? activeOverride.decision : appeal.status;
 
   return (
     <main>
@@ -105,7 +119,10 @@ export default function AppealDetailPage() {
           보여준다 — 이미 심판된 이의에는 폼이 아예 없다(#67 AC). 서버의 409
           (조건부 UPDATE)와 이 분기가 이중 심판을 막는 두 겹의 방어다. */}
       {!ruling && (
-        <RulingForm appealId={appeal.id} onRuled={(newRuling) => setRuledOverride(newRuling)} />
+        <RulingForm
+          appealId={appeal.id}
+          onRuled={(newRuling) => setRuledOverride({ appealId, ruling: newRuling })}
+        />
       )}
 
       {ruling && (
