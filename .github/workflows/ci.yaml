@@ -396,26 +396,43 @@ jobs:
         run: docker build -f docker/frontend.Dockerfile --target runner -t laurio-frontend-runner-ci .
 
       # 이 레포가 이미 두 번 겪은 사고(CLAUDE.md 「이미 데인 곳」) — .dockerignore
-      # 패턴이 파일에 적혀 있다는 것만으로는 증명이 아니다. 가짜 시크릿을 실제로
-      # 심어서 이미지에 안 들어가는지 직접 확인한다.
+      # 패턴이 파일에 적혀 있다는 것만으로는 증명이 아니다. 가짜 시크릿과 가짜
+      # 호스트 node_modules를 실제로 심어서 이미지에 안 들어가는지 직접
+      # 확인한다.
+      #
+      # **경로를 build context 기준으로 정확히 맞춘다**(#70 코드리뷰 지적,
+      # 심각). 이 스텝은 저장소 루트에서 `docker build ... .`을 돌리므로
+      # frontend.Dockerfile의 `COPY frontend/ ./frontend/`가 시크릿을
+      # `/app/frontend/.env`에 놓는다 — `/app/.env`는 애초에 존재할 수 없는
+      # 경로라 그 단정은 항상 거짓으로 통과했다(뒤의 재귀 grep만 실질
+      # 커버리지였다). node_modules 검증도 이름만 약속하고 실제로는 아무
+      # node_modules도 없어(이 잡은 pnpm install을 돌리지 않는다) 아무것도
+      # 검증하지 않았다 — 마커 파일을 직접 만들어 넣는다.
       - name: .dockerignore actually keeps secrets and host node_modules out of the image
         run: |
           set -euo pipefail
           echo "OPENAI_API_KEY=sk-ci-guard-fake-secret-do-not-leak" > frontend/.env
+          mkdir -p frontend/node_modules/.ci-guard-marker
+          echo "host-node-modules-should-not-leak-into-image" > frontend/node_modules/.ci-guard-marker/marker.txt
           docker build -f docker/frontend.Dockerfile --target builder -t laurio-frontend-builder-ci-guard .
           docker run --rm --entrypoint sh laurio-frontend-builder-ci-guard -c '
             set -e
-            if [ -f /app/.env ]; then
-              echo "FOUND /app/.env — .dockerignore가 시크릿을 막지 못했다" >&2
+            if [ -f /app/frontend/.env ]; then
+              echo "FOUND /app/frontend/.env — .dockerignore가 시크릿을 막지 못했다" >&2
               exit 1
             fi
-            if grep -rl "sk-ci-guard-fake-secret" /app > /dev/null 2>&1; then
-              echo "가짜 시크릿 문자열이 이미지 어딘가에 들어갔다" >&2
+            if [ -d /app/frontend/node_modules/.ci-guard-marker ]; then
+              echo "FOUND /app/frontend/node_modules/.ci-guard-marker — .dockerignore가 호스트 node_modules를 막지 못했다" >&2
               exit 1
             fi
-            echo "confirmed: .env excluded from the image"
+            if grep -rl "sk-ci-guard-fake-secret\|host-node-modules-should-not-leak-into-image" /app > /dev/null 2>&1; then
+              echo "가짜 시크릿 또는 host node_modules 마커가 이미지 어딘가에 들어갔다" >&2
+              exit 1
+            fi
+            echo "confirmed: .env and host node_modules excluded from the image"
           '
           rm -f frontend/.env
+          rm -rf frontend/node_modules/.ci-guard-marker
           docker rmi laurio-frontend-builder-ci-guard
 
       - name: Refuses to boot in production with missing config (and actually exits — not just logs)
@@ -461,9 +478,20 @@ jobs:
           # 백엔드가 없어 /healthz 는 503(degraded)이 정상이다 — 여기서 보는 건
           # "완전한 설정에서는 프론트가 죽지 않고 응답한다"는 것뿐이다. 연결
           # 자체가 안 되면(000) 컨테이너가 여전히 안 뜬 것이다.
+          #
+          # **`|| echo "000"`을 쓰지 않는다**(#70 코드리뷰 지적, 심각). curl은
+          # `-w`가 있으면 연결 실패 시에도 스스로 "000"을 쓰고 비정상 종료
+          # 코드로 끝낸다 — 그 위에 `|| echo "000"`을 얹으면 실패할 때마다
+          # "000"이 두 번(curl 자신 + echo) 이어져 "000000"이 되고, 그 값은
+          # 아래 `[ "$status" = "000" ]` 비교와 절대 같아지지 않아 **재시도
+          # 루프가 첫 시도에 곧장 break한다** — 컨테이너가 정상 부팅 중이어도
+          # 빨간불이 되고, "완전한 설정에서는 죽지 않는다"는 이 스텝의 관측
+          # 자체가 수행되지 않는다. curl 자신의 "000" 출력만 남기고, 그래도
+          # 정말 비어 있는 극단적인 경우를 위한 방어로 `${status:-000}`만 쓴다.
           status="000"
           for _ in $(seq 1 20); do
-            status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3100/healthz || echo "000")
+            status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3100/healthz 2>/dev/null)
+            status="${status:-000}"
             [ "$status" = "000" ] || break
             sleep 1
           done
@@ -513,24 +541,40 @@ jobs:
 
       # frontend-deploy-guard와 같은 이유 — .dockerignore가 시크릿과 호스트
       # node_modules를 실제로 막는지 이 앱에서도 직접 확인한다.
+      #
+      # **경로를 build context 기준으로 정확히 맞춘다**(#70 코드리뷰 지적,
+      # 심각). 이 스텝은 저장소 루트에서 `docker build ... .`을 돌리므로
+      # operator.Dockerfile의 `COPY operator/ ./operator/`가 시크릿을
+      # `/app/operator/.env`에 놓는다 — `/app/.env`는 애초에 존재할 수 없는
+      # 경로라 그 단정은 항상 거짓으로 통과했다. node_modules 검증도 이름만
+      # 약속하고 실제로는 아무 node_modules도 없어(이 잡은 pnpm install을
+      # 돌리지 않는다) 아무것도 검증하지 않았다 — 마커 파일을 직접 만들어
+      # 넣는다.
       - name: .dockerignore actually keeps secrets and host node_modules out of the image
         run: |
           set -euo pipefail
           echo "OPENAI_API_KEY=sk-ci-guard-fake-secret-do-not-leak" > operator/.env
+          mkdir -p operator/node_modules/.ci-guard-marker
+          echo "host-node-modules-should-not-leak-into-image" > operator/node_modules/.ci-guard-marker/marker.txt
           docker build -f docker/operator.Dockerfile --target builder -t laurio-operator-builder-ci-guard .
           docker run --rm --entrypoint sh laurio-operator-builder-ci-guard -c '
             set -e
-            if [ -f /app/.env ]; then
-              echo "FOUND /app/.env — .dockerignore가 시크릿을 막지 못했다" >&2
+            if [ -f /app/operator/.env ]; then
+              echo "FOUND /app/operator/.env — .dockerignore가 시크릿을 막지 못했다" >&2
               exit 1
             fi
-            if grep -rl "sk-ci-guard-fake-secret" /app > /dev/null 2>&1; then
-              echo "가짜 시크릿 문자열이 이미지 어딘가에 들어갔다" >&2
+            if [ -d /app/operator/node_modules/.ci-guard-marker ]; then
+              echo "FOUND /app/operator/node_modules/.ci-guard-marker — .dockerignore가 호스트 node_modules를 막지 못했다" >&2
               exit 1
             fi
-            echo "confirmed: .env excluded from the image"
+            if grep -rl "sk-ci-guard-fake-secret\|host-node-modules-should-not-leak-into-image" /app > /dev/null 2>&1; then
+              echo "가짜 시크릿 또는 host node_modules 마커가 이미지 어딘가에 들어갔다" >&2
+              exit 1
+            fi
+            echo "confirmed: .env and host node_modules excluded from the image"
           '
           rm -f operator/.env
+          rm -rf operator/node_modules/.ci-guard-marker
           docker rmi laurio-operator-builder-ci-guard
 
       - name: Refuses to boot in production with missing config (and actually exits — not just logs)
@@ -576,9 +620,16 @@ jobs:
           # 백엔드가 없어 /healthz 는 503(degraded)이 정상이다 — 여기서 보는 건
           # "완전한 설정에서는 운영자 앱이 죽지 않고 응답한다"는 것뿐이다. 연결
           # 자체가 안 되면(000) 컨테이너가 여전히 안 뜬 것이다.
+          #
+          # frontend-deploy-guard와 같은 이유로 `|| echo "000"`을 쓰지 않는다
+          # (#70 코드리뷰 지적, 심각 — 여기서 그대로 복사된 버그였다). curl은
+          # `-w`가 있으면 연결 실패 시에도 스스로 "000"을 쓴다 — `|| echo
+          # "000"`을 얹으면 "000000"이 되어 재시도 루프가 첫 시도에 곧장
+          # break한다.
           status="000"
           for _ in $(seq 1 20); do
-            status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3101/healthz || echo "000")
+            status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3101/healthz 2>/dev/null)
+            status="${status:-000}"
             [ "$status" = "000" ] || break
             sleep 1
           done

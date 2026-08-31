@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import uuid
 from datetime import timedelta
 
@@ -41,7 +42,11 @@ SCORING_RUN_PENDING_URL = "/api/internal/scoring/run-pending"
 # 이 명령이 심은 Contest 는 전부 이 접두어로 시작한다(코드리뷰 지적) — clear_queues()가
 # "이 명령이 만든 것"만 골라 지우려면 다른 시드·실사용 데이터와 구별할 표식이
 # 필요하다(frontend/e2e/lib/seed.ts, contests/management/commands/
-# seed_e2e_contests.py의 title__startswith 관용구와 같은 원칙).
+# seed_e2e_contests.py의 title__startswith 관용구와 같은 원칙). 이 접두어는
+# "가족 전체"(모든 실행이 심은 Contest)를 가리킨다 — clear_queues()는 실행을
+# 가리지 않고 이 가족 전체에서 지우는 게 맞다(그 함수는 "큐를 0건으로" 만드는
+# 것이 목적이라 실행 경계가 무관하다). 아래 `_own_title_prefix()`가 그 안에서
+# "이번 실행이 심은 것"만 가리키는 더 좁은 접두어를 만든다.
 TITLE_PREFIX = "[e2e-op-queue] "
 
 # Contest를 발행할 때 쓰는 마감까지의 여유. **정렬 문제를 마감 값으로 풀지
@@ -54,7 +59,8 @@ TITLE_PREFIX = "[e2e-op-queue] "
 # 심각한 사고였다. `_close_contest`를 이 Contest 하나만 좁게 전이시키는
 # 방식으로 고친 지금은(아래), 마감이 실시간 기준으로 아직 오지 않았어도
 # 무관하다 — 그래서 원래 값(1시간)으로 되돌린다. 정렬 문제의 진짜 원인은
-# 마감이 아니라 축적이었다 — STALE_AFTER·_clear_stale_seed_contents 참고.
+# 마감이 아니라 축적이었다 — `_own_title_prefix`·`_clear_stale_seed_contests`
+# 참고.
 DEADLINE_OFFSET = timedelta(hours=1)
 
 # 이 명령들이 만드는 Contest는 지금까지 아무도 지우지 않아 스위트를 반복
@@ -66,13 +72,37 @@ DEADLINE_OFFSET = timedelta(hours=1)
 # 깨진다. #66이 이 명령들의 호출 빈도를 3배로 늘리면서 이 결함이 로컬에서
 # 두 번만 돌려도 드러날 만큼 빨라졌다.
 #
-# 그래서 시드를 부를 때마다 자기 접두어의 "오래된"(STALE_AFTER보다 이전)
-# Contest를 먼저 정리한다. 매 호출마다 무조건 지우지 않는 이유: 같은
-# 스위트 실행 안에서 방금 만든 형제 Contest(다른 --only 호출, 같은
-# 테스트가 두 번째로 부르는 seed)까지 지우면 그 테스트 자신이 깨진다.
-# Playwright 스위트 한 번은 보통 몇 분이면 끝나므로, 1시간이면 "이번
-# 실행에서 막 만든 것"과 "예전 실행이 남긴 것"을 안전하게 가른다.
-STALE_AFTER = timedelta(hours=1)
+# **예전에는 벽시계 기준 1시간 컷오프(STALE_AFTER)로 "오래된 것"을
+# 정리했는데, 그 기준이 정확히 "연속 두 번 실행"이라는 경우를 보존했다**
+# (코드리뷰가 실제로 재현: 깨끗한 스택에서 스위트를 연달아 두 번 돌리면
+# 1회차가 심은 Contest는 정의상 1시간이 안 지나 살아남고, 2회차 것과 합쳐
+# 공개 목록 1페이지를 밀어냈다). 시간은 "이번 실행이 만든 것"과 "이전
+# 실행이 남긴 것"을 구별하지 못한다 — 두 실행이 1시간 안에 겹치면 매번
+# 똑같이 재현되는 결함이었다.
+#
+# 그래서 시간 대신 **실행 하나를 식별하는 토큰**을 쓴다.
+# `LAURIO_E2E_RUN_ID`(frontend/e2e/global-setup.ts가 스위트 시작 시 한 번
+# 발급해 모든 시드 호출에 실어 보낸다)를 Contest 제목에 새겨, "이번 실행이
+# 심은 것"만 자기 것으로 인식한다 — 그 외의 가족-접두어 Contest는 전부
+# (얼마나 오래됐든) 다른 실행이 남긴 것이므로 정리 대상이다. 같은 실행
+# 안에서 여러 번 호출해도(다른 --only, 같은 테스트의 두 번째 시드) 서로의
+# 형제를 지우지 않는다 — 토큰이 같기 때문이다. 이 명령이 프론트엔드
+# 시드 헬퍼를 거치지 않고 손으로(또는 pytest에서) 불릴 때를 위해, 환경변수가
+# 없으면 이 프로세스 안에서만 유효한 임의 토큰으로 대체한다 — 그 경우
+# "실행"의 경계는 이 파이썬 프로세스의 수명이 된다.
+_FALLBACK_RUN_ID = uuid.uuid4().hex[:8]
+
+
+def _run_id() -> str:
+    return os.environ.get("LAURIO_E2E_RUN_ID") or _FALLBACK_RUN_ID
+
+
+def _own_title_prefix() -> str:
+    """이번 실행이 심은 Contest에만 붙는, TITLE_PREFIX(가족 전체)보다 좁은
+    접두어. `_clear_stale_seed_contests`가 "내 것"과 "다른 실행이 남긴 것"을
+    가르는 유일한 기준이다."""
+
+    return f"{TITLE_PREFIX}[{_run_id()}] "
 
 
 def _internal_headers() -> dict:
@@ -117,12 +147,15 @@ def _sign_payment(*, webhook_id: str, order_id: str, status: str) -> str:
     return hmac.new(key.encode("utf-8"), canonical, hashlib.sha256).hexdigest()
 
 
-def _clear_stale_seed_contests() -> None:
-    """자기 접두어(TITLE_PREFIX)의 오래된 Contest를 정리한다 — 위 STALE_AFTER
-    설명 참고. 삭제 범위는 항상 이 접두어로만 좁힌다: 다른 시드(seed_dev_data,
-    seed_e2e_contests.py)나 실제 데이터, 그리고 이 명령을 모르는 다른 체인의
-    e2e 데이터는 절대 건드리지 않는다 — clear_queues()가 이미 세운 것과 같은
-    안전 속성이다.
+def _clear_stale_seed_contests() -> int:
+    """자기 가족-접두어(TITLE_PREFIX)의 Contest 중 **이번 실행이 심지 않은
+    것**을 정리한다 — 위 `_own_title_prefix` 설명 참고. 나이가 아니라 실행
+    토큰으로 가른다: `_own_title_prefix()`로 시작하지 않으면(=이번
+    `LAURIO_E2E_RUN_ID`가 아니면) 얼마나 최근에 만들어졌든 다른 실행이 남긴
+    것이므로 지운다. 삭제 범위는 항상 TITLE_PREFIX 가족으로만 좁힌다: 다른
+    시드(seed_dev_data, seed_e2e_contests.py)나 실제 데이터, 그리고 이
+    명령을 모르는 다른 체인의 e2e 데이터는 절대 건드리지 않는다 —
+    clear_queues()가 이미 세운 것과 같은 안전 속성이다.
 
     **Award를 Contest보다 먼저 지운다.** `Award.submission`이 PROTECT라
     (awards/models.py — 감사 기록 보존) Contest를 바로 지우면
@@ -130,19 +163,24 @@ def _clear_stale_seed_contests() -> None:
     Award -> Handover -> Payout -> TaxIdentity/PayoutWebhookDelivery는 전부
     CASCADE라 함께 정리된다. Contest를 지우면 나머지(Submission·Score·
     Appeal·AppealRuling·SourceReading·Requirement 등)도 CASCADE로 따라간다.
+
+    지운 Contest 개수를 돌려준다 — `--prune-other-runs`(아래 Command)가 그
+    수를 그대로 stdout에 찍어, globalSetup이 스위트 시작 전에 실제로 무언가를
+    정리했는지 눈으로 확인할 수 있게 한다.
     """
 
-    cutoff = timezone.now() - STALE_AFTER
+    own_prefix = _own_title_prefix()
     stale_contest_ids = list(
-        Contest.objects.filter(title__startswith=TITLE_PREFIX, created_at__lt=cutoff).values_list(
-            "id", flat=True
-        )
+        Contest.objects.filter(title__startswith=TITLE_PREFIX)
+        .exclude(title__startswith=own_prefix)
+        .values_list("id", flat=True)
     )
     if not stale_contest_ids:
-        return
+        return 0
 
     Award.objects.filter(contest_id__in=stale_contest_ids).delete()
     Contest.objects.filter(id__in=stale_contest_ids).delete()
+    return len(stale_contest_ids)
 
 
 def _category() -> Category:
@@ -162,7 +200,7 @@ def _publish_contest(client: Client, *, sponsor_uid: str, deadline_at, requireme
     response = client.post(
         CONTESTS_URL,
         data={
-            "title": f"{TITLE_PREFIX}{sponsor_uid}의 공모전",
+            "title": f"{_own_title_prefix()}{sponsor_uid}의 공모전",
             "category_id": _category().id,
             "deliverable_type_ids": [_deliverable_type().id],
             "prize": 1_000_000,
@@ -427,6 +465,18 @@ class Command(BaseCommand):
             action="store_true",
             help="심지 않고 이 명령이 심은 데이터만 빈 상태로 되돌린다(다른 옵션과 함께 쓰지 않는다).",
         )
+        parser.add_argument(
+            "--prune-other-runs",
+            action="store_true",
+            help=(
+                "심지 않고 다른 실행(다른 LAURIO_E2E_RUN_ID)이 남긴 own-prefix "
+                "Contest만 정리한다(다른 옵션과 함께 쓰지 않는다). frontend/e2e/"
+                "global-setup.ts가 스위트 시작 시 딱 한 번 부른다 — 이 명령을 처음 "
+                "실제로 부르는 시점(대개 operator 프로젝트의 첫 테스트)까지 기다리면, "
+                "그전에 먼저 도는 public 프로젝트 테스트가 이전 실행이 남긴 Contest를 "
+                "이미 관찰해 버린다(#70 코드리뷰가 실제로 재현)."
+            ),
+        )
 
     def handle(self, *args, **options) -> None:
         _refuse_in_deployed_environment()
@@ -436,8 +486,16 @@ class Command(BaseCommand):
             self.stdout.write(json.dumps(result))
             return
 
-        # 심기 전에 자기 접두어의 오래된 Contest부터 정리한다(STALE_AFTER
-        # 설명 참고) — 축적이 공개 목록 정렬을 오염시키는 근본 원인이었다.
+        if options.get("prune_other_runs"):
+            pruned = _clear_stale_seed_contests()
+            self.stdout.write(json.dumps({"pruned": pruned}))
+            return
+
+        # 심기 전에 자기 가족-접두어의, 이번 실행이 심지 않은 Contest부터
+        # 정리한다(`_own_title_prefix` 설명 참고) — 축적이 공개 목록 정렬을
+        # 오염시키는 근본 원인이었다. globalSetup이 스위트 시작 시 이미 한 번
+        # 정리했더라도(위 --prune-other-runs), 이 실행 도중 다른 체인/프로세스가
+        # 남긴 것까지 잡도록 매 호출마다 다시 돈다 — 멱등하고 비용도 작다.
         _clear_stale_seed_contests()
 
         only = options.get("only")

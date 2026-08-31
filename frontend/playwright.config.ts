@@ -23,6 +23,9 @@ const publicBaseURL = process.env.LAURIO_E2E_BASE_URL ?? "http://127.0.0.1:53000
 const operatorBaseURL = process.env.LAURIO_OPERATOR_E2E_BASE_URL ?? "http://127.0.0.1:53001";
 
 export default defineConfig({
+  // 운영자 큐 시드가 "이번 실행"과 "이전 실행"을 구별할 토큰을 스위트 시작 시
+  // 한 번 발급한다(코드리뷰 지적, #70 — e2e/lib/run-id.ts 상단 주석 참고).
+  globalSetup: require.resolve("./e2e/global-setup.ts"),
   fullyParallel: true,
   // e2e/tokens.spec.ts 는 app/tokens.css 를 실제로 편집해 렌더링이 갈리는지
   // 확인한다(FE-02, #27 핵심 승인 기준) — tracked 파일 하나를 스위트 전체가

@@ -13,9 +13,12 @@
   그 Submission들에 append-only `Score`를 남겼다 — 되돌릴 수 없는 사고였다.
   `core.transitions.claim_transition`으로 좁힌 지금은 이 Contest만 옮겨야
   한다.
-- `seed_e2e_operator_queues._clear_stale_seed_contests`: 오래된(STALE_AFTER
-  이전) own-prefix Contest만 지워야 한다 — 무관한 Contest, 그리고 방금 만든
-  (STALE_AFTER 이내) own-prefix Contest는 손대면 안 된다. Award가
+- `seed_e2e_operator_queues._clear_stale_seed_contests`: **다른 실행**(다른
+  `LAURIO_E2E_RUN_ID`)의 own-prefix Contest만 지워야 한다 — 무관한 Contest,
+  그리고 **이번 실행**(같은 run id)의 own-prefix Contest는 손대면 안 된다.
+  코드리뷰가 실제로 재현한 회귀: 예전에는 벽시계 1시간 컷오프였는데, 그
+  기준은 "연속 두 번 실행"을 구별하지 못해 두 실행의 Contest가 모두 살아남아
+  공개 목록 e2e를 깨뜨렸다 — 그래서 나이가 아니라 실행 토큰으로 가른다. Award가
   `submission`을 PROTECT하므로(awards/models.py) Award를 먼저 지우지 않으면
   Contest 삭제 자체가 `ProtectedError`로 막힌다는 것도 함께 확인한다.
 """
@@ -235,14 +238,17 @@ def test_close_contest_does_not_touch_other_published_contests():
     )
 
 
-# --- seed_e2e_operator_queues._clear_stale_seed_contests — 축적 정리(#66 코드리뷰 지적) ---
+# --- seed_e2e_operator_queues._clear_stale_seed_contests — 축적 정리(#66·#70 코드리뷰 지적) ---
 
 
-def _make_stale_own_prefix_contest_with_award(uid: str, *, age) -> Contest:
-    """`TITLE_PREFIX`로 시작하는, `age`만큼 오래된 Contest를 Award까지 딸려
-    직접 만든다 — `Award.submission`이 PROTECT라(awards/models.py) Contest를
-    그냥 지우면 `ProtectedError`가 난다는 것과, `_clear_stale_seed_contests`가
-    Award를 먼저 지워 그 보호를 올바르게 푸는지를 함께 확인하는 데 쓴다."""
+def _make_own_prefix_contest_with_award(uid: str, *, run_id: str, age=timedelta()) -> Contest:
+    """`TITLE_PREFIX` 가족의, 지정한 `run_id`가 태그된 Contest를 Award까지
+    딸려 직접 만든다 — `Award.submission`이 PROTECT라(awards/models.py)
+    Contest를 그냥 지우면 `ProtectedError`가 난다는 것과,
+    `_clear_stale_seed_contests`가 Award를 먼저 지워 그 보호를 올바르게
+    푸는지를 함께 확인하는 데 쓴다. `age`는 기본 0(방금 만든 것)이지만,
+    "나이가 아니라 run_id로 가른다"는 것을 증명하는 테스트는 이 값을 크게
+    줘서 오래됐어도 무관함을 보인다."""
 
     from accounts.management.commands.seed_e2e_operator_queues import TITLE_PREFIX
 
@@ -258,7 +264,10 @@ def _make_stale_own_prefix_contest_with_award(uid: str, *, age) -> Contest:
     )
     contest = Contest.objects.create(
         sponsor=sponsor_user.sponsor_profile,
-        title=f"{TITLE_PREFIX}stale-{uid}",
+        # `_own_title_prefix()`가 실제로 만드는 형태(TITLE_PREFIX + "[run_id] ")를
+        # 손으로 재현한다 — 임포트해 부르면 *현재 프로세스의* run id를 쓰게 되어
+        # "다른 실행"을 표현할 수 없다.
+        title=f"{TITLE_PREFIX}[{run_id}] stale-{uid}",
         category=category,
         prize=1_000_000,
         deadline_at=timezone.now() - age,
@@ -279,41 +288,66 @@ def _make_stale_own_prefix_contest_with_award(uid: str, *, age) -> Contest:
 
 
 @pytest.mark.django_db
-def test_clear_stale_seed_contests_removes_old_own_prefix_data_only():
-    """#66 코드리뷰 지적 — 정렬 오염의 진짜 원인은 축적이었다(마감을 미루는 것은
-    답이 아니었다). 오래된 own-prefix Contest는 Award의 PROTECT를 뚫고
-    지워지고, 무관한 Contest와 이 호출이 방금 만든 own-prefix Contest는
-    그대로 남아야 한다."""
+def test_clear_stale_seed_contests_removes_a_different_runs_own_prefix_data_only(monkeypatch):
+    """#66/#70 코드리뷰 지적 — 정렬 오염의 진짜 원인은 축적이었다(마감을
+    미루는 것도, 벽시계 컷오프도 답이 아니었다). **다른 실행**(다른
+    `LAURIO_E2E_RUN_ID`)의 own-prefix Contest는 방금 만들어졌어도(나이와
+    무관하게) 지워지고, 무관한 Contest와 이번 실행이 방금 만든 own-prefix
+    Contest는 그대로 남아야 한다."""
 
-    from accounts.management.commands.seed_e2e_operator_queues import STALE_AFTER, TITLE_PREFIX
+    monkeypatch.setenv("LAURIO_E2E_RUN_ID", "run-current")
 
-    stale = _make_stale_own_prefix_contest_with_award(
-        "cleanup-1", age=STALE_AFTER + timedelta(minutes=1)
-    )
+    foreign_run = _make_own_prefix_contest_with_award("cleanup-1", run_id="run-other")
     unrelated_contest, _unrelated_submission = _make_unrelated_published_contest_with_submission(
         "cleanup-unrelated-1"
     )
 
     call_command("seed_e2e_operator_queues", only="appeal")
 
-    assert not Contest.objects.filter(pk=stale.pk).exists(), (
-        "오래된 own-prefix Contest가 정리되지 않았다 — 축적이 다시 시작된다."
+    assert not Contest.objects.filter(pk=foreign_run.pk).exists(), (
+        "다른 실행의 own-prefix Contest가 정리되지 않았다 — 축적이 다시 시작된다."
     )
     assert Contest.objects.filter(pk=unrelated_contest.pk).exists(), (
         "무관한 Contest까지 지워졌다 — 삭제 범위가 자기 접두어를 벗어났다."
     )
-    # 이 호출이 방금 만든 own-prefix Contest(seed_pending_appeal)는 STALE_AFTER
-    # 이내라 정리 대상이 아니어야 한다 — 남은 own-prefix Contest는 그것 하나뿐.
+    # 이 호출이 방금 만든 own-prefix Contest(seed_pending_appeal, run-current 태그)만
+    # 남아야 한다.
+    from accounts.management.commands.seed_e2e_operator_queues import TITLE_PREFIX
+
     fresh_own_prefix = Contest.objects.filter(title__startswith=TITLE_PREFIX)
     assert fresh_own_prefix.count() == 1, list(fresh_own_prefix.values_list("title", flat=True))
+    assert fresh_own_prefix.first().title.startswith(f"{TITLE_PREFIX}[run-current]")
 
 
 @pytest.mark.django_db
-def test_running_the_seed_twice_in_a_row_does_not_push_a_fresh_own_prefix_contest_out():
-    """#66 코드리뷰 지적 — "연속 두 번 돌려도 초록"을 백엔드 레벨에서도
-    고정한다. 첫 호출이 own-prefix Contest 하나를 남기고, 그 직후(=STALE_AFTER
-    이내) 두 번째 호출이 그것까지 지워버리면 축적 정리 자체가 정렬 문제를
-    다시 만든다 — 그런 일이 없는지 직접 센다."""
+def test_clear_stale_seed_contests_preserves_the_current_runs_data_even_if_old(monkeypatch):
+    """#70 코드리뷰가 실제로 재현한 회귀 — 예전에는 벽시계 1시간 컷오프였는데,
+    깨끗한 스택에서 스위트를 연달아 두 번 돌리면 두 실행 모두 1시간 안에
+    들어가 정리되지 않았다("연속 두 번 실행"을 구별하지 못했다). 시간이
+    무관해졌다는 것을 직접 증명한다: created_at을 30일 전으로 돌려도 현재
+    run id와 같은 태그가 붙어 있으면 지워지지 않아야 한다."""
+
+    monkeypatch.setenv("LAURIO_E2E_RUN_ID", "run-current")
+
+    own_but_old = _make_own_prefix_contest_with_award(
+        "cleanup-2", run_id="run-current", age=timedelta(days=30)
+    )
+
+    call_command("seed_e2e_operator_queues", only="appeal")
+
+    assert Contest.objects.filter(pk=own_but_old.pk).exists(), (
+        "현재 실행의 own-prefix Contest가 나이만으로 지워졌다 — 시간 기준 정리로 되돌아갔다."
+    )
+
+
+@pytest.mark.django_db
+def test_running_the_seed_twice_in_a_row_does_not_push_a_fresh_own_prefix_contest_out(monkeypatch):
+    """#66/#70 코드리뷰 지적 — "연속 두 번 돌려도 초록"을 백엔드 레벨에서도
+    고정한다. 같은 실행(같은 run id) 안에서 첫 호출이 own-prefix Contest
+    하나를 남기고, 그 직후 두 번째 호출이 그것까지 지워버리면 축적 정리
+    자체가 정렬 문제를 다시 만든다 — 그런 일이 없는지 직접 센다."""
+
+    monkeypatch.setenv("LAURIO_E2E_RUN_ID", "run-same")
 
     from accounts.management.commands.seed_e2e_operator_queues import TITLE_PREFIX
 
@@ -329,7 +363,7 @@ def test_running_the_seed_twice_in_a_row_does_not_push_a_fresh_own_prefix_contes
     )
 
     # 두 번째 호출 뒤에도 첫 번째 호출이 만든 Contest가 여전히 있어야 한다
-    # (STALE_AFTER 이내라 정리 대상이 아니다) — 그리고 새로 하나가 더 늘어야
-    # 한다(멱등하지 않다는 이 명령의 계약대로).
+    # (같은 run id라 정리 대상이 아니다) — 그리고 새로 하나가 더 늘어야 한다
+    # (멱등하지 않다는 이 명령의 계약대로).
     assert first_titles <= second_titles
     assert len(second_titles) == 2
