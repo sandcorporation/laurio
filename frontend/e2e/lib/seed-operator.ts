@@ -67,7 +67,17 @@ export function seedE2eOperator(options: SeedOperatorOptions = {}): SeededOperat
 }
 
 export type SeededOperatorQueues = {
-  appeal?: { appeal_id: number; contest_id: number };
+  appeal?: {
+    appeal_id: number;
+    contest_id: number;
+    // submission_id·reason·dev_access는 운영자 앱 08(#66)이 덧붙였다 — 옵셔널로
+    // 둔 것은 이 타입이 옛 응답 모양(appeal_id·contest_id만)도 여전히 표현할 수
+    // 있어야 하기 때문이 아니라, 실제로는 항상 채워진다(백엔드가 additive하게만
+    // 바꿨다)는 점을 타입에서까지 강제하지 않기 위해서다.
+    submission_id: number;
+    reason: string;
+    dev_access: string;
+  };
   identity_pending_payout?: { idempotency_key: string; contest_id: number };
   seller_pending_payout?: { idempotency_key: string; contest_id: number };
 };
@@ -88,4 +98,65 @@ export function clearE2eOperatorQueues(): { appeals_deleted: number; payouts_del
     appeals_deleted: number;
     payouts_deleted: number;
   };
+}
+
+// backend/appeals/schemas.py의 RulingOut과 필드 이름을 맞춘다 —
+// seed_e2e_operator_appeal.py가 이 값을 손으로 재구성하지 않고 상세 조회
+// (GET /operator/appeals/{id})의 응답을 그대로 돌려주기 때문이다.
+export type SeededAppealRuling = {
+  decision: "upheld" | "rejected";
+  ruled_by_id: number;
+  ruled_by_username: string;
+  note: string;
+  ruled_at: string;
+  correction_amount: number | null;
+  correction_journal_entry_id: number | null;
+};
+
+export type SeededAppealForDetail = {
+  appeal_id: number;
+  contest_id: number;
+  submission_id: number;
+  reason: string;
+  // 소스 요청 본문(scoring 프롬프트)에 실제로 심겨 있는 유일한 마커 — 이의
+  // 상세를 펼치기 전에는 화면 어디에도 없어야 하고, 펼친 뒤에만 나타나야 한다
+  // (#66 AC, ADR-0022).
+  source_marker: string;
+  // Developer 본인의 JWT — GET /api/submissions/{id}/source-readings(티켓 03)를
+  // e2e가 직접 쳐서 "펼침이 실제로 열람 기록을 남겼는가"를 확인하는 데 쓴다.
+  dev_access: string;
+  status: "pending" | "upheld" | "rejected";
+  ruling: SeededAppealRuling | null;
+};
+
+/** `seed_e2e_operator_appeal` 관리 명령을 돌려 이의 상세 화면 e2e에 필요한 이의
+ * 하나를 심는다(backend/accounts/management/commands/seed_e2e_operator_appeal.py).
+ * `rule`을 주면 그 결정으로 즉시 심판까지 마친 이의를 돌려준다 — #66은 심판
+ * 폼을 만들지 않지만(#67), 이미 심판된 이의를 필터·읽기 전용 화면으로 보여주는
+ * 것은 검증해야 한다. 멱등하지 않다 — 매 호출이 새 Contest·Submission·Appeal을
+ * 만든다. */
+export function seedE2eOperatorAppeal(rule?: "uphold" | "reject"): SeededAppealForDetail {
+  const args = rule ? ["--rule", rule] : [];
+  return runSeedCommand("seed_e2e_operator_appeal", args) as SeededAppealForDetail;
+}
+
+function backendApiPort(): string {
+  return process.env.LAURIO_API_PORT ?? "58000";
+}
+
+/** Developer 본인의 소스 열람 기록 수를 백엔드에서 직접 센다(`GET
+ * /api/submissions/{id}/source-readings`, JWT 인증, 티켓 03) — 운영자 앱의 BFF를
+ * 거치지 않고 백엔드 컨테이너의 호스트 노출 포트를 직접 친다. 이 엔드포인트는
+ * 운영자 앱이 아니라 공개 앱(Developer)의 표면이라 운영자 BFF의 허용목록에
+ * 없고, 있어서도 안 된다(ADR-0021) — 그래서 e2e가 직접 HTTP로 확인한다. */
+export async function sourceReadingCount(submissionId: number, devAccess: string): Promise<number> {
+  const res = await fetch(
+    `http://127.0.0.1:${backendApiPort()}/api/submissions/${submissionId}/source-readings`,
+    { headers: { Authorization: `Bearer ${devAccess}` } },
+  );
+  if (!res.ok) {
+    throw new Error(`source-readings 조회 실패: ${res.status} ${await res.text()}`);
+  }
+  const body = (await res.json()) as unknown[];
+  return body.length;
 }

@@ -44,6 +44,18 @@ SCORING_RUN_PENDING_URL = "/api/internal/scoring/run-pending"
 # seed_e2e_contests.py의 title__startswith 관용구와 같은 원칙).
 TITLE_PREFIX = "[e2e-op-queue] "
 
+# 공개 목록(GET /api/contests)의 기본 정렬은 deadline_at 오름차순이다
+# (contests/api.py의 ordering). 예전에는 여기서 발행하는 Contest가
+# "now + 1시간" 마감을 썼는데, 이 명령들이 (다른 시드보다) 훨씬 자주
+# 불리면서(#66이 이의 상세 e2e를 위해 seed_e2e_operator_appeal.py를 더해
+# 호출 빈도가 늘었다) 그 짧은 마감이 공개 목록 1페이지를 계속 차지해
+# 버렸다 — 공개 시드(seed_e2e_contests.py)가 만든 Contest가 정렬 뒤로
+# 밀려 목록 e2e가 실패했다(코드리뷰 지적). 이 명령들의 목적(마감을 지나
+# 채점·심판 흐름을 태우는 것)에 마감의 절대 시각은 상관없다 —
+# _close_contest가 항상 "그 마감 + 1분"으로 시계를 얼릴 뿐이다. 그래서
+# 마감을 아주 먼 미래로 잡아 정렬 앞자리를 애초에 다투지 않는다.
+FAR_FUTURE_DEADLINE = timedelta(days=400)
+
 
 def _internal_headers() -> dict:
     return {"HTTP_X_INTERNAL_TOKEN": settings.INTERNAL_API_TOKEN}
@@ -155,11 +167,22 @@ def _source_object_key(contest_id: int, developer_user_id: int) -> str:
     return f"submission:{contest_id}:{developer_user_id}:source/{uuid.uuid4().hex}"
 
 
-def _submit(client: Client, dev: dict, contest_id: int, *, requirement_id: int | None = None) -> dict:
+def _submit(
+    client: Client,
+    dev: dict,
+    contest_id: int,
+    *,
+    requirement_id: int | None = None,
+    source_bytes: bytes = b"print('e2e queue seed')\n",
+) -> dict:
+    # source_bytes는 운영자 앱 08(#66)이 덧붙였다 — 이의 상세 e2e가 "소스가 아직
+    # 안 왔다 → 펼치면 왔다"를 판정하려면 호출마다 다른 유일한 마커를 소스에 심을
+    # 수 있어야 한다. 기본값은 그대로라 기존 호출부(seed_pending_appeal 등)는
+    # 영향받지 않는다.
     from storage.adapters.fake import FakeStorageAdapter
 
     source_key = _source_object_key(contest_id, dev["user_id"])
-    FakeStorageAdapter().write_object(source_key, b"print('e2e queue seed')\n")
+    FakeStorageAdapter().write_object(source_key, source_bytes)
 
     responses = []
     if requirement_id is not None:
@@ -193,7 +216,7 @@ def seed_pending_appeal() -> dict:
 
     client = Client()
     uid = uuid.uuid4().hex[:8]
-    deadline = timezone.now() + timedelta(hours=1)
+    deadline = timezone.now() + FAR_FUTURE_DEADLINE
     sponsor, contest = _publish_contest(
         client,
         sponsor_uid=f"e2e-appeal-sponsor-{uid}",
@@ -208,19 +231,31 @@ def seed_pending_appeal() -> dict:
     scoring_resp = client.post(SCORING_RUN_PENDING_URL, **_internal_headers())
     assert scoring_resp.status_code == 200, scoring_resp.content
 
+    reason = "e2e 큐 시드 — AI가 놓친 근거가 실제로 소스에 있습니다."
     appeal_resp = client.post(
         f"/api/submissions/{submission['id']}/appeal",
-        data={"reason": "e2e 큐 시드 — AI가 놓친 근거가 실제로 소스에 있습니다."},
+        data={"reason": reason},
         content_type="application/json",
         **_auth_header(dev["access"]),
     )
     assert appeal_resp.status_code == 201, appeal_resp.content
-    return {"appeal_id": appeal_resp.json()["id"], "contest_id": contest["id"]}
+    # submission_id·reason·dev_access는 운영자 앱 08(#66)이 덧붙였다 — 이의 상세
+    # 화면 e2e가 "제기 사유가 실제로 보이는가"와 "펼침이 Developer 쪽 열람 기록
+    # (GET /submissions/{id}/source-readings)에 실제로 한 건을 남기는가"를
+    # 검증하려면 이 값들이 필요하다. 기존 키(appeal_id·contest_id)는 그대로라
+    # home.spec.ts 등 이미 이 함수를 쓰는 곳은 영향받지 않는다.
+    return {
+        "appeal_id": appeal_resp.json()["id"],
+        "contest_id": contest["id"],
+        "submission_id": submission["id"],
+        "reason": reason,
+        "dev_access": dev["access"],
+    }
 
 
 def _ready_for_payout(uid: str) -> tuple[Client, dict, dict, dict]:
     client = Client()
-    deadline = timezone.now() + timedelta(hours=1)
+    deadline = timezone.now() + FAR_FUTURE_DEADLINE
     sponsor, contest = _publish_contest(client, sponsor_uid=f"e2e-payout-sponsor-{uid}", deadline_at=deadline)
     dev = _verified_user(client, f"e2e-payout-dev-{uid}")
     submission = _submit(client, dev, contest["id"])
