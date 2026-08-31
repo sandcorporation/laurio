@@ -160,3 +160,15 @@ export async function sourceReadingCount(submissionId: number, devAccess: string
   const body = (await res.json()) as unknown[];
   return body.length;
 }
+
+/** 한 Contest의 원장 분개 개수를 `count_ledger_entries` 관리 명령으로 직접
+ * 원장에서 센다(#67). 재심판 시도가 409로 거절되는 것으로 멈추지 않고, 그
+ * 거절이 실제로 정정 분개를 하나도 더 만들지 않았음을 확인하는 데 쓴다 —
+ * 원장은 append-only라 잘못 남은 정정은 지울 수 없다. */
+export function ledgerEntryCount(contestId: number): number {
+  const result = runSeedCommand("count_ledger_entries", [
+    "--contest-id",
+    String(contestId),
+  ]) as { count: number };
+  return result.count;
+}
