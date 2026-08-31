@@ -37,6 +37,10 @@ _Avoid_: 참가자, Entrant, Contestant, Contractor, Freelancer
 Laurio를 운영하며 Appeal에 Ruling을 내리는 당사자. Sponsor·Developer와 서로소다 — 소셜 계정을 가진 계정은 Operator가 될 수 없고, Operator는 소셜 계정을 붙일 수 없다. 이 구분이 「돈을 움직인 사람이 누구인가」를 애매하지 않게 만든다.
 _Avoid_: 관리자, 스태프, Admin, Staff, Moderator
 
+**SourceReading**:
+Operator가 이의를 심판하며 제출 소스를 펼쳐 본 사건. 기본은 접혀 있고 명시적으로 펼 때만 남는다 — 그래야 기록이 잡음이 아니라 신호가 된다. 소스를 감춘다는 약속이 운영자 앞에서만 조용히 사라지지 않게 하는 장치다.
+_Avoid_: 조회 로그, 접근 기록, 감사 로그(감사 대상 전체를 가리키는 넓은 말), Access log
+
 ### 제출과 선정
 
 **Submission**:
