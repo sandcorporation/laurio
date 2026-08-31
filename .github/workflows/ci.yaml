@@ -396,26 +396,43 @@ jobs:
         run: docker build -f docker/frontend.Dockerfile --target runner -t laurio-frontend-runner-ci .
 
       # 이 레포가 이미 두 번 겪은 사고(CLAUDE.md 「이미 데인 곳」) — .dockerignore
-      # 패턴이 파일에 적혀 있다는 것만으로는 증명이 아니다. 가짜 시크릿을 실제로
-      # 심어서 이미지에 안 들어가는지 직접 확인한다.
+      # 패턴이 파일에 적혀 있다는 것만으로는 증명이 아니다. 가짜 시크릿과 가짜
+      # 호스트 node_modules를 실제로 심어서 이미지에 안 들어가는지 직접
+      # 확인한다.
+      #
+      # **경로를 build context 기준으로 정확히 맞춘다**(#70 코드리뷰 지적,
+      # 심각). 이 스텝은 저장소 루트에서 `docker build ... .`을 돌리므로
+      # frontend.Dockerfile의 `COPY frontend/ ./frontend/`가 시크릿을
+      # `/app/frontend/.env`에 놓는다 — `/app/.env`는 애초에 존재할 수 없는
+      # 경로라 그 단정은 항상 거짓으로 통과했다(뒤의 재귀 grep만 실질
+      # 커버리지였다). node_modules 검증도 이름만 약속하고 실제로는 아무
+      # node_modules도 없어(이 잡은 pnpm install을 돌리지 않는다) 아무것도
+      # 검증하지 않았다 — 마커 파일을 직접 만들어 넣는다.
       - name: .dockerignore actually keeps secrets and host node_modules out of the image
         run: |
           set -euo pipefail
           echo "OPENAI_API_KEY=sk-ci-guard-fake-secret-do-not-leak" > frontend/.env
+          mkdir -p frontend/node_modules/.ci-guard-marker
+          echo "host-node-modules-should-not-leak-into-image" > frontend/node_modules/.ci-guard-marker/marker.txt
           docker build -f docker/frontend.Dockerfile --target builder -t laurio-frontend-builder-ci-guard .
           docker run --rm --entrypoint sh laurio-frontend-builder-ci-guard -c '
             set -e
-            if [ -f /app/.env ]; then
-              echo "FOUND /app/.env — .dockerignore가 시크릿을 막지 못했다" >&2
+            if [ -f /app/frontend/.env ]; then
+              echo "FOUND /app/frontend/.env — .dockerignore가 시크릿을 막지 못했다" >&2
               exit 1
             fi
-            if grep -rl "sk-ci-guard-fake-secret" /app > /dev/null 2>&1; then
-              echo "가짜 시크릿 문자열이 이미지 어딘가에 들어갔다" >&2
+            if [ -d /app/frontend/node_modules/.ci-guard-marker ]; then
+              echo "FOUND /app/frontend/node_modules/.ci-guard-marker — .dockerignore가 호스트 node_modules를 막지 못했다" >&2
               exit 1
             fi
-            echo "confirmed: .env excluded from the image"
+            if grep -rl "sk-ci-guard-fake-secret\|host-node-modules-should-not-leak-into-image" /app > /dev/null 2>&1; then
+              echo "가짜 시크릿 또는 host node_modules 마커가 이미지 어딘가에 들어갔다" >&2
+              exit 1
+            fi
+            echo "confirmed: .env and host node_modules excluded from the image"
           '
           rm -f frontend/.env
+          rm -rf frontend/node_modules/.ci-guard-marker
           docker rmi laurio-frontend-builder-ci-guard
 
       - name: Refuses to boot in production with missing config (and actually exits — not just logs)
@@ -461,9 +478,20 @@ jobs:
           # 백엔드가 없어 /healthz 는 503(degraded)이 정상이다 — 여기서 보는 건
           # "완전한 설정에서는 프론트가 죽지 않고 응답한다"는 것뿐이다. 연결
           # 자체가 안 되면(000) 컨테이너가 여전히 안 뜬 것이다.
+          #
+          # **`|| echo "000"`을 쓰지 않는다**(#70 코드리뷰 지적, 심각). curl은
+          # `-w`가 있으면 연결 실패 시에도 스스로 "000"을 쓰고 비정상 종료
+          # 코드로 끝낸다 — 그 위에 `|| echo "000"`을 얹으면 실패할 때마다
+          # "000"이 두 번(curl 자신 + echo) 이어져 "000000"이 되고, 그 값은
+          # 아래 `[ "$status" = "000" ]` 비교와 절대 같아지지 않아 **재시도
+          # 루프가 첫 시도에 곧장 break한다** — 컨테이너가 정상 부팅 중이어도
+          # 빨간불이 되고, "완전한 설정에서는 죽지 않는다"는 이 스텝의 관측
+          # 자체가 수행되지 않는다. curl 자신의 "000" 출력만 남기고, 그래도
+          # 정말 비어 있는 극단적인 경우를 위한 방어로 `${status:-000}`만 쓴다.
           status="000"
           for _ in $(seq 1 20); do
-            status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3100/healthz || echo "000")
+            status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3100/healthz 2>/dev/null)
+            status="${status:-000}"
             [ "$status" = "000" ] || break
             sleep 1
           done
@@ -487,6 +515,142 @@ jobs:
             || { echo "::error::production인데 laurio_refresh 쿠키에 Secure가 없다"; exit 1; }
 
           docker rm -f frontend-boot-ok
+
+      - name: Dump container state on failure
+        if: failure()
+        run: docker ps -a
+
+  # 운영자 앱 배포 부팅 가드 (#70 — #63가 미룬 것을 여기서 켠다).
+  #
+  # frontend-deploy-guard와 정확히 같은 이유·같은 형태다: ADR-0021의 프론트 테스트
+  # 시임("실행 중인 앱 하나")으로는 "앱이 뜨지 않는 것" 자체를 증명할 수 없다.
+  # operator.Dockerfile의 runner 스테이지(staging/prod가 실제로 배포하는 그
+  # 이미지)를 직접 빌드해 컨테이너로 띄우고, 프로세스 종료 코드와 로그를 확인한다.
+  #
+  # operator/instrumentation.ts도 frontend와 같은 함정을 피해 process.exit(1)로
+  # 직접 프로세스를 끊는다(#38에서 이미 확인된 "Next가 throw를 삼킨다"는 사실이
+  # 이 앱에도 그대로 적용된다) — 이 잡은 그게 실제로 그런지 직접 관찰한다.
+  operator-deploy-guard:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the production operator image (runner stage)
+        run: docker build -f docker/operator.Dockerfile --target runner -t laurio-operator-runner-ci .
+
+      # frontend-deploy-guard와 같은 이유 — .dockerignore가 시크릿과 호스트
+      # node_modules를 실제로 막는지 이 앱에서도 직접 확인한다.
+      #
+      # **경로를 build context 기준으로 정확히 맞춘다**(#70 코드리뷰 지적,
+      # 심각). 이 스텝은 저장소 루트에서 `docker build ... .`을 돌리므로
+      # operator.Dockerfile의 `COPY operator/ ./operator/`가 시크릿을
+      # `/app/operator/.env`에 놓는다 — `/app/.env`는 애초에 존재할 수 없는
+      # 경로라 그 단정은 항상 거짓으로 통과했다. node_modules 검증도 이름만
+      # 약속하고 실제로는 아무 node_modules도 없어(이 잡은 pnpm install을
+      # 돌리지 않는다) 아무것도 검증하지 않았다 — 마커 파일을 직접 만들어
+      # 넣는다.
+      - name: .dockerignore actually keeps secrets and host node_modules out of the image
+        run: |
+          set -euo pipefail
+          echo "OPENAI_API_KEY=sk-ci-guard-fake-secret-do-not-leak" > operator/.env
+          mkdir -p operator/node_modules/.ci-guard-marker
+          echo "host-node-modules-should-not-leak-into-image" > operator/node_modules/.ci-guard-marker/marker.txt
+          docker build -f docker/operator.Dockerfile --target builder -t laurio-operator-builder-ci-guard .
+          docker run --rm --entrypoint sh laurio-operator-builder-ci-guard -c '
+            set -e
+            if [ -f /app/operator/.env ]; then
+              echo "FOUND /app/operator/.env — .dockerignore가 시크릿을 막지 못했다" >&2
+              exit 1
+            fi
+            if [ -d /app/operator/node_modules/.ci-guard-marker ]; then
+              echo "FOUND /app/operator/node_modules/.ci-guard-marker — .dockerignore가 호스트 node_modules를 막지 못했다" >&2
+              exit 1
+            fi
+            if grep -rl "sk-ci-guard-fake-secret\|host-node-modules-should-not-leak-into-image" /app > /dev/null 2>&1; then
+              echo "가짜 시크릿 또는 host node_modules 마커가 이미지 어딘가에 들어갔다" >&2
+              exit 1
+            fi
+            echo "confirmed: .env and host node_modules excluded from the image"
+          '
+          rm -f operator/.env
+          rm -rf operator/node_modules/.ci-guard-marker
+          docker rmi laurio-operator-builder-ci-guard
+
+      - name: Refuses to boot in production with missing config (and actually exits — not just logs)
+        run: |
+          set +e
+          output=$(timeout 20 docker run --rm -e LAURIO_DEPLOYMENT_TARGET=production laurio-operator-runner-ci 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
+            echo "::error::LAURIO_OPERATOR_ORIGIN/LAURIO_API_BASE_URL 없이도 컨테이너가 죽지 않았다(status=$status) — 부팅 가드가 깨졌다"
+            exit 1
+          fi
+          echo "$output" | grep -q "LAURIO_OPERATOR_ORIGIN" || { echo "::error::에러 메시지에 원인(LAURIO_OPERATOR_ORIGIN)이 안 남는다"; exit 1; }
+          echo "$output" | grep -q "LAURIO_API_BASE_URL" || { echo "::error::에러 메시지에 원인(LAURIO_API_BASE_URL)이 안 남는다"; exit 1; }
+
+      - name: Refuses to boot in staging with only one required value missing
+        run: |
+          set +e
+          output=$(timeout 20 docker run --rm \
+            -e LAURIO_DEPLOYMENT_TARGET=staging \
+            -e LAURIO_OPERATOR_ORIGIN=https://operator.staging.laurio.example \
+            laurio-operator-runner-ci 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
+            echo "::error::LAURIO_API_BASE_URL 없이도 staging 컨테이너가 죽지 않았다(status=$status)"
+            exit 1
+          fi
+          echo "$output" | grep -q "LAURIO_API_BASE_URL" || { echo "::error::에러 메시지에 원인이 안 남는다"; exit 1; }
+
+      - name: Boots with a complete production config and forces Secure cookies
+        run: |
+          set -euo pipefail
+          docker run -d --name operator-boot-ok \
+            -e LAURIO_DEPLOYMENT_TARGET=production \
+            -e LAURIO_OPERATOR_ORIGIN=https://operator.laurio.example \
+            -e LAURIO_API_BASE_URL=http://127.0.0.1:1 \
+            -p 3101:3000 \
+            laurio-operator-runner-ci
+
+          # 백엔드가 없어 /healthz 는 503(degraded)이 정상이다 — 여기서 보는 건
+          # "완전한 설정에서는 운영자 앱이 죽지 않고 응답한다"는 것뿐이다. 연결
+          # 자체가 안 되면(000) 컨테이너가 여전히 안 뜬 것이다.
+          #
+          # frontend-deploy-guard와 같은 이유로 `|| echo "000"`을 쓰지 않는다
+          # (#70 코드리뷰 지적, 심각 — 여기서 그대로 복사된 버그였다). curl은
+          # `-w`가 있으면 연결 실패 시에도 스스로 "000"을 쓴다 — `|| echo
+          # "000"`을 얹으면 "000000"이 되어 재시도 루프가 첫 시도에 곧장
+          # break한다.
+          status="000"
+          for _ in $(seq 1 20); do
+            status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3101/healthz 2>/dev/null)
+            status="${status:-000}"
+            [ "$status" = "000" ] || break
+            sleep 1
+          done
+          echo "healthz status: $status"
+          if [ "$status" != "200" ] && [ "$status" != "503" ]; then
+            echo "::error::완전한 프로덕션 설정인데도 컨테이너가 응답하지 않는다(status=$status)"
+            docker logs operator-boot-ok
+            exit 1
+          fi
+
+          # ADR-0016/0019 성립 조건 — production에서 세션 쿠키의 Secure가 실제로
+          # 켜지는지. operator/app/api/auth/logout/route.ts는 세션 쿠키가 없으면
+          # 백엔드를 부르지 않고 곧바로 clearSessionCookie를 실어 응답한다 — 그래서
+          # 백엔드 없이도 이 경로 하나로 쿠키 속성을 직접 관찰할 수 있다.
+          set_cookie=$(curl -s -D - -o /dev/null -X POST http://127.0.0.1:3101/api/auth/logout \
+            -H "Origin: https://operator.laurio.example")
+          echo "$set_cookie"
+          echo "$set_cookie" | grep -qi "laurio_operator_session=.*Secure" \
+            || { echo "::error::production인데 laurio_operator_session 쿠키에 Secure가 없다"; exit 1; }
+
+          docker rm -f operator-boot-ok
 
       - name: Dump container state on failure
         if: failure()

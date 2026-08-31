@@ -233,10 +233,63 @@ services:
       # instrumentation.ts가 부팅을 거부한다. .env.staging에서 반드시 채운다.
       LAURIO_WEB_ORIGIN: ${LAURIO_WEB_ORIGIN:?staging LAURIO_WEB_ORIGIN 를 .env.staging 에 설정하라}
     ports:
-      # staging은 검증용 서브 호스트에 직접 노출한다(운영자·QA가 브라우저로 바로
-      # 들어간다) — backend의 INTERNAL_API_PORT 노출과 같은 이유다. prod처럼
-      # 127.0.0.1로 좁히지 않는다.
+      # staging은 검증용 서브 호스트에 직접 노출한다 — backend의
+      # INTERNAL_API_PORT 노출과 같은 이유다. prod처럼 127.0.0.1로 좁히지
+      # 않는다.
+      #
+      # **이 컨테이너 자신은 평문 HTTP로만 듣는다.** LAURIO_WEB_ORIGIN이
+      # https://laurio.honeycombpizza.link이고 이 앱의 세션 쿠키가 staging에서도
+      # Secure를 거는 이상(lib/auth/cookies.ts의 isDeployedEnvironment),
+      # `http://<서브호스트 IP>:${LAURIO_WEB_PORT}`를 브라우저로 직접 열면
+      # Origin이 어긋나 로그인이 403이 되거나(운 좋게 통과해도) Secure 쿠키가
+      # 저장되지 않아 로그인 화면으로 무한히 돌아온다(#70 코드리뷰 지적) —
+      # storage.honeycombpizza.link(MinIO, 이 파일이 관리하지 않는다)와 같은
+      # 전제다: 이 호스트 앞단에 `laurio.honeycombpizza.link`를 이 평문 포트로
+      # 넘겨주는 TLS 종단 리버스 프록시가 **반드시** 있어야 한다. "운영자·QA가
+      # 브라우저로 들어간다"는 그 도메인을 통해서다 — 이 포트로 직접 들어가는
+      # 것이 아니다.
       - "${LAURIO_WEB_PORT:-3000}:3000"
+
+  # 운영자 앱 BFF(#70, ADR-0019/0021). operator.Dockerfile의 runner 스테이지 —
+  # frontend 서비스와 같은 산출물 모양(standalone, `node server.js`)이고 같은
+  # 부팅 가드 원칙을 따른다(operator/instrumentation.ts) — LAURIO_OPERATOR_ORIGIN·
+  # LAURIO_API_BASE_URL이 비어 있으면 이 컨테이너를 그 자리에서 죽인다.
+  #
+  # **LAURIO_OPERATOR_ORIGIN을 위 x-backend-env 앵커의 backend가 요구하는 것과
+  # 정확히 같은 환경변수에서 읽는다.** 두 서비스가 `.env.staging`의 같은 줄을
+  # 그대로 나눠 읽으므로, 이 값이 서로 다른 곳에서 따로 채워져 어긋나는 사고
+  # 자체가 구조적으로 불가능하다 — 이 티켓의 핵심 위험(오리진 정합성)에 대한
+  # compose 수준의 방어다. e2e(frontend/e2e/operator/proxy.spec.ts)가 런타임에서
+  # 같은 사실을 한 번 더 증명한다.
+  operator:
+    build:
+      context: ..
+      dockerfile: docker/operator.Dockerfile
+      target: runner
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+    environment:
+      LAURIO_DEPLOYMENT_TARGET: staging
+      LAURIO_API_BASE_URL: http://backend:8000
+      # backend의 OPERATOR_WEB_ORIGIN(위 x-backend-env)과 같은 변수, 같은 값.
+      LAURIO_OPERATOR_ORIGIN: ${LAURIO_OPERATOR_ORIGIN:?LAURIO_OPERATOR_ORIGIN 을 설정해야 한다}
+    ports:
+      # 공개 앱(LAURIO_WEB_PORT)과 겹치지 않는 별도 포트 — frontend 서비스와
+      # 같은 이유로 127.0.0.1로 좁히지 않는다.
+      #
+      # **이 컨테이너 자신은 평문 HTTP로만 듣는다 — frontend 서비스의 ports:
+      # 주석과 정확히 같은 이유, 같은 결론이다**(#70 코드리뷰 지적).
+      # LAURIO_OPERATOR_ORIGIN이 https이고 이 앱의 세션 쿠키도 staging에서
+      # Secure를 거는 이상(operator/lib/auth/cookies.ts), 이 평문 포트를 IP로
+      # 직접 열면 Origin 불일치로 로그인이 403이 되거나 Secure 쿠키가 저장되지
+      # 않아 /login으로 무한히 돌아온다. 운영자·QA는 이 포트가 아니라
+      # LAURIO_OPERATOR_ORIGIN이 가리키는 도메인(예:
+      # operator.laurio.honeycombpizza.link)으로 들어간다 — 이 호스트 앞단에
+      # 그 도메인을 이 포트로 넘겨주는 TLS 종단 리버스 프록시가 반드시 있어야
+      # 한다.
+      - "${LAURIO_OPERATOR_WEB_PORT:-3001}:3000"
 
 volumes:
   laurio-staging-db:

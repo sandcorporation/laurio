@@ -4,6 +4,8 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 
+import { e2eRunId } from "./run-id";
+
 const BACKEND_DIR = path.resolve(__dirname, "../../../backend");
 
 export type SeededOperator = {
@@ -25,7 +27,13 @@ function backendDbPort(): string {
 function runSeedCommand(command: string, args: string[]): unknown {
   const output = execFileSync("uv", ["run", "python", "manage.py", command, ...args], {
     cwd: BACKEND_DIR,
-    env: { ...process.env, LAURIO_DB_PORT: backendDbPort() },
+    // LAURIO_E2E_RUN_ID: 이번 스위트 실행이 심은 Contest를 이전 실행이 남긴
+    // 것과 구별하는 토큰(e2e/lib/run-id.ts, seed_e2e_operator_queues.py의
+    // `_own_title_prefix` 참고) — 여기서 파일을 직접 읽어 매번 명시적으로
+    // 실어 보낸다. Playwright가 globalSetup 이후 워커에 process.env를
+    // 상속시켜 준다는 것과 별개로, 그 상속에만 기대면 어긋났을 때 "매 호출이
+    // 서로 다른 토큰을 받아 서로의 형제를 지우는" 조용한 사고가 된다.
+    env: { ...process.env, LAURIO_DB_PORT: backendDbPort(), LAURIO_E2E_RUN_ID: e2eRunId() },
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "inherit"],
   });
