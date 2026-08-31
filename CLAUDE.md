@@ -52,6 +52,14 @@ docker compose -f docker/compose.dev.yaml down -v
 docker compose -f docker/compose.dev.yaml up -d
 ```
 
+**Celery 는 dev 기본 기동에 없다**(#40). beat 가 60초마다 쏘는 스캔이 마감 전이·채점·
+배분·환불을 실제로 진행시켜, e2e 가 심은 데이터를 테스트 도중에 다른 상태로
+옮겨버리기 때문이다. 스캔 경로를 돌려보고 싶을 때만 프로필로 켠다:
+
+```bash
+docker compose -f docker/compose.dev.yaml --profile celery up -d
+```
+
 ## 운영
 
 **Django admin 은 없다**(#46, ADR-0019). `/admin/` 은 마운트되지 않고 각 앱의

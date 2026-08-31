@@ -1157,10 +1157,37 @@ export interface paths {
          *     요청에서 익명이 된다. 즉시 무효화라는 성질은 그대로이고, 그 사실을 테스트가
          *     직접 확인한다("이미 로그인한 클라이언트가 다음 요청에서 401").
          *
-         *     마지막 활성 superuser 는 자신을 비활성화할 수 없다. 화면도 없고 계정을 되살릴
-         *     API 도 없으므로, 그 상태는 서버에 들어가 관리 명령을 돌려야만 빠져나올 수 있다.
+         *     마지막 활성 superuser 는 비활성화할 수 없다. 화면도 없으므로 그 상태는 서버에
+         *     들어가 관리 명령을 돌려야만 빠져나온다 — 되살리는 경로가 생겼어도(#47) 그것을
+         *     부를 사람이 아무도 없어지기 때문이다.
          */
         post: operations["accounts_operator_api_deactivate_operator_account"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/operators/{operator_id}/reactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reactivate Operator Account
+         * @description 비활성화된 Operator 를 되살린다 (#47).
+         *
+         *     화면이 없으므로(ADR-0019) 이 경로가 없으면 실수로 비활성화한 계정을 되살리는
+         *     유일한 방법이 서버에 들어가 shell 을 여는 것이었다.
+         *
+         *     서로소 불변식을 다시 확인한다 — 비활성화된 사이에 그 계정에 소셜이 붙었을 수
+         *     있다(`accounts.operators.reactivate_operator`).
+         */
+        post: operations["accounts_operator_api_reactivate_operator_account"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3906,6 +3933,15 @@ export interface operations {
                     "application/json": components["schemas"]["OperatorOut"];
                 };
             };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
             /** @description Unprocessable Content */
             422: {
                 headers: {
@@ -3950,6 +3986,48 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    accounts_operator_api_reactivate_operator_account: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operator_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

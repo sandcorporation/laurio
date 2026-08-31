@@ -139,6 +139,74 @@ services:
              python manage.py seed_dev_data &&
              python manage.py runserver 0.0.0.0:8000"
 
+  # Celery worker·beat (#40). **기본 기동에서는 빠져 있다** — `profiles` 때문에
+  # `docker compose up -d` 로는 뜨지 않고, 필요할 때만 다음처럼 켠다:
+  #
+  #   docker compose -f docker/compose.dev.yaml --profile celery up -d
+  #
+  # 왜 기본이 아닌가. beat 는 60초마다 스캔 틱을 쏘고(config/celery.py), 그 스캔은
+  # 마감 전이·채점·배분·환불을 실제로 진행시킨다. e2e 가 심는 Contest·Submission 을
+  # 테스트 도중에 다른 상태로 옮겨버리면, 원인이 테스트 밖에 있는 비결정적 실패가
+  # 된다 — 이 저장소가 시드 위생으로 이미 한 번 겪은 부류다. dev 에서 스캔 경로를
+  # 돌려보고 싶을 때만 명시적으로 켠다.
+  celery-worker:
+    profiles: ["celery"]
+    build:
+      context: ..
+      dockerfile: docker/backend.Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    environment:
+      <<: *default-postgres-env
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      DJANGO_DEBUG: "true"
+      DJANGO_SECRET_KEY: dev-only-insecure-key
+      DJANGO_ALLOWED_HOSTS: "*"
+      SESSION_REDIS_URL: redis://redis:6379/1
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      # backend 서비스는 INTERNAL_API_TOKEN 을 주지 않아 DEBUG 기본값
+      # ("dev-only-internal-token", config/settings.py)을 쓴다 — celery 도 같은
+      # 값이어야 백엔드가 그 호출을 받아들인다. 이름을 다르게 주면 스캔이 전부
+      # 401 로 조용히 실패한다.
+      INTERNAL_API_BASE_URL: http://backend:8000
+    command: celery -A config worker --loglevel info
+
+  celery-beat:
+    profiles: ["celery"]
+    build:
+      context: ..
+      dockerfile: docker/backend.Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    environment:
+      <<: *default-postgres-env
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      DJANGO_DEBUG: "true"
+      DJANGO_SECRET_KEY: dev-only-insecure-key
+      DJANGO_ALLOWED_HOSTS: "*"
+      SESSION_REDIS_URL: redis://redis:6379/1
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      # backend 서비스는 INTERNAL_API_TOKEN 을 주지 않아 DEBUG 기본값
+      # ("dev-only-internal-token", config/settings.py)을 쓴다 — celery 도 같은
+      # 값이어야 백엔드가 그 호출을 받아들인다. 이름을 다르게 주면 스캔이 전부
+      # 401 로 조용히 실패한다.
+      INTERNAL_API_BASE_URL: http://backend:8000
+    command: celery -A config beat --loglevel info
+
   frontend:
     build:
       context: ..

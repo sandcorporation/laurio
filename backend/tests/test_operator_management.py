@@ -51,6 +51,12 @@ def _deactivate(client, operator_id):
     )
 
 
+def _reactivate(client, operator_id):
+    return client.post(
+        f"{OPERATORS_URL}/{operator_id}/reactivate", HTTP_ORIGIN=ORIGIN
+    )
+
+
 @pytest.mark.django_db
 def test_a_superuser_operator_can_create_another_operator():
     root = _client_for("root", superuser=True)
@@ -271,3 +277,136 @@ def test_the_list_says_who_is_active():
 
     assert rows["root"]["is_active"] is True
     assert rows["retired"]["is_active"] is False
+
+
+# --- 재활성화와 실패 이유 구분 (#47) -------------------------------------------
+#
+# #45 가 만든 관리 API 는 되돌릴 수 없는 방향으로만 동작했다. admin 도 없으므로
+# 실수로 비활성화한 Operator 를 되살리려면 서버에 들어가 shell 을 열어야 했다.
+
+
+@pytest.mark.django_db
+def test_a_superuser_can_bring_a_deactivated_operator_back():
+    root = _client_for("root", superuser=True)
+    _create(root, "returning")
+    returning_id = get_user_model().objects.get(username="returning").id
+    assert _deactivate(root, returning_id).status_code == 200
+
+    response = _reactivate(root, returning_id)
+
+    assert response.status_code == 200, response.content
+    assert get_user_model().objects.get(id=returning_id).is_active is True
+
+
+@pytest.mark.django_db
+def test_a_reactivated_operator_can_log_in_and_work_again():
+    """비활성화가 끊었던 접근이 실제로 복구되는지까지 본다."""
+
+    root = _client_for("root", superuser=True)
+    _create(root, "returning")
+    returning_id = get_user_model().objects.get(username="returning").id
+    _deactivate(root, returning_id)
+
+    assert (
+        Client().post(
+            "/api/operator/login",
+            data={"username": "returning", "password": PW},
+            content_type="application/json",
+            HTTP_ORIGIN=ORIGIN,
+        ).status_code
+        == 401
+    )
+
+    assert _reactivate(root, returning_id).status_code == 200
+
+    back = Client()
+    assert (
+        back.post(
+            "/api/operator/login",
+            data={"username": "returning", "password": PW},
+            content_type="application/json",
+            HTTP_ORIGIN=ORIGIN,
+        ).status_code
+        == 200
+    )
+    assert back.get(ME_URL).status_code == 200
+
+
+@pytest.mark.django_db
+def test_an_ordinary_operator_cannot_reactivate():
+    """「돈을 움직일 권한을 나눠줄 수 있다」와 같은 무게다(ADR-0018)."""
+
+    root = _client_for("root", superuser=True)
+    _create(root, "returning")
+    returning_id = get_user_model().objects.get(username="returning").id
+    _deactivate(root, returning_id)
+
+    judge = _client_for("judge")
+
+    assert _reactivate(judge, returning_id).status_code == 403
+    assert get_user_model().objects.get(id=returning_id).is_active is False
+
+
+@pytest.mark.django_db
+def test_reactivation_refuses_an_account_that_gained_a_social_identity(client):
+    """서로소 불변식은 재활성화 경로에서도 성립해야 한다(ADR-0018).
+
+    비활성화된 사이에 그 계정에 소셜이 붙었다면 되살리지 않는다 — 한쪽만 막으면
+    다른 쪽으로 돌아 들어온다는 것이 이 불변식이 반복해 가르친 바다.
+    """
+
+    root = _client_for("root", superuser=True)
+    _create(root, "tainted")
+    tainted = get_user_model().objects.get(username="tainted")
+    _deactivate(root, tainted.id)
+
+    SocialAccount.objects.create(
+        user=tainted, provider=SocialAccount.Provider.KAKAO, provider_uid="tainted-social"
+    )
+
+    response = _reactivate(root, tainted.id)
+
+    assert response.status_code == 422, response.content
+    assert get_user_model().objects.get(id=tainted.id).is_active is False
+
+
+@pytest.mark.django_db
+def test_reactivation_requires_an_origin_like_every_other_mutation():
+    root = _client_for("root", superuser=True)
+    _create(root, "returning")
+    returning_id = get_user_model().objects.get(username="returning").id
+    _deactivate(root, returning_id)
+
+    response = root.post(f"{OPERATORS_URL}/{returning_id}/reactivate")
+
+    assert response.status_code == 403
+    assert get_user_model().objects.get(id=returning_id).is_active is False
+
+
+@pytest.mark.django_db
+def test_failures_are_distinguishable_without_parsing_the_message():
+    """화면이 `detail` 문구를 파싱해 분기하면, 문구를 다듬는 순간 조용히 깨진다.
+
+    안정적인 식별자로 갈라낼 수 있어야 한다.
+    """
+
+    root = _client_for("root", superuser=True)
+    root_id = get_user_model().objects.get(username="root").id
+
+    last_superuser = _deactivate(root, root_id)
+    missing = _deactivate(root, 99999999)
+
+    assert last_superuser.status_code == 409
+    assert missing.status_code == 404
+    assert last_superuser.json()["code"] == "last_superuser"
+    assert missing.json()["code"] == "not_found"
+
+
+@pytest.mark.django_db
+def test_reactivating_an_already_active_operator_is_harmless():
+    root = _client_for("root", superuser=True)
+    _create(root, "already-on")
+    target_id = get_user_model().objects.get(username="already-on").id
+
+    assert _reactivate(root, target_id).status_code == 200
+    assert get_user_model().objects.get(id=target_id).is_active is True

@@ -20,7 +20,12 @@ from ninja.errors import HttpError
 
 from core.operator_auth import OperatorAuth, SuperuserOperatorAuth
 
-from .operators import OperatorInvariantError, create_operator, deactivate_operator
+from .operators import (
+    OperatorInvariantError,
+    create_operator,
+    deactivate_operator,
+    reactivate_operator,
+)
 
 router = Router(tags=["operator"], auth=OperatorAuth())
 
@@ -51,6 +56,9 @@ class OperatorCreateIn(Schema):
 
 class ErrorOut(Schema):
     detail: str
+    # 화면이 `detail` 문구를 파싱해 분기하면, 문구를 다듬는 순간 조용히 깨진다.
+    # 안정적인 식별자를 함께 준다(#47).
+    code: str = "error"
 
 
 # 계정 존재 여부를 드러내지 않는 단일 문구. 틀린 비밀번호·없는 계정·비활성 계정·
@@ -129,7 +137,9 @@ def list_operators(request: HttpRequest):
 
 
 @router.post(
-    "/operators", response={201: OperatorOut, 422: ErrorOut}, auth=_SUPERUSER
+    "/operators",
+    response={201: OperatorOut, 409: ErrorOut, 422: ErrorOut},
+    auth=_SUPERUSER,
 )
 def create_operator_account(request: HttpRequest, payload: OperatorCreateIn):
     """새 Operator 를 만든다.
@@ -144,12 +154,12 @@ def create_operator_account(request: HttpRequest, payload: OperatorCreateIn):
             payload.username, payload.password, superuser=payload.is_superuser
         )
     except OperatorInvariantError as exc:
-        raise HttpError(422, str(exc)) from exc
-    except IntegrityError as exc:
+        return 422, {"detail": str(exc), "code": "invalid"}
+    except IntegrityError:
         # 같은 이름으로 동시에 두 번 들어온 경우. create_operator 의 사전 조회는
         # 순차적으로만 막으므로 DB 의 unique 제약이 최후의 방어선이고, 그것이
         # 500 으로 새어나가면 안 된다.
-        raise HttpError(409, "이미 존재하는 사용자입니다.") from exc
+        return 409, {"detail": "이미 존재하는 사용자입니다.", "code": "duplicate"}
 
     return 201, OperatorOut(
         id=operator.id,
@@ -157,6 +167,10 @@ def create_operator_account(request: HttpRequest, payload: OperatorCreateIn):
         is_superuser=operator.is_superuser,
         is_active=operator.is_active,
     )
+
+
+def _operator_or_none(operator_id: int):
+    return get_user_model().objects.filter(id=operator_id, is_staff=True).first()
 
 
 @router.post(
@@ -173,28 +187,57 @@ def deactivate_operator_account(request: HttpRequest, operator_id: int):
     요청에서 익명이 된다. 즉시 무효화라는 성질은 그대로이고, 그 사실을 테스트가
     직접 확인한다("이미 로그인한 클라이언트가 다음 요청에서 401").
 
-    마지막 활성 superuser 는 자신을 비활성화할 수 없다. 화면도 없고 계정을 되살릴
-    API 도 없으므로, 그 상태는 서버에 들어가 관리 명령을 돌려야만 빠져나올 수 있다.
+    마지막 활성 superuser 는 비활성화할 수 없다. 화면도 없으므로 그 상태는 서버에
+    들어가 관리 명령을 돌려야만 빠져나온다 — 되살리는 경로가 생겼어도(#47) 그것을
+    부를 사람이 아무도 없어지기 때문이다.
     """
 
-    User = get_user_model()
-    try:
-        target = User.objects.get(id=operator_id, is_staff=True)
-    except User.DoesNotExist as exc:
-        raise HttpError(404, "Operator 를 찾을 수 없습니다.") from exc
+    target = _operator_or_none(operator_id)
+    if target is None:
+        return 404, {"detail": "Operator 를 찾을 수 없습니다.", "code": "not_found"}
 
     if target.is_superuser and target.is_active:
         remaining = (
-            User.objects.filter(is_staff=True, is_superuser=True, is_active=True)
+            get_user_model()
+            .objects.filter(is_staff=True, is_superuser=True, is_active=True)
             .exclude(id=target.id)
             .exists()
         )
         if not remaining:
-            raise HttpError(
-                409,
-                "마지막 상위 등급 Operator 는 비활성화할 수 없습니다 — "
-                "아무도 Operator 를 만들 수 없는 상태가 됩니다.",
-            )
+            return 409, {
+                "detail": (
+                    "마지막 상위 등급 Operator 는 비활성화할 수 없습니다 — "
+                    "아무도 Operator 를 만들 수 없는 상태가 됩니다."
+                ),
+                "code": "last_superuser",
+            }
 
     deactivate_operator(target)
     return 200, {"detail": "비활성화되었습니다."}
+
+
+@router.post(
+    "/operators/{operator_id}/reactivate",
+    response={200: dict, 404: ErrorOut, 422: ErrorOut},
+    auth=_SUPERUSER,
+)
+def reactivate_operator_account(request: HttpRequest, operator_id: int):
+    """비활성화된 Operator 를 되살린다 (#47).
+
+    화면이 없으므로(ADR-0019) 이 경로가 없으면 실수로 비활성화한 계정을 되살리는
+    유일한 방법이 서버에 들어가 shell 을 여는 것이었다.
+
+    서로소 불변식을 다시 확인한다 — 비활성화된 사이에 그 계정에 소셜이 붙었을 수
+    있다(`accounts.operators.reactivate_operator`).
+    """
+
+    target = _operator_or_none(operator_id)
+    if target is None:
+        return 404, {"detail": "Operator 를 찾을 수 없습니다.", "code": "not_found"}
+
+    try:
+        reactivate_operator(target)
+    except OperatorInvariantError as exc:
+        return 422, {"detail": str(exc), "code": "invalid"}
+
+    return 200, {"detail": "다시 활성화되었습니다."}

@@ -215,6 +215,60 @@ jobs:
   # 프론트엔드 e2e. ADR-0017 — 시임은 **실행 중인 Next 앱 하나**이므로, 모킹하지 않고
   # dev compose 로 전체 스택(db·minio·backend·frontend)을 실제로 띄운 뒤 그걸 친다.
   # dev compose 는 모든 어댑터가 fake 로 바인딩되므로 실제 PG·LLM·알림 벤더가 필요 없다.
+  celery-broker:
+    # #40 — celery 가 redis 트랜스포트 없이 선언돼 있어서 staging·prod 의 worker·beat
+    # 가 브로커에 붙지 못하는 상태였다. 의존성만 고치고 끝내면 같은 일이 조용히
+    # 되돌아온다(이 저장소는 .dockerignore 에서 「파일에 적혀 있다」를 증명으로
+    # 착각해 두 번 데었다). 그래서 **실제로 붙는지**를 매번 확인한다.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bring up the stack with celery
+        # dev 기본 기동에는 celery 가 빠져 있다(beat 의 60초 스캔이 e2e 시드를
+        # 건드리면 비결정적 실패가 된다) — 이 잡만 프로필로 켠다.
+        run: docker compose -f docker/compose.dev.yaml --profile celery up -d --build
+
+      - name: The redis transport driver is actually in the image
+        # 파일에 적힌 의존성이 아니라 빌드된 이미지 안을 본다.
+        run: |
+          docker compose -f docker/compose.dev.yaml exec -T celery-worker             python -c "import redis, kombu; print('redis', redis.__version__, 'kombu', kombu.__version__)"
+
+      - name: The worker is actually connected to the broker
+        # inspect ping 은 브로커를 통해 왕복한다 — 드라이버가 없거나 붙지 못하면
+        # 여기서 끝난다.
+        run: |
+          for i in $(seq 1 30); do
+            if docker compose -f docker/compose.dev.yaml exec -T celery-worker                  celery -A config inspect ping | grep -q pong; then
+              echo "worker: pong"; exit 0
+            fi
+            sleep 3
+          done
+          echo "worker 가 브로커에 붙지 못했다"
+          docker compose -f docker/compose.dev.yaml logs celery-worker | tail -50
+          exit 1
+
+      - name: Beat publishes a due task and the worker executes it
+        # beat -> 브로커 -> worker 경로 전체를 한 번에 증명한다. 태스크가
+        # "succeeded" 로 끝났다는 것은 내부 API 호출까지 통했다는 뜻이다
+        # (토큰이 어긋나면 401 로 실패한다).
+        run: |
+          for i in $(seq 1 40); do
+            if docker compose -f docker/compose.dev.yaml logs celery-worker                  | grep -q "core.call_scheduler_tick.*succeeded"; then
+              echo "beat -> worker 경로 확인"; exit 0
+            fi
+            sleep 3
+          done
+          echo "beat 가 쏜 태스크를 worker 가 실행하지 못했다"
+          docker compose -f docker/compose.dev.yaml logs celery-beat | tail -50
+          docker compose -f docker/compose.dev.yaml logs celery-worker | tail -50
+          exit 1
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker/compose.dev.yaml --profile celery down -v
+
   frontend-test:
     runs-on: ubuntu-latest
 

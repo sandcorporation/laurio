@@ -110,3 +110,20 @@ def deactivate_operator(operator) -> None:
 
     operator.is_active = False
     operator.save(update_fields=["is_active"])
+
+
+@transaction.atomic
+def reactivate_operator(operator) -> None:
+    """비활성화된 Operator 를 되살린다 (#47).
+
+    서로소 불변식을 **다시** 확인한다 — 비활성화된 사이에 그 계정에 소셜이 붙었을
+    수 있다. 만들 때만 막고 되살릴 때 안 막으면, 그 문으로 돌아 들어온다. 한쪽만
+    막으면 다른 쪽이 열린다는 것이 이 불변식이 반복해 가르친 바다(ADR-0018).
+
+    이미 활성인 계정에 불러도 문제없다 — 되살리는 것이 목적이지 상태 전이를
+    주장하는 것이 아니다.
+    """
+
+    assert_can_become_operator(operator)
+    operator.is_active = True
+    operator.save(update_fields=["is_active"])
