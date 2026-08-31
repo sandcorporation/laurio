@@ -272,7 +272,14 @@ def test_zero_submissions_after_close_gets_fully_refunded_and_ledger_balances_to
     body = response.json()
     assert body["count"] == 1
     assert body["results"] == [
-        {"payment_id": Payment.objects.get(order_id=order_id).id, "contest_id": contest["id"], "status": "refunded"}
+        {
+            "payment_id": Payment.objects.get(order_id=order_id).id,
+            "contest_id": contest["id"],
+            "status": "refunded",
+            # 이 스캔이 직접 선점해 환불했다는 뜻이다 — 남이 시작한 환불을
+            # 확인만 한 경우와 구분된다(#48).
+            "claimed": True,
+        }
     ]
 
     payment = Payment.objects.get(order_id=order_id)
@@ -321,62 +328,120 @@ def test_firing_refund_scan_twice_refunds_only_once(client, category, landing_ty
 
 @pytest.mark.django_db(transaction=True)
 def test_concurrent_refund_scans_refund_only_once(django_db_blocker, category, landing_type):
-    """두 워커가 동시에 같은 스캔을 돌려도 환불은 한 번만 일어나야 한다.
+    """두 스캔이 같은 PAID Payment 를 **동시에 선점하려 할 때** 정확히 하나만 이긴다.
 
-    request_refund의 조건부 UPDATE(WHERE status='paid')가 실제 동시 경합에서도
-    막아주는지는 순차 이중 호출로는 증명되지 않는다 — 스레드 두 개로 실제 경합을
-    만든다(test_payments.py의 동시 결제 시작 테스트와 같은 방식).
+    `request_refund` 의 조건부 UPDATE(WHERE status='paid')가 최후의 방어선으로
+    동작하는지를 본다.
+
+    **이 테스트는 두 번 고쳐졌다(#48).**
+
+    처음에는 `sum(count) == 1` 을 단언했다. 그런데 `count` 는 "이번 스캔이 처리한
+    행 수"이지 "환불한 건수"가 아니다 — 경합이 진짜로 일어나면 합계가 2가 되므로,
+    그 단언은 **경합이 실제로 일어날 때만 실패**했다. 제 일을 할 때만 빨개지는
+    테스트였다.
+
+    단언을 고친 뒤에는 더 불편한 사실이 드러났다: `threading.Barrier` 로 두 요청을
+    같은 순간에 쏴도 **12번 중 한 번도 겹치지 않았다.** 한 스레드가 스캔을 통째로
+    끝낸 뒤에야 다른 스레드가 시작하므로, 뒤늦은 스캔은 후보 집합에서 이미 사라진
+    Payment 를 아예 보지 못한다. 겹치지 않은 실행은 조건부 UPDATE 에 대해 아무것도
+    증명하지 않는다.
+
+    그래서 경합을 **우연에 맡기지 않고 만든다.** 두 스레드가 각자 후보를 고른 뒤
+    선점 직전에서 만나도록 `request_refund` 를 감싼다 — 그 지점이 정확히 이
+    테스트가 지키려는 곳이다. HTTP 시임 밖으로 나가는 예외지만(CLAUDE.md), 두
+    요청의 내부 인터리빙은 시임 위에서는 만들어낼 수 없다 — `test_ledger.py` 의
+    매니저 레벨 테스트가 같은 이유로 둔 예외와 같은 성격이다.
     """
+
+    from unittest.mock import patch
 
     from django.db import connections
     from django.test import Client
 
+    from payments import services as payment_services
+
     with django_db_blocker.unblock():
         setup_client = Client()
         deadline = timezone.now() + timedelta(hours=1)
-        sponsor, contest = _publish_contest(
+        _sponsor, contest = _publish_contest(
             setup_client, category=category, deliverable_type=landing_type, deadline_at=deadline
         )
-        order_id = Payment.objects.get(contest_id=contest["id"]).order_id
+        payment = Payment.objects.get(contest_id=contest["id"])
         _close_via_tick(setup_client, at=deadline + timedelta(minutes=1))
 
-        results: list = []
-        barrier = threading.Barrier(2)
+        real_request_refund = payment_services.request_refund
+        claim_barrier = threading.Barrier(2)
+        claim_lock = threading.Lock()
+        claim_outcomes: list = []
+
+        def racing_request_refund(order_id):
+            # 두 스레드가 각자 후보를 고른 상태로 여기 모인다 — 둘 다 이 Payment 를
+            # PAID 로 보고 있다. 그 다음 동시에 조건부 UPDATE 로 들어간다.
+            claim_barrier.wait(timeout=15)
+            claimed = real_request_refund(order_id)
+            with claim_lock:
+                claim_outcomes.append(claimed)
+            return claimed
+
+        responses: list = []
 
         def worker():
             try:
                 with django_db_blocker.unblock():
                     local_client = Client()
-                    barrier.wait()
-                    response = local_client.post(
-                        RUN_REFUNDS_URL,
-                        data={},
-                        content_type="application/json",
-                        **_internal_headers(),
+                    responses.append(
+                        local_client.post(
+                            RUN_REFUNDS_URL,
+                            data={},
+                            content_type="application/json",
+                            **_internal_headers(),
+                        )
                     )
-                    results.append(response)
             finally:
                 connections.close_all()
 
-        threads = [threading.Thread(target=worker) for _ in range(2)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+        with patch.object(payment_services, "request_refund", racing_request_refund):
+            threads = [threading.Thread(target=worker) for _ in range(2)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=30)
+            assert not any(t.is_alive() for t in threads), "스레드가 끝나지 않았다"
 
-        assert len(results) == 2
-        for response in results:
-            assert response.status_code == 200
+        assert len(responses) == 2
+        for response in responses:
+            assert response.status_code == 200, response.content
 
-        total_refunded = sum(r.json()["count"] for r in results)
-        assert total_refunded == 1
+        # --- 경합이 실제로 일어났는가 -----------------------------------------
+        #
+        # 둘 다 이 Payment 를 PAID 로 보고 선점을 시도했다는 뜻이다. 이게 아니면
+        # 아래 단언들은 조건부 UPDATE 에 대해 아무것도 말하지 않는다.
+        assert len(claim_outcomes) == 2, (
+            f"두 스캔이 동시에 선점을 시도하지 않았다({len(claim_outcomes)}회) — "
+            "이 테스트는 아무것도 증명하지 못했다."
+        )
 
-        payment = Payment.objects.get(order_id=order_id)
-        assert payment.status == Payment.Status.REFUNDED
+        # --- 그리고 정확히 하나만 이겼는가 -------------------------------------
+        winners = [c for c in claim_outcomes if c is not None]
+        assert len(winners) == 1, f"선점이 {len(winners)}번 성공했다 — 조건부 UPDATE 가 샜다"
+
+        rows = [
+            row
+            for response in responses
+            for row in response.json()["results"]
+            if row["payment_id"] == payment.id
+        ]
+        assert [row["claimed"] for row in rows] == [True], (
+            f"환불을 수행했다고 보고한 스캔이 정확히 하나가 아니다: {rows}"
+        )
+
+        refreshed = Payment.objects.get(pk=payment.pk)
+        assert refreshed.status == Payment.Status.REFUNDED
 
         ledger_id = Contest.objects.get(id=contest["id"]).ledger_id
         entries = _ledger_entries(setup_client, ledger_id)
-        assert len([e for e in entries if e["reverses_id"] is not None]) == 1
+        reversing = [e for e in entries if e["reverses_id"] is not None]
+        assert len(reversing) == 1, f"반대 분개가 {len(reversing)}개다 — 이중 환불"
 
 
 # --- Submission이 있으면 절대 환불되지 않는다 ------------------------------------

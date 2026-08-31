@@ -224,6 +224,31 @@ def mark_refund_failed(order_id) -> Payment:
     return Payment.objects.get(order_id=order_id)
 
 
+def _result(payment: Payment, status: str, *, claimed: bool, error: str | None = None) -> dict:
+    """스캔 결과 한 줄.
+
+    `claimed` 가 이 스캔이 **직접 환불을 수행했는지**를 말한다 — 이 필드가 없으면
+    "내가 환불했다"와 "남이 시작한 환불을 확인했을 뿐이다"가 응답에서 구분되지
+    않는다. 실제로 그 모호함 때문에 동시성 테스트가 뒤집힌 단언을 하고 있었다
+    (#48): 두 스캔이 진짜로 겹치면 하나는 선점하고 다른 하나는 재확인해 결과가
+    2줄이 되는데, `count` 만 보고 "환불이 두 번 일어났다"고 읽었다. 그래서 그
+    테스트는 **경합이 실제로 일어날 때만 실패**했다.
+
+    `count`(=len(results))의 뜻은 그대로 "이번 스캔이 처리한 행 수"다. 바뀐 것은
+    각 행이 자기가 무엇을 했는지 말한다는 것뿐이다.
+    """
+
+    row = {
+        "payment_id": payment.id,
+        "contest_id": payment.contest_id,
+        "status": status,
+        "claimed": claimed,
+    }
+    if error is not None:
+        row["error"] = error
+    return row
+
+
 def _settle_new_refund_attempt(adapter, claimed: Payment, *, simulate: str | None) -> dict:
     """방금 request_refund로 선점한 Payment에 대해 새 refund() 호출을 시도하고
     확정한다.
@@ -253,30 +278,19 @@ def _settle_new_refund_attempt(adapter, claimed: Payment, *, simulate: str | Non
         try:
             status = adapter.query_refund_status(order_id=order_id)
         except Exception as exc:  # noqa: BLE001 - 이 행만 실패시키고 배치는 계속한다.
-            return {
-                "payment_id": claimed.id,
-                "contest_id": claimed.contest_id,
-                "status": "pending",
-                "error": f"{type(exc).__name__}: {exc}",
-            }
+            return _result(
+                claimed, "pending", claimed=True, error=f"{type(exc).__name__}: {exc}"
+            )
     except PGError as exc:
         # PG가 명시적으로 거부했다는 확인된 결과다 — 이때만 종결한다.
         mark_refund_failed(claimed.order_id)
-        return {
-            "payment_id": claimed.id,
-            "contest_id": claimed.contest_id,
-            "status": "failed",
-            "error": str(exc),
-        }
+        return _result(claimed, "failed", claimed=True, error=str(exc))
     except Exception as exc:  # noqa: BLE001 - 확인되지 않은 예외는 재시도 대상으로 남긴다.
-        return {
-            "payment_id": claimed.id,
-            "contest_id": claimed.contest_id,
-            "status": "pending",
-            "error": f"{type(exc).__name__}: {exc}",
-        }
+        return _result(
+            claimed, "pending", claimed=True, error=f"{type(exc).__name__}: {exc}"
+        )
 
-    return _apply_refund_status(claimed, status)
+    return _apply_refund_status(claimed, status, claimed=True)
 
 
 def _reconcile_pending_refund(adapter, payment: Payment) -> dict:
@@ -292,26 +306,23 @@ def _reconcile_pending_refund(adapter, payment: Payment) -> dict:
     try:
         status = adapter.query_refund_status(order_id=str(payment.order_id))
     except Exception as exc:  # noqa: BLE001 - 이 행만 실패시키고 배치는 계속한다.
-        return {
-            "payment_id": payment.id,
-            "contest_id": payment.contest_id,
-            "status": "pending",
-            "error": f"{type(exc).__name__}: {exc}",
-        }
+        return _result(
+            payment, "pending", claimed=False, error=f"{type(exc).__name__}: {exc}"
+        )
 
-    return _apply_refund_status(payment, status)
+    return _apply_refund_status(payment, status, claimed=False)
 
 
-def _apply_refund_status(payment: Payment, status: str) -> dict:
+def _apply_refund_status(payment: Payment, status: str, *, claimed: bool) -> dict:
     if status == "refunded":
         mark_refunded(payment.order_id)
-        return {"payment_id": payment.id, "contest_id": payment.contest_id, "status": "refunded"}
+        return _result(payment, "refunded", claimed=claimed)
     if status == "failed":
         mark_refund_failed(payment.order_id)
-        return {"payment_id": payment.id, "contest_id": payment.contest_id, "status": "failed"}
+        return _result(payment, "failed", claimed=claimed)
     # pending — 아직 확정할 수 없다. REFUND_REQUESTED로 남겨두고 다음 스캔의
     # 재확인(_reconcile_pending_refund)이나 웹훅이 마저 확정한다.
-    return {"payment_id": payment.id, "contest_id": payment.contest_id, "status": "pending"}
+    return _result(payment, "pending", claimed=claimed)
 
 
 def run_pending_refunds(*, simulate: str | None = None) -> list[dict]:
