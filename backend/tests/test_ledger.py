@@ -10,7 +10,6 @@
 막는 취약점이다). 각 테스트에 그 이유를 docstring으로 남겨둔다.
 """
 
-import secrets
 import uuid
 
 import pytest
@@ -19,6 +18,7 @@ from django.test import Client
 
 from ledger.models import AppendOnlyError, JournalEntry, LedgerLine
 
+LEDGER_ORIGIN = "http://testserver"
 LEDGER_URL = "/api/ledger"
 
 
@@ -58,6 +58,7 @@ def test_unauthenticated_cannot_post_entry(client):
         f"{LEDGER_URL}/entries",
         data=_balanced_entry_payload(contest_id),
         content_type="application/json",
+        HTTP_ORIGIN=LEDGER_ORIGIN,
     )
 
     assert response.status_code == 403
@@ -75,6 +76,7 @@ def test_non_staff_user_cannot_post_entry(client):
         f"{LEDGER_URL}/entries",
         data=_balanced_entry_payload(contest_id),
         content_type="application/json",
+        HTTP_ORIGIN=LEDGER_ORIGIN,
     )
 
     assert response.status_code == 403
@@ -103,7 +105,7 @@ def test_operator_can_post_balanced_entry_using_all_five_accounts(client):
     }
 
     response = client.post(
-        f"{LEDGER_URL}/entries", data=payload, content_type="application/json"
+        f"{LEDGER_URL}/entries", data=payload, content_type="application/json", HTTP_ORIGIN=LEDGER_ORIGIN
     )
 
     assert response.status_code == 201
@@ -135,7 +137,7 @@ def test_unbalanced_entry_is_rejected_and_nothing_persisted(client):
     }
 
     response = client.post(
-        f"{LEDGER_URL}/entries", data=payload, content_type="application/json"
+        f"{LEDGER_URL}/entries", data=payload, content_type="application/json", HTTP_ORIGIN=LEDGER_ORIGIN
     )
 
     assert response.status_code == 400
@@ -159,7 +161,7 @@ def test_amount_must_be_a_whole_number_not_a_float(client):
     }
 
     response = client.post(
-        f"{LEDGER_URL}/entries", data=payload, content_type="application/json"
+        f"{LEDGER_URL}/entries", data=payload, content_type="application/json", HTTP_ORIGIN=LEDGER_ORIGIN
     )
 
     assert response.status_code == 422
@@ -180,7 +182,7 @@ def test_unknown_account_is_rejected(client):
     }
 
     response = client.post(
-        f"{LEDGER_URL}/entries", data=payload, content_type="application/json"
+        f"{LEDGER_URL}/entries", data=payload, content_type="application/json", HTTP_ORIGIN=LEDGER_ORIGIN
     )
 
     assert response.status_code == 422
@@ -195,6 +197,7 @@ def test_operator_can_confirm_contest_ledger_is_balanced(client):
         f"{LEDGER_URL}/entries",
         data=_balanced_entry_payload(contest_id),
         content_type="application/json",
+        HTTP_ORIGIN=LEDGER_ORIGIN,
     )
 
     response = client.get(f"{LEDGER_URL}/contests/{contest_id}/balance")
@@ -217,6 +220,7 @@ def test_unrelated_contest_balance_is_untouched(client):
         f"{LEDGER_URL}/entries",
         data=_balanced_entry_payload(contest_a),
         content_type="application/json",
+        HTTP_ORIGIN=LEDGER_ORIGIN,
     )
 
     response = client.get(f"{LEDGER_URL}/contests/{contest_b}/balance")
@@ -249,6 +253,7 @@ def test_correction_is_a_new_reversing_entry_and_original_survives(client):
         f"{LEDGER_URL}/entries",
         data=_balanced_entry_payload(contest_id, memo="원본: 잘못 기록됨"),
         content_type="application/json",
+        HTTP_ORIGIN=LEDGER_ORIGIN,
     )
     assert original_response.status_code == 201
     original = original_response.json()
@@ -263,7 +268,7 @@ def test_correction_is_a_new_reversing_entry_and_original_survives(client):
         ],
     }
     reversal_response = client.post(
-        f"{LEDGER_URL}/entries", data=reversal_payload, content_type="application/json"
+        f"{LEDGER_URL}/entries", data=reversal_payload, content_type="application/json", HTTP_ORIGIN=LEDGER_ORIGIN
     )
     assert reversal_response.status_code == 201
     reversal = reversal_response.json()
@@ -290,7 +295,7 @@ def test_reversing_unknown_entry_is_rejected(client):
     payload["reverses_id"] = 999_999
 
     response = client.post(
-        f"{LEDGER_URL}/entries", data=payload, content_type="application/json"
+        f"{LEDGER_URL}/entries", data=payload, content_type="application/json", HTTP_ORIGIN=LEDGER_ORIGIN
     )
 
     assert response.status_code == 400
@@ -301,44 +306,66 @@ def test_reversing_unknown_entry_is_rejected(client):
 
 
 @pytest.mark.django_db
-def test_post_entry_without_csrf_token_is_rejected():
-    user = _make_operator(username="csrf-operator")
-    csrf_client = Client(enforce_csrf_checks=True)
-    assert csrf_client.login(username=user.username, password="operator-pw-1234")
+def test_post_entry_without_an_origin_header_is_rejected():
+    """자동 전송되는 세션 쿠키만으로 분개가 위조되면 안 된다 — append-only 원장에
+    영구히 남는다.
+
+    예전에는 이 라우터만 CSRF **토큰** 방식을 썼고, 그 토큰을 발급하던 것이
+    `/admin/login/` 이었다. #46 이 admin 을 내리면서 발급처가 사라져 이 엔드포인트는
+    실제 클라이언트에게 영구 403 이 됐다 — 방어가 아니라 고장이다. ADR-0016 이 이미
+    정한 하나(SameSite + `Origin` 검증)로 통일했고, 지키는 성질은 그대로다.
+    """
+
+    user = _make_operator(username="origin-operator")
+    session_client = Client()
+    assert session_client.login(username=user.username, password="operator-pw-1234")
     contest_id = uuid.uuid4()
 
-    response = csrf_client.post(
+    response = session_client.post(
         f"{LEDGER_URL}/entries",
         data=_balanced_entry_payload(contest_id),
         content_type="application/json",
     )
 
     assert response.status_code == 403
-    entries_response = csrf_client.get(f"{LEDGER_URL}/contests/{contest_id}/entries")
+    entries_response = session_client.get(f"{LEDGER_URL}/contests/{contest_id}/entries")
     assert entries_response.json() == []
 
 
 @pytest.mark.django_db
-def test_post_entry_with_matching_csrf_cookie_and_header_succeeds():
-    """토큰이 있으면(쿠키·헤더 일치) 여전히 정상 동작함을 확인해, 위 테스트가 CSRF
-    검사를 우회해서가 아니라 정말로 토큰 유무로 갈린다는 것을 보인다."""
-
-    user = _make_operator(username="csrf-operator-2")
-    csrf_client = Client(enforce_csrf_checks=True)
-    assert csrf_client.login(username=user.username, password="operator-pw-1234")
-
-    token = secrets.token_hex(32)
-    csrf_client.cookies["csrftoken"] = token
+def test_post_entry_from_another_origin_is_rejected():
+    user = _make_operator(username="origin-operator-2")
+    session_client = Client()
+    assert session_client.login(username=user.username, password="operator-pw-1234")
     contest_id = uuid.uuid4()
 
-    response = csrf_client.post(
+    response = session_client.post(
         f"{LEDGER_URL}/entries",
         data=_balanced_entry_payload(contest_id),
         content_type="application/json",
-        HTTP_X_CSRFTOKEN=token,
+        HTTP_ORIGIN="https://evil.example",
     )
 
-    assert response.status_code == 201
+    assert response.status_code == 403
+    assert session_client.get(f"{LEDGER_URL}/contests/{contest_id}/entries").json() == []
+
+
+@pytest.mark.django_db
+def test_post_entry_from_our_own_origin_succeeds():
+    """위 두 테스트가 검사를 우회해서가 아니라 정말로 Origin 으로 갈린다는 것을 보인다."""
+
+    user = _make_operator(username="origin-operator-3")
+    session_client = Client()
+    assert session_client.login(username=user.username, password="operator-pw-1234")
+
+    response = session_client.post(
+        f"{LEDGER_URL}/entries",
+        data=_balanced_entry_payload(uuid.uuid4()),
+        content_type="application/json",
+        HTTP_ORIGIN="http://testserver",
+    )
+
+    assert response.status_code == 201, response.content
 
 
 # ---------------------------------------------------------------------------
@@ -422,6 +449,7 @@ def test_reversal_across_contests_is_rejected(client):
         f"{LEDGER_URL}/entries",
         data=_balanced_entry_payload(contest_a, memo="A의 원본"),
         content_type="application/json",
+        HTTP_ORIGIN=LEDGER_ORIGIN,
     ).json()
 
     cross_contest_payload = {
@@ -435,7 +463,7 @@ def test_reversal_across_contests_is_rejected(client):
     }
 
     response = client.post(
-        f"{LEDGER_URL}/entries", data=cross_contest_payload, content_type="application/json"
+        f"{LEDGER_URL}/entries", data=cross_contest_payload, content_type="application/json", HTTP_ORIGIN=LEDGER_ORIGIN
     )
 
     assert response.status_code == 400
@@ -462,6 +490,7 @@ def test_reversing_the_same_entry_twice_is_rejected(client):
         f"{LEDGER_URL}/entries",
         data=_balanced_entry_payload(contest_id, memo="원본"),
         content_type="application/json",
+        HTTP_ORIGIN=LEDGER_ORIGIN,
     ).json()
 
     reversal_payload = {
@@ -475,13 +504,13 @@ def test_reversing_the_same_entry_twice_is_rejected(client):
     }
 
     first = client.post(
-        f"{LEDGER_URL}/entries", data=reversal_payload, content_type="application/json"
+        f"{LEDGER_URL}/entries", data=reversal_payload, content_type="application/json", HTTP_ORIGIN=LEDGER_ORIGIN
     )
     assert first.status_code == 201
 
     duplicate_payload = dict(reversal_payload, memo="정정 2회차(중복·재시도)")
     second = client.post(
-        f"{LEDGER_URL}/entries", data=duplicate_payload, content_type="application/json"
+        f"{LEDGER_URL}/entries", data=duplicate_payload, content_type="application/json", HTTP_ORIGIN=LEDGER_ORIGIN
     )
 
     assert second.status_code == 400
@@ -513,7 +542,7 @@ def test_amount_beyond_sane_upper_bound_is_rejected_not_500(client):
     }
 
     response = client.post(
-        f"{LEDGER_URL}/entries", data=payload, content_type="application/json"
+        f"{LEDGER_URL}/entries", data=payload, content_type="application/json", HTTP_ORIGIN=LEDGER_ORIGIN
     )
 
     assert response.status_code == 422

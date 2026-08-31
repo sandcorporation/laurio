@@ -17,7 +17,16 @@ from django.conf import settings
 from django.http import JsonResponse
 from ninja.errors import HttpError
 
-OPERATOR_PATH_PREFIX = "/api/operator/"
+# 세션 쿠키로 인증하는 표면들. 쿠키는 브라우저가 자동으로 실어 보내므로 이들의
+# 변경 요청은 전부 Origin 검증을 거쳐야 한다(ADR-0016 의 성립 조건).
+#
+# `/api/ledger/*` 가 여기 있는 이유(#46 후속). 그 라우터는 `request.user.is_staff`
+# 로 게이트하는데 그것이 곧 Operator 라는 뜻이다. 예전에는 자기만 `check_csrf` 로
+# 토큰 방식을 썼고, 그 토큰을 발급하던 것이 `/admin/login/` 이었다 — admin 을
+# 내리면서 발급처가 사라져 그 엔드포인트는 실제 클라이언트에게 영구 403 이 됐다.
+# 두 가지 CSRF 기계를 병행하면 언젠가 한쪽만 고쳐지므로, ADR-0016 이 이미 정한
+# 하나(SameSite + Origin)로 통일한다.
+SESSION_AUTHENTICATED_PREFIXES = ("/api/operator/", "/api/ledger/")
 _MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
@@ -37,7 +46,7 @@ def allowed_operator_origin(request) -> str:
 
 
 class OperatorOriginMiddleware:
-    """운영자 경로의 변경 요청에 `Origin` 검증을 건다.
+    """세션으로 인증하는 경로의 변경 요청에 `Origin` 검증을 건다.
 
     ADR-0016 은 쿠키로 자격증명을 옮기는 결정의 **성립 조건**으로 SameSite 와 Origin
     검증을 함께 요구한다. 빠지면 이 구조는 토큰을 JS 에 노출하는 것보다 나쁘다 —
@@ -55,7 +64,10 @@ class OperatorOriginMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        if request.path.startswith(OPERATOR_PATH_PREFIX) and request.method in _MUTATING_METHODS:
+        needs_check = request.method in _MUTATING_METHODS and request.path.startswith(
+            SESSION_AUTHENTICATED_PREFIXES
+        )
+        if needs_check:
             origin = request.headers.get("Origin")
             if not origin or origin != allowed_operator_origin(request):
                 return JsonResponse(

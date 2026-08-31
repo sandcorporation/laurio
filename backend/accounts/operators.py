@@ -101,7 +101,12 @@ def create_operator(username: str, password: str, *, superuser: bool = False):
 
 @transaction.atomic
 def deactivate_operator(operator) -> None:
-    """Operator 를 비활성화한다. 세션 회수는 호출부의 책임이다(#45)."""
+    """Operator 를 비활성화한다 — 이것만으로 접근이 끊긴다.
+
+    세션을 따로 지우지 않는다. Redis 세션은 사용자별로 조회할 수단이 없지만,
+    `ModelBackend.get_user` 가 비활성 사용자에 None 을 돌려주므로 이미 로그인해
+    있던 사람도 다음 요청에서 익명이 된다 — 즉시 무효화라는 성질은 그대로다.
+    """
 
     operator.is_active = False
     operator.save(update_fields=["is_active"])

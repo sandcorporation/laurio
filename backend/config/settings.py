@@ -246,6 +246,21 @@ SESSION_COOKIE_SAMESITE = "Lax"
 # 조립한다(dev·테스트).
 OPERATOR_WEB_ORIGIN = _env("LAURIO_OPERATOR_ORIGIN", "")
 
+if IS_DEPLOYED_ENVIRONMENT and not OPERATOR_WEB_ORIGIN:
+    # 비어 있으면 Host 헤더 유도로 떨어지는데, `SECURE_PROXY_SSL_HEADER` 는
+    # production 에만 걸린다 — TLS 종단 프록시 뒤의 staging 에서는 scheme 이 http 로
+    # 잡혀 브라우저가 보낸 https 오리진과 어긋나고, **로그인을 포함한 모든 변경
+    # 요청이 403** 이 된다. fail-closed 라 보안 구멍은 아니지만 운영이 통째로 죽는다.
+    #
+    # 프론트엔드가 LAURIO_WEB_ORIGIN 에 대해 이미 같은 실패를 겪고 같은 방식으로
+    # 막았다(frontend/instrumentation.ts) — 여기서 그 결을 맞춘다.
+    raise ImproperlyConfigured(
+        f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET} 인데 "
+        "LAURIO_OPERATOR_ORIGIN 이 비어 있다. 배포 환경에서는 운영자 앱의 오리진을 "
+        "명시해야 한다 — Host 헤더 유도는 리버스 프록시 구성에 따라 어긋나고, "
+        "그러면 운영자의 모든 변경 요청이 403 이 된다."
+    )
+
 # 스토리지 어댑터 (ADR-0005, ADR-0007): "fake"가 기본값이라 아무것도 설정하지 않아도
 # 테스트·CI는 MinIO 없이 돈다. dev compose가 backend 컨테이너에만 STORAGE_BACKEND=s3
 # 를 주입해 MinIO로 바인딩한다(docker/compose.dev.yaml). staging/prod는 같은 "s3"

@@ -104,6 +104,9 @@ x-backend-env: &backend-env
 
   # --- Celery (ADR-0003) ---
   # Operator 세션(#43, ADR-0018) — 브로커와 같은 인스턴스, 다른 DB 인덱스.
+  # 운영자 앱의 오리진(#43). 비면 부팅이 거부된다 — Host 헤더 유도는
+  # 리버스 프록시 구성에 따라 어긋나 모든 변경 요청이 403 이 된다.
+  LAURIO_OPERATOR_ORIGIN: ${LAURIO_OPERATOR_ORIGIN:?LAURIO_OPERATOR_ORIGIN 을 설정해야 한다}
   SESSION_REDIS_URL: redis://redis:6379/1
   CELERY_BROKER_URL: redis://redis:6379/0
   CELERY_RESULT_BACKEND: redis://redis:6379/0
@@ -131,6 +134,9 @@ services:
 
   redis: # Celery 브로커 + 결과 백엔드(ADR-0003). beat/worker 전용 — 호스트에 공개하지 않는다.
     image: redis:7-alpine
+    # AOF 는 기본으로 꺼져 있다. 세션을 여기 얹었으므로(#43) 켜지 않으면 RDB
+    # 스냅샷 창 안의 재시작이 조사 중인 운영자를 전부 튕긴다 — dev 와 같은 이유다.
+    command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - laurio-staging-redis:/data
     healthcheck:

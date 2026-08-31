@@ -2102,6 +2102,11 @@ export interface components {
         OperatorOut: {
             /** Id */
             id: number;
+            /**
+             * Is Active
+             * @default true
+             */
+            is_active: boolean;
             /** Is Superuser */
             is_superuser: boolean;
             /** Username */

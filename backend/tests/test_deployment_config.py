@@ -50,6 +50,8 @@ def _base_env(*, target: str, secret_key: str) -> dict[str, str]:
         "POSTGRES_HOST": "127.0.0.1",
         "POSTGRES_PORT": "55432",
         "INTERNAL_API_TOKEN": f"{target}-internal-token",
+        # 운영자 앱 오리진(#43). 배포 환경에서 비면 부팅이 거부된다.
+        "LAURIO_OPERATOR_ORIGIN": f"https://operator.{target}.laurio.example",
         "JWT_SIGNING_KEY": f"{target}-jwt-signing-key",
         "PAYMENT_WEBHOOK_SECRET": f"{target}-payment-webhook-secret",
         "PAYOUT_WEBHOOK_SECRET": f"{target}-payout-webhook-secret",
@@ -300,3 +302,38 @@ def test_internal_endpoints_are_exempt_from_ssl_redirect_but_other_paths_are_not
         "내부 엔드포인트만 예외여야 한다 — 예외 패턴이 너무 넓으면 공개 API까지 "
         "SSL 리다이렉트가 조용히 꺼진다."
     )
+
+
+# --- 운영자 오리진: 비어 있으면 배포 환경에서 부팅을 거부한다 (#43 후속) ------------
+
+
+@pytest.mark.parametrize("target", ["staging", "production"])
+def test_deployed_environment_refuses_to_boot_without_an_operator_origin(target):
+    """비면 Host 헤더 유도로 떨어지는데, `SECURE_PROXY_SSL_HEADER` 는 production 에만
+    걸린다 — TLS 종단 뒤의 staging 에서는 scheme 이 http 로 잡혀 브라우저가 보낸
+    https 오리진과 어긋나고, **로그인을 포함한 모든 변경 요청이 403** 이 된다.
+    fail-closed 라 보안 구멍은 아니지만 운영이 통째로 죽는다.
+
+    프론트엔드가 LAURIO_WEB_ORIGIN 에 대해 이미 같은 실패를 겪고 같은 방식으로
+    막았다(frontend/instrumentation.ts).
+    """
+
+    env = (_production_env if target == "production" else _staging_env)()
+    env["LAURIO_OPERATOR_ORIGIN"] = ""
+
+    result = _run_check(env)
+
+    assert result.returncode != 0
+    assert "LAURIO_OPERATOR_ORIGIN" in result.stderr
+
+
+def test_development_target_boots_without_an_operator_origin():
+    """dev·CI 는 요청이 실제로 도착한 주소로 조립한다 — 강제하지 않는다."""
+
+    env = _base_env(target="development", secret_key=_STRONG_SECRET_KEY)
+    env["LAURIO_DEPLOYMENT_TARGET"] = "development"
+    env["LAURIO_OPERATOR_ORIGIN"] = ""
+
+    result = _run_check(env)
+
+    assert result.returncode == 0, result.stderr

@@ -24,6 +24,19 @@ jobs:
           --health-timeout 5s
           --health-retries 20
 
+      redis:
+        # Operator 세션 저장소(#43). 테스트가 실제 Redis 를 상대로 돈다 — conftest 의
+        # autouse 픽스처가 매 테스트마다 세션 캐시를 비우므로, 이게 없으면 스위트
+        # 전체가 ConnectionError 로 죽는다.
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
     env:
       # 러너에서는 서비스 컨테이너가 표준 포트로 붙으므로 dev 기본값을 덮어쓴다.
       POSTGRES_HOST: 127.0.0.1
@@ -31,6 +44,8 @@ jobs:
       POSTGRES_DB: laurio
       POSTGRES_USER: laurio
       POSTGRES_PASSWORD: laurio
+      # 러너의 redis 도 표준 포트다 — dev 가 비켜 잡은 16379 기본값을 덮어쓴다.
+      SESSION_REDIS_URL: redis://127.0.0.1:6379/1
       DJANGO_SECRET_KEY: ci-only-insecure-key
       DJANGO_DEBUG: "false"
       DJANGO_ALLOWED_HOSTS: "*"

@@ -12,13 +12,15 @@
 from __future__ import annotations
 
 from django.contrib.auth import authenticate, get_user_model, login, logout
+from django.db import IntegrityError
 from django.http import HttpRequest
 from ninja import Router, Schema
+from pydantic import Field
 from ninja.errors import HttpError
 
 from core.operator_auth import OperatorAuth, SuperuserOperatorAuth
 
-from .operators import OperatorInvariantError, create_operator
+from .operators import OperatorInvariantError, create_operator, deactivate_operator
 
 router = Router(tags=["operator"], auth=OperatorAuth())
 
@@ -32,11 +34,18 @@ class OperatorOut(Schema):
     id: int
     username: str
     is_superuser: bool
+    # 유일한 관리 표면이므로 "지금 누가 활성인가"에 답할 수 있어야 한다. 비활성
+    # Operator 를 되살리는 API 는 아직 없다 — 그건 이 티켓에 없던 기능이라 후속으로
+    # 뗀다.
+    is_active: bool = True
 
 
 class OperatorCreateIn(Schema):
-    username: str
-    password: str
+    # Django 기본 User.username 의 상한이 150자다. 경계를 두지 않으면 그 너머가
+    # DataError 500 이 되는데, 4xx 여야 할 자리에서 500 이 나는 것은 이 저장소가
+    # 반복해서 겪은 결함 모양이다. 빈 문자열도 여기서 막는다.
+    username: str = Field(min_length=1, max_length=150)
+    password: str = Field(min_length=1, max_length=256)
     is_superuser: bool = False
 
 
@@ -66,7 +75,12 @@ def operator_login(request: HttpRequest, payload: OperatorLoginIn):
         raise HttpError(401, _LOGIN_FAILED)
 
     login(request, user)
-    return 200, OperatorOut(id=user.id, username=user.username, is_superuser=user.is_superuser)
+    return 200, OperatorOut(
+        id=user.id,
+        username=user.username,
+        is_superuser=user.is_superuser,
+        is_active=user.is_active,
+    )
 
 
 @router.post("/logout", response={200: dict})
@@ -80,7 +94,12 @@ def operator_logout(request: HttpRequest):
 @router.get("/me", response={200: OperatorOut})
 def operator_me(request: HttpRequest):
     user = request.auth
-    return 200, OperatorOut(id=user.id, username=user.username, is_superuser=user.is_superuser)
+    return 200, OperatorOut(
+        id=user.id,
+        username=user.username,
+        is_superuser=user.is_superuser,
+        is_active=user.is_active,
+    )
 
 
 # --- Operator 계정 관리 (#45) --------------------------------------------------
@@ -99,7 +118,12 @@ def list_operators(request: HttpRequest):
     """Operator 목록. 자격증명과 관련된 것은 아무것도 나오지 않는다."""
 
     return 200, [
-        OperatorOut(id=u.id, username=u.username, is_superuser=u.is_superuser)
+        OperatorOut(
+            id=u.id,
+            username=u.username,
+            is_superuser=u.is_superuser,
+            is_active=u.is_active,
+        )
         for u in get_user_model().objects.filter(is_staff=True).order_by("username")
     ]
 
@@ -121,9 +145,17 @@ def create_operator_account(request: HttpRequest, payload: OperatorCreateIn):
         )
     except OperatorInvariantError as exc:
         raise HttpError(422, str(exc)) from exc
+    except IntegrityError as exc:
+        # 같은 이름으로 동시에 두 번 들어온 경우. create_operator 의 사전 조회는
+        # 순차적으로만 막으므로 DB 의 unique 제약이 최후의 방어선이고, 그것이
+        # 500 으로 새어나가면 안 된다.
+        raise HttpError(409, "이미 존재하는 사용자입니다.") from exc
 
     return 201, OperatorOut(
-        id=operator.id, username=operator.username, is_superuser=operator.is_superuser
+        id=operator.id,
+        username=operator.username,
+        is_superuser=operator.is_superuser,
+        is_active=operator.is_active,
     )
 
 
@@ -164,6 +196,5 @@ def deactivate_operator_account(request: HttpRequest, operator_id: int):
                 "아무도 Operator 를 만들 수 없는 상태가 됩니다.",
             )
 
-    target.is_active = False
-    target.save(update_fields=["is_active"])
+    deactivate_operator(target)
     return 200, {"detail": "비활성화되었습니다."}

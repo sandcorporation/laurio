@@ -223,3 +223,51 @@ def test_operator_management_requires_an_origin_like_every_other_mutation():
 
     assert response.status_code == 403
     assert not get_user_model().objects.filter(username="no-origin").exists()
+
+
+@pytest.mark.django_db
+def test_an_overlong_username_is_a_client_error_not_a_server_error():
+    """4xx 여야 할 자리에서 500 이 나는 것은 이 저장소가 반복해 겪은 결함 모양이다."""
+
+    root = _client_for("root", superuser=True)
+
+    response = _create(root, "x" * 200)
+
+    assert response.status_code == 422, response.content
+    assert not get_user_model().objects.filter(username__startswith="x" * 50).exists()
+
+
+@pytest.mark.django_db
+def test_an_empty_username_is_refused():
+    root = _client_for("root", superuser=True)
+
+    assert _create(root, "").status_code == 422
+
+
+@pytest.mark.django_db
+def test_creating_the_same_operator_twice_is_a_conflict_not_a_crash():
+    """사전 조회는 순차적으로만 막는다 — DB 의 unique 제약이 최후의 방어선이고,
+    그것이 500 으로 새어나가면 안 된다."""
+
+    root = _client_for("root", superuser=True)
+    assert _create(root, "twice").status_code == 201
+
+    second = _create(root, "twice")
+
+    assert second.status_code in (409, 422), second.content
+    assert get_user_model().objects.filter(username="twice").count() == 1
+
+
+@pytest.mark.django_db
+def test_the_list_says_who_is_active():
+    """유일한 관리 표면이므로 "지금 누가 활성인가"에 답할 수 있어야 한다."""
+
+    root = _client_for("root", superuser=True)
+    _create(root, "retired")
+    retired_id = get_user_model().objects.get(username="retired").id
+    assert _deactivate(root, retired_id).status_code == 200
+
+    rows = {row["username"]: row for row in root.get(OPERATORS_URL).json()}
+
+    assert rows["root"]["is_active"] is True
+    assert rows["retired"]["is_active"] is False
