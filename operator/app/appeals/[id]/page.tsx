@@ -35,6 +35,13 @@ export default function AppealDetailPage() {
     );
   }
 
+  if (state.status === "redirecting") {
+    // 401을 만나 로그인으로 이동하는 중이다(코드리뷰 지적 — use-appeal-detail.ts
+    // 참고) — 이 프레임에서는 아무것도 그리지 않는다. useSession의
+    // "unauthenticated" 분기와 같은 자리다.
+    return null;
+  }
+
   if (state.status === "not-found") {
     return (
       <main>

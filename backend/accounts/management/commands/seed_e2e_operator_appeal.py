@@ -35,9 +35,10 @@ from django.test import Client
 from django.utils import timezone
 
 from .seed_e2e_operator_queues import (
-    FAR_FUTURE_DEADLINE,
+    DEADLINE_OFFSET,
     SCORING_RUN_PENDING_URL,
     _auth_header,
+    _clear_stale_seed_contests,
     _close_contest,
     _internal_headers,
     _publish_contest,
@@ -80,9 +81,7 @@ def seed_appeal_for_detail(*, rule: str | None) -> dict:
     client = Client()
     uid = uuid.uuid4().hex[:8]
     marker = f"e2e-source-marker-{uuid.uuid4().hex}"
-    # 공개 목록 정렬(deadline_at 오름차순)을 밀어내지 않는다 —
-    # seed_e2e_operator_queues.py의 FAR_FUTURE_DEADLINE 주석 참고.
-    deadline = timezone.now() + FAR_FUTURE_DEADLINE
+    deadline = timezone.now() + DEADLINE_OFFSET
     sponsor, contest = _publish_contest(
         client,
         sponsor_uid=f"e2e-appealdetail-sponsor-{uid}",
@@ -171,6 +170,11 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options) -> None:
         _refuse_in_deployed_environment()
+        # 이 명령도 자기 접두어(TITLE_PREFIX)의 Contest를 만든다 — 오래된 것을
+        # 먼저 정리한다(seed_e2e_operator_queues.py의 STALE_AFTER 설명 참고).
+        # #66이 이 명령을 새로 더하며 호출 빈도가 크게 늘었으므로, 여기서도
+        # 같은 정리를 빠뜨리면 축적이 다시 시작된다.
+        _clear_stale_seed_contests()
         result = seed_appeal_for_detail(rule=options.get("rule"))
         # 명령이 마지막 줄에 JSON 한 덩어리만 찍는다 — 다른 seed_e2e_* 명령과 같은 관용구.
         self.stdout.write(json.dumps(result))

@@ -10,6 +10,7 @@ import type { AppealDetail } from "./types";
 
 export type AppealDetailState =
   | { status: "loading" }
+  | { status: "redirecting" }
   | { status: "loaded"; appeal: AppealDetail }
   | { status: "not-found" }
   | { status: "error" };
@@ -31,6 +32,11 @@ export function useAppealDetail(appealId: string, enabled: boolean): AppealDetai
         if (cancelled) return;
 
         if (res.status === 401) {
+          // 코드리뷰 지적: state를 "loading"에 그대로 둔 채 router.replace만
+          // 부르면, 내비게이션이 늦거나 실패했을 때 "불러오는 중..."이 영원히
+          // 남는다 — 오류도 재시도도 없이 화면이 그 상태에 갇힌다. 이동을
+          // 시작하기 전에 먼저 상태를 바꾼다.
+          setState({ status: "redirecting" });
           router.replace("/login");
           return;
         }

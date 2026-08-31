@@ -29,13 +29,13 @@ from django.core.management.base import BaseCommand, CommandError
 from django.test import Client
 from django.utils import timezone
 
+from awards.models import Award
 from contests.models import Category, Contest, DeliverableType
-from core.models import ClockOverride
+from core.transitions import claim_transition
 
 CONTESTS_URL = "/api/contests"
 PAYMENTS_URL = "/api/payments"
 PAYOUTS_URL = "/api/payouts"
-TICK_URL = "/api/internal/tick"
 SCORING_RUN_PENDING_URL = "/api/internal/scoring/run-pending"
 
 # 이 명령이 심은 Contest 는 전부 이 접두어로 시작한다(코드리뷰 지적) — clear_queues()가
@@ -44,17 +44,35 @@ SCORING_RUN_PENDING_URL = "/api/internal/scoring/run-pending"
 # seed_e2e_contests.py의 title__startswith 관용구와 같은 원칙).
 TITLE_PREFIX = "[e2e-op-queue] "
 
-# 공개 목록(GET /api/contests)의 기본 정렬은 deadline_at 오름차순이다
-# (contests/api.py의 ordering). 예전에는 여기서 발행하는 Contest가
-# "now + 1시간" 마감을 썼는데, 이 명령들이 (다른 시드보다) 훨씬 자주
-# 불리면서(#66이 이의 상세 e2e를 위해 seed_e2e_operator_appeal.py를 더해
-# 호출 빈도가 늘었다) 그 짧은 마감이 공개 목록 1페이지를 계속 차지해
-# 버렸다 — 공개 시드(seed_e2e_contests.py)가 만든 Contest가 정렬 뒤로
-# 밀려 목록 e2e가 실패했다(코드리뷰 지적). 이 명령들의 목적(마감을 지나
-# 채점·심판 흐름을 태우는 것)에 마감의 절대 시각은 상관없다 —
-# _close_contest가 항상 "그 마감 + 1분"으로 시계를 얼릴 뿐이다. 그래서
-# 마감을 아주 먼 미래로 잡아 정렬 앞자리를 애초에 다투지 않는다.
-FAR_FUTURE_DEADLINE = timedelta(days=400)
+# Contest를 발행할 때 쓰는 마감까지의 여유. **정렬 문제를 마감 값으로 풀지
+# 않는다**(코드리뷰 지적) — 한때 이 값을 400일로 밀어 정렬 앞자리를 피해
+# 보려 했는데, `_close_contest`가 그 마감을 근거로 시계를 얼리고 전역
+# `/api/internal/tick`을 태우는 구조였던 탓에, "마감을 미래로 미룬다"가
+# 곧 "그 시각까지의 전역 스캔 반경을 넓힌다"와 같은 말이 되어 DB의 모든
+# PUBLISHED Contest를 CLOSED/JUDGING_ENDED로, 그 Submission들을 채점까지
+# 끝내 버렸다(Score는 append-only라 되돌릴 수 없다) — 정렬 버그보다 훨씬
+# 심각한 사고였다. `_close_contest`를 이 Contest 하나만 좁게 전이시키는
+# 방식으로 고친 지금은(아래), 마감이 실시간 기준으로 아직 오지 않았어도
+# 무관하다 — 그래서 원래 값(1시간)으로 되돌린다. 정렬 문제의 진짜 원인은
+# 마감이 아니라 축적이었다 — STALE_AFTER·_clear_stale_seed_contents 참고.
+DEADLINE_OFFSET = timedelta(hours=1)
+
+# 이 명령들이 만드는 Contest는 지금까지 아무도 지우지 않아 스위트를 반복
+# 실행할 때마다 쌓였다(코드리뷰 지적) — clear_queues()는 Appeal·Payout
+# 행만 지우고 Contest는 그대로 둔다. 전부 prize=1,000,000이라 `?sort=prize`
+# 정렬(`-prize, id`)에서 "[E2E] underfunded"(seed_e2e_contests.py, 매번
+# 재생성돼 항상 최대 id → 동점 그룹 맨 뒤)를 계속 뒤로 밀어내다, 누적이
+# 페이지 크기(20)를 넘으면 그 Contest가 1페이지 밖으로 나가 목록 e2e가
+# 깨진다. #66이 이 명령들의 호출 빈도를 3배로 늘리면서 이 결함이 로컬에서
+# 두 번만 돌려도 드러날 만큼 빨라졌다.
+#
+# 그래서 시드를 부를 때마다 자기 접두어의 "오래된"(STALE_AFTER보다 이전)
+# Contest를 먼저 정리한다. 매 호출마다 무조건 지우지 않는 이유: 같은
+# 스위트 실행 안에서 방금 만든 형제 Contest(다른 --only 호출, 같은
+# 테스트가 두 번째로 부르는 seed)까지 지우면 그 테스트 자신이 깨진다.
+# Playwright 스위트 한 번은 보통 몇 분이면 끝나므로, 1시간이면 "이번
+# 실행에서 막 만든 것"과 "예전 실행이 남긴 것"을 안전하게 가른다.
+STALE_AFTER = timedelta(hours=1)
 
 
 def _internal_headers() -> dict:
@@ -99,17 +117,32 @@ def _sign_payment(*, webhook_id: str, order_id: str, status: str) -> str:
     return hmac.new(key.encode("utf-8"), canonical, hashlib.sha256).hexdigest()
 
 
-def _freeze(at) -> None:
-    ClockOverride.objects.update_or_create(pk=1, defaults={"overridden_at": at})
+def _clear_stale_seed_contests() -> None:
+    """자기 접두어(TITLE_PREFIX)의 오래된 Contest를 정리한다 — 위 STALE_AFTER
+    설명 참고. 삭제 범위는 항상 이 접두어로만 좁힌다: 다른 시드(seed_dev_data,
+    seed_e2e_contests.py)나 실제 데이터, 그리고 이 명령을 모르는 다른 체인의
+    e2e 데이터는 절대 건드리지 않는다 — clear_queues()가 이미 세운 것과 같은
+    안전 속성이다.
 
+    **Award를 Contest보다 먼저 지운다.** `Award.submission`이 PROTECT라
+    (awards/models.py — 감사 기록 보존) Contest를 바로 지우면
+    `ProtectedError`가 난다. Award를 먼저 지우면 그 보호가 풀리고,
+    Award -> Handover -> Payout -> TaxIdentity/PayoutWebhookDelivery는 전부
+    CASCADE라 함께 정리된다. Contest를 지우면 나머지(Submission·Score·
+    Appeal·AppealRuling·SourceReading·Requirement 등)도 CASCADE로 따라간다.
+    """
 
-def _unfreeze() -> None:
-    # 이 명령은 매번 새 프로세스로 실행되지만 ClockOverride는 DB 행이라 프로세스
-    # 경계를 넘어 남는다 — 얼린 채로 끝내면 다음에 이 명령을 부르거나(다른 seed_*
-    # 함수가 실시간 기준 마감일을 계산하다 "이미 지났다"로 거부되는 것을 직접
-    # 재현했다) 같은 DB를 보는 다른 e2e 스펙까지 조용히 오작동시킨다. 마감을
-    # 지나치게 만드는 용도로만 잠깐 얼리고, 쓰자마자 바로 되돌린다.
-    ClockOverride.objects.filter(pk=1).delete()
+    cutoff = timezone.now() - STALE_AFTER
+    stale_contest_ids = list(
+        Contest.objects.filter(title__startswith=TITLE_PREFIX, created_at__lt=cutoff).values_list(
+            "id", flat=True
+        )
+    )
+    if not stale_contest_ids:
+        return
+
+    Award.objects.filter(contest_id__in=stale_contest_ids).delete()
+    Contest.objects.filter(id__in=stale_contest_ids).delete()
 
 
 def _category() -> Category:
@@ -199,16 +232,37 @@ def _submit(
 
 
 def _close_contest(client: Client, contest: dict, *, deadline) -> None:
-    _freeze(deadline + timedelta(minutes=1))
-    try:
-        tick_resp = client.post(TICK_URL, **_internal_headers())
-        assert tick_resp.status_code == 200, tick_resp.content
-        assert Contest.objects.get(id=contest["id"]).status == Contest.Status.CLOSED
-    finally:
-        # 마감을 지나치게 만드는 용도로만 잠깐 얼렸다 — 이후 단계(채점·Award·
-        # Handover·지급)는 실시간 기준으로 진행돼야 하고, 이 프로세스가 끝난 뒤에도
-        # DB에 남아 다른 e2e 스펙까지 오작동시키면 안 된다(_unfreeze 주석 참고).
-        _unfreeze()
+    """이 Contest **하나만** PUBLISHED -> CLOSED로 좁게 전이시킨다.
+
+    **예전에는 시계를 얼리고 `/api/internal/tick`(전역 스캔)을 태웠다** —
+    코드리뷰에서 심각 결함으로 지적됐다: 그 틱은 DB의 **모든** PUBLISHED
+    Contest를 스캔해 CLOSED로, 이어서 같은 틱이 JUDGING_ENDED로도 옮기고,
+    곧바로 뒤에서 부르는 `scoring/run-pending`이 그 Submission들에
+    append-only `Score`를 남긴다 — `seed_dev_data`가 만든 개발 데이터가
+    e2e 한 번에 조용히 전부 채점 완료 상태가 될 수 있었다. 시계를 미래로
+    얼릴수록 그 반경이 넓어지는 구조였다(예전 FAR_FUTURE_DEADLINE 실수가
+    정확히 그 반경을 400일치로 넓혔다).
+
+    지금은 `core.transitions.claim_transition` — 스케줄러 틱이 내부에서
+    쓰는 것과 같은 원자적 빌딩 블록 — 을 이 Contest의 pk 하나에만 직접
+    적용한다. 스캔이 없으니 다른 Contest는 손대지 않고, 시계를 얼릴
+    필요도 없어 그 흔적을 되돌리는 코드(_unfreeze)도 함께 사라진다.
+    `extra_fields`는 contests/apps.py에 등록된 실제 전이 규칙과 같은 계산
+    (judging_ends_at = 이 Contest의 deadline_at + JUDGING_PERIOD_DAYS)을
+    그대로 재현한다 — Award 엔드포인트가 이 값을 실시간과 비교하므로
+    (awards/api.py) 값 자체는 여전히 정확해야 한다.
+    """
+
+    ok = claim_transition(
+        Contest,
+        contest["id"],
+        from_state=Contest.Status.PUBLISHED,
+        to_state=Contest.Status.CLOSED,
+        state_field="status",
+        now=timezone.now(),
+        extra_fields={"judging_ends_at": deadline + timedelta(days=settings.JUDGING_PERIOD_DAYS)},
+    )
+    assert ok, f"Contest {contest['id']} 를 PUBLISHED -> CLOSED 로 전이하지 못했다."
 
 
 def seed_pending_appeal() -> dict:
@@ -216,7 +270,7 @@ def seed_pending_appeal() -> dict:
 
     client = Client()
     uid = uuid.uuid4().hex[:8]
-    deadline = timezone.now() + FAR_FUTURE_DEADLINE
+    deadline = timezone.now() + DEADLINE_OFFSET
     sponsor, contest = _publish_contest(
         client,
         sponsor_uid=f"e2e-appeal-sponsor-{uid}",
@@ -255,7 +309,7 @@ def seed_pending_appeal() -> dict:
 
 def _ready_for_payout(uid: str) -> tuple[Client, dict, dict, dict]:
     client = Client()
-    deadline = timezone.now() + FAR_FUTURE_DEADLINE
+    deadline = timezone.now() + DEADLINE_OFFSET
     sponsor, contest = _publish_contest(client, sponsor_uid=f"e2e-payout-sponsor-{uid}", deadline_at=deadline)
     dev = _verified_user(client, f"e2e-payout-dev-{uid}")
     submission = _submit(client, dev, contest["id"])
@@ -381,6 +435,10 @@ class Command(BaseCommand):
             result = clear_queues()
             self.stdout.write(json.dumps(result))
             return
+
+        # 심기 전에 자기 접두어의 오래된 Contest부터 정리한다(STALE_AFTER
+        # 설명 참고) — 축적이 공개 목록 정렬을 오염시키는 근본 원인이었다.
+        _clear_stale_seed_contests()
 
         only = options.get("only")
         result: dict = {}

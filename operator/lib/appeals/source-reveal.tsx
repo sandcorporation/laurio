@@ -20,6 +20,7 @@ import { useState } from "react";
 type RevealState =
   | { status: "collapsed" }
   | { status: "revealing" }
+  | { status: "redirecting" }
   | { status: "revealed"; prompt: string }
   | { status: "error"; message: string };
 
@@ -35,6 +36,13 @@ export function SourceReveal({ appealId }: { appealId: number }) {
       });
 
       if (res.status === 401) {
+        // 세션이 만료됐다 — 코드리뷰 지적: 이전에는 여기서 state를 그대로
+        // "revealing"에 남겨둔 채 router.replace만 불렀다. 내비게이션이
+        // 늦거나(느린 네트워크) 실패하면 비활성화된 "펼치는 중..." 버튼만
+        // 남고 오류도 재시도 수단도 없이 화면이 그 상태에 갇힌다. 이동을
+        // 시작하기 전에 먼저 상태를 바꿔, 내비게이션이 어떻게 되든 화면이
+        // 더 이상 "펼치는 중"으로 보이지 않게 한다.
+        setState({ status: "redirecting" });
         router.replace("/login");
         return;
       }
@@ -62,7 +70,7 @@ export function SourceReveal({ appealId }: { appealId: number }) {
         시각을 확인할 수 있습니다. 심판에 정말 필요할 때만 펼치세요.
       </p>
 
-      {state.status !== "revealed" && (
+      {state.status !== "revealed" && state.status !== "redirecting" && (
         <button
           type="button"
           data-testid="appeal-source-reveal-button"
@@ -71,6 +79,10 @@ export function SourceReveal({ appealId }: { appealId: number }) {
         >
           {state.status === "revealing" ? "펼치는 중..." : "소스 펼치기"}
         </button>
+      )}
+
+      {state.status === "redirecting" && (
+        <p data-testid="appeal-source-redirecting">세션이 만료되어 로그인 화면으로 이동합니다...</p>
       )}
 
       {state.status === "error" && (

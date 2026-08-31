@@ -12,6 +12,7 @@ import type { AppealStatus, AppealSummary } from "./types";
 
 export type AppealListState =
   | { status: "loading" }
+  | { status: "redirecting" }
   | { status: "loaded"; appeals: AppealSummary[] }
   | { status: "error" };
 
@@ -36,6 +37,10 @@ export function useAppealList(
         if (cancelled) return;
 
         if (res.status === 401) {
+          // use-appeal-detail.ts·source-reveal.tsx와 같은 코드리뷰 지적 —
+          // state를 "loading"에 남겨둔 채 이동만 시작하면, 내비게이션이
+          // 늦거나 실패했을 때 화면이 그 상태에 갇힌다.
+          setState({ status: "redirecting" });
           router.replace("/login");
           return;
         }
