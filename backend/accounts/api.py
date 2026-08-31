@@ -12,6 +12,7 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from .middleware import jwt_auth
+from .operators import OperatorInvariantError, assert_can_use_social_login
 from .models import DeveloperProfile, SocialAccount, SponsorProfile
 from .sanitize import sanitize_free_text
 from .schemas import (
@@ -54,6 +55,14 @@ def social_login(request: HttpRequest, provider: str, payload: SocialLoginIn):
     )
     if social_account is not None:
         user = social_account.user
+        # 서로소 불변식의 반대 방향(#42, ADR-0018). 부트스트랩 명령만 막으면 이미
+        # Operator 인 계정에 소셜 계정을 붙여 돌아 들어올 수 있다. Operator 가
+        # 토큰을 얻지 못해야 `DeveloperProfile` 경로에도 닿지 못하고, 그래야 자기
+        # 사건 심판이 구조적으로 불가능하다는 성질이 유지된다.
+        try:
+            assert_can_use_social_login(user)
+        except OperatorInvariantError as exc:
+            raise HttpError(403, str(exc)) from exc
     else:
         User = get_user_model()
         user = User(
