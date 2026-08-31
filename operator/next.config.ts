@@ -13,6 +13,20 @@ const nextConfig: NextConfig = {
   outputFileTracingRoot: path.join(__dirname, ".."),
   transpilePackages: ["@laurio/bff-shared"],
   reactStrictMode: true,
+  webpack: (config, { dev }) => {
+    // frontend/next.config.ts와 같은 이유 — dev 컨테이너가 소스를 바인드
+    // 마운트로 받는데(docker/compose.dev.yaml), Windows 호스트 → Linux 컨테이너
+    // 바인드 마운트에서는 기본 fs 이벤트 감시가 파일 변경을 놓칠 수 있어
+    // 폴링으로 강제한다.
+    if (dev) {
+      config.watchOptions = {
+        ...config.watchOptions,
+        poll: 1000,
+        aggregateTimeout: 300,
+      };
+    }
+    return config;
+  },
 };
 
 export default nextConfig;
