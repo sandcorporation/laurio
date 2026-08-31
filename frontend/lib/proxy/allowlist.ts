@@ -26,6 +26,9 @@
 // contests·submissions 접두어 아래 걸려 있다(backend/awards/api.py,
 // backend/handovers/api.py, backend/appeals/api.py 확인). 그래서 별도 항목이
 // 필요 없다 — contests·submissions 접두어가 이미 덮는다.
+// `/api/operator/*` 도 여기 없다(#43). 운영자 표면은 별도 앱이 자기 BFF 로 친다 —
+// 공개 프론트가 그 경로를 프록시할 이유가 없고, 열어두면 참가자용 BFF 가 운영자
+// 세션을 실어 나를 수 있는 통로가 된다. `/api/internal/*` 을 막는 것과 같은 이유다.
 export const BACKEND_PROXY_ALLOWLIST: readonly string[] = [
   "/api/accounts",
   "/api/verification",

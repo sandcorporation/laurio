@@ -14,6 +14,7 @@
 """
 
 import pytest
+from django.core.cache import caches
 
 from payments.adapters import FakePGAdapter
 from storage.adapters.fake import FakeStorageAdapter
@@ -31,3 +32,21 @@ def _reset_fake_pg_adapter():
     FakePGAdapter._final_refund_status.clear()
     yield
     FakePGAdapter._final_refund_status.clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_operator_sessions():
+    """Operator 세션은 실제 Redis 에 산다(#43) — DB 처럼 롤백되지 않는다.
+
+    `@pytest.mark.django_db` 가 되돌리는 것은 Postgres 트랜잭션뿐이다. 세션은
+    Redis 에 그대로 남아 다음 테스트가 남의 로그인 상태를 물려받는다 — 하필
+    "로그아웃하면 그 자리에서 막힌다"를 검증하는 테스트들이 그 오염에 가장 약하다.
+    매 테스트 전후로 세션 캐시를 비운다.
+
+    별도 DB 인덱스(settings.SESSION_REDIS_URL 의 /1)를 쓰므로 Celery 브로커의
+    키를 지우지 않는다.
+    """
+
+    caches["sessions"].clear()
+    yield
+    caches["sessions"].clear()

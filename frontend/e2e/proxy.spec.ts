@@ -44,6 +44,17 @@ test.describe("허용목록 — 기본은 거부", () => {
     }
   });
 
+
+  test("운영자 표면은 프록시로 도달할 수 없다", async ({ request }) => {
+    // 운영자 세션은 별도 앱의 BFF 가 들고 있다(#43). 공개 프론트가 이 경로를
+    // 프록시하면 참가자용 BFF 가 운영자 권한을 실어 나르는 통로가 된다.
+    for (const path of ["/api/backend/operator/me", "/api/backend/operator/login"]) {
+      const res = await request.get(path);
+      expect(res.status(), path).toBe(404);
+      expect(await res.text(), path).toContain("허용되지 않은 경로입니다");
+    }
+  });
+
   test("백엔드에 새 엔드포인트가 생겨도 허용목록에 없으면 노출되지 않는다", async ({
     request,
   }) => {

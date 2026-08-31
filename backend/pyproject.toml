@@ -12,7 +12,10 @@ dependencies = [
     "psycopg[binary]>=3.2",
     "pyjwt>=2.13.0",
     "python-dotenv>=1.2.3",
-    "celery>=5.4",
+    # celery[redis] 로 선언한다 — extra 없이 celery 만 넣으면 redis 트랜스포트
+    # 드라이버가 설치되지 않아, redis:// 브로커를 쓰는 staging·prod 의 worker·beat 가
+    # 붙지 못한다(#40). Operator 세션도 같은 패키지를 쓴다(#43).
+    "celery[redis]>=5.4",
     "requests>=2.32",
     # staging/prod 배포용 WSGI 서버(#23). `manage.py runserver`는 Django 자신이 문서화한
     # 대로 개발 전용이라 dev compose에서만 쓴다.

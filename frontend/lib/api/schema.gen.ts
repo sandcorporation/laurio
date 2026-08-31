@@ -1050,6 +1050,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operator/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Operator Login
+         * @description 세션을 연다. `Origin` 검증은 미들웨어가 이미 통과시킨 뒤다.
+         *
+         *     `authenticate()` 는 비활성 계정에 대해 None 을 돌려준다(ModelBackend 의
+         *     `user_can_authenticate`) — 그래서 여기서 따로 막지 않는다.
+         */
+        post: operations["accounts_operator_api_operator_login"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Operator Logout
+         * @description 세션을 지운다 — 다음 요청부터 그 자리에서 막힌다.
+         */
+        post: operations["accounts_operator_api_operator_logout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Operator Me */
+        get: operations["accounts_operator_api_operator_me"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/payments": {
         parameters: {
             query?: never;
@@ -1953,6 +2013,22 @@ export interface components {
          * @enum {string}
          */
         NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "new_contest_in_category";
+        /** OperatorLoginIn */
+        OperatorLoginIn: {
+            /** Password */
+            password: string;
+            /** Username */
+            username: string;
+        };
+        /** OperatorOut */
+        OperatorOut: {
+            /** Id */
+            id: number;
+            /** Is Superuser */
+            is_superuser: boolean;
+            /** Username */
+            username: string;
+        };
         /** PagedContestOut */
         PagedContestOut: {
             /** Count */
@@ -3600,6 +3676,81 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NotificationOut"][];
+                };
+            };
+        };
+    };
+    accounts_operator_api_operator_login: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OperatorLoginIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorOut"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    accounts_operator_api_operator_logout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    accounts_operator_api_operator_me: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorOut"];
                 };
             };
         };

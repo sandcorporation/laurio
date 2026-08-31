@@ -166,6 +166,9 @@ MIDDLEWARE = [
     # runserver의 자체 정적 서빙(DEBUG=True)과 충돌하지 않는다.
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    # 운영자 경로의 변경 요청에 Origin 검증을 건다(#43, ADR-0016 의 성립 조건).
+    # 세션 미들웨어 뒤에 두어 request.scheme·get_host() 가 준비된 상태에서 본다.
+    "core.operator_auth.OperatorOriginMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -210,6 +213,39 @@ DATABASES = {
         "PORT": _env("POSTGRES_PORT", _DEV_DB_PORT),
     }
 }
+
+# Operator 세션 (#43, ADR-0018). 세션 레코드를 지우는 것이 곧 즉시 무효화이므로
+# 별도의 토큰 블랙리스트를 두지 않는다 — 돈을 움직이는 권한은 즉시 빼앗을 수 있어야
+# 한다. 아래 기본값은 호스트에서 `uv run pytest` 를 돌릴 때만 쓰이고, 컨테이너
+# 안에서는 compose 가 SESSION_REDIS_URL 을 직접 주입한다(DB 와 같은 구조).
+#
+# DB 인덱스를 1 로 둔다 — Celery 브로커가 0 을 쓰므로(compose 의 CELERY_BROKER_URL)
+# 같은 인스턴스를 공유하면서도 키가 섞이지 않는다.
+_DEV_REDIS_PORT = _env("LAURIO_REDIS_PORT", "16379")
+SESSION_REDIS_URL = _env("SESSION_REDIS_URL", f"redis://127.0.0.1:{_DEV_REDIS_PORT}/1")
+
+CACHES = {
+    "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"},
+    "sessions": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": SESSION_REDIS_URL,
+    },
+}
+
+SESSION_ENGINE = "django.contrib.sessions.backends.cache"
+SESSION_CACHE_ALIAS = "sessions"
+# Operator 세션 전용 이름 — 참가자 세션이라는 개념 자체가 없으므로(참가자는 JWT 를
+# 쿠키에 담아 BFF 가 들고 있다, ADR-0016) 이 쿠키는 언제나 Operator 의 것이다.
+SESSION_COOKIE_NAME = "laurio_operator_session"
+# Django 기본값과 같지만 명시한다 — 이 쿠키가 돈을 움직이는 권한을 들고 있어서,
+# 기본값이 조용히 바뀌는 것에 기대면 안 된다.
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+
+# 운영자 앱의 오리진. 배포 환경에서는 명시적으로 준다 — Host 헤더 유도보다 강하고
+# 리버스 프록시 구성에 흔들리지 않는다. 비어 있으면 요청이 실제로 도착한 주소로
+# 조립한다(dev·테스트).
+OPERATOR_WEB_ORIGIN = _env("LAURIO_OPERATOR_ORIGIN", "")
 
 # 스토리지 어댑터 (ADR-0005, ADR-0007): "fake"가 기본값이라 아무것도 설정하지 않아도
 # 테스트·CI는 MinIO 없이 돈다. dev compose가 backend 컨테이너에만 STORAGE_BACKEND=s3

@@ -103,6 +103,8 @@ x-backend-env: &backend-env
   INTERNAL_API_BASE_URL: http://backend:8000
 
   # --- Celery (ADR-0003) ---
+  # Operator 세션(#43, ADR-0018) — 브로커와 같은 인스턴스, 다른 DB 인덱스.
+  SESSION_REDIS_URL: redis://redis:6379/1
   CELERY_BROKER_URL: redis://redis:6379/0
   CELERY_RESULT_BACKEND: redis://redis:6379/0
 

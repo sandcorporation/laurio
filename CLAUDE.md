@@ -6,7 +6,7 @@ Python + uv, Django + django-ninja, PostgreSQL. 백엔드는 `backend/`, 컨테�
 
 ```bash
 docker compose -f docker/compose.dev.yaml up          # 전체 스택
-docker compose -f docker/compose.dev.yaml up -d db    # 테스트용 DB만
+docker compose -f docker/compose.dev.yaml up -d db redis   # 테스트용 인프라
 cd backend && uv run pytest                           # 테스트
 ```
 
@@ -16,6 +16,7 @@ cd backend && uv run pytest                           # 테스트
 | --- | --- | --- | --- |
 | PostgreSQL | `55432` | 5432 | `LAURIO_DB_PORT` |
 | backend | `58000` | 8000 | `LAURIO_API_PORT` |
+| Redis | `16379` | 6379 | `LAURIO_REDIS_PORT` |
 
 호스트에서 `uv run pytest`를 돌릴 때 붙는 DB 포트 기본값도 `LAURIO_DB_PORT`를 따라간다
 (`backend/config/settings.py`). 컨테이너 안에서는 compose가 `POSTGRES_*`를 직접 주입한다.
@@ -42,6 +43,9 @@ cd backend && uv run pytest                           # 테스트
 두 파일 모두 `INTERNAL_API_TOKEN`이 없으면 부팅 자체가 거부된다.
 
 ## 테스트
+
+Operator 세션은 실제 Redis 에 산다(#43, ADR-0018) — 그래서 테스트에도 `redis` 가
+필요하다. DB 와 같은 구조다: 인프라는 compose 가 주고 pytest 는 호스트에서 붙는다.
 
 **HTTP가 유일한 시임이다.** 테스트는 마운트된 django-ninja API를 전체 요청 스택(URLconf +
 미들웨어 + 라우터)을 통해 호출한다. 모델 메서드나 서비스 클래스를 직접 부르지 않고, 라우터를

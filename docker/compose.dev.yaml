@@ -34,6 +34,28 @@ services:
       timeout: 3s
       retries: 20
 
+  redis:
+    # Operator 세션 저장소(#43, ADR-0018). staging·prod 에는 Celery 브로커용 redis 가
+    # 이미 있어 세션도 같은 인스턴스를 쓴다 — dev 에만 없어서 여기 붙인다.
+    #
+    # `--appendonly yes` 가 핵심이다. redis:7-alpine 은 AOF 가 기본으로 꺼져 있어서,
+    # 켜지 않으면 컨테이너 재시작이 곧 전원 로그아웃이 된다. 세션을 지우는 것이
+    # 즉시 무효화 수단인데(별도 블랙리스트를 두지 않는 이유다), 재시작이 그것을
+    # 구분 없이 해버리면 운영자가 조사 중에 튕겨 나간다.
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      # 호스트에서 uv run pytest 를 돌릴 때 붙는다 — DB 와 같은 이유다.
+      # 표준 6379 를 비켜 잡는 것도 같은 이유다(CLAUDE.md).
+      - "${LAURIO_REDIS_PORT:-16379}:6379"
+    volumes:
+      - laurio-dev-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
   # 스토리지 어댑터(ADR-0005, ADR-0007)의 dev 바인딩. S3 호환 API라 앱은 STORAGE_BACKEND=s3
   # 그대로 두고 엔드포인트만 여기를 가리킨다. 버킷은 항상 private — 이 스택 어디에도
   # 버킷을 public으로 만들거나 정책을 고치는 코드는 없다.
@@ -80,6 +102,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      redis:
+        condition: service_healthy
       # 이게 없으면 backend가 laurio-dev 버킷이 아직 없는 상태로 뜰 수 있고,
       # 첫 업로드 PUT이 NoSuchBucket으로 실패한다.
       minio-init:
@@ -91,6 +115,8 @@ services:
       DJANGO_DEBUG: "true"
       DJANGO_SECRET_KEY: dev-only-insecure-key
       DJANGO_ALLOWED_HOSTS: "*"
+      # Operator 세션(#43). Celery 브로커가 db 0 을 쓰므로 세션은 1 을 쓴다.
+      SESSION_REDIS_URL: redis://redis:6379/1
       STORAGE_BACKEND: s3
       STORAGE_BUCKET: laurio-dev
       STORAGE_ENDPOINT_URL: http://minio:9000
@@ -170,6 +196,7 @@ services:
              pnpm dev"
 
 volumes:
+  laurio-dev-redis:
   laurio-dev-db:
   laurio-dev-web-node-modules:
   laurio-dev-web-next:
