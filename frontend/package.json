@@ -11,6 +11,7 @@
     "generate:api": "node scripts/generate-api-types.mjs"
   },
   "dependencies": {
+    "@laurio/bff-shared": "workspace:*",
     "next": "^15.5.0",
     "openapi-fetch": "^0.13.8",
     "react": "^19.1.0",

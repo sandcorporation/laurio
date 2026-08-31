@@ -17,6 +17,8 @@ cd backend && uv run pytest                           # 테스트
 | PostgreSQL | `55432` | 5432 | `LAURIO_DB_PORT` |
 | backend | `58000` | 8000 | `LAURIO_API_PORT` |
 | Redis | `16379` | 6379 | `LAURIO_REDIS_PORT` |
+| 공개 앱(`frontend/`) | `53000` | 3000 | `LAURIO_WEB_PORT` |
+| 운영자 앱(`operator/`, #63) | `53001` | 3000 | `LAURIO_OPERATOR_WEB_PORT` |
 
 호스트에서 `uv run pytest`를 돌릴 때 붙는 DB 포트 기본값도 `LAURIO_DB_PORT`를 따라간다
 (`backend/config/settings.py`). 컨테이너 안에서는 compose가 `POSTGRES_*`를 직접 주입한다.
@@ -110,9 +112,29 @@ pytest`가 그 DB에 직접 붙는다 — 컨테이너를 거칠 이유가 없�
 
 ## 프론트엔드
 
-Next.js + React. `frontend/`. 테스트 시임은 실행 중인 Next 앱 하나뿐이다(ADR-0017) —
-`docker compose -f docker/compose.dev.yaml up` 으로 스택을 띄운 뒤 `pnpm --dir frontend
-test` 로 Playwright 가 그걸 친다. `pnpm --dir frontend typecheck` 는 스택 없이 돈다.
+Next.js + React. 저장소 루트가 pnpm 워크스페이스다(운영자 앱 04 #62, ADR-0021) —
+락파일은 루트의 `pnpm-lock.yaml` 하나뿐이고, 공개 앱(`frontend/`, 위치·패키지 이름
+변경 없음)·운영자 앱(`operator/`)·공유 BFF 패키지(`packages/bff-shared`, 경로
+순회 방어·Origin 검증·허용목록 검사 함수·백엔드 전달 기계만 담는다 — 허용목록의
+**내용**은 앱마다 자기 파일에 남는다)가 그 멤버다. 명령은 그대로다 — 워크스페이스가
+생겨도 `pnpm --dir <앱>` 호출법은 바뀌지 않는다.
+
+테스트 시임은 **앱마다 하나**다(ADR-0021, ADR-0017 개정) — 앱이 둘이어도 그 아래로
+내려가는 컴포넌트 테스트·모킹은 없다. `docker compose -f docker/compose.dev.yaml up`
+으로 두 앱이 다 뜬 스택을 띄운 뒤 `pnpm --dir frontend test` 로 Playwright 가 프로젝트
+둘로 두 앱을 한 번에 친다(공개 앱 스펙은 `frontend/e2e/*.spec.ts`, 운영자 앱 스펙은
+`frontend/e2e/operator/*.spec.ts` — `playwright.config.ts` 가 프로젝트마다 다른
+`testDir`·`baseURL` 을 준다). `LAURIO_E2E_BASE_URL`/`LAURIO_OPERATOR_E2E_BASE_URL`
+로 각 프로젝트의 `baseURL` 을 바꿀 수 있다(기본값은 위 포트 표와 같다).
+`pnpm --dir frontend typecheck`/`pnpm --dir operator typecheck` 는 스택 없이 돈다.
+
+**운영자 앱은 인증의 모양이 다르다**(#63, ADR-0018/0019). 공개 앱은 쿠키의 JWT를
+`Authorization` 헤더로 바꿔 달지만, 운영자 앱은 Django 세션 쿠키
+(`laurio_operator_session`, `backend/config/settings.py`)를 이름으로만 골라
+중계한다 — 브라우저의 Cookie 헤더를 통째로 넘기지 않는다. e2e 가 로그인할
+Operator 계정은 `backend/accounts/management/commands/seed_e2e_operator.py`
+(멱등)로 만든다 — 사람이 쓰는 `create_operator` 부트스트랩 명령과 달리 반복
+실행에 안전하다.
 
 **API 타입은 손으로 쓰지 않는다.** `frontend/lib/api/schema.gen.ts` 는
 `pnpm --dir frontend generate:api`(`frontend/scripts/generate-api-types.mjs`)가

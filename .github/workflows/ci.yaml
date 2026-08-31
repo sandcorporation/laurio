@@ -278,11 +278,20 @@ jobs:
       - name: Bring up the dev stack
         run: docker compose -f docker/compose.dev.yaml up -d --build
 
-      - name: Wait for the app to answer
+      - name: Wait for the public app to answer
         run: |
           curl --fail --silent --show-error \
                --retry 60 --retry-delay 3 --retry-all-errors --retry-connrefused \
                http://127.0.0.1:53000/healthz
+
+      # 운영자 앱(#63, ADR-0021) — 같은 dev compose 스택에 붙는 두 번째 앱. 한
+      # 스위트가 프로젝트 둘로 둘 다 친다(playwright.config.ts) — 이 앱이 뜨지
+      # 않으면 그 프로젝트 전체가 실패한다.
+      - name: Wait for the operator app to answer
+        run: |
+          curl --fail --silent --show-error \
+               --retry 60 --retry-delay 3 --retry-all-errors --retry-connrefused \
+               http://127.0.0.1:53001/healthz
 
       # FE-04/FE-05(#29·#30) SSR 테스트가 `frontend/e2e/lib/seed.ts` 로 호스트에서
       # `uv run manage.py seed_e2e_contests` 를 돌려 실제 Contest 를 dev DB에 심는다
@@ -311,24 +320,34 @@ jobs:
         working-directory: frontend
         run: pnpm install --frozen-lockfile
 
-      - name: Typecheck
+      - name: Typecheck (public app)
         working-directory: frontend
         run: pnpm typecheck
 
+      - name: Typecheck (operator app)
+        working-directory: operator
+        run: pnpm typecheck
+
       # next build 만 잡는 오류가 있다(라우트 핸들러 시그니처, output: "standalone"
-      # 산출물 등). 여기서 안 돌리면 FE-13 의 배포 시점까지 미검출로 남는다.
-      - name: Build
+      # 산출물 등). 여기서 안 돌리면 배포 시점까지 미검출로 남는다. 두 앱 다 돈다 —
+      # #63부터 두 앱이 각자 standalone 산출물을 만든다.
+      - name: Build (public app)
         working-directory: frontend
+        run: pnpm build
+
+      - name: Build (operator app)
+        working-directory: operator
         run: pnpm build
 
       - name: Install Playwright browser
         working-directory: frontend
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Run e2e against the running app
+      - name: Run e2e against the running apps
         working-directory: frontend
         env:
           LAURIO_E2E_BASE_URL: http://127.0.0.1:53000
+          LAURIO_OPERATOR_E2E_BASE_URL: http://127.0.0.1:53001
         run: pnpm test
 
       - name: Dump stack logs on failure

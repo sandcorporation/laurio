@@ -228,12 +228,15 @@ services:
       # 이 프로젝트가 이미 쓴다. 그래서 비켜 잡았고 환경변수로 바꿀 수 있다.
       - "${LAURIO_WEB_PORT:-53000}:3000"
     volumes:
-      # 소스를 마운트해 수정이 즉시 반영되게 한다. node_modules 는 이미지 것을 쓰도록
-      # 익명 볼륨으로 가린다 — 호스트(Windows)와 이미지(리눅스)의 바이너리가 다르다.
-      - ../frontend:/app
-      # 둘 다 이름 있는 볼륨이다 — 익명이면 컨테이너를 다시 만들 때 옛 것이
-      # 승계되는데, 이름이 없으면 그것만 골라 지울 수가 없어 down -v(= dev DB·MinIO
-      # 소실)까지 가야 한다. 이름이 있으면 하나만 버리고 나머지는 지킬 수 있다:
+      # 저장소 전체를 마운트한다(운영자 앱 04 #62부터) — pnpm 워크스페이스의
+      # 락파일·workspace 정의가 저장소 루트에 있고, frontend/가 그 워크스페이스
+      # 멤버 중 하나라서 frontend/만 떼어 마운트하면 `pnpm install`이 워크스페이스
+      # 형태를 볼 수 없다. node_modules 는 이미지 것을 쓰도록 이름 있는 볼륨으로
+      # 가린다 — 호스트(Windows)와 이미지(리눅스)의 바이너리가 다르다.
+      - ..:/app
+      # 이름 있는 볼륨이다 — 익명이면 컨테이너를 다시 만들 때 옛 것이 승계되는데,
+      # 이름이 없으면 그것만 골라 지울 수가 없어 down -v(= dev DB·MinIO 소실)까지
+      # 가야 한다. 이름이 있으면 하나만 버리고 나머지는 지킬 수 있다:
       #
       #   docker compose -f docker/compose.dev.yaml rm -sf frontend
       #   docker volume rm laurio-dev_laurio-dev-web-next
@@ -243,8 +246,14 @@ services:
       # .next 볼륨에 남아 next dev 가 그 위에서 돌다 MODULE_NOT_FOUND 로 500 을
       # 낸다(실제로 겪었다). 프로덕션 빌드 확인은 CI 가 하고, 로컬에서 필요하면
       # 일회용 컨테이너에서 돌린다.
+      #
+      # 워크스페이스 멤버마다 자기 node_modules(심볼릭 링크 모음)를 갖는다 —
+      # 루트 것 하나만 가리면 frontend/·packages/bff-shared/ 밑에는 여전히 호스트
+      # 바인드 마운트가 그대로 남아 옛(또는 없는) node_modules 가 노출된다.
       - laurio-dev-web-node-modules:/app/node_modules
-      - laurio-dev-web-next:/app/.next
+      - laurio-dev-web-frontend-node-modules:/app/frontend/node_modules
+      - laurio-dev-web-shared-node-modules:/app/packages/bff-shared/node_modules
+      - laurio-dev-web-next:/app/frontend/.next
       # node_modules 볼륨은 처음 만들어질 때 딱 한 번만 이미지 내용으로 채워진다
       # (도커의 명명된 볼륨 규칙). 그래서 이미 떠 있는 스택에 `pnpm add` 로 의존성을
       # 새로 추가하고 `up -d --build` 만 돌리면, 이미지는 새 패키지를 담고 있어도
@@ -259,14 +268,90 @@ services:
     # 정리할 때 TTY 확인을 요구해(ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY) 실제로
     # 막혔다. 이 컨테이너는 TTY 없이 백그라운드로 뜬다. `pnpm dev` 자체에는 걸지
     # 않는다 — Next 의 CI 분기 동작까지 바꿀 이유는 없다.
+    #
+    # install은 워크스페이스 루트(/app)에서, dev는 이 앱 디렉터리(이미지의
+    # WORKDIR인 /app/frontend, frontend.Dockerfile 참고)에서 돈다.
+    #
+    # **`--filter laurio-frontend...`를 반드시 쓴다**(코드리뷰 지적, 두 번 재현된
+    # 사고). 필터 없는 평범한 `pnpm install`은 워크스페이스 전체(operator/까지)를
+    # 설치한다 — 이 컨테이너는 `/app/operator/node_modules`를 볼륨으로 가리지
+    # 않으므로, 그 설치가 호스트에 바인드 마운트된 `operator/node_modules`에
+    # 리눅스 산출물을 그대로 쓴다. `operator` 서비스도 대칭으로
+    # `/app/frontend/node_modules`를 가리지 않아 반대 방향으로 같은 사고가
+    # 난다 — 실제로 스택을 띄운 뒤 호스트에서 `pnpm install --frozen-lockfile`을
+    # 돌리면 "Already up to date"를 찍으면서도 `playwright: not found`가 나는
+    # 것으로 재현된다(호스트가 기대하는 Windows 바이너리가 컨테이너의 리눅스
+    # 산출물로 조용히 덮인 것이다 — pnpm의 최신성 판정은 락파일 해시만 보지
+    # 실제 바이너리 플랫폼은 보지 않는다). `--filter <패키지>...`는 그 패키지와
+    # 그 워크스페이스 의존성(laurio-frontend는 @laurio/bff-shared)만 설치 대상에
+    # 넣는다 — operator/는 필터링 대상 밖이라 이 컨테이너가 그 디렉터리를 아예
+    # 건드리지 않는다(`pnpm install --filter laurio-frontend... --frozen-lockfile`
+    # 을 직접 돌려 "Scope: 2 of 4 workspace projects"로 확인했다). 두 컨테이너가
+    # 서로의 node_modules를 볼륨으로 가리는 것보다 이 편이 근본적이다 — 애초에
+    # 쓰지 않는 디렉터리를 아예 쓰지 않게 만든다.
+    #
+    # `--force`는 그대로 남긴다 — 이 서비스 자신의 node_modules 볼륨이 어떤
+    # 이유로든(중단된 install, 이미지 교체 등) 반쪽짜리 상태로 남아 있어도 매번
+    # 완전히 다시 링크해 같은 결과로 수렴시킨다(#63 커밋 메시지에 남긴 최초
+    # 재현). `--filter`가 사고의 근본 원인(다른 앱 디렉터리를 건드리는 것)을
+    # 막고, `--force`는 이 앱 자신의 디렉터리가 스스로 망가졌을 때의 복원력이다
+    # — 서로 다른 문제를 막는다.
     command: >
-      sh -c "CI=true pnpm install --frozen-lockfile &&
-             pnpm dev"
+      sh -c "cd /app && CI=true pnpm install --filter laurio-frontend... --frozen-lockfile --force &&
+             cd /app/frontend && pnpm dev"
+
+  # 운영자 앱(#63, ADR-0019/0021) — 공개 앱과 다른 오리진으로 뜬다. 같은
+  # 워크스페이스 멤버라서 frontend 서비스와 거의 같은 모양이다: 저장소 전체를
+  # 마운트하고, 워크스페이스 루트에서 install한 뒤 operator/에서 dev를 돈다.
+  operator:
+    build:
+      context: ..
+      dockerfile: docker/operator.Dockerfile
+      target: dev
+    depends_on:
+      backend:
+        condition: service_started
+    environment:
+      LAURIO_API_BASE_URL: http://backend:8000
+      # dev에서는 비워 둔다 — backend/config/settings.py의 OPERATOR_WEB_ORIGIN도
+      # dev에서는 비어 있고(IS_DEPLOYED_ENVIRONMENT가 아니라서 부팅 가드가 걸리지
+      # 않는다), 양쪽 다 비어 있으면 둘 다 같은 값(Host 헤더로 유도한 도착지
+      # 오리진)을 독립적으로 계산해 정확히 맞아떨어진다(lib/backend.ts의
+      # operatorOrigin 주석 참고). 배포 환경(compose.staging/prod.yaml)에서는
+      # 백엔드의 LAURIO_OPERATOR_ORIGIN과 반드시 같은 값을 준다 — #70의 몫이다.
+    ports:
+      # 공개 앱(53000)과 겹치지 않는 새 포트. 이 머신에서 이미 쓰는 포트를
+      # 피했다(디스패치 지침) — 기본값은 CLAUDE.md 포트 표와 같다.
+      - "${LAURIO_OPERATOR_WEB_PORT:-53001}:3000"
+    volumes:
+      - ..:/app
+      - laurio-dev-operator-node-modules:/app/node_modules
+      - laurio-dev-operator-app-node-modules:/app/operator/node_modules
+      - laurio-dev-operator-shared-node-modules:/app/packages/bff-shared/node_modules
+      - laurio-dev-operator-next:/app/operator/.next
+      - laurio-dev-operator-pnpm-store:/pnpm/store
+    # frontend 서비스 command 주석 참고 — `--filter laurio-operator...`가 이
+    # 컨테이너의 install이 frontend/node_modules를 건드리지 않게 막는다(이
+    # 서비스가 그 디렉터리를 볼륨으로 가리지 않으므로, 필터 없이는 호스트에
+    # 바인드 마운트된 frontend/node_modules에 리눅스 산출물을 그대로 쓴다 —
+    # 코드리뷰가 호스트에서 직접 재현한 사고). `--force`는 이 앱 자신의
+    # node_modules 볼륨이 반쪽짜리 상태로 남아 있을 때의 복원력으로 별개로
+    # 남긴다.
+    command: >
+      sh -c "cd /app && CI=true pnpm install --filter laurio-operator... --frozen-lockfile --force &&
+             cd /app/operator && pnpm dev"
 
 volumes:
   laurio-dev-redis:
   laurio-dev-db:
   laurio-dev-web-node-modules:
+  laurio-dev-web-frontend-node-modules:
+  laurio-dev-web-shared-node-modules:
   laurio-dev-web-next:
   laurio-dev-web-pnpm-store:
+  laurio-dev-operator-node-modules:
+  laurio-dev-operator-app-node-modules:
+  laurio-dev-operator-shared-node-modules:
+  laurio-dev-operator-next:
+  laurio-dev-operator-pnpm-store:
   laurio-dev-minio:

@@ -2,6 +2,7 @@
 //
 // 브라우저 → 이 라우트 핸들러 → Django로 흐른다. 파일은 하나지만 통과시킬 경로는
 // lib/proxy/allowlist.ts의 명시적 허용목록으로만 정해진다 — 기본은 거부다.
+import { sanitizeBackendPath } from "@laurio/bff-shared";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
@@ -9,7 +10,6 @@ import { clearSessionCookies, setSessionCookies } from "@/lib/auth/cookies";
 import { assertSameOrigin } from "@/lib/auth/origin";
 import { isAllowedBackendPath } from "@/lib/proxy/allowlist";
 import { forwardToBackend } from "@/lib/proxy/forward";
-import { sanitizeBackendPath } from "@/lib/proxy/path-safety";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +18,7 @@ const NOT_ALLOWED_RESPONSE = { detail: "허용되지 않은 경로입니다." } 
 async function handle(request: NextRequest, path: string[]): Promise<NextResponse> {
   // 세그먼트 검사 + 재조립이 허용목록 검사보다 먼저다 — 인코딩된 슬래시(%2f)로
   // 세그먼트 안에 경로 순회를 숨기는 우회를 여기서 원천 차단한다
-  // (lib/proxy/path-safety.ts 상단 주석에 재현 경로가 있다). sanitizeBackendPath가
+  // (packages/bff-shared/src/path-safety.ts 상단 주석에 재현 경로가 있다). sanitizeBackendPath가
   // 돌려주는 문자열이 이후 허용목록 검사와 실제 fetch 양쪽에 동일하게 쓰인다 —
   // "검사한 것과 실행한 것이 다르다"는 이 버그의 근본 원인 자체를 구조로 막는다.
   const backendPath = sanitizeBackendPath(path);
