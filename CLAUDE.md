@@ -44,6 +44,22 @@ cd backend && uv run pytest                           # 테스트
 `POST /api/internal/tick`을 수동으로 쏴서 21일 시나리오를 몇 초에 재현할 수 있다 —
 두 파일 모두 `INTERNAL_API_TOKEN`이 없으면 부팅 자체가 거부된다.
 
+**운영자 앱(`operator/`)도 두 compose 파일에 뜬다**(#70). 공개 앱(`frontend`)과
+같은 3스테이지 이미지(`docker/operator.Dockerfile` — dev/builder/runner)를 쓰고,
+배포 compose는 `target: runner`를 명시적으로 고른다. 필수 설정은
+`LAURIO_OPERATOR_ORIGIN`과 `LAURIO_API_BASE_URL`— 배포 환경에서 둘 중 하나라도
+비면 `operator/instrumentation.ts`가 첫 요청을 받기 전에 `process.exit(1)`로
+프로세스를 끊는다(`throw`만으로는 Next가 그 에러를 삼켜 컨테이너가 Up인 채로
+이유 없는 500만 낸다는 게 공개 앱 쪽에서 이미 확인된 사실이다).
+
+**`LAURIO_OPERATOR_ORIGIN`은 백엔드와 운영자 앱이 같은 `.env.staging`/`.env.prod`
+줄 하나를 나눠 읽는 값이다** — 백엔드의 `OperatorOriginMiddleware`가 기대하는
+오리진과 운영자 앱이 나가는 요청에 붙이는 오리진이 어긋나면 로그인을 포함한
+모든 운영자 변경 요청이 조용히 403이 된다(fail-closed라 보안 구멍은 아니지만
+원인을 찾기 어렵다 — 이 저장소가 이미 두 번 겪은 실패). 공개 앱의 오리진과
+반드시 다른 서브도메인을 쓴다 — 같은 오리진을 공유하면 공개 앱이 뚫렸을 때
+운영자 세션 쿠키까지 노출될 길이 생긴다.
+
 **`appeals` 마이그레이션이 다시 만들어졌다**(#44). 배포 이력이 없어 단일 initial 로
 정리했는데, 옛 `0001_initial` 을 이미 적용한 dev DB 는 Django 가 "적용 완료" 로
 보고 조용히 지나간다 — 테이블이 없다는 오류가 한참 뒤 런타임에 난다. 그 시점의

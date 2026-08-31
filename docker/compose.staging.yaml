@@ -238,6 +238,37 @@ services:
       # 127.0.0.1로 좁히지 않는다.
       - "${LAURIO_WEB_PORT:-3000}:3000"
 
+  # 운영자 앱 BFF(#70, ADR-0019/0021). operator.Dockerfile의 runner 스테이지 —
+  # frontend 서비스와 같은 산출물 모양(standalone, `node server.js`)이고 같은
+  # 부팅 가드 원칙을 따른다(operator/instrumentation.ts) — LAURIO_OPERATOR_ORIGIN·
+  # LAURIO_API_BASE_URL이 비어 있으면 이 컨테이너를 그 자리에서 죽인다.
+  #
+  # **LAURIO_OPERATOR_ORIGIN을 위 x-backend-env 앵커의 backend가 요구하는 것과
+  # 정확히 같은 환경변수에서 읽는다.** 두 서비스가 `.env.staging`의 같은 줄을
+  # 그대로 나눠 읽으므로, 이 값이 서로 다른 곳에서 따로 채워져 어긋나는 사고
+  # 자체가 구조적으로 불가능하다 — 이 티켓의 핵심 위험(오리진 정합성)에 대한
+  # compose 수준의 방어다. e2e(frontend/e2e/operator/proxy.spec.ts)가 런타임에서
+  # 같은 사실을 한 번 더 증명한다.
+  operator:
+    build:
+      context: ..
+      dockerfile: docker/operator.Dockerfile
+      target: runner
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+    environment:
+      LAURIO_DEPLOYMENT_TARGET: staging
+      LAURIO_API_BASE_URL: http://backend:8000
+      # backend의 OPERATOR_WEB_ORIGIN(위 x-backend-env)과 같은 변수, 같은 값.
+      LAURIO_OPERATOR_ORIGIN: ${LAURIO_OPERATOR_ORIGIN:?LAURIO_OPERATOR_ORIGIN 을 설정해야 한다}
+    ports:
+      # 공개 앱(LAURIO_WEB_PORT)과 겹치지 않는 별도 포트. 운영자·QA가 서브
+      # 호스트에서 브라우저로 바로 들어간다 — frontend 서비스와 같은 이유로
+      # 127.0.0.1로 좁히지 않는다.
+      - "${LAURIO_OPERATOR_WEB_PORT:-3001}:3000"
+
 volumes:
   laurio-staging-db:
   laurio-staging-redis:

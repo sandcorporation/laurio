@@ -491,3 +491,116 @@ jobs:
       - name: Dump container state on failure
         if: failure()
         run: docker ps -a
+
+  # 운영자 앱 배포 부팅 가드 (#70 — #63가 미룬 것을 여기서 켠다).
+  #
+  # frontend-deploy-guard와 정확히 같은 이유·같은 형태다: ADR-0021의 프론트 테스트
+  # 시임("실행 중인 앱 하나")으로는 "앱이 뜨지 않는 것" 자체를 증명할 수 없다.
+  # operator.Dockerfile의 runner 스테이지(staging/prod가 실제로 배포하는 그
+  # 이미지)를 직접 빌드해 컨테이너로 띄우고, 프로세스 종료 코드와 로그를 확인한다.
+  #
+  # operator/instrumentation.ts도 frontend와 같은 함정을 피해 process.exit(1)로
+  # 직접 프로세스를 끊는다(#38에서 이미 확인된 "Next가 throw를 삼킨다"는 사실이
+  # 이 앱에도 그대로 적용된다) — 이 잡은 그게 실제로 그런지 직접 관찰한다.
+  operator-deploy-guard:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the production operator image (runner stage)
+        run: docker build -f docker/operator.Dockerfile --target runner -t laurio-operator-runner-ci .
+
+      # frontend-deploy-guard와 같은 이유 — .dockerignore가 시크릿과 호스트
+      # node_modules를 실제로 막는지 이 앱에서도 직접 확인한다.
+      - name: .dockerignore actually keeps secrets and host node_modules out of the image
+        run: |
+          set -euo pipefail
+          echo "OPENAI_API_KEY=sk-ci-guard-fake-secret-do-not-leak" > operator/.env
+          docker build -f docker/operator.Dockerfile --target builder -t laurio-operator-builder-ci-guard .
+          docker run --rm --entrypoint sh laurio-operator-builder-ci-guard -c '
+            set -e
+            if [ -f /app/.env ]; then
+              echo "FOUND /app/.env — .dockerignore가 시크릿을 막지 못했다" >&2
+              exit 1
+            fi
+            if grep -rl "sk-ci-guard-fake-secret" /app > /dev/null 2>&1; then
+              echo "가짜 시크릿 문자열이 이미지 어딘가에 들어갔다" >&2
+              exit 1
+            fi
+            echo "confirmed: .env excluded from the image"
+          '
+          rm -f operator/.env
+          docker rmi laurio-operator-builder-ci-guard
+
+      - name: Refuses to boot in production with missing config (and actually exits — not just logs)
+        run: |
+          set +e
+          output=$(timeout 20 docker run --rm -e LAURIO_DEPLOYMENT_TARGET=production laurio-operator-runner-ci 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
+            echo "::error::LAURIO_OPERATOR_ORIGIN/LAURIO_API_BASE_URL 없이도 컨테이너가 죽지 않았다(status=$status) — 부팅 가드가 깨졌다"
+            exit 1
+          fi
+          echo "$output" | grep -q "LAURIO_OPERATOR_ORIGIN" || { echo "::error::에러 메시지에 원인(LAURIO_OPERATOR_ORIGIN)이 안 남는다"; exit 1; }
+          echo "$output" | grep -q "LAURIO_API_BASE_URL" || { echo "::error::에러 메시지에 원인(LAURIO_API_BASE_URL)이 안 남는다"; exit 1; }
+
+      - name: Refuses to boot in staging with only one required value missing
+        run: |
+          set +e
+          output=$(timeout 20 docker run --rm \
+            -e LAURIO_DEPLOYMENT_TARGET=staging \
+            -e LAURIO_OPERATOR_ORIGIN=https://operator.staging.laurio.example \
+            laurio-operator-runner-ci 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
+            echo "::error::LAURIO_API_BASE_URL 없이도 staging 컨테이너가 죽지 않았다(status=$status)"
+            exit 1
+          fi
+          echo "$output" | grep -q "LAURIO_API_BASE_URL" || { echo "::error::에러 메시지에 원인이 안 남는다"; exit 1; }
+
+      - name: Boots with a complete production config and forces Secure cookies
+        run: |
+          set -euo pipefail
+          docker run -d --name operator-boot-ok \
+            -e LAURIO_DEPLOYMENT_TARGET=production \
+            -e LAURIO_OPERATOR_ORIGIN=https://operator.laurio.example \
+            -e LAURIO_API_BASE_URL=http://127.0.0.1:1 \
+            -p 3101:3000 \
+            laurio-operator-runner-ci
+
+          # 백엔드가 없어 /healthz 는 503(degraded)이 정상이다 — 여기서 보는 건
+          # "완전한 설정에서는 운영자 앱이 죽지 않고 응답한다"는 것뿐이다. 연결
+          # 자체가 안 되면(000) 컨테이너가 여전히 안 뜬 것이다.
+          status="000"
+          for _ in $(seq 1 20); do
+            status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3101/healthz || echo "000")
+            [ "$status" = "000" ] || break
+            sleep 1
+          done
+          echo "healthz status: $status"
+          if [ "$status" != "200" ] && [ "$status" != "503" ]; then
+            echo "::error::완전한 프로덕션 설정인데도 컨테이너가 응답하지 않는다(status=$status)"
+            docker logs operator-boot-ok
+            exit 1
+          fi
+
+          # ADR-0016/0019 성립 조건 — production에서 세션 쿠키의 Secure가 실제로
+          # 켜지는지. operator/app/api/auth/logout/route.ts는 세션 쿠키가 없으면
+          # 백엔드를 부르지 않고 곧바로 clearSessionCookie를 실어 응답한다 — 그래서
+          # 백엔드 없이도 이 경로 하나로 쿠키 속성을 직접 관찰할 수 있다.
+          set_cookie=$(curl -s -D - -o /dev/null -X POST http://127.0.0.1:3101/api/auth/logout \
+            -H "Origin: https://operator.laurio.example")
+          echo "$set_cookie"
+          echo "$set_cookie" | grep -qi "laurio_operator_session=.*Secure" \
+            || { echo "::error::production인데 laurio_operator_session 쿠키에 Secure가 없다"; exit 1; }
+
+          docker rm -f operator-boot-ok
+
+      - name: Dump container state on failure
+        if: failure()
+        run: docker ps -a
