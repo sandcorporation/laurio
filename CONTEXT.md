@@ -77,6 +77,10 @@ _Avoid_: 예치금을 Deposit으로 부르는 것, Holding
 Prize가 원장을 거쳐 Developer에게 실제로 나가는 것. 플랫폼 수수료와 원천징수가 공제된 뒤의 실지급을 포함한 전 과정을 가리킨다.
 _Avoid_: 정산, 이체, 송금, Settlement, Transfer, Disbursement
 
+**Seller**:
+Developer가 Payout을 받기 위해 지급대행사(토스)에 등록되는 수취인 신원. Payout이 확정된 뒤에만 등록이 시작된다 — Verification이 가입이 아니라 행위 시점으로 미뤄진 것과 같은 원칙이다. 등록으로 받는 sellerId는 Developer에 남아 두 번째 Payout부터는 재등록하지 않는다. 본인인증을 마치면 부분 승인 상태로 주간 한도 안에서 지급받고, 한도를 넘으면 심사 대기가 된다 — 둘 다 실패가 아니다.
+_Avoid_: 셀러(한글 음역을 개념 이름처럼 쓰는 것), 정산 계좌, Merchant, Payee
+
 **Distribution**:
 Sponsor가 기한 내 Award하지 않아, Score 컷라인을 통과한 Submission들에게 Prize를 1/N로 나누는 것.
 _Avoid_: 유찰 배분, 자동 지급, Refund, Split
