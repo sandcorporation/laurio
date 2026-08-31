@@ -16,14 +16,28 @@ export default function OperatorHome() {
   const counts = useQueueCounts(session.status === "authenticated");
   const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
 
   async function handleLogout() {
     setLoggingOut(true);
+    setLogoutError(null);
     try {
-      await fetch("/api/auth/logout", { method: "POST" });
-    } finally {
+      const res = await fetch("/api/auth/logout", { method: "POST" });
+      if (!res.ok) {
+        // BFF가 실패하면 의도적으로 쿠키를 지우지 않는다(operator/app/api/auth/
+        // logout/route.ts) — 세션이 살아 있는데 여기서 그냥 /login으로 보내면
+        // "로그아웃됨"으로 보이지만 실제로는 세션이 죽지 않은 채로 남는다
+        // (코드리뷰 지적). 실패를 화면에 말하고 여기 머문다.
+        const body = (await res.json().catch(() => null)) as { detail?: string } | null;
+        setLogoutError(body?.detail ?? `로그아웃에 실패했습니다 (${res.status}). 다시 시도해주세요.`);
+        return;
+      }
       router.replace("/login");
       router.refresh();
+    } catch {
+      setLogoutError("로그아웃 요청을 보내지 못했습니다. 네트워크를 확인해주세요.");
+    } finally {
+      setLoggingOut(false);
     }
   }
 
@@ -76,6 +90,11 @@ export default function OperatorHome() {
       <button type="button" data-testid="logout-button" onClick={handleLogout} disabled={loggingOut}>
         {loggingOut ? "로그아웃 중..." : "로그아웃"}
       </button>
+      {logoutError && (
+        <p role="alert" data-testid="logout-error">
+          {logoutError}
+        </p>
+      )}
     </main>
   );
 }

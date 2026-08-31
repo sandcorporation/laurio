@@ -6,19 +6,26 @@
 여기서는 있으면 갱신하고 없으면 만드는 멱등한 버전을 따로 둔다
 (`backend/contests/management/commands/seed_e2e_contests.py`와 같은 원칙).
 
-`accounts.operators.create_operator`를 호출하지 않는 이유: 그 함수는 "이미
-존재하면 거부"가 핵심 계약이라 멱등 시드에 맞지 않는다. 서로소 불변식·비밀번호
-정책 검증은 이 명령의 관심사가 아니다 — 그건 `backend/tests/test_operators.py`가
-이미 지킨다. 여기서는 오직 "로그인 가능한 Operator 계정이 결정적으로 존재한다"만
-보장한다.
+**서로소 불변식(ADR-0018)은 여기서도 지켜야 한다**(코드리뷰 지적) — 처음에는
+"멱등 시드는 create_operator의 계약(이미 있으면 거부)에 안 맞으니 그 함수를
+안 쓴다"고 판단했는데, 그 대가로 `User.objects.get_or_create` 뒤에 바로
+`is_staff=True`를 놓아 **이미 있는 계정이면 무엇이든** Operator로 승격시키는
+길을 열어 버렸다 — 우연히 참가자 계정과 같은 이름으로 이 명령을 부르면(또는
+소셜 로그인이 그 사용자 이름을 먼저 선점하면) 소셜 계정을 가진 사용자가 그대로
+Operator가 된다. `accounts.operators.assert_can_become_operator`가 정확히 이
+경로를 막으려고 있는 함수라, 승격 직전에 그 함수를 거친다 — "이미 존재하면
+거부"라는 create_operator의 계약만 우회하고, 서로소 불변식 자체는 그대로 지킨다.
 """
 
 from __future__ import annotations
 
 import json
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
+
+from accounts.operators import OperatorInvariantError, assert_can_become_operator
 
 
 class Command(BaseCommand):
@@ -30,12 +37,33 @@ class Command(BaseCommand):
         parser.add_argument("--superuser", action="store_true")
 
     def handle(self, *args, **options) -> None:
+        # 고정된 기본 비밀번호("e2e-operator-pw-9134-xyz")를 쓰는 명령이 운영
+        # 이미지에 그대로 들어간다 — 배포 환경에서 실행되면 그 자체로 알려진
+        # 자격증명의 Operator 계정이 생긴다(코드리뷰 지적). dev·CI에서만 돈다.
+        if settings.IS_DEPLOYED_ENVIRONMENT:
+            raise CommandError(
+                f"LAURIO_DEPLOYMENT_TARGET={settings.LAURIO_DEPLOYMENT_TARGET} 인데 "
+                "이 명령을 실행하려 했다 — seed_e2e_operator 는 e2e 전용이라 배포 "
+                "환경에서 실행할 수 없다(고정된 기본 비밀번호를 쓴다)."
+            )
+
         User = get_user_model()
         username: str = options["username"]
         password: str = options["password"]
         superuser: bool = bool(options["superuser"])
 
-        operator, _created = User.objects.get_or_create(username=username)
+        operator = User.objects.filter(username=username).first()
+        if operator is not None:
+            # 참가자 → 운영자 방향의 서로소 불변식(ADR-0018). 이미 Operator인
+            # 계정(소셜 계정이 없다)은 그대로 통과한다 — 이 명령을 반복 실행해
+            # 비밀번호·등급을 갱신하는 것이 정상 경로다.
+            try:
+                assert_can_become_operator(operator)
+            except OperatorInvariantError as exc:
+                raise CommandError(str(exc)) from exc
+        else:
+            operator = User(username=username)
+
         operator.is_staff = True
         operator.is_superuser = superuser
         operator.is_active = True

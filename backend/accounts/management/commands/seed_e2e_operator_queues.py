@@ -25,7 +25,7 @@ import uuid
 from datetime import timedelta
 
 from django.conf import settings
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.test import Client
 from django.utils import timezone
 
@@ -37,6 +37,12 @@ PAYMENTS_URL = "/api/payments"
 PAYOUTS_URL = "/api/payouts"
 TICK_URL = "/api/internal/tick"
 SCORING_RUN_PENDING_URL = "/api/internal/scoring/run-pending"
+
+# 이 명령이 심은 Contest 는 전부 이 접두어로 시작한다(코드리뷰 지적) — clear_queues()가
+# "이 명령이 만든 것"만 골라 지우려면 다른 시드·실사용 데이터와 구별할 표식이
+# 필요하다(frontend/e2e/lib/seed.ts, contests/management/commands/
+# seed_e2e_contests.py의 title__startswith 관용구와 같은 원칙).
+TITLE_PREFIX = "[e2e-op-queue] "
 
 
 def _internal_headers() -> dict:
@@ -111,7 +117,7 @@ def _publish_contest(client: Client, *, sponsor_uid: str, deadline_at, requireme
     response = client.post(
         CONTESTS_URL,
         data={
-            "title": f"{sponsor_uid}의 공모전",
+            "title": f"{TITLE_PREFIX}{sponsor_uid}의 공모전",
             "category_id": _category().id,
             "deliverable_type_ids": [_deliverable_type().id],
             "prize": 1_000_000,
@@ -275,24 +281,46 @@ def seed_seller_pending_payout() -> dict:
 
 
 def clear_queues() -> dict:
-    """세 큐를 전부 빈 상태로 되돌린다 — "0건은 0건이라고 명시적으로 말한다"는
-    인수조건(#65)을 e2e로 확인하려면 실제로 0인 상태가 필요하다. 이 저장소의
-    dev DB는 이 체인의 compose 스택 전용(디스패치 지침의 프로젝트별 격리)이라
-    다른 체인의 데이터를 건드릴 위험이 없다 — 그래도 "pending"·두 대기 상태만
-    지운다: 이미 심판된 Appeal이나 확정된 Payout까지 건드릴 이유가 없다.
+    """세 큐를 이 명령이 심은 데이터에 한해서만 빈 상태로 되돌린다 — "0건은
+    0건이라고 명시적으로 말한다"는 인수조건(#65)을 e2e로 확인하려면 실제로 0인
+    상태가 필요하다.
+
+    **삭제 범위는 이 명령이 만든 Contest(TITLE_PREFIX)로만 좁힌다**(코드리뷰
+    지적) — 애초의 "status가 pending/대기 상태인 건 전부"는 다른 시드나 실제
+    운영 데이터까지 함께 지울 수 있는 너무 넓은 조건이었다. `manage.py
+    seed_dev_data`가 만든 Appeal·Payout이나, 이 명령을 모르는 다른 체인의 e2e
+    데이터는 절대 건드리지 않는다.
 
     Payout을 지우면 TaxIdentity·PayoutWebhookDelivery가 CASCADE로 함께 지워진다
     (payouts/models.py) — 원장 분개(journal_entry_id)는 FK가 아니라 그대로 남지만,
-    이 명령은 e2e 스크래치 DB 전용이라 감사 기록 보존을 신경 쓸 대상이 아니다.
+    이 명령이 만든 Contest·Payout에 한정된 삭제라 감사 기록 보존을 신경 쓸
+    대상이 아니다.
     """
     from appeals.models import Appeal
     from payouts.models import Payout
 
-    appeals_deleted, _ = Appeal.objects.filter(status="pending").delete()
+    appeals_deleted, _ = Appeal.objects.filter(
+        status="pending", submission__contest__title__startswith=TITLE_PREFIX
+    ).delete()
     payouts_deleted, _ = Payout.objects.filter(
-        status__in=[Payout.Status.CONFIRMED_IDENTITY_PENDING, Payout.Status.CONFIRMED_SELLER_PENDING]
+        status__in=[Payout.Status.CONFIRMED_IDENTITY_PENDING, Payout.Status.CONFIRMED_SELLER_PENDING],
+        handover__award__contest__title__startswith=TITLE_PREFIX,
     ).delete()
     return {"appeals_deleted": appeals_deleted, "payouts_deleted": payouts_deleted}
+
+
+def _refuse_in_deployed_environment() -> None:
+    # 이 명령은 실제 Contest·Payment·Payout을 만들고(--clear는 그것도 모자라
+    # 지운다) 운영 이미지에 그대로 들어간다 — ADR-0019가 Django admin을 내린
+    # 이유(행을 직접 편집·삭제할 수 있으면 감사 추적에 우회로가 남는다)가 여기도
+    # 그대로 적용된다. dev·CI(IS_DEPLOYED_ENVIRONMENT가 아닌 곳)에서만 돈다 —
+    # config/settings.py의 다른 배포 가드들과 같은 판정 기준이다.
+    if settings.IS_DEPLOYED_ENVIRONMENT:
+        raise CommandError(
+            f"LAURIO_DEPLOYMENT_TARGET={settings.LAURIO_DEPLOYMENT_TARGET} 인데 "
+            "이 명령을 실행하려 했다 — seed_e2e_operator_queues 는 e2e 전용이라 "
+            "배포 환경에서 실행할 수 없다(실제 데이터를 만들거나 지운다)."
+        )
 
 
 class Command(BaseCommand):
@@ -308,10 +336,12 @@ class Command(BaseCommand):
         parser.add_argument(
             "--clear",
             action="store_true",
-            help="심지 않고 세 큐를 전부 빈 상태로 되돌린다(다른 옵션과 함께 쓰지 않는다).",
+            help="심지 않고 이 명령이 심은 데이터만 빈 상태로 되돌린다(다른 옵션과 함께 쓰지 않는다).",
         )
 
     def handle(self, *args, **options) -> None:
+        _refuse_in_deployed_environment()
+
         if options.get("clear"):
             result = clear_queues()
             self.stdout.write(json.dumps(result))

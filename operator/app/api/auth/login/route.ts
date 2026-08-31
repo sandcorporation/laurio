@@ -31,14 +31,30 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   });
 
   const payload = await safeJson(backendRes);
-  const response = NextResponse.json(payload ?? { detail: "로그인에 실패했습니다." }, {
-    status: backendRes.status,
-  });
 
-  if (backendRes.ok) {
-    const sessionValue = extractSessionCookieValue(backendRes);
-    if (sessionValue) setSessionCookie(response, sessionValue);
+  if (!backendRes.ok) {
+    return NextResponse.json(payload ?? { detail: "로그인에 실패했습니다." }, {
+      status: backendRes.status,
+    });
   }
 
+  const sessionValue = extractSessionCookieValue(backendRes);
+  if (!sessionValue) {
+    // 백엔드는 로그인을 성공(200)시켰는데 이 앱이 세션 쿠키를 못 뽑았다 — 이건
+    // 사용자 입력 문제가 아니라 우리 쪽 실패다(코드리뷰 지적). 여기서 그냥
+    // payload를 200으로 돌려주면 폼은 성공으로 보고 이동하는데, 쿠키가 없으니
+    // 미들웨어가 곧바로 /login으로 되돌리고 에러 문구도 없다 — 사용자에게는
+    // "아무 일도 안 일어남"으로 보인다. 명확한 5xx로 실패시켜 화면이 이유를
+    // 말하게 한다.
+    return NextResponse.json(
+      { detail: "로그인 세션을 만드는 데 실패했습니다. 다시 시도해주세요." },
+      { status: 502 },
+    );
+  }
+
+  const response = NextResponse.json(payload ?? { detail: "로그인되었습니다." }, {
+    status: backendRes.status,
+  });
+  setSessionCookie(response, sessionValue);
   return response;
 }

@@ -8,10 +8,12 @@ import { Suspense, useState } from "react";
 import type { FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
+import { sanitizeNextPath } from "@/lib/auth/sanitize-next";
+
 function LoginFields() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const next = searchParams.get("next") || "/";
+  const next = sanitizeNextPath(searchParams.get("next"));
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");

@@ -26,6 +26,34 @@ test.describe("미들웨어 가드 — 콘텐츠가 그려지기 전에 리다�
     await expect(page.getByTestId("operator-home-protected-content")).toHaveCount(0);
     await expect(page.getByTestId("operator-home-heading")).toHaveCount(0);
   });
+
+  test("아직 화면이 없는 경로도 가드된다 — 화이트리스트가 아니라 예외 목록이다", async ({
+    request,
+  }) => {
+    // #66·#68이 아직 /appeals·/payouts 페이지를 안 만들었지만, 홈(#65)이 이미 그
+    // 경로로 링크를 건다 — matcher가 "아는 페이지만" 담는 화이트리스트면 이
+    // 라우트들은 가드 없이 태어난다. 페이지 존재 여부와 무관하게 미들웨어가
+    // 먼저 가로채는지를 확인한다(실제로 그 페이지가 있는지는 다른 티켓의 몫).
+    for (const path of ["/appeals", "/payouts", "/operators", "/anything-not-yet-built"]) {
+      const res = await request.get(path, { maxRedirects: 0 });
+      expect([302, 307], path).toContain(res.status());
+      expect(res.headers()["location"], path).toContain("/login");
+    }
+  });
+
+  test("/login·/api/**·/healthz는 세션 없이도 가드에 걸리지 않는다", async ({ request }) => {
+    const login = await request.get("/login");
+    expect(login.status()).toBe(200);
+
+    const health = await request.get("/healthz");
+    expect([200, 503]).toContain(health.status());
+
+    // /api/auth/session은 세션이 없으면 401을 내야 정상이다 — 미들웨어가
+    // /login으로 리다이렉트하면(302/307) 안 된다. 이 라우트 자신이 세션 판정을
+    // 한다(app/api/auth/session/route.ts).
+    const session = await request.get("/api/auth/session");
+    expect(session.status()).toBe(401);
+  });
 });
 
 test.describe("로그인 — 아이디·비밀번호(ADR-0018)", () => {
@@ -118,6 +146,39 @@ test.describe("세션 쿠키(ADR-0016/0019)", () => {
     await expect(page).toHaveURL(/\/login/);
   });
 
+  test("로그아웃 요청이 실패하면 실패했다고 말할 뿐 로그인 화면으로 보내지 않는다", async ({
+    page,
+  }) => {
+    const operator = seedE2eOperator({ username: `e2e-op-logoutfail-${Date.now()}` });
+
+    await page.goto("/login");
+    await page.getByTestId("login-username").fill(operator.username);
+    await page.getByTestId("login-password").fill(E2E_OPERATOR_PASSWORD);
+    await page.getByTestId("login-submit").click();
+    await expect(page.getByTestId("operator-home-heading")).toBeVisible();
+
+    // 이 앱 자신의 로그아웃 BFF 호출만 실패시킨다 — 실제 세션·쿠키는 그대로 두고
+    // "BFF가 실패를 답했을 때 화면이 어떻게 반응하는가"라는 순수 프론트 렌더링
+    // 분기만 결정적으로 재현한다(home.spec.ts의 조회 실패 테스트와 같은 원칙 —
+    // 백엔드 로직이 아니라 프론트 상태 분기 하나를 좁혀서 겨냥한다).
+    await page.route("**/api/auth/logout", (route) =>
+      route.fulfill({ status: 500, body: JSON.stringify({ detail: "로그아웃 실패 시뮬레이션" }) }),
+    );
+
+    await page.getByTestId("logout-button").click();
+
+    await expect(page.getByTestId("logout-error")).toBeVisible();
+    // 로그인 화면으로 보내지지 않는다 — 세션이 죽지 않았는데 "로그아웃됨"으로
+    // 보이면 안 된다(코드리뷰 지적).
+    await expect(page).not.toHaveURL(/\/login/);
+    await expect(page.getByTestId("operator-home-heading")).toBeVisible();
+
+    // 실제 세션 쿠키도 그대로 살아 있다 — 화면만이 아니라 실제로도 로그인
+    // 상태다.
+    const cookies = await page.context().cookies();
+    expect(cookies.find((cookie) => cookie.name === "laurio_operator_session")).toBeDefined();
+  });
+
   test("브라우저의 쿠키 헤더를 통째로 중계하지 않는다 — 무관한 쿠키가 섞여도 정상 응답한다", async ({
     page,
   }) => {
@@ -170,5 +231,48 @@ test.describe("Origin 검증 — 로그인도 예외가 아니다(ADR-0016/0019)
       data: { username: operator.username, password: E2E_OPERATOR_PASSWORD },
     });
     expect(res.status()).toBe(403);
+  });
+});
+
+test.describe("open redirect 방어 — ?next= 는 같은 오리진의 절대경로만 허용한다", () => {
+  test("완전한 외부 URL을 next로 주면 무시하고 홈으로 보낸다", async ({ page, baseURL }) => {
+    const operator = seedE2eOperator({ username: `e2e-op-openredirect-abs-${Date.now()}` });
+
+    await page.goto("/login?next=" + encodeURIComponent("https://evil.example.test/phish"));
+    await page.getByTestId("login-username").fill(operator.username);
+    await page.getByTestId("login-password").fill(E2E_OPERATOR_PASSWORD);
+    await page.getByTestId("login-submit").click();
+
+    await expect(page.getByTestId("operator-home-heading")).toBeVisible();
+    expect(new URL(page.url()).origin).toBe(baseURL);
+    expect(page.url()).not.toContain("evil.example.test");
+  });
+
+  test("프로토콜 상대 URL(슬래시 두 개로 시작)도 거부하고 홈으로 보낸다", async ({
+    page,
+    baseURL,
+  }) => {
+    const operator = seedE2eOperator({ username: `e2e-op-openredirect-proto-${Date.now()}` });
+    const protocolRelative = "//" + "evil.example.test";
+
+    await page.goto("/login?next=" + encodeURIComponent(protocolRelative));
+    await page.getByTestId("login-username").fill(operator.username);
+    await page.getByTestId("login-password").fill(E2E_OPERATOR_PASSWORD);
+    await page.getByTestId("login-submit").click();
+
+    await expect(page.getByTestId("operator-home-heading")).toBeVisible();
+    expect(new URL(page.url()).origin).toBe(baseURL);
+    expect(page.url()).not.toContain("evil.example.test");
+  });
+
+  test("같은 오리진의 상대경로 next는 정상적으로 그리로 보낸다", async ({ page }) => {
+    const operator = seedE2eOperator({ username: `e2e-op-openredirect-legit-${Date.now()}` });
+
+    await page.goto("/login?next=" + encodeURIComponent("/appeals"));
+    await page.getByTestId("login-username").fill(operator.username);
+    await page.getByTestId("login-password").fill(E2E_OPERATOR_PASSWORD);
+    await page.getByTestId("login-submit").click();
+
+    await expect(page).toHaveURL(/\/appeals/);
   });
 });

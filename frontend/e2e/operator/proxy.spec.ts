@@ -15,8 +15,12 @@ const NOT_ALLOWED_DETAIL = "허용되지 않은 경로입니다.";
 async function loginAsOperator(
   request: import("@playwright/test").APIRequestContext,
   baseURL: string,
+  options: { superuser?: boolean } = {},
 ): Promise<void> {
-  const operator = seedE2eOperator({ username: `e2e-op-proxy-${Date.now()}` });
+  const operator = seedE2eOperator({
+    username: `e2e-op-proxy-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    superuser: options.superuser,
+  });
   const res = await request.post("/api/auth/login", {
     headers: { origin: baseURL },
     data: { username: operator.username, password: E2E_OPERATOR_PASSWORD },
@@ -78,6 +82,35 @@ test.describe("허용목록 — 운영자 표면 하나뿐(ADR-0021)", () => {
     expect(typeof body.username).toBe("string");
   });
 
+  test("로그인·로그아웃은 운영자 표면 접두어 안에 있어도 범용 프록시를 통과하지 못한다", async ({
+    request,
+    baseURL,
+  }) => {
+    // 전용 라우트(app/api/auth/login|logout/route.ts)가 이미 이 둘을 처리한다 —
+    // 범용 프록시로 새면 Django의 cycle_key()가 세션 id를 갈아치우는데 그 새
+    // Set-Cookie를 이 프록시는 다시 굽지 않아 조용히 로그아웃된 것과 같은 상태가
+    // 된다(lib/proxy/allowlist.ts 상단 주석).
+    const loginRes = await request.post("/api/backend/operator/login", {
+      headers: { origin: baseURL! },
+      data: { username: "whoever", password: "whatever" },
+    });
+    expect(loginRes.status()).toBe(404);
+    expect((await loginRes.json()).detail).toBe(NOT_ALLOWED_DETAIL);
+
+    await loginAsOperator(request, baseURL!);
+
+    const logoutRes = await request.post("/api/backend/operator/logout", {
+      headers: { origin: baseURL! },
+    });
+    expect(logoutRes.status()).toBe(404);
+    expect((await logoutRes.json()).detail).toBe(NOT_ALLOWED_DETAIL);
+
+    // 막혔을 뿐 세션은 멀쩡히 살아 있어야 한다 — 프록시가 진짜 로그인 표면까지
+    // 함께 부순 게 아니라는 것을 같이 증명한다.
+    const meRes = await request.get("/api/backend/operator/me");
+    expect(meRes.status()).toBe(200);
+  });
+
   test("세그먼트 안에 인코딩된 슬래시를 숨긴 경로 순회는 /api/internal/*에 도달하지 못한다", async ({
     request,
   }) => {
@@ -100,19 +133,34 @@ test.describe("허용목록 — 운영자 표면 하나뿐(ADR-0021)", () => {
 });
 
 test.describe("프록시 경로에도 Origin 검증이 적용된다(ADR-0016/0019)", () => {
-  test("허용된 경로라도 다른 Origin에서 온 변경 요청은 거부된다", async ({ request, baseURL }) => {
-    await loginAsOperator(request, baseURL!);
+  // 로그인·로그아웃은 이 파일의 "허용목록" describe가 이미 증명했듯 범용
+  // 프록시를 아예 통과하지 못한다(#1 코드리뷰 지적 이후) — 그래서 여기 Origin
+  // 검증 테스트는 프록시로 실제로 도달하는 다른 변경 엔드포인트를 써야 한다.
+  // Operator 계정 생성(상위 등급 전용)을 고른다 — 부작용이 독립적이라(새 계정
+  // 하나 느는 것뿐) 반복 실행에도 안전하다.
+  const CREATE_OPERATOR_PATH = "/api/backend/operator/operators";
 
-    const res = await request.post("/api/backend/operator/logout", {
+  function createOperatorPayload() {
+    return {
+      username: `e2e-op-proxy-created-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      password: E2E_OPERATOR_PASSWORD,
+    };
+  }
+
+  test("허용된 경로라도 다른 Origin에서 온 변경 요청은 거부된다", async ({ request, baseURL }) => {
+    await loginAsOperator(request, baseURL!, { superuser: true });
+
+    const res = await request.post(CREATE_OPERATOR_PATH, {
       headers: { origin: "https://evil.example.test" },
+      data: createOperatorPayload(),
     });
     expect(res.status()).toBe(403);
   });
 
   test("Origin 헤더가 아예 없는 변경 요청도 거부된다(fail-closed)", async ({ request, baseURL }) => {
-    await loginAsOperator(request, baseURL!);
+    await loginAsOperator(request, baseURL!, { superuser: true });
 
-    const res = await request.post("/api/backend/operator/logout");
+    const res = await request.post(CREATE_OPERATOR_PATH, { data: createOperatorPayload() });
     expect(res.status()).toBe(403);
   });
 
@@ -123,16 +171,17 @@ test.describe("프록시 경로에도 Origin 검증이 적용된다(ADR-0016/001
     // 이 BFF 가 백엔드로 나갈 때 붙이는 Origin(lib/backend.ts의 operatorOrigin)이
     // 백엔드가 기대하는 값(OPERATOR_WEB_ORIGIN, 비어 있으면 Host 헤더 유도)과
     // 어긋나면 이 요청은 403이 된다 — 로그인이 되는 것으로 이미 증명되지만,
-    // 여기서는 그것이 "두 앱의 오리진 설정이 서로 맞는가"의 문제임을 로그아웃
+    // 여기서는 그것이 "두 앱의 오리진 설정이 서로 맞는가"의 문제임을 다른 변경
     // 경로로도 한 번 더 못박는다. 어긋나면 조용히 매 요청이 403이 되는 사고를
     // 이 저장소가 이미 두 번 겪었다(CLAUDE.md).
-    await loginAsOperator(request, baseURL!);
+    await loginAsOperator(request, baseURL!, { superuser: true });
 
-    const res = await request.post("/api/backend/operator/logout", {
+    const res = await request.post(CREATE_OPERATOR_PATH, {
       headers: { origin: baseURL! },
+      data: createOperatorPayload(),
     });
     expect(res.status()).not.toBe(403);
-    expect(res.status()).toBe(200);
+    expect(res.status()).toBe(201);
   });
 
   test("GET처럼 읽기 전용인 요청은 Origin 검사 대상이 아니다", async ({ request, baseURL }) => {
