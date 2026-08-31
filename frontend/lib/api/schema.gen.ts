@@ -1110,6 +1110,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operator/operators": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Operators
+         * @description Operator 목록. 자격증명과 관련된 것은 아무것도 나오지 않는다.
+         */
+        get: operations["accounts_operator_api_list_operators"];
+        put?: never;
+        /**
+         * Create Operator Account
+         * @description 새 Operator 를 만든다.
+         *
+         *     부트스트랩 명령과 **같은 도메인 함수**를 쓴다(#42). 서로소 불변식과 비밀번호
+         *     정책이 두 경로에 각각 구현되면 언젠가 한쪽만 고쳐진다 — 한쪽만 막으면 다른
+         *     쪽으로 돌아 들어온다는 것이 이 불변식의 전체 요점이다.
+         */
+        post: operations["accounts_operator_api_create_operator_account"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/operators/{operator_id}/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Deactivate Operator Account
+         * @description Operator 를 비활성화한다 — 다음 요청부터 그 자리에서 막힌다.
+         *
+         *     **세션을 열거해 지우지 않는다.** 세션은 Redis 에 있고 사용자별로 조회할 수단이
+         *     없다. 대신 `is_active=False` 가 그 일을 대신한다: Django 의 `ModelBackend.get_user`
+         *     가 비활성 사용자에 대해 None 을 돌려주므로, 이미 로그인해 있던 사람도 다음
+         *     요청에서 익명이 된다. 즉시 무효화라는 성질은 그대로이고, 그 사실을 테스트가
+         *     직접 확인한다("이미 로그인한 클라이언트가 다음 요청에서 401").
+         *
+         *     마지막 활성 superuser 는 자신을 비활성화할 수 없다. 화면도 없고 계정을 되살릴
+         *     API 도 없으므로, 그 상태는 서버에 들어가 관리 명령을 돌려야만 빠져나올 수 있다.
+         */
+        post: operations["accounts_operator_api_deactivate_operator_account"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/payments": {
         parameters: {
             query?: never;
@@ -2022,6 +2079,18 @@ export interface components {
          * @enum {string}
          */
         NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "new_contest_in_category";
+        /** OperatorCreateIn */
+        OperatorCreateIn: {
+            /**
+             * Is Superuser
+             * @default false
+             */
+            is_superuser: boolean;
+            /** Password */
+            password: string;
+            /** Username */
+            username: string;
+        };
         /** OperatorLoginIn */
         OperatorLoginIn: {
             /** Password */
@@ -3786,6 +3855,101 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OperatorOut"];
+                };
+            };
+        };
+    };
+    accounts_operator_api_list_operators: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorOut"][];
+                };
+            };
+        };
+    };
+    accounts_operator_api_create_operator_account: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OperatorCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    accounts_operator_api_deactivate_operator_account: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operator_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
                 };
             };
         };
