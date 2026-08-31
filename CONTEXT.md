@@ -33,6 +33,10 @@ _Avoid_: 의뢰자, 발주처, Client, Buyer, Orderer, Requester
 Contest에 Submission을 내는 당사자. 한 사람이 어떤 Contest에서는 Sponsor이고 다른 Contest에서는 Developer일 수 있다.
 _Avoid_: 참가자, Entrant, Contestant, Contractor, Freelancer
 
+**Operator**:
+Laurio를 운영하며 Appeal에 Ruling을 내리는 당사자. Sponsor·Developer와 서로소다 — 소셜 계정을 가진 계정은 Operator가 될 수 없고, Operator는 소셜 계정을 붙일 수 없다. 이 구분이 「돈을 움직인 사람이 누구인가」를 애매하지 않게 만든다.
+_Avoid_: 관리자, 스태프, Admin, Staff, Moderator
+
 ### 제출과 선정
 
 **Submission**:
@@ -42,6 +46,14 @@ _Avoid_: 제출물, 출품작, Entry, Work, Proposal
 **Score**:
 마감 직후 한 번만 산출되어 불변으로 고정되는, Submission의 필수 Requirement 달성률. Distribution 대상 판정의 유일한 근거다.
 _Avoid_: 평가, 점수, Grade, Rating, Evaluation
+
+**Appeal**:
+Developer가 자신의 Score에 이의를 제기하는 것. Score는 불변이므로 재채점 요구가 아니라 사람의 판단을 구하는 것이다.
+_Avoid_: 이의신청, 재심, 항소, Dispute, Complaint, Rescore
+
+**Ruling**:
+Operator가 Appeal을 인용하거나 기각하는 행위. 인용해도 Score는 그대로 두고 원장에 정정 분개를 새로 더한다. Ruling에는 그것을 내린 Operator가 언제나 함께 남는다 — 존재하는데 신원이 없는 Ruling은 있을 수 없다.
+_Avoid_: 판정, 처리, 결정, Decision, Resolution, Judgment
 
 **Award**:
 Sponsor가 하나의 Submission을 우승작으로 확정하는 행위. 이 시점에 지식재산권이 Sponsor에게 이전된다.
