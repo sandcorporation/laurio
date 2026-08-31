@@ -34,7 +34,16 @@ export function useOperators(enabled: boolean): { state: OperatorsState; reload:
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
-    setState({ status: "loading" });
+
+    // 여기서 `setState({status:"loading"})`를 부르지 않는다(코드리뷰 지적).
+    // 첫 조회는 `state`의 초기값이 이미 `{status:"loading"}`이라 그걸로
+    // 충분하다. `reload()`(생성·비활성화·재활성화 뒤 재조회)가 매번 다시
+    // "loading"으로 리셋하면, 페이지의 최상단 게이트(`state.status ===
+    // "loading"`)가 이미 그려진 표와 생성 폼을 통째로 걷어내고 스피너로
+    // 바꿔치기한다 — 방금 만든 계정의 행이 화면에서 사라졌다 다시 나타나는
+    // 것처럼 보이고, 그 사이 폼·행의 로컬 상태(입력값·pending·에러 메시지)도
+    // 전부 날아간다. 대신 이미 그려진 화면(loaded든 forbidden·error든)을
+    // 그대로 유지한 채 조용히 다시 읽고, 응답이 오면 그 결과로만 갱신한다.
 
     async function load() {
       try {

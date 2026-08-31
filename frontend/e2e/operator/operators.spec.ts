@@ -141,6 +141,52 @@ test.describe("생성 실패 — 서로 다른 이유는 서로 다른 메시지
   });
 });
 
+test.describe("빈 입력 — 요청 검증 오류가 화면을 죽이지 않는다(#69)", () => {
+  test("아이디·비밀번호를 비운 채 생성을 누르면 422를 받고, 화면이 죽지 않고 이유를 문자열로 보여준다", async ({
+    page,
+  }) => {
+    // 폼에 클라이언트 검증이 없다(코드리뷰 지적) — 그래서 빈 채로 제출하면
+    // 요청이 그대로 백엔드까지 가서 우리 라우터가 아니라 ninja/pydantic의
+    // 요청 검증(스키마의 min_length=1)에 걸린다. 이 422의 detail은 우리
+    // 라우터가 손으로 만드는 문자열(약한 비밀번호·중복 아이디 케이스)이
+        // 아니라 오류 객체의 **배열**이다 — 그걸 문자열로 가정하고 그대로
+    // `{error}`로 렌더하면 React가 "Objects are not valid as a React
+    // child"로 화면 전체를 죽인다. operator/lib/operators/actions.ts의
+    // normalizeDetail이 그 배열을 사람이 읽을 문자열로 좁혀야 이 테스트가
+    // 통과한다.
+    const superuser = seedE2eOperator({
+      username: `e2e-op-mgmt-emptyfields-super-${Date.now()}`,
+      superuser: true,
+    });
+
+    await loginAndExpectHome(page, superuser.username);
+    await openOperatorsPage(page);
+
+    const responsePromise = page.waitForResponse(
+      (res) => res.url().includes("/api/backend/operator/operators") && res.request().method() === "POST",
+    );
+    await page.getByTestId("create-operator-submit").click();
+    const response = await responsePromise;
+
+    // 정말로 ninja/pydantic의 요청 검증 422를 받았다는 것부터 확인한다 —
+    // 우리 라우터가 만드는 422(약한 비밀번호)와는 다른 경로다.
+    expect(response.status()).toBe(422);
+
+    // 화면이 죽지 않았다 — 헤딩·표가 여전히 있고, 에러가 읽을 수 있는
+    // 문자열로 보인다. "[object Object]"는 detail을 문자열로 좁히지 못했을
+    // 때 나는 대표적인 증상이다.
+    await expect(page.getByTestId("operators-heading")).toBeVisible();
+    await expect(page.getByTestId("create-operator-error")).toBeVisible();
+    const message = await page.getByTestId("create-operator-error").textContent();
+    expect(message).toBeTruthy();
+    expect(message).not.toContain("[object Object]");
+    expect(message).not.toContain("undefined");
+
+    // 화면이 여전히 반응한다 — 죽은 화면이라면 표도 이미 사라졌을 것이다.
+    await expect(page.getByTestId("operators-table")).toBeVisible();
+  });
+});
+
 test.describe("비활성화 — 효과로 증명한다(#69)", () => {
   test("Operator를 비활성화하면 그 계정으로 더 이상 로그인되지 않는다", async ({ page }) => {
     const superuser = seedE2eOperator({
@@ -204,36 +250,35 @@ test.describe("마지막 상위 등급 계정(#69)", () => {
 
     await loginAndExpectHome(page, superuser.username);
 
-    // 이 BFF의 변경 요청은 Origin 검증을 거친다(packages/bff-shared/src/origin.ts)
-    // — 브라우저의 fetch()는 이 헤더를 자동으로 싣지만 page.request는 API
-    // 테스트 클라이언트라 싣지 않으므로, 아래 정리 단계에서 직접 붙여야 한다.
-    const origin = new URL(page.url()).origin;
-
-    // 다른 활성 상위 등급 계정이 남아 있으면 "마지막"이 아니게 되어 이 테스트가
-    // 무엇도 증명하지 못한다 — 이 컴포즈 스택 안에서 자기 자신 말고 남은 활성
-    // superuser를 전부 비활성화해 정말로 "마지막 하나"인 상태를 만든다. 백엔드
-    // API를 페이지의 세션 쿠키로 직접 호출한다(같은 브라우저 컨텍스트를 공유하는
-    // page.request이므로 쿠키가 자동으로 실린다).
-    const listRes = await page.request.get("/api/backend/operator/operators");
-    expect(listRes.ok()).toBeTruthy();
-    const operators = (await listRes.json()) as Array<{
-      id: number;
-      username: string;
-      is_superuser: boolean;
-      is_active: boolean;
-    }>;
-    const otherActiveSuperusers = operators.filter(
-      (op) => op.is_superuser && op.is_active && op.id !== superuser.id,
+    // 실제로 "이 스택의 마지막 활성 superuser" 상태를 만들려면 이 테스트가
+    // 만들지 않은 다른 활성 superuser를 전부 비활성화해야 한다 — 그런데 그
+    // 계정 중에는 개발자가 자기 `laurio-dev` 스택에 `create_operator
+    // --superuser`로 만든 본인 계정도 포함될 수 있다. 실제로 그 사고가 났다
+    // (코드리뷰 지적): 이 스위트를 개발자 스택에 대고 한 번 돌리면 본인
+    // 계정이 영구히 잠기고, 되살리려면 이미 잠긴 그 계정의 superuser 권한이
+    // 필요해 관리 명령으로 컨테이너에 들어가는 것 말고는 방법이 없어진다 —
+    // ADR-0019가 남긴 바로 그 상황이고 #69는 그걸 끝내려는 화면이다. 그래서
+    // 이 테스트는 이 스택에 남아 있는 다른 계정을 절대 건드리지 않는다.
+    //
+    // 대신 백엔드의 409(code: last_superuser) 판정 자체는
+    // backend/tests/test_operator_management.py::
+    // test_the_last_superuser_cannot_deactivate_themselves가 이미 HTTP로
+    // 검증하고 있다 — 여기서 다시 증명할 대상이 아니다. 이 화면이 증명해야
+    // 하는 것은 "그 응답을 받으면 이유를 그대로 보여주는가"라는 순수 프론트
+    // 렌더링 문제이므로, 그 응답 하나만 좁게 모킹한다(home.spec.ts의 "조회
+    // 실패" 테스트와 같은 원칙 — 실제 보안 판정이 아닌 순수 렌더링 상태는
+    // 모킹으로 결정적으로 재현한다).
+    await page.route(`**/api/backend/operator/operators/${superuser.id}/deactivate`, (route) =>
+      route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          detail:
+            "마지막 상위 등급 Operator는 비활성화할 수 없습니다 — 아무도 Operator를 만들 수 없는 상태가 됩니다.",
+          code: "last_superuser",
+        }),
+      }),
     );
-    for (const other of otherActiveSuperusers) {
-      const res = await page.request.post(`/api/backend/operator/operators/${other.id}/deactivate`, {
-        headers: { origin },
-      });
-      // 다른 superuser를 지우는 이 정리 단계 자체가 "마지막 하나"가 되기 전까지는
-      // 항상 성공해야 한다(409는 이 스택에 상위 등급이 자기 자신 하나만 남았을 때만
-      // 나야 정상이다).
-      expect(res.status(), `cleanup deactivate of operator ${other.id}`).toBe(200);
-    }
 
     await openOperatorsPage(page);
     const row = page.getByTestId(`operator-row-${superuser.id}`);
@@ -245,10 +290,11 @@ test.describe("마지막 상위 등급 계정(#69)", () => {
     const message = await row.getByTestId(`operator-row-${superuser.id}-action-error`).textContent();
     expect(message).toContain("마지막");
 
-    // 거절됐으니 여전히 활성이고, 실제로도 로그인이 계속된다 — 라벨이 아니라 효과.
+    // 거절됐으니(모킹된 응답이지만) 화면은 여전히 활성으로 그린다 — 라벨이
+    // 아니라 relay 자체를 증명한다. 실제 로그인 가능 여부는 이 계정이 실제로
+    // 비활성화되지 않았으므로 별도로 재확인할 필요가 없다(애초에 이 계정에
+    // 대해 실제 deactivate 호출을 보낸 적이 없다).
     await expect(row.getByTestId(`operator-row-${superuser.id}-active`)).toHaveText("활성");
-    await logout(page);
-    await loginAndExpectHome(page, superuser.username);
   });
 });
 
@@ -282,5 +328,33 @@ test.describe("세션 없이 열면 렌더링 전에 로그인으로 돌아간�
     await expect(page).toHaveURL(/\/login/);
     await expect(page.getByTestId("operators-heading")).toHaveCount(0);
     await expect(page.getByTestId("operators-table")).toHaveCount(0);
+  });
+});
+
+test.describe("홈에서 실제로 눌러 들어가는 경로(#69)", () => {
+  // 코드리뷰 지적 — 이 화면으로 가는 링크가 앱 어디에도 없어서 URL을 직접
+  // 쳐야만 들어갈 수 있었다. e2e가 전부 page.goto("/operators")였던 탓에
+  // 그 사실이 가려져 있었다 — 그래서 여기서는 반드시 클릭으로 도달한다.
+  test("상위 등급 홈에 계정 관리로 가는 링크가 있고, 클릭하면 /operators로 이동한다", async ({
+    page,
+  }) => {
+    const superuser = seedE2eOperator({
+      username: `e2e-op-mgmt-navlink-super-${Date.now()}`,
+      superuser: true,
+    });
+
+    await loginAndExpectHome(page, superuser.username);
+    await page.getByTestId("operators-nav-link").click();
+
+    await expect(page).toHaveURL(/\/operators$/);
+    await expect(page.getByTestId("operators-heading")).toBeVisible();
+  });
+
+  test("일반 등급 홈에는 계정 관리 링크가 없다", async ({ page }) => {
+    const ordinary = seedE2eOperator({ username: `e2e-op-mgmt-navlink-ordinary-${Date.now()}` });
+
+    await loginAndExpectHome(page, ordinary.username);
+
+    await expect(page.getByTestId("operators-nav-link")).toHaveCount(0);
   });
 });

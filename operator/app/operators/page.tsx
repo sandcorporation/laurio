@@ -21,19 +21,26 @@ export default function OperatorsPage() {
     router.replace("/login");
   }
 
+  if (session.status === "unauthenticated") {
+    // 이 검사가 loading 검사보다 먼저여야 한다(코드리뷰 지적). 세션이 죽으면
+    // (쿠키는 남았지만 백엔드가 더 이상 인정하지 않으면) session.status는
+    // "loading"을 거치지 않고 곧장 "unauthenticated"로 간다 — 그 시점에
+    // enabled(=session.status === "authenticated")는 한 번도 true였던 적이
+    // 없으므로 useOperators의 effect가 아예 실행되지 않고, state는 초기값인
+    // "loading"에 영원히 머문다. 이 검사를 loading 검사 뒤에 두면 그 state가
+    // 계속 "loading"이라는 이유만으로 화면이 스피너에 갇히고, useSession이
+    // 이미 시작한 /login 리다이렉트가 이 화면 뒤로 가려진다. useSession이
+    // 리다이렉트하는 중이므로 여기서는 아무것도 렌더하지 않는다
+    // (operator/app/page.tsx와 같은 원칙).
+    return null;
+  }
+
   if (session.status === "loading" || state.status === "loading") {
     return (
       <main>
         <p data-testid="operators-loading">불러오는 중...</p>
       </main>
     );
-  }
-
-  if (session.status === "unauthenticated") {
-    // useSession이 이미 /login으로 보내는 중이다 — 리다이렉트가 붙기 전 한
-    // 프레임 동안 보호된 내용이 그려지지 않도록 여기서 아무것도 렌더하지 않는다
-    // (operator/app/page.tsx와 같은 원칙).
-    return null;
   }
 
   return (

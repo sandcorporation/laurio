@@ -8,6 +8,15 @@
 // 존재하는 사용자입니다" 계열 메시지)는 같은 422/invalid로 묶일 때도 있지만
 // `detail` 문구 자체가 서로 달라서 화면에서 구별된다 — 두 실패를 "생성
 // 실패"로 뭉개지 않는다.
+//
+// **`detail`이 항상 문자열은 아니다**(코드리뷰 지적). django-ninja의 **요청
+// 검증** 실패(예: 스키마의 `min_length=1`을 어긴 빈 아이디·비밀번호)는 우리
+// 라우터가 직접 만든 422가 아니라 ninja/pydantic이 만든 422이고, 그 `detail`은
+// 오류 객체의 **배열**이다(`[{"type": ..., "loc": [...], "msg": "..."}, ...]`).
+// 이걸 문자열로 가정하고 그대로 렌더하면(예: `{error}`) React가 "Objects are
+// not valid as a React child"로 화면 전체를 죽인다. `normalizeDetail`이 이
+// 두 형태(우리 라우터의 문자열 detail, ninja의 배열 detail)를 모두 사람이 읽을
+// 수 있는 문자열 하나로 좁힌다 — 호출부는 항상 문자열만 받는다.
 import type { OperatorAccount } from "./types";
 
 export interface ApiFailure {
@@ -24,13 +33,31 @@ export interface ApiSuccess<T> {
 
 export type ApiResult<T> = ApiSuccess<T> | ApiFailure;
 
+function normalizeDetail(detail: unknown, status: number): string {
+  if (typeof detail === "string" && detail.length > 0) return detail;
+
+  // ninja/pydantic 요청 검증 오류: [{"type": "...", "loc": [...], "msg": "..."}]
+  if (Array.isArray(detail) && detail.length > 0) {
+    const messages = detail
+      .map((item) =>
+        item && typeof item === "object" && "msg" in item && typeof (item as { msg: unknown }).msg === "string"
+          ? (item as { msg: string }).msg
+          : null,
+      )
+      .filter((msg): msg is string => msg !== null);
+    if (messages.length > 0) return messages.join(" ");
+  }
+
+  return `요청이 실패했습니다 (${status}).`;
+}
+
 async function toFailure(res: Response): Promise<ApiFailure> {
-  const body = (await res.json().catch(() => null)) as { detail?: string; code?: string } | null;
+  const body = (await res.json().catch(() => null)) as { detail?: unknown; code?: string } | null;
   return {
     ok: false,
     status: res.status,
     code: body?.code ?? "error",
-    detail: body?.detail ?? `요청이 실패했습니다 (${res.status}).`,
+    detail: normalizeDetail(body?.detail, res.status),
   };
 }
 
