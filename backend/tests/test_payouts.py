@@ -32,7 +32,7 @@ from contests.models import Category, Contest, DeliverableType
 from core.models import ClockOverride
 from handovers.models import Handover
 from ledger.services import contest_entries
-from payouts.models import Payout, TaxIdentity
+from payouts.models import Payout, Seller, TaxIdentity
 
 TICK_URL = "/api/internal/tick"
 CONTESTS_URL = "/api/contests"
@@ -212,13 +212,46 @@ def _request_payout(client, dev: dict, contest_id: int) -> dict:
     return resp.json()
 
 
-def _confirm_payout(client, dev: dict, idempotency_key: str, *, simulate=None):
+def _confirm_payout(client, dev: dict, idempotency_key: str, *, simulate=None, seller_simulate=None):
+    body = {}
+    if simulate is not None:
+        body["simulate"] = simulate
+    if seller_simulate is not None:
+        body["seller_simulate"] = seller_simulate
     return client.post(
         f"{PAYOUTS_URL}/{idempotency_key}/confirm",
+        data=body,
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+
+
+def _retry_seller_registration(client, dev: dict, idempotency_key: str, *, simulate=None):
+    return client.post(
+        f"{PAYOUTS_URL}/{idempotency_key}/seller-registration",
         data={"simulate": simulate} if simulate is not None else {},
         content_type="application/json",
         **_auth_header(dev["access"]),
     )
+
+
+def _operator_client(username="payouts-op-1", *, superuser=False):
+    """로그인된 Operator 용 클라이언트 (test_appeals._operator_client와 같은 관용구)."""
+
+    from django.core.management import call_command
+    from django.test import Client
+
+    password = "Zx82!Laurio-Payouts-Secret"
+    call_command("create_operator", username, password=password, superuser=superuser)
+    operator = Client()
+    response = operator.post(
+        "/api/operator/login",
+        data={"username": username, "password": password},
+        content_type="application/json",
+        HTTP_ORIGIN="http://testserver",
+    )
+    assert response.status_code == 200, response.content
+    return operator
 
 
 @pytest.fixture
@@ -762,3 +795,346 @@ def test_sponsor_cannot_view_developer_payout_breakdown(client, category, landin
 
     resp = client.get(f"{CONTESTS_URL}/{contest['id']}/payout", **_auth_header(sponsor["access"]))
     assert resp.status_code == 403
+
+
+# --- Seller 등록 — 지급 확정 후 등록과 두 대기의 구분 (#50, ADR-0020) -------------
+
+
+@pytest.mark.django_db
+def test_seller_registration_does_not_start_before_payout_is_confirmed(
+    client, category, landing_type
+):
+    """제출·요청 시점에는 Seller가 아예 생기지 않는다 — 등록은 지급이 확정된
+    뒤에만 시작된다(ADR-0020 핵심 규율)."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    assert not Seller.objects.filter(developer_id=payout.handover.award.submission.developer_id).exists()
+
+    _confirm_payout(client, dev, requested["idempotency_key"])
+
+    assert Seller.objects.filter(
+        developer_id=payout.handover.award.submission.developer_id
+    ).exists()
+
+
+@pytest.mark.django_db
+def test_default_seller_registration_succeeds_and_reaches_identity_pending(
+    client, category, landing_type
+):
+    """기본(시나리오 미지정) 등록은 즉시 부분 승인되어 기존 흐름(확정 즉시
+    신원 대기)을 그대로 유지한다 — 회귀 방지용."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+
+    resp = _confirm_payout(client, dev, requested["idempotency_key"])
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "confirmed_identity_pending"
+    assert body["seller_status"] == "partially_approved"
+
+
+@pytest.mark.django_db
+def test_seller_pending_is_a_distinct_state_from_identity_pending(client, category, landing_type):
+    """「지급 확정 · Seller 대기」는 「지급 확정 · 신원 대기」와 다른 상태다
+    (#50 AC) — 하나는 세무(주민등록번호), 하나는 지급대행사 수취인 등록을
+    기다린다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+
+    resp = _confirm_payout(
+        client, dev, requested["idempotency_key"], seller_simulate="review_required"
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "confirmed_seller_pending"
+    assert body["status"] != "confirmed_identity_pending"
+    assert body["seller_status"] == "under_review"
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    assert payout.status == Payout.Status.CONFIRMED_SELLER_PENDING
+
+
+@pytest.mark.django_db
+def test_limit_exceeded_seller_registration_is_under_review_not_failed(
+    client, category, landing_type
+):
+    """주간 한도를 넘으면 심사 대기이지 실패가 아니다(#50 AC) — 성공한
+    Developer를 성공했다는 이유로 막지 않는다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+
+    resp = _confirm_payout(
+        client, dev, requested["idempotency_key"], seller_simulate="limit_exceeded"
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "confirmed_seller_pending"
+    assert body["status"] != "failed"
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    assert payout.status != Payout.Status.FAILED
+
+    developer_id = payout.handover.award.submission.developer_id
+    seller = Seller.objects.get(developer_id=developer_id)
+    assert seller.status == Seller.Status.UNDER_REVIEW
+
+
+@pytest.mark.django_db
+def test_seller_rejection_leaves_confirmed_amount_in_the_ledger(client, category, landing_type):
+    """등록이 거절되어도 확정된 금액은 원장에 개발자 미지급금으로 그대로
+    남는다(#50 AC, ADR-0004) — 어느 경로로도 돈이 사라지지 않는다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+
+    resp = _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="rejected")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "confirmed_seller_pending"
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    assert payout.journal_entry_id is not None
+
+    from ledger.services import contest_balance, contest_entries
+
+    ledger_id = Contest.objects.get(id=contest["id"]).ledger_id
+    balance = contest_balance(ledger_id)
+    assert balance["is_balanced"] is True
+
+    lines = [line for e in contest_entries(ledger_id) for line in e.lines.all()]
+    developer_payable_credit = sum(
+        l.amount for l in lines if l.account == "developer_payable" and l.side == "credit"
+    )
+    developer_payable_debit = sum(
+        l.amount for l in lines if l.account == "developer_payable" and l.side == "debit"
+    )
+    outstanding = developer_payable_credit - developer_payable_debit
+    assert outstanding == payout.net_amount
+
+    developer_id = payout.handover.award.submission.developer_id
+    seller = Seller.objects.get(developer_id=developer_id)
+    assert seller.status == Seller.Status.REJECTED
+
+
+@pytest.mark.django_db
+def test_identity_can_be_submitted_while_seller_registration_is_still_pending(
+    client, category, landing_type
+):
+    """두 대기는 독립적이다 — Seller 등록이 안 끝났어도 신원은 먼저 제출할 수
+    있고, 그래도 최종 확정(CONFIRMED)에는 이르지 않는다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="review_required")
+
+    resp = client.post(
+        f"{PAYOUTS_URL}/{requested['idempotency_key']}/identity",
+        data={"resident_registration_number": "9001011234567"},
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "confirmed_seller_pending"
+    assert body["has_identity"] is True
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    assert TaxIdentity.objects.filter(payout=payout).exists()
+    assert payout.status == Payout.Status.CONFIRMED_SELLER_PENDING
+
+
+@pytest.mark.django_db
+def test_retry_seller_registration_resolves_to_confirmed_when_identity_already_submitted(
+    client, category, landing_type
+):
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="review_required")
+    client.post(
+        f"{PAYOUTS_URL}/{requested['idempotency_key']}/identity",
+        data={"resident_registration_number": "9001011234567"},
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+
+    resp = _retry_seller_registration(client, dev, requested["idempotency_key"])
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "confirmed"
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    assert payout.status == Payout.Status.CONFIRMED
+
+
+@pytest.mark.django_db
+def test_retry_seller_registration_resolves_to_identity_pending_when_identity_missing(
+    client, category, landing_type
+):
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="review_required")
+
+    resp = _retry_seller_registration(client, dev, requested["idempotency_key"])
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "confirmed_identity_pending"
+
+
+@pytest.mark.django_db
+def test_retry_seller_registration_can_still_come_back_under_review(client, category, landing_type):
+    """재시도해도 여전히 승인되지 않을 수 있다 — 그래도 실패로 종결되지
+    않는다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="limit_exceeded")
+
+    resp = _retry_seller_registration(
+        client, dev, requested["idempotency_key"], simulate="limit_exceeded"
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "confirmed_seller_pending"
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    assert payout.status != Payout.Status.FAILED
+
+
+@pytest.mark.django_db
+def test_seller_registration_cannot_be_retried_outside_seller_pending(client, category, landing_type):
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"])  # 기본 성공 -> identity_pending
+
+    resp = _retry_seller_registration(client, dev, requested["idempotency_key"])
+    assert resp.status_code == 409
+
+
+@pytest.mark.django_db
+def test_second_payout_reuses_seller_id_and_does_not_reregister(
+    client, category, landing_type
+):
+    """sellerId가 Developer에 남아 두 번째 Payout이 재등록하지 않는다(#50 AC)."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest_a = _publish_contest(
+        client, category=category, deliverable_type=landing_type,
+        sponsor_uid="sponsor-a", deadline_at=deadline,
+    )
+    dev = _verified_user(client, "dev-repeat", "dev-repeat-ci")
+    submission_a = _submit(client, dev, contest_a["id"])
+    _close_contest(client, contest_a, deadline=deadline)
+    _award(client, sponsor, contest_a["id"], submission_a["id"])
+    _accept_handover(client, sponsor, contest_a["id"])
+
+    requested_a = _request_payout(client, dev, contest_a["id"])
+    _confirm_payout(client, dev, requested_a["idempotency_key"])
+
+    payout_a = Payout.objects.get(idempotency_key=requested_a["idempotency_key"])
+    developer_id = payout_a.handover.award.submission.developer_id
+    seller_after_first = Seller.objects.get(developer_id=developer_id)
+    assert seller_after_first.status == Seller.Status.PARTIALLY_APPROVED
+    first_seller_id = seller_after_first.seller_id
+
+    # 같은 Developer가 두 번째 Contest도 이긴다. 첫 Contest를 마감시키며 시계를
+    # 앞으로 감아 두었으므로(ClockOverride) 초기화하지 않으면 이 두 번째 마감이
+    # 이미 지난 시각이 되어 제출 자체가 403으로 막힌다.
+    ClockOverride.objects.filter(pk=1).delete()
+    deadline2 = timezone.now() + timedelta(hours=1)
+    sponsor2, contest_b = _publish_contest(
+        client, category=category, deliverable_type=landing_type,
+        sponsor_uid="sponsor-b", deadline_at=deadline2,
+    )
+    submission_b = _submit(client, dev, contest_b["id"])
+    _close_contest(client, contest_b, deadline=deadline2)
+    _award(client, sponsor2, contest_b["id"], submission_b["id"])
+    _accept_handover(client, sponsor2, contest_b["id"])
+
+    requested_b = _request_payout(client, dev, contest_b["id"])
+    # 두 번째 확정에 "거절" 시나리오를 실어 보내도 — 이미 부분 승인된 Seller가
+    # 있으므로 재등록 자체가 일어나지 않아 이 값은 무시되고 곧장 신원 대기로
+    # 넘어간다.
+    resp = _confirm_payout(
+        client, dev, requested_b["idempotency_key"], seller_simulate="rejected"
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "confirmed_identity_pending"
+
+    assert Seller.objects.filter(developer_id=developer_id).count() == 1
+    seller_after_second = Seller.objects.get(developer_id=developer_id)
+    assert seller_after_second.seller_id == first_seller_id
+    assert seller_after_second.status == Seller.Status.PARTIALLY_APPROVED
+
+
+@pytest.mark.django_db
+def test_developer_sees_next_action_guidance_on_payout(client, category, landing_type):
+    """침묵은 상금이 사라진 것으로 읽힌다 — Developer가 다음에 뭘 해야 하는지
+    알 수 있어야 한다(#50 AC)."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    resp = _confirm_payout(
+        client, dev, requested["idempotency_key"], seller_simulate="limit_exceeded"
+    )
+    body = resp.json()
+    assert body["next_action"]
+    assert "심사" in body["next_action"]
+
+    get_resp = client.get(f"{CONTESTS_URL}/{contest['id']}/payout", **_auth_header(dev["access"]))
+    assert get_resp.status_code == 200
+    assert get_resp.json()["next_action"]
+
+
+# --- Operator 표면 — 두 대기 중 어느 쪽인지 조회 (#50 AC) -------------------------
+
+
+@pytest.mark.django_db
+def test_operator_sees_which_payouts_are_blocked_on_seller_vs_identity(
+    client, category, landing_type
+):
+    sponsor, dev1, contest1, submission1 = _ready_for_payout(
+        client, category, landing_type, sponsor_uid="sponsor-op-1", dev_uid="dev-op-1"
+    )
+    requested1 = _request_payout(client, dev1, contest1["id"])
+    _confirm_payout(client, dev1, requested1["idempotency_key"], seller_simulate="review_required")
+
+    # 첫 Contest를 마감시키며 시계를 앞으로 감아 두었으므로(ClockOverride)
+    # 초기화하지 않으면 두 번째 Contest의 마감이 이미 지난 시각이 된다.
+    ClockOverride.objects.filter(pk=1).delete()
+    _sponsor2, dev2, contest2, _submission2 = _ready_for_payout(
+        client, category, landing_type, sponsor_uid="sponsor-op-2", dev_uid="dev-op-2"
+    )
+    requested2 = _request_payout(client, dev2, contest2["id"])
+    _confirm_payout(client, dev2, requested2["idempotency_key"])  # identity_pending
+
+    operator = _operator_client()
+
+    seller_blocked = operator.get("/api/operator/payouts?blocked_on=seller")
+    assert seller_blocked.status_code == 200
+    seller_keys = {row["idempotency_key"] for row in seller_blocked.json()}
+    assert requested1["idempotency_key"] in seller_keys
+    assert requested2["idempotency_key"] not in seller_keys
+    seller_row = next(
+        row for row in seller_blocked.json() if row["idempotency_key"] == requested1["idempotency_key"]
+    )
+    assert seller_row["blocked_on"] == "seller"
+    assert seller_row["seller_status"] == "under_review"
+
+    identity_blocked = operator.get("/api/operator/payouts?blocked_on=identity")
+    assert identity_blocked.status_code == 200
+    identity_keys = {row["idempotency_key"] for row in identity_blocked.json()}
+    assert requested2["idempotency_key"] in identity_keys
+    assert requested1["idempotency_key"] not in identity_keys
+
+
+@pytest.mark.django_db
+def test_operator_payouts_surface_is_closed_to_non_operators(client, category, landing_type):
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"])
+
+    resp = client.get("/api/operator/payouts", **_auth_header(dev["access"]))
+    assert resp.status_code in (401, 403)
