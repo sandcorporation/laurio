@@ -5,6 +5,7 @@
 // 간다. 목록 화면 자체(이의 심판 #66, 지급 큐 #68)는 다른 티켓의 몫이라 여기서는
 // 만들지 않는다 — 링크의 목적지로만 남겨 둔다.
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import { QueueCard } from "@/lib/home/queue-card";
@@ -62,6 +63,20 @@ export default function OperatorHome() {
         {session.user.is_superuser ? "상위 등급 (계정 관리 가능)" : "일반 등급"}
       </p>
       <p data-testid="operator-home-protected-content">이 화면은 로그인해야만 보입니다.</p>
+
+      {/* Operator 계정 관리(#69)로 가는 유일한 진입점 — 상위 등급에게만 보인다.
+          URL을 직접 쳐야만 들어갈 수 있던 것을 코드리뷰가 지적했다. 일반
+          Operator에게는 애초에 링크를 주지 않는다(눌러도 403이 화면에서
+          "등급이 필요하다"고 말하긴 하지만, 갈 수 없는 곳으로 가는 링크를
+          먼저 보여줄 이유가 없다) — 세 큐 카드(#65/#66/#68 소관)는 건드리지
+          않는다. */}
+      {session.user.is_superuser && (
+        <p>
+          <Link href="/operators" data-testid="operators-nav-link">
+            Operator 계정 관리
+          </Link>
+        </p>
+      )}
 
       <section data-testid="operator-home-queues">
         <QueueCard
