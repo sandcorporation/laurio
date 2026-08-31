@@ -150,7 +150,6 @@ def _serialize_detail(appeal: Appeal) -> AppealDetailOut:
         score=ScoreSnapshotOut(
             percentage=str(score.percentage),
             model_version=score.model_version,
-            prompt=score.prompt,
             reasoning=score.reasoning,
             created_at=score.created_at,
         ),
@@ -174,8 +173,10 @@ def list_appeals(request, status: str | None = None):
     "/appeals/{appeal_id}", response={200: AppealDetailOut, 404: ErrorOut}
 )
 def get_appeal_detail(request, appeal_id: int):
-    """운영자가 Score 스냅샷(점수·근거·프롬프트·모델버전)과 함께 이의를 조회한다
-    (#21 AC)."""
+    """운영자가 Score 스냅샷(점수·근거·모델버전)과 함께 이의를 조회한다 (#21 AC).
+
+    프롬프트(=채점에 쓰인 제출 소스)는 여기 없다 — #59, ADR-0022. 소스를 보려면
+    별도의 명시적 펼침 요청이 필요하다(#60)."""
 
     appeal = _get_appeal_or_404(appeal_id)
     return 200, _serialize_detail(appeal)

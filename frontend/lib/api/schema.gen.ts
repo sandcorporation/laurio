@@ -1014,8 +1014,10 @@ export interface paths {
         };
         /**
          * Get Appeal Detail
-         * @description 운영자가 Score 스냅샷(점수·근거·프롬프트·모델버전)과 함께 이의를 조회한다
-         *     (#21 AC).
+         * @description 운영자가 Score 스냅샷(점수·근거·모델버전)과 함께 이의를 조회한다 (#21 AC).
+         *
+         *     프롬프트(=채점에 쓰인 제출 소스)는 여기 없다 — #59, ADR-0022. 소스를 보려면
+         *     별도의 명시적 펼침 요청이 필요하다(#60).
          */
         get: operations["appeals_api_get_appeal_detail"];
         put?: never;
@@ -2412,8 +2414,14 @@ export interface components {
         };
         /**
          * ScoreSnapshotOut
-         * @description 운영자가 심판 근거로 보는 Score 스냅샷 그대로 — 점수·근거·프롬프트·모델버전
-         *     전부(#21 AC, ADR-0006).
+         * @description 운영자가 심판 근거로 보는 Score 스냅샷 — 점수·근거·모델버전(#21 AC, ADR-0006).
+         *
+         *     **`prompt` 는 여기 없다 (#59, ADR-0022).** 프롬프트에는 채점에 쓰인 제출 소스가
+         *     통째로 임베드되어 있어(`scoring._build_prompt`), 이의 상세를 조회하는 것만으로
+         *     소스 전문이 흘러서는 안 된다. 소스를 보려면 별도의 명시적 펼침 요청이 필요하고
+         *     그 요청은 `SourceReading` 을 남긴다(#60) — `Score` 자체는 프롬프트를 여전히
+         *     그대로 보관한다(재현성을 위한 불변 스냅샷, ADR-0006). 이 스키마가 바뀐 것은
+         *     **누가 볼 수 있는지** 뿐이다.
          */
         ScoreSnapshotOut: {
             /**
@@ -2425,8 +2433,6 @@ export interface components {
             model_version: string;
             /** Percentage */
             percentage: string;
-            /** Prompt */
-            prompt: string;
             /** Reasoning */
             reasoning: {
                 [key: string]: unknown;
