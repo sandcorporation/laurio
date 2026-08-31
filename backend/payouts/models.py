@@ -1,9 +1,9 @@
-"""Payout 실행 도메인 모델 (#15, ADR-0004, ADR-0008).
+"""Payout 실행 도메인 모델 (#15, #50, ADR-0004, ADR-0008, ADR-0020).
 
 `Payout`은 한 `Handover`(Escrow 해제)에 대해 실제로 돈을 내보내는 시도 하나를
 나타낸다. `payments.models.Payment`와 같은 성격이다 — 토스 지급대행과의 대화
-상태(요청됨/확정됨·신원대기/확정됨/실패)만 들고, 확정으로 전이하는 순간에만
-원장에 수수료·원천징수 공제 분개를 남긴다.
+상태(요청됨/확정됨·Seller대기/확정됨·신원대기/확정됨/실패)만 들고, 확정으로
+전이하는 순간에만 원장에 수수료·원천징수 공제 분개를 남긴다.
 
 동시성·재전송에 안전한 이유는 `payouts.services.mark_confirmed`/`mark_failed`가
 ADR-0003과 같은 조건부 `UPDATE ... WHERE status='requested'` 규율을 그대로
@@ -12,6 +12,12 @@ ADR-0003과 같은 조건부 `UPDATE ... WHERE status='requested'` 규율을 그
 멱등키(`idempotency_key`)는 ADR-0008이 요구하는 "지급 요청에 멱등키를 붙인다"의
 실체다 — `payments.Payment.order_id`와 같은 역할이지만, 토스 지급대행 API가
 실제로 `Idempotency-Key` 헤더를 요구하는 개념이라 이름을 그대로 맞춘다.
+
+`Seller`는 ADR-0020이 새로 들인 개념이다 — `Developer`가 지급대행사에 등록되는
+수취인 신원. `CONFIRMED_IDENTITY_PENDING`("지급 확정 · 신원 대기", 주민등록번호를
+기다림)과 `CONFIRMED_SELLER_PENDING`("지급 확정 · Seller 대기", 지급대행사의
+수취인 등록을 기다림)은 서로 다른 것을 기다리는 별개 상태다 — 뭉치면 Operator가
+어느 쪽을 처리해야 하는지 알 수 없다.
 """
 
 from __future__ import annotations
@@ -28,6 +34,12 @@ class Payout(models.Model):
         # 없어 세무 처리를 마칠 수 없는 상태. 정식 상태다(ADR-0008) — 실패가
         # 아니고, 금액은 원장에 개발자 미지급금으로 계속 남는다.
         CONFIRMED_IDENTITY_PENDING = "confirmed_identity_pending", "지급 확정 · 신원 대기"
+        # 지급이 확정됐지만 이 Developer의 Seller(지급대행사 수취인) 등록이 아직
+        # 끝나지 않은 상태(ADR-0020). CONFIRMED_IDENTITY_PENDING과는 다른 것을
+        # 기다린다 — 이건 주민등록번호(Laurio의 세무)가 아니라 지급대행사의
+        # 수취인 등록을 기다린다. 한도 초과·심사 지연도 여기 머문다 — 실패가
+        # 아니므로 금액은 그대로 원장에 개발자 미지급금으로 남는다.
+        CONFIRMED_SELLER_PENDING = "confirmed_seller_pending", "지급 확정 · Seller 대기"
         CONFIRMED = "confirmed", "지급 확정"
         FAILED = "failed", "지급 실패"
 
@@ -90,7 +102,12 @@ class Payout(models.Model):
             models.UniqueConstraint(
                 fields=["handover"],
                 condition=models.Q(
-                    status__in=["requested", "confirmed_identity_pending", "confirmed"]
+                    status__in=[
+                        "requested",
+                        "confirmed_identity_pending",
+                        "confirmed_seller_pending",
+                        "confirmed",
+                    ]
                 ),
                 name="unique_active_payout_per_handover",
             ),
@@ -100,7 +117,12 @@ class Payout(models.Model):
             models.UniqueConstraint(
                 fields=["distribution_share"],
                 condition=models.Q(
-                    status__in=["requested", "confirmed_identity_pending", "confirmed"]
+                    status__in=[
+                        "requested",
+                        "confirmed_identity_pending",
+                        "confirmed_seller_pending",
+                        "confirmed",
+                    ]
                 ),
                 name="unique_active_payout_per_distribution_share",
             ),
@@ -165,3 +187,54 @@ class TaxIdentity(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"TaxIdentity(payout={self.payout_id})"
+
+
+class Seller(models.Model):
+    """`Developer`가 지급대행사(토스)에 등록된 수취인 신원 (#50, ADR-0020).
+
+    가입·제출 시점이 아니라 **Payout이 확정된 뒤**에만 등록이 시작된다 —
+    `verification.models.Verification`을 행위 시점으로 미룬 것(ADR-0011)과 같은
+    원칙이다. 구경하거나 떨어진 Developer가 지급대행사에 신원 정보를 넘길
+    이유가 없다.
+
+    `Developer`(accounts.DeveloperProfile)와 1:1이다 — 한 Developer는 Contest를
+    여러 번 이길 수 있지만 지급대행사 등록은 한 번만 하면 된다. `seller_id`가
+    한 번 채워지면(PARTIALLY_APPROVED) 두 번째 Payout부터는 재등록하지 않는다
+    (`payouts.services.ensure_seller_registered`).
+    """
+
+    class Status(models.TextChoices):
+        # 아직 등록을 시도하지 않았거나, 시도했지만 지급대행사 응답을 아직
+        # 받지 못한 상태. 사실상 과도기 값이다 — FakeSellerAdapter는 항상
+        # 동기로 응답하므로 이 값이 DB에 오래 머무는 일은 없지만, 실물 어댑터가
+        # 붙으면(#57) 비동기 응답을 기다리는 동안 이 값에 머물 수 있다.
+        PENDING = "pending", "등록 대기"
+        # 본인인증을 마치고 지급대행사가 승인한 상태 — 주간 한도 안에서는
+        # 곧바로 지급받을 수 있다(ADR-0020).
+        PARTIALLY_APPROVED = "partially_approved", "부분 승인"
+        # 주간 한도 초과, 또는 지급대행사가 추가 서류·확인을 요구하는 상태.
+        # **실패가 아니다** — 짧은 기간에 여러 Contest에서 수상한 Developer를
+        # 성공했다는 이유로 막지 않는다(ADR-0020). 시간이 지나면(또는 재시도로)
+        # PARTIALLY_APPROVED로 넘어갈 수 있다.
+        UNDER_REVIEW = "under_review", "심사 대기"
+        # 지급대행사가 등록을 거절했다. 이것도 Payout을 FAILED로 되돌리지
+        # 않는다 — 확정된 금액은 원장에 개발자 미지급금으로 그대로 남고
+        # (ADR-0004), 재시도(운영 처리 후 재등록)로 회복할 여지를 남긴다.
+        REJECTED = "rejected", "거절"
+
+    developer = models.OneToOneField(
+        "accounts.DeveloperProfile", related_name="seller", on_delete=models.CASCADE
+    )
+    # 지급대행사가 발급한 등록 식별자. 등록 시도 자체가 아직 없었거나(PENDING)
+    # 거절되어(REJECTED) 식별자를 못 받았으면 빈 문자열일 수 있다.
+    seller_id = models.CharField(max_length=100, blank=True)
+    status = models.CharField(max_length=32, choices=Status.choices, default=Status.PENDING)
+    # PARTIALLY_APPROVED일 때만 의미가 있는 주간 지급 한도(원 단위 정수,
+    # ADR-0004). 그 외 상태에서는 null이다.
+    weekly_limit_amount = models.PositiveIntegerField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"Seller(developer={self.developer_id}, status={self.status})"

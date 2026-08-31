@@ -1226,6 +1226,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operator/payouts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Payouts For Operator
+         * @description Operator가 어느 Payout이 두 대기 중 어느 쪽에 막혀 있는지 본다(#50 AC).
+         *
+         *     `blocked_on=identity`나 `blocked_on=seller`로 필터링할 수 있다 — 운영자가
+         *     "지금 내가 처리해야 할 것은 어느 쪽인가"에 바로 답할 수 있어야 한다는 요구가
+         *     여기 있다. 값을 주지 않으면 전체를 최신순으로 본다.
+         */
+        get: operations["payouts_api_list_payouts_for_operator"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/payments": {
         parameters: {
             query?: never;
@@ -1354,6 +1378,30 @@ export interface paths {
          *     받는다(ADR-0008) — 가입 시점이나 지급 요청 시점에는 수집하지 않는다.
          */
         post: operations["payouts_api_submit_payout_identity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/payouts/{idempotency_key}/seller-registration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Payout Seller Registration
+         * @description CONFIRMED_SELLER_PENDING에서 Seller 등록을 다시 시도한다(#50, ADR-0020).
+         *
+         *     실물 어댑터가 붙기 전까지는 fake 시나리오(한도 초과·심사 필요·거절)가 결국
+         *     부분 승인으로 풀리는 것을 재현하는 유일한 경로이기도 하다 — 실제 토스
+         *     지급대행은 이 자리를 웹훅이나 배치 재조회로 대신하게 된다(#57).
+         */
+        post: operations["payouts_api_retry_payout_seller_registration"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1770,6 +1818,8 @@ export interface components {
         };
         /** ConfirmPayoutIn */
         ConfirmPayoutIn: {
+            /** Seller Simulate */
+            seller_simulate?: string | null;
             /** Simulate */
             simulate?: string | null;
         };
@@ -2198,6 +2248,40 @@ export interface components {
             /** Username */
             username: string;
         };
+        /**
+         * OperatorPayoutOut
+         * @description Operator가 Payout 하나가 무엇을 기다리는지 보는 표면(#50 AC).
+         *
+         *     `blocked_on`은 "identity" | "seller" | None(둘 다 안 기다림 — 이미
+         *     CONFIRMED거나 아직 REQUESTED/FAILED) 중 하나다. 두 대기를 한 상태로
+         *     뭉치지 않는다는 요구가 Operator 조회에서도 그대로 지켜져야 한다.
+         */
+        OperatorPayoutOut: {
+            /** Blocked On */
+            blocked_on: string | null;
+            /** Contest Id */
+            contest_id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Developer User Id */
+            developer_user_id: number;
+            /** Has Identity */
+            has_identity: boolean;
+            /**
+             * Idempotency Key
+             * Format: uuid
+             */
+            idempotency_key: string;
+            /** Net Amount */
+            net_amount: number;
+            /** Seller Status */
+            seller_status: string | null;
+            /** Status */
+            status: string;
+        };
         /** PagedContestOut */
         PagedContestOut: {
             /** Count */
@@ -2248,10 +2332,14 @@ export interface components {
             idempotency_key: string;
             /** Net Amount */
             net_amount: number;
+            /** Next Action */
+            next_action: string;
             /** Platform Fee Amount */
             platform_fee_amount: number;
             /** Prize Amount */
             prize_amount: number;
+            /** Seller Status */
+            seller_status: string | null;
             /** Status */
             status: string;
             /** Withholding Tax Amount */
@@ -2494,6 +2582,11 @@ export interface components {
             reasoning: {
                 [key: string]: unknown;
             }[];
+        };
+        /** SellerRegistrationRetryIn */
+        SellerRegistrationRetryIn: {
+            /** Simulate */
+            simulate?: string | null;
         };
         /** SocialLoginIn */
         SocialLoginIn: {
@@ -4157,6 +4250,28 @@ export interface operations {
             };
         };
     };
+    payouts_api_list_payouts_for_operator: {
+        parameters: {
+            query?: {
+                blocked_on?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorPayoutOut"][];
+                };
+            };
+        };
+    };
     payments_api_initiate_payment: {
         parameters: {
             query?: never;
@@ -4401,6 +4516,59 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["IdentitySubmitIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PayoutOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    payouts_api_retry_payout_seller_registration: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                idempotency_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SellerRegistrationRetryIn"];
             };
         };
         responses: {
