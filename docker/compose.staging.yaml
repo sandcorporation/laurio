@@ -12,6 +12,8 @@
 # 어댑터 바인딩(ADR-0007, 한눈에 보기용 — 실제 값은 .env.staging):
 #   PG        : FakePGAdapter        -> 토스 "샌드박스"        (PAYMENT_ADAPTER_MODE=real)
 #   지급대행   : FakePayoutAdapter     -> 토스 지급대행 샌드박스   (PAYOUT_ADAPTER_MODE=real)
+#   Seller 등록 : FakeSellerAdapter     -> 토스 지급대행 셀러 등록 (SELLER_ADAPTER_MODE=real,
+#               #50/#57, Payout 확정 후에만 호출된다 — ADR-0020)
 #   스토리지   : MinIO(dev)           -> MinIO(서브 호스트, TLS)  (STORAGE_BACKEND=s3)
 #   소셜 로그인 : FakeSocialAdapter     -> 카카오/GitHub/구글 실물 (SOCIAL_AUTH_MODE=real)
 #   본인확인   : FakeVerificationAdapter -> 실제 PASS/NICE 연동   (VERIFICATION_ADAPTER_MODE=real)
@@ -72,6 +74,9 @@ x-backend-env: &backend-env
   PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:?}
   PAYOUT_ADAPTER_MODE: real
   PAYOUT_WEBHOOK_SECRET: ${PAYOUT_WEBHOOK_SECRET:?}
+  # Seller(수취인) 등록은 지급과 별개 API·별개 시점이다(#50, ADR-0020) — Payout이
+  # 확정된 뒤에만 호출된다.
+  SELLER_ADAPTER_MODE: real
   TOSS_SANDBOX_SECRET_KEY: ${TOSS_SANDBOX_SECRET_KEY:-}
 
   # --- LLM 채점 · AI grill 어댑터 (ADR-0006/0007/0014) ---

@@ -1,21 +1,27 @@
-"""Payout 실행 API (#15, ADR-0004, ADR-0007, ADR-0008).
+"""Payout 실행 API (#15, #50, ADR-0004, ADR-0007, ADR-0008, ADR-0020).
 
 - `POST /contests/{contest_id}/payout` — Developer가 자신의 Award된 Contest에
   대해 지급을 요청한다. Escrow가 아직 해제되지 않았으면(Handover가 released가
   아니면) 409다. 멱등하다 — 이미 요청되어 있으면 새 idempotency_key를 만들지
   않고 그대로 어댑터에 재요청한다(payments.api.initiate_payment와 같은 관용구).
 - `GET /contests/{contest_id}/payout` — Developer 본인이 총액·수수료·원천징수·
-  실지급액 내역을 조회한다.
+  실지급액 내역과, 무엇을 기다리고 있으며 다음에 뭘 해야 하는지를 조회한다.
 - `POST /payouts/{idempotency_key}/confirm` — 동기 확인. 타임아웃이 나도 곧바로
   실패로 처리하지 않고 조회로 확정한다.
 - `POST /payouts/webhook` — 토스(Fake 포함)가 비동기로 통지하는
   `payout.changed` 웹훅. 서명이 없거나 틀리면 거부한다.
 - `POST /payouts/{idempotency_key}/identity` — 지급이 확정된(CONFIRMED_IDENTITY_
-  PENDING 이상) 뒤에만 Developer가 주민등록번호를 제출해 최종 확정한다.
+  PENDING 이상) 뒤에만 Developer가 주민등록번호를 제출한다.
+- `POST /payouts/{idempotency_key}/seller-registration` — CONFIRMED_SELLER_
+  PENDING에서 Seller 등록을 다시 시도한다(#50). 실물 어댑터가 붙기 전까지는
+  fake 시나리오 재현용이기도 하다.
+- `GET /operator/payouts` — Operator가 두 대기(신원/Seller) 중 어느 쪽이 막혀
+  있는지 본다(#50 AC).
 
 두 확정 경로(confirm/webhook) 모두 `payouts.services.mark_confirmed`/
 `mark_failed`라는 같은 조건부 UPDATE 관문을 통과한다 — 어느 쪽이 먼저 도착하든,
-몇 번 재전송되든 원장에는 정확히 한 번만 분개가 남는다.
+몇 번 재전송되든 원장에는 정확히 한 번만 분개가 남는다. `mark_confirmed`는 그
+안에서 Seller 등록도 함께 시작한다(ADR-0020).
 """
 
 from __future__ import annotations
@@ -27,16 +33,35 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
+from core.operator_auth import OperatorAuth
 from distributions.models import DistributionShare
 from handovers.models import Handover
 from payments.webhook_security import verify_webhook_signature
 
 from .adapters import PayoutError, PayoutTimeoutError, get_adapter
-from .models import Payout, PayoutWebhookDelivery, TaxIdentity
-from .schemas import ConfirmPayoutIn, ErrorOut, IdentitySubmitIn, PayoutOut, WebhookIn, WebhookOut
-from .services import get_or_create_payout, mark_confirmed, mark_failed, submit_identity
+from .models import Payout, PayoutWebhookDelivery, Seller, TaxIdentity
+from .schemas import (
+    ConfirmPayoutIn,
+    ErrorOut,
+    IdentitySubmitIn,
+    OperatorPayoutOut,
+    PayoutOut,
+    SellerRegistrationRetryIn,
+    WebhookIn,
+    WebhookOut,
+)
+from .services import (
+    get_or_create_payout,
+    mark_confirmed,
+    mark_failed,
+    retry_seller_registration,
+    submit_identity,
+)
 
 router = Router(tags=["payouts"])
+# Operator 표면 — appeals.api.operator_router와 같은 원칙으로 라우터 전체가
+# 기본 거부다(#44).
+operator_router = Router(tags=["operator", "payouts"], auth=OperatorAuth())
 
 
 def _payout_contest_id(payout: Payout) -> int:
@@ -59,7 +84,46 @@ def _payout_owner_user_id(payout: Payout) -> int:
     return payout.distribution_share.submission.developer.user_id
 
 
+def _payout_developer_id(payout: Payout) -> int:
+    """이 Payout을 받을 `accounts.DeveloperProfile`의 pk — Seller는 이 단위로
+    등록된다(payouts.services._resolve_developer와 같은 판정).
+    """
+
+    if payout.handover_id is not None:
+        return payout.handover.award.submission.developer_id
+    return payout.distribution_share.submission.developer_id
+
+
+# 다음 행동 안내(#50 AC — "Developer가 자기 Payout이 무엇을 기다리는지와 다음에
+# 무엇을 해야 하는지 볼 수 있다"). status·seller_status 조합마다 사람이 읽을
+# 문장을 고정해 둔다 — 침묵은 상금이 사라진 것으로 읽힌다.
+def _next_action_message(payout: Payout, seller: Seller | None) -> str:
+    if payout.status == Payout.Status.REQUESTED:
+        return "지급 확인 절차가 진행 중입니다. 잠시만 기다려주세요."
+    if payout.status == Payout.Status.CONFIRMED_SELLER_PENDING:
+        if seller is not None and seller.status == Seller.Status.UNDER_REVIEW:
+            return (
+                "지급대행사 심사가 진행 중입니다(주간 지급 한도 초과 또는 추가 확인 "
+                "요청) — 상금은 안전하게 보관되어 있으며 심사가 끝나면 자동으로 다음 "
+                "단계로 넘어갑니다."
+            )
+        if seller is not None and seller.status == Seller.Status.REJECTED:
+            return (
+                "지급대행사 수취인 등록이 거절되었습니다. 상금은 원장에 그대로 "
+                "남아 있습니다 — 운영자에게 문의해주세요."
+            )
+        return "지급대행사 수취인 등록이 진행 중입니다. 완료되면 자동으로 다음 단계로 넘어갑니다."
+    if payout.status == Payout.Status.CONFIRMED_IDENTITY_PENDING:
+        return "세무 신고를 위해 주민등록번호를 제출해주세요."
+    if payout.status == Payout.Status.CONFIRMED:
+        return "지급이 완료되었습니다."
+    if payout.status == Payout.Status.FAILED:
+        return "지급 요청이 실패했습니다. 다시 시도해주세요."
+    return ""  # pragma: no cover - 위 분기가 Status 전체를 다룬다.
+
+
 def _serialize(payout: Payout) -> PayoutOut:
+    seller = Seller.objects.filter(developer_id=_payout_developer_id(payout)).first()
     return PayoutOut(
         idempotency_key=payout.idempotency_key,
         contest_id=_payout_contest_id(payout),
@@ -69,6 +133,8 @@ def _serialize(payout: Payout) -> PayoutOut:
         net_amount=payout.net_amount,
         status=payout.status,
         has_identity=TaxIdentity.objects.filter(payout=payout).exists(),
+        seller_status=seller.status if seller is not None else None,
+        next_action=_next_action_message(payout, seller),
         created_at=payout.created_at,
     )
 
@@ -197,7 +263,7 @@ def confirm_payout(request: HttpRequest, idempotency_key: UUID, payload: Confirm
         raise HttpError(502, str(exc)) from exc
 
     if result_status == "paid":
-        payout = mark_confirmed(idempotency_key)
+        payout = mark_confirmed(idempotency_key, seller_simulate=payload.seller_simulate)
     elif result_status == "failed":
         payout = mark_failed(idempotency_key)
     else:
@@ -270,10 +336,97 @@ def submit_payout_identity(
 
     payout = _get_owned_payout(request, idempotency_key)
 
-    if payout.status not in (Payout.Status.CONFIRMED_IDENTITY_PENDING, Payout.Status.CONFIRMED):
+    # CONFIRMED_SELLER_PENDING도 신원 제출을 받는다 — 두 대기는 서로 독립적이다
+    # (#50, ADR-0020). Seller 등록이 아직 안 끝났다는 이유로 신원 제출까지
+    # 막으면, 먼저 끝난 쪽이 있어도 아무것도 진행할 수 없다.
+    if payout.status not in (
+        Payout.Status.CONFIRMED_IDENTITY_PENDING,
+        Payout.Status.CONFIRMED_SELLER_PENDING,
+        Payout.Status.CONFIRMED,
+    ):
         raise HttpError(
             409, "지급이 확정된 뒤에만 신원 정보를 제출할 수 있습니다."
         )
 
     payout = submit_identity(payout, payload.resident_registration_number)
     return 200, _serialize(payout)
+
+
+@router.post(
+    "/payouts/{idempotency_key}/seller-registration",
+    response={200: PayoutOut, 403: ErrorOut, 404: ErrorOut, 409: ErrorOut},
+    auth=jwt_auth,
+)
+def retry_payout_seller_registration(
+    request: HttpRequest, idempotency_key: UUID, payload: SellerRegistrationRetryIn
+):
+    """CONFIRMED_SELLER_PENDING에서 Seller 등록을 다시 시도한다(#50, ADR-0020).
+
+    실물 어댑터가 붙기 전까지는 fake 시나리오(한도 초과·심사 필요·거절)가 결국
+    부분 승인으로 풀리는 것을 재현하는 유일한 경로이기도 하다 — 실제 토스
+    지급대행은 이 자리를 웹훅이나 배치 재조회로 대신하게 된다(#57).
+    """
+
+    payout = _get_owned_payout(request, idempotency_key)
+
+    if payout.status != Payout.Status.CONFIRMED_SELLER_PENDING:
+        raise HttpError(
+            409, "Seller 등록 대기 상태에서만 재시도할 수 있습니다."
+        )
+
+    payout = retry_seller_registration(payout, simulate=payload.simulate)
+    return 200, _serialize(payout)
+
+
+# --- Operator 표면 (#50 AC) ------------------------------------------------------
+
+
+def _blocked_on(payout: Payout) -> str | None:
+    if payout.status == Payout.Status.CONFIRMED_SELLER_PENDING:
+        return "seller"
+    if payout.status == Payout.Status.CONFIRMED_IDENTITY_PENDING:
+        return "identity"
+    return None
+
+
+@operator_router.get("/payouts", response=list[OperatorPayoutOut])
+def list_payouts_for_operator(request: HttpRequest, blocked_on: str | None = None):
+    """Operator가 어느 Payout이 두 대기 중 어느 쪽에 막혀 있는지 본다(#50 AC).
+
+    `blocked_on=identity`나 `blocked_on=seller`로 필터링할 수 있다 — 운영자가
+    "지금 내가 처리해야 할 것은 어느 쪽인가"에 바로 답할 수 있어야 한다는 요구가
+    여기 있다. 값을 주지 않으면 전체를 최신순으로 본다.
+    """
+
+    payouts = (
+        Payout.objects.select_related(
+            "handover__award__contest",
+            "handover__award__submission__developer",
+            "distribution_share__distribution__contest",
+            "distribution_share__submission__developer",
+        )
+        .order_by("-created_at")
+    )
+
+    results: list[OperatorPayoutOut] = []
+    for payout in payouts:
+        blocked = _blocked_on(payout)
+        if blocked_on is not None and blocked != blocked_on:
+            continue
+
+        seller = Seller.objects.filter(developer_id=_payout_developer_id(payout)).first()
+        results.append(
+            OperatorPayoutOut(
+                idempotency_key=payout.idempotency_key,
+                contest_id=_payout_contest_id(payout),
+                developer_user_id=_payout_owner_user_id(payout),
+                net_amount=payout.net_amount,
+                status=payout.status,
+                blocked_on=blocked,
+                seller_status=seller.status if seller is not None else None,
+                has_identity=TaxIdentity.objects.filter(payout=payout).exists(),
+                created_at=payout.created_at,
+            )
+        )
+
+    return results

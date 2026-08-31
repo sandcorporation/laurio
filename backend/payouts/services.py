@@ -1,4 +1,4 @@
-"""Payout 도메인 로직 (#15, ADR-0003, ADR-0004, ADR-0008).
+"""Payout 도메인 로직 (#15, #50, ADR-0003, ADR-0004, ADR-0008, ADR-0020).
 
 API 레이어(`payouts.api`)에서만 호출된다 — 테스트의 유일한 시임은 HTTP이므로 여기
 함수를 테스트에서 직접 부르지 않는다(`CLAUDE.md`).
@@ -16,10 +16,17 @@ rowcount가 1일 때만 원장에 수수료·원천징수 공제 분개를 남�
 
 지급 확정은 항상 CONFIRMED_IDENTITY_PENDING을 거친다 — 주민등록번호는 가입
 시점이 아니라 Payout이 확정된 시점에만 수집하므로(ADR-0008), 확정되는 순간에는
-아직 신원 정보가 없는 것이 정상 경로다. `submit_identity`가 뒤이어 CONFIRMED로
-마저 옮긴다. 원장 분개는 CONFIRMED_IDENTITY_PENDING 진입 시점에 이미 남는다 —
-신원 정보 유무는 세무 신고 가능 여부를 가릴 뿐 금액이 원장에서 사라지지도,
-다시 계산되지도 않는다.
+아직 신원 정보가 없는 것이 정상 경로다. 원장 분개는 CONFIRMED_IDENTITY_PENDING
+진입 시점에 이미 남는다 — 신원 정보 유무도, Seller 등록 여부도 금액이 원장에서
+사라지거나 다시 계산되게 만들지 않는다.
+
+**Seller 등록은 이 확정 시점에만 시작된다**(ADR-0020) — `ensure_seller_registered`가
+`mark_confirmed`에서 자동으로 호출된다. 이미 부분 승인된 Seller가 있으면(두 번째
+Payout부터) 어댑터를 다시 부르지 않고 그대로 통과한다. 아직 부분 승인이 아니면
+(한도 초과·심사 필요·거절 어느 쪽이든) `CONFIRMED_SELLER_PENDING`에 머문다 —
+`CONFIRMED_IDENTITY_PENDING`("신원 대기")과는 다른 것을 기다리는 별개 상태다.
+`submit_identity`와 `retry_seller_registration`이 이 두 대기를 마저 풀어 CONFIRMED로
+옮긴다.
 """
 
 from __future__ import annotations
@@ -31,15 +38,19 @@ from ledger.models import Account, EntrySide
 from ledger.services import LineInput, post_journal_entry
 from verification.crypto import encrypt
 
-from .models import Payout, TaxIdentity
+from .adapters import get_seller_adapter
+from .models import Payout, Seller, TaxIdentity
 
 # REQUESTED든 그 이후 확정 상태든 "아직 실패로 끝나지 않은" 시도는 활성으로 본다
 # — models.Payout.Meta.constraints의 unique_active_payout_per_handover와 정확히
 # 같은 집합이어야 한다(그쪽은 DB 레벨 최후 방어선, 이건 애플리케이션 레벨 조회
 # 기준). FAILED만 빠진다 — 그래야 실패한 시도 뒤에 새 REQUESTED를 만들 수 있다.
+# CONFIRMED_SELLER_PENDING도 활성이다 — Seller 등록이 안 끝났을 뿐 지급 자체는
+# 이미 확정되어 원장에 분개가 남아 있다(#50).
 _ACTIVE_PAYOUT_STATUSES = [
     Payout.Status.REQUESTED,
     Payout.Status.CONFIRMED_IDENTITY_PENDING,
+    Payout.Status.CONFIRMED_SELLER_PENDING,
     Payout.Status.CONFIRMED,
 ]
 
@@ -177,13 +188,63 @@ def _resolve_contest(payout: Payout):
     return payout.distribution_share.distribution.contest
 
 
-def mark_confirmed(idempotency_key) -> Payout:
-    """지급을 확정한다(CONFIRMED_IDENTITY_PENDING). 이미 확정되어 있으면 그대로
-    돌려준다.
+def _resolve_developer(payout: Payout):
+    """이 Payout을 받을 `accounts.DeveloperProfile` — `_resolve_contest`와 같은
+    이유로 두 경로(Handover/DistributionShare) 중 하나를 통해서만 판정된다.
+    Seller는 이 Developer 단위로 등록된다(한 Developer가 여러 Contest를 이겨도
+    등록은 한 번).
+    """
+
+    if payout.handover_id is not None:
+        return payout.handover.award.submission.developer
+    return payout.distribution_share.submission.developer
+
+
+def ensure_seller_registered(developer, *, simulate: str | None = None) -> Seller:
+    """이 Developer의 Seller 등록을 멱등하게 보장한다(#50, ADR-0020).
+
+    이미 부분 승인된 Seller가 있으면 그대로 돌려주고 어댑터를 다시 부르지
+    않는다 — `seller_id`가 Developer에 남아 두 번째 Payout부터는 재등록하지
+    않는다는 요구가 여기서 지켜진다. 그 외(등록 전/심사 대기/거절)에는 등록
+    (또는 재시도)을 어댑터에 요청하고 결과를 그대로 반영한다 — 한도 초과·심사
+    필요·거절 어느 쪽도 예외를 던지지 않는다(정상 응답의 한 갈래다, ADR-0020).
+    """
+
+    existing = Seller.objects.filter(developer=developer).first()
+    if existing is not None and existing.status == Seller.Status.PARTIALLY_APPROVED:
+        return existing
+
+    adapter = get_seller_adapter()
+    result = adapter.register(developer_id=developer.id, simulate=simulate)
+
+    seller, _created = Seller.objects.update_or_create(
+        developer=developer,
+        defaults={
+            # 거절 응답이 빈 seller_id를 줄 수 있다 — 이전에 이미 받은 식별자가
+            # 있으면 지우지 않는다(재시도로 같은 등록 건을 이어가는 실물 벤더의
+            # 모양을 흉내낸다).
+            "seller_id": result.seller_id or (existing.seller_id if existing else ""),
+            "status": result.status,
+            "weekly_limit_amount": result.weekly_limit_amount,
+        },
+    )
+    return seller
+
+
+def mark_confirmed(idempotency_key, *, seller_simulate: str | None = None) -> Payout:
+    """지급을 확정한다(CONFIRMED_IDENTITY_PENDING, 또는 Seller가 아직 준비되지
+    않았으면 CONFIRMED_SELLER_PENDING). 이미 확정되어 있으면 그대로 돌려준다.
 
     이겼을 때만(rowcount==1) 원장에 수수료·원천징수 공제 분개를 남긴다. 원천징수는
     반드시 원천징수 예수금 계정에 계상된다(ADR-0004/0008) — 국세청에 낼 남의
-    돈이므로 플랫폼 수수료 수익과 섞이지 않는다.
+    돈이므로 플랫폼 수수료 수익과 섞이지 않는다. **이 분개는 Seller 등록 결과와
+    무관하게 항상 남는다** — 한도 초과·심사 지연·거절 어느 경로로도 확정된 금액이
+    원장에서 사라지지 않는다(ADR-0004, #50 AC).
+
+    `seller_simulate`는 fake Seller 어댑터 전용 시나리오 선택이다
+    (`ConfirmPayoutIn.seller_simulate`와 같은 원칙, `payments.api.ConfirmPaymentIn.
+    simulate`를 본뜬 관용구) — 실제 어댑터에서는 의미가 없다. 웹훅 경로는 이
+    인자를 넘기지 않으므로 항상 기본(즉시 부분 승인) 시나리오로 등록을 시도한다.
     """
 
     with transaction.atomic():
@@ -191,7 +252,10 @@ def mark_confirmed(idempotency_key) -> Payout:
             idempotency_key=idempotency_key, status=Payout.Status.REQUESTED
         ).update(status=Payout.Status.CONFIRMED_IDENTITY_PENDING)
         payout = Payout.objects.select_related(
-            "handover__award__contest", "distribution_share__distribution__contest"
+            "handover__award__contest",
+            "handover__award__submission__developer",
+            "distribution_share__distribution__contest",
+            "distribution_share__submission__developer",
         ).get(idempotency_key=idempotency_key)
 
         if updated != 1:
@@ -230,6 +294,18 @@ def mark_confirmed(idempotency_key) -> Payout:
         Payout.objects.filter(pk=payout.pk).update(journal_entry_id=entry.id)
         payout.journal_entry_id = entry.id
 
+        # Seller 등록은 이 확정 시점에만 시작된다(ADR-0020) — 그 전에는 어떤
+        # 신원 정보도 지급대행사에 넘기지 않는다. 이미 부분 승인된 Seller가
+        # 있으면(두 번째 Payout부터) ensure_seller_registered가 어댑터를 다시
+        # 부르지 않는다.
+        developer = _resolve_developer(payout)
+        seller = ensure_seller_registered(developer, simulate=seller_simulate)
+        if seller.status != Seller.Status.PARTIALLY_APPROVED:
+            Payout.objects.filter(
+                pk=payout.pk, status=Payout.Status.CONFIRMED_IDENTITY_PENDING
+            ).update(status=Payout.Status.CONFIRMED_SELLER_PENDING)
+            payout.status = Payout.Status.CONFIRMED_SELLER_PENDING
+
     return payout
 
 
@@ -247,18 +323,22 @@ def mark_failed(idempotency_key) -> Payout:
 
 
 def submit_identity(payout: Payout, resident_registration_number: str) -> Payout:
-    """주민등록번호를 암호화해 별도 테이블에 저장하고 지급을 최종 확정한다.
+    """주민등록번호를 암호화해 별도 테이블에 저장하고, 두 대기가 모두 풀렸으면
+    지급을 최종 확정한다.
 
     `TaxIdentity`를 `update_or_create`로 upsert한다 — 재제출은 항상 최신 값으로
     덮어쓴다. 이미 있는 값을 그대로 다시 보내면(재전송) 같은 값으로 덮어쓸 뿐이라
     안전하고, 실수로 잘못 입력한 값을 보냈다면(오타) 정정할 수 있는 유일한
     경로이기도 하다 — TaxIdentity는 append-only 원장이 아니라 세무 신고용
     현재값 저장소이므로, "이미 있으면 그대로 돌려주고 두 번째 값은 버린다"는
-    구 정책은 오타를 API로 영영 고칠 수 없게 만든다(#15 리뷰 지적 4). Payout
-    상태는 CONFIRMED_IDENTITY_PENDING일 때만 CONFIRMED로 전이한다 — 이미
-    CONFIRMED인 뒤의 정정 제출은 상태를 다시 건드리지 않는다(원장 분개는
-    mark_confirmed 시점에 이미 끝났고, 신원 정보 자체는 원장에 영향을 주지
-    않는다).
+    구 정책은 오타를 API로 영영 고칠 수 없게 만든다(#15 리뷰 지적 4).
+
+    Payout 상태는 CONFIRMED_IDENTITY_PENDING 또는 CONFIRMED_SELLER_PENDING일
+    때만 건드린다(이미 CONFIRMED인 뒤의 정정 제출은 상태를 다시 건드리지
+    않는다 — 원장 분개는 mark_confirmed 시점에 이미 끝났고, 신원 정보 자체는
+    원장에 영향을 주지 않는다). 신원은 항상 저장하지만, **Seller가 아직 부분
+    승인이 아니면 CONFIRMED로 넘어가지 않고 CONFIRMED_SELLER_PENDING에
+    남는다**(#50, ADR-0020) — 두 대기 중 하나라도 남아 있으면 최종 확정이 아니다.
     """
 
     with transaction.atomic():
@@ -268,9 +348,43 @@ def submit_identity(payout: Payout, resident_registration_number: str) -> Payout
                 "resident_registration_number_encrypted": encrypt(resident_registration_number)
             },
         )
-        Payout.objects.filter(
-            pk=payout.pk, status=Payout.Status.CONFIRMED_IDENTITY_PENDING
-        ).update(status=Payout.Status.CONFIRMED)
+
+        if payout.status in (
+            Payout.Status.CONFIRMED_IDENTITY_PENDING,
+            Payout.Status.CONFIRMED_SELLER_PENDING,
+        ):
+            developer = _resolve_developer(payout)
+            seller = Seller.objects.filter(developer=developer).first()
+            seller_ready = seller is not None and seller.status == Seller.Status.PARTIALLY_APPROVED
+            target = Payout.Status.CONFIRMED if seller_ready else Payout.Status.CONFIRMED_SELLER_PENDING
+            Payout.objects.filter(pk=payout.pk, status=payout.status).update(status=target)
 
     payout.refresh_from_db()
     return payout
+
+
+def retry_seller_registration(payout: Payout, *, simulate: str | None = None) -> Payout:
+    """CONFIRMED_SELLER_PENDING에서 Seller 등록을 다시 시도한다(#50, ADR-0020).
+
+    부분 승인으로 넘어가면, 신원이 이미 제출되어 있으면 CONFIRMED로, 아직
+    아니면 CONFIRMED_IDENTITY_PENDING으로 옮긴다(두 대기 중 남은 한쪽만
+    보여준다). 여전히 부분 승인이 아니면(한도 초과·심사 필요·거절) 그대로
+    CONFIRMED_SELLER_PENDING에 남는다 — 실패로 종결되지 않는다.
+    """
+
+    with transaction.atomic():
+        locked = Payout.objects.select_for_update().get(pk=payout.pk)
+        if locked.status != Payout.Status.CONFIRMED_SELLER_PENDING:
+            return locked
+
+        developer = _resolve_developer(locked)
+        seller = ensure_seller_registered(developer, simulate=simulate)
+        if seller.status == Seller.Status.PARTIALLY_APPROVED:
+            has_identity = TaxIdentity.objects.filter(payout=locked).exists()
+            target = Payout.Status.CONFIRMED if has_identity else Payout.Status.CONFIRMED_IDENTITY_PENDING
+            Payout.objects.filter(
+                pk=locked.pk, status=Payout.Status.CONFIRMED_SELLER_PENDING
+            ).update(status=target)
+            locked.status = target
+
+    return locked
