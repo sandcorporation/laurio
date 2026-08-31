@@ -75,7 +75,7 @@ test.describe("허용목록 — 기본은 거부", () => {
     // "/api/contests"로 시작한다는 이유로 허용목록을 통과했고, 그 문자열을 그대로
     // 받은 fetch()의 URL 파서가 ".."를 정규화해 실제로는 /api/internal/tick으로
     // 나갔다(프록시의 404가 아니라 백엔드의 401이 그대로 돌아오는 것으로 직접
-    // 확인했다). lib/proxy/path-safety.ts의 세그먼트 검사가 이걸 막는다 — 반드시
+    // 확인했다). packages/bff-shared/src/path-safety.ts의 세그먼트 검사가 이걸 막는다 — 반드시
     // 프록시 고유의 404 + 이 본문이어야 한다. 백엔드의 401이 보이면 우회가 아직
     // 뚫려 있다는 뜻이다.
     const bypassPaths = [
