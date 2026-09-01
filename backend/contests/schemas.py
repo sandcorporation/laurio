@@ -275,4 +275,8 @@ class MySponsoredContestOut(Schema):
 
     @staticmethod
     def resolve_next_action(obj) -> str:
-        return sponsor_next_action_for(obj, submission_count=obj.submission_count)
+        # `now` 는 목록 엔드포인트가 요청 스코프에서 **한 번** 구해 각 행에
+        # 붙여 둔 값이다 — 여기서 `Clock.now()` 를 부르면 행마다 ClockOverride
+        # 조회가 나가고, 게다가 한 화면 안에서 행마다 다른 시각으로 판정하게
+        # 된다(마감 직전 목록에서 실제로 갈릴 수 있다).
+        return sponsor_next_action_for(obj, now=obj.judged_as_of)

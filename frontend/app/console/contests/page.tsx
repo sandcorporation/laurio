@@ -52,11 +52,31 @@ export default function MyContestsPage() {
           아직 연 공모전이 없습니다.
         </p>
       ) : (
-        <ul className="mt-6 flex flex-col gap-3" data-testid="my-contests-list">
-          {state.rows.map((row) => (
-            <SponsoredContestCard key={row.contest_id} row={row} />
-          ))}
-        </ul>
+        <>
+          <ul className="mt-6 flex flex-col gap-3" data-testid="my-contests-list">
+            {state.rows.map((row) => (
+              <SponsoredContestCard key={row.contest_id} row={row} />
+            ))}
+          </ul>
+
+          {/* 목록은 페이지네이션된다. 컨트롤이 없으면 20개를 넘는 개최자는
+              나머지에 도달할 길이 없고, 잘렸다는 사실조차 화면에 없다 —
+              오래된 것들이 잘리는데 그중 하나가 「내 차례」면 이 화면이
+              막으려던 결과가 그대로 일어난다. */}
+          {state.hasMore ? (
+            <button
+              className="mt-4 rounded border border-subtle px-4 py-2 text-sm disabled:opacity-50"
+              type="button"
+              onClick={state.loadMore}
+              disabled={state.loadingMore}
+              data-testid="my-contests-load-more"
+            >
+              {state.loadingMore
+                ? "불러오는 중..."
+                : `더 보기 (${state.rows.length} / ${state.count})`}
+            </button>
+          ) : null}
+        </>
       )}
     </main>
   );

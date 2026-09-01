@@ -15,13 +15,14 @@ import logging
 from uuid import UUID
 
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Sum
+from django.db.models import DateTimeField, Sum, Value
 from django.http import HttpRequest
 from ninja import Query, Router
 from ninja.errors import HttpError
 from ninja.pagination import PageNumberPagination, paginate
 
 from accounts.middleware import jwt_auth
+from contests.sponsorship import sponsored_contest_queryset
 from accounts.models import SponsorProfile
 from accounts.sanitize import sanitize_free_text
 from core.clock import Clock
@@ -314,13 +315,17 @@ def list_my_sponsored_contests(request: HttpRequest, **kwargs):
     if profile is None:
         return Contest.objects.none()
 
-    return (
-        Contest.objects.filter(sponsor=profile)
-        # 「다음 행동」 판정이 보는 것들을 한 번에 끌어온다 — 행마다 조회를
-        # 내면 공모전이 쌓일수록 목록이 느려진다.
-        .select_related("award__handover", "distribution")
-        .annotate(submission_count=Count("submissions", distinct=True))
-        .order_by("-created_at")
+    # 시각과 정책을 이 요청 스코프에서 **한 번씩만** 구한다 — `core.api.tick` 과
+    # `distributions.services.run_due_distributions` 가 쓰는 것과 같은 관용구
+    # (#75, ADR-0023). 행마다 구하면 조회가 행 수만큼 늘고, 게다가 한 화면 안에서
+    # 행마다 다른 시각으로 판정하게 된다.
+    as_of = Clock.now()
+    policy = get_current_policy()
+
+    return sponsored_contest_queryset(
+        Contest.objects.filter(sponsor=profile), as_of=as_of, policy=policy
+    ).annotate(judged_as_of=Value(as_of, output_field=DateTimeField())).order_by(
+        "-created_at"
     )
 
 

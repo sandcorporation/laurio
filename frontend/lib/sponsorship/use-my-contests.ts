@@ -22,7 +22,16 @@ export type SponsoredContestRow = components["schemas"]["MySponsoredContestOut"]
 export type MyContestsState =
   | { status: "loading" }
   | { status: "error" }
-  | { status: "ready"; rows: SponsoredContestRow[]; count: number };
+  | {
+      status: "ready";
+      rows: SponsoredContestRow[];
+      count: number;
+      /** 아직 안 받은 페이지가 남았는가 — 남았는데 컨트롤이 없으면 그것들은 없는 것이 된다. */
+      hasMore: boolean;
+      /** 다음 페이지를 이어 붙인다. */
+      loadMore: () => void;
+      loadingMore: boolean;
+    };
 
 export type SponsorActionLabel = {
   text: string;
@@ -69,16 +78,28 @@ export const SPONSOR_ACTION_LABELS: Record<SponsorNextAction, SponsorActionLabel
   contest_complete: { text: "완료되었습니다", mine: false, canJudge: false },
 };
 
+
+/** 페이지를 이어 받는다.
+ *
+ * 목록 엔드포인트는 `page_size=20` 으로 페이지네이션된다. 1페이지만 그리면
+ * 공모전(또는 참가)이 20개를 넘는 사람은 나머지에 **도달할 길이 없는데**,
+ * 빈 상태 판정에 쓰는 `count` 는 전체 건수라 잘렸다는 사실이 화면에 드러나지도
+ * 않는다. `-created_at` 정렬이라 잘리는 쪽이 오래된 것들이고, 그중 하나가 「내
+ * 차례」면 이 화면이 막으려던 결과가 그대로 일어난다.
+ */
 export function useMyContests(): MyContestsState {
   const router = useRouter();
-  const [state, setState] = useState<MyContestsState>({ status: "loading" });
+  const [phase, setPhase] = useState<"loading" | "error" | "ready" | "more">("loading");
+  const [rows, setRows] = useState<SponsoredContestRow[]>([]);
+  const [count, setCount] = useState(0);
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     let cancelled = false;
 
     void (async () => {
       try {
-        const response = await sessionFetch("/api/backend/contests/mine", {
+        const response = await sessionFetch(`/api/backend/contests/mine?page=${page}`, {
           cache: "no-store",
         });
         if (cancelled) return;
@@ -88,7 +109,7 @@ export function useMyContests(): MyContestsState {
           return;
         }
         if (!response.ok) {
-          setState({ status: "error" });
+          setPhase("error");
           return;
         }
 
@@ -96,18 +117,34 @@ export function useMyContests(): MyContestsState {
           items: SponsoredContestRow[];
           count: number;
         };
-        if (!cancelled) {
-          setState({ status: "ready", rows: body.items, count: body.count });
-        }
+        if (cancelled) return;
+
+        // 페이지를 **이어 붙인다.** 갈아끼우면 「더 보기」가 앞 페이지를 지운다.
+        setRows((previous) => (page === 1 ? body.items : [...previous, ...body.items]));
+        setCount(body.count);
+        setPhase("ready");
       } catch {
-        if (!cancelled) setState({ status: "error" });
+        if (!cancelled) setPhase("error");
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [router, page]);
 
-  return state;
+  if (phase === "loading") return { status: "loading" };
+  if (phase === "error") return { status: "error" };
+
+  return {
+    status: "ready",
+    rows,
+    count,
+    hasMore: rows.length < count,
+    loadingMore: phase === "more",
+    loadMore: () => {
+      setPhase("more");
+      setPage((current) => current + 1);
+    },
+  };
 }

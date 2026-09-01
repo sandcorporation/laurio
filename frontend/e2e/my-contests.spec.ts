@@ -138,6 +138,58 @@ test("이의로 배분이 보류된 공모전은 「보류」라고 말한다 �
   ).toContainText("이의 심판");
 });
 
+test("20개를 넘으면 「더 보기」로 나머지에 도달한다 — 잘린 채 끝나지 않는다", async ({
+  page,
+}) => {
+  const seeded = seedE2eContests();
+  await login(page, seeded.judging.sponsor_login_seed);
+
+  // 서버는 `page_size=20` 으로 페이지네이션한다. 1페이지만 그리면 21번째부터는
+  // **도달할 길이 없는데**, `count` 는 전체 건수라 잘렸다는 사실조차 화면에
+  // 없다. `-created_at` 정렬이라 잘리는 쪽이 오래된 것들이고, 그중 하나가
+  // 「내 차례」면 이 화면이 막으려던 결과가 그대로 일어난다.
+  //
+  // 21건을 실제로 개최시키는 것은 이 화면과 무관한 비용이라, 서버 응답의
+  // 페이지 두 장을 그대로 흉내 낸다 — 확인할 것은 화면이 잘림을 드러내고
+  // 이어 붙이는가다.
+  const rowAt = (index: number) => ({
+    contest_id: 900000 + index,
+    title: `공모전 ${index}`,
+    prize: 1_000_000,
+    status: "published",
+    deadline_at: new Date(Date.now() + 86_400_000).toISOString(),
+    judging_ends_at: null,
+    submission_count: 0,
+    next_action: "awaiting_submissions",
+    created_at: new Date().toISOString(),
+  });
+
+  await page.route("**/api/backend/contests/mine*", (route) => {
+    const url = new URL(route.request().url());
+    const pageNumber = Number(url.searchParams.get("page") ?? "1");
+    const start = (pageNumber - 1) * 20;
+    const items = Array.from({ length: pageNumber === 1 ? 20 : 1 }, (_, i) => rowAt(start + i));
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ items, count: 21 }),
+    });
+  });
+
+  await page.goto("/console/contests");
+
+  const rows = page.getByTestId("my-contests-list").locator("li");
+  await expect(rows).toHaveCount(20);
+  // 잘렸다는 사실이 화면에 있어야 한다.
+  await expect(page.getByTestId("my-contests-load-more")).toContainText("20 / 21");
+
+  await page.getByTestId("my-contests-load-more").click();
+
+  // **이어 붙인다** — 갈아끼우면 앞 20개가 사라진다.
+  await expect(rows).toHaveCount(21);
+  await expect(page.getByTestId("my-contests-load-more")).toHaveCount(0);
+});
+
 test("세션이 없으면 렌더링 전에 로그인으로 돌아간다 — 보호된 내용이 응답에 없다", async ({
   page,
 }) => {

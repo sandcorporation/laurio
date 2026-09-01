@@ -31,6 +31,7 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 
+from django.db.models import Q
 from django.db import transaction
 
 from appeals.models import Appeal
@@ -62,7 +63,10 @@ BATCH_SIZE = 50
 # 없다. 빠뜨리면 이 상태에 머무는 몫이 매 스캔마다 다시 후보에 잡혀
 # BATCH_SIZE 슬롯을 낭비한다("새 상태를 후보 집합에 반영하지 않으면 좌초·낭비가
 # 생긴다"는 이 저장소가 반복해 겪은 결함 모양).
-_SETTLED_PAYOUT_STATUSES = [
+# 「이 몫은 더 이상 지급을 기다리지 않는다」는 상태들. `contests.sponsorship` 도
+# 이것을 본다(#81) — 개최자에게 「완료」라고 말해도 되는지가 같은 기준이어야
+# 한다. 그래서 앞의 밑줄을 뗐다.
+SETTLED_PAYOUT_STATUSES = [
     Payout.Status.CONFIRMED_IDENTITY_PENDING,
     Payout.Status.CONFIRMED_SELLER_PENDING,
     Payout.Status.CONFIRMED,
@@ -228,20 +232,29 @@ def _attempt_share_payout(
     }
 
 
-def distribution_due_contests(as_of, policy):
-    """배분 시각이 온 Contest 들 — **이의 보류를 적용하기 전의** 집합이다 (#74).
+def distribution_due_q(as_of, policy) -> Q:
+    """「배분 시각이 왔다」는 조건 그 자체 — **이의 보류를 적용하기 전의** 것이다.
 
-    스캔이 이 집합에서 이의 보류를 빼고, 「이 이의가 배분을 막고 있다」는 표시가
-    이 집합에 **들어 있는가**로 판정된다. 조건을 두 벌로 쓰면 언젠가 갈라지고,
-    그러면 큐는 막고 있다고 하는데 실제로는 아니거나(또는 그 반대) 한다.
+    조건을 `Q` 로 내주는 이유는 소비처가 셋이고 모양이 다르기 때문이다: 스캔은
+    이것으로 후보를 뽑고(그 뒤 이의 보류를 뺀다), 이의 쪽은 「이 이의가 배분을
+    막고 있다」를 이 조건에 **들어 있는가**로 판정하고(#74), 개최자 목록은 행마다
+    `Case/When` 으로 붙여 조회 없이 같은 것을 안다(#81).
+
+    조건을 세 벌로 쓰면 언젠가 갈라지고, 그러면 개최자 화면은 보류라는데 이의
+    큐는 아니라고 하는 날이 온다.
     """
 
-    cutoff = as_of - timedelta(days=policy.distribution_wait_days)
-    return Contest.objects.filter(
+    return Q(
         status=Contest.Status.JUDGING_ENDED,
-        judging_ends_at__lte=cutoff,
+        judging_ends_at__lte=as_of - timedelta(days=policy.distribution_wait_days),
         distribution__isnull=True,
     )
+
+
+def distribution_due_contests(as_of, policy):
+    """`distribution_due_q` 를 적용한 Contest 질의."""
+
+    return Contest.objects.filter(distribution_due_q(as_of, policy))
 
 
 def is_holding_distribution(appeal) -> bool:
@@ -334,7 +347,7 @@ def run_due_distributions(*, fail_submission_ids: set[int] | None = None) -> lis
             )
 
     pending_shares = (
-        DistributionShare.objects.exclude(payouts__status__in=_SETTLED_PAYOUT_STATUSES)
+        DistributionShare.objects.exclude(payouts__status__in=SETTLED_PAYOUT_STATUSES)
         .select_related("distribution", "submission")
         .order_by("id")
         .distinct()[:BATCH_SIZE]

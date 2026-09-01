@@ -460,3 +460,105 @@ def test_a_partially_scored_contest_still_tells_the_sponsor_to_judge(
     assert not Score.objects.filter(submission_id=b["id"]).exists()
 
     assert _mine(client, sponsor["access"])[0]["next_action"] == "judge_and_award"
+
+
+# --- 코드리뷰가 잡은 두 구멍 -----------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_a_contest_where_no_submission_could_be_scored_still_offers_judging(
+    client, category, landing_type
+):
+    """채점이 **전량** 실패해도 심사는 열려 있다 (코드리뷰 지적).
+
+    「하나라도 채점됨」을 바깥 조건으로 두면, 소스가 사라져 채점이 영영 성공하지
+    못하는 공모전은 심사기간 내내 「채점 대기」에 갇히고 심사 링크도 사라진다.
+    Award 도 심사 비교도 Score 를 조회조차 하지 않는데 그렇다.
+    """
+
+    from django.test import override_settings
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type,
+        sponsor_uid="sponsor-allfail", sponsor_ci="ci-allfail",
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    dev = _verified_user(client, "dev-allfail", "ci-dev-allfail")
+    only = _submit(
+        client, dev, contest["id"], requirement_id=contest["requirements"][0]["id"]
+    )
+    _close_contest(client, contest, deadline=deadline)
+
+    with override_settings(LLM_FAKE_RAISING_SUBMISSION_IDS={only["id"]}):
+        _run_scoring(client)
+
+    # 채점 전에는 「보여줄 것이 아직 없다」가 맞다. 문제는 그 뒤다.
+    assert _mine(client, sponsor["access"])[0]["next_action"] == "awaiting_scoring"
+
+    # 심사기간이 지나면 더는 「채점 대기」가 아니다 — 채점 게이트가 심사 창
+    # 밖으로 새면 배분이 끝난 뒤에도 영원히 「채점 대기」라고 말한다.
+    from core.models import ClockOverride
+    from contests.models import Contest
+
+    row = Contest.objects.get(id=contest["id"])
+    ClockOverride.objects.update_or_create(
+        pk=1, defaults={"overridden_at": row.judging_ends_at + timedelta(minutes=1)}
+    )
+    client.post("/api/internal/tick", **_internal_headers())
+
+    assert _mine(client, sponsor["access"])[0]["next_action"] == "awaiting_distribution"
+
+
+@pytest.mark.django_db
+def test_a_distribution_whose_payouts_have_not_settled_is_not_called_complete(
+    client, category, landing_type
+):
+    """배분 행이 생긴 것과 돈이 간 것은 다르다 (코드리뷰 지적).
+
+    지급이 실패해 매 스캔 재시도되는 중에도 `Distribution` 행은 있다. 그때
+    「완료되었습니다」라고 하면 개최자는 끝났다고 믿는다 — Award 경로는 이미
+    `Payout.Status.CONFIRMED` 를 확인하고서야 완료라고 하므로 비대칭이기도 했다.
+    """
+
+    from core.models import ClockOverride
+    from contests.models import Contest
+    from distributions.models import Distribution
+    from policies.services import get_current_policy
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type,
+        sponsor_uid="sponsor-unsettled", sponsor_ci="ci-unsettled",
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    dev = _verified_user(client, "dev-unsettled", "ci-dev-unsettled")
+    submission = _submit(
+        client, dev, contest["id"], requirement_id=contest["requirements"][0]["id"]
+    )
+    _close_contest(client, contest, deadline=deadline)
+    _run_scoring(client)
+
+    row = Contest.objects.get(id=contest["id"])
+    policy = get_current_policy()
+    ClockOverride.objects.update_or_create(
+        pk=1,
+        defaults={
+            "overridden_at": row.judging_ends_at
+            + timedelta(days=policy.distribution_wait_days + 1)
+        },
+    )
+
+    # 스캔이 Contest 를 JUDGING_ENDED 로 옮겨야 배분 후보가 된다.
+    client.post("/api/internal/tick", **_internal_headers())
+
+    # 이 Submission 의 지급만 실패시킨 채 배분을 돌린다 — 저장소가 이미 가진
+    # 실패 주입 경로다(`run_due_distributions(fail_submission_ids=...)`).
+    from distributions.services import run_due_distributions
+
+    run_due_distributions(fail_submission_ids={submission["id"]})
+
+    assert Distribution.objects.filter(contest_id=contest["id"]).exists()
+    assert _mine(client, sponsor["access"])[0]["next_action"] == "awaiting_payout"

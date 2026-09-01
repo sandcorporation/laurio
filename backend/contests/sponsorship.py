@@ -16,11 +16,15 @@ Payment, Submission 수, Score 유무, Award, Handover.status, Distribution, 그
 **그래서 각 값은 그 행위 엔드포인트의 전제와 같은 조건에서 나와야 한다.** 조건을
 두 벌로 쓰면 언젠가 갈라지고, 그때 화면은 시키는 대로 한 개최자에게 409 를
 보여준다.
+
+**이 모듈은 조회를 내지 않는다.** 판정에 필요한 사실은 호출부가
+`sponsored_contest_queryset` 으로 미리 붙여 준다. 행마다 조회를 내면 한
+페이지(20행)에 100 쿼리가 넘고 `get_current_policy()` 도 행마다 불리게 된다 —
+`policies/services.py` 가 요청 스코프당 한 번만 부르라고 못 박아 둔 그것이다.
 """
 
 from django.db import models
-
-from core.clock import Clock
+from django.db.models import Case, Count, Exists, OuterRef, Value, When
 
 
 class SponsorNextAction(models.TextChoices):
@@ -30,9 +34,9 @@ class SponsorNextAction(models.TextChoices):
     # 결제해야 공개된다. 초안인 채로 두면 아무 일도 일어나지 않는데, 그 사실을
     # 말해 주는 곳이 지금까지 없었다.
     PAY_TO_PUBLISH = "pay_to_publish", "결제 필요"
-    # **이 화면의 핵심.** 채점이 끝났고 심사기간이 남아 있다 — 지금 고르지 않으면
-    # 심사기간이 지나 무응답 배분으로 넘어가고, 개최자는 고를 수 있었던 결과를
-    # 고르지 못한 채 끝난다.
+    # **이 화면의 핵심.** 심사기간이 남아 있다 — 지금 고르지 않으면 심사기간이
+    # 지나 무응답 배분으로 넘어가고, 개최자는 고를 수 있었던 결과를 고르지 못한
+    # 채 끝난다.
     JUDGE_AND_AWARD = "judge_and_award", "심사·선정"
     # 선정했고 인수를 확인하면 Escrow 가 풀린다. 확인하지 않아도 기간이 지나면
     # 풀리지만(Handover.ReleasedVia.TIMEOUT), 그때까지 개발자의 돈이 묶인다.
@@ -51,18 +55,60 @@ class SponsorNextAction(models.TextChoices):
     CONTEST_COMPLETE = "contest_complete", "완료"
 
 
-def sponsor_next_action_for(contest, *, submission_count: int) -> str:
+def sponsored_contest_queryset(base, *, as_of, policy):
+    """판정에 필요한 사실을 **한 질의로** 붙인다 (#81).
+
+    전부 `Exists` 서브쿼리다 — `Count` 로 하면 조인이 곱해져 행이 늘고,
+    `distinct=True` 로 막아도 질의가 무거워진다. 실제 조인은
+    `submission_count` 하나뿐이다.
+    """
+
+    from appeals.models import Appeal
+    from distributions.models import DistributionShare
+    from distributions.services import SETTLED_PAYOUT_STATUSES, distribution_due_q
+    from payouts.models import Payout
+    from scoring.models import Score
+
+    return base.select_related("award__handover", "distribution").annotate(
+        submission_count=Count("submissions", distinct=True),
+        has_any_score=Exists(Score.objects.filter(submission__contest=OuterRef("pk"))),
+        has_pending_appeal=Exists(
+            Appeal.objects.filter(
+                submission__contest=OuterRef("pk"), status=Appeal.Status.PENDING
+            )
+        ),
+        has_confirmed_payout=Exists(
+            Payout.objects.filter(
+                handover__award__contest=OuterRef("pk"), status=Payout.Status.CONFIRMED
+            )
+        ),
+        # 배분은 만들어졌는데 아직 정산되지 않은 몫이 남아 있는가. 「배분 행이
+        # 생겼다」와 「돈이 실제로 갔다」는 다르다 — 지급이 전부 실패해 매 스캔
+        # 재시도되는 중에도 앞의 조건은 참이다.
+        has_unsettled_share=Exists(
+            DistributionShare.objects.filter(
+                distribution__contest=OuterRef("pk")
+            ).exclude(payouts__status__in=SETTLED_PAYOUT_STATUSES)
+        ),
+        # 배분 시각이 왔는가. 스캔·이의 큐가 쓰는 것과 **같은 조건**이다
+        # (`distribution_due_q`) — 세 벌로 쓰면 개최자 화면은 보류라는데 이의
+        # 큐는 아니라고 하는 날이 온다.
+        is_distribution_due=Case(
+            When(distribution_due_q(as_of, policy), then=Value(True)),
+            default=Value(False),
+            output_field=models.BooleanField(),
+        ),
+    )
+
+
+def sponsor_next_action_for(contest, *, now) -> str:
     """이 Contest 에 대해 Sponsor 가 지금 할 일(또는 기다리는 것)을 하나 고른다.
 
-    호출부는 `award__handover` · `distribution` 을 미리 가져와야 한다 — 이 함수는
-    행마다 새 조회를 내지 않는다(공모전이 쌓일수록 목록이 느려진다). 다만 이의
-    보류 판정만은 조회를 낸다: 그 조건이 배분 스캔의 후보 질의와 **같은 곳에서**
-    나와야 하기 때문이다(아래 참조).
+    `contest` 는 `sponsored_contest_queryset` 이 붙인 annotation 을 갖고 있어야
+    한다. 이 함수는 조회를 내지 않는다.
     """
 
     from contests.models import Contest
-
-    now = Clock.now()
 
     if contest.status == Contest.Status.DRAFT:
         return SponsorNextAction.PAY_TO_PUBLISH
@@ -70,39 +116,51 @@ def sponsor_next_action_for(contest, *, submission_count: int) -> str:
     if contest.status == Contest.Status.PUBLISHED and now < contest.deadline_at:
         return SponsorNextAction.AWAITING_SUBMISSIONS
 
+    # 선정이 끝났으면 그 뒤의 흐름만 남는다 — 채점 상태는 더 이상 개최자가
+    # 기다릴 것이 아니다.
     award = getattr(contest, "award", None)
     if award is not None:
-        return _awarded_action(award)
+        return _awarded_action(contest, award)
 
     # 마감은 됐는데 아무도 안 냈다. 「심사하세요」는 거짓말이고, 「기다리는 중」도
     # 아니다 — 올 것이 더 없다.
-    if submission_count == 0:
+    if contest.submission_count == 0:
         return SponsorNextAction.NO_SUBMISSIONS
 
-    # 채점이 **하나라도** 끝나야 심사 비교 화면에 보여줄 것이 생긴다.
-    #
-    # **「전부 채점됨」을 요구하지 않는다.** 그렇게 두면 한 건의 채점이 계속
-    # 실패할 때 개최자는 심사기간이 지나도록 「심사하세요」를 듣지 못하고, 고를
-    # 수 있었던 결과를 못 고른 채 무응답 배분으로 넘어간다. Award 는 Score 를
-    # 조회조차 하지 않으므로(ADR-0006/0014) 심사 자체는 언제든 가능하다 —
-    # 화면이 API 가 허용하는 행위를 감추면 안 된다.
-    if not _any_scored(contest):
+    # 마감 시각은 지났는데 스캔이 아직 CLOSED 로 옮기지 않았다.
+    if contest.status == Contest.Status.PUBLISHED:
         return SponsorNextAction.AWAITING_SCORING
 
     if contest.status == Contest.Status.CLOSED and _within_judging_window(contest, now):
+        # **채점을 이 아래 단계들의 게이트로 쓰지 않는다.** 「하나라도 채점됨」을
+        # 바깥 조건으로 두면, 채점이 영영 성공하지 못하는 공모전은 배분이 끝난
+        # 뒤에도 계속 「채점 대기」라고 말한다. 그래서 이 안내는 **심사 창
+        # 안에만** 있다.
+        #
+        # 심사 창 안에서도 채점은 「보여줄 것이 아직 없다」는 안내일 뿐이고,
+        # 심사 자체를 막지 않는다 — `POST /contests/{id}/award` 도 심사 비교
+        # 화면도 Score 를 조회조차 하지 않는다(ADR-0006/0014).
+        if not contest.has_any_score:
+            return SponsorNextAction.AWAITING_SCORING
         return SponsorNextAction.JUDGE_AND_AWARD
 
     # 심사기간이 지났다 — 무응답 배분의 차례다.
     if getattr(contest, "distribution", None) is not None:
+        # 배분 행이 생겼다고 돈이 간 것은 아니다. 지급이 전부 실패해 매 스캔
+        # 재시도되는 중에도 그 행은 있다 — 그때 「완료」라고 하면 개최자는
+        # 끝났다고 믿는다. Award 경로가 `Payout.Status.CONFIRMED` 를 확인하고서야
+        # 완료라고 하는 것과 같은 기준이다.
+        if contest.has_unsettled_share:
+            return SponsorNextAction.AWAITING_PAYOUT
         return SponsorNextAction.CONTEST_COMPLETE
 
-    if _held_by_appeal(contest):
+    if contest.has_pending_appeal and contest.is_distribution_due:
         return SponsorNextAction.AWAITING_APPEAL_RULING
 
     return SponsorNextAction.AWAITING_DISTRIBUTION
 
 
-def _awarded_action(award) -> str:
+def _awarded_action(contest, award) -> str:
     from handovers.models import Handover
 
     handover = getattr(award, "handover", None)
@@ -116,43 +174,11 @@ def _awarded_action(award) -> str:
 
     # Escrow 는 풀렸다 — 남은 것은 개발자 쪽 지급 절차이고 Sponsor 가 할 일은
     # 없다. 지급 상태를 개최자에게 자세히 보여주지 않는 것은 의도다: 수취인
-    # 등록·주민등록번호는 개발자와 지급대행사 사이의 일이다.
-    from payouts.models import Payout
-
-    payout = (
-        Payout.objects.filter(handover=handover).order_by("-created_at").first()
-    )
-    if payout is not None and payout.status == Payout.Status.CONFIRMED:
+    # 등록도 주민등록번호도 개최자가 알 일이 아니다.
+    if contest.has_confirmed_payout:
         return SponsorNextAction.CONTEST_COMPLETE
     return SponsorNextAction.AWAITING_PAYOUT
 
 
-def _any_scored(contest) -> bool:
-    from submissions.models import Submission
-
-    return Submission.objects.filter(contest=contest, score__isnull=False).exists()
-
-
 def _within_judging_window(contest, now) -> bool:
     return contest.judging_ends_at is None or now < contest.judging_ends_at
-
-
-def _held_by_appeal(contest) -> bool:
-    """이 공모전의 배분이 심판되지 않은 이의 때문에 멈춰 있는가 (스토리 40).
-
-    판정을 `distributions.services` 에서 가져온다 — 「막고 있다」를 이의 쪽에서
-    말할 때 쓰는 것과 **같은 함수**다. 두 벌로 쓰면 개최자 화면은 보류라는데
-    이의 큐는 아니라고 하는 날이 온다.
-    """
-
-    from appeals.models import Appeal
-    from distributions.services import is_holding_distribution
-
-    pending = (
-        Appeal.objects.filter(
-            submission__contest=contest, status=Appeal.Status.PENDING
-        )
-        .select_related("submission")
-        .first()
-    )
-    return pending is not None and is_holding_distribution(pending)
