@@ -152,6 +152,22 @@ Operator 계정은 `backend/accounts/management/commands/seed_e2e_operator.py`
 (멱등)로 만든다 — 사람이 쓰는 `create_operator` 부트스트랩 명령과 달리 반복
 실행에 안전하다.
 
+**TDD 안쪽 고리에서 전체를 돌리지 마라.** 관련 파일만 돌리고, 전체는 게이트로 둔다.
+
+| 언제 | 무엇 | 실측 |
+| --- | --- | --- |
+| red→green 반복 | 그 테스트 파일 하나 | 백엔드 3~17초 · e2e 13~42초 |
+| 티켓 커밋 직전 | 건드린 쪽 스위트 (`pytest` 또는 `test:operator`) | 3분 · 4.7분 |
+| 체인/PR 보고 직전 | 전체 | 백엔드 3분 + e2e 7분 |
+
+```bash
+cd backend && LAURIO_DB_PORT=<포트> uv run pytest tests/test_payouts.py -q
+pnpm --dir frontend exec playwright test --project=operator e2e/operator/policy.spec.ts
+```
+
+안쪽 고리에서 전체를 돌리면 **한 번의 red→green 이 17초가 아니라 10분**이 된다.
+슬라이스 하나에 그 왕복이 여러 번 있으니 티켓 하나가 통째로 테스트 대기에 잠긴다.
+
 **스위트가 8분을 넘긴다 — 한 앱만 고쳤으면 그 앱만 돌린다.**
 
 ```bash
