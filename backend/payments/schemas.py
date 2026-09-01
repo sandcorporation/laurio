@@ -25,6 +25,11 @@ class ConfirmPaymentIn(Schema):
     # fake PG 전용 시나리오 선택. 실제 어댑터(PAYMENT_ADAPTER_MODE=real)에서는 무시된다
     # — FakePGAdapter만 이 값을 해석한다(ADR-0007).
     simulate: str | None = None
+    # 결제 건 식별자(#86) — 실물 PG(토스)가 결제 승인에 요구하는 값으로, 브라우저
+    # 위젯이 성공했을 때만 생긴다. FakePGAdapter는 이 값을 무시하므로 optional —
+    # 이 필드가 있어야 실물 어댑터(#87)가 값을 지어내지 않고 그대로 넘길 자리가
+    # 생긴다.
+    payment_key: str | None = None
 
 
 class RunRefundsIn(Schema):

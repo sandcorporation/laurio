@@ -8,6 +8,7 @@ Fake PG의 존재 이유는 정상 흐름이 아니라 장애 흐름이다 — �
 import hashlib
 import hmac
 import threading
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -15,6 +16,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 
 from contests.models import Category, Contest, DeliverableType
+from payments.adapters import FakePGAdapter
 from payments.models import Payment
 from policies.services import get_current_policy
 
@@ -133,10 +135,21 @@ def _send_webhook(
     )
 
 
-def _confirm(client, access: str, order_id: str, simulate: str | None = None):
+def _confirm(
+    client,
+    access: str,
+    order_id: str,
+    simulate: str | None = None,
+    payment_key: str | None = None,
+):
+    body: dict = {}
+    if simulate is not None:
+        body["simulate"] = simulate
+    if payment_key is not None:
+        body["payment_key"] = payment_key
     return client.post(
         f"{PAYMENTS_URL}/{order_id}/confirm",
-        data={"simulate": simulate} if simulate is not None else {},
+        data=body,
         content_type="application/json",
         **_auth_header(access),
     )
@@ -398,6 +411,51 @@ def test_confirm_timeout_but_actually_failed_does_not_publish_or_post_ledger(
     _login_operator(client)
     entries = client.get(f"{LEDGER_URL}/contests/{ledger_id}/entries").json()
     assert entries == []
+
+
+@pytest.mark.django_db
+def test_confirm_forwards_payment_key_to_adapter(client, category, landing_type):
+    """브라우저가 보낸 결제 건 식별자가 PG 어댑터의 confirm까지 도달한다 (#86, spec #82).
+
+    실물 PG(토스)는 결제 승인에 결제 건 식별자(payment key)를 요구하는데, 그
+    값은 브라우저 위젯이 성공했을 때만 생긴다. FakePGAdapter는 이 값을 그냥
+    무시해도(기존 동작 불변) 계약에는 그 값을 나를 자리가 있어야 하고, 실제로
+    확인 요청 → 어댑터까지 전달돼야 한다 — #87이 실물 어댑터로 갈아끼울 때 그
+    자리에 값을 지어내지 않고 그대로 넘길 수 있어야 하기 때문이다.
+
+    FakePGAdapter는 이 값을 어디에도 남기지 않으므로(무시하는 것 자체가
+    인수조건), 도달 여부를 스파이로 관찰한다 — 여전히 HTTP 엔드포인트를 통해
+    구동되고, 스파이는 관찰 지점일 뿐 시임을 바꾸지 않는다.
+    """
+
+    access, contest = _draft_contest(client, category=category, deliverable_type=landing_type)
+    payment = _initiate_payment(client, access, contest["id"])
+
+    received: dict[str, str | None] = {}
+    original_confirm = FakePGAdapter.confirm
+
+    def spy_confirm(self, *, order_id, simulate=None, payment_key=None):
+        received["payment_key"] = payment_key
+        return original_confirm(self, order_id=order_id, simulate=simulate)
+
+    with patch.object(FakePGAdapter, "confirm", spy_confirm):
+        response = _confirm(
+            client, access, payment["order_id"], payment_key="fake-widget-key-abc123"
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "paid"
+    assert received["payment_key"] == "fake-widget-key-abc123"
+
+    # 기존 동작 불변 — payment_key를 안 보내도(기존 호출부와 동일) 여전히 정상
+    # 승인된다.
+    access2, contest2 = _draft_contest(
+        client, uid="sponsor-payment-key-omitted", category=category, deliverable_type=landing_type
+    )
+    payment2 = _initiate_payment(client, access2, contest2["id"])
+    response2 = _confirm(client, access2, payment2["order_id"])
+    assert response2.status_code == 200
+    assert response2.json()["status"] == "paid"
 
 
 @pytest.mark.django_db

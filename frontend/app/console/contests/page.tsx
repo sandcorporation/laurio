@@ -128,6 +128,18 @@ function SponsoredContestCard({ row }: { row: SponsoredContestRow }) {
           심사하러 가기
         </Link>
       ) : null}
+
+      {/* 「결제해야 공개됩니다」가 갈 곳이 없었다(#86) — draft 인 채로 두면
+          아무 일도 일어나지 않는데, 이 화면이 유일하게 그 사실을 말하는 자리다. */}
+      {row.next_action === "pay_to_publish" ? (
+        <Link
+          className="mt-2 inline-block text-sm underline"
+          href={`/console/contests/${row.contest_id}/payment`}
+          data-testid={`my-contest-row-${row.contest_id}-pay`}
+        >
+          결제하러 가기
+        </Link>
+      ) : null}
     </li>
   );
 }
