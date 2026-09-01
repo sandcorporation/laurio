@@ -3,6 +3,7 @@ from enum import Enum
 
 from ninja import Schema
 from pydantic import Field
+from contests.sponsorship import SponsorNextAction, sponsor_next_action_for
 
 
 class CategoryOut(Schema):
@@ -234,3 +235,44 @@ class ContestReopenIn(Schema):
 
     prize: int = Field(gt=0)
     deadline_at: datetime
+
+
+class MySponsoredContestOut(Schema):
+    """「내 공모전」의 한 행 (#81) — Sponsor 가 자기가 연 공모전을 볼 때 받는 것.
+
+    참가자 쪽 `MyParticipationOut` 과 같은 모양이다: **도메인 상태가 아니라
+    「다음 행동」이 주인공**이고, 그 판정은 백엔드가 한다.
+
+    `next_action` 의 타입이 `str` 이 아니라 `SponsorNextAction` 인 것이 중요하다 —
+    생성된 프론트 타입에서 12개짜리 리터럴 유니온이 되고, 값이 하나 늘면 번역표를
+    가진 파일에서 `tsc --noEmit` 이 빌드타임에 잡는다. `str` 로 두면 `string` 이
+    되어 그 안전망이 통째로 사라진다(#74 에서 실제로 겪고 고친 실수다).
+
+    **`is_holding_distribution` 같은 이름을 따로 두지 않는다.** 보류는 「다음
+    행동」의 한 값이다 — 별도 불리언을 두면 화면이 두 값을 조합해 문장을 만들게
+    되고, 그 조합은 다시 화면의 파생 로직이다.
+    """
+
+    contest_id: int
+    title: str
+    prize: int
+    status: str
+    deadline_at: datetime
+    judging_ends_at: datetime | None = None
+    # 몇 명이 냈는지가 그 자리에서 보여야 심사하러 갈지 판단할 수 있다.
+    submission_count: int
+    next_action: SponsorNextAction
+    created_at: datetime
+
+    @staticmethod
+    def resolve_contest_id(obj) -> int:
+        return obj.id
+
+    @staticmethod
+    def resolve_submission_count(obj) -> int:
+        # 목록 질의가 `annotate` 로 붙여 준다 — 행마다 세면 N+1 이다.
+        return obj.submission_count
+
+    @staticmethod
+    def resolve_next_action(obj) -> str:
+        return sponsor_next_action_for(obj, submission_count=obj.submission_count)

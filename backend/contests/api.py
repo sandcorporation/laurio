@@ -15,7 +15,7 @@ import logging
 from uuid import UUID
 
 from django.db import IntegrityError, transaction
-from django.db.models import Sum
+from django.db.models import Count, Sum
 from django.http import HttpRequest
 from ninja import Query, Router
 from ninja.errors import HttpError
@@ -47,6 +47,7 @@ from .requirement_chat import (
     get_requirement_chat_adapter,
 )
 from .schemas import (
+    MySponsoredContestOut,
     CategoryOut,
     ContestListFilters,
     ContestSort,
@@ -289,6 +290,37 @@ def list_contests(request: HttpRequest, filters: Query[ContestListFilters]):
         queryset.order_by(*ordering)
         .select_related("category")
         .prefetch_related("deliverable_types", "requirements")
+    )
+
+
+@router.get("/contests/mine", response=list[MySponsoredContestOut], auth=jwt_auth)
+@paginate(PageNumberPagination, page_size=20)
+def list_my_sponsored_contests(request: HttpRequest, **kwargs):
+    """Sponsor 가 자기가 연 공모전들과 각각의 「다음 행동」을 본다 (#81).
+
+    **`/contests/{contest_id}` 보다 먼저 등록해야 한다.** 아래에 두면 django-ninja
+    가 `mine` 을 `contest_id` 로 읽어 422 를 낸다 — 참가자 쪽 `/submissions/mine`
+    이 이미 겪은 함정이다.
+
+    **`draft` 도 나온다.** 공개 목록은 draft 를 감추지만 여기는 「내 것」이고, 초안인
+    채로 결제하지 않으면 아무 일도 일어나지 않는다는 사실을 말해 줄 곳이 여기밖에
+    없다.
+
+    Sponsor 프로필이 없으면 빈 목록이다 — 개최한 적 없는 사람은 정상적인 상태이지
+    없는 리소스가 아니다(`/submissions/mine` 과 같은 관용구).
+    """
+
+    profile = SponsorProfile.objects.filter(user=request.auth_user).first()
+    if profile is None:
+        return Contest.objects.none()
+
+    return (
+        Contest.objects.filter(sponsor=profile)
+        # 「다음 행동」 판정이 보는 것들을 한 번에 끌어온다 — 행마다 조회를
+        # 내면 공모전이 쌓일수록 목록이 느려진다.
+        .select_related("award__handover", "distribution")
+        .annotate(submission_count=Count("submissions", distinct=True))
+        .order_by("-created_at")
     )
 
 

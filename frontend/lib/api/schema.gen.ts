@@ -223,6 +223,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/contests/mine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List My Sponsored Contests
+         * @description Sponsor 가 자기가 연 공모전들과 각각의 「다음 행동」을 본다 (#81).
+         *
+         *     **`/contests/{contest_id}` 보다 먼저 등록해야 한다.** 아래에 두면 django-ninja
+         *     가 `mine` 을 `contest_id` 로 읽어 422 를 낸다 — 참가자 쪽 `/submissions/mine`
+         *     이 이미 겪은 함정이다.
+         *
+         *     **`draft` 도 나온다.** 공개 목록은 draft 를 감추지만 여기는 「내 것」이고, 초안인
+         *     채로 결제하지 않으면 아무 일도 일어나지 않는다는 사실을 말해 줄 곳이 여기밖에
+         *     없다.
+         *
+         *     Sponsor 프로필이 없으면 빈 목록이다 — 개최한 적 없는 사람은 정상적인 상태이지
+         *     없는 리소스가 아니다(`/submissions/mine` 과 같은 관용구).
+         */
+        get: operations["contests_api_list_my_sponsored_contests"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/contests/quote": {
         parameters: {
             query?: never;
@@ -2455,6 +2486,47 @@ export interface components {
             submitted_at: string;
         };
         /**
+         * MySponsoredContestOut
+         * @description 「내 공모전」의 한 행 (#81) — Sponsor 가 자기가 연 공모전을 볼 때 받는 것.
+         *
+         *     참가자 쪽 `MyParticipationOut` 과 같은 모양이다: **도메인 상태가 아니라
+         *     「다음 행동」이 주인공**이고, 그 판정은 백엔드가 한다.
+         *
+         *     `next_action` 의 타입이 `str` 이 아니라 `SponsorNextAction` 인 것이 중요하다 —
+         *     생성된 프론트 타입에서 12개짜리 리터럴 유니온이 되고, 값이 하나 늘면 번역표를
+         *     가진 파일에서 `tsc --noEmit` 이 빌드타임에 잡는다. `str` 로 두면 `string` 이
+         *     되어 그 안전망이 통째로 사라진다(#74 에서 실제로 겪고 고친 실수다).
+         *
+         *     **`is_holding_distribution` 같은 이름을 따로 두지 않는다.** 보류는 「다음
+         *     행동」의 한 값이다 — 별도 불리언을 두면 화면이 두 값을 조합해 문장을 만들게
+         *     되고, 그 조합은 다시 화면의 파생 로직이다.
+         */
+        MySponsoredContestOut: {
+            /** Contest Id */
+            contest_id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Deadline At
+             * Format: date-time
+             */
+            deadline_at: string;
+            /** Judging Ends At */
+            judging_ends_at?: string | null;
+            next_action: components["schemas"]["SponsorNextAction"];
+            /** Prize */
+            prize: number;
+            /** Status */
+            status: string;
+            /** Submission Count */
+            submission_count: number;
+            /** Title */
+            title: string;
+        };
+        /**
          * NextAction
          * @description Developer 가 지금 무엇을 해야 하는가 — 또는 무엇을 기다리는가.
          * @enum {string}
@@ -2632,6 +2704,13 @@ export interface components {
             count: number;
             /** Items */
             items: components["schemas"]["MyParticipationOut"][];
+        };
+        /** PagedMySponsoredContestOut */
+        PagedMySponsoredContestOut: {
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["MySponsoredContestOut"][];
         };
         /** PagedSourceReadingOut */
         PagedSourceReadingOut: {
@@ -3025,6 +3104,12 @@ export interface components {
             /** Prompt */
             prompt: string;
         };
+        /**
+         * SponsorNextAction
+         * @description Sponsor 가 이 공모전에 대해 지금 무엇을 해야 하는가 — 또는 무엇을 기다리는가.
+         * @enum {string}
+         */
+        SponsorNextAction: "pay_to_publish" | "judge_and_award" | "accept_handover" | "awaiting_submissions" | "awaiting_scoring" | "awaiting_appeal_ruling" | "awaiting_distribution" | "awaiting_payout" | "no_submissions" | "contest_complete";
         /** SubmissionIn */
         SubmissionIn: {
             /** Demo Url */
@@ -3382,6 +3467,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DeliverableTypeOut"][];
+                };
+            };
+        };
+    };
+    contests_api_list_my_sponsored_contests: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PagedMySponsoredContestOut"];
                 };
             };
         };
