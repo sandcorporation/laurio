@@ -69,6 +69,9 @@ export type SeededJudgingContest = {
   id: number;
   title: string;
   sponsor_login_seed: string;
+  // 제출이 있는 Developer 로 로그인할 수 있게 하는 seed(#74) — 「내 참가 현황」
+  // 처럼 Developer 본인의 화면이 이걸 쓴다.
+  developer_login_seed: string;
   judging_ends_at: string;
   requirements: SeededJudgingRequirement[];
   submissions: { id: number; developer_id: number; developer_display_name: string }[];
