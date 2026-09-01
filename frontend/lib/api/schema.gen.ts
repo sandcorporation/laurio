@@ -1553,6 +1553,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/submissions/mine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List My Participation
+         * @description Developer 가 자기 제출들과 각각의 「다음 행동」을 본다 (#74).
+         *
+         *     이 표면이 없어서 로그인한 Developer 가 "내가 어디에 냈고 각각 지금 어떤
+         *     상태인가" 를 볼 곳이 없었다 — 공개 프로필은 마감 후 아카이브이고 단건
+         *     조회는 하나씩이다. 이의도 지급도 걸 데가 없었다.
+         *
+         *     **행은 도메인 상태가 아니라 「다음 행동」을 말한다**(`participation.py` 참고).
+         *     판정은 백엔드에 있고 값은 타입 있는 enum 이라, 값이 하나 늘면 프론트의
+         *     누락된 분기를 `tsc` 가 빌드타임에 잡는다.
+         *
+         *     제출이 아직 없으면 빈 페이지로 200 이다 — "아직 아무 데도 안 냈다" 는
+         *     정상적인 사실이지 없는 리소스가 아니다. 이 경로가
+         *     `/submissions/{submission_id}` 보다 **먼저** 등록돼야 한다는 점에 주의한다
+         *     — 뒤에 두면 "mine" 이 submission_id 로 먹혀 404 가 난다.
+         */
+        get: operations["submissions_api_list_my_participation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/submissions/{submission_id}": {
         parameters: {
             query?: never;
@@ -2354,6 +2387,41 @@ export interface components {
             /** Username */
             username: string;
         };
+        /**
+         * MyParticipationOut
+         * @description 「내 참가 현황」의 한 행 (#74).
+         *
+         *     도메인 상태를 그대로 늘어놓지 않는다 — `next_action` 하나가 "지금 무엇을
+         *     해야 하는가" 에 먼저 답하고, 나머지는 그 행을 알아보기 위한 최소한이다.
+         *     상세는 각자의 화면이 보여준다.
+         */
+        MyParticipationOut: {
+            /** Contest Id */
+            contest_id: number;
+            /** Contest Title */
+            contest_title: string;
+            /**
+             * Deadline At
+             * Format: date-time
+             */
+            deadline_at: string;
+            next_action: components["schemas"]["NextAction"];
+            /** Prize */
+            prize: number;
+            /** Submission Id */
+            submission_id: number;
+            /**
+             * Submitted At
+             * Format: date-time
+             */
+            submitted_at: string;
+        };
+        /**
+         * NextAction
+         * @description Developer 가 지금 무엇을 해야 하는가 — 또는 무엇을 기다리는가.
+         * @enum {string}
+         */
+        NextAction: "awaiting_deadline" | "awaiting_scoring" | "awaiting_judging" | "awaiting_appeal_ruling" | "awaiting_distribution" | "awaiting_handover_release" | "awaiting_seller_registration" | "can_appeal" | "request_payout" | "submit_tax_identity" | "not_selected" | "payout_complete";
         /** NotificationOut */
         NotificationOut: {
             /** Context */
@@ -2482,6 +2550,13 @@ export interface components {
             /** Items */
             items: components["schemas"]["ContestOut"][];
         };
+        /** PagedMyParticipationOut */
+        PagedMyParticipationOut: {
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["MyParticipationOut"][];
+        };
         /** PagedSourceReadingOut */
         PagedSourceReadingOut: {
             /** Count */
@@ -2532,8 +2607,8 @@ export interface components {
             idempotency_key: string;
             /** Net Amount */
             net_amount: number;
-            /** Next Action */
-            next_action: string;
+            /** Next Action Message */
+            next_action_message: string;
             /** Platform Fee Amount */
             platform_fee_amount: number;
             /** Prize Amount */
@@ -5170,6 +5245,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UploadResponse"];
+                };
+            };
+        };
+    };
+    submissions_api_list_my_participation: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PagedMyParticipationOut"];
                 };
             };
         };

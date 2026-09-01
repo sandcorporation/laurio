@@ -1389,12 +1389,12 @@ def test_developer_sees_next_action_guidance_on_payout(client, category, landing
         client, dev, requested["idempotency_key"], seller_simulate="limit_exceeded"
     )
     body = resp.json()
-    assert body["next_action"]
-    assert "심사" in body["next_action"]
+    assert body["next_action_message"]
+    assert "심사" in body["next_action_message"]
 
     get_resp = client.get(f"{CONTESTS_URL}/{contest['id']}/payout", **_auth_header(dev["access"]))
     assert get_resp.status_code == 200
-    assert get_resp.json()["next_action"]
+    assert get_resp.json()["next_action_message"]
 
 
 # --- Operator 표면 — 두 대기 중 어느 쪽인지 조회 (#50 AC) -------------------------

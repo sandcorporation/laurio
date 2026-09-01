@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 
 from ninja import Schema
+
+from .participation import NextAction
 from pydantic import Field
 
 
@@ -75,6 +77,54 @@ class SubmissionOut(Schema):
     completion: CompletionOut
     created_at: datetime
     updated_at: datetime
+
+
+class MyParticipationOut(Schema):
+    """「내 참가 현황」의 한 행 (#74).
+
+    도메인 상태를 그대로 늘어놓지 않는다 — `next_action` 하나가 "지금 무엇을
+    해야 하는가" 에 먼저 답하고, 나머지는 그 행을 알아보기 위한 최소한이다.
+    상세는 각자의 화면이 보여준다.
+    """
+
+    submission_id: int
+    contest_id: int
+    contest_title: str
+    prize: int
+    deadline_at: datetime
+    # **`str` 이 아니라 enum 이어야 한다.** 이 값을 enum 으로 두기로 한 유일한
+    # 근거가 "값이 하나 늘면 생성된 타입에도 늘고 `tsc --noEmit` 이 프론트의
+    # 누락된 분기를 빌드타임에 잡는다" 인데, `str` 로 두면 타입체커가 볼 것이
+    # 없어 그 근거가 통째로 사라진다(실제로 처음에 `str` 로 썼다가 생성된
+    # 타입이 `next_action: string` 으로 나오는 것을 보고 고쳤다).
+    next_action: NextAction
+    submitted_at: datetime
+
+    @staticmethod
+    def resolve_submission_id(obj) -> int:
+        return obj.id
+
+    @staticmethod
+    def resolve_contest_title(obj) -> str:
+        return obj.contest.title
+
+    @staticmethod
+    def resolve_prize(obj) -> int:
+        return obj.contest.prize
+
+    @staticmethod
+    def resolve_deadline_at(obj):
+        return obj.contest.deadline_at
+
+    @staticmethod
+    def resolve_submitted_at(obj):
+        return obj.created_at
+
+    @staticmethod
+    def resolve_next_action(obj) -> str:
+        from .participation import next_action_for
+
+        return next_action_for(obj)
 
 
 class PublicSubmissionOut(Schema):

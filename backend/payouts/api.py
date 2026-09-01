@@ -135,7 +135,7 @@ def _serialize(payout: Payout) -> PayoutOut:
         status=payout.status,
         has_identity=TaxIdentity.objects.filter(payout=payout).exists(),
         seller_status=seller.status if seller is not None else None,
-        next_action=_next_action_message(payout, seller),
+        next_action_message=_next_action_message(payout, seller),
         created_at=payout.created_at,
     )
 
