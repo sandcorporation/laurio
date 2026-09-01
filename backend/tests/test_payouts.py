@@ -52,6 +52,15 @@ def _freeze(at):
     ClockOverride.objects.update_or_create(pk=1, defaults={"overridden_at": at})
 
 
+def _unfreeze():
+    """ClockOverride는 단일 행(pk=1)이라 한 Contest를 닫으며 건 고정이 그대로
+    남아 있으면, 뒤이어 같은 테스트 안에서 실제 지금 시각 기준 마감을 가진 두
+    번째 Contest에 제출이 "마감 지남"으로 막힌다. 독립된 두 번째
+    `_ready_for_payout` 사이클을 시작하기 전에 실제 시각으로 되돌린다."""
+
+    ClockOverride.objects.update_or_create(pk=1, defaults={"overridden_at": None})
+
+
 def _login(client, uid="dev-1", email=None):
     email = email or f"{uid}@example.com"
     response = client.post(
@@ -99,7 +108,7 @@ def _sign_payout(*, webhook_id: str, idempotency_key: str, status: str) -> str:
 
 
 def _publish_contest(
-    client, *, category, deliverable_type, sponsor_uid="sponsor-1", deadline_at=None
+    client, *, category, deliverable_type, sponsor_uid="sponsor-1", deadline_at=None, prize=1_000_000
 ) -> tuple[dict, dict]:
     sponsor = _verified_user(client, sponsor_uid, f"{sponsor_uid}-ci")
     deadline_at = deadline_at or (timezone.now() + timedelta(days=7))
@@ -110,7 +119,7 @@ def _publish_contest(
             "title": f"{sponsor_uid}의 공모전",
             "category_id": category.id,
             "deliverable_type_ids": [deliverable_type.id],
-            "prize": 1_000_000,
+            "prize": prize,
             "deadline_at": deadline_at.isoformat(),
             "requirements": [],
         },
@@ -189,14 +198,16 @@ def _accept_handover(client, sponsor: dict, contest_id: int) -> dict:
     return resp.json()
 
 
-def _ready_for_payout(client, category, landing_type, *, sponsor_uid="sponsor-1", dev_uid="dev-1"):
+def _ready_for_payout(
+    client, category, landing_type, *, sponsor_uid="sponsor-1", dev_uid="dev-1", prize=1_000_000
+):
     """Escrow까지 해제된 Contest 하나를 만들어 (sponsor, dev, contest, submission)를
     돌려준다."""
 
     deadline = timezone.now() + timedelta(hours=1)
     sponsor, contest = _publish_contest(
         client, category=category, deliverable_type=landing_type,
-        sponsor_uid=sponsor_uid, deadline_at=deadline,
+        sponsor_uid=sponsor_uid, deadline_at=deadline, prize=prize,
     )
     dev = _verified_user(client, dev_uid, f"{dev_uid}-ci")
     submission = _submit(client, dev, contest["id"])
@@ -294,19 +305,306 @@ def test_only_awarded_developer_can_request_payout(client, category, landing_typ
 
 @pytest.mark.django_db
 def test_payout_request_computes_fee_and_withholding_breakdown(client, category, landing_type):
+    """기본 정책(수수료 10%, 원천징수 4.4%)에서 1,000,000원 상금의 공제액을
+    손으로 계산한 값과 비교한다(#75) — 코드의 계산식을 재현하지 않는다."""
+
     sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
 
     payout = _request_payout(client, dev, contest["id"])
-    prize = contest["prize"]
-    expected_fee = prize * settings.PAYOUT_PLATFORM_FEE_BPS // 10_000
-    expected_withholding = prize * settings.PAYOUT_WITHHOLDING_TAX_BPS // 10_000
-    expected_net = prize - expected_fee - expected_withholding
 
-    assert payout["prize_amount"] == prize
-    assert payout["platform_fee_amount"] == expected_fee
-    assert payout["withholding_tax_amount"] == expected_withholding
-    assert payout["net_amount"] == expected_net
+    assert payout["prize_amount"] == 1_000_000
+    assert payout["platform_fee_amount"] == 100_000
+    assert payout["withholding_tax_amount"] == 44_000
+    assert payout["net_amount"] == 856_000
     assert payout["status"] == "requested"
+
+
+@pytest.mark.django_db
+def test_withholding_tax_is_4_4_percent_of_paid_amount_not_3_3_percent(
+    client, category, landing_type
+):
+    """국세청 기준 공모전 상금(기타소득, 필요경비 80%)의 원천징수는 지급액의
+    4.4%다 — 사업소득 세율인 3.3%가 아니다(#73/#75). 5,000,000원 상금에서
+    3.3%(165,000원)와 4.4%(220,000원)는 55,000원 차이가 나므로, 이 값 하나가
+    이전 세율 사용 여부를 갈라낸다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(
+        client, category, landing_type, prize=5_000_000
+    )
+
+    payout = _request_payout(client, dev, contest["id"])
+
+    assert payout["withholding_tax_amount"] == 220_000
+    assert payout["withholding_tax_amount"] != 165_000  # 3.3% — 옛 세율은 아니다.
+    assert payout["net_amount"] == 5_000_000 - payout["platform_fee_amount"] - 220_000
+
+
+# --- 과세최저한 경계값(250,000원) -------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_withholding_is_zero_at_or_below_250000_won_and_nonzero_above_it(
+    client, category, landing_type
+):
+    """과세최저한(기타소득금액 5만원 이하 = 지급액 250,000원 이하)에서는
+    원천징수가 없다. 250,000원 자체를 포함해 경계 셋(그 아래·그 값·그 위)을
+    모두 친다(#75) — 코드와 테스트가 경계의 같은 쪽에 서야 한다."""
+
+    _, dev_below, contest_below, _ = _ready_for_payout(
+        client, category, landing_type, dev_uid="dev-below", prize=249_999
+    )
+    payout_below = _request_payout(client, dev_below, contest_below["id"])
+    assert payout_below["withholding_tax_amount"] == 0
+    assert payout_below["net_amount"] == 249_999 - payout_below["platform_fee_amount"]
+
+    _unfreeze()
+    _, dev_at, contest_at, _ = _ready_for_payout(
+        client, category, landing_type, dev_uid="dev-at", prize=250_000
+    )
+    payout_at = _request_payout(client, dev_at, contest_at["id"])
+    assert payout_at["withholding_tax_amount"] == 0
+
+    _unfreeze()
+    _, dev_above, contest_above, _ = _ready_for_payout(
+        client, category, landing_type, dev_uid="dev-above", prize=250_001
+    )
+    payout_above = _request_payout(client, dev_above, contest_above["id"])
+    assert payout_above["withholding_tax_amount"] == 11_000
+    assert payout_above["withholding_tax_amount"] > 0
+
+
+# --- Payout이 적용된 요율을 스냅샷에 기록한다 -------------------------------------
+
+
+@pytest.mark.django_db
+def test_payout_records_the_platform_fee_and_withholding_rate_it_applied(
+    client, category, landing_type
+):
+    """Payout은 금액만이 아니라 적용된 요율 자체(bp 단위)를 자기 안에 기록한다
+    (#75, ADR-0023) — 상금이 다르면 금액에서 요율을 역산할 수 없다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    assert payout.platform_fee_bps == 1000
+    assert payout.withholding_tax_bps == 440
+
+
+@pytest.mark.django_db
+def test_changing_the_policy_changes_new_payouts_but_not_past_ones(
+    client, category, landing_type
+):
+    """정책의 요율을 바꾼 뒤: 새 Payout의 공제는 달라지고, 이미 만들어진
+    Payout의 금액과 기록된 요율은 그대로다(#75) — 스냅샷이 실제로 스냅샷인지를
+    묻는다. "요율 필드가 있다"에서 멈추지 않고 요율을 실제로 바꿔 확인한다."""
+
+    from policies.models import PlatformPolicy
+
+    # 정책을 건드리기 전에 만든 Payout — 기본값(수수료 10%, 원천징수 4.4%).
+    sponsor_a, dev_a, contest_a, _ = _ready_for_payout(
+        client, category, landing_type, sponsor_uid="sponsor-a", dev_uid="dev-a"
+    )
+    before = _request_payout(client, dev_a, contest_a["id"])
+    payout_before = Payout.objects.get(idempotency_key=before["idempotency_key"])
+    assert payout_before.platform_fee_amount == 100_000
+    assert payout_before.withholding_tax_amount == 44_000
+    assert payout_before.platform_fee_bps == 1000
+    assert payout_before.withholding_tax_bps == 440
+
+    # 운영자가 요율을 바꿨다고 가정한다 — DB 행을 직접 조정한다
+    # (distributions.models.DistributionCutline을 테스트가 조정하는 것과 같은
+    # 관용구, 운영자 API는 #76의 몫).
+    PlatformPolicy.objects.update_or_create(
+        pk=1, defaults={"platform_fee_bps": 1500, "withholding_tax_bps": 500}
+    )
+
+    # 정책 변경 이후에 만든 새 Payout — 새 요율이 적용된다.
+    _unfreeze()
+    sponsor_b, dev_b, contest_b, _ = _ready_for_payout(
+        client, category, landing_type, sponsor_uid="sponsor-b", dev_uid="dev-b"
+    )
+    after = _request_payout(client, dev_b, contest_b["id"])
+    payout_after = Payout.objects.get(idempotency_key=after["idempotency_key"])
+    assert payout_after.platform_fee_amount == 150_000  # 1,000,000 * 15%
+    assert payout_after.withholding_tax_amount == 50_000  # 1,000,000 * 5%
+    assert payout_after.platform_fee_bps == 1500
+    assert payout_after.withholding_tax_bps == 500
+
+    # 정책 변경이 과거 Payout을 흔들지 않는다 — 금액도, 기록된 요율도 그대로다.
+    payout_before.refresh_from_db()
+    assert payout_before.platform_fee_amount == 100_000
+    assert payout_before.withholding_tax_amount == 44_000
+    assert payout_before.platform_fee_bps == 1000
+    assert payout_before.withholding_tax_bps == 440
+
+
+@pytest.mark.django_db
+def test_platform_policy_row_is_created_with_defaults_on_first_use(
+    client, category, landing_type
+):
+    """PlatformPolicy 행이 없는 신선한 DB에서도 부팅과 첫 요청이 그냥
+    동작한다(#75) — 행이 없으면 기본값으로 만들어진다."""
+
+    from policies.models import PlatformPolicy
+
+    assert PlatformPolicy.objects.count() == 0
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    payout = _request_payout(client, dev, contest["id"])
+
+    assert payout["platform_fee_amount"] == 100_000
+    assert payout["withholding_tax_amount"] == 44_000
+
+    policy = PlatformPolicy.objects.get(pk=1)
+    assert policy.platform_fee_bps == 1000
+    assert policy.withholding_tax_bps == 440
+
+
+# --- 코드리뷰 지적 반영 (#75 후속) -------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_platform_policy_rejects_a_fee_bps_above_the_sane_upper_bound(db):
+    """요율에 상한이 없으면 `platform_fee_bps=12000`(120%) 같은 오입력이
+    저장되고, 한참 뒤 지급 요청 도중 `net_amount`가 음수라 500으로 죽는다 —
+    원인이 여기(정책 저장 시점)인데 증상은 지급 경로에서 나타난다. 값을 바꾸는
+    경로가 지금은 shell뿐이라(#76 전) 모델 자신이 막아야 한다.
+
+    상한 CheckConstraint를 없애면 이 테스트가 빨간불이 된다 — 저장이 그냥
+    성공해버리기 때문이다."""
+
+    from django.db import IntegrityError, transaction
+
+    from policies.models import PlatformPolicy
+
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            PlatformPolicy.objects.create(platform_fee_bps=12_000, withholding_tax_bps=440)
+
+
+@pytest.mark.django_db
+def test_platform_policy_rejects_fee_plus_withholding_bps_above_10000(db):
+    """개별 상한 안에 있어도 둘의 합이 10000bp(100%)를 넘으면 net_amount가
+    음수가 될 수 있다 — 합 제약이 따로 필요하다."""
+
+    from django.db import IntegrityError, transaction
+
+    from policies.models import PlatformPolicy
+
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            # 개별 상한(9000) 안이지만 합이 10000을 넘는다.
+            PlatformPolicy.objects.create(platform_fee_bps=6_000, withholding_tax_bps=5_000)
+
+
+@pytest.mark.django_db
+def test_invalid_policy_never_reaches_the_payout_request_path(
+    client, category, landing_type
+):
+    """CheckConstraint가 막아 상한 초과 값이 애초에 저장되지 않으므로, 지급
+    요청 경로가 (수정 전처럼) 중단된 트랜잭션 안에서 재조회하다
+    TransactionManagementError로 원인이 덮이는 500을 만날 일이 없다 — 정상
+    상태(1000/440)에서 지급 요청이 여전히 200대로 끝난다는 것으로 그 경로가
+    깨지지 않았음을 확인한다."""
+
+    from policies.models import PlatformPolicy
+
+    from django.db import IntegrityError, transaction
+
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            PlatformPolicy.objects.create(pk=1, platform_fee_bps=12_000, withholding_tax_bps=440)
+
+    # 위 시도가 거부되어 정책 행은 여전히 없다(또는 기본값이다) — 지급 요청은
+    # 정상적으로 200대로 끝난다.
+    assert not PlatformPolicy.objects.filter(pk=1).exists()
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    payout = _request_payout(client, dev, contest["id"])
+    assert payout["status"] == "requested"
+
+
+@pytest.mark.django_db
+def test_exempt_payout_records_zero_bps_and_an_explicit_exempt_flag_not_the_nominal_rate(
+    client, category, landing_type
+):
+    """과세최저한으로 원천징수가 0원인데 정책의 명목 요율(440)을 그대로
+    기록하면 "4.4%를 적용했다"는 기록과 "0원 뗐다"는 금액이 모순된다 — 나중에
+    이 스냅샷으로 원천징수 명세를 만들면 뗀 적 없는 세금을 보고하게 된다.
+    1/N 배분 몫은 250,000원 이하가 흔하므로 엣지 케이스가 아니다.
+
+    적용된 bps를 0으로 되돌리면(면제인데도 정책의 명목 요율을 그대로 기록하면)
+    이 테스트가 빨간불이 된다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(
+        client, category, landing_type, prize=250_000
+    )
+    requested = _request_payout(client, dev, contest["id"])
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+
+    assert payout.withholding_tax_amount == 0
+    assert payout.withholding_exempt is True
+    assert payout.withholding_tax_bps == 0  # 정책의 명목 요율(440)이 아니다.
+    # 수수료는 면제 대상이 아니므로 그대로 기록된다 — 면제는 원천징수에만 적용.
+    assert payout.platform_fee_bps == 1000
+
+
+@pytest.mark.django_db
+def test_non_exempt_payout_still_records_the_nominal_withholding_rate(
+    client, category, landing_type
+):
+    """면제가 아닌 정상 케이스에서는 정책의 명목 요율이 그대로 기록되고
+    withholding_exempt는 False다 — 위 면제 테스트와 대조."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(
+        client, category, landing_type, prize=1_000_000
+    )
+    requested = _request_payout(client, dev, contest["id"])
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+
+    assert payout.withholding_tax_amount == 44_000
+    assert payout.withholding_exempt is False
+    assert payout.withholding_tax_bps == 440
+
+
+@pytest.mark.django_db
+def test_exempt_threshold_does_not_move_when_only_the_withholding_rate_changes(
+    client, category, landing_type
+):
+    """원천징수 면제 임계값(250,000원)은 원천징수율(`withholding_tax_bps`)이
+    아니라 필요경비율(`withholding_necessary_expense_bps`)에서만 유도된다 —
+    누가 원천징수율만 330(사업소득 세율)으로 바꿔도, 그 값이 면제 임계값에
+    관여하지 않으므로 250,000원 이하 건은 여전히 면제된다. 임계값이
+    withholding_tax_bps에서 유도되도록(수정 전 상태로) 되돌리면 이 테스트가
+    빨간불이 된다 — 330bp에서는 250,000 * 330 // 10000 = 8,250원이 걷혀
+    withholding_tax_amount가 0이 아니게 된다."""
+
+    from policies.models import PlatformPolicy
+
+    # 원천징수율만 바꾼다 — 필요경비율(80%)은 그대로 둔다.
+    PlatformPolicy.objects.update_or_create(pk=1, defaults={"withholding_tax_bps": 330})
+
+    sponsor, dev, contest, submission = _ready_for_payout(
+        client, category, landing_type, prize=250_000
+    )
+    requested = _request_payout(client, dev, contest["id"])
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+
+    assert payout.withholding_tax_amount == 0
+    assert payout.withholding_exempt is True
+
+    # 임계값 바로 위(250,001원)에서는 여전히 새 요율(330bp)로 걷힌다 —
+    # 임계값 자체는 그대로이면서 요율만 바뀌었다는 것을 함께 증명한다.
+    _unfreeze()
+    _, dev2, contest2, _ = _ready_for_payout(
+        client, category, landing_type, dev_uid="dev-330", prize=250_001
+    )
+    requested2 = _request_payout(client, dev2, contest2["id"])
+    payout2 = Payout.objects.get(idempotency_key=requested2["idempotency_key"])
+    assert payout2.withholding_tax_amount == 250_001 * 330 // 10_000
+    assert payout2.withholding_exempt is False
+    assert payout2.withholding_tax_bps == 330
 
 
 @pytest.mark.django_db

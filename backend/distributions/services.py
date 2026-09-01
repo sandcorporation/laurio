@@ -41,6 +41,8 @@ from notifications.lifecycle import notify_distribution_shares
 from payouts.adapters import PayoutError, PayoutTimeoutError, get_adapter
 from payouts.models import Payout
 from payouts.services import get_or_create_payout, mark_confirmed, mark_failed
+from policies.models import PlatformPolicy
+from policies.services import get_current_policy
 from submissions.models import Submission
 
 from .models import Distribution, DistributionCutline, DistributionShare
@@ -171,16 +173,22 @@ def _create_distribution_for_contest(contest_id: int) -> Distribution | None:
     return distribution
 
 
-def _attempt_share_payout(share: DistributionShare, *, force_failure: bool) -> dict:
+def _attempt_share_payout(
+    share: DistributionShare, *, policy: PlatformPolicy, force_failure: bool
+) -> dict:
     """이 몫에 대한 지급을 시도(신규 요청 또는 재시도)한다.
 
     `payouts.services.get_or_create_payout`가 이미 활성 Payout이 있으면 그대로
     돌려주므로, 여기서 새 요청이 중복으로 나가지 않는다. `force_failure`는 fake
     어댑터 전용 테스트 시나리오 선택이다(`payments.api.ConfirmPaymentIn.simulate`와
     같은 원칙) — 실제 어댑터에서는 의미가 없다.
+
+    `policy`는 `run_due_distributions`가 스캔 스코프당 한 번 읽어 넘긴다(#75,
+    ADR-0023) — 여기서 다시 읽지 않는다. 그러지 않으면 이 스캔이 시도하는 몫
+    수만큼 정책 조회가 나간다.
     """
 
-    payout = get_or_create_payout(distribution_share=share)
+    payout = get_or_create_payout(distribution_share=share, policy=policy)
 
     if payout.status != Payout.Status.REQUESTED:
         # 이미 다른 경로(웹훅 등)로 확정·실패되어 있다 — 그대로 지나간다.
@@ -224,6 +232,10 @@ def run_due_distributions(*, fail_submission_ids: set[int] | None = None) -> lis
     """
 
     as_of = Clock.now()
+    # 이 스캔 스코프에서 정책을 한 번만 읽는다(#75, ADR-0023) — as_of를 스캔
+    # 시작 시점에 한 번만 구해 재사용하는 것과 같은 이유. 아래 for share in
+    # pending_shares 루프가 몫마다 정책을 다시 읽으면 쿼리가 몫 수만큼 늘어난다.
+    policy = get_current_policy()
     fail_submission_ids = fail_submission_ids or set()
     results: list[dict] = []
 
@@ -288,7 +300,7 @@ def run_due_distributions(*, fail_submission_ids: set[int] | None = None) -> lis
         # 통째로 막힌다.
         try:
             outcome = _attempt_share_payout(
-                share, force_failure=share.submission_id in fail_submission_ids
+                share, policy=policy, force_failure=share.submission_id in fail_submission_ids
             )
         except Exception as exc:  # noqa: BLE001 - 한 몫의 실패가 배치를 막으면 안 된다.
             logger.exception(

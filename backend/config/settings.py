@@ -137,6 +137,7 @@ INSTALLED_APPS = [
     "ledger",
     "payments",
     "core",
+    "policies",
     "notifications",
     # 모델은 없다(#8/#10이 붙을 때까지). STORAGE_BACKEND/STORAGE_TARGET_RESOLVER
     # 오탈자를 요청 시점 500 대신 `manage.py check`/부팅 시점에 잡기 위해서만 등록한다.
@@ -572,12 +573,13 @@ if not _payout_webhook_secret:
     _payout_webhook_secret = "dev-only-insecure-fake-toss-payout-webhook-secret"
 PAYOUT_WEBHOOK_SECRET = _payout_webhook_secret
 
-# 플랫폼 수수료·원천징수 공제율. 1/10000(bp) 단위 정수로 다뤄 float 오차 없이
-# 원 단위 정수 금액을 계산한다(ADR-0004: "금액은 원 단위 정수로 다룬다"). 원천징수는
-# 기타소득 원천징수의 상식적인 근사치(3.3%)를 기본값으로 둔다 — 실제 세율은 세무
-# 정책(#15 범위 밖)이 정한다.
-PAYOUT_PLATFORM_FEE_BPS = int(_env("PAYOUT_PLATFORM_FEE_BPS", "1000"))
-PAYOUT_WITHHOLDING_TAX_BPS = int(_env("PAYOUT_WITHHOLDING_TAX_BPS", "330"))
+# 플랫폼 수수료·원천징수 공제율은 더 이상 여기 없다(#75, ADR-0023). settings.py가
+# 환경변수로 읽었지만 staging·prod 어디에도 그 값을 준 적이 없어 실질적으로 코드
+# 상수였고, 요율은 환경의 성질이 아니라 사업 정책이다 — staging과 production에서
+# 달라지면 그것은 설정이 아니라 버그다. `policies.models.PlatformPolicy`(DB 단일
+# 행)가 대신하고, `policies.services.get_current_policy()`로 읽는다. 두 경로를
+# 남기지 않는다 — CSRF 방어를 두 기계로 두었다가 한쪽 발급처가 사라져 영구 403이
+# 된 사고가 이 저장소에 있다.
 
 # --- Seller(지급대행사 수취인) 등록 어댑터 (#50, ADR-0007, ADR-0020) -------------------
 #
