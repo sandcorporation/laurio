@@ -87,4 +87,9 @@ export default async function globalSetup(): Promise<void> {
   // eslint-disable-next-line no-console -- globalSetup은 CI 로그에서 눈에 보여야
   // 실제로 뭔가를 정리했는지 확인할 수 있다.
   console.log(`[global-setup] e2e run id ${runId} — ${output.trim().split("\n").pop()}`);
+
+  // **호출을 잊고 있었다.** 이 함수는 진작 있었고 CLAUDE.md 는 워밍업이 돌고
+  // 있다고 적어 뒀는데, 정의만 되고 불리지 않았다 — 즉 기록된 "웜 2.5분" 이
+  // 아니라 계속 "콜드 5.6분" 을 내고 있었다. 코드리뷰가 잡았다.
+  await warmRoutes();
 }
