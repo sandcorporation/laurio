@@ -78,6 +78,17 @@ export default function OperatorHome() {
         </p>
       )}
 
+      {/* 정책 화면(#77)으로 가는 진입점 — 계정 관리와 달리 등급을 가리지
+          않는다. 조회는 일반 등급도 되므로(#76) 이 링크는 두 등급 모두에게
+          보인다 — 편집 가능 여부는 화면 안에서 갈린다. 「할 일」 큐 카드
+          (#65/#66/#68 소관)와는 나란히 두지 않는다 — 정책은 처리해야 할
+          대기열이 아니다. */}
+      <p>
+        <Link href="/policy" data-testid="policy-nav-link">
+          플랫폼 정책
+        </Link>
+      </p>
+
       <section data-testid="operator-home-queues">
         <QueueCard
           testId="queue-appeals-pending"

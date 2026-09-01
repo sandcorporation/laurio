@@ -1082,6 +1082,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operator/deliverable-types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Deliverable Types */
+        get: operations["contests_operator_api_list_deliverable_types"];
+        put?: never;
+        /** Create Deliverable Type Endpoint */
+        post: operations["contests_operator_api_create_deliverable_type_endpoint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/deliverable-types/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Deliverable Type Changes */
+        get: operations["contests_operator_api_list_deliverable_type_changes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/deliverable-types/{deliverable_type_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Update Deliverable Type Endpoint */
+        post: operations["contests_operator_api_update_deliverable_type_endpoint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/deliverable-types/{deliverable_type_id}/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Deactivate Deliverable Type Endpoint */
+        post: operations["contests_operator_api_deactivate_deliverable_type_endpoint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/operator/login": {
         parameters: {
             query?: never;
@@ -2018,6 +2087,46 @@ export interface components {
             /** Recipient Id */
             recipient_id: number;
         };
+        /** DeactivateDeliverableTypeIn */
+        DeactivateDeliverableTypeIn: {
+            /** Reason */
+            reason: string;
+        };
+        /** DeliverableTypeChangeOut */
+        DeliverableTypeChangeOut: {
+            /** Action */
+            action: string;
+            /** After */
+            after: {
+                [key: string]: unknown;
+            };
+            /** Before */
+            before: {
+                [key: string]: unknown;
+            };
+            /**
+             * Changed At
+             * Format: date-time
+             */
+            changed_at: string;
+            /** Deliverable Type Id */
+            deliverable_type_id: number;
+            /** Id */
+            id: number;
+            /** Operator Username */
+            operator_username: string;
+            /** Reason */
+            reason: string;
+        };
+        /** DeliverableTypeCreateIn */
+        DeliverableTypeCreateIn: {
+            /** Minimum Prize */
+            minimum_prize: number;
+            /** Name */
+            name: string;
+            /** Reason */
+            reason: string;
+        };
         /** DeliverableTypeOut */
         DeliverableTypeOut: {
             /** Id */
@@ -2026,6 +2135,13 @@ export interface components {
             minimum_prize: number;
             /** Name */
             name: string;
+        };
+        /** DeliverableTypeUpdateIn */
+        DeliverableTypeUpdateIn: {
+            /** Minimum Prize */
+            minimum_prize: number;
+            /** Reason */
+            reason: string;
         };
         /** DeveloperPublicProfileOut */
         DeveloperPublicProfileOut: {
@@ -2282,6 +2398,27 @@ export interface components {
             password: string;
             /** Username */
             username: string;
+        };
+        /** OperatorDeliverableTypeOut */
+        OperatorDeliverableTypeOut: {
+            /** Id */
+            id: number;
+            /** Is Active */
+            is_active: boolean;
+            /** Minimum Prize */
+            minimum_prize: number;
+            /** Name */
+            name: string;
+        };
+        /** OperatorErrorOut */
+        OperatorErrorOut: {
+            /**
+             * Code
+             * @default error
+             */
+            code: string;
+            /** Detail */
+            detail: string;
         };
         /** OperatorLoginIn */
         OperatorLoginIn: {
@@ -4143,6 +4280,185 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    contests_operator_api_list_deliverable_types: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorDeliverableTypeOut"][];
+                };
+            };
+        };
+    };
+    contests_operator_api_create_deliverable_type_endpoint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeliverableTypeCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorDeliverableTypeOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+        };
+    };
+    contests_operator_api_list_deliverable_type_changes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliverableTypeChangeOut"][];
+                };
+            };
+        };
+    };
+    contests_operator_api_update_deliverable_type_endpoint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                deliverable_type_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeliverableTypeUpdateIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorDeliverableTypeOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+        };
+    };
+    contests_operator_api_deactivate_deliverable_type_endpoint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                deliverable_type_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeactivateDeliverableTypeIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorDeliverableTypeOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
                 };
             };
         };
