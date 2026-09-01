@@ -43,7 +43,9 @@ from verification.models import Verification
 from .models import Evidence, RequirementResponse, Submission
 from .participation import next_action_for
 from .schemas import (
+    ErrorOut,
     MyParticipationOut,
+    OwnScoreOut,
     ComparisonEntryOut,
     ComparisonSubmissionOut,
     CompletionOut,
@@ -428,6 +430,49 @@ def list_my_participation(request: HttpRequest, **kwargs):
         .select_related("contest", "score", "appeal", "contest__award__handover")
         .order_by("-created_at")
     )
+
+@router.get(
+    "/submissions/{submission_id}/score",
+    response={200: OwnScoreOut, 403: ErrorOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def get_own_score(request: HttpRequest, submission_id: int):
+    """Developer 가 자기 Submission 의 채점 결과를 본다 (#74).
+
+    **이게 없으면 이의 제기는 화면이 아니었다.** Score 가 노출되는 곳은 운영자의
+    이의 상세 하나뿐이었다 — 이의를 낸 다음에야, 그것도 낸 본인이 아니라 심판하는
+    운영자만 볼 수 있었다. 「채점이 끝났다」는 알림을 받은 Developer 에게는 무엇에
+    이의를 제기할지 볼 데가 없었다.
+
+    채점 전에는 404 다. 「아직 채점되지 않았다」와 「그런 제출이 없다」는 다른
+    사실이므로 detail 로 구분한다 — 앞은 기다리면 되고 뒤는 뭔가 잘못된 것이다.
+    """
+
+    submission = _get_owned_submission(request, submission_id)
+
+    score = getattr(submission, "score", None)
+    if score is None:
+        raise HttpError(404, "아직 채점되지 않았습니다.")
+
+    return 200, score
+
+
+def _get_owned_submission(request: HttpRequest, submission_id: int) -> Submission:
+    """`appeals.api._get_owned_submission` 과 같은 경계다 — 없는 것과 남의 것을
+    가른다. 두 앱이 각자 자기 라우터에서 쓰므로 한쪽이 다른 쪽을 import 하지
+    않는다(순환을 만들 이유가 없다)."""
+
+    try:
+        submission = Submission.objects.select_related("developer", "score").get(
+            id=submission_id
+        )
+    except Submission.DoesNotExist as exc:
+        raise HttpError(404, "Submission을 찾을 수 없습니다.") from exc
+
+    if submission.developer.user_id != request.auth_user.id:
+        raise HttpError(403, "본인의 Submission에만 접근할 수 있습니다.")
+    return submission
+
 
 @router.get("/submissions/{submission_id}", response={200: SubmissionOut}, auth=None)
 def get_submission(request: HttpRequest, submission_id: int):

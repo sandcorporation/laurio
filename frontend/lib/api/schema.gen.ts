@@ -1656,6 +1656,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/submissions/{submission_id}/score": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Own Score
+         * @description Developer 가 자기 Submission 의 채점 결과를 본다 (#74).
+         *
+         *     **이게 없으면 이의 제기는 화면이 아니었다.** Score 가 노출되는 곳은 운영자의
+         *     이의 상세 하나뿐이었다 — 이의를 낸 다음에야, 그것도 낸 본인이 아니라 심판하는
+         *     운영자만 볼 수 있었다. 「채점이 끝났다」는 알림을 받은 Developer 에게는 무엇에
+         *     이의를 제기할지 볼 데가 없었다.
+         *
+         *     채점 전에는 404 다. 「아직 채점되지 않았다」와 「그런 제출이 없다」는 다른
+         *     사실이므로 detail 로 구분한다 — 앞은 기다리면 되고 뒤는 뭔가 잘못된 것이다.
+         */
+        get: operations["submissions_api_get_own_score"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/submissions/{submission_id}/source-readings": {
         parameters: {
             query?: never;
@@ -2542,6 +2570,37 @@ export interface components {
             seller_status: string | null;
             /** Status */
             status: string;
+        };
+        /**
+         * OwnScoreOut
+         * @description Developer 가 자기 Submission 의 채점 결과를 볼 때 받는 것 (#74).
+         *
+         *     운영자가 심판 근거로 보는 `appeals.schemas.ScoreSnapshotOut` 과 필드가 같다 —
+         *     이의를 제기하는 사람과 심판하는 사람이 **같은 것을 보고** 이야기해야 하기
+         *     때문이다. 한쪽만 보는 값이 있으면 이의는 서로 다른 근거를 두고 오간다.
+         *
+         *     **`prompt` 는 없다.** 프롬프트에는 본인 소스가 통째로 임베드되어 있어
+         *     (`scoring._build_prompt`) 본인에게 보인다고 유출은 아니지만, 응답 크기에
+         *     상한이 사라진다 — 이 저장소는 상한 없는 필드가 4xx 가 나야 할 자리에서 500 을
+         *     내는 것을 이미 겪었다(#72). 소스를 다시 보는 경로는 따로 있다(ADR-0022).
+         *
+         *     `percentage` 는 문자열이다. 배분 컷라인이 쓰는 것과 같은 십진값이라, float 로
+         *     내리면 화면이 보여준 값과 돈을 가른 값이 갈릴 수 있다.
+         */
+        OwnScoreOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Model Version */
+            model_version: string;
+            /** Percentage */
+            percentage: string;
+            /** Reasoning */
+            reasoning: {
+                [key: string]: unknown;
+            }[];
         };
         /** PagedContestOut */
         PagedContestOut: {
@@ -5462,6 +5521,46 @@ export interface operations {
             };
             /** @description Unprocessable Content */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    submissions_api_get_own_score: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                submission_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OwnScoreOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

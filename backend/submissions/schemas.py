@@ -187,3 +187,37 @@ class ContestComparisonOut(Schema):
     contest_id: int
     submissions: list[ComparisonSubmissionOut]
     requirements: list[RequirementComparisonOut]
+
+
+class OwnScoreOut(Schema):
+    """Developer 가 자기 Submission 의 채점 결과를 볼 때 받는 것 (#74).
+
+    운영자가 심판 근거로 보는 `appeals.schemas.ScoreSnapshotOut` 과 필드가 같다 —
+    이의를 제기하는 사람과 심판하는 사람이 **같은 것을 보고** 이야기해야 하기
+    때문이다. 한쪽만 보는 값이 있으면 이의는 서로 다른 근거를 두고 오간다.
+
+    **`prompt` 는 없다.** 프롬프트에는 본인 소스가 통째로 임베드되어 있어
+    (`scoring._build_prompt`) 본인에게 보인다고 유출은 아니지만, 응답 크기에
+    상한이 사라진다 — 이 저장소는 상한 없는 필드가 4xx 가 나야 할 자리에서 500 을
+    내는 것을 이미 겪었다(#72). 소스를 다시 보는 경로는 따로 있다(ADR-0022).
+
+    `percentage` 는 문자열이다. 배분 컷라인이 쓰는 것과 같은 십진값이라, float 로
+    내리면 화면이 보여준 값과 돈을 가른 값이 갈릴 수 있다.
+    """
+
+    percentage: str
+    model_version: str
+    reasoning: list[dict]
+    created_at: datetime
+
+    @staticmethod
+    def resolve_percentage(obj) -> str:
+        # `Decimal` 을 그대로 두면 JSON 에서 float 가 된다 — 배분 컷라인이 쓰는
+        # 것과 같은 십진값이므로 자릿수를 잃지 않게 문자열로 내린다.
+        return str(obj.percentage)
+
+
+class ErrorOut(Schema):
+    """django-ninja 의 `HttpError` 가 내는 모양 — 4xx 를 생성 타입에 드러낸다."""
+
+    detail: str
