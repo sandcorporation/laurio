@@ -432,65 +432,138 @@ def test_raising_cutline_disqualifies_a_submission_that_previously_cleared_it(
     빠진다(#79 AC) — "값이 저장됐다"가 아니라 자격자 집합(배분 결과) 자체가
     실제로 바뀌는 것을 본다.
 
-    dev_mid는 두 개의 required Requirement 중 하나만 grounded되어 정확히 50%를
-    받는다. 컷라인을 40%로 낮춰두면(그 즉시는 넘는다) dev_mid도 자격자다. 하지만
-    Distribution이 실제로 만들어지기 전에 운영자가 컷라인을 70%로 올리면 —
-    dev_mid의 50%는 더 이상 그 컷라인을 넘지 못한다. dev_high(100%, 두 요건 모두
-    grounded)는 어느 쪽 컷라인에서도 항상 넘는다 — 그래서 최종 자격자는
-    dev_high 하나뿐이어야 한다.
+    "이전에는 통과했다"를 실제로 증명하려면 낮은 컷라인에서 진짜로 통과하는
+    것부터 봐야 한다(코드리뷰 지적 #79 후속) — Distribution은 Contest 하나에
+    최대 한 번만 만들어지므로, 같은 Contest로 "전"과 "후"를 둘 다 볼 수는
+    없다. 그래서 조건이 동일한 두 Contest를 쓴다:
+
+    - contest_control: 컷라인 40%에서 배분한다. 50%짜리 dev_mid_control이
+      실제로 자격을 얻는다는 것을 먼저 확인한다(positive control) — 이 확인이
+      없으면 뒤의 "raising it disqualified a submission that previously
+      cleared it"이라는 주장은 근거 없는 이름일 뿐이다.
+    - contest_treatment: 완전히 동일한 조건(같은 두 required Requirement,
+      같은 50% 채점)이지만, Distribution이 만들어지기 직전에 운영자가 컷라인을
+      70%로 올린다 — 이제 그 50%는 더 이상 넘지 못한다. dev_high_treatment
+      (100%, 두 요건 모두 grounded)를 함께 둬 컷라인 미달자뿐이라 컷라인이
+      waive되는 경우(cutline_waived)와 "진짜로 컷라인에 걸려 제외됨"을
+      구별한다.
     """
 
-    deadline = timezone.now() + timedelta(hours=1)
-    sponsor, contest = _publish_contest(
+    # --- control: 컷라인 40%에서 50%짜리 제출작이 실제로 통과한다 -----------------
+
+    deadline_control = timezone.now() + timedelta(hours=1)
+    _, contest_control = _publish_contest(
         client,
         category=category,
         deliverable_type=landing_type,
-        deadline_at=deadline,
+        deadline_at=deadline_control,
         requirements=[
             {"text": "로그인 기능이 있다", "grade": "required"},
             {"text": "결제 기능이 있다", "grade": "required"},
         ],
         prize=1_000_000,
+        sponsor_uid="sponsor-cutline-control",
+        sponsor_ci="sponsor-cutline-control-ci",
     )
-    requirement_ids = [r["id"] for r in contest["requirements"]]
+    control_requirement_ids = [r["id"] for r in contest_control["requirements"]]
 
-    dev_high = _verified_user(client, "dev-high", "dev-high-ci")
-    submission_high = _submit_multi(
-        client, dev_high, contest["id"], requirement_ids=requirement_ids, grounded_flags=[True, True]
+    dev_mid_control = _verified_user(client, "dev-mid-control", "dev-mid-control-ci")
+    submission_mid_control = _submit_multi(
+        client,
+        dev_mid_control,
+        contest_control["id"],
+        requirement_ids=control_requirement_ids,
+        grounded_flags=[True, False],
     )
 
-    dev_mid = _verified_user(client, "dev-mid", "dev-mid-ci")
-    submission_mid = _submit_multi(
-        client, dev_mid, contest["id"], requirement_ids=requirement_ids, grounded_flags=[True, False]
-    )
-
-    _close_contest(client, contest, deadline=deadline)
+    _close_contest(client, contest_control, deadline=deadline_control)
     _run_scoring(client)
-    _end_judging_period(client, contest["id"])
-    _advance_past_distribution_wait(contest["id"])
+    _end_judging_period(client, contest_control["id"])
+    _advance_past_distribution_wait(contest_control["id"])
 
-    score_mid = Submission.objects.get(id=submission_mid["id"]).score.percentage
-    assert score_mid == Decimal("50.00")
+    score_control = Submission.objects.get(id=submission_mid_control["id"]).score.percentage
+    assert score_control == Decimal("50.00")
 
-    # 컷라인을 40%로 낮춰둔다 — 이 시점 기준으로는 dev_mid(50%)도 넘는다.
     PlatformPolicy.objects.update_or_create(
         pk=1, defaults={"distribution_cutline_percentage": Decimal("40.00")}
     )
+    _run_due_distributions(client)
 
-    # 운영자가 배분 실행 전에 컷라인을 70%로 올린다 — dev_mid는 더 이상 못 넘고,
-    # dev_high(100%)는 여전히 넘는다.
+    distribution_control = Distribution.objects.get(contest_id=contest_control["id"])
+    assert distribution_control.cutline_percentage == Decimal("40.00")
+    assert distribution_control.cutline_waived is False
+    # positive control — 40%에서는 50%짜리가 실제로 자격을 얻는다.
+    assert DistributionShare.objects.filter(submission_id=submission_mid_control["id"]).exists()
+
+    # --- treatment: 같은 조건, 다만 배분 직전에 컷라인을 70%로 올린다 -------------
+
+    # control 처리가 시계를 (배분 대기 기간만큼) 미래로 돌려놨다 — 그대로 두면
+    # 곧 발행할 contest_treatment의 마감이 이미 "지난" 것으로 보여 제출 자체가
+    # 403으로 막힌다. 실제 지금 시각으로 되돌린다(이후 _close_contest 등이 각
+    # 자신의 기준으로 다시 얼린다).
+    _freeze(timezone.now())
+
+    deadline_treatment = timezone.now() + timedelta(hours=2)
+    _, contest_treatment = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline_treatment,
+        requirements=[
+            {"text": "로그인 기능이 있다", "grade": "required"},
+            {"text": "결제 기능이 있다", "grade": "required"},
+        ],
+        prize=1_000_000,
+        sponsor_uid="sponsor-cutline-treatment",
+        sponsor_ci="sponsor-cutline-treatment-ci",
+    )
+    treatment_requirement_ids = [r["id"] for r in contest_treatment["requirements"]]
+
+    dev_high_treatment = _verified_user(client, "dev-high-treatment", "dev-high-treatment-ci")
+    submission_high_treatment = _submit_multi(
+        client,
+        dev_high_treatment,
+        contest_treatment["id"],
+        requirement_ids=treatment_requirement_ids,
+        grounded_flags=[True, True],
+    )
+
+    dev_mid_treatment = _verified_user(client, "dev-mid-treatment", "dev-mid-treatment-ci")
+    submission_mid_treatment = _submit_multi(
+        client,
+        dev_mid_treatment,
+        contest_treatment["id"],
+        requirement_ids=treatment_requirement_ids,
+        grounded_flags=[True, False],
+    )
+
+    _close_contest(client, contest_treatment, deadline=deadline_treatment)
+    _run_scoring(client)
+    _end_judging_period(client, contest_treatment["id"])
+    _advance_past_distribution_wait(contest_treatment["id"])
+
+    score_treatment = Submission.objects.get(id=submission_mid_treatment["id"]).score.percentage
+    assert score_treatment == Decimal("50.00")
+
+    # 운영자가 배분 실행 전에 컷라인을 70%로 올린다 — 같은 50%가 이제는 못 넘고,
+    # dev_high_treatment(100%)는 여전히 넘는다.
     PlatformPolicy.objects.update_or_create(
         pk=1, defaults={"distribution_cutline_percentage": Decimal("70.00")}
     )
-
     _run_due_distributions(client)
 
-    distribution = Distribution.objects.get(contest_id=contest["id"])
-    assert distribution.cutline_percentage == Decimal("70.00")
-    assert distribution.cutline_waived is False
-    assert distribution.qualifying_count == 1
-    assert DistributionShare.objects.filter(submission_id=submission_high["id"]).exists()
-    assert not DistributionShare.objects.filter(submission_id=submission_mid["id"]).exists()
+    distribution_treatment = Distribution.objects.get(contest_id=contest_treatment["id"])
+    assert distribution_treatment.cutline_percentage == Decimal("70.00")
+    # dev_high_treatment가 진짜로 컷라인을 넘어 자격을 얻으므로, dev_mid_treatment의
+    # 제외는 "아무도 못 넘어 waive됐다"가 아니라 컷라인에 실제로 걸린 것이다.
+    assert distribution_treatment.cutline_waived is False
+    assert distribution_treatment.qualifying_count == 1
+    assert DistributionShare.objects.filter(
+        submission_id=submission_high_treatment["id"]
+    ).exists()
+    assert not DistributionShare.objects.filter(
+        submission_id=submission_mid_treatment["id"]
+    ).exists()
 
 
 @pytest.mark.django_db

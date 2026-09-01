@@ -63,6 +63,58 @@ class DistributionCutlineMigrationTests(TransactionTestCase):
         # 된다(ADR-0023 "정책값은 DB의 단일 행 하나로 모은다").
         assert "distributions_distributioncutline" not in connection.introspection.table_names()
 
+    def test_rolling_back_and_forward_again_preserves_a_non_default_cutline(self):
+        """롤백해도 값을 잃지 않는다(코드리뷰 지적 #79 후속) — `policies`의
+        0003을 되돌렸다가(그러면 `distributions`의 0003도 함께 되돌아가
+        `DistributionCutline` 테이블이 다시 생긴다) 다시 최신까지 전진시켜도,
+        운영자가 조정해둔 값이 살아 있어야 한다.
+
+        옛 reverse(`noop_reverse`)는 아무 것도 쓰지 않았다 — 그래서 롤백 직후
+        되살아난 `DistributionCutline` 테이블은 빈 채였고, 다시 전진시키면
+        `policies.services.get_current_policy`의 get_or_create가 필드 기본값
+        (60.00)으로 조용히 되돌아갔다. 이 테스트가 바로 그 왕복을 재현한다 —
+        reverse가 값을 되돌려 쓰지 않으면 이 테스트가 빨개진다.
+        """
+
+        executor = MigrationExecutor(connection)
+        executor.migrate(
+            [
+                ("distributions", "0002_distributionshare_result_notice_sent_at"),
+                ("policies", "0002_bounds_and_exempt_threshold_inputs"),
+            ]
+        )
+        executor.loader.build_graph()
+        targets = executor.loader.graph.leaf_nodes()
+        executor.migrate(targets)
+
+        from policies.models import PlatformPolicy
+
+        # 운영자가 마이그레이션이 끝난 뒤 컷라인을 33.25%로 조정했다고 가정한다
+        # — 기본값(60.00)이 아니어야 "롤백해도 우연히 맞아떨어졌다"가 안 된다.
+        PlatformPolicy.objects.update_or_create(
+            pk=1, defaults={"distribution_cutline_percentage": Decimal("33.25")}
+        )
+
+        # 두 앱을 이관 이전 상태로 되돌린다 — distributions의 0003(DeleteModel)이
+        # 먼저 되돌아가 DistributionCutline 테이블을 다시 만들고, 그 다음
+        # policies의 0003 RunPython의 reverse가 실행된다.
+        executor.loader.build_graph()
+        executor.migrate(
+            [
+                ("distributions", "0002_distributionshare_result_notice_sent_at"),
+                ("policies", "0002_bounds_and_exempt_threshold_inputs"),
+            ]
+        )
+
+        # 다시 최신까지 전진시킨다 — policies의 0003 RunPython(정방향)이 방금
+        # reverse가 되돌려 쓴 DistributionCutline 값을 다시 읽어야 한다.
+        executor.loader.build_graph()
+        targets = executor.loader.graph.leaf_nodes()
+        executor.migrate(targets)
+
+        policy = PlatformPolicy.objects.get(pk=1)
+        assert policy.distribution_cutline_percentage == Decimal("33.25")
+
     def test_boots_with_default_cutline_when_no_prior_row_existed(self):
         """신선한 DB(DistributionCutline 행이 한 번도 만들어진 적 없음)에서도
         마이그레이션이 그냥 통과하고, 이후 첫 조회가 기본값(60.00)으로 행을
