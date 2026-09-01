@@ -8,6 +8,7 @@
 // 버튼 하나로 바로 실행하지 않고, 이유를 적는 인라인 폼을 먼저 연다.
 import { useState } from "react";
 
+import { parseIntegerFieldInput } from "@/lib/forms/parse-integer-field-input";
 import { deactivateDeliverableType, updateMinimumPrize } from "./actions";
 import type { DeliverableType } from "./types";
 
@@ -43,10 +44,15 @@ export function TypeRow({
     setPending(true);
     setError(null);
 
-    const parsed = Number(minimumPrizeInput.trim());
+    // `Number("")`가 NaN이 아니라 0이라는 함정 때문에(코드리뷰 지적) 빈
+    // 입력칸이 조용히 "최소 제안 상금 0원"으로 저장될 뻔했다 — 그러면 그
+    // 종류의 "상금미달" 배지 판정이 사실상 꺼진다. parseIntegerFieldInput이
+    // 빈 문자열·숫자 아닌 문자열을 구분해, 서버의 422로 명시적으로 거절되게
+    // 한다(policy-editor.tsx와 같은 방어를 여기서 다시 손으로 만들지 않는다).
+    const parsed = parseIntegerFieldInput(minimumPrizeInput);
     const result = await updateMinimumPrize(
       type.id,
-      Number.isNaN(parsed) ? (minimumPrizeInput as unknown as number) : parsed,
+      parsed.valid ? parsed.value : (parsed.raw as unknown as number),
       reason,
     );
     setPending(false);

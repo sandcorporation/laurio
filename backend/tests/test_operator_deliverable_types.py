@@ -397,3 +397,32 @@ def test_raising_minimum_prize_changes_which_new_contests_get_the_underfunded_ba
     assert before_detail.status_code == 200
     assert before_detail.json()["is_underfunded"] is False
     assert before_detail.json()["required_minimum_prize"] == 500_000
+
+
+# --- 코드리뷰 지적 4 — minimum_prize 상한이 없어 500이 난다 ------------------
+
+
+@pytest.mark.django_db
+def test_create_with_minimum_prize_above_postgres_integer_range_is_4xx_not_500():
+    """DeliverableType.minimum_prize는 Postgres의 integer(4바이트) 컬럼이다.
+    상한이 없으면 그 열의 실제 한계(2**31-1)를 넘는 입력이
+    `DataError: integer out of range`로 500이 된다 — 4xx여야 할 자리다."""
+
+    root = _operator_client("root-dtype-int-overflow-create", superuser=True)
+
+    response = _create(root, name="정수 상한 초과 생성", minimum_prize=3_000_000_000)
+
+    assert response.status_code in (400, 422), response.content
+    assert not DeliverableType.objects.filter(name="정수 상한 초과 생성").exists()
+
+
+@pytest.mark.django_db
+def test_update_with_minimum_prize_above_postgres_integer_range_is_4xx_not_500():
+    dtype = DeliverableType.objects.create(name="정수 상한 초과 수정", minimum_prize=100_000)
+    root = _operator_client("root-dtype-int-overflow-update", superuser=True)
+
+    response = _update(root, dtype.id, minimum_prize=3_000_000_000)
+
+    assert response.status_code in (400, 422), response.content
+    dtype.refresh_from_db()
+    assert dtype.minimum_prize == 100_000

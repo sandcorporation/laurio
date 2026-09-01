@@ -109,6 +109,40 @@ test.describe("생성 — 상위 등급, 즉시 공개 선택지에 나타난다
     await expect(page.getByTestId("create-deliverable-type-error")).toBeVisible();
     await expect(page.getByTestId("create-deliverable-type-error")).toContainText("이유");
   });
+
+  test("최소 제안 상금 칸을 비운 채 생성하면 0원 종류가 조용히 만들어지지 않는다(코드리뷰 지적)", async ({
+    page,
+  }) => {
+    // `Number("")`는 NaN이 아니라 0이다 — 최소 제안 상금을 비운 채 생성하면
+    // 0원짜리 종류가 조용히 만들어질 뻔했다. 이름은 unique이고 되살리는
+    // 경로가 없어(#80은 비활성화만 만든다) 그 이름이 영구히 묶인다.
+    const superuser = seedE2eOperator({
+      username: `e2e-op-dtype-create-emptyprize-${Date.now()}`,
+      superuser: true,
+    });
+    const typeName = `이유있음-빈상금-${Date.now()}`;
+
+    await loginAndExpectHome(page, superuser.username);
+    await page.getByTestId("deliverable-types-nav-link").click();
+
+    await page.getByTestId("create-deliverable-type-name").fill(typeName);
+    // 최소 제안 상금 칸은 비워 둔다.
+    await page.getByTestId("create-deliverable-type-reason").fill("빈 상금 시도");
+
+    const responsePromise = page.waitForResponse(
+      (res) => res.url().includes("/api/backend/operator/deliverable-types") && res.request().method() === "POST",
+    );
+    await page.getByTestId("create-deliverable-type-submit").click();
+    const response = await responsePromise;
+
+    // 200/201이 아니어야 한다 — 성공했다면 0원짜리 종류가 조용히 생겼다는
+    // 뜻이다.
+    expect(response.ok()).toBe(false);
+    await expect(page.getByTestId("create-deliverable-type-error")).toBeVisible();
+
+    const row = page.locator('tr[data-testid^="deliverable-type-row-"]', { hasText: typeName });
+    await expect(row).toHaveCount(0);
+  });
 });
 
 test.describe("수정 — 최소 제안 상금, 이유가 함께 남는다(#80)", () => {
@@ -143,6 +177,53 @@ test.describe("수정 — 최소 제안 상금, 이유가 함께 남는다(#80)"
     const historyTable = page.getByTestId("deliverable-type-history-table");
     await expect(historyTable).toBeVisible();
     await expect(historyTable).toContainText(reason);
+  });
+
+  test("최소 제안 상금 칸을 비운 채 수정하면 조용히 0원이 되지 않는다(코드리뷰 지적)", async ({
+    page,
+  }) => {
+    // `Number("")`는 NaN이 아니라 0이다 — 비운 채 저장하면 그 종류의
+    // "상금미달" 배지 판정이 사실상 꺼질 뻔했다.
+    const superuser = seedE2eOperator({
+      username: `e2e-op-dtype-update-emptyprize-${Date.now()}`,
+      superuser: true,
+    });
+    const typeName = `e2e 빈상금수정 대상 ${Date.now()}`;
+
+    await loginAndExpectHome(page, superuser.username);
+    await page.getByTestId("deliverable-types-nav-link").click();
+
+    await page.getByTestId("create-deliverable-type-name").fill(typeName);
+    await page.getByTestId("create-deliverable-type-minimum-prize").fill("450000");
+    await page.getByTestId("create-deliverable-type-reason").fill("초기 생성");
+    await page.getByTestId("create-deliverable-type-submit").click();
+
+    const row = page.locator('tr[data-testid^="deliverable-type-row-"]', { hasText: typeName });
+    await expect(row).toBeVisible();
+    const rowTestId = await row.getAttribute("data-testid");
+    if (!rowTestId) throw new Error("행의 data-testid를 찾지 못했다");
+
+    await page.getByTestId(`${rowTestId}-edit-button`).click();
+    await page.getByTestId(`${rowTestId}-edit-minimum-prize`).fill("");
+    await page.getByTestId(`${rowTestId}-edit-reason`).fill("빈 상금 수정 시도");
+
+    const responsePromise = page.waitForResponse(
+      (res) => /\/api\/backend\/operator\/deliverable-types\/\d+$/.test(res.url()) && res.request().method() === "POST",
+    );
+    await page.getByTestId(`${rowTestId}-edit-save`).click();
+    const response = await responsePromise;
+
+    expect(response.ok()).toBe(false);
+
+    // 실패한 시도는 여전히 편집 모드에 머문다(입력칸이 비어 있는 그대로) —
+    // 그 셀 자체는 지금 <input>이라 텍스트로 읽을 수 없다. 서버에 실제로
+    // 반영되지 않았는지는 새로고침해 view 모드로 돌아온 값으로 확인한다 —
+    // 클라이언트의 낙관이 아니라 서버 상태를 직접 증명한다.
+    await page.reload();
+    const reloadedRow = page.locator('tr[data-testid^="deliverable-type-row-"]', {
+      hasText: typeName,
+    });
+    await expect(reloadedRow.getByTestId(`${rowTestId}-minimum-prize`)).toHaveText("450000");
   });
 });
 

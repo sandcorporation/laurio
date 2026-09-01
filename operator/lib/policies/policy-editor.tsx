@@ -12,6 +12,7 @@
 // 먼저 틀린 이유로 막거나, 서버가 막을 것을 화면이 허용해버린다.
 import { useEffect, useState } from "react";
 
+import { parseIntegerFieldInput } from "@/lib/forms/parse-integer-field-input";
 import { updatePolicy } from "./actions";
 import { POLICY_FIELDS, POLICY_FIELD_LABELS } from "./types";
 import type { PlatformPolicy, PolicyField } from "./types";
@@ -63,19 +64,21 @@ export function PolicyEditor({
 
     const changes: Partial<Record<PolicyField, number>> = {};
     for (const field of POLICY_FIELDS) {
-      const raw = inputs[field].trim();
-      const parsed = Number(raw);
       const current = policy[field];
-      // 파싱 불가한 값(빈 문자열 포함)은 "이 필드는 안 건드림"으로 보내지
-      // 않고 그대로 보낸다 — NaN을 그대로 payload에 실으면 JSON.stringify가
-      // null로 바꿔버려 서버의 422(요청 검증)로 이어진다. 그 메시지를 그대로
-      // 보여주는 것이 "왜 거절됐는지"를 화면이 뭉개지 않는 방법이다.
-      if (Number.isNaN(parsed)) {
-        changes[field] = raw as unknown as number; // 서버가 타입 오류로 422를 낸다.
+      // `Number("")`가 NaN이 아니라 0이라는 함정 때문에(코드리뷰 지적, 같은
+      // 함정이 DeliverableType 화면 두 곳과 겹쳐 한 곳에 모았다) 이 판정을
+      // 여기서 다시 손으로 하지 않는다 — parse-integer-field-input.ts 참고.
+      const result = parseIntegerFieldInput(inputs[field]);
+      if (!result.valid) {
+        // 파싱 불가한 값(빈 문자열 포함)은 "이 필드는 안 건드림"으로 보내지
+        // 않고 그대로 보낸다 — 문자열을 그대로 payload에 실으면 서버의
+        // 422(요청 검증)로 이어진다. 그 메시지를 그대로 보여주는 것이 "왜
+        // 거절됐는지"를 화면이 뭉개지 않는 방법이다.
+        changes[field] = result.raw as unknown as number;
         continue;
       }
-      if (parsed !== current) {
-        changes[field] = parsed;
+      if (result.value !== current) {
+        changes[field] = result.value;
       }
     }
 

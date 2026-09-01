@@ -64,15 +64,24 @@ class OperatorDeliverableTypeOut(Schema):
     is_active: bool
 
 
+# DeliverableType.minimum_prize는 Django PositiveIntegerField로, Postgres의
+# `integer`(4바이트) 컬럼이다 — 상한을 안 걸면 그 열의 실제 상한(2**31-1)을
+# 넘는 입력이 `DataError: integer out of range`로 500이 된다(코드리뷰 지적,
+# 재현됨). `policies.services._FIELD_BOUNDS`가 withholding_minor_income_exempt_won
+# 에 같은 상한을 명시해 둔 것과 같은 이유로, 여기서도 4xx가 나야 할 자리에서
+# 500이 나지 않게 한다.
+_POSITIVE_INT_MAX = 2**31 - 1
+
+
 class DeliverableTypeCreateIn(Schema):
     name: str = Field(min_length=1, max_length=100)
-    minimum_prize: int = Field(ge=0)
+    minimum_prize: int = Field(ge=0, le=_POSITIVE_INT_MAX)
     # 정책 변경과 같은 규율(#76) — 새 종류를 추가하는 것도 근거가 남아야 한다.
     reason: str
 
 
 class DeliverableTypeUpdateIn(Schema):
-    minimum_prize: int = Field(ge=0)
+    minimum_prize: int = Field(ge=0, le=_POSITIVE_INT_MAX)
     reason: str
 
 

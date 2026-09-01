@@ -203,6 +203,36 @@ test.describe("변경 — 상위 등급, 이유가 함께 남는다(#77)", () =>
     expect(message).not.toContain("[object Object]");
     expect(message).not.toContain("undefined");
   });
+
+  test("입력칸을 비운 채 저장하면 조용히 0이 되지 않는다(코드리뷰 지적)", async ({ page }) => {
+    // `Number("")`는 NaN이 아니라 0이다 — 입력칸을 비운 채 저장하면 그
+    // 필드가 조용히 0으로 바뀔 뻔했다. 서버 경계(0~9000)가 0을 허용하므로
+    // 이 사고는 200으로 "성공"해버려 화면에서 눈치채기 어렵다. 빈 입력은
+    // 명시적인 4xx로 거절되어야 하고, 표의 값도 그대로여야 한다.
+    const superuser = seedE2eOperator({
+      username: `e2e-op-policy-emptyinput-${Date.now()}`,
+      superuser: true,
+    });
+
+    await loginAndExpectHome(page, superuser.username);
+    await page.getByTestId("policy-nav-link").click();
+
+    const currentFee = await readFeeBps(page);
+    await page.getByTestId("policy-input-platform_fee_bps").fill("");
+    await page.getByTestId("policy-reason-input").fill("빈 입력 시도");
+
+    const responsePromise = page.waitForResponse(
+      (res) => res.url().includes("/api/backend/operator/policy") && res.request().method() === "POST",
+    );
+    await page.getByTestId("policy-save-button").click();
+    const response = await responsePromise;
+
+    // 200이 아니어야 한다 — 200이면 빈 입력이 조용히 유효한 값(0)으로
+    // 받아들여졌다는 뜻이다.
+    expect(response.status()).not.toBe(200);
+    await expect(page.getByTestId("policy-value-platform_fee_bps")).toHaveText(String(currentFee));
+    expect(currentFee).not.toBe(0);
+  });
 });
 
 test.describe("세션 만료 — 스피너에 갇히지 않는다(#77, #69의 함정)", () => {

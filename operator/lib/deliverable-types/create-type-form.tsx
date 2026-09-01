@@ -5,6 +5,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 
+import { parseIntegerFieldInput } from "@/lib/forms/parse-integer-field-input";
 import { createDeliverableType } from "./actions";
 
 export function CreateTypeForm({
@@ -25,13 +26,17 @@ export function CreateTypeForm({
     setError(null);
     setPending(true);
 
-    const parsedPrize = Number(minimumPrize.trim());
+    // `Number("")`가 NaN이 아니라 0이라는 함정 때문에(코드리뷰 지적) 최소
+    // 제안 상금 칸을 비운 채 생성하면 0원짜리 종류가 조용히 만들어질 뻔했다
+    // — 이름은 unique이고 되살리는 경로가 없어(#80은 비활성화만 만든다) 그
+    // 이름이 영구히 묶인다. parseIntegerFieldInput이 빈 문자열·숫자 아닌
+    // 문자열을 구분해 서버의 422로 명시적으로 거절되게 한다.
+    const parsedPrize = parseIntegerFieldInput(minimumPrize);
     const result = await createDeliverableType({
       name,
-      // 파싱 불가한 값은 그대로 NaN을 보내지 않고, 서버의 요청 검증이
-      // 422로 거절하도록 원본 문자열을 그대로 실어 보낸다 —
-      // policy-editor.tsx와 같은 판단.
-      minimum_prize: Number.isNaN(parsedPrize) ? (minimumPrize as unknown as number) : parsedPrize,
+      minimum_prize: parsedPrize.valid
+        ? parsedPrize.value
+        : (parsedPrize.raw as unknown as number),
       reason,
     });
     setPending(false);

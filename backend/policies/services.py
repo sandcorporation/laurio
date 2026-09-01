@@ -119,6 +119,13 @@ def update_policy(
     problems, fee, withholding = _validate(changes, reason)
 
     with transaction.atomic():
+        # `select_for_update().get(pk=1)`은 행의 존재를 전제한다 — 신선한
+        # DB(GET을 한 번도 안 거친 채 POST부터 오는 경우, 예: expected_
+        # version=0으로 바로 시도)에서는 행이 없어 DoesNotExist로 500이 났다
+        # (코드리뷰 지적, 재현됨). `get_current_policy()`가 바로 그 지연
+        # 생성(get_or_create)을 담당하므로, 잠그기 전에 먼저 불러 행이
+        # 반드시 있게 만든다.
+        get_current_policy()
         current = PlatformPolicy.objects.select_for_update().get(pk=1)
 
         if current.version != expected_version:

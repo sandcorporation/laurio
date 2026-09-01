@@ -402,3 +402,33 @@ def test_concurrent_changes_do_not_silently_lose_one(django_db_blocker):
         final = PlatformPolicy.objects.get(pk=1)
         assert final.platform_fee_bps in (2000, 3000)
         assert final.version == starting_version + 1
+
+
+# --- 코드리뷰 지적 5 — 신선한 DB에서 첫 변경이 500이 난다 -------------------
+
+
+@pytest.mark.django_db
+def test_change_policy_on_a_fresh_db_without_a_prior_get_does_not_500():
+    """PlatformPolicy 행이 한 번도 만들어진 적 없는 신선한 DB에, GET을 한 번도
+    거치지 않고 곧장 POST(expected_version=0)를 쏴도 500이 아니어야 한다.
+
+    `update_policy`가 `select_for_update().get(pk=1)`로 행의 존재를
+    전제했었다 — `get_current_policy()`의 지연 생성(get_or_create)을 잠그기
+    전에 부르지 않으면 DoesNotExist로 500이 난다(코드리뷰 지적, 재현됨)."""
+
+    assert PlatformPolicy.objects.count() == 0
+    root = _client_for("root-policy-freshdb", superuser=True)
+
+    response = root.post(
+        POLICY_URL,
+        data={
+            "platform_fee_bps": 1200,
+            "reason": "신선한 DB에서 첫 변경",
+            "expected_version": 0,
+        },
+        content_type="application/json",
+        HTTP_ORIGIN=ORIGIN,
+    )
+
+    assert response.status_code == 200, response.content
+    assert PlatformPolicy.objects.get(pk=1).platform_fee_bps == 1200
