@@ -33,6 +33,7 @@ from django.utils import timezone
 from awards.models import Award
 from contests.models import Category, Contest, DeliverableType
 from core.transitions import claim_transition
+from policies.services import get_current_policy
 
 CONTESTS_URL = "/api/contests"
 PAYMENTS_URL = "/api/payments"
@@ -297,9 +298,9 @@ def _close_contest(client: Client, contest: dict, *, deadline) -> None:
     적용한다. 스캔이 없으니 다른 Contest는 손대지 않고, 시계를 얼릴
     필요도 없어 그 흔적을 되돌리는 코드(_unfreeze)도 함께 사라진다.
     `extra_fields`는 contests/apps.py에 등록된 실제 전이 규칙과 같은 계산
-    (judging_ends_at = 이 Contest의 deadline_at + JUDGING_PERIOD_DAYS)을
-    그대로 재현한다 — Award 엔드포인트가 이 값을 실시간과 비교하므로
-    (awards/api.py) 값 자체는 여전히 정확해야 한다.
+    (judging_ends_at = 이 Contest의 deadline_at + PlatformPolicy.judging_period_days,
+    #78/ADR-0023)을 그대로 재현한다 — Award 엔드포인트가 이 값을 실시간과
+    비교하므로(awards/api.py) 값 자체는 여전히 정확해야 한다.
     """
 
     ok = claim_transition(
@@ -309,7 +310,10 @@ def _close_contest(client: Client, contest: dict, *, deadline) -> None:
         to_state=Contest.Status.CLOSED,
         state_field="status",
         now=timezone.now(),
-        extra_fields={"judging_ends_at": deadline + timedelta(days=settings.JUDGING_PERIOD_DAYS)},
+        extra_fields={
+            "judging_ends_at": deadline
+            + timedelta(days=get_current_policy().judging_period_days)
+        },
     )
     assert ok, f"Contest {contest['id']} 를 PUBLISHED -> CLOSED 로 전이하지 못했다."
 

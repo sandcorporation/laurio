@@ -34,6 +34,7 @@ from django.utils import timezone
 
 from contests.models import Contest
 from core.clock import Clock
+from policies.services import get_current_policy
 
 from .models import Notification, NotificationType
 from .services import create_notification
@@ -107,7 +108,7 @@ def _participating_developer_users(contest: Contest):
 # --- 마감 임박 -------------------------------------------------------------------
 
 
-def send_due_deadline_reminders(as_of=None) -> list[dict]:
+def send_due_deadline_reminders(as_of=None, policy=None) -> list[dict]:
     """마감이 다가오는 PUBLISHED Contest의 Sponsor와 참가 Developer에게 알린다.
 
     Contest 당 한 번만 "완료"로 표시한다 — `deadline_reminder_sent_at`이 비어
@@ -116,10 +117,16 @@ def send_due_deadline_reminders(as_of=None) -> list[dict]:
     도중 타임아웃·재배포로 죽으면, 표시를 먼저 찍는 예전 방식은 남은 수신자를
     영원히 못 받게 만들었다. `_safe_notify_once`가 이미 받은 수신자에게 중복
     발송하지 않으므로, 다음 스캔이 이 Contest를 다시 집어도 안전하다.
+
+    `policy`는 이 스캔 스코프에서 한 번 읽은 `PlatformPolicy`다(#78,
+    ADR-0023) — 생략하면(단독 호출 편의용, `as_of`와 같은 관용구) 이 함수가
+    대신 한 번 읽는다. `run_due_lifecycle_notifications`가 세 스캔에 같은
+    `policy`를 넘겨 다섯 스캔 전체에서 정책 조회가 늘어나지 않게 한다.
     """
 
     as_of = as_of or Clock.now()
-    lead = timedelta(hours=settings.DEADLINE_REMINDER_LEAD_HOURS)
+    policy = policy or get_current_policy()
+    lead = timedelta(hours=policy.deadline_reminder_lead_hours)
 
     due = list(
         Contest.objects.filter(
@@ -168,17 +175,20 @@ def send_due_deadline_reminders(as_of=None) -> list[dict]:
 # --- 심사기간 종료 임박 ------------------------------------------------------------
 
 
-def send_due_judging_end_reminders(as_of=None) -> list[dict]:
+def send_due_judging_end_reminders(as_of=None, policy=None) -> list[dict]:
     """심사기간 종료가 다가오는 CLOSED Contest의 Sponsor에게 Award를 상기시킨다.
 
     유료 연장(`contests.services.mark_extension_paid`)이 `judging_ends_at`을
     늘릴 때 `judging_end_reminder_sent_at`도 함께 비운다(#19 리뷰 지적 1) —
     그래야 연장된 새 종료일이 다가올 때 이 스캔이 다시 알릴 수 있다. 여기서는
     그 결과(비워진 플래그)를 그대로 소비할 뿐이다.
+
+    `policy` 파라미터는 `send_due_deadline_reminders`와 같다(#78, ADR-0023).
     """
 
     as_of = as_of or Clock.now()
-    lead = timedelta(hours=settings.JUDGING_END_REMINDER_LEAD_HOURS)
+    policy = policy or get_current_policy()
+    lead = timedelta(hours=policy.judging_end_reminder_lead_hours)
 
     due = list(
         Contest.objects.filter(
@@ -251,7 +261,7 @@ def _constructed_daytime_target(due_at, *, lead_days: int, hour: int):
     return target_local.astimezone(dt_timezone.utc)
 
 
-def send_due_distribution_final_warnings(as_of=None) -> list[dict]:
+def send_due_distribution_final_warnings(as_of=None, policy=None) -> list[dict]:
     """Distribution 실행이 다가오는 JUDGING_ENDED Contest의 Sponsor에게 금액을
     명시한 최종 경고를 보낸다.
 
@@ -268,9 +278,14 @@ def send_due_distribution_final_warnings(as_of=None) -> list[dict]:
     있다(특히 유료 연장으로 id 순서와 judging_ends_at 순서가 어긋나기 시작하면).
     정확한 최종 판정은 여전히 아래 루프의 `_constructed_daytime_target` 비교가
     한다.
+
+    `policy` 파라미터는 `send_due_deadline_reminders`와 같다(#78, ADR-0023).
+    `NOTIFICATION_DAYTIME_HOUR`(낮 시각 자체를 고정하는 상수)는 이 티켓의
+    이전 대상이 아니다 — settings에 그대로 남는다.
     """
 
     as_of = as_of or Clock.now()
+    policy = policy or get_current_policy()
 
     # warning_target은 (judging_ends_at + WAIT_DAYS - LEAD_DAYS)의 로컬 날짜를
     # 낮 시각으로 고정한 것이므로, 그 "날짜 고정" 때문에 원래 시각에서 최대
@@ -281,8 +296,8 @@ def send_due_distribution_final_warnings(as_of=None) -> list[dict]:
     judging_ends_at_cutoff = (
         as_of
         + timedelta(days=1)
-        - timedelta(days=settings.DISTRIBUTION_WAIT_DAYS)
-        + timedelta(days=settings.DISTRIBUTION_FINAL_WARNING_LEAD_DAYS)
+        - timedelta(days=policy.distribution_wait_days)
+        + timedelta(days=policy.distribution_final_warning_lead_days)
     )
 
     due = list(
@@ -301,11 +316,11 @@ def send_due_distribution_final_warnings(as_of=None) -> list[dict]:
     for contest in due:
         try:
             distribution_due_at = contest.judging_ends_at + timedelta(
-                days=settings.DISTRIBUTION_WAIT_DAYS
+                days=policy.distribution_wait_days
             )
             warning_target = _constructed_daytime_target(
                 distribution_due_at,
-                lead_days=settings.DISTRIBUTION_FINAL_WARNING_LEAD_DAYS,
+                lead_days=policy.distribution_final_warning_lead_days,
                 hour=settings.NOTIFICATION_DAYTIME_HOUR,
             )
             if as_of < warning_target:
@@ -417,13 +432,19 @@ def send_pending_distribution_share_result_notices(as_of=None) -> list[dict]:
 
 def run_due_lifecycle_notifications(as_of=None) -> list[dict]:
     """다섯 스캔(마감 임박·심사기간 종료 임박·Distribution 최종 경고·Award/
-    Distribution 결과 알림 복구)을 한 번에 돈다."""
+    Distribution 결과 알림 복구)을 한 번에 돈다.
+
+    이 호출(스캔 스코프) 전체에서 정책을 한 번만 읽어 세 리드타임 스캔에
+    같이 넘긴다(#78, ADR-0023) — `as_of`를 한 번만 구해 재사용하는 것과
+    같은 이유다.
+    """
 
     as_of = as_of or Clock.now()
+    policy = get_current_policy()
     results: list[dict] = []
-    results += send_due_deadline_reminders(as_of=as_of)
-    results += send_due_judging_end_reminders(as_of=as_of)
-    results += send_due_distribution_final_warnings(as_of=as_of)
+    results += send_due_deadline_reminders(as_of=as_of, policy=policy)
+    results += send_due_judging_end_reminders(as_of=as_of, policy=policy)
+    results += send_due_distribution_final_warnings(as_of=as_of, policy=policy)
     results += send_pending_award_result_notices(as_of=as_of)
     results += send_pending_distribution_share_result_notices(as_of=as_of)
     return results

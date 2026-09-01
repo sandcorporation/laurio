@@ -20,7 +20,6 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.http import HttpRequest
 from ninja import Router
@@ -32,6 +31,7 @@ from core.clock import Clock
 from core.transitions import claim_transition
 from handovers.models import Handover
 from notifications.lifecycle import notify_award_result
+from policies.services import get_current_policy
 from submissions.models import Submission
 
 from .models import Award
@@ -108,7 +108,8 @@ def award_submission(request: HttpRequest, contest_id: int, payload: AwardIn):
         # 인수 확인·빌드 자산·Escrow 해제 흐름이 딸릴 자리를 만들 뿐이다.
         Handover.objects.create(
             award=award,
-            release_deadline_at=now + timedelta(days=settings.HANDOVER_ACCEPTANCE_PERIOD_DAYS),
+            release_deadline_at=now
+            + timedelta(days=get_current_policy().handover_acceptance_period_days),
         )
 
     # 트랜잭션이 커밋된 뒤에만 알린다 — notify_award_result는 내부에서 모든 예외를

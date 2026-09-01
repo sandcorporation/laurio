@@ -270,7 +270,9 @@ def _resolve_developer(payout: Payout):
     return payout.distribution_share.submission.developer
 
 
-def ensure_seller_registered(developer, *, simulate: str | None = None) -> Seller:
+def ensure_seller_registered(
+    developer, *, simulate: str | None = None, policy: PlatformPolicy | None = None
+) -> Seller:
     """이 Developer의 Seller 등록을 멱등하게 보장한다(#50, ADR-0020).
 
     이미 부분 승인된 Seller가 있으면 그대로 돌려주고 어댑터를 다시 부르지
@@ -278,6 +280,12 @@ def ensure_seller_registered(developer, *, simulate: str | None = None) -> Selle
     않는다는 요구가 여기서 지켜진다. 그 외(등록 전/심사 대기/거절)에는 등록
     (또는 재시도)을 어댑터에 요청하고 결과를 그대로 반영한다 — 한도 초과·심사
     필요·거절 어느 쪽도 예외를 던지지 않는다(정상 응답의 한 갈래다, ADR-0020).
+
+    `policy`는 호출 스코프에서 이미 읽은 `PlatformPolicy`를 어댑터까지
+    그대로 전달하는 자리다(#78, ADR-0023) — `get_or_create_payout`이 이미
+    쓰는 것과 같은 관용구. `distributions.services.run_due_distributions`처럼
+    한 스캔에서 여러 Developer를 순회하는 호출자는 반드시 넘겨야 한다 —
+    생략하면 어댑터가 Developer 수만큼 정책을 다시 읽는다.
     """
 
     existing = Seller.objects.filter(developer=developer).first()
@@ -285,7 +293,7 @@ def ensure_seller_registered(developer, *, simulate: str | None = None) -> Selle
         return existing
 
     adapter = get_seller_adapter()
-    result = adapter.register(developer_id=developer.id, simulate=simulate)
+    result = adapter.register(developer_id=developer.id, simulate=simulate, policy=policy)
 
     seller, _created = Seller.objects.update_or_create(
         developer=developer,
@@ -301,7 +309,12 @@ def ensure_seller_registered(developer, *, simulate: str | None = None) -> Selle
     return seller
 
 
-def mark_confirmed(idempotency_key, *, seller_simulate: str | None = None) -> Payout:
+def mark_confirmed(
+    idempotency_key,
+    *,
+    seller_simulate: str | None = None,
+    policy: PlatformPolicy | None = None,
+) -> Payout:
     """지급을 확정한다(CONFIRMED_IDENTITY_PENDING, 또는 Seller가 아직 준비되지
     않았으면 CONFIRMED_SELLER_PENDING). 이미 확정되어 있으면 그대로 돌려준다.
 
@@ -315,6 +328,10 @@ def mark_confirmed(idempotency_key, *, seller_simulate: str | None = None) -> Pa
     (`ConfirmPayoutIn.seller_simulate`와 같은 원칙, `payments.api.ConfirmPaymentIn.
     simulate`를 본뜬 관용구) — 실제 어댑터에서는 의미가 없다. 웹훅 경로는 이
     인자를 넘기지 않으므로 항상 기본(즉시 부분 승인) 시나리오로 등록을 시도한다.
+
+    `policy`는 `ensure_seller_registered`로 그대로 전달된다(#78, ADR-0023) —
+    스캔 스코프에서 이미 읽은 정책을 넘기지 않으면(단독 호출 편의용 기본값
+    None) Seller 등록 시점에 한 번 더 읽는다.
     """
 
     with transaction.atomic():
@@ -369,7 +386,7 @@ def mark_confirmed(idempotency_key, *, seller_simulate: str | None = None) -> Pa
         # 있으면(두 번째 Payout부터) ensure_seller_registered가 어댑터를 다시
         # 부르지 않는다.
         developer = _resolve_developer(payout)
-        seller = ensure_seller_registered(developer, simulate=seller_simulate)
+        seller = ensure_seller_registered(developer, simulate=seller_simulate, policy=policy)
         if seller.status != Seller.Status.PARTIALLY_APPROVED:
             Payout.objects.filter(
                 pk=payout.pk, status=Payout.Status.CONFIRMED_IDENTITY_PENDING

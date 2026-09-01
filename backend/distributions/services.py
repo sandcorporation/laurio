@@ -5,8 +5,9 @@ API 레이어(`distributions.api`)에서만 호출된다 — 테스트의 유일
 
 두 단계로 나뉜 스캔이다(`payments.services.run_pending_refunds`와 같은 구조):
 
-1. 새로 기한이 된 Contest — JUDGING_ENDED로 옮겨간 지 DISTRIBUTION_WAIT_DAYS가
-   지났는데 아직 Distribution이 없는 Contest를 찾아 Distribution + N개의
+1. 새로 기한이 된 Contest — JUDGING_ENDED로 옮겨간 지
+   PlatformPolicy.distribution_wait_days(#78/ADR-0023)가 지났는데 아직
+   Distribution이 없는 Contest를 찾아 Distribution + N개의
    DistributionShare를 만들고, 1/N 나머지를 단수처리 분개로 남긴다. Contest를
    `select_for_update`로 잠그고 Distribution 존재 여부를 그 안에서 확인하므로
    (core.transitions.claim_transition과 같은 정신 — 다만 부수효과가 분개 생성이라
@@ -30,7 +31,6 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 
-from django.conf import settings
 from django.db import transaction
 
 from contests.models import Contest
@@ -211,7 +211,7 @@ def _attempt_share_payout(
         result_status = "failed"
 
     if result_status == "paid":
-        payout = mark_confirmed(payout.idempotency_key)
+        payout = mark_confirmed(payout.idempotency_key, policy=policy)
     elif result_status == "failed":
         payout = mark_failed(payout.idempotency_key)
     else:
@@ -239,7 +239,7 @@ def run_due_distributions(*, fail_submission_ids: set[int] | None = None) -> lis
     fail_submission_ids = fail_submission_ids or set()
     results: list[dict] = []
 
-    cutoff = as_of - timedelta(days=settings.DISTRIBUTION_WAIT_DAYS)
+    cutoff = as_of - timedelta(days=policy.distribution_wait_days)
     due_contest_ids = list(
         Contest.objects.filter(
             status=Contest.Status.JUDGING_ENDED,

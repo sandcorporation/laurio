@@ -19,8 +19,10 @@ from datetime import timedelta
 from django.db import migrations
 
 # 이 마이그레이션이 작성된 시점의 심사기간 길이를 그대로 굳힌다 — 나중에
-# settings.JUDGING_PERIOD_DAYS를 바꿔도 이 백필의 의미(당시의 7일 규칙을 소급 적용)는
-# 흔들리면 안 된다. contests/apps.py의 런타임 전이 규칙은 계속 settings 값을 따른다.
+# 정책값(당시는 settings.JUDGING_PERIOD_DAYS, #78 이후는
+# PlatformPolicy.judging_period_days, ADR-0023)을 바꿔도 이 백필의 의미(당시의
+# 7일 규칙을 소급 적용)는 흔들리면 안 된다. contests/apps.py의 런타임 전이
+# 규칙은 계속 그 시점의 정책값을 따른다.
 _JUDGING_PERIOD_DAYS_AT_MIGRATION_TIME = 7
 
 

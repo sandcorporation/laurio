@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from django.conf import settings
 from django.db import transaction
 
 from core.clock import Clock
@@ -78,8 +77,15 @@ def mark_extension_paid(order_id) -> JudgingExtensionPayment:
         if contest.status == Contest.Status.CLOSED and contest.judging_ends_at is not None:
             new_count = contest.judging_extension_count + 1
             new_refund_disabled = contest.refund_disabled or new_count >= 2
+            # 여기서 정책을 다시 읽지 않는다(#78 코드리뷰 지적 2) —
+            # payment.extension_days는 initiate 시점에 amount와 함께 스냅샷된
+            # 값이다(contests.api.initiate_extension_payment). confirm 시점에
+            # 정책을 다시 읽으면, initiate와 confirm 사이에 운영자가
+            # judging_extension_days를 바꿨을 때 이미 청구된 금액(amount)과
+            # 실제로 늘어나는 심사기간이 서로 다른 정책 시점을 가리키는
+            # 불일치가 생긴다 — Sponsor가 7일치를 내고 3일만 받는 식.
             new_judging_ends_at = contest.judging_ends_at + timedelta(
-                days=settings.JUDGING_EXTENSION_DAYS
+                days=payment.extension_days
             )
 
             # claim_transition을 그대로 재사용한다 — from_state와 to_state가 둘 다
