@@ -16,13 +16,13 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from django.conf import settings
 from django.db import transaction
 
 from core.clock import Clock
 from core.transitions import claim_transition
 from ledger.models import Account, EntrySide
 from ledger.services import LineInput, post_journal_entry
+from policies.services import get_current_policy
 
 from .models import Contest, JudgingExtensionPayment
 
@@ -76,10 +76,14 @@ def mark_extension_paid(order_id) -> JudgingExtensionPayment:
         # 돈을 어떻게 처리할지(환불 등)는 이 티켓 범위 밖이다(#17/#22).
         contest = Contest.objects.select_for_update().get(pk=payment.contest_id)
         if contest.status == Contest.Status.CLOSED and contest.judging_ends_at is not None:
+            # 이 요청(confirm 한 번) 스코프에서 정책을 한 번만 읽는다(#78,
+            # ADR-0023) — 이 분기 안에서만 필요하므로 위 재전송 조기 반환 뒤에
+            # 읽는다.
+            policy = get_current_policy()
             new_count = contest.judging_extension_count + 1
             new_refund_disabled = contest.refund_disabled or new_count >= 2
             new_judging_ends_at = contest.judging_ends_at + timedelta(
-                days=settings.JUDGING_EXTENSION_DAYS
+                days=policy.judging_extension_days
             )
 
             # claim_transition을 그대로 재사용한다 — from_state와 to_state가 둘 다

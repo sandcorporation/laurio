@@ -17,7 +17,10 @@ PayoutTimeoutError는 query_status로 확정해야 한다"는 규율까지 `paym
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from policies.models import PlatformPolicy
 
 
 class PayoutError(Exception):
@@ -147,7 +150,11 @@ class SellerRegistrationResult:
 
 class SellerAdapter(Protocol):
     def register(
-        self, *, developer_id: int, simulate: str | None = None
+        self,
+        *,
+        developer_id: int,
+        simulate: str | None = None,
+        policy: "PlatformPolicy | None" = None,
     ) -> SellerRegistrationResult:
         """이 Developer를 지급대행사에 Seller로 등록(또는 재조회·재시도)한다.
 
@@ -157,6 +164,12 @@ class SellerAdapter(Protocol):
         승인된 Seller에 대해 이 메서드를 다시 부르지 않는 것은 호출자의
         책임이다(`payouts.services.ensure_seller_registered`가 그 규율을
         지킨다) — sellerId가 재등록을 막는다는 요구가 여기 있지 않다.
+
+        `policy`는 호출 스코프에서 이미 읽은 `PlatformPolicy`를 넘기는
+        자리다(#78, ADR-0023) — 생략하면(단독 호출 편의용) 구현체가 대신
+        한 번 읽는다. 실물 어댑터는 이 값을 쓰지 않는다(주간 한도는 벤더가
+        응답으로 알려준다) — 이 매개변수는 Fake 구현체가 "토스가 알려주는
+        한도"를 우리 쪽에서 결정론적으로 흉내내기 위한 자리일 뿐이다.
         """
         ...
 
@@ -166,7 +179,8 @@ class FakeSellerAdapter:
 
     `register`의 `simulate` 값:
     - None / "success" (기본) — 즉시 부분 승인. 주간 한도는
-      `settings.SELLER_WEEKLY_LIMIT_AMOUNT`.
+      `PlatformPolicy.seller_weekly_limit_amount`(토스가 정한 사실, #78/
+      ADR-0020 — 우리 판단으로 올릴 수 있는 값이 아니다).
     - "limit_exceeded" — 주간 한도를 넘겨 심사 대기가 된다. **실패가 아니다**
       (ADR-0020) — 짧은 기간에 여러 번 수상한 Developer를 성공했다는 이유로
       막지 않는다.
@@ -178,9 +192,21 @@ class FakeSellerAdapter:
     """
 
     def register(
-        self, *, developer_id: int, simulate: str | None = None
+        self,
+        *,
+        developer_id: int,
+        simulate: str | None = None,
+        policy: "PlatformPolicy | None" = None,
     ) -> SellerRegistrationResult:
-        from django.conf import settings
+        if policy is None:
+            # 단독 호출 편의용 — 스캔 스코프에서 이미 읽은 정책을 넘기지 않은
+            # 호출자를 위해 여기서 한 번 읽는다(#78, ADR-0023). 스캔 루프
+            # 안에서 이 메서드를 부르는 호출자(`distributions.services`)는
+            # 반드시 이미 읽은 policy를 넘겨야 한다 — 그러지 않으면 Payout
+            # 수만큼 이 조회가 반복된다.
+            from policies.services import get_current_policy
+
+            policy = get_current_policy()
 
         scenario = simulate or "success"
         seller_id = f"fake-seller-{developer_id}"
@@ -189,7 +215,7 @@ class FakeSellerAdapter:
             return SellerRegistrationResult(
                 seller_id=seller_id,
                 status="partially_approved",
-                weekly_limit_amount=settings.SELLER_WEEKLY_LIMIT_AMOUNT,
+                weekly_limit_amount=policy.seller_weekly_limit_amount,
             )
         if scenario in ("limit_exceeded", "review_required"):
             return SellerRegistrationResult(

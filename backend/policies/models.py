@@ -1,12 +1,17 @@
-"""PlatformPolicy — 정책값의 단일 행 (#75, ADR-0023).
+"""PlatformPolicy — 정책값의 단일 행 (#75/#78, ADR-0023).
 
 수수료율·원천징수율·개최비·연장비·기간·리드타임·배분 컷라인이 `settings.py`의
 환경변수 12개와 `DistributionCutline`·`DeliverableType.minimum_prize` 두 테이블에
-흩어져 있었다(ADR-0023). 이 티켓(#75)은 그중 **플랫폼 수수료율과 원천징수율
-둘만** 이 모델로 옮긴다 — 나머지 열 개(개최비·연장비·기간·리드타임·주간한도)는
-#78이, 배분 컷라인은 #79가 각자 옮긴다. 그래서 이 모델은 지금 필드가 넷뿐이지만,
-이후 티켓들이 필드를 추가할 자리로 의도되었다(운영자 API로 바꾸는 것도 #76의
-몫이다 — 지금은 `manage.py shell`로만 바꿀 수 있고 그래도 된다).
+흩어져 있었다(ADR-0023). #75가 **플랫폼 수수료율과 원천징수율 둘만** 먼저 이
+모델로 옮겼고, 이 티켓(#78)이 나머지 열 개(개최비·연장비·기간·리드타임 3종·
+지급대행 주간 한도)를 옮긴다 — 배분 컷라인만 #79가 남긴다(같이 손대면 두
+체인이 같은 모델에서 충돌한다). 운영자 API로 바꾸는 것은 여전히 #76의 몫이다
+— 지금은 `manage.py shell`로만 바꿀 수 있고 그래도 된다.
+
+**지급대행 주간 한도는 성질이 다르다.** 나머지 아홉 개는 우리가 정하는 사업
+판단이지만, 이 값은 토스가 정한 사실이다(주간 1천만원, ADR-0020) — 우리
+판단으로 올릴 수 있는 값이 아니다. 같은 행에 두되 그 구분을 필드 주석에
+남긴다.
 
 `DistributionCutline`(`distributions.models`)과 같은 관용구를 쓴다 — 단일 행
 (pk=1), 없으면 `policies.services.get_current_policy()`가 기본값으로 만든다.
@@ -66,6 +71,59 @@ class PlatformPolicy(models.Model):
     # 나머지 정책값과 같은 자리(단일 행)에 둔다.
     withholding_minor_income_exempt_won = models.PositiveIntegerField(default=50_000)
 
+    # --- 요금 (#78) ---------------------------------------------------------
+    # Sponsor가 Contest를 개최할 때 Prize와 별도로 결제하는 개최 등록비(원 단위
+    # 정수, ADR-0004). 옛 CONTEST_LISTING_FEE 환경변수의 기본값과 같다.
+    contest_listing_fee = models.PositiveIntegerField(default=50_000)
+
+    # 심사기간 유료 연장 1회당 결제 금액(원 단위 정수). 옛 CONTEST_EXTENSION_FEE
+    # 환경변수의 기본값과 같다.
+    judging_extension_fee = models.PositiveIntegerField(default=30_000)
+
+    # --- 기간 (#78) ---------------------------------------------------------
+    # 마감 후 기본 심사기간(일). CLOSED 전이가 일어나는 조건부 UPDATE 안에서
+    # deadline_at + 이 값으로 judging_ends_at을 채운다. 옛 JUDGING_PERIOD_DAYS
+    # 환경변수의 기본값과 같다.
+    judging_period_days = models.PositiveIntegerField(default=7)
+
+    # 유료 연장 1회가 심사기간을 늘리는 길이(일). judging_ends_at 컬럼에만
+    # 더해진다 — 예약된 스케줄러 규칙은 건드리지 않는다(ADR-0003). 옛
+    # JUDGING_EXTENSION_DAYS 환경변수의 기본값과 같다.
+    judging_extension_days = models.PositiveIntegerField(default=7)
+
+    # Award 후 Sponsor가 인수를 확인하지 않아도 이 기간(일)이 지나면
+    # 스케줄러가 Escrow를 해제한다. 옛 HANDOVER_ACCEPTANCE_PERIOD_DAYS
+    # 환경변수의 기본값과 같다.
+    handover_acceptance_period_days = models.PositiveIntegerField(default=14)
+
+    # 심사기간 종료(JUDGING_ENDED) 후 이 기간(일) 동안 아무도 Award하지 않으면
+    # 스케줄러가 Score 컷라인을 통과한 Submission들에게 Prize를 1/N로
+    # 배분한다. 옛 DISTRIBUTION_WAIT_DAYS 환경변수의 기본값과 같다.
+    distribution_wait_days = models.PositiveIntegerField(default=14)
+
+    # --- 알림 리드타임 (#78) -------------------------------------------------
+    # 마감이 이만큼(시간) 남으면 Sponsor·참가 Developer에게 미리 알린다. 옛
+    # DEADLINE_REMINDER_LEAD_HOURS 환경변수의 기본값과 같다.
+    deadline_reminder_lead_hours = models.PositiveIntegerField(default=24)
+
+    # 심사기간 종료가 이만큼(시간) 남으면 Sponsor에게 Award를 상기시킨다. 옛
+    # JUDGING_END_REMINDER_LEAD_HOURS 환경변수의 기본값과 같다.
+    judging_end_reminder_lead_hours = models.PositiveIntegerField(default=24)
+
+    # Distribution 실행이 이만큼(일) 앞서면 낮 시각(NOTIFICATION_DAYTIME_HOUR)에
+    # 금액을 명시한 최종 경고를 보낸다. 옛 DISTRIBUTION_FINAL_WARNING_LEAD_DAYS
+    # 환경변수의 기본값과 같다.
+    distribution_final_warning_lead_days = models.PositiveIntegerField(default=1)
+
+    # --- 벤더 제약 (#78) -----------------------------------------------------
+    # **우리 정책이 아니라 토스가 정한 사실이다**(ADR-0020) — 부분 승인된
+    # Seller가 심사 없이 지급받을 수 있는 주간 한도(원 단위 정수). 그 이상은
+    # 심사 대기(under_review)로 다룬다, 실패가 아니다. 나머지 필드와 같은
+    # 행에 두지만 우리 판단으로 올릴 수 있는 값이 아니다 — 이 구분이 흐려지면
+    # 언젠가 누가 화면에서 이 숫자를 올리고 벤더 쪽에서 거절당한다. 옛
+    # SELLER_WEEKLY_LIMIT_AMOUNT 환경변수의 기본값과 같다.
+    seller_weekly_limit_amount = models.PositiveIntegerField(default=10_000_000)
+
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -100,6 +158,26 @@ class PlatformPolicy(models.Model):
                     platform_fee_bps__lte=10_000 - models.F("withholding_tax_bps")
                 ),
                 name="platform_fee_and_withholding_bps_leave_nonnegative_net",
+            ),
+            # 0일 기간은 말이 안 된다("심사기간 0일"은 심사기간이 없다는
+            # 뜻이지 정책이 아니다) — #73 스펙이 명시한 거부 대상 중 하나다.
+            # 나머지 방어선(운영자 API의 4xx 검증)은 #76의 몫이지만, 지금은
+            # 이 모델이 유일한 방어선이므로 여기서도 막는다(#78).
+            models.CheckConstraint(
+                condition=models.Q(judging_period_days__gte=1),
+                name="judging_period_days_at_least_one_day",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(judging_extension_days__gte=1),
+                name="judging_extension_days_at_least_one_day",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(handover_acceptance_period_days__gte=1),
+                name="handover_acceptance_period_days_at_least_one_day",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(distribution_wait_days__gte=1),
+                name="distribution_wait_days_at_least_one_day",
             ),
         ]
 

@@ -35,6 +35,7 @@ from core.models import ClockOverride
 from distributions.models import Distribution, DistributionCutline, DistributionShare
 from ledger.services import contest_balance, contest_entries
 from payouts.models import Payout
+from policies.services import get_current_policy
 from storage.adapters.fake import FakeStorageAdapter
 
 TICK_URL = "/api/internal/tick"
@@ -231,7 +232,7 @@ def _advance_past_distribution_wait(contest_id: int) -> None:
     judging_ends_at = Contest.objects.get(id=contest_id).judging_ends_at
     _freeze(
         judging_ends_at
-        + timedelta(days=settings.DISTRIBUTION_WAIT_DAYS, minutes=1)
+        + timedelta(days=get_current_policy().distribution_wait_days, minutes=1)
     )
 
 

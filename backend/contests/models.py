@@ -88,7 +88,8 @@ class Contest(models.Model):
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.DRAFT)
 
     # 심사기간 종료 시각 (#13, ADR-0003). CLOSED 전이가 일어나는 조건부 UPDATE 안에서
-    # deadline_at + JUDGING_PERIOD_DAYS 로 함께 채워진다. 유료 연장은 이 컬럼만
+    # deadline_at + PlatformPolicy.judging_period_days(#78/ADR-0023)로 함께
+    # 채워진다. 유료 연장은 이 컬럼만
     # 갱신한다 — 예약된 스캔 규칙(core.transitions 레지스트리)은 그대로 두고 값만
     # 바뀐다. CLOSED로 전이하기 전에는 null이다.
     judging_ends_at = models.DateTimeField(null=True, blank=True)
@@ -196,8 +197,9 @@ class JudgingExtensionPayment(models.Model):
     # PG에 전달하는 주문 참조값.
     order_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
 
-    # 결제 시점의 스냅샷 — settings.CONTEST_EXTENSION_FEE가 나중에 바뀌어도 이미
-    # 요청된 결제 금액은 흔들리지 않는다(Payment.prize_amount와 같은 원칙).
+    # 결제 시점의 스냅샷 — PlatformPolicy.judging_extension_fee(#78/ADR-0023)가
+    # 나중에 바뀌어도 이미 요청된 결제 금액은 흔들리지 않는다(Payment.prize_amount와
+    # 같은 원칙).
     amount = models.PositiveIntegerField()
     # 이 결제가 성공하면 몇 번째 연장이 되는지의 스냅샷(감사·원장 메모용). 정확한
     # 카운트는 여전히 Contest.judging_extension_count가 조건부 UPDATE로 늘리는

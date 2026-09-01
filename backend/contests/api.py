@@ -14,7 +14,6 @@
 import logging
 from uuid import UUID
 
-from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import Sum
 from django.http import HttpRequest
@@ -28,6 +27,7 @@ from accounts.sanitize import sanitize_free_text
 from core.clock import Clock
 from payments.adapters import PGError, PGTimeoutError, get_adapter
 from payments.models import Payment
+from policies.services import get_current_policy
 from verification.models import Verification
 
 from .models import (
@@ -516,7 +516,7 @@ def initiate_judging_period_extension(
             with transaction.atomic():
                 payment = JudgingExtensionPayment.objects.create(
                     contest=contest,
-                    amount=settings.CONTEST_EXTENSION_FEE,
+                    amount=get_current_policy().judging_extension_fee,
                     extension_number=contest.judging_extension_count + 1,
                     status=JudgingExtensionPayment.Status.REQUESTED,
                 )

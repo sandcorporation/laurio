@@ -16,10 +16,11 @@ class ContestsConfig(AppConfig):
         정확히 한 번만 일어난다.
 
         1. PUBLISHED -> CLOSED — deadline_at 이 지나면 옮긴다. 같은 조건부 UPDATE
-           안에서 judging_ends_at(=이 Contest 자신의 deadline_at + JUDGING_PERIOD_DAYS)
-           도 함께 채운다(#13) — 심사기간은 여기서 시작된다. **반드시 이 행의
-           deadline_at에서 파생시킨다** — 스캔 시각(as_of)에서 파생시키면 스캔
-           주기만큼 심사기간이 매번 조금씩 늘어나고(ADR-0003이 허용한 "전이가 늦어지는
+           안에서 judging_ends_at(=이 Contest 자신의 deadline_at +
+           PlatformPolicy.judging_period_days, #78/ADR-0023)도 함께 채운다(#13)
+           — 심사기간은 여기서 시작된다. **반드시 이 행의 deadline_at에서
+           파생시킨다** — 스캔 시각(as_of)에서 파생시키면 스캔 주기만큼
+           심사기간이 매번 조금씩 늘어나고(ADR-0003이 허용한 "전이가 늦어지는
            것"과 "심사기간 자체가 늘어나는 것"은 다른 문제다), 마감 시각이 서로 다른
            두 Contest가 같은 틱에 우연히 같이 CLOSED로 넘어가면 둘 다 동일한
            judging_ends_at을 받는 사고가 난다(#13 리뷰 지적).
@@ -31,11 +32,22 @@ class ContestsConfig(AppConfig):
 
         from datetime import timedelta
 
-        from django.conf import settings
-
         from core.transitions import TransitionSpec, register_transition
 
         from .models import Contest
+
+        def _judging_period_days(scan_context: dict) -> int:
+            # 이 스캔(run_due_transitions 호출 한 번) 동안 정책을 한 번만
+            # 읽는다(#78, ADR-0023) — extra_fields는 CLOSED로 넘어가는 Contest
+            # 행마다 호출되므로, 여기서 매번 get_current_policy()를 부르면
+            # 쿼리가 행 수만큼 늘어난다. scan_context는 core.transitions가
+            # run_due_transitions 호출 하나에 대해 만들어주는 빈 dict라 이
+            # memoization이 스캔 경계를 정확히 지킨다.
+            if "policy" not in scan_context:
+                from policies.services import get_current_policy
+
+                scan_context["policy"] = get_current_policy()
+            return scan_context["policy"].judging_period_days
 
         register_transition(
             TransitionSpec(
@@ -44,9 +56,9 @@ class ContestsConfig(AppConfig):
                 from_state=Contest.Status.PUBLISHED,
                 to_state=Contest.Status.CLOSED,
                 state_field="status",
-                extra_fields=lambda contest, now: {
+                extra_fields=lambda contest, now, scan_context: {
                     "judging_ends_at": contest.deadline_at
-                    + timedelta(days=settings.JUDGING_PERIOD_DAYS)
+                    + timedelta(days=_judging_period_days(scan_context))
                 },
             )
         )
