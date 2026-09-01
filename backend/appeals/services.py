@@ -16,6 +16,8 @@ import하지 않는다. 이의를 인용해도 `Score.percentage`나 `reasoning`
 
 from __future__ import annotations
 
+import logging
+
 from django.db import transaction
 
 from core.clock import Clock
@@ -23,6 +25,8 @@ from ledger.models import Account, EntrySide
 from ledger.services import LineInput, post_journal_entry
 
 from .models import Appeal, AppealRuling
+
+logger = logging.getLogger(__name__)
 
 
 def uphold_appeal(
@@ -86,6 +90,7 @@ def uphold_appeal(
             correction_journal_entry_id=entry.id,
         )
 
+    _notify_ruled(appeal)
     return appeal
 
 
@@ -114,4 +119,43 @@ def reject_appeal(appeal: Appeal, *, ruled_by, ruling_note: str, now=None) -> Ap
             )
 
     appeal.refresh_from_db()
+    _notify_ruled(appeal)
     return appeal
+
+
+def _notify_ruled(appeal: Appeal) -> None:
+    """이의가 심판됐음을 낸 사람에게 알린다 (#74).
+
+    **심판자 개인의 이름은 담지 않는다** — #61 이 열람 기록에 대해 세운 것과 같은
+    이유다. 결과와 이유는 주되 운영자 신원을 참가자에게 흘리지 않는다(ADR-0018
+    이 서로소로 갈라놓은 두 경계 사이에 새 문제가 생긴다).
+
+    알림 실패가 심판을 되돌리면 안 된다 — 심판은 원장에 정정 분개를 남기는
+    되돌릴 수 없는 행위이고, 통지는 그것을 전할 뿐이다. 어떤 예외도 호출자에게
+    전파하지 않는다(notifications 의 `_safe_notify` 와 같은 규율).
+
+    트랜잭션 **밖**에서 부른다 — 알림 생성이 심판의 원자성 안에 들어가면
+    알림 쪽 실패가 정정 분개까지 롤백시킨다.
+    """
+
+    try:
+        from notifications.models import NotificationType
+        from notifications.services import create_notification
+
+        ruling = getattr(appeal, "ruling", None)
+        create_notification(
+            recipient=appeal.submission.developer.user,
+            notification_type=NotificationType.APPEAL_RULED,
+            context={
+                "appeal_id": appeal.id,
+                "submission_id": appeal.submission_id,
+                "decision": appeal.status,
+                "ruling_note": ruling.note if ruling else "",
+                "correction_amount": ruling.correction_amount if ruling else None,
+            },
+        )
+    except Exception:  # noqa: BLE001 - 알림 실패가 심판을 되돌리면 안 된다.
+        logger.exception(
+            "Appeal(pk=%s) 심판 완료 알림 생성 중 예외 — 심판 자체는 그대로 둔다",
+            appeal.id,
+        )

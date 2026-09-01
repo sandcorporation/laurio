@@ -14,6 +14,14 @@ class NotificationType(models.TextChoices):
     JUDGING_PERIOD_ENDING_REMINDER = "judging_period_ending_reminder", "심사기간 종료 임박 알림"
     DISTRIBUTION_FINAL_WARNING = "distribution_final_warning", "Distribution 최종 경고"
     RESULT_NOTICE = "result_notice", "결과 알림"
+    # 채점이 끝났다 — 이의 창이 열렸다는 신호다(#74). 기한을 만들었으면 그
+    # 시작을 알리는 것까지가 같은 결정이다: 알리지 않으면 그 기한은 "들어와 본
+    # 사람에게만 공정한" 규칙이 된다.
+    SCORING_COMPLETE = "scoring_complete", "채점 완료"
+    # 이의가 심판됐다 — 인용이든 기각이든. 낸 사람이 결과를 알려면 들어와 봐야
+    # 하는 상태를 없앤다. **심판자 개인의 이름은 담지 않는다**(#61 이 열람
+    # 기록에 대해 세운 것과 같은 이유 — 운영자 신원을 참가자에게 흘리지 않는다).
+    APPEAL_RULED = "appeal_ruled", "이의 심판 완료"
     NEW_CONTEST_IN_CATEGORY = "new_contest_in_category", "관심 Category 신규 Contest"
 
 
@@ -31,6 +39,10 @@ NOTIFICATION_TYPE_FLAGS: dict[str, dict[str, bool]] = {
         "is_promotional": False,
     },
     NotificationType.RESULT_NOTICE: {"is_transactional": True, "is_promotional": False},
+    # 둘 다 거래성이다 — 참가자가 낸 것에 대한 처리 결과이지 광고가 아니므로
+    # 옵트인이 필요 없다(ADR-0010).
+    NotificationType.SCORING_COMPLETE: {"is_transactional": True, "is_promotional": False},
+    NotificationType.APPEAL_RULED: {"is_transactional": True, "is_promotional": False},
     NotificationType.NEW_CONTEST_IN_CATEGORY: {"is_transactional": False, "is_promotional": True},
 }
 

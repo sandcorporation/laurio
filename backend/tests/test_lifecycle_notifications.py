@@ -984,7 +984,14 @@ def test_award_result_notice_is_recovered_after_crash_before_completion(
 
     award = Award.objects.get(contest_id=contest["id"])
     assert award.result_notice_sent_at is None
-    assert _my_notifications(client, dev["access"]) == []
+    # **결과 알림이** 아직 없다는 것이 이 테스트의 주장이다 — "알림이 하나도
+    # 없다" 가 아니다. 채점 완료 알림(#74)이 생긴 뒤로 후자는 거짓이 됐고, 그건
+    # 이 테스트가 원래 물으려던 것과 무관하다.
+    assert not [
+        n
+        for n in _my_notifications(client, dev["access"])
+        if n["notification_type"] == NotificationType.RESULT_NOTICE
+    ]
 
     recovery = _run_lifecycle_scan(client)
     assert any(
@@ -1059,7 +1066,14 @@ def test_distribution_result_notice_is_recovered_after_crash_before_completion(
 
     share = DistributionShare.objects.get(submission_id=submission["id"])
     assert share.result_notice_sent_at is None
-    assert _my_notifications(client, dev["access"]) == []
+    # **결과 알림이** 아직 없다는 것이 이 테스트의 주장이다 — "알림이 하나도
+    # 없다" 가 아니다. 채점 완료 알림(#74)이 생긴 뒤로 후자는 거짓이 됐고, 그건
+    # 이 테스트가 원래 물으려던 것과 무관하다.
+    assert not [
+        n
+        for n in _my_notifications(client, dev["access"])
+        if n["notification_type"] == NotificationType.RESULT_NOTICE
+    ]
 
     recovery = _run_lifecycle_scan(client)
     assert any(

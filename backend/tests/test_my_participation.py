@@ -384,3 +384,72 @@ def test_after_the_deadline_but_before_scoring_the_row_says_scoring_is_pending(
         **_auth_header(dev["access"]),
     )
     assert refused.status_code == 409
+
+
+# --- 알림: 이의 창의 시작과 끝 (#74) ----------------------------------------------
+
+
+@pytest.mark.django_db
+def test_scoring_notifies_the_developer_with_the_appeal_deadline(
+    client, category, landing_type
+):
+    """채점이 끝나면 알린다 — 그 통지가 이의 창이 열렸다는 신호다.
+
+    기한을 만들었으면 그 시작을 알리는 것까지가 같은 결정이다. 알리지 않으면
+    기한은 "들어와 본 사람에게만 공정한" 규칙이 된다. 그래서 **언제까지인지**도
+    통지에 함께 담는다 — 받는 사람이 다시 들어와 찾게 만들지 않는다.
+    """
+
+    from notifications.models import Notification, NotificationType
+
+    seeded = _seed_scored_submission(client, category, landing_type, uid="dev-notify-score")
+
+    notice = Notification.objects.filter(
+        notification_type=NotificationType.SCORING_COMPLETE
+    ).first()
+    assert notice is not None, "채점이 끝났는데 알림이 없다"
+    assert notice.context["submission_id"] == seeded["submission_id"]
+    assert notice.context["appeal_deadline"], "이의 기한이 통지에 없다"
+
+
+@pytest.mark.django_db
+def test_ruling_an_appeal_notifies_the_developer_without_the_operators_name(
+    client, category, landing_type
+):
+    """심판 결과를 알리되 **심판자 개인의 이름은 담지 않는다**.
+
+    #61 이 열람 기록에 대해 세운 것과 같은 이유다 — 결과와 이유는 주되 운영자
+    신원을 참가자에게 흘리면 ADR-0018 이 서로소로 갈라놓은 두 경계 사이에 새
+    문제가 생긴다(누가 자기를 떨어뜨렸는지 아는 참가자).
+    """
+
+    from notifications.models import Notification, NotificationType
+    from tests.test_source_readings import OPERATOR_ORIGIN, _operator_client
+
+    seeded = _seed_scored_submission(client, category, landing_type, uid="dev-notify-rule")
+    filed = client.post(
+        f"/api/submissions/{seeded['submission_id']}/appeal",
+        data={"reason": "재검토를 요청합니다."},
+        content_type="application/json",
+        **_auth_header(seeded["access"]),
+    )
+    assert filed.status_code == 201
+    appeal_id = filed.json()["id"]
+
+    operator_name = "op-secret-ruler"
+    operator = _operator_client(operator_name)
+    ruled = operator.post(
+        f"/api/operator/appeals/{appeal_id}/rule",
+        data={"decision": "reject", "ruling_note": "판정을 유지한다."},
+        content_type="application/json",
+        HTTP_ORIGIN=OPERATOR_ORIGIN,
+    )
+    assert ruled.status_code == 200, ruled.content
+
+    notice = Notification.objects.filter(
+        notification_type=NotificationType.APPEAL_RULED
+    ).first()
+    assert notice is not None, "심판이 끝났는데 알림이 없다"
+    assert notice.context["decision"] == "rejected"
+    assert notice.context["ruling_note"] == "판정을 유지한다."
+    assert operator_name not in str(notice.context), "심판자의 이름이 통지에 들어갔다"

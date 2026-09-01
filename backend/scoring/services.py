@@ -231,7 +231,46 @@ def score_submission_once(submission: Submission) -> dict:
         # 이미 Score가 있으므로 여기서도 재채점하지 않는다(ADR-0006).
         return {"submission_id": submission.id, "status": "already_scored"}
 
+    # 채점이 끝났다는 것은 Developer 에게 **이의 창이 열렸다**는 뜻이다(#74).
+    # 기한을 만들었으면 그 시작을 알리는 것까지가 같은 결정이다 — 알리지 않으면
+    # 그 기한은 "들어와 본 사람에게만 공정한" 규칙이 된다.
+    #
+    # 알림 실패가 채점을 되돌리면 안 된다. 이 함수는 절대 예외를 밖으로 던지지
+    # 않는다는 계약을 갖고 있고(모듈 docstring), `_notify_scored` 가 그 계약을
+    # 지킨다 — notifications 쪽의 `_safe_notify` 와 같은 규율이다.
+    _notify_scored(submission)
+
     return {"submission_id": submission.id, "status": "scored", "percentage": str(percentage)}
+
+
+def _notify_scored(submission: Submission) -> None:
+    """채점 완료를 Developer 에게 알린다 — 어떤 예외도 호출자에게 전파하지 않는다."""
+
+    try:
+        from notifications.models import NotificationType
+        from notifications.services import create_notification
+
+        create_notification(
+            recipient=submission.developer.user,
+            notification_type=NotificationType.SCORING_COMPLETE,
+            context={
+                "contest_id": submission.contest_id,
+                "contest_title": submission.contest.title,
+                "submission_id": submission.id,
+                # 이의 기한을 함께 준다 — "언제까지" 가 통지에 없으면 받는 사람이
+                # 다시 들어와 찾아야 한다.
+                "appeal_deadline": (
+                    submission.contest.judging_ends_at.isoformat()
+                    if submission.contest.judging_ends_at
+                    else None
+                ),
+            },
+        )
+    except Exception:  # noqa: BLE001 - 알림 실패가 채점을 되돌리면 안 된다.
+        logger.exception(
+            "Submission(pk=%s) 채점 완료 알림 생성 중 예외 — 채점 자체는 그대로 둔다",
+            submission.id,
+        )
 
 
 def run_pending_scoring(as_of=None) -> list[dict]:
