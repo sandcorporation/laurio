@@ -126,6 +126,16 @@ cd backend && LAURIO_DB_PORT=55432 uv run pytest   # 포트는 쓰는 스택에 
 dev compose의 `db` 서비스는 호스트 포트로 이미 노출돼 있으므로 호스트의 `uv run
 pytest`가 그 DB에 직접 붙는다 — 컨테이너를 거칠 이유가 없다.
 
+**pytest 를 두 개 이상 동시에 돌린다면 `LAURIO_TEST_DB_NAME` 을 서로 다르게
+줘라.** 기본값은 Django 관례대로 `test_laurio` 하나라, 병렬 워크트리에서 체인 둘이
+각자 pytest 를 돌리면 같은 DB 를 두고 싸운다 — `DROP DATABASE ... is being
+accessed by other users` 로 서로를 떨어뜨리고, 그 실패는 **코드 회귀와 구분되지
+않는다.** 실제로 겪었다.
+
+```bash
+cd backend && LAURIO_DB_PORT=55432 LAURIO_TEST_DB_NAME=test_laurio_c2 uv run pytest
+```
+
 ## 프론트엔드
 
 Next.js + React. 저장소 루트가 pnpm 워크스페이스다(운영자 앱 04 #62, ADR-0021) —

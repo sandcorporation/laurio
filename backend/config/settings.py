@@ -211,6 +211,17 @@ DATABASES = {
         "PASSWORD": _env("POSTGRES_PASSWORD", "laurio"),
         "HOST": _env("POSTGRES_HOST", "127.0.0.1"),
         "PORT": _env("POSTGRES_PORT", _DEV_DB_PORT),
+        # 테스트 DB 이름을 환경에서 바꿀 수 있게 한다.
+        #
+        # 기본값은 Django 관례 그대로 `test_<NAME>` 이라 아무것도 안 바뀐다.
+        # 필요한 것은 **동시에 도는 두 pytest 가 서로를 밟지 않는 것**이다 —
+        # 병렬 워크트리에서 체인 둘이 각자 pytest 를 돌리면 같은 `test_laurio`
+        # 를 두고 싸워 `DROP DATABASE ... is being accessed by other users` 로
+        # 서로를 떨어뜨린다. 실제로 겪었고, 그때 나오는 실패는 코드 회귀와
+        # 구분되지 않아 사람이 시간을 버린다.
+        #
+        # 체인마다 `LAURIO_TEST_DB_NAME` 을 달리 주면 격리된다.
+        "TEST": {"NAME": _env("LAURIO_TEST_DB_NAME", "") or None},
     }
 }
 
