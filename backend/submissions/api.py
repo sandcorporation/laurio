@@ -463,9 +463,11 @@ def _get_owned_submission(request: HttpRequest, submission_id: int) -> Submissio
     않는다(순환을 만들 이유가 없다)."""
 
     try:
-        submission = Submission.objects.select_related("developer", "score").get(
-            id=submission_id
-        )
+        # `score.submission.contest` 와 `.appeal` 을 이 조회에서 함께 끌어온다 —
+        # `OwnScoreOut` 의 이의 창 판정이 그것을 본다.
+        submission = Submission.objects.select_related(
+            "developer", "score", "contest", "appeal"
+        ).get(id=submission_id)
     except Submission.DoesNotExist as exc:
         raise HttpError(404, "Submission을 찾을 수 없습니다.") from exc
 

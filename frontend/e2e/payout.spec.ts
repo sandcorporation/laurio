@@ -139,6 +139,26 @@ test("주민등록번호는 화면에 남지 않는다 — 제출 뒤 입력칸�
   expect(await page.content()).not.toContain("9001011234567");
 });
 
+test("Seller 등록이 거절돼도 상금이 남아 있다고 말하고 재시도를 준다", async ({ page }) => {
+  const seeded = seedE2eContests();
+  await login(page, seeded.judging.developer_login_seed);
+  const contestId = seeded.judging.id;
+
+  await stubPayout(page, contestId, {
+    status: "confirmed_seller_pending",
+    has_identity: true,
+    seller_status: "rejected",
+    next_action_message: "지급대행사 수취인 등록이 거절되었습니다.",
+  });
+
+  await page.goto(`/console/payouts/${contestId}`);
+
+  // 거절은 실패가 아니다 — 돈은 원장에 남아 있다(ADR-0020). 사람이 고객센터를
+  // 거쳐야 하면 "상금이 사라진 것 같은 시간"만 길어진다.
+  await expect(page.getByTestId("payout-seller-rejected")).toContainText("그대로 남아 있습니다");
+  await expect(page.getByTestId("payout-seller-retry")).toBeVisible();
+});
+
 test("수상하지 않은 행에는 지급 링크 자체가 없다", async ({ page }) => {
   const seeded = seedE2eContests();
   await login(page, seeded.judging.developer_login_seed);

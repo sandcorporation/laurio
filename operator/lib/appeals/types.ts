@@ -14,6 +14,13 @@ export type AppealSummary = {
   correction_amount: number | null;
   ruled_at: string | null;
   created_at: string;
+  // 이 이의가 지금 어떤 Contest 의 배분을 막고 있는가 (#74).
+  //
+  // 배분은 이의가 심판될 때까지 기다린다 — 이의가 묻는 것이 정확히 "내 점수가
+  // 컷라인을 넘는가" 이기 때문이다. 그 대가로 **한 사람의 이의가 그 Contest 의
+  // 배분 전체를 멈춘다**: 다른 참가자들의 돈도 함께 미뤄진다. 그래서 이 심판은
+  // 밀리면 밀릴수록 여러 사람의 돈을 붙잡는다.
+  is_holding_distribution: boolean;
 };
 
 export type ScoreSnapshot = {

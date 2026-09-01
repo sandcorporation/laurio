@@ -209,6 +209,29 @@ class OwnScoreOut(Schema):
     model_version: str
     reasoning: list[dict]
     created_at: datetime
+    # 이의 창이 언제 닫히는지. 기한을 만들어 놓고 화면에 적지 않으면 그 기한은
+    # 달력을 들고 계산한 사람에게만 유리한 함정이 된다. 심사기간이 없는 Contest
+    # 면 None 이고, 그때는 창이 닫히지 않는다.
+    appeal_deadline: datetime | None = None
+    # 지금 낼 수 있는가. `appeals.api.create_appeal` 의 전제와 **같은 함수**에서
+    # 나온다 — 조건을 두 벌로 쓰면 언젠가 갈라지고, 그때 화면은 이의를 권해놓고
+    # API 가 거절한다.
+    can_appeal: bool = False
+
+    @staticmethod
+    def resolve_appeal_deadline(obj):
+        return obj.submission.contest.judging_ends_at
+
+    @staticmethod
+    def resolve_can_appeal(obj) -> bool:
+        from core.clock import Clock
+
+        from .participation import within_appeal_window
+
+        submission = obj.submission
+        if getattr(submission, "appeal", None) is not None:
+            return False
+        return within_appeal_window(submission.contest, Clock.now())
 
     @staticmethod
     def resolve_percentage(obj) -> str:

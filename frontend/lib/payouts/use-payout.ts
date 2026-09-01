@@ -89,3 +89,13 @@ export function submitTaxIdentity(idempotencyKey: string, residentRegistrationNu
     resident_registration_number: residentRegistrationNumber,
   });
 }
+
+
+/** Seller(지급대행 수취인) 등록을 다시 시도한다 (#74 스토리 31).
+ *
+ * 지급대행사 쪽의 일시적 실패로 사람이 고객센터를 거쳐야 한다면, 그건 상금이
+ * 사라진 것처럼 느껴지는 시간을 늘릴 뿐이다.
+ */
+export function retrySellerRegistration(idempotencyKey: string) {
+  return postAndReadDetail(`/api/backend/payouts/${idempotencyKey}/seller-registration`);
+}

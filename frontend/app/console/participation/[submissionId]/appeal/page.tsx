@@ -68,8 +68,15 @@ export default function AppealPage({ params }: { params: Promise<{ submissionId:
           <ScoreSection score={state.score} />
           {state.appeal ? (
             <ExistingAppeal appeal={state.appeal} />
-          ) : (
+          ) : state.score.can_appeal ? (
             <AppealForm submissionId={submissionId} onSubmitted={reload} />
+          ) : (
+            // **폼이 없는 이유를 말한다.** 버튼이 그냥 없으면 "왜 없지"가
+            // 남고, 사용자는 자기 잘못인지 고장인지 모른다. 낼 수 있는지는
+            // 서버가 판정한다 — `create_appeal` 의 전제와 같은 함수다.
+            <p className="mt-8 text-muted" data-testid="appeal-closed">
+              이의 제기 기한(심사기간 종료)이 지나 더 이상 접수할 수 없습니다.
+            </p>
           )}
           <ReadingsSection readings={state.readings} failed={state.readingsFailed} />
         </>
@@ -90,6 +97,15 @@ function ScoreSection({ score }: { score: OwnScore }) {
       </p>
 
       {/* 근거가 없으면 이의를 쓸 수 없다 — 무엇을 반박할지 모른다. */}
+      {/* **기한이 화면에 있을 사실이어야 한다**(#74 스토리 15). 기한을 만들어
+          놓고 적지 않으면 그것은 달력을 들고 계산한 사람에게만 유리한 함정이
+          된다. */}
+      {score.appeal_deadline ? (
+        <p className="mt-2 text-sm" data-testid="appeal-deadline">
+          이의 제기 기한 {new Date(score.appeal_deadline).toLocaleString("ko-KR")}
+        </p>
+      ) : null}
+
       <ul className="mt-3 flex flex-col gap-2" data-testid="appeal-score-reasoning">
         {score.reasoning.map((item, index) => (
           <li key={index} className="rounded border border-subtle p-3 text-sm">
@@ -116,6 +132,16 @@ function ExistingAppeal({ appeal }: { appeal: Appeal }) {
           심판 의견: {appeal.ruling_note}
         </p>
       ) : null}
+      {/* **내 이의가 배분을 붙잡고 있다**(#74). 침묵은 상금이 사라진 것으로
+          읽힌다(ADR-0020) — 왜 아직 안 움직이는지, 그리고 사라진 게 아니라는
+          것을 여기서 말한다. */}
+      {appeal.is_holding_distribution ? (
+        <p className="mt-3 text-sm" data-testid="appeal-existing-holding">
+          이 이의가 심판될 때까지 이 공모전의 상금 배분은 진행되지 않습니다. 상금은 그대로
+          남아 있습니다.
+        </p>
+      ) : null}
+
       {appeal.correction_amount != null ? (
         <p className="mt-2 text-sm" data-testid="appeal-existing-correction">
           정정 금액 {appeal.correction_amount.toLocaleString()}원

@@ -89,6 +89,43 @@ test.describe("이의 큐 — 기본은 심판 대기, 필터로 그 외도 본�
     expect(createdAtText?.trim()).toBeTruthy();
   });
 
+  test("배분을 막고 있는 이의는 그렇게 표시된다 — 밀리면 여러 사람의 돈이 밀린다", async ({
+    page,
+  }) => {
+    const operator = seedE2eOperator();
+    await loginAsOperator(page, operator.username);
+
+    // 플래그가 **언제 참이 되는지**는 backend/tests/test_distributions.py 가
+    // 실물로 검증한다(배분 시각이 지나야 참, 심판되면 거짓). 여기서 확인할 것은
+    // 큐가 그 값을 표시하는가 하나다 — 참으로 만들려면 전역 시계를 배분 대기일
+    // 만큼 밀어야 하고, 그러면 같은 실행의 다른 스펙이 함께 움직인다.
+    await page.route("**/api/backend/operator/appeals*", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([
+          {
+            id: 90001,
+            submission_id: 42,
+            reason: "컷라인 판정에 이의가 있습니다.",
+            status: "pending",
+            ruling_note: "",
+            correction_amount: null,
+            ruled_at: null,
+            created_at: new Date().toISOString(),
+            is_holding_distribution: true,
+          },
+        ]),
+      }),
+    );
+
+    await page.goto("/appeals");
+    await waitForAppealsListSettled(page);
+
+    // 큐는 하나로 유지한다 — 두 번째 큐를 만들지 않고 그 행에 표시를 단다.
+    await expect(page.getByTestId("appeal-row-90001-holding")).toContainText("배분 보류");
+  });
+
   test("목록이 비어 있으면 빈 목록이라고 명시적으로 말한다", async ({ page }) => {
     const operator = seedE2eOperator();
     await loginAsOperator(page, operator.username);

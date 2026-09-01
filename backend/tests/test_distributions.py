@@ -1226,3 +1226,129 @@ def _seed_scored_contest(client, category, landing_type, *, uid: str) -> dict:
 def _advance_to_distribution_due(client, contest_id: int) -> None:
     _end_judging_period(client, contest_id)
     _advance_past_distribution_wait(contest_id)
+
+
+_OPERATOR_SEQ = 0
+
+
+def _operator_appeals(client) -> list[dict]:
+    """운영자 큐를 읽는다. Operator 는 Developer 와 서로소인 신원이라 클라이언트를
+    따로 쓴다(ADR-0018).
+
+    **캐시하지 않는다.** 세션은 실제 Redis 에 살지만(ADR-0018) Operator 행은
+    테스트 트랜잭션과 함께 롤백되므로, 앞 테스트의 클라이언트를 재사용하면 세션은
+    남았는데 가리키는 사용자가 없어 401 이 난다.
+    """
+
+    from tests.test_appeals import _operator_client
+
+    # 이름이 매번 달라야 한다 — 한 테스트가 큐를 두 번 읽으면(막기 전·후) 같은
+    # 이름으로 두 번 만들게 되고, `create_operator` 는 중복을 거절한다.
+    global _OPERATOR_SEQ
+    _OPERATOR_SEQ += 1
+    operator = _operator_client(f"op-hold-visibility-{_OPERATOR_SEQ}")
+
+    response = operator.get("/api/operator/appeals?status=pending")
+    assert response.status_code == 200, response.content
+    return response.json()
+
+
+def _rule_appeal(client, appeal_id: int, *, decision: str) -> None:
+    from tests.test_appeals import OPERATOR_ORIGIN, _operator_client
+
+    operator = _operator_client("op-hold-ruler")
+    response = operator.post(
+        f"/api/operator/appeals/{appeal_id}/rule",
+        data={"decision": decision, "ruling_note": "확인했습니다."},
+        content_type="application/json",
+        HTTP_ORIGIN=OPERATOR_ORIGIN,
+    )
+    assert response.status_code == 200, response.content
+
+
+# --- 보류가 보인다 (#74 스토리 24·37·38) -----------------------------------------
+#
+# 한 사람의 이의가 그 Contest 의 배분 전체를 멈춘다 — 다른 참가자들의 돈도 함께
+# 미뤄진다. 그 대가를 치르기로 했으면, 막고 있다는 사실이 **양쪽 화면에** 보여야
+# 한다. 운영자에게는 "이 심판이 돈을 막고 있다"는 우선순위 신호이고, 제출자에게는
+# "내 이의 때문에 아직 안 움직인다 — 사라진 게 아니다"라는 설명이다.
+
+
+@pytest.mark.django_db
+def test_an_appeal_that_holds_a_distribution_says_so_to_the_operator(
+    client, category, landing_type
+):
+    """운영자 큐가 「배분을 막고 있다」를 표시한다 — 심판이 밀리면 돈이 밀린다."""
+
+    seeded = _seed_scored_contest(client, category, landing_type, uid="dev-hold-vis")
+    filed = client.post(
+        f"/api/submissions/{seeded['submission_id']}/appeal",
+        data={"reason": "컷라인 판정에 이의가 있습니다."},
+        content_type="application/json",
+        **_auth_header(seeded["access"]),
+    )
+    assert filed.status_code == 201
+
+    # 아직 배분 시각이 오지 않았다 — 막고 있는 게 아니라 그냥 대기다.
+    before = _operator_appeals(client)
+    assert before[0]["is_holding_distribution"] is False
+
+    _advance_to_distribution_due(client, seeded["contest_id"])
+
+    after = _operator_appeals(client)
+    assert after[0]["is_holding_distribution"] is True, (
+        "배분 시각이 지났는데도 큐가 「막고 있다」를 말하지 않는다"
+    )
+
+
+@pytest.mark.django_db
+def test_the_developer_sees_that_their_appeal_is_holding_the_money(
+    client, category, landing_type
+):
+    """제출자도 같은 사실을 본다 — 침묵은 돈이 사라진 것으로 읽힌다(ADR-0020)."""
+
+    seeded = _seed_scored_contest(client, category, landing_type, uid="dev-hold-own")
+    client.post(
+        f"/api/submissions/{seeded['submission_id']}/appeal",
+        data={"reason": "컷라인 판정에 이의가 있습니다."},
+        content_type="application/json",
+        **_auth_header(seeded["access"]),
+    )
+    _advance_to_distribution_due(client, seeded["contest_id"])
+
+    response = client.get(
+        f"/api/submissions/{seeded['submission_id']}/appeal",
+        **_auth_header(seeded["access"]),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["is_holding_distribution"] is True
+
+
+@pytest.mark.django_db
+def test_a_ruled_appeal_no_longer_holds_anything(client, category, landing_type):
+    """심판이 끝나면 표시도 사라진다 — 안 그러면 「막고 있다」가 영구 라벨이 된다."""
+
+    seeded = _seed_scored_contest(client, category, landing_type, uid="dev-hold-ruled")
+    filed = client.post(
+        f"/api/submissions/{seeded['submission_id']}/appeal",
+        data={"reason": "컷라인 판정에 이의가 있습니다."},
+        content_type="application/json",
+        **_auth_header(seeded["access"]),
+    )
+    _advance_to_distribution_due(client, seeded["contest_id"])
+    assert _operator_appeals(client)[0]["is_holding_distribution"] is True
+
+    _rule_appeal(client, filed.json()["id"], decision="reject")
+
+    # 운영자 큐(pending)에서는 아예 사라진다. 라벨이 남았는지는 제출자 쪽에서
+    # 본다 — 같은 직렬화이고, 「막고 있다」가 심판 뒤에도 붙어 있으면 제출자는
+    # 자기 이의가 여전히 돈을 막고 있다고 믿는다.
+    assert _operator_appeals(client) == []
+
+    own = client.get(
+        f"/api/submissions/{seeded['submission_id']}/appeal",
+        **_auth_header(seeded["access"]),
+    )
+    assert own.status_code == 200
+    assert own.json()["is_holding_distribution"] is False

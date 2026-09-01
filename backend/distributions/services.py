@@ -228,6 +228,42 @@ def _attempt_share_payout(
     }
 
 
+def distribution_due_contests(as_of, policy):
+    """배분 시각이 온 Contest 들 — **이의 보류를 적용하기 전의** 집합이다 (#74).
+
+    스캔이 이 집합에서 이의 보류를 빼고, 「이 이의가 배분을 막고 있다」는 표시가
+    이 집합에 **들어 있는가**로 판정된다. 조건을 두 벌로 쓰면 언젠가 갈라지고,
+    그러면 큐는 막고 있다고 하는데 실제로는 아니거나(또는 그 반대) 한다.
+    """
+
+    cutoff = as_of - timedelta(days=policy.distribution_wait_days)
+    return Contest.objects.filter(
+        status=Contest.Status.JUDGING_ENDED,
+        judging_ends_at__lte=cutoff,
+        distribution__isnull=True,
+    )
+
+
+def is_holding_distribution(appeal) -> bool:
+    """이 이의가 지금 어떤 Contest 의 배분을 막고 있는가 (#74 스토리 24·37·38).
+
+    한 사람의 이의가 그 Contest 의 배분 전체를 멈춘다 — 다른 참가자들의 돈도 함께
+    미뤄진다. 그 대가를 치르기로 했으면 막고 있다는 사실이 양쪽 화면에 보여야
+    한다: 운영자에게는 「이 심판이 돈을 막고 있다」는 우선순위 신호이고,
+    제출자에게는 「내 이의 때문에 아직 안 움직인다 — 사라진 게 아니다」라는
+    설명이다(ADR-0020 의 "침묵은 상금이 사라진 것으로 읽힌다").
+
+    심판이 끝나면 저절로 False 가 된다 — 「막고 있다」가 영구 라벨이 되지 않는다.
+    """
+
+    if appeal.status != Appeal.Status.PENDING:
+        return False
+
+    return distribution_due_contests(Clock.now(), get_current_policy()).filter(
+        id=appeal.submission.contest_id
+    ).exists()
+
+
 def run_due_distributions(*, fail_submission_ids: set[int] | None = None) -> list[dict]:
     """무응답 14일이 지난 Contest를 스캔해 Distribution을 만들고, 아직 확정되지
     않은 몫에 대한 지급을 시도(또는 재시도)한다.
@@ -241,13 +277,8 @@ def run_due_distributions(*, fail_submission_ids: set[int] | None = None) -> lis
     fail_submission_ids = fail_submission_ids or set()
     results: list[dict] = []
 
-    cutoff = as_of - timedelta(days=policy.distribution_wait_days)
     due_contest_ids = list(
-        Contest.objects.filter(
-            status=Contest.Status.JUDGING_ENDED,
-            judging_ends_at__lte=cutoff,
-            distribution__isnull=True,
-        )
+        distribution_due_contests(as_of, policy)
         # **심판되지 않은 이의가 있으면 그 Contest 는 아직 배분하지 않는다**(#74).
         #
         # 이의가 묻는 것이 정확히 "내 점수가 컷라인을 넘는가" 이고, 점수가 돈을

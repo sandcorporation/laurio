@@ -94,6 +94,13 @@ function AppealsListInner() {
                 <span data-testid={`appeal-row-${appeal.id}-status`}>
                   {APPEAL_STATUS_LABELS[appeal.status]}
                 </span>
+                {/* **이 심판이 돈을 막고 있다**(#74). 배분은 이의가 심판될
+                    때까지 기다리므로, 밀린 심판 하나가 그 Contest 참가자
+                    전원의 배분을 붙잡는다. 큐를 하나로 유지하되(두 번째 큐를
+                    만들지 않는다) 그 행에 표시를 단다. */}
+                {appeal.is_holding_distribution ? (
+                  <span data-testid={`appeal-row-${appeal.id}-holding`}>배분 보류 중</span>
+                ) : null}
               </Link>
             </li>
           ))}

@@ -20,6 +20,7 @@ import { use, useState } from "react";
 import { useSession } from "@/lib/auth/use-session";
 import {
   requestPayout,
+  retrySellerRegistration,
   submitTaxIdentity,
   usePayout,
   type Payout,
@@ -128,6 +129,14 @@ function PayoutDetail({ payout, onChanged }: { payout: Payout; onChanged: () => 
             지금은 기다리는 단계입니다 — 하실 일은 없습니다. 상금은 원장에 그대로 남아 있고,
             등록이 끝나면 자동으로 다음 단계로 넘어갑니다.
           </p>
+          {/* **거절도 실패가 아니다**(#74 스토리 30·31). 지급대행사가 수취인
+              등록을 거절해도 상금은 원장에 그대로 남아 있다 — 그 사실을 말하고,
+              다시 시도할 길을 준다. 사람이 고객센터를 거쳐야 하면 "상금이
+              사라진 것 같은 시간"이 길어질 뿐이다. */}
+          {payout.seller_status === "rejected" ? (
+            <SellerRetry payout={payout} onRetried={onChanged} />
+          ) : null}
+
           {/* Seller 등록 대기 중에도 주민등록번호는 낼 수 있다 — 두 대기는
               서로 독립적이다(ADR-0020). 먼저 끝낼 수 있는 쪽을 막지 않는다. */}
           {payout.has_identity ? null : <TaxIdentityForm payout={payout} onSubmitted={onChanged} />}
@@ -140,6 +149,43 @@ function PayoutDetail({ payout, onChanged }: { payout: Payout; onChanged: () => 
         </p>
       ) : null}
     </>
+  );
+}
+
+function SellerRetry({ payout, onRetried }: { payout: Payout; onRetried: () => void }) {
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function handleClick() {
+    setPending(true);
+    setMessage(null);
+    const result = await retrySellerRegistration(payout.idempotency_key);
+    if (result.ok) return onRetried();
+    setMessage(result.message);
+    setPending(false);
+  }
+
+  return (
+    <div className="mt-3" data-testid="payout-seller-rejected">
+      <p className="text-sm">
+        지급대행사의 수취인 등록이 거절되었습니다. <strong>상금은 그대로 남아 있습니다</strong> —
+        다시 시도해보시고, 계속 거절되면 운영자에게 문의해주세요.
+      </p>
+      <button
+        className="mt-2 rounded border border-subtle px-3 py-2 text-sm disabled:opacity-50"
+        type="button"
+        onClick={handleClick}
+        disabled={pending}
+        data-testid="payout-seller-retry"
+      >
+        {pending ? "다시 시도하는 중..." : "등록 다시 시도"}
+      </button>
+      {message ? (
+        <p className="mt-2 text-attention" data-testid="payout-seller-retry-error">
+          {message}
+        </p>
+      ) : null}
+    </div>
   );
 }
 

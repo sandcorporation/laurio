@@ -1810,6 +1810,11 @@ export interface components {
             created_at: string;
             /** Id */
             id: number;
+            /**
+             * Is Holding Distribution
+             * @default false
+             */
+            is_holding_distribution: boolean;
             /** Reason */
             reason: string;
             /** Ruled At */
@@ -1842,6 +1847,11 @@ export interface components {
             created_at: string;
             /** Id */
             id: number;
+            /**
+             * Is Holding Distribution
+             * @default false
+             */
+            is_holding_distribution: boolean;
             /** Reason */
             reason: string;
             /** Ruled At */
@@ -2588,6 +2598,13 @@ export interface components {
          *     내리면 화면이 보여준 값과 돈을 가른 값이 갈릴 수 있다.
          */
         OwnScoreOut: {
+            /** Appeal Deadline */
+            appeal_deadline?: string | null;
+            /**
+             * Can Appeal
+             * @default false
+             */
+            can_appeal: boolean;
             /**
              * Created At
              * Format: date-time

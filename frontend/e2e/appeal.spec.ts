@@ -84,6 +84,34 @@ test("채점 전이면 「아직 채점되지 않았다」고 말한다 — 실�
   await expect(page.getByTestId("appeal-form")).toHaveCount(0);
 });
 
+test("이의 기한이 화면에 있고, 지났으면 폼 대신 이유가 있다", async ({ page }) => {
+  const seeded = seedE2eContests();
+  await login(page, seeded.judging.developer_login_seed);
+  const submissionId = seeded.judging.submissions[0].id;
+
+  // 기한 안 — 기한이 문장으로 보이고 폼이 있다. 기한을 만들어 놓고 화면에
+  // 적지 않으면 달력을 든 사람에게만 유리한 함정이 된다.
+  await page.goto(`/console/participation/${submissionId}/appeal`);
+  await expect(page.getByTestId("appeal-deadline")).toBeVisible();
+  await expect(page.getByTestId("appeal-form")).toBeVisible();
+
+  // 기한 밖 — 서버가 `can_appeal: false` 를 준다. 버튼이 그냥 사라지면
+  // "왜 없지"가 남는다: 이유를 말한다.
+  await page.route(`**/api/backend/submissions/${submissionId}/score`, async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ...body, can_appeal: false }),
+    });
+  });
+  await page.goto(`/console/participation/${submissionId}/appeal`);
+
+  await expect(page.getByTestId("appeal-closed")).toContainText("기한");
+  await expect(page.getByTestId("appeal-form")).toHaveCount(0);
+});
+
 test("조회에 실패하면 실패했다고 말한다 — 「채점 전」처럼 보이지 않는다", async ({ page }) => {
   const seeded = seedE2eContests();
   await login(page, seeded.judging.developer_login_seed);
@@ -140,6 +168,36 @@ test("남의 제출이면 채점 결과가 보이지 않는다", async ({ page }
   // 403 은 404 와 달리 "화면 전체가 실패" 다 — 남의 점수가 새지 않는다.
   await expect(page.getByTestId("appeal-error")).toBeVisible();
   await expect(page.getByTestId("appeal-score")).toHaveCount(0);
+});
+
+test("내 이의가 배분을 붙잡고 있으면 그렇게 말한다 — 사라진 게 아니다", async ({ page }) => {
+  const seeded = seedE2eContests();
+  await login(page, seeded.judging.developer_login_seed);
+  const submissionId = seeded.judging.submissions[0].id;
+
+  await page.route(`**/api/backend/submissions/${submissionId}/appeal`, async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: 1,
+        submission_id: submissionId,
+        reason: "컷라인 판정에 이의가 있습니다.",
+        status: "pending",
+        ruling_note: "",
+        correction_amount: null,
+        ruled_at: null,
+        created_at: new Date().toISOString(),
+        is_holding_distribution: true,
+      }),
+    });
+  });
+
+  await page.goto(`/console/participation/${submissionId}/appeal`);
+
+  // 침묵은 상금이 사라진 것으로 읽힌다(ADR-0020).
+  await expect(page.getByTestId("appeal-existing-holding")).toContainText("그대로 남아");
 });
 
 test("세션이 없으면 렌더링 전에 로그인으로 돌아간다", async ({ page }) => {

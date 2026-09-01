@@ -31,6 +31,13 @@ class AppealOut(Schema):
     correction_amount: int | None = None
     ruled_at: datetime | None = None
     created_at: datetime
+    # 이 이의가 지금 어떤 Contest 의 배분을 막고 있는가 (#74 스토리 24·37·38).
+    #
+    # 같은 값이 **운영자 큐와 제출자 화면 양쪽**에 쓰인다 — 이 스키마가 두 곳에서
+    # 쓰이기 때문이다. 운영자에게는 "이 심판이 돈을 막고 있다"는 우선순위 신호,
+    # 제출자에게는 "내 이의 때문에 아직 안 움직인다 — 사라진 게 아니다"라는
+    # 설명이다. 두 문장은 같은 사실의 두 얼굴이라 값도 하나여야 한다.
+    is_holding_distribution: bool = False
 
 
 class ScoreSnapshotOut(Schema):

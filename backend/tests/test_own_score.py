@@ -150,3 +150,69 @@ def test_reading_a_score_requires_authentication(client, scored):
     response = client.get(_score_url(scored["submission_id"]))
 
     assert response.status_code == 401
+
+
+# --- 이의 창이 언제 닫히는지 (#74 스토리 15·13·14) --------------------------------
+#
+# 기한을 만들어 놓고 화면에 안 적으면, 그 기한은 "달력을 들고 계산한 사람에게만"
+# 유리한 함정이 된다. 창이 닫히는 시각과 지금 낼 수 있는지를 채점 결과와 같은
+# 응답에 넣는다 — 점수를 여는 것이 곧 창을 여는 사건이고, 이의 화면이 이미
+# 부르는 응답이 이것뿐이다.
+
+
+@pytest.mark.django_db
+def test_the_score_says_when_the_appeal_window_closes(client, scored):
+    """언제까지 낼 수 있는지가 화면에 있을 사실이어야 한다."""
+
+    response = client.get(
+        _score_url(scored["submission_id"]), **_auth_header(scored["dev"]["access"])
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["appeal_deadline"], "이의 기한이 없으면 화면이 계산해야 한다"
+    assert body["can_appeal"] is True
+
+
+@pytest.mark.django_db
+def test_after_the_judging_period_ends_the_score_says_the_window_is_closed(client, scored):
+    """기한이 지나면 `can_appeal` 이 False 다 — 화면이 버튼을 감출 근거가 된다.
+
+    조건은 `appeals.api.create_appeal` 이 쓰는 것과 같은 함수에서 나온다
+    (`submissions.participation.within_appeal_window`). 두 벌로 쓰면 언젠가
+    갈라지고, 그때 화면은 이의를 권해놓고 API 가 거절한다.
+    """
+
+    from core.models import ClockOverride
+    from contests.models import Contest
+
+    contest = Contest.objects.get(id=scored["contest"]["id"])
+    assert contest.judging_ends_at is not None
+    ClockOverride.objects.update_or_create(
+        pk=1, defaults={"overridden_at": contest.judging_ends_at + timedelta(minutes=1)}
+    )
+
+    response = client.get(
+        _score_url(scored["submission_id"]), **_auth_header(scored["dev"]["access"])
+    )
+
+    assert response.status_code == 200
+    assert response.json()["can_appeal"] is False
+
+
+@pytest.mark.django_db
+def test_once_an_appeal_exists_the_score_no_longer_offers_another(client, scored):
+    """이미 냈으면 못 낸다 — 중복 거절과 같은 조건이다."""
+
+    client.post(
+        f"/api/submissions/{scored['submission_id']}/appeal",
+        data={"reason": "Evidence 가 실제로 소스에 있습니다."},
+        content_type="application/json",
+        **_auth_header(scored["dev"]["access"]),
+    )
+
+    response = client.get(
+        _score_url(scored["submission_id"]), **_auth_header(scored["dev"]["access"])
+    )
+
+    assert response.json()["can_appeal"] is False

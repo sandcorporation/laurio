@@ -42,6 +42,7 @@ from ninja.pagination import PageNumberPagination, paginate
 
 from accounts.middleware import jwt_auth
 from core.clock import Clock
+from distributions.services import is_holding_distribution
 from core.operator_auth import OperatorAuth
 from submissions.models import Submission
 from submissions.participation import within_appeal_window
@@ -82,6 +83,7 @@ def _serialize(appeal: Appeal) -> AppealOut:
         correction_amount=ruling.correction_amount if ruling else None,
         ruled_at=ruling.ruled_at if ruling else None,
         created_at=appeal.created_at,
+        is_holding_distribution=is_holding_distribution(appeal),
     )
 
 
