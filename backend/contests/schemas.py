@@ -49,6 +49,57 @@ class DeliverableTypeOut(Schema):
     minimum_prize: int
 
 
+# --- 운영자 표면(#80) --------------------------------------------------------
+#
+# 공개용 `DeliverableTypeOut`과 갈라 둔 이유: 운영자 화면은 비활성 종류도 봐야
+# 하므로(이미 그 종류를 쓰는 Contest가 있을 수 있고, 되살릴 방법을 판단하려면
+# 지금 꺼져 있다는 사실 자체를 봐야 한다) `is_active`가 필요하다. 참가자에게는
+# 그 필드를 보여줄 이유가 없다 — 공개 목록은 애초에 활성 종류만 돌려준다.
+
+
+class OperatorDeliverableTypeOut(Schema):
+    id: int
+    name: str
+    minimum_prize: int
+    is_active: bool
+
+
+# DeliverableType.minimum_prize는 Django PositiveIntegerField로, Postgres의
+# `integer`(4바이트) 컬럼이다 — 상한을 안 걸면 그 열의 실제 상한(2**31-1)을
+# 넘는 입력이 `DataError: integer out of range`로 500이 된다(코드리뷰 지적,
+# 재현됨). `policies.services._FIELD_BOUNDS`가 withholding_minor_income_exempt_won
+# 에 같은 상한을 명시해 둔 것과 같은 이유로, 여기서도 4xx가 나야 할 자리에서
+# 500이 나지 않게 한다.
+_POSITIVE_INT_MAX = 2**31 - 1
+
+
+class DeliverableTypeCreateIn(Schema):
+    name: str = Field(min_length=1, max_length=100)
+    minimum_prize: int = Field(ge=0, le=_POSITIVE_INT_MAX)
+    # 정책 변경과 같은 규율(#76) — 새 종류를 추가하는 것도 근거가 남아야 한다.
+    reason: str
+
+
+class DeliverableTypeUpdateIn(Schema):
+    minimum_prize: int = Field(ge=0, le=_POSITIVE_INT_MAX)
+    reason: str
+
+
+class DeactivateDeliverableTypeIn(Schema):
+    reason: str
+
+
+class DeliverableTypeChangeOut(Schema):
+    id: int
+    deliverable_type_id: int
+    operator_username: str
+    action: str
+    reason: str
+    before: dict
+    after: dict
+    changed_at: datetime
+
+
 class QuoteIn(Schema):
     deliverable_type_ids: list[int]
 

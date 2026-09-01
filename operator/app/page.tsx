@@ -78,6 +78,27 @@ export default function OperatorHome() {
         </p>
       )}
 
+      {/* 정책 화면(#77)으로 가는 진입점 — 계정 관리와 달리 등급을 가리지
+          않는다. 조회는 일반 등급도 되므로(#76) 이 링크는 두 등급 모두에게
+          보인다 — 편집 가능 여부는 화면 안에서 갈린다. 「할 일」 큐 카드
+          (#65/#66/#68 소관)와는 나란히 두지 않는다 — 정책은 처리해야 할
+          대기열이 아니다. */}
+      <p>
+        <Link href="/policy" data-testid="policy-nav-link">
+          플랫폼 정책
+        </Link>
+      </p>
+
+      {/* 산출물 종류 관리(#80)로 가는 진입점 — 정책 화면과 같은 이유로 두
+          등급 모두에게 보인다. 최소 제안 상금도 "상금미달" 배지 판정에
+          쓰이는 정책값과 같은 무게의 판단이라 정책 화면의 관용구를 그대로
+          따른다(#77). */}
+      <p>
+        <Link href="/deliverable-types" data-testid="deliverable-types-nav-link">
+          산출물 종류 관리
+        </Link>
+      </p>
+
       <section data-testid="operator-home-queues">
         <QueueCard
           testId="queue-appeals-pending"

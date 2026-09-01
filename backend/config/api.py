@@ -6,6 +6,7 @@ from appeals.api import operator_router as appeals_operator_router
 from appeals.api import router as appeals_router
 from awards.api import router as awards_router
 from contests.api import router as contests_router
+from contests.operator_api import operator_router as contests_operator_router
 from core.api import router as core_internal_router
 from distributions.api import internal_router as distributions_internal_router
 from handovers.api import internal_router as handovers_internal_router
@@ -17,6 +18,7 @@ from payments.api import internal_router as payments_internal_router
 from payments.api import router as payments_router
 from payouts.api import operator_router as payouts_operator_router
 from payouts.api import router as payouts_router
+from policies.api import operator_router as policies_operator_router
 from scoring.api import router as scoring_internal_router
 from storage.api import router as storage_router
 from storage.policy import StorageAccessDenied
@@ -63,5 +65,7 @@ def storage_access_denied(request, exc: StorageAccessDenied):
 api.add_router("/operator", operator_router)
 api.add_router("/operator", appeals_operator_router)
 api.add_router("/operator", payouts_operator_router)
+api.add_router("/operator", policies_operator_router)
+api.add_router("/operator", contests_operator_router)
 
 api.add_router("/storage", storage_router)

@@ -1082,6 +1082,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operator/deliverable-types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Deliverable Types */
+        get: operations["contests_operator_api_list_deliverable_types"];
+        put?: never;
+        /** Create Deliverable Type Endpoint */
+        post: operations["contests_operator_api_create_deliverable_type_endpoint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/deliverable-types/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Deliverable Type Changes */
+        get: operations["contests_operator_api_list_deliverable_type_changes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/deliverable-types/{deliverable_type_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Update Deliverable Type Endpoint */
+        post: operations["contests_operator_api_update_deliverable_type_endpoint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/deliverable-types/{deliverable_type_id}/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Deactivate Deliverable Type Endpoint */
+        post: operations["contests_operator_api_deactivate_deliverable_type_endpoint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/operator/login": {
         parameters: {
             query?: never;
@@ -1242,6 +1311,48 @@ export interface paths {
          *     여기 있다. 값을 주지 않으면 전체를 최신순으로 본다.
          */
         get: operations["payouts_api_list_payouts_for_operator"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Policy */
+        get: operations["policies_api_get_policy"];
+        put?: never;
+        /**
+         * Change Policy
+         * @description 정책을 바꾼다. 상위 등급만 — `SuperuserOperatorAuth`가 일반 등급을
+         *     403으로 거절한다(401과 구별된다: 세션 자체가 없으면 401·`OperatorAuth`).
+         *
+         *     `changes`는 페이로드에서 실제로 값이 온 필드만 뽑는다 — `None`은 "이
+         *     필드는 건드리지 마라"는 뜻이다.
+         */
+        post: operations["policies_api_change_policy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/policy/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Policy Changes */
+        get: operations["policies_api_list_policy_changes"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1976,6 +2087,46 @@ export interface components {
             /** Recipient Id */
             recipient_id: number;
         };
+        /** DeactivateDeliverableTypeIn */
+        DeactivateDeliverableTypeIn: {
+            /** Reason */
+            reason: string;
+        };
+        /** DeliverableTypeChangeOut */
+        DeliverableTypeChangeOut: {
+            /** Action */
+            action: string;
+            /** After */
+            after: {
+                [key: string]: unknown;
+            };
+            /** Before */
+            before: {
+                [key: string]: unknown;
+            };
+            /**
+             * Changed At
+             * Format: date-time
+             */
+            changed_at: string;
+            /** Deliverable Type Id */
+            deliverable_type_id: number;
+            /** Id */
+            id: number;
+            /** Operator Username */
+            operator_username: string;
+            /** Reason */
+            reason: string;
+        };
+        /** DeliverableTypeCreateIn */
+        DeliverableTypeCreateIn: {
+            /** Minimum Prize */
+            minimum_prize: number;
+            /** Name */
+            name: string;
+            /** Reason */
+            reason: string;
+        };
         /** DeliverableTypeOut */
         DeliverableTypeOut: {
             /** Id */
@@ -1984,6 +2135,13 @@ export interface components {
             minimum_prize: number;
             /** Name */
             name: string;
+        };
+        /** DeliverableTypeUpdateIn */
+        DeliverableTypeUpdateIn: {
+            /** Minimum Prize */
+            minimum_prize: number;
+            /** Reason */
+            reason: string;
         };
         /** DeveloperPublicProfileOut */
         DeveloperPublicProfileOut: {
@@ -2030,6 +2188,11 @@ export interface components {
         EntrySide: "debit" | "credit";
         /** ErrorOut */
         ErrorOut: {
+            /**
+             * Code
+             * @default error
+             */
+            code: string;
             /** Detail */
             detail: string;
         };
@@ -2236,6 +2399,27 @@ export interface components {
             /** Username */
             username: string;
         };
+        /** OperatorDeliverableTypeOut */
+        OperatorDeliverableTypeOut: {
+            /** Id */
+            id: number;
+            /** Is Active */
+            is_active: boolean;
+            /** Minimum Prize */
+            minimum_prize: number;
+            /** Name */
+            name: string;
+        };
+        /** OperatorErrorOut */
+        OperatorErrorOut: {
+            /**
+             * Code
+             * @default error
+             */
+            code: string;
+            /** Detail */
+            detail: string;
+        };
         /** OperatorLoginIn */
         OperatorLoginIn: {
             /** Password */
@@ -2360,6 +2544,61 @@ export interface components {
             status: string;
             /** Withholding Tax Amount */
             withholding_tax_amount: number;
+        };
+        /** PolicyChangeOut */
+        PolicyChangeOut: {
+            /** After */
+            after: {
+                [key: string]: number;
+            };
+            /** Before */
+            before: {
+                [key: string]: number;
+            };
+            /**
+             * Changed At
+             * Format: date-time
+             */
+            changed_at: string;
+            /** Id */
+            id: number;
+            /** Operator Username */
+            operator_username: string;
+            /** Reason */
+            reason: string;
+        };
+        /** PolicyOut */
+        PolicyOut: {
+            /** Platform Fee Bps */
+            platform_fee_bps: number;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Version */
+            version: number;
+            /** Withholding Minor Income Exempt Won */
+            withholding_minor_income_exempt_won: number;
+            /** Withholding Necessary Expense Bps */
+            withholding_necessary_expense_bps: number;
+            /** Withholding Tax Bps */
+            withholding_tax_bps: number;
+        };
+        /** PolicyUpdateIn */
+        PolicyUpdateIn: {
+            /** Expected Version */
+            expected_version: number;
+            /** Platform Fee Bps */
+            platform_fee_bps?: number | null;
+            /** Reason */
+            reason: string;
+            /** Withholding Minor Income Exempt Won */
+            withholding_minor_income_exempt_won?: number | null;
+            /** Withholding Necessary Expense Bps */
+            withholding_necessary_expense_bps?: number | null;
+            /** Withholding Tax Bps */
+            withholding_tax_bps?: number | null;
         };
         /**
          * ProfileIn
@@ -4045,6 +4284,185 @@ export interface operations {
             };
         };
     };
+    contests_operator_api_list_deliverable_types: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorDeliverableTypeOut"][];
+                };
+            };
+        };
+    };
+    contests_operator_api_create_deliverable_type_endpoint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeliverableTypeCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorDeliverableTypeOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+        };
+    };
+    contests_operator_api_list_deliverable_type_changes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliverableTypeChangeOut"][];
+                };
+            };
+        };
+    };
+    contests_operator_api_update_deliverable_type_endpoint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                deliverable_type_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeliverableTypeUpdateIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorDeliverableTypeOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+        };
+    };
+    contests_operator_api_deactivate_deliverable_type_endpoint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                deliverable_type_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeactivateDeliverableTypeIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorDeliverableTypeOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+        };
+    };
     accounts_operator_api_operator_login: {
         parameters: {
             query?: never;
@@ -4284,6 +4702,88 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OperatorPayoutOut"][];
+                };
+            };
+        };
+    };
+    policies_api_get_policy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyOut"];
+                };
+            };
+        };
+    };
+    policies_api_change_policy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PolicyUpdateIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    policies_api_list_policy_changes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyChangeOut"][];
                 };
             };
         };

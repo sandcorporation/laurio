@@ -397,9 +397,10 @@ def test_changing_the_policy_changes_new_payouts_but_not_past_ones(
 ):
     """정책의 요율을 바꾼 뒤: 새 Payout의 공제는 달라지고, 이미 만들어진
     Payout의 금액과 기록된 요율은 그대로다(#75) — 스냅샷이 실제로 스냅샷인지를
-    묻는다. "요율 필드가 있다"에서 멈추지 않고 요율을 실제로 바꿔 확인한다."""
+    묻는다. "요율 필드가 있다"에서 멈추지 않고 요율을 실제로 바꿔 확인한다.
 
-    from policies.models import PlatformPolicy
+    #76부터는 운영자 API로 바꾼다 — 직접 ORM을 건드리지 않는다(CLAUDE.md의
+    HTTP 시임 하나 규율)."""
 
     # 정책을 건드리기 전에 만든 Payout — 기본값(수수료 10%, 원천징수 4.4%).
     sponsor_a, dev_a, contest_a, _ = _ready_for_payout(
@@ -412,12 +413,22 @@ def test_changing_the_policy_changes_new_payouts_but_not_past_ones(
     assert payout_before.platform_fee_bps == 1000
     assert payout_before.withholding_tax_bps == 440
 
-    # 운영자가 요율을 바꿨다고 가정한다 — DB 행을 직접 조정한다
-    # (distributions.models.DistributionCutline을 테스트가 조정하는 것과 같은
-    # 관용구, 운영자 API는 #76의 몫).
-    PlatformPolicy.objects.update_or_create(
-        pk=1, defaults={"platform_fee_bps": 1500, "withholding_tax_bps": 500}
+    # 상위 등급 Operator가 운영자 API로 요율을 바꾼다.
+    root = _operator_client("policy-root-1", superuser=True)
+    current = root.get("/api/operator/policy", HTTP_ORIGIN="http://testserver")
+    assert current.status_code == 200, current.content
+    changed = root.post(
+        "/api/operator/policy",
+        data={
+            "platform_fee_bps": 1500,
+            "withholding_tax_bps": 500,
+            "reason": "요율 조정 테스트(#76)",
+            "expected_version": current.json()["version"],
+        },
+        content_type="application/json",
+        HTTP_ORIGIN="http://testserver",
     )
+    assert changed.status_code == 200, changed.content
 
     # 정책 변경 이후에 만든 새 Payout — 새 요율이 적용된다.
     _unfreeze()
