@@ -55,8 +55,17 @@ BATCH_SIZE = 50
 
 # unique_active_payout_per_distribution_share와 같은 집합이어야 한다
 # (payouts.services._ACTIVE_PAYOUT_STATUSES와 같은 이유) — 이 상태들에 도달한
-# 몫은 이미 확정됐으므로 다시 시도하지 않는다.
-_SETTLED_PAYOUT_STATUSES = [Payout.Status.CONFIRMED_IDENTITY_PENDING, Payout.Status.CONFIRMED]
+# 몫은 이미 확정됐으므로 다시 시도하지 않는다. CONFIRMED_SELLER_PENDING도
+# 포함한다(#50) — Seller 등록이 아직 안 끝났을 뿐 지급 자체(원장 분개)는 이미
+# 확정되어 있으므로, 이 스캔이 다시 request_payout/confirm을 시도할 이유가
+# 없다. 빠뜨리면 이 상태에 머무는 몫이 매 스캔마다 다시 후보에 잡혀
+# BATCH_SIZE 슬롯을 낭비한다("새 상태를 후보 집합에 반영하지 않으면 좌초·낭비가
+# 생긴다"는 이 저장소가 반복해 겪은 결함 모양).
+_SETTLED_PAYOUT_STATUSES = [
+    Payout.Status.CONFIRMED_IDENTITY_PENDING,
+    Payout.Status.CONFIRMED_SELLER_PENDING,
+    Payout.Status.CONFIRMED,
+]
 
 
 def get_cutline_percentage():

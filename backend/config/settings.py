@@ -581,6 +581,23 @@ PAYOUT_WEBHOOK_SECRET = _payout_webhook_secret
 # 남기지 않는다 — CSRF 방어를 두 기계로 두었다가 한쪽 발급처가 사라져 영구 403이
 # 된 사고가 이 저장소에 있다.
 
+# --- Seller(지급대행사 수취인) 등록 어댑터 (#50, ADR-0007, ADR-0020) -------------------
+#
+# PAYOUT_ADAPTER_MODE와 같은 원칙: 기본값은 항상 fake다. 실제 토스 지급대행 셀러
+# 등록은 이 티켓 범위 밖이다(#57) — staging/production에서만 real dotted path를
+# 요구한다.
+SELLER_ADAPTER_MODE = _env("SELLER_ADAPTER_MODE", "fake")
+if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(SELLER_ADAPTER_MODE):
+    raise ImproperlyConfigured(
+        f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 인데 SELLER_ADAPTER_MODE "
+        "가 fake 다. staging/production 배포에서는 SELLER_ADAPTER_MODE=real 을 반드시 "
+        "설정해야 한다."
+    )
+
+# 부분 승인된 Seller가 심사 없이 지급받을 수 있는 주간 한도(원 단위 정수,
+# ADR-0020). 그 이상은 심사 대기(under_review)로 다룬다 — 실패가 아니다.
+SELLER_WEEKLY_LIMIT_AMOUNT = int(_env("SELLER_WEEKLY_LIMIT_AMOUNT", "10000000"))
+
 # --- Distribution (#16, ADR-0003/0004/0006) -------------------------------------------
 #
 # 심사기간 종료(JUDGING_ENDED, judging_ends_at) 후 이 기간 동안 아무도 Award하지

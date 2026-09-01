@@ -44,3 +44,9 @@ design/*.html
 
 # playwright MCP 도구가 남기는 산출물
 /.playwright-mcp/
+
+# pnpm 워크스페이스(운영자 앱 04 #62) — 앱마다 자기 .gitignore 도 갖고 있지만,
+# packages/* 는 별도 .gitignore 가 없으므로 여기서 한 번에 덮는다. 슬래시 없는
+# 패턴은 모든 깊이에서 매치되므로 frontend/node_modules 도 이 규칙 하나로 커버된다.
+node_modules/
+/.pnpm-store/

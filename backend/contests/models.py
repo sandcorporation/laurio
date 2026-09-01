@@ -125,6 +125,24 @@ class Contest(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            # 스케줄러 틱(core.transitions.run_due_transitions)이 60초마다 도는 두
+            # 스캔의 WHERE 절이 그대로 타는 인덱스다. 규칙은 contests/apps.py 가
+            # 등록하고, 각각 (status, deadline_at) 과 (status, judging_ends_at) 을
+            # 함께 건다.
+            #
+            # 인덱스가 없으면 그 둘이 매 틱마다 전체 테이블 순차 스캔이 된다 —
+            # `EXPLAIN` 으로 실제로 확인했다(Seq Scan on contests_contest). 지금
+            # 규모에서는 수 ms 라 아프지 않지만, transitions.py 가 배치 상한을
+            # 두면서 남긴 주석("인덱스가 있어도 무제한 스캔은 …")은 인덱스가
+            # 있다는 전제로 쓰였는데 실제로는 없었다. notifications 는 같은 모양의
+            # 주기 스캔에 대해 이미 이 인덱스를 갖고 있다(notif_status_sched_idx)
+            # — 여기서 그 관용구를 맞춘다.
+            models.Index(fields=["status", "deadline_at"], name="contest_status_deadline_idx"),
+            models.Index(
+                fields=["status", "judging_ends_at"], name="contest_status_judgeend_idx"
+            ),
+        ]
 
     def __str__(self) -> str:  # pragma: no cover
         return self.title

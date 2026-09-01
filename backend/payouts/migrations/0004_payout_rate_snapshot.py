@@ -18,7 +18,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("payouts", "0002_payout_distribution_share_alter_payout_handover_and_more"),
+        ("payouts", "0003_seller_and_more"),
     ]
 
     operations = [
