@@ -1,7 +1,12 @@
-"""본인확인 어댑터 인터페이스 (ADR-0007).
+"""본인확인 어댑터 인터페이스 (ADR-0007, #83).
 
-실제 PASS/NICE 연동은 이 티켓 범위 밖이다. 인터페이스만 정의하고 dev/test는 fake로
-바인딩한다. 실제 구현체가 필요해지면 이 `VerificationAdapter` 계약만 만족시키면 된다.
+실제 PortOne 통합인증 연동은 이 티켓 범위 밖이다(#85). 인터페이스만 정의하고
+dev/test는 fake로 바인딩한다. 실제 구현체가 필요해지면 이 `VerificationAdapter`
+계약만 만족시키면 된다.
+
+어댑터 선택은 `core.adapters.resolve_adapter`를 쓴다 — scoring이 이미 쓰는 것과
+같은 선택 방식이다(#83). `VERIFICATION_ADAPTER_MODE`가 `"fake"`면 Fake를, 아니면
+그 값을 dotted path로 보고 실제 클래스를 import한다.
 """
 
 from __future__ import annotations
@@ -9,6 +14,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from typing import Protocol
+
+from django.conf import settings
+
+from core.adapters import resolve_adapter
 
 
 class VerificationAdapterError(Exception):
@@ -50,11 +59,12 @@ class FakeVerificationAdapter:
 
 
 def get_adapter() -> VerificationAdapter:
-    from django.conf import settings
-
-    if settings.VERIFICATION_ADAPTER_MODE == "fake":
-        return FakeVerificationAdapter()
-    raise NotImplementedError(
-        "실제 PASS/NICE 연동은 아직 구현되지 않았다 — VerificationAdapter 계약만 만족시키면"
-        " 된다 (ADR-0007)."
+    return resolve_adapter(
+        mode=settings.VERIFICATION_ADAPTER_MODE,
+        fake_factory=FakeVerificationAdapter,
+        not_implemented_hint=(
+            "실제 본인확인 연동은 아직 구현되지 않았다 — VerificationAdapter 계약만 "
+            "만족시키는 dotted path를 VERIFICATION_ADAPTER_MODE에 설정하면 된다 "
+            "(ADR-0007)."
+        ),
     )

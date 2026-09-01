@@ -19,13 +19,21 @@ dev/test는 `FakePGAdapter`로 바인딩된다(`PAYMENT_ADAPTER_MODE=fake`). 이
 `TypeError`로 죽으므로, "PGAdapter 계약만 만족시키면 된다"는 문서화된 규칙이
 실제로 지켜지려면 이 선을 지켜야 한다.
 
-실제 토스 연동은 이 티켓 범위 밖이다(#23). `PGAdapter` 계약만 만족시키면 된다.
+실제 토스 연동은 이 티켓 범위 밖이다(#87). `PGAdapter` 계약만 만족시키면 된다.
+
+어댑터 선택은 `core.adapters.resolve_adapter`를 쓴다(#83) — scoring이 이미 쓰는
+것과 같은 선택 방식이다. `PAYMENT_ADAPTER_MODE`가 `"fake"`면 Fake를, 아니면 그
+값을 dotted path로 보고 실제 클래스를 import한다.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Protocol
+
+from django.conf import settings
+
+from core.adapters import resolve_adapter
 
 
 class PGError(Exception):
@@ -217,11 +225,12 @@ class FakePGAdapter:
 
 
 def get_adapter() -> PGAdapter:
-    from django.conf import settings
-
-    if settings.PAYMENT_ADAPTER_MODE == "fake":
-        return FakePGAdapter()
-    raise NotImplementedError(
-        "실제 토스페이먼츠 연동은 아직 구현되지 않았다 — PGAdapter 계약만 만족시키면 "
-        "된다 (ADR-0007). 샌드박스 연동은 #23의 범위다."
+    return resolve_adapter(
+        mode=settings.PAYMENT_ADAPTER_MODE,
+        fake_factory=FakePGAdapter,
+        not_implemented_hint=(
+            "실제 토스페이먼츠 연동은 아직 구현되지 않았다 — PGAdapter 계약만 만족시키는 "
+            "dotted path를 PAYMENT_ADAPTER_MODE에 설정하면 된다 (ADR-0007). 샌드박스 "
+            "연동은 #87의 범위다."
+        ),
     )

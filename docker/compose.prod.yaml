@@ -14,11 +14,13 @@
 # 관리형 RDS/OCI DB를 쓸 경우 POSTGRES_HOST/POSTGRES_PORT 를 그 엔드포인트로 덮어쓴다.
 #
 # 어댑터 바인딩(ADR-0007, 한눈에 보기용 — 실제 값은 .env.prod):
-#   PG        : FakePGAdapter        -> 토스 "실물"            (PAYMENT_ADAPTER_MODE=real)
-#   지급대행   : FakePayoutAdapter     -> 토스 지급대행 실물      (PAYOUT_ADAPTER_MODE=real)
+#   PG        : FakePGAdapter        -> 토스 "실물"(dotted path, 아직 미구현 — #87)
+#   지급대행   : FakePayoutAdapter     -> 토스 지급대행 실물(dotted path, 아직 미구현
+#               — #82 라운드 2)
 #   스토리지   : MinIO                -> 실제 S3/OCI 버킷        (STORAGE_BACKEND=s3)
 #   소셜 로그인 : FakeSocialAdapter     -> 카카오/GitHub/구글 실물 (SOCIAL_AUTH_MODE=real)
-#   본인확인   : FakeVerificationAdapter -> 실제 PASS/NICE 연동   (VERIFICATION_ADAPTER_MODE=real)
+#   본인확인   : FakeVerificationAdapter -> 실제 PortOne 통합인증 연동(dotted path,
+#               아직 미구현 — #85)
 #   LLM 채점   : FakeLLMScoringAdapter  -> 실제 LLM 벤더(dotted path로 지정, 아직 미구현)
 #   알림 채널  : Fake*Adapter           -> 실제 카카오 알림톡/SMS·LMS 벤더(dotted path로
 #               지정, 아직 미구현 — .env.prod에서 반드시 채워야 하는 이유가 이것이다.
@@ -27,7 +29,10 @@
 # (dotted path가 가리키는 클래스명이 Fake로 시작해도 마찬가지다) 부팅 자체를 거부한다 —
 # staging과 동일한 가드지만, production은 추가로 IS_PRODUCTION_DEPLOYMENT 하드닝
 # (HSTS·SSL 리다이렉트·secure 쿠키·강한 SECRET_KEY, `manage.py check --deploy`가 검증)
-# 도 함께 켜진다.
+# 도 함께 켜진다. VERIFICATION_ADAPTER_MODE·PAYMENT_ADAPTER_MODE·PAYOUT_ADAPTER_MODE는
+# 그 값이 "fake"도 아니고 실제로 import도 안 되면 역시 부팅을 거부한다(#83) — 그래서
+# 실물 클래스가 없는 지금은 알림 채널과 같은 원칙으로 `${VAR:?...}`로 필수값으로
+# 비워 둔다.
 #
 # 스케줄러(ADR-0003): redis 브로커 + celery-worker + celery-beat 세 서비스가 반드시
 # 함께 떠야 한다 — compose.staging.yaml과 같은 이유(core/tasks.py, config/celery.py
@@ -72,13 +77,19 @@ x-backend-env: &backend-env
 
   # --- 소셜 로그인 / 본인확인 어댑터 (ADR-0007, ADR-0011) ---
   SOCIAL_AUTH_MODE: real
-  VERIFICATION_ADAPTER_MODE: real
+  # 실제 PortOne 통합인증 어댑터는 아직 구현되지 않았다(#85) — "real"은 dotted
+  # path가 아니라 부팅이 통과하고 첫 본인확인 요청에서야 죽었다(#83이 고친 버그).
+  # staging과 같은 값을 쓰지 않는다(벤더 계정 자체가 다르다). 실물이 생기면 그
+  # dotted path를 .env.prod에 채운다.
+  VERIFICATION_ADAPTER_MODE: ${VERIFICATION_ADAPTER_MODE:?실제 본인확인 어댑터의 dotted path를 .env.prod 에 채워라 — 아직 구현 전이면(#85) 이 값 자체를 비워 둘 수 없다}
   VERIFICATION_ENCRYPTION_KEY: ${VERIFICATION_ENCRYPTION_KEY:?}
 
   # --- 결제 · Escrow / Payout 어댑터 (ADR-0007, ADR-0008): 토스 "실물" ---
-  PAYMENT_ADAPTER_MODE: real
+  # 실제 토스/토스 지급대행 어댑터는 아직 구현되지 않았다(#87/#82 라운드 2) — 위
+  # VERIFICATION_ADAPTER_MODE와 같은 이유로 필수값으로 비워 둔다.
+  PAYMENT_ADAPTER_MODE: ${PAYMENT_ADAPTER_MODE:?실제 PG 어댑터의 dotted path를 .env.prod 에 채워라 — 아직 구현 전이면(#87) 이 값 자체를 비워 둘 수 없다}
   PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:?}
-  PAYOUT_ADAPTER_MODE: real
+  PAYOUT_ADAPTER_MODE: ${PAYOUT_ADAPTER_MODE:?실제 지급대행 어댑터의 dotted path를 .env.prod 에 채워라 — 아직 구현 전이면 이 값 자체를 비워 둘 수 없다}
   PAYOUT_WEBHOOK_SECRET: ${PAYOUT_WEBHOOK_SECRET:?}
   TOSS_LIVE_SECRET_KEY: ${TOSS_LIVE_SECRET_KEY:-}
 

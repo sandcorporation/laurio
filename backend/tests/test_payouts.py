@@ -26,12 +26,14 @@ from datetime import timedelta
 
 import pytest
 from django.conf import settings
+from django.test import override_settings
 from django.utils import timezone
 
 from contests.models import Category, Contest, DeliverableType
 from core.models import ClockOverride
 from handovers.models import Handover
 from ledger.services import contest_entries
+from payouts.adapters import FakePayoutAdapter
 from payouts.models import Payout, TaxIdentity
 
 TICK_URL = "/api/internal/tick"
@@ -762,3 +764,37 @@ def test_sponsor_cannot_view_developer_payout_breakdown(client, category, landin
 
     resp = client.get(f"{CONTESTS_URL}/{contest['id']}/payout", **_auth_header(sponsor["access"]))
     assert resp.status_code == 403
+
+
+# --- 어댑터 선택이 resolve_adapter를 쓴다 (#83) --------------------------------
+
+
+class _DottedPathTestPayoutAdapter(FakePayoutAdapter):
+    """`PAYOUT_ADAPTER_MODE`에 dotted path로 지목됐을 때 실제로 이 클래스가
+    쓰인다는 것을 증명하기 위한 테스트 전용 더블(#83).
+
+    `FakePayoutAdapter`의 기본 시나리오(`simulate=None`)는 즉시 "paid"를
+    돌려주는데, 이 더블은 그와 반대로 항상 "failed"를 돌려준다 — 그래서
+    `simulate`를 전혀 넘기지 않은 confirm 호출이 실패로 끝나면, `resolve_adapter`가
+    "fake" 별칭이 아니라 이 dotted path를 실제로 import해 썼다는 것을 HTTP 응답
+    본문만으로 확인할 수 있다.
+    """
+
+    def confirm(self, *, idempotency_key: str, simulate: str | None = None) -> str:
+        return "failed"
+
+
+@pytest.mark.django_db
+def test_payout_adapter_mode_resolves_a_dotted_path_to_a_real_class(
+    client, category, landing_type
+):
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+
+    with override_settings(
+        PAYOUT_ADAPTER_MODE="tests.test_payouts._DottedPathTestPayoutAdapter"
+    ):
+        resp = _confirm_payout(client, dev, requested["idempotency_key"])
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "failed"

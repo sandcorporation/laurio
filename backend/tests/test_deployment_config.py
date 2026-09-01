@@ -25,6 +25,29 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 # SECRET_KEY 강도 가드(config/settings.py)를 통과하는 값.
 _STRONG_SECRET_KEY = "prod-Kx8f3Kq0mN2pR7tYcVbGhJkLdSaWeUiOaXzCvBnMqWeRtYuIoPaSdFgHjKlZxCvB"
 
+
+# --- VERIFICATION/PAYMENT/PAYOUT_ADAPTER_MODE 용 stub (#83) --------------------
+#
+# 실물 어댑터(#85 PortOne, #87 Toss)는 아직 없다. 이 파일이 검증하는 것은 "완전한
+# production/staging 환경이 부팅되는가"이지 "실물 벤더가 실제로 연결되는가"가
+# 아니므로, 여기서는 이름이 Fake로 시작하지 않는 최소 stub 클래스를 직접 두고
+# dotted path로 가리킨다 — config/settings.py의 새 부팅 가드(#83,
+# `_require_resolvable_adapter_mode`)가 "fake도 아니고 import도 안 되는 값"만
+# 거부한다는 것을, "import는 되지만 fake는 아닌 값"은 통과시킨다는 것과 대비해
+# 함께 증명한다.
+
+
+class _StubRealVerificationAdapter:
+    """실물 PortOne 연동이 아직 없다(#85) — 부팅 가드 테스트 전용 stub."""
+
+
+class _StubRealPGAdapter:
+    """실물 토스 연동이 아직 없다(#87) — 부팅 가드 테스트 전용 stub."""
+
+
+class _StubRealPayoutAdapter:
+    """실물 토스 지급대행 연동이 아직 없다(#82 라운드 2) — 부팅 가드 테스트 전용 stub."""
+
 # dev의 fallback과 같은, 이미 저장소에 공개된 고정 Fernet 키(config/settings.py 참고) —
 # 새로 유출되는 비밀이 아니다. 부팅 가드는 이 값의 "강도"가 아니라 "비어 있는지"만
 # 본다(SECRET_KEY와 달리 production 전용 강도 검사가 없다).
@@ -63,9 +86,9 @@ def _base_env(*, target: str, secret_key: str) -> dict[str, str]:
         "STORAGE_SECRET_KEY": "dummy",
         "STORAGE_REGION": "us-east-1",
         "SOCIAL_AUTH_MODE": "real",
-        "VERIFICATION_ADAPTER_MODE": "real",
-        "PAYMENT_ADAPTER_MODE": "real",
-        "PAYOUT_ADAPTER_MODE": "real",
+        "VERIFICATION_ADAPTER_MODE": "tests.test_deployment_config._StubRealVerificationAdapter",
+        "PAYMENT_ADAPTER_MODE": "tests.test_deployment_config._StubRealPGAdapter",
+        "PAYOUT_ADAPTER_MODE": "tests.test_deployment_config._StubRealPayoutAdapter",
         "LLM_ADAPTER_MODE": "real",
         "LLM_REQUIREMENT_CHAT_ADAPTER_MODE": "real",
         "NOTIFICATION_ALIMTALK_ADAPTER": "notifications.adapters.RealAlimtalkAdapter",
@@ -251,6 +274,12 @@ _FAKE_DOTTED_PATH_BYPASSES = [
         "LLM_REQUIREMENT_CHAT_ADAPTER_MODE",
         "contests.requirement_chat.FakeRequirementChatAdapter",
     ),
+    # #83: verification/payment/payout도 이제 resolve_adapter로 dotted path를 그대로
+    # import한다 — 전에는 "fake" 리터럴 외의 값이 전부 NotImplementedError였으므로 이
+    # 우회 자체가 불가능했다. 세 어댑터를 옮기면서 새로 생긴 회귀 위험이다.
+    ("VERIFICATION_ADAPTER_MODE", "verification.adapters.FakeVerificationAdapter"),
+    ("PAYMENT_ADAPTER_MODE", "payments.adapters.FakePGAdapter"),
+    ("PAYOUT_ADAPTER_MODE", "payouts.adapters.FakePayoutAdapter"),
 ]
 
 
@@ -276,6 +305,56 @@ def test_deployed_environment_refuses_a_fake_adapter_named_by_dotted_path(
     )
     assert "ImproperlyConfigured" in result.stderr
     assert field in result.stderr
+
+
+# --- 풀 수 없는(non-fake, non-importable) 어댑터 값은 부팅 자체를 거부한다 (#83) -----
+#
+# compose.staging.yaml이 실제로 겪었던 버그를 그대로 재현한다: PAYMENT_ADAPTER_MODE
+# 같은 값에 "real"처럼 dotted path가 아닌(그리고 "fake"도 아닌) 문자열을 넣으면,
+# 이전에는 부팅이 통과하고 첫 결제·본인확인 요청에서야 NotImplementedError로 죽었다.
+
+
+_UNRESOLVABLE_ADAPTER_MODE_FIELDS = [
+    "VERIFICATION_ADAPTER_MODE",
+    "PAYMENT_ADAPTER_MODE",
+    "PAYOUT_ADAPTER_MODE",
+]
+
+
+@pytest.mark.parametrize("target", ["staging", "production"])
+@pytest.mark.parametrize("field", _UNRESOLVABLE_ADAPTER_MODE_FIELDS)
+def test_deployed_environment_refuses_to_boot_with_an_unresolvable_adapter_value(target, field):
+    """`"real"`은 dotted path가 아니다 — `import_string`이 시도조차 되지 않고 바로
+    `ImportError`가 난다. 이 값으로 배포되면 컨테이너는 뜨지만 실제 요청에서만
+    죽는다는 것이 이 티켓(#83)이 고치는 버그다."""
+
+    env_builder = _production_env if target == "production" else _staging_env
+    env = env_builder(**{field: "real"})
+
+    result = _run_check(env)
+
+    assert result.returncode != 0, (
+        f"{target} config with {field}='real' 이 부팅에 성공했다 — 'real'은 아무 클래스도 "
+        "가리키지 않는 문자열이므로, 이 값 그대로 배포되면 요청이 들어올 때까지 아무도 "
+        "이 실수를 모른다."
+    )
+    assert "ImproperlyConfigured" in result.stderr
+    assert field in result.stderr
+
+
+def test_development_target_boots_with_an_unresolvable_adapter_value():
+    """dev·CI는 이 새 가드의 대상이 아니다 — 오타를 부팅 실패로 바꿀 만큼 배포와
+    같은 무게가 아니다(#83). 값을 실제로 쓰려는 요청이 오기 전까지는 조용히 통과한다
+    (resolve_adapter가 그 시점에 NotImplementedError를 던진다 — 기존 동작 그대로)."""
+
+    env = _base_env(target="development", secret_key=_STRONG_SECRET_KEY)
+    env["LAURIO_DEPLOYMENT_TARGET"] = "development"
+    for field in _UNRESOLVABLE_ADAPTER_MODE_FIELDS:
+        env[field] = "real"
+
+    result = _run_check(env)
+
+    assert result.returncode == 0, result.stderr
 
 
 # --- Celery beat가 부르는 내부 엔드포인트는 SSL 리다이렉트에서 빠져야 한다 ----------

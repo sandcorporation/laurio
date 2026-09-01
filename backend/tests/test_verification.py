@@ -8,7 +8,9 @@
 from datetime import date
 
 import pytest
+from django.test import override_settings
 
+from verification.adapters import FakeVerificationAdapter, VerificationResult
 from verification.models import Verification
 
 
@@ -310,3 +312,53 @@ def test_downgrading_to_underage_clears_previously_stored_ci_and_di(client):
     assert record.ci_encrypted == ""
     assert record.ci_hash == ""
     assert record.di_encrypted == ""
+
+
+# --- 어댑터 선택이 resolve_adapter를 쓴다 (#83) --------------------------------
+
+
+class _DottedPathTestVerificationAdapter(FakeVerificationAdapter):
+    """`VERIFICATION_ADAPTER_MODE`에 dotted path로 지목됐을 때 실제로 이 클래스가
+    쓰인다는 것을 증명하기 위한 테스트 전용 더블(#83).
+
+    토큰 파싱은 그대로 물려받되, 결과의 real_name에 이 클래스만 낼 수 있는
+    마커를 남긴다 — `VERIFICATION_ADAPTER_MODE="fake"`였다면 절대 나올 수 없는
+    값이므로, DB에 저장된 값만으로 `resolve_adapter`가 이 dotted path를 실제로
+    import해 썼다는 것을 확인할 수 있다.
+    """
+
+    def resolve(self, verification_token: str) -> VerificationResult:
+        result = super().resolve(verification_token)
+        return VerificationResult(
+            real_name="DOTTED-PATH-MARKER",
+            birth_date=result.birth_date,
+            ci=result.ci,
+            di=result.di,
+        )
+
+
+@pytest.mark.django_db
+def test_verification_adapter_mode_resolves_a_dotted_path_to_a_real_class(client):
+    pair = _login(client)
+
+    with override_settings(
+        VERIFICATION_ADAPTER_MODE=(
+            "tests.test_verification._DottedPathTestVerificationAdapter"
+        )
+    ):
+        response = client.post(
+            "/api/verification/verify",
+            data={
+                "verification_token": _fake_token(
+                    "홍길동", "1990-05-15", "ci-dotted-path-1", "di-dotted-path-1"
+                )
+            },
+            content_type="application/json",
+            **_auth_header(pair["access"]),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "verified"
+
+    record = Verification.objects.get(user__social_accounts__provider_uid="verify-subject")
+    assert record.real_name == "DOTTED-PATH-MARKER"

@@ -13,8 +13,10 @@ from uuid import uuid4
 import pytest
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 
 from contests.models import Category, Contest, DeliverableType
+from payments.adapters import FakePGAdapter, PaymentRequestResult
 from payments.models import Payment
 
 CONTESTS_URL = "/api/contests"
@@ -559,3 +561,40 @@ def test_concurrent_initiate_payment_creates_only_one_active_payment(
 # admin 의 Payment 추가 폼이 NOT NULL 위반 500 을 내지 않는지 지키던 테스트가 여기
 # 있었다. #46 이 admin 을 내리면서 그 폼 자체가 존재하지 않게 됐다 — 막으려던 실패
 # 방식이 도달 불가능해졌으므로 함께 지운다.
+
+
+# --- 어댑터 선택이 resolve_adapter를 쓴다 (#83) --------------------------------
+
+
+class _DottedPathTestPGAdapter(FakePGAdapter):
+    """`PAYMENT_ADAPTER_MODE`에 dotted path로 지목됐을 때 실제로 이 클래스가
+    쓰인다는 것을 증명하기 위한 테스트 전용 더블(#83).
+
+    나머지 동작(confirm/refund 등)은 `FakePGAdapter`를 그대로 물려받고,
+    `request_payment`의 checkout_url에만 이 클래스만 낼 수 있는 마커를 남긴다 —
+    `PAYMENT_ADAPTER_MODE="fake"`였다면 절대 나올 수 없는 값이므로, HTTP 응답
+    본문만으로 `resolve_adapter`가 "fake" 별칭이 아니라 이 dotted path를 실제로
+    import해 썼다는 것을 확인할 수 있다.
+    """
+
+    def request_payment(self, *, order_id: str, amount: int) -> PaymentRequestResult:
+        return PaymentRequestResult(
+            order_id=order_id,
+            checkout_url=f"https://dotted-path-marker.test/checkout/{order_id}",
+        )
+
+
+@pytest.mark.django_db
+def test_payment_adapter_mode_resolves_a_dotted_path_to_a_real_class(
+    client, category, landing_type
+):
+    access, contest = _draft_contest(client, category=category, deliverable_type=landing_type)
+
+    with override_settings(
+        PAYMENT_ADAPTER_MODE="tests.test_payments._DottedPathTestPGAdapter"
+    ):
+        payment = _initiate_payment(client, access, contest["id"])
+
+    assert payment["checkout_url"] == (
+        f"https://dotted-path-marker.test/checkout/{payment['order_id']}"
+    )

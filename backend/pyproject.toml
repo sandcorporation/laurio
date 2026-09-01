@@ -41,4 +41,10 @@ dev = [
 DJANGO_SETTINGS_MODULE = "config.settings"
 python_files = ["test_*.py"]
 testpaths = ["tests"]
-addopts = "-q"
+# live_vendor(#83, ADR-0007): 벤더를 실제로 치는 선택적 테스트. 기본 실행에서
+# 제외한다 — 자격증명 없는 신선한 체크아웃이 이 때문에 빨개지면 안 된다.
+# `uv run pytest -m live_vendor`로만 선택 실행한다(tests/live.py 참고).
+markers = [
+    "live_vendor: 실제 벤더를 치는 선택적 테스트. 기본 실행에서 제외된다.",
+]
+addopts = "-q -m \"not live_vendor\""
