@@ -8,6 +8,8 @@
     "start": "next start --port 3000",
     "typecheck": "tsc --noEmit",
     "test": "playwright test",
+    "test:public": "playwright test --project=public",
+    "test:operator": "playwright test --project=operator",
     "generate:api": "node scripts/generate-api-types.mjs"
   },
   "dependencies": {

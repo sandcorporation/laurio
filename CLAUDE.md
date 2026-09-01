@@ -152,6 +152,26 @@ Operator 계정은 `backend/accounts/management/commands/seed_e2e_operator.py`
 (멱등)로 만든다 — 사람이 쓰는 `create_operator` 부트스트랩 명령과 달리 반복
 실행에 안전하다.
 
+**스위트가 8분을 넘긴다 — 한 앱만 고쳤으면 그 앱만 돌린다.**
+
+```bash
+pnpm --dir frontend test            # 전체 (약 8분, 137건)
+pnpm --dir frontend test:operator   # 운영자 앱만 (약 5.6분)
+pnpm --dir frontend test:public     # 공개 앱만 (약 2.4분)
+```
+
+이게 편의가 아니라 필요다. 서브에이전트의 명령 타임아웃 상한이 10분인데 전체
+스위트가 부하에 따라 8~10분에서 흔들린다 — 넘으면 하네스가 백그라운드로 돌리고
+그 완료 알림은 에이전트가 아니라 최상위 세션으로 가서, 에이전트가 오지 않을
+신호를 영원히 기다린다. 실제로 여러 체인이 그렇게 멈췄다.
+
+**병렬로 돌리지 마라(`workers: 1` 을 올리지 마라).** 시도해서 8.0분이 3.5분으로
+줄었지만 **16건이 실패했다.** 공개 스펙 넷이 각자 `beforeAll` 에서 같은 고정
+접두어 데이터를 다시 심어 서로를 리셋하는 구조이고(직렬에서만 성립한다), 운영자
+쪽은 큐 **건수**를 단언한다. 병렬로 가려면 시드에 워커별 네임스페이스를 주는
+설계 변경이 먼저다 — 설정 한 줄로 되는 일이 아니다. 시간은 특정 테스트에 몰려
+있지도 않다(167건 합계 467초, 가장 느린 10건이 19%).
+
 **API 타입은 손으로 쓰지 않는다.** `frontend/lib/api/schema.gen.ts` 는
 `pnpm --dir frontend generate:api`(`frontend/scripts/generate-api-types.mjs`)가
 백엔드의 OpenAPI 스키마에서 생성해 커밋한 산출물이다. 이 명령은 **스택이 필요
