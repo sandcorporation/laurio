@@ -33,7 +33,41 @@ function backendDbPort(): string {
   return process.env.LAURIO_DB_PORT ?? "55432";
 }
 
-export default function globalSetup(): void {
+// Next dev 서버는 라우트를 **요청받을 때** 컴파일한다. 그래서 스위트의 첫
+// 실행은 테스트가 아니라 컴파일을 기다린다 — 실측으로 public 프로젝트가 콜드
+// 5.6분, 웜 2.5분이었다(같은 79건). 그 차이가 통째로 첫 방문 비용이고,
+// contests-pagination 은 30초 타임아웃을 먹고 실패하기까지 했다.
+//
+// 그래서 워커가 뜨기 전에 여기서 주요 라우트를 한 번씩 친다. 응답 내용은 보지
+// 않는다 — 컴파일만 시키면 되고, 실패해도(스택이 아직 안 떴거나 그 라우트가
+// 인증을 요구하거나) 그냥 넘어간다. 이 함수의 일은 테스트가 아니라 준비다.
+async function warmRoutes(): Promise<void> {
+  const publicBase = process.env.LAURIO_E2E_BASE_URL ?? "http://127.0.0.1:53000";
+  const operatorBase = process.env.LAURIO_OPERATOR_E2E_BASE_URL ?? "http://127.0.0.1:53001";
+  const targets = [
+    `${publicBase}/`,
+    `${publicBase}/contests`,
+    `${publicBase}/login`,
+    `${publicBase}/console`,
+    `${operatorBase}/login`,
+    `${operatorBase}/`,
+    `${operatorBase}/appeals`,
+    `${operatorBase}/payouts`,
+    `${operatorBase}/operators`,
+    `${operatorBase}/policy`,
+    `${operatorBase}/deliverable-types`,
+  ];
+  const started = Date.now();
+  await Promise.all(
+    targets.map((url) =>
+      fetch(url, { redirect: "manual" }).catch(() => undefined),
+    ),
+  );
+  // eslint-disable-next-line no-console -- 워밍업이 실제로 돌았는지 CI 로그에서 보여야 한다.
+  console.log(`[global-setup] warmed ${targets.length} routes in ${Date.now() - started}ms`);
+}
+
+export default async function globalSetup(): Promise<void> {
   const runId = randomUUID().slice(0, 8);
   fs.writeFileSync(RUN_ID_FILE, runId, "utf-8");
 

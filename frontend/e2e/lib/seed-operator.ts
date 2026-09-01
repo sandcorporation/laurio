@@ -57,9 +57,42 @@ export type SeedOperatorOptions = {
   superuser?: boolean;
 };
 
+// 인자 없이 부른 결과를 프로세스 안에서 재사용한다.
+//
+// **측정해서 넣었다.** 운영자 스펙의 시드 호출 127회 중 79회가 이 함수였고,
+// 한 번에 약 1.4초(그중 Django 부팅만 640ms)라 계정을 만드는 데만 95초가
+// 쓰였다 — 운영자 스위트 344초의 4분의 1이다. `uv run` 오버헤드는 40ms 라
+// 거기서 줄일 것은 없었다(직접 호출 641ms vs uv run 651ms). 줄일 수 있는 건
+// 호출당 비용이 아니라 **호출 횟수**다.
+//
+// **인자를 주면 캐시를 쓰지 않는다.** 계정 자체를 바꾸는 스펙(비활성화·
+// 재활성화·등급 확인)은 서로 간섭하면 안 되므로 지금처럼 고유한 이름을 주고,
+// 그 호출은 매번 새로 만든다. "로그인할 계정이 하나 필요할 뿐" 인 대다수만
+// 공유한다 — 운영자 신원은 그 테스트들이 단언하는 대상이 아니다.
+//
+// 캐시는 워커 프로세스 하나 안에서만 산다. Playwright 가 워커를 여럿 쓰면
+// 워커마다 하나씩 만들어지는데, 이름이 고정이고 명령이 멱등하므로
+// (`seed_e2e_operator` 는 get_or_create 다) 그래도 안전하다.
+const SHARED_OPERATOR_USERNAME = "e2e-op-shared";
+let sharedOperator: SeededOperator | null = null;
+
 /** `seed_e2e_operator` 관리 명령을 돌려 로그인 가능한 Operator 계정을 멱등하게
- * 만든다(backend/accounts/management/commands/seed_e2e_operator.py). */
+ * 만든다(backend/accounts/management/commands/seed_e2e_operator.py).
+ *
+ * 인자 없이 부르면 이 프로세스가 이미 만든 공유 계정을 그대로 돌려준다. 계정을
+ * 변경하는 테스트는 반드시 고유한 `username` 을 줘야 한다. */
 export function seedE2eOperator(options: SeedOperatorOptions = {}): SeededOperator {
+  const wantsShared =
+    options.username === undefined && options.password === undefined && !options.superuser;
+  if (wantsShared && sharedOperator) return sharedOperator;
+  if (wantsShared) {
+    sharedOperator = seedOperatorAccount({ ...options, username: SHARED_OPERATOR_USERNAME });
+    return sharedOperator;
+  }
+  return seedOperatorAccount(options);
+}
+
+function seedOperatorAccount(options: SeedOperatorOptions): SeededOperator {
   const args: string[] = [];
   if (options.username) args.push("--username", options.username);
   args.push("--password", options.password ?? E2E_OPERATOR_PASSWORD);

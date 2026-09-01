@@ -52,7 +52,7 @@ test.describe("지급 큐 — 무엇에 막혀 있는가(#68, ADR-0020)", () => 
   test("확정 후 막혀 있는 Payout이 콘테스트·개발자·금액·막힌 이유와 함께 보인다", async ({
     page,
   }) => {
-    const operator = seedE2eOperator({ username: `e2e-op-payoutrow-${Date.now()}` });
+    const operator = seedE2eOperator();
     const seeded = seedE2eOperatorQueues("identity");
     const identityPayout = seeded.identity_pending_payout;
     if (!identityPayout) throw new Error("identity_pending_payout 시드가 비어 있다");
@@ -72,7 +72,7 @@ test.describe("지급 큐 — 무엇에 막혀 있는가(#68, ADR-0020)", () => 
   test("필터가 실제로 배제한다 — identity로 걸러도 seller 행은 보이지 않는다(그 반대도)", async ({
     page,
   }) => {
-    const operator = seedE2eOperator({ username: `e2e-op-payoutfilter-${Date.now()}` });
+    const operator = seedE2eOperator();
     const seeded = seedE2eOperatorQueues();
     const identityPayout = seeded.identity_pending_payout;
     const sellerPayout = seeded.seller_pending_payout;
@@ -103,7 +103,7 @@ test.describe("지급 큐 — 무엇에 막혀 있는가(#68, ADR-0020)", () => 
   });
 
   test("필터 탭을 클릭해도 같은 결과가 된다 — URL이 바뀌고 목록이 갱신된다", async ({ page }) => {
-    const operator = seedE2eOperator({ username: `e2e-op-payouttabs-${Date.now()}` });
+    const operator = seedE2eOperator();
     const seeded = seedE2eOperatorQueues();
     const identityPayout = seeded.identity_pending_payout;
     const sellerPayout = seeded.seller_pending_payout;
@@ -133,7 +133,7 @@ test.describe("지급 큐 — 무엇에 막혀 있는가(#68, ADR-0020)", () => 
   });
 
   test("두 대기가 서로 다른 것으로 읽힌다 — 같은 라벨·같은 클래스가 아니다", async ({ page }) => {
-    const operator = seedE2eOperator({ username: `e2e-op-payoutdistinct-${Date.now()}` });
+    const operator = seedE2eOperator();
     const seeded = seedE2eOperatorQueues();
     const identityPayout = seeded.identity_pending_payout;
     const sellerPayout = seeded.seller_pending_payout;
@@ -178,7 +178,7 @@ test.describe("지급 큐 — 무엇에 막혀 있는가(#68, ADR-0020)", () => 
     // 볼 수 있을 만큼(수백 ms 이상) 늘려 놓고 그 구간 전체에서 잘못된 조합이
     // 없다는 것을 단언한다 — auto-retry를 우회하는 것이 아니라, auto-retry가
     // 절대 놓칠 수 없을 만큼 창을 넓히는 쪽이다.
-    const operator = seedE2eOperator({ username: `e2e-op-payouttransition-${Date.now()}` });
+    const operator = seedE2eOperator();
     const seeded = seedE2eOperatorQueues();
     const identityPayout = seeded.identity_pending_payout;
     const sellerPayout = seeded.seller_pending_payout;
@@ -222,7 +222,7 @@ test.describe("지급 큐 — 무엇에 막혀 있는가(#68, ADR-0020)", () => 
   test("큐가 비어 있으면 명시적으로 말한다 — 빈 박스가 아니다", async ({ page }) => {
     clearE2eOperatorQueues();
 
-    const operator = seedE2eOperator({ username: `e2e-op-payoutempty-${Date.now()}` });
+    const operator = seedE2eOperator();
     await loginAsOperator(page, operator.username);
 
     await page.goto("/payouts?blocked_on=identity");
@@ -234,7 +234,7 @@ test.describe("지급 큐 — 무엇에 막혀 있는가(#68, ADR-0020)", () => 
   });
 
   test("조회에 실패하면 실패라고 말한다 — 0건처럼 보이지 않는다", async ({ page }) => {
-    const operator = seedE2eOperator({ username: `e2e-op-payoutfail-${Date.now()}` });
+    const operator = seedE2eOperator();
 
     await page.route("**/api/backend/operator/payouts*", (route) =>
       route.fulfill({ status: 500, body: JSON.stringify({ detail: "boom" }) }),
@@ -250,7 +250,7 @@ test.describe("지급 큐 — 무엇에 막혀 있는가(#68, ADR-0020)", () => 
   });
 
   test("홈의 두 지급 건수와 이 목록의 건수가 일치한다", async ({ page }) => {
-    const operator = seedE2eOperator({ username: `e2e-op-payoutcount-${Date.now()}` });
+    const operator = seedE2eOperator();
     await loginAsOperator(page, operator.username);
 
     seedE2eOperatorQueues("identity");
