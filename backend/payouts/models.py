@@ -82,8 +82,17 @@ class Payout(models.Model):
     # 쓴 요율 자체가 남아야 한다 — 상금이 다르면 금액에서 요율을 역산할 수 없다.
     # `policies.PlatformPolicy`가 지금 어떤 값이든, 이 두 필드는 이 Payout이 만들어진
     # 순간의 값에 영구히 고정된다(정책이 나중에 바뀌어도 흔들리지 않는다).
+    #
+    # withholding_tax_bps는 "실제로 적용된" 요율이다(코드리뷰 지적 2) — 과세최저한
+    # 면제로 withholding_tax_amount가 0원이면 이 필드도 0을 기록한다. 정책의
+    # 명목 요율(예: 440)을 그대로 남기면 "4.4%를 적용했다"는 기록과 "0원 뗐다"는
+    # 금액이 서로 모순돼, 이 스냅샷으로 나중에 원천징수 명세를 만들면 뗀 적 없는
+    # 세금을 보고하게 된다. withholding_exempt가 그 모순 없는 기록을 "왜"까지
+    # 답하게 한다 — bps=0이 "요율이 0으로 정책됐다"인지 "면제됐다"인지는
+    # withholding_exempt로만 구별된다.
     platform_fee_bps = models.PositiveIntegerField()
     withholding_tax_bps = models.PositiveIntegerField()
+    withholding_exempt = models.BooleanField(default=False)
 
     status = models.CharField(max_length=32, choices=Status.choices, default=Status.REQUESTED)
 

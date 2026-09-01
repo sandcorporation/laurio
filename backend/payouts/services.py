@@ -42,13 +42,6 @@ from verification.crypto import encrypt
 from .adapters import get_seller_adapter
 from .models import Payout, Seller, TaxIdentity
 
-# 과세최저한(국세청 기준): 건별 기타소득금액이 5만원 이하면 원천징수 의무가 없다.
-# 기타소득금액 = 지급액 × 20%(필요경비 80% 인정)이므로, 지급액 250,000원 이하는
-# 원천징수 0원이다(#75, ADR-0008/0023). 필요경비율(80%)과 과세최저한(5만원) 자체는
-# 세법이 정한 고정값이지 이 티켓이 옮기는 정책값(플랫폼 수수료율·원천징수율)이
-# 아니므로 PlatformPolicy에 넣지 않는다 — 경계값은 정확히 이 상수 하나에서 나온다.
-WITHHOLDING_EXEMPT_THRESHOLD = 250_000
-
 # REQUESTED든 그 이후 확정 상태든 "아직 실패로 끝나지 않은" 시도는 활성으로 본다
 # — models.Payout.Meta.constraints의 unique_active_payout_per_handover와 정확히
 # 같은 집합이어야 한다(그쪽은 DB 레벨 최후 방어선, 이건 애플리케이션 레벨 조회
@@ -63,8 +56,30 @@ _ACTIVE_PAYOUT_STATUSES = [
 ]
 
 
-def _compute_amounts(prize_amount: int, policy: PlatformPolicy) -> tuple[int, int, int]:
-    """(플랫폼 수수료, 원천징수, 실지급액)을 원 단위 정수로 계산한다.
+def _withholding_exempt_threshold(policy: PlatformPolicy) -> int:
+    """이 정책에서 원천징수가 면제되는 지급액의 상한(원)을 구조적으로 유도한다.
+
+    과세최저한(기타소득금액이 `withholding_minor_income_exempt_won`원 이하)을
+    필요경비율(`withholding_necessary_expense_bps`)로 지급액 기준으로 환산한다.
+    기본값(필요경비 80%, 과세최저한 5만원)에서는 250,000원이 나온다.
+
+    **`withholding_tax_bps`(원천징수율)는 이 계산에 전혀 관여하지 않는다** —
+    코드리뷰 지적 3: 임계값이 원천징수율에서 유도되면, 원천징수율만 바꿔도(예:
+    사업소득 세율 3.3%로 되돌리는 실수) 임계값이 그 의도와 무관하게 조용히
+    따라 바뀐다. 임계값은 오직 "소득 중 몇 %가 과세 대상인가"(필요경비율)에서만
+    나오므로, 원천징수율을 얼마로 바꾸든 이 임계값은 흔들리지 않는다 — 두 값이
+    실수로 따로 움직여 조용히 틀려지는 경로 자체가 없다.
+
+    `withholding_necessary_expense_bps`는 `PlatformPolicy`의 CheckConstraint가
+    9999(<100%) 이하로 강제하므로 아래 나눗셈은 0으로 나누지 않는다.
+    """
+
+    remaining_bps = 10_000 - policy.withholding_necessary_expense_bps
+    return policy.withholding_minor_income_exempt_won * 10_000 // remaining_bps
+
+
+def _compute_amounts(prize_amount: int, policy: PlatformPolicy) -> tuple[int, int, int, int, bool]:
+    """(플랫폼 수수료, 원천징수, 실지급액, 적용된 원천징수율bp, 면제 여부)를 계산한다.
 
     `policy`가 이 계산의 유일한 요율 출처다(#75, ADR-0023) — 호출자가 요청(또는
     스캔) 스코프당 한 번 읽은 `PlatformPolicy`를 넘겨야 한다.
@@ -72,19 +87,27 @@ def _compute_amounts(prize_amount: int, policy: PlatformPolicy) -> tuple[int, in
     bp(1/10000) 단위 정수 비율로 계산해 float 오차를 피한다(ADR-0004). 수수료와
     원천징수는 내림으로 계산하고, 실지급액은 나머지 전부를 가져간다 — 반올림으로
     셋의 합이 prize_amount와 어긋나는 사고를 구조적으로 없앤다(ADR-0004의 1/N
-    나머지 처리와 같은 정신: 단수가 어딘가로 사라지지 않는다).
+    나머지 처리와 같은 정신: 단수가 어딘가로 사라지지 않는다). `PlatformPolicy`의
+    CheckConstraint(`platform_fee_bps + withholding_tax_bps <= 10000`)가
+    net_amount >= 0을 항상 보장한다(코드리뷰 지적 1) — floor(a)+floor(b) <=
+    floor(a+b)이므로 fee+withholding <= prize_amount다.
 
-    과세최저한(`WITHHOLDING_EXEMPT_THRESHOLD`) 이하면 원천징수는 0이다 — 지급액이
-    정확히 그 값이어도 0이다(그 위에서만 붙는다).
+    과세최저한 이하면(`_withholding_exempt_threshold`) 원천징수는 0이고, 반환하는
+    "적용된 요율"도 0이다 — 정책의 명목 요율을 그대로 반환하면 "이 요율을
+    적용했다"는 기록과 "0원 뗐다"는 금액이 모순된다(코드리뷰 지적 2). 지급액이
+    임계값과 정확히 같아도 면제다(그 위에서만 붙는다).
     """
 
     fee = prize_amount * policy.platform_fee_bps // 10_000
-    if prize_amount <= WITHHOLDING_EXEMPT_THRESHOLD:
+    exempt = prize_amount <= _withholding_exempt_threshold(policy)
+    if exempt:
         withholding = 0
+        applied_withholding_bps = 0
     else:
         withholding = prize_amount * policy.withholding_tax_bps // 10_000
+        applied_withholding_bps = policy.withholding_tax_bps
     net = prize_amount - fee - withholding
-    return fee, withholding, net
+    return fee, withholding, net, applied_withholding_bps, exempt
 
 
 def get_or_create_payout(handover=None, *, distribution_share=None, policy: PlatformPolicy | None = None) -> Payout:
@@ -138,19 +161,30 @@ def get_or_create_payout(handover=None, *, distribution_share=None, policy: Plat
                 return existing
 
             prize_amount = locked.award.contest.prize
-            fee, withholding, net = _compute_amounts(prize_amount, policy)
+            fee, withholding, net, applied_withholding_bps, exempt = _compute_amounts(
+                prize_amount, policy
+            )
 
             try:
-                return Payout.objects.create(
-                    handover=locked,
-                    prize_amount=prize_amount,
-                    platform_fee_amount=fee,
-                    withholding_tax_amount=withholding,
-                    net_amount=net,
-                    platform_fee_bps=policy.platform_fee_bps,
-                    withholding_tax_bps=policy.withholding_tax_bps,
-                    status=Payout.Status.REQUESTED,
-                )
+                # 중첩 atomic(세이브포인트)으로 감싼다(payments.api.initiate_payment와
+                # 같은 이유, 코드리뷰 지적 1) — IntegrityError가 나면 Postgres는
+                # 세이브포인트가 없는 바깥 트랜잭션 전체를 "aborted" 상태로 만들어
+                # 그 뒤의 어떤 쿼리도 커밋 전까지 막아버린다. 세이브포인트가 없으면
+                # 아래 except 절의 조회(existing = Payout.objects.filter(...))조차
+                # `TransactionManagementError`로 실패해, 방어적 안전망이 오히려
+                # 원인을 덮는 새 500을 만든다.
+                with transaction.atomic():
+                    return Payout.objects.create(
+                        handover=locked,
+                        prize_amount=prize_amount,
+                        platform_fee_amount=fee,
+                        withholding_tax_amount=withholding,
+                        net_amount=net,
+                        platform_fee_bps=policy.platform_fee_bps,
+                        withholding_tax_bps=applied_withholding_bps,
+                        withholding_exempt=exempt,
+                        status=Payout.Status.REQUESTED,
+                    )
             except IntegrityError:
                 # unique_active_payout_per_handover에 걸렸다 — 위 잠금에도
                 # 불구하고 도달했다면 방어적 안전망이다(payments.api.
@@ -180,19 +214,24 @@ def get_or_create_payout(handover=None, *, distribution_share=None, policy: Plat
             return existing
 
         prize_amount = locked.amount
-        fee, withholding, net = _compute_amounts(prize_amount, policy)
+        fee, withholding, net, applied_withholding_bps, exempt = _compute_amounts(
+            prize_amount, policy
+        )
 
         try:
-            return Payout.objects.create(
-                distribution_share=locked,
-                prize_amount=prize_amount,
-                platform_fee_amount=fee,
-                withholding_tax_amount=withholding,
-                net_amount=net,
-                platform_fee_bps=policy.platform_fee_bps,
-                withholding_tax_bps=policy.withholding_tax_bps,
-                status=Payout.Status.REQUESTED,
-            )
+            # 세이브포인트로 감싼다 — 위 handover 분기와 같은 이유(코드리뷰 지적 1).
+            with transaction.atomic():
+                return Payout.objects.create(
+                    distribution_share=locked,
+                    prize_amount=prize_amount,
+                    platform_fee_amount=fee,
+                    withholding_tax_amount=withholding,
+                    net_amount=net,
+                    platform_fee_bps=policy.platform_fee_bps,
+                    withholding_tax_bps=applied_withholding_bps,
+                    withholding_exempt=exempt,
+                    status=Payout.Status.REQUESTED,
+                )
         except IntegrityError:
             # unique_active_payout_per_distribution_share에 걸렸다 — 위와 같은
             # 방어적 안전망이다.

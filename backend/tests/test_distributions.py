@@ -513,11 +513,70 @@ def test_platform_policy_is_read_once_per_scan_not_once_per_share(
         _run_due_distributions(client)
 
     policy_queries = [q for q in ctx.captured_queries if "policies_platformpolicy" in q["sql"]]
-    assert Payout.objects.filter(distribution_share__distribution__contest_id=contest["id"]).count() == 3
+    payouts = Payout.objects.filter(distribution_share__distribution__contest_id=contest["id"])
+    assert payouts.count() == 3
     assert len(policy_queries) == 1, (
         f"platform_policy 테이블 쿼리가 {len(policy_queries)}번 나갔다 — 몫(3개)마다 "
         "다시 읽으면 안 되고 스캔당 한 번이어야 한다."
     )
+
+    # 쿼리 수만 세고 배분 몫 Payout이 실제로 요율 스냅샷을 제대로 기록하는지는
+    # 확인하지 않았다는 코드리뷰 지적(#75 후속) — 지급 요청 경로만이 아니라
+    # 배분 경로로 만들어진 Payout도 확인한다. 몫(1,000,000원)은 면제 임계값
+    # (250,000원) 위이므로 정상적으로 요율이 걷힌다.
+    for payout in payouts:
+        assert payout.platform_fee_bps == 1000
+        assert payout.withholding_tax_bps == 440
+        assert payout.withholding_exempt is False
+        assert payout.withholding_tax_amount == 1_000_000 * 440 // 10_000
+
+
+@pytest.mark.django_db
+def test_distribution_shares_at_or_below_the_withholding_threshold_are_exempt(
+    client, category, landing_type
+):
+    """배분으로 만들어진 Payout도 과세최저한 면제를 제대로 적용한다 — 1/N
+    배분 몫은 250,000원 이하가 흔한 경우다(#75 코드리뷰 지적 4). 위 스냅샷
+    테스트가 (수정 전처럼) `get_or_create_payout`에 넘기는 `platform_fee_bps`/
+    `withholding_tax_bps` kwargs를 지워도 통과했다는 지적을 받았으므로, 이 값이
+    실제로 배분 경로에서도 쓰인다는 것을 이 테스트로 증명한다."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+        prize=700_000,
+    )
+    requirement_id = contest["requirements"][0]["id"]
+
+    devs = [_verified_user(client, f"dev-exempt-{i}", f"dev-exempt-{i}-ci") for i in range(3)]
+    for dev in devs:
+        _submit(client, dev, contest["id"], requirement_id=requirement_id, grounded=True)
+
+    _close_contest(client, contest, deadline=deadline)
+    _run_scoring(client)
+    _end_judging_period(client, contest["id"])
+    _advance_past_distribution_wait(contest["id"])
+    _run_due_distributions(client)
+
+    distribution = Distribution.objects.get(contest_id=contest["id"])
+    assert distribution.qualifying_count == 3
+    assert distribution.share_amount == 233_333  # 700,000 // 3 — 250,000원 이하.
+
+    payouts = Payout.objects.filter(distribution_share__distribution=distribution)
+    assert payouts.count() == 3
+    for payout in payouts:
+        assert payout.prize_amount == 233_333
+        assert payout.withholding_tax_amount == 0
+        assert payout.withholding_exempt is True
+        assert payout.withholding_tax_bps == 0  # 정책의 명목 요율(440)이 아니다.
+        # 수수료는 면제 대상이 아니므로 그대로 걷힌다.
+        assert payout.platform_fee_bps == 1000
+        assert payout.platform_fee_amount == 233_333 * 1000 // 10_000
+        assert payout.net_amount == payout.prize_amount - payout.platform_fee_amount
 
 
 # --- 부분 실패: 성공분만 반영, 실패분은 재시도 대상 -------------------------------
