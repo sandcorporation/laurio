@@ -32,11 +32,13 @@ from django.utils import timezone
 
 from contests.models import Category, Contest, DeliverableType
 from core.models import ClockOverride
-from distributions.models import Distribution, DistributionCutline, DistributionShare
+from distributions.models import Distribution, DistributionShare
 from ledger.services import contest_balance, contest_entries
 from payouts.models import Payout
+from policies.models import PlatformPolicy
 from policies.services import get_current_policy
 from storage.adapters.fake import FakeStorageAdapter
+from submissions.models import Submission
 
 TICK_URL = "/api/internal/tick"
 CONTESTS_URL = "/api/contests"
@@ -200,6 +202,40 @@ def _submit(
     return response.json()
 
 
+def _submit_multi(
+    client, dev: dict, contest_id: int, *, requirement_ids: list[int], grounded_flags: list[bool]
+) -> dict:
+    """여러 Requirement에 대해 각각 grounded 여부를 따로 지정해 제출한다 — 0%나
+    100%가 아닌 중간 백분율(예: 2개 중 1개만 grounded = 50%)이 필요한 테스트에
+    쓴다(`_submit`을 여러 Requirement로 일반화한 것, test_scoring.py의
+    `_PartialVerdictAdapter` 테스트가 확인한 것과 같은 산식 — met/total * 100).
+    """
+
+    assert len(requirement_ids) == len(grounded_flags)
+    source_key = _source_object_key(contest_id, dev["user_id"])
+    marker = f"MARKER_{uuid.uuid4().hex}"
+    FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": f"# {marker}\n"}))
+
+    response = client.post(
+        f"{CONTESTS_URL}/{contest_id}/submissions",
+        data={
+            "source_object_key": source_key,
+            "requirement_responses": [
+                {
+                    "requirement_id": rid,
+                    "is_met": True,
+                    "evidence": [{"kind": "source_location", "value": marker}] if grounded else [],
+                }
+                for rid, grounded in zip(requirement_ids, grounded_flags)
+            ],
+        },
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert response.status_code == 201, response.content
+    return response.json()
+
+
 def _close_contest(client, contest: dict, *, deadline) -> None:
     _freeze(deadline + timedelta(minutes=1))
     tick_resp = client.post(TICK_URL, **_internal_headers())
@@ -259,9 +295,12 @@ def landing_type(db):
 
 @pytest.fixture(autouse=True)
 def _default_cutline(db):
-    """모든 테스트가 같은 기본 컷라인(60%)에서 출발하게 한다."""
+    """모든 테스트가 같은 기본 컷라인(60%)에서 출발하게 한다(#79 — PlatformPolicy로
+    흡수된 뒤에도 옛 DistributionCutline 픽스처와 같은 역할)."""
 
-    DistributionCutline.objects.update_or_create(pk=1, defaults={"minimum_percentage": Decimal("60.00")})
+    PlatformPolicy.objects.update_or_create(
+        pk=1, defaults={"distribution_cutline_percentage": Decimal("60.00")}
+    )
 
 
 # --- 무응답 14일: 그 전에는 아무 일도 없고, 지나면 배분한다 ------------------------
@@ -371,10 +410,11 @@ def test_cutline_is_a_db_adjustable_operating_parameter(client, category, landin
     _end_judging_period(client, contest["id"])
     _advance_past_distribution_wait(contest["id"])
 
-    # 운영자가 admin에서 컷라인을 낮췄다고 가정한다 — DB 행을 직접 조정한다
-    # (core.models.ClockOverride를 테스트가 직접 조정하는 것과 같은 관용구).
-    DistributionCutline.objects.update_or_create(
-        pk=1, defaults={"minimum_percentage": Decimal("0.00")}
+    # 운영자가 컷라인을 낮췄다고 가정한다 — DB 행을 직접 조정한다(지금은
+    # `manage.py shell`이 유일한 경로다, #76 전. core.models.ClockOverride를
+    # 테스트가 직접 조정하는 것과 같은 관용구).
+    PlatformPolicy.objects.update_or_create(
+        pk=1, defaults={"distribution_cutline_percentage": Decimal("0.00")}
     )
 
     _run_due_distributions(client)
@@ -383,6 +423,195 @@ def test_cutline_is_a_db_adjustable_operating_parameter(client, category, landin
     assert distribution.qualifying_count == 1
     assert distribution.cutline_percentage == Decimal("0.00")
     assert DistributionShare.objects.filter(submission_id=submission_low["id"]).exists()
+
+
+@pytest.mark.django_db
+def test_raising_cutline_disqualifies_a_submission_that_previously_cleared_it(
+    client, category, landing_type
+):
+    """운영자가 컷라인을 올리면, 그 전이었다면 통과했을 Submission이 배분에서
+    빠진다(#79 AC) — "값이 저장됐다"가 아니라 자격자 집합(배분 결과) 자체가
+    실제로 바뀌는 것을 본다.
+
+    "이전에는 통과했다"를 실제로 증명하려면 낮은 컷라인에서 진짜로 통과하는
+    것부터 봐야 한다(코드리뷰 지적 #79 후속) — Distribution은 Contest 하나에
+    최대 한 번만 만들어지므로, 같은 Contest로 "전"과 "후"를 둘 다 볼 수는
+    없다. 그래서 조건이 동일한 두 Contest를 쓴다:
+
+    - contest_control: 컷라인 40%에서 배분한다. 50%짜리 dev_mid_control이
+      실제로 자격을 얻는다는 것을 먼저 확인한다(positive control) — 이 확인이
+      없으면 뒤의 "raising it disqualified a submission that previously
+      cleared it"이라는 주장은 근거 없는 이름일 뿐이다.
+    - contest_treatment: 완전히 동일한 조건(같은 두 required Requirement,
+      같은 50% 채점)이지만, Distribution이 만들어지기 직전에 운영자가 컷라인을
+      70%로 올린다 — 이제 그 50%는 더 이상 넘지 못한다. dev_high_treatment
+      (100%, 두 요건 모두 grounded)를 함께 둬 컷라인 미달자뿐이라 컷라인이
+      waive되는 경우(cutline_waived)와 "진짜로 컷라인에 걸려 제외됨"을
+      구별한다.
+    """
+
+    # --- control: 컷라인 40%에서 50%짜리 제출작이 실제로 통과한다 -----------------
+
+    deadline_control = timezone.now() + timedelta(hours=1)
+    _, contest_control = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline_control,
+        requirements=[
+            {"text": "로그인 기능이 있다", "grade": "required"},
+            {"text": "결제 기능이 있다", "grade": "required"},
+        ],
+        prize=1_000_000,
+        sponsor_uid="sponsor-cutline-control",
+        sponsor_ci="sponsor-cutline-control-ci",
+    )
+    control_requirement_ids = [r["id"] for r in contest_control["requirements"]]
+
+    dev_mid_control = _verified_user(client, "dev-mid-control", "dev-mid-control-ci")
+    submission_mid_control = _submit_multi(
+        client,
+        dev_mid_control,
+        contest_control["id"],
+        requirement_ids=control_requirement_ids,
+        grounded_flags=[True, False],
+    )
+
+    _close_contest(client, contest_control, deadline=deadline_control)
+    _run_scoring(client)
+    _end_judging_period(client, contest_control["id"])
+    _advance_past_distribution_wait(contest_control["id"])
+
+    score_control = Submission.objects.get(id=submission_mid_control["id"]).score.percentage
+    assert score_control == Decimal("50.00")
+
+    PlatformPolicy.objects.update_or_create(
+        pk=1, defaults={"distribution_cutline_percentage": Decimal("40.00")}
+    )
+    _run_due_distributions(client)
+
+    distribution_control = Distribution.objects.get(contest_id=contest_control["id"])
+    assert distribution_control.cutline_percentage == Decimal("40.00")
+    assert distribution_control.cutline_waived is False
+    # positive control — 40%에서는 50%짜리가 실제로 자격을 얻는다.
+    assert DistributionShare.objects.filter(submission_id=submission_mid_control["id"]).exists()
+
+    # --- treatment: 같은 조건, 다만 배분 직전에 컷라인을 70%로 올린다 -------------
+
+    # control 처리가 시계를 (배분 대기 기간만큼) 미래로 돌려놨다 — 그대로 두면
+    # 곧 발행할 contest_treatment의 마감이 이미 "지난" 것으로 보여 제출 자체가
+    # 403으로 막힌다. 실제 지금 시각으로 되돌린다(이후 _close_contest 등이 각
+    # 자신의 기준으로 다시 얼린다).
+    _freeze(timezone.now())
+
+    deadline_treatment = timezone.now() + timedelta(hours=2)
+    _, contest_treatment = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline_treatment,
+        requirements=[
+            {"text": "로그인 기능이 있다", "grade": "required"},
+            {"text": "결제 기능이 있다", "grade": "required"},
+        ],
+        prize=1_000_000,
+        sponsor_uid="sponsor-cutline-treatment",
+        sponsor_ci="sponsor-cutline-treatment-ci",
+    )
+    treatment_requirement_ids = [r["id"] for r in contest_treatment["requirements"]]
+
+    dev_high_treatment = _verified_user(client, "dev-high-treatment", "dev-high-treatment-ci")
+    submission_high_treatment = _submit_multi(
+        client,
+        dev_high_treatment,
+        contest_treatment["id"],
+        requirement_ids=treatment_requirement_ids,
+        grounded_flags=[True, True],
+    )
+
+    dev_mid_treatment = _verified_user(client, "dev-mid-treatment", "dev-mid-treatment-ci")
+    submission_mid_treatment = _submit_multi(
+        client,
+        dev_mid_treatment,
+        contest_treatment["id"],
+        requirement_ids=treatment_requirement_ids,
+        grounded_flags=[True, False],
+    )
+
+    _close_contest(client, contest_treatment, deadline=deadline_treatment)
+    _run_scoring(client)
+    _end_judging_period(client, contest_treatment["id"])
+    _advance_past_distribution_wait(contest_treatment["id"])
+
+    score_treatment = Submission.objects.get(id=submission_mid_treatment["id"]).score.percentage
+    assert score_treatment == Decimal("50.00")
+
+    # 운영자가 배분 실행 전에 컷라인을 70%로 올린다 — 같은 50%가 이제는 못 넘고,
+    # dev_high_treatment(100%)는 여전히 넘는다.
+    PlatformPolicy.objects.update_or_create(
+        pk=1, defaults={"distribution_cutline_percentage": Decimal("70.00")}
+    )
+    _run_due_distributions(client)
+
+    distribution_treatment = Distribution.objects.get(contest_id=contest_treatment["id"])
+    assert distribution_treatment.cutline_percentage == Decimal("70.00")
+    # dev_high_treatment가 진짜로 컷라인을 넘어 자격을 얻으므로, dev_mid_treatment의
+    # 제외는 "아무도 못 넘어 waive됐다"가 아니라 컷라인에 실제로 걸린 것이다.
+    assert distribution_treatment.cutline_waived is False
+    assert distribution_treatment.qualifying_count == 1
+    assert DistributionShare.objects.filter(
+        submission_id=submission_high_treatment["id"]
+    ).exists()
+    assert not DistributionShare.objects.filter(
+        submission_id=submission_mid_treatment["id"]
+    ).exists()
+
+
+@pytest.mark.django_db
+def test_changing_the_policy_cutline_does_not_alter_an_already_created_distribution(
+    client, category, landing_type
+):
+    """`Distribution.cutline_percentage`는 스냅샷이다(#79 AC, ADR-0006이 Score에
+    대해 세운 것과 같은 규율) — 배분이 이미 만들어진 뒤 운영자가
+    `PlatformPolicy.distribution_cutline_percentage`를 바꿔도, 그 배분이 그때
+    실제로 쓴 값은 흔들리지 않는다.
+    """
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+        prize=1_000_000,
+    )
+    requirement_id = contest["requirements"][0]["id"]
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+    _submit(client, dev, contest["id"], requirement_id=requirement_id, grounded=True)
+
+    _close_contest(client, contest, deadline=deadline)
+    _run_scoring(client)
+    _end_judging_period(client, contest["id"])
+    _advance_past_distribution_wait(contest["id"])
+
+    # 이 스캔은 기본 컷라인(60%, _default_cutline 픽스처)으로 배분을 만든다.
+    _run_due_distributions(client)
+    distribution = Distribution.objects.get(contest_id=contest["id"])
+    assert distribution.cutline_percentage == Decimal("60.00")
+
+    # 운영자가 그 뒤에 정책 컷라인을 90%로 올린다 — 미래의 배분에만 영향을 줘야
+    # 하고, 이미 만들어진 이 Distribution의 기록은 바뀌면 안 된다.
+    PlatformPolicy.objects.update_or_create(
+        pk=1, defaults={"distribution_cutline_percentage": Decimal("90.00")}
+    )
+
+    distribution.refresh_from_db()
+    assert distribution.cutline_percentage == Decimal("60.00")
+
+    # 정책값 자체는 실제로 바뀌었다는 것도 확인한다 — 위 unchanged 단언이
+    # "애초에 아무것도 안 바뀌었다"가 아니라 진짜 스냅샷임을 보장한다.
+    assert PlatformPolicy.objects.get(pk=1).distribution_cutline_percentage == Decimal("90.00")
 
 
 # --- 두 번 쏴도 한 번만 -----------------------------------------------------------
@@ -501,12 +730,11 @@ def test_platform_policy_is_read_once_per_scan_not_once_per_share(
     _end_judging_period(client, contest["id"])
     _advance_past_distribution_wait(contest["id"])
 
-    # 정책 행을 미리 만들어 둔다(_default_cutline 픽스처가 DistributionCutline을
-    # 미리 만들어 두는 것과 같은 이유) — 그래야 스캔 도중 잡히는 쿼리가 순수하게
-    # "몫마다 다시 읽는가"만 잰다. 행이 없으면 get_or_create의 최초 생성이
-    # SELECT+INSERT 두 문장을 내므로, 그 생성 비용까지 섞이면 "몫 수만큼
-    # 늘었는지"를 못 가린다.
-    from policies.models import PlatformPolicy
+    # 정책 행이 미리 있는지 다시 한 번 확인한다(_default_cutline 픽스처가 이미
+    # PlatformPolicy를 만들어 두지만, 명시적으로 남겨 이 테스트의 전제를 분명히
+    # 한다) — 그래야 스캔 도중 잡히는 쿼리가 순수하게 "몫마다 다시 읽는가"만
+    # 잰다. 행이 없으면 get_or_create의 최초 생성이 SELECT+INSERT 두 문장을
+    # 내므로, 그 생성 비용까지 섞이면 "몫 수만큼 늘었는지"를 못 가린다.
 
     PlatformPolicy.objects.get_or_create(pk=1)
 

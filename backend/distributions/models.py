@@ -6,42 +6,19 @@ Submission들에게 Prize를 1/N로 나누는 것"이다(CONTEXT.md). Contest �
 Distribution을 보고 아무 것도 다시 만들지 않는다(#16 AC "틱을 연속 두 번 쏴도
 한 번만 실행된다").
 
-컷라인(`DistributionCutline`)은 상수가 아니라 DB 조정 가능한 운영 파라미터다(#16
-AC) — 단일 행(pk=1)에 담아 `core.models.ClockOverride`와 같은 관용구로 admin에서
-직접 고칠 수 있게 한다. `Distribution.cutline_percentage`는 실제로 적용된 값의
-스냅샷이다 — 나중에 운영자가 컷라인을 바꿔도 이미 배분된 Distribution의 판정
-근거는 흔들리지 않는다(`payouts.Payout.prize_amount`가 지급 요청 시점 스냅샷인
-것과 같은 원칙).
+컷라인은 상수가 아니라 DB 조정 가능한 운영 파라미터다(#16 AC) —
+`policies.PlatformPolicy.distribution_cutline_percentage`에 산다(#79, ADR-0023).
+이 모델이 예전에 직접 담던 `DistributionCutline`을 그 단일 행이 흡수했다 — 정책이
+여러 테이블로 흩어지지 않도록 하기 위해서다. 값을 바꾸는 것은 상위 등급
+Operator만 할 수 있는 운영자 API의 몫이다(#76) — 지금은 `manage.py shell`로만
+바뀐다. `Distribution.cutline_percentage`는 실제로 적용된 값의 스냅샷이다 —
+나중에 운영자가 컷라인을 바꿔도 이미 배분된 Distribution의 판정 근거는 흔들리지
+않는다(`payouts.Payout.prize_amount`가 지급 요청 시점 스냅샷인 것과 같은 원칙).
 """
 
 from __future__ import annotations
 
-from decimal import Decimal
-
 from django.db import models
-
-_DEFAULT_CUTLINE_PERCENTAGE = Decimal("60.00")
-
-
-class DistributionCutline(models.Model):
-    """Score 컷라인 — 단일 행(pk=1)만 쓰는 DB 조정 가능한 운영 파라미터.
-
-    운영자가 Django admin에서 직접 값을 바꾼다. 코드 배포 없이 조정할 수 있어야
-    한다는 것이 이 모델이 상수가 아니라 테이블인 이유다.
-    """
-
-    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
-    minimum_percentage = models.DecimalField(
-        max_digits=5, decimal_places=2, default=_DEFAULT_CUTLINE_PERCENTAGE
-    )
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        verbose_name = "Distribution 컷라인"
-        verbose_name_plural = "Distribution 컷라인"
-
-    def __str__(self) -> str:  # pragma: no cover
-        return f"DistributionCutline({self.minimum_percentage}%)"
 
 
 class Distribution(models.Model):
