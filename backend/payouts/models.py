@@ -64,6 +64,15 @@ class Payout(models.Model):
     withholding_tax_amount = models.PositiveIntegerField()
     net_amount = models.PositiveIntegerField()
 
+    # 이 금액을 계산할 때 실제로 쓴 요율의 스냅샷(#75, ADR-0023) — 1/10000(bp) 단위
+    # 정수. `distributions.Distribution.cutline_percentage`와 같은 이유: 값이
+    # 바뀔 수 있게 되는 순간 "왜 이만큼 뗐는가"에 답하려면 금액만이 아니라 그때
+    # 쓴 요율 자체가 남아야 한다 — 상금이 다르면 금액에서 요율을 역산할 수 없다.
+    # `policies.PlatformPolicy`가 지금 어떤 값이든, 이 두 필드는 이 Payout이 만들어진
+    # 순간의 값에 영구히 고정된다(정책이 나중에 바뀌어도 흔들리지 않는다).
+    platform_fee_bps = models.PositiveIntegerField()
+    withholding_tax_bps = models.PositiveIntegerField()
+
     status = models.CharField(max_length=32, choices=Status.choices, default=Status.REQUESTED)
 
     # 확정(CONFIRMED_IDENTITY_PENDING 진입) 시 원장에 남긴 수수료·원천징수 공제

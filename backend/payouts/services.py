@@ -24,14 +24,22 @@ rowcount가 1일 때만 원장에 수수료·원천징수 공제 분개를 남�
 
 from __future__ import annotations
 
-from django.conf import settings
 from django.db import IntegrityError, transaction
 
 from ledger.models import Account, EntrySide
 from ledger.services import LineInput, post_journal_entry
+from policies.models import PlatformPolicy
+from policies.services import get_current_policy
 from verification.crypto import encrypt
 
 from .models import Payout, TaxIdentity
+
+# 과세최저한(국세청 기준): 건별 기타소득금액이 5만원 이하면 원천징수 의무가 없다.
+# 기타소득금액 = 지급액 × 20%(필요경비 80% 인정)이므로, 지급액 250,000원 이하는
+# 원천징수 0원이다(#75, ADR-0008/0023). 필요경비율(80%)과 과세최저한(5만원) 자체는
+# 세법이 정한 고정값이지 이 티켓이 옮기는 정책값(플랫폼 수수료율·원천징수율)이
+# 아니므로 PlatformPolicy에 넣지 않는다 — 경계값은 정확히 이 상수 하나에서 나온다.
+WITHHOLDING_EXEMPT_THRESHOLD = 250_000
 
 # REQUESTED든 그 이후 확정 상태든 "아직 실패로 끝나지 않은" 시도는 활성으로 본다
 # — models.Payout.Meta.constraints의 unique_active_payout_per_handover와 정확히
@@ -44,22 +52,31 @@ _ACTIVE_PAYOUT_STATUSES = [
 ]
 
 
-def _compute_amounts(prize_amount: int) -> tuple[int, int, int]:
+def _compute_amounts(prize_amount: int, policy: PlatformPolicy) -> tuple[int, int, int]:
     """(플랫폼 수수료, 원천징수, 실지급액)을 원 단위 정수로 계산한다.
+
+    `policy`가 이 계산의 유일한 요율 출처다(#75, ADR-0023) — 호출자가 요청(또는
+    스캔) 스코프당 한 번 읽은 `PlatformPolicy`를 넘겨야 한다.
 
     bp(1/10000) 단위 정수 비율로 계산해 float 오차를 피한다(ADR-0004). 수수료와
     원천징수는 내림으로 계산하고, 실지급액은 나머지 전부를 가져간다 — 반올림으로
     셋의 합이 prize_amount와 어긋나는 사고를 구조적으로 없앤다(ADR-0004의 1/N
     나머지 처리와 같은 정신: 단수가 어딘가로 사라지지 않는다).
+
+    과세최저한(`WITHHOLDING_EXEMPT_THRESHOLD`) 이하면 원천징수는 0이다 — 지급액이
+    정확히 그 값이어도 0이다(그 위에서만 붙는다).
     """
 
-    fee = prize_amount * settings.PAYOUT_PLATFORM_FEE_BPS // 10_000
-    withholding = prize_amount * settings.PAYOUT_WITHHOLDING_TAX_BPS // 10_000
+    fee = prize_amount * policy.platform_fee_bps // 10_000
+    if prize_amount <= WITHHOLDING_EXEMPT_THRESHOLD:
+        withholding = 0
+    else:
+        withholding = prize_amount * policy.withholding_tax_bps // 10_000
     net = prize_amount - fee - withholding
     return fee, withholding, net
 
 
-def get_or_create_payout(handover=None, *, distribution_share=None) -> Payout:
+def get_or_create_payout(handover=None, *, distribution_share=None, policy: PlatformPolicy | None = None) -> Payout:
     """이 Handover(또는 DistributionShare)에 대한 활성 Payout을 멱등하게 만든다.
 
     정확히 하나만 넘겨야 한다 — 어느 쪽이든 그 대상이 Payout이 실제로 가리키는
@@ -81,10 +98,20 @@ def get_or_create_payout(handover=None, *, distribution_share=None) -> Payout:
     죽는다. 네트워크 호출(어댑터)은 이 함수 밖(API 레이어)에서 한다 — 이 함수는
     순수 DB 쓰기만 하므로 트랜잭션 안에서도 안전하다("외부 네트워크 호출을
     transaction.atomic() 안에 넣지 않는다"는 lessons-learned 원칙).
+
+    `policy`는 호출자가 요청(또는 스캔) 스코프당 한 번 읽어 넘겨야 한다(#75,
+    ADR-0023) — 생략하면 이 호출 하나를 위해 새로 한 번 읽는다(단독 호출 편의용,
+    `core.transitions.claim_transition`이 `now`를 생략 가능하게 둔 것과 같은
+    관용구). `distributions.services.run_due_distributions`처럼 여러 몫을 순회하며
+    이 함수를 반복 호출하는 곳은 반드시 미리 읽은 값을 넘겨야 한다 — 그러지
+    않으면 몫 수만큼 정책 조회가 나간다.
     """
 
     if (handover is None) == (distribution_share is None):
         raise ValueError("handover 또는 distribution_share 중 정확히 하나만 넘겨야 한다.")
+
+    if policy is None:
+        policy = get_current_policy()
 
     if handover is not None:
         from handovers.models import Handover
@@ -100,7 +127,7 @@ def get_or_create_payout(handover=None, *, distribution_share=None) -> Payout:
                 return existing
 
             prize_amount = locked.award.contest.prize
-            fee, withholding, net = _compute_amounts(prize_amount)
+            fee, withholding, net = _compute_amounts(prize_amount, policy)
 
             try:
                 return Payout.objects.create(
@@ -109,6 +136,8 @@ def get_or_create_payout(handover=None, *, distribution_share=None) -> Payout:
                     platform_fee_amount=fee,
                     withholding_tax_amount=withholding,
                     net_amount=net,
+                    platform_fee_bps=policy.platform_fee_bps,
+                    withholding_tax_bps=policy.withholding_tax_bps,
                     status=Payout.Status.REQUESTED,
                 )
             except IntegrityError:
@@ -140,7 +169,7 @@ def get_or_create_payout(handover=None, *, distribution_share=None) -> Payout:
             return existing
 
         prize_amount = locked.amount
-        fee, withholding, net = _compute_amounts(prize_amount)
+        fee, withholding, net = _compute_amounts(prize_amount, policy)
 
         try:
             return Payout.objects.create(
@@ -149,6 +178,8 @@ def get_or_create_payout(handover=None, *, distribution_share=None) -> Payout:
                 platform_fee_amount=fee,
                 withholding_tax_amount=withholding,
                 net_amount=net,
+                platform_fee_bps=policy.platform_fee_bps,
+                withholding_tax_bps=policy.withholding_tax_bps,
                 status=Payout.Status.REQUESTED,
             )
         except IntegrityError:

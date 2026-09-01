@@ -30,6 +30,7 @@ from accounts.middleware import jwt_auth
 from distributions.models import DistributionShare
 from handovers.models import Handover
 from payments.webhook_security import verify_webhook_signature
+from policies.services import get_current_policy
 
 from .adapters import PayoutError, PayoutTimeoutError, get_adapter
 from .models import Payout, PayoutWebhookDelivery, TaxIdentity
@@ -97,7 +98,10 @@ def request_payout(request: HttpRequest, contest_id: int):
     if handover.status != Handover.Status.RELEASED:
         raise HttpError(409, "아직 Escrow가 해제되지 않아 지급을 요청할 수 없습니다.")
 
-    payout = get_or_create_payout(handover)
+    # 이 요청 스코프에서 정책을 한 번만 읽는다(#75, ADR-0023) — core.api.tick이
+    # Clock.now()를 한 번만 구해 재사용하는 것과 같은 관용구.
+    policy = get_current_policy()
+    payout = get_or_create_payout(handover, policy=policy)
 
     adapter = get_adapter()
     adapter.request_payout(idempotency_key=str(payout.idempotency_key), amount=payout.net_amount)

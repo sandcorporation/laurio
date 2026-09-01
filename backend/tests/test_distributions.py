@@ -26,6 +26,8 @@ from decimal import Decimal
 
 import pytest
 from django.conf import settings
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from contests.models import Category, Contest, DeliverableType
@@ -467,6 +469,55 @@ def test_remainder_is_booked_as_explicit_entry_and_ledger_stays_balanced(
     )
     balance_after = contest_balance(contest_obj.ledger_id)
     assert balance_after["is_balanced"] is True
+
+
+@pytest.mark.django_db
+def test_platform_policy_is_read_once_per_scan_not_once_per_share(
+    client, category, landing_type
+):
+    """정책 읽기는 스캔 스코프당 한 번이다(#75, ADR-0023) — 몫마다 다시 읽으면
+    채점·배분·지급 경로에서 쿼리가 몫 수만큼 늘어난다. 3개 몫을 만들어 그 스캔
+    도중 platform_policy 테이블을 정확히 한 번만 쳤는지를 실제로 센다 —
+    "요청 스코프당 한 번"이라는 주장을 코드 리딩이 아니라 쿼리 수로 증명한다."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+        prize=3_000_000,
+    )
+    requirement_id = contest["requirements"][0]["id"]
+
+    devs = [_verified_user(client, f"dev-qpol-{i}", f"dev-qpol-{i}-ci") for i in range(3)]
+    for dev in devs:
+        _submit(client, dev, contest["id"], requirement_id=requirement_id, grounded=True)
+
+    _close_contest(client, contest, deadline=deadline)
+    _run_scoring(client)
+    _end_judging_period(client, contest["id"])
+    _advance_past_distribution_wait(contest["id"])
+
+    # 정책 행을 미리 만들어 둔다(_default_cutline 픽스처가 DistributionCutline을
+    # 미리 만들어 두는 것과 같은 이유) — 그래야 스캔 도중 잡히는 쿼리가 순수하게
+    # "몫마다 다시 읽는가"만 잰다. 행이 없으면 get_or_create의 최초 생성이
+    # SELECT+INSERT 두 문장을 내므로, 그 생성 비용까지 섞이면 "몫 수만큼
+    # 늘었는지"를 못 가린다.
+    from policies.models import PlatformPolicy
+
+    PlatformPolicy.objects.get_or_create(pk=1)
+
+    with CaptureQueriesContext(connection) as ctx:
+        _run_due_distributions(client)
+
+    policy_queries = [q for q in ctx.captured_queries if "policies_platformpolicy" in q["sql"]]
+    assert Payout.objects.filter(distribution_share__distribution__contest_id=contest["id"]).count() == 3
+    assert len(policy_queries) == 1, (
+        f"platform_policy 테이블 쿼리가 {len(policy_queries)}번 나갔다 — 몫(3개)마다 "
+        "다시 읽으면 안 되고 스캔당 한 번이어야 한다."
+    )
 
 
 # --- 부분 실패: 성공분만 반영, 실패분은 재시도 대상 -------------------------------
