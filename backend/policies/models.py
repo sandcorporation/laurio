@@ -1,15 +1,15 @@
-"""PlatformPolicy — 정책값의 단일 행 (#75, ADR-0023).
+"""PlatformPolicy — 정책값의 단일 행 (#75, #79, ADR-0023).
 
 수수료율·원천징수율·개최비·연장비·기간·리드타임·배분 컷라인이 `settings.py`의
 환경변수 12개와 `DistributionCutline`·`DeliverableType.minimum_prize` 두 테이블에
-흩어져 있었다(ADR-0023). 이 티켓(#75)은 그중 **플랫폼 수수료율과 원천징수율
-둘만** 이 모델로 옮긴다 — 나머지 열 개(개최비·연장비·기간·리드타임·주간한도)는
-#78이, 배분 컷라인은 #79가 각자 옮긴다. 그래서 이 모델은 지금 필드가 넷뿐이지만,
-이후 티켓들이 필드를 추가할 자리로 의도되었다(운영자 API로 바꾸는 것도 #76의
-몫이다 — 지금은 `manage.py shell`로만 바꿀 수 있고 그래도 된다).
+흩어져 있었다(ADR-0023). #75가 **플랫폼 수수료율과 원천징수율**을, #79가
+**배분 컷라인**(옛 `DistributionCutline`)을 이 모델로 옮겼다 — 나머지 열 개
+(개최비·연장비·기간·리드타임·주간한도)는 #78의 몫이다. 이후 티켓들이 필드를
+추가할 자리로 의도되었다(운영자 API로 바꾸는 것도 #76의 몫이다 — 지금은
+`manage.py shell`로만 바꿀 수 있고 그래도 된다).
 
-`DistributionCutline`(`distributions.models`)과 같은 관용구를 쓴다 — 단일 행
-(pk=1), 없으면 `policies.services.get_current_policy()`가 기본값으로 만든다.
+단일 행(pk=1) 관용구를 쓴다 — 없으면 `policies.services.get_current_policy()`가
+기본값으로 만든다.
 
 **코드리뷰 지적 반영(#75 후속)**:
 
@@ -30,6 +30,8 @@
 """
 
 from __future__ import annotations
+
+from decimal import Decimal
 
 from django.db import models
 
@@ -66,6 +68,17 @@ class PlatformPolicy(models.Model):
     # 나머지 정책값과 같은 자리(단일 행)에 둔다.
     withholding_minor_income_exempt_won = models.PositiveIntegerField(default=50_000)
 
+    # 배분(Distribution) 컷라인 — Score 백분율이 이 값 이상인 Submission만 무응답
+    # 1/N 배분의 자격자다(#79, 옛 `distributions.DistributionCutline`). 그
+    # 모델과 같은 단일 행 관용구를 그대로 흡수했다: 기본값 60.00은 옛 모델의
+    # 기본값과 같다. `distributions.services._create_distribution_for_contest`가
+    # 이 값을 읽어 `Distribution.cutline_percentage`에 스냅샷으로 남긴다 — 이
+    # 필드 자체를 바꿔도 이미 만들어진 Distribution의 기록은 흔들리지 않는다
+    # (ADR-0006이 Score에 대해 세운 것과 같은 규율).
+    distribution_cutline_percentage = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal("60.00")
+    )
+
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -100,6 +113,17 @@ class PlatformPolicy(models.Model):
                     platform_fee_bps__lte=10_000 - models.F("withholding_tax_bps")
                 ),
                 name="platform_fee_and_withholding_bps_leave_nonnegative_net",
+            ),
+            # 컷라인은 백분율이다 — 범위 밖의 값(음수, 100% 초과)은 오타이지
+            # 사업 판단일 수 없다(#79). 옛 `DistributionCutline`에는 이 방어선이
+            # 없었다 — admin이 사라진 뒤 값을 바꾸는 유일한 경로가
+            # `manage.py shell`인 지금은 이 모델 자신이 막아야 한다.
+            models.CheckConstraint(
+                condition=models.Q(
+                    distribution_cutline_percentage__gte=Decimal("0.00")
+                )
+                & models.Q(distribution_cutline_percentage__lte=Decimal("100.00")),
+                name="distribution_cutline_percentage_within_0_100",
             ),
         ]
 

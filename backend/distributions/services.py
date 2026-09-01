@@ -45,7 +45,7 @@ from policies.models import PlatformPolicy
 from policies.services import get_current_policy
 from submissions.models import Submission
 
-from .models import Distribution, DistributionCutline, DistributionShare
+from .models import Distribution, DistributionShare
 
 logger = logging.getLogger(__name__)
 
@@ -68,19 +68,20 @@ _SETTLED_PAYOUT_STATUSES = [
 ]
 
 
-def get_cutline_percentage():
-    """DB 조정 가능한 컷라인 값을 읽는다. 행이 없으면 기본값으로 만든다."""
-
-    cutline, _ = DistributionCutline.objects.get_or_create(pk=1)
-    return cutline.minimum_percentage
-
-
-def _create_distribution_for_contest(contest_id: int) -> Distribution | None:
+def _create_distribution_for_contest(
+    contest_id: int, *, policy: PlatformPolicy
+) -> Distribution | None:
     """이 Contest에 대한 Distribution을 멱등하게 만든다.
 
     참여자가 0명이면 아무 것도 만들지 않고 None을 돌려준다 — 참여자 0명 전액
     환불은 #17의 몫이지, 여기서 대신 처리하지 않는다(0으로 나누는 사고도 이렇게
     구조적으로 피한다).
+
+    `policy`는 `run_due_distributions`가 스캔 스코프당 한 번 읽어 넘긴다(#75,
+    #79, ADR-0023) — 여기서 다시 읽지 않는다. 컷라인(`policy.
+    distribution_cutline_percentage`)도 `_attempt_share_payout`이 쓰는 수수료·
+    원천징수율과 같은 정책 행에서 나오므로, 이 스캔이 시도하는 Contest 수만큼
+    정책 조회가 늘어나지 않는다.
     """
 
     with transaction.atomic():
@@ -103,7 +104,7 @@ def _create_distribution_for_contest(contest_id: int) -> Distribution | None:
         if not submissions:
             return None
 
-        cutline = get_cutline_percentage()
+        cutline = policy.distribution_cutline_percentage
         qualifying = [s for s in submissions if hasattr(s, "score") and s.score.percentage >= cutline]
 
         cutline_waived = False
@@ -258,7 +259,7 @@ def run_due_distributions(*, fail_submission_ids: set[int] | None = None) -> lis
         # (scoring.services.run_pending_scoring이 이미 겪고 고친 것과 같은
         # 종류의 사고 — #21 리뷰).
         try:
-            distribution = _create_distribution_for_contest(contest_id)
+            distribution = _create_distribution_for_contest(contest_id, policy=policy)
         except Exception as exc:  # noqa: BLE001 - 한 Contest의 실패가 배치를 막으면 안 된다.
             logger.exception(
                 "Contest(pk=%s) Distribution 생성 중 예외, 다음 건으로 계속", contest_id
