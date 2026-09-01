@@ -1,0 +1,227 @@
+"use client";
+
+// 이의 제기 화면 (#74) — Developer 가 채점 결과를 보고, 이의를 걸고, 자기 소스가
+// 몇 번 열렸는지 확인한다.
+//
+// **채점 결과가 먼저 온다.** 무엇에 이의를 제기하는지 보지 못한 채 사유를 쓰라고
+// 하는 화면은 화면이 아니다. 그래서 이 화면을 짜다가 "Developer 가 자기 점수를
+// 볼 방법이 없다"는 구멍을 먼저 메웠다.
+//
+// **열람 기록은 약속의 증거다**(ADR-0022). 운영자는 심판을 위해 소스를 읽을 수
+// 있고, 대신 읽을 때마다 기록이 남는다. 그 기록을 제출자 본인이 볼 수 있어야
+// 약속이 검증 가능해진다 — 그래서 이의를 아직 걸지 않았어도 여기 있다.
+// 운영자의 이름은 주지 않는다: 시각과 횟수만으로 약속은 검증된다.
+import Link from "next/link";
+import { use, useState } from "react";
+
+import { useSession } from "@/lib/auth/use-session";
+import {
+  submitAppeal,
+  useAppealPage,
+  type Appeal,
+  type OwnScore,
+  type SourceReading,
+} from "@/lib/appeals/use-appeal-page";
+
+const APPEAL_STATUS_LABELS: Record<string, string> = {
+  pending: "심판을 기다리는 중입니다",
+  upheld: "이의가 받아들여졌습니다",
+  rejected: "이의가 기각되었습니다",
+};
+
+export default function AppealPage({ params }: { params: Promise<{ submissionId: string }> }) {
+  const { submissionId } = use(params);
+  const session = useSession();
+  const { state, reload } = useAppealPage(submissionId);
+
+  // 세션이 죽었는지를 로딩 게이트보다 **먼저** 본다 — 반대로 두면 만료 시
+  // 영원히 "불러오는 중"에 갇힌다(#69).
+  if (session.status === "unauthenticated") return null;
+  if (session.status === "loading" || state.status === "loading") {
+    return (
+      <main className="p-10">
+        <p data-testid="appeal-loading">불러오는 중...</p>
+      </main>
+    );
+  }
+
+  return (
+    <main className="mx-auto max-w-3xl p-10">
+      <Link className="text-sm text-muted" href="/console/participation" data-testid="appeal-back">
+        ← 내 참가 현황
+      </Link>
+      <h1 className="mt-2 text-2xl font-semibold" data-testid="appeal-heading">
+        채점 결과와 이의 제기
+      </h1>
+
+      {state.status === "error" ? (
+        <p className="mt-6 text-attention" data-testid="appeal-error">
+          채점 결과를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.
+        </p>
+      ) : state.score === null ? (
+        // 채점 전이다. 이의를 걸 대상이 아직 없다 — 실패가 아니라 순서다.
+        <p className="mt-6" data-testid="appeal-not-scored">
+          아직 채점되지 않았습니다. 채점이 끝나면 결과와 함께 이의를 제기할 수 있습니다.
+        </p>
+      ) : (
+        <>
+          <ScoreSection score={state.score} />
+          {state.appeal ? (
+            <ExistingAppeal appeal={state.appeal} />
+          ) : (
+            <AppealForm submissionId={submissionId} onSubmitted={reload} />
+          )}
+          <ReadingsSection readings={state.readings} failed={state.readingsFailed} />
+        </>
+      )}
+    </main>
+  );
+}
+
+function ScoreSection({ score }: { score: OwnScore }) {
+  return (
+    <section className="mt-6" data-testid="appeal-score">
+      <p className="text-lg">
+        필수 요건 달성률{" "}
+        <strong data-testid="appeal-score-percentage">{score.percentage}%</strong>
+      </p>
+      <p className="text-sm text-muted" data-testid="appeal-score-model">
+        판정 모델 {score.model_version}
+      </p>
+
+      {/* 근거가 없으면 이의를 쓸 수 없다 — 무엇을 반박할지 모른다. */}
+      <ul className="mt-3 flex flex-col gap-2" data-testid="appeal-score-reasoning">
+        {score.reasoning.map((item, index) => (
+          <li key={index} className="rounded border border-subtle p-3 text-sm">
+            {String(item.reasoning ?? "")}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function ExistingAppeal({ appeal }: { appeal: Appeal }) {
+  return (
+    <section className="mt-8 rounded border border-subtle p-4" data-testid="appeal-existing">
+      {/* 한 Submission 에 이의는 하나다 — 폼 대신 낸 것을 보여준다. */}
+      <p className="font-semibold" data-testid="appeal-existing-status">
+        {APPEAL_STATUS_LABELS[appeal.status] ?? appeal.status}
+      </p>
+      <p className="mt-2 whitespace-pre-wrap text-sm" data-testid="appeal-existing-reason">
+        {appeal.reason}
+      </p>
+      {appeal.ruling_note ? (
+        <p className="mt-3 whitespace-pre-wrap text-sm text-muted" data-testid="appeal-existing-note">
+          심판 의견: {appeal.ruling_note}
+        </p>
+      ) : null}
+      {appeal.correction_amount != null ? (
+        <p className="mt-2 text-sm" data-testid="appeal-existing-correction">
+          정정 금액 {appeal.correction_amount.toLocaleString()}원
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+function AppealForm({
+  submissionId,
+  onSubmitted,
+}: {
+  submissionId: string;
+  onSubmitted: () => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    if (pending) return;
+    setPending(true);
+    setMessage(null);
+
+    const result = await submitAppeal(submissionId, reason);
+    if (result.ok) {
+      // **낙관적 갱신을 하지 않는다** — 서버에서 다시 읽는다. 이의는 되돌릴 수
+      // 없어서, 접수됐다고 먼저 그렸다가 틀리면 낸 적 없는 이의를 봤다고 믿게
+      // 된다.
+      onSubmitted();
+      return;
+    }
+
+    // 서버가 준 문구를 그대로 보여준다 — 기한이 지났다·이미 냈다는 다른
+    // 사실이고, 화면이 짐작해 다시 쓰면 언젠가 갈라진다.
+    setMessage(result.message);
+    setPending(false);
+  }
+
+  return (
+    <form className="mt-8 flex flex-col gap-3" onSubmit={handleSubmit} data-testid="appeal-form">
+      <label className="text-sm" htmlFor="appeal-reason">
+        어느 판정이 왜 잘못됐는지 적어주세요. 운영자가 이 글과 채점 근거를 함께 봅니다.
+      </label>
+      <textarea
+        id="appeal-reason"
+        className="min-h-32 rounded border border-subtle p-3"
+        value={reason}
+        onChange={(event) => setReason(event.target.value)}
+        data-testid="appeal-reason"
+        required
+        maxLength={4000}
+      />
+      <button
+        className="self-start rounded bg-accent px-4 py-2 text-white disabled:opacity-50"
+        type="submit"
+        disabled={pending || reason.trim().length === 0}
+        data-testid="appeal-submit"
+      >
+        {pending ? "접수하는 중..." : "이의 제기"}
+      </button>
+      {message ? (
+        <p className="text-attention" data-testid="appeal-submit-error">
+          {message}
+        </p>
+      ) : null}
+    </form>
+  );
+}
+
+function ReadingsSection({
+  readings,
+  failed,
+}: {
+  readings: SourceReading[];
+  failed: boolean;
+}) {
+  return (
+    <section className="mt-10 border-t border-subtle pt-6" data-testid="appeal-readings">
+      <h2 className="font-semibold">내 소스 열람 기록</h2>
+      <p className="mt-1 text-sm text-muted">
+        운영자는 이의를 심판하기 위해 제출 소스를 열어볼 수 있고, 열 때마다 아래에 기록이
+        남습니다. 누가 읽었는지는 공개하지 않습니다 — 언제 몇 번 열렸는지만 보여줍니다.
+      </p>
+
+      {failed ? (
+        // 열람 기록만 따로 실패할 수 있다. 그때 "0건"으로 보이면 "아무도 안
+        // 봤다"는 거짓말이 된다 — 이 화면이 지키려는 약속이 정확히 그것이다.
+        <p className="mt-3 text-attention" data-testid="appeal-readings-error">
+          열람 기록을 불러오지 못했습니다. 「아무도 열지 않았다」는 뜻이 아닙니다.
+        </p>
+      ) : readings.length === 0 ? (
+        <p className="mt-3 text-sm" data-testid="appeal-readings-empty">
+          아직 아무도 열어보지 않았습니다.
+        </p>
+      ) : (
+        <ul className="mt-3 flex flex-col gap-1 text-sm" data-testid="appeal-readings-list">
+          {readings.map((reading, index) => (
+            <li key={index} data-testid="appeal-readings-row">
+              {new Date(reading.read_at).toLocaleString("ko-KR")}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
