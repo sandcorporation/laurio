@@ -29,6 +29,7 @@ from awards.models import Award
 from contests.models import Category, Contest, DeliverableType, JudgingExtensionPayment
 from core.models import ClockOverride
 from core.transitions import TRANSITION_REGISTRY
+from policies.services import get_current_policy
 
 TICK_URL = "/api/internal/tick"
 CONTESTS_URL = "/api/contests"
@@ -233,7 +234,7 @@ def test_judging_period_starts_at_close_and_scanned_by_scheduled_transition(
     # deadline과 close_at이 1분밖에 안 떨어져 있어 차이가 작아 보이지만, 아래
     # test_judging_ends_at_is_derived_from_each_contests_own_deadline이 그 차이를
     # 직접 증명한다.
-    expected_judging_ends_at = deadline + timedelta(days=settings.JUDGING_PERIOD_DAYS)
+    expected_judging_ends_at = deadline + timedelta(days=get_current_policy().judging_period_days)
     assert closed.judging_ends_at == expected_judging_ends_at
 
     # 아직 심사기간 중이므로 틱을 쏴도 JUDGING_ENDED로 넘어가지 않는다.
@@ -251,6 +252,35 @@ def test_judging_period_starts_at_close_and_scanned_by_scheduled_transition(
         {"model": "Contest", "pk": contest["id"], "from_state": "closed", "to_state": "judging_ended"}
     ]
     assert Contest.objects.get(id=contest["id"]).status == Contest.Status.JUDGING_ENDED
+
+
+@pytest.mark.django_db
+def test_judging_period_length_follows_policy_change_not_a_hardcoded_default(
+    client, category, landing_type
+):
+    """운영자가 심사기간을 바꾸면 그 뒤에 마감되는 Contest의 judging_ends_at이
+    실제로 달라진다(#78 AC) — "정책 행에 값이 저장됐다"로 멈추지 않고 효과를
+    확인한다. 기본값(7일)이 아니라 정책 행이 정한 값(여기서는 3일)으로
+    judging_ends_at이 계산되는지를 직접 비교한다 — contests/apps.py가 여전히
+    7을 하드코딩하고 있다면 이 테스트가 실제로 빨개진다.
+    """
+
+    from policies.models import PlatformPolicy
+
+    PlatformPolicy.objects.update_or_create(pk=1, defaults={"judging_period_days": 3})
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+
+    _close_contest(client, contest, deadline=deadline)
+
+    closed = Contest.objects.get(id=contest["id"])
+    assert closed.judging_ends_at == deadline + timedelta(days=3)
+    # 바뀌기 전 기본값(7일)으로 계산했다면 나왔을 시각과는 다르다는 것을
+    # 명시적으로 대조한다.
+    assert closed.judging_ends_at != deadline + timedelta(days=7)
 
 
 @pytest.mark.django_db
@@ -299,8 +329,8 @@ def test_judging_ends_at_is_derived_from_each_contests_own_deadline(client, cate
     assert closed_a.status == Contest.Status.CLOSED
     assert closed_b.status == Contest.Status.CLOSED
 
-    assert closed_a.judging_ends_at == early_deadline + timedelta(days=settings.JUDGING_PERIOD_DAYS)
-    assert closed_b.judging_ends_at == late_deadline + timedelta(days=settings.JUDGING_PERIOD_DAYS)
+    assert closed_a.judging_ends_at == early_deadline + timedelta(days=get_current_policy().judging_period_days)
+    assert closed_b.judging_ends_at == late_deadline + timedelta(days=get_current_policy().judging_period_days)
     assert closed_a.judging_ends_at != closed_b.judging_ends_at
 
 
@@ -724,7 +754,7 @@ def test_extension_updates_only_the_transition_time_column(client, category, lan
     assert registry_size_after == registry_size_before
 
     extended = Contest.objects.get(id=contest["id"])
-    expected = original_judging_ends_at + timedelta(days=settings.JUDGING_EXTENSION_DAYS)
+    expected = original_judging_ends_at + timedelta(days=get_current_policy().judging_extension_days)
     assert extended.judging_ends_at == expected
     assert extended.status == Contest.Status.CLOSED
 
@@ -738,6 +768,47 @@ def test_extension_updates_only_the_transition_time_column(client, category, lan
     _freeze(expected + timedelta(minutes=1))
     client.post(TICK_URL, **_internal_headers())
     assert Contest.objects.get(id=contest["id"]).status == Contest.Status.JUDGING_ENDED
+
+
+@pytest.mark.django_db
+def test_extension_days_is_snapshotted_at_initiate_not_re_read_at_confirm(
+    client, category, landing_type
+):
+    """#78 코드리뷰 지적 2 — initiate와 confirm 사이에 운영자가
+    judging_extension_days를 바꿔도, 이미 청구된 금액(amount)과 실제로
+    늘어나는 심사기간이 같은 시점(initiate)의 정책값을 가리켜야 한다.
+    confirm 시점에 정책을 다시 읽으면 Sponsor가 (initiate 시점 기준) 7일치
+    금액을 내고 3일만 받는 불일치가 생긴다 — extension_days 스냅샷을 없애고
+    confirm이 정책을 다시 읽게 되돌리면 이 테스트가 빨간불이 된다.
+    """
+
+    from policies.models import PlatformPolicy
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+    _close_contest(client, contest, deadline=deadline)
+    original_judging_ends_at = Contest.objects.get(id=contest["id"]).judging_ends_at
+
+    initiated = _initiate_extension(client, sponsor, contest["id"])
+    original_extension_days = get_current_policy().judging_extension_days
+    assert initiated["amount"] == get_current_policy().judging_extension_fee
+
+    # initiate와 confirm 사이에 운영자가 연장 단위를 7일에서 3일로 바꾼다.
+    PlatformPolicy.objects.update_or_create(pk=1, defaults={"judging_extension_days": 3})
+
+    confirm_resp = _confirm_extension(client, sponsor, contest["id"], initiated["order_id"])
+    assert confirm_resp.status_code == 200
+    assert confirm_resp.json()["amount"] == initiated["amount"]
+
+    extended = Contest.objects.get(id=contest["id"])
+    # initiate 시점(7일, 스냅샷)대로 늘어나야 한다 — confirm 시점에 바뀐 새
+    # 값(3일)이 아니다.
+    assert extended.judging_ends_at == original_judging_ends_at + timedelta(
+        days=original_extension_days
+    )
+    assert extended.judging_ends_at != original_judging_ends_at + timedelta(days=3)
 
 
 @pytest.mark.django_db
@@ -1040,7 +1111,7 @@ def test_confirming_the_same_extension_payment_twice_does_not_double_charge(
     extended = Contest.objects.get(id=contest["id"])
     assert extended.judging_extension_count == 1
     assert extended.judging_ends_at == original_judging_ends_at + timedelta(
-        days=settings.JUDGING_EXTENSION_DAYS
+        days=get_current_policy().judging_extension_days
     )
 
     payment = JudgingExtensionPayment.objects.get(order_id=initiated["order_id"])

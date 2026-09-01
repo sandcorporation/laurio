@@ -223,6 +223,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/contests/mine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List My Sponsored Contests
+         * @description Sponsor 가 자기가 연 공모전들과 각각의 「다음 행동」을 본다 (#81).
+         *
+         *     **`/contests/{contest_id}` 보다 먼저 등록해야 한다.** 아래에 두면 django-ninja
+         *     가 `mine` 을 `contest_id` 로 읽어 422 를 낸다 — 참가자 쪽 `/submissions/mine`
+         *     이 이미 겪은 함정이다.
+         *
+         *     **`draft` 도 나온다.** 공개 목록은 draft 를 감추지만 여기는 「내 것」이고, 초안인
+         *     채로 결제하지 않으면 아무 일도 일어나지 않는다는 사실을 말해 줄 곳이 여기밖에
+         *     없다.
+         *
+         *     Sponsor 프로필이 없으면 빈 목록이다 — 개최한 적 없는 사람은 정상적인 상태이지
+         *     없는 리소스가 아니다(`/submissions/mine` 과 같은 관용구).
+         */
+        get: operations["contests_api_list_my_sponsored_contests"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/contests/quote": {
         parameters: {
             query?: never;
@@ -1014,8 +1045,10 @@ export interface paths {
         };
         /**
          * Get Appeal Detail
-         * @description 운영자가 Score 스냅샷(점수·근거·프롬프트·모델버전)과 함께 이의를 조회한다
-         *     (#21 AC).
+         * @description 운영자가 Score 스냅샷(점수·근거·모델버전)과 함께 이의를 조회한다 (#21 AC).
+         *
+         *     프롬프트(=채점에 쓰인 제출 소스)는 여기 없다 — #59, ADR-0022. 소스를 보려면
+         *     별도의 명시적 펼침 요청이 필요하다(#60).
          */
         get: operations["appeals_api_get_appeal_detail"];
         put?: never;
@@ -1044,6 +1077,105 @@ export interface paths {
          *     방어선이다).
          */
         post: operations["appeals_api_rule_appeal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/appeals/{appeal_id}/source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reveal Appeal Source
+         * @description Operator 가 이의 심판을 위해 채점에 쓰인 소스를 펼친다 (#60, ADR-0022).
+         *
+         *     **이 요청 자체가 `SourceReading` 을 남긴다.** 기록과 소스는 같은 요청에서
+         *     나온다 — 둘을 갈라놓으면 한쪽만 부르는(기록 없이 소스만 얻는) 경로가 생긴다.
+         *
+         *     **`POST` 인 이유.** 읽기 전용 메서드가 기록을 남기는 것은 그 메서드에 대한
+         *     거짓말이고, `OperatorOriginMiddleware` 는 변경 메서드에만 걸린다 — `GET` 으로
+         *     두면 이 표면만 CSRF 방어 밖에 남는다.
+         *
+         *     **열람은 상태가 아니라 사건이다.** 같은 Operator 가 같은 이의에서 다시 펼치면
+         *     행이 하나 더 쌓인다 — 중복 제거를 하지 않는다.
+         */
+        post: operations["appeals_api_reveal_appeal_source"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/deliverable-types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Deliverable Types */
+        get: operations["contests_operator_api_list_deliverable_types"];
+        put?: never;
+        /** Create Deliverable Type Endpoint */
+        post: operations["contests_operator_api_create_deliverable_type_endpoint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/deliverable-types/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Deliverable Type Changes */
+        get: operations["contests_operator_api_list_deliverable_type_changes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/deliverable-types/{deliverable_type_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Update Deliverable Type Endpoint */
+        post: operations["contests_operator_api_update_deliverable_type_endpoint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/deliverable-types/{deliverable_type_id}/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Deactivate Deliverable Type Endpoint */
+        post: operations["contests_operator_api_deactivate_deliverable_type_endpoint"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1194,6 +1326,72 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operator/payouts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Payouts For Operator
+         * @description Operator가 어느 Payout이 두 대기 중 어느 쪽에 막혀 있는지 본다(#50 AC).
+         *
+         *     `blocked_on=identity`나 `blocked_on=seller`로 필터링할 수 있다 — 운영자가
+         *     "지금 내가 처리해야 할 것은 어느 쪽인가"에 바로 답할 수 있어야 한다는 요구가
+         *     여기 있다. 값을 주지 않으면 전체를 최신순으로 본다.
+         */
+        get: operations["payouts_api_list_payouts_for_operator"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Policy */
+        get: operations["policies_api_get_policy"];
+        put?: never;
+        /**
+         * Change Policy
+         * @description 정책을 바꾼다. 상위 등급만 — `SuperuserOperatorAuth`가 일반 등급을
+         *     403으로 거절한다(401과 구별된다: 세션 자체가 없으면 401·`OperatorAuth`).
+         *
+         *     `changes`는 페이로드에서 실제로 값이 온 필드만 뽑는다 — `None`은 "이
+         *     필드는 건드리지 마라"는 뜻이다.
+         */
+        post: operations["policies_api_change_policy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/policy/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Policy Changes */
+        get: operations["policies_api_list_policy_changes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/payments": {
         parameters: {
             query?: never;
@@ -1328,6 +1526,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/payouts/{idempotency_key}/seller-registration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Payout Seller Registration
+         * @description CONFIRMED_SELLER_PENDING에서 Seller 등록을 다시 시도한다(#50, ADR-0020).
+         *
+         *     실물 어댑터가 붙기 전까지는 fake 시나리오(한도 초과·심사 필요·거절)가 결국
+         *     부분 승인으로 풀리는 것을 재현하는 유일한 경로이기도 하다 — 실제 토스
+         *     지급대행은 이 자리를 웹훅이나 배치 재조회로 대신하게 된다(#57).
+         */
+        post: operations["payouts_api_retry_payout_seller_registration"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/storage/downloads": {
         parameters: {
             query?: never;
@@ -1356,6 +1578,39 @@ export interface paths {
         put?: never;
         /** Request Upload */
         post: operations["storage_api_request_upload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/submissions/mine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List My Participation
+         * @description Developer 가 자기 제출들과 각각의 「다음 행동」을 본다 (#74).
+         *
+         *     이 표면이 없어서 로그인한 Developer 가 "내가 어디에 냈고 각각 지금 어떤
+         *     상태인가" 를 볼 곳이 없었다 — 공개 프로필은 마감 후 아카이브이고 단건
+         *     조회는 하나씩이다. 이의도 지급도 걸 데가 없었다.
+         *
+         *     **행은 도메인 상태가 아니라 「다음 행동」을 말한다**(`participation.py` 참고).
+         *     판정은 백엔드에 있고 값은 타입 있는 enum 이라, 값이 하나 늘면 프론트의
+         *     누락된 분기를 `tsc` 가 빌드타임에 잡는다.
+         *
+         *     제출이 아직 없으면 빈 페이지로 200 이다 — "아직 아무 데도 안 냈다" 는
+         *     정상적인 사실이지 없는 리소스가 아니다. 이 경로가
+         *     `/submissions/{submission_id}` 보다 **먼저** 등록돼야 한다는 점에 주의한다
+         *     — 뒤에 두면 "mine" 이 submission_id 로 먹혀 404 가 난다.
+         */
+        get: operations["submissions_api_list_my_participation"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1426,6 +1681,70 @@ export interface paths {
          *     끌어다 붙이는 시도) 거부한다.
          */
         post: operations["handovers_api_upload_build_asset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/submissions/{submission_id}/score": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Own Score
+         * @description Developer 가 자기 Submission 의 채점 결과를 본다 (#74).
+         *
+         *     **이게 없으면 이의 제기는 화면이 아니었다.** Score 가 노출되는 곳은 운영자의
+         *     이의 상세 하나뿐이었다 — 이의를 낸 다음에야, 그것도 낸 본인이 아니라 심판하는
+         *     운영자만 볼 수 있었다. 「채점이 끝났다」는 알림을 받은 Developer 에게는 무엇에
+         *     이의를 제기할지 볼 데가 없었다.
+         *
+         *     채점 전에는 404 다. 「아직 채점되지 않았다」와 「그런 제출이 없다」는 다른
+         *     사실이므로 detail 로 구분한다 — 앞은 기다리면 되고 뒤는 뭔가 잘못된 것이다.
+         */
+        get: operations["submissions_api_get_own_score"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/submissions/{submission_id}/source-readings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Own Source Readings
+         * @description Developer 가 본인 Submission 의 소스 열람 기록을 본다 (#61, ADR-0022).
+         *
+         *     ADR-0022 는 열람 기록을 만들라고만 한 것이 아니라 "기록에는 읽는 사람이 있어야
+         *     한다"고 요구했다 — 이 엔드포인트가 그 요구를 채운다. 열람이 없으면 빈 목록으로
+         *     200 이다: "아직 아무도 안 봤다"는 정상적인 사실이지 없는 리소스가 아니다.
+         *
+         *     **운영자의 이름은 주지 않는다.** `SourceReadingOut` 에 `read_at` 뿐이다 — 시각과
+         *     횟수만으로 "내 소스가 심판 과정에서 몇 번 열렸다"는 약속을 검증할 수 있다.
+         *
+         *     **상한이 있다(#72).** 열람은 의도적으로 중복 제거도 레이트리밋도 없다(#60 —
+         *     열람은 상태가 아니라 사건이라, 두 번 봤으면 두 줄이 남아야 한다). 그래서 행이
+         *     무제한 쌓일 수 있는데 전부를 한 배열로 직렬화하면 응답에 상한이 코드 어디에도
+         *     없게 된다 — 이 저장소는 상한 없는 필드가 4xx 가 나야 할 자리에서 500 을 내는
+         *     것을 이미 겪었다. `contests` 목록과 같은 페이지네이션 관용구를 쓴다.
+         *
+         *     소유권 검사는 페이지네이션보다 **먼저** 일어난다 — 남의 Submission 이면 빈
+         *     페이지가 아니라 403 이다.
+         */
+        get: operations["appeals_api_list_own_source_readings"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1522,6 +1841,11 @@ export interface components {
             created_at: string;
             /** Id */
             id: number;
+            /**
+             * Is Holding Distribution
+             * @default false
+             */
+            is_holding_distribution: boolean;
             /** Reason */
             reason: string;
             /** Ruled At */
@@ -1554,6 +1878,11 @@ export interface components {
             created_at: string;
             /** Id */
             id: number;
+            /**
+             * Is Holding Distribution
+             * @default false
+             */
+            is_holding_distribution: boolean;
             /** Reason */
             reason: string;
             /** Ruled At */
@@ -1711,6 +2040,8 @@ export interface components {
         };
         /** ConfirmPayoutIn */
         ConfirmPayoutIn: {
+            /** Seller Simulate */
+            seller_simulate?: string | null;
             /** Simulate */
             simulate?: string | null;
         };
@@ -1858,6 +2189,46 @@ export interface components {
             /** Recipient Id */
             recipient_id: number;
         };
+        /** DeactivateDeliverableTypeIn */
+        DeactivateDeliverableTypeIn: {
+            /** Reason */
+            reason: string;
+        };
+        /** DeliverableTypeChangeOut */
+        DeliverableTypeChangeOut: {
+            /** Action */
+            action: string;
+            /** After */
+            after: {
+                [key: string]: unknown;
+            };
+            /** Before */
+            before: {
+                [key: string]: unknown;
+            };
+            /**
+             * Changed At
+             * Format: date-time
+             */
+            changed_at: string;
+            /** Deliverable Type Id */
+            deliverable_type_id: number;
+            /** Id */
+            id: number;
+            /** Operator Username */
+            operator_username: string;
+            /** Reason */
+            reason: string;
+        };
+        /** DeliverableTypeCreateIn */
+        DeliverableTypeCreateIn: {
+            /** Minimum Prize */
+            minimum_prize: number;
+            /** Name */
+            name: string;
+            /** Reason */
+            reason: string;
+        };
         /** DeliverableTypeOut */
         DeliverableTypeOut: {
             /** Id */
@@ -1866,6 +2237,13 @@ export interface components {
             minimum_prize: number;
             /** Name */
             name: string;
+        };
+        /** DeliverableTypeUpdateIn */
+        DeliverableTypeUpdateIn: {
+            /** Minimum Prize */
+            minimum_prize: number;
+            /** Reason */
+            reason: string;
         };
         /** DeveloperPublicProfileOut */
         DeveloperPublicProfileOut: {
@@ -1912,6 +2290,11 @@ export interface components {
         EntrySide: "debit" | "credit";
         /** ErrorOut */
         ErrorOut: {
+            /**
+             * Code
+             * @default error
+             */
+            code: string;
             /** Detail */
             detail: string;
         };
@@ -2073,6 +2456,82 @@ export interface components {
             /** Username */
             username: string;
         };
+        /**
+         * MyParticipationOut
+         * @description 「내 참가 현황」의 한 행 (#74).
+         *
+         *     도메인 상태를 그대로 늘어놓지 않는다 — `next_action` 하나가 "지금 무엇을
+         *     해야 하는가" 에 먼저 답하고, 나머지는 그 행을 알아보기 위한 최소한이다.
+         *     상세는 각자의 화면이 보여준다.
+         */
+        MyParticipationOut: {
+            /** Contest Id */
+            contest_id: number;
+            /** Contest Title */
+            contest_title: string;
+            /**
+             * Deadline At
+             * Format: date-time
+             */
+            deadline_at: string;
+            next_action: components["schemas"]["NextAction"];
+            /** Prize */
+            prize: number;
+            /** Submission Id */
+            submission_id: number;
+            /**
+             * Submitted At
+             * Format: date-time
+             */
+            submitted_at: string;
+        };
+        /**
+         * MySponsoredContestOut
+         * @description 「내 공모전」의 한 행 (#81) — Sponsor 가 자기가 연 공모전을 볼 때 받는 것.
+         *
+         *     참가자 쪽 `MyParticipationOut` 과 같은 모양이다: **도메인 상태가 아니라
+         *     「다음 행동」이 주인공**이고, 그 판정은 백엔드가 한다.
+         *
+         *     `next_action` 의 타입이 `str` 이 아니라 `SponsorNextAction` 인 것이 중요하다 —
+         *     생성된 프론트 타입에서 12개짜리 리터럴 유니온이 되고, 값이 하나 늘면 번역표를
+         *     가진 파일에서 `tsc --noEmit` 이 빌드타임에 잡는다. `str` 로 두면 `string` 이
+         *     되어 그 안전망이 통째로 사라진다(#74 에서 실제로 겪고 고친 실수다).
+         *
+         *     **`is_holding_distribution` 같은 이름을 따로 두지 않는다.** 보류는 「다음
+         *     행동」의 한 값이다 — 별도 불리언을 두면 화면이 두 값을 조합해 문장을 만들게
+         *     되고, 그 조합은 다시 화면의 파생 로직이다.
+         */
+        MySponsoredContestOut: {
+            /** Contest Id */
+            contest_id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Deadline At
+             * Format: date-time
+             */
+            deadline_at: string;
+            /** Judging Ends At */
+            judging_ends_at?: string | null;
+            next_action: components["schemas"]["SponsorNextAction"];
+            /** Prize */
+            prize: number;
+            /** Status */
+            status: string;
+            /** Submission Count */
+            submission_count: number;
+            /** Title */
+            title: string;
+        };
+        /**
+         * NextAction
+         * @description Developer 가 지금 무엇을 해야 하는가 — 또는 무엇을 기다리는가.
+         * @enum {string}
+         */
+        NextAction: "awaiting_deadline" | "awaiting_scoring" | "awaiting_judging" | "awaiting_appeal_ruling" | "awaiting_distribution" | "awaiting_handover_release" | "awaiting_seller_registration" | "can_appeal" | "request_payout" | "submit_tax_identity" | "not_selected" | "payout_complete";
         /** NotificationOut */
         NotificationOut: {
             /** Context */
@@ -2105,7 +2564,7 @@ export interface components {
          *     해둔다. User Story 80~89 에 나오는 유형 중 최소 집합을 담았다.
          * @enum {string}
          */
-        NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "new_contest_in_category";
+        NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "scoring_complete" | "appeal_ruled" | "new_contest_in_category";
         /** OperatorCreateIn */
         OperatorCreateIn: {
             /**
@@ -2117,6 +2576,27 @@ export interface components {
             password: string;
             /** Username */
             username: string;
+        };
+        /** OperatorDeliverableTypeOut */
+        OperatorDeliverableTypeOut: {
+            /** Id */
+            id: number;
+            /** Is Active */
+            is_active: boolean;
+            /** Minimum Prize */
+            minimum_prize: number;
+            /** Name */
+            name: string;
+        };
+        /** OperatorErrorOut */
+        OperatorErrorOut: {
+            /**
+             * Code
+             * @default error
+             */
+            code: string;
+            /** Detail */
+            detail: string;
         };
         /** OperatorLoginIn */
         OperatorLoginIn: {
@@ -2139,12 +2619,105 @@ export interface components {
             /** Username */
             username: string;
         };
+        /**
+         * OperatorPayoutOut
+         * @description Operator가 Payout 하나가 무엇을 기다리는지 보는 표면(#50 AC).
+         *
+         *     `blocked_on`은 "identity" | "seller" | None(둘 다 안 기다림 — 이미
+         *     CONFIRMED거나 아직 REQUESTED/FAILED) 중 하나다. 두 대기를 한 상태로
+         *     뭉치지 않는다는 요구가 Operator 조회에서도 그대로 지켜져야 한다.
+         */
+        OperatorPayoutOut: {
+            /** Blocked On */
+            blocked_on: string | null;
+            /** Contest Id */
+            contest_id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Developer User Id */
+            developer_user_id: number;
+            /** Has Identity */
+            has_identity: boolean;
+            /**
+             * Idempotency Key
+             * Format: uuid
+             */
+            idempotency_key: string;
+            /** Net Amount */
+            net_amount: number;
+            /** Seller Status */
+            seller_status: string | null;
+            /** Status */
+            status: string;
+        };
+        /**
+         * OwnScoreOut
+         * @description Developer 가 자기 Submission 의 채점 결과를 볼 때 받는 것 (#74).
+         *
+         *     운영자가 심판 근거로 보는 `appeals.schemas.ScoreSnapshotOut` 과 필드가 같다 —
+         *     이의를 제기하는 사람과 심판하는 사람이 **같은 것을 보고** 이야기해야 하기
+         *     때문이다. 한쪽만 보는 값이 있으면 이의는 서로 다른 근거를 두고 오간다.
+         *
+         *     **`prompt` 는 없다.** 프롬프트에는 본인 소스가 통째로 임베드되어 있어
+         *     (`scoring._build_prompt`) 본인에게 보인다고 유출은 아니지만, 응답 크기에
+         *     상한이 사라진다 — 이 저장소는 상한 없는 필드가 4xx 가 나야 할 자리에서 500 을
+         *     내는 것을 이미 겪었다(#72). 소스를 다시 보는 경로는 따로 있다(ADR-0022).
+         *
+         *     `percentage` 는 문자열이다. 배분 컷라인이 쓰는 것과 같은 십진값이라, float 로
+         *     내리면 화면이 보여준 값과 돈을 가른 값이 갈릴 수 있다.
+         */
+        OwnScoreOut: {
+            /** Appeal Deadline */
+            appeal_deadline?: string | null;
+            /**
+             * Can Appeal
+             * @default false
+             */
+            can_appeal: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Model Version */
+            model_version: string;
+            /** Percentage */
+            percentage: string;
+            /** Reasoning */
+            reasoning: {
+                [key: string]: unknown;
+            }[];
+        };
         /** PagedContestOut */
         PagedContestOut: {
             /** Count */
             count: number;
             /** Items */
             items: components["schemas"]["ContestOut"][];
+        };
+        /** PagedMyParticipationOut */
+        PagedMyParticipationOut: {
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["MyParticipationOut"][];
+        };
+        /** PagedMySponsoredContestOut */
+        PagedMySponsoredContestOut: {
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["MySponsoredContestOut"][];
+        };
+        /** PagedSourceReadingOut */
+        PagedSourceReadingOut: {
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["SourceReadingOut"][];
         };
         /** PaymentOut */
         PaymentOut: {
@@ -2189,14 +2762,73 @@ export interface components {
             idempotency_key: string;
             /** Net Amount */
             net_amount: number;
+            /** Next Action Message */
+            next_action_message: string;
             /** Platform Fee Amount */
             platform_fee_amount: number;
             /** Prize Amount */
             prize_amount: number;
+            /** Seller Status */
+            seller_status: string | null;
             /** Status */
             status: string;
             /** Withholding Tax Amount */
             withholding_tax_amount: number;
+        };
+        /** PolicyChangeOut */
+        PolicyChangeOut: {
+            /** After */
+            after: {
+                [key: string]: number;
+            };
+            /** Before */
+            before: {
+                [key: string]: number;
+            };
+            /**
+             * Changed At
+             * Format: date-time
+             */
+            changed_at: string;
+            /** Id */
+            id: number;
+            /** Operator Username */
+            operator_username: string;
+            /** Reason */
+            reason: string;
+        };
+        /** PolicyOut */
+        PolicyOut: {
+            /** Platform Fee Bps */
+            platform_fee_bps: number;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Version */
+            version: number;
+            /** Withholding Minor Income Exempt Won */
+            withholding_minor_income_exempt_won: number;
+            /** Withholding Necessary Expense Bps */
+            withholding_necessary_expense_bps: number;
+            /** Withholding Tax Bps */
+            withholding_tax_bps: number;
+        };
+        /** PolicyUpdateIn */
+        PolicyUpdateIn: {
+            /** Expected Version */
+            expected_version: number;
+            /** Platform Fee Bps */
+            platform_fee_bps?: number | null;
+            /** Reason */
+            reason: string;
+            /** Withholding Minor Income Exempt Won */
+            withholding_minor_income_exempt_won?: number | null;
+            /** Withholding Necessary Expense Bps */
+            withholding_necessary_expense_bps?: number | null;
+            /** Withholding Tax Bps */
+            withholding_tax_bps?: number | null;
         };
         /**
          * ProfileIn
@@ -2412,8 +3044,14 @@ export interface components {
         };
         /**
          * ScoreSnapshotOut
-         * @description 운영자가 심판 근거로 보는 Score 스냅샷 그대로 — 점수·근거·프롬프트·모델버전
-         *     전부(#21 AC, ADR-0006).
+         * @description 운영자가 심판 근거로 보는 Score 스냅샷 — 점수·근거·모델버전(#21 AC, ADR-0006).
+         *
+         *     **`prompt` 는 여기 없다 (#59, ADR-0022).** 프롬프트에는 채점에 쓰인 제출 소스가
+         *     통째로 임베드되어 있어(`scoring._build_prompt`), 이의 상세를 조회하는 것만으로
+         *     소스 전문이 흘러서는 안 된다. 소스를 보려면 별도의 명시적 펼침 요청이 필요하고
+         *     그 요청은 `SourceReading` 을 남긴다(#60) — `Score` 자체는 프롬프트를 여전히
+         *     그대로 보관한다(재현성을 위한 불변 스냅샷, ADR-0006). 이 스키마가 바뀐 것은
+         *     **누가 볼 수 있는지** 뿐이다.
          */
         ScoreSnapshotOut: {
             /**
@@ -2425,18 +3063,53 @@ export interface components {
             model_version: string;
             /** Percentage */
             percentage: string;
-            /** Prompt */
-            prompt: string;
             /** Reasoning */
             reasoning: {
                 [key: string]: unknown;
             }[];
+        };
+        /** SellerRegistrationRetryIn */
+        SellerRegistrationRetryIn: {
+            /** Simulate */
+            simulate?: string | null;
         };
         /** SocialLoginIn */
         SocialLoginIn: {
             /** Access Token */
             access_token: string;
         };
+        /**
+         * SourceReadingOut
+         * @description Developer 가 보는 자기 Submission 의 소스 열람 기록 한 건 (#61, ADR-0022).
+         *
+         *     **누가 봤는지는 여기 없다.** 시각과 횟수만으로 "심판 과정에서 몇 번 열렸다"는
+         *     약속을 검증할 수 있고, 운영자 신원을 참가자에게 흘리면 ADR-0018 이 서로소로
+         *     갈라놓은 두 경계 사이에 새 문제가 생긴다.
+         */
+        SourceReadingOut: {
+            /**
+             * Read At
+             * Format: date-time
+             */
+            read_at: string;
+        };
+        /**
+         * SourceRevealOut
+         * @description 소스 펼침 응답 (#60, ADR-0022).
+         *
+         *     #59 이전에는 상세 조회의 부수 효과로 새던 바로 그 내용(`Score.prompt`)이다 —
+         *     이제는 이 명시적 `POST` 요청에서만, `SourceReading` 을 함께 남기고서만 나온다.
+         */
+        SourceRevealOut: {
+            /** Prompt */
+            prompt: string;
+        };
+        /**
+         * SponsorNextAction
+         * @description Sponsor 가 이 공모전에 대해 지금 무엇을 해야 하는가 — 또는 무엇을 기다리는가.
+         * @enum {string}
+         */
+        SponsorNextAction: "pay_to_publish" | "judge_and_award" | "accept_handover" | "awaiting_submissions" | "awaiting_scoring" | "awaiting_appeal_ruling" | "awaiting_distribution" | "awaiting_payout" | "no_submissions" | "contest_complete";
         /** SubmissionIn */
         SubmissionIn: {
             /** Demo Url */
@@ -2794,6 +3467,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DeliverableTypeOut"][];
+                };
+            };
+        };
+    };
+    contests_api_list_my_sponsored_contests: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PagedMySponsoredContestOut"];
                 };
             };
         };
@@ -3816,6 +4512,216 @@ export interface operations {
             };
         };
     };
+    appeals_api_reveal_appeal_source: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                appeal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceRevealOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    contests_operator_api_list_deliverable_types: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorDeliverableTypeOut"][];
+                };
+            };
+        };
+    };
+    contests_operator_api_create_deliverable_type_endpoint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeliverableTypeCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorDeliverableTypeOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+        };
+    };
+    contests_operator_api_list_deliverable_type_changes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliverableTypeChangeOut"][];
+                };
+            };
+        };
+    };
+    contests_operator_api_update_deliverable_type_endpoint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                deliverable_type_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeliverableTypeUpdateIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorDeliverableTypeOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+        };
+    };
+    contests_operator_api_deactivate_deliverable_type_endpoint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                deliverable_type_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeactivateDeliverableTypeIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorDeliverableTypeOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+        };
+    };
     accounts_operator_api_operator_login: {
         parameters: {
             query?: never;
@@ -4033,6 +4939,110 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    payouts_api_list_payouts_for_operator: {
+        parameters: {
+            query?: {
+                blocked_on?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorPayoutOut"][];
+                };
+            };
+        };
+    };
+    policies_api_get_policy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyOut"];
+                };
+            };
+        };
+    };
+    policies_api_change_policy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PolicyUpdateIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    policies_api_list_policy_changes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyChangeOut"][];
                 };
             };
         };
@@ -4322,6 +5332,59 @@ export interface operations {
             };
         };
     };
+    payouts_api_retry_payout_seller_registration: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                idempotency_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SellerRegistrationRetryIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PayoutOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     storage_api_request_download: {
         parameters: {
             query?: never;
@@ -4366,6 +5429,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UploadResponse"];
+                };
+            };
+        };
+    };
+    submissions_api_list_my_participation: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PagedMyParticipationOut"];
                 };
             };
         };
@@ -4565,6 +5651,71 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    submissions_api_get_own_score: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                submission_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OwnScoreOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    appeals_api_list_own_source_readings: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number | null;
+            };
+            header?: never;
+            path: {
+                submission_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PagedSourceReadingOut"];
                 };
             };
         };

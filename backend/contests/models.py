@@ -33,7 +33,17 @@ class Category(models.Model):
 class DeliverableType(models.Model):
     """만들어야 할 산출물의 종류. 최소 제안 상금을 갖고 복수 선택 시 합산된다.
 
-    배포 없이 운영자가 admin에서 조정할 수 있는 DB 테이블이다.
+    상위 등급 Operator가 `POST /api/operator/deliverable-types`(생성)·
+    `POST /api/operator/deliverable-types/{id}`(최소 제안 상금 수정)·
+    `POST /api/operator/deliverable-types/{id}/deactivate`(비활성화)로 조정한다
+    (#80). admin은 ADR-0019로 내려갔다 — 여기서 "admin에서 조정한다"고 말하던
+    시절의 흔적은 이 문장이 마지막이다.
+
+    `PlatformPolicy`(#75~#79)와 달리 단일 행에 들어갈 수 없다 — 종류마다 값이
+    다르고 종류 자체가 추가·삭제(정확히는 비활성화)되기 때문이다(ADR-0023).
+    지우지 않고 비활성화만 하는 이유는 이미 이 종류로 만들어진 `Contest`가
+    있을 수 있어서다 — `Contest.deliverable_types`가 이 행을 참조하는 한 지우면
+    그 Contest들의 산출물 종류가 깨진다.
     """
 
     name = models.CharField(max_length=100, unique=True)
@@ -45,6 +55,47 @@ class DeliverableType(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"{self.name} (min {self.minimum_prize:,}원)"
+
+
+class DeliverableTypeChange(models.Model):
+    """`DeliverableType`에 대한 한 번의 변경 사건 — 누가·언제·무엇을·왜 (#80).
+
+    `policies.models.PolicyChange`와 같은 규율이다 — 최소 제안 상금은 "상금미달"
+    배지 판정에 그대로 쓰이므로, 그 값을 바꾸는 것도 근거 없이 이루어지면 안
+    되는 판단이다. `action`으로 생성·수정·비활성화 세 가지를 구별한다 — 생성은
+    `before`가 비어 있고(그 전엔 이 종류 자체가 없었다), 비활성화는 `is_active`
+    한 필드만 바뀐다.
+
+    `deliverable_type`은 PROTECT다 — `DeliverableType`은 지워지지 않고
+    비활성화만 되므로 이 참조가 끊길 일은 정상 경로에 없지만, `PolicyChange.
+    operator`·`AppealRuling.ruled_by`와 같은 원칙을 그대로 지킨다. `operator`도
+    PROTECT — 바꾼 계정을 지워도 감사 기록이 주인을 잃지 않는다.
+    """
+
+    class Action(models.TextChoices):
+        CREATED = "created", "생성"
+        UPDATED = "updated", "수정"
+        DEACTIVATED = "deactivated", "비활성화"
+
+    deliverable_type = models.ForeignKey(
+        DeliverableType, related_name="changes", on_delete=models.PROTECT
+    )
+    operator = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="deliverable_type_changes", on_delete=models.PROTECT
+    )
+    action = models.CharField(max_length=16, choices=Action.choices)
+    reason = models.TextField()
+    before = models.JSONField()
+    after = models.JSONField()
+    changed_at = models.DateTimeField()
+
+    class Meta:
+        verbose_name = "산출물 종류 변경 이력"
+        verbose_name_plural = "산출물 종류 변경 이력"
+        ordering = ["-changed_at", "-id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"DeliverableTypeChange({self.action}, deliverable_type_id={self.deliverable_type_id})"
 
 
 class Contest(models.Model):
@@ -88,7 +139,8 @@ class Contest(models.Model):
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.DRAFT)
 
     # 심사기간 종료 시각 (#13, ADR-0003). CLOSED 전이가 일어나는 조건부 UPDATE 안에서
-    # deadline_at + JUDGING_PERIOD_DAYS 로 함께 채워진다. 유료 연장은 이 컬럼만
+    # deadline_at + PlatformPolicy.judging_period_days(#78/ADR-0023)로 함께
+    # 채워진다. 유료 연장은 이 컬럼만
     # 갱신한다 — 예약된 스캔 규칙(core.transitions 레지스트리)은 그대로 두고 값만
     # 바뀐다. CLOSED로 전이하기 전에는 null이다.
     judging_ends_at = models.DateTimeField(null=True, blank=True)
@@ -125,6 +177,24 @@ class Contest(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            # 스케줄러 틱(core.transitions.run_due_transitions)이 60초마다 도는 두
+            # 스캔의 WHERE 절이 그대로 타는 인덱스다. 규칙은 contests/apps.py 가
+            # 등록하고, 각각 (status, deadline_at) 과 (status, judging_ends_at) 을
+            # 함께 건다.
+            #
+            # 인덱스가 없으면 그 둘이 매 틱마다 전체 테이블 순차 스캔이 된다 —
+            # `EXPLAIN` 으로 실제로 확인했다(Seq Scan on contests_contest). 지금
+            # 규모에서는 수 ms 라 아프지 않지만, transitions.py 가 배치 상한을
+            # 두면서 남긴 주석("인덱스가 있어도 무제한 스캔은 …")은 인덱스가
+            # 있다는 전제로 쓰였는데 실제로는 없었다. notifications 는 같은 모양의
+            # 주기 스캔에 대해 이미 이 인덱스를 갖고 있다(notif_status_sched_idx)
+            # — 여기서 그 관용구를 맞춘다.
+            models.Index(fields=["status", "deadline_at"], name="contest_status_deadline_idx"),
+            models.Index(
+                fields=["status", "judging_ends_at"], name="contest_status_judgeend_idx"
+            ),
+        ]
 
     def __str__(self) -> str:  # pragma: no cover
         return self.title
@@ -178,9 +248,20 @@ class JudgingExtensionPayment(models.Model):
     # PG에 전달하는 주문 참조값.
     order_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
 
-    # 결제 시점의 스냅샷 — settings.CONTEST_EXTENSION_FEE가 나중에 바뀌어도 이미
-    # 요청된 결제 금액은 흔들리지 않는다(Payment.prize_amount와 같은 원칙).
+    # 결제 시점의 스냅샷 — PlatformPolicy.judging_extension_fee(#78/ADR-0023)가
+    # 나중에 바뀌어도 이미 요청된 결제 금액은 흔들리지 않는다(Payment.prize_amount와
+    # 같은 원칙).
     amount = models.PositiveIntegerField()
+    # 결제 시점(initiate)의 PlatformPolicy.judging_extension_days 스냅샷
+    # (#78 코드리뷰 지적 2) — amount와 짝을 이루는 값인데도 원래는 여기
+    # 찍히지 않고 confirm 시점에 정책에서 다시 읽혔다. initiate와 confirm
+    # 사이에 운영자가 judging_extension_days를 바꾸면(#78이 이 값을 런타임
+    # 가변 DB 행으로 옮기면서 실제로 열린 창이다 — 값이 상수였을 때는 없던
+    # 문제다) amount는 옛 금액 그대로 청구되는데 심사기간은 새 값만큼만
+    # 늘어나는 불일치가 생긴다. Sponsor가 낸 돈과 실제로 받는 연장 길이가
+    # 항상 같은 시점의 정책을 가리키도록 이 필드가 그 값을 initiate
+    # 시점에 확정한다.
+    extension_days = models.PositiveIntegerField()
     # 이 결제가 성공하면 몇 번째 연장이 되는지의 스냅샷(감사·원장 메모용). 정확한
     # 카운트는 여전히 Contest.judging_extension_count가 조건부 UPDATE로 늘리는
     # 값이 유일한 진실이다 — 이 필드는 그 값을 미리 찍어두는 라벨일 뿐이다.

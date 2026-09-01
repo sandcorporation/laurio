@@ -37,6 +37,18 @@ _Avoid_: 참가자, Entrant, Contestant, Contractor, Freelancer
 Laurio를 운영하며 Appeal에 Ruling을 내리는 당사자. Sponsor·Developer와 서로소다 — 소셜 계정을 가진 계정은 Operator가 될 수 없고, Operator는 소셜 계정을 붙일 수 없다. 이 구분이 「돈을 움직인 사람이 누구인가」를 애매하지 않게 만든다.
 _Avoid_: 관리자, 스태프, Admin, Staff, Moderator
 
+**PlatformPolicy**:
+플랫폼이 정한 요율과 기간 — 수수료, 원천징수, 개최비, 연장비, 심사기간, 배분 대기, 배분 컷라인. 환경이 아니라 사업이 정하는 값이라 staging 과 production 에서 같아야 하고, 바뀌면 누가 언제 바꿨는지가 남는다(ADR-0023). 값을 쓴 Payout·Distribution 은 그때의 요율을 자기 안에 기억한다.
+_Avoid_: 설정, config, 환경변수(그 셋은 환경마다 달라도 되는 것을 가리킨다)
+
+**PolicyChange**:
+PlatformPolicy 를 바꾼 사건 하나 — 누가, 언제, 무엇을 무엇으로. 요율을 바꾸는 것은 돈에 관한 판단이므로 심판·열람과 같이 신원이 붙는다(ADR-0019, ADR-0023).
+_Avoid_: 설정 변경 로그, 히스토리
+
+**SourceReading**:
+Operator가 이의를 심판하며 제출 소스를 펼쳐 본 사건. 기본은 접혀 있고 명시적으로 펼 때만 남는다 — 그래야 기록이 잡음이 아니라 신호가 된다. 소스를 감춘다는 약속이 운영자 앞에서만 조용히 사라지지 않게 하는 장치다.
+_Avoid_: 조회 로그, 접근 기록, 감사 로그(감사 대상 전체를 가리키는 넓은 말), Access log
+
 ### 제출과 선정
 
 **Submission**:
@@ -76,6 +88,10 @@ _Avoid_: 예치금을 Deposit으로 부르는 것, Holding
 **Payout**:
 Prize가 원장을 거쳐 Developer에게 실제로 나가는 것. 플랫폼 수수료와 원천징수가 공제된 뒤의 실지급을 포함한 전 과정을 가리킨다.
 _Avoid_: 정산, 이체, 송금, Settlement, Transfer, Disbursement
+
+**Seller**:
+Developer가 Payout을 받기 위해 지급대행사(토스)에 등록되는 수취인 신원. Payout이 확정된 뒤에만 등록이 시작된다 — Verification이 가입이 아니라 행위 시점으로 미뤄진 것과 같은 원칙이다. 등록으로 받는 sellerId는 Developer에 남아 두 번째 Payout부터는 재등록하지 않는다. 본인인증을 마치면 부분 승인 상태로 주간 한도 안에서 지급받고, 한도를 넘으면 심사 대기가 된다 — 둘 다 실패가 아니다.
+_Avoid_: 셀러(한글 음역을 개념 이름처럼 쓰는 것), 정산 계좌, Merchant, Payee
 
 **Distribution**:
 Sponsor가 기한 내 Award하지 않아, Score 컷라인을 통과한 Submission들에게 Prize를 1/N로 나누는 것.

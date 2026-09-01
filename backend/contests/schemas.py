@@ -3,6 +3,7 @@ from enum import Enum
 
 from ninja import Schema
 from pydantic import Field
+from contests.sponsorship import SponsorNextAction, sponsor_next_action_for
 
 
 class CategoryOut(Schema):
@@ -47,6 +48,57 @@ class DeliverableTypeOut(Schema):
     id: int
     name: str
     minimum_prize: int
+
+
+# --- 운영자 표면(#80) --------------------------------------------------------
+#
+# 공개용 `DeliverableTypeOut`과 갈라 둔 이유: 운영자 화면은 비활성 종류도 봐야
+# 하므로(이미 그 종류를 쓰는 Contest가 있을 수 있고, 되살릴 방법을 판단하려면
+# 지금 꺼져 있다는 사실 자체를 봐야 한다) `is_active`가 필요하다. 참가자에게는
+# 그 필드를 보여줄 이유가 없다 — 공개 목록은 애초에 활성 종류만 돌려준다.
+
+
+class OperatorDeliverableTypeOut(Schema):
+    id: int
+    name: str
+    minimum_prize: int
+    is_active: bool
+
+
+# DeliverableType.minimum_prize는 Django PositiveIntegerField로, Postgres의
+# `integer`(4바이트) 컬럼이다 — 상한을 안 걸면 그 열의 실제 상한(2**31-1)을
+# 넘는 입력이 `DataError: integer out of range`로 500이 된다(코드리뷰 지적,
+# 재현됨). `policies.services._FIELD_BOUNDS`가 withholding_minor_income_exempt_won
+# 에 같은 상한을 명시해 둔 것과 같은 이유로, 여기서도 4xx가 나야 할 자리에서
+# 500이 나지 않게 한다.
+_POSITIVE_INT_MAX = 2**31 - 1
+
+
+class DeliverableTypeCreateIn(Schema):
+    name: str = Field(min_length=1, max_length=100)
+    minimum_prize: int = Field(ge=0, le=_POSITIVE_INT_MAX)
+    # 정책 변경과 같은 규율(#76) — 새 종류를 추가하는 것도 근거가 남아야 한다.
+    reason: str
+
+
+class DeliverableTypeUpdateIn(Schema):
+    minimum_prize: int = Field(ge=0, le=_POSITIVE_INT_MAX)
+    reason: str
+
+
+class DeactivateDeliverableTypeIn(Schema):
+    reason: str
+
+
+class DeliverableTypeChangeOut(Schema):
+    id: int
+    deliverable_type_id: int
+    operator_username: str
+    action: str
+    reason: str
+    before: dict
+    after: dict
+    changed_at: datetime
 
 
 class QuoteIn(Schema):
@@ -183,3 +235,48 @@ class ContestReopenIn(Schema):
 
     prize: int = Field(gt=0)
     deadline_at: datetime
+
+
+class MySponsoredContestOut(Schema):
+    """「내 공모전」의 한 행 (#81) — Sponsor 가 자기가 연 공모전을 볼 때 받는 것.
+
+    참가자 쪽 `MyParticipationOut` 과 같은 모양이다: **도메인 상태가 아니라
+    「다음 행동」이 주인공**이고, 그 판정은 백엔드가 한다.
+
+    `next_action` 의 타입이 `str` 이 아니라 `SponsorNextAction` 인 것이 중요하다 —
+    생성된 프론트 타입에서 12개짜리 리터럴 유니온이 되고, 값이 하나 늘면 번역표를
+    가진 파일에서 `tsc --noEmit` 이 빌드타임에 잡는다. `str` 로 두면 `string` 이
+    되어 그 안전망이 통째로 사라진다(#74 에서 실제로 겪고 고친 실수다).
+
+    **`is_holding_distribution` 같은 이름을 따로 두지 않는다.** 보류는 「다음
+    행동」의 한 값이다 — 별도 불리언을 두면 화면이 두 값을 조합해 문장을 만들게
+    되고, 그 조합은 다시 화면의 파생 로직이다.
+    """
+
+    contest_id: int
+    title: str
+    prize: int
+    status: str
+    deadline_at: datetime
+    judging_ends_at: datetime | None = None
+    # 몇 명이 냈는지가 그 자리에서 보여야 심사하러 갈지 판단할 수 있다.
+    submission_count: int
+    next_action: SponsorNextAction
+    created_at: datetime
+
+    @staticmethod
+    def resolve_contest_id(obj) -> int:
+        return obj.id
+
+    @staticmethod
+    def resolve_submission_count(obj) -> int:
+        # 목록 질의가 `annotate` 로 붙여 준다 — 행마다 세면 N+1 이다.
+        return obj.submission_count
+
+    @staticmethod
+    def resolve_next_action(obj) -> str:
+        # `now` 는 목록 엔드포인트가 요청 스코프에서 **한 번** 구해 각 행에
+        # 붙여 둔 값이다 — 여기서 `Clock.now()` 를 부르면 행마다 ClockOverride
+        # 조회가 나가고, 게다가 한 화면 안에서 행마다 다른 시각으로 판정하게
+        # 된다(마감 직전 목록에서 실제로 갈릴 수 있다).
+        return sponsor_next_action_for(obj, now=obj.judged_as_of)

@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
@@ -9,6 +11,18 @@ const nextConfig: NextConfig = {
   // 확인하려면 컨테이너 안에서 돌린다:
   //   docker compose -f docker/compose.dev.yaml exec frontend pnpm build
   output: "standalone",
+  // 저장소 루트가 pnpm 워크스페이스가 됐다(운영자 앱 04 #62) — Next가 파일
+  // 추적(file tracing)의 기준을 자동으로 워크스페이스 루트(락파일이 있는 곳)로
+  // 잡으므로, standalone 산출물이 `frontend/` 하위 구조를 그대로 보존한다
+  // (`.next/standalone/frontend/server.js`). 명시하지 않아도 Next가 같은 값을
+  // 추론하지만, 그 추론이 "다른 락파일을 찾았다"는 경고에 흔들리지 않도록 여기서
+  // 고정한다 — docker/frontend.Dockerfile의 runner 스테이지가 이 경로를 그대로
+  // 안다.
+  outputFileTracingRoot: path.join(__dirname, ".."),
+  // packages/bff-shared는 별도로 빌드되지 않는 워크스페이스 소스 패키지다
+  // (main이 ./src/index.ts를 직접 가리킨다) — Next의 webpack/SWC 로더가 이
+  // 패키지도 앱 코드처럼 컴파일하게 한다.
+  transpilePackages: ["@laurio/bff-shared"],
   // 공개 표면은 서버에서 렌더링되어야 색인된다(ADR-0015). 실수로 클라이언트
   // 렌더링이 되면 조용히 깨지므로, e2e 가 JS 를 끈 HTML 을 직접 확인한다.
   reactStrictMode: true,

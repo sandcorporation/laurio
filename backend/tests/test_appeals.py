@@ -406,12 +406,56 @@ def test_operator_views_appeal_with_full_score_snapshot(client, category, landin
     body = detail.json()
     assert body["score"]["percentage"] == str(score.percentage)
     assert body["score"]["model_version"] == score.model_version
-    assert body["score"]["prompt"] == score.prompt
     assert body["score"]["reasoning"] == score.reasoning
+    assert body["score"]["created_at"] is not None
+    # #59, ADR-0022: 프롬프트(=소스 전문)는 상세 응답에 없다 — 스키마에서 제거됐다.
+    assert "prompt" not in body["score"]
+    # 심판에 필요한 나머지(이의 사유·상태·확정된 심판)는 여전히 돌아온다.
+    assert body["reason"] == "근거를 다시 봐주세요."
+    assert body["status"] == "pending"
+    assert body["ruling"] is None
 
     listing = operator.get(f"{OPERATOR_APPEALS_URL}?status=pending")
     assert listing.status_code == 200
     assert any(a["id"] == appeal_id for a in listing.json())
+
+
+@pytest.mark.django_db
+def test_operator_appeal_detail_does_not_leak_source_text(client, category, landing_type):
+    """이의 상세 응답 어디에도 채점에 쓰인 소스 문자열이 나타나지 않는다 (#59, ADR-0022).
+
+    "필드가 없다"가 아니라 "내용이 없다"를 친다 — 실제로 소스가 담긴 프롬프트로
+    채점된 뒤, 그 소스 문자열이 응답 바디 전체(직렬화된 원문 바이트)에 한 글자도
+    없는지 확인한다. `grounded=True`는 제출 소스(app.py)에 고유 마커를 심고, 그
+    마커가 채점 프롬프트에 실제로 임베드됐는지까지 먼저 확인해 픽스처 자체가
+    무의미하지 않음을 보장한다.
+    """
+
+    operator = _operator_client()
+    sponsor, dev, contest, submission = _scored_submission(
+        client, category, landing_type, grounded=True
+    )
+    # `_submit`이 소스(app.py)에 심고 Evidence로도 되돌려주는 고유 마커 — 채점
+    # 프롬프트가 실제로 이 소스 내용을 그대로 삼켰다는 것을 증명하는 데 쓴다.
+    source_marker = submission["requirement_responses"][0]["evidence"][0]["value"]
+
+    score = Score.objects.get(submission_id=submission["id"])
+    assert source_marker in score.prompt  # 픽스처가 정말로 소스를 프롬프트에 심었는지 확인
+
+    appeal_resp = client.post(
+        APPEAL_URL(submission["id"]),
+        data={"reason": "근거를 다시 봐주세요."},
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert appeal_resp.status_code == 201
+    appeal_id = appeal_resp.json()["id"]
+
+    detail = operator.get(f"{OPERATOR_APPEALS_URL}/{appeal_id}")
+    assert detail.status_code == 200
+    assert "prompt" not in detail.json()["score"]
+    # 응답 원문 어디에도 소스 문자열이 없다 — 필드 부재가 아니라 내용 부재를 친다.
+    assert source_marker not in detail.content.decode("utf-8")
 
 
 # --- 인용: 정정 분개 추가, 기존 분개는 그대로, 원장은 균형 -----------------------

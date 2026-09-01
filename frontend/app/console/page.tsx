@@ -4,6 +4,7 @@
 // 실제로 이어지는지 눈으로 볼 수 있는 최소 화면이다 — 실제 대시보드는 이후
 // 티켓이 채운다.
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import { useSession } from "@/lib/auth/use-session";
@@ -45,6 +46,25 @@ export default function AppHome() {
       <p className="text-sm text-ink" data-testid="app-home-protected-content">
         이 화면은 로그인해야만 보입니다.
       </p>
+      {/* 「내 참가 현황」으로 가는 진입점(#74). 이 링크가 없으면 그 화면은 URL 을
+          직접 쳐야만 닿는다 — 운영자 앱의 계정 관리 화면이 실제로 그 상태로
+          한 번 나갔다(#69). */}
+      <Link
+        href="/console/participation"
+        data-testid="app-home-participation-link"
+        className="w-fit rounded-sm border border-rule px-4 py-2 text-sm hover:border-ink"
+      >
+        내 참가 현황
+      </Link>
+      {/* 개최자 쪽 진입점(#81). 참가와 개최는 같은 계정이 둘 다 할 수 있으므로
+          둘 다 여기 있다 — 역할로 화면을 가르지 않는다. */}
+      <Link
+        href="/console/contests"
+        data-testid="app-home-my-contests-link"
+        className="w-fit rounded-sm border border-rule px-4 py-2 text-sm hover:border-ink"
+      >
+        내 공모전
+      </Link>
       <button
         type="button"
         onClick={handleLogout}

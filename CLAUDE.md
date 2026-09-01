@@ -17,6 +17,8 @@ cd backend && uv run pytest                           # 테스트
 | PostgreSQL | `55432` | 5432 | `LAURIO_DB_PORT` |
 | backend | `58000` | 8000 | `LAURIO_API_PORT` |
 | Redis | `16379` | 6379 | `LAURIO_REDIS_PORT` |
+| 공개 앱(`frontend/`) | `53000` | 3000 | `LAURIO_WEB_PORT` |
+| 운영자 앱(`operator/`, #63) | `53001` | 3000 | `LAURIO_OPERATOR_WEB_PORT` |
 
 호스트에서 `uv run pytest`를 돌릴 때 붙는 DB 포트 기본값도 `LAURIO_DB_PORT`를 따라간다
 (`backend/config/settings.py`). 컨테이너 안에서는 compose가 `POSTGRES_*`를 직접 주입한다.
@@ -41,6 +43,22 @@ cd backend && uv run pytest                           # 테스트
 `SECRET_KEY`를 강제한다. staging은 검증용 서브 호스트라 운영자가
 `POST /api/internal/tick`을 수동으로 쏴서 21일 시나리오를 몇 초에 재현할 수 있다 —
 두 파일 모두 `INTERNAL_API_TOKEN`이 없으면 부팅 자체가 거부된다.
+
+**운영자 앱(`operator/`)도 두 compose 파일에 뜬다**(#70). 공개 앱(`frontend`)과
+같은 3스테이지 이미지(`docker/operator.Dockerfile` — dev/builder/runner)를 쓰고,
+배포 compose는 `target: runner`를 명시적으로 고른다. 필수 설정은
+`LAURIO_OPERATOR_ORIGIN`과 `LAURIO_API_BASE_URL`— 배포 환경에서 둘 중 하나라도
+비면 `operator/instrumentation.ts`가 첫 요청을 받기 전에 `process.exit(1)`로
+프로세스를 끊는다(`throw`만으로는 Next가 그 에러를 삼켜 컨테이너가 Up인 채로
+이유 없는 500만 낸다는 게 공개 앱 쪽에서 이미 확인된 사실이다).
+
+**`LAURIO_OPERATOR_ORIGIN`은 백엔드와 운영자 앱이 같은 `.env.staging`/`.env.prod`
+줄 하나를 나눠 읽는 값이다** — 백엔드의 `OperatorOriginMiddleware`가 기대하는
+오리진과 운영자 앱이 나가는 요청에 붙이는 오리진이 어긋나면 로그인을 포함한
+모든 운영자 변경 요청이 조용히 403이 된다(fail-closed라 보안 구멍은 아니지만
+원인을 찾기 어렵다 — 이 저장소가 이미 두 번 겪은 실패). 공개 앱의 오리진과
+반드시 다른 서브도메인을 쓴다 — 같은 오리진을 공유하면 공개 앱이 뚫렸을 때
+운영자 세션 쿠키까지 노출될 길이 생긴다.
 
 **`appeals` 마이그레이션이 다시 만들어졌다**(#44). 배포 이력이 없어 단일 initial 로
 정리했는데, 옛 `0001_initial` 을 이미 적용한 dev DB 는 Django 가 "적용 완료" 로
@@ -110,9 +128,77 @@ pytest`가 그 DB에 직접 붙는다 — 컨테이너를 거칠 이유가 없�
 
 ## 프론트엔드
 
-Next.js + React. `frontend/`. 테스트 시임은 실행 중인 Next 앱 하나뿐이다(ADR-0017) —
-`docker compose -f docker/compose.dev.yaml up` 으로 스택을 띄운 뒤 `pnpm --dir frontend
-test` 로 Playwright 가 그걸 친다. `pnpm --dir frontend typecheck` 는 스택 없이 돈다.
+Next.js + React. 저장소 루트가 pnpm 워크스페이스다(운영자 앱 04 #62, ADR-0021) —
+락파일은 루트의 `pnpm-lock.yaml` 하나뿐이고, 공개 앱(`frontend/`, 위치·패키지 이름
+변경 없음)·운영자 앱(`operator/`)·공유 BFF 패키지(`packages/bff-shared`, 경로
+순회 방어·Origin 검증·허용목록 검사 함수·백엔드 전달 기계만 담는다 — 허용목록의
+**내용**은 앱마다 자기 파일에 남는다)가 그 멤버다. 명령은 그대로다 — 워크스페이스가
+생겨도 `pnpm --dir <앱>` 호출법은 바뀌지 않는다.
+
+테스트 시임은 **앱마다 하나**다(ADR-0021, ADR-0017 개정) — 앱이 둘이어도 그 아래로
+내려가는 컴포넌트 테스트·모킹은 없다. `docker compose -f docker/compose.dev.yaml up`
+으로 두 앱이 다 뜬 스택을 띄운 뒤 `pnpm --dir frontend test` 로 Playwright 가 프로젝트
+둘로 두 앱을 한 번에 친다(공개 앱 스펙은 `frontend/e2e/*.spec.ts`, 운영자 앱 스펙은
+`frontend/e2e/operator/*.spec.ts` — `playwright.config.ts` 가 프로젝트마다 다른
+`testDir`·`baseURL` 을 준다). `LAURIO_E2E_BASE_URL`/`LAURIO_OPERATOR_E2E_BASE_URL`
+로 각 프로젝트의 `baseURL` 을 바꿀 수 있다(기본값은 위 포트 표와 같다).
+`pnpm --dir frontend typecheck`/`pnpm --dir operator typecheck` 는 스택 없이 돈다.
+
+**운영자 앱은 인증의 모양이 다르다**(#63, ADR-0018/0019). 공개 앱은 쿠키의 JWT를
+`Authorization` 헤더로 바꿔 달지만, 운영자 앱은 Django 세션 쿠키
+(`laurio_operator_session`, `backend/config/settings.py`)를 이름으로만 골라
+중계한다 — 브라우저의 Cookie 헤더를 통째로 넘기지 않는다. e2e 가 로그인할
+Operator 계정은 `backend/accounts/management/commands/seed_e2e_operator.py`
+(멱등)로 만든다 — 사람이 쓰는 `create_operator` 부트스트랩 명령과 달리 반복
+실행에 안전하다.
+
+**TDD 안쪽 고리에서 전체를 돌리지 마라.** 관련 파일만 돌리고, 전체는 게이트로 둔다.
+
+| 언제 | 무엇 | 실측 |
+| --- | --- | --- |
+| red→green 반복 | 그 테스트 파일 하나 | 백엔드 3~17초 · e2e 13~42초 |
+| 티켓 커밋 직전 | 건드린 쪽 스위트 (`pytest` 또는 `test:operator`) | 3분 · 4.7분 |
+| 체인/PR 보고 직전 | 전체 | 백엔드 3분 + e2e 7분 |
+
+```bash
+cd backend && LAURIO_DB_PORT=<포트> uv run pytest tests/test_payouts.py -q
+pnpm --dir frontend exec playwright test --project=operator e2e/operator/policy.spec.ts
+```
+
+안쪽 고리에서 전체를 돌리면 **한 번의 red→green 이 17초가 아니라 10분**이 된다.
+슬라이스 하나에 그 왕복이 여러 번 있으니 티켓 하나가 통째로 테스트 대기에 잠긴다.
+
+**스위트가 8분을 넘긴다 — 한 앱만 고쳤으면 그 앱만 돌린다.**
+
+```bash
+pnpm --dir frontend test            # 전체 (약 7분, 170건)
+pnpm --dir frontend test:operator   # 운영자 앱만 (약 4.7분, 91건)
+pnpm --dir frontend test:public     # 공개 앱만 (약 2.3분, 79건)
+```
+
+이게 편의가 아니라 필요다. 서브에이전트의 명령 타임아웃 상한이 10분인데 전체
+스위트가 부하에 따라 8~10분에서 흔들린다 — 넘으면 하네스가 백그라운드로 돌리고
+그 완료 알림은 에이전트가 아니라 최상위 세션으로 가서, 에이전트가 오지 않을
+신호를 영원히 기다린다. 실제로 여러 체인이 그렇게 멈췄다.
+
+**두 가지가 이미 시간을 반으로 줄여 뒀다 — 되돌리지 마라.**
+
+`globalSetup` 이 두 앱의 주요 라우트를 미리 친다. Next dev 서버는 라우트를
+요청받을 때 컴파일해서, 없으면 첫 실행이 테스트가 아니라 컴파일을 기다린다
+(public 콜드 5.6분 대 웜 2.5분, 같은 79건 — contests-pagination 은 30초
+타임아웃으로 실패하기까지 했다).
+
+`seedE2eOperator()` 를 **인자 없이** 부르면 프로세스 안에서 계정을 재사용한다.
+시드 호출 127회 중 79회가 이것이었고 한 번에 약 1.4초(Django 부팅만 640ms)라
+계정 만드는 데만 95초가 쓰였다. **계정 자체를 바꾸는 테스트는 반드시 고유한
+`username` 을 줘야 한다** — 인자를 주면 캐시를 타지 않는다.
+
+**병렬로 돌리지 마라(`workers: 1` 을 올리지 마라).** 시도해서 8.0분이 3.5분으로
+줄었지만 **16건이 실패했다.** 공개 스펙 넷이 각자 `beforeAll` 에서 같은 고정
+접두어 데이터를 다시 심어 서로를 리셋하는 구조이고(직렬에서만 성립한다), 운영자
+쪽은 큐 **건수**를 단언한다. 병렬로 가려면 시드에 워커별 네임스페이스를 주는
+설계 변경이 먼저다 — 설정 한 줄로 되는 일이 아니다. 시간은 특정 테스트에 몰려
+있지도 않다(167건 합계 467초, 가장 느린 10건이 19%).
 
 **API 타입은 손으로 쓰지 않는다.** `frontend/lib/api/schema.gen.ts` 는
 `pnpm --dir frontend generate:api`(`frontend/scripts/generate-api-types.mjs`)가

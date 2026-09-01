@@ -20,12 +20,17 @@
 "스크린샷" 값도 마찬가지로 storage object_key를 담을 수 있는 불투명한 문자열이다.
 """
 
-from __future__ import annotations
+# `from __future__ import annotations` 를 쓰지 않는다 — 이 모듈에는 `@paginate` 로
+# 감싼 엔드포인트가 있고(list_my_participation, #74), 그 래퍼는 원본 함수의
+# `__globals__` 를 가져갈 수 없어 문자열이 된 어노테이션을 해석하지 못한다.
+# contests/api.py(#39)와 appeals/api.py(#72)가 같은 자리에서
+# `QueryParams is not fully defined` 500 을 겪고 같은 결론에 도달했다.
 
 from django.db import IntegrityError, transaction
 from django.http import HttpRequest
 from ninja import Router
 from ninja.errors import HttpError
+from ninja.pagination import PageNumberPagination, paginate
 
 from accounts.middleware import jwt_auth
 from accounts.models import DeveloperProfile
@@ -36,7 +41,11 @@ from core.clock import Clock
 from verification.models import Verification
 
 from .models import Evidence, RequirementResponse, Submission
+from .participation import next_action_for
 from .schemas import (
+    ErrorOut,
+    MyParticipationOut,
+    OwnScoreOut,
     ComparisonEntryOut,
     ComparisonSubmissionOut,
     CompletionOut,
@@ -389,6 +398,82 @@ def get_my_submission(request: HttpRequest, contest_id: int):
     return 200, _serialize(
         submission, contest=contest, is_owner=True, is_sponsor=False, past_deadline=past_deadline
     )
+
+
+@router.get("/submissions/mine", response=list[MyParticipationOut], auth=jwt_auth)
+@paginate(PageNumberPagination, page_size=20)
+def list_my_participation(request: HttpRequest, **kwargs):
+    """Developer 가 자기 제출들과 각각의 「다음 행동」을 본다 (#74).
+
+    이 표면이 없어서 로그인한 Developer 가 "내가 어디에 냈고 각각 지금 어떤
+    상태인가" 를 볼 곳이 없었다 — 공개 프로필은 마감 후 아카이브이고 단건
+    조회는 하나씩이다. 이의도 지급도 걸 데가 없었다.
+
+    **행은 도메인 상태가 아니라 「다음 행동」을 말한다**(`participation.py` 참고).
+    판정은 백엔드에 있고 값은 타입 있는 enum 이라, 값이 하나 늘면 프론트의
+    누락된 분기를 `tsc` 가 빌드타임에 잡는다.
+
+    제출이 아직 없으면 빈 페이지로 200 이다 — "아직 아무 데도 안 냈다" 는
+    정상적인 사실이지 없는 리소스가 아니다. 이 경로가
+    `/submissions/{submission_id}` 보다 **먼저** 등록돼야 한다는 점에 주의한다
+    — 뒤에 두면 "mine" 이 submission_id 로 먹혀 404 가 난다.
+    """
+
+    profile = DeveloperProfile.objects.filter(user=request.auth_user).first()
+    if profile is None:
+        return Submission.objects.none()
+
+    # 「다음 행동」을 고르려면 Contest·Score·Award·Handover·Appeal 을 함께 본다.
+    # 행마다 새로 조회하면 참가가 쌓일수록 N+1 이 된다.
+    return (
+        Submission.objects.filter(developer=profile)
+        .select_related("contest", "score", "appeal", "contest__award__handover")
+        .order_by("-created_at")
+    )
+
+@router.get(
+    "/submissions/{submission_id}/score",
+    response={200: OwnScoreOut, 403: ErrorOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def get_own_score(request: HttpRequest, submission_id: int):
+    """Developer 가 자기 Submission 의 채점 결과를 본다 (#74).
+
+    **이게 없으면 이의 제기는 화면이 아니었다.** Score 가 노출되는 곳은 운영자의
+    이의 상세 하나뿐이었다 — 이의를 낸 다음에야, 그것도 낸 본인이 아니라 심판하는
+    운영자만 볼 수 있었다. 「채점이 끝났다」는 알림을 받은 Developer 에게는 무엇에
+    이의를 제기할지 볼 데가 없었다.
+
+    채점 전에는 404 다. 「아직 채점되지 않았다」와 「그런 제출이 없다」는 다른
+    사실이므로 detail 로 구분한다 — 앞은 기다리면 되고 뒤는 뭔가 잘못된 것이다.
+    """
+
+    submission = _get_owned_submission(request, submission_id)
+
+    score = getattr(submission, "score", None)
+    if score is None:
+        raise HttpError(404, "아직 채점되지 않았습니다.")
+
+    return 200, score
+
+
+def _get_owned_submission(request: HttpRequest, submission_id: int) -> Submission:
+    """`appeals.api._get_owned_submission` 과 같은 경계다 — 없는 것과 남의 것을
+    가른다. 두 앱이 각자 자기 라우터에서 쓰므로 한쪽이 다른 쪽을 import 하지
+    않는다(순환을 만들 이유가 없다)."""
+
+    try:
+        # `score.submission.contest` 와 `.appeal` 을 이 조회에서 함께 끌어온다 —
+        # `OwnScoreOut` 의 이의 창 판정이 그것을 본다.
+        submission = Submission.objects.select_related(
+            "developer", "score", "contest", "appeal"
+        ).get(id=submission_id)
+    except Submission.DoesNotExist as exc:
+        raise HttpError(404, "Submission을 찾을 수 없습니다.") from exc
+
+    if submission.developer.user_id != request.auth_user.id:
+        raise HttpError(403, "본인의 Submission에만 접근할 수 있습니다.")
+    return submission
 
 
 @router.get("/submissions/{submission_id}", response={200: SubmissionOut}, auth=None)

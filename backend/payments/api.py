@@ -86,7 +86,7 @@ def initiate_payment(request: HttpRequest, payload: InitiatePaymentIn):
     생기더라도 DB 제약이 최후에 막아준다.
     """
 
-    from django.conf import settings
+    from policies.services import get_current_policy
 
     with transaction.atomic():
         try:
@@ -124,7 +124,7 @@ def initiate_payment(request: HttpRequest, payload: InitiatePaymentIn):
             )
             return 201, _serialize(existing, checkout_url=result.checkout_url)
 
-        listing_fee_amount = settings.CONTEST_LISTING_FEE
+        listing_fee_amount = get_current_policy().contest_listing_fee
         try:
             # 중첩 atomic(세이브포인트)으로 감싼다 — IntegrityError가 나면
             # Postgres는 바깥 트랜잭션 전체를 "aborted" 상태로 만들어 그 뒤의

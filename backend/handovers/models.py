@@ -30,9 +30,9 @@ class Handover(models.Model):
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.PENDING_ACCEPTANCE
     )
-    # Award 시각 + HANDOVER_ACCEPTANCE_PERIOD_DAYS. Sponsor가 침묵해도 이 시각이
-    # 지나면 틱이 Escrow를 해제한다 — Sponsor의 침묵이 Developer를 인질로 잡지
-    # 못한다(#14 AC).
+    # Award 시각 + PlatformPolicy.handover_acceptance_period_days(#78/ADR-0023).
+    # Sponsor가 침묵해도 이 시각이 지나면 틱이 Escrow를 해제한다 — Sponsor의
+    # 침묵이 Developer를 인질로 잡지 못한다(#14 AC).
     release_deadline_at = models.DateTimeField()
 
     released_via = models.CharField(max_length=20, choices=ReleasedVia.choices, blank=True)

@@ -166,6 +166,7 @@ INSTALLED_APPS = [
     "ledger",
     "payments",
     "core",
+    "policies",
     "notifications",
     # 모델은 없다(#8/#10이 붙을 때까지). STORAGE_BACKEND/STORAGE_TARGET_RESOLVER
     # 오탈자를 요청 시점 500 대신 `manage.py check`/부팅 시점에 잡기 위해서만 등록한다.
@@ -437,21 +438,10 @@ if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(PAYMENT_ADAPTER_MODE):
     )
 _require_resolvable_adapter_mode(setting_name="PAYMENT_ADAPTER_MODE", value=PAYMENT_ADAPTER_MODE)
 
-# Sponsor가 Contest를 개최할 때 Prize와 별도로 결제하는 개최 등록비(원 단위 정수,
-# ADR-0004). 배포 없이 조정할 수 있는 DeliverableType.minimum_prize와 달리 이건
-# 아직 DB 조정 대상이 아니다 — 이 티켓 범위에서는 전역 고정값이면 충분하다.
-CONTEST_LISTING_FEE = int(_env("CONTEST_LISTING_FEE", "50000"))
-
-# --- 심사기간 · Award · 유료 연장 (#13, ADR-0003) --------------------------------
-# 마감 후 기본 심사기간. CLOSED 전이가 일어나는 조건부 UPDATE 안에서
-# deadline_at + 이 값으로 judging_ends_at을 채운다.
-JUDGING_PERIOD_DAYS = int(_env("JUDGING_PERIOD_DAYS", "7"))
-# 유료 연장 1회가 심사기간을 늘리는 길이. judging_ends_at 컬럼에만 더해진다 —
-# 예약된 스케줄러 규칙은 건드리지 않는다(ADR-0003).
-JUDGING_EXTENSION_DAYS = int(_env("JUDGING_EXTENSION_DAYS", "7"))
-# 연장 1회당 결제 금액(원 단위 정수, ADR-0004). CONTEST_LISTING_FEE와 같은 성격의
-# 전역 고정값이다 — 아직 DB 조정 대상이 아니다.
-CONTEST_EXTENSION_FEE = int(_env("CONTEST_EXTENSION_FEE", "30000"))
+# 개최비·심사기간·심사기간 연장 단위·연장비는 더 이상 여기 없다(#78,
+# ADR-0023) — `policies.models.PlatformPolicy`(DB 단일 행)의
+# contest_listing_fee·judging_period_days·judging_extension_days·
+# judging_extension_fee로 옮겼다. 아래 두 줄이 있던 자리(#13, ADR-0003)다.
 
 # 웹훅 서명 검증 비밀키 (#9 리뷰 지적 2). `/api/payments/webhook`은 인증 없는
 # 내부 엔드포인트지만, 서명이 없으면 누구든 자신의 order_id로 "paid"를 위조해
@@ -576,9 +566,8 @@ LLM_REQUIREMENT_CHAT_FAKE_RAISING_CONTEST_IDS = [
 
 # --- Handover · Escrow 해제 (#14, ADR-0003/0004/0005/0014) --------------------------
 #
-# Award 후 Sponsor가 인수를 확인하지 않아도 이 기간이 지나면 스케줄러(내부 스캔
-# 엔드포인트)가 Escrow를 해제한다 — Sponsor의 침묵이 Developer를 인질로 잡지 못한다.
-HANDOVER_ACCEPTANCE_PERIOD_DAYS = int(_env("HANDOVER_ACCEPTANCE_PERIOD_DAYS", "14"))
+# 인도 승인 기간은 더 이상 여기 없다(#78, ADR-0023) —
+# `policies.models.PlatformPolicy.handover_acceptance_period_days`로 옮겼다.
 
 # --- Payout 실행 (#15, ADR-0004/0008) -------------------------------------------------
 #
@@ -606,35 +595,52 @@ if not _payout_webhook_secret:
     _payout_webhook_secret = "dev-only-insecure-fake-toss-payout-webhook-secret"
 PAYOUT_WEBHOOK_SECRET = _payout_webhook_secret
 
-# 플랫폼 수수료·원천징수 공제율. 1/10000(bp) 단위 정수로 다뤄 float 오차 없이
-# 원 단위 정수 금액을 계산한다(ADR-0004: "금액은 원 단위 정수로 다룬다"). 원천징수는
-# 기타소득 원천징수의 상식적인 근사치(3.3%)를 기본값으로 둔다 — 실제 세율은 세무
-# 정책(#15 범위 밖)이 정한다.
-PAYOUT_PLATFORM_FEE_BPS = int(_env("PAYOUT_PLATFORM_FEE_BPS", "1000"))
-PAYOUT_WITHHOLDING_TAX_BPS = int(_env("PAYOUT_WITHHOLDING_TAX_BPS", "330"))
+# 플랫폼 수수료·원천징수 공제율은 더 이상 여기 없다(#75, ADR-0023). settings.py가
+# 환경변수로 읽었지만 staging·prod 어디에도 그 값을 준 적이 없어 실질적으로 코드
+# 상수였고, 요율은 환경의 성질이 아니라 사업 정책이다 — staging과 production에서
+# 달라지면 그것은 설정이 아니라 버그다. `policies.models.PlatformPolicy`(DB 단일
+# 행)가 대신하고, `policies.services.get_current_policy()`로 읽는다. 두 경로를
+# 남기지 않는다 — CSRF 방어를 두 기계로 두었다가 한쪽 발급처가 사라져 영구 403이
+# 된 사고가 이 저장소에 있다.
+
+# --- Seller(지급대행사 수취인) 등록 어댑터 (#50, ADR-0007, ADR-0020) -------------------
+#
+# PAYOUT_ADAPTER_MODE와 같은 원칙: 기본값은 항상 fake다. 실제 토스 지급대행 셀러
+# 등록은 이 티켓 범위 밖이다(#57) — staging/production에서만 real dotted path를
+# 요구한다.
+SELLER_ADAPTER_MODE = _env("SELLER_ADAPTER_MODE", "fake")
+if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(SELLER_ADAPTER_MODE):
+    raise ImproperlyConfigured(
+        f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 인데 SELLER_ADAPTER_MODE "
+        "가 fake 다. staging/production 배포에서는 실제 Seller 등록 어댑터의 dotted "
+        "path를 반드시 설정해야 한다."
+    )
+_require_resolvable_adapter_mode(setting_name="SELLER_ADAPTER_MODE", value=SELLER_ADAPTER_MODE)
+
+# 지급대행 주간 한도는 더 이상 여기 없다(#78, ADR-0023) —
+# `policies.models.PlatformPolicy.seller_weekly_limit_amount`로 옮겼다. **이
+# 값은 우리 정책이 아니라 토스가 정한 사실**이다(ADR-0020) — 같은 행에 있어도
+# 우리 판단으로 올릴 수 있는 값이 아니다.
 
 # --- Distribution (#16, ADR-0003/0004/0006) -------------------------------------------
 #
-# 심사기간 종료(JUDGING_ENDED, judging_ends_at) 후 이 기간 동안 아무도 Award하지
-# 않으면 스케줄러(내부 스캔 엔드포인트)가 Score 컷라인을 통과한 Submission들에게
-# Prize를 1/N로 배분한다 — HANDOVER_ACCEPTANCE_PERIOD_DAYS와 같은 "Sponsor의
-# 침묵이 Developer를 인질로 잡지 못한다" 원칙의 무응답 버전이다(REQUEST.md).
-DISTRIBUTION_WAIT_DAYS = int(_env("DISTRIBUTION_WAIT_DAYS", "14"))
+# 배분 대기 기간은 더 이상 여기 없다(#78, ADR-0023) —
+# `policies.models.PlatformPolicy.distribution_wait_days`로 옮겼다.
 
 # --- Notification 연결: Contest 라이프사이클 (#19, ADR-0009/0010) ----------------------
 #
 # 마감·심사기간 종료·Distribution이 다가올 때 Sponsor·Developer에게 미리 알린다.
 # 실제 발송(즉시/야간 연기/대체발송)은 notifications.services(#18)가 그대로
 # 담당한다 — 여기서는 "언제 그 알림을 만들 것인가"만 정한다(notifications.lifecycle).
-DEADLINE_REMINDER_LEAD_HOURS = int(_env("DEADLINE_REMINDER_LEAD_HOURS", "24"))
-JUDGING_END_REMINDER_LEAD_HOURS = int(_env("JUDGING_END_REMINDER_LEAD_HOURS", "24"))
+# 세 리드타임(마감 임박·심사 종료 임박·Distribution 최종 경고) 모두 더 이상
+# 여기 없다(#78, ADR-0023) — `policies.models.PlatformPolicy`의
+# deadline_reminder_lead_hours·judging_end_reminder_lead_hours·
+# distribution_final_warning_lead_days로 옮겼다.
 
-# Distribution 최종 경고는 야간 차단의 08시 연기(ADR-0010)에 기대지 않고, 애초에
-# 낮 시각으로 스케줄을 구성한다(#19 AC) — Distribution 실행 이만큼(일) 앞서,
-# 항상 NOTIFICATION_DAYTIME_HOUR 시(로컬)로 고정된 시각에 발송을 시도한다.
-DISTRIBUTION_FINAL_WARNING_LEAD_DAYS = int(_env("DISTRIBUTION_FINAL_WARNING_LEAD_DAYS", "1"))
 # 08:00~21:00(quiet hours 밖) 중 임의로 고른 낮 시각. 이 값을 바꾸려면 반드시
 # 08~20 사이로 유지해야 한다 — 그 밖으로 나가면 "낮 시각 구성" 자체가 깨진다.
+# (사업 정책이 아니라 알림 스케줄링의 기술적 상수라 이 티켓의 이전 대상이
+# 아니다 — CONTEST_LISTING_FEE 등과 달리 여기 그대로 남는다.)
 NOTIFICATION_DAYTIME_HOUR = int(_env("NOTIFICATION_DAYTIME_HOUR", "10"))
 
 # --- 운영 배포 하드닝 (#23, 티켓 01(#1)이 미룬 `manage.py check --deploy`) --------------

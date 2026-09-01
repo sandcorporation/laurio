@@ -423,6 +423,22 @@ class Command(BaseCommand):
         )
         user.set_unusable_password()
         user.save(update_fields=["password"])
+        # **SocialAccount 를 함께 심는다** — 심사 Sponsor 에 대해 이미 하고 있던
+        # 것을 Developer 에게도 한다(#74). `accounts.api.social_login` 이
+        # (provider, provider_uid) 로만 사용자를 찾으므로, provider_uid 를 로그인
+        # seed 문자열과 같게 두면 e2e 가 그 seed 로 로그인했을 때 바로 이 계정이
+        # 된다.
+        #
+        # 이게 없으면 **제출을 가진 Developer 로 로그인할 방법이 없다** — 「내 참가
+        # 현황」·이의 제기·지급처럼 Developer 본인의 화면은 전부 그 상태를
+        # 필요로 하는데, 매번 UI 로 개최·결제·제출을 다시 걷는 것은 그 화면이
+        # 검증하려는 것과 무관한 비용이다.
+        SocialAccount.objects.create(
+            user=user,
+            provider=SocialAccount.Provider.KAKAO,
+            provider_uid=username,
+            email=f"{username}@example.invalid",
+        )
         return DeveloperProfile.objects.create(user=user, display_name=display_name, bio=bio)
 
     def _create_contest(
@@ -509,6 +525,11 @@ class Command(BaseCommand):
             # Sponsor 로 귀결된다(_seed_judging_sponsor 참고) — "본인만 Award 할
             # 수 있다"를 검증하려면 진짜 Sponsor 로 로그인해야 하기 때문이다.
             "sponsor_login_seed": JUDGING_SPONSOR_LOGIN_SEED,
+            # Developer 본인의 화면(#74)이 "이 Contest 에 제출을 가진 개발자" 로
+            # 로그인할 수 있게 한다 — provider_uid 를 username 과 같게 심어 뒀다.
+            # **문자열을 따로 적지 않고 객체에서 꺼낸다** — 적어 두면 시드가 쓰는
+            # 개발자가 바뀌었을 때 조용히 다른 사람으로 로그인하게 된다.
+            "developer_login_seed": developer_a.user.username,
             "judging_ends_at": (
                 contest.judging_ends_at.isoformat() if contest.judging_ends_at else None
             ),

@@ -48,6 +48,11 @@ class _StubRealPGAdapter:
 class _StubRealPayoutAdapter:
     """실물 토스 지급대행 연동이 아직 없다(#82 라운드 2) — 부팅 가드 테스트 전용 stub."""
 
+
+class _StubRealSellerAdapter:
+    """실물 토스 지급대행 Seller 등록 연동이 아직 없다(#57) — 부팅 가드 테스트 전용 stub."""
+
+
 # dev의 fallback과 같은, 이미 저장소에 공개된 고정 Fernet 키(config/settings.py 참고) —
 # 새로 유출되는 비밀이 아니다. 부팅 가드는 이 값의 "강도"가 아니라 "비어 있는지"만
 # 본다(SECRET_KEY와 달리 production 전용 강도 검사가 없다).
@@ -89,6 +94,7 @@ def _base_env(*, target: str, secret_key: str) -> dict[str, str]:
         "VERIFICATION_ADAPTER_MODE": "tests.test_deployment_config._StubRealVerificationAdapter",
         "PAYMENT_ADAPTER_MODE": "tests.test_deployment_config._StubRealPGAdapter",
         "PAYOUT_ADAPTER_MODE": "tests.test_deployment_config._StubRealPayoutAdapter",
+        "SELLER_ADAPTER_MODE": "tests.test_deployment_config._StubRealSellerAdapter",
         "LLM_ADAPTER_MODE": "real",
         "LLM_REQUIREMENT_CHAT_ADAPTER_MODE": "real",
         "NOTIFICATION_ALIMTALK_ADAPTER": "notifications.adapters.RealAlimtalkAdapter",
@@ -170,6 +176,7 @@ _FAKE_ADAPTER_OVERRIDES = [
     ("VERIFICATION_ADAPTER_MODE", "fake"),
     ("PAYMENT_ADAPTER_MODE", "fake"),
     ("PAYOUT_ADAPTER_MODE", "fake"),
+    ("SELLER_ADAPTER_MODE", "fake"),
     ("LLM_ADAPTER_MODE", "fake"),
     ("LLM_REQUIREMENT_CHAT_ADAPTER_MODE", "fake"),
     ("NOTIFICATION_ALIMTALK_ADAPTER", "notifications.adapters.FakeAlimtalkAdapter"),
@@ -280,6 +287,7 @@ _FAKE_DOTTED_PATH_BYPASSES = [
     ("VERIFICATION_ADAPTER_MODE", "verification.adapters.FakeVerificationAdapter"),
     ("PAYMENT_ADAPTER_MODE", "payments.adapters.FakePGAdapter"),
     ("PAYOUT_ADAPTER_MODE", "payouts.adapters.FakePayoutAdapter"),
+    ("SELLER_ADAPTER_MODE", "payouts.adapters.FakeSellerAdapter"),
 ]
 
 
@@ -318,6 +326,7 @@ _UNRESOLVABLE_ADAPTER_MODE_FIELDS = [
     "VERIFICATION_ADAPTER_MODE",
     "PAYMENT_ADAPTER_MODE",
     "PAYOUT_ADAPTER_MODE",
+    "SELLER_ADAPTER_MODE",
 ]
 
 

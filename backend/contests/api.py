@@ -14,20 +14,21 @@
 import logging
 from uuid import UUID
 
-from django.conf import settings
 from django.db import IntegrityError, transaction
-from django.db.models import Sum
+from django.db.models import DateTimeField, Sum, Value
 from django.http import HttpRequest
 from ninja import Query, Router
 from ninja.errors import HttpError
 from ninja.pagination import PageNumberPagination, paginate
 
 from accounts.middleware import jwt_auth
+from contests.sponsorship import sponsored_contest_queryset
 from accounts.models import SponsorProfile
 from accounts.sanitize import sanitize_free_text
 from core.clock import Clock
 from payments.adapters import PGError, PGTimeoutError, get_adapter
 from payments.models import Payment
+from policies.services import get_current_policy
 from verification.models import Verification
 
 from .models import (
@@ -47,6 +48,7 @@ from .requirement_chat import (
     get_requirement_chat_adapter,
 )
 from .schemas import (
+    MySponsoredContestOut,
     CategoryOut,
     ContestListFilters,
     ContestSort,
@@ -292,6 +294,41 @@ def list_contests(request: HttpRequest, filters: Query[ContestListFilters]):
     )
 
 
+@router.get("/contests/mine", response=list[MySponsoredContestOut], auth=jwt_auth)
+@paginate(PageNumberPagination, page_size=20)
+def list_my_sponsored_contests(request: HttpRequest, **kwargs):
+    """Sponsor 가 자기가 연 공모전들과 각각의 「다음 행동」을 본다 (#81).
+
+    **`/contests/{contest_id}` 보다 먼저 등록해야 한다.** 아래에 두면 django-ninja
+    가 `mine` 을 `contest_id` 로 읽어 422 를 낸다 — 참가자 쪽 `/submissions/mine`
+    이 이미 겪은 함정이다.
+
+    **`draft` 도 나온다.** 공개 목록은 draft 를 감추지만 여기는 「내 것」이고, 초안인
+    채로 결제하지 않으면 아무 일도 일어나지 않는다는 사실을 말해 줄 곳이 여기밖에
+    없다.
+
+    Sponsor 프로필이 없으면 빈 목록이다 — 개최한 적 없는 사람은 정상적인 상태이지
+    없는 리소스가 아니다(`/submissions/mine` 과 같은 관용구).
+    """
+
+    profile = SponsorProfile.objects.filter(user=request.auth_user).first()
+    if profile is None:
+        return Contest.objects.none()
+
+    # 시각과 정책을 이 요청 스코프에서 **한 번씩만** 구한다 — `core.api.tick` 과
+    # `distributions.services.run_due_distributions` 가 쓰는 것과 같은 관용구
+    # (#75, ADR-0023). 행마다 구하면 조회가 행 수만큼 늘고, 게다가 한 화면 안에서
+    # 행마다 다른 시각으로 판정하게 된다.
+    as_of = Clock.now()
+    policy = get_current_policy()
+
+    return sponsored_contest_queryset(
+        Contest.objects.filter(sponsor=profile), as_of=as_of, policy=policy
+    ).annotate(judged_as_of=Value(as_of, output_field=DateTimeField())).order_by(
+        "-created_at"
+    )
+
+
 @router.get("/contests/{contest_id}", response=ContestOut, auth=None)
 def get_contest(request: HttpRequest, contest_id: int):
     try:
@@ -513,10 +550,17 @@ def initiate_judging_period_extension(
             # 중첩 atomic(세이브포인트) — payments.api.initiate_payment와 같은
             # 이유. IntegrityError가 나면 바깥 트랜잭션 전체가 aborted 상태가 되어
             # 그 뒤의 방어적 조회조차 TransactionManagementError로 죽는다.
+            #
+            # amount와 extension_days를 같은 policy 조회에서 함께 스냅샷한다
+            # (#78 코드리뷰 지적 2) — 이 initiate 시점 이후 confirm까지
+            # 정책이 바뀌어도 이 결제가 청구하는 금액과 실제로 늘어나는
+            # 심사기간이 서로 다른 시점을 가리키는 불일치가 생기지 않는다.
+            policy = get_current_policy()
             with transaction.atomic():
                 payment = JudgingExtensionPayment.objects.create(
                     contest=contest,
-                    amount=settings.CONTEST_EXTENSION_FEE,
+                    amount=policy.judging_extension_fee,
+                    extension_days=policy.judging_extension_days,
                     extension_number=contest.judging_extension_count + 1,
                     status=JudgingExtensionPayment.Status.REQUESTED,
                 )

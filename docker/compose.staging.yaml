@@ -14,7 +14,9 @@
 #               PAYMENT_ADAPTER_MODE=real 이라는 존재하지 않는 값을 하드코딩했던 것이
 #               #83이 고친 버그다. 컨테이너는 뜨지만 첫 결제에서야 죽었다)
 #   지급대행   : FakePayoutAdapter     -> 토스 지급대행 샌드박스(dotted path, 아직 미구현)
-#   스토리지   : MinIO                -> 실제 S3/OCI 버킷        (STORAGE_BACKEND=s3)
+#   Seller 등록 : FakeSellerAdapter     -> 토스 지급대행 셀러 등록(dotted path, 아직
+#               미구현 — #50/#57, Payout 확정 후에만 호출된다 — ADR-0020)
+#   스토리지   : MinIO(dev)           -> MinIO(서브 호스트, TLS)  (STORAGE_BACKEND=s3)
 #   소셜 로그인 : FakeSocialAdapter     -> 카카오/GitHub/구글 실물 (SOCIAL_AUTH_MODE=real)
 #   본인확인   : FakeVerificationAdapter -> 실제 PortOne 통합인증 연동(dotted path,
 #               아직 미구현 — #85)
@@ -24,10 +26,10 @@
 #               구현되지 않은 클래스 이름을 여기 하드코딩하지 않는다)
 # config/settings.py의 IS_DEPLOYED_ENVIRONMENT 가드가 이 중 하나라도 fake로 남으면
 # (dotted path가 가리키는 클래스명이 Fake로 시작해도 마찬가지다) 부팅 자체를 거부한다.
-# VERIFICATION_ADAPTER_MODE·PAYMENT_ADAPTER_MODE·PAYOUT_ADAPTER_MODE는 그 값이
-# "fake"도 아니고 실제로 import도 안 되면 역시 부팅을 거부한다(#83) — 그래서 실물
-# 클래스가 없는 지금은 알림 채널과 같은 원칙으로 `${VAR:?...}`로 필수값으로 비워
-# 둔다. 실물이 생기면(#85/#87) 그 dotted path를 .env.staging에 채운다.
+# VERIFICATION_ADAPTER_MODE·PAYMENT_ADAPTER_MODE·PAYOUT_ADAPTER_MODE·SELLER_ADAPTER_MODE는
+# 그 값이 "fake"도 아니고 실제로 import도 안 되면 역시 부팅을 거부한다(#83) — 그래서
+# 실물 클래스가 없는 지금은 알림 채널과 같은 원칙으로 `${VAR:?...}`로 필수값으로 비워
+# 둔다. 실물이 생기면(#85/#87/#57) 그 dotted path를 .env.staging에 채운다.
 #
 # 스케줄러(ADR-0003): redis 브로커 + celery-worker + celery-beat 세 서비스가 반드시
 # 함께 떠야 한다. beat가 core/tasks.py에 정의된 여섯 개 내부 스캔 태스크(틱,
@@ -56,6 +58,10 @@ x-backend-env: &backend-env
   STORAGE_BACKEND: s3
   STORAGE_BUCKET: ${STORAGE_BUCKET:?}
   STORAGE_ENDPOINT_URL: ${STORAGE_ENDPOINT_URL:?}
+  # 브라우저가 presigned PUT 을 직접 쏘는 주소(ADR-0005). MinIO 를 쓰는 staging 에서는
+  # 컨테이너가 붙는 주소와 갈릴 수 있어 명시한다 — 비면 STORAGE_ENDPOINT_URL 을
+  # 물려받는다(config/settings.py).
+  STORAGE_PUBLIC_ENDPOINT_URL: ${STORAGE_PUBLIC_ENDPOINT_URL:-}
   STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:?}
   STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:?}
   STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
@@ -81,6 +87,10 @@ x-backend-env: &backend-env
   PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:?}
   PAYOUT_ADAPTER_MODE: ${PAYOUT_ADAPTER_MODE:?실제 지급대행 어댑터의 dotted path를 .env.staging 에 채워라 — 아직 구현 전이면 이 값 자체를 비워 둘 수 없다}
   PAYOUT_WEBHOOK_SECRET: ${PAYOUT_WEBHOOK_SECRET:?}
+  # Seller(수취인) 등록은 지급과 별개 API·별개 시점이다(#50, ADR-0020) — Payout이
+  # 확정된 뒤에만 호출된다. 실제 어댑터는 아직 구현되지 않았다(#57) — 위와 같은
+  # 이유로 필수값으로 비워 둔다.
+  SELLER_ADAPTER_MODE: ${SELLER_ADAPTER_MODE:?실제 Seller 등록 어댑터의 dotted path를 .env.staging 에 채워라 — 아직 구현 전이면(#57) 이 값 자체를 비워 둘 수 없다}
   TOSS_SANDBOX_SECRET_KEY: ${TOSS_SANDBOX_SECRET_KEY:-}
 
   # --- LLM 채점 · AI grill 어댑터 (ADR-0006/0007/0014) ---
@@ -237,10 +247,63 @@ services:
       # instrumentation.ts가 부팅을 거부한다. .env.staging에서 반드시 채운다.
       LAURIO_WEB_ORIGIN: ${LAURIO_WEB_ORIGIN:?staging LAURIO_WEB_ORIGIN 를 .env.staging 에 설정하라}
     ports:
-      # staging은 검증용 서브 호스트에 직접 노출한다(운영자·QA가 브라우저로 바로
-      # 들어간다) — backend의 INTERNAL_API_PORT 노출과 같은 이유다. prod처럼
-      # 127.0.0.1로 좁히지 않는다.
+      # staging은 검증용 서브 호스트에 직접 노출한다 — backend의
+      # INTERNAL_API_PORT 노출과 같은 이유다. prod처럼 127.0.0.1로 좁히지
+      # 않는다.
+      #
+      # **이 컨테이너 자신은 평문 HTTP로만 듣는다.** LAURIO_WEB_ORIGIN이
+      # https://laurio.honeycombpizza.link이고 이 앱의 세션 쿠키가 staging에서도
+      # Secure를 거는 이상(lib/auth/cookies.ts의 isDeployedEnvironment),
+      # `http://<서브호스트 IP>:${LAURIO_WEB_PORT}`를 브라우저로 직접 열면
+      # Origin이 어긋나 로그인이 403이 되거나(운 좋게 통과해도) Secure 쿠키가
+      # 저장되지 않아 로그인 화면으로 무한히 돌아온다(#70 코드리뷰 지적) —
+      # storage.honeycombpizza.link(MinIO, 이 파일이 관리하지 않는다)와 같은
+      # 전제다: 이 호스트 앞단에 `laurio.honeycombpizza.link`를 이 평문 포트로
+      # 넘겨주는 TLS 종단 리버스 프록시가 **반드시** 있어야 한다. "운영자·QA가
+      # 브라우저로 들어간다"는 그 도메인을 통해서다 — 이 포트로 직접 들어가는
+      # 것이 아니다.
       - "${LAURIO_WEB_PORT:-3000}:3000"
+
+  # 운영자 앱 BFF(#70, ADR-0019/0021). operator.Dockerfile의 runner 스테이지 —
+  # frontend 서비스와 같은 산출물 모양(standalone, `node server.js`)이고 같은
+  # 부팅 가드 원칙을 따른다(operator/instrumentation.ts) — LAURIO_OPERATOR_ORIGIN·
+  # LAURIO_API_BASE_URL이 비어 있으면 이 컨테이너를 그 자리에서 죽인다.
+  #
+  # **LAURIO_OPERATOR_ORIGIN을 위 x-backend-env 앵커의 backend가 요구하는 것과
+  # 정확히 같은 환경변수에서 읽는다.** 두 서비스가 `.env.staging`의 같은 줄을
+  # 그대로 나눠 읽으므로, 이 값이 서로 다른 곳에서 따로 채워져 어긋나는 사고
+  # 자체가 구조적으로 불가능하다 — 이 티켓의 핵심 위험(오리진 정합성)에 대한
+  # compose 수준의 방어다. e2e(frontend/e2e/operator/proxy.spec.ts)가 런타임에서
+  # 같은 사실을 한 번 더 증명한다.
+  operator:
+    build:
+      context: ..
+      dockerfile: docker/operator.Dockerfile
+      target: runner
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+    environment:
+      LAURIO_DEPLOYMENT_TARGET: staging
+      LAURIO_API_BASE_URL: http://backend:8000
+      # backend의 OPERATOR_WEB_ORIGIN(위 x-backend-env)과 같은 변수, 같은 값.
+      LAURIO_OPERATOR_ORIGIN: ${LAURIO_OPERATOR_ORIGIN:?LAURIO_OPERATOR_ORIGIN 을 설정해야 한다}
+    ports:
+      # 공개 앱(LAURIO_WEB_PORT)과 겹치지 않는 별도 포트 — frontend 서비스와
+      # 같은 이유로 127.0.0.1로 좁히지 않는다.
+      #
+      # **이 컨테이너 자신은 평문 HTTP로만 듣는다 — frontend 서비스의 ports:
+      # 주석과 정확히 같은 이유, 같은 결론이다**(#70 코드리뷰 지적).
+      # LAURIO_OPERATOR_ORIGIN이 https이고 이 앱의 세션 쿠키도 staging에서
+      # Secure를 거는 이상(operator/lib/auth/cookies.ts), 이 평문 포트를 IP로
+      # 직접 열면 Origin 불일치로 로그인이 403이 되거나 Secure 쿠키가 저장되지
+      # 않아 /login으로 무한히 돌아온다. 운영자·QA는 이 포트가 아니라
+      # LAURIO_OPERATOR_ORIGIN이 가리키는 도메인(예:
+      # operator.laurio.honeycombpizza.link)으로 들어간다 — 이 호스트 앞단에
+      # 그 도메인을 이 포트로 넘겨주는 TLS 종단 리버스 프록시가 반드시 있어야
+      # 한다.
+      - "${LAURIO_OPERATOR_WEB_PORT:-3001}:3000"
 
 volumes:
   laurio-staging-db:

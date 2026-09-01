@@ -19,11 +19,13 @@ from datetime import timedelta
 from django.db import migrations
 
 # 이 마이그레이션이 작성된 시점의 인수 대기 기간을 그대로 굳힌다 — 나중에
-# settings.HANDOVER_ACCEPTANCE_PERIOD_DAYS를 바꿔도 이 백필의 의미(당시의 14일
-# 규칙을 소급 적용)는 흔들리면 안 된다(contests/migrations/
-# 0005_backfill_judging_ends_at.py의 _JUDGING_PERIOD_DAYS_AT_MIGRATION_TIME과
-# 같은 이유). handovers.api의 런타임 인수 확인·release-due 스캔은 계속 settings
-# 값을 따른다 — 이 상수는 배포 시점 이전에 이미 확정됐던 Award들에만 쓰인다.
+# 정책값(당시는 settings.HANDOVER_ACCEPTANCE_PERIOD_DAYS, #78 이후는
+# PlatformPolicy.handover_acceptance_period_days, ADR-0023)을 바꿔도 이
+# 백필의 의미(당시의 14일 규칙을 소급 적용)는 흔들리면 안 된다(contests/
+# migrations/0005_backfill_judging_ends_at.py의
+# _JUDGING_PERIOD_DAYS_AT_MIGRATION_TIME과 같은 이유). handovers.api의
+# 런타임 인수 확인·release-due 스캔은 계속 그 시점의 정책값을 따른다 — 이
+# 상수는 배포 시점 이전에 이미 확정됐던 Award들에만 쓰인다.
 _HANDOVER_ACCEPTANCE_PERIOD_DAYS_AT_MIGRATION_TIME = 14
 
 

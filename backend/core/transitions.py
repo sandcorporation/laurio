@@ -83,7 +83,21 @@ class TransitionSpec:
     # 이 행의 deadline_at에서 파생돼야지, 스캔 배치 전체가 공유하는 as_of에서
     # 파생되면 안 된다 — 그러면 마감 시각이 서로 다른 두 Contest가 같은 틱에
     # 우연히 같이 걸렸다는 이유만으로 동일한 judging_ends_at을 받는다).
-    extra_fields: Callable[[models.Model, datetime], dict[str, object]] | None = None
+    #
+    # 세 번째 인자 `scan_context`는 `run_due_transitions` 호출 한 번(스캔 스코프)
+    # 동안 공유되는 빈 dict다(#78) — extra_fields가 정책값처럼 행마다 다시
+    # 조회하면 안 되는 값을 스스로 memoize할 자리다. `core.transitions` 자신은
+    # 이 dict의 내용을 모른다 — 무엇을 캐싱할지는 각 extra_fields 구현의 몫이다.
+    #
+    # **이 dict는 TRANSITION_REGISTRY의 모든 spec이 공유한다** — 한 번의
+    # run_due_transitions 호출 안에서 등록된 모든 규칙이 같은 scan_context
+    # 인스턴스를 받는다(코드리뷰 지적, #78 후속). 그래서 키를 `"policy"`처럼
+    # 네임스페이스 없이 고르면, 다른 spec이 같은 memoization 관용구를 복사해
+    # 같은 키를 쓰는 순간 등록 순서에 따라 서로의 값을 읽거나 덮어쓴다 —
+    # AttributeError로 스캔 전체가 죽거나, 우연히 같은 속성이 있으면 잘못된
+    # 값이 조용히 저장된다. 이 dict에 쓰는 모든 키는 소유 모듈을 담아야
+    # 한다 — 예: `f"{__name__}:policy"`(`contests/apps.py`가 쓰는 관용구).
+    extra_fields: Callable[[models.Model, datetime, dict], dict[str, object]] | None = None
 
 
 TRANSITION_REGISTRY: list[TransitionSpec] = []
@@ -104,6 +118,10 @@ def run_due_transitions(as_of=None) -> list[dict]:
 
     as_of = as_of or Clock.now()
     results: list[dict] = []
+    # 이 호출(스캔) 전체가 공유하는 캐시 자리 — extra_fields가 행마다 다시 읽으면
+    # 안 되는 값(예: PlatformPolicy)을 여기 memoize한다(#78). as_of를 스캔
+    # 시작 시점에 한 번만 구해 재사용하는 것과 같은 이유다.
+    scan_context: dict = {}
 
     for spec in TRANSITION_REGISTRY:
         # 전체 행(pk만이 아니라)을 가져온다 — extra_fields가 이 행 자신의 다른
@@ -116,7 +134,11 @@ def run_due_transitions(as_of=None) -> list[dict]:
             )[:DEFAULT_BATCH_SIZE]
         )
         for row in due_rows:
-            extra_fields = spec.extra_fields(row, as_of) if spec.extra_fields is not None else None
+            extra_fields = (
+                spec.extra_fields(row, as_of, scan_context)
+                if spec.extra_fields is not None
+                else None
+            )
             if claim_transition(
                 spec.model,
                 row.pk,
