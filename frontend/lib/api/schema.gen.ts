@@ -1250,6 +1250,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operator/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Policy */
+        get: operations["policies_api_get_policy"];
+        put?: never;
+        /**
+         * Change Policy
+         * @description 정책을 바꾼다. 상위 등급만 — `SuperuserOperatorAuth`가 일반 등급을
+         *     403으로 거절한다(401과 구별된다: 세션 자체가 없으면 401·`OperatorAuth`).
+         *
+         *     `changes`는 페이로드에서 실제로 값이 온 필드만 뽑는다 — `None`은 "이
+         *     필드는 건드리지 마라"는 뜻이다.
+         */
+        post: operations["policies_api_change_policy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/policy/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Policy Changes */
+        get: operations["policies_api_list_policy_changes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/payments": {
         parameters: {
             query?: never;
@@ -2030,6 +2072,11 @@ export interface components {
         EntrySide: "debit" | "credit";
         /** ErrorOut */
         ErrorOut: {
+            /**
+             * Code
+             * @default error
+             */
+            code: string;
             /** Detail */
             detail: string;
         };
@@ -2360,6 +2407,61 @@ export interface components {
             status: string;
             /** Withholding Tax Amount */
             withholding_tax_amount: number;
+        };
+        /** PolicyChangeOut */
+        PolicyChangeOut: {
+            /** After */
+            after: {
+                [key: string]: number;
+            };
+            /** Before */
+            before: {
+                [key: string]: number;
+            };
+            /**
+             * Changed At
+             * Format: date-time
+             */
+            changed_at: string;
+            /** Id */
+            id: number;
+            /** Operator Username */
+            operator_username: string;
+            /** Reason */
+            reason: string;
+        };
+        /** PolicyOut */
+        PolicyOut: {
+            /** Platform Fee Bps */
+            platform_fee_bps: number;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Version */
+            version: number;
+            /** Withholding Minor Income Exempt Won */
+            withholding_minor_income_exempt_won: number;
+            /** Withholding Necessary Expense Bps */
+            withholding_necessary_expense_bps: number;
+            /** Withholding Tax Bps */
+            withholding_tax_bps: number;
+        };
+        /** PolicyUpdateIn */
+        PolicyUpdateIn: {
+            /** Expected Version */
+            expected_version: number;
+            /** Platform Fee Bps */
+            platform_fee_bps?: number | null;
+            /** Reason */
+            reason: string;
+            /** Withholding Minor Income Exempt Won */
+            withholding_minor_income_exempt_won?: number | null;
+            /** Withholding Necessary Expense Bps */
+            withholding_necessary_expense_bps?: number | null;
+            /** Withholding Tax Bps */
+            withholding_tax_bps?: number | null;
         };
         /**
          * ProfileIn
@@ -4284,6 +4386,88 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OperatorPayoutOut"][];
+                };
+            };
+        };
+    };
+    policies_api_get_policy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyOut"];
+                };
+            };
+        };
+    };
+    policies_api_change_policy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PolicyUpdateIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    policies_api_list_policy_changes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyChangeOut"][];
                 };
             };
         };
