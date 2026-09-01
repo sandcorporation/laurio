@@ -155,15 +155,27 @@ Operator 계정은 `backend/accounts/management/commands/seed_e2e_operator.py`
 **스위트가 8분을 넘긴다 — 한 앱만 고쳤으면 그 앱만 돌린다.**
 
 ```bash
-pnpm --dir frontend test            # 전체 (약 8분, 137건)
-pnpm --dir frontend test:operator   # 운영자 앱만 (약 5.6분)
-pnpm --dir frontend test:public     # 공개 앱만 (약 2.4분)
+pnpm --dir frontend test            # 전체 (약 7분, 170건)
+pnpm --dir frontend test:operator   # 운영자 앱만 (약 4.7분, 91건)
+pnpm --dir frontend test:public     # 공개 앱만 (약 2.3분, 79건)
 ```
 
 이게 편의가 아니라 필요다. 서브에이전트의 명령 타임아웃 상한이 10분인데 전체
 스위트가 부하에 따라 8~10분에서 흔들린다 — 넘으면 하네스가 백그라운드로 돌리고
 그 완료 알림은 에이전트가 아니라 최상위 세션으로 가서, 에이전트가 오지 않을
 신호를 영원히 기다린다. 실제로 여러 체인이 그렇게 멈췄다.
+
+**두 가지가 이미 시간을 반으로 줄여 뒀다 — 되돌리지 마라.**
+
+`globalSetup` 이 두 앱의 주요 라우트를 미리 친다. Next dev 서버는 라우트를
+요청받을 때 컴파일해서, 없으면 첫 실행이 테스트가 아니라 컴파일을 기다린다
+(public 콜드 5.6분 대 웜 2.5분, 같은 79건 — contests-pagination 은 30초
+타임아웃으로 실패하기까지 했다).
+
+`seedE2eOperator()` 를 **인자 없이** 부르면 프로세스 안에서 계정을 재사용한다.
+시드 호출 127회 중 79회가 이것이었고 한 번에 약 1.4초(Django 부팅만 640ms)라
+계정 만드는 데만 95초가 쓰였다. **계정 자체를 바꾸는 테스트는 반드시 고유한
+`username` 을 줘야 한다** — 인자를 주면 캐시를 타지 않는다.
 
 **병렬로 돌리지 마라(`workers: 1` 을 올리지 마라).** 시도해서 8.0분이 3.5분으로
 줄었지만 **16건이 실패했다.** 공개 스펙 넷이 각자 `beforeAll` 에서 같은 고정
