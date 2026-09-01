@@ -1447,3 +1447,92 @@ def test_operator_payouts_surface_is_closed_to_non_operators(client, category, l
 
     resp = client.get("/api/operator/payouts", **_auth_header(dev["access"]))
     assert resp.status_code in (401, 403)
+
+
+# --- 주민등록번호가 새는 자리 (#74) -------------------------------------------
+#
+# 이 값은 저장할 때 암호화된다(위 테스트가 확인한다). 하지만 **저장에 이르지
+# 못한 요청**이 남는 자리가 두 곳 더 있다: 검증 실패 응답과 로그. pydantic 은
+# 기본적으로 검증 오류에 `input` 을 담고, django-ninja 는 그것을 그대로
+# `detail` 로 내보낸다 — 사용자가 자릿수를 틀리는 순간 주민등록번호 전체가
+# 응답 본문에, 그리고 그 응답을 찍는 어떤 로그에든 들어간다.
+
+
+@pytest.mark.django_db
+def test_a_malformed_resident_number_never_comes_back_in_the_error_response(
+    client, category, landing_type
+):
+    """자릿수를 틀린 주민등록번호가 4xx 응답 본문에 되돌아오면 안 된다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"])
+
+    # 13자리가 아니라 패턴 검증에서 떨어진다 — 사용자가 실제로 흔히 내는 요청이다.
+    malformed = "900101123456"
+
+    resp = client.post(
+        f"{PAYOUTS_URL}/{requested['idempotency_key']}/identity",
+        data={"resident_registration_number": malformed},
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+
+    assert resp.status_code == 422
+    body = resp.content.decode()
+    assert malformed not in body, (
+        "검증 실패 응답이 입력한 주민등록번호를 그대로 되돌려줬다 — "
+        f"본문: {body[:400]}"
+    )
+    # 앞 6자리(생년월일)만 새도 준식별자다.
+    assert malformed[:6] not in body
+
+
+@pytest.mark.django_db
+def test_a_malformed_resident_number_never_reaches_the_logs(
+    client, category, landing_type, caplog
+):
+    """같은 요청이 로그에도 남으면 안 된다 — 응답만 막으면 절반이다."""
+
+    import logging
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"])
+
+    malformed = "900101123456"
+
+    with caplog.at_level(logging.DEBUG):
+        client.post(
+            f"{PAYOUTS_URL}/{requested['idempotency_key']}/identity",
+            data={"resident_registration_number": malformed},
+            content_type="application/json",
+            **_auth_header(dev["access"]),
+        )
+
+    logged = chr(10).join(record.getMessage() for record in caplog.records)
+    assert malformed not in logged
+    assert malformed[:6] not in logged
+
+
+@pytest.mark.django_db
+def test_a_valid_resident_number_never_comes_back_in_the_success_response(
+    client, category, landing_type
+):
+    """성공 응답에도 되돌려주지 않는다 — 되돌려줄 이유가 없다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"])
+
+    rrn = "9001011234567"
+    resp = client.post(
+        f"{PAYOUTS_URL}/{requested['idempotency_key']}/identity",
+        data={"resident_registration_number": rrn},
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+
+    assert resp.status_code == 200
+    assert rrn not in resp.content.decode()
+    assert rrn[:6] not in resp.content.decode()

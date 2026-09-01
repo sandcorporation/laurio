@@ -103,6 +103,21 @@ function ParticipationCard({ row }: { row: ParticipationRow }) {
       >
         채점 결과 보기
       </Link>
+
+      {/* 지급 화면은 지급 단계에 닿은 행에만 건다. 「모든 행」으로 하면
+          수상하지 않은 사람에게 「지급 요청」 버튼이 보이고, 눌러 봐야 서버가
+          거절한다. 어느 상태가 지급 단계인지는 화면이 파생하지 않는다 —
+          서버가 준 값에 대해 번역표가 답을 들고 있고, 새 값이 생기면
+          `tsc --noEmit` 이 그 답을 요구한다. */}
+      {label.payoutStage ? (
+        <Link
+          className="mt-2 ml-4 inline-block text-sm underline"
+          href={`/console/payouts/${row.contest_id}`}
+          data-testid={`participation-row-${row.submission_id}-payout`}
+        >
+          상금 지급
+        </Link>
+      ) : null}
     </li>
   );
 }

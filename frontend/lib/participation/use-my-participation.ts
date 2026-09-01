@@ -38,20 +38,45 @@ export type ParticipationState =
  *
  * `mine` 은 "네 차례인가" 다. 기다리는 것과 해야 하는 것을 화면이 갈라 보여줘야
  * 참가자가 한눈에 "지금 나한테 온 게 있나" 에 답할 수 있다.
+ *
+ * `payoutStage` 는 "이 상태에서 지급 화면이 보여줄 것이 있는가" 다. 수상하지
+ * 않은 사람에게 지급 화면을 링크하면 「지급 요청」 버튼이 보이는데, 눌러 봐야
+ * 서버가 거절한다 — 화면이 시키는 대로 했는데 거절당하는 그 모양이다. 이 값을
+ * **번역표 안에** 둔 것은 별도의 Set 으로 빼면 새 상태가 생겼을 때 아무도
+ * 결정하지 않은 채 조용히 `false` 가 되기 때문이다. 여기 있으면 `Record` 가
+ * 빌드타임에 결정을 강제한다.
  */
-export const NEXT_ACTION_LABELS: Record<NextAction, { text: string; mine: boolean }> = {
-  awaiting_deadline: { text: "마감을 기다리는 중입니다", mine: false },
-  awaiting_scoring: { text: "채점을 기다리는 중입니다", mine: false },
-  awaiting_judging: { text: "발주자의 심사를 기다리는 중입니다", mine: false },
-  awaiting_appeal_ruling: { text: "이의 심판을 기다리는 중입니다", mine: false },
-  awaiting_distribution: { text: "상금 배분을 기다리는 중입니다", mine: false },
-  awaiting_handover_release: { text: "인수 확인을 기다리는 중입니다", mine: false },
-  awaiting_seller_registration: { text: "지급대행 등록을 기다리는 중입니다", mine: false },
-  can_appeal: { text: "채점 결과에 이의를 제기할 수 있습니다", mine: true },
-  request_payout: { text: "상금 지급을 요청하세요", mine: true },
-  submit_tax_identity: { text: "세무 처리를 위한 정보를 제출하세요", mine: true },
-  not_selected: { text: "선정되지 않았습니다", mine: false },
-  payout_complete: { text: "지급이 완료되었습니다", mine: false },
+export type NextActionLabel = { text: string; mine: boolean; payoutStage: boolean };
+
+export const NEXT_ACTION_LABELS: Record<NextAction, NextActionLabel> = {
+  awaiting_deadline: { text: "마감을 기다리는 중입니다", mine: false, payoutStage: false },
+  awaiting_scoring: { text: "채점을 기다리는 중입니다", mine: false, payoutStage: false },
+  awaiting_judging: { text: "발주자의 심사를 기다리는 중입니다", mine: false, payoutStage: false },
+  awaiting_appeal_ruling: { text: "이의 심판을 기다리는 중입니다", mine: false, payoutStage: false },
+  awaiting_distribution: { text: "상금 배분을 기다리는 중입니다", mine: false, payoutStage: false },
+  // 인수 확인 대기부터가 지급 단계다 — 이때부터 금액 내역이 존재하고, 무엇을
+  // 기다리는지 지급 화면이 설명할 것이 있다.
+  awaiting_handover_release: {
+    text: "인수 확인을 기다리는 중입니다",
+    mine: false,
+    payoutStage: true,
+  },
+  awaiting_seller_registration: {
+    text: "지급대행 등록을 기다리는 중입니다",
+    mine: false,
+    payoutStage: true,
+  },
+  can_appeal: { text: "채점 결과에 이의를 제기할 수 있습니다", mine: true, payoutStage: false },
+  request_payout: { text: "상금 지급을 요청하세요", mine: true, payoutStage: true },
+  submit_tax_identity: {
+    text: "세무 처리를 위한 정보를 제출하세요",
+    mine: true,
+    payoutStage: true,
+  },
+  not_selected: { text: "선정되지 않았습니다", mine: false, payoutStage: false },
+  // 끝난 뒤에도 내역을 다시 볼 수 있어야 한다 — 얼마가 떼였는지 확인할 곳이
+  // 여기밖에 없다.
+  payout_complete: { text: "지급이 완료되었습니다", mine: false, payoutStage: true },
 };
 
 export function useMyParticipation(): ParticipationState {

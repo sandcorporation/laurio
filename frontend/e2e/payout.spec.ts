@@ -1,0 +1,177 @@
+// 지급 화면 (#74) — 얼마가 되어 내게 오는지, 지금 무엇이 남았는지.
+//
+// 시임은 실행 중인 공개 앱 하나다(ADR-0017/0021). 금액 계산과 상태 전이는
+// backend/tests/test_payouts.py 가 실물로 검증한다 — 여기서 확인할 것은 **화면이
+// 그 값을 어떻게 구분해 보여주는가**다. 그래서 상태별 렌더링은 서버 응답을 좁게
+// 갈아끼워 친다(이의 화면 스펙과 같은 방식). 소유권·미수상 같은 경계는 갈아끼우지
+// 않고 실제 서버가 답하게 둔다.
+import { expect, test } from "@playwright/test";
+
+import { seedE2eContests } from "./lib/seed";
+
+async function login(page: import("@playwright/test").Page, seed: string): Promise<void> {
+  await page.goto("/login");
+  await page.getByTestId("fake-login-seed").fill(seed);
+  await page.getByTestId("login-kakao").click();
+  await expect(page).toHaveURL(/\/console/);
+}
+
+const AMOUNTS = {
+  idempotency_key: "11111111-2222-3333-4444-555555555555",
+  contest_id: 1,
+  prize_amount: 1_000_000,
+  platform_fee_amount: 100_000,
+  withholding_tax_amount: 44_000,
+  net_amount: 856_000,
+  has_identity: false,
+  seller_status: null,
+  created_at: new Date().toISOString(),
+};
+
+async function stubPayout(
+  page: import("@playwright/test").Page,
+  contestId: number,
+  overrides: Record<string, unknown>,
+): Promise<void> {
+  await page.route(`**/api/backend/contests/${contestId}/payout`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ...AMOUNTS, contest_id: contestId, ...overrides }),
+    }),
+  );
+}
+
+test("상금 그대로가 들어오지 않는다는 것을 지급 전에 본다", async ({ page }) => {
+  const seeded = seedE2eContests();
+  await login(page, seeded.judging.developer_login_seed);
+
+  const contestId = seeded.judging.id;
+  await stubPayout(page, contestId, {
+    status: "requested",
+    next_action_message: "지급 확인 절차가 진행 중입니다. 잠시만 기다려주세요.",
+  });
+
+  await page.goto(`/console/payouts/${contestId}`);
+
+  // 네 줄이 모두 보여야 한다 — 실수령액만 보여주면 왜 줄었는지 모르고,
+  // 상금만 보여주면 지급 뒤에 설명하게 된다.
+  await expect(page.getByTestId("payout-amount-prize")).toContainText("1,000,000");
+  await expect(page.getByTestId("payout-amount-fee")).toContainText("100,000");
+  await expect(page.getByTestId("payout-amount-withholding")).toContainText("44,000");
+  await expect(page.getByTestId("payout-amount-net")).toContainText("856,000");
+});
+
+test("주민등록번호 대기와 지급대행 등록 대기를 다르게 그린다", async ({ page }) => {
+  const seeded = seedE2eContests();
+  await login(page, seeded.judging.developer_login_seed);
+  const contestId = seeded.judging.id;
+
+  // 「내 차례」 — 폼이 있다.
+  await stubPayout(page, contestId, {
+    status: "confirmed_identity_pending",
+    next_action_message: "세무 신고를 위해 주민등록번호를 제출해주세요.",
+  });
+  await page.goto(`/console/payouts/${contestId}`);
+  await expect(page.getByTestId("payout-identity-form")).toBeVisible();
+  await expect(page.getByTestId("payout-waiting")).toHaveCount(0);
+
+  // 「기다림」 — 하실 일이 없다고 말하고, 상금이 안전하다고 말한다. 실패가
+  // 아니다(ADR-0020). 두 대기가 같은 회색 문장이면 자기 차례인 걸 모른다.
+  await page.unrouteAll();
+  await stubPayout(page, contestId, {
+    status: "confirmed_seller_pending",
+    has_identity: true,
+    seller_status: "under_review",
+    next_action_message: "지급대행사 심사가 진행 중입니다.",
+  });
+  await page.goto(`/console/payouts/${contestId}`);
+  await expect(page.getByTestId("payout-waiting")).toContainText("하실 일은 없습니다");
+  await expect(page.getByTestId("payout-identity-form")).toHaveCount(0);
+});
+
+test("지급대행사가 별도 인증 문자를 보낸다고 미리 말한다", async ({ page }) => {
+  const seeded = seedE2eContests();
+  await login(page, seeded.judging.developer_login_seed);
+  const contestId = seeded.judging.id;
+
+  await stubPayout(page, contestId, {
+    status: "confirmed_identity_pending",
+    next_action_message: "세무 신고를 위해 주민등록번호를 제출해주세요.",
+  });
+
+  await page.goto(`/console/payouts/${contestId}`);
+
+  // 본인확인은 이미 포트원으로 했다 — 예고 없는 두 번째 문자는 피싱으로 읽힌다.
+  await expect(page.getByTestId("payout-sms-notice").first()).toContainText("별도의 본인확인 문자");
+});
+
+test("주민등록번호는 화면에 남지 않는다 — 제출 뒤 입력칸이 비고 마스킹된다", async ({
+  page,
+}) => {
+  const seeded = seedE2eContests();
+  await login(page, seeded.judging.developer_login_seed);
+  const contestId = seeded.judging.id;
+
+  await stubPayout(page, contestId, {
+    status: "confirmed_identity_pending",
+    next_action_message: "세무 신고를 위해 주민등록번호를 제출해주세요.",
+  });
+  // 제출은 실패시킨다 — **실패했을 때야말로** 남기고 싶은 유혹이 큰 자리다.
+  await page.route(`**/api/backend/payouts/*/identity`, (route) =>
+    route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({ detail: "지급이 확정된 뒤에만 신원 정보를 제출할 수 있습니다." }),
+    }),
+  );
+
+  await page.goto(`/console/payouts/${contestId}`);
+  const input = page.getByTestId("payout-rrn-input");
+  // 어깨너머로 읽히지 않는다.
+  await expect(input).toHaveAttribute("type", "password");
+
+  await input.fill("9001011234567");
+  await page.getByTestId("payout-identity-submit").click();
+
+  await expect(page.getByTestId("payout-identity-error")).toBeVisible();
+  await expect(input).toHaveValue("");
+  expect(await page.content()).not.toContain("9001011234567");
+});
+
+test("수상하지 않은 행에는 지급 링크 자체가 없다", async ({ page }) => {
+  const seeded = seedE2eContests();
+  await login(page, seeded.judging.developer_login_seed);
+
+  await page.goto("/console/participation");
+  const rows = page.getByTestId("participation-list").locator("li");
+  await expect(rows.first()).toBeVisible();
+
+  // 심사 시드는 아직 지급 단계가 아니다. 링크를 걸어 두면 「지급 요청」 버튼이
+  // 보이고, 눌러 봐야 서버가 거절한다 — 화면이 시킨 대로 했는데 거절당하는
+  // 그 모양이다.
+  await expect(rows.first().getByTestId(/participation-row-\d+-payout/)).toHaveCount(0);
+});
+
+test("남의 Contest 를 직접 쳐도 금액이 새지 않는다", async ({ page }) => {
+  const seeded = seedE2eContests();
+  await login(page, `e2e-payout-intruder-${Date.now()}`);
+
+  await page.goto(`/console/payouts/${seeded.judging.id}`);
+
+  // 서버가 403(남의 것)을 내든 404(아직 Award 되지 않음)를 내든, 여기서
+  // 지켜야 할 것은 하나다 — **금액 내역이 보이지 않는다.** 어느 코드가 나오는지는
+  // backend/tests/test_payouts.py 가 실물로 검증하므로 여기서 다시 고정하지
+  // 않는다(시드에 Award·Handover 까지 간 Contest 가 없어 여기서는 404 다).
+  await expect(page.getByTestId("payout-heading")).toBeVisible();
+  await expect(page.getByTestId("payout-amounts")).toHaveCount(0);
+  await expect(page.getByTestId("payout-identity-form")).toHaveCount(0);
+});
+
+test("세션이 없으면 렌더링 전에 로그인으로 돌아간다", async ({ page }) => {
+  const response = await page.goto("/console/payouts/1");
+
+  expect(response?.status()).toBeLessThan(400);
+  await expect(page).toHaveURL(/\/login/);
+  expect(await page.content()).not.toContain("상금 지급");
+});
