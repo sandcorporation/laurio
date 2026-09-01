@@ -1,0 +1,174 @@
+"""DeliverableType 운영자 API (#80, ADR-0023).
+
+`accounts.operator_api`와 같은 분리 이유 — `contests.api`(공개 표면, 인증 계층이
+다르고 파일이 이미 크다)와 이 표면(세션 인증, 등급이 갈린다)을 한 파일에 두지
+않는다.
+
+- `GET /operator/deliverable-types` — 활성·비활성 전부. 일반 등급도 조회할 수
+  있다(정책 조회와 같은 규율, #76) — 운영자가 "왜 이 종류가 선택지에 없지"에
+  답하려면 비활성 종류도 봐야 한다.
+- `POST /operator/deliverable-types` — 새 종류 생성. 상위 등급만.
+- `GET /operator/deliverable-types/changes` — 변경 이력. 일반 등급도 조회
+  가능. **정의 순서가 아래 `{id}` 라우트보다 앞이어야 한다** — 이유는 그
+  라우트 정의부의 주석을 보라.
+- `POST /operator/deliverable-types/{id}` — 최소 제안 상금 수정. 상위 등급만.
+- `POST /operator/deliverable-types/{id}/deactivate` — 비활성화. 상위 등급만.
+
+라우터 기본값이 이미 거부(`OperatorAuth`)다. 변경 엔드포인트는 그 위에 상위
+등급까지 요구한다(`SuperuserOperatorAuth`) — 최소 제안 상금은 "상금미달" 배지
+판정에 그대로 쓰이므로, 이 값을 바꾸는 것도 정책값과 같은 무게의 판단이다.
+"""
+
+from __future__ import annotations
+
+from django.http import HttpRequest
+from ninja import Router, Schema
+
+from core.operator_auth import OperatorAuth, SuperuserOperatorAuth
+
+from .deliverable_type_services import (
+    DeliverableTypeConflictError,
+    DeliverableTypeValidationError,
+    create_deliverable_type,
+    deactivate_deliverable_type,
+    update_minimum_prize,
+)
+from .models import DeliverableType, DeliverableTypeChange
+from .schemas import (
+    DeactivateDeliverableTypeIn,
+    DeliverableTypeChangeOut,
+    DeliverableTypeCreateIn,
+    DeliverableTypeUpdateIn,
+    OperatorDeliverableTypeOut,
+)
+
+operator_router = Router(tags=["operator", "contests"], auth=OperatorAuth())
+
+_SUPERUSER = SuperuserOperatorAuth()
+
+
+# django-ninja의 response= 선언에 쓸 간단한 오류 스키마 — accounts.operator_api.
+# ErrorOut과 같은 계약(문자열 detail + 안정적인 code)이다. 여기서 새로 정의하는
+# 이유는 이 앱의 스키마 모듈(contests.schemas)이 그 계약을 아직 갖고 있지 않기
+# 때문이다.
+class OperatorErrorOut(Schema):
+    detail: str
+    code: str = "error"
+
+
+def _serialize(deliverable_type: DeliverableType) -> OperatorDeliverableTypeOut:
+    return OperatorDeliverableTypeOut(
+        id=deliverable_type.id,
+        name=deliverable_type.name,
+        minimum_prize=deliverable_type.minimum_prize,
+        is_active=deliverable_type.is_active,
+    )
+
+
+def _serialize_change(change: DeliverableTypeChange) -> DeliverableTypeChangeOut:
+    return DeliverableTypeChangeOut(
+        id=change.id,
+        deliverable_type_id=change.deliverable_type_id,
+        operator_username=change.operator.username,
+        action=change.action,
+        reason=change.reason,
+        before=change.before,
+        after=change.after,
+        changed_at=change.changed_at,
+    )
+
+
+def _get_or_404(deliverable_type_id: int) -> DeliverableType | None:
+    return DeliverableType.objects.filter(id=deliverable_type_id).first()
+
+
+@operator_router.get("/deliverable-types", response={200: list[OperatorDeliverableTypeOut]})
+def list_deliverable_types(request: HttpRequest):
+    return 200, [
+        _serialize(dt) for dt in DeliverableType.objects.all().order_by("name")
+    ]
+
+
+@operator_router.post(
+    "/deliverable-types",
+    response={201: OperatorDeliverableTypeOut, 409: OperatorErrorOut, 422: OperatorErrorOut},
+    auth=_SUPERUSER,
+)
+def create_deliverable_type_endpoint(request: HttpRequest, payload: DeliverableTypeCreateIn):
+    try:
+        deliverable_type = create_deliverable_type(
+            operator=request.auth,
+            name=payload.name,
+            minimum_prize=payload.minimum_prize,
+            reason=payload.reason,
+        )
+    except DeliverableTypeValidationError as exc:
+        return 422, {"detail": str(exc), "code": "invalid"}
+    except DeliverableTypeConflictError as exc:
+        return 409, {"detail": str(exc), "code": "duplicate"}
+
+    return 201, _serialize(deliverable_type)
+
+
+# **등록 순서가 중요하다.** django-ninja는 `{deliverable_type_id}` 같은 자리를
+# 별도의 정수 컨버터 없이 "슬래시 없는 아무 문자열"에 매치시키므로, 아래
+# `/deliverable-types/{deliverable_type_id}`(POST)가 먼저 등록되면 Django의
+# URL 리졸버가 `/deliverable-types/changes`(GET)로 온 요청까지 그 패턴에
+# 먼저 매치시켜버린다 — 매치된 패턴에 그 메서드(GET)가 없으므로 405가 나고,
+# 리졸버는 다음 패턴으로 넘어가지 않는다(실제로 겪은 버그). 정적 경로
+# `changes`를 동적 `{deliverable_type_id}`보다 먼저 등록해 이 충돌을 피한다.
+@operator_router.get("/deliverable-types/changes", response={200: list[DeliverableTypeChangeOut]})
+def list_deliverable_type_changes(request: HttpRequest):
+    changes = DeliverableTypeChange.objects.select_related("operator").order_by(
+        "-changed_at", "-id"
+    )[:200]
+    return 200, [_serialize_change(change) for change in changes]
+
+
+@operator_router.post(
+    "/deliverable-types/{deliverable_type_id}",
+    response={200: OperatorDeliverableTypeOut, 404: OperatorErrorOut, 422: OperatorErrorOut},
+    auth=_SUPERUSER,
+)
+def update_deliverable_type_endpoint(
+    request: HttpRequest, deliverable_type_id: int, payload: DeliverableTypeUpdateIn
+):
+    deliverable_type = _get_or_404(deliverable_type_id)
+    if deliverable_type is None:
+        return 404, {"detail": "DeliverableType을 찾을 수 없습니다.", "code": "not_found"}
+
+    try:
+        updated = update_minimum_prize(
+            deliverable_type,
+            operator=request.auth,
+            minimum_prize=payload.minimum_prize,
+            reason=payload.reason,
+        )
+    except DeliverableTypeValidationError as exc:
+        return 422, {"detail": str(exc), "code": "invalid"}
+
+    return 200, _serialize(updated)
+
+
+@operator_router.post(
+    "/deliverable-types/{deliverable_type_id}/deactivate",
+    response={200: OperatorDeliverableTypeOut, 404: OperatorErrorOut, 409: OperatorErrorOut, 422: OperatorErrorOut},
+    auth=_SUPERUSER,
+)
+def deactivate_deliverable_type_endpoint(
+    request: HttpRequest, deliverable_type_id: int, payload: DeactivateDeliverableTypeIn
+):
+    deliverable_type = _get_or_404(deliverable_type_id)
+    if deliverable_type is None:
+        return 404, {"detail": "DeliverableType을 찾을 수 없습니다.", "code": "not_found"}
+
+    try:
+        updated = deactivate_deliverable_type(
+            deliverable_type, operator=request.auth, reason=payload.reason
+        )
+    except DeliverableTypeValidationError as exc:
+        return 422, {"detail": str(exc), "code": "invalid"}
+    except DeliverableTypeConflictError as exc:
+        return 409, {"detail": str(exc), "code": "already_inactive"}
+
+    return 200, _serialize(updated)

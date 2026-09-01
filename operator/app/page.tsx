@@ -89,6 +89,16 @@ export default function OperatorHome() {
         </Link>
       </p>
 
+      {/* 산출물 종류 관리(#80)로 가는 진입점 — 정책 화면과 같은 이유로 두
+          등급 모두에게 보인다. 최소 제안 상금도 "상금미달" 배지 판정에
+          쓰이는 정책값과 같은 무게의 판단이라 정책 화면의 관용구를 그대로
+          따른다(#77). */}
+      <p>
+        <Link href="/deliverable-types" data-testid="deliverable-types-nav-link">
+          산출물 종류 관리
+        </Link>
+      </p>
+
       <section data-testid="operator-home-queues">
         <QueueCard
           testId="queue-appeals-pending"
