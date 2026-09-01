@@ -33,6 +33,7 @@ from datetime import timedelta
 
 from django.db import transaction
 
+from appeals.models import Appeal
 from contests.models import Contest
 from core.clock import Clock
 from ledger.models import Account, EntrySide
@@ -247,6 +248,21 @@ def run_due_distributions(*, fail_submission_ids: set[int] | None = None) -> lis
             judging_ends_at__lte=cutoff,
             distribution__isnull=True,
         )
+        # **심판되지 않은 이의가 있으면 그 Contest 는 아직 배분하지 않는다**(#74).
+        #
+        # 이의가 묻는 것이 정확히 "내 점수가 컷라인을 넘는가" 이고, 점수가 돈을
+        # 정하는 유일한 곳이 이 컷라인이다(`Score` 는 Award 를 결정하지 않는다 —
+        # ADR-0006/0014). 답이 안 나온 채 배분하면 이의 제도가 무의미해진다.
+        #
+        # 후보 질의에서 걸러낸다 — 루프 안에서 건너뛰면 그 Contest 가 매 스캔
+        # 배치의 맨 앞을 차지해(order_by("id")) 뒤의 정상 건들을 밀어낸다.
+        #
+        # **보류는 실패가 아니다.** 심판이 끝나는 순간 이 조건이 저절로 풀려
+        # 다음 스캔이 집는다 — 상태를 따로 두지 않는 이유다. 다만 운영자가
+        # 심판하지 않으면 무기한이므로, 운영자 큐가 "이 이의가 배분을 막고
+        # 있다" 를 보여줘야 한다(#74 스펙, ADR-0020 의 "돈이 사라지는 경로를
+        # 만들지 않는다").
+        .exclude(submissions__appeal__status=Appeal.Status.PENDING)
         .order_by("id")
         .values_list("id", flat=True)[:BATCH_SIZE]
     )

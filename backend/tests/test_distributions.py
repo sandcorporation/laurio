@@ -1109,3 +1109,120 @@ def test_one_poisoned_share_does_not_block_other_shares_in_same_scan(
     assert resp2 is not None
     poison_payout.refresh_from_db()
     assert poison_payout.status == Payout.Status.CONFIRMED_IDENTITY_PENDING
+
+
+# --- 심판 대기 중인 이의는 배분을 막는다 (#74) ------------------------------------
+
+
+@pytest.mark.django_db
+def test_a_pending_appeal_holds_the_distribution_for_that_contest(
+    client, category, landing_type
+):
+    """심판되지 않은 이의가 있으면 그 Contest 의 배분을 진행하지 않는다 (#74).
+
+    이의가 묻는 것이 정확히 "내 점수가 컷라인을 넘는가" 이고, 점수가 돈을
+    정하는 유일한 곳이 배분의 컷라인이다(`Score` 는 Award 를 결정하지 않는다 —
+    ADR-0006/0014). 답이 안 나온 채 배분하면 이의 제도 자체가 무의미해진다.
+
+    **대가를 알고 택한 결정이다**: 한 사람의 이의가 그 Contest 의 배분 전체를
+    멈춘다 — 다른 참가자들의 돈도 함께 미뤄진다. 그래서 운영자 큐가 "이 이의가
+    배분을 막고 있다" 를 보여줘야 한다(#74 스펙).
+    """
+
+    seeded = _seed_scored_contest(client, category, landing_type, uid="dev-hold")
+
+    filed = client.post(
+        f"/api/submissions/{seeded['submission_id']}/appeal",
+        data={"reason": "컷라인 판정에 이의가 있습니다."},
+        content_type="application/json",
+        **_auth_header(seeded["access"]),
+    )
+    assert filed.status_code == 201, filed.content
+
+    _advance_to_distribution_due(client, seeded["contest_id"])
+    _run_due_distributions(client)
+
+    assert not Distribution.objects.filter(contest_id=seeded["contest_id"]).exists(), (
+        "심판 대기 중인 이의가 있는데 배분이 만들어졌다"
+    )
+
+
+@pytest.mark.django_db
+def test_the_hold_lifts_once_the_appeal_is_ruled(client, category, landing_type):
+    """심판이 끝나면 다음 스캔이 배분한다 — 보류는 실패가 아니다.
+
+    위 테스트만 있으면 "영원히 막힘" 도 통과한다. 보류가 **풀린다**는 것을
+    함께 고정해야 그 결정이 돈이 사라지는 경로가 아님을 증명한다(ADR-0020).
+    """
+
+    seeded = _seed_scored_contest(client, category, landing_type, uid="dev-lift")
+    filed = client.post(
+        f"/api/submissions/{seeded['submission_id']}/appeal",
+        data={"reason": "재검토를 요청합니다."},
+        content_type="application/json",
+        **_auth_header(seeded["access"]),
+    )
+    assert filed.status_code == 201
+    appeal_id = filed.json()["id"]
+
+    _advance_to_distribution_due(client, seeded["contest_id"])
+    _run_due_distributions(client)
+    assert not Distribution.objects.filter(contest_id=seeded["contest_id"]).exists()
+
+    from tests.test_source_readings import OPERATOR_ORIGIN, _operator_client
+
+    operator = _operator_client("op-distribution-hold")
+    ruled = operator.post(
+        f"/api/operator/appeals/{appeal_id}/rule",
+        data={"decision": "reject", "ruling_note": "판정을 유지한다."},
+        content_type="application/json",
+        HTTP_ORIGIN=OPERATOR_ORIGIN,
+    )
+    assert ruled.status_code == 200, ruled.content
+
+    _run_due_distributions(client)
+
+    assert Distribution.objects.filter(contest_id=seeded["contest_id"]).exists(), (
+        "심판이 끝났는데도 다음 스캔이 배분하지 않았다 — 보류가 영구 정지가 됐다"
+    )
+
+
+def _seed_scored_contest(client, category, landing_type, *, uid: str) -> dict:
+    """채점까지 끝낸 상태 — 아직 심사기간 안이라 이의를 낼 수 있다.
+
+    **순서가 중요하다.** 이의 기한은 심사기간 종료이고(#74) 배분은 그로부터
+    14일 뒤다. 그래서 "배분을 막는 이의" 는 **심사기간 안에 내고 심판이 늦어진**
+    것일 수밖에 없다 — 배분 시점에는 이미 새 이의를 낼 수 없다. 이 헬퍼가
+    채점까지만 하고 멈추는 이유다.
+    """
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        sponsor_uid=f"{uid}-sponsor",
+        sponsor_ci=f"{uid}-sponsor-ci",
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    dev = _verified_user(client, uid, f"{uid}-ci")
+    submission = _submit(
+        client,
+        dev,
+        contest["id"],
+        requirement_id=contest["requirements"][0]["id"],
+        grounded=True,
+    )
+    _close_contest(client, contest, deadline=deadline)
+    _run_scoring(client)
+    return {
+        "access": dev["access"],
+        "submission_id": submission["id"],
+        "contest_id": contest["id"],
+    }
+
+
+def _advance_to_distribution_due(client, contest_id: int) -> None:
+    _end_judging_period(client, contest_id)
+    _advance_past_distribution_wait(contest_id)
