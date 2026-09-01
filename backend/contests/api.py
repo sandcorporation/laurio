@@ -612,7 +612,9 @@ def confirm_judging_period_extension(
 
     adapter = get_adapter()
     try:
-        result_status = adapter.confirm(order_id=str(order_id), simulate=payload.simulate)
+        result_status = adapter.confirm(
+            order_id=str(order_id), simulate=payload.simulate, payment_key=payload.payment_key
+        )
     except PGTimeoutError:
         result_status = adapter.query_status(order_id=str(order_id))
     except PGError as exc:

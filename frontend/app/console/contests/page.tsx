@@ -130,8 +130,10 @@ function SponsoredContestCard({ row }: { row: SponsoredContestRow }) {
       ) : null}
 
       {/* 「결제해야 공개됩니다」가 갈 곳이 없었다(#86) — draft 인 채로 두면
-          아무 일도 일어나지 않는데, 이 화면이 유일하게 그 사실을 말하는 자리다. */}
-      {row.next_action === "pay_to_publish" ? (
+          아무 일도 일어나지 않는데, 이 화면이 유일하게 그 사실을 말하는 자리다.
+          canJudge와 같은 이유로 `next_action`을 직접 비교하지 않고 번역표를
+          거친다(#86 코드리뷰) — 새 상태가 생기면 빌드가 깨진다. */}
+      {label.canPay ? (
         <Link
           className="mt-2 inline-block text-sm underline"
           href={`/console/contests/${row.contest_id}/payment`}

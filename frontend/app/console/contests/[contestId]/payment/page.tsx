@@ -47,6 +47,11 @@ type ConfirmState =
   | { status: "idle" }
   | { status: "confirming" }
   | { status: "paid" }
+  // 실물 어댑터에서 도달 가능한 경로다(#86 코드리뷰) — confirm 응답이 아직
+  // paid/failed로 확정되지 않았다(requested/pending). "idle"로 되돌리면
+  // 사용자에게는 클릭이 아무 일도 안 한 것처럼 보여 반복 클릭을 유도한다 —
+  // 그래서 구별되는 상태로 그린다.
+  | { status: "pending" }
   | { status: "failed"; message: string };
 
 /** 실물 위젯이 없는 이 티켓의 범위 안에서 "위젯이 성공했을 때만 생기는 값"을
@@ -138,34 +143,46 @@ export default function ContestPaymentPage() {
     if (load.status !== "ready") return;
     setConfirm({ status: "confirming" });
 
-    const res = await sessionFetch(`/api/backend/payments/${load.payment.order_id}/confirm`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ payment_key: fakeWidgetPaymentKey(load.payment.order_id) }),
-    });
+    // 로드 경로(loadAll)와 같은 모양으로 맞춘다 — fetch 자체가 reject되면(네트워크
+    // 끊김 등) catch 없이는 "confirming"에 영구히 갇혀 버튼이 disabled인 채
+    // 남고, 사용자는 청구가 됐는지조차 알 수 없다(#86 코드리뷰).
+    try {
+      const res = await sessionFetch(`/api/backend/payments/${load.payment.order_id}/confirm`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ payment_key: fakeWidgetPaymentKey(load.payment.order_id) }),
+      });
 
-    if (!res.ok) {
-      const body = (await res.json().catch(() => null)) as { detail?: string } | null;
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { detail?: string } | null;
+        setConfirm({
+          status: "failed",
+          message: body?.detail ?? `결제 확인에 실패했습니다 (${res.status})`,
+        });
+        return;
+      }
+
+      const result = (await res.json()) as PaymentOut;
+      if (result.status === "paid") {
+        setConfirm({ status: "paid" });
+        return;
+      }
+      if (result.status === "failed") {
+        setConfirm({ status: "failed", message: "결제가 승인되지 않았습니다." });
+        return;
+      }
+      // 아직 확정되지 않았다(requested/pending) — 타임아웃 후 조회로 확정하는
+      // 규율은 백엔드가 이미 지킨다(ADR-0008). 여기서는 그 사실을 구별되는
+      // 상태로 보여주기만 한다 — "다시 확인하기"는 retry()와 같은 경로를 타
+      // 최신 상태를 다시 불러온다(이미 확정됐으면 already-paid로, 아직이면
+      // 같은 결제를 그대로 이어받는다).
+      setConfirm({ status: "pending" });
+    } catch {
       setConfirm({
         status: "failed",
-        message: body?.detail ?? `결제 확인에 실패했습니다 (${res.status})`,
+        message: "네트워크 오류로 결제 확인 결과를 알 수 없습니다. 다시 확인해주세요.",
       });
-      return;
     }
-
-    const result = (await res.json()) as PaymentOut;
-    if (result.status === "paid") {
-      setConfirm({ status: "paid" });
-      return;
-    }
-    if (result.status === "failed") {
-      setConfirm({ status: "failed", message: "결제가 승인되지 않았습니다." });
-      return;
-    }
-    // 아직 확정되지 않았다(requested/pending) — 타임아웃 후 조회로 확정하는
-    // 규율은 백엔드가 이미 지킨다(ADR-0008). 화면은 다시 시도할 수 있게만
-    // 열어둔다.
-    setConfirm({ status: "idle" });
   }
 
   function retry() {
@@ -285,6 +302,18 @@ export default function ContestPaymentPage() {
             className="rounded border border-ink px-4 py-2 text-sm hover:bg-ink hover:text-paper"
           >
             다시 시도
+          </button>
+        </div>
+      ) : confirm.status === "pending" ? (
+        <div className="mt-4 flex flex-col items-start gap-2" data-testid="payment-pending">
+          <p role="status">확인 중입니다. 잠시 후 다시 확인해주세요.</p>
+          <button
+            type="button"
+            onClick={retry}
+            data-testid="payment-recheck"
+            className="rounded border border-ink px-4 py-2 text-sm hover:bg-ink hover:text-paper"
+          >
+            다시 확인하기
           </button>
         </div>
       ) : (

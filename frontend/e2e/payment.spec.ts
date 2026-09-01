@@ -220,6 +220,50 @@ test.describe("개최 → 결제 화면 → 공개", () => {
     await expect(page.getByTestId("payment-success")).toBeVisible();
   });
 
+  test("confirm 응답이 아직 확정되지 않았으면(pending) 클릭이 아무 일도 안 한 것처럼 보이지 않는다", async ({
+    page,
+  }) => {
+    // 실물 어댑터에서 도달 가능한 경로다(#86 코드리뷰) — Fake PG는 기본
+    // 시나리오로는 이 상태를 만들지 않으므로, confirm 응답 자체를 가로채
+    // "requested"(아직 확정 전)로 바꿔치기해 화면의 처리만 확인한다.
+    const runId = `${Date.now()}`;
+    await login(page, `pay-pending-${runId}`);
+    await verify(page, `pay-pending-${runId}`);
+    const contestId = await createDraftViaForm(page, runId);
+
+    let intercepted = false;
+    await page.route("**/api/backend/payments/*/confirm", async (route) => {
+      if (intercepted) {
+        await route.continue();
+        return;
+      }
+      intercepted = true;
+      const response = await route.fetch();
+      const body = (await response.json()) as Record<string, unknown>;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ...body, status: "requested" }),
+      });
+    });
+
+    await page.goto(`/console/contests/${contestId}/payment`);
+    await page.getByTestId("payment-pay-button").click();
+
+    // "idle"로 조용히 되돌아가지 않는다 — 구별되는 상태다.
+    await expect(page.getByTestId("payment-pending")).toBeVisible();
+    await expect(page.getByTestId("payment-pay-button")).toHaveCount(0);
+    await expect(page.getByTestId("payment-failed")).toHaveCount(0);
+
+    // "다시 확인하기"는 막다른 화면이 아니다 — 최신 상태를 다시 불러온다.
+    // route.fetch()가 실제 백엔드 confirm을 그대로 통과시켰으므로(응답 바디만
+    // 화면에 보여줄 때 "requested"로 바꿔치기했을 뿐) 실제로는 이미 결제·공개가
+    // 끝나 있다 — "다시 확인하기"가 화면에 잠깐 보인 pending이 아니라 진짜
+    // 최신 상태(이미 결제됨)로 수렴한다는 것을 보여준다.
+    await page.getByTestId("payment-recheck").click();
+    await expect(page.getByTestId("payment-already-paid")).toBeVisible();
+  });
+
   test("세션이 없으면 렌더링 전에 로그인으로 돌아간다 — 보호된 내용이 응답에 없다", async ({
     page,
   }) => {

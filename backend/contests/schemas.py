@@ -171,6 +171,11 @@ class ConfirmJudgingExtensionIn(Schema):
     # fake PG 전용 시나리오 선택. 실제 어댑터에서는 무시된다(payments.schemas의
     # ConfirmPaymentIn과 같은 원칙, ADR-0007).
     simulate: str | None = None
+    # 결제 건 식별자(#86, payments.schemas.ConfirmPaymentIn과 같은 이유) —
+    # PGAdapter.confirm 계약에 이 필드가 생겼는데 이 두 번째 호출부가 안 넓히면
+    # #87이 실물 어댑터로 갈아끼우는 순간 연장 결제만 조용히 이 값 없이
+    # confirm을 호출하게 된다. FakePGAdapter는 이 값을 무시하므로 optional이다.
+    payment_key: str | None = None
 
 
 class JudgingExtensionPaymentOut(Schema):

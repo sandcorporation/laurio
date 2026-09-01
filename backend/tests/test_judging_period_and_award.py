@@ -20,6 +20,7 @@ import hashlib
 import hmac
 import uuid
 from datetime import timedelta
+from unittest.mock import patch
 
 import pytest
 from django.conf import settings
@@ -29,6 +30,7 @@ from awards.models import Award
 from contests.models import Category, Contest, DeliverableType, JudgingExtensionPayment
 from core.models import ClockOverride
 from core.transitions import TRANSITION_REGISTRY
+from payments.adapters import FakePGAdapter
 from policies.services import get_current_policy
 
 TICK_URL = "/api/internal/tick"
@@ -178,10 +180,17 @@ def _initiate_extension(client, sponsor: dict, contest_id: int) -> dict:
     return resp.json()
 
 
-def _confirm_extension(client, sponsor: dict, contest_id: int, order_id: str, *, simulate=None):
+def _confirm_extension(
+    client, sponsor: dict, contest_id: int, order_id: str, *, simulate=None, payment_key=None
+):
+    body: dict = {}
+    if simulate is not None:
+        body["simulate"] = simulate
+    if payment_key is not None:
+        body["payment_key"] = payment_key
     return client.post(
         f"{CONTESTS_URL}/{contest_id}/extend-judging-period/{order_id}/confirm",
-        data={"simulate": simulate} if simulate is not None else {},
+        data=body,
         content_type="application/json",
         **_auth_header(sponsor["access"]),
     )
@@ -1179,6 +1188,45 @@ def test_extension_confirm_timeout_then_failed_does_not_apply(client, category, 
     payment = JudgingExtensionPayment.objects.get(order_id=initiated["order_id"])
     assert payment.status == JudgingExtensionPayment.Status.FAILED
     assert payment.journal_entry_id is None
+
+
+@pytest.mark.django_db
+def test_extension_confirm_forwards_payment_key_to_adapter(client, category, landing_type):
+    """연장 결제 확인의 두 번째 호출부도 결제 건 식별자를 어댑터까지 나른다
+    (#86 코드리뷰 지적 2). `payments.api.confirm_payment`와 같은 PGAdapter.confirm
+    계약을 쓰면서 이 자리만 payment_key를 안 넘기면, #87이 실물 토스 어댑터로
+    갈아끼우는 순간 연장 결제만 조용히 그 값 없이 confirm을 호출하게 된다 —
+    이 티켓이 메인 결제 경로에서 막으려던 구멍이 두 번째 자리에 그대로 남는
+    것을 막는다.
+    """
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+    _close_contest(client, contest, deadline=deadline)
+
+    initiated = _initiate_extension(client, sponsor, contest["id"])
+
+    received: dict[str, str | None] = {}
+    original_confirm = FakePGAdapter.confirm
+
+    def spy_confirm(self, *, order_id, simulate=None, payment_key=None):
+        received["payment_key"] = payment_key
+        return original_confirm(self, order_id=order_id, simulate=simulate)
+
+    with patch.object(FakePGAdapter, "confirm", spy_confirm):
+        confirm_resp = _confirm_extension(
+            client,
+            sponsor,
+            contest["id"],
+            initiated["order_id"],
+            payment_key="fake-widget-key-extension-abc123",
+        )
+
+    assert confirm_resp.status_code == 200
+    assert confirm_resp.json()["status"] == "paid"
+    assert received["payment_key"] == "fake-widget-key-extension-abc123"
 
 
 @pytest.mark.django_db
