@@ -36,6 +36,15 @@ class ContestsConfig(AppConfig):
 
         from .models import Contest
 
+        # scan_context는 TRANSITION_REGISTRY의 모든 spec이 공유하는 dict다
+        # (core.transitions.run_due_transitions) — 키가 네임스페이스 없이
+        # "policy"처럼 뻔하면, 나중에 다른 전이가 같은 memoization 관용구를
+        # 복사해 같은 키를 쓰는 순간 등록 순서에 따라 서로의 값을 덮어쓰거나
+        # 읽는다(코드리뷰 지적 3 — AttributeError로 스캔이 죽거나, 우연히
+        # 같은 속성이 있으면 잘못된 값이 조용히 저장된다). 이 모듈 소유임을
+        # 값 자체에 담아 충돌을 구조적으로 막는다.
+        _SCAN_CONTEXT_POLICY_KEY = f"{__name__}:policy"
+
         def _judging_period_days(scan_context: dict) -> int:
             # 이 스캔(run_due_transitions 호출 한 번) 동안 정책을 한 번만
             # 읽는다(#78, ADR-0023) — extra_fields는 CLOSED로 넘어가는 Contest
@@ -43,11 +52,11 @@ class ContestsConfig(AppConfig):
             # 쿼리가 행 수만큼 늘어난다. scan_context는 core.transitions가
             # run_due_transitions 호출 하나에 대해 만들어주는 빈 dict라 이
             # memoization이 스캔 경계를 정확히 지킨다.
-            if "policy" not in scan_context:
+            if _SCAN_CONTEXT_POLICY_KEY not in scan_context:
                 from policies.services import get_current_policy
 
-                scan_context["policy"] = get_current_policy()
-            return scan_context["policy"].judging_period_days
+                scan_context[_SCAN_CONTEXT_POLICY_KEY] = get_current_policy()
+            return scan_context[_SCAN_CONTEXT_POLICY_KEY].judging_period_days
 
         register_transition(
             TransitionSpec(

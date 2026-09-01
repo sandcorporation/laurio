@@ -201,6 +201,16 @@ class JudgingExtensionPayment(models.Model):
     # 나중에 바뀌어도 이미 요청된 결제 금액은 흔들리지 않는다(Payment.prize_amount와
     # 같은 원칙).
     amount = models.PositiveIntegerField()
+    # 결제 시점(initiate)의 PlatformPolicy.judging_extension_days 스냅샷
+    # (#78 코드리뷰 지적 2) — amount와 짝을 이루는 값인데도 원래는 여기
+    # 찍히지 않고 confirm 시점에 정책에서 다시 읽혔다. initiate와 confirm
+    # 사이에 운영자가 judging_extension_days를 바꾸면(#78이 이 값을 런타임
+    # 가변 DB 행으로 옮기면서 실제로 열린 창이다 — 값이 상수였을 때는 없던
+    # 문제다) amount는 옛 금액 그대로 청구되는데 심사기간은 새 값만큼만
+    # 늘어나는 불일치가 생긴다. Sponsor가 낸 돈과 실제로 받는 연장 길이가
+    # 항상 같은 시점의 정책을 가리키도록 이 필드가 그 값을 initiate
+    # 시점에 확정한다.
+    extension_days = models.PositiveIntegerField()
     # 이 결제가 성공하면 몇 번째 연장이 되는지의 스냅샷(감사·원장 메모용). 정확한
     # 카운트는 여전히 Contest.judging_extension_count가 조건부 UPDATE로 늘리는
     # 값이 유일한 진실이다 — 이 필드는 그 값을 미리 찍어두는 라벨일 뿐이다.

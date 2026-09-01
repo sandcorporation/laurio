@@ -513,10 +513,17 @@ def initiate_judging_period_extension(
             # 중첩 atomic(세이브포인트) — payments.api.initiate_payment와 같은
             # 이유. IntegrityError가 나면 바깥 트랜잭션 전체가 aborted 상태가 되어
             # 그 뒤의 방어적 조회조차 TransactionManagementError로 죽는다.
+            #
+            # amount와 extension_days를 같은 policy 조회에서 함께 스냅샷한다
+            # (#78 코드리뷰 지적 2) — 이 initiate 시점 이후 confirm까지
+            # 정책이 바뀌어도 이 결제가 청구하는 금액과 실제로 늘어나는
+            # 심사기간이 서로 다른 시점을 가리키는 불일치가 생기지 않는다.
+            policy = get_current_policy()
             with transaction.atomic():
                 payment = JudgingExtensionPayment.objects.create(
                     contest=contest,
-                    amount=get_current_policy().judging_extension_fee,
+                    amount=policy.judging_extension_fee,
+                    extension_days=policy.judging_extension_days,
                     extension_number=contest.judging_extension_count + 1,
                     status=JudgingExtensionPayment.Status.REQUESTED,
                 )

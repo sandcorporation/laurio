@@ -22,7 +22,6 @@ from core.clock import Clock
 from core.transitions import claim_transition
 from ledger.models import Account, EntrySide
 from ledger.services import LineInput, post_journal_entry
-from policies.services import get_current_policy
 
 from .models import Contest, JudgingExtensionPayment
 
@@ -76,14 +75,17 @@ def mark_extension_paid(order_id) -> JudgingExtensionPayment:
         # 돈을 어떻게 처리할지(환불 등)는 이 티켓 범위 밖이다(#17/#22).
         contest = Contest.objects.select_for_update().get(pk=payment.contest_id)
         if contest.status == Contest.Status.CLOSED and contest.judging_ends_at is not None:
-            # 이 요청(confirm 한 번) 스코프에서 정책을 한 번만 읽는다(#78,
-            # ADR-0023) — 이 분기 안에서만 필요하므로 위 재전송 조기 반환 뒤에
-            # 읽는다.
-            policy = get_current_policy()
             new_count = contest.judging_extension_count + 1
             new_refund_disabled = contest.refund_disabled or new_count >= 2
+            # 여기서 정책을 다시 읽지 않는다(#78 코드리뷰 지적 2) —
+            # payment.extension_days는 initiate 시점에 amount와 함께 스냅샷된
+            # 값이다(contests.api.initiate_extension_payment). confirm 시점에
+            # 정책을 다시 읽으면, initiate와 confirm 사이에 운영자가
+            # judging_extension_days를 바꿨을 때 이미 청구된 금액(amount)과
+            # 실제로 늘어나는 심사기간이 서로 다른 정책 시점을 가리키는
+            # 불일치가 생긴다 — Sponsor가 7일치를 내고 3일만 받는 식.
             new_judging_ends_at = contest.judging_ends_at + timedelta(
-                days=policy.judging_extension_days
+                days=payment.extension_days
             )
 
             # claim_transition을 그대로 재사용한다 — from_state와 to_state가 둘 다

@@ -771,6 +771,47 @@ def test_extension_updates_only_the_transition_time_column(client, category, lan
 
 
 @pytest.mark.django_db
+def test_extension_days_is_snapshotted_at_initiate_not_re_read_at_confirm(
+    client, category, landing_type
+):
+    """#78 코드리뷰 지적 2 — initiate와 confirm 사이에 운영자가
+    judging_extension_days를 바꿔도, 이미 청구된 금액(amount)과 실제로
+    늘어나는 심사기간이 같은 시점(initiate)의 정책값을 가리켜야 한다.
+    confirm 시점에 정책을 다시 읽으면 Sponsor가 (initiate 시점 기준) 7일치
+    금액을 내고 3일만 받는 불일치가 생긴다 — extension_days 스냅샷을 없애고
+    confirm이 정책을 다시 읽게 되돌리면 이 테스트가 빨간불이 된다.
+    """
+
+    from policies.models import PlatformPolicy
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+    _close_contest(client, contest, deadline=deadline)
+    original_judging_ends_at = Contest.objects.get(id=contest["id"]).judging_ends_at
+
+    initiated = _initiate_extension(client, sponsor, contest["id"])
+    original_extension_days = get_current_policy().judging_extension_days
+    assert initiated["amount"] == get_current_policy().judging_extension_fee
+
+    # initiate와 confirm 사이에 운영자가 연장 단위를 7일에서 3일로 바꾼다.
+    PlatformPolicy.objects.update_or_create(pk=1, defaults={"judging_extension_days": 3})
+
+    confirm_resp = _confirm_extension(client, sponsor, contest["id"], initiated["order_id"])
+    assert confirm_resp.status_code == 200
+    assert confirm_resp.json()["amount"] == initiated["amount"]
+
+    extended = Contest.objects.get(id=contest["id"])
+    # initiate 시점(7일, 스냅샷)대로 늘어나야 한다 — confirm 시점에 바뀐 새
+    # 값(3일)이 아니다.
+    assert extended.judging_ends_at == original_judging_ends_at + timedelta(
+        days=original_extension_days
+    )
+    assert extended.judging_ends_at != original_judging_ends_at + timedelta(days=3)
+
+
+@pytest.mark.django_db
 def test_extension_confirm_persists_journal_entry_and_updates_auto_now(
     client, category, landing_type
 ):
