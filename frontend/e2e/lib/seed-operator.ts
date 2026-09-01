@@ -165,8 +165,11 @@ export async function sourceReadingCount(submissionId: number, devAccess: string
   if (!res.ok) {
     throw new Error(`source-readings 조회 실패: ${res.status} ${await res.text()}`);
   }
-  const body = (await res.json()) as unknown[];
-  return body.length;
+  // #72 부터 이 표면은 페이지네이션된다({items, count}) — 열람은 중복 제거가
+  // 없어 무제한으로 쌓일 수 있기 때문이다. 여기서 필요한 것은 "몇 번 열렸는가"
+  // 이므로 페이지의 길이가 아니라 전체 개수인 count 를 쓴다.
+  const body = (await res.json()) as { items: unknown[]; count: number };
+  return body.count;
 }
 
 /** 한 Contest의 원장 분개 개수를 `count_ledger_entries` 관리 명령으로 직접

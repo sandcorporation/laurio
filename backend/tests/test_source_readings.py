@@ -440,7 +440,8 @@ def test_developer_sees_no_readings_before_anyone_reveals(client, category, land
     response = client.get(SOURCE_READINGS_URL(submission_id), **_auth_header(dev["access"]))
 
     assert response.status_code == 200
-    assert response.json() == []
+    # 페이지네이션된 응답(#72) — 빈 목록은 items 가 비고 count 가 0 이다.
+    assert response.json() == {"items": [], "count": 0}
 
 
 @pytest.mark.django_db
@@ -460,9 +461,11 @@ def test_two_reveals_are_visible_as_two_readings_on_the_developer_surface(
 
     assert response.status_code == 200
     body = response.json()
-    assert len(body) == 2
+    assert body["count"] == 2
+    items = body["items"]
+    assert len(items) == 2
     # 최신순 — 두 열람 시각이 내림차순으로 정렬되어 있다.
-    assert body[0]["read_at"] >= body[1]["read_at"]
+    assert items[0]["read_at"] >= items[1]["read_at"]
 
 
 @pytest.mark.django_db
@@ -500,6 +503,124 @@ def test_source_reading_response_does_not_expose_operator_identity(
 
     assert response.status_code == 200
     body = response.json()
-    assert len(body) == 1
-    assert set(body[0].keys()) == {"read_at"}
+    assert body["count"] == 1
+    assert set(body["items"][0].keys()) == {"read_at"}
     assert "op-secret-name" not in response.content.decode("utf-8")
+
+
+# --- #72: 감사 기록은 대상의 삭제에 딸려 사라지지 않는다 --------------------------
+
+
+@pytest.mark.django_db
+def test_deleting_an_appeal_cannot_silently_erase_its_source_readings(
+    client, category, landing_type
+):
+    """Appeal 을 지우는 것만으로 "누가 이 소스를 봤는가"가 사라지면 안 된다(#72).
+
+    `read_by` 만 PROTECT 로 지켜서는 부족했다 — 열람한 계정을 지울 수는 없어도
+    Appeal 행 하나를 지우면 기록이 통째로 조용히 사라졌다. 지우려면 감사 기록을
+    **먼저 명시적으로** 지워야 한다. 그 한 줄이 코드에 남는 것이 이 결정의 목적이다.
+    """
+
+    from django.db.models import ProtectedError
+
+    from appeals.models import Appeal
+
+    appeal_id, submission_id, _dev = _appeal_ready_full(client, category, landing_type)
+    operator = _operator_client("op-protect-appeal")
+    assert _reveal_source(operator, appeal_id).status_code == 200
+
+    with pytest.raises(ProtectedError):
+        Appeal.objects.get(id=appeal_id).delete()
+
+    assert SourceReading.objects.filter(submission_id=submission_id).count() == 1
+
+
+@pytest.mark.django_db
+def test_deleting_a_submission_cannot_silently_erase_its_source_readings(
+    client, category, landing_type
+):
+    """Submission 쪽 경로도 같이 막는다 — 한쪽만 막으면 다른 쪽으로 돌아 지울 수 있다."""
+
+    from django.db.models import ProtectedError
+
+    from submissions.models import Submission
+
+    appeal_id, submission_id, _dev = _appeal_ready_full(client, category, landing_type)
+    operator = _operator_client("op-protect-submission")
+    assert _reveal_source(operator, appeal_id).status_code == 200
+
+    with pytest.raises(ProtectedError):
+        Submission.objects.get(id=submission_id).delete()
+
+    assert SourceReading.objects.filter(submission_id=submission_id).count() == 1
+
+
+@pytest.mark.django_db
+def test_deleting_an_appeal_cannot_silently_erase_its_ruling(client, category, landing_type):
+    """심판 기록도 같다(#72) — "누가 돈을 움직였는가"가 삭제 한 번으로 사라지면
+    #24 가 연 문제로 되돌아간다."""
+
+    from django.db.models import ProtectedError
+
+    from appeals.models import Appeal, AppealRuling
+
+    appeal_id, _submission_id, _dev = _appeal_ready_full(client, category, landing_type)
+    operator = _operator_client("op-protect-ruling")
+    ruled = operator.post(
+        f"{OPERATOR_APPEALS_URL}/{appeal_id}/rule",
+        data={"decision": "reject", "ruling_note": "기각한다."},
+        content_type="application/json",
+        HTTP_ORIGIN=OPERATOR_ORIGIN,
+    )
+    assert ruled.status_code == 200, ruled.content
+
+    with pytest.raises(ProtectedError):
+        Appeal.objects.get(id=appeal_id).delete()
+
+    assert AppealRuling.objects.filter(appeal_id=appeal_id).count() == 1
+
+
+# --- #72: 열람 기록 조회에 상한이 있다 -------------------------------------------
+
+
+@pytest.mark.django_db
+def test_source_reading_list_is_paginated(client, category, landing_type):
+    """열람은 중복 제거가 없어 무제한으로 쌓이는데(#60), 조회에는 상한이 있어야 한다.
+
+    한 페이지를 넘게 펼친 뒤, 한 번의 응답이 페이지 크기를 넘지 않으면서도 전체
+    개수는 정확히 말하는지 확인한다 — 상한이 "일부를 조용히 감춘다"가 되면 안 된다.
+    """
+
+    page_size = 20
+    appeal_id, submission_id, dev = _appeal_ready_full(client, category, landing_type)
+    operator = _operator_client("op-many-reveals")
+    for _ in range(page_size + 3):
+        assert _reveal_source(operator, appeal_id).status_code == 200
+
+    response = client.get(SOURCE_READINGS_URL(submission_id), **_auth_header(dev["access"]))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["count"] == page_size + 3
+    assert len(body["items"]) == page_size
+
+    second = client.get(
+        SOURCE_READINGS_URL(submission_id), {"page": 2}, **_auth_header(dev["access"])
+    )
+    assert second.status_code == 200
+    assert len(second.json()["items"]) == 3
+
+
+@pytest.mark.django_db
+def test_pagination_does_not_open_another_developers_readings(client, category, landing_type):
+    """소유권 검사가 페이지네이션보다 먼저다 — 남의 것이면 빈 페이지가 아니라 403 이다."""
+
+    _appeal_id, submission_id, _dev = _appeal_ready_full(client, category, landing_type)
+    other_dev = _verified_user(client, "dev-3", "dev-3-ci")
+
+    response = client.get(
+        SOURCE_READINGS_URL(submission_id), {"page": 1}, **_auth_header(other_dev["access"])
+    )
+
+    assert response.status_code == 403

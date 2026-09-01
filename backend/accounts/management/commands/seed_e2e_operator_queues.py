@@ -161,8 +161,14 @@ def _clear_stale_seed_contests() -> int:
     (awards/models.py — 감사 기록 보존) Contest를 바로 지우면
     `ProtectedError`가 난다. Award를 먼저 지우면 그 보호가 풀리고,
     Award -> Handover -> Payout -> TaxIdentity/PayoutWebhookDelivery는 전부
-    CASCADE라 함께 정리된다. Contest를 지우면 나머지(Submission·Score·
-    Appeal·AppealRuling·SourceReading·Requirement 등)도 CASCADE로 따라간다.
+    CASCADE라 함께 정리된다.
+
+    **감사 기록도 Contest보다 먼저 지운다.** `AppealRuling.appeal`과
+    `SourceReading.appeal`/`.submission`은 PROTECT다(#72) — 예전에는 CASCADE라
+    Contest 한 줄을 지우면 "누가 심판했는가"와 "누가 소스를 봤는가"가 통째로
+    조용히 사라졌다. 이제는 지우려면 여기처럼 **명시적으로 한 줄을 써야 한다**.
+    그 한 줄이 코드에 남는 것이 그 결정의 목적이므로, 편의를 위해 CASCADE로
+    되돌리지 마라.
 
     지운 Contest 개수를 돌려준다 — `--prune-other-runs`(아래 Command)가 그
     수를 그대로 stdout에 찍어, globalSetup이 스위트 시작 전에 실제로 무언가를
@@ -178,7 +184,12 @@ def _clear_stale_seed_contests() -> int:
     if not stale_contest_ids:
         return 0
 
+    from appeals.models import AppealRuling, SourceReading
+
     Award.objects.filter(contest_id__in=stale_contest_ids).delete()
+    # 감사 기록 -> Appeal/Submission -> Contest 순서. PROTECT라 순서가 곧 조건이다.
+    SourceReading.objects.filter(submission__contest_id__in=stale_contest_ids).delete()
+    AppealRuling.objects.filter(appeal__submission__contest_id__in=stale_contest_ids).delete()
     Contest.objects.filter(id__in=stale_contest_ids).delete()
     return len(stale_contest_ids)
 
@@ -423,9 +434,17 @@ def clear_queues() -> dict:
     이 명령이 만든 Contest·Payout에 한정된 삭제라 감사 기록 보존을 신경 쓸
     대상이 아니다.
     """
-    from appeals.models import Appeal
+    from appeals.models import Appeal, SourceReading
     from payouts.models import Payout
 
+    # 심판 대기(pending) Appeal 이라 AppealRuling 은 없지만, **SourceReading 은
+    # 있을 수 있다** — 운영자가 심판하기 전에 소스를 펼쳐 보는 것이 정상 경로다.
+    # `SourceReading.appeal` 이 PROTECT 이므로(#72) 먼저 지우지 않으면 여기서
+    # ProtectedError 가 난다. 감사 기록을 지우는 일은 이렇게 눈에 보여야 한다.
+    SourceReading.objects.filter(
+        appeal__status="pending",
+        appeal__submission__contest__title__startswith=TITLE_PREFIX,
+    ).delete()
     appeals_deleted, _ = Appeal.objects.filter(
         status="pending", submission__contest__title__startswith=TITLE_PREFIX
     ).delete()

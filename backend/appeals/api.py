@@ -29,11 +29,16 @@
 import하지 않는다.
 """
 
-from __future__ import annotations
+# `from __future__ import annotations` 를 쓰지 않는다 — 이 모듈에는 `@paginate` 로
+# 감싼 엔드포인트가 있고(list_own_source_readings, #72), 그 래퍼는 원본 함수의
+# `__globals__` 를 가져갈 수 없어 문자열이 된 어노테이션을 해석하지 못한다.
+# contests/api.py 가 같은 자리에서 `QueryParams is not fully defined` 500 을
+# 겪고 같은 결론에 도달했다(#39).
 
 from django.http import HttpRequest
 from ninja import Router
 from ninja.errors import HttpError
+from ninja.pagination import PageNumberPagination, paginate
 
 from accounts.middleware import jwt_auth
 from core.clock import Clock
@@ -128,10 +133,11 @@ def get_own_appeal(request: HttpRequest, submission_id: int):
 
 @router.get(
     "/submissions/{submission_id}/source-readings",
-    response={200: list[SourceReadingOut], 403: ErrorOut, 404: ErrorOut},
+    response=list[SourceReadingOut],
     auth=jwt_auth,
 )
-def list_own_source_readings(request: HttpRequest, submission_id: int):
+@paginate(PageNumberPagination, page_size=20)
+def list_own_source_readings(request: HttpRequest, submission_id: int, **kwargs):
     """Developer 가 본인 Submission 의 소스 열람 기록을 본다 (#61, ADR-0022).
 
     ADR-0022 는 열람 기록을 만들라고만 한 것이 아니라 "기록에는 읽는 사람이 있어야
@@ -140,12 +146,19 @@ def list_own_source_readings(request: HttpRequest, submission_id: int):
 
     **운영자의 이름은 주지 않는다.** `SourceReadingOut` 에 `read_at` 뿐이다 — 시각과
     횟수만으로 "내 소스가 심판 과정에서 몇 번 열렸다"는 약속을 검증할 수 있다.
+
+    **상한이 있다(#72).** 열람은 의도적으로 중복 제거도 레이트리밋도 없다(#60 —
+    열람은 상태가 아니라 사건이라, 두 번 봤으면 두 줄이 남아야 한다). 그래서 행이
+    무제한 쌓일 수 있는데 전부를 한 배열로 직렬화하면 응답에 상한이 코드 어디에도
+    없게 된다 — 이 저장소는 상한 없는 필드가 4xx 가 나야 할 자리에서 500 을 내는
+    것을 이미 겪었다. `contests` 목록과 같은 페이지네이션 관용구를 쓴다.
+
+    소유권 검사는 페이지네이션보다 **먼저** 일어난다 — 남의 Submission 이면 빈
+    페이지가 아니라 403 이다.
     """
 
     submission = _get_owned_submission(request, submission_id)
-
-    readings = SourceReading.objects.filter(submission=submission).order_by("-read_at")
-    return 200, [SourceReadingOut(read_at=r.read_at) for r in readings]
+    return SourceReading.objects.filter(submission=submission).order_by("-read_at")
 
 
 def _get_appeal_or_404(appeal_id: int) -> Appeal:

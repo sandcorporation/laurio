@@ -1529,6 +1529,15 @@ export interface paths {
          *
          *     **운영자의 이름은 주지 않는다.** `SourceReadingOut` 에 `read_at` 뿐이다 — 시각과
          *     횟수만으로 "내 소스가 심판 과정에서 몇 번 열렸다"는 약속을 검증할 수 있다.
+         *
+         *     **상한이 있다(#72).** 열람은 의도적으로 중복 제거도 레이트리밋도 없다(#60 —
+         *     열람은 상태가 아니라 사건이라, 두 번 봤으면 두 줄이 남아야 한다). 그래서 행이
+         *     무제한 쌓일 수 있는데 전부를 한 배열로 직렬화하면 응답에 상한이 코드 어디에도
+         *     없게 된다 — 이 저장소는 상한 없는 필드가 4xx 가 나야 할 자리에서 500 을 내는
+         *     것을 이미 겪었다. `contests` 목록과 같은 페이지네이션 관용구를 쓴다.
+         *
+         *     소유권 검사는 페이지네이션보다 **먼저** 일어난다 — 남의 Submission 이면 빈
+         *     페이지가 아니라 403 이다.
          */
         get: operations["appeals_api_list_own_source_readings"];
         put?: never;
@@ -2288,6 +2297,13 @@ export interface components {
             count: number;
             /** Items */
             items: components["schemas"]["ContestOut"][];
+        };
+        /** PagedSourceReadingOut */
+        PagedSourceReadingOut: {
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["SourceReadingOut"][];
         };
         /** PaymentOut */
         PaymentOut: {
@@ -4859,7 +4875,10 @@ export interface operations {
     };
     appeals_api_list_own_source_readings: {
         parameters: {
-            query?: never;
+            query?: {
+                page?: number;
+                page_size?: number | null;
+            };
             header?: never;
             path: {
                 submission_id: number;
@@ -4874,25 +4893,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SourceReadingOut"][];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOut"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOut"];
+                    "application/json": components["schemas"]["PagedSourceReadingOut"];
                 };
             };
         };

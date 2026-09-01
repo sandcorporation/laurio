@@ -66,7 +66,13 @@ class AppealRuling(models.Model):
         UPHELD = "upheld", "인용"
         REJECTED = "rejected", "기각"
 
-    appeal = models.OneToOneField(Appeal, related_name="ruling", on_delete=models.CASCADE)
+    # PROTECT — CASCADE 였다(#72). `ruled_by` 만 PROTECT 로 지켜서는 부족하다:
+    # 심판한 계정을 지울 수는 없어도 **Appeal 행 하나를 지우면 그 심판 기록이
+    # 통째로 조용히 사라졌다.** 감사 기록이 자기 대상의 삭제에 딸려 없어지면
+    # "누가 돈을 움직였는가"에 답할 수 없게 되고, 그것이 #24 가 연 문제 그
+    # 자체다. 지우려면 심판 기록을 **먼저 명시적으로** 지워야 한다 — 그 한 줄이
+    # 코드에 남는 것이 이 결정의 목적이다.
+    appeal = models.OneToOneField(Appeal, related_name="ruling", on_delete=models.PROTECT)
     ruled_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, related_name="appeal_rulings", on_delete=models.PROTECT
     )
@@ -107,10 +113,14 @@ class SourceReading(models.Model):
     열람 기록을 appeal 을 거치지 않고 바로 찾아야 하므로 여기 직접 둔다.
     """
 
+    # 둘 다 PROTECT — CASCADE 였다(#72). `AppealRuling` 과 같은 이유다: Submission
+    # 이나 Appeal 을 지우는 것만으로 "누가 이 소스를 봤는가"가 사라지면, ADR-0022
+    # 가 세우려던 약속(소스를 감춘다는 말이 운영자 앞에서 조용히 사라지지 않는다)
+    # 이 삭제 한 번으로 무효가 된다.
     submission = models.ForeignKey(
-        "submissions.Submission", related_name="source_readings", on_delete=models.CASCADE
+        "submissions.Submission", related_name="source_readings", on_delete=models.PROTECT
     )
-    appeal = models.ForeignKey(Appeal, related_name="source_readings", on_delete=models.CASCADE)
+    appeal = models.ForeignKey(Appeal, related_name="source_readings", on_delete=models.PROTECT)
     read_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, related_name="source_readings", on_delete=models.PROTECT
     )
