@@ -89,6 +89,13 @@ x-backend-env: &backend-env
 
   # --- 소셜 로그인 / 본인확인 어댑터 (ADR-0007, ADR-0011, ADR-0024) ---
   SOCIAL_AUTH_MODE: real
+  # 카카오 OAuth 앱 자격증명(#95/#96) — staging의 x-backend-env 앵커와 같은
+  # 이유·같은 구조다(docker/compose.staging.yaml 참고). authorize
+  # 리다이렉트・code→token 교환은 frontend 서비스(BFF)가 지므로 이 값들을
+  # 실제로 쓰는 건 backend가 아니라 frontend다.
+  KAKAO_REST_API_KEY: ${KAKAO_REST_API_KEY:?prod KAKAO_REST_API_KEY 를 .env.prod 에 설정하라}
+  KAKAO_SECRET_KEY: ${KAKAO_SECRET_KEY:?prod KAKAO_SECRET_KEY 를 .env.prod 에 설정하라}
+  KAKAO_REDIRECT_URI: ${KAKAO_REDIRECT_URI:?prod KAKAO_REDIRECT_URI 를 .env.prod 에 설정하라 — 카카오 콘솔에 등록한 값과 정확히 같아야 한다}
   # 실물 PortOne V2 통합인증 어댑터가 #85로 생겼다 — "real"은 dotted path가
   # 아니라 부팅이 통과하고 첫 본인확인 요청에서야 죽었다(#83이 고친 버그).
   # 여기는 verification.adapters.PortOneV2VerificationAdapter를 채운다.
@@ -294,6 +301,13 @@ services:
       # instrumentation.ts가 부팅을 거부한다. staging의 값과 같은 값을 쓰지 않는다
       # (실제 운영 도메인이어야 한다). .env.prod에서 반드시 채운다.
       LAURIO_WEB_ORIGIN: ${LAURIO_WEB_ORIGIN:?prod LAURIO_WEB_ORIGIN 를 .env.prod 에 설정하라}
+      # 카카오 OAuth 앱 자격증명(#95/#96) — staging의 frontend 서비스와 같은
+      # 이유·같은 구조다(docker/compose.staging.yaml 참고). staging과 같은
+      # 값을 쓰지 않는다 — 벤더 앱 자체가 다르고, redirect_uri는 실제 운영
+      # 도메인이어야 한다.
+      KAKAO_REST_API_KEY: ${KAKAO_REST_API_KEY:?prod KAKAO_REST_API_KEY 를 .env.prod 에 설정하라}
+      KAKAO_SECRET_KEY: ${KAKAO_SECRET_KEY:?prod KAKAO_SECRET_KEY 를 .env.prod 에 설정하라}
+      KAKAO_REDIRECT_URI: ${KAKAO_REDIRECT_URI:?prod KAKAO_REDIRECT_URI 를 .env.prod 에 설정하라 — 카카오 콘솔에 등록한 값과 정확히 같아야 한다}
     ports:
       # backend와 같은 이유로 127.0.0.1에만 publish한다 — 이 호스트 앞단에 TLS
       # 종단 리버스 프록시가 반드시 있어야 하고(아직 이 저장소에는 없다, 별도

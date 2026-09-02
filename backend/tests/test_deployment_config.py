@@ -84,6 +84,12 @@ def _base_env(*, target: str, secret_key: str) -> dict[str, str]:
         "STORAGE_SECRET_KEY": "dummy",
         "STORAGE_REGION": "us-east-1",
         "SOCIAL_AUTH_MODE": "real",
+        # 카카오 OAuth 앱 자격증명(#95/#96) — authorize・code→token 교환은
+        # 프론트엔드 BFF가 지므로 이 프로세스는 실제로 쓰지 않지만, 부팅 가드
+        # (config/settings.py)는 이 값들이 비어 있으면 거부한다.
+        "KAKAO_REST_API_KEY": f"{target}-kakao-rest-api-key",
+        "KAKAO_SECRET_KEY": f"{target}-kakao-secret-key",
+        "KAKAO_REDIRECT_URI": f"https://{target}.laurio.example/api/auth/social/kakao/callback",
         "VERIFICATION_ADAPTER_MODE": "tests.adapter_stubs.StubVerificationAdapter",
         "PAYMENT_ADAPTER_MODE": "tests.adapter_stubs.StubPGAdapter",
         "PAYOUT_ADAPTER_MODE": "tests.adapter_stubs.StubPayoutAdapter",
@@ -631,6 +637,62 @@ def test_development_target_boots_without_an_operator_origin():
     env = _base_env(target="development", secret_key=_STRONG_SECRET_KEY)
     env["LAURIO_DEPLOYMENT_TARGET"] = "development"
     env["LAURIO_OPERATOR_ORIGIN"] = ""
+
+    result = _run_check(env)
+
+    assert result.returncode == 0, result.stderr
+
+
+# --- 카카오 OAuth 앱 자격증명: 비어 있으면 배포 환경에서 부팅을 거부한다 (#95/#96) ---
+#
+# authorize 리다이렉트・code→token 교환은 프론트엔드 BFF가 진다(#95) — 이
+# 프로세스는 이 값들을 실제로 쓰지 않는다. 그런데도 여기서 거부하는 이유는
+# LAURIO_OPERATOR_ORIGIN과 같다: 배포 스택이 "떴다/안 떴다"를 판정하는 신호를
+# backend 컨테이너 하나로 모은다 — 값이 비면 카카오 로그인 버튼이 컨테이너가
+# 뜬 채로 항상 실패한다는 것을 배포 시점에 알게 한다(#83이 어댑터에 대해 닫은
+# 실패 모드와 같다).
+
+
+@pytest.mark.parametrize("target", ["staging", "production"])
+@pytest.mark.parametrize(
+    "field", ["KAKAO_REST_API_KEY", "KAKAO_SECRET_KEY", "KAKAO_REDIRECT_URI"]
+)
+def test_deployed_environment_refuses_to_boot_without_a_kakao_oauth_credential(target, field):
+    env_builder = _production_env if target == "production" else _staging_env
+    env = env_builder(**{field: ""})
+
+    result = _run_check(env)
+
+    assert result.returncode != 0, (
+        f"{target} config with {field}='' 가 부팅에 성공했다 — 카카오 로그인 버튼이 "
+        "컨테이너가 뜬 채로 항상 실패한다."
+    )
+    assert "ImproperlyConfigured" in result.stderr
+    assert field in result.stderr
+
+
+def test_staging_boots_with_kakao_oauth_credentials():
+    env = _staging_env(
+        KAKAO_REST_API_KEY="staging-kakao-rest-api-key",
+        KAKAO_SECRET_KEY="staging-kakao-secret-key",
+        KAKAO_REDIRECT_URI="https://staging.laurio.example/api/auth/social/kakao/callback",
+    )
+
+    result = _run_check(env)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_development_target_boots_without_kakao_oauth_credentials():
+    """dev·CI 는 이 가드의 대상이 아니다 — 오타를 부팅 실패로 바꿀 만큼 배포와
+    같은 무게가 아니다. 자격증명이 없으면 authorize 라우트가 카카오 대신 우리
+    문구로 돌아간다(#96, frontend/app/api/auth/social/kakao/authorize/route.ts)."""
+
+    env = _base_env(target="development", secret_key=_STRONG_SECRET_KEY)
+    env["LAURIO_DEPLOYMENT_TARGET"] = "development"
+    env["KAKAO_REST_API_KEY"] = ""
+    env["KAKAO_SECRET_KEY"] = ""
+    env["KAKAO_REDIRECT_URI"] = ""
 
     result = _run_check(env)
 

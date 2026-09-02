@@ -139,6 +139,14 @@ jobs:
       STORAGE_SECRET_KEY: ci-deploy-check-only-secret-key
       STORAGE_REGION: us-east-1
       SOCIAL_AUTH_MODE: real
+      # 카카오 OAuth 앱 자격증명(#95/#96) — authorize・code→token 교환은
+      # frontend BFF가 지므로 이 잡(backend만 돈다)은 실제로 쓰지 않지만,
+      # SOCIAL_AUTH_MODE=real인 배포 환경에서 이 값들이 비면 config/settings.py
+      # 의 부팅 가드가 거부한다 — 이 잡이 검증하는 "배포 하드닝이 통과하는가"에
+      # 포함된다.
+      KAKAO_REST_API_KEY: ci-deploy-check-only-kakao-rest-api-key
+      KAKAO_SECRET_KEY: ci-deploy-check-only-kakao-secret-key
+      KAKAO_REDIRECT_URI: https://api.laurio.example/api/auth/social/kakao/callback
       # 실제 벤더 어댑터(#85 PortOne, #87 Toss, #57 Seller 등록, #88 OpenAI)는
       # 아직 구현되지 않았다(#23/#83 범위 밖) — 이 잡이 검증하려는 건 "배포
       # 하드닝이 통과하는가"이지 "어댑터가 실물인가"가 아니다. `core.adapters.
@@ -484,6 +492,29 @@ jobs:
           fi
           echo "$output" | grep -q "LAURIO_API_BASE_URL" || { echo "::error::에러 메시지에 원인이 안 남는다"; exit 1; }
 
+      # #95/#96 — 카카오 OAuth 앱 자격증명도 같은 부팅 가드 대상이다
+      # (instrumentation.ts REQUIRED_IN_DEPLOYED_ENVIRONMENTS). LAURIO_WEB_ORIGIN/
+      # LAURIO_API_BASE_URL은 채우고 카카오 자격증명만 비워 — 이 값들만으로도
+      # 독립적으로 부팅이 거부되는지 확인한다.
+      - name: Refuses to boot in production without kakao oauth credentials
+        run: |
+          set +e
+          output=$(timeout 20 docker run --rm \
+            -e LAURIO_DEPLOYMENT_TARGET=production \
+            -e LAURIO_WEB_ORIGIN=https://laurio.example \
+            -e LAURIO_API_BASE_URL=http://127.0.0.1:1 \
+            laurio-frontend-runner-ci 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
+            echo "::error::카카오 자격증명 없이도 컨테이너가 죽지 않았다(status=$status) — 부팅 가드가 깨졌다"
+            exit 1
+          fi
+          echo "$output" | grep -q "KAKAO_REST_API_KEY" || { echo "::error::에러 메시지에 원인(KAKAO_REST_API_KEY)이 안 남는다"; exit 1; }
+          echo "$output" | grep -q "KAKAO_SECRET_KEY" || { echo "::error::에러 메시지에 원인(KAKAO_SECRET_KEY)이 안 남는다"; exit 1; }
+          echo "$output" | grep -q "KAKAO_REDIRECT_URI" || { echo "::error::에러 메시지에 원인(KAKAO_REDIRECT_URI)이 안 남는다"; exit 1; }
+
       - name: Boots with a complete production config and forces Secure cookies
         run: |
           set -euo pipefail
@@ -491,6 +522,9 @@ jobs:
             -e LAURIO_DEPLOYMENT_TARGET=production \
             -e LAURIO_WEB_ORIGIN=https://laurio.example \
             -e LAURIO_API_BASE_URL=http://127.0.0.1:1 \
+            -e KAKAO_REST_API_KEY=ci-guard-only-kakao-rest-api-key \
+            -e KAKAO_SECRET_KEY=ci-guard-only-kakao-secret-key \
+            -e KAKAO_REDIRECT_URI=https://laurio.example/api/auth/social/kakao/callback \
             -p 3100:3000 \
             laurio-frontend-runner-ci
 

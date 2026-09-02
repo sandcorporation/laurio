@@ -86,6 +86,17 @@ x-backend-env: &backend-env
 
   # --- 소셜 로그인 / 본인확인 어댑터 (ADR-0007, ADR-0011, ADR-0024) ---
   SOCIAL_AUTH_MODE: real
+  # 카카오 OAuth 앱 자격증명(#95/#96) — authorize 리다이렉트・code→token 교환은
+  # frontend 서비스(BFF)가 지므로 이 값들을 실제로 쓰는 건 backend가 아니라
+  # frontend다(아래 frontend 서비스의 environment도 같은 .env.staging 줄을
+  # 나눠 읽는다). 그런데도 여기서 요구하는 이유는 배포 스택의 "떴다/안 떴다"
+  # 신호를 backend 컨테이너 하나로 모으기 위해서다(LAURIO_OPERATOR_ORIGIN과
+  # 같은 원칙) — 비면 core.settings의 부팅 가드가 거부한다.
+  KAKAO_REST_API_KEY: ${KAKAO_REST_API_KEY:?staging KAKAO_REST_API_KEY 를 .env.staging 에 설정하라}
+  KAKAO_SECRET_KEY: ${KAKAO_SECRET_KEY:?staging KAKAO_SECRET_KEY 를 .env.staging 에 설정하라}
+  # 카카오 콘솔에 등록한 값과 정확히 같아야 한다 — 한 글자만 달라도 code→token
+  # 교환이 거절된다.
+  KAKAO_REDIRECT_URI: ${KAKAO_REDIRECT_URI:?staging KAKAO_REDIRECT_URI 를 .env.staging 에 설정하라 — 카카오 콘솔에 등록한 값과 정확히 같아야 한다}
   # 실물 PortOne V2 통합인증 어댑터가 #85로 생겼다 — "real"은 dotted path가
   # 아니라 부팅이 통과하고 첫 본인확인 요청에서야 죽었다(#83이 고친 버그).
   # 여기는 verification.adapters.PortOneV2VerificationAdapter를 채운다. 채널은
@@ -307,6 +318,16 @@ services:
       # frontend/lib/auth/origin.ts의 CSRF Origin 검증이 쓰는 값 — 비어 있으면
       # instrumentation.ts가 부팅을 거부한다. .env.staging에서 반드시 채운다.
       LAURIO_WEB_ORIGIN: ${LAURIO_WEB_ORIGIN:?staging LAURIO_WEB_ORIGIN 를 .env.staging 에 설정하라}
+      # 카카오 OAuth 앱 자격증명(#95/#96) — authorize 리다이렉트・code→token
+      # 교환을 이 서비스(BFF)가 직접 한다(frontend/lib/auth/kakao.ts). backend의
+      # x-backend-env 앵커와 같은 .env.staging 줄을 나눠 읽는다 — 두 서비스가
+      # 각자 부팅 시점에 요구해야(여기는 instrumentation.ts) "한쪽만 채우고
+      # 잊었다"는 사고를 막는다. KAKAO_SECRET_KEY는 이 값을 실제로 쓰는
+      # 유일한 서비스가 여기라는 뜻이기도 하다 — client_secret이 브라우저로
+      # 나가는 응답에는 절대 실리지 않는다.
+      KAKAO_REST_API_KEY: ${KAKAO_REST_API_KEY:?staging KAKAO_REST_API_KEY 를 .env.staging 에 설정하라}
+      KAKAO_SECRET_KEY: ${KAKAO_SECRET_KEY:?staging KAKAO_SECRET_KEY 를 .env.staging 에 설정하라}
+      KAKAO_REDIRECT_URI: ${KAKAO_REDIRECT_URI:?staging KAKAO_REDIRECT_URI 를 .env.staging 에 설정하라 — 카카오 콘솔에 등록한 값과 정확히 같아야 한다}
     ports:
       # staging은 검증용 서브 호스트에 직접 노출한다 — backend의
       # INTERNAL_API_PORT 노출과 같은 이유다. prod처럼 127.0.0.1로 좁히지

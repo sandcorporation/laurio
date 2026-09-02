@@ -52,6 +52,36 @@ const REQUIRED_IN_DEPLOYED_ENVIRONMENTS: Array<{ name: string; reason: string }>
       "모두 127.0.0.1:58000(자기 자신)으로 조용히 폴백해 로그인·조회·제출이 전부 " +
       "연결 거부로 실패한다 — 배포 환경에서는 실제 backend 주소를 명시적으로 요구한다.",
   },
+  // 카카오 OAuth 앱 자격증명(#95/#96, spec #92) — authorize 리다이렉트・code→token
+  // 교환을 이 BFF가 직접 하므로(lib/auth/kakao.ts) 이 세 값을 실제로 읽는
+  // 프로세스는 backend가 아니라 여기다. backend/config/settings.py가 같은
+  // 이름의 값을 배포 환경에서 한 번 더 요구하는 것도 같은 이유다
+  // (LAURIO_OPERATOR_ORIGIN을 backend·operator 양쪽이 각자 요구하는 것과 같은
+  // 원칙) — 두 쪽 다 잊혀야만 "로그인 버튼이 컨테이너가 뜬 채로 항상 실패한다"는
+  // 사고가 난다.
+  {
+    name: "KAKAO_REST_API_KEY",
+    reason:
+      "카카오 OAuth의 client_id다. 비어 있으면 lib/auth/kakao.ts의 " +
+      "readKakaoOAuthConfig가 null을 돌려줘, authorize 라우트가 카카오로 " +
+      "보내는 대신 '이 환경에는 카카오 앱이 설정되지 않았다'는 우리 문구로 " +
+      "돌아간다 — dev에서는 정상 동작이지만 배포 환경에서 이 상태가 되는 것은 " +
+      "설정 누락이다.",
+  },
+  {
+    name: "KAKAO_SECRET_KEY",
+    reason:
+      "카카오 OAuth의 client_secret이다. code→token 교환(lib/auth/kakao.ts의 " +
+      "exchangeKakaoCodeForToken)에만 쓰이고 브라우저로 나가는 응답에는 " +
+      "절대 실리지 않는다 — 비어 있으면 authorize 자체가 카카오로 가지 않는다.",
+  },
+  {
+    name: "KAKAO_REDIRECT_URI",
+    reason:
+      "카카오 콘솔에 등록한 값과 한 글자라도 다르면 카카오가 code→token 교환을 " +
+      "거절한다(docker/staging.env.example 참고) — 비어 있으면 그 사고를 배포 " +
+      "시점에 막는다.",
+  },
 ];
 
 export async function register(): Promise<void> {
