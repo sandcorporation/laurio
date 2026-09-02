@@ -53,14 +53,6 @@ class WithdrawalBlockReason(models.TextChoices):
         "developer_payout_in_progress",
         "지급이 끝나지 않은 Payout이 있어 탈퇴할 수 없습니다",
     )
-    # #100 한정 — 실명을 남길 자리(RetainedIdentity)가 아직 없어 거래 이력이
-    # 있는 사람은 통째로 막는다. #101이 RetainedIdentity를 만들며 이 사유를
-    # 더는 내지 않는다(코드에서 제거된다) — 지울 수 없는 것을 지우려 하지
-    # 않는다는 임시 제한이다.
-    RETENTION_NOT_YET_SUPPORTED = (
-        "retention_not_yet_supported",
-        "거래 이력이 있는 계정의 탈퇴는 아직 지원되지 않습니다",
-    )
 
 
 def _is_blocking_contest_status(status: str) -> bool:
@@ -141,45 +133,74 @@ def _developer_has_payout_in_progress(developer_profile: DeveloperProfile) -> bo
     return any(_is_blocking_payout_status(status) for status in statuses)
 
 
-def has_transacted(user) -> bool:
-    """이 계정에 결제나 지급 같은 금전 이동이 **있었던 적이 있는가**(끝났든 아니든).
+def _transaction_basis(user) -> tuple[str, int] | None:
+    """이 계정에 결제나 지급 같은 금전 이동이 **있었던 적이 있는가**(끝났든 아니든),
+    있다면 그 근거는 무엇인가 — `(RetainedIdentity.Reason, 그 거래의 PK)`.
 
-    `blocking_reasons`("탈퇴할 수 있는가" — 진행 중인가)와는 다른 질문이다. 이
-    함수는 RetainedIdentity로 실명을 남길지를 정하는 데만 쓰인다(#101) — 판정
-    기준은 한 곳(여기)에만 있다.
+    `blocking_reasons`("탈퇴할 수 있는가" — *진행 중인가*)와는 다른 질문이다(#101).
+    이 함수 하나가 `has_transacted`(있었는가)와 `RetainedIdentity`를 채우는
+    근거(왜, 어느 거래) 양쪽의 유일한 판정처다 — 갈라 두면 언젠가 둘이 다른
+    답을 하게 된다(이 저장소가 반복해 겪은 실패 모양).
 
     - Sponsor: 결제된(=DRAFT를 벗어난 적이 있는) Contest를 하나라도 가졌으면
-      참이다. `Contest.status`가 DRAFT를 벗어나는 유일한 경로가 결제 확인이라
-      (`contests.models.Contest.Status.PUBLISHED`의 주석), 지금 상태가 무엇이든
-      DRAFT가 아니면 과거에 결제가 있었다는 뜻이다.
-    - Developer: 확정(CONFIRMED)된 Payout을 하나라도 받았으면 참이다 — 원장에
-      실제로 돈이 움직인 기록이 남은 경우다.
+      그 Contest가 근거다. `Contest.status`가 DRAFT를 벗어나는 유일한 경로가
+      결제 확인이라(`contests.models.Contest.Status.PUBLISHED`의 주석), 지금
+      상태가 무엇이든 DRAFT가 아니면 과거에 결제가 있었다는 뜻이다.
+    - Developer: 확정(CONFIRMED)된 Payout을 하나라도 받았으면 그 Payout이
+      근거다 — 원장에 실제로 돈이 움직인 기록이 남은 경우다.
+
+    한 계정이 Sponsor·Developer 양쪽으로 거래했더라도 행은 하나(`RetainedIdentity`
+    가 `user`에 대해 OneToOne)뿐이라 근거도 하나만 고른다 — Sponsor 쪽을 먼저
+    본다. 실명 하나를 남기는 데는 근거가 하나로 충분하고, 어느 쪽이 먼저인지는
+    이 파기 결정의 정당성에 영향을 주지 않는다.
     """
 
     from contests.models import Contest
     from payouts.models import Payout
+    from verification.models import RetainedIdentity
 
     sponsor_profile = getattr(user, "sponsor_profile", None)
     if sponsor_profile is not None:
-        if Contest.objects.filter(sponsor=sponsor_profile).exclude(
-            status=Contest.Status.DRAFT
-        ).exists():
-            return True
+        contest = (
+            Contest.objects.filter(sponsor=sponsor_profile)
+            .exclude(status=Contest.Status.DRAFT)
+            .order_by("id")
+            .first()
+        )
+        if contest is not None:
+            return RetainedIdentity.Reason.SPONSOR_PAID_CONTEST, contest.id
 
     developer_profile = getattr(user, "developer_profile", None)
     if developer_profile is not None:
-        if Payout.objects.filter(
-            models.Q(handover__award__submission__developer=developer_profile)
-            | models.Q(distribution_share__submission__developer=developer_profile),
-            status=Payout.Status.CONFIRMED,
-        ).exists():
-            return True
+        payout = (
+            Payout.objects.filter(
+                models.Q(handover__award__submission__developer=developer_profile)
+                | models.Q(distribution_share__submission__developer=developer_profile),
+                status=Payout.Status.CONFIRMED,
+            )
+            .order_by("id")
+            .first()
+        )
+        if payout is not None:
+            return RetainedIdentity.Reason.DEVELOPER_CONFIRMED_PAYOUT, payout.id
 
-    return False
+    return None
+
+
+def has_transacted(user) -> bool:
+    """이 계정에 결제나 지급 같은 금전 이동이 있었던 적이 있는가. 판정 기준은
+    `_transaction_basis` 한 곳에만 있다."""
+
+    return _transaction_basis(user) is not None
 
 
 def blocking_reasons(user) -> list[WithdrawalBlockReason]:
-    """지금 이 계정이 탈퇴할 수 없는 이유 전부. 비어 있으면 탈퇴할 수 있다."""
+    """지금 이 계정이 탈퇴할 수 없는 이유 전부. 비어 있으면 탈퇴할 수 있다.
+
+    거래 이력이 있다는 사실 자체는 막지 않는다(#101) — `execute_withdrawal`이
+    그 실명을 `RetainedIdentity`로 옮겨 남기는 것으로 처리한다. 여기서 막는
+    것은 오직 *진행 중인* 거래뿐이다.
+    """
 
     reasons: list[WithdrawalBlockReason] = []
 
@@ -190,12 +211,6 @@ def blocking_reasons(user) -> list[WithdrawalBlockReason]:
     developer_profile = getattr(user, "developer_profile", None)
     if developer_profile is not None and _developer_has_payout_in_progress(developer_profile):
         reasons.append(WithdrawalBlockReason.DEVELOPER_PAYOUT_IN_PROGRESS)
-
-    # #100 한정 임시 제한 — 진행 중인 거래는 없지만(위에서 걸리지 않았지만)
-    # 거래 이력이 있으면 실명을 남길 자리가 아직 없어 통째로 막는다. #101이
-    # RetainedIdentity를 만들며 이 분기를 지운다.
-    if not reasons and has_transacted(user):
-        reasons.append(WithdrawalBlockReason.RETENTION_NOT_YET_SUPPORTED)
 
     return reasons
 
@@ -227,6 +242,26 @@ def execute_withdrawal(user) -> Withdrawal:
 
     verification = getattr(user, "verification", None)
     if verification is not None:
+        # 실명·생년월일을 지우기 **전에** 거래 이력을 확인해야 한다 — 순서를
+        # 바꾸면 옮길 값이 이미 사라진 뒤에 옮기려는 꼴이 된다.
+        basis = _transaction_basis(user)
+        if basis is not None:
+            from verification.models import (
+                RETAINED_IDENTITY_RETENTION_PERIOD,
+                RetainedIdentity,
+            )
+
+            reason, retained_because_id = basis
+            retained = RetainedIdentity(
+                user=user,
+                reason=reason,
+                retained_because_id=retained_because_id,
+                retained_until=now + RETAINED_IDENTITY_RETENTION_PERIOD,
+            )
+            retained.real_name = verification.real_name
+            retained.birth_date = verification.birth_date
+            retained.save()
+
         verification.status = verification.Status.WITHDRAWN
         verification.reason = "탈퇴로 신원이 파기되었습니다."
         verification.real_name_encrypted = ""

@@ -1,14 +1,14 @@
-"""Withdrawal — 신원 파기, 계정 삭제가 아니다 (#100, ADR-0025).
+"""Withdrawal — 신원 파기, 계정 삭제가 아니다 (#100, #101, ADR-0025).
 
 `Withdrawal`은 계정 행을 지우지 않는다. CI·DI·전화번호·표시 이름·소개가
-즉시 사라지고, 공개 프로필이 닫히고, 로그인할 수 없게 된다. 이 티켓(#100)은
-거래(결제·지급) 이력이 있는 사람을 아직 통째로 막는다 — 실명을 남길 자리
-(RetainedIdentity)가 없기 때문이다. 그 제한은 #101이 푼다.
+즉시 사라지고, 공개 프로필이 닫히고, 로그인할 수 없게 된다. 거래(결제·지급)
+이력이 있는 사람은 실명·생년월일이 `RetainedIdentity`로 옮겨져 남고(#101),
+없었던 사람은 전부 즉시 파기된다.
 """
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 
 import pytest
 from django.conf import settings
@@ -19,7 +19,7 @@ from accounts.withdrawal import WithdrawalBlockReason
 from contests.models import Category, Contest, DeliverableType
 from core.models import ClockOverride
 from payouts.models import Payout
-from verification.models import Verification
+from verification.models import RetainedIdentity, Verification
 
 WITHDRAWAL_URL = "/api/accounts/withdrawal"
 CONTESTS_URL = "/api/contests"
@@ -480,12 +480,12 @@ def test_developer_with_in_progress_payout_is_blocked(client, category, landing_
 
 
 @pytest.mark.django_db
-def test_sponsor_who_already_paid_for_a_now_finished_contest_is_blocked_by_retention_gap(
+def test_sponsor_who_already_paid_can_withdraw_and_real_name_is_retained(
     client, category, landing_type
 ):
-    """진행 중인 거래는 이제 없지만(Contest가 AWARDED로 끝났다) 결제 이력이 있는
-    Sponsor는 #100에서는 막힌 채로 남는다 — 실명을 남길 자리가 아직 없다. 사유는
-    정확히 하나(RETENTION_NOT_YET_SUPPORTED)다."""
+    """진행 중인 거래는 이제 없다(Contest가 AWARDED로 끝났다) — 결제 이력이 있는
+    Sponsor도 #101부터는 탈퇴할 수 있다. 실명·생년월일은 RetainedIdentity로
+    옮겨지고, 원래 자리(Verification)에서는 사라진다(#101 AC)."""
 
     sponsor, dev, contest, submission = _ready_for_payout(
         client, category, landing_type, sponsor_uid="retained-sponsor", dev_uid="retained-dev-1"
@@ -493,20 +493,36 @@ def test_sponsor_who_already_paid_for_a_now_finished_contest_is_blocked_by_reten
 
     header = _auth_header(sponsor["access"])
     eligibility = client.get(WITHDRAWAL_URL, **header)
-    assert eligibility.json() == {
-        "can_withdraw": False,
-        "blocking_reasons": [WithdrawalBlockReason.RETENTION_NOT_YET_SUPPORTED.value],
-    }
+    assert eligibility.json() == {"can_withdraw": True, "blocking_reasons": []}
 
     response = client.post(WITHDRAWAL_URL, content_type="application/json", **header)
-    assert response.status_code == 409
-    assert response.json()["blocking_reasons"] == [
-        WithdrawalBlockReason.RETENTION_NOT_YET_SUPPORTED.value
-    ]
+    assert response.status_code == 200, response.content
+
+    from django.contrib.auth import get_user_model
+
+    user = get_user_model().objects.get(social_accounts__provider_uid="retained-sponsor")
+
+    verification = Verification.objects.get(user=user)
+    assert verification.status == Verification.Status.WITHDRAWN
+    # CI·DI·전화번호는 거래 이력과 무관하게 여전히 즉시 파기된다.
+    assert verification.ci_encrypted == ""
+    assert verification.di_encrypted == ""
+    # 실명·생년월일은 원래 자리에서 사라졌다 — RetainedIdentity로 옮겨졌다.
+    assert verification.real_name_encrypted == ""
+    assert verification.birth_date_encrypted == ""
+
+    retained = RetainedIdentity.objects.get(user=user)
+    assert retained.reason == RetainedIdentity.Reason.SPONSOR_PAID_CONTEST
+    assert retained.retained_because_id == contest["id"]
+    assert retained.real_name == "사람"  # _verified_user의 기본 실명
+    assert retained.birth_date == date(1995, 1, 1)
+    assert retained.retained_until > timezone.now()
+    # 원문이 평문으로 저장되지 않는다 — Verification과 같은 암호화 방식이다.
+    assert "사람" not in retained.real_name_encrypted
 
 
 @pytest.mark.django_db
-def test_developer_with_a_confirmed_payout_is_blocked_by_retention_gap(
+def test_developer_with_a_confirmed_payout_can_withdraw_and_real_name_is_retained(
     client, category, landing_type
 ):
     sponsor, dev, contest, submission = _ready_for_payout(
@@ -516,16 +532,108 @@ def test_developer_with_a_confirmed_payout_is_blocked_by_retention_gap(
     _confirm_payout(client, dev, requested["idempotency_key"])
     identity_resp = _submit_identity(client, dev, requested["idempotency_key"])
     assert identity_resp.status_code == 200
-    assert Payout.objects.get(idempotency_key=requested["idempotency_key"]).status == (
-        Payout.Status.CONFIRMED
-    )
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    assert payout.status == Payout.Status.CONFIRMED
 
     header = _auth_header(dev["access"])
     eligibility = client.get(WITHDRAWAL_URL, **header)
-    assert eligibility.json() == {
-        "can_withdraw": False,
-        "blocking_reasons": [WithdrawalBlockReason.RETENTION_NOT_YET_SUPPORTED.value],
-    }
+    assert eligibility.json() == {"can_withdraw": True, "blocking_reasons": []}
+
+    response = client.post(WITHDRAWAL_URL, content_type="application/json", **header)
+    assert response.status_code == 200, response.content
+
+    from django.contrib.auth import get_user_model
+
+    user = get_user_model().objects.get(social_accounts__provider_uid="retained-dev-2")
+    retained = RetainedIdentity.objects.get(user=user)
+    assert retained.reason == RetainedIdentity.Reason.DEVELOPER_CONFIRMED_PAYOUT
+    assert retained.retained_because_id == payout.id
+
+
+@pytest.mark.django_db
+def test_never_transacted_vs_transacted_withdrawal_differ_in_what_is_retained(
+    client, category, landing_type
+):
+    """이 스펙의 핵심 대비다 — 거래가 있었던 사람은 실명이 남고, 없었던 사람은
+    전부 즉시 파기된다(#101 AC). 같은 테스트에서 둘을 대비시킨다."""
+
+    # 거래가 전혀 없는 사람 — 본인확인만 했다.
+    never_pair = _login(client, uid="never-transacted-user")
+    never_header = _auth_header(never_pair["access"])
+    _verify(client, never_pair["access"], ci="never-transacted-ci", name="한번도안한사람")
+
+    # 거래(결제된 Contest)가 있는 Sponsor.
+    transacted_sponsor, _dev, _contest, _submission = _ready_for_payout(
+        client, category, landing_type,
+        sponsor_uid="differ-sponsor", dev_uid="differ-dev",
+    )
+
+    client.post(WITHDRAWAL_URL, content_type="application/json", **never_header)
+    client.post(
+        WITHDRAWAL_URL, content_type="application/json", **_auth_header(transacted_sponsor["access"])
+    )
+
+    from django.contrib.auth import get_user_model
+
+    User = get_user_model()
+    never_user = User.objects.get(social_accounts__provider_uid="never-transacted-user")
+    transacted_user = User.objects.get(social_accounts__provider_uid="differ-sponsor")
+
+    # 거래가 없었던 사람 — RetainedIdentity 행 자체가 생기지 않는다.
+    assert not RetainedIdentity.objects.filter(user=never_user).exists()
+    assert Verification.objects.get(user=never_user).real_name_encrypted == ""
+
+    # 거래가 있었던 사람 — RetainedIdentity가 실명을 들고 남는다.
+    assert RetainedIdentity.objects.filter(user=transacted_user).exists()
+    assert Verification.objects.get(user=transacted_user).real_name_encrypted == ""
+
+
+@pytest.mark.django_db
+def test_retained_identity_has_no_ci_di_or_phone_columns():
+    """CI·DI·전화번호는 RetainedIdentity에 들어갈 칼럼 자체가 없다(#101 AC) —
+    자리가 없어야 나중에 채워 넣는 실수를 막는다."""
+
+    field_names = {f.name for f in RetainedIdentity._meta.get_fields()}
+    assert "ci_encrypted" not in field_names
+    assert "ci_hash" not in field_names
+    assert "di_encrypted" not in field_names
+    assert "phone_number_encrypted" not in field_names
+
+
+@pytest.mark.django_db
+def test_retained_identity_lives_in_its_own_table_separate_from_verification():
+    """살아 있는 신원과 다른 자리(별도 테이블)에 있다 — 같은 테이블에 칼럼만
+    늘리지 않았다."""
+
+    assert RetainedIdentity._meta.db_table != Verification._meta.db_table
+
+
+@pytest.mark.django_db
+def test_retained_identity_never_appears_in_any_public_response(client, category, landing_type):
+    """RetainedIdentity의 내용이 어떤 공개 API 응답에도 실리지 않는다 — 있는지가
+    아니라 없는지를 단언한다(#101 AC)."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(
+        client, category, landing_type, sponsor_uid="leak-check-sponsor", dev_uid="leak-check-dev"
+    )
+    client.post(
+        WITHDRAWAL_URL, content_type="application/json", **_auth_header(sponsor["access"])
+    )
+
+    from django.contrib.auth import get_user_model
+
+    user = get_user_model().objects.get(social_accounts__provider_uid="leak-check-sponsor")
+    retained = RetainedIdentity.objects.get(user=user)
+    real_name = retained.real_name
+
+    # 이 Sponsor가 개최한 Contest의 공개 상세 — 실명이 실릴 자리가 없어야 한다.
+    detail = client.get(f"{CONTESTS_URL}/{contest['id']}")
+    assert detail.status_code == 200
+    assert real_name not in detail.content.decode()
+
+    listing = client.get(CONTESTS_URL)
+    assert listing.status_code == 200
+    assert real_name not in listing.content.decode()
 
 
 # --- 상태 목록 자체를 순회한다 ----------------------------------------------------
