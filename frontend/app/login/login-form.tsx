@@ -1,42 +1,70 @@
 "use client";
 
-// 로그인 화면(ADR-0016, FE-07 #32). ADR-0015가 그은 경계 밖이다 — 이 페이지는
-// auth=None 백엔드 엔드포인트를 부르지 않고(호출할 세션이 아직 없다), 색인
-// 대상도 아니다. 그래서 서버 컴포넌트로 남겨둘 이유가 없어 클라이언트
+// 로그인 화면(ADR-0016, FE-07 #32, #95 spec #92). ADR-0015가 그은 경계 밖이다 —
+// 이 페이지는 auth=None 백엔드 엔드포인트를 부르지 않고(호출할 세션이 아직
+// 없다), 색인 대상도 아니다. 그래서 서버 컴포넌트로 남겨둘 이유가 없어 클라이언트
 // 컴포넌트로 둔다.
 //
-// dev/test는 소셜 제공자 실제 연동이 불가능하다(카카오·GitHub·구글 계정으로
-// 브라우저를 통과시킬 수 없다). 백엔드의 SOCIAL_AUTH_MODE=fake(기본값, dev/test)는
-// access_token을 "<식별자>:<이메일>" 형식 문자열로 그대로 신뢰하므로
-// (accounts/social.py FakeSocialAdapter), 여기서는 그 형식에 맞는 결정적인
-// 토큰을 만들어 세 버튼 모두 실제로 로그인이 끝까지 되는 것을 증명한다.
-// SOCIAL_AUTH_MODE=real인 배포(staging/prod)에서는 이 자리에 실제 OAuth authorize
-// 리다이렉트가 들어가야 한다 — 그건 이 티켓 범위 밖이고(#23이 배포 환경을 갈랐고,
-// 실제 제공자 자격증명 발급은 별도 운영 작업이다), 지금 이 폼은 백엔드가 어떤
-// 어댑터를 쓰든 상관없이 "access_token 문자열을 얻어 POST 한다"는 동일한 계약을
-// 지킨다.
+// 이 화면은 두 경로를 같이 그린다(#95):
+//
+// 1. **실물 제공자 버튼.** 카카오는 실제로 동작한다 — 누르면 이 페이지를 떠나
+//    `/api/auth/social/kakao/authorize`로 top-level GET 이동한다(BFF가 OAuth를
+//    진다, 클라이언트 JS가 토큰을 만지는 일이 없다). GitHub·구글은 아직 배선만
+//    있고 어댑터가 없으므로(spec #92 Out of Scope) 버튼은 있되 비활성 상태로
+//    "준비 중"을 뚜렷이 보여준다 — 눌러도 아무 데도 안 가는 버튼을 두지 않는다.
+// 2. **dev seed 폼.** SOCIAL_AUTH_MODE=fake(dev/test 기본값)는 access_token을
+//    "<식별자>:<이메일>" 형식 문자열로 그대로 신뢰한다(accounts/social.py
+//    FakeSocialAdapter) — 그 형식에 맞는 결정적인 토큰을 만들어 곧바로 POST한다.
+//    기존 e2e 119건이 이 폼(`fake-login-seed`·`login-kakao` 등 테스트 id)으로
+//    로그인하므로 여기는 손대지 않는다. `showDevSeedForm`이 false면(배포 환경,
+//    app/login/page.tsx가 서버에서 판정) 이 절 자체가 렌더되지 않는다 — 배포
+//    환경에 로그인 우회가 실려 나가는 것이 막는 값이다(#95).
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-const PROVIDERS = [
+import { resolveNextPath } from "@/lib/auth/next-path";
+
+const DEV_SEED_PROVIDERS = [
   { id: "kakao", label: "카카오로 로그인" },
   { id: "github", label: "GitHub으로 로그인" },
   { id: "google", label: "Google로 로그인" },
 ] as const;
 
-type ProviderId = (typeof PROVIDERS)[number]["id"];
+type DevSeedProviderId = (typeof DEV_SEED_PROVIDERS)[number]["id"];
 
-function LoginButtons() {
+// 콜백(app/api/auth/social/kakao/callback/route.ts)과 authorize
+// (app/api/auth/social/kakao/authorize/route.ts)가 ?error=로 실어 보내는 코드를
+// 사람이 읽을 문구로 옮긴다 — "빈 화면이 아니라 이유가 보인다"는 인수조건.
+const OAUTH_ERROR_MESSAGES: Record<string, string> = {
+  oauth_unconfigured: "이 환경에는 카카오 앱이 설정되지 않았습니다.",
+  invalid_state: "로그인 세션이 만료되었거나 올바르지 않습니다. 다시 시도해주세요.",
+  provider_denied: "카카오 로그인이 취소되었거나 거부되었습니다.",
+  login_failed: "로그인에 실패했습니다. 다시 시도해주세요.",
+};
+
+function describeOAuthError(code: string | null): string | null {
+  if (!code) return null;
+  return OAUTH_ERROR_MESSAGES[code] ?? "로그인에 실패했습니다.";
+}
+
+interface LoginButtonsProps {
+  showDevSeedForm: boolean;
+}
+
+function LoginButtons({ showDevSeedForm }: LoginButtonsProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const next = searchParams.get("next") || "/console";
+  // 같은 오리진 경로가 아니면 기본값으로 떨어진다(오픈 리다이렉트 방어) —
+  // authorize 라우트가 이 값을 다시 한번 같은 규칙으로 검증한다.
+  const next = resolveNextPath(searchParams.get("next"));
+  const oauthError = describeOAuthError(searchParams.get("error"));
 
   const [seed, setSeed] = useState("dev-user");
-  const [pending, setPending] = useState<ProviderId | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState<DevSeedProviderId | null>(null);
+  const [devSeedError, setDevSeedError] = useState<string | null>(null);
 
-  async function handleLogin(provider: ProviderId) {
-    setError(null);
+  async function handleDevSeedLogin(provider: DevSeedProviderId) {
+    setDevSeedError(null);
     setPending(provider);
     try {
       const accessToken = `${seed}:${seed}@example.test`;
@@ -48,68 +76,103 @@ function LoginButtons() {
 
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { detail?: string } | null;
-        setError(body?.detail ?? `로그인에 실패했습니다 (${res.status})`);
+        setDevSeedError(body?.detail ?? `로그인에 실패했습니다 (${res.status})`);
         return;
       }
 
       router.replace(next);
       router.refresh();
     } catch {
-      setError("로그인 요청을 보내지 못했습니다. 네트워크를 확인해주세요.");
+      setDevSeedError("로그인 요청을 보내지 못했습니다. 네트워크를 확인해주세요.");
     } finally {
       setPending(null);
     }
   }
+
+  const displayedError = devSeedError ?? oauthError;
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-8 bg-paper p-10">
       <div className="flex w-full max-w-sm flex-col gap-6 rounded-md border border-rule bg-surface p-8">
         <div>
           <h1 className="text-2xl font-semibold">로그인</h1>
-          <p className="mt-2 text-sm text-ink">
-            dev 환경은 소셜 제공자 대신 결정적인 fake 어댑터로 로그인합니다.
-          </p>
         </div>
-
-        <label className="flex flex-col gap-1 text-sm">
-          테스트 계정 식별자
-          <input
-            className="rounded-sm border border-rule bg-paper px-2 py-1 font-mono"
-            value={seed}
-            onChange={(event) => setSeed(event.target.value)}
-            data-testid="fake-login-seed"
-          />
-        </label>
 
         <div className="flex flex-col gap-3">
-          {PROVIDERS.map((provider) => (
-            <button
-              key={provider.id}
-              type="button"
-              onClick={() => handleLogin(provider.id)}
-              disabled={pending !== null}
-              data-testid={`login-${provider.id}`}
-              className="rounded-sm border border-rule px-4 py-2 text-sm hover:border-ink disabled:opacity-50"
-            >
-              {pending === provider.id ? "로그인 중..." : provider.label}
-            </button>
-          ))}
+          <a
+            href={`/api/auth/social/kakao/authorize?next=${encodeURIComponent(next)}`}
+            data-testid="oauth-login-kakao"
+            className="rounded-sm border border-ink px-4 py-2 text-center text-sm font-medium hover:bg-ink hover:text-paper"
+          >
+            카카오로 로그인
+          </a>
+          <button
+            type="button"
+            disabled
+            aria-disabled="true"
+            data-testid="oauth-login-github"
+            className="cursor-not-allowed rounded-sm border border-rule px-4 py-2 text-sm text-ink/50"
+          >
+            GitHub으로 로그인 (준비 중)
+          </button>
+          <button
+            type="button"
+            disabled
+            aria-disabled="true"
+            data-testid="oauth-login-google"
+            className="cursor-not-allowed rounded-sm border border-rule px-4 py-2 text-sm text-ink/50"
+          >
+            Google로 로그인 (준비 중)
+          </button>
         </div>
 
-        {error && (
+        {displayedError && (
           <p role="alert" data-testid="login-error" className="text-sm text-attention">
-            {error}
+            {displayedError}
           </p>
+        )}
+
+        {showDevSeedForm && (
+          <div className="flex flex-col gap-3 border-t border-rule pt-6" data-testid="dev-seed-login">
+            <p className="text-sm text-ink">
+              dev 환경은 소셜 제공자 대신 결정적인 fake 어댑터로 로그인합니다.
+            </p>
+
+            <label className="flex flex-col gap-1 text-sm">
+              테스트 계정 식별자
+              <input
+                className="rounded-sm border border-rule bg-paper px-2 py-1 font-mono"
+                value={seed}
+                onChange={(event) => setSeed(event.target.value)}
+                data-testid="fake-login-seed"
+              />
+            </label>
+
+            <div className="flex flex-col gap-3">
+              {DEV_SEED_PROVIDERS.map((provider) => (
+                <button
+                  key={provider.id}
+                  type="button"
+                  onClick={() => handleDevSeedLogin(provider.id)}
+                  disabled={pending !== null}
+                  data-testid={`login-${provider.id}`}
+                  className="rounded-sm border border-rule px-4 py-2 text-sm hover:border-ink disabled:opacity-50"
+                >
+                  {pending === provider.id ? "로그인 중..." : provider.label}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
       </div>
     </main>
   );
 }
 
-export default function LoginForm() {
+export default function LoginForm({ showDevSeedForm }: LoginButtonsProps) {
   return (
     <Suspense fallback={null}>
-      <LoginButtons />
+      <LoginButtons showDevSeedForm={showDevSeedForm} />
     </Suspense>
   );
 }

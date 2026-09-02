@@ -7,10 +7,9 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-import { backendBaseUrl } from "@/lib/auth/backend";
 import { setSessionCookies } from "@/lib/auth/cookies";
-import { safeJson } from "@/lib/auth/http";
 import { assertSameOrigin } from "@/lib/auth/origin";
+import { loginWithSocialAccessToken } from "@/lib/auth/social-login";
 
 export const dynamic = "force-dynamic";
 
@@ -46,24 +45,13 @@ export async function POST(
     return NextResponse.json({ detail: "access_token이 필요합니다." }, { status: 400 });
   }
 
-  const backendRes = await fetch(`${backendBaseUrl()}/api/auth/social/${provider}/login`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ access_token: body.access_token }),
-    cache: "no-store",
-  });
-
-  if (!backendRes.ok) {
-    const detail = await safeJson(backendRes);
-    return NextResponse.json(detail ?? { detail: "로그인에 실패했습니다." }, {
-      status: backendRes.status,
-    });
+  const result = await loginWithSocialAccessToken(provider, body.access_token);
+  if (!result.ok) {
+    return NextResponse.json(result.detail, { status: result.status });
   }
-
-  const pair = (await backendRes.json()) as { access: string; refresh: string };
 
   // status만 돌려준다 — 토큰은 쿠키에만 실린다.
   const response = NextResponse.json({ status: "ok" });
-  setSessionCookies(response, pair);
+  setSessionCookies(response, result.pair);
   return response;
 }
