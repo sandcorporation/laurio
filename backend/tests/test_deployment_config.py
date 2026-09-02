@@ -419,6 +419,75 @@ def test_deployed_environment_refuses_a_notification_adapter_that_exists_but_doe
     assert "NOTIFICATION_SMS_ADAPTER" in result.stderr
 
 
+# --- 알리고(Aligo) SMS/LMS 실물 어댑터의 자격증명 (#51) -----------------------------
+#
+# AC: "NOTIFICATION_*_ADAPTER dotted path 셋이 채워져 배포 환경이 부팅한다" —
+# TossPGAdapter(#87)와 같은 원칙으로, 인자 없이 생성되지만 자격증명이 비어
+# 있으면 생성 자체가 실패해 core.adapters.check_adapter_mode가 core.E002로
+# 부팅을 거부한다.
+
+
+def test_staging_boots_with_aligo_sms_lms_adapters_and_credentials():
+    env = _staging_env(
+        NOTIFICATION_SMS_ADAPTER="notifications.adapters_aligo.AligoSmsAdapter",
+        NOTIFICATION_LMS_ADAPTER="notifications.adapters_aligo.AligoLmsAdapter",
+        ALIGO_API_KEY="dummy-key",
+        ALIGO_USER_ID="dummy-user",
+        ALIGO_SENDER_PHONE_NUMBER="01000000000",
+    )
+
+    result = _run_check(env)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_staging_alimtalk_adapter_boots_with_aligo_credentials():
+    """알림톡 어댑터(#51)는 아직 벤더를 호출하지 않지만, 승인 이후 그대로 실물
+    호출로 바꿀 수 있도록 자격증명은 미리 검증한다 — 그래서 이 값도 같은
+    자격증명을 요구한다."""
+
+    env = _staging_env(
+        NOTIFICATION_ALIMTALK_ADAPTER="notifications.adapters_aligo.AligoAlimtalkAdapter",
+        ALIGO_API_KEY="dummy-key",
+        ALIGO_USER_ID="dummy-user",
+        ALIGO_SENDER_PHONE_NUMBER="01000000000",
+    )
+
+    result = _run_check(env)
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "NOTIFICATION_ALIMTALK_ADAPTER",
+        "NOTIFICATION_SMS_ADAPTER",
+        "NOTIFICATION_LMS_ADAPTER",
+    ],
+)
+@pytest.mark.parametrize(
+    "class_name",
+    [
+        "AligoAlimtalkAdapter",
+        "AligoSmsAdapter",
+        "AligoLmsAdapter",
+    ],
+)
+def test_staging_refuses_boot_without_any_aligo_credential_env_var(field, class_name):
+    env = _staging_env(**{field: f"notifications.adapters_aligo.{class_name}"})
+
+    result = _run_check(env)
+
+    assert result.returncode != 0, (
+        "ALIGO_API_KEY/ALIGO_USER_ID/ALIGO_SENDER_PHONE_NUMBER 없이도 부팅에 "
+        "성공했다 — AligoCredentialsError(ImproperlyConfigured)가 어댑터 생성을 "
+        "막아야 core.E002로 부팅이 거부된다."
+    )
+    assert "core.E002" in result.stderr
+    assert field in result.stderr
+
+
 # --- 토스 결제 어댑터의 자격증명 환경변수 이름(#87 코드리뷰 지적 6) -----------------------
 #
 # TossPGAdapter는 settings.TOSS_API_SECRET_KEY를 읽는데, staging/prod

@@ -134,10 +134,18 @@ x-backend-env: &backend-env
   # 코디네이터 리뷰 지적: 존재하지 않는 클래스 이름을 여기 하드코딩하지 않는다 —
   # 실제 벤더 어댑터의 dotted path를 .env.prod에서 반드시 채워야 한다. staging의
   # 샌드박스 값과 절대 같은 값을 쓰지 않는다(벤더 계정 자체가 다르다).
-  NOTIFICATION_ALIMTALK_ADAPTER: ${NOTIFICATION_ALIMTALK_ADAPTER:?실제 알림톡 벤더 어댑터의 dotted path를 .env.prod 에 채워라}
-  NOTIFICATION_SMS_ADAPTER: ${NOTIFICATION_SMS_ADAPTER:?실제 SMS 벤더 어댑터의 dotted path를 .env.prod 에 채워라}
-  NOTIFICATION_LMS_ADAPTER: ${NOTIFICATION_LMS_ADAPTER:?실제 LMS 벤더 어댑터의 dotted path를 .env.prod 에 채워라}
+  # #51: 알리고(Aligo) SMS/LMS 실물 어댑터 — notifications.adapters_aligo.
+  # AligoSmsAdapter / AligoLmsAdapter. 알림톡은 승인 전까지 AligoAlimtalkAdapter가
+  # 항상 실패를 돌려줘 SMS로 대체발송한다(ADR-0009).
+  NOTIFICATION_ALIMTALK_ADAPTER: ${NOTIFICATION_ALIMTALK_ADAPTER:?실제 알림톡 벤더 어댑터의 dotted path를 .env.prod 에 채워라 — 승인 전이면 notifications.adapters_aligo.AligoAlimtalkAdapter(#51)를 채운다}
+  NOTIFICATION_SMS_ADAPTER: ${NOTIFICATION_SMS_ADAPTER:?실제 SMS 벤더 어댑터의 dotted path를 .env.prod 에 채워라 — notifications.adapters_aligo.AligoSmsAdapter(#51)}
+  NOTIFICATION_LMS_ADAPTER: ${NOTIFICATION_LMS_ADAPTER:?실제 LMS 벤더 어댑터의 dotted path를 .env.prod 에 채워라 — notifications.adapters_aligo.AligoLmsAdapter(#51)}
   NOTIFICATION_VENDOR_API_KEY: ${NOTIFICATION_VENDOR_API_KEY:-}
+  # 알리고 자격증명(#51) — staging과 절대 같은 값을 쓰지 않는다(벤더 계정 자체가
+  # 다르다).
+  ALIGO_API_KEY: ${ALIGO_API_KEY:-}
+  ALIGO_USER_ID: ${ALIGO_USER_ID:-}
+  ALIGO_SENDER_PHONE_NUMBER: ${ALIGO_SENDER_PHONE_NUMBER:-}
 
   # --- 내부 인증(스케줄러 틱 외 5개 내부 스캔, ADR-0003) ---
   # 돈을 움직이는 전이를 발사하는 엔드포인트들이다. staging과 다른 값을 쓴다 — 같은

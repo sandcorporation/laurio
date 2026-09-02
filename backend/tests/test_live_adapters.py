@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
 import requests
 from django.test import override_settings
 
@@ -62,3 +63,49 @@ def test_toss_payment_adapter_queries_are_server_only_and_shape_stable():
         unknown_order_id = f"laurio-live-test-{uuid.uuid4()}"
         assert adapter.query_status(order_id=unknown_order_id) == "pending"
         assert adapter.query_refund_status(order_id=unknown_order_id) == "pending"
+
+
+@live_vendor
+def test_aligo_credentials_authenticate_and_the_account_is_actually_out_of_balance():
+    """#51(SMS/LMS 실물 어댑터)의 옵인 live 테스트.
+
+    이 계정의 잔액은 0이다(사용자가 직접 확인한 사실) — 그래서 실제 발송
+    (`/send/`)을 치면 성공을 단언할 수 없다. 대신 과금되지 않는 잔액 조회
+    (`/remain/`)로 자격증명이 실제로 인증되는지만 확인한다. 발송 자체가
+    실패하는 경로(잔액 부족)는 이 계정으로 발송을 실제로 시도했을 때 우리
+    어댑터가 크래시가 아니라 `ChannelSendResult(success=False, ...)`로
+    돌려준다는 것을 `tests/test_notifications_aligo_adapter.py`가 이미
+    mock으로 증명한다 — 여기서 실제 잔액 부족 응답의 정확한 문구를 다시
+    확인하지 않는다(#82 Testing Decisions: 벤더 응답의 값이 아니라 모양만
+    본다).
+
+    이 테스트를 처음 돌렸을 때 실제로 받은 응답은 성공(result_code="1")이
+    아니라 `-101`("제한된 IP입니다")이었다 — Aligo는 콘솔에 등록된 발신 IP
+    에서만 API 호출을 허용한다. 그래서 이 테스트는 "인증이 완전히 통과했다"가
+    아니라 "요청이 실제로 Aligo에 도달해 구조화된 응답을 받았다"(크래시도,
+    빈 응답도, JSON 파싱 실패도 아니다)까지만 단언한다 — IP 화이트리스트
+    미등록은 자격증명이 틀렸다는 뜻이 아니므로 그 경우는 skip으로 구분한다."""
+
+    require_live_credential("ALIGO_API_KEY")
+    require_live_credential("ALIGO_USER_ID")
+    require_live_credential("ALIGO_SENDER_PHONE_NUMBER")
+
+    from notifications.adapters_aligo import query_remaining_balance
+
+    body = query_remaining_balance()
+
+    assert isinstance(body, dict) and "result_code" in body, body
+    result_code = str(body.get("result_code"))
+
+    if result_code == "-101":
+        pytest.skip(
+            f"Aligo가 이 실행 환경의 발신 IP를 거부했다({body.get('message')!r}) — "
+            "Aligo 콘솔의 발신 IP 화이트리스트에 이 머신의 공인 IP를 등록해야 "
+            "인증까지 확인할 수 있다(staging 배포 호스트도 마찬가지로 등록이 "
+            "필요하다). 자격증명 자체가 틀렸다는 뜻은 아니다."
+        )
+
+    # 인증이 통했다는 사실 하나만 본다 — 잔액 자체는 0이어도(이 계정의 현재
+    # 상태) result_code는 정상적으로 "1"이다. 인증이 실패하면 벤더가 다른
+    # result_code(예: 자격증명 오류)를 준다.
+    assert result_code == "1", body

@@ -7,7 +7,9 @@ create_superuser로 만드는 것과 같은 성격), 실제 동작 — 발송되
 엔드포인트를 통해서만 확인한다.
 """
 
+import json
 from datetime import datetime, timedelta
+from unittest.mock import Mock
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -15,6 +17,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.test import override_settings
 
+from accounts.models import PhoneContact
 from core.models import ClockOverride
 from notifications.models import Notification, NotificationOptIn, NotificationType
 
@@ -476,3 +479,95 @@ def test_creating_notification_with_unknown_type_returns_422_not_500(client):
     )
 
     assert response.status_code == 422
+
+
+# --- 실물 알리고 어댑터: 알림톡 실패 → SMS 대체발송이 HTTP 시임을 통해 실제로 동작한다 (#51) ---
+
+
+def _aligo_response(status_code: int, json_body: dict | None = None, text: str = "") -> Mock:
+    import requests
+
+    response = Mock(spec=requests.Response)
+    response.status_code = status_code
+    response.text = text if json_body is None else json.dumps(json_body)
+    if json_body is None:
+        response.json.side_effect = ValueError("no json")
+    else:
+        response.json.return_value = json_body
+    return response
+
+
+@pytest.mark.django_db
+def test_real_alimtalk_adapter_falls_back_to_real_sms_adapter(client):
+    """#51 AC: 알림톡 어댑터가 존재하고, 승인 전에는 실패를 돌려줘 SMS/LMS
+    대체발송 경로가 실제로 동작한다 — Fake가 아니라 실제로 배포에 쓸 두
+    클래스(AligoAlimtalkAdapter/AligoSmsAdapter)를 그대로 붙여서 확인한다."""
+
+    from unittest.mock import patch
+
+    _freeze(datetime(2026, 1, 10, 14, 0, tzinfo=KST))
+    user = _make_user()
+    PhoneContact.objects.create(user=user, phone_number="01011112222")
+
+    with override_settings(
+        NOTIFICATION_ALIMTALK_ADAPTER="notifications.adapters_aligo.AligoAlimtalkAdapter",
+        NOTIFICATION_SMS_ADAPTER="notifications.adapters_aligo.AligoSmsAdapter",
+        ALIGO_API_KEY="test-api-key",
+        ALIGO_USER_ID="test-user-id",
+        ALIGO_SENDER_PHONE_NUMBER="01000000000",
+    ):
+        with patch("notifications.adapters_aligo.requests.post") as mock_post:
+            mock_post.return_value = _aligo_response(200, {"result_code": "1", "message": "success"})
+            response = client.post(
+                CREATE_URL,
+                data={
+                    "recipient_id": user.id,
+                    "notification_type": NotificationType.DEADLINE_REMINDER,
+                },
+                content_type="application/json",
+                **_auth_headers(),
+            )
+
+    body = response.json()
+    assert body["status"] == Notification.Status.SENT
+    channels = [(d["channel"], d["status"]) for d in body["dispatches"]]
+    assert channels == [("alimtalk", "failed"), ("sms", "sent")]
+    assert "사전심사" in body["dispatches"][0]["failure_reason"]
+    # 알림톡은 벤더를 전혀 부르지 않았다 — SMS 시도 한 번만 실제로 요청이 나갔다.
+    mock_post.assert_called_once()
+
+
+@pytest.mark.django_db
+def test_missing_vendor_credentials_falls_through_every_channel_without_crashing(client):
+    """#51 AC: 벤더가 응답하지 않아도(여기서는 자격증명 자체가 없어 어댑터
+    생성 자체가 실패하는 극단적인 경우) 통지 발송 스캔 전체가 죽지 않는다 —
+    세 채널 다 실패해도 create_notification은 500이 아니라 FAILED 상태로
+    정상 종결되고, 실패 사유가 전부 보존된다."""
+
+    _freeze(datetime(2026, 1, 10, 14, 0, tzinfo=KST))
+    user = _make_user()
+
+    with override_settings(
+        NOTIFICATION_ALIMTALK_ADAPTER="notifications.adapters_aligo.AligoAlimtalkAdapter",
+        NOTIFICATION_SMS_ADAPTER="notifications.adapters_aligo.AligoSmsAdapter",
+        NOTIFICATION_LMS_ADAPTER="notifications.adapters_aligo.AligoLmsAdapter",
+        ALIGO_API_KEY="",
+        ALIGO_USER_ID="",
+        ALIGO_SENDER_PHONE_NUMBER="",
+    ):
+        response = client.post(
+            CREATE_URL,
+            data={
+                "recipient_id": user.id,
+                "notification_type": NotificationType.DEADLINE_REMINDER,
+            },
+            content_type="application/json",
+            **_auth_headers(),
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == Notification.Status.FAILED
+    assert [d["channel"] for d in body["dispatches"]] == ["alimtalk", "sms", "lms"]
+    assert all(d["status"] == "failed" for d in body["dispatches"])
+    assert all(d["failure_reason"] for d in body["dispatches"])

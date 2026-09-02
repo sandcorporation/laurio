@@ -155,8 +155,12 @@ jobs:
       LLM_REQUIREMENT_CHAT_ADAPTER_MODE: tests.adapter_stubs.StubRequirementChatAdapter
       # #89: RealAlimtalkAdapter/RealSmsAdapter/RealLmsAdapter는 저장소에 없는
       # 클래스였다 — 그 사실이 부팅 가드 없이는 드러나지 않았다. 실물 벤더
-      # 어댑터(#51)가 아직 없는 동안은 나머지 어댑터들과 같은 원칙으로
-      # tests.adapter_stubs가 제공하는, 계약을 구조적으로 만족하는 stub을 가리킨다.
+      # 어댑터(#51, notifications.adapters_aligo)는 이제 존재하지만, 이 잡은
+      # PAYMENT_ADAPTER_MODE가 TossPGAdapter가 나온 뒤에도 계속 stub을 가리키는
+      # 것과 같은 이유로 여전히 stub을 가리킨다 — "배포 하드닝이 통과하는가"를
+      # 벤더 자격증명 없이 검증하는 것이 이 잡의 목적이다. 실물 Aligo 어댑터가
+      # 자격증명과 함께 실제로 부팅되는지는 tests/test_deployment_config.py의
+      # 전용 테스트가 별도로 검증한다.
       NOTIFICATION_ALIMTALK_ADAPTER: tests.adapter_stubs.StubNotificationChannelAdapter
       NOTIFICATION_SMS_ADAPTER: tests.adapter_stubs.StubNotificationChannelAdapter
       NOTIFICATION_LMS_ADAPTER: tests.adapter_stubs.StubNotificationChannelAdapter

@@ -76,6 +76,29 @@ class DeveloperProfile(models.Model):
         return f"Developer<{self.user_id}>"
 
 
+class PhoneContact(models.Model):
+    """알림 채널(SMS/LMS/알림톡)이 실제로 발송할 대상 전화번호(#51, ADR-0009).
+
+    `User`는 Django 기본 `auth.User`라 필드를 직접 늘릴 수 없다 — `SponsorProfile`/
+    `DeveloperProfile`과 같은 모양으로, 역할과 무관하게 `User` 하나에 지연 생성되는
+    OneToOne을 둔다. Sponsor·Developer 양쪽 다 될 수 있는 계정이 전화번호를 두 번
+    등록하지 않게 하기 위해 역할별 프로필이 아니라 `User`에 직접 붙인다.
+
+    가입 흐름에서 이 값을 채우는 화면은 이 티켓 범위 밖이다(ADR-0009가 예정한
+    "가입 시 사실상 필수"는 프론트엔드 작업이다) — 여기서는 있으면 쓰고 없으면
+    발송을 시도하지 않는다는 계약만 정한다(`notifications.adapters_aligo`).
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, related_name="phone_contact", on_delete=models.CASCADE
+    )
+    phone_number = models.CharField(max_length=20)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"PhoneContact<{self.user_id}>"
+
+
 class RefreshToken(models.Model):
     """회전형 리프레시 토큰의 서버측 원장.
 
