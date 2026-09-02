@@ -31,7 +31,7 @@ from django.utils import timezone
 from contests.models import Category, Contest, DeliverableType
 from core.models import ClockOverride
 from ledger.models import AppendOnlyError
-from scoring.adapters import RequirementVerdict, ScoringOutput
+from scoring.adapters import LLMAdapterPermanentError, RequirementVerdict, ScoringOutput
 from scoring.models import Score, ScoringAttempt
 from storage.adapters.fake import FakeStorageAdapter
 
@@ -75,6 +75,58 @@ class _PartialVerdictAdapter:
             verdicts=[
                 RequirementVerdict(requirement_id=r.requirement_id, is_met=True, reasoning="ok")
                 for r in kept
+            ],
+            model_version=self.model_version,
+        )
+
+
+class _PermanentFailureAdapter:
+    """LLMAdapterPermanentError로 죽는 어댑터 (#88 코드리뷰 지적 2).
+
+    `settings.LLM_PERMANENT_FAILURE_SUBMISSION_IDS`에 있는 submission_id만
+    죽고, 나머지는 정상 처리한다 — 다시 불러도 같은 결과가 나오는 실패(모델명
+    오타로 인한 400, 잘린 응답 등)를 흉내낸다. `_PoisonPillAdapter`(예상 못한
+    예외)와 달리, 이 실패는 다음 스캔의 대상 조회에서 그 Submission 자체를 빼야
+    한다 — 영원히 재시도만 되며 Score 없이 배분 컷라인에서 조용히 빠지는 사고를
+    막는 것이 이 어댑터의 존재 이유다.
+    """
+
+    model_version = "permanent-failure-v1"
+
+    def score(self, scoring_input):
+        target_ids = getattr(settings, "LLM_PERMANENT_FAILURE_SUBMISSION_IDS", [])
+        if scoring_input.submission_id in target_ids:
+            raise LLMAdapterPermanentError(
+                f"permanent failure — submission={scoring_input.submission_id}"
+                "(설정으로 강제된 결정적 실패 시나리오)."
+            )
+        return ScoringOutput(
+            verdicts=[
+                RequirementVerdict(requirement_id=r.requirement_id, is_met=True, reasoning="ok")
+                for r in scoring_input.requirements
+            ],
+            model_version=self.model_version,
+        )
+
+
+class _SlowAdapter:
+    """`settings.LLM_SLOW_ADAPTER_SLEEP_SECONDS`만큼 잠들었다 성공하는 어댑터.
+
+    `scoring.services.SCAN_TIME_BUDGET_SECONDS`(#88 코드리뷰 지적 1)가 실제로
+    배치를 조기 종료시키는지 검증하는 용도 — 실물 OpenAI 호출 없이 "느린 호출"을
+    결정적으로 재현한다.
+    """
+
+    model_version = "slow-v1"
+
+    def score(self, scoring_input):
+        import time as _time
+
+        _time.sleep(getattr(settings, "LLM_SLOW_ADAPTER_SLEEP_SECONDS", 0.1))
+        return ScoringOutput(
+            verdicts=[
+                RequirementVerdict(requirement_id=r.requirement_id, is_met=True, reasoning="ok")
+                for r in scoring_input.requirements
             ],
             model_version=self.model_version,
         )
@@ -855,6 +907,161 @@ def test_one_poisoned_submission_does_not_block_the_rest_of_the_batch(
     assert not Score.objects.filter(submission_id=sub1).exists()
     assert ScoringAttempt.objects.filter(submission_id=sub1).exists()
     assert Score.objects.filter(submission_id=sub2).exists()
+
+
+# --- #88 코드리뷰 지적 2: 결정적 실패는 permanent로 남고 다음 스캔에서 빠진다 --------
+
+
+@pytest.mark.django_db
+def test_permanent_failure_is_excluded_from_the_next_scan(client, category, landing_type):
+    """LLMAdapterPermanentError로 죽은 Submission은 `ScoringAttempt.permanent=True`로
+    남고, 다음 스캔의 대상 조회에서 아예 빠진다 — 안 그러면 결정적 실패(모델명
+    오타, 잘린 응답 등)를 영원히 재시도만 하며 Score 없이 배분 컷라인에서 조용히
+    빠지는 사고가 난다(#88 코드리뷰 지적 2)."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+
+    dev1 = _verified_user(client, "dev-1", "dev-ci-1")
+    dev2 = _verified_user(client, "dev-2", "dev-ci-2")
+    key1 = _source_object_key(contest["id"], dev1["user_id"])
+    key2 = _source_object_key(contest["id"], dev2["user_id"])
+    FakeStorageAdapter().write_object(key1, _zip_bytes({"app.py": "MARKER\n"}))
+    FakeStorageAdapter().write_object(key2, _zip_bytes({"app.py": "MARKER\n"}))
+
+    def _submit(dev, key):
+        resp = client.post(
+            f"{CONTESTS_URL}/{contest['id']}/submissions",
+            data={
+                "source_object_key": key,
+                "requirement_responses": [
+                    {
+                        "requirement_id": requirement_id,
+                        "is_met": True,
+                        "evidence": [{"kind": "source_location", "value": "MARKER"}],
+                    }
+                ],
+            },
+            content_type="application/json",
+            **_auth_header(dev["access"]),
+        )
+        assert resp.status_code == 201
+        return resp.json()["id"]
+
+    sub1 = _submit(dev1, key1)
+    sub2 = _submit(dev2, key2)
+
+    _close_contest(client, contest, deadline=deadline)
+
+    with override_settings(
+        LLM_ADAPTER_MODE="tests.test_scoring._PermanentFailureAdapter",
+        LLM_PERMANENT_FAILURE_SUBMISSION_IDS=[sub1],
+    ):
+        first = _run_pending(client)
+
+    statuses = {r["submission_id"]: r["status"] for r in first["results"]}
+    assert statuses[sub1] == "failed_permanently"
+    assert statuses[sub2] == "scored"
+
+    attempt = ScoringAttempt.objects.get(submission_id=sub1)
+    assert attempt.permanent is True
+    assert not Score.objects.filter(submission_id=sub1).exists()
+
+    # 두 번째 스캔 — sub1이 이제는 성공할 수 있는 조건(LLM_PERMANENT_FAILURE_
+    # SUBMISSION_IDS를 안 준다)이어도 대상 조회에서 아예 빠져 있어야 한다.
+    # "계속 결정적으로 실패한다"가 아니라 "다시는 시도조차 안 한다"는 것을
+    # 증명한다.
+    with override_settings(LLM_ADAPTER_MODE="tests.test_scoring._PermanentFailureAdapter"):
+        second = _run_pending(client)
+
+    assert second["count"] == 0
+    assert not Score.objects.filter(submission_id=sub1).exists()
+
+
+# --- #88 코드리뷰 지적 1: 시간 예산을 넘기면 배치를 조기 종료한다 -------------------
+
+
+@pytest.mark.django_db
+def test_scan_stops_early_once_it_exceeds_its_time_budget(
+    client, category, landing_type, monkeypatch
+):
+    """`SCAN_TIME_BUDGET_SECONDS`를 넘기면 남은 Submission을 시작하지 않는다 —
+    celery(30초)·gunicorn(기본 30초) 타임아웃으로 워커가 SIGKILL되기 전에 스스로
+    멈춰야, 이미 처리한 건은 최소한 ScoringAttempt/Score를 남긴 채 다음 스캔이
+    나머지를 이어받는다(#88 코드리뷰 지적 1). 실물 호출 없이 `_SlowAdapter`로
+    "느린 호출"을 결정적으로 재현하고, 예산 자체는 테스트가 감당할 수 있는
+    크기로 몽키패치한다."""
+
+    monkeypatch.setattr("scoring.services.SCAN_TIME_BUDGET_SECONDS", 0.05)
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+
+    submission_ids = []
+    for i in range(3):
+        dev = _verified_user(client, f"dev-{i}", f"dev-ci-{i}")
+        key = _source_object_key(contest["id"], dev["user_id"])
+        FakeStorageAdapter().write_object(key, _zip_bytes({"app.py": "MARKER\n"}))
+        resp = client.post(
+            f"{CONTESTS_URL}/{contest['id']}/submissions",
+            data={
+                "source_object_key": key,
+                "requirement_responses": [
+                    {
+                        "requirement_id": requirement_id,
+                        "is_met": True,
+                        "evidence": [{"kind": "source_location", "value": "MARKER"}],
+                    }
+                ],
+            },
+            content_type="application/json",
+            **_auth_header(dev["access"]),
+        )
+        assert resp.status_code == 201
+        submission_ids.append(resp.json()["id"])
+
+    _close_contest(client, contest, deadline=deadline)
+
+    with override_settings(
+        LLM_ADAPTER_MODE="tests.test_scoring._SlowAdapter",
+        LLM_SLOW_ADAPTER_SLEEP_SECONDS=0.1,
+    ):
+        first = _run_pending(client)
+
+    # 첫 건은 항상 처리한다(빈손으로 돌아가지 않는다) — 그 한 건이 예산(0.05초)보다
+    # 오래 걸리므로(0.1초) 두 번째 건을 시작하기 전에 멈춘다.
+    assert first["count"] == 1
+    scored_ids = {r["submission_id"] for r in first["results"] if r["status"] == "scored"}
+    assert len(scored_ids) == 1
+    remaining = set(submission_ids) - scored_ids
+    assert len(remaining) == 2
+    for sid in remaining:
+        assert not Score.objects.filter(submission_id=sid).exists()
+
+    # 다음 스캔(예산 제약을 풀고)이 나머지를 이어받는다 — 조기 종료가 그
+    # Submission을 영구히 배제하지 않는다(permanent와 다른 점).
+    monkeypatch.setattr("scoring.services.SCAN_TIME_BUDGET_SECONDS", 10)
+    with override_settings(LLM_ADAPTER_MODE="tests.test_scoring._SlowAdapter"):
+        second = _run_pending(client)
+
+    assert second["count"] == 2
+    assert all(r["status"] == "scored" for r in second["results"])
+    for sid in remaining:
+        assert Score.objects.filter(submission_id=sid).exists()
 
 
 # --- 리뷰 지적 반영: 어댑터가 판정을 누락해도 크래시하지 않는다 (#12 리뷰 지적 3) -------
