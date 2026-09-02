@@ -39,6 +39,10 @@ export type SponsorActionLabel = {
   mine: boolean;
   /** 심사 비교 화면으로 갈 수 있는 단계인가 (그 화면이 보여줄 것이 있는가). */
   canJudge: boolean;
+  /** 결제 화면으로 갈 수 있는 단계인가 (#86). canJudge와 같은 이유로 화면이
+   * `next_action`을 직접 비교하지 않고 이 표를 거친다 — 새 상태가 생기면
+   * `Record<SponsorNextAction, ...>` 타입 오류로 빌드가 깨진다. */
+  canPay: boolean;
 };
 
 /** 「다음 행동」의 번역표.
@@ -52,30 +56,49 @@ export const SPONSOR_ACTION_LABELS: Record<SponsorNextAction, SponsorActionLabel
     text: "결제해야 공개됩니다",
     mine: true,
     canJudge: false,
+    canPay: true,
   },
   // 이 화면의 핵심. 지금 고르지 않으면 심사기간이 지나 무응답 배분으로 넘어간다.
   judge_and_award: {
     text: "제출물을 심사하고 선정하세요",
     mine: true,
     canJudge: true,
+    canPay: false,
   },
   accept_handover: {
     text: "인수를 확인하세요 — 확인해야 개발자에게 상금이 갑니다",
     mine: true,
     canJudge: false,
+    canPay: false,
   },
-  awaiting_submissions: { text: "제출을 기다리는 중입니다", mine: false, canJudge: false },
-  awaiting_scoring: { text: "채점을 기다리는 중입니다", mine: false, canJudge: false },
+  awaiting_submissions: {
+    text: "제출을 기다리는 중입니다",
+    mine: false,
+    canJudge: false,
+    canPay: false,
+  },
+  awaiting_scoring: { text: "채점을 기다리는 중입니다", mine: false, canJudge: false, canPay: false },
   // 스토리 40 — #81 이 존재하는 이유. 「늦음」이 아니라 「보류」다.
   awaiting_appeal_ruling: {
     text: "이의 심판이 끝날 때까지 상금 배분이 보류되어 있습니다",
     mine: false,
     canJudge: false,
+    canPay: false,
   },
-  awaiting_distribution: { text: "상금 배분을 기다리는 중입니다", mine: false, canJudge: false },
-  awaiting_payout: { text: "개발자에게 지급되는 중입니다", mine: false, canJudge: false },
-  no_submissions: { text: "제출 없이 마감되었습니다", mine: false, canJudge: false },
-  contest_complete: { text: "완료되었습니다", mine: false, canJudge: false },
+  awaiting_distribution: {
+    text: "상금 배분을 기다리는 중입니다",
+    mine: false,
+    canJudge: false,
+    canPay: false,
+  },
+  awaiting_payout: {
+    text: "개발자에게 지급되는 중입니다",
+    mine: false,
+    canJudge: false,
+    canPay: false,
+  },
+  no_submissions: { text: "제출 없이 마감되었습니다", mine: false, canJudge: false, canPay: false },
+  contest_complete: { text: "완료되었습니다", mine: false, canJudge: false, canPay: false },
 };
 
 

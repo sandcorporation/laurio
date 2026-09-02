@@ -9,6 +9,7 @@
 // Requirement 체크리스트뿐이고, 그 CRUD가 이 패널의 핵심이다 — AI는 제안하고
 // Sponsor가 최종 결정한다.
 import { useState } from "react";
+import Link from "next/link";
 
 import { formatPrize } from "@/lib/contest-format";
 import type { ContestDetail, RequirementGrade, RequirementOut } from "@/lib/contests/grill-types";
@@ -326,6 +327,15 @@ export function RequirementDraftPanel({
         <p className="text-center text-xs leading-relaxed text-ink/50" data-testid="grill-payment-required-notice">
           결제가 끝나야 공모전이 공개됩니다
         </p>
+        {/* URL을 직접 쳐야만 결제로 닿는 경로가 되지 않도록(#86), 초안을 만든
+            바로 그 자리에서 결제 화면으로 이어간다. */}
+        <Link
+          href={`/console/contests/${contest.id}/payment`}
+          data-testid="grill-go-to-payment"
+          className="mt-1 block text-center text-xs font-semibold underline"
+        >
+          결제하러 가기
+        </Link>
       </div>
     </aside>
   );

@@ -2035,6 +2035,8 @@ export interface components {
         };
         /** ConfirmPaymentIn */
         ConfirmPaymentIn: {
+            /** Payment Key */
+            payment_key?: string | null;
             /** Simulate */
             simulate?: string | null;
         };
