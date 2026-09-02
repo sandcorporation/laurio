@@ -54,6 +54,28 @@ Seller가 나중에 준비되는 시점(재시도·`seller.changed` 웹훅)에 `
 한 번 더 불러 그제서야 실제 이체를 시도한다 — 이 설계는 발견 사실이라
 ADR-0008에도 남겨 둔다.
 
+## `transfer_attempt`는 벤더 거래를 식별하는 유일한 키다 (설계 결정, 5차 코드리뷰)
+
+세 라운드에 걸쳐 `transfer_attempt`를 벤더 참조(refPayoutId/Idempotency-Key)에만
+쓰고 웹훅 매칭·조회·결과 기록에는 반영하지 않은 채로 두었더니, 그때그때 다른
+결함이 새로 생겼다(웹훅이 낡은 attempt의 배달로 진행 중인 attempt를 잘못
+풀어주는 등). 5차 코드리뷰가 지정한 설계는: **`transfer_attempt`를 벤더 거래를
+식별하는 유일한 키로 끝까지 끌고 간다** — 벤더 참조뿐 아니라 웹훅 매칭
+(`{idempotency_key}-{attempt}`를 파싱해 attempt가 Payout의 현재 값과 다르면
+버린다, `payouts.api.receive_toss_payout_webhook`), `query_status`(새 attempt를
+선점하면 `vendor_payout_id`를 반드시 비운다 — 그러지 않으면 시도 N의 타임아웃이
+시도 N-1의 낡은 vendor_payout_id로 잘못 확정된다), 결과 기록
+(`payouts.services.record_transfer_result`가 attempt 불일치 결과는 기록하지
+않는다)까지 전부.
+
+**이 설계는 벤더 자신의 Idempotency-Key 보존 기간에 기대는 것을 의도적으로
+포기한다.** 벤더가 같은 Idempotency-Key로 온 요청을 얼마나 오래 중복 제거해
+주는지는 문서화되어 있지 않고 통제할 수도 없다 — 대신 우리 쪽 DB의
+`transfer_attempt` 카운터와 조건부 UPDATE(`claim_transition`)로 "이 attempt에
+대해 벤더 POST는 정확히 한 번만 나간다"를 스스로 보장한다. 벤더 쪽 중복 제거는
+그 위에 얹히는 이중 안전장치일 뿐, 우리가 정확성을 위해 기대는 유일한 방어선이
+아니다.
+
 ## `payout.changed`/`seller.changed` 웹훅 서명
 
 토스 문서: 이 두 웹훅에만 서명 헤더(`tosspayments-webhook-signature`)가 붙는다.
@@ -73,16 +95,22 @@ import json
 import logging
 import os
 from base64 import b64encode
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import requests
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
-from .adapters import PayoutError, PayoutTimeoutError, SellerError, SellerRegistrationResult
+from .adapters import (
+    PayoutError,
+    PayoutTimeoutError,
+    SellerError,
+    SellerRegistrationResult,
+    TransferOutcome,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +145,15 @@ _PENDING_PAYOUT_STATUSES = {"REQUESTED", "IN_PROGRESS"}
 # 판단을 실이체 쪽에도 일관되게 적용한다. staging에서 실제 코드값을 확인하면
 # 이 키워드 집합을 정확한 코드 목록으로 좁혀야 한다(#57 알아둘 것).
 _PAYOUT_RETRYABLE_CODE_KEYWORDS = ("LIMIT", "RATE", "TOO_MANY", "THROTTL")
+
+# 벤더 호출 전에 선점(claim)한 시도가 벤더에 닿기도 전에 끊겼을 때(예:
+# ConnectionError), 얼마나 지나야 그 선점을 포기하고 재선점할 수 있게 하는가
+# (코드리뷰 지적 6, 5차) — notifications.services.STUCK_QUEUED_THRESHOLD와 같은
+# 관용구다. `_TIMEOUT_SECONDS`(10초)에 넉넉한 여유를 둔다 — 재시도/웹훅 재수신처럼
+# 사람이 다시 트리거하는 경로에서만 재선점이 일어나므로(payouts에는 notifications
+# 같은 주기 스캔이 없다), 짧게 잡아 정상 진행 중인 시도를 실수로 걷어차기보다는
+# 여유 있게 잡아 "진짜 멈춘 것"만 되찾는 쪽을 택한다.
+_TRANSFER_CLAIM_STALE_AFTER_SECONDS = 60
 
 
 def _looks_like_retryable_payout_code(code: str | None) -> bool:
@@ -248,6 +285,31 @@ def verify_toss_webhook_signature(
         if hmac.compare_digest(expected, candidate):
             return True
     return False
+
+
+def parse_vendor_ref(ref: str) -> tuple[str, int] | None:
+    """벤더에 보낸 참조(`f"{idempotency_key}-{transfer_attempt}"`)를 되돌려
+    `(idempotency_key, transfer_attempt)`로 가른다(코드리뷰 지적 1, 5차 —
+    설계 결정: attempt를 웹훅 매칭까지 끌고 간다).
+
+    UUID 문자열 자체가 내부에 하이픈 4개를 이미 포함하므로, **마지막**
+    하이픈에서만 나눈다(`rpartition`) — attempt 접미사가 항상 가장 뒤에
+    붙기 때문에 이 규칙만으로 항상 올바르게 갈린다. 형식이 맞지 않으면(하이픈이
+    없거나, 앞부분이 UUID가 아니거나, 뒷부분이 정수가 아니면) `None`을 돌려준다.
+    """
+
+    if "-" not in ref:
+        return None
+    key_part, _, attempt_part = ref.rpartition("-")
+    try:
+        UUID(key_part)
+    except ValueError:
+        return None
+    try:
+        attempt = int(attempt_part)
+    except ValueError:
+        return None
+    return key_part, attempt
 
 
 # --- 공용 HTTP 헬퍼 -----------------------------------------------------------------
@@ -594,7 +656,7 @@ class TossPayoutAdapter:
         del amount
         return PayoutRequestResult(idempotency_key=idempotency_key, accepted=True)
 
-    def confirm(self, *, idempotency_key: str, simulate: str | None = None) -> str:
+    def confirm(self, *, idempotency_key: str, simulate: str | None = None) -> TransferOutcome:
         del simulate  # Fake 전용 — 실물 어댑터는 쓰지 않는다.
 
         from .models import Payout as PayoutModel
@@ -604,28 +666,34 @@ class TossPayoutAdapter:
         if seller is None or seller.status not in Seller.READY_STATUSES:
             # Seller가 아직 지급 가능 상태가 아니다 — 실제 이체를 요청할 수
             # 없다. Laurio 내부 확정(원장 분개 + Seller 등록 착수)만 진행한다.
-            return "paid"
+            # attempt=None은 "벤더를 실제로 부르지 않았다"는 뜻이다(코드리뷰
+            # 지적 5, 5차) — 호출자는 이때 transfer_status를 건드리면 안 된다.
+            return TransferOutcome(status="paid", attempt=None)
 
         claimed = self._claim_transfer_attempt(payout)
         if claimed is None:
             # 이미 다른 호출이 이 실이체를 선점했다(코드리뷰 지적 1, 4차 —
             # 실행 재현 완료). payouts.api.confirm_payout의 최초 호출과
             # payouts.services._request_real_transfer_if_ready의 재확인
-            # 호출이 같은 Payout에 대해 격쳐 불려도(Seller가 이미 READY인
+            # 호출이 같은 Payout에 대해 겹쳐 불려도(Seller가 이미 READY인
             # Payout은 둘 다 이 confirm()에 도달한다), 벤더에는 정확히 한
             # 번만 POST가 나가야 한다 — 두 번째 호출은 여기서 벤더를
-            # 부르지 않고 현재 상태를 다시 읽어 그대로 신뢰한다.
-            payout.refresh_from_db(fields=["transfer_status"])
+            # 부르지 않고 현재 상태를 다시 읽어 그대로 신뢰한다. 이때도
+            # attempt는 반드시 "지금 DB에 있는 현재 값"을 돌려준다(코드리뷰
+            # 지적 5) — 그래야 호출자(record_transfer_result)가 이 결과를
+            # 낡은 attempt로 오인해 버리지 않는다.
+            payout.refresh_from_db(fields=["transfer_status", "transfer_attempt"])
             if payout.transfer_status == PayoutModel.TransferStatus.COMPLETED:
-                return "paid"
+                return TransferOutcome(status="paid", attempt=payout.transfer_attempt)
             if payout.transfer_status == PayoutModel.TransferStatus.FAILED:
-                return "failed"
+                return TransferOutcome(status="failed", attempt=payout.transfer_attempt)
             raise PayoutTimeoutError(
                 f"다른 호출이 이미 이 실이체를 선점했다(idempotency_key={idempotency_key}) — "
                 "query_status로 확정해야 한다."
             )
 
-        return self._request_real_payout(claimed, seller)
+        status = self._request_real_payout(claimed, seller)
+        return TransferOutcome(status=status, attempt=claimed.transfer_attempt)
 
     def _claim_transfer_attempt(self, payout):
         """벤더를 부르기 전에 이 시도를 선점한다(코드리뷰 지적 1, 4차) —
@@ -637,15 +705,29 @@ class TossPayoutAdapter:
         않고 벤더를 부를 수 있다 — 벤더 호출 지점(여기) 자체를 선점하는
         것만이 모든 경로를 한 곳에서 닫는다.
 
-        선점에 성공하면(NOT_REQUESTED 또는 FAILED에서 REQUESTED로) 새
-        `transfer_attempt`가 반영된 신선한 Payout을, 실패하면(다른 호출이
-        이미 REQUESTED/COMPLETED로 선점해 두었다) None을 돌려준다.
+        선점에 성공하면(NOT_REQUESTED/FAILED에서, 또는 오래 멈춘 REQUESTED에서
+        REQUESTED로) 새 `transfer_attempt`가 반영된 신선한 Payout을, 실패하면
+        (다른 호출이 이미 REQUESTED/COMPLETED로 선점해 두었다) None을 돌려준다.
+
+        새 attempt를 선점할 때마다 `vendor_payout_id`를 반드시 비운다(코드리뷰
+        지적 2, 5차) — 그러지 않으면 새 시도의 query_status가 이전 시도가 남긴
+        벤더 id로 조회해, 시도 N의 타임아웃이 시도 N-1의 결과로 잘못 확정된다.
+        `transfer_claimed_at`도 함께 찍는다 — 아래 "멈춘 REQUESTED 재선점"
+        분기가 이 값을 근거로 판단한다.
         """
 
-        from django.db.models import F
+        from django.db.models import F, Q
 
+        from core.clock import Clock
         from core.transitions import claim_transition
         from .models import Payout as PayoutModel
+
+        now = Clock.now()
+        claim_extra = {
+            "transfer_attempt": F("transfer_attempt") + 1,
+            "vendor_payout_id": "",
+            "transfer_claimed_at": now,
+        }
 
         won = claim_transition(
             PayoutModel,
@@ -653,15 +735,42 @@ class TossPayoutAdapter:
             from_state=PayoutModel.TransferStatus.NOT_REQUESTED,
             to_state=PayoutModel.TransferStatus.REQUESTED,
             state_field="transfer_status",
-            extra_fields={"transfer_attempt": F("transfer_attempt") + 1},
+            now=now,
+            extra_fields=claim_extra,
         ) or claim_transition(
             PayoutModel,
             payout.pk,
             from_state=PayoutModel.TransferStatus.FAILED,
             to_state=PayoutModel.TransferStatus.REQUESTED,
             state_field="transfer_status",
-            extra_fields={"transfer_attempt": F("transfer_attempt") + 1},
+            now=now,
+            extra_fields=claim_extra,
         )
+
+        if not won:
+            # REQUESTED에서 멈춘 채로 오래 남아 있으면(코드리뷰 지적 6, 5차)
+            # 재선점한다 — 벤더에 닿기도 전에 끊긴 요청(ConnectionError 등)은
+            # 벤더가 이 시도 자체를 모르므로 query_status로도 절대 풀리지
+            # 않는다. `claim_transition`은 상태 문자열 하나만 조건으로 걸 수
+            # 있어(등식 비교) 시각 범위(`__lte`) 조건은 못 담으므로, 여기서는
+            # notifications._reclaim_stuck_queued와 같은 원리의 raw 조건부
+            # UPDATE를 직접 쓴다 — `transfer_claimed_at`을 조건에 넣었으므로
+            # 여러 호출이 동시에 같은 행을 집어도 정확히 하나만 성공한다(먼저
+            # 이긴 호출이 `transfer_claimed_at`을 신선하게 갱신하면, 뒤이은
+            # UPDATE는 더 이상 `__lte=stale_before`를 만족하지 않는다).
+            stale_before = now - timedelta(seconds=_TRANSFER_CLAIM_STALE_AFTER_SECONDS)
+            reclaimed = (
+                PayoutModel.objects.filter(
+                    pk=payout.pk,
+                    transfer_status=PayoutModel.TransferStatus.REQUESTED,
+                )
+                .filter(
+                    Q(transfer_claimed_at__isnull=True) | Q(transfer_claimed_at__lte=stale_before)
+                )
+                .update(**claim_extra)
+            )
+            won = reclaimed == 1
+
         if not won:
             return None
 
@@ -791,12 +900,21 @@ class TossPayoutAdapter:
             raise PayoutError("토스 지급 요청 응답이 JSON도 JWE도 아니다.")
         return body
 
-    def query_status(self, *, idempotency_key: str) -> str:
+    def query_status(self, *, idempotency_key: str) -> TransferOutcome:
         from .models import Seller
 
         payout, seller = self._resolve_seller(idempotency_key)
         if seller is None or seller.status not in Seller.READY_STATUSES:
-            return "pending"
+            # 벤더를 실제로 조회하지 않았다(코드리뷰 지적 5, 5차) — attempt=None.
+            return TransferOutcome(status="pending", attempt=None)
+
+        # `payout`은 위 `_resolve_seller`가 방금 새로 조회한 행이므로
+        # `transfer_attempt`/`vendor_payout_id`는 이미 최신이다 — 새 attempt를
+        # 선점하며 `_claim_transfer_attempt`가 `vendor_payout_id`를 비워 두므로
+        # (코드리뷰 지적 2), 여기서 그 값이 남아 있다면 반드시 "지금 진행
+        # 중인 attempt"가 벤더 응답으로 이미 채운 값이다 — 낡은 attempt의
+        # 값일 수 없다.
+        attempt = payout.transfer_attempt
 
         if not payout.vendor_payout_id:
             # POST가 응답을 받기 전에 타임아웃/네트워크 오류로 끝나 벤더가
@@ -804,7 +922,8 @@ class TossPayoutAdapter:
             # 시도하면 항상 존재하지 않는 리소스를 찾게 되어 "타임아웃 뒤
             # 조회로 확정"하는 경로 자체가 성립하지 않는다. 우리 refPayoutId로
             # 조회하는 별도 경로로 폴백한다.
-            return self._query_status_by_ref(payout)
+            status = self._query_status_by_ref(payout)
+            return TransferOutcome(status=status, attempt=attempt)
 
         try:
             response = requests.get(
@@ -823,7 +942,7 @@ class TossPayoutAdapter:
             ) from exc
 
         if response.status_code == 404:
-            return "pending"
+            return TransferOutcome(status="pending", attempt=attempt)
         if response.status_code >= 400:
             body = _safe_json(response)
             raise PayoutError(
@@ -832,7 +951,8 @@ class TossPayoutAdapter:
             )
 
         body = self._decode_response_body(response)
-        return self._map_payout_query_status(body.get("status"), idempotency_key=idempotency_key)
+        status = self._map_payout_query_status(body.get("status"), idempotency_key=idempotency_key)
+        return TransferOutcome(status=status, attempt=attempt)
 
     def _query_status_by_ref(self, payout) -> str:
         """벤더가 발급한 id를 아직 모를 때(코드리뷰 지적 8), 우리 refPayoutId로

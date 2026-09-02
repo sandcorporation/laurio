@@ -140,6 +140,14 @@ class Payout(models.Model):
     # 매 시도가 벤더에게는 새 요청으로 보이게 한다 — 우리 쪽 DB 조회·웹훅
     # 매칭은 여전히 `idempotency_key`(변하지 않는 값)로만 한다.
     transfer_attempt = models.PositiveIntegerField(default=0)
+    # 이 시도(transfer_attempt)를 선점한 시각(코드리뷰 지적 6, 5차) —
+    # notifications.models.Notification.claimed_at과 같은 관용구다. 벤더에
+    # 닿기도 전에 끊긴 요청(ConnectionError 등)은 query_status로도 절대 풀리지
+    # 않는다 — 벤더는 그 시도 자체를 모르기 때문이다. 이 값이 없으면
+    # transfer_status=REQUESTED로 영구히 멈춘 Payout을 되찾을 방법이 없다.
+    # `TossPayoutAdapter._claim_transfer_attempt`가 새 시도를 선점할 때마다
+    # 갱신하고, 이 값이 오래되면(임계값 초과) REQUESTED에서도 재선점을 허용한다.
+    transfer_claimed_at = models.DateTimeField(null=True, blank=True)
 
     # 확정(CONFIRMED_IDENTITY_PENDING 진입) 시 원장에 남긴 수수료·원천징수 공제
     # 분개. 성공 시 정확히 한 번만 채워진다.

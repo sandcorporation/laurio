@@ -333,12 +333,12 @@ def confirm_payout(request: HttpRequest, idempotency_key: UUID, payload: Confirm
 
     adapter = get_adapter()
     try:
-        result_status = adapter.confirm(
+        outcome = adapter.confirm(
             idempotency_key=str(idempotency_key), simulate=payload.simulate
         )
     except PayoutTimeoutError:
         # 타임아웃은 실패가 아니다 — 실제 결과를 조회로 확정한다(ADR-0008).
-        result_status = adapter.query_status(idempotency_key=str(idempotency_key))
+        outcome = adapter.query_status(idempotency_key=str(idempotency_key))
     except PayoutError as exc:
         raise HttpError(502, str(exc)) from exc
 
@@ -347,17 +347,21 @@ def confirm_payout(request: HttpRequest, idempotency_key: UUID, payload: Confirm
     # 동작, 코드리뷰 지적 1 4차의 후속 발견) — 그 결과를 여기서 기록하지
     # 않으면, mark_confirmed 안의 _request_real_transfer_if_ready가 나중에
     # 다시 불려도 이미 선점된 시도에 클레임이 밀려 벤더를 다시 부를 수
-    # 없고, 이긴 쪽의 결과가 영영 어디에도 안 남는다. Seller가 아직
-    # READY가 아닐 때는 이 "paid"가 실이체가 아니라 내부 확정 의미이므로
-    # 여기서 기록하면 안 된다 — 실이체를 시도한 적도 없이 COMPLETED로
-    # 잘못 남는다.
-    seller = Seller.objects.filter(developer_id=_payout_developer_id(payout)).first()
-    if seller is not None and seller.status in Seller.READY_STATUSES:
-        record_transfer_result(payout, result_status)
+    # 없고, 이긴 쪽의 결과가 영영 어디에도 안 남는다.
+    #
+    # "실제로 벤더를 불렀는지"를 Seller 상태를 다시 읽어 추정하지 않는다
+    # (코드리뷰 지적 5, 5차) — 어댑터 호출과 이 재조회 사이에 seller.changed
+    # 웹훅이 끼어들면 Seller.status가 이미 바뀌어 있을 수 있어, 실제로는
+    # 벤더를 부르지 않은 결과를 COMPLETED로 잘못 기록하거나(READY가 아니었을
+    # 때 부른 것처럼 보임) 반대로 이긴 호출의 진짜 결과를 놓칠 수 있다.
+    # 대신 어댑터가 그 호출 순간 직접 알려준 `outcome.attempt`만 신뢰한다 —
+    # `record_transfer_result`가 `attempt=None`이면(벤더를 실제로 부르지
+    # 않았다는 뜻) 스스로 아무 것도 기록하지 않는다.
+    record_transfer_result(payout, outcome.status, outcome.attempt)
 
-    if result_status == "paid":
+    if outcome.status == "paid":
         payout = mark_confirmed(idempotency_key, seller_simulate=payload.seller_simulate)
-    elif result_status == "failed":
+    elif outcome.status == "failed":
         payout = mark_failed(idempotency_key)
     else:
         # 아직 확정할 수 없다(pending) — 함부로 실패 처리하지 않는다. 이후
@@ -545,6 +549,16 @@ def receive_toss_payout_webhook(request: HttpRequest):
     추정한 것이다 — staging에서 실제로 한 번 받아 확인하기 전까지는 정확한
     필드명을 단정하지 않는다(#57 알아둘 것). `refPayoutId`(우리
     idempotency_key)를 찾지 못하면 다른 방식(`data.id`)도 시도한다.
+
+    **지급 식별자는 `{idempotency_key}-{transfer_attempt}` 형식이다**(코드리뷰
+    지적 1, 5차 — 이전에는 접미어 없는 순수 UUID만 기대해 `UUID(str(...))`가
+    무조건 `ValueError`를 던졌다. 실제 벤더가 보내는 웹훅은 우리가 보낸
+    `refPayoutId`를 그대로 돌려주므로, 이 형식이 아닌 웹훅은 전부 이 엔드포인트
+    에서 422가 났다). `adapters_toss.parse_vendor_ref`로 `(idempotency_key,
+    attempt)`를 갈라내고, attempt가 Payout의 **현재** `transfer_attempt`와
+    다르면(설계 결정, 5차 코드리뷰) 낡은(또는 알 수 없는) 시도의 지연 배달로
+    보고 조용히 버린다 — 진행 중이거나 이미 확정된 attempt를 잘못 덮어쓰지
+    않기 위해서다.
     """
 
     if not _toss_webhook_signature_ok(request):
@@ -563,10 +577,15 @@ def receive_toss_payout_webhook(request: HttpRequest):
     if not ref_payout_id:
         raise HttpError(422, "웹훅 본문에서 지급 식별자를 찾을 수 없습니다.")
 
-    try:
-        idempotency_key = UUID(str(ref_payout_id))
-    except ValueError as exc:
-        raise HttpError(422, "웹훅의 지급 식별자가 유효한 UUID가 아닙니다.") from exc
+    from .adapters_toss import parse_vendor_ref
+
+    parsed = parse_vendor_ref(str(ref_payout_id))
+    if parsed is None:
+        raise HttpError(
+            422, "웹훅의 지급 식별자가 유효한 형식(idempotency_key-attempt)이 아닙니다."
+        )
+    idempotency_key_str, webhook_attempt = parsed
+    idempotency_key = UUID(idempotency_key_str)
 
     try:
         known_payout = Payout.objects.get(idempotency_key=idempotency_key)
@@ -590,6 +609,15 @@ def receive_toss_payout_webhook(request: HttpRequest):
         idempotency_key=idempotency_key,
         event_status=our_status,
     )
+
+    if webhook_attempt != known_payout.transfer_attempt:
+        # 지금 진행 중인(또는 이미 확정된) attempt에 대한 배달이 아니다
+        # (설계 결정, 5차 코드리뷰) — 낡은 attempt의 지연 배달이 새 시도를
+        # 잘못 덮어쓰지 않도록 조용히 버린다. 배달 자체는 위에서 이미
+        # PayoutWebhookDelivery로 남겼다(감사 추적은 유지한다).
+        return 200, WebhookOut(
+            received=True, idempotency_key=idempotency_key, status=known_payout.status
+        )
 
     # Payout이 이미 REQUESTED를 지나 두 대기 어딘가로 넘어간 뒤에 이 웹훅이
     # 도착해도 조용히 버려지지 않는다(코드리뷰 지적 4) — resolve_transfer_webhook

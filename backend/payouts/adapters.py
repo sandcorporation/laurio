@@ -57,23 +57,49 @@ class PayoutRequestResult:
     accepted: bool
 
 
+@dataclass(frozen=True)
+class TransferOutcome:
+    """`confirm`/`query_status`가 돌려주는 결과(코드리뷰 지적 5, 5차).
+
+    "paid" | "failed" | "pending" 문자열(`status`)과 함께, 이 결과가 실제로
+    어느 `Payout.transfer_attempt`에 대한 것인지(`attempt`)를 같이 돌려준다.
+
+    `attempt`가 `None`이면 이번 호출은 벤더를 실제로 부르지 않았다는 뜻이다
+    (예: Seller가 아직 READY가 아니어서 내부적으로만 확정한 경우) — 호출자는
+    이때 `Payout.transfer_status`/`transfer_attempt`를 절대 건드리면 안 된다.
+
+    이 필드가 필요한 이유: 어댑터를 호출한 "뒤에" Seller 상태를 다시 읽어
+    "방금 실제로 벤더를 불렀는지"를 추정하면, 그 사이 `seller.changed` 웹훅이
+    끼어들어 오판할 수 있다(코드리뷰 지적 5) — 어댑터가 호출 그 순간 알고 있던
+    사실을 그대로 돌려주는 것만이 경합 없이 정확하다.
+    """
+
+    status: str
+    attempt: int | None
+
+
 @runtime_checkable
 class PayoutAdapter(Protocol):
     def request_payout(self, *, idempotency_key: str, amount: int) -> PayoutRequestResult: ...
 
-    def confirm(self, *, idempotency_key: str, simulate: str | None = None) -> str:
-        """토스에 지급 결과를 동기 확인한다. "paid" | "failed" 를 돌려준다.
+    def confirm(self, *, idempotency_key: str, simulate: str | None = None) -> TransferOutcome:
+        """토스에 지급 결과를 동기 확인한다.
+
+        `TransferOutcome.status`는 "paid" | "failed" 중 하나다. 실제로 벤더를
+        부르지 않았다면(Seller가 아직 준비되지 않은 경우 등) `attempt`는
+        `None`이다 — 벤더를 불렀다면 그 시도의 `Payout.transfer_attempt` 값을
+        돌려준다.
 
         `PayoutTimeoutError`를 던질 수 있다 — 그 경우 호출자는 `query_status`로
         실제 결과를 확정해야 한다.
         """
         ...
 
-    def query_status(self, *, idempotency_key: str) -> str:
+    def query_status(self, *, idempotency_key: str) -> TransferOutcome:
         """idempotency_key의 실제 지급 상태를 조회한다.
 
-        "paid" | "failed" | "pending" 중 하나. 순수 조회다 — `simulate` 같은
-        시나리오 선택 인자를 받지 않는다.
+        `TransferOutcome.status`는 "paid" | "failed" | "pending" 중 하나다.
+        순수 조회다 — `simulate` 같은 시나리오 선택 인자를 받지 않는다.
         """
         ...
 
@@ -96,12 +122,17 @@ class FakePayoutAdapter:
     def request_payout(self, *, idempotency_key: str, amount: int) -> PayoutRequestResult:
         return PayoutRequestResult(idempotency_key=idempotency_key, accepted=True)
 
-    def confirm(self, *, idempotency_key: str, simulate: str | None = None) -> str:
+    def confirm(self, *, idempotency_key: str, simulate: str | None = None) -> TransferOutcome:
+        # Fake는 Seller 준비 여부와 무관하게 항상 "벤더를 부른 것"으로 친다 —
+        # attempt는 실제 어댑터의 transfer_attempt 증가분과 대응하지 않으므로
+        # 항상 0을 돌려준다. Fake만 쓰는 Payout은 transfer_attempt가 절대
+        # 증가하지 않으므로(그 카운터는 TossPayoutAdapter._claim_transfer_attempt
+        # 전용) 0은 항상 "지금 진행 중인 시도"와 일치한다.
         scenario = simulate or "success"
         if scenario == "success":
-            return "paid"
+            return TransferOutcome(status="paid", attempt=0)
         if scenario == "failed":
-            return "failed"
+            return TransferOutcome(status="failed", attempt=0)
         if scenario == "timeout_then_success":
             self._final_status[idempotency_key] = "paid"
             raise PayoutTimeoutError(
@@ -116,8 +147,8 @@ class FakePayoutAdapter:
             )
         raise PayoutError(f"알 수 없는 fake 토스 지급대행 시나리오: {scenario!r}")
 
-    def query_status(self, *, idempotency_key: str) -> str:
-        return self._final_status.get(idempotency_key, "pending")
+    def query_status(self, *, idempotency_key: str) -> TransferOutcome:
+        return TransferOutcome(status=self._final_status.get(idempotency_key, "pending"), attempt=0)
 
 
 def get_adapter() -> PayoutAdapter:
