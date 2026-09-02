@@ -153,3 +153,25 @@ class BlacklistedToken(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return self.jti
+
+
+class Withdrawal(models.Model):
+    """`User` 하나가 탈퇴한 사건 (#100, ADR-0025).
+
+    행이 존재한다는 것 자체가 "이 계정은 신원을 파기했다"는 기록이다 — 삭제하지
+    않는다(#24 개인정보 담당자 story: 파기했음을 증명해야 한다). `user`는 `PROTECT`다
+    — 계정 행 자체를 지우지 않는다는 이 기능 전체의 전제와 같은 이유로, 탈퇴
+    기록을 지우면 "파기했다"는 증거가 함께 사라진다.
+
+    실제 파기(CI·DI·전화번호·표시 이름·소개를 지우고 `Verification.status`를
+    내리는 것)는 `accounts.withdrawal.execute_withdrawal`이 이 행과 같은
+    트랜잭션에서 한다 — 이 모델 자체는 "언제 탈퇴했는가"만 든다.
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, related_name="withdrawal", on_delete=models.PROTECT
+    )
+    withdrawn_at = models.DateTimeField()
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"Withdrawal<{self.user_id}>"

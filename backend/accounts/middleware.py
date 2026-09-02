@@ -35,7 +35,14 @@ class JWTAuthenticationMiddleware:
                 payload = None
             if payload is not None:
                 User = get_user_model()
-                request.auth_user = User.objects.filter(pk=int(payload["sub"])).first()
+                # `is_active=True`를 걸러 탈퇴(#100, ADR-0025)한 계정을 즉시
+                # 무효화한다 — 탈퇴는 유예 없이 실행되므로, 이미 발급된 액세스
+                # 토큰이 만료 전이어도 다음 요청부터 곧바로 익명이 된다.
+                # `core.operator_auth.OperatorAuth`가 세션 인증에서 쓰는 것과
+                # 같은 장치를 여기 JWT 경로에도 건다.
+                request.auth_user = User.objects.filter(
+                    pk=int(payload["sub"]), is_active=True
+                ).first()
 
         return self.get_response(request)
 

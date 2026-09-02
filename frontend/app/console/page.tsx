@@ -74,6 +74,16 @@ export default function AppHome() {
       >
         {loggingOut ? "로그아웃 중..." : "로그아웃"}
       </button>
+      {/* 탈퇴 진입점(#100, ADR-0025). 클릭 한 번으로 닿아야 한다는 것이 이
+          티켓의 인수조건이다 — 링크가 없으면 URL을 직접 쳐야만 닿는 화면이
+          된다(「내 참가 현황」 링크가 같은 이유로 여기 있는 것과 같다). */}
+      <Link
+        href="/console/withdraw"
+        data-testid="app-home-withdraw-link"
+        className="w-fit rounded-sm border border-rule px-4 py-2 text-sm text-muted hover:border-ink"
+      >
+        탈퇴
+      </Link>
     </main>
   );
 }

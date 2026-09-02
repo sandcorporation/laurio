@@ -19,6 +19,13 @@ class Verification(models.Model):
     class Status(models.TextChoices):
         VERIFIED = "verified", "본인확인 완료"
         UNDERAGE = "underage", "만 19세 미만"
+        # 탈퇴로 신원이 파기된 계정(#100, ADR-0025). 미성년 판정이 이미 쓰는 모양
+        # 그대로 행은 남기고 상태만 내린다 — 그래야 "신원이 파기된 계정"과 "한 번도
+        # 확인하지 않은 계정"(Verification 행 자체가 없음)이 구별되고, 파기
+        # 이행 여부를 셀 수 있다(개인정보 담당자 story). CI·DI·전화번호·실명·
+        # 생년월일은 이 상태로 내려가는 순간 함께 지워진다
+        # (`accounts.withdrawal.execute_withdrawal`).
+        WITHDRAWN = "withdrawn", "탈퇴(신원 파기)"
 
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL, related_name="verification", on_delete=models.CASCADE

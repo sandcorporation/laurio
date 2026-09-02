@@ -64,6 +64,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/accounts/withdrawal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Withdrawal Eligibility
+         * @description 탈퇴 화면이 무엇이 막는지 미리 보여줄 수 있게 판정만 돌려준다 (#100 AC).
+         *
+         *     화면은 이 응답을 그대로 읽어 목록을 보여줄 뿐, Contest·Payout 상태에서 다시
+         *     판정하지 않는다 — `accounts.withdrawal.blocking_reasons`가 유일한 판정처다.
+         */
+        get: operations["accounts_api_get_withdrawal_eligibility"];
+        put?: never;
+        /**
+         * Withdraw
+         * @description 신원을 파기한다. 유예 없이 즉시 실행되고 되돌릴 수 없다(ADR-0025).
+         *
+         *     막는 사유가 있으면 409로 그 목록을 그대로 돌려준다 — 화면이 버튼을 감추는
+         *     것과 서버가 거절하는 것은 둘 다 필요하다(#67과 같은 구분).
+         */
+        post: operations["accounts_api_withdraw"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/logout": {
         parameters: {
             query?: never;
@@ -698,6 +728,12 @@ export interface paths {
          *     데모·영상만 담는다 — 소스는 Award 전까지 아무에게도 공개되지 않고(ADR-0014),
          *     test_account는 "데모·영상" 칸에 없는 로그인 정보라 여기서도 내려주지 않는다
          *     (submissions.api._serialize와 같은 원칙, #10 리뷰 지적).
+         *
+         *     **탈퇴한 Developer는 404다**(#100, ADR-0025) — "공개 프로필이 닫힌다"는
+         *     실명·소개가 비는 것이 아니라 그 존재 자체가 더 이상 조회되지 않는 것이다.
+         *     `user.is_active`가 그 판정이다(`accounts.withdrawal.execute_withdrawal`이
+         *     탈퇴 시 이 값을 내린다) — 다른 이유로 존재하지 않는 Developer와 같은 404를
+         *     돌려줘 탈퇴 여부 자체도 굳이 구별해 알려주지 않는다.
          */
         get: operations["submissions_api_get_developer_public_profile"];
         put?: never;
@@ -3460,6 +3496,44 @@ export interface components {
             /** Status */
             status: string;
         };
+        /**
+         * WithdrawalBlockReason
+         * @description 탈퇴를 막는 사유. 응답에 실려 화면이 무엇을 끝내야 하는지 말하게 한다.
+         * @enum {string}
+         */
+        WithdrawalBlockReason: "sponsor_contest_in_progress" | "developer_payout_in_progress" | "retention_not_yet_supported";
+        /**
+         * WithdrawalEligibilityOut
+         * @description 탈퇴 화면이 「막고 있는 것」을 그대로 보여줄 수 있게 하는 판정 결과.
+         *
+         *     `blocking_reasons`가 `WithdrawalBlockReason`(enum)이라 생성된 프론트 타입에
+         *     리터럴 유니온으로 나타난다 — 값이 하나 늘면 번역표를 가진 파일에서
+         *     `tsc --noEmit`이 빌드타임에 잡는다(accounts.withdrawal 모듈 독스트링 참고).
+         */
+        WithdrawalEligibilityOut: {
+            /** Blocking Reasons */
+            blocking_reasons: components["schemas"]["WithdrawalBlockReason"][];
+            /** Can Withdraw */
+            can_withdraw: boolean;
+        };
+        /** WithdrawalOut */
+        WithdrawalOut: {
+            /**
+             * Withdrawn At
+             * Format: date-time
+             */
+            withdrawn_at: string;
+        };
+        /**
+         * WithdrawalRejectedOut
+         * @description 탈퇴가 거부될 때의 응답 — 무엇이 막는지 목록으로 준다(#100 AC).
+         */
+        WithdrawalRejectedOut: {
+            /** Blocking Reasons */
+            blocking_reasons: components["schemas"]["WithdrawalBlockReason"][];
+            /** Detail */
+            detail: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -3533,6 +3607,55 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProfileOut"];
+                };
+            };
+        };
+    };
+    accounts_api_get_withdrawal_eligibility: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WithdrawalEligibilityOut"];
+                };
+            };
+        };
+    };
+    accounts_api_withdraw: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WithdrawalOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WithdrawalRejectedOut"];
                 };
             };
         };
