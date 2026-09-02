@@ -18,6 +18,14 @@
 //
 // 서버 컴포넌트다. 클라이언트 지시어가 붙으면 안 된다(ADR-0015) — 이 페이지는
 // 색인 대상 공개 표면이다.
+// **이 페이지는 요청 시점에 렌더된다.** Next 는 기본적으로 이 라우트를 정적
+// 프리렌더하려 하고, 그러면 `pnpm build` 중에 백엔드를 치다가 ECONNREFUSED 로
+// **빌드가 통째로 실패한다**(`Export encountered an error on /page: /`). 빌드
+// 시점에는 백엔드가 없다 — 프로덕션 이미지는 컨테이너 밖에서 혼자 구워진다.
+//
+// `cache: "no-store"` 만으로는 부족했다. 명시적으로 표시한다.
+export const dynamic = "force-dynamic";
+
 import Link from "next/link";
 
 import { fetchHomeCuration, type Contest, type HomeCurationGroup } from "@/lib/api/contests";
