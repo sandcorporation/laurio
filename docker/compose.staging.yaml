@@ -133,6 +133,11 @@ x-backend-env: &backend-env
   # 0)으로 고정되고 .env.staging에 무엇을 채워도 반영되지 않는다.
   LLM_OPENAI_MODEL: ${LLM_OPENAI_MODEL:-gpt-4o-mini}
   LLM_OPENAI_TEMPERATURE: ${LLM_OPENAI_TEMPERATURE:-0}
+  # contests.requirement_chat.OpenAIRequirementChatAdapter의 전용 temperature다
+  # (#55 코드리뷰 지적 4) — 위 LLM_OPENAI_TEMPERATURE(채점, 결정적이어야
+  # 컷라인이 안정적이다)와 절대 같은 키를 쓰지 않는다. 비우면 기본값 0.7(대화가
+  # 매 턴 기계적으로 똑같아지지 않게 한다).
+  LLM_REQUIREMENT_CHAT_OPENAI_TEMPERATURE: ${LLM_REQUIREMENT_CHAT_OPENAI_TEMPERATURE:-0.7}
 
   # --- 알림 채널 어댑터 (ADR-0007/0009) ---
   # 코디네이터 리뷰 지적: 여기 존재하지 않는 클래스 이름(RealAlimtalkAdapter 등)을

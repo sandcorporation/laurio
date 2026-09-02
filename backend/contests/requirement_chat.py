@@ -204,6 +204,44 @@ class FakeRequirementChatAdapter:
         )
 
 
+# gpt-4o-mini의 컨텍스트 상한(128k 토큰)을 contests.api._MAX_CHAT_HISTORY_TURNS
+# (200턴) 가드만으로는 지키지 못한다(#55 코드리뷰 지적 3) — Sponsor 발화(최대
+# 2000자)와 AI 응답(최대 4000자, 이 모듈의 _MAX_REPLY_LENGTH)이 200턴 쌓이면
+# 최대 약 120만자로, 한글 기준 1토큰≈1.5~2자로만 잡아도 컨텍스트를 몇 배
+# 넘는다. 넘는 순간부터 매 턴 400 context_length_exceeded ->
+# RequirementChatAdapterError -> 사과 응답만 나오고, 그 사과도 이력에 그대로
+# 쌓여 이력을 줄일 경로가 없으므로 그 Contest의 AI grill이 영구히 죽는다 —
+# 200턴 가드가 발동하기 훨씬 전에 벌어진다. 그래서 벤더에 보내는 프롬프트는
+# "최근 턴부터 채우다가 이 문자 수 예산을 넘기면 멈춘다"로 방어한다. 40,000자는
+# 넉넉히 보수적인 값이다(약 2~2.7만 토큰) — 시스템 프롬프트·확정 체크리스트·
+# 이번 발화·응답 토큰에 남길 여유를 크게 둔다.
+_MAX_HISTORY_PROMPT_CHARS = 40_000
+
+
+def _select_recent_history(history: list[ChatTurn]) -> tuple[list[ChatTurn], int]:
+    """최근 턴부터 문자 수 예산 안에 들어오는 만큼만 고른다(#55 코드리뷰 지적 3).
+
+    오래된 턴을 프롬프트에서 빼는 것은 정보 손실이지만, `RequirementChatMessage`
+    행 각각이 이미 자기 몫의 감사 기록을 갖고 있으므로(#20) 대화 자체가
+    사라지지는 않는다 — 이번에 벤더로 보내는 프롬프트에서만 빠질 뿐이다. 가장
+    최근 턴은 그 턴 하나만으로 예산을 넘어도 반드시 포함한다 — 그렇지 않으면
+    Sponsor의 방금 발화조차 맥락 없이 사라질 수 있다.
+    """
+
+    selected: list[ChatTurn] = []
+    used = 0
+    for turn in reversed(history):
+        # 마커·역할 표기(<<<SPONSOR_MESSAGE_START/END>>>, "[role] ")의 오버헤드를
+        # 넉넉히 더해 예산을 살짝 보수적으로 잡는다.
+        cost = len(turn.content) + len(turn.role) + 40
+        if selected and used + cost > _MAX_HISTORY_PROMPT_CHARS:
+            break
+        selected.append(turn)
+        used += cost
+    selected.reverse()
+    return selected, len(history) - len(selected)
+
+
 def build_chat_prompt(chat_input: RequirementChatInput, *, include_history: bool = True) -> str:
     """실제 LLM에 보낼 프롬프트 문자열 — 감사·재현용으로 만들어 두지만, fake
     어댑터는 이 문자열이 아니라 구조화된 `chat_input`을 직접 읽는다
@@ -246,7 +284,13 @@ def build_chat_prompt(chat_input: RequirementChatInput, *, include_history: bool
     if include_history:
         lines.append("")
         lines.append("## 대화 이력")
-        for turn in chat_input.history:
+        recent_turns, omitted_count = _select_recent_history(chat_input.history)
+        if omitted_count:
+            lines.append(
+                f"(가장 오래된 {omitted_count}턴은 길이 예산 때문에 이번 요청에서 생략됨 "
+                "— 각 턴은 감사 기록에 그대로 남아 있다)"
+            )
+        for turn in recent_turns:
             lines.append(f"[{turn.role}] <<<SPONSOR_MESSAGE_START>>>")
             lines.append(neutralize_untrusted(turn.content))
             lines.append("<<<SPONSOR_MESSAGE_END>>>")
@@ -269,6 +313,12 @@ _OPENAI_DEFAULT_TEMPERATURE = 0.7
 # 지적 1) — 이 엔드포인트도 동기 WSGI 요청이라 gunicorn 기본 워커 타임아웃(30초)
 # 안에서 프롬프트 구성·DB 조회 오버헤드까지 끝나야 한다.
 _OPENAI_REQUEST_TIMEOUT_SECONDS = 20
+# max_tokens가 없으면 장황한 생성이 응답 크기를 사후에(_MAX_REPLY_LENGTH로) 잘라도
+# 소용없다 — 생성 자체가 오래 걸려 20초 타임아웃을 먼저 터뜨리고, 벤더 과금은
+# 이미 나간 채로 재시도해도 같은 프롬프트라 같은 실패가 재현된다(#55 코드리뷰
+# 지적 5). reply(최대 4000자 ≈ 최대 2700토큰) + proposed_requirements 최대
+# 5개(각 500자 ≈ 최대 1700토큰 합) + JSON 구조 오버헤드에 여유를 더한 값이다.
+_OPENAI_MAX_TOKENS = 4096
 _OPENAI_SYSTEM_PROMPT = (
     "당신은 Laurio 공모전 Sponsor의 AI grill 대화를 돕는 보조자입니다. 응답은 반드시 "
     "지정된 JSON 스키마를 따라야 합니다 — reply(사용자에게 보여줄 대화문)와 "
@@ -346,6 +396,26 @@ def _describe_openai_http_error(response: Any, *, contest_id: int) -> str:
     return f"{base}, {details})." if details else f"{base})."
 
 
+# grade 별칭 — 벤더가 스키마의 enum(["required","optional"])을 어기고 대소문자·
+# 공백·한글 표기("필수"/"선택"/"옵션")로 돌려줘도 놓치지 않는다(#55 코드리뷰
+# 지적 1). 매핑되지 않는 값은 "optional"로 본다 — `contests.api`의 폴백(모르면
+# required)과 일부러 반대 방향을 골랐다. required로 잘못 떨어지면 선택 요건이
+# 필수로 뒤집혀 채점 백분율이 바뀌고 그 값이 배분 컷라인을 가른다(ADR-0006).
+_GRADE_ALIASES = {
+    "required": "required",
+    "필수": "required",
+    "optional": "optional",
+    "선택": "optional",
+    "옵션": "optional",
+}
+
+
+def _normalize_grade(raw_grade: object) -> str:
+    if not isinstance(raw_grade, str):
+        return "optional"
+    return _GRADE_ALIASES.get(raw_grade.strip().lower(), "optional")
+
+
 def _parse_openai_chat_response(body: dict, *, contest_id: int) -> RequirementChatOutput:
     """OpenAI 응답 본문을 검증하고 `RequirementChatOutput`으로 바꾼다.
 
@@ -399,19 +469,24 @@ def _parse_openai_chat_response(body: dict, *, contest_id: int) -> RequirementCh
     raw_proposals = parsed.get("proposed_requirements")
     proposals: list[RequirementProposal] = []
     if isinstance(raw_proposals, list):
-        for raw in raw_proposals[:_MAX_PROPOSALS_PER_TURN]:
+        for raw in raw_proposals:
             if not isinstance(raw, dict):
                 continue
             text = raw.get("text")
             if not isinstance(text, str) or not text.strip():
                 continue
-            grade = raw.get("grade")
-            grade_str = grade if isinstance(grade, str) else ""
             proposals.append(
-                RequirementProposal(text=text.strip()[:500], grade=grade_str)
+                RequirementProposal(
+                    text=text.strip()[:500], grade=_normalize_grade(raw.get("grade"))
+                )
             )
     # raw_proposals가 배열이 아니면(문자열·객체·None 등) 그냥 빈 목록으로 취급한다 —
     # reply는 이미 확보했으니 대화는 끊기지 않는다(#55 AC).
+    #
+    # 상한은 반드시 "필터링 뒤"에 자른다(#55 코드리뷰 지적 2) — 앞서 자르면 불량
+    # 항목이 앞쪽에 몰렸을 때 뒤에 있는 멀쩡한 제안이 상한에 닿지도 못한 채
+    # 통째로 사라진다.
+    proposals = proposals[:_MAX_PROPOSALS_PER_TURN]
 
     model_used = body.get("model") or "unknown"
     return RequirementChatOutput(
@@ -428,11 +503,12 @@ class OpenAIRequirementChatAdapter:
     OpenAIRequirementChatAdapter`로 켠다(`core.adapters.resolve_adapter`).
     자격증명은 환경변수 `OPEN_AI_API_KEY`에서만 읽는다 — `scoring.adapters.
     OpenAIScoringAdapter`와 같은 키를 공유한다(벤더 하나, 용도 둘). 모델명은
-    `LLM_OPENAI_MODEL`(기본 `gpt-4o-mini`), temperature는
-    `LLM_OPENAI_TEMPERATURE`로 배포 환경마다 바꿀 수 있다 — 채점과 같은 설정
-    키를 그대로 재사용한다(docker/compose.staging.yaml·compose.prod.yaml). 다만
-    기본 temperature는 채점(0 — 같은 입력에 항상 같은 판정)과 달리 대화이므로
-    0.7을 쓴다 — 매 턴 기계적으로 똑같은 질문만 반복하지 않게 한다.
+    `LLM_OPENAI_MODEL`(기본 `gpt-4o-mini`)을 채점과 공유하지만, temperature는
+    **전용 키** `LLM_REQUIREMENT_CHAT_OPENAI_TEMPERATURE`(기본 0.7)를 따로 둔다
+    (#55 코드리뷰 지적 4) — 채점의 `LLM_OPENAI_TEMPERATURE`(기본 0, 같은 입력에
+    항상 같은 판정이어야 컷라인이 안정적이다, ADR-0006)와 공유하면 compose의
+    `:-0` 고정 때문에 grill의 0.7이 배포에 절대 반영되지 않거나, 반대로 grill을
+    위해 0.7을 넣으면 채점이 비결정적이 되어 컷라인이 흔들린다.
 
     생성자가 자격증명 없이는 인스턴스화되지 않는다 — 배포 환경에서
     `LLM_REQUIREMENT_CHAT_ADAPTER_MODE`가 이 클래스를 가리키는데 키가 없으면
@@ -459,7 +535,9 @@ class OpenAIRequirementChatAdapter:
         if temperature is not None:
             self._temperature = temperature
         else:
-            raw_temperature = os.environ.get("LLM_OPENAI_TEMPERATURE")
+            # scoring과 공유하는 LLM_OPENAI_TEMPERATURE가 아니라 전용 키를 읽는다
+            # (#55 코드리뷰 지적 4) — 클래스 독스트링 참고.
+            raw_temperature = os.environ.get("LLM_REQUIREMENT_CHAT_OPENAI_TEMPERATURE")
             self._temperature = (
                 float(raw_temperature) if raw_temperature else _OPENAI_DEFAULT_TEMPERATURE
             )
@@ -475,6 +553,7 @@ class OpenAIRequirementChatAdapter:
         payload = {
             "model": self._model,
             "temperature": self._temperature,
+            "max_tokens": _OPENAI_MAX_TOKENS,
             "messages": [
                 {"role": "system", "content": _OPENAI_SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},

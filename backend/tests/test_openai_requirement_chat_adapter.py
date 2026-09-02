@@ -201,6 +201,55 @@ def test_malformed_proposal_items_are_skipped_not_raising(monkeypatch):
     assert len(output.proposed_requirements) == 2
 
 
+def test_grade_synonyms_are_normalized_to_canonical_values(monkeypatch):
+    """벤더가 스키마의 enum(["required","optional"])을 어기고 대소문자·공백·한글
+    표기로 돌려줘도(#55 코드리뷰 지적 1) `contests.api`의 required 폴백에 걸려
+    선택 요건이 필수로 뒤집히면 안 된다 — 여기서 정규화한다."""
+
+    proposals = [
+        {"text": "A", "grade": "Required"},
+        {"text": "B", "grade": " optional "},
+        {"text": "C", "grade": "필수"},
+        {"text": "D", "grade": "선택"},
+        {"text": "E", "grade": "옵션"},
+    ]
+    body = _chat_completion_body("정리했어요", proposals)
+    monkeypatch.setattr(
+        "contests.requirement_chat.requests.post", lambda *a, **k: _FakeResponse(200, body)
+    )
+
+    output = OpenAIRequirementChatAdapter().respond(_chat_input())
+
+    grades = {p.text: p.grade for p in output.proposed_requirements}
+    assert grades == {
+        "A": "required",
+        "B": "optional",
+        "C": "required",
+        "D": "optional",
+        "E": "optional",
+    }
+
+
+def test_unmapped_grade_value_does_not_silently_become_required(monkeypatch):
+    """매핑되지 않는 grade 값은 `contests.api`의 required 폴백과 반대 방향인
+    optional로 떨어져야 한다 — required로 우연히 뒤집히면 선택 요건이 필수가
+    되어 채점 백분율과 배분 컷라인이 흔들린다(#55 코드리뷰 지적 1)."""
+
+    proposals = [
+        {"text": "타입 이상함", "grade": 123},
+        {"text": "값 이상함", "grade": "urgent"},
+        {"text": "None", "grade": None},
+    ]
+    body = _chat_completion_body("정리했어요", proposals)
+    monkeypatch.setattr(
+        "contests.requirement_chat.requests.post", lambda *a, **k: _FakeResponse(200, body)
+    )
+
+    output = OpenAIRequirementChatAdapter().respond(_chat_input())
+
+    assert all(p.grade == "optional" for p in output.proposed_requirements)
+
+
 def test_empty_proposed_requirements_array_is_valid(monkeypatch):
     body = _chat_completion_body("추가로 제안할 게 없어요", [])
     monkeypatch.setattr(
@@ -234,6 +283,31 @@ def test_too_many_proposals_are_capped_not_raising(monkeypatch):
     output = OpenAIRequirementChatAdapter().respond(_chat_input())
 
     assert len(output.proposed_requirements) <= 5
+
+
+def test_malformed_items_before_good_ones_do_not_starve_the_cap(monkeypatch):
+    """불량 항목이 앞쪽에 몰려 있어도 뒤에 있는 멀쩡한 제안이 상한(5개)에 담겨야
+    한다(#55 코드리뷰 지적 2) — 상한을 필터링 *전에* 적용하면 앞의 불량 항목들만
+    세다가 뒤의 정상 제안은 아예 보지도 못하고 잘려나간다."""
+
+    bad_items = [
+        "문자열 항목",
+        {"grade": "required"},  # text 없음
+        {"text": "   ", "grade": "required"},  # 공백뿐
+        None,
+        {"text": "", "grade": "optional"},
+    ]
+    good_items = [{"text": f"정상 항목 {i}", "grade": "required"} for i in range(6)]
+    body = _chat_completion_body("정리했어요", bad_items + good_items)
+    monkeypatch.setattr(
+        "contests.requirement_chat.requests.post", lambda *a, **k: _FakeResponse(200, body)
+    )
+
+    output = OpenAIRequirementChatAdapter().respond(_chat_input())
+
+    texts = [p.text for p in output.proposed_requirements]
+    assert len(texts) == 5
+    assert texts == [f"정상 항목 {i}" for i in range(5)]
 
 
 # --- reply 자체를 뽑을 수 없으면 예외 — 대화를 만들어낼 재료가 없다 -----------------
@@ -372,6 +446,118 @@ def test_credential_never_leaks_into_exception_message(monkeypatch):
         OpenAIRequirementChatAdapter().respond(_chat_input())
 
     assert "sk-test-key-do-not-leak" not in str(exc_info.value)
+
+
+# --- 설정: 전용 temperature 키, max_tokens (#55 코드리뷰 지적 4·5) -----------------
+
+
+def test_temperature_reads_dedicated_env_var_not_scoring_shared_one(monkeypatch):
+    """`LLM_OPENAI_TEMPERATURE`(scoring과 공유)를 그릴이 함께 읽으면, 문서화된
+    기본값 0.7이 compose의 `:-0` 고정 때문에 배포에서 절대 적용되지 않거나,
+    반대로 grill 설정을 채점에 흘려보내면 채점이 비결정적이 되어 컷라인
+    (ADR-0006)이 흔들린다(#55 코드리뷰 지적 4) — 전용 키로 분리한다."""
+
+    monkeypatch.delenv("LLM_OPENAI_TEMPERATURE", raising=False)
+    monkeypatch.delenv("LLM_REQUIREMENT_CHAT_OPENAI_TEMPERATURE", raising=False)
+
+    captured = {}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        captured["payload"] = json
+        return _FakeResponse(200, _chat_completion_body("네", []))
+
+    monkeypatch.setattr("contests.requirement_chat.requests.post", fake_post)
+
+    # scoring 전용 키만 채워도 grill의 temperature는 바뀌지 않아야 한다(기본 0.7 유지).
+    monkeypatch.setenv("LLM_OPENAI_TEMPERATURE", "0")
+    OpenAIRequirementChatAdapter().respond(_chat_input())
+    assert captured["payload"]["temperature"] == 0.7
+
+    # grill 전용 키를 채우면 그 값이 반영된다.
+    monkeypatch.setenv("LLM_REQUIREMENT_CHAT_OPENAI_TEMPERATURE", "0.3")
+    OpenAIRequirementChatAdapter().respond(_chat_input())
+    assert captured["payload"]["temperature"] == 0.3
+
+
+def test_request_payload_includes_max_tokens(monkeypatch):
+    """max_tokens가 없으면 장황한 생성이 20초 타임아웃을 먼저 터뜨리고(과금은
+    그대로 나가고) 재시도해도 같은 프롬프트라 재현된다(#55 코드리뷰 지적 5)."""
+
+    captured = {}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        captured["payload"] = json
+        return _FakeResponse(200, _chat_completion_body("네", []))
+
+    monkeypatch.setattr("contests.requirement_chat.requests.post", fake_post)
+
+    OpenAIRequirementChatAdapter().respond(_chat_input())
+
+    assert isinstance(captured["payload"].get("max_tokens"), int)
+    assert captured["payload"]["max_tokens"] > 0
+
+
+# --- 대화 이력 상한 (#55 코드리뷰 지적 3) -------------------------------------------
+
+
+def test_huge_history_does_not_balloon_the_prompt_sent_to_vendor(monkeypatch):
+    """200턴 가드만으로는 gpt-4o-mini의 128k 컨텍스트를 지키지 못한다 — 이력이
+    쌓일수록 프롬프트가 무한정 자라면 어느 순간부터 매 턴
+    context_length_exceeded로 실패하고, 그 실패조차 이력에 쌓여 이력을 줄일
+    경로가 없는 Contest는 AI grill이 영구히 죽는다(#55 코드리뷰 지적 3). 프롬프트
+    문자 수 자체가 이력 크기와 무관하게 예산 안에 머물러야 한다."""
+
+    from contests.requirement_chat import ChatTurn
+
+    huge_history = [
+        ChatTurn(role="sponsor" if i % 2 == 0 else "assistant", content="가" * 2000)
+        for i in range(200)
+    ]
+
+    captured = {}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        captured["payload"] = json
+        return _FakeResponse(200, _chat_completion_body("네", []))
+
+    monkeypatch.setattr("contests.requirement_chat.requests.post", fake_post)
+
+    chat_input = _chat_input()
+    chat_input = RequirementChatInput(
+        contest_id=chat_input.contest_id,
+        contest_title=chat_input.contest_title,
+        latest_message=chat_input.latest_message,
+        history=huge_history,
+        existing_requirements=chat_input.existing_requirements,
+    )
+
+    OpenAIRequirementChatAdapter().respond(chat_input)
+
+    user_message = captured["payload"]["messages"][-1]["content"]
+    # 200턴 * 2000자 = 40만자를 그대로 실었다면 이 상한을 훌쩍 넘는다.
+    assert len(user_message) < 100_000
+
+
+def test_select_recent_history_keeps_most_recent_turn_even_if_it_alone_exceeds_budget():
+    from contests.requirement_chat import ChatTurn, _select_recent_history
+
+    huge_turn = ChatTurn(role="sponsor", content="가" * 1_000_000)
+    selected, omitted = _select_recent_history([huge_turn])
+
+    assert selected == [huge_turn]
+    assert omitted == 0
+
+
+def test_select_recent_history_prefers_recent_turns_when_over_budget():
+    from contests.requirement_chat import ChatTurn, _select_recent_history
+
+    history = [ChatTurn(role="sponsor", content="가" * 2000) for _ in range(200)]
+    selected, omitted = _select_recent_history(history)
+
+    assert omitted > 0
+    assert len(selected) < len(history)
+    # 남은 턴은 항상 "가장 최근" 쪽이어야 한다 — 잘리는 건 오래된 쪽이다.
+    assert selected == history[len(history) - len(selected):]
 
 
 # --- AC: 배포 환경에서 자격증명이 없으면 부팅 자체가 거부된다(#83 부팅 가드) --------
