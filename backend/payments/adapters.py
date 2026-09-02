@@ -29,7 +29,7 @@ dev/test는 `FakePGAdapter`로 바인딩된다(`PAYMENT_ADAPTER_MODE=fake`). 이
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from django.conf import settings
 
@@ -55,6 +55,7 @@ class PaymentRequestResult:
     checkout_url: str
 
 
+@runtime_checkable
 class PGAdapter(Protocol):
     def request_payment(self, *, order_id: str, amount: int) -> PaymentRequestResult: ...
 

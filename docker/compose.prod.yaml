@@ -13,6 +13,10 @@
 # 템플릿으로도 쓸 수 있게 설계했다 — `db` 서비스는 자체 호스팅 옵션일 뿐이고,
 # 관리형 RDS/OCI DB를 쓸 경우 POSTGRES_HOST/POSTGRES_PORT 를 그 엔드포인트로 덮어쓴다.
 #
+# **이 스택은 지금 뜨지 않는다 — 의도된 상태다(#83, 사용자 결정).** staging과
+# 같은 이유다(compose.staging.yaml 상단 주석 참고) — 본인확인(#85)·결제(#87)·
+# Seller 등록(#57)·LLM 채점/AI grill(#88)의 `Real*` 클래스가 하나도 아직 없다.
+#
 # 어댑터 바인딩(ADR-0007, 한눈에 보기용 — 실제 값은 .env.prod):
 #   PG        : FakePGAdapter        -> 토스 "실물"(dotted path, 아직 미구현 — #87)
 #   지급대행   : FakePayoutAdapter     -> 토스 지급대행 실물(dotted path, 아직 미구현
@@ -23,7 +27,10 @@
 #   소셜 로그인 : FakeSocialAdapter     -> 카카오/GitHub/구글 실물 (SOCIAL_AUTH_MODE=real)
 #   본인확인   : FakeVerificationAdapter -> 실제 PortOne 통합인증 연동(dotted path,
 #               아직 미구현 — #85)
-#   LLM 채점   : FakeLLMScoringAdapter  -> 실제 LLM 벤더(dotted path로 지정, 아직 미구현)
+#   LLM 채점   : FakeLLMScoringAdapter  -> 실제 OpenAI 어댑터(dotted path, 아직
+#               미구현 — #88)
+#   AI grill  : FakeRequirementChatAdapter -> 실제 OpenAI 어댑터(dotted path, 아직
+#               미구현 — #88)
 #   알림 채널  : Fake*Adapter           -> 실제 카카오 알림톡/SMS·LMS 벤더(dotted path로
 #               지정, 아직 미구현 — .env.prod에서 반드시 채워야 하는 이유가 이것이다.
 #               구현되지 않은 클래스 이름을 여기 하드코딩하지 않는다)
@@ -32,9 +39,12 @@
 # staging과 동일한 가드지만, production은 추가로 IS_PRODUCTION_DEPLOYMENT 하드닝
 # (HSTS·SSL 리다이렉트·secure 쿠키·강한 SECRET_KEY, `manage.py check --deploy`가 검증)
 # 도 함께 켜진다. VERIFICATION_ADAPTER_MODE·PAYMENT_ADAPTER_MODE·PAYOUT_ADAPTER_MODE·
-# SELLER_ADAPTER_MODE는 그 값이 "fake"도 아니고 실제로 import도 안 되면 역시 부팅을
-# 거부한다(#83) — 그래서 실물 클래스가 없는 지금은 알림 채널과 같은 원칙으로
-# `${VAR:?...}`로 필수값으로 비워 둔다.
+# SELLER_ADAPTER_MODE·LLM_ADAPTER_MODE·LLM_REQUIREMENT_CHAT_ADAPTER_MODE는 그 값이
+# "fake"도 아니고 실제로 쓸 수도 없으면(임포트·인스턴스화·계약 충족 중 하나라도
+# 실패하면) 역시 부팅을 거부한다(#83, core.adapters.check_adapter_mode —
+# django.core.checks로 등록되어 django.setup() 이후에만 평가된다). 그래서 실물
+# 클래스가 없는 지금은 알림 채널과 같은 원칙으로 `${VAR:?...}`로 필수값으로 비워
+# 둔다.
 #
 # 스케줄러(ADR-0003): redis 브로커 + celery-worker + celery-beat 세 서비스가 반드시
 # 함께 떠야 한다 — compose.staging.yaml과 같은 이유(core/tasks.py, config/celery.py
@@ -100,10 +110,11 @@ x-backend-env: &backend-env
   TOSS_LIVE_SECRET_KEY: ${TOSS_LIVE_SECRET_KEY:-}
 
   # --- LLM 채점 · AI grill 어댑터 (ADR-0006/0007/0014) ---
-  # staging과 같은 이유로 정직한 sentinel이다 — 존재하지 않는 클래스를 가리키는 척
-  # 하지 않는다. 실제 벤더 어댑터가 구현되면 그 dotted path로 교체한다.
-  LLM_ADAPTER_MODE: real
-  LLM_REQUIREMENT_CHAT_ADAPTER_MODE: real
+  # 실제 OpenAI 어댑터는 아직 구현되지 않았다(#88) — "real"은 dotted path가
+  # 아니라 core.adapters.check_adapter_mode(#83)가 부팅 시점에 거부한다. 위와
+  # 같은 이유로 필수값으로 비워 둔다.
+  LLM_ADAPTER_MODE: ${LLM_ADAPTER_MODE:?실제 LLM 채점 어댑터의 dotted path를 .env.prod 에 채워라 — 아직 구현 전이면(#88) 이 값 자체를 비워 둘 수 없다}
+  LLM_REQUIREMENT_CHAT_ADAPTER_MODE: ${LLM_REQUIREMENT_CHAT_ADAPTER_MODE:?실제 AI grill 어댑터의 dotted path를 .env.prod 에 채워라 — 아직 구현 전이면(#88) 이 값 자체를 비워 둘 수 없다}
   OPEN_AI_API_KEY: ${OPEN_AI_API_KEY:-}
 
   # --- 알림 채널 어댑터 (ADR-0007/0009) ---

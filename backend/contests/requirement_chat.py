@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from django.conf import settings
 
@@ -90,6 +90,7 @@ class RequirementChatAdapterError(Exception):
     """
 
 
+@runtime_checkable
 class RequirementChatAdapter(Protocol):
     model_version: str
 

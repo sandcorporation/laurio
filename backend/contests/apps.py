@@ -30,6 +30,15 @@ class ContestsConfig(AppConfig):
            스케줄러 전이보다 먼저 일어나도, 늦게 일어나도 서로를 밟지 않는다.
         """
 
+        from django.core.checks import register
+
+        from . import checks
+
+        # LLM_REQUIREMENT_CHAT_ADAPTER_MODE 부팅 가드(#83) — 전이 등록과는 별개
+        # 관심사지만, 이 앱의 ready()가 이미 지연 임포트 원칙(모델을 여기서
+        # 불러오는 이유)을 지키고 있으므로 같은 자리에 등록한다.
+        register(checks.check_llm_requirement_chat_adapter_mode)
+
         from datetime import timedelta
 
         from core.transitions import TransitionSpec, register_transition

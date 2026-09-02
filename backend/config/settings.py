@@ -8,7 +8,6 @@ from datetime import timedelta
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
-from django.utils.module_loading import import_string
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -51,34 +50,6 @@ def _is_fake_adapter_binding(value: str) -> bool:
         return True
     class_name = value.rsplit(".", 1)[-1]
     return class_name.startswith("Fake")
-
-
-def _require_resolvable_adapter_mode(*, setting_name: str, value: str) -> None:
-    """배포 환경에서 어댑터 모드 값이 "fake"도 아니고 import도 안 되면 부팅을 거부한다 (#83).
-
-    payments·verification·payouts 세 어댑터는 `core.adapters.resolve_adapter`로
-    선택된다 — "fake"가 아니면 뭐든 dotted path로 그대로 import를 시도한다. 지금까지는
-    그 값이 실제로 풀리는지 아무도 부팅 시점에 확인하지 않았다. 그래서
-    `compose.staging.yaml`의 `PAYMENT_ADAPTER_MODE: real`처럼(그 자체로는 아무 클래스도
-    가리키지 않는) 값을 넣어도 컨테이너는 정상적으로 뜨고, 첫 결제·본인확인 요청에서야
-    `NotImplementedError`로 죽었다 — 배포 시점에 알 수 있었던 실수를 사용자 요청 시점의
-    500으로 알게 되는 것이다.
-
-    dev는 이 가드 대상이 아니다 — 오타를 부팅 실패로 바꿀 만큼 배포와 같은 무게가
-    아니다(IS_DEPLOYED_ENVIRONMENT 설명 참고).
-    """
-
-    if not IS_DEPLOYED_ENVIRONMENT or value == "fake":
-        return
-    try:
-        import_string(value)
-    except ImportError as exc:
-        raise ImproperlyConfigured(
-            f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 인데 "
-            f"{setting_name}={value!r} 를 임포트할 수 없다 ({exc}). \"fake\" 이거나 실제 "
-            "어댑터 클래스의 dotted path여야 한다 — 이 값 그대로는 부팅은 통과하고 첫 "
-            "요청에서야 죽는다."
-        ) from exc
 
 
 DEBUG = _env_bool("DJANGO_DEBUG", True)
@@ -418,10 +389,6 @@ if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(VERIFICATION_ADAPTER_MOD
         "VERIFICATION_ADAPTER_MODE 가 fake 다. staging/production 배포에서는 실제 "
         "본인확인 어댑터의 dotted path를 반드시 설정해야 한다."
     )
-_require_resolvable_adapter_mode(
-    setting_name="VERIFICATION_ADAPTER_MODE", value=VERIFICATION_ADAPTER_MODE
-)
-
 # 실명·생년월일·CI/DI를 저장 시 암호화하는 대칭키(Fernet). SECRET_KEY와 마찬가지로
 # 배포 환경에서는 반드시 주입해야 하고, dev는 저장소에 공개된 고정 키로 대체한다.
 _verification_key = os.environ.get("VERIFICATION_ENCRYPTION_KEY") or ""
@@ -447,7 +414,6 @@ if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(PAYMENT_ADAPTER_MODE):
         "fake 다. staging/production 배포에서는 실제 PG 어댑터의 dotted path를 반드시 "
         "설정해야 한다."
     )
-_require_resolvable_adapter_mode(setting_name="PAYMENT_ADAPTER_MODE", value=PAYMENT_ADAPTER_MODE)
 
 # 개최비·심사기간·심사기간 연장 단위·연장비는 더 이상 여기 없다(#78,
 # ADR-0023) — `policies.models.PlatformPolicy`(DB 단일 행)의
@@ -591,7 +557,6 @@ if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(PAYOUT_ADAPTER_MODE):
         "fake 다. staging/production 배포에서는 실제 지급대행 어댑터의 dotted path를 "
         "반드시 설정해야 한다."
     )
-_require_resolvable_adapter_mode(setting_name="PAYOUT_ADAPTER_MODE", value=PAYOUT_ADAPTER_MODE)
 
 # payout.changed 웹훅 서명 비밀키. payments.webhook_security의 서명 스킴을 그대로
 # 재사용한다(HMAC-SHA256) — 벤더가 다를 뿐 "서명 없는 웹훅으로 원장이 위조될 수
@@ -626,7 +591,6 @@ if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(SELLER_ADAPTER_MODE):
         "가 fake 다. staging/production 배포에서는 실제 Seller 등록 어댑터의 dotted "
         "path를 반드시 설정해야 한다."
     )
-_require_resolvable_adapter_mode(setting_name="SELLER_ADAPTER_MODE", value=SELLER_ADAPTER_MODE)
 
 # 지급대행 주간 한도는 더 이상 여기 없다(#78, ADR-0023) —
 # `policies.models.PlatformPolicy.seller_weekly_limit_amount`로 옮겼다. **이

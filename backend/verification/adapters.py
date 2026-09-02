@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from django.conf import settings
 
@@ -32,6 +32,7 @@ class VerificationResult:
     di: str
 
 
+@runtime_checkable
 class VerificationAdapter(Protocol):
     def resolve(self, verification_token: str) -> VerificationResult: ...
 

@@ -118,6 +118,10 @@ jobs:
       DJANGO_DEBUG: "false"
       DJANGO_SECRET_KEY: "ci-deploy-check-only-Kx8f3Kq0mN2pR7tYcVbGhJkLdSaWeUiOaXzCvBnMqWeRtYuIoPaSdFgHjKlZxCvB"
       DJANGO_ALLOWED_HOSTS: "api.laurio.example"
+      # #43: 배포 환경에서 비면 부팅을 거부한다 — 이 잡의 env가 그 가드를
+      # 실제로 통과하는지도 함께 검증한다(코디네이터 리뷰 지적 — 이 값이 없어서
+      # 이 잡은 어댑터 모드와 무관하게 이미 실패하고 있었다).
+      LAURIO_OPERATOR_ORIGIN: "https://operator.laurio.example"
       POSTGRES_DB: laurio
       POSTGRES_USER: laurio
       POSTGRES_PASSWORD: ci-deploy-check-only-password
@@ -135,13 +139,20 @@ jobs:
       STORAGE_SECRET_KEY: ci-deploy-check-only-secret-key
       STORAGE_REGION: us-east-1
       SOCIAL_AUTH_MODE: real
-      VERIFICATION_ADAPTER_MODE: real
-      PAYMENT_ADAPTER_MODE: real
-      PAYOUT_ADAPTER_MODE: real
-      # 실제 벤더 어댑터는 아직 구현되지 않았다(#23 범위 밖) — "fake가 아니다"라는
-      # 것만 이 검사의 관심사다. 실제 어댑터가 생기면 그 dotted path로 바뀐다.
-      LLM_ADAPTER_MODE: real
-      LLM_REQUIREMENT_CHAT_ADAPTER_MODE: real
+      # 실제 벤더 어댑터(#85 PortOne, #87 Toss, #57 Seller 등록, #88 OpenAI)는
+      # 아직 구현되지 않았다(#23/#83 범위 밖) — 이 잡이 검증하려는 건 "배포
+      # 하드닝이 통과하는가"이지 "어댑터가 실물인가"가 아니다. `core.adapters.
+      # check_adapter_mode`(#83)는 "fake"도 아니고 실제로 쓸 수도 없는 값(import·
+      # 인스턴스화·계약 충족 중 하나라도 실패)을 거부하므로, 문자 그대로 "real"은
+      # 더 이상 통과하지 못한다(dotted path가 아니다) — `tests/adapter_stubs.py`가
+      # 제공하는, 각 Protocol을 구조적으로 만족하는 최소 stub을 대신 가리킨다.
+      # 실물 어댑터가 생기면 그 dotted path로 바뀐다.
+      VERIFICATION_ADAPTER_MODE: tests.adapter_stubs.StubVerificationAdapter
+      PAYMENT_ADAPTER_MODE: tests.adapter_stubs.StubPGAdapter
+      PAYOUT_ADAPTER_MODE: tests.adapter_stubs.StubPayoutAdapter
+      SELLER_ADAPTER_MODE: tests.adapter_stubs.StubSellerAdapter
+      LLM_ADAPTER_MODE: tests.adapter_stubs.StubLLMScoringAdapter
+      LLM_REQUIREMENT_CHAT_ADAPTER_MODE: tests.adapter_stubs.StubRequirementChatAdapter
       NOTIFICATION_ALIMTALK_ADAPTER: notifications.adapters.RealAlimtalkAdapter
       NOTIFICATION_SMS_ADAPTER: notifications.adapters.RealSmsAdapter
       NOTIFICATION_LMS_ADAPTER: notifications.adapters.RealLmsAdapter

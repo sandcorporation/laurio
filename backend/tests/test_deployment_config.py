@@ -1,13 +1,19 @@
-"""배포 환경 부팅 가드 (#23, ADR-0007).
+"""배포 환경 부팅 가드 (#23, #83, ADR-0007).
 
 이 프로젝트의 유일한 테스트 시임은 HTTP지만, 이 파일이 검증하는 대상은 요청을
-받기도 전에 끝나는 부팅 시점의 `ImproperlyConfigured`다 — HTTP로는 원천적으로
-도달할 수 없다. `config/settings.py`는 모듈 임포트 시점에 가드를 평가하므로, 같은
-프로세스 안에서 `override_settings`로 재현할 수 없다(이미 임포트가 끝난 뒤라
-`LAURIO_DEPLOYMENT_TARGET` 분기를 다시 태울 방법이 없다). 그래서 `storage/checks.py`가
-`manage.py check`(부팅 파이프라인 그 자체)로 검증되는 것과 같은 원칙을,
-서브프로세스로 `manage.py check`를 직접 실행해 종료 코드와 에러 메시지를 확인하는
-방식으로 적용한다.
+받기도 전에 끝나는 부팅 시점의 실패다 — HTTP로는 원천적으로 도달할 수 없다.
+가드는 두 갈래다: `config/settings.py`의 대부분은 모듈 임포트 시점에
+`ImproperlyConfigured`를 던지고, 어댑터 모드 가드(#83,
+`core.adapters.check_adapter_mode`)는 `django.core.checks`로 등록되어
+`django.setup()` 이후에만 평가된다(모델을 참조하는 실물 어댑터를 settings.py
+임포트 도중 불러오면 `AppRegistryNotReady`가 나기 때문이다 — 그건
+`except ImportError`로 잡히지 않는다). 두 갈래 다 같은 프로세스 안에서
+`override_settings`로는 재현할 수 없다(이미 임포트가 끝난 뒤라
+`LAURIO_DEPLOYMENT_TARGET` 분기를 다시 태울 방법이 없고, 체크 레지스트리도
+매 프로세스에서 한 번만 구성된다). 그래서 `storage/checks.py`가 `manage.py
+check`(부팅 파이프라인 그 자체)로 검증되는 것과 같은 원칙을, 서브프로세스로
+`manage.py check`를 직접 실행해 종료 코드와 에러 메시지를 확인하는 방식으로
+두 갈래 모두에 적용한다.
 """
 
 from __future__ import annotations
@@ -26,31 +32,18 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 _STRONG_SECRET_KEY = "prod-Kx8f3Kq0mN2pR7tYcVbGhJkLdSaWeUiOaXzCvBnMqWeRtYuIoPaSdFgHjKlZxCvB"
 
 
-# --- VERIFICATION/PAYMENT/PAYOUT_ADAPTER_MODE 용 stub (#83) --------------------
+# --- VERIFICATION/PAYMENT/PAYOUT/SELLER/LLM*_ADAPTER_MODE 용 stub (#83) ---------
 #
-# 실물 어댑터(#85 PortOne, #87 Toss)는 아직 없다. 이 파일이 검증하는 것은 "완전한
-# production/staging 환경이 부팅되는가"이지 "실물 벤더가 실제로 연결되는가"가
-# 아니므로, 여기서는 이름이 Fake로 시작하지 않는 최소 stub 클래스를 직접 두고
-# dotted path로 가리킨다 — config/settings.py의 새 부팅 가드(#83,
-# `_require_resolvable_adapter_mode`)가 "fake도 아니고 import도 안 되는 값"만
-# 거부한다는 것을, "import는 되지만 fake는 아닌 값"은 통과시킨다는 것과 대비해
-# 함께 증명한다.
-
-
-class _StubRealVerificationAdapter:
-    """실물 PortOne 연동이 아직 없다(#85) — 부팅 가드 테스트 전용 stub."""
-
-
-class _StubRealPGAdapter:
-    """실물 토스 연동이 아직 없다(#87) — 부팅 가드 테스트 전용 stub."""
-
-
-class _StubRealPayoutAdapter:
-    """실물 토스 지급대행 연동이 아직 없다(#82 라운드 2) — 부팅 가드 테스트 전용 stub."""
-
-
-class _StubRealSellerAdapter:
-    """실물 토스 지급대행 Seller 등록 연동이 아직 없다(#57) — 부팅 가드 테스트 전용 stub."""
+# 실물 어댑터(#85 PortOne, #87 Toss, #57 Seller 등록, #88 OpenAI)는 아직 없다.
+# 이 파일이 검증하는 것은 "완전한 production/staging 환경이 부팅되는가"이지
+# "실물 벤더가 실제로 연결되는가"가 아니므로, `tests/adapter_stubs.py`가 이름이
+# Fake로 시작하지 않고 각 Protocol을 구조적으로 만족하는 최소 stub 클래스를
+# dotted path로 제공한다(그 모듈 자체에 상세 설명이 있다) — 부팅 가드(#83,
+# `core.adapters.check_adapter_mode`)가 "fake도 아니고 import·인스턴스화·
+# 계약 충족도 안 되는 값"만 거부한다는 것을, 이 stub들은 통과한다는 것과 대비해
+# 함께 증명한다. 이 stub들을 이 테스트 모듈 안에 직접 두지 않는 이유는 그
+# 모듈의 독스트링이 설명한다 — settings.py가 아니라 이제 checks 프레임워크가
+# 이 dotted path를 임포트하므로 시점 문제는 사라졌지만, 계속 가볍게 둔다.
 
 
 # dev의 fallback과 같은, 이미 저장소에 공개된 고정 Fernet 키(config/settings.py 참고) —
@@ -91,12 +84,12 @@ def _base_env(*, target: str, secret_key: str) -> dict[str, str]:
         "STORAGE_SECRET_KEY": "dummy",
         "STORAGE_REGION": "us-east-1",
         "SOCIAL_AUTH_MODE": "real",
-        "VERIFICATION_ADAPTER_MODE": "tests.test_deployment_config._StubRealVerificationAdapter",
-        "PAYMENT_ADAPTER_MODE": "tests.test_deployment_config._StubRealPGAdapter",
-        "PAYOUT_ADAPTER_MODE": "tests.test_deployment_config._StubRealPayoutAdapter",
-        "SELLER_ADAPTER_MODE": "tests.test_deployment_config._StubRealSellerAdapter",
-        "LLM_ADAPTER_MODE": "real",
-        "LLM_REQUIREMENT_CHAT_ADAPTER_MODE": "real",
+        "VERIFICATION_ADAPTER_MODE": "tests.adapter_stubs.StubVerificationAdapter",
+        "PAYMENT_ADAPTER_MODE": "tests.adapter_stubs.StubPGAdapter",
+        "PAYOUT_ADAPTER_MODE": "tests.adapter_stubs.StubPayoutAdapter",
+        "SELLER_ADAPTER_MODE": "tests.adapter_stubs.StubSellerAdapter",
+        "LLM_ADAPTER_MODE": "tests.adapter_stubs.StubLLMScoringAdapter",
+        "LLM_REQUIREMENT_CHAT_ADAPTER_MODE": "tests.adapter_stubs.StubRequirementChatAdapter",
         "NOTIFICATION_ALIMTALK_ADAPTER": "notifications.adapters.RealAlimtalkAdapter",
         "NOTIFICATION_SMS_ADAPTER": "notifications.adapters.RealSmsAdapter",
         "NOTIFICATION_LMS_ADAPTER": "notifications.adapters.RealLmsAdapter",
@@ -327,6 +320,8 @@ _UNRESOLVABLE_ADAPTER_MODE_FIELDS = [
     "PAYMENT_ADAPTER_MODE",
     "PAYOUT_ADAPTER_MODE",
     "SELLER_ADAPTER_MODE",
+    "LLM_ADAPTER_MODE",
+    "LLM_REQUIREMENT_CHAT_ADAPTER_MODE",
 ]
 
 
@@ -335,7 +330,12 @@ _UNRESOLVABLE_ADAPTER_MODE_FIELDS = [
 def test_deployed_environment_refuses_to_boot_with_an_unresolvable_adapter_value(target, field):
     """`"real"`은 dotted path가 아니다 — `import_string`이 시도조차 되지 않고 바로
     `ImportError`가 난다. 이 값으로 배포되면 컨테이너는 뜨지만 실제 요청에서만
-    죽는다는 것이 이 티켓(#83)이 고치는 버그다."""
+    죽는다는 것이 이 티켓(#83)이 고치는 버그다.
+
+    이 가드는 `core.adapters.check_adapter_mode`로 `django.core.checks`에 등록되어
+    있다(#83 코드리뷰 지적 — settings.py 모듈 실행 도중에 평가하면 모델을 참조하는
+    실물 어댑터에서 `AppRegistryNotReady`가 난다) — 그래서 실패 신호가
+    `ImproperlyConfigured`가 아니라 `SystemCheckError`/`core.E001`이다."""
 
     env_builder = _production_env if target == "production" else _staging_env
     env = env_builder(**{field: "real"})
@@ -347,7 +347,7 @@ def test_deployed_environment_refuses_to_boot_with_an_unresolvable_adapter_value
         "가리키지 않는 문자열이므로, 이 값 그대로 배포되면 요청이 들어올 때까지 아무도 "
         "이 실수를 모른다."
     )
-    assert "ImproperlyConfigured" in result.stderr
+    assert "core.E001" in result.stderr
     assert field in result.stderr
 
 
@@ -364,6 +364,28 @@ def test_development_target_boots_with_an_unresolvable_adapter_value():
     result = _run_check(env)
 
     assert result.returncode == 0, result.stderr
+
+
+# --- 존재하지만 계약을 만족하지 않는 dotted path (#83 코드리뷰 지적) ---------------
+#
+# 가드가 "import만 되면 통과"였다면, payments.adapters.PGError처럼 실제로 존재하는
+# (그러나 PGAdapter 계약과는 전혀 무관한) 클래스를 가리키는 오타가 부팅을 통과하고
+# 첫 결제에서야 AttributeError라는 알아보기 어려운 모양으로 죽는다 — 가드가 막으려던
+# 바로 그 실패 모드다. `core.adapters.check_adapter_mode`는 실제로 인스턴스화하고
+# 계약을 만족하는지도 확인하므로 이 경로를 부팅 시점에 잡는다.
+
+
+def test_deployed_environment_refuses_a_dotted_path_that_exists_but_does_not_satisfy_the_contract():
+    env = _production_env(PAYMENT_ADAPTER_MODE="payments.adapters.PGError")
+
+    result = _run_check(env)
+
+    assert result.returncode != 0, (
+        "payments.adapters.PGError는 존재하지만 PGAdapter 계약과 무관한 클래스다 — "
+        "이 값으로 배포되면 부팅은 통과하고 첫 결제에서야 AttributeError로 죽는다."
+    )
+    assert "core.E003" in result.stderr
+    assert "PAYMENT_ADAPTER_MODE" in result.stderr
 
 
 # --- Celery beat가 부르는 내부 엔드포인트는 SSL 리다이렉트에서 빠져야 한다 ----------

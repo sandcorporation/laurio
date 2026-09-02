@@ -21,7 +21,7 @@ PayoutTimeoutError는 query_status로 확정해야 한다"는 규율까지 `paym
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from policies.models import PlatformPolicy
@@ -49,6 +49,7 @@ class PayoutRequestResult:
     accepted: bool
 
 
+@runtime_checkable
 class PayoutAdapter(Protocol):
     def request_payout(self, *, idempotency_key: str, amount: int) -> PayoutRequestResult: ...
 
@@ -157,6 +158,7 @@ class SellerRegistrationResult:
     weekly_limit_amount: int | None
 
 
+@runtime_checkable
 class SellerAdapter(Protocol):
     def register(
         self,

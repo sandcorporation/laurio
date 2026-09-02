@@ -37,6 +37,18 @@ cd backend && uv run pytest                           # 테스트
 `docker/staging.env.example`/`docker/prod.env.example`을 복사해 `docker/.env.staging`/
 `docker/.env.prod`로 채운다 — 둘 다 `.gitignore`가 막아 커밋되지 않는다.
 
+**staging/prod는 지금 뜨지 않는다 — #85(PortOne 본인확인)·#87(Toss 결제)·
+#57(Seller 등록)·#88(OpenAI 채점/AI grill)이 끝나기 전까지는 의도된 상태다.**
+저장소에 `Real*` 어댑터 클래스가 하나도 없어서다 — `VERIFICATION_ADAPTER_MODE`·
+`PAYMENT_ADAPTER_MODE`·`PAYOUT_ADAPTER_MODE`·`SELLER_ADAPTER_MODE`·
+`LLM_ADAPTER_MODE`·`LLM_REQUIREMENT_CHAT_ADAPTER_MODE` 여섯 값을 `example`
+그대로 채워도(`${VAR:?...}`가 요구하는 값을 줘도) `core.adapters.check_adapter_mode`
+(`django.core.checks`로 등록되어 `django.setup()` 이후 `manage.py
+migrate`/`check`/`runserver` 부팅 파이프라인에서 평가된다, #83)가 "fake도
+아니고 실제로 쓸 수도 없다"며 부팅 자체를 거부한다. 컨테이너가 뜬 채로
+첫 요청에서야 죽는 것보다, 정직하게 못 뜨는 편을 택했다 — 위 네 티켓이 각자의
+dotted path를 채워 넣으면 그 값으로 교체되며 정상 부팅된다.
+
 `config/settings.py`의 `IS_DEPLOYED_ENVIRONMENT`(staging+production)가 fake 어댑터
 바인딩을 부팅 시점에 거부하고, `IS_PRODUCTION_DEPLOYMENT`(production만)가 추가로
 `manage.py check --deploy`가 요구하는 HSTS·SSL 리다이렉트·secure 쿠키·강한

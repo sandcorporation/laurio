@@ -9,7 +9,7 @@ PG·스토리지와 같은 원칙(ADR-0007): 실제 LLM 벤더를 인터페이�
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from django.conf import settings
 
@@ -68,6 +68,7 @@ class LLMAdapterError(Exception):
     """
 
 
+@runtime_checkable
 class LLMScoringAdapter(Protocol):
     model_version: str
 
