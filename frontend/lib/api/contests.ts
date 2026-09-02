@@ -17,6 +17,13 @@ export type Requirement = components["schemas"]["RequirementOut"];
 
 export type ContestSort = components["schemas"]["ContestSort"];
 
+// 홈이 공모전을 네 묶음으로 큐레이션할 때 쓰는 타입(#94, spec #92). 묶음
+// 식별자는 백엔드가 정한 enum — `frontend/lib/home-curation.ts`의 번역표가
+// 이 유니온을 `Record`로 받아, 값이 하나 늘면 `tsc --noEmit`이 빌드타임에
+// 잡는다.
+export type HomeCurationBucket = components["schemas"]["HomeCurationBucket"];
+export type HomeCurationGroup = components["schemas"]["HomeCurationGroupOut"];
+
 // 한 페이지에 보여줄 개수. **필터·정렬은 백엔드가 한다**(#39) — 예전에는 이
 // 함수가 `page_size=200` 으로 전부 받아와 서버 컴포넌트가 직접 걸렀는데, 두
 // 가지로 조용히 틀렸다: 공개 Contest 가 그 수를 넘으면 뒤쪽이 목록에서 그냥
@@ -73,6 +80,29 @@ export async function fetchContests(query: ContestListQuery = {}): Promise<Conte
     pageSize: CONTESTS_PAGE_SIZE,
     totalPages: Math.max(1, Math.ceil(res.data.count / CONTESTS_PAGE_SIZE)),
   };
+}
+
+// 홈의 네 묶음 — 진행중·마감임박·심사중·완료(#94, spec #92). **묶음 판정은
+// 백엔드가 한다**: 이 함수는 `contests.api.get_home_curation`이 이미 판정해
+// 내려준 값을 그대로 옮길 뿐, `status`·`deadline_at`에서 다시 계산하지 않는다
+// — 화면이 재파생하면 새 상태가 조용히 어느 분기에도 안 걸리는 실패를 이
+// 저장소가 반복해서 겪었다(#94 인수조건).
+//
+// 응답은 항상 네 묶음을 다 담는다(빈 묶음도 `contests: []`로 온다) — 그래서
+// 호출부는 "묶음이 존재하는지"를 따로 걱정하지 않고 그대로 렌더링할 수 있다.
+export async function fetchHomeCuration(): Promise<HomeCurationGroup[]> {
+  const res = await backendClient.GET("/api/contests/home");
+
+  if (!res.response.ok) {
+    throw new Error(
+      `GET /api/contests/home 실패: ${res.response.status} ${res.response.statusText}`,
+    );
+  }
+  if (res.data === undefined) {
+    throw new Error("GET /api/contests/home: 2xx 인데 응답 본문이 비어 있다");
+  }
+
+  return res.data;
 }
 
 // 존재하지 않거나 draft 인 Contest 는 백엔드가 이미 404 로 답한다

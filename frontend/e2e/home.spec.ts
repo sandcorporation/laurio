@@ -123,6 +123,97 @@ test.describe("홈 — 자리표시가 아니라 실제 공모전을 보여준�
   });
 });
 
+// LP-02 (#94, spec #92) — 홈이 공모전을 네 묶음으로 큐레이션한다.
+//
+// **묶음 판정은 백엔드가 한다**(GET /api/contests/home,
+// contests.curation.home_bucket_for) — 아래 테스트는 그 판정이 화면에 그대로
+// 나타나는지, 그리고 어떤 묶음이 비어도 섹션째 사라지지 않는지를 클릭·텍스트로
+// 확인한다. 백엔드 쪽 "모든 Contest.Status가 어떤 묶음엔가 들어간다"는 고정은
+// backend/tests/test_home_curation.py 의 몫이다 — 여기서는 화면이 그 결과를
+// 정직하게 옮기는지만 본다.
+test.describe("홈 — 공모전을 네 묶음으로 큐레이션한다", () => {
+  test("네 묶음이 모두 제목으로 보인다", async ({ page }) => {
+    await page.goto("/");
+
+    for (const [bucket, label] of [
+      ["ongoing", "진행중"],
+      ["imminent", "마감임박"],
+      ["in_judging", "심사중"],
+      ["completed", "완료"],
+    ] as const) {
+      const section = page.getByTestId(`home-bucket-${bucket}`);
+      await expect(section).toBeVisible();
+      await expect(section.getByRole("heading", { name: label })).toBeVisible();
+    }
+  });
+
+  // seed_e2e_contests.py: funded 는 deadline_at = now+10일(PUBLISHED) — 마감임박
+  // 임계값(3일, contests.curation.HOME_IMMINENT_DEADLINE_DAYS)보다 멀다.
+  test("마감이 먼 공개 공모전은 「진행중」에 들어간다", async ({ page }) => {
+    await page.goto("/");
+
+    const ongoingList = page.getByTestId("home-bucket-ongoing-list");
+    await expect(ongoingList.locator(`[data-contest-row="${seeded.funded.id}"]`)).toBeVisible();
+
+    const imminentList = page.getByTestId("home-bucket-imminent-list");
+    await expect(
+      imminentList.locator(`[data-contest-row="${seeded.funded.id}"]`),
+    ).toHaveCount(0);
+  });
+
+  // seed_e2e_contests.py: underfunded 는 deadline_at = now+2일(PUBLISHED) — 임계값
+  // 이내다. 「마감이 가까운 Contest가 진행중이 아니라 마감임박에 들어간다」는
+  // #94 인수조건을 직접 확인한다.
+  test("마감이 가까운 공개 공모전은 「진행중」이 아니라 「마감임박」에 들어간다", async ({
+    page,
+  }) => {
+    await page.goto("/");
+
+    const imminentList = page.getByTestId("home-bucket-imminent-list");
+    await expect(
+      imminentList.locator(`[data-contest-row="${seeded.underfunded.id}"]`),
+    ).toBeVisible();
+
+    const ongoingList = page.getByTestId("home-bucket-ongoing-list");
+    await expect(
+      ongoingList.locator(`[data-contest-row="${seeded.underfunded.id}"]`),
+    ).toHaveCount(0);
+  });
+
+  // seed_e2e_contests.py: closed 는 CLOSED다 — 마감됐고 심사기간 중(ADR-0014,
+  // 데모·영상은 이미 전면 공개).
+  test("마감된 공모전은 「심사중」에 들어간다", async ({ page }) => {
+    await page.goto("/");
+
+    const inJudgingList = page.getByTestId("home-bucket-in_judging-list");
+    await expect(
+      inJudgingList.locator(`[data-contest-row="${seeded.closed.id}"]`),
+    ).toBeVisible();
+  });
+
+  // 기본 시드에는 AWARDED·JUDGING_ENDED Contest 가 없다 — 「완료」가 실제로 빈
+  // 채로 렌더되는 경우를 이 사실이 그대로 제공한다. 섹션이 사라지거나 깨지지
+  // 않고 "비어 있다"고 말해야 한다(#94 인수조건).
+  test("완료 묶음이 비어 있어도 섹션이 사라지지 않고 비어 있다고 말한다", async ({ page }) => {
+    await page.goto("/");
+
+    const section = page.getByTestId("home-bucket-completed");
+    await expect(section).toBeVisible();
+    await expect(page.getByTestId("home-bucket-completed-empty")).toBeVisible();
+    await expect(page.getByTestId("home-bucket-completed-list")).toHaveCount(0);
+  });
+
+  // 각 묶음에서 공모전 목록으로 이어질 수 있어야 한다(#94 인수조건) — 홈은
+  // 큐레이션이고 목록(필터·정렬·페이지네이션, #39)은 탐색이라 그 둘을 잇는
+  // 통로가 있어야 한다.
+  test("묶음의 전체 보기를 누르면 공모전 목록으로 이어진다", async ({ page }) => {
+    await page.goto("/");
+
+    await page.getByTestId("home-bucket-ongoing-view-all").click();
+    await expect(page).toHaveURL(/\/contests$/);
+  });
+});
+
 // 이 스펙의 존재 이유. 티켓 #93 본문 그대로: 이 테스트가 있었다면 입구 없는
 // staging 이 나가지 않았다. `page.goto`는 맨 처음 한 번뿐이고, 그 뒤로는 전부
 // 클릭이다.
