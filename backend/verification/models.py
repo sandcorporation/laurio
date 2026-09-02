@@ -121,6 +121,22 @@ class Verification(models.Model):
 
         return cls.objects.filter(status=cls.Status.VERIFIED, ci_hash=ci_hash(ci))
 
+    def would_change_identity(self, ci: str) -> bool:
+        """이 계정에 이미 확정된 CI가 있고, `ci`가 그것과 다른지(#99, ADR-0025).
+
+        **한 계정의 신원은 다른 사람의 것으로 바뀌지 않는다.** 이미 CI가 있는
+        계정에 다른 CI로 본인확인이 들어오면 재확인 전체를 거부해야 한다 —
+        그러지 않으면 성인으로 확인받아 Contest를 개최한 사람이 재확인 한 번으로
+        미성년이 되어 그 Contest의 자전거래 차단이 조용히 꺼진다(#90).
+
+        `ci_hash`가 아직 비어 있는 계정(첫 본인확인이거나, 미성년 판정으로
+        지워진 뒤)은 비교 대상이 없으므로 항상 False다 — "바뀐다"는 판단은
+        바뀔 대상이 있어야 성립한다. 이 경우는 정상적인 첫 확인·재확인이다.
+        """
+        if not self.ci_hash:
+            return False
+        return self.ci_hash != ci_hash(ci)
+
 
 class VerificationRequest(models.Model):
     """실물 어댑터에 보낼 identityVerificationId를 서버가 발급해 요청자에게 귀속시킨 기록.

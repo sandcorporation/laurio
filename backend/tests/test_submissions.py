@@ -567,6 +567,113 @@ def test_ci_less_developer_can_never_reach_the_self_dealing_check(client, catego
     assert Submission.objects.count() == 0
 
 
+@pytest.mark.django_db
+def test_submission_is_rejected_when_sponsor_has_no_verified_identity(
+    client, category, landing_type, caplog
+):
+    """#90 회귀 — Sponsor에게 VERIFIED 신원이 없으면 자전거래 검사를 할 수 없다.
+    지금까지는 비교 대상이 없으면 조용히 통과시켰다 — "검사할 수 없다"가
+    "안전하다"를 뜻하지 않는다. 개최에는 본인확인이 필요하므로(ADR-0011) 이
+    상태는 정상 운영에서 도달 불가능해야 하고, 그럼에도 도달했다면 fail-closed로
+    막고 ERROR로 남겨야 한다.
+
+    실제로 이 상태에 도달하는 경로 하나는 "성인으로 확인받아 개최한 Sponsor가
+    재확인에서 미성년으로 내려가 CI가 지워지는 것"이다. #99(같은 CI로의
+    재확인만 허용)가 생긴 뒤로는 다른 CI로 그 상태를 만들 수 없다 — 그래서 같은
+    CI를 유지한 채 생년월일만 미성년으로 바꿔 재확인한다(현실의 벤더는 같은
+    CI에 다른 생년월일을 주지 않지만, fake 어댑터는 이 회귀 시나리오를 직접
+    구성하기 위해 그 제약이 없다).
+    """
+    import logging
+
+    sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        sponsor_ci="sponsor-underage-later",
+    )
+
+    ten_years_ago = (timezone.now() - timedelta(days=365 * 10)).date().isoformat()
+    downgrade = client.post(
+        "/api/verification/verify",
+        data={
+            "verification_token": (
+                f"사실은미성년|{ten_years_ago}|sponsor-underage-later|sponsor-underage-later-di"
+            )
+        },
+        content_type="application/json",
+        **_auth_header(sponsor["access"]),
+    )
+    assert downgrade.json()["status"] == "underage"
+
+    dev = _verified_user(client, "dev-after-downgrade", "dev-after-downgrade-ci")
+
+    with caplog.at_level(logging.ERROR, logger="submissions.api"):
+        response = _submit(
+            client,
+            dev["access"],
+            contest["id"],
+            {"source_object_key": _source_object_key(contest["id"], dev["user_id"])},
+        )
+
+    assert response.status_code == 403
+    assert Submission.objects.count() == 0
+
+    error_records = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert error_records, "비교 대상 없는 자전거래 검사는 ERROR 로그를 남겨야 한다"
+
+
+@pytest.mark.django_db
+def test_submission_is_rejected_when_sponsor_verified_but_ci_hash_is_empty(
+    client, category, landing_type, caplog
+):
+    """코드리뷰 지적 — `_reject_self_dealing`의 Sponsor 쪽 가드가 비대칭이었다.
+    `sponsor_verification is None`만 막고 "VERIFIED인데 ci_hash가 빈 문자열"은
+    막지 않아서, 마지막 비교 `"" == developer_ci_hash`가 항상 False가 되어
+    자전거래 검사가 조용히 통과했다 — #90이 지적한 결함의 좁은 형태가 그대로
+    남아 있었다.
+
+    이 docstring의 도달 불가 논거(VERIFIED 행은 반드시 `set_ci`를 거쳤으므로
+    `ci_hash`가 빌 수 없다, #84)는 Developer뿐 아니라 Sponsor에게도 똑같이
+    적용된다 — 그래서 이 상태는 HTTP로는 만들 수 없다. `set_ci`가 빈 CI를
+    거부하기 때문이다. `test_set_ci_refuses_an_empty_value_so_ci_less_users_cannot_share_a_hash`
+    와 같은 이유로, 여기서만 모델을 직접 손대 방어선 자체를 검증한다 — 나머지
+    흐름(개최·제출)은 그대로 HTTP를 거친다.
+    """
+    import logging
+
+    from verification.models import Verification
+
+    sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        sponsor_ci="sponsor-empty-ci-hash",
+    )
+
+    sponsor_verification = Verification.objects.get(user_id=sponsor["user_id"])
+    sponsor_verification.ci_hash = ""
+    sponsor_verification.save(update_fields=["ci_hash"])
+
+    dev = _verified_user(
+        client, "dev-vs-empty-ci-hash-sponsor", "dev-vs-empty-ci-hash-sponsor-ci"
+    )
+
+    with caplog.at_level(logging.ERROR, logger="submissions.api"):
+        response = _submit(
+            client,
+            dev["access"],
+            contest["id"],
+            {"source_object_key": _source_object_key(contest["id"], dev["user_id"])},
+        )
+
+    assert response.status_code == 403
+    assert Submission.objects.count() == 0
+
+    error_records = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert error_records, "빈 ci_hash인 VERIFIED Sponsor도 ERROR 로그를 남겨야 한다"
+
+
 # --- Evidence 연결 · 완성도 지표 -----------------------------------------------
 
 

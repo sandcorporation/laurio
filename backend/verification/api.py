@@ -143,6 +143,29 @@ def verify(request: HttpRequest, payload: VerifyIn):
         raise HttpError(422, f"본인확인에 실패했습니다: {exc}") from exc
 
     verification, _created = Verification.objects.get_or_create(user=request.auth_user)
+
+    # 한 계정의 신원은 다른 사람의 것으로 바뀌지 않는다(#99, ADR-0025) — 이미
+    # 확정된 CI가 있는데 다른 CI로 재확인이 들어오면 신원 전체(실명·생년월일·
+    # 상태)를 손대지 않고 거부한다. 정당하게 CI가 바뀌는 경우(주민등록번호
+    # 변경)와 계정 탈취 복구는 이 스펙 범위 밖이다 — 고객센터 경로가 생기기
+    # 전까지는 거부가 기본이다.
+    if verification.would_change_identity(result.ci):
+        # 이 분기가 실제로 걸리는 건 두 가지 경우뿐이다: 계정을 탈취한 사람이
+        # 자기 신원으로 재확인을 시도했거나, 정당한 소유자가 CI가 바뀌는 사유로
+        # 재확인을 시도한 것이다. 둘 다 드물어야 정상이므로 ERROR로 남겨
+        # 운영자가 계정 탈취 시도를 알아챌 수 있게 한다.
+        logger.error(
+            "본인확인 시도의 CI가 기존에 확정된 신원과 다르다(user_id=%s) — 계정 탈취 "
+            "시도이거나 정당한 CI 변경(주민등록번호 변경 등) 요청일 수 있다. 두 경우 "
+            "모두 이 저장소는 아직 처리 경로가 없어 거부한다(#98 범위 밖).",
+            request.auth_user.id,
+        )
+        raise HttpError(
+            409,
+            "이미 다른 신원으로 본인확인이 완료된 계정입니다. 본인 확인 정보가 바뀌었다면"
+            "(주민등록번호 변경, 계정 탈취 복구 등) 운영자에게 문의해 주세요.",
+        )
+
     verification.real_name = result.real_name
     verification.birth_date = result.birth_date
 

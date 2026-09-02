@@ -26,6 +26,8 @@
 # contests/api.py(#39)와 appeals/api.py(#72)가 같은 자리에서
 # `QueryParams is not fully defined` 500 을 겪고 같은 결론에 도달했다.
 
+import logging
+
 from django.db import IntegrityError, transaction
 from django.http import HttpRequest
 from ninja import Router
@@ -59,6 +61,8 @@ from .schemas import (
     SubmissionOut,
 )
 from .target_refs import demo_video_target_ref, source_target_ref
+
+logger = logging.getLogger(__name__)
 
 router = Router(tags=["submissions"])
 
@@ -131,13 +135,80 @@ def _reject_if_past_deadline(contest: Contest) -> None:
 
 
 def _reject_self_dealing(contest: Contest, developer_verification: Verification) -> None:
+    """Sponsor와 Developer가 동일인이면 제출을 막는다(자전거래 차단, ADR-0011).
+
+    비교할 CI가 없으면 "통과"가 아니라 거부다(#90) — 지금까지는 비교 대상이
+    없다는 것을 조용히 통과로 처리했는데, 그건 "검사할 수 없다"와 "안전하다"를
+    혼동한 것이었다. 이 함수가 걸리는 두 실패 분기(Developer의 ci_hash가
+    비어 있음 / Sponsor에게 VERIFIED 신원이 없음)는 정상 운영에서는 도달
+    불가능해야 한다:
+
+    - Developer 쪽: `VerificationResult`가 빈 CI로는 생성 자체를 거부하고
+      (#84, ADR-0024), `Verification.set_ci`도 같은 이유로 빈 값을 거부한다
+      (모델 층의 두 번째 방어선). 이 함수를 호출하는 `_require_verification`은
+      `status == VERIFIED`인 행만 넘기므로, 그 행은 반드시 `set_ci`를 거쳐
+      만들어졌고 따라서 `ci_hash`가 비어 있을 수 없다.
+    - Sponsor 쪽: 개최에는 본인확인이 필요하고(ADR-0011), 한 계정의 신원은
+      다른 사람의 것으로 바뀌지 않는다(#99, ADR-0025) — 이미 CI가 확정된
+      계정은 같은 CI로만 재확인이 통과되므로, 성인으로 개최한 Sponsor가
+      재확인 한 번으로 미성년(UNDERAGE, CI 소거)이 되는 일은 일어나지 않는다.
+      그리고 Developer와 같은 이유로, VERIFIED인 Sponsor 행도 `set_ci`를
+      거쳤을 것이므로 `ci_hash`가 빈 문자열일 수 없다 — 이 논거는 두 쪽 모두에
+      똑같이 적용되므로 가드도 양쪽에 똑같이 있어야 한다(코드리뷰 지적 —
+      `sponsor_verification is None`만 막고 "VERIFIED인데 ci_hash가 빈
+      문자열"은 막지 않으면, 마지막 비교 `"" == developer_ci_hash`가 항상
+      False가 되어 자전거래 검사가 조용히 통과해버린다).
+
+    그럼에도 도달했다면 위 불변식 중 하나가 깨진 것이므로, "무엇이 참인지
+    모르는 상태"에서 통과시키지 않고 fail-closed로 거부하며 ERROR로 남겨
+    운영자가 즉시 알아채게 한다 — `set_ci`가 어댑터 가드 위에 모델 가드를
+    하나 더 둔 것과 같은 규율이다.
+    """
     if not developer_verification.ci_hash:
-        return
+        logger.error(
+            "VERIFIED 상태인 Developer(user_id=%s)의 ci_hash가 비어 있다 — 불변식 위반. "
+            "#84 이후 이 상태는 정상 운영에서 도달 불가능해야 한다.",
+            developer_verification.user_id,
+        )
+        raise HttpError(
+            403,
+            "본인확인 정보를 확인할 수 없어 제출할 수 없습니다. 운영자에게 문의해 주세요.",
+        )
+
     sponsor_verification = Verification.objects.filter(
         user_id=contest.sponsor.user_id, status=Verification.Status.VERIFIED
     ).first()
     if sponsor_verification is None:
-        return
+        logger.error(
+            "Contest(id=%s)의 Sponsor(user_id=%s)에게 VERIFIED 신원이 없어 자전거래 "
+            "검사를 할 수 없다 — 불변식 위반. 개최에는 본인확인이 필요하므로(ADR-0011) "
+            "이 상태는 정상 운영에서 도달 불가능해야 한다(#90).",
+            contest.id,
+            contest.sponsor.user_id,
+        )
+        raise HttpError(
+            403,
+            "이 Contest는 Sponsor의 본인확인 상태를 확인할 수 없어 제출할 수 없습니다. "
+            "운영자에게 문의해 주세요.",
+        )
+    if not sponsor_verification.ci_hash:
+        # "신원이 없다"(위 분기)와 "신원은 있는데 CI가 비었다"(이 분기)는 서로
+        # 다른 불변식이 깨진 것이라 로그 문구를 따로 남긴다 — 하나로 합치면
+        # 운영자가 두 원인을 로그만으로 가릴 수 없다. 이 분기가 없으면
+        # `"" == developer_verification.ci_hash`가 항상 False가 되어 자전거래
+        # 검사가 조용히 통과한다(코드리뷰 지적, #90의 좁은 형태).
+        logger.error(
+            "Contest(id=%s)의 VERIFIED Sponsor(user_id=%s)의 ci_hash가 비어 있다 — "
+            "불변식 위반. #84 이후 이 상태는 정상 운영에서 도달 불가능해야 한다.",
+            contest.id,
+            contest.sponsor.user_id,
+        )
+        raise HttpError(
+            403,
+            "이 Contest는 Sponsor의 본인확인 상태를 확인할 수 없어 제출할 수 없습니다. "
+            "운영자에게 문의해 주세요.",
+        )
+
     if sponsor_verification.ci_hash == developer_verification.ci_hash:
         raise HttpError(
             403, "이 Contest의 Sponsor와 동일인으로 확인되어 제출할 수 없습니다(자전거래 차단)."

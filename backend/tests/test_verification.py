@@ -316,6 +316,90 @@ def test_downgrading_to_underage_clears_previously_stored_ci_and_di(client):
     assert record.di_encrypted == ""
 
 
+# --- 신원은 다른 사람의 것으로 바뀌지 않는다 (#99, ADR-0025) -----------------------
+
+
+@pytest.mark.django_db
+def test_reverifying_with_a_different_ci_is_rejected_and_identity_is_unchanged(client, caplog):
+    """이미 CI가 확정된 계정에 다른 CI로 재확인이 들어오면 거부되고 신원이 전혀
+    바뀌지 않는다 — 계정을 뺏겨도 CI까지 뺏기지는 않는다(#99). 거부 응답은
+    이유와 문의처를 말하고, 시도 자체는 ERROR로 남아 운영자가 계정 탈취 시도를
+    알아챌 수 있어야 한다.
+    """
+    import logging
+
+    pair = _login(client, uid="ci-lock-subject", email="ci-lock@example.com")
+
+    first = client.post(
+        "/api/verification/verify",
+        data={
+            "verification_token": _fake_token(
+                "원래사람", "1990-01-01", "ci-lock-original", "di-lock-original"
+            )
+        },
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert first.json()["status"] == "verified"
+
+    record = Verification.objects.get(user__social_accounts__provider_uid="ci-lock-subject")
+    original_ci_hash = record.ci_hash
+    original_real_name = record.real_name
+    original_verified_at = record.verified_at
+
+    with caplog.at_level(logging.ERROR, logger="verification.api"):
+        second = client.post(
+            "/api/verification/verify",
+            data={
+                "verification_token": _fake_token(
+                    "다른사람", "1985-06-01", "ci-lock-different", "di-lock-different"
+                )
+            },
+            content_type="application/json",
+            **_auth_header(pair["access"]),
+        )
+
+    assert 400 <= second.status_code < 500
+    body = second.json()
+    assert "문의" in body["detail"]
+
+    record.refresh_from_db()
+    assert record.status == Verification.Status.VERIFIED
+    assert record.ci_hash == original_ci_hash
+    assert record.real_name == original_real_name
+    assert record.verified_at == original_verified_at
+
+    error_records = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert error_records, "CI가 바뀌는 재확인 시도는 ERROR 로그를 남겨야 한다"
+
+
+@pytest.mark.django_db
+def test_reverifying_with_the_same_ci_updates_name_and_phone_normally(client):
+    """같은 CI로의 재확인은 정상적인 갱신이다 — 실명 변경 등이 그대로 반영된다."""
+    pair = _login(client, uid="ci-same-subject", email="ci-same@example.com")
+
+    first = client.post(
+        "/api/verification/verify",
+        data={"verification_token": _fake_token("옛이름", "1990-01-01", "ci-same-1", "di-same-1")},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert first.json()["status"] == "verified"
+
+    second = client.post(
+        "/api/verification/verify",
+        data={"verification_token": _fake_token("새이름", "1990-01-01", "ci-same-1", "di-same-1")},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+
+    assert second.status_code == 200
+    assert second.json()["status"] == "verified"
+
+    record = Verification.objects.get(user__social_accounts__provider_uid="ci-same-subject")
+    assert record.real_name == "새이름"
+
+
 # --- 어댑터 선택이 resolve_adapter를 쓴다 (#83) --------------------------------
 
 
@@ -844,11 +928,14 @@ def test_reverifying_as_adult_without_a_phone_number_preserves_the_existing_phon
     assert contact.phone_number == "01012345678"
 
     # 재확인 — 이번에는 벤더(Fake 토큰)가 phoneNumber를 주지 않는다(4필드 토큰).
+    # CI는 첫 확인과 같은 값을 쓴다 — 다른 CI였다면 #99의 신원 불변식에 걸려
+    # 재확인 자체가 거부된다. 이 테스트가 고정하려는 건 phoneNumber 생략이지
+    # CI 변경이 아니다.
     second = client.post(
         "/api/verification/verify",
         data={
             "verification_token": _fake_token(
-                "홍길동", "1990-05-15", "ci-reverify-2", "di-reverify-2"
+                "홍길동", "1990-05-15", "ci-reverify-1", "di-reverify-1"
             )
         },
         content_type="application/json",
