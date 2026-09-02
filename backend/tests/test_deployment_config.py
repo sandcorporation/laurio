@@ -90,9 +90,13 @@ def _base_env(*, target: str, secret_key: str) -> dict[str, str]:
         "SELLER_ADAPTER_MODE": "tests.adapter_stubs.StubSellerAdapter",
         "LLM_ADAPTER_MODE": "tests.adapter_stubs.StubLLMScoringAdapter",
         "LLM_REQUIREMENT_CHAT_ADAPTER_MODE": "tests.adapter_stubs.StubRequirementChatAdapter",
-        "NOTIFICATION_ALIMTALK_ADAPTER": "notifications.adapters.RealAlimtalkAdapter",
-        "NOTIFICATION_SMS_ADAPTER": "notifications.adapters.RealSmsAdapter",
-        "NOTIFICATION_LMS_ADAPTER": "notifications.adapters.RealLmsAdapter",
+        # #89: notifications.adapters.RealAlimtalkAdapter/RealSmsAdapter/RealLmsAdapter는
+        # 저장소에 없는 클래스였다(그것이 이 티켓이 고치는 버그) — 실물 벤더
+        # 어댑터(#51)가 나오기 전까지는 나머지 어댑터들과 같은 원칙으로 stub을
+        # 가리킨다.
+        "NOTIFICATION_ALIMTALK_ADAPTER": "tests.adapter_stubs.StubNotificationChannelAdapter",
+        "NOTIFICATION_SMS_ADAPTER": "tests.adapter_stubs.StubNotificationChannelAdapter",
+        "NOTIFICATION_LMS_ADAPTER": "tests.adapter_stubs.StubNotificationChannelAdapter",
     }
 
 
@@ -322,6 +326,12 @@ _UNRESOLVABLE_ADAPTER_MODE_FIELDS = [
     "SELLER_ADAPTER_MODE",
     "LLM_ADAPTER_MODE",
     "LLM_REQUIREMENT_CHAT_ADAPTER_MODE",
+    # #89: 알림 채널 셋도 이제 같은 가드(core.adapters.check_adapter_mode)를 받는다 —
+    # 이전에는 존재하지 않는 클래스를 가리켜도 부팅이 통과했다(정확히 이 티켓이
+    # 고치는 버그).
+    "NOTIFICATION_ALIMTALK_ADAPTER",
+    "NOTIFICATION_SMS_ADAPTER",
+    "NOTIFICATION_LMS_ADAPTER",
 ]
 
 
@@ -386,6 +396,27 @@ def test_deployed_environment_refuses_a_dotted_path_that_exists_but_does_not_sat
     )
     assert "core.E003" in result.stderr
     assert "PAYMENT_ADAPTER_MODE" in result.stderr
+
+
+def test_deployed_environment_refuses_a_notification_adapter_that_exists_but_does_not_satisfy_the_contract():
+    """#89: 알림 채널도 같은 계약 검증을 받는다.
+
+    `payments.adapters.PGError`는 존재하지만 `NotificationChannelAdapter`
+    계약(channel 속성 + send 메서드)과 전혀 무관하다 — 이 값으로 배포되면
+    부팅은 통과하고 첫 알림 시도에서야 AttributeError로 죽는다.
+    """
+
+    env = _production_env(NOTIFICATION_SMS_ADAPTER="payments.adapters.PGError")
+
+    result = _run_check(env)
+
+    assert result.returncode != 0, (
+        "payments.adapters.PGError는 존재하지만 NotificationChannelAdapter 계약과 "
+        "무관한 클래스다 — 이 값으로 배포되면 부팅은 통과하고 첫 알림에서야 "
+        "AttributeError로 죽는다."
+    )
+    assert "core.E003" in result.stderr
+    assert "NOTIFICATION_SMS_ADAPTER" in result.stderr
 
 
 # --- 토스 결제 어댑터의 자격증명 환경변수 이름(#87 코드리뷰 지적 6) -----------------------

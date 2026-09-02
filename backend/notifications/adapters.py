@@ -13,7 +13,7 @@ Fake 구현체는 `settings.NOTIFICATION_FAKE_FAILING_CHANNELS` 에 자기 채�
 """
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from django.conf import settings
 from django.utils.module_loading import import_string
@@ -25,6 +25,7 @@ class ChannelSendResult:
     failure_reason: str = ""
 
 
+@runtime_checkable
 class NotificationChannelAdapter(Protocol):
     channel: str
 

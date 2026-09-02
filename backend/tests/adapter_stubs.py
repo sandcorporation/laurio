@@ -90,3 +90,17 @@ class StubRequirementChatAdapter:
 
     def respond(self, chat_input):
         raise NotImplementedError("배포 가드 검증 전용 stub — 실제로 호출되면 안 된다.")
+
+
+class StubNotificationChannelAdapter:
+    """`notifications.adapters.NotificationChannelAdapter` 계약을 구조적으로 만족한다(#89).
+
+    세 설정(NOTIFICATION_ALIMTALK_ADAPTER/NOTIFICATION_SMS_ADAPTER/
+    NOTIFICATION_LMS_ADAPTER)이 전부 같은 Protocol을 만족하면 되므로, 다른
+    Protocol들과 달리 값마다 별도 Stub 클래스를 만들지 않고 하나를 공유한다.
+    """
+
+    channel = "stub"
+
+    def send(self, *, recipient, notification):
+        raise NotImplementedError("배포 가드 검증 전용 stub — 실제로 호출되면 안 된다.")

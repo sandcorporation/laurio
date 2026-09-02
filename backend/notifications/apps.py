@@ -9,6 +9,14 @@ class NotificationsConfig(AppConfig):
     def ready(self):
         register(check_notification_type_flags_cover_all_types)
 
+        # #89: 알림 채널 셋(알림톡/SMS/LMS)도 나머지 여섯 어댑터와 같은 부팅
+        # 가드를 받는다 — import·인스턴스화·계약 충족을 실제로 검증한다.
+        from . import checks
+
+        register(checks.check_notification_alimtalk_adapter_mode)
+        register(checks.check_notification_sms_adapter_mode)
+        register(checks.check_notification_lms_adapter_mode)
+
 
 def check_notification_type_flags_cover_all_types(app_configs, **kwargs):
     """NotificationType 에 값을 추가하고 NOTIFICATION_TYPE_FLAGS 를 깜빡하면 부팅을 막는다.

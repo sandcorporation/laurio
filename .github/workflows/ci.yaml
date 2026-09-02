@@ -153,9 +153,13 @@ jobs:
       SELLER_ADAPTER_MODE: tests.adapter_stubs.StubSellerAdapter
       LLM_ADAPTER_MODE: tests.adapter_stubs.StubLLMScoringAdapter
       LLM_REQUIREMENT_CHAT_ADAPTER_MODE: tests.adapter_stubs.StubRequirementChatAdapter
-      NOTIFICATION_ALIMTALK_ADAPTER: notifications.adapters.RealAlimtalkAdapter
-      NOTIFICATION_SMS_ADAPTER: notifications.adapters.RealSmsAdapter
-      NOTIFICATION_LMS_ADAPTER: notifications.adapters.RealLmsAdapter
+      # #89: RealAlimtalkAdapter/RealSmsAdapter/RealLmsAdapter는 저장소에 없는
+      # 클래스였다 — 그 사실이 부팅 가드 없이는 드러나지 않았다. 실물 벤더
+      # 어댑터(#51)가 아직 없는 동안은 나머지 어댑터들과 같은 원칙으로
+      # tests.adapter_stubs가 제공하는, 계약을 구조적으로 만족하는 stub을 가리킨다.
+      NOTIFICATION_ALIMTALK_ADAPTER: tests.adapter_stubs.StubNotificationChannelAdapter
+      NOTIFICATION_SMS_ADAPTER: tests.adapter_stubs.StubNotificationChannelAdapter
+      NOTIFICATION_LMS_ADAPTER: tests.adapter_stubs.StubNotificationChannelAdapter
 
     steps:
       - uses: actions/checkout@v4
