@@ -376,6 +376,20 @@ jobs:
         working-directory: backend
         run: uv sync --locked
 
+      # **스택을 띄운 뒤 워크스페이스 설치를 한 번 되돌린다.** dev compose 의
+      # frontend·operator 서비스는 바인드된 체크아웃(`..:/app`) 위에서
+      # `pnpm install --force` 를 돌린다 — node_modules 대부분은 이름 있는 볼륨이
+      # 가리지만, 러너의 워크스페이스 트리가 그 과정에서 흔들려 `pnpm exec
+      # playwright` 가 바이너리를 못 찾는 상태가 된다(실측: 빌드를 앞으로 옮긴
+      # 뒤 이 스텝이 `Command "playwright" not found` 로 죽었다).
+      #
+      # 앞의 설치를 없애고 여기 하나만 두지 않는 이유 — 타입체크와 빌드가 스택
+      # **앞에** 있어야 `.next` 가 root 소유로 생기지 않는다(위 주석). 두 번
+      # 도는 비용은 pnpm store 가 이미 더워 몇 초다.
+      - name: Reinstall workspace dependencies after the stack settled
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
       - name: Install Playwright browser
         working-directory: frontend
         run: pnpm exec playwright install --with-deps chromium
