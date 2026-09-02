@@ -557,3 +557,61 @@ def test_demo_seed_leaves_nothing_for_the_money_scans(db):
     due = list(distribution_due_contests(timezone.now(), policy))
 
     assert due == [], f"배분 스캔이 데모 Contest 를 집는다: {[c.title for c in due]}"
+
+
+def test_demo_seed_gives_every_contest_entrants(db, client):
+    """데모 공모전마다 참가작이 있고, 마감된 것은 공개로 보인다 (#52).
+
+    참가작 없는 공모전만 늘어서 있으면 발주자에게 「여기 내면 사람이 온다」가
+    보이지 않는다 — 큐레이션이 두 관객을 같은 화면으로 설득한다는 것이 spec #92
+    의 근거였다.
+
+    마감 전 참가작은 소유자·Sponsor 외에 404 다(ADR-0014). 그래서 「공개로
+    보인다」는 마감된 것으로만 확인한다.
+    """
+
+    from django.core.management import call_command
+
+    from contests.models import Contest
+    from submissions.models import Submission
+
+    call_command("seed_demo_contests", verbosity=0)
+
+    demo = Contest.objects.filter(title__startswith="[데모] ")
+    assert demo.exists()
+    for contest in demo:
+        assert contest.submissions.exists(), f"{contest.title} 에 참가작이 없다"
+
+    closed = demo.filter(status=Contest.Status.CLOSED).first()
+    submission = Submission.objects.filter(contest=closed).first()
+    body = client.get(f"/api/submissions/{submission.pk}").json()
+
+    # 마감 후에도 소스와 테스트 계정은 소유자 본인에게만 보인다(ADR-0014) —
+    # 시드가 그 경계를 우회해 만든 데이터가 아니라는 것을 함께 고정한다.
+    assert body["source_object_key"] is None
+    assert body["test_account"] is None
+    assert body["demo_url"]
+    assert body["requirement_responses"], "Requirement 응답이 없으면 심사 비교 화면이 빈다"
+
+
+def test_demo_seed_awarded_contest_actually_has_an_award(db):
+    """AWARDED 인데 수상작이 없는 모순을 만들지 않는다 (#52).
+
+    상태만 AWARDED 로 두면 그 Contest 를 여는 화면들이 실제 배포에서는 나올 수
+    없는 조합을 그린다. Award 를 함께 심고, 그것이 그 Contest 의 참가작을
+    가리키는지까지 본다.
+    """
+
+    from django.core.management import call_command
+
+    from awards.models import Award
+    from contests.models import Contest
+
+    call_command("seed_demo_contests", verbosity=0)
+
+    for contest in Contest.objects.filter(
+        title__startswith="[데모] ", status=Contest.Status.AWARDED
+    ):
+        award = Award.objects.filter(contest=contest).first()
+        assert award is not None, f"{contest.title} 이 AWARDED 인데 Award 가 없다"
+        assert award.submission.contest_id == contest.pk

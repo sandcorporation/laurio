@@ -34,9 +34,10 @@ from django.db import transaction
 from django.utils import timezone
 
 from accounts.models import DeveloperProfile, SponsorProfile
+from awards.models import Award
 from contests.curation import HomeCurationBucket, home_bucket_for
 from contests.models import Category, Contest, DeliverableType, Requirement
-from submissions.models import Submission
+from submissions.models import RequirementResponse, Submission
 
 PREFIX = "[데모] "
 
@@ -137,10 +138,37 @@ _DEMO_CONTESTS = [
     ),
 ]
 
-# 마감된 Contest 에 붙일 제출. **완료 묶음이 비어 있지 않아야 발주자에게 설득이
-# 된다** — 제출 없는 공모전은 "사람들이 실제로 참여하고 끝까지 간다"를 보여주지
-# 못한다(spec #92 의 큐레이션 근거).
-_DEMO_DEVELOPERS = ["김하늘", "이준서", "박서연"]
+# 참가작을 낼 개발자들. **여럿이어야 한다** — 공개 프로필(`/developers/{id}`)이
+# 마감된 참가작을 아카이브해 보여주는데(#11), 한 사람이 전부 낸 것으로 심으면
+# 그 화면이 「한 명이 아홉 개 낸 공모전」이 되어 실제와 다른 인상을 준다.
+_DEMO_DEVELOPERS = [
+    "김하늘",
+    "이준서",
+    "박서연",
+    "최민재",
+    "정유진",
+    "한지우",
+]
+
+# Contest 마다 참가작을 몇 개 붙일지. **진행중인 공모전에도 붙인다** — 참가작이
+# 하나도 없는 공모전만 늘어서 있으면 발주자에게 "여기 내면 사람이 온다"가
+# 보이지 않는다(spec #92 의 큐레이션 근거). 진행 중에는 소유자·Sponsor 외에는
+# 존재 자체가 안 보이지만(ADR-0014), 발주자 콘솔과 마감 이후 화면이 그때
+# 비어 있지 않게 된다.
+#
+# 수를 고정 목록으로 두는 이유 — `contest.id % n` 같은 식으로 정하면 DB 를 새로
+# 만들 때마다 id 가 달라져 배치가 바뀐다. 데모는 몇 번을 다시 심어도 같아야
+# 스크린샷과 설명이 어긋나지 않는다.
+_SUBMISSION_COUNTS = [3, 2, 4, 2, 3, 4, 3, 3, 2]
+
+# 참가작에 붙일 Requirement 응답. 전부 충족으로 심으면 심사 비교 화면의
+# 매트릭스가 한 색으로 채워져 그 화면이 무엇을 보여주는지 알 수 없다 — 필수는
+# 대체로 충족하고 선택은 갈리게 둔다.
+_RESPONSE_NOTES = [
+    "구현했습니다. 데모 계정으로 바로 확인하실 수 있습니다.",
+    "구현했으나 일부 화면은 아직 다듬는 중입니다.",
+    "시간 관계로 이번 제출에는 포함하지 못했습니다.",
+]
 
 
 class Command(BaseCommand):
@@ -167,10 +195,16 @@ class Command(BaseCommand):
 
         now = timezone.now()
         sponsor = self._demo_sponsor()
-        developers = [self._demo_developer(name) for name in _DEMO_DEVELOPERS]
+        developers = [self._demo_developer(i, name) for i, name in enumerate(_DEMO_DEVELOPERS)]
 
         counts: dict[str, int] = {}
-        for title, category_name, type_name, prize, offset, status, expected in _DEMO_CONTESTS:
+        submission_total = 0
+        # 참가자를 Contest 마다 한 칸씩 밀어 배정한다 — 매번 앞에서부터 자르면
+        # 앞의 두세 명만 참가작을 갖고 뒤의 사람들은 빈 프로필이 된다.
+        developer_cursor = 0
+
+        for index, entry in enumerate(_DEMO_CONTESTS):
+            title, category_name, type_name, prize, offset, status, expected = entry
             contest = self._create_contest(
                 sponsor=sponsor,
                 title=title,
@@ -182,16 +216,28 @@ class Command(BaseCommand):
                 now=now,
             )
 
-            # 마감된 것에는 제출을 붙인다 — 심사중·완료 묶음이 실제로 무언가
-            # 일어난 것처럼 보여야 한다.
-            if status != Contest.Status.PUBLISHED:
-                for index, developer in enumerate(developers[: 2 + (contest.id % 2)]):
-                    Submission.objects.create(
-                        contest=contest,
-                        developer=developer,
-                        source_object_key=f"submission:demo:{contest.id}/{index}",
-                        demo_url=f"https://demo.laurio.invalid/{contest.id}/{index}",
-                    )
+            wanted = _SUBMISSION_COUNTS[index % len(_SUBMISSION_COUNTS)]
+            entrants = [
+                developers[(developer_cursor + offset_) % len(developers)]
+                for offset_ in range(wanted)
+            ]
+            developer_cursor += wanted
+
+            submissions = [
+                self._create_submission(contest=contest, developer=developer, rank=rank)
+                for rank, developer in enumerate(entrants)
+            ]
+            submission_total += len(submissions)
+
+            # 수상까지 간 공모전에는 Award 가 있어야 한다. **없으면 상태만
+            # AWARDED 이고 수상작이 없는 모순**이 되어, 그 Contest 를 여는
+            # 화면들이 실제 배포에서는 나올 수 없는 조합을 그린다.
+            if status == Contest.Status.AWARDED:
+                Award.objects.create(
+                    contest=contest,
+                    submission=submissions[0],
+                    awarded_at=contest.judging_ends_at - timedelta(days=1),
+                )
 
             # **심은 것이 의도한 묶음에 실제로 들어가는지 여기서 확인한다.**
             # 시드가 조용히 엉뚱한 묶음을 채우면 화면을 봐도 무엇이 틀렸는지
@@ -205,9 +251,17 @@ class Command(BaseCommand):
             counts[str(actual)] = counts.get(str(actual), 0) + 1
 
         summary = ", ".join(f"{bucket} {count}건" for bucket, count in sorted(counts.items()))
-        self.stdout.write(self.style.SUCCESS(f"seed_demo_contests: {summary}"))
+        self.stdout.write(
+            self.style.SUCCESS(f"seed_demo_contests: {summary} / 참가작 {submission_total}건")
+        )
 
     def _clear(self) -> int:
+        # **Award 를 먼저 지운다.** `Award.submission` 은 `on_delete=PROTECT` 인데,
+        # Django 의 delete collector 는 "그 Award 자체도 이번 삭제로 함께 사라진다"는
+        # 것을 감안하지 않고 PROTECT 를 만나는 즉시 막는다 — Contest 부터 지우면
+        # ProtectedError 로 명령 전체가 죽어 멱등성이 깨진다(`seed_e2e_contests`
+        # 가 같은 자리에서 이미 한 번 겪었다).
+        Award.objects.filter(contest__title__startswith=PREFIX).delete()
         removed, _ = Contest.objects.filter(title__startswith=PREFIX).delete()
         get_user_model().objects.filter(username__startswith="demo-seed-").delete()
         return removed
@@ -220,14 +274,61 @@ class Command(BaseCommand):
         user.save(update_fields=["password"])
         return SponsorProfile.objects.create(user=user, display_name=f"{PREFIX}발주자")
 
-    def _demo_developer(self, name: str) -> DeveloperProfile:
-        username = f"demo-seed-dev-{abs(hash(name)) % 100000}"
+    def _demo_developer(self, index: int, name: str) -> DeveloperProfile:
+        # username 을 이름의 `hash()` 에서 뽑지 않는다 — 파이썬의 문자열 해시는
+        # 프로세스마다 무작위라(PYTHONHASHSEED) 같은 시드를 두 번 돌리면 계정
+        # 아이디가 달라진다. 데모는 다시 심어도 같아야 한다.
+        username = f"demo-seed-dev-{index:02d}"
         user = get_user_model().objects.create_user(
             username=username, email=f"{username}@example.invalid"
         )
         user.set_unusable_password()
         user.save(update_fields=["password"])
-        return DeveloperProfile.objects.create(user=user, display_name=f"{PREFIX}{name}")
+        return DeveloperProfile.objects.create(
+            user=user,
+            display_name=f"{PREFIX}{name}",
+            bio=f"{name} 입니다. 웹과 모바일을 주로 만듭니다. (staging 검증용 데모 계정)",
+        )
+
+    def _create_submission(
+        self, *, contest: Contest, developer: DeveloperProfile, rank: int
+    ) -> Submission:
+        """참가작 하나 — Requirement 응답까지 함께 붙인다.
+
+        응답이 없으면 심사 비교 화면(#36)의 Requirement 축 매트릭스가 통째로
+        비어, 그 화면이 무엇을 보여주는 곳인지 데모에서 알 수 없다.
+        """
+
+        submission = Submission.objects.create(
+            contest=contest,
+            developer=developer,
+            source_object_key=f"submission:demo:{contest.pk}/{rank}/source.zip",
+            demo_url=f"https://demo.laurio.invalid/{contest.pk}/{rank}",
+            # 영상은 일부만 낸다 — 실제로도 전원이 내지는 않는다.
+            demo_video_object_key=(
+                f"submission:demo:{contest.pk}/{rank}/demo.mp4" if rank % 2 == 0 else ""
+            ),
+            test_account="demo@example.invalid / demo1234" if rank % 3 != 2 else "",
+        )
+
+        for requirement in contest.requirements.all().order_by("order", "id"):
+            # 필수는 대체로 충족하고 선택은 갈린다 — 전부 충족으로 심으면
+            # 매트릭스가 한 색이 되어 비교 화면이 아무것도 말하지 않는다.
+            if requirement.grade == Requirement.Grade.REQUIRED:
+                is_met = rank % 4 != 3
+            else:
+                is_met = rank % 2 == 0
+            note_index = 0 if is_met else 2
+            if is_met and rank % 3 == 1:
+                note_index = 1
+            RequirementResponse.objects.create(
+                submission=submission,
+                requirement=requirement,
+                is_met=is_met,
+                note=_RESPONSE_NOTES[note_index],
+            )
+
+        return submission
 
     def _create_contest(
         self,
