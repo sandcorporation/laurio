@@ -160,7 +160,6 @@ x-backend-env: &backend-env
   NOTIFICATION_ALIMTALK_ADAPTER: ${NOTIFICATION_ALIMTALK_ADAPTER:?실제 알림톡 벤더 어댑터의 dotted path를 .env.staging 에 채워라 — 승인 전이면 notifications.adapters_aligo.AligoAlimtalkAdapter(#51)를 채운다}
   NOTIFICATION_SMS_ADAPTER: ${NOTIFICATION_SMS_ADAPTER:?실제 SMS 벤더 어댑터의 dotted path를 .env.staging 에 채워라 — notifications.adapters_aligo.AligoSmsAdapter(#51)}
   NOTIFICATION_LMS_ADAPTER: ${NOTIFICATION_LMS_ADAPTER:?실제 LMS 벤더 어댑터의 dotted path를 .env.staging 에 채워라 — notifications.adapters_aligo.AligoLmsAdapter(#51)}
-  NOTIFICATION_VENDOR_API_KEY: ${NOTIFICATION_VENDOR_API_KEY:-}
   # 알리고 자격증명(#51) — AligoSmsAdapter/AligoLmsAdapter/AligoAlimtalkAdapter가
   # 인자 없이 생성되는 시점(core.adapters.resolve_adapter)에 읽는다. 비어 있으면
   # 그 생성 자체가 ImproperlyConfigured로 실패해 core.adapters.check_adapter_mode가
