@@ -34,7 +34,14 @@ class StubPGAdapter:
     def request_payment(self, *, order_id: str, amount: int):
         raise NotImplementedError("배포 가드 검증 전용 stub — 실제로 호출되면 안 된다.")
 
-    def confirm(self, *, order_id: str, simulate: str | None = None):
+    def confirm(
+        self,
+        *,
+        order_id: str,
+        simulate: str | None = None,
+        payment_key: str | None = None,
+        amount: int | None = None,
+    ):
         raise NotImplementedError("배포 가드 검증 전용 stub — 실제로 호출되면 안 된다.")
 
     def query_status(self, *, order_id: str):

@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import logging
 from uuid import UUID
 
 from django.db import IntegrityError, transaction
@@ -46,6 +47,8 @@ from .services import (
     run_pending_refunds,
 )
 from .webhook_security import verify_webhook_signature
+
+logger = logging.getLogger(__name__)
 
 router = Router(tags=["payments"])
 
@@ -177,14 +180,33 @@ def confirm_payment(request: HttpRequest, order_id: UUID, payload: ConfirmPaymen
     adapter = get_adapter()
     try:
         result_status = adapter.confirm(
-            order_id=str(order_id), simulate=payload.simulate, payment_key=payload.payment_key
+            order_id=str(order_id),
+            simulate=payload.simulate,
+            payment_key=payload.payment_key,
+            amount=payment.total_amount,
         )
     except PGTimeoutError:
         # 타임아웃은 실패가 아니다 — 실제 결과를 조회로 확정한다(ADR-0008의 지급 웹훅
         # 규율을 결제 확인에도 동일하게 적용). query_status는 order_id만 받는
         # 순수 조회다 — `simulate`는 confirm과 같은 어댑터 인스턴스가 이미 기억하고
         # 있다(PGAdapter 계약, #9 리뷰 지적 4).
-        result_status = adapter.query_status(order_id=str(order_id))
+        #
+        # 이 재확인 호출 자체가 또 실패할 수 있다(#87 코드리뷰 지적 3) —
+        # FakePGAdapter는 query_status에서 절대 예외를 던지지 않아 이 경로가 기존
+        # 테스트에서 한 번도 밟힌 적이 없었다. 실물 어댑터는 네트워크 문제로
+        # 여기서도 실패할 수 있고, 그 실패를 그대로 올리면 500이 된다 — 타임아웃만큼 실패도
+        # "아직 모른다"이지 "실패했다"가 아니므로, 여기서도 강제로 종결시키지 않고
+        # 현재 상태(REQUESTED)를 그대로 돌려준다 — 웹훅이나 다음 재시도가 마저 확정한다.
+        try:
+            result_status = adapter.query_status(order_id=str(order_id))
+        except Exception as exc:  # noqa: BLE001 - 재확인조차 실패하면 미확정으로 남겨둔다.
+            logger.error(
+                "토스 결제 재확인(query_status)이 실패했다 — 실패로 단정하지 않고 "
+                "현재 상태를 그대로 돌려준다(order_id=%s): %s",
+                order_id,
+                exc,
+            )
+            result_status = "pending"
     except PGError as exc:
         raise HttpError(502, str(exc)) from exc
 

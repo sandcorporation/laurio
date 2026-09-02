@@ -15,7 +15,10 @@
 
 from __future__ import annotations
 
+import uuid
+
 import requests
+from django.test import override_settings
 
 from tests.live import live_vendor, require_live_credential
 
@@ -35,3 +38,27 @@ def test_openai_credential_authenticates_against_the_real_api():
     )
 
     assert response.status_code == 200, response.text
+
+
+@live_vendor
+def test_toss_payment_adapter_queries_are_server_only_and_shape_stable():
+    """#87(토스 결제 실물 어댑터)의 옵인 live 테스트.
+
+    승인(`confirm`)은 브라우저 위젯이 만드는 `payment_key`가 있어야 하므로 live
+    테스트가 대신할 수 없다(사람이 dev에서 실제 브라우저로 결제를 마쳐야 한다,
+    AC). 여기서는 **서버만으로 가능한 계약 부분**만 친다 — 존재하지 않는
+    order_id로 상태를 조회하면 예외가 아니라 정해진 값("pending")이 돌아오는가.
+    벤더 응답의 구체적인 값이 아니라 이 어댑터가 그 응답을 우리 계약대로
+    해석한다는 사실(모양)만 본다(#82 Testing Decisions: "Live tests assert
+    shape, not values")."""
+
+    from payments.adapters_toss import TossPGAdapter
+
+    secret_key = require_live_credential("TOSS_API_SECRET_KEY")
+
+    with override_settings(TOSS_API_SECRET_KEY=secret_key, TOSS_API_VERSION="2022-11-16"):
+        adapter = TossPGAdapter()
+
+        unknown_order_id = f"laurio-live-test-{uuid.uuid4()}"
+        assert adapter.query_status(order_id=unknown_order_id) == "pending"
+        assert adapter.query_refund_status(order_id=unknown_order_id) == "pending"

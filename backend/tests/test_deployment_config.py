@@ -388,6 +388,53 @@ def test_deployed_environment_refuses_a_dotted_path_that_exists_but_does_not_sat
     assert "PAYMENT_ADAPTER_MODE" in result.stderr
 
 
+# --- 토스 결제 어댑터의 자격증명 환경변수 이름(#87 코드리뷰 지적 6) -----------------------
+#
+# TossPGAdapter는 settings.TOSS_API_SECRET_KEY를 읽는데, staging/prod
+# compose는 그 이름이 아니라 TOSS_SANDBOX_SECRET_KEY/TOSS_LIVE_SECRET_KEY를
+# 주입한다(docker/compose.staging.yaml, docker/compose.prod.yaml — 새드박스
+# 키와 실물 키를 다른 이름으로 두어 운영자가 실수로 실물 키를 staging에
+# 붙여넣어도 그 변수가 애초에 읽히지 않는다). settings.py가 이 셋 중 먼저
+# 채워진 값을 쓰도록 폴백하지 않으면, 문서대로 TOSS_SANDBOX_SECRET_KEY/
+# TOSS_LIVE_SECRET_KEY를 채워도 core.E002로 부팅이 거부된다.
+
+
+def test_staging_toss_adapter_boots_with_sandbox_secret_key_env_var():
+    env = _staging_env(
+        PAYMENT_ADAPTER_MODE="payments.adapters_toss.TossPGAdapter",
+        TOSS_SANDBOX_SECRET_KEY="test_sk_dummy_sandbox",
+    )
+
+    result = _run_check(env)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_production_toss_adapter_boots_with_live_secret_key_env_var():
+    env = _production_env(
+        PAYMENT_ADAPTER_MODE="payments.adapters_toss.TossPGAdapter",
+        TOSS_LIVE_SECRET_KEY="live_sk_dummy",
+    )
+
+    result = _run_check(env)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_staging_toss_adapter_refuses_boot_without_any_toss_secret_key_env_var():
+    env = _staging_env(PAYMENT_ADAPTER_MODE="payments.adapters_toss.TossPGAdapter")
+
+    result = _run_check(env)
+
+    assert result.returncode != 0, (
+        "TOSS_API_SECRET_KEY도 TOSS_SANDBOX_SECRET_KEY도 없으면 "
+        "TossPGAdapter의 생성자(ImproperlyConfigured)가 실패해 "
+        "core.E002로 부팅이 거부되어야 한다."
+    )
+    assert "core.E002" in result.stderr
+    assert "PAYMENT_ADAPTER_MODE" in result.stderr
+
+
 # --- Celery beat가 부르는 내부 엔드포인트는 SSL 리다이렉트에서 빠져야 한다 ----------
 # (코디네이터 리뷰 지적: production의 SECURE_SSL_REDIRECT=True가 컨테이너 내부
 # 네트워크에서 평문 HTTP로 오는 Celery의 틱 호출까지 301로 되돌려 보내면, 평문

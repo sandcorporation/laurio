@@ -17,7 +17,7 @@ from django.contrib.auth import get_user_model
 from django.test import override_settings
 
 from contests.models import Category, Contest, DeliverableType
-from payments.adapters import FakePGAdapter, PaymentRequestResult
+from payments.adapters import FakePGAdapter, PGError, PGTimeoutError, PaymentRequestResult
 from payments.models import Payment
 from policies.services import get_current_policy
 
@@ -432,11 +432,12 @@ def test_confirm_forwards_payment_key_to_adapter(client, category, landing_type)
     access, contest = _draft_contest(client, category=category, deliverable_type=landing_type)
     payment = _initiate_payment(client, access, contest["id"])
 
-    received: dict[str, str | None] = {}
+    received: dict[str, str | int | None] = {}
     original_confirm = FakePGAdapter.confirm
 
-    def spy_confirm(self, *, order_id, simulate=None, payment_key=None):
+    def spy_confirm(self, *, order_id, simulate=None, payment_key=None, amount=None):
         received["payment_key"] = payment_key
+        received["amount"] = amount
         return original_confirm(self, order_id=order_id, simulate=simulate)
 
     with patch.object(FakePGAdapter, "confirm", spy_confirm):
@@ -447,6 +448,38 @@ def test_confirm_forwards_payment_key_to_adapter(client, category, landing_type)
     assert response.status_code == 200
     assert response.json()["status"] == "paid"
     assert received["payment_key"] == "fake-widget-key-abc123"
+    # amount도 payment_key와 같은 이유로 계약에 있다(#87) — 토스 결제 승인
+    # API가 위·변조 방지를 위해 요구하는 값이라, 호출부가 DB의 실제 결제 금액을
+    # 그대로 넘기는지 확인한다.
+    assert received["amount"] == payment["total_amount"]
+
+
+@pytest.mark.django_db
+def test_confirm_survives_query_status_failure_after_timeout(client, category, landing_type):
+    """confirm이 타임아웃돼 query_status로 재확인하는데 그 재확인마저 실패하면
+    (#87 코드리뷰 지적 3) — 500이 되면 안 된다. FakePGAdapter는 query_status에서
+    절대 예외를 던지지 않아 이 경로가 기존 테스트에서 한 번도 밟힌 적이 없었다
+    (실물 어댑터는 네트워크 문제로 재확인 자체도 실패할 수 있다). 재확인조차
+    실패했다는 것은 "실패했다"가 아니라 "아직 모른다"이므로, Payment는 강제로
+    종결되지 않고 REQUESTED로 남아야 한다."""
+
+    access, contest = _draft_contest(client, category=category, deliverable_type=landing_type)
+    payment = _initiate_payment(client, access, contest["id"])
+
+    def broken_confirm(self, *, order_id, simulate=None, payment_key=None, amount=None):
+        raise PGTimeoutError("fake network blip on confirm")
+
+    def broken_query_status(self, *, order_id):
+        raise PGError("fake network blip on query_status")
+
+    with patch.object(FakePGAdapter, "confirm", broken_confirm), patch.object(
+        FakePGAdapter, "query_status", broken_query_status
+    ):
+        response = _confirm(client, access, payment["order_id"], payment_key="k")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "requested"
 
     # 기존 동작 불변 — payment_key를 안 보내도(기존 호출부와 동일) 여전히 정상
     # 승인된다.
