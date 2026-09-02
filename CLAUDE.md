@@ -144,14 +144,15 @@ pytest`가 그 DB에 직접 붙는다 — 컨테이너를 거칠 이유가 없�
 accessed by other users` 로 서로를 떨어뜨리고, 그 실패는 **코드 회귀와 구분되지
 않는다.** 실제로 겪었다.
 
-**같은 이유로 `LAURIO_SESSION_KEY_PREFIX` 도 달리 줘라.** Operator 세션은 실제
-Redis 에 산다(ADR-0018) — DB 를 갈라도 **세션은 여전히 공유**라, 한쪽이 캐시를
-비우거나 같은 키를 쓰면 다른 쪽 Operator 가 로그인한 적 없는 것이 되어 401 무더기로
-무너진다. 같은 파일이 접두어 없이는 6건 실패하고 접두어를 주면 22건 전부 통과하는
-것을 확인했다.
+**같은 이유로 `SESSION_REDIS_URL` 의 DB 인덱스도 달리 줘라.** Operator 세션은
+실제 Redis 에 산다(ADR-0018). `tests/conftest.py` 가 테스트마다
+`caches["sessions"].clear()` 를 부르는데 Django 의 RedisCache 는 그것을
+**FLUSHDB** 로 구현한다 — **키 접두어로는 막을 수 없다.** 두 체인이 같은 인덱스를
+쓰면 한쪽의 테스트 정리가 다른 쪽의 로그인 세션을 통째로 지우고, 피해자는
+원인과 무관한 401 무더기를 본다.
 
 ```bash
-cd backend && LAURIO_DB_PORT=55432   LAURIO_TEST_DB_NAME=test_laurio_c2 LAURIO_SESSION_KEY_PREFIX=c2   uv run pytest
+cd backend && LAURIO_DB_PORT=55432   LAURIO_TEST_DB_NAME=test_laurio_c2   SESSION_REDIS_URL=redis://127.0.0.1:16379/5   uv run pytest
 ```
 
 ## 프론트엔드
