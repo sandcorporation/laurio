@@ -3,6 +3,8 @@ import { IBM_Plex_Mono, IBM_Plex_Sans_KR } from "next/font/google";
 import type { ReactNode } from "react";
 import "./globals.css";
 
+import { SiteHeader } from "./components/site-header";
+
 // 「공모 게시판」 서체(FE-02, #27) — 시안(design/*.dc.html)이 확정한 두 서체다.
 // next/font 로 셀프호스팅해 레이아웃 시프트 없이 로드하고, 실패해도 무너지지
 // 않도록 폴백 스택은 app/tokens.css 의 --font-sans/--font-mono 가 최종 결정한다.
@@ -39,10 +41,16 @@ export const metadata: Metadata = {
   description: "발주자가 상금을 걸고 요구사항을 공개하면, 개발자들이 만들어 제출하는 공개 공모전 플랫폼",
 };
 
+// 헤더는 모든 페이지에 서므로 여기서 딱 한 번 조립한다(#93, spec #92). 세션
+// 슬롯을 뺀 나머지는 서버 컴포넌트라 인증 구역(app/console/**)을 포함해 어느
+// 페이지가 이 레이아웃 아래 걸리든 렌더링 방식이 갈리지 않는다.
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="ko" className={`${ibmPlexSansKR.variable} ${ibmPlexMono.variable}`}>
-      <body>{children}</body>
+      <body>
+        <SiteHeader />
+        {children}
+      </body>
     </html>
   );
 }

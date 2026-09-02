@@ -1,37 +1,87 @@
-// 뼈대 단계의 자리표시 페이지다. 실제 공개 표면(공모전 목록)은 티켓 FE-04(#29)가
-// 이 자리를 대신한다. 여기서는 티켓 FE-02(#27)의 토큰이 실제로 배선돼 있다는
-// 것만 증명한다 — 화면을 만들지 않는다. 아래 스트립은 frontend/e2e/tokens.spec.ts
-// 가 계산된 스타일을 읽는 대상이다. 리터럴 hex 는 어디에도 없다 — 전부
-// app/tokens.css 의 @theme 가 만든 유틸리티(`bg-*` `text-*` `border-*`)다.
+// 공개 표면의 현관(#93, spec #92). FE-02(#27)가 토큰 배선을 증명하려고 세운
+// 자리표시 페이지였고, 그 주석은 "실제 공개 표면은 FE-04(#29)가 이 자리를
+// 대신한다"고 적어 뒀었다 — 하지만 #29 는 `/contests` 를 새로 만들었을 뿐 이
+// 자리는 그대로 남겨졌다. 이 페이지가 그 약속을 늦게라도 지킨다.
 //
-// 서버 컴포넌트다. 이 페이지에 "use client" 가 붙으면 안 된다(ADR-0015).
-export default function Home() {
-  return (
-    <main className="flex min-h-screen flex-col gap-8 p-10">
-      <h1 className="text-3xl font-semibold">Laurio</h1>
-      <p>공개 공모전 플랫폼. 프론트엔드 뼈대가 서 있습니다.</p>
+// **큐레이션(진행중·마감임박·심사중·완료 네 묶음)은 다음 티켓의 몫이다**(#94,
+// spec #92). 여기서는 `/contests` 가 이미 쓰는 것과 같은 공개 목록 데이터를
+// 그대로 보여준다 — 중요한 것은 "보인다"가 아니라 "걸어서 닿는다"다. 헤더의
+// 「공모전」 링크가 필터·정렬·페이지가 있는 전체 목록으로 안내한다.
+//
+// 서버 컴포넌트다. 클라이언트 지시어가 붙으면 안 된다(ADR-0015) — 이 페이지는
+// 색인 대상 공개 표면이다.
+import Link from "next/link";
 
-      <div className="flex flex-wrap items-center gap-4 rounded-md border border-rule bg-surface p-4">
-        <span
-          data-token-proof="attention"
-          className="rounded-sm border border-attention px-3 py-1 text-sm text-attention"
-        >
-          상금미달
-        </span>
-        <span
-          data-token-proof="verified"
-          className="rounded-sm border border-verified px-3 py-1 text-sm text-verified"
-        >
-          충족
-        </span>
-        {/* 금액·기한·식별자는 모노스페이스로 렌더된다(FE-02 승인 기준). */}
-        <span data-token-proof="amount" className="font-mono text-base">
-          4,000,000
-        </span>
-        <span data-token-proof="deadline" className="font-mono text-sm text-ink">
-          D-6
-        </span>
-      </div>
+import { fetchContests, type Contest } from "@/lib/api/contests";
+import { formatDday, formatPrize, isImminent } from "@/lib/contest-format";
+
+// 큐레이션이 없는 이 티켓 범위에서는 첫 화면에 너무 많은 행을 쏟아붓지 않는다
+// — 전체는 「공모전」 링크가 있는 `/contests` 의 몫이다.
+const HOME_CONTEST_LIMIT = 12;
+
+export default async function Home() {
+  const page = await fetchContests({ page: 1 });
+  const contests = page.items.slice(0, HOME_CONTEST_LIMIT);
+
+  return (
+    <main className="flex min-h-screen flex-col gap-8 bg-paper p-10 text-ink">
+      <header className="flex flex-col gap-2">
+        <h1 className="text-3xl font-semibold">Laurio</h1>
+        <p className="text-sm text-ink/70">
+          발주자가 상금을 걸고 요구사항을 공개하면, 개발자들이 만들어 제출하는 공개 공모전
+          플랫폼입니다.
+        </p>
+      </header>
+
+      <section className="flex flex-col gap-4">
+        <div className="flex items-baseline justify-between gap-4 border-b border-rule pb-2">
+          <h2 className="text-lg font-semibold">공모전</h2>
+          <Link href="/contests" data-testid="home-view-all-contests" className="text-sm text-ink/60 hover:text-ink">
+            전체 보기
+          </Link>
+        </div>
+
+        {contests.length === 0 ? (
+          <p data-testid="home-contests-empty" className="py-10 text-center text-sm text-ink/60">
+            아직 공개된 공모전이 없습니다.
+          </p>
+        ) : (
+          <ul data-testid="home-contest-list" className="flex flex-col">
+            {contests.map((contest) => (
+              <HomeContestRow key={contest.id} contest={contest} />
+            ))}
+          </ul>
+        )}
+      </section>
     </main>
+  );
+}
+
+function HomeContestRow({ contest }: { contest: Contest }) {
+  const imminent = isImminent(contest.deadline_at);
+
+  return (
+    <li>
+      <Link
+        href={`/contests/${contest.id}`}
+        data-contest-row={contest.id}
+        className="grid grid-cols-[minmax(0,1fr)_150px_88px] items-center gap-6 border-b border-rule px-1 py-4 hover:bg-surface"
+      >
+        <div className="flex min-w-0 flex-col gap-1">
+          <span className="truncate text-[15px] font-medium">{contest.title}</span>
+          <span className="text-xs text-ink/60">{contest.category.name}</span>
+        </div>
+        <div
+          className={`text-right font-mono text-sm font-medium ${contest.is_underfunded ? "text-attention" : ""}`}
+        >
+          {formatPrize(contest.prize)}
+        </div>
+        <div
+          className={`text-right font-mono text-sm ${imminent ? "font-semibold text-attention" : "text-ink/70"}`}
+        >
+          {formatDday(contest.deadline_at)}
+        </div>
+      </Link>
+    </li>
   );
 }

@@ -8,6 +8,11 @@ import path from "node:path";
 // 반영해 렌더링하는지 브라우저로 확인한다 — 목(mock)이 아니라 진짜 파일을
 // 진짜로 바꾼다.
 //
+// 관찰 대상 페이지는 `/dev-tokens` 다. #93 이전에는 `/` 가 이 증명용
+// 스트립을 담은 자리표시 페이지였지만, `/` 는 이제 실제 공모전을 보여주는
+// 현관이라(#93, spec #92) 그 자리에 진단용 마크업이 남으면 안 된다 —
+// `data-token-proof` 네 개는 값도 의미도 그대로 `/dev-tokens` 로 옮겨갔다.
+//
 // **이 테스트는 tracked 파일을 실제로 편집한다.** 다른 스펙 파일이 같은 순간
 // 같은 페이지에서 토큰이 만든 색을 관찰하면 경합한다 — `describe.configure({mode:
 // "serial"})` 는 이 파일 *안에서만* 순서를 강제할 뿐 다른 파일과의 경합은 막지
@@ -46,7 +51,7 @@ test("app/tokens.css 의 액센트 값 하나를 바꾸면 그 토큰을 쓰는 
   expect(original.toLowerCase()).toContain(ORIGINAL_ATTENTION);
 
   try {
-    await page.goto("/");
+    await page.goto("/dev-tokens");
 
     // 스왑 전 — 컴포넌트는 `text-attention`/`border-attention` 같은 의미
     // 이름만 쓰고 있고, 지금은 그게 시안 값으로 풀린다.

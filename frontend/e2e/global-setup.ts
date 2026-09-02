@@ -49,6 +49,7 @@ async function warmRoutes(): Promise<void> {
     `${publicBase}/contests`,
     `${publicBase}/login`,
     `${publicBase}/console`,
+    `${publicBase}/dev-tokens`,
     `${operatorBase}/login`,
     `${operatorBase}/`,
     `${operatorBase}/appeals`,
