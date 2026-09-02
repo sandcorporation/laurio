@@ -1,6 +1,7 @@
 from ninja import NinjaAPI
 
 from accounts.api import router as accounts_router
+from accounts.internal_api import internal_router as accounts_internal_router
 from accounts.operator_api import router as operator_router
 from appeals.api import operator_router as appeals_operator_router
 from appeals.api import router as appeals_router
@@ -46,6 +47,7 @@ def health(request):
 
 
 api.add_router("/internal", core_internal_router)
+api.add_router("/internal/accounts", accounts_internal_router)
 api.add_router("/internal/notifications", notifications_internal_router)
 api.add_router("/internal/scoring", scoring_internal_router)
 api.add_router("/internal/handovers", handovers_internal_router)

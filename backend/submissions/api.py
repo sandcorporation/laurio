@@ -527,10 +527,16 @@ def get_developer_public_profile(request: HttpRequest, developer_id: int):
     데모·영상만 담는다 — 소스는 Award 전까지 아무에게도 공개되지 않고(ADR-0014),
     test_account는 "데모·영상" 칸에 없는 로그인 정보라 여기서도 내려주지 않는다
     (submissions.api._serialize와 같은 원칙, #10 리뷰 지적).
+
+    **탈퇴한 Developer는 404다**(#100, ADR-0025) — "공개 프로필이 닫힌다"는
+    실명·소개가 비는 것이 아니라 그 존재 자체가 더 이상 조회되지 않는 것이다.
+    `user.is_active`가 그 판정이다(`accounts.withdrawal.execute_withdrawal`이
+    탈퇴 시 이 값을 내린다) — 다른 이유로 존재하지 않는 Developer와 같은 404를
+    돌려줘 탈퇴 여부 자체도 굳이 구별해 알려주지 않는다.
     """
 
     developer = DeveloperProfile.objects.filter(id=developer_id).select_related("user").first()
-    if developer is None:
+    if developer is None or not developer.user.is_active:
         raise HttpError(404, "Developer를 찾을 수 없습니다.")
 
     now = Clock.now()

@@ -49,4 +49,8 @@ app.conf.beat_schedule = {
         "task": "core.call_scoring_run_pending",
         "schedule": _SCAN_INTERVAL_SECONDS,
     },
+    "accounts-purge-expired-identities": {
+        "task": "core.call_accounts_purge_expired_identities",
+        "schedule": _SCAN_INTERVAL_SECONDS,
+    },
 }

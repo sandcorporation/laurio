@@ -86,3 +86,11 @@ def call_scoring_run_pending() -> dict:
     """scoring/api.py: 채점 대기·재시도 대상 Submission을 스캔해 LLM 채점을 돌린다."""
 
     return _call_internal("/api/internal/scoring/run-pending")
+
+
+@shared_task(name="core.call_accounts_purge_expired_identities")
+def call_accounts_purge_expired_identities() -> dict:
+    """accounts/internal_api.py: 2년 미이용 신원 파기 + 보존 기간 만료
+    RetainedIdentity 파기(#102, ADR-0025)."""
+
+    return _call_internal("/api/internal/accounts/purge-expired-identities")

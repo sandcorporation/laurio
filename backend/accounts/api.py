@@ -23,9 +23,13 @@ from .schemas import (
     RefreshIn,
     SocialLoginIn,
     TokenPairOut,
+    WithdrawalEligibilityOut,
+    WithdrawalOut,
+    WithdrawalRejectedOut,
 )
 from .social import SocialLoginError, get_adapter
 from .tokens import TokenError, blacklist_token, issue_token_pair, rotate_refresh_token
+from .withdrawal import WithdrawalBlockedError, blocking_reasons, execute_withdrawal
 
 router = Router(tags=["auth"])
 
@@ -63,6 +67,17 @@ def social_login(request: HttpRequest, provider: str, payload: SocialLoginIn):
             assert_can_use_social_login(user)
         except OperatorInvariantError as exc:
             raise HttpError(403, str(exc)) from exc
+
+        # 탈퇴(#100, ADR-0025)한 계정은 다시 로그인할 수 없다 — `is_active=False`가
+        # 그 표시다. `JWTAuthenticationMiddleware`가 이미 발급된 토큰을 걸러내는
+        # 것과 같은 이유로, 여기서도 새 토큰 자체를 내주지 않는다. CI를 지웠으므로
+        # "재가입" 경로도 없다 — 같은 소셜 계정으로는 영구히 막힌다(ADR-0025의
+        # 되돌릴 수 없다는 결정 그대로).
+        if not user.is_active:
+            raise HttpError(
+                403,
+                "탈퇴한 계정입니다. 신원이 파기되어 다시 로그인할 수 없습니다.",
+            )
     else:
         User = get_user_model()
         user = User(
@@ -160,3 +175,37 @@ def ensure_developer_profile(request: HttpRequest, payload: ProfileIn):
     profile, _created = DeveloperProfile.objects.get_or_create(user=request.auth_user)
     _apply_profile_update(profile, payload)
     return ProfileOut(display_name=profile.display_name, bio=profile.bio)
+
+
+@router.get("/accounts/withdrawal", response=WithdrawalEligibilityOut, auth=jwt_auth)
+def get_withdrawal_eligibility(request: HttpRequest):
+    """탈퇴 화면이 무엇이 막는지 미리 보여줄 수 있게 판정만 돌려준다 (#100 AC).
+
+    화면은 이 응답을 그대로 읽어 목록을 보여줄 뿐, Contest·Payout 상태에서 다시
+    판정하지 않는다 — `accounts.withdrawal.blocking_reasons`가 유일한 판정처다.
+    """
+
+    reasons = blocking_reasons(request.auth_user)
+    return WithdrawalEligibilityOut(can_withdraw=not reasons, blocking_reasons=reasons)
+
+
+@router.post(
+    "/accounts/withdrawal",
+    response={200: WithdrawalOut, 409: WithdrawalRejectedOut},
+    auth=jwt_auth,
+)
+def withdraw(request: HttpRequest):
+    """신원을 파기한다. 유예 없이 즉시 실행되고 되돌릴 수 없다(ADR-0025).
+
+    막는 사유가 있으면 409로 그 목록을 그대로 돌려준다 — 화면이 버튼을 감추는
+    것과 서버가 거절하는 것은 둘 다 필요하다(#67과 같은 구분).
+    """
+
+    try:
+        withdrawal = execute_withdrawal(request.auth_user)
+    except WithdrawalBlockedError as exc:
+        return 409, WithdrawalRejectedOut(
+            detail="진행 중인 거래가 있어 탈퇴할 수 없습니다.", blocking_reasons=exc.reasons
+        )
+
+    return 200, WithdrawalOut(withdrawn_at=withdrawal.withdrawn_at)
