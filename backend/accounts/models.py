@@ -16,6 +16,10 @@ from __future__ import annotations
 from django.conf import settings
 from django.db import models
 
+from verification.crypto import decrypt, encrypt
+
+from .phone import normalize_phone_number
+
 
 class SocialAccount(models.Model):
     """소셜 로그인 제공자와 연결된 계정 하나.
@@ -74,6 +78,47 @@ class DeveloperProfile(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"Developer<{self.user_id}>"
+
+
+class PhoneContact(models.Model):
+    """알림 채널(SMS/LMS/알림톡)이 실제로 발송할 대상 전화번호(#51, ADR-0009).
+
+    `User`는 Django 기본 `auth.User`라 필드를 직접 늘릴 수 없다 — `SponsorProfile`/
+    `DeveloperProfile`과 같은 모양으로, 역할과 무관하게 `User` 하나에 지연 생성되는
+    OneToOne을 둔다. Sponsor·Developer 양쪽 다 될 수 있는 계정이 전화번호를 두 번
+    등록하지 않게 하기 위해 역할별 프로필이 아니라 `User`에 직접 붙인다.
+
+    이 값은 `verification.api.verify`가 본인확인이 완료될 때 자동으로 채운다
+    (#51 코드리뷰 지적 1) — 이 프로젝트는 이미 휴대폰 본인확인을 요구하므로
+    (ADR-0011), 그 응답이 실제 연락 가능한 번호를 확보하는 가장 자연스러운
+    지점이다. 여기서는 있으면 쓰고 없으면 발송을 시도하지 않는다는 계약만
+    정한다(`notifications.adapters_aligo`).
+
+    같은 DB의 다른 신원 정보(Verification의 실명·생년월일·CI/DI)와 같은 규율로
+    평문 저장하지 않는다(#51 코드리뷰 지적 3) — `verification.crypto`의 Fernet
+    암호화를 그대로 재사용한다(같은 VERIFICATION_ENCRYPTION_KEY).
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, related_name="phone_contact", on_delete=models.CASCADE
+    )
+    phone_number_encrypted = models.CharField(max_length=500)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def phone_number(self) -> str:
+        return decrypt(self.phone_number_encrypted)
+
+    @phone_number.setter
+    def phone_number(self, value: str) -> None:
+        """정규화(#51 코드리뷰 지적 4)를 거친 뒤에만 암호화해 저장한다 —
+        하이픈·공백·국가코드 표기를 흡수하고, 알리고의 콤마 구분 다중 수신자
+        파라미터로 오인될 수 있는 값은 `InvalidPhoneNumberError`로 거부한다."""
+
+        self.phone_number_encrypted = encrypt(normalize_phone_number(value))
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"PhoneContact<{self.user_id}>"
 
 
 class RefreshToken(models.Model):

@@ -57,6 +57,12 @@ class VerificationResult:
     birth_date: date
     ci: str
     di: str
+    # 본인확인 응답이 함께 주는 휴대폰 번호(#51 코드리뷰 지적 1) — 실제 벤더는
+    # verifiedCustomer.phoneNumber로 이 값을 준다. 빈 문자열이면(옛 벤더 응답,
+    # 또는 phoneNumber를 안 주는 인증 수단) verification.api.verify가
+    # PhoneContact를 만들지 않는다 — CI와 달리 이 값이 없다고 본인확인 자체가
+    # 실패하지는 않는다(통지 채널이 하나 비는 것뿐이다).
+    phone_number: str = ""
 
     def __post_init__(self) -> None:
         if not self.ci:
@@ -74,23 +80,29 @@ class VerificationAdapter(Protocol):
 class FakeVerificationAdapter:
     """dev/test 전용. 네트워크 없이 결정적으로 동작한다.
 
-    토큰 형식: ``"<실명>|<YYYY-MM-DD>|<ci>|<di>"``.
+    토큰 형식: ``"<실명>|<YYYY-MM-DD>|<ci>|<di>"`` 또는 휴대폰 번호를 더한
+    ``"<실명>|<YYYY-MM-DD>|<ci>|<di>|<phone>"``(#51) — 5번째 필드는 선택이라
+    기존 4필드 토큰을 쓰던 테스트가 전부 그대로 동작한다.
     """
 
     def resolve(self, verification_token: str) -> VerificationResult:
         parts = verification_token.split("|")
-        if len(parts) != 4:
+        if len(parts) not in (4, 5):
             raise VerificationAdapterError(
-                "fake verification token must be '<name>|<YYYY-MM-DD>|<ci>|<di>'"
+                "fake verification token must be "
+                "'<name>|<YYYY-MM-DD>|<ci>|<di>[|<phone>]'"
             )
-        real_name, birth_iso, ci, di = parts
+        real_name, birth_iso, ci, di, *rest = parts
+        phone_number = rest[0] if rest else ""
         if not real_name or not ci or not di:
             raise VerificationAdapterError("fake verification token missing fields")
         try:
             birth_date = date.fromisoformat(birth_iso)
         except ValueError as exc:
             raise VerificationAdapterError("fake verification token has an invalid date") from exc
-        return VerificationResult(real_name=real_name, birth_date=birth_date, ci=ci, di=di)
+        return VerificationResult(
+            real_name=real_name, birth_date=birth_date, ci=ci, di=di, phone_number=phone_number
+        )
 
 
 class PortOneV2VerificationAdapter:
@@ -203,12 +215,19 @@ class PortOneV2VerificationAdapter:
 
         ci = str(customer.get("ci") or "")
         di = str(customer.get("di") or "")
+        # 포트원 통합인증 응답은 verifiedCustomer.phoneNumber로 실제 연락 가능한
+        # 번호를 함께 준다(#51) — verification.api.verify가 이 값으로
+        # accounts.models.PhoneContact를 채운다. 벤더가 이 필드를 비워 보내도
+        # 본인확인 자체는 그대로 성공한다(ci와 달리 필수 계약이 아니다).
+        phone_number = str(customer.get("phoneNumber") or "")
 
         # ci가 비어 있으면(카카오처럼 CI를 안 주는 인증 수단이 실수로 다시 켜진
         # 상황, ADR-0024) 여기서 VerificationResult(...)가 그 자리에서
         # VerificationMissingCIError를 던진다 — #84가 세운 불변식을 이 어댑터가
         # 다시 검사하지 않는다.
-        return VerificationResult(real_name=real_name, birth_date=birth_date, ci=ci, di=di)
+        return VerificationResult(
+            real_name=real_name, birth_date=birth_date, ci=ci, di=di, phone_number=phone_number
+        )
 
 
 def get_adapter() -> VerificationAdapter:

@@ -19,6 +19,7 @@ SELECT 가 선형으로 쌓인다.
 """
 
 import logging
+import time as time_module
 from datetime import time, timedelta, timezone as dt_timezone
 
 from django.db.models import Q
@@ -41,8 +42,21 @@ QUIET_HOURS_START = time(21, 0)
 QUIET_HOURS_END = time(8, 0)
 
 # 야간 큐(DEFERRED) 한 번 스캔에서 처리하는 최대 건수. core.transitions.DEFAULT_BATCH_SIZE
-# 와 같은 이유(무제한 스캔이 요청 타임아웃을 만든다)로 둔다.
+# 와 같은 이유(무제한 스캔이 요청 타임아웃을 만든다)로 둔다. 실제 시간 상한은
+# DUE_SCAN_TIME_BUDGET_SECONDS가 건다 — 이 값은 그보다 훨씬 못 미치는 조건에서만
+# (벤더가 비정상적으로 빠른 경우) 실제로 걸리는 상한이다.
 DUE_SCAN_BATCH_SIZE = 500
+
+# 이 스캔 한 번이 실물 벤더 HTTP를 부르며 쓸 수 있는 최대 시간(초)(#51 코드리뷰
+# 지적 6). 진입점은 gunicorn 워커 타임아웃과 Celery beat 호출의 timeout=30
+# (core/tasks.py) 안에 반드시 들어와야 한다 — 채널 하나의 벤더 타임아웃
+# (notifications.adapters_aligo._TIMEOUT_SECONDS=5)이 최악의 경우 셋 다 겹쳐
+# 15초까지 걸릴 수 있으므로, 그 여유를 남기고 12초로 잡는다(12 + 15 = 27초 <
+# 30초). 이 예산을 넘기면 남은 행은 이번 스캔에서 처리하지 않고 다음 스캔(60초
+# 뒤, config/celery.py)에 넘긴다 — ADR-0010 "연기하되 버리지 않는다"와 같은
+# 원칙: 이번에 못 하면 다음 틱이 마저 한다. 처리하지 못한 DEFERRED/QUEUED 행은
+# 그대로 남아 다음 스캔의 대상이 된다(상태를 미리 건드리지 않았으므로 안전하다).
+DUE_SCAN_TIME_BUDGET_SECONDS = 12.0
 
 # QUEUED로 선점된 뒤 이만큼 지나도 여전히 QUEUED면 "멈췄다"고 본다(#10 리뷰 지적).
 # 정상적인 발송 시도는 어댑터 타임아웃을 포함해도 이보다 훨씬 빨리 SENT/FAILED로
@@ -155,12 +169,102 @@ def _attempt_dispatch(notification: Notification, *, now=None) -> None:
     ① 다음 채널로 넘어가지 못하고, ② 이 시도의 이력이 아예 안 남고(ADR-0009 의
     발송 이력=법적 방어선이 뚫린다), ③ Notification 이 QUEUED 에 영원히 멈춘다
     (야간 큐 스캐너는 DEFERRED 만 다시 줍는다). 그래서 채널마다 개별적으로 감싼다.
+
+    **채널마다 두 단계로 기록한다(#51 코드리뷰 지적 7).** 벤더를 부르기 "전"에
+    PENDING 행을 먼저 커밋하고, 응답을 받은 "후"에 SENT/FAILED로 갱신한다.
+    실물 어댑터(Fake와 달리)는 실제로 과금되는 외부 호출이라, 벤더 발송이
+    실제로 성공한 뒤 이 함수가 SENT를 기록하기 전에 프로세스가 죽으면(배포
+    재시작, OOM 등) 이 Notification은 QUEUED에 claimed_at만 남긴 채 멈춘다.
+    STUCK_QUEUED_THRESHOLD가 지나 재선점되면 예전 코드는 알림톡부터 처음부터
+    다시 시도했다 — 이미 성공했을 수도 있는 채널에 실제 과금이 다시 발생하는
+    "유료 재발송" 사고다. PENDING 기록이 있으면 "이 채널을 이미 시도했을 수도
+    있다"는 증거가 남으므로, 재시도가 그 채널을 건너뛰고 다음 채널로 넘어간다 —
+    "다시 보낸다"보다 "이 채널로는 확신이 없으니 넘어간다"를 우선한다(돈이
+    새는 쪽보다 알림 하나가 덜 가는 쪽이 안전하다, ADR-0009와 같은 방향의
+    선택).
+
+    **이미 SENT인 채널이 있는지는 채널 순서를 따라가며 확인하지 않고, 반복문에
+    들어가기 전에 전체를 한 번에 확인한다**(#51 3차 코드리뷰 지적 5) — 그렇지
+    않으면 나중 채널(예: sms)이 SENT까지 기록된 뒤 claim_transition 직전에
+    죽었을 때, 재선점이 그 SENT 행에 도달하기도 전에 앞 채널(알림톡, 정상
+    FAILED라 재시도 대상)부터 다시 벤더를 불러 중복 도달·이중 과금을 만들
+    수 있다.
     """
 
     now = now if now is not None else Clock.now()
     from_state = notification.status
 
+    # 어떤 채널이든 이미 SENT로 기록돼 있으면 더는 아무 채널도 건드리지
+    # 않는다(#51 3차 코드리뷰 지적 5). 이 확인을 반복문 "안"에서 채널 순서
+    # (알림톡→SMS→LMS)대로만 하면, sms가 SENT까지 기록된 뒤 claim_transition
+    # 직전에 죽었을 때 재선점이 sms의 SENT 행에 도달하기도 전에 alimtalk
+    # (FAILED — 정상적인 실패라 재시도 대상이다)부터 다시 벤더를 부른다.
+    # alimtalk 재시도 자체는 의도된 동작(실패한 채널은 재시도해야 한다)이지만,
+    # 그 재시도가 이번에는 성공하면 이미 성공한 sms와 합쳐 같은 알림이 두
+    # 채널로 중복 도달하고 두 번 과금된다 — 반복문에 들어가기 전에 전체
+    # 채널을 한 번 훑어 "이미 성공한 채널이 있는가"부터 확인해야 이 순서
+    # 문제가 사라진다.
+    if NotificationDispatch.objects.filter(
+        notification=notification, status=NotificationDispatch.Status.SENT
+    ).exists():
+        claim_transition(
+            Notification,
+            notification.pk,
+            from_state=from_state,
+            to_state=Notification.Status.SENT,
+            state_field="status",
+            now=now,
+        )
+        return
+
     for channel, adapter_factory in CHANNEL_FALLBACK_CHAIN:
+        previous = (
+            NotificationDispatch.objects.filter(notification=notification, channel=channel)
+            .order_by("-id")
+            .first()
+        )
+        if previous is not None and previous.status in (
+            NotificationDispatch.Status.PENDING,
+            NotificationDispatch.Status.INDETERMINATE,
+        ):
+            logger.warning(
+                "Notification(pk=%s) 채널 %s 의 이전 시도가 결과 확정 전에 "
+                "중단됐다(PENDING/INDETERMINATE) — 벤더가 실제로 발송에 "
+                "성공했을 수 있으므로 중복 과금을 피하기 위해 재시도하지 "
+                "않고 다음 채널로 넘어간다.",
+                notification.pk,
+                channel,
+            )
+            if previous.status == NotificationDispatch.Status.PENDING:
+                # PENDING을 FAILED로 확정하면 안 된다(#51 3차 코드리뷰 지적 1
+                # — 2차 수정이 되돌린 사고) — FAILED는 "안전하게 재시도해도
+                # 되는 실패"로 다음 재선점에 읽혀, 이미 벤더가 성공시켰을 수도
+                # 있는 채널에 또 벤더를 불러 재과금·중복 도달을 만든다. 그렇다고
+                # PENDING을 사유 없이 그대로 두면 발송 이력이 아무것도 설명하지
+                # 못한다(#51 2차 코드리뷰 지적 6). INDETERMINATE는 "재시도
+                # 대상이 아니다"라는 사실을 SENT/PENDING과 같은 그룹으로 유지
+                # 하면서(위 if 조건), 이력에는 "왜 재시도하지 않았는지"를
+                # 정직하게 남긴다 — FAILED가 아니므로 다음 재선점도 이 분기를
+                # 다시 타 안전하게 건너뛴다(이미 INDETERMINATE라 이 if 블록
+                # 자체는 다시 쓰지 않는다).
+                previous.status = NotificationDispatch.Status.INDETERMINATE
+                previous.failure_reason = (
+                    "이전 시도가 벤더 응답을 받기 전에 중단됐다 — 실제로 성공했을 "
+                    "수 있어 중복 과금을 피하기 위해 재시도하지 않았다."
+                )[:255]
+                previous.save(update_fields=["status", "failure_reason"])
+            continue
+
+        # 벤더를 부르기 전에 PENDING을 먼저 커밋한다 — 아래 어댑터 호출 도중
+        # 프로세스가 죽어도 이 행은 이미 DB에 있다.
+        dispatch = NotificationDispatch.objects.create(
+            notification=notification,
+            channel=channel,
+            status=NotificationDispatch.Status.PENDING,
+            attempted_at=now,
+            failure_reason="",
+        )
+
         try:
             # 코디네이터 리뷰 지적(#23): adapter_factory()는 원래 이 try 밖에 있었다.
             # NOTIFICATION_*_ADAPTER가 존재하지 않는 dotted path(예: 아직 구현되지
@@ -182,17 +286,14 @@ def _attempt_dispatch(notification: Notification, *, now=None) -> None:
                 success=False, failure_reason=f"{type(exc).__name__}: {exc}"[:255]
             )
 
-        NotificationDispatch.objects.create(
-            notification=notification,
-            channel=channel,
-            status=(
-                NotificationDispatch.Status.SENT
-                if result.success
-                else NotificationDispatch.Status.FAILED
-            ),
-            attempted_at=now,
-            failure_reason=result.failure_reason[:255],
+        dispatch.status = (
+            NotificationDispatch.Status.SENT
+            if result.success
+            else NotificationDispatch.Status.FAILED
         )
+        dispatch.failure_reason = result.failure_reason[:255]
+        dispatch.save(update_fields=["status", "failure_reason"])
+
         if result.success:
             claim_transition(
                 Notification,
@@ -325,15 +426,57 @@ def dispatch_due_notifications(as_of=None) -> list[int]:
         .values_list("pk", flat=True)[:DUE_SCAN_BATCH_SIZE]
     )
 
+    # DEFERRED와 stuck-QUEUED가 시간 예산을 절반씩 나눠 쓴다(#51 2차 코드리뷰
+    # 지적 1). 이전에는 두 루프가 마감시각 하나를 공유하고 DEFERRED가 먼저
+    # 돈 뒤 예산을 다 쓰면 그 자리에서 곧장 return했다 — stuck-QUEUED 재선점
+    # 루프는 시도조차 되지 않았다. stuck-QUEUED 재선점은 PENDING으로 죽은
+    # 행(벤더 발송 성공 이후, SENT 확정 이전에 프로세스가 죽은 경우)을 되살리는
+    # **유일한** 경로라, 아침처럼 DEFERRED가 몰리는 스캔마다 이 경로가 매번
+    # 굶으면 그 행들은 STUCK_QUEUED_THRESHOLD가 지날 때마다 "재선점 시도조차
+    # 안 됨"을 반복하며 영원히 복구되지 않는다.
+    #
+    # 마감시각을 미리(스캔 시작 시점) 통째로 계산해 두면 DEFERRED 루프의
+    # 시간 초과 검사가 "행과 행 사이"에서만 일어난다는 사실이 다시 구멍이
+    # 된다(#51 3차 코드리뷰 지적 3) — 채널 하나가 최대 5초(connect 2초 + read
+    # 3초)이고 한 행이 최대 3채널을 순서대로 시도하므로, 진행 중이던 행
+    # 하나가 최대 15초를 쓸 수 있다. stuck_deadline을 scan_start 기준
+    # (scan_start + 전체 예산)으로 미리 고정해 두면, 벤더가 느려 처리 중인
+    # DEFERRED 행 하나가 15초를 쓰는 것만으로 stuck_deadline(scan_start+12초)
+    # 을 이미 넘겨 버려 — 정확히 "벤더가 느려 stuck 행이 생기는" 바로 그
+    # 상황에서 stuck-QUEUED 루프가 진입하자마자 0초짜리 예산을 받는다. 그래서
+    # stuck_deadline은 DEFERRED 루프가 끝난 "그 시점부터" 새로 절반을 받는다
+    # — DEFERRED가 실제로 얼마나 오래 걸렸든, stuck-QUEUED는 항상 자기 몫의
+    # 절반을 온전히 받는다(전체 스캔 시간은 늘어날 수 있지만, 60초 주기·30초
+    # 요청 타임아웃 안에서는 감수할 만하다 — 그 반대급부인 "복구 경로가 아예
+    # 실행되지 않는다"보다 훨씬 낫다).
+    half_budget = DUE_SCAN_TIME_BUDGET_SECONDS / 2
+    deferred_deadline = time_module.monotonic() + half_budget
+
     dispatched_ids: list[int] = []
     for pk in due_deferred_ids:
+        if time_module.monotonic() >= deferred_deadline:
+            logger.warning(
+                "Notification 야간 큐 스캔의 DEFERRED 처리가 시간 예산을 넘겨 "
+                "중단한다 — 나머지는 다음 스캔(60초 뒤)이 이어서 처리하고, "
+                "이번 스캔은 stuck-QUEUED 재선점으로 넘어간다.",
+            )
+            break
         try:
             if _claim_and_process_deferred(pk, now=as_of):
                 dispatched_ids.append(pk)
         except Exception:  # noqa: BLE001 - 한 행의 실패가 나머지 배치를 막으면 안 된다.
             logger.exception("Notification(pk=%s) 야간 큐 처리 중 예외, 다음 행으로 계속", pk)
 
+    # DEFERRED가 실제로 얼마나 썼는지와 무관하게, 지금 이 시점부터 새로 절반을
+    # 받는다 — 위 설명 참고.
+    stuck_deadline = time_module.monotonic() + half_budget
     for pk in stuck_queued_ids:
+        if time_module.monotonic() >= stuck_deadline:
+            logger.warning(
+                "Notification 야간 큐 스캔의 stuck-QUEUED 재선점이 시간 예산을 "
+                "넘겨 중단한다 — 나머지는 다음 스캔(60초 뒤)이 이어서 처리한다.",
+            )
+            break
         try:
             if _reclaim_and_process_stuck_queued(pk, now=as_of, stale_before=stale_before):
                 dispatched_ids.append(pk)

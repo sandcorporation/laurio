@@ -90,3 +90,36 @@ class StubRequirementChatAdapter:
 
     def respond(self, chat_input):
         raise NotImplementedError("배포 가드 검증 전용 stub — 실제로 호출되면 안 된다.")
+
+
+class StubAlimtalkChannelAdapter:
+    """`notifications.adapters.NotificationChannelAdapter` 계약을 구조적으로 만족한다(#89).
+
+    `notifications.checks`(#51 코드리뷰 지적 8)가 `channel` 속성이 설정 이름이
+    기대하는 값과 실제로 같은지도 검증하므로, 세 설정마다 그 채널값에 맞는
+    Stub이 따로 있어야 한다 — 하나를 공유하면(예: channel="stub") 그 자체가
+    이 검사에 걸린다.
+    """
+
+    channel = "alimtalk"
+
+    def send(self, *, recipient, notification):
+        raise NotImplementedError("배포 가드 검증 전용 stub — 실제로 호출되면 안 된다.")
+
+
+class StubSmsChannelAdapter:
+    """`notifications.adapters.NotificationChannelAdapter` 계약을 구조적으로 만족한다(#89)."""
+
+    channel = "sms"
+
+    def send(self, *, recipient, notification):
+        raise NotImplementedError("배포 가드 검증 전용 stub — 실제로 호출되면 안 된다.")
+
+
+class StubLmsChannelAdapter:
+    """`notifications.adapters.NotificationChannelAdapter` 계약을 구조적으로 만족한다(#89)."""
+
+    channel = "lms"
+
+    def send(self, *, recipient, notification):
+        raise NotImplementedError("배포 가드 검증 전용 stub — 실제로 호출되면 안 된다.")

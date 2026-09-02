@@ -28,7 +28,9 @@ def _auth_header(access: str) -> dict:
     return {"HTTP_AUTHORIZATION": f"Bearer {access}"}
 
 
-def _fake_token(name: str, birth_iso: str, ci: str, di: str) -> str:
+def _fake_token(name: str, birth_iso: str, ci: str, di: str, phone: str = "") -> str:
+    if phone:
+        return f"{name}|{birth_iso}|{ci}|{di}|{phone}"
     return f"{name}|{birth_iso}|{ci}|{di}"
 
 
@@ -652,3 +654,208 @@ def test_a_fake_named_dotted_path_does_not_require_verification_start(client):
 
     assert response.status_code == 200
     assert response.json()["status"] == "verified"
+
+
+
+# --- 본인확인 응답의 휴대폰 번호 -> PhoneContact (#51 코드리뷰 지적 1) -----------
+
+
+@pytest.mark.django_db
+def test_verification_with_phone_number_populates_encrypted_phone_contact(client):
+    """알림(#51)이 실제로 문자를 보낼 대상 번호가 이 프로젝트 어디에도 없었다 —
+    본인확인이 이미 휴대폰으로 이루어지므로 그 응답이 채우는 것이 자연스러운
+    지점이다. 여기서도 평문으로 남기지 않는다(#51 코드리뷰 지적 3)."""
+
+    from accounts.models import PhoneContact
+
+    pair = _login(client, uid="verify-phone-subject")
+
+    response = client.post(
+        "/api/verification/verify",
+        data={
+            "verification_token": _fake_token(
+                "홍길동", "1990-05-15", "ci-phone-1", "di-phone-1", phone="010-1234-5678"
+            )
+        },
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+
+    assert response.status_code == 200
+
+    contact = PhoneContact.objects.get(
+        user__social_accounts__provider_uid="verify-phone-subject"
+    )
+    assert "1234" not in contact.phone_number_encrypted
+    assert contact.phone_number == "01012345678"
+
+
+@pytest.mark.django_db
+def test_verification_without_phone_number_does_not_create_phone_contact(client):
+    """4필드 토큰(휴대폰 번호 없음)은 기존 동작 그대로 — PhoneContact가
+    만들어지지 않는다(#51은 없다고 본인확인 자체를 막지 않는다)."""
+
+    from accounts.models import PhoneContact
+
+    pair = _login(client, uid="verify-no-phone-subject")
+
+    response = client.post(
+        "/api/verification/verify",
+        data={"verification_token": _fake_token("홍길동", "1990-05-15", "ci-no-phone", "di-no-phone")},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+
+    assert response.status_code == 200
+    assert not PhoneContact.objects.filter(
+        user__social_accounts__provider_uid="verify-no-phone-subject"
+    ).exists()
+
+
+
+@pytest.mark.django_db
+def test_underage_verification_with_phone_number_does_not_create_phone_contact(client):
+    """#51 2차 코드리뷰 지적 4: 미성년자는 CI/DI와 같은 이유로 PhoneContact도
+    남기지 않는다 — 그 계정에는 삭제 경로가 없으므로 여기서 막지 않으면
+    영구히 잔존한다."""
+
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from accounts.models import PhoneContact
+
+    pair = _login(client, uid="verify-underage-phone-subject")
+
+    today = timezone.localdate()
+    clearly_minor_birth = today - timedelta(days=365 * 10)
+
+    response = client.post(
+        "/api/verification/verify",
+        data={
+            "verification_token": _fake_token(
+                "미성년자",
+                clearly_minor_birth.isoformat(),
+                "ci-underage-phone",
+                "di-underage-phone",
+                phone="010-1234-5678",
+            )
+        },
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+
+    assert response.json()["status"] == "underage"
+    assert not PhoneContact.objects.filter(
+        user__social_accounts__provider_uid="verify-underage-phone-subject"
+    ).exists()
+
+
+@pytest.mark.django_db
+def test_downgrading_to_underage_deletes_previously_stored_phone_contact(client):
+    """재확인으로 성인 → 미성년 판정이 뒤집히면 이미 저장돼 있던 PhoneContact도
+    지운다(위 test_downgrading_to_underage_clears_previously_stored_ci_and_di
+    와 같은 시나리오, CI/DI 대신 PhoneContact를 본다)."""
+
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from accounts.models import PhoneContact
+
+    pair = _login(client, uid="downgrade-phone-subject", email="downgrade-phone@example.com")
+
+    first = client.post(
+        "/api/verification/verify",
+        data={
+            "verification_token": _fake_token(
+                "한때성인",
+                "1990-01-01",
+                "ci-downgrade-phone-1",
+                "di-downgrade-phone-1",
+                phone="010-1234-5678",
+            )
+        },
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert first.json()["status"] == "verified"
+    assert PhoneContact.objects.filter(
+        user__social_accounts__provider_uid="downgrade-phone-subject"
+    ).exists()
+
+    today = timezone.localdate()
+    clearly_minor_birth = today - timedelta(days=365 * 10)
+
+    second = client.post(
+        "/api/verification/verify",
+        data={
+            "verification_token": _fake_token(
+                "사실은미성년",
+                clearly_minor_birth.isoformat(),
+                "ci-downgrade-phone-1",
+                "di-downgrade-phone-1",
+                phone="010-1234-5678",
+            )
+        },
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert second.json()["status"] == "underage"
+
+    assert not PhoneContact.objects.filter(
+        user__social_accounts__provider_uid="downgrade-phone-subject"
+    ).exists()
+
+
+
+@pytest.mark.django_db
+def test_reverifying_as_adult_without_a_phone_number_preserves_the_existing_phone_contact(client):
+    """#51 3차 코드리뷰 지적 2: 2차 수정의 `else` 분기가 UNDERAGE와 "VERIFIED
+    인데 벤더가 phoneNumber를 안 준 경우"를 하나로 묶어, 재확인 때마다 벤더가
+    이 필드를 생략하면 이미 저장돼 있던 정상 번호까지 조용히 지웠다.
+    verify()가 PhoneContact를 채우는 유일한 지점이므로, 그 계정은 이후
+    영구히 SMS를 못 받는다 — 성인 재확인에 phoneNumber가 없다고 기존 값을
+    지우면 안 된다."""
+
+    from accounts.models import PhoneContact
+
+    pair = _login(client, uid="reverify-no-phone-subject")
+
+    first = client.post(
+        "/api/verification/verify",
+        data={
+            "verification_token": _fake_token(
+                "홍길동",
+                "1990-05-15",
+                "ci-reverify-1",
+                "di-reverify-1",
+                phone="010-1234-5678",
+            )
+        },
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert first.json()["status"] == "verified"
+
+    contact = PhoneContact.objects.get(
+        user__social_accounts__provider_uid="reverify-no-phone-subject"
+    )
+    assert contact.phone_number == "01012345678"
+
+    # 재확인 — 이번에는 벤더(Fake 토큰)가 phoneNumber를 주지 않는다(4필드 토큰).
+    second = client.post(
+        "/api/verification/verify",
+        data={
+            "verification_token": _fake_token(
+                "홍길동", "1990-05-15", "ci-reverify-2", "di-reverify-2"
+            )
+        },
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert second.json()["status"] == "verified"
+
+    # 기존 PhoneContact가 지워지지 않고 그대로 남아 있다.
+    contact.refresh_from_db()
+    assert contact.phone_number == "01012345678"

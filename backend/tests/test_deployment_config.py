@@ -90,9 +90,15 @@ def _base_env(*, target: str, secret_key: str) -> dict[str, str]:
         "SELLER_ADAPTER_MODE": "tests.adapter_stubs.StubSellerAdapter",
         "LLM_ADAPTER_MODE": "tests.adapter_stubs.StubLLMScoringAdapter",
         "LLM_REQUIREMENT_CHAT_ADAPTER_MODE": "tests.adapter_stubs.StubRequirementChatAdapter",
-        "NOTIFICATION_ALIMTALK_ADAPTER": "notifications.adapters.RealAlimtalkAdapter",
-        "NOTIFICATION_SMS_ADAPTER": "notifications.adapters.RealSmsAdapter",
-        "NOTIFICATION_LMS_ADAPTER": "notifications.adapters.RealLmsAdapter",
+        # #89: notifications.adapters.RealAlimtalkAdapter/RealSmsAdapter/RealLmsAdapter는
+        # 저장소에 없는 클래스였다(그것이 이 티켓이 고치는 버그) — 실물 벤더
+        # 어댑터(#51)가 나오기 전까지는 나머지 어댑터들과 같은 원칙으로 stub을
+        # 가리킨다. 세 설정마다 channel이 다른 Stub을 쓴다(#51 코드리뷰 지적 8) —
+        # notifications.checks가 이제 channel 일치도 검증하므로 하나를
+        # 공유하면 그 자체가 걸린다.
+        "NOTIFICATION_ALIMTALK_ADAPTER": "tests.adapter_stubs.StubAlimtalkChannelAdapter",
+        "NOTIFICATION_SMS_ADAPTER": "tests.adapter_stubs.StubSmsChannelAdapter",
+        "NOTIFICATION_LMS_ADAPTER": "tests.adapter_stubs.StubLmsChannelAdapter",
     }
 
 
@@ -322,6 +328,12 @@ _UNRESOLVABLE_ADAPTER_MODE_FIELDS = [
     "SELLER_ADAPTER_MODE",
     "LLM_ADAPTER_MODE",
     "LLM_REQUIREMENT_CHAT_ADAPTER_MODE",
+    # #89: 알림 채널 셋도 이제 같은 가드(core.adapters.check_adapter_mode)를 받는다 —
+    # 이전에는 존재하지 않는 클래스를 가리켜도 부팅이 통과했다(정확히 이 티켓이
+    # 고치는 버그).
+    "NOTIFICATION_ALIMTALK_ADAPTER",
+    "NOTIFICATION_SMS_ADAPTER",
+    "NOTIFICATION_LMS_ADAPTER",
 ]
 
 
@@ -386,6 +398,135 @@ def test_deployed_environment_refuses_a_dotted_path_that_exists_but_does_not_sat
     )
     assert "core.E003" in result.stderr
     assert "PAYMENT_ADAPTER_MODE" in result.stderr
+
+
+def test_deployed_environment_refuses_a_notification_adapter_that_exists_but_does_not_satisfy_the_contract():
+    """#89: 알림 채널도 같은 계약 검증을 받는다.
+
+    `payments.adapters.PGError`는 존재하지만 `NotificationChannelAdapter`
+    계약(channel 속성 + send 메서드)과 전혀 무관하다 — 이 값으로 배포되면
+    부팅은 통과하고 첫 알림 시도에서야 AttributeError로 죽는다.
+    """
+
+    env = _production_env(NOTIFICATION_SMS_ADAPTER="payments.adapters.PGError")
+
+    result = _run_check(env)
+
+    assert result.returncode != 0, (
+        "payments.adapters.PGError는 존재하지만 NotificationChannelAdapter 계약과 "
+        "무관한 클래스다 — 이 값으로 배포되면 부팅은 통과하고 첫 알림에서야 "
+        "AttributeError로 죽는다."
+    )
+    assert "core.E003" in result.stderr
+    assert "NOTIFICATION_SMS_ADAPTER" in result.stderr
+
+
+# --- 알리고(Aligo) SMS/LMS 실물 어댑터의 자격증명 (#51) -----------------------------
+#
+# AC: "NOTIFICATION_*_ADAPTER dotted path 셋이 채워져 배포 환경이 부팅한다" —
+# TossPGAdapter(#87)와 같은 원칙으로, 인자 없이 생성되지만 자격증명이 비어
+# 있으면 생성 자체가 실패해 core.adapters.check_adapter_mode가 core.E002로
+# 부팅을 거부한다.
+
+
+def test_staging_boots_with_aligo_sms_lms_adapters_and_credentials():
+    env = _staging_env(
+        NOTIFICATION_SMS_ADAPTER="notifications.adapters_aligo.AligoSmsAdapter",
+        NOTIFICATION_LMS_ADAPTER="notifications.adapters_aligo.AligoLmsAdapter",
+        ALIGO_API_KEY="dummy-key",
+        ALIGO_USER_ID="dummy-user",
+        ALIGO_SENDER_PHONE_NUMBER="01000000000",
+    )
+
+    result = _run_check(env)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_staging_alimtalk_adapter_boots_with_aligo_credentials():
+    """알림톡 어댑터(#51)는 아직 벤더를 호출하지 않지만, 승인 이후 그대로 실물
+    호출로 바꿀 수 있도록 자격증명은 미리 검증한다 — 그래서 이 값도 같은
+    자격증명을 요구한다."""
+
+    env = _staging_env(
+        NOTIFICATION_ALIMTALK_ADAPTER="notifications.adapters_aligo.AligoAlimtalkAdapter",
+        ALIGO_API_KEY="dummy-key",
+        ALIGO_USER_ID="dummy-user",
+        ALIGO_SENDER_PHONE_NUMBER="01000000000",
+    )
+
+    result = _run_check(env)
+
+    assert result.returncode == 0, result.stderr
+
+
+# --- 세 설정이 서로의 채널을 가리키면(#51 코드리뷰 지적 8) 부팅을 거부한다 -----------
+#
+# core.adapters.check_adapter_mode는 Protocol 구조(channel 속성 + send 메서드
+# 존재)만 보므로, NOTIFICATION_SMS_ADAPTER가 실수로 channel="lms"인
+# AligoLmsAdapter를 가리켜도 그 자체로는 깨끗이 통과한다 — 리뷰가 직접
+# 실행해 확인한 사고: SMS 요금으로 전부 LMS를 보내면서 발송 이력에는
+# channel="sms"로 남는다. notifications.checks의 추가 검증(notifications.E002)
+# 이 이 어긋남을 부팅 시점에 잡아야 한다.
+
+
+@pytest.mark.parametrize(
+    "field,wrong_class_name",
+    [
+        ("NOTIFICATION_ALIMTALK_ADAPTER", "AligoSmsAdapter"),
+        ("NOTIFICATION_SMS_ADAPTER", "AligoLmsAdapter"),
+        ("NOTIFICATION_LMS_ADAPTER", "AligoAlimtalkAdapter"),
+    ],
+)
+def test_staging_refuses_boot_when_a_notification_setting_points_at_the_wrong_channel(
+    field, wrong_class_name
+):
+    env = _staging_env(
+        **{field: f"notifications.adapters_aligo.{wrong_class_name}"},
+        ALIGO_API_KEY="dummy-key",
+        ALIGO_USER_ID="dummy-user",
+        ALIGO_SENDER_PHONE_NUMBER="01000000000",
+    )
+
+    result = _run_check(env)
+
+    assert result.returncode != 0, (
+        f"{field}가 다른 채널의 어댑터({wrong_class_name})를 가리켜도 부팅에 "
+        "성공했다 — Protocol 구조만 같으면 통과하는 core.adapters.check_adapter_mode "
+        "의 빈틈이다(#51 코드리뷰 지적 8)."
+    )
+    assert "notifications.E002" in result.stderr
+    assert field in result.stderr
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "NOTIFICATION_ALIMTALK_ADAPTER",
+        "NOTIFICATION_SMS_ADAPTER",
+        "NOTIFICATION_LMS_ADAPTER",
+    ],
+)
+@pytest.mark.parametrize(
+    "class_name",
+    [
+        "AligoAlimtalkAdapter",
+        "AligoSmsAdapter",
+        "AligoLmsAdapter",
+    ],
+)
+def test_staging_refuses_boot_without_any_aligo_credential_env_var(field, class_name):
+    env = _staging_env(**{field: f"notifications.adapters_aligo.{class_name}"})
+
+    result = _run_check(env)
+
+    assert result.returncode != 0, (
+        "ALIGO_API_KEY/ALIGO_USER_ID/ALIGO_SENDER_PHONE_NUMBER 없이도 부팅에 "
+        "성공했다 — AligoCredentialsError(ImproperlyConfigured)가 어댑터 생성을 "
+        "막아야 core.E002로 부팅이 거부된다."
+    )
+    assert "core.E002" in result.stderr
+    assert field in result.stderr
 
 
 # --- 토스 결제 어댑터의 자격증명 환경변수 이름(#87 코드리뷰 지적 6) -----------------------

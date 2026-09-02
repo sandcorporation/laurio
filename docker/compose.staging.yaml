@@ -147,10 +147,23 @@ x-backend-env: &backend-env
   # 아무것도 안 한다"는 문제는 남는다) 매번 채널 폴백이 소모된다. 실제 벤더 어댑터가
   # 구현되면 그 dotted path를 .env.staging에 채워 넣는다 — 그 전까지는 필수값으로
   # 비워 둬 운영자가 "아직 없다"는 것을 명시적으로 알게 한다.
-  NOTIFICATION_ALIMTALK_ADAPTER: ${NOTIFICATION_ALIMTALK_ADAPTER:?실제 알림톡 벤더 어댑터의 dotted path를 .env.staging 에 채워라 — 아직 구현 전이면 이 값 자체를 비워 둘 수 없다}
-  NOTIFICATION_SMS_ADAPTER: ${NOTIFICATION_SMS_ADAPTER:?실제 SMS 벤더 어댑터의 dotted path를 .env.staging 에 채워라}
-  NOTIFICATION_LMS_ADAPTER: ${NOTIFICATION_LMS_ADAPTER:?실제 LMS 벤더 어댑터의 dotted path를 .env.staging 에 채워라}
+  # #51: 알리고(Aligo) SMS/LMS 실물 어댑터가 이제 존재한다 —
+  # notifications.adapters_aligo.AligoSmsAdapter / AligoLmsAdapter. 알림톡은
+  # 사업자등록·채널 개설·템플릿 사전심사가 끝나기 전까지 AligoAlimtalkAdapter가
+  # 항상 실패를 돌려줘 SMS로 대체발송한다(ADR-0009) — 승인이 나면 이 값을 실제
+  # 카카오 알림톡 어댑터로 바꾼다.
+  NOTIFICATION_ALIMTALK_ADAPTER: ${NOTIFICATION_ALIMTALK_ADAPTER:?실제 알림톡 벤더 어댑터의 dotted path를 .env.staging 에 채워라 — 승인 전이면 notifications.adapters_aligo.AligoAlimtalkAdapter(#51)를 채운다}
+  NOTIFICATION_SMS_ADAPTER: ${NOTIFICATION_SMS_ADAPTER:?실제 SMS 벤더 어댑터의 dotted path를 .env.staging 에 채워라 — notifications.adapters_aligo.AligoSmsAdapter(#51)}
+  NOTIFICATION_LMS_ADAPTER: ${NOTIFICATION_LMS_ADAPTER:?실제 LMS 벤더 어댑터의 dotted path를 .env.staging 에 채워라 — notifications.adapters_aligo.AligoLmsAdapter(#51)}
   NOTIFICATION_VENDOR_API_KEY: ${NOTIFICATION_VENDOR_API_KEY:-}
+  # 알리고 자격증명(#51) — AligoSmsAdapter/AligoLmsAdapter/AligoAlimtalkAdapter가
+  # 인자 없이 생성되는 시점(core.adapters.resolve_adapter)에 읽는다. 비어 있으면
+  # 그 생성 자체가 ImproperlyConfigured로 실패해 core.adapters.check_adapter_mode가
+  # core.E002로 부팅을 거부한다(dev는 위 세 값이 기본 fake라 이 클래스 자체가
+  # 생성되지 않으므로 영향받지 않는다).
+  ALIGO_API_KEY: ${ALIGO_API_KEY:-}
+  ALIGO_USER_ID: ${ALIGO_USER_ID:-}
+  ALIGO_SENDER_PHONE_NUMBER: ${ALIGO_SENDER_PHONE_NUMBER:-}
 
   # --- 내부 인증(스케줄러 틱 외 5개 내부 스캔, ADR-0003) ---
   # staging의 존재 이유 중 하나: 운영자가 이 토큰으로 POST /api/internal/tick 을 직접

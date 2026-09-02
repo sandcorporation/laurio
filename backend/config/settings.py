@@ -522,6 +522,16 @@ NOTIFICATION_FAKE_RAISING_CHANNELS = [
     c for c in _env("NOTIFICATION_FAKE_RAISING_CHANNELS", "").split(",") if c
 ]
 
+# 알리고(Aligo) SMS/LMS 실물 어댑터(#51)가 쓰는 자격증명. 토스 어댑터
+# (TOSS_API_SECRET_KEY)와 같은 원칙 — 여기서 부팅을 막지 않는다. dev는
+# NOTIFICATION_SMS_ADAPTER/LMS_ADAPTER가 기본값 "fake"라 이 클래스 자체가
+# 생성되지 않기 때문이다. 배포 환경에서 이 클래스를 가리키는데 값이 비어
+# 있으면 `core.adapters.check_adapter_mode`가 어댑터 생성 실패를 잡아
+# `core.E002`로 부팅을 거부한다.
+ALIGO_API_KEY = _env("ALIGO_API_KEY", "")
+ALIGO_USER_ID = _env("ALIGO_USER_ID", "")
+ALIGO_SENDER_PHONE_NUMBER = _env("ALIGO_SENDER_PHONE_NUMBER", "")
+
 # --- AI 채점 어댑터 (#12, ADR-0006, ADR-0007, ADR-0014) -----------------------------
 #
 # PAYMENT_ADAPTER_MODE·STORAGE_BACKEND와 같은 원칙: 기본값은 항상 fake다. dev/CI는
