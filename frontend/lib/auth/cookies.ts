@@ -17,7 +17,10 @@ export interface TokenPair {
 // backend/config/settings.py의 LAURIO_DEPLOYMENT_TARGET과 같은 이름·같은 값
 // 규약을 따른다 — ticket FE-13(#38)이 frontend 서비스를 compose.staging/prod.yaml에
 // 추가할 때 이 값만 주입하면 된다.
-function isDeployedEnvironment(): boolean {
+// #93 코드리뷰 — /dev-tokens(진단 화면, app/dev-tokens/page.tsx)가 같은 판정을
+// 재사용한다. 배포 환경인지 아닌지는 여기 이름·값 규약이 유일한 출처여야
+// 한다(로직이 두 곳에서 어긋나면 안 된다는 원칙 그대로).
+export function isDeployedEnvironment(): boolean {
   const target = process.env.LAURIO_DEPLOYMENT_TARGET;
   return target === "staging" || target === "production";
 }

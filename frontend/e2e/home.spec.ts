@@ -4,6 +4,11 @@
 // 된 실패는 "119건이 초록인데 입구가 없다"였다 — 모든 기존 e2e가
 // `page.goto()`로 URL을 직접 쳤기 때문에 아무도 "첫 방문자가 / 에서 클릭만으로
 // 어디까지 갈 수 있는가"를 보지 않았다. 아래 마지막 테스트가 그 구멍을 메운다.
+//
+// 코드리뷰 지적(#93 1차) — 처음 버전의 걷기 테스트는 헤더 링크 셋만 돌아
+// 홈의 <section> 을 통째로 지우고 행 링크를 망가뜨려도 초록이었다. 「입구가
+// 있다」를 증명해야 하는데 「헤더에 링크가 있다」만 증명한 것이다. 아래에서는
+// 실제 시드 Contest 행을 클릭해 그 Contest 의 상세까지 닿는다.
 import fs from "node:fs";
 import path from "node:path";
 
@@ -76,25 +81,80 @@ test.describe("홈 — 자리표시가 아니라 실제 공모전을 보여준�
       const html = await page.content();
       expect(html).not.toContain(seeded.draft.title);
     });
+
+    // 코드리뷰 지적(#93 1차) — 홈 본문만 보던 자바스크립트-없음 테스트는
+    // 헤더가 하이드레이션 뒤로 밀리는 회귀(ADR-0015 가 막으려는 바로 그
+    // 실패)를 못 잡는다. 헤더도 서버에서 렌더된다는 것을 여기서 직접 본다.
+    test("헤더 링크도 자바스크립트 없이 그대로 보인다", async ({ page }) => {
+      await page.goto("/");
+      await expect(page.getByTestId("header-brand")).toBeVisible();
+      await expect(page.getByTestId("header-nav-contests")).toBeVisible();
+      await expect(page.getByTestId("header-cta-new-contest")).toBeVisible();
+    });
+  });
+
+  // 코드리뷰 지적(#93 1차) — 행의 href·data-contest-row 를 직접 검증하는
+  // 테스트가 없어서 오타를 내도 스위트가 초록이었다. 아래에서 특정 행을 눌러
+  // 정확히 그 Contest 의 상세로 이어지는지 본다.
+  test("행을 누르면 그 Contest 의 상세로 이어진다", async ({ page }) => {
+    await page.goto("/");
+
+    await page.locator(`[data-contest-row="${seeded.funded.id}"]`).click();
+
+    await expect(page).toHaveURL(new RegExp(`/contests/${seeded.funded.id}$`));
+    await expect(
+      page.getByRole("heading", { level: 1, name: seeded.funded.title }),
+    ).toBeVisible();
+  });
+
+  // 코드리뷰 지적(#93 2차) — /contests 는 「상금미달」 배지와 "참가를 막지
+  // 않습니다" 각주를 낸다. 홈이 액센트 색으로만 이 상태를 표시하면, 그
+  // 규칙을 가장 모를 첫 방문자가 보는 화면에서만 그 규칙이 사라진다.
+  test("「상금미달」 배지와 각주가 /contests 와 같은 문구로 홈에도 있다", async ({ page }) => {
+    await page.goto("/");
+
+    const underfundedRow = page.locator(`[data-contest-row="${seeded.underfunded.id}"]`);
+    await expect(underfundedRow.getByText("상금미달")).toBeVisible();
+
+    const fundedRow = page.locator(`[data-contest-row="${seeded.funded.id}"]`);
+    await expect(fundedRow.getByText("상금미달")).toHaveCount(0);
+
+    await expect(page.getByText("참가를 막지 않습니다", { exact: false })).toBeVisible();
   });
 });
 
 // 이 스펙의 존재 이유. 티켓 #93 본문 그대로: 이 테스트가 있었다면 입구 없는
 // staging 이 나가지 않았다. `page.goto`는 맨 처음 한 번뿐이고, 그 뒤로는 전부
 // 클릭이다.
-test("첫 방문자가 / 에서 시작해 클릭만으로 공모전 목록과 로그인 화면에 닿는다", async ({
+//
+// 코드리뷰 지적(#93 1차)을 반영해, 헤더 링크뿐 아니라 홈에 실제로 렌더된
+// Contest 행을 먼저 클릭해 그 상세에 닿는 것부터 확인한다 — 홈의 <section>
+// 이 통째로 사라지거나 행 링크가 깨지면 이 자리에서 실패해야 한다.
+test("첫 방문자가 / 에서 시작해 클릭만으로 실제 공모전과 공모전 목록·로그인 화면에 닿는다", async ({
   page,
 }) => {
   await page.goto("/");
+
+  // 실제 공모전 상세 — 홈이 렌더한 행을 직접 누른다.
+  await page.locator(`[data-contest-row="${seeded.funded.id}"]`).click();
+  await expect(
+    page.getByRole("heading", { level: 1, name: seeded.funded.title }),
+  ).toBeVisible();
+
+  // 헤더는 상세 페이지에도 서 있다 — 브랜드를 눌러 홈으로. 이것도 클릭이다,
+  // URL 을 다시 치지 않는다.
+  await page.getByTestId("header-brand").click();
+  // 코드리뷰 지적(#93 1차) — `/\/$/` 는 "/contests/" 처럼 슬래시로 끝나는
+  // 어떤 경로도 통과시킨다. 정확히 루트인지 문자열로 단언한다.
+  await expect(page).toHaveURL("/");
 
   // 공모전 목록.
   await page.getByTestId("header-nav-contests").click();
   await expect(page).toHaveURL(/\/contests$/);
   await expect(page.getByTestId("contest-count")).toBeVisible();
 
-  // 브랜드를 눌러 홈으로 — 이것도 클릭이다, URL 을 다시 치지 않는다.
   await page.getByTestId("header-brand").click();
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL("/");
 
   // 로그인 화면.
   await expect(page.getByTestId("header-login-link")).toBeVisible();

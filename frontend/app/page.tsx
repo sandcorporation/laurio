@@ -52,6 +52,17 @@ export default async function Home() {
             ))}
           </ul>
         )}
+
+        {/* 「상금미달」이 참가를 막지 않는다는 도메인 규칙은 /contests(app/contests/page.tsx)와
+            같은 문구로 반복한다 — 액센트 색만으로는 이 규칙이 안 읽힌다. 홈은 하필 그
+            규칙을 가장 모를 첫 방문자가 보는 화면이라, 여기서 빠지면 안 된다. */}
+        <p className="flex items-start gap-2 border-t border-rule pt-4 text-xs leading-relaxed text-ink/60">
+          <span aria-hidden="true">ⓘ</span>
+          <span>
+            「상금미달」은 참가를 막지 않습니다. 선택한 요구형태의 최소 제안 상금 합계에 못
+            미친다는 표시일 뿐이며, 판단은 개발자의 몫입니다.
+          </span>
+        </p>
       </section>
     </main>
   );
@@ -68,7 +79,10 @@ function HomeContestRow({ contest }: { contest: Contest }) {
         className="grid grid-cols-[minmax(0,1fr)_150px_88px] items-center gap-6 border-b border-rule px-1 py-4 hover:bg-surface"
       >
         <div className="flex min-w-0 flex-col gap-1">
-          <span className="truncate text-[15px] font-medium">{contest.title}</span>
+          <div className="flex items-center gap-2">
+            <span className="truncate text-[15px] font-medium">{contest.title}</span>
+            {contest.is_underfunded && <UnderfundedBadge />}
+          </div>
           <span className="text-xs text-ink/60">{contest.category.name}</span>
         </div>
         <div
@@ -83,5 +97,13 @@ function HomeContestRow({ contest }: { contest: Contest }) {
         </div>
       </Link>
     </li>
+  );
+}
+
+function UnderfundedBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 border border-attention px-1.5 py-0.5 text-[10.5px] font-medium text-attention">
+      상금미달
+    </span>
   );
 }

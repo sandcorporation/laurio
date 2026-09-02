@@ -9,9 +9,19 @@
 // (app/console/**)을 지키려고 "세션이 없으면 /login 으로 보낸다"를 내장하고
 // 있다. 헤더는 공개 페이지에도 서므로 로그인 안 한 방문자가 정상이다 — 그
 // 상태를 리다이렉트가 아니라 "로그인" 링크로 보여줘야 한다.
+//
+// 그래도 fetch 는 맨 것을 쓰지 않고 `sessionFetch`(lib/auth/client-fetch.ts)를
+// 쓴다(#93 코드리뷰). 액세스가 만료된 채 `/console` 진입 직후처럼, 이 슬롯과
+// `useSession`(console/page.tsx)이 같은 순간 같은 401 을 동시에 만나면 리프레시
+// 토큰은 1회용이라 몫이 갈린다 — 맨 fetch 로 진 쪽은 되살리지 못한 401 을 그대로
+// "비로그인"으로 굳혀버려, 로그인한 사용자에게 경로가 바뀔 때까지 "로그인"이
+// 뜨는 결과를 냈다(직접 재현해 확인했다). `sessionFetch`는 401 을 만나면 단일
+// 비행으로 세션을 되살린 뒤 재시도해 이 경합을 흡수한다.
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+
+import { sessionFetch } from "@/lib/auth/client-fetch";
 
 type SlotState = "loading" | "authenticated" | "unauthenticated";
 
@@ -28,7 +38,7 @@ export function SessionSlot() {
   useEffect(() => {
     let cancelled = false;
 
-    fetch("/api/auth/session", { cache: "no-store" })
+    sessionFetch("/api/auth/session", { cache: "no-store" })
       .then((res) => {
         if (cancelled) return;
         setState(res.ok ? "authenticated" : "unauthenticated");
