@@ -25,6 +25,7 @@ WITHDRAWAL_URL = "/api/accounts/withdrawal"
 CONTESTS_URL = "/api/contests"
 PAYMENTS_URL = "/api/payments"
 PAYOUTS_URL = "/api/payouts"
+PURGE_URL = "/api/internal/accounts/purge-expired-identities"
 
 
 # --- 헬퍼 (test_payouts.py와 같은 관용구) ---------------------------------------
@@ -718,3 +719,236 @@ def test_destroyed_identity_never_appears_in_any_public_response(client):
     assert profile_resp.status_code == 404
     assert "흘리면안되는이름" not in profile_resp.content.decode()
     assert "흘리면안되는닉네임" not in profile_resp.content.decode()
+
+
+# --- #102: 2년 미이용 신원 파기 · 보존 기간 만료 스캔 ------------------------------
+
+
+def _backdate_activity(user_id: int, verification_id: int, *, to) -> None:
+    """`last_activity_at`이 보는 두 신호(가입 시각·본인확인 갱신 시각)를 과거로
+    되돌린다. `.update()`로 직접 쓴다 — `auto_now`/`auto_now_add`는 `.save()` 호출
+    시점에만 개입하므로 이 방법이 유일하게 값을 강제로 앉힌다."""
+
+    from django.contrib.auth import get_user_model
+
+    get_user_model().objects.filter(id=user_id).update(date_joined=to)
+    Verification.objects.filter(id=verification_id).update(updated_at=to)
+
+
+@pytest.mark.django_db
+def test_dormant_verified_account_has_identity_purged_but_account_and_submission_remain(
+    client,
+):
+    """2년간 행위가 없던 계정의 신원이 파기되지만, 계정·프로필은 그대로 남는다
+    (#102 AC) — Withdrawal과 달리 로그인도 그대로 된다."""
+
+    pair = _login(client, uid="dormant-user")
+    header = _auth_header(pair["access"])
+    _verify(client, pair["access"], ci="dormant-ci", name="오래안온사람", phone="010-2222-3333")
+    client.post(
+        "/api/accounts/developer-profile",
+        data={"display_name": "오래된닉네임"},
+        content_type="application/json",
+        **header,
+    )
+
+    from django.contrib.auth import get_user_model
+
+    user = get_user_model().objects.get(social_accounts__provider_uid="dormant-user")
+    verification = Verification.objects.get(user=user)
+    long_ago = timezone.now() - timedelta(days=365 * 3)
+    _backdate_activity(user.id, verification.id, to=long_ago)
+
+    _freeze(timezone.now())
+    resp = client.post(PURGE_URL, **_internal_headers())
+    assert resp.status_code == 200, resp.content
+    body = resp.json()
+    assert body["dormant_identities_purged"] == 1
+    assert user.id in body["dormant_user_ids"]
+
+    verification.refresh_from_db()
+    assert verification.status == Verification.Status.EXPIRED
+    assert verification.ci_encrypted == ""
+    assert verification.di_encrypted == ""
+    assert verification.real_name_encrypted == ""
+    assert verification.birth_date_encrypted == ""
+    assert not PhoneContact.objects.filter(user=user).exists()
+
+    # 계정·프로필·로그인은 그대로다.
+    user.refresh_from_db()
+    assert user.is_active is True
+    developer = DeveloperProfile.objects.get(user=user)
+    assert developer.display_name == "오래된닉네임"  # Withdrawal과 달리 지워지지 않는다.
+
+    me = client.get("/api/accounts/me", **header)
+    assert me.status_code == 200  # 이미 발급된 토큰으로도 여전히 로그인 상태다.
+
+
+@pytest.mark.django_db
+def test_dormancy_boundary_just_under_and_at_two_years(client):
+    """경계값 — 막 2년이 된 것과 아직 안 된 것을 같은 테스트에서 대비시킨다(#102 AC)."""
+
+    from accounts.dormancy import DORMANCY_PERIOD
+    from django.contrib.auth import get_user_model
+
+    pair = _login(client, uid="boundary-user")
+    header = _auth_header(pair["access"])
+    _verify(client, pair["access"], ci="boundary-ci", name="경계값사람")
+
+    user = get_user_model().objects.get(social_accounts__provider_uid="boundary-user")
+    verification = Verification.objects.get(user=user)
+    last_activity = timezone.now() - timedelta(days=1)
+    _backdate_activity(user.id, verification.id, to=last_activity)
+
+    # 아직 2년이 안 됐다 — 파기되지 않는다.
+    _freeze(last_activity + DORMANCY_PERIOD - timedelta(days=1))
+    resp = client.post(PURGE_URL, **_internal_headers())
+    assert resp.status_code == 200
+    assert resp.json()["dormant_identities_purged"] == 0
+    verification.refresh_from_db()
+    assert verification.status == Verification.Status.VERIFIED
+
+    # 막 2년이 됐다 — 파기된다.
+    _freeze(last_activity + DORMANCY_PERIOD)
+    resp = client.post(PURGE_URL, **_internal_headers())
+    assert resp.status_code == 200
+    assert resp.json()["dormant_identities_purged"] == 1
+    verification.refresh_from_db()
+    assert verification.status == Verification.Status.EXPIRED
+
+
+@pytest.mark.django_db
+def test_dormant_sponsor_with_past_transaction_retains_real_name(client, category, landing_type):
+    """거래 이력이 있었던 사람이 2년 미이용으로 파기돼도, 실명은 Withdrawal과 같은
+    규칙(RetainedIdentity)으로 남는다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(
+        client, category, landing_type, sponsor_uid="dormant-sponsor", dev_uid="dormant-dev"
+    )
+
+    from django.contrib.auth import get_user_model
+
+    user = get_user_model().objects.get(social_accounts__provider_uid="dormant-sponsor")
+    verification = Verification.objects.get(user=user)
+    long_ago = timezone.now() - timedelta(days=365 * 3)
+    _backdate_activity(user.id, verification.id, to=long_ago)
+    # 개최 자체도 "행위"다(last_activity_at) — 그 Contest를 만든 시각도 함께
+    # 되돌려야 "그 뒤로 2년간 아무 것도 안 했다"는 시나리오가 성립한다.
+    Contest.objects.filter(id=contest["id"]).update(created_at=long_ago)
+
+    _freeze(timezone.now())
+    resp = client.post(PURGE_URL, **_internal_headers())
+    assert resp.status_code == 200
+    assert resp.json()["dormant_identities_purged"] == 1
+
+    retained = RetainedIdentity.objects.get(user=user)
+    assert retained.reason == RetainedIdentity.Reason.SPONSOR_PAID_CONTEST
+    assert retained.retained_because_id == contest["id"]
+
+    verification.refresh_from_db()
+    assert verification.real_name_encrypted == ""
+
+
+@pytest.mark.django_db
+def test_expired_retained_identity_is_purged_and_unexpired_one_remains(client):
+    """보존 기간이 지난 RetainedIdentity가 사라지고, 안 지난 것은 남는다(#102 AC)."""
+
+    from django.contrib.auth import get_user_model
+
+    User = get_user_model()
+    expired_user = User.objects.create_user(username="retained-expired", email="a@example.test")
+    fresh_user = User.objects.create_user(username="retained-fresh", email="b@example.test")
+
+    now = timezone.now()
+    expired = RetainedIdentity(
+        user=expired_user,
+        reason=RetainedIdentity.Reason.SPONSOR_PAID_CONTEST,
+        retained_because_id=1,
+        retained_until=now - timedelta(days=1),
+    )
+    expired.real_name = "만료된사람"
+    expired.birth_date = date(1990, 1, 1)
+    expired.save()
+
+    fresh = RetainedIdentity(
+        user=fresh_user,
+        reason=RetainedIdentity.Reason.DEVELOPER_CONFIRMED_PAYOUT,
+        retained_because_id=2,
+        retained_until=now + timedelta(days=1),
+    )
+    fresh.real_name = "아직남은사람"
+    fresh.birth_date = date(1991, 1, 1)
+    fresh.save()
+
+    _freeze(now)
+    resp = client.post(PURGE_URL, **_internal_headers())
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["expired_retained_identities_purged"] == 1
+    assert expired.id in body["expired_retained_identity_ids"]
+
+    assert not RetainedIdentity.objects.filter(id=expired.id).exists()
+    assert RetainedIdentity.objects.filter(id=fresh.id).exists()
+
+
+@pytest.mark.django_db
+def test_purge_scan_is_idempotent(client):
+    """스캔이 두 번 돌아도 같은 결과다 — 이미 파기된 것을 다시 파기하려 하지
+    않는다(#102 AC)."""
+
+    pair = _login(client, uid="idempotent-user")
+    header = _auth_header(pair["access"])
+    _verify(client, pair["access"], ci="idempotent-ci", name="두번스캔사람")
+
+    from django.contrib.auth import get_user_model
+
+    user = get_user_model().objects.get(social_accounts__provider_uid="idempotent-user")
+    verification = Verification.objects.get(user=user)
+    long_ago = timezone.now() - timedelta(days=365 * 3)
+    _backdate_activity(user.id, verification.id, to=long_ago)
+
+    _freeze(timezone.now())
+    first = client.post(PURGE_URL, **_internal_headers())
+    assert first.status_code == 200
+    assert first.json()["dormant_identities_purged"] == 1
+
+    second = client.post(PURGE_URL, **_internal_headers())
+    assert second.status_code == 200
+    assert second.json()["dormant_identities_purged"] == 0
+    assert second.json()["expired_retained_identities_purged"] == 0
+
+
+@pytest.mark.django_db
+def test_returning_dormant_user_must_reverify_to_host_a_contest(client, category, landing_type):
+    """돌아온 사람이 개최를 하려 할 때 본인확인을 다시 요구받는다(#102 AC) — 왜
+    다시 하는지 알 수 있는 이유가 함께 온다."""
+
+    pair = _login(client, uid="returning-sponsor")
+    header = _auth_header(pair["access"])
+    _verify(client, pair["access"], ci="returning-ci", name="돌아온사람")
+
+    from django.contrib.auth import get_user_model
+
+    user = get_user_model().objects.get(social_accounts__provider_uid="returning-sponsor")
+    verification = Verification.objects.get(user=user)
+    long_ago = timezone.now() - timedelta(days=365 * 3)
+    _backdate_activity(user.id, verification.id, to=long_ago)
+
+    _freeze(timezone.now())
+    client.post(PURGE_URL, **_internal_headers())
+
+    resp = client.post(
+        CONTESTS_URL,
+        data={
+            "title": "돌아와서 여는 공모전",
+            "category_id": category.id,
+            "deliverable_type_ids": [landing_type.id],
+            "prize": 1_000_000,
+            "deadline_at": (timezone.now() + timedelta(days=7)).isoformat(),
+            "requirements": [],
+        },
+        content_type="application/json",
+        **header,
+    )
+    assert resp.status_code == 403
+    assert "본인확인" in resp.json()["detail"]

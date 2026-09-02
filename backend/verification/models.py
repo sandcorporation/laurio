@@ -32,6 +32,12 @@ class Verification(models.Model):
         # 생년월일은 이 상태로 내려가는 순간 함께 지워진다
         # (`accounts.withdrawal.execute_withdrawal`).
         WITHDRAWN = "withdrawn", "탈퇴(신원 파기)"
+        # 2년간 행위가 없어 스캔이 신원만 파기한 계정(#102, ADR-0025). WITHDRAWN과
+        # 일부러 값을 나눈다 — 이쪽은 계정이 비활성화되지 않고(User.is_active는
+        # 그대로 True), 로그인도 그대로 되며, 다음에 개최·제출을 시도할 때 본인확인을
+        # 다시 요구받을 뿐이다. WITHDRAWN(탈퇴)을 재사용하면 "계정이 닫혔다"는
+        # 사실과 어긋난 상태가 하나의 값으로 뭉개진다.
+        EXPIRED = "expired", "미이용으로 신원 파기"
 
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL, related_name="verification", on_delete=models.CASCADE

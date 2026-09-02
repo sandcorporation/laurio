@@ -60,6 +60,12 @@ _EXPECTED_SCHEDULE_ENTRIES = [
         "core.call_scoring_run_pending",
         "/api/internal/scoring/run-pending",
     ),
+    (
+        "accounts-purge-expired-identities",
+        core_tasks.call_accounts_purge_expired_identities,
+        "core.call_accounts_purge_expired_identities",
+        "/api/internal/accounts/purge-expired-identities",
+    ),
 ]
 
 
