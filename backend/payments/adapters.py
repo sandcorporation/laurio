@@ -60,7 +60,12 @@ class PGAdapter(Protocol):
     def request_payment(self, *, order_id: str, amount: int) -> PaymentRequestResult: ...
 
     def confirm(
-        self, *, order_id: str, simulate: str | None = None, payment_key: str | None = None
+        self,
+        *,
+        order_id: str,
+        simulate: str | None = None,
+        payment_key: str | None = None,
+        amount: int | None = None,
     ) -> str:
         """PG에 결제 승인을 동기 요청한다. "paid" | "failed" 를 돌려준다.
 
@@ -68,6 +73,13 @@ class PGAdapter(Protocol):
         함께 이 값을 요구하는데, 브라우저 위젯이 성공했을 때만 생긴다. 이 계약
         자리는 그래서 있다 — Fake PG는 이 값을 무시하고 계약만 만족시킨다
         (`FakePGAdapter.confirm` 참고). optional이므로 fake 경로는 바뀌지 않는다.
+
+        `amount`도 같은 이유로 있다(#87) — 토스 결제 승인 API는 주문번호·결제
+        건 식별자와 함께 금액을 요구한다(위·변조 방지: 벤더가 자기 쪽에 기록된
+        금액과 대조한다). 호출부(`payments.api.confirm_payment`,
+        `contests.api.confirm_judging_period_extension`)는 이미 DB에 있는
+        `Payment.total_amount`/`JudgingExtensionPayment.amount`를 그대로 넘긴다.
+        Fake PG는 이 값도 무시한다 — optional이므로 fake 경로는 바뀌지 않는다.
 
         `PGTimeoutError`를 던질 수 있다 — 그 경우 호출자는 `query_status`로 실제
         결과를 확정해야 한다.
@@ -137,11 +149,16 @@ class FakePGAdapter:
         )
 
     def confirm(
-        self, *, order_id: str, simulate: str | None = None, payment_key: str | None = None
+        self,
+        *,
+        order_id: str,
+        simulate: str | None = None,
+        payment_key: str | None = None,
+        amount: int | None = None,
     ) -> str:
-        # payment_key는 계약에만 존재한다 — Fake PG는 값을 검증도 저장도 하지
-        # 않는다(#86). 받아서 무시하는 것 자체가 "기존 동작이 바뀌지 않는다"는
-        # 인수조건이다.
+        # payment_key·amount는 계약에만 존재한다 — Fake PG는 값을 검증도 저장도
+        # 하지 않는다(#86, #87). 받아서 무시하는 것 자체가 "기존 동작이 바뀌지
+        # 않는다"는 인수조건이다.
         scenario = simulate or "success"
         if scenario == "success":
             return "paid"

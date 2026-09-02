@@ -1208,11 +1208,12 @@ def test_extension_confirm_forwards_payment_key_to_adapter(client, category, lan
 
     initiated = _initiate_extension(client, sponsor, contest["id"])
 
-    received: dict[str, str | None] = {}
+    received: dict[str, str | int | None] = {}
     original_confirm = FakePGAdapter.confirm
 
-    def spy_confirm(self, *, order_id, simulate=None, payment_key=None):
+    def spy_confirm(self, *, order_id, simulate=None, payment_key=None, amount=None):
         received["payment_key"] = payment_key
+        received["amount"] = amount
         return original_confirm(self, order_id=order_id, simulate=simulate)
 
     with patch.object(FakePGAdapter, "confirm", spy_confirm):
@@ -1227,6 +1228,8 @@ def test_extension_confirm_forwards_payment_key_to_adapter(client, category, lan
     assert confirm_resp.status_code == 200
     assert confirm_resp.json()["status"] == "paid"
     assert received["payment_key"] == "fake-widget-key-extension-abc123"
+    # amount도 payment_key와 같은 이유로 계약에 있다(#87).
+    assert received["amount"] == initiated["amount"]
 
 
 @pytest.mark.django_db

@@ -432,11 +432,12 @@ def test_confirm_forwards_payment_key_to_adapter(client, category, landing_type)
     access, contest = _draft_contest(client, category=category, deliverable_type=landing_type)
     payment = _initiate_payment(client, access, contest["id"])
 
-    received: dict[str, str | None] = {}
+    received: dict[str, str | int | None] = {}
     original_confirm = FakePGAdapter.confirm
 
-    def spy_confirm(self, *, order_id, simulate=None, payment_key=None):
+    def spy_confirm(self, *, order_id, simulate=None, payment_key=None, amount=None):
         received["payment_key"] = payment_key
+        received["amount"] = amount
         return original_confirm(self, order_id=order_id, simulate=simulate)
 
     with patch.object(FakePGAdapter, "confirm", spy_confirm):
@@ -447,6 +448,10 @@ def test_confirm_forwards_payment_key_to_adapter(client, category, landing_type)
     assert response.status_code == 200
     assert response.json()["status"] == "paid"
     assert received["payment_key"] == "fake-widget-key-abc123"
+    # amount도 payment_key와 같은 이유로 계약에 있다(#87) — 토스 결제 승인
+    # API가 위·변조 방지를 위해 요구하는 값이라, 호출부가 DB의 실제 결제 금액을
+    # 그대로 넘기는지 확인한다.
+    assert received["amount"] == payment["total_amount"]
 
     # 기존 동작 불변 — payment_key를 안 보내도(기존 호출부와 동일) 여전히 정상
     # 승인된다.

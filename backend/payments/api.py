@@ -177,7 +177,10 @@ def confirm_payment(request: HttpRequest, order_id: UUID, payload: ConfirmPaymen
     adapter = get_adapter()
     try:
         result_status = adapter.confirm(
-            order_id=str(order_id), simulate=payload.simulate, payment_key=payload.payment_key
+            order_id=str(order_id),
+            simulate=payload.simulate,
+            payment_key=payload.payment_key,
+            amount=payment.total_amount,
         )
     except PGTimeoutError:
         # 타임아웃은 실패가 아니다 — 실제 결과를 조회로 확정한다(ADR-0008의 지급 웹훅
