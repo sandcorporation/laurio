@@ -101,19 +101,24 @@ x-backend-env: &backend-env
   PORT_ONE_V2_SECRET_KEY: ${PORT_ONE_V2_SECRET_KEY:?}
 
   # --- 결제 · Escrow / Payout 어댑터 (ADR-0007, ADR-0008) ---
-  # "샌드박스냐 실물이냐"는 이 모드 값이 아니라 실제 어댑터 구현체(향후 티켓)가
-  # 참조하는 TOSS_* 자격증명이 어느 엔드포인트를 가리키는지로 갈린다. 실제
-  # 토스/토스 지급대행 어댑터는 아직 구현되지 않았다(#87/#82 라운드 2) — 위
-  # VERIFICATION_ADAPTER_MODE와 같은 이유로 필수값으로 비워 둔다.
+  # "샌드박스냐 실물이냐"는 이 모드 값이 아니라 실제 어댑터 구현체가 참조하는
+  # TOSS_* 자격증명이 어느 엔드포인트를 가리키는지로 갈린다. 결제는
+  # payments.adapters_toss.TossPGAdapter(#87), 지급대행/Seller 등록은
+  # payouts.adapters_toss.TossPayoutAdapter/TossSellerAdapter(#57)를 dotted
+  # path로 채운다 — 위 VERIFICATION_ADAPTER_MODE와 같은 이유로 필수값으로
+  # 비워 둔다.
   PAYMENT_ADAPTER_MODE: ${PAYMENT_ADAPTER_MODE:?실제 PG 어댑터의 dotted path를 .env.staging 에 채워라 — 아직 구현 전이면(#87) 이 값 자체를 비워 둘 수 없다}
   PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:?}
   PAYOUT_ADAPTER_MODE: ${PAYOUT_ADAPTER_MODE:?실제 지급대행 어댑터의 dotted path를 .env.staging 에 채워라 — 아직 구현 전이면 이 값 자체를 비워 둘 수 없다}
   PAYOUT_WEBHOOK_SECRET: ${PAYOUT_WEBHOOK_SECRET:?}
   # Seller(수취인) 등록은 지급과 별개 API·별개 시점이다(#50, ADR-0020) — Payout이
-  # 확정된 뒤에만 호출된다. 실제 어댑터는 아직 구현되지 않았다(#57) — 위와 같은
-  # 이유로 필수값으로 비워 둔다.
+  # 확정된 뒤에만 호출된다.
   SELLER_ADAPTER_MODE: ${SELLER_ADAPTER_MODE:?실제 Seller 등록 어댑터의 dotted path를 .env.staging 에 채워라 — 아직 구현 전이면(#57) 이 값 자체를 비워 둘 수 없다}
   TOSS_SANDBOX_SECRET_KEY: ${TOSS_SANDBOX_SECRET_KEY:-}
+  # 셀러 등록·수정·지급 요청 세 API의 JWE 암호화 + payout.changed/
+  # seller.changed 웹훅 서명 검증에 쓰는 보안 키(#57) — TOSS_SANDBOX_SECRET_KEY와
+  # 별개 값이다.
+  TOSS_API_SECURE_KEY: ${TOSS_API_SECURE_KEY:-}
 
   # --- LLM 채점 · AI grill 어댑터 (ADR-0006/0007/0014) ---
   # AI 채점의 실물 어댑터는 scoring.adapters.OpenAIScoringAdapter다(#88) —

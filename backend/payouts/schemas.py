@@ -15,9 +15,10 @@ class PayoutOut(Schema):
     net_amount: int
     status: str
     has_identity: bool
-    # Seller가 아직 등록되지 않았으면 None. 있으면 "pending" | "partially_approved"
-    # | "under_review" | "rejected" 중 하나(#50, ADR-0020) — 두 대기(신원/Seller)
-    # 중 이쪽이 무엇을 기다리는지 Developer·Operator가 조회할 수 있어야 한다.
+    # Seller가 아직 등록되지 않았으면 None. 있으면 "pending" |
+    # "approval_required" | "partially_approved" | "under_review" | "approved"
+    # | "rejected" 중 하나(#50, #57, ADR-0020) — 두 대기(신원/Seller) 중 이쪽이
+    # 무엇을 기다리는지 Developer·Operator가 조회할 수 있어야 한다.
     seller_status: str | None
     # Developer가 다음에 무엇을 해야 하는지(또는 왜 아직 기다려야 하는지)를
     # 사람이 읽을 수 있는 한국어 문장으로 준다 — 침묵은 상금이 사라진 것으로
@@ -69,12 +70,30 @@ class WebhookOut(Schema):
     status: str
 
 
+class SellerWebhookOut(Schema):
+    """`seller.changed` 실물 웹훅 응답(#57) — `WebhookOut`과 달리 Payout이
+    아니라 Seller에 대한 것이라 idempotency_key(UUID)를 재사용하지 않는다."""
+
+    received: bool
+    seller_id: str
+    status: str
+
+
 class IdentitySubmitIn(Schema):
     # 형식만 검증한다(숫자로만 이루어진 13자리) — 실제 유효성(생년월일·성별 코드
     # 정합, 체크섬)까지 검사하는 건 이 티켓 범위 밖이다. 길이만 보고 통과시키면
     # "13자리 문자열"이면 뭐든(공백·기호 포함) 암호화되어 저장되고 만다(#15
     # 리뷰 지적 4) — 패턴으로 숫자만 허용한다.
     resident_registration_number: str = Field(pattern=r"^\d{13}$")
+
+
+class SellerPhoneSubmitIn(Schema):
+    """토스 셀러 등록(businessType=INDIVIDUAL)의 individual 객체가 요구하는
+    전화번호(#57). 숫자로만 이루어진 10~11자리(하이픈 없이)만 허용한다 —
+    `IdentitySubmitIn.resident_registration_number`와 같은 원칙으로 형식만
+    검증한다."""
+
+    phone_number: str = Field(pattern=r"^\d{10,11}$")
 
 
 class ErrorOut(Schema):

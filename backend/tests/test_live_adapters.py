@@ -62,3 +62,71 @@ def test_toss_payment_adapter_queries_are_server_only_and_shape_stable():
         unknown_order_id = f"laurio-live-test-{uuid.uuid4()}"
         assert adapter.query_status(order_id=unknown_order_id) == "pending"
         assert adapter.query_refund_status(order_id=unknown_order_id) == "pending"
+
+
+@live_vendor
+def test_toss_seller_registration_encrypts_with_the_real_vendor_and_gets_a_recognized_status():
+    """#57(토스 지급대행 Seller 등록 실물 어댑터)의 옵인 live 테스트.
+
+    staging이 아직 뜨지 않아(#52) "실제로 한 번 지급이 끝까지 도는 것"은 이
+    티켓이 증명할 수 없다 — 대신 dev에서 벤더의 test 환경을 직접 쳐서 증명할
+    수 있는 만큼만 증명한다: 우리가 만든 JWE(alg=dir, A256GCM)를 실제 토스가
+    받아 복호화할 수 있는가, 그리고 응답이 우리가 인식하는 상태 값 중 하나로
+    오는가. **값이 아니라 모양만 본다**(#82 Testing Decisions와 같은 원칙) —
+    test 환경의 개인 식별 정보는 매번 새로 지어내는 무작위 값이라 승인/거절
+    여부 자체는 이 테스트가 단언하지 않는다.
+
+    이 테스트는 매 실행마다 새 `refSellerId`로 실제 sandbox에 셀러 등록을
+    시도한다 — test 키가 정확히 이런 반복 호출을 위해 있는 자격증명이라
+    부작용을 걱정하지 않는다.
+    """
+
+    import uuid as _uuid
+
+    from payouts.adapters_toss import _SELLER_STATUS_MAP, jwe_encrypt
+    from payments.adapters_toss import _safe_json
+
+    secret_key = require_live_credential("TOSS_API_SECRET_KEY")
+    secure_key = require_live_credential("TOSS_API_SECURE_KEY")
+
+    ref_seller_id = f"laurio-live-test-{_uuid.uuid4()}"
+    body = {
+        "refSellerId": ref_seller_id,
+        "businessType": "INDIVIDUAL",
+        "individual": {
+            "name": "라우리오테스트",
+            "email": f"{ref_seller_id}@example.com",
+            "phone": "01000000000",
+        },
+    }
+    encrypted_body = jwe_encrypt(body, secure_key_hex=secure_key)
+
+    from base64 import b64encode
+
+    credentials = b64encode(f"{secret_key}:".encode()).decode()
+    response = requests.post(
+        "https://api.tosspayments.com/v1/sellers",
+        data=encrypted_body,
+        headers={
+            "Authorization": f"Basic {credentials}",
+            "Content-Type": "application/jwt",
+            "TossPayments-api-version": "2022-11-16",
+            "TossPayments-api-security-mode": "ENCRYPTION",
+        },
+        timeout=10,
+    )
+
+    # 우리 쪽 설정 문제(401/403)가 아니라면, 응답이 JWE든 평문 JSON이든 우리가
+    # 인식하는 status 값이거나(성공 경로) 벤더가 명시적으로 거절한
+    # 4xx여야 한다 — 어느 쪽이든 "우리 요청이 벤더에게 이해됐다"는 뜻이다.
+    assert response.status_code not in (401, 403), response.text
+
+    if response.status_code < 400:
+        raw = response.text.strip()
+        if raw.count(".") == 4:
+            from payouts.adapters_toss import jwe_decrypt
+
+            decoded = jwe_decrypt(raw, secure_key_hex=secure_key)
+        else:
+            decoded = _safe_json(response) or {}
+        assert decoded.get("status") in _SELLER_STATUS_MAP

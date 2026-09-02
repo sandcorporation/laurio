@@ -289,7 +289,7 @@ def ensure_seller_registered(
     """
 
     existing = Seller.objects.filter(developer=developer).first()
-    if existing is not None and existing.status == Seller.Status.PARTIALLY_APPROVED:
+    if existing is not None and existing.status in Seller.READY_STATUSES:
         return existing
 
     adapter = get_seller_adapter()
@@ -387,13 +387,103 @@ def mark_confirmed(
         # 부르지 않는다.
         developer = _resolve_developer(payout)
         seller = ensure_seller_registered(developer, simulate=seller_simulate, policy=policy)
-        if seller.status != Seller.Status.PARTIALLY_APPROVED:
+        if seller.status not in Seller.READY_STATUSES:
             Payout.objects.filter(
                 pk=payout.pk, status=Payout.Status.CONFIRMED_IDENTITY_PENDING
             ).update(status=Payout.Status.CONFIRMED_SELLER_PENDING)
             payout.status = Payout.Status.CONFIRMED_SELLER_PENDING
+        else:
+            _request_real_transfer_if_ready(payout)
 
     return payout
+
+
+def _request_real_transfer_if_ready(payout: Payout) -> None:
+    """Seller가 방금 지급 가능 상태(READY_STATUSES)가 된 시점에 실제 이체를
+    요청한다(#57).
+
+    **토스 실물 연동을 붙이며 알게 된 순서 문제**(ADR-0008에도 남긴다): 토스
+    지급대행의 실제 이체 API는 이미 등록된 sellerId를 요구하는데, 이 저장소의
+    기존 순서(#50, ADR-0020)는 Payout이 먼저 확정되고 그 *뒤에* Seller
+    등록이 시작된다 — 그래서 최초 확정 시점(`mark_confirmed`)에는 아직
+    sellerId가 없어 실물 어댑터가 이체를 요청할 수 없다.
+
+    `payouts.adapters_toss.TossPayoutAdapter.confirm`은 이 순서를 그대로
+    받아들인다 — Seller가 준비되지 않았으면 벤더를 부르지 않고 "paid"(Laurio
+    내부 확정)만 돌려주고, 준비됐으면 실제로 벤더를 부른다. 그래서 Seller가
+    나중에(재시도·웹훅으로) 준비되는 순간 이 함수가 `confirm`을 **한 번 더**
+    불러 그제서야 실제 이체를 시도한다 — Fake 어댑터는 이 재호출에서도 항상
+    "paid"를 돌려주므로(기본 시나리오) 기존 #50/#15 테스트의 관찰 가능한
+    동작은 전혀 바뀌지 않는다.
+
+    실패해도 크래시하거나 Payout을 되돌리지 않는다 — 원장 분개는 이미
+    남아 있고(ADR-0004), 다음 재시도(재시도 엔드포인트 또는 웹훅)가 다시
+    이 함수를 거친다.
+    """
+
+    from .adapters import PayoutError, PayoutTimeoutError, get_adapter
+
+    adapter = get_adapter()
+    try:
+        result_status = adapter.confirm(idempotency_key=str(payout.idempotency_key))
+    except PayoutTimeoutError:
+        try:
+            result_status = adapter.query_status(idempotency_key=str(payout.idempotency_key))
+        except PayoutError:
+            return
+    except PayoutError:
+        return
+
+    if result_status == "failed":
+        # 실물 이체가 거절됐다 — Payout을 FAILED로 되돌리지 않는다(#57 AC:
+        # "지급 실패 시 금액이 원장에 남아 재시도할 수 있다"). 원장 분개는 이미
+        # 남아 있으므로 사람이 다시 시도할 수 있는 상태로 그대로 둔다.
+        return
+    # "paid" 또는 아직 미확정("pending")이면 이 함수는 상태를 바꾸지 않는다 —
+    # Payout.status 전이는 호출자(submit_identity/retry_seller_registration/
+    # advance_seller_pending_payouts)가 두 대기가 모두 풀렸는지를 기준으로
+    # 이미 결정한다.
+
+
+def advance_seller_pending_payouts(developer) -> list[Payout]:
+    """Seller가 웹훅(`seller.changed`)으로 방금 지급 가능 상태가 됐을 때, 이
+    Developer의 CONFIRMED_SELLER_PENDING Payout들을 다음 상태로 밀어준다(#57).
+
+    실물 어댑터는 `retry_seller_registration`처럼 우리가 다시 register()를
+    불러야만 상태가 갱신되는 게 아니라, 토스가 비동기로(웹훅) 최종 상태를
+    알려준다 — 그 경로에서도 두 대기 판정과 실이체 시도가 똑같이 일어나야
+    한다. 이미 CONFIRMED이거나 REQUESTED/FAILED인 Payout은 건드리지 않는다.
+    """
+
+    from django.db.models import Q
+
+    seller = Seller.objects.filter(developer=developer).first()
+    if seller is None or seller.status not in Seller.READY_STATUSES:
+        return []
+
+    candidates = Payout.objects.filter(status=Payout.Status.CONFIRMED_SELLER_PENDING).filter(
+        Q(handover__award__submission__developer=developer)
+        | Q(distribution_share__submission__developer=developer)
+    )
+
+    advanced: list[Payout] = []
+    for candidate in candidates:
+        with transaction.atomic():
+            locked = Payout.objects.select_for_update().get(pk=candidate.pk)
+            if locked.status != Payout.Status.CONFIRMED_SELLER_PENDING:
+                continue
+            _request_real_transfer_if_ready(locked)
+            has_identity = TaxIdentity.objects.filter(payout=locked).exists()
+            target = (
+                Payout.Status.CONFIRMED if has_identity else Payout.Status.CONFIRMED_IDENTITY_PENDING
+            )
+            updated = Payout.objects.filter(
+                pk=locked.pk, status=Payout.Status.CONFIRMED_SELLER_PENDING
+            ).update(status=target)
+            if updated:
+                locked.status = target
+                advanced.append(locked)
+    return advanced
 
 
 def mark_failed(idempotency_key) -> Payout:
@@ -442,7 +532,9 @@ def submit_identity(payout: Payout, resident_registration_number: str) -> Payout
         ):
             developer = _resolve_developer(payout)
             seller = Seller.objects.filter(developer=developer).first()
-            seller_ready = seller is not None and seller.status == Seller.Status.PARTIALLY_APPROVED
+            seller_ready = seller is not None and seller.status in Seller.READY_STATUSES
+            if seller_ready:
+                _request_real_transfer_if_ready(payout)
             target = Payout.Status.CONFIRMED if seller_ready else Payout.Status.CONFIRMED_SELLER_PENDING
             Payout.objects.filter(pk=payout.pk, status=payout.status).update(status=target)
 
@@ -466,7 +558,8 @@ def retry_seller_registration(payout: Payout, *, simulate: str | None = None) ->
 
         developer = _resolve_developer(locked)
         seller = ensure_seller_registered(developer, simulate=simulate)
-        if seller.status == Seller.Status.PARTIALLY_APPROVED:
+        if seller.status in Seller.READY_STATUSES:
+            _request_real_transfer_if_ready(locked)
             has_identity = TaxIdentity.objects.filter(payout=locked).exists()
             target = Payout.Status.CONFIRMED if has_identity else Payout.Status.CONFIRMED_IDENTITY_PENDING
             Payout.objects.filter(
@@ -475,3 +568,38 @@ def retry_seller_registration(payout: Payout, *, simulate: str | None = None) ->
             locked.status = target
 
     return locked
+
+
+def submit_seller_phone(developer, phone_number: str) -> Seller:
+    """토스 셀러 등록(businessType=INDIVIDUAL)의 individual 객체가 요구하는
+    전화번호를 제출한다(#57).
+
+    가입·제출 시점에는 어디에도 저장되지 않는 값이라(CLAUDE.md 도메인에 phone
+    개념 자체가 없다) `TaxIdentity.resident_registration_number`와 같은 원칙으로
+    별도 제출을 받는다 — Payout이 아직 확정되지 않았어도 미리 제출해 둘 수
+    있다(Seller 자체는 여전히 확정 시점에만 등록을 시도한다, ADR-0020 —
+    이 함수는 그 규율을 어기지 않는다. 값을 미리 저장만 해 둘 뿐 등록을
+    앞당기지 않는다).
+
+    이미 CONFIRMED_SELLER_PENDING에 머물던 Payout이 있으면(실물 어댑터가
+    전화번호가 없어 PENDING에 계속 머물렀던 경우, `TossSellerAdapter.register`
+    참고) 저장 직후 곧바로 재시도한다 — Developer가 전화번호를 내고 나서도
+    "다시 시도" 버튼을 또 눌러야 한다면 그 자체가 침묵으로 읽힌다.
+    """
+
+    from django.db.models import Q
+
+    with transaction.atomic():
+        seller, _created = Seller.objects.select_for_update().get_or_create(developer=developer)
+        seller.phone_number = phone_number
+        seller.save(update_fields=["phone_number_encrypted", "updated_at"])
+
+    pending_payouts = Payout.objects.filter(status=Payout.Status.CONFIRMED_SELLER_PENDING).filter(
+        Q(handover__award__submission__developer=developer)
+        | Q(distribution_share__submission__developer=developer)
+    )
+    for pending_payout in pending_payouts:
+        retry_seller_registration(pending_payout)
+
+    seller.refresh_from_db()
+    return seller

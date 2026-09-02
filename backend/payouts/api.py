@@ -26,6 +26,7 @@
 
 from __future__ import annotations
 
+import json
 from uuid import UUID
 
 from django.http import HttpRequest
@@ -40,6 +41,7 @@ from payments.webhook_security import verify_webhook_signature
 from policies.services import get_current_policy
 
 from .adapters import PayoutError, PayoutTimeoutError, get_adapter
+from .adapters_toss import verify_toss_webhook_signature
 from .models import Payout, PayoutWebhookDelivery, Seller, TaxIdentity
 from .schemas import (
     ConfirmPayoutIn,
@@ -47,16 +49,20 @@ from .schemas import (
     IdentitySubmitIn,
     OperatorPayoutOut,
     PayoutOut,
+    SellerPhoneSubmitIn,
     SellerRegistrationRetryIn,
+    SellerWebhookOut,
     WebhookIn,
     WebhookOut,
 )
 from .services import (
+    advance_seller_pending_payouts,
     get_or_create_payout,
     mark_confirmed,
     mark_failed,
     retry_seller_registration,
     submit_identity,
+    submit_seller_phone,
 )
 
 router = Router(tags=["payouts"])
@@ -112,6 +118,25 @@ def _next_action_message(payout: Payout, seller: Seller | None) -> str:
             return (
                 "지급대행사 수취인 등록이 거절되었습니다. 상금은 원장에 그대로 "
                 "남아 있습니다 — 운영자에게 문의해주세요."
+            )
+        if seller is not None and seller.status == Seller.Status.APPROVAL_REQUIRED:
+            # #57 추가 인수조건 — "PENDING과 APPROVAL_REQUIRED가 화면에서
+            # 다르게 읽힌다." 이건 Developer의 차례다: 이미 포트원으로 본인확인을
+            # 했더라도 토스가 지급대행사로서 별도로 본인인증 문자를 보낸다
+            # (ADR-0020 — 벤더가 갈려 두 번 일어난다).
+            return (
+                "지급대행사(토스페이먼츠)가 보낸 본인인증 문자로 인증을 완료해주세요 — "
+                "이미 본인확인을 하셨더라도 지급대행사 자체 의무라 다시 인증이 "
+                "필요합니다. 인증이 끝나면 자동으로 다음 단계로 넘어갑니다."
+            )
+        if (
+            seller is None or seller.status == Seller.Status.PENDING
+        ) and not (seller is not None and seller.phone_number):
+            # PENDING이면서 전화번호도 아직 없다 — "우리가 응답을 기다린다"가
+            # 아니라 "Developer가 낼 것이 있다"는 뜻이다. PENDING을 "아무도 할
+            # 일이 없다"로 뭉뚱그리면 이 경우를 놓친다(#57 추가 인수조건).
+            return (
+                "지급대행사 수취인 등록에 전화번호가 필요합니다 — 아래에서 제출해주세요."
             )
         return "지급대행사 수취인 등록이 진행 중입니다. 완료되면 자동으로 다음 단계로 넘어갑니다."
     if payout.status == Payout.Status.CONFIRMED_IDENTITY_PENDING:
@@ -380,6 +405,180 @@ def retry_payout_seller_registration(
 
     payout = retry_seller_registration(payout, simulate=payload.simulate)
     return 200, _serialize(payout)
+
+
+@router.post(
+    "/payouts/{idempotency_key}/seller-phone",
+    response={200: PayoutOut, 403: ErrorOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def submit_payout_seller_phone(
+    request: HttpRequest, idempotency_key: UUID, payload: SellerPhoneSubmitIn
+):
+    """토스 셀러 등록(businessType=INDIVIDUAL)의 individual 객체가 요구하는
+    전화번호를 제출한다(#57 추가 인수조건).
+
+    `submit_payout_identity`와 달리 Payout 상태를 확인하지 않는다 — Seller는
+    Developer 단위 개념이라 전화번호도 마찬가지다(Payout이 아직 REQUESTED여도
+    미리 받아 둘 수 있다). 저장 직후 CONFIRMED_SELLER_PENDING에 머물던 같은
+    Developer의 Payout이 있으면 곧바로 재시도한다(`submit_seller_phone`).
+    """
+
+    payout = _get_owned_payout(request, idempotency_key)
+    developer_id = _payout_developer_id(payout)
+
+    from accounts.models import DeveloperProfile
+
+    developer = DeveloperProfile.objects.get(pk=developer_id)
+    submit_seller_phone(developer, payload.phone_number)
+
+    payout.refresh_from_db()
+    return 200, _serialize(payout)
+
+
+# --- 실물 토스 웹훅 (#57) ----------------------------------------------------------
+#
+# `/payouts/webhook`(위)은 Fake 어댑터·기존 테스트가 쓰는 우리 자체 HMAC
+# 스킴이다(payments.webhook_security 재사용). 실제 토스는 `payout.changed`/
+# `seller.changed`에만 다른 서명 스킴(헤더 기반, 보안 키로 HMAC)을 쓴다 —
+# `adapters_toss.verify_toss_webhook_signature`가 그 스킴을 검증한다. 두
+# 엔드포인트를 분리해 두는 이유는 기존 Fake 기반 테스트(#50/#15)가 하나도
+# 깨지지 않게 하기 위해서다 — 실물 웹훅 URL은 배포 환경에서만 등록된다(#52,
+# 이 티켓 범위 밖).
+
+
+def _toss_webhook_signature_ok(request: HttpRequest) -> bool:
+    from django.conf import settings
+
+    return verify_toss_webhook_signature(
+        payload=request.body,
+        transmission_time=request.headers.get("tosspayments-webhook-transmission-time", ""),
+        signature_header=request.headers.get("tosspayments-webhook-signature"),
+        secure_key=settings.TOSS_API_SECURE_KEY,
+    )
+
+
+@router.post(
+    "/payouts/webhook/toss",
+    response={200: WebhookOut, 400: ErrorOut, 401: ErrorOut, 404: ErrorOut, 422: ErrorOut},
+    auth=None,
+)
+def receive_toss_payout_webhook(request: HttpRequest):
+    """실제 토스가 보내는 `payout.changed` 웹훅. 서명은 DB를 건드리기 전에
+    가장 먼저 검증한다(#9 리뷰 지적 2와 같은 순서).
+
+    본문 구조는 벤더 문서가 공개한 뼈대(`eventType`/`data`)를 최선으로
+    추정한 것이다 — staging에서 실제로 한 번 받아 확인하기 전까지는 정확한
+    필드명을 단정하지 않는다(#57 알아둘 것). `refPayoutId`(우리
+    idempotency_key)를 찾지 못하면 다른 방식(`data.id`)도 시도한다.
+    """
+
+    if not _toss_webhook_signature_ok(request):
+        raise HttpError(401, "웹훅 서명이 없거나 올바르지 않습니다.")
+
+    try:
+        body = json.loads(request.body.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise HttpError(400, "웹훅 본문이 JSON이 아닙니다.") from exc
+
+    data = body.get("data") or {}
+    ref_payout_id = data.get("refPayoutId") or data.get("id")
+    vendor_status = data.get("status")
+    webhook_id = request.headers.get("tosspayments-webhook-transmission-id", "")
+
+    if not ref_payout_id:
+        raise HttpError(422, "웹훅 본문에서 지급 식별자를 찾을 수 없습니다.")
+
+    try:
+        idempotency_key = UUID(str(ref_payout_id))
+    except ValueError as exc:
+        raise HttpError(422, "웹훅의 지급 식별자가 유효한 UUID가 아닙니다.") from exc
+
+    try:
+        known_payout = Payout.objects.get(idempotency_key=idempotency_key)
+    except Payout.DoesNotExist as exc:
+        raise HttpError(404, "알 수 없는 idempotency_key 입니다.") from exc
+
+    from .adapters_toss import _FAILED_PAYOUT_STATUSES, _PAID_PAYOUT_STATUSES
+
+    if vendor_status in _PAID_PAYOUT_STATUSES:
+        our_status = "paid"
+    elif vendor_status in _FAILED_PAYOUT_STATUSES:
+        our_status = "failed"
+    else:
+        # 아직 REQUESTED/IN_PROGRESS다 — 확정할 수 없으니 조용히 기록만 하고
+        # 상태는 건드리지 않는다.
+        our_status = "pending"
+
+    PayoutWebhookDelivery.objects.create(
+        payout_id=known_payout.id,
+        webhook_id=webhook_id,
+        idempotency_key=idempotency_key,
+        event_status=our_status,
+    )
+
+    if our_status == "paid":
+        payout = mark_confirmed(idempotency_key)
+    elif our_status == "failed":
+        payout = mark_failed(idempotency_key)
+    else:
+        payout = known_payout
+
+    return 200, WebhookOut(received=True, idempotency_key=idempotency_key, status=payout.status)
+
+
+@router.post(
+    "/payouts/webhook/toss-seller",
+    response={200: SellerWebhookOut, 400: ErrorOut, 401: ErrorOut, 404: ErrorOut, 422: ErrorOut},
+    auth=None,
+)
+def receive_toss_seller_webhook(request: HttpRequest):
+    """실제 토스가 보내는 `seller.changed` 웹훅 — Seller가 등록 이후 비동기로
+    (본인인증·KYC 심사 결과) 상태를 바꿀 때 온다. `register()`를 우리가 다시
+    부르지 않아도 이 경로로 Seller.status가 갱신되고, 그 즉시 이 Developer의
+    CONFIRMED_SELLER_PENDING Payout들을 다음 단계로 밀어준다
+    (`advance_seller_pending_payouts`).
+    """
+
+    if not _toss_webhook_signature_ok(request):
+        raise HttpError(401, "웹훅 서명이 없거나 올바르지 않습니다.")
+
+    try:
+        body = json.loads(request.body.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise HttpError(400, "웹훅 본문이 JSON이 아닙니다.") from exc
+
+    data = body.get("data") or {}
+    ref_seller_id = data.get("refSellerId") or ""
+    seller_id = data.get("sellerId") or ""
+    vendor_status = data.get("status")
+
+    from .adapters_toss import _SELLER_STATUS_MAP
+
+    our_status = _SELLER_STATUS_MAP.get(vendor_status)
+    if our_status is None:
+        raise HttpError(422, f"알 수 없는 status 입니다: {vendor_status!r}")
+
+    seller = None
+    if ref_seller_id.startswith("laurio-developer-"):
+        developer_id_str = ref_seller_id.removeprefix("laurio-developer-")
+        if developer_id_str.isdigit():
+            seller = Seller.objects.filter(developer_id=int(developer_id_str)).first()
+    if seller is None and seller_id:
+        seller = Seller.objects.filter(seller_id=seller_id).first()
+    if seller is None:
+        raise HttpError(404, "알 수 없는 Seller 입니다.")
+
+    weekly_limit_body = data.get("weeklyLimit") or {}
+    Seller.objects.filter(pk=seller.pk).update(
+        seller_id=seller_id or seller.seller_id,
+        status=our_status,
+        weekly_limit_amount=weekly_limit_body.get("amount") if our_status == "partially_approved" else None,
+    )
+
+    advance_seller_pending_payouts(seller.developer)
+
+    return 200, SellerWebhookOut(received=True, seller_id=seller_id or seller.seller_id, status=our_status)
 
 
 # --- Operator 표면 (#50 AC) ------------------------------------------------------

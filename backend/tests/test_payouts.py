@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import uuid
 from datetime import timedelta
 
@@ -1614,3 +1615,353 @@ def test_seller_adapter_mode_resolves_a_dotted_path_to_a_real_class(
     developer_id = payout.handover.award.submission.developer_id
     seller = Seller.objects.get(developer_id=developer_id)
     assert seller.seller_id == f"dotted-path-marker-{developer_id}"
+
+
+# --- #57: Seller.Status.APPROVAL_REQUIRED / APPROVED -----------------------------------
+
+
+@pytest.mark.django_db
+def test_approval_required_is_visible_and_distinct_from_pending(client, category, landing_type):
+    """APPROVAL_REQUIRED("본인인증 대기")는 PENDING("응답 대기")과 화면에서
+    다르게 읽혀야 한다(#57 추가 인수조건) — 하나는 Developer의 차례이고, 하나는
+    아무도 할 일이 없는 상태다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+
+    resp = _confirm_payout(
+        client, dev, requested["idempotency_key"], seller_simulate="approval_required"
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "confirmed_seller_pending"
+    assert body["seller_status"] == "approval_required"
+    assert "본인인증" in body["next_action_message"]
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    developer_id = payout.handover.award.submission.developer_id
+    seller = Seller.objects.get(developer_id=developer_id)
+    assert seller.status == Seller.Status.APPROVAL_REQUIRED
+
+
+@pytest.mark.django_db
+def test_approved_seller_is_ready_like_partially_approved(client, category, landing_type):
+    """APPROVED(KYC 완료, 한도 없음)도 PARTIALLY_APPROVED처럼 곧바로 지급
+    가능 상태로 취급된다 — 한도를 푼 Developer가 계속 부분 승인으로 남지
+    않는다(#57 추가 인수조건)."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+
+    resp = _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="approved")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "confirmed_identity_pending"
+    assert body["seller_status"] == "approved"
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    assert payout.status == Payout.Status.CONFIRMED_IDENTITY_PENDING
+
+
+@pytest.mark.django_db
+def test_second_payout_does_not_reregister_when_seller_is_approved(client, category, landing_type):
+    """READY_STATUSES는 PARTIALLY_APPROVED뿐 아니라 APPROVED도 포함한다 — 이미
+    APPROVED인 Seller는 두 번째 Payout에서도 재등록하지 않는다."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest_a = _publish_contest(
+        client, category=category, deliverable_type=landing_type,
+        sponsor_uid="sponsor-approved", deadline_at=deadline, prize=1_000_000,
+    )
+    dev = _verified_user(client, "dev-approved", "dev-approved-ci")
+    submission_a = _submit(client, dev, contest_a["id"])
+    _close_contest(client, contest_a, deadline=deadline)
+    _award(client, sponsor, contest_a["id"], submission_a["id"])
+    _accept_handover(client, sponsor, contest_a["id"])
+    requested_a = _request_payout(client, dev, contest_a["id"])
+    _confirm_payout(client, dev, requested_a["idempotency_key"], seller_simulate="approved")
+
+    payout_a = Payout.objects.get(idempotency_key=requested_a["idempotency_key"])
+    developer_id = payout_a.handover.award.submission.developer_id
+    seller_id_after_first = Seller.objects.get(developer_id=developer_id).seller_id
+
+    ClockOverride.objects.filter(pk=1).delete()
+    deadline2 = timezone.now() + timedelta(hours=1)
+    sponsor_b, contest_b = _publish_contest(
+        client, category=category, deliverable_type=landing_type,
+        sponsor_uid="sponsor-approved-2", deadline_at=deadline2, prize=1_000_000,
+    )
+    submission_b = _submit(client, dev, contest_b["id"])
+    _close_contest(client, contest_b, deadline=deadline2)
+    _award(client, sponsor_b, contest_b["id"], submission_b["id"])
+    _accept_handover(client, sponsor_b, contest_b["id"])
+    requested_b = _request_payout(client, dev, contest_b["id"])
+
+    # "rejected"를 넘겨도 이미 APPROVED인 Seller는 어댑터를 다시 부르지 않으므로
+    # 여전히 즉시 확정된다 — ensure_seller_registered가 READY_STATUSES에서
+    # 곧바로 반환한다는 것을 증명한다.
+    resp = _confirm_payout(client, dev, requested_b["idempotency_key"], seller_simulate="rejected")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "confirmed_identity_pending"
+    assert body["seller_status"] == "approved"
+
+    seller_id_after_second = Seller.objects.get(developer_id=developer_id).seller_id
+    assert seller_id_after_second == seller_id_after_first
+
+
+# --- #57: 전화번호 제출 -----------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_seller_phone_submission_stores_encrypted_value(client, category, landing_type):
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"])
+
+    resp = client.post(
+        f"{PAYOUTS_URL}/{requested['idempotency_key']}/seller-phone",
+        data={"phone_number": "01055556666"},
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert resp.status_code == 200
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    developer_id = payout.handover.award.submission.developer_id
+    seller = Seller.objects.get(developer_id=developer_id)
+    assert seller.phone_number == "01055556666"
+    # DB 컬럼 자체는 평문이 아니어야 한다(TaxIdentity와 같은 원칙).
+    assert "01055556666" not in seller.phone_number_encrypted
+
+
+@pytest.mark.django_db
+def test_seller_phone_submission_retries_registration_when_seller_pending(
+    client, category, landing_type
+):
+    """Seller 등록이 대기 중이었다면(#50 심사 대기 시나리오), 전화번호 제출
+    직후 곧바로 재시도된다 — Developer가 전화번호를 낸 뒤 별도로 "다시 시도"
+    버튼을 또 눌러야 한다면 그 자체가 침묵으로 읽힌다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="review_required")
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    assert payout.status == Payout.Status.CONFIRMED_SELLER_PENDING
+
+    resp = client.post(
+        f"{PAYOUTS_URL}/{requested['idempotency_key']}/seller-phone",
+        data={"phone_number": "01055556666"},
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    # FakeSellerAdapter는 phone_number를 쓰지 않으므로 재시도의 시나리오는
+    # 기본값(성공)이다 — 곧바로 다음 단계로 넘어간다.
+    assert body["status"] == "confirmed_identity_pending"
+
+
+@pytest.mark.django_db
+def test_seller_phone_rejects_malformed_value(client, category, landing_type):
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"])
+
+    resp = client.post(
+        f"{PAYOUTS_URL}/{requested['idempotency_key']}/seller-phone",
+        data={"phone_number": "abc"},
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.django_db
+def test_next_action_message_asks_for_phone_when_seller_row_has_none(
+    client, category, landing_type
+):
+    """PENDING이면서 전화번호도 없으면 "우리가 응답을 기다린다"가 아니라
+    "Developer가 낼 것이 있다"는 뜻이어야 한다(#57 추가 인수조건) — 실물
+    어댑터가 이 상태에 실제로 머무는 경로는 `test_payouts_toss_adapter.py`가
+    이미 검증했으므로, 여기서는 그 상태에서 화면 문구가 올바른지만 확인한다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="review_required")
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    developer_id = payout.handover.award.submission.developer_id
+    # 실물 어댑터가 전화번호 없이 PENDING에 머무는 상황을 흉내낸다 — Fake는
+    # 이 상태를 직접 만들 시나리오가 없으므로(#50 네 시나리오에는 없다) 여기서만
+    # ORM으로 상태를 조정한다(동작을 구동하는 게 아니라 화면 문구를 확인하기
+    # 위한 사전 조건 설정이다 — `_freeze`가 ClockOverride를 직접 다루는 것과
+    # 같은 관용구).
+    Seller.objects.filter(developer_id=developer_id).update(
+        status=Seller.Status.PENDING, seller_id=""
+    )
+
+    resp = client.get(
+        f"{CONTESTS_URL}/{contest['id']}/payout", **_auth_header(dev["access"])
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["seller_status"] == "pending"
+    assert "전화번호" in body["next_action_message"]
+
+
+# --- #57: 실물 토스 웹훅 --------------------------------------------------------------
+
+
+def _sign_toss_webhook(*, payload: bytes, transmission_time: str) -> str:
+    """`payouts.adapters_toss.verify_toss_webhook_signature`가 검증하는 것과
+    같은 스킴으로, 테스트가 실제 토스인 척 서명을 만든다."""
+
+    import base64
+
+    secure_key = settings.TOSS_API_SECURE_KEY
+    digest = hmac.new(
+        secure_key.encode("utf-8"), f"{payload.decode()}:{transmission_time}".encode("utf-8"), hashlib.sha256
+    ).digest()
+    return f"v1:{base64.b64encode(digest).decode()}"
+
+
+@pytest.mark.django_db
+def test_toss_payout_webhook_rejects_missing_or_wrong_signature(client, category, landing_type):
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"])
+
+    payload = json.dumps(
+        {"eventType": "payout.changed", "data": {"refPayoutId": requested["idempotency_key"], "status": "COMPLETED"}}
+    ).encode("utf-8")
+
+    with override_settings(TOSS_API_SECURE_KEY="dummy-secure-key-for-test"):
+        resp = client.post(
+            f"{PAYOUTS_URL}/webhook/toss",
+            data=payload,
+            content_type="application/json",
+            HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_TIME="2024-01-01T00:00:00+09:00",
+            HTTP_TOSSPAYMENTS_WEBHOOK_SIGNATURE="v1:d3Jvbmc=",
+        )
+    assert resp.status_code == 401
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    assert payout.status == Payout.Status.CONFIRMED_IDENTITY_PENDING  # 건드리지 않았다
+
+
+@pytest.mark.django_db
+def test_toss_payout_webhook_confirms_and_is_idempotent_on_redelivery(
+    client, category, landing_type
+):
+    """실제 토스 서명 스킴으로 온 `payout.changed` 웹훅이 Payout을 확정하고,
+    같은 웹훅이 재전송돼도 원장 분개가 두 번 남지 않는다(#57 AC)."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+
+    # confirm()을 부르지 않고 곧바로 웹훅으로 확정한다(REQUESTED에서 시작).
+    transmission_time = "2024-01-01T00:00:00+09:00"
+    payload = json.dumps(
+        {
+            "eventType": "payout.changed",
+            "data": {"refPayoutId": requested["idempotency_key"], "status": "COMPLETED"},
+        }
+    ).encode("utf-8")
+
+    with override_settings(TOSS_API_SECURE_KEY="dummy-secure-key-for-test"):
+        signature = _sign_toss_webhook(payload=payload, transmission_time=transmission_time)
+        headers = dict(
+            content_type="application/json",
+            HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_TIME=transmission_time,
+            HTTP_TOSSPAYMENTS_WEBHOOK_SIGNATURE=signature,
+            HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_ID="whid-1",
+        )
+        first = client.post(f"{PAYOUTS_URL}/webhook/toss", data=payload, **headers)
+        assert first.status_code == 200
+        assert first.json()["status"] == "confirmed_identity_pending"
+
+        second = client.post(f"{PAYOUTS_URL}/webhook/toss", data=payload, **headers)
+        assert second.status_code == 200
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    assert payout.journal_entry_id is not None
+
+    from ledger.services import contest_entries
+
+    ledger_id = Contest.objects.get(id=contest["id"]).ledger_id
+    fee_entries = [
+        e for e in contest_entries(ledger_id)
+        if "Payout 확정" in e.memo
+    ]
+    assert len(fee_entries) == 1
+
+
+@pytest.mark.django_db
+def test_toss_seller_webhook_advances_seller_pending_payout(client, category, landing_type):
+    """`seller.changed` 웹훅이 Seller.status를 갱신하고, 그 즉시
+    CONFIRMED_SELLER_PENDING이던 Payout을 다음 단계로 밀어준다(#57)."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="approval_required")
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    assert payout.status == Payout.Status.CONFIRMED_SELLER_PENDING
+    developer_id = payout.handover.award.submission.developer_id
+    seller = Seller.objects.get(developer_id=developer_id)
+    ref_seller_id = f"laurio-developer-{developer_id}"
+
+    transmission_time = "2024-01-01T00:00:00+09:00"
+    payload = json.dumps(
+        {
+            "eventType": "seller.changed",
+            "data": {
+                "refSellerId": ref_seller_id,
+                "sellerId": seller.seller_id,
+                "status": "PARTIALLY_APPROVED",
+                "weeklyLimit": {"amount": 10_000_000},
+            },
+        }
+    ).encode("utf-8")
+
+    with override_settings(TOSS_API_SECURE_KEY="dummy-secure-key-for-test"):
+        signature = _sign_toss_webhook(payload=payload, transmission_time=transmission_time)
+        resp = client.post(
+            f"{PAYOUTS_URL}/webhook/toss-seller",
+            data=payload,
+            content_type="application/json",
+            HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_TIME=transmission_time,
+            HTTP_TOSSPAYMENTS_WEBHOOK_SIGNATURE=signature,
+        )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "partially_approved"
+
+    seller.refresh_from_db()
+    assert seller.status == Seller.Status.PARTIALLY_APPROVED
+    assert seller.weekly_limit_amount == 10_000_000
+
+    payout.refresh_from_db()
+    assert payout.status == Payout.Status.CONFIRMED_IDENTITY_PENDING
+
+
+@pytest.mark.django_db
+def test_toss_seller_webhook_rejects_bad_signature(client, category, landing_type):
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="approval_required")
+
+    payload = json.dumps(
+        {"eventType": "seller.changed", "data": {"refSellerId": "x", "status": "APPROVED"}}
+    ).encode("utf-8")
+
+    with override_settings(TOSS_API_SECURE_KEY="dummy-secure-key-for-test"):
+        resp = client.post(
+            f"{PAYOUTS_URL}/webhook/toss-seller",
+            data=payload,
+            content_type="application/json",
+            HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_TIME="2024-01-01T00:00:00+09:00",
+            HTTP_TOSSPAYMENTS_WEBHOOK_SIGNATURE="v1:d3Jvbmc=",
+        )
+    assert resp.status_code == 401

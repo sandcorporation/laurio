@@ -150,11 +150,17 @@ class SellerError(Exception):
 @dataclass(frozen=True)
 class SellerRegistrationResult:
     # 등록 시도 자체가 지급대행사에 접수되면(승인이든 심사든 거절이든) 식별자를
-    # 받는다. 접수조차 안 된 예외적 경우에만 빈 문자열일 수 있다.
+    # 받는다. 접수조차 안 된 예외적 경우("pending", 아래 참고)에만 빈 문자열일
+    # 수 있다.
     seller_id: str
-    # "partially_approved" | "under_review" | "rejected" 중 하나.
+    # `payouts.models.Seller.Status`의 값 문자열과 정확히 일치해야 한다 —
+    # "pending"(#57, 실물 어댑터가 이메일·실명·전화번호 중 하나라도 없어 벤더를
+    # 아직 부르지 않았다) | "approval_required"(#57, 등록은 됐지만 본인인증
+    # 전) | "partially_approved" | "under_review" | "approved"(#57, KYC 완료 —
+    # 한도 없음) | "rejected" 중 하나.
     status: str
-    # status가 "partially_approved"일 때만 채워진다.
+    # status가 "partially_approved"일 때만 채워진다. "approved"는 한도 자체가
+    # 없으므로 None이다.
     weekly_limit_amount: int | None
 
 
@@ -186,7 +192,7 @@ class SellerAdapter(Protocol):
 
 
 class FakeSellerAdapter:
-    """dev/test 전용. 네트워크 없이 결정적으로 동작하며 네 시나리오를 흉내낸다.
+    """dev/test 전용. 네트워크 없이 결정적으로 동작하며 여섯 시나리오를 흉내낸다.
 
     `register`의 `simulate` 값:
     - None / "success" (기본) — 즉시 부분 승인. 주간 한도는
@@ -200,6 +206,11 @@ class FakeSellerAdapter:
       같은 결과지만, 원인이 다르므로 Fake가 흉내낼 수 있는 시나리오는 둘 다
       남겨둔다(#50 AC — "부분 승인·한도 초과·심사 필요·거절").
     - "rejected" — 등록이 거절된다.
+    - "approval_required"(#57) — 등록만 접수되고 아직 본인인증 전이다. 실물
+      어댑터의 첫 등록 응답이 실제로 가장 흔하게 이 값이다(ADR-0020 토스
+      재확인 결과) — "아무도 할 일이 없다"는 PENDING과 달리 "Developer가
+      본인인증을 해야 한다"는 것을 이 상태가 구분해 알려준다.
+    - "approved"(#57) — KYC 심사까지 마쳐 주간 한도 자체가 없다.
     """
 
     def register(
@@ -235,6 +246,14 @@ class FakeSellerAdapter:
         if scenario == "rejected":
             return SellerRegistrationResult(
                 seller_id=seller_id, status="rejected", weekly_limit_amount=None
+            )
+        if scenario == "approval_required":
+            return SellerRegistrationResult(
+                seller_id=seller_id, status="approval_required", weekly_limit_amount=None
+            )
+        if scenario == "approved":
+            return SellerRegistrationResult(
+                seller_id=seller_id, status="approved", weekly_limit_amount=None
             )
         raise SellerError(f"알 수 없는 fake Seller 등록 시나리오: {scenario!r}")
 

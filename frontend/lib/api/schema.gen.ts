@@ -1488,6 +1488,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/payouts/webhook/toss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Receive Toss Payout Webhook
+         * @description 실제 토스가 보내는 `payout.changed` 웹훅. 서명은 DB를 건드리기 전에
+         *     가장 먼저 검증한다(#9 리뷰 지적 2와 같은 순서).
+         *
+         *     본문 구조는 벤더 문서가 공개한 뼈대(`eventType`/`data`)를 최선으로
+         *     추정한 것이다 — staging에서 실제로 한 번 받아 확인하기 전까지는 정확한
+         *     필드명을 단정하지 않는다(#57 알아둘 것). `refPayoutId`(우리
+         *     idempotency_key)를 찾지 못하면 다른 방식(`data.id`)도 시도한다.
+         */
+        post: operations["payouts_api_receive_toss_payout_webhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/payouts/webhook/toss-seller": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Receive Toss Seller Webhook
+         * @description 실제 토스가 보내는 `seller.changed` 웹훅 — Seller가 등록 이후 비동기로
+         *     (본인인증·KYC 심사 결과) 상태를 바꿀 때 온다. `register()`를 우리가 다시
+         *     부르지 않아도 이 경로로 Seller.status가 갱신되고, 그 즉시 이 Developer의
+         *     CONFIRMED_SELLER_PENDING Payout들을 다음 단계로 밀어준다
+         *     (`advance_seller_pending_payouts`).
+         */
+        post: operations["payouts_api_receive_toss_seller_webhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/payouts/{idempotency_key}/confirm": {
         parameters: {
             query?: never;
@@ -1520,6 +1570,32 @@ export interface paths {
          *     받는다(ADR-0008) — 가입 시점이나 지급 요청 시점에는 수집하지 않는다.
          */
         post: operations["payouts_api_submit_payout_identity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/payouts/{idempotency_key}/seller-phone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit Payout Seller Phone
+         * @description 토스 셀러 등록(businessType=INDIVIDUAL)의 individual 객체가 요구하는
+         *     전화번호를 제출한다(#57 추가 인수조건).
+         *
+         *     `submit_payout_identity`와 달리 Payout 상태를 확인하지 않는다 — Seller는
+         *     Developer 단위 개념이라 전화번호도 마찬가지다(Payout이 아직 REQUESTED여도
+         *     미리 받아 둘 수 있다). 저장 직후 CONFIRMED_SELLER_PENDING에 머물던 같은
+         *     Developer의 Payout이 있으면 곧바로 재시도한다(`submit_seller_phone`).
+         */
+        post: operations["payouts_api_submit_payout_seller_phone"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3099,10 +3175,34 @@ export interface components {
                 [key: string]: unknown;
             }[];
         };
+        /**
+         * SellerPhoneSubmitIn
+         * @description 토스 셀러 등록(businessType=INDIVIDUAL)의 individual 객체가 요구하는
+         *     전화번호(#57). 숫자로만 이루어진 10~11자리(하이픈 없이)만 허용한다 —
+         *     `IdentitySubmitIn.resident_registration_number`와 같은 원칙으로 형식만
+         *     검증한다.
+         */
+        SellerPhoneSubmitIn: {
+            /** Phone Number */
+            phone_number: string;
+        };
         /** SellerRegistrationRetryIn */
         SellerRegistrationRetryIn: {
             /** Simulate */
             simulate?: string | null;
+        };
+        /**
+         * SellerWebhookOut
+         * @description `seller.changed` 실물 웹훅 응답(#57) — `WebhookOut`과 달리 Payout이
+         *     아니라 Seller에 대한 것이라 idempotency_key(UUID)를 재사용하지 않는다.
+         */
+        SellerWebhookOut: {
+            /** Received */
+            received: boolean;
+            /** Seller Id */
+            seller_id: string;
+            /** Status */
+            status: string;
         };
         /** SocialLoginIn */
         SocialLoginIn: {
@@ -5277,6 +5377,118 @@ export interface operations {
             };
         };
     };
+    payouts_api_receive_toss_payout_webhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookOut"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    payouts_api_receive_toss_seller_webhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SellerWebhookOut"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     payouts_api_confirm_payout: {
         parameters: {
             query?: never;
@@ -5365,6 +5577,50 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    payouts_api_submit_payout_seller_phone: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                idempotency_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SellerPhoneSubmitIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PayoutOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
