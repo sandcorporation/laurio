@@ -433,7 +433,20 @@ if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(PAYMENT_ADAPTER_MODE):
 # 배포 환경에서 PAYMENT_ADAPTER_MODE가 이 클래스를 가리키는데 키가 비어 있으면
 # `core.adapters.check_adapter_mode`가 어댑터 생성 자체가 실패하는 것을 잡아
 # `core.E002`로 부팅을 거부한다(AC: 자격증명 누락은 배포에서 부팅 실패다).
-TOSS_API_SECRET_KEY = _env("TOSS_API_SECRET_KEY", "")
+#
+# 환경별로 실제 주입되는 변수 이름이 다르다(#87 코드리뷰 지적 6) — dev는 저장소
+# 루트 .env가 이미 `TOSS_API_SECRET_KEY`라는 이름을 쓰고, staging/prod compose는
+# 그보다 먼저(#82/#83 스캐폴딩 시점) `TOSS_SANDBOX_SECRET_KEY`/`TOSS_LIVE_SECRET_KEY`로
+# 못박아 뒀다 — 샌드박스 키와 실물 키를 다른 이름으로 두면 운영자가 실수로 실물
+# 키를 staging에 붙여넣어도 그 변수가 애초에 읽히지 않는다. 세 이름 중 먼저 채워진
+# 값을 쓴다 — 배포 환경마다 하나만 채워지므로 순서는 충돌하지 않는다. compose
+# 파일·env example을 새 이름으로 바꾸지 않는 이유는 이 구분 자체가 의도된
+# 안전장치이기 때문이다.
+TOSS_API_SECRET_KEY = (
+    _env("TOSS_API_SECRET_KEY", "")
+    or _env("TOSS_SANDBOX_SECRET_KEY", "")
+    or _env("TOSS_LIVE_SECRET_KEY", "")
+)
 # 벤더가 문서화한 API 버전 헤더값(`TossPayments-api-version`). dev의 테스트 키는
 # 2022-11-16을 쓴다 — 값 자체는 벤더 사실이라 코드에 하드코딩하지 않고 환경에서 읽는다.
 TOSS_API_VERSION = _env("TOSS_API_VERSION", "2022-11-16")

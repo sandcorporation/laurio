@@ -619,7 +619,22 @@ def confirm_judging_period_extension(
             amount=payment.amount,
         )
     except PGTimeoutError:
-        result_status = adapter.query_status(order_id=str(order_id))
+        # payments.api.confirm_payment과 같은 규율이다(#87 코드리뷰 지적 4) —
+        # 이 재확인 호출자체가 또 실패할 수 있다. FakePGAdapter는 query_status에서
+        # 절대 예외를 던지지 않아 이 경로가 기존 테스트에서 한 번도 밟힌 적이
+        # 없었다 — 그 실패를 그대로 올리면 500이 된다. 타임아웃만큼 이 실패도
+        # "아직 모른다"이지 "실패했다"가 아니므로 강제 종결시키지 않고 현재
+        # 상태(REQUESTED)를 그대로 돌려준다.
+        try:
+            result_status = adapter.query_status(order_id=str(order_id))
+        except Exception as exc:  # noqa: BLE001 - 재확인조차 실패하면 미확정으로 남겨둔다.
+            logger.error(
+                "토스 연장 결제 재확인(query_status)이 실패했다 — 실패로 단정하지 않고 "
+                "현재 상태를 그대로 돌려준다(order_id=%s): %s",
+                order_id,
+                exc,
+            )
+            result_status = "pending"
     except PGError as exc:
         raise HttpError(502, str(exc)) from exc
 
