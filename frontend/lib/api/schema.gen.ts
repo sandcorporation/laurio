@@ -223,6 +223,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/contests/home": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Home Curation
+         * @description 홈이 보여줄 네 묶음 — 진행중·마감임박·심사중·완료 (#94, spec #92).
+         *
+         *     **`/contests/{contest_id}` 보다 먼저 등록해야 한다** — `/contests/mine`과 같은
+         *     이유다(위 `list_my_sponsored_contests` 참고). 아래에 두면 ninja가 `home`을
+         *     `contest_id`로 읽으려다 422를 낸다.
+         *
+         *     **판정은 여기가 아니라 `contests.curation.home_bucket_for`가 한다.** 화면이
+         *     `status`·`deadline_at`에서 재파생하면 새 상태가 생겼을 때 조용히 어느
+         *     분기에도 안 걸린다 — `submissions.participation`·`contests.sponsorship`이
+         *     같은 이유로 백엔드 판정인 것과 같다(#94 인수조건).
+         *
+         *     Contest 하나에 판정 조건을 두 벌로 두지 않으려고 **공개 대상을 한 질의로
+         *     모두 가져와 Python에서 한 번씩만 판정한다** — 묶음마다 쿼리를 나눠 각자
+         *     다른 WHERE 절로 "마감임박"을 다시 계산하면 그 두 조건이 언젠가 갈라진다
+         *     (`sponsored_contest_queryset`의 annotate-then-decide 관용구와 같다).
+         *
+         *     `DRAFT`는 애초에 `_PUBLICLY_VISIBLE_STATUSES`에 없어 이 질의에 잡히지 않는다
+         *     — 결제 전 Contest가 새지 않는다는 계약은 공개 목록/상세와 같다(#94 인수조건).
+         *
+         *     네 묶음은 **비어 있어도 항상 다 나온다** — `HomeCurationBucket`을 순회해
+         *     목록을 만들므로, 실제로 그 부류의 Contest가 하나도 없으면 `contests: []`인
+         *     채로 그 묶음이 응답에 실린다. 화면이 그 자리에서 "비어 있다"고 보여줄 수
+         *     있는 것은 이 항상-네-묶음 계약 덕분이다(#94 인수조건 — 섹션이 통째로
+         *     사라지면 안 된다).
+         *
+         *     각 묶음은 최대 `_HOME_BUCKET_LIMIT`건만 담는다 — 홈은 큐레이션이지 탐색이
+         *     아니다. 전체를 보려면 `/contests`(#39)로 간다.
+         */
+        get: operations["contests_api_get_home_curation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/contests/mine": {
         parameters: {
             query?: never;
@@ -1506,6 +1552,16 @@ export interface paths {
          *     추정한 것이다 — staging에서 실제로 한 번 받아 확인하기 전까지는 정확한
          *     필드명을 단정하지 않는다(#57 알아둘 것). `refPayoutId`(우리
          *     idempotency_key)를 찾지 못하면 다른 방식(`data.id`)도 시도한다.
+         *
+         *     **지급 식별자는 `{idempotency_key}-{transfer_attempt}` 형식이다**(코드리뷰
+         *     지적 1, 5차 — 이전에는 접미어 없는 순수 UUID만 기대해 `UUID(str(...))`가
+         *     무조건 `ValueError`를 던졌다. 실제 벤더가 보내는 웹훅은 우리가 보낸
+         *     `refPayoutId`를 그대로 돌려주므로, 이 형식이 아닌 웹훅은 전부 이 엔드포인트
+         *     에서 422가 났다). `adapters_toss.parse_vendor_ref`로 `(idempotency_key,
+         *     attempt)`를 갈라내고, attempt가 Payout의 **현재** `transfer_attempt`와
+         *     다르면(설계 결정, 5차 코드리뷰) 낡은(또는 알 수 없는) 시도의 지연 배달로
+         *     보고 조용히 버린다 — 진행 중이거나 이미 확정된 attempt를 잘못 덮어쓰지
+         *     않기 위해서다.
          */
         post: operations["payouts_api_receive_toss_payout_webhook"];
         delete?: never;
@@ -2441,6 +2497,31 @@ export interface components {
             released_via?: string | null;
             /** Status */
             status: string;
+        };
+        /**
+         * HomeCurationBucket
+         * @description 홈에서 공모전이 속하는 네 묶음 중 하나 (#94).
+         * @enum {string}
+         */
+        HomeCurationBucket: "ongoing" | "imminent" | "in_judging" | "completed";
+        /**
+         * HomeCurationGroupOut
+         * @description 홈의 한 묶음 — 큐레이션 식별자와 그 안의 공모전들 (#94, spec #92).
+         *
+         *     `MySponsoredContestOut.next_action`과 같은 이유로 `bucket`의 타입이 `str`가
+         *     아니라 `HomeCurationBucket`이다 — 생성된 프론트 타입에서 4개짜리 리터럴
+         *     유니온이 되고, 값이 하나 늘면 번역표를 가진 파일(`Record<Bucket, …>`)에서
+         *     `tsc --noEmit`이 빌드타임에 잡는다.
+         *
+         *     `contests`가 빈 배열이어도 이 스키마의 인스턴스 자체는 항상 존재한다 —
+         *     `GET /api/contests/home`이 네 묶음을 항상 다 돌려주므로, 어떤 묶음이 비어
+         *     있어도 화면이 그 섹션을 통째로 지우지 않고 "비어 있다"고 보여줄 수 있다
+         *     (#94 인수조건).
+         */
+        HomeCurationGroupOut: {
+            bucket: components["schemas"]["HomeCurationBucket"];
+            /** Contests */
+            contests: components["schemas"]["ContestOut"][];
         };
         /** IdentitySubmitIn */
         IdentitySubmitIn: {
@@ -3616,6 +3697,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DeliverableTypeOut"][];
+                };
+            };
+        };
+    };
+    contests_api_get_home_curation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HomeCurationGroupOut"][];
                 };
             };
         };

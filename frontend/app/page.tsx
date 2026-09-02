@@ -1,27 +1,31 @@
 // 공개 표면의 현관(#93, spec #92). FE-02(#27)가 토큰 배선을 증명하려고 세운
 // 자리표시 페이지였고, 그 주석은 "실제 공개 표면은 FE-04(#29)가 이 자리를
 // 대신한다"고 적어 뒀었다 — 하지만 #29 는 `/contests` 를 새로 만들었을 뿐 이
-// 자리는 그대로 남겨졌다. 이 페이지가 그 약속을 늦게라도 지킨다.
+// 자리는 그대로 남겨졌다. #93 이 그 약속을 늦게라도 지켰다.
 //
-// **큐레이션(진행중·마감임박·심사중·완료 네 묶음)은 다음 티켓의 몫이다**(#94,
-// spec #92). 여기서는 `/contests` 가 이미 쓰는 것과 같은 공개 목록 데이터를
-// 그대로 보여준다 — 중요한 것은 "보인다"가 아니라 "걸어서 닿는다"다. 헤더의
-// 「공모전」 링크가 필터·정렬·페이지가 있는 전체 목록으로 안내한다.
+// 이 티켓(#94, spec #92)이 얹는 것은 **큐레이션**이다 — 공모전을 한 덩어리
+// 목록이 아니라 진행중·마감임박·심사중·완료 네 묶음으로 갈라 보여준다.
+// **묶음 판정은 백엔드가 한다**(`GET /api/contests/home`,
+// `contests.curation.home_bucket_for`) — 이 페이지는 `status`·`deadline_at`을
+// 다시 보고 재파생하지 않는다. 화면이 원시 상태에서 재파생하다 새 상태가
+// 조용히 어느 분기에도 안 걸리는 것을 이 저장소가 반복해서 겪었기 때문이다
+// (`submissions.participation`·`contests.sponsorship`과 같은 이유).
+//
+// 각 묶음은 항상 나온다 — 비어 있어도 섹션째 사라지지 않고 "비어 있다"고
+// 말한다(#94 인수조건). 헤더의 「공모전」 링크와 각 묶음의 "전체 보기"는 모두
+// 필터·정렬·페이지네이션이 있는 `/contests`(#39)로 안내한다 — 홈은 큐레이션이고
+// 목록은 탐색이라 그 경계를 손대지 않는다.
 //
 // 서버 컴포넌트다. 클라이언트 지시어가 붙으면 안 된다(ADR-0015) — 이 페이지는
 // 색인 대상 공개 표면이다.
 import Link from "next/link";
 
-import { fetchContests, type Contest } from "@/lib/api/contests";
+import { fetchHomeCuration, type Contest, type HomeCurationGroup } from "@/lib/api/contests";
 import { formatDday, formatPrize, isImminent } from "@/lib/contest-format";
-
-// 큐레이션이 없는 이 티켓 범위에서는 첫 화면에 너무 많은 행을 쏟아붓지 않는다
-// — 전체는 「공모전」 링크가 있는 `/contests` 의 몫이다.
-const HOME_CONTEST_LIMIT = 12;
+import { HOME_BUCKET_EMPTY_MESSAGES, HOME_BUCKET_LABELS } from "@/lib/home-curation";
 
 export default async function Home() {
-  const page = await fetchContests({ page: 1 });
-  const contests = page.items.slice(0, HOME_CONTEST_LIMIT);
+  const groups = await fetchHomeCuration();
 
   return (
     <main className="flex min-h-screen flex-col gap-8 bg-paper p-10 text-ink">
@@ -33,38 +37,55 @@ export default async function Home() {
         </p>
       </header>
 
-      <section className="flex flex-col gap-4">
-        <div className="flex items-baseline justify-between gap-4 border-b border-rule pb-2">
-          <h2 className="text-lg font-semibold">공모전</h2>
-          <Link href="/contests" data-testid="home-view-all-contests" className="text-sm text-ink/60 hover:text-ink">
-            전체 보기
-          </Link>
-        </div>
+      {groups.map((group) => (
+        <HomeBucketSection key={group.bucket} group={group} />
+      ))}
 
-        {contests.length === 0 ? (
-          <p data-testid="home-contests-empty" className="py-10 text-center text-sm text-ink/60">
-            아직 공개된 공모전이 없습니다.
-          </p>
-        ) : (
-          <ul data-testid="home-contest-list" className="flex flex-col">
-            {contests.map((contest) => (
-              <HomeContestRow key={contest.id} contest={contest} />
-            ))}
-          </ul>
-        )}
-
-        {/* 「상금미달」이 참가를 막지 않는다는 도메인 규칙은 /contests(app/contests/page.tsx)와
-            같은 문구로 반복한다 — 액센트 색만으로는 이 규칙이 안 읽힌다. 홈은 하필 그
-            규칙을 가장 모를 첫 방문자가 보는 화면이라, 여기서 빠지면 안 된다. */}
-        <p className="flex items-start gap-2 border-t border-rule pt-4 text-xs leading-relaxed text-ink/60">
-          <span aria-hidden="true">ⓘ</span>
-          <span>
-            「상금미달」은 참가를 막지 않습니다. 선택한 요구형태의 최소 제안 상금 합계에 못
-            미친다는 표시일 뿐이며, 판단은 개발자의 몫입니다.
-          </span>
-        </p>
-      </section>
+      {/* 「상금미달」이 참가를 막지 않는다는 도메인 규칙은 /contests(app/contests/page.tsx)와
+          같은 문구로 반복한다 — 액센트 색만으로는 이 규칙이 안 읽힌다. 홈은 하필 그
+          규칙을 가장 모를 첫 방문자가 보는 화면이라, 여기서 빠지면 안 된다. */}
+      <p className="flex items-start gap-2 border-t border-rule pt-4 text-xs leading-relaxed text-ink/60">
+        <span aria-hidden="true">ⓘ</span>
+        <span>
+          「상금미달」은 참가를 막지 않습니다. 선택한 요구형태의 최소 제안 상금 합계에 못
+          미친다는 표시일 뿐이며, 판단은 개발자의 몫입니다.
+        </span>
+      </p>
     </main>
+  );
+}
+
+function HomeBucketSection({ group }: { group: HomeCurationGroup }) {
+  const label = HOME_BUCKET_LABELS[group.bucket];
+
+  return (
+    <section data-testid={`home-bucket-${group.bucket}`} className="flex flex-col gap-4">
+      <div className="flex items-baseline justify-between gap-4 border-b border-rule pb-2">
+        <h2 className="text-lg font-semibold">{label}</h2>
+        <Link
+          href="/contests"
+          data-testid={`home-bucket-${group.bucket}-view-all`}
+          className="text-sm text-ink/60 hover:text-ink"
+        >
+          전체 보기
+        </Link>
+      </div>
+
+      {group.contests.length === 0 ? (
+        <p
+          data-testid={`home-bucket-${group.bucket}-empty`}
+          className="py-6 text-center text-sm text-ink/60"
+        >
+          {HOME_BUCKET_EMPTY_MESSAGES[group.bucket]}
+        </p>
+      ) : (
+        <ul data-testid={`home-bucket-${group.bucket}-list`} className="flex flex-col">
+          {group.contests.map((contest) => (
+            <HomeContestRow key={contest.id} contest={contest} />
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

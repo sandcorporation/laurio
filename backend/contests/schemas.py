@@ -3,6 +3,7 @@ from enum import Enum
 
 from ninja import Schema
 from pydantic import Field
+from contests.curation import HomeCurationBucket
 from contests.sponsorship import SponsorNextAction, sponsor_next_action_for
 
 
@@ -161,6 +162,24 @@ class ContestOut(Schema):
     # 익명 방문자도 볼 수 있게 된다. 이 값들은 JudgingExtensionPaymentOut(연장
     # 확정 응답, Sponsor 본인 인증 필요)과 Django admin(운영자 전용)에서만 노출한다.
     judging_ends_at: datetime | None
+
+
+class HomeCurationGroupOut(Schema):
+    """홈의 한 묶음 — 큐레이션 식별자와 그 안의 공모전들 (#94, spec #92).
+
+    `MySponsoredContestOut.next_action`과 같은 이유로 `bucket`의 타입이 `str`가
+    아니라 `HomeCurationBucket`이다 — 생성된 프론트 타입에서 4개짜리 리터럴
+    유니온이 되고, 값이 하나 늘면 번역표를 가진 파일(`Record<Bucket, …>`)에서
+    `tsc --noEmit`이 빌드타임에 잡는다.
+
+    `contests`가 빈 배열이어도 이 스키마의 인스턴스 자체는 항상 존재한다 —
+    `GET /api/contests/home`이 네 묶음을 항상 다 돌려주므로, 어떤 묶음이 비어
+    있어도 화면이 그 섹션을 통째로 지우지 않고 "비어 있다"고 보여줄 수 있다
+    (#94 인수조건).
+    """
+
+    bucket: HomeCurationBucket
+    contests: list[ContestOut]
 
 
 class InitiateJudgingExtensionIn(Schema):

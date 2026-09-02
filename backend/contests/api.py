@@ -22,6 +22,7 @@ from ninja.errors import HttpError
 from ninja.pagination import PageNumberPagination, paginate
 
 from accounts.middleware import jwt_auth
+from contests.curation import HomeCurationBucket, home_bucket_for
 from contests.sponsorship import sponsored_contest_queryset
 from accounts.models import SponsorProfile
 from accounts.sanitize import sanitize_free_text
@@ -57,6 +58,7 @@ from .schemas import (
     ContestOut,
     ContestReopenIn,
     DeliverableTypeOut,
+    HomeCurationGroupOut,
     InitiateJudgingExtensionIn,
     JudgingExtensionPaymentOut,
     QuoteIn,
@@ -92,6 +94,11 @@ _PUBLICLY_VISIBLE_STATUSES = [
     Contest.Status.AWARDED,
     Contest.Status.JUDGING_ENDED,
 ]
+
+# 홈의 한 묶음이 보여주는 최대 건수 (#94). 홈은 큐레이션이지 탐색이 아니다 —
+# 전체는 `/contests`(#39, 필터·정렬·페이지네이션을 이미 갖고 있다)의 몫이다.
+# 이전 자리표시 홈(#93)이 전체를 12건으로 잘랐던 것과 같은 정신이다.
+_HOME_BUCKET_LIMIT = 6
 
 
 def _minimum_total(deliverable_type_ids: list[int]) -> int:
@@ -327,6 +334,68 @@ def list_my_sponsored_contests(request: HttpRequest, **kwargs):
     ).annotate(judged_as_of=Value(as_of, output_field=DateTimeField())).order_by(
         "-created_at"
     )
+
+
+@router.get("/contests/home", response=list[HomeCurationGroupOut], auth=None)
+def get_home_curation(request: HttpRequest):
+    """홈이 보여줄 네 묶음 — 진행중·마감임박·심사중·완료 (#94, spec #92).
+
+    **`/contests/{contest_id}` 보다 먼저 등록해야 한다** — `/contests/mine`과 같은
+    이유다(위 `list_my_sponsored_contests` 참고). 아래에 두면 ninja가 `home`을
+    `contest_id`로 읽으려다 422를 낸다.
+
+    **판정은 여기가 아니라 `contests.curation.home_bucket_for`가 한다.** 화면이
+    `status`·`deadline_at`에서 재파생하면 새 상태가 생겼을 때 조용히 어느
+    분기에도 안 걸린다 — `submissions.participation`·`contests.sponsorship`이
+    같은 이유로 백엔드 판정인 것과 같다(#94 인수조건).
+
+    Contest 하나에 판정 조건을 두 벌로 두지 않으려고 **공개 대상을 한 질의로
+    모두 가져와 Python에서 한 번씩만 판정한다** — 묶음마다 쿼리를 나눠 각자
+    다른 WHERE 절로 "마감임박"을 다시 계산하면 그 두 조건이 언젠가 갈라진다
+    (`sponsored_contest_queryset`의 annotate-then-decide 관용구와 같다).
+
+    `DRAFT`는 애초에 `_PUBLICLY_VISIBLE_STATUSES`에 없어 이 질의에 잡히지 않는다
+    — 결제 전 Contest가 새지 않는다는 계약은 공개 목록/상세와 같다(#94 인수조건).
+
+    네 묶음은 **비어 있어도 항상 다 나온다** — `HomeCurationBucket`을 순회해
+    목록을 만들므로, 실제로 그 부류의 Contest가 하나도 없으면 `contests: []`인
+    채로 그 묶음이 응답에 실린다. 화면이 그 자리에서 "비어 있다"고 보여줄 수
+    있는 것은 이 항상-네-묶음 계약 덕분이다(#94 인수조건 — 섹션이 통째로
+    사라지면 안 된다).
+
+    각 묶음은 최대 `_HOME_BUCKET_LIMIT`건만 담는다 — 홈은 큐레이션이지 탐색이
+    아니다. 전체를 보려면 `/contests`(#39)로 간다.
+    """
+
+    now = Clock.now()
+
+    contests = (
+        Contest.objects.filter(status__in=_PUBLICLY_VISIBLE_STATUSES)
+        .select_related("category")
+        .prefetch_related("deliverable_types", "requirements")
+        .order_by("deadline_at", "id")
+    )
+
+    grouped: dict = {bucket: [] for bucket in HomeCurationBucket}
+    for contest in contests:
+        bucket = home_bucket_for(contest, now=now)
+        if bucket is None:
+            # `_PUBLICLY_VISIBLE_STATUSES`에 있는데 `home_bucket_for`가 모르는
+            # 상태다 — 있어서는 안 되지만(둘 다 #94가 같이 유지해야 하는
+            # 계약이다), 있다면 화면에서 조용히 사라지느니 여기서 무시하고
+            # 넘어가는 편이 낫다. 어차피 이 상황은 `_PUBLICLY_VISIBLE_STATUSES`와
+            # `home_bucket_for`가 같은 상태 집합을 다루는 한 일어나지 않는다.
+            continue
+        if len(grouped[bucket]) < _HOME_BUCKET_LIMIT:
+            grouped[bucket].append(contest)
+
+    return [
+        HomeCurationGroupOut(
+            bucket=bucket,
+            contests=[_serialize_contest(c) for c in grouped[bucket]],
+        )
+        for bucket in HomeCurationBucket
+    ]
 
 
 @router.get("/contests/{contest_id}", response=ContestOut, auth=None)
