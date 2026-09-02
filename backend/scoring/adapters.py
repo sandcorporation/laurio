@@ -83,6 +83,23 @@ class LLMAdapterError(Exception):
     """
 
 
+class LLMAdapterPermanentError(LLMAdapterError):
+    """다시 호출해도 같은 결과가 나오는 실패다 — 자동 재시도 대상이 아니다(#88 코드리뷰 지적 2).
+
+    예: 잘렸거나(finish_reason != "stop") 벤더가 명시적으로 거부한 응답, 모델명
+    오타 같은 설정 오류로 인한 4xx. 네트워크 순단·5xx·429(요금 한도)는 다음
+    시도에서 결과가 달라질 수 있으니 여기 포함되지 않는다 — 그런 것들은 그대로
+    `LLMAdapterError`로 남아 계속 자동 재시도된다.
+
+    `scoring.services.score_submission_once`가 이 예외를 잡으면 `ScoringAttempt.
+    permanent=True`로 남기고, `run_pending_scoring`의 대상 조회가 그런 Submission을
+    이후 스캔에서 제외한다 — 그렇지 않으면 이 Submission은 영원히 재시도만 되며
+    Score 없이 배분 컷라인에서 조용히 빠진다(#88 코드리뷰 지적 2). ADR-0006이 말하는
+    "이의제기는 재채점이 아니라 운영자가 근거를 보고 판단하는 절차다"와 같은 정신 —
+    자동 재시도로 못 고치는 실패는 자동 재시도가 아니라 운영자의 눈에 띄어야 한다.
+    """
+
+
 @runtime_checkable
 class LLMScoringAdapter(Protocol):
     model_version: str
@@ -144,12 +161,27 @@ class FakeLLMScoringAdapter:
 
 _OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
 _OPENAI_DEFAULT_MODEL = "gpt-4o-mini"
-_OPENAI_REQUEST_TIMEOUT_SECONDS = 60
+_OPENAI_DEFAULT_TEMPERATURE = 0
+
+# celery-beat가 30초 타임아웃으로 이 앱의 internal 엔드포인트를 호출하고
+# (core.tasks._call_internal), gunicorn도 --timeout을 따로 안 줬으니 기본값인
+# 30초 만에 워커를 SIGKILL한다(#88 코드리뷰 지적 1). 이전 값(60초)은 단 하나의
+# 느린 호출로도 그 예산을 넘겼고, 워커가 SIGKILL되면 진행 중이던 요청은
+# ScoringAttempt를 남길 기회조차 없이 사라진다 — 다음 beat(60초 뒤)가 같은
+# 앞머리 Submission들을 다시 집어 똑같이 죽는 사고가 반복된다. 20초로 줄여
+# 프롬프트 구성·DB 조회 등 나머지 오버헤드에 10초 여유를 남긴다.
+_OPENAI_REQUEST_TIMEOUT_SECONDS = 20
 _OPENAI_SYSTEM_PROMPT = (
     "당신은 Laurio 공모전 제출물을 채점하는 심사 보조자입니다. 사용자 메시지에 나열된"
     " 모든 requirement_id에 대해 빠짐없이 하나씩 판정을 반환해야 합니다 — 일부를"
     " 빠뜨리면 안 됩니다."
 )
+
+# 재시도해도 같은 결과가 나오는 HTTP 상태 — 우리 쪽 요청 자체가 잘못됐다는
+# 뜻이다(모델명 오타로 인한 400, 잘못된 자격증명으로 인한 401/403 등). 429(요금
+# 한도)는 4xx여도 시간이 지나면 풀리므로 제외한다 — 무제한 재시도 대상인 5xx·
+# 네트워크 오류와 같은 취급이다(#88 코드리뷰 지적 2).
+_OPENAI_PERMANENT_HTTP_STATUSES = frozenset(range(400, 500)) - {429}
 
 
 def _openai_verdict_response_schema() -> dict:
@@ -189,20 +221,37 @@ def _openai_verdict_response_schema() -> dict:
 def _describe_openai_http_error(response: Any, *, submission_id: int) -> str:
     """벤더가 명시적으로 거부했을 때(4xx/5xx)의 예외 메시지를 만든다.
 
-    OpenAI 에러 응답의 `error.message`는 벤더가 작성한 텍스트(요금 한도·모델명
-    오류 등)이지 우리가 보낸 프롬프트가 아니다 — 그래도 방어적으로 300자로
-    자른다. 우리가 보낸 프롬프트·소스는 이 메시지 어디에도 넣지 않는다(ADR-0014).
+    `error.message`는 벤더가 쓴 자유 텍스트다 — 유효성 검증 오류가 "우리가 보낸
+    값"을 그대로 인용해 설명하는 경우가 있어(예: 필드 값을 되풀이하는 문구),
+    우리 프롬프트·소스의 일부를 반사할 위험이 있다(#88 코드리뷰 지적 5). 그래서
+    이 메시지에는 절대 담지 않는다(ADR-0014) — 대신 상태코드와, 벤더가 고정된
+    값만 쓰는 `error.type`/`error.code`(자유 텍스트가 아니라 열거형 라벨)만
+    담는다.
+
+    `error_body["error"]`가 dict라고 가정하지 않는다 — 프록시나 게이트웨이가
+    `{"error": "Too Many Requests"}`처럼 문자열을 줄 수 있고, 그럴 때
+    `.get("message")`를 부르면 AttributeError가 이 함수 밖으로 새어나가
+    "모든 실패는 LLMAdapterError"라는 모듈 계약을 깬다(#88 코드리뷰 지적 4).
     """
 
-    vendor_message = ""
+    error_type = ""
+    error_code = ""
     try:
         error_body = response.json()
-        if isinstance(error_body, dict):
-            vendor_message = str(error_body.get("error", {}).get("message", ""))[:300]
     except ValueError:
-        vendor_message = ""
-    base = f"OpenAI 채점 호출이 실패했다(status={response.status_code}, submission={submission_id})."
-    return f"{base} {vendor_message}".strip() if vendor_message else base
+        error_body = None
+    if isinstance(error_body, dict):
+        error_field = error_body.get("error")
+        if isinstance(error_field, dict):
+            error_type = str(error_field.get("type") or "")[:100]
+            error_code = str(error_field.get("code") or "")[:100]
+    base = f"OpenAI 채점 호출이 실패했다(status={response.status_code}, submission={submission_id})"
+    details = ", ".join(
+        part
+        for part in [f"type={error_type}" if error_type else "", f"code={error_code}" if error_code else ""]
+        if part
+    )
+    return f"{base}, {details})." if details else f"{base})."
 
 
 def _parse_openai_scoring_response(
@@ -214,11 +263,19 @@ def _parse_openai_scoring_response(
     같은 식별자만 담고, 응답 본문이나 프롬프트 내용은 절대 담지 않는다
     (ADR-0014):
 
-    - choices/message/content가 없으면 예외.
-    - finish_reason이 "stop"이 아니면(길이 제한으로 잘렸거나 거부됐으면) 예외 —
-      잘린 응답을 파싱해서 낮은 점수로 내보내지 않는다.
+    - choices/message/content가 없으면 예외(재시도 가능 — 응답 모양 자체가
+      매번 같으리라는 보장이 없다).
+    - finish_reason이 "stop"이 아니면(길이 제한으로 잘렸거나 거부됐으면)
+      `LLMAdapterPermanentError` — 같은 프롬프트·같은 토큰 예산이면 다시 불러도
+      또 잘린다(#88 코드리뷰 지적 2). 잘린 응답을 파싱해서 낮은 점수로 내보내지
+      않는다.
     - content가 JSON으로 파싱되지 않으면 예외.
-    - requirement_id가 중복되거나, 요청에 없던 필드가 비었거나 타입이 틀리면 예외.
+    - requirement_id는 정수여야 한다 — `int()`로 강제 변환하지 않는다. 10.9를
+      10으로 자르거나 True를 1로 바꾸면 엉뚱한 requirement에 판정이 붙고도
+      중복·누락 검사를 전부 통과해, percentage가 모델의 실제 판정과 어긋난다
+      (#88 코드리뷰 지적 3 — 이 티켓이 지키기로 한 "percentage가 판정들과
+      일치한다"의 유일한 구멍이었다).
+    - requirement_id가 중복되거나, 필드가 비었거나 타입이 틀리면 예외.
     - 요청에 실은 requirement_id 중 하나라도 응답에 없으면 예외 — 「미충족」으로
       조용히 채우지 않는다(#88 AC).
     """
@@ -232,7 +289,7 @@ def _parse_openai_scoring_response(
 
     finish_reason = choice.get("finish_reason") if isinstance(choice, dict) else None
     if finish_reason != "stop":
-        raise LLMAdapterError(
+        raise LLMAdapterPermanentError(
             f"OpenAI 응답이 정상 종료되지 않았다(finish_reason={finish_reason!r}, "
             f"submission={submission_id}) — 잘렸거나 거부된 응답을 점수로 쓸 수 없다."
         )
@@ -264,13 +321,22 @@ def _parse_openai_scoring_response(
                 f"OpenAI 응답의 verdict 항목이 객체가 아니다(submission={submission_id})."
             )
         try:
-            requirement_id = int(raw["requirement_id"])
+            requirement_id_raw = raw["requirement_id"]
             is_met = raw["is_met"]
             reasoning = raw["reasoning"]
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, TypeError):
             raise LLMAdapterError(
                 f"OpenAI 응답의 verdict 항목이 필드를 빠뜨렸다(submission={submission_id})."
             ) from None
+        # bool은 int의 서브클래스라 isinstance(True, int)가 True다 — 명시적으로
+        # 걷어낸다. int()로 강제 변환하면 10.9→10, True→1처럼 절삭·변환되어
+        # 남의 requirement_id에 판정이 붙고도 아래 중복·누락 검사를 통과한다.
+        if not isinstance(requirement_id_raw, int) or isinstance(requirement_id_raw, bool):
+            raise LLMAdapterError(
+                f"OpenAI 응답의 requirement_id가 정수가 아니다"
+                f"(submission={submission_id})."
+            )
+        requirement_id = requirement_id_raw
         if not isinstance(is_met, bool):
             raise LLMAdapterError(
                 f"OpenAI 응답의 is_met이 boolean이 아니다(requirement_id={requirement_id}, "
@@ -308,7 +374,11 @@ class OpenAIScoringAdapter:
 
     `LLM_ADAPTER_MODE=scoring.adapters.OpenAIScoringAdapter`로 켠다
     (`core.adapters.resolve_adapter`). 자격증명은 환경변수
-    `OPEN_AI_API_KEY`에서만 읽는다 — 저장소에는 들어가지 않는다.
+    `OPEN_AI_API_KEY`에서만 읽는다 — 저장소에는 들어가지 않는다. 모델명은
+    `LLM_OPENAI_MODEL`(기본 `gpt-4o-mini`), temperature는
+    `LLM_OPENAI_TEMPERATURE`(기본 0)로 배포 환경마다 바꿀 수 있다 — compose의
+    `environment`에 실려 컨테이너까지 전달된다(#88 코드리뷰 지적 6, docker/
+    compose.staging.yaml·compose.prod.yaml).
 
     생성자가 자격증명 없이는 인스턴스화되지 않는다 — 배포 환경에서
     `LLM_ADAPTER_MODE`가 이 클래스를 가리키는데 키가 없으면
@@ -316,7 +386,13 @@ class OpenAIScoringAdapter:
     거부한다. 그래서 자격증명 부재가 첫 채점 요청에서야 500으로 드러나지 않는다.
     """
 
-    def __init__(self, *, model: str | None = None, timeout: float = _OPENAI_REQUEST_TIMEOUT_SECONDS) -> None:
+    def __init__(
+        self,
+        *,
+        model: str | None = None,
+        temperature: float | None = None,
+        timeout: float = _OPENAI_REQUEST_TIMEOUT_SECONDS,
+    ) -> None:
         api_key = os.environ.get("OPEN_AI_API_KEY") or ""
         if not api_key:
             raise LLMAdapterError(
@@ -325,6 +401,11 @@ class OpenAIScoringAdapter:
             )
         self._api_key = api_key
         self._model = model or os.environ.get("LLM_OPENAI_MODEL") or _OPENAI_DEFAULT_MODEL
+        if temperature is not None:
+            self._temperature = temperature
+        else:
+            raw_temperature = os.environ.get("LLM_OPENAI_TEMPERATURE")
+            self._temperature = float(raw_temperature) if raw_temperature else _OPENAI_DEFAULT_TEMPERATURE
         self._timeout = timeout
         # 부팅 가드(core.adapters.check_adapter_mode)의 isinstance(LLMScoringAdapter)
         # 검사가 요구하는 자리 — 실제 호출에 쓰인 모델 식별자는 매 score() 호출마다
@@ -337,7 +418,7 @@ class OpenAIScoringAdapter:
         requirement_ids = [r.requirement_id for r in scoring_input.requirements]
         payload = {
             "model": self._model,
-            "temperature": 0,
+            "temperature": self._temperature,
             "messages": [
                 {"role": "system", "content": _OPENAI_SYSTEM_PROMPT},
                 {"role": "user", "content": scoring_input.prompt},
@@ -365,9 +446,10 @@ class OpenAIScoringAdapter:
             ) from None
 
         if response.status_code != 200:
-            raise LLMAdapterError(
-                _describe_openai_http_error(response, submission_id=scoring_input.submission_id)
-            )
+            message = _describe_openai_http_error(response, submission_id=scoring_input.submission_id)
+            if response.status_code in _OPENAI_PERMANENT_HTTP_STATUSES:
+                raise LLMAdapterPermanentError(message)
+            raise LLMAdapterError(message)
 
         try:
             body = response.json()
@@ -396,7 +478,8 @@ def get_adapter() -> LLMScoringAdapter:
         mode=settings.LLM_ADAPTER_MODE,
         fake_factory=FakeLLMScoringAdapter,
         not_implemented_hint=(
-            "실제 LLM 연동은 아직 구현되지 않았다 — LLMScoringAdapter 계약만 만족시키는 "
-            "dotted path를 LLM_ADAPTER_MODE에 설정하면 된다 (ADR-0007)."
+            "LLM_ADAPTER_MODE가 가리키는 dotted path를 import할 수 없다 — 실물 "
+            "어댑터는 scoring.adapters.OpenAIScoringAdapter다(#88). LLMScoringAdapter "
+            "계약만 만족시키면 다른 dotted path도 쓸 수 있다(ADR-0007)."
         ),
     )
