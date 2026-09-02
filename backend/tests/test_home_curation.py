@@ -481,3 +481,52 @@ def test_bucket_mismatch_is_logged_not_silently_dropped(
         "불일치" in record.message and str(contest.id) in record.message
         for record in caplog.records
     ), "쿼리와 home_bucket_for가 갈렸는데도 로그가 안 남았다"
+
+
+def test_demo_seed_fills_every_home_bucket(db, client):
+    """`seed_demo_contests` 가 네 묶음을 실제로 채운다 (#52).
+
+    staging 이 처음 떴을 때 홈의 네 묶음이 전부 「아직 없습니다」였다 — 코드가
+    아니라 DB 가 비어서였는데, 그 상태로는 큐레이션이 어떻게 보이는지 확인할
+    길이 없었다. 이 테스트는 그 시드가 **네 묶음을 전부 채운다**는 것을 HTTP
+    시임에서 고정한다.
+
+    시드 자신도 `home_bucket_for` 로 자기가 심은 것을 검사해 어긋나면
+    CommandError 로 죽는다. 그건 「시드의 의도」와 「판정」이 맞는지를 보고,
+    이 테스트는 그것이 **응답에 실제로 실리는지**를 본다 — 시드가 통과해도
+    쿼리 쪽(`_home_bucket_queryset`)이 그 행을 안 집으면 화면은 여전히 빈다.
+    """
+
+    from django.core.management import call_command
+
+    call_command("seed_demo_contests", verbosity=0)
+
+    groups = client.get(HOME_URL).json()
+    by_bucket = {group["bucket"]: group["contests"] for group in groups}
+
+    for bucket in HomeCurationBucket:
+        assert by_bucket.get(bucket.value), f"{bucket.value} 묶음이 비어 있다"
+
+    # 데모라는 것이 제목에 드러나야 한다 — staging 방문자가 실제 발주로
+    # 오인하면 안 된다.
+    for contests in by_bucket.values():
+        for contest in contests:
+            assert contest["title"].startswith("[데모] ")
+
+
+def test_demo_seed_is_idempotent(db, client):
+    """두 번 돌려도 개수가 늘지 않는다 (#52).
+
+    staging 배포마다 다시 돌릴 수 있어야 하는데, 돌릴 때마다 쌓이면 홈이
+    같은 공모전 수십 개로 뒤덮인다.
+    """
+
+    from django.core.management import call_command
+
+    call_command("seed_demo_contests", verbosity=0)
+    first = {g["bucket"]: len(g["contests"]) for g in client.get(HOME_URL).json()}
+
+    call_command("seed_demo_contests", verbosity=0)
+    second = {g["bucket"]: len(g["contests"]) for g in client.get(HOME_URL).json()}
+
+    assert first == second
