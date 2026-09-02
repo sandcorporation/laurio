@@ -11,22 +11,22 @@ import type { NextRequest } from "next/server";
 import { setSessionCookies } from "@/lib/auth/cookies";
 import { exchangeKakaoCodeForToken, readKakaoOAuthConfig } from "@/lib/auth/kakao";
 import { resolveNextPath } from "@/lib/auth/next-path";
+import { loginPathWithError, redirectToPath } from "@/lib/auth/redirect";
 import { clearOAuthRoundTripCookies, readOAuthRoundTripCookies } from "@/lib/auth/oauth-state";
 import { loginWithSocialAccessToken } from "@/lib/auth/social-login";
 
 export const dynamic = "force-dynamic";
 
-function redirectToLoginWithError(origin: string, error: string, next: string): NextResponse {
-  const url = new URL("/login", origin);
-  url.searchParams.set("error", error);
-  url.searchParams.set("next", next);
-  const response = NextResponse.redirect(url);
+function redirectToLoginWithError(error: string, next: string): NextResponse {
+  const response = redirectToPath(loginPathWithError(error, next));
   clearOAuthRoundTripCookies(response);
   return response;
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const { searchParams, origin } = new URL(request.url);
+  // origin은 뽑지 않는다 — 우리 화면으로 돌아가는 리다이렉트는 전부 상대 경로다
+  // (lib/auth/redirect.ts가 그 이유를 적는다).
+  const { searchParams } = new URL(request.url);
   const { state: cookieState, next: cookieNext } = readOAuthRoundTripCookies(request);
   // next는 쿠키에 저장해 둔 값을 쓴다 — authorize가 이미 같은 오리진 경로로
   // 검증해 둔 값이고, 카카오를 거쳐 오는 쿼리 파라미터에 다시 실으면 그 값이
@@ -37,17 +37,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // 로그인 화면으로 돌아가 이유를 보여준다.
   const providerError = searchParams.get("error");
   if (providerError) {
-    return redirectToLoginWithError(origin, "provider_denied", next);
+    return redirectToLoginWithError("provider_denied", next);
   }
 
   const queryState = searchParams.get("state");
   if (!cookieState || !queryState || cookieState !== queryState) {
-    return redirectToLoginWithError(origin, "invalid_state", next);
+    return redirectToLoginWithError("invalid_state", next);
   }
 
   const code = searchParams.get("code");
   if (!code) {
-    return redirectToLoginWithError(origin, "invalid_state", next);
+    return redirectToLoginWithError("invalid_state", next);
   }
 
   const config = readKakaoOAuthConfig();
@@ -55,7 +55,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     // authorize가 이 상태면 애초에 카카오로 보내지 않았을 것이다 — 그래도 state
     // 쿠키를 훔쳐 이 라우트를 직접 두드리는 경로를 상정해 여기서도 같은 방식으로
     // 막는다(#96).
-    return redirectToLoginWithError(origin, "oauth_unconfigured", next);
+    return redirectToLoginWithError("oauth_unconfigured", next);
   }
 
   // 카카오 교환·백엔드 로그인 호출 전체를 하나로 묶어서 잡는다(코드리뷰
@@ -71,15 +71,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const accessToken = await exchangeKakaoCodeForToken(config, code);
     const result = await loginWithSocialAccessToken("kakao", accessToken);
     if (!result.ok) {
-      return redirectToLoginWithError(origin, "login_failed", next);
+      return redirectToLoginWithError("login_failed", next);
     }
 
-    const response = NextResponse.redirect(new URL(next, origin));
+    const response = redirectToPath(next);
     setSessionCookies(response, result.pair);
     clearOAuthRoundTripCookies(response);
     return response;
   } catch (err) {
     console.error("카카오 로그인 콜백 처리 중 예외가 발생했다:", err);
-    return redirectToLoginWithError(origin, "login_failed", next);
+    return redirectToLoginWithError("login_failed", next);
   }
 }

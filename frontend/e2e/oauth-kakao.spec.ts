@@ -217,6 +217,54 @@ test.describe("카카오 콜백 — state 검증 (자격증명 유무와 무관�
   });
 });
 
+test.describe("우리 화면으로 돌아가는 리다이렉트는 상대 경로다", () => {
+  // **컨테이너 안의 Next는 자기가 어떤 공개 주소로 불렸는지 모른다.** 스테이징에서
+  // 카카오 로그인을 끝내면 `https://0.0.0.0:3000/console`로 튕겼다 — 콜백이
+  // `new URL(request.url).origin`으로 절대 URL을 만들었고, 리버스 프록시 뒤의
+  // standalone Next에서 그 값이 바인드 주소(0.0.0.0:3000)였기 때문이다.
+  //
+  // 그래서 우리 화면으로 돌아갈 때는 오리진을 짓지 않는다. 상대 Location은
+  // 브라우저가 **자기가 친 주소** 기준으로 푼다 — 그게 언제나 맞는 공개 오리진이고,
+  // 환경변수도 프록시 헤더 설정도 필요 없다(운영자 앱의 미들웨어가 이미 그렇게
+  // 동작해서 스테이징에서 멀쩡했다).
+  const isRelativePath = (location: string) => location.startsWith("/") && !location.startsWith("//");
+
+  test("콜백이 거절할 때의 로그인 화면 복귀가 절대 URL이 아니다", async ({ request }) => {
+    const res = await request.get("/api/auth/social/kakao/callback?code=whatever&state=guess", {
+      maxRedirects: 0,
+    });
+
+    const location = res.headers()["location"] ?? "";
+    expect(location).toContain("/login");
+    expect(isRelativePath(location), `Location=${location}`).toBe(true);
+  });
+
+  test("authorize가 미설정으로 되돌릴 때의 복귀도 절대 URL이 아니다", async ({ request }) => {
+    const res = await request.get("/api/auth/social/kakao/authorize?next=/console", {
+      maxRedirects: 0,
+    });
+
+    const location = res.headers()["location"] ?? "";
+    // 자격증명이 있으면 카카오로 나간다 — 그건 외부 절대 URL이 맞다.
+    test.skip(location.includes("kauth.kakao.com"), "자격증명이 있어 카카오로 나간다");
+
+    expect(location).toContain("/login");
+    expect(isRelativePath(location), `Location=${location}`).toBe(true);
+  });
+
+  test("로그인에 성공했을 때 가는 곳도 절대 URL이 아니다", async ({ request }) => {
+    // 성공 경로는 카카오 교환이 필요하다. 교환이 실패하면 login_failed로 떨어지는데,
+    // **그 복귀도 같은 헬퍼를 쓰므로** 절대 URL 여부는 여기서 관찰된다.
+    const res = await request.get("/api/auth/social/kakao/callback?code=bogus&state=x", {
+      maxRedirects: 0,
+      headers: { cookie: "laurio_oauth_state=x; laurio_oauth_next=%2Fconsole" },
+    });
+
+    const location = res.headers()["location"] ?? "";
+    expect(isRelativePath(location), `Location=${location}`).toBe(true);
+  });
+});
+
 test.describe("로그인 화면 — 실물 버튼과 dev seed 폼이 공존한다", () => {
   test("카카오 버튼은 authorize로 가는 링크이고, GitHub·구글은 준비 중으로 비활성화돼 있다", async ({
     page,
