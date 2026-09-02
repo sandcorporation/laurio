@@ -35,11 +35,19 @@ class PayoutError(Exception):
     """토스가 지급 요청·확인을 명시적으로 거부했을 때."""
 
 
-class PayoutTimeoutError(Exception):
+class PayoutTimeoutError(PayoutError):
     """토스 호출이 타임아웃됐다.
 
     응답을 받지 못했을 뿐 실제 처리 결과는 알 수 없다 — 호출자는 이걸 실패로
     간주해서는 안 되고, `query_status`로 실제 상태를 조회해 확정해야 한다.
+
+    `PayoutError`의 서브클래스다(코드리뷰 지적 5) — `except PayoutTimeoutError`가
+    항상 `except PayoutError`보다 먼저 걸리도록 호출부가 이미 순서를 지키고
+    있으므로(`payouts.api.confirm_payout`, `payouts.services.
+    _request_real_transfer_if_ready`) 기존 분기 동작은 그대로다. 서브클래스가
+    아니었을 때는 `query_status`가 다시 타임아웃하면 그 `PayoutTimeoutError`가
+    `except PayoutError`에 잡히지 않고 `transaction.atomic()` 블록 밖으로 새어
+    나가 이미 커밋 대기 중이던 원장 분개까지 롤백시켰다.
     """
 
 
@@ -49,23 +57,49 @@ class PayoutRequestResult:
     accepted: bool
 
 
+@dataclass(frozen=True)
+class TransferOutcome:
+    """`confirm`/`query_status`가 돌려주는 결과(코드리뷰 지적 5, 5차).
+
+    "paid" | "failed" | "pending" 문자열(`status`)과 함께, 이 결과가 실제로
+    어느 `Payout.transfer_attempt`에 대한 것인지(`attempt`)를 같이 돌려준다.
+
+    `attempt`가 `None`이면 이번 호출은 벤더를 실제로 부르지 않았다는 뜻이다
+    (예: Seller가 아직 READY가 아니어서 내부적으로만 확정한 경우) — 호출자는
+    이때 `Payout.transfer_status`/`transfer_attempt`를 절대 건드리면 안 된다.
+
+    이 필드가 필요한 이유: 어댑터를 호출한 "뒤에" Seller 상태를 다시 읽어
+    "방금 실제로 벤더를 불렀는지"를 추정하면, 그 사이 `seller.changed` 웹훅이
+    끼어들어 오판할 수 있다(코드리뷰 지적 5) — 어댑터가 호출 그 순간 알고 있던
+    사실을 그대로 돌려주는 것만이 경합 없이 정확하다.
+    """
+
+    status: str
+    attempt: int | None
+
+
 @runtime_checkable
 class PayoutAdapter(Protocol):
     def request_payout(self, *, idempotency_key: str, amount: int) -> PayoutRequestResult: ...
 
-    def confirm(self, *, idempotency_key: str, simulate: str | None = None) -> str:
-        """토스에 지급 결과를 동기 확인한다. "paid" | "failed" 를 돌려준다.
+    def confirm(self, *, idempotency_key: str, simulate: str | None = None) -> TransferOutcome:
+        """토스에 지급 결과를 동기 확인한다.
+
+        `TransferOutcome.status`는 "paid" | "failed" 중 하나다. 실제로 벤더를
+        부르지 않았다면(Seller가 아직 준비되지 않은 경우 등) `attempt`는
+        `None`이다 — 벤더를 불렀다면 그 시도의 `Payout.transfer_attempt` 값을
+        돌려준다.
 
         `PayoutTimeoutError`를 던질 수 있다 — 그 경우 호출자는 `query_status`로
         실제 결과를 확정해야 한다.
         """
         ...
 
-    def query_status(self, *, idempotency_key: str) -> str:
+    def query_status(self, *, idempotency_key: str) -> TransferOutcome:
         """idempotency_key의 실제 지급 상태를 조회한다.
 
-        "paid" | "failed" | "pending" 중 하나. 순수 조회다 — `simulate` 같은
-        시나리오 선택 인자를 받지 않는다.
+        `TransferOutcome.status`는 "paid" | "failed" | "pending" 중 하나다.
+        순수 조회다 — `simulate` 같은 시나리오 선택 인자를 받지 않는다.
         """
         ...
 
@@ -88,12 +122,17 @@ class FakePayoutAdapter:
     def request_payout(self, *, idempotency_key: str, amount: int) -> PayoutRequestResult:
         return PayoutRequestResult(idempotency_key=idempotency_key, accepted=True)
 
-    def confirm(self, *, idempotency_key: str, simulate: str | None = None) -> str:
+    def confirm(self, *, idempotency_key: str, simulate: str | None = None) -> TransferOutcome:
+        # Fake는 Seller 준비 여부와 무관하게 항상 "벤더를 부른 것"으로 친다 —
+        # attempt는 실제 어댑터의 transfer_attempt 증가분과 대응하지 않으므로
+        # 항상 0을 돌려준다. Fake만 쓰는 Payout은 transfer_attempt가 절대
+        # 증가하지 않으므로(그 카운터는 TossPayoutAdapter._claim_transfer_attempt
+        # 전용) 0은 항상 "지금 진행 중인 시도"와 일치한다.
         scenario = simulate or "success"
         if scenario == "success":
-            return "paid"
+            return TransferOutcome(status="paid", attempt=0)
         if scenario == "failed":
-            return "failed"
+            return TransferOutcome(status="failed", attempt=0)
         if scenario == "timeout_then_success":
             self._final_status[idempotency_key] = "paid"
             raise PayoutTimeoutError(
@@ -108,8 +147,8 @@ class FakePayoutAdapter:
             )
         raise PayoutError(f"알 수 없는 fake 토스 지급대행 시나리오: {scenario!r}")
 
-    def query_status(self, *, idempotency_key: str) -> str:
-        return self._final_status.get(idempotency_key, "pending")
+    def query_status(self, *, idempotency_key: str) -> TransferOutcome:
+        return TransferOutcome(status=self._final_status.get(idempotency_key, "pending"), attempt=0)
 
 
 def get_adapter() -> PayoutAdapter:
@@ -150,11 +189,17 @@ class SellerError(Exception):
 @dataclass(frozen=True)
 class SellerRegistrationResult:
     # 등록 시도 자체가 지급대행사에 접수되면(승인이든 심사든 거절이든) 식별자를
-    # 받는다. 접수조차 안 된 예외적 경우에만 빈 문자열일 수 있다.
+    # 받는다. 접수조차 안 된 예외적 경우("pending", 아래 참고)에만 빈 문자열일
+    # 수 있다.
     seller_id: str
-    # "partially_approved" | "under_review" | "rejected" 중 하나.
+    # `payouts.models.Seller.Status`의 값 문자열과 정확히 일치해야 한다 —
+    # "pending"(#57, 실물 어댑터가 이메일·실명·전화번호 중 하나라도 없어 벤더를
+    # 아직 부르지 않았다) | "approval_required"(#57, 등록은 됐지만 본인인증
+    # 전) | "partially_approved" | "under_review" | "approved"(#57, KYC 완료 —
+    # 한도 없음) | "rejected" 중 하나.
     status: str
-    # status가 "partially_approved"일 때만 채워진다.
+    # status가 "partially_approved"일 때만 채워진다. "approved"는 한도 자체가
+    # 없으므로 None이다.
     weekly_limit_amount: int | None
 
 
@@ -186,7 +231,7 @@ class SellerAdapter(Protocol):
 
 
 class FakeSellerAdapter:
-    """dev/test 전용. 네트워크 없이 결정적으로 동작하며 네 시나리오를 흉내낸다.
+    """dev/test 전용. 네트워크 없이 결정적으로 동작하며 여섯 시나리오를 흉내낸다.
 
     `register`의 `simulate` 값:
     - None / "success" (기본) — 즉시 부분 승인. 주간 한도는
@@ -200,6 +245,11 @@ class FakeSellerAdapter:
       같은 결과지만, 원인이 다르므로 Fake가 흉내낼 수 있는 시나리오는 둘 다
       남겨둔다(#50 AC — "부분 승인·한도 초과·심사 필요·거절").
     - "rejected" — 등록이 거절된다.
+    - "approval_required"(#57) — 등록만 접수되고 아직 본인인증 전이다. 실물
+      어댑터의 첫 등록 응답이 실제로 가장 흔하게 이 값이다(ADR-0020 토스
+      재확인 결과) — "아무도 할 일이 없다"는 PENDING과 달리 "Developer가
+      본인인증을 해야 한다"는 것을 이 상태가 구분해 알려준다.
+    - "approved"(#57) — KYC 심사까지 마쳐 주간 한도 자체가 없다.
     """
 
     def register(
@@ -235,6 +285,14 @@ class FakeSellerAdapter:
         if scenario == "rejected":
             return SellerRegistrationResult(
                 seller_id=seller_id, status="rejected", weekly_limit_amount=None
+            )
+        if scenario == "approval_required":
+            return SellerRegistrationResult(
+                seller_id=seller_id, status="approval_required", weekly_limit_amount=None
+            )
+        if scenario == "approved":
+            return SellerRegistrationResult(
+                seller_id=seller_id, status="approved", weekly_limit_amount=None
             )
         raise SellerError(f"알 수 없는 fake Seller 등록 시나리오: {scenario!r}")
 

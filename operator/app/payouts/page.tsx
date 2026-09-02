@@ -23,7 +23,7 @@ import {
 } from "@/lib/payouts/use-payout-queue";
 
 function parseFilter(value: string | null): BlockedOnFilter {
-  if (value === "identity" || value === "seller") return value;
+  if (value === "identity" || value === "seller" || value === "transfer") return value;
   return "all";
 }
 
@@ -32,6 +32,10 @@ function parseFilter(value: string | null): BlockedOnFilter {
 const BLOCKED_ON_LABEL: Record<BlockedOnKind, string> = {
   identity: "세무 신원 대기 — Laurio 처리 대기",
   seller: "Seller 등록 대기 — 지급대행사 처리 대기",
+  // Seller 자체는 이미 READY인데 실이체(벤더 이체 API)만 실패/미확정인
+  // 경우다(#57 코드리뷰 2차 지적 1) -- "Seller 등록 대기"라고 부르면 운영자가
+  // Seller 쪽을 다시 들여다보게 만드는데, 실제로 해야 할 일은 이체 재시도다.
+  transfer: "실이체 대기 — 이체 재시도 필요",
 };
 
 function PayoutBadge({ blockedOn }: { blockedOn: BlockedOnKind }) {
@@ -62,6 +66,7 @@ function FilterTabs({ filter, onSelect }: { filter: BlockedOnFilter; onSelect: (
     { value: "all", label: "전체" },
     { value: "identity", label: "신원 대기만" },
     { value: "seller", label: "Seller 대기만" },
+    { value: "transfer", label: "실이체 대기만" },
   ];
 
   return (

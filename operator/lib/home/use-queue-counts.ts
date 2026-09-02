@@ -15,6 +15,10 @@ export interface QueueCounts {
   pendingAppeals: number;
   identityPendingPayouts: number;
   sellerPendingPayouts: number;
+  // "transfer"(#57 코드리뷰 2차 지적 1) -- Seller는 이미 READY인데 실이체
+  // 자체가 실패/미확정인 Payout. 큐 목록에서 조회하지 않으면 운영자 눈에서
+  // 완전히 사라지는 것과 같은 이유로 홈 카드에서도 빼면 안 된다.
+  transferPendingPayouts: number;
 }
 
 export type QueueCountsState =
@@ -41,19 +45,25 @@ export function useQueueCounts(enabled: boolean): QueueCountsState {
 
     async function load() {
       try {
-        const [appeals, identity, seller] = await Promise.all([
+        const [appeals, identity, seller, transfer] = await Promise.all([
           countFrom("/api/backend/operator/appeals?status=pending"),
           countFrom("/api/backend/operator/payouts?blocked_on=identity"),
           countFrom("/api/backend/operator/payouts?blocked_on=seller"),
+          countFrom("/api/backend/operator/payouts?blocked_on=transfer"),
         ]);
         if (cancelled) return;
 
-        if ([appeals.status, identity.status, seller.status].includes(401)) {
+        if ([appeals.status, identity.status, seller.status, transfer.status].includes(401)) {
           router.replace("/login");
           return;
         }
 
-        if (appeals.count === null || identity.count === null || seller.count === null) {
+        if (
+          appeals.count === null ||
+          identity.count === null ||
+          seller.count === null ||
+          transfer.count === null
+        ) {
           setState({ status: "error" });
           return;
         }
@@ -64,6 +74,7 @@ export function useQueueCounts(enabled: boolean): QueueCountsState {
             pendingAppeals: appeals.count,
             identityPendingPayouts: identity.count,
             sellerPendingPayouts: seller.count,
+            transferPendingPayouts: transfer.count,
           },
         });
       } catch {

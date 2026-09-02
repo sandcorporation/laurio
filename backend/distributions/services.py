@@ -42,7 +42,7 @@ from ledger.services import LineInput, post_journal_entry
 from notifications.lifecycle import notify_distribution_shares
 from payouts.adapters import PayoutError, PayoutTimeoutError, get_adapter
 from payouts.models import Payout
-from payouts.services import get_or_create_payout, mark_confirmed, mark_failed
+from payouts.services import get_or_create_payout, mark_confirmed, mark_failed, record_transfer_result
 from policies.models import PlatformPolicy
 from policies.services import get_current_policy
 from submissions.models import Submission
@@ -209,16 +209,31 @@ def _attempt_share_payout(
 
     simulate = "failed" if force_failure else None
     try:
-        result_status = adapter.confirm(idempotency_key=str(payout.idempotency_key), simulate=simulate)
+        outcome = adapter.confirm(idempotency_key=str(payout.idempotency_key), simulate=simulate)
     except PayoutTimeoutError:
         # 타임아웃은 실패가 아니다 — 실제 결과를 조회로 확정한다(ADR-0008).
-        result_status = adapter.query_status(idempotency_key=str(payout.idempotency_key))
+        outcome = adapter.query_status(idempotency_key=str(payout.idempotency_key))
     except PayoutError:
-        result_status = "failed"
+        from payouts.adapters import TransferOutcome
 
-    if result_status == "paid":
+        # 어느 attempt에 대한 이야기인지 신뢰할 수 없다(코드리뷰 지적 5, 5차와
+        # 같은 이유) -- attempt=None으로 record_transfer_result가 아무 것도
+        # 쓰지 않게 한다. status="failed"만으로도 아래 mark_failed 분기가
+        # Payout.status를 정확히 옮긴다.
+        outcome = TransferOutcome(status="failed", attempt=None)
+
+    # confirm_payout(payouts.api)과 같은 이유(코드리뷰 지적 5, 5차) -- 이
+    # 직접 호출도 Seller가 이미 READY면 실제 벤더 호출을 선점해 이길 수
+    # 있다. 그 결과를 여기서 기록하지 않으면 mark_confirmed 안의
+    # _request_real_transfer_if_ready가 나중에 다시 불려도 이미 선점된
+    # 시도에 클레임이 밀려 벤더를 다시 부를 수 없고, 이긴 쪽의 결과가
+    # 영영 어디에도 안 남는다. Seller 상태를 다시 읽어 추정하지 않고
+    # 어댑터가 직접 알려준 attempt만 신뢰한다.
+    record_transfer_result(payout, outcome.status, outcome.attempt)
+
+    if outcome.status == "paid":
         payout = mark_confirmed(payout.idempotency_key, policy=policy)
-    elif result_status == "failed":
+    elif outcome.status == "failed":
         payout = mark_failed(payout.idempotency_key)
     else:
         # 아직 확정할 수 없다(pending) — REQUESTED로 남겨 웹훅이나 다음 스캔이

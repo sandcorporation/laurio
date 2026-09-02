@@ -43,6 +43,34 @@ class Payout(models.Model):
         CONFIRMED = "confirmed", "지급 확정"
         FAILED = "failed", "지급 실패"
 
+    class TransferStatus(models.TextChoices):
+        """실제 벤더 이체(토스 실물 어댑터가 부르는 `POST /v2/payouts`)의 진행
+        상태 — `status`(두 대기가 풀렸는가)와는 다른 축이다(코드리뷰 지적 1/4/8,
+        #57). `status`가 "Laurio가 내부적으로(원장상) 확정했는가"를 답하는
+        반면, 이 필드는 "그 확정된 금액이 실제로 벤더에게 이체 요청됐고 그
+        결과가 무엇인가"를 답한다. 둘을 하나로 뭉치면 "Seller가 막 준비됐는데
+        실이체가 벤더 쪽 한도로 거절된" 경우를 표현할 자리가 없어, 확정
+        상태(status)가 실이체 실패를 덮어써 "지급 완료"라고 잘못 말하게 된다.
+
+        REQUESTED/COMPLETED/FAILED 어느 쪽으로도 `status`를 되돌리지 않는다 —
+        원장 분개는 이미 남아 있고(ADR-0004), 이 필드는 오직 "실이체 자체가
+        어디까지 갔는가"만 기록한다. `status`를 CONFIRMED로 전진시킬지는
+        `payouts.services`의 호출자들이 이 필드가 COMPLETED일 때만 결정한다.
+        """
+
+        # Seller가 아직 지급 가능 상태가 아니어서 실이체 자체를 시도하지
+        # 않았다(기본값). 두 대기 중 Seller 대기가 남아 있다는 뜻이다.
+        NOT_REQUESTED = "not_requested", "실이체 요청 전"
+        # 벤더에 실이체를 요청했지만 아직 결과가 확정되지 않았다(타임아웃 뒤
+        # query_status로도 아직 pending, 또는 웹훅을 기다리는 중).
+        REQUESTED = "requested", "실이체 확인 대기"
+        COMPLETED = "completed", "실이체 완료"
+        # 벤더가 실이체를 명시적으로 거절했다(예: 실이체 시점의 한도 초과).
+        # **실패로 종결하지 않는다** — 원장의 금액은 그대로이고, Seller가
+        # 이미 준비된 상태이므로 재시도(POST /payouts/{key}/seller-registration,
+        # 실질적으로는 실이체 재시도)로 회복한다(코드리뷰 지적 1).
+        FAILED = "failed", "실이체 실패"
+
     # OneToOneField가 아니라 ForeignKey다 — FAILED로 끝난 시도가 재시도를 영구히
     # 막으면 안 된다(토스가 거절해도 Escrow에 갇힌 상금을 꺼낼 길이 있어야 한다).
     # 동시에 하나의 Handover에 "진행 중이거나 이미 성사된" 시도가 두 개 이상
@@ -95,6 +123,31 @@ class Payout(models.Model):
     withholding_exempt = models.BooleanField(default=False)
 
     status = models.CharField(max_length=32, choices=Status.choices, default=Status.REQUESTED)
+    transfer_status = models.CharField(
+        max_length=16, choices=TransferStatus.choices, default=TransferStatus.NOT_REQUESTED
+    )
+    # 벤더(토스)가 실이체 요청 응답으로 돌려준 자신의 식별자(코드리뷰 지적 8) —
+    # 우리 idempotency_key(refPayoutId)와 다르다. POST 응답의 `id`를 여기 저장해
+    # 두지 않으면, 확인(query_status)이 우리 키로 GET을 시도해 항상 404가
+    # 되어 "타임아웃 뒤 조회로 확정"하는 경로 자체가 성립하지 않는다.
+    vendor_payout_id = models.CharField(max_length=100, blank=True)
+    # 실이체를 벤더에 실제로 요청(POST)한 횟수(코드리뷰 지적 4, 4차 — 실행
+    # 재현 완료). `idempotency_key` 하나를 모든 재시도에 그대로 재사용하면,
+    # 벤더가 "이미 처리한 요청"으로 보고 예전 FAILED 응답을 그대로 재생한다
+    # — 진짜 새 시도가 아니라 캐시된 실패를 돌려받으므로 실운영에서 영구히
+    # 복구 불가능하다. `TossPayoutAdapter`는 벤더에 보내는 refPayoutId/
+    # Idempotency-Key를 `f"{idempotency_key}-{transfer_attempt}"`로 만들어
+    # 매 시도가 벤더에게는 새 요청으로 보이게 한다 — 우리 쪽 DB 조회·웹훅
+    # 매칭은 여전히 `idempotency_key`(변하지 않는 값)로만 한다.
+    transfer_attempt = models.PositiveIntegerField(default=0)
+    # 이 시도(transfer_attempt)를 선점한 시각(코드리뷰 지적 6, 5차) —
+    # notifications.models.Notification.claimed_at과 같은 관용구다. 벤더에
+    # 닿기도 전에 끊긴 요청(ConnectionError 등)은 query_status로도 절대 풀리지
+    # 않는다 — 벤더는 그 시도 자체를 모르기 때문이다. 이 값이 없으면
+    # transfer_status=REQUESTED로 영구히 멈춘 Payout을 되찾을 방법이 없다.
+    # `TossPayoutAdapter._claim_transfer_attempt`가 새 시도를 선점할 때마다
+    # 갱신하고, 이 값이 오래되면(임계값 초과) REQUESTED에서도 재선점을 허용한다.
+    transfer_claimed_at = models.DateTimeField(null=True, blank=True)
 
     # 확정(CONFIRMED_IDENTITY_PENDING 진입) 시 원장에 남긴 수수료·원천징수 공제
     # 분개. 성공 시 정확히 한 번만 채워진다.
@@ -224,9 +277,20 @@ class Seller(models.Model):
     class Status(models.TextChoices):
         # 아직 등록을 시도하지 않았거나, 시도했지만 지급대행사 응답을 아직
         # 받지 못한 상태. 사실상 과도기 값이다 — FakeSellerAdapter는 항상
-        # 동기로 응답하므로 이 값이 DB에 오래 머무는 일은 없지만, 실물 어댑터가
-        # 붙으면(#57) 비동기 응답을 기다리는 동안 이 값에 머물 수 있다.
+        # 동기로 응답하므로 이 값이 DB에 오래 머무는 일은 없지만, 실물
+        # 어댑터(#57)는 이메일·실명·전화번호 중 하나라도 아직 없으면 벤더를
+        # 부르지 않고 이 값에 머문다(등록 자체를 아직 시도하지 않은
+        # 경우) — `TossSellerAdapter.register` 참고.
         PENDING = "pending", "등록 대기"
+        # 토스에 재확인한 실제 상태 흐름(ADR-0020)의 첫 단계 — 등록은
+        # 접수됐고(seller_id를 받는다) 토스가 발송한 본인인증 문자로 Developer가
+        # 본인인증을 마쳐야 다음 단계(PARTIALLY_APPROVED)로 넘어간다. **PENDING과
+        # 다르다** — PENDING은 "아무도 할 일이 없다"(우리가 응답을 기다린다)이고,
+        # 이 상태는 "Developer가 할 일이 있다"(사람의 차례)다. 이 구별이 없으면
+        # 화면이 "처리 중"이라고만 말해 Developer가 자기 차례인 줄 모르고
+        # 기다린다 — ADR-0020이 "침묵은 상금이 사라진 것으로 읽힌다"고 경고한
+        # 바로 그 상태다.
+        APPROVAL_REQUIRED = "approval_required", "본인인증 대기"
         # 본인인증을 마치고 지급대행사가 승인한 상태 — 주간 한도 안에서는
         # 곧바로 지급받을 수 있다(ADR-0020).
         PARTIALLY_APPROVED = "partially_approved", "부분 승인"
@@ -235,10 +299,22 @@ class Seller(models.Model):
         # 성공했다는 이유로 막지 않는다(ADR-0020). 시간이 지나면(또는 재시도로)
         # PARTIALLY_APPROVED로 넘어갈 수 있다.
         UNDER_REVIEW = "under_review", "심사 대기"
+        # KYC 심사를 마쳐 주간 한도 자체가 없어진 상태(ADR-0020 토스 재확인
+        # 결과) — PARTIALLY_APPROVED와 마찬가지로 곧바로 지급받을 수 있다.
+        # 한도를 푼 Developer가 계속 PARTIALLY_APPROVED로 잘못 남지 않도록
+        # 별도 값을 둔다.
+        APPROVED = "approved", "승인 완료"
         # 지급대행사가 등록을 거절했다. 이것도 Payout을 FAILED로 되돌리지
         # 않는다 — 확정된 금액은 원장에 개발자 미지급금으로 그대로 남고
         # (ADR-0004), 재시도(운영 처리 후 재등록)로 회복할 여지를 남긴다.
         REJECTED = "rejected", "거절"
+
+    # 지급이 준비 완료로 취급되는(=Payout이 다음 단계로 넘어갈 수 있는) 상태
+    # 집합 — `payouts.services`의 여러 지점이 "Seller가 준비됐는가"를 같은
+    # 기준으로 판정해야 한다(#57). PARTIALLY_APPROVED(주간 한도 있음)와
+    # APPROVED(한도 없음) 둘 다 지급 가능 상태이고, 한도 자체는 지급 시점에
+    # 별도로 확인할 문제이지 Seller 준비 여부의 판정 기준이 아니다.
+    READY_STATUSES = (Status.PARTIALLY_APPROVED, Status.APPROVED)
 
     developer = models.OneToOneField(
         "accounts.DeveloperProfile", related_name="seller", on_delete=models.CASCADE
@@ -250,9 +326,32 @@ class Seller(models.Model):
     # PARTIALLY_APPROVED일 때만 의미가 있는 주간 지급 한도(원 단위 정수,
     # ADR-0004). 그 외 상태에서는 null이다.
     weekly_limit_amount = models.PositiveIntegerField(null=True, blank=True)
+    # 토스 셀러 등록(businessType=INDIVIDUAL)의 individual 객체가 요구하는
+    # 전화번호(#57) — 가입 시점에는 어디에도 없어 Payout이 확정된 뒤 별도로
+    # 제출받는다(`POST /payouts/{idempotency_key}/seller-phone`). TaxIdentity.
+    # resident_registration_number_encrypted와 같은 이유로 암호화해 저장한다.
+    # 아직 제출되지 않았으면 빈 문자열이고, 그동안 실물 어댑터는 벤더를 부르지
+    # 않고 PENDING에 머문다(register()가 스스로 판단한다) — Fake 어댑터는 이
+    # 값을 쓰지 않는다(기존 시나리오 동작을 바꾸지 않는다).
+    phone_number_encrypted = models.CharField(max_length=500, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:  # pragma: no cover
         return f"Seller(developer={self.developer_id}, status={self.status})"
+
+    # --- 암호화된 필드 접근자 (verification.models.Verification과 같은 패턴) ----
+    @property
+    def phone_number(self) -> str:
+        from verification.crypto import decrypt
+
+        if not self.phone_number_encrypted:
+            return ""
+        return decrypt(self.phone_number_encrypted)
+
+    @phone_number.setter
+    def phone_number(self, value: str) -> None:
+        from verification.crypto import encrypt
+
+        self.phone_number_encrypted = encrypt(value) if value else ""

@@ -121,6 +121,13 @@ export default function OperatorHome() {
           state={counts}
           pick={(c) => c.sellerPendingPayouts}
         />
+        <QueueCard
+          testId="queue-payouts-transfer"
+          label="실이체 대기 중인 지급"
+          href="/payouts?blocked_on=transfer"
+          state={counts}
+          pick={(c) => c.transferPendingPayouts}
+        />
       </section>
 
       <button type="button" data-testid="logout-button" onClick={handleLogout} disabled={loggingOut}>

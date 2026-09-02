@@ -438,6 +438,15 @@ TOSS_API_SECRET_KEY = (
 # 2022-11-16을 쓴다 — 값 자체는 벤더 사실이라 코드에 하드코딩하지 않고 환경에서 읽는다.
 TOSS_API_VERSION = _env("TOSS_API_VERSION", "2022-11-16")
 
+# 토스 지급대행 셀러 등록·수정·지급 요청 세 API가 요구하는 JWE 암호화 키(#57).
+# 64자 hex 문자열(A256GCM용 32바이트) — `TossPayments-api-security-mode:
+# ENCRYPTION`을 쓰는 요청의 본문을 이 키로 직접(alg=dir) 암호화하고, 같은 키로
+# `payout.changed`/`seller.changed` 웹훅 서명(HMAC-SHA256)도 검증한다
+# (`payouts.adapters_toss` 참고). TOSS_API_SECRET_KEY와 마찬가지로 dotted path가
+# 실물 어댑터를 가리킬 때만(PAYOUT_ADAPTER_MODE/SELLER_ADAPTER_MODE) 이 값이
+# 실제로 쓰인다 — dev 기본값(fake)에서는 비어 있어도 아무 문제가 없다.
+TOSS_API_SECURE_KEY = _env("TOSS_API_SECURE_KEY", "")
+
 # 개최비·심사기간·심사기간 연장 단위·연장비는 더 이상 여기 없다(#78,
 # ADR-0023) — `policies.models.PlatformPolicy`(DB 단일 행)의
 # contest_listing_fee·judging_period_days·judging_extension_days·

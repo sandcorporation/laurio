@@ -25,6 +25,12 @@ const AMOUNTS = {
   net_amount: 856_000,
   has_identity: false,
   seller_status: null,
+  // 두 필드는 #57 코드리뷰 지적 8/10/12(3차)가 만든 새 신호다 — 기본값을
+  // "할 일이 없다"쪽으로 둬서, 이 값을 신경 쓰지 않는 기존 테스트들이
+  // 전화번호 폼이나 "실이체 실패" 문구를 뜻하지 않게 계속 보게 되는 것을
+  // 막는다. 그 신호를 직접 검증하려는 테스트만 명시적으로 덮어쓴다.
+  has_seller_phone: true,
+  transfer_status: "not_requested",
   created_at: new Date().toISOString(),
 };
 
@@ -155,8 +161,35 @@ test("Seller 등록이 거절돼도 상금이 남아 있다고 말하고 재시�
 
   // 거절은 실패가 아니다 — 돈은 원장에 남아 있다(ADR-0020). 사람이 고객센터를
   // 거쳐야 하면 "상금이 사라진 것 같은 시간"만 길어진다.
-  await expect(page.getByTestId("payout-seller-rejected")).toContainText("그대로 남아 있습니다");
+  await expect(page.getByTestId("payout-seller-retry-rejected")).toContainText("그대로 남아 있습니다");
   await expect(page.getByTestId("payout-seller-retry")).toBeVisible();
+});
+
+test("실이체 자체가 거절되면 등록 거절과 다른 문구로 재시도를 준다", async ({ page }) => {
+  // #57 코드리뷰 지적 11(3차) — Seller 등록은 끝났는데(READY) 실이체 자체가
+  // 거절된 경우, "수취인 등록이 거절되었습니다"라고 말하면 실제 원인과
+  // 어긋난다.
+  const seeded = seedE2eContests();
+  await login(page, seeded.judging.developer_login_seed);
+  const contestId = seeded.judging.id;
+
+  await stubPayout(page, contestId, {
+    status: "confirmed_seller_pending",
+    has_identity: true,
+    seller_status: "partially_approved",
+    transfer_status: "failed",
+    next_action_message: "지급대행사 등록은 끝났지만 실제 이체가 거절되었습니다.",
+  });
+
+  await page.goto(`/console/payouts/${contestId}`);
+
+  await expect(page.getByTestId("payout-seller-retry-transfer")).toContainText("실제 이체가 거절");
+  await expect(page.getByTestId("payout-seller-retry-transfer")).not.toContainText(
+    "수취인 등록이 거절",
+  );
+  await expect(page.getByTestId("payout-seller-retry")).toBeVisible();
+  // "하실 일은 없습니다"와 재시도 버튼이 함께 뜨면 모순이다(코드리뷰 지적 10).
+  await expect(page.getByText("하실 일은 없습니다")).toHaveCount(0);
 });
 
 test("수상하지 않은 행에는 지급 링크 자체가 없다", async ({ page }) => {

@@ -85,6 +85,17 @@ export const NEXT_ACTION_LABELS: Record<NextAction, NextActionLabel> = {
   // 끝난 뒤에도 내역을 다시 볼 수 있어야 한다 — 얼마가 떼였는지 확인할 곳이
   // 여기밖에 없다.
   payout_complete: { text: "지급이 완료되었습니다", mine: false, payoutStage: true },
+  // Seller 등록은 끝났는데 실제 이체 자체가 벤더 쪽에서 실패/미확정인
+  // 경우다(#57 코드리뷰 지적 1/7, 3차) — 지급 화면에서 다시 시도할 수
+  // 있으므로 mine이다.
+  retry_transfer: { text: "실이체를 다시 시도해주세요", mine: true, payoutStage: true },
+  // 확정된 뒤 뒤늦게 실이체 실패가 확인된 경우다 — 아직 자기 서비스 재시도
+  // 경로가 없다(ADR-0008에 남긴 한계). "지급 완료"라고 잘못 말하지 않는다.
+  awaiting_transfer_resolution: {
+    text: "지급 처리를 확인하는 중입니다",
+    mine: false,
+    payoutStage: true,
+  },
 };
 
 /** 목록은 `page_size=20` 으로 페이지네이션된다 (#81 리뷰 지적).

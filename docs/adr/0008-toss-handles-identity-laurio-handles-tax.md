@@ -19,3 +19,53 @@
 **비사업자 개인의 셀러 등록은 가능하다.** ADR-0020이 이미 이 항목을 닫았고, 이후 토스에 재확인해 정확한 상태 흐름까지 받았다 — 그 내용은 ADR-0020에 적어 두었다.
 
 **그래서 지급대행을 옮길 이유가 없다.** 포트원도 개인 파트너 정산을 정면으로 지원하지만, 원천징수라는 축에서 둘이 같고 토스는 이미 test 키와 어댑터 설계(#57)가 서 있다. 벤더는 이렇게 갈린다: **결제와 지급대행은 토스, 본인확인은 포트원.** 그 결과 하나가 ADR-0011에 부담을 남기며, 그것도 ADR-0020에 적어 두었다.
+
+## 실물을 붙이며 알게 된 것 — Payout 확정과 Seller 등록의 순서가 실제 벤더 요구와 어긋난다 (#57)
+
+토스의 실제 지급대행 이체 API(`POST /v2/payouts`)는 이미 등록·승인된 `sellerId`를
+요구한다. 그런데 이 저장소의 기존 순서(#50, ADR-0020)는 **Payout이 먼저
+확정되고 그 뒤에 Seller 등록이 시작**된다 — `payouts.services.mark_confirmed`가
+원장 분개를 남기는 그 순간에는 아직 `sellerId`가 없다. 두 설계가 정면으로
+맞부딪힌다: 우리는 "확정 후 등록"을 원칙으로 세웠는데(구경꾼에게 신원 정보를
+넘길 이유가 없다는 프라이버시 근거), 벤더는 "등록된 수취인에게만 이체 가능"을
+전제로 API를 설계했다.
+
+**택한 해법.** `Payout.status`의 CONFIRMED는 이 코드베이스에서 처음부터
+"Laurio가 내부적으로 확정했다"(원장 분개가 남았다)는 뜻이었지 "벤더가 실제로
+이체를 마쳤다"는 뜻이 아니었다(Fake 어댑터의 `confirm()`이 네트워크 없이
+즉시 성공하는 것도 같은 전제였다). 그래서 실물 `TossPayoutAdapter.confirm()`은
+두 갈래로 나눈다 — Seller가 아직 지급 가능 상태가 아니면 벤더를 부르지 않고
+"paid"(내부 확정)만 돌려주고, Seller가 이미 준비돼 있으면(두 번째 Payout부터,
+또는 첫 Payout이라도 Seller가 나중에 준비된 뒤 재시도·웹훅 경로로 다시
+불렸을 때) 그제서야 실제 이체를 요청한다. `payouts.services.
+_request_real_transfer_if_ready`가 Seller가 막 준비된 시점(재시도 엔드포인트,
+`seller.changed` 웹훅)에 `confirm()`을 한 번 더 불러 그제서야 실제 벤더 호출이
+일어난다.
+
+**코드리뷰(#57 2차)로 드러난 실제 문제와 그 해법.** 위에서 예견한 우려가
+정확히 현실이 됐다 — 최초 구현은 "Seller가 READY다"라는 사실만으로 두 대기가
+풀렸다고 보고 `Payout.status`를 CONFIRMED 계열로 전진시켰는데, 그 판단은 실제
+이체가 벤더 쪽에서 정말로 완료됐는지를 전혀 보지 않았다. 그래서 실이체가
+거절돼도(예: 실이체 시점의 한도) 화면은 "지급이 완료되었습니다"라고 말했고,
+확정 이후 도착한 `payout.changed` FAILED 웹훅은 조용히 버려졌다.
+
+해법은 이 ADR이 예견한 대로 별도 축을 두는 것이었다 —
+`Payout.status`("두 대기가 풀렸는가", 원장 사실)와 별개로
+`Payout.transfer_status`(NOT_REQUESTED/REQUESTED/COMPLETED/FAILED, "실이체
+자체가 벤더 쪽에서 어디까지 갔는가")를 새 필드로 둔다. `payouts.services.
+_request_real_transfer_if_ready`는 이제 실이체가 COMPLETED로 확정됐을 때만
+`True`를 돌려주고, 호출자(`submit_identity`/`retry_seller_registration`/
+`advance_seller_pending_payouts`)는 그 값을 볼 때만 `Payout.status`를
+전진시킨다 — 실패·미확정이면 CONFIRMED_SELLER_PENDING에 그대로 남아 기존
+재시도 엔드포인트(`POST /payouts/{key}/seller-registration`)가 계속 재시도
+표면 역할을 한다. 확정 이후 도착하는 `payout.changed` 웹훅도
+`resolve_transfer_webhook`을 거쳐 `transfer_status`를 갱신한다.
+
+**여전히 남는 한계 하나.** `Payout.status`가 이미 CONFIRMED(두 대기가 모두
+풀린 뒤)로 넘어간 다음에 그 실이체가 뒤늦게 FAILED로 확인되면,
+`transfer_status`는 FAILED로 기록되고 화면·Operator 큐에 드러나지만(더 이상
+조용히 버려지지 않는다), `Payout.status` 자체를 CONFIRMED에서 되돌리는
+자기 서비스 재시도 경로는 아직 없다 — Developer는 "운영자가 확인 후 다시
+진행합니다"라는 안내만 본다. staging에서 이 타이밍이 실제로 얼마나 자주
+발생하는지 관찰한 뒤, 필요하면 Operator 재시도 엔드포인트를 추가로
+만들어야 한다.

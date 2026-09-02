@@ -54,6 +54,21 @@ class NextAction(models.TextChoices):
     NOT_SELECTED = "not_selected", "미선정"
     PAYOUT_COMPLETE = "payout_complete", "지급 완료"
 
+    # --- 다시 네 차례(실이체 재시도) -------------------------------------------
+    # Seller 등록은 끝났는데(READY) 실제 이체 자체가 벤더 쪽에서 거절/미확정인
+    # 경우다(#57 코드리뷰 지적 1/7, 3차) — Payout.status만 보면 두 대기가 다
+    # 풀린 것처럼 보이지만 Payout.transfer_status가 FAILED다. 이 값을 두지
+    # 않으면 「내 참가 현황」이 PAYOUT_COMPLETE로 잘못 말하거나
+    # AWAITING_SELLER_REGISTRATION으로 잘못 되돌린다.
+    RETRY_TRANSFER = "retry_transfer", "실이체 재시도 필요"
+    # Payout이 이미 최종 확정(CONFIRMED)된 뒤에 실이체 실패가 뒤늦게
+    # 확인된 경우다(#57 코드리뷰 지적 4, 2차 — payout.changed 웹훅이 지연
+    # 도착한다) — Developer 쪽 자기 서비스 재시도 경로가 아직 없다(ADR-0008에
+    # 남긴 한계). AWAITING_SELLER_REGISTRATION으로 뭉치면 "Seller 등록이
+    # 안 끝났다"는 다른 사실을 말하게 되고, PAYOUT_COMPLETE로 뭉치면 이
+    # 티켓이 가장 경계하는 그 거짓말이 된다.
+    AWAITING_TRANSFER_RESOLUTION = "awaiting_transfer_resolution", "지급 처리 확인 중"
+
 
 def next_action_for(submission) -> str:
     """이 Submission 에 대해 Developer 가 지금 할 일(또는 기다리는 것)을 하나 고른다.
@@ -122,7 +137,7 @@ def _payout_action(submission):
     """돈이 걸린 단계 — 각 값이 대응하는 엔드포인트의 전제와 같은 조건에서 나온다."""
 
     from handovers.models import Handover
-    from payouts.models import Payout
+    from payouts.models import Payout, TaxIdentity
 
     award = getattr(submission.contest, "award", None)
     if award is None or award.submission_id != submission.id:
@@ -144,11 +159,29 @@ def _payout_action(submission):
     # 상태 그대로다 — 앞은 Developer 가 주민등록번호를 내야 하는 「네 차례」이고,
     # 뒤는 지급대행사 쪽 등록을 기다리는 중이다(ADR-0020: 둘은 다른 것을
     # 기다리고, 둘 다 실패가 아니다).
+    #
+    # **CONFIRMED_IDENTITY_PENDING에서는 신원 제출이 실이체 재시도보다
+    # 앞선다**(코드리뷰 지적 3, 4차 — 실행 재현 완료). transfer_status가
+    # FAILED라고 곧바로 RETRY_TRANSFER를 돌려주면, 신원을 아직 한 번도
+    # 못 낸(has_identity=False) Payout도 그 값에 가려진다 — 이 상태는
+    # 원래 "신원 대기"를 뜻하고, 신원 미제출과 실이체 실패는 서로 다른
+    # 두 가지를 동시에 기다리는 것이지 하나가 다른 하나를 대체하지 않는다.
     if payout.status == Payout.Status.CONFIRMED_IDENTITY_PENDING:
-        return NextAction.SUBMIT_TAX_IDENTITY
+        has_identity = TaxIdentity.objects.filter(payout=payout).exists()
+        if not has_identity:
+            return NextAction.SUBMIT_TAX_IDENTITY
+        if payout.transfer_status == Payout.TransferStatus.FAILED:
+            return NextAction.RETRY_TRANSFER
+        return NextAction.AWAITING_SELLER_REGISTRATION
     if payout.status == Payout.Status.CONFIRMED_SELLER_PENDING:
+        if payout.transfer_status == Payout.TransferStatus.FAILED:
+            return NextAction.RETRY_TRANSFER
         return NextAction.AWAITING_SELLER_REGISTRATION
     if payout.status == Payout.Status.CONFIRMED:
+        # 확정 이후 뒤늦게 도착한 실패 웹훅이 남긴 상태일 수 있다 — "지급
+        # 완료"라고 잘못 말하지 않는다.
+        if payout.transfer_status == Payout.TransferStatus.FAILED:
+            return NextAction.AWAITING_TRANSFER_RESOLUTION
         return NextAction.PAYOUT_COMPLETE
 
     return NextAction.AWAITING_SELLER_REGISTRATION

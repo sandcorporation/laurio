@@ -5,7 +5,7 @@
 // (걸러 볼 수 있어야 "정말 0인가"를 스스로 확인할 수 있다).
 import Link from "next/link";
 
-import type { QueueCountsState } from "./use-queue-counts";
+import type { QueueCounts, QueueCountsState } from "./use-queue-counts";
 
 export function QueueCard({
   testId,
@@ -18,7 +18,10 @@ export function QueueCard({
   label: string;
   href: string;
   state: QueueCountsState;
-  pick: (counts: { pendingAppeals: number; identityPendingPayouts: number; sellerPendingPayouts: number }) => number;
+  // QueueCounts를 그대로 재사용한다 -- 손으로 다시 적은 구조적 타입이었을 때는
+  // QueueCounts에 새 필드(transferPendingPayouts, #57 코드리뷰 지적 1)가 늘어도
+  // 이 타입은 따라가지 않아 tsc가 잡아주지 못했다.
+  pick: (counts: QueueCounts) => number;
 }) {
   return (
     <Link href={href} data-testid={testId}>
