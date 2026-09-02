@@ -849,6 +849,85 @@ def test_extension_clears_judging_end_reminder_flag_so_a_second_warning_can_fire
 
 
 @pytest.mark.django_db
+def test_deadline_reminder_scan_yields_to_time_budget_mid_fanout_and_recovers_next_scan(
+    client, category, landing_type
+):
+    """#51 2차 코드리뷰 지적 2: run_due_lifecycle_notifications는 이제 그 안에서
+    notifications.services.create_notification을 통해 실물 벤더에 동기 HTTP를
+    낸다 — Contest 200개 × 참가자 전원을 한 요청 안에서 처리하면 gunicorn/
+    Celery의 30초 타임아웃을 넘긴다. 실제 크래시(위 테스트)가 아니라 정상적인
+    시간 예산 초과로도 똑같이 "이미 받은 사람은 다시 받지 않고, 완료 표시는
+    남기지 않아 다음 스캔이 안전하게 마저 보낸다"가 성립해야 한다."""
+
+    from unittest.mock import patch
+
+    import notifications.lifecycle as lifecycle_module
+
+    deadline = timezone.now() + timedelta(hours=2)
+    sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+    devs = [_verified_user(client, f"budget-dev-{i}", f"budget-dev-{i}-ci") for i in range(3)]
+    for dev in devs:
+        _submit(client, dev, contest["id"], requirement_id=requirement_id, grounded=True)
+
+    _freeze(
+        _safe_daytime_at_or_after(
+            deadline - timedelta(hours=get_current_policy().deadline_reminder_lead_hours)
+        )
+    )
+
+    # 호출 순서: ① run_due_lifecycle_notifications의 deadline 계산,
+    # ② send_due_deadline_reminders 바깥 루프(이 Contest 진입 전) 확인,
+    # ③ 첫 번째 참가자 팬아웃 전 확인, ④ 두 번째 참가자 팬아웃 전 확인(여기서
+    # 예산 초과로 멈춘다). 이 시나리오의 다른 네 스캔(judging-end 임박 등)은
+    # 대상 Contest가 없어 추가로 monotonic()을 부르지 않는다.
+    with patch.object(
+        lifecycle_module.time_module, "monotonic", side_effect=[0.0, 0.0, 0.0, 100.0]
+    ):
+        budget_exceeded_scan = _run_lifecycle_scan(client)
+
+    # 예산 초과로 멈췄으므로 이 Contest는 "완료"로 보고되지 않는다.
+    assert not any(
+        r.get("event") == "deadline_reminder_sent" and r.get("contest_id") == contest["id"]
+        for r in budget_exceeded_scan["results"]
+    )
+    assert Contest.objects.get(id=contest["id"]).deadline_reminder_sent_at is None
+
+    notified_count = sum(
+        1
+        for dev in devs
+        if any(
+            n["notification_type"] == NotificationType.DEADLINE_REMINDER
+            for n in _my_notifications(client, dev["access"])
+        )
+    )
+    assert notified_count == 1
+
+    # 다음 스캔(시간 제약 없이)이 나머지 수신자만 안전하게 마저 보낸다.
+    recovery_scan = _run_lifecycle_scan(client)
+    assert any(
+        r.get("event") == "deadline_reminder_sent" and r.get("contest_id") == contest["id"]
+        for r in recovery_scan["results"]
+    )
+    assert Contest.objects.get(id=contest["id"]).deadline_reminder_sent_at is not None
+
+    for dev in devs:
+        matching = [
+            n
+            for n in _my_notifications(client, dev["access"])
+            if n["notification_type"] == NotificationType.DEADLINE_REMINDER
+        ]
+        # 이미 받은 1명은 중복으로 다시 받지 않고, 나머지 2명은 정확히 한 번 받는다.
+        assert len(matching) == 1
+
+
+@pytest.mark.django_db
 def test_deadline_reminder_recovers_remaining_developers_after_mid_fanout_crash(
     client, category, landing_type
 ):

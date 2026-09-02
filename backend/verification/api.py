@@ -169,12 +169,17 @@ def verify(request: HttpRequest, payload: VerifyIn):
 
     # 본인확인 응답이 휴대폰 번호를 함께 줬으면 알림 채널(#51)이 실제로 쓸
     # PhoneContact를 채운다 — 이 프로젝트에서 연락 가능한 번호를 확보하는
-    # 유일한 지점이다(ADR-0011이 이미 휴대폰 본인확인을 요구한다). 벤더가 이
-    # 필드를 비워 보내는 경우도 있으므로(포트원 계약상 필수가 아니다) 있을
-    # 때만 저장한다 — 없다고 본인확인 자체를 막지 않는다. 정규화가 거부하는
-    # 값(#51 코드리뷰 지적 4, 사실상 벤더가 이상한 형식을 준 경우)도 같은
+    # 유일한 지점이다(ADR-0011이 이미 휴대폰 본인확인을 요구한다). 성인
+    # (VERIFIED)일 때만 채운다 — 미성년자(UNDERAGE)는 CI/DI를 남길 이유가
+    # 없는 것과 같은 이유로(#51 2차 코드리뷰 지적 4) 전화번호도 남기지
+    # 않는다: 재확인으로 인한 다운그레이드를 포함해, 이미 저장돼 있던
+    # PhoneContact가 있다면 함께 지운다 — 그 계정에는 삭제 경로가 따로
+    # 없으므로 여기서 지우지 않으면 영구히 잔존한다. 벤더가 이 필드를 비워
+    # 보내는 경우도 있으므로(포트원 계약상 필수가 아니다) 있을 때만
+    # 저장한다 — 없다고 본인확인 자체를 막지 않는다. 정규화가 거부하는 값
+    # (#51 코드리뷰 지적 4, 사실상 벤더가 이상한 형식을 준 경우)도 같은
     # 이유로 본인확인 완료 자체를 막지 않고 로그만 남긴다.
-    if result.phone_number:
+    if verification.status == Verification.Status.VERIFIED and result.phone_number:
         try:
             PhoneContact.objects.update_or_create(
                 user=request.auth_user, defaults={"phone_number": result.phone_number}
@@ -185,6 +190,8 @@ def verify(request: HttpRequest, payload: VerifyIn):
                 "PhoneContact를 채우지 못했다. 본인확인 자체는 그대로 완료된다.",
                 request.auth_user.id,
             )
+    else:
+        PhoneContact.objects.filter(user=request.auth_user).delete()
 
     # 1회용이다 — 성공적으로 소비된 identityVerificationId는 재사용할 수 없다.
     # 실패(벤더 거절 등)한 시도는 여기 도달하지 않으므로 같은 id로 재시도할 수

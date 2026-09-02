@@ -1,4 +1,4 @@
-"""휴대폰 번호 정규화·검증 (#51 코드리뷰 지적 4).
+"""휴대폰 번호 정규화·검증 (#51 코드리뷰 지적 4, 2차 코드리뷰 지적 5).
 
 알리고(Aligo) 발송 API의 `receiver` 파라미터는 콤마로 여러 수신자를 한 번에
 지정하는 필드다 — 검증 없이 그대로 벤더에 넘기면, 값 하나에 콤마가 섞여 들어온
@@ -28,18 +28,30 @@ def normalize_phone_number(raw: str) -> str:
     이 제거 자체가 다중 수신자 콤마 인젝션을 원천 차단하는 방어선이다. 결과가
     국내 휴대폰 번호 형식이 아니면 `InvalidPhoneNumberError`를 던진다 — 조용히
     잘못된 값을 저장하지 않는다.
+
+    국가코드 뒤에 국내 트렁크 0을 붙이느냐(`82-010-...`)/떼느냐(`82-10-...`,
+    ITU 표준)는 벤더·입력 소스마다 갈린다(#51 2차 코드리뷰 지적 5) — 이전
+    버전은 "국가코드 뒤에는 항상 트렁크 0이 없다"고 가정하고 무조건 "0"을
+    덧붙여서, 이미 0이 붙어 온 `+82 010-1234-5678`을 `001012345678`(자릿수
+    초과)로 만들어 거부했다. verify()가 PhoneContact를 채우는 유일한
+    지점이므로, 이 경로가 거부하면 그 사용자는 SMS를 영영 못 받는다. 그래서
+    국가코드를 뗀 뒤 "이미 0으로 시작하는가"를 먼저 보고, 아닐 때만 0을
+    붙인다 — 두 표기 방식 모두 정확히 한 번만 0이 붙은 결과로 수렴한다.
     """
 
     digits = re.sub(r"[^0-9+]", "", raw or "")
 
     if digits.startswith("+82"):
-        digits = "0" + digits[3:]
+        rest = digits[3:]
     elif digits.startswith("82") and len(digits) >= 11:
-        digits = "0" + digits[2:]
+        rest = digits[2:]
+    else:
+        rest = digits.lstrip("+")
 
-    digits = digits.lstrip("+")
+    if rest and not rest.startswith("0"):
+        rest = "0" + rest
 
-    if not _MOBILE_RE.match(digits):
+    if not _MOBILE_RE.match(rest):
         raise InvalidPhoneNumberError(f"올바른 국내 휴대폰 번호 형식이 아니다: {raw!r}")
 
-    return digits
+    return rest

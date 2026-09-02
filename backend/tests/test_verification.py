@@ -710,3 +710,99 @@ def test_verification_without_phone_number_does_not_create_phone_contact(client)
     assert not PhoneContact.objects.filter(
         user__social_accounts__provider_uid="verify-no-phone-subject"
     ).exists()
+
+
+
+@pytest.mark.django_db
+def test_underage_verification_with_phone_number_does_not_create_phone_contact(client):
+    """#51 2차 코드리뷰 지적 4: 미성년자는 CI/DI와 같은 이유로 PhoneContact도
+    남기지 않는다 — 그 계정에는 삭제 경로가 없으므로 여기서 막지 않으면
+    영구히 잔존한다."""
+
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from accounts.models import PhoneContact
+
+    pair = _login(client, uid="verify-underage-phone-subject")
+
+    today = timezone.localdate()
+    clearly_minor_birth = today - timedelta(days=365 * 10)
+
+    response = client.post(
+        "/api/verification/verify",
+        data={
+            "verification_token": _fake_token(
+                "미성년자",
+                clearly_minor_birth.isoformat(),
+                "ci-underage-phone",
+                "di-underage-phone",
+                phone="010-1234-5678",
+            )
+        },
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+
+    assert response.json()["status"] == "underage"
+    assert not PhoneContact.objects.filter(
+        user__social_accounts__provider_uid="verify-underage-phone-subject"
+    ).exists()
+
+
+@pytest.mark.django_db
+def test_downgrading_to_underage_deletes_previously_stored_phone_contact(client):
+    """재확인으로 성인 → 미성년 판정이 뒤집히면 이미 저장돼 있던 PhoneContact도
+    지운다(위 test_downgrading_to_underage_clears_previously_stored_ci_and_di
+    와 같은 시나리오, CI/DI 대신 PhoneContact를 본다)."""
+
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from accounts.models import PhoneContact
+
+    pair = _login(client, uid="downgrade-phone-subject", email="downgrade-phone@example.com")
+
+    first = client.post(
+        "/api/verification/verify",
+        data={
+            "verification_token": _fake_token(
+                "한때성인",
+                "1990-01-01",
+                "ci-downgrade-phone-1",
+                "di-downgrade-phone-1",
+                phone="010-1234-5678",
+            )
+        },
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert first.json()["status"] == "verified"
+    assert PhoneContact.objects.filter(
+        user__social_accounts__provider_uid="downgrade-phone-subject"
+    ).exists()
+
+    today = timezone.localdate()
+    clearly_minor_birth = today - timedelta(days=365 * 10)
+
+    second = client.post(
+        "/api/verification/verify",
+        data={
+            "verification_token": _fake_token(
+                "사실은미성년",
+                clearly_minor_birth.isoformat(),
+                "ci-downgrade-phone-1",
+                "di-downgrade-phone-1",
+                phone="010-1234-5678",
+            )
+        },
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert second.json()["status"] == "underage"
+
+    assert not PhoneContact.objects.filter(
+        user__social_accounts__provider_uid="downgrade-phone-subject"
+    ).exists()

@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 import logging
+import time as time_module
 from datetime import timedelta, timezone as dt_timezone
 
 from django.conf import settings
@@ -50,6 +51,25 @@ BATCH_SIZE = 200
 
 # Award/Distribution 결과 알림 복구 스캔 한 번이 처리하는 최대 행 수. 같은 이유.
 RESULT_NOTICE_BATCH_SIZE = 200
+
+# 다섯 스캔 전체(run_due_lifecycle_notifications)가 실물 벤더 HTTP를 부르며
+# 쓸 수 있는 최대 시간(초)(#51 2차 코드리뷰 지적 2). `_safe_notify`/
+# `_safe_notify_once`는 내부에서 `create_notification`을 부르고, 그 함수는
+# 즉시 `_attempt_dispatch`로 실물 벤더에 동기 HTTP를 낸다 — Contest 200개 ×
+# 참가자 전원이면 한 요청 안에서 벤더를 수백~수천 번 부르게 된다.
+# `notifications.services.dispatch_due_notifications`와 같은 원칙
+# (DUE_SCAN_TIME_BUDGET_SECONDS)을 여기도 적용한다 — 이 예산을 넘기면 남은
+# Contest/행은 이번 스캔에서 건드리지 않고 다음 스캔에 넘긴다. "완료 표시
+# (*_sent_at)는 실제로 다 보낸 뒤에만 남긴다"(모듈 독스트링)는 원칙과 그대로
+# 맞물린다 — 시간 예산으로 중단된 Contest는 완료 표시가 없으므로 다음 스캔이
+# 안전하게 이어받는다. `run_due_lifecycle_notifications`가 다섯 스캔에 같은
+# 마감시각(deadline) 하나를 넘겨, 스캔 하나가 예산을 다 쓰면 나머지 넷은
+# 이번 호출에서 사실상 건드릴 시간이 없다는 것까지 함께 표현한다.
+LIFECYCLE_TIME_BUDGET_SECONDS = 12.0
+
+
+def _budget_exhausted(deadline: float | None) -> bool:
+    return deadline is not None and time_module.monotonic() >= deadline
 
 
 def _safe_notify(*, recipient, notification_type: str, context: dict) -> None:
@@ -108,7 +128,7 @@ def _participating_developer_users(contest: Contest):
 # --- 마감 임박 -------------------------------------------------------------------
 
 
-def send_due_deadline_reminders(as_of=None, policy=None) -> list[dict]:
+def send_due_deadline_reminders(as_of=None, policy=None, deadline=None) -> list[dict]:
     """마감이 다가오는 PUBLISHED Contest의 Sponsor와 참가 Developer에게 알린다.
 
     Contest 당 한 번만 "완료"로 표시한다 — `deadline_reminder_sent_at`이 비어
@@ -122,6 +142,12 @@ def send_due_deadline_reminders(as_of=None, policy=None) -> list[dict]:
     ADR-0023) — 생략하면(단독 호출 편의용, `as_of`와 같은 관용구) 이 함수가
     대신 한 번 읽는다. `run_due_lifecycle_notifications`가 세 스캔에 같은
     `policy`를 넘겨 다섯 스캔 전체에서 정책 조회가 늘어나지 않게 한다.
+
+    `deadline`(#51 2차 코드리뷰 지적 2)은 `time.monotonic()` 기준 마감시각이다
+    — 넘기면 Contest 하나든(바깥 루프), 그 Contest의 참가자 팬아웃 도중이든
+    (안쪽 루프) 그 자리에서 멈춘다. 팬아웃 도중 멈춘 Contest는 완료 표시를
+    남기지 않는다 — 이미 보낸 수신자는 `_safe_notify_once`가 다음 스캔에서
+    건너뛰고, 못 보낸 나머지만 이어서 보낸다.
     """
 
     as_of = as_of or Clock.now()
@@ -140,6 +166,12 @@ def send_due_deadline_reminders(as_of=None, policy=None) -> list[dict]:
 
     results = []
     for contest in due:
+        if _budget_exhausted(deadline):
+            logger.warning(
+                "마감 임박 알림 스캔이 시간 예산을 넘겨 중단한다 — 나머지 "
+                "Contest는 다음 스캔에서 처리된다."
+            )
+            break
         try:
             context = {
                 "contest_id": contest.id,
@@ -152,13 +184,30 @@ def send_due_deadline_reminders(as_of=None, policy=None) -> list[dict]:
                 dedup_context={"contest_id": contest.id},
                 context={**context, "role": "sponsor"},
             )
+
+            fanout_complete = True
             for dev_user in _participating_developer_users(contest):
+                if _budget_exhausted(deadline):
+                    logger.warning(
+                        "Contest(pk=%s) 마감 임박 알림 팬아웃이 시간 예산을 "
+                        "넘겨 중단한다 — 남은 참가자는 다음 스캔에서 이어서 "
+                        "받는다.",
+                        contest.id,
+                    )
+                    fanout_complete = False
+                    break
                 _safe_notify_once(
                     recipient=dev_user,
                     notification_type=NotificationType.DEADLINE_REMINDER,
                     dedup_context={"contest_id": contest.id},
                     context={**context, "role": "developer"},
                 )
+
+            if not fanout_complete:
+                # 이 Contest를 끝까지 못 돌았다 — 완료 표시를 남기지 않고
+                # (위 docstring), 예산이 이미 다 소진됐으므로 남은 Contest도
+                # 이번 스캔에서는 더 건드리지 않는다.
+                break
 
             # 전원(Sponsor + 참가 Developer)에게 시도를 마친 뒤에만 완료 표시를
             # 남긴다 — 위 docstring 참고.
@@ -175,7 +224,7 @@ def send_due_deadline_reminders(as_of=None, policy=None) -> list[dict]:
 # --- 심사기간 종료 임박 ------------------------------------------------------------
 
 
-def send_due_judging_end_reminders(as_of=None, policy=None) -> list[dict]:
+def send_due_judging_end_reminders(as_of=None, policy=None, deadline=None) -> list[dict]:
     """심사기간 종료가 다가오는 CLOSED Contest의 Sponsor에게 Award를 상기시킨다.
 
     유료 연장(`contests.services.mark_extension_paid`)이 `judging_ends_at`을
@@ -184,6 +233,7 @@ def send_due_judging_end_reminders(as_of=None, policy=None) -> list[dict]:
     그 결과(비워진 플래그)를 그대로 소비할 뿐이다.
 
     `policy` 파라미터는 `send_due_deadline_reminders`와 같다(#78, ADR-0023).
+    `deadline`도 같다(#51 2차 코드리뷰 지적 2).
     """
 
     as_of = as_of or Clock.now()
@@ -203,6 +253,12 @@ def send_due_judging_end_reminders(as_of=None, policy=None) -> list[dict]:
 
     results = []
     for contest in due:
+        if _budget_exhausted(deadline):
+            logger.warning(
+                "심사기간 종료 임박 알림 스캔이 시간 예산을 넘겨 중단한다 — "
+                "나머지 Contest는 다음 스캔에서 처리된다."
+            )
+            break
         try:
             # judging_ends_at을 dedup_context에 함께 넣는다 — 유료 연장이 이
             # 값을 바꾸면서 judging_end_reminder_sent_at도 함께 비우므로(#19
@@ -261,9 +317,11 @@ def _constructed_daytime_target(due_at, *, lead_days: int, hour: int):
     return target_local.astimezone(dt_timezone.utc)
 
 
-def send_due_distribution_final_warnings(as_of=None, policy=None) -> list[dict]:
+def send_due_distribution_final_warnings(as_of=None, policy=None, deadline=None) -> list[dict]:
     """Distribution 실행이 다가오는 JUDGING_ENDED Contest의 Sponsor에게 금액을
     명시한 최종 경고를 보낸다.
+
+    `deadline`은 `send_due_deadline_reminders`와 같다(#51 2차 코드리뷰 지적 2).
 
     아직 Distribution이 만들어지지 않은 Contest만 대상이다 — 이미 실행됐다면
     경고가 아니라 결과 통지(`notify_distribution_shares`)가 맞다.
@@ -314,6 +372,12 @@ def send_due_distribution_final_warnings(as_of=None, policy=None) -> list[dict]:
 
     results = []
     for contest in due:
+        if _budget_exhausted(deadline):
+            logger.warning(
+                "Distribution 최종 경고 스캔이 시간 예산을 넘겨 중단한다 — "
+                "나머지 Contest는 다음 스캔에서 처리된다."
+            )
+            break
         try:
             distribution_due_at = contest.judging_ends_at + timedelta(
                 days=policy.distribution_wait_days
@@ -358,7 +422,7 @@ def send_due_distribution_final_warnings(as_of=None, policy=None) -> list[dict]:
 # --- 결과 알림 복구: Award / Distribution -----------------------------------------
 
 
-def send_pending_award_result_notices(as_of=None) -> list[dict]:
+def send_pending_award_result_notices(as_of=None, deadline=None) -> list[dict]:
     """`notify_award_result`가 끝까지 완료되지 못한 Award를 다시 찾아 마저 알린다.
 
     awards.api.award_submission이 커밋 직후 호출하는 즉시 경로가 보통의 경우를
@@ -367,6 +431,8 @@ def send_pending_award_result_notices(as_of=None) -> list[dict]:
     잊어버리는" 방식이 아니라, 언젠가 누군가 실제로 재시도한다는 보장이 있어야
     한다). `Award.result_notice_sent_at`이 비어 있는 행이 "아직 완료되지 않았다"
     는 표식이다.
+
+    `deadline`은 `send_due_deadline_reminders`와 같다(#51 2차 코드리뷰 지적 2).
     """
 
     from awards.models import Award
@@ -380,6 +446,12 @@ def send_pending_award_result_notices(as_of=None) -> list[dict]:
 
     results = []
     for award in pending:
+        if _budget_exhausted(deadline):
+            logger.warning(
+                "Award 결과 알림 복구 스캔이 시간 예산을 넘겨 중단한다 — "
+                "나머지는 다음 스캔에서 처리된다."
+            )
+            break
         notify_award_result(award)
         award.refresh_from_db(fields=["result_notice_sent_at"])
         if award.result_notice_sent_at is not None:
@@ -388,13 +460,17 @@ def send_pending_award_result_notices(as_of=None) -> list[dict]:
     return results
 
 
-def send_pending_distribution_share_result_notices(as_of=None) -> list[dict]:
+def send_pending_distribution_share_result_notices(as_of=None, deadline=None) -> list[dict]:
     """`notify_distribution_shares`가 끝까지 완료되지 못한 몫을 다시 찾아 마저 알린다.
 
     `send_pending_award_result_notices`와 같은 이유·같은 구조다(#19 리뷰 지적
     3) — `distributions.services._create_distribution_for_contest`의 즉시
     경로가 대부분을 처리하고, 이 스캔은 죽은 나머지만 복구한다.
     `DistributionShare.result_notice_sent_at`이 비어 있는 몫이 대상이다.
+
+    `deadline`은 `send_due_deadline_reminders`와 같다(#51 2차 코드리뷰 지적 2)
+    — `notify_distribution_shares`에도 그대로 넘겨, Distribution 하나가
+    수신자를 많이 가진 경우(팬아웃)에도 예산이 지켜지게 한다.
     """
 
     from distributions.models import DistributionShare
@@ -414,9 +490,15 @@ def send_pending_distribution_share_result_notices(as_of=None) -> list[dict]:
 
     results = []
     for shares in by_distribution.values():
+        if _budget_exhausted(deadline):
+            logger.warning(
+                "Distribution 결과 알림 복구 스캔이 시간 예산을 넘겨 중단한다 "
+                "— 나머지는 다음 스캔에서 처리된다."
+            )
+            break
         distribution = shares[0].distribution
         submissions = [share.submission for share in shares]
-        notify_distribution_shares(distribution, submissions)
+        notify_distribution_shares(distribution, submissions, deadline=deadline)
         for share in shares:
             share.refresh_from_db(fields=["result_notice_sent_at"])
             if share.result_notice_sent_at is not None:
@@ -436,17 +518,21 @@ def run_due_lifecycle_notifications(as_of=None) -> list[dict]:
 
     이 호출(스캔 스코프) 전체에서 정책을 한 번만 읽어 세 리드타임 스캔에
     같이 넘긴다(#78, ADR-0023) — `as_of`를 한 번만 구해 재사용하는 것과
-    같은 이유다.
+    같은 이유다. 시간 예산(LIFECYCLE_TIME_BUDGET_SECONDS)도 이 호출 전체에서
+    한 번만 계산해 다섯 스캔에 같이 넘긴다(#51 2차 코드리뷰 지적 2) — 다섯
+    스캔 각자 별도의 12초를 받으면 합이 60초까지 늘어나 gunicorn/Celery의
+    30초 요청 타임아웃을 넘긴다.
     """
 
     as_of = as_of or Clock.now()
     policy = get_current_policy()
+    deadline = time_module.monotonic() + LIFECYCLE_TIME_BUDGET_SECONDS
     results: list[dict] = []
-    results += send_due_deadline_reminders(as_of=as_of, policy=policy)
-    results += send_due_judging_end_reminders(as_of=as_of, policy=policy)
-    results += send_due_distribution_final_warnings(as_of=as_of, policy=policy)
-    results += send_pending_award_result_notices(as_of=as_of)
-    results += send_pending_distribution_share_result_notices(as_of=as_of)
+    results += send_due_deadline_reminders(as_of=as_of, policy=policy, deadline=deadline)
+    results += send_due_judging_end_reminders(as_of=as_of, policy=policy, deadline=deadline)
+    results += send_due_distribution_final_warnings(as_of=as_of, policy=policy, deadline=deadline)
+    results += send_pending_award_result_notices(as_of=as_of, deadline=deadline)
+    results += send_pending_distribution_share_result_notices(as_of=as_of, deadline=deadline)
     return results
 
 
@@ -490,7 +576,7 @@ def notify_award_result(award) -> None:
         )
 
 
-def notify_distribution_shares(distribution, qualifying_submissions) -> None:
+def notify_distribution_shares(distribution, qualifying_submissions, deadline=None) -> None:
     """Distribution이 만들어진 직후(또는 복구 스캔에 의해 나중에) 배분받은
     Developer들에게 금액과 함께 알린다.
 
@@ -501,12 +587,26 @@ def notify_distribution_shares(distribution, qualifying_submissions) -> None:
     Submission의 `DistributionShare.result_notice_sent_at`이 이미 채워져
     있으면 그 몫만 건너뛴다 — `send_pending_distribution_share_result_notices`
     의 재시도가 이미 보낸 몫까지 다시 보내지 않는 이유다(#19 리뷰 지적 3).
+
+    `deadline`은 기본값 None이라 즉시 경로(`distributions.services.
+    _create_distribution_for_contest`)의 동작은 그대로다 — 시간 예산은
+    복구 스캔(`send_pending_distribution_share_result_notices`)만 넘긴다
+    (#51 2차 코드리뷰 지적 2). 예산을 넘기면 남은 몫은 건드리지 않는다 —
+    `result_notice_sent_at`이 비어 있으므로 다음 복구 스캔이 안전하게
+    이어받는다.
     """
 
     try:
         contest = distribution.contest
         now = Clock.now()
         for submission in qualifying_submissions:
+            if _budget_exhausted(deadline):
+                logger.warning(
+                    "Distribution(pk=%s) 결과 알림 팬아웃이 시간 예산을 넘겨 "
+                    "중단한다 — 남은 몫은 다음 복구 스캔에서 이어서 보낸다.",
+                    distribution.pk,
+                )
+                break
             share = submission.distribution_share
             if share.result_notice_sent_at is not None:
                 continue

@@ -216,6 +216,19 @@ def _attempt_dispatch(notification: Notification, *, now=None) -> None:
                 notification.pk,
                 channel,
             )
+            # PENDING을 그대로 두지 않는다(#51 2차 코드리뷰 지적 6) — 결과를
+            # 확인할 수 없어 재시도하지 않기로 한 이 판단 자체를 이력에 남긴다.
+            # 그렇지 않으면 이 행이 사유가 빈 채로 영원히 "pending"에 머물러
+            # `/api/notifications/me`에 노출되고, ADR-0009가 발송 이력을
+            # 법적 방어선으로 삼는 취지("무슨 일이 있었는지 답할 수 있다")가
+            # 무너진다. 실제 벤더 결과는 여전히 모르지만, "왜 재시도하지
+            # 않았는지"는 정직하게 기록할 수 있다.
+            previous.status = NotificationDispatch.Status.FAILED
+            previous.failure_reason = (
+                "이전 시도가 벤더 응답을 받기 전에 중단됐다 — 실제로 성공했을 "
+                "수 있어 중복 과금을 피하기 위해 재시도하지 않았다."
+            )[:255]
+            previous.save(update_fields=["status", "failure_reason"])
             continue
 
         # 벤더를 부르기 전에 PENDING을 먼저 커밋한다 — 아래 어댑터 호출 도중
@@ -389,17 +402,30 @@ def dispatch_due_notifications(as_of=None) -> list[int]:
         .values_list("pk", flat=True)[:DUE_SCAN_BATCH_SIZE]
     )
 
-    deadline = time_module.monotonic() + DUE_SCAN_TIME_BUDGET_SECONDS
+    # DEFERRED와 stuck-QUEUED가 시간 예산을 절반씩 나눠 쓴다(#51 2차 코드리뷰
+    # 지적 1). 이전에는 두 루프가 마감시각 하나를 공유하고 DEFERRED가 먼저
+    # 돈 뒤 예산을 다 쓰면 그 자리에서 곧장 return했다 — stuck-QUEUED 재선점
+    # 루프는 시도조차 되지 않았다. stuck-QUEUED 재선점은 PENDING으로 죽은
+    # 행(벤더 발송 성공 이후, SENT 확정 이전에 프로세스가 죽은 경우)을 되살리는
+    # **유일한** 경로라, 아침처럼 DEFERRED가 몰리는 스캔마다 이 경로가 매번
+    # 굶으면 그 행들은 STUCK_QUEUED_THRESHOLD가 지날 때마다 "재선점 시도조차
+    # 안 됨"을 반복하며 영원히 복구되지 않는다. DEFERRED가 앞쪽 절반을 다
+    # 쓰더라도 stuck-QUEUED는 뒤쪽 절반을 그대로 보장받는다 — DEFERRED가
+    # 절반보다 일찍 끝나면 stuck-QUEUED는 그만큼 더 받는다(전체 합은 여전히
+    # DUE_SCAN_TIME_BUDGET_SECONDS를 넘지 않는다).
+    scan_start = time_module.monotonic()
+    deferred_deadline = scan_start + DUE_SCAN_TIME_BUDGET_SECONDS / 2
+    stuck_deadline = scan_start + DUE_SCAN_TIME_BUDGET_SECONDS
 
     dispatched_ids: list[int] = []
     for pk in due_deferred_ids:
-        if time_module.monotonic() >= deadline:
+        if time_module.monotonic() >= deferred_deadline:
             logger.warning(
-                "Notification 야간 큐 스캔이 시간 예산(%s초)을 넘겨 중단한다 — "
-                "나머지는 다음 스캔(60초 뒤)이 이어서 처리한다.",
-                DUE_SCAN_TIME_BUDGET_SECONDS,
+                "Notification 야간 큐 스캔의 DEFERRED 처리가 시간 예산을 넘겨 "
+                "중단한다 — 나머지는 다음 스캔(60초 뒤)이 이어서 처리하고, "
+                "이번 스캔은 stuck-QUEUED 재선점으로 넘어간다.",
             )
-            return dispatched_ids
+            break
         try:
             if _claim_and_process_deferred(pk, now=as_of):
                 dispatched_ids.append(pk)
@@ -407,13 +433,12 @@ def dispatch_due_notifications(as_of=None) -> list[int]:
             logger.exception("Notification(pk=%s) 야간 큐 처리 중 예외, 다음 행으로 계속", pk)
 
     for pk in stuck_queued_ids:
-        if time_module.monotonic() >= deadline:
+        if time_module.monotonic() >= stuck_deadline:
             logger.warning(
-                "Notification 야간 큐 스캔이 시간 예산(%s초)을 넘겨 중단한다 — "
-                "나머지는 다음 스캔(60초 뒤)이 이어서 처리한다.",
-                DUE_SCAN_TIME_BUDGET_SECONDS,
+                "Notification 야간 큐 스캔의 stuck-QUEUED 재선점이 시간 예산을 "
+                "넘겨 중단한다 — 나머지는 다음 스캔(60초 뒤)이 이어서 처리한다.",
             )
-            return dispatched_ids
+            break
         try:
             if _reclaim_and_process_stuck_queued(pk, now=as_of, stale_before=stale_before):
                 dispatched_ids.append(pk)

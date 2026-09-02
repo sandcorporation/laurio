@@ -522,10 +522,14 @@ def test_reclaimed_channel_still_pending_is_skipped_not_retried(client):
     assert recovery_scan.json()["count"] == 1
 
     recovered = client.get(f"{CREATE_URL}/{notification.id}", **_auth_headers()).json()
-    # alimtalk는 PENDING 기록 그대로다 — 재시도로 새 시도가 추가되지 않았다.
+    # alimtalk는 재시도로 새 시도가 추가되지 않았다 — 다만 PENDING으로 영원히
+    # 남지 않고, "왜 재시도하지 않았는지"를 설명하는 FAILED로 확정된다(#51
+    # 2차 코드리뷰 지적 6) — 사유가 빈 PENDING이 /api/notifications/me에
+    # 영구히 노출되면 ADR-0009의 발송 이력이 아무것도 설명하지 못한다.
     alimtalk_dispatches = [d for d in recovered["dispatches"] if d["channel"] == "alimtalk"]
     assert len(alimtalk_dispatches) == 1
-    assert alimtalk_dispatches[0]["status"] == "pending"
+    assert alimtalk_dispatches[0]["status"] == "failed"
+    assert alimtalk_dispatches[0]["failure_reason"] != ""
     # sms로 넘어가 정상적으로 발송을 끝냈다(기본 Fake sms는 성공한다).
     sms_dispatches = [d for d in recovered["dispatches"] if d["channel"] == "sms"]
     assert len(sms_dispatches) == 1
@@ -615,6 +619,80 @@ def test_dispatch_scan_stops_early_when_the_time_budget_is_exhausted(client):
     # 다음 스캔(시간 제약 없이)이 남은 것을 마저 처리한다.
     rescan = client.post(DISPATCH_DUE_URL, **_auth_headers())
     assert rescan.json()["count"] == 2
+
+
+@pytest.mark.django_db
+def test_stuck_queued_recovery_is_not_starved_when_deferred_uses_its_share_of_the_budget(client):
+    """#51 2차 코드리뷰 지적 1: 이전에는 DEFERRED 루프와 stuck-QUEUED 루프가
+    시간 예산 하나를 공유하고 DEFERRED가 먼저 돌아, DEFERRED가 예산을 다
+    쓰면 그 자리에서 곧장 반환해 stuck-QUEUED 재선점 루프가 아예 실행되지
+    않았다 — PENDING으로 죽은 행을 되살리는 유일한 경로가 매 스캔 굶주렸다.
+    이제 두 루프는 예산을 절반씩 나눠 쓰므로, DEFERRED가 자기 몫을 다 써도
+    stuck-QUEUED는 여전히 시도된다."""
+
+    from unittest.mock import patch
+
+    user = _make_user()
+    as_of = datetime(2026, 1, 10, 14, 0, tzinfo=KST)
+
+    deferred_notifications = [
+        Notification.objects.create(
+            recipient=user,
+            notification_type=NotificationType.DEADLINE_REMINDER,
+            is_transactional=True,
+            is_promotional=False,
+            status=Notification.Status.DEFERRED,
+            scheduled_for=as_of,
+            created_at=as_of,
+        )
+        for _ in range(2)
+    ]
+    stuck_notification = Notification.objects.create(
+        recipient=user,
+        notification_type=NotificationType.DEADLINE_REMINDER,
+        is_transactional=True,
+        is_promotional=False,
+        status=Notification.Status.QUEUED,
+        claimed_at=as_of,
+        created_at=as_of,
+    )
+    # 벤더 발송이 성공한 뒤 SENT 확정 전에 죽은 것을 흉내낸다 — stuck-QUEUED
+    # 재선점만이 이 행을 다시 찾아 결론(FAILED로 확정, #51 2차 코드리뷰
+    # 지적 6)을 남길 수 있다.
+    NotificationDispatch.objects.create(
+        notification=stuck_notification,
+        channel="alimtalk",
+        status=NotificationDispatch.Status.PENDING,
+        attempted_at=as_of,
+        failure_reason="",
+    )
+    # STUCK_QUEUED_THRESHOLD(5분)가 지나야 stuck-QUEUED 재선점 대상이 된다 —
+    # claimed_at=as_of인 채로 스캔 시각도 as_of면 아직 "막 처리 중"으로 보고
+    # 건드리지 않는다.
+    _freeze(as_of + timedelta(minutes=10))
+
+    # scan_start=0.0(1번째 호출). DEFERRED 몫(6초)은 두 번째 행 처리 직전
+    # (3번째 호출, 7.0)에 이미 초과돼 있어 첫 행만 처리하고 멈춘다. 그래도
+    # stuck-QUEUED 몫(전체 12초)에는 아직 여유가 있으므로(4번째 호출도 7.0)
+    # stuck 재선점이 실제로 실행된다.
+    with patch(
+        "notifications.services.time_module.monotonic", side_effect=[0.0, 0.0, 7.0, 7.0]
+    ):
+        response = client.post(DISPATCH_DUE_URL, **_auth_headers())
+
+    assert response.json()["count"] == 2  # deferred 하나 + stuck 하나.
+
+    stuck_recovered = client.get(
+        f"{CREATE_URL}/{stuck_notification.id}", **_auth_headers()
+    ).json()
+    assert stuck_recovered["status"] == Notification.Status.SENT
+
+    deferred_statuses = [
+        client.get(f"{CREATE_URL}/{n.id}", **_auth_headers()).json()["status"]
+        for n in deferred_notifications
+    ]
+    assert deferred_statuses.count(Notification.Status.SENT) == 1
+    assert deferred_statuses.count(Notification.Status.DEFERRED) == 1
 
 
 @pytest.mark.django_db

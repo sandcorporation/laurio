@@ -206,6 +206,11 @@ def test_sms_adapter_sends_short_message_as_sms(recipient):
     assert kwargs["data"]["msg_type"] == "SMS"
     assert kwargs["data"]["receiver"] == "01011112222"
     assert kwargs["data"]["sender"] == "01000000000"
+    # (connect, read) 튜플이어야 한다(#51 2차 코드리뷰 지적 3) — 스칼라
+    # 하나를 쓰면 requests가 그 값을 connect·read 각각에 적용해 실제 최대
+    # 대기 시간이 두 배가 된다.
+    assert isinstance(kwargs["timeout"], tuple)
+    assert sum(kwargs["timeout"]) <= 5
 
 
 @override_settings(**_ALIGO_SETTINGS)

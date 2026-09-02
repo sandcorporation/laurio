@@ -40,10 +40,20 @@ _SEND_URL = "https://apis.aligo.in/send/"
 _REMAIN_URL = "https://apis.aligo.in/remain/"
 # 야간 드레인 스캔(notifications.services.dispatch_due_notifications, #51
 # 코드리뷰 지적 6)이 한 요청 안에서 여러 건을 순차 처리한다 — 채널 하나가
-# 10초씩 물고 늘어지면 그 시간이 통째로 스캔 예산을 잡아먹는다. 5초면 실제
-# 벤더 응답(보통 수백ms)에는 넉넉하고, 벤더가 완전히 죽은 최악의 경우에도
-# 한 채널이 잡아먹는 시간을 절반으로 줄인다.
-_TIMEOUT_SECONDS = 5
+# 오래 물고 늘어지면 그 시간이 통째로 스캔 예산을 잡아먹는다.
+#
+# 스칼라 값 하나(예: 5)를 주면 requests가 그 값을 connect와 read 각각에
+# 독립적으로 적용한다 — 연결은 되는데 응답만 느린(slow-drip) 벤더를 만나면
+# 실제 최대 대기 시간은 5초가 아니라 최대 10초가 된다(#51 2차 코드리뷰
+# 지적 3). "채널 하나 최대 5초 × 3채널 = 15초, 스캔 예산 12초 + 15초 =
+# 27초 < gunicorn/Celery 30초" 라는 계산은 채널 하나의 총 대기 시간이
+# 5초라는 전제 위에 있었는데, 스칼라 timeout으로는 그 전제가 성립하지
+# 않았다. `(connect, read)` 튜플로 각 단계를 명시적으로 나눠, 합쳐서 정확히
+# 5초를 넘지 않게 한다 — 연결 자체가 막힌 경우(2초)와 연결은 됐지만 응답이
+# 느린 경우(3초)를 구분해서 잡는다.
+_CONNECT_TIMEOUT_SECONDS = 2
+_READ_TIMEOUT_SECONDS = 3
+_TIMEOUT_SECONDS = (_CONNECT_TIMEOUT_SECONDS, _READ_TIMEOUT_SECONDS)
 
 # 대략적인 EUC-KR(CP949) 계열 SMS 바이트 한도 — 이 값을 넘으면 벤더가 SMS로는
 # 아예 접수하지 않거나(우리가 원치 않는 잘림) 임의로 잘라 보낼 수 있다. 그래서
