@@ -9,7 +9,15 @@ API 레이어(`scoring.api`)에서만 호출된다 — 테스트의 유일한 �
 남기고 Score를 만들지 않은 채 돌아오므로, 다음 스캔(`run_pending_scoring`)이
 "아직 한 번도 성공하지 못한 첫 시도"를 자동으로 반복한다 — 이것이 이 프로젝트가
 구현하는 "재시도"다. 별도의 재시도 카운터·백오프 스케줄이 없어도, 스캔이 반복되는
-한 실패는 스스로 낫는다(ADR-0003과 같은 정신).
+한 실패는 스스로 낫는다(ADR-0003과 같은 정신) — **단, 그 실패가 재시도로 나을 수
+있을 때만이다.** `scoring.adapters.LLMAdapterPermanentError`(#88 코드리뷰 지적 2)는
+다시 불러도 같은 결과가 나오는 실패(잘린 응답, 모델명 오타로 인한 400 등)를 표시한다
+— 이 예외는 `ScoringAttempt.permanent=True`로 남고, `run_pending_scoring`의 대상
+조회가 그런 Submission을 이후 스캔에서 뺀다. 안 그러면 그 Submission은 영원히
+재시도만 되며 Score 없이 배분 컷라인에서 조용히 빠진다. 이건 ADR-0006이 말하는
+"이의제기는 재채점이 아니라 운영자가 근거를 보고 판단하는 절차다"와 같은 정신 —
+자동 재시도로 못 고치는 실패는 운영자의 눈에 띄어야 한다(`/api/internal/scoring/
+incomplete-contests`의 `latest_error`).
 
 `Score`는 append-only라 한 번 잘못 쓰면 영원히 못 고친다. 그래서 `score_submission_once`
 는 절대 예외를 밖으로 던지지 않는다 — 소스를 아직 찾을 수 없는 것("아직" 상태),
@@ -24,6 +32,7 @@ Score를 만들지 않았다"로 돌아온다. `run_pending_scoring`이 여러 S
 from __future__ import annotations
 
 import logging
+import time
 from decimal import ROUND_HALF_UP, Decimal
 
 from django.db import IntegrityError, transaction
@@ -33,7 +42,7 @@ from core.prompt_safety import neutralize_untrusted as _neutralize_untrusted
 from storage.adapters import get_storage_adapter
 from submissions.models import RequirementResponse, Submission
 
-from .adapters import RequirementInput, ScoringInput, get_adapter
+from .adapters import LLMAdapterPermanentError, RequirementInput, ScoringInput, get_adapter
 from .models import Score, ScoringAttempt
 from .source_selection import select_source_files
 
@@ -42,6 +51,17 @@ logger = logging.getLogger(__name__)
 # 한 스캔에서 시도하는 최대 Submission 수. core.transitions.DEFAULT_BATCH_SIZE와
 # 같은 이유 — 무제한 스캔은 백로그가 쌓였을 때 요청 자체를 타임아웃으로 몰아넣는다.
 BATCH_SIZE = 50
+
+# celery-beat가 이 앱의 internal 엔드포인트를 30초 타임아웃으로 호출하고
+# (core.tasks._call_internal), gunicorn도 --timeout 없이 기본값(30초)으로 뜬다
+# (#88 코드리뷰 지적 1). BATCH_SIZE(50)개를 전부 실물 LLM으로 순회하면 단 하나의
+# 느린 호출만으로도 이 예산을 넘길 수 있다 — 그 상태로 워커가 SIGKILL되면 진행
+# 중이던 건은 ScoringAttempt조차 못 남기고 사라지고, 다음 beat가 60초 뒤 같은
+# 앞머리 Submission들을 다시 집어 똑같이 죽는 사고가 반복된다. 이 예산을 넘기면
+# 이번 스캔은 남은 Submission을 시작하지 않고 지금까지 처리한 결과만 돌려준다 —
+# 나머지는 다음 스캔(idempotent, ADR-0003과 같은 정신)이 이어받는다. 30초보다
+# 넉넉히 낮춰 요청/응답 직렬화 등 나머지 오버헤드에 여유를 둔다.
+SCAN_TIME_BUDGET_SECONDS = 20
 
 # 프롬프트 인젝션 방어(마커 무력화·코드펜스 탈출 방지)는 core.prompt_safety로
 # 옮겨 #20(AI grill)의 Sponsor 대화 프롬프트와 공유한다 — 로직은 그대로다
@@ -214,8 +234,16 @@ def score_submission_once(submission: Submission) -> dict:
         logger.exception(
             "Submission(pk=%s) 채점 중 예외, 다음 건으로 계속", submission.id
         )
-        ScoringAttempt.objects.create(submission=submission, error=message[:2000])
-        return {"submission_id": submission.id, "status": "failed", "error": message}
+        # LLMAdapterPermanentError(#88 코드리뷰 지적 2) — 다시 불러도 같은 결과가
+        # 나오는 실패다. permanent=True로 남겨야 run_pending_scoring의 대상
+        # 조회가 다음 스캔부터 이 Submission을 뺀다 — 안 그러면 영원히 재시도만
+        # 되며 Score 없이 배분 컷라인에서 조용히 빠진다.
+        is_permanent = isinstance(exc, LLMAdapterPermanentError)
+        ScoringAttempt.objects.create(
+            submission=submission, error=message[:2000], permanent=is_permanent
+        )
+        status = "failed_permanently" if is_permanent else "failed"
+        return {"submission_id": submission.id, "status": status, "error": message}
 
     try:
         with transaction.atomic():
@@ -282,6 +310,15 @@ def run_pending_scoring(as_of=None) -> list[dict]:
     구조), 실제 배포에서는 둘 다 Celery beat가 짧은 주기로 반복 호출하므로 사실상
     "마감 직후"로 수렴한다.
 
+    두 가지 안전장치(#88 코드리뷰 지적 1·2):
+
+    - `SCAN_TIME_BUDGET_SECONDS`를 넘기면 남은 Submission을 시작하지 않고
+      지금까지 처리한 결과만 돌려준다 — 이 스캔을 부른 celery/gunicorn이 워커째
+      SIGKILL하기 전에 먼저 스스로 멈춘다. 남은 건 다음 스캔이 이어받는다.
+    - `permanent=True`인 최근 `ScoringAttempt`를 가진 Submission은 대상에서
+      뺀다 — 다시 불러도 같은 결과가 나오는 실패를 영원히 반복하지 않는다
+      (`scoring.adapters.LLMAdapterPermanentError`).
+
     `score_submission_once`가 이미 모든 예외를 흡수하지만(모듈 docstring), 방어적으로
     한 번 더 감싼다 — notifications.dispatch_due_notifications와 같은 이유다: 이
     함수 자체가 나중에 바뀌어 예외를 흘리게 되더라도, 배치 하나가 통째로 막혀 뒤에
@@ -303,19 +340,35 @@ def run_pending_scoring(as_of=None) -> list[dict]:
             ],
             score__isnull=True,
         )
+        # 결정적으로 실패한 건(#88 코드리뷰 지적 2)은 뺀다 — 안 그러면 매 스캔이
+        # order_by("id")의 앞머리에서 같은 건을 다시 집어 영원히 재시도만 하고,
+        # 그 뒤의 새 Submission은 BATCH_SIZE 안에 들어오지 못할 수 있다.
+        .exclude(scoring_attempts__permanent=True)
         .select_related("contest")
         .order_by("id")[:BATCH_SIZE]
     )
     results: list[dict] = []
+    started_at = time.monotonic()
     for submission in pending:
+        if results and time.monotonic() - started_at >= SCAN_TIME_BUDGET_SECONDS:
+            # 이미 최소 한 건은 처리했다 — 빈손으로 돌아가지 않는다. 나머지는
+            # 다음 스캔이 이어받는다(idempotent, ADR-0003과 같은 정신).
+            logger.warning(
+                "run_pending_scoring이 시간 예산(%s초)을 넘겨 배치를 조기 종료한다 — "
+                "나머지는 다음 스캔이 이어받는다.",
+                SCAN_TIME_BUDGET_SECONDS,
+            )
+            break
         try:
             results.append(score_submission_once(submission))
         except Exception as exc:  # noqa: BLE001 - 한 행의 실패가 나머지 배치를 막으면 안 된다.
             logger.exception(
                 "Submission(pk=%s) 채점 스캔 처리 중 예외, 다음 건으로 계속", submission.id
             )
+            is_permanent = isinstance(exc, LLMAdapterPermanentError)
             ScoringAttempt.objects.create(
-                submission=submission, error=f"{type(exc).__name__}: {exc}"[:2000]
+                submission=submission, error=f"{type(exc).__name__}: {exc}"[:2000], permanent=is_permanent
             )
-            results.append({"submission_id": submission.id, "status": "failed", "error": str(exc)})
+            status = "failed_permanently" if is_permanent else "failed"
+            results.append({"submission_id": submission.id, "status": status, "error": str(exc)})
     return results

@@ -30,7 +30,7 @@ from awards.models import Award
 from contests.models import Category, Contest, DeliverableType, JudgingExtensionPayment
 from core.models import ClockOverride
 from core.transitions import TRANSITION_REGISTRY
-from payments.adapters import FakePGAdapter
+from payments.adapters import FakePGAdapter, PGError, PGTimeoutError
 from policies.services import get_current_policy
 
 TICK_URL = "/api/internal/tick"
@@ -1208,11 +1208,12 @@ def test_extension_confirm_forwards_payment_key_to_adapter(client, category, lan
 
     initiated = _initiate_extension(client, sponsor, contest["id"])
 
-    received: dict[str, str | None] = {}
+    received: dict[str, str | int | None] = {}
     original_confirm = FakePGAdapter.confirm
 
-    def spy_confirm(self, *, order_id, simulate=None, payment_key=None):
+    def spy_confirm(self, *, order_id, simulate=None, payment_key=None, amount=None):
         received["payment_key"] = payment_key
+        received["amount"] = amount
         return original_confirm(self, order_id=order_id, simulate=simulate)
 
     with patch.object(FakePGAdapter, "confirm", spy_confirm):
@@ -1227,6 +1228,41 @@ def test_extension_confirm_forwards_payment_key_to_adapter(client, category, lan
     assert confirm_resp.status_code == 200
     assert confirm_resp.json()["status"] == "paid"
     assert received["payment_key"] == "fake-widget-key-extension-abc123"
+    # amount도 payment_key와 같은 이유로 계약에 있다(#87).
+    assert received["amount"] == initiated["amount"]
+
+
+@pytest.mark.django_db
+def test_extension_confirm_survives_query_status_failure_after_timeout(
+    client, category, landing_type
+):
+    """payments.api.confirm_payment와 같은 구멍이다(#87 코드리뷰 지적 4) —
+    타임아웃 뒤 재확인(query_status)마저 실패하면 500이 되면 안 된다. 강제로
+    종결시키지 않고 현재 상태(REQUESTED)를 그대로 돌려준다."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+    _close_contest(client, contest, deadline=deadline)
+
+    initiated = _initiate_extension(client, sponsor, contest["id"])
+
+    def broken_confirm(self, *, order_id, simulate=None, payment_key=None, amount=None):
+        raise PGTimeoutError("fake network blip on confirm")
+
+    def broken_query_status(self, *, order_id):
+        raise PGError("fake network blip on query_status")
+
+    with patch.object(FakePGAdapter, "confirm", broken_confirm), patch.object(
+        FakePGAdapter, "query_status", broken_query_status
+    ):
+        confirm_resp = _confirm_extension(
+            client, sponsor, contest["id"], initiated["order_id"], payment_key="k"
+        )
+
+    assert confirm_resp.status_code == 200
+    assert confirm_resp.json()["status"] == "requested"
 
 
 @pytest.mark.django_db

@@ -233,6 +233,14 @@ DATABASES = {
 # DB 인덱스를 1 로 둔다 — Celery 브로커가 0 을 쓰므로(compose 의 CELERY_BROKER_URL)
 # 같은 인스턴스를 공유하면서도 키가 섞이지 않는다.
 _DEV_REDIS_PORT = _env("LAURIO_REDIS_PORT", "16379")
+# **동시에 두 pytest 를 돌린다면 이 값의 DB 인덱스를 서로 다르게 줘라.**
+#
+# `tests/conftest.py` 가 테스트마다 `caches["sessions"].clear()` 를 부르는데,
+# Django 의 RedisCache 는 그것을 **FLUSHDB** 로 구현한다 — 즉 키 접두어가 있든
+# 없든 **그 DB 전체**를 날린다. 그래서 두 체인이 같은 인덱스를 쓰면 한쪽의
+# 테스트 정리가 다른 쪽의 로그인 세션을 통째로 지우고, 피해자는 원인과 무관한
+# 401 무더기를 본다 — 코드 회귀와 구분되지 않는다. 접두어로는 막을 수 없고
+# 인덱스를 갈라야 한다(처음에 접두어로 고치려다 이 사실을 확인했다).
 SESSION_REDIS_URL = _env("SESSION_REDIS_URL", f"redis://127.0.0.1:{_DEV_REDIS_PORT}/1")
 
 CACHES = {
@@ -240,17 +248,6 @@ CACHES = {
     "sessions": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
         "LOCATION": SESSION_REDIS_URL,
-        # 세션 키에 접두어를 붙일 수 있게 한다.
-        #
-        # Operator 세션은 실제 Redis 에 산다(ADR-0018) — 그래서 **동시에 도는 두
-        # pytest 가 서로의 세션을 밟는다.** 한쪽이 캐시를 비우거나 같은 키를 쓰면
-        # 다른 쪽 Operator 가 로그인한 적 없는 것이 되어, 원인과 무관한 401 무더기로
-        # 무너진다. 실제로 겪었고, 그 실패는 코드 회귀와 구분되지 않는다.
-        #
-        # `LAURIO_TEST_DB_NAME` 과 같은 처방이다 — 병렬 워크트리에서 체인마다
-        # `LAURIO_SESSION_KEY_PREFIX` 를 달리 주면 격리된다. 기본값은 빈 문자열이라
-        # 단독 실행과 배포는 아무것도 바뀌지 않는다.
-        "KEY_PREFIX": _env("LAURIO_SESSION_KEY_PREFIX", ""),
     },
 }
 
@@ -425,6 +422,31 @@ if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(PAYMENT_ADAPTER_MODE):
         "fake 다. staging/production 배포에서는 실제 PG 어댑터의 dotted path를 반드시 "
         "설정해야 한다."
     )
+
+# 토스페이먼츠 결제 어댑터(#87)가 쓰는 자격증명. `payments.adapters_toss.TossPGAdapter`가
+# 인자 없이 생성되는 시점(`core.adapters.resolve_adapter`)에 `TOSS_API_SECRET_KEY`가
+# 비어 있으면 스스로 거부한다 — 여기서 부팅을 막지 않는 이유는 dev에서는
+# PAYMENT_ADAPTER_MODE가 기본값 "fake"라 이 클래스 자체가 생성되지 않기 때문이다.
+# 배포 환경에서 PAYMENT_ADAPTER_MODE가 이 클래스를 가리키는데 키가 비어 있으면
+# `core.adapters.check_adapter_mode`가 어댑터 생성 자체가 실패하는 것을 잡아
+# `core.E002`로 부팅을 거부한다(AC: 자격증명 누락은 배포에서 부팅 실패다).
+#
+# 환경별로 실제 주입되는 변수 이름이 다르다(#87 코드리뷰 지적 6) — dev는 저장소
+# 루트 .env가 이미 `TOSS_API_SECRET_KEY`라는 이름을 쓰고, staging/prod compose는
+# 그보다 먼저(#82/#83 스캐폴딩 시점) `TOSS_SANDBOX_SECRET_KEY`/`TOSS_LIVE_SECRET_KEY`로
+# 못박아 뒀다 — 샌드박스 키와 실물 키를 다른 이름으로 두면 운영자가 실수로 실물
+# 키를 staging에 붙여넣어도 그 변수가 애초에 읽히지 않는다. 세 이름 중 먼저 채워진
+# 값을 쓴다 — 배포 환경마다 하나만 채워지므로 순서는 충돌하지 않는다. compose
+# 파일·env example을 새 이름으로 바꾸지 않는 이유는 이 구분 자체가 의도된
+# 안전장치이기 때문이다.
+TOSS_API_SECRET_KEY = (
+    _env("TOSS_API_SECRET_KEY", "")
+    or _env("TOSS_SANDBOX_SECRET_KEY", "")
+    or _env("TOSS_LIVE_SECRET_KEY", "")
+)
+# 벤더가 문서화한 API 버전 헤더값(`TossPayments-api-version`). dev의 테스트 키는
+# 2022-11-16을 쓴다 — 값 자체는 벤더 사실이라 코드에 하드코딩하지 않고 환경에서 읽는다.
+TOSS_API_VERSION = _env("TOSS_API_VERSION", "2022-11-16")
 
 # 개최비·심사기간·심사기간 연장 단위·연장비는 더 이상 여기 없다(#78,
 # ADR-0023) — `policies.models.PlatformPolicy`(DB 단일 행)의
