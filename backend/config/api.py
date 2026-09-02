@@ -25,6 +25,7 @@ from storage.api import router as storage_router
 from storage.policy import StorageAccessDenied
 from submissions.api import router as submissions_router
 from verification.api import router as verification_router
+from verification.operator_api import operator_router as verification_operator_router
 
 api = NinjaAPI(title="Laurio API", version="0.1.0")
 
@@ -69,5 +70,6 @@ api.add_router("/operator", appeals_operator_router)
 api.add_router("/operator", payouts_operator_router)
 api.add_router("/operator", policies_operator_router)
 api.add_router("/operator", contests_operator_router)
+api.add_router("/operator", verification_operator_router)
 
 api.add_router("/storage", storage_router)

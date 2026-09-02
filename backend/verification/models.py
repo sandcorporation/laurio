@@ -224,3 +224,33 @@ class RetainedIdentity(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"RetainedIdentity<{self.user_id}:{self.reason}>"
+
+
+class IdentityReading(models.Model):
+    """Operator가 탈퇴 참가자의 보존된 실명(`RetainedIdentity`)을 펼쳐 본 사건 하나
+    (#103, ADR-0022).
+
+    `appeals.SourceReading`과 같은 모양이다 — 상태가 아니라 사건이다. 같은
+    Operator가 같은 `RetainedIdentity`를 다시 펼치면 행이 하나 더 쌓인다.
+    중복 제거하면 "한 번 봤다"와 "열 번 봤다"가 구별되지 않아 기록의 값이
+    사라진다.
+
+    둘 다 PROTECT다 — 열람한 Operator 계정이나 그 대상 `RetainedIdentity`를
+    지우는 것만으로 "누가 이 실명을 봤는가"가 사라지면, ADR-0022가 세운 약속
+    (감춘다는 말이 운영자 앞에서 조용히 사라지지 않는다)이 삭제 한 번으로
+    무효가 된다.
+    """
+
+    retained_identity = models.ForeignKey(
+        RetainedIdentity, related_name="identity_readings", on_delete=models.PROTECT
+    )
+    read_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="identity_readings", on_delete=models.PROTECT
+    )
+    read_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ["-read_at"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"IdentityReading(retained_identity={self.retained_identity_id})"

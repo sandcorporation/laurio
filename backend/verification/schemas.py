@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from ninja import Schema
 
@@ -34,3 +34,28 @@ class CiLookupMatchOut(Schema):
 
 class CiLookupOut(Schema):
     matches: list[CiLookupMatchOut]
+
+
+# --- Operator: 보존된 실명 열람 (#103, ADR-0022) ------------------------------
+
+
+class RetainedIdentityOut(Schema):
+    """목록·상세 — 접힌 채로 나간다. 실명·생년월일은 여기 없다(#103 AC).
+
+    `펼침`(POST .../reveal) 을 거쳐야만 값이 내려온다 — 목록을 훑거나 상세를
+    여는 것만으로는 값이 내려오지 않는다.
+    """
+
+    id: int
+    user_id: int
+    reason: str
+    retained_because_id: int
+    retained_until: datetime
+    created_at: datetime
+
+
+class RetainedIdentityRevealOut(Schema):
+    """펼침 응답 (#103, ADR-0022). 이 요청 자체가 `IdentityReading` 을 남긴다."""
+
+    real_name: str
+    birth_date: date
