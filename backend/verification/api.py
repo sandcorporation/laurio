@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+from datetime import timedelta
 
 from django.conf import settings
 from django.http import HttpRequest
@@ -16,6 +17,7 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
+from core.adapters import is_fake_adapter_binding
 
 from .adapters import VerificationAdapterError, VerificationMissingCIError, get_adapter
 from .age import is_adult
@@ -32,6 +34,25 @@ from .schemas import (
 logger = logging.getLogger(__name__)
 
 router = Router(tags=["verification"])
+
+# identityVerificationId 하나가 유효한 최대 시간(#85 코드리뷰 지적 4). 이게 없으면
+# 실패한(또는 도중에 포기한) 시도가 VerificationRequest에 무기한 쌓이고, 그 값이
+# 무기한 재사용 가능한 상태로 남는다 — 사람이 인증창을 실제로 여닫는 데 걸리는
+# 시간을 넉넉히 잡아도 30분이면 충분하다.
+_PENDING_VERIFICATION_TTL = timedelta(minutes=30)
+
+
+def _generate_identity_verification_id() -> str:
+    """서버가 발급하는 identityVerificationId(#85 코드리뷰 지적 1·4).
+
+    포트원 V2의 가맹점 지정 식별자 길이 상한은 40자다(#85 코드리뷰 지적 1) —
+    ``"laurio-iv-" + secrets.token_urlsafe(24)``는 42자로 그 상한을 넘어 dev
+    Fake 경로에서는 절대 안 걸리고 staging/prod에서 실제 벤더를 칠 때만
+    깨졌다. `secrets.token_urlsafe(18)`은 24자라 접두어(10자)를 더해도 34자로
+    여유 있게 들어간다.
+    """
+
+    return f"laurio-iv-{secrets.token_urlsafe(18)}"
 
 
 def _to_status_out(verification: Verification | None) -> VerificationStatusOut:
@@ -55,7 +76,11 @@ def start_verification(request: HttpRequest):
     제출해 그 사람의 CI/DI로 VERIFIED가 되는 계정 탈취(미성년자의 성년 게이트
     통과, 실소유자의 자전거래 오차단)가 가능하다.
     """
-    identity_verification_id = f"laurio-iv-{secrets.token_urlsafe(24)}"
+    # 이 사용자의 이전 미완료 시도는 새 시도로 대체한다(#85 코드리뷰 지적 4) —
+    # 재시도·창 닫고 다시 시도 같은 흔한 경로가 계속 새 행을 쌓지 않는다.
+    VerificationRequest.objects.filter(user=request.auth_user).delete()
+
+    identity_verification_id = _generate_identity_verification_id()
     VerificationRequest.objects.create(
         user=request.auth_user, identity_verification_id=identity_verification_id
     )
@@ -72,15 +97,27 @@ def verify(request: HttpRequest, payload: VerifyIn):
     # 어댑터의 토큰은 사용자가 직접 지어내는 자기완결적 문자열이라(FakeVerificationAdapter)
     # 귀속시킬 대상 자체가 없고, tests/test_verification.py를 비롯한 기존 스위트
     # 전체가 /verification/start 없이 바로 verify를 호출하는 전제로 짜여 있다.
+    #
+    # `settings.VERIFICATION_ADAPTER_MODE == "fake"` 리터럴 비교가 아니라
+    # `is_fake_adapter_binding`을 쓴다(#85 코드리뷰 지적 5) — 배포 부팅 가드
+    # (config/settings.py)는 이미 "...FakeVerificationAdapter"처럼 dotted path가
+    # 가리키는 클래스명이 Fake로 시작하기만 해도 fake로 본다. 이 검사가 리터럴
+    # "fake"만 보면, 그런 dotted path로 바인딩된 배포 환경에서는 두 판정이
+    # 어긋나 이 소유권 확인이 항상 걸려 본인확인 자체가 영구히 불가능해진다.
     pending_request: VerificationRequest | None = None
-    if settings.VERIFICATION_ADAPTER_MODE != "fake":
+    if not is_fake_adapter_binding(settings.VERIFICATION_ADAPTER_MODE):
+        # 만료된 요청은 존재해도 없는 것과 같다(#85 코드리뷰 지적 4) — TTL이
+        # 지나면 같은 이유(403)로 거절되고, 아래에서 함께 지워 정리된다.
         pending_request = VerificationRequest.objects.filter(
-            user=request.auth_user, identity_verification_id=token
+            user=request.auth_user,
+            identity_verification_id=token,
+            created_at__gte=timezone.now() - _PENDING_VERIFICATION_TTL,
         ).first()
         if pending_request is None:
             raise HttpError(
                 403,
-                "본인이 발급받지 않은 본인확인 요청입니다. 처음부터 다시 시도해 주세요.",
+                "본인이 발급받지 않았거나 만료된 본인확인 요청입니다. 처음부터 다시 "
+                "시도해 주세요.",
             )
 
     try:

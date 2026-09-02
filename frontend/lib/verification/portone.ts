@@ -80,9 +80,22 @@ function loadPortOneSdk(): Promise<void> {
   // 성공하든 실패하든, 다음 호출이 이번 시도의 결과를 그대로 재사용하지
   // 않도록 캐시를 비운다 — 실패 후 재시도가 가능해야 하고, 성공 뒤에는 위의
   // `window.PortOne` 체크가 캐시보다 먼저 확인되므로 비워도 안전하다.
-  promise.finally(() => {
-    if (sdkLoadPromise === promise) sdkLoadPromise = null;
-  });
+  //
+  // `.finally(...)`를 쓰지 않는다(#85 코드리뷰 지적 6) — `promise`가
+  // reject되면 `.finally(...)`가 돌려주는 새 Promise도 그대로 reject되는데,
+  // 그 Promise를 아무도 기다리지 않으므로(별도 변수에 담기지도, return되지도
+  // 않는다) unhandled rejection이 된다. `.then(onFulfilled, onRejected)`의
+  // 두 콜백 모두 값을 그냥 반환해(재던지지 않아) 그 체인이 항상 성공으로
+  // 끝나게 만든다 — 캐시 비우기라는 부수효과는 그대로 실행되면서도, 아무도
+  // 기다리지 않는 Promise가 reject되는 일은 없다.
+  promise.then(
+    () => {
+      if (sdkLoadPromise === promise) sdkLoadPromise = null;
+    },
+    () => {
+      if (sdkLoadPromise === promise) sdkLoadPromise = null;
+    },
+  );
   return promise;
 }
 
@@ -104,7 +117,7 @@ async function fetchServerIssuedIdentityVerificationId(): Promise<string> {
  * 모바일은 PortOne SDK가 팝업 대신 전체 페이지 리다이렉트로 인증창을 여는데,
  * 그러면 이 JS 실행 컨텍스트 자체가 사라져 이 Promise는 영원히 resolve되지
  * 않는다(#85 코드리뷰 지적 3) — 대신 리다이렉트로 돌아온 새 페이지 로드에서
- * `consumeRedirectVerificationResult`를 불러야 한다.
+ * `peekRedirectVerificationResult`를 불러야 한다.
  */
 export async function requestPortOneIdentityVerification(params: {
   storeId: string;
@@ -136,37 +149,59 @@ export type PortOneRedirectResult =
   | { status: "failure"; message: string };
 
 /**
- * 모바일에서 PortOne 인증창이 전체 페이지 리다이렉트로 돌아왔는지 확인한다
- * (#85 코드리뷰 지적 3). `redirectUrl`로 돌아온 요청은 쿼리스트링에
- * identityVerificationId(성공)나 code/message(실패)를 싣고 있다 — 있으면 그
- * 결과를 소비하고 쿼리스트링을 지운 뒤(새로고침 없이, 다시 마운트돼도 같은
- * 결과를 중복 처리하지 않도록) 돌려준다. 리다이렉트 복귀가 아니면(쿼리
- * 파라미터가 없으면) null이다 — 데스크톱 팝업 흐름에서는 절대 호출될 일이
- * 없지만, 모바일에서는 화면이 마운트될 때마다 이걸로 복귀 여부를 확인해야
- * `requestPortOneIdentityVerification`이 돌려주는 Promise가 오지 않는 경로를
- * 보완할 수 있다.
+ * 모바일에서 PortOne 인증창이 전체 페이지 리다이렉트로 돌아왔는지 **읽기만**
+ * 한다 — URL은 건드리지 않는다(#85 코드리뷰 지적 2·7).
+ *
+ * 이전 구현은 이 함수 자신이 URL에서 결과를 읽는 동시에 쿼리스트링을
+ * 지웠다 — `POST /verification/verify`가 그 결과를 서버에 확정하기 **전에**
+ * 이미 벤더 쪽 흔적이 사라지는 셈이라, 그 확정 요청이 일시적으로(네트워크
+ * 끊김 등) 실패하면 이미 벤더 쪽에서는 완료된 본인확인을 되찾을 방법이
+ * 없었다 — 재시도할 identityVerificationId 자체가 URL에서 사라졌기
+ * 때문이다. 호출부는 `POST /verification/verify`가 실제로 확정된 뒤에만
+ * `clearRedirectVerificationParams`를 따로 불러야 한다.
+ *
+ * 실패 복귀(`code`/`message`만 실리고 `identityVerificationId`가 없을 수
+ * 있다)도 결과로 인식한다 — 이전에는 `identityVerificationId`가 없으면
+ * 곧장 null을 돌려줘 실패 복귀 자체가 통째로 무시됐고, 그 파라미터들이 URL에
+ * 영원히 남았다(#85 코드리뷰 지적 7).
+ *
+ * 리다이렉트 복귀가 아니면(관련 쿼리 파라미터가 전혀 없으면) null이다.
  */
-export function consumeRedirectVerificationResult(): PortOneRedirectResult | null {
+export function peekRedirectVerificationResult(): PortOneRedirectResult | null {
   if (typeof window === "undefined") return null;
 
   const params = new URLSearchParams(window.location.search);
   const identityVerificationId = params.get("identityVerificationId");
-  if (!identityVerificationId) return null;
-
   const code = params.get("code");
   const message = params.get("message");
 
+  if (!identityVerificationId && !code) return null;
+
+  if (code) {
+    return { status: "failure", message: message || "본인확인 창에서 오류가 발생했습니다." };
+  }
+  // 위 가드(!identityVerificationId && !code)를 통과했고 code가 없으므로
+  // identityVerificationId는 반드시 있다.
+  return { status: "success", identityVerificationId: identityVerificationId as string };
+}
+
+/**
+ * `peekRedirectVerificationResult`가 읽은 리다이렉트 쿼리 파라미터를 URL에서
+ * 지운다(새로고침 없이) — 호출부가 그 결과를 **확정된 뒤에**(성공/실패 응답을
+ * 서버로부터 실제로 받은 뒤에, 또는 벤더 쪽 실패라 재시도할 여지가 없을 때)
+ * 명시적으로 불러야 한다(#85 코드리뷰 지적 2). 다시 마운트돼도 같은 결과를
+ * 중복 처리하지 않게 하려는 목적이지, 확정 전에 미리 지우려는 게 아니다.
+ */
+export function clearRedirectVerificationParams(): void {
+  if (typeof window === "undefined") return;
+
+  const params = new URLSearchParams(window.location.search);
   params.delete("identityVerificationId");
   params.delete("code");
   params.delete("message");
   const rest = params.toString();
   const nextUrl = window.location.pathname + (rest ? "?" + rest : "") + window.location.hash;
   window.history.replaceState(null, "", nextUrl);
-
-  if (code) {
-    return { status: "failure", message: message || "본인확인 창에서 오류가 발생했습니다." };
-  }
-  return { status: "success", identityVerificationId };
 }
 
 /** 실물 본인확인 버튼을 렌더링할지 결정한다 — 둘 다 있어야 인증창을 열 수 있다. */

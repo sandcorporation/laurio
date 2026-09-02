@@ -28,6 +28,31 @@ from django.utils.module_loading import import_string
 T = TypeVar("T")
 
 
+def is_fake_adapter_binding(value: str) -> bool:
+    """"fake" 별칭이거나, dotted path가 가리키는 클래스명이 Fake로 시작하면 True.
+
+    원래는 `value == "fake"`만 봤다. 그런데 STORAGE_BACKEND는 "fake"가 별칭
+    dict(storage.adapters._BACKENDS)를 거쳐 실제 dotted path로 풀리고,
+    LLM_ADAPTER_MODE/LLM_REQUIREMENT_CHAT_ADAPTER_MODE는 "fake"가 아니면 뭐든
+    dotted path로 그대로 import한다(resolve_adapter) — 즉 운영 배포에서
+    `STORAGE_BACKEND=storage.adapters.fake.FakeStorageAdapter`처럼 "fake"라는
+    별칭 문자열만 피해 가면 실제로는 여전히 Fake 어댑터가 조용히 바인딩된다.
+    그래서 별칭 문자열이 아니라 "가리키는 클래스가 Fake인가"를 직접 판정한다.
+
+    `config.settings`의 배포 부팅 가드(IS_DEPLOYED_ENVIRONMENT일 때 fake 바인딩을
+    거부)와 `verification.api.verify`의 identityVerificationId 소유권 확인
+    (fake 모드는 그 확인을 건너뛴다)이 반드시 같은 판정을 써야 한다(#85 코드리뷰
+    지적 5) — 한쪽만 dotted-path-그러나-Fake인 값을 "fake로 안 본다"고 판정하면,
+    검사가 서로 다른 결론에 도달해 배포 가드는 통과했는데 본인확인 자체가 항상
+    403으로 막히는 상황이 생긴다. 이 함수 하나를 두 곳 모두에서 그대로 쓴다.
+    """
+
+    if value == "fake":
+        return True
+    class_name = value.rsplit(".", 1)[-1]
+    return class_name.startswith("Fake")
+
+
 def resolve_adapter(*, mode: str, fake_factory: Callable[[], T], not_implemented_hint: str) -> T:
     """`mode`가 `"fake"`면 `fake_factory()`를, 아니면 dotted path를 import해 인스턴스화한다.
 

@@ -134,6 +134,26 @@ def test_resolve_wraps_network_errors():
             adapter.resolve("iv-abc-123")
 
 
+def test_resolve_does_not_leak_the_request_url_when_the_network_call_fails(caplog):
+    """`requests.RequestException`의 str()에는 요청 URL 전체(storeId 쿼리
+    파라미터 포함)가 그대로 들어간다 — 예외 메시지에 그대로 실으면 verify()가
+    422 detail로 사용자에게 돌려준다(#85 코드리뷰 지적 3). 로그에만 남아야
+    한다."""
+    adapter = PortOneV2VerificationAdapter()
+
+    with patch("verification.adapters.requests.get") as mock_get:
+        mock_get.side_effect = requests.ConnectionError(
+            "Max retries exceeded with url: /identity-verifications/iv-abc-123"
+            "?storeId=store-test-1 (Caused by ...)"
+        )
+        with caplog.at_level(logging.ERROR, logger="verification.adapters"):
+            with pytest.raises(VerificationAdapterError) as exc_info:
+                adapter.resolve("iv-abc-123")
+
+    assert "store-test-1" not in str(exc_info.value)
+    assert any("store-test-1" in r.getMessage() for r in caplog.records)
+
+
 def test_resolve_raises_and_logs_when_response_is_not_json(caplog):
     adapter = PortOneV2VerificationAdapter()
 
@@ -172,6 +192,33 @@ def test_resolve_raises_and_logs_when_expected_fields_are_missing(caplog):
                 adapter.resolve("iv-abc-123")
 
     assert any(r.levelno >= logging.ERROR for r in caplog.records)
+
+
+def test_resolve_does_not_leak_the_raw_birth_date_when_it_is_malformed(caplog):
+    """`date.fromisoformat`이 거부하는 값을 그대로 받으면 그 ValueError의 str()에
+    원본 문자열(생년월일, PII)이 그대로 들어간다 — 예외 메시지에 그대로 실으면
+    verify()가 422 detail로 사용자에게 돌려준다(#85 코드리뷰 지적 3)."""
+    adapter = PortOneV2VerificationAdapter()
+    malformed_birth_date = "1990-99-99"
+
+    with patch("verification.adapters.requests.get") as mock_get:
+        mock_get.return_value = _fake_response(
+            json_body={
+                "status": "VERIFIED",
+                "verifiedCustomer": {
+                    "name": "홍길동",
+                    "birthDate": malformed_birth_date,
+                    "ci": "ci-1",
+                    "di": "di-1",
+                },
+            }
+        )
+        with caplog.at_level(logging.ERROR, logger="verification.adapters"):
+            with pytest.raises(VerificationAdapterError) as exc_info:
+                adapter.resolve("iv-abc-123")
+
+    assert malformed_birth_date not in str(exc_info.value)
+    assert any(malformed_birth_date in r.getMessage() for r in caplog.records)
 
 
 def test_resolve_reuses_the_84_ci_invariant_instead_of_reimplementing_it():

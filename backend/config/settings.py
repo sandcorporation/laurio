@@ -10,6 +10,15 @@ from pathlib import Path
 from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
+# core.adapters는 Django 모델·앱 레지스트리가 필요한 것을 아무것도 임포트하지
+# 않으므로(core/adapters.py 모듈 docstring) settings.py 모듈 실행 도중(=아직 앱
+# 레지스트리가 준비되지 않은 시점)에 import해도 안전하다. 배포 부팅 가드(아래
+# IS_DEPLOYED_ENVIRONMENT 블록들)와 verification.api.verify의
+# identityVerificationId 소유권 확인이 반드시 같은 fake 판정을 써야 하므로
+# (#85 코드리뷰 지적 5), 그 판정 함수를 여기서 임포트해 별칭(`_is_fake_adapter_binding`)
+# 으로 그대로 쓴다.
+from core.adapters import is_fake_adapter_binding as _is_fake_adapter_binding
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # 호스트에서 돌릴 때 backend/.env 를 읽는다. override=False 라서 compose·CI 가 주입한
@@ -31,25 +40,6 @@ def _env_bool(name: str, default: bool) -> bool:
     if not raw:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _is_fake_adapter_binding(value: str) -> bool:
-    """"fake" 별칭이거나, dotted path가 가리키는 클래스명이 Fake로 시작하면 True.
-
-    코디네이터 리뷰 지적: 이 가드는 원래 `value == "fake"`만 봤다. 그런데
-    STORAGE_BACKEND는 "fake"가 별칭 dict(storage.adapters._BACKENDS)를 거쳐 실제
-    dotted path로 풀리고, LLM_ADAPTER_MODE/LLM_REQUIREMENT_CHAT_ADAPTER_MODE는
-    "fake"가 아니면 뭐든 dotted path로 그대로 import한다
-    (core.adapters.resolve_adapter) — 즉 운영 배포에서
-    `STORAGE_BACKEND=storage.adapters.fake.FakeStorageAdapter`처럼 "fake"라는
-    별칭 문자열만 피해 가면 실제로는 여전히 Fake 어댑터가 조용히 바인딩된다.
-    그래서 별칭 문자열이 아니라 "가리키는 클래스가 Fake인가"를 직접 판정한다.
-    """
-
-    if value == "fake":
-        return True
-    class_name = value.rsplit(".", 1)[-1]
-    return class_name.startswith("Fake")
 
 
 DEBUG = _env_bool("DJANGO_DEBUG", True)

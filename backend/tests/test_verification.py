@@ -616,3 +616,39 @@ def test_a_successfully_consumed_token_cannot_be_replayed(client):
         )
 
     assert second.status_code == 403
+
+
+
+class FakeDottedPathVerificationAdapter(FakeVerificationAdapter):
+    """클래스명이 "Fake"로 시작하는 dotted-path 어댑터(#85 코드리뷰 지적 5).
+
+    `VERIFICATION_ADAPTER_MODE`에 리터럴 "fake"가 아니라 이 dotted path를
+    직접 지목해도(배포 부팅 가드 `is_fake_adapter_binding`이 이미 이런 값을
+    fake로 본다), `verify()`의 identityVerificationId 소유권 확인이 같은
+    판정을 쓰지 않으면 이 클래스를 "실물"로 오인해 `/verification/start` 없이는
+    영원히 403이 난다 — 배포 가드는 통과했는데 본인확인 자체가 불가능해지는
+    상황이다.
+    """
+
+
+@pytest.mark.django_db
+def test_a_fake_named_dotted_path_does_not_require_verification_start(client):
+    """리터럴 "fake"가 아니라 dotted path로 지목된 Fake 클래스도, `/verification/start`
+    없이 곧장 `/verification/verify`를 부를 수 있어야 한다(#85 코드리뷰 지적 5)."""
+
+    pair = _login(client)
+
+    with override_settings(
+        VERIFICATION_ADAPTER_MODE=(
+            "tests.test_verification.FakeDottedPathVerificationAdapter"
+        )
+    ):
+        response = client.post(
+            "/api/verification/verify",
+            data={"verification_token": _fake_token("홍길동", "1990-05-15", "ci-1", "di-1")},
+            content_type="application/json",
+            **_auth_header(pair["access"]),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "verified"

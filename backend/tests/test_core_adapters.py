@@ -19,7 +19,7 @@ from typing import Protocol, runtime_checkable
 import pytest
 from django.test import override_settings
 
-from core.adapters import check_adapter_mode, resolve_adapter
+from core.adapters import check_adapter_mode, is_fake_adapter_binding, resolve_adapter
 
 # --- resolve_adapter -----------------------------------------------------------
 
@@ -151,3 +151,25 @@ def test_check_adapter_mode_passes_for_a_conforming_class():
     ):
         errors = check_adapter_mode(setting_name="_CHECK_ADAPTER_TEST_MODE", protocol=_Greetable)
     assert errors == []
+
+
+# --- is_fake_adapter_binding ----------------------------------------------------
+
+
+def test_is_fake_adapter_binding_true_for_the_literal_alias():
+    assert is_fake_adapter_binding("fake") is True
+
+
+def test_is_fake_adapter_binding_true_for_a_dotted_path_ending_in_fake():
+    """"fake"라는 별칭 문자열을 안 썼어도, dotted path가 가리키는 클래스명이
+    Fake로 시작하면 fake로 본다(#85 코드리뷰 지적 5의 전제) — 배포 부팅 가드와
+    verification.api.verify의 identityVerificationId 소유권 확인이 이 함수
+    하나를 그대로 같이 쓴다는 것 자체가 이 판정이 두 곳에서 다르게 나지 않게
+    보장하는 방법이다."""
+
+    assert is_fake_adapter_binding("verification.adapters.FakeVerificationAdapter") is True
+
+
+def test_is_fake_adapter_binding_false_for_a_real_dotted_path():
+    assert is_fake_adapter_binding("verification.adapters.PortOneV2VerificationAdapter") is False
+

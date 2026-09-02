@@ -146,7 +146,11 @@ class PortOneV2VerificationAdapter:
                 timeout=self._TIMEOUT_SECONDS,
             )
         except requests.RequestException as exc:
-            raise VerificationAdapterError(f"포트원 본인확인 조회 호출이 실패했다: {exc}") from exc
+            # requests 예외의 str()에는 요청 URL 전체(쿼리 파라미터의 storeId
+            # 포함)가 그대로 들어간다 — 로그에만 남기고 예외 메시지는 일반화한다
+            # (#85 코드리뷰 지적 3, 바로 아래 4xx/5xx·JSON 파싱 분기와 같은 원칙).
+            logger.error("포트원 본인확인 조회 호출이 실패했다: %s", exc)
+            raise VerificationAdapterError("포트원 본인확인 조회 호출이 실패했다.") from exc
 
         if response.status_code == 404:
             raise VerificationAdapterError("포트원에 존재하지 않는 본인확인 식별자다.")
@@ -187,9 +191,14 @@ class PortOneV2VerificationAdapter:
             real_name = str(customer["name"])
             birth_date = date.fromisoformat(str(customer["birthDate"]))
         except (KeyError, ValueError) as exc:
+            # ValueError(date.fromisoformat)의 str()에는 문제가 된 원본 문자열이
+            # 그대로 들어간다 — birthDate가 계약과 다른 형식이면 그 값(생년월일,
+            # PII)이 예외 메시지에 실려 verify()의 422 detail로 사용자에게 그대로
+            # 나갈 수 있었다(#85 코드리뷰 지적 3). customer 전체는 로그에만
+            # 남기고, 사용자에게 가는 메시지는 어떤 필드가 문제인지만 말한다.
             logger.error("포트원 본인확인 응답 필드가 계약과 다르다: %r", customer)
             raise VerificationAdapterError(
-                f"포트원 본인확인 응답 형식이 계약과 다르다: {exc}"
+                "포트원 본인확인 응답 형식이 계약과 다르다(name/birthDate)."
             ) from exc
 
         ci = str(customer.get("ci") or "")

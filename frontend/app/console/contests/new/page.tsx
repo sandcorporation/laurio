@@ -47,8 +47,9 @@ import {
 } from "@/lib/contests/grill-types";
 
 import {
-  consumeRedirectVerificationResult,
+  clearRedirectVerificationParams,
   getPortOneBrowserConfig,
+  peekRedirectVerificationResult,
   requestPortOneIdentityVerification,
 } from "@/lib/verification/portone";
 
@@ -93,6 +94,7 @@ export default function NewContestGrillPage() {
   const [load, setLoad] = useState<LoadState>({ status: "loading" });
   const [reloadTick, setReloadTick] = useState(0);
   const [verifying, setVerifying] = useState(false);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
   const portOneConfig = useMemo(() => getPortOneBrowserConfig(), []);
 
   // --- Phase A: 브리프 ------------------------------------------------------
@@ -213,18 +215,38 @@ export default function NewContestGrillPage() {
     }
   }
 
-  async function finalizeLiveVerification(identityVerificationId: string) {
-    const res = await sessionFetch("/api/backend/verification/verify", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ verification_token: identityVerificationId }),
-    });
+  // 서버에 확정 요청을 보낸 결과 — recoverable=true는 우리 서버에 요청 자체가
+  // 닿지 않은 네트워크 수준 실패다(#85 코드리뷰 지적 2). 이 경우 벤더 쪽에서는
+  // 본인확인이 이미 끝났을 수 있으므로, 호출부가 identityVerificationId를 URL
+  // (또는 재시도 경로)에 그대로 남겨 다시 시도할 수 있게 해야 한다 — 반대로
+  // recoverable=false(서버가 확정된 응답을 줬다 — 성공이든 4xx든)는 그
+  // identityVerificationId의 운명이 이미 정해졌으므로 지워도 안전하다.
+  type FinalizeOutcome = { ok: true } | { ok: false; recoverable: boolean; message: string };
+
+  async function finalizeLiveVerification(identityVerificationId: string): Promise<FinalizeOutcome> {
+    let res: Response;
+    try {
+      res = await sessionFetch("/api/backend/verification/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ verification_token: identityVerificationId }),
+      });
+    } catch {
+      return {
+        ok: false,
+        recoverable: true,
+        message:
+          "본인확인 결과를 서버에 전달하지 못했습니다. 네트워크를 확인한 뒤 페이지를 " +
+          "새로고침해 다시 시도해 주세요.",
+      };
+    }
+
     if (res.ok) {
       setReloadTick((t) => t + 1);
-      return;
+      return { ok: true };
     }
     const body = (await res.json().catch(() => null)) as { detail?: string } | null;
-    window.alert(body?.detail ?? "본인확인에 실패했습니다.");
+    return { ok: false, recoverable: false, message: body?.detail ?? "본인확인에 실패했습니다." };
   }
 
   async function handleVerifyLive() {
@@ -232,11 +254,13 @@ export default function NewContestGrillPage() {
     const config = portOneConfig;
     if (!config) return;
     setVerifying(true);
+    setVerifyError(null);
     try {
       const identityVerificationId = await requestPortOneIdentityVerification(config);
-      await finalizeLiveVerification(identityVerificationId);
+      const outcome = await finalizeLiveVerification(identityVerificationId);
+      if (!outcome.ok) setVerifyError(outcome.message);
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "본인확인에 실패했습니다.");
+      setVerifyError(err instanceof Error ? err.message : "본인확인에 실패했습니다.");
     } finally {
       setVerifying(false);
     }
@@ -245,15 +269,41 @@ export default function NewContestGrillPage() {
   // 모바일에서는 PortOne 인증창이 팝업이 아니라 전체 페이지 리다이렉트로 열려
   // handleVerifyLive의 Promise가 resolve되지 않는다(#85 코드리뷰 지적 3) — 이
   // 화면이 리다이렉트로 돌아왔는지를 마운트 시점에 별도로 확인해야 한다.
+  //
+  // URL은 `peekRedirectVerificationResult`로 읽기만 하고, 서버 확정 요청이
+  // 실제로 끝난(recoverable=false가 된) 뒤에만 `clearRedirectVerificationParams`
+  // 를 부른다(#85 코드리뷰 지적 2) — 그 전에 지우면 확정 요청이 일시적으로
+  // 실패했을 때 재시도할 identityVerificationId 자체를 잃는다.
   useEffect(() => {
     if (session.status !== "authenticated") return;
-    const redirectResult = consumeRedirectVerificationResult();
+    const redirectResult = peekRedirectVerificationResult();
     if (redirectResult === null) return;
+
     if (redirectResult.status === "failure") {
-      window.alert(redirectResult.message);
+      // 벤더 쪽에서 이미 실패로 끝난 시도다 — 재시도할 여지가 없으므로 곧장
+      // 지운다.
+      clearRedirectVerificationParams();
+      setVerifyError(redirectResult.message);
       return;
     }
-    finalizeLiveVerification(redirectResult.identityVerificationId);
+
+    let cancelled = false;
+    setVerifying(true);
+    finalizeLiveVerification(redirectResult.identityVerificationId)
+      .then((outcome) => {
+        if (cancelled) return;
+        if (outcome.ok || !outcome.recoverable) {
+          clearRedirectVerificationParams();
+        }
+        if (!outcome.ok) setVerifyError(outcome.message);
+      })
+      .finally(() => {
+        if (!cancelled) setVerifying(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 마운트 시점 1회만 확인한다.
   }, [session.status]);
 
@@ -525,6 +575,11 @@ export default function NewContestGrillPage() {
           >
             {verifying ? "확인 중..." : "실제 본인확인하기(PortOne)"}
           </button>
+        )}
+        {verifyError && (
+          <p role="alert" data-testid="grill-verify-live-error" className="text-sm text-attention">
+            {verifyError}
+          </p>
         )}
       </main>
     );
