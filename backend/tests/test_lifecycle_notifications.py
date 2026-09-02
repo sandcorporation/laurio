@@ -882,13 +882,17 @@ def test_deadline_reminder_scan_yields_to_time_budget_mid_fanout_and_recovers_ne
         )
     )
 
-    # 호출 순서: ① run_due_lifecycle_notifications의 deadline 계산,
-    # ② send_due_deadline_reminders 바깥 루프(이 Contest 진입 전) 확인,
-    # ③ 첫 번째 참가자 팬아웃 전 확인, ④ 두 번째 참가자 팬아웃 전 확인(여기서
-    # 예산 초과로 멈춘다). 이 시나리오의 다른 네 스캔(judging-end 임박 등)은
-    # 대상 Contest가 없어 추가로 monotonic()을 부르지 않는다.
+    # 호출 순서: ① send_due_deadline_reminders 몫의 deadline 계산,
+    # ② 그 스캔의 바깥 루프(이 Contest 진입 전) 확인, ③ 첫 번째 참가자
+    # 팬아웃 전 확인, ④ 두 번째 참가자 팬아웃 전 확인(여기서 예산 초과로
+    # 멈춘다). 다섯 스캔이 각자 자기 차례에 deadline을 새로 계산하므로(#51
+    # 3차 코드리뷰 지적 4), 이어지는 네 스캔도 각자 한 번씩 자기 몫의
+    # deadline을 계산한다(⑤~⑧) — 이 시나리오에서는 그 네 스캔 모두 대상
+    # Contest/행이 없어 그 이상은 monotonic()을 부르지 않는다.
     with patch.object(
-        lifecycle_module.time_module, "monotonic", side_effect=[0.0, 0.0, 0.0, 100.0]
+        lifecycle_module.time_module,
+        "monotonic",
+        side_effect=[0.0, 0.0, 0.0, 100.0, 100.0, 100.0, 100.0, 100.0],
     ):
         budget_exceeded_scan = _run_lifecycle_scan(client)
 
@@ -925,6 +929,134 @@ def test_deadline_reminder_scan_yields_to_time_budget_mid_fanout_and_recovers_ne
         ]
         # 이미 받은 1명은 중복으로 다시 받지 않고, 나머지 2명은 정확히 한 번 받는다.
         assert len(matching) == 1
+
+
+@pytest.mark.django_db
+def test_award_result_notice_recovery_is_not_starved_when_an_earlier_scan_exhausts_its_own_share(
+    client, category, landing_type
+):
+    """#51 3차 코드리뷰 지적 4: 다섯 스캔이 마감시각 하나를 고정 순서로
+    공유하던 버전에서는, 첫 스캔(마감 임박 팬아웃)이 예산을 다 쓸 때마다
+    마지막 두 복구 스캔(Award/Distribution 결과 알림 복구)이 매번 첫
+    iteration에서 멈췄다 — 즉시 경로가 죽은 Award 결과 알림이 영원히
+    복구되지 않는다는 뜻이다. 이 테스트는 그 시나리오를 그대로 재현한다 —
+    마감 임박 스캔은(mock으로) 자기 몫을 다 쓰게 만들고, 동시에 Award 하나가
+    복구를 기다리고 있다. 다섯 스캔이 각자 새로 몫을 받으므로, 첫 스캔이
+    중단돼도 Award 복구 스캔은 정상적으로 실행돼야 한다."""
+
+    from unittest.mock import patch
+
+    import notifications.lifecycle as lifecycle_module
+    from awards.models import Award
+
+    # 두 Contest를 만들고 제출까지 전부 "지금"(고정 시각 없음) 끝내 둔다 —
+    # 아래에서 Award 시나리오를 완성하려고 시계를 앞으로 넘기면, 그 뒤에
+    # 만드는 Contest의 deadline_at 계산이 이미 지나간 시각이 될 수 있다.
+    award_deadline = timezone.now() + timedelta(hours=1)
+    award_sponsor, award_contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=award_deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    award_requirement_id = award_contest["requirements"][0]["id"]
+    award_dev = _verified_user(client, "budget-award-dev", "budget-award-dev-ci")
+    award_submission = _submit(
+        client, award_dev, award_contest["id"], requirement_id=award_requirement_id, grounded=True
+    )
+
+    reminder_deadline = timezone.now() + timedelta(hours=2)
+    _reminder_sponsor, reminder_contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=reminder_deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    reminder_requirement_id = reminder_contest["requirements"][0]["id"]
+    reminder_devs = [
+        _verified_user(client, f"budget-reminder-dev-{i}", f"budget-reminder-dev-{i}-ci")
+        for i in range(2)
+    ]
+    for dev in reminder_devs:
+        _submit(
+            client, dev, reminder_contest["id"], requirement_id=reminder_requirement_id, grounded=True
+        )
+
+    # --- Award 하나를 "즉시 알림이 죽어서 복구를 기다리는" 상태로 만든다 ---
+    _close_contest(client, award_contest, deadline=award_deadline)
+    _run_scoring(client)
+    _freeze(_safe_daytime_at_or_after(award_deadline + timedelta(minutes=1)))
+    with patch.object(
+        lifecycle_module,
+        "_safe_notify",
+        side_effect=RuntimeError("simulated crash before completion"),
+    ):
+        award_resp = client.post(
+            f"{AWARDS_URL}/{award_contest['id']}/award",
+            data={"submission_id": award_submission["id"]},
+            content_type="application/json",
+            **_auth_header(award_sponsor["access"]),
+        )
+    assert award_resp.status_code == 200, award_resp.content
+    award = Award.objects.get(contest_id=award_contest["id"])
+    assert award.result_notice_sent_at is None
+
+    # 마감 임박 알림이 밀려 있는 시각으로 다시 맞춘다 — reminder_contest는
+    # 이미 제출까지 끝나 있으므로 이 시계 이동에 영향받지 않는다.
+    _freeze(
+        _safe_daytime_at_or_after(
+            reminder_deadline
+            - timedelta(hours=get_current_policy().deadline_reminder_lead_hours)
+        )
+    )
+
+    # monotonic()을 처음 네 번(마감 임박 스캔의 deadline 계산 + 바깥 루프 진입 +
+    # 참가자 둘의 팬아웃 확인)만 정밀 제어해 그 스캔이 자기 몫을 다 쓰고
+    # 중단되게 만든다. 그 이후(다른 네 스캔이 각자 새로 받는 deadline과 그
+    # 이후 점검들)는 실제로 몇 번 호출되는지 미리 셀 필요가 없도록, 아주
+    # 작은 간격(0.001초)만 계속 흘려보낸다 — 각 스캔이 자기 몫으로 새로
+    # 받는 2.4초짜리 창을 그 정도로는 절대 넘기지 못한다.
+    call_count = {"n": 0}
+    fanout_exhausted_at = 100.0
+
+    def _monotonic_side_effect():
+        call_count["n"] += 1
+        n = call_count["n"]
+        if n <= 3:
+            return 0.0
+        if n == 4:
+            return fanout_exhausted_at
+        return fanout_exhausted_at + (n - 4) * 0.001
+
+    with patch.object(
+        lifecycle_module.time_module, "monotonic", side_effect=_monotonic_side_effect
+    ):
+        combined_scan = _run_lifecycle_scan(client)
+
+    # 마감 임박 스캔은 예산을 넘겨 중단됐다 — 이 Contest는 "완료"로 보고되지
+    # 않는다(이 테스트가 실제로 그 경로를 탔다는 확인).
+    assert not any(
+        r.get("event") == "deadline_reminder_sent" and r.get("contest_id") == reminder_contest["id"]
+        for r in combined_scan["results"]
+    )
+    assert Contest.objects.get(id=reminder_contest["id"]).deadline_reminder_sent_at is None
+
+    # 그런데도 Award 결과 알림 복구는 굶지 않고 실제로 실행됐다 — 다섯
+    # 스캔이 더는 마감시각 하나를 고정 순서로 공유하지 않기 때문이다.
+    assert any(
+        r.get("event") == "award_result_notice_recovered" and r.get("award_id") == award.id
+        for r in combined_scan["results"]
+    )
+    award.refresh_from_db()
+    assert award.result_notice_sent_at is not None
+    result_notices = [
+        n
+        for n in _my_notifications(client, award_dev["access"])
+        if n["notification_type"] == NotificationType.RESULT_NOTICE
+    ]
+    assert len(result_notices) == 1
 
 
 @pytest.mark.django_db

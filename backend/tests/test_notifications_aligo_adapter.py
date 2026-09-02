@@ -236,7 +236,14 @@ def test_sms_adapter_routes_a_long_message_to_lms_without_truncating(recipient):
         mock_post.return_value = _response(200, {"result_code": "1", "message": "success"})
         result = adapter.send(recipient=recipient, notification=notification)
 
-    assert result == ChannelSendResult(success=True)
+    assert result.success is True
+    # #51 3차 코드리뷰 지적 6: NotificationDispatch.channel은 재시도 판단에
+    # 쓰이는 슬롯 식별자라 "sms"로 그대로 남지만(notifications.services.
+    # _attempt_dispatch), 실제로는 LMS로 승격돼 나갔다는 사실이 새 구멍이 될
+    # 수 있다(notifications.E002는 바인딩 시점만 본다) — 그래서 발송 시점의
+    # 이 사실이 failure_reason에 정직하게 남아야 한다.
+    assert "LMS" in result.failure_reason
+    assert "승격" in result.failure_reason
     kwargs = mock_post.call_args.kwargs
     assert kwargs["data"]["msg_type"] == "LMS"
     assert "title" in kwargs["data"]
@@ -244,6 +251,39 @@ def test_sms_adapter_routes_a_long_message_to_lms_without_truncating(recipient):
     from notifications.rendering import render_message
 
     assert kwargs["data"]["msg"] == render_message(notification)
+
+
+@override_settings(**_ALIGO_SETTINGS)
+def test_sms_adapter_promotion_note_survives_a_vendor_rejection_too(recipient):
+    """#51 3차 코드리뷰 지적 6: 승격된 메시지가 벤더에게 거절당해도(성공이
+    아니어도) "SMS 슬롯인데 실제로는 LMS로 보내려 했다"는 사실은 이력에
+    남아야 한다 — 실패 사유만 보고서는 애초에 어떤 종류로 시도됐는지 알 수
+    없어진다."""
+
+    PhoneContact.objects.create(user=recipient, phone_number="01011112222")
+    adapter = AligoSmsAdapter()
+
+    long_context = {
+        "contest_title": "아주 긴 이름을 가진 해커톤 대회",
+        "amount": 1_000_000,
+        "distribution_due_at": "2026-09-30T08:00:00+09:00",
+    }
+    notification = _notification(
+        recipient,
+        notification_type=NotificationType.DISTRIBUTION_FINAL_WARNING,
+        context=long_context,
+    )
+
+    with patch("notifications.adapters_aligo.requests.post") as mock_post:
+        mock_post.return_value = _response(
+            200, {"result_code": "-999", "message": "요청을 처리할 수 없습니다."}
+        )
+        result = adapter.send(recipient=recipient, notification=notification)
+
+    assert result.success is False
+    assert "LMS" in result.failure_reason
+    assert "승격" in result.failure_reason
+    assert "요청을 처리할 수 없습니다" in result.failure_reason
 
 
 # --- 벤더 실패 · 네트워크 오류는 예외가 아니라 실패 결과다 ---------------------

@@ -806,3 +806,56 @@ def test_downgrading_to_underage_deletes_previously_stored_phone_contact(client)
     assert not PhoneContact.objects.filter(
         user__social_accounts__provider_uid="downgrade-phone-subject"
     ).exists()
+
+
+
+@pytest.mark.django_db
+def test_reverifying_as_adult_without_a_phone_number_preserves_the_existing_phone_contact(client):
+    """#51 3차 코드리뷰 지적 2: 2차 수정의 `else` 분기가 UNDERAGE와 "VERIFIED
+    인데 벤더가 phoneNumber를 안 준 경우"를 하나로 묶어, 재확인 때마다 벤더가
+    이 필드를 생략하면 이미 저장돼 있던 정상 번호까지 조용히 지웠다.
+    verify()가 PhoneContact를 채우는 유일한 지점이므로, 그 계정은 이후
+    영구히 SMS를 못 받는다 — 성인 재확인에 phoneNumber가 없다고 기존 값을
+    지우면 안 된다."""
+
+    from accounts.models import PhoneContact
+
+    pair = _login(client, uid="reverify-no-phone-subject")
+
+    first = client.post(
+        "/api/verification/verify",
+        data={
+            "verification_token": _fake_token(
+                "홍길동",
+                "1990-05-15",
+                "ci-reverify-1",
+                "di-reverify-1",
+                phone="010-1234-5678",
+            )
+        },
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert first.json()["status"] == "verified"
+
+    contact = PhoneContact.objects.get(
+        user__social_accounts__provider_uid="reverify-no-phone-subject"
+    )
+    assert contact.phone_number == "01012345678"
+
+    # 재확인 — 이번에는 벤더(Fake 토큰)가 phoneNumber를 주지 않는다(4필드 토큰).
+    second = client.post(
+        "/api/verification/verify",
+        data={
+            "verification_token": _fake_token(
+                "홍길동", "1990-05-15", "ci-reverify-2", "di-reverify-2"
+            )
+        },
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert second.json()["status"] == "verified"
+
+    # 기존 PhoneContact가 지워지지 않고 그대로 남아 있다.
+    contact.refresh_from_db()
+    assert contact.phone_number == "01012345678"

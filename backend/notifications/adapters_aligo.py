@@ -223,6 +223,16 @@ def _post_to_aligo(
     )
 
 
+# SMS 슬롯이 실제로는 LMS로 승격돼 나갔을 때 이력에 남기는 문구(#51 3차
+# 코드리뷰 지적 6). notifications.checks의 notifications.E002(#89/#51)는
+# "이 슬롯에 바인딩된 어댑터의 channel 속성이 슬롯과 같은가"만 부팅 시점에
+# 확인한다 — AligoSmsAdapter는 channel="sms"이므로 그 검사를 정상적으로
+# 통과하지만, 메시지 길이에 따라 매 발송마다 벤더에는 SMS로도 LMS로도 나갈
+# 수 있다는 사실은 바인딩 시점 검사로는 볼 수 없다. 그래서 발송 시점에
+# 이력으로 남긴다.
+_LMS_PROMOTION_NOTE = "메시지가 SMS 한도를 넘어 LMS로 승격되어 발송됨(과금은 LMS 기준)"
+
+
 class AligoSmsAdapter:
     """`NOTIFICATION_SMS_ADAPTER=notifications.adapters_aligo.AligoSmsAdapter`로 켠다."""
 
@@ -241,8 +251,23 @@ class AligoSmsAdapter:
         message = render_message(notification)
         msg_type = _select_msg_type(message)
         title = _DEFAULT_TITLE if msg_type == "LMS" else None
-        return _post_to_aligo(
+        result = _post_to_aligo(
             self._credentials, receiver=phone, msg=message, msg_type=msg_type, title=title
+        )
+
+        if msg_type != "LMS":
+            return result
+
+        # 승격이 실제로 일어났다 — NotificationDispatch.channel은 그대로
+        # "sms"로 남긴다(재시도 판단에 쓰이는 슬롯 식별자이기 때문이다,
+        # notifications.services._attempt_dispatch 참고). 대신 이 사실을
+        # failure_reason에 남긴다(성공이어도) — ChannelSendResult 독스트링
+        # 참고.
+        if result.success:
+            return ChannelSendResult(success=True, failure_reason=_LMS_PROMOTION_NOTE)
+        return ChannelSendResult(
+            success=False,
+            failure_reason=f"{_LMS_PROMOTION_NOTE} — {result.failure_reason}"[:255],
         )
 
 

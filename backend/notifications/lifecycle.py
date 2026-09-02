@@ -62,9 +62,22 @@ RESULT_NOTICE_BATCH_SIZE = 200
 # Contest/행은 이번 스캔에서 건드리지 않고 다음 스캔에 넘긴다. "완료 표시
 # (*_sent_at)는 실제로 다 보낸 뒤에만 남긴다"(모듈 독스트링)는 원칙과 그대로
 # 맞물린다 — 시간 예산으로 중단된 Contest는 완료 표시가 없으므로 다음 스캔이
-# 안전하게 이어받는다. `run_due_lifecycle_notifications`가 다섯 스캔에 같은
-# 마감시각(deadline) 하나를 넘겨, 스캔 하나가 예산을 다 쓰면 나머지 넷은
-# 이번 호출에서 사실상 건드릴 시간이 없다는 것까지 함께 표현한다.
+# 안전하게 이어받는다.
+#
+# **다섯 스캔이 마감시각 하나를 고정 순서로 공유하지 않는다**(#51 3차
+# 코드리뷰 지적 4 — 공유하는 버전이 만든 문제). 마감시각 하나를 앞에서부터
+# 순서대로 나눠 쓰면, 첫 스캔(마감 임박, Contest×참가자 전원 팬아웃)이
+# 예산을 다 쓸 때마다 완료 표시를 못 남겨 **다음 틱에도 다시 1순위**가 되고,
+# 마지막 두 복구 스캔(Award/Distribution 결과 알림 복구)은 매번 첫
+# iteration에서 그 자리에서 멈춘다 — 복구 스캔이 존재하는 이유(즉시 경로가
+# 죽은 알림을 마저 보낸다)가 통째로 무력화된다. 그래서 다섯 스캔은 각자
+# **자기 차례가 됐을 때 새로 계산한** 몫(LIFECYCLE_TIME_BUDGET_SECONDS/5)을
+# 받는다 — `notifications.services.dispatch_due_notifications`가 DEFERRED/
+# stuck-QUEUED 두 루프에 적용한 것과 같은 원칙("이전 단계가 얼마나 썼든,
+# 다음 단계는 자기 몫을 온전히 새로 받는다")을 다섯 스캔으로 넓힌 것이다.
+# 앞 스캔이 자기 몫을 넘겨도 뒤 스캔은 항상 최소한 하나는 시도할 기회를
+# 받는다 — 전체 스캔 시간이 늘어날 수 있지만, "복구 스캔이 영원히 실행되지
+# 않는다"보다 훨씬 낫다.
 LIFECYCLE_TIME_BUDGET_SECONDS = 12.0
 
 
@@ -518,21 +531,41 @@ def run_due_lifecycle_notifications(as_of=None) -> list[dict]:
 
     이 호출(스캔 스코프) 전체에서 정책을 한 번만 읽어 세 리드타임 스캔에
     같이 넘긴다(#78, ADR-0023) — `as_of`를 한 번만 구해 재사용하는 것과
-    같은 이유다. 시간 예산(LIFECYCLE_TIME_BUDGET_SECONDS)도 이 호출 전체에서
-    한 번만 계산해 다섯 스캔에 같이 넘긴다(#51 2차 코드리뷰 지적 2) — 다섯
-    스캔 각자 별도의 12초를 받으면 합이 60초까지 늘어나 gunicorn/Celery의
-    30초 요청 타임아웃을 넘긴다.
+    같은 이유다.
+
+    시간 예산(LIFECYCLE_TIME_BUDGET_SECONDS)은 다섯 스캔이 **고정 순서로
+    공유하지 않는다**(#51 3차 코드리뷰 지적 4) — 공유하면 앞선 스캔(특히
+    첫 번째, Contest×참가자 전원 팬아웃)이 예산을 다 쓸 때마다 뒤의 스캔은
+    매번 첫 iteration에서 멈춘다. 특히 마지막 두 스캔은 "즉시 경로가 죽은
+    Award/Distribution 결과 알림을 복구"하는 게 존재 이유인데, 매번 0초를
+    받으면 그 복구가 영원히 일어나지 않는다. 그래서 각 스캔은 **자기 차례가
+    됐을 때** `LIFECYCLE_TIME_BUDGET_SECONDS`를 다섯으로 나눈 몫을 새로
+    계산해 받는다 — 앞 스캔이 자기 몫을 넘겨 썼든 말든, 뒤 스캔은 항상 최소
+    한 건은 시도할 수 있는 자기 몫을 그대로 받는다.
     """
 
     as_of = as_of or Clock.now()
     policy = get_current_policy()
-    deadline = time_module.monotonic() + LIFECYCLE_TIME_BUDGET_SECONDS
+    # 다섯 스캔이 균등하게 나눠 쓰는 몫 — 각 스캔 시작 시점에 이 길이만큼의
+    # 마감시각을 새로 계산한다(위 docstring 참고).
+    per_scan_budget = LIFECYCLE_TIME_BUDGET_SECONDS / 5
     results: list[dict] = []
+
+    deadline = time_module.monotonic() + per_scan_budget
     results += send_due_deadline_reminders(as_of=as_of, policy=policy, deadline=deadline)
+
+    deadline = time_module.monotonic() + per_scan_budget
     results += send_due_judging_end_reminders(as_of=as_of, policy=policy, deadline=deadline)
+
+    deadline = time_module.monotonic() + per_scan_budget
     results += send_due_distribution_final_warnings(as_of=as_of, policy=policy, deadline=deadline)
+
+    deadline = time_module.monotonic() + per_scan_budget
     results += send_pending_award_result_notices(as_of=as_of, deadline=deadline)
+
+    deadline = time_module.monotonic() + per_scan_budget
     results += send_pending_distribution_share_result_notices(as_of=as_of, deadline=deadline)
+
     return results
 
 

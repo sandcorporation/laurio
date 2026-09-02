@@ -21,6 +21,16 @@ from django.utils.module_loading import import_string
 
 @dataclass(frozen=True)
 class ChannelSendResult:
+    """`failure_reason`은 이름과 달리 실패 사유 전용이 아니다 — `success=True`
+    여도 발송 이력에 남길 만한 특이사항이 있으면(예: SMS 슬롯으로 호출됐지만
+    메시지가 길어 실제로는 LMS로 승격돼 나간 경우, #51 3차 코드리뷰 지적 6)
+    어댑터가 여기에 채운다. `NotificationDispatch`에는 이 정보를 담을 별도
+    컬럼이 없고(스키마 변경 없이), `channel` 필드는 재시도 판단에 쓰이는
+    슬롯 식별자라 실제 발송 종류로 바꿔 적으면 재시도 로직이 깨지므로
+    (notifications.services._attempt_dispatch 참고), 이 자유 텍스트 필드가
+    "무슨 일이 있었는지"를 정직하게 남기는 유일한 자리다.
+    """
+
     success: bool
     failure_reason: str = ""
 

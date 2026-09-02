@@ -145,6 +145,18 @@ class NotificationDispatch(models.Model):
         PENDING = "pending", "발송 시도 중(결과 미확정)"
         SENT = "sent", "성공"
         FAILED = "failed", "실패"
+        # PENDING인 채 재선점된 채널의 종결 상태(#51 3차 코드리뷰 지적 1).
+        # FAILED로 확정하면 두 가지가 동시에 틀린다 — ① 실제로는 벤더가
+        # 성공했을 수도 있는데 "확정 실패"로 이력에 남고, ② 다음 재선점이
+        # FAILED를 "안전하게 재시도해도 되는 실패"로 오인해 이미 성공했을 수
+        # 있는 채널에 다시 벤더를 불러 재과금·중복 도달을 만든다(정확히 이
+        # PENDING 처리 자체가 막으려던 사고). 그렇다고 PENDING 그대로 두면
+        # 사유가 빈 채로 무기한 남아 발송 이력이 아무것도 설명하지 못한다
+        # (#51 2차 코드리뷰 지적 6). INDETERMINATE는 이 둘을 동시에 만족한다
+        # — 이력에는 "왜 재시도하지 않았는지"가 사유로 남고, `_attempt_dispatch`
+        # 는 이 상태도 SENT/PENDING과 같이 "이미 손댔으니 다시 벤더를 부르지
+        # 않는다"로 취급한다.
+        INDETERMINATE = "indeterminate", "결과 불명(재시도 안 함)"
 
     notification = models.ForeignKey(
         Notification, on_delete=models.CASCADE, related_name="dispatches"
