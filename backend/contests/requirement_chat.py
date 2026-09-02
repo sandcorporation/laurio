@@ -1,22 +1,37 @@
-"""AI grill — Sponsor가 AI와 대화하며 Requirement 체크리스트를 함께 만든다 (#20).
+"""AI grill — Sponsor가 AI와 대화하며 Requirement 체크리스트를 함께 만든다 (#20, #55).
 
-`scoring/adapters.py`(#12)가 세운 패턴을 그대로 재사용한다: fake/real 모드를
+`scoring/adapters.py`(#12/#88)가 세운 패턴을 그대로 재사용한다: fake/real 모드를
 `core.adapters.resolve_adapter`로 고르고, dev·CI는 항상 fake로 네트워크 없이
-결정적으로 돈다(ADR-0007). 벤더 실연동은 이 티켓 범위 밖이다 —
-`RequirementChatAdapter` 계약만 만족시키면 된다.
+결정적으로 돈다(ADR-0007). `OpenAIRequirementChatAdapter`(#55)가 실물 어댑터다.
 
 Sponsor가 대화에 입력하는 텍스트는 신뢰할 수 없는 입력이다 — Requirement로
 확정되면 제출·심사·채점(scoring)이 그대로 소비하는 프롬프트 재료가 된다. 그래서
 `scoring.services`가 이미 만든 프롬프트 인젝션 방어(`core.prompt_safety`)를 그대로
 가져다 쓴다. 새 LLM 연동을 또 만들지 않는다.
+
+**채점(`OpenAIScoringAdapter`, #88)과 이 어댑터가 벤더 응답 불량을 다루는 방식은
+정반대다 — 의도적으로 다르다.** 채점은 한 번의 판정이 Distribution 컷라인을
+가르고 Score가 불변이라 재채점 경로가 없으므로(ADR-0006), 형식을 벗어난 응답은
+무조건 예외로 죽여 낮은 점수로 둔갑하는 것을 막는다. 여기는 여러 턴에 걸친
+대화라 Sponsor가 같은 말을 다시 보내거나 다르게 설명해 스스로 재시도할 수
+있다(#55 AC — "화면이 죽지 않는다, 대화를 이어갈 수 있다"). 그래서 이 어댑터는
+`reply` 문자열을 뽑아낼 수 있는 한 관대하게 파싱한다 — `proposed_requirements`가
+배열이 아니거나 개별 항목의 필드가 비거나 타입이 틀려도 그 항목만 건너뛰고
+대화는 이어간다. `contests.api.send_requirement_chat_message`가 이미 프론트(#37)
+앞단에서 한 번 더 방어하므로(문자열 500자 절단, grade 미상이면 required로 폴백),
+이 어댑터가 그 위에서 다시 엄격하게 굴면 그 방어를 무력화하는 것과 같다 —
+그래서 여기서는 최소한만 검증한다.
 """
 
 from __future__ import annotations
 
+import json
+import os
 import re
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
+import requests
 from django.conf import settings
 
 from core.adapters import resolve_adapter
@@ -247,13 +262,276 @@ def build_chat_prompt(chat_input: RequirementChatInput, *, include_history: bool
     return "\n".join(lines)
 
 
+_OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
+_OPENAI_DEFAULT_MODEL = "gpt-4o-mini"
+_OPENAI_DEFAULT_TEMPERATURE = 0.7
+# `scoring.adapters.OpenAIScoringAdapter`가 20초로 줄인 것과 같은 이유(#88 코드리뷰
+# 지적 1) — 이 엔드포인트도 동기 WSGI 요청이라 gunicorn 기본 워커 타임아웃(30초)
+# 안에서 프롬프트 구성·DB 조회 오버헤드까지 끝나야 한다.
+_OPENAI_REQUEST_TIMEOUT_SECONDS = 20
+_OPENAI_SYSTEM_PROMPT = (
+    "당신은 Laurio 공모전 Sponsor의 AI grill 대화를 돕는 보조자입니다. 응답은 반드시 "
+    "지정된 JSON 스키마를 따라야 합니다 — reply(사용자에게 보여줄 대화문)와 "
+    "proposed_requirements(이번 턴에 제안하는 체크리스트 후보 배열, 없으면 빈 배열) "
+    "두 필드를 모두 포함하세요."
+)
+
+# 사용자에게 보여줄 reply 문자열의 상한 — 터무니없이 긴 응답도 화면을 죽이지 않게
+# 방어적으로 자른다(#55 AC). proposed_requirements의 각 항목 text는 이미
+# `contests.api.send_requirement_chat_message`가 500자로 자른다.
+_MAX_REPLY_LENGTH = 4000
+
+
+def _openai_chat_response_schema() -> dict:
+    """OpenAI Structured Outputs용 JSON 스키마.
+
+    `scoring.adapters._openai_verdict_response_schema`와 같은 이유로 `strict: True`가
+    타입은 강제하지만, 실제 벤더가 항상 스키마를 정확히 지킨다는 보장은 없다
+    (모더레이션 거부·길이 제한으로 잘린 응답 등) — 그래서 `_parse_openai_chat_response`가
+    응답을 받은 뒤 다시 한번 관대하게 확인한다.
+    """
+
+    return {
+        "name": "requirement_chat_response",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "reply": {"type": "string"},
+                "proposed_requirements": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string"},
+                            "grade": {"type": "string", "enum": ["required", "optional"]},
+                        },
+                        "required": ["text", "grade"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": ["reply", "proposed_requirements"],
+            "additionalProperties": False,
+        },
+    }
+
+
+def _describe_openai_http_error(response: Any, *, contest_id: int) -> str:
+    """벤더가 명시적으로 거부했을 때(4xx/5xx)의 예외 메시지를 만든다.
+
+    `scoring.adapters._describe_openai_http_error`와 같은 방어 — `error.message`는
+    벤더가 쓴 자유 텍스트라 Sponsor가 보낸 발화를 반사할 수 있으므로 절대 담지
+    않는다. `error`가 dict가 아니라 문자열일 수도 있으므로 `.get`을 바로 부르지
+    않는다.
+    """
+
+    error_type = ""
+    error_code = ""
+    try:
+        error_body = response.json()
+    except ValueError:
+        error_body = None
+    if isinstance(error_body, dict):
+        error_field = error_body.get("error")
+        if isinstance(error_field, dict):
+            error_type = str(error_field.get("type") or "")[:100]
+            error_code = str(error_field.get("code") or "")[:100]
+    base = f"OpenAI AI grill 호출이 실패했다(status={response.status_code}, contest={contest_id})"
+    details = ", ".join(
+        part
+        for part in [f"type={error_type}" if error_type else "", f"code={error_code}" if error_code else ""]
+        if part
+    )
+    return f"{base}, {details})." if details else f"{base})."
+
+
+def _parse_openai_chat_response(body: dict, *, contest_id: int) -> RequirementChatOutput:
+    """OpenAI 응답 본문을 검증하고 `RequirementChatOutput`으로 바꾼다.
+
+    채점 어댑터의 파싱(`scoring.adapters._parse_openai_scoring_response`)과 달리
+    **관대하다** — `reply` 문자열을 뽑아낼 수 없을 때만 예외를 던지고, 그 밖의
+    형식 이탈(`proposed_requirements`가 배열이 아니거나 개별 항목이 필드를
+    빠뜨리거나 타입이 틀림)은 예외 없이 건너뛴다. 이유는 모듈 독스트링 참고 —
+    Sponsor는 대화를 이어가며 스스로 재시도할 수 있으므로, 대화 자체를 끊을
+    이유가 없다.
+    """
+
+    try:
+        choice = body["choices"][0]
+    except (KeyError, IndexError, TypeError):
+        raise RequirementChatAdapterError(
+            f"OpenAI 응답에 choices가 없다(contest={contest_id})."
+        ) from None
+
+    finish_reason = choice.get("finish_reason") if isinstance(choice, dict) else None
+    if finish_reason != "stop":
+        raise RequirementChatAdapterError(
+            f"OpenAI 응답이 정상 종료되지 않았다(finish_reason={finish_reason!r}, "
+            f"contest={contest_id}) — 잘렸거나 거부된 응답으로는 대화를 이어갈 수 없다."
+        )
+
+    try:
+        content = choice["message"]["content"]
+    except (KeyError, TypeError):
+        raise RequirementChatAdapterError(
+            f"OpenAI 응답에 message.content가 없다(contest={contest_id})."
+        ) from None
+
+    try:
+        parsed = json.loads(content)
+    except (TypeError, ValueError):
+        raise RequirementChatAdapterError(
+            f"OpenAI 응답 content가 유효한 JSON이 아니다(contest={contest_id})."
+        ) from None
+
+    if not isinstance(parsed, dict):
+        raise RequirementChatAdapterError(
+            f"OpenAI 응답이 JSON 객체가 아니다(contest={contest_id})."
+        )
+
+    reply = parsed.get("reply")
+    if not isinstance(reply, str) or not reply.strip():
+        raise RequirementChatAdapterError(
+            f"OpenAI 응답에 reply가 없다(contest={contest_id})."
+        )
+
+    raw_proposals = parsed.get("proposed_requirements")
+    proposals: list[RequirementProposal] = []
+    if isinstance(raw_proposals, list):
+        for raw in raw_proposals[:_MAX_PROPOSALS_PER_TURN]:
+            if not isinstance(raw, dict):
+                continue
+            text = raw.get("text")
+            if not isinstance(text, str) or not text.strip():
+                continue
+            grade = raw.get("grade")
+            grade_str = grade if isinstance(grade, str) else ""
+            proposals.append(
+                RequirementProposal(text=text.strip()[:500], grade=grade_str)
+            )
+    # raw_proposals가 배열이 아니면(문자열·객체·None 등) 그냥 빈 목록으로 취급한다 —
+    # reply는 이미 확보했으니 대화는 끊기지 않는다(#55 AC).
+
+    model_used = body.get("model") or "unknown"
+    return RequirementChatOutput(
+        reply=reply.strip()[:_MAX_REPLY_LENGTH],
+        proposed_requirements=proposals,
+        model_version=str(model_used),
+    )
+
+
+class OpenAIRequirementChatAdapter:
+    """OpenAI로 실제 AI grill 대화를 나누는 실물 어댑터 (#55, ADR-0007/0014).
+
+    `LLM_REQUIREMENT_CHAT_ADAPTER_MODE=contests.requirement_chat.
+    OpenAIRequirementChatAdapter`로 켠다(`core.adapters.resolve_adapter`).
+    자격증명은 환경변수 `OPEN_AI_API_KEY`에서만 읽는다 — `scoring.adapters.
+    OpenAIScoringAdapter`와 같은 키를 공유한다(벤더 하나, 용도 둘). 모델명은
+    `LLM_OPENAI_MODEL`(기본 `gpt-4o-mini`), temperature는
+    `LLM_OPENAI_TEMPERATURE`로 배포 환경마다 바꿀 수 있다 — 채점과 같은 설정
+    키를 그대로 재사용한다(docker/compose.staging.yaml·compose.prod.yaml). 다만
+    기본 temperature는 채점(0 — 같은 입력에 항상 같은 판정)과 달리 대화이므로
+    0.7을 쓴다 — 매 턴 기계적으로 똑같은 질문만 반복하지 않게 한다.
+
+    생성자가 자격증명 없이는 인스턴스화되지 않는다 — 배포 환경에서
+    `LLM_REQUIREMENT_CHAT_ADAPTER_MODE`가 이 클래스를 가리키는데 키가 없으면
+    `core.adapters.check_adapter_mode`(#83, `contests.checks.
+    check_llm_requirement_chat_adapter_mode`)가 이 예외를 부팅 시점에 잡아
+    배포를 거부한다.
+    """
+
+    def __init__(
+        self,
+        *,
+        model: str | None = None,
+        temperature: float | None = None,
+        timeout: float = _OPENAI_REQUEST_TIMEOUT_SECONDS,
+    ) -> None:
+        api_key = os.environ.get("OPEN_AI_API_KEY") or ""
+        if not api_key:
+            raise RequirementChatAdapterError(
+                "OPEN_AI_API_KEY가 비어 있다 — 실물 OpenAI AI grill 어댑터는 자격증명 "
+                "없이 생성할 수 없다."
+            )
+        self._api_key = api_key
+        self._model = model or os.environ.get("LLM_OPENAI_MODEL") or _OPENAI_DEFAULT_MODEL
+        if temperature is not None:
+            self._temperature = temperature
+        else:
+            raw_temperature = os.environ.get("LLM_OPENAI_TEMPERATURE")
+            self._temperature = (
+                float(raw_temperature) if raw_temperature else _OPENAI_DEFAULT_TEMPERATURE
+            )
+        self._timeout = timeout
+        # 부팅 가드(core.adapters.check_adapter_mode)의 isinstance(RequirementChatAdapter)
+        # 검사가 요구하는 자리 — 실제 호출에 쓰인 모델 식별자는 매 respond() 호출마다
+        # OpenAI 응답의 "model" 필드에서 새로 읽어 RequirementChatOutput.model_version으로
+        # 돌려준다(scoring.adapters.OpenAIScoringAdapter와 같은 이유).
+        self.model_version = self._model
+
+    def respond(self, chat_input: RequirementChatInput) -> RequirementChatOutput:
+        prompt = build_chat_prompt(chat_input)
+        payload = {
+            "model": self._model,
+            "temperature": self._temperature,
+            "messages": [
+                {"role": "system", "content": _OPENAI_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": _openai_chat_response_schema(),
+            },
+        }
+
+        try:
+            response = requests.post(
+                _OPENAI_CHAT_COMPLETIONS_URL,
+                headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=self._timeout,
+            )
+        except requests.RequestException as exc:
+            raise RequirementChatAdapterError(
+                f"OpenAI AI grill 호출이 네트워크 오류로 실패했다({type(exc).__name__}, "
+                f"contest={chat_input.contest_id})."
+            ) from None
+
+        if response.status_code != 200:
+            raise RequirementChatAdapterError(
+                _describe_openai_http_error(response, contest_id=chat_input.contest_id)
+            )
+
+        try:
+            body = response.json()
+        except ValueError:
+            raise RequirementChatAdapterError(
+                f"OpenAI 응답이 JSON이 아니다(contest={chat_input.contest_id})."
+            ) from None
+
+        try:
+            return _parse_openai_chat_response(body, contest_id=chat_input.contest_id)
+        except RequirementChatAdapterError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - 예상 못한 응답 모양도 조용히 죽지 않아야 한다.
+            raise RequirementChatAdapterError(
+                f"OpenAI 응답을 파싱하는 중 예상치 못한 오류가 났다({type(exc).__name__}, "
+                f"contest={chat_input.contest_id})."
+            ) from None
+
+
 def get_requirement_chat_adapter() -> RequirementChatAdapter:
     return resolve_adapter(
         mode=settings.LLM_REQUIREMENT_CHAT_ADAPTER_MODE,
         fake_factory=FakeRequirementChatAdapter,
         not_implemented_hint=(
-            "실제 LLM 연동은 아직 구현되지 않았다 — RequirementChatAdapter 계약만 "
-            "만족시키는 dotted path를 LLM_REQUIREMENT_CHAT_ADAPTER_MODE에 설정하면 "
-            "된다 (ADR-0007)."
+            "LLM_REQUIREMENT_CHAT_ADAPTER_MODE가 가리키는 dotted path를 import할 수 "
+            "없다 — 실물 어댑터는 contests.requirement_chat."
+            "OpenAIRequirementChatAdapter다(#55). RequirementChatAdapter 계약만 "
+            "만족시키면 다른 dotted path도 쓸 수 있다(ADR-0007)."
         ),
     )

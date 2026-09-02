@@ -29,8 +29,8 @@
 #               아직 미구현 — #85)
 #   LLM 채점   : FakeLLMScoringAdapter  -> 실제 OpenAI 어댑터(dotted path, 아직
 #               미구현 — #88)
-#   AI grill  : FakeRequirementChatAdapter -> 실제 OpenAI 어댑터(dotted path, 아직
-#               미구현 — #88)
+#   AI grill  : FakeRequirementChatAdapter -> contests.requirement_chat.
+#               OpenAIRequirementChatAdapter(#55)
 #   알림 채널  : Fake*Adapter           -> 실제 카카오 알림톡/SMS·LMS 벤더(dotted path로
 #               지정, 아직 미구현 — .env.prod에서 반드시 채워야 하는 이유가 이것이다.
 #               구현되지 않은 클래스 이름을 여기 하드코딩하지 않는다)
@@ -119,10 +119,11 @@ x-backend-env: &backend-env
   # AI 채점의 실물 어댑터는 scoring.adapters.OpenAIScoringAdapter다(#88) —
   # LLM_ADAPTER_MODE를 그 dotted path로 채운다. "real"은 dotted path가 아니라
   # core.adapters.check_adapter_mode(#83)가 부팅 시점에 거부한다. AI grill의
-  # 실물 어댑터는 아직 구현되지 않았다(#20) — 위와 같은 이유로 필수값으로 비워
-  # 둔다.
+  # 실물 어댑터는 contests.requirement_chat.OpenAIRequirementChatAdapter다(#55)
+  # — 채점과 같은 OPEN_AI_API_KEY를 공유하지만 설정 키는 별개다. 위와 같은
+  # 이유로 값을 명시적으로 요구한다.
   LLM_ADAPTER_MODE: ${LLM_ADAPTER_MODE:?실제 LLM 채점 어댑터의 dotted path를 .env.prod 에 채워라 — scoring.adapters.OpenAIScoringAdapter(#88)}
-  LLM_REQUIREMENT_CHAT_ADAPTER_MODE: ${LLM_REQUIREMENT_CHAT_ADAPTER_MODE:?실제 AI grill 어댑터의 dotted path를 .env.prod 에 채워라 — 아직 구현 전이면(#20) 이 값 자체를 비워 둘 수 없다}
+  LLM_REQUIREMENT_CHAT_ADAPTER_MODE: ${LLM_REQUIREMENT_CHAT_ADAPTER_MODE:?실제 AI grill 어댑터의 dotted path를 .env.prod 에 채워라 — contests.requirement_chat.OpenAIRequirementChatAdapter(#55)}
   OPEN_AI_API_KEY: ${OPEN_AI_API_KEY:-}
   # scoring.adapters.OpenAIScoringAdapter가 읽는 선택 설정(#88 코드리뷰 지적 6)
   # — 여기 없으면 컨테이너 안에서는 항상 기본값(모델 gpt-4o-mini, temperature
