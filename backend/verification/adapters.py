@@ -24,12 +24,40 @@ class VerificationAdapterError(Exception):
     """제공자가 본인확인 토큰을 거부했거나 파싱할 수 없을 때."""
 
 
+class VerificationMissingCIError(VerificationAdapterError):
+    """본인확인 응답에 CI가 없을 때(#84).
+
+    `VerificationAdapterError`의 하위 타입이므로 `verification.api.verify`의
+    기존 예외 처리에 새 분기 없이 그대로 걸린다. CI 없는 응답은 정상 운영에서
+    나오면 안 된다 — 실제 벤더(KG이니시스 통합인증)는 카카오 인증에서만 CI를
+    주지 않고, 이 플랫폼은 카카오를 본인확인 수단에서 뺐다(ADR-0024). 그래서
+    이 예외가 실제로 터졌다면 사용자 잘못이 아니라 벤더 콘솔의 인증 수단 설정이
+    되돌려졌다는 뜻이다 — 호출자가 ERROR로 로그를 남겨야 한다.
+    """
+
+
 @dataclass(frozen=True)
 class VerificationResult:
+    """본인확인 결과 계약.
+
+    `ci`가 빈 문자열이면 생성 자체가 실패한다(#84) — `Verification.set_ci("")`가
+    `HMAC(key, "")`라는 정상적인 64자 hex를 만들어, CI 없는 사용자 전원이 같은
+    해시를 갖고 서로 남남인 Sponsor와 Developer가 동일인으로 오차단되는 결함의
+    근본 원인을 계약 타입 단계에서 막는다. 지금 있는 어댑터도, 나중에 누가
+    추가하는 어댑터도 이 가드를 우회할 수 없다.
+    """
+
     real_name: str
     birth_date: date
     ci: str
     di: str
+
+    def __post_init__(self) -> None:
+        if not self.ci:
+            raise VerificationMissingCIError(
+                "본인확인 응답에 CI가 없다 — CI를 주지 않는 인증 수단은 본인확인으로 "
+                "인정하지 않는다(ADR-0024)."
+            )
 
 
 @runtime_checkable

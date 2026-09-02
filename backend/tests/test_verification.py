@@ -337,6 +337,120 @@ class _DottedPathTestVerificationAdapter(FakeVerificationAdapter):
         )
 
 
+class _NoCIVerificationAdapter:
+    """CI를 주지 않는 벤더 응답을 흉내낸다(#84).
+
+    실제 벤더(KG이니시스 통합인증)는 카카오 인증에서만 CI를 주지 않는다 — 이
+    어댑터는 "그 인증 수단 설정이 되돌려진" 상황을 재현해, `VerificationResult`가
+    CI 없이는 생성 자체를 거부하는지 증명한다. 토큰 형식은 `FakeVerificationAdapter`
+    처럼 `"<실명>|<YYYY-MM-DD>"`만 쓴다 — CI/DI는 이 어댑터가 절대 채우지 않는다.
+    """
+
+    def resolve(self, verification_token: str) -> VerificationResult:
+        real_name, birth_iso = verification_token.split("|")[:2]
+        return VerificationResult(
+            real_name=real_name, birth_date=date.fromisoformat(birth_iso), ci="", di=""
+        )
+
+
+@pytest.mark.django_db
+def test_verification_with_missing_ci_is_rejected_and_leaves_user_unverified(client, caplog):
+    """CI 없는 응답으로 본인확인을 시도하면 4xx로 거절되고 VERIFIED가 되지 않는다.
+
+    응답 문구는 이유를 말하고 다른 인증 수단을 쓰라고 안내해야 하며, 서버 로그는
+    ERROR로 이걸 사용자 잘못이 아니라 벤더 콘솔의 설정 회귀로 지목해야 한다(#84).
+    """
+    pair = _login(client, uid="no-ci-subject", email="no-ci@example.com")
+
+    with override_settings(
+        VERIFICATION_ADAPTER_MODE="tests.test_verification._NoCIVerificationAdapter"
+    ):
+        import logging
+
+        with caplog.at_level(logging.ERROR, logger="verification.api"):
+            response = client.post(
+                "/api/verification/verify",
+                data={"verification_token": "노시아이|1990-01-01"},
+                content_type="application/json",
+                **_auth_header(pair["access"]),
+            )
+
+    assert 400 <= response.status_code < 500
+    body = response.json()
+    assert "다른 인증 수단" in body["detail"]
+
+    assert Verification.objects.filter(
+        user__social_accounts__provider_uid="no-ci-subject", status=Verification.Status.VERIFIED
+    ).exists() is False
+
+    error_records = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert error_records, "CI 없는 응답은 ERROR 로그를 남겨야 한다"
+    assert any("설정 회귀" in r.getMessage() for r in error_records)
+    assert all("사용자" not in r.getMessage() or "설정" in r.getMessage() for r in error_records)
+
+
+@pytest.mark.django_db
+def test_ci_less_user_cannot_submit_or_open_a_contest(client):
+    """CI 없는 응답으로는 관문(Submission 제출·Contest 개최)이 열리지 않는다(#84)."""
+    pair = _login(client, uid="no-ci-gate-subject", email="no-ci-gate@example.com")
+
+    with override_settings(
+        VERIFICATION_ADAPTER_MODE="tests.test_verification._NoCIVerificationAdapter"
+    ):
+        client.post(
+            "/api/verification/verify",
+            data={"verification_token": "노시아이|1990-01-01"},
+            content_type="application/json",
+            **_auth_header(pair["access"]),
+        )
+
+    me = client.get("/api/verification/me", **_auth_header(pair["access"]))
+    assert me.json()["status"] == "unverified"
+
+    create_response = client.post(
+        "/api/contests",
+        data={
+            "title": "자전거래 회귀 방지 대회",
+            "category_id": 999_999,
+            "deliverable_type_ids": [999_999],
+            "prize": 1_000_000,
+            "deadline_at": "2999-01-01T00:00:00Z",
+        },
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    # Verification 게이트가 Category/DeliverableType 존재 여부보다 먼저 걸린다
+    # (contests/api.py create_contest) — 실재하지 않는 id를 넘겨도 403이 먼저 난다.
+    assert create_response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_set_ci_refuses_an_empty_value_so_ci_less_users_cannot_share_a_hash():
+    """`Verification.set_ci`의 회귀 테스트(#84) — 이 파일의 다른 테스트는 전부 HTTP를
+    거치지만, 이 불변식은 `VerificationResult`의 계약 가드보다 한 층 더 안쪽,
+    모델 자신의 방어선이라 이 파일에서 유일하게 모델 메서드를 직접 부른다
+    (`tests/test_core_adapters.py`가 `core.adapters`라는 순수 인프라 헬퍼에
+    대해 같은 예외를 이미 두고 있다).
+
+    `set_ci("")`가 조용히 통과하면 `HMAC(key, "")`이라는 정상적인 64자 hex가
+    나와, CI 없는 사용자 전원이 같은 해시를 갖고 서로 남남인 Sponsor와 Developer가
+    동일인으로 오차단된다 — 이게 이 티켓이 고치는 실제 결함이다. 위의 거절
+    테스트는 `VerificationResult` 계약 가드만 증명하고 이 메서드 자체는 부르지
+    않으므로, `set_ci`가 다시 빈 문자열을 받아들이게 되는 회귀는 이 테스트만
+    잡는다.
+    """
+    verification = Verification(status=Verification.Status.VERIFIED)
+
+    with pytest.raises(ValueError):
+        verification.set_ci("")
+
+    # 가드가 막아 ci_hash가 채워지지 않은 채로 남는다 — 두 번째 CI 없는 사용자가
+    # 같은 시도를 해도 같은 이유로 막히므로, 둘 다 ci_hash="" 그대로다. 서로 다른
+    # 사람인 두 Verification이 이 상태로는 절대 같은 해시로 묶이지 않는다.
+    assert verification.ci_hash == ""
+    assert list(Verification.find_by_ci("")) == []
+
+
 @pytest.mark.django_db
 def test_verification_adapter_mode_resolves_a_dotted_path_to_a_real_class(client):
     pair = _login(client)

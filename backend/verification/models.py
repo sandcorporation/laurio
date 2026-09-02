@@ -63,6 +63,21 @@ class Verification(models.Model):
         return decrypt(self.ci_encrypted)
 
     def set_ci(self, value: str) -> None:
+        """CI를 암호화해 저장하고 조회용 해시를 같이 남긴다.
+
+        빈 문자열은 거부한다(#84) — `ci_hash("")`는 빈 해시가 아니라
+        `HMAC(key, "")`라는 정상적인 64자 hex라서, 이 가드가 없으면 CI 없는
+        사용자 전원이 같은 해시를 갖게 되어 서로 남남인 사람들이 동일인으로
+        오차단된다. `VerificationResult`(어댑터 계약 타입)가 이미 빈 CI로는
+        생성 자체를 막지만(verification.adapters), 이 메서드를 직접 부르는
+        어떤 미래의 호출자도 같은 실수를 반복할 수 없도록 모델 층에서도
+        명시적으로 막는다 — 두 가드가 서로 다른 말을 하게 두지 않는다.
+        """
+        if not value:
+            raise ValueError(
+                "CI 없이 본인확인을 완료 처리할 수 없다 — 빈 CI는 HMAC(key, '')라는 "
+                "정상 해시를 만들어 서로 다른 사용자를 동일인으로 오판시킨다."
+            )
         self.ci_encrypted = encrypt(value)
         self.ci_hash = ci_hash(value)
 

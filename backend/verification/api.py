@@ -6,6 +6,8 @@ CI를 확보해 "이 사람이 실재하는 성인 본인인가"를 답한다.
 
 from __future__ import annotations
 
+import logging
+
 from django.http import HttpRequest
 from django.utils import timezone
 from ninja import Router
@@ -13,10 +15,12 @@ from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
 
-from .adapters import VerificationAdapterError, get_adapter
+from .adapters import VerificationAdapterError, VerificationMissingCIError, get_adapter
 from .age import is_adult
 from .models import Verification
 from .schemas import CiLookupIn, CiLookupOut, CiLookupMatchOut, VerificationStatusOut, VerifyIn
+
+logger = logging.getLogger(__name__)
 
 router = Router(tags=["verification"])
 
@@ -38,6 +42,21 @@ def verify(request: HttpRequest, payload: VerifyIn):
     try:
         result = get_adapter().resolve(payload.verification_token)
     except VerificationAdapterError as exc:
+        if isinstance(exc, VerificationMissingCIError):
+            # 정상 운영에서는 절대 나오면 안 되는 경로다(#84) — 실제 벤더는 카카오
+            # 인증에서만 CI를 안 주고, 이 플랫폼은 카카오를 본인확인 수단에서 뺐다
+            # (ADR-0024). 여기 걸렸다는 건 사용자 잘못이 아니라 벤더 콘솔의 인증
+            # 수단 설정이 되돌려졌다는 뜻이므로 ERROR로 남겨 운영자가 알아채게 한다.
+            logger.error(
+                "본인확인 응답에 CI가 없다(user_id=%s) — 설정 회귀 가능성: 벤더 콘솔에서 "
+                "CI를 주지 않는 인증 수단(예: 카카오)이 다시 활성화됐는지 확인해야 한다.",
+                request.auth_user.id,
+            )
+            raise HttpError(
+                422,
+                "이 인증 수단으로는 본인확인을 완료할 수 없습니다. 다른 인증 수단으로 "
+                "다시 시도해 주세요.",
+            ) from exc
         raise HttpError(422, f"본인확인에 실패했습니다: {exc}") from exc
 
     verification, _created = Verification.objects.get_or_create(user=request.auth_user)
