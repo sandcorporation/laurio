@@ -24,6 +24,19 @@ import { isDeployedEnvironment } from "@/lib/auth/cookies";
 // `lib/auth/cookies.ts` 의 `isDeployedEnvironment()` 를 그대로 재사용한다 —
 // "배포 환경인가"의 판정이 여기서 다시 발명되면 두 곳이 어긋날 수 있다.
 // `tokens.spec.ts` 는 dev 스택에서만 도므로 이 게이트에 비용이 없다.
+// **정적 프리렌더 대상이 아니어야 한다.** 아래 `notFound()` 게이트는 요청
+// 시점에 판정돼야 뜻이 있는데, Next 는 동적 API 호출이 없는 이 페이지를
+// `next build` 때 한 번 렌더해 정적 HTML 로 굳힌다 — 그러면
+// `isDeployedEnvironment()` 가 런타임(배포 컨테이너)이 아니라 **빌드 환경**의
+// `LAURIO_DEPLOYMENT_TARGET` 을 보고, 빌드 환경은 보통 그 값을 안 주므로
+// 게이트가 열린 채로 굳는다.
+//
+// 실제로 그랬다: `LAURIO_DEPLOYMENT_TARGET=production` 으로 띄운 프로덕션
+// 이미지에서 `/dev-tokens` 가 200 을 냈다(직접 확인). `next dev` 는 프리렌더를
+// 하지 않아 개발 중에는 게이트가 멀쩡히 동작하는 것처럼 보인다 — `/login` 이
+// 같은 자리에서 같은 방식으로 뚫려 있었다(#95 코드리뷰).
+export const dynamic = "force-dynamic";
+
 export default function DevTokensPage() {
   if (isDeployedEnvironment()) {
     notFound();
