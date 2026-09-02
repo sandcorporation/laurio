@@ -530,3 +530,30 @@ def test_demo_seed_is_idempotent(db, client):
     second = {g["bucket"]: len(g["contests"]) for g in client.get(HOME_URL).json()}
 
     assert first == second
+
+
+def test_demo_seed_leaves_nothing_for_the_money_scans(db):
+    """데모 시드가 실물 돈 경로를 깨우지 않는다 (#52).
+
+    staging 에는 celery beat 가 돈다. 배분 스캔은 `JUDGING_ENDED` 이면서
+    `judging_ends_at` 이 `distribution_wait_days` 만큼 지난 Contest 를 집는데,
+    데모를 「한 달 전에 끝난 공모전」으로 심으면 결제도 수상자도 없는 Contest 로
+    배분을 만들려 들어 60초마다 실패한다 — 데모 데이터가 실물 어댑터(토스)를
+    건드리게 된다.
+
+    「완료」 묶음은 상태로 결정되므로 날짜를 당겨도 화면은 그대로다. 이 테스트는
+    그 날짜 선택이 나중에 「더 그럴듯하게」 과거로 옮겨지는 것을 막는다.
+    """
+
+    from django.core.management import call_command
+    from django.utils import timezone
+
+    from distributions.services import distribution_due_contests
+    from policies.models import PlatformPolicy
+
+    call_command("seed_demo_contests", verbosity=0)
+
+    policy = PlatformPolicy.objects.order_by("-id").first() or PlatformPolicy()
+    due = list(distribution_due_contests(timezone.now(), policy))
+
+    assert due == [], f"배분 스캔이 데모 Contest 를 집는다: {[c.title for c in due]}"

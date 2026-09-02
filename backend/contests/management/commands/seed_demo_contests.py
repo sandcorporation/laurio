@@ -107,12 +107,22 @@ _DEMO_CONTESTS = [
         Contest.Status.CLOSED,
         HomeCurationBucket.IN_JUDGING,
     ),
+    # **완료 묶음의 마감은 최근이어야 한다.** staging 에는 celery beat 가 돌고,
+    # 배분 스캔이 `JUDGING_ENDED` 이면서 `judging_ends_at` 이 정책의
+    # `distribution_wait_days`(기본 14일)만큼 지난 Contest 를 집는다
+    # (`distributions.services.distribution_due_q`). 데모를 「한 달 전에 끝난
+    # 공모전」으로 심으면 그 스캔이 결제도 수상자도 없는 Contest 로 배분을
+    # 만들려 들어 60초마다 실패한다 — 데모가 실물 돈 경로를 건드리게 된다.
+    #
+    # `judging_ends_at` 을 하루 전으로 두면 어떤 정책값에서도 안전하다
+    # (`distribution_wait_days >= 1` 이 DB 제약이다). 홈의 묶음 배정은 상태로
+    # 결정되므로 날짜를 당겨도 「완료」에 그대로 남는다.
     (
         "보드게임 룰 검색 서비스",
         "게임",
         "웹 서비스",
         1_500_000,
-        timedelta(days=-21),
+        timedelta(days=-8),
         Contest.Status.AWARDED,
         HomeCurationBucket.COMPLETED,
     ),
@@ -121,7 +131,7 @@ _DEMO_CONTESTS = [
         "교육",
         "관리자 페이지",
         1_000_000,
-        timedelta(days=-30),
+        timedelta(days=-8),
         Contest.Status.JUDGING_ENDED,
         HomeCurationBucket.COMPLETED,
     ),
