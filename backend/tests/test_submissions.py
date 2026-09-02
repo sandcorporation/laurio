@@ -501,6 +501,72 @@ def test_different_ci_developer_can_submit(client, category, landing_type):
     assert response.status_code == 201
 
 
+class _NoCIVerificationAdapterForSelfDealingRegression:
+    """CI를 주지 않는 벤더 응답을 흉내낸다 — `verification.adapters`의 것과 같은
+    모양이지만, `_reject_self_dealing`이 있는 이 파일에서 독립적으로 검증하기
+    위해 여기 따로 둔다(#84 코드리뷰 지적 4)."""
+
+    def resolve(self, verification_token: str):
+        from datetime import date
+
+        from verification.adapters import VerificationResult
+
+        return VerificationResult(real_name="CI없음", birth_date=date(1995, 1, 1), ci="", di="")
+
+
+@pytest.mark.django_db
+def test_ci_less_developer_can_never_reach_the_self_dealing_check(client, category, landing_type):
+    """#84 회귀 테스트 — `_reject_self_dealing`이 실제로 걸려 있는 이 파일에서,
+    CI 없는 응답으로 인증을 시도한 Developer는 애초에 VERIFIED가 되지 않으므로
+    그 함수의 ci_hash 비교에 도달조차 못 한다는 것을 증명한다.
+
+    구코드는 `Verification.set_ci("")`가 `HMAC(key, "")`라는 정상 해시를 만들어,
+    CI 없는 사용자 전원(서로 남남인 Sponsor·Developer 포함)이 같은 해시를 갖고
+    동일인으로 오차단됐다 — `_reject_self_dealing`의 `if not ci_hash: return`
+    가드도 그 값이 falsy가 아니라서 못 걸렀다. #84 이후에는 CI 없는 응답이
+    VERIFIED 행 자체를 만들 수 없으므로, 이 시나리오는 self-dealing 판정에
+    도달하기 한참 전인 "본인확인 필요" 게이트에서 막힌다.
+    """
+    _sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, sponsor_ci="sponsor-only-ci-2"
+    )
+
+    from django.test import override_settings
+
+    dev_pair = _login(client, uid="ci-less-dev")
+    with override_settings(
+        VERIFICATION_ADAPTER_MODE=(
+            "tests.test_submissions._NoCIVerificationAdapterForSelfDealingRegression"
+        )
+    ):
+        start = client.post("/api/verification/start", **_auth_header(dev_pair["access"]))
+        assert start.status_code == 200, start.content
+        verify_response = client.post(
+            "/api/verification/verify",
+            data={"verification_token": start.json()["identity_verification_id"]},
+            content_type="application/json",
+            **_auth_header(dev_pair["access"]),
+        )
+    # CI 없는 응답은 거절된다(#84) — 이 사용자는 VERIFIED가 아니다.
+    assert 400 <= verify_response.status_code < 500
+
+    me = client.get("/api/accounts/me", **_auth_header(dev_pair["access"]))
+    assert me.status_code == 200
+
+    submit_response = _submit(
+        client,
+        dev_pair["access"],
+        contest["id"],
+        {"source_object_key": _source_object_key(contest["id"], me.json()["id"])},
+    )
+
+    # self-dealing 판정이 아니라 "본인확인이 안 됐다"는 훨씬 앞선 게이트에서
+    # 막힌다 — Submission.objects.count()가 0인 것으로 어느 경로로도 생성되지
+    # 않았음을 확인한다.
+    assert submit_response.status_code == 403
+    assert Submission.objects.count() == 0
+
+
 # --- Evidence 연결 · 완성도 지표 -----------------------------------------------
 
 

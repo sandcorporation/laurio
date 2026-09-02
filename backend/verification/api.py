@@ -7,7 +7,9 @@ CI를 확보해 "이 사람이 실재하는 성인 본인인가"를 답한다.
 from __future__ import annotations
 
 import logging
+import secrets
 
+from django.conf import settings
 from django.http import HttpRequest
 from django.utils import timezone
 from ninja import Router
@@ -17,8 +19,15 @@ from accounts.middleware import jwt_auth
 
 from .adapters import VerificationAdapterError, VerificationMissingCIError, get_adapter
 from .age import is_adult
-from .models import Verification
-from .schemas import CiLookupIn, CiLookupOut, CiLookupMatchOut, VerificationStatusOut, VerifyIn
+from .models import Verification, VerificationRequest
+from .schemas import (
+    CiLookupIn,
+    CiLookupOut,
+    CiLookupMatchOut,
+    VerificationStartOut,
+    VerificationStatusOut,
+    VerifyIn,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +44,47 @@ def _to_status_out(verification: Verification | None) -> VerificationStatusOut:
     )
 
 
+@router.post("/verification/start", response=VerificationStartOut, auth=jwt_auth)
+def start_verification(request: HttpRequest):
+    """실물 본인확인에 쓸 identityVerificationId를 서버가 발급해 요청자에게 귀속시킨다.
+
+    브라우저 SDK는 이 값을 그대로 실어 인증창을 연다 — 리다이렉트 URL과 브라우저
+    히스토리에 노출되는 값이다. `verify()`는 실물 어댑터를 쓸 때 이 값이 실제로
+    요청자 본인에게 발급된 것인지 확인한 뒤에만 완료 처리한다(#85 코드리뷰 지적
+    1) — 그렇지 않으면 노출된 남의 identityVerificationId를 다른 계정이 그대로
+    제출해 그 사람의 CI/DI로 VERIFIED가 되는 계정 탈취(미성년자의 성년 게이트
+    통과, 실소유자의 자전거래 오차단)가 가능하다.
+    """
+    identity_verification_id = f"laurio-iv-{secrets.token_urlsafe(24)}"
+    VerificationRequest.objects.create(
+        user=request.auth_user, identity_verification_id=identity_verification_id
+    )
+    return VerificationStartOut(identity_verification_id=identity_verification_id)
+
+
 @router.post("/verification/verify", response=VerificationStatusOut, auth=jwt_auth)
 def verify(request: HttpRequest, payload: VerifyIn):
     """휴대폰 본인확인을 완료 처리한다. 만 19세 미만이면 verified가 되지 않는다."""
 
+    token = payload.verification_token
+
+    # 실물 어댑터를 쓸 때만 발급 기록을 확인한다(#85 코드리뷰 지적 1) — Fake
+    # 어댑터의 토큰은 사용자가 직접 지어내는 자기완결적 문자열이라(FakeVerificationAdapter)
+    # 귀속시킬 대상 자체가 없고, tests/test_verification.py를 비롯한 기존 스위트
+    # 전체가 /verification/start 없이 바로 verify를 호출하는 전제로 짜여 있다.
+    pending_request: VerificationRequest | None = None
+    if settings.VERIFICATION_ADAPTER_MODE != "fake":
+        pending_request = VerificationRequest.objects.filter(
+            user=request.auth_user, identity_verification_id=token
+        ).first()
+        if pending_request is None:
+            raise HttpError(
+                403,
+                "본인이 발급받지 않은 본인확인 요청입니다. 처음부터 다시 시도해 주세요.",
+            )
+
     try:
-        result = get_adapter().resolve(payload.verification_token)
+        result = get_adapter().resolve(token)
     except VerificationAdapterError as exc:
         if isinstance(exc, VerificationMissingCIError):
             # 정상 운영에서는 절대 나오면 안 되는 경로다(#84) — 실제 벤더는 카카오
@@ -83,6 +127,11 @@ def verify(request: HttpRequest, payload: VerifyIn):
         verification.di_encrypted = ""
 
     verification.save()
+    # 1회용이다 — 성공적으로 소비된 identityVerificationId는 재사용할 수 없다.
+    # 실패(벤더 거절 등)한 시도는 여기 도달하지 않으므로 같은 id로 재시도할 수
+    # 있게 남겨 둔다.
+    if pending_request is not None:
+        pending_request.delete()
     return _to_status_out(verification)
 
 

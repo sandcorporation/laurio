@@ -249,6 +249,11 @@ services:
       context: ..
       dockerfile: docker/frontend.Dockerfile
       target: runner
+      # staging과 같은 이유(compose.staging.yaml 참고, #85 코드리뷰 지적 2·7) —
+      # NEXT_PUBLIC_*는 빌드타임에 인라인되므로 build.args로만 전달할 수 있다.
+      args:
+        NEXT_PUBLIC_PORTONE_STORE_ID: ${PORT_ONE_V2_STORE_ID:?}
+        NEXT_PUBLIC_PORTONE_CHANNEL_KEY: ${KG_INICIS_CHANNEL_KEY:?}
     restart: unless-stopped
     depends_on:
       db:

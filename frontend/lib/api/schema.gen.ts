@@ -1790,6 +1790,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/verification/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Verification
+         * @description 실물 본인확인에 쓸 identityVerificationId를 서버가 발급해 요청자에게 귀속시킨다.
+         *
+         *     브라우저 SDK는 이 값을 그대로 실어 인증창을 연다 — 리다이렉트 URL과 브라우저
+         *     히스토리에 노출되는 값이다. `verify()`는 실물 어댑터를 쓸 때 이 값이 실제로
+         *     요청자 본인에게 발급된 것인지 확인한 뒤에만 완료 처리한다(#85 코드리뷰 지적
+         *     1) — 그렇지 않으면 노출된 남의 identityVerificationId를 다른 계정이 그대로
+         *     제출해 그 사람의 CI/DI로 VERIFIED가 되는 계정 탈취(미성년자의 성년 게이트
+         *     통과, 실소유자의 자전거래 오차단)가 가능하다.
+         */
+        post: operations["verification_api_start_verification"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/verification/verify": {
         parameters: {
             query?: never;
@@ -2030,6 +2057,8 @@ export interface components {
         };
         /** ConfirmJudgingExtensionIn */
         ConfirmJudgingExtensionIn: {
+            /** Payment Key */
+            payment_key?: string | null;
             /** Simulate */
             simulate?: string | null;
         };
@@ -3193,6 +3222,17 @@ export interface components {
             object_key: string;
             /** Upload Url */
             upload_url: string;
+        };
+        /**
+         * VerificationStartOut
+         * @description 서버가 발급한 identityVerificationId(#85 코드리뷰 지적 1).
+         *
+         *     브라우저 SDK는 이 값을 그대로 실어 인증창을 연다. `verify()`는 실물
+         *     어댑터를 쓸 때 이 값이 실제로 요청자 본인에게 발급된 것인지 확인한다.
+         */
+        VerificationStartOut: {
+            /** Identity Verification Id */
+            identity_verification_id: string;
         };
         /** VerificationStatusOut */
         VerificationStatusOut: {
@@ -5762,6 +5802,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VerificationStatusOut"];
+                };
+            };
+        };
+    };
+    verification_api_start_verification: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VerificationStartOut"];
                 };
             };
         };

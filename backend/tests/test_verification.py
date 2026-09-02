@@ -317,23 +317,37 @@ def test_downgrading_to_underage_clears_previously_stored_ci_and_di(client):
 # --- 어댑터 선택이 resolve_adapter를 쓴다 (#83) --------------------------------
 
 
-class _DottedPathTestVerificationAdapter(FakeVerificationAdapter):
+def _start(client, access: str) -> str:
+    """`/verification/start`를 호출해 서버가 발급한 identityVerificationId를 얻는다.
+
+    #85 코드리뷰 지적 1 — 실물(비-fake) 어댑터 모드에서는 `verify()`가 이 값이
+    실제로 요청자 본인에게 발급된 것인지 확인한다. 이 파일의 dotted-path 테스트
+    더블들은 실물 흐름을 흉내내므로, 이 헬퍼로 먼저 발급받은 id를 그대로
+    `verification_token`으로 제출한다.
+    """
+    response = client.post("/api/verification/start", **_auth_header(access))
+    assert response.status_code == 200, response.content
+    return response.json()["identity_verification_id"]
+
+
+class _DottedPathTestVerificationAdapter:
     """`VERIFICATION_ADAPTER_MODE`에 dotted path로 지목됐을 때 실제로 이 클래스가
     쓰인다는 것을 증명하기 위한 테스트 전용 더블(#83).
 
-    토큰 파싱은 그대로 물려받되, 결과의 real_name에 이 클래스만 낼 수 있는
-    마커를 남긴다 — `VERIFICATION_ADAPTER_MODE="fake"`였다면 절대 나올 수 없는
-    값이므로, DB에 저장된 값만으로 `resolve_adapter`가 이 dotted path를 실제로
-    import해 썼다는 것을 확인할 수 있다.
+    실물 어댑터를 흉내내므로 `verification_token`은 `/verification/start`가
+    발급한 불투명 id다(#85 코드리뷰 지적 1) — 그래서 이 어댑터는 토큰 내용을
+    파싱하지 않고 고정된 응답을 돌려준다. 그 응답의 real_name에 이 클래스만
+    낼 수 있는 마커를 남겨서, `VERIFICATION_ADAPTER_MODE="fake"`였다면 절대
+    나올 수 없는 값이 DB에 저장된 것만으로 `resolve_adapter`가 이 dotted
+    path를 실제로 import해 썼다는 것을 확인할 수 있다.
     """
 
     def resolve(self, verification_token: str) -> VerificationResult:
-        result = super().resolve(verification_token)
         return VerificationResult(
             real_name="DOTTED-PATH-MARKER",
-            birth_date=result.birth_date,
-            ci=result.ci,
-            di=result.di,
+            birth_date=date(1990, 5, 15),
+            ci="ci-dotted-path-1",
+            di="di-dotted-path-1",
         )
 
 
@@ -342,14 +356,14 @@ class _NoCIVerificationAdapter:
 
     실제 벤더(KG이니시스 통합인증)는 카카오 인증에서만 CI를 주지 않는다 — 이
     어댑터는 "그 인증 수단 설정이 되돌려진" 상황을 재현해, `VerificationResult`가
-    CI 없이는 생성 자체를 거부하는지 증명한다. 토큰 형식은 `FakeVerificationAdapter`
-    처럼 `"<실명>|<YYYY-MM-DD>"`만 쓴다 — CI/DI는 이 어댑터가 절대 채우지 않는다.
+    CI 없이는 생성 자체를 거부하는지 증명한다. 실물 어댑터를 흉내내므로
+    `verification_token`은 `/verification/start`가 발급한 불투명 id다(#85 코드리뷰
+    지적 1) — 토큰 내용은 파싱하지 않고 고정된 실명·생년월일만 돌려준다.
     """
 
     def resolve(self, verification_token: str) -> VerificationResult:
-        real_name, birth_iso = verification_token.split("|")[:2]
         return VerificationResult(
-            real_name=real_name, birth_date=date.fromisoformat(birth_iso), ci="", di=""
+            real_name="노시아이", birth_date=date(1990, 1, 1), ci="", di=""
         )
 
 
@@ -365,12 +379,13 @@ def test_verification_with_missing_ci_is_rejected_and_leaves_user_unverified(cli
     with override_settings(
         VERIFICATION_ADAPTER_MODE="tests.test_verification._NoCIVerificationAdapter"
     ):
+        token = _start(client, pair["access"])
         import logging
 
         with caplog.at_level(logging.ERROR, logger="verification.api"):
             response = client.post(
                 "/api/verification/verify",
-                data={"verification_token": "노시아이|1990-01-01"},
+                data={"verification_token": token},
                 content_type="application/json",
                 **_auth_header(pair["access"]),
             )
@@ -397,9 +412,10 @@ def test_ci_less_user_cannot_submit_or_open_a_contest(client):
     with override_settings(
         VERIFICATION_ADAPTER_MODE="tests.test_verification._NoCIVerificationAdapter"
     ):
+        token = _start(client, pair["access"])
         client.post(
             "/api/verification/verify",
-            data={"verification_token": "노시아이|1990-01-01"},
+            data={"verification_token": token},
             content_type="application/json",
             **_auth_header(pair["access"]),
         )
@@ -432,22 +448,38 @@ def test_set_ci_refuses_an_empty_value_so_ci_less_users_cannot_share_a_hash():
     (`tests/test_core_adapters.py`가 `core.adapters`라는 순수 인프라 헬퍼에
     대해 같은 예외를 이미 두고 있다).
 
+    두 `Verification` 행을 실제로 DB에 저장한다(코드리뷰 지적 — 저장하지 않은
+    객체에 대한 단언은 가드가 있든 없든 항상 통과해 아무것도 증명하지 못한다).
     `set_ci("")`가 조용히 통과하면 `HMAC(key, "")`이라는 정상적인 64자 hex가
     나와, CI 없는 사용자 전원이 같은 해시를 갖고 서로 남남인 Sponsor와 Developer가
     동일인으로 오차단된다 — 이게 이 티켓이 고치는 실제 결함이다. 위의 거절
     테스트는 `VerificationResult` 계약 가드만 증명하고 이 메서드 자체는 부르지
     않으므로, `set_ci`가 다시 빈 문자열을 받아들이게 되는 회귀는 이 테스트만
-    잡는다.
+    잡는다 — 가드가 사라지면 두 저장된 행 모두 `ci_hash`가 같은 값으로 채워져
+    `find_by_ci("")`가 서로 남남인 둘을 같이 돌려주게 된다.
     """
-    verification = Verification(status=Verification.Status.VERIFIED)
+    from django.contrib.auth import get_user_model
+
+    User = get_user_model()
+    user_a = User.objects.create_user(username="ci-guard-a", email="ci-guard-a@example.com")
+    user_b = User.objects.create_user(username="ci-guard-b", email="ci-guard-b@example.com")
+    verification_a = Verification.objects.create(user=user_a, status=Verification.Status.VERIFIED)
+    verification_b = Verification.objects.create(user=user_b, status=Verification.Status.VERIFIED)
 
     with pytest.raises(ValueError):
-        verification.set_ci("")
+        verification_a.set_ci("")
+    with pytest.raises(ValueError):
+        verification_b.set_ci("")
 
-    # 가드가 막아 ci_hash가 채워지지 않은 채로 남는다 — 두 번째 CI 없는 사용자가
-    # 같은 시도를 해도 같은 이유로 막히므로, 둘 다 ci_hash="" 그대로다. 서로 다른
-    # 사람인 두 Verification이 이 상태로는 절대 같은 해시로 묶이지 않는다.
-    assert verification.ci_hash == ""
+    verification_a.refresh_from_db()
+    verification_b.refresh_from_db()
+
+    # 가드가 막아 ci_hash가 채워지지 않은 채로 DB에 남는다 — 서로 다른 사람인 두
+    # 저장된 행이 이 상태로는 절대 같은 해시로 묶이지 않는다. 가드가 사라지면
+    # 위의 pytest.raises가 실패해 여기 도달하지도 못하거나, 도달하더라도 두 행
+    # 모두 ci_hash가 같은 값(HMAC(key, ""))으로 저장돼 아래 단언이 깨진다.
+    assert verification_a.ci_hash == ""
+    assert verification_b.ci_hash == ""
     assert list(Verification.find_by_ci("")) == []
 
 
@@ -460,13 +492,10 @@ def test_verification_adapter_mode_resolves_a_dotted_path_to_a_real_class(client
             "tests.test_verification._DottedPathTestVerificationAdapter"
         )
     ):
+        token = _start(client, pair["access"])
         response = client.post(
             "/api/verification/verify",
-            data={
-                "verification_token": _fake_token(
-                    "홍길동", "1990-05-15", "ci-dotted-path-1", "di-dotted-path-1"
-                )
-            },
+            data={"verification_token": token},
             content_type="application/json",
             **_auth_header(pair["access"]),
         )
@@ -476,3 +505,114 @@ def test_verification_adapter_mode_resolves_a_dotted_path_to_a_real_class(client
 
     record = Verification.objects.get(user__social_accounts__provider_uid="verify-subject")
     assert record.real_name == "DOTTED-PATH-MARKER"
+
+
+# --- identityVerificationId는 발급자에게만 귀속된다 (#85 코드리뷰 지적 1) -----------
+
+
+@pytest.mark.django_db
+def test_start_verification_requires_authentication(client):
+    response = client.post("/api/verification/start")
+    assert response.status_code == 401
+
+
+@pytest.mark.django_db
+def test_start_verification_issues_a_fresh_id_bound_to_the_caller(client):
+    pair = _login(client)
+    response = client.post("/api/verification/start", **_auth_header(pair["access"]))
+    assert response.status_code == 200
+    body = response.json()
+    assert body["identity_verification_id"]
+
+    from verification.models import VerificationRequest
+
+    record = VerificationRequest.objects.get(
+        identity_verification_id=body["identity_verification_id"]
+    )
+    assert record.user.social_accounts.filter(provider_uid="verify-subject").exists()
+
+
+@pytest.mark.django_db
+def test_a_leaked_identity_verification_id_cannot_be_claimed_by_a_different_account(client):
+    """핵심 취약점 회귀 테스트(#85 코드리뷰 지적 1).
+
+    identityVerificationId는 리다이렉트 URL·브라우저 히스토리로 노출될 수 있는
+    값이다. 그 값을 서버가 발급자에게 귀속시켜 두지 않으면, 전혀 다른 계정이
+    그 값을 그대로 `POST /verification/verify`에 제출해 원래 발급받은 사람의
+    CI/DI로 VERIFIED가 될 수 있었다 — 미성년자가 성년 게이트를 통과하거나
+    실소유자가 자전거래로 오차단되는 결과로 이어진다. 서버는 "요청자 본인이
+    발급받은 값인가"를 확인해 이 도용을 막아야 한다.
+    """
+    victim = _login(client, uid="binding-victim", email="binding-victim@example.com")
+    attacker = _login(client, uid="binding-attacker", email="binding-attacker@example.com")
+
+    with override_settings(
+        VERIFICATION_ADAPTER_MODE=(
+            "tests.test_verification._DottedPathTestVerificationAdapter"
+        )
+    ):
+        leaked_token = _start(client, victim["access"])
+
+        attacker_response = client.post(
+            "/api/verification/verify",
+            data={"verification_token": leaked_token},
+            content_type="application/json",
+            **_auth_header(attacker["access"]),
+        )
+
+    assert attacker_response.status_code == 403
+
+    attacker_verification = Verification.objects.filter(
+        user__social_accounts__provider_uid="binding-attacker"
+    ).first()
+    assert (
+        attacker_verification is None
+        or attacker_verification.status != Verification.Status.VERIFIED
+    )
+
+
+@pytest.mark.django_db
+def test_verify_rejects_a_token_that_was_never_issued_in_real_adapter_mode(client):
+    pair = _login(client)
+
+    with override_settings(
+        VERIFICATION_ADAPTER_MODE=(
+            "tests.test_verification._DottedPathTestVerificationAdapter"
+        )
+    ):
+        response = client.post(
+            "/api/verification/verify",
+            data={"verification_token": "made-up-id-nobody-issued"},
+            content_type="application/json",
+            **_auth_header(pair["access"]),
+        )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_a_successfully_consumed_token_cannot_be_replayed(client):
+    pair = _login(client)
+
+    with override_settings(
+        VERIFICATION_ADAPTER_MODE=(
+            "tests.test_verification._DottedPathTestVerificationAdapter"
+        )
+    ):
+        token = _start(client, pair["access"])
+        first = client.post(
+            "/api/verification/verify",
+            data={"verification_token": token},
+            content_type="application/json",
+            **_auth_header(pair["access"]),
+        )
+        assert first.status_code == 200
+
+        second = client.post(
+            "/api/verification/verify",
+            data={"verification_token": token},
+            content_type="application/json",
+            **_auth_header(pair["access"]),
+        )
+
+    assert second.status_code == 403

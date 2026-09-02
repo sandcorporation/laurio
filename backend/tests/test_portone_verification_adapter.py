@@ -98,6 +98,23 @@ def test_resolve_raises_when_vendor_returns_a_server_error():
             adapter.resolve("iv-abc-123")
 
 
+def test_resolve_does_not_leak_the_raw_vendor_response_body_into_the_exception_message(caplog):
+    """벤더 원문(response.text)이 예외 메시지에 실리면 verify()가 그걸 422 detail로
+    그대로 사용자에게 돌려준다(#85 코드리뷰 지적 6) — 로그에만 남고 예외 메시지는
+    일반화돼야 한다."""
+    adapter = PortOneV2VerificationAdapter()
+    secret_looking_body = "internal-trace-id=abc123 upstream=payment-core-7"
+
+    with patch("verification.adapters.requests.get") as mock_get:
+        mock_get.return_value = _fake_response(status_code=502, text=secret_looking_body)
+        with caplog.at_level(logging.ERROR, logger="verification.adapters"):
+            with pytest.raises(VerificationAdapterError) as exc_info:
+                adapter.resolve("iv-abc-123")
+
+    assert secret_looking_body not in str(exc_info.value)
+    assert any(secret_looking_body in r.getMessage() for r in caplog.records)
+
+
 def test_resolve_raises_when_status_is_not_verified():
     """인증 실패·만료·아직 진행 중인 상태(FAILED/PENDING 등)는 4xx로 옮겨진다."""
     adapter = PortOneV2VerificationAdapter()

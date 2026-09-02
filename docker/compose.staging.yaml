@@ -255,6 +255,14 @@ services:
       context: ..
       dockerfile: docker/frontend.Dockerfile
       target: runner
+      # NEXT_PUBLIC_*는 빌드타임에 인라인된다(#85 코드리뷰 지적 2·7) — 아래
+      # environment로 넘겨봐야 이미 굳어진 브라우저 번들에는 반영되지 않는다.
+      # KG_INICIS_CHANNEL_KEY(.env.staging)를 여기서 NEXT_PUBLIC_PORTONE_CHANNEL_KEY
+      # 로 별칭한다 — 백엔드가 서버-투-서버 조회에 쓰는 이름을 그대로 프론트
+      # 빌드 인자로도 재사용해, 값이 두 곳에서 따로 관리되며 어긋날 여지를 없앤다.
+      args:
+        NEXT_PUBLIC_PORTONE_STORE_ID: ${PORT_ONE_V2_STORE_ID:?}
+        NEXT_PUBLIC_PORTONE_CHANNEL_KEY: ${KG_INICIS_CHANNEL_KEY:?}
     restart: unless-stopped
     depends_on:
       backend:

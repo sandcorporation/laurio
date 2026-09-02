@@ -96,12 +96,15 @@ class FakeVerificationAdapter:
 class PortOneV2VerificationAdapter:
     """포트원(PortOne) V2 통합인증 실물 어댑터 (#85, ADR-0007).
 
-    채널은 KG이니시스 통합인증이다. 브라우저 SDK가 인증창을 띄워
-    identityVerificationId를 돌려주면(이 어댑터가 받는 `verification_token`이
-    바로 그 값이다), 서버는 그 id로 포트원에 서버-투-서버 조회를 한다
+    채널은 KG이니시스 통합인증이다. `verification.api.start_verification`이
+    발급해 요청자에게 귀속시킨 identityVerificationId를 브라우저 SDK가 그대로
+    실어 인증창을 띄우면(이 어댑터가 받는 `verification_token`이 바로 그
+    값이다), 서버는 그 id로 포트원에 서버-투-서버 조회를 한다
     (``GET /identity-verifications/{id}``) — 서버가 받는 콜백 URL이 없어
     도메인·TLS 없이 dev에서 끝까지 걸을 수 있다(MinIO가 dev에서 이미 실물인
-    것과 같은 모양).
+    것과 같은 모양). 이 id가 실제로 호출자 본인에게 발급된 것인지 확인하는
+    책임은 이 어댑터가 아니라 `verification.api.verify`에 있다(#85 코드리뷰
+    지적 1) — 어댑터는 순수하게 "이 id로 포트원이 뭐라고 답하는가"만 다룬다.
 
     자격증명(`PORT_ONE_V2_STORE_ID`, `PORT_ONE_V2_SECRET_KEY`)은 환경변수에서만
     읽는다 — 저장소에 들어가지 않는다. 둘 중 하나라도 없으면 인스턴스를 만들 수
@@ -148,8 +151,15 @@ class PortOneV2VerificationAdapter:
         if response.status_code == 404:
             raise VerificationAdapterError("포트원에 존재하지 않는 본인확인 식별자다.")
         if response.status_code >= 400:
+            # 벤더 응답 원문(response.text)은 로그에만 남긴다 — 그대로 예외
+            # 메시지에 실으면 verify()가 그걸 422 detail로 사용자에게 그대로
+            # 돌려준다(#85 코드리뷰 지적 6). 아래 JSON 파싱·형식 불일치 분기와
+            # 같은 일반화 원칙을 이 분기에도 적용한다.
+            logger.error(
+                "포트원 본인확인 조회가 %s를 반환했다: %s", response.status_code, response.text
+            )
             raise VerificationAdapterError(
-                f"포트원 본인확인 조회가 {response.status_code}를 반환했다: {response.text}"
+                f"포트원 본인확인 조회가 {response.status_code}를 반환했다."
             )
 
         try:

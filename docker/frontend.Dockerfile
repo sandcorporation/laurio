@@ -39,6 +39,17 @@ FROM base AS builder
 COPY frontend/ ./frontend/
 COPY packages/bff-shared/ ./packages/bff-shared/
 WORKDIR /app/frontend
+# NEXT_PUBLIC_*는 브라우저에서 도는 코드에 빌드타임에 인라인된다 — 런타임
+# environment로 넘겨도 이미 굳어진 번들에는 반영되지 않는다(#85 코드리뷰 지적
+# 2). 포트원 브라우저 SDK가 인증창을 열 때 쓰는 두 값을 여기서 ARG로 받아
+# ENV로 노출해야 `pnpm build`가 실제 값을 인라인한다 — 비워 두면
+# `lib/verification/portone.ts`의 getPortOneBrowserConfig()가 null을 돌려줘
+# "실제 본인확인하기" 버튼 자체가 렌더링되지 않는다(기능이 죽은 채가 아니라
+# 조용히 숨는다 — 자격증명이 없는 dev/CI 이미지가 이 버튼으로 죽지 않는 이유).
+ARG NEXT_PUBLIC_PORTONE_STORE_ID=""
+ARG NEXT_PUBLIC_PORTONE_CHANNEL_KEY=""
+ENV NEXT_PUBLIC_PORTONE_STORE_ID=${NEXT_PUBLIC_PORTONE_STORE_ID}
+ENV NEXT_PUBLIC_PORTONE_CHANNEL_KEY=${NEXT_PUBLIC_PORTONE_CHANNEL_KEY}
 RUN pnpm build
 
 # ---- runner: staging/prod가 실제로 쓰는 얇은 이미지 (compose.staging.yaml/

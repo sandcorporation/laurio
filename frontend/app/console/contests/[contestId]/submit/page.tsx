@@ -18,7 +18,11 @@ import type {
   VerificationStatusOut,
 } from "@/lib/submissions/types";
 
-import { getPortOneBrowserConfig, requestPortOneIdentityVerification } from "@/lib/verification/portone";
+import {
+  consumeRedirectVerificationResult,
+  getPortOneBrowserConfig,
+  requestPortOneIdentityVerification,
+} from "@/lib/verification/portone";
 
 import { RequirementField, type RequirementFieldState } from "./requirement-field";
 
@@ -180,6 +184,20 @@ export default function SubmitPage() {
     }
   }
 
+  async function finalizeLiveVerification(identityVerificationId: string) {
+    const res = await sessionFetch("/api/backend/verification/verify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ verification_token: identityVerificationId }),
+    });
+    if (res.ok) {
+      setReloadTick((t) => t + 1);
+      return;
+    }
+    const body = (await res.json().catch(() => null)) as { detail?: string } | null;
+    window.alert(body?.detail ?? "본인확인에 실패했습니다.");
+  }
+
   async function handleVerifyLive() {
     if (session.status !== "authenticated") return;
     const config = portOneConfig;
@@ -187,22 +205,28 @@ export default function SubmitPage() {
     setVerifying(true);
     try {
       const identityVerificationId = await requestPortOneIdentityVerification(config);
-      const res = await sessionFetch("/api/backend/verification/verify", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ verification_token: identityVerificationId }),
-      });
-      if (res.ok) setReloadTick((t) => t + 1);
-      else {
-        const body = (await res.json().catch(() => null)) as { detail?: string } | null;
-        window.alert(body?.detail ?? "본인확인에 실패했습니다.");
-      }
+      await finalizeLiveVerification(identityVerificationId);
     } catch (err) {
       window.alert(err instanceof Error ? err.message : "본인확인에 실패했습니다.");
     } finally {
       setVerifying(false);
     }
   }
+
+  // 모바일에서는 PortOne 인증창이 팝업이 아니라 전체 페이지 리다이렉트로 열려
+  // handleVerifyLive의 Promise가 resolve되지 않는다(#85 코드리뷰 지적 3) — 이
+  // 화면이 리다이렉트로 돌아왔는지를 마운트 시점에 별도로 확인해야 한다.
+  useEffect(() => {
+    if (session.status !== "authenticated") return;
+    const redirectResult = consumeRedirectVerificationResult();
+    if (redirectResult === null) return;
+    if (redirectResult.status === "failure") {
+      window.alert(redirectResult.message);
+      return;
+    }
+    finalizeLiveVerification(redirectResult.identityVerificationId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 마운트 시점 1회만 확인한다.
+  }, [session.status]);
 
   async function handleSubmit() {
     if (load.status !== "ready") return;

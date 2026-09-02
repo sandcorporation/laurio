@@ -101,3 +101,34 @@ class Verification(models.Model):
         """
 
         return cls.objects.filter(status=cls.Status.VERIFIED, ci_hash=ci_hash(ci))
+
+
+class VerificationRequest(models.Model):
+    """실물 어댑터에 보낼 identityVerificationId를 서버가 발급해 요청자에게 귀속시킨 기록.
+
+    포트원 브라우저 SDK가 받는 identityVerificationId는 리다이렉트 URL과 브라우저
+    히스토리에 노출된다(#85 코드리뷰 지적 1). 그 값을 클라이언트가 스스로 만들면
+    아무 관계 없는 다른 계정이 그 값을 그대로 `POST /verification/verify`에 실어
+    보낼 수 있고, 서버는 그게 "누가 요청했는지" 확인할 방법이 없어 피해자의
+    CI/DI로 그 공격자 계정이 VERIFIED가 된다 — 미성년자가 성년 게이트를
+    통과하거나, 실소유자가 자전거래로 오차단된다.
+
+    그래서 identityVerificationId는 반드시 이 서버가 먼저 발급하고
+    (`verification.api.start_verification`), 그 사용자에게 귀속시켜 둔다.
+    `verify()`는 실물 어댑터를 쓸 때 이 표에서 "요청자 본인이 발급받은 값인가"를
+    확인한 뒤에만 진행하고, 성공하든 실패하든 1회용으로 소모한다(재사용 방지).
+
+    Fake 어댑터(dev/test)는 토큰 자체가 사용자가 직접 지어내는 자기완결적 문자열
+    이라 이 표를 쓰지 않는다 — 클라이언트가 자기 CI를 자기 이름으로 주장하는
+    설계 자체가 fake의 목적이라, 여기서 막을 「남의 정체성 도용」이 성립하지
+    않는다.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="verification_requests", on_delete=models.CASCADE
+    )
+    identity_verification_id = models.CharField(max_length=100, unique=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"VerificationRequest<{self.user_id}:{self.identity_verification_id}>"
