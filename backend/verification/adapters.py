@@ -105,6 +105,39 @@ class FakeVerificationAdapter:
         )
 
 
+# CI 누락을 진단할 때 로그에 실어도 되는 필드 — **사람이 아니라 인증 수단을
+# 가리키는 값만** 담는다. 「어느 수단으로 인증했나」가 카카오 회귀(ADR-0024)와
+# 테스트 채널을 가르는 유일한 단서인데, verifiedCustomer 의 나머지 필드는 실명·
+# 생년월일·전화번호라 그대로 남길 수 없다.
+#
+# 허용목록으로 두는 이유 — 벤더가 나중에 필드를 추가했을 때 「모르는 필드는
+# 안전할 것」으로 기울면 언젠가 PII 가 로그로 샌다. 모르는 필드는 이름만 남고
+# 값은 남지 않는다.
+_NON_PII_DIAGNOSTIC_KEYS = ("method", "pgProvider", "operator", "channelType")
+
+
+def _non_pii_diagnostics(payload: dict, customer: dict) -> list[tuple[str, str]]:
+    """CI 누락 진단에 쓸, 사람을 가리키지 않는 필드만 (name, value) 로 추린다."""
+
+    found: list[tuple[str, str]] = []
+    channel = payload.get("channel")
+    sources: list[dict] = [payload, customer]
+    if isinstance(channel, dict):
+        sources.append(channel)
+
+    for source in sources:
+        for key in _NON_PII_DIAGNOSTIC_KEYS:
+            value = source.get(key)
+            # 스칼라만 남긴다 — 중첩 구조에 PII 가 들어 있을 수 있다.
+            if isinstance(value, str) and value and (key, value) not in found:
+                found.append((key, value))
+    if isinstance(channel, dict):
+        channel_type = channel.get("type")
+        if isinstance(channel_type, str) and channel_type:
+            found.append(("channel.type", channel_type))
+    return found
+
+
 class PortOneV2VerificationAdapter:
     """포트원(PortOne) V2 통합인증 실물 어댑터 (#85, ADR-0007).
 
@@ -220,6 +253,32 @@ class PortOneV2VerificationAdapter:
         # accounts.models.PhoneContact를 채운다. 벤더가 이 필드를 비워 보내도
         # 본인확인 자체는 그대로 성공한다(ci와 달리 필수 계약이 아니다).
         phone_number = str(customer.get("phoneNumber") or "")
+
+        if not ci:
+            # **벤더가 무엇을 줬는지 남긴다.** 이게 없으면 운영자는 상위
+            # (`verification.api.verify`)의 "CI가 없다" 한 줄만 보고 원인을 가릴
+            # 수 없다 — 콘솔에서 CI를 안 주는 인증 수단(카카오, ADR-0024)이 다시
+            # 켜진 것인지, 테스트 채널이라 CI가 아예 안 내려오는 것인지, 벤더가
+            # 필드 이름을 바꾼 것인지가 전부 같은 한 줄로 보인다. staging 에서
+            # 실제로 이 상황을 만나 원인을 좁히지 못했다(#52).
+            #
+            # **값이 아니라 필드 이름과 인증 수단만 남긴다** — verifiedCustomer 는
+            # 실명·생년월일·전화번호가 든 PII 덩어리이고, 이 어댑터의 다른 실패
+            # 분기들이 이미 원문을 예외 메시지로 흘리지 않도록 잡혀 있다(#85
+            # 코드리뷰 지적 3·6). 로그도 같은 규율을 따른다.
+            logger.error(
+                "포트원이 CI 없이 VERIFIED를 돌려줬다 — verifiedCustomer 필드=%s, "
+                "ci=%s, di=%s, %s. 콘솔에서 CI를 주지 않는 인증 수단이 켜졌는지, "
+                "테스트 채널이라 CI가 내려오지 않는지 확인해야 한다.",
+                sorted(customer.keys()),
+                "빈 값" if "ci" in customer else "필드 자체가 없음",
+                "있음" if di else ("빈 값" if "di" in customer else "필드 자체가 없음"),
+                ", ".join(
+                    f"{name}={value}"
+                    for name, value in _non_pii_diagnostics(payload, customer)
+                )
+                or "인증 수단 정보 없음",
+            )
 
         # ci가 비어 있으면(카카오처럼 CI를 안 주는 인증 수단이 실수로 다시 켜진
         # 상황, ADR-0024) 여기서 VerificationResult(...)가 그 자리에서

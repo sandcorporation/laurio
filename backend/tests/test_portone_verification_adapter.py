@@ -267,3 +267,51 @@ def test_resolve_reuses_the_84_ci_invariant_instead_of_reimplementing_it():
         )
         with pytest.raises(VerificationMissingCIError):
             adapter.resolve("iv-no-ci")
+
+
+def test_resolve_logs_what_the_vendor_actually_returned_when_ci_is_missing(caplog):
+    """CI가 없을 때 **벤더가 무엇을 줬는지**를 남긴다.
+
+    이게 없으면 운영자는 "CI가 없다"만 보고 원인을 가릴 수 없다 — 콘솔에서
+    CI를 안 주는 인증 수단(카카오, ADR-0024)이 다시 켜진 것인지, 아예 테스트
+    채널이라 CI가 안 내려오는 것인지, 벤더가 필드 이름을 바꾼 것인지가 전부
+    같은 한 줄로 보인다. staging 에서 실제로 이 상황을 만나 원인을 좁히지
+    못했다(#52).
+
+    **값이 아니라 필드 이름과 인증 수단만 남긴다** — verifiedCustomer 는 실명·
+    생년월일·전화번호가 든 PII 덩어리라, 이 파일의 다른 테스트들이 이미 원문이
+    로그·예외로 새지 않는 것을 고정하고 있다.
+    """
+
+    adapter = PortOneV2VerificationAdapter()
+
+    with patch("verification.adapters.requests.get") as mock_get:
+        mock_get.return_value = _fake_response(
+            json_body={
+                "status": "VERIFIED",
+                "method": "IDENTITY_VERIFICATION_METHOD_UNIFIED",
+                "verifiedCustomer": {
+                    "name": "홍길동",
+                    "birthDate": "1990-01-01",
+                    "phoneNumber": "01012345678",
+                    "di": "di-1",
+                    "operator": "SHINHAN",
+                },
+            }
+        )
+        with caplog.at_level(logging.ERROR, logger="verification.adapters"):
+            with pytest.raises(VerificationMissingCIError):
+                adapter.resolve("iv-no-ci")
+
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+
+    # 어떤 필드가 왔는지 — ci 가 아예 없었는지 빈 값이었는지가 여기서 갈린다.
+    assert "birthDate" in logged
+    assert "phoneNumber" in logged
+    # 어느 인증 수단이었는지 — 카카오 회귀인지 아닌지를 가르는 값이다.
+    assert "SHINHAN" in logged
+
+    # **PII 는 새지 않는다.**
+    assert "홍길동" not in logged
+    assert "1990-01-01" not in logged
+    assert "01012345678" not in logged

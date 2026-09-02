@@ -7,6 +7,10 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
+# Fernet 은 VERIFICATION_ENCRYPTION_KEY 가 **쓸 수 있는 키인지**를 부팅 시점에
+# 확인하는 데만 쓴다(아래 Verification 절). Django 앱 레지스트리를 건드리지
+# 않으므로 settings.py 실행 도중 임포트해도 안전하다.
+from cryptography.fernet import Fernet
 from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
@@ -413,6 +417,39 @@ if IS_DEPLOYED_ENVIRONMENT:
             "로그인 버튼이 컨테이너가 뜬 채로 항상 실패한다."
         )
 
+# --- 로깅 -------------------------------------------------------------------
+#
+# **500 이 컨테이너 로그에 보여야 한다.** Django 기본 로깅에서 `django.request` 의
+# ERROR 는 `mail_admins` 로만 가고, `django` 로거의 콘솔 핸들러는 `DEBUG=True` 일
+# 때만 붙는다 — 그래서 `DEBUG=False` 인 배포에서는 500 이 나도 `docker compose
+# logs` 에 **한 줄도** 남지 않는다.
+#
+# staging 에서 본인확인 500 을 쫓을 때 실제로 그랬다: 로그는 멀쩡한데 사용자만
+# 500 을 받았고, 원인(VERIFICATION_ENCRYPTION_KEY 가 Fernet 키가 아니었다)은 같은
+# 요청을 손으로 재현해서야 나왔다. 우리 코드가 남기는 logger.error 는 보이는데
+# 처리되지 않은 예외만 안 보이는 상태라, 「로그에 없으니 백엔드는 무사하다」는
+# 잘못된 결론까지 나왔다.
+#
+# `disable_existing_loggers: False` — 이 설정이 앱 로거(verification.adapters 등)를
+# 끄지 않도록 한다. 그 로거들은 전파로 여기 핸들러에 닿는다.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "standard": {"format": "[{asctime}] {levelname} {name}: {message}", "style": "{"},
+    },
+    "handlers": {
+        "console": {"class": "logging.StreamHandler", "formatter": "standard"},
+    },
+    "root": {"handlers": ["console"], "level": "INFO"},
+    "loggers": {
+        # 처리되지 않은 예외가 여기로 온다 — 이 한 줄이 이 블록의 이유다.
+        "django.request": {"handlers": ["console"], "level": "ERROR", "propagate": False},
+        # 요청 로그는 gunicorn 이 아니라 Django 가 낼 필요가 없다 — 시끄럽기만 하다.
+        "django.db.backends": {"level": "WARNING"},
+    },
+}
+
 # --- Verification (ADR-0011, ADR-0007) ------------------------------------
 # 본인확인 어댑터도 같은 원칙: 기본값은 항상 fake이고, staging/production 배포만
 # real을 명시한다.
@@ -433,6 +470,27 @@ if not _verification_key:
             "배포 환경에서는 반드시 주입해야 한다."
         )
     _verification_key = "A0crfksMrBmbSY37jIyOwcPRFpK9rc_eIaNnL89lIfo="
+
+# **비어 있지 않은 것만으로는 부족하다.** staging 에서 실제로 겪었다 — 사람이 이
+# 칸에 아무 문자열이나 채웠고, 「비어 있는지」만 보는 가드가 통과시켰다. 컨테이너는
+# 멀쩡히 떴고, 본인확인이 **성공해서 실명을 암호화하려는 순간**
+# `Fernet key must be 32 url-safe base64-encoded bytes` 로 500 이 났다. 사용자에게는
+# 본인확인이 깨진 것으로만 보이고, 원인은 벤더 응답 어디에도 없다 — 이 저장소는
+# 그 실패 모양을 이미 거부하기로 했다(CLAUDE.md, #83 의 어댑터 가드와 같은 규율).
+#
+# dev 도 함께 검사한다. 값을 **주지 않는** 것은 dev 에서 정상이고(위의 fallback 이
+# 받는다), 여기서 걸리는 것은 「줬는데 쓸 수 없는 값」뿐이다 — 그건 어느 환경에서도
+# 오타가 아니라 고장이다.
+try:
+    Fernet(_verification_key.encode() if isinstance(_verification_key, str) else _verification_key)
+except (ValueError, TypeError) as _fernet_exc:
+    raise ImproperlyConfigured(
+        "VERIFICATION_ENCRYPTION_KEY 가 Fernet 키가 아니다. 실명·생년월일·CI/DI 암호화에 "
+        "쓰이므로 본인확인이 성공하는 순간 500 이 난다. "
+        "`python -c \"from cryptography.fernet import Fernet; "
+        'print(Fernet.generate_key().decode())"` 로 생성한 값을 넣어라.'
+    ) from _fernet_exc
+
 VERIFICATION_ENCRYPTION_KEY = _verification_key
 
 # --- 결제 · Escrow 예치 (#9, ADR-0007) --------------------------------------

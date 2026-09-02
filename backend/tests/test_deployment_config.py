@@ -697,3 +697,98 @@ def test_development_target_boots_without_kakao_oauth_credentials():
     result = _run_check(env)
 
     assert result.returncode == 0, result.stderr
+
+
+# --- VERIFICATION_ENCRYPTION_KEY: 비어 있지 않은 것으로는 부족하다 ------------------
+
+
+@pytest.mark.parametrize(
+    "bad_key",
+    [
+        pytest.param("not-a-fernet-key", id="아무 문자열"),
+        pytest.param("A0crfksMrBmbSY37jIyOwcPRFpK9rc_eIaNnL89lIf", id="32바이트가 아닌 base64"),
+        pytest.param("한글은 base64가 아니다", id="base64가 아닌 문자"),
+    ],
+)
+@pytest.mark.parametrize("target", ["staging", "production"])
+def test_deployed_environment_refuses_a_verification_key_that_is_not_a_fernet_key(target, bad_key):
+    """**비어 있지 않은 것만으로는 부족하다** (#52).
+
+    staging 에서 실제로 겪었다 — 사람이 이 칸에 아무 문자열이나 채웠고, 가드가
+    "비어 있지 않다"만 보고 통과시켰다. 컨테이너는 멀쩡히 떴고, 본인확인이
+    **성공해서 실명을 암호화하려는 순간** `Fernet key must be 32 url-safe
+    base64-encoded bytes` 로 500 이 났다. 사용자에게는 본인확인이 깨진 것으로만
+    보이고, 원인은 벤더 응답 어디에도 없다.
+
+    이 저장소는 그 실패 모양을 이미 거부하기로 했다(CLAUDE.md — "컨테이너가 뜬
+    채로 첫 요청에서야 죽는 것보다, 정직하게 못 뜨는 편을 택했다").
+    """
+
+    env_builder = _production_env if target == "production" else _staging_env
+    env = env_builder()
+    env["VERIFICATION_ENCRYPTION_KEY"] = bad_key
+
+    result = _run_check(env)
+
+    assert result.returncode != 0, (
+        f"{target} config with VERIFICATION_ENCRYPTION_KEY={bad_key!r} booted successfully — "
+        "이 값으로는 본인확인이 성공하는 순간 500이 난다."
+    )
+    assert "ImproperlyConfigured" in result.stderr
+    assert "VERIFICATION_ENCRYPTION_KEY" in result.stderr
+    # 사람이 바로 고칠 수 있어야 한다 — 무엇이 틀렸는지만 말하고 끝내지 않는다.
+    assert "Fernet" in result.stderr
+
+
+@pytest.mark.parametrize("target", ["staging", "production"])
+def test_deployed_environment_boots_with_a_real_fernet_key(target):
+    """유효한 키는 그대로 통과한다 — 가드가 정상 배포를 막지 않는다."""
+
+    env_builder = _production_env if target == "production" else _staging_env
+    result = _run_check(env_builder())
+
+    assert result.returncode == 0, result.stderr
+
+
+# --- 500 이 컨테이너 로그에 남는가 -------------------------------------------------
+
+
+def test_unhandled_errors_reach_stdout_so_docker_logs_shows_them():
+    """**500 트레이스백이 컨테이너 로그에 나와야 한다** (#52).
+
+    Django 기본 로깅에서 `django.request` 의 ERROR 는 `mail_admins` 로만 간다 —
+    `DEBUG=False` 인 배포에서는 500 이 나도 `docker compose logs` 에 **한 줄도**
+    남지 않는다. staging 에서 본인확인 500 을 쫓을 때 실제로 그랬다: 로그는
+    멀쩡한데 사용자만 500 을 받았고, 원인은 같은 요청을 손으로 재현해서야 나왔다.
+
+    이 파일의 다른 테스트들과 같은 이유로 서브프로세스로 확인한다 — pytest 의
+    로깅 플러그인이 핸들러의 스트림을 가로채므로, 같은 프로세스 안에서는 「진짜
+    stderr 로 나가는가」를 관찰할 수 없다. 컨테이너 로그는 프로세스의 stderr 그
+    자체다.
+    """
+
+    import os
+
+    program = (
+        "import django, logging;"
+        "django.setup();"
+        "logging.getLogger('django.request')"
+        # 표식은 ASCII 로 둔다 — 이 줄은 서브프로세스의 콘솔 인코딩(Windows 는
+        # cp949)으로 나가는데, 한글 표식을 쓰면 테스트가 제품이 아니라 로캘 때문에
+        # 깨진다.
+        ".error('LAURIO_REQUEST_ERROR_MARKER')"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", program],
+        cwd=BACKEND_DIR,
+        env={**os.environ, **_staging_env()},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert "LAURIO_REQUEST_ERROR_MARKER" in (result.stdout + result.stderr), (
+        "django.request 의 ERROR 가 프로세스 stdout/stderr 어디에도 나오지 않는다 — "
+        "배포에서 500 이 docker logs 에 남지 않는다는 뜻이다. "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
