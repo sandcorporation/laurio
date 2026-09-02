@@ -72,6 +72,31 @@ dotted path를 채워 넣으면 그 값으로 교체되며 정상 부팅된다.
 반드시 다른 서브도메인을 쓴다 — 같은 오리진을 공유하면 공개 앱이 뚫렸을 때
 운영자 세션 쿠키까지 노출될 길이 생긴다.
 
+**staging 배포는 `deploy.sh` 가 한다 — `Jenkinsfile` 이 아니다.** Jenkins 잡은
+Pipeline 이 아니라 **freestyle** 이고, 셸 스텝이 `sh ./deploy.sh staging` 하나뿐이라
+`Jenkinsfile` 은 읽히지 않는다. 이걸 모르고 Jenkinsfile 만 고쳤다가 빌드가
+`cannot open ./deploy.sh` 로 통째로 실패했다 — 지금은 `Jenkinsfile` 도 같은
+스크립트를 부르는 껍데기라 어느 쪽으로 돌려도 동작이 같다.
+
+`deploy.sh` 는 **바뀐 것만 다시 굽는다**. 기준점은 `.jenkins-staging-deployed`
+(gitignore, 빌드 디렉터리에 남는다 — 시크릿과 같은 전제). 그 파일이 없거나 그것이
+가리키는 커밋이 저장소에 없으면 전부 굽는다. 경로 → 서비스 팬아웃은 1:1 이 아니다:
+`backend/` 는 **backend + celery-worker + celery-beat** 를 함께 갈고(셋이 같은
+이미지이고, backend 만 갈면 워커가 옛 코드로 스캔을 계속 돌린다),
+`packages/bff-shared/` 와 `pnpm-lock.yaml` 은 **frontend + operator** 를 함께 간다.
+없는 컨테이너는 변경 여부와 무관하게 굽는다 — 「없음」은 「최신」이 아니다.
+
+**헬스 체크는 Host 헤더를 붙여야 한다.** 루프백으로 치면 Host 가 `127.0.0.1` 이
+되는데 그건 `ALLOWED_HOSTS` 에 없어 Django 가 400 을 낸다 — gunicorn 이 멀쩡히
+떠 있어도 배포가 실패로 끝난다(빌드 #5 가 세 이미지를 다 굽고 다섯 컨테이너를 다
+띄운 뒤 그렇게 죽었다). 스크립트는 `DJANGO_ALLOWED_HOSTS` 의 첫 항목을 쓴다.
+
+Jenkins 컨테이너는 호스트 docker 소켓을 물고 root 로 돈다. 빌드 로그는
+`docker exec jenkins sh -c 'tail /var/jenkins_home/jobs/laurio/builds/<N>/log'`.
+워크스페이스는 컨테이너의 `/var/jenkins_home/workspace/laurio` 이자 호스트의
+`/server/jenkins/workspace/laurio` 다 — **경로가 다르므로** compose 에 상대경로
+바인드 마운트를 넣으면 호스트 데몬이 엉뚱한 곳을 본다. 지금은 named volume 뿐이다.
+
 **`appeals` 마이그레이션이 다시 만들어졌다**(#44). 배포 이력이 없어 단일 initial 로
 정리했는데, 옛 `0001_initial` 을 이미 적용한 dev DB 는 Django 가 "적용 완료" 로
 보고 조용히 지나간다 — 테이블이 없다는 오류가 한참 뒤 런타임에 난다. 그 시점의
