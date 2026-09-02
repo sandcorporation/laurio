@@ -137,6 +137,12 @@ class NotificationDispatch(models.Model):
         LMS = "lms", "LMS"
 
     class Status(models.TextChoices):
+        # 벤더를 부르기 직전에 남긴다(#51 코드리뷰 지적 7) — 벤더 호출이 실제로
+        # 성공한 "뒤" 이 행을 SENT로 확정 "전"에 프로세스가 죽으면, 이 행이
+        # PENDING인 채로 남아 "이 채널을 이미 시도했을 수도 있다"는 증거가
+        # 된다. 정상적으로 끝난 요청·응답에서는 이 상태가 최종적으로 남지
+        # 않는다 — SENT/FAILED 중 하나로 같은 요청 안에서 항상 갱신된다.
+        PENDING = "pending", "발송 시도 중(결과 미확정)"
         SENT = "sent", "성공"
         FAILED = "failed", "실패"
 

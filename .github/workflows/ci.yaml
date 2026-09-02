@@ -161,9 +161,9 @@ jobs:
       # 벤더 자격증명 없이 검증하는 것이 이 잡의 목적이다. 실물 Aligo 어댑터가
       # 자격증명과 함께 실제로 부팅되는지는 tests/test_deployment_config.py의
       # 전용 테스트가 별도로 검증한다.
-      NOTIFICATION_ALIMTALK_ADAPTER: tests.adapter_stubs.StubNotificationChannelAdapter
-      NOTIFICATION_SMS_ADAPTER: tests.adapter_stubs.StubNotificationChannelAdapter
-      NOTIFICATION_LMS_ADAPTER: tests.adapter_stubs.StubNotificationChannelAdapter
+      NOTIFICATION_ALIMTALK_ADAPTER: tests.adapter_stubs.StubAlimtalkChannelAdapter
+      NOTIFICATION_SMS_ADAPTER: tests.adapter_stubs.StubSmsChannelAdapter
+      NOTIFICATION_LMS_ADAPTER: tests.adapter_stubs.StubLmsChannelAdapter
 
     steps:
       - uses: actions/checkout@v4

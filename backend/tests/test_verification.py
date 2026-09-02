@@ -28,7 +28,9 @@ def _auth_header(access: str) -> dict:
     return {"HTTP_AUTHORIZATION": f"Bearer {access}"}
 
 
-def _fake_token(name: str, birth_iso: str, ci: str, di: str) -> str:
+def _fake_token(name: str, birth_iso: str, ci: str, di: str, phone: str = "") -> str:
+    if phone:
+        return f"{name}|{birth_iso}|{ci}|{di}|{phone}"
     return f"{name}|{birth_iso}|{ci}|{di}"
 
 
@@ -652,3 +654,59 @@ def test_a_fake_named_dotted_path_does_not_require_verification_start(client):
 
     assert response.status_code == 200
     assert response.json()["status"] == "verified"
+
+
+
+# --- 본인확인 응답의 휴대폰 번호 -> PhoneContact (#51 코드리뷰 지적 1) -----------
+
+
+@pytest.mark.django_db
+def test_verification_with_phone_number_populates_encrypted_phone_contact(client):
+    """알림(#51)이 실제로 문자를 보낼 대상 번호가 이 프로젝트 어디에도 없었다 —
+    본인확인이 이미 휴대폰으로 이루어지므로 그 응답이 채우는 것이 자연스러운
+    지점이다. 여기서도 평문으로 남기지 않는다(#51 코드리뷰 지적 3)."""
+
+    from accounts.models import PhoneContact
+
+    pair = _login(client, uid="verify-phone-subject")
+
+    response = client.post(
+        "/api/verification/verify",
+        data={
+            "verification_token": _fake_token(
+                "홍길동", "1990-05-15", "ci-phone-1", "di-phone-1", phone="010-1234-5678"
+            )
+        },
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+
+    assert response.status_code == 200
+
+    contact = PhoneContact.objects.get(
+        user__social_accounts__provider_uid="verify-phone-subject"
+    )
+    assert "1234" not in contact.phone_number_encrypted
+    assert contact.phone_number == "01012345678"
+
+
+@pytest.mark.django_db
+def test_verification_without_phone_number_does_not_create_phone_contact(client):
+    """4필드 토큰(휴대폰 번호 없음)은 기존 동작 그대로 — PhoneContact가
+    만들어지지 않는다(#51은 없다고 본인확인 자체를 막지 않는다)."""
+
+    from accounts.models import PhoneContact
+
+    pair = _login(client, uid="verify-no-phone-subject")
+
+    response = client.post(
+        "/api/verification/verify",
+        data={"verification_token": _fake_token("홍길동", "1990-05-15", "ci-no-phone", "di-no-phone")},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+
+    assert response.status_code == 200
+    assert not PhoneContact.objects.filter(
+        user__social_accounts__provider_uid="verify-no-phone-subject"
+    ).exists()

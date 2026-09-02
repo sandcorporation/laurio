@@ -93,10 +93,12 @@ def _base_env(*, target: str, secret_key: str) -> dict[str, str]:
         # #89: notifications.adapters.RealAlimtalkAdapter/RealSmsAdapter/RealLmsAdapter는
         # 저장소에 없는 클래스였다(그것이 이 티켓이 고치는 버그) — 실물 벤더
         # 어댑터(#51)가 나오기 전까지는 나머지 어댑터들과 같은 원칙으로 stub을
-        # 가리킨다.
-        "NOTIFICATION_ALIMTALK_ADAPTER": "tests.adapter_stubs.StubNotificationChannelAdapter",
-        "NOTIFICATION_SMS_ADAPTER": "tests.adapter_stubs.StubNotificationChannelAdapter",
-        "NOTIFICATION_LMS_ADAPTER": "tests.adapter_stubs.StubNotificationChannelAdapter",
+        # 가리킨다. 세 설정마다 channel이 다른 Stub을 쓴다(#51 코드리뷰 지적 8) —
+        # notifications.checks가 이제 channel 일치도 검증하므로 하나를
+        # 공유하면 그 자체가 걸린다.
+        "NOTIFICATION_ALIMTALK_ADAPTER": "tests.adapter_stubs.StubAlimtalkChannelAdapter",
+        "NOTIFICATION_SMS_ADAPTER": "tests.adapter_stubs.StubSmsChannelAdapter",
+        "NOTIFICATION_LMS_ADAPTER": "tests.adapter_stubs.StubLmsChannelAdapter",
     }
 
 
@@ -456,6 +458,45 @@ def test_staging_alimtalk_adapter_boots_with_aligo_credentials():
     result = _run_check(env)
 
     assert result.returncode == 0, result.stderr
+
+
+# --- 세 설정이 서로의 채널을 가리키면(#51 코드리뷰 지적 8) 부팅을 거부한다 -----------
+#
+# core.adapters.check_adapter_mode는 Protocol 구조(channel 속성 + send 메서드
+# 존재)만 보므로, NOTIFICATION_SMS_ADAPTER가 실수로 channel="lms"인
+# AligoLmsAdapter를 가리켜도 그 자체로는 깨끗이 통과한다 — 리뷰가 직접
+# 실행해 확인한 사고: SMS 요금으로 전부 LMS를 보내면서 발송 이력에는
+# channel="sms"로 남는다. notifications.checks의 추가 검증(notifications.E002)
+# 이 이 어긋남을 부팅 시점에 잡아야 한다.
+
+
+@pytest.mark.parametrize(
+    "field,wrong_class_name",
+    [
+        ("NOTIFICATION_ALIMTALK_ADAPTER", "AligoSmsAdapter"),
+        ("NOTIFICATION_SMS_ADAPTER", "AligoLmsAdapter"),
+        ("NOTIFICATION_LMS_ADAPTER", "AligoAlimtalkAdapter"),
+    ],
+)
+def test_staging_refuses_boot_when_a_notification_setting_points_at_the_wrong_channel(
+    field, wrong_class_name
+):
+    env = _staging_env(
+        **{field: f"notifications.adapters_aligo.{wrong_class_name}"},
+        ALIGO_API_KEY="dummy-key",
+        ALIGO_USER_ID="dummy-user",
+        ALIGO_SENDER_PHONE_NUMBER="01000000000",
+    )
+
+    result = _run_check(env)
+
+    assert result.returncode != 0, (
+        f"{field}가 다른 채널의 어댑터({wrong_class_name})를 가리켜도 부팅에 "
+        "성공했다 — Protocol 구조만 같으면 통과하는 core.adapters.check_adapter_mode "
+        "의 빈틈이다(#51 코드리뷰 지적 8)."
+    )
+    assert "notifications.E002" in result.stderr
+    assert field in result.stderr
 
 
 @pytest.mark.parametrize(

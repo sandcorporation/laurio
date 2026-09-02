@@ -38,7 +38,12 @@ logger = logging.getLogger(__name__)
 
 _SEND_URL = "https://apis.aligo.in/send/"
 _REMAIN_URL = "https://apis.aligo.in/remain/"
-_TIMEOUT_SECONDS = 10
+# 야간 드레인 스캔(notifications.services.dispatch_due_notifications, #51
+# 코드리뷰 지적 6)이 한 요청 안에서 여러 건을 순차 처리한다 — 채널 하나가
+# 10초씩 물고 늘어지면 그 시간이 통째로 스캔 예산을 잡아먹는다. 5초면 실제
+# 벤더 응답(보통 수백ms)에는 넉넉하고, 벤더가 완전히 죽은 최악의 경우에도
+# 한 채널이 잡아먹는 시간을 절반으로 줄인다.
+_TIMEOUT_SECONDS = 5
 
 # 대략적인 EUC-KR(CP949) 계열 SMS 바이트 한도 — 이 값을 넘으면 벤더가 SMS로는
 # 아예 접수하지 않거나(우리가 원치 않는 잘림) 임의로 잘라 보낼 수 있다. 그래서
@@ -88,13 +93,32 @@ def _read_credentials() -> _AligoCredentials:
 def _byte_length(text: str) -> int:
     """Aligo SMS/LMS 판정 기준(EUC-KR 계열 바이트 수)을 근사한다.
 
-    UTF-8로 세면 한글 한 글자가 3바이트라 실제 벤더 판정보다 훨씬 빨리 한도를
-    넘긴 것으로 오판한다. CP949는 EUC-KR의 상위 호환이라 현대 한글 음절을 전부
-    2바이트로 인코딩한다. CP949로 표현할 수 없는 문자(이모지 등)는 "?"로
-    치환한다 — 길이 판정이 예외로 죽으면 안 된다.
+    UTF-8로 통째로 세면 한글 한 글자가 3바이트라 실제 벤더 판정보다 훨씬 빨리
+    한도를 넘긴 것으로 오판한다 — 그래서 CP949(EUC-KR의 상위 호환, 현대 한글
+    음절을 전부 2바이트로 인코딩한다)를 기준으로 삼는다.
+
+    다만 문자 전체를 한 번에 ``text.encode("cp949", errors="replace")``로
+    인코딩하면, CP949로 표현할 수 없는 문자(이모지, KS X 1001 밖 한자, 그리고
+    이 저장소가 실제 문구에 쓰는 em dash "—")가 전부 "?" 1바이트로 치환돼
+    실제보다 훨씬 짧게 계산된다(#51 코드리뷰 지적 2 — 이모지 15개짜리 제목이
+    추정 65바이트로 나왔지만 실제 페이로드는 123바이트였다). 그 결과 SMS
+    한도를 실제로는 넘는 메시지가 SMS로 잘못 분류돼 벤더가 잘라 보내거나
+    접수를 거절할 수 있다 — "돈 정보를 담은 문장이 중간에서 끊기면 안 된다"는
+    AC(#51)가 그대로 깨진다.
+
+    그래서 문자 하나하나를 시도한다 — CP949로 인코딩되면 그 결과(1~2바이트)를,
+    안 되면 실제로 전송될 때 쓰이는 UTF-8 인코딩 기준 바이트 수(그 문자의
+    진짜 크기)를 더한다. 순수 한글·영문 문구는 기존과 똑같이 정확하고, 특수
+    문자가 섞여도 더는 과소평가하지 않는다.
     """
 
-    return len(text.encode("cp949", errors="replace"))
+    total = 0
+    for char in text:
+        try:
+            total += len(char.encode("cp949"))
+        except UnicodeEncodeError:
+            total += len(char.encode("utf-8"))
+    return total
 
 
 def _select_msg_type(message: str) -> str:
@@ -107,12 +131,31 @@ def _recipient_phone_number(recipient) -> str | None:
     없으면 None — Django의 역방향 OneToOne 접근자는 행이 없을 때
     `RelatedObjectDoesNotExist`(AttributeError의 하위 타입)를 던지므로
     `getattr(..., default)`가 그대로 동작한다.
+
+    `PhoneContact.phone_number` setter(accounts.models)가 저장 시점에 이미
+    `accounts.phone.normalize_phone_number`로 정규화·검증하므로 여기서 다시
+    걸릴 값은 정상적으로는 없다. 그래도 알리고의 `receiver` 파라미터가
+    콤마로 여러 수신자를 지정하는 필드라는 사실 자체가 위험하므로(#51
+    코드리뷰 지적 4), 벤더를 호출하는 마지막 지점에서 한 번 더 방어한다 —
+    저장 시점 검증을 우회하는 어떤 경로(레거시 데이터, 직접 DB 조작 등)가
+    생겨도 콤마가 섞인 값이 그대로 벤더에 나가는 일은 없다.
     """
 
     contact = getattr(recipient, "phone_contact", None)
     if contact is None:
         return None
-    return contact.phone_number or None
+    phone = contact.phone_number
+    if not phone:
+        return None
+    if "," in phone:
+        logger.error(
+            "PhoneContact(user_id=%s)의 번호에 콤마가 포함돼 있다 — 알리고 "
+            "receiver 파라미터는 콤마를 다중 수신자 구분자로 해석하므로 "
+            "발송하지 않는다.",
+            getattr(recipient, "id", None),
+        )
+        return None
+    return phone
 
 
 def _post_to_aligo(
@@ -249,17 +292,33 @@ class AligoAlimtalkAdapter:
         )
 
 
+class AligoQueryError(Exception):
+    """잔액 조회가 실패했을 때(#51 코드리뷰 지적 5)."""
+
+
 def query_remaining_balance(credentials: _AligoCredentials | None = None) -> dict:
     """잔여 발송 건수를 조회한다 — 실제 발송 없이 자격증명이 유효한지 확인하는
     용도(#51 live 테스트). 잔액이 0이어도(계정 잔액 0인 것이 이 프로젝트의 현재
     상태다) 이 호출 자체는 성공한다 — 조회는 과금되지 않는다.
+
+    GET이 아니라 POST(form body)로 보낸다(#51 코드리뷰 지적 5) — GET은 `key`가
+    쿼리스트링에 그대로 실려, `response.raise_for_status()`가 던지는
+    `requests.HTTPError`의 메시지에 `response.url` 전체(쿼리스트링 포함)가
+    담겨 그대로 로그로 새 나갈 수 있었다. 알리고 `/remain/`은 POST form도
+    받는 엔드포인트라 body로 옮기는 것만으로 이 경로 자체가 없어진다. 그래도
+    `raise_for_status()`를 쓰지 않고 직접 예외를 만든다 — 그 메서드가 항상
+    `response.url`을 메시지에 포함시키는 구현이라, 다른 경로로 URL에 자격증명이
+    실리는 변경이 나중에 들어와도 이 함수만은 자격증명을 예외 메시지에 담지
+    않는다는 것을 구조적으로 보장한다.
     """
 
     credentials = credentials or _read_credentials()
-    response = requests.get(
+    response = requests.post(
         _REMAIN_URL,
-        params={"key": credentials.api_key, "user_id": credentials.user_id},
+        data={"key": credentials.api_key, "user_id": credentials.user_id},
         timeout=_TIMEOUT_SECONDS,
     )
-    response.raise_for_status()
+    if response.status_code >= 400:
+        logger.warning("Aligo 잔액 조회가 HTTP %s를 응답했다: %s", response.status_code, response.text)
+        raise AligoQueryError(f"Aligo 잔액 조회가 HTTP {response.status_code}를 응답했다.")
     return response.json()

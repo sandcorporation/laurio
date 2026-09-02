@@ -19,7 +19,12 @@ from django.test import override_settings
 
 from accounts.models import PhoneContact
 from core.models import ClockOverride
-from notifications.models import Notification, NotificationOptIn, NotificationType
+from notifications.models import (
+    Notification,
+    NotificationDispatch,
+    NotificationOptIn,
+    NotificationType,
+)
 
 KST = ZoneInfo("Asia/Seoul")
 CREATE_URL = "/api/internal/notifications"
@@ -436,6 +441,99 @@ def test_stuck_queued_notification_is_recovered_by_a_later_scan(client):
 
 
 @pytest.mark.django_db
+def test_reclaimed_channel_already_sent_is_not_retried_to_avoid_double_charge(client):
+    """#51 코드리뷰 지적 7: 벤더 발송이 실제로 성공한 '뒤' 이 채널을 SENT로
+    확정하기 '전'에 프로세스가 죽으면, 예전 코드는 재선점 시 알림톡부터 다시
+    시도해 이미 성공한 채널까지 다시 벤더를 불렀다 — 실물 어댑터는 실제로
+    과금되므로 이것이 유료 재발송 사고다. 이미 SENT인 채널은 다시 시도하지
+    않고 그 성공을 그대로 확정해야 한다."""
+
+    user = _make_user()
+    stuck_at = datetime(2026, 1, 10, 14, 0, tzinfo=KST)
+    notification = Notification.objects.create(
+        recipient=user,
+        notification_type=NotificationType.DEADLINE_REMINDER,
+        is_transactional=True,
+        is_promotional=False,
+        status=Notification.Status.QUEUED,
+        claimed_at=stuck_at,
+        created_at=stuck_at,
+    )
+    # alimtalk는 시도했다가 실패했고, sms는 실제로 성공했지만 그 직후 죽어서
+    # Notification.status가 SENT로 갱신되지 못한 채 QUEUED에 멈췄다고 가정한다.
+    NotificationDispatch.objects.create(
+        notification=notification,
+        channel="alimtalk",
+        status=NotificationDispatch.Status.FAILED,
+        attempted_at=stuck_at,
+        failure_reason="fake-alimtalk-forced-failure",
+    )
+    NotificationDispatch.objects.create(
+        notification=notification,
+        channel="sms",
+        status=NotificationDispatch.Status.SENT,
+        attempted_at=stuck_at,
+        failure_reason="",
+    )
+
+    _freeze(stuck_at + timedelta(minutes=10))
+    recovery_scan = client.post(DISPATCH_DUE_URL, **_auth_headers())
+    assert recovery_scan.json()["count"] == 1
+
+    recovered = client.get(f"{CREATE_URL}/{notification.id}", **_auth_headers()).json()
+    assert recovered["status"] == Notification.Status.SENT
+    # sms 채널의 발송 시도는 여전히 하나뿐이다 — 재선점이 두 번째 sms 시도를
+    # 새로 만들지 않았다(다시 벤더를 부르지 않았다는 뜻).
+    sms_dispatches = [d for d in recovered["dispatches"] if d["channel"] == "sms"]
+    assert len(sms_dispatches) == 1
+    assert sms_dispatches[0]["status"] == "sent"
+    # lms는 아예 시도되지 않았다 — sms의 기존 성공으로 바로 종결됐다.
+    assert all(d["channel"] != "lms" for d in recovered["dispatches"])
+
+
+@pytest.mark.django_db
+def test_reclaimed_channel_still_pending_is_skipped_not_retried(client):
+    """#51 코드리뷰 지적 7: 벤더 응답을 받기 '전'에(성공인지 실패인지 확정하기
+    전에) 죽으면 그 채널의 기록은 PENDING으로 남는다 — 벤더가 실제로는
+    성공했을 수도 있으므로, 재선점이 이 채널을 다시 시도하면 중복 과금
+    가능성이 있다. PENDING인 채널은 건너뛰고 다음 채널로 넘어가야 한다."""
+
+    user = _make_user()
+    stuck_at = datetime(2026, 1, 10, 14, 0, tzinfo=KST)
+    notification = Notification.objects.create(
+        recipient=user,
+        notification_type=NotificationType.DEADLINE_REMINDER,
+        is_transactional=True,
+        is_promotional=False,
+        status=Notification.Status.QUEUED,
+        claimed_at=stuck_at,
+        created_at=stuck_at,
+    )
+    NotificationDispatch.objects.create(
+        notification=notification,
+        channel="alimtalk",
+        status=NotificationDispatch.Status.PENDING,
+        attempted_at=stuck_at,
+        failure_reason="",
+    )
+
+    _freeze(stuck_at + timedelta(minutes=10))
+    recovery_scan = client.post(DISPATCH_DUE_URL, **_auth_headers())
+    assert recovery_scan.json()["count"] == 1
+
+    recovered = client.get(f"{CREATE_URL}/{notification.id}", **_auth_headers()).json()
+    # alimtalk는 PENDING 기록 그대로다 — 재시도로 새 시도가 추가되지 않았다.
+    alimtalk_dispatches = [d for d in recovered["dispatches"] if d["channel"] == "alimtalk"]
+    assert len(alimtalk_dispatches) == 1
+    assert alimtalk_dispatches[0]["status"] == "pending"
+    # sms로 넘어가 정상적으로 발송을 끝냈다(기본 Fake sms는 성공한다).
+    sms_dispatches = [d for d in recovered["dispatches"] if d["channel"] == "sms"]
+    assert len(sms_dispatches) == 1
+    assert sms_dispatches[0]["status"] == "sent"
+    assert recovered["status"] == Notification.Status.SENT
+
+
+@pytest.mark.django_db
 def test_stuck_queued_recovery_re_defers_instead_of_sending_during_quiet_hours(client):
     """멈춘 QUEUED를 재선점하는 경로도, DEFERRED 재선점 경로와 똑같이 발송 직전에
     다시 야간인지 확인해야 한다 — 재선점 시점이 마침 야간이면 그대로 내보내지 않고
@@ -462,6 +560,61 @@ def test_stuck_queued_recovery_re_defers_instead_of_sending_during_quiet_hours(c
     assert deferred["status"] == Notification.Status.DEFERRED
     assert deferred["dispatches"] == []
     assert deferred["scheduled_for"] is not None
+
+
+@pytest.mark.django_db
+def test_dispatch_scan_stops_early_when_the_time_budget_is_exhausted(client):
+    """#51 코드리뷰 지적 6: 실물 어댑터는 진짜 네트워크 호출이라 배치가 커지면
+    gunicorn/Celery의 30초 요청 타임아웃을 넘길 수 있다. 이 스캔은 시간
+    예산(DUE_SCAN_TIME_BUDGET_SECONDS)을 넘기면 나머지 행을 이번에는 건드리지
+    않고 다음 스캔(60초 뒤)에 넘겨야 한다 — ADR-0010 "연기하되 버리지
+    않는다"와 같은 원칙이다."""
+
+    from unittest.mock import patch
+
+    user = _make_user()
+    as_of = datetime(2026, 1, 10, 14, 0, tzinfo=KST)
+
+    notifications = [
+        Notification.objects.create(
+            recipient=user,
+            notification_type=NotificationType.DEADLINE_REMINDER,
+            is_transactional=True,
+            is_promotional=False,
+            status=Notification.Status.DEFERRED,
+            scheduled_for=as_of,
+            created_at=as_of,
+        )
+        for _ in range(3)
+    ]
+    _freeze(as_of)
+
+    # 첫 monotonic() 호출이 예산 계산의 기준선(0.0)이고, 두 번째(첫 행 처리 전)는
+    # 아직 예산 안이라 진행하지만, 세 번째(두 번째 행 처리 전)는 이미 예산을
+    # 넘긴 것으로 만든다 — 그래서 딱 한 건만 처리되고 스캔이 즉시 멈춘다.
+    with patch(
+        "notifications.services.time_module.monotonic", side_effect=[0.0, 0.0, 100.0]
+    ):
+        response = client.post(DISPATCH_DUE_URL, **_auth_headers())
+
+    body = response.json()
+    assert body["count"] == 1  # 셋 중 하나만 처리됐다 — 나머지는 건드리지 않았다.
+
+    statuses = {
+        n.id: client.get(f"{CREATE_URL}/{n.id}", **_auth_headers()).json()["status"]
+        for n in notifications
+    }
+    processed = [nid for nid, status in statuses.items() if status == Notification.Status.SENT]
+    still_deferred = [
+        nid for nid, status in statuses.items() if status == Notification.Status.DEFERRED
+    ]
+    assert len(processed) == 1
+    # 나머지 둘은 상태를 건드리지 않았다 — 다음 스캔이 안전하게 다시 집을 수 있다.
+    assert len(still_deferred) == 2
+
+    # 다음 스캔(시간 제약 없이)이 남은 것을 마저 처리한다.
+    rescan = client.post(DISPATCH_DUE_URL, **_auth_headers())
+    assert rescan.json()["count"] == 2
 
 
 @pytest.mark.django_db

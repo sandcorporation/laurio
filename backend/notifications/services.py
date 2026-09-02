@@ -19,6 +19,7 @@ SELECT 가 선형으로 쌓인다.
 """
 
 import logging
+import time as time_module
 from datetime import time, timedelta, timezone as dt_timezone
 
 from django.db.models import Q
@@ -41,8 +42,21 @@ QUIET_HOURS_START = time(21, 0)
 QUIET_HOURS_END = time(8, 0)
 
 # 야간 큐(DEFERRED) 한 번 스캔에서 처리하는 최대 건수. core.transitions.DEFAULT_BATCH_SIZE
-# 와 같은 이유(무제한 스캔이 요청 타임아웃을 만든다)로 둔다.
+# 와 같은 이유(무제한 스캔이 요청 타임아웃을 만든다)로 둔다. 실제 시간 상한은
+# DUE_SCAN_TIME_BUDGET_SECONDS가 건다 — 이 값은 그보다 훨씬 못 미치는 조건에서만
+# (벤더가 비정상적으로 빠른 경우) 실제로 걸리는 상한이다.
 DUE_SCAN_BATCH_SIZE = 500
+
+# 이 스캔 한 번이 실물 벤더 HTTP를 부르며 쓸 수 있는 최대 시간(초)(#51 코드리뷰
+# 지적 6). 진입점은 gunicorn 워커 타임아웃과 Celery beat 호출의 timeout=30
+# (core/tasks.py) 안에 반드시 들어와야 한다 — 채널 하나의 벤더 타임아웃
+# (notifications.adapters_aligo._TIMEOUT_SECONDS=5)이 최악의 경우 셋 다 겹쳐
+# 15초까지 걸릴 수 있으므로, 그 여유를 남기고 12초로 잡는다(12 + 15 = 27초 <
+# 30초). 이 예산을 넘기면 남은 행은 이번 스캔에서 처리하지 않고 다음 스캔(60초
+# 뒤, config/celery.py)에 넘긴다 — ADR-0010 "연기하되 버리지 않는다"와 같은
+# 원칙: 이번에 못 하면 다음 틱이 마저 한다. 처리하지 못한 DEFERRED/QUEUED 행은
+# 그대로 남아 다음 스캔의 대상이 된다(상태를 미리 건드리지 않았으므로 안전하다).
+DUE_SCAN_TIME_BUDGET_SECONDS = 12.0
 
 # QUEUED로 선점된 뒤 이만큼 지나도 여전히 QUEUED면 "멈췄다"고 본다(#10 리뷰 지적).
 # 정상적인 발송 시도는 어댑터 타임아웃을 포함해도 이보다 훨씬 빨리 SENT/FAILED로
@@ -155,12 +169,65 @@ def _attempt_dispatch(notification: Notification, *, now=None) -> None:
     ① 다음 채널로 넘어가지 못하고, ② 이 시도의 이력이 아예 안 남고(ADR-0009 의
     발송 이력=법적 방어선이 뚫린다), ③ Notification 이 QUEUED 에 영원히 멈춘다
     (야간 큐 스캐너는 DEFERRED 만 다시 줍는다). 그래서 채널마다 개별적으로 감싼다.
+
+    **채널마다 두 단계로 기록한다(#51 코드리뷰 지적 7).** 벤더를 부르기 "전"에
+    PENDING 행을 먼저 커밋하고, 응답을 받은 "후"에 SENT/FAILED로 갱신한다.
+    실물 어댑터(Fake와 달리)는 실제로 과금되는 외부 호출이라, 벤더 발송이
+    실제로 성공한 뒤 이 함수가 SENT를 기록하기 전에 프로세스가 죽으면(배포
+    재시작, OOM 등) 이 Notification은 QUEUED에 claimed_at만 남긴 채 멈춘다.
+    STUCK_QUEUED_THRESHOLD가 지나 재선점되면 예전 코드는 알림톡부터 처음부터
+    다시 시도했다 — 이미 성공했을 수도 있는 채널에 실제 과금이 다시 발생하는
+    "유료 재발송" 사고다. PENDING 기록이 있으면 "이 채널을 이미 시도했을 수도
+    있다"는 증거가 남으므로, 재시도가 그 채널을 건너뛰고 다음 채널로 넘어간다 —
+    "다시 보낸다"보다 "이 채널로는 확신이 없으니 넘어간다"를 우선한다(돈이
+    새는 쪽보다 알림 하나가 덜 가는 쪽이 안전하다, ADR-0009와 같은 방향의
+    선택).
     """
 
     now = now if now is not None else Clock.now()
     from_state = notification.status
 
     for channel, adapter_factory in CHANNEL_FALLBACK_CHAIN:
+        previous = (
+            NotificationDispatch.objects.filter(notification=notification, channel=channel)
+            .order_by("-id")
+            .first()
+        )
+        if previous is not None and previous.status in (
+            NotificationDispatch.Status.SENT,
+            NotificationDispatch.Status.PENDING,
+        ):
+            if previous.status == NotificationDispatch.Status.SENT:
+                # 이미 이 채널로 성공했다(재선점 경로) — 다시 벤더를 부르지
+                # 않고 그 성공을 그대로 확정한다.
+                claim_transition(
+                    Notification,
+                    notification.pk,
+                    from_state=from_state,
+                    to_state=Notification.Status.SENT,
+                    state_field="status",
+                    now=now,
+                )
+                return
+            logger.warning(
+                "Notification(pk=%s) 채널 %s 의 이전 시도가 결과 확정 전에 "
+                "중단됐다(PENDING) — 벤더가 실제로 발송에 성공했을 수 있으므로 "
+                "중복 과금을 피하기 위해 재시도하지 않고 다음 채널로 넘어간다.",
+                notification.pk,
+                channel,
+            )
+            continue
+
+        # 벤더를 부르기 전에 PENDING을 먼저 커밋한다 — 아래 어댑터 호출 도중
+        # 프로세스가 죽어도 이 행은 이미 DB에 있다.
+        dispatch = NotificationDispatch.objects.create(
+            notification=notification,
+            channel=channel,
+            status=NotificationDispatch.Status.PENDING,
+            attempted_at=now,
+            failure_reason="",
+        )
+
         try:
             # 코디네이터 리뷰 지적(#23): adapter_factory()는 원래 이 try 밖에 있었다.
             # NOTIFICATION_*_ADAPTER가 존재하지 않는 dotted path(예: 아직 구현되지
@@ -182,17 +249,14 @@ def _attempt_dispatch(notification: Notification, *, now=None) -> None:
                 success=False, failure_reason=f"{type(exc).__name__}: {exc}"[:255]
             )
 
-        NotificationDispatch.objects.create(
-            notification=notification,
-            channel=channel,
-            status=(
-                NotificationDispatch.Status.SENT
-                if result.success
-                else NotificationDispatch.Status.FAILED
-            ),
-            attempted_at=now,
-            failure_reason=result.failure_reason[:255],
+        dispatch.status = (
+            NotificationDispatch.Status.SENT
+            if result.success
+            else NotificationDispatch.Status.FAILED
         )
+        dispatch.failure_reason = result.failure_reason[:255]
+        dispatch.save(update_fields=["status", "failure_reason"])
+
         if result.success:
             claim_transition(
                 Notification,
@@ -325,8 +389,17 @@ def dispatch_due_notifications(as_of=None) -> list[int]:
         .values_list("pk", flat=True)[:DUE_SCAN_BATCH_SIZE]
     )
 
+    deadline = time_module.monotonic() + DUE_SCAN_TIME_BUDGET_SECONDS
+
     dispatched_ids: list[int] = []
     for pk in due_deferred_ids:
+        if time_module.monotonic() >= deadline:
+            logger.warning(
+                "Notification 야간 큐 스캔이 시간 예산(%s초)을 넘겨 중단한다 — "
+                "나머지는 다음 스캔(60초 뒤)이 이어서 처리한다.",
+                DUE_SCAN_TIME_BUDGET_SECONDS,
+            )
+            return dispatched_ids
         try:
             if _claim_and_process_deferred(pk, now=as_of):
                 dispatched_ids.append(pk)
@@ -334,6 +407,13 @@ def dispatch_due_notifications(as_of=None) -> list[int]:
             logger.exception("Notification(pk=%s) 야간 큐 처리 중 예외, 다음 행으로 계속", pk)
 
     for pk in stuck_queued_ids:
+        if time_module.monotonic() >= deadline:
+            logger.warning(
+                "Notification 야간 큐 스캔이 시간 예산(%s초)을 넘겨 중단한다 — "
+                "나머지는 다음 스캔(60초 뒤)이 이어서 처리한다.",
+                DUE_SCAN_TIME_BUDGET_SECONDS,
+            )
+            return dispatched_ids
         try:
             if _reclaim_and_process_stuck_queued(pk, now=as_of, stale_before=stale_before):
                 dispatched_ids.append(pk)

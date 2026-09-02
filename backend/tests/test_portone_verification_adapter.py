@@ -33,11 +33,13 @@ def _fake_response(*, status_code=200, json_body=None, text="") -> MagicMock:
     return response
 
 
-def _verified_body(*, name="홍길동", birth_date="1990-01-01", ci="ci-real-1", di="di-real-1") -> dict:
-    return {
-        "status": "VERIFIED",
-        "verifiedCustomer": {"name": name, "birthDate": birth_date, "ci": ci, "di": di},
-    }
+def _verified_body(
+    *, name="홍길동", birth_date="1990-01-01", ci="ci-real-1", di="di-real-1", phone_number=None
+) -> dict:
+    customer = {"name": name, "birthDate": birth_date, "ci": ci, "di": di}
+    if phone_number is not None:
+        customer["phoneNumber"] = phone_number
+    return {"status": "VERIFIED", "verifiedCustomer": customer}
 
 
 @pytest.fixture(autouse=True)
@@ -78,6 +80,35 @@ def test_resolve_queries_portone_server_to_server_with_the_token_as_identity_ver
     from datetime import date
 
     assert result.birth_date == date(1990, 1, 1)
+
+
+def test_resolve_extracts_the_phone_number_for_notification_channels():
+    """#51 코드리뷰 지적 1: notifications가 실제로 문자를 보낼 대상 번호를
+    포트원 응답의 verifiedCustomer.phoneNumber에서 가져온다."""
+
+    adapter = PortOneV2VerificationAdapter()
+
+    with patch("verification.adapters.requests.get") as mock_get:
+        mock_get.return_value = _fake_response(
+            json_body=_verified_body(phone_number="01099998888")
+        )
+        result = adapter.resolve("iv-abc-123")
+
+    assert result.phone_number == "01099998888"
+
+
+def test_resolve_defaults_phone_number_to_empty_string_when_vendor_omits_it():
+    """phoneNumber는 포트원 계약상 필수가 아니다 — 없어도 본인확인 자체는
+    성공하고, 빈 문자열로 남는다(verification.api.verify가 이 경우 PhoneContact를
+    만들지 않는다)."""
+
+    adapter = PortOneV2VerificationAdapter()
+
+    with patch("verification.adapters.requests.get") as mock_get:
+        mock_get.return_value = _fake_response(json_body=_verified_body(phone_number=None))
+        result = adapter.resolve("iv-abc-123")
+
+    assert result.phone_number == ""
 
 
 def test_resolve_raises_not_500_when_identity_verification_id_does_not_exist():

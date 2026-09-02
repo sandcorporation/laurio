@@ -17,6 +17,8 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
+from accounts.models import PhoneContact
+from accounts.phone import InvalidPhoneNumberError
 from core.adapters import is_fake_adapter_binding
 
 from .adapters import VerificationAdapterError, VerificationMissingCIError, get_adapter
@@ -164,6 +166,26 @@ def verify(request: HttpRequest, payload: VerifyIn):
         verification.di_encrypted = ""
 
     verification.save()
+
+    # 본인확인 응답이 휴대폰 번호를 함께 줬으면 알림 채널(#51)이 실제로 쓸
+    # PhoneContact를 채운다 — 이 프로젝트에서 연락 가능한 번호를 확보하는
+    # 유일한 지점이다(ADR-0011이 이미 휴대폰 본인확인을 요구한다). 벤더가 이
+    # 필드를 비워 보내는 경우도 있으므로(포트원 계약상 필수가 아니다) 있을
+    # 때만 저장한다 — 없다고 본인확인 자체를 막지 않는다. 정규화가 거부하는
+    # 값(#51 코드리뷰 지적 4, 사실상 벤더가 이상한 형식을 준 경우)도 같은
+    # 이유로 본인확인 완료 자체를 막지 않고 로그만 남긴다.
+    if result.phone_number:
+        try:
+            PhoneContact.objects.update_or_create(
+                user=request.auth_user, defaults={"phone_number": result.phone_number}
+            )
+        except InvalidPhoneNumberError:
+            logger.error(
+                "본인확인 응답의 휴대폰 번호 형식이 올바르지 않다(user_id=%s) — "
+                "PhoneContact를 채우지 못했다. 본인확인 자체는 그대로 완료된다.",
+                request.auth_user.id,
+            )
+
     # 1회용이다 — 성공적으로 소비된 identityVerificationId는 재사용할 수 없다.
     # 실패(벤더 거절 등)한 시도는 여기 도달하지 않으므로 같은 id로 재시도할 수
     # 있게 남겨 둔다.
