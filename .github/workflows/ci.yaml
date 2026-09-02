@@ -302,6 +302,47 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Install dependencies from lockfile
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      # **타입체크와 빌드는 dev 스택을 띄우기 전에 돌린다.** 순서가 취향이 아니라
+      # 필요다: dev compose 의 frontend 서비스는 저장소를 컨테이너에 마운트하고
+      # (`..:/app`) `/app/frontend/.next` 를 이름 있는 볼륨으로 가리는데, Docker 가
+      # 그 마운트 지점을 **호스트 체크아웃에 root 소유로 만든다**. 그러면 러너
+      # 사용자로 도는 `pnpm build` 가 `.next/trace` 를 열지 못해
+      # `EACCES: permission denied` 로 죽는다 — 실제로 이 잡을 연속으로 빨간불로
+      # 만들었다. 빌드가 먼저 돌면 `.next` 는 러너 것이고, 그 뒤 볼륨이 그것을
+      # 가려도 아무도 다시 쓰지 않는다.
+      #
+      # 부수 효과도 좋다 — 타입 오류가 이미지 빌드를 기다리지 않고 즉시 잡힌다.
+      - name: Typecheck (public app)
+        working-directory: frontend
+        run: pnpm typecheck
+
+      - name: Typecheck (operator app)
+        working-directory: operator
+        run: pnpm typecheck
+
+      # next build 만 잡는 오류가 있다(라우트 핸들러 시그니처, output: "standalone"
+      # 산출물 등). 여기서 안 돌리면 배포 시점까지 미검출로 남는다. 두 앱 다 돈다 —
+      # #63부터 두 앱이 각자 standalone 산출물을 만든다.
+      - name: Build (public app)
+        working-directory: frontend
+        run: pnpm build
+
+      - name: Build (operator app)
+        working-directory: operator
+        run: pnpm build
+
       - name: Bring up the dev stack
         run: docker compose -f docker/compose.dev.yaml up -d --build
 
@@ -334,37 +375,6 @@ jobs:
       - name: Install backend dependencies from lockfile
         working-directory: backend
         run: uv sync --locked
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.33.0
-
-      - name: Install dependencies from lockfile
-        working-directory: frontend
-        run: pnpm install --frozen-lockfile
-
-      - name: Typecheck (public app)
-        working-directory: frontend
-        run: pnpm typecheck
-
-      - name: Typecheck (operator app)
-        working-directory: operator
-        run: pnpm typecheck
-
-      # next build 만 잡는 오류가 있다(라우트 핸들러 시그니처, output: "standalone"
-      # 산출물 등). 여기서 안 돌리면 배포 시점까지 미검출로 남는다. 두 앱 다 돈다 —
-      # #63부터 두 앱이 각자 standalone 산출물을 만든다.
-      - name: Build (public app)
-        working-directory: frontend
-        run: pnpm build
-
-      - name: Build (operator app)
-        working-directory: operator
-        run: pnpm build
 
       - name: Install Playwright browser
         working-directory: frontend
@@ -532,6 +542,14 @@ jobs:
           # "완전한 설정에서는 프론트가 죽지 않고 응답한다"는 것뿐이다. 연결
           # 자체가 안 되면(000) 컨테이너가 여전히 안 뜬 것이다.
           #
+          # **`|| true` 가 없으면 재시도 루프가 한 번도 돌지 않는다.** `set -e`
+          # 아래에서 `status=$(curl ...)` 는 대입문의 종료 코드가 curl 의 것이라,
+          # 첫 시도가 실패하는 순간 셸이 그 자리에서 죽는다 — 컨테이너가 정상
+          # 부팅 중이어도 빨간불이 되고, 스텝은 curl 자신의 종료 코드(연결 실패 7,
+          # 수신 실패 56)로 끝난다. 실제로 그렇게 15회 연속 실패했다. 아래 주석이
+          # 경계하는 "000000" 문제는 `|| echo "000"` 이 출력을 하나 더 얹기 때문에
+          # 생기는 것이라, 출력을 얹지 않는 `|| true` 에는 없다.
+          #
           # **`|| echo "000"`을 쓰지 않는다**(#70 코드리뷰 지적, 심각). curl은
           # `-w`가 있으면 연결 실패 시에도 스스로 "000"을 쓰고 비정상 종료
           # 코드로 끝낸다 — 그 위에 `|| echo "000"`을 얹으면 실패할 때마다
@@ -543,7 +561,7 @@ jobs:
           # 정말 비어 있는 극단적인 경우를 위한 방어로 `${status:-000}`만 쓴다.
           status="000"
           for _ in $(seq 1 20); do
-            status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3100/healthz 2>/dev/null)
+            status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3100/healthz 2>/dev/null || true)
             status="${status:-000}"
             [ "$status" = "000" ] || break
             sleep 1
@@ -674,6 +692,14 @@ jobs:
           # "완전한 설정에서는 운영자 앱이 죽지 않고 응답한다"는 것뿐이다. 연결
           # 자체가 안 되면(000) 컨테이너가 여전히 안 뜬 것이다.
           #
+          # **`|| true` 가 없으면 재시도 루프가 한 번도 돌지 않는다.** `set -e`
+          # 아래에서 `status=$(curl ...)` 는 대입문의 종료 코드가 curl 의 것이라,
+          # 첫 시도가 실패하는 순간 셸이 그 자리에서 죽는다 — 컨테이너가 정상
+          # 부팅 중이어도 빨간불이 되고, 스텝은 curl 자신의 종료 코드(연결 실패 7,
+          # 수신 실패 56)로 끝난다. 실제로 그렇게 15회 연속 실패했다. 아래 주석이
+          # 경계하는 "000000" 문제는 `|| echo "000"` 이 출력을 하나 더 얹기 때문에
+          # 생기는 것이라, 출력을 얹지 않는 `|| true` 에는 없다.
+          #
           # frontend-deploy-guard와 같은 이유로 `|| echo "000"`을 쓰지 않는다
           # (#70 코드리뷰 지적, 심각 — 여기서 그대로 복사된 버그였다). curl은
           # `-w`가 있으면 연결 실패 시에도 스스로 "000"을 쓴다 — `|| echo
@@ -681,7 +707,7 @@ jobs:
           # break한다.
           status="000"
           for _ in $(seq 1 20); do
-            status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3101/healthz 2>/dev/null)
+            status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3101/healthz 2>/dev/null || true)
             status="${status:-000}"
             [ "$status" = "000" ] || break
             sleep 1
