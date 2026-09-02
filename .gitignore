@@ -51,3 +51,4 @@ design/*.html
 node_modules/
 /.pnpm-store/
 .jenkins-staging-deployed
+.jenkins-prod-deployed
