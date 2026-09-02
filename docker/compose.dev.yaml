@@ -223,6 +223,18 @@ services:
       # 컨테이너 안에서는 compose 네트워크 이름으로 백엔드에 붙는다. 호스트에서
       # `pnpm dev` 로 돌릴 때는 이 값이 없어 settings 의 기본값(127.0.0.1:58000)이 쓰인다.
       LAURIO_API_BASE_URL: http://backend:8000
+      # 카카오 OAuth 앱 자격증명(#95/#96) — **실제 카카오 앱이 아니다.** 값이
+      # 비어 있으면 authorize 라우트가 카카오로 가는 대신 "이 환경에는 카카오
+      # 앱이 설정되지 않았다"는 우리 문구로 돌아간다(dev의 정상 동작). 여기
+      # 더미 값을 채우는 이유는 그 반대쪽 경로 — authorize가 실제로 카카오
+      # authorize URL로 리다이렉트하고 state를 발급하는 것, 콜백이 state를
+      # 검증하는 것(frontend/e2e/oauth-kakao.spec.ts) — 도 dev/CI에서
+      # 결정적으로 검증하기 위해서다. code→token 교환(유일한 벤더 호출)은
+      # 이 값으로 절대 성공하지 않는다 — 그 경로는 옵인 live 테스트가 진짜
+      # 자격증명으로 별도로 검증한다(#83 live_vendor).
+      KAKAO_REST_API_KEY: dev-only-placeholder-kakao-rest-api-key
+      KAKAO_SECRET_KEY: dev-only-placeholder-kakao-secret-key
+      KAKAO_REDIRECT_URI: http://127.0.0.1:53000/api/auth/social/kakao/callback
     ports:
       # 이 머신은 3000·5432·8000·9000·9001 을 다른 프로젝트가, 55432·58000·19000·19001 을
       # 이 프로젝트가 이미 쓴다. 그래서 비켜 잡았고 환경변수로 바꿀 수 있다.

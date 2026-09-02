@@ -377,6 +377,42 @@ if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(SOCIAL_AUTH_MODE):
         "fake 다. staging/production 배포에서는 SOCIAL_AUTH_MODE=real 을 반드시 설정해야 한다."
     )
 
+# 카카오 OAuth 앱 자격증명 (#95/#96, spec #92). authorize 리다이렉트・code→token
+# 교환은 백엔드가 아니라 프론트엔드 BFF가 진다(#95) — 이 프로세스는 이 값들을
+# 실제로 쓰지 않는다. 그런데도 여기서 부팅 가드를 세우는 이유는
+# LAURIO_OPERATOR_ORIGIN(#43)과 같다: 배포 스택이 "떴다/안 떴다"를 판정하는
+# 신호를 backend 컨테이너 하나로 모아 둬야, 운영자가 스택을 올릴 때 여러
+# 컨테이너의 로그를 각각 뒤지지 않고 이 컨테이너의 종료 코드 하나로 "OAuth 앱
+# 자격증명이 빠졌다"는 것을 즉시 알 수 있다(frontend/instrumentation.ts가 같은
+# 값을 프론트 쪽에서 한 번 더 요구하는 것도 같은 이유 — 두 쪽 다 잊혀야만
+# 사고가 나게 한다). SOCIAL_AUTH_MODE=real인데 이 값들이 비면, 카카오 로그인
+# 버튼은 컨테이너가 멀쩡히 뜬 채로 항상 실패한다 — #83이 어댑터에 대해 닫은
+# 바로 그 실패 모드다.
+#
+# redirect_uri는 카카오 콘솔에 등록한 값과 한 글자도 다르면 안 된다 — 다르면
+# 카카오가 code→token 교환 자체를 거절한다(docker/staging.env.example 참고).
+KAKAO_REST_API_KEY = _env("KAKAO_REST_API_KEY", "")
+KAKAO_SECRET_KEY = _env("KAKAO_SECRET_KEY", "")
+KAKAO_REDIRECT_URI = _env("KAKAO_REDIRECT_URI", "")
+
+if IS_DEPLOYED_ENVIRONMENT:
+    _missing_kakao_settings = [
+        name
+        for name, value in (
+            ("KAKAO_REST_API_KEY", KAKAO_REST_API_KEY),
+            ("KAKAO_SECRET_KEY", KAKAO_SECRET_KEY),
+            ("KAKAO_REDIRECT_URI", KAKAO_REDIRECT_URI),
+        )
+        if not value
+    ]
+    if _missing_kakao_settings:
+        raise ImproperlyConfigured(
+            f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 인데 다음 카카오 OAuth "
+            f"자격증명이 비어 있다: {', '.join(_missing_kakao_settings)}. authorize "
+            "리다이렉트・code→token 교환은 프론트엔드 BFF가 지지만(#95), 이 값들이 없으면 "
+            "로그인 버튼이 컨테이너가 뜬 채로 항상 실패한다."
+        )
+
 # --- Verification (ADR-0011, ADR-0007) ------------------------------------
 # 본인확인 어댑터도 같은 원칙: 기본값은 항상 fake이고, staging/production 배포만
 # real을 명시한다.
