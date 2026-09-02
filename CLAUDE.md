@@ -272,6 +272,17 @@ pnpm --dir frontend test:public     # 공개 앱만 (약 2.3분, 79건)
 설계 변경이 먼저다 — 설정 한 줄로 되는 일이 아니다. 시간은 특정 테스트에 몰려
 있지도 않다(167건 합계 467초, 가장 느린 10건이 19%).
 
+**우리 화면으로 돌아가는 리다이렉트는 상대 경로로 낸다.** 컨테이너 안의 Next 는
+자기가 어떤 공개 주소로 불렸는지 모른다 — `new URL(request.url).origin` 이 리버스
+프록시 뒤 standalone 모드에서 공개 도메인이 아니라 **바인드 주소**로 나온다.
+카카오 로그인이 실제로 `https://0.0.0.0:3000/console` 로 튕겼다(로그인은 성공하는데
+도착지가 존재하지 않아 사용자에게는 깨진 것으로 보인다). `lib/auth/redirect.ts` 의
+`redirectToPath` 를 쓴다 — 상대 Location 은 브라우저가 자기가 친 주소 기준으로
+풀어 언제나 맞는 오리진이 되고, 환경변수도 `X-Forwarded-*` 설정도 필요 없다.
+`NextResponse.redirect()` 는 절대 URL 을 요구하므로 **외부로 나갈 때만** 쓴다
+(카카오 authorize 등). dev 에서는 `request.url` 이 우연히 맞아 이 버그가 보이지
+않는다 — e2e 가 Location 이 `/` 로 시작하는지를 직접 단언하는 이유다.
+
 **API 타입은 손으로 쓰지 않는다.** `frontend/lib/api/schema.gen.ts` 는
 `pnpm --dir frontend generate:api`(`frontend/scripts/generate-api-types.mjs`)가
 백엔드의 OpenAPI 스키마에서 생성해 커밋한 산출물이다. 이 명령은 **스택이 필요
