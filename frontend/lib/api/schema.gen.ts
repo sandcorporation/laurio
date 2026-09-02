@@ -761,6 +761,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/internal/accounts/purge-expired-identities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Purge Expired Identities Endpoint
+         * @description 2년간 행위가 없던 계정의 신원을 파기하고, 보존 기간이 지난
+         *     `RetainedIdentity`를 지운다. 같은 시각에 두 번 불러도 결과가 같다.
+         */
+        post: operations["accounts_internal_api_purge_expired_identities_endpoint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/internal/distributions/run-due": {
         parameters: {
             query?: never;
@@ -1466,6 +1487,75 @@ export interface paths {
         get: operations["policies_api_list_policy_changes"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/retained-identities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Retained Identities
+         * @description 분쟁 대응을 위해 보존된 실명 목록을 훑는다. **실명·생년월일은 여기 없다**(#103 AC).
+         *
+         *     목록을 훑는 것만으로 값이 새면 "펼치는 행위가 있어야 기록이 신호가 된다"는
+         *     ADR-0022의 설계가 무너진다.
+         */
+        get: operations["verification_operator_api_list_retained_identities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/retained-identities/{retained_identity_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Retained Identity
+         * @description 상세도 목록과 같은 이유로 접혀 있다 — 실명·생년월일이 없다(#103 AC).
+         */
+        get: operations["verification_operator_api_get_retained_identity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/retained-identities/{retained_identity_id}/reveal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reveal Retained Identity
+         * @description Operator가 분쟁 대응을 위해 보존된 실명을 펼친다 (#103, ADR-0022).
+         *
+         *     **이 요청 자체가 `IdentityReading`을 남긴다.** 기록과 값은 같은 요청에서
+         *     나온다 — 둘을 갈라놓으면 한쪽만 부르는(기록 없이 값만 얻는) 경로가 생긴다.
+         *
+         *     **열람은 상태가 아니라 사건이다.** 같은 Operator가 같은 행을 다시 펼치면
+         *     행이 하나 더 쌓인다 — 중복 제거를 하지 않는다(`SourceReading`과 같은 규율).
+         */
+        post: operations["verification_operator_api_reveal_retained_identity"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2937,6 +3027,13 @@ export interface components {
             /** Items */
             items: components["schemas"]["MySponsoredContestOut"][];
         };
+        /** PagedRetainedIdentityOut */
+        PagedRetainedIdentityOut: {
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["RetainedIdentityOut"][];
+        };
         /** PagedSourceReadingOut */
         PagedSourceReadingOut: {
             /** Count */
@@ -3231,6 +3328,46 @@ export interface components {
             order?: number | null;
             /** Text */
             text?: string | null;
+        };
+        /**
+         * RetainedIdentityOut
+         * @description 목록·상세 — 접힌 채로 나간다. 실명·생년월일은 여기 없다(#103 AC).
+         *
+         *     `펼침`(POST .../reveal) 을 거쳐야만 값이 내려온다 — 목록을 훑거나 상세를
+         *     여는 것만으로는 값이 내려오지 않는다.
+         */
+        RetainedIdentityOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Reason */
+            reason: string;
+            /** Retained Because Id */
+            retained_because_id: number;
+            /**
+             * Retained Until
+             * Format: date-time
+             */
+            retained_until: string;
+            /** User Id */
+            user_id: number;
+        };
+        /**
+         * RetainedIdentityRevealOut
+         * @description 펼침 응답 (#103, ADR-0022). 이 요청 자체가 `IdentityReading` 을 남긴다.
+         */
+        RetainedIdentityRevealOut: {
+            /**
+             * Birth Date
+             * Format: date
+             */
+            birth_date: string;
+            /** Real Name */
+            real_name: string;
         };
         /**
          * RulingOut
@@ -4434,6 +4571,24 @@ export interface operations {
             };
         };
     };
+    accounts_internal_api_purge_expired_identities_endpoint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     distributions_api_run_due: {
         parameters: {
             query?: never;
@@ -5414,6 +5569,96 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PolicyChangeOut"][];
+                };
+            };
+        };
+    };
+    verification_operator_api_list_retained_identities: {
+        parameters: {
+            query?: {
+                user_id?: number | null;
+                page?: number;
+                page_size?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PagedRetainedIdentityOut"];
+                };
+            };
+        };
+    };
+    verification_operator_api_get_retained_identity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                retained_identity_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetainedIdentityOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    verification_operator_api_reveal_retained_identity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                retained_identity_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetainedIdentityRevealOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
         };
