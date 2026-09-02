@@ -181,6 +181,24 @@ Operator 계정은 `backend/accounts/management/commands/seed_e2e_operator.py`
 (멱등)로 만든다 — 사람이 쓰는 `create_operator` 부트스트랩 명령과 달리 반복
 실행에 안전하다.
 
+**워크트리에서 일한다면 e2e 가 당신 코드를 치지 않는다.** `playwright.config.ts`
+에 `webServer` 가 없는 것은 의도다(ADR-0021 — 테스트가 앱의 수명을 소유하지
+않는다). 그 결과 compose 로 뜬 `frontend` 컨테이너는 **바깥 체크아웃**을 마운트해
+서빙하므로, 격리된 워크트리에서 프론트를 고치고 e2e 를 돌리면 **고치기 전 코드가
+통과한다.** 병렬 체인 둘이 각자 이 사실을 재발견했다.
+
+워크트리 코드로 검증하려면 그 워크트리에서 임시 Next 서버를 띄우고 baseURL 을
+그쪽으로 돌린다 — 백엔드는 이미 떠 있는 것을 그대로 쓴다:
+
+```bash
+cd <worktree>/frontend
+LAURIO_API_BASE_URL=http://127.0.0.1:58000 pnpm exec next dev -p 53100 &
+LAURIO_E2E_BASE_URL=http://127.0.0.1:53100 pnpm exec playwright test --project=public
+kill %1
+```
+
+끝나면 반드시 죽인다 — 남겨 두면 다음 체인이 그 포트에서 막힌다.
+
 **TDD 안쪽 고리에서 전체를 돌리지 마라.** 관련 파일만 돌리고, 전체는 게이트로 둔다.
 
 | 언제 | 무엇 | 실측 |
