@@ -144,8 +144,14 @@ pytest`가 그 DB에 직접 붙는다 — 컨테이너를 거칠 이유가 없�
 accessed by other users` 로 서로를 떨어뜨리고, 그 실패는 **코드 회귀와 구분되지
 않는다.** 실제로 겪었다.
 
+**같은 이유로 `LAURIO_SESSION_KEY_PREFIX` 도 달리 줘라.** Operator 세션은 실제
+Redis 에 산다(ADR-0018) — DB 를 갈라도 **세션은 여전히 공유**라, 한쪽이 캐시를
+비우거나 같은 키를 쓰면 다른 쪽 Operator 가 로그인한 적 없는 것이 되어 401 무더기로
+무너진다. 같은 파일이 접두어 없이는 6건 실패하고 접두어를 주면 22건 전부 통과하는
+것을 확인했다.
+
 ```bash
-cd backend && LAURIO_DB_PORT=55432 LAURIO_TEST_DB_NAME=test_laurio_c2 uv run pytest
+cd backend && LAURIO_DB_PORT=55432   LAURIO_TEST_DB_NAME=test_laurio_c2 LAURIO_SESSION_KEY_PREFIX=c2   uv run pytest
 ```
 
 ## 프론트엔드

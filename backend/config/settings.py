@@ -240,6 +240,17 @@ CACHES = {
     "sessions": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
         "LOCATION": SESSION_REDIS_URL,
+        # 세션 키에 접두어를 붙일 수 있게 한다.
+        #
+        # Operator 세션은 실제 Redis 에 산다(ADR-0018) — 그래서 **동시에 도는 두
+        # pytest 가 서로의 세션을 밟는다.** 한쪽이 캐시를 비우거나 같은 키를 쓰면
+        # 다른 쪽 Operator 가 로그인한 적 없는 것이 되어, 원인과 무관한 401 무더기로
+        # 무너진다. 실제로 겪었고, 그 실패는 코드 회귀와 구분되지 않는다.
+        #
+        # `LAURIO_TEST_DB_NAME` 과 같은 처방이다 — 병렬 워크트리에서 체인마다
+        # `LAURIO_SESSION_KEY_PREFIX` 를 달리 주면 격리된다. 기본값은 빈 문자열이라
+        # 단독 실행과 배포는 아무것도 바뀌지 않는다.
+        "KEY_PREFIX": _env("LAURIO_SESSION_KEY_PREFIX", ""),
     },
 }
 
