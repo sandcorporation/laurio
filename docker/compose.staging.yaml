@@ -84,14 +84,21 @@ x-backend-env: &backend-env
   # --- Authentication (ADR-0012) ---
   JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:?}
 
-  # --- 소셜 로그인 / 본인확인 어댑터 (ADR-0007, ADR-0011) ---
+  # --- 소셜 로그인 / 본인확인 어댑터 (ADR-0007, ADR-0011, ADR-0024) ---
   SOCIAL_AUTH_MODE: real
-  # 실제 PortOne 통합인증 어댑터는 아직 구현되지 않았다(#85) — "real"은 dotted
-  # path가 아니라 부팅이 통과하고 첫 본인확인 요청에서야 죽었다(#83이 고친 버그).
-  # 알림 채널과 같은 원칙으로 필수값으로 비워 둔다 — 실물이 생기면 그 dotted
-  # path를 .env.staging에 채운다.
-  VERIFICATION_ADAPTER_MODE: ${VERIFICATION_ADAPTER_MODE:?실제 본인확인 어댑터의 dotted path를 .env.staging 에 채워라 — 아직 구현 전이면(#85) 이 값 자체를 비워 둘 수 없다}
+  # 실물 PortOne V2 통합인증 어댑터가 #85로 생겼다 — "real"은 dotted path가
+  # 아니라 부팅이 통과하고 첫 본인확인 요청에서야 죽었다(#83이 고친 버그).
+  # 여기는 verification.adapters.PortOneV2VerificationAdapter를 채운다. 채널은
+  # KG이니시스 통합인증이고, 카카오는 CI를 안 줘서 인증 수단에서 뺐다(ADR-0024)
+  # — 코드는 그 설정이 되돌려져도 VerificationMissingCIError로 안전하다.
+  VERIFICATION_ADAPTER_MODE: ${VERIFICATION_ADAPTER_MODE:?verification.adapters.PortOneV2VerificationAdapter를 .env.staging 에 채워라(#85)}
   VERIFICATION_ENCRYPTION_KEY: ${VERIFICATION_ENCRYPTION_KEY:?}
+  # PortOneV2VerificationAdapter가 서버-투-서버 조회(GET /identity-verifications/{id})
+  # 에 쓰는 자격증명 — 콜백 URL이 없어 도메인·TLS 없이도 동작한다. 채널키는
+  # 브라우저 SDK가 인증창을 열 때도 쓰므로 프론트(NEXT_PUBLIC_PORTONE_CHANNEL_KEY)
+  # 에도 같은 값을 준다.
+  PORT_ONE_V2_STORE_ID: ${PORT_ONE_V2_STORE_ID:?}
+  PORT_ONE_V2_SECRET_KEY: ${PORT_ONE_V2_SECRET_KEY:?}
 
   # --- 결제 · Escrow / Payout 어댑터 (ADR-0007, ADR-0008) ---
   # "샌드박스냐 실물이냐"는 이 모드 값이 아니라 실제 어댑터 구현체(향후 티켓)가

@@ -46,6 +46,8 @@ import {
   type VerificationStatusOut,
 } from "@/lib/contests/grill-types";
 
+import { getPortOneBrowserConfig, requestPortOneIdentityVerification } from "@/lib/verification/portone";
+
 import { GrillChatPanel } from "./grill-chat-panel";
 import { RequirementDraftPanel } from "./requirement-draft-panel";
 
@@ -87,6 +89,7 @@ export default function NewContestGrillPage() {
   const [load, setLoad] = useState<LoadState>({ status: "loading" });
   const [reloadTick, setReloadTick] = useState(0);
   const [verifying, setVerifying] = useState(false);
+  const portOneConfig = useMemo(() => getPortOneBrowserConfig(), []);
 
   // --- Phase A: 브리프 ------------------------------------------------------
   const [brief, setBrief] = useState<BriefForm>(EMPTY_BRIEF);
@@ -201,6 +204,30 @@ export default function NewContestGrillPage() {
         body: JSON.stringify({ verification_token: `${seed}|1990-01-01|ci-${seed}|di-${seed}` }),
       });
       if (res.ok) setReloadTick((t) => t + 1);
+    } finally {
+      setVerifying(false);
+    }
+  }
+
+  async function handleVerifyLive() {
+    if (session.status !== "authenticated") return;
+    const config = portOneConfig;
+    if (!config) return;
+    setVerifying(true);
+    try {
+      const identityVerificationId = await requestPortOneIdentityVerification(config);
+      const res = await sessionFetch("/api/backend/verification/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ verification_token: identityVerificationId }),
+      });
+      if (res.ok) setReloadTick((t) => t + 1);
+      else {
+        const body = (await res.json().catch(() => null)) as { detail?: string } | null;
+        window.alert(body?.detail ?? "본인확인에 실패했습니다.");
+      }
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "본인확인에 실패했습니다.");
     } finally {
       setVerifying(false);
     }
@@ -462,6 +489,17 @@ export default function NewContestGrillPage() {
             className="rounded-sm border border-rule px-4 py-2 text-sm hover:border-ink disabled:opacity-50"
           >
             {verifying ? "확인 중..." : "지금 본인확인하기(dev)"}
+          </button>
+        )}
+        {verification.status !== "underage" && portOneConfig && (
+          <button
+            type="button"
+            onClick={handleVerifyLive}
+            disabled={verifying}
+            data-testid="grill-verify-now-live"
+            className="rounded-sm border border-rule px-4 py-2 text-sm hover:border-ink disabled:opacity-50"
+          >
+            {verifying ? "확인 중..." : "실제 본인확인하기(PortOne)"}
           </button>
         )}
       </main>
