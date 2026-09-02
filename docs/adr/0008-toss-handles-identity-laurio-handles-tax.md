@@ -42,12 +42,30 @@ _request_real_transfer_if_ready`가 Seller가 막 준비된 시점(재시도 엔
 `seller.changed` 웹훅)에 `confirm()`을 한 번 더 불러 그제서야 실제 벤더 호출이
 일어난다.
 
-**남은 한계.** 이 실제 이체 호출이 동기로 확정되지 못하고(`PayoutTimeoutError`
-뒤 `query_status`도 "pending") 대기 중인 상태에서도, 두 대기(신원/Seller)가
-모두 풀리면 `Payout.status`는 CONFIRMED로 넘어간다 — "CONFIRMED = 내부 확정"
-이라는 기존 어휘와는 일관되지만, 실제 이체가 늦게 실패로 확정되는 경우
-`payout.changed` 웹훅이 이를 감지해도 CONFIRMED에서 되돌리는 경로가 없다(원장
-분개는 그대로 남아 사라지지 않지만, `Payout.status`가 "실제로는 아직 벤더
-쪽에서 실패했다"는 사실을 드러내지 못한다). staging에서 실제 이체 타이밍을
-관찰한 뒤 별도 상태(예: `TRANSFER_FAILED`)가 필요한지 다시 판단해야 한다 —
-이 티켓(#57)은 그 상태를 새로 만들지 않았다.
+**코드리뷰(#57 2차)로 드러난 실제 문제와 그 해법.** 위에서 예견한 우려가
+정확히 현실이 됐다 — 최초 구현은 "Seller가 READY다"라는 사실만으로 두 대기가
+풀렸다고 보고 `Payout.status`를 CONFIRMED 계열로 전진시켰는데, 그 판단은 실제
+이체가 벤더 쪽에서 정말로 완료됐는지를 전혀 보지 않았다. 그래서 실이체가
+거절돼도(예: 실이체 시점의 한도) 화면은 "지급이 완료되었습니다"라고 말했고,
+확정 이후 도착한 `payout.changed` FAILED 웹훅은 조용히 버려졌다.
+
+해법은 이 ADR이 예견한 대로 별도 축을 두는 것이었다 —
+`Payout.status`("두 대기가 풀렸는가", 원장 사실)와 별개로
+`Payout.transfer_status`(NOT_REQUESTED/REQUESTED/COMPLETED/FAILED, "실이체
+자체가 벤더 쪽에서 어디까지 갔는가")를 새 필드로 둔다. `payouts.services.
+_request_real_transfer_if_ready`는 이제 실이체가 COMPLETED로 확정됐을 때만
+`True`를 돌려주고, 호출자(`submit_identity`/`retry_seller_registration`/
+`advance_seller_pending_payouts`)는 그 값을 볼 때만 `Payout.status`를
+전진시킨다 — 실패·미확정이면 CONFIRMED_SELLER_PENDING에 그대로 남아 기존
+재시도 엔드포인트(`POST /payouts/{key}/seller-registration`)가 계속 재시도
+표면 역할을 한다. 확정 이후 도착하는 `payout.changed` 웹훅도
+`resolve_transfer_webhook`을 거쳐 `transfer_status`를 갱신한다.
+
+**여전히 남는 한계 하나.** `Payout.status`가 이미 CONFIRMED(두 대기가 모두
+풀린 뒤)로 넘어간 다음에 그 실이체가 뒤늦게 FAILED로 확인되면,
+`transfer_status`는 FAILED로 기록되고 화면·Operator 큐에 드러나지만(더 이상
+조용히 버려지지 않는다), `Payout.status` 자체를 CONFIRMED에서 되돌리는
+자기 서비스 재시도 경로는 아직 없다 — Developer는 "운영자가 확인 후 다시
+진행합니다"라는 안내만 본다. staging에서 이 타이밍이 실제로 얼마나 자주
+발생하는지 관찰한 뒤, 필요하면 Operator 재시도 엔드포인트를 추가로
+만들어야 한다.

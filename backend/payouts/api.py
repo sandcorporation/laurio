@@ -60,6 +60,7 @@ from .services import (
     get_or_create_payout,
     mark_confirmed,
     mark_failed,
+    resolve_transfer_webhook,
     retry_seller_registration,
     submit_identity,
     submit_seller_phone,
@@ -69,6 +70,20 @@ router = Router(tags=["payouts"])
 # Operator 표면 — appeals.api.operator_router와 같은 원칙으로 라우터 전체가
 # 기본 거부다(#44).
 operator_router = Router(tags=["operator", "payouts"], auth=OperatorAuth())
+
+# seller.changed 웹훅의 out-of-order/재전송 방어에 쓰는 순위(코드리뷰 지적 9)
+# — 숫자가 클수록 더 진행된 상태다. REJECTED는 별도 취급(항상 적용 허용,
+# receive_toss_seller_webhook 참고)이라 여기 순위는 실질적으로 쓰이지 않지만
+# allowed_source_statuses 계산에서 자기 자신은 항상 포함돼야 하므로 값을
+# 채워 둔다.
+_SELLER_STATUS_RANK = {
+    Seller.Status.PENDING: 0,
+    Seller.Status.APPROVAL_REQUIRED: 1,
+    Seller.Status.UNDER_REVIEW: 1,
+    Seller.Status.PARTIALLY_APPROVED: 2,
+    Seller.Status.APPROVED: 3,
+    Seller.Status.REJECTED: 0,
+}
 
 
 def _payout_contest_id(payout: Payout) -> int:
@@ -108,6 +123,20 @@ def _next_action_message(payout: Payout, seller: Seller | None) -> str:
     if payout.status == Payout.Status.REQUESTED:
         return "지급 확인 절차가 진행 중입니다. 잠시만 기다려주세요."
     if payout.status == Payout.Status.CONFIRMED_SELLER_PENDING:
+        seller_ready = seller is not None and seller.status in Seller.READY_STATUSES
+        if seller_ready and payout.transfer_status == Payout.TransferStatus.FAILED:
+            # Seller 등록은 끝났지만 실이체 자체가 거절됐다(#57 코드리뷰 지적
+            # 1) — Seller.status만 보면 "다 됐다"로 읽히지만 실제로는 아직
+            # 돈이 안 나갔다. transfer_status를 따로 봐야만 이 경우를
+            # 구별할 수 있다.
+            return (
+                "지급대행사 등록은 끝났지만 실제 이체가 거절되었습니다 — 상금은 "
+                "원장에 그대로 남아 있습니다. 아래에서 다시 시도해주세요."
+            )
+        if seller_ready:
+            # Seller는 준비됐지만 실이체 확인이 아직 끝나지 않았다(REQUESTED
+            # — 타임아웃 뒤 재확인 대기).
+            return "실이체 확인이 진행 중입니다. 잠시만 기다려주세요."
         if seller is not None and seller.status == Seller.Status.UNDER_REVIEW:
             return (
                 "지급대행사 심사가 진행 중입니다(주간 지급 한도 초과 또는 추가 확인 "
@@ -140,8 +169,27 @@ def _next_action_message(payout: Payout, seller: Seller | None) -> str:
             )
         return "지급대행사 수취인 등록이 진행 중입니다. 완료되면 자동으로 다음 단계로 넘어갑니다."
     if payout.status == Payout.Status.CONFIRMED_IDENTITY_PENDING:
+        if payout.transfer_status == Payout.TransferStatus.FAILED:
+            # Seller는 이미 준비돼 신원 대기만 남았었는데, 실이체 자체가
+            # 뒤늦게 실패로 확인됐다(#57 코드리뷰 지적 4) — 신원 제출을
+            # 막을 이유는 없지만(독립적인 두 축이다), 실이체가 실패했다는
+            # 사실을 감추지 않는다.
+            return (
+                "실제 이체가 실패로 확인되었습니다 — 상금은 원장에 그대로 남아 "
+                "있습니다. 세무 신고를 위한 주민등록번호는 계속 제출해주세요."
+            )
         return "세무 신고를 위해 주민등록번호를 제출해주세요."
     if payout.status == Payout.Status.CONFIRMED:
+        if payout.transfer_status == Payout.TransferStatus.FAILED:
+            # 확정된 뒤 뒤늦게 도착한 payout.changed FAILED 웹훅이 남긴
+            # 상태다(#57 코드리뷰 지적 4) — Payout.status는 원장 사실이라
+            # 되돌리지 않지만(ADR-0004), 실제로는 아직 돈이 안 나갔다는 사실을
+            # 숨기지 않는다. Developer 쪽 자기 서비스 재시도 경로는 아직
+            # 없다(ADR-0008에 남겨 둔 한계) — 운영자 처리를 안내한다.
+            return (
+                "지급이 확정되었지만 실제 이체가 실패로 확인되었습니다 — 상금은 "
+                "원장에 그대로 남아 있습니다. 운영자가 확인 후 다시 진행합니다."
+            )
         return "지급이 완료되었습니다."
     if payout.status == Payout.Status.FAILED:
         return "지급 요청이 실패했습니다. 다시 시도해주세요."
@@ -158,6 +206,7 @@ def _serialize(payout: Payout) -> PayoutOut:
         withholding_tax_amount=payout.withholding_tax_amount,
         net_amount=payout.net_amount,
         status=payout.status,
+        transfer_status=payout.transfer_status,
         has_identity=TaxIdentity.objects.filter(payout=payout).exists(),
         seller_status=seller.status if seller is not None else None,
         next_action_message=_next_action_message(payout, seller),
@@ -517,12 +566,12 @@ def receive_toss_payout_webhook(request: HttpRequest):
         event_status=our_status,
     )
 
-    if our_status == "paid":
-        payout = mark_confirmed(idempotency_key)
-    elif our_status == "failed":
-        payout = mark_failed(idempotency_key)
-    else:
-        payout = known_payout
+    # Payout이 이미 REQUESTED를 지나 두 대기 어딘가로 넘어간 뒤에 이 웹훅이
+    # 도착해도 조용히 버려지지 않는다(코드리뷰 지적 4) — resolve_transfer_webhook
+    # 이 REQUESTED에서는 기존 mark_confirmed/mark_failed 조건부 UPDATE를 그대로
+    # 타고, 그 이후 도착이면 transfer_status에 결과를 남긴다(FAILED여도
+    # Payout.status를 되돌리지 않는다 — 원장 분개는 그대로다).
+    payout = resolve_transfer_webhook(idempotency_key, our_status)
 
     return 200, WebhookOut(received=True, idempotency_key=idempotency_key, status=payout.status)
 
@@ -570,25 +619,56 @@ def receive_toss_seller_webhook(request: HttpRequest):
         raise HttpError(404, "알 수 없는 Seller 입니다.")
 
     weekly_limit_body = data.get("weeklyLimit") or {}
-    Seller.objects.filter(pk=seller.pk).update(
+
+    # 재전송·역순 도착에 안전해야 한다(코드리뷰 지적 9) — payout.changed
+    # 웹훅이 조건부 UPDATE(status=OLD인 행만 WHERE로 걸어 갱신)로 지켜지는
+    # 것과 같은 규율이다. 여기서는 "이전보다 진행이 뒤처지는 값으로는
+    # 덮어쓰지 않는다"가 그 규율의 구체화다 — 순위 없이 그대로 덮어쓰면 늦게
+    # 도착한 오래된 이벤트(예: 먼저 보낸 APPROVAL_REQUIRED가 네트워크 지연으로
+    # PARTIALLY_APPROVED보다 늦게 도착)가 APPROVED→APPROVAL_REQUIRED로
+    # 되돌리고 이미 없어진 주간 한도를 다시 씌운다. REJECTED는 벤더가 언제든
+    # 내릴 수 있는 결정이라 순위와 무관하게 항상 허용한다.
+    incoming_rank = _SELLER_STATUS_RANK.get(our_status, 0)
+    allowed_source_statuses = [
+        status
+        for status, rank in _SELLER_STATUS_RANK.items()
+        if our_status == Seller.Status.REJECTED or rank <= incoming_rank
+    ]
+
+    updated = Seller.objects.filter(pk=seller.pk, status__in=allowed_source_statuses).update(
         seller_id=seller_id or seller.seller_id,
         status=our_status,
         weekly_limit_amount=weekly_limit_body.get("amount") if our_status == "partially_approved" else None,
     )
 
-    advance_seller_pending_payouts(seller.developer)
+    if updated:
+        advance_seller_pending_payouts(seller.developer)
+        seller.refresh_from_db()
 
-    return 200, SellerWebhookOut(received=True, seller_id=seller_id or seller.seller_id, status=our_status)
+    return 200, SellerWebhookOut(received=True, seller_id=seller_id or seller.seller_id, status=seller.status)
 
 
 # --- Operator 표면 (#50 AC) ------------------------------------------------------
 
 
-def _blocked_on(payout: Payout) -> str | None:
+def _blocked_on(payout: Payout, *, seller: Seller | None = None) -> str | None:
     if payout.status == Payout.Status.CONFIRMED_SELLER_PENDING:
+        # Seller 자체는 이미 READY인데 실이체만 안 풀렸으면(#57 코드리뷰
+        # 지적 1) "seller"가 아니라 "transfer"다 — 운영자가 처리해야 할
+        # 대상이 다르다(Seller 등록 담당 vs 이체 재시도).
+        seller_ready = seller is not None and seller.status in Seller.READY_STATUSES
+        if seller_ready:
+            return "transfer"
         return "seller"
     if payout.status == Payout.Status.CONFIRMED_IDENTITY_PENDING:
         return "identity"
+    if (
+        payout.status == Payout.Status.CONFIRMED
+        and payout.transfer_status == Payout.TransferStatus.FAILED
+    ):
+        # 확정 이후 도착한 실패 웹훅이 남긴 상태다(#57 코드리뷰 지적 4) —
+        # Operator 큐에서도 드러나야 한다.
+        return "transfer"
     return None
 
 
@@ -613,11 +693,11 @@ def list_payouts_for_operator(request: HttpRequest, blocked_on: str | None = Non
 
     results: list[OperatorPayoutOut] = []
     for payout in payouts:
-        blocked = _blocked_on(payout)
+        seller = Seller.objects.filter(developer_id=_payout_developer_id(payout)).first()
+        blocked = _blocked_on(payout, seller=seller)
         if blocked_on is not None and blocked != blocked_on:
             continue
 
-        seller = Seller.objects.filter(developer_id=_payout_developer_id(payout)).first()
         results.append(
             OperatorPayoutOut(
                 idempotency_key=payout.idempotency_key,
@@ -625,6 +705,7 @@ def list_payouts_for_operator(request: HttpRequest, blocked_on: str | None = Non
                 developer_user_id=_payout_owner_user_id(payout),
                 net_amount=payout.net_amount,
                 status=payout.status,
+                transfer_status=payout.transfer_status,
                 blocked_on=blocked,
                 seller_status=seller.status if seller is not None else None,
                 has_identity=TaxIdentity.objects.filter(payout=payout).exists(),

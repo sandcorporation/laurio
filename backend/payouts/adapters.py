@@ -35,11 +35,19 @@ class PayoutError(Exception):
     """토스가 지급 요청·확인을 명시적으로 거부했을 때."""
 
 
-class PayoutTimeoutError(Exception):
+class PayoutTimeoutError(PayoutError):
     """토스 호출이 타임아웃됐다.
 
     응답을 받지 못했을 뿐 실제 처리 결과는 알 수 없다 — 호출자는 이걸 실패로
     간주해서는 안 되고, `query_status`로 실제 상태를 조회해 확정해야 한다.
+
+    `PayoutError`의 서브클래스다(코드리뷰 지적 5) — `except PayoutTimeoutError`가
+    항상 `except PayoutError`보다 먼저 걸리도록 호출부가 이미 순서를 지키고
+    있으므로(`payouts.api.confirm_payout`, `payouts.services.
+    _request_real_transfer_if_ready`) 기존 분기 동작은 그대로다. 서브클래스가
+    아니었을 때는 `query_status`가 다시 타임아웃하면 그 `PayoutTimeoutError`가
+    `except PayoutError`에 잡히지 않고 `transaction.atomic()` 블록 밖으로 새어
+    나가 이미 커밋 대기 중이던 원장 분개까지 롤백시켰다.
     """
 
 

@@ -20,6 +20,14 @@ class PayoutOut(Schema):
     # | "rejected" 중 하나(#50, #57, ADR-0020) — 두 대기(신원/Seller) 중 이쪽이
     # 무엇을 기다리는지 Developer·Operator가 조회할 수 있어야 한다.
     seller_status: str | None
+    # 실이체(벤더 이체 API) 자체의 진행 상태(#57 코드리뷰 지적 1/4) —
+    # "not_requested" | "requested" | "completed" | "failed" 중 하나. `status`
+    # (두 대기가 풀렸는가)와는 다른 축이다 — Seller가 이미 READY여도 실이체
+    # 자체가 벤더 쪽 사유로 거절되면 이 값이 "failed"가 되고, 그때는
+    # `status`가 confirmed_seller_pending에 머문다(실패로 종결되지 않는다,
+    # ADR-0004). "지급이 완료되었습니다"라고 말해도 되는지는 이 값도 함께
+    # 봐야 한다.
+    transfer_status: str
     # Developer가 다음에 무엇을 해야 하는지(또는 왜 아직 기다려야 하는지)를
     # 사람이 읽을 수 있는 한국어 문장으로 준다 — 침묵은 상금이 사라진 것으로
     # 읽힌다(#50 AC).
@@ -103,9 +111,10 @@ class ErrorOut(Schema):
 class OperatorPayoutOut(Schema):
     """Operator가 Payout 하나가 무엇을 기다리는지 보는 표면(#50 AC).
 
-    `blocked_on`은 "identity" | "seller" | None(둘 다 안 기다림 — 이미
-    CONFIRMED거나 아직 REQUESTED/FAILED) 중 하나다. 두 대기를 한 상태로
-    뭉치지 않는다는 요구가 Operator 조회에서도 그대로 지켜져야 한다.
+    `blocked_on`은 "identity" | "seller" | "transfer"(#57 코드리뷰 지적 1 —
+    Seller는 이미 READY인데 실이체 자체가 실패/미확정인 경우) | None(아무 것도
+    안 기다림 — 이미 CONFIRMED거나 아직 REQUESTED/FAILED) 중 하나다. 두 대기를
+    한 상태로 뭉치지 않는다는 요구가 Operator 조회에서도 그대로 지켜져야 한다.
     """
 
     idempotency_key: UUID
@@ -113,6 +122,7 @@ class OperatorPayoutOut(Schema):
     developer_user_id: int
     net_amount: int
     status: str
+    transfer_status: str
     blocked_on: str | None
     seller_status: str | None
     has_identity: bool

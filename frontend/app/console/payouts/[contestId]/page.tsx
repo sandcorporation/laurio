@@ -21,6 +21,7 @@ import { useSession } from "@/lib/auth/use-session";
 import {
   requestPayout,
   retrySellerRegistration,
+  submitSellerPhone,
   submitTaxIdentity,
   usePayout,
   type Payout,
@@ -129,11 +130,22 @@ function PayoutDetail({ payout, onChanged }: { payout: Payout; onChanged: () => 
             지금은 기다리는 단계입니다 — 하실 일은 없습니다. 상금은 원장에 그대로 남아 있고,
             등록이 끝나면 자동으로 다음 단계로 넘어갑니다.
           </p>
-          {/* **거절도 실패가 아니다**(#74 스토리 30·31). 지급대행사가 수취인
-              등록을 거절해도 상금은 원장에 그대로 남아 있다 — 그 사실을 말하고,
-              다시 시도할 길을 준다. 사람이 고객센터를 거쳐야 하면 "상금이
-              사라진 것 같은 시간"이 길어질 뿐이다. */}
-          {payout.seller_status === "rejected" ? (
+          {/* PENDING이면서 아직 전화번호를 안 냈으면 하실 일이 있다(#57
+              코드리뷰 지적 10) — next_action_message가 "아래에서 제출해주세요"
+              라고 말하는데 폼이 없으면 그 지시를 따를 수 없다. 실물 어댑터는
+              전화번호 없이 첫 등록을 시도조차 하지 않는다
+              (TossSellerAdapter.register) — 그러니 이 폼 없이는 영구 정체다. */}
+          {payout.seller_status === null || payout.seller_status === "pending" ? (
+            <SellerPhoneForm payout={payout} onSubmitted={onChanged} />
+          ) : null}
+
+          {/* **거절도, 실이체 실패도 실패가 아니다**(#74 스토리 30·31, #57
+              코드리뷰 지적 1). 지급대행사가 수취인 등록을 거절하거나, 등록은
+              끝났는데 실제 이체 자체가 거절돼도 상금은 원장에 그대로 남아
+              있다 — 그 사실을 말하고, 다시 시도할 길을 준다. 사람이
+              고객센터를 거쳐야 하면 "상금이 사라진 것 같은 시간"이 길어질
+              뿐이다. */}
+          {payout.seller_status === "rejected" || payout.transfer_status === "failed" ? (
             <SellerRetry payout={payout} onRetried={onChanged} />
           ) : null}
 
@@ -186,6 +198,63 @@ function SellerRetry({ payout, onRetried }: { payout: Payout; onRetried: () => v
         </p>
       ) : null}
     </div>
+  );
+}
+
+function SellerPhoneForm({ payout, onSubmitted }: { payout: Payout; onSubmitted: () => void }) {
+  const [value, setValue] = useState("");
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    if (pending) return;
+    setPending(true);
+    setMessage(null);
+
+    const result = await submitSellerPhone(payout.idempotency_key, value);
+
+    if (result.ok) return onSubmitted();
+    setMessage(result.message);
+    setPending(false);
+  }
+
+  return (
+    <form
+      className="mt-4 flex flex-col gap-3 rounded border border-subtle p-3"
+      onSubmit={handleSubmit}
+      data-testid="payout-seller-phone-form"
+    >
+      <label className="text-sm" htmlFor="payout-seller-phone">
+        지급대행사 수취인 등록에 전화번호가 필요합니다 — 본인인증 문자를 받을 번호입니다.
+      </label>
+      <input
+        id="payout-seller-phone"
+        className="rounded border border-subtle p-3"
+        type="tel"
+        inputMode="numeric"
+        autoComplete="tel"
+        maxLength={11}
+        value={value}
+        onChange={(event) => setValue(event.target.value.replace(/\D/g, ""))}
+        placeholder="숫자만 (하이픈 없이)"
+        data-testid="payout-seller-phone-input"
+        required
+      />
+      <button
+        className="self-start rounded bg-accent px-4 py-2 text-white disabled:opacity-50"
+        type="submit"
+        disabled={pending || value.length < 10}
+        data-testid="payout-seller-phone-submit"
+      >
+        {pending ? "제출하는 중..." : "제출"}
+      </button>
+      {message ? (
+        <p className="text-attention" data-testid="payout-seller-phone-error">
+          {message}
+        </p>
+      ) : null}
+    </form>
   );
 }
 

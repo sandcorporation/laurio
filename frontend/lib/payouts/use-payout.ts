@@ -99,3 +99,14 @@ export function submitTaxIdentity(idempotencyKey: string, residentRegistrationNu
 export function retrySellerRegistration(idempotencyKey: string) {
   return postAndReadDetail(`/api/backend/payouts/${idempotencyKey}/seller-registration`);
 }
+
+/** 토스 셀러 등록(businessType=INDIVIDUAL)의 individual 객체가 요구하는
+ * 전화번호를 제출한다(#57 코드리뷰 지적 10 — next_action_message가 "아래에서
+ * 제출해주세요"라고 말하는 폼이 실제로 없었다). Payout이 아직 확정되지
+ * 않았어도 미리 제출해 둘 수 있다.
+ */
+export function submitSellerPhone(idempotencyKey: string, phoneNumber: string) {
+  return postAndReadDetail(`/api/backend/payouts/${idempotencyKey}/seller-phone`, {
+    phone_number: phoneNumber,
+  });
+}

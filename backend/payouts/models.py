@@ -43,6 +43,34 @@ class Payout(models.Model):
         CONFIRMED = "confirmed", "지급 확정"
         FAILED = "failed", "지급 실패"
 
+    class TransferStatus(models.TextChoices):
+        """실제 벤더 이체(토스 실물 어댑터가 부르는 `POST /v2/payouts`)의 진행
+        상태 — `status`(두 대기가 풀렸는가)와는 다른 축이다(코드리뷰 지적 1/4/8,
+        #57). `status`가 "Laurio가 내부적으로(원장상) 확정했는가"를 답하는
+        반면, 이 필드는 "그 확정된 금액이 실제로 벤더에게 이체 요청됐고 그
+        결과가 무엇인가"를 답한다. 둘을 하나로 뭉치면 "Seller가 막 준비됐는데
+        실이체가 벤더 쪽 한도로 거절된" 경우를 표현할 자리가 없어, 확정
+        상태(status)가 실이체 실패를 덮어써 "지급 완료"라고 잘못 말하게 된다.
+
+        REQUESTED/COMPLETED/FAILED 어느 쪽으로도 `status`를 되돌리지 않는다 —
+        원장 분개는 이미 남아 있고(ADR-0004), 이 필드는 오직 "실이체 자체가
+        어디까지 갔는가"만 기록한다. `status`를 CONFIRMED로 전진시킬지는
+        `payouts.services`의 호출자들이 이 필드가 COMPLETED일 때만 결정한다.
+        """
+
+        # Seller가 아직 지급 가능 상태가 아니어서 실이체 자체를 시도하지
+        # 않았다(기본값). 두 대기 중 Seller 대기가 남아 있다는 뜻이다.
+        NOT_REQUESTED = "not_requested", "실이체 요청 전"
+        # 벤더에 실이체를 요청했지만 아직 결과가 확정되지 않았다(타임아웃 뒤
+        # query_status로도 아직 pending, 또는 웹훅을 기다리는 중).
+        REQUESTED = "requested", "실이체 확인 대기"
+        COMPLETED = "completed", "실이체 완료"
+        # 벤더가 실이체를 명시적으로 거절했다(예: 실이체 시점의 한도 초과).
+        # **실패로 종결하지 않는다** — 원장의 금액은 그대로이고, Seller가
+        # 이미 준비된 상태이므로 재시도(POST /payouts/{key}/seller-registration,
+        # 실질적으로는 실이체 재시도)로 회복한다(코드리뷰 지적 1).
+        FAILED = "failed", "실이체 실패"
+
     # OneToOneField가 아니라 ForeignKey다 — FAILED로 끝난 시도가 재시도를 영구히
     # 막으면 안 된다(토스가 거절해도 Escrow에 갇힌 상금을 꺼낼 길이 있어야 한다).
     # 동시에 하나의 Handover에 "진행 중이거나 이미 성사된" 시도가 두 개 이상
@@ -95,6 +123,14 @@ class Payout(models.Model):
     withholding_exempt = models.BooleanField(default=False)
 
     status = models.CharField(max_length=32, choices=Status.choices, default=Status.REQUESTED)
+    transfer_status = models.CharField(
+        max_length=16, choices=TransferStatus.choices, default=TransferStatus.NOT_REQUESTED
+    )
+    # 벤더(토스)가 실이체 요청 응답으로 돌려준 자신의 식별자(코드리뷰 지적 8) —
+    # 우리 idempotency_key(refPayoutId)와 다르다. POST 응답의 `id`를 여기 저장해
+    # 두지 않으면, 확인(query_status)이 우리 키로 GET을 시도해 항상 404가
+    # 되어 "타임아웃 뒤 조회로 확정"하는 경로 자체가 성립하지 않는다.
+    vendor_payout_id = models.CharField(max_length=100, blank=True)
 
     # 확정(CONFIRMED_IDENTITY_PENDING 진입) 시 원장에 남긴 수수료·원천징수 공제
     # 분개. 성공 시 정확히 한 번만 채워진다.

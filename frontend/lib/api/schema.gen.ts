@@ -2730,9 +2730,10 @@ export interface components {
          * OperatorPayoutOut
          * @description Operator가 Payout 하나가 무엇을 기다리는지 보는 표면(#50 AC).
          *
-         *     `blocked_on`은 "identity" | "seller" | None(둘 다 안 기다림 — 이미
-         *     CONFIRMED거나 아직 REQUESTED/FAILED) 중 하나다. 두 대기를 한 상태로
-         *     뭉치지 않는다는 요구가 Operator 조회에서도 그대로 지켜져야 한다.
+         *     `blocked_on`은 "identity" | "seller" | "transfer"(#57 코드리뷰 지적 1 —
+         *     Seller는 이미 READY인데 실이체 자체가 실패/미확정인 경우) | None(아무 것도
+         *     안 기다림 — 이미 CONFIRMED거나 아직 REQUESTED/FAILED) 중 하나다. 두 대기를
+         *     한 상태로 뭉치지 않는다는 요구가 Operator 조회에서도 그대로 지켜져야 한다.
          */
         OperatorPayoutOut: {
             /** Blocked On */
@@ -2759,6 +2760,8 @@ export interface components {
             seller_status: string | null;
             /** Status */
             status: string;
+            /** Transfer Status */
+            transfer_status: string;
         };
         /**
          * OwnScoreOut
@@ -2879,6 +2882,8 @@ export interface components {
             seller_status: string | null;
             /** Status */
             status: string;
+            /** Transfer Status */
+            transfer_status: string;
             /** Withholding Tax Amount */
             withholding_tax_amount: number;
         };
