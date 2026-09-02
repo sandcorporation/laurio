@@ -17,15 +17,19 @@ Sponsor가 대화에 입력하는 텍스트는 신뢰할 수 없는 입력이다
 있다(#55 AC — "화면이 죽지 않는다, 대화를 이어갈 수 있다"). 그래서 이 어댑터는
 `reply` 문자열을 뽑아낼 수 있는 한 관대하게 파싱한다 — `proposed_requirements`가
 배열이 아니거나 개별 항목의 필드가 비거나 타입이 틀려도 그 항목만 건너뛰고
-대화는 이어간다. `contests.api.send_requirement_chat_message`가 이미 프론트(#37)
-앞단에서 한 번 더 방어하므로(문자열 500자 절단, grade 미상이면 required로 폴백),
-이 어댑터가 그 위에서 다시 엄격하게 굴면 그 방어를 무력화하는 것과 같다 —
-그래서 여기서는 최소한만 검증한다.
+대화는 이어간다. `contests.api.send_requirement_chat_message`가 프론트(#37)
+앞단에서 문자열을 다시 500자로 자르는 이중 방어는 여전히 유효하지만, grade는
+**이 어댑터가 직접 정규화해 항상 "required"/"optional" 정규값만 내보낸다**
+(`_normalize_grade`, #55 2차 코드리뷰 지적 3) — `contests.api`의 required 폴백은
+이 경로에서는 더 이상 타지 않는다(그 폴백이 받아준다는 것을 근거로 여기서
+검증을 생략하면 안 된다는 게 그 리뷰 지적이었다). 매핑되지 않는 grade 값은
+로그를 남기고 optional로 떨어뜨린다.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from dataclasses import dataclass, field
@@ -36,6 +40,8 @@ from django.conf import settings
 
 from core.adapters import resolve_adapter
 from core.prompt_safety import neutralize_untrusted
+
+logger = logging.getLogger(__name__)
 
 # 대화당 제안을 과도하게 쏟아내지 않도록 한 턴에서 뽑아내는 후보 개수를 제한한다.
 _MAX_PROPOSALS_PER_TURN = 5
@@ -242,6 +248,44 @@ def _select_recent_history(history: list[ChatTurn]) -> tuple[list[ChatTurn], int
     return selected, len(history) - len(selected)
 
 
+# `existing_requirements`(확정된 체크리스트)에도 개수 상한이 없다
+# (`contests.api.add_requirement`) — #55 2차 코드리뷰 지적 1: 이력 예산
+# (`_MAX_HISTORY_PROMPT_CHARS`)이 막으려던 바로 그 실패 모드(128k 컨텍스트
+# 초과 -> 매 턴 context_length_exceeded -> 사과 응답만 반복)가 이 다른 문으로
+# 그대로 들어온다. 턴당 5개 제안을 200턴 가드보다 훨씬 안쪽인 50턴만 받아들여도
+# 250개 * 500자 ≈ 12.5만자가 이력 예산(4만자) 위에 얹힌다. `_select_recent_history`
+# 와 같은 원칙으로 별도 예산을 둔다 — 두 예산을 합쳐도(2만 + 4만 = 6만자 ≈ 4만
+# 토큰) 시스템 프롬프트·현재 발화·응답 토큰(`_OPENAI_MAX_TOKENS`)을 더해도
+# 128k에 크게 못 미친다.
+_MAX_EXISTING_REQUIREMENTS_PROMPT_CHARS = 20_000
+
+
+def _select_requirements_within_budget(
+    existing: list[ExistingRequirement],
+) -> tuple[list[ExistingRequirement], int]:
+    """`_select_recent_history`와 같은 원칙 — 가장 최근에 확정된 항목부터 문자 수
+    예산 안에 드는 만큼만 프롬프트에 싣는다.
+
+    잘려나간 항목은 Contest의 체크리스트 자체(DB)에는 그대로 남아 있다 —
+    이번에 벤더로 보내는 프롬프트에서만 빠진다. 프롬프트에서 빠진 항목과 겹치는
+    제안을 AI가 다시 낼 수는 있지만, AI는 제안만 하고 Sponsor가 직접 검토한
+    뒤에만 실제로 추가되므로(#55 AC) 중복 제안은 거절하면 그만이고 대화 자체가
+    죽지는 않는다 — `_select_recent_history`의 이력 절단과 달리 이쪽은 "정확도
+    저하"이지 "죽음"이 아니다.
+    """
+
+    selected: list[ExistingRequirement] = []
+    used = 0
+    for requirement in reversed(existing):
+        cost = len(requirement.text) + len(requirement.grade) + 10
+        if selected and used + cost > _MAX_EXISTING_REQUIREMENTS_PROMPT_CHARS:
+            break
+        selected.append(requirement)
+        used += cost
+    selected.reverse()
+    return selected, len(existing) - len(selected)
+
+
 def build_chat_prompt(chat_input: RequirementChatInput, *, include_history: bool = True) -> str:
     """실제 LLM에 보낼 프롬프트 문자열 — 감사·재현용으로 만들어 두지만, fake
     어댑터는 이 문자열이 아니라 구조화된 `chat_input`을 직접 읽는다
@@ -276,7 +320,15 @@ def build_chat_prompt(chat_input: RequirementChatInput, *, include_history: bool
         "## 지금까지 확정된 체크리스트",
     ]
     if chat_input.existing_requirements:
-        for r in chat_input.existing_requirements:
+        recent_requirements, omitted_requirement_count = _select_requirements_within_budget(
+            chat_input.existing_requirements
+        )
+        if omitted_requirement_count:
+            lines.append(
+                f"(가장 먼저 확정된 {omitted_requirement_count}개 항목은 길이 예산 때문에 "
+                "이번 요청에서 생략됨 — Contest의 체크리스트 자체에는 그대로 남아 있다)"
+            )
+        for r in recent_requirements:
             lines.append(f"- [{r.grade}] {neutralize_untrusted(r.text)}")
     else:
         lines.append("(없음)")
@@ -313,12 +365,6 @@ _OPENAI_DEFAULT_TEMPERATURE = 0.7
 # 지적 1) — 이 엔드포인트도 동기 WSGI 요청이라 gunicorn 기본 워커 타임아웃(30초)
 # 안에서 프롬프트 구성·DB 조회 오버헤드까지 끝나야 한다.
 _OPENAI_REQUEST_TIMEOUT_SECONDS = 20
-# max_tokens가 없으면 장황한 생성이 응답 크기를 사후에(_MAX_REPLY_LENGTH로) 잘라도
-# 소용없다 — 생성 자체가 오래 걸려 20초 타임아웃을 먼저 터뜨리고, 벤더 과금은
-# 이미 나간 채로 재시도해도 같은 프롬프트라 같은 실패가 재현된다(#55 코드리뷰
-# 지적 5). reply(최대 4000자 ≈ 최대 2700토큰) + proposed_requirements 최대
-# 5개(각 500자 ≈ 최대 1700토큰 합) + JSON 구조 오버헤드에 여유를 더한 값이다.
-_OPENAI_MAX_TOKENS = 4096
 _OPENAI_SYSTEM_PROMPT = (
     "당신은 Laurio 공모전 Sponsor의 AI grill 대화를 돕는 보조자입니다. 응답은 반드시 "
     "지정된 JSON 스키마를 따라야 합니다 — reply(사용자에게 보여줄 대화문)와 "
@@ -330,6 +376,20 @@ _OPENAI_SYSTEM_PROMPT = (
 # 방어적으로 자른다(#55 AC). proposed_requirements의 각 항목 text는 이미
 # `contests.api.send_requirement_chat_message`가 500자로 자른다.
 _MAX_REPLY_LENGTH = 4000
+
+# max_tokens는 반드시 위 두 상수(_MAX_REPLY_LENGTH·_MAX_PROPOSALS_PER_TURN)에서
+# 나오는 최악값보다 커야 한다(#55 2차 코드리뷰 지적 2) — 낮으면 reply 4000자 +
+# proposals 5개(각 500자)를 정상적으로 다 채우려는 응답조차
+# finish_reason="length"로 잘리고, _MAX_REPLY_LENGTH의 사후 절단이 아니라 그
+# 턴 전체가 예외로 죽는다(_parse_openai_chat_response의 finish_reason 검사).
+# 상수 두 개가 나중에 바뀌어도 값이 다시 어긋나지 않도록 고정 숫자 대신
+# 이 자리에서 계산한다 — 정수 연산만 써서 부동소수점 반올림에 흔들리지 않는다.
+_WORST_CASE_CONTENT_CHARS = _MAX_REPLY_LENGTH + _MAX_PROPOSALS_PER_TURN * 500  # proposal.text 상한(contests.api)
+# 한글 기준 1토큰≈1.5자(=2/3)로 보수적으로 잡은 최악값 토큰 수.
+_WORST_CASE_CONTENT_TOKENS = _WORST_CASE_CONTENT_CHARS * 2 // 3
+# 위 추정의 오차 여유로 50%, 거기에 JSON 구조(따옴표·중괄호·필드명) 오버헤드로
+# 고정 500토큰을 더한다.
+_OPENAI_MAX_TOKENS = _WORST_CASE_CONTENT_TOKENS * 3 // 2 + 500
 
 
 def _openai_chat_response_schema() -> dict:
@@ -398,9 +458,14 @@ def _describe_openai_http_error(response: Any, *, contest_id: int) -> str:
 
 # grade 별칭 — 벤더가 스키마의 enum(["required","optional"])을 어기고 대소문자·
 # 공백·한글 표기("필수"/"선택"/"옵션")로 돌려줘도 놓치지 않는다(#55 코드리뷰
-# 지적 1). 매핑되지 않는 값은 "optional"로 본다 — `contests.api`의 폴백(모르면
-# required)과 일부러 반대 방향을 골랐다. required로 잘못 떨어지면 선택 요건이
-# 필수로 뒤집혀 채점 백분율이 바뀌고 그 값이 배분 컷라인을 가른다(ADR-0006).
+# 지적 1). 매핑되지 않는 값은 "optional"로 본다 — required로 잘못 떨어지면
+# 선택 요건이 필수로 뒤집히고, optional로 잘못 떨어지면 그 반대가 된다. 둘 다
+# 채점 백분율과 배분 컷라인을 흔든다(ADR-0006)는 점에서는 같지만, 방향을
+# 선택해야 한다면 optional 쪽이 낫다 — 제안은 Sponsor가 직접 검토해야 실제
+# Requirement가 되므로(#55 AC), 잘못 낮춰진 등급은 화면에서 바로 보이고 고칠
+# 수 있다. 다만 **어느 방향이든 오분류가 조용하면 안 된다** — 매핑에 실패하면
+# `logger.warning`을 남긴다(#55 2차 코드리뷰 지적 3). 로그가 없으면 벤더가
+# 응답 스키마의 enum을 어기고 있다는 사실 자체를 아무도 모른다.
 _GRADE_ALIASES = {
     "required": "required",
     "필수": "required",
@@ -410,10 +475,19 @@ _GRADE_ALIASES = {
 }
 
 
-def _normalize_grade(raw_grade: object) -> str:
-    if not isinstance(raw_grade, str):
-        return "optional"
-    return _GRADE_ALIASES.get(raw_grade.strip().lower(), "optional")
+def _normalize_grade(raw_grade: object, *, contest_id: int) -> str:
+    if isinstance(raw_grade, str):
+        normalized = _GRADE_ALIASES.get(raw_grade.strip().lower())
+        if normalized is not None:
+            return normalized
+    logger.warning(
+        "OpenAI AI grill 응답의 proposed_requirements 항목에 알 수 없는 grade가 "
+        "왔다(raw_grade=%r, contest=%s) — optional로 취급한다. 벤더가 응답 스키마의 "
+        "enum([\"required\",\"optional\"])을 어기고 있을 수 있다.",
+        str(raw_grade)[:100],
+        contest_id,
+    )
+    return "optional"
 
 
 def _parse_openai_chat_response(body: dict, *, contest_id: int) -> RequirementChatOutput:
@@ -477,7 +551,8 @@ def _parse_openai_chat_response(body: dict, *, contest_id: int) -> RequirementCh
                 continue
             proposals.append(
                 RequirementProposal(
-                    text=text.strip()[:500], grade=_normalize_grade(raw.get("grade"))
+                    text=text.strip()[:500],
+                    grade=_normalize_grade(raw.get("grade"), contest_id=contest_id),
                 )
             )
     # raw_proposals가 배열이 아니면(문자열·객체·None 등) 그냥 빈 목록으로 취급한다 —

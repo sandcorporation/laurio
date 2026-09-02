@@ -560,6 +560,173 @@ def test_select_recent_history_prefers_recent_turns_when_over_budget():
     assert selected == history[len(history) - len(selected):]
 
 
+# --- 2차 코드리뷰: 확정 체크리스트도 예산에 넣는다 (#55 2차 코드리뷰 지적 1) --------
+
+
+def test_huge_existing_requirements_does_not_balloon_the_prompt_sent_to_vendor(monkeypatch):
+    """이력만 예산을 두고 확정 체크리스트(`existing_requirements`)에 상한이
+    없으면, 이력 예산이 막으려던 바로 그 실패 모드(128k 컨텍스트 초과 -> 매 턴
+    context_length_exceeded -> 사과 응답만 반복)가 다른 문으로 그대로 들어온다.
+    `contests.api.add_requirement`에 개수 제한이 없으므로 어댑터 쪽에서 막아야
+    한다."""
+
+    from contests.requirement_chat import ExistingRequirement
+
+    huge_existing = [
+        ExistingRequirement(text=f"확정된 요건 {i} " + "가" * 480, grade="required")
+        for i in range(300)
+    ]
+
+    captured = {}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        captured["payload"] = json
+        return _FakeResponse(200, _chat_completion_body("네", []))
+
+    monkeypatch.setattr("contests.requirement_chat.requests.post", fake_post)
+
+    chat_input = _chat_input()
+    chat_input = RequirementChatInput(
+        contest_id=chat_input.contest_id,
+        contest_title=chat_input.contest_title,
+        latest_message=chat_input.latest_message,
+        history=chat_input.history,
+        existing_requirements=huge_existing,
+    )
+
+    OpenAIRequirementChatAdapter().respond(chat_input)
+
+    user_message = captured["payload"]["messages"][-1]["content"]
+    # 300개 * 약 500자 = 15만자를 그대로 실었다면 이 상한을 훌쩍 넘는다.
+    assert len(user_message) < 100_000
+
+
+def test_existing_requirements_budget_omission_is_visible_in_the_prompt(monkeypatch):
+    """예산에 걸려 항목이 잘렸다면 그 사실이 프롬프트 문구에 드러나야 한다 —
+    조용히 사라지면 AI가 왜 이미 확정된 항목을 다시 제안하는지 알 길이 없다."""
+
+    from contests.requirement_chat import ExistingRequirement
+
+    huge_existing = [
+        ExistingRequirement(text=f"확정된 요건 {i} " + "가" * 480, grade="required")
+        for i in range(300)
+    ]
+
+    captured = {}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        captured["payload"] = json
+        return _FakeResponse(200, _chat_completion_body("네", []))
+
+    monkeypatch.setattr("contests.requirement_chat.requests.post", fake_post)
+
+    chat_input = _chat_input()
+    chat_input = RequirementChatInput(
+        contest_id=chat_input.contest_id,
+        contest_title=chat_input.contest_title,
+        latest_message=chat_input.latest_message,
+        history=chat_input.history,
+        existing_requirements=huge_existing,
+    )
+
+    OpenAIRequirementChatAdapter().respond(chat_input)
+
+    user_message = captured["payload"]["messages"][-1]["content"]
+    assert "생략됨" in user_message
+
+
+def test_select_requirements_within_budget_keeps_most_recent():
+    from contests.requirement_chat import ExistingRequirement, _select_requirements_within_budget
+
+    existing = [
+        ExistingRequirement(text="요건 " + "가" * 400, grade="required") for _ in range(200)
+    ]
+    selected, omitted = _select_requirements_within_budget(existing)
+
+    assert omitted > 0
+    assert len(selected) < len(existing)
+    assert selected == existing[len(existing) - len(selected):]
+
+
+def test_select_requirements_within_budget_keeps_lone_huge_item():
+    from contests.requirement_chat import ExistingRequirement, _select_requirements_within_budget
+
+    huge = ExistingRequirement(text="가" * 1_000_000, grade="required")
+    selected, omitted = _select_requirements_within_budget([huge])
+
+    assert selected == [huge]
+    assert omitted == 0
+
+
+# --- 2차 코드리뷰: max_tokens가 자기 계산의 최악값보다 커야 한다 (지적 2) -----------
+
+
+def test_max_tokens_exceeds_worst_case_reply_and_proposals_token_estimate():
+    """reply(_MAX_REPLY_LENGTH) + proposals(_MAX_PROPOSALS_PER_TURN * 500자)를
+    정상적으로 다 채우는 응답이 finish_reason="length"로 잘리면 안 된다 — 잘리면
+    _MAX_REPLY_LENGTH의 사후 절단이 아니라 그 턴 전체가 예외로 죽는다(#55 2차
+    코드리뷰 지적 2)."""
+
+    from contests import requirement_chat as m
+
+    worst_case_chars = m._MAX_REPLY_LENGTH + m._MAX_PROPOSALS_PER_TURN * 500
+    # 한글 기준 1토큰≈1.5자로 보수적으로 잡은 최악값 — 코드리뷰가 지적한 계산과
+    # 같은 추정치다.
+    worst_case_tokens = worst_case_chars / 1.5
+
+    assert m._OPENAI_MAX_TOKENS > worst_case_tokens
+
+
+def test_request_payload_max_tokens_matches_module_constant(monkeypatch):
+    captured = {}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        captured["payload"] = json
+        return _FakeResponse(200, _chat_completion_body("네", []))
+
+    monkeypatch.setattr("contests.requirement_chat.requests.post", fake_post)
+
+    OpenAIRequirementChatAdapter().respond(_chat_input())
+
+    from contests.requirement_chat import _OPENAI_MAX_TOKENS
+
+    assert captured["payload"]["max_tokens"] == _OPENAI_MAX_TOKENS
+
+
+# --- 2차 코드리뷰: 매핑 안 되는 grade는 조용히 넘어가지 않는다 (지적 3) -------------
+
+
+def test_unmapped_grade_logs_a_warning(monkeypatch, caplog):
+    """방향(optional로 떨어뜨리기)은 타당하지만, 벤더가 응답 스키마의 enum을
+    어기고 있다는 사실 자체는 로그로 남아야 한다 — 안 그러면 아무도 모른다."""
+
+    body = _chat_completion_body(
+        "정리했어요", [{"text": "필수 항목처럼 보이는데", "grade": "mandatory"}]
+    )
+    monkeypatch.setattr(
+        "contests.requirement_chat.requests.post", lambda *a, **k: _FakeResponse(200, body)
+    )
+
+    with caplog.at_level("WARNING", logger="contests.requirement_chat"):
+        OpenAIRequirementChatAdapter().respond(_chat_input())
+
+    assert any("mandatory" in record.getMessage() for record in caplog.records)
+
+
+def test_known_grade_values_do_not_log_a_warning(monkeypatch, caplog):
+    body = _chat_completion_body(
+        "정리했어요", [{"text": "정상", "grade": "required"}]
+    )
+    monkeypatch.setattr(
+        "contests.requirement_chat.requests.post", lambda *a, **k: _FakeResponse(200, body)
+    )
+
+    with caplog.at_level("WARNING", logger="contests.requirement_chat"):
+        OpenAIRequirementChatAdapter().respond(_chat_input())
+
+    assert caplog.records == []
+
+
 # --- AC: 배포 환경에서 자격증명이 없으면 부팅 자체가 거부된다(#83 부팅 가드) --------
 
 
