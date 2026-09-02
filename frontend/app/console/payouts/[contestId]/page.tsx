@@ -124,18 +124,27 @@ function PayoutDetail({ payout, onChanged }: { payout: Payout; onChanged: () => 
         <TaxIdentityForm payout={payout} onSubmitted={onChanged} />
       ) : null}
 
+      {/* 실이체는 이미 READY인 Seller에서도 실패할 수 있다(#57 코드리뷰
+          지적 1) — 그러면 status는 confirmed_identity_pending에 머물지만
+          할 일(재시도)이 있다. seller_pending 섹션과 같은 조건을 여기서도
+          똑같이 쓴다(코드리뷰 지적 7/9, 3차 — 백엔드의 blocked_on/NextAction
+          판정과 같은 신호를 본다). */}
+      {payout.status === "confirmed_identity_pending" && payout.transfer_status === "failed" ? (
+        <SellerRetry payout={payout} onRetried={onChanged} reason="transfer" />
+      ) : null}
+
       {payout.status === "confirmed_seller_pending" ? (
         <section className="mt-6 rounded border border-subtle p-4" data-testid="payout-waiting">
-          <p className="text-muted">
-            지금은 기다리는 단계입니다 — 하실 일은 없습니다. 상금은 원장에 그대로 남아 있고,
-            등록이 끝나면 자동으로 다음 단계로 넘어갑니다.
-          </p>
           {/* PENDING이면서 아직 전화번호를 안 냈으면 하실 일이 있다(#57
               코드리뷰 지적 10) — next_action_message가 "아래에서 제출해주세요"
               라고 말하는데 폼이 없으면 그 지시를 따를 수 없다. 실물 어댑터는
               전화번호 없이 첫 등록을 시도조차 하지 않는다
-              (TossSellerAdapter.register) — 그러니 이 폼 없이는 영구 정체다. */}
-          {payout.seller_status === null || payout.seller_status === "pending" ? (
+              (TossSellerAdapter.register) — 그러니 이 폼 없이는 영구 정체다.
+              `has_seller_phone`(서버가 계산한 값)을 본다 — seller_status가
+              null/pending인지로 추론하면, 전화번호 말고 다른 정보(이메일 등)가
+              없어 계속 pending인 경우에도 이미 낸 전화번호를 또 내라는 폼이
+              된다(코드리뷰 지적 12, 3차). */}
+          {!payout.has_seller_phone ? (
             <SellerPhoneForm payout={payout} onSubmitted={onChanged} />
           ) : null}
 
@@ -145,26 +154,60 @@ function PayoutDetail({ payout, onChanged }: { payout: Payout; onChanged: () => 
               있다 — 그 사실을 말하고, 다시 시도할 길을 준다. 사람이
               고객센터를 거쳐야 하면 "상금이 사라진 것 같은 시간"이 길어질
               뿐이다. */}
-          {payout.seller_status === "rejected" || payout.transfer_status === "failed" ? (
-            <SellerRetry payout={payout} onRetried={onChanged} />
+          {payout.seller_status === "rejected" ? (
+            <SellerRetry payout={payout} onRetried={onChanged} reason="rejected" />
+          ) : payout.transfer_status === "failed" ? (
+            <SellerRetry payout={payout} onRetried={onChanged} reason="transfer" />
           ) : null}
 
           {/* Seller 등록 대기 중에도 주민등록번호는 낼 수 있다 — 두 대기는
               서로 독립적이다(ADR-0020). 먼저 끝낼 수 있는 쪽을 막지 않는다. */}
           {payout.has_identity ? null : <TaxIdentityForm payout={payout} onSubmitted={onChanged} />}
+
+          {/* "하실 일은 없습니다"는 정말로 할 일이 없을 때만 보인다(코드리뷰
+              지적 10, 3차) — 전화번호 폼·재시도 버튼·신원 제출 폼 중 어느
+              것도 뜨지 않을 때만이다. 폼·버튼 바로 위에 이 문장이 뜨면
+              "할 일이 없다"와 "여기 낼 것이 있다"가 한 화면에서 서로
+              모순된다. */}
+          {payout.has_seller_phone &&
+          payout.seller_status !== "rejected" &&
+          payout.transfer_status !== "failed" &&
+          payout.has_identity ? (
+            <p className="text-muted">
+              지금은 기다리는 단계입니다 — 하실 일은 없습니다. 상금은 원장에 그대로 남아 있고,
+              등록이 끝나면 자동으로 다음 단계로 넘어갑니다.
+            </p>
+          ) : null}
         </section>
       ) : null}
 
-      {payout.status === "confirmed" ? (
+      {payout.status === "confirmed" && payout.transfer_status !== "failed" ? (
         <p className="mt-6 font-semibold" data-testid="payout-complete">
           지급이 완료되었습니다.
         </p>
       ) : null}
+
+      {/* 확정 이후 뒤늦게 실이체 실패가 확인된 경우다(#57 코드리뷰 지적 4/8,
+          2·3차) — next_action_message가 이미 그 사실을 말하므로(위), 그
+          바로 아래에 모순되는 "지급이 완료되었습니다"를 또 찍지 않는다.
+          Developer 쪽 자기 서비스 재시도 경로는 아직 없다(ADR-0008에 남긴
+          한계) — 여기서 새 버튼을 만들지 않는다. */}
     </>
   );
 }
 
-function SellerRetry({ payout, onRetried }: { payout: Payout; onRetried: () => void }) {
+function SellerRetry({
+  payout,
+  onRetried,
+  reason,
+}: {
+  payout: Payout;
+  onRetried: () => void;
+  /** 재시도 버튼이 뜬 이유 — 문구가 실제 원인과 어긋나면 안 된다(코드리뷰
+   * 지적 11, 3차): "rejected"인데 "실이체가 실패했다"고 말하거나 그 반대면
+   * Developer가 무엇을 다시 시도하는 건지 오해한다. */
+  reason: "rejected" | "transfer";
+}) {
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -177,11 +220,16 @@ function SellerRetry({ payout, onRetried }: { payout: Payout; onRetried: () => v
     setPending(false);
   }
 
+  const explanation =
+    reason === "rejected"
+      ? "지급대행사의 수취인 등록이 거절되었습니다."
+      : "지급대행사 수취인 등록은 끝났지만 실제 이체가 거절되었습니다.";
+
   return (
-    <div className="mt-3" data-testid="payout-seller-rejected">
+    <div className="mt-3" data-testid={`payout-seller-retry-${reason}`}>
       <p className="text-sm">
-        지급대행사의 수취인 등록이 거절되었습니다. <strong>상금은 그대로 남아 있습니다</strong> —
-        다시 시도해보시고, 계속 거절되면 운영자에게 문의해주세요.
+        {explanation} <strong>상금은 그대로 남아 있습니다</strong> — 다시 시도해보시고, 계속
+        거절되면 운영자에게 문의해주세요.
       </p>
       <button
         className="mt-2 rounded border border-subtle px-3 py-2 text-sm disabled:opacity-50"
@@ -190,7 +238,7 @@ function SellerRetry({ payout, onRetried }: { payout: Payout; onRetried: () => v
         disabled={pending}
         data-testid="payout-seller-retry"
       >
-        {pending ? "다시 시도하는 중..." : "등록 다시 시도"}
+        {pending ? "다시 시도하는 중..." : "다시 시도"}
       </button>
       {message ? (
         <p className="mt-2 text-attention" data-testid="payout-seller-retry-error">

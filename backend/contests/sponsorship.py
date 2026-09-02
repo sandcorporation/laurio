@@ -77,10 +77,17 @@ def sponsored_contest_queryset(base, *, as_of, policy):
                 submission__contest=OuterRef("pk"), status=Appeal.Status.PENDING
             )
         ),
+        # transfer_status가 FAILED면 CONFIRMED라도 실이체가 실제로는 아직
+        # 안 나간 것이다(#57 코드리뷰 지적 4/7/8, 3차의 결과로 생긴
+        # Payout.transfer_status 축 — status는 원장 확정 사실이라 되돌리지
+        # 않지만(ADR-0004), 이 축을 안 보면 뒤늦게 실이체가 실패로 확인된
+        # Contest도 "완료"라고 말하게 된다). Sponsor에게 지급 상세를 보여주지
+        # 않는다는 설계 의도(위 주석)는 그대로 지키되, "완료"라는 판정 자체는
+        # 진실이어야 한다.
         has_confirmed_payout=Exists(
             Payout.objects.filter(
                 handover__award__contest=OuterRef("pk"), status=Payout.Status.CONFIRMED
-            )
+            ).exclude(transfer_status=Payout.TransferStatus.FAILED)
         ),
         # 배분은 만들어졌는데 아직 정산되지 않은 몫이 남아 있는가. 「배분 행이
         # 생겼다」와 「돈이 실제로 갔다」는 다르다 — 지급이 전부 실패해 매 스캔

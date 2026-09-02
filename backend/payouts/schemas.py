@@ -15,6 +15,12 @@ class PayoutOut(Schema):
     net_amount: int
     status: str
     has_identity: bool
+    # Seller 등록에 필요한 전화번호를 이미 제출했는가(#57 코드리뷰 지적 12,
+    # 3차) — has_identity와 같은 원칙이다. 프런트가 이 값 대신 seller_status가
+    # null/pending인지로 폼 노출 여부를 추론하면, 전화번호 말고 다른 정보
+    # (예: 이메일)가 없어 register()가 계속 "pending"을 돌려주는 경우에도
+    # 폼이 계속 다시 나타난다 — 이미 제출한 값을 또 내라고 요구하는 꼴이다.
+    has_seller_phone: bool
     # Seller가 아직 등록되지 않았으면 None. 있으면 "pending" |
     # "approval_required" | "partially_approved" | "under_review" | "approved"
     # | "rejected" 중 하나(#50, #57, ADR-0020) — 두 대기(신원/Seller) 중 이쪽이

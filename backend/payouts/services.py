@@ -455,15 +455,41 @@ def _request_real_transfer_if_ready(payout: Payout) -> bool:
     원장 분개까지 롤백시킨다.
     """
 
+    # 이미 COMPLETED면 벤더를 다시 부르지 않는다(코드리뷰 지적 2, 3차) --
+    # mark_confirmed/submit_identity/retry_seller_registration/
+    # advance_seller_pending_payouts 네 경로 모두 이 함수를 다시 부를 수
+    # 있고, 그중 어느 것도 "이미 완료됐는가"를 스스로 확인하지 않았다.
+    # 이중 지급 방지를 토스의 Idempotency-Key 보존 기간에만 맡기지 않는다 --
+    # 우리 쪽에서 먼저 걸러낸다.
+    if payout.transfer_status == Payout.TransferStatus.COMPLETED:
+        return True
+
     from .adapters import PayoutError, get_adapter
 
     adapter = get_adapter()
     try:
         result_status = adapter.confirm(idempotency_key=str(payout.idempotency_key))
-    except PayoutError:
+    except PayoutError as exc:
+        logger.warning(
+            "실이체 confirm()이 예외를 던졌다(idempotency_key=%s): %s -- query_status로 "
+            "재확인한다.",
+            payout.idempotency_key,
+            exc,
+        )
         try:
             result_status = adapter.query_status(idempotency_key=str(payout.idempotency_key))
-        except PayoutError:
+        except PayoutError as exc2:
+            # 코드리뷰 지적 13(3차) -- 이전에는 이 두 예외를 로그 없이
+            # 삼켰다. 자격증명 오류(401/403)처럼 재시도해도 절대 풀리지
+            # 않는 원인이면 이 로그가 유일한 단서다 -- 로그가 없으면 Payout이
+            # 영원히 "pending"에 머물러도 아무도 알아채지 못한다.
+            logger.error(
+                "실이체 confirm()과 query_status() 둘 다 실패했다"
+                "(idempotency_key=%s): confirm=%s, query_status=%s",
+                payout.idempotency_key,
+                exc,
+                exc2,
+            )
             result_status = "pending"
 
     if result_status == "paid":
@@ -572,8 +598,22 @@ def resolve_transfer_webhook(idempotency_key, our_status: str) -> Payout:
         return payout
 
     if our_status == "failed":
-        Payout.objects.filter(pk=payout.pk).update(transfer_status=Payout.TransferStatus.FAILED)
-        payout.transfer_status = Payout.TransferStatus.FAILED
+        # COMPLETED를 되돌리지 않는다(코드리뷰 지적 5, 3차) — 순서 보장이
+        # 없는 웹훅 재전송·역순 도착 환경에서, 이미 실제로 성공한 뒤에 도착한
+        # 오래된 FAILED가(예: 이전 시도의 지연된 사본) 방금 COMPLETED로 확정된
+        # 사실을 지우면 "돈은 나갔는데 화면은 실패라고 말한다"는, 이 티켓이
+        # 가장 경계하는 정반대 방향의 거짓말이 된다. COMPLETED가 이미
+        # 아니었을 때만 FAILED를 반영한다 — 조건부 UPDATE 하나로 경합도
+        # 안전하다.
+        updated = (
+            Payout.objects.filter(pk=payout.pk)
+            .exclude(transfer_status=Payout.TransferStatus.COMPLETED)
+            .update(transfer_status=Payout.TransferStatus.FAILED)
+        )
+        if updated:
+            payout.transfer_status = Payout.TransferStatus.FAILED
+        else:
+            payout.refresh_from_db()
         return payout
 
     if our_status == "paid":
@@ -633,19 +673,23 @@ def submit_identity(payout: Payout, resident_registration_number: str) -> Payout
             # CONFIRMED로 넘어가는 건 실이체가 실제로 COMPLETED로 확정됐을
             # 때만이다(코드리뷰 지적 1) — Seller가 READY라는 사실만으로
             # 전진시키면, 벤더가 실이체 자체를 거절해도(예: 실이체 시점의
-            # 한도) status만 보고 "지급 완료"라고 잘못 말하게 된다. 실이체가
-            # 아직 안 풀렸으면(FAILED/REQUESTED) CONFIRMED_SELLER_PENDING에
-            # 남아 기존 재시도 엔드포인트(seller-registration)가 그대로 이
-            # Payout을 다시 집는다 — Seller.status 자체는 이미 READY이므로
-            # `retry_seller_registration`이 `ensure_seller_registered`를
-            # 곧바로 통과시키고 `_request_real_transfer_if_ready`만 다시
-            # 시도한다.
-            transfer_completed = _request_real_transfer_if_ready(payout) if seller_ready else False
-            target = (
-                Payout.Status.CONFIRMED
-                if (seller_ready and transfer_completed)
-                else Payout.Status.CONFIRMED_SELLER_PENDING
-            )
+            # 한도) status만 보고 "지급 완료"라고 잘못 말하게 된다.
+            if not seller_ready:
+                target = Payout.Status.CONFIRMED_SELLER_PENDING
+            elif _request_real_transfer_if_ready(payout):
+                target = Payout.Status.CONFIRMED
+            else:
+                # Seller는 이미 READY지만 실이체가 아직 안 풀렸다
+                # (FAILED/REQUESTED) — status를 CONFIRMED_SELLER_PENDING으로
+                # 강제하지 않는다(코드리뷰 지적 6, 3차). payout.status가 이미
+                # CONFIRMED_IDENTITY_PENDING이었다면(Seller가 확정 시점에
+                # 이미 READY였고 신원만 남아 있던 경우) 그대로 둔다 —
+                # CONFIRMED_SELLER_PENDING으로 뭉치면 "신원은 이미 제출했다"
+                # 는 사실이 사라지고 "Seller 대기"로 잘못 역행한다. 두
+                # 상태(CONFIRMED_IDENTITY_PENDING/CONFIRMED_SELLER_PENDING)
+                # 모두 next_action_message가 transfer_status를 함께 봐서
+                # "실이체가 실패했다"는 사실을 정확히 전달한다.
+                target = payout.status
             Payout.objects.filter(pk=payout.pk, status=payout.status).update(status=target)
 
     payout.refresh_from_db()
@@ -659,31 +703,64 @@ def retry_seller_registration(payout: Payout, *, simulate: str | None = None) ->
     아니면 CONFIRMED_IDENTITY_PENDING으로 옮긴다(두 대기 중 남은 한쪽만
     보여준다). 여전히 부분 승인이 아니면(한도 초과·심사 필요·거절) 그대로
     CONFIRMED_SELLER_PENDING에 남는다 — 실패로 종결되지 않는다.
+
+    벤더 HTTP 호출(`ensure_seller_registered`/`_request_real_transfer_if_ready`
+    가 각각 최대 10~20초)은 락 밖에서 한다(코드리뷰 지적 14, 3차 —
+    `advance_seller_pending_payouts`에 이미 적용한 것과 같은 규율을 여기에도
+    적용한다). `select_for_update()`로 감싸면 이 호출을 기다리는 동안 다른
+    요청(같은 Payout의 재시도 클릭, 또는 웹훅)이 그 락에 막혀 대기하다
+    타임아웃한다. `submit_seller_phone`은 이 함수를 여러 Payout에 대해
+    루프로 부르므로, 한 번의 호출이 락을 오래 쥐면 그 지연이 N배로
+    불어난다. 안전장치는 마지막 조건부 UPDATE 하나로 충분하다
+    (`mark_confirmed`와 같은 규율).
     """
 
-    with transaction.atomic():
-        locked = Payout.objects.select_for_update().get(pk=payout.pk)
-        if locked.status != Payout.Status.CONFIRMED_SELLER_PENDING:
-            return locked
+    current = Payout.objects.get(pk=payout.pk)
 
-        developer = _resolve_developer(locked)
+    if current.status == Payout.Status.CONFIRMED_SELLER_PENDING:
+        developer = _resolve_developer(current)
         seller = ensure_seller_registered(developer, simulate=simulate)
         if seller.status in Seller.READY_STATUSES:
             # 이 시점에 실제로 실이체가 COMPLETED로 확정될 때만 다음 상태로
             # 넘어간다(코드리뷰 지적 1) — 그렇지 않으면(FAILED/REQUESTED)
             # CONFIRMED_SELLER_PENDING에 그대로 남아, Seller가 READY인데도
             # 실이체만 안 풀린 경우를 위한 재시도 표면 역할을 계속한다.
-            if _request_real_transfer_if_ready(locked):
-                has_identity = TaxIdentity.objects.filter(payout=locked).exists()
+            if _request_real_transfer_if_ready(current):
+                has_identity = TaxIdentity.objects.filter(payout=current).exists()
                 target = (
                     Payout.Status.CONFIRMED if has_identity else Payout.Status.CONFIRMED_IDENTITY_PENDING
                 )
-                Payout.objects.filter(
-                    pk=locked.pk, status=Payout.Status.CONFIRMED_SELLER_PENDING
+                updated = Payout.objects.filter(
+                    pk=current.pk, status=Payout.Status.CONFIRMED_SELLER_PENDING
                 ).update(status=target)
-                locked.status = target
+                if updated:
+                    current.status = target
+        return current
 
-    return locked
+    if (
+        current.status == Payout.Status.CONFIRMED_IDENTITY_PENDING
+        and current.transfer_status == Payout.TransferStatus.FAILED
+    ):
+        # Seller는 이미 READY인데 실이체 자체만 실패한 경우다(코드리뷰 지적
+        # 6, 3차의 결과 — submit_identity가 더는 이 상태를
+        # CONFIRMED_SELLER_PENDING으로 역행시키지 않으므로, 실이체 재시도가
+        # 필요한 Payout이 CONFIRMED_IDENTITY_PENDING에 머물 수 있다). 이
+        # 엔드포인트가 CONFIRMED_SELLER_PENDING만 받으면 프런트가 보여주는
+        # "다시 시도" 버튼(transfer_status만 보고 노출된다)이 항상 409를
+        # 돌려받는다 — 화면이 시킬 수 없는 일을 시키는 꼴이다. Seller가
+        # 그 사이 REJECTED로 바뀌었을 수도 있으니(웹훅으로) 다시 확인한다.
+        developer = _resolve_developer(current)
+        seller = Seller.objects.filter(developer=developer).first()
+        if seller is not None and seller.status in Seller.READY_STATUSES:
+            if _request_real_transfer_if_ready(current):
+                updated = Payout.objects.filter(
+                    pk=current.pk, status=Payout.Status.CONFIRMED_IDENTITY_PENDING
+                ).update(status=Payout.Status.CONFIRMED)
+                if updated:
+                    current.status = Payout.Status.CONFIRMED
+        return current
+
+    return current
 
 
 def submit_seller_phone(developer, phone_number: str) -> Seller:

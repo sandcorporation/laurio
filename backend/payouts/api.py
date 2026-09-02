@@ -208,6 +208,7 @@ def _serialize(payout: Payout) -> PayoutOut:
         status=payout.status,
         transfer_status=payout.transfer_status,
         has_identity=TaxIdentity.objects.filter(payout=payout).exists(),
+        has_seller_phone=bool(seller is not None and seller.phone_number),
         seller_status=seller.status if seller is not None else None,
         next_action_message=_next_action_message(payout, seller),
         created_at=payout.created_at,
@@ -447,9 +448,19 @@ def retry_payout_seller_registration(
 
     payout = _get_owned_payout(request, idempotency_key)
 
-    if payout.status != Payout.Status.CONFIRMED_SELLER_PENDING:
+    # CONFIRMED_SELLER_PENDING(Seller 자체가 아직 READY가 아님)뿐 아니라
+    # CONFIRMED_IDENTITY_PENDING이면서 transfer_status가 FAILED인 경우도
+    # 받는다(코드리뷰 지적 6/7/8, 3차) — Seller는 이미 READY인데 실이체만
+    # 실패한 상태다. 프런트는 seller_status가 아니라 transfer_status만 보고
+    # "다시 시도" 버튼을 띄우므로(#57 2차), 여기서 CONFIRMED_SELLER_PENDING만
+    # 받으면 그 버튼이 항상 409를 돌려받는다.
+    retryable = payout.status == Payout.Status.CONFIRMED_SELLER_PENDING or (
+        payout.status == Payout.Status.CONFIRMED_IDENTITY_PENDING
+        and payout.transfer_status == Payout.TransferStatus.FAILED
+    )
+    if not retryable:
         raise HttpError(
-            409, "Seller 등록 대기 상태에서만 재시도할 수 있습니다."
+            409, "Seller 등록 대기 또는 실이체 실패 상태에서만 재시도할 수 있습니다."
         )
 
     payout = retry_seller_registration(payout, simulate=payload.simulate)
@@ -619,26 +630,52 @@ def receive_toss_seller_webhook(request: HttpRequest):
         raise HttpError(404, "알 수 없는 Seller 입니다.")
 
     weekly_limit_body = data.get("weeklyLimit") or {}
+    new_weekly_limit = weekly_limit_body.get("amount") if our_status == "partially_approved" else None
 
-    # 재전송·역순 도착에 안전해야 한다(코드리뷰 지적 9) — payout.changed
+    if our_status == seller.status:
+        # 완전히 같은 상태의 재전송이다(코드리뷰 지적 4, 3차 — "동급 rank가
+        # 서로 덮어쓴다"의 핵심은 이 경우다: 새 정보가 전혀 없는 중복 배달도
+        # 예전 조건(rank <= incoming_rank)을 통과해 advance_seller_pending_
+        # payouts를 다시 불렀다). 값 자체(주간 한도 등)는 최신화해도 안전하지만,
+        # 실이체 재시도 표면을 다시 두드릴 이유가 없다.
+        Seller.objects.filter(pk=seller.pk).update(
+            seller_id=seller_id or seller.seller_id, weekly_limit_amount=new_weekly_limit
+        )
+        return 200, SellerWebhookOut(
+            received=True, seller_id=seller_id or seller.seller_id, status=seller.status
+        )
+
+    # 재전송·역순 도착에 안전해야 한다(코드리뷰 지적 9, 2차) — payout.changed
     # 웹훅이 조건부 UPDATE(status=OLD인 행만 WHERE로 걸어 갱신)로 지켜지는
     # 것과 같은 규율이다. 여기서는 "이전보다 진행이 뒤처지는 값으로는
     # 덮어쓰지 않는다"가 그 규율의 구체화다 — 순위 없이 그대로 덮어쓰면 늦게
     # 도착한 오래된 이벤트(예: 먼저 보낸 APPROVAL_REQUIRED가 네트워크 지연으로
     # PARTIALLY_APPROVED보다 늦게 도착)가 APPROVED→APPROVAL_REQUIRED로
-    # 되돌리고 이미 없어진 주간 한도를 다시 씌운다. REJECTED는 벤더가 언제든
-    # 내릴 수 있는 결정이라 순위와 무관하게 항상 허용한다.
+    # 되돌리고 이미 없어진 주간 한도를 다시 씌운다.
+    #
+    # REJECTED는 *incoming*으로는 순위와 무관하게 항상 허용하지만(벤더가
+    # 언제든 내릴 수 있는 결정), *source*(현재 이미 REJECTED인 Seller)는
+    # 이 웹훅 경로로 되돌리지 않는다(코드리뷰 지적 3, 3차) — REJECTED의
+    # 순위를 0으로 두면 rank <= incoming_rank 조건이 "REJECTED에서는 무엇으로든
+    # 넘어갈 수 있다"고 잘못 허용해, 거절 *이전*에 발송됐다가 뒤늦게 도착한
+    # 오래된 이벤트(예: APPROVAL_REQUIRED)가 거절을 지우고 곧바로
+    # advance_seller_pending_payouts를 거쳐 실이체를 재발사할 길을 연다.
+    # 거절 이후의 진짜 새 진행은 재등록(ensure_seller_registered->register())의
+    # 동기 응답이 Seller.status를 직접 갱신하는 경로로만 일어난다 — 이
+    # 비동기 웹훅만으로는 "오래된 이벤트"와 "거절 이후의 새 진행"을 구별할
+    # 수 없으므로 항상 보수적으로 거절을 유지한다.
     incoming_rank = _SELLER_STATUS_RANK.get(our_status, 0)
     allowed_source_statuses = [
         status
         for status, rank in _SELLER_STATUS_RANK.items()
-        if our_status == Seller.Status.REJECTED or rank <= incoming_rank
+        if status != Seller.Status.REJECTED
+        and (our_status == Seller.Status.REJECTED or rank <= incoming_rank)
     ]
 
     updated = Seller.objects.filter(pk=seller.pk, status__in=allowed_source_statuses).update(
         seller_id=seller_id or seller.seller_id,
         status=our_status,
-        weekly_limit_amount=weekly_limit_body.get("amount") if our_status == "partially_approved" else None,
+        weekly_limit_amount=new_weekly_limit,
     )
 
     if updated:
@@ -661,6 +698,14 @@ def _blocked_on(payout: Payout, *, seller: Seller | None = None) -> str | None:
             return "transfer"
         return "seller"
     if payout.status == Payout.Status.CONFIRMED_IDENTITY_PENDING:
+        # transfer_status가 FAILED면 신원이 아니라 실이체가 막힌 것이다
+        # (코드리뷰 지적 9, 3차) — submit_identity가 이 상태를 더는
+        # CONFIRMED_SELLER_PENDING으로 역행시키지 않으므로(지적 6), 실이체
+        # 재시도가 필요한 Payout이 CONFIRMED_IDENTITY_PENDING에 그대로 머문다.
+        # "identity"로 분류하면 이미 제출된 신원을 또 기다리는 것처럼 보이고,
+        # transfer 큐에서는 아예 빠진다.
+        if payout.transfer_status == Payout.TransferStatus.FAILED:
+            return "transfer"
         return "identity"
     if (
         payout.status == Payout.Status.CONFIRMED

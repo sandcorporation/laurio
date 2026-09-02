@@ -54,6 +54,21 @@ class NextAction(models.TextChoices):
     NOT_SELECTED = "not_selected", "미선정"
     PAYOUT_COMPLETE = "payout_complete", "지급 완료"
 
+    # --- 다시 네 차례(실이체 재시도) -------------------------------------------
+    # Seller 등록은 끝났는데(READY) 실제 이체 자체가 벤더 쪽에서 거절/미확정인
+    # 경우다(#57 코드리뷰 지적 1/7, 3차) — Payout.status만 보면 두 대기가 다
+    # 풀린 것처럼 보이지만 Payout.transfer_status가 FAILED다. 이 값을 두지
+    # 않으면 「내 참가 현황」이 PAYOUT_COMPLETE로 잘못 말하거나
+    # AWAITING_SELLER_REGISTRATION으로 잘못 되돌린다.
+    RETRY_TRANSFER = "retry_transfer", "실이체 재시도 필요"
+    # Payout이 이미 최종 확정(CONFIRMED)된 뒤에 실이체 실패가 뒤늦게
+    # 확인된 경우다(#57 코드리뷰 지적 4, 2차 — payout.changed 웹훅이 지연
+    # 도착한다) — Developer 쪽 자기 서비스 재시도 경로가 아직 없다(ADR-0008에
+    # 남긴 한계). AWAITING_SELLER_REGISTRATION으로 뭉치면 "Seller 등록이
+    # 안 끝났다"는 다른 사실을 말하게 되고, PAYOUT_COMPLETE로 뭉치면 이
+    # 티켓이 가장 경계하는 그 거짓말이 된다.
+    AWAITING_TRANSFER_RESOLUTION = "awaiting_transfer_resolution", "지급 처리 확인 중"
+
 
 def next_action_for(submission) -> str:
     """이 Submission 에 대해 Developer 가 지금 할 일(또는 기다리는 것)을 하나 고른다.
@@ -144,11 +159,25 @@ def _payout_action(submission):
     # 상태 그대로다 — 앞은 Developer 가 주민등록번호를 내야 하는 「네 차례」이고,
     # 뒤는 지급대행사 쪽 등록을 기다리는 중이다(ADR-0020: 둘은 다른 것을
     # 기다리고, 둘 다 실패가 아니다).
+    # Payout.status(두 대기가 풀렸는가)만 보면 안 된다(코드리뷰 지적 7, 3차) —
+    # transfer_status(실이체 자체가 벤더 쪽에서 어디까지 갔는가)가 FAILED면
+    # status가 뭐든 재시도가 필요하다는 사실이 우선한다. `payouts.api.
+    # retry_payout_seller_registration`이 실제로 받는 조건과 정확히 같아야
+    # 한다 — 조건을 두 벌로 쓰면 이 값과 실제 재시도 가능 여부가 갈린다.
+    if payout.transfer_status == Payout.TransferStatus.FAILED and payout.status in (
+        Payout.Status.CONFIRMED_IDENTITY_PENDING,
+        Payout.Status.CONFIRMED_SELLER_PENDING,
+    ):
+        return NextAction.RETRY_TRANSFER
     if payout.status == Payout.Status.CONFIRMED_IDENTITY_PENDING:
         return NextAction.SUBMIT_TAX_IDENTITY
     if payout.status == Payout.Status.CONFIRMED_SELLER_PENDING:
         return NextAction.AWAITING_SELLER_REGISTRATION
     if payout.status == Payout.Status.CONFIRMED:
+        # 확정 이후 뒤늦게 도착한 실패 웹훅이 남긴 상태일 수 있다 — "지급
+        # 완료"라고 잘못 말하지 않는다.
+        if payout.transfer_status == Payout.TransferStatus.FAILED:
+            return NextAction.AWAITING_TRANSFER_RESOLUTION
         return NextAction.PAYOUT_COMPLETE
 
     return NextAction.AWAITING_SELLER_REGISTRATION

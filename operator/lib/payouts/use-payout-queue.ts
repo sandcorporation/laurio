@@ -15,8 +15,12 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-export type BlockedOnFilter = "all" | "identity" | "seller";
-export type BlockedOnKind = "identity" | "seller";
+export type BlockedOnFilter = "all" | "identity" | "seller" | "transfer";
+// "transfer"(#57 코드리뷰 2차 지적 1) -- Seller 자체는 이미 READY인데 실이체
+// 자체가 실패/미확정인 Payout. CONFIRMED_SELLER_PENDING을 "seller"로만
+// 재분류하기 시작한 뒤로 이 값이 실제로 나오기 시작했는데, 이 큐가 그 값을
+// 조회하지 않으면 그 행들이 운영자 눈에서 완전히 사라진다.
+export type BlockedOnKind = "identity" | "seller" | "transfer";
 
 export interface OperatorPayoutRow {
   idempotency_key: string;
@@ -47,7 +51,7 @@ async function fetchBlocked(
 }
 
 function kindsFor(filter: BlockedOnFilter): BlockedOnKind[] {
-  if (filter === "all") return ["identity", "seller"];
+  if (filter === "all") return ["identity", "seller", "transfer"];
   return [filter];
 }
 
