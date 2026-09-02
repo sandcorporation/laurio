@@ -238,18 +238,16 @@ export interface paths {
          *     이유다(위 `list_my_sponsored_contests` 참고). 아래에 두면 ninja가 `home`을
          *     `contest_id`로 읽으려다 422를 낸다.
          *
-         *     **판정은 여기가 아니라 `contests.curation.home_bucket_for`가 한다.** 화면이
+         *     **판정의 원본은 `contests.curation.home_bucket_for`다.** 화면이
          *     `status`·`deadline_at`에서 재파생하면 새 상태가 생겼을 때 조용히 어느
          *     분기에도 안 걸린다 — `submissions.participation`·`contests.sponsorship`이
-         *     같은 이유로 백엔드 판정인 것과 같다(#94 인수조건).
+         *     같은 이유로 백엔드 판정인 것과 같다(#94 인수조건). 다만 이 엔드포인트는
+         *     성능 때문에 그 판정을 묶음별 쿼리(`_home_bucket_queryset`)로 다시
+         *     표현한다 — 왜 그래야 했는지, 그리고 갈리지 않게 무엇을 해 두었는지는 그
+         *     함수의 docstring을 본다.
          *
-         *     Contest 하나에 판정 조건을 두 벌로 두지 않으려고 **공개 대상을 한 질의로
-         *     모두 가져와 Python에서 한 번씩만 판정한다** — 묶음마다 쿼리를 나눠 각자
-         *     다른 WHERE 절로 "마감임박"을 다시 계산하면 그 두 조건이 언젠가 갈라진다
-         *     (`sponsored_contest_queryset`의 annotate-then-decide 관용구와 같다).
-         *
-         *     `DRAFT`는 애초에 `_PUBLICLY_VISIBLE_STATUSES`에 없어 이 질의에 잡히지 않는다
-         *     — 결제 전 Contest가 새지 않는다는 계약은 공개 목록/상세와 같다(#94 인수조건).
+         *     `DRAFT`는 어느 `_home_bucket_queryset` 필터에도 안 걸린다 — 결제 전
+         *     Contest가 새지 않는다는 계약은 공개 목록/상세와 같다(#94 인수조건).
          *
          *     네 묶음은 **비어 있어도 항상 다 나온다** — `HomeCurationBucket`을 순회해
          *     목록을 만들므로, 실제로 그 부류의 Contest가 하나도 없으면 `contests: []`인

@@ -50,6 +50,15 @@ class HomeCurationBucket(models.TextChoices):
 def home_bucket_for(contest, *, now) -> str | None:
     """이 Contest가 홈의 어느 묶음에 속하는지 하나 고른다.
 
+    **이 함수가 유일한 판정 기준이다.** `contests.api.get_home_curation`이
+    성능 때문에(#94 코드리뷰 4 — 공개 Contest 전체를 매 요청 fetch할 수
+    없다) 묶음마다 별도 쿼리로 이 판정을 SQL WHERE로 다시 표현하지만
+    (`contests.api._home_bucket_queryset`), 그 쿼리가 돌려준 각 행을 여기로
+    다시 통과시켜 갈리면 로그로 드러낸다 — 조건을 두 벌로 쓰면 언젠가
+    갈라진다는 이 저장소의 경험(`submissions.participation`·
+    `contests.sponsorship`) 그대로다. `backend/tests/test_home_curation.py`의
+    경계값 테스트들이 두 표현을 계속 맞춰 둔다.
+
     `DRAFT`는 `None`이다 — 결제 전 Contest가 홈에 새면 안 된다(#94 인수조건).
     이 함수를 부르는 쪽은 애초에 `contests.api._PUBLICLY_VISIBLE_STATUSES`로
     이미 걸러진 Contest만 넘기지만(공개 목록·상세와 같은 경계), `DRAFT`가
@@ -64,7 +73,21 @@ def home_bucket_for(contest, *, now) -> str | None:
     from contests.models import Contest
 
     if contest.status == Contest.Status.PUBLISHED:
-        if contest.deadline_at - now <= timedelta(days=HOME_IMMINENT_DEADLINE_DAYS):
+        remaining = contest.deadline_at - now
+
+        # 마감 시각은 지났는데 스캔이 아직 CLOSED로 옮기지 않은 아주 짧은
+        # 창이다(core.transitions, 스케줄러 틱 주기 이내 — ADR-0003).
+        # `submissions.participation.next_action_for`가 같은 상황에서
+        # `Contest.status`가 아니라 `deadline_at`을 직접 비교해 마감 이후로
+        # 취급하는 것과 같은 근거다. **하한 없이 "마감이 3일 이내"만 보면
+        # 이 음수 구간(마감이 며칠 전이어도 참)이 「마감임박」의 오름차순
+        # 정렬에서 맨 앞자리를 영구히 차지해, 실제 D-1·D-2 Contest를
+        # 밀어낸다**(#94 코드리뷰 2) — 그래서 "아직 안 지났다"를 먼저 걸러
+        # 이 구간을 「심사중」으로 보낸다.
+        if remaining < timedelta(0):
+            return HomeCurationBucket.IN_JUDGING
+
+        if remaining <= timedelta(days=HOME_IMMINENT_DEADLINE_DAYS):
             return HomeCurationBucket.IMMINENT
         return HomeCurationBucket.ONGOING
 

@@ -14,15 +14,17 @@
 import logging
 from uuid import UUID
 
+from datetime import timedelta
+
 from django.db import IntegrityError, transaction
-from django.db.models import DateTimeField, Sum, Value
+from django.db.models import DateTimeField, Q, QuerySet, Sum, Value
 from django.http import HttpRequest
 from ninja import Query, Router
 from ninja.errors import HttpError
 from ninja.pagination import PageNumberPagination, paginate
 
 from accounts.middleware import jwt_auth
-from contests.curation import HomeCurationBucket, home_bucket_for
+from contests.curation import HOME_IMMINENT_DEADLINE_DAYS, HomeCurationBucket, home_bucket_for
 from contests.sponsorship import sponsored_contest_queryset
 from accounts.models import SponsorProfile
 from accounts.sanitize import sanitize_free_text
@@ -336,6 +338,62 @@ def list_my_sponsored_contests(request: HttpRequest, **kwargs):
     )
 
 
+def _home_bucket_queryset(base: QuerySet, bucket, *, now) -> QuerySet:
+    """`bucket`에 속하는 Contest만, 그 묶음에 맞는 정렬로 돌려준다 (#94).
+
+    **`contests.curation.home_bucket_for`가 판정의 원본이고, 이 함수는 그
+    판정을 SQL WHERE로 다시 표현한 것이다.** 원래는(#94 1차) 공개 Contest를
+    전부 가져와 Python에서 `home_bucket_for`를 한 번씩만 부르는 단일 질의
+    였다 — 조건을 두 벌로 쓰지 않으려던 것이었는데, 그러면 공개 Contest가
+    쌓일수록(수천 건) 매 홈 방문마다 전부 fetch하고
+    `deliverable_types`·`requirements`까지 prefetch하게 된다(#94 코드리뷰
+    4 — 홈은 `force-dynamic`이라 캐시도 없다). 그래서 묶음마다 상태·기한으로
+    좁히고 그 묶음에 맞는 정렬로 DB에서 상위 `_HOME_BUCKET_LIMIT`건만 뽑는다.
+
+    **이 이중화는 방치되지 않는다** — `get_home_curation`이 각 행을 다시
+    `home_bucket_for`에 통과시켜 이 필터와 갈리면 로그로 드러내고,
+    `backend/tests/test_home_curation.py`의 경계값 테스트들이 임계값
+    (`HOME_IMMINENT_DEADLINE_DAYS`)의 양쪽 끝을 계속 검증한다.
+
+    정렬은 묶음마다 다르다(#94 코드리뷰 1) — 「진행중」·「마감임박」은 마감이
+    가까운 순(오름차순), 「심사중」·「완료」는 최근에 마감된 순(내림차순)이다.
+    네 묶음이 전부 같은 정렬을 쓰면 「완료」·「심사중」은 가장 오래된 건에
+    영구히 고정된다 — 방금 선정된 공모전이 홈에 절대 안 오른다.
+    """
+
+    imminent_cutoff = now + timedelta(days=HOME_IMMINENT_DEADLINE_DAYS)
+
+    if bucket == HomeCurationBucket.ONGOING:
+        return base.filter(
+            status=Contest.Status.PUBLISHED, deadline_at__gt=imminent_cutoff
+        ).order_by("deadline_at", "id")
+
+    if bucket == HomeCurationBucket.IMMINENT:
+        # 하한(`deadline_at__gte=now`)이 없으면 스캔이 아직 CLOSED로 못 옮긴
+        # 마감 지난 PUBLISHED가 여기 섞여, 오름차순 정렬의 맨 앞자리(가장
+        # 음수인 값)를 영구히 차지하고 진짜 D-1·D-2를 밀어낸다(#94 코드리뷰
+        # 2). `home_bucket_for`가 그 구간을 IN_JUDGING으로 보내는 것과
+        # 같은 경계다.
+        return base.filter(
+            status=Contest.Status.PUBLISHED,
+            deadline_at__gte=now,
+            deadline_at__lte=imminent_cutoff,
+        ).order_by("deadline_at", "id")
+
+    if bucket == HomeCurationBucket.IN_JUDGING:
+        return base.filter(
+            Q(status=Contest.Status.CLOSED)
+            | Q(status=Contest.Status.PUBLISHED, deadline_at__lt=now)
+        ).order_by("-deadline_at", "-id")
+
+    if bucket == HomeCurationBucket.COMPLETED:
+        return base.filter(
+            status__in=(Contest.Status.AWARDED, Contest.Status.JUDGING_ENDED)
+        ).order_by("-deadline_at", "-id")
+
+    raise ValueError(f"알 수 없는 HomeCurationBucket: {bucket!r}")  # pragma: no cover
+
+
 @router.get("/contests/home", response=list[HomeCurationGroupOut], auth=None)
 def get_home_curation(request: HttpRequest):
     """홈이 보여줄 네 묶음 — 진행중·마감임박·심사중·완료 (#94, spec #92).
@@ -344,18 +402,16 @@ def get_home_curation(request: HttpRequest):
     이유다(위 `list_my_sponsored_contests` 참고). 아래에 두면 ninja가 `home`을
     `contest_id`로 읽으려다 422를 낸다.
 
-    **판정은 여기가 아니라 `contests.curation.home_bucket_for`가 한다.** 화면이
+    **판정의 원본은 `contests.curation.home_bucket_for`다.** 화면이
     `status`·`deadline_at`에서 재파생하면 새 상태가 생겼을 때 조용히 어느
     분기에도 안 걸린다 — `submissions.participation`·`contests.sponsorship`이
-    같은 이유로 백엔드 판정인 것과 같다(#94 인수조건).
+    같은 이유로 백엔드 판정인 것과 같다(#94 인수조건). 다만 이 엔드포인트는
+    성능 때문에 그 판정을 묶음별 쿼리(`_home_bucket_queryset`)로 다시
+    표현한다 — 왜 그래야 했는지, 그리고 갈리지 않게 무엇을 해 두었는지는 그
+    함수의 docstring을 본다.
 
-    Contest 하나에 판정 조건을 두 벌로 두지 않으려고 **공개 대상을 한 질의로
-    모두 가져와 Python에서 한 번씩만 판정한다** — 묶음마다 쿼리를 나눠 각자
-    다른 WHERE 절로 "마감임박"을 다시 계산하면 그 두 조건이 언젠가 갈라진다
-    (`sponsored_contest_queryset`의 annotate-then-decide 관용구와 같다).
-
-    `DRAFT`는 애초에 `_PUBLICLY_VISIBLE_STATUSES`에 없어 이 질의에 잡히지 않는다
-    — 결제 전 Contest가 새지 않는다는 계약은 공개 목록/상세와 같다(#94 인수조건).
+    `DRAFT`는 어느 `_home_bucket_queryset` 필터에도 안 걸린다 — 결제 전
+    Contest가 새지 않는다는 계약은 공개 목록/상세와 같다(#94 인수조건).
 
     네 묶음은 **비어 있어도 항상 다 나온다** — `HomeCurationBucket`을 순회해
     목록을 만들므로, 실제로 그 부류의 Contest가 하나도 없으면 `contests: []`인
@@ -369,33 +425,38 @@ def get_home_curation(request: HttpRequest):
 
     now = Clock.now()
 
-    contests = (
-        Contest.objects.filter(status__in=_PUBLICLY_VISIBLE_STATUSES)
-        .select_related("category")
-        .prefetch_related("deliverable_types", "requirements")
-        .order_by("deadline_at", "id")
+    base = Contest.objects.select_related("category").prefetch_related(
+        "deliverable_types", "requirements"
     )
 
-    grouped: dict = {bucket: [] for bucket in HomeCurationBucket}
-    for contest in contests:
-        bucket = home_bucket_for(contest, now=now)
-        if bucket is None:
-            # `_PUBLICLY_VISIBLE_STATUSES`에 있는데 `home_bucket_for`가 모르는
-            # 상태다 — 있어서는 안 되지만(둘 다 #94가 같이 유지해야 하는
-            # 계약이다), 있다면 화면에서 조용히 사라지느니 여기서 무시하고
-            # 넘어가는 편이 낫다. 어차피 이 상황은 `_PUBLICLY_VISIBLE_STATUSES`와
-            # `home_bucket_for`가 같은 상태 집합을 다루는 한 일어나지 않는다.
-            continue
-        if len(grouped[bucket]) < _HOME_BUCKET_LIMIT:
-            grouped[bucket].append(contest)
+    groups = []
+    for bucket in HomeCurationBucket:
+        contests = list(_home_bucket_queryset(base, bucket, now=now)[:_HOME_BUCKET_LIMIT])
 
-    return [
-        HomeCurationGroupOut(
-            bucket=bucket,
-            contests=[_serialize_contest(c) for c in grouped[bucket]],
+        for contest in contests:
+            # `_home_bucket_queryset`가 `home_bucket_for`의 판정을 SQL로
+            # 다시 쓴 것이므로, 둘이 갈리면 화면이 조용히 틀린 채로 나간다
+            # — curation.home_bucket_for의 docstring이 "호출부는 조용히
+            # 버리지 않고 드러내야 한다"고 적어 둔 계약을 여기서 지킨다
+            # (#94 코드리뷰 5). 홈 전체를 죽이지는 않는다 — 묶음 하나가
+            # 틀리는 것이 홈이 통째로 500이 되는 것보다 낫다.
+            actual_bucket = home_bucket_for(contest, now=now)
+            if actual_bucket != bucket:
+                logger.error(
+                    "홈 큐레이션 불일치: Contest %s(status=%s, deadline_at=%s)를 "
+                    "%s 쿼리로 가져왔는데 home_bucket_for는 %s라고 판정했다 — "
+                    "_home_bucket_queryset과 home_bucket_for가 갈렸다.",
+                    contest.id, contest.status, contest.deadline_at, bucket, actual_bucket,
+                )
+
+        groups.append(
+            HomeCurationGroupOut(
+                bucket=bucket,
+                contests=[_serialize_contest(c) for c in contests],
+            )
         )
-        for bucket in HomeCurationBucket
-    ]
+
+    return groups
 
 
 @router.get("/contests/{contest_id}", response=ContestOut, auth=None)
