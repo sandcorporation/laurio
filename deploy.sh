@@ -266,10 +266,16 @@ done
 
 # 백엔드가 요청을 실제로 받는지 본다. 컨테이너가 running 인 것과 gunicorn 이
 # 응답하는 것은 다르다.
+#
+# **Host 헤더를 붙여야 한다.** 루프백으로 치면 Host 가 `127.0.0.1` 이 되는데 그건
+# ALLOWED_HOSTS 에 없으므로 Django 가 400 을 낸다 — gunicorn 이 멀쩡히 떠 있어도
+# 배포가 실패한 것처럼 보인다(빌드 #5 가 실제로 그렇게 실패했다). 하드코딩 대신
+# ALLOWED_HOSTS 의 첫 항목을 쓴다 — 환경마다 다르고, 그 값이 곧 「이 배포가
+# 받아들이는 이름」이다.
 HEALTHY=false
 i=0
 while [ "$i" -lt 30 ]; do
-  if $COMPOSE exec -T backend python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).status==200 else 1)" 2>/dev/null; then
+  if $COMPOSE exec -T backend python -c "import os,urllib.request,sys; host=(os.environ.get('DJANGO_ALLOWED_HOSTS') or '').split(',')[0].strip() or '127.0.0.1'; req=urllib.request.Request('http://127.0.0.1:8000/api/health', headers={'Host': host}); sys.exit(0 if urllib.request.urlopen(req, timeout=3).status==200 else 1)" 2>/dev/null; then
     HEALTHY=true
     break
   fi
