@@ -9,7 +9,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 import { setSessionCookies } from "@/lib/auth/cookies";
-import { KakaoTokenExchangeError, exchangeKakaoCodeForToken, readKakaoOAuthConfig } from "@/lib/auth/kakao";
+import { exchangeKakaoCodeForToken, readKakaoOAuthConfig } from "@/lib/auth/kakao";
 import { resolveNextPath } from "@/lib/auth/next-path";
 import { clearOAuthRoundTripCookies, readOAuthRoundTripCookies } from "@/lib/auth/oauth-state";
 import { loginWithSocialAccessToken } from "@/lib/auth/social-login";
@@ -58,21 +58,28 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return redirectToLoginWithError(origin, "oauth_unconfigured", next);
   }
 
-  let accessToken: string;
+  // 카카오 교환·백엔드 로그인 호출 전체를 하나로 묶어서 잡는다(코드리뷰
+  // 지적) — 예전에는 exchangeKakaoCodeForToken의 KakaoTokenExchangeError만
+  // 잡고 그 아래 loginWithSocialAccessToken 호출은 try 밖에 있었다. 그 함수가
+  // 부르는 fetch가 네트워크 실패(백엔드 연결 거부 등)로 예외를 던지면 이
+  // 라우트 핸들러 자체가 처리되지 않은 예외로 죽어 Next가 원인 없는 500을
+  // 내려주고, 그 요청이 실패하는 바람에 clearOAuthRoundTripCookies가 한 번도
+  // 안 불려 이미 다 쓴 state/next 쿠키가 브라우저에 남았다. 어떤 예외든(카카오
+  // 교환 실패든, 백엔드 호출의 네트워크 실패든) 로그인 화면으로 정상적으로
+  // 돌아가고 왕복 쿠키를 지운다.
   try {
-    accessToken = await exchangeKakaoCodeForToken(config, code);
+    const accessToken = await exchangeKakaoCodeForToken(config, code);
+    const result = await loginWithSocialAccessToken("kakao", accessToken);
+    if (!result.ok) {
+      return redirectToLoginWithError(origin, "login_failed", next);
+    }
+
+    const response = NextResponse.redirect(new URL(next, origin));
+    setSessionCookies(response, result.pair);
+    clearOAuthRoundTripCookies(response);
+    return response;
   } catch (err) {
-    if (!(err instanceof KakaoTokenExchangeError)) throw err;
+    console.error("카카오 로그인 콜백 처리 중 예외가 발생했다:", err);
     return redirectToLoginWithError(origin, "login_failed", next);
   }
-
-  const result = await loginWithSocialAccessToken("kakao", accessToken);
-  if (!result.ok) {
-    return redirectToLoginWithError(origin, "login_failed", next);
-  }
-
-  const response = NextResponse.redirect(new URL(next, origin));
-  setSessionCookies(response, result.pair);
-  clearOAuthRoundTripCookies(response);
-  return response;
 }

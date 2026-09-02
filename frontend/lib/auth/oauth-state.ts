@@ -19,9 +19,15 @@ import { isDeployedEnvironment } from "./cookies";
 export const OAUTH_STATE_COOKIE = "laurio_oauth_state";
 export const OAUTH_NEXT_COOKIE = "laurio_oauth_next";
 
-// 카카오 동의 화면에서 사람이 조작하는 시간이면 충분하다 — 길게 둘수록 탈취된
-// state 쿠키가 재사용될 수 있는 창이 늘어난다.
-const OAUTH_ROUND_TRIP_MAX_AGE_SECONDS = 5 * 60;
+// 카카오 동의 화면에서 사람이 조작하는 시간이면 충분해야 하지만, 5분은 실제로
+// 짧았다(코드리뷰 지적) — 카카오 신규 가입이거나 그 화면에서 추가 인증(휴대폰
+// 인증 등)을 거치는 정상 사용자가 그 시간을 넘겨 invalid_state로 튕겨났다.
+// 15분으로 늘린다 — 길게 둘수록 탈취된 state 쿠키가 재사용될 수 있는 창은
+// 늘어나지만, state는 HttpOnly·1회용(성공·실패 양쪽에서 즉시 지운다)이라
+// 탈취 자체가 이미 브라우저/쿠키 저장소가 뚫렸다는 뜻이고, 그 경우엔 TTL이
+// 얼마든 방어선이 아니다 — 그래서 이 값은 "정상 사용자가 시간 안에 끝낼 수
+// 있는가"로 정한다.
+const OAUTH_ROUND_TRIP_MAX_AGE_SECONDS = 15 * 60;
 
 export function generateOAuthState(): string {
   return randomBytes(24).toString("base64url");
