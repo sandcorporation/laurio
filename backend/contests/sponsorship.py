@@ -24,7 +24,7 @@ Payment, Submission 수, Score 유무, Award, Handover.status, Distribution, 그
 """
 
 from django.db import models
-from django.db.models import Case, Count, Exists, OuterRef, Value, When
+from django.db.models import Case, Count, Exists, OuterRef, Q, Value, When
 
 
 class SponsorNextAction(models.TextChoices):
@@ -92,10 +92,21 @@ def sponsored_contest_queryset(base, *, as_of, policy):
         # 배분은 만들어졌는데 아직 정산되지 않은 몫이 남아 있는가. 「배분 행이
         # 생겼다」와 「돈이 실제로 갔다」는 다르다 — 지급이 전부 실패해 매 스캔
         # 재시도되는 중에도 앞의 조건은 참이다.
+        #
+        # `payouts__status__in=SETTLED_PAYOUT_STATUSES`만으로는 CONFIRMED인데
+        # transfer_status가 FAILED인 Payout도 "정산됨"으로 잡는다(코드리뷰
+        # 지적 7, 4차 — 지난 라운드에 Award 경로(has_confirmed_payout)만
+        # 고치고 이 배분 경로는 놓쳤다). 두 조건을 하나의 Q로 묶어 **같은
+        # 관련 Payout 행**에 함께 걸어야 한다 — exclude를 두 번 나눠 걸면
+        # 서로 다른 Payout 행에 각각 적용될 수 있어 원하는 "정산됨 AND
+        # 실이체 실패 아님"이라는 단일 행의 조건이 되지 않는다.
         has_unsettled_share=Exists(
             DistributionShare.objects.filter(
                 distribution__contest=OuterRef("pk")
-            ).exclude(payouts__status__in=SETTLED_PAYOUT_STATUSES)
+            ).exclude(
+                Q(payouts__status__in=SETTLED_PAYOUT_STATUSES)
+                & ~Q(payouts__transfer_status=Payout.TransferStatus.FAILED)
+            )
         ),
         # 배분 시각이 왔는가. 스캔·이의 큐가 쓰는 것과 **같은 조건**이다
         # (`distribution_due_q`) — 세 벌로 쓰면 개최자 화면은 보류라는데 이의

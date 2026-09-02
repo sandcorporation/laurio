@@ -2538,12 +2538,63 @@ def test_participation_next_action_reflects_failed_transfer_not_payout_complete(
     ):
         _confirm_payout(client, dev, requested["idempotency_key"])
 
-    # 「내 참가 현황」의 next_action_for()는 hasattr(submission, "score")부터
-    # 확인한다 -- _ready_for_payout는 채점을 돌리지 않고 곧바로 Award로
-    # 가므로(#57 범위 밖인 채점 플로우), Score가 없으면 AWAITING_SCORING에서
-    # 끝나 payout 단계까지 내려가지 않는다. Score 생성은 이 테스트가 보려는
-    # 동작(transfer_status를 읽는가)이 아니라 사전 조건 설정이다 --
-    # `_freeze`가 ClockOverride를 직접 다루는 것과 같은 관용구.
+        # 「내 참가 현황」의 next_action_for()는 hasattr(submission, "score")부터
+        # 확인한다 -- _ready_for_payout는 채점을 돌리지 않고 곧바로 Award로
+        # 가므로(#57 범위 밖인 채점 플로우), Score가 없으면 AWAITING_SCORING에서
+        # 끝나 payout 단계까지 내려가지 않는다. Score 생성은 이 테스트가 보려는
+        # 동작(transfer_status를 읽는가)이 아니라 사전 조건 설정이다 --
+        # `_freeze`가 ClockOverride를 직접 다루는 것과 같은 관용구.
+        from scoring.models import Score
+
+        Score.objects.create(
+            submission_id=submission["id"],
+            percentage=100,
+            model_version="test",
+            prompt="",
+            reasoning=[],
+        )
+
+        # 신원은 이미 제출된 상태여야 한다 -- 신원이 없으면(코드리뷰
+        # 지적 3, 4차) SUBMIT_TAX_IDENTITY가 우선하는 것이 올바른 동작이다 --
+        # 이 테스트가 보려는 것은 그 다음 단계(신원은 낸 다음 실이체가 실패한
+        # 경우)다.
+        client.post(
+            f"{PAYOUTS_URL}/{requested['idempotency_key']}/identity",
+            data={"resident_registration_number": "9001011234567"},
+            content_type="application/json",
+            **_auth_header(dev["access"]),
+        )
+
+    resp = client.get("/api/submissions/mine", **_auth_header(dev["access"]))
+    assert resp.status_code == 200
+    rows = resp.json()["items"]
+    row = next(r for r in rows if r["contest_id"] == contest["id"])
+    assert row["next_action"] == "retry_transfer"
+    assert row["next_action"] != "payout_complete"
+
+
+@pytest.mark.django_db
+def test_participation_next_action_prioritizes_missing_identity_over_retry_transfer(
+    client, category, landing_type
+):
+    """#57 코드리뷰 지적 3(4차): 신원을 아직 한 번도 못 낸(has_identity=False)
+    Payout은 transfer_status가 FAILED여도 retry_transfer가 아니라
+    submit_tax_identity를 돌려준다 -- 둘을 동시에 기다리는 상태인데
+    하나가 다른 하나를 가리면 안 된다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+
+    with override_settings(
+        PAYOUT_ADAPTER_MODE=(
+            "tests.test_payouts._TransferFailsOnceSellerReadyPayoutAdapter"
+        )
+    ):
+        confirm_resp = _confirm_payout(client, dev, requested["idempotency_key"])
+    assert confirm_resp.json()["status"] == "confirmed_identity_pending"
+    assert confirm_resp.json()["transfer_status"] == "failed"
+    assert confirm_resp.json()["has_identity"] is False
+
     from scoring.models import Score
 
     Score.objects.create(
@@ -2558,8 +2609,7 @@ def test_participation_next_action_reflects_failed_transfer_not_payout_complete(
     assert resp.status_code == 200
     rows = resp.json()["items"]
     row = next(r for r in rows if r["contest_id"] == contest["id"])
-    assert row["next_action"] == "retry_transfer"
-    assert row["next_action"] != "payout_complete"
+    assert row["next_action"] == "submit_tax_identity"
 
 
 @pytest.mark.django_db
@@ -2580,8 +2630,20 @@ def test_operator_blocked_on_transfer_for_identity_pending_with_failed_transfer(
         )
     ):
         confirm_resp = _confirm_payout(client, dev, requested["idempotency_key"])
-    assert confirm_resp.json()["status"] == "confirmed_identity_pending"
-    assert confirm_resp.json()["transfer_status"] == "failed"
+        assert confirm_resp.json()["status"] == "confirmed_identity_pending"
+        assert confirm_resp.json()["transfer_status"] == "failed"
+
+        # 신원을 먼저 낸다 -- 미제출 신원이 있으면(코드리뷰 지적 3, 4차)
+        # identity가 우선해야 한다 -- 이 테스트가 보려는 것은 그 다음 단계다.
+        # override_settings 블록 밖으로 나가면 PAYOUT_ADAPTER_MODE가
+        # 기본값(fake)으로 되돌아가 submit_identity의 실이체 재확인이 항상
+        # 즉시 성공해 버린다 -- 반드시 이 블록 안에서 제출해야 한다.
+        client.post(
+            f"{PAYOUTS_URL}/{requested['idempotency_key']}/identity",
+            data={"resident_registration_number": "9001011234567"},
+            content_type="application/json",
+            **_auth_header(dev["access"]),
+        )
 
     operator = _operator_client()
     resp = operator.get(f"{PAYOUTS_URL.replace('/payouts', '/operator/payouts')}?blocked_on=transfer")
@@ -2593,3 +2655,260 @@ def test_operator_blocked_on_transfer_for_identity_pending_with_failed_transfer(
         f"{PAYOUTS_URL.replace('/payouts', '/operator/payouts')}?blocked_on=identity"
     )
     assert requested["idempotency_key"] not in [row["idempotency_key"] for row in identity_resp.json()]
+
+
+@pytest.mark.django_db
+def test_operator_blocked_on_identity_takes_priority_when_identity_missing(
+    client, category, landing_type
+):
+    """#57 코드리뷰 지적 3(4차): 신원을 아직 내지 않았으면 transfer_status가
+    FAILED여도 blocked_on은 "identity"다 -- "transfer"로 분류되면 운영자가
+    identity 큐에서 이 행을 영영히 못 본다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+
+    with override_settings(
+        PAYOUT_ADAPTER_MODE=(
+            "tests.test_payouts._TransferFailsOnceSellerReadyPayoutAdapter"
+        )
+    ):
+        confirm_resp = _confirm_payout(client, dev, requested["idempotency_key"])
+    assert confirm_resp.json()["has_identity"] is False
+    assert confirm_resp.json()["transfer_status"] == "failed"
+
+    operator = _operator_client()
+    identity_resp = operator.get(
+        f"{PAYOUTS_URL.replace('/payouts', '/operator/payouts')}?blocked_on=identity"
+    )
+    assert requested["idempotency_key"] in [row["idempotency_key"] for row in identity_resp.json()]
+
+    transfer_resp = operator.get(
+        f"{PAYOUTS_URL.replace('/payouts', '/operator/payouts')}?blocked_on=transfer"
+    )
+    assert requested["idempotency_key"] not in [row["idempotency_key"] for row in transfer_resp.json()]
+
+
+
+# --- 코드리뷰 후속(#57 4차) -------------------------------------------------------
+
+
+_R4_SECURE_KEY_HEX = "c" * 64
+
+
+@pytest.mark.django_db
+def test_toss_payout_adapter_never_posts_twice_for_the_same_confirm_request(
+    client, category, landing_type
+):
+    """#57 코드리뷰 지적 1(4차, 실행 재현 확인됨): Seller가 이미 READY인
+    Payout은 confirm 요청 한 번에 payouts.api.confirm_payout의 직접 호출과
+    payouts.services.mark_confirmed 안의 _request_real_transfer_if_ready 호출
+    둘 다가 TossPayoutAdapter.confirm()에 도달한다 -- 벤더에는
+    정확히 한 번만 POST가 나가야 한다(claim_transition 관용구로 이
+    시도를 벤더 호출 전에 선점한다)."""
+
+    from unittest.mock import Mock, patch
+
+    from payouts.adapters_toss import jwe_encrypt
+
+    def _encrypted_response(status_code, body):
+        token = jwe_encrypt(body, secure_key_hex=_R4_SECURE_KEY_HEX)
+        response = Mock()
+        response.status_code = status_code
+        response.text = token
+        response.json.side_effect = ValueError("jwe body")
+        return response
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+
+    # 이 Developer는 이미 이전에 Seller가 등록되어 READY 상태다 --
+    # payouts.api.confirm_payout의 첫 번째 adapter.confirm() 호출이 곳바로
+    # 실이체를 시도하는 시나리오를 재현한다.
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    developer_id = payout.handover.award.submission.developer_id
+    Seller.objects.create(
+        developer_id=developer_id,
+        seller_id="already-ready-seller",
+        status=Seller.Status.PARTIALLY_APPROVED,
+        weekly_limit_amount=10_000_000,
+    )
+
+    with override_settings(
+        PAYOUT_ADAPTER_MODE="payouts.adapters_toss.TossPayoutAdapter",
+        TOSS_API_SECRET_KEY="test-secret-key",
+        TOSS_API_SECURE_KEY=_R4_SECURE_KEY_HEX,
+    ):
+        with patch("payouts.adapters_toss.requests.post") as mock_post:
+            mock_post.return_value = _encrypted_response(
+                200, {"id": "toss-vendor-payout-id", "status": "COMPLETED"}
+            )
+            resp = _confirm_payout(client, dev, requested["idempotency_key"])
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "confirmed_identity_pending"
+    assert resp.json()["transfer_status"] == "completed"
+    # 핵심 단언 -- 두 경로가 같은 Payout에 대해 경쳐 불려도 실제 POST는
+    # 단 한 번만 나가야 한다.
+    assert mock_post.call_count == 1
+
+
+@pytest.mark.django_db
+def test_toss_payout_adapter_retry_uses_a_fresh_vendor_reference(client, category, landing_type):
+    """#57 코드리뷰 지적 4(4차): 재시도마다 벤더에 보내는 refPayoutId/
+    Idempotency-Key가 달라야 한다 -- 같은 값을 재사용하면 벤더가 예전
+    FAILED 응답을 그대로 재생해 실운영에서 영구히 복구 불가능해진다.
+
+    Seller는 미리 만들어두지 않는다 -- confirm() 시점에 이미 READY인
+    Seller가 있으면 그 첫 벤더 응답이 "failed"일 때 mark_failed가 Payout
+    자체를 종결시킨다(원래 #15/#50 설계 그대로: 아직 원장에 아무것도
+    안 남았을 때의 실패는 그 Payout 행을 끝내고 재시도는 새 Payout으로
+    한다). 이 테스트가 보려는 "같은 Payout을 재시도할 때 refPayoutId가
+    바뀌는가"를 보려면, 첫 실이체 시도가 mark_confirmed 안에서(원장 분개가
+    이미 남은 뒤) 실패해 CONFIRMED_IDENTITY_PENDING + transfer_status=
+    failed로 남는 경로를 타야 한다 -- Seller가 confirm() 첫 호출 시점에는
+    아직 없다가(내부 확정만 진행), 그 안에서 등록되며 READY가 되는 순간
+    처음으로 실이체가 시도되는 정상 순서를 그대로 따른다.
+    """
+
+    from unittest.mock import Mock, patch
+
+    from payouts.adapters_toss import jwe_decrypt, jwe_encrypt
+
+    def _encrypted_response(status_code, body):
+        token = jwe_encrypt(body, secure_key_hex=_R4_SECURE_KEY_HEX)
+        response = Mock()
+        response.status_code = status_code
+        response.text = token
+        response.json.side_effect = ValueError("jwe body")
+        return response
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+
+    with override_settings(
+        PAYOUT_ADAPTER_MODE="payouts.adapters_toss.TossPayoutAdapter",
+        TOSS_API_SECRET_KEY="test-secret-key",
+        TOSS_API_SECURE_KEY=_R4_SECURE_KEY_HEX,
+    ):
+        with patch("payouts.adapters_toss.requests.post") as mock_post:
+            mock_post.return_value = _encrypted_response(400, {"code": "INVALID_ACCOUNT"})
+            # 기본(성공) Seller 등록 시나리오 -- ensure_seller_registered가
+            # mark_confirmed 안에서 Seller를 즉시 READY로 만들고, 그 직후
+            # _request_real_transfer_if_ready가 처음으로 실이체를 시도한다.
+            first_resp = _confirm_payout(client, dev, requested["idempotency_key"])
+        assert first_resp.json()["status"] == "confirmed_identity_pending"
+        assert first_resp.json()["transfer_status"] == "failed"
+        first_ref = jwe_decrypt(
+            mock_post.call_args.kwargs["data"], secure_key_hex=_R4_SECURE_KEY_HEX
+        )["refPayoutId"]
+
+        with patch("payouts.adapters_toss.requests.post") as mock_post_retry:
+            mock_post_retry.return_value = _encrypted_response(
+                400, {"code": "INVALID_ACCOUNT"}
+            )
+            retry_resp = _retry_seller_registration(client, dev, requested["idempotency_key"])
+        assert retry_resp.status_code == 200
+        assert retry_resp.json()["transfer_status"] == "failed"
+        second_ref = jwe_decrypt(
+            mock_post_retry.call_args.kwargs["data"], secure_key_hex=_R4_SECURE_KEY_HEX
+        )["refPayoutId"]
+
+    assert first_ref != second_ref
+    assert first_ref == f"{payout.idempotency_key}-1"
+    assert second_ref == f"{payout.idempotency_key}-2"
+
+
+@pytest.mark.django_db
+def test_retry_seller_registration_preserves_tax_identity_requirement(
+    client, category, landing_type
+):
+    """#57 코드리뷰 지적 2(4차, 실행 재현 확인됨): CONFIRMED_IDENTITY_PENDING +
+    transfer_status=FAILED에서 재시도가 성공해도, 신원을 제출한 적이 없으면
+    CONFIRMED로 바로 올라가면 안 된다 -- 주민등록번호를 영구히 못 받게
+    된다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+
+    with override_settings(
+        PAYOUT_ADAPTER_MODE=(
+            "tests.test_payouts._TransferFailsOnceSellerReadyPayoutAdapter"
+        )
+    ):
+        confirm_resp = _confirm_payout(client, dev, requested["idempotency_key"])
+    assert confirm_resp.json()["status"] == "confirmed_identity_pending"
+    assert confirm_resp.json()["transfer_status"] == "failed"
+    assert confirm_resp.json()["has_identity"] is False
+
+    # 이제 실이체가 성공하는 정상(Fake 기본) 어댑터로 재시도한다 --
+    # 신원을 한 번도 내지 않았으므로 CONFIRMED가 아니라
+    # CONFIRMED_IDENTITY_PENDING에 그대로 남아야 한다.
+    retry_resp = _retry_seller_registration(client, dev, requested["idempotency_key"])
+    assert retry_resp.status_code == 200
+    body = retry_resp.json()
+    assert body["status"] == "confirmed_identity_pending"
+    assert body["has_identity"] is False
+    assert body["transfer_status"] == "completed"
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    assert payout.status == Payout.Status.CONFIRMED_IDENTITY_PENDING
+
+    # 이제 신원을 내면 정상적으로 CONFIRMED로 올라간다.
+    identity_resp = client.post(
+        f"{PAYOUTS_URL}/{requested['idempotency_key']}/identity",
+        data={"resident_registration_number": "9001011234567"},
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert identity_resp.status_code == 200
+    assert identity_resp.json()["status"] == "confirmed"
+
+
+@pytest.mark.django_db
+class _VendorNoLongerRecognizesSellerAdapter(FakeSellerAdapter):
+    """벤더가 우리 seller_id를 더는 인식하지 못하는 상황(GET 404)을 흉내내는
+    테스트 더블(#57 코드리뷰 지적 6, 4차) -- register()를 몇 번을 다시
+    불러도 항상 "pending"과 빈 seller_id를 돌려준다."""
+
+    def register(self, *, developer_id: int, simulate: str | None = None, policy=None):
+        return SellerRegistrationResult(seller_id="", status="pending", weekly_limit_amount=None)
+
+
+@pytest.mark.django_db
+def test_seller_register_stale_id_does_not_loop_forever_on_404(
+    client, category, landing_type
+):
+    """#57 코드리뷰 지적 6(4차): 벤더가 우리 seller_id를 404로 거부하면
+    그 값을 보존하지 않는다 -- 보존하면 다음 register() 호출이 같은 죽은
+    seller_id로 또 조회를 시도해 영원히 404를 반복하고 새 POST로 넘어갈
+    길이 없어진다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    # 먼저 정상 경로로 seller_id를 확보한다(기본 Fake 성공 시나리오가 아니라
+    # 심사 대기로 남겨 등록은 접수됐지만 아직 READY는 아닌 상태를 만든다).
+    _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="review_required")
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    developer_id = payout.handover.award.submission.developer_id
+    seller_before = Seller.objects.get(developer_id=developer_id)
+    assert seller_before.seller_id  # 등록 접수 시 받은 식별자가 있다.
+
+    # 이제 벤더가 그 seller_id를 더는 인식하지 못하는 상황(GET 404)을
+    # 재현한다 -- 재시도가 "pending"과 빈 seller_id를 돌려준다.
+    with override_settings(
+        SELLER_ADAPTER_MODE="tests.test_payouts._VendorNoLongerRecognizesSellerAdapter"
+    ):
+        resp = _retry_seller_registration(client, dev, requested["idempotency_key"])
+    assert resp.status_code == 200
+
+    seller_after = Seller.objects.get(developer_id=developer_id)
+    assert seller_after.status == Seller.Status.PENDING
+    # 핵심 단언 -- 죽은 seller_id가 보존되지 않았다. 보존되었다면 다음
+    # register() 호출이 다시 같은 죽은 ID로 조회를 시도해 영원히 풀리지
+    # 않는다(실물 TossSellerAdapter.register()는 seller_id가 있으면 GET으로
+    # 재조회하는 경로를 타므로, 이 값이 안 지워지면 실운영에서 영구
+    # 404 루프가 된다).
+    assert seller_after.seller_id == ""

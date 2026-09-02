@@ -413,64 +413,80 @@ def test_confirm_none_seller_short_circuits_without_network_call():
 
 
 def test_confirm_with_ready_seller_calls_vendor_and_maps_completed_to_paid():
-    payout = Mock(idempotency_key="22222222-2222-2222-2222-222222222222", net_amount=900_000)
+    payout = Mock(
+        idempotency_key="22222222-2222-2222-2222-222222222222", net_amount=900_000, transfer_attempt=1
+    )
     seller = Mock(status=Seller.Status.PARTIALLY_APPROVED, seller_id="seller-1")
 
     with _settings():
         adapter = TossPayoutAdapter()
         with patch.object(adapter, "_resolve_seller", return_value=(payout, seller)):
-            with patch("payouts.adapters_toss.requests.post") as mock_post:
-                mock_post.return_value = _encrypted_response(200, {"status": "COMPLETED"})
-                result = adapter.confirm(idempotency_key=str(payout.idempotency_key))
+            # _claim_transfer_attempt는 벤더 호출 전에 실제 DB 조건부 UPDATE를
+            # 한다(코드리뷰 지적 1, 4차) -- 이 파일의 나머지 테스트처럼 Mock
+            # payout(실제 DB 행이 아니다)을 쓰는 여기서는 그 선점 자체가 아니라
+            # "선점에 성공했을 때 confirm()이 올바르게 동작하는가"를 본다.
+            with patch.object(adapter, "_claim_transfer_attempt", return_value=payout):
+                with patch("payouts.adapters_toss.requests.post") as mock_post:
+                    mock_post.return_value = _encrypted_response(200, {"status": "COMPLETED"})
+                    result = adapter.confirm(idempotency_key=str(payout.idempotency_key))
 
     assert result == "paid"
     _, kwargs = mock_post.call_args
-    assert kwargs["headers"]["Idempotency-Key"] == str(payout.idempotency_key)
+    assert kwargs["headers"]["Idempotency-Key"] == f"{payout.idempotency_key}-{payout.transfer_attempt}"
     sent_body = jwe_decrypt(kwargs["data"], secure_key_hex=_SECURE_KEY_HEX)
     assert sent_body["sellerId"] == "seller-1"
-    assert sent_body["refPayoutId"] == str(payout.idempotency_key)
+    assert sent_body["refPayoutId"] == f"{payout.idempotency_key}-{payout.transfer_attempt}"
 
 
 def test_confirm_with_ready_seller_maps_failed_status_to_failed():
-    payout = Mock(idempotency_key="33333333-3333-3333-3333-333333333333", net_amount=1_000)
+    payout = Mock(
+        idempotency_key="33333333-3333-3333-3333-333333333333", net_amount=1_000, transfer_attempt=1
+    )
     seller = Mock(status=Seller.Status.APPROVED, seller_id="seller-2")
 
     with _settings():
         adapter = TossPayoutAdapter()
         with patch.object(adapter, "_resolve_seller", return_value=(payout, seller)):
-            with patch("payouts.adapters_toss.requests.post") as mock_post:
-                mock_post.return_value = _encrypted_response(200, {"status": "FAILED"})
-                result = adapter.confirm(idempotency_key=str(payout.idempotency_key))
+            with patch.object(adapter, "_claim_transfer_attempt", return_value=payout):
+                with patch("payouts.adapters_toss.requests.post") as mock_post:
+                    mock_post.return_value = _encrypted_response(200, {"status": "FAILED"})
+                    result = adapter.confirm(idempotency_key=str(payout.idempotency_key))
 
     assert result == "failed"
 
 
 def test_confirm_with_ready_seller_in_progress_raises_timeout():
-    payout = Mock(idempotency_key="44444444-4444-4444-4444-444444444444", net_amount=1_000)
+    payout = Mock(
+        idempotency_key="44444444-4444-4444-4444-444444444444", net_amount=1_000, transfer_attempt=1
+    )
     seller = Mock(status=Seller.Status.APPROVED, seller_id="seller-3")
 
     with _settings():
         adapter = TossPayoutAdapter()
         with patch.object(adapter, "_resolve_seller", return_value=(payout, seller)):
-            with patch("payouts.adapters_toss.requests.post") as mock_post:
-                mock_post.return_value = _encrypted_response(200, {"status": "IN_PROGRESS"})
-                with pytest.raises(PayoutTimeoutError):
-                    adapter.confirm(idempotency_key=str(payout.idempotency_key))
+            with patch.object(adapter, "_claim_transfer_attempt", return_value=payout):
+                with patch("payouts.adapters_toss.requests.post") as mock_post:
+                    mock_post.return_value = _encrypted_response(200, {"status": "IN_PROGRESS"})
+                    with pytest.raises(PayoutTimeoutError):
+                        adapter.confirm(idempotency_key=str(payout.idempotency_key))
 
 
 def test_confirm_network_error_raises_payout_timeout_error():
-    payout = Mock(idempotency_key="55555555-5555-5555-5555-555555555555", net_amount=1_000)
+    payout = Mock(
+        idempotency_key="55555555-5555-5555-5555-555555555555", net_amount=1_000, transfer_attempt=1
+    )
     seller = Mock(status=Seller.Status.APPROVED, seller_id="seller-4")
 
     with _settings():
         adapter = TossPayoutAdapter()
         with patch.object(adapter, "_resolve_seller", return_value=(payout, seller)):
-            with patch(
-                "payouts.adapters_toss.requests.post",
-                side_effect=requests.ConnectionError("connection reset"),
-            ):
-                with pytest.raises(PayoutTimeoutError):
-                    adapter.confirm(idempotency_key=str(payout.idempotency_key))
+            with patch.object(adapter, "_claim_transfer_attempt", return_value=payout):
+                with patch(
+                    "payouts.adapters_toss.requests.post",
+                    side_effect=requests.ConnectionError("connection reset"),
+                ):
+                    with pytest.raises(PayoutTimeoutError):
+                        adapter.confirm(idempotency_key=str(payout.idempotency_key))
 
 
 def test_query_status_without_ready_seller_returns_pending_without_network_call():
@@ -648,48 +664,51 @@ def test_query_seller_status_unknown_id_returns_pending(developer):
 
 
 def test_confirm_limit_exceeded_code_raises_timeout_not_failed():
-    payout = Mock(idempotency_key="77777777-7777-7777-7777-777777777777", net_amount=1_000)
+    payout = Mock(idempotency_key="77777777-7777-7777-7777-777777777777", net_amount=1_000, transfer_attempt=1)
     seller = Mock(status=Seller.Status.PARTIALLY_APPROVED, seller_id="seller-limit")
 
     with _settings():
         adapter = TossPayoutAdapter()
         with patch.object(adapter, "_resolve_seller", return_value=(payout, seller)):
-            with patch("payouts.adapters_toss.requests.post") as mock_post:
-                mock_post.return_value = _response(
-                    400, {"code": "EXCEED_WEEKLY_PAYOUT_LIMIT", "message": "\uc8fc\uac04 \ud55c\ub3c4 \ucd08\uacfc"}
-                )
-                with pytest.raises(PayoutTimeoutError):
-                    adapter.confirm(idempotency_key=str(payout.idempotency_key))
+            with patch.object(adapter, "_claim_transfer_attempt", return_value=payout):
+                with patch("payouts.adapters_toss.requests.post") as mock_post:
+                    mock_post.return_value = _response(
+                        400, {"code": "EXCEED_WEEKLY_PAYOUT_LIMIT", "message": "\uc8fc\uac04 \ud55c\ub3c4 \ucd08\uacfc"}
+                    )
+                    with pytest.raises(PayoutTimeoutError):
+                        adapter.confirm(idempotency_key=str(payout.idempotency_key))
 
 
 def test_confirm_rate_limited_429_raises_timeout_not_failed():
-    payout = Mock(idempotency_key="88888888-8888-8888-8888-888888888888", net_amount=1_000)
+    payout = Mock(idempotency_key="88888888-8888-8888-8888-888888888888", net_amount=1_000, transfer_attempt=1)
     seller = Mock(status=Seller.Status.PARTIALLY_APPROVED, seller_id="seller-rate")
 
     with _settings():
         adapter = TossPayoutAdapter()
         with patch.object(adapter, "_resolve_seller", return_value=(payout, seller)):
-            with patch("payouts.adapters_toss.requests.post") as mock_post:
-                mock_post.return_value = _response(429, {"code": "TOO_MANY_REQUESTS"})
-                with pytest.raises(PayoutTimeoutError):
-                    adapter.confirm(idempotency_key=str(payout.idempotency_key))
+            with patch.object(adapter, "_claim_transfer_attempt", return_value=payout):
+                with patch("payouts.adapters_toss.requests.post") as mock_post:
+                    mock_post.return_value = _response(429, {"code": "TOO_MANY_REQUESTS"})
+                    with pytest.raises(PayoutTimeoutError):
+                        adapter.confirm(idempotency_key=str(payout.idempotency_key))
 
 
 def test_confirm_genuine_decline_still_returns_failed():
     """\ud55c\ub3c4/rate-limit \ud0a4\uc6cc\ub4dc\uac00 \uc5c6\ub294 \uc9c4\uc9dc \uac70\uc808\uc740 \uc5ec\uc804\ud788 "failed"\ub2e4 -- \ubaa8\ub4e0
     4xx\ub97c \uc77c\uc2dc \uc624\ub958\ub85c \ubad5\uac1c\uba74 \uc548 \ub41c\ub2e4."""
 
-    payout = Mock(idempotency_key="99999999-9999-9999-9999-999999999999", net_amount=1_000)
+    payout = Mock(idempotency_key="99999999-9999-9999-9999-999999999999", net_amount=1_000, transfer_attempt=1)
     seller = Mock(status=Seller.Status.PARTIALLY_APPROVED, seller_id="seller-decline")
 
     with _settings():
         adapter = TossPayoutAdapter()
         with patch.object(adapter, "_resolve_seller", return_value=(payout, seller)):
-            with patch("payouts.adapters_toss.requests.post") as mock_post:
-                mock_post.return_value = _response(
-                    400, {"code": "INVALID_ACCOUNT", "message": "invalid account"}
-                )
-                result = adapter.confirm(idempotency_key=str(payout.idempotency_key))
+            with patch.object(adapter, "_claim_transfer_attempt", return_value=payout):
+                with patch("payouts.adapters_toss.requests.post") as mock_post:
+                    mock_post.return_value = _response(
+                        400, {"code": "INVALID_ACCOUNT", "message": "invalid account"}
+                    )
+                    result = adapter.confirm(idempotency_key=str(payout.idempotency_key))
 
     assert result == "failed"
 
@@ -698,18 +717,19 @@ def test_confirm_genuine_decline_still_returns_failed():
 
 
 def test_confirm_persists_vendor_payout_id_from_post_response():
-    payout = Mock(idempotency_key="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", net_amount=1_000)
+    payout = Mock(idempotency_key="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", net_amount=1_000, transfer_attempt=1)
     seller = Mock(status=Seller.Status.APPROVED, seller_id="seller-vid")
 
     with _settings():
         adapter = TossPayoutAdapter()
         with patch.object(adapter, "_resolve_seller", return_value=(payout, seller)):
-            with patch.object(adapter, "_persist_vendor_payout_id") as mock_persist:
-                with patch("payouts.adapters_toss.requests.post") as mock_post:
-                    mock_post.return_value = _encrypted_response(
-                        200, {"id": "toss-payout-id-123", "status": "COMPLETED"}
-                    )
-                    result = adapter.confirm(idempotency_key=str(payout.idempotency_key))
+            with patch.object(adapter, "_claim_transfer_attempt", return_value=payout):
+                with patch.object(adapter, "_persist_vendor_payout_id") as mock_persist:
+                    with patch("payouts.adapters_toss.requests.post") as mock_post:
+                        mock_post.return_value = _encrypted_response(
+                            200, {"id": "toss-payout-id-123", "status": "COMPLETED"}
+                        )
+                        result = adapter.confirm(idempotency_key=str(payout.idempotency_key))
 
     assert result == "paid"
     mock_persist.assert_called_once_with(payout, "toss-payout-id-123")
@@ -733,7 +753,7 @@ def test_query_status_uses_vendor_payout_id_when_present():
 
 
 def test_query_status_without_vendor_payout_id_falls_back_to_ref_query():
-    payout = Mock(idempotency_key="cccccccc-cccc-cccc-cccc-cccccccccccc", vendor_payout_id="")
+    payout = Mock(idempotency_key="cccccccc-cccc-cccc-cccc-cccccccccccc", vendor_payout_id="", transfer_attempt=3)
     seller = Mock(status=Seller.Status.APPROVED)
 
     with _settings():
@@ -745,7 +765,7 @@ def test_query_status_without_vendor_payout_id_falls_back_to_ref_query():
 
     get_url = mock_get.call_args[0][0]
     assert get_url.endswith("/v2/payouts")
-    assert mock_get.call_args.kwargs["params"] == {"refPayoutId": str(payout.idempotency_key)}
+    assert mock_get.call_args.kwargs["params"] == {"refPayoutId": f"{payout.idempotency_key}-{payout.transfer_attempt}"}
 
 
 def test_query_status_by_ref_returns_pending_on_404():

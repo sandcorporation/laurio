@@ -137,7 +137,7 @@ def _payout_action(submission):
     """돈이 걸린 단계 — 각 값이 대응하는 엔드포인트의 전제와 같은 조건에서 나온다."""
 
     from handovers.models import Handover
-    from payouts.models import Payout
+    from payouts.models import Payout, TaxIdentity
 
     award = getattr(submission.contest, "award", None)
     if award is None or award.submission_id != submission.id:
@@ -159,19 +159,23 @@ def _payout_action(submission):
     # 상태 그대로다 — 앞은 Developer 가 주민등록번호를 내야 하는 「네 차례」이고,
     # 뒤는 지급대행사 쪽 등록을 기다리는 중이다(ADR-0020: 둘은 다른 것을
     # 기다리고, 둘 다 실패가 아니다).
-    # Payout.status(두 대기가 풀렸는가)만 보면 안 된다(코드리뷰 지적 7, 3차) —
-    # transfer_status(실이체 자체가 벤더 쪽에서 어디까지 갔는가)가 FAILED면
-    # status가 뭐든 재시도가 필요하다는 사실이 우선한다. `payouts.api.
-    # retry_payout_seller_registration`이 실제로 받는 조건과 정확히 같아야
-    # 한다 — 조건을 두 벌로 쓰면 이 값과 실제 재시도 가능 여부가 갈린다.
-    if payout.transfer_status == Payout.TransferStatus.FAILED and payout.status in (
-        Payout.Status.CONFIRMED_IDENTITY_PENDING,
-        Payout.Status.CONFIRMED_SELLER_PENDING,
-    ):
-        return NextAction.RETRY_TRANSFER
+    #
+    # **CONFIRMED_IDENTITY_PENDING에서는 신원 제출이 실이체 재시도보다
+    # 앞선다**(코드리뷰 지적 3, 4차 — 실행 재현 완료). transfer_status가
+    # FAILED라고 곧바로 RETRY_TRANSFER를 돌려주면, 신원을 아직 한 번도
+    # 못 낸(has_identity=False) Payout도 그 값에 가려진다 — 이 상태는
+    # 원래 "신원 대기"를 뜻하고, 신원 미제출과 실이체 실패는 서로 다른
+    # 두 가지를 동시에 기다리는 것이지 하나가 다른 하나를 대체하지 않는다.
     if payout.status == Payout.Status.CONFIRMED_IDENTITY_PENDING:
-        return NextAction.SUBMIT_TAX_IDENTITY
+        has_identity = TaxIdentity.objects.filter(payout=payout).exists()
+        if not has_identity:
+            return NextAction.SUBMIT_TAX_IDENTITY
+        if payout.transfer_status == Payout.TransferStatus.FAILED:
+            return NextAction.RETRY_TRANSFER
+        return NextAction.AWAITING_SELLER_REGISTRATION
     if payout.status == Payout.Status.CONFIRMED_SELLER_PENDING:
+        if payout.transfer_status == Payout.TransferStatus.FAILED:
+            return NextAction.RETRY_TRANSFER
         return NextAction.AWAITING_SELLER_REGISTRATION
     if payout.status == Payout.Status.CONFIRMED:
         # 확정 이후 뒤늦게 도착한 실패 웹훅이 남긴 상태일 수 있다 — "지급

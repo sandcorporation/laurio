@@ -131,6 +131,15 @@ class Payout(models.Model):
     # 두지 않으면, 확인(query_status)이 우리 키로 GET을 시도해 항상 404가
     # 되어 "타임아웃 뒤 조회로 확정"하는 경로 자체가 성립하지 않는다.
     vendor_payout_id = models.CharField(max_length=100, blank=True)
+    # 실이체를 벤더에 실제로 요청(POST)한 횟수(코드리뷰 지적 4, 4차 — 실행
+    # 재현 완료). `idempotency_key` 하나를 모든 재시도에 그대로 재사용하면,
+    # 벤더가 "이미 처리한 요청"으로 보고 예전 FAILED 응답을 그대로 재생한다
+    # — 진짜 새 시도가 아니라 캐시된 실패를 돌려받으므로 실운영에서 영구히
+    # 복구 불가능하다. `TossPayoutAdapter`는 벤더에 보내는 refPayoutId/
+    # Idempotency-Key를 `f"{idempotency_key}-{transfer_attempt}"`로 만들어
+    # 매 시도가 벤더에게는 새 요청으로 보이게 한다 — 우리 쪽 DB 조회·웹훅
+    # 매칭은 여전히 `idempotency_key`(변하지 않는 값)로만 한다.
+    transfer_attempt = models.PositiveIntegerField(default=0)
 
     # 확정(CONFIRMED_IDENTITY_PENDING 진입) 시 원장에 남긴 수수료·원천징수 공제
     # 분개. 성공 시 정확히 한 번만 채워진다.

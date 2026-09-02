@@ -60,6 +60,7 @@ from .services import (
     get_or_create_payout,
     mark_confirmed,
     mark_failed,
+    record_transfer_result,
     resolve_transfer_webhook,
     retry_seller_registration,
     submit_identity,
@@ -340,6 +341,19 @@ def confirm_payout(request: HttpRequest, idempotency_key: UUID, payload: Confirm
         result_status = adapter.query_status(idempotency_key=str(idempotency_key))
     except PayoutError as exc:
         raise HttpError(502, str(exc)) from exc
+
+    # Seller가 이미 READY라면 이 직접 호출 자체가 실제 벤더 호출(실이체
+    # 요청)을 선점해 이길 수 있다(TossPayoutAdapter.confirm()의 두 갈래
+    # 동작, 코드리뷰 지적 1 4차의 후속 발견) — 그 결과를 여기서 기록하지
+    # 않으면, mark_confirmed 안의 _request_real_transfer_if_ready가 나중에
+    # 다시 불려도 이미 선점된 시도에 클레임이 밀려 벤더를 다시 부를 수
+    # 없고, 이긴 쪽의 결과가 영영 어디에도 안 남는다. Seller가 아직
+    # READY가 아닐 때는 이 "paid"가 실이체가 아니라 내부 확정 의미이므로
+    # 여기서 기록하면 안 된다 — 실이체를 시도한 적도 없이 COMPLETED로
+    # 잘못 남는다.
+    seller = Seller.objects.filter(developer_id=_payout_developer_id(payout)).first()
+    if seller is not None and seller.status in Seller.READY_STATUSES:
+        record_transfer_result(payout, result_status)
 
     if result_status == "paid":
         payout = mark_confirmed(idempotency_key, seller_simulate=payload.seller_simulate)
@@ -688,7 +702,7 @@ def receive_toss_seller_webhook(request: HttpRequest):
 # --- Operator 표면 (#50 AC) ------------------------------------------------------
 
 
-def _blocked_on(payout: Payout, *, seller: Seller | None = None) -> str | None:
+def _blocked_on(payout: Payout, *, seller: Seller | None = None, has_identity: bool = False) -> str | None:
     if payout.status == Payout.Status.CONFIRMED_SELLER_PENDING:
         # Seller 자체는 이미 READY인데 실이체만 안 풀렸으면(#57 코드리뷰
         # 지적 1) "seller"가 아니라 "transfer"다 — 운영자가 처리해야 할
@@ -698,12 +712,14 @@ def _blocked_on(payout: Payout, *, seller: Seller | None = None) -> str | None:
             return "transfer"
         return "seller"
     if payout.status == Payout.Status.CONFIRMED_IDENTITY_PENDING:
-        # transfer_status가 FAILED면 신원이 아니라 실이체가 막힌 것이다
-        # (코드리뷰 지적 9, 3차) — submit_identity가 이 상태를 더는
-        # CONFIRMED_SELLER_PENDING으로 역행시키지 않으므로(지적 6), 실이체
-        # 재시도가 필요한 Payout이 CONFIRMED_IDENTITY_PENDING에 그대로 머문다.
-        # "identity"로 분류하면 이미 제출된 신원을 또 기다리는 것처럼 보이고,
-        # transfer 큐에서는 아예 빠진다.
+        # 신원 미제출이 실이체 재시도보다 앞선다(코드리뷰 지적 3, 4차 --
+        # 실행 재현 완료) -- has_identity를 안 보고 transfer_status만
+        # 보면, 신원을 아직 한 번도 못 낸(has_identity=False) Payout이
+        # "transfer"로 분류돼 identity 큐에서 완전히 빠진다. 이 상태의
+        # 원래 의미("신원 대기")가 그대로 있는 한 identity가 우선한다 --
+        # submissions.participation._payout_action과 정확히 같은 우선순위.
+        if not has_identity:
+            return "identity"
         if payout.transfer_status == Payout.TransferStatus.FAILED:
             return "transfer"
         return "identity"
@@ -739,7 +755,8 @@ def list_payouts_for_operator(request: HttpRequest, blocked_on: str | None = Non
     results: list[OperatorPayoutOut] = []
     for payout in payouts:
         seller = Seller.objects.filter(developer_id=_payout_developer_id(payout)).first()
-        blocked = _blocked_on(payout, seller=seller)
+        has_identity = TaxIdentity.objects.filter(payout=payout).exists()
+        blocked = _blocked_on(payout, seller=seller, has_identity=has_identity)
         if blocked_on is not None and blocked != blocked_on:
             continue
 
@@ -753,7 +770,7 @@ def list_payouts_for_operator(request: HttpRequest, blocked_on: str | None = Non
                 transfer_status=payout.transfer_status,
                 blocked_on=blocked,
                 seller_status=seller.status if seller is not None else None,
-                has_identity=TaxIdentity.objects.filter(payout=payout).exists(),
+                has_identity=has_identity,
                 created_at=payout.created_at,
             )
         )
