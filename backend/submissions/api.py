@@ -152,6 +152,12 @@ def _reject_self_dealing(contest: Contest, developer_verification: Verification)
       다른 사람의 것으로 바뀌지 않는다(#99, ADR-0025) — 이미 CI가 확정된
       계정은 같은 CI로만 재확인이 통과되므로, 성인으로 개최한 Sponsor가
       재확인 한 번으로 미성년(UNDERAGE, CI 소거)이 되는 일은 일어나지 않는다.
+      그리고 Developer와 같은 이유로, VERIFIED인 Sponsor 행도 `set_ci`를
+      거쳤을 것이므로 `ci_hash`가 빈 문자열일 수 없다 — 이 논거는 두 쪽 모두에
+      똑같이 적용되므로 가드도 양쪽에 똑같이 있어야 한다(코드리뷰 지적 —
+      `sponsor_verification is None`만 막고 "VERIFIED인데 ci_hash가 빈
+      문자열"은 막지 않으면, 마지막 비교 `"" == developer_ci_hash`가 항상
+      False가 되어 자전거래 검사가 조용히 통과해버린다).
 
     그럼에도 도달했다면 위 불변식 중 하나가 깨진 것이므로, "무엇이 참인지
     모르는 상태"에서 통과시키지 않고 fail-closed로 거부하며 ERROR로 남겨
@@ -177,6 +183,23 @@ def _reject_self_dealing(contest: Contest, developer_verification: Verification)
             "Contest(id=%s)의 Sponsor(user_id=%s)에게 VERIFIED 신원이 없어 자전거래 "
             "검사를 할 수 없다 — 불변식 위반. 개최에는 본인확인이 필요하므로(ADR-0011) "
             "이 상태는 정상 운영에서 도달 불가능해야 한다(#90).",
+            contest.id,
+            contest.sponsor.user_id,
+        )
+        raise HttpError(
+            403,
+            "이 Contest는 Sponsor의 본인확인 상태를 확인할 수 없어 제출할 수 없습니다. "
+            "운영자에게 문의해 주세요.",
+        )
+    if not sponsor_verification.ci_hash:
+        # "신원이 없다"(위 분기)와 "신원은 있는데 CI가 비었다"(이 분기)는 서로
+        # 다른 불변식이 깨진 것이라 로그 문구를 따로 남긴다 — 하나로 합치면
+        # 운영자가 두 원인을 로그만으로 가릴 수 없다. 이 분기가 없으면
+        # `"" == developer_verification.ci_hash`가 항상 False가 되어 자전거래
+        # 검사가 조용히 통과한다(코드리뷰 지적, #90의 좁은 형태).
+        logger.error(
+            "Contest(id=%s)의 VERIFIED Sponsor(user_id=%s)의 ci_hash가 비어 있다 — "
+            "불변식 위반. #84 이후 이 상태는 정상 운영에서 도달 불가능해야 한다.",
             contest.id,
             contest.sponsor.user_id,
         )
