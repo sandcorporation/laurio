@@ -41,6 +41,7 @@ from payments.webhook_security import verify_webhook_signature
 from policies.services import get_current_policy
 
 from payments.charges import Outcome, reconcile_after_timeout
+from .progress import Hold, HoldKind, assert_covers_all_kinds, hold_of
 from .adapters import PayoutError, PayoutTimeoutError, get_adapter, TransferOutcome
 from .adapters_toss import verify_toss_webhook_signature
 from .models import Payout, PayoutWebhookDelivery, Seller, TaxIdentity
@@ -89,87 +90,64 @@ _SELLER_STATUS_RANK = {
 
 
 # 다음 행동 안내(#50 AC — "Developer가 자기 Payout이 무엇을 기다리는지와 다음에
-# 무엇을 해야 하는지 볼 수 있다"). status·seller_status 조합마다 사람이 읽을
-# 문장을 고정해 둔다 — 침묵은 상금이 사라진 것으로 읽힌다.
-def _next_action_message(payout: Payout, seller: Seller | None) -> str:
-    if payout.status == Payout.Status.REQUESTED:
-        return "지급 확인 절차가 진행 중입니다. 잠시만 기다려주세요."
-    if payout.status == Payout.Status.CONFIRMED_SELLER_PENDING:
-        seller_ready = seller is not None and seller.status in Seller.READY_STATUSES
-        if seller_ready and payout.transfer_status == Payout.TransferStatus.FAILED:
-            # Seller 등록은 끝났지만 실이체 자체가 거절됐다(#57 코드리뷰 지적
-            # 1) — Seller.status만 보면 "다 됐다"로 읽히지만 실제로는 아직
-            # 돈이 안 나갔다. transfer_status를 따로 봐야만 이 경우를
-            # 구별할 수 있다.
-            return (
-                "지급대행사 등록은 끝났지만 실제 이체가 거절되었습니다 — 상금은 "
-                "원장에 그대로 남아 있습니다. 아래에서 다시 시도해주세요."
-            )
-        if seller_ready:
-            # Seller는 준비됐지만 실이체 확인이 아직 끝나지 않았다(REQUESTED
-            # — 타임아웃 뒤 재확인 대기).
-            return "실이체 확인이 진행 중입니다. 잠시만 기다려주세요."
-        if seller is not None and seller.status == Seller.Status.UNDER_REVIEW:
-            return (
-                "지급대행사 심사가 진행 중입니다(주간 지급 한도 초과 또는 추가 확인 "
-                "요청) — 상금은 안전하게 보관되어 있으며 심사가 끝나면 자동으로 다음 "
-                "단계로 넘어갑니다."
-            )
-        if seller is not None and seller.status == Seller.Status.REJECTED:
-            return (
-                "지급대행사 수취인 등록이 거절되었습니다. 상금은 원장에 그대로 "
-                "남아 있습니다 — 운영자에게 문의해주세요."
-            )
-        if seller is not None and seller.status == Seller.Status.APPROVAL_REQUIRED:
-            # #57 추가 인수조건 — "PENDING과 APPROVAL_REQUIRED가 화면에서
-            # 다르게 읽힌다." 이건 Developer의 차례다: 이미 포트원으로 본인확인을
-            # 했더라도 토스가 지급대행사로서 별도로 본인인증 문자를 보낸다
-            # (ADR-0020 — 벤더가 갈려 두 번 일어난다).
-            return (
-                "지급대행사(토스페이먼츠)가 보낸 본인인증 문자로 인증을 완료해주세요 — "
-                "이미 본인확인을 하셨더라도 지급대행사 자체 의무라 다시 인증이 "
-                "필요합니다. 인증이 끝나면 자동으로 다음 단계로 넘어갑니다."
-            )
-        if (
-            seller is None or seller.status == Seller.Status.PENDING
-        ) and not (seller is not None and seller.phone_number):
-            # PENDING이면서 전화번호도 아직 없다 — "우리가 응답을 기다린다"가
-            # 아니라 "Developer가 낼 것이 있다"는 뜻이다. PENDING을 "아무도 할
-            # 일이 없다"로 뭉뚱그리면 이 경우를 놓친다(#57 추가 인수조건).
-            return (
-                "지급대행사 수취인 등록에 전화번호가 필요합니다 — 아래에서 제출해주세요."
-            )
-        return "지급대행사 수취인 등록이 진행 중입니다. 완료되면 자동으로 다음 단계로 넘어갑니다."
-    if payout.status == Payout.Status.CONFIRMED_IDENTITY_PENDING:
-        if payout.transfer_status == Payout.TransferStatus.FAILED:
-            # Seller는 이미 준비돼 신원 대기만 남았었는데, 실이체 자체가
-            # 뒤늦게 실패로 확인됐다(#57 코드리뷰 지적 4) — 신원 제출을
-            # 막을 이유는 없지만(독립적인 두 축이다), 실이체가 실패했다는
-            # 사실을 감추지 않는다.
-            return (
-                "실제 이체가 실패로 확인되었습니다 — 상금은 원장에 그대로 남아 "
-                "있습니다. 세무 신고를 위한 주민등록번호는 계속 제출해주세요."
-            )
-        return "세무 신고를 위해 주민등록번호를 제출해주세요."
-    if payout.status == Payout.Status.CONFIRMED:
-        if payout.transfer_status == Payout.TransferStatus.FAILED:
-            # 확정된 뒤 뒤늦게 도착한 payout.changed FAILED 웹훅이 남긴
-            # 상태다(#57 코드리뷰 지적 4) — Payout.status는 원장 사실이라
-            # 되돌리지 않지만(ADR-0004), 실제로는 아직 돈이 안 나갔다는 사실을
-            # 숨기지 않는다. Developer 쪽 자기 서비스 재시도 경로는 아직
-            # 없다(ADR-0008에 남겨 둔 한계) — 운영자 처리를 안내한다.
-            return (
-                "지급이 확정되었지만 실제 이체가 실패로 확인되었습니다 — 상금은 "
-                "원장에 그대로 남아 있습니다. 운영자가 확인 후 다시 진행합니다."
-            )
-        return "지급이 완료되었습니다."
-    if payout.status == Payout.Status.FAILED:
-        return "지급 요청이 실패했습니다. 다시 시도해주세요."
-    return ""  # pragma: no cover - 위 분기가 Status 전체를 다룬다.
+# 무엇을 해야 하는지 볼 수 있다"). 판정은 `payouts.progress.hold_of` 가 하고(#130), 여기는
+# Hold → 사람이 읽을 문장의 번역표다 — 침묵은 상금이 사라진 것으로 읽힌다.
+_NEXT_ACTION_MESSAGES: dict[HoldKind, str] = {
+    HoldKind.REQUESTED: "지급 확인 절차가 진행 중입니다. 잠시만 기다려주세요.",
+    HoldKind.IDENTITY: "세무 신고를 위해 주민등록번호를 제출해주세요.",
+    HoldKind.IDENTITY_RECORDED: "세무 신고를 위해 주민등록번호를 제출해주세요.",
+    HoldKind.SELLER_PHONE: "지급대행사 수취인 등록에 전화번호가 필요합니다 — 아래에서 제출해주세요.",
+    HoldKind.SELLER_AUTH: (
+        "지급대행사(토스페이먼츠)가 보낸 본인인증 문자로 인증을 완료해주세요 — "
+        "이미 본인확인을 하셨더라도 지급대행사 자체 의무라 다시 인증이 "
+        "필요합니다. 인증이 끝나면 자동으로 다음 단계로 넘어갑니다."
+    ),
+    HoldKind.SELLER_REVIEW: (
+        "지급대행사 심사가 진행 중입니다(주간 지급 한도 초과 또는 추가 확인 "
+        "요청) — 상금은 안전하게 보관되어 있으며 심사가 끝나면 자동으로 다음 "
+        "단계로 넘어갑니다."
+    ),
+    HoldKind.SELLER_REJECTED: (
+        "지급대행사 수취인 등록이 거절되었습니다. 상금은 원장에 그대로 "
+        "남아 있습니다 — 운영자에게 문의해주세요."
+    ),
+    HoldKind.SELLER_PENDING: "지급대행사 수취인 등록이 진행 중입니다. 완료되면 자동으로 다음 단계로 넘어갑니다.",
+    HoldKind.TRANSFER_CONFIRMING: "실이체 확인이 진행 중입니다. 잠시만 기다려주세요.",
+    HoldKind.TRANSFER_RETRY: (
+        "지급대행사 등록은 끝났지만 실제 이체가 거절되었습니다 — 상금은 "
+        "원장에 그대로 남아 있습니다. 아래에서 다시 시도해주세요."
+    ),
+    HoldKind.TRANSFER_RETRY_IDENTITY_RECORDED: (
+        "실제 이체가 실패로 확인되었습니다 — 상금은 원장에 그대로 남아 "
+        "있습니다. 세무 신고를 위한 주민등록번호는 계속 제출해주세요."
+    ),
+    HoldKind.TRANSFER_OPERATOR: (
+        "지급이 확정되었지만 실제 이체가 실패로 확인되었습니다 — 상금은 "
+        "원장에 그대로 남아 있습니다. 운영자가 확인 후 다시 진행합니다."
+    ),
+    HoldKind.COMPLETE: "지급이 완료되었습니다.",
+    HoldKind.FAILED: "지급 요청이 실패했습니다. 다시 시도해주세요.",
+    HoldKind.UNKNOWN: "지급 상태를 확인하는 중입니다. 운영자가 확인 후 안내드립니다.",
+}
+assert_covers_all_kinds(_NEXT_ACTION_MESSAGES, name="_NEXT_ACTION_MESSAGES")
+
+# 신원 미제출 상태에서 실이체 실패도 함께 확인된 경우 — 신원 제출을 막을 이유는 없지만
+# (독립적인 두 축), 실이체가 실패했다는 사실을 감추지 않는다(#57 코드리뷰 지적 4).
+_IDENTITY_AFTER_TRANSFER_FAILURE_MESSAGE = _NEXT_ACTION_MESSAGES[
+    HoldKind.TRANSFER_RETRY_IDENTITY_RECORDED
+]
+
+
+def _next_action_message(hold: Hold) -> str:
+    if hold.kind is HoldKind.IDENTITY and hold.transfer_failed:
+        return _IDENTITY_AFTER_TRANSFER_FAILURE_MESSAGE
+    return _NEXT_ACTION_MESSAGES[hold.kind]
 
 
 def _serialize(payout: Payout) -> PayoutOut:
     seller = payout.seller
+    has_identity = TaxIdentity.objects.filter(payout=payout).exists()
+    hold = hold_of(payout, seller=seller, has_identity=has_identity)
     return PayoutOut(
         idempotency_key=payout.idempotency_key,
         contest_id=payout.contest.id,
@@ -179,10 +157,10 @@ def _serialize(payout: Payout) -> PayoutOut:
         net_amount=payout.net_amount,
         status=payout.status,
         transfer_status=payout.transfer_status,
-        has_identity=TaxIdentity.objects.filter(payout=payout).exists(),
+        has_identity=has_identity,
         has_seller_phone=bool(seller is not None and seller.phone_number),
         seller_status=seller.status if seller is not None else None,
-        next_action_message=_next_action_message(payout, seller),
+        next_action_message=_next_action_message(hold),
         created_at=payout.created_at,
     )
 
@@ -687,37 +665,6 @@ def receive_toss_seller_webhook(request: HttpRequest):
 # --- Operator 표면 (#50 AC) ------------------------------------------------------
 
 
-def _blocked_on(payout: Payout, *, seller: Seller | None = None, has_identity: bool = False) -> str | None:
-    if payout.status == Payout.Status.CONFIRMED_SELLER_PENDING:
-        # Seller 자체는 이미 READY인데 실이체만 안 풀렸으면(#57 코드리뷰
-        # 지적 1) "seller"가 아니라 "transfer"다 — 운영자가 처리해야 할
-        # 대상이 다르다(Seller 등록 담당 vs 이체 재시도).
-        seller_ready = seller is not None and seller.status in Seller.READY_STATUSES
-        if seller_ready:
-            return "transfer"
-        return "seller"
-    if payout.status == Payout.Status.CONFIRMED_IDENTITY_PENDING:
-        # 신원 미제출이 실이체 재시도보다 앞선다(코드리뷰 지적 3, 4차 --
-        # 실행 재현 완료) -- has_identity를 안 보고 transfer_status만
-        # 보면, 신원을 아직 한 번도 못 낸(has_identity=False) Payout이
-        # "transfer"로 분류돼 identity 큐에서 완전히 빠진다. 이 상태의
-        # 원래 의미("신원 대기")가 그대로 있는 한 identity가 우선한다 --
-        # submissions.participation._payout_action과 정확히 같은 우선순위.
-        if not has_identity:
-            return "identity"
-        if payout.transfer_status == Payout.TransferStatus.FAILED:
-            return "transfer"
-        return "identity"
-    if (
-        payout.status == Payout.Status.CONFIRMED
-        and payout.transfer_status == Payout.TransferStatus.FAILED
-    ):
-        # 확정 이후 도착한 실패 웹훅이 남긴 상태다(#57 코드리뷰 지적 4) —
-        # Operator 큐에서도 드러나야 한다.
-        return "transfer"
-    return None
-
-
 @operator_router.get("/payouts", response=list[OperatorPayoutOut])
 def list_payouts_for_operator(request: HttpRequest, blocked_on: str | None = None):
     """Operator가 어느 Payout이 두 대기 중 어느 쪽에 막혀 있는지 본다(#50 AC).
@@ -736,7 +683,7 @@ def list_payouts_for_operator(request: HttpRequest, blocked_on: str | None = Non
     for payout in payouts:
         seller = payout.seller
         has_identity = TaxIdentity.objects.filter(payout=payout).exists()
-        blocked = _blocked_on(payout, seller=seller, has_identity=has_identity)
+        blocked = hold_of(payout, seller=seller, has_identity=has_identity).blocked_on
         if blocked_on is not None and blocked != blocked_on:
             continue
 

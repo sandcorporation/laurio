@@ -9,7 +9,7 @@
   쓰는 것과 같은 구분이다 — `PGError`를 던지면 `payments.api.confirm_payment`가
   이를 502로 바꾸고 `Payment`는 REQUESTED에 그대로 머문다(재시도해도 다시 502).
   카드 거절처럼 **결제 시도 자체가 정상적으로 끝난 결과**는 "failed"로 돌려줘야
-  `mark_failed`가 Payment를 종결시키고, Sponsor가 "다시 시도"로 새 결제를 시작할
+  `apply_vendor_outcome`이 Payment를 종결시키고, Sponsor가 "다시 시도"로 새 결제를 시작할
   수 있다. `PGError`는 우리 쪽 자격증명·요청 자체가 잘못된 경우(401/403)에만
   쓴다 — 그건 이 결제 건의 문제가 아니라 이 배포의 설정 문제이므로 종결시키면
   안 된다.

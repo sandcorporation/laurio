@@ -3183,3 +3183,53 @@ def test_toss_payout_interrupted_claim_is_recoverable_after_staleness_threshold(
     assert payout.transfer_attempt == 2  # 재선점으로 새 attempt를 받았다
     assert payout.transfer_status == Payout.TransferStatus.COMPLETED
     assert payout.vendor_payout_id == "toss-vendor-id-recovered"
+
+
+@pytest.mark.django_db
+def test_participation_says_request_payout_when_the_last_payout_attempt_failed(
+    client, category, landing_type
+):
+    """벤더가 거절해 Payout 이 FAILED 로 끝나면 「내 참가 현황」은 「지급대행 등록 대기」가
+    아니라 「지급을 다시 요청하세요」다 (#130) — 실제로 가능한 행동이 그것이고
+    (get_or_create_payout 이 FAILED 뒤 새 REQUESTED 행을 만든다), 지급 화면의 문구도 이미
+    그렇게 말한다. 전에는 status 별 분기의 fallthrough 가 FAILED 를 잘못 말했다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    failed = _confirm_payout(client, dev, requested["idempotency_key"], simulate="failed")
+    assert failed.json()["status"] == "failed"
+
+    from scoring.models import Score
+
+    Score.objects.create(
+        submission_id=submission["id"], percentage=100, model_version="test", prompt="", reasoning=[]
+    )
+
+    resp = client.get("/api/submissions/mine", **_auth_header(dev["access"]))
+    assert resp.status_code == 200
+    row = next(r for r in resp.json()["items"] if r["contest_id"] == contest["id"])
+    assert row["next_action"] == "request_payout"
+
+
+@pytest.mark.django_db
+def test_operator_queue_flags_an_unclassifiable_payout_as_operator_hold_and_logs(
+    client, category, landing_type, caplog
+):
+    """Hold 표에 없는 조합은 조용히 지나가지 않는다 (#130) — 돈은 움직이지 않고 사람의
+    차례로 표시되며 ERROR 로그가 남는다. 도달 불가여야 하는 곳에 도달했다면 불변식이
+    깨진 것이고, 무엇이 참인지 모르는 상태에서 통과시킬 이유가 없다(ADR-0025 와 같은
+    규율). 표 밖의 status 값을 DB 에 직접 심어 재현한다."""
+
+    import logging
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    Payout.objects.filter(idempotency_key=requested["idempotency_key"]).update(status="bogus")
+
+    operator = _operator_client()
+    with caplog.at_level(logging.ERROR):
+        resp = operator.get("/api/operator/payouts")
+    assert resp.status_code == 200
+    row = next(r for r in resp.json() if r["idempotency_key"] == requested["idempotency_key"])
+    assert row["blocked_on"] == "operator"
+    assert any("bogus" in record.getMessage() for record in caplog.records)
