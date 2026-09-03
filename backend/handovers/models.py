@@ -45,6 +45,17 @@ class Handover(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    def payout_target(self):
+        """이 Handover 를 지급 사유로 하는 Payout 생성에 필요한 것 (#129)."""
+
+        from payouts.targets import PayoutTarget
+
+        return PayoutTarget(
+            fk_name="handover",
+            lock=lambda: Handover.objects.select_for_update().get(pk=self.pk),
+            prize_amount_of=lambda locked: locked.award.contest.prize,
+        )
+
     def __str__(self) -> str:  # pragma: no cover
         return f"Handover(award={self.award_id}, status={self.status})"
 

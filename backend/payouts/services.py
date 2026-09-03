@@ -43,6 +43,7 @@ from verification.crypto import encrypt
 
 from .adapters import SellerError, get_seller_adapter
 from .models import Payout, Seller, TaxIdentity
+from .targets import PayoutTarget
 
 logger = logging.getLogger(__name__)
 
@@ -114,119 +115,57 @@ def _compute_amounts(prize_amount: int, policy: PlatformPolicy) -> tuple[int, in
     return fee, withholding, net, applied_withholding_bps, exempt
 
 
-def get_or_create_payout(handover=None, *, distribution_share=None, policy: PlatformPolicy | None = None) -> Payout:
-    """이 Handover(또는 DistributionShare)에 대한 활성 Payout을 멱등하게 만든다.
+def get_or_create_payout(target: PayoutTarget, *, policy: PlatformPolicy | None = None) -> Payout:
+    """이 지급 사유(Handover 또는 DistributionShare 의 `payout_target()`)에 대한 활성
+    Payout 을 멱등하게 만든다.
 
-    정확히 하나만 넘겨야 한다 — 어느 쪽이든 그 대상이 Payout이 실제로 가리키는
-    지급 사유가 된다(`payouts.models.Payout.payout_exactly_one_target`과 같은
-    불변식). `distribution_share`는 #16 — Distribution(무응답 1/N 배분)이 Award
-    없이도 이 경로를 그대로 재사용할 수 있게 하는 두 번째 대상이다.
+    활성(REQUESTED/CONFIRMED_IDENTITY_PENDING/CONFIRMED_SELLER_PENDING/CONFIRMED)이 이미
+    있으면 그대로 돌려준다 — 중복 클릭·재요청이 새 idempotency_key를 계속 만들어내지
+    않는다(payments.api.initiate_payment와 같은 관용구). 가장 최근 시도가 FAILED뿐이면
+    (토스가 거절했거나 fake 시나리오로 실패를 흉내낸 경우) 새 REQUESTED 행을 만들어
+    재시도를 허용한다 — Escrow에 갇힌 상금이 재시도 경로 없이 영구히 묶이는 사고를 막는다.
 
-    활성(REQUESTED/CONFIRMED_IDENTITY_PENDING/CONFIRMED)이 이미 있으면 그대로
-    돌려준다 — 중복 클릭·재요청이 새 idempotency_key를 계속 만들어내지 않는다
-    (payments.api.initiate_payment와 같은 관용구). 가장 최근 시도가 FAILED뿐이면
-    (토스가 거절했거나 fake 시나리오로 실패를 흉내낸 경우) 새 REQUESTED 행을
-    만들어 재시도를 허용한다 — Escrow에 갇힌 상금이 재시도 경로 없이 영구히
-    묶이는 사고를 막는다.
+    사유 행을 `select_for_update`로 잠가 동시 요청을 직렬화한다(payments.api.
+    initiate_payment가 Contest를 잠그는 것과 같은 이유) — 잠금 없이 조회-후-생성하면 두
+    요청이 동시에 "활성 Payout 없음"을 보고 각자 새 행을 만들어, unique 제약이 최후에
+    하나만 통과시켜도 나머지 하나는 예외로 죽는다. 네트워크 호출(어댑터)은 이 함수
+    밖에서 한다 — 이 함수는 순수 DB 쓰기만 하므로 트랜잭션 안에서도 안전하다.
 
-    대상 행을 `select_for_update`로 잠가 동시 요청을 직렬화한다
-    (payments.api.initiate_payment가 Contest를 잠그는 것과 같은 이유) — 잠금
-    없이 조회-후-생성하면 두 요청이 동시에 "활성 Payout 없음"을 보고 각자 새
-    행을 만들어, unique 제약이 최후에 하나만 통과시켜도 나머지 하나는 예외로
-    죽는다. 네트워크 호출(어댑터)은 이 함수 밖(API 레이어)에서 한다 — 이 함수는
-    순수 DB 쓰기만 하므로 트랜잭션 안에서도 안전하다("외부 네트워크 호출을
-    transaction.atomic() 안에 넣지 않는다"는 lessons-learned 원칙).
+    두 경로의 차이(잠그는 행·금액 출처·FK 이름)는 `PayoutTarget` 이 들고 오고(#129),
+    나머지는 한 본문이다 — 전에는 50줄이 두 번 적혀 있었다.
 
     `policy`는 호출자가 요청(또는 스캔) 스코프당 한 번 읽어 넘겨야 한다(#75,
-    ADR-0023) — 생략하면 이 호출 하나를 위해 새로 한 번 읽는다(단독 호출 편의용,
-    `core.transitions.claim_transition`이 `now`를 생략 가능하게 둔 것과 같은
-    관용구). `distributions.services.run_due_distributions`처럼 여러 몫을 순회하며
-    이 함수를 반복 호출하는 곳은 반드시 미리 읽은 값을 넘겨야 한다 — 그러지
-    않으면 몫 수만큼 정책 조회가 나간다.
+    ADR-0023) — 생략하면 이 호출 하나를 위해 새로 한 번 읽는다(단독 호출 편의용).
     """
-
-    if (handover is None) == (distribution_share is None):
-        raise ValueError("handover 또는 distribution_share 중 정확히 하나만 넘겨야 한다.")
 
     if policy is None:
         policy = get_current_policy()
 
-    if handover is not None:
-        from handovers.models import Handover
-
-        with transaction.atomic():
-            locked = Handover.objects.select_for_update().get(pk=handover.pk)
-            existing = (
-                Payout.objects.filter(handover=locked, status__in=_ACTIVE_PAYOUT_STATUSES)
-                .order_by("-created_at")
-                .first()
-            )
-            if existing is not None:
-                return existing
-
-            prize_amount = locked.award.contest.prize
-            fee, withholding, net, applied_withholding_bps, exempt = _compute_amounts(
-                prize_amount, policy
-            )
-
-            try:
-                # 중첩 atomic(세이브포인트)으로 감싼다(payments.api.initiate_payment와
-                # 같은 이유, 코드리뷰 지적 1) — IntegrityError가 나면 Postgres는
-                # 세이브포인트가 없는 바깥 트랜잭션 전체를 "aborted" 상태로 만들어
-                # 그 뒤의 어떤 쿼리도 커밋 전까지 막아버린다. 세이브포인트가 없으면
-                # 아래 except 절의 조회(existing = Payout.objects.filter(...))조차
-                # `TransactionManagementError`로 실패해, 방어적 안전망이 오히려
-                # 원인을 덮는 새 500을 만든다.
-                with transaction.atomic():
-                    return Payout.objects.create(
-                        handover=locked,
-                        prize_amount=prize_amount,
-                        platform_fee_amount=fee,
-                        withholding_tax_amount=withholding,
-                        net_amount=net,
-                        platform_fee_bps=policy.platform_fee_bps,
-                        withholding_tax_bps=applied_withholding_bps,
-                        withholding_exempt=exempt,
-                        status=Payout.Status.REQUESTED,
-                    )
-            except IntegrityError:
-                # unique_active_payout_per_handover에 걸렸다 — 위 잠금에도
-                # 불구하고 도달했다면 방어적 안전망이다(payments.api.
-                # initiate_payment와 같은 이유). 이미 있는 활성 Payout을 그대로
-                # 돌려준다.
-                existing = (
-                    Payout.objects.filter(handover=locked, status__in=_ACTIVE_PAYOUT_STATUSES)
-                    .order_by("-created_at")
-                    .first()
-                )
-                if existing is not None:
-                    return existing
-                raise
-
-    from distributions.models import DistributionShare
-
     with transaction.atomic():
-        locked = DistributionShare.objects.select_for_update().get(pk=distribution_share.pk)
-        existing = (
-            Payout.objects.filter(
-                distribution_share=locked, status__in=_ACTIVE_PAYOUT_STATUSES
-            )
-            .order_by("-created_at")
-            .first()
+        locked = target.lock()
+        fk = {target.fk_name: locked}
+        active = Payout.objects.filter(**fk, status__in=_ACTIVE_PAYOUT_STATUSES).order_by(
+            "-created_at"
         )
+        existing = active.first()
         if existing is not None:
             return existing
 
-        prize_amount = locked.amount
+        prize_amount = target.prize_amount_of(locked)
         fee, withholding, net, applied_withholding_bps, exempt = _compute_amounts(
             prize_amount, policy
         )
 
         try:
-            # 세이브포인트로 감싼다 — 위 handover 분기와 같은 이유(코드리뷰 지적 1).
+            # 중첩 atomic(세이브포인트)으로 감싼다(payments.api.initiate_payment와 같은
+            # 이유, 코드리뷰 지적 1) — IntegrityError가 나면 Postgres는 세이브포인트가
+            # 없는 바깥 트랜잭션 전체를 "aborted" 상태로 만들어 그 뒤의 어떤 쿼리도
+            # 커밋 전까지 막아버린다. 세이브포인트가 없으면 아래 except 절의 조회조차
+            # `TransactionManagementError`로 실패해, 방어적 안전망이 오히려 원인을 덮는
+            # 새 500을 만든다.
             with transaction.atomic():
                 return Payout.objects.create(
-                    distribution_share=locked,
+                    **fk,
                     prize_amount=prize_amount,
                     platform_fee_amount=fee,
                     withholding_tax_amount=withholding,
@@ -237,15 +176,9 @@ def get_or_create_payout(handover=None, *, distribution_share=None, policy: Plat
                     status=Payout.Status.REQUESTED,
                 )
         except IntegrityError:
-            # unique_active_payout_per_distribution_share에 걸렸다 — 위와 같은
-            # 방어적 안전망이다.
-            existing = (
-                Payout.objects.filter(
-                    distribution_share=locked, status__in=_ACTIVE_PAYOUT_STATUSES
-                )
-                .order_by("-created_at")
-                .first()
-            )
+            # unique_active_payout_per_* 에 걸렸다 — 위 잠금에도 불구하고 도달했다면
+            # 방어적 안전망이다. 이미 있는 활성 Payout을 그대로 돌려준다.
+            existing = active.first()
             if existing is not None:
                 return existing
             raise

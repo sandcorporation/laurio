@@ -195,7 +195,7 @@ def _attempt_share_payout(
     수만큼 정책 조회가 나간다.
     """
 
-    payout = get_or_create_payout(distribution_share=share, policy=policy)
+    payout = get_or_create_payout(share.payout_target(), policy=policy)
 
     if payout.status != Payout.Status.REQUESTED:
         # 이미 다른 경로(웹훅 등)로 확정·실패되어 있다 — 그대로 지나간다.

@@ -214,7 +214,7 @@ def request_payout(request: HttpRequest, contest_id: int):
     # 이 요청 스코프에서 정책을 한 번만 읽는다(#75, ADR-0023) — core.api.tick이
     # Clock.now()를 한 번만 구해 재사용하는 것과 같은 관용구.
     policy = get_current_policy()
-    payout = get_or_create_payout(handover, policy=policy)
+    payout = get_or_create_payout(handover.payout_target(), policy=policy)
 
     adapter = get_adapter()
     adapter.request_payout(idempotency_key=str(payout.idempotency_key), amount=payout.net_amount)
