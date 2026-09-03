@@ -8,24 +8,24 @@
    규제)보다 엄격하게, 야간에는 어떤 Notification 도 내보내지 않는다.
 3. 그 외에는 즉시 채널 폴백 체인(알림톡 → SMS → LMS)을 시도한다.
 
-`dispatch_due_notifications` 는 DEFERRED 로 쌓인 것 중 scheduled_for 가 지난 것을
+`notification-dispatch-deferred` 스캔 는 DEFERRED 로 쌓인 것 중 scheduled_for 가 지난 것을
 찾아 실제로 발송을 시도한다. 이때도 core.transitions.claim_transition 과 같은 조건부
 UPDATE 패턴을 그대로 재사용해, 같은 시각에 두 번 스캔해도 한 번만 발송을 시도한다
 (ADR-0003 이 만든 메커니즘의 재사용).
 
-시각은 이 모듈의 각 공개 함수(create_notification, dispatch_due_notifications) 호출당
+시각은 이 모듈의 각 공개 함수(create_notification, notification-dispatch-deferred 스캔) 호출당
 Clock.now() 를 딱 한 번만 구해서 그 값을 아래로 넘긴다. 채널마다, 행마다 다시 조회하면
 SELECT 가 선형으로 쌓인다.
 """
 
 import logging
-import time as time_module
 from datetime import time, timedelta, timezone as dt_timezone
 
 from django.db.models import Q
 from django.utils import timezone
 
 from core.clock import Clock
+from core.scans import ScanSpec
 from core.transitions import claim_transition
 
 from .adapters import CHANNEL_FALLBACK_CHAIN, ChannelSendResult
@@ -40,23 +40,6 @@ logger = logging.getLogger(__name__)
 
 QUIET_HOURS_START = time(21, 0)
 QUIET_HOURS_END = time(8, 0)
-
-# 야간 큐(DEFERRED) 한 번 스캔에서 처리하는 최대 건수. core.transitions.DEFAULT_BATCH_SIZE
-# 와 같은 이유(무제한 스캔이 요청 타임아웃을 만든다)로 둔다. 실제 시간 상한은
-# DUE_SCAN_TIME_BUDGET_SECONDS가 건다 — 이 값은 그보다 훨씬 못 미치는 조건에서만
-# (벤더가 비정상적으로 빠른 경우) 실제로 걸리는 상한이다.
-DUE_SCAN_BATCH_SIZE = 500
-
-# 이 스캔 한 번이 실물 벤더 HTTP를 부르며 쓸 수 있는 최대 시간(초)(#51 코드리뷰
-# 지적 6). 진입점은 gunicorn 워커 타임아웃과 Celery beat 호출의 timeout=30
-# (core/tasks.py) 안에 반드시 들어와야 한다 — 채널 하나의 벤더 타임아웃
-# (notifications.adapters_aligo._TIMEOUT_SECONDS=5)이 최악의 경우 셋 다 겹쳐
-# 15초까지 걸릴 수 있으므로, 그 여유를 남기고 12초로 잡는다(12 + 15 = 27초 <
-# 30초). 이 예산을 넘기면 남은 행은 이번 스캔에서 처리하지 않고 다음 스캔(60초
-# 뒤, config/celery.py)에 넘긴다 — ADR-0010 "연기하되 버리지 않는다"와 같은
-# 원칙: 이번에 못 하면 다음 틱이 마저 한다. 처리하지 못한 DEFERRED/QUEUED 행은
-# 그대로 남아 다음 스캔의 대상이 된다(상태를 미리 건드리지 않았으므로 안전하다).
-DUE_SCAN_TIME_BUDGET_SECONDS = 12.0
 
 # QUEUED로 선점된 뒤 이만큼 지나도 여전히 QUEUED면 "멈췄다"고 본다(#10 리뷰 지적).
 # 정상적인 발송 시도는 어댑터 타임아웃을 포함해도 이보다 훨씬 빨리 SENT/FAILED로
@@ -391,96 +374,72 @@ def _reclaim_and_process_stuck_queued(pk: int, *, now, stale_before) -> bool:
     return _process_claimed_queued_row(pk, now=now)
 
 
-def dispatch_due_notifications(as_of=None) -> list[int]:
-    """야간 연기(DEFERRED)로 쌓인 것과, QUEUED에서 멈춰버린 것을 찾아 발송을 시도한다.
+# --- 야간 큐 스캔 둘 (#10, #51, #139) ------------------------------------------------
+#
+# 야간 연기(DEFERRED)로 쌓인 것의 발송과, QUEUED에서 멈춰버린 것의 재선점은 각자 등록부
+# 항목이다 — 예전에는 한 엔드포인트가 둘을 순서대로 돌리며 예산을 절반씩 나눴고, 그
+# 나눔의 정확한 규칙(#51 2차 지적 1, 3차 지적 3)이 코드의 절반이었다. 이제 각 스캔이 자기
+# 예산을 통째로 받으므로 「DEFERRED 가 몰리는 아침에 stuck-QUEUED 복구가 굶는다」는 구조
+# 자체가 없다. stuck-QUEUED 재선점은 PENDING으로 죽은 행(벤더 발송 성공 이후, SENT 확정
+# 이전에 프로세스가 죽은 경우)을 되살리는 **유일한** 경로다.
+#
+# 시간 예산 12초(#51 코드리뷰 지적 6): 진입점은 Celery beat 호출의 timeout=30(core/tasks.py)
+# 안에 반드시 들어와야 한다 — 채널 하나의 벤더 타임아웃(notifications.adapters_aligo.
+# _TIMEOUT_SECONDS=5)이 최악의 경우 셋 다 겹쳐 15초까지 걸릴 수 있으므로 그 여유를 남긴다
+# (12 + 15 = 27초 < 30초). 예산을 넘기면 남은 행은 다음 실행(60초 뒤)에 넘긴다 — ADR-0010
+# "연기하되 버리지 않는다"와 같은 원칙이고, 상태를 미리 건드리지 않았으므로 안전하다.
+# 배치 500은 그보다 훨씬 못 미치는 조건에서만(벤더가 비정상적으로 빠른 경우) 걸리는 상한이다.
+_DISPATCH_TIME_BUDGET_SECONDS = 12.0
+_DISPATCH_BATCH_SIZE = 500
 
-    DEFERRED 행은 claim_transition 으로 DEFERRED -> QUEUED 를 먼저 조건부로 선점한
-    뒤에만 실제 발송을 시도한다. QUEUED 행은 STUCK_QUEUED_THRESHOLD 이상 멈춰 있는
-    것만 재선점 대상이다(#10 리뷰 지적) — 그렇지 않으면 지금 막 즉시발송 경로로
-    한창 처리 중인(아직 SENT/FAILED로 끝나지 않은) 정상적인 QUEUED 행까지 이 스캔이
-    집어 이중 발송을 시도하게 된다.
 
-    같은 as_of 로 두 번 불러도 이미 QUEUED/SENT/FAILED/다시 DEFERRED 로 옮겨간 행은
-    다시 잡히지 않으므로 중복 발송이 없다.
+def _due_deferred(as_of, ctx):
+    return Notification.objects.filter(status=Notification.Status.DEFERRED, scheduled_for__lte=as_of)
 
-    한 행 처리 중 예기치 못한 예외가 나도(_attempt_dispatch 자체는 채널 예외를 이미
-    다 잡지만, 방어적으로 한 번 더) 나머지 행 처리를 막지 않는다 — 배치 하나가 통째로
-    막혀 뒤에 있는 정상 건들까지 무기한 QUEUED 로 남는 사고를 막기 위함이다. 설령
-    이 처리 자체가 다시 죽더라도, claimed_at이 이미 갱신돼 있으므로 다음 스캔이
-    STUCK_QUEUED_THRESHOLD 뒤에 다시 집어간다 — 완전히 잊히는 경로가 없다.
-    """
 
-    as_of = as_of or Clock.now()
+def _dispatch_deferred(notification, as_of, ctx):
+    """DEFERRED -> QUEUED 를 조건부로 선점한 뒤에만 실제 발송을 시도한다. 같은 as_of 로 두
+    번 돌아도 이미 QUEUED/SENT/FAILED/다시 DEFERRED 로 옮겨간 행은 다시 잡히지 않는다."""
+
+    if not _claim_and_process_deferred(notification.pk, now=as_of):
+        return None
+    return {"notification_id": notification.pk}
+
+
+def _stuck_queued(as_of, ctx):
+    """STUCK_QUEUED_THRESHOLD 이상 멈춰 있는 QUEUED 행만(#10 리뷰 지적) — 그렇지 않으면 지금
+    막 즉시발송 경로로 한창 처리 중인 정상적인 QUEUED 행까지 집어 이중 발송을 시도하게 된다."""
+
     stale_before = as_of - STUCK_QUEUED_THRESHOLD
-
-    due_deferred_ids = list(
-        Notification.objects.filter(status=Notification.Status.DEFERRED, scheduled_for__lte=as_of)
-        .order_by("pk")
-        .values_list("pk", flat=True)[:DUE_SCAN_BATCH_SIZE]
+    return Notification.objects.filter(status=Notification.Status.QUEUED).filter(
+        Q(claimed_at__isnull=True) | Q(claimed_at__lte=stale_before)
     )
 
-    stuck_queued_ids = list(
-        Notification.objects.filter(status=Notification.Status.QUEUED)
-        .filter(Q(claimed_at__isnull=True) | Q(claimed_at__lte=stale_before))
-        .order_by("pk")
-        .values_list("pk", flat=True)[:DUE_SCAN_BATCH_SIZE]
-    )
 
-    # DEFERRED와 stuck-QUEUED가 시간 예산을 절반씩 나눠 쓴다(#51 2차 코드리뷰
-    # 지적 1). 이전에는 두 루프가 마감시각 하나를 공유하고 DEFERRED가 먼저
-    # 돈 뒤 예산을 다 쓰면 그 자리에서 곧장 return했다 — stuck-QUEUED 재선점
-    # 루프는 시도조차 되지 않았다. stuck-QUEUED 재선점은 PENDING으로 죽은
-    # 행(벤더 발송 성공 이후, SENT 확정 이전에 프로세스가 죽은 경우)을 되살리는
-    # **유일한** 경로라, 아침처럼 DEFERRED가 몰리는 스캔마다 이 경로가 매번
-    # 굶으면 그 행들은 STUCK_QUEUED_THRESHOLD가 지날 때마다 "재선점 시도조차
-    # 안 됨"을 반복하며 영원히 복구되지 않는다.
-    #
-    # 마감시각을 미리(스캔 시작 시점) 통째로 계산해 두면 DEFERRED 루프의
-    # 시간 초과 검사가 "행과 행 사이"에서만 일어난다는 사실이 다시 구멍이
-    # 된다(#51 3차 코드리뷰 지적 3) — 채널 하나가 최대 5초(connect 2초 + read
-    # 3초)이고 한 행이 최대 3채널을 순서대로 시도하므로, 진행 중이던 행
-    # 하나가 최대 15초를 쓸 수 있다. stuck_deadline을 scan_start 기준
-    # (scan_start + 전체 예산)으로 미리 고정해 두면, 벤더가 느려 처리 중인
-    # DEFERRED 행 하나가 15초를 쓰는 것만으로 stuck_deadline(scan_start+12초)
-    # 을 이미 넘겨 버려 — 정확히 "벤더가 느려 stuck 행이 생기는" 바로 그
-    # 상황에서 stuck-QUEUED 루프가 진입하자마자 0초짜리 예산을 받는다. 그래서
-    # stuck_deadline은 DEFERRED 루프가 끝난 "그 시점부터" 새로 절반을 받는다
-    # — DEFERRED가 실제로 얼마나 오래 걸렸든, stuck-QUEUED는 항상 자기 몫의
-    # 절반을 온전히 받는다(전체 스캔 시간은 늘어날 수 있지만, 60초 주기·30초
-    # 요청 타임아웃 안에서는 감수할 만하다 — 그 반대급부인 "복구 경로가 아예
-    # 실행되지 않는다"보다 훨씬 낫다).
-    half_budget = DUE_SCAN_TIME_BUDGET_SECONDS / 2
-    deferred_deadline = time_module.monotonic() + half_budget
+def _reclaim_stuck(notification, as_of, ctx):
+    """재선점에 성공한 호출만 처리한다 — 설령 이 처리 자체가 다시 죽더라도 claimed_at 이 이미
+    갱신돼 있으므로 다음 실행이 STUCK_QUEUED_THRESHOLD 뒤에 다시 집어간다. 완전히 잊히는
+    경로가 없다."""
 
-    dispatched_ids: list[int] = []
-    for pk in due_deferred_ids:
-        if time_module.monotonic() >= deferred_deadline:
-            logger.warning(
-                "Notification 야간 큐 스캔의 DEFERRED 처리가 시간 예산을 넘겨 "
-                "중단한다 — 나머지는 다음 스캔(60초 뒤)이 이어서 처리하고, "
-                "이번 스캔은 stuck-QUEUED 재선점으로 넘어간다.",
-            )
-            break
-        try:
-            if _claim_and_process_deferred(pk, now=as_of):
-                dispatched_ids.append(pk)
-        except Exception:  # noqa: BLE001 - 한 행의 실패가 나머지 배치를 막으면 안 된다.
-            logger.exception("Notification(pk=%s) 야간 큐 처리 중 예외, 다음 행으로 계속", pk)
+    stale_before = as_of - STUCK_QUEUED_THRESHOLD
+    if not _reclaim_and_process_stuck_queued(notification.pk, now=as_of, stale_before=stale_before):
+        return None
+    return {"notification_id": notification.pk}
 
-    # DEFERRED가 실제로 얼마나 썼는지와 무관하게, 지금 이 시점부터 새로 절반을
-    # 받는다 — 위 설명 참고.
-    stuck_deadline = time_module.monotonic() + half_budget
-    for pk in stuck_queued_ids:
-        if time_module.monotonic() >= stuck_deadline:
-            logger.warning(
-                "Notification 야간 큐 스캔의 stuck-QUEUED 재선점이 시간 예산을 "
-                "넘겨 중단한다 — 나머지는 다음 스캔(60초 뒤)이 이어서 처리한다.",
-            )
-            break
-        try:
-            if _reclaim_and_process_stuck_queued(pk, now=as_of, stale_before=stale_before):
-                dispatched_ids.append(pk)
-        except Exception:  # noqa: BLE001 - 한 행의 실패가 나머지 배치를 막으면 안 된다.
-            logger.exception("Notification(pk=%s) 멈춘 QUEUED 재처리 중 예외, 다음 행으로 계속", pk)
 
-    return dispatched_ids
+NOTIFICATION_SCANS = (
+    ScanSpec(
+        name="notification-dispatch-deferred",
+        candidates=_due_deferred,
+        handle_row=_dispatch_deferred,
+        batch_size=_DISPATCH_BATCH_SIZE,
+        time_budget_seconds=_DISPATCH_TIME_BUDGET_SECONDS,
+    ),
+    ScanSpec(
+        name="notification-reclaim-stuck",
+        candidates=_stuck_queued,
+        handle_row=_reclaim_stuck,
+        batch_size=_DISPATCH_BATCH_SIZE,
+        time_budget_seconds=_DISPATCH_TIME_BUDGET_SECONDS,
+    ),
+)

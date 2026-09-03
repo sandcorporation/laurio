@@ -184,7 +184,7 @@ def _settle_new_refund_attempt(adapter, claimed: Payment, *, simulate: str | Non
 
     어댑터가 던지는 예외는 이 함수 밖으로 내보내지 않는다 — 배치 하나(이 한 행)의
     실패가 나머지 배치를 막으면 안 된다(리뷰 지적 2, 4; chain A의 스케줄러 틱,
-    scoring.services.run_pending_scoring과 같은 이유). PGTimeoutError는 실패가
+    scoring.services 의 submission-scoring 스캔과 같은 이유). PGTimeoutError는 실패가
     아니므로 query_refund_status로 재확인하는데, 그 재확인 호출 자체도 실패할 수
     있어 같은 방식으로 감싼다(리뷰 지적 2) — 감싸지 않으면 그 예외가 스캔 전체를
     500으로 죽이고, 이 Payment는 REFUND_REQUESTED에 갇힌 채(후보 쿼리가 PAID만

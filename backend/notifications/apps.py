@@ -21,8 +21,10 @@ class NotificationsConfig(AppConfig):
         from core.scans import register_scan
 
         from .lifecycle import LIFECYCLE_SCANS
+        from .services import NOTIFICATION_SCANS
 
-        for spec in LIFECYCLE_SCANS:
+        # 야간 큐 발송·stuck-QUEUED 재선점(#10, #139)도 등록부 항목이다.
+        for spec in (*NOTIFICATION_SCANS, *LIFECYCLE_SCANS):
             register_scan(spec)
 
 

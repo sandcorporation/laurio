@@ -415,7 +415,12 @@ def test_awarded_contest_is_never_moved_to_judging_ended_by_the_tick(
     _freeze(judging_ends_at + timedelta(minutes=1))
     tick_resp = client.post(TICK_URL, **_internal_headers())
     assert tick_resp.status_code == 200
-    matching = [t for t in tick_resp.json()["rows"] if t["pk"] == contest["id"]]
+    # /tick 은 등록부 전부를 돌므로(#137) 다른 스캔의 행(채점·알림)도 섞여 온다 — Contest 행만 본다.
+    matching = [
+        t
+        for t in tick_resp.json()["rows"]
+        if t.get("model") == "Contest" and t.get("pk") == contest["id"]
+    ]
     assert matching == []
     assert Contest.objects.get(id=contest["id"]).status == Contest.Status.AWARDED
 

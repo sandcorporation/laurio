@@ -77,7 +77,7 @@ class LLMAdapterError(Exception):
 
     scoring.services.score_submission_once가 이 예외를 잡아 ScoringAttempt로
     남기고 조용히 돌아온다. Score는 만들어지지 않으므로, 다음 스캔
-    (scoring.services.run_pending_scoring)이 자동으로 다시 시도한다 — 별도의
+    (scoring.services 의 submission-scoring 스캔)이 자동으로 다시 시도한다 — 별도의
     재시도 스케줄링 코드가 필요 없다(ADR-0003과 같은 정신: 상태가 없으면 그냥
     다시 스캔하면 된다).
     """
@@ -92,7 +92,7 @@ class LLMAdapterPermanentError(LLMAdapterError):
     `LLMAdapterError`로 남아 계속 자동 재시도된다.
 
     `scoring.services.score_submission_once`가 이 예외를 잡으면 `ScoringAttempt.
-    permanent=True`로 남기고, `run_pending_scoring`의 대상 조회가 그런 Submission을
+    permanent=True`로 남기고, `submission-scoring` 스캔의 대상 조회가 그런 Submission을
     이후 스캔에서 제외한다 — 그렇지 않으면 이 Submission은 영원히 재시도만 되며
     Score 없이 배분 컷라인에서 조용히 빠진다(#88 코드리뷰 지적 2). ADR-0006이 말하는
     "이의제기는 재채점이 아니라 운영자가 근거를 보고 판단하는 절차다"와 같은 정신 —

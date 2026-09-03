@@ -35,14 +35,6 @@ LEGACY_BEAT_SCHEDULE = {
         "task": "core.call_payments_run_refunds",
         "schedule": _SCAN_INTERVAL_SECONDS,
     },
-    "notifications-dispatch-due": {
-        "task": "core.call_notifications_dispatch_due",
-        "schedule": _SCAN_INTERVAL_SECONDS,
-    },
-    "scoring-run-pending": {
-        "task": "core.call_scoring_run_pending",
-        "schedule": _SCAN_INTERVAL_SECONDS,
-    },
 }
 
 

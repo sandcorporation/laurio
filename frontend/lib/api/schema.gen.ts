@@ -422,15 +422,15 @@ export interface paths {
          *     엔드포인트는 결제 **의도**를 `JudgingExtensionPayment(REQUESTED)`로 먼저
          *     영속화하고 PG에 결제를 등록할 뿐, 아직 심사기간을 늘리지도 원장에 분개를
          *     남기지도 않는다. 실제로 돈이 확정되는 것은
-         *     `POST .../extend-judging-period/{order_id}/confirm`뿐이다(#13 리뷰 지적 1 —
-         *     확정 전에 먼저 행을 만들어 둬야, 결제 결과가 나중에 pending으로 걸리거나
-         *     confirm 호출 자체가 유실돼도 대사할 수 있는 흔적이 남는다).
+         *     `POST .../extend-judging-period/{order_id}/confirm`뿐이다(#13 리뷰 지적 1).
          *
          *     같은 Contest에 대해 두 요청이 동시에 들어와도 진행 중인(REQUESTED) 연장 결제가
-         *     하나만 남아야 한다(#13 리뷰 지적 2, `payments.api.initiate_payment`와 같은
-         *     이유) — `Contest` 행을 `select_for_update`로 잠가 동시 요청을 직렬화하고,
-         *     `JudgingExtensionPayment.unique_pending_judging_extension_payment_per_contest`
+         *     하나만 남아야 한다(#13 리뷰 지적 2) — `Contest` 행을 `select_for_update`로 잠가
+         *     동시 요청을 직렬화하고, `unique_pending_judging_extension_payment_per_contest`
          *     부분 유니크 제약을 두 번째 방어선으로 둔다.
+         *
+         *     **PG 호출은 그 잠금 밖에서 한다**(#126) — 벤더가 느리면 그 Contest 의 모든 쓰기가
+         *     같이 멈추고 DB 커넥션을 물고 있게 된다. 행 생성까지만 트랜잭션 안이다.
          */
         post: operations["contests_api_initiate_judging_period_extension"];
         delete?: never;
@@ -450,14 +450,11 @@ export interface paths {
         put?: never;
         /**
          * Confirm Judging Period Extension
-         * @description 연장 결제를 동기 확인한다 (`payments.api.confirm_payment`와 같은 구조).
+         * @description 연장 결제를 동기 확인한다 — Charge 확정 경로 하나(`payments.charges.settle_charge`).
          *
-         *     **PG 호출은 어떤 `transaction.atomic()` 블록 밖에서 일어난다** — 잠금을 쥔 채
-         *     외부 네트워크 호출을 기다리지 않는다(#13 리뷰 지적 3). 타임아웃이 나도 곧바로
-         *     실패로 처리하지 않고 `query_status`로 실제 결과를 조회해 확정한다(ADR-0008).
-         *     돈이 실제로 오갔는지 알 수 없는 "pending"도 실패로 단정하지 않는다 — 함부로
-         *     `mark_extension_failed`를 부르면, 나중에 PG가 성공으로 정산해도 이미 실패로
-         *     적힌 결제는 다시 확인되지 않는다.
+         *     PG 호출은 어떤 `transaction.atomic()` 블록 밖에서 일어나고, 타임아웃이면 `query_status`
+         *     로 확정하며, 그 재확인마저 실패하면 미확정으로 남긴다(#87 지적 4, #125). 벤더의
+         *     명시적 거절은 502 다.
          */
         post: operations["contests_api_confirm_judging_period_extension"];
         delete?: never;
@@ -850,27 +847,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/internal/accounts/purge-expired-identities": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Purge Expired Identities Endpoint
-         * @description 2년간 행위가 없던 계정의 신원을 파기하고, 보존 기간이 지난
-         *     `RetainedIdentity`를 지운다. 같은 시각에 두 번 불러도 결과가 같다.
-         */
-        post: operations["accounts_internal_api_purge_expired_identities_endpoint"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/internal/distributions/run-due": {
         parameters: {
             query?: never;
@@ -895,30 +871,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/internal/handovers/release-due": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Release Due Handovers
-         * @description 인수 확인 없이 release_deadline_at이 지난 Handover를 스캔해 Escrow를 해제한다.
-         *
-         *     Sponsor의 침묵이 Developer를 인질로 잡지 못한다는 규율의 실제 구현이다(#14 AC).
-         *     같은 시각에 두 번 불러도(워커가 겹쳐 돌아도) `release_escrow`의 조건부 UPDATE가
-         *     각 Handover를 정확히 한 번만 해제한다.
-         */
-        post: operations["handovers_api_release_due_handovers"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/internal/notifications": {
         parameters: {
             query?: never;
@@ -930,55 +882,6 @@ export interface paths {
         put?: never;
         /** Create */
         post: operations["notifications_api_create"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/internal/notifications/dispatch-due": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Dispatch Due
-         * @description 야간 연기 큐를 스캔해 발송 시각이 지난 것을 발송한다.
-         *
-         *     Celery beat 틱과 별개의 진입점이다 — 틱(#3)은 상태 전이 스캔 전반을 다루고, 이
-         *     엔드포인트는 Notification 야간 큐에 특화된 스캔이다. 필요하면 나중에 같은 beat
-         *     스케줄에 나란히 등록하면 된다.
-         */
-        post: operations["notifications_api_dispatch_due"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/internal/notifications/lifecycle/run-due": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Run Due Lifecycle
-         * @description Contest 라이프사이클이 다가옴에 따라 필요한 Notification들을 스캔해 만든다
-         *     (#19) — 마감 임박, 심사기간 종료 임박, Distribution 최종 경고(금액 포함,
-         *     낮 시각으로 구성된 스케줄). Celery beat가 tick과 나란히 반복 호출할 전용
-         *     진입점이다 — `distributions.api.run_due`/`handovers.api.release_due_handovers`
-         *     와 같은 이유로 `core.transitions` 레지스트리를 쓰지 않는다(각 알림 생성이라는
-         *     부수효과가 있어 단순 조건부 UPDATE로는 부족하다).
-         */
-        post: operations["notifications_api_run_due_lifecycle"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1050,6 +953,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/internal/scans/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Scan
+         * @description 등록부의 스캔 하나. Celery beat 가 스캔마다 이것을 부른다 — 이름은 등록부에서만 온다.
+         */
+        post: operations["core_api_scan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/internal/scoring/incomplete-contests": {
         parameters: {
             query?: never;
@@ -1074,29 +997,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/internal/scoring/run-pending": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Run Pending
-         * @description CLOSED Contest 중 아직 채점되지 않은 Submission을 스캔해 채점을 시도한다.
-         *
-         *     이미 Score가 있는 Submission은 항상 건너뛴다 — 재채점 경로는 없다(ADR-0006).
-         *     실패한 시도는 다음 호출에서 자동으로 다시 시도된다.
-         */
-        post: operations["scoring_api_run_pending"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/internal/tick": {
         parameters: {
             query?: never;
@@ -1108,10 +1008,12 @@ export interface paths {
         put?: never;
         /**
          * Tick
-         * @description 스케줄러 틱. Celery beat 가 주기적으로 이 엔드포인트를 호출한다(ADR-0003).
+         * @description 등록부의 스캔 전부를 등록 순서로 한 바퀴 — 수동용 진입점(#137, ADR-0003).
          *
-         *     등록된 모든 전이 규칙을 스캔해 시각이 지난 행을 조건부 UPDATE로 옮긴다. 같은
-         *     시각에 두 번 불러도(워커가 겹쳐 돌아도) 각 전이는 정확히 한 번만 일어난다.
+         *     staging 운영자가 21일 시나리오를 몇 초에 재현할 때 쓴다. Celery beat 는 이것을 부르지
+         *     않고 스캔마다 `/scans/{name}` 을 부른다 — 열일곱 스캔을 각자 예산으로 순차 실행하면 30초
+         *     HTTP 타임아웃 안에 못 들 수 있다. 같은 시각에 두 번 불러도 각 행은 정확히 한 번만
+         *     처리된다(조건부 UPDATE, `core.transitions.claim_transition`).
          */
         post: operations["core_api_tick"];
         delete?: never;
@@ -1667,8 +1569,10 @@ export interface paths {
          *     같은 Contest에 대해 두 요청이 동시에 들어와도 활성 결제가 하나만 남아야
          *     한다(#9 리뷰 지적 3) — `Contest` 행을 `select_for_update`로 잠가 동시
          *     요청을 직렬화하고, `Payment.unique_active_payment_per_contest` 부분
-         *     유니크 제약을 두 번째 방어선으로 둔다. 잠금을 잡지 못한 예외 경로가
-         *     생기더라도 DB 제약이 최후에 막아준다.
+         *     유니크 제약을 두 번째 방어선으로 둔다.
+         *
+         *     **PG 등록은 그 잠금 밖에서 한다**(#127) — 벤더가 느리면 그 Contest 의 모든 쓰기가
+         *     같이 멈추고 DB 커넥션을 물고 있게 된다. 행 확보까지만 트랜잭션 안이다.
          */
         post: operations["payments_api_initiate_payment"];
         delete?: never;
@@ -1714,7 +1618,12 @@ export interface paths {
         put?: never;
         /**
          * Confirm Payment
-         * @description 동기 승인 확인. 타임아웃이 나도 곧바로 실패로 처리하지 않고 조회로 확정한다.
+         * @description 동기 승인 확인 — Charge 확정 경로 하나(`payments.charges.settle_charge`).
+         *
+         *     PG 호출은 어떤 `transaction.atomic()` 밖에서 일어나고, 타임아웃이면 `query_status` 로
+         *     확정하며, 그 재확인마저 실패하면 미확정으로 남긴다(#87 지적 3, #125). 벤더의 명시적
+         *     거절은 502 다. 이미 다른 경로(웹훅 등)로 확정돼 있으면 벤더를 부르지 않고 현재 상태를
+         *     돌려준다.
          */
         post: operations["payments_api_confirm_payment"];
         delete?: never;
@@ -3098,8 +3007,9 @@ export interface components {
          * @description Operator가 Payout 하나가 무엇을 기다리는지 보는 표면(#50 AC).
          *
          *     `blocked_on`은 "identity" | "seller" | "transfer"(#57 코드리뷰 지적 1 —
-         *     Seller는 이미 READY인데 실이체 자체가 실패/미확정인 경우) | None(아무 것도
-         *     안 기다림 — 이미 CONFIRMED거나 아직 REQUESTED/FAILED) 중 하나다. 두 대기를
+         *     Seller는 이미 READY인데 실이체 자체가 실패/미확정인 경우) | "operator"(Hold 표에
+         *     없는 조합 — 사람이 봐야 한다, #130) | None(아무 것도 안 기다림 — 이미 CONFIRMED거나
+         *     아직 REQUESTED/FAILED) 중 하나다. 값은 `payouts.progress.hold_of` 의 Hold 에서 나온다. 두 대기를
          *     한 상태로 뭉치지 않는다는 요구가 Operator 조회에서도 그대로 지켜져야 한다.
          */
         OperatorPayoutOut: {
@@ -4852,24 +4762,6 @@ export interface operations {
             };
         };
     };
-    accounts_internal_api_purge_expired_identities_endpoint: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
     distributions_api_run_due: {
         parameters: {
             query?: never;
@@ -4882,24 +4774,6 @@ export interface operations {
                 "application/json": components["schemas"]["RunDueDistributionsIn"];
             };
         };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    handovers_api_release_due_handovers: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
         responses: {
             /** @description OK */
             200: {
@@ -4931,42 +4805,6 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["NotificationOut"];
                 };
-            };
-        };
-    };
-    notifications_api_dispatch_due: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    notifications_api_run_due_lifecycle: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
         };
     };
@@ -5032,11 +4870,13 @@ export interface operations {
             };
         };
     };
-    scoring_api_incomplete_contests: {
+    core_api_scan: {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                name: string;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -5050,7 +4890,7 @@ export interface operations {
             };
         };
     };
-    scoring_api_run_pending: {
+    scoring_api_incomplete_contests: {
         parameters: {
             query?: never;
             header?: never;
