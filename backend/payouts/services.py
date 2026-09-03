@@ -490,13 +490,15 @@ def record_transfer_result(payout: Payout, result_status: str, attempt: int | No
 
 def advance_seller_pending_payouts(developer) -> list[Payout]:
     """Seller가 웹훅(`seller.changed`)으로 방금 지급 가능 상태가 됐을 때, 이
-    Developer의 CONFIRMED_SELLER_PENDING Payout들을 다음 상태로 밀어준다(#57).
+    Developer의 CONFIRMED_SELLER_PENDING Payout들을 `advance` 로 밀어준다(#57, #132).
 
-    실물 어댑터는 `retry_seller_registration`처럼 우리가 다시 register()를
-    불러야만 상태가 갱신되는 게 아니라, 토스가 비동기로(웹훅) 최종 상태를
-    알려준다 — 그 경로에서도 두 대기 판정과 실이체 시도가 똑같이 일어나야
-    한다. 이미 CONFIRMED이거나 REQUESTED/FAILED인 Payout은 건드리지 않는다.
+    실물 어댑터는 `retry_seller_registration`처럼 우리가 다시 register()를 불러야만
+    상태가 갱신되는 게 아니라, 토스가 비동기로(웹훅) 최종 상태를 알려준다 — 그
+    경로에서도 두 대기 판정과 실이체 시도가 똑같이 일어나야 한다. 벤더 HTTP 호출은
+    락 없이 한다(코드리뷰 지적 13) — advance 의 규율이다.
     """
+
+    from .progress import advance
 
     seller = Seller.objects.filter(developer=developer).first()
     if seller is None or seller.status not in Seller.READY_STATUSES:
@@ -506,27 +508,10 @@ def advance_seller_pending_payouts(developer) -> list[Payout]:
 
     advanced: list[Payout] = []
     for candidate in candidates:
-        # 벤더 HTTP 호출은 락 없이 한다(코드리뷰 지적 13) — `select_for_update`로
-        # 감싸면 웹훅 핸들러가 벤더 응답을 기다리는 최대 20초(confirm 10s +
-        # query_status 10s) 동안 이 Payout의 행 락을 쥐게 되고, 몫이 여럿인
-        # Distribution에서는 다른 요청·재전송된 웹훅이 그 락에 막혀 대기하다
-        # 타임아웃 → 재전송을 반복한다. 안전장치는 아래 조건부 UPDATE
-        # 하나로 충분하다(mark_confirmed와 같은 규율) — 그 사이 다른 경로가
-        # 먼저 전이시켰으면 rowcount 0으로 조용히 넘어간다.
-        transfer_completed = _request_real_transfer_if_ready(candidate)
-        if not transfer_completed:
-            continue
-
-        has_identity = TaxIdentity.objects.filter(payout=candidate).exists()
-        target = (
-            Payout.Status.CONFIRMED if has_identity else Payout.Status.CONFIRMED_IDENTITY_PENDING
-        )
-        updated = Payout.objects.filter(
-            pk=candidate.pk, status=Payout.Status.CONFIRMED_SELLER_PENDING
-        ).update(status=target)
-        if updated:
-            candidate.status = target
-            advanced.append(candidate)
+        before = candidate.status
+        after = advance(candidate, register_seller=False)
+        if after.status != before:
+            advanced.append(after)
     return advanced
 
 
@@ -595,19 +580,12 @@ def resolve_transfer_webhook(idempotency_key, our_status: str) -> Payout:
         return payout
 
     if our_status == "paid":
+        # 사실(실이체 COMPLETED)만 기록하고 advance 에 맡긴다(#132) — 두 대기가 모두 풀렸으면
+        # CONFIRMED 로, 신원이 아직이면 CONFIRMED_IDENTITY_PENDING 으로 간다.
         Payout.objects.filter(pk=payout.pk).update(transfer_status=Payout.TransferStatus.COMPLETED)
-        payout.transfer_status = Payout.TransferStatus.COMPLETED
-        if payout.status == Payout.Status.CONFIRMED_SELLER_PENDING:
-            has_identity = TaxIdentity.objects.filter(payout=payout).exists()
-            target = (
-                Payout.Status.CONFIRMED if has_identity else Payout.Status.CONFIRMED_IDENTITY_PENDING
-            )
-            updated = Payout.objects.filter(
-                pk=payout.pk, status=Payout.Status.CONFIRMED_SELLER_PENDING
-            ).update(status=target)
-            if updated:
-                payout.status = target
-        return payout
+        from .progress import advance
+
+        return advance(payout, register_seller=False)
 
     # "pending"(REQUESTED/IN_PROGRESS) — 아직 확정할 수 없다. 기록만 하고
     # 조용히 넘어간다.
@@ -641,98 +619,30 @@ def submit_identity(payout: Payout, resident_registration_number: str) -> Payout
 
 
 def retry_seller_registration(payout: Payout, *, simulate: str | None = None) -> Payout:
-    """CONFIRMED_SELLER_PENDING에서 Seller 등록을 다시 시도한다(#50, ADR-0020).
+    """Seller 등록(또는 실이체)을 다시 시도한다(#50, ADR-0020) — 판정은 `advance` 가 한다(#132).
 
-    부분 승인으로 넘어가면, 신원이 이미 제출되어 있으면 CONFIRMED로, 아직
-    아니면 CONFIRMED_IDENTITY_PENDING으로 옮긴다(두 대기 중 남은 한쪽만
-    보여준다). 여전히 부분 승인이 아니면(한도 초과·심사 필요·거절) 그대로
-    CONFIRMED_SELLER_PENDING에 남는다 — 실패로 종결되지 않는다.
+    CONFIRMED_SELLER_PENDING 이면 등록을 다시 시도하고(`register_seller=True`), 그 결과
+    READY 면 실이체까지 확정될 때만 다음 상태로 간다. 여전히 READY 가 아니면(한도 초과·심사
+    필요·거절) 그대로 남는다 — 실패로 종결되지 않는다.
 
-    벤더 HTTP 호출(`ensure_seller_registered`/`_request_real_transfer_if_ready`
-    가 각각 최대 10~20초)은 락 밖에서 한다(코드리뷰 지적 14, 3차 —
-    `advance_seller_pending_payouts`에 이미 적용한 것과 같은 규율을 여기에도
-    적용한다). `select_for_update()`로 감싸면 이 호출을 기다리는 동안 다른
-    요청(같은 Payout의 재시도 클릭, 또는 웹훅)이 그 락에 막혀 대기하다
-    타임아웃한다. `submit_seller_phone`은 이 함수를 여러 Payout에 대해
-    루프로 부르므로, 한 번의 호출이 락을 오래 쥐면 그 지연이 N배로
-    불어난다. 안전장치는 마지막 조건부 UPDATE 하나로 충분하다
-    (`mark_confirmed`와 같은 규율).
+    CONFIRMED_IDENTITY_PENDING 인데 실이체만 FAILED 인 경우도 받는다 — Seller 는 이미 READY
+    였고 실이체 자체만 거절된 상태라, 프런트의 「다시 시도」가 여기로 온다(#57 코드리뷰 지적
+    6, 3차). 이때는 등록을 다시 시도하지 않고 지금 Seller 를 읽는다(그 사이 웹훅으로
+    REJECTED 가 됐을 수 있다 — 그러면 advance 가 Seller 대기로 옮긴다).
+
+    벤더 HTTP 호출은 락 밖에서 한다(코드리뷰 지적 14, 3차) — advance 의 규율이다.
     """
 
+    from .progress import advance
+
     current = Payout.objects.get(pk=payout.pk)
-
     if current.status == Payout.Status.CONFIRMED_SELLER_PENDING:
-        developer = current.developer
-        seller = ensure_seller_registered(developer, simulate=simulate)
-        # ensure_seller_registered가 Seller를 막 READY로 만들면 그 안에서
-        # advance_seller_pending_payouts를 불러(코드리뷰 지적 5, 4차) 이
-        # Payout을 포함한 "이 Developer의 CONFIRMED_SELLER_PENDING 전부"를
-        # 이미 전진시켰을 수 있다 -- 그러면 아래 조건부 UPDATE는 WHERE 절이
-        # 더 이상 매치하지 않아 rowcount 0이 되고, 그것만으로는
-        # current.status를 갱신할 기회가 없다. 어느 경로가 실제로 전이시켰든
-        # 항상 최신 상태를 다시 읽어 돌려준다.
-        #
-        # `current`를 여기서 즉시 새로 읽는다(코드리뷰 지적 4, 5차) --
-        # ensure_seller_registered 호출 *안에서* 방금 일어났을 수 있는 sweep이
-        # 쓴 값(transfer_status/status)을 이 시점에 반영하지 않으면, 바로 아래
-        # `_request_real_transfer_if_ready(current)`가 sweep 이전의 낡은
-        # transfer_status(예: NOT_REQUESTED)를 보고 COMPLETED 단락 검사를
-        # 통과시켜, 이미 sweep이 확정 지은 같은 Payout에 대해 같은 요청 안에서
-        # 클레임+POST를 한 번 더 시도한다.
-        current.refresh_from_db()
-        if seller.status in Seller.READY_STATUSES:
-            # 이 시점에 실제로 실이체가 COMPLETED로 확정될 때만 다음 상태로
-            # 넘어간다(코드리뷰 지적 1) — 그렇지 않으면(FAILED/REQUESTED)
-            # CONFIRMED_SELLER_PENDING에 그대로 남아, Seller가 READY인데도
-            # 실이체만 안 풀린 경우를 위한 재시도 표면 역할을 계속한다.
-            if _request_real_transfer_if_ready(current):
-                has_identity = TaxIdentity.objects.filter(payout=current).exists()
-                target = (
-                    Payout.Status.CONFIRMED if has_identity else Payout.Status.CONFIRMED_IDENTITY_PENDING
-                )
-                Payout.objects.filter(
-                    pk=current.pk, status=Payout.Status.CONFIRMED_SELLER_PENDING
-                ).update(status=target)
-        current.refresh_from_db()
-        return current
-
+        return advance(current, register_seller=True, seller_simulate=simulate)
     if (
         current.status == Payout.Status.CONFIRMED_IDENTITY_PENDING
         and current.transfer_status == Payout.TransferStatus.FAILED
     ):
-        # Seller는 이미 READY인데 실이체 자체만 실패한 경우다(코드리뷰 지적
-        # 6, 3차의 결과 — submit_identity가 더는 이 상태를
-        # CONFIRMED_SELLER_PENDING으로 역행시키지 않으므로, 실이체 재시도가
-        # 필요한 Payout이 CONFIRMED_IDENTITY_PENDING에 머물 수 있다). 이
-        # 엔드포인트가 CONFIRMED_SELLER_PENDING만 받으면 프런트가 보여주는
-        # "다시 시도" 버튼(transfer_status만 보고 노출된다)이 항상 409를
-        # 돌려받는다 — 화면이 시킬 수 없는 일을 시키는 꼴이다. Seller가
-        # 그 사이 REJECTED로 바뀌었을 수도 있으니(웹훅으로) 다시 확인한다.
-        developer = current.developer
-        seller = Seller.objects.filter(developer=developer).first()
-        if seller is not None and seller.status in Seller.READY_STATUSES:
-            if _request_real_transfer_if_ready(current):
-                # CONFIRMED_IDENTITY_PENDING에 있다는 것 자체가 "신원이 이미
-                # 제출됐다"는 뜻이 아니다(코드리뷰 지적 2, 4차 -- 실행 재현
-                # 완료) -- 이 상태의 원래 의미는 정확히 그 반대다("신원 대기").
-                # mark_confirmed가 Seller가 이미 READY인 첫 확정에서 무조건
-                # 이 상태로 보내고, 신원은 그 이후에 별도로 제출받는다. 이
-                # 분기를 has_identity 없이 CONFIRMED로 올리면, 신원을 아직
-                # 한 번도 못 낸 Payout이 세무 신고 자체가 영구히 불가능해진다
-                # -- submit_identity의 "CONFIRMED_IDENTITY_PENDING/
-                # CONFIRMED_SELLER_PENDING일 때만 건드린다"는 가드에 다시는
-                # 걸리지 않기 때문이다. 첫 번째 분기(CONFIRMED_SELLER_PENDING)
-                # 와 정확히 같은 판정을 쓴다.
-                has_identity = TaxIdentity.objects.filter(payout=current).exists()
-                target = (
-                    Payout.Status.CONFIRMED if has_identity else Payout.Status.CONFIRMED_IDENTITY_PENDING
-                )
-                Payout.objects.filter(
-                    pk=current.pk, status=Payout.Status.CONFIRMED_IDENTITY_PENDING
-                ).update(status=target)
-        current.refresh_from_db()
-        return current
-
+        return advance(current, register_seller=False)
     return current
 
 
