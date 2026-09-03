@@ -16,6 +16,8 @@ import uuid
 from django.conf import settings
 from django.db import models
 
+from core.classification import Classification
+
 from payments.charges import ChargeBase
 
 
@@ -203,7 +205,93 @@ class Contest(models.Model):
 
     @property
     def is_published(self) -> bool:
-        return self.status == self.Status.PUBLISHED
+        return self.Status.SUBMITTABLE(self.status)
+
+
+class HomeStatusAxis(models.TextChoices):
+    """홈 큐레이션 버킷의 status 축 (#94, #141) — status 만으로 정해지는 부분. OPEN 은 마감 시각이
+    마저 갈라 ONGOING·IMMINENT·IN_JUDGING 중 하나가 되고(`contests.curation.home_bucket_for`),
+    HIDDEN 은 어느 묶음에도 들어가지 않는다."""
+
+    OPEN = "open", "공개 중"
+    IN_JUDGING = "in_judging", "심사중"
+    COMPLETED = "completed", "완료"
+    HIDDEN = "hidden", "숨김"
+
+
+# --- Contest.Status 가 소유하는 분류 (#141, #121) --------------------------------------------
+#
+# 질문마다 다섯 값 전부에 명시적으로 답한다. 집합은 여기서 파생되고(`.statuses`), 단일값 비교도
+# 질문으로 한다 — 값이 하나 끼어들면(예: 심사 중 PAUSED) `== CLOSED` 자리들이 조용히 False 가
+# 되는 것을 tests/test_status_classification.py 의 키 집합 단언이 막는다. 값 집합의 내용은 이관 전과
+# 같다(#121 — 같은 질문에 다른 집합을 쓰는 곳은 없었다).
+_S = Contest.Status
+
+# 마감(#11) 이후에도 계속 공개로 남는다 — CLOSED 뿐 아니라 AWARDED·JUDGING_ENDED 도(#13). 아니면
+# 심사기간이 끝나거나 Award 되는 순간 목록·상세·제출물 조회가 404 가 된다.
+Contest.Status.PUBLICLY_VISIBLE = Classification(
+    {_S.DRAFT: False, _S.PUBLISHED: True, _S.CLOSED: True, _S.AWARDED: True, _S.JUDGING_ENDED: True},
+    question="공개 목록·상세에 보이는가",
+)
+# 결제로 공개됐고 아직 마감 전이가 안 됐다 — 제출·수정의 status 전제(시각은 따로 본다).
+Contest.Status.SUBMITTABLE = Classification(
+    {_S.DRAFT: False, _S.PUBLISHED: True, _S.CLOSED: False, _S.AWARDED: False, _S.JUDGING_ENDED: False},
+    question="status 상 제출을 받는가",
+)
+# CLOSED 뿐 아니라 AWARDED·JUDGING_ENDED 도(#13) — Award 는 Score 를 기다리지 않으므로 채점이 끝나기
+# 전에 CLOSED 를 벗어날 수 있다. CLOSED 만 보면 그 순간 미채점 Submission 이 영원히 빠진다.
+Contest.Status.SCOREABLE = Classification(
+    {_S.DRAFT: False, _S.PUBLISHED: False, _S.CLOSED: True, _S.AWARDED: True, _S.JUDGING_ENDED: True},
+    question="채점 스캔의 대상인가",
+)
+# 심사 창 안에서만 — 시각(judging_ends_at)은 따로 본다.
+Contest.Status.AWARDABLE = Classification(
+    {_S.DRAFT: False, _S.PUBLISHED: False, _S.CLOSED: True, _S.AWARDED: False, _S.JUDGING_ENDED: False},
+    question="status 상 Award 할 수 있는가",
+)
+# PUBLISHED·DRAFT 는 심사기간 자체가 없고, AWARDED·JUDGING_ENDED 는 더 늘릴 대상이 없다.
+Contest.Status.JUDGING_EXTENDABLE = Classification(
+    {_S.DRAFT: False, _S.PUBLISHED: False, _S.CLOSED: True, _S.AWARDED: False, _S.JUDGING_ENDED: False},
+    question="심사기간을 연장할 수 있는가",
+)
+# 참여자 0명 전액 환불의 status 전제 — JUDGING_ENDED 도(#13 뒤 남아 있던 격차). 스케줄러가
+# judging_ends_at 이 지나면 CLOSED -> JUDGING_ENDED 로 무조건 옮기므로, CLOSED 만 보면 그 순간부터
+# Prize 가 Escrow 에 갇힌다. 참가자 없음·refund_disabled 는 payments 가 따로 본다.
+Contest.Status.REFUNDABLE = Classification(
+    {_S.DRAFT: False, _S.PUBLISHED: False, _S.CLOSED: True, _S.AWARDED: False, _S.JUDGING_ENDED: True},
+    question="참여자 0명 환불의 status 전제를 만족하는가",
+)
+# 유찰된 Contest 의 재개최 — 같은 이유로 JUDGING_ENDED 도. 실제 판정 근거는 REFUNDED Payment 다.
+Contest.Status.REOPENABLE = Classification(
+    {_S.DRAFT: False, _S.PUBLISHED: False, _S.CLOSED: True, _S.AWARDED: False, _S.JUDGING_ENDED: True},
+    question="재개최할 수 있는 status 인가",
+)
+# 결제 전이라 고칠 수 있고, 결제를 (다시) 시작할 수 있다 — 둘 다 DRAFT 뿐이다.
+Contest.Status.EDITABLE = Classification(
+    {_S.DRAFT: True, _S.PUBLISHED: False, _S.CLOSED: False, _S.AWARDED: False, _S.JUDGING_ENDED: False},
+    question="초안으로서 고칠 수 있는가",
+)
+Contest.Status.PAYABLE = Classification(
+    {_S.DRAFT: True, _S.PUBLISHED: False, _S.CLOSED: False, _S.AWARDED: False, _S.JUDGING_ENDED: False},
+    question="Prize 결제를 시작할 수 있는가",
+)
+# 진행 중인 거래 — Sponsor 는 이 상태의 Contest 가 있으면 탈퇴할 수 없다(ADR-0025, #142 가 쓴다).
+Contest.Status.BLOCKS_SPONSOR_WITHDRAWAL = Classification(
+    {_S.DRAFT: False, _S.PUBLISHED: True, _S.CLOSED: True, _S.AWARDED: False, _S.JUDGING_ENDED: False},
+    question="Sponsor 의 탈퇴를 막는 진행 중 거래인가",
+)
+# 홈 큐레이션의 status 축(#94). PUBLISHED 는 마감 시각이 마저 가른다.
+Contest.Status.HOME_AXIS = Classification(
+    {
+        _S.DRAFT: HomeStatusAxis.HIDDEN,
+        _S.PUBLISHED: HomeStatusAxis.OPEN,
+        _S.CLOSED: HomeStatusAxis.IN_JUDGING,
+        _S.AWARDED: HomeStatusAxis.COMPLETED,
+        _S.JUDGING_ENDED: HomeStatusAxis.COMPLETED,
+    },
+    question="홈의 어느 묶음 축에 속하는가",
+)
+del _S
 
 
 class Requirement(models.Model):
@@ -315,7 +403,7 @@ class JudgingExtensionPayment(ChargeBase):
         from core.transitions import claim_transition
 
         contest = Contest.objects.select_for_update().get(pk=self.contest_id)
-        if contest.status != Contest.Status.CLOSED or contest.judging_ends_at is None:
+        if not Contest.Status.JUDGING_EXTENDABLE(contest.status) or contest.judging_ends_at is None:
             return
 
         new_count = contest.judging_extension_count + 1

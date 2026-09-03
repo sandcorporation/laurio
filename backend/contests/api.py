@@ -36,6 +36,7 @@ from policies.services import get_current_policy
 from verification.models import Verification
 
 from .models import (
+    HomeStatusAxis,
     Category,
     Contest,
     DeliverableType,
@@ -87,17 +88,6 @@ _VALID_GRADES = {"required", "optional"}
 # 한 Sponsor가 한 Contest에 쌓을 수 있는 대화 턴 수 상한. 무제한으로 두면 한 Contest가
 # 프롬프트에 실리는 대화 이력을 무한정 늘려 이후 매 턴의 LLM 호출 비용·지연을 키운다.
 _MAX_CHAT_HISTORY_TURNS = 200
-
-# 마감(#11) 이후 계속 공개로 남는 상태들. CLOSED뿐 아니라 AWARDED·JUDGING_ENDED도
-# 포함한다(#13) — 그렇지 않으면 심사기간이 끝나거나 Award되는 순간 목록·상세가
-# 404가 되어, #11이 만든 "마감된 Contest는 계속 공개" 계약이 그 이후 상태에서
-# 조용히 깨진다(정확히 이 티켓이 경계하라고 지시받은, 새 상태를 놓치는 실패 형태다).
-_PUBLICLY_VISIBLE_STATUSES = [
-    Contest.Status.PUBLISHED,
-    Contest.Status.CLOSED,
-    Contest.Status.AWARDED,
-    Contest.Status.JUDGING_ENDED,
-]
 
 # 홈의 한 묶음이 보여주는 최대 건수 (#94). 홈은 큐레이션이지 탐색이 아니다 —
 # 전체는 `/contests`(#39, 필터·정렬·페이지네이션을 이미 갖고 있다)의 몫이다.
@@ -298,7 +288,7 @@ def list_contests(request: HttpRequest, filters: Query[ContestListFilters]):
     아니라 빈 목록이다(필터는 "그런 게 있느냐"가 아니라 "그것으로 좁혀라"이다).
     """
 
-    queryset = Contest.objects.filter(status__in=_PUBLICLY_VISIBLE_STATUSES)
+    queryset = Contest.objects.filter(status__in=Contest.Status.PUBLICLY_VISIBLE.statuses)
 
     if filters.category is not None:
         queryset = queryset.filter(category_id=filters.category)
@@ -384,7 +374,8 @@ def _home_bucket_queryset(base: QuerySet, bucket, *, now) -> QuerySet:
 
     if bucket == HomeCurationBucket.ONGOING:
         return base.filter(
-            status=Contest.Status.PUBLISHED, deadline_at__gt=imminent_cutoff
+            status__in=Contest.Status.HOME_AXIS.where(HomeStatusAxis.OPEN),
+            deadline_at__gt=imminent_cutoff,
         ).order_by("deadline_at", "id")
 
     if bucket == HomeCurationBucket.IMMINENT:
@@ -394,20 +385,20 @@ def _home_bucket_queryset(base: QuerySet, bucket, *, now) -> QuerySet:
         # 2). `home_bucket_for`가 그 구간을 IN_JUDGING으로 보내는 것과
         # 같은 경계다.
         return base.filter(
-            status=Contest.Status.PUBLISHED,
+            status__in=Contest.Status.HOME_AXIS.where(HomeStatusAxis.OPEN),
             deadline_at__gte=now,
             deadline_at__lte=imminent_cutoff,
         ).order_by("deadline_at", "id")
 
     if bucket == HomeCurationBucket.IN_JUDGING:
         return base.filter(
-            Q(status=Contest.Status.CLOSED)
-            | Q(status=Contest.Status.PUBLISHED, deadline_at__lt=now)
+            Q(status__in=Contest.Status.HOME_AXIS.where(HomeStatusAxis.IN_JUDGING))
+            | Q(status__in=Contest.Status.HOME_AXIS.where(HomeStatusAxis.OPEN), deadline_at__lt=now)
         ).order_by("-deadline_at", "-id")
 
     if bucket == HomeCurationBucket.COMPLETED:
         return base.filter(
-            status__in=(Contest.Status.AWARDED, Contest.Status.JUDGING_ENDED)
+            status__in=Contest.Status.HOME_AXIS.where(HomeStatusAxis.COMPLETED)
         ).order_by("-deadline_at", "-id")
 
     raise ValueError(f"알 수 없는 HomeCurationBucket: {bucket!r}")  # pragma: no cover
@@ -499,8 +490,8 @@ def get_contest(request: HttpRequest, contest_id: int):
         raise HttpError(404, "Contest를 찾을 수 없습니다.") from exc
 
     # PUBLISHED·CLOSED·AWARDED·JUDGING_ENDED 모두 공개다 — list_contests와 같은
-    # 기준(위 _PUBLICLY_VISIBLE_STATUSES 설명 참고).
-    if contest.status not in _PUBLICLY_VISIBLE_STATUSES:
+    # 기준(Contest.Status.PUBLICLY_VISIBLE).
+    if not Contest.Status.PUBLICLY_VISIBLE(contest.status):
         auth_user = getattr(request, "auth_user", None)
         is_owner = auth_user is not None and contest.sponsor.user_id == auth_user.id
         if not is_owner:
@@ -632,7 +623,7 @@ def record_contest_view(request: HttpRequest, contest_id: int):
     except Contest.DoesNotExist as exc:
         raise HttpError(404, "Contest를 찾을 수 없습니다.") from exc
 
-    if contest.status not in _PUBLICLY_VISIBLE_STATUSES:
+    if not Contest.Status.PUBLICLY_VISIBLE(contest.status):
         auth_user = getattr(request, "auth_user", None)
         is_owner = auth_user is not None and contest.sponsor.user_id == auth_user.id
         if not is_owner:
@@ -691,15 +682,9 @@ def reopen_contest(request: HttpRequest, contest_id: int, payload: ContestReopen
         if original.sponsor.user_id != request.auth_user.id:
             raise HttpError(403, "본인이 개최한 Contest만 재개최할 수 있습니다.")
 
-        if original.status not in (Contest.Status.CLOSED, Contest.Status.JUDGING_ENDED):
-            # CLOSED뿐 아니라 JUDGING_ENDED도 허용한다 — 스케줄러가
-            # judging_ends_at이 지나면 CLOSED -> JUDGING_ENDED로 무조건 전이시키므로
-            # (core.transitions 레지스트리, Award 여부와 무관), 참여자 0명으로
-            # 유찰된 Contest도 이 엔드포인트가 그 사실을 알아채기 전에
-            # JUDGING_ENDED로 넘어갈 수 있다. CLOSED만 허용하면 그 순간부터
-            # 재개최가 영구히 409로 막힌다 — 실제 판정 근거는 아래
-            # REFUNDED Payment 존재 여부이지 이 status 값 자체가 아니므로, 상태
-            # 값만으로 이미 유찰이 확정된 Contest를 걸러낼 이유가 없다.
+        if not Contest.Status.REOPENABLE(original.status):
+            # 실제 판정 근거는 아래 REFUNDED Payment 존재 여부이지 이 status 값 자체가 아니다 —
+            # 어느 status 가 해당하는지는 Contest.Status.REOPENABLE 이 답한다(#141).
             raise HttpError(409, "마감된 Contest만 재개최할 수 있습니다.")
 
         if not Payment.objects.filter(contest=original, status=Payment.Status.REFUNDED).exists():
@@ -767,10 +752,7 @@ _ACTIVE_EXTENSION_PAYMENT_STATUSES = [JudgingExtensionPayment.Status.REQUESTED]
 
 
 def _reject_if_judging_period_is_not_extendable(contest: Contest) -> None:
-    if contest.status != Contest.Status.CLOSED:
-        # PUBLISHED(아직 마감 전)·DRAFT(아직 공개 전)는 심사기간 자체가 없고,
-        # AWARDED(이미 Award됨)·JUDGING_ENDED(이미 심사기간 종료)는 더 늘릴 대상이
-        # 없다.
+    if not Contest.Status.JUDGING_EXTENDABLE(contest.status):
         raise HttpError(409, "지금은 심사기간을 연장할 수 있는 상태가 아닙니다.")
 
     # 코드베이스 관용구와 맞춘다: 심사기간 종료는 `judging_ends_at <= as_of`일 때
@@ -929,7 +911,7 @@ def _get_owned_draft_contest(request: HttpRequest, contest_id: int) -> Contest:
 
     contest = _get_owned_contest(request, contest_id)
 
-    if contest.status != Contest.Status.DRAFT:
+    if not Contest.Status.EDITABLE(contest.status):
         raise HttpError(409, "공개된 Contest의 Requirement 체크리스트는 더 이상 수정할 수 없습니다.")
 
     return contest

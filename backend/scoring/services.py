@@ -303,11 +303,7 @@ def _pending_submissions(as_of, ctx):
 
     return (
         Submission.objects.filter(
-            contest__status__in=[
-                Contest.Status.CLOSED,
-                Contest.Status.AWARDED,
-                Contest.Status.JUDGING_ENDED,
-            ],
+            contest__status__in=Contest.Status.SCOREABLE.statuses,
             score__isnull=True,
         )
         .exclude(scoring_attempts__permanent=True)

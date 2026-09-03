@@ -128,10 +128,10 @@ def sponsor_next_action_for(contest, *, now) -> str:
 
     from contests.models import Contest
 
-    if contest.status == Contest.Status.DRAFT:
+    if Contest.Status.PAYABLE(contest.status):
         return SponsorNextAction.PAY_TO_PUBLISH
 
-    if contest.status == Contest.Status.PUBLISHED and now < contest.deadline_at:
+    if Contest.Status.SUBMITTABLE(contest.status) and now < contest.deadline_at:
         return SponsorNextAction.AWAITING_SUBMISSIONS
 
     # 선정이 끝났으면 그 뒤의 흐름만 남는다 — 채점 상태는 더 이상 개최자가
@@ -146,10 +146,10 @@ def sponsor_next_action_for(contest, *, now) -> str:
         return SponsorNextAction.NO_SUBMISSIONS
 
     # 마감 시각은 지났는데 스캔이 아직 CLOSED 로 옮기지 않았다.
-    if contest.status == Contest.Status.PUBLISHED:
+    if Contest.Status.SUBMITTABLE(contest.status):
         return SponsorNextAction.AWAITING_SCORING
 
-    if contest.status == Contest.Status.CLOSED and _within_judging_window(contest, now):
+    if Contest.Status.AWARDABLE(contest.status) and _within_judging_window(contest, now):
         # **채점을 이 아래 단계들의 게이트로 쓰지 않는다.** 「하나라도 채점됨」을
         # 바깥 조건으로 두면, 채점이 영영 성공하지 못하는 공모전은 배분이 끝난
         # 뒤에도 계속 「채점 대기」라고 말한다. 그래서 이 안내는 **심사 창

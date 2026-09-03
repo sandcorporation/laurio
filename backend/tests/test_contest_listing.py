@@ -234,7 +234,7 @@ def test_filtering_by_an_id_that_does_not_exist_is_an_empty_list_not_an_error(
 def test_draft_contests_are_still_invisible_through_the_new_filters(
     client, sponsor, games, web
 ):
-    """필터를 붙이면서 공개 범위가 넓어지면 안 된다(_PUBLICLY_VISIBLE_STATUSES)."""
+    """필터를 붙이면서 공개 범위가 넓어지면 안 된다(Contest.Status.PUBLICLY_VISIBLE)."""
 
     draft = Contest.objects.create(
         sponsor=sponsor,

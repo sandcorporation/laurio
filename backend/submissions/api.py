@@ -97,25 +97,13 @@ def _get_published_contest_or_404(contest_id: int) -> Contest:
         contest = Contest.objects.select_related("sponsor").get(id=contest_id)
     except Contest.DoesNotExist as exc:
         raise HttpError(404, "Contest를 찾을 수 없습니다.") from exc
-    if contest.status != Contest.Status.PUBLISHED:
+    if not Contest.Status.SUBMITTABLE(contest.status):
         # draft Contest는 아직 결제가 끝나지 않아 공개되지 않았다 — 존재를
         # 드러내지 않는다(contests.api.get_contest와 같은 원칙). CLOSED는 여기
         # 포함하지 않는다 — 제출·수정은 어차피 _reject_if_past_deadline이 별도로
         # 막으므로, 이 헬퍼는 "결제로 공개되었는가"만 본다.
         raise HttpError(404, "Contest를 찾을 수 없습니다.")
     return contest
-
-
-_VIEWABLE_STATUSES = (
-    Contest.Status.PUBLISHED,
-    Contest.Status.CLOSED,
-    # AWARDED·JUDGING_ENDED도 포함한다(#13) — 그렇지 않으면 Award되거나 심사기간이
-    # 끝나는 순간 Developer가 자기 제출물을 조회하지 못하게 된다. 정확히 #11이
-    # CLOSED를 추가할 때 반영했던 것과 같은 원칙을, 이 티켓이 추가한 두 상태에도
-    # 적용한다(#12 리뷰 지적 4의 재발 방지).
-    Contest.Status.AWARDED,
-    Contest.Status.JUDGING_ENDED,
-)
 
 
 def _get_viewable_contest_or_404(contest_id: int) -> Contest:
@@ -133,7 +121,7 @@ def _get_viewable_contest_or_404(contest_id: int) -> Contest:
         contest = Contest.objects.select_related("sponsor").get(id=contest_id)
     except Contest.DoesNotExist as exc:
         raise HttpError(404, "Contest를 찾을 수 없습니다.") from exc
-    if contest.status not in _VIEWABLE_STATUSES:
+    if not Contest.Status.PUBLICLY_VISIBLE(contest.status):
         raise HttpError(404, "Contest를 찾을 수 없습니다.")
     return contest
 
