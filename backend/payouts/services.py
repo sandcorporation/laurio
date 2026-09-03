@@ -251,29 +251,6 @@ def get_or_create_payout(handover=None, *, distribution_share=None, policy: Plat
             raise
 
 
-def _resolve_contest(payout: Payout):
-    """이 Payout이 어느 지급 사유(Handover 또는 DistributionShare)를 통해 어느
-    Contest에 속하는지 판정한다. `payout_exactly_one_target` 제약이 이미 정확히
-    하나만 채워짐을 보장하므로 분기는 여기서 끝난다.
-    """
-
-    if payout.handover_id is not None:
-        return payout.handover.award.contest
-    return payout.distribution_share.distribution.contest
-
-
-def _resolve_developer(payout: Payout):
-    """이 Payout을 받을 `accounts.DeveloperProfile` — `_resolve_contest`와 같은
-    이유로 두 경로(Handover/DistributionShare) 중 하나를 통해서만 판정된다.
-    Seller는 이 Developer 단위로 등록된다(한 Developer가 여러 Contest를 이겨도
-    등록은 한 번).
-    """
-
-    if payout.handover_id is not None:
-        return payout.handover.award.submission.developer
-    return payout.distribution_share.submission.developer
-
-
 def ensure_seller_registered(
     developer, *, simulate: str | None = None, policy: PlatformPolicy | None = None
 ) -> Seller:
@@ -385,19 +362,14 @@ def mark_confirmed(
         updated = Payout.objects.filter(
             idempotency_key=idempotency_key, status=Payout.Status.REQUESTED
         ).update(status=Payout.Status.CONFIRMED_IDENTITY_PENDING)
-        payout = Payout.objects.select_related(
-            "handover__award__contest",
-            "handover__award__submission__developer",
-            "distribution_share__distribution__contest",
-            "distribution_share__submission__developer",
-        ).get(idempotency_key=idempotency_key)
+        payout = Payout.objects.with_target().get(idempotency_key=idempotency_key)
 
         if updated != 1:
             # 이미 확정(또는 그 이후)이거나 실패다 — 다른 채널이 먼저 이겼거나
             # 재전송이다. 원장에는 이미 반영되어 있거나 애초에 없어야 한다.
             return payout
 
-        contest = _resolve_contest(payout)
+        contest = payout.contest
         entry = post_journal_entry(
             contest_id=contest.ledger_id,
             memo=(
@@ -442,7 +414,7 @@ def mark_confirmed(
     # 신원 정보도 지급대행사에 넘기지 않는다. 이미 부분 승인된 Seller가
     # 있으면(두 번째 Payout부터) ensure_seller_registered가 어댑터를 다시
     # 부르지 않는다.
-    developer = _resolve_developer(payout)
+    developer = payout.developer
     seller = ensure_seller_registered(developer, simulate=seller_simulate, policy=policy)
     if seller.status not in Seller.READY_STATUSES:
         Payout.objects.filter(
@@ -593,16 +565,11 @@ def advance_seller_pending_payouts(developer) -> list[Payout]:
     한다. 이미 CONFIRMED이거나 REQUESTED/FAILED인 Payout은 건드리지 않는다.
     """
 
-    from django.db.models import Q
-
     seller = Seller.objects.filter(developer=developer).first()
     if seller is None or seller.status not in Seller.READY_STATUSES:
         return []
 
-    candidates = Payout.objects.filter(status=Payout.Status.CONFIRMED_SELLER_PENDING).filter(
-        Q(handover__award__submission__developer=developer)
-        | Q(distribution_share__submission__developer=developer)
-    )
+    candidates = Payout.objects.filter(status=Payout.Status.CONFIRMED_SELLER_PENDING).for_developer(developer)
 
     advanced: list[Payout] = []
     for candidate in candidates:
@@ -750,7 +717,7 @@ def submit_identity(payout: Payout, resident_registration_number: str) -> Payout
         Payout.Status.CONFIRMED_IDENTITY_PENDING,
         Payout.Status.CONFIRMED_SELLER_PENDING,
     ):
-        developer = _resolve_developer(payout)
+        developer = payout.developer
         seller = Seller.objects.filter(developer=developer).first()
         seller_ready = seller is not None and seller.status in Seller.READY_STATUSES
         # CONFIRMED로 넘어가는 건 실이체가 실제로 COMPLETED로 확정됐을
@@ -801,7 +768,7 @@ def retry_seller_registration(payout: Payout, *, simulate: str | None = None) ->
     current = Payout.objects.get(pk=payout.pk)
 
     if current.status == Payout.Status.CONFIRMED_SELLER_PENDING:
-        developer = _resolve_developer(current)
+        developer = current.developer
         seller = ensure_seller_registered(developer, simulate=simulate)
         # ensure_seller_registered가 Seller를 막 READY로 만들면 그 안에서
         # advance_seller_pending_payouts를 불러(코드리뷰 지적 5, 4차) 이
@@ -847,7 +814,7 @@ def retry_seller_registration(payout: Payout, *, simulate: str | None = None) ->
         # "다시 시도" 버튼(transfer_status만 보고 노출된다)이 항상 409를
         # 돌려받는다 — 화면이 시킬 수 없는 일을 시키는 꼴이다. Seller가
         # 그 사이 REJECTED로 바뀌었을 수도 있으니(웹훅으로) 다시 확인한다.
-        developer = _resolve_developer(current)
+        developer = current.developer
         seller = Seller.objects.filter(developer=developer).first()
         if seller is not None and seller.status in Seller.READY_STATUSES:
             if _request_real_transfer_if_ready(current):
@@ -892,17 +859,12 @@ def submit_seller_phone(developer, phone_number: str) -> Seller:
     "다시 시도" 버튼을 또 눌러야 한다면 그 자체가 침묵으로 읽힌다.
     """
 
-    from django.db.models import Q
-
     with transaction.atomic():
         seller, _created = Seller.objects.select_for_update().get_or_create(developer=developer)
         seller.phone_number = phone_number
         seller.save(update_fields=["phone_number_encrypted", "updated_at"])
 
-    pending_payouts = Payout.objects.filter(status=Payout.Status.CONFIRMED_SELLER_PENDING).filter(
-        Q(handover__award__submission__developer=developer)
-        | Q(distribution_share__submission__developer=developer)
-    )
+    pending_payouts = Payout.objects.filter(status=Payout.Status.CONFIRMED_SELLER_PENDING).for_developer(developer)
     for pending_payout in pending_payouts:
         retry_seller_registration(pending_payout)
 
