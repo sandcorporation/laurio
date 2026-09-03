@@ -58,7 +58,7 @@ class ConfirmPayoutIn(Schema):
     # fake Seller 등록 어댑터 전용 시나리오 선택("success"(기본)/"limit_exceeded"/
     # "review_required"/"rejected"). 같은 원칙(ADR-0007) — 실제 어댑터에서는
     # 무시된다. Payout이 이 confirm 호출로 처음 확정될 때만 의미가 있다 — 이미
-    # 확정된 뒤의 재호출은 이 값을 보지 않는다(payouts.services.mark_confirmed).
+    # 확정된 뒤의 재호출은 이 값을 보지 않는다(payouts.progress.advance).
     seller_simulate: str | None = None
 
 

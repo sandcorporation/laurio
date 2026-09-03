@@ -18,9 +18,9 @@
 - `GET /operator/payouts` — Operator가 두 대기(신원/Seller) 중 어느 쪽이 막혀
   있는지 본다(#50 AC).
 
-두 확정 경로(confirm/webhook) 모두 `payouts.services.mark_confirmed`/
-`mark_failed`라는 같은 조건부 UPDATE 관문을 통과한다 — 어느 쪽이 먼저 도착하든,
-몇 번 재전송되든 원장에는 정확히 한 번만 분개가 남는다. `mark_confirmed`는 그
+두 확정 경로(confirm/webhook) 모두 `payouts.progress.advance`라는 같은 조건부 UPDATE
+관문을 통과한다 — 어느 쪽이 먼저 도착하든, 몇 번 재전송되든 원장에는 정확히 한 번만
+분개가 남는다. 첫 홈은
 안에서 Seller 등록도 함께 시작한다(ADR-0020).
 """
 
@@ -41,7 +41,7 @@ from payments.webhook_security import verify_webhook_signature
 from policies.services import get_current_policy
 
 from payments.charges import Outcome, reconcile_after_timeout
-from .progress import Hold, HoldKind, assert_covers_all_kinds, hold_of
+from .progress import Hold, HoldKind, advance, assert_covers_all_kinds, hold_of
 from .adapters import PayoutError, PayoutTimeoutError, get_adapter, TransferOutcome
 from .adapters_toss import verify_toss_webhook_signature
 from .models import Payout, PayoutWebhookDelivery, Seller, TaxIdentity
@@ -60,8 +60,6 @@ from .schemas import (
 from .services import (
     advance_seller_pending_payouts,
     get_or_create_payout,
-    mark_confirmed,
-    mark_failed,
     record_transfer_result,
     resolve_transfer_webhook,
     retry_seller_registration,
@@ -285,7 +283,7 @@ def confirm_payout(request: HttpRequest, idempotency_key: UUID, payload: Confirm
     # Seller가 이미 READY라면 이 직접 호출 자체가 실제 벤더 호출(실이체
     # 요청)을 선점해 이길 수 있다(TossPayoutAdapter.confirm()의 두 갈래
     # 동작, 코드리뷰 지적 1 4차의 후속 발견) — 그 결과를 여기서 기록하지
-    # 않으면, mark_confirmed 안의 _request_real_transfer_if_ready가 나중에
+    # 않으면, advance 안의 _request_real_transfer_if_ready가 나중에
     # 다시 불려도 이미 선점된 시도에 클레임이 밀려 벤더를 다시 부를 수
     # 없고, 이긴 쪽의 결과가 영영 어디에도 안 남는다.
     #
@@ -300,9 +298,14 @@ def confirm_payout(request: HttpRequest, idempotency_key: UUID, payload: Confirm
     record_transfer_result(payout, outcome.status, outcome.attempt)
 
     if Outcome.parse(outcome.status) is Outcome.PAID:
-        payout = mark_confirmed(idempotency_key, seller_simulate=payload.seller_simulate)
+        payout = advance(
+            payout,
+            confirmed_by_vendor=True,
+            register_seller=True,
+            seller_simulate=payload.seller_simulate,
+        )
     elif Outcome.parse(outcome.status) is Outcome.FAILED:
-        payout = mark_failed(idempotency_key)
+        payout = advance(payout, confirmed_by_vendor=False, register_seller=False)
     else:
         # 아직 확정할 수 없다(pending) — 함부로 실패 처리하지 않는다. 이후
         # 웹훅이나 재조회가 마저 확정한다.
@@ -348,9 +351,9 @@ def receive_webhook(request: HttpRequest, payload: WebhookIn):
     )
 
     if payload.status == "paid":
-        payout = mark_confirmed(payload.idempotency_key)
+        payout = advance(known_payout, confirmed_by_vendor=True, register_seller=True)
     elif payload.status == "failed":
-        payout = mark_failed(payload.idempotency_key)
+        payout = advance(known_payout, confirmed_by_vendor=False, register_seller=False)
     else:
         raise HttpError(422, "status는 paid 또는 failed 여야 합니다.")
 
@@ -556,7 +559,7 @@ def receive_toss_payout_webhook(request: HttpRequest):
 
     # Payout이 이미 REQUESTED를 지나 두 대기 어딘가로 넘어간 뒤에 이 웹훅이
     # 도착해도 조용히 버려지지 않는다(코드리뷰 지적 4) — resolve_transfer_webhook
-    # 이 REQUESTED에서는 기존 mark_confirmed/mark_failed 조건부 UPDATE를 그대로
+    # 이 REQUESTED에서는 기존 advance 조건부 UPDATE를 그대로
     # 타고, 그 이후 도착이면 transfer_status에 결과를 남긴다(FAILED여도
     # Payout.status를 되돌리지 않는다 — 원장 분개는 그대로다).
     payout = resolve_transfer_webhook(idempotency_key, our_status)

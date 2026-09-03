@@ -15,7 +15,7 @@ API 레이어(`distributions.api`)에서만 호출된다 — 테스트의 유일
    Distribution을 보고 그대로 지나간다(#16 AC).
 2. 아직 확정되지 않은 몫(DistributionShare) — 새로 만들어졌거나, 이전 시도가
    FAILED로 끝나 재시도 대상이 된 몫에 대해 `payouts` 앱의 기존 경로
-   (`get_or_create_payout`/`mark_confirmed`/`mark_failed`)를 그대로 재사용해
+   (`get_or_create_payout`/`advance`)를 그대로 재사용해
    지급을 시도한다. 실패한 몫은 REQUESTED가 아니라 FAILED로 남으므로 다음 스캔이
    자동으로 재시도한다 — "일부만 성공하면 성공분만 원장에 반영되고 나머지는
    재시도 대상으로 남는다"(#16 AC)는 이 재시도 루프의 직접적인 결과다.
@@ -43,7 +43,8 @@ from notifications.lifecycle import notify_distribution_shares
 from payments.charges import Outcome, reconcile_after_timeout
 from payouts.adapters import PayoutError, PayoutTimeoutError, get_adapter, TransferOutcome
 from payouts.models import Payout
-from payouts.services import get_or_create_payout, mark_confirmed, mark_failed, record_transfer_result
+from payouts.progress import advance
+from payouts.services import get_or_create_payout, record_transfer_result
 from policies.models import PlatformPolicy
 from policies.services import get_current_policy
 from submissions.models import Submission
@@ -224,13 +225,13 @@ def _attempt_share_payout(
     except PayoutError:
         # 어느 attempt에 대한 이야기인지 신뢰할 수 없다(코드리뷰 지적 5, 5차와
         # 같은 이유) -- attempt=None으로 record_transfer_result가 아무 것도
-        # 쓰지 않게 한다. status="failed"만으로도 아래 mark_failed 분기가
+        # 쓰지 않게 한다. status="failed"만으로도 아래 실패 분기가
         # Payout.status를 정확히 옮긴다.
         outcome = TransferOutcome(status="failed", attempt=None)
 
     # confirm_payout(payouts.api)과 같은 이유(코드리뷰 지적 5, 5차) -- 이
     # 직접 호출도 Seller가 이미 READY면 실제 벤더 호출을 선점해 이길 수
-    # 있다. 그 결과를 여기서 기록하지 않으면 mark_confirmed 안의
+    # 있다. 그 결과를 여기서 기록하지 않으면 advance 안의
     # _request_real_transfer_if_ready가 나중에 다시 불려도 이미 선점된
     # 시도에 클레임이 밀려 벤더를 다시 부를 수 없고, 이긴 쪽의 결과가
     # 영영 어디에도 안 남는다. Seller 상태를 다시 읽어 추정하지 않고
@@ -238,9 +239,9 @@ def _attempt_share_payout(
     record_transfer_result(payout, outcome.status, outcome.attempt)
 
     if Outcome.parse(outcome.status) is Outcome.PAID:
-        payout = mark_confirmed(payout.idempotency_key, policy=policy)
+        payout = advance(payout, confirmed_by_vendor=True, register_seller=True, policy=policy)
     elif Outcome.parse(outcome.status) is Outcome.FAILED:
-        payout = mark_failed(payout.idempotency_key)
+        payout = advance(payout, confirmed_by_vendor=False, register_seller=False)
     else:
         # 아직 확정할 수 없다(pending) — REQUESTED로 남겨 웹훅이나 다음 스캔이
         # 마저 확정하게 한다.

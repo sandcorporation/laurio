@@ -5,7 +5,7 @@
 상태(요청됨/확정됨·Seller대기/확정됨·신원대기/확정됨/실패)만 들고, 확정으로
 전이하는 순간에만 원장에 수수료·원천징수 공제 분개를 남긴다.
 
-동시성·재전송에 안전한 이유는 `payouts.services.mark_confirmed`/`mark_failed`가
+동시성·재전송에 안전한 이유는 `payouts.progress.advance`가
 ADR-0003과 같은 조건부 `UPDATE ... WHERE status='requested'` 규율을 그대로
 따르기 때문이다.
 
