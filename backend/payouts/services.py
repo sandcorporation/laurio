@@ -615,22 +615,16 @@ def resolve_transfer_webhook(idempotency_key, our_status: str) -> Payout:
 
 
 def submit_identity(payout: Payout, resident_registration_number: str) -> Payout:
-    """주민등록번호를 암호화해 별도 테이블에 저장하고, 두 대기가 모두 풀렸으면
-    지급을 최종 확정한다.
+    """주민등록번호를 암호화해 별도 테이블에 저장하고, 그 사실로 Payout 을 전진시킨다.
 
     `TaxIdentity`를 `update_or_create`로 upsert한다 — 재제출은 항상 최신 값으로
     덮어쓴다. 이미 있는 값을 그대로 다시 보내면(재전송) 같은 값으로 덮어쓸 뿐이라
     안전하고, 실수로 잘못 입력한 값을 보냈다면(오타) 정정할 수 있는 유일한
     경로이기도 하다 — TaxIdentity는 append-only 원장이 아니라 세무 신고용
-    현재값 저장소이므로, "이미 있으면 그대로 돌려주고 두 번째 값은 버린다"는
-    구 정책은 오타를 API로 영영 고칠 수 없게 만든다(#15 리뷰 지적 4).
+    현재값 저장소다(#15 리뷰 지적 4).
 
-    Payout 상태는 CONFIRMED_IDENTITY_PENDING 또는 CONFIRMED_SELLER_PENDING일
-    때만 건드린다(이미 CONFIRMED인 뒤의 정정 제출은 상태를 다시 건드리지
-    않는다 — 원장 분개는 mark_confirmed 시점에 이미 끝났고, 신원 정보 자체는
-    원장에 영향을 주지 않는다). 신원은 항상 저장하지만, **Seller가 아직 부분
-    승인이 아니면 CONFIRMED로 넘어가지 않고 CONFIRMED_SELLER_PENDING에
-    남는다**(#50, ADR-0020) — 두 대기 중 하나라도 남아 있으면 최종 확정이 아니다.
+    상태 판정은 `payouts.progress.advance` 가 한다(#131) — 이 입구는 사실(신원)만 기록한다.
+    이미 CONFIRMED 인 뒤의 정정 제출은 상태를 건드리지 않는다(advance 가 두 대기 상태만 본다).
     """
 
     with transaction.atomic():
@@ -640,43 +634,10 @@ def submit_identity(payout: Payout, resident_registration_number: str) -> Payout
                 "resident_registration_number_encrypted": encrypt(resident_registration_number)
             },
         )
+    # 벤더 HTTP 호출(실이체 확인)은 트랜잭션 밖 — TaxIdentity upsert 는 이미 커밋됐다.
+    from .progress import advance
 
-    # 벤더 HTTP 호출(_request_real_transfer_if_ready)은 트랜잭션 밖에서 한다
-    # (코드리뷰 지적 7, 5차) — TaxIdentity upsert는 위 atomic() 블록이 이미
-    # 커밋했다. mark_confirmed와 같은 이유: 벤더 호출까지 트랜잭션에 남겨두면
-    # 롤백이 attempt/vendor_payout_id까지 되돌려 "정확히 한 번" 보장이 무너진다.
-    original_status = payout.status
-    if original_status in (
-        Payout.Status.CONFIRMED_IDENTITY_PENDING,
-        Payout.Status.CONFIRMED_SELLER_PENDING,
-    ):
-        developer = payout.developer
-        seller = Seller.objects.filter(developer=developer).first()
-        seller_ready = seller is not None and seller.status in Seller.READY_STATUSES
-        # CONFIRMED로 넘어가는 건 실이체가 실제로 COMPLETED로 확정됐을
-        # 때만이다(코드리뷰 지적 1) — Seller가 READY라는 사실만으로
-        # 전진시키면, 벤더가 실이체 자체를 거절해도(예: 실이체 시점의
-        # 한도) status만 보고 "지급 완료"라고 잘못 말하게 된다.
-        if not seller_ready:
-            target = Payout.Status.CONFIRMED_SELLER_PENDING
-        elif _request_real_transfer_if_ready(payout):
-            target = Payout.Status.CONFIRMED
-        else:
-            # Seller는 이미 READY지만 실이체가 아직 안 풀렸다
-            # (FAILED/REQUESTED) — status를 CONFIRMED_SELLER_PENDING으로
-            # 강제하지 않는다(코드리뷰 지적 6, 3차). payout.status가 이미
-            # CONFIRMED_IDENTITY_PENDING이었다면(Seller가 확정 시점에
-            # 이미 READY였고 신원만 남아 있던 경우) 그대로 둔다 —
-            # CONFIRMED_SELLER_PENDING으로 뭉치면 "신원은 이미 제출했다"
-            # 는 사실이 사라지고 "Seller 대기"로 잘못 역행한다. 두
-            # 상태(CONFIRMED_IDENTITY_PENDING/CONFIRMED_SELLER_PENDING)
-            # 모두 next_action_message가 transfer_status를 함께 봐서
-            # "실이체가 실패했다"는 사실을 정확히 전달한다.
-            target = original_status
-        Payout.objects.filter(pk=payout.pk, status=original_status).update(status=target)
-
-    payout.refresh_from_db()
-    return payout
+    return advance(payout, register_seller=False)
 
 
 def retry_seller_registration(payout: Payout, *, simulate: str | None = None) -> Payout:
