@@ -81,8 +81,10 @@ Pipeline 이 아니라 **freestyle** 이고, 셸 스텝이 `sh ./deploy.sh stagi
 `deploy.sh` 는 **바뀐 것만 다시 굽는다**. 기준점은 `.jenkins-staging-deployed`
 (gitignore, 빌드 디렉터리에 남는다 — 시크릿과 같은 전제). 그 파일이 없거나 그것이
 가리키는 커밋이 저장소에 없으면 전부 굽는다. 경로 → 서비스 팬아웃은 1:1 이 아니다:
-`backend/` 는 **backend + celery-worker + celery-beat** 를 함께 갈고(셋이 같은
-이미지이고, backend 만 갈면 워커가 옛 코드로 스캔을 계속 돌린다),
+`backend/` 는 **backend + celery-worker + celery-beat** 를 함께 갈고(셋은 같은
+Dockerfile 을 쓰지만 공유 `image:` 태그가 없어 **이미지가 셋**이다 — `build backend`
+만 하면 워커 둘은 옛 이미지에 남고, `up -d` 는 바뀐 게 없으니 Running 이라 적고
+지나가 배포가 초록으로 끝난 채 스캔만 옛 코드로 돈다),
 `packages/bff-shared/` 와 `pnpm-lock.yaml` 은 **frontend + operator** 를 함께 간다.
 없는 컨테이너는 변경 여부와 무관하게 굽는다 — 「없음」은 「최신」이 아니다.
 

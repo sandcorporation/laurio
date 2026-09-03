@@ -9,7 +9,7 @@
 # **바뀐 것만 다시 굽고 바꿔 끼운다.** 그런데 「바뀐 것」과 「바꿔 끼울 것」이
 # 1:1 이 아니다 — 그 어긋남이 이 파일의 대부분이다.
 #
-#   backend/             -> backend + celery-worker + celery-beat  (셋이 같은 이미지)
+#   backend/             -> backend + celery-worker + celery-beat  (같은 Dockerfile, 이미지는 셋)
 #   frontend/            -> frontend
 #   operator/            -> operator
 #   packages/bff-shared/ -> frontend + operator                    (둘이 함께 쓴다)
@@ -186,20 +186,31 @@ fi
 PIDS=""
 SERVICES=""
 
+# 첫 인자는 로그 이름이고, 나머지가 실제로 구울 서비스들이다.
+#
+# **backend·celery-worker·beat 는 같은 이미지가 아니다.** 셋 다 같은
+# Dockerfile 을 가리키지만 compose 파일 어디에도 공유 `image:` 태그가 없어서,
+# compose 는 서비스 이름으로 이미지를 **셋** 만든다(laurio-staging-backend,
+# -celery-worker, -celery-beat). 그래서 `build backend` 는 하나만 굽고 워커
+# 둘은 옛 이미지에 남는다 — 뒤의 `up -d` 도 바뀐 게 없으니 그냥 Running 이라
+# 적고 지나간다. 배포는 초록으로 끝나는데 스캔만 옛 코드로 돈다.
+# 실제로 그렇게 한 번 나갔다(빌드 23). 같은 레이어를 쓰므로 둘째·셋째는
+# 캐시에 맞아 거의 시간이 들지 않는다.
+#
+# NEXT_PUBLIC_* 는 빌드타임에 인라인된다 — build args 는 compose 가
+# .env.<target> 에서 읽어 넘긴다(#85). 여기서 따로 줄 것이 없다.
 start_build() {
-  svc="$1"
-  # backend·celery-worker·celery-beat 는 같은 이미지를 쓰므로 한 번만 굽는다.
-  # NEXT_PUBLIC_* 는 빌드타임에 인라인된다 — build args 는 compose 가
-  # .env.<target> 에서 읽어 넘긴다(#85). 여기서 따로 줄 것이 없다.
-  $COMPOSE build "$svc" > "${BUILD_LOGS}/${svc}.log" 2>&1 &
-  PIDS="$PIDS $!:$svc"
-  SERVICES="$SERVICES $svc"
-  log "$svc 빌드 시작"
+  label="$1"
+  shift
+  $COMPOSE build "$@" > "${BUILD_LOGS}/${label}.log" 2>&1 &
+  PIDS="$PIDS $!:$label"
+  SERVICES="$SERVICES $label"
+  log "$label 빌드 시작"
 }
 
-if [ "$BUILD_BACKEND" = true ]; then start_build backend; fi
-if [ "$BUILD_FRONTEND" = true ]; then start_build frontend; fi
-if [ "$BUILD_OPERATOR" = true ]; then start_build operator; fi
+if [ "$BUILD_BACKEND" = true ]; then start_build backend backend celery-worker celery-beat; fi
+if [ "$BUILD_FRONTEND" = true ]; then start_build frontend frontend; fi
+if [ "$BUILD_OPERATOR" = true ]; then start_build operator operator; fi
 
 BUILD_FAILED=""
 for entry in $PIDS; do
