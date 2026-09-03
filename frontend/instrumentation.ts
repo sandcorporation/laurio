@@ -96,15 +96,25 @@ const REQUIRED_IN_DEPLOYED_ENVIRONMENTS: Array<{ name: string; reason: string }>
   // 읽는 실제 컨테이너 런타임 env, 빌드 시점 값과 항상 같다)에 그대로 들어가
   // 값이 둘로 갈릴 여지가 없다.
   // docker/compose.staging.yaml·docker/compose.prod.yaml의 frontend
-  // build.args가 TOSS_SANDBOX_CLIENT_KEY/TOSS_LIVE_CLIENT_KEY를 비운 채로도
-  // 빌드를 통과시키므로(#112 스펙 결정 — 위젯 사용 여부는 클라이언트 키가
-  // 아니라 PAYMENT_ADAPTER_MODE가 가른다), 빌드가 성공했다는 것이 이 값이
-  // 채워졌다는 증거가 되지 못한다. 그런데 배포 환경에서 PAYMENT_ADAPTER_MODE는
-  // 언제나 실물 어댑터를 가리켜야 하므로(core.adapters.check_adapter_mode,
-  // #83이 fake를 거부한다) 배포 환경이라면 위젯을 반드시 쓴다 — 이 값이
-  // 비어 있으면 사용자가 결제하기를 누르는 순간에야 lib/payments/toss.ts의
+  // build.args는 이제 `${TOSS_SANDBOX_CLIENT_KEY:?...}`/`${TOSS_LIVE_CLIENT_KEY:?...}`
+  // 로 이 값을 요구한다(#115) — 비어 있으면 이미지를 굽기도 전에 `docker
+  // compose config`가 거부한다. 배포 환경에서 PAYMENT_ADAPTER_MODE는 언제나
+  // 실물 어댑터를 가리켜야 하므로(core.adapters.check_adapter_mode, #83이
+  // fake를 거부한다) 배포 환경이라면 위젯을 반드시 쓴다 — 이 값이 비어
+  // 있으면 사용자가 결제하기를 누르는 순간에야 lib/payments/toss.ts의
   // getTossClientKey()가 null을 돌려줘 실패한다. 그 첫 발견자가 사용자였던
   // 사고(spec #110)를 부팅 시점으로 당긴다.
+  //
+  // **이 가드가 성립하는 것은 이 값이 build.args로만 존재하고 아래
+  // frontend 서비스의 environment: 블록 어디에도 없기 때문이다** —
+  // "런타임 env == 빌드에 실제로 구운 값"이라는 등식은 그 부재에 의존한다.
+  // 누군가 나중에 이 이름을 compose의 environment:(또는 배포 스크립트의
+  // `-e`)에 추가하면, 그 값이 무엇이든 이 부팅 가드는 그것만 보고 통과해
+  // 버린다 — 브라우저 번들에 실제로 구워진 값과 무관하게. 그러면 이 가드가
+  // 초록불을 주는데 번들은 비어 있는, 이 티켓이 막으려 한 바로 그 사고가
+  // 조용히 되살아난다. **NEXT_PUBLIC_TOSS_CLIENT_KEY를 environment:에
+  // 추가하지 않는다** — docker/compose.staging.yaml·docker/compose.prod.yaml의
+  // build.args 옆에도 같은 경고가 있다.
   {
     name: "NEXT_PUBLIC_TOSS_CLIENT_KEY",
     reason:
