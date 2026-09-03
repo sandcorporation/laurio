@@ -71,7 +71,7 @@ class DistributionCutlineMigrationTests(TransactionTestCase):
 
         옛 reverse(`noop_reverse`)는 아무 것도 쓰지 않았다 — 그래서 롤백 직후
         되살아난 `DistributionCutline` 테이블은 빈 채였고, 다시 전진시키면
-        `policies.services.get_current_policy`의 get_or_create가 필드 기본값
+        `policies.scope.current_policy`의 get_or_create가 필드 기본값
         (60.00)으로 조용히 되돌아갔다. 이 테스트가 바로 그 왕복을 재현한다 —
         reverse가 값을 되돌려 쓰지 않으면 이 테스트가 빨개진다.
         """
@@ -134,7 +134,7 @@ class DistributionCutlineMigrationTests(TransactionTestCase):
         targets = executor.loader.graph.leaf_nodes()
         executor.migrate(targets)
 
-        from policies.services import get_current_policy
+        from policies.scope import current_policy
 
-        policy = get_current_policy()
+        policy = current_policy()
         assert policy.distribution_cutline_percentage == Decimal("60.00")

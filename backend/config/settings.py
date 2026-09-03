@@ -169,6 +169,9 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "accounts.middleware.JWTAuthenticationMiddleware",
+    # 요청 하나 = PlatformPolicy 스코프 하나(#145, ADR-0023) — 그 안에서 `policies.scope.
+    # current_policy()` 는 첫 호출에 한 번만 SELECT 한다.
+    "policies.middleware.PolicyScopeMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -711,7 +714,7 @@ PAYOUT_WEBHOOK_SECRET = _payout_webhook_secret
 # 환경변수로 읽었지만 staging·prod 어디에도 그 값을 준 적이 없어 실질적으로 코드
 # 상수였고, 요율은 환경의 성질이 아니라 사업 정책이다 — staging과 production에서
 # 달라지면 그것은 설정이 아니라 버그다. `policies.models.PlatformPolicy`(DB 단일
-# 행)가 대신하고, `policies.services.get_current_policy()`로 읽는다. 두 경로를
+# 행)가 대신하고, `policies.scope.current_policy()`로 읽는다. 두 경로를
 # 남기지 않는다 — CSRF 방어를 두 기계로 두었다가 한쪽 발급처가 사라져 영구 403이
 # 된 사고가 이 저장소에 있다.
 

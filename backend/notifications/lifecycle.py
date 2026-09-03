@@ -41,7 +41,7 @@ from contests.models import Contest
 from core import scans
 from core.clock import Clock
 from core.scans import ScanSpec
-from policies.services import get_current_policy
+from policies.scope import current_policy
 
 from .models import Notification, NotificationType
 from .services import create_notification
@@ -109,17 +109,6 @@ def _participating_developer_users(contest: Contest):
     return User.objects.filter(developer_profile__submissions__contest=contest).distinct()
 
 
-# 스캔 실행 한 번 동안 정책을 한 번만 읽는다(#78, ADR-0023). `/tick` 은 모든 스캔이 같은
-# ctx 를 공유하므로 키에 소유 모듈을 담는다(contests/apps.py 와 같은 관용구).
-_POLICY_KEY = f"{__name__}:policy"
-
-
-def _policy(ctx):
-    if _POLICY_KEY not in ctx:
-        ctx[_POLICY_KEY] = get_current_policy()
-    return ctx[_POLICY_KEY]
-
-
 # --- 마감 임박 -------------------------------------------------------------------
 
 
@@ -127,7 +116,7 @@ def _deadline_reminder_candidates(as_of, ctx):
     """마감이 다가오는 PUBLISHED Contest — Contest 당 한 번만 "완료"로 표시하므로
     `deadline_reminder_sent_at` 이 비어 있는 행만 대상이다."""
 
-    lead = timedelta(hours=_policy(ctx).deadline_reminder_lead_hours)
+    lead = timedelta(hours=current_policy().deadline_reminder_lead_hours)
     return Contest.objects.filter(
         status__in=Contest.Status.SUBMITTABLE.statuses,
         deadline_reminder_sent_at__isnull=True,
@@ -184,7 +173,7 @@ def _judging_end_reminder_candidates(as_of, ctx):
     `judging_ends_at`을 늘릴 때 `judging_end_reminder_sent_at`도 함께 비운다(#19 리뷰 지적 1)
     — 그래야 연장된 새 종료일이 다가올 때 이 스캔이 다시 알릴 수 있다."""
 
-    lead = timedelta(hours=_policy(ctx).judging_end_reminder_lead_hours)
+    lead = timedelta(hours=current_policy().judging_end_reminder_lead_hours)
     return Contest.objects.filter(
         status__in=Contest.Status.AWARDABLE.statuses,
         judging_end_reminder_sent_at__isnull=True,
@@ -258,7 +247,7 @@ def _final_warning_candidates(as_of, ctx):
     `_constructed_daytime_target` 비교가 한다.
     """
 
-    policy = _policy(ctx)
+    policy = current_policy()
     # warning_target은 (judging_ends_at + WAIT_DAYS - LEAD_DAYS)의 로컬 날짜를 낮 시각으로
     # 고정한 것이므로, 그 "날짜 고정" 때문에 원래 시각에서 최대 하루(24시간)까지만
     # 벗어난다. 그래서 "warning_target <= as_of"이려면 최소한 "judging_ends_at + WAIT_DAYS
@@ -282,7 +271,7 @@ def _final_warning_candidates(as_of, ctx):
 def _send_final_warning(contest, as_of, ctx):
     """`NOTIFICATION_DAYTIME_HOUR`(낮 시각 자체를 고정하는 상수)는 settings에 그대로 남는다."""
 
-    policy = _policy(ctx)
+    policy = current_policy()
     distribution_due_at = contest.judging_ends_at + timedelta(days=policy.distribution_wait_days)
     warning_target = _constructed_daytime_target(
         distribution_due_at,

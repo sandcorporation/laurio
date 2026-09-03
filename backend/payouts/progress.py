@@ -403,7 +403,6 @@ def advance(
     simulate: str | None = None,
     seller_simulate: str | None = None,
     confirmed_by_vendor: bool | None = None,
-    policy=None,
 ) -> Payout:
     """사실이 바뀐 뒤 Payout 을 다음 상태로 전진시킨다 — 사실 대조(reconcile) 한 곳 (#131, #133, #135).
 
@@ -490,7 +489,7 @@ def advance(
 
     developer = payout.developer
     if register_seller:
-        seller = ensure_seller_registered(developer, simulate=seller_simulate, policy=policy)
+        seller = ensure_seller_registered(developer, simulate=seller_simulate)
         # ensure_seller_registered 가 Seller 를 막 READY 로 만들면 그 안에서 sweep 이 이
         # Payout 을 이미 전진시켰을 수 있다 — 낡은 값으로 판단하지 않도록 다시 읽는다.
         payout.refresh_from_db()

@@ -32,7 +32,7 @@ from core.clock import Clock
 from payments.adapters import PGError, get_adapter
 from payments.charges import settle_charge
 from payments.models import Payment
-from policies.services import get_current_policy
+from policies.scope import current_policy
 from verification.models import Verification
 
 from .models import (
@@ -337,7 +337,7 @@ def list_my_sponsored_contests(request: HttpRequest, **kwargs):
     # (#75, ADR-0023). 행마다 구하면 조회가 행 수만큼 늘고, 게다가 한 화면 안에서
     # 행마다 다른 시각으로 판정하게 된다.
     as_of = Clock.now()
-    policy = get_current_policy()
+    policy = current_policy()
 
     return sponsored_contest_queryset(
         Contest.objects.filter(sponsor=profile), as_of=as_of, policy=policy
@@ -757,7 +757,7 @@ def initiate_judging_period_extension(
                 # 중첩 atomic(세이브포인트) — payments.api.initiate_payment와 같은
                 # 이유. amount와 extension_days를 같은 policy 조회에서 함께
                 # 스냅샷한다(#78 코드리뷰 지적 2).
-                policy = get_current_policy()
+                policy = current_policy()
                 with transaction.atomic():
                     payment = JudgingExtensionPayment.objects.create(
                         contest=contest,

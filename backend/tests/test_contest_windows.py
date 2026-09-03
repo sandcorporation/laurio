@@ -11,7 +11,7 @@ import pytest
 from django.utils import timezone
 
 from contests.models import Contest
-from policies.services import get_current_policy
+from policies.scope import current_policy
 from tests.predicate_pairs import assert_predicate_matches_q
 from tests.test_home_curation import (  # noqa: F401 - 픽스처
     _make_contest,
@@ -69,7 +69,7 @@ def test_appeal_window_predicate_matches_its_queryset_at_the_boundary(sponsor, c
 
 @pytest.mark.django_db
 def test_distribution_due_predicate_matches_its_queryset_at_the_boundary(sponsor, category, deliverable_type):
-    policy = get_current_policy()
+    policy = current_policy()
     as_of = timezone.now()
     due_at = as_of - timedelta(days=policy.distribution_wait_days)
     deadline = due_at - timedelta(days=policy.judging_period_days)

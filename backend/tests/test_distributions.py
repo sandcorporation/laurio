@@ -36,7 +36,7 @@ from distributions.models import Distribution, DistributionShare
 from ledger.services import contest_balance, contest_entries
 from payouts.models import Payout
 from policies.models import PlatformPolicy
-from policies.services import get_current_policy
+from policies.scope import current_policy
 from storage.adapters.fake import FakeStorageAdapter
 from submissions.models import Submission
 
@@ -267,7 +267,7 @@ def _advance_past_distribution_wait(contest_id: int) -> None:
     judging_ends_at = Contest.objects.get(id=contest_id).judging_ends_at
     _freeze(
         judging_ends_at
-        + timedelta(days=get_current_policy().distribution_wait_days, minutes=1)
+        + timedelta(days=current_policy().distribution_wait_days, minutes=1)
     )
 
 

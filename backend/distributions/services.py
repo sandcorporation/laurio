@@ -45,7 +45,7 @@ from payouts.models import Payout
 from payouts.progress import advance
 from payouts.services import get_or_create_payout
 from policies.models import PlatformPolicy
-from policies.services import get_current_policy
+from policies.scope import current_policy
 from submissions.models import Submission
 
 from core.scans import ScanSpec, scan_params
@@ -65,7 +65,7 @@ def _create_distribution_for_contest(
     환불은 #17의 몫이지, 여기서 대신 처리하지 않는다(0으로 나누는 사고도 이렇게
     구조적으로 피한다).
 
-    `policy`는 스캔이 실행당 한 번 읽어 넘긴다(`_policy`)(#75,
+    `policy`는 스캔 실행의 스코프에서 한 번 읽은 것이다(`policies.scope`, #75, #145,
     #79, ADR-0023) — 여기서 다시 읽지 않는다. 컷라인(`policy.
     distribution_cutline_percentage`)도 `_attempt_share_payout`이 쓰는 수수료·
     원천징수율과 같은 정책 행에서 나오므로, 이 스캔이 시도하는 Contest 수만큼
@@ -163,7 +163,7 @@ def _create_distribution_for_contest(
 
 
 def _attempt_share_payout(
-    share: DistributionShare, *, policy: PlatformPolicy, force_failure: bool
+    share: DistributionShare, *, force_failure: bool
 ) -> dict:
     """이 몫에 대한 지급을 시도(신규 요청 또는 재시도)한다.
 
@@ -172,12 +172,12 @@ def _attempt_share_payout(
     어댑터 전용 테스트 시나리오 선택이다(`payments.api.ConfirmPaymentIn.simulate`와
     같은 원칙) — 실제 어댑터에서는 의미가 없다.
 
-    `policy`는 스캔이 실행당 한 번 읽어 넘긴다(`_policy`)(#75,
+    `policy`는 스캔 실행의 스코프에서 한 번 읽은 것이다(`policies.scope`, #75, #145,
     ADR-0023) — 여기서 다시 읽지 않는다. 그러지 않으면 이 스캔이 시도하는 몫
     수만큼 정책 조회가 나간다.
     """
 
-    payout = get_or_create_payout(share.payout_target(), policy=policy)
+    payout = get_or_create_payout(share.payout_target())
 
     if payout.status != Payout.Status.REQUESTED:
         # 이미 다른 경로(웹훅 등)로 확정·실패되어 있다 — 그대로 지나간다.
@@ -197,7 +197,6 @@ def _attempt_share_payout(
             adapter=get_adapter(),
             confirm_with_vendor=True,
             simulate="failed" if force_failure else None,
-            policy=policy,
         )
     except PayoutError:
         payout = advance(payout, register_seller=False, confirmed_by_vendor=False)
@@ -249,7 +248,7 @@ def is_holding_distribution(appeal) -> bool:
     if appeal.status != Appeal.Status.PENDING:
         return False
 
-    return distribution_due_contests(Clock.now(), get_current_policy()).filter(
+    return distribution_due_contests(Clock.now(), current_policy()).filter(
         id=appeal.submission.contest_id
     ).exists()
 
@@ -262,19 +261,9 @@ def is_holding_distribution(appeal) -> bool:
 # 지급 시도하지 않는다(#16 AC). 행별 예외 격리는 뼈대(core.scans)의 것이다 — FAILED 로 끝난
 # 몫은 계속 재시도 후보로 남으므로(의도된 동작), 그 재시도 경로가 order_by("id") 의 맨 앞을
 # 영구히 차지한 채 예외로 죽으면 뒤의 배치가 통째로 막히는 poison pill 을 뼈대가 막는다.
-_POLICY_KEY = f"{__name__}:policy"
-
-
-def _policy(ctx):
-    # 이 스캔 실행에서 정책을 한 번만 읽는다(#75, ADR-0023) — 몫마다 다시 읽으면 쿼리가 몫 수만큼 늘어난다.
-    if _POLICY_KEY not in ctx:
-        ctx[_POLICY_KEY] = get_current_policy()
-    return ctx[_POLICY_KEY]
-
-
 def _due_contests(as_of, ctx):
     return (
-        distribution_due_contests(as_of, _policy(ctx))
+        distribution_due_contests(as_of, current_policy())
         # **심판되지 않은 이의가 있으면 그 Contest 는 아직 배분하지 않는다**(#74).
         #
         # 이의가 묻는 것이 정확히 "내 점수가 컷라인을 넘는가" 이고, 점수가 돈을 정하는 유일한
@@ -293,7 +282,7 @@ def _due_contests(as_of, ctx):
 
 
 def _create_distribution(contest, as_of, ctx):
-    distribution = _create_distribution_for_contest(contest.id, policy=_policy(ctx))
+    distribution = _create_distribution_for_contest(contest.id, policy=current_policy())
     if distribution is None:
         return None
     return {
@@ -320,7 +309,7 @@ def _attempt_payout(share, as_of, ctx):
     # 여기 나열된 submission_id 의 지급 시도만 강제로 실패시킨다. 실제 어댑터에서는 의미가 없다.
     fail_submission_ids = set(scan_params(ctx).get("fail_submission_ids", []))
     outcome = _attempt_share_payout(
-        share, policy=_policy(ctx), force_failure=share.submission_id in fail_submission_ids
+        share, force_failure=share.submission_id in fail_submission_ids
     )
     outcome["event"] = "payout_attempted"
     return outcome

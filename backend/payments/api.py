@@ -82,7 +82,7 @@ def initiate_payment(request: HttpRequest, payload: InitiatePaymentIn):
     같이 멈추고 DB 커넥션을 물고 있게 된다. 행 확보까지만 트랜잭션 안이다.
     """
 
-    from policies.services import get_current_policy
+    from policies.scope import current_policy
 
     with transaction.atomic():
         try:
@@ -117,7 +117,7 @@ def initiate_payment(request: HttpRequest, payload: InitiatePaymentIn):
                 payment.prize_amount = contest.prize
                 payment.save(update_fields=["prize_amount"])
         else:
-            listing_fee_amount = get_current_policy().contest_listing_fee
+            listing_fee_amount = current_policy().contest_listing_fee
             try:
                 # 중첩 atomic(세이브포인트)으로 감싼다 — IntegrityError가 나면 Postgres는
                 # 바깥 트랜잭션 전체를 "aborted" 상태로 만들어 그 뒤의 어떤 쿼리도 커밋

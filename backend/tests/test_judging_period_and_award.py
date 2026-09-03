@@ -31,7 +31,7 @@ from contests.models import Category, Contest, DeliverableType, JudgingExtension
 from core.models import ClockOverride
 from core.scans import SCAN_REGISTRY
 from payments.adapters import FakePGAdapter, PGError, PGTimeoutError
-from policies.services import get_current_policy
+from policies.scope import current_policy
 
 TICK_URL = "/api/internal/tick"
 CONTESTS_URL = "/api/contests"
@@ -243,7 +243,7 @@ def test_judging_period_starts_at_close_and_scanned_by_scheduled_transition(
     # deadline과 close_at이 1분밖에 안 떨어져 있어 차이가 작아 보이지만, 아래
     # test_judging_ends_at_is_derived_from_each_contests_own_deadline이 그 차이를
     # 직접 증명한다.
-    expected_judging_ends_at = deadline + timedelta(days=get_current_policy().judging_period_days)
+    expected_judging_ends_at = deadline + timedelta(days=current_policy().judging_period_days)
     assert closed.judging_ends_at == expected_judging_ends_at
 
     # 아직 심사기간 중이므로 틱을 쏴도 JUDGING_ENDED로 넘어가지 않는다.
@@ -343,8 +343,8 @@ def test_judging_ends_at_is_derived_from_each_contests_own_deadline(client, cate
     assert closed_a.status == Contest.Status.CLOSED
     assert closed_b.status == Contest.Status.CLOSED
 
-    assert closed_a.judging_ends_at == early_deadline + timedelta(days=get_current_policy().judging_period_days)
-    assert closed_b.judging_ends_at == late_deadline + timedelta(days=get_current_policy().judging_period_days)
+    assert closed_a.judging_ends_at == early_deadline + timedelta(days=current_policy().judging_period_days)
+    assert closed_b.judging_ends_at == late_deadline + timedelta(days=current_policy().judging_period_days)
     assert closed_a.judging_ends_at != closed_b.judging_ends_at
 
 
@@ -773,7 +773,7 @@ def test_extension_updates_only_the_transition_time_column(client, category, lan
     assert registry_size_after == registry_size_before
 
     extended = Contest.objects.get(id=contest["id"])
-    expected = original_judging_ends_at + timedelta(days=get_current_policy().judging_extension_days)
+    expected = original_judging_ends_at + timedelta(days=current_policy().judging_extension_days)
     assert extended.judging_ends_at == expected
     assert extended.status == Contest.Status.CLOSED
 
@@ -811,8 +811,8 @@ def test_extension_days_is_snapshotted_at_initiate_not_re_read_at_confirm(
     original_judging_ends_at = Contest.objects.get(id=contest["id"]).judging_ends_at
 
     initiated = _initiate_extension(client, sponsor, contest["id"])
-    original_extension_days = get_current_policy().judging_extension_days
-    assert initiated["amount"] == get_current_policy().judging_extension_fee
+    original_extension_days = current_policy().judging_extension_days
+    assert initiated["amount"] == current_policy().judging_extension_fee
 
     # initiate와 confirm 사이에 운영자가 연장 단위를 7일에서 3일로 바꾼다.
     PlatformPolicy.objects.update_or_create(pk=1, defaults={"judging_extension_days": 3})
@@ -1130,7 +1130,7 @@ def test_confirming_the_same_extension_payment_twice_does_not_double_charge(
     extended = Contest.objects.get(id=contest["id"])
     assert extended.judging_extension_count == 1
     assert extended.judging_ends_at == original_judging_ends_at + timedelta(
-        days=get_current_policy().judging_extension_days
+        days=current_policy().judging_extension_days
     )
 
     payment = JudgingExtensionPayment.objects.get(order_id=initiated["order_id"])

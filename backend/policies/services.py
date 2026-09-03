@@ -1,11 +1,8 @@
 """PlatformPolicy 읽기·쓰기 (#75, #76, ADR-0023).
 
-읽기(`get_current_policy`)는 호출 스코프당 한 번이다 — `core.transitions`가
-`Clock.now()`를 스캔 한 번당 한 번만 구해 그 값을 인자로 넘기는 것과 같은
-관용구다: 값마다(또는 Payout마다) 정책을 다시 조회하면 채점·배분·지급 경로에서
-쿼리가 값의 수·건수만큼 늘어난다. 이 모듈의 읽기 함수는 호출자가 요청(또는
-스캔) 시작 시점에 정확히 한 번만 부르고, 그 뒤로는 반환값을 계속 재사용해야
-한다.
+읽기는 `policies.scope.current_policy()` 로 한다(#145) — 요청·스캔 실행 스코프당 한 번만 SELECT
+하고 그 안에서 재사용한다. 이 모듈의 `get_current_policy` 는 그 홀더가 쓰는 원시 읽기다 — 이 앱
+밖에서는 직접 부르지 않는다.
 
 쓰기(`update_policy`)는 이 앱 밖에서 부르지 않는다 — `policies.api`(운영자
 API, #76)에서만 호출된다. 테스트의 유일한 시임은 HTTP이므로(CLAUDE.md) 이
@@ -168,4 +165,8 @@ def update_policy(
             changed_at=Clock.now(),
         )
 
+    # write-through(#145) — 이 요청의 스코프가 이미 옛 행을 읽어 두었어도 나머지는 새 행을 본다.
+    from .scope import refresh_scope
+
+    refresh_scope(current)
     return current, change

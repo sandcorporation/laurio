@@ -24,7 +24,7 @@ from django.utils import timezone
 from contests.models import Category, Contest, DeliverableType
 from core.models import ClockOverride
 from payments.models import Payment
-from policies.services import get_current_policy
+from policies.scope import current_policy
 
 # 환불 스캔 둘의 등록부 이름(#140) — 예전 단일 엔드포인트가 순서대로 처리하던 두 후보 종류 그대로.
 REFUND_SCAN_URLS = (
@@ -316,7 +316,7 @@ def test_zero_submissions_after_close_gets_fully_refunded_and_ledger_balances_to
     assert balance["balance"] == 0
     assert balance["is_balanced"] is True
 
-    listing_fee = get_current_policy().contest_listing_fee
+    listing_fee = current_policy().contest_listing_fee
     entries = _ledger_entries(client, closed.ledger_id)
     lines = entries[1]["lines"]
     lines_by_account = {line["account"]: (line["side"], line["amount"]) for line in lines}

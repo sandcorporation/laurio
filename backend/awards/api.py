@@ -31,7 +31,7 @@ from core.clock import Clock
 from core.transitions import claim_transition
 from handovers.models import Handover
 from notifications.lifecycle import notify_award_result
-from policies.services import get_current_policy
+from policies.scope import current_policy
 from submissions.models import Submission
 
 from .models import Award
@@ -102,7 +102,7 @@ def award_submission(request: HttpRequest, contest_id: int, payload: AwardIn):
         Handover.objects.create(
             award=award,
             release_deadline_at=now
-            + timedelta(days=get_current_policy().handover_acceptance_period_days),
+            + timedelta(days=current_policy().handover_acceptance_period_days),
         )
 
     # 트랜잭션이 커밋된 뒤에만 알린다 — notify_award_result는 내부에서 모든 예외를

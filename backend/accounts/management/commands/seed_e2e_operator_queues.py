@@ -33,7 +33,7 @@ from django.utils import timezone
 from awards.models import Award
 from contests.models import Category, Contest, DeliverableType
 from core.transitions import claim_transition
-from policies.services import get_current_policy
+from policies.scope import current_policy
 
 CONTESTS_URL = "/api/contests"
 PAYMENTS_URL = "/api/payments"
@@ -312,7 +312,7 @@ def _close_contest(client: Client, contest: dict, *, deadline) -> None:
         now=timezone.now(),
         extra_fields={
             "judging_ends_at": deadline
-            + timedelta(days=get_current_policy().judging_period_days)
+            + timedelta(days=current_policy().judging_period_days)
         },
     )
     assert ok, f"Contest {contest['id']} 를 PUBLISHED -> CLOSED 로 전이하지 못했다."
