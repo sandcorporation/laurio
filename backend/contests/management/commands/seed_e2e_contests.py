@@ -25,11 +25,13 @@ spec #25). 그래서 ORM으로 상태를 직접 만든다 — Django 관리 명�
 from __future__ import annotations
 
 import json
+import re
 from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
-from django.core.management.base import BaseCommand
+from django.db.models import Q
+from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
 from accounts.models import DeveloperProfile, SocialAccount, SponsorProfile
@@ -38,7 +40,28 @@ from contests.models import Category, Contest, DeliverableType, Requirement
 from scoring.models import Score
 from submissions.models import Evidence, RequirementResponse, Submission
 
-PREFIX = "[E2E] "
+# 네임스페이스 없이 부를 때의 기본 접두어. 런타임에 Contest 를 만드는
+# 스펙들(submit·upload·grill·payment)이 이 문자열을 직접 쓰고,
+# `frontend/e2e/global-setup.ts` 의 일괄 정리도 이 접두어를 훑는다 — 바꾸려면
+# 그 셋을 함께 봐야 한다.
+DEFAULT_PREFIX = "[E2E] "
+
+# 이 명령이 만드는 계정들의 이름 뿌리. 네임스페이스가 붙으면 `<base>-<token>` 이
+# 된다(`Command._account`). 정리가 이 목록을 쓰므로, 계정을 하나 늘리면 여기도
+# 늘려야 한다 — 안 그러면 그 계정만 남아 다음 시드가 username 충돌로 터진다.
+_SEEDED_ACCOUNT_BASES = (
+    "e2e-seed-sponsor",
+    "e2e-seed-developer",
+    "e2e-judging-sponsor",
+    "e2e-judging-developer-a",
+    "e2e-judging-developer-b",
+)
+
+# 워커별 네임스페이스 토큰이 들어갈 수 있는 글자 (#104). username·title 에 그대로
+# 실리므로 좁게 막는다 — 공백이나 구분자가 섞이면 접두어 비교(`startswith`)가
+# 다른 네임스페이스를 잡아먹고, 길면 username 길이 제한을 넘겨 시드가 런타임에
+# 터진다.
+_NAMESPACE_RE = re.compile(r"^[a-z0-9]{1,16}$")
 
 # FE-06(#31) 인수조건 — 소스코드와 test_account 는 developer 공개 프로필 HTML
 # 어디에도 나오면 안 된다. 두 값을 여기 심어두고 frontend/e2e 스펙이 이 정확한
@@ -74,6 +97,26 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser) -> None:
         parser.add_argument(
+            "--prune-all-namespaces",
+            action="store_true",
+            help=(
+                "심지 않고, 어느 네임스페이스의 것이든 이 명령이 만든 데이터를 전부 지운다 "
+                "(#104). 워커별 정리는 자기 범위만 지우므로, 죽은 워커가 남긴 것과 런타임에 "
+                "만들어진 `[E2E] ` Contest 는 아무도 걷지 않는다 — 스위트 시작 전에 "
+                "`global-setup` 이 한 번 부른다. 워커가 아직 없는 시점이라 경합이 없다."
+            ),
+        )
+        parser.add_argument(
+            "--namespace",
+            default="",
+            help=(
+                "이 시드가 자기 것으로 삼을 네임스페이스 토큰 (#104). 주면 title 접두어와 "
+                "계정 이름이 그 토큰으로 갈려, **다른 네임스페이스의 데이터를 지우지 않는다** "
+                "— e2e 를 워커 여럿으로 돌릴 때 두 워커가 서로의 픽스처를 파괴하지 않게 하는 "
+                "장치다. 안 주면 예전과 똑같이 `[E2E] ` 로 심는다."
+            ),
+        )
+        parser.add_argument(
             "--bulk",
             type=int,
             default=0,
@@ -84,26 +127,43 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options) -> None:
+        # **네임스페이스가 이 명령의 「자기 것」 범위를 정한다** (#104). 접두어와
+        # 계정 이름이 그 토큰으로 갈리고, `_cleanup` 도 그 범위만 지운다 — 그래서
+        # 워커 둘이 동시에 불러도 서로의 픽스처를 파괴하지 않는다.
+        if options.get("prune_all_namespaces"):
+            self.stdout.write(self.style.SUCCESS(f"pruned {self._prune_all_namespaces()} contests"))
+            return
+
+        namespace = (options.get("namespace") or "").strip()
+        if namespace and not _NAMESPACE_RE.match(namespace):
+            raise CommandError(
+                f"--namespace 는 소문자 영숫자 1~16자여야 한다(받은 값: {namespace!r}). "
+                "이 토큰은 username 과 title 에 그대로 실리므로, 공백이나 구분자가 섞이면 "
+                "접두어 비교가 다른 네임스페이스를 잡아먹고 길면 username 길이 제한을 넘긴다."
+            )
+        self.namespace = namespace
+        self.prefix = f"[E2E-{namespace}] " if namespace else DEFAULT_PREFIX
+
         self._cleanup()
 
         sponsor = self._seed_sponsor()
         # 삭제하고 다시 만들지 않고 **제자리에서 맞춤다**(_cleanup 주석 참고). 기준데이터라
         # 이름이 고정이고, 유지해두면 다른 스펙이 런타임에 만든 Contest 가 이것들을
         # 참조하고 있어도 시드가 깨지지 않는다.
-        category_lifestyle, _ = Category.objects.get_or_create(name=f"{PREFIX}라이프스타일")
-        category_productivity, _ = Category.objects.get_or_create(name=f"{PREFIX}생산성")
+        category_lifestyle, _ = Category.objects.get_or_create(name=f"{self.prefix}라이프스타일")
+        category_productivity, _ = Category.objects.get_or_create(name=f"{self.prefix}생산성")
         web_service, _ = DeliverableType.objects.update_or_create(
-            name=f"{PREFIX}웹 서비스", defaults={"minimum_prize": 2_000_000}
+            name=f"{self.prefix}웹 서비스", defaults={"minimum_prize": 2_000_000}
         )
         mobile_app, _ = DeliverableType.objects.update_or_create(
-            name=f"{PREFIX}모바일 앱", defaults={"minimum_prize": 1_500_000}
+            name=f"{self.prefix}모바일 앱", defaults={"minimum_prize": 1_500_000}
         )
 
         now = timezone.now()
 
         funded = self._create_contest(
             sponsor=sponsor,
-            title=f"{PREFIX}알림 앱 리디자인",
+            title=f"{self.prefix}알림 앱 리디자인",
             category=category_lifestyle,
             deliverable_types=[web_service],
             description="기존 알림 앱의 UI 를 다시 그리는 공모전입니다.",
@@ -118,7 +178,7 @@ class Command(BaseCommand):
 
         underfunded = self._create_contest(
             sponsor=sponsor,
-            title=f"{PREFIX}러닝 크루 기록 앱",
+            title=f"{self.prefix}러닝 크루 기록 앱",
             category=category_productivity,
             deliverable_types=[web_service, mobile_app],
             description="러닝 크루의 기록을 남기는 앱입니다.",
@@ -132,7 +192,7 @@ class Command(BaseCommand):
 
         closed = self._create_contest(
             sponsor=sponsor,
-            title=f"{PREFIX}마감된 공모전",
+            title=f"{self.prefix}마감된 공모전",
             category=category_lifestyle,
             deliverable_types=[web_service],
             description="이미 마감되었지만 공개 목록·상세에 남아야 하는 공모전입니다.",
@@ -147,7 +207,7 @@ class Command(BaseCommand):
 
         draft = self._create_contest(
             sponsor=sponsor,
-            title=f"{PREFIX}드래프트 공모전",
+            title=f"{self.prefix}드래프트 공모전",
             category=category_lifestyle,
             deliverable_types=[web_service],
             description="아직 공개되지 않은 draft 입니다 — 404 여야 합니다.",
@@ -167,7 +227,7 @@ class Command(BaseCommand):
         judging_sponsor = self._seed_judging_sponsor()
         judging = self._create_contest(
             sponsor=judging_sponsor,
-            title=f"{PREFIX}심사 비교용 공모전",
+            title=f"{self.prefix}심사 비교용 공모전",
             category=category_productivity,
             deliverable_types=[web_service],
             description="Requirement 매트릭스 비교와 Award 테스트용 공모전입니다.",
@@ -185,10 +245,10 @@ class Command(BaseCommand):
         )
 
         developer_a = self._seed_named_developer(
-            "e2e-judging-developer-a", f"{PREFIX}심사 개발자 A"
+            self._account("e2e-judging-developer-a"), f"{self.prefix}심사 개발자 A"
         )
         developer_b = self._seed_named_developer(
-            "e2e-judging-developer-b", f"{PREFIX}심사 개발자 B"
+            self._account("e2e-judging-developer-b"), f"{self.prefix}심사 개발자 B"
         )
 
         # Submission A — 필수 Requirement 에 Evidence 가 연결돼 있다(칸이
@@ -208,7 +268,7 @@ class Command(BaseCommand):
             submission=submission_a,
             requirement=judging_required_req,
             is_met=True,
-            note=f"{PREFIX}로그인 폼과 세션 발급을 구현했습니다.",
+            note=f"{self.prefix}로그인 폼과 세션 발급을 구현했습니다.",
         )
         Evidence.objects.create(
             response=response_a_required,
@@ -237,12 +297,12 @@ class Command(BaseCommand):
             submission=submission_a,
             percentage=Decimal("91.50"),
             model_version=JUDGING_SCORE_MODEL_SENTINEL,
-            prompt=f"{PREFIX}fake prompt",
+            prompt=f"{self.prefix}fake prompt",
             reasoning=[
                 {
                     "requirement_id": judging_required_req.id,
                     "is_met": True,
-                    "reasoning": f"{PREFIX}fake reasoning",
+                    "reasoning": f"{self.prefix}fake reasoning",
                 }
             ],
         )
@@ -264,7 +324,7 @@ class Command(BaseCommand):
             contest=closed,
             developer=developer,
             source_object_key=SENSITIVE_SOURCE_OBJECT_KEY,
-            demo_video_object_key=f"{PREFIX}demo-video/deadbeefdeadbeefdeadbeefdeadbeef",
+            demo_video_object_key=f"{self.prefix}demo-video/deadbeefdeadbeefdeadbeefdeadbeef",
             demo_url="https://example.invalid/e2e-archived-demo",
             test_account=SENSITIVE_TEST_ACCOUNT,
         )
@@ -310,14 +370,14 @@ class Command(BaseCommand):
         (테스트가 정렬 로직을 그대로 다시 계산하지 않는다).
         """
 
-        category, _ = Category.objects.get_or_create(name=f"{PREFIX}대량")
+        category, _ = Category.objects.get_or_create(name=f"{self.prefix}대량")
         now = timezone.now()
 
         contests = Contest.objects.bulk_create(
             [
                 Contest(
                     sponsor=sponsor,
-                    title=f"{PREFIX}대량 {i:04d}",
+                    title=f"{self.prefix}대량 {i:04d}",
                     category=category,
                     description="목록 페이지네이션 재현용 Contest 입니다.",
                     prize=10_000_000 - i,
@@ -342,6 +402,44 @@ class Command(BaseCommand):
             "lowest_prize_title": contests[-1].title,
         }
 
+    def _prune_all_namespaces(self) -> int:
+        """네임스페이스와 무관하게 이 명령 계열이 만든 것을 전부 지운다 (#104).
+
+        워커별 정리(`_cleanup`)는 일부러 자기 범위만 지운다 — 그래야 옆 워커를
+        파괴하지 않는다. 그 대가로 **아무도 걷지 않는 것**이 생긴다: 죽은 워커가
+        남긴 네임스페이스, 그리고 런타임에 Contest 를 만드는 스펙들이 쓰는
+        `[E2E] ` 접두어. 접두어가 없던 시절 그것들이 쌓여 목록 페이지네이션
+        스펙이 조용히 깨진 적이 있다(16건까지 쌓인 것을 확인했다).
+
+        그래서 스위트 시작 전에 한 번만 이 경로로 전부 걷는다 — 그 시점에는
+        워커가 아직 없어 경합이 성립하지 않는다.
+        """
+
+        # `[E2E] ` 와 `[E2E-w0] ` 를 함께 잡는 공통 조각. Award 를 먼저 지운다 —
+        # `Award.submission` 이 PROTECT 라 Contest 부터 지우면 막힌다.
+        stem = "[E2E"
+        Award.objects.filter(contest__title__startswith=stem).delete()
+        removed, _ = Contest.objects.filter(title__startswith=stem).delete()
+        # **`e2e-` 로 뭉뚱그리지 않는다.** 그렇게 하면 운영자 시드가 만든 계정까지
+        # 잡히는데, 그 계정들은 `AppealRuling.ruled_by`·`PolicyChange.operator` 가
+        # PROTECT 로 잡고 있어 삭제가 통째로 막힌다(실제로 겪었다). 이 명령이 만드는
+        # 다섯 계정만, 네임스페이스 접미가 붙은 것까지 함께 고른다.
+        account_filter = Q()
+        for base in _SEEDED_ACCOUNT_BASES:
+            account_filter |= Q(username=base) | Q(username__startswith=f"{base}-")
+        get_user_model().objects.filter(account_filter).delete()
+        return removed
+
+    def _account(self, base: str) -> str:
+        """계정 이름도 네임스페이스로 가른다 (#104).
+
+        `username` 은 unique 라, 네임스페이스를 안 가르면 두 번째 워커의 시드가
+        `IntegrityError` 로 터진다. title 접두어와 같은 토큰을 쓴다 — 정리할 때
+        「이 네임스페이스의 계정」을 접두어 하나로 고를 수 있어야 한다.
+        """
+
+        return f"{base}-{self.namespace}" if self.namespace else base
+
     def _cleanup(self) -> None:
         # Award.submission 은 on_delete=PROTECT 다(awards/models.py) — Django의
         # delete collector 는 "그 Award 자체도 이번 삭제로 함께 사라진다"는 걸
@@ -350,13 +448,13 @@ class Command(BaseCommand):
         # 의 "Sponsor 본인은 Award할 수 있다" 테스트), Contest 를 삭제하기 전에
         # 그 Contest 에 걸린 Award 를 먼저 지워야 한다 — Handover.award 는 CASCADE
         # 라 Award 를 지우면 함께 정리된다.
-        Award.objects.filter(contest__title__startswith=PREFIX).delete()
+        Award.objects.filter(contest__title__startswith=self.prefix).delete()
         # 다른 스펙이 런타임에 만드는 Contest(submit/upload/grill)도 제목에 이 접두어를
         # 달아 여기서 함께 정리된다(#39). 접두어가 없던 시절에는 스위트를 돌릴 때마다
         # 쌓이기만 해서, 목록이 페이지네이션되기 시작하면 시드 Contest 가 1페이지 밖으로
         # 밀려나 스펙이 조용히 깨졌다 — 실제로 "제출 폼 데모용 Contest" 가 16건까지
         # 쌓인 것을 확인했다.
-        Contest.objects.filter(title__startswith=PREFIX).delete()
+        Contest.objects.filter(title__startswith=self.prefix).delete()
         # Category 와 DeliverableType 은 **지우지 않는다** — 지우려고 했다가 이
         # 명령이 통째로 죽었다. Contest.category 는 on_delete=PROTECT 인데,
         # submit/upload/grill 스펙은 자기 Contest 를 **런타임에** 만들면서 이
@@ -370,19 +468,17 @@ class Command(BaseCommand):
         # 기준데이터는 이름이 고정이라 삭제할 이유가 애초에 없다 — 위에서
         # get_or_create/update_or_create 로 제자리에서 맞춘다. 멱등성은 그대로고,
         # "접두어 없는 실데이터는 절대 건드리지 않는다"는 약속도 그대로 지킨다.
+        # 계정도 이 네임스페이스의 것만 지운다 (#104) — 이름을 하나씩 나열하는 대신
+        # `_account` 가 붙이는 접두어로 고른다. 그래야 이름이 하나 늘어도 정리에서
+        # 빠지는 일이 없고, 다른 워커의 계정을 건드리지 않는다.
         get_user_model().objects.filter(
-            username__in=[
-                "e2e-seed-sponsor",
-                "e2e-seed-developer",
-                "e2e-judging-sponsor",
-                "e2e-judging-developer-a",
-                "e2e-judging-developer-b",
-            ]
+            username__in=[self._account(base) for base in _SEEDED_ACCOUNT_BASES]
         ).delete()
 
     def _seed_sponsor(self) -> SponsorProfile:
         user = get_user_model().objects.create_user(
-            username="e2e-seed-sponsor", email="e2e-seed-sponsor@example.invalid"
+            username=self._account("e2e-seed-sponsor"),
+            email="e2e-seed-sponsor@example.invalid",
         )
         user.set_unusable_password()
         user.save(update_fields=["password"])
@@ -395,24 +491,25 @@ class Command(BaseCommand):
         똑같이 맞추면 frontend/e2e 가 그 seed 로 로그인했을 때 바로 이 계정으로
         귀결된다)."""
 
+        login_seed = self._account(JUDGING_SPONSOR_LOGIN_SEED)
         user = get_user_model().objects.create_user(
-            username=JUDGING_SPONSOR_LOGIN_SEED, email=f"{JUDGING_SPONSOR_LOGIN_SEED}@example.test"
+            username=login_seed, email=f"{login_seed}@example.test"
         )
         user.set_unusable_password()
         user.save(update_fields=["password"])
         SocialAccount.objects.create(
             user=user,
             provider=SocialAccount.Provider.KAKAO,
-            provider_uid=JUDGING_SPONSOR_LOGIN_SEED,
-            email=f"{JUDGING_SPONSOR_LOGIN_SEED}@example.test",
+            provider_uid=login_seed,
+            email=f"{login_seed}@example.test",
         )
-        return SponsorProfile.objects.create(user=user, display_name=f"{PREFIX}심사 스폰서")
+        return SponsorProfile.objects.create(user=user, display_name=f"{self.prefix}심사 스폰서")
 
     def _seed_developer(self) -> DeveloperProfile:
         return self._seed_named_developer(
-            "e2e-seed-developer",
-            f"{PREFIX}개발자",
-            bio=f"{PREFIX}자기소개 — SSR 로 색인되어야 하는 공개 프로필입니다.",
+            self._account("e2e-seed-developer"),
+            f"{self.prefix}개발자",
+            bio=f"{self.prefix}자기소개 — SSR 로 색인되어야 하는 공개 프로필입니다.",
         )
 
     def _seed_named_developer(
@@ -524,7 +621,7 @@ class Command(BaseCommand):
             # frontend/e2e 가 이 seed 로 fake 로그인하면 이 Contest 의 진짜
             # Sponsor 로 귀결된다(_seed_judging_sponsor 참고) — "본인만 Award 할
             # 수 있다"를 검증하려면 진짜 Sponsor 로 로그인해야 하기 때문이다.
-            "sponsor_login_seed": JUDGING_SPONSOR_LOGIN_SEED,
+            "sponsor_login_seed": contest.sponsor.user.username,
             # Developer 본인의 화면(#74)이 "이 Contest 에 제출을 가진 개발자" 로
             # 로그인할 수 있게 한다 — provider_uid 를 username 과 같게 심어 뒀다.
             # **문자열을 따로 적지 않고 객체에서 꺼낸다** — 적어 두면 시드가 쓰는

@@ -115,8 +115,38 @@ export type SeedOptions = {
   bulk?: number;
 };
 
+/**
+ * 이 워커가 자기 것으로 삼을 네임스페이스 토큰 (#104).
+ *
+ * **시드는 심기 전에 지운다** — 접두어가 붙은 Contest·계정을 전부 삭제하고 다시
+ * 만든다. 워커가 여럿이면 그 삭제가 다른 워커의 픽스처까지 지워서, 실패가 코드
+ * 회귀와 구분되지 않는다(예전 병렬화 시도가 16건 실패로 끝난 이유). 워커마다
+ * 다른 토큰을 주면 각자 자기 범위만 지운다.
+ *
+ * `parallelIndex` 는 **동시에 살아 있는 워커 사이에서만** 유일하다(워커가 죽고
+ * 새로 뜨면 재사용된다) — 그거면 충분하다. 우리가 막아야 하는 것은 "같은 순간에
+ * 도는 두 워커의 충돌"이고, 순차적으로 같은 인덱스를 물려받은 워커는 앞 워커가
+ * 이미 끝난 뒤라 지울 것이 자기 것뿐이다.
+ *
+ * 테스트 밖(예: globalSetup)에서 부르면 인덱스가 없다 — 그때는 네임스페이스
+ * 없이, 즉 예전과 같은 `[E2E] ` 로 심는다.
+ */
+function workerNamespace(): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- 이 모듈은
+    // globalSetup(테스트 밖)에서도 임포트되므로 최상단에서 test 를 끌어오면
+    // 그쪽에서 터진다. 실제로 워커 안일 때만 읽는다.
+    const { test } = require("@playwright/test") as typeof import("@playwright/test");
+    return `w${test.info().parallelIndex}`;
+  } catch {
+    return "";
+  }
+}
+
 export function seedE2eContests(options: SeedOptions = {}): SeededContests {
   const args = ["run", "python", "manage.py", "seed_e2e_contests"];
+  const namespace = workerNamespace();
+  if (namespace) args.push("--namespace", namespace);
   if (options.bulk) args.push("--bulk", String(options.bulk));
 
   const output = execFileSync("uv", args, {

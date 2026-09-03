@@ -89,6 +89,26 @@ export default async function globalSetup(): Promise<void> {
   // 실제로 뭔가를 정리했는지 확인할 수 있다.
   console.log(`[global-setup] e2e run id ${runId} — ${output.trim().split("\n").pop()}`);
 
+  // **워커별 정리가 걷지 못하는 것을 여기서 한 번 걷는다** (#104).
+  // `seed_e2e_contests` 는 이제 자기 네임스페이스만 지운다 — 그래야 옆 워커를
+  // 파괴하지 않는다. 그 대가로 죽은 워커가 남긴 네임스페이스와, 런타임에
+  // Contest 를 만드는 스펙들이 쓰는 `[E2E] ` 접두어를 아무도 안 걷는다.
+  // 접두어가 없던 시절 그것들이 쌓여 목록 페이지네이션 스펙이 조용히 깨졌다.
+  //
+  // 여기는 워커가 아직 하나도 없는 시점이라 경합이 성립하지 않는다.
+  const pruned = execFileSync(
+    "uv",
+    ["run", "python", "manage.py", "seed_e2e_contests", "--prune-all-namespaces"],
+    {
+      cwd: BACKEND_DIR,
+      env: { ...process.env, LAURIO_DB_PORT: backendDbPort() },
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "inherit"],
+    },
+  );
+  // eslint-disable-next-line no-console -- 위와 같은 이유.
+  console.log(`[global-setup] ${pruned.trim().split(String.fromCharCode(10)).pop()}`);
+
   // **호출을 잊고 있었다.** 이 함수는 진작 있었고 CLAUDE.md 는 워밍업이 돌고
   // 있다고 적어 뒀는데, 정의만 되고 불리지 않았다 — 즉 기록된 "웜 2.5분" 이
   // 아니라 계속 "콜드 5.6분" 을 내고 있었다. 코드리뷰가 잡았다.

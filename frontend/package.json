@@ -7,9 +7,9 @@
     "build": "next build",
     "start": "next start --port 3000",
     "typecheck": "tsc --noEmit",
-    "test": "playwright test",
-    "test:public": "playwright test --project=public",
-    "test:operator": "playwright test --project=operator",
+    "test": "pnpm run test:public && pnpm run test:operator",
+    "test:public": "playwright test --project=public --grep-invert @exclusive && playwright test --project=public --grep @exclusive --workers=1",
+    "test:operator": "playwright test --project=operator --workers=1",
     "generate:api": "node scripts/generate-api-types.mjs"
   },
   "dependencies": {

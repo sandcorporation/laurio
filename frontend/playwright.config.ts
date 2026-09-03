@@ -27,15 +27,26 @@ export default defineConfig({
   // 한 번 발급한다(코드리뷰 지적, #70 — e2e/lib/run-id.ts 상단 주석 참고).
   globalSetup: require.resolve("./e2e/global-setup.ts"),
   fullyParallel: true,
-  // e2e/tokens.spec.ts 는 app/tokens.css 를 실제로 편집해 렌더링이 갈리는지
-  // 확인한다(FE-02, #27 핵심 승인 기준) — tracked 파일 하나를 스위트 전체가
-  // 공유한다. `fullyParallel` 과 `describe.configure({ mode: "serial" })` 는
-  // 같은 파일 *안에서만* 순서를 강제할 뿐이고, 다른 스펙 파일(다른 프로젝트
-  // 포함)은 별도 워커에서 여전히 같은 순간에 같은 페이지를 열어 토큰이 만든
-  // 색을 관찰할 수 있다. 워커를 하나로 고정해 전체 실행(두 프로젝트 합쳐)을
-  // 진짜로 배타적으로 만든다 — 스펙 파일이나 프로젝트가 늘어도 이 보장은
-  // 구조적으로 유지된다.
-  workers: 1,
+  // **워커 여럿으로 돈다** (#104). 예전에는 `workers: 1` 이었다 —
+  // `e2e/tokens.spec.ts` 가 app/tokens.css 를 실제로 편집해(FE-02 #27 의 핵심
+  // 승인 기준) 그 창 동안 다른 워커가 여는 모든 페이지가 바뀐 색을 보기
+  // 때문이었다. `fullyParallel` 과 `describe.configure({ mode: "serial" })` 는
+  // 같은 파일 안에서만 순서를 강제해 그것을 막지 못한다.
+  //
+  // 이제 그 보장은 워커 수가 아니라 **실행을 두 패스로 나누는 것**이 진다
+  // (package.json 의 test 스크립트) — `@exclusive` 태그가 없는 것을 먼저 병렬로,
+  // 그 다음 태그가 붙은 것만 워커 하나로 돌린다. 스펙 파일이 늘어도 그 보장은
+  // 유지된다: 전역 상태를 건드리는 스펙은 그 태그를 붙이면 된다.
+  //
+  // 시드 충돌은 다른 방식으로 막았다 — `seed_e2e_contests` 가 워커별
+  // 네임스페이스로 자기 범위만 지운다(e2e/lib/seed.ts 의 workerNamespace).
+  // **운영자 프로젝트는 이 값을 쓰지 않는다** — package.json 의 test:operator 가
+  // `--workers=1` 로 못 박는다. 그쪽 스펙은 큐의 **전체 건수**를 단언하고(홈의 세
+  // 숫자가 심은 것과 정확히 맞는지), 「0건은 0건이라고 말한다」는 테스트는 아예
+  // 빈 큐를 요구한다 — 다른 워커가 무엇이든 심는 순간 둘 다 깨진다. 실제로 2워커로
+  // 돌려 4건이 그렇게 실패하는 것을 확인했다. 그걸 풀려면 운영자 큐 시드에도
+  // 워커별 네임스페이스가 필요하고, 그건 이 티켓 범위를 넘는다.
+  workers: Number(process.env.PLAYWRIGHT_WORKERS ?? 2),
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [["github"], ["list"]] : "list",

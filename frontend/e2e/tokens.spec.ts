@@ -39,7 +39,15 @@ async function readProof(page: import("@playwright/test").Page) {
   });
 }
 
-test("app/tokens.css 의 액센트 값 하나를 바꾸면 그 토큰을 쓰는 모든 곳(텍스트·괘선)이 함께 바뀐다", async ({
+// **`@exclusive` — 이 테스트는 혼자 돈다** (#104). 아래에서 app/tokens.css 를
+// 실제로 편집하는 동안, 다른 워커가 여는 모든 페이지가 바뀐 색을 본다.
+// `fullyParallel` 과 `describe.configure({ mode: "serial" })` 는 같은 파일
+// 안에서만 순서를 강제하므로 그것으로는 막을 수 없다. package.json 의 test 스크립트가
+// 태그 없는 것을 먼저 병렬로 돌리고, 그 다음 이 태그가 붙은 것만 워커 하나로 돌린다.
+//
+// **전역 상태를 건드리는 스펙을 새로 쓴다면 이 태그를 붙여라** — 안 붙이면
+// 병렬로 돌아 다른 스펙을 오염시킨다.
+test("@exclusive app/tokens.css 의 액센트 값 하나를 바꾸면 그 토큰을 쓰는 모든 곳(텍스트·괘선)이 함께 바뀐다", async ({
   page,
 }) => {
   // 스왑 폴 + 복구 폴을 합치면 기본 30초 타임아웃을 넘는다. 여기서 명시적으로
