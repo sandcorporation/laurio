@@ -30,6 +30,18 @@ export type ComparisonSubmissionOut = components["schemas"]["ComparisonSubmissio
 export type AwardIn = components["schemas"]["AwardIn"];
 export type AwardOut = components["schemas"]["AwardOut"];
 
+// Sponsor 지표 화면(#107, 부모 #105)이 쓰는 타입. `ContestMetricsOut` 에도 다른
+// 비교 화면 타입들과 같은 이유로 developer_id·submission_id·Score 필드가 없다 —
+// 백엔드 스키마(submissions/schemas.py) 자체에 없으므로, 이 타입을 그대로
+// 클라이언트 컴포넌트 props 로 넘겨도 개별 참가자나 점수가 새어나갈 수 없다.
+export type ContestMetricsOut = components["schemas"]["ContestMetricsOut"];
+export type DailyParticipationOut = components["schemas"]["DailyParticipationOut"];
+export type RequirementFulfillmentOut = components["schemas"]["RequirementFulfillmentOut"];
+export type CompletionDistributionOut = components["schemas"]["CompletionDistributionOut"];
+// #109, 부모 #105 — 조회수·전환율. `view_count`는 캐시에서 온 집계 하나뿐이고
+// 방문자 식별자는 이 타입에도 없다.
+export type ViewMetricsOut = components["schemas"]["ViewMetricsOut"];
+
 export const EVIDENCE_KINDS: { value: EvidenceIn["kind"]; label: string }[] = [
   { value: "video_timestamp", label: "영상 타임스탬프" },
   { value: "screenshot", label: "스크린샷" },

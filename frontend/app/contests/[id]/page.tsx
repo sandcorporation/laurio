@@ -13,6 +13,8 @@ import { notFound } from "next/navigation";
 import { fetchContest, type Requirement } from "@/lib/api/contests";
 import { formatDday, formatPrize, formatSubmissionCount, isImminent } from "@/lib/contest-format";
 
+import { ContestViewBeacon } from "./view-beacon";
+
 type Params = { id: string };
 
 function parseContestId(raw: string): number | null {
@@ -65,6 +67,7 @@ export default async function ContestDetailPage({ params }: { params: Promise<Pa
 
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-8 bg-paper p-10 text-ink">
+      <ContestViewBeacon contestId={contest.id} />
       <header className="flex flex-col gap-3 border-b border-rule pb-6">
         <div className="flex flex-wrap items-center gap-2 text-xs text-ink/60">
           <span>{contest.category.name}</span>

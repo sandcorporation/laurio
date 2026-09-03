@@ -29,7 +29,10 @@
 import logging
 
 from django.db import IntegrityError, transaction
+from django.db.models import Count, Q
+from django.db.models.functions import TruncDate
 from django.http import HttpRequest
+from django.utils import timezone
 from ninja import Router
 from ninja.errors import HttpError
 from ninja.pagination import PageNumberPagination, paginate
@@ -39,6 +42,7 @@ from accounts.models import DeveloperProfile
 from accounts.sanitize import sanitize_free_text
 from awards.models import Award
 from contests.models import Contest, Requirement
+from contests.view_tracking import get_view_count
 from core.clock import Clock
 from verification.models import Verification
 
@@ -50,15 +54,20 @@ from .schemas import (
     OwnScoreOut,
     ComparisonEntryOut,
     ComparisonSubmissionOut,
+    CompletionDistributionOut,
     CompletionOut,
     ContestComparisonOut,
+    ContestMetricsOut,
+    DailyParticipationOut,
     DeveloperPublicProfileOut,
     EvidenceOut,
     PublicSubmissionOut,
     RequirementComparisonOut,
+    RequirementFulfillmentOut,
     RequirementResponseOut,
     SubmissionIn,
     SubmissionOut,
+    ViewMetricsOut,
 )
 from .target_refs import demo_video_target_ref, source_target_ref
 
@@ -746,4 +755,118 @@ def compare_submissions(request: HttpRequest, contest_id: int):
             )
             for r in requirements
         ],
+    )
+
+
+@router.get(
+    "/contests/{contest_id}/metrics",
+    response={200: ContestMetricsOut},
+    auth=jwt_auth,
+)
+def get_contest_metrics(request: HttpRequest, contest_id: int):
+    """Sponsor가 자기 Contest의 건강을 본다 (#107·#108, 부모 #105).
+
+    지금까지 Sponsor가 자기 Contest 상태를 아는 수단은 제출을 하나씩 열어보는
+    것뿐이었다 — 참가가 언제부터 들어오는지, 어느 Requirement가 사람들을
+    걸러내는지 알 수 없어 "참가가 없다"를 마감 직전에야 알았다. 이
+    엔드포인트가 일자별 누적 Submission 수(#107)에 이어 Requirement별 충족
+    분포와 제출 완성도 분포(#108)를 낸다.
+
+    `submissions.api.compare_submissions`와 같은 소유권 검사를 그대로 쓴다 —
+    새 예외를 만들지 않는다. **그 엔드포인트와 달리 마감 전에도 열린다** —
+    Sponsor는 마감 전에도 개별 Submission을 볼 수 있으므로(진행 중 비공개는
+    Developer 사이의 규율이다), 집계가 마감 전에 보여도 새로 알려주는 것이
+    없다.
+
+    **Score는 이 함수 어디에도 조회하지 않는다** — `scoring.models.Score`를
+    import조차 하지 않는다(ADR-0006/0014). **개별 Submission·Developer도
+    응답에 없다** — 아래 어느 쿼리도 developer_id를 select하지 않는다.
+    """
+
+    try:
+        contest = Contest.objects.select_related("sponsor").get(id=contest_id)
+    except Contest.DoesNotExist as exc:
+        raise HttpError(404, "Contest를 찾을 수 없습니다.") from exc
+
+    if contest.sponsor.user_id != request.auth_user.id:
+        raise HttpError(403, "본인이 개최한 Contest만 지표를 볼 수 있습니다.")
+
+    submissions_qs = Submission.objects.filter(contest=contest)
+    total_submission_count = submissions_qs.count()
+
+    # 판정은 여기(백엔드)에서 한다 — 화면은 이미 묶인 일자별 누적치를 받아
+    # 그리기만 한다. `TruncDate`에 `Asia/Seoul`을 명시하는 이유는
+    # `settings.TIME_ZONE`이 그것이더라도, DB가 UTC로 저장한 `created_at`을
+    # 그대로 자르면 자정 근처 제출이 하루 밀려 보일 수 있기 때문이다.
+    daily_counts = (
+        submissions_qs.annotate(
+            day=TruncDate("created_at", tzinfo=timezone.get_current_timezone())
+        )
+        .values("day")
+        .annotate(count=Count("id"))
+        .order_by("day")
+    )
+
+    cumulative = 0
+    daily_participation: list[DailyParticipationOut] = []
+    for row in daily_counts:
+        cumulative += row["count"]
+        daily_participation.append(
+            DailyParticipationOut(date=row["day"].isoformat(), cumulative_count=cumulative)
+        )
+
+    # #108 — Requirement별 충족 분포. 한 질의로 (requirement_id -> 충족 건수)를
+    # 얻는다 — Requirement 수만큼 질의를 내면 요구사항이 많은 Contest에서
+    # N+1이 된다. 분모는 total_submission_count다: 그 Requirement에 자가
+    # 응답이 아예 없는 Submission도 "충족하지 못함"으로 세야
+    # `RequirementFulfillmentOut`의 docstring이 약속한 채점 원칙과 맞는다.
+    met_counts_by_requirement = dict(
+        RequirementResponse.objects.filter(submission__contest=contest, is_met=True)
+        .values("requirement_id")
+        .annotate(met=Count("id"))
+        .values_list("requirement_id", "met")
+    )
+    requirements = list(Requirement.objects.filter(contest=contest).order_by("order", "id"))
+    requirement_fulfillment = [
+        RequirementFulfillmentOut(
+            requirement_id=requirement.id,
+            text=requirement.text,
+            grade=requirement.grade,
+            met_count=met_counts_by_requirement.get(requirement.id, 0),
+            total_submission_count=total_submission_count,
+        )
+        for requirement in requirements
+    ]
+
+    # #108 — 제출 완성도 분포. 세 boolean을 한 집계 질의로 센다(`Count` +
+    # `filter=~Q(...)`) — Submission마다 훑지 않는다.
+    completion_agg = submissions_qs.aggregate(
+        demo_video_count=Count("id", filter=~Q(demo_video_object_key="")),
+        demo_url_count=Count("id", filter=~Q(demo_url="")),
+        test_account_count=Count("id", filter=~Q(test_account="")),
+    )
+    completion_distribution = CompletionDistributionOut(
+        total_submission_count=total_submission_count,
+        demo_video_count=completion_agg["demo_video_count"],
+        demo_url_count=completion_agg["demo_url_count"],
+        test_account_count=completion_agg["test_account_count"],
+    )
+
+    # #109 — 조회수와 전환율. 쓰기는 `contests.view_tracking`이 캐시에서
+    # 이미 해 뒀다 — 이 함수는 읽기만 한다(Score를 조회하지 않는 것과 같은
+    # 이유로, 새 쓰기 경로를 여기 만들지 않는다). 조회가 0이면 0으로
+    # 나누지 않고 None을 낸다.
+    view_count = get_view_count(contest.id)
+    conversion_rate = (
+        total_submission_count / view_count if view_count > 0 else None
+    )
+    view_metrics = ViewMetricsOut(view_count=view_count, conversion_rate=conversion_rate)
+
+    return 200, ContestMetricsOut(
+        contest_id=contest.id,
+        total_submission_count=total_submission_count,
+        daily_participation=daily_participation,
+        requirement_fulfillment=requirement_fulfillment,
+        completion_distribution=completion_distribution,
+        view_metrics=view_metrics,
     )
