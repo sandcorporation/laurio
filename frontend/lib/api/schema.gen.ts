@@ -487,6 +487,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/contests/{contest_id}/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Contest Metrics
+         * @description Sponsor가 자기 Contest의 건강을 본다 (#107·#108, 부모 #105).
+         *
+         *     지금까지 Sponsor가 자기 Contest 상태를 아는 수단은 제출을 하나씩 열어보는
+         *     것뿐이었다 — 참가가 언제부터 들어오는지, 어느 Requirement가 사람들을
+         *     걸러내는지 알 수 없어 "참가가 없다"를 마감 직전에야 알았다. 이
+         *     엔드포인트가 일자별 누적 Submission 수(#107)에 이어 Requirement별 충족
+         *     분포와 제출 완성도 분포(#108)를 낸다.
+         *
+         *     `submissions.api.compare_submissions`와 같은 소유권 검사를 그대로 쓴다 —
+         *     새 예외를 만들지 않는다. **그 엔드포인트와 달리 마감 전에도 열린다** —
+         *     Sponsor는 마감 전에도 개별 Submission을 볼 수 있으므로(진행 중 비공개는
+         *     Developer 사이의 규율이다), 집계가 마감 전에 보여도 새로 알려주는 것이
+         *     없다.
+         *
+         *     **Score는 이 함수 어디에도 조회하지 않는다** — `scoring.models.Score`를
+         *     import조차 하지 않는다(ADR-0006/0014). **개별 Submission·Developer도
+         *     응답에 없다** — 아래 어느 쿼리도 developer_id를 select하지 않는다.
+         */
+        get: operations["submissions_api_get_contest_metrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/contests/{contest_id}/payout": {
         parameters: {
             query?: never;
@@ -2292,6 +2328,25 @@ export interface components {
             submission_id: number;
         };
         /**
+         * CompletionDistributionOut
+         * @description 제출 완성도 분포 — 데모·시연 영상·테스트 계정이 붙은 Submission 비율 (#108).
+         *
+         *     `submissions.schemas.CompletionOut` 이 Submission 한 건에 대해 매기는 세
+         *     boolean(has_demo_video·has_demo_url·has_test_account)을 Contest 전체로
+         *     집계한 것이다. 참가작들이 실제로 확인 가능한 상태인지 가늠하는 신호일
+         *     뿐 — 강제 항목은 아니다(소스만 필수다).
+         */
+        CompletionDistributionOut: {
+            /** Demo Url Count */
+            demo_url_count: number;
+            /** Demo Video Count */
+            demo_video_count: number;
+            /** Test Account Count */
+            test_account_count: number;
+            /** Total Submission Count */
+            total_submission_count: number;
+        };
+        /**
          * CompletionOut
          * @description 시연 영상·데모 URL·테스트 계정·Evidence 연결 상태를 요약한 완성도 지표.
          *
@@ -2404,6 +2459,18 @@ export interface components {
             /** @default deadline */
             sort: "deadline" | "prize";
         };
+        /** ContestMetricsOut */
+        ContestMetricsOut: {
+            completion_distribution: components["schemas"]["CompletionDistributionOut"];
+            /** Contest Id */
+            contest_id: number;
+            /** Daily Participation */
+            daily_participation: components["schemas"]["DailyParticipationOut"][];
+            /** Requirement Fulfillment */
+            requirement_fulfillment: components["schemas"]["RequirementFulfillmentOut"][];
+            /** Total Submission Count */
+            total_submission_count: number;
+        };
         /** ContestOut */
         ContestOut: {
             category: components["schemas"]["CategoryOut"];
@@ -2475,6 +2542,19 @@ export interface components {
             notification_type: components["schemas"]["NotificationType"];
             /** Recipient Id */
             recipient_id: number;
+        };
+        /**
+         * DailyParticipationOut
+         * @description 하루 치 참가 — 그 날짜까지의 누적 Submission 수 (#107).
+         *
+         *     판정은 백엔드가 한다: 화면이 Submission 목록을 받아 스스로 날짜별로 묶지
+         *     않는다. `date` 는 `YYYY-MM-DD` — Asia/Seoul 기준 하루다.
+         */
+        DailyParticipationOut: {
+            /** Cumulative Count */
+            cumulative_count: number;
+            /** Date */
+            date: string;
         };
         /** DeactivateDeliverableTypeIn */
         DeactivateDeliverableTypeIn: {
@@ -3261,6 +3341,36 @@ export interface components {
             grade: string;
             /** Text */
             text: string;
+        };
+        /**
+         * RequirementFulfillmentOut
+         * @description Requirement 하나를 몇 명이 충족했는가 (#108).
+         *
+         *     분모는 **이 Contest 의 전체 Submission 수**다 — 그 Requirement 에 자가
+         *     응답을 아예 남기지 않은 Submission 도 「충족하지 못함」으로 센다. 채점이
+         *     증거 없는 자가 응답을 미달로 보는 것(ADR-0014)과 같은 원칙이다.
+         *
+         *     **사람이 아니라 일에 대한 정보다.** `developer_id`도 어느 Submission이
+         *     응답했는지도 여기 없다 — 나오는 것은 이 Requirement의 충족 건수뿐이다.
+         *
+         *     **표본이 작으면 이 집계가 익명이 아니다.** Submission 이 1~2건일 때
+         *     "1명 중 1명이 충족" 은 그 사람의 자가 응답 그대로다. 지금은 Sponsor 가
+         *     어차피 개별 Submission 을 볼 수 있어(`compare_submissions`) 이 지표가 새로
+         *     드러내는 것이 없지만, **이 지표를 공개로 옮기려 할 때는 그대로 함정이
+         *     된다** — 그때는 최소 표본 수 같은 장치가 먼저 필요하다(#108, 이 티켓은 그
+         *     장치를 구현하지 않는다).
+         */
+        RequirementFulfillmentOut: {
+            /** Grade */
+            grade: string;
+            /** Met Count */
+            met_count: number;
+            /** Requirement Id */
+            requirement_id: number;
+            /** Text */
+            text: string;
+            /** Total Submission Count */
+            total_submission_count: number;
         };
         /** RequirementIn */
         RequirementIn: {
@@ -4194,6 +4304,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    submissions_api_get_contest_metrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contest_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContestMetricsOut"];
                 };
             };
         };
