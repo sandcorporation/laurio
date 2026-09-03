@@ -1402,3 +1402,46 @@ def test_share_payout_timeout_then_failed_requery_stays_requested_not_attempt_fa
     payout = Payout.objects.get(distribution_share__submission_id=submission["id"])
     assert payout.status == Payout.Status.REQUESTED
     assert payout.journal_entry_id is None
+
+
+@pytest.mark.django_db
+def test_share_payout_with_ready_seller_but_failed_transfer_stays_identity_pending(
+    client, category, landing_type
+):
+    """Distribution 몫 지급도 같은 advance 를 탄다 (#133) — Seller 가 READY 인데 실이체가 거절되면
+    Award 경로와 똑같이 CONFIRMED 가 아니라 CONFIRMED_IDENTITY_PENDING + transfer FAILED 에 머문다
+    (표의 빈칸이었던 「Distribution 기반 Payout 의 실이체 실패 가지」)."""
+
+    from django.test import override_settings
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+        prize=444_444,
+        sponsor_uid="sponsor-share-fail",
+    )
+    requirement_id = contest["requirements"][0]["id"]
+    dev = _verified_user(client, "dev-share-fail", "dev-share-fail-ci")
+    submission = _submit(client, dev, contest["id"], requirement_id=requirement_id, grounded=True)
+    _close_contest(client, contest, deadline=deadline)
+    _run_scoring(client)
+    _end_judging_period(client, contest["id"])
+    _advance_past_distribution_wait(contest["id"])
+
+    with override_settings(
+        PAYOUT_ADAPTER_MODE="tests.test_payouts._TransferFailsOnceSellerReadyPayoutAdapter"
+    ):
+        resp = _run_due_distributions(client)
+
+    row = next(r for r in resp["results"] if r.get("submission_id") == submission["id"])
+    assert row["event"] == "payout_attempted"
+    assert row["status"] == "confirmed_identity_pending"
+
+    payout = Payout.objects.get(distribution_share__submission_id=submission["id"])
+    assert payout.status == Payout.Status.CONFIRMED_IDENTITY_PENDING
+    assert payout.transfer_status == Payout.TransferStatus.FAILED
+    assert payout.journal_entry_id is not None  # 원장 분개는 실이체 결과와 무관하게 남는다

@@ -187,12 +187,64 @@ def hold_of(payout: Payout, *, seller: Seller | None, has_identity: bool) -> Hol
     return Hold(kind=kind, turn=TURN_OF[kind], transfer_failed=transfer_failed)
 
 
-def advance(payout: Payout, *, register_seller: bool, seller_simulate: str | None = None) -> Payout:
-    """사실이 바뀐 뒤 Payout 을 다음 상태로 전진시킨다 — 사실 대조(reconcile) 한 곳 (#131).
+def _confirmation_journal(payout: Payout):
+    """첫 홈에서 남기는 수수료·원천징수 공제 분개. 원천징수는 반드시 원천징수 예수금 계정에
+    계상된다(ADR-0004/0008) — 국세청에 낼 남의 돈이므로 플랫폼 수수료 수익과 섞이지 않는다.
+    **이 분개는 Seller 등록 결과와 무관하게 항상 남는다** — 한도 초과·심사 지연·거절 어느
+    경로로도 확정된 금액이 원장에서 사라지지 않는다(ADR-0004, #50 AC)."""
 
-    입구(주민등록번호 제출·Seller 재시도·웹훅·sweep·확정)는 새 사실만 기록하고 이 함수를
-    부른다. 이 함수는 네 축(status · transfer_status · Seller READY · TaxIdentity)을 지금
-    다시 읽어 목표를 정한다 — 어떤 순서로 사실이 도착하든 마지막 advance 가 같은 답을 낸다.
+    from ledger.models import Account, EntrySide
+    from ledger.services import LineInput
+
+    contest = payout.contest
+    return (
+        contest.ledger_id,
+        (
+            f"Contest #{contest.id} Payout 확정 — 플랫폼 수수료 "
+            f"{payout.platform_fee_amount:,}원 + 원천징수 "
+            f"{payout.withholding_tax_amount:,}원 공제 (실지급액 "
+            f"{payout.net_amount:,}원)"
+        ),
+        [
+            LineInput(
+                account=Account.DEVELOPER_PAYABLE,
+                side=EntrySide.DEBIT,
+                amount=payout.platform_fee_amount + payout.withholding_tax_amount,
+            ),
+            LineInput(
+                account=Account.PLATFORM_FEE_REVENUE,
+                side=EntrySide.CREDIT,
+                amount=payout.platform_fee_amount,
+            ),
+            LineInput(
+                account=Account.WITHHOLDING_TAX_PAYABLE,
+                side=EntrySide.CREDIT,
+                amount=payout.withholding_tax_amount,
+            ),
+        ],
+    )
+
+
+def advance(
+    payout: Payout,
+    *,
+    register_seller: bool,
+    seller_simulate: str | None = None,
+    confirmed_by_vendor: bool | None = None,
+    policy=None,
+) -> Payout:
+    """사실이 바뀐 뒤 Payout 을 다음 상태로 전진시킨다 — 사실 대조(reconcile) 한 곳 (#131, #133).
+
+    입구(확정·자체 웹훅·주민등록번호 제출·Seller 재시도·실물 웹훅·sweep·Distribution 몫 지급)는
+    새 사실만 기록하고 이 함수를 부른다. 이 함수는 네 축(status · transfer_status · Seller READY
+    · TaxIdentity)을 지금 다시 읽어 목표를 정한다 — 어떤 순서로 사실이 도착하든 마지막 advance 가
+    같은 답을 낸다.
+
+    **첫 홈만 외부 사실을 받는다** — `confirmed_by_vendor` 는 「벤더가 이 지급 요청을 받아들였는가」.
+    REQUESTED 에서 True 면 `UPDATE … WHERE status='requested'` 로 이긴 호출만 같은 트랜잭션에서
+    수수료·원천징수 공제 분개를 남기고(`payments.charges.claim_and_post`, ADR-0003·0004) 두 대기로
+    들어간다; False 면 FAILED 로 끝난다(원장에는 아무것도 없다 — 돈이 움직이지 않았다). 그 뒤는
+    전부 파생이다.
 
     **두 대기 규칙(ADR-0020)**: Seller 가 READY 가 아니면 CONFIRMED_SELLER_PENDING. READY 면
     실이체를 요청하고, 그것이 COMPLETED 로 확정됐을 때만 신원 유무에 따라 CONFIRMED /
@@ -203,24 +255,45 @@ def advance(payout: Payout, *, register_seller: bool, seller_simulate: str | Non
     `register_seller` — 이 입구가 Seller 등록을 촉발하는가. 확정과 재시도는 그렇고(ADR-0020:
     등록은 확정 시점에 시작된다), 신원 제출·웹훅·sweep 은 이미 있는 Seller 를 읽기만 한다.
 
-    쓰기는 `UPDATE … WHERE pk AND status=<읽은 값>` 한 번이다(ADR-0003) — rowcount 0 이면
-    다른 입구가 먼저 전진시킨 것이니 아무것도 하지 않는다. 벤더 HTTP 는 트랜잭션 밖이다.
-    첫 홈(REQUESTED → 확정, 원장 분개)은 #133 이 이 함수로 옮긴다 — 그때까지 REQUESTED·
-    CONFIRMED·FAILED 는 이 함수가 건드리지 않는다.
+    벤더 HTTP(Seller 등록·실이체)는 어떤 트랜잭션 밖에서 한다(코드리뷰 지적 7, 5차) — 원장
+    분개는 그 전에 이미 커밋돼 있다. 쓰기는 `UPDATE … WHERE pk AND status=<읽은 값>` 한 번이고
+    rowcount 0 이면 다른 입구가 먼저 전진시킨 것이니 아무것도 하지 않는다.
     """
+
+    from payments.charges import claim_and_post
 
     from .models import TaxIdentity
     from .services import _request_real_transfer_if_ready, ensure_seller_registered
 
     S = Payout.Status
     payout.refresh_from_db()
+
+    if payout.status == S.REQUESTED:
+        if confirmed_by_vendor is None:
+            return payout
+        if confirmed_by_vendor:
+            payout, _claimed = claim_and_post(
+                Payout.objects.with_target(),
+                filters={"pk": payout.pk},
+                from_status=S.REQUESTED,
+                to_status=S.CONFIRMED_IDENTITY_PENDING,
+                journal=_confirmation_journal,
+            )
+        else:
+            payout, _claimed = claim_and_post(
+                Payout.objects.with_target(),
+                filters={"pk": payout.pk},
+                from_status=S.REQUESTED,
+                to_status=S.FAILED,
+            )
+
     original = payout.status
     if original not in (S.CONFIRMED_IDENTITY_PENDING, S.CONFIRMED_SELLER_PENDING):
         return payout
 
     developer = payout.developer
     if register_seller:
-        seller = ensure_seller_registered(developer, simulate=seller_simulate)
+        seller = ensure_seller_registered(developer, simulate=seller_simulate, policy=policy)
         # ensure_seller_registered 가 Seller 를 막 READY 로 만들면 그 안에서 sweep 이 이
         # Payout 을 이미 전진시켰을 수 있다 — 낡은 값으로 판단하지 않도록 다시 읽는다.
         payout.refresh_from_db()
