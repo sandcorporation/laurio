@@ -42,6 +42,7 @@ from accounts.models import DeveloperProfile
 from accounts.sanitize import sanitize_free_text
 from awards.models import Award
 from contests.models import Contest, Requirement
+from contests.view_tracking import get_view_count
 from core.clock import Clock
 from verification.models import Verification
 
@@ -66,6 +67,7 @@ from .schemas import (
     RequirementResponseOut,
     SubmissionIn,
     SubmissionOut,
+    ViewMetricsOut,
 )
 from .target_refs import demo_video_target_ref, source_target_ref
 
@@ -850,10 +852,21 @@ def get_contest_metrics(request: HttpRequest, contest_id: int):
         test_account_count=completion_agg["test_account_count"],
     )
 
+    # #109 — 조회수와 전환율. 쓰기는 `contests.view_tracking`이 캐시에서
+    # 이미 해 뒀다 — 이 함수는 읽기만 한다(Score를 조회하지 않는 것과 같은
+    # 이유로, 새 쓰기 경로를 여기 만들지 않는다). 조회가 0이면 0으로
+    # 나누지 않고 None을 낸다.
+    view_count = get_view_count(contest.id)
+    conversion_rate = (
+        total_submission_count / view_count if view_count > 0 else None
+    )
+    view_metrics = ViewMetricsOut(view_count=view_count, conversion_rate=conversion_rate)
+
     return 200, ContestMetricsOut(
         contest_id=contest.id,
         total_submission_count=total_submission_count,
         daily_participation=daily_participation,
         requirement_fulfillment=requirement_fulfillment,
         completion_distribution=completion_distribution,
+        view_metrics=view_metrics,
     )

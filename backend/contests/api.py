@@ -50,6 +50,7 @@ from .requirement_chat import (
     build_chat_prompt,
     get_requirement_chat_adapter,
 )
+from .view_tracking import record_view
 from .schemas import (
     MySponsoredContestOut,
     CategoryOut,
@@ -479,6 +480,36 @@ def get_contest(request: HttpRequest, contest_id: int):
             raise HttpError(404, "Contest를 찾을 수 없습니다.")
 
     return _serialize_contest(contest)
+
+
+@router.post("/contests/{contest_id}/views", auth=None)
+def record_contest_view(request: HttpRequest, contest_id: int):
+    """브라우저가 Contest 상세를 연 뒤 알린다 (#109, 부모 #105, `ContestView`).
+
+    서버 렌더(`get_contest`)는 이 엔드포인트를 부르지 않는다 — 클라이언트
+    컴포넌트가 마운트된 뒤에만 이 경로를 친다(미리 불러오기·크롤러는
+    브라우저를 마운트하지 않으므로 세지 않는다). 판정(날짜별 중복
+    제거·Sponsor 자기 조회 배제)은 `contests.view_tracking.record_view`가
+    전부 한다 — 이 함수는 대상 Contest가 공개된 것인지만 `get_contest`와
+    같은 기준으로 확인한다.
+
+    응답에 조회수를 싣지 않는다 — 조회수는 Sponsor 전용이고, 공개 표면
+    어디에도 실리지 않는다는 것이 #109의 인수조건이다.
+    """
+
+    try:
+        contest = Contest.objects.select_related("sponsor").get(id=contest_id)
+    except Contest.DoesNotExist as exc:
+        raise HttpError(404, "Contest를 찾을 수 없습니다.") from exc
+
+    if contest.status not in _PUBLICLY_VISIBLE_STATUSES:
+        auth_user = getattr(request, "auth_user", None)
+        is_owner = auth_user is not None and contest.sponsor.user_id == auth_user.id
+        if not is_owner:
+            raise HttpError(404, "Contest를 찾을 수 없습니다.")
+
+    record_view(contest, request)
+    return {"success": True}
 
 
 @router.post("/contests/{contest_id}/reopen", response=ContestOut, auth=jwt_auth)

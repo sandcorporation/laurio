@@ -29,6 +29,7 @@ from tests.test_source_readings import _publish_contest, _submit, _verified_user
 
 METRICS_URL = "/api/contests/{contest_id}/metrics"
 SUBMISSIONS_URL = "/api/contests/{contest_id}/submissions"
+CONTESTS_URL = "/api/contests"
 
 
 def _auth_header(access: str) -> dict:
@@ -453,3 +454,243 @@ def test_metrics_response_never_mentions_score_or_developer_identity(
     assert "percentage" not in raw.lower()
     assert "developer" not in raw.lower()
     assert "prompt" not in raw.lower()
+
+
+# --- #109: ContestView — 조회수와 전환율 -------------------------------------
+#
+# `CONTEXT.md`의 `ContestView` 정의: 사건을 저장하지 않는다. 날짜별 고유 수만
+# 남고, 같은 사람이 같은 날 여러 번 열어도 하나다. 서버 렌더는 세지 않는다 —
+# 브라우저가 마운트된 뒤에 `POST /api/contests/{id}/views`로 알린다.
+
+CONTEST_DETAIL_URL = "/api/contests/{contest_id}"
+VIEWS_URL = "/api/contests/{contest_id}/views"
+
+
+def _record_view(client, contest_id: int, *, access: str | None = None, **extra):
+    headers = _auth_header(access) if access else {}
+    headers.update(extra)
+    return client.post(VIEWS_URL.format(contest_id=contest_id), **headers)
+
+
+def _view_metrics(client, access: str, contest_id: int) -> dict:
+    response = _metrics(client, access, contest_id)
+    assert response.status_code == 200, response.content
+    return response.json()["view_metrics"]
+
+
+@pytest.mark.django_db
+def test_recording_a_view_for_a_missing_contest_is_404(client):
+    response = _record_view(client, 999_999)
+
+    assert response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_a_person_opening_the_contest_detail_counts_as_one_view(
+    client, category, landing_type
+):
+    sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    dev = _verified_user(client, "dev-view-1", "ci-view-1")
+
+    response = _record_view(client, contest["id"], access=dev["access"])
+    assert response.status_code == 200, response.content
+
+    metrics = _view_metrics(client, sponsor["access"], contest["id"])
+    assert metrics["view_count"] == 1
+
+
+@pytest.mark.django_db
+def test_the_same_person_opening_it_twice_in_a_day_still_counts_as_one(
+    client, category, landing_type
+):
+    sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    dev = _verified_user(client, "dev-view-dup", "ci-view-dup")
+
+    _record_view(client, contest["id"], access=dev["access"])
+    _record_view(client, contest["id"], access=dev["access"])
+    _record_view(client, contest["id"], access=dev["access"])
+
+    metrics = _view_metrics(client, sponsor["access"], contest["id"])
+    assert metrics["view_count"] == 1
+
+
+@pytest.mark.django_db
+def test_moving_the_clock_a_day_forward_counts_again(client, category, landing_type):
+    """중복 판별에 쓰는 날짜는 주입된 시계에서 온다(ADR-0003) — 시계를 하루 밀면
+    다시 세진다."""
+
+    from core.models import ClockOverride
+
+    sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    dev = _verified_user(client, "dev-view-clock", "ci-view-clock")
+
+    day_one = timezone.now()
+    ClockOverride.objects.update_or_create(pk=1, defaults={"overridden_at": day_one})
+    _record_view(client, contest["id"], access=dev["access"])
+
+    metrics = _view_metrics(client, sponsor["access"], contest["id"])
+    assert metrics["view_count"] == 1
+
+    ClockOverride.objects.update_or_create(
+        pk=1, defaults={"overridden_at": day_one + timedelta(days=1)}
+    )
+    _record_view(client, contest["id"], access=dev["access"])
+
+    metrics = _view_metrics(client, sponsor["access"], contest["id"])
+    assert metrics["view_count"] == 2
+
+
+@pytest.mark.django_db
+def test_a_different_person_opening_it_makes_the_count_two(client, category, landing_type):
+    sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    dev_a = _verified_user(client, "dev-view-a", "ci-view-a")
+    dev_b = _verified_user(client, "dev-view-b", "ci-view-b")
+
+    _record_view(client, contest["id"], access=dev_a["access"])
+    _record_view(client, contest["id"], access=dev_b["access"])
+
+    metrics = _view_metrics(client, sponsor["access"], contest["id"])
+    assert metrics["view_count"] == 2
+
+
+@pytest.mark.django_db
+def test_two_anonymous_visitors_with_different_ips_both_count(client, category, landing_type):
+    """로그인하지 않은 방문자도 조회로 잡힌다 — IP+User-Agent 로 구별한다."""
+
+    sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+
+    _record_view(
+        client, contest["id"],
+        REMOTE_ADDR="203.0.113.5", HTTP_USER_AGENT="anon-browser-a",
+    )
+    _record_view(
+        client, contest["id"],
+        REMOTE_ADDR="203.0.113.9", HTTP_USER_AGENT="anon-browser-b",
+    )
+
+    metrics = _view_metrics(client, sponsor["access"], contest["id"])
+    assert metrics["view_count"] == 2
+
+
+@pytest.mark.django_db
+def test_the_sponsors_own_view_of_their_contest_is_not_counted(client, category, landing_type):
+    """자기가 새로고침한 것이 자기 지표를 부풀리면 그 지표는 쓸모가 없다."""
+
+    sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+
+    _record_view(client, contest["id"], access=sponsor["access"])
+    _record_view(client, contest["id"], access=sponsor["access"])
+
+    metrics = _view_metrics(client, sponsor["access"], contest["id"])
+    assert metrics["view_count"] == 0
+
+
+@pytest.mark.django_db
+def test_rendering_the_public_detail_twice_does_not_count_a_view(client, category, landing_type):
+    """서버 렌더가 조회를 세지 않는다 — `GET /contests/{id}`(SSR 이 읽는 공개
+    상세)를 두 번 쳐도 조회수는 그대로다. 세는 것은 브라우저가 연 뒤 알리는
+    `POST /contests/{id}/views` 뿐이다."""
+
+    sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+
+    detail_url = CONTEST_DETAIL_URL.format(contest_id=contest["id"])
+    assert client.get(detail_url).status_code == 200
+    assert client.get(detail_url).status_code == 200
+
+    metrics = _view_metrics(client, sponsor["access"], contest["id"])
+    assert metrics["view_count"] == 0
+
+
+@pytest.mark.django_db
+def test_conversion_rate_is_none_when_there_are_no_views(client, category, landing_type):
+    """조회가 0 이어도 전환율 자리가 깨지지 않는다 — 0 으로 나누지 않는다."""
+
+    sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+
+    metrics = _view_metrics(client, sponsor["access"], contest["id"])
+    assert metrics["view_count"] == 0
+    assert metrics["conversion_rate"] is None
+
+
+@pytest.mark.django_db
+def test_conversion_rate_matches_submission_count_over_view_count(
+    client, category, landing_type
+):
+    """전환율이 참가작 수와 조회수에서 일관되게 나온다."""
+
+    deadline = timezone.now() + timedelta(days=10)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "요구사항", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+
+    dev_a = _verified_user(client, "dev-conv-a", "ci-conv-a")
+    dev_b = _verified_user(client, "dev-conv-b", "ci-conv-b")
+    dev_c = _verified_user(client, "dev-conv-c", "ci-conv-c")
+
+    for dev in (dev_a, dev_b, dev_c):
+        _record_view(client, contest["id"], access=dev["access"])
+
+    _submit_full(
+        client, dev_a, contest["id"],
+        responses=[{"requirement_id": requirement_id, "is_met": True}],
+    )
+
+    metrics = _view_metrics(client, sponsor["access"], contest["id"])
+    assert metrics["view_count"] == 3
+    assert metrics["conversion_rate"] == pytest.approx(1 / 3)
+
+
+@pytest.mark.django_db
+def test_view_metrics_are_absent_from_public_surfaces(client, category, landing_type):
+    """조회수는 Sponsor 에게만 보인다 — 공개 표면 어디에도 실리지 않는다는
+    것을 **없는지**로 단언한다."""
+
+    sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    dev = _verified_user(client, "dev-view-public-leak", "ci-view-public-leak")
+    _record_view(client, contest["id"], access=dev["access"])
+
+    detail_response = client.get(CONTEST_DETAIL_URL.format(contest_id=contest["id"]))
+    assert detail_response.status_code == 200
+    detail_raw = detail_response.content.decode("utf-8").lower()
+    assert "view_count" not in detail_raw
+    assert "view_metrics" not in detail_raw
+    assert "conversion_rate" not in detail_raw
+
+    list_response = client.get(CONTESTS_URL)
+    assert list_response.status_code == 200
+    list_raw = list_response.content.decode("utf-8").lower()
+    assert "view_count" not in list_raw
+    assert "view_metrics" not in list_raw
+    assert "conversion_rate" not in list_raw
+
+
+@pytest.mark.django_db
+def test_view_metrics_response_carries_no_visitor_identifying_value(
+    client, category, landing_type
+):
+    """조회 집계 어디에도 방문자를 식별할 값이 남지 않는다 — **있는지가 아니라
+    없는지**를 단언한다. 응답 전체(직렬화된 JSON 텍스트)에 방문자를 가리키는
+    원문(사용자 id, IP, User-Agent)이 조금도 없어야 한다 — 남는 것은 Contest
+    별 집계 숫자뿐이다."""
+
+    sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    dev = _verified_user(client, "dev-view-no-identity-leak", "ci-view-no-identity-leak")
+
+    view_response = _record_view(
+        client, contest["id"], access=dev["access"],
+        HTTP_USER_AGENT="marker-user-agent-should-not-leak",
+    )
+    assert view_response.status_code == 200
+    assert "marker-user-agent-should-not-leak" not in view_response.content.decode("utf-8")
+
+    metrics_response = _metrics(client, sponsor["access"], contest["id"])
+    assert metrics_response.status_code == 200
+    metrics_raw = metrics_response.content.decode("utf-8")
+    assert str(dev["user_id"]) not in metrics_raw
+    assert "marker-user-agent-should-not-leak" not in metrics_raw
+
+    view_metrics = metrics_response.json()["view_metrics"]
+    assert set(view_metrics.keys()) == {"view_count", "conversion_rate"}

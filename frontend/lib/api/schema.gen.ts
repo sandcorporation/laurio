@@ -745,6 +745,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/contests/{contest_id}/views": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record Contest View
+         * @description 브라우저가 Contest 상세를 연 뒤 알린다 (#109, 부모 #105, `ContestView`).
+         *
+         *     서버 렌더(`get_contest`)는 이 엔드포인트를 부르지 않는다 — 클라이언트
+         *     컴포넌트가 마운트된 뒤에만 이 경로를 친다(미리 불러오기·크롤러는
+         *     브라우저를 마운트하지 않으므로 세지 않는다). 판정(날짜별 중복
+         *     제거·Sponsor 자기 조회 배제)은 `contests.view_tracking.record_view`가
+         *     전부 한다 — 이 함수는 대상 Contest가 공개된 것인지만 `get_contest`와
+         *     같은 기준으로 확인한다.
+         *
+         *     응답에 조회수를 싣지 않는다 — 조회수는 Sponsor 전용이고, 공개 표면
+         *     어디에도 실리지 않는다는 것이 #109의 인수조건이다.
+         */
+        post: operations["contests_api_record_contest_view"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/developers/{developer_id}/profile": {
         parameters: {
             query?: never;
@@ -2470,6 +2500,7 @@ export interface components {
             requirement_fulfillment: components["schemas"]["RequirementFulfillmentOut"][];
             /** Total Submission Count */
             total_submission_count: number;
+            view_metrics: components["schemas"]["ViewMetricsOut"];
         };
         /** ContestOut */
         ContestOut: {
@@ -3717,6 +3748,25 @@ export interface components {
             /** Verification Token */
             verification_token: string;
         };
+        /**
+         * ViewMetricsOut
+         * @description 조회수와 전환율 — 「본 사람 대비 낸 사람」(#109, 부모 #105).
+         *
+         *     `view_count`는 `contests.view_tracking.get_view_count`가 캐시에서 읽은
+         *     값이다 — 관계형 DB의 Contest 행이 아니다(공개 상세는 트래픽이 가장
+         *     많은 화면이라 조회마다 그 행을 갱신하면 경합이 생긴다). 이 스키마에도
+         *     개별 방문자를 가리키는 필드는 없다 — Contest 전체의 조회수 하나뿐이다.
+         *
+         *     `conversion_rate`는 `total_submission_count / view_count`다. 조회가
+         *     0이면 0으로 나누지 않고 `None`을 낸다 — "아직 데이터가 없음"과 "전환율
+         *     0%"은 다른 것이라, 화면이 그 둘을 구별해 그릴 수 있어야 한다.
+         */
+        ViewMetricsOut: {
+            /** Conversion Rate */
+            conversion_rate: number | null;
+            /** View Count */
+            view_count: number;
+        };
         /** WebhookIn */
         WebhookIn: {
             /**
@@ -4660,6 +4710,26 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["SubmissionOut"];
                 };
+            };
+        };
+    };
+    contests_api_record_contest_view: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contest_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

@@ -308,6 +308,23 @@ class CompletionDistributionOut(Schema):
     test_account_count: int
 
 
+class ViewMetricsOut(Schema):
+    """조회수와 전환율 — 「본 사람 대비 낸 사람」(#109, 부모 #105).
+
+    `view_count`는 `contests.view_tracking.get_view_count`가 캐시에서 읽은
+    값이다 — 관계형 DB의 Contest 행이 아니다(공개 상세는 트래픽이 가장
+    많은 화면이라 조회마다 그 행을 갱신하면 경합이 생긴다). 이 스키마에도
+    개별 방문자를 가리키는 필드는 없다 — Contest 전체의 조회수 하나뿐이다.
+
+    `conversion_rate`는 `total_submission_count / view_count`다. 조회가
+    0이면 0으로 나누지 않고 `None`을 낸다 — "아직 데이터가 없음"과 "전환율
+    0%"은 다른 것이라, 화면이 그 둘을 구별해 그릴 수 있어야 한다.
+    """
+
+    view_count: int
+    conversion_rate: float | None
+
+
 class ContestMetricsOut(Schema):
     contest_id: int
     total_submission_count: int
@@ -317,6 +334,8 @@ class ContestMetricsOut(Schema):
     # 화면·제출 폼과 같은 순서라 Sponsor 가 다른 화면과 대조하기 쉽다.
     requirement_fulfillment: list[RequirementFulfillmentOut]
     completion_distribution: CompletionDistributionOut
+    # #109 — 조회수와 전환율.
+    view_metrics: ViewMetricsOut
 
 
 class ErrorOut(Schema):
