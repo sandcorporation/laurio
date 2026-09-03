@@ -1,0 +1,340 @@
+"use client";
+
+// 초안 이어서 작성 화면 (#111, 부모 #110).
+//
+// 지금까지 draft Contest는 브라우저 메모리에만 살았다 — 새로고침하면 화면은
+// 빈 브리프 폼으로 돌아가고, 만들어진 draft는 DB에 남는데 돌아갈 자리가
+// 없었다. 이 화면이 그 자리다: **Contest를 URL로 식별하고 서버에서 다시
+// 읽는다** — POST /contests의 생성 응답에만 기대지 않는다(AC1). 그래서
+// 새로고침·북마크·「내 공모전」목록에서의 재진입이 전부 여기로 수렴한다.
+//
+// 인증 구역이므로 SSR 하지 않는다(ADR-0015, 다른 모든 /console/** 화면과 같은
+// 이유) — "서버에서 읽는다"는 것은 Next 서버 컴포넌트가 아니라 이 클라이언트
+// 컴포넌트가 마운트 시 항상 GET으로 백엔드에서 다시 조회한다는 뜻이다
+// (payment/page.tsx와 같은 관용구).
+//
+// **이 티켓은 읽기까지다** — 브리프 필드(제목·카테고리·요구형태·상금·마감)를
+// 고치는 화면은 #113의 몫이다. 여기서 실제로 계속 바뀌는 것은 기존 Phase B와
+// 같이 AI grill 대화와 Requirement 체크리스트뿐이다.
+//
+// **결제가 끝나면 이 화면으로의 편집 이동이 닫힌다**(spec #110) — Contest가
+// draft를 벗어나면 대화·체크리스트 UI를 그리지 않고, 공개된 공모전으로 가는
+// 링크만 남긴다.
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useParams } from "next/navigation";
+
+import { sessionFetch } from "@/lib/auth/client-fetch";
+import { useSession } from "@/lib/auth/use-session";
+import {
+  FALLBACK_CHAT_REPLY,
+  parseChatReply,
+  readErrorDetail,
+  sanitizeChatTurns,
+  type ChatProposal,
+  type ParsedChatTurn,
+} from "@/lib/contests/chat-response";
+import {
+  CHAT_MAX_HISTORY_TURNS,
+  type ContestDetail,
+  type RequirementGrade,
+  type RequirementOut,
+} from "@/lib/contests/grill-types";
+
+import { ContestStageStepper } from "../../_components/contest-stage-stepper";
+import { GrillChatPanel } from "../../_components/grill-chat-panel";
+import { RequirementDraftPanel } from "../../_components/requirement-draft-panel";
+
+type LoadState =
+  | { status: "loading" }
+  // 존재하지 않거나 남의 draft다 — 두 경우를 구별하지 않는다(#111 AC: "있는지가
+  // 아니라 없는지로 단언한다"). GET /contests/{id}가 이미 이 두 경우를 같은
+  // 404로 합친다.
+  | { status: "not-found" }
+  | { status: "error"; message: string }
+  // draft를 벗어난 Contest다 — 결제가 끝나 공개됐다(또는 그 이후 상태다).
+  // 이 화면에서 더 이상 고칠 것이 없으므로 대화·체크리스트를 그리지 않는다.
+  | { status: "closed"; contest: ContestDetail }
+  | { status: "ready"; contest: ContestDetail };
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export default function ContestDraftPage() {
+  const params = useParams<{ contestId: string }>();
+  const contestId = params.contestId;
+  const session = useSession();
+
+  const [load, setLoad] = useState<LoadState>({ status: "loading" });
+
+  const [requirements, setRequirements] = useState<RequirementOut[]>([]);
+  const [messages, setMessages] = useState<ParsedChatTurn[]>([]);
+  const [proposals, setProposals] = useState<ChatProposal[]>([]);
+  const [sending, setSending] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+  const [requirementError, setRequirementError] = useState<string | null>(null);
+  const [requirementBusy, setRequirementBusy] = useState(false);
+
+  useEffect(() => {
+    if (session.status !== "authenticated") return;
+    let cancelled = false;
+
+    async function loadAll() {
+      const contestRes = await sessionFetch(`/api/backend/contests/${contestId}`);
+      if (cancelled) return;
+
+      if (contestRes.status === 404) {
+        setLoad({ status: "not-found" });
+        return;
+      }
+      if (!contestRes.ok) {
+        setLoad({ status: "error", message: "공모전 정보를 불러오지 못했습니다." });
+        return;
+      }
+      const contest = (await contestRes.json().catch(() => null)) as ContestDetail | null;
+      if (cancelled || contest === null) {
+        setLoad({ status: "error", message: "공모전 정보를 해석하지 못했습니다." });
+        return;
+      }
+
+      if (contest.status !== "draft") {
+        setLoad({ status: "closed", contest });
+        return;
+      }
+
+      // 대화 이력도 함께 읽는다 — "다시 들어와도 이어갈 수 있게 한다"
+      // (contests/models.py RequirementChatMessage). 이 조회가 실패해도 화면
+      // 자체는 죽지 않는다 — 빈 대화로 이어가면 그만이다.
+      const chatRes = await sessionFetch(`/api/backend/contests/${contestId}/requirement-chat/messages`);
+      const chatBody = chatRes.ok ? await chatRes.json().catch(() => null) : null;
+      if (cancelled) return;
+
+      setRequirements(Array.isArray(contest.requirements) ? contest.requirements : []);
+      setMessages(sanitizeChatTurns(chatBody));
+      setLoad({ status: "ready", contest });
+    }
+
+    loadAll().catch(() => {
+      if (!cancelled) setLoad({ status: "error", message: "불러오는 중 오류가 발생했습니다." });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session.status, contestId]);
+
+  const turnLimitReached = messages.length >= CHAT_MAX_HISTORY_TURNS;
+
+  async function handleSendChat(text: string) {
+    setChatError(null);
+    setSending(true);
+    try {
+      const res = await sessionFetch(`/api/backend/contests/${contestId}/requirement-chat/messages`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ message: text }),
+      });
+
+      if (!res.ok) {
+        setChatError((await readErrorDetail(res)) ?? `메시지를 보내지 못했습니다 (${res.status})`);
+        return;
+      }
+
+      let body: unknown;
+      try {
+        body = await res.json();
+      } catch {
+        // 본문이 JSON이 아니다 — 프록시가 대신 HTML 에러 페이지 등을 돌려준
+        // 경우다. 대화는 끊지 않고 사과 메시지 한 턴만 화면에 남긴다.
+        const now = new Date().toISOString();
+        setMessages((prev) => [
+          ...prev,
+          { role: "sponsor", content: text, created_at: now },
+          { role: "assistant", content: FALLBACK_CHAT_REPLY, created_at: now },
+        ]);
+        return;
+      }
+
+      const parsed = parseChatReply(body);
+      const sanitizedHistory = sanitizeChatTurns(
+        isPlainRecord(body) ? (body as Record<string, unknown>).messages : undefined,
+      );
+      if (sanitizedHistory.length > 0) {
+        setMessages(sanitizedHistory);
+      } else {
+        // messages 필드가 아예 없거나 전부 깨져 있어도, 최소한 지금 주고받은
+        // 두 턴만은 화면에 남겨 대화가 끊긴 것처럼 보이지 않게 한다.
+        const now = new Date().toISOString();
+        setMessages((prev) => [
+          ...prev,
+          { role: "sponsor", content: text, created_at: now },
+          { role: "assistant", content: parsed.reply, created_at: now },
+        ]);
+      }
+      setProposals(parsed.proposals);
+    } catch {
+      setChatError("연결에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function handleAddRequirement(text: string, grade: RequirementGrade, fromProposal?: ChatProposal) {
+    setRequirementError(null);
+    setRequirementBusy(true);
+    try {
+      const res = await sessionFetch(`/api/backend/contests/${contestId}/requirements`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text, grade }),
+      });
+
+      if (!res.ok) {
+        setRequirementError((await readErrorDetail(res)) ?? `추가하지 못했습니다 (${res.status})`);
+        return;
+      }
+
+      const created = await res.json().catch(() => null);
+      if (isPlainRecord(created) && typeof created.id === "number" && typeof created.text === "string") {
+        setRequirements((prev) => [...prev, created as unknown as RequirementOut]);
+        if (fromProposal) {
+          setProposals((prev) => prev.filter((p) => p !== fromProposal));
+        }
+      } else {
+        setRequirementError("추가 응답을 해석하지 못했습니다. 새로고침해 확인해 주세요.");
+      }
+    } catch {
+      setRequirementError("연결에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setRequirementBusy(false);
+    }
+  }
+
+  async function handleUpdateRequirement(
+    id: number,
+    patch: { text?: string; grade?: RequirementGrade },
+  ): Promise<boolean> {
+    setRequirementError(null);
+    try {
+      const res = await sessionFetch(`/api/backend/contests/${contestId}/requirements/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+
+      if (!res.ok) {
+        setRequirementError((await readErrorDetail(res)) ?? `수정하지 못했습니다 (${res.status})`);
+        return false;
+      }
+
+      const updated = await res.json().catch(() => null);
+      if (isPlainRecord(updated) && typeof updated.id === "number") {
+        setRequirements((prev) =>
+          prev.map((r) => (r.id === id ? (updated as unknown as RequirementOut) : r)),
+        );
+        return true;
+      }
+      setRequirementError("수정 응답을 해석하지 못했습니다. 다시 시도해 주세요.");
+      return false;
+    } catch {
+      setRequirementError("연결에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+      return false;
+    }
+  }
+
+  async function handleDeleteRequirement(id: number) {
+    setRequirementError(null);
+    try {
+      const res = await sessionFetch(`/api/backend/contests/${contestId}/requirements/${id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        setRequirementError((await readErrorDetail(res)) ?? `삭제하지 못했습니다 (${res.status})`);
+        return;
+      }
+      setRequirements((prev) => prev.filter((r) => r.id !== id));
+    } catch {
+      setRequirementError("연결에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+    }
+  }
+
+  if (session.status === "unauthenticated") return null;
+  if (session.status === "loading" || load.status === "loading") {
+    return (
+      <main className="flex min-h-screen items-center justify-center p-10">
+        <p data-testid="draft-loading">불러오는 중...</p>
+      </main>
+    );
+  }
+
+  if (load.status === "not-found") {
+    return (
+      <main className="flex min-h-screen items-center justify-center p-10">
+        <p data-testid="draft-not-found">Contest를 찾을 수 없습니다.</p>
+      </main>
+    );
+  }
+
+  if (load.status === "error") {
+    return (
+      <main className="flex min-h-screen items-center justify-center p-10">
+        <p role="alert" data-testid="draft-load-error">
+          {load.message}
+        </p>
+      </main>
+    );
+  }
+
+  if (load.status === "closed") {
+    return (
+      <main className="mx-auto max-w-xl p-10">
+        <ContestStageStepper current="payment" />
+        <h1 className="mt-4 text-2xl font-semibold" data-testid="draft-closed-heading">
+          {load.contest.title}
+        </h1>
+        <p className="mt-6" data-testid="draft-closed">
+          이미 결제가 완료되어 공개된 공모전입니다. 더 이상 브리프나 요구사항을 수정할 수 없습니다.
+        </p>
+        <Link
+          href={`/contests/${contestId}`}
+          data-testid="draft-view-contest"
+          className="mt-4 inline-block text-sm underline"
+        >
+          공모전 보기
+        </Link>
+      </main>
+    );
+  }
+
+  const { contest } = load;
+  const contestForPanel = { ...contest, requirements };
+
+  return (
+    <main className="flex min-h-screen flex-col" data-testid="draft-phase-b">
+      <div className="border-b border-rule px-8 py-3">
+        <ContestStageStepper current="requirements" />
+      </div>
+      <div className="grid flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_452px]">
+        <GrillChatPanel
+          messages={messages}
+          proposals={proposals}
+          onSend={handleSendChat}
+          onAddProposal={(proposal) => void handleAddRequirement(proposal.text, proposal.grade, proposal)}
+          sending={sending}
+          chatError={chatError}
+          turnLimitReached={turnLimitReached}
+        />
+        <RequirementDraftPanel
+          contest={contestForPanel}
+          requirements={requirements}
+          requirementError={requirementError}
+          requirementBusy={requirementBusy}
+          onAdd={(text, grade) => handleAddRequirement(text, grade)}
+          onUpdate={handleUpdateRequirement}
+          onDelete={handleDeleteRequirement}
+        />
+      </div>
+    </main>
+  );
+}

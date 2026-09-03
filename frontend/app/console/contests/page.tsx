@@ -99,9 +99,18 @@ function SponsoredContestCard({ row }: { row: SponsoredContestRow }) {
         {label.mine ? `내 차례 · ${label.text}` : label.text}
       </p>
 
+      {/* draft(next_action === "pay_to_publish")는 공개 서버 컴포넌트
+          (`/contests/{id}`)로 가면 인증 없는 조회로는 404다 — 소유자라도
+          공개 표면에서는 draft가 보이지 않는다(#111, ADR-0015). 이어서
+          작성하는 자리(`/console/contests/{id}/draft`)로 보낸다 — 결제
+          화면이 아니라 그 화면이 "초안 행을 눌렀을 때" 가야 할 곳이다. */}
       <Link
         className="mt-2 block text-lg"
-        href={`/contests/${row.contest_id}`}
+        href={
+          row.next_action === "pay_to_publish"
+            ? `/console/contests/${row.contest_id}/draft`
+            : `/contests/${row.contest_id}`
+        }
         data-testid={`my-contest-row-${row.contest_id}-detail`}
       >
         {row.title}
