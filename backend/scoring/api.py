@@ -1,8 +1,8 @@
 """AI 채점 내부 엔드포인트 (#12, ADR-0006, ADR-0007, ADR-0014).
 
-core의 내부 틱 엔드포인트와 같은 `InternalAuth`를 쓴다 — notifications의
-`/internal/notifications/dispatch-due`와 같은 구조로, Contest 마감 전이 스캔
-(core의 틱)과는 별개의 주기로 Celery beat가 반복 호출하는 채점 전용 스캔이다.
+core의 내부 틱 엔드포인트와 같은 `InternalAuth`를 쓴다. 채점 스캔 자체는 여기 없다 —
+`scoring.services.SUBMISSION_SCORING_SCAN`(등록부 이름 `submission-scoring`, #139)이
+core.scans 등록부에 올라 Celery beat 가 주기적으로 돌린다.
 """
 
 from __future__ import annotations
@@ -14,21 +14,8 @@ from core.auth import InternalAuth
 from submissions.models import Submission
 
 from .models import ScoringAttempt
-from .services import run_pending_scoring
 
 router = Router(tags=["internal", "scoring"], auth=InternalAuth())
-
-
-@router.post("/run-pending")
-def run_pending(request):
-    """CLOSED Contest 중 아직 채점되지 않은 Submission을 스캔해 채점을 시도한다.
-
-    이미 Score가 있는 Submission은 항상 건너뛴다 — 재채점 경로는 없다(ADR-0006).
-    실패한 시도는 다음 호출에서 자동으로 다시 시도된다.
-    """
-
-    results = run_pending_scoring()
-    return {"count": len(results), "results": results}
 
 
 @router.get("/incomplete-contests")
@@ -42,7 +29,7 @@ def incomplete_contests(request):
 
     payload = []
     # CLOSED뿐 아니라 AWARDED·JUDGING_ENDED도 본다(#13) — 같은 이유로
-    # scoring.services.run_pending_scoring도 이 세 상태를 함께 스캔한다: Award는
+    # scoring.services 의 submission-scoring 스캔도 이 세 상태를 함께 본다: Award는
     # Score를 기다리지 않고 일어날 수 있어(ADR-0006/0014), 채점이 끝나기 전에
     # Contest가 CLOSED를 벗어날 수 있다.
     closed_contests = Contest.objects.filter(

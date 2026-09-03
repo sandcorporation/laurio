@@ -40,7 +40,7 @@ from storage.adapters.fake import FakeStorageAdapter
 CONTESTS_URL = "/api/contests"
 PAYMENTS_URL = "/api/payments"
 TICK_URL = "/api/internal/tick"
-SCORING_RUN_PENDING_URL = "/api/internal/scoring/run-pending"
+SCORING_RUN_PENDING_URL = "/api/internal/scans/submission-scoring"
 OPERATOR_APPEALS_URL = "/api/operator/appeals"
 # Django 테스트 클라이언트의 기본 호스트. 운영자 경로의 변경 요청은 Origin 을
 # 검증한다(#43, ADR-0016 의 성립 조건).

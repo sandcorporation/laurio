@@ -17,7 +17,7 @@ from accounts.middleware import jwt_auth
 from core.auth import InternalAuth
 
 from .models import Notification, NotificationType
-from .services import create_notification, dispatch_due_notifications
+from .services import create_notification
 
 router = Router(tags=["internal", "notifications"], auth=InternalAuth())
 
@@ -102,23 +102,10 @@ def create(request, payload: CreateNotificationIn):
     return _serialize(notification)
 
 
-# 정적 경로("/dispatch-due", "/types/")는 반드시
+# 정적 경로("/types/")는 반드시
 # "/{notification_id}" 보다 먼저 등록한다. django-ninja/Django의 URL 매칭은 등록
 # 순서를 따르므로, 동적 경로가 먼저 있으면 그 문자열들이 그 경로에 먼저 매치해
 # 405를 낸다.
-@router.post("/dispatch-due")
-def dispatch_due(request):
-    """야간 연기 큐를 스캔해 발송 시각이 지난 것을 발송한다.
-
-    Celery beat 틱과 별개의 진입점이다 — 틱(#3)은 상태 전이 스캔 전반을 다루고, 이
-    엔드포인트는 Notification 야간 큐에 특화된 스캔이다. 필요하면 나중에 같은 beat
-    스케줄에 나란히 등록하면 된다.
-    """
-
-    dispatched_ids = dispatch_due_notifications()
-    return {"count": len(dispatched_ids), "dispatched_ids": dispatched_ids}
-
-
 @public_router.get("/me", response=list[NotificationOut], auth=jwt_auth)
 def list_my_notifications(
     request,

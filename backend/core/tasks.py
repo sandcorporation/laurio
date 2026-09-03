@@ -69,17 +69,5 @@ def call_payments_run_refunds() -> dict:
 
 
 
-@shared_task(name="core.call_notifications_dispatch_due")
-def call_notifications_dispatch_due() -> dict:
-    """notifications/api.py: 야간 연기 큐를 스캔해 발송 시각이 지난 알림을 보낸다."""
 
-    return _call_internal("/api/internal/notifications/dispatch-due")
-
-
-
-@shared_task(name="core.call_scoring_run_pending")
-def call_scoring_run_pending() -> dict:
-    """scoring/api.py: 채점 대기·재시도 대상 Submission을 스캔해 LLM 채점을 돌린다."""
-
-    return _call_internal("/api/internal/scoring/run-pending")
 

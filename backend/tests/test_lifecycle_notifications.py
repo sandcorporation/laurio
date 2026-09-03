@@ -35,7 +35,7 @@ KST = ZoneInfo("Asia/Seoul")
 TICK_URL = "/api/internal/tick"
 CONTESTS_URL = "/api/contests"
 PAYMENTS_URL = "/api/payments"
-SCORING_RUN_PENDING_URL = "/api/internal/scoring/run-pending"
+SCORING_RUN_PENDING_URL = "/api/internal/scans/submission-scoring"
 DISTRIBUTIONS_RUN_DUE_URL = "/api/internal/distributions/run-due"
 # 다섯 lifecycle 스캔의 등록부 이름(#138) — 예전 단일 엔드포인트가 돌리던 고정 순서 그대로.
 LIFECYCLE_SCAN_NAMES = (

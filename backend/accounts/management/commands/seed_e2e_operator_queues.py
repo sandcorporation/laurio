@@ -38,7 +38,7 @@ from policies.services import get_current_policy
 CONTESTS_URL = "/api/contests"
 PAYMENTS_URL = "/api/payments"
 PAYOUTS_URL = "/api/payouts"
-SCORING_RUN_PENDING_URL = "/api/internal/scoring/run-pending"
+SCORING_RUN_PENDING_URL = "/api/internal/scans/submission-scoring"
 
 # 이 명령이 심은 Contest 는 전부 이 접두어로 시작한다(코드리뷰 지적) — clear_queues()가
 # "이 명령이 만든 것"만 골라 지우려면 다른 시드·실사용 데이터와 구별할 표식이

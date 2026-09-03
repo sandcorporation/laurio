@@ -311,7 +311,7 @@ def run_due_distributions(*, fail_submission_ids: set[int] | None = None) -> lis
         # 배치가 막히면 안 된다 — order_by("id")로 스캔하는 이상, 그 예외를
         # 밖으로 흘리면 이 Contest가 항상 배치 맨 앞에서 다시 걸려 그 뒤의
         # 정상 건들까지 영원히 처리되지 못하는 poison pill이 된다
-        # (scoring.services.run_pending_scoring이 이미 겪고 고친 것과 같은
+        # (scoring.services 의 submission-scoring 스캔이 이미 겪고 고친 것과 같은
         # 종류의 사고 — #21 리뷰).
         try:
             distribution = _create_distribution_for_contest(contest_id, policy=policy)

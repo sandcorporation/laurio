@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 _SEND_URL = "https://apis.aligo.in/send/"
 _REMAIN_URL = "https://apis.aligo.in/remain/"
-# 야간 드레인 스캔(notifications.services.dispatch_due_notifications, #51
+# 야간 드레인 스캔(notifications.services 의 notification-dispatch-deferred 스캔, #51
 # 코드리뷰 지적 6)이 한 요청 안에서 여러 건을 순차 처리한다 — 채널 하나가
 # 오래 물고 늘어지면 그 시간이 통째로 스캔 예산을 잡아먹는다.
 #

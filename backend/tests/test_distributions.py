@@ -43,7 +43,7 @@ from submissions.models import Submission
 TICK_URL = "/api/internal/tick"
 CONTESTS_URL = "/api/contests"
 PAYMENTS_URL = "/api/payments"
-SCORING_RUN_PENDING_URL = "/api/internal/scoring/run-pending"
+SCORING_RUN_PENDING_URL = "/api/internal/scans/submission-scoring"
 DISTRIBUTIONS_RUN_DUE_URL = "/api/internal/distributions/run-due"
 
 

@@ -38,7 +38,7 @@ from storage.adapters.fake import FakeStorageAdapter
 CONTESTS_URL = "/api/contests"
 PAYMENTS_URL = "/api/payments"
 TICK_URL = "/api/internal/tick"
-SCORING_RUN_PENDING_URL = "/api/internal/scoring/run-pending"
+SCORING_RUN_PENDING_URL = "/api/internal/scans/submission-scoring"
 OPERATOR_APPEALS_URL = "/api/operator/appeals"
 OPERATOR_ORIGIN = "http://testserver"
 
@@ -198,12 +198,16 @@ def _submit(client, dev: dict, contest_id: int, *, requirement_id: int) -> dict:
 
 
 def _close_contest(client, contest: dict, *, deadline) -> None:
+    """마감 전이 스캔만 돌린다 — `/tick` 은 등록부 전부를 한 바퀴 돌아(#137) 채점까지 같이
+    실행하므로, 「마감은 됐지만 채점 전」을 관찰하는 테스트(my_contests·my_participation 이
+    이 헬퍼를 가져다 쓴다)가 그 상태를 볼 수 없게 된다."""
+
     from core.models import ClockOverride
 
     ClockOverride.objects.update_or_create(
         pk=1, defaults={"overridden_at": deadline + timedelta(minutes=1)}
     )
-    tick_resp = client.post(TICK_URL, **_internal_headers())
+    tick_resp = client.post("/api/internal/scans/contest-close", **_internal_headers())
     assert tick_resp.status_code == 200
     assert Contest.objects.get(id=contest["id"]).status == Contest.Status.CLOSED
 

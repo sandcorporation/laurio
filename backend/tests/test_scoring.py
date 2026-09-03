@@ -3,7 +3,7 @@
 핵심 대상:
 
 - 마감 전이(#11) 직후 채점이 시작된다 — 여기서는 `/api/internal/tick`으로 Contest를
-  CLOSED로 옮긴 뒤 `/api/internal/scoring/run-pending`을 쏘는 두 단계로 재현한다.
+  CLOSED로 옮긴 뒤 `/api/internal/scans/submission-scoring`을 쏘는 두 단계로 재현한다.
   notifications 앱의 `/dispatch-due`와 core 앱의 `/tick`이 이미 별개의 주기적
   진입점으로 공존하는 것과 같은 구조다.
 - 채점 근거는 자가 응답이 아니라 소스코드와 Evidence다 — 자가 응답을 전부 충족으로
@@ -112,7 +112,7 @@ class _PermanentFailureAdapter:
 class _SlowAdapter:
     """`settings.LLM_SLOW_ADAPTER_SLEEP_SECONDS`만큼 잠들었다 성공하는 어댑터.
 
-    `scoring.services.SCAN_TIME_BUDGET_SECONDS`(#88 코드리뷰 지적 1)가 실제로
+    스캔의 시간 예산(#88 코드리뷰 지적 1)이 실제로
     배치를 조기 종료시키는지 검증하는 용도 — 실물 OpenAI 호출 없이 "느린 호출"을
     결정적으로 재현한다.
     """
@@ -131,8 +131,7 @@ class _SlowAdapter:
             model_version=self.model_version,
         )
 
-TICK_URL = "/api/internal/tick"
-RUN_PENDING_URL = "/api/internal/scoring/run-pending"
+RUN_PENDING_URL = "/api/internal/scans/submission-scoring"
 INCOMPLETE_CONTESTS_URL = "/api/internal/scoring/incomplete-contests"
 CONTESTS_URL = "/api/contests"
 PAYMENTS_URL = "/api/payments"
@@ -253,8 +252,11 @@ def _zip_bytes(files: dict[str, str]) -> bytes:
 
 
 def _close_contest(client, contest: dict, *, deadline: "timezone.datetime") -> None:
+    """마감 전이 스캔만 돌린다 — `/tick` 은 등록부 전부를 한 바퀴 돌아(#137) 채점 스캔까지
+    같이 실행하므로, 어느 어댑터로 언제 채점되는지를 단언하는 이 파일에서는 쓰지 않는다."""
+
     _freeze(deadline + timedelta(minutes=1))
-    tick_resp = client.post(TICK_URL, **_internal_headers())
+    tick_resp = client.post("/api/internal/scans/contest-close", **_internal_headers())
     assert tick_resp.status_code == 200
     assert Contest.objects.get(id=contest["id"]).status == Contest.Status.CLOSED
 
@@ -322,7 +324,7 @@ def test_evidence_grounded_in_source_scores_required_requirement_as_met(
     _close_contest(client, contest, deadline=deadline)
     result = _run_pending(client)
     assert result["count"] == 1
-    assert result["results"][0]["status"] == "scored"
+    assert result["rows"][0]["status"] == "scored"
 
     score = Score.objects.get(submission_id=submission_id)
     assert score.percentage == Decimal("100.00")
@@ -470,7 +472,7 @@ def test_running_pending_scan_twice_scores_only_once(client, category, landing_t
 
     first = _run_pending(client)
     assert first["count"] == 1
-    assert first["results"][0]["status"] == "scored"
+    assert first["rows"][0]["status"] == "scored"
 
     first_score = Score.objects.get(submission_id=submission_id)
 
@@ -577,14 +579,14 @@ def test_llm_failure_is_logged_and_retried_on_next_scan(client, category, landin
     with override_settings(LLM_FAKE_RAISING_SUBMISSION_IDS=[submission_id]):
         failed = _run_pending(client)
     assert failed["count"] == 1
-    assert failed["results"][0]["status"] == "failed"
+    assert failed["rows"][0]["status"] == "failed"
     assert not Score.objects.filter(submission_id=submission_id).exists()
     assert ScoringAttempt.objects.filter(submission_id=submission_id).count() == 1
 
     # 실패 흉내를 껐으니 다음 스캔에서 같은 코드 경로(첫 시도)가 자동으로 재시도된다.
     retried = _run_pending(client)
     assert retried["count"] == 1
-    assert retried["results"][0]["status"] == "scored"
+    assert retried["rows"][0]["status"] == "scored"
     assert Score.objects.filter(submission_id=submission_id).count() == 1
 
 
@@ -825,7 +827,7 @@ def test_missing_source_object_leaves_submission_unscored_for_next_scan(
     result = _run_pending(client)
 
     assert result["count"] == 1
-    assert result["results"][0]["status"] == "source_not_found"
+    assert result["rows"][0]["status"] == "source_not_found"
     assert not Score.objects.filter(submission_id=submission_id).exists()
     assert ScoringAttempt.objects.filter(submission_id=submission_id).exists()
 
@@ -834,7 +836,7 @@ def test_missing_source_object_leaves_submission_unscored_for_next_scan(
     FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": "MARKER\n"}))
     retried = _run_pending(client)
     assert retried["count"] == 1
-    assert retried["results"][0]["status"] == "scored"
+    assert retried["rows"][0]["status"] == "scored"
     assert Score.objects.get(submission_id=submission_id).percentage == Decimal("100.00")
 
 
@@ -900,7 +902,7 @@ def test_one_poisoned_submission_does_not_block_the_rest_of_the_batch(
         result = _run_pending(client)
 
     assert result["count"] == 2
-    statuses = {r["submission_id"]: r["status"] for r in result["results"]}
+    statuses = {r["submission_id"]: r["status"] for r in result["rows"]}
     assert statuses[sub1] == "failed"
     assert statuses[sub2] == "scored"
 
@@ -966,7 +968,7 @@ def test_permanent_failure_is_excluded_from_the_next_scan(client, category, land
     ):
         first = _run_pending(client)
 
-    statuses = {r["submission_id"]: r["status"] for r in first["results"]}
+    statuses = {r["submission_id"]: r["status"] for r in first["rows"]}
     assert statuses[sub1] == "failed_permanently"
     assert statuses[sub2] == "scored"
 
@@ -992,14 +994,19 @@ def test_permanent_failure_is_excluded_from_the_next_scan(client, category, land
 def test_scan_stops_early_once_it_exceeds_its_time_budget(
     client, category, landing_type, monkeypatch
 ):
-    """`SCAN_TIME_BUDGET_SECONDS`를 넘기면 남은 Submission을 시작하지 않는다 —
+    """스캔의 시간 예산을 넘기면 남은 Submission을 시작하지 않는다 —
     celery(30초)·gunicorn(기본 30초) 타임아웃으로 워커가 SIGKILL되기 전에 스스로
     멈춰야, 이미 처리한 건은 최소한 ScoringAttempt/Score를 남긴 채 다음 스캔이
     나머지를 이어받는다(#88 코드리뷰 지적 1). 실물 호출 없이 `_SlowAdapter`로
     "느린 호출"을 결정적으로 재현하고, 예산 자체는 테스트가 감당할 수 있는
     크기로 몽키패치한다."""
 
-    monkeypatch.setattr("scoring.services.SCAN_TIME_BUDGET_SECONDS", 0.05)
+    from dataclasses import replace
+
+    from core import scans
+
+    spec = scans.SCAN_REGISTRY["submission-scoring"]
+    monkeypatch.setitem(scans.SCAN_REGISTRY, "submission-scoring", replace(spec, time_budget_seconds=0.05))
 
     deadline = timezone.now() + timedelta(hours=1)
     _sponsor, contest = _publish_contest(
@@ -1045,7 +1052,7 @@ def test_scan_stops_early_once_it_exceeds_its_time_budget(
     # 첫 건은 항상 처리한다(빈손으로 돌아가지 않는다) — 그 한 건이 예산(0.05초)보다
     # 오래 걸리므로(0.1초) 두 번째 건을 시작하기 전에 멈춘다.
     assert first["count"] == 1
-    scored_ids = {r["submission_id"] for r in first["results"] if r["status"] == "scored"}
+    scored_ids = {r["submission_id"] for r in first["rows"] if r["status"] == "scored"}
     assert len(scored_ids) == 1
     remaining = set(submission_ids) - scored_ids
     assert len(remaining) == 2
@@ -1054,12 +1061,12 @@ def test_scan_stops_early_once_it_exceeds_its_time_budget(
 
     # 다음 스캔(예산 제약을 풀고)이 나머지를 이어받는다 — 조기 종료가 그
     # Submission을 영구히 배제하지 않는다(permanent와 다른 점).
-    monkeypatch.setattr("scoring.services.SCAN_TIME_BUDGET_SECONDS", 10)
+    monkeypatch.setitem(scans.SCAN_REGISTRY, "submission-scoring", replace(spec, time_budget_seconds=10))
     with override_settings(LLM_ADAPTER_MODE="tests.test_scoring._SlowAdapter"):
         second = _run_pending(client)
 
     assert second["count"] == 2
-    assert all(r["status"] == "scored" for r in second["results"])
+    assert all(r["status"] == "scored" for r in second["rows"])
     for sid in remaining:
         assert Score.objects.filter(submission_id=sid).exists()
 
@@ -1112,7 +1119,7 @@ def test_adapter_omitting_a_verdict_treats_it_as_unmet_instead_of_crashing(
         result = _run_pending(client)
 
     assert result["count"] == 1
-    assert result["results"][0]["status"] == "scored"
+    assert result["rows"][0]["status"] == "scored"
 
     score = Score.objects.get(submission_id=submission_id)
     # _PartialVerdictAdapter는 두 Requirement 중 마지막 하나의 판정을 아예 안
@@ -1268,7 +1275,7 @@ def test_multibyte_utf8_cut_at_budget_boundary_keeps_valid_prefix(client, catego
     _close_contest(client, contest, deadline=deadline)
     result = _run_pending(client)
 
-    assert result["results"][0]["status"] == "scored"
+    assert result["rows"][0]["status"] == "scored"
     score = Score.objects.get(submission_id=submission_id)
     # 파일이 통째로 버려졌다면(옛 버그) Evidence("가")를 소스에서 찾지 못해 0%가
     # 나왔을 것이다. 유효한 접두부가 살아남아야 100%가 나온다.

@@ -61,7 +61,7 @@ class ScoringAttempt(models.Model):
     error = models.TextField()
     # 다시 시도해도 같은 결과가 나올 실패인가(#88 코드리뷰 지적 2,
     # scoring.adapters.LLMAdapterPermanentError). True면 scoring.services.
-    # run_pending_scoring의 대상 조회가 이 Submission을 이후 스캔에서 뺀다 —
+    # submission-scoring 스캔의 대상 조회가 이 Submission을 이후 스캔에서 뺀다 —
     # 안 그러면 매 스캔이 같은 결정적 실패를 영원히 반복하면서 Score 없이
     # 배분 컷라인에서 조용히 빠진다. 기본값 False는 기존 데이터(전부 재시도
     # 가능한 실패로 취급되던 시절)와 호환된다.
