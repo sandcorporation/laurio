@@ -129,7 +129,7 @@ def _deadline_reminder_candidates(as_of, ctx):
 
     lead = timedelta(hours=_policy(ctx).deadline_reminder_lead_hours)
     return Contest.objects.filter(
-        status=Contest.Status.PUBLISHED,
+        status__in=Contest.Status.SUBMITTABLE.statuses,
         deadline_reminder_sent_at__isnull=True,
         deadline_at__lte=as_of + lead,
     ).select_related("sponsor__user")
@@ -186,7 +186,7 @@ def _judging_end_reminder_candidates(as_of, ctx):
 
     lead = timedelta(hours=_policy(ctx).judging_end_reminder_lead_hours)
     return Contest.objects.filter(
-        status=Contest.Status.CLOSED,
+        status__in=Contest.Status.AWARDABLE.statuses,
         judging_end_reminder_sent_at__isnull=True,
         judging_ends_at__isnull=False,
         judging_ends_at__lte=as_of + lead,
@@ -271,7 +271,7 @@ def _final_warning_candidates(as_of, ctx):
         + timedelta(days=policy.distribution_final_warning_lead_days)
     )
     return Contest.objects.filter(
-        status=Contest.Status.JUDGING_ENDED,
+        status__in=Contest.Status.AWAITING_DISTRIBUTION.statuses,
         distribution__isnull=True,
         distribution_final_warning_sent_at__isnull=True,
         judging_ends_at__isnull=False,

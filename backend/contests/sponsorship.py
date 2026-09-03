@@ -65,7 +65,7 @@ def sponsored_contest_queryset(base, *, as_of, policy):
 
     from appeals.models import Appeal
     from distributions.models import DistributionShare
-    from distributions.services import SETTLED_PAYOUT_STATUSES, distribution_due_q
+    from distributions.services import distribution_due_q
     from payouts.models import Payout
     from scoring.models import Score
 
@@ -93,7 +93,7 @@ def sponsored_contest_queryset(base, *, as_of, policy):
         # 생겼다」와 「돈이 실제로 갔다」는 다르다 — 지급이 전부 실패해 매 스캔
         # 재시도되는 중에도 앞의 조건은 참이다.
         #
-        # `payouts__status__in=SETTLED_PAYOUT_STATUSES`만으로는 CONFIRMED인데
+        # `payouts__status__in=Payout.Status.SETTLED.statuses`만으로는 CONFIRMED인데
         # transfer_status가 FAILED인 Payout도 "정산됨"으로 잡는다(코드리뷰
         # 지적 7, 4차 — 지난 라운드에 Award 경로(has_confirmed_payout)만
         # 고치고 이 배분 경로는 놓쳤다). 두 조건을 하나의 Q로 묶어 **같은
@@ -104,7 +104,7 @@ def sponsored_contest_queryset(base, *, as_of, policy):
             DistributionShare.objects.filter(
                 distribution__contest=OuterRef("pk")
             ).exclude(
-                Q(payouts__status__in=SETTLED_PAYOUT_STATUSES)
+                Q(payouts__status__in=Payout.Status.SETTLED.statuses)
                 & ~Q(payouts__transfer_status=Payout.TransferStatus.FAILED)
             )
         ),

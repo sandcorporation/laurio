@@ -47,18 +47,6 @@ from .targets import PayoutTarget
 
 logger = logging.getLogger(__name__)
 
-# REQUESTED든 그 이후 확정 상태든 "아직 실패로 끝나지 않은" 시도는 활성으로 본다
-# — models.Payout.Meta.constraints의 unique_active_payout_per_handover와 정확히
-# 같은 집합이어야 한다(그쪽은 DB 레벨 최후 방어선, 이건 애플리케이션 레벨 조회
-# 기준). FAILED만 빠진다 — 그래야 실패한 시도 뒤에 새 REQUESTED를 만들 수 있다.
-# CONFIRMED_SELLER_PENDING도 활성이다 — Seller 등록이 안 끝났을 뿐 지급 자체는
-# 이미 확정되어 원장에 분개가 남아 있다(#50).
-_ACTIVE_PAYOUT_STATUSES = [
-    Payout.Status.REQUESTED,
-    Payout.Status.CONFIRMED_IDENTITY_PENDING,
-    Payout.Status.CONFIRMED_SELLER_PENDING,
-    Payout.Status.CONFIRMED,
-]
 
 
 def _withholding_exempt_threshold(policy: PlatformPolicy) -> int:
@@ -144,7 +132,7 @@ def get_or_create_payout(target: PayoutTarget, *, policy: PlatformPolicy | None 
     with transaction.atomic():
         locked = target.lock()
         fk = {target.fk_name: locked}
-        active = Payout.objects.filter(**fk, status__in=_ACTIVE_PAYOUT_STATUSES).order_by(
+        active = Payout.objects.filter(**fk, status__in=Payout.Status.ACTIVE.statuses).order_by(
             "-created_at"
         )
         existing = active.first()

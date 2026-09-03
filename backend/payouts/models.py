@@ -27,6 +27,8 @@ import uuid
 from django.db import models
 from django.db.models import Q
 
+from core.classification import Classification
+
 
 class PayoutQuerySet(models.QuerySet):
     """Payout 의 지급 사유(Handover 또는 DistributionShare)에 따라 갈리는 조회를 한 곳에
@@ -64,21 +66,61 @@ class PayoutQuerySet(models.QuerySet):
         )
 
 
+class PayoutStatus(models.TextChoices):
+    REQUESTED = "requested", "요청됨"
+    # 토스가 지급을 확정했지만(payout.changed 성공), 주민등록번호가 아직
+    # 없어 세무 처리를 마칠 수 없는 상태. 정식 상태다(ADR-0008) — 실패가
+    # 아니고, 금액은 원장에 개발자 미지급금으로 계속 남는다.
+    CONFIRMED_IDENTITY_PENDING = "confirmed_identity_pending", "지급 확정 · 신원 대기"
+    # 지급이 확정됐지만 이 Developer의 Seller(지급대행사 수취인) 등록이 아직
+    # 끝나지 않은 상태(ADR-0020). CONFIRMED_IDENTITY_PENDING과는 다른 것을
+    # 기다린다 — 이건 주민등록번호(Laurio의 세무)가 아니라 지급대행사의
+    # 수취인 등록을 기다린다. 한도 초과·심사 지연도 여기 머문다 — 실패가
+    # 아니므로 금액은 그대로 원장에 개발자 미지급금으로 남는다.
+    CONFIRMED_SELLER_PENDING = "confirmed_seller_pending", "지급 확정 · Seller 대기"
+    CONFIRMED = "confirmed", "지급 확정"
+    FAILED = "failed", "지급 실패"
+
+
+# --- Payout.Status 가 소유하는 분류 (#142, #121) ---------------------------------------------
+#
+# 다섯 값 전부에 명시적으로 답한다(tests/test_status_classification.py 가 강제). CONFIRMED_SELLER_PENDING 이
+# 생겼을 때 distributions 의 SETTLED 집합에 빠져 배치 슬롯을 낭비한 사고(#50)가 이 모양의 이유다.
+_P = PayoutStatus
+
+# "아직 실패로 끝나지 않은" 시도 — FAILED 만 빠진다. 그래야 실패한 시도 뒤에 새 REQUESTED 를 만들 수
+# 있다. CONFIRMED_SELLER_PENDING 도 활성이다 — Seller 등록이 안 끝났을 뿐 지급 자체는 이미 확정되어
+# 원장에 분개가 남아 있다(#50). 아래 Payout.Meta 의 부분 유니크 제약 둘이 이 질문에서 파생된다 — DB
+# 레벨 최후 방어선과 애플리케이션 레벨 조회 기준이 한 집합이다.
+PayoutStatus.ACTIVE = Classification(
+    {_P.REQUESTED: True, _P.CONFIRMED_IDENTITY_PENDING: True, _P.CONFIRMED_SELLER_PENDING: True, _P.CONFIRMED: True, _P.FAILED: False},
+    question="활성(실패로 끝나지 않은) 시도인가",
+)
+# 「이 몫은 더 이상 지급을 기다리지 않는다」 — 지급 자체(원장 분개)가 확정된 상태들. 몫 지급 스캔이
+# 다시 시도하지 않는 기준이고, `contests.sponsorship` 이 개최자에게 「완료」라고 말해도 되는지도
+# 같은 기준이어야 한다(#81).
+PayoutStatus.SETTLED = Classification(
+    {_P.REQUESTED: False, _P.CONFIRMED_IDENTITY_PENDING: True, _P.CONFIRMED_SELLER_PENDING: True, _P.CONFIRMED: True, _P.FAILED: False},
+    question="지급이 확정되어 더 이상 기다리지 않는가",
+)
+# ADR-0025 "지급이 끝나기 전에는 탈퇴할 수 없다"(User Story 6). CONFIRMED 는 지급이 실제로 끝난
+# 상태이고(TransferStatus 가 COMPLETED 일 때만 여기로 전진한다), FAILED 는 그 시도 자체가 끝난 상태다 —
+# 재시도는 새 REQUESTED 행으로 남으므로(#57) FAILED 행 하나가 "미지급 상태"를 뜻하지 않는다.
+PayoutStatus.BLOCKS_DEVELOPER_WITHDRAWAL = Classification(
+    {_P.REQUESTED: True, _P.CONFIRMED_IDENTITY_PENDING: True, _P.CONFIRMED_SELLER_PENDING: True, _P.CONFIRMED: False, _P.FAILED: False},
+    question="Developer 의 탈퇴를 막는 진행 중 지급인가",
+)
+del _P
+
+# 부분 유니크 제약의 조건 — ACTIVE 질문에서 파생한 문자열 리스트(enum 정의 순서, 마이그레이션 상태와
+# 같은 순서).
+_ACTIVE_PAYOUT_STATUS_VALUES = [status.value for status in PayoutStatus if PayoutStatus.ACTIVE(status)]
+
+
 class Payout(models.Model):
-    class Status(models.TextChoices):
-        REQUESTED = "requested", "요청됨"
-        # 토스가 지급을 확정했지만(payout.changed 성공), 주민등록번호가 아직
-        # 없어 세무 처리를 마칠 수 없는 상태. 정식 상태다(ADR-0008) — 실패가
-        # 아니고, 금액은 원장에 개발자 미지급금으로 계속 남는다.
-        CONFIRMED_IDENTITY_PENDING = "confirmed_identity_pending", "지급 확정 · 신원 대기"
-        # 지급이 확정됐지만 이 Developer의 Seller(지급대행사 수취인) 등록이 아직
-        # 끝나지 않은 상태(ADR-0020). CONFIRMED_IDENTITY_PENDING과는 다른 것을
-        # 기다린다 — 이건 주민등록번호(Laurio의 세무)가 아니라 지급대행사의
-        # 수취인 등록을 기다린다. 한도 초과·심사 지연도 여기 머문다 — 실패가
-        # 아니므로 금액은 그대로 원장에 개발자 미지급금으로 남는다.
-        CONFIRMED_SELLER_PENDING = "confirmed_seller_pending", "지급 확정 · Seller 대기"
-        CONFIRMED = "confirmed", "지급 확정"
-        FAILED = "failed", "지급 실패"
+    # 값 자리는 `Payout.Status.X` 그대로다 — 클래스 바깥에 둔 이유는 Meta 의 제약 조건이 클래스 생성
+    # 중에 이 enum 의 분류를 읽어야 하기 때문이다.
+    Status = PayoutStatus
 
     class TransferStatus(models.TextChoices):
         """실제 벤더 이체(토스 실물 어댑터가 부르는 `POST /v2/payouts`)의 진행
@@ -211,14 +253,7 @@ class Payout(models.Model):
             # 'failed'인 행끼리는 이 제약에 걸리지 않는다.
             models.UniqueConstraint(
                 fields=["handover"],
-                condition=models.Q(
-                    status__in=[
-                        "requested",
-                        "confirmed_identity_pending",
-                        "confirmed_seller_pending",
-                        "confirmed",
-                    ]
-                ),
+                condition=models.Q(status__in=_ACTIVE_PAYOUT_STATUS_VALUES),
                 name="unique_active_payout_per_handover",
             ),
             # distribution_share 쪽도 같은 이유로 같은 모양의 부분 유니크 제약을
@@ -226,14 +261,7 @@ class Payout(models.Model):
             # 수수료·원천징수 분개가 두 번 남는다.
             models.UniqueConstraint(
                 fields=["distribution_share"],
-                condition=models.Q(
-                    status__in=[
-                        "requested",
-                        "confirmed_identity_pending",
-                        "confirmed_seller_pending",
-                        "confirmed",
-                    ]
-                ),
+                condition=models.Q(status__in=_ACTIVE_PAYOUT_STATUS_VALUES),
                 name="unique_active_payout_per_distribution_share",
             ),
             # 정확히 하나의 지급 사유만 채워져야 한다 — 둘 다 비었거나 둘 다

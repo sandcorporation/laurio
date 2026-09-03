@@ -54,22 +54,6 @@ from .models import Distribution, DistributionShare
 
 logger = logging.getLogger(__name__)
 
-# unique_active_payout_per_distribution_share와 같은 집합이어야 한다
-# (payouts.services._ACTIVE_PAYOUT_STATUSES와 같은 이유) — 이 상태들에 도달한
-# 몫은 이미 확정됐으므로 다시 시도하지 않는다. CONFIRMED_SELLER_PENDING도
-# 포함한다(#50) — Seller 등록이 아직 안 끝났을 뿐 지급 자체(원장 분개)는 이미
-# 확정되어 있으므로, 이 스캔이 다시 request_payout/confirm을 시도할 이유가
-# 없다. 빠뜨리면 이 상태에 머무는 몫이 매 스캔마다 다시 후보에 잡혀
-# 배치 슬롯을 낭비한다("새 상태를 후보 집합에 반영하지 않으면 좌초·낭비가
-# 생긴다"는 이 저장소가 반복해 겪은 결함 모양).
-# 「이 몫은 더 이상 지급을 기다리지 않는다」는 상태들. `contests.sponsorship` 도
-# 이것을 본다(#81) — 개최자에게 「완료」라고 말해도 되는지가 같은 기준이어야
-# 한다. 그래서 앞의 밑줄을 뗐다.
-SETTLED_PAYOUT_STATUSES = [
-    Payout.Status.CONFIRMED_IDENTITY_PENDING,
-    Payout.Status.CONFIRMED_SELLER_PENDING,
-    Payout.Status.CONFIRMED,
-]
 
 
 def _create_distribution_for_contest(
@@ -95,7 +79,7 @@ def _create_distribution_for_contest(
         if existing is not None:
             return existing
 
-        if locked_contest.status != Contest.Status.JUDGING_ENDED:
+        if not Contest.Status.AWAITING_DISTRIBUTION(locked_contest.status):
             # 잠근 뒤 다시 읽은 최신 상태로 한 번 더 확인한다 — 이 배치가 만들어질
             # 때와 실제로 잠그는 시점 사이에 Award가 끼어들었을 수 있다.
             return None
@@ -238,7 +222,7 @@ def distribution_due_q(as_of, policy) -> Q:
     """
 
     return Q(
-        status=Contest.Status.JUDGING_ENDED,
+        status__in=Contest.Status.AWAITING_DISTRIBUTION.statuses,
         judging_ends_at__lte=as_of - timedelta(days=policy.distribution_wait_days),
         distribution__isnull=True,
     )
@@ -325,7 +309,7 @@ def _create_distribution(contest, as_of, ctx):
 
 def _pending_shares(as_of, ctx):
     return (
-        DistributionShare.objects.exclude(payouts__status__in=SETTLED_PAYOUT_STATUSES)
+        DistributionShare.objects.exclude(payouts__status__in=Payout.Status.SETTLED.statuses)
         .select_related("distribution", "submission")
         .distinct()
     )
