@@ -162,3 +162,29 @@ export function getTossClientKey(): string | null {
   const key = process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY;
   return key ? key : null;
 }
+
+/** `requestPayment`가 reject하는 값은 `Error`가 아니다(#112 코드리뷰 지적 4) —
+ * 토스 SDK는 `{ code, message }` 형태(예: `INVALID_CLIENT_KEY`,
+ * `USER_CANCEL`)로 거절한다. `err instanceof Error`만 보면 이 형태를 그냥
+ * "결제창을 여는 중 오류가 발생했습니다"로 뭉개 버려, staging이 죽었을 때
+ * 정작 원인(클라이언트 키가 잘못됐다는 것)이 화면에도 로그에도 남지 않는다
+ * — 이 티켓이 고치려는 바로 그 증상이다. 호출부가 이 함수로 사람이 읽을
+ * 메시지를 얻고, 원본 값은 항상 `console.error`로 흘려보낸다. */
+export function describeTossFailure(err: unknown): string {
+  if (err instanceof Error) {
+    console.error("토스 결제창 오류:", err);
+    return err.message;
+  }
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    "message" in err &&
+    typeof (err as { message: unknown }).message === "string"
+  ) {
+    const code = "code" in err ? (err as { code: unknown }).code : undefined;
+    console.error("토스 결제창 오류:", { code, message: (err as { message: string }).message });
+    return (err as { message: string }).message;
+  }
+  console.error("토스 결제창에서 알 수 없는 형태의 오류가 발생했다:", err);
+  return "결제창을 여는 중 오류가 발생했습니다.";
+}

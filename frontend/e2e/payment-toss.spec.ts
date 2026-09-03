@@ -203,6 +203,13 @@ test.describe("실물 어댑터 — 결제하기가 토스 SDK로 목적지·파
 
     // 시크릿류 값은 브라우저 어디에도 없다.
     expect(JSON.stringify(call)).not.toContain("secret");
+
+    // requestPayment가 실제로는 페이지를 떠나지 않고 그냥 resolve로 끝났다
+    // (이 스텁이 그렇다) — "opening_widget"에 영원히 갇히지 않고 구별되는
+    // 실패로 전환된다는 것을 고정한다(#112 코드리뷰 지적 5). 정상 경로라면
+    // 브라우저가 이미 페이지를 떠났을 시점이라 이 상태 자체가 관찰되지 않는다.
+    await expect(page.getByTestId("payment-failed")).toBeVisible();
+    await expect(page.getByTestId("payment-pay-button")).toHaveCount(0);
   });
 });
 
@@ -283,5 +290,40 @@ test.describe("결제창에서 돌아온 뒤 — URL 파라미터 인식 자체�
     // 보인다는 것 자체가 "막다른 화면이 아니다"를 증명한다 — 완주까지는
     // direct 경로에서만 확인한다(payment.spec.ts가 이미 그 경로를 끝까지
     // 걷는다).
+  });
+
+  test("돌아온 paymentKey의 orderId가 현재 결제 건과 다르면 확정을 시도하지 않고 거부한다", async ({
+    page,
+  }) => {
+    // 세션이 만료돼 /login을 왕복하는 사이 이전 결제(A)가 실패 웹훅으로
+    // 종결되고 loadAll이 새 결제(B)를 만들었을 수 있다 — 그 사이 A의
+    // paymentKey가 그대로 B의 화면으로 돌아온 상황을 흉내낸다(#112 코드리뷰
+    // 지적 2). orderId가 지금 화면이 들고 있는 결제 건과 다르므로 confirm을
+    // 아예 부르지 않고 거부해야 한다.
+    const runId = `${Date.now()}`;
+    await login(page, `pay-toss-mismatch-${runId}`);
+    await verify(page, `pay-toss-mismatch-${runId}`);
+    const contestId = await createDraftViaForm(page, runId, 5_000_000);
+
+    const payment = await gotoPaymentAndReadResponse(page, contestId);
+    const mismatchedOrderId = "00000000-0000-0000-0000-000000000000";
+    expect(mismatchedOrderId).not.toBe(payment.order_id);
+
+    await page.goto(
+      `/console/contests/${contestId}/payment` +
+        `?paymentKey=stale-key-${runId}&orderId=${mismatchedOrderId}&amount=${payment.total_amount}`,
+    );
+
+    await expect(page.getByTestId("payment-failed")).toBeVisible();
+    await expect(page.getByTestId("payment-failed")).toContainText("일치하지 않습니다");
+
+    // confirm이 아예 호출되지 않았다 — Contest는 여전히 draft다. 이 fetch는
+    // 아직 로그인된 브라우저 세션(소유자)에서 나가므로 draft라도 200으로
+    // 보인다(get_contest의 소유자 예외) — 그래서 상태 문자열 자체를 본다.
+    const contestStatus = await page.evaluate(async (id) => {
+      const res = await fetch(`/api/backend/contests/${id}`);
+      return (await res.json()).status as string;
+    }, contestId);
+    expect(contestStatus).toBe("draft");
   });
 });

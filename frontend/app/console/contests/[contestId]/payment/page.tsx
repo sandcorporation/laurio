@@ -36,6 +36,7 @@ import { useSession } from "@/lib/auth/use-session";
 import { formatPrize } from "@/lib/contest-format";
 import {
   clearRedirectPaymentParams,
+  describeTossFailure,
   getTossClientKey,
   openTossCheckout,
   peekRedirectPaymentResult,
@@ -166,11 +167,12 @@ export default function ContestPaymentPage() {
   // 이 확인 자체는 경로와 무관하게 항상 돈다("direct" 경로에는 애초에 이
   // 파라미터가 붙을 일이 없으므로 조용히 아무 것도 하지 않는다).
   //
-  // URL은 peekRedirectPaymentResult가 **읽기만** 하고, 확정을 시도한 뒤(성공
-  // 이든 실패든) clearRedirectPaymentParams로 지운다 — lib/verification/
-  // portone.ts와 같은 규율: 확정 전에 지우면 그 요청이 일시적으로 실패했을 때
-  // 재시도할 paymentKey 자체를 잃는다. 실패 복귀는 재시도할 여지가 없으므로
-  // 곧바로 지운다.
+  // URL은 peekRedirectPaymentResult가 **읽기만** 하고, clearRedirectPaymentParams
+  // 는 confirmWithPaymentKey가 돌려주는 outcome을 보고서만 지운다(#112
+  // 코드리뷰 지적 1) — recoverable=true(우리 서버에 요청 자체가 닿지 않은
+  // 네트워크 수준 실패, lib/verification/portone.ts와 같은 판단 기준)면 이
+  // paymentKey로 다시 시도할 수 있어야 하므로 URL에 남겨 둔다. 실패 복귀는
+  // 재시도할 여지가 없으므로(벤더 쪽에서 이미 끝났다) 곧바로 지운다.
   useEffect(() => {
     if (load.status !== "ready") return;
     const redirectResult = peekRedirectPaymentResult();
@@ -182,57 +184,101 @@ export default function ContestPaymentPage() {
       return;
     }
 
-    clearRedirectPaymentParams();
-    void confirmWithPaymentKey(redirectResult.paymentKey);
+    let cancelled = false;
+    confirmWithPaymentKey(redirectResult.orderId, redirectResult.paymentKey).then((outcome) => {
+      if (cancelled) return;
+      if (outcome.ok || !outcome.recoverable) {
+        clearRedirectPaymentParams();
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 마운트(로드 완료) 시점 1회만 확인한다.
   }, [load.status]);
+
+  // confirm을 시도한 결과 — recoverable=true는 이 paymentKey로 다시 시도할
+  // 여지가 있다는 뜻이다(네트워크가 끊겨 우리 서버에 요청 자체가 닿지
+  // 않았거나, BFF·백엔드가 5xx로 응답해 요청이 실제로 처리됐는지조차 불확실한
+  // 경우 — #112 코드리뷰 지적 1). recoverable=false는 이 시도의 운명이 이미
+  // 정해졌다는 뜻이다 — 우리 서버가 확정된 응답(2xx나 4xx)을 줬다면 그 응답
+  // 안에서 이미 이 paymentKey를 실제로 써서 어댑터까지 넘겼으므로 같은 키를
+  // 다시 보낼 이유가 없다.
+  type ConfirmOutcome = { ok: true } | { ok: false; recoverable: boolean };
 
   // 로드 경로(loadAll)와 같은 모양으로 맞춘다 — fetch 자체가 reject되면(네트워크
   // 끊김 등) catch 없이는 "confirming"에 영구히 갇혀 버튼이 disabled인 채
   // 남고, 사용자는 청구가 됐는지조차 알 수 없다(#86 코드리뷰). "direct"
   // 경로(가짜 결제 건 식별자)와 "widget" 복귀 경로(토스가 돌려준 진짜 값)
   // 둘 다 이 함수로 수렴한다.
-  async function confirmWithPaymentKey(paymentKey: string) {
-    if (load.status !== "ready") return;
+  //
+  // `orderId`는 이 paymentKey가 **지금 이 화면이 들고 있는 결제 건의 것인지**
+  // 를 확인하는 자리다(#112 코드리뷰 지적 2) — 세션이 만료돼 /login을
+  // 왕복하는 사이 이전 결제(A)가 실패 웹훅으로 종결되고 loadAll이 새 결제
+  // (B)를 만들었을 수 있다. 그 사이 A의 paymentKey가 그대로 B의 confirm에
+  // 흘러들면 다른 결제 건의 승인을 이 Contest의 별개 결제에 붙이게 된다 —
+  // 조용히 넘기지 않고 명시적으로 거부한다.
+  async function confirmWithPaymentKey(orderId: string, paymentKey: string): Promise<ConfirmOutcome> {
+    if (load.status !== "ready") return { ok: false, recoverable: false };
+
+    if (orderId !== load.payment.order_id) {
+      setConfirm({
+        status: "failed",
+        message: "이 결제 정보는 현재 결제 건과 일치하지 않습니다. 다시 시도해주세요.",
+      });
+      return { ok: false, recoverable: false };
+    }
+
     setConfirm({ status: "confirming" });
 
+    let res: Response;
     try {
-      const res = await sessionFetch(`/api/backend/payments/${load.payment.order_id}/confirm`, {
+      res = await sessionFetch(`/api/backend/payments/${load.payment.order_id}/confirm`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ payment_key: paymentKey }),
       });
-
-      if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { detail?: string } | null;
-        setConfirm({
-          status: "failed",
-          message: body?.detail ?? `결제 확인에 실패했습니다 (${res.status})`,
-        });
-        return;
-      }
-
-      const result = (await res.json()) as PaymentOut;
-      if (result.status === "paid") {
-        setConfirm({ status: "paid" });
-        return;
-      }
-      if (result.status === "failed") {
-        setConfirm({ status: "failed", message: "결제가 승인되지 않았습니다." });
-        return;
-      }
-      // 아직 확정되지 않았다(requested/pending) — 타임아웃 후 조회로 확정하는
-      // 규율은 백엔드가 이미 지킨다(ADR-0008). 여기서는 그 사실을 구별되는
-      // 상태로 보여주기만 한다 — "다시 확인하기"는 retry()와 같은 경로를 타
-      // 최신 상태를 다시 불러온다(이미 확정됐으면 already-paid로, 아직이면
-      // 같은 결제를 그대로 이어받는다).
-      setConfirm({ status: "pending" });
     } catch {
+      // 네트워크 자체가 끊겨 요청이 우리 서버에 닿지 않았다 — 토스 쪽에서는
+      // 이미 이 paymentKey로 결제가 승인됐을 수 있으므로 재시도할 수 있어야
+      // 한다.
       setConfirm({
         status: "failed",
         message: "네트워크 오류로 결제 확인 결과를 알 수 없습니다. 다시 확인해주세요.",
       });
+      return { ok: false, recoverable: true };
     }
+
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { detail?: string } | null;
+      setConfirm({
+        status: "failed",
+        message: body?.detail ?? `결제 확인에 실패했습니다 (${res.status})`,
+      });
+      // 5xx(BFF 502 포함)는 우리 인프라 쪽 일시적 실패다 — 요청이 실제로
+      // 처리됐는지조차 불확실하므로 재시도할 수 있어야 한다. 4xx는 우리
+      // 서버가 이 요청 자체를 확정적으로 거절한 것이라 같은 paymentKey를
+      // 다시 보내도 결과가 달라지지 않는다.
+      return { ok: false, recoverable: res.status >= 500 };
+    }
+
+    const result = (await res.json()) as PaymentOut;
+    if (result.status === "paid") {
+      setConfirm({ status: "paid" });
+      return { ok: true };
+    }
+    if (result.status === "failed") {
+      setConfirm({ status: "failed", message: "결제가 승인되지 않았습니다." });
+      return { ok: false, recoverable: false };
+    }
+    // 아직 확정되지 않았다(requested/pending) — 타임아웃 후 조회로 확정하는
+    // 규율은 백엔드가 이미 지킨다(ADR-0008). 여기서는 그 사실을 구별되는
+    // 상태로 보여주기만 한다 — "다시 확인하기"는 retry()와 같은 경로를 타
+    // 최신 상태를 다시 불러온다(이미 확정됐으면 already-paid로, 아직이면
+    // 같은 결제를 그대로 이어받는다). 이 paymentKey는 이번 시도에서 이미
+    // 백엔드 → 어댑터까지 실려 갔으므로 다시 보낼 이유가 없다.
+    setConfirm({ status: "pending" });
+    return { ok: false, recoverable: false };
   }
 
   /** "widget" 경로 전용(#112) — 토스 결제창을 연다. 성공하면 브라우저가 이
@@ -261,12 +307,21 @@ export default function ContestPaymentPage() {
         orderName: load.title.slice(0, 100),
         returnPath: `/console/contests/${contestId}/payment`,
       });
-      // 정상 경로라면 여기 도달하기 전에 브라우저가 이미 토스로 떠났다.
-    } catch (err) {
+      // 정상 경로라면 여기 도달하기 전에 브라우저가 이미 토스로 떠났다 —
+      // 페이지 자체가 언로드되므로 아래 setConfirm은 실행되지 않는다. 그런데
+      // requestPayment가 실제로 떠나지 않고 그냥 resolve로 끝나면(#112
+      // 코드리뷰 지적 5) "opening_widget"에 영원히 갇힌다 — 버튼은 disabled,
+      // 메시지도 재시도 방법도 없다. 구별되는 실패로 전환해 다시 시도할 수
+      // 있게 한다.
       setConfirm({
         status: "failed",
-        message: err instanceof Error ? err.message : "결제창을 여는 중 오류가 발생했습니다.",
+        message: "결제창이 열리지 않았습니다. 다시 시도해주세요.",
       });
+    } catch (err) {
+      // 토스 SDK는 Error가 아니라 { code, message } 형태로 거절한다(#112
+      // 코드리뷰 지적 4) — describeTossFailure가 그 형태를 해석하고 원인을
+      // 항상 콘솔에 남긴다.
+      setConfirm({ status: "failed", message: describeTossFailure(err) });
     }
   }
 
@@ -276,7 +331,10 @@ export default function ContestPaymentPage() {
       await payViaWidget();
       return;
     }
-    await confirmWithPaymentKey(fakeWidgetPaymentKey(load.payment.order_id));
+    await confirmWithPaymentKey(
+      load.payment.order_id,
+      fakeWidgetPaymentKey(load.payment.order_id),
+    );
   }
 
   function retry() {

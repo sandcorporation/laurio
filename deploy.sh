@@ -165,6 +165,30 @@ if missing operator; then
   BUILD_OPERATOR=true
 fi
 
+# NEXT_PUBLIC_TOSS_CLIENT_KEY 회전 감지 (#112 코드리뷰 지적 3). 이 값은
+# 빌드타임에만 굳는다 — .env.<target>은 gitignore라 위 git diff 기반 변경
+# 감지는 이 값이 바뀐 것을 절대 보지 못한다. #115의 부팅 가드는 값이 "비어
+# 있으면" 부팅을 거부하지만, 있던 값을 다른 값으로 돌린(rotate) 경우는
+# 여전히 통과한다 — 이미 뜬 컨테이너는 예전 키를 문 채로 계속 돈다. 그래서
+# 이미 뜬 frontend 컨테이너가 실제로 구운 값(docker/frontend.Dockerfile의
+# runner 스테이지가 ENV로 남긴다)과, 지금 env 파일이 주는 값을 직접
+# 비교한다 — 다르면 다시 굽는다. 컨테이너가 없으면(missing) 위에서 이미
+# BUILD_FRONTEND=true다.
+if [ "$BUILD_FRONTEND" = false ] && ! missing frontend; then
+  case "$TARGET" in
+    staging) TOSS_KEY_VAR=TOSS_SANDBOX_CLIENT_KEY ;;
+    prod) TOSS_KEY_VAR=TOSS_LIVE_CLIENT_KEY ;;
+  esac
+  CURRENT_TOSS_KEY=$(grep -E "^${TOSS_KEY_VAR}=" "$ENV_FILE" | tail -1 | cut -d= -f2-)
+  FRONTEND_CID=$($COMPOSE ps -q frontend 2>/dev/null | head -1)
+  BAKED_TOSS_KEY=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$FRONTEND_CID" 2>/dev/null \
+    | grep '^NEXT_PUBLIC_TOSS_CLIENT_KEY=' | cut -d= -f2-)
+  if [ "$BAKED_TOSS_KEY" != "$CURRENT_TOSS_KEY" ]; then
+    log "NEXT_PUBLIC_TOSS_CLIENT_KEY 가 .env.${TARGET} 과 어긋난다(떠 있는 컨테이너가 구운 값과 다르다) — frontend 를 다시 굽는다."
+    BUILD_FRONTEND=true
+  fi
+fi
+
 plan() {
   if [ "$1" = true ]; then echo "다시 굽는다"; else echo "건너뛴다"; fi
 }

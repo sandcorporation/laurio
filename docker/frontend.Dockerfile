@@ -71,6 +71,17 @@ ENV NODE_ENV=production \
     PORT=3000 \
     HOSTNAME=0.0.0.0
 
+# builder가 굳힌 값을 이 스테이지의 컨테이너 런타임 환경에도 그대로 남긴다
+# (#112 코드리뷰 지적 3). NEXT_PUBLIC_*는 build.args로만 오고 frontend 서비스의
+# environment: 블록에는 없으므로, 이 값은 브라우저 번들에 실제로 인라인된
+# 값과 항상 같다 — 즉 "이 컨테이너가 지금 실제로 서빙 중인 값"을 컨테이너
+# 자신에게 물어볼 수 있게 된다. deploy.sh가 재배포 때 .env.<target>의 현재
+# 값과 이 값을 비교해, 키가 회전(rotate)됐는데 frontend를 다시 굽지 않아
+# 예전 키를 문 채로 계속 뜨는 것을 잡는다 — .env.<target>은 gitignore라
+# git diff 기반 변경 감지로는 절대 보이지 않는다.
+ARG NEXT_PUBLIC_TOSS_CLIENT_KEY=""
+ENV NEXT_PUBLIC_TOSS_CLIENT_KEY=${NEXT_PUBLIC_TOSS_CLIENT_KEY}
+
 WORKDIR /app
 
 RUN groupadd --system --gid 1001 nodejs \
