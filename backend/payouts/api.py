@@ -88,36 +88,6 @@ _SELLER_STATUS_RANK = {
 }
 
 
-def _payout_contest_id(payout: Payout) -> int:
-    """이 Payout이 속한 Contest — Handover(Award) 경로거나 DistributionShare(#16)
-    경로거나 정확히 하나를 통해서만 판정된다(payout_exactly_one_target 제약).
-    """
-
-    if payout.handover_id is not None:
-        return payout.handover.award.contest_id
-    return payout.distribution_share.distribution.contest_id
-
-
-def _payout_owner_user_id(payout: Payout) -> int:
-    """이 Payout을 받을 Developer의 user_id — 위와 같은 이유로 두 경로 중 하나를
-    통해 판정된다.
-    """
-
-    if payout.handover_id is not None:
-        return payout.handover.award.submission.developer.user_id
-    return payout.distribution_share.submission.developer.user_id
-
-
-def _payout_developer_id(payout: Payout) -> int:
-    """이 Payout을 받을 `accounts.DeveloperProfile`의 pk — Seller는 이 단위로
-    등록된다(payouts.services._resolve_developer와 같은 판정).
-    """
-
-    if payout.handover_id is not None:
-        return payout.handover.award.submission.developer_id
-    return payout.distribution_share.submission.developer_id
-
-
 # 다음 행동 안내(#50 AC — "Developer가 자기 Payout이 무엇을 기다리는지와 다음에
 # 무엇을 해야 하는지 볼 수 있다"). status·seller_status 조합마다 사람이 읽을
 # 문장을 고정해 둔다 — 침묵은 상금이 사라진 것으로 읽힌다.
@@ -199,10 +169,10 @@ def _next_action_message(payout: Payout, seller: Seller | None) -> str:
 
 
 def _serialize(payout: Payout) -> PayoutOut:
-    seller = Seller.objects.filter(developer_id=_payout_developer_id(payout)).first()
+    seller = payout.seller
     return PayoutOut(
         idempotency_key=payout.idempotency_key,
-        contest_id=_payout_contest_id(payout),
+        contest_id=payout.contest.id,
         prize_amount=payout.prize_amount,
         platform_fee_amount=payout.platform_fee_amount,
         withholding_tax_amount=payout.withholding_tax_amount,
@@ -265,56 +235,39 @@ def get_payout(request: HttpRequest, contest_id: int):
     핵심 결함이었다.
     """
 
+    user_id = request.auth_user.id
+
+    # 소유권은 지급 사유 쪽이 말한다 — Award 경로는 Handover 가(남의 것이면 403), Distribution
+    # 경로는 그 Developer 의 몫이 있는지가(없으면 404). Payout 자체의 조회는 어느 경로든
+    # 하나다(#128).
     handover = (
-        Handover.objects.select_related("award__contest", "award__submission__developer")
+        Handover.objects.select_related("award__submission__developer")
         .filter(award__contest_id=contest_id)
         .first()
     )
     if handover is not None:
-        if handover.award.submission.developer.user_id != request.auth_user.id:
+        if handover.award.submission.developer.user_id != user_id:
             raise HttpError(403, "본인이 Award된 Submission의 Developer만 접근할 수 있습니다.")
-
-        payout = Payout.objects.filter(handover=handover).select_related(
-            "handover__award__contest"
-        ).first()
-        if payout is None:
-            raise HttpError(404, "아직 지급 요청이 없습니다.")
-        return 200, _serialize(payout)
-
-    share = (
-        DistributionShare.objects.select_related("distribution__contest", "submission__developer")
-        .filter(
-            distribution__contest_id=contest_id,
-            submission__developer__user_id=request.auth_user.id,
-        )
-        .first()
-    )
-    if share is None:
+    elif not DistributionShare.objects.filter(
+        distribution__contest_id=contest_id, submission__developer__user_id=user_id
+    ).exists():
         raise HttpError(
             404, "이 Contest는 아직 Award되지 않았고, Distribution 대상도 아닙니다."
         )
 
-    payout = Payout.objects.filter(distribution_share=share).select_related(
-        "distribution_share__distribution__contest"
-    ).first()
+    payout = Payout.objects.with_target().for_contest(contest_id).owned_by(user_id).first()
     if payout is None:
         raise HttpError(404, "아직 지급 요청이 없습니다.")
-
     return 200, _serialize(payout)
 
 
 def _get_owned_payout(request: HttpRequest, idempotency_key: UUID) -> Payout:
     try:
-        payout = Payout.objects.select_related(
-            "handover__award__contest",
-            "handover__award__submission__developer",
-            "distribution_share__distribution__contest",
-            "distribution_share__submission__developer",
-        ).get(idempotency_key=idempotency_key)
+        payout = Payout.objects.with_target().get(idempotency_key=idempotency_key)
     except Payout.DoesNotExist as exc:
         raise HttpError(404, "지급 요청을 찾을 수 없습니다.") from exc
 
-    if _payout_owner_user_id(payout) != request.auth_user.id:
+    if payout.developer.user_id != request.auth_user.id:
         raise HttpError(403, "본인의 지급 요청만 접근할 수 있습니다.")
     return payout
 
@@ -512,12 +465,7 @@ def submit_payout_seller_phone(
     """
 
     payout = _get_owned_payout(request, idempotency_key)
-    developer_id = _payout_developer_id(payout)
-
-    from accounts.models import DeveloperProfile
-
-    developer = DeveloperProfile.objects.get(pk=developer_id)
-    submit_seller_phone(developer, payload.phone_number)
+    submit_seller_phone(payout.developer, payload.phone_number)
 
     payout.refresh_from_db()
     return 200, _serialize(payout)
@@ -780,18 +728,13 @@ def list_payouts_for_operator(request: HttpRequest, blocked_on: str | None = Non
     """
 
     payouts = (
-        Payout.objects.select_related(
-            "handover__award__contest",
-            "handover__award__submission__developer",
-            "distribution_share__distribution__contest",
-            "distribution_share__submission__developer",
-        )
+        Payout.objects.with_target()
         .order_by("-created_at")
     )
 
     results: list[OperatorPayoutOut] = []
     for payout in payouts:
-        seller = Seller.objects.filter(developer_id=_payout_developer_id(payout)).first()
+        seller = payout.seller
         has_identity = TaxIdentity.objects.filter(payout=payout).exists()
         blocked = _blocked_on(payout, seller=seller, has_identity=has_identity)
         if blocked_on is not None and blocked != blocked_on:
@@ -800,8 +743,8 @@ def list_payouts_for_operator(request: HttpRequest, blocked_on: str | None = Non
         results.append(
             OperatorPayoutOut(
                 idempotency_key=payout.idempotency_key,
-                contest_id=_payout_contest_id(payout),
-                developer_user_id=_payout_owner_user_id(payout),
+                contest_id=payout.contest.id,
+                developer_user_id=payout.developer.user_id,
                 net_amount=payout.net_amount,
                 status=payout.status,
                 transfer_status=payout.transfer_status,

@@ -25,6 +25,43 @@ from __future__ import annotations
 import uuid
 
 from django.db import models
+from django.db.models import Q
+
+
+class PayoutQuerySet(models.QuerySet):
+    """Payout 의 지급 사유(Handover 또는 DistributionShare)에 따라 갈리는 조회를 한 곳에
+    (#128). 불변식 `payout_exactly_one_target` 이 이 모델에 있으므로 「어느 경로로
+    Contest·Developer 에 닿는가」도 여기서만 안다 — 호출자는 두 FK 중 어느 쪽인지 알 필요가
+    없다.
+    """
+
+    def with_target(self):
+        """`contest`·`developer` 속성이 추가 조회 없이 풀리도록 두 경로를 미리 붙인다."""
+
+        return self.select_related(
+            "handover__award__contest",
+            "handover__award__submission__developer",
+            "distribution_share__distribution__contest",
+            "distribution_share__submission__developer",
+        )
+
+    def for_developer(self, developer):
+        return self.filter(
+            Q(handover__award__submission__developer=developer)
+            | Q(distribution_share__submission__developer=developer)
+        )
+
+    def for_contest(self, contest_id):
+        return self.filter(
+            Q(handover__award__contest_id=contest_id)
+            | Q(distribution_share__distribution__contest_id=contest_id)
+        )
+
+    def owned_by(self, user_id):
+        return self.filter(
+            Q(handover__award__submission__developer__user_id=user_id)
+            | Q(distribution_share__submission__developer__user_id=user_id)
+        )
 
 
 class Payout(models.Model):
@@ -158,6 +195,8 @@ class Payout(models.Model):
     # 이 필드가 채워질 일이 없다 — 감사용으로 자리만 남겨둔다.
     reversal_journal_entry_id = models.PositiveIntegerField(null=True, blank=True)
 
+    objects = PayoutQuerySet.as_manager()
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -208,6 +247,28 @@ class Payout(models.Model):
                 name="payout_exactly_one_target",
             ),
         ]
+
+    # ---- 지급 사유 해석 (#128) — 두 FK 중 정확히 하나가 채워져 있다(payout_exactly_one_target).
+    @property
+    def contest(self):
+        if self.handover_id is not None:
+            return self.handover.award.contest
+        return self.distribution_share.distribution.contest
+
+    @property
+    def developer(self):
+        """이 Payout 을 받을 `accounts.DeveloperProfile`. Seller 는 이 단위로 등록된다 —
+        한 Developer 가 여러 Contest 를 이겨도 등록은 한 번."""
+
+        if self.handover_id is not None:
+            return self.handover.award.submission.developer
+        return self.distribution_share.submission.developer
+
+    @property
+    def seller(self):
+        """이 Payout 의 수취인 Seller. 아직 등록이 시작되지 않았으면 None."""
+
+        return Seller.objects.filter(developer=self.developer).first()
 
     def __str__(self) -> str:  # pragma: no cover
         return f"Payout(idempotency_key={self.idempotency_key}, status={self.status})"
