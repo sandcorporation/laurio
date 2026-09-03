@@ -9,8 +9,10 @@ import pytest
 
 from contests.models import Contest, HomeStatusAxis
 from core.classification import classifications_of
+from payouts.models import Payout
 
 S = Contest.Status
+P = Payout.Status
 
 
 def test_contest_status_has_classifications():
@@ -37,6 +39,9 @@ def test_contest_status_sets_are_the_ones_the_call_sites_used_to_spell_out():
     assert S.EDITABLE.statuses == {S.DRAFT}
     assert S.PAYABLE.statuses == {S.DRAFT}
     assert S.BLOCKS_SPONSOR_WITHDRAWAL.statuses == {S.PUBLISHED, S.CLOSED}
+    assert S.HAS_AWARD.statuses == {S.AWARDED}
+    assert S.AWAITING_DISTRIBUTION.statuses == {S.JUDGING_ENDED}
+    assert S.EVER_PAID.statuses == {S.PUBLISHED, S.CLOSED, S.AWARDED, S.JUDGING_ENDED}
     assert S.HOME_AXIS.where(HomeStatusAxis.OPEN) == {S.PUBLISHED}
     assert S.HOME_AXIS.where(HomeStatusAxis.IN_JUDGING) == {S.CLOSED}
     assert S.HOME_AXIS.where(HomeStatusAxis.COMPLETED) == {S.AWARDED, S.JUDGING_ENDED}
@@ -48,3 +53,32 @@ def test_an_unknown_status_value_is_loud_not_silently_false():
 
     with pytest.raises(KeyError):
         S.SCOREABLE("paused")
+
+
+@pytest.mark.parametrize("name", sorted(classifications_of(P)))
+def test_every_payout_status_question_answers_for_every_value(name):
+    question = classifications_of(P)[name]
+    assert question.keys == set(P), f"Payout.Status.{name} 이 답하지 않는 값이 있다: {set(P) - question.keys}"
+
+
+def test_payout_status_sets_are_the_ones_the_call_sites_used_to_spell_out():
+    assert P.ACTIVE.statuses == {
+        P.REQUESTED, P.CONFIRMED_IDENTITY_PENDING, P.CONFIRMED_SELLER_PENDING, P.CONFIRMED
+    }
+    assert P.SETTLED.statuses == {P.CONFIRMED_IDENTITY_PENDING, P.CONFIRMED_SELLER_PENDING, P.CONFIRMED}
+    assert P.BLOCKS_DEVELOPER_WITHDRAWAL.statuses == {
+        P.REQUESTED, P.CONFIRMED_IDENTITY_PENDING, P.CONFIRMED_SELLER_PENDING
+    }
+
+
+def test_active_payout_unique_constraints_are_derived_from_the_active_question():
+    """DB 레벨 최후 방어선(부분 유니크 제약 둘)과 애플리케이션 조회 기준이 한 집합이다."""
+
+    conditions = {
+        c.name: c.condition for c in Payout._meta.constraints if c.name.startswith("unique_active_payout")
+    }
+    assert set(conditions) == {"unique_active_payout_per_handover", "unique_active_payout_per_distribution_share"}
+    for name, condition in conditions.items():
+        ((lookup, values),) = condition.children
+        assert lookup == "status__in", name
+        assert set(values) == {s.value for s in P.ACTIVE.statuses}, name

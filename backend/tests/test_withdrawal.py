@@ -641,63 +641,6 @@ def test_retained_identity_never_appears_in_any_public_response(client, category
 # --- 상태 목록 자체를 순회한다 ----------------------------------------------------
 
 
-@pytest.mark.django_db
-def test_every_contest_status_is_classified_as_blocking_or_not(client, caplog):
-    """새 `Contest.Status`가 생겨도 조용히 어느 분기에도 안 걸리지 않는다 — fail-closed
-    로 걸리면 최소한 ERROR 로 드러난다."""
-
-    from accounts.withdrawal import _is_blocking_contest_status
-
-    expected_blocking = {
-        Contest.Status.DRAFT: False,
-        Contest.Status.PUBLISHED: True,
-        Contest.Status.CLOSED: True,
-        Contest.Status.AWARDED: False,
-        Contest.Status.JUDGING_ENDED: False,
-    }
-    assert set(expected_blocking) == set(Contest.Status)  # 이 테스트 자체가 최신 목록을 안다.
-
-    with caplog.at_level("ERROR", logger="accounts.withdrawal"):
-        for status, expected in expected_blocking.items():
-            assert _is_blocking_contest_status(status) is expected, status
-
-    assert not caplog.records
-
-
-@pytest.mark.django_db
-def test_every_payout_status_is_classified_as_blocking_or_not(caplog):
-    from accounts.withdrawal import _is_blocking_payout_status
-
-    expected_blocking = {
-        Payout.Status.REQUESTED: True,
-        Payout.Status.CONFIRMED_IDENTITY_PENDING: True,
-        Payout.Status.CONFIRMED_SELLER_PENDING: True,
-        Payout.Status.CONFIRMED: False,
-        Payout.Status.FAILED: False,
-    }
-    assert set(expected_blocking) == set(Payout.Status)
-
-    with caplog.at_level("ERROR", logger="accounts.withdrawal"):
-        for status, expected in expected_blocking.items():
-            assert _is_blocking_payout_status(status) is expected, status
-
-    assert not caplog.records
-
-
-@pytest.mark.django_db
-def test_unknown_status_fails_closed_and_logs_error(caplog):
-    """분류 함수 자체가 모르는 값을 만나면 통과시키지 않는다 — 안전한 쪽(막는다)을
-    고르고 ERROR를 남긴다."""
-
-    from accounts.withdrawal import _is_blocking_contest_status, _is_blocking_payout_status
-
-    with caplog.at_level("ERROR", logger="accounts.withdrawal"):
-        assert _is_blocking_contest_status("no-such-status") is True
-        assert _is_blocking_payout_status("no-such-status") is True
-
-    assert len(caplog.records) == 2
-
-
 # --- 파기된 신원이 공개 API 응답 어디에도 실리지 않는다 ---------------------------
 
 

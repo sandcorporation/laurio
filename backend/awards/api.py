@@ -57,12 +57,11 @@ def award_submission(request: HttpRequest, contest_id: int, payload: AwardIn):
 
     now = Clock.now()
 
-    if contest.status == Contest.Status.AWARDED:
+    if Contest.Status.HAS_AWARD(contest.status):
         raise HttpError(409, "이미 다른 Submission이 Award되었습니다.")
-    if contest.status != Contest.Status.CLOSED:
-        # DRAFT·PUBLISHED는 아직 마감 전이라 심사기간 자체가 없다. JUDGING_ENDED는
-        # 이미 심사기간이 종료됐다(아래 judging_ends_at 비교와 같은 결론을, 스케줄러
-        # 틱이 이미 반영한 경우 상태만으로 먼저 잡아준다).
+    if not Contest.Status.AWARDABLE(contest.status):
+        # 어느 status 가 해당하는지는 Contest.Status.AWARDABLE 이 답한다(#142). JUDGING_ENDED 는 아래
+        # judging_ends_at 비교와 같은 결론을, 스케줄러가 이미 반영한 경우 상태만으로 먼저 잡아준다.
         raise HttpError(409, "지금은 Award할 수 있는 상태가 아닙니다.")
 
     # 코드베이스 관용구와 맞춘다: 스케줄러는 `judging_ends_at <= as_of`일 때

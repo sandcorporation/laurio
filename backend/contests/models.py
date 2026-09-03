@@ -280,6 +280,23 @@ Contest.Status.BLOCKS_SPONSOR_WITHDRAWAL = Classification(
     {_S.DRAFT: False, _S.PUBLISHED: True, _S.CLOSED: True, _S.AWARDED: False, _S.JUDGING_ENDED: False},
     question="Sponsor 의 탈퇴를 막는 진행 중 거래인가",
 )
+# Award 가 이미 확정됐다 — 두 번째 Award 는 409 다.
+Contest.Status.HAS_AWARD = Classification(
+    {_S.DRAFT: False, _S.PUBLISHED: False, _S.CLOSED: False, _S.AWARDED: True, _S.JUDGING_ENDED: False},
+    question="Award 가 이미 확정됐는가",
+)
+# 심사기간이 Award 없이 끝나 「무응답 N일」 카운트다운 중이다 — Distribution 의 대상 status.
+Contest.Status.AWAITING_DISTRIBUTION = Classification(
+    {_S.DRAFT: False, _S.PUBLISHED: False, _S.CLOSED: False, _S.AWARDED: False, _S.JUDGING_ENDED: True},
+    question="Distribution 을 기다리는가",
+)
+# DRAFT 를 벗어나는 유일한 경로가 결제 확인이라, 지금 상태가 무엇이든 DRAFT 가 아니면 과거에
+# 결제가 있었다(accounts.withdrawal 의 거래 근거, ADR-0025). 집합이 PUBLICLY_VISIBLE 과 같은 것은
+# 우연이다 — 질문이 다르다.
+Contest.Status.EVER_PAID = Classification(
+    {_S.DRAFT: False, _S.PUBLISHED: True, _S.CLOSED: True, _S.AWARDED: True, _S.JUDGING_ENDED: True},
+    question="결제가 확인된 적이 있는가",
+)
 # 홈 큐레이션의 status 축(#94). PUBLISHED 는 마감 시각이 마저 가른다.
 Contest.Status.HOME_AXIS = Classification(
     {

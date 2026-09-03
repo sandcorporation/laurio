@@ -31,7 +31,6 @@ enum인 이유도 같다 — 생성된 프론트 타입에 리터럴 유니온�
 
 from __future__ import annotations
 
-import logging
 
 from django.db import models, transaction
 
@@ -39,7 +38,6 @@ from core.clock import Clock
 
 from .models import DeveloperProfile, PhoneContact, SponsorProfile, Withdrawal
 
-logger = logging.getLogger(__name__)
 
 
 class WithdrawalBlockReason(models.TextChoices):
@@ -55,73 +53,23 @@ class WithdrawalBlockReason(models.TextChoices):
     )
 
 
-def _is_blocking_contest_status(status: str) -> bool:
-    """이 Contest.status가 Sponsor의 탈퇴를 막는가 — 「심사가 끝나기 전」인가.
-
-    ADR-0025: "심사가 끝나기 전에는 탈퇴할 수 없다"(User Story 7). DRAFT는 결제
-    전이라 묶인 돈이 없고, AWARDED·JUDGING_ENDED는 심사가 이미 끝난 상태다.
-    """
-
-    from contests.models import Contest
-
-    if status == Contest.Status.DRAFT:
-        return False
-    if status == Contest.Status.PUBLISHED:
-        return True
-    if status == Contest.Status.CLOSED:
-        return True
-    if status in (Contest.Status.AWARDED, Contest.Status.JUDGING_ENDED):
-        return False
-
-    logger.error(
-        "알 수 없는 Contest.Status(%r) — 탈퇴 차단 판정이 분류하지 못해 "
-        "fail-closed로 막는다. contests.models.Contest.Status에 새 값이 추가됐다면 "
-        "accounts.withdrawal._is_blocking_contest_status도 함께 고쳐야 한다.",
-        status,
-    )
-    return True
-
-
-def _is_blocking_payout_status(status: str) -> bool:
-    """이 Payout.status가 Developer의 탈퇴를 막는가 — 「지급이 끝나기 전」인가.
-
-    ADR-0025: "지급이 끝나기 전에는 탈퇴할 수 없다"(User Story 6). CONFIRMED는
-    지급이 실제로 끝난 상태이고(payouts.models.Payout 문서 참고 — TransferStatus가
-    COMPLETED일 때만 status가 CONFIRMED로 전진한다), FAILED는 그 시도 자체가
-    끝난 상태다 — 재시도는 새 REQUESTED 행으로 남으므로(#57) FAILED 행 하나가
-    "미지급 상태"를 뜻하지 않는다.
-    """
-
-    from payouts.models import Payout
-
-    if status == Payout.Status.REQUESTED:
-        return True
-    if status == Payout.Status.CONFIRMED_IDENTITY_PENDING:
-        return True
-    if status == Payout.Status.CONFIRMED_SELLER_PENDING:
-        return True
-    if status == Payout.Status.CONFIRMED:
-        return False
-    if status == Payout.Status.FAILED:
-        return False
-
-    logger.error(
-        "알 수 없는 Payout.Status(%r) — 탈퇴 차단 판정이 분류하지 못해 "
-        "fail-closed로 막는다. payouts.models.Payout.Status에 새 값이 추가됐다면 "
-        "accounts.withdrawal._is_blocking_payout_status도 함께 고쳐야 한다.",
-        status,
-    )
-    return True
-
-
 def _sponsor_has_contest_in_progress(sponsor_profile: SponsorProfile) -> bool:
+    """ADR-0025 "심사가 끝나기 전에는 탈퇴할 수 없다"(User Story 7) — 어느 status 가 「심사가 끝나기
+    전」인지는 Contest.Status.BLOCKS_SPONSOR_WITHDRAWAL 이 답한다(#142). 예전의 status 별 if 사슬과
+    fail-closed 가지는 그 사상이 빠짐없음을 테스트로 강제하면서 사라졌다."""
+
     from contests.models import Contest
 
+    # 필터(status__in)가 아니라 사상 조회다 — DB 에 enum 밖 값이 남는 마이그레이션 사고를 조용히
+    # 「막지 않음」으로 지나치지 않고 KeyError 로 드러낸다(#121).
     statuses = set(Contest.objects.filter(sponsor=sponsor_profile).values_list("status", flat=True))
-    return any(_is_blocking_contest_status(status) for status in statuses)
+    return any(Contest.Status.BLOCKS_SPONSOR_WITHDRAWAL(status) for status in statuses)
 
 
 def _developer_has_payout_in_progress(developer_profile: DeveloperProfile) -> bool:
+    """ADR-0025 "지급이 끝나기 전에는 탈퇴할 수 없다"(User Story 6) — Payout.Status.
+    BLOCKS_DEVELOPER_WITHDRAWAL 이 답한다(#142)."""
+
     from payouts.models import Payout
 
     statuses = set(
@@ -130,7 +78,7 @@ def _developer_has_payout_in_progress(developer_profile: DeveloperProfile) -> bo
             | models.Q(distribution_share__submission__developer=developer_profile)
         ).values_list("status", flat=True)
     )
-    return any(_is_blocking_payout_status(status) for status in statuses)
+    return any(Payout.Status.BLOCKS_DEVELOPER_WITHDRAWAL(status) for status in statuses)
 
 
 def _transaction_basis(user) -> tuple[str, int] | None:
@@ -162,8 +110,9 @@ def _transaction_basis(user) -> tuple[str, int] | None:
     sponsor_profile = getattr(user, "sponsor_profile", None)
     if sponsor_profile is not None:
         contest = (
-            Contest.objects.filter(sponsor=sponsor_profile)
-            .exclude(status=Contest.Status.DRAFT)
+            Contest.objects.filter(
+                sponsor=sponsor_profile, status__in=Contest.Status.EVER_PAID.statuses
+            )
             .order_by("id")
             .first()
         )
