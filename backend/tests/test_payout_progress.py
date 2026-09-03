@@ -113,12 +113,13 @@ def _toss_payout_webhook(client, *, idempotency_key: str, vendor_status: str, at
 
 
 @pytest.mark.django_db
-def test_late_paid_webhook_on_seller_pending_with_identity_reaches_confirmed(
+def test_late_paid_webhook_after_identity_with_failed_transfer_reaches_confirmed(
     client, category, landing_type
 ):
-    """표의 빈칸이었던 조합 — Seller 는 READY 인데 실이체가 거절돼 CSP 에 머물고, 신원은 이미
-    냈다. 뒤늦게 payout.changed COMPLETED 가 오면 두 대기가 모두 풀린 것이므로 CONFIRMED 다.
-    (#132: 웹훅 입구도 사실만 기록하고 advance 가 판정한다.)"""
+    """표의 빈칸이었던 조합 — 확정 시점에 Seller 가 이미 READY 라 신원 대기(CIP)로 갔는데 실이체는
+    거절됐고, 그 상태에서 신원을 냈다(실이체가 아직이라 CIP 에 머문다). 뒤늦게 payout.changed
+    COMPLETED 가 오면 두 대기가 모두 풀린 것이므로 CONFIRMED 다. (#132: 웹훅 입구도 사실만
+    기록하고 advance 가 판정한다 — 전에는 이 조합에서 status 가 CIP 에 그대로 남았다.)"""
 
     from django.test import override_settings
 
@@ -130,11 +131,12 @@ def test_late_paid_webhook_on_seller_pending_with_identity_reaches_confirmed(
         PAYOUT_ADAPTER_MODE="tests.test_payouts._TransferFailsOnceSellerReadyPayoutAdapter"
     ):
         confirmed = p._confirm_payout(client, dev, key)
-        assert confirmed.json()["status"] == "confirmed_seller_pending"
+        assert confirmed.json()["status"] == "confirmed_identity_pending"
         assert confirmed.json()["transfer_status"] == "failed"
 
         identity = _submit_identity(client, dev, key)
-        assert identity.json()["status"] == "confirmed_seller_pending"  # 실이체가 아직
+        assert identity.json()["status"] == "confirmed_identity_pending"  # 실이체가 아직
+        assert identity.json()["has_identity"] is True
 
     resp = _toss_payout_webhook(client, idempotency_key=key, vendor_status="COMPLETED")
     assert resp.status_code == 200, resp.content
