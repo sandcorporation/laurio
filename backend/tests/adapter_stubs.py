@@ -67,7 +67,7 @@ class StubPayoutAdapter:
 class StubSellerAdapter:
     """`payouts.adapters.SellerAdapter` 계약을 구조적으로 만족한다."""
 
-    def register(self, *, developer_id: int, simulate: str | None = None, policy=None):
+    def register(self, registration, *, simulate: str | None = None):
         raise NotImplementedError("배포 가드 검증 전용 stub — 실제로 호출되면 안 된다.")
 
 

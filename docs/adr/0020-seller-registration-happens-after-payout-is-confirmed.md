@@ -50,3 +50,20 @@ ADR-0008은 계좌·본인확인·KYC를 토스 지급대행에 위임하고 Lau
 **합칠 수 없다.** 토스의 본인인증은 그들이 지급대행사로서 지는 의무이므로 우리가 대신 마쳐줄 수 없고, 우리 쪽 CI를 넘겨 면제받을 수도 없다.
 
 ADR-0011은 "가입이 아니라 행위 시점"으로 인증을 미뤄 문턱을 낮췄는데, 그 결과 수상자에게는 인증 시점이 둘이 된다. 불가피하지만 **화면이 미리 말해야 한다** — "이미 본인확인했는데 왜 또?"라는 반응이 나오면 그것은 우리가 설명하지 않은 것이다. 지급 화면이 토스에서 문자가 간다는 사실과 그 이유를 함께 보여줘야 한다.
+
+## 보완 — port 가 수취인을 실어 나른다 (#134–#136)
+
+이 ADR 이 「Payout 은 수취인이 누구인지 넘기지 않고 금액과 멱등키만 어댑터에 준다」고 적어 둔
+공백은 실물 어댑터가 그 수취인을 스스로 되짚어 읽는 것으로 메워져 있었다 — Toss adapter 가
+Payout·Seller 를 조회하고, READY 를 검사하고, `transfer_status` 를 선점하고, `vendor_payout_id` 를
+썼다. Fake 는 그 어느 것도 하지 않아 두 adapter 가 교체 가능하지 않았다.
+
+그 공백을 닫았다. caller(`payouts.progress`)가 `TransferRequest(idempotency_key, amount,
+seller_id, vendor_ref, vendor_payout_id)` 를 조립해 넘기고 `VendorResult(status, vendor_payout_id)`
+를 받는다. Seller 등록도 같다 — `SellerRegistration(ref_seller_id, name, email, phone,
+existing_seller_id)` 을 `ensure_seller_registered` 가 조립한다. adapter 는 우리 테이블을 읽지도
+쓰지도 않고, 벤더 규약만 안다: sellerId 없이는 이체 API 가 없으므로 수취인 없는 요청은 HTTP 없이
+내부 확정으로 받아들이고, individual 의 이름·이메일·전화번호가 비어 있으면 벤더를 부르지 않고
+pending 을 돌려준다. claim·attempt·재선점·`vendor_payout_id` 저장은 `payouts.progress` 가 한다.
+
+「지급 확정이 Seller 등록보다 앞선다」는 순서 자체는 그대로다 — 바뀐 것은 그 순서를 누가 아는가다.

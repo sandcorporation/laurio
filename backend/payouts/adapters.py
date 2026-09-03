@@ -207,29 +207,39 @@ class SellerRegistrationResult:
     weekly_limit_amount: int | None
 
 
+@dataclass(frozen=True)
+class SellerRegistration:
+    """caller 가 조립해 넘기는 Seller 등록 요청 (#136). adapter 는 Verification 도 Seller 도 읽지 않는다.
+
+    `existing_seller_id` 는 이전 시도가 접수돼 받은 식별자 — 있으면 실물 adapter 는 새 등록(POST)이
+    아니라 현재 상태 조회(GET)를 한다(코드리뷰 지적 7). 거절된 등록은 재시도가 새 POST 여야 하므로
+    caller 가 그때는 빈 값을 넘긴다.
+    """
+
+    ref_seller_id: str
+    name: str
+    email: str
+    phone: str
+    existing_seller_id: str = ""
+    # Fake 전용 — 「토스가 알려줄 주간 한도」를 흉내낼 값. caller 가 스코프에서 이미 읽은
+    # PlatformPolicy 에서 채운다(#78, ADR-0023: 스캔당 한 번). 실물 adapter 는 벤더 응답이 한도를
+    # 알려주므로 이 값을 쓰지 않는다.
+    weekly_limit_hint: int | None = None
+
+
 @runtime_checkable
 class SellerAdapter(Protocol):
     def register(
-        self,
-        *,
-        developer_id: int,
-        simulate: str | None = None,
-        policy: "PlatformPolicy | None" = None,
+        self, registration: SellerRegistration, *, simulate: str | None = None
     ) -> SellerRegistrationResult:
         """이 Developer를 지급대행사에 Seller로 등록(또는 재조회·재시도)한다.
 
-        동기 응답이다 — 실물 어댑터가 비동기라면(웹훅으로 뒤늦게 승인/거절이
-        온다면) 어댑터 내부에서 "under_review"로 우선 응답하고, 이후 별도
-        경로(웹훅 또는 재시도 엔드포인트)가 최종 상태를 반영한다. 이미 부분
-        승인된 Seller에 대해 이 메서드를 다시 부르지 않는 것은 호출자의
-        책임이다(`payouts.services.ensure_seller_registered`가 그 규율을
-        지킨다) — sellerId가 재등록을 막는다는 요구가 여기 있지 않다.
-
-        `policy`는 호출 스코프에서 이미 읽은 `PlatformPolicy`를 넘기는
-        자리다(#78, ADR-0023) — 생략하면(단독 호출 편의용) 구현체가 대신
-        한 번 읽는다. 실물 어댑터는 이 값을 쓰지 않는다(주간 한도는 벤더가
-        응답으로 알려준다) — 이 매개변수는 Fake 구현체가 "토스가 알려주는
-        한도"를 우리 쪽에서 결정론적으로 흉내내기 위한 자리일 뿐이다.
+        동기 응답이다 — 실물 어댑터가 비동기라면(웹훅으로 뒤늦게 승인/거절이 온다면) 어댑터
+        내부에서 "under_review"로 우선 응답하고, 이후 별도 경로(웹훅 또는 재시도 엔드포인트)가
+        최종 상태를 반영한다. 이미 부분 승인된 Seller에 대해 이 메서드를 다시 부르지 않는 것은
+        호출자의 책임이다(`payouts.services.ensure_seller_registered`가 그 규율을 지킨다).
+        벤더가 요구하는 항목(이름·이메일·전화번호)이 비어 있으면 실물 adapter 는 벤더를 부르지
+        않고 "pending"(아직 시도하지 않음)을 돌려준다 — 그것은 벤더 규약이다.
         """
         ...
 
@@ -239,48 +249,31 @@ class FakeSellerAdapter:
 
     `register`의 `simulate` 값:
     - None / "success" (기본) — 즉시 부분 승인. 주간 한도는
-      `PlatformPolicy.seller_weekly_limit_amount`(토스가 정한 사실, #78/
-      ADR-0020 — 우리 판단으로 올릴 수 있는 값이 아니다).
-    - "limit_exceeded" — 주간 한도를 넘겨 심사 대기가 된다. **실패가 아니다**
-      (ADR-0020) — 짧은 기간에 여러 번 수상한 Developer를 성공했다는 이유로
-      막지 않는다.
-    - "review_required" — 한도와 무관하게 지급대행사가 추가 확인을 요구해
-      심사 대기가 된다. 도메인 관점에서는 "under_review"로 limit_exceeded와
-      같은 결과지만, 원인이 다르므로 Fake가 흉내낼 수 있는 시나리오는 둘 다
-      남겨둔다(#50 AC — "부분 승인·한도 초과·심사 필요·거절").
+      `PlatformPolicy.seller_weekly_limit_amount`(토스가 정한 사실, #78/ADR-0020).
+    - "limit_exceeded" — 주간 한도를 넘겨 심사 대기가 된다. **실패가 아니다**(ADR-0020).
+    - "review_required" — 지급대행사가 추가 확인을 요구해 심사 대기가 된다.
     - "rejected" — 등록이 거절된다.
-    - "approval_required"(#57) — 등록만 접수되고 아직 본인인증 전이다. 실물
-      어댑터의 첫 등록 응답이 실제로 가장 흔하게 이 값이다(ADR-0020 토스
-      재확인 결과) — "아무도 할 일이 없다"는 PENDING과 달리 "Developer가
-      본인인증을 해야 한다"는 것을 이 상태가 구분해 알려준다.
+    - "approval_required"(#57) — 등록만 접수되고 아직 본인인증 전이다.
     - "approved"(#57) — KYC 심사까지 마쳐 주간 한도 자체가 없다.
+
+    실물과 달리 이름·이메일·전화번호가 비어 있어도 시나리오대로 답한다 — dev/e2e 가 전화번호
+    없이도 지급 흐름 끝까지 걸을 수 있어야 하기 때문이다.
     """
 
     def register(
-        self,
-        *,
-        developer_id: int,
-        simulate: str | None = None,
-        policy: "PlatformPolicy | None" = None,
+        self, registration: SellerRegistration, *, simulate: str | None = None
     ) -> SellerRegistrationResult:
-        if policy is None:
-            # 단독 호출 편의용 — 스캔 스코프에서 이미 읽은 정책을 넘기지 않은
-            # 호출자를 위해 여기서 한 번 읽는다(#78, ADR-0023). 스캔 루프
-            # 안에서 이 메서드를 부르는 호출자(`distributions.services`)는
-            # 반드시 이미 읽은 policy를 넘겨야 한다 — 그러지 않으면 Payout
-            # 수만큼 이 조회가 반복된다.
-            from policies.services import get_current_policy
-
-            policy = get_current_policy()
-
         scenario = simulate or "success"
-        seller_id = f"fake-seller-{developer_id}"
-
+        seller_id = f"fake-{registration.ref_seller_id}"
         if scenario == "success":
+            weekly_limit = registration.weekly_limit_hint
+            if weekly_limit is None:
+                # 단독 호출 편의용 — caller 가 스코프의 정책을 안 실어 보냈으면 여기서 한 번 읽는다.
+                from policies.services import get_current_policy
+
+                weekly_limit = get_current_policy().seller_weekly_limit_amount
             return SellerRegistrationResult(
-                seller_id=seller_id,
-                status="partially_approved",
-                weekly_limit_amount=policy.seller_weekly_limit_amount,
+                seller_id=seller_id, status="partially_approved", weekly_limit_amount=weekly_limit
             )
         if scenario in ("limit_exceeded", "review_required"):
             return SellerRegistrationResult(
