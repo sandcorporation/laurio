@@ -296,7 +296,11 @@ jobs:
         if: always()
         run: docker compose -f docker/compose.dev.yaml --profile celery down -v
 
-  frontend-test:
+  # **공개 앱 e2e.** 운영자 e2e 와 나눠 **동시에** 돈다 (#104) — 한 잡이 둘을
+  # 이어 돌리면 직렬로 남는 부분(공개 배타 패스 2.8분 + 운영자 6.4분)이 병렬
+  # 이득을 먹는다. 나누면 그 둘이 겹친다. 각 잡은 자기에게 필요한 컨테이너만
+  # 띄운다 — 운영자 잡은 공개 앱이 뜨기를 기다리지 않아도 된다.
+  frontend-e2e-public:
     runs-on: ubuntu-latest
 
     steps:
@@ -328,10 +332,6 @@ jobs:
         working-directory: frontend
         run: pnpm typecheck
 
-      - name: Typecheck (operator app)
-        working-directory: operator
-        run: pnpm typecheck
-
       # next build 만 잡는 오류가 있다(라우트 핸들러 시그니처, output: "standalone"
       # 산출물 등). 여기서 안 돌리면 배포 시점까지 미검출로 남는다. 두 앱 다 돈다 —
       # #63부터 두 앱이 각자 standalone 산출물을 만든다.
@@ -339,18 +339,118 @@ jobs:
         working-directory: frontend
         run: pnpm build
 
-      - name: Build (operator app)
-        working-directory: operator
-        run: pnpm build
-
       - name: Bring up the dev stack
-        run: docker compose -f docker/compose.dev.yaml up -d --build
+        run: docker compose -f docker/compose.dev.yaml up -d --build frontend
 
       - name: Wait for the public app to answer
         run: |
           curl --fail --silent --show-error \
                --retry 60 --retry-delay 3 --retry-all-errors --retry-connrefused \
                http://127.0.0.1:53000/healthz
+
+      # 운영자 앱(#63, ADR-0021) — 같은 dev compose 스택에 붙는 두 번째 앱. 한
+      # 스위트가 프로젝트 둘로 둘 다 친다(playwright.config.ts) — 이 앱이 뜨지
+      # 않으면 그 프로젝트 전체가 실패한다.
+      # FE-04/FE-05(#29·#30) SSR 테스트가 `frontend/e2e/lib/seed.ts` 로 호스트에서
+      # `uv run manage.py seed_e2e_contests` 를 돌려 실제 Contest 를 dev DB에 심는다
+      # (하드코딩 픽스처가 아니라 백엔드가 준 값이어야 SSR 증명이 성립한다 —
+      # frontend/e2e/seam.spec.ts 상단 주석). dev compose 의 db 서비스는 호스트
+      # 55432(기본값)에 이미 노출돼 있으므로 `cd backend && uv run pytest` 와 같은
+      # 경로로 같은 DB에 붙는다.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install backend dependencies from lockfile
+        working-directory: backend
+        run: uv sync --locked
+
+      # **스택을 띄운 뒤 워크스페이스 설치를 한 번 되돌린다.** dev compose 의
+      # frontend·operator 서비스는 바인드된 체크아웃(`..:/app`) 위에서
+      # `pnpm install --force` 를 돌린다 — node_modules 대부분은 이름 있는 볼륨이
+      # 가리지만, 러너의 워크스페이스 트리가 그 과정에서 흔들려 `pnpm exec
+      # playwright` 가 바이너리를 못 찾는 상태가 된다(실측: 빌드를 앞으로 옮긴
+      # 뒤 이 스텝이 `Command "playwright" not found` 로 죽었다).
+      #
+      # 앞의 설치를 없애고 여기 하나만 두지 않는 이유 — 타입체크와 빌드가 스택
+      # **앞에** 있어야 `.next` 가 root 소유로 생기지 않는다(위 주석). 두 번
+      # 도는 비용은 pnpm store 가 이미 더워 몇 초다.
+      - name: Reinstall workspace dependencies after the stack settled
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browser
+        working-directory: frontend
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run e2e against the running apps
+        working-directory: frontend
+        env:
+          LAURIO_E2E_BASE_URL: http://127.0.0.1:53000
+          LAURIO_OPERATOR_E2E_BASE_URL: http://127.0.0.1:53001
+        run: pnpm run test:public
+
+      - name: Dump stack logs on failure
+        if: failure()
+        run: docker compose -f docker/compose.dev.yaml logs --tail 100
+
+      # playwright.config.ts 가 재시도 시 트레이스를 남긴다. 올리지 않으면 실패한
+      # CI 실행에서 그게 그대로 버려져 원인을 못 본다.
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 7
+
+
+  # **운영자 앱 e2e.** 위 잡과 동시에 돈다. 여전히 워커 하나로 돈다 —
+  # 큐의 전체 건수를 단언하고 「0건」 테스트가 빈 큐를 요구하기 때문이다.
+  frontend-e2e-operator:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Install dependencies from lockfile
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      # **타입체크와 빌드는 dev 스택을 띄우기 전에 돌린다.** 순서가 취향이 아니라
+      # 필요다: dev compose 의 frontend 서비스는 저장소를 컨테이너에 마운트하고
+      # (`..:/app`) `/app/frontend/.next` 를 이름 있는 볼륨으로 가리는데, Docker 가
+      # 그 마운트 지점을 **호스트 체크아웃에 root 소유로 만든다**. 그러면 러너
+      # 사용자로 도는 `pnpm build` 가 `.next/trace` 를 열지 못해
+      # `EACCES: permission denied` 로 죽는다 — 실제로 이 잡을 연속으로 빨간불로
+      # 만들었다. 빌드가 먼저 돌면 `.next` 는 러너 것이고, 그 뒤 볼륨이 그것을
+      # 가려도 아무도 다시 쓰지 않는다.
+      #
+      # 부수 효과도 좋다 — 타입 오류가 이미지 빌드를 기다리지 않고 즉시 잡힌다.
+      - name: Typecheck (operator app)
+        working-directory: operator
+        run: pnpm typecheck
+
+      # next build 만 잡는 오류가 있다(라우트 핸들러 시그니처, output: "standalone"
+      # 산출물 등). 여기서 안 돌리면 배포 시점까지 미검출로 남는다. 두 앱 다 돈다 —
+      # #63부터 두 앱이 각자 standalone 산출물을 만든다.
+      - name: Build (operator app)
+        working-directory: operator
+        run: pnpm build
+
+      - name: Bring up the dev stack
+        run: docker compose -f docker/compose.dev.yaml up -d --build operator
 
       # 운영자 앱(#63, ADR-0021) — 같은 dev compose 스택에 붙는 두 번째 앱. 한
       # 스위트가 프로젝트 둘로 둘 다 친다(playwright.config.ts) — 이 앱이 뜨지
@@ -399,7 +499,7 @@ jobs:
         env:
           LAURIO_E2E_BASE_URL: http://127.0.0.1:53000
           LAURIO_OPERATOR_E2E_BASE_URL: http://127.0.0.1:53001
-        run: pnpm test
+        run: pnpm run test:operator
 
       - name: Dump stack logs on failure
         if: failure()
