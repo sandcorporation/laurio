@@ -1352,3 +1352,53 @@ def test_a_ruled_appeal_no_longer_holds_anything(client, category, landing_type)
     )
     assert own.status_code == 200
     assert own.json()["is_holding_distribution"] is False
+
+
+@pytest.mark.django_db
+def test_share_payout_timeout_then_failed_requery_stays_requested_not_attempt_failed(
+    client, category, landing_type
+):
+    """몫 지급의 confirm 이 타임아웃하고 재확인(query_status)도 실패하면, 그 몫은
+    「시도 실패」행이 아니라 미확정(REQUESTED)으로 남아 다음 스캔이 마저 확정한다
+    (#125). 전에는 재확인 예외가 몫 단위 격리(except Exception)에 잡혀
+    payout_attempt_failed 로 기록됐다 — 격리는 살았지만 "실패"라는 말이 틀렸다."""
+
+    from unittest.mock import patch
+
+    from payouts.adapters import FakePayoutAdapter, PayoutTimeoutError
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+        prize=333_333,
+        sponsor_uid="sponsor-timeout",
+    )
+    requirement_id = contest["requirements"][0]["id"]
+    dev = _verified_user(client, "dev-timeout", "dev-timeout-ci")
+    submission = _submit(client, dev, contest["id"], requirement_id=requirement_id, grounded=True)
+    _close_contest(client, contest, deadline=deadline)
+    _run_scoring(client)
+    _end_judging_period(client, contest["id"])
+    _advance_past_distribution_wait(contest["id"])
+
+    def _timeout(self, **kwargs):
+        raise PayoutTimeoutError("fake: 벤더 응답 없음")
+
+    with (
+        patch.object(FakePayoutAdapter, "confirm", _timeout),
+        patch.object(FakePayoutAdapter, "query_status", _timeout),
+    ):
+        resp = _run_due_distributions(client)
+
+    events = {r.get("submission_id"): r for r in resp["results"] if "submission_id" in r}
+    row = events[submission["id"]]
+    assert row["event"] == "payout_attempted", row
+    assert row["status"] == "requested"
+
+    payout = Payout.objects.get(distribution_share__submission_id=submission["id"])
+    assert payout.status == Payout.Status.REQUESTED
+    assert payout.journal_entry_id is None

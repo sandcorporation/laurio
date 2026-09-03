@@ -718,6 +718,28 @@ def test_confirm_timeout_resolves_via_query_status_and_posts_entry_once(
 
 
 @pytest.mark.django_db
+def test_confirm_timeout_then_failed_requery_leaves_payout_requested_not_500(
+    client, category, landing_type
+):
+    """타임아웃 뒤 재확인(query_status) 자체가 또 실패하면 500 이 아니라 미확정으로
+    남긴다 (#125) — 결제 확인(payments.api)이 #87 지적 3 으로 얻은 규율을 지급 확인도
+    같이 갖는다. 실패도 타임아웃도 "아직 모른다"이지 "실패했다"가 아니다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+
+    resp = _confirm_payout(
+        client, dev, requested["idempotency_key"], simulate="timeout_then_query_error"
+    )
+    assert resp.status_code == 200, resp.content
+    assert resp.json()["status"] == "requested"
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    assert payout.status == Payout.Status.REQUESTED
+    assert payout.journal_entry_id is None
+
+
+@pytest.mark.django_db
 def test_confirm_failed_leaves_no_ledger_entry(client, category, landing_type):
     sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
     requested = _request_payout(client, dev, contest["id"])
