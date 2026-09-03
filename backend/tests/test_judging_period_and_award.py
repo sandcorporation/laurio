@@ -29,7 +29,7 @@ from django.utils import timezone
 from awards.models import Award
 from contests.models import Category, Contest, DeliverableType, JudgingExtensionPayment
 from core.models import ClockOverride
-from core.transitions import TRANSITION_REGISTRY
+from core.scans import SCAN_REGISTRY
 from payments.adapters import FakePGAdapter, PGError, PGTimeoutError
 from policies.services import get_current_policy
 
@@ -255,10 +255,16 @@ def test_judging_period_starts_at_close_and_scanned_by_scheduled_transition(
     tick_resp = client.post(TICK_URL, **_internal_headers())
     assert tick_resp.status_code == 200
     matching = [
-        t for t in tick_resp.json()["transitioned"] if t["model"] == "Contest" and t["pk"] == contest["id"]
+        t for t in tick_resp.json()["rows"] if t["model"] == "Contest" and t["pk"] == contest["id"]
     ]
     assert matching == [
-        {"model": "Contest", "pk": contest["id"], "from_state": "closed", "to_state": "judging_ended"}
+        {
+            "scan": "contest-judging-end",
+            "model": "Contest",
+            "pk": contest["id"],
+            "from_state": "closed",
+            "to_state": "judging_ended",
+        }
     ]
     assert Contest.objects.get(id=contest["id"]).status == Contest.Status.JUDGING_ENDED
 
@@ -301,8 +307,7 @@ def test_judging_ends_at_is_derived_from_each_contests_own_deadline(client, cate
 
     두 deadline의 간격은 JUDGING_PERIOD_DAYS(기본 7일)보다 훨씬 짧게 잡는다 —
     간격이 그보다 크면 이 틱 한 번(PUBLISHED -> CLOSED에 이어 CLOSED ->
-    JUDGING_ENDED까지 같은 as_of로 순차 처리한다, core.transitions.
-    run_due_transitions)이 먼저 닫힌 Contest의 심사기간까지 함께 끝내버려 CLOSED
+    JUDGING_ENDED까지 같은 as_of로 순차 처리한다, core.scans.run_all)이 먼저 닫힌 Contest의 심사기간까지 함께 끝내버려 CLOSED
     상태로 비교할 수 없게 된다."""
 
     early_deadline = timezone.now() + timedelta(hours=1)
@@ -330,7 +335,7 @@ def test_judging_ends_at_is_derived_from_each_contests_own_deadline(client, cate
     _freeze(late_deadline + timedelta(minutes=1))
     tick_resp = client.post(TICK_URL, **_internal_headers())
     assert tick_resp.status_code == 200
-    transitioned_ids = {t["pk"] for t in tick_resp.json()["transitioned"] if t["model"] == "Contest"}
+    transitioned_ids = {t["pk"] for t in tick_resp.json()["rows"] if t["model"] == "Contest"}
     assert {contest_a["id"], contest_b["id"]} <= transitioned_ids
 
     closed_a = Contest.objects.get(id=contest_a["id"])
@@ -376,8 +381,8 @@ def test_firing_tick_twice_ends_judging_period_only_once(client, category, landi
 
     assert first.status_code == 200
     assert second.status_code == 200
-    first_matches = [t for t in first.json()["transitioned"] if t["pk"] == contest["id"]]
-    second_matches = [t for t in second.json()["transitioned"] if t["pk"] == contest["id"]]
+    first_matches = [t for t in first.json()["rows"] if t["pk"] == contest["id"]]
+    second_matches = [t for t in second.json()["rows"] if t["pk"] == contest["id"]]
     assert len(first_matches) == 1
     assert second_matches == []
     assert Contest.objects.get(id=contest["id"]).status == Contest.Status.JUDGING_ENDED
@@ -410,7 +415,7 @@ def test_awarded_contest_is_never_moved_to_judging_ended_by_the_tick(
     _freeze(judging_ends_at + timedelta(minutes=1))
     tick_resp = client.post(TICK_URL, **_internal_headers())
     assert tick_resp.status_code == 200
-    matching = [t for t in tick_resp.json()["transitioned"] if t["pk"] == contest["id"]]
+    matching = [t for t in tick_resp.json()["rows"] if t["pk"] == contest["id"]]
     assert matching == []
     assert Contest.objects.get(id=contest["id"]).status == Contest.Status.AWARDED
 
@@ -752,14 +757,14 @@ def test_extension_updates_only_the_transition_time_column(client, category, lan
     _close_contest(client, contest, deadline=deadline)
     original_judging_ends_at = Contest.objects.get(id=contest["id"]).judging_ends_at
 
-    registry_size_before = len(TRANSITION_REGISTRY)
+    registry_size_before = len(SCAN_REGISTRY)
 
     body = _extend(client, sponsor, contest["id"])
     assert body["status"] == "paid"
     assert body["judging_extension_count"] == 1
     assert body["refund_disabled"] is False
 
-    registry_size_after = len(TRANSITION_REGISTRY)
+    registry_size_after = len(SCAN_REGISTRY)
     assert registry_size_after == registry_size_before
 
     extended = Contest.objects.get(id=contest["id"])

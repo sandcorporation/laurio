@@ -24,11 +24,9 @@ app.autodiscover_tasks()
 
 _SCAN_INTERVAL_SECONDS = 60.0
 
-app.conf.beat_schedule = {
-    "scheduler-tick": {
-        "task": "core.call_scheduler_tick",
-        "schedule": _SCAN_INTERVAL_SECONDS,
-    },
+# 아직 스캔 등록부로 옮기지 않은 스캔들(#138~#140 이 하나씩 옮긴다). 옮기는 순간 이 목록에서
+# 지운다 — 옮긴 스캔은 등록부에서 파생된 항목으로 돈다.
+LEGACY_BEAT_SCHEDULE = {
     "distributions-run-due": {
         "task": "core.call_distributions_run_due",
         "schedule": _SCAN_INTERVAL_SECONDS,
@@ -58,3 +56,20 @@ app.conf.beat_schedule = {
         "schedule": _SCAN_INTERVAL_SECONDS,
     },
 }
+
+
+def sync_beat_schedule() -> dict:
+    """beat 스케줄 = 아직 안 옮긴 레거시 + **등록부에서 파생된 항목**(#137). `core.scans.
+    register_scan` 이 스캔을 더할 때마다 이 함수를 불러 스케줄을 다시 만든다 — 스케줄을 손으로
+    쓰는 자리가 없으므로 「등록했는데 안 도는」 상태가 표현 불가능하다."""
+
+    from core.scans import beat_schedule
+
+    app.conf.beat_schedule = {**LEGACY_BEAT_SCHEDULE, **beat_schedule()}
+    return app.conf.beat_schedule
+
+
+# 임포트 시점에는 레거시만 — 이 모듈은 Django 앱 레지스트리가 준비되기 전(config 패키지 임포트)에
+# 읽히므로 등록부를 여기서 건드릴 수 없다. 등록부 항목은 각 앱의 ready() 가 `register_scan` 으로
+# 더할 때마다 위 함수가 스케줄에 합친다 — beat 프로세스는 django.setup() 뒤에야 스케줄을 읽는다.
+app.conf.beat_schedule = dict(LEGACY_BEAT_SCHEDULE)

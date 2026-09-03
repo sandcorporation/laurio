@@ -7,10 +7,10 @@ class ContestsConfig(AppConfig):
     verbose_name = "Contest · 공모전"
 
     def ready(self) -> None:
-        """마감 전이·심사기간 종료 전이를 core.transitions 레지스트리에 등록한다
+        """마감 전이·심사기간 종료 전이를 core.scans 등록부에 스캔으로 등록한다
         (#11/#13, ADR-0003).
 
-        core.transitions.run_due_transitions 가 스케줄러 틱마다 이 규칙들을 스캔한다.
+        core.scans 등록부에 스캔으로 올라 beat 가 주기적으로, /tick 이 한 바퀴에 스캔한다(#137).
         `claim_transition` 이 이미 `WHERE id=? AND status='<이전상태>'` 형태의 단일
         UPDATE 문으로 rowcount==1 일 때만 통과시키므로, 틱을 두 번 쏴도 각 전이는
         정확히 한 번만 일어난다.
@@ -41,12 +41,13 @@ class ContestsConfig(AppConfig):
 
         from datetime import timedelta
 
-        from core.transitions import TransitionSpec, register_transition
+        from core.scans import register_scan, transition_scan
+        from core.transitions import TransitionSpec
 
         from .models import Contest
 
-        # scan_context는 TRANSITION_REGISTRY의 모든 spec이 공유하는 dict다
-        # (core.transitions.run_due_transitions) — 키가 네임스페이스 없이
+        # scan_context(ctx)는 /tick 한 바퀴 동안 모든 스캔이 공유하는 dict다
+        # (core.scans.run_all) — 키가 네임스페이스 없이
         # "policy"처럼 뻔하면, 나중에 다른 전이가 같은 memoization 관용구를
         # 복사해 같은 키를 쓰는 순간 등록 순서에 따라 서로의 값을 덮어쓰거나
         # 읽는다(코드리뷰 지적 3 — AttributeError로 스캔이 죽거나, 우연히
@@ -55,38 +56,45 @@ class ContestsConfig(AppConfig):
         _SCAN_CONTEXT_POLICY_KEY = f"{__name__}:policy"
 
         def _judging_period_days(scan_context: dict) -> int:
-            # 이 스캔(run_due_transitions 호출 한 번) 동안 정책을 한 번만
-            # 읽는다(#78, ADR-0023) — extra_fields는 CLOSED로 넘어가는 Contest
-            # 행마다 호출되므로, 여기서 매번 get_current_policy()를 부르면
-            # 쿼리가 행 수만큼 늘어난다. scan_context는 core.transitions가
-            # run_due_transitions 호출 하나에 대해 만들어주는 빈 dict라 이
-            # memoization이 스캔 경계를 정확히 지킨다.
+            # 이 스캔 실행 한 번 동안 정책을 한 번만 읽는다(#78, ADR-0023) —
+            # extra_fields는 CLOSED로 넘어가는 Contest 행마다 호출되므로, 여기서
+            # 매번 get_current_policy()를 부르면 쿼리가 행 수만큼 늘어난다.
+            # scan_context는 core.scans 가 실행 하나에 대해 만들어주는 빈 dict라
+            # 이 memoization이 스캔 경계를 정확히 지킨다.
             if _SCAN_CONTEXT_POLICY_KEY not in scan_context:
                 from policies.services import get_current_policy
 
                 scan_context[_SCAN_CONTEXT_POLICY_KEY] = get_current_policy()
             return scan_context[_SCAN_CONTEXT_POLICY_KEY].judging_period_days
 
-        register_transition(
-            TransitionSpec(
-                model=Contest,
-                due_field="deadline_at",
-                from_state=Contest.Status.PUBLISHED,
-                to_state=Contest.Status.CLOSED,
-                state_field="status",
-                extra_fields=lambda contest, now, scan_context: {
-                    "judging_ends_at": contest.deadline_at
-                    + timedelta(days=_judging_period_days(scan_context))
-                },
+        register_scan(
+            transition_scan(
+                TransitionSpec(
+                    model=Contest,
+                    due_field="deadline_at",
+                    from_state=Contest.Status.PUBLISHED,
+                    to_state=Contest.Status.CLOSED,
+                    state_field="status",
+                    extra_fields=lambda contest, now, scan_context: {
+                        "judging_ends_at": contest.deadline_at
+                        + timedelta(days=_judging_period_days(scan_context))
+                    },
+                ),
+                name="contest-close",
+                batch_size=500,
             )
         )
 
-        register_transition(
-            TransitionSpec(
-                model=Contest,
-                due_field="judging_ends_at",
-                from_state=Contest.Status.CLOSED,
-                to_state=Contest.Status.JUDGING_ENDED,
-                state_field="status",
+        register_scan(
+            transition_scan(
+                TransitionSpec(
+                    model=Contest,
+                    due_field="judging_ends_at",
+                    from_state=Contest.Status.CLOSED,
+                    to_state=Contest.Status.JUDGING_ENDED,
+                    state_field="status",
+                ),
+                name="contest-judging-end",
+                batch_size=500,
             )
         )

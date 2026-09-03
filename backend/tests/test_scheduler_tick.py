@@ -52,8 +52,9 @@ def test_tick_transitions_due_row_and_leaves_future_row_alone(client):
     assert response.status_code == 200
     body = response.json()
     assert body["count"] == 1
-    assert body["transitioned"] == [
+    assert body["rows"] == [
         {
+            "scan": "scheduled-state-demo",
             "model": "ScheduledStateDemo",
             "pk": due.pk,
             "from_state": "pending",
@@ -80,7 +81,7 @@ def test_firing_tick_twice_runs_the_same_transition_only_once(client):
     assert second.status_code == 200
     assert first.json()["count"] == 1
     assert second.json()["count"] == 0
-    assert second.json()["transitioned"] == []
+    assert second.json()["rows"] == []
 
     due.refresh_from_db()
     assert due.state == ScheduledStateDemo.State.DONE
@@ -131,3 +132,74 @@ def test_tick_transition_refreshes_auto_now_field_using_injected_clock(client):
     due.refresh_from_db()
     assert due.updated_at != original_updated_at
     assert due.updated_at == frozen_tick_time
+
+
+@pytest.mark.django_db
+def test_scan_endpoint_runs_one_registered_scan_and_rejects_unknown_names(client):
+    now = timezone.now()
+    _freeze(now)
+    due = ScheduledStateDemo.objects.create(due_at=now - timedelta(minutes=1))
+
+    unknown = client.post("/api/internal/scans/no-such-scan", **_auth_headers())
+    assert unknown.status_code == 404
+
+    response = client.post("/api/internal/scans/scheduled-state-demo", **_auth_headers())
+    assert response.status_code == 200
+    body = response.json()
+    assert body["scan"] == "scheduled-state-demo"
+    assert body["count"] == 1
+    assert body["failed"] == []
+    assert body["rows"][0]["pk"] == due.pk
+
+
+@pytest.mark.django_db
+def test_one_poisoned_row_does_not_block_the_rest_of_the_scan(client):
+    """행 하나가 예외를 던져도 같은 실행의 뒤 행들은 처리된다 — order_by("id") 스캔에서 예외를
+    감싸지 않으면 그 행이 매번 배치 맨 앞에서 다시 걸려 뒤가 영원히 막히는 poison pill 이 된다.
+    전에는 등록부 tick 에 이 격리가 없었다(#137)."""
+
+    from unittest.mock import patch
+
+    from core import transitions
+
+    now = timezone.now()
+    _freeze(now)
+    poison = ScheduledStateDemo.objects.create(due_at=now - timedelta(minutes=2))
+    healthy = ScheduledStateDemo.objects.create(due_at=now - timedelta(minutes=1))
+
+    real_claim = transitions.claim_transition
+
+    def _claim(model, pk, **kwargs):
+        if pk == poison.pk:
+            raise RuntimeError("예기치 못한 버그")
+        return real_claim(model, pk, **kwargs)
+
+    with patch.object(transitions, "claim_transition", _claim):
+        response = client.post("/api/internal/scans/scheduled-state-demo", **_auth_headers())
+
+    body = response.json()
+    assert [f["pk"] for f in body["failed"]] == [poison.pk]
+    assert [r["pk"] for r in body["rows"]] == [healthy.pk]
+    healthy.refresh_from_db()
+    assert healthy.state == ScheduledStateDemo.State.DONE
+
+
+@pytest.mark.django_db
+def test_batch_cap_leaves_the_remainder_for_the_next_run(client, monkeypatch):
+    from dataclasses import replace
+
+    from core import scans
+
+    now = timezone.now()
+    _freeze(now)
+    for minutes in (3, 2, 1):
+        ScheduledStateDemo.objects.create(due_at=now - timedelta(minutes=minutes))
+
+    spec = scans.SCAN_REGISTRY["scheduled-state-demo"]
+    monkeypatch.setitem(scans.SCAN_REGISTRY, "scheduled-state-demo", replace(spec, batch_size=2))
+
+    first = client.post("/api/internal/scans/scheduled-state-demo", **_auth_headers()).json()
+    second = client.post("/api/internal/scans/scheduled-state-demo", **_auth_headers()).json()
+    assert first["count"] == 2
+    assert second["count"] == 1
+    assert ScheduledStateDemo.objects.filter(state=ScheduledStateDemo.State.PENDING).count() == 0

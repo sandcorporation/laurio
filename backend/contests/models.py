@@ -180,7 +180,7 @@ class Contest(models.Model):
     class Meta:
         ordering = ["-created_at"]
         indexes = [
-            # 스케줄러 틱(core.transitions.run_due_transitions)이 60초마다 도는 두
+            # 스캔 등록부(core.scans)의 두 Contest 스캔이 60초마다 도는데 그
             # 스캔의 WHERE 절이 그대로 타는 인덱스다. 규칙은 contests/apps.py 가
             # 등록하고, 각각 (status, deadline_at) 과 (status, judging_ends_at) 을
             # 함께 건다.

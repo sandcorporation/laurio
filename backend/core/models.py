@@ -28,7 +28,7 @@ class ScheduledStateDemo(models.Model):
     "전이 시각이 지난 행을 스캔해 `UPDATE ... WHERE id=? AND state='이전상태'` 로만
     전이시키고, rowcount 가 1일 때만 통과시킨다"는 메커니즘을 시연하기 위한 것이며
     도메인 로직을 담지 않는다. 이후 티켓이 실제 모델에 같은 메커니즘
-    (`core.transitions.register_transition` / `core.transitions.claim_transition`)을
+    (`core.scans.transition_scan` / `core.transitions.claim_transition`)을
     재사용하면 된다.
     """
 

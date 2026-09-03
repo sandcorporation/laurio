@@ -5,10 +5,10 @@ UPDATE 로만 수행하고, rowcount 가 1일 때만 "전이가 실제로 일어
 몇 개로 겹쳐 같은 틱을 동시에 처리해도, 두 번째 이후의 UPDATE 는 WHERE 절이 더 이상
 매치하지 않아 rowcount 0으로 끝나므로 정확히 한 번만 통과한다.
 
-`register_transition` 으로 "이 모델의 이 상태는, due_field 가 지나면, 저 상태로
-간다"는 규칙을 등록해두면 `run_due_transitions` 가 주기적으로 이를 스캔해 전이시킨다.
-개별 모델이 이 레지스트리를 쓰지 않고 `claim_transition` 만 직접 재사용해도 된다
-(예: notifications 앱의 야간 지연 발송 큐가 이 방식을 쓴다).
+`TransitionSpec` 으로 "이 모델의 이 상태는, due_field 가 지나면, 저 상태로 간다"는 규칙을
+적고 `core.scans.transition_scan` 으로 스캔 등록부에 올리면 주기적으로 스캔돼 전이된다(#137).
+개별 모델이 그 규칙 없이 `claim_transition` 만 직접 재사용해도 된다(예: notifications 앱의
+야간 지연 발송 큐).
 
 시각은 호출 스코프(틱 한 번, 요청 한 번)당 한 번만 `Clock.now()` 로 구하고, 그 값을
 `now=` 로 넘겨써야 한다 — 스캔 대상 행마다 새로 조회하면 SELECT 가 행 수만큼 쌓인다.
@@ -22,12 +22,6 @@ from typing import Callable
 from django.db import models
 
 from .clock import Clock
-
-# 틱 한 번에 스캔·전이시키는 최대 행 수. 인덱스가 있어도 무제한 스캔은 백로그가 쌓였을
-# 때 틱 요청 자체를 타임아웃(core/tasks.py 의 30초)으로 몰아넣는다. 배치를 넘는 잔여
-# 분량은 다음 틱이 마저 처리한다 — ADR-0003 이 이미 "스캔 주기만큼 늦어지는 건 무해하다"
-# 고 규정했으므로, 배치를 나누는 것도 같은 허용 범위 안에 있다.
-DEFAULT_BATCH_SIZE = 500
 
 
 def claim_transition(
@@ -84,91 +78,27 @@ class TransitionSpec:
     # 파생되면 안 된다 — 그러면 마감 시각이 서로 다른 두 Contest가 같은 틱에
     # 우연히 같이 걸렸다는 이유만으로 동일한 judging_ends_at을 받는다).
     #
-    # 세 번째 인자 `scan_context`는 `run_due_transitions` 호출 한 번(스캔 스코프)
-    # 동안 공유되는 빈 dict다(#78) — extra_fields가 정책값처럼 행마다 다시
-    # 조회하면 안 되는 값을 스스로 memoize할 자리다. `core.transitions` 자신은
-    # 이 dict의 내용을 모른다 — 무엇을 캐싱할지는 각 extra_fields 구현의 몫이다.
-    #
-    # **이 dict는 TRANSITION_REGISTRY의 모든 spec이 공유한다** — 한 번의
-    # run_due_transitions 호출 안에서 등록된 모든 규칙이 같은 scan_context
-    # 인스턴스를 받는다(코드리뷰 지적, #78 후속). 그래서 키를 `"policy"`처럼
-    # 네임스페이스 없이 고르면, 다른 spec이 같은 memoization 관용구를 복사해
-    # 같은 키를 쓰는 순간 등록 순서에 따라 서로의 값을 읽거나 덮어쓴다 —
-    # AttributeError로 스캔 전체가 죽거나, 우연히 같은 속성이 있으면 잘못된
-    # 값이 조용히 저장된다. 이 dict에 쓰는 모든 키는 소유 모듈을 담아야
-    # 한다 — 예: `f"{__name__}:policy"`(`contests/apps.py`가 쓰는 관용구).
+    # 세 번째 인자는 스캔 실행 한 번 동안 공유되는 `ctx` dict 다(core.scans.run_scan, #78) —
+    # extra_fields가 정책값처럼 행마다 다시 조회하면 안 되는 값을 memoize할 자리다. `/tick`
+    # (run_all)은 모든 스캔이 같은 ctx 를 공유하므로 키는 소유 모듈을 담아야 한다 —
+    # 예: `f"{__name__}:policy"`(`contests/apps.py`가 쓰는 관용구).
     extra_fields: Callable[[models.Model, datetime, dict], dict[str, object]] | None = None
 
 
-TRANSITION_REGISTRY: list[TransitionSpec] = []
-
-
-def register_transition(spec: TransitionSpec) -> TransitionSpec:
-    TRANSITION_REGISTRY.append(spec)
-    return spec
-
-
-def run_due_transitions(as_of=None) -> list[dict]:
-    """등록된 모든 전이 규칙에 대해 "시각이 지난 것"을 스캔하고 조건부 UPDATE로 옮긴다.
-
-    같은 as_of 로 두 번 불러도(=틱을 연속으로 두 번 쏴도) 각 행은 정확히 한 번만
-    결과 목록에 나타난다. `as_of` 는 이 호출 전체에서 한 번만 구해 모든 행에 재사용한다
-    (Clock.now() 를 행마다 다시 조회하지 않는다).
-    """
-
-    as_of = as_of or Clock.now()
-    results: list[dict] = []
-    # 이 호출(스캔) 전체가 공유하는 캐시 자리 — extra_fields가 행마다 다시 읽으면
-    # 안 되는 값(예: PlatformPolicy)을 여기 memoize한다(#78). as_of를 스캔
-    # 시작 시점에 한 번만 구해 재사용하는 것과 같은 이유다.
-    scan_context: dict = {}
-
-    for spec in TRANSITION_REGISTRY:
-        # 전체 행(pk만이 아니라)을 가져온다 — extra_fields가 이 행 자신의 다른
-        # 컬럼(예: deadline_at)에서 값을 파생시킬 수 있어야 한다(위 TransitionSpec
-        # 설명 참고). 배치 크기가 DEFAULT_BATCH_SIZE로 이미 상한이 걸려 있으므로
-        # 쿼리 자체는 여전히 한 번이다(N+1이 아니다).
-        due_rows = list(
-            spec.model.objects.filter(
-                **{spec.state_field: spec.from_state, f"{spec.due_field}__lte": as_of}
-            )[:DEFAULT_BATCH_SIZE]
-        )
-        for row in due_rows:
-            extra_fields = (
-                spec.extra_fields(row, as_of, scan_context)
-                if spec.extra_fields is not None
-                else None
-            )
-            if claim_transition(
-                spec.model,
-                row.pk,
-                from_state=spec.from_state,
-                to_state=spec.to_state,
-                state_field=spec.state_field,
-                now=as_of,
-                extra_fields=extra_fields,
-            ):
-                results.append(
-                    {
-                        "model": spec.model.__name__,
-                        "pk": row.pk,
-                        "from_state": spec.from_state,
-                        "to_state": spec.to_state,
-                    }
-                )
-
-    return results
-
-
-# ScheduledStateDemo 스캐폴딩을 레지스트리에 등록한다. 실제 모델이 들어오면
-# 각자의 apps.py ready() 에서 같은 방식으로 register_transition 을 호출하면 된다.
+# ScheduledStateDemo 스캐폴딩을 스캔 등록부에 등록한다(#137). 실제 모델은 각자의 apps.py
+# ready() 에서 `register_scan(transition_scan(TransitionSpec(...), name=...))` 로 같은 일을 한다.
 from .models import ScheduledStateDemo  # noqa: E402
+from .scans import register_scan, transition_scan  # noqa: E402
 
-register_transition(
-    TransitionSpec(
-        model=ScheduledStateDemo,
-        due_field="due_at",
-        from_state=ScheduledStateDemo.State.PENDING,
-        to_state=ScheduledStateDemo.State.DONE,
+register_scan(
+    transition_scan(
+        TransitionSpec(
+            model=ScheduledStateDemo,
+            due_field="due_at",
+            from_state=ScheduledStateDemo.State.PENDING,
+            to_state=ScheduledStateDemo.State.DONE,
+        ),
+        name="scheduled-state-demo",
+        batch_size=500,
     )
 )
