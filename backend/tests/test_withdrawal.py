@@ -25,7 +25,8 @@ WITHDRAWAL_URL = "/api/accounts/withdrawal"
 CONTESTS_URL = "/api/contests"
 PAYMENTS_URL = "/api/payments"
 PAYOUTS_URL = "/api/payouts"
-PURGE_URL = "/api/internal/accounts/purge-expired-identities"
+DORMANCY_SCAN_URL = "/api/internal/scans/identity-dormancy-purge"
+RETAINED_SCAN_URL = "/api/internal/scans/retained-identity-purge"
 
 
 # --- 헬퍼 (test_payouts.py와 같은 관용구) ---------------------------------------
@@ -725,7 +726,7 @@ def test_destroyed_identity_never_appears_in_any_public_response(client):
 
 
 def _backdate_activity(user_id: int, verification_id: int, *, to) -> None:
-    """`last_activity_at`이 보는 두 신호(가입 시각·본인확인 갱신 시각)를 과거로
+    """휴면 스캔의 후보 쿼리가 보는 두 신호(가입 시각·본인확인 갱신 시각)를 과거로
     되돌린다. `.update()`로 직접 쓴다 — `auto_now`/`auto_now_add`는 `.save()` 호출
     시점에만 개입하므로 이 방법이 유일하게 값을 강제로 앉힌다."""
 
@@ -760,11 +761,11 @@ def test_dormant_verified_account_has_identity_purged_but_account_and_submission
     _backdate_activity(user.id, verification.id, to=long_ago)
 
     _freeze(timezone.now())
-    resp = client.post(PURGE_URL, **_internal_headers())
+    resp = client.post(DORMANCY_SCAN_URL, **_internal_headers())
     assert resp.status_code == 200, resp.content
     body = resp.json()
-    assert body["dormant_identities_purged"] == 1
-    assert user.id in body["dormant_user_ids"]
+    assert body["count"] == 1
+    assert [r["user_id"] for r in body["rows"]] == [user.id]
 
     verification.refresh_from_db()
     assert verification.status == Verification.Status.EXPIRED
@@ -802,17 +803,17 @@ def test_dormancy_boundary_just_under_and_at_two_years(client):
 
     # 아직 2년이 안 됐다 — 파기되지 않는다.
     _freeze(last_activity + DORMANCY_PERIOD - timedelta(days=1))
-    resp = client.post(PURGE_URL, **_internal_headers())
+    resp = client.post(DORMANCY_SCAN_URL, **_internal_headers())
     assert resp.status_code == 200
-    assert resp.json()["dormant_identities_purged"] == 0
+    assert resp.json()["count"] == 0
     verification.refresh_from_db()
     assert verification.status == Verification.Status.VERIFIED
 
     # 막 2년이 됐다 — 파기된다.
     _freeze(last_activity + DORMANCY_PERIOD)
-    resp = client.post(PURGE_URL, **_internal_headers())
+    resp = client.post(DORMANCY_SCAN_URL, **_internal_headers())
     assert resp.status_code == 200
-    assert resp.json()["dormant_identities_purged"] == 1
+    assert resp.json()["count"] == 1
     verification.refresh_from_db()
     assert verification.status == Verification.Status.EXPIRED
 
@@ -832,14 +833,14 @@ def test_dormant_sponsor_with_past_transaction_retains_real_name(client, categor
     verification = Verification.objects.get(user=user)
     long_ago = timezone.now() - timedelta(days=365 * 3)
     _backdate_activity(user.id, verification.id, to=long_ago)
-    # 개최 자체도 "행위"다(last_activity_at) — 그 Contest를 만든 시각도 함께
+    # 개최 자체도 "행위"다(휴면 후보 쿼리의 Greatest) — 그 Contest를 만든 시각도 함께
     # 되돌려야 "그 뒤로 2년간 아무 것도 안 했다"는 시나리오가 성립한다.
     Contest.objects.filter(id=contest["id"]).update(created_at=long_ago)
 
     _freeze(timezone.now())
-    resp = client.post(PURGE_URL, **_internal_headers())
+    resp = client.post(DORMANCY_SCAN_URL, **_internal_headers())
     assert resp.status_code == 200
-    assert resp.json()["dormant_identities_purged"] == 1
+    assert resp.json()["count"] == 1
 
     retained = RetainedIdentity.objects.get(user=user)
     assert retained.reason == RetainedIdentity.Reason.SPONSOR_PAID_CONTEST
@@ -881,11 +882,11 @@ def test_expired_retained_identity_is_purged_and_unexpired_one_remains(client):
     fresh.save()
 
     _freeze(now)
-    resp = client.post(PURGE_URL, **_internal_headers())
+    resp = client.post(RETAINED_SCAN_URL, **_internal_headers())
     assert resp.status_code == 200
     body = resp.json()
-    assert body["expired_retained_identities_purged"] == 1
-    assert expired.id in body["expired_retained_identity_ids"]
+    assert body["count"] == 1
+    assert [r["retained_identity_id"] for r in body["rows"]] == [expired.id]
 
     assert not RetainedIdentity.objects.filter(id=expired.id).exists()
     assert RetainedIdentity.objects.filter(id=fresh.id).exists()
@@ -908,14 +909,57 @@ def test_purge_scan_is_idempotent(client):
     _backdate_activity(user.id, verification.id, to=long_ago)
 
     _freeze(timezone.now())
-    first = client.post(PURGE_URL, **_internal_headers())
+    first = client.post(DORMANCY_SCAN_URL, **_internal_headers())
     assert first.status_code == 200
-    assert first.json()["dormant_identities_purged"] == 1
+    assert first.json()["count"] == 1
 
-    second = client.post(PURGE_URL, **_internal_headers())
+    second = client.post(DORMANCY_SCAN_URL, **_internal_headers())
     assert second.status_code == 200
-    assert second.json()["dormant_identities_purged"] == 0
-    assert second.json()["expired_retained_identities_purged"] == 0
+    assert second.json()["count"] == 0
+    assert client.post(RETAINED_SCAN_URL, **_internal_headers()).json()["count"] == 0
+
+
+@pytest.mark.django_db
+def test_dormancy_scan_isolates_an_account_whose_purge_raises(client):
+    """행 하나의 예외가 배치를 막지 않는다(#138) — 그 계정은 `failed` 에 남고(트랜잭션은
+    되돌아가 신원이 그대로다) 뒤의 계정은 같은 실행에서 파기된다."""
+
+    from unittest.mock import patch
+
+    from django.contrib.auth import get_user_model
+
+    import accounts.dormancy as dormancy_module
+
+    users = []
+    for i in range(2):
+        pair = _login(client, uid=f"poison-dormant-{i}")
+        _verify(client, pair["access"], ci=f"poison-dormant-{i}-ci", name=f"독약{i}")
+        user = get_user_model().objects.get(social_accounts__provider_uid=f"poison-dormant-{i}")
+        verification = Verification.objects.get(user=user)
+        _backdate_activity(user.id, verification.id, to=timezone.now() - timedelta(days=365 * 3))
+        users.append((user, verification))
+    (poison_user, poison_verification), (healthy_user, healthy_verification) = users
+    _freeze(timezone.now())
+
+    real_basis = dormancy_module._transaction_basis
+
+    def _basis(user):
+        if user.id == poison_user.id:
+            raise RuntimeError("거래 근거 조회 중 예기치 못한 버그")
+        return real_basis(user)
+
+    with patch.object(dormancy_module, "_transaction_basis", _basis):
+        resp = client.post(DORMANCY_SCAN_URL, **_internal_headers())
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [f["pk"] for f in body["failed"]] == [poison_verification.id]
+    assert [r["user_id"] for r in body["rows"]] == [healthy_user.id]
+    poison_verification.refresh_from_db()
+    healthy_verification.refresh_from_db()
+    assert poison_verification.status == Verification.Status.VERIFIED
+    assert poison_verification.ci_encrypted != ""
+    assert healthy_verification.status == Verification.Status.EXPIRED
 
 
 @pytest.mark.django_db
@@ -935,7 +979,7 @@ def test_returning_dormant_user_must_reverify_to_host_a_contest(client, category
     _backdate_activity(user.id, verification.id, to=long_ago)
 
     _freeze(timezone.now())
-    client.post(PURGE_URL, **_internal_headers())
+    client.post(DORMANCY_SCAN_URL, **_internal_headers())
 
     resp = client.post(
         CONTESTS_URL,

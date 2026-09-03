@@ -33,7 +33,7 @@ CONTESTS_URL = "/api/contests"
 PAYMENTS_URL = "/api/payments"
 SUBMISSIONS_URL = "/api/submissions"
 STORAGE_URL = "/api/storage"
-INTERNAL_HANDOVER_RELEASE_DUE_URL = "/api/internal/handovers/release-due"
+INTERNAL_HANDOVER_RELEASE_DUE_URL = "/api/internal/scans/handover-release"
 
 
 # --- 헬퍼 (test_judging_period_and_award.py와 같은 형식) ------------------------
@@ -526,9 +526,12 @@ def test_release_due_scan_is_bounded_by_batch_size(client, category, landing_typ
     (scoring.services.BATCH_SIZE와 같은 이유, 리뷰 지적 5) — 배치를 넘는 잔여
     분량은 다음 스캔이 마저 처리해야 한다."""
 
-    import handovers.api as handovers_api
+    from dataclasses import replace
 
-    monkeypatch.setattr(handovers_api, "BATCH_SIZE", 2)
+    from core import scans
+
+    spec = scans.SCAN_REGISTRY["handover-release"]
+    monkeypatch.setitem(scans.SCAN_REGISTRY, "handover-release", replace(spec, batch_size=2))
 
     handovers = []
     for i in range(3):
@@ -560,6 +563,46 @@ def test_release_due_scan_is_bounded_by_batch_size(client, category, landing_typ
         h.refresh_from_db()
         assert h.status == Handover.Status.RELEASED
         assert h.escrow_release_journal_entry_id is not None
+
+
+@pytest.mark.django_db
+def test_release_scan_isolates_a_handover_whose_release_raises(client, category, landing_type):
+    """행 하나의 예외가 배치를 막지 않는다(#138) — 그 Handover 는 `failed` 에 남고 뒤의
+    Handover 는 같은 실행에서 해제된다. 격리가 없으면 id 순 스캔에서 그 행이 매번 맨 앞에서
+    다시 걸려 뒤가 영원히 막힌다."""
+
+    from unittest.mock import patch
+
+    import handovers.scans as handover_scans
+
+    handovers = []
+    for i in range(2):
+        ClockOverride.objects.filter(pk=1).delete()
+        _sponsor, _dev, contest, _submission = _publish_close_award(
+            client, category, landing_type, sponsor_uid=f"poison-sponsor-{i}", dev_uid=f"poison-dev-{i}"
+        )
+        handovers.append(Handover.objects.get(award__contest_id=contest["id"]))
+    poison, healthy = handovers
+    _freeze(max(h.release_deadline_at for h in handovers) + timedelta(minutes=1))
+
+    real_release = handover_scans.release_escrow
+
+    def _release(handover, **kwargs):
+        if handover.pk == poison.pk:
+            raise RuntimeError("원장 분개 중 예기치 못한 버그")
+        return real_release(handover, **kwargs)
+
+    with patch.object(handover_scans, "release_escrow", _release):
+        resp = client.post(INTERNAL_HANDOVER_RELEASE_DUE_URL, **_internal_headers())
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [f["pk"] for f in body["failed"]] == [poison.pk]
+    assert [r["handover_id"] for r in body["rows"]] == [healthy.pk]
+    poison.refresh_from_db()
+    healthy.refresh_from_db()
+    assert poison.status == Handover.Status.PENDING_ACCEPTANCE
+    assert healthy.status == Handover.Status.RELEASED
 
 
 @pytest.mark.django_db

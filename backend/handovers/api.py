@@ -3,16 +3,13 @@
 접근 개방 자체는 이 앱이 엔드포인트로 만드는 게 아니다 — `submissions.resolvers`가
 `awards.Award`의 존재만으로 판정하므로(ADR-0005), Award가 만들어지는 순간(이 앱이
 `awards.api.award_submission`과 같은 트랜잭션에서 만드는 `Handover` 행과 함께) 이미
-열려 있다. 이 라우터가 실제로 담당하는 것은 세 가지뿐이다:
+열려 있다. 이 라우터가 실제로 담당하는 것은 두 가지뿐이다:
 
 - Sponsor의 인수 확인(`POST .../handover/accept`) — Escrow를 해제한다.
 - Developer의 빌드 자산 업로드 기록(`POST /submissions/{id}/build-assets`).
-- 내부 스캔(`POST /internal/handovers/release-due`) — 인수 확인이 없어도 정해진
-  기간이 지나면 틱이 Escrow를 해제한다. `core.transitions`의 일반 상태 전이
-  레지스트리를 쓰지 않는 이유: 그 메커니즘은 같은 행의 컬럼값만 바꿀 뿐이라
-  (해제 시 반드시 필요한) 원장 분개 같은 부수효과를 걸 자리가 없다 — `scoring`이
-  `run-pending`이라는 자신만의 내부 스캔 엔드포인트를 따로 둔 것과 같은 이유·
-  같은 패턴이다.
+
+인수 확인이 없어도 정해진 기간이 지나면 Escrow 를 해제하는 스캔은 `handovers.scans`
+(등록부 이름 `handover-release`, #138)에 있다 — 이 라우터에는 없다.
 """
 
 from __future__ import annotations
@@ -22,8 +19,6 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
-from core.auth import InternalAuth
-from core.clock import Clock
 from submissions.models import Submission
 from submissions.target_refs import build_asset_target_ref
 
@@ -32,16 +27,6 @@ from .schemas import BuildAssetIn, BuildAssetOut, ErrorOut, HandoverOut, _BUILD_
 from .services import release_escrow
 
 router = Router(tags=["handovers"])
-internal_router = Router(tags=["internal", "handovers"], auth=InternalAuth())
-
-# 한 스캔에서 시도하는 최대 Handover 수. scoring.services.BATCH_SIZE·
-# core.transitions.DEFAULT_BATCH_SIZE와 같은 이유 — 무제한 스캔은 백로그가
-# 쌓였을 때 이 요청 자체를 타임아웃으로 몰아넣는다. 이 스캔은 Escrow를
-# 해제하므로 타임아웃 중간에 끊기는 게 장식적인 문제가 아니다 — 배치를 넘는
-# 잔여분은 다음 틱이 마저 처리한다(ADR-0003이 이미 "스캔 주기만큼 늦어지는 건
-# 무해하다"고 규정했다).
-BATCH_SIZE = 50
-
 
 def _serialize_handover(handover: Handover) -> HandoverOut:
     return HandoverOut(
@@ -102,33 +87,6 @@ def accept_handover(request: HttpRequest, contest_id: int):
 
     handover = release_escrow(handover, released_via=Handover.ReleasedVia.SPONSOR_ACCEPTED)
     return 200, _serialize_handover(handover)
-
-
-@internal_router.post("/release-due")
-def release_due_handovers(request):
-    """인수 확인 없이 release_deadline_at이 지난 Handover를 스캔해 Escrow를 해제한다.
-
-    Sponsor의 침묵이 Developer를 인질로 잡지 못한다는 규율의 실제 구현이다(#14 AC).
-    같은 시각에 두 번 불러도(워커가 겹쳐 돌아도) `release_escrow`의 조건부 UPDATE가
-    각 Handover를 정확히 한 번만 해제한다.
-    """
-
-    as_of = Clock.now()
-    due = (
-        Handover.objects.filter(
-            status=Handover.Status.PENDING_ACCEPTANCE, release_deadline_at__lte=as_of
-        )
-        .select_related("award__contest")
-        .order_by("id")[:BATCH_SIZE]
-    )
-
-    released = []
-    for handover in due:
-        result = release_escrow(handover, released_via=Handover.ReleasedVia.TIMEOUT, now=as_of)
-        if result.status == Handover.Status.RELEASED:
-            released.append({"handover_id": result.id, "award_id": result.award_id})
-
-    return {"as_of": as_of.isoformat(), "count": len(released), "released": released}
 
 
 # --- 빌드 자산 ----------------------------------------------------------------

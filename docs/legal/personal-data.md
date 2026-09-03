@@ -42,7 +42,7 @@ CI 로 본인확인이 들어오면 거부한다 — 성인으로 확인받아 �
 | --- | --- | --- | --- |
 | **탈퇴** (Withdrawal) | CI·DI·전화번호·표시 이름·소개 즉시. 계정은 비활성화 | Contest·Submission·원장·Payout. 거래가 있었으면 실명·생년월일이 RetainedIdentity 로 | `backend/accounts/withdrawal.py` |
 | **2년 무행위** | 신원만 (위와 같은 항목). 계정·로그인·Submission 은 그대로, 다음 행위 때 재확인 | 위와 같음 | `backend/accounts/dormancy.py` `DORMANCY_PERIOD` |
-| **보존 만료** (5년) | RetainedIdentity 행 | — | `core.tasks.call_accounts_purge_expired_identities` (Celery beat 스캔) |
+| **보존 만료** (5년) | RetainedIdentity 행 | — | `retained-identity-purge` 스캔(`backend/accounts/dormancy.py`, Celery beat 가 등록부에서 파생해 돌린다) |
 
 세 가지 판단이 이 표 뒤에 있다:
 

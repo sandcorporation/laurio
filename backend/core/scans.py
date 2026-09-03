@@ -61,6 +61,18 @@ class ScanSpec:
 
 SCAN_REGISTRY: dict[str, ScanSpec] = {}
 
+# run_scan 이 이번 실행의 단조 마감시각을 ctx 에 두는 키 — 행 처리 함수가 **행 안쪽**(수신자
+# 팬아웃 등)에서도 예산을 확인하고 싶을 때 `budget_exhausted(ctx)` 로 읽는다. 뼈대의 행
+# 사이 확인과 같은 시계·같은 마감이다.
+_CTX_DEADLINE_KEY = f"{__name__}:deadline"
+
+
+def budget_exhausted(ctx: dict) -> bool:
+    """이번 스캔 실행의 시간 예산이 다 됐는가 — 행 처리 함수가 팬아웃 도중 멈출지 판단할 때."""
+
+    deadline = ctx.get(_CTX_DEADLINE_KEY)
+    return deadline is not None and time.monotonic() >= deadline
+
 
 def register_scan(spec: ScanSpec) -> ScanSpec:
     """등록부에 더한다. 같은 이름을 두 번 등록하면 즉시 터진다 — 두 스캔이 같은 URL·beat 항목을
@@ -107,6 +119,7 @@ def run_scan(name: str, *, as_of=None, ctx: dict | None = None) -> dict:
     as_of = as_of if as_of is not None else Clock.now()
     ctx = {} if ctx is None else ctx
     deadline = time.monotonic() + spec.time_budget_seconds
+    ctx[_CTX_DEADLINE_KEY] = deadline
 
     rows: list[dict] = []
     failed: list[dict] = []

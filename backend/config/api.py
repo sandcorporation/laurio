@@ -1,7 +1,6 @@
 from ninja import NinjaAPI
 
 from accounts.api import router as accounts_router
-from accounts.internal_api import internal_router as accounts_internal_router
 from accounts.operator_api import router as operator_router
 from appeals.api import operator_router as appeals_operator_router
 from appeals.api import router as appeals_router
@@ -10,7 +9,6 @@ from contests.api import router as contests_router
 from contests.operator_api import operator_router as contests_operator_router
 from core.api import router as core_internal_router
 from distributions.api import internal_router as distributions_internal_router
-from handovers.api import internal_router as handovers_internal_router
 from handovers.api import router as handovers_router
 from ledger.api import router as ledger_router
 from notifications.api import public_router as notifications_router
@@ -48,10 +46,8 @@ def health(request):
 
 
 api.add_router("/internal", core_internal_router)
-api.add_router("/internal/accounts", accounts_internal_router)
 api.add_router("/internal/notifications", notifications_internal_router)
 api.add_router("/internal/scoring", scoring_internal_router)
-api.add_router("/internal/handovers", handovers_internal_router)
 api.add_router("/internal/payments", payments_internal_router)
 api.add_router("/internal/distributions", distributions_internal_router)
 

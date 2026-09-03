@@ -35,24 +35,12 @@ LEGACY_BEAT_SCHEDULE = {
         "task": "core.call_payments_run_refunds",
         "schedule": _SCAN_INTERVAL_SECONDS,
     },
-    "handovers-release-due": {
-        "task": "core.call_handovers_release_due",
-        "schedule": _SCAN_INTERVAL_SECONDS,
-    },
     "notifications-dispatch-due": {
         "task": "core.call_notifications_dispatch_due",
         "schedule": _SCAN_INTERVAL_SECONDS,
     },
-    "notifications-lifecycle-run-due": {
-        "task": "core.call_notifications_lifecycle_run_due",
-        "schedule": _SCAN_INTERVAL_SECONDS,
-    },
     "scoring-run-pending": {
         "task": "core.call_scoring_run_pending",
-        "schedule": _SCAN_INTERVAL_SECONDS,
-    },
-    "accounts-purge-expired-identities": {
-        "task": "core.call_accounts_purge_expired_identities",
         "schedule": _SCAN_INTERVAL_SECONDS,
     },
 }
