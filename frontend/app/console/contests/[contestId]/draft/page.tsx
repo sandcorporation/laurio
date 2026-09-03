@@ -36,11 +36,14 @@ import {
 } from "@/lib/contests/chat-response";
 import {
   CHAT_MAX_HISTORY_TURNS,
+  type Category,
   type ContestDetail,
+  type DeliverableType,
   type RequirementGrade,
   type RequirementOut,
 } from "@/lib/contests/grill-types";
 
+import { BriefEditPanel, type BriefEditPatch } from "../../_components/brief-edit-panel";
 import { ContestStageStepper } from "../../_components/contest-stage-stepper";
 import { GrillChatPanel } from "../../_components/grill-chat-panel";
 import { RequirementDraftPanel } from "../../_components/requirement-draft-panel";
@@ -76,6 +79,14 @@ export default function ContestDraftPage() {
   const [requirementError, setRequirementError] = useState<string | null>(null);
   const [requirementBusy, setRequirementBusy] = useState(false);
 
+  // #113 — 브리프 수정(제목·설명·카테고리·요구형태·상금·마감). 편집 폼이 필요로
+  // 하는 선택지도 draft일 때만 함께 읽는다.
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [deliverableTypes, setDeliverableTypes] = useState<DeliverableType[]>([]);
+  const [briefSaving, setBriefSaving] = useState(false);
+  const [briefError, setBriefError] = useState<string | null>(null);
+  const [deliverableTypesChangedNotice, setDeliverableTypesChangedNotice] = useState(false);
+
   useEffect(() => {
     if (session.status !== "authenticated") return;
     let cancelled = false;
@@ -103,15 +114,25 @@ export default function ContestDraftPage() {
         return;
       }
 
-      // 대화 이력도 함께 읽는다 — "다시 들어와도 이어갈 수 있게 한다"
-      // (contests/models.py RequirementChatMessage). 이 조회가 실패해도 화면
-      // 자체는 죽지 않는다 — 빈 대화로 이어가면 그만이다.
-      const chatRes = await sessionFetch(`/api/backend/contests/${contestId}/requirement-chat/messages`);
+      // 대화 이력·브리프 편집 폼이 쓸 선택지도 함께 읽는다 — "다시 들어와도
+      // 이어갈 수 있게 한다"(contests/models.py RequirementChatMessage)와,
+      // 브리프 수정 폼(#113)이 카테고리·요구형태 선택지를 그리는 데 쓴다. 이
+      // 조회들이 실패해도 화면 자체는 죽지 않는다 — 빈 대화·빈 선택지로
+      // 이어가면 그만이다(수정 폼은 선택지가 없으면 저장이 막힐 뿐이다).
+      const [chatRes, catRes, dtRes] = await Promise.all([
+        sessionFetch(`/api/backend/contests/${contestId}/requirement-chat/messages`),
+        sessionFetch("/api/backend/contests/categories"),
+        sessionFetch("/api/backend/contests/deliverable-types"),
+      ]);
       const chatBody = chatRes.ok ? await chatRes.json().catch(() => null) : null;
+      const categoriesBody = catRes.ok ? await catRes.json().catch(() => null) : null;
+      const deliverableTypesBody = dtRes.ok ? await dtRes.json().catch(() => null) : null;
       if (cancelled) return;
 
       setRequirements(Array.isArray(contest.requirements) ? contest.requirements : []);
       setMessages(sanitizeChatTurns(chatBody));
+      setCategories(Array.isArray(categoriesBody) ? categoriesBody : []);
+      setDeliverableTypes(Array.isArray(deliverableTypesBody) ? deliverableTypesBody : []);
       setLoad({ status: "ready", contest });
     }
 
@@ -243,6 +264,56 @@ export default function ContestDraftPage() {
     }
   }
 
+  /** 브리프를 고친다(#113) — 판정은 전부 백엔드가 한다: 파생값(최소 상금 합계·
+   * 상금미달)은 이 함수가 계산하지 않고 `PATCH /contests/{id}` 응답을 그대로
+   * 반영한다. 요구형태가 바뀌었으면 배너를 띄운다 — 이미 붙인 Requirement는
+   * 지워지지 않지만 Sponsor가 스스로 검토해야 하기 때문이다. */
+  async function handleSaveBrief(patch: BriefEditPatch): Promise<boolean> {
+    if (load.status !== "ready") return false;
+    const previousTypeIds = load.contest.deliverable_types
+      .map((dt) => dt.id)
+      .sort((a, b) => a - b)
+      .join(",");
+
+    setBriefError(null);
+    setBriefSaving(true);
+    try {
+      const res = await sessionFetch(`/api/backend/contests/${contestId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+
+      if (!res.ok) {
+        setBriefError((await readErrorDetail(res)) ?? `수정하지 못했습니다 (${res.status})`);
+        return false;
+      }
+
+      const updated = (await res.json().catch(() => null)) as ContestDetail | null;
+      if (updated === null) {
+        setBriefError("수정 응답을 해석하지 못했습니다. 새로고침해 확인해 주세요.");
+        return false;
+      }
+
+      const nextTypeIds = updated.deliverable_types
+        .map((dt) => dt.id)
+        .sort((a, b) => a - b)
+        .join(",");
+      if (nextTypeIds !== previousTypeIds) {
+        setDeliverableTypesChangedNotice(true);
+      }
+
+      setRequirements(Array.isArray(updated.requirements) ? updated.requirements : requirements);
+      setLoad({ status: "ready", contest: updated });
+      return true;
+    } catch {
+      setBriefError("연결에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+      return false;
+    } finally {
+      setBriefSaving(false);
+    }
+  }
+
   async function handleDeleteRequirement(id: number) {
     setRequirementError(null);
     try {
@@ -315,6 +386,16 @@ export default function ContestDraftPage() {
       <div className="border-b border-rule px-8 py-3">
         <ContestStageStepper current="requirements" />
       </div>
+      <BriefEditPanel
+        contest={contest}
+        categories={categories}
+        deliverableTypes={deliverableTypes}
+        saving={briefSaving}
+        error={briefError}
+        deliverableTypesChangedNotice={deliverableTypesChangedNotice}
+        onDismissDeliverableTypesChangedNotice={() => setDeliverableTypesChangedNotice(false)}
+        onSave={handleSaveBrief}
+      />
       <div className="grid flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_452px]">
         <GrillChatPanel
           messages={messages}

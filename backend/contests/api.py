@@ -60,6 +60,7 @@ from .schemas import (
     ContestCreateIn,
     ContestOut,
     ContestReopenIn,
+    ContestUpdateIn,
     DeliverableTypeOut,
     HomeCurationGroupOut,
     InitiateJudgingExtensionIn,
@@ -505,6 +506,84 @@ def get_contest(request: HttpRequest, contest_id: int):
         if not is_owner:
             raise HttpError(404, "Contest를 찾을 수 없습니다.")
 
+    return _serialize_contest(contest)
+
+
+@router.patch("/contests/{contest_id}", response=ContestOut, auth=jwt_auth)
+def update_draft_contest(request: HttpRequest, contest_id: int, payload: ContestUpdateIn):
+    """결제가 문을 닫기 전까지는 draft를 무엇이든 고칠 수 있다 (#113, 부모 #110).
+
+    지금까지 Contest를 고치는 엔드포인트 자체가 없었다 — 브리프를 잘못 써도,
+    요구형태를 다시 고르고 싶어도 돌아갈 자리가 없었다. 이 엔드포인트가 첫
+    번째다. 게이트는 `_get_owned_draft_contest`가 진다 — 소유자가 아니면
+    404("있는지가 아니라 없는지"), DRAFT가 아니면 409("분명히 거절당한다").
+
+    **돈에 닿는 값을 바꾸면 파생값을 다시 계산한다.** 요구형태(`deliverable_
+    type_ids`)나 상금(`prize`)이 바뀌면 `required_minimum_prize`(최소 제안 상금
+    합계)와 `is_underfunded`(상금미달 배지)를 새로 구한다 — 그 값은 "개최 시점의
+    스냅샷"인데 DRAFT는 아직 개최된 것이 아니므로 다시 계산하는 것이 원래 의미에
+    맞다(결제가 그 스냅샷을 굳힌다). `required_minimum_prize`는 항상 **지금의**
+    DeliverableType.minimum_prize에서 다시 합산한다 — 운영자가 그 사이 최소
+    상금을 바꿨을 수도 있고, DRAFT는 아직 그 변경을 반영해도 되는 상태이기
+    때문이다.
+
+    **이미 붙인 Requirement는 요구형태를 바꿔도 지우지 않는다** — 자유 텍스트라
+    구조적으로 무효가 되지 않고, 그것을 쓴 사람이 Sponsor 자신이다(spec #110
+    Implementation Decisions). 이 엔드포인트는 `Requirement`를 전혀 건드리지
+    않는다 — 화면이 "요구형태를 바꿨다"는 사실을 스스로 안내한다.
+    """
+
+    contest = _get_owned_draft_contest(request, contest_id)
+
+    with transaction.atomic():
+        if payload.title is not None:
+            sanitized_title = sanitize_free_text(payload.title)
+            if not sanitized_title:
+                raise HttpError(422, "제목이 비어 있습니다.")
+            contest.title = sanitized_title
+
+        if payload.description is not None:
+            contest.description = sanitize_free_text(payload.description)
+
+        if payload.category_id is not None:
+            try:
+                contest.category = Category.objects.get(id=payload.category_id, is_active=True)
+            except Category.DoesNotExist as exc:
+                raise HttpError(422, "존재하지 않는 Category입니다.") from exc
+
+        if payload.deadline_at is not None:
+            contest.deadline_at = payload.deadline_at
+
+        deliverable_types_changed = False
+        if payload.deliverable_type_ids is not None:
+            if not payload.deliverable_type_ids:
+                raise HttpError(422, "DeliverableType을 하나 이상 선택해야 합니다.")
+            deliverable_types = list(
+                DeliverableType.objects.filter(
+                    id__in=payload.deliverable_type_ids, is_active=True
+                )
+            )
+            if len(deliverable_types) != len(set(payload.deliverable_type_ids)):
+                raise HttpError(422, "존재하지 않는 DeliverableType이 포함되어 있습니다.")
+            contest.deliverable_types.set(deliverable_types)
+            deliverable_types_changed = True
+
+        if payload.prize is not None:
+            contest.prize = payload.prize
+
+        if deliverable_types_changed or payload.prize is not None:
+            minimum_total = _minimum_total(
+                list(contest.deliverable_types.values_list("id", flat=True))
+            )
+            contest.required_minimum_prize = minimum_total
+            contest.is_underfunded = contest.prize < minimum_total
+
+        contest.save()
+
+    contest.refresh_from_db()
+    # draft는 결제 전까지 참가할 수 없다 — annotate 대신 직접 0을 채운다
+    # (create_contest/reopen_contest와 같은 이유, _serialize_contest 참고).
+    contest.submission_count = 0
     return _serialize_contest(contest)
 
 

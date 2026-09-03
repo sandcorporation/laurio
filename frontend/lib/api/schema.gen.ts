@@ -362,7 +362,30 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update Draft Contest
+         * @description 결제가 문을 닫기 전까지는 draft를 무엇이든 고칠 수 있다 (#113, 부모 #110).
+         *
+         *     지금까지 Contest를 고치는 엔드포인트 자체가 없었다 — 브리프를 잘못 써도,
+         *     요구형태를 다시 고르고 싶어도 돌아갈 자리가 없었다. 이 엔드포인트가 첫
+         *     번째다. 게이트는 `_get_owned_draft_contest`가 진다 — 소유자가 아니면
+         *     404("있는지가 아니라 없는지"), DRAFT가 아니면 409("분명히 거절당한다").
+         *
+         *     **돈에 닿는 값을 바꾸면 파생값을 다시 계산한다.** 요구형태(`deliverable_
+         *     type_ids`)나 상금(`prize`)이 바뀌면 `required_minimum_prize`(최소 제안 상금
+         *     합계)와 `is_underfunded`(상금미달 배지)를 새로 구한다 — 그 값은 "개최 시점의
+         *     스냅샷"인데 DRAFT는 아직 개최된 것이 아니므로 다시 계산하는 것이 원래 의미에
+         *     맞다(결제가 그 스냅샷을 굳힌다). `required_minimum_prize`는 항상 **지금의**
+         *     DeliverableType.minimum_prize에서 다시 합산한다 — 운영자가 그 사이 최소
+         *     상금을 바꿨을 수도 있고, DRAFT는 아직 그 변경을 반영해도 되는 상태이기
+         *     때문이다.
+         *
+         *     **이미 붙인 Requirement는 요구형태를 바꿔도 지우지 않는다** — 자유 텍스트라
+         *     구조적으로 무효가 되지 않고, 그것을 쓴 사람이 Sponsor 자신이다(spec #110
+         *     Implementation Decisions). 이 엔드포인트는 `Requirement`를 전혀 건드리지
+         *     않는다 — 화면이 "요구형태를 바꿨다"는 사실을 스스로 안내한다.
+         */
+        patch: operations["contests_api_update_draft_contest"];
         trace?: never;
     };
     "/api/contests/{contest_id}/award": {
@@ -2566,6 +2589,32 @@ export interface components {
          * @enum {string}
          */
         ContestSort: "deadline" | "prize";
+        /**
+         * ContestUpdateIn
+         * @description DRAFT Contest를 고치는 요청 (#113, 부모 #110).
+         *
+         *     전부 선택 필드다 — Sponsor가 한 화면에서 한 번에 몇 개를 고치든, 건드리지
+         *     않은 필드는 `None`으로 와서 그대로 둔다(부분 갱신). `deliverable_type_ids`가
+         *     `None`이 아니라 빈 리스트로 오면 `create_contest`와 같은 이유로 422다 —
+         *     산출물 종류를 전부 비우는 것은 유효한 개최 상태가 아니다.
+         *
+         *     결제가 문을 닫기 전(DRAFT)에만 이 스키마가 쓰인다 — 게이트는
+         *     `_get_owned_draft_contest`가 진다(소유자가 아니면 404, DRAFT가 아니면 409).
+         */
+        ContestUpdateIn: {
+            /** Category Id */
+            category_id?: number | null;
+            /** Deadline At */
+            deadline_at?: string | null;
+            /** Deliverable Type Ids */
+            deliverable_type_ids?: number[] | null;
+            /** Description */
+            description?: string | null;
+            /** Prize */
+            prize?: number | null;
+            /** Title */
+            title?: string | null;
+        };
         /** CreateNotificationIn */
         CreateNotificationIn: {
             /** Context */
@@ -4198,6 +4247,32 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContestOut"];
+                };
+            };
+        };
+    };
+    contests_api_update_draft_contest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contest_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContestUpdateIn"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {
