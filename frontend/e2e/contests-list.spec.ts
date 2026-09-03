@@ -127,6 +127,39 @@ test("@exclusive 상금순 정렬이 마감 임박순과 다른 순서를 낸다
   expect(fundedIndex).toBeLessThan(underfundedIndex);
 });
 
+// PS-01 (#106, spec #105) — 참가작 수가 목록에 보이고, 백엔드가 낸 값과
+// 일치한다(심고 세는 것을 같은 테스트에서 대비시킨다, #106 인수조건). 화면은
+// 이 숫자를 다시 세지 않는다 — seed_e2e_contests.py 가 이미 심은 뒤 다시 세어
+// 돌려준 값(seeded.funded.submission_count)을 그대로 기대값으로 쓴다.
+test("@exclusive 참가작 수가 목록에 보이고 백엔드가 심은 값과 일치한다", async ({ page }) => {
+  await page.goto("/contests");
+
+  const count = page
+    .locator(`[data-contest-row="${seeded.funded.id}"]`)
+    .getByTestId("submission-count");
+  await expect(count).toHaveText(`참가작 ${seeded.funded.submission_count}건`);
+  await expect(count).toHaveAttribute(
+    "data-submission-count",
+    String(seeded.funded.submission_count),
+  );
+});
+
+// 0도 숨기지 않는다 — "0"이라는 숫자가 아니라 "아직 참가작이 없습니다"로
+// 읽힌다. 숫자와 문구가 다른 층에서 결정된다는 것이 #106 인수조건이다.
+test("@exclusive 참가작이 없는 Contest 는 「아직 참가작이 없습니다」로 보인다", async ({
+  page,
+}) => {
+  expect(seeded.underfunded.submission_count).toBe(0);
+
+  await page.goto("/contests");
+
+  const count = page
+    .locator(`[data-contest-row="${seeded.underfunded.id}"]`)
+    .getByTestId("submission-count");
+  await expect(count).toHaveText("아직 참가작이 없습니다");
+  await expect(count).toHaveAttribute("data-submission-count", "0");
+});
+
 test("@exclusive 마감이 임박한 Contest 가 시각적으로 구분된다", async ({ page }) => {
   // underfunded 는 2일 뒤 마감(seed_e2e_contests) — IMMINENT_DEADLINE_DAYS(3일)
   // 안쪽이라 임박 스타일(text-attention)이 붙어야 한다. funded 는 10일 뒤라 붙지

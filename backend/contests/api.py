@@ -17,7 +17,7 @@ from uuid import UUID
 from datetime import timedelta
 
 from django.db import IntegrityError, transaction
-from django.db.models import DateTimeField, Q, QuerySet, Sum, Value
+from django.db.models import Count, DateTimeField, Q, QuerySet, Sum, Value
 from django.http import HttpRequest
 from ninja import Query, Router
 from ninja.errors import HttpError
@@ -111,6 +111,13 @@ def _minimum_total(deliverable_type_ids: list[int]) -> int:
 
 
 def _serialize_contest(contest: Contest) -> ContestOut:
+    # `contest.submission_count`는 annotate로 미리 실려 있어야 한다
+    # (list_contests/get_contest/get_home_curation) — 새로 만든 Contest는
+    # 호출부가 0을 직접 채워 넣는다(create_contest/reopen_contest, 둘 다 방금
+    # 만든 행이라 Submission이 있을 수 없다). 여기서 조용히 0으로 기본값을
+    # 주지 않는 이유는, annotate를 빠뜨린 새 호출부가 있으면 AttributeError로
+    # 바로 드러나야 하기 때문이다 — getattr로 감싸면 그 실수가 "항상 0"이라는
+    # 그럴듯한 값으로 위장해 테스트를 통과할 수 있다.
     return ContestOut(
         id=contest.id,
         title=contest.title,
@@ -132,6 +139,7 @@ def _serialize_contest(contest: Contest) -> ContestOut:
         source_contest_id=contest.source_contest_id,
         created_at=contest.created_at,
         judging_ends_at=contest.judging_ends_at,
+        submission_count=contest.submission_count,
     )
 
 
@@ -246,6 +254,9 @@ def create_contest(request: HttpRequest, payload: ContestCreateIn):
         )
 
     contest.refresh_from_db()
+    # 방금 만든 행이라 Submission이 있을 수 없다 — annotate 대신 직접 0을 채운다
+    # (_serialize_contest 참고).
+    contest.submission_count = 0
     return _serialize_contest(contest)
 
 
@@ -300,6 +311,12 @@ def list_contests(request: HttpRequest, filters: Query[ContestListFilters]):
         queryset.order_by(*ordering)
         .select_related("category")
         .prefetch_related("deliverable_types", "requirements")
+        # 참가작 수(#106, spec #105) — 목록은 행이 가장 많은 화면이라 행마다
+        # 세면 N+1이 정확히 여기서 터진다. `distinct=True`는 `deliverable_type`
+        # 필터가 M2M을 조인할 때(위 `deliverable_types__id` 필터) Count가 그
+        # 조인으로 부풀려지는 것을 막는다 — 필터가 없을 때도 안전하고 비용도
+        # 무시할 만하다.
+        .annotate(submission_count=Count("submissions", distinct=True))
     )
 
 
@@ -425,8 +442,14 @@ def get_home_curation(request: HttpRequest):
 
     now = Clock.now()
 
-    base = Contest.objects.select_related("category").prefetch_related(
-        "deliverable_types", "requirements"
+    base = (
+        Contest.objects.select_related("category")
+        .prefetch_related("deliverable_types", "requirements")
+        # 참가작 수(#106, spec #105) — 네 묶음 각각의 쿼리(_home_bucket_queryset)가
+        # 이 `base`를 그대로 이어받아 필터만 얹으므로, annotate를 여기 한 번만
+        # 둬도 네 쿼리 전부에 실린다. 홈 큐레이션이 이미 경계해 둔 N+1(#94)과
+        # 같은 이유로 묶음마다·행마다 따로 세지 않는다.
+        .annotate(submission_count=Count("submissions", distinct=True))
     )
 
     groups = []
@@ -465,6 +488,9 @@ def get_contest(request: HttpRequest, contest_id: int):
         contest = (
             Contest.objects.select_related("category")
             .prefetch_related("deliverable_types", "requirements")
+            # 참가작 수(#106, spec #105) — 단건이라도 annotate로 얻는다.
+            # `_serialize_contest`가 `contest.submission_count`를 그대로 읽는다.
+            .annotate(submission_count=Count("submissions", distinct=True))
             .get(id=contest_id)
         )
     except Contest.DoesNotExist as exc:
@@ -596,6 +622,9 @@ def reopen_contest(request: HttpRequest, contest_id: int, payload: ContestReopen
         )
 
     new_contest.refresh_from_db()
+    # 방금 만든 행이라 Submission이 있을 수 없다 — annotate 대신 직접 0을 채운다
+    # (_serialize_contest 참고).
+    new_contest.submission_count = 0
     return _serialize_contest(new_contest)
 
 

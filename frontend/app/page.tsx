@@ -29,7 +29,7 @@ export const dynamic = "force-dynamic";
 import Link from "next/link";
 
 import { fetchHomeCuration, type Contest, type HomeCurationGroup } from "@/lib/api/contests";
-import { formatDday, formatPrize, isImminent } from "@/lib/contest-format";
+import { formatDday, formatPrize, formatSubmissionCount, isImminent } from "@/lib/contest-format";
 import { HOME_BUCKET_EMPTY_MESSAGES, HOME_BUCKET_LABELS } from "@/lib/home-curation";
 
 export default async function Home() {
@@ -113,6 +113,13 @@ function HomeContestRow({ contest }: { contest: Contest }) {
             {contest.is_underfunded && <UnderfundedBadge />}
           </div>
           <span className="text-xs text-ink/60">{contest.category.name}</span>
+          <span
+            data-testid="submission-count"
+            data-submission-count={contest.submission_count}
+            className="text-xs text-ink/60"
+          >
+            {formatSubmissionCount(contest.submission_count)}
+          </span>
         </div>
         <div
           className={`text-right font-mono text-sm font-medium ${contest.is_underfunded ? "text-attention" : ""}`}

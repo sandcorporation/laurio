@@ -36,6 +36,10 @@ export type SeededContest = {
   deliverable_types: string[];
   deliverable_type_ids: number[];
   requirements: SeededRequirement[];
+  // #106 — 이 Contest 에 실제로 심어진 Submission 수. seed_e2e_contests.py 의
+  // `_serialize` 가 심은 뒤에 다시 세어 돌려주므로, e2e 는 이 값과 화면에 보이는
+  // 참가작 수를 그대로 비교할 수 있다(하드코딩한 기대값을 따로 두지 않는다).
+  submission_count: number;
 };
 
 // FE-06(#31) — 개발자 공개 프로필 SSR 테스트가 검증할 백엔드 값. 마감된

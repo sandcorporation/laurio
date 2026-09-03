@@ -30,3 +30,12 @@ export function isImminent(deadlineAt: string, now: Date = new Date()): boolean 
 export function formatPrize(amount: number): string {
   return amount.toLocaleString("ko-KR");
 }
+
+// 참가작 수 문구(#106, spec #105). 백엔드(`ContestOut.submission_count`)는 숫자
+// 0을 그대로 보낸다 — 그것을 "아직 참가작이 없습니다"로 읽히게 바꾸는 것은
+// 화면의 몫이다. 숫자와 문구가 **다른 층**에서 결정된다는 것이 #106 인수조건
+// 이고, 이 함수가 그 경계선이다 — 화면은 이 함수 말고 다시 세지 않는다.
+export function formatSubmissionCount(count: number): string {
+  if (count === 0) return "아직 참가작이 없습니다";
+  return `참가작 ${count}건`;
+}
