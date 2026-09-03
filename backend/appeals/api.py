@@ -45,7 +45,6 @@ from core.clock import Clock
 from distributions.services import is_holding_distribution
 from core.operator_auth import OperatorAuth
 from submissions.models import Submission
-from submissions.participation import within_appeal_window
 
 from .models import Appeal, SourceReading
 from .schemas import (
@@ -121,7 +120,7 @@ def create_appeal(request: HttpRequest, submission_id: int, payload: AppealCreat
     # **화면이 버튼을 감추는 것과 여기서 거절하는 것은 둘 다 필요하다** — 앞은
     # 사고 예방, 뒤는 방어다(#67 이 심판에 대해 세운 것과 같은 구분). 응답의
     # 필드는 아무것도 강제하지 못한다.
-    if not within_appeal_window(submission.contest, Clock.now()):
+    if not submission.contest.appeal_window_open(Clock.now()):
         raise HttpError(
             409,
             "이의제기 기한(심사기간 종료)이 지나 더 이상 접수할 수 없습니다.",

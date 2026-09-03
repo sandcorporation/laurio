@@ -226,12 +226,10 @@ class OwnScoreOut(Schema):
     def resolve_can_appeal(obj) -> bool:
         from core.clock import Clock
 
-        from .participation import within_appeal_window
-
         submission = obj.submission
         if getattr(submission, "appeal", None) is not None:
             return False
-        return within_appeal_window(submission.contest, Clock.now())
+        return submission.contest.appeal_window_open(Clock.now())
 
     @staticmethod
     def resolve_percentage(obj) -> str:

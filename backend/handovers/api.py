@@ -85,7 +85,8 @@ def accept_handover(request: HttpRequest, contest_id: int):
     if contest.sponsor.user_id != request.auth_user.id:
         raise HttpError(403, "본인이 개최한 Contest만 인수 확인할 수 있습니다.")
 
-    handover = release_escrow(handover, released_via=Handover.ReleasedVia.SPONSOR_ACCEPTED)
+    if handover.acceptable():
+        handover = release_escrow(handover, released_via=Handover.ReleasedVia.SPONSOR_ACCEPTED)
     return 200, _serialize_handover(handover)
 
 

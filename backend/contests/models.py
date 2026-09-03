@@ -12,9 +12,11 @@
 
 from __future__ import annotations
 import uuid
+from datetime import timedelta
 
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 
 from core.classification import Classification
 
@@ -100,6 +102,23 @@ class DeliverableTypeChange(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"DeliverableTypeChange({self.action}, deliverable_type_id={self.deliverable_type_id})"
+
+
+class ContestQuerySet(models.QuerySet):
+    """Contest 의 시간 창을 필터로 묻는 짝 (#143, #124). 파이썬 술어(`Contest.judging_window_open`
+    등)와 이름이 같고 뜻이 같아야 한다 — 둘의 일치는 tests/test_contest_windows.py 가 경계값
+    픽스처(직전·경계·직후)로 지킨다."""
+
+    def judging_window_open(self, now):
+        return self.filter(judging_ends_at__gt=now)
+
+    def appeal_window_open(self, now):
+        return self.filter(Q(judging_ends_at__isnull=True) | Q(judging_ends_at__gt=now))
+
+    def distribution_due(self, as_of, policy):
+        from distributions.services import distribution_due_q
+
+        return self.filter(distribution_due_q(as_of, policy))
 
 
 class Contest(models.Model):
@@ -200,12 +219,47 @@ class Contest(models.Model):
             ),
         ]
 
+    objects = ContestQuerySet.as_manager()
+
     def __str__(self) -> str:  # pragma: no cover
         return self.title
 
     @property
     def is_published(self) -> bool:
         return self.Status.SUBMITTABLE(self.status)
+
+    # --- 시간 창 (#143, #124) — Contest 가 자기 시간 창을 안다 ---------------------------------
+    #
+    # 「이 사람이 지금 무엇을 해야 하는가」를 판정하는 번역기(sponsorship·participation)와 그 행위
+    # 엔드포인트의 409/403 가드(awards.api·contests.api 연장)가 **같은 메서드**를 부른다 — 조건을
+    # 두 벌로 쓰면 언젠가 갈라지고, 그때 화면은 시키는 대로 한 사용자에게 409 를 보여준다.
+    # 경계는 스케줄러와 같다: `judging_ends_at <= as_of` 이면 CLOSED -> JUDGING_ENDED 로 옮기므로,
+    # 심사 창은 now 가 judging_ends_at 과 같아지는 순간부터 이미 닫혀 있다(#13 리뷰 지적 7).
+
+    def judging_window_open(self, now) -> bool:
+        """Sponsor 가 Award·심사기간 연장을 할 수 있는 시간 창. 심사기간이 아직 없으면(CLOSED 전이가
+        judging_ends_at 을 찍기 전) 닫혀 있다 — 행위 엔드포인트가 그렇게 거부해 왔고, 번역기도
+        같은 답을 해야 「심사하세요」라고 해놓고 403 이 나는 일이 없다."""
+
+        return self.judging_ends_at is not None and now < self.judging_ends_at
+
+    def appeal_window_open(self, now) -> bool:
+        """Developer 가 이의를 낼 수 있는 시간 창 = 심사 창의 끝과 같은 시각(#74) — 그래서 Sponsor 의
+        유료 연장이 이의 창도 늘린다. 그 결합이 한 파일에 보이도록 여기 둔다. 심사기간이 없는
+        Contest 는 창이 닫히지 않는다(`SubmissionDetailOut.appeal_deadline` 이 그렇게 약속한다) —
+        심사 창과 다른 점이다."""
+
+        return self.judging_ends_at is None or now < self.judging_ends_at
+
+    def distribution_due(self, as_of, policy) -> bool:
+        """무응답 배분의 차례가 됐는가 — `distributions.services.distribution_due_q` 의 파이썬 짝."""
+
+        return (
+            self.Status.AWAITING_DISTRIBUTION(self.status)
+            and self.judging_ends_at is not None
+            and self.judging_ends_at <= as_of - timedelta(days=policy.distribution_wait_days)
+            and getattr(self, "distribution", None) is None
+        )
 
 
 class HomeStatusAxis(models.TextChoices):

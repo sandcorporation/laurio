@@ -15,9 +15,11 @@ from .services import release_escrow
 
 
 def _due_handovers(as_of, ctx):
-    return Handover.objects.filter(
-        status=Handover.Status.PENDING_ACCEPTANCE, release_deadline_at__lte=as_of
-    ).select_related("award__contest")
+    return (
+        Handover.objects.acceptable()
+        .filter(release_deadline_at__lte=as_of)
+        .select_related("award__contest")
+    )
 
 
 def _release(handover, as_of, ctx):

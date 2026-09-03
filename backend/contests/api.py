@@ -755,12 +755,8 @@ def _reject_if_judging_period_is_not_extendable(contest: Contest) -> None:
     if not Contest.Status.JUDGING_EXTENDABLE(contest.status):
         raise HttpError(409, "지금은 심사기간을 연장할 수 있는 상태가 아닙니다.")
 
-    # 코드베이스 관용구와 맞춘다: 심사기간 종료는 `judging_ends_at <= as_of`일 때
-    # 일어나므로(core.transitions), "아직 끝나지 않았다"는 정확히 `now <
-    # judging_ends_at`이다. Award(awards.api)도 같은 경계를 쓴다(#13 리뷰 지적 7 —
-    # 세 곳이 서로 다른 부등호를 쓰면 경계 순간에 판정이 갈린다).
-    now = Clock.now()
-    if contest.judging_ends_at is None or now >= contest.judging_ends_at:
+    # 시간 창은 Contest 가 안다(#143) — Award 가드·Sponsor 번역기와 같은 메서드다.
+    if not contest.judging_window_open(Clock.now()):
         # status가 아직 CLOSED로 보여도(스캔 주기만큼 늦어질 수 있다, ADR-0003)
         # 시각으로 다시 한번 확인한다 — 스케줄러가 아직 JUDGING_ENDED로 옮기지
         # 못했다고 해서 이미 끝난 심사기간을 연장해줄 수는 없다.
