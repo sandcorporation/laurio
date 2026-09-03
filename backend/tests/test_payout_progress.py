@@ -84,3 +84,85 @@ def test_identity_resubmission_after_confirmed_replaces_the_value_and_keeps_conf
     from verification.crypto import decrypt
 
     assert decrypt(identity.resident_registration_number_encrypted) == "9001017654321"
+
+
+def _toss_payout_webhook(client, *, idempotency_key: str, vendor_status: str, attempt: int = 0):
+    """실물 payout.changed 웹훅 — refPayoutId 는 `{key}-{attempt}` 형식이다."""
+
+    import json
+
+    from django.test import override_settings
+
+    payload = json.dumps(
+        {
+            "eventType": "payout.changed",
+            "data": {"refPayoutId": f"{idempotency_key}-{attempt}", "status": vendor_status},
+        }
+    ).encode("utf-8")
+    transmission_time = "2024-01-01T00:00:00+09:00"
+    with override_settings(TOSS_API_SECURE_KEY=p._TEST_TOSS_SECURE_KEY):
+        signature = p._sign_toss_webhook(payload=payload, transmission_time=transmission_time)
+        return client.post(
+            f"{p.PAYOUTS_URL}/webhook/toss",
+            data=payload,
+            content_type="application/json",
+            HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_TIME=transmission_time,
+            HTTP_TOSSPAYMENTS_WEBHOOK_SIGNATURE=signature,
+            HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_ID="whid-progress",
+        )
+
+
+@pytest.mark.django_db
+def test_late_paid_webhook_on_seller_pending_with_identity_reaches_confirmed(
+    client, category, landing_type
+):
+    """표의 빈칸이었던 조합 — Seller 는 READY 인데 실이체가 거절돼 CSP 에 머물고, 신원은 이미
+    냈다. 뒤늦게 payout.changed COMPLETED 가 오면 두 대기가 모두 풀린 것이므로 CONFIRMED 다.
+    (#132: 웹훅 입구도 사실만 기록하고 advance 가 판정한다.)"""
+
+    from django.test import override_settings
+
+    sponsor, dev, contest, submission = p._ready_for_payout(client, category, landing_type)
+    requested = p._request_payout(client, dev, contest["id"])
+    key = requested["idempotency_key"]
+
+    with override_settings(
+        PAYOUT_ADAPTER_MODE="tests.test_payouts._TransferFailsOnceSellerReadyPayoutAdapter"
+    ):
+        confirmed = p._confirm_payout(client, dev, key)
+        assert confirmed.json()["status"] == "confirmed_seller_pending"
+        assert confirmed.json()["transfer_status"] == "failed"
+
+        identity = _submit_identity(client, dev, key)
+        assert identity.json()["status"] == "confirmed_seller_pending"  # 실이체가 아직
+
+    resp = _toss_payout_webhook(client, idempotency_key=key, vendor_status="COMPLETED")
+    assert resp.status_code == 200, resp.content
+    assert resp.json()["status"] == "confirmed"
+
+    payout = Payout.objects.get(idempotency_key=key)
+    assert payout.status == Payout.Status.CONFIRMED
+    assert payout.transfer_status == Payout.TransferStatus.COMPLETED
+
+
+@pytest.mark.django_db
+def test_failed_vendor_webhook_before_any_confirm_ends_the_attempt_as_failed(
+    client, category, landing_type
+):
+    """REQUESTED 에서 실물 웹훅이 FAILED 를 보고하면 이 시도는 FAILED 로 끝난다 — 원장에는
+    아무것도 남지 않고, 새 요청을 낼 수 있다(표의 빈칸이었던 「실물 웹훅 경유 mark_failed」)."""
+
+    sponsor, dev, contest, submission = p._ready_for_payout(client, category, landing_type)
+    requested = p._request_payout(client, dev, contest["id"])
+    key = requested["idempotency_key"]
+
+    resp = _toss_payout_webhook(client, idempotency_key=key, vendor_status="FAILED")
+    assert resp.status_code == 200, resp.content
+    assert resp.json()["status"] == "failed"
+
+    payout = Payout.objects.get(idempotency_key=key)
+    assert payout.status == Payout.Status.FAILED
+    assert payout.journal_entry_id is None
+
+    retry = p._request_payout(client, dev, contest["id"])
+    assert retry["idempotency_key"] != key
