@@ -241,4 +241,44 @@ test.describe("결제 전까지는 초안을 고칠 수 있다", () => {
     }, contestId);
     expect(patchStatus).toBe(404);
   });
+
+  test("유효하지 않은 값이면 저장 버튼이 막히고 이유가 보인다 — 눌러도 아무 일도 안 하는 것처럼 보이지 않는다", async ({
+    page,
+  }) => {
+    // 코드리뷰 지적 3 — 예전에는 상금·요구형태·마감·카테고리 중 하나라도
+    // 비어 있으면 submit()이 조용히 리턴해, 저장을 눌러도 클릭이 씹힌 것처럼
+    // 보였다. 지금은 버튼도 막히고 이유도 보인다.
+    const runId = `${Date.now()}`;
+    await login(page, `draft-edit-invalid-${runId}`);
+    await verify(page, `draft-edit-invalid-${runId}`);
+    await createDraftViaForm(page, runId, { prize: 5_000_000, deliverableTypeName: "랜딩·원페이지" });
+
+    await page.getByTestId("draft-edit-brief-toggle").click();
+
+    // 상금을 비운다.
+    await page.getByTestId("draft-edit-prize").fill("");
+    await expect(page.getByTestId("draft-edit-save")).toBeDisabled();
+    await expect(page.getByTestId("draft-edit-validation-hint")).toContainText(
+      "상금은 0보다 큰 금액이어야 합니다",
+    );
+
+    // 상금을 되돌리면 버튼이 다시 풀린다.
+    await page.getByTestId("draft-edit-prize").fill("5000000");
+    await expect(page.getByTestId("draft-edit-save")).toBeEnabled();
+    await expect(page.getByTestId("draft-edit-validation-hint")).toHaveCount(0);
+
+    // 요구형태를 전부 해제한다.
+    const landingId = await findByName(page, "/api/backend/contests/deliverable-types", "랜딩·원페이지");
+    await page.getByTestId(`draft-edit-deliverable-type-${landingId}-checkbox`).uncheck();
+    await expect(page.getByTestId("draft-edit-save")).toBeDisabled();
+    await expect(page.getByTestId("draft-edit-validation-hint")).toContainText(
+      "요구형태를 하나 이상 선택해주세요",
+    );
+
+    // 요구형태를 다시 고르고, 이번엔 마감을 비운다.
+    await page.getByTestId(`draft-edit-deliverable-type-${landingId}-checkbox`).check();
+    await page.getByTestId("draft-edit-deadline").fill("");
+    await expect(page.getByTestId("draft-edit-save")).toBeDisabled();
+    await expect(page.getByTestId("draft-edit-validation-hint")).toContainText("마감 기한을 선택해주세요");
+  });
 });

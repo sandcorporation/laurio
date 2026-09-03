@@ -104,7 +104,8 @@ export default function ContestDraftPage() {
         return;
       }
       const contest = (await contestRes.json().catch(() => null)) as ContestDetail | null;
-      if (cancelled || contest === null) {
+      if (cancelled) return;
+      if (contest === null) {
         setLoad({ status: "error", message: "공모전 정보를 해석하지 못했습니다." });
         return;
       }
@@ -119,14 +120,19 @@ export default function ContestDraftPage() {
       // 브리프 수정 폼(#113)이 카테고리·요구형태 선택지를 그리는 데 쓴다. 이
       // 조회들이 실패해도 화면 자체는 죽지 않는다 — 빈 대화·빈 선택지로
       // 이어가면 그만이다(수정 폼은 선택지가 없으면 저장이 막힐 뿐이다).
+      // 각 fetch를 개별적으로 catch한다 — `Promise.all`을 그대로 쓰면 셋 중
+      // 하나가 네트워크 수준에서 reject(fetch 자체가 던짐)될 때 나머지 둘이
+      // 성공했어도 전체가 reject되어 아래 `loadAll().catch()`가 이미 확인한
+      // Contest까지 통째로 "error" 상태로 덮어버린다 — 바로 위 주석이 약속한
+      // "실패해도 화면 자체는 죽지 않는다"가 깨진다.
       const [chatRes, catRes, dtRes] = await Promise.all([
-        sessionFetch(`/api/backend/contests/${contestId}/requirement-chat/messages`),
-        sessionFetch("/api/backend/contests/categories"),
-        sessionFetch("/api/backend/contests/deliverable-types"),
+        sessionFetch(`/api/backend/contests/${contestId}/requirement-chat/messages`).catch(() => null),
+        sessionFetch("/api/backend/contests/categories").catch(() => null),
+        sessionFetch("/api/backend/contests/deliverable-types").catch(() => null),
       ]);
-      const chatBody = chatRes.ok ? await chatRes.json().catch(() => null) : null;
-      const categoriesBody = catRes.ok ? await catRes.json().catch(() => null) : null;
-      const deliverableTypesBody = dtRes.ok ? await dtRes.json().catch(() => null) : null;
+      const chatBody = chatRes?.ok ? await chatRes.json().catch(() => null) : null;
+      const categoriesBody = catRes?.ok ? await catRes.json().catch(() => null) : null;
+      const deliverableTypesBody = dtRes?.ok ? await dtRes.json().catch(() => null) : null;
       if (cancelled) return;
 
       setRequirements(Array.isArray(contest.requirements) ? contest.requirements : []);

@@ -572,13 +572,38 @@ def update_draft_contest(request: HttpRequest, contest_id: int, payload: Contest
             contest.prize = payload.prize
 
         if deliverable_types_changed or payload.prize is not None:
-            minimum_total = _minimum_total(
-                list(contest.deliverable_types.values_list("id", flat=True))
+            # 지금 붙어 있는 deliverable_types를 있는 그대로 합산한다 —
+            # `_minimum_total`(생성/재개최가 "새로 고를 수 있는 것"을 거를 때
+            # 쓰는 is_active=True 필터)을 여기 그대로 쓰면, 운영자가 그 사이
+            # 비활성화한 타입이 응답의 deliverable_types 목록(_serialize_contest,
+            # is_active를 보지 않는다)에는 여전히 나오는데 최소 상금 합계에서만
+            # 조용히 빠진다 — 같은 응답 안에서 "무엇이 붙어 있는가"와 "최소
+            # 상금이 얼마인가"가 서로 다른 집합을 가리키는 불일치다(코드리뷰
+            # 지적). 그래서 여기서는 필터 없이 지금 붙어 있는 것 전부를 더한다.
+            minimum_total = (
+                contest.deliverable_types.aggregate(total=Sum("minimum_prize"))["total"] or 0
             )
             contest.required_minimum_prize = minimum_total
             contest.is_underfunded = contest.prize < minimum_total
 
         contest.save()
+
+        if payload.prize is not None:
+            # 결제가 문을 닫기 전까지는 결제 화면을 먼저 열어(POST /payments가
+            # REQUESTED Payment를 만든다) 상금을 확인한 뒤에도 초안으로 돌아가
+            # 다시 고칠 수 있다(#111의 "요구사항으로 돌아가기"). Escrow는
+            # `Payment.prize_amount`로 예치되고 실제 Payout은 `Contest.prize`
+            # 를 기준으로 나가므로(payments/services.py mark_paid,
+            # payouts/services.py) — 이 상금 변경 시점에 진행 중인(REQUESTED)
+            # Payment가 있다면 그 스냅샷을 지금 값으로 맞춘다. **불변식: REQUESTED
+            # Payment는 그것이 속한 Contest와 다른 금액을 가질 수 없다.** PAID는
+            # 이미 굳어진(그리고 Contest를 published로 넘긴) 스냅샷이라 손대지
+            # 않는다 — PAID가 존재한다는 것 자체가 이 Contest가 더 이상 DRAFT가
+            # 아니라는 뜻이라 이 엔드포인트에 도달하지도 않는다
+            # (_get_owned_draft_contest가 먼저 409로 막는다).
+            Payment.objects.filter(
+                contest=contest, status=Payment.Status.REQUESTED
+            ).update(prize_amount=contest.prize)
 
     contest.refresh_from_db()
     # draft는 결제 전까지 참가할 수 없다 — annotate 대신 직접 0을 채운다

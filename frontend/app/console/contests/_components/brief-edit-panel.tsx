@@ -73,13 +73,21 @@ export function BriefEditPanel({
 }: BriefEditPanelProps) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<FormState>(() => formFromContest(contest));
+  // 저장을 막는 이유(빈 카테고리·상금·요구형태·마감) — 서버 오류(`error` prop)와
+  // 갈라 둔다. 예전에는 이 네 가지 중 하나라도 걸리면 `submit()`이 아무 것도
+  // 하지 않고 조용히 리턴해, Sponsor가 저장을 눌러도 클릭이 씹힌 것처럼
+  // 보였다(코드리뷰 지적). 지금은 버튼도 막고(아래 `formInvalidReason`) 그
+  // 이유를 화면에 남긴다 — 이중 방어다.
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   function startEditing() {
     setForm(formFromContest(contest));
+    setValidationError(null);
     setEditing(true);
   }
 
   function cancelEditing() {
+    setValidationError(null);
     setEditing(false);
   }
 
@@ -92,12 +100,32 @@ export function BriefEditPanel({
     }));
   }
 
+  const prizeNumber = Number(form.prize);
+  const formInvalidReason =
+    form.categoryId === ""
+      ? "카테고리를 선택해주세요."
+      : !Number.isFinite(prizeNumber) || prizeNumber <= 0
+        ? "상금은 0보다 큰 금액이어야 합니다."
+        : form.deliverableTypeIds.length === 0
+          ? "요구형태를 하나 이상 선택해주세요."
+          : !form.deadlineAt
+            ? "마감 기한을 선택해주세요."
+            : null;
+
   async function submit() {
-    if (form.categoryId === "") return;
-    const prizeNumber = Number(form.prize);
-    if (!Number.isFinite(prizeNumber) || prizeNumber <= 0) return;
-    if (form.deliverableTypeIds.length === 0) return;
-    if (!form.deadlineAt) return;
+    // `form.categoryId === ""`도 formInvalidReason이 이미 잡아내지만, TS는 그
+    // 바깥 변수로부터 `form.categoryId`의 타입을 좁히지 못한다 — 아래
+    // `category_id: form.categoryId`가 `number`를 요구하므로 여기서 한 번 더
+    // 좁힌다(formInvalidReason이 null이면 항상 참이라 실질적으로는 도달하지
+    // 않는 분기다).
+    if (formInvalidReason || form.categoryId === "") {
+      // 버튼이 막혀 있는 게 정상 경로지만, 값이 프로그램적으로(테스트 등)
+      // 바뀌어 버튼 disabled 판정과 어긋나는 순간에도 조용히 아무 일도 안
+      // 하지 않는다 — 왜 저장되지 않았는지를 반드시 알린다.
+      setValidationError(formInvalidReason ?? "카테고리를 선택해주세요.");
+      return;
+    }
+    setValidationError(null);
 
     const ok = await onSave({
       title: form.title.trim(),
@@ -245,9 +273,18 @@ export function BriefEditPanel({
             />
           </label>
 
-          {error && (
+          {(validationError || error) && (
             <p role="alert" data-testid="draft-edit-error" className="text-sm text-attention">
-              {error}
+              {validationError || error}
+            </p>
+          )}
+
+          {/* 제출을 시도하기 전에도 왜 저장 버튼이 막혀 있는지 보인다 — 버튼만
+              비활성화하고 이유를 말하지 않으면 눌러도 안 눌러도 똑같이
+              「아무 반응 없음」으로 보인다(코드리뷰 지적). */}
+          {!validationError && formInvalidReason && (
+            <p className="text-xs text-ink/50" data-testid="draft-edit-validation-hint">
+              {formInvalidReason}
             </p>
           )}
 
@@ -255,7 +292,7 @@ export function BriefEditPanel({
             <button
               type="button"
               onClick={() => void submit()}
-              disabled={saving}
+              disabled={saving || !!formInvalidReason}
               data-testid="draft-edit-save"
               className="border border-ink bg-ink px-4 py-2 text-xs text-paper disabled:opacity-50"
             >

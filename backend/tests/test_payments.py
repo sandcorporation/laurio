@@ -303,6 +303,66 @@ def test_escrow_deposit_posts_balanced_ledger_entry(client, category, landing_ty
     assert debit_total == credit_total == 1_000_000 + listing_fee
 
 
+@pytest.mark.django_db
+def test_editing_prize_after_payment_screen_opened_keeps_the_requested_payment_in_sync(
+    client, category, landing_type
+):
+    """#113 코드리뷰 지적 1 — REQUESTED Payment는 그것이 속한 Contest와 다른
+    금액을 가질 수 없다.
+
+    결제 화면을 먼저 열면(POST /payments) draft Contest의 지금 상금으로
+    REQUESTED Payment가 만들어진다. #111이 연 "요구사항으로 돌아가기"로 다시
+    초안으로 가서 상금을 고치면(PATCH /contests/{id}, #113), 이미 만들어진
+    그 Payment도 새 금액을 따라가야 한다 — 그러지 않으면 Escrow는
+    `Payment.prize_amount`(옛 금액)로 예치되는데 실제 Payout은
+    `Contest.prize`(새 금액, payouts/services.py)를 기준으로 나가 둘이
+    갈라진다."""
+
+    access, contest = _draft_contest(
+        client, category=category, deliverable_type=landing_type, prize=1_000_000
+    )
+    first = _initiate_payment(client, access, contest["id"])
+    assert first["prize_amount"] == 1_000_000
+
+    patch = client.patch(
+        f"{CONTESTS_URL}/{contest['id']}",
+        data={"prize": 3_000_000},
+        content_type="application/json",
+        **_auth_header(access),
+    )
+    assert patch.status_code == 200
+    assert patch.json()["prize"] == 3_000_000
+
+    # 다시 결제 화면을 열지 않았어도 상금을 고친 그 순간 이미 맞춰져 있다.
+    stale = Payment.objects.get(order_id=first["order_id"])
+    assert stale.prize_amount == 3_000_000
+    assert stale.status == Payment.Status.REQUESTED
+
+    # 결제 화면을 다시 열면(재요청) 같은 결제를 그대로 이어받되 새 금액이다.
+    second = _initiate_payment(client, access, contest["id"])
+    assert second["order_id"] == first["order_id"]
+    assert second["prize_amount"] == 3_000_000
+    assert second["total_amount"] == 3_000_000 + second["listing_fee_amount"]
+
+    # 실제로 확정되는 금액도, 원장에 남는 금액도 옛 상금이 아니라 새 상금이다.
+    confirm = _confirm(client, access, second["order_id"])
+    assert confirm.status_code == 200
+    confirmed = confirm.json()
+    assert confirmed["status"] == "paid"
+    assert confirmed["prize_amount"] == 3_000_000
+
+    ledger_id = Contest.objects.get(id=contest["id"]).ledger_id
+    _login_operator(client)
+    entries = client.get(f"{LEDGER_URL}/contests/{ledger_id}/entries").json()
+    assert len(entries) == 1
+    lines_by_account = {
+        line["account"]: (line["side"], line["amount"]) for line in entries[0]["lines"]
+    }
+    assert lines_by_account["developer_payable"] == ("credit", 3_000_000)
+    amounts = {amt for _side, amt in lines_by_account.values()}
+    assert 1_000_000 not in amounts
+
+
 # --- 돈이 새는 경로 (Fake PG 주입) --------------------------------------------
 
 

@@ -201,4 +201,27 @@ test.describe("초안이 URL을 갖는다 — 새로고침해도, 며칠 뒤에�
     await expect(page).toHaveURL(/\/login/);
     expect(await page.content()).not.toContain("grill-draft-panel");
   });
+
+  test("대화 이력·카테고리·요구형태 조회 중 하나가 네트워크 수준에서 실패해도 화면은 죽지 않는다", async ({
+    page,
+  }) => {
+    // 코드리뷰 지적 5 — Contest 자체는 정상 읽혔는데(요청이 아예 서버에 닿지도
+    // 못하는) 나머지 세 "부가" 조회 중 하나가 reject되면, 예전에는
+    // `Promise.all`이 전체를 reject시켜 이미 확인한 Contest까지 통째로 에러
+    // 화면으로 덮었다 — "이 조회들이 실패해도 화면 자체는 죽지 않는다"는
+    // 주석과 실제 동작이 어긋나 있었다.
+    const runId = `${Date.now()}`;
+    await login(page, `draft-partial-fail-${runId}`);
+    await verify(page, `draft-partial-fail-${runId}`);
+    const contestId = await createDraftViaForm(page, runId, 5_000_000);
+
+    await page.route("**/api/backend/contests/categories", (route) => route.abort());
+
+    await page.goto(`/console/contests/${contestId}/draft`);
+
+    // 화면은 여전히 정상적으로 뜬다 — 에러 화면으로 떨어지지 않는다.
+    await expect(page.getByTestId("grill-draft-panel")).toBeVisible();
+    await expect(page.getByTestId("draft-load-error")).toHaveCount(0);
+    await expect(page.getByTestId("grill-draft-title")).toContainText(`[E2E] 초안 이어쓰기 테스트 ${runId}`);
+  });
 });

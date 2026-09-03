@@ -226,6 +226,55 @@ def test_empty_deliverable_type_ids_is_rejected(client, category, landing_type):
 
 
 @pytest.mark.django_db
+def test_minimum_prize_recompute_matches_the_deliverable_types_the_response_lists(
+    client, category, landing_type, admin_type
+):
+    """코드리뷰 지적 4 — required_minimum_prize는 응답이 실제로 나열하는
+    deliverable_types와 같은 집합에서 합산돼야 한다.
+
+    운영자가 이미 붙어 있는 DeliverableType 하나를 그 사이 비활성화해도
+    `_serialize_contest`의 `deliverable_types` 목록에서는 사라지지 않는다
+    (is_active로 거르지 않는다 — 이미 이 종류로 만들어진 Contest가 있을 수
+    있어서다, contests/models.py DeliverableType 주석). prize만 바꾸는(요구
+    형태는 건드리지 않는) PATCH가 그 값을 다시 계산할 때, 같은 응답이 나열하는
+    타입 수와 합산에 쓰인 타입 수가 갈리면 안 된다."""
+    pair = _login(client)
+    _verify(client, pair["access"], ci="sponsor-ci-7")
+    created = _create_draft(
+        client,
+        pair["access"],
+        category=category,
+        deliverable_type_ids=[landing_type.id, admin_type.id],
+        prize=1_000_000,
+    )
+    assert created["required_minimum_prize"] == 500_000 + 1_500_000
+    contest_id = created["id"]
+
+    # 운영자가 admin_type을 비활성화한다 — 붙어 있는 Contest에서 떨어지지는
+    # 않는다(DeliverableType은 지워지지 않고 비활성화만 된다).
+    DeliverableType.objects.filter(id=admin_type.id).update(is_active=False)
+
+    # deliverable_type_ids는 건드리지 않고 prize만 바꾼다.
+    response = client.patch(
+        f"{CONTESTS_URL}/{contest_id}",
+        data={"prize": 3_000_000},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert response.status_code == 200
+    body = response.json()
+
+    # 응답은 여전히 두 타입을 나열한다(비활성화됐다고 목록에서 사라지지 않는다).
+    assert len(body["deliverable_types"]) == 2
+    assert {dt["id"] for dt in body["deliverable_types"]} == {landing_type.id, admin_type.id}
+
+    # 최소 상금 합계도 그 두 타입 그대로를 합산한 값이어야 한다 — 목록에는
+    # 있는데 합계에서만 조용히 빠지면 같은 응답 안에서 서로 다른 사실을
+    # 말하게 된다.
+    assert body["required_minimum_prize"] == 500_000 + 1_500_000
+
+
+@pytest.mark.django_db
 def test_only_draft_can_be_updated_no_status_silently_passes(client, category, landing_type):
     """`Contest.Status`를 순회한다 — 고정된 상태 목록이 아니라 실제 enum을 돈다
     (test_home_curation.py와 같은 관용구). DRAFT를 뺀 모든 상태가 409여야 한다."""
