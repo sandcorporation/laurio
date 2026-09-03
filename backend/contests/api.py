@@ -593,7 +593,7 @@ def update_draft_contest(request: HttpRequest, contest_id: int, payload: Contest
             # REQUESTED Payment를 만든다) 상금을 확인한 뒤에도 초안으로 돌아가
             # 다시 고칠 수 있다(#111의 "요구사항으로 돌아가기"). Escrow는
             # `Payment.prize_amount`로 예치되고 실제 Payout은 `Contest.prize`
-            # 를 기준으로 나가므로(payments/services.py mark_paid,
+            # 를 기준으로 나가므로(Payment.journal,
             # payouts/services.py) — 이 상금 변경 시점에 진행 중인(REQUESTED)
             # Payment가 있다면 그 스냅샷을 지금 값으로 맞춘다. **불변식: REQUESTED
             # Payment는 그것이 속한 Contest와 다른 금액을 가질 수 없다.** PAID는

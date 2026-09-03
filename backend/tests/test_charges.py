@@ -159,8 +159,6 @@ def test_timeout_then_query_failure_leaves_charge_requested_not_500(
     ctx = kind.setup(client, category, landing_type)
     order_id = kind.initiate(client, ctx)
 
-    real_query = FakePGAdapter.query_status
-
     def _boom(self, *, order_id):
         raise RuntimeError("PG 조회 API 가 500 을 냈다")
 
@@ -172,7 +170,6 @@ def test_timeout_then_query_failure_leaves_charge_requested_not_500(
     assert not kind.applied(ctx)
 
     # 다음 확인이 마저 확정한다.
-    FakePGAdapter.query_status = real_query
     resp = kind.confirm(client, ctx, order_id)
     assert resp.status_code == 200
     assert resp.json()["status"] == "paid"
