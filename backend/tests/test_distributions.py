@@ -1072,20 +1072,19 @@ def test_one_poisoned_share_does_not_block_other_shares_in_same_scan(
     _advance_past_distribution_wait(poison_contest["id"])
     _advance_past_distribution_wait(ok_contest["id"])
 
-    real_request_payout = FakePayoutAdapter.request_payout
+    real_confirm = FakePayoutAdapter.confirm
 
-    def _maybe_poison(self, *, idempotency_key, amount):
+    def _maybe_poison(self, request, *, simulate=None):
         # amount는 net_amount(수수료·원천징수 공제 후)라 prize와 다르다 — Payout을
         # idempotency_key로 역참조해 어느 Submission의 시도인지 정확히 판별한다.
-        # 이 시점에는 이미 get_or_create_payout이 Payout 행을 만들어 둔 뒤다.
         payout = Payout.objects.select_related("distribution_share").get(
-            idempotency_key=idempotency_key
+            idempotency_key=request.idempotency_key
         )
         if payout.distribution_share.submission_id == poison_submission["id"]:
             raise RuntimeError("예기치 못한 어댑터 버그")
-        return real_request_payout(self, idempotency_key=idempotency_key, amount=amount)
+        return real_confirm(self, request, simulate=simulate)
 
-    with patch.object(FakePayoutAdapter, "request_payout", _maybe_poison):
+    with patch.object(FakePayoutAdapter, "confirm", _maybe_poison):
         resp = _run_due_distributions(client)
 
     events = {r.get("submission_id"): r for r in resp["results"] if "submission_id" in r}
@@ -1385,7 +1384,7 @@ def test_share_payout_timeout_then_failed_requery_stays_requested_not_attempt_fa
     _end_judging_period(client, contest["id"])
     _advance_past_distribution_wait(contest["id"])
 
-    def _timeout(self, **kwargs):
+    def _timeout(self, *args, **kwargs):
         raise PayoutTimeoutError("fake: 벤더 응답 없음")
 
     with (

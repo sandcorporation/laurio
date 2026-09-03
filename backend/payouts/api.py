@@ -40,9 +40,8 @@ from handovers.models import Handover
 from payments.webhook_security import verify_webhook_signature
 from policies.services import get_current_policy
 
-from payments.charges import Outcome, reconcile_after_timeout
 from .progress import Hold, HoldKind, advance, assert_covers_all_kinds, hold_of
-from .adapters import PayoutError, PayoutTimeoutError, get_adapter, TransferOutcome
+from .adapters import PayoutError, get_adapter
 from .adapters_toss import verify_toss_webhook_signature
 from .models import Payout, PayoutWebhookDelivery, Seller, TaxIdentity
 from .schemas import (
@@ -60,7 +59,6 @@ from .schemas import (
 from .services import (
     advance_seller_pending_payouts,
     get_or_create_payout,
-    record_transfer_result,
     resolve_transfer_webhook,
     retry_seller_registration,
     submit_identity,
@@ -192,9 +190,6 @@ def request_payout(request: HttpRequest, contest_id: int):
     policy = get_current_policy()
     payout = get_or_create_payout(handover.payout_target(), policy=policy)
 
-    adapter = get_adapter()
-    adapter.request_payout(idempotency_key=str(payout.idempotency_key), amount=payout.net_amount)
-
     return 201, _serialize(payout)
 
 
@@ -261,55 +256,19 @@ def confirm_payout(request: HttpRequest, idempotency_key: UUID, payload: Confirm
         # 돌려준다(재전송에 안전).
         return 200, _serialize(payout)
 
-    adapter = get_adapter()
+    # 벤더 확인·실이체·Seller 등록·원장 분개 전부 advance 가 한다(#133, #135) — 이 엔드포인트는
+    # 소유권과 fake 시나리오만 넘긴다. 벤더의 명시적 거절은 502 다.
     try:
-        outcome = adapter.confirm(
-            idempotency_key=str(idempotency_key), simulate=payload.simulate
-        )
-    except PayoutTimeoutError:
-        # 타임아웃은 실패가 아니다 — 실제 결과를 조회로 확정한다(ADR-0008). 그
-        # 재확인 자체가 또 실패할 수 있다(#125 — 결제 확인이 #87 지적 3 으로 얻은
-        # 규율을 여기도 갖는다): 그때는 실패로 단정하지 않고 미확정(pending,
-        # attempt=None → record_transfer_result 가 아무것도 쓰지 않는다)으로 남겨
-        # 웹훅이나 다음 재시도가 마저 확정하게 한다.
-        outcome = reconcile_after_timeout(
-            lambda: adapter.query_status(idempotency_key=str(idempotency_key)),
-            on_unknown=TransferOutcome(status="pending", attempt=None),
-            context=f"지급 확정 재확인(idempotency_key={idempotency_key})",
+        payout = advance(
+            payout,
+            register_seller=True,
+            adapter=get_adapter(),
+            confirm_with_vendor=True,
+            simulate=payload.simulate,
+            seller_simulate=payload.seller_simulate,
         )
     except PayoutError as exc:
         raise HttpError(502, str(exc)) from exc
-
-    # Seller가 이미 READY라면 이 직접 호출 자체가 실제 벤더 호출(실이체
-    # 요청)을 선점해 이길 수 있다(TossPayoutAdapter.confirm()의 두 갈래
-    # 동작, 코드리뷰 지적 1 4차의 후속 발견) — 그 결과를 여기서 기록하지
-    # 않으면, advance 안의 _request_real_transfer_if_ready가 나중에
-    # 다시 불려도 이미 선점된 시도에 클레임이 밀려 벤더를 다시 부를 수
-    # 없고, 이긴 쪽의 결과가 영영 어디에도 안 남는다.
-    #
-    # "실제로 벤더를 불렀는지"를 Seller 상태를 다시 읽어 추정하지 않는다
-    # (코드리뷰 지적 5, 5차) — 어댑터 호출과 이 재조회 사이에 seller.changed
-    # 웹훅이 끼어들면 Seller.status가 이미 바뀌어 있을 수 있어, 실제로는
-    # 벤더를 부르지 않은 결과를 COMPLETED로 잘못 기록하거나(READY가 아니었을
-    # 때 부른 것처럼 보임) 반대로 이긴 호출의 진짜 결과를 놓칠 수 있다.
-    # 대신 어댑터가 그 호출 순간 직접 알려준 `outcome.attempt`만 신뢰한다 —
-    # `record_transfer_result`가 `attempt=None`이면(벤더를 실제로 부르지
-    # 않았다는 뜻) 스스로 아무 것도 기록하지 않는다.
-    record_transfer_result(payout, outcome.status, outcome.attempt)
-
-    if Outcome.parse(outcome.status) is Outcome.PAID:
-        payout = advance(
-            payout,
-            confirmed_by_vendor=True,
-            register_seller=True,
-            seller_simulate=payload.seller_simulate,
-        )
-    elif Outcome.parse(outcome.status) is Outcome.FAILED:
-        payout = advance(payout, confirmed_by_vendor=False, register_seller=False)
-    else:
-        # 아직 확정할 수 없다(pending) — 함부로 실패 처리하지 않는다. 이후
-        # 웹훅이나 재조회가 마저 확정한다.
-        payout.refresh_from_db()
 
     return 200, _serialize(payout)
 
