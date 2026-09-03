@@ -268,10 +268,55 @@ class DailyParticipationOut(Schema):
     cumulative_count: int
 
 
+class RequirementFulfillmentOut(Schema):
+    """Requirement 하나를 몇 명이 충족했는가 (#108).
+
+    분모는 **이 Contest 의 전체 Submission 수**다 — 그 Requirement 에 자가
+    응답을 아예 남기지 않은 Submission 도 「충족하지 못함」으로 센다. 채점이
+    증거 없는 자가 응답을 미달로 보는 것(ADR-0014)과 같은 원칙이다.
+
+    **사람이 아니라 일에 대한 정보다.** `developer_id`도 어느 Submission이
+    응답했는지도 여기 없다 — 나오는 것은 이 Requirement의 충족 건수뿐이다.
+
+    **표본이 작으면 이 집계가 익명이 아니다.** Submission 이 1~2건일 때
+    "1명 중 1명이 충족" 은 그 사람의 자가 응답 그대로다. 지금은 Sponsor 가
+    어차피 개별 Submission 을 볼 수 있어(`compare_submissions`) 이 지표가 새로
+    드러내는 것이 없지만, **이 지표를 공개로 옮기려 할 때는 그대로 함정이
+    된다** — 그때는 최소 표본 수 같은 장치가 먼저 필요하다(#108, 이 티켓은 그
+    장치를 구현하지 않는다).
+    """
+
+    requirement_id: int
+    text: str
+    grade: str
+    met_count: int
+    total_submission_count: int
+
+
+class CompletionDistributionOut(Schema):
+    """제출 완성도 분포 — 데모·시연 영상·테스트 계정이 붙은 Submission 비율 (#108).
+
+    `submissions.schemas.CompletionOut` 이 Submission 한 건에 대해 매기는 세
+    boolean(has_demo_video·has_demo_url·has_test_account)을 Contest 전체로
+    집계한 것이다. 참가작들이 실제로 확인 가능한 상태인지 가늠하는 신호일
+    뿐 — 강제 항목은 아니다(소스만 필수다).
+    """
+
+    total_submission_count: int
+    demo_video_count: int
+    demo_url_count: int
+    test_account_count: int
+
+
 class ContestMetricsOut(Schema):
     contest_id: int
     total_submission_count: int
     daily_participation: list[DailyParticipationOut]
+    # #108 — 필수·선택 구별은 각 항목의 `grade` 필드가 담는다. 순서는
+    # Requirement.Meta.ordering(`order`, `id`)을 그대로 따른다 — 심사 비교
+    # 화면·제출 폼과 같은 순서라 Sponsor 가 다른 화면과 대조하기 쉽다.
+    requirement_fulfillment: list[RequirementFulfillmentOut]
+    completion_distribution: CompletionDistributionOut
 
 
 class ErrorOut(Schema):

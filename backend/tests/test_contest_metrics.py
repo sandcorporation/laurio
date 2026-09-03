@@ -1,30 +1,76 @@
-"""Sponsor 지표 화면 — 일자별 누적 참가작 수 (#107, 부모 #105).
+"""Sponsor 지표 화면 — 일자별 누적 참가작 수(#107), Requirement 충족 분포·제출
+완성도 분포(#108), 부모 #105.
 
 지금까지 Sponsor 가 자기 Contest 상태를 아는 수단은 제출을 하나씩 열어보는
-것뿐이었다. 이 티켓은 그 화면의 첫 지표 — **일자별 누적 Submission 수** — 를
-`GET /api/contests/{id}/metrics` 로 낸다.
+것뿐이었다. `GET /api/contests/{id}/metrics` 가 그 자리에 세 지표를 낸다:
 
-시임은 언제나 HTTP 다(CLAUDE.md). Requirement 충족 분포·완성도 분포(#108)는
-이 파일이 다루지 않는다 — 다음 티켓의 몫이다.
+- 일자별 누적 Submission 수 (#107)
+- Requirement 별로 몇 명이 충족했는가 — 필수·선택 구별, 분모는 전체 Submission
+  수 (#108)
+- 제출 완성도 분포 — 데모·영상·테스트 계정이 붙은 비율 (#108)
+
+시임은 언제나 HTTP 다(CLAUDE.md).
 """
 
 from __future__ import annotations
 
+import uuid
 from datetime import timedelta
 
 import pytest
 from django.utils import timezone
 
 from contests.models import Category, DeliverableType
+from storage.adapters.fake import FakeStorageAdapter
 from submissions.models import Submission
+from submissions.target_refs import demo_video_target_ref, source_target_ref
 
 from tests.test_source_readings import _publish_contest, _submit, _verified_user
 
 METRICS_URL = "/api/contests/{contest_id}/metrics"
+SUBMISSIONS_URL = "/api/contests/{contest_id}/submissions"
 
 
 def _auth_header(access: str) -> dict:
     return {"HTTP_AUTHORIZATION": f"Bearer {access}"}
+
+
+def _submit_full(
+    client,
+    dev: dict,
+    contest_id: int,
+    *,
+    responses: list[dict],
+    demo_video: bool = False,
+    demo_url: str = "",
+    test_account: str = "",
+) -> dict:
+    """`_submit`(test_source_readings)보다 유연한 버전 — 여러 Requirement 응답과
+    완성도 필드(데모 영상·URL·테스트 계정)를 함께 제어한다. #108 의 분포
+    테스트는 응답이 갈리는 Submission 을 여러 건 심어야 한다."""
+
+    source_key = f"{source_target_ref(contest_id, dev['user_id'])}/{uuid.uuid4().hex}"
+    FakeStorageAdapter().write_object(source_key, b"fake source zip bytes")
+
+    payload = {
+        "source_object_key": source_key,
+        "requirement_responses": responses,
+        "demo_url": demo_url,
+        "test_account": test_account,
+    }
+    if demo_video:
+        video_key = f"{demo_video_target_ref(contest_id, dev['user_id'])}/{uuid.uuid4().hex}"
+        FakeStorageAdapter().write_object(video_key, b"fake video bytes")
+        payload["demo_video_object_key"] = video_key
+
+    response = client.post(
+        SUBMISSIONS_URL.format(contest_id=contest_id),
+        data=payload,
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert response.status_code == 201, response.content
+    return response.json()
 
 
 @pytest.fixture
@@ -195,3 +241,215 @@ def test_daily_participation_is_ordered_by_date_regardless_of_creation_order(
     daily = response.json()["daily_participation"]
     assert len(daily) == 1
     assert daily[0]["cumulative_count"] == 1
+
+
+# --- #108: Requirement 별 충족 분포 --------------------------------------------
+
+
+@pytest.mark.django_db
+def test_requirement_fulfillment_matches_actual_responses_seeded_and_counted_together(
+    client, category, landing_type
+):
+    """일부만 충족한 Submission 을 심어 숫자가 갈리는 것을 본다 — 필수와 선택이
+    구별된다."""
+
+    deadline = timezone.now() + timedelta(days=10)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[
+            {"text": "로그인 기능이 있다", "grade": "required"},
+            {"text": "다크모드가 있다", "grade": "optional"},
+        ],
+    )
+    required_id = contest["requirements"][0]["id"]
+    optional_id = contest["requirements"][1]["id"]
+
+    dev_a = _verified_user(client, "dev-fulfillment-a", "ci-fulfillment-a")
+    dev_b = _verified_user(client, "dev-fulfillment-b", "ci-fulfillment-b")
+    dev_c = _verified_user(client, "dev-fulfillment-c", "ci-fulfillment-c")
+
+    # A: 둘 다 충족. B: 필수만 충족, 선택은 미충족. C: 필수 응답 자체가 없다
+    # (자가 응답을 안 남긴 것도 "충족하지 못함"으로 세야 한다).
+    _submit_full(
+        client, dev_a, contest["id"],
+        responses=[
+            {"requirement_id": required_id, "is_met": True},
+            {"requirement_id": optional_id, "is_met": True},
+        ],
+    )
+    _submit_full(
+        client, dev_b, contest["id"],
+        responses=[
+            {"requirement_id": required_id, "is_met": True},
+            {"requirement_id": optional_id, "is_met": False},
+        ],
+    )
+    _submit_full(client, dev_c, contest["id"], responses=[])
+
+    response = _metrics(client, sponsor["access"], contest["id"])
+
+    assert response.status_code == 200, response.content
+    body = response.json()
+    assert body["total_submission_count"] == 3
+
+    fulfillment_by_id = {r["requirement_id"]: r for r in body["requirement_fulfillment"]}
+    required_row = fulfillment_by_id[required_id]
+    optional_row = fulfillment_by_id[optional_id]
+
+    assert required_row["grade"] == "required"
+    assert required_row["met_count"] == 2
+    assert required_row["total_submission_count"] == 3
+
+    assert optional_row["grade"] == "optional"
+    assert optional_row["met_count"] == 1
+    assert optional_row["total_submission_count"] == 3
+
+
+@pytest.mark.django_db
+def test_a_requirement_nobody_met_is_reported_as_zero(client, category, landing_type):
+    """아무도 충족하지 못한 Requirement 도 0 으로 정확히 나온다 — 화면이 그것을
+    눈에 띄게 만드는 재료다."""
+
+    deadline = timezone.now() + timedelta(days=10)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "과한 요구사항", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+
+    dev = _verified_user(client, "dev-fulfillment-zero", "ci-fulfillment-zero")
+    _submit_full(
+        client, dev, contest["id"],
+        responses=[{"requirement_id": requirement_id, "is_met": False}],
+    )
+
+    response = _metrics(client, sponsor["access"], contest["id"])
+
+    assert response.status_code == 200
+    row = response.json()["requirement_fulfillment"][0]
+    assert row["met_count"] == 0
+    assert row["total_submission_count"] == 1
+
+
+@pytest.mark.django_db
+def test_a_contest_with_no_requirements_reports_an_empty_fulfillment_list(
+    client, category, landing_type
+):
+    """Requirement 응답이 없어도(이 경우 Requirement 자체가 없어도) 화면이
+    깨지지 않고 그렇게 말한다."""
+
+    sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+
+    response = _metrics(client, sponsor["access"], contest["id"])
+
+    assert response.status_code == 200
+    assert response.json()["requirement_fulfillment"] == []
+
+
+# --- #108: 제출 완성도 분포 -----------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_completion_distribution_matches_actual_submissions(client, category, landing_type):
+    deadline = timezone.now() + timedelta(days=10)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "요구사항", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+
+    dev_a = _verified_user(client, "dev-completion-a", "ci-completion-a")
+    dev_b = _verified_user(client, "dev-completion-b", "ci-completion-b")
+
+    # A: 데모 영상·URL·테스트 계정 전부. B: 아무것도 없음.
+    _submit_full(
+        client, dev_a, contest["id"],
+        responses=[{"requirement_id": requirement_id, "is_met": True}],
+        demo_video=True,
+        demo_url="https://example.invalid/demo-a",
+        test_account="id:pw",
+    )
+    _submit_full(
+        client, dev_b, contest["id"],
+        responses=[{"requirement_id": requirement_id, "is_met": False}],
+    )
+
+    response = _metrics(client, sponsor["access"], contest["id"])
+
+    assert response.status_code == 200, response.content
+    completion = response.json()["completion_distribution"]
+    assert completion["total_submission_count"] == 2
+    assert completion["demo_video_count"] == 1
+    assert completion["demo_url_count"] == 1
+    assert completion["test_account_count"] == 1
+
+
+@pytest.mark.django_db
+def test_completion_distribution_is_all_zero_when_there_are_no_submissions(
+    client, category, landing_type
+):
+    """참가작이 하나도 없어도 화면이 깨지지 않고 그렇게 말한다."""
+
+    sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+
+    response = _metrics(client, sponsor["access"], contest["id"])
+
+    assert response.status_code == 200
+    completion = response.json()["completion_distribution"]
+    assert completion == {
+        "total_submission_count": 0,
+        "demo_video_count": 0,
+        "demo_url_count": 0,
+        "test_account_count": 0,
+    }
+
+
+# --- #108: 사람이 아니라 일에 대한 정보다 — Score·개별 Submission 이 없다 -------
+
+
+@pytest.mark.django_db
+def test_metrics_response_never_mentions_score_or_developer_identity(
+    client, category, landing_type
+):
+    """Score 는 이 화면 어디에도 없다(ADR-0006/0014) — 집계로 우회하지 않는다.
+    개별 Submission 도 새로 노출하지 않는다 — 응답에 developer 식별자가 없다.
+
+    **있는지가 아니라 없는지**를 단언한다 — 응답 본문 전체(직렬화된 JSON
+    텍스트)에 그 문자열이 조금도 없어야 한다."""
+
+    deadline = timezone.now() + timedelta(days=10)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "요구사항", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+
+    dev = _verified_user(client, "dev-no-score-leak", "ci-no-score-leak")
+    _submit_full(
+        client, dev, contest["id"],
+        responses=[{"requirement_id": requirement_id, "is_met": True}],
+        demo_video=True,
+        demo_url="https://example.invalid/demo",
+        test_account="id:pw",
+    )
+
+    # 이 Contest 를 마감·채점까지 돌려 Score 가 실제로 존재하게 만든다 — "코드
+    # 경로가 아예 없어서" 안전한 게 아니라 "있는데도 안 새는지" 를 증명해야
+    # 한다(judge/page.tsx·compare_submissions 테스트와 같은 원칙).
+    from tests.test_source_readings import _close_contest, _run_scoring
+
+    _close_contest(client, contest, deadline=deadline)
+    _run_scoring(client)
+
+    response = _metrics(client, sponsor["access"], contest["id"])
+
+    assert response.status_code == 200, response.content
+    raw = response.content.decode("utf-8")
+    assert "score" not in raw.lower()
+    assert "percentage" not in raw.lower()
+    assert "developer" not in raw.lower()
+    assert "prompt" not in raw.lower()

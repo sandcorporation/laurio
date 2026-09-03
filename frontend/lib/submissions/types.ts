@@ -36,6 +36,8 @@ export type AwardOut = components["schemas"]["AwardOut"];
 // 클라이언트 컴포넌트 props 로 넘겨도 개별 참가자나 점수가 새어나갈 수 없다.
 export type ContestMetricsOut = components["schemas"]["ContestMetricsOut"];
 export type DailyParticipationOut = components["schemas"]["DailyParticipationOut"];
+export type RequirementFulfillmentOut = components["schemas"]["RequirementFulfillmentOut"];
+export type CompletionDistributionOut = components["schemas"]["CompletionDistributionOut"];
 
 export const EVIDENCE_KINDS: { value: EvidenceIn["kind"]; label: string }[] = [
   { value: "video_timestamp", label: "영상 타임스탬프" },
