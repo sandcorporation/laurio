@@ -17,6 +17,7 @@
 from datetime import timedelta
 
 from django.db import models
+from django.db.models import Q
 
 # 마감임박의 임계값. **`PlatformPolicy`(ADR-0023)에 넣지 않는다.** 그 ADR은
 # 수수료율·심사기간·배분 대기일처럼 돈이나 행동을 바꾸는 값을 위한 것이고, 이
@@ -100,3 +101,63 @@ def home_bucket_for(contest, *, now) -> str | None:
         return HomeCurationBucket.COMPLETED
 
     return None
+
+
+def home_bucket_queryset(base, bucket, *, now):
+    """`bucket`에 속하는 Contest만, 그 묶음에 맞는 정렬로 돌려준다 (#94).
+
+    **바로 위 `home_bucket_for`가 판정의 원본이고, 이 함수는 그 판정을 SQL WHERE로
+    다시 표현한 것이다.** 두 표현이 한 화면에 나란히 살도록 여기 둔다(#144) — 한쪽만
+    고치는 사고는 다른 쪽이 눈에 보일 때 줄어든다. 원래는(#94 1차) 공개 Contest를
+    전부 가져와 Python에서 `home_bucket_for`를 한 번씩만 부르는 단일 질의
+    였다 — 조건을 두 벌로 쓰지 않으려던 것이었는데, 그러면 공개 Contest가
+    쌓일수록(수천 건) 매 홈 방문마다 전부 fetch하고
+    `deliverable_types`·`requirements`까지 prefetch하게 된다(#94 코드리뷰
+    4 — 홈은 `force-dynamic`이라 캐시도 없다). 그래서 묶음마다 상태·기한으로
+    좁히고 그 묶음에 맞는 정렬로 DB에서 상위 `_HOME_BUCKET_LIMIT`건만 뽑는다.
+
+    **이 이중화는 방치되지 않는다** — `get_home_curation`이 각 행을 다시
+    `home_bucket_for`에 통과시켜 이 필터와 갈리면 로그로 드러내고,
+    `backend/tests/test_home_curation.py`의 경계값 테스트가 네 묶음 각각을 공용
+    헬퍼(`tests.predicate_pairs.assert_predicate_matches_q`)로 임계값 양쪽 끝에서 맞춘다.
+
+    정렬은 묶음마다 다르다(#94 코드리뷰 1) — 「진행중」·「마감임박」은 마감이
+    가까운 순(오름차순), 「심사중」·「완료」는 최근에 마감된 순(내림차순)이다.
+    네 묶음이 전부 같은 정렬을 쓰면 「완료」·「심사중」은 가장 오래된 건에
+    영구히 고정된다 — 방금 선정된 공모전이 홈에 절대 안 오른다.
+    """
+
+    from contests.models import Contest, HomeStatusAxis
+
+    imminent_cutoff = now + timedelta(days=HOME_IMMINENT_DEADLINE_DAYS)
+
+    if bucket == HomeCurationBucket.ONGOING:
+        return base.filter(
+            status__in=Contest.Status.HOME_AXIS.where(HomeStatusAxis.OPEN),
+            deadline_at__gt=imminent_cutoff,
+        ).order_by("deadline_at", "id")
+
+    if bucket == HomeCurationBucket.IMMINENT:
+        # 하한(`deadline_at__gte=now`)이 없으면 스캔이 아직 CLOSED로 못 옮긴
+        # 마감 지난 PUBLISHED가 여기 섞여, 오름차순 정렬의 맨 앞자리(가장
+        # 음수인 값)를 영구히 차지하고 진짜 D-1·D-2를 밀어낸다(#94 코드리뷰
+        # 2). `home_bucket_for`가 그 구간을 IN_JUDGING으로 보내는 것과
+        # 같은 경계다.
+        return base.filter(
+            status__in=Contest.Status.HOME_AXIS.where(HomeStatusAxis.OPEN),
+            deadline_at__gte=now,
+            deadline_at__lte=imminent_cutoff,
+        ).order_by("deadline_at", "id")
+
+    if bucket == HomeCurationBucket.IN_JUDGING:
+        return base.filter(
+            Q(status__in=Contest.Status.HOME_AXIS.where(HomeStatusAxis.IN_JUDGING))
+            | Q(status__in=Contest.Status.HOME_AXIS.where(HomeStatusAxis.OPEN), deadline_at__lt=now)
+        ).order_by("-deadline_at", "-id")
+
+    if bucket == HomeCurationBucket.COMPLETED:
+        return base.filter(
+            status__in=Contest.Status.HOME_AXIS.where(HomeStatusAxis.COMPLETED)
+        ).order_by("-deadline_at", "-id")
+
+    raise ValueError(f"알 수 없는 HomeCurationBucket: {bucket!r}")  # pragma: no cover
