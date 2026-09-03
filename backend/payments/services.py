@@ -31,7 +31,7 @@ from .models import Payment
 
 # --- 참여자 0명 전액 환불 (#17, ADR-0004) ------------------------------------
 #
-# mark_paid/mark_failed와 같은 조건부 UPDATE 규율을 그대로 반복하되, 절대
+# Charge 확정(payments.charges.apply_vendor_outcome)과 같은 조건부 UPDATE 규율을 그대로 반복하되, 절대
 # 되돌아가지 않는다는 규율까지 함께 지킨다:
 #
 # 1) request_refund가 PAID -> REFUND_REQUESTED로 조건부 전이시켜 "이 스캔이 이
@@ -40,7 +40,7 @@ from .models import Payment
 # 2) PG 어댑터의 확정 결과에 따라 mark_refunded(REFUNDED) 또는
 #    mark_refund_failed(REFUND_FAILED)를 부른다. 이 두 종결 상태 중 어느 쪽에도
 #    도달한 뒤에는 다시는 REFUND_REQUESTED로도, PAID로도 되돌아가지 않는다 —
-#    mark_paid/mark_failed가 REQUESTED에서 한 번만 전이하고 끝나는 것과 같은
+#    Charge 확정이 REQUESTED에서 한 번만 전이하고 끝나는 것과 같은
 #    성격이다. 되돌아가는 경로를 허용하면(과거 버전이 REFUND_REQUESTED ->
 #    PAID로 되돌렸던 것처럼) 재전송된 실패 웹훅이 그 사이 새로 시작된 다른(더
 #    최신) 환불 시도를 잘못 취소시켜, 실제로는 PG에서 성공한 환불이 원장에
@@ -81,7 +81,7 @@ def mark_refunded(order_id) -> Payment:
     """환불을 완료로 확정한다. REFUND_REQUESTED 상태에서만 전이하며, 이겼을 때만
     (rowcount==1) 원장에 반대 분개를 남긴다.
 
-    반대 분개는 mark_paid가 남긴 예치 분개의 각 라인 차/대변을 그대로 뒤집는다 —
+    반대 분개는 Payment.journal 이 남긴 예치 분개의 각 라인 차/대변을 그대로 뒤집는다 —
     발주자 예치금은 다시 대변(환불), 개발자 미지급금(Prize)과 플랫폼 수수료 수익
     (개최 등록비)은 차변으로 취소된다. 세 라인 모두 원본과 금액이 같으므로 이
     Contest의 원장 순합계는 정확히 0으로 돌아온다.
@@ -136,7 +136,7 @@ def mark_refunded(order_id) -> Payment:
 def mark_refund_failed(order_id) -> Payment:
     """환불 실패를 REFUND_FAILED로 종결한다. PAID로 되돌리지 않는다.
 
-    mark_failed(Payment.FAILED)와 같은 성격의 종결 상태다 — 원장에는 아무 흔적도
+    Payment.FAILED와 같은 성격의 종결 상태다 — 원장에는 아무 흔적도
     남기지 않는다(돈이 움직이지 않았거나, 움직였더라도 이 신호만으로는 확정할 수
     없다). REFUND_REQUESTED에서만 전이하므로 같은 실패 신호가 재전송돼도 두 번째
     호출은 rowcount 0으로 아무 일도 하지 않는다 — REFUND_REQUESTED -> PAID처럼
