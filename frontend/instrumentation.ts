@@ -82,6 +82,51 @@ const REQUIRED_IN_DEPLOYED_ENVIRONMENTS: Array<{ name: string; reason: string }>
       "거절한다(docker/staging.env.example 참고) — 비어 있으면 그 사고를 배포 " +
       "시점에 막는다.",
   },
+  // 토스 결제창 브라우저 SDK의 클라이언트 키(#112 lib/payments/toss.ts,
+  // #115). lib/payments/toss.ts는 "use client" 파일이라 그 안의
+  // process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY는 Next 빌드가 브라우저 번들에
+  // 실제로 인라인한다 — 하지만 이 instrumentation.ts는 그 컴파일 그래프
+  // 밖에서 도는 별도 Node 진입점이라 같은 인라인의 혜택을 받지 못한다(직접
+  // 확인했다: builder 스테이지만 --build-arg로 채워 빌드하면 이 파일의
+  // process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY는 여전히 빈 문자열이었다). 그래서
+  // docker/frontend.Dockerfile의 runner 스테이지에도 같은 ARG를 다시 선언해
+  // ENV로 노출해 뒀다 — `docker build --build-arg NEXT_PUBLIC_TOSS_CLIENT_KEY=…`
+  // 는 그 이름을 선언한 모든 스테이지에 전역으로 적용되므로, compose의
+  // build.args가 주는 한 값이 builder(브라우저 번들 인라인용)와 runner(여기가
+  // 읽는 실제 컨테이너 런타임 env, 빌드 시점 값과 항상 같다)에 그대로 들어가
+  // 값이 둘로 갈릴 여지가 없다.
+  // docker/compose.staging.yaml·docker/compose.prod.yaml의 frontend
+  // build.args는 이제 `${TOSS_SANDBOX_CLIENT_KEY:?...}`/`${TOSS_LIVE_CLIENT_KEY:?...}`
+  // 로 이 값을 요구한다(#115) — 비어 있으면 이미지를 굽기도 전에 `docker
+  // compose config`가 거부한다. 배포 환경에서 PAYMENT_ADAPTER_MODE는 언제나
+  // 실물 어댑터를 가리켜야 하므로(core.adapters.check_adapter_mode, #83이
+  // fake를 거부한다) 배포 환경이라면 위젯을 반드시 쓴다 — 이 값이 비어
+  // 있으면 사용자가 결제하기를 누르는 순간에야 lib/payments/toss.ts의
+  // getTossClientKey()가 null을 돌려줘 실패한다. 그 첫 발견자가 사용자였던
+  // 사고(spec #110)를 부팅 시점으로 당긴다.
+  //
+  // **이 가드가 성립하는 것은 이 값이 build.args로만 존재하고 아래
+  // frontend 서비스의 environment: 블록 어디에도 없기 때문이다** —
+  // "런타임 env == 빌드에 실제로 구운 값"이라는 등식은 그 부재에 의존한다.
+  // 누군가 나중에 이 이름을 compose의 environment:(또는 배포 스크립트의
+  // `-e`)에 추가하면, 그 값이 무엇이든 이 부팅 가드는 그것만 보고 통과해
+  // 버린다 — 브라우저 번들에 실제로 구워진 값과 무관하게. 그러면 이 가드가
+  // 초록불을 주는데 번들은 비어 있는, 이 티켓이 막으려 한 바로 그 사고가
+  // 조용히 되살아난다. **NEXT_PUBLIC_TOSS_CLIENT_KEY를 environment:에
+  // 추가하지 않는다** — docker/compose.staging.yaml·docker/compose.prod.yaml의
+  // build.args 옆에도 같은 경고가 있다.
+  {
+    name: "NEXT_PUBLIC_TOSS_CLIENT_KEY",
+    reason:
+      "토스 결제창 브라우저 SDK가 결제창을 열 때 쓰는 공개 키다 " +
+      "(lib/payments/toss.ts의 getTossClientKey) — 배포 환경은 PG 어댑터가 " +
+      "언제나 실물(TossPGAdapter)이라 위젯을 반드시 거치는데, 이 값이 " +
+      "비어 있으면 사용자가 결제하기를 누른 순간에야 실패가 드러난다. " +
+      "docker/staging.env.example의 TOSS_SANDBOX_CLIENT_KEY, " +
+      "docker/prod.env.example의 TOSS_LIVE_CLIENT_KEY를 채우고 " +
+      "docker/frontend.Dockerfile의 build.args로 넘겨야 한다 — 이미 빌드된 " +
+      "이미지라면 재빌드해야 한다(런타임 재주입으로는 늦는다).",
+  },
 ];
 
 export async function register(): Promise<void> {

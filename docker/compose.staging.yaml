@@ -306,12 +306,26 @@ services:
         NEXT_PUBLIC_PORTONE_STORE_ID: ${PORT_ONE_V2_STORE_ID:?}
         NEXT_PUBLIC_PORTONE_CHANNEL_KEY: ${KG_INICIS_CHANNEL_KEY:?}
         # 토스 결제창 브라우저 SDK가 쓰는 공개 키(#112) — TOSS_SANDBOX_SECRET_KEY와
-        # 짝을 이루는 클라이언트 키다(토스 개발자센터 > API 키). 비어 있어도
-        # 빌드는 통과한다 — 위젯을 쓸지는 PAYMENT_ADAPTER_MODE가 가른다. 값이
-        # 비었는데 그 모드가 실물 어댑터를 가리키면 결제 화면이 "결제 설정이
-        # 올바르지 않다"는 것을 사용자에게 곧바로 보여준다(#115가 부팅 시점
-        # 가드를 더한다).
-        NEXT_PUBLIC_TOSS_CLIENT_KEY: ${TOSS_SANDBOX_CLIENT_KEY:-}
+        # 짝을 이루는 클라이언트 키다(토스 개발자센터 > API 키). **비어 있으면
+        # compose 자체가 여기서 기동을 거부한다(#115)** — 위 NEXT_PUBLIC_PORTONE_*
+        # 와 같은 `${VAR:?...}` 이다. 예전에는 `${TOSS_SANDBOX_CLIENT_KEY:-}`로
+        # 비워 둬도 빌드가 통과했지만, 배포 환경의 PAYMENT_ADAPTER_MODE는 언제나
+        # 실물 어댑터를 가리켜야 하므로(#83이 fake를 거부한다) 위젯은 반드시
+        # 쓰인다 — 이 값이 비면 "이미지 세 개를 굽고 컨테이너가 죽는 걸 보고
+        # 나서야 로그를 뒤진다"는 순서가 되므로, deploy.sh의 프리플라이트가
+        # 빌드를 시작하기도 전에 `compose config`로 한 줄에 잡아내게 한다.
+        #
+        # **이 값은 build.args로만 존재해야 한다 — 아래 frontend 서비스의
+        # environment: 블록에 절대 추가하지 않는다.** 부팅 가드
+        # (frontend/instrumentation.ts)는 컨테이너의 *런타임* env를 읽는데,
+        # docker/frontend.Dockerfile의 runner 스테이지가 이 ARG를 다시 ENV로
+        # 노출해 두었기 때문에 지금은 "런타임 env == 빌드에 실제로 구운 값"이
+        # 성립한다(#115). 이 값을 environment:에도 넣으면 그 등식이 깨진다 —
+        # 브라우저 번들에는 빌드 시점 값이 굳어 있는데 가드는 environment:가
+        # 준 다른(혹은 채워진) 값을 보고 통과해 버려, 정작 번들은 비어 있는
+        # 채로 배포가 초록불을 받는 사고가 생긴다. 이게 바로 이 티켓이 막으려는
+        # 사고의 재현이다.
+        NEXT_PUBLIC_TOSS_CLIENT_KEY: ${TOSS_SANDBOX_CLIENT_KEY:?토스 결제창 브라우저 SDK 클라이언트 키를 .env.staging 의 TOSS_SANDBOX_CLIENT_KEY 에 설정하라 — 빌드타임에 인라인되므로 부팅 후에는 되돌릴 수 없다}
     restart: unless-stopped
     depends_on:
       backend:

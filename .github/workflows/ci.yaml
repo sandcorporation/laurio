@@ -639,6 +639,41 @@ jobs:
           echo "$output" | grep -q "KAKAO_SECRET_KEY" || { echo "::error::에러 메시지에 원인(KAKAO_SECRET_KEY)이 안 남는다"; exit 1; }
           echo "$output" | grep -q "KAKAO_REDIRECT_URI" || { echo "::error::에러 메시지에 원인(KAKAO_REDIRECT_URI)이 안 남는다"; exit 1; }
 
+      # #115 — 토스 결제창 클라이언트 키(NEXT_PUBLIC_TOSS_CLIENT_KEY)가 빌드타임에
+      # 비어 있으면 배포 환경에서 부팅 자체를 거부하는지 확인한다. 다른 필수값은
+      # 전부 채워 이 값 하나만으로 독립적으로 죽는지를 본다. laurio-frontend-runner-ci
+      # 는 build.args 없이(빈 문자열로) 지었으므로 이 시나리오 그대로다.
+      - name: Refuses to boot in production without a toss client key baked in
+        run: |
+          set +e
+          output=$(timeout 20 docker run --rm \
+            -e LAURIO_DEPLOYMENT_TARGET=production \
+            -e LAURIO_WEB_ORIGIN=https://laurio.example \
+            -e LAURIO_API_BASE_URL=http://127.0.0.1:1 \
+            -e KAKAO_REST_API_KEY=ci-guard-only-kakao-rest-api-key \
+            -e KAKAO_SECRET_KEY=ci-guard-only-kakao-secret-key \
+            -e KAKAO_REDIRECT_URI=https://laurio.example/api/auth/social/kakao/callback \
+            laurio-frontend-runner-ci 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
+            echo "::error::토스 클라이언트 키 없이도 컨테이너가 죽지 않았다(status=$status) — 부팅 가드가 깨졌다"
+            exit 1
+          fi
+          echo "$output" | grep -q "NEXT_PUBLIC_TOSS_CLIENT_KEY" || { echo "::error::에러 메시지에 원인(NEXT_PUBLIC_TOSS_CLIENT_KEY)이 안 남는다"; exit 1; }
+
+      # #115 코드리뷰 지적 -- 이 값을 검증하겠다고 프로덕션 이미지를 두 번(빌드
+      # 인자 있이/없이) 굽지 않는다. pnpm build 가 다시 도는 두 번째 빌드는
+      # CI 시간을 그대로 배로 늘리는데, 이 부팅 가드가 실제로 읽는 것은 컨테이너의
+      # 런타임 env이지 브라우저 번들에 인라인된 값이 아니다(위에서 직접 측정해
+      # 확인한 사실 -- instrumentation.ts는 Next의 컴파일 그래프 밖에서 돈다).
+      # 그러니 KAKAO_*와 같은 방식으로 같은 이미지에 -e만 다르게 줘서 런타임
+      # env가 있을 때/없을 때 두 경우를 구분하면 충분하다 -- 이 스텝이 검증하는
+      # 건 부팅 가드가 이 이름의 env를 보고 옳게 판단하는가이지, 이 특정 빌드가
+      # 브라우저 번들에 값을 구웠는가가 아니다(후자는 docker/frontend.Dockerfile의
+      # ARG/ENV 선언이 전담하고, 이미 로컬에서 직접 --build-arg로 지어 확인했다
+      # -- 구조가 단순해 회귀 위험이 낮다).
       - name: Boots with a complete production config and forces Secure cookies
         run: |
           set -euo pipefail
@@ -649,6 +684,7 @@ jobs:
             -e KAKAO_REST_API_KEY=ci-guard-only-kakao-rest-api-key \
             -e KAKAO_SECRET_KEY=ci-guard-only-kakao-secret-key \
             -e KAKAO_REDIRECT_URI=https://laurio.example/api/auth/social/kakao/callback \
+            -e NEXT_PUBLIC_TOSS_CLIENT_KEY=ci-guard-only-toss-client-key \
             -p 3100:3000 \
             laurio-frontend-runner-ci
 
