@@ -551,14 +551,19 @@ def test_a_distribution_whose_payouts_have_not_settled_is_not_called_complete(
         },
     )
 
-    # 스캔이 Contest 를 JUDGING_ENDED 로 옮겨야 배분 후보가 된다.
-    client.post("/api/internal/tick", **_internal_headers())
+    # 스캔이 Contest 를 JUDGING_ENDED 로 옮겨야 배분 후보가 된다 — 전이 스캔만 돌린다(`/tick`
+    # 은 배분·지급 스캔까지 한 바퀴 돌아 아래의 실패 주입보다 먼저 지급을 끝내 버린다, #137).
+    client.post("/api/internal/scans/contest-judging-end", **_internal_headers())
 
-    # 이 Submission 의 지급만 실패시킨 채 배분을 돌린다 — 저장소가 이미 가진
-    # 실패 주입 경로다(`run_due_distributions(fail_submission_ids=...)`).
-    from distributions.services import run_due_distributions
-
-    run_due_distributions(fail_submission_ids={submission["id"]})
+    # 이 Submission 의 지급만 실패시킨 채 배분을 돌린다 — 저장소가 이미 가진 실패 주입
+    # 경로다(distribution-share-payout 스캔의 `fail_submission_ids` params, #140).
+    client.post("/api/internal/scans/distribution-create", **_internal_headers())
+    client.post(
+        "/api/internal/scans/distribution-share-payout",
+        data={"params": {"fail_submission_ids": [submission["id"]]}},
+        content_type="application/json",
+        **_internal_headers(),
+    )
 
     assert Distribution.objects.filter(contest_id=contest["id"]).exists()
     assert _mine(client, sponsor["access"])[0]["next_action"] == "awaiting_payout"

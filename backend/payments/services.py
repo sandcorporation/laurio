@@ -25,6 +25,8 @@ from ledger.models import Account, EntrySide
 from ledger.services import LineInput, post_journal_entry
 from submissions.models import Submission
 
+from core.scans import ScanSpec, scan_params
+
 from .adapters import PGError, PGTimeoutError, get_adapter
 from .models import Payment
 
@@ -48,17 +50,10 @@ from .models import Payment
 #    (리뷰 지적 1).
 # 3) adapter.refund()가 확정하지 못하고 "pending"으로 끝나면(타임아웃 후
 #    query_refund_status로도 아직 안 끝났거나, 실제 어댑터가 진짜 비동기라서)
-#    Payment는 REFUND_REQUESTED에 머문다. run_pending_refunds는 매 스캔마다
+#    Payment는 REFUND_REQUESTED에 머문다. `payment-refund-reconcile` 스캔이 매번
 #    이런 미확정 건도 함께 조회해 query_refund_status로만(=새 refund() 호출
 #    없이) 재확인한다 — PAID만 후보로 삼으면 이 건들은 웹훅이 끝내 오지 않는 한
 #    영원히 멈춰 있는다(리뷰 지적 3).
-
-
-REFUND_BATCH_SIZE = 50
-# 한 스캔에서 시도·재확인하는 최대 Payment 수. core.transitions.DEFAULT_BATCH_SIZE,
-# scoring.services.BATCH_SIZE와 같은 이유 — 무제한 스캔은 백로그가 쌓였을 때 이
-# 스캔을 호출하는 HTTP 요청 자체를 타임아웃으로 몰아넣는다(리뷰 지적 4). 배치를
-# 넘는 잔여 분량은 다음 스캔이 마저 처리한다.
 
 
 def request_refund(order_id) -> Payment | None:
@@ -254,70 +249,74 @@ def _apply_refund_status(payment: Payment, status: str, *, claimed: bool) -> dic
     return _result(payment, "pending", claimed=claimed)
 
 
-def run_pending_refunds(*, simulate: str | None = None) -> list[dict]:
-    """CLOSED Contest 중 Submission이 0건인 채 결제가 완료된 것을 찾아 전액 환불하고,
-    이미 시작됐지만 아직 확정되지 못한 환불 시도를 재확인한다.
+# --- 참여자 0명 전액 환불 스캔 둘 (#17, #140, ADR-0003) -------------------------------
+#
+# Submission이 하나라도 있으면 이 스캔은 그 Contest의 Payment를 절대 건드리지 않는다 —
+# 참여자 0명 전액 환불은 ADR-0004가 허용하는 유일한 환불 경로다. 후보가 두 종류라 스캔도
+# 둘이다(리뷰 지적 3·4):
+#
+# 1) `payment-refund-request` — PAID인 새 후보. request_refund로 선점하고 새 refund()를 부른다.
+# 2) `payment-refund-reconcile` — 이미 REFUND_REQUESTED인 미확정 후보. 새 refund()를 다시
+#    부르지 않고 query_refund_status로만 재확인한다.
+#
+# `simulate`(scan_params)는 새 refund() 호출(1번)에만 적용되는 fake PG 전용 시나리오 선택
+# 값이다(`payments.api.ConfirmPaymentIn.simulate`와 같은 원칙 — 실제 어댑터는 무시한다).
+# 재확인(2번)은 새 요청을 만들지 않는 순수 조회이므로 시나리오 선택이 의미가 없다 —
+# FakePGAdapter가 최초 refund() 호출 시점에 기억해 둔 결과를 그대로 돌려준다.
+_ADAPTER_KEY = f"{__name__}:adapter"
 
-    Submission이 하나라도 있으면 이 스캔은 그 Contest의 Payment를 절대 건드리지
-    않는다 — 참여자 0명 전액 환불은 ADR-0004가 허용하는 유일한 환불 경로다(#17).
 
-    한 번의 호출이 두 종류의 후보를 처리한다(각각 REFUND_BATCH_SIZE로 배치를
-    나눈다 — 리뷰 지적 4):
+def _adapter(ctx):
+    if _ADAPTER_KEY not in ctx:
+        ctx[_ADAPTER_KEY] = get_adapter()
+    return ctx[_ADAPTER_KEY]
 
-    1) PAID인 새 후보 — request_refund로 선점하고 새 refund()를 호출한다.
-    2) 이미 REFUND_REQUESTED인 미확정 후보 — 새 refund()를 다시 부르지 않고
-       query_refund_status로만 재확인한다(리뷰 지적 3).
 
-    `simulate`는 새 refund() 호출(1번 경로)에만 적용되는 fake PG 전용 시나리오
-    선택 값이다(`payments.api.ConfirmPaymentIn.simulate`와 같은 원칙 — 실제
-    어댑터는 무시한다). 재확인(2번 경로)은 새 요청을 만들지 않는 순수 조회이므로
-    시나리오 선택이 의미가 없다 — FakePGAdapter가 최초 refund() 호출 시점에
-    기억해 둔 결과를 그대로 돌려준다.
-    """
-
-    contests_with_submissions = Submission.objects.values_list("contest_id", flat=True)
-
-    # CLOSED뿐 아니라 JUDGING_ENDED도 봐야 한다(#13이 JUDGING_ENDED를 도입한 뒤
-    # 반영되지 않은 채 남아 있던 격차) — 스케줄러가 judging_ends_at이 지나면
-    # CLOSED -> JUDGING_ENDED로 무조건 전이시키므로(core.transitions 레지스트리,
-    # award 여부와 무관), 참여자 0명인 Contest도 이 스캔이 따라잡기 전에
-    # JUDGING_ENDED로 넘어갈 수 있다. CLOSED만 보면 그 순간부터 이 Payment는
-    # 영원히 이 스캔의 후보 집합 밖으로 빠져 Escrow에 갇힌다 — 이 실행에서 반복된
-    # "새 상태, 낡은 호출부" 패턴 그대로다.
+def _eligible_contests():
+    # CLOSED뿐 아니라 JUDGING_ENDED도 봐야 한다(#13이 JUDGING_ENDED를 도입한 뒤 반영되지
+    # 않은 채 남아 있던 격차) — 스케줄러가 judging_ends_at이 지나면 CLOSED -> JUDGING_ENDED로
+    # 무조건 전이시키므로(award 여부와 무관), 참여자 0명인 Contest도 이 스캔이 따라잡기 전에
+    # JUDGING_ENDED로 넘어갈 수 있다. CLOSED만 보면 그 순간부터 이 Payment는 영원히 이
+    # 스캔의 후보 집합 밖으로 빠져 Escrow에 갇힌다 — "새 상태, 낡은 호출부" 패턴 그대로다.
     #
-    # refund_disabled인 Contest는 제외한다(#13이 만든 필드의 유일한 소비처) —
-    # REQUEST.md: 유료 연장 2회 이상이면 환불 불가로 영구 확정된다. 이 플래그가
-    # True인 Contest는 설령 참여자가 0명이어도 이 경로로 환불하지 않는다.
-    eligible_contests = Contest.objects.filter(
+    # refund_disabled인 Contest는 제외한다(#13이 만든 필드의 유일한 소비처) — REQUEST.md:
+    # 유료 연장 2회 이상이면 환불 불가로 영구 확정된다. 이 플래그가 True인 Contest는 설령
+    # 참여자가 0명이어도 이 경로로 환불하지 않는다.
+    contests_with_submissions = Submission.objects.values_list("contest_id", flat=True)
+    return Contest.objects.filter(
         status__in=[Contest.Status.CLOSED, Contest.Status.JUDGING_ENDED],
         refund_disabled=False,
     ).exclude(id__in=contests_with_submissions)
 
-    new_candidates = list(
-        Payment.objects.filter(status=Payment.Status.PAID, contest__in=eligible_contests)
-        .select_related("contest")
-        .order_by("id")[:REFUND_BATCH_SIZE]
-    )
 
-    pending_candidates = list(
-        Payment.objects.filter(
-            status=Payment.Status.REFUND_REQUESTED, contest__in=eligible_contests
-        )
-        .select_related("contest")
-        .order_by("id")[:REFUND_BATCH_SIZE]
-    )
+def _new_refund_candidates(as_of, ctx):
+    return Payment.objects.filter(
+        status=Payment.Status.PAID, contest__in=_eligible_contests()
+    ).select_related("contest")
 
-    adapter = get_adapter()
-    results: list[dict] = []
 
-    for candidate in new_candidates:
-        claimed = request_refund(candidate.order_id)
-        if claimed is None:
-            # 다른 스캔이 이미 이 Payment의 환불을 선점했다 — 건드리지 않는다.
-            continue
-        results.append(_settle_new_refund_attempt(adapter, claimed, simulate=simulate))
+def _request_and_settle(payment, as_of, ctx):
+    claimed = request_refund(payment.order_id)
+    if claimed is None:
+        # 다른 스캔이 이미 이 Payment의 환불을 선점했다 — 건드리지 않는다.
+        return None
+    return _settle_new_refund_attempt(_adapter(ctx), claimed, simulate=scan_params(ctx).get("simulate"))
 
-    for payment in pending_candidates:
-        results.append(_reconcile_pending_refund(adapter, payment))
 
-    return results
+def _pending_refund_candidates(as_of, ctx):
+    return Payment.objects.filter(
+        status=Payment.Status.REFUND_REQUESTED, contest__in=_eligible_contests()
+    ).select_related("contest")
+
+
+def _reconcile(payment, as_of, ctx):
+    return _reconcile_pending_refund(_adapter(ctx), payment)
+
+
+# 배치 50은 뼈대 기본값 그대로다 — 무제한 스캔은 백로그가 쌓였을 때 이 스캔을 호출하는 HTTP
+# 요청 자체를 타임아웃으로 몰아넣는다(리뷰 지적 4). 배치를 넘는 잔여 분량은 다음 실행이 마저
+# 처리한다.
+REFUND_SCANS = (
+    ScanSpec(name="payment-refund-request", candidates=_new_refund_candidates, handle_row=_request_and_settle),
+    ScanSpec(name="payment-refund-reconcile", candidates=_pending_refund_candidates, handle_row=_reconcile),
+)

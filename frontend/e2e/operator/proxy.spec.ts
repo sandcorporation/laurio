@@ -45,11 +45,12 @@ test.describe("허용목록 — 운영자 표면 하나뿐(ADR-0021)", () => {
 
     // 나머지 내부 라우터도 함께 — 이 사람이 아니라 Celery beat 가 부르는 자리다.
     for (const path of [
-      "/api/backend/internal/scoring/run-pending",
-      "/api/backend/internal/payments/run-refunds",
-      "/api/backend/internal/distributions/run-due",
-      "/api/backend/internal/handovers/release-due",
-      "/api/backend/internal/notifications/dispatch-due",
+      "/api/backend/internal/scans/submission-scoring",
+      "/api/backend/internal/scans/payment-refund-request",
+      "/api/backend/internal/scans/distribution-create",
+      "/api/backend/internal/scans/handover-release",
+      "/api/backend/internal/scans/notification-dispatch-deferred",
+      "/api/backend/internal/scoring/incomplete-contests",
       "/api/backend/internal/appeals",
     ]) {
       const res = await request.get(path);

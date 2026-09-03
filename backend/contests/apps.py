@@ -46,26 +46,26 @@ class ContestsConfig(AppConfig):
 
         from .models import Contest
 
-        # scan_context(ctx)는 /tick 한 바퀴 동안 모든 스캔이 공유하는 dict다
+        # ctx는 /tick 한 바퀴 동안 모든 스캔이 공유하는 dict다
         # (core.scans.run_all) — 키가 네임스페이스 없이
         # "policy"처럼 뻔하면, 나중에 다른 전이가 같은 memoization 관용구를
         # 복사해 같은 키를 쓰는 순간 등록 순서에 따라 서로의 값을 덮어쓰거나
         # 읽는다(코드리뷰 지적 3 — AttributeError로 스캔이 죽거나, 우연히
         # 같은 속성이 있으면 잘못된 값이 조용히 저장된다). 이 모듈 소유임을
         # 값 자체에 담아 충돌을 구조적으로 막는다.
-        _SCAN_CONTEXT_POLICY_KEY = f"{__name__}:policy"
+        _CTX_POLICY_KEY = f"{__name__}:policy"
 
-        def _judging_period_days(scan_context: dict) -> int:
+        def _judging_period_days(ctx: dict) -> int:
             # 이 스캔 실행 한 번 동안 정책을 한 번만 읽는다(#78, ADR-0023) —
             # extra_fields는 CLOSED로 넘어가는 Contest 행마다 호출되므로, 여기서
             # 매번 get_current_policy()를 부르면 쿼리가 행 수만큼 늘어난다.
-            # scan_context는 core.scans 가 실행 하나에 대해 만들어주는 빈 dict라
+            # ctx는 core.scans 가 실행 하나에 대해 만들어주는 빈 dict라
             # 이 memoization이 스캔 경계를 정확히 지킨다.
-            if _SCAN_CONTEXT_POLICY_KEY not in scan_context:
+            if _CTX_POLICY_KEY not in ctx:
                 from policies.services import get_current_policy
 
-                scan_context[_SCAN_CONTEXT_POLICY_KEY] = get_current_policy()
-            return scan_context[_SCAN_CONTEXT_POLICY_KEY].judging_period_days
+                ctx[_CTX_POLICY_KEY] = get_current_policy()
+            return ctx[_CTX_POLICY_KEY].judging_period_days
 
         register_scan(
             transition_scan(
@@ -75,9 +75,9 @@ class ContestsConfig(AppConfig):
                     from_state=Contest.Status.PUBLISHED,
                     to_state=Contest.Status.CLOSED,
                     state_field="status",
-                    extra_fields=lambda contest, now, scan_context: {
+                    extra_fields=lambda contest, now, ctx: {
                         "judging_ends_at": contest.deadline_at
-                        + timedelta(days=_judging_period_days(scan_context))
+                        + timedelta(days=_judging_period_days(ctx))
                     },
                 ),
                 name="contest-close",

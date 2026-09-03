@@ -1,26 +1,11 @@
-"""Celery beat 가 주기적으로 실행하는 태스크.
+"""Celery beat 가 주기적으로 실행하는 태스크 (#137, #140, ADR-0003).
 
-ADR-0003: "스캔 진입점은 내부 인증 HTTP 엔드포인트다 — 워커·수동 curl·Celery beat
-모두 같은 하나의 HTTP 경로를 거치게 해서, '두 번 쏴도 한 번만 통과한다'는 보장을
-지키는 코드 경로가 단 하나만 존재하게 한다. 이 파일의 태스크는 전부 그 경로를
-호출하는 얇은 어댑터일 뿐이며 비즈니스 로직을 담지 않는다(비즈니스 로직 테스트는
-각 앱의 HTTP 테스트 — tests/test_scheduler_tick.py, tests/test_refunds.py 등 —
-가 이미 내부 엔드포인트를 직접 두드려 검증한다).
-
-코디네이터 리뷰 지적(#23): 이 파일이 core.call_scheduler_tick 하나만 가지고 있어서
-"틱"만 Celery beat 태스크로 존재하고, distributions/payments/handovers/
-notifications/scoring 각자의 내부 스캔 엔드포인트(config/api.py 참고 — 전부
-`/api/internal/*` 아래, 전부 core.auth.InternalAuth로 보호된다)는 아무도 주기적으로
-부르지 않았다. 그 결과 Distribution 1/N 배분, 환불 재확인, Handover Escrow 해제,
-야간 지연 알림 발송, 채점 재시도가 실제 배포에서 전부 멈춘다 — Celery beat가 있어도
-등록되지 않은 태스크는 당연히 안 돈다.
-
-이 태스크들을 각 앱(distributions/, notifications/ 등) 안에 두지 않고 여기 core/에
-모아 둔 이유: distributions/notifications/contests는 다른 체인이 동시에 편집 중이라
-그 디렉터리 안에 파일을 새로 만들거나 수정하지 않는다는 제약이 있다. 이 태스크들은
-비즈니스 로직이 전혀 없는 "URL에 POST 한 번"이라 어느 파일에 있어도 동작이 같고,
-core/tasks.py가 이미 그 정확한 패턴(호출부만 있고 로직은 없는 얇은 어댑터)의
-전례다.
+ADR-0003: 스캔 진입점은 내부 인증 HTTP 엔드포인트다 — 워커·수동 curl·Celery beat 모두 같은
+하나의 HTTP 경로를 거치게 해서, "두 번 쏴도 한 번만 통과한다"는 보장을 지키는 코드 경로가 단
+하나만 존재하게 한다. 태스크는 하나뿐이다 — 등록부(`core.scans.SCAN_REGISTRY`)의 스캔 이름을
+받아 `/api/internal/scans/{name}` 에 POST 한다. beat 스케줄은 그 등록부에서 파생되므로
+「엔드포인트는 있는데 아무도 부르지 않는」 스캔(#23 코디네이터 리뷰가 잡았던 사고)은 표현
+자체가 불가능하다.
 """
 
 import requests
@@ -52,22 +37,3 @@ def run_scan(name: str) -> dict:
     이름과 함께 등록한다(#137). 등록부 밖의 이름은 엔드포인트가 404 로 거부한다."""
 
     return _call_internal(f"/api/internal/scans/{name}")
-
-
-@shared_task(name="core.call_distributions_run_due")
-def call_distributions_run_due() -> dict:
-    """distributions/api.py: 심사기간 종료 후 무응답 기간이 지난 Contest에 1/N 배분."""
-
-    return _call_internal("/api/internal/distributions/run-due")
-
-
-@shared_task(name="core.call_payments_run_refunds")
-def call_payments_run_refunds() -> dict:
-    """payments/api.py: PENDING/타임아웃으로 남은 환불을 재확인해 확정한다."""
-
-    return _call_internal("/api/internal/payments/run-refunds")
-
-
-
-
-

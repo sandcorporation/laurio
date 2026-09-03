@@ -56,7 +56,9 @@ dotted path를 채워 넣으면 그 값으로 교체되며 정상 부팅된다.
 바인딩을 부팅 시점에 거부하고, `IS_PRODUCTION_DEPLOYMENT`(production만)가 추가로
 `manage.py check --deploy`가 요구하는 HSTS·SSL 리다이렉트·secure 쿠키·강한
 `SECRET_KEY`를 강제한다. staging은 검증용 서브 호스트라 운영자가
-`POST /api/internal/tick`을 수동으로 쏴서 21일 시나리오를 몇 초에 재현할 수 있다 —
+`POST /api/internal/tick`을 수동으로 쏴서 21일 시나리오를 몇 초에 재현할 수 있다(tick 은
+스캔 등록부 `core/scans.py` 의 스캔 **전부**를 등록 순서로 한 바퀴 돈다 — 전이·채점·환불·배분·
+지급·알림. 스캔 하나만 돌리려면 `POST /api/internal/scans/{name}`, #137/#140) —
 두 파일 모두 `INTERNAL_API_TOKEN`이 없으면 부팅 자체가 거부된다.
 
 **운영자 앱(`operator/`)도 두 compose 파일에 뜬다**(#70). 공개 앱(`frontend`)과

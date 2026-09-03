@@ -48,13 +48,11 @@ from policies.models import PlatformPolicy
 from policies.services import get_current_policy
 from submissions.models import Submission
 
+from core.scans import ScanSpec, scan_params
+
 from .models import Distribution, DistributionShare
 
 logger = logging.getLogger(__name__)
-
-# 한 스캔에서 시도하는 최대 행 수 — handovers.api.BATCH_SIZE와 같은 이유. 무제한
-# 스캔은 백로그가 쌓였을 때 이 요청 자체를 타임아웃으로 몰아넣는다.
-BATCH_SIZE = 50
 
 # unique_active_payout_per_distribution_share와 같은 집합이어야 한다
 # (payouts.services._ACTIVE_PAYOUT_STATUSES와 같은 이유) — 이 상태들에 도달한
@@ -62,7 +60,7 @@ BATCH_SIZE = 50
 # 포함한다(#50) — Seller 등록이 아직 안 끝났을 뿐 지급 자체(원장 분개)는 이미
 # 확정되어 있으므로, 이 스캔이 다시 request_payout/confirm을 시도할 이유가
 # 없다. 빠뜨리면 이 상태에 머무는 몫이 매 스캔마다 다시 후보에 잡혀
-# BATCH_SIZE 슬롯을 낭비한다("새 상태를 후보 집합에 반영하지 않으면 좌초·낭비가
+# 배치 슬롯을 낭비한다("새 상태를 후보 집합에 반영하지 않으면 좌초·낭비가
 # 생긴다"는 이 저장소가 반복해 겪은 결함 모양).
 # 「이 몫은 더 이상 지급을 기다리지 않는다」는 상태들. `contests.sponsorship` 도
 # 이것을 본다(#81) — 개최자에게 「완료」라고 말해도 되는지가 같은 기준이어야
@@ -83,7 +81,7 @@ def _create_distribution_for_contest(
     환불은 #17의 몫이지, 여기서 대신 처리하지 않는다(0으로 나누는 사고도 이렇게
     구조적으로 피한다).
 
-    `policy`는 `run_due_distributions`가 스캔 스코프당 한 번 읽어 넘긴다(#75,
+    `policy`는 스캔이 실행당 한 번 읽어 넘긴다(`_policy`)(#75,
     #79, ADR-0023) — 여기서 다시 읽지 않는다. 컷라인(`policy.
     distribution_cutline_percentage`)도 `_attempt_share_payout`이 쓰는 수수료·
     원천징수율과 같은 정책 행에서 나오므로, 이 스캔이 시도하는 Contest 수만큼
@@ -190,7 +188,7 @@ def _attempt_share_payout(
     어댑터 전용 테스트 시나리오 선택이다(`payments.api.ConfirmPaymentIn.simulate`와
     같은 원칙) — 실제 어댑터에서는 의미가 없다.
 
-    `policy`는 `run_due_distributions`가 스캔 스코프당 한 번 읽어 넘긴다(#75,
+    `policy`는 스캔이 실행당 한 번 읽어 넘긴다(`_policy`)(#75,
     ADR-0023) — 여기서 다시 읽지 않는다. 그러지 않으면 이 스캔이 시도하는 몫
     수만큼 정책 조회가 나간다.
     """
@@ -272,106 +270,81 @@ def is_holding_distribution(appeal) -> bool:
     ).exists()
 
 
-def run_due_distributions(*, fail_submission_ids: set[int] | None = None) -> list[dict]:
-    """무응답 14일이 지난 Contest를 스캔해 Distribution을 만들고, 아직 확정되지
-    않은 몫에 대한 지급을 시도(또는 재시도)한다.
-    """
+# --- 배분 스캔 둘 (#16, #140, ADR-0003) --------------------------------------------------
+#
+# `distribution-create` 는 무응답 기간이 지난 Contest 에 Distribution 을 만들고,
+# `distribution-share-payout` 은 아직 확정되지 않은 몫의 지급을 시도(또는 재시도)한다. 같은
+# 시각에 두 번 돌아도 이미 만들어진 Distribution 은 다시 만들지 않고, 이미 확정된 몫은 다시
+# 지급 시도하지 않는다(#16 AC). 행별 예외 격리는 뼈대(core.scans)의 것이다 — FAILED 로 끝난
+# 몫은 계속 재시도 후보로 남으므로(의도된 동작), 그 재시도 경로가 order_by("id") 의 맨 앞을
+# 영구히 차지한 채 예외로 죽으면 뒤의 배치가 통째로 막히는 poison pill 을 뼈대가 막는다.
+_POLICY_KEY = f"{__name__}:policy"
 
-    as_of = Clock.now()
-    # 이 스캔 스코프에서 정책을 한 번만 읽는다(#75, ADR-0023) — as_of를 스캔
-    # 시작 시점에 한 번만 구해 재사용하는 것과 같은 이유. 아래 for share in
-    # pending_shares 루프가 몫마다 정책을 다시 읽으면 쿼리가 몫 수만큼 늘어난다.
-    policy = get_current_policy()
-    fail_submission_ids = fail_submission_ids or set()
-    results: list[dict] = []
 
-    due_contest_ids = list(
-        distribution_due_contests(as_of, policy)
+def _policy(ctx):
+    # 이 스캔 실행에서 정책을 한 번만 읽는다(#75, ADR-0023) — 몫마다 다시 읽으면 쿼리가 몫 수만큼 늘어난다.
+    if _POLICY_KEY not in ctx:
+        ctx[_POLICY_KEY] = get_current_policy()
+    return ctx[_POLICY_KEY]
+
+
+def _due_contests(as_of, ctx):
+    return (
+        distribution_due_contests(as_of, _policy(ctx))
         # **심판되지 않은 이의가 있으면 그 Contest 는 아직 배분하지 않는다**(#74).
         #
-        # 이의가 묻는 것이 정확히 "내 점수가 컷라인을 넘는가" 이고, 점수가 돈을
-        # 정하는 유일한 곳이 이 컷라인이다(`Score` 는 Award 를 결정하지 않는다 —
-        # ADR-0006/0014). 답이 안 나온 채 배분하면 이의 제도가 무의미해진다.
+        # 이의가 묻는 것이 정확히 "내 점수가 컷라인을 넘는가" 이고, 점수가 돈을 정하는 유일한
+        # 곳이 이 컷라인이다(`Score` 는 Award 를 결정하지 않는다 — ADR-0006/0014). 답이 안 나온
+        # 채 배분하면 이의 제도가 무의미해진다.
         #
-        # 후보 질의에서 걸러낸다 — 루프 안에서 건너뛰면 그 Contest 가 매 스캔
-        # 배치의 맨 앞을 차지해(order_by("id")) 뒤의 정상 건들을 밀어낸다.
+        # 후보 질의에서 걸러낸다 — 행 처리에서 건너뛰면 그 Contest 가 매 실행 배치의 맨 앞을
+        # 차지해(order_by("id")) 뒤의 정상 건들을 밀어낸다.
         #
-        # **보류는 실패가 아니다.** 심판이 끝나는 순간 이 조건이 저절로 풀려
-        # 다음 스캔이 집는다 — 상태를 따로 두지 않는 이유다. 다만 운영자가
-        # 심판하지 않으면 무기한이므로, 운영자 큐가 "이 이의가 배분을 막고
-        # 있다" 를 보여줘야 한다(#74 스펙, ADR-0020 의 "돈이 사라지는 경로를
-        # 만들지 않는다").
+        # **보류는 실패가 아니다.** 심판이 끝나는 순간 이 조건이 저절로 풀려 다음 실행이 집는다
+        # — 상태를 따로 두지 않는 이유다. 다만 운영자가 심판하지 않으면 무기한이므로, 운영자
+        # 큐가 "이 이의가 배분을 막고 있다" 를 보여줘야 한다(#74 스펙, ADR-0020 의 "돈이
+        # 사라지는 경로를 만들지 않는다").
         .exclude(submissions__appeal__status=Appeal.Status.PENDING)
-        .order_by("id")
-        .values_list("id", flat=True)[:BATCH_SIZE]
     )
 
-    for contest_id in due_contest_ids:
-        # 한 Contest의 처리가 여기서 예외를 던져도(예기치 못한 버그) 나머지
-        # 배치가 막히면 안 된다 — order_by("id")로 스캔하는 이상, 그 예외를
-        # 밖으로 흘리면 이 Contest가 항상 배치 맨 앞에서 다시 걸려 그 뒤의
-        # 정상 건들까지 영원히 처리되지 못하는 poison pill이 된다
-        # (scoring.services 의 submission-scoring 스캔이 이미 겪고 고친 것과 같은
-        # 종류의 사고 — #21 리뷰).
-        try:
-            distribution = _create_distribution_for_contest(contest_id, policy=policy)
-        except Exception as exc:  # noqa: BLE001 - 한 Contest의 실패가 배치를 막으면 안 된다.
-            logger.exception(
-                "Contest(pk=%s) Distribution 생성 중 예외, 다음 건으로 계속", contest_id
-            )
-            results.append(
-                {
-                    "event": "distribution_creation_failed",
-                    "contest_id": contest_id,
-                    "error": f"{type(exc).__name__}: {exc}",
-                }
-            )
-            continue
 
-        if distribution is not None:
-            results.append(
-                {
-                    "event": "distribution_created",
-                    "contest_id": contest_id,
-                    "distribution_id": distribution.id,
-                    "qualifying_count": distribution.qualifying_count,
-                    "share_amount": distribution.share_amount,
-                    "remainder_amount": distribution.remainder_amount,
-                    "cutline_waived": distribution.cutline_waived,
-                }
-            )
+def _create_distribution(contest, as_of, ctx):
+    distribution = _create_distribution_for_contest(contest.id, policy=_policy(ctx))
+    if distribution is None:
+        return None
+    return {
+        "event": "distribution_created",
+        "contest_id": contest.id,
+        "distribution_id": distribution.id,
+        "qualifying_count": distribution.qualifying_count,
+        "share_amount": distribution.share_amount,
+        "remainder_amount": distribution.remainder_amount,
+        "cutline_waived": distribution.cutline_waived,
+    }
 
-    pending_shares = (
+
+def _pending_shares(as_of, ctx):
+    return (
         DistributionShare.objects.exclude(payouts__status__in=SETTLED_PAYOUT_STATUSES)
         .select_related("distribution", "submission")
-        .order_by("id")
-        .distinct()[:BATCH_SIZE]
+        .distinct()
     )
 
-    for share in pending_shares:
-        # 같은 이유로 몫 하나의 지급 시도가 던지는 예외도 밖으로 흘리지 않는다 —
-        # FAILED로 끝난 몫은 계속 재시도 후보로 남으므로(의도된 동작, "실패한
-        # 지급만 다음 스캔이 자동으로 재시도한다"), 그 재시도 경로 자체가
-        # order_by("id")의 맨 앞을 영구히 차지한 채 예외로 죽으면 그 뒤의 배치가
-        # 통째로 막힌다.
-        try:
-            outcome = _attempt_share_payout(
-                share, policy=policy, force_failure=share.submission_id in fail_submission_ids
-            )
-        except Exception as exc:  # noqa: BLE001 - 한 몫의 실패가 배치를 막으면 안 된다.
-            logger.exception(
-                "DistributionShare(pk=%s) 지급 시도 중 예외, 다음 건으로 계속", share.id
-            )
-            results.append(
-                {
-                    "event": "payout_attempt_failed",
-                    "submission_id": share.submission_id,
-                    "error": f"{type(exc).__name__}: {exc}",
-                }
-            )
-            continue
 
-        outcome["event"] = "payout_attempted"
-        results.append(outcome)
+def _attempt_payout(share, as_of, ctx):
+    # `fail_submission_ids`(scan_params)는 fake 지급대행 어댑터 전용 테스트 시나리오 선택이다 —
+    # 여기 나열된 submission_id 의 지급 시도만 강제로 실패시킨다. 실제 어댑터에서는 의미가 없다.
+    fail_submission_ids = set(scan_params(ctx).get("fail_submission_ids", []))
+    outcome = _attempt_share_payout(
+        share, policy=_policy(ctx), force_failure=share.submission_id in fail_submission_ids
+    )
+    outcome["event"] = "payout_attempted"
+    return outcome
 
-    return results
+
+# 배치 50은 뼈대 기본값 그대로다 — 무제한 스캔은 백로그가 쌓였을 때 이 요청 자체를 타임아웃으로
+# 몰아넣는다.
+DISTRIBUTION_SCANS = (
+    ScanSpec(name="distribution-create", candidates=_due_contests, handle_row=_create_distribution),
+    ScanSpec(name="distribution-share-payout", candidates=_pending_shares, handle_row=_attempt_payout),
+)

@@ -31,11 +31,12 @@ test.describe("허용목록 — 기본은 거부", () => {
 
     // 나머지 내부 라우터들도 함께 확인한다(마감 전이·배분·환불·지급·채점·알림).
     for (const path of [
-      "/api/backend/internal/scoring/run-pending",
-      "/api/backend/internal/payments/run-refunds",
-      "/api/backend/internal/distributions/run-due",
-      "/api/backend/internal/handovers/release-due",
-      "/api/backend/internal/notifications/dispatch-due",
+      "/api/backend/internal/scans/submission-scoring",
+      "/api/backend/internal/scans/payment-refund-request",
+      "/api/backend/internal/scans/distribution-create",
+      "/api/backend/internal/scans/handover-release",
+      "/api/backend/internal/scans/notification-dispatch-deferred",
+      "/api/backend/internal/scoring/incomplete-contests",
       "/api/backend/internal/appeals",
     ]) {
       const res = await request.get(path);
@@ -89,7 +90,7 @@ test.describe("허용목록 — 기본은 거부", () => {
       "/api/backend/contests/..%2f..%2finternal%2ftick",
       // 허용목록에 있는 다른 접두어(submissions)로도 같은 우회를 시도한다 —
       // 특정 접두어 하나만 고친 게 아니라 구조적으로 막혔는지 확인한다.
-      "/api/backend/submissions/..%2finternal%2fscoring%2frun-pending",
+      "/api/backend/submissions/..%2finternal%2fscans%2fsubmission-scoring",
     ];
 
     for (const path of bypassPaths) {

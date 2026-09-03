@@ -36,7 +36,6 @@ TICK_URL = "/api/internal/tick"
 CONTESTS_URL = "/api/contests"
 PAYMENTS_URL = "/api/payments"
 SCORING_RUN_PENDING_URL = "/api/internal/scans/submission-scoring"
-DISTRIBUTIONS_RUN_DUE_URL = "/api/internal/distributions/run-due"
 # 다섯 lifecycle 스캔의 등록부 이름(#138) — 예전 단일 엔드포인트가 돌리던 고정 순서 그대로.
 LIFECYCLE_SCAN_NAMES = (
     "deadline-reminder",
@@ -237,14 +236,25 @@ def _end_judging_period(client, contest_id: int) -> None:
 
 
 def _run_due_distributions(client, *, fail_submission_ids: list[int] | None = None) -> dict:
-    response = client.post(
-        DISTRIBUTIONS_RUN_DUE_URL,
-        data={"fail_submission_ids": fail_submission_ids or []},
-        content_type="application/json",
-        **_internal_headers(),
-    )
-    assert response.status_code == 200, response.content
-    return response.json()
+    """배분 생성 스캔과 몫 지급 스캔을 순서대로 한 번씩 돌리고 결과를 합친다(#140) — 예전 단일
+    엔드포인트와 같은 관찰면(`results`)에 뼈대의 `failed` 를 더해 돌려준다."""
+
+    rows: list[dict] = []
+    failed: list[dict] = []
+    for name, params in (
+        ("distribution-create", {}),
+        ("distribution-share-payout", {"fail_submission_ids": fail_submission_ids or []}),
+    ):
+        response = client.post(
+            f"/api/internal/scans/{name}",
+            data={"params": params},
+            content_type="application/json",
+            **_internal_headers(),
+        )
+        assert response.status_code == 200, response.content
+        rows += response.json()["rows"]
+        failed += response.json()["failed"]
+    return {"count": len(rows), "results": rows, "failed": failed}
 
 
 def _exhaust_after_first_fanout():

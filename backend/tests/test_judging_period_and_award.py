@@ -255,7 +255,7 @@ def test_judging_period_starts_at_close_and_scanned_by_scheduled_transition(
     tick_resp = client.post(TICK_URL, **_internal_headers())
     assert tick_resp.status_code == 200
     matching = [
-        t for t in tick_resp.json()["rows"] if t["model"] == "Contest" and t["pk"] == contest["id"]
+        t for t in tick_resp.json()["rows"] if t.get("model") == "Contest" and t.get("pk") == contest["id"]
     ]
     assert matching == [
         {
@@ -335,7 +335,7 @@ def test_judging_ends_at_is_derived_from_each_contests_own_deadline(client, cate
     _freeze(late_deadline + timedelta(minutes=1))
     tick_resp = client.post(TICK_URL, **_internal_headers())
     assert tick_resp.status_code == 200
-    transitioned_ids = {t["pk"] for t in tick_resp.json()["rows"] if t["model"] == "Contest"}
+    transitioned_ids = {t["pk"] for t in tick_resp.json()["rows"] if t.get("model") == "Contest"}
     assert {contest_a["id"], contest_b["id"]} <= transitioned_ids
 
     closed_a = Contest.objects.get(id=contest_a["id"])
