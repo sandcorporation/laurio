@@ -1,0 +1,50 @@
+# 법률 관련 문서
+
+이 폴더는 **지도**다. 어느 법이 이 서비스의 어디에 닿는지, 그 지점에서 무엇을 정했고
+코드가 그것을 어디서 지키는지, 그리고 무엇이 아직 확인되지 않았는지를 한 곳에서
+찾게 한다. 결정의 **원문은 `docs/adr/`** 에, 요율·기간 같은 **값은 코드와
+`PlatformPolicy`** 에 있다 — 이 폴더는 그 둘을 베끼지 않고 가리킨다. 값이 바뀌면
+코드와 ADR 을 고치고 여기서는 링크만 확인한다.
+
+> **이 문서들은 법률 자문이 아니다.** 공개 자료를 읽고 벤더(토스페이먼츠·포트원)에
+> 직접 물어 정한 것이다. 벤더에게 확인받은 항목은 그렇게 표시했고, 나머지는 변호사·
+> 세무사 확인이 필요한 **가정**이다. 확인이 끝나면 해당 문서의 「열린 항목」에서
+> 지우고 근거를 적는다.
+
+## 문서
+
+| 문서 | 다루는 법 | 닿는 곳 |
+| --- | --- | --- |
+| [commerce-and-payments.md](commerce-and-payments.md) | 전자상거래법 · 전자금융거래법 · 여신전문금융업법 | 사업자 요건, 상금 예치·지급 구조, 환불, 자전거래, 거래 기록 5년 보존 |
+| [tax.md](tax.md) | 소득세법 | 기타소득 원천징수, 과세최저한, 지급명세서, 주민등록번호 수집, 원장의 예수금 계정 |
+| [personal-data.md](personal-data.md) | 개인정보 보호법 · 정보통신망법 · CI 고시 | 수집 시점과 항목, 암호화, 탈퇴·휴면 파기, 보존 신원 분리, 열람 기록, 위탁·국외 이전, 통지 동의와 야간 차단 |
+| [contracts-and-ip.md](contracts-and-ip.md) | 민법 · 저작권법 · 약관규제법 | 만 19세 제한, 선정작·탈락작 저작권, 소스 비공개, AI 채점 이의, **약관·고지에 들어가야 할 항목 목록** |
+
+## 법 → 코드 빠른 표
+
+| 법적 요구 | 우리가 정한 것 | 코드 |
+| --- | --- | --- |
+| 결제대금예치업 등록 없이 남의 돈을 보관할 수 없다 | 결제·지급대행을 토스에 위임, Laurio 는 원장으로 기록만 ([ADR-0004](../adr/0004-double-entry-ledger.md), [ADR-0008](../adr/0008-toss-handles-identity-laurio-handles-tax.md)) | `backend/payments/adapters_toss.py`, `backend/ledger/models.py` |
+| 기타소득 원천징수·지급명세서는 지급자가 진다 | 지급대행사가 대신하지 않음을 벤더에 확인, Laurio 가 뗀다 | `backend/payouts/services.py` `_compute_amounts`, `backend/policies/models.py` |
+| 미성년자의 법률행위는 취소될 수 있다 | 제출·개최는 만 19세 이상만 ([ADR-0011](../adr/0011-verification-at-action-time-and-adults-only.md)) | `backend/verification/models.py` `Status.UNDERAGE` |
+| 불필요해진 개인정보는 지체 없이 파기 (개인정보 보호법 21조) | 탈퇴 = 신원 파기, 2년 무행위 = 신원만 파기 ([ADR-0025](../adr/0025-withdrawal-erases-identity-not-the-account.md)) | `backend/accounts/withdrawal.py`, `backend/accounts/dormancy.py` |
+| 거래 기록은 5년 보존 (전자상거래법 시행령) | 거래가 있던 사람의 실명·생년월일만 별도 테이블에 5년 | `backend/verification/models.py` `RETAINED_IDENTITY_RETENTION_PERIOD`, `RetainedIdentity` |
+| 광고성 정보는 사전 동의, 야간 전송 별도 동의 (정보통신망법) | 광고성만 옵트인, 21~08시는 거래성까지 연기 ([ADR-0010](../adr/0010-quiet-hours-defer-not-drop.md)) | `backend/notifications/models.py` `NotificationOptIn`, `is_promotional` |
+| 통신판매중개자 표시·고지 의무 | 필요하다고 적어 두었을 뿐 화면·약관은 아직 없다 | — |
+
+## 열린 항목 종합
+
+각 문서의 「열린 항목」을 한 줄씩 모은 것이다. 상세와 근거는 각 문서에 있다.
+
+| # | 항목 | 문서 | 성격 |
+| --- | --- | --- | --- |
+| 1 | **약관·개인정보처리방침·통신판매중개자 고지 화면이 저장소에 없다.** 여러 ADR 이 "약관 항목"이라 지목한 조항들이 갈 곳이 없다 | contracts-and-ip | 미구현 |
+| 2 | 구현된 토스 결제는 **에스크로 상품이 아니다.** REQUEST.md 는 PG 에스크로로 구매안전서비스 확인증을 충족한다고 봤다 — 통신판매업 신고 요건을 다시 봐야 한다 | commerce-and-payments | 확인 필요 |
+| 3 | Sponsor 가 개인 소비자일 때 「참가자가 한 명이라도 있으면 환불 없음」과 청약철회권의 관계 | commerce-and-payments | 확인 필요 |
+| 4 | 반복 참가 Developer 의 상금이 사업소득(3.3%)으로 재분류될 여지 | tax | 세무 검토 |
+| 5 | 지급명세서 생성·제출 기능이 없다 — 제출 주체가 Laurio 인 것은 확인됐다 | tax | 미구현 |
+| 6 | 플랫폼 수수료·개최비의 부가세·세금계산서·현금영수증 처리가 정해지지 않았다 | tax | 미정 |
+| 7 | 제출 소스가 AI 채점을 위해 OpenAI 로 나간다 — 국외 이전·위탁 고지 | personal-data | 고지 필요 |
+| 8 | 발주자의 「탈락작 마스킹 없는 공개」 동의를 코드가 기록하지 않는다 | contracts-and-ip | 미구현 |
+| 9 | 정당하게 CI 가 바뀐 사람(주민등록번호 변경, 계정 탈취 복구)을 위한 사람의 판단 경로가 없다 | personal-data | 미구현 |
+| 10 | 발신주의(발송 이력이 통지의 증거) 조항이 개인 Sponsor 에게 불공정 약관으로 다퉈질 여지 | contracts-and-ip | 확인 필요 |

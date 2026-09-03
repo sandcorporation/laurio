@@ -10,7 +10,10 @@ docker compose -f docker/compose.dev.yaml up -d db redis   # 테스트용 인프
 cd backend && uv run pytest                           # 테스트
 ```
 
-**공개 포트가 표준이 아니다.** 이 머신의 5432·8000은 다른 프로젝트가 쓰고 있어 비켜 잡았다.
+**공개 포트가 표준이 아니다.** compose 기본값이 5432·8000·6379·3000을 통째로 비켜 잡아
+뒀다 — 표준 포트를 쓰는 다른 프로젝트와 한 머신에 얹기 위해서다. 지금 개발 머신에는
+그런 프로젝트가 없지만 기본값은 그대로 둔다(옮기면 아래 표의 환경변수와 문서·스크립트가
+같이 흔들린다).
 
 | | 호스트 | 컨테이너 | 환경변수 |
 | --- | --- | --- | --- |
@@ -93,6 +96,10 @@ Dockerfile 을 쓰지만 공유 `image:` 태그가 없어 **이미지가 셋**�
 떠 있어도 배포가 실패로 끝난다(빌드 #5 가 세 이미지를 다 굽고 다섯 컨테이너를 다
 띄운 뒤 그렇게 죽었다). 스크립트는 `DJANGO_ALLOWED_HOSTS` 의 첫 항목을 쓴다.
 
+**Jenkins 는 staging 배포 호스트에 있다 — 개발 머신이 아니다.** 아래 `docker exec
+jenkins` 와 `/server/jenkins/...` 는 그 호스트에서만 유효하다(개발 머신에서 치면
+컨테이너도 경로도 없다).
+
 Jenkins 컨테이너는 호스트 docker 소켓을 물고 root 로 돈다. 빌드 로그는
 `docker exec jenkins sh -c 'tail /var/jenkins_home/jobs/laurio/builds/<N>/log'`.
 워크스페이스는 컨테이너의 `/var/jenkins_home/workspace/laurio` 이자 호스트의
@@ -166,14 +173,15 @@ dev compose의 `db` 서비스는 호스트 포트로 이미 노출돼 있으므�
 pytest`가 그 DB에 직접 붙는다 — 컨테이너를 거칠 이유가 없다.
 
 **스위트는 기본으로 병렬 실행된다**(#104). `pyproject.toml` 의 `addopts` 가 `-n 4` 를
-준다 — 직렬 5분 20초가 1분 47초다(실측, 1085건). 워커별 테스트 DB 는 pytest-django 가,
+준다 — 직렬 4분 11초가 1분 18초다(실측, 1132건). 워커별 테스트 DB 는 pytest-django 가,
 세션 Redis 인덱스는 `tests/conftest.py` 가 갈라 준다. 직렬로 보려면 `-n 0`.
 
-**`-n auto` 를 쓰지 마라.** 그건 논리 코어 수(이 머신은 14)를 잡는데, 세션 Redis
-인덱스가 워커마다 하나씩 올라 Redis 기본 범위(0~15)를 넘긴다 — conftest 의 가드가
-그 자리에서 막는다. 그리고 `SESSION_REDIS_URL` 의 인덱스를 높게 잡으면(예: /13) 워커
-넷만으로도 범위를 넘으니, 병렬 워크트리에서는 **낮은 인덱스를 골라 4칸씩 띄워
-쓴다**(예: 체인마다 /0, /5, /10).
+**`-n auto` 를 쓰지 마라 — `-n 4` 가 기본값인 이유가 있다.** `auto` 는 논리 코어
+수(이 머신은 12)를 잡는데, 세션 Redis 인덱스가 워커마다 하나씩 올라간다
+(`tests/conftest.py`: 기준 인덱스 + 워커 번호 + 1). 기본 `/1` 에 12워커면 최대 13 이라
+아슬아슬하게 통과하지만, 인덱스를 조금만 올려 잡으면 그대로 Redis 기본 범위(0~15)를
+넘겨 conftest 의 가드가 그 자리에서 막는다 — `/13` 이면 워커 넷만으로도 넘는다.
+병렬 워크트리에서는 **낮은 인덱스를 골라 4칸씩 띄워 쓴다**(예: 체인마다 /0, /5, /10).
 
 **pytest 를 두 개 이상 동시에 돌린다면 `LAURIO_TEST_DB_NAME` 을 서로 다르게
 줘라.** 기본값은 Django 관례대로 `test_laurio` 하나라, 병렬 워크트리에서 체인 둘이
@@ -259,15 +267,18 @@ kill %1
 | 언제 | 무엇 | 실측 |
 | --- | --- | --- |
 | red→green 반복 | 그 테스트 파일 하나 | 백엔드 3~17초 · e2e 13~42초 |
-| 티켓 커밋 직전 | 건드린 쪽 스위트 (`pytest` 또는 `test:operator`) | 3분 · 4.7분 |
-| 체인/PR 보고 직전 | 전체 | 백엔드 3분 + e2e 7분 |
+| 티켓 커밋 직전 | 건드린 쪽 스위트 (`pytest` 또는 `test:operator`) | 1분 20초 · 4.7분 |
+| 체인/PR 보고 직전 | 전체 | 백엔드 1분 20초 + e2e 7분 |
+
+백엔드 수치는 이 머신 실측이다. **e2e 수치는 전부 이전 머신(WSL) 실측이라 여기서는
+다시 재지 않았다** — 아래 스위트 시간들도 같다.
 
 ```bash
 cd backend && LAURIO_DB_PORT=<포트> uv run pytest tests/test_payouts.py -q
 pnpm --dir frontend exec playwright test --project=operator e2e/operator/policy.spec.ts
 ```
 
-안쪽 고리에서 전체를 돌리면 **한 번의 red→green 이 17초가 아니라 10분**이 된다.
+안쪽 고리에서 전체를 돌리면 **한 번의 red→green 이 17초가 아니라 8분**이 된다.
 슬라이스 하나에 그 왕복이 여러 번 있으니 티켓 하나가 통째로 테스트 대기에 잠긴다.
 
 **스위트가 8분을 넘긴다 — 한 앱만 고쳤으면 그 앱만 돌린다.**
@@ -316,11 +327,13 @@ pnpm --dir frontend test:public     # 공개 앱만 (약 2.3분, 79건)
 만들어진 `[E2E] `)이 생겨, `global-setup` 이 시작 전에 `--prune-all-namespaces` 로
 한 번 걷는다.
 
-**메모리가 워커 수의 실제 상한이다.** Docker VM 이 8GB 였을 때는 2워커에서도
-`next dev` 컨테이너가 OOM 으로 죽어 절반이 `ERR_CONNECTION_REFUSED` 로 실패했다 —
-24GB 로 올린 뒤에야 4워커가 성립했다(`.wslconfig`). 실측: 공개 스위트 직렬 7.4분 →
-4워커 4.4분(병렬 2.8분 + 배타 1.6분). 기본값은 `"50%"` 이고 `PLAYWRIGHT_WORKERS` 로
-바꾼다 — 올리기 전에 `docker stats` 로 여유를 먼저 본다.
+**메모리가 워커 수의 실제 상한이다.** 예전 머신(WSL, Docker VM 8GB)에서는 2워커에서도
+`next dev` 컨테이너가 OOM 으로 죽어 절반이 `ERR_CONNECTION_REFUSED` 로 실패했고,
+VM 을 24GB 로 올린 뒤에야 4워커가 성립했다 — 그때 실측이 공개 스위트 직렬 7.4분 →
+4워커 4.4분(병렬 2.8분 + 배타 1.6분)이다. 지금 머신은 네이티브 리눅스 Docker(코어 12,
+호스트 RAM 약 26GB)라 조절할 VM 크기가 없고, 컨테이너가 호스트 메모리를 그대로
+나눠 쓴다. 기본값 `"50%"` 는 여기서 **6워커**라 검증된 4워커보다 높다 —
+`PLAYWRIGHT_WORKERS` 로 바꾸고, 올리기 전에 `docker stats` 로 여유를 먼저 본다.
 
 **우리 화면으로 돌아가는 리다이렉트는 상대 경로로 낸다.** 컨테이너 안의 Next 는
 자기가 어떤 공개 주소로 불렸는지 모른다 — `new URL(request.url).origin` 이 리버스
@@ -358,3 +371,10 @@ The five canonical roles, unchanged: `needs-triage`, `needs-info`,
 ### Domain docs
 
 Single-context — `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+### Legal docs
+
+`docs/legal/` 은 지도다 — 어느 법이 어디에 닿고, 코드가 어디서 지키며, 무엇이 아직
+확인되지 않았는지. `README.md` 가 색인이고 열린 항목을 한 표로 모은다. 결정의 원문은
+ADR, 값은 코드에 있다 — 세무·개인정보·약관·IP·결제 구조를 건드리면 먼저 읽고, 새
+결정이 「약관 항목」을 만들면 `contracts-and-ip.md` 의 목록에 더한다.

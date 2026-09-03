@@ -81,6 +81,10 @@ _Avoid_: 납품, 전달, 이관, Delivery, Transfer
 
 ### 돈
 
+**Charge**:
+Sponsor 에게 청구돼 PG 로 결제되는 금액 — Prize 예치와 개최비, 그리고 심사 연장비의 두 종류다. 벤더가 확정하기 전까지는 돈이 아니고, 확정되는 그 순간에만 원장에 기록된다.
+_Avoid_: 결제(행위와 금액이 섞인다), Payment(코드 테이블 이름일 뿐), 청구서, Invoice, Order
+
 **Prize**:
 Sponsor가 Contest 개최 시 예치하는 금액. Payout 또는 환불로만 빠져나간다.
 _Avoid_: 보상, 대금, Reward, Payment, Fee
@@ -96,6 +100,10 @@ _Avoid_: 정산, 이체, 송금, Settlement, Transfer, Disbursement
 **Seller**:
 Developer가 Payout을 받기 위해 지급대행사(토스)에 등록되는 수취인 신원. Payout이 확정된 뒤에만 등록이 시작된다 — Verification이 가입이 아니라 행위 시점으로 미뤄진 것과 같은 원칙이다. 등록으로 받는 sellerId는 Developer에 남아 두 번째 Payout부터는 재등록하지 않는다. 본인인증을 마치면 부분 승인 상태로 주간 한도 안에서 지급받고, 한도를 넘으면 심사 대기가 된다 — 둘 다 실패가 아니다.
 _Avoid_: 셀러(한글 음역을 개념 이름처럼 쓰는 것), 정산 계좌, Merchant, Payee
+
+**Hold**:
+확정된 Payout 을 지금 붙들고 있는 것(신원 미제출 · Seller 의 전화번호·본인인증·심사·거절 · 실이체 실패)과 그것을 풀 차례가 누구에게 있는가(Developer · 지급대행사 · Operator). 신원이 실이체보다 앞서고, 정의되지 않은 조합은 Operator 의 차례다 — 돈은 움직이지 않고 사람이 본다.
+_Avoid_: blocked_on(운영자 API 필드 이름일 뿐), 대기 상태(무엇을 기다리는지가 빠진다), 블로커, Pending, Blocker
 
 **Distribution**:
 Sponsor가 기한 내 Award하지 않아, Score 컷라인을 통과한 Submission들에게 Prize를 1/N로 나누는 것.
