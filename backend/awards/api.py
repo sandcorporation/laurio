@@ -64,15 +64,9 @@ def award_submission(request: HttpRequest, contest_id: int, payload: AwardIn):
         # judging_ends_at 비교와 같은 결론을, 스케줄러가 이미 반영한 경우 상태만으로 먼저 잡아준다.
         raise HttpError(409, "지금은 Award할 수 있는 상태가 아닙니다.")
 
-    # 코드베이스 관용구와 맞춘다: 스케줄러는 `judging_ends_at <= as_of`일 때
-    # CLOSED -> JUDGING_ENDED로 옮긴다(core.transitions/contests.apps) — 즉 심사
-    # 기간은 "now가 judging_ends_at과 같아지는 순간"부터 이미 끝난 것으로 본다.
-    # `>`를 쓰면 그 경계 순간에 스케줄러는 이미 끝났다고 보는데 Award는 아직
-    # 허용해버리는 불일치가 생긴다(#13 리뷰 지적 7 — extend_judging_period의
-    # `_reject_if_judging_period_is_not_extendable`도 같은 `>=`를 쓴다).
-    if contest.judging_ends_at is None or now >= contest.judging_ends_at:
-        # 스캔 주기만큼 틱이 아직 CLOSED -> JUDGING_ENDED를 못 옮겼더라도, 시각으로
-        # 다시 한 번 막는다(AC: "심사기간이 지나면 Award가 거부된다").
+    # 시간 창은 Contest 가 안다(#143) — 연장 가드와 Sponsor 번역기가 같은 메서드를 부른다. 스캔
+    # 주기만큼 틱이 아직 CLOSED -> JUDGING_ENDED 를 못 옮겼더라도 시각으로 다시 한 번 막는다.
+    if not contest.judging_window_open(now):
         raise HttpError(403, "심사기간이 지나 Award할 수 없습니다.")
 
     with transaction.atomic():

@@ -101,31 +101,16 @@ def next_action_for(submission) -> str:
     # 아직 돈이 걸린 단계에 닿지 않았다 — 이의를 낼 수 있는지 본다. 조건은
     # `appeals.api.create_appeal` 의 전제와 같다: 채점이 끝났고(위에서 확인),
     # 아직 이의가 없고, 기한(심사기간 종료) 안이다.
-    if appeal is None and within_appeal_window(contest, now):
+    if appeal is None and contest.appeal_window_open(now):
         return NextAction.CAN_APPEAL
 
     if _is_awarded_to_someone_else(submission):
         return NextAction.NOT_SELECTED
 
-    if contest.judging_ends_at is not None and now < contest.judging_ends_at:
+    if contest.judging_window_open(now):
         return NextAction.AWAITING_JUDGING
 
     return NextAction.AWAITING_DISTRIBUTION
-
-
-def within_appeal_window(contest, now) -> bool:
-    """이의 제기 기한은 심사기간 종료다 (#74).
-
-    `Score` 는 Award 를 결정하지 않으므로(ADR-0006/0014 — Award 엔드포인트는
-    Score 를 조회조차 하지 않는다) 점수가 돈을 정하는 곳은 배분의 컷라인
-    하나뿐이고, `judging_ends_at` 이면 배분은 아직 대기를 시작도 안 했다.
-
-    **이 값은 Sponsor 의 유료 연장으로 미뤄진다.** 그러면 Developer 의 이의 창도
-    함께 늘어난다 — 유리한 방향이라 해롭지 않지만 아무도 그렇게 결정한 적은
-    없으므로, 그 결합이 여기 있다는 것을 적어 둔다.
-    """
-
-    return contest.judging_ends_at is None or now < contest.judging_ends_at
 
 
 def _is_awarded_to_someone_else(submission) -> bool:

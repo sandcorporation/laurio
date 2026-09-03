@@ -149,7 +149,7 @@ def sponsor_next_action_for(contest, *, now) -> str:
     if Contest.Status.SUBMITTABLE(contest.status):
         return SponsorNextAction.AWAITING_SCORING
 
-    if Contest.Status.AWARDABLE(contest.status) and _within_judging_window(contest, now):
+    if Contest.Status.AWARDABLE(contest.status) and contest.judging_window_open(now):
         # **채점을 이 아래 단계들의 게이트로 쓰지 않는다.** 「하나라도 채점됨」을
         # 바깥 조건으로 두면, 채점이 영영 성공하지 못하는 공모전은 배분이 끝난
         # 뒤에도 계속 「채점 대기」라고 말한다. 그래서 이 안내는 **심사 창
@@ -186,8 +186,8 @@ def _awarded_action(contest, award) -> str:
         # Award 는 됐는데 Handover 가 아직 없다 — 만들어지는 중이다.
         return SponsorNextAction.ACCEPT_HANDOVER
 
-    # `handovers.api.accept_handover` 가 받는 상태 그대로다.
-    if handover.status != Handover.Status.RELEASED:
+    # `handovers.api.accept_handover` 와 같은 메서드다(#143).
+    if handover.acceptable():
         return SponsorNextAction.ACCEPT_HANDOVER
 
     # Escrow 는 풀렸다 — 남은 것은 개발자 쪽 지급 절차이고 Sponsor 가 할 일은
@@ -196,7 +196,3 @@ def _awarded_action(contest, award) -> str:
     if contest.has_confirmed_payout:
         return SponsorNextAction.CONTEST_COMPLETE
     return SponsorNextAction.AWAITING_PAYOUT
-
-
-def _within_judging_window(contest, now) -> bool:
-    return contest.judging_ends_at is None or now < contest.judging_ends_at

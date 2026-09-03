@@ -15,10 +15,25 @@ from __future__ import annotations
 from django.db import models
 
 
+class HandoverQuerySet(models.QuerySet):
+    def acceptable(self):
+        """`Handover.acceptable()` 의 필터 짝 — 아직 Escrow 가 풀리지 않은 것."""
+
+        return self.exclude(status=Handover.Status.RELEASED)
+
+
 class Handover(models.Model):
     class Status(models.TextChoices):
         PENDING_ACCEPTANCE = "pending_acceptance", "인수 대기"
         RELEASED = "released", "Escrow 해제됨"
+
+    objects = HandoverQuerySet.as_manager()
+
+    def acceptable(self) -> bool:
+        """Sponsor 의 인수 확인(또는 타임아웃 해제)이 아직 의미가 있는가 — `handovers.api.
+        accept_handover` 와 `contests.sponsorship._awarded_action` 이 같은 메서드를 부른다(#143)."""
+
+        return self.status != self.Status.RELEASED
 
     class ReleasedVia(models.TextChoices):
         SPONSOR_ACCEPTED = "sponsor_accepted", "Sponsor 인수 확인"
