@@ -119,7 +119,7 @@ async function createContestAsSponsor(
   return createContestAsCurrentUser(page, options);
 }
 
-test.describe("소스 필수 · Evidence 연결 · 완성도", () => {
+test.describe("@exclusive 소스 필수 · Evidence 연결 · 완성도", () => {
   test("소스 없이는 제출이 거부되고, 업로드 후에는 저장되며 마감 전까지 몇 번이든 수정할 수 있다", async ({
     page,
   }) => {

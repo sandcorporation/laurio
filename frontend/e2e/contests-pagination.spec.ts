@@ -60,7 +60,7 @@ async function rowIdsOnPage(page: Page): Promise<string[]> {
 
 // JS 를 끈 상태로 도는 것 자체가 SSR 증명이다(ADR-0015) — 페이지를 넘기는 링크도
 // 전부 진짜 내비게이션이라, 필터·정렬·페이지가 서버에서 적용된 HTML 로 온다.
-test.describe("자바스크립트 없이", () => {
+test.describe("@exclusive 자바스크립트 없이", () => {
   test.use({ javaScriptEnabled: false });
 
   test("전체 건수는 이 페이지에 실린 수가 아니라 필터가 걸린 전체 건수다", async ({ page }) => {
@@ -140,7 +140,7 @@ test.describe("자바스크립트 없이", () => {
   });
 });
 
-test("필터를 바꾸면 페이지가 1 로 돌아간다", async ({ page }) => {
+test("@exclusive 필터를 바꾸면 페이지가 1 로 돌아간다", async ({ page }) => {
   // 3페이지에서 카테고리를 좁혔는데 페이지가 그대로면, 결과가 1페이지밖에 없을 때
   // "조건에 맞는 공모전이 없습니다" 가 뜬다 — 있는데 없다고 말하는 화면이다.
   await page.goto(bulkUrl({ sort: "prize", page: 3 }));

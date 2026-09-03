@@ -22,7 +22,7 @@ test.beforeAll(() => {
   seeded = seedE2eContests();
 });
 
-test.describe("헤더 — 모든 페이지에 같은 모양으로 선다", () => {
+test.describe("@exclusive 헤더 — 모든 페이지에 같은 모양으로 선다", () => {
   for (const target of ["/", "/contests", "/login"]) {
     test(`${target} 에도 브랜드·공모전·개최 CTA 가 있다`, async ({ page }) => {
       await page.goto(target);
@@ -60,7 +60,7 @@ test.describe("헤더 — 모든 페이지에 같은 모양으로 선다", () =>
   });
 });
 
-test.describe("홈 — 자리표시가 아니라 실제 공모전을 보여준다", () => {
+test.describe("@exclusive 홈 — 자리표시가 아니라 실제 공모전을 보여준다", () => {
   test('이 페이지에 "use client" 가 없다', () => {
     // ADR-0015 — 홈은 공개 표면이라 서버 컴포넌트로 남아야 색인된다.
     const source = fs.readFileSync(path.join(__dirname, "../app/page.tsx"), "utf-8");
@@ -131,7 +131,7 @@ test.describe("홈 — 자리표시가 아니라 실제 공모전을 보여준�
 // 확인한다. 백엔드 쪽 "모든 Contest.Status가 어떤 묶음엔가 들어간다"는 고정은
 // backend/tests/test_home_curation.py 의 몫이다 — 여기서는 화면이 그 결과를
 // 정직하게 옮기는지만 본다.
-test.describe("홈 — 공모전을 네 묶음으로 큐레이션한다", () => {
+test.describe("@exclusive 홈 — 공모전을 네 묶음으로 큐레이션한다", () => {
   test("네 묶음이 모두 제목으로 보인다", async ({ page }) => {
     await page.goto("/");
 
@@ -221,7 +221,7 @@ test.describe("홈 — 공모전을 네 묶음으로 큐레이션한다", () => 
 // 코드리뷰 지적(#93 1차)을 반영해, 헤더 링크뿐 아니라 홈에 실제로 렌더된
 // Contest 행을 먼저 클릭해 그 상세에 닿는 것부터 확인한다 — 홈의 <section>
 // 이 통째로 사라지거나 행 링크가 깨지면 이 자리에서 실패해야 한다.
-test("첫 방문자가 / 에서 시작해 클릭만으로 실제 공모전과 공모전 목록·로그인 화면에 닿는다", async ({
+test("@exclusive 첫 방문자가 / 에서 시작해 클릭만으로 실제 공모전과 공모전 목록·로그인 화면에 닿는다", async ({
   page,
 }) => {
   await page.goto("/");

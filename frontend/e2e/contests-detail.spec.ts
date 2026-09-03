@@ -16,7 +16,7 @@ test.beforeAll(() => {
   seeded = seedE2eContests();
 });
 
-test("이 페이지에 \"use client\" 가 없다", () => {
+test("@exclusive 이 페이지에 \"use client\" 가 없다", () => {
   const source = fs.readFileSync(
     path.join(__dirname, "../app/contests/[id]/page.tsx"),
     "utf-8",
@@ -24,7 +24,7 @@ test("이 페이지에 \"use client\" 가 없다", () => {
   expect(source).not.toContain('"use client"');
 });
 
-test("요구사항과 Requirement 체크리스트가 서버 렌더링된 HTML 에 들어 있다", async ({ request }) => {
+test("@exclusive 요구사항과 Requirement 체크리스트가 서버 렌더링된 HTML 에 들어 있다", async ({ request }) => {
   const res = await request.get(`/contests/${seeded.funded.id}`);
   expect(res.status()).toBe(200);
   const html = await res.text();
@@ -36,7 +36,7 @@ test("요구사항과 Requirement 체크리스트가 서버 렌더링된 HTML �
   }
 });
 
-test("Requirement 의 필수/선택 등급이 구분되어 보인다", async ({ request }) => {
+test("@exclusive Requirement 의 필수/선택 등급이 구분되어 보인다", async ({ request }) => {
   const res = await request.get(`/contests/${seeded.funded.id}`);
   const html = await res.text();
 
@@ -45,7 +45,7 @@ test("Requirement 의 필수/선택 등급이 구분되어 보인다", async ({ 
   expect(html).toContain('data-requirement-grade="optional"');
 });
 
-test("OG 태그(제목·설명·이미지)가 서버에서 들어간다", async ({ request }) => {
+test("@exclusive OG 태그(제목·설명·이미지)가 서버에서 들어간다", async ({ request }) => {
   const res = await request.get(`/contests/${seeded.funded.id}`);
   const html = await res.text();
 
@@ -54,12 +54,12 @@ test("OG 태그(제목·설명·이미지)가 서버에서 들어간다", async 
   expect(html).toMatch(/property="og:image" content="[^"]*\/opengraph-image[^"]*"/);
 });
 
-test("로그인 없이 접근된다", async ({ request }) => {
+test("@exclusive 로그인 없이 접근된다", async ({ request }) => {
   const res = await request.get(`/contests/${seeded.funded.id}`);
   expect(res.status()).toBe(200);
 });
 
-test("마감된 Contest 도 상세에 남는다", async ({ request }) => {
+test("@exclusive 마감된 Contest 도 상세에 남는다", async ({ request }) => {
   // ADR-0014 — 마감은 결제 취소가 아니라 데모·영상이 공개되는 시점이다.
   const res = await request.get(`/contests/${seeded.closed.id}`);
   expect(res.status()).toBe(200);
@@ -67,12 +67,12 @@ test("마감된 Contest 도 상세에 남는다", async ({ request }) => {
   expect(html).toContain(seeded.closed.title);
 });
 
-test("존재하지 않는 Contest 는 404 다", async ({ request }) => {
+test("@exclusive 존재하지 않는 Contest 는 404 다", async ({ request }) => {
   const res = await request.get("/contests/999999999");
   expect(res.status()).toBe(404);
 });
 
-test("draft Contest 는 404 이고, 존재 여부를 드러내지 않는다", async ({ request }) => {
+test("@exclusive draft Contest 는 404 이고, 존재 여부를 드러내지 않는다", async ({ request }) => {
   const draftRes = await request.get(`/contests/${seeded.draft.id}`);
   const missingRes = await request.get("/contests/999999999");
 

@@ -74,7 +74,7 @@ async function createContest(page: import("@playwright/test").Page): Promise<num
   return result.body.id as number;
 }
 
-test("presigned 업로드 발급은 프록시를 타지만 실제 PUT은 스토리지로 직행한다", async ({
+test("@exclusive presigned 업로드 발급은 프록시를 타지만 실제 PUT은 스토리지로 직행한다", async ({
   page,
   baseURL,
 }) => {
@@ -150,7 +150,7 @@ async function getSessionUserId(page: import("@playwright/test").Page): Promise<
   });
 }
 
-test("업로드 실패는 이유와 함께 보이고 재시도할 수 있다", async ({ page }) => {
+test("@exclusive 업로드 실패는 이유와 함께 보이고 재시도할 수 있다", async ({ page }) => {
   const seed = `upload-fail-${Date.now()}`;
   await loginAndVerify(page, seed);
 

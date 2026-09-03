@@ -46,7 +46,15 @@ export default defineConfig({
   // 빈 큐를 요구한다 — 다른 워커가 무엇이든 심는 순간 둘 다 깨진다. 실제로 2워커로
   // 돌려 4건이 그렇게 실패하는 것을 확인했다. 그걸 풀려면 운영자 큐 시드에도
   // 워커별 네임스페이스가 필요하고, 그건 이 티켓 범위를 넘는다.
-  workers: Number(process.env.PLAYWRIGHT_WORKERS ?? 2),
+  // 기본값은 머신에 맞춰 정해진다("50%" = 코어의 절반) — 하드코딩하면 작은
+  // 머신에서는 죽고 큰 머신에서는 논다. 실측: 이 저장소의 개발 머신에서 공개
+  // 스위트가 직렬 7.4분 → 4워커 4.4분(병렬 패스 2.8분 + 배타 패스 1.6분).
+  //
+  // **메모리가 워커 수의 실제 상한이다.** Docker VM 이 8GB 였을 때는 2워커에서도
+  // `next dev` 컨테이너가 OOM 으로 죽어 절반이 ERR_CONNECTION_REFUSED 로
+  // 실패했다 — 24GB 로 올린 뒤에야 4워커가 성립했다. 이 값을 올리기 전에
+  // `docker stats` 로 여유를 먼저 본다.
+  workers: process.env.PLAYWRIGHT_WORKERS ?? "50%",
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [["github"], ["list"]] : "list",
