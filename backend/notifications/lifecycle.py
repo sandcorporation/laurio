@@ -240,7 +240,7 @@ def send_due_deadline_reminders(as_of=None, policy=None, deadline=None) -> list[
 def send_due_judging_end_reminders(as_of=None, policy=None, deadline=None) -> list[dict]:
     """심사기간 종료가 다가오는 CLOSED Contest의 Sponsor에게 Award를 상기시킨다.
 
-    유료 연장(`contests.services.mark_extension_paid`)이 `judging_ends_at`을
+    유료 연장(`JudgingExtensionPayment.on_paid`)이 `judging_ends_at`을
     늘릴 때 `judging_end_reminder_sent_at`도 함께 비운다(#19 리뷰 지적 1) —
     그래야 연장된 새 종료일이 다가올 때 이 스캔이 다시 알릴 수 있다. 여기서는
     그 결과(비워진 플래그)를 그대로 소비할 뿐이다.
