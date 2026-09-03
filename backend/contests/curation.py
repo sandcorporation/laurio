@@ -60,7 +60,7 @@ def home_bucket_for(contest, *, now) -> str | None:
     경계값 테스트들이 두 표현을 계속 맞춰 둔다.
 
     `DRAFT`는 `None`이다 — 결제 전 Contest가 홈에 새면 안 된다(#94 인수조건).
-    이 함수를 부르는 쪽은 애초에 `contests.api._PUBLICLY_VISIBLE_STATUSES`로
+    이 함수를 부르는 쪽은 애초에 `Contest.Status.PUBLICLY_VISIBLE`로
     이미 걸러진 Contest만 넘기지만(공개 목록·상세와 같은 경계), `DRAFT`가
     실수로 들어와도 여기서 다시 한번 막는다 — 조건을 한 곳에 두면 어느 한쪽만
     고쳐 갈라지는 사고를 막을 수 있다.
@@ -70,9 +70,11 @@ def home_bucket_for(contest, *, now) -> str | None:
     참고).
     """
 
-    from contests.models import Contest
+    from contests.models import Contest, HomeStatusAxis
 
-    if contest.status == Contest.Status.PUBLISHED:
+    axis = Contest.Status.HOME_AXIS(contest.status)
+
+    if axis is HomeStatusAxis.OPEN:
         remaining = contest.deadline_at - now
 
         # 마감 시각은 지났는데 스캔이 아직 CLOSED로 옮기지 않은 아주 짧은
@@ -91,10 +93,10 @@ def home_bucket_for(contest, *, now) -> str | None:
             return HomeCurationBucket.IMMINENT
         return HomeCurationBucket.ONGOING
 
-    if contest.status == Contest.Status.CLOSED:
+    if axis is HomeStatusAxis.IN_JUDGING:
         return HomeCurationBucket.IN_JUDGING
 
-    if contest.status in (Contest.Status.AWARDED, Contest.Status.JUDGING_ENDED):
+    if axis is HomeStatusAxis.COMPLETED:
         return HomeCurationBucket.COMPLETED
 
     return None

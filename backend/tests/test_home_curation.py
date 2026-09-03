@@ -7,7 +7,7 @@ HTTP 시임으로 확인한다(CLAUDE.md — 시임은 언제나 HTTP).
 `test_every_public_status_lands_in_exactly_one_bucket`가 이 파일에서 가장
 중요한 테스트다 — 고정된 상태 목록이 아니라 `Contest.Status` 자체를 순회한다.
 나중에 상태가 하나 늘면 이 테스트도 그 값을 함께 돌기 때문에,
-`contests.curation.home_bucket_for`나 `contests.api._PUBLICLY_VISIBLE_STATUSES`
+`contests.curation.home_bucket_for`나 `Contest.Status.PUBLICLY_VISIBLE`
 어느 한쪽이라도 그 값을 받아들이지 않으면 여기서 즉시 드러난다 — 화면이
 조용히 그 부류를 안 보여주게 되는 실패를 여기서 막는다(#94 인수조건).
 """

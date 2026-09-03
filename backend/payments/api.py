@@ -97,10 +97,7 @@ def initiate_payment(request: HttpRequest, payload: InitiatePaymentIn):
         if contest.sponsor.user_id != request.auth_user.id:
             raise HttpError(403, "본인이 개최한 Contest만 결제할 수 있습니다.")
 
-        if contest.status != Contest.Status.DRAFT:
-            # PUBLISHED(이미 결제·공개됨)뿐 아니라 CLOSED(마감 전이까지 지난 뒤)도
-            # 새 결제를 시작할 이유가 없다(#12 리뷰 지적). 결제를 다시 시작할 수 있는
-            # 상태는 DRAFT뿐이다.
+        if not Contest.Status.PAYABLE(contest.status):
             raise HttpError(409, "이미 결제가 완료되어 공개된 Contest입니다.")
 
         # 이미 진행 중이거나 완료된 결제가 있으면 새로 만들지 않고 그대로 돌려준다 —

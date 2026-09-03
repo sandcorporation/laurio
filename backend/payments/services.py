@@ -284,7 +284,7 @@ def _eligible_contests():
     # 참여자가 0명이어도 이 경로로 환불하지 않는다.
     contests_with_submissions = Submission.objects.values_list("contest_id", flat=True)
     return Contest.objects.filter(
-        status__in=[Contest.Status.CLOSED, Contest.Status.JUDGING_ENDED],
+        status__in=Contest.Status.REFUNDABLE.statuses,
         refund_disabled=False,
     ).exclude(id__in=contests_with_submissions)
 
