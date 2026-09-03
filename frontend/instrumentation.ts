@@ -82,6 +82,41 @@ const REQUIRED_IN_DEPLOYED_ENVIRONMENTS: Array<{ name: string; reason: string }>
       "거절한다(docker/staging.env.example 참고) — 비어 있으면 그 사고를 배포 " +
       "시점에 막는다.",
   },
+  // 토스 결제창 브라우저 SDK의 클라이언트 키(#112 lib/payments/toss.ts,
+  // #115). lib/payments/toss.ts는 "use client" 파일이라 그 안의
+  // process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY는 Next 빌드가 브라우저 번들에
+  // 실제로 인라인한다 — 하지만 이 instrumentation.ts는 그 컴파일 그래프
+  // 밖에서 도는 별도 Node 진입점이라 같은 인라인의 혜택을 받지 못한다(직접
+  // 확인했다: builder 스테이지만 --build-arg로 채워 빌드하면 이 파일의
+  // process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY는 여전히 빈 문자열이었다). 그래서
+  // docker/frontend.Dockerfile의 runner 스테이지에도 같은 ARG를 다시 선언해
+  // ENV로 노출해 뒀다 — `docker build --build-arg NEXT_PUBLIC_TOSS_CLIENT_KEY=…`
+  // 는 그 이름을 선언한 모든 스테이지에 전역으로 적용되므로, compose의
+  // build.args가 주는 한 값이 builder(브라우저 번들 인라인용)와 runner(여기가
+  // 읽는 실제 컨테이너 런타임 env, 빌드 시점 값과 항상 같다)에 그대로 들어가
+  // 값이 둘로 갈릴 여지가 없다.
+  // docker/compose.staging.yaml·docker/compose.prod.yaml의 frontend
+  // build.args가 TOSS_SANDBOX_CLIENT_KEY/TOSS_LIVE_CLIENT_KEY를 비운 채로도
+  // 빌드를 통과시키므로(#112 스펙 결정 — 위젯 사용 여부는 클라이언트 키가
+  // 아니라 PAYMENT_ADAPTER_MODE가 가른다), 빌드가 성공했다는 것이 이 값이
+  // 채워졌다는 증거가 되지 못한다. 그런데 배포 환경에서 PAYMENT_ADAPTER_MODE는
+  // 언제나 실물 어댑터를 가리켜야 하므로(core.adapters.check_adapter_mode,
+  // #83이 fake를 거부한다) 배포 환경이라면 위젯을 반드시 쓴다 — 이 값이
+  // 비어 있으면 사용자가 결제하기를 누르는 순간에야 lib/payments/toss.ts의
+  // getTossClientKey()가 null을 돌려줘 실패한다. 그 첫 발견자가 사용자였던
+  // 사고(spec #110)를 부팅 시점으로 당긴다.
+  {
+    name: "NEXT_PUBLIC_TOSS_CLIENT_KEY",
+    reason:
+      "토스 결제창 브라우저 SDK가 결제창을 열 때 쓰는 공개 키다 " +
+      "(lib/payments/toss.ts의 getTossClientKey) — 배포 환경은 PG 어댑터가 " +
+      "언제나 실물(TossPGAdapter)이라 위젯을 반드시 거치는데, 이 값이 " +
+      "비어 있으면 사용자가 결제하기를 누른 순간에야 실패가 드러난다. " +
+      "docker/staging.env.example의 TOSS_SANDBOX_CLIENT_KEY, " +
+      "docker/prod.env.example의 TOSS_LIVE_CLIENT_KEY를 채우고 " +
+      "docker/frontend.Dockerfile의 build.args로 넘겨야 한다 — 이미 빌드된 " +
+      "이미지라면 재빌드해야 한다(런타임 재주입으로는 늦는다).",
+  },
 ];
 
 export async function register(): Promise<void> {

@@ -546,6 +546,19 @@ jobs:
       - name: Build the production frontend image (runner stage)
         run: docker build -f docker/frontend.Dockerfile --target runner -t laurio-frontend-runner-ci .
 
+      # #115 — NEXT_PUBLIC_TOSS_CLIENT_KEY는 빌드타임에만 정해진다(런타임 -e로
+      # 덮어써도 이미 굳어진 브라우저 번들에는 반영되지 않는다). 위 이미지는 그
+      # build.args 없이(빈 문자열로) 지었으므로 "값이 비었을 때" 시나리오
+      # 그대로다 — 아래에서 그 이미지로 부팅 거부를 확인한다. "완전한 설정"
+      # 시나리오는 이 값을 채워 별도로 지은 이미지가 필요하다 — 같은
+      # laurio-frontend-runner-ci로는 아예 검증할 수 없다(빌드된 뒤에는 되돌릴
+      # 방법이 없다).
+      - name: Build the production frontend image with a Toss client key baked in
+        run: |
+          docker build -f docker/frontend.Dockerfile --target runner \
+            --build-arg NEXT_PUBLIC_TOSS_CLIENT_KEY=ci-guard-only-toss-client-key \
+            -t laurio-frontend-runner-ci-with-toss-key .
+
       # 이 레포가 이미 두 번 겪은 사고(CLAUDE.md 「이미 데인 곳」) — .dockerignore
       # 패턴이 파일에 적혀 있다는 것만으로는 증명이 아니다. 가짜 시크릿과 가짜
       # 호스트 node_modules를 실제로 심어서 이미지에 안 들어가는지 직접
@@ -639,6 +652,30 @@ jobs:
           echo "$output" | grep -q "KAKAO_SECRET_KEY" || { echo "::error::에러 메시지에 원인(KAKAO_SECRET_KEY)이 안 남는다"; exit 1; }
           echo "$output" | grep -q "KAKAO_REDIRECT_URI" || { echo "::error::에러 메시지에 원인(KAKAO_REDIRECT_URI)이 안 남는다"; exit 1; }
 
+      # #115 — 토스 결제창 클라이언트 키(NEXT_PUBLIC_TOSS_CLIENT_KEY)가 빌드타임에
+      # 비어 있으면 배포 환경에서 부팅 자체를 거부하는지 확인한다. 다른 필수값은
+      # 전부 채워 이 값 하나만으로 독립적으로 죽는지를 본다. laurio-frontend-runner-ci
+      # 는 build.args 없이(빈 문자열로) 지었으므로 이 시나리오 그대로다.
+      - name: Refuses to boot in production without a toss client key baked in
+        run: |
+          set +e
+          output=$(timeout 20 docker run --rm \
+            -e LAURIO_DEPLOYMENT_TARGET=production \
+            -e LAURIO_WEB_ORIGIN=https://laurio.example \
+            -e LAURIO_API_BASE_URL=http://127.0.0.1:1 \
+            -e KAKAO_REST_API_KEY=ci-guard-only-kakao-rest-api-key \
+            -e KAKAO_SECRET_KEY=ci-guard-only-kakao-secret-key \
+            -e KAKAO_REDIRECT_URI=https://laurio.example/api/auth/social/kakao/callback \
+            laurio-frontend-runner-ci 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
+            echo "::error::토스 클라이언트 키 없이도 컨테이너가 죽지 않았다(status=$status) — 부팅 가드가 깨졌다"
+            exit 1
+          fi
+          echo "$output" | grep -q "NEXT_PUBLIC_TOSS_CLIENT_KEY" || { echo "::error::에러 메시지에 원인(NEXT_PUBLIC_TOSS_CLIENT_KEY)이 안 남는다"; exit 1; }
+
       - name: Boots with a complete production config and forces Secure cookies
         run: |
           set -euo pipefail
@@ -650,7 +687,7 @@ jobs:
             -e KAKAO_SECRET_KEY=ci-guard-only-kakao-secret-key \
             -e KAKAO_REDIRECT_URI=https://laurio.example/api/auth/social/kakao/callback \
             -p 3100:3000 \
-            laurio-frontend-runner-ci
+            laurio-frontend-runner-ci-with-toss-key
 
           # 백엔드가 없어 /healthz 는 503(degraded)이 정상이다 — 여기서 보는 건
           # "완전한 설정에서는 프론트가 죽지 않고 응답한다"는 것뿐이다. 연결

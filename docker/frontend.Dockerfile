@@ -71,6 +71,19 @@ ENV NODE_ENV=production \
     PORT=3000 \
     HOSTNAME=0.0.0.0
 
+# NEXT_PUBLIC_TOSS_CLIENT_KEY는 위 builder 스테이지에서 브라우저 번들에
+# 인라인됐지만(#112), instrumentation.ts는 그 컴파일 그래프 밖에서 도는 별도
+# Node 진입점이라 그 인라인의 혜택을 받지 못한다(#115 — 직접 확인했다: builder를
+# --build-arg로 채워 빌드해도 instrumentation.ts의 process.env.NEXT_PUBLIC_
+# TOSS_CLIENT_KEY는 여전히 빈 문자열이었다). 그래서 이 스테이지에도 같은 ARG를
+# 다시 선언해 ENV로 노출한다 — `docker build --build-arg NEXT_PUBLIC_TOSS_
+# CLIENT_KEY=...`는 그 이름을 선언한 모든 스테이지에 전역으로 적용되므로,
+# compose의 build.args가 이미 주는 한 값이 builder(브라우저 번들 인라인용)와
+# runner(부팅 가드가 읽는 실제 런타임 env) 양쪽에 그대로 들어간다 — 값이 둘로
+# 갈릴 여지가 없다.
+ARG NEXT_PUBLIC_TOSS_CLIENT_KEY=""
+ENV NEXT_PUBLIC_TOSS_CLIENT_KEY=${NEXT_PUBLIC_TOSS_CLIENT_KEY}
+
 WORKDIR /app
 
 RUN groupadd --system --gid 1001 nodejs \
