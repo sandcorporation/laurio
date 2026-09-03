@@ -1610,12 +1610,10 @@ class _DottedPathTestSellerAdapter(FakeSellerAdapter):
     썼다는 것을 확인할 수 있다.
     """
 
-    def register(
-        self, *, developer_id: int, simulate: str | None = None, policy=None
-    ) -> SellerRegistrationResult:
-        result = super().register(developer_id=developer_id, simulate=simulate, policy=policy)
+    def register(self, registration, *, simulate: str | None = None) -> SellerRegistrationResult:
+        result = super().register(registration, simulate=simulate)
         return SellerRegistrationResult(
-            seller_id=f"dotted-path-marker-{developer_id}",
+            seller_id=f"dotted-path-marker-{registration.ref_seller_id.rsplit('-', 1)[-1]}",
             status=result.status,
             weekly_limit_amount=result.weekly_limit_amount,
         )
@@ -2102,7 +2100,7 @@ class _AlwaysFailingSellerAdapter(FakeSellerAdapter):
     """실물 어댑터의 5xx/네트워크 장애를 흉내내는 테스트 더블(#57 코드리뷰
     지적 3/6) -- register()가 항상 SellerError를 던진다."""
 
-    def register(self, *, developer_id: int, simulate: str | None = None, policy=None):
+    def register(self, registration, *, simulate: str | None = None):
         from payouts.adapters import SellerError
 
         raise SellerError("fake vendor 5xx")
@@ -2886,7 +2884,7 @@ class _VendorNoLongerRecognizesSellerAdapter(FakeSellerAdapter):
     테스트 더블(#57 코드리뷰 지적 6, 4차) -- register()를 몇 번을 다시
     불러도 항상 "pending"과 빈 seller_id를 돌려준다."""
 
-    def register(self, *, developer_id: int, simulate: str | None = None, policy=None):
+    def register(self, registration, *, simulate: str | None = None):
         return SellerRegistrationResult(seller_id="", status="pending", weekly_limit_amount=None)
 
 

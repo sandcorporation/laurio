@@ -18,9 +18,7 @@ import requests
 from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
 
-from django.contrib.auth import get_user_model
 
-from accounts.models import DeveloperProfile
 from payouts.adapters import PayoutAdapter, PayoutError, PayoutTimeoutError, SellerAdapter, SellerError
 from payouts.models import Seller
 from payouts.adapters_toss import (
@@ -63,30 +61,6 @@ def _encrypted_response(status_code: int, body: dict) -> Mock:
     response.text = token
     response.json.side_effect = ValueError("jwe body, not plain json")
     return response
-
-
-@pytest.fixture
-def developer(db):
-    User = get_user_model()
-    user = User.objects.create_user(username="toss-seller-dev", email="dev@example.com")
-    return DeveloperProfile.objects.create(user=user)
-
-
-def _verify(developer, *, real_name="홍길동"):
-    from datetime import date
-
-    Verification.objects.create(
-        user_id=developer.user_id,
-        status=Verification.Status.VERIFIED,
-        real_name=real_name,
-        birth_date=date(1995, 1, 1),
-    )
-
-
-def _give_phone(developer, phone="01012345678"):
-    seller, _ = Seller.objects.get_or_create(developer=developer)
-    seller.phone_number = phone
-    seller.save(update_fields=["phone_number_encrypted"])
 
 
 # --- JWE round trip -----------------------------------------------------------------
@@ -214,184 +188,171 @@ def test_payout_adapter_satisfies_protocol():
         assert isinstance(TossPayoutAdapter(), PayoutAdapter)
 
 
-# --- TossSellerAdapter.register — 신원 정보 누락 ---------------------------------------
+# --- TossSellerAdapter.register — 순수 요청/응답 (#136) -------------------------------------
+#
+# adapter 는 Verification 도 Seller 도 읽지 않는다. caller(ensure_seller_registered)가
+# SellerRegistration 을 조립해 넘긴다 — 여기 테스트에는 DB 픽스처가 없다.
+
+from payouts.adapters import SellerRegistration
 
 
-@pytest.mark.django_db
-def test_register_without_phone_does_not_call_vendor_and_returns_pending(developer):
-    _verify(developer)
-    # 전화번호를 아직 제출하지 않았다.
+def _reg(**overrides):
+    base = dict(
+        ref_seller_id="laurio-developer-7",
+        name="홍길동",
+        email="dev@example.com",
+        phone="01099998888",
+        existing_seller_id="",
+    )
+    base.update(overrides)
+    return SellerRegistration(**base)
 
+
+def test_register_without_phone_does_not_call_vendor_and_returns_pending():
+    """벤더 규약 — individual 은 이름·이메일·전화번호 전부 필수. 빠지면 HTTP 없이 pending."""
     with _settings():
         adapter = TossSellerAdapter()
         with patch("payouts.adapters_toss.requests.post") as mock_post:
-            result = adapter.register(developer_id=developer.id)
-
+            result = adapter.register(_reg(phone=""))
     mock_post.assert_not_called()
     assert result.status == "pending"
     assert result.seller_id == ""
 
 
-@pytest.mark.django_db
-def test_register_without_verification_does_not_call_vendor_and_returns_pending(developer):
-    _give_phone(developer)
-    # 본인확인이 안 되어 있어 실명이 없다.
-
+def test_register_without_name_does_not_call_vendor_and_returns_pending():
     with _settings():
         adapter = TossSellerAdapter()
         with patch("payouts.adapters_toss.requests.post") as mock_post:
-            result = adapter.register(developer_id=developer.id)
-
+            result = adapter.register(_reg(name=""))
     mock_post.assert_not_called()
     assert result.status == "pending"
 
 
-# --- TossSellerAdapter.register — 정상 경로 --------------------------------------------
-
-
-@pytest.mark.django_db
-def test_register_sends_jwe_encrypted_body_with_individual_fields(developer):
-    _verify(developer, real_name="홍길동")
-    _give_phone(developer, phone="01099998888")
-
+def test_register_sends_jwe_encrypted_body_with_individual_fields():
     with _settings():
         adapter = TossSellerAdapter()
         with patch("payouts.adapters_toss.requests.post") as mock_post:
             mock_post.return_value = _encrypted_response(
                 200,
-                {
-                    "refSellerId": f"laurio-developer-{developer.id}",
-                    "sellerId": "seller-abc",
-                    "status": "APPROVAL_REQUIRED",
-                },
+                {"refSellerId": "laurio-developer-7", "sellerId": "seller-abc", "status": "APPROVAL_REQUIRED"},
             )
-            result = adapter.register(developer_id=developer.id)
-
+            result = adapter.register(_reg())
     assert result.status == "approval_required"
     assert result.seller_id == "seller-abc"
     assert result.weekly_limit_amount is None
-
     _, kwargs = mock_post.call_args
     assert kwargs["headers"]["TossPayments-api-security-mode"] == "ENCRYPTION"
     sent_body = jwe_decrypt(kwargs["data"], secure_key_hex=_SECURE_KEY_HEX)
+    assert sent_body["refSellerId"] == "laurio-developer-7"
     assert sent_body["businessType"] == "INDIVIDUAL"
-    assert sent_body["individual"] == {
-        "name": "홍길동",
-        "email": "dev@example.com",
-        "phone": "01099998888",
-    }
+    assert sent_body["individual"] == {"name": "홍길동", "email": "dev@example.com", "phone": "01099998888"}
 
 
-@pytest.mark.django_db
-def test_register_maps_partially_approved_and_weekly_limit(developer):
-    _verify(developer)
-    _give_phone(developer)
-
+@pytest.mark.parametrize(
+    "vendor_body,expected_status,expected_limit",
+    [
+        ({"sellerId": "s", "status": "PARTIALLY_APPROVED", "weeklyLimit": {"amount": 10_000_000}}, "partially_approved", 10_000_000),
+        ({"sellerId": "s", "status": "KYC_REQUIRED"}, "under_review", None),
+        ({"sellerId": "s", "status": "APPROVED"}, "approved", None),
+    ],
+    ids=["partially-approved", "kyc-required", "approved"],
+)
+def test_register_maps_vendor_statuses(vendor_body, expected_status, expected_limit):
     with _settings():
         adapter = TossSellerAdapter()
         with patch("payouts.adapters_toss.requests.post") as mock_post:
-            mock_post.return_value = _encrypted_response(
-                200,
-                {
-                    "sellerId": "seller-xyz",
-                    "status": "PARTIALLY_APPROVED",
-                    "weeklyLimit": {"amount": 10_000_000},
-                },
-            )
-            result = adapter.register(developer_id=developer.id)
-
-    assert result.status == "partially_approved"
-    assert result.weekly_limit_amount == 10_000_000
+            mock_post.return_value = _encrypted_response(200, vendor_body)
+            result = adapter.register(_reg())
+    assert result.status == expected_status
+    assert result.weekly_limit_amount == expected_limit
 
 
-@pytest.mark.django_db
-def test_register_maps_kyc_required_to_under_review(developer):
-    _verify(developer)
-    _give_phone(developer)
-
+def test_register_vendor_rejection_returns_rejected_not_raise():
     with _settings():
         adapter = TossSellerAdapter()
         with patch("payouts.adapters_toss.requests.post") as mock_post:
-            mock_post.return_value = _encrypted_response(
-                200, {"sellerId": "seller-x", "status": "KYC_REQUIRED"}
-            )
-            result = adapter.register(developer_id=developer.id)
-
-    assert result.status == "under_review"
-
-
-@pytest.mark.django_db
-def test_register_maps_approved_with_no_weekly_limit(developer):
-    _verify(developer)
-    _give_phone(developer)
-
-    with _settings():
-        adapter = TossSellerAdapter()
-        with patch("payouts.adapters_toss.requests.post") as mock_post:
-            mock_post.return_value = _encrypted_response(
-                200, {"sellerId": "seller-x", "status": "APPROVED"}
-            )
-            result = adapter.register(developer_id=developer.id)
-
-    assert result.status == "approved"
-    assert result.weekly_limit_amount is None
-
-
-@pytest.mark.django_db
-def test_register_vendor_rejection_returns_rejected_not_raise(developer):
-    _verify(developer)
-    _give_phone(developer)
-
-    with _settings():
-        adapter = TossSellerAdapter()
-        with patch("payouts.adapters_toss.requests.post") as mock_post:
-            mock_post.return_value = _response(
-                400, {"code": "INVALID_REQUEST", "message": "심사 기준 미달"}
-            )
-            result = adapter.register(developer_id=developer.id)
-
+            mock_post.return_value = _response(400, {"code": "INVALID_REQUEST", "message": "심사 기준 미달"})
+            result = adapter.register(_reg())
     assert result.status == "rejected"
 
 
-@pytest.mark.django_db
-def test_register_our_credentials_rejected_raises_sellererror(developer):
-    _verify(developer)
-    _give_phone(developer)
-
+def test_register_our_credentials_rejected_raises_sellererror():
     with _settings():
         adapter = TossSellerAdapter()
         with patch("payouts.adapters_toss.requests.post") as mock_post:
             mock_post.return_value = _response(401, {"code": "UNAUTHORIZED_KEY"})
             with pytest.raises(SellerError):
-                adapter.register(developer_id=developer.id)
+                adapter.register(_reg())
 
 
-@pytest.mark.django_db
-def test_register_timeout_raises_sellererror(developer):
-    _verify(developer)
-    _give_phone(developer)
-
+def test_register_timeout_raises_sellererror():
     with _settings():
         adapter = TossSellerAdapter()
         with patch("payouts.adapters_toss.requests.post", side_effect=requests.Timeout("boom")):
             with pytest.raises(SellerError):
-                adapter.register(developer_id=developer.id)
+                adapter.register(_reg())
 
 
-@pytest.mark.django_db
-def test_register_unknown_status_raises_and_logs(developer, caplog):
-    _verify(developer)
-    _give_phone(developer)
-
+def test_register_unknown_status_raises_and_logs(caplog):
     with _settings():
         adapter = TossSellerAdapter()
         with patch("payouts.adapters_toss.requests.post") as mock_post:
             mock_post.return_value = _encrypted_response(200, {"status": "SOMETHING_NEW"})
             with caplog.at_level("ERROR"):
                 with pytest.raises(SellerError):
-                    adapter.register(developer_id=developer.id)
-
+                    adapter.register(_reg())
     assert any(record.levelname == "ERROR" for record in caplog.records)
+
+
+def test_register_vendor_server_error_raises_sellererror_not_rejected():
+    with _settings():
+        adapter = TossSellerAdapter()
+        with patch("payouts.adapters_toss.requests.post") as mock_post:
+            mock_post.return_value = _response(503, {"code": "UNAVAILABLE"})
+            with pytest.raises(SellerError):
+                adapter.register(_reg())
+
+
+def test_register_rate_limited_raises_sellererror_not_rejected():
+    with _settings():
+        adapter = TossSellerAdapter()
+        with patch("payouts.adapters_toss.requests.post") as mock_post:
+            mock_post.return_value = _response(429, {"code": "TOO_MANY_REQUESTS"})
+            with pytest.raises(SellerError):
+                adapter.register(_reg())
+
+
+# --- 코드리뷰 후속(#57 2차): 7 -- 재등록 대신 조회 ---------------------------------
+
+
+def test_register_with_existing_seller_id_queries_instead_of_posting():
+    """이미 seller_id를 받은 상태라면 register()를 다시 불러도 POST가 아니라 GET으로 현재
+    상태만 재확인한다(코드리뷰 지적 7) -- 고정된 refSellerId로 또 POST하면 벤더의 "이미
+    등록됨" 4xx가 REJECTED로 잘못 매핑된다. 거절된 등록의 재시도는 caller 가 빈 값을 넘겨
+    새 POST 로 간다."""
+    with _settings():
+        adapter = TossSellerAdapter()
+        with patch("payouts.adapters_toss.requests.post") as mock_post, patch(
+            "payouts.adapters_toss.requests.get"
+        ) as mock_get:
+            mock_get.return_value = _encrypted_response(
+                200, {"sellerId": "already-registered-seller-id", "status": "PARTIALLY_APPROVED"}
+            )
+            result = adapter.register(_reg(existing_seller_id="already-registered-seller-id"))
+    mock_post.assert_not_called()
+    mock_get.assert_called_once()
+    assert "already-registered-seller-id" in mock_get.call_args[0][0]
+    assert result.status == "partially_approved"
+
+
+def test_query_seller_status_unknown_id_returns_pending():
+    with _settings():
+        adapter = TossSellerAdapter()
+        with patch("payouts.adapters_toss.requests.get") as mock_get:
+            mock_get.return_value = _response(404, {"code": "NOT_FOUND_SELLER"})
+            result = adapter.register(_reg(existing_seller_id="missing-on-vendor"))
+    assert result.status == "pending"
+    assert result.seller_id == ""
 
 
 # --- TossPayoutAdapter — 순수 요청/응답 (#134/#135) ---------------------------------------
@@ -537,116 +498,6 @@ def test_payout_adapter_rejects_non_hex_secure_key():
         with pytest.raises(ImproperlyConfigured):
             TossPayoutAdapter()
 
-
-# --- 코드리뷰 후속(#57 2차): 3 -- Seller 등록 5xx/429 ------------------------------
-
-
-@pytest.mark.django_db
-def test_register_vendor_server_error_raises_sellererror_not_rejected(developer):
-    _verify(developer)
-    _give_phone(developer)
-
-    with _settings():
-        adapter = TossSellerAdapter()
-        with patch("payouts.adapters_toss.requests.post") as mock_post:
-            mock_post.return_value = _response(500, text="internal error")
-            with pytest.raises(SellerError):
-                adapter.register(developer_id=developer.id)
-
-
-@pytest.mark.django_db
-def test_register_rate_limited_raises_sellererror_not_rejected(developer):
-    _verify(developer)
-    _give_phone(developer)
-
-    with _settings():
-        adapter = TossSellerAdapter()
-        with patch("payouts.adapters_toss.requests.post") as mock_post:
-            mock_post.return_value = _response(429, {"code": "TOO_MANY_REQUESTS"})
-            with pytest.raises(SellerError):
-                adapter.register(developer_id=developer.id)
-
-
-# --- 코드리뷰 후속(#57 2차): 7 -- 재등록 대신 조회 ---------------------------------
-
-
-@pytest.mark.django_db
-def test_register_with_existing_seller_id_queries_instead_of_posting(developer):
-    """이미 seller_id를 받은 상태라면 register()를 다시 불러도 POST가 아니라
-    GET으로 현재 상태만 재확인한다(코드리뷰 지적 7) -- 고정된 refSellerId로
-    또 POST하면 벤더의 "이미 등록됨" 4xx가 REJECTED로 잘못 매핑된다."""
-
-    from payouts.models import Seller as SellerModel
-
-    _verify(developer)
-    _give_phone(developer)
-    SellerModel.objects.filter(developer=developer).update(
-        seller_id="already-registered-seller-id",
-        status=SellerModel.Status.APPROVAL_REQUIRED,
-    )
-
-    with _settings():
-        adapter = TossSellerAdapter()
-        with patch("payouts.adapters_toss.requests.post") as mock_post, patch(
-            "payouts.adapters_toss.requests.get"
-        ) as mock_get:
-            mock_get.return_value = _encrypted_response(
-                200, {"sellerId": "already-registered-seller-id", "status": "PARTIALLY_APPROVED"}
-            )
-            result = adapter.register(developer_id=developer.id)
-
-    mock_post.assert_not_called()
-    mock_get.assert_called_once()
-    get_url = mock_get.call_args[0][0]
-    assert "already-registered-seller-id" in get_url
-    assert result.status == "partially_approved"
-
-
-@pytest.mark.django_db
-def test_register_with_rejected_existing_seller_posts_again(developer):
-    """거절된 등록은 재시도(새 POST)를 허용한다 -- seller_id가 있어도 상태가
-    REJECTED면 재등록 경로를 막지 않는다."""
-
-    from payouts.models import Seller as SellerModel
-
-    _verify(developer)
-    _give_phone(developer)
-    SellerModel.objects.filter(developer=developer).update(
-        seller_id="old-seller-id", status=SellerModel.Status.REJECTED
-    )
-
-    with _settings():
-        adapter = TossSellerAdapter()
-        with patch("payouts.adapters_toss.requests.post") as mock_post, patch(
-            "payouts.adapters_toss.requests.get"
-        ) as mock_get:
-            mock_post.return_value = _encrypted_response(
-                200, {"sellerId": "new-seller-id", "status": "APPROVAL_REQUIRED"}
-            )
-            result = adapter.register(developer_id=developer.id)
-
-    mock_post.assert_called_once()
-    mock_get.assert_not_called()
-    assert result.seller_id == "new-seller-id"
-
-
-@pytest.mark.django_db
-def test_query_seller_status_unknown_id_returns_pending(developer):
-    from payouts.models import Seller as SellerModel
-
-    _verify(developer)
-    _give_phone(developer)
-    SellerModel.objects.filter(developer=developer).update(
-        seller_id="missing-on-vendor", status=SellerModel.Status.APPROVAL_REQUIRED
-    )
-
-    with _settings():
-        adapter = TossSellerAdapter()
-        with patch("payouts.adapters_toss.requests.get") as mock_get:
-            mock_get.return_value = _response(404, {"code": "NOT_FOUND_SELLER"})
-            result = adapter.register(developer_id=developer.id)
-
-    assert result.status == "pending"
 
 
 # --- 코드리뷰 후속(#57 2차): 2 -- 실이체 한도/rate limit는 종결 실패가 아니다 ---------

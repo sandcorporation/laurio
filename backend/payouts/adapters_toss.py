@@ -108,6 +108,7 @@ from .adapters import (
     PayoutError,
     PayoutTimeoutError,
     SellerError,
+    SellerRegistration,
     SellerRegistrationResult,
     TransferRequest,
     VendorResult,
@@ -382,85 +383,47 @@ class TossSellerAdapter:
         headers["TossPayments-api-security-mode"] = "ENCRYPTION"
         return headers
 
-    def _resolve_identity(self, developer_id: int) -> tuple[str, str, str]:
-        """(실명, 이메일, 전화번호)를 조회한다. 하나라도 없으면 빈 문자열이다.
-
-        `FakeSellerAdapter`가 `policy`를 스스로 읽는 것과 같은 관용구 —
-        `SellerAdapter.register` 계약(Protocol)에 이 세 값을 위한 매개변수를
-        더하지 않는다.
-        """
-
-        from accounts.models import DeveloperProfile
-        from verification.models import Verification
-
-        from .models import Seller
-
-        try:
-            developer = DeveloperProfile.objects.select_related("user").get(pk=developer_id)
-        except DeveloperProfile.DoesNotExist as exc:
-            raise SellerError(f"Developer#{developer_id}를 찾을 수 없다.") from exc
-
-        email = developer.user.email or ""
-
-        real_name = ""
-        verification = Verification.objects.filter(
-            user_id=developer.user_id, status=Verification.Status.VERIFIED
-        ).first()
-        if verification is not None:
-            real_name = verification.real_name
-
-        phone = ""
-        seller_row = Seller.objects.filter(developer_id=developer_id).first()
-        if seller_row is not None:
-            phone = seller_row.phone_number
-
-        return real_name, email, phone
-
     def register(
-        self,
-        *,
-        developer_id: int,
-        simulate: str | None = None,
-        policy: Any = None,
+        self, registration: SellerRegistration, *, simulate: str | None = None
     ) -> SellerRegistrationResult:
-        # simulate/policy는 Fake 전용 시나리오 선택 값이다 — 실물 어댑터는 쓰지
-        # 않는다(주간 한도는 벤더 응답이 알려준다).
-        del simulate, policy
+        # simulate 는 Fake 전용 시나리오 선택 값이다 — 실물 어댑터는 쓰지 않는다.
+        del simulate
 
-        real_name, email, phone = self._resolve_identity(developer_id)
-        if not (real_name and email and phone):
+        ref = registration.ref_seller_id
+        if not (registration.name and registration.email and registration.phone):
+            # 벤더 규약 — individual 객체는 이름·이메일·전화번호가 전부 필수다. 하나라도 없으면
+            # 벤더를 부르지 않고 "아직 시도하지 않음"(pending)이다. caller 가 값을 채워 다시 온다.
             missing = [
-                name
-                for name, value in (("실명", real_name), ("이메일", email), ("전화번호", phone))
+                label
+                for label, value in (
+                    ("실명", registration.name),
+                    ("이메일", registration.email),
+                    ("전화번호", registration.phone),
+                )
                 if not value
             ]
             logger.info(
-                "Seller 등록에 필요한 정보가 아직 없어 등록을 시도하지 않는다"
-                "(developer_id=%s, 누락=%s).",
-                developer_id,
+                "Seller 등록에 필요한 정보가 아직 없어 등록을 시도하지 않는다(ref=%s, 누락=%s).",
+                ref,
                 missing,
             )
             return SellerRegistrationResult(seller_id="", status="pending", weekly_limit_amount=None)
 
-        from .models import Seller
-
-        ref_seller_id = f"laurio-developer-{developer_id}"
-        existing = Seller.objects.filter(developer_id=developer_id).first()
-
-        if existing is not None and existing.seller_id and existing.status != Seller.Status.REJECTED:
-            # 이미 이전 시도가 접수돼 seller_id를 받은 상태다(코드리뷰 지적 7)
-            # — 고정된 refSellerId로 다시 POST하면 벤더가 "이미 등록된 셀러"류의
-            # 4xx로 거절하고, 그 4xx는 아래 _parse_seller_response의 일반
-            # 거절 처리를 거쳐 "rejected"로 잘못 매핑돼 APPROVAL_REQUIRED,
-            # UNDER_REVIEW 같은 멀쩡히 진행 중인 상태를 덮어쓴다. 대신 현재
-            # 상태를 조회(GET)한다 — 재시도, 재확인의 실제 경로는 등록이 아니라
-            # 조회다.
-            return self._query_seller_status(existing.seller_id, developer_id=developer_id)
+        if registration.existing_seller_id:
+            # 이미 이전 시도가 접수돼 seller_id를 받은 상태다(코드리뷰 지적 7) — 고정된
+            # refSellerId로 다시 POST하면 벤더가 "이미 등록된 셀러"류의 4xx로 거절하고, 그 4xx는
+            # 일반 거절 처리를 거쳐 "rejected"로 잘못 매핑돼 진행 중인 상태를 덮어쓴다. 재시도·
+            # 재확인의 실제 경로는 등록이 아니라 조회다.
+            return self._query_seller_status(registration.existing_seller_id, ref=ref)
 
         body = {
-            "refSellerId": ref_seller_id,
+            "refSellerId": ref,
             "businessType": "INDIVIDUAL",
-            "individual": {"name": real_name, "email": email, "phone": phone},
+            "individual": {
+                "name": registration.name,
+                "email": registration.email,
+                "phone": registration.phone,
+            },
         }
         encrypted_body = jwe_encrypt(body, secure_key_hex=self._secure_key)
 
@@ -472,18 +435,13 @@ class TossSellerAdapter:
                 timeout=_TIMEOUT_SECONDS,
             )
         except requests.Timeout as exc:
-            raise SellerError(
-                f"토스 Seller 등록 요청이 타임아웃됐다(developer_id={developer_id})."
-            ) from exc
+            raise SellerError(f"토스 Seller 등록 요청이 타임아웃됐다(ref={ref}).") from exc
         except requests.RequestException as exc:
-            raise SellerError(
-                f"토스 Seller 등록 요청이 네트워크 오류로 실패했다"
-                f"(developer_id={developer_id}): {exc}"
-            ) from exc
+            raise SellerError(f"토스 Seller 등록 요청이 네트워크 오류로 실패했다(ref={ref}): {exc}") from exc
 
-        return self._parse_seller_response(response, developer_id=developer_id)
+        return self._parse_seller_response(response, ref=ref)
 
-    def _query_seller_status(self, seller_id: str, *, developer_id: int) -> SellerRegistrationResult:
+    def _query_seller_status(self, seller_id: str, *, ref: str) -> SellerRegistrationResult:
         """이미 등록된(seller_id를 받은) Seller의 현재 상태를 GET으로 다시
         확인한다(코드리뷰 지적 7) — register()가 벤더에 새 등록을 요청하는
         게 아니라 이 메서드로 재조회하도록 갈아탄 것이 이 티켓의 핵심 수정이다.
@@ -497,12 +455,12 @@ class TossSellerAdapter:
             )
         except requests.Timeout as exc:
             raise SellerError(
-                f"토스 Seller 조회 요청이 타임아웃됐다(developer_id={developer_id})."
+                f"토스 Seller 조회 요청이 타임아웃됐다(ref={ref})."
             ) from exc
         except requests.RequestException as exc:
             raise SellerError(
                 f"토스 Seller 조회 요청이 네트워크 오류로 실패했다"
-                f"(developer_id={developer_id}): {exc}"
+                f"(ref={ref}): {exc}"
             ) from exc
 
         if response.status_code == 404:
@@ -510,10 +468,10 @@ class TossSellerAdapter:
             # 드문 경우다. 처음부터 다시 시도할 수 있게 pending으로 돌려준다.
             return SellerRegistrationResult(seller_id="", status="pending", weekly_limit_amount=None)
 
-        return self._parse_seller_response(response, developer_id=developer_id)
+        return self._parse_seller_response(response, ref=ref)
 
     def _parse_seller_response(
-        self, response: requests.Response, *, developer_id: int
+        self, response: requests.Response, *, ref: str
     ) -> SellerRegistrationResult:
         if response.status_code >= 500:
             # 벤더 쪽 일시 오류 — 등록이 실제로 접수됐는지 알 수 없다(코드리뷰
@@ -523,11 +481,11 @@ class TossSellerAdapter:
             # 유지하게 한다.
             raise SellerError(
                 f"토스가 Seller 등록/조회에서 서버 오류를 응답했다"
-                f"(developer_id={developer_id}, status={response.status_code})."
+                f"(ref={ref}, status={response.status_code})."
             )
         if response.status_code == 429:
             raise SellerError(
-                f"토스 Seller 등록/조회가 rate limit에 걸렸다(developer_id={developer_id})."
+                f"토스 Seller 등록/조회가 rate limit에 걸렸다(ref={ref})."
             )
 
         if response.status_code >= 400:
@@ -537,11 +495,11 @@ class TossSellerAdapter:
             if response.status_code in _OUR_INTEGRATION_ERROR_STATUSES:
                 raise SellerError(
                     f"토스 Seller 등록이 우리 쪽 설정 문제로 거부됐다"
-                    f"(developer_id={developer_id}, code={code}): {message}"
+                    f"(ref={ref}, code={code}): {message}"
                 )
             logger.info(
-                "토스 Seller 등록이 거절됐다(developer_id=%s, code=%s): %s",
-                developer_id,
+                "토스 Seller 등록이 거절됐다(ref=%s, code=%s): %s",
+                ref,
                 code,
                 message,
             )
@@ -556,19 +514,19 @@ class TossSellerAdapter:
             body = _safe_json(response)
             if body is None:
                 raise SellerError(
-                    f"토스 Seller 등록 응답이 JSON도 JWE도 아니다(developer_id={developer_id})."
+                    f"토스 Seller 등록 응답이 JSON도 JWE도 아니다(ref={ref})."
                 )
 
         vendor_status = body.get("status")
         status = _SELLER_STATUS_MAP.get(vendor_status)
         if status is None:
             logger.error(
-                "토스 Seller 등록 응답에 알 수 없는 status가 왔다(developer_id=%s): %r",
-                developer_id,
+                "토스 Seller 등록 응답에 알 수 없는 status가 왔다(ref=%s): %r",
+                ref,
                 vendor_status,
             )
             raise SellerError(
-                f"토스 Seller 등록 응답의 status를 알 수 없다(developer_id={developer_id}): "
+                f"토스 Seller 등록 응답의 status를 알 수 없다(ref={ref}): "
                 f"{vendor_status!r}"
             )
 

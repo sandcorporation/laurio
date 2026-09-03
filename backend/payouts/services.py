@@ -184,31 +184,53 @@ def get_or_create_payout(target: PayoutTarget, *, policy: PlatformPolicy | None 
             raise
 
 
-def ensure_seller_registered(
-    developer, *, simulate: str | None = None, policy: PlatformPolicy | None = None
-) -> Seller:
+def _seller_registration_for(developer, existing: Seller | None, *, policy=None):
+    """벤더에 보낼 Seller 등록 요청을 우리 테이블에서 조립한다 (#136)."""
+
+    from verification.models import Verification
+
+    from .adapters import SellerRegistration
+
+    verification = Verification.objects.filter(
+        user_id=developer.user_id, status=Verification.Status.VERIFIED
+    ).first()
+    return SellerRegistration(
+        ref_seller_id=f"laurio-developer-{developer.id}",
+        name=verification.real_name if verification is not None else "",
+        email=developer.user.email or "",
+        phone=existing.phone_number if existing is not None else "",
+        existing_seller_id=(
+            existing.seller_id
+            if existing is not None and existing.seller_id and existing.status != Seller.Status.REJECTED
+            else ""
+        ),
+        weekly_limit_hint=policy.seller_weekly_limit_amount if policy is not None else None,
+    )
+
+
+def ensure_seller_registered(developer, *, simulate: str | None = None, policy=None) -> Seller:
     """이 Developer의 Seller 등록을 멱등하게 보장한다(#50, ADR-0020).
 
-    이미 부분 승인된 Seller가 있으면 그대로 돌려주고 어댑터를 다시 부르지
-    않는다 — `seller_id`가 Developer에 남아 두 번째 Payout부터는 재등록하지
-    않는다는 요구가 여기서 지켜진다. 그 외(등록 전/심사 대기/거절)에는 등록
-    (또는 재시도)을 어댑터에 요청하고 결과를 그대로 반영한다 — 한도 초과·심사
-    필요·거절 어느 쪽도 예외를 던지지 않는다(정상 응답의 한 갈래다, ADR-0020).
+    이미 부분 승인된 Seller가 있으면 그대로 돌려주고 어댑터를 다시 부르지 않는다 —
+    `seller_id`가 Developer에 남아 두 번째 Payout부터는 재등록하지 않는다는 요구가 여기서
+    지켜진다. 그 외(등록 전/심사 대기/거절)에는 등록(또는 재시도)을 어댑터에 요청하고 결과를
+    그대로 반영한다 — 한도 초과·심사 필요·거절 어느 쪽도 예외를 던지지 않는다(정상 응답의 한
+    갈래다, ADR-0020).
 
-    `policy`는 호출 스코프에서 이미 읽은 `PlatformPolicy`를 어댑터까지
-    그대로 전달하는 자리다(#78, ADR-0023) — `get_or_create_payout`이 이미
-    쓰는 것과 같은 관용구. `distributions.services.run_due_distributions`처럼
-    한 스캔에서 여러 Developer를 순회하는 호출자는 반드시 넘겨야 한다 —
-    생략하면 어댑터가 Developer 수만큼 정책을 다시 읽는다.
+    벤더에 보낼 신원(실명·이메일·전화번호)과 기존 식별자는 **여기서** 조립한다(#136) — adapter 는
+    우리 테이블을 읽지 않는다. 거절된 등록의 재시도는 새 등록이어야 하므로 그때는 기존 식별자를
+    넘기지 않는다. `policy` 는 Fake 가 흉내낼 주간 한도(weekly_limit_hint)로만 실려 간다 —
+    스캔 스코프에서 이미 읽은 값을 넘기면 몫 수만큼 정책을 다시 읽지 않는다(ADR-0023).
     """
 
     existing = Seller.objects.filter(developer=developer).first()
     if existing is not None and existing.status in Seller.READY_STATUSES:
         return existing
 
+    registration = _seller_registration_for(developer, existing, policy=policy)
     adapter = get_seller_adapter()
     try:
-        result = adapter.register(developer_id=developer.id, simulate=simulate, policy=policy)
+        result = adapter.register(registration, simulate=simulate)
     except SellerError:
         # 벤더 쪽 일시 오류(5xx·rate limit·타임아웃·네트워크)다 — 등록이 실제로
         # 어떻게 됐는지 알 수 없다(코드리뷰 지적 3/6). 이 함수는 advance의
