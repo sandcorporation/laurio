@@ -32,7 +32,7 @@ Header를 base64url로 인코딩한 바이트 그대로다) — 별도 JWE 라�
 `accounts` User, 전화번호는 이 도메인 어디에도 없던 값이라 이 티켓이
 `payouts.models.Seller.phone_number_encrypted`로 새로 들였다(별도 제출
 엔드포인트, `payouts.services.submit_seller_phone`). `FakeSellerAdapter`처럼
-`policies.services.get_current_policy()`를 스스로 읽는 기존 관용구를 그대로
+`policies.scope.current_policy()`를 스스로 읽는 기존 관용구를 그대로
 따라, 이 어댑터도 `register()` 안에서 직접 조회한다 — `SellerAdapter.register`
 계약(Protocol)을 바꾸지 않는다.
 

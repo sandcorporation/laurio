@@ -19,7 +19,7 @@ from django.test import override_settings
 from contests.models import Category, Contest, DeliverableType
 from payments.adapters import FakePGAdapter, PGError, PGTimeoutError, PaymentRequestResult
 from payments.models import Payment
-from policies.services import get_current_policy
+from policies.scope import current_policy
 
 CONTESTS_URL = "/api/contests"
 PAYMENTS_URL = "/api/payments"
@@ -292,7 +292,7 @@ def test_escrow_deposit_posts_balanced_ledger_entry(client, category, landing_ty
     assert len(entries) == 1
     entry = entries[0]
 
-    listing_fee = get_current_policy().contest_listing_fee
+    listing_fee = current_policy().contest_listing_fee
     lines_by_account = {line["account"]: (line["side"], line["amount"]) for line in entry["lines"]}
     assert lines_by_account["sponsor_deposit"] == ("debit", 1_000_000 + listing_fee)
     assert lines_by_account["developer_payable"] == ("credit", 1_000_000)
@@ -624,7 +624,7 @@ def test_confirm_ignores_amount_claimed_by_the_browser(client, category, landing
     lines_by_account = {
         line["account"]: (line["side"], line["amount"]) for line in entries[0]["lines"]
     }
-    listing_fee = get_current_policy().contest_listing_fee
+    listing_fee = current_policy().contest_listing_fee
     # forged_amount가 아니라 실제 총액(prize + 개최 등록비)만 원장에 남는다.
     assert lines_by_account["sponsor_deposit"] == ("debit", 1_000_000 + listing_fee)
 

@@ -204,7 +204,7 @@ def test_a_contest_whose_distribution_is_held_by_an_appeal_says_it_is_held(
 
     from core.models import ClockOverride
     from contests.models import Contest
-    from policies.services import get_current_policy
+    from policies.scope import current_policy
 
     deadline = timezone.now() + timedelta(hours=1)
     sponsor, contest = _publish_contest(
@@ -231,7 +231,7 @@ def test_a_contest_whose_distribution_is_held_by_an_appeal_says_it_is_held(
     # 심사기간이 끝나고 배분 대기일까지 지난다 — 지금쯤 배분이 됐어야 한다.
     row = Contest.objects.get(id=contest["id"])
     assert row.judging_ends_at is not None
-    policy = get_current_policy()
+    policy = current_policy()
     ClockOverride.objects.update_or_create(
         pk=1,
         defaults={
@@ -525,7 +525,7 @@ def test_a_distribution_whose_payouts_have_not_settled_is_not_called_complete(
     from core.models import ClockOverride
     from contests.models import Contest
     from distributions.models import Distribution
-    from policies.services import get_current_policy
+    from policies.scope import current_policy
 
     deadline = timezone.now() + timedelta(hours=1)
     sponsor, contest = _publish_contest(
@@ -542,7 +542,7 @@ def test_a_distribution_whose_payouts_have_not_settled_is_not_called_complete(
     _run_scoring(client)
 
     row = Contest.objects.get(id=contest["id"])
-    policy = get_current_policy()
+    policy = current_policy()
     ClockOverride.objects.update_or_create(
         pk=1,
         defaults={

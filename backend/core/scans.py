@@ -121,8 +121,8 @@ def run_scan(name: str, *, as_of=None, ctx: dict | None = None, params: dict | N
     - 행 하나의 예외는 그 행만 `failed` 에 남기고 계속한다 — `order_by("id")` 스캔에서 예외를
       감싸지 않으면 그 행이 매번 배치 맨 앞에서 다시 걸려 뒤의 정상 건들이 영원히 처리되지 못하는
       poison pill 이 된다.
-    - `ctx` 는 이 실행 동안 공유되는 dict — 행마다 다시 읽으면 안 되는 값(정책 등)을 후보·행 처리
-      함수가 memoize 할 자리. 뼈대는 그 내용을 모른다.
+    - `ctx` 는 이 실행 동안 공유되는 dict — 행마다 다시 읽으면 안 되는 값을 후보·행 처리 함수가
+      memoize 할 자리. 뼈대는 그 내용을 모른다(정책은 #145 부터 `policies.scope` 가 맡는다).
     """
 
     spec = SCAN_REGISTRY[name]
@@ -132,20 +132,25 @@ def run_scan(name: str, *, as_of=None, ctx: dict | None = None, params: dict | N
     ctx[_CTX_DEADLINE_KEY] = deadline
     ctx[_CTX_PARAMS_KEY] = dict(params or {})
 
+    # 실행 하나 = PlatformPolicy 스코프 하나(#145) — 후보 쿼리·행 처리가 `current_policy()` 를 몇 번
+    # 부르든 SELECT 는 한 번이다. run_all 은 스캔마다 새 스코프를 연다(각 실행이 그 시점의 정책).
+    from policies.scope import policy_scope
+
     rows: list[dict] = []
     failed: list[dict] = []
-    for index, row in enumerate(_batch(spec, as_of, ctx)):
-        if index > 0 and time.monotonic() >= deadline:
-            logger.info("스캔 %s 가 시간 예산(%.1fs)을 다 써 남은 행을 다음 실행에 넘긴다.", name, spec.time_budget_seconds)
-            break
-        try:
-            result = spec.handle_row(row, as_of, ctx)
-        except Exception as exc:  # noqa: BLE001 - 한 행의 실패가 배치를 막으면 안 된다.
-            logger.exception("스캔 %s: 행(pk=%s) 처리 중 예외, 다음 행으로 계속", name, getattr(row, "pk", None))
-            failed.append({"pk": getattr(row, "pk", None), "error": f"{type(exc).__name__}: {exc}"})
-            continue
-        if result is not None:
-            rows.append(result)
+    with policy_scope():
+        for index, row in enumerate(_batch(spec, as_of, ctx)):
+            if index > 0 and time.monotonic() >= deadline:
+                logger.info("스캔 %s 가 시간 예산(%.1fs)을 다 써 남은 행을 다음 실행에 넘긴다.", name, spec.time_budget_seconds)
+                break
+            try:
+                result = spec.handle_row(row, as_of, ctx)
+            except Exception as exc:  # noqa: BLE001 - 한 행의 실패가 배치를 막으면 안 된다.
+                logger.exception("스캔 %s: 행(pk=%s) 처리 중 예외, 다음 행으로 계속", name, getattr(row, "pk", None))
+                failed.append({"pk": getattr(row, "pk", None), "error": f"{type(exc).__name__}: {exc}"})
+                continue
+            if result is not None:
+                rows.append(result)
 
     return {
         "scan": name,

@@ -38,7 +38,7 @@ from django.db import IntegrityError, transaction
 from ledger.models import Account, EntrySide
 from ledger.services import LineInput, post_journal_entry
 from policies.models import PlatformPolicy
-from policies.services import get_current_policy
+from policies.scope import current_policy
 from verification.crypto import encrypt
 
 from .adapters import SellerError, get_seller_adapter
@@ -103,7 +103,7 @@ def _compute_amounts(prize_amount: int, policy: PlatformPolicy) -> tuple[int, in
     return fee, withholding, net, applied_withholding_bps, exempt
 
 
-def get_or_create_payout(target: PayoutTarget, *, policy: PlatformPolicy | None = None) -> Payout:
+def get_or_create_payout(target: PayoutTarget) -> Payout:
     """이 지급 사유(Handover 또는 DistributionShare 의 `payout_target()`)에 대한 활성
     Payout 을 멱등하게 만든다.
 
@@ -122,12 +122,10 @@ def get_or_create_payout(target: PayoutTarget, *, policy: PlatformPolicy | None 
     두 경로의 차이(잠그는 행·금액 출처·FK 이름)는 `PayoutTarget` 이 들고 오고(#129),
     나머지는 한 본문이다 — 전에는 50줄이 두 번 적혀 있었다.
 
-    `policy`는 호출자가 요청(또는 스캔) 스코프당 한 번 읽어 넘겨야 한다(#75,
-    ADR-0023) — 생략하면 이 호출 하나를 위해 새로 한 번 읽는다(단독 호출 편의용).
+    정책은 이 요청·스캔 실행의 스코프에서 읽는다(`policies.scope.current_policy`, #145).
     """
 
-    if policy is None:
-        policy = get_current_policy()
+    policy = current_policy()
 
     with transaction.atomic():
         locked = target.lock()
@@ -172,7 +170,7 @@ def get_or_create_payout(target: PayoutTarget, *, policy: PlatformPolicy | None 
             raise
 
 
-def _seller_registration_for(developer, existing: Seller | None, *, policy=None):
+def _seller_registration_for(developer, existing: Seller | None):
     """벤더에 보낼 Seller 등록 요청을 우리 테이블에서 조립한다 (#136)."""
 
     from verification.models import Verification
@@ -192,11 +190,11 @@ def _seller_registration_for(developer, existing: Seller | None, *, policy=None)
             if existing is not None and existing.seller_id and existing.status != Seller.Status.REJECTED
             else ""
         ),
-        weekly_limit_hint=policy.seller_weekly_limit_amount if policy is not None else None,
+        weekly_limit_hint=current_policy().seller_weekly_limit_amount,
     )
 
 
-def ensure_seller_registered(developer, *, simulate: str | None = None, policy=None) -> Seller:
+def ensure_seller_registered(developer, *, simulate: str | None = None) -> Seller:
     """이 Developer의 Seller 등록을 멱등하게 보장한다(#50, ADR-0020).
 
     이미 부분 승인된 Seller가 있으면 그대로 돌려주고 어댑터를 다시 부르지 않는다 —
@@ -207,15 +205,14 @@ def ensure_seller_registered(developer, *, simulate: str | None = None, policy=N
 
     벤더에 보낼 신원(실명·이메일·전화번호)과 기존 식별자는 **여기서** 조립한다(#136) — adapter 는
     우리 테이블을 읽지 않는다. 거절된 등록의 재시도는 새 등록이어야 하므로 그때는 기존 식별자를
-    넘기지 않는다. `policy` 는 Fake 가 흉내낼 주간 한도(weekly_limit_hint)로만 실려 간다 —
-    스캔 스코프에서 이미 읽은 값을 넘기면 몫 수만큼 정책을 다시 읽지 않는다(ADR-0023).
+    넘기지 않는다. 주간 한도 힌트(weekly_limit_hint)는 스코프의 정책에서 읽어 Fake 에 실어 준다.
     """
 
     existing = Seller.objects.filter(developer=developer).first()
     if existing is not None and existing.status in Seller.READY_STATUSES:
         return existing
 
-    registration = _seller_registration_for(developer, existing, policy=policy)
+    registration = _seller_registration_for(developer, existing)
     adapter = get_seller_adapter()
     try:
         result = adapter.register(registration, simulate=simulate)

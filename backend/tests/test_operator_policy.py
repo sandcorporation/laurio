@@ -413,7 +413,7 @@ def test_change_policy_on_a_fresh_db_without_a_prior_get_does_not_500():
     거치지 않고 곧장 POST(expected_version=0)를 쏴도 500이 아니어야 한다.
 
     `update_policy`가 `select_for_update().get(pk=1)`로 행의 존재를
-    전제했었다 — `get_current_policy()`의 지연 생성(get_or_create)을 잠그기
+    전제했었다 — `current_policy()`의 지연 생성(get_or_create)을 잠그기
     전에 부르지 않으면 DoesNotExist로 500이 난다(코드리뷰 지적, 재현됨)."""
 
     assert PlatformPolicy.objects.count() == 0

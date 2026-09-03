@@ -19,7 +19,7 @@ Payment, Submission 수, Score 유무, Award, Handover.status, Distribution, 그
 
 **이 모듈은 조회를 내지 않는다.** 판정에 필요한 사실은 호출부가
 `sponsored_contest_queryset` 으로 미리 붙여 준다. 행마다 조회를 내면 한
-페이지(20행)에 100 쿼리가 넘고 `get_current_policy()` 도 행마다 불리게 된다 —
+페이지(20행)에 100 쿼리가 넘고 `current_policy()` 도 행마다 불리게 된다 —
 `policies/services.py` 가 요청 스코프당 한 번만 부르라고 못 박아 둔 그것이다.
 """
 

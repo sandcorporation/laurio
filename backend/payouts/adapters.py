@@ -268,10 +268,10 @@ class FakeSellerAdapter:
         if scenario == "success":
             weekly_limit = registration.weekly_limit_hint
             if weekly_limit is None:
-                # 단독 호출 편의용 — caller 가 스코프의 정책을 안 실어 보냈으면 여기서 한 번 읽는다.
-                from policies.services import get_current_policy
+                # caller 가 힌트를 안 실어 보냈으면 스코프의 정책에서 읽는다(#145).
+                from policies.scope import current_policy
 
-                weekly_limit = get_current_policy().seller_weekly_limit_amount
+                weekly_limit = current_policy().seller_weekly_limit_amount
             return SellerRegistrationResult(
                 seller_id=seller_id, status="partially_approved", weekly_limit_amount=weekly_limit
             )

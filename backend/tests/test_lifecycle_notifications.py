@@ -28,7 +28,7 @@ import notifications.lifecycle as lifecycle_module
 from core.models import ClockOverride
 from distributions.models import Distribution
 from notifications.models import Notification, NotificationType
-from policies.services import get_current_policy
+from policies.scope import current_policy
 
 KST = ZoneInfo("Asia/Seoul")
 
@@ -352,7 +352,7 @@ def test_deadline_reminder_notifies_sponsor_and_participating_developer(
     # 명시적으로 고정해 야간 연기 여부가 이 테스트의 결과를 좌우하지 않게 한다.
     _freeze(
         _safe_daytime_at_or_after(
-            deadline - timedelta(hours=get_current_policy().deadline_reminder_lead_hours)
+            deadline - timedelta(hours=current_policy().deadline_reminder_lead_hours)
         )
     )
     result = _run_lifecycle_scan(client)
@@ -461,7 +461,7 @@ def test_judging_end_reminder_notifies_sponsor(client, category, landing_type):
     judging_ends_at = Contest.objects.get(id=contest["id"]).judging_ends_at
     _freeze(
         judging_ends_at
-        - timedelta(hours=get_current_policy().judging_end_reminder_lead_hours)
+        - timedelta(hours=current_policy().judging_end_reminder_lead_hours)
         + timedelta(minutes=1)
     )
     result = _run_lifecycle_scan(client)
@@ -509,12 +509,12 @@ def test_distribution_final_warning_states_amount_and_is_sent_at_constructed_day
     _end_judging_period(client, contest["id"])
 
     judging_ends_at = Contest.objects.get(id=contest["id"]).judging_ends_at
-    distribution_due_at = judging_ends_at + timedelta(days=get_current_policy().distribution_wait_days)
+    distribution_due_at = judging_ends_at + timedelta(days=current_policy().distribution_wait_days)
 
     # 구성된 경고 시각을 테스트가 독립적으로 계산한다: distribution_due_at으로부터
     # LEAD_DAYS 전, 로컬(KST) NOTIFICATION_DAYTIME_HOUR시로 고정.
     local_due = timezone.localtime(distribution_due_at, KST)
-    warning_date = (local_due - timedelta(days=get_current_policy().distribution_final_warning_lead_days)).date()
+    warning_date = (local_due - timedelta(days=current_policy().distribution_final_warning_lead_days)).date()
     expected_warning_at = datetime(
         warning_date.year,
         warning_date.month,
@@ -582,7 +582,7 @@ def test_distribution_final_warning_is_not_sent_once_distribution_already_happen
     _end_judging_period(client, contest["id"])
 
     judging_ends_at = Contest.objects.get(id=contest["id"]).judging_ends_at
-    _freeze(judging_ends_at + timedelta(days=get_current_policy().distribution_wait_days, minutes=1))
+    _freeze(judging_ends_at + timedelta(days=current_policy().distribution_wait_days, minutes=1))
     _run_due_distributions(client)
     assert Distribution.objects.filter(contest_id=contest["id"]).exists()
 
@@ -661,7 +661,7 @@ def test_distribution_sends_result_notice_with_amount_to_qualifying_developer(
     # 검증하므로 야간 연기 여부가 우연에 좌우되면 안 된다.
     _freeze(
         _safe_daytime_at_or_after(
-            judging_ends_at + timedelta(days=get_current_policy().distribution_wait_days, minutes=1)
+            judging_ends_at + timedelta(days=current_policy().distribution_wait_days, minutes=1)
         )
     )
     _run_due_distributions(client)
@@ -710,9 +710,9 @@ def test_distribution_still_executes_when_every_notification_channel_fails(
     _end_judging_period(client, contest["id"])
 
     judging_ends_at = Contest.objects.get(id=contest["id"]).judging_ends_at
-    distribution_due_at = judging_ends_at + timedelta(days=get_current_policy().distribution_wait_days)
+    distribution_due_at = judging_ends_at + timedelta(days=current_policy().distribution_wait_days)
     local_due = timezone.localtime(distribution_due_at, KST)
-    warning_date = (local_due - timedelta(days=get_current_policy().distribution_final_warning_lead_days)).date()
+    warning_date = (local_due - timedelta(days=current_policy().distribution_final_warning_lead_days)).date()
     expected_warning_at = datetime(
         warning_date.year,
         warning_date.month,
@@ -788,7 +788,7 @@ def test_notification_history_only_shows_own_notifications(client, category, lan
 
     _freeze(
         deadline
-        - timedelta(hours=get_current_policy().deadline_reminder_lead_hours)
+        - timedelta(hours=current_policy().deadline_reminder_lead_hours)
         + timedelta(minutes=1)
     )
     _run_lifecycle_scan(client)
@@ -838,7 +838,7 @@ def test_extension_clears_judging_end_reminder_flag_so_a_second_warning_can_fire
     _freeze(
         _safe_daytime_at_or_after(
             first_judging_ends_at
-            - timedelta(hours=get_current_policy().judging_end_reminder_lead_hours)
+            - timedelta(hours=current_policy().judging_end_reminder_lead_hours)
         )
     )
     first_scan = _run_lifecycle_scan(client)
@@ -873,7 +873,7 @@ def test_extension_clears_judging_end_reminder_flag_so_a_second_warning_can_fire
     # 연장된 새 종료일이 다가오면 두 번째 경고가 실제로 나간다.
     _freeze(
         _safe_daytime_at_or_after(
-            new_judging_ends_at - timedelta(hours=get_current_policy().judging_end_reminder_lead_hours)
+            new_judging_ends_at - timedelta(hours=current_policy().judging_end_reminder_lead_hours)
         )
     )
     second_scan = _run_lifecycle_scan(client)
@@ -920,7 +920,7 @@ def test_deadline_reminder_scan_yields_to_time_budget_mid_fanout_and_recovers_ne
 
     _freeze(
         _safe_daytime_at_or_after(
-            deadline - timedelta(hours=get_current_policy().deadline_reminder_lead_hours)
+            deadline - timedelta(hours=current_policy().deadline_reminder_lead_hours)
         )
     )
 
@@ -1005,7 +1005,7 @@ def test_award_result_notice_recovery_is_not_starved_when_an_earlier_scan_exhaus
     # (#137 run_all). 그 시점(약 한 시간 뒤)에 이 Contest 의 마감 임박이 아직 도래하지 않도록
     # 리드타임보다 넉넉히 뒤에 마감을 잡는다 — 그래야 예산 초과 시나리오가 실제로 실행된다.
     reminder_deadline = timezone.now() + timedelta(
-        hours=get_current_policy().deadline_reminder_lead_hours + 3
+        hours=current_policy().deadline_reminder_lead_hours + 3
     )
     _reminder_sponsor, reminder_contest = _publish_contest(
         client,
@@ -1048,7 +1048,7 @@ def test_award_result_notice_recovery_is_not_starved_when_an_earlier_scan_exhaus
     _freeze(
         _safe_daytime_at_or_after(
             reminder_deadline
-            - timedelta(hours=get_current_policy().deadline_reminder_lead_hours)
+            - timedelta(hours=current_policy().deadline_reminder_lead_hours)
         )
     )
 
@@ -1111,7 +1111,7 @@ def test_deadline_reminder_recovers_remaining_developers_after_mid_fanout_crash(
 
     _freeze(
         _safe_daytime_at_or_after(
-            deadline - timedelta(hours=get_current_policy().deadline_reminder_lead_hours)
+            deadline - timedelta(hours=current_policy().deadline_reminder_lead_hours)
         )
     )
 
@@ -1278,7 +1278,7 @@ def test_distribution_result_notice_is_recovered_after_crash_before_completion(
     judging_ends_at = Contest.objects.get(id=contest["id"]).judging_ends_at
     _freeze(
         _safe_daytime_at_or_after(
-            judging_ends_at + timedelta(days=get_current_policy().distribution_wait_days, minutes=1)
+            judging_ends_at + timedelta(days=current_policy().distribution_wait_days, minutes=1)
         )
     )
 
@@ -1340,15 +1340,15 @@ def test_distribution_final_warning_query_does_not_get_crowded_out_by_not_yet_du
     # "아직 멀었다" — judging_ends_at이 anchor 한 시간 전이라, 경고까지는
     # (WAIT_DAYS - LEAD_DAYS)일 가까이 남았다.
     recent_judging_ends_at = anchor - timedelta(hours=1)
-    recent_deadline = recent_judging_ends_at - timedelta(days=get_current_policy().judging_period_days)
+    recent_deadline = recent_judging_ends_at - timedelta(days=current_policy().judging_period_days)
 
     # "이미 도래했다" — 경고 시각이 정확히 anchor가 되도록 역산한다(3시간 여유를
     # 둬 로컬 날짜 경계를 확실히 넘긴다).
     due_judging_ends_at = anchor - timedelta(
-        days=get_current_policy().distribution_wait_days - get_current_policy().distribution_final_warning_lead_days,
+        days=current_policy().distribution_wait_days - current_policy().distribution_final_warning_lead_days,
         hours=3,
     )
-    due_deadline = due_judging_ends_at - timedelta(days=get_current_policy().judging_period_days)
+    due_deadline = due_judging_ends_at - timedelta(days=current_policy().judging_period_days)
 
     contests = []
     for i, deadline_at in enumerate([recent_deadline, recent_deadline, due_deadline]):
