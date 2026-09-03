@@ -161,7 +161,7 @@ def test_tick_closes_contest_past_its_deadline(client, category, landing_type):
 
     assert response.status_code == 200
     body = response.json()
-    matching = [t for t in body["rows"] if t["model"] == "Contest" and t["pk"] == contest["id"]]
+    matching = [t for t in body["rows"] if t.get("model") == "Contest" and t.get("pk") == contest["id"]]
     assert matching == [
         {
             "scan": "contest-close",
@@ -204,8 +204,8 @@ def test_firing_tick_twice_closes_contest_only_once(client, category, landing_ty
     assert first.status_code == 200
     assert second.status_code == 200
 
-    first_matches = [t for t in first.json()["rows"] if t["pk"] == contest["id"]]
-    second_matches = [t for t in second.json()["rows"] if t["pk"] == contest["id"]]
+    first_matches = [t for t in first.json()["rows"] if t.get("model") == "Contest" and t.get("pk") == contest["id"]]
+    second_matches = [t for t in second.json()["rows"] if t.get("model") == "Contest" and t.get("pk") == contest["id"]]
     assert len(first_matches) == 1
     assert second_matches == []
 

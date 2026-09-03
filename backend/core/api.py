@@ -1,3 +1,5 @@
+import json
+
 from ninja import Router
 from ninja.errors import HttpError
 
@@ -5,6 +7,26 @@ from .auth import InternalAuth
 from .scans import SCAN_REGISTRY, run_all, run_scan
 
 router = Router(tags=["internal"])
+
+
+def _scan_params(request) -> dict:
+    """본문이 있으면 `{"params": {...}}` 에서 params 를 꺼낸다 — fake 어댑터 전용 시나리오 선택
+    (환불의 simulate, 배분 지급의 fail_submission_ids 등)이 스캔 실행 하나에 딸려 들어오는
+    자리다(`core.scans.scan_params(ctx)` 로 읽는다). Celery beat 는 본문 없이 부르므로 본문은
+    선택이고, 그 경우 빈 dict 다. ninja 의 본문 스키마를 쓰지 않는 이유는 본문 없는 POST(beat
+    의 호출 모양)가 400 으로 거부되지 않아야 하기 때문이다."""
+
+    # JSON 본문일 때만 읽는다 — 본문 없는 POST 는 클라이언트에 따라 빈 multipart 로 오기도 한다.
+    if request.content_type != "application/json" or not request.body:
+        return {}
+    try:
+        body = json.loads(request.body)
+    except ValueError as exc:
+        raise HttpError(400, "본문은 JSON 이어야 합니다.") from exc
+    params = body.get("params", {}) if isinstance(body, dict) else {}
+    if not isinstance(params, dict):
+        raise HttpError(400, "params 는 객체여야 합니다.")
+    return params
 
 
 @router.post("/tick", auth=InternalAuth())
@@ -26,4 +48,4 @@ def scan(request, name: str):
 
     if name not in SCAN_REGISTRY:
         raise HttpError(404, f"등록되지 않은 스캔입니다: {name}")
-    return run_scan(name)
+    return run_scan(name, params=_scan_params(request))

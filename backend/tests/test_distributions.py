@@ -44,7 +44,6 @@ TICK_URL = "/api/internal/tick"
 CONTESTS_URL = "/api/contests"
 PAYMENTS_URL = "/api/payments"
 SCORING_RUN_PENDING_URL = "/api/internal/scans/submission-scoring"
-DISTRIBUTIONS_RUN_DUE_URL = "/api/internal/distributions/run-due"
 
 
 # --- 헬퍼 (test_scoring.py/test_handover.py와 같은 형식) ------------------------
@@ -273,14 +272,25 @@ def _advance_past_distribution_wait(contest_id: int) -> None:
 
 
 def _run_due_distributions(client, *, fail_submission_ids: list[int] | None = None) -> dict:
-    response = client.post(
-        DISTRIBUTIONS_RUN_DUE_URL,
-        data={"fail_submission_ids": fail_submission_ids or []},
-        content_type="application/json",
-        **_internal_headers(),
-    )
-    assert response.status_code == 200, response.content
-    return response.json()
+    """배분 생성 스캔과 몫 지급 스캔을 순서대로 한 번씩 돌리고 결과를 합친다(#140) — 예전 단일
+    엔드포인트와 같은 관찰면(`results`)에 뼈대의 `failed` 를 더해 돌려준다."""
+
+    rows: list[dict] = []
+    failed: list[dict] = []
+    for name, params in (
+        ("distribution-create", {}),
+        ("distribution-share-payout", {"fail_submission_ids": fail_submission_ids or []}),
+    ):
+        response = client.post(
+            f"/api/internal/scans/{name}",
+            data={"params": params},
+            content_type="application/json",
+            **_internal_headers(),
+        )
+        assert response.status_code == 200, response.content
+        rows += response.json()["rows"]
+        failed += response.json()["failed"]
+    return {"count": len(rows), "results": rows, "failed": failed}
 
 
 @pytest.fixture
@@ -744,7 +754,8 @@ def test_platform_policy_is_read_once_per_scan_not_once_per_share(
     policy_queries = [q for q in ctx.captured_queries if "policies_platformpolicy" in q["sql"]]
     payouts = Payout.objects.filter(distribution_share__distribution__contest_id=contest["id"])
     assert payouts.count() == 3
-    assert len(policy_queries) == 1, (
+    # 스캔 실행당 한 번 — 배분 생성 스캔과 몫 지급 스캔이 각각 한 번씩(#140), 몫(3개)마다가 아니다.
+    assert len(policy_queries) == 2, (
         f"platform_policy 테이블 쿼리가 {len(policy_queries)}번 나갔다 — 몫(3개)마다 "
         "다시 읽으면 안 되고 스캔당 한 번이어야 한다."
     )
@@ -1088,7 +1099,10 @@ def test_one_poisoned_share_does_not_block_other_shares_in_same_scan(
         resp = _run_due_distributions(client)
 
     events = {r.get("submission_id"): r for r in resp["results"] if "submission_id" in r}
-    assert events[poison_submission["id"]]["event"] == "payout_attempt_failed"
+    # 예외로 죽은 몫은 뼈대(core.scans)가 격리해 `failed` 에 남긴다(#140) — 결과 행이 아니다.
+    poison_share = DistributionShare.objects.get(submission_id=poison_submission["id"])
+    assert [f["pk"] for f in resp["failed"]] == [poison_share.pk]
+    assert poison_submission["id"] not in events
     # 포이즌 항목 뒤에 있는(더 큰 id) 정상 항목도 같은 스캔에서 처리됐다 —
     # 배치가 막히지 않았다는 직접적인 증거다.
     assert events[ok_submission["id"]]["event"] == "payout_attempted"
@@ -1359,8 +1373,8 @@ def test_share_payout_timeout_then_failed_requery_stays_requested_not_attempt_fa
 ):
     """몫 지급의 confirm 이 타임아웃하고 재확인(query_status)도 실패하면, 그 몫은
     「시도 실패」행이 아니라 미확정(REQUESTED)으로 남아 다음 스캔이 마저 확정한다
-    (#125). 전에는 재확인 예외가 몫 단위 격리(except Exception)에 잡혀
-    payout_attempt_failed 로 기록됐다 — 격리는 살았지만 "실패"라는 말이 틀렸다."""
+    (#125). 전에는 재확인 예외가 몫 단위 격리에 잡혀 「시도 실패」로 기록됐다 — 격리는
+    살았지만 "실패"라는 말이 틀렸다."""
 
     from unittest.mock import patch
 

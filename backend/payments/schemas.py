@@ -36,12 +36,6 @@ class ConfirmPaymentIn(Schema):
     payment_key: str | None = None
 
 
-class RunRefundsIn(Schema):
-    # fake PG 전용 시나리오 선택. ConfirmPaymentIn.simulate와 같은 원칙 — 실제
-    # 어댑터(PAYMENT_ADAPTER_MODE=real)에서는 무시된다(#17, ADR-0007).
-    simulate: str | None = None
-
-
 class WebhookIn(Schema):
     webhook_id: str
     order_id: UUID

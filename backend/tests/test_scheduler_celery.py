@@ -6,13 +6,13 @@
 
 #137 이전에는 엔드포인트 8 · task 7 · beat 7 을 세 곳에 손으로 나란히 적었고, 이 파일의 기대
 목록도 손으로 관리됐다 — 그래서 lifecycle 스캔이 조용히 스케줄에서 빠진 채 배포됐다. 지금은
-등록부가 유일한 원천이고 이 테스트는 그 파생이 깨지지 않았는지만 본다. 아직 옮기지 않은
-스캔(`LEGACY_BEAT_SCHEDULE`)은 #138~#140 이 하나씩 등록부로 옮기며 그 목록에서 지운다.
+등록부가 유일한 원천이고 이 테스트는 그 파생이 깨지지 않았는지만 본다(#140 으로 열일곱 스캔이
+전부 등록부에 올라 손으로 쓴 항목은 하나도 없다).
 """
 
 import inspect
 
-from config.celery import LEGACY_BEAT_SCHEDULE, app as celery_app
+from config.celery import app as celery_app
 from core import tasks as core_tasks
 from core.scans import SCAN_REGISTRY
 
@@ -28,11 +28,37 @@ def test_every_registered_scan_has_a_beat_entry_that_calls_run_scan_with_its_nam
         assert entry["schedule"] == spec.interval_seconds > 0
 
 
-def test_beat_schedule_is_exactly_registry_plus_legacy():
-    """스케줄에 등록부 밖의 항목이 없고, 레거시 목록 밖의 손으로 쓴 항목도 없다."""
+def test_beat_schedule_is_exactly_the_registry():
+    """스케줄에 등록부 밖의 항목이 없다 — 손으로 쓴 항목은 하나도 없다."""
 
-    expected = {f"scan:{name}" for name in SCAN_REGISTRY} | set(LEGACY_BEAT_SCHEDULE)
-    assert set(celery_app.conf.beat_schedule) == expected
+    assert set(celery_app.conf.beat_schedule) == {f"scan:{name}" for name in SCAN_REGISTRY}
+
+
+def test_every_scan_that_used_to_have_its_own_endpoint_is_registered():
+    """#137 이전에 앱마다 따로 있던 열일곱 스캔이 전부 등록부에 있다 — 이관 중 하나가 조용히
+    빠지는 것이 #23 사고의 정확한 모양이다."""
+
+    expected = {
+        "scheduled-state-demo",
+        "contest-close",
+        "contest-judging-end",
+        "handover-release",
+        "identity-dormancy-purge",
+        "retained-identity-purge",
+        "deadline-reminder",
+        "judging-end-reminder",
+        "distribution-final-warning",
+        "award-result-notice-recovery",
+        "distribution-result-notice-recovery",
+        "notification-dispatch-deferred",
+        "notification-reclaim-stuck",
+        "submission-scoring",
+        "payment-refund-request",
+        "payment-refund-reconcile",
+        "distribution-create",
+        "distribution-share-payout",
+    }
+    assert expected <= set(SCAN_REGISTRY), expected - set(SCAN_REGISTRY)
 
 
 def test_run_scan_task_calls_the_scan_endpoint_with_the_internal_token():
@@ -49,12 +75,3 @@ def test_tick_is_not_scheduled_by_beat():
 
     assert not any(e["task"] == "core.call_scheduler_tick" for e in celery_app.conf.beat_schedule.values())
     assert not hasattr(core_tasks, "call_scheduler_tick")
-
-
-def test_legacy_entries_still_point_at_existing_tasks():
-    """아직 안 옮긴 스캔은 옛 task 로 계속 돌아야 한다 — 옮기기 전에 목록에서 지우면 그 스캔이
-    조용히 멈춘다(#137 이전에 실제로 일어난 사고)."""
-
-    for name, entry in LEGACY_BEAT_SCHEDULE.items():
-        task_fn = entry["task"].split(".")[-1]
-        assert hasattr(core_tasks, task_fn), f"{name}: {entry['task']} 태스크가 없다"

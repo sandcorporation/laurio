@@ -26,8 +26,23 @@ from core.models import ClockOverride
 from payments.models import Payment
 from policies.services import get_current_policy
 
-TICK_URL = "/api/internal/tick"
-RUN_REFUNDS_URL = "/api/internal/payments/run-refunds"
+# 환불 스캔 둘의 등록부 이름(#140) — 예전 단일 엔드포인트가 순서대로 처리하던 두 후보 종류 그대로.
+REFUND_SCAN_URLS = (
+    "/api/internal/scans/payment-refund-request",
+    "/api/internal/scans/payment-refund-reconcile",
+)
+
+
+class _ScanResponse:
+    """두 스캔 응답을 예전 `/run-refunds` 의 관찰면(`count`·`results`)으로 합친 것."""
+
+    status_code = 200
+
+    def __init__(self, rows: list[dict]):
+        self._body = {"count": len(rows), "results": rows}
+
+    def json(self) -> dict:
+        return self._body
 CONTESTS_URL = "/api/contests"
 PAYMENTS_URL = "/api/payments"
 LEDGER_URL = "/api/ledger"
@@ -95,13 +110,18 @@ def _login_operator(client, **kwargs):
     return user
 
 
-def _run_refunds(client, *, simulate: str | None = None):
-    return client.post(
-        RUN_REFUNDS_URL,
-        data={"simulate": simulate} if simulate is not None else {},
-        content_type="application/json",
-        **_internal_headers(),
-    )
+def _run_refunds(client, *, simulate: str | None = None, scans=REFUND_SCAN_URLS) -> _ScanResponse:
+    rows: list[dict] = []
+    for url in scans:
+        response = client.post(
+            url,
+            data={"params": {"simulate": simulate}} if simulate is not None else {},
+            content_type="application/json",
+            **_internal_headers(),
+        )
+        assert response.status_code == 200, response.content
+        rows += response.json()["rows"]
+    return _ScanResponse(rows)
 
 
 def _sign(*, webhook_id: str, order_id: str, status: str, secret: str | None = None) -> str:
@@ -194,9 +214,14 @@ def _submit(client, access: str, contest_id: int) -> None:
 
 
 def _close_via_tick(client, *, at) -> None:
+    """Contest 전이 스캔 둘(마감·심사기간 종료)만 돌린다 — `/tick` 은 등록부 전부를 한 바퀴
+    돌아(#137) 환불 스캔까지 같이 실행하므로, 어느 simulate 로 언제 환불되는지를 단언하는 이
+    파일에서는 쓰지 않는다."""
+
     _freeze(at)
-    response = client.post(TICK_URL, **_internal_headers())
-    assert response.status_code == 200
+    for name in ("contest-close", "contest-judging-end"):
+        response = client.post(f"/api/internal/scans/{name}", **_internal_headers())
+        assert response.status_code == 200
 
 
 def _as_operator(client) -> None:
@@ -238,14 +263,14 @@ def landing_type(db):
 
 @pytest.mark.django_db
 def test_run_refunds_rejects_request_without_internal_auth(client):
-    response = client.post(RUN_REFUNDS_URL)
+    response = client.post(REFUND_SCAN_URLS[0])
 
     assert response.status_code == 401
 
 
 @pytest.mark.django_db
 def test_run_refunds_rejects_wrong_token(client):
-    response = client.post(RUN_REFUNDS_URL, **{"HTTP_X_INTERNAL_TOKEN": "wrong-token"})
+    response = client.post(REFUND_SCAN_URLS[0], **{"HTTP_X_INTERNAL_TOKEN": "wrong-token"})
 
     assert response.status_code == 401
 
@@ -392,7 +417,7 @@ def test_concurrent_refund_scans_refund_only_once(django_db_blocker, category, l
                     local_client = Client()
                     responses.append(
                         local_client.post(
-                            RUN_REFUNDS_URL,
+                            REFUND_SCAN_URLS[0],
                             data={},
                             content_type="application/json",
                             **_internal_headers(),
@@ -429,7 +454,7 @@ def test_concurrent_refund_scans_refund_only_once(django_db_blocker, category, l
         rows = [
             row
             for response in responses
-            for row in response.json()["results"]
+            for row in response.json()["rows"]
             if row["payment_id"] == payment.id
         ]
         assert [row["claimed"] for row in rows] == [True], (
@@ -641,10 +666,11 @@ def test_query_refund_status_error_after_timeout_does_not_500_and_leaves_row_ret
     order_id_b = Payment.objects.get(contest_id=contest_b["id"]).order_id
     _close_via_tick(client, at=deadline + timedelta(minutes=1))
 
-    # 두 Contest 모두 같은 스캔 호출 안에서 같은 simulate로 처리된다 — a는
+    # 두 Contest 모두 같은 스캔 실행 안에서 같은 simulate로 처리된다 — a는
     # query_refund_status 자체가 에러를 내는 시나리오, b는 이 테스트에서는
-    # 같은 시나리오를 쓰지만 배치가 죽지 않는다는 것만 확인하면 충분하다.
-    response = _run_refunds(client, simulate="timeout_then_query_error")
+    # 같은 시나리오를 쓰지만 배치가 죽지 않는다는 것만 확인하면 충분하다. 재확인
+    # 스캔은 돌리지 않는다 — 방금 선점된 두 행을 곧바로 다시 집어 행 수를 두 배로 보고한다.
+    response = _run_refunds(client, simulate="timeout_then_query_error", scans=REFUND_SCAN_URLS[:1])
     assert response.status_code == 200
     body = response.json()
     assert body["count"] == 2
@@ -721,12 +747,13 @@ def test_pending_refund_is_reconciled_by_a_later_scan_without_calling_refund_aga
 
 @pytest.mark.django_db
 def test_refund_scan_is_bounded_by_batch_size(client, category, landing_type):
-    """한 스캔이 처리하는 후보 수가 REFUND_BATCH_SIZE로 제한된다 — 무제한 스캔은
+    """한 스캔이 처리하는 후보 수가 배치 상한으로 제한된다 — 무제한 스캔은
     백로그가 쌓였을 때 이 엔드포인트를 호출하는 HTTP 요청 자체를 타임아웃으로
     몰아넣는다."""
 
-    from payments.services import REFUND_BATCH_SIZE
+    from core.scans import SCAN_REGISTRY
 
+    REFUND_BATCH_SIZE = SCAN_REGISTRY["payment-refund-request"].batch_size
     assert REFUND_BATCH_SIZE > 0
 
     total = REFUND_BATCH_SIZE + 3
@@ -993,10 +1020,10 @@ def test_run_refunds_accepts_body_less_request(client, category, landing_type):
     운영 호출을 재현하려면 `generic()`으로 길이 0인 본문을 직접 보내야 한다.
 
     이 스캔도 본문 없는 호출을 받아들여야 실제로 스케줄에 걸린다(코디네이터
-    리뷰 결함 8). 이전에는 `payload: RunRefundsIn`에 기본값이 없어 본문 없는
-    요청이 400으로 거부됐다."""
+    리뷰 결함 8). 이전에는 본문 스키마에 기본값이 없어 본문 없는 요청이 400으로
+    거부됐다 — 지금은 `/scans/{name}` 이 본문을 선택으로 읽는다(#140)."""
 
     response = client.generic(
-        "POST", RUN_REFUNDS_URL, data=b"", content_type="application/json", **_internal_headers()
+        "POST", REFUND_SCAN_URLS[0], data=b"", content_type="application/json", **_internal_headers()
     )
     assert response.status_code == 200, response.content

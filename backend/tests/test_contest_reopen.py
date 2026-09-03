@@ -25,8 +25,7 @@ from core.models import ClockOverride
 from payments.models import Payment
 from verification.models import Verification
 
-TICK_URL = "/api/internal/tick"
-RUN_REFUNDS_URL = "/api/internal/payments/run-refunds"
+RUN_REFUNDS_URL = "/api/internal/scans/payment-refund-request"
 CONTESTS_URL = "/api/contests"
 PAYMENTS_URL = "/api/payments"
 LEDGER_URL = "/api/ledger"
@@ -124,7 +123,7 @@ def _send_webhook(client, *, webhook_id: str, order_id: str, status: str):
 def _run_refunds(client, *, simulate: str | None = None):
     return client.post(
         RUN_REFUNDS_URL,
-        data={"simulate": simulate} if simulate is not None else {},
+        data={"params": {"simulate": simulate}} if simulate is not None else {},
         content_type="application/json",
         **_internal_headers(),
     )
@@ -184,9 +183,13 @@ def _pay_and_publish(client, sponsor, contest_id: int) -> dict:
 
 
 def _close_via_tick(client, *, at) -> None:
+    """Contest 전이 스캔만 돌린다 — `/tick` 은 등록부 전부를 한 바퀴 돌아(#137) 환불까지 같이
+    실행하므로, 환불 스캔을 따로 부르는 이 파일의 순서를 흐린다."""
+
     _freeze(at)
-    response = client.post(TICK_URL, **_internal_headers())
-    assert response.status_code == 200
+    for name in ("contest-close", "contest-judging-end"):
+        response = client.post(f"/api/internal/scans/{name}", **_internal_headers())
+        assert response.status_code == 200
 
 
 def _lapsed_contest(

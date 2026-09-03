@@ -847,30 +847,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/internal/distributions/run-due": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Run Due
-         * @description 무응답 14일이 지난 Contest를 스캔해 Distribution을 만들고, 아직 확정되지
-         *     않은 몫에 대한 지급을 시도(또는 재시도)한다.
-         *
-         *     같은 시각에 두 번 불러도(워커가 겹쳐 돌아도) 이미 만들어진 Distribution은
-         *     다시 만들지 않고, 이미 확정된 몫은 다시 지급 시도하지 않는다(#16 AC).
-         */
-        post: operations["distributions_api_run_due"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/internal/notifications": {
         parameters: {
             query?: never;
@@ -916,37 +892,6 @@ export interface paths {
         get: operations["notifications_api_retrieve"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/internal/payments/run-refunds": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Run Refunds
-         * @description CLOSED Contest 중 Submission이 0건인 채 결제가 완료된 것을 스캔해 전액 환불한다.
-         *
-         *     core의 마감 전이(#11)가 Contest를 PUBLISHED -> CLOSED로 옮긴 뒤, 같은 스케줄러
-         *     체계(ADR-0003) 안에서 Celery beat가 이 엔드포인트를 짧은 주기로 반복 호출한다 —
-         *     scoring.api의 `/internal/scoring/run-pending`, notifications.api의
-         *     `/internal/notifications/dispatch-due`와 같은 구조다. 같은 시각에 두 번 쏴도
-         *     (`payments.services.request_refund`의 조건부 UPDATE 덕분에) 각 Payment는
-         *     정확히 한 번만 환불된다.
-         *
-         *     `simulate`는 이 스캔이 집는 모든 후보에게 그대로 전달되는 fake PG 전용
-         *     시나리오 선택 값이다(`ConfirmPaymentIn.simulate`와 같은 원칙 — 실제 어댑터는
-         *     무시한다).
-         */
-        post: operations["payments_api_run_refunds"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3499,18 +3444,15 @@ export interface components {
             /** Ruled By Username */
             ruled_by_username: string;
         };
-        /** RunDueDistributionsIn */
-        RunDueDistributionsIn: {
+        /** ScanRunIn */
+        ScanRunIn: {
             /**
-             * Fail Submission Ids
-             * @default []
+             * Params
+             * @default {}
              */
-            fail_submission_ids: number[];
-        };
-        /** RunRefundsIn */
-        RunRefundsIn: {
-            /** Simulate */
-            simulate?: string | null;
+            params: {
+                [key: string]: unknown;
+            };
         };
         /**
          * ScoreSnapshotOut
@@ -4762,28 +4704,6 @@ export interface operations {
             };
         };
     };
-    distributions_api_run_due: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["RunDueDistributionsIn"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
     notifications_api_create: {
         parameters: {
             query?: never;
@@ -4848,28 +4768,6 @@ export interface operations {
             };
         };
     };
-    payments_api_run_refunds: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["RunRefundsIn"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
     core_api_scan: {
         parameters: {
             query?: never;
@@ -4879,7 +4777,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ScanRunIn"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {

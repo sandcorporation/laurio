@@ -65,6 +65,16 @@ SCAN_REGISTRY: dict[str, ScanSpec] = {}
 # 팬아웃 등)에서도 예산을 확인하고 싶을 때 `budget_exhausted(ctx)` 로 읽는다. 뼈대의 행
 # 사이 확인과 같은 시계·같은 마감이다.
 _CTX_DEADLINE_KEY = f"{__name__}:deadline"
+# 실행 하나에 딸린 입력(`/scans/{name}` 본문의 params). **fake 어댑터 전용 시나리오 선택**
+# (환불의 simulate, 배분 지급의 fail_submission_ids)만 여기로 온다 — 실제 어댑터는 무시하고
+# beat 는 아무것도 보내지 않는다. 스캔이 사람의 입력으로 동작을 바꾸는 자리가 아니다.
+_CTX_PARAMS_KEY = f"{__name__}:params"
+
+
+def scan_params(ctx: dict) -> dict:
+    """이번 실행에 딸린 입력 — 없으면 빈 dict."""
+
+    return ctx.get(_CTX_PARAMS_KEY) or {}
 
 
 def budget_exhausted(ctx: dict) -> bool:
@@ -100,7 +110,7 @@ def _batch(spec: ScanSpec, as_of, ctx: dict) -> list:
     return list(candidates)[: spec.batch_size]
 
 
-def run_scan(name: str, *, as_of=None, ctx: dict | None = None) -> dict:
+def run_scan(name: str, *, as_of=None, ctx: dict | None = None, params: dict | None = None) -> dict:
     """등록된 스캔 하나를 실행한다.
 
     - `as_of` 는 한 번만 구해 모든 행에 재사용한다(행마다 `Clock.now()` 를 다시 조회하지 않는다).
@@ -120,6 +130,7 @@ def run_scan(name: str, *, as_of=None, ctx: dict | None = None) -> dict:
     ctx = {} if ctx is None else ctx
     deadline = time.monotonic() + spec.time_budget_seconds
     ctx[_CTX_DEADLINE_KEY] = deadline
+    ctx[_CTX_PARAMS_KEY] = dict(params or {})
 
     rows: list[dict] = []
     failed: list[dict] = []
