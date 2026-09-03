@@ -587,6 +587,11 @@ class Command(BaseCommand):
                 {"text": r.text, "grade": r.grade}
                 for r in contest.requirements.all().order_by("order", "id")
             ],
+            # #106 — 이 호출 시점의 실제 Submission 수. 호출부(handle)가 이
+            # Contest 에 낼 Submission 을 전부 심은 뒤에 _serialize 를 부르므로
+            # 여기서 다시 세면 GET /api/contests/{id} 가 낸 submission_count 와
+            # 같은 값이 나와야 한다 — frontend/e2e 가 그 일치를 그대로 단언한다.
+            "submission_count": contest.submissions.count(),
         }
 
     def _serialize_developer(self, developer: DeveloperProfile, *, closed_contest: Contest) -> dict:

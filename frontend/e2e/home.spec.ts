@@ -214,6 +214,57 @@ test.describe("@exclusive 홈 — 공모전을 네 묶음으로 큐레이션한�
   });
 });
 
+// PS-01 (#106, spec #105) — 참가작 수가 홈 카드에서 시작해 목록·상세까지
+// 같은 값으로 따라온다. **묶음 판정과 마찬가지로 참가작 수도 백엔드가 낸다**
+// (GET /api/contests/home 의 ContestOut.submission_count) — 화면은 그 숫자를
+// 문구로 옮길 뿐 다시 세지 않는다. seed_e2e_contests.py 의 funded 는
+// Submission 을 하나 심으므로(developer 픽스처), seeded.funded.submission_count
+// 로 기대값을 하드코딩하지 않고 시드가 준 값을 그대로 쓴다.
+test.describe("@exclusive 홈 — 참가작 수가 화면을 옮겨도 같은 값을 유지한다", () => {
+  test("참가작 수가 홈 카드에서 시작해 목록을 거쳐 상세까지 같은 값으로 이어진다", async ({
+    page,
+  }) => {
+    const expected = `참가작 ${seeded.funded.submission_count}건`;
+
+    await page.goto("/");
+    const homeCount = page
+      .locator(`[data-contest-row="${seeded.funded.id}"]`)
+      .getByTestId("submission-count");
+    await expect(homeCount).toHaveText(expected);
+    await expect(homeCount).toHaveAttribute(
+      "data-submission-count",
+      String(seeded.funded.submission_count),
+    );
+
+    await page.getByTestId("home-bucket-ongoing-view-all").click();
+    await expect(page).toHaveURL(/\/contests$/);
+    await expect(
+      page.locator(`[data-contest-row="${seeded.funded.id}"]`).getByTestId("submission-count"),
+    ).toHaveText(expected);
+
+    await page.locator(`[data-contest-row="${seeded.funded.id}"]`).click();
+    await expect(page).toHaveURL(new RegExp(`/contests/${seeded.funded.id}$`));
+    await expect(page.getByTestId("submission-count")).toHaveText(expected);
+  });
+
+  // 0도 숨기지 않는다 — "0" 이라는 숫자가 아니라 "아직 참가작이 없습니다"로
+  // 읽힌다(#106 인수조건). seed_e2e_contests.py 의 underfunded 는 Submission 이
+  // 없다.
+  test("참가작이 없는 공모전은 홈 카드에서도 「아직 참가작이 없습니다」라고 말한다", async ({
+    page,
+  }) => {
+    expect(seeded.underfunded.submission_count).toBe(0);
+
+    await page.goto("/");
+    const imminentList = page.getByTestId("home-bucket-imminent-list");
+    await expect(
+      imminentList
+        .locator(`[data-contest-row="${seeded.underfunded.id}"]`)
+        .getByTestId("submission-count"),
+    ).toHaveText("아직 참가작이 없습니다");
+  });
+});
+
 // 이 스펙의 존재 이유. 티켓 #93 본문 그대로: 이 테스트가 있었다면 입구 없는
 // staging 이 나가지 않았다. `page.goto`는 맨 처음 한 번뿐이고, 그 뒤로는 전부
 // 클릭이다.

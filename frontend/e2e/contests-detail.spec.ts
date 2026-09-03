@@ -59,6 +59,30 @@ test("@exclusive 로그인 없이 접근된다", async ({ request }) => {
   expect(res.status()).toBe(200);
 });
 
+// PS-01 (#106, spec #105) — 참가작 수가 상세에도 보이고, 백엔드가 낸 값과
+// 일치한다. seed_e2e_contests.py 가 실제로 심은 뒤 다시 세어 돌려준 값
+// (seeded.funded.submission_count)을 그대로 기대값으로 쓴다 — 화면은 다시
+// 세지 않는다.
+test("@exclusive 참가작 수가 상세에 보이고 백엔드가 심은 값과 일치한다", async ({ request }) => {
+  const res = await request.get(`/contests/${seeded.funded.id}`);
+  const html = await res.text();
+
+  expect(html).toContain(`참가작 ${seeded.funded.submission_count}건`);
+});
+
+// 0도 숨기지 않는다 — "0"이라는 숫자가 아니라 "아직 참가작이 없습니다"로
+// 읽힌다. 숫자와 문구가 다른 층에서 결정된다는 것이 #106 인수조건이다.
+test("@exclusive 참가작이 없는 Contest 상세는 「아직 참가작이 없습니다」라고 말한다", async ({
+  request,
+}) => {
+  expect(seeded.underfunded.submission_count).toBe(0);
+
+  const res = await request.get(`/contests/${seeded.underfunded.id}`);
+  const html = await res.text();
+
+  expect(html).toContain("아직 참가작이 없습니다");
+});
+
 test("@exclusive 마감된 Contest 도 상세에 남는다", async ({ request }) => {
   // ADR-0014 — 마감은 결제 취소가 아니라 데모·영상이 공개되는 시점이다.
   const res = await request.get(`/contests/${seeded.closed.id}`);

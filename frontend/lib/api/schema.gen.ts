@@ -2437,6 +2437,8 @@ export interface components {
             source_contest_id?: number | null;
             /** Status */
             status: string;
+            /** Submission Count */
+            submission_count: number;
             /** Title */
             title: string;
         };

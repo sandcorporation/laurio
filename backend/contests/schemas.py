@@ -162,6 +162,17 @@ class ContestOut(Schema):
     # 익명 방문자도 볼 수 있게 된다. 이 값들은 JudgingExtensionPaymentOut(연장
     # 확정 응답, Sponsor 본인 인증 필요)과 Django admin(운영자 전용)에서만 노출한다.
     judging_ends_at: datetime | None
+    # 실제 Submission 수 (#106, spec #105). **개별 Submission을 여는 것이
+    # 아니다** — ADR-0014가 감추는 것은 진행 중 개별 제출물이고, 이 필드는 집계
+    # 하나뿐이다(마감 전에도 노출된다). 0도 그대로 싣는다 — "아직 참가작이
+    # 없습니다"라는 문구를 만드는 것은 화면의 몫이지 이 스키마의 몫이 아니다
+    # (숫자와 문구를 다른 층에 둔다는 것이 #106 인수조건).
+    #
+    # 이 값은 항상 `contests.api._serialize_contest` 호출부가 미리 annotate하거나
+    # (list_contests/get_contest/get_home_curation) 새로 만든 Contest에 0으로
+    # 채워 넣은(`create_contest`/`reopen_contest`) `Contest.submission_count`
+    # 에서 온다 — 화면과 마찬가지로 이 스키마도 따로 세지 않는다.
+    submission_count: int
 
 
 class HomeCurationGroupOut(Schema):

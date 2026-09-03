@@ -11,7 +11,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { fetchContest, type Requirement } from "@/lib/api/contests";
-import { formatDday, formatPrize, isImminent } from "@/lib/contest-format";
+import { formatDday, formatPrize, formatSubmissionCount, isImminent } from "@/lib/contest-format";
 
 type Params = { id: string };
 
@@ -85,7 +85,7 @@ export default async function ContestDetailPage({ params }: { params: Promise<Pa
         </div>
       </header>
 
-      <section className="grid grid-cols-2 gap-6 border-b border-rule pb-6">
+      <section className="grid grid-cols-3 gap-6 border-b border-rule pb-6">
         <div className="flex flex-col gap-1">
           <span className="text-xs tracking-wide text-ink/60">상금</span>
           <span
@@ -110,6 +110,21 @@ export default async function ContestDetailPage({ params }: { params: Promise<Pa
           </span>
           <span className="font-mono text-xs text-ink/60">
             {new Date(contest.deadline_at).toLocaleString("ko-KR")}
+          </span>
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className="text-xs tracking-wide text-ink/60">참가작</span>
+          {/* 백엔드가 낸 숫자(ContestOut.submission_count, #106)를 그대로
+              읽되, 0은 "0"이 아니라 문구로 낸다 — formatSubmissionCount가 그
+              경계선이고, 화면은 이 함수 말고 다시 세지 않는다. */}
+          <span
+            data-testid="submission-count"
+            data-submission-count={contest.submission_count}
+            className={`font-mono font-medium ${
+              contest.submission_count === 0 ? "text-base text-ink/60" : "text-2xl"
+            }`}
+          >
+            {formatSubmissionCount(contest.submission_count)}
           </span>
         </div>
       </section>

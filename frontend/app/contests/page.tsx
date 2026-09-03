@@ -23,7 +23,7 @@ import {
   type ContestSort,
   type DeliverableType,
 } from "@/lib/api/contests";
-import { formatDday, formatPrize, isImminent } from "@/lib/contest-format";
+import { formatDday, formatPrize, formatSubmissionCount, isImminent } from "@/lib/contest-format";
 
 type SearchParams = { [key: string]: string | string[] | undefined };
 
@@ -323,6 +323,13 @@ function ContestRow({ contest }: { contest: Contest }) {
           {contest.is_underfunded && (
             <> · 최소 제안 {formatPrize(contest.required_minimum_prize)}원</>
           )}
+        </div>
+        <div
+          data-testid="submission-count"
+          data-submission-count={contest.submission_count}
+          className="text-xs text-ink/60"
+        >
+          {formatSubmissionCount(contest.submission_count)}
         </div>
       </div>
       <div className="flex flex-wrap gap-1.5 text-[11.5px] text-ink/70">
