@@ -185,3 +185,61 @@ def hold_of(payout: Payout, *, seller: Seller | None, has_identity: bool) -> Hol
         kind = HoldKind.UNKNOWN
 
     return Hold(kind=kind, turn=TURN_OF[kind], transfer_failed=transfer_failed)
+
+
+def advance(payout: Payout, *, register_seller: bool, seller_simulate: str | None = None) -> Payout:
+    """사실이 바뀐 뒤 Payout 을 다음 상태로 전진시킨다 — 사실 대조(reconcile) 한 곳 (#131).
+
+    입구(주민등록번호 제출·Seller 재시도·웹훅·sweep·확정)는 새 사실만 기록하고 이 함수를
+    부른다. 이 함수는 네 축(status · transfer_status · Seller READY · TaxIdentity)을 지금
+    다시 읽어 목표를 정한다 — 어떤 순서로 사실이 도착하든 마지막 advance 가 같은 답을 낸다.
+
+    **두 대기 규칙(ADR-0020)**: Seller 가 READY 가 아니면 CONFIRMED_SELLER_PENDING. READY 면
+    실이체를 요청하고, 그것이 COMPLETED 로 확정됐을 때만 신원 유무에 따라 CONFIRMED /
+    CONFIRMED_IDENTITY_PENDING 으로 — Seller 가 READY 라는 사실만으로 전진시키면 벤더가
+    실이체를 거절해도 「지급 완료」라고 말하게 된다(#57 코드리뷰 지적 1). 실이체가 아직
+    안 풀렸으면 제자리다 — CIP 를 CSP 로 뭉치면 「신원은 이미 냈다」는 사실이 사라진다.
+
+    `register_seller` — 이 입구가 Seller 등록을 촉발하는가. 확정과 재시도는 그렇고(ADR-0020:
+    등록은 확정 시점에 시작된다), 신원 제출·웹훅·sweep 은 이미 있는 Seller 를 읽기만 한다.
+
+    쓰기는 `UPDATE … WHERE pk AND status=<읽은 값>` 한 번이다(ADR-0003) — rowcount 0 이면
+    다른 입구가 먼저 전진시킨 것이니 아무것도 하지 않는다. 벤더 HTTP 는 트랜잭션 밖이다.
+    첫 홈(REQUESTED → 확정, 원장 분개)은 #133 이 이 함수로 옮긴다 — 그때까지 REQUESTED·
+    CONFIRMED·FAILED 는 이 함수가 건드리지 않는다.
+    """
+
+    from .models import TaxIdentity
+    from .services import _request_real_transfer_if_ready, ensure_seller_registered
+
+    S = Payout.Status
+    payout.refresh_from_db()
+    original = payout.status
+    if original not in (S.CONFIRMED_IDENTITY_PENDING, S.CONFIRMED_SELLER_PENDING):
+        return payout
+
+    developer = payout.developer
+    if register_seller:
+        seller = ensure_seller_registered(developer, simulate=seller_simulate)
+        # ensure_seller_registered 가 Seller 를 막 READY 로 만들면 그 안에서 sweep 이 이
+        # Payout 을 이미 전진시켰을 수 있다 — 낡은 값으로 판단하지 않도록 다시 읽는다.
+        payout.refresh_from_db()
+        original = payout.status
+        if original not in (S.CONFIRMED_IDENTITY_PENDING, S.CONFIRMED_SELLER_PENDING):
+            return payout
+    else:
+        seller = Seller.objects.filter(developer=developer).first()
+
+    seller_ready = seller is not None and seller.status in Seller.READY_STATUSES
+    if not seller_ready:
+        target = S.CONFIRMED_SELLER_PENDING
+    elif _request_real_transfer_if_ready(payout):
+        has_identity = TaxIdentity.objects.filter(payout=payout).exists()
+        target = S.CONFIRMED if has_identity else S.CONFIRMED_IDENTITY_PENDING
+    else:
+        target = original
+
+    if target != original:
+        Payout.objects.filter(pk=payout.pk, status=original).update(status=target)
+    payout.refresh_from_db()
+    return payout
