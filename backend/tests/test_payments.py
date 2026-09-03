@@ -721,6 +721,82 @@ def test_confirm_ignores_amount_claimed_by_the_browser(client, category, landing
     assert lines_by_account["sponsor_deposit"] == ("debit", 1_000_000 + listing_fee)
 
 
+# --- 확정 경로가 둘이어도 한 번만 반영된다 — 순서를 뒤집어도 (#114) ------------
+
+
+@pytest.mark.django_db
+def test_confirm_arriving_first_then_webhook_still_lands_paid_with_single_ledger_entry(
+    client, category, landing_type
+):
+    """리다이렉트(동기 confirm)가 먼저 도착하고, 그 뒤 웹훅이 같은 order_id로
+    다시 통지해도 원장에는 한 번만 반영된다 — 웹훅이 먼저 오는 경우
+    (`test_webhook_arriving_before_confirm_response_still_lands_correct_state`)
+    는 이미 있으니, 순서를 뒤집은 이 경우도 같은 자리로 수렴한다는 것을
+    고정한다(#114 인수조건 — "웹훅이 먼저 와도, 리다이렉트가 먼저 와도
+    최종 상태가 같다")."""
+
+    access, contest = _draft_contest(client, category=category, deliverable_type=landing_type)
+    payment = _initiate_payment(client, access, contest["id"])
+
+    confirm = _confirm(client, access, payment["order_id"], payment_key="widget-key-order-1")
+    assert confirm.status_code == 200
+    assert confirm.json()["status"] == "paid"
+
+    webhook = _send_webhook(
+        client, webhook_id="wh-confirm-first-1", order_id=payment["order_id"], status="paid"
+    )
+    assert webhook.status_code == 200
+
+    ledger_id = Contest.objects.get(id=contest["id"]).ledger_id
+    _login_operator(client)
+    entries = client.get(f"{LEDGER_URL}/contests/{ledger_id}/entries").json()
+    assert len(entries) == 1  # 두 채널이 경합해도 분개는 한 번만.
+
+    contest_row = Contest.objects.get(id=contest["id"])
+    assert contest_row.status == Contest.Status.PUBLISHED
+
+    payment_row = Payment.objects.get(order_id=payment["order_id"])
+    assert payment_row.status == Payment.Status.PAID
+
+
+# --- 실패 웹훅도 같은 자리로 수렴한다 — 리다이렉트 없이 웹훅만 (#114) ----------
+
+
+@pytest.mark.django_db
+def test_failed_webhook_alone_leaves_contest_draft_with_no_ledger_entries(
+    client, category, landing_type
+):
+    """리다이렉트가 전혀 오지 않아도(사용자가 결제 직후 브라우저를 닫았거나
+    애초에 위젯에서 실패해 우리 화면으로 돌아오지 못한 경우) 실패 웹훅만으로
+    Payment가 종결되고 Contest는 draft에 머문다 — "돈은 안 들어왔는데
+    공모전은 공개돼 있다" 같은 어긋난 상태가 남지 않는다(#114 인수조건)."""
+
+    access, contest = _draft_contest(client, category=category, deliverable_type=landing_type)
+    payment = _initiate_payment(client, access, contest["id"])
+
+    webhook = _send_webhook(
+        client, webhook_id="wh-failed-alone-1", order_id=payment["order_id"], status="failed"
+    )
+    assert webhook.status_code == 200
+    assert webhook.json()["status"] == "failed"
+
+    payment_row = Payment.objects.get(order_id=payment["order_id"])
+    assert payment_row.status == Payment.Status.FAILED
+
+    contest_row = Contest.objects.get(id=contest["id"])
+    assert contest_row.status == Contest.Status.DRAFT
+
+    ledger_id = contest_row.ledger_id
+    _login_operator(client)
+    entries = client.get(f"{LEDGER_URL}/contests/{ledger_id}/entries").json()
+    assert entries == []
+
+    # 실패로 종결된 뒤에도 같은 Contest로 결제를 다시 시작할 수 있다 — 새
+    # Payment(새 order_id)가 만들어진다.
+    retry = _initiate_payment(client, access, contest["id"])
+    assert retry["order_id"] != payment["order_id"]
+
+
 # --- admin (#9 리뷰 지적 6) ----------------------------------------------------
 
 
