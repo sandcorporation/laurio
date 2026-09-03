@@ -133,55 +133,54 @@ def _is_awarded_to_someone_else(submission) -> bool:
     return award is not None and award.submission_id != submission.id
 
 
+# Hold → NextAction 번역표 (#130). 판정은 `payouts.progress.hold_of` 가 한다 — 여기서
+# 원시 상태를 다시 읽으면 세 렌더러가 갈린다. 표는 HoldKind 전체를 덮어야 한다(로드 시 검사).
+def _payout_actions():
+    from payouts.progress import HoldKind, assert_covers_all_kinds
+
+    table = {
+        HoldKind.REQUESTED: NextAction.AWAITING_SELLER_REGISTRATION,
+        HoldKind.IDENTITY: NextAction.SUBMIT_TAX_IDENTITY,
+        HoldKind.IDENTITY_RECORDED: NextAction.AWAITING_SELLER_REGISTRATION,
+        HoldKind.SELLER_PHONE: NextAction.AWAITING_SELLER_REGISTRATION,
+        HoldKind.SELLER_AUTH: NextAction.AWAITING_SELLER_REGISTRATION,
+        HoldKind.SELLER_REVIEW: NextAction.AWAITING_SELLER_REGISTRATION,
+        HoldKind.SELLER_REJECTED: NextAction.AWAITING_SELLER_REGISTRATION,
+        HoldKind.SELLER_PENDING: NextAction.AWAITING_SELLER_REGISTRATION,
+        HoldKind.TRANSFER_CONFIRMING: NextAction.AWAITING_SELLER_REGISTRATION,
+        HoldKind.TRANSFER_RETRY: NextAction.RETRY_TRANSFER,
+        HoldKind.TRANSFER_RETRY_IDENTITY_RECORDED: NextAction.RETRY_TRANSFER,
+        HoldKind.TRANSFER_OPERATOR: NextAction.AWAITING_TRANSFER_RESOLUTION,
+        HoldKind.COMPLETE: NextAction.PAYOUT_COMPLETE,
+        # 벤더가 거절해 이 시도가 끝났다 — 실제로 가능한 행동은 새 지급 요청이다
+        # (#130 — 전에는 fallthrough 가 「지급대행 등록 대기」라고 잘못 말했다).
+        HoldKind.FAILED: NextAction.REQUEST_PAYOUT,
+        HoldKind.UNKNOWN: NextAction.AWAITING_TRANSFER_RESOLUTION,
+    }
+    assert_covers_all_kinds(table, name="participation._payout_actions")
+    return table
+
+
 def _payout_action(submission):
-    """돈이 걸린 단계 — 각 값이 대응하는 엔드포인트의 전제와 같은 조건에서 나온다."""
+    """돈이 걸린 단계 — Award·Handover 까지는 여기서 보고, Payout 이 있으면 Hold 로 넘긴다."""
 
     from handovers.models import Handover
     from payouts.models import Payout, TaxIdentity
+    from payouts.progress import hold_of
 
     award = getattr(submission.contest, "award", None)
     if award is None or award.submission_id != submission.id:
         return None
-
     handover = getattr(award, "handover", None)
     if handover is None:
         return None
-
     # `payouts.api.request_payout` 이 요구하는 것과 같은 조건이다.
     if handover.status != Handover.Status.RELEASED:
         return NextAction.AWAITING_HANDOVER_RELEASE
-
     payout = Payout.objects.filter(handover=handover).order_by("-created_at").first()
     if payout is None:
         return NextAction.REQUEST_PAYOUT
 
-    # `submit_payout_identity` 와 `retry_seller_registration` 이 각자 요구하는
-    # 상태 그대로다 — 앞은 Developer 가 주민등록번호를 내야 하는 「네 차례」이고,
-    # 뒤는 지급대행사 쪽 등록을 기다리는 중이다(ADR-0020: 둘은 다른 것을
-    # 기다리고, 둘 다 실패가 아니다).
-    #
-    # **CONFIRMED_IDENTITY_PENDING에서는 신원 제출이 실이체 재시도보다
-    # 앞선다**(코드리뷰 지적 3, 4차 — 실행 재현 완료). transfer_status가
-    # FAILED라고 곧바로 RETRY_TRANSFER를 돌려주면, 신원을 아직 한 번도
-    # 못 낸(has_identity=False) Payout도 그 값에 가려진다 — 이 상태는
-    # 원래 "신원 대기"를 뜻하고, 신원 미제출과 실이체 실패는 서로 다른
-    # 두 가지를 동시에 기다리는 것이지 하나가 다른 하나를 대체하지 않는다.
-    if payout.status == Payout.Status.CONFIRMED_IDENTITY_PENDING:
-        has_identity = TaxIdentity.objects.filter(payout=payout).exists()
-        if not has_identity:
-            return NextAction.SUBMIT_TAX_IDENTITY
-        if payout.transfer_status == Payout.TransferStatus.FAILED:
-            return NextAction.RETRY_TRANSFER
-        return NextAction.AWAITING_SELLER_REGISTRATION
-    if payout.status == Payout.Status.CONFIRMED_SELLER_PENDING:
-        if payout.transfer_status == Payout.TransferStatus.FAILED:
-            return NextAction.RETRY_TRANSFER
-        return NextAction.AWAITING_SELLER_REGISTRATION
-    if payout.status == Payout.Status.CONFIRMED:
-        # 확정 이후 뒤늦게 도착한 실패 웹훅이 남긴 상태일 수 있다 — "지급
-        # 완료"라고 잘못 말하지 않는다.
-        if payout.transfer_status == Payout.TransferStatus.FAILED:
-            return NextAction.AWAITING_TRANSFER_RESOLUTION
-        return NextAction.PAYOUT_COMPLETE
-
-    return NextAction.AWAITING_SELLER_REGISTRATION
+    has_identity = TaxIdentity.objects.filter(payout=payout).exists()
+    hold = hold_of(payout, seller=payout.seller, has_identity=has_identity)
+    return _payout_actions()[hold.kind]
