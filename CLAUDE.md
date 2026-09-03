@@ -163,6 +163,16 @@ cd backend && LAURIO_DB_PORT=55432 uv run pytest   # 포트는 쓰는 스택에 
 dev compose의 `db` 서비스는 호스트 포트로 이미 노출돼 있으므로 호스트의 `uv run
 pytest`가 그 DB에 직접 붙는다 — 컨테이너를 거칠 이유가 없다.
 
+**스위트는 기본으로 병렬 실행된다**(#104). `pyproject.toml` 의 `addopts` 가 `-n 4` 를
+준다 — 직렬 5분 20초가 1분 47초다(실측, 1085건). 워커별 테스트 DB 는 pytest-django 가,
+세션 Redis 인덱스는 `tests/conftest.py` 가 갈라 준다. 직렬로 보려면 `-n 0`.
+
+**`-n auto` 를 쓰지 마라.** 그건 논리 코어 수(이 머신은 14)를 잡는데, 세션 Redis
+인덱스가 워커마다 하나씩 올라 Redis 기본 범위(0~15)를 넘긴다 — conftest 의 가드가
+그 자리에서 막는다. 그리고 `SESSION_REDIS_URL` 의 인덱스를 높게 잡으면(예: /13) 워커
+넷만으로도 범위를 넘으니, 병렬 워크트리에서는 **낮은 인덱스를 골라 4칸씩 띄워
+쓴다**(예: 체인마다 /0, /5, /10).
+
 **pytest 를 두 개 이상 동시에 돌린다면 `LAURIO_TEST_DB_NAME` 을 서로 다르게
 줘라.** 기본값은 Django 관례대로 `test_laurio` 하나라, 병렬 워크트리에서 체인 둘이
 각자 pytest 를 돌리면 같은 DB 를 두고 싸운다 — `DROP DATABASE ... is being
@@ -205,6 +215,24 @@ Next.js + React. 저장소 루트가 pnpm 워크스페이스다(운영자 앱 04
 Operator 계정은 `backend/accounts/management/commands/seed_e2e_operator.py`
 (멱등)로 만든다 — 사람이 쓰는 `create_operator` 부트스트랩 명령과 달리 반복
 실행에 안전하다.
+
+**dev 컨테이너의 `backend` 도 바깥 체크아웃을 서빙한다.** 프론트에 대해서만 적혀
+있던 함정인데 백엔드도 같다 — `docker/compose.dev.yaml` 이 저장소 전체를 마운트하므로,
+워크트리에서 **새 API 라우트를 더하면 58000 번 백엔드에는 그 라우트가 없다.** e2e 가
+404 를 받고, 원인은 코드가 아니라 어느 체크아웃을 쳤느냐다. 두 에이전트가 각자 시행
+착오로 이걸 다시 발견했다. 워크트리 코드를 치려면 백엔드도 임시로 띄운다:
+
+```bash
+cd <worktree>/backend
+LAURIO_DB_PORT=55432 STORAGE_BACKEND=s3 uv run python manage.py runserver 0.0.0.0:58101 &
+cd ../frontend
+LAURIO_API_BASE_URL=http://127.0.0.1:58101 pnpm exec next dev -p 53201 &
+LAURIO_E2E_BASE_URL=http://127.0.0.1:53201 LAURIO_E2E_NAMESPACE=c2 pnpm exec playwright test --project=public
+kill %1 %2
+```
+
+`STORAGE_BACKEND=s3` 를 주는 이유는 dev compose 의 backend 가 그렇게 뜨기 때문이다
+(업로드 e2e 가 실물 MinIO 를 쳐야 한다) — 빼면 업로드 스펙만 갈린다.
 
 **워크트리에서 일한다면 e2e 가 당신 코드를 치지 않는다.** `playwright.config.ts`
 에 `webServer` 가 없는 것은 의도다(ADR-0021 — 테스트가 앱의 수명을 소유하지

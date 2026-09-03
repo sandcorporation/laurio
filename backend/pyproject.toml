@@ -35,6 +35,11 @@ package = false
 dev = [
     "pytest>=8.3",
     "pytest-django>=4.9",
+    # 스위트가 1000건을 넘어 한 프로세스로는 5분 넘게 걸린다. 이 스위트를 도는
+    # 주체가 많아서(에이전트마다, 체인 검증마다, 머지 후, CI) 그 5분이 계속
+    # 곱해진다. `-n` 을 주면 워커별로 테스트 DB가 따로 생기고(pytest-django),
+    # 세션 Redis 도 tests/conftest.py 가 워커별로 갈라 준다.
+    "pytest-xdist>=3.6",
 ]
 
 [tool.pytest.ini_options]
@@ -47,4 +52,13 @@ testpaths = ["tests"]
 markers = [
     "live_vendor: 실제 벤더를 치는 선택적 테스트. 기본 실행에서 제외된다.",
 ]
-addopts = "-q -m \"not live_vendor\""
+# 기본 병렬 실행 — 직렬 5분 20초가 1분 47초가 된다(실측, 1085건). 이 스위트를 도는
+# 주체가 많아서(에이전트마다, 체인 검증마다, 머지 후, CI) 그 차이가 계속 곱해진다.
+# 워커별 테스트 DB 는 pytest-django 가, 세션 Redis 인덱스는 tests/conftest.py 가
+# 갈라 준다. 직렬로 보고 싶으면 `-n 0` 을 준다.
+#
+# **`auto` 를 쓰지 않는다.** 그건 머신의 논리 코어 수(이 개발 머신은 14)를 잡는데,
+# 세션 Redis 인덱스가 워커마다 하나씩 올라가 Redis 기본 범위(0~15)를 넘긴다 —
+# conftest 의 가드가 그 자리에서 막는다. 4 는 그 범위 안에 넉넉히 들어가면서
+# 공유 Postgres 를 과하게 물지 않는 값이다.
+addopts = "-q -n 4 -m \"not live_vendor\""
