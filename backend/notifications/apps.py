@@ -17,6 +17,14 @@ class NotificationsConfig(AppConfig):
         register(checks.check_notification_sms_adapter_mode)
         register(checks.check_notification_lms_adapter_mode)
 
+        # Contest 라이프사이클 통지 스캔 다섯(#19, #138) — 등록부에 올라 각자 자기 예산으로 돈다.
+        from core.scans import register_scan
+
+        from .lifecycle import LIFECYCLE_SCANS
+
+        for spec in LIFECYCLE_SCANS:
+            register_scan(spec)
+
 
 def check_notification_type_flags_cover_all_types(app_configs, **kwargs):
     """NotificationType 에 값을 추가하고 NOTIFICATION_TYPE_FLAGS 를 깜빡하면 부팅을 막는다.

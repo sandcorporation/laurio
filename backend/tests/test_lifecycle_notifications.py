@@ -13,6 +13,7 @@ Contest 라이프사이클 이벤트(마감 임박·심사기간 종료 임박·
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -22,6 +23,8 @@ from django.test import override_settings
 from django.utils import timezone
 
 from contests.models import Contest
+import core.scans as scans_module
+import notifications.lifecycle as lifecycle_module
 from core.models import ClockOverride
 from distributions.models import Distribution
 from notifications.models import Notification, NotificationType
@@ -34,7 +37,14 @@ CONTESTS_URL = "/api/contests"
 PAYMENTS_URL = "/api/payments"
 SCORING_RUN_PENDING_URL = "/api/internal/scoring/run-pending"
 DISTRIBUTIONS_RUN_DUE_URL = "/api/internal/distributions/run-due"
-LIFECYCLE_RUN_DUE_URL = "/api/internal/notifications/lifecycle/run-due"
+# 다섯 lifecycle 스캔의 등록부 이름(#138) — 예전 단일 엔드포인트가 돌리던 고정 순서 그대로.
+LIFECYCLE_SCAN_NAMES = (
+    "deadline-reminder",
+    "judging-end-reminder",
+    "distribution-final-warning",
+    "award-result-notice-recovery",
+    "distribution-result-notice-recovery",
+)
 MY_NOTIFICATIONS_URL = "/api/notifications/me"
 
 
@@ -237,10 +247,33 @@ def _run_due_distributions(client, *, fail_submission_ids: list[int] | None = No
     return response.json()
 
 
+def _exhaust_after_first_fanout():
+    """`time.monotonic` 대역 — 첫 스캔이 참가자 하나에게 보낸 뒤 예산을 다 쓴 것으로 보이게
+    한다(호출 ①② 는 0초, ③ 부터 100초). 그 뒤는 0.001초씩만 흘려 어떤 스캔의 20초 예산도
+    넘기지 않는다."""
+
+    call_count = {"n": 0}
+
+    def _monotonic():
+        call_count["n"] += 1
+        n = call_count["n"]
+        if n <= 2:
+            return 0.0
+        return 100.0 + (n - 3) * 0.001
+
+    return _monotonic
+
+
 def _run_lifecycle_scan(client) -> dict:
-    response = client.post(LIFECYCLE_RUN_DUE_URL, **_internal_headers())
-    assert response.status_code == 200, response.content
-    return response.json()
+    """다섯 lifecycle 스캔을 순서대로 한 번씩 돌리고 결과 행을 합친다 — 예전 단일 엔드포인트와
+    같은 관찰면(`results`)을 유지해 시나리오 테스트가 스캔 이름을 몰라도 된다(#138)."""
+
+    rows: list[dict] = []
+    for name in LIFECYCLE_SCAN_NAMES:
+        response = client.post(f"/api/internal/scans/{name}", **_internal_headers())
+        assert response.status_code == 200, response.content
+        rows += response.json()["rows"]
+    return {"results": rows}
 
 
 def _my_notifications(client, access: str) -> list[dict]:
@@ -861,7 +894,6 @@ def test_deadline_reminder_scan_yields_to_time_budget_mid_fanout_and_recovers_ne
 
     from unittest.mock import patch
 
-    import notifications.lifecycle as lifecycle_module
 
     deadline = timezone.now() + timedelta(hours=2)
     sponsor, contest = _publish_contest(
@@ -882,18 +914,12 @@ def test_deadline_reminder_scan_yields_to_time_budget_mid_fanout_and_recovers_ne
         )
     )
 
-    # 호출 순서: ① send_due_deadline_reminders 몫의 deadline 계산,
-    # ② 그 스캔의 바깥 루프(이 Contest 진입 전) 확인, ③ 첫 번째 참가자
-    # 팬아웃 전 확인, ④ 두 번째 참가자 팬아웃 전 확인(여기서 예산 초과로
-    # 멈춘다). 다섯 스캔이 각자 자기 차례에 deadline을 새로 계산하므로(#51
-    # 3차 코드리뷰 지적 4), 이어지는 네 스캔도 각자 한 번씩 자기 몫의
-    # deadline을 계산한다(⑤~⑧) — 이 시나리오에서는 그 네 스캔 모두 대상
-    # Contest/행이 없어 그 이상은 monotonic()을 부르지 않는다.
-    with patch.object(
-        lifecycle_module.time_module,
-        "monotonic",
-        side_effect=[0.0, 0.0, 0.0, 100.0, 100.0, 100.0, 100.0, 100.0],
-    ):
+    # 단조 시계는 core.scans 가 쥔다(#138). 호출 순서: ① deadline-reminder 실행의 마감
+    # 계산, ② 첫 번째 참가자 팬아웃 전 확인(`budget_exhausted`), ③ 두 번째 참가자 팬아웃 전
+    # 확인(여기서 예산 초과로 멈춘다). 첫 행은 예산과 무관하게 시도되므로 행 사이 확인은
+    # 없다. 이어지는 네 스캔은 각자 자기 마감을 새로 계산하고(④~) 아주 작은 간격만 흘려
+    # 20초 예산을 절대 넘기지 않는다.
+    with patch.object(scans_module.time, "monotonic", side_effect=_exhaust_after_first_fanout()):
         budget_exceeded_scan = _run_lifecycle_scan(client)
 
     # 예산 초과로 멈췄으므로 이 Contest는 "완료"로 보고되지 않는다.
@@ -946,7 +972,6 @@ def test_award_result_notice_recovery_is_not_starved_when_an_earlier_scan_exhaus
 
     from unittest.mock import patch
 
-    import notifications.lifecycle as lifecycle_module
     from awards.models import Award
 
     # 두 Contest를 만들고 제출까지 전부 "지금"(고정 시각 없음) 끝내 둔다 —
@@ -966,7 +991,12 @@ def test_award_result_notice_recovery_is_not_starved_when_an_earlier_scan_exhaus
         client, award_dev, award_contest["id"], requirement_id=award_requirement_id, grounded=True
     )
 
-    reminder_deadline = timezone.now() + timedelta(hours=2)
+    # 아래 Award 시나리오가 /tick 을 쏘는데, 그 tick 은 이제 lifecycle 스캔까지 한 바퀴 돈다
+    # (#137 run_all). 그 시점(약 한 시간 뒤)에 이 Contest 의 마감 임박이 아직 도래하지 않도록
+    # 리드타임보다 넉넉히 뒤에 마감을 잡는다 — 그래야 예산 초과 시나리오가 실제로 실행된다.
+    reminder_deadline = timezone.now() + timedelta(
+        hours=get_current_policy().deadline_reminder_lead_hours + 3
+    )
     _reminder_sponsor, reminder_contest = _publish_contest(
         client,
         category=category,
@@ -1012,27 +1042,9 @@ def test_award_result_notice_recovery_is_not_starved_when_an_earlier_scan_exhaus
         )
     )
 
-    # monotonic()을 처음 네 번(마감 임박 스캔의 deadline 계산 + 바깥 루프 진입 +
-    # 참가자 둘의 팬아웃 확인)만 정밀 제어해 그 스캔이 자기 몫을 다 쓰고
-    # 중단되게 만든다. 그 이후(다른 네 스캔이 각자 새로 받는 deadline과 그
-    # 이후 점검들)는 실제로 몇 번 호출되는지 미리 셀 필요가 없도록, 아주
-    # 작은 간격(0.001초)만 계속 흘려보낸다 — 각 스캔이 자기 몫으로 새로
-    # 받는 2.4초짜리 창을 그 정도로는 절대 넘기지 못한다.
-    call_count = {"n": 0}
-    fanout_exhausted_at = 100.0
-
-    def _monotonic_side_effect():
-        call_count["n"] += 1
-        n = call_count["n"]
-        if n <= 3:
-            return 0.0
-        if n == 4:
-            return fanout_exhausted_at
-        return fanout_exhausted_at + (n - 4) * 0.001
-
-    with patch.object(
-        lifecycle_module.time_module, "monotonic", side_effect=_monotonic_side_effect
-    ):
+    # 마감 임박 스캔이 참가자 둘 중 하나만 보내고 예산을 다 쓰게 만든다 — 그 뒤의 스캔은
+    # 각자 자기 마감을 새로 계산한다(#138 — 예전에는 다섯이 한 엔드포인트 안에서 몫을 나눴다).
+    with patch.object(scans_module.time, "monotonic", side_effect=_exhaust_after_first_fanout()):
         combined_scan = _run_lifecycle_scan(client)
 
     # 마감 임박 스캔은 예산을 넘겨 중단됐다 — 이 Contest는 "완료"로 보고되지
@@ -1043,8 +1055,8 @@ def test_award_result_notice_recovery_is_not_starved_when_an_earlier_scan_exhaus
     )
     assert Contest.objects.get(id=reminder_contest["id"]).deadline_reminder_sent_at is None
 
-    # 그런데도 Award 결과 알림 복구는 굶지 않고 실제로 실행됐다 — 다섯
-    # 스캔이 더는 마감시각 하나를 고정 순서로 공유하지 않기 때문이다.
+    # 그런데도 Award 결과 알림 복구는 굶지 않고 실제로 실행됐다 — 다섯 스캔이 각자
+    # 등록부 항목이라 마감시각을 공유할 길 자체가 없다(#138).
     assert any(
         r.get("event") == "award_result_notice_recovered" and r.get("award_id") == award.id
         for r in combined_scan["results"]
@@ -1073,7 +1085,6 @@ def test_deadline_reminder_recovers_remaining_developers_after_mid_fanout_crash(
 
     from unittest.mock import patch
 
-    import notifications.lifecycle as lifecycle_module
 
     deadline = timezone.now() + timedelta(hours=2)
     sponsor, contest = _publish_contest(
@@ -1160,7 +1171,6 @@ def test_award_result_notice_is_recovered_after_crash_before_completion(
 
     from unittest.mock import patch
 
-    import notifications.lifecycle as lifecycle_module
     from awards.models import Award
 
     deadline = timezone.now() + timedelta(hours=1)
@@ -1237,7 +1247,6 @@ def test_distribution_result_notice_is_recovered_after_crash_before_completion(
 
     from unittest.mock import patch
 
-    import notifications.lifecycle as lifecycle_module
     from distributions.models import DistributionShare
 
     deadline = timezone.now() + timedelta(hours=1)
@@ -1309,13 +1318,12 @@ def test_distribution_final_warning_query_does_not_get_crowded_out_by_not_yet_du
     후보(낮은 id, 먼저 처리됨)가 작은 배치를 다 채워 실제로 마감된 경고(높은
     id)를 이번 스캔에서 밀어낼 수 있다(#19 리뷰 지적 4) — 특히 유료 연장으로
     id 순서와 judging_ends_at 순서가 어긋나기 시작하면 실제로 벌어진다. 여기서는
-    BATCH_SIZE를 2로 줄이고, 먼저 만든 '아직 멀었다' Contest 2개 뒤에 나중에
+    배치 상한을 2로 줄이고, 먼저 만든 '아직 멀었다' Contest 2개 뒤에 나중에
     만든 '이미 도래했다' Contest 1개를 두어 재현한다.
     """
 
     from unittest.mock import patch
 
-    import notifications.lifecycle as lifecycle_module
 
     anchor = datetime(2026, 2, 1, 10, 0, tzinfo=KST)
 
@@ -1354,7 +1362,10 @@ def test_distribution_final_warning_query_does_not_get_crowded_out_by_not_yet_du
     assert due_contest["id"] > contests[1]["id"]
 
     _freeze(anchor)
-    with patch.object(lifecycle_module, "BATCH_SIZE", 2):
+    spec = scans_module.SCAN_REGISTRY["distribution-final-warning"]
+    with patch.dict(
+        scans_module.SCAN_REGISTRY, {"distribution-final-warning": replace(spec, batch_size=2)}
+    ):
         result = _run_lifecycle_scan(client)
 
     assert any(

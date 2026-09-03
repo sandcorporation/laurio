@@ -7,3 +7,10 @@ class HandoversConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "handovers"
     verbose_name = "Handover · 소스 접근 개방 · Escrow 해제"
+
+    def ready(self) -> None:
+        from core.scans import register_scan
+
+        from .scans import HANDOVER_RELEASE_SCAN
+
+        register_scan(HANDOVER_RELEASE_SCAN)

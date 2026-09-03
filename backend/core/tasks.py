@@ -68,12 +68,6 @@ def call_payments_run_refunds() -> dict:
     return _call_internal("/api/internal/payments/run-refunds")
 
 
-@shared_task(name="core.call_handovers_release_due")
-def call_handovers_release_due() -> dict:
-    """handovers/api.py: Sponsor 무응답 기간이 지난 Handover의 Escrow를 해제한다."""
-
-    return _call_internal("/api/internal/handovers/release-due")
-
 
 @shared_task(name="core.call_notifications_dispatch_due")
 def call_notifications_dispatch_due() -> dict:
@@ -82,18 +76,6 @@ def call_notifications_dispatch_due() -> dict:
     return _call_internal("/api/internal/notifications/dispatch-due")
 
 
-@shared_task(name="core.call_notifications_lifecycle_run_due")
-def call_notifications_lifecycle_run_due() -> dict:
-    """notifications/api.py: Contest 라이프사이클 통지(마감 임박·심사 종료 임박·
-    Distribution 최종 경고·결과 통지 복구)를 스캔한다(#19).
-
-    이 태스크가 없던 동안 그 엔드포인트는 존재만 하고 배포 환경에서 한 번도 돌지
-    않았다 — 위 docstring 이 경고한 「등록되지 않은 태스크는 당연히 안 돈다」가
-    그대로 재발한 것이다.
-    """
-
-    return _call_internal("/api/internal/notifications/lifecycle/run-due")
-
 
 @shared_task(name="core.call_scoring_run_pending")
 def call_scoring_run_pending() -> dict:
@@ -101,10 +83,3 @@ def call_scoring_run_pending() -> dict:
 
     return _call_internal("/api/internal/scoring/run-pending")
 
-
-@shared_task(name="core.call_accounts_purge_expired_identities")
-def call_accounts_purge_expired_identities() -> dict:
-    """accounts/internal_api.py: 2년 미이용 신원 파기 + 보존 기간 만료
-    RetainedIdentity 파기(#102, ADR-0025)."""
-
-    return _call_internal("/api/internal/accounts/purge-expired-identities")

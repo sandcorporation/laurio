@@ -102,7 +102,7 @@ def create(request, payload: CreateNotificationIn):
     return _serialize(notification)
 
 
-# 정적 경로("/dispatch-due", "/types/", "/lifecycle/run-due")는 반드시
+# 정적 경로("/dispatch-due", "/types/")는 반드시
 # "/{notification_id}" 보다 먼저 등록한다. django-ninja/Django의 URL 매칭은 등록
 # 순서를 따르므로, 동적 경로가 먼저 있으면 그 문자열들이 그 경로에 먼저 매치해
 # 405를 낸다.
@@ -117,22 +117,6 @@ def dispatch_due(request):
 
     dispatched_ids = dispatch_due_notifications()
     return {"count": len(dispatched_ids), "dispatched_ids": dispatched_ids}
-
-
-@router.post("/lifecycle/run-due")
-def run_due_lifecycle(request):
-    """Contest 라이프사이클이 다가옴에 따라 필요한 Notification들을 스캔해 만든다
-    (#19) — 마감 임박, 심사기간 종료 임박, Distribution 최종 경고(금액 포함,
-    낮 시각으로 구성된 스케줄). Celery beat가 tick과 나란히 반복 호출할 전용
-    진입점이다 — `distributions.api.run_due`/`handovers.api.release_due_handovers`
-    와 같은 이유로 `core.transitions` 레지스트리를 쓰지 않는다(각 알림 생성이라는
-    부수효과가 있어 단순 조건부 UPDATE로는 부족하다).
-    """
-
-    from .lifecycle import run_due_lifecycle_notifications
-
-    results = run_due_lifecycle_notifications()
-    return {"count": len(results), "results": results}
 
 
 @public_router.get("/me", response=list[NotificationOut], auth=jwt_auth)
