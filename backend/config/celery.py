@@ -45,6 +45,10 @@ app.conf.beat_schedule = {
         "task": "core.call_notifications_dispatch_due",
         "schedule": _SCAN_INTERVAL_SECONDS,
     },
+    "notifications-lifecycle-run-due": {
+        "task": "core.call_notifications_lifecycle_run_due",
+        "schedule": _SCAN_INTERVAL_SECONDS,
+    },
     "scoring-run-pending": {
         "task": "core.call_scoring_run_pending",
         "schedule": _SCAN_INTERVAL_SECONDS,
