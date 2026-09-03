@@ -138,7 +138,10 @@ def test_late_paid_webhook_after_identity_with_failed_transfer_reaches_confirmed
         assert identity.json()["status"] == "confirmed_identity_pending"  # 실이체가 아직
         assert identity.json()["has_identity"] is True
 
-    resp = _toss_payout_webhook(client, idempotency_key=key, vendor_status="COMPLETED")
+    # 웹훅의 refPayoutId 는 지금 진행 중인 attempt 를 가리켜야 한다 — caller 가 실이체를 시도하며
+    # attempt 를 선점했으므로(#135) 기본값 0 이 아니다. 낡은 attempt 의 배달은 조용히 버려진다.
+    attempt = Payout.objects.get(idempotency_key=key).transfer_attempt
+    resp = _toss_payout_webhook(client, idempotency_key=key, vendor_status="COMPLETED", attempt=attempt)
     assert resp.status_code == 200, resp.content
     assert resp.json()["status"] == "confirmed"
 

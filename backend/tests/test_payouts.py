@@ -1577,10 +1577,10 @@ class _DottedPathTestPayoutAdapter(FakePayoutAdapter):
     본문만으로 확인할 수 있다.
     """
 
-    def confirm(self, *, idempotency_key: str, simulate: str | None = None):
-        from payouts.adapters import TransferOutcome
+    def confirm(self, request, *, simulate: str | None = None):
+        from payouts.adapters import VendorResult
 
-        return TransferOutcome(status="failed", attempt=0)
+        return VendorResult(status="failed")
 
 
 @pytest.mark.django_db
@@ -2026,24 +2026,11 @@ class _TransferFailsOnceSellerReadyPayoutAdapter(FakePayoutAdapter):
     항상 "failed"를 돌려준다. #57 코드리뷰 지적 1(실이체가 실패했는데도
     status만 보고 CONFIRMED로 잘못 전이하던 버그)을 검증하는 데 쓴다."""
 
-    def confirm(self, *, idempotency_key: str, simulate: str | None = None):
-        from payouts.adapters import TransferOutcome
-        from payouts.models import Payout as PayoutModel
-        from payouts.models import Seller as SellerModel
+    def confirm(self, request, *, simulate: str | None = None):
+        from payouts.adapters import VendorResult
 
-        payout = PayoutModel.objects.select_related(
-            "handover__award__submission__developer",
-            "distribution_share__submission__developer",
-        ).get(idempotency_key=idempotency_key)
-        developer = (
-            payout.handover.award.submission.developer
-            if payout.handover_id is not None
-            else payout.distribution_share.submission.developer
-        )
-        seller = SellerModel.objects.filter(developer=developer).first()
-        if seller is None or seller.status not in SellerModel.READY_STATUSES:
-            return TransferOutcome(status="paid", attempt=None)
-        return TransferOutcome(status="failed", attempt=payout.transfer_attempt)
+        # 수취인(request.seller_id)이 없으면 내부 확정 "paid", 있으면 실이체 거절 "failed".
+        return VendorResult(status="failed" if request.seller_id else "paid")
 
 
 @pytest.mark.django_db
@@ -2153,45 +2140,20 @@ def test_seller_adapter_error_does_not_roll_back_the_ledger_entry(client, catego
 
 
 class _TransferStaysPendingPayoutAdapter(FakePayoutAdapter):
-    """실물 TossPayoutAdapter.confirm()의 두 갈래 동작을 재현하되(Seller가
-    READY가 아니면 "paid"), Seller가 READY가 된 뒤(실이체를 실제로 시도하는
-    단계)에는 실이체가 벤더 쪽에서 아직 확정되지 않은 채 계속 대기 중인
-    상황을 흉내낸다 -- confirm()이 PayoutTimeoutError를 던지고
-    query_status()도 "pending"을 돌려준다. transfer_status가 COMPLETED로도
-    FAILED로도 확정되지 않은(REQUESTED) 상태에서 웹훅이 도착하는 시나리오를
-    재현하는 데 쓴다(#57 코드리뷰 지적 4/5, 3차)."""
+    """수취인이 있으면 실이체가 영원히 pending 인 더블 -- 확정된 뒤 뒤늦게 웹훅으로 결과가
+    도착하는 경로를 재현한다."""
 
-    def _seller_ready(self, idempotency_key: str) -> bool:
-        from payouts.models import Payout as PayoutModel
-        from payouts.models import Seller as SellerModel
+    def confirm(self, request, *, simulate: str | None = None):
+        from payouts.adapters import PayoutTimeoutError, VendorResult
 
-        payout = PayoutModel.objects.select_related(
-            "handover__award__submission__developer",
-            "distribution_share__submission__developer",
-        ).get(idempotency_key=idempotency_key)
-        developer = (
-            payout.handover.award.submission.developer
-            if payout.handover_id is not None
-            else payout.distribution_share.submission.developer
-        )
-        seller = SellerModel.objects.filter(developer=developer).first()
-        return seller is not None and seller.status in SellerModel.READY_STATUSES
-
-    def confirm(self, *, idempotency_key: str, simulate: str | None = None):
-        from payouts.adapters import PayoutTimeoutError, TransferOutcome
-
-        if not self._seller_ready(idempotency_key):
-            return TransferOutcome(status="paid", attempt=None)
+        if not request.seller_id:
+            return VendorResult(status="paid")
         raise PayoutTimeoutError("fake pending forever")
 
-    def query_status(self, *, idempotency_key: str):
-        from payouts.adapters import TransferOutcome
-        from payouts.models import Payout as PayoutModel
+    def query_status(self, request):
+        from payouts.adapters import VendorResult
 
-        if not self._seller_ready(idempotency_key):
-            return TransferOutcome(status="pending", attempt=None)
-        payout = PayoutModel.objects.get(idempotency_key=idempotency_key)
-        return TransferOutcome(status="pending", attempt=payout.transfer_attempt)
+        return VendorResult(status="pending")
 
 
 @pytest.mark.django_db
@@ -2225,10 +2187,13 @@ def test_toss_payout_webhook_failed_after_confirmed_updates_transfer_status(
     payload = json.dumps(
         {
             "eventType": "payout.changed",
-            # _TransferStaysPendingPayoutAdapter는 실제 클레임(transfer_attempt
-            # 증가)을 하지 않으므로 attempt는 여전히 기본값 0이다(코드리뷰
-            # 지적 1, 5차 — 실제 형식을 그대로 써야 파싱 결함을 잡을 수 있다).
-            "data": {"refPayoutId": f"{requested['idempotency_key']}-0", "status": "FAILED"},
+            # attempt 선점은 caller(payouts.progress)가 하므로(#135) 어댑터가 무엇이든
+            # 실이체를 시도한 순간 transfer_attempt 는 1 이다 — 실제 형식 그대로 그 값을 쓴다
+            # (코드리뷰 지적 1, 5차). 낡은 attempt 의 배달은 조용히 버려진다.
+            "data": {
+                "refPayoutId": f"{requested['idempotency_key']}-{payout.transfer_attempt}",
+                "status": "FAILED",
+            },
         }
     ).encode("utf-8")
 
@@ -2352,11 +2317,11 @@ class _CountingPayoutAdapter(FakePayoutAdapter):
 
     call_count = 0
 
-    def confirm(self, *, idempotency_key: str, simulate: str | None = None):
-        from payouts.adapters import TransferOutcome
+    def confirm(self, request, *, simulate: str | None = None):
+        from payouts.adapters import VendorResult
 
         type(self).call_count += 1
-        return TransferOutcome(status="paid", attempt=0)
+        return VendorResult(status="paid")
 
 
 @pytest.mark.django_db

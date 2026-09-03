@@ -109,7 +109,8 @@ from .adapters import (
     PayoutTimeoutError,
     SellerError,
     SellerRegistrationResult,
-    TransferOutcome,
+    TransferRequest,
+    VendorResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -146,14 +147,6 @@ _PENDING_PAYOUT_STATUSES = {"REQUESTED", "IN_PROGRESS"}
 # 이 키워드 집합을 정확한 코드 목록으로 좁혀야 한다(#57 알아둘 것).
 _PAYOUT_RETRYABLE_CODE_KEYWORDS = ("LIMIT", "RATE", "TOO_MANY", "THROTTL")
 
-# 벤더 호출 전에 선점(claim)한 시도가 벤더에 닿기도 전에 끊겼을 때(예:
-# ConnectionError), 얼마나 지나야 그 선점을 포기하고 재선점할 수 있게 하는가
-# (코드리뷰 지적 6, 5차) — notifications.services.STUCK_QUEUED_THRESHOLD와 같은
-# 관용구다. `_TIMEOUT_SECONDS`(10초)에 넉넉한 여유를 둔다 — 재시도/웹훅 재수신처럼
-# 사람이 다시 트리거하는 경로에서만 재선점이 일어나므로(payouts에는 notifications
-# 같은 주기 스캔이 없다), 짧게 잡아 정상 진행 중인 시도를 실수로 걷어차기보다는
-# 여유 있게 잡아 "진짜 멈춘 것"만 되찾는 쪽을 택한다.
-_TRANSFER_CLAIM_STALE_AFTER_SECONDS = 60
 
 
 def _looks_like_retryable_payout_code(code: str | None) -> bool:
@@ -626,197 +619,55 @@ class TossPayoutAdapter:
         headers["Idempotency-Key"] = idempotency_key
         return headers
 
-    def _resolve_seller(self, idempotency_key: str):
-        """이 지급 요청의 수취인 Seller를 조회한다. 없으면 None.
-
-        adapter 가 도메인 행을 되짚어 읽는다는 사실 자체는 #120(seam 이동)이 없앤다 —
-        여기서는 두 지급 사유의 갈래만 `Payout.developer`(#128)로 보낸다.
-        """
-
-        from .models import Payout
-
-        try:
-            payout = Payout.objects.with_target().get(idempotency_key=idempotency_key)
-        except Payout.DoesNotExist as exc:
-            raise PayoutError(
-                f"idempotency_key={idempotency_key}에 해당하는 Payout을 찾을 수 없다."
-            ) from exc
-
-        return payout, payout.seller
-
-    def request_payout(self, *, idempotency_key: str, amount: int) -> Any:
-        from .adapters import PayoutRequestResult
-
-        # 실제 벤더 호출은 confirm()에서만 한다 — request_payout() 시점에는
-        # Seller가 존재하지 않는 것이 정상 경로다(모듈 독스트링 참고).
-        del amount
-        return PayoutRequestResult(idempotency_key=idempotency_key, accepted=True)
-
-    def confirm(self, *, idempotency_key: str, simulate: str | None = None) -> TransferOutcome:
+    def confirm(self, request: TransferRequest, *, simulate: str | None = None) -> VendorResult:
         del simulate  # Fake 전용 — 실물 어댑터는 쓰지 않는다.
 
-        from .models import Payout as PayoutModel
-        from .models import Seller
+        if not request.seller_id:
+            # 벤더 규약: sellerId 없이는 이체 API 가 없다(ADR-0020 순서 문제 — 지급 확정이
+            # Seller 등록보다 앞선다). 수취인이 아직 없는 요청은 HTTP 없이 「Laurio 내부
+            # 확정」으로 받아들이고, Seller 가 READY 가 되는 순간 caller 가 새 요청으로 다시 온다.
+            return VendorResult(status="paid")
+        return self._request_real_payout(request)
 
-        payout, seller = self._resolve_seller(idempotency_key)
-        if seller is None or seller.status not in Seller.READY_STATUSES:
-            # Seller가 아직 지급 가능 상태가 아니다 — 실제 이체를 요청할 수
-            # 없다. Laurio 내부 확정(원장 분개 + Seller 등록 착수)만 진행한다.
-            # attempt=None은 "벤더를 실제로 부르지 않았다"는 뜻이다(코드리뷰
-            # 지적 5, 5차) — 호출자는 이때 transfer_status를 건드리면 안 된다.
-            return TransferOutcome(status="paid", attempt=None)
-
-        claimed = self._claim_transfer_attempt(payout)
-        if claimed is None:
-            # 이미 다른 호출이 이 실이체를 선점했다(코드리뷰 지적 1, 4차 —
-            # 실행 재현 완료). payouts.api.confirm_payout의 최초 호출과
-            # payouts.services._request_real_transfer_if_ready의 재확인
-            # 호출이 같은 Payout에 대해 겹쳐 불려도(Seller가 이미 READY인
-            # Payout은 둘 다 이 confirm()에 도달한다), 벤더에는 정확히 한
-            # 번만 POST가 나가야 한다 — 두 번째 호출은 여기서 벤더를
-            # 부르지 않고 현재 상태를 다시 읽어 그대로 신뢰한다. 이때도
-            # attempt는 반드시 "지금 DB에 있는 현재 값"을 돌려준다(코드리뷰
-            # 지적 5) — 그래야 호출자(record_transfer_result)가 이 결과를
-            # 낡은 attempt로 오인해 버리지 않는다.
-            payout.refresh_from_db(fields=["transfer_status", "transfer_attempt"])
-            if payout.transfer_status == PayoutModel.TransferStatus.COMPLETED:
-                return TransferOutcome(status="paid", attempt=payout.transfer_attempt)
-            if payout.transfer_status == PayoutModel.TransferStatus.FAILED:
-                return TransferOutcome(status="failed", attempt=payout.transfer_attempt)
-            raise PayoutTimeoutError(
-                f"다른 호출이 이미 이 실이체를 선점했다(idempotency_key={idempotency_key}) — "
-                "query_status로 확정해야 한다."
-            )
-
-        status = self._request_real_payout(claimed, seller)
-        return TransferOutcome(status=status, attempt=claimed.transfer_attempt)
-
-    def _claim_transfer_attempt(self, payout):
-        """벤더를 부르기 전에 이 시도를 선점한다(코드리뷰 지적 1, 4차) —
-        `core.transitions.claim_transition`과 같은 조건부 UPDATE(WHERE
-        transfer_status='old') + rowcount 관용구다. 이중 지급 방어를
-        `payouts.services._request_real_transfer_if_ready`가 확인하는
-        `transfer_status`에만 맡기면, 그 값을 아직 아무도 쓰지 않은 최초
-        확인(payouts.api.confirm_payout의 직접 호출)이 그 검사를 거치지
-        않고 벤더를 부를 수 있다 — 벤더 호출 지점(여기) 자체를 선점하는
-        것만이 모든 경로를 한 곳에서 닫는다.
-
-        선점에 성공하면(NOT_REQUESTED/FAILED에서, 또는 오래 멈춘 REQUESTED에서
-        REQUESTED로) 새 `transfer_attempt`가 반영된 신선한 Payout을, 실패하면
-        (다른 호출이 이미 REQUESTED/COMPLETED로 선점해 두었다) None을 돌려준다.
-
-        새 attempt를 선점할 때마다 `vendor_payout_id`를 반드시 비운다(코드리뷰
-        지적 2, 5차) — 그러지 않으면 새 시도의 query_status가 이전 시도가 남긴
-        벤더 id로 조회해, 시도 N의 타임아웃이 시도 N-1의 결과로 잘못 확정된다.
-        `transfer_claimed_at`도 함께 찍는다 — 아래 "멈춘 REQUESTED 재선점"
-        분기가 이 값을 근거로 판단한다.
-        """
-
-        from django.db.models import F, Q
-
-        from core.clock import Clock
-        from core.transitions import claim_transition
-        from .models import Payout as PayoutModel
-
-        now = Clock.now()
-        claim_extra = {
-            "transfer_attempt": F("transfer_attempt") + 1,
-            "vendor_payout_id": "",
-            "transfer_claimed_at": now,
-        }
-
-        won = claim_transition(
-            PayoutModel,
-            payout.pk,
-            from_state=PayoutModel.TransferStatus.NOT_REQUESTED,
-            to_state=PayoutModel.TransferStatus.REQUESTED,
-            state_field="transfer_status",
-            now=now,
-            extra_fields=claim_extra,
-        ) or claim_transition(
-            PayoutModel,
-            payout.pk,
-            from_state=PayoutModel.TransferStatus.FAILED,
-            to_state=PayoutModel.TransferStatus.REQUESTED,
-            state_field="transfer_status",
-            now=now,
-            extra_fields=claim_extra,
-        )
-
-        if not won:
-            # REQUESTED에서 멈춘 채로 오래 남아 있으면(코드리뷰 지적 6, 5차)
-            # 재선점한다 — 벤더에 닿기도 전에 끊긴 요청(ConnectionError 등)은
-            # 벤더가 이 시도 자체를 모르므로 query_status로도 절대 풀리지
-            # 않는다. `claim_transition`은 상태 문자열 하나만 조건으로 걸 수
-            # 있어(등식 비교) 시각 범위(`__lte`) 조건은 못 담으므로, 여기서는
-            # notifications._reclaim_stuck_queued와 같은 원리의 raw 조건부
-            # UPDATE를 직접 쓴다 — `transfer_claimed_at`을 조건에 넣었으므로
-            # 여러 호출이 동시에 같은 행을 집어도 정확히 하나만 성공한다(먼저
-            # 이긴 호출이 `transfer_claimed_at`을 신선하게 갱신하면, 뒤이은
-            # UPDATE는 더 이상 `__lte=stale_before`를 만족하지 않는다).
-            stale_before = now - timedelta(seconds=_TRANSFER_CLAIM_STALE_AFTER_SECONDS)
-            reclaimed = (
-                PayoutModel.objects.filter(
-                    pk=payout.pk,
-                    transfer_status=PayoutModel.TransferStatus.REQUESTED,
-                )
-                .filter(
-                    Q(transfer_claimed_at__isnull=True) | Q(transfer_claimed_at__lte=stale_before)
-                )
-                .update(**claim_extra)
-            )
-            won = reclaimed == 1
-
-        if not won:
-            return None
-
-        payout.refresh_from_db()
-        return payout
-
-    def _request_real_payout(self, payout, seller) -> str:
-        # 벤더에 보내는 참조는 우리 idempotency_key 그대로가 아니라
-        # `{idempotency_key}-{transfer_attempt}`다(코드리뷰 지적 4, 4차 —
-        # 실행 재현 완료). 재시도마다 같은 refPayoutId/Idempotency-Key를
-        # 재사용하면, 벤더는 "이미 처리한 요청"으로 보고 예전 FAILED
-        # 응답을 그대로 재생한다 — 실운영에서 영구히 복구 불가능하다.
-        # `_claim_transfer_attempt`가 이 호출 직전에 transfer_attempt를
-        # 이미 올려 두었다. 우리 쪽 DB 조회·웹훅 매칭은 여전히 변하지
-        # 않는 `idempotency_key` 하나로만 한다 — 이 접미사는 벤더에게만 보인다.
-        vendor_ref = f"{payout.idempotency_key}-{payout.transfer_attempt}"
+    def _request_real_payout(self, request: TransferRequest) -> VendorResult:
+        # 벤더에 보내는 참조는 `{idempotency_key}-{transfer_attempt}` 다(코드리뷰 지적 4, 4차 —
+        # 실행 재현 완료). 재시도마다 같은 refPayoutId/Idempotency-Key 를 재사용하면 벤더는
+        # "이미 처리한 요청"으로 보고 예전 FAILED 응답을 그대로 재생한다 — 실운영에서 영구히
+        # 복구 불가능하다. 그 참조를 조립하는 것은 caller(payouts.progress)다 — attempt 를
+        # 선점하는 쪽이 그 값을 안다.
         body = {
-            "refPayoutId": vendor_ref,
-            "sellerId": seller.seller_id,
-            "amount": payout.net_amount,
+            "refPayoutId": request.vendor_ref,
+            "sellerId": request.seller_id,
+            "amount": request.amount,
             "scheduleType": "EXPRESS",
         }
         encrypted_body = jwe_encrypt(body, secure_key_hex=self._secure_key)
+        key = request.idempotency_key
 
         try:
             response = requests.post(
                 f"{_BASE_URL}/v2/payouts",
                 data=encrypted_body,
-                headers=self._headers(idempotency_key=vendor_ref),
+                headers=self._headers(idempotency_key=request.vendor_ref),
                 timeout=_TIMEOUT_SECONDS,
             )
         except requests.Timeout as exc:
             raise PayoutTimeoutError(
-                f"토스 지급 요청이 타임아웃됐다(idempotency_key={payout.idempotency_key}) — "
+                f"토스 지급 요청이 타임아웃됐다(idempotency_key={key}) — "
                 "실제 결과는 query_status로 확정해야 한다."
             ) from exc
         except requests.RequestException as exc:
             raise PayoutTimeoutError(
-                f"토스 지급 요청이 네트워크 오류로 실패했다"
-                f"(idempotency_key={payout.idempotency_key}): {exc} — "
+                f"토스 지급 요청이 네트워크 오류로 실패했다(idempotency_key={key}): {exc} — "
                 "실제 결과는 query_status로 확정해야 한다."
             ) from exc
 
         if response.status_code >= 500:
             raise PayoutTimeoutError(
                 f"토스가 지급 요청에서 서버 오류를 응답했다"
-                f"(idempotency_key={payout.idempotency_key}, status={response.status_code}) — "
+                f"(idempotency_key={key}, status={response.status_code}) — "
                 "실제 결과는 query_status로 확정해야 한다."
             )
-
         if response.status_code >= 400:
             body_json = _safe_json(response)
             code = body_json.get("code") if body_json else None
@@ -824,65 +675,37 @@ class TossPayoutAdapter:
             if response.status_code in _OUR_INTEGRATION_ERROR_STATUSES:
                 raise PayoutError(
                     f"토스 지급 요청이 우리 쪽 설정 문제로 거부됐다"
-                    f"(idempotency_key={payout.idempotency_key}, code={code}): {message}"
+                    f"(idempotency_key={key}, code={code}): {message}"
                 )
             if response.status_code == 429 or _looks_like_retryable_payout_code(code):
-                # 한도·rate limit류의 일시적 거절이다(코드리뷰 지적 2) — Seller
-                # 쪽이 같은 사실(주간 한도 초과)을 UNDER_REVIEW로 다루는 것과
-                # 같은 원칙으로, 여기서도 종결 실패("failed")로 굳히지 않는다.
-                # PayoutTimeoutError를 던져 호출자가 query_status로 재확인하고,
-                # 그래도 안 풀리면 다음 재시도(웹훅/재시도 엔드포인트)가 다시
-                # 시도하게 한다 — READY인 Seller의 두 번째 Payout이 이 한도에
-                # 걸려도 Payout.FAILED로 영구 종결되지 않는다.
+                # 한도·rate limit류의 일시적 거절이다(코드리뷰 지적 2) — Seller 쪽이 같은
+                # 사실(주간 한도 초과)을 UNDER_REVIEW로 다루는 것과 같은 원칙으로, 여기서도
+                # 종결 실패("failed")로 굳히지 않는다. PayoutTimeoutError를 던져 호출자가
+                # query_status로 재확인하고, 그래도 안 풀리면 다음 재시도가 다시 시도하게 한다.
                 raise PayoutTimeoutError(
                     f"토스 지급 요청이 한도·rate limit으로 일시 거절됐다"
-                    f"(idempotency_key={payout.idempotency_key}, code={code}) — "
-                    "query_status로 재확인해야 한다."
+                    f"(idempotency_key={key}, code={code}) — query_status로 재확인해야 한다."
                 )
-            logger.info(
-                "토스 지급 요청이 거절됐다(idempotency_key=%s, code=%s): %s",
-                payout.idempotency_key,
-                code,
-                message,
-            )
-            return "failed"
+            logger.info("토스 지급 요청이 거절됐다(idempotency_key=%s, code=%s): %s", key, code, message)
+            return VendorResult(status="failed")
 
         response_body = self._decode_response_body(response)
         vendor_payout_id = response_body.get("id") or ""
-        if vendor_payout_id:
-            self._persist_vendor_payout_id(payout, vendor_payout_id)
         vendor_status = response_body.get("status")
         if vendor_status in _PAID_PAYOUT_STATUSES:
-            return "paid"
+            return VendorResult(status="paid", vendor_payout_id=vendor_payout_id)
         if vendor_status in _FAILED_PAYOUT_STATUSES:
-            return "failed"
+            return VendorResult(status="failed", vendor_payout_id=vendor_payout_id)
         if vendor_status in _PENDING_PAYOUT_STATUSES:
-            raise PayoutTimeoutError(
-                f"토스 지급 요청이 아직 진행 중이다(idempotency_key={payout.idempotency_key}, "
-                f"status={vendor_status}) — query_status로 확정해야 한다."
-            )
+            # 아직 진행 중이다 — 벤더가 준 자기 id 를 같이 돌려준다(코드리뷰 지적 8). caller 가
+            # 그것을 저장해 두면 이후 조회가 우리 ref 가 아니라 이 id 로 간다.
+            return VendorResult(status="pending", vendor_payout_id=vendor_payout_id)
         logger.error(
-            "토스 지급 요청 응답에 알 수 없는 status가 왔다(idempotency_key=%s): %r",
-            payout.idempotency_key,
-            vendor_status,
+            "토스 지급 요청 응답에 알 수 없는 status가 왔다(idempotency_key=%s): %r", key, vendor_status
         )
         raise PayoutError(
-            f"토스 지급 요청 응답의 status를 알 수 없다(idempotency_key={payout.idempotency_key}): "
-            f"{vendor_status!r}"
+            f"토스 지급 요청 응답의 status를 알 수 없다(idempotency_key={key}): {vendor_status!r}"
         )
-
-    def _persist_vendor_payout_id(self, payout, vendor_payout_id: str) -> None:
-        """벤더가 POST 응답으로 준 자신의 식별자를 저장한다(코드리뷰 지적 8) —
-        이후 query_status가 우리 refPayoutId가 아니라 이 값으로 조회해야
-        한다. 여기서만 DB에 쓴다(다른 어댑터 메서드는 읽기만 한다) — 원본
-        응답을 직접 파싱한 시점에만 이 값을 알 수 있고, 이 사실을 상위
-        레이어(services.py)로 되돌려줄 별도 채널이 PayoutAdapter 계약(문자열
-        반환)에 없기 때문이다."""
-
-        from .models import Payout as _Payout
-
-        _Payout.objects.filter(pk=payout.pk).update(vendor_payout_id=vendor_payout_id)
-        payout.vendor_payout_id = vendor_payout_id
 
     def _decode_response_body(self, response: requests.Response) -> dict:
         raw_body = response.text
@@ -896,92 +719,69 @@ class TossPayoutAdapter:
             raise PayoutError("토스 지급 요청 응답이 JSON도 JWE도 아니다.")
         return body
 
-    def query_status(self, *, idempotency_key: str) -> TransferOutcome:
-        from .models import Seller
+    def query_status(self, request: TransferRequest) -> VendorResult:
+        if not request.seller_id:
+            # 벤더를 실제로 조회하지 않았다 — 수취인이 없는 요청은 벤더에 간 적이 없다.
+            return VendorResult(status="pending")
 
-        payout, seller = self._resolve_seller(idempotency_key)
-        if seller is None or seller.status not in Seller.READY_STATUSES:
-            # 벤더를 실제로 조회하지 않았다(코드리뷰 지적 5, 5차) — attempt=None.
-            return TransferOutcome(status="pending", attempt=None)
-
-        # `payout`은 위 `_resolve_seller`가 방금 새로 조회한 행이므로
-        # `transfer_attempt`/`vendor_payout_id`는 이미 최신이다 — 새 attempt를
-        # 선점하며 `_claim_transfer_attempt`가 `vendor_payout_id`를 비워 두므로
-        # (코드리뷰 지적 2), 여기서 그 값이 남아 있다면 반드시 "지금 진행
-        # 중인 attempt"가 벤더 응답으로 이미 채운 값이다 — 낡은 attempt의
-        # 값일 수 없다.
-        attempt = payout.transfer_attempt
-
-        if not payout.vendor_payout_id:
-            # POST가 응답을 받기 전에 타임아웃/네트워크 오류로 끝나 벤더가
-            # 발급한 자신의 id를 아직 모른다(코드리뷰 지적 8) — 그 id로 GET을
-            # 시도하면 항상 존재하지 않는 리소스를 찾게 되어 "타임아웃 뒤
-            # 조회로 확정"하는 경로 자체가 성립하지 않는다. 우리 refPayoutId로
-            # 조회하는 별도 경로로 폴백한다.
-            status = self._query_status_by_ref(payout)
-            return TransferOutcome(status=status, attempt=attempt)
+        key = request.idempotency_key
+        if not request.vendor_payout_id:
+            # POST가 응답을 받기 전에 타임아웃/네트워크 오류로 끝나 벤더가 발급한 자신의 id를
+            # 아직 모른다(코드리뷰 지적 8) — 우리 refPayoutId로 조회하는 별도 경로로 폴백한다.
+            return self._query_status_by_ref(request)
 
         try:
             response = requests.get(
-                f"{_BASE_URL}/v2/payouts/{payout.vendor_payout_id}",
+                f"{_BASE_URL}/v2/payouts/{request.vendor_payout_id}",
                 headers=_basic_auth_headers(self._secret_key, api_version=self._api_version),
                 timeout=_TIMEOUT_SECONDS,
             )
         except requests.Timeout as exc:
-            raise PayoutTimeoutError(
-                f"토스 지급 조회 요청이 타임아웃됐다(idempotency_key={idempotency_key})."
-            ) from exc
+            raise PayoutTimeoutError(f"토스 지급 조회 요청이 타임아웃됐다(idempotency_key={key}).") from exc
         except requests.RequestException as exc:
             raise PayoutTimeoutError(
-                f"토스 지급 조회 요청이 네트워크 오류로 실패했다"
-                f"(idempotency_key={idempotency_key}): {exc}"
+                f"토스 지급 조회 요청이 네트워크 오류로 실패했다(idempotency_key={key}): {exc}"
             ) from exc
 
         if response.status_code == 404:
-            return TransferOutcome(status="pending", attempt=attempt)
+            return VendorResult(status="pending", vendor_payout_id=request.vendor_payout_id)
         if response.status_code >= 400:
             body = _safe_json(response)
             raise PayoutError(
-                f"토스 지급 조회가 실패했다(idempotency_key={idempotency_key}, "
-                f"status={response.status_code}): {body}"
+                f"토스 지급 조회가 실패했다(idempotency_key={key}, status={response.status_code}): {body}"
             )
 
         body = self._decode_response_body(response)
-        status = self._map_payout_query_status(body.get("status"), idempotency_key=idempotency_key)
-        return TransferOutcome(status=status, attempt=attempt)
+        status = self._map_payout_query_status(body.get("status"), idempotency_key=key)
+        return VendorResult(status=status, vendor_payout_id=request.vendor_payout_id)
 
-    def _query_status_by_ref(self, payout) -> str:
-        """벤더가 발급한 id를 아직 모를 때(코드리뷰 지적 8), 우리 refPayoutId로
-        조회를 시도하는 폴백 경로다. 토스가 이 조회 방식을 정확히 어떤 응답
-        모양(단일 객체/목록)으로 주는지는 staging에서 실제로 검증되지 않았다
-        — 이 티켓은 "타임아웃 뒤에도 최소한 무한정 같은 refPayoutId로 재시도할
-        수 있다"는 것만 보장한다(404/빈 결과는 예외가 아니라 "pending").
-        """
+    def _query_status_by_ref(self, request: TransferRequest) -> VendorResult:
+        """벤더가 발급한 id를 아직 모를 때(코드리뷰 지적 8), 우리 refPayoutId로 조회를 시도하는
+        폴백 경로다. 토스가 이 조회 방식을 정확히 어떤 응답 모양(단일 객체/목록)으로 주는지는
+        staging에서 실제로 검증되지 않았다 — 최소한 무한정 같은 refPayoutId로 재시도할 수 있다는
+        것만 보장한다(404/빈 결과는 예외가 아니라 "pending")."""
 
+        key = request.idempotency_key
         try:
             response = requests.get(
                 f"{_BASE_URL}/v2/payouts",
-                params={"refPayoutId": f"{payout.idempotency_key}-{payout.transfer_attempt}"},
+                params={"refPayoutId": request.vendor_ref},
                 headers=_basic_auth_headers(self._secret_key, api_version=self._api_version),
                 timeout=_TIMEOUT_SECONDS,
             )
         except requests.Timeout as exc:
-            raise PayoutTimeoutError(
-                f"토스 지급 조회(ref) 요청이 타임아웃됐다(idempotency_key={payout.idempotency_key})."
-            ) from exc
+            raise PayoutTimeoutError(f"토스 지급 조회(ref) 요청이 타임아웃됐다(idempotency_key={key}).") from exc
         except requests.RequestException as exc:
             raise PayoutTimeoutError(
-                f"토스 지급 조회(ref) 요청이 네트워크 오류로 실패했다"
-                f"(idempotency_key={payout.idempotency_key}): {exc}"
+                f"토스 지급 조회(ref) 요청이 네트워크 오류로 실패했다(idempotency_key={key}): {exc}"
             ) from exc
 
         if response.status_code == 404:
-            return "pending"
+            return VendorResult(status="pending")
         if response.status_code >= 400:
             body = _safe_json(response)
             raise PayoutError(
-                f"토스 지급 조회(ref)가 실패했다(idempotency_key={payout.idempotency_key}, "
-                f"status={response.status_code}): {body}"
+                f"토스 지급 조회(ref)가 실패했다(idempotency_key={key}, status={response.status_code}): {body}"
             )
 
         body = self._decode_response_body(response)
@@ -991,17 +791,13 @@ class TossPayoutAdapter:
         elif isinstance(body, dict) and isinstance(body.get("list"), list):
             items = body["list"]
             record = items[0] if items else None
-
         if not record:
-            return "pending"
+            return VendorResult(status="pending")
 
-        vendor_id = record.get("id") or ""
-        if vendor_id:
-            from .models import Payout as _Payout
-
-            _Payout.objects.filter(pk=payout.pk).update(vendor_payout_id=vendor_id)
-
-        return self._map_payout_query_status(record.get("status"), idempotency_key=str(payout.idempotency_key))
+        return VendorResult(
+            status=self._map_payout_query_status(record.get("status"), idempotency_key=key),
+            vendor_payout_id=record.get("id") or "",
+        )
 
     def _map_payout_query_status(self, vendor_status, *, idempotency_key: str) -> str:
         if vendor_status in _PAID_PAYOUT_STATUSES:

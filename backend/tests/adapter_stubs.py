@@ -57,13 +57,10 @@ class StubPGAdapter:
 class StubPayoutAdapter:
     """`payouts.adapters.PayoutAdapter` 계약을 구조적으로 만족한다."""
 
-    def request_payout(self, *, idempotency_key: str, amount: int):
+    def confirm(self, request, *, simulate: str | None = None):
         raise NotImplementedError("배포 가드 검증 전용 stub — 실제로 호출되면 안 된다.")
 
-    def confirm(self, *, idempotency_key: str, simulate: str | None = None):
-        raise NotImplementedError("배포 가드 검증 전용 stub — 실제로 호출되면 안 된다.")
-
-    def query_status(self, *, idempotency_key: str):
+    def query_status(self, request):
         raise NotImplementedError("배포 가드 검증 전용 stub — 실제로 호출되면 안 된다.")
 
 

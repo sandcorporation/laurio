@@ -40,11 +40,10 @@ from core.clock import Clock
 from ledger.models import Account, EntrySide
 from ledger.services import LineInput, post_journal_entry
 from notifications.lifecycle import notify_distribution_shares
-from payments.charges import Outcome, reconcile_after_timeout
-from payouts.adapters import PayoutError, PayoutTimeoutError, get_adapter, TransferOutcome
+from payouts.adapters import PayoutError, get_adapter
 from payouts.models import Payout
 from payouts.progress import advance
-from payouts.services import get_or_create_payout, record_transfer_result
+from payouts.services import get_or_create_payout
 from policies.models import PlatformPolicy
 from policies.services import get_current_policy
 from submissions.models import Submission
@@ -206,46 +205,20 @@ def _attempt_share_payout(
             "status": payout.status,
         }
 
-    adapter = get_adapter()
-    adapter.request_payout(idempotency_key=str(payout.idempotency_key), amount=payout.net_amount)
-
-    simulate = "failed" if force_failure else None
+    # 벤더 확인·실이체·Seller 등록·원장 분개 전부 advance 가 한다(#133, #135) — Award 경로의
+    # 확정 엔드포인트와 같은 함수다. `force_failure`는 fake 어댑터 전용 시나리오 선택이다. 벤더의
+    # 명시적 거절(PayoutError)은 이 몫의 이번 시도를 실패로 끝낸다 — 다음 스캔이 새 요청으로 재시도.
     try:
-        outcome = adapter.confirm(idempotency_key=str(payout.idempotency_key), simulate=simulate)
-    except PayoutTimeoutError:
-        # 타임아웃은 실패가 아니다 — 실제 결과를 조회로 확정한다(ADR-0008). 재확인
-        # 자체가 또 실패하면(#125) 미확정으로 남긴다 — 몫 단위 격리(아래 호출자의
-        # except Exception)가 잡아 주긴 했지만 그건 "시도 실패"라는 틀린 말을
-        # 기록했고, 이 몫은 다음 스캔에서 새 요청이 아니라 재확인을 받아야 한다.
-        outcome = reconcile_after_timeout(
-            lambda: adapter.query_status(idempotency_key=str(payout.idempotency_key)),
-            on_unknown=TransferOutcome(status="pending", attempt=None),
-            context=f"Distribution 몫 지급 재확인(idempotency_key={payout.idempotency_key})",
+        payout = advance(
+            payout,
+            register_seller=True,
+            adapter=get_adapter(),
+            confirm_with_vendor=True,
+            simulate="failed" if force_failure else None,
+            policy=policy,
         )
     except PayoutError:
-        # 어느 attempt에 대한 이야기인지 신뢰할 수 없다(코드리뷰 지적 5, 5차와
-        # 같은 이유) -- attempt=None으로 record_transfer_result가 아무 것도
-        # 쓰지 않게 한다. status="failed"만으로도 아래 실패 분기가
-        # Payout.status를 정확히 옮긴다.
-        outcome = TransferOutcome(status="failed", attempt=None)
-
-    # confirm_payout(payouts.api)과 같은 이유(코드리뷰 지적 5, 5차) -- 이
-    # 직접 호출도 Seller가 이미 READY면 실제 벤더 호출을 선점해 이길 수
-    # 있다. 그 결과를 여기서 기록하지 않으면 advance 안의
-    # _request_real_transfer_if_ready가 나중에 다시 불려도 이미 선점된
-    # 시도에 클레임이 밀려 벤더를 다시 부를 수 없고, 이긴 쪽의 결과가
-    # 영영 어디에도 안 남는다. Seller 상태를 다시 읽어 추정하지 않고
-    # 어댑터가 직접 알려준 attempt만 신뢰한다.
-    record_transfer_result(payout, outcome.status, outcome.attempt)
-
-    if Outcome.parse(outcome.status) is Outcome.PAID:
-        payout = advance(payout, confirmed_by_vendor=True, register_seller=True, policy=policy)
-    elif Outcome.parse(outcome.status) is Outcome.FAILED:
-        payout = advance(payout, confirmed_by_vendor=False, register_seller=False)
-    else:
-        # 아직 확정할 수 없다(pending) — REQUESTED로 남겨 웹훅이나 다음 스캔이
-        # 마저 확정하게 한다.
-        payout.refresh_from_db()
+        payout = advance(payout, register_seller=False, confirmed_by_vendor=False)
 
     return {
         "submission_id": share.submission_id,
