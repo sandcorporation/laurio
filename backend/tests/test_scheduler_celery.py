@@ -55,6 +55,12 @@ _EXPECTED_SCHEDULE_ENTRIES = [
         "/api/internal/notifications/dispatch-due",
     ),
     (
+        "notifications-lifecycle-run-due",
+        core_tasks.call_notifications_lifecycle_run_due,
+        "core.call_notifications_lifecycle_run_due",
+        "/api/internal/notifications/lifecycle/run-due",
+    ),
+    (
         "scoring-run-pending",
         core_tasks.call_scoring_run_pending,
         "core.call_scoring_run_pending",

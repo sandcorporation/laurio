@@ -81,6 +81,19 @@ def call_notifications_dispatch_due() -> dict:
     return _call_internal("/api/internal/notifications/dispatch-due")
 
 
+@shared_task(name="core.call_notifications_lifecycle_run_due")
+def call_notifications_lifecycle_run_due() -> dict:
+    """notifications/api.py: Contest 라이프사이클 통지(마감 임박·심사 종료 임박·
+    Distribution 최종 경고·결과 통지 복구)를 스캔한다(#19).
+
+    이 태스크가 없던 동안 그 엔드포인트는 존재만 하고 배포 환경에서 한 번도 돌지
+    않았다 — 위 docstring 이 경고한 「등록되지 않은 태스크는 당연히 안 돈다」가
+    그대로 재발한 것이다.
+    """
+
+    return _call_internal("/api/internal/notifications/lifecycle/run-due")
+
+
 @shared_task(name="core.call_scoring_run_pending")
 def call_scoring_run_pending() -> dict:
     """scoring/api.py: 채점 대기·재시도 대상 Submission을 스캔해 LLM 채점을 돌린다."""
