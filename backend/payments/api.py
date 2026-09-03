@@ -27,7 +27,7 @@ from accounts.middleware import jwt_auth
 from contests.models import Contest
 from core.auth import InternalAuth
 
-from .adapters import PGError, PGTimeoutError, get_adapter
+from .adapters import PGError, PGTimeoutError, checkout_flow_for_current_mode, get_adapter
 from .models import Payment, WebhookDelivery
 from .schemas import (
     ConfirmPaymentIn,
@@ -70,6 +70,7 @@ def _serialize(payment: Payment, checkout_url: str | None = None) -> PaymentOut:
         total_amount=payment.total_amount,
         status=payment.status,
         checkout_url=checkout_url,
+        checkout_flow=checkout_flow_for_current_mode(),
         created_at=payment.created_at,
     )
 

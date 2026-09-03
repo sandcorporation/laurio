@@ -33,7 +33,7 @@ from typing import Protocol, runtime_checkable
 
 from django.conf import settings
 
-from core.adapters import resolve_adapter
+from core.adapters import is_fake_adapter_binding, resolve_adapter
 
 
 class PGError(Exception):
@@ -252,6 +252,24 @@ class FakePGAdapter:
         """
 
         cls._final_refund_status[order_id] = status
+
+
+def checkout_flow_for_current_mode() -> str:
+    """"direct" | "widget" — 브라우저가 위젯을 거쳐야 하는지(#112).
+
+    `PAYMENT_ADAPTER_MODE`가 fake면 지금처럼 확인 없이 곧바로 확정한다
+    ("direct") — dev에 벤더 자격증명이 없고 개최 e2e가 그 경로로 끝까지
+    걸어야 한다. 실물 어댑터면 브라우저가 토스 결제창을 거친다("widget").
+
+    **클라이언트 키의 유무로 가르지 않는다** — `is_fake_adapter_binding`은
+    설정값(dotted path 포함)만 본다. 키가 비었는데 이 함수가 "widget"을
+    돌려주면 브라우저가 결제창을 열지 못해 사용자에게 바로 드러난다 — 키를
+    깜빡한 배포가 조용히 fake처럼 동작해 staging에서야 발각되는 것(이
+    티켓의 근본 원인)보다 낫다. 부팅 시점에 그 값 자체를 요구하는 것은
+    별도 티켓(#115)의 범위다.
+    """
+
+    return "direct" if is_fake_adapter_binding(settings.PAYMENT_ADAPTER_MODE) else "widget"
 
 
 def get_adapter() -> PGAdapter:

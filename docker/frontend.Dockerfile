@@ -50,6 +50,15 @@ ARG NEXT_PUBLIC_PORTONE_STORE_ID=""
 ARG NEXT_PUBLIC_PORTONE_CHANNEL_KEY=""
 ENV NEXT_PUBLIC_PORTONE_STORE_ID=${NEXT_PUBLIC_PORTONE_STORE_ID}
 ENV NEXT_PUBLIC_PORTONE_CHANNEL_KEY=${NEXT_PUBLIC_PORTONE_CHANNEL_KEY}
+# 토스 결제창 브라우저 SDK가 결제창을 열 때 쓰는 값(#112) — 같은 이유로 여기서
+# ARG로 받아 ENV로 노출해야 `pnpm build`가 실제 값을 인라인한다. 비어 있어도
+# 빌드는 죽지 않는다 — 위젯을 쓸지는 이 값이 아니라 백엔드의
+# PAYMENT_ADAPTER_MODE가 가른다(payments.api의 checkout_flow, ADR-0007). 값이
+# 비었는데 서버가 "widget"을 요구하면 lib/payments/toss.ts가 결제창을 열지
+# 못했다는 것을 화면에 곧바로 보여준다 — 부팅 시점에 이 값 자체를 요구하는
+# 것은 #115의 범위다.
+ARG NEXT_PUBLIC_TOSS_CLIENT_KEY=""
+ENV NEXT_PUBLIC_TOSS_CLIENT_KEY=${NEXT_PUBLIC_TOSS_CLIENT_KEY}
 RUN pnpm build
 
 # ---- runner: staging/prod가 실제로 쓰는 얇은 이미지 (compose.staging.yaml/
