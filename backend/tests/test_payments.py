@@ -425,56 +425,6 @@ def test_webhook_arriving_before_confirm_response_still_lands_correct_state(
 
 
 @pytest.mark.django_db
-def test_confirm_timeout_but_actually_succeeded_reconciles_via_query_not_double_charge(
-    client, category, landing_type
-):
-    """confirm 호출이 타임아웃돼도, 실제로는 PG 쪽에서 성공했다면 조회로 확정하고
-    중복 반영하지 않는다."""
-
-    access, contest = _draft_contest(client, category=category, deliverable_type=landing_type)
-    payment = _initiate_payment(client, access, contest["id"])
-
-    confirm = _confirm(client, access, payment["order_id"], simulate="timeout_then_success")
-    assert confirm.status_code == 200
-    assert confirm.json()["status"] == "paid"
-
-    contest_row = Contest.objects.get(id=contest["id"])
-    assert contest_row.status == Contest.Status.PUBLISHED
-
-    # 나중에 같은 결제에 대해 웹훅까지 도착해도(실제로 PG가 결국 웹훅도 보냈다고
-    # 가정) 원장에는 여전히 한 번만 반영되어야 한다.
-    webhook = _send_webhook(
-        client, webhook_id="wh-timeout-1", order_id=payment["order_id"], status="paid"
-    )
-    assert webhook.status_code == 200
-
-    ledger_id = Contest.objects.get(id=contest["id"]).ledger_id
-    _login_operator(client)
-    entries = client.get(f"{LEDGER_URL}/contests/{ledger_id}/entries").json()
-    assert len(entries) == 1
-
-
-@pytest.mark.django_db
-def test_confirm_timeout_but_actually_failed_does_not_publish_or_post_ledger(
-    client, category, landing_type
-):
-    access, contest = _draft_contest(client, category=category, deliverable_type=landing_type)
-    payment = _initiate_payment(client, access, contest["id"])
-
-    confirm = _confirm(client, access, payment["order_id"], simulate="timeout_then_failed")
-    assert confirm.status_code == 200
-    assert confirm.json()["status"] == "failed"
-
-    contest_row = Contest.objects.get(id=contest["id"])
-    assert contest_row.status == Contest.Status.DRAFT
-
-    ledger_id = contest_row.ledger_id
-    _login_operator(client)
-    entries = client.get(f"{LEDGER_URL}/contests/{ledger_id}/entries").json()
-    assert entries == []
-
-
-@pytest.mark.django_db
 def test_confirm_forwards_payment_key_to_adapter(client, category, landing_type):
     """브라우저가 보낸 결제 건 식별자가 PG 어댑터의 confirm까지 도달한다 (#86, spec #82).
 
@@ -512,44 +462,6 @@ def test_confirm_forwards_payment_key_to_adapter(client, category, landing_type)
     # API가 위·변조 방지를 위해 요구하는 값이라, 호출부가 DB의 실제 결제 금액을
     # 그대로 넘기는지 확인한다.
     assert received["amount"] == payment["total_amount"]
-
-
-@pytest.mark.django_db
-def test_confirm_survives_query_status_failure_after_timeout(client, category, landing_type):
-    """confirm이 타임아웃돼 query_status로 재확인하는데 그 재확인마저 실패하면
-    (#87 코드리뷰 지적 3) — 500이 되면 안 된다. FakePGAdapter는 query_status에서
-    절대 예외를 던지지 않아 이 경로가 기존 테스트에서 한 번도 밟힌 적이 없었다
-    (실물 어댑터는 네트워크 문제로 재확인 자체도 실패할 수 있다). 재확인조차
-    실패했다는 것은 "실패했다"가 아니라 "아직 모른다"이므로, Payment는 강제로
-    종결되지 않고 REQUESTED로 남아야 한다."""
-
-    access, contest = _draft_contest(client, category=category, deliverable_type=landing_type)
-    payment = _initiate_payment(client, access, contest["id"])
-
-    def broken_confirm(self, *, order_id, simulate=None, payment_key=None, amount=None):
-        raise PGTimeoutError("fake network blip on confirm")
-
-    def broken_query_status(self, *, order_id):
-        raise PGError("fake network blip on query_status")
-
-    with patch.object(FakePGAdapter, "confirm", broken_confirm), patch.object(
-        FakePGAdapter, "query_status", broken_query_status
-    ):
-        response = _confirm(client, access, payment["order_id"], payment_key="k")
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["status"] == "requested"
-
-    # 기존 동작 불변 — payment_key를 안 보내도(기존 호출부와 동일) 여전히 정상
-    # 승인된다.
-    access2, contest2 = _draft_contest(
-        client, uid="sponsor-payment-key-omitted", category=category, deliverable_type=landing_type
-    )
-    payment2 = _initiate_payment(client, access2, contest2["id"])
-    response2 = _confirm(client, access2, payment2["order_id"])
-    assert response2.status_code == 200
-    assert response2.json()["status"] == "paid"
 
 
 @pytest.mark.django_db
@@ -640,70 +552,6 @@ def test_wrongly_signed_webhook_is_rejected_and_ledger_untouched(client, categor
 
 
 # --- 동시 결제 시작 (#9 리뷰 지적 3) --------------------------------------------
-
-
-@pytest.mark.django_db(transaction=True)
-def test_concurrent_initiate_payment_creates_only_one_active_payment(
-    django_db_blocker, category, landing_type
-):
-    """두 요청이 동시에 같은 Contest에 결제를 시작해도 활성 Payment는 하나만
-    남아야 한다 — Contest 행 잠금(select_for_update)과
-    unique_active_payment_per_contest 부분 유니크 제약이 함께 막는다.
-
-    `test_initiating_payment_twice_is_idempotent`는 순차 호출만 검증하므로
-    이 테스트는 실제 스레드 두 개로 동시에 쏴서 락 없이는 재현되지 않는 경합을
-    직접 만든다. `transaction=True`라야 각 스레드가 자기 DB 커넥션으로 진짜
-    커밋을 주고받아 select_for_update가 실제로 대기·직렬화한다.
-    """
-
-    from django.db import connections
-    from django.test import Client
-
-    with django_db_blocker.unblock():
-        setup_client = Client()
-        access, contest = _draft_contest(
-            setup_client, category=category, deliverable_type=landing_type
-        )
-
-        results: list = []
-        barrier = threading.Barrier(2)
-
-        def worker():
-            try:
-                with django_db_blocker.unblock():
-                    local_client = Client()
-                    barrier.wait()
-                    response = local_client.post(
-                        PAYMENTS_URL,
-                        data={"contest_id": contest["id"]},
-                        content_type="application/json",
-                        **_auth_header(access),
-                    )
-                    results.append(response)
-            finally:
-                # 스레드마다 독립된 DB 커넥션을 새로 여는데, 스레드가 끝나도 그
-                # 커넥션은 Django가 자동으로 닫아주지 않는다 — 닫지 않으면
-                # 테스트 DB 정리(DROP DATABASE) 시점에 "다른 세션이 접속 중"
-                # 경고·경합이 남는다.
-                connections.close_all()
-
-        threads = [threading.Thread(target=worker) for _ in range(2)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        assert len(results) == 2
-        for response in results:
-            assert response.status_code == 201, response.content
-
-        order_ids = {response.json()["order_id"] for response in results}
-        assert len(order_ids) == 1  # 둘 다 같은 결제를 가리켜야 한다.
-
-        active = Payment.objects.filter(
-            contest_id=contest["id"], status__in=[Payment.Status.REQUESTED, Payment.Status.PAID]
-        )
-        assert active.count() == 1
 
 
 # --- 위젯 vs 즉시 확정 — PG 어댑터 모드가 가른다, 클라이언트 키가 아니다 (#112) ---

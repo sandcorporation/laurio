@@ -8,7 +8,7 @@
   엔드포인트. 서명이 없거나 틀리면 거부한다(`payments.webhook_security`) — 인증이
   없는 엔드포인트라고 해서 검증까지 없는 건 아니다.
 
-두 확정 경로(confirm/webhook) 모두 `payments.services.mark_paid`/`mark_failed`라는
+두 확정 경로(confirm/webhook) 모두 `payments.charges.apply_vendor_outcome`이라는
 같은 조건부 UPDATE 관문을 통과한다 — 어느 쪽이 먼저 도착하든, 몇 번 재전송되든
 원장에는 정확히 한 번만 분개가 남는다.
 """
@@ -27,7 +27,8 @@ from accounts.middleware import jwt_auth
 from contests.models import Contest
 from core.auth import InternalAuth
 
-from .adapters import PGError, PGTimeoutError, checkout_flow_for_current_mode, get_adapter
+from .adapters import PGError, checkout_flow_for_current_mode, get_adapter
+from .charges import Outcome, apply_vendor_outcome, settle_charge
 from .models import Payment, WebhookDelivery
 from .schemas import (
     ConfirmPaymentIn,
@@ -39,8 +40,6 @@ from .schemas import (
     WebhookOut,
 )
 from .services import (
-    mark_failed,
-    mark_paid,
     mark_refund_failed,
     mark_refunded,
     request_refund,
@@ -86,8 +85,10 @@ def initiate_payment(request: HttpRequest, payload: InitiatePaymentIn):
     같은 Contest에 대해 두 요청이 동시에 들어와도 활성 결제가 하나만 남아야
     한다(#9 리뷰 지적 3) — `Contest` 행을 `select_for_update`로 잠가 동시
     요청을 직렬화하고, `Payment.unique_active_payment_per_contest` 부분
-    유니크 제약을 두 번째 방어선으로 둔다. 잠금을 잡지 못한 예외 경로가
-    생기더라도 DB 제약이 최후에 막아준다.
+    유니크 제약을 두 번째 방어선으로 둔다.
+
+    **PG 등록은 그 잠금 밖에서 한다**(#127) — 벤더가 느리면 그 Contest 의 모든 쓰기가
+    같이 멈추고 DB 커넥션을 물고 있게 된다. 행 확보까지만 트랜잭션 안이다.
     """
 
     from policies.services import get_current_policy
@@ -107,70 +108,49 @@ def initiate_payment(request: HttpRequest, payload: InitiatePaymentIn):
 
         if contest.status != Contest.Status.DRAFT:
             # PUBLISHED(이미 결제·공개됨)뿐 아니라 CLOSED(마감 전이까지 지난 뒤)도
-            # 새 결제를 시작할 이유가 없다 — 원래는 PUBLISHED만 봤는데, #11이
-            # CLOSED 상태를 추가하면서 이 가드가 새 상태를 놓치고 있었다(#12 리뷰
-            # 지적). 결제를 다시 시작할 수 있는 상태는 DRAFT뿐이다.
+            # 새 결제를 시작할 이유가 없다(#12 리뷰 지적). 결제를 다시 시작할 수 있는
+            # 상태는 DRAFT뿐이다.
             raise HttpError(409, "이미 결제가 완료되어 공개된 Contest입니다.")
 
-        # 이미 진행 중이거나 완료된 결제가 있으면 새로 만들지 않고 그대로
-        # 돌려준다 — 중복 클릭·재요청이 새 주문을 계속 만들어내지 않게 하는
-        # 멱등성이다. Contest 행을 위에서 잠갔으므로 이 조회는 동시 요청과
-        # 경합하지 않는다.
-        existing = (
+        # 이미 진행 중이거나 완료된 결제가 있으면 새로 만들지 않고 그대로 돌려준다 —
+        # 중복 클릭·재요청이 새 주문을 계속 만들어내지 않게 하는 멱등성이다.
+        payment = (
             Payment.objects.filter(contest=contest, status__in=_ACTIVE_PAYMENT_STATUSES)
             .order_by("-created_at")
             .first()
         )
-        if existing is not None:
-            # 방어선 두 번째 층 — 첫 번째는 contests.api.update_draft_contest가
-            # 상금을 바꾸는 그 순간 REQUESTED Payment를 맞춰준다. 여기서도
-            # 확인하는 이유: 이 확인은 Contest가 여전히 DRAFT임을 위에서 이미
-            # 확정했으므로(그렇지 않으면 409), _ACTIVE_PAYMENT_STATUSES 중
-            # 여기 남을 수 있는 것은 REQUESTED뿐이다(PAID는 Contest를
-            # published로 넘긴다, payments/services.py mark_paid) — 이 결제를
-            # 다시 화면에 돌려주기 직전에 한 번 더 맞춰, 어떤 경로로든 둘이
-            # 갈라져 있었다면 여기서 마지막으로 바로잡는다. **불변식: REQUESTED
-            # Payment는 그것이 속한 Contest와 다른 금액을 가질 수 없다**(코드
-            # 리뷰 지적 — 그렇지 않으면 Escrow(Payment.prize_amount)와 실제
-            # Payout(Contest.prize, payouts/services.py)이 서로 다른 금액을
-            # 가리키게 된다).
-            if existing.prize_amount != contest.prize:
-                existing.prize_amount = contest.prize
-                existing.save(update_fields=["prize_amount"])
-            adapter = get_adapter()
-            result = adapter.request_payment(
-                order_id=str(existing.order_id), amount=existing.total_amount
-            )
-            return 201, _serialize(existing, checkout_url=result.checkout_url)
+        if payment is not None:
+            # 방어선 두 번째 층 — 첫 번째는 contests.api.update_draft_contest가 상금을
+            # 바꾸는 그 순간 REQUESTED Payment를 맞춰준다. **불변식: REQUESTED Payment는
+            # 그것이 속한 Contest와 다른 금액을 가질 수 없다** — 그렇지 않으면
+            # Escrow(Payment.prize_amount)와 실제 Payout(Contest.prize)이 서로 다른
+            # 금액을 가리키게 된다.
+            if payment.prize_amount != contest.prize:
+                payment.prize_amount = contest.prize
+                payment.save(update_fields=["prize_amount"])
+        else:
+            listing_fee_amount = get_current_policy().contest_listing_fee
+            try:
+                # 중첩 atomic(세이브포인트)으로 감싼다 — IntegrityError가 나면 Postgres는
+                # 바깥 트랜잭션 전체를 "aborted" 상태로 만들어 그 뒤의 어떤 쿼리도 커밋
+                # 전까지 막아버린다.
+                with transaction.atomic():
+                    payment = Payment.objects.create(
+                        contest=contest,
+                        prize_amount=contest.prize,
+                        listing_fee_amount=listing_fee_amount,
+                        status=Payment.Status.REQUESTED,
+                    )
+            except IntegrityError:
+                # Contest 잠금에도 불구하고 unique_active_payment_per_contest에 걸렸다 —
+                # 방어적 안전망이다. 이미 있는 활성 결제를 그대로 돌려준다.
+                payment = Payment.objects.filter(
+                    contest=contest, status__in=_ACTIVE_PAYMENT_STATUSES
+                ).latest("created_at")
 
-        listing_fee_amount = get_current_policy().contest_listing_fee
-        try:
-            # 중첩 atomic(세이브포인트)으로 감싼다 — IntegrityError가 나면
-            # Postgres는 바깥 트랜잭션 전체를 "aborted" 상태로 만들어 그 뒤의
-            # 어떤 쿼리도 커밋 전까지 막아버린다. 세이브포인트가 없으면 아래
-            # except 절의 조회(`Payment.objects.filter(...).latest(...)`)조차
-            # `TransactionManagementError`로 실패한다 — 그러면 방어적 안전망이
-            # 오히려 500을 새로 만드는 꼴이 된다.
-            with transaction.atomic():
-                payment = Payment.objects.create(
-                    contest=contest,
-                    prize_amount=contest.prize,
-                    listing_fee_amount=listing_fee_amount,
-                    status=Payment.Status.REQUESTED,
-                )
-        except IntegrityError:
-            # Contest 잠금에도 불구하고 unique_active_payment_per_contest에
-            # 걸렸다 — 방어적 안전망이다(정상 경로에서는 위 select_for_update가
-            # 이미 직렬화했으므로 도달하지 않아야 한다). 이미 있는 활성 결제를
-            # 그대로 돌려준다.
-            payment = Payment.objects.filter(
-                contest=contest, status__in=_ACTIVE_PAYMENT_STATUSES
-            ).latest("created_at")
-
-        adapter = get_adapter()
-        result = adapter.request_payment(order_id=str(payment.order_id), amount=payment.total_amount)
-
-        return 201, _serialize(payment, checkout_url=result.checkout_url)
+    adapter = get_adapter()
+    result = adapter.request_payment(order_id=str(payment.order_id), amount=payment.total_amount)
+    return 201, _serialize(payment, checkout_url=result.checkout_url)
 
 
 @router.post(
@@ -179,61 +159,33 @@ def initiate_payment(request: HttpRequest, payload: InitiatePaymentIn):
     auth=jwt_auth,
 )
 def confirm_payment(request: HttpRequest, order_id: UUID, payload: ConfirmPaymentIn):
-    """동기 승인 확인. 타임아웃이 나도 곧바로 실패로 처리하지 않고 조회로 확정한다."""
+    """동기 승인 확인 — Charge 확정 경로 하나(`payments.charges.settle_charge`).
 
+    PG 호출은 어떤 `transaction.atomic()` 밖에서 일어나고, 타임아웃이면 `query_status` 로
+    확정하며, 그 재확인마저 실패하면 미확정으로 남긴다(#87 지적 3, #125). 벤더의 명시적
+    거절은 502 다. 이미 다른 경로(웹훅 등)로 확정돼 있으면 벤더를 부르지 않고 현재 상태를
+    돌려준다.
+    """
+
+    charge_qs = Payment.objects.select_related("contest__sponsor")
     try:
-        payment = Payment.objects.select_related("contest__sponsor").get(order_id=order_id)
+        payment = charge_qs.get(order_id=order_id)
     except Payment.DoesNotExist as exc:
         raise HttpError(404, "결제를 찾을 수 없습니다.") from exc
 
     if payment.contest.sponsor.user_id != request.auth_user.id:
         raise HttpError(403, "본인이 개최한 Contest의 결제만 확인할 수 있습니다.")
 
-    if payment.status != Payment.Status.REQUESTED:
-        # 이미 다른 경로(웹훅 등)로 확정되어 있다 — 그대로 현재 상태를 돌려준다.
-        return 200, _serialize(payment)
-
-    adapter = get_adapter()
     try:
-        result_status = adapter.confirm(
-            order_id=str(order_id),
+        payment = settle_charge(
+            charge_qs,
+            order_id=order_id,
+            adapter=get_adapter(),
             simulate=payload.simulate,
             payment_key=payload.payment_key,
-            amount=payment.total_amount,
         )
-    except PGTimeoutError:
-        # 타임아웃은 실패가 아니다 — 실제 결과를 조회로 확정한다(ADR-0008의 지급 웹훅
-        # 규율을 결제 확인에도 동일하게 적용). query_status는 order_id만 받는
-        # 순수 조회다 — `simulate`는 confirm과 같은 어댑터 인스턴스가 이미 기억하고
-        # 있다(PGAdapter 계약, #9 리뷰 지적 4).
-        #
-        # 이 재확인 호출 자체가 또 실패할 수 있다(#87 코드리뷰 지적 3) —
-        # FakePGAdapter는 query_status에서 절대 예외를 던지지 않아 이 경로가 기존
-        # 테스트에서 한 번도 밟힌 적이 없었다. 실물 어댑터는 네트워크 문제로
-        # 여기서도 실패할 수 있고, 그 실패를 그대로 올리면 500이 된다 — 타임아웃만큼 실패도
-        # "아직 모른다"이지 "실패했다"가 아니므로, 여기서도 강제로 종결시키지 않고
-        # 현재 상태(REQUESTED)를 그대로 돌려준다 — 웹훅이나 다음 재시도가 마저 확정한다.
-        try:
-            result_status = adapter.query_status(order_id=str(order_id))
-        except Exception as exc:  # noqa: BLE001 - 재확인조차 실패하면 미확정으로 남겨둔다.
-            logger.error(
-                "토스 결제 재확인(query_status)이 실패했다 — 실패로 단정하지 않고 "
-                "현재 상태를 그대로 돌려준다(order_id=%s): %s",
-                order_id,
-                exc,
-            )
-            result_status = "pending"
     except PGError as exc:
         raise HttpError(502, str(exc)) from exc
-
-    if result_status == "paid":
-        payment = mark_paid(order_id)
-    elif result_status == "failed":
-        payment = mark_failed(order_id)
-    else:
-        # 아직 확정할 수 없다(pending) — 함부로 실패 처리하지 않고 현재 상태를
-        # 그대로 돌려준다. 이후 웹훅이나 재조회가 마저 확정한다.
-        payment.refresh_from_db()
 
     return 200, _serialize(payment)
 
@@ -276,10 +228,14 @@ def receive_webhook(request: HttpRequest, payload: WebhookIn):
         event_status=payload.status,
     )
 
-    if payload.status == "paid":
-        payment = mark_paid(payload.order_id)
-    elif payload.status == "failed":
-        payment = mark_failed(payload.order_id)
+    if payload.status in ("paid", "failed"):
+        # confirm 응답과 같은 함수로 들어간다 — 웹훅이 confirm 보다 먼저 와도, 같은
+        # 웹훅이 두 번 와도 조건부 UPDATE 가 한 번만 이긴다.
+        payment = apply_vendor_outcome(
+            Payment.objects.select_related("contest"),
+            order_id=payload.order_id,
+            outcome=Outcome.parse(payload.status),
+        )
     elif payload.status == "refunded":
         # #17 — 환불 스캔(run_pending_refunds)이 동기적으로 이미 확정했을 수도
         # 있는 결과를 PG가 비동기로 다시 통지한다. mark_refunded는 REFUND_REQUESTED
