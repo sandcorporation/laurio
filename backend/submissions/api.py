@@ -29,7 +29,10 @@
 import logging
 
 from django.db import IntegrityError, transaction
+from django.db.models import Count
+from django.db.models.functions import TruncDate
 from django.http import HttpRequest
+from django.utils import timezone
 from ninja import Router
 from ninja.errors import HttpError
 from ninja.pagination import PageNumberPagination, paginate
@@ -52,6 +55,8 @@ from .schemas import (
     ComparisonSubmissionOut,
     CompletionOut,
     ContestComparisonOut,
+    ContestMetricsOut,
+    DailyParticipationOut,
     DeveloperPublicProfileOut,
     EvidenceOut,
     PublicSubmissionOut,
@@ -746,4 +751,63 @@ def compare_submissions(request: HttpRequest, contest_id: int):
             )
             for r in requirements
         ],
+    )
+
+
+@router.get(
+    "/contests/{contest_id}/metrics",
+    response={200: ContestMetricsOut},
+    auth=jwt_auth,
+)
+def get_contest_metrics(request: HttpRequest, contest_id: int):
+    """Sponsor가 자기 Contest의 건강을 본다 (#107, 부모 #105).
+
+    지금까지 Sponsor가 자기 Contest 상태를 아는 수단은 제출을 하나씩 열어보는
+    것뿐이었다 — 참가가 언제부터 들어오는지 알 수 없어 "참가가 없다"를 마감
+    직전에야 알았다. 이 엔드포인트가 **첫 지표로 일자별 누적 Submission 수**를
+    낸다.
+
+    `submissions.api.compare_submissions`와 같은 소유권 검사를 그대로 쓴다 —
+    새 예외를 만들지 않는다. **그 엔드포인트와 달리 마감 전에도 열린다** —
+    Sponsor는 마감 전에도 개별 Submission을 볼 수 있으므로(진행 중 비공개는
+    Developer 사이의 규율이다), 집계가 마감 전에 보여도 새로 알려주는 것이
+    없다.
+    """
+
+    try:
+        contest = Contest.objects.select_related("sponsor").get(id=contest_id)
+    except Contest.DoesNotExist as exc:
+        raise HttpError(404, "Contest를 찾을 수 없습니다.") from exc
+
+    if contest.sponsor.user_id != request.auth_user.id:
+        raise HttpError(403, "본인이 개최한 Contest만 지표를 볼 수 있습니다.")
+
+    submissions_qs = Submission.objects.filter(contest=contest)
+    total_submission_count = submissions_qs.count()
+
+    # 판정은 여기(백엔드)에서 한다 — 화면은 이미 묶인 일자별 누적치를 받아
+    # 그리기만 한다. `TruncDate`에 `Asia/Seoul`을 명시하는 이유는
+    # `settings.TIME_ZONE`이 그것이더라도, DB가 UTC로 저장한 `created_at`을
+    # 그대로 자르면 자정 근처 제출이 하루 밀려 보일 수 있기 때문이다.
+    daily_counts = (
+        submissions_qs.annotate(
+            day=TruncDate("created_at", tzinfo=timezone.get_current_timezone())
+        )
+        .values("day")
+        .annotate(count=Count("id"))
+        .order_by("day")
+    )
+
+    cumulative = 0
+    daily_participation: list[DailyParticipationOut] = []
+    for row in daily_counts:
+        cumulative += row["count"]
+        daily_participation.append(
+            DailyParticipationOut(date=row["day"].isoformat(), cumulative_count=cumulative)
+        )
+
+    return 200, ContestMetricsOut(
+        contest_id=contest.id,
+        total_submission_count=total_submission_count,
+        daily_participation=daily_participation,
     )

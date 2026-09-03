@@ -129,6 +129,18 @@ function SponsoredContestCard({ row }: { row: SponsoredContestRow }) {
         </Link>
       ) : null}
 
+      {/* 지표 화면(#107)은 「다음 행동」과 무관하게 항상 열려 있다 — 마감 전에도
+          Sponsor 는 자기 Contest 의 참가 추이를 볼 수 있어야 하고(마감 전에도
+          개별 Submission 을 볼 수 있으므로 집계도 새로 알려주는 것이 없다),
+          canJudge·canPay 처럼 상태를 타는 링크가 아니다. */}
+      <Link
+        className="mt-2 inline-block text-sm underline"
+        href={`/console/contests/${row.contest_id}/metrics`}
+        data-testid={`my-contest-row-${row.contest_id}-metrics`}
+      >
+        지표 보기
+      </Link>
+
       {/* 「결제해야 공개됩니다」가 갈 곳이 없었다(#86) — draft 인 채로 두면
           아무 일도 일어나지 않는데, 이 화면이 유일하게 그 사실을 말하는 자리다.
           canJudge와 같은 이유로 `next_action`을 직접 비교하지 않고 번역표를

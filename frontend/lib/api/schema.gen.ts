@@ -487,6 +487,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/contests/{contest_id}/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Contest Metrics
+         * @description Sponsor가 자기 Contest의 건강을 본다 (#107, 부모 #105).
+         *
+         *     지금까지 Sponsor가 자기 Contest 상태를 아는 수단은 제출을 하나씩 열어보는
+         *     것뿐이었다 — 참가가 언제부터 들어오는지 알 수 없어 "참가가 없다"를 마감
+         *     직전에야 알았다. 이 엔드포인트가 **첫 지표로 일자별 누적 Submission 수**를
+         *     낸다.
+         *
+         *     `submissions.api.compare_submissions`와 같은 소유권 검사를 그대로 쓴다 —
+         *     새 예외를 만들지 않는다. **그 엔드포인트와 달리 마감 전에도 열린다** —
+         *     Sponsor는 마감 전에도 개별 Submission을 볼 수 있으므로(진행 중 비공개는
+         *     Developer 사이의 규율이다), 집계가 마감 전에 보여도 새로 알려주는 것이
+         *     없다.
+         */
+        get: operations["submissions_api_get_contest_metrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/contests/{contest_id}/payout": {
         parameters: {
             query?: never;
@@ -2404,6 +2435,15 @@ export interface components {
             /** @default deadline */
             sort: "deadline" | "prize";
         };
+        /** ContestMetricsOut */
+        ContestMetricsOut: {
+            /** Contest Id */
+            contest_id: number;
+            /** Daily Participation */
+            daily_participation: components["schemas"]["DailyParticipationOut"][];
+            /** Total Submission Count */
+            total_submission_count: number;
+        };
         /** ContestOut */
         ContestOut: {
             category: components["schemas"]["CategoryOut"];
@@ -2475,6 +2515,19 @@ export interface components {
             notification_type: components["schemas"]["NotificationType"];
             /** Recipient Id */
             recipient_id: number;
+        };
+        /**
+         * DailyParticipationOut
+         * @description 하루 치 참가 — 그 날짜까지의 누적 Submission 수 (#107).
+         *
+         *     판정은 백엔드가 한다: 화면이 Submission 목록을 받아 스스로 날짜별로 묶지
+         *     않는다. `date` 는 `YYYY-MM-DD` — Asia/Seoul 기준 하루다.
+         */
+        DailyParticipationOut: {
+            /** Cumulative Count */
+            cumulative_count: number;
+            /** Date */
+            date: string;
         };
         /** DeactivateDeliverableTypeIn */
         DeactivateDeliverableTypeIn: {
@@ -4194,6 +4247,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    submissions_api_get_contest_metrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contest_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContestMetricsOut"];
                 };
             };
         };
