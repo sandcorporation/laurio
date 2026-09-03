@@ -1,128 +1,60 @@
-"""Celery beat 설정 (티켓 02, ADR-0003; #23에서 5개 내부 스캔 태스크를 추가한다).
+"""Celery beat 설정 (티켓 02, ADR-0003, #23, #137).
 
-브로커(Redis)는 공유 dev 인프라에 없고, 이 체인은 새 컨테이너/포트를 띄우지 않기로
-되어 있다. 그래서 "Celery beat가 주기적으로 내부 스캔 엔드포인트를 호출한다"는
-요건은 브로커에 붙여 실제로 실행해보는 대신, beat 스케줄에 각 태스크가 등록되어
-있고 태스크가 올바른 내부 인증 엔드포인트를 부르도록 구성되어 있는지를 코드
-수준에서 확인한다. 각 엔드포인트 자체의 동작은 해당 앱의 HTTP 테스트
-(test_scheduler_tick.py, test_refunds.py, test_distributions.py, test_handover.py,
-test_notifications.py, test_scoring.py)가 이미 증명한다.
+브로커(Redis)는 공유 dev 인프라에 없으므로 "beat 가 주기적으로 스캔을 부른다"는 요건은 실제
+실행 대신 코드 수준에서 확인한다 — 스케줄이 **스캔 등록부에서 파생**되고, 각 항목이 등록부의
+스캔 이름으로 `core.run_scan` 을 부르며, 태스크가 내부 인증 엔드포인트를 거치는지.
 
-코디네이터 리뷰 지적(#23): core.call_scheduler_tick 하나만 beat_schedule에 있으면
-"틱"만 돌고, distributions/payments/handovers/notifications/scoring 각자의 내부
-스캔 엔드포인트는 아무도 부르지 않는다 — 실제 배포에서 Distribution 배분·환불
-재확인·Handover Escrow 해제·야간 알림 발송·채점 재시도가 전부 멈춘다. 이 파일은
-여섯 개 태스크 전부가 등록되어 있는지를 파라미터화해 확인한다.
+#137 이전에는 엔드포인트 8 · task 7 · beat 7 을 세 곳에 손으로 나란히 적었고, 이 파일의 기대
+목록도 손으로 관리됐다 — 그래서 lifecycle 스캔이 조용히 스케줄에서 빠진 채 배포됐다. 지금은
+등록부가 유일한 원천이고 이 테스트는 그 파생이 깨지지 않았는지만 본다. 아직 옮기지 않은
+스캔(`LEGACY_BEAT_SCHEDULE`)은 #138~#140 이 하나씩 등록부로 옮기며 그 목록에서 지운다.
 """
 
 import inspect
 
-import pytest
-
-from config.celery import app as celery_app
+from config.celery import LEGACY_BEAT_SCHEDULE, app as celery_app
 from core import tasks as core_tasks
-
-# (beat_schedule의 엔트리 이름, 태스크 함수, 태스크 이름, 호출해야 하는 내부 경로)
-_EXPECTED_SCHEDULE_ENTRIES = [
-    (
-        "scheduler-tick",
-        core_tasks.call_scheduler_tick,
-        "core.call_scheduler_tick",
-        "/api/internal/tick",
-    ),
-    (
-        "distributions-run-due",
-        core_tasks.call_distributions_run_due,
-        "core.call_distributions_run_due",
-        "/api/internal/distributions/run-due",
-    ),
-    (
-        "payments-run-refunds",
-        core_tasks.call_payments_run_refunds,
-        "core.call_payments_run_refunds",
-        "/api/internal/payments/run-refunds",
-    ),
-    (
-        "handovers-release-due",
-        core_tasks.call_handovers_release_due,
-        "core.call_handovers_release_due",
-        "/api/internal/handovers/release-due",
-    ),
-    (
-        "notifications-dispatch-due",
-        core_tasks.call_notifications_dispatch_due,
-        "core.call_notifications_dispatch_due",
-        "/api/internal/notifications/dispatch-due",
-    ),
-    (
-        "notifications-lifecycle-run-due",
-        core_tasks.call_notifications_lifecycle_run_due,
-        "core.call_notifications_lifecycle_run_due",
-        "/api/internal/notifications/lifecycle/run-due",
-    ),
-    (
-        "scoring-run-pending",
-        core_tasks.call_scoring_run_pending,
-        "core.call_scoring_run_pending",
-        "/api/internal/scoring/run-pending",
-    ),
-    (
-        "accounts-purge-expired-identities",
-        core_tasks.call_accounts_purge_expired_identities,
-        "core.call_accounts_purge_expired_identities",
-        "/api/internal/accounts/purge-expired-identities",
-    ),
-]
+from core.scans import SCAN_REGISTRY
 
 
-@pytest.mark.parametrize(
-    "entry_name,_task_fn,task_name,_path",
-    _EXPECTED_SCHEDULE_ENTRIES,
-    ids=[e[0] for e in _EXPECTED_SCHEDULE_ENTRIES],
-)
-def test_beat_schedule_registers_each_internal_scan_periodically(
-    entry_name, _task_fn, task_name, _path
-):
+def test_every_registered_scan_has_a_beat_entry_that_calls_run_scan_with_its_name():
     schedule = celery_app.conf.beat_schedule
+    assert SCAN_REGISTRY, "등록된 스캔이 하나도 없다"
+    for name, spec in SCAN_REGISTRY.items():
+        entry = schedule.get(f"scan:{name}")
+        assert entry is not None, f"등록부의 스캔 {name!r} 이 beat 스케줄에 없다 — 파생이 깨졌다"
+        assert entry["task"] == "core.run_scan"
+        assert entry["args"] == [name]
+        assert entry["schedule"] == spec.interval_seconds > 0
 
-    assert entry_name in schedule, (
-        f"beat_schedule에 {entry_name!r}이 없다 — 이 스캔은 배포 환경에서 절대 자동으로 "
-        "돌지 않는다(config/celery.py)."
-    )
-    entry = schedule[entry_name]
-    assert entry["task"] == task_name
-    assert entry["schedule"] > 0
+
+def test_beat_schedule_is_exactly_registry_plus_legacy():
+    """스케줄에 등록부 밖의 항목이 없고, 레거시 목록 밖의 손으로 쓴 항목도 없다."""
+
+    expected = {f"scan:{name}" for name in SCAN_REGISTRY} | set(LEGACY_BEAT_SCHEDULE)
+    assert set(celery_app.conf.beat_schedule) == expected
 
 
-@pytest.mark.parametrize(
-    "_entry_name,task_fn,_task_name,path",
-    _EXPECTED_SCHEDULE_ENTRIES,
-    ids=[e[0] for e in _EXPECTED_SCHEDULE_ENTRIES],
-)
-def test_each_task_calls_its_internal_endpoint_with_the_internal_token(
-    _entry_name, task_fn, _task_name, path
-):
-    source = inspect.getsource(task_fn)
-
-    assert path in source
-    # 태스크 전부가 core.tasks._call_internal을 공유하므로, X-Internal-Token 헤더
-    # 자체는 _call_internal에만 문자 그대로 등장한다 — 각 태스크가 그 헬퍼를 실제로
-    # 거치는지는 소스에 그 경로 문자열이 있는지로 확인한다(위 assert).
+def test_run_scan_task_calls_the_scan_endpoint_with_the_internal_token():
+    source = inspect.getsource(core_tasks.run_scan)
+    assert "/api/internal/scans/" in source
     assert "_call_internal" in source
+    helper = inspect.getsource(core_tasks._call_internal)
+    assert "X-Internal-Token" in helper
+    assert "INTERNAL_API_TOKEN" in helper
 
 
-def test_call_internal_helper_sends_the_internal_token_header():
-    source = inspect.getsource(core_tasks._call_internal)
+def test_tick_is_not_scheduled_by_beat():
+    """/tick 은 등록부 전부를 한 바퀴 도는 수동용이다 — beat 가 부르면 30초 타임아웃 안에 못 든다."""
 
-    assert "X-Internal-Token" in source
-    assert "INTERNAL_API_TOKEN" in source
+    assert not any(e["task"] == "core.call_scheduler_tick" for e in celery_app.conf.beat_schedule.values())
+    assert not hasattr(core_tasks, "call_scheduler_tick")
 
 
-def test_beat_schedule_has_no_extra_or_missing_entries():
-    """등록된 태스크 이름 집합이 core/tasks.py의 태스크 집합과 정확히 일치하는지 —
-    태스크를 추가하고 beat_schedule에 등록하는 걸 깜빡하는 회귀를 잡는다."""
+def test_legacy_entries_still_point_at_existing_tasks():
+    """아직 안 옮긴 스캔은 옛 task 로 계속 돌아야 한다 — 옮기기 전에 목록에서 지우면 그 스캔이
+    조용히 멈춘다(#137 이전에 실제로 일어난 사고)."""
 
-    schedule_task_names = {entry["task"] for entry in celery_app.conf.beat_schedule.values()}
-    expected_task_names = {e[2] for e in _EXPECTED_SCHEDULE_ENTRIES}
-
-    assert schedule_task_names == expected_task_names
+    for name, entry in LEGACY_BEAT_SCHEDULE.items():
+        task_fn = entry["task"].split(".")[-1]
+        assert hasattr(core_tasks, task_fn), f"{name}: {entry['task']} 태스크가 없다"
