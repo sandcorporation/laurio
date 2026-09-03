@@ -1321,3 +1321,38 @@ def test_awarded_and_judging_ended_contests_stay_publicly_visible(
     )
     assert me_resp.status_code == 200
     assert me_resp.json()["id"] == submission["id"]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_extension_initiate_calls_pg_outside_the_contest_lock(client, category, landing_type):
+    """연장비 initiate 는 PG(request_payment)를 Contest 행 잠금을 쥔 atomic **밖**에서
+    부른다 (#126) — Payout 쪽이 #57 5차 리뷰(지적 7)로 세운 규율. 벤더가 느리면 그
+    Contest 의 모든 쓰기가 같이 멈추고 DB 커넥션을 물고 있기 때문이다.
+
+    `transaction=True` 라야 테스트 자체의 트랜잭션 래퍼가 없어 `in_atomic_block` 이
+    엔드포인트가 연 블록만을 말한다.
+    """
+
+    from unittest.mock import patch
+
+    from django.db import transaction as db_transaction
+
+    from payments.adapters import FakePGAdapter
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+    _close_contest(client, contest, deadline=deadline)
+
+    seen: list[bool] = []
+    real_request_payment = FakePGAdapter.request_payment
+
+    def _observe(self, *, order_id, amount):
+        seen.append(db_transaction.get_connection().in_atomic_block)
+        return real_request_payment(self, order_id=order_id, amount=amount)
+
+    with patch.object(FakePGAdapter, "request_payment", _observe):
+        _initiate_extension(client, sponsor, contest["id"])
+
+    assert seen == [False], seen

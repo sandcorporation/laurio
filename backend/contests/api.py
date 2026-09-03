@@ -29,7 +29,8 @@ from contests.sponsorship import sponsored_contest_queryset
 from accounts.models import SponsorProfile
 from accounts.sanitize import sanitize_free_text
 from core.clock import Clock
-from payments.adapters import PGError, PGTimeoutError, get_adapter
+from payments.adapters import PGError, get_adapter
+from payments.charges import settle_charge
 from payments.models import Payment
 from policies.services import get_current_policy
 from verification.models import Verification
@@ -75,7 +76,6 @@ from .schemas import (
     RequirementProposalOut,
     RequirementUpdateIn,
 )
-from .services import mark_extension_failed, mark_extension_paid
 
 router = Router(tags=["contests"])
 logger = logging.getLogger(__name__)
@@ -799,15 +799,15 @@ def initiate_judging_period_extension(
     엔드포인트는 결제 **의도**를 `JudgingExtensionPayment(REQUESTED)`로 먼저
     영속화하고 PG에 결제를 등록할 뿐, 아직 심사기간을 늘리지도 원장에 분개를
     남기지도 않는다. 실제로 돈이 확정되는 것은
-    `POST .../extend-judging-period/{order_id}/confirm`뿐이다(#13 리뷰 지적 1 —
-    확정 전에 먼저 행을 만들어 둬야, 결제 결과가 나중에 pending으로 걸리거나
-    confirm 호출 자체가 유실돼도 대사할 수 있는 흔적이 남는다).
+    `POST .../extend-judging-period/{order_id}/confirm`뿐이다(#13 리뷰 지적 1).
 
     같은 Contest에 대해 두 요청이 동시에 들어와도 진행 중인(REQUESTED) 연장 결제가
-    하나만 남아야 한다(#13 리뷰 지적 2, `payments.api.initiate_payment`와 같은
-    이유) — `Contest` 행을 `select_for_update`로 잠가 동시 요청을 직렬화하고,
-    `JudgingExtensionPayment.unique_pending_judging_extension_payment_per_contest`
+    하나만 남아야 한다(#13 리뷰 지적 2) — `Contest` 행을 `select_for_update`로 잠가
+    동시 요청을 직렬화하고, `unique_pending_judging_extension_payment_per_contest`
     부분 유니크 제약을 두 번째 방어선으로 둔다.
+
+    **PG 호출은 그 잠금 밖에서 한다**(#126) — 벤더가 느리면 그 Contest 의 모든 쓰기가
+    같이 멈추고 DB 커넥션을 물고 있게 된다. 행 생성까지만 트랜잭션 안이다.
     """
 
     with transaction.atomic():
@@ -825,51 +825,36 @@ def initiate_judging_period_extension(
 
         # 이미 진행 중인 연장 결제가 있으면 새로 만들지 않고 그대로 돌려준다 —
         # 중복 클릭·재요청이 새 주문을 계속 만들어내지 않게 하는 멱등성이다.
-        # Contest 행을 위에서 잠갔으므로 이 조회는 동시 요청과 경합하지 않는다.
-        existing = (
+        payment = (
             JudgingExtensionPayment.objects.filter(
                 contest=contest, status__in=_ACTIVE_EXTENSION_PAYMENT_STATUSES
             )
             .order_by("-created_at")
             .first()
         )
-        if existing is not None:
-            adapter = get_adapter()
-            result = adapter.request_payment(
-                order_id=str(existing.order_id), amount=existing.amount
-            )
-            return 201, _serialize_extension_payment(existing, checkout_url=result.checkout_url)
+        if payment is None:
+            try:
+                # 중첩 atomic(세이브포인트) — payments.api.initiate_payment와 같은
+                # 이유. amount와 extension_days를 같은 policy 조회에서 함께
+                # 스냅샷한다(#78 코드리뷰 지적 2).
+                policy = get_current_policy()
+                with transaction.atomic():
+                    payment = JudgingExtensionPayment.objects.create(
+                        contest=contest,
+                        amount=policy.judging_extension_fee,
+                        extension_days=policy.judging_extension_days,
+                        extension_number=contest.judging_extension_count + 1,
+                        status=JudgingExtensionPayment.Status.REQUESTED,
+                    )
+            except IntegrityError:
+                # Contest 잠금에도 불구하고 부분 유니크 제약에 걸렸다 — 방어적 안전망이다.
+                payment = JudgingExtensionPayment.objects.filter(
+                    contest=contest, status__in=_ACTIVE_EXTENSION_PAYMENT_STATUSES
+                ).latest("created_at")
 
-        try:
-            # 중첩 atomic(세이브포인트) — payments.api.initiate_payment와 같은
-            # 이유. IntegrityError가 나면 바깥 트랜잭션 전체가 aborted 상태가 되어
-            # 그 뒤의 방어적 조회조차 TransactionManagementError로 죽는다.
-            #
-            # amount와 extension_days를 같은 policy 조회에서 함께 스냅샷한다
-            # (#78 코드리뷰 지적 2) — 이 initiate 시점 이후 confirm까지
-            # 정책이 바뀌어도 이 결제가 청구하는 금액과 실제로 늘어나는
-            # 심사기간이 서로 다른 시점을 가리키는 불일치가 생기지 않는다.
-            policy = get_current_policy()
-            with transaction.atomic():
-                payment = JudgingExtensionPayment.objects.create(
-                    contest=contest,
-                    amount=policy.judging_extension_fee,
-                    extension_days=policy.judging_extension_days,
-                    extension_number=contest.judging_extension_count + 1,
-                    status=JudgingExtensionPayment.Status.REQUESTED,
-                )
-        except IntegrityError:
-            # Contest 잠금에도 불구하고 unique_pending_judging_extension_payment_
-            # per_contest에 걸렸다 — 방어적 안전망이다(정상 경로에서는 위
-            # select_for_update가 이미 직렬화했으므로 도달하지 않아야 한다).
-            payment = JudgingExtensionPayment.objects.filter(
-                contest=contest, status__in=_ACTIVE_EXTENSION_PAYMENT_STATUSES
-            ).latest("created_at")
-
-        adapter = get_adapter()
-        result = adapter.request_payment(order_id=str(payment.order_id), amount=payment.amount)
-
-        return 201, _serialize_extension_payment(payment, checkout_url=result.checkout_url)
+    adapter = get_adapter()
+    result = adapter.request_payment(order_id=str(payment.order_id), amount=payment.amount)
+    return 201, _serialize_extension_payment(payment, checkout_url=result.checkout_url)
 
 
 @router.post(
@@ -880,66 +865,32 @@ def initiate_judging_period_extension(
 def confirm_judging_period_extension(
     request: HttpRequest, contest_id: int, order_id: UUID, payload: ConfirmJudgingExtensionIn
 ):
-    """연장 결제를 동기 확인한다 (`payments.api.confirm_payment`와 같은 구조).
+    """연장 결제를 동기 확인한다 — Charge 확정 경로 하나(`payments.charges.settle_charge`).
 
-    **PG 호출은 어떤 `transaction.atomic()` 블록 밖에서 일어난다** — 잠금을 쥔 채
-    외부 네트워크 호출을 기다리지 않는다(#13 리뷰 지적 3). 타임아웃이 나도 곧바로
-    실패로 처리하지 않고 `query_status`로 실제 결과를 조회해 확정한다(ADR-0008).
-    돈이 실제로 오갔는지 알 수 없는 "pending"도 실패로 단정하지 않는다 — 함부로
-    `mark_extension_failed`를 부르면, 나중에 PG가 성공으로 정산해도 이미 실패로
-    적힌 결제는 다시 확인되지 않는다.
+    PG 호출은 어떤 `transaction.atomic()` 블록 밖에서 일어나고, 타임아웃이면 `query_status`
+    로 확정하며, 그 재확인마저 실패하면 미확정으로 남긴다(#87 지적 4, #125). 벤더의
+    명시적 거절은 502 다.
     """
 
+    charge_qs = JudgingExtensionPayment.objects.select_related("contest__sponsor")
     try:
-        payment = JudgingExtensionPayment.objects.select_related("contest__sponsor").get(
-            order_id=order_id, contest_id=contest_id
-        )
+        payment = charge_qs.get(order_id=order_id, contest_id=contest_id)
     except JudgingExtensionPayment.DoesNotExist as exc:
         raise HttpError(404, "연장 결제를 찾을 수 없습니다.") from exc
 
     if payment.contest.sponsor.user_id != request.auth_user.id:
         raise HttpError(403, "본인이 개최한 Contest의 연장 결제만 확인할 수 있습니다.")
 
-    if payment.status != JudgingExtensionPayment.Status.REQUESTED:
-        # 이미 확정되어 있다 — 그대로 현재 상태를 돌려준다(재전송·재조회에 안전).
-        return 200, _serialize_extension_payment(payment)
-
-    adapter = get_adapter()
     try:
-        result_status = adapter.confirm(
-            order_id=str(order_id),
+        payment = settle_charge(
+            charge_qs,
+            order_id=order_id,
+            adapter=get_adapter(),
             simulate=payload.simulate,
             payment_key=payload.payment_key,
-            amount=payment.amount,
         )
-    except PGTimeoutError:
-        # payments.api.confirm_payment과 같은 규율이다(#87 코드리뷰 지적 4) —
-        # 이 재확인 호출자체가 또 실패할 수 있다. FakePGAdapter는 query_status에서
-        # 절대 예외를 던지지 않아 이 경로가 기존 테스트에서 한 번도 밟힌 적이
-        # 없었다 — 그 실패를 그대로 올리면 500이 된다. 타임아웃만큼 이 실패도
-        # "아직 모른다"이지 "실패했다"가 아니므로 강제 종결시키지 않고 현재
-        # 상태(REQUESTED)를 그대로 돌려준다.
-        try:
-            result_status = adapter.query_status(order_id=str(order_id))
-        except Exception as exc:  # noqa: BLE001 - 재확인조차 실패하면 미확정으로 남겨둔다.
-            logger.error(
-                "토스 연장 결제 재확인(query_status)이 실패했다 — 실패로 단정하지 않고 "
-                "현재 상태를 그대로 돌려준다(order_id=%s): %s",
-                order_id,
-                exc,
-            )
-            result_status = "pending"
     except PGError as exc:
         raise HttpError(502, str(exc)) from exc
-
-    if result_status == "paid":
-        payment = mark_extension_paid(order_id)
-    elif result_status == "failed":
-        payment = mark_extension_failed(order_id)
-    else:
-        # 아직 확정할 수 없다(pending) — 함부로 실패 처리하지 않고 현재 상태를
-        # 그대로 돌려준다. 이후 재조회가 마저 확정한다.
-        payment.refresh_from_db()
 
     return 200, _serialize_extension_payment(payment)
 

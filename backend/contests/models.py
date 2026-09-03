@@ -16,6 +16,8 @@ import uuid
 from django.conf import settings
 from django.db import models
 
+from payments.charges import ChargeBase
+
 
 class Category(models.Model):
     """Contest가 속한 산업·장르. DeliverableType과는 다른 축이다."""
@@ -223,58 +225,39 @@ class Requirement(models.Model):
         return self.text
 
 
-class JudgingExtensionPayment(models.Model):
-    """심사기간 유료 연장 결제 시도 하나 (#13, ADR-0004/0007/0008).
+class JudgingExtensionPayment(ChargeBase):
+    """심사기간 유료 연장 결제 시도 하나 (#13, #126, ADR-0004/0007/0008).
 
-    `payments.models.Payment`와 같은 성격의 모델이다 — PG와의 대화 상태(요청됨/
-    완료/실패)만 들고, 완료로 전이하는 순간에만 원장에 분개를 남긴다. `Payment`를
-    그대로 재사용하지 않는 이유: `Payment.unique_active_payment_per_contest`는
-    Contest 당 결제가 평생 한 번(최초 예치)이라는 전제로 걸려 있는데, 연장은 같은
-    Contest에 대해 여러 번 반복될 수 있는 별개의 결제 종류다.
+    Charge(CONTEXT.md)의 한 종류다 — `payments.models.Payment`(Prize 예치+개최비)와
+    같은 뼈대(`payments.charges.ChargeBase`)를 상속하고, 이 종류에 고유한 둘만 준다:
+    분개의 줄(`journal`)과 확정에 딸려오는 부모 전이(`on_paid` — 심사기간 연장). `Payment`
+    를 그대로 재사용하지 않는 이유: `Payment.unique_active_payment_per_contest`는 Contest
+    당 결제가 평생 한 번(최초 예치)이라는 전제로 걸려 있는데, 연장은 같은 Contest에 대해
+    여러 번 반복될 수 있는 별개의 결제 종류다.
 
-    동시성·재전송에 안전한 이유는 `contests.services.mark_extension_paid`/
-    `mark_extension_failed`가 `payments.services.mark_paid`/`mark_failed`와 똑같은
-    조건부 `UPDATE ... WHERE status='requested'` 규율을 따르기 때문이다.
+    동시성·재전송에 안전한 이유는 `payments.charges.apply_vendor_outcome` 이 조건부
+    `UPDATE ... WHERE status='requested'` 규율(ADR-0003)로 딱 한 번만 이기기 때문이다.
     """
-
-    class Status(models.TextChoices):
-        REQUESTED = "requested", "요청됨"
-        PAID = "paid", "결제완료"
-        FAILED = "failed", "결제실패"
 
     contest = models.ForeignKey(
         "contests.Contest", related_name="judging_extension_payments", on_delete=models.CASCADE
     )
-    # PG에 전달하는 주문 참조값.
-    order_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
 
     # 결제 시점의 스냅샷 — PlatformPolicy.judging_extension_fee(#78/ADR-0023)가
     # 나중에 바뀌어도 이미 요청된 결제 금액은 흔들리지 않는다(Payment.prize_amount와
     # 같은 원칙).
     amount = models.PositiveIntegerField()
     # 결제 시점(initiate)의 PlatformPolicy.judging_extension_days 스냅샷
-    # (#78 코드리뷰 지적 2) — amount와 짝을 이루는 값인데도 원래는 여기
-    # 찍히지 않고 confirm 시점에 정책에서 다시 읽혔다. initiate와 confirm
-    # 사이에 운영자가 judging_extension_days를 바꾸면(#78이 이 값을 런타임
-    # 가변 DB 행으로 옮기면서 실제로 열린 창이다 — 값이 상수였을 때는 없던
-    # 문제다) amount는 옛 금액 그대로 청구되는데 심사기간은 새 값만큼만
-    # 늘어나는 불일치가 생긴다. Sponsor가 낸 돈과 실제로 받는 연장 길이가
-    # 항상 같은 시점의 정책을 가리키도록 이 필드가 그 값을 initiate
-    # 시점에 확정한다.
+    # (#78 코드리뷰 지적 2) — amount와 짝을 이루는 값. initiate와 confirm 사이에
+    # 운영자가 judging_extension_days를 바꾸면 amount는 옛 금액 그대로 청구되는데
+    # 심사기간은 새 값만큼만 늘어나는 불일치가 생긴다 — Sponsor가 낸 돈과 실제로
+    # 받는 연장 길이가 항상 같은 시점의 정책을 가리키도록 이 필드가 그 값을
+    # initiate 시점에 확정한다.
     extension_days = models.PositiveIntegerField()
     # 이 결제가 성공하면 몇 번째 연장이 되는지의 스냅샷(감사·원장 메모용). 정확한
     # 카운트는 여전히 Contest.judging_extension_count가 조건부 UPDATE로 늘리는
     # 값이 유일한 진실이다 — 이 필드는 그 값을 미리 찍어두는 라벨일 뿐이다.
     extension_number = models.PositiveIntegerField()
-
-    status = models.CharField(max_length=16, choices=Status.choices, default=Status.REQUESTED)
-
-    # 이 결제가 원장에 남긴 분개. 성공 시 정확히 한 번만 채워진다(Payment.journal_
-    # entry_id와 같은 원칙).
-    journal_entry_id = models.PositiveIntegerField(null=True, blank=True)
-
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["-created_at"]
@@ -294,6 +277,71 @@ class JudgingExtensionPayment(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"JudgingExtensionPayment(order_id={self.order_id}, status={self.status})"
+
+    @property
+    def charged_amount(self) -> int:
+        return self.amount
+
+    def journal(self):
+        from ledger.models import Account, EntrySide
+        from ledger.services import LineInput
+
+        return (
+            self.contest.ledger_id,
+            (
+                f"Contest #{self.contest_id} 심사기간 연장 {self.extension_number}회차 — "
+                f"{self.amount:,}원"
+            ),
+            [
+                LineInput(account=Account.SPONSOR_DEPOSIT, side=EntrySide.DEBIT, amount=self.amount),
+                LineInput(
+                    account=Account.PLATFORM_FEE_REVENUE, side=EntrySide.CREDIT, amount=self.amount
+                ),
+            ],
+        )
+
+    def on_paid(self) -> None:
+        """이겼을 때만, 분개와 같은 트랜잭션 안에서 심사기간을 늘린다.
+
+        결제가 확정되는 사이(initiate → confirm) Award되었거나 이미 심사기간이
+        종료됐다면 더 늘릴 대상이 없다. 그 경우에도 분개는 그대로 남는다 — Sponsor가 낸
+        돈이 대사 가능한 흔적으로 남아야 하기 때문이다(#13 리뷰 지적 1). 그 돈의 처리
+        (환불 등)는 별도다(#17/#22).
+        """
+
+        from datetime import timedelta
+
+        from core.clock import Clock
+        from core.transitions import claim_transition
+
+        contest = Contest.objects.select_for_update().get(pk=self.contest_id)
+        if contest.status != Contest.Status.CLOSED or contest.judging_ends_at is None:
+            return
+
+        new_count = contest.judging_extension_count + 1
+        # 여기서 정책을 다시 읽지 않는다(#78 코드리뷰 지적 2) — extension_days 는
+        # initiate 시점에 amount 와 함께 스냅샷된 값이다.
+        new_judging_ends_at = contest.judging_ends_at + timedelta(days=self.extension_days)
+
+        # claim_transition을 그대로 재사용한다 — from/to 가 둘 다 CLOSED인 "제자리"
+        # 전이이지만, ① WHERE status='closed' 조건부 UPDATE 규율을 한 번 더 지키고
+        # ② auto_now 필드(updated_at)를 이 메커니즘이 채워준다(#13 리뷰 지적 6).
+        claim_transition(
+            Contest,
+            contest.pk,
+            from_state=Contest.Status.CLOSED,
+            to_state=Contest.Status.CLOSED,
+            state_field="status",
+            now=Clock.now(),
+            extra_fields={
+                "judging_ends_at": new_judging_ends_at,
+                "judging_extension_count": new_count,
+                "refund_disabled": contest.refund_disabled or new_count >= 2,
+                # 심사기간 종료 임박 알림(#19)이 이미 발송된 뒤에 연장되면 이 표식을
+                # 비워야 새 종료일이 다가올 때 다시 알릴 수 있다(#19 리뷰 지적 1).
+                "judging_end_reminder_sent_at": None,
+            },
+        )
 
 
 class RequirementChatMessage(models.Model):
