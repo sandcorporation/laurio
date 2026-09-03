@@ -26,78 +26,7 @@ from ledger.services import LineInput, post_journal_entry
 from submissions.models import Submission
 
 from .adapters import PGError, PGTimeoutError, get_adapter
-from .charges import claim_and_post
 from .models import Payment
-
-
-def mark_paid(order_id) -> Payment:
-    """결제를 완료로 확정한다. 이미 확정되어 있으면 아무 것도 다시 하지 않는다.
-
-    이겼을 때만(rowcount==1) 원장에 예치 분개를 남기고 Contest를 공개한다 —
-    `payments.charges.claim_and_post` 가 그 규율(조건부 UPDATE + 같은 트랜잭션의
-    분개 + 되쓰기)을 소유하고(#125), 여기는 이 Charge 종류에 고유한 두 가지만 준다:
-    분개의 줄과, 이긴 뒤 딸려오는 부모 전이. 예치 분개는 결제 총액(Prize + 개최
-    등록비)이 발주자 예치금에서 빠져나와, Prize는 개발자 미지급금(Escrow — 이후
-    Payout·Distribution·환불로만 빠져나간다)으로, 등록비는 플랫폼 수수료 수익으로
-    즉시 인식되는 것으로 기록한다.
-    """
-
-    def _journal(payment: Payment):
-        return (
-            payment.contest.ledger_id,
-            (
-                f"Contest #{payment.contest_id} 결제 예치 — "
-                f"상금 {payment.prize_amount:,}원 + 개최 등록비 {payment.listing_fee_amount:,}원"
-            ),
-            [
-                LineInput(
-                    account=Account.SPONSOR_DEPOSIT,
-                    side=EntrySide.DEBIT,
-                    amount=payment.total_amount,
-                ),
-                LineInput(
-                    account=Account.DEVELOPER_PAYABLE,
-                    side=EntrySide.CREDIT,
-                    amount=payment.prize_amount,
-                ),
-                LineInput(
-                    account=Account.PLATFORM_FEE_REVENUE,
-                    side=EntrySide.CREDIT,
-                    amount=payment.listing_fee_amount,
-                ),
-            ],
-        )
-
-    def _publish_contest(payment: Payment) -> None:
-        # Contest 공개도 같은 조건부 UPDATE 규율을 따른다 — draft일 때만 published로
-        # 간다. 이 결제가 이미 그 전이를 성공시켰으므로(rowcount==1) 정상 경로에서는
-        # 항상 draft여야 하지만, 방어적으로 조건을 남겨 이중 공개를 구조적으로 막는다.
-        Contest.objects.filter(pk=payment.contest_id, status=Contest.Status.DRAFT).update(
-            status=Contest.Status.PUBLISHED
-        )
-
-    payment, _claimed = claim_and_post(
-        Payment.objects.select_related("contest"),
-        filters={"order_id": order_id},
-        from_status=Payment.Status.REQUESTED,
-        to_status=Payment.Status.PAID,
-        journal=_journal,
-        on_claimed=_publish_contest,
-    )
-    return payment
-
-
-def mark_failed(order_id) -> Payment:
-    """결제를 실패로 확정한다. 이미 확정되어 있으면 아무 것도 다시 하지 않는다.
-
-    실패 경로는 원장에 아무 흔적도 남기지 않는다 — 돈이 움직이지 않았다.
-    """
-
-    Payment.objects.filter(order_id=order_id, status=Payment.Status.REQUESTED).update(
-        status=Payment.Status.FAILED
-    )
-    return Payment.objects.get(order_id=order_id)
-
 
 
 # --- 참여자 0명 전액 환불 (#17, ADR-0004) ------------------------------------
