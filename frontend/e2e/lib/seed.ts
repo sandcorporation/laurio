@@ -137,7 +137,13 @@ function workerNamespace(): string {
     // globalSetup(테스트 밖)에서도 임포트되므로 최상단에서 test 를 끌어오면
     // 그쪽에서 터진다. 실제로 워커 안일 때만 읽는다.
     const { test } = require("@playwright/test") as typeof import("@playwright/test");
-    return `w${test.info().parallelIndex}`;
+    // **같은 머신에서 스위트를 둘 이상 동시에 돌린다면 `LAURIO_E2E_NAMESPACE` 를
+    // 서로 다르게 줘라** — `parallelIndex` 는 한 실행 안에서만 유일해서, 두 실행이
+    // 각자 `w0` 을 써 서로의 픽스처를 지운다. 병렬 워크트리에서 체인 둘이 각자
+    // e2e 를 돌리는 상황이 정확히 그것이다(`LAURIO_TEST_DB_NAME` 을 달리 주는
+    // 것과 같은 이유). 명령 쪽 검증이 소문자 영숫자만 받으므로 그 형태로 준다.
+    const scope = (process.env.LAURIO_E2E_NAMESPACE ?? "").replace(/[^a-z0-9]/g, "");
+    return `${scope}w${test.info().parallelIndex}`;
   } catch {
     return "";
   }
