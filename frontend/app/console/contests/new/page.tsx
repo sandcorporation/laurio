@@ -1,50 +1,26 @@
 "use client";
 
-// AI grill 개최 (FE-12, #37, spec #25 User Story 40-48, design/Brief.dc.html).
+// AI grill 개최 — 브리프 (FE-12, #37, spec #25 User Story 40-48, design/Brief.dc.html).
+// 초안이 자기 자리를 갖게 되면서(#111, 부모 #110) 이 화면은 **Phase A(브리프)
+// 까지만** 맡는다 — 아직 Contest가 없는 상태에서 제목·카테고리·요구형태·상금·
+// 마감을 받는다. 요구형태를 고를 때마다 최소 제안 상금 합계를 POST
+// /contests/quote로 실시간으로 보여준다(직접 합산하지 않는다 — 규칙이 두 곳에서
+// 어긋나면 안 된다).
 //
-// 두 단계로 나뉜다 — 백엔드 API 표면이 그렇게 생겼기 때문이다:
-//
-//   Phase A (브리프) — 아직 Contest가 없다. 제목·카테고리·요구형태·상금·마감을
-//   받는다. 요구형태를 고를 때마다 최소 제안 상금 합계를 POST /contests/quote로
-//   실시간으로 보여준다(직접 합산하지 않는다 — 규칙이 두 곳에서 어긋나면 안 된다).
-//
-//   Phase B (AI grill) — Phase A를 제출하면 그 순간 Contest가 draft로
-//   생성된다(POST /api/contests, requirements=[]). AI grill 대화와 Requirement
-//   CRUD는 전부 이 contest_id에 매달린 하위 자원이라, 대화가 시작되려면 Contest가
-//   먼저 있어야 한다. 생성 이후에는 제목·요구형태·상금을 고치는 엔드포인트가
-//   없으므로(REQUEST.md의 "체크리스트만 대화로 정한다"는 설계 그대로) 그 값들은
-//   Phase B에서 읽기 전용 요약으로만 보여준다. 이 화면 안에서 실제로 계속
-//   바뀌는 것은 Requirement 체크리스트뿐이다.
-//
-// LLM 신뢰 경계 — 이 화면이 실제로 부르는 백엔드
-// (contests/requirement_chat.py `send_requirement_chat_message`)는 어댑터가
-// 죽어도 이미 사과 응답으로 감성해 절대 500을 내지 않는다. 그래도 이 화면은
-// 그 응답을 타입 캐스팅으로 그냥 믿지 않는다 — BFF 프록시가 502/504를 빈
-// 본문으로 삼키거나 응답이 아예 오지 않는 경우까지 포함해, `lib/contests/
-// chat-response.ts`의 방어적 파서를 거친다(#37 인수조건 — "LLM이 이상하거나
-// 형식에 맞지 않는 응답을 해도 화면이 죽지 않는다").
+// 제출하면 그 순간 Contest가 draft로 생성되고(POST /api/contests,
+// requirements=[]), 화면은 그 Contest의 URL —
+// `/console/contests/{contestId}/draft` — 로 넘어간다. AI grill 대화·
+// Requirement CRUD는 전부 그 화면의 몫이다: 초안이 URL을 가지므로 새로고침·
+// 북마크·목록 진입이 전부 그 화면에서 이어진다(이 화면 자체는 다시 방문해도
+// 항상 빈 브리프 폼이다 — 그것이 맞다, 브리프는 Contest 생성 전 단계다).
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import { sessionFetch } from "@/lib/auth/client-fetch";
 import { useSession } from "@/lib/auth/use-session";
 import { formatPrize } from "@/lib/contest-format";
-import {
-  FALLBACK_CHAT_REPLY,
-  parseChatReply,
-  readErrorDetail,
-  sanitizeChatTurns,
-  type ChatProposal,
-  type ParsedChatTurn,
-} from "@/lib/contests/chat-response";
-import {
-  CHAT_MAX_HISTORY_TURNS,
-  type Category,
-  type ContestDetail,
-  type DeliverableType,
-  type RequirementGrade,
-  type RequirementOut,
-  type VerificationStatusOut,
-} from "@/lib/contests/grill-types";
+import { readErrorDetail } from "@/lib/contests/chat-response";
+import type { Category, DeliverableType, VerificationStatusOut } from "@/lib/contests/grill-types";
 
 import {
   clearRedirectVerificationParams,
@@ -53,8 +29,7 @@ import {
   requestPortOneIdentityVerification,
 } from "@/lib/verification/portone";
 
-import { GrillChatPanel } from "./grill-chat-panel";
-import { RequirementDraftPanel } from "./requirement-draft-panel";
+import { ContestStageStepper } from "../_components/contest-stage-stepper";
 
 type LoadState =
   | { status: "loading" }
@@ -90,6 +65,7 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 
 export default function NewContestGrillPage() {
   const session = useSession();
+  const router = useRouter();
 
   const [load, setLoad] = useState<LoadState>({ status: "loading" });
   const [reloadTick, setReloadTick] = useState(0);
@@ -97,21 +73,10 @@ export default function NewContestGrillPage() {
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const portOneConfig = useMemo(() => getPortOneBrowserConfig(), []);
 
-  // --- Phase A: 브리프 ------------------------------------------------------
   const [brief, setBrief] = useState<BriefForm>(EMPTY_BRIEF);
   const [quoteTotal, setQuoteTotal] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-
-  // --- Phase B: AI grill 대화 + 체크리스트 -----------------------------------
-  const [contest, setContest] = useState<ContestDetail | null>(null);
-  const [requirements, setRequirements] = useState<RequirementOut[]>([]);
-  const [messages, setMessages] = useState<ParsedChatTurn[]>([]);
-  const [proposals, setProposals] = useState<ChatProposal[]>([]);
-  const [sending, setSending] = useState(false);
-  const [chatError, setChatError] = useState<string | null>(null);
-  const [requirementError, setRequirementError] = useState<string | null>(null);
-  const [requirementBusy, setRequirementBusy] = useState(false);
 
   useEffect(() => {
     if (session.status !== "authenticated") return;
@@ -162,7 +127,6 @@ export default function NewContestGrillPage() {
   // #37 인수조건: "규칙이 두 곳에서 어긋나면 안 된다").
   const deliverableTypeKey = brief.deliverableTypeIds.slice().sort((a, b) => a - b).join(",");
   useEffect(() => {
-    if (contest) return; // Phase B에서는 서버가 만든 required_minimum_prize를 그대로 쓴다.
     if (brief.deliverableTypeIds.length === 0) {
       setQuoteTotal(0);
       return;
@@ -193,7 +157,7 @@ export default function NewContestGrillPage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- deliverableTypeKey가 배열 내용의 안정된 대리 키다.
-  }, [deliverableTypeKey, contest]);
+  }, [deliverableTypeKey]);
 
   const prizeNumber = Number(brief.prize);
   const previewUnderfunded =
@@ -368,158 +332,16 @@ export default function NewContestGrillPage() {
         return;
       }
 
-      setContest(created as unknown as ContestDetail);
-      setRequirements(Array.isArray(created.requirements) ? (created.requirements as RequirementOut[]) : []);
+      // 초안이 자기 URL을 갖는다(#111) — 여기서부터는 그 화면(요구사항 작성)이
+      // 이어받는다. 새로고침·북마크·목록에서의 재진입이 전부 그 URL을 통해
+      // 이뤄지므로, 이 화면(브리프)은 생성 후 상태를 들고 있지 않는다.
+      router.push(`/console/contests/${created.id}/draft`);
     } catch {
       setCreateError("연결에 실패했습니다. 잠시 후 다시 시도해 주세요.");
     } finally {
       setCreating(false);
     }
   }
-
-  const turnLimitReached = messages.length >= CHAT_MAX_HISTORY_TURNS;
-
-  async function handleSendChat(text: string) {
-    if (!contest) return;
-    setChatError(null);
-    setSending(true);
-    try {
-      const res = await sessionFetch(`/api/backend/contests/${contest.id}/requirement-chat/messages`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ message: text }),
-      });
-
-      if (!res.ok) {
-        setChatError((await readErrorDetail(res)) ?? `메시지를 보내지 못했습니다 (${res.status})`);
-        return;
-      }
-
-      let body: unknown;
-      try {
-        body = await res.json();
-      } catch {
-        // 본문이 JSON이 아니다 — 프록시가 대신 HTML 에러 페이지 등을 돌려준
-        // 경우다. 대화는 끊지 않고 사과 메시지 한 턴만 화면에 남긴다.
-        const now = new Date().toISOString();
-        setMessages((prev) => [
-          ...prev,
-          { role: "sponsor", content: text, created_at: now },
-          { role: "assistant", content: FALLBACK_CHAT_REPLY, created_at: now },
-        ]);
-        return;
-      }
-
-      const parsed = parseChatReply(body);
-      const sanitizedHistory = sanitizeChatTurns(
-        isPlainRecord(body) ? (body as Record<string, unknown>).messages : undefined,
-      );
-      if (sanitizedHistory.length > 0) {
-        setMessages(sanitizedHistory);
-      } else {
-        // messages 필드가 아예 없거나 전부 깨져 있어도, 최소한 지금 주고받은
-        // 두 턴만은 화면에 남겨 대화가 끊긴 것처럼 보이지 않게 한다.
-        const now = new Date().toISOString();
-        setMessages((prev) => [
-          ...prev,
-          { role: "sponsor", content: text, created_at: now },
-          { role: "assistant", content: parsed.reply, created_at: now },
-        ]);
-      }
-      setProposals(parsed.proposals);
-    } catch {
-      setChatError("연결에 실패했습니다. 잠시 후 다시 시도해 주세요.");
-    } finally {
-      setSending(false);
-    }
-  }
-
-  async function handleAddRequirement(text: string, grade: RequirementGrade, fromProposal?: ChatProposal) {
-    if (!contest) return;
-    setRequirementError(null);
-    setRequirementBusy(true);
-    try {
-      const res = await sessionFetch(`/api/backend/contests/${contest.id}/requirements`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text, grade }),
-      });
-
-      if (!res.ok) {
-        setRequirementError((await readErrorDetail(res)) ?? `추가하지 못했습니다 (${res.status})`);
-        return;
-      }
-
-      const created = await res.json().catch(() => null);
-      if (isPlainRecord(created) && typeof created.id === "number" && typeof created.text === "string") {
-        setRequirements((prev) => [...prev, created as unknown as RequirementOut]);
-        if (fromProposal) {
-          setProposals((prev) => prev.filter((p) => p !== fromProposal));
-        }
-      } else {
-        setRequirementError("추가 응답을 해석하지 못했습니다. 새로고침해 확인해 주세요.");
-      }
-    } catch {
-      setRequirementError("연결에 실패했습니다. 잠시 후 다시 시도해 주세요.");
-    } finally {
-      setRequirementBusy(false);
-    }
-  }
-
-  async function handleUpdateRequirement(
-    id: number,
-    patch: { text?: string; grade?: RequirementGrade },
-  ): Promise<boolean> {
-    if (!contest) return false;
-    setRequirementError(null);
-    try {
-      const res = await sessionFetch(`/api/backend/contests/${contest.id}/requirements/${id}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(patch),
-      });
-
-      if (!res.ok) {
-        setRequirementError((await readErrorDetail(res)) ?? `수정하지 못했습니다 (${res.status})`);
-        return false;
-      }
-
-      const updated = await res.json().catch(() => null);
-      if (isPlainRecord(updated) && typeof updated.id === "number") {
-        setRequirements((prev) =>
-          prev.map((r) => (r.id === id ? (updated as unknown as RequirementOut) : r)),
-        );
-        return true;
-      }
-      setRequirementError("수정 응답을 해석하지 못했습니다. 다시 시도해 주세요.");
-      return false;
-    } catch {
-      setRequirementError("연결에 실패했습니다. 잠시 후 다시 시도해 주세요.");
-      return false;
-    }
-  }
-
-  async function handleDeleteRequirement(id: number) {
-    if (!contest) return;
-    setRequirementError(null);
-    try {
-      const res = await sessionFetch(`/api/backend/contests/${contest.id}/requirements/${id}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) {
-        setRequirementError((await readErrorDetail(res)) ?? `삭제하지 못했습니다 (${res.status})`);
-        return;
-      }
-      setRequirements((prev) => prev.filter((r) => r.id !== id));
-    } catch {
-      setRequirementError("연결에 실패했습니다. 잠시 후 다시 시도해 주세요.");
-    }
-  }
-
-  const contestForPanel = useMemo(() => {
-    if (!contest) return null;
-    return { ...contest, requirements };
-  }, [contest, requirements]);
 
   if (session.status === "loading" || load.status === "loading") {
     return (
@@ -585,43 +407,19 @@ export default function NewContestGrillPage() {
     );
   }
 
-  // --- Phase B: 이미 draft Contest가 있으면 AI grill 화면을 보여준다 ------------
-  if (contestForPanel) {
-    return (
-      <main className="grid min-h-screen grid-cols-1 lg:grid-cols-[minmax(0,1fr)_452px]" data-testid="grill-phase-b">
-        <GrillChatPanel
-          messages={messages}
-          proposals={proposals}
-          onSend={handleSendChat}
-          onAddProposal={(proposal) => void handleAddRequirement(proposal.text, proposal.grade, proposal)}
-          sending={sending}
-          chatError={chatError}
-          turnLimitReached={turnLimitReached}
-        />
-        <RequirementDraftPanel
-          contest={contestForPanel}
-          requirements={requirements}
-          requirementError={requirementError}
-          requirementBusy={requirementBusy}
-          onAdd={(text, grade) => handleAddRequirement(text, grade)}
-          onUpdate={handleUpdateRequirement}
-          onDelete={handleDeleteRequirement}
-        />
-      </main>
-    );
-  }
-
-  // --- Phase A: 브리프 입력 폼 ------------------------------------------------
   return (
     <main className="mx-auto flex min-h-screen max-w-xl flex-col gap-6 p-10">
-      <div>
-        <p className="text-xs font-medium tracking-widest text-ink/60">공모전 개최</p>
-        <h1 className="text-2xl font-semibold" data-testid="grill-brief-heading">
-          기본 정보를 알려주세요
-        </h1>
-        <p className="mt-2 text-sm text-ink/70">
-          다음 단계에서 AI와 대화하며 요구사항 체크리스트를 함께 만듭니다.
-        </p>
+      <div className="flex flex-col gap-3">
+        <ContestStageStepper current="brief" />
+        <div>
+          <p className="text-xs font-medium tracking-widest text-ink/60">공모전 개최</p>
+          <h1 className="text-2xl font-semibold" data-testid="grill-brief-heading">
+            기본 정보를 알려주세요
+          </h1>
+          <p className="mt-2 text-sm text-ink/70">
+            다음 단계에서 AI와 대화하며 요구사항 체크리스트를 함께 만듭니다.
+          </p>
+        </div>
       </div>
 
       <label className="flex flex-col gap-1 text-sm">

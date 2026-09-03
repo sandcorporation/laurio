@@ -25,6 +25,8 @@ import { useSession } from "@/lib/auth/use-session";
 import { formatPrize } from "@/lib/contest-format";
 import type { components } from "@/lib/api/schema.gen";
 
+import { ContestStageStepper } from "../../_components/contest-stage-stepper";
+
 type PaymentOut = components["schemas"]["PaymentOut"];
 
 type ContestMeta = {
@@ -261,7 +263,22 @@ export default function ContestPaymentPage() {
 
   return (
     <main className="mx-auto max-w-xl p-10">
-      <h1 className="text-2xl font-semibold" data-testid="payment-heading">
+      <ContestStageStepper current="payment" />
+
+      {/* 결제 전까지는 무엇이든 고칠 수 있다(spec #110) — 결제 직전에 요구사항을
+          하나 고치고 싶어도 돌아갈 자리가 없었다. 이 화면이 살아 있는 한(즉
+          Contest가 아직 draft인 한) 그 자리로 클릭 한 번에 돌아간다. 결제가
+          끝나면(아래 payment-success/already-paid 분기) 이 링크 자체가 더 이상
+          그려지지 않는다 — 그것이 "이동이 닫힌다"의 실제 구현이다. */}
+      <Link
+        href={`/console/contests/${contestId}/draft`}
+        data-testid="payment-back-to-requirements"
+        className="mt-3 inline-block text-xs text-ink/60 underline hover:text-ink"
+      >
+        ← 요구사항으로 돌아가기
+      </Link>
+
+      <h1 className="mt-4 text-2xl font-semibold" data-testid="payment-heading">
         {title}
       </h1>
       <p className="mt-1 text-sm text-ink/60">결제가 끝나야 공모전이 공개됩니다.</p>

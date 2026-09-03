@@ -121,6 +121,21 @@ def initiate_payment(request: HttpRequest, payload: InitiatePaymentIn):
             .first()
         )
         if existing is not None:
+            # 방어선 두 번째 층 — 첫 번째는 contests.api.update_draft_contest가
+            # 상금을 바꾸는 그 순간 REQUESTED Payment를 맞춰준다. 여기서도
+            # 확인하는 이유: 이 확인은 Contest가 여전히 DRAFT임을 위에서 이미
+            # 확정했으므로(그렇지 않으면 409), _ACTIVE_PAYMENT_STATUSES 중
+            # 여기 남을 수 있는 것은 REQUESTED뿐이다(PAID는 Contest를
+            # published로 넘긴다, payments/services.py mark_paid) — 이 결제를
+            # 다시 화면에 돌려주기 직전에 한 번 더 맞춰, 어떤 경로로든 둘이
+            # 갈라져 있었다면 여기서 마지막으로 바로잡는다. **불변식: REQUESTED
+            # Payment는 그것이 속한 Contest와 다른 금액을 가질 수 없다**(코드
+            # 리뷰 지적 — 그렇지 않으면 Escrow(Payment.prize_amount)와 실제
+            # Payout(Contest.prize, payouts/services.py)이 서로 다른 금액을
+            # 가리키게 된다).
+            if existing.prize_amount != contest.prize:
+                existing.prize_amount = contest.prize
+                existing.save(update_fields=["prize_amount"])
             adapter = get_adapter()
             result = adapter.request_payment(
                 order_id=str(existing.order_id), amount=existing.total_amount
