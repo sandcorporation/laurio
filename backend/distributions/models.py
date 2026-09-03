@@ -78,6 +78,17 @@ class DistributionShare(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
 
+    def payout_target(self):
+        """이 몫을 지급 사유로 하는 Payout 생성에 필요한 것 (#129)."""
+
+        from payouts.targets import PayoutTarget
+
+        return PayoutTarget(
+            fk_name="distribution_share",
+            lock=lambda: DistributionShare.objects.select_for_update().get(pk=self.pk),
+            prize_amount_of=lambda locked: locked.amount,
+        )
+
     class Meta:
         ordering = ["id"]
 

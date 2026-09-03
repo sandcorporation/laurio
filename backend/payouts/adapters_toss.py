@@ -627,26 +627,22 @@ class TossPayoutAdapter:
         return headers
 
     def _resolve_seller(self, idempotency_key: str):
-        """이 지급 요청의 수취인 Seller를 조회한다. 없으면 None."""
+        """이 지급 요청의 수취인 Seller를 조회한다. 없으면 None.
 
-        from .models import Payout, Seller
+        adapter 가 도메인 행을 되짚어 읽는다는 사실 자체는 #120(seam 이동)이 없앤다 —
+        여기서는 두 지급 사유의 갈래만 `Payout.developer`(#128)로 보낸다.
+        """
+
+        from .models import Payout
 
         try:
-            payout = Payout.objects.select_related(
-                "handover__award__submission__developer",
-                "distribution_share__submission__developer",
-            ).get(idempotency_key=idempotency_key)
+            payout = Payout.objects.with_target().get(idempotency_key=idempotency_key)
         except Payout.DoesNotExist as exc:
             raise PayoutError(
                 f"idempotency_key={idempotency_key}에 해당하는 Payout을 찾을 수 없다."
             ) from exc
 
-        if payout.handover_id is not None:
-            developer = payout.handover.award.submission.developer
-        else:
-            developer = payout.distribution_share.submission.developer
-
-        return payout, Seller.objects.filter(developer=developer).first()
+        return payout, payout.seller
 
     def request_payout(self, *, idempotency_key: str, amount: int) -> Any:
         from .adapters import PayoutRequestResult
