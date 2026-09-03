@@ -19,7 +19,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from accounts.models import SponsorProfile
-from contests.curation import HOME_IMMINENT_DEADLINE_DAYS, HomeCurationBucket
+from contests.curation import HOME_IMMINENT_DEADLINE_DAYS, HomeCurationBucket, home_bucket_for
 from contests.models import Category, Contest, DeliverableType
 
 HOME_URL = "/api/contests/home"
@@ -186,10 +186,10 @@ def test_every_public_status_lands_in_exactly_one_bucket(
     하나 늘면 이 테스트도 자동으로 그 값을 포함해서 돈다.
 
     **두 가지를 함께 지킨다.** 화면에 실제로 보이는 것은
-    `_home_bucket_queryset`(#94 코드리뷰 4, 성능 때문에 SQL로 다시 쓴 필터)의
+    `home_bucket_queryset`(#94 코드리뷰 4, 성능 때문에 SQL로 다시 쓴 필터)의
     결과이므로 그쪽이 새 상태를 놓치면 `all_bucketed_ids`에서 바로 드러난다.
     하지만 `home_bucket_for`(판정의 원본)만 새 상태를 놓치고
-    `_home_bucket_queryset`은 우연히 맞는 경우, 화면은 정상이어도 둘이
+    `home_bucket_queryset`은 우연히 맞는 경우, 화면은 정상이어도 둘이
     갈렸다는 사실은 로그로만 드러난다 — 그래서 ERROR 로그가 하나도 없는지도
     같이 확인한다. 이게 없으면 리뷰어가 `home_bucket_for`에서
     `JUDGING_ENDED` 처리를 빼는 뮤테이션을 넣었을 때 이 테스트가 더 이상
@@ -230,7 +230,7 @@ def test_every_public_status_lands_in_exactly_one_bucket(
     # 같은 Contest가 두 묶음에 동시에 들어가지 않는다.
     assert len(all_bucketed_ids) == len(set(all_bucketed_ids))
 
-    # `_home_bucket_queryset`과 `home_bucket_for`가 이 상태 집합 전체에서
+    # `home_bucket_queryset`과 `home_bucket_for`가 이 상태 집합 전체에서
     # 하나도 갈리지 않았다 — 화면은 맞아도 판정의 원본이 조용히 틀어지는
     # 것까지 잡는다.
     assert not [r for r in caplog.records if "불일치" in r.message], (
@@ -396,7 +396,7 @@ def test_completed_bucket_orders_most_recently_completed_first(
 def test_home_bucket_for_agrees_with_the_query_for_every_status_and_boundary(
     client, sponsor, category, deliverable_type
 ):
-    """`_home_bucket_queryset`(성능 때문에 SQL로 다시 쓴 필터)과
+    """`home_bucket_queryset`(성능 때문에 SQL로 다시 쓴 필터)과
     `home_bucket_for`(판정의 원본)가 임계값 양쪽 끝에서도 갈리지 않는다(#94
     코드리뷰 4/5 — 조건을 두 벌로 쓰면 언젠가 갈라진다는 이 저장소의 경험).
 
@@ -450,7 +450,7 @@ def test_home_bucket_for_agrees_with_the_query_for_every_status_and_boundary(
 def test_bucket_mismatch_is_logged_not_silently_dropped(
     client, sponsor, category, deliverable_type, monkeypatch, caplog
 ):
-    """`_home_bucket_queryset`과 `home_bucket_for`가 갈리면 조용히 넘어가지
+    """`home_bucket_queryset`과 `home_bucket_for`가 갈리면 조용히 넘어가지
     않고 로그로 드러난다(#94 코드리뷰 5 — `home_bucket_for`의 docstring이
     적어 둔 "호출부는 조용히 버리지 않고 드러내야 한다"는 계약).
 
@@ -494,7 +494,7 @@ def test_demo_seed_fills_every_home_bucket(db, client):
     시드 자신도 `home_bucket_for` 로 자기가 심은 것을 검사해 어긋나면
     CommandError 로 죽는다. 그건 「시드의 의도」와 「판정」이 맞는지를 보고,
     이 테스트는 그것이 **응답에 실제로 실리는지**를 본다 — 시드가 통과해도
-    쿼리 쪽(`_home_bucket_queryset`)이 그 행을 안 집으면 화면은 여전히 빈다.
+    쿼리 쪽(`home_bucket_queryset`)이 그 행을 안 집으면 화면은 여전히 빈다.
     """
 
     from django.core.management import call_command
@@ -615,3 +615,49 @@ def test_demo_seed_awarded_contest_actually_has_an_award(db):
         award = Award.objects.filter(contest=contest).first()
         assert award is not None, f"{contest.title} 이 AWARDED 인데 Award 가 없다"
         assert award.submission.contest_id == contest.pk
+
+
+@pytest.mark.django_db
+def test_each_bucket_query_matches_home_bucket_for_at_every_boundary(
+    sponsor, category, deliverable_type
+):
+    """네 묶음 각각에 대해 「`home_bucket_for` 가 그 묶음이라고 답한다」와 「그 묶음의 쿼리가
+    포함한다」가 경계 직전·경계·직후와 모든 status 에서 같다(#144) — 술어 ↔ Q 쌍의 공용 헬퍼."""
+
+    from contests.curation import home_bucket_queryset
+    from tests.predicate_pairs import assert_predicate_matches_q
+
+    now = timezone.now()
+    threshold = timedelta(days=HOME_IMMINENT_DEADLINE_DAYS)
+    cases = []
+    for label, deadline_at in [
+        ("마감 1초 전", now - timedelta(seconds=1)),
+        ("마감 정확히 지금", now),
+        ("마감 1초 후", now + timedelta(seconds=1)),
+        ("임계값 정확히 위", now + threshold),
+        ("임계값 1초 초과", now + threshold + timedelta(seconds=1)),
+    ]:
+        cases.append((
+            f"PUBLISHED · {label}",
+            _make_contest(
+                sponsor, category, deliverable_type,
+                status=Contest.Status.PUBLISHED, deadline_at=deadline_at, title=label,
+            ),
+        ))
+    for status in (
+        Contest.Status.DRAFT, Contest.Status.CLOSED, Contest.Status.AWARDED, Contest.Status.JUDGING_ENDED
+    ):
+        cases.append((
+            f"{status} · 마감 지남",
+            _make_contest(
+                sponsor, category, deliverable_type,
+                status=status, deadline_at=now - timedelta(days=1), title=str(status),
+            ),
+        ))
+
+    for bucket in HomeCurationBucket:
+        assert_predicate_matches_q(
+            cases,
+            lambda contest, bucket=bucket: home_bucket_for(contest, now=now) == bucket,
+            home_bucket_queryset(Contest.objects.all(), bucket, now=now),
+        )
