@@ -18,6 +18,10 @@ class PaymentOut(Schema):
     total_amount: int
     status: str
     checkout_url: str | None = None
+    # "direct" | "widget" — 위젯을 거칠지는 PG 어댑터 모드가 가른다(#112).
+    # 클라이언트 키의 유무가 아니다 — 그러면 키를 깜빡한 배포가 조용히
+    # fake처럼 동작한다. payments.adapters.checkout_flow_for_current_mode 참고.
+    checkout_flow: str
     created_at: datetime
 
 

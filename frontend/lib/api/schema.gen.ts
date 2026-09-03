@@ -3205,6 +3205,8 @@ export interface components {
         };
         /** PaymentOut */
         PaymentOut: {
+            /** Checkout Flow */
+            checkout_flow: string;
             /** Checkout Url */
             checkout_url?: string | null;
             /** Contest Id */

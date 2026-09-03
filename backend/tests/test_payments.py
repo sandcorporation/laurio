@@ -706,6 +706,157 @@ def test_concurrent_initiate_payment_creates_only_one_active_payment(
         assert active.count() == 1
 
 
+# --- 위젯 vs 즉시 확정 — PG 어댑터 모드가 가른다, 클라이언트 키가 아니다 (#112) ---
+
+
+@pytest.mark.django_db
+def test_checkout_flow_is_direct_for_fake_adapter_mode(client, category, landing_type):
+    """dev/test 기본값(PAYMENT_ADAPTER_MODE=fake)에서는 브라우저가 위젯 없이
+    곧바로 확정한다 — 기존 e2e가 그 경로로 끝까지 걸어야 한다(#112 인수조건)."""
+
+    access, contest = _draft_contest(client, category=category, deliverable_type=landing_type)
+
+    payment = _initiate_payment(client, access, contest["id"])
+
+    assert payment["checkout_flow"] == "direct"
+
+
+@pytest.mark.django_db
+def test_checkout_flow_is_widget_for_a_real_adapter_mode(client, category, landing_type):
+    """PAYMENT_ADAPTER_MODE가 dotted path(=fake가 아닌)를 가리키면 브라우저가
+    위젯을 거쳐야 한다는 신호를 받는다 — **클라이언트 키의 유무가 아니라
+    이 설정값 자체**가 가른다(#112 인수조건). `_DottedPathTestPGAdapter`는
+    `FakePGAdapter`를 상속해 동작은 fake와 같지만 클래스명이 "Fake"로
+    시작하지 않으므로 `is_fake_adapter_binding`이 이 값을 fake로 보지
+    않는다 — #83이 이미 이 구분을 위해 쓰는 것과 같은 더블이다."""
+
+    access, contest = _draft_contest(client, category=category, deliverable_type=landing_type)
+
+    with override_settings(
+        PAYMENT_ADAPTER_MODE="tests.test_payments._DottedPathTestPGAdapter"
+    ):
+        payment = _initiate_payment(client, access, contest["id"])
+
+    assert payment["checkout_flow"] == "widget"
+
+
+# --- 확정 금액은 브라우저가 아니라 Payment 행에서 온다 (#112) ------------------
+
+
+@pytest.mark.django_db
+def test_confirm_ignores_amount_claimed_by_the_browser(client, category, landing_type):
+    """브라우저가 confirm 요청 본문에 실제와 다른 amount를 실어 보내도 결과가
+    달라지지 않는다 — 확정에 쓰이는 금액은 언제나 이 Payment 행의
+    `total_amount`다(#112 인수조건). `ConfirmPaymentIn`에는 애초에 `amount`
+    필드가 없으므로 이 값은 스키마 파싱 단계에서부터 버려진다 — 이 테스트는
+    "필드가 없다"는 사실이 아니라 "그 값을 실어 보내도 원장·상태가 정확한
+    금액으로만 남는다"는 관찰 가능한 결과를 고정한다."""
+
+    access, contest = _draft_contest(
+        client, prize=1_000_000, category=category, deliverable_type=landing_type
+    )
+    payment = _initiate_payment(client, access, contest["id"])
+
+    forged_amount = payment["total_amount"] + 999_000_000
+    response = client.post(
+        f"{PAYMENTS_URL}/{payment['order_id']}/confirm",
+        data={"payment_key": "widget-key-forged-amount", "amount": forged_amount},
+        content_type="application/json",
+        **_auth_header(access),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "paid"
+    assert response.json()["total_amount"] == payment["total_amount"]
+
+    ledger_id = Contest.objects.get(id=contest["id"]).ledger_id
+    _login_operator(client)
+    entries = client.get(f"{LEDGER_URL}/contests/{ledger_id}/entries").json()
+    assert len(entries) == 1
+    lines_by_account = {
+        line["account"]: (line["side"], line["amount"]) for line in entries[0]["lines"]
+    }
+    listing_fee = get_current_policy().contest_listing_fee
+    # forged_amount가 아니라 실제 총액(prize + 개최 등록비)만 원장에 남는다.
+    assert lines_by_account["sponsor_deposit"] == ("debit", 1_000_000 + listing_fee)
+
+
+# --- 확정 경로가 둘이어도 한 번만 반영된다 — 순서를 뒤집어도 (#114) ------------
+
+
+@pytest.mark.django_db
+def test_confirm_arriving_first_then_webhook_still_lands_paid_with_single_ledger_entry(
+    client, category, landing_type
+):
+    """리다이렉트(동기 confirm)가 먼저 도착하고, 그 뒤 웹훅이 같은 order_id로
+    다시 통지해도 원장에는 한 번만 반영된다 — 웹훅이 먼저 오는 경우
+    (`test_webhook_arriving_before_confirm_response_still_lands_correct_state`)
+    는 이미 있으니, 순서를 뒤집은 이 경우도 같은 자리로 수렴한다는 것을
+    고정한다(#114 인수조건 — "웹훅이 먼저 와도, 리다이렉트가 먼저 와도
+    최종 상태가 같다")."""
+
+    access, contest = _draft_contest(client, category=category, deliverable_type=landing_type)
+    payment = _initiate_payment(client, access, contest["id"])
+
+    confirm = _confirm(client, access, payment["order_id"], payment_key="widget-key-order-1")
+    assert confirm.status_code == 200
+    assert confirm.json()["status"] == "paid"
+
+    webhook = _send_webhook(
+        client, webhook_id="wh-confirm-first-1", order_id=payment["order_id"], status="paid"
+    )
+    assert webhook.status_code == 200
+
+    ledger_id = Contest.objects.get(id=contest["id"]).ledger_id
+    _login_operator(client)
+    entries = client.get(f"{LEDGER_URL}/contests/{ledger_id}/entries").json()
+    assert len(entries) == 1  # 두 채널이 경합해도 분개는 한 번만.
+
+    contest_row = Contest.objects.get(id=contest["id"])
+    assert contest_row.status == Contest.Status.PUBLISHED
+
+    payment_row = Payment.objects.get(order_id=payment["order_id"])
+    assert payment_row.status == Payment.Status.PAID
+
+
+# --- 실패 웹훅도 같은 자리로 수렴한다 — 리다이렉트 없이 웹훅만 (#114) ----------
+
+
+@pytest.mark.django_db
+def test_failed_webhook_alone_leaves_contest_draft_with_no_ledger_entries(
+    client, category, landing_type
+):
+    """리다이렉트가 전혀 오지 않아도(사용자가 결제 직후 브라우저를 닫았거나
+    애초에 위젯에서 실패해 우리 화면으로 돌아오지 못한 경우) 실패 웹훅만으로
+    Payment가 종결되고 Contest는 draft에 머문다 — "돈은 안 들어왔는데
+    공모전은 공개돼 있다" 같은 어긋난 상태가 남지 않는다(#114 인수조건)."""
+
+    access, contest = _draft_contest(client, category=category, deliverable_type=landing_type)
+    payment = _initiate_payment(client, access, contest["id"])
+
+    webhook = _send_webhook(
+        client, webhook_id="wh-failed-alone-1", order_id=payment["order_id"], status="failed"
+    )
+    assert webhook.status_code == 200
+    assert webhook.json()["status"] == "failed"
+
+    payment_row = Payment.objects.get(order_id=payment["order_id"])
+    assert payment_row.status == Payment.Status.FAILED
+
+    contest_row = Contest.objects.get(id=contest["id"])
+    assert contest_row.status == Contest.Status.DRAFT
+
+    ledger_id = contest_row.ledger_id
+    _login_operator(client)
+    entries = client.get(f"{LEDGER_URL}/contests/{ledger_id}/entries").json()
+    assert entries == []
+
+    # 실패로 종결된 뒤에도 같은 Contest로 결제를 다시 시작할 수 있다 — 새
+    # Payment(새 order_id)가 만들어진다.
+    retry = _initiate_payment(client, access, contest["id"])
+    assert retry["order_id"] != payment["order_id"]
+
+
 # --- admin (#9 리뷰 지적 6) ----------------------------------------------------
 
 
