@@ -40,7 +40,8 @@ from handovers.models import Handover
 from payments.webhook_security import verify_webhook_signature
 from policies.services import get_current_policy
 
-from .adapters import PayoutError, PayoutTimeoutError, get_adapter
+from payments.charges import Outcome, reconcile_after_timeout
+from .adapters import PayoutError, PayoutTimeoutError, get_adapter, TransferOutcome
 from .adapters_toss import verify_toss_webhook_signature
 from .models import Payout, PayoutWebhookDelivery, Seller, TaxIdentity
 from .schemas import (
@@ -337,8 +338,16 @@ def confirm_payout(request: HttpRequest, idempotency_key: UUID, payload: Confirm
             idempotency_key=str(idempotency_key), simulate=payload.simulate
         )
     except PayoutTimeoutError:
-        # 타임아웃은 실패가 아니다 — 실제 결과를 조회로 확정한다(ADR-0008).
-        outcome = adapter.query_status(idempotency_key=str(idempotency_key))
+        # 타임아웃은 실패가 아니다 — 실제 결과를 조회로 확정한다(ADR-0008). 그
+        # 재확인 자체가 또 실패할 수 있다(#125 — 결제 확인이 #87 지적 3 으로 얻은
+        # 규율을 여기도 갖는다): 그때는 실패로 단정하지 않고 미확정(pending,
+        # attempt=None → record_transfer_result 가 아무것도 쓰지 않는다)으로 남겨
+        # 웹훅이나 다음 재시도가 마저 확정하게 한다.
+        outcome = reconcile_after_timeout(
+            lambda: adapter.query_status(idempotency_key=str(idempotency_key)),
+            on_unknown=TransferOutcome(status="pending", attempt=None),
+            context=f"지급 확정 재확인(idempotency_key={idempotency_key})",
+        )
     except PayoutError as exc:
         raise HttpError(502, str(exc)) from exc
 
@@ -359,9 +368,9 @@ def confirm_payout(request: HttpRequest, idempotency_key: UUID, payload: Confirm
     # 않았다는 뜻) 스스로 아무 것도 기록하지 않는다.
     record_transfer_result(payout, outcome.status, outcome.attempt)
 
-    if outcome.status == "paid":
+    if Outcome.parse(outcome.status) is Outcome.PAID:
         payout = mark_confirmed(idempotency_key, seller_simulate=payload.seller_simulate)
-    elif outcome.status == "failed":
+    elif Outcome.parse(outcome.status) is Outcome.FAILED:
         payout = mark_failed(idempotency_key)
     else:
         # 아직 확정할 수 없다(pending) — 함부로 실패 처리하지 않는다. 이후

@@ -40,7 +40,8 @@ from core.clock import Clock
 from ledger.models import Account, EntrySide
 from ledger.services import LineInput, post_journal_entry
 from notifications.lifecycle import notify_distribution_shares
-from payouts.adapters import PayoutError, PayoutTimeoutError, get_adapter
+from payments.charges import Outcome, reconcile_after_timeout
+from payouts.adapters import PayoutError, PayoutTimeoutError, get_adapter, TransferOutcome
 from payouts.models import Payout
 from payouts.services import get_or_create_payout, mark_confirmed, mark_failed, record_transfer_result
 from policies.models import PlatformPolicy
@@ -211,11 +212,16 @@ def _attempt_share_payout(
     try:
         outcome = adapter.confirm(idempotency_key=str(payout.idempotency_key), simulate=simulate)
     except PayoutTimeoutError:
-        # 타임아웃은 실패가 아니다 — 실제 결과를 조회로 확정한다(ADR-0008).
-        outcome = adapter.query_status(idempotency_key=str(payout.idempotency_key))
+        # 타임아웃은 실패가 아니다 — 실제 결과를 조회로 확정한다(ADR-0008). 재확인
+        # 자체가 또 실패하면(#125) 미확정으로 남긴다 — 몫 단위 격리(아래 호출자의
+        # except Exception)가 잡아 주긴 했지만 그건 "시도 실패"라는 틀린 말을
+        # 기록했고, 이 몫은 다음 스캔에서 새 요청이 아니라 재확인을 받아야 한다.
+        outcome = reconcile_after_timeout(
+            lambda: adapter.query_status(idempotency_key=str(payout.idempotency_key)),
+            on_unknown=TransferOutcome(status="pending", attempt=None),
+            context=f"Distribution 몫 지급 재확인(idempotency_key={payout.idempotency_key})",
+        )
     except PayoutError:
-        from payouts.adapters import TransferOutcome
-
         # 어느 attempt에 대한 이야기인지 신뢰할 수 없다(코드리뷰 지적 5, 5차와
         # 같은 이유) -- attempt=None으로 record_transfer_result가 아무 것도
         # 쓰지 않게 한다. status="failed"만으로도 아래 mark_failed 분기가
@@ -231,9 +237,9 @@ def _attempt_share_payout(
     # 어댑터가 직접 알려준 attempt만 신뢰한다.
     record_transfer_result(payout, outcome.status, outcome.attempt)
 
-    if outcome.status == "paid":
+    if Outcome.parse(outcome.status) is Outcome.PAID:
         payout = mark_confirmed(payout.idempotency_key, policy=policy)
-    elif outcome.status == "failed":
+    elif Outcome.parse(outcome.status) is Outcome.FAILED:
         payout = mark_failed(payout.idempotency_key)
     else:
         # 아직 확정할 수 없다(pending) — REQUESTED로 남겨 웹훅이나 다음 스캔이

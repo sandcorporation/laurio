@@ -114,7 +114,12 @@ class FakePayoutAdapter:
       성공했다. 뒤이어 같은 어댑터 인스턴스로 `query_status`를 부르면 "paid"가
       나온다.
     - "timeout_then_failed" — `confirm`은 타임아웃하고 토스 쪽에서도 실패했다.
+    - "timeout_then_query_error" — `confirm`도 타임아웃하고 뒤이은 `query_status`도
+      실패한다(#125). 재확인 자체가 죽는 실물 경로를 흉내낸다 — FakePGAdapter 의
+      `_QUERY_ERROR_SENTINEL` 과 같은 장치.
     """
+
+    _QUERY_ERROR = "__query_error__"
 
     def __init__(self) -> None:
         self._final_status: dict[str, str] = {}
@@ -145,10 +150,21 @@ class FakePayoutAdapter:
                 f"fake 토스 지급대행이 confirm(idempotency_key={idempotency_key})에서 "
                 "타임아웃했다 — 실제 결과는 query_status로 확정해야 한다."
             )
+        if scenario == "timeout_then_query_error":
+            self._final_status[idempotency_key] = self._QUERY_ERROR
+            raise PayoutTimeoutError(
+                f"fake 토스 지급대행이 confirm(idempotency_key={idempotency_key})에서 "
+                "타임아웃했다 — 그리고 재확인도 실패할 것이다."
+            )
         raise PayoutError(f"알 수 없는 fake 토스 지급대행 시나리오: {scenario!r}")
 
     def query_status(self, *, idempotency_key: str) -> TransferOutcome:
-        return TransferOutcome(status=self._final_status.get(idempotency_key, "pending"), attempt=0)
+        final = self._final_status.get(idempotency_key, "pending")
+        if final == self._QUERY_ERROR:
+            raise PayoutTimeoutError(
+                f"fake 토스 지급대행 query_status(idempotency_key={idempotency_key})가 타임아웃했다."
+            )
+        return TransferOutcome(status=final, attempt=0)
 
 
 def get_adapter() -> PayoutAdapter:
