@@ -128,9 +128,14 @@ button:disabled {
   background: #fff;
 }
 
-/* 두 대기가 서로 다른 것으로 읽혀야 한다(#68 AC, ADR-0020) — 같은 라벨·같은
-   색으로 뭉뚱그리지 않는다. 둘 다 "대기"이지 실패가 아니므로 경고·오류 색(빨강
-   계열)은 어느 쪽에도 쓰지 않는다. */
+/* 대기들이 서로 다른 것으로 읽혀야 한다(#68 AC, ADR-0020) — 같은 라벨·같은
+   색으로 뭉뚱그리지 않는다. 전부 "대기"이지 실패가 아니므로 경고·오류 색(빨강
+   계열)은 어디에도 쓰지 않는다.
+
+   `PayoutBadge` 가 `badge-waiting-${blocked_on}` 을 조립하므로 이 표는 큐가 조회하는
+   세 종류(`usePayoutQueue` 의 `BlockedOnKind`)를 모두 덮어야 한다 — transfer 가
+   빠져 있어서 세 번째 배지만 배경도 테두리도 없는 본문 텍스트로 그려졌다(#91).
+   종류를 늘리면 여기도 함께 늘린다. */
 .badge-waiting {
   border-radius: 999px;
   padding: 0.3rem 0.75rem;
@@ -148,4 +153,12 @@ button:disabled {
   background: #fef3e2;
   color: #9a6700;
   border: 1px solid #f5dfb0;
+}
+
+/* Seller 는 이미 READY 인데 실이체만 남은 경우(#57 코드리뷰 2차 지적 1) — 운영자가
+   해야 할 일이 Seller 쪽이 아니라 이체 재시도라서 seller 와 같은 색을 쓰지 않는다. */
+.badge-waiting-transfer {
+  background: #ecf5ee;
+  color: #1f6b3a;
+  border: 1px solid #c3e0cd;
 }

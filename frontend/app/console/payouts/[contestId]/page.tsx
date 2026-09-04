@@ -111,6 +111,28 @@ function RequestSection({
 }
 
 function PayoutDetail({ payout, onChanged }: { payout: Payout; onChanged: () => void }) {
+  // 「전화번호를 내야 하는가」를 한 곳에서만 판정한다 — 아래에서 폼을 띄우는
+  // 조건과 "하실 일은 없습니다"를 감추는 조건이 같은 값을 봐야 한다. 두 조건이
+  // 따로 적혀 있으면 한쪽만 고쳤을 때 **아무것도 없는 빈 대기 상자**가 남는다
+  // (#91 — `has_seller_phone` 만 보던 시절의 실제 결과).
+  //
+  // 백엔드의 Hold 표(`payouts/progress.py`)가 전화번호를 요구하는 조합과 정확히
+  // 같다: Seller 가 아직 없거나 PENDING 인데 번호가 없을 때. 심사 중
+  // (under_review)·거절(rejected)·본인인증 대기(approval_required)에는 백엔드가
+  // 다른 것을 안내하므로("심사가 끝나면 자동으로 넘어갑니다", "운영자에게
+  // 문의해주세요") 여기서 번호를 요구하면 화면이 시키는 대로 한 사람이 아무
+  // 변화도 못 본다.
+  const needsSellerPhone =
+    !payout.has_seller_phone &&
+    (payout.seller_status === null || payout.seller_status === "pending");
+
+  // 지급대행사가 보낸 본인인증 문자를 아직 처리하지 않았다 — 백엔드도 이것을
+  // Developer 의 차례로 본다(`progress.py` 의 SELLER_AUTH → Turn.DEVELOPER).
+  // 여기 화면이 줄 수 있는 것은 없지만(인증은 토스 쪽에서 끝난다)
+  // "하실 일은 없습니다"라고 말해서는 안 된다 — 바로 위 안내가 정반대를
+  // 말하고 있다.
+  const awaitingSellerAuth = payout.seller_status === "approval_required";
+
   return (
     <>
       <AmountBreakdown payout={payout} />
@@ -143,10 +165,9 @@ function PayoutDetail({ payout, onChanged }: { payout: Payout; onChanged: () => 
               `has_seller_phone`(서버가 계산한 값)을 본다 — seller_status가
               null/pending인지로 추론하면, 전화번호 말고 다른 정보(이메일 등)가
               없어 계속 pending인 경우에도 이미 낸 전화번호를 또 내라는 폼이
-              된다(코드리뷰 지적 12, 3차). */}
-          {!payout.has_seller_phone ? (
-            <SellerPhoneForm payout={payout} onSubmitted={onChanged} />
-          ) : null}
+              된다(코드리뷰 지적 12, 3차). 그 값만으로 부족한 이유와 Seller 상태를
+              함께 보는 이유는 위 `needsSellerPhone` 에 적혀 있다(#91). */}
+          {needsSellerPhone ? <SellerPhoneForm payout={payout} onSubmitted={onChanged} /> : null}
 
           {/* **거절도, 실이체 실패도 실패가 아니다**(#74 스토리 30·31, #57
               코드리뷰 지적 1). 지급대행사가 수취인 등록을 거절하거나, 등록은
@@ -169,7 +190,8 @@ function PayoutDetail({ payout, onChanged }: { payout: Payout; onChanged: () => 
               것도 뜨지 않을 때만이다. 폼·버튼 바로 위에 이 문장이 뜨면
               "할 일이 없다"와 "여기 낼 것이 있다"가 한 화면에서 서로
               모순된다. */}
-          {payout.has_seller_phone &&
+          {!needsSellerPhone &&
+          !awaitingSellerAuth &&
           payout.seller_status !== "rejected" &&
           payout.transfer_status !== "failed" &&
           payout.has_identity ? (

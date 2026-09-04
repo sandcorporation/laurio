@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 from uuid import UUID
 
+from django.db.models import Exists, OuterRef
 from django.http import HttpRequest
 from ninja import Router
 from ninja.errors import HttpError
@@ -441,7 +442,13 @@ def receive_toss_payout_webhook(request: HttpRequest):
     본문 구조는 벤더 문서가 공개한 뼈대(`eventType`/`data`)를 최선으로
     추정한 것이다 — staging에서 실제로 한 번 받아 확인하기 전까지는 정확한
     필드명을 단정하지 않는다(#57 알아둘 것). `refPayoutId`(우리
-    idempotency_key)를 찾지 못하면 다른 방식(`data.id`)도 시도한다.
+    idempotency_key)를 찾지 못하면 벤더가 만든 자기 식별자(`data.id`)로 조회한다.
+
+    **`data.id` 는 우리 참조가 아니다**(#91) — 이전에는 그것을 `refPayoutId` 인 양
+    `parse_vendor_ref` 에 넘겼는데, 벤더 식별자는 UUID 도 아니고 attempt 접미어도
+    없으니 파싱이 언제나 실패해 이 폴백은 **있는데 반드시 422 로 끝나는** 경로였다.
+    그 값을 저장해 두는 자리가 이미 있으므로(`Payout.vendor_payout_id` —
+    `TossPayoutAdapter` 가 POST 응답의 `id` 를 거기 넣는다) 그 열로 조회한다.
 
     **지급 식별자는 `{idempotency_key}-{transfer_attempt}` 형식이다**(코드리뷰
     지적 1, 5차 — 이전에는 접미어 없는 순수 UUID만 기대해 `UUID(str(...))`가
@@ -463,27 +470,42 @@ def receive_toss_payout_webhook(request: HttpRequest):
         raise HttpError(400, "웹훅 본문이 JSON이 아닙니다.") from exc
 
     data = body.get("data") or {}
-    ref_payout_id = data.get("refPayoutId") or data.get("id")
+    ref_payout_id = data.get("refPayoutId") or ""
+    vendor_payout_id = data.get("id") or ""
     vendor_status = data.get("status")
     webhook_id = request.headers.get("tosspayments-webhook-transmission-id", "")
 
-    if not ref_payout_id:
+    if not ref_payout_id and not vendor_payout_id:
         raise HttpError(422, "웹훅 본문에서 지급 식별자를 찾을 수 없습니다.")
 
     from .adapters_toss import parse_vendor_ref
 
-    parsed = parse_vendor_ref(str(ref_payout_id))
-    if parsed is None:
+    # **읽을 수 없는 참조는 없는 참조와 같이 다룬다**(#91, 코드리뷰) — 폴백을
+    # 「refPayoutId 가 아예 없을 때」로만 열어 두면, 벤더가 접미어 없는 옛 참조를
+    # 돌려주거나 값이 잘려 오는 순간 그 웹훅은 재전송을 몇 번 받든 영구히 422 다.
+    # 폴백이 막으려던 것이 정확히 그 상황이다.
+    parsed = parse_vendor_ref(str(ref_payout_id)) if ref_payout_id else None
+
+    if parsed is not None:
+        idempotency_key = UUID(parsed[0])
+        webhook_attempt = parsed[1]
+        try:
+            known_payout = Payout.objects.get(idempotency_key=idempotency_key)
+        except Payout.DoesNotExist as exc:
+            raise HttpError(404, "알 수 없는 idempotency_key 입니다.") from exc
+    elif vendor_payout_id:
+        known_payout = Payout.objects.filter(vendor_payout_id=str(vendor_payout_id)).first()
+        if known_payout is None:
+            raise HttpError(404, "알 수 없는 지급 식별자입니다.")
+        idempotency_key = known_payout.idempotency_key
+        # 벤더 식별자는 언제나 **현재** attempt 의 것이다 — 새 시도를 선점할 때마다
+        # `vendor_payout_id` 를 반드시 비우기 때문이다(`adapters_toss` 상단 주석).
+        # 그러니 아래 attempt 대조는 이 경로에서 항상 통과해야 맞다.
+        webhook_attempt = known_payout.transfer_attempt
+    else:
         raise HttpError(
             422, "웹훅의 지급 식별자가 유효한 형식(idempotency_key-attempt)이 아닙니다."
         )
-    idempotency_key_str, webhook_attempt = parsed
-    idempotency_key = UUID(idempotency_key_str)
-
-    try:
-        known_payout = Payout.objects.get(idempotency_key=idempotency_key)
-    except Payout.DoesNotExist as exc:
-        raise HttpError(404, "알 수 없는 idempotency_key 입니다.") from exc
 
     from .adapters_toss import _FAILED_PAYOUT_STATUSES, _PAID_PAYOUT_STATUSES
 
@@ -630,17 +652,32 @@ def list_payouts_for_operator(request: HttpRequest, blocked_on: str | None = Non
     `blocked_on=identity`나 `blocked_on=seller`로 필터링할 수 있다 — 운영자가
     "지금 내가 처리해야 할 것은 어느 쪽인가"에 바로 답할 수 있어야 한다는 요구가
     여기 있다. 값을 주지 않으면 전체를 최신순으로 본다.
+
+    **행마다 조회하지 않는다**(#91) — `hold_of` 는 "조회를 내지 않는다, 호출부가
+    Seller 와 신원 제출 여부를 미리 가져온다"고 못 박아 두었는데(`progress.py`) 이
+    큐만 그 규율을 어겨 행마다 Seller 1회 + TaxIdentity 1회를 쳤고, 그것도
+    `blocked_on` 으로 걸러내기 **전에** 쳤다. 운영자 홈이 세 큐를 병렬로 부르므로
+    그대로 3배가 된다. 신원은 `contests.sponsorship` 과 같은 `Exists` 관용구로 붙이고,
+    Seller 는 FK 가 아니라 Developer 단위 개념이라(`Payout.seller` 는 속성이다)
+    한 질의로 모아 사상한다.
     """
 
-    payouts = (
+    payouts = list(
         Payout.objects.with_target()
+        .annotate(identity_submitted=Exists(TaxIdentity.objects.filter(payout=OuterRef("pk"))))
         .order_by("-created_at")
     )
+    sellers_by_developer = {
+        seller.developer_id: seller
+        for seller in Seller.objects.filter(
+            developer_id__in={payout.developer.id for payout in payouts}
+        )
+    }
 
     results: list[OperatorPayoutOut] = []
     for payout in payouts:
-        seller = payout.seller
-        has_identity = TaxIdentity.objects.filter(payout=payout).exists()
+        seller = sellers_by_developer.get(payout.developer.id)
+        has_identity = payout.identity_submitted
         blocked = hold_of(payout, seller=seller, has_identity=has_identity).blocked_on
         if blocked_on is not None and blocked != blocked_on:
             continue

@@ -280,3 +280,63 @@ test.describe("지급 큐 — 무엇에 막혀 있는가(#68, ADR-0020)", () => 
     await expect(page.getByTestId("payout-queue-heading")).toHaveCount(0);
   });
 });
+
+// --- #91: 세 번째 배지가 스타일 없이 그려진다 ------------------------------------
+//
+// `PayoutBadge` 는 `badge-waiting-${blockedOn}` 을 조립하는데(operator/app/payouts/
+// page.tsx) `operator/app/globals.css` 에는 identity·seller 둘만 정의돼 있었다 —
+// transfer 행은 세 번째 종류인데 배경도 테두리도 없이 본문 텍스트로 그려진다.
+// 기존 배지 테스트는 `class` 문자열만 비교해서(문자열은 실제로 다르다) 이걸
+// 잡지 못했다. **실제로 칠해졌는가**를 본다.
+//
+// 실이체 대기(#57 코드리뷰 2차 지적 1)를 만드는 시드가 없으므로 응답을 갈아끼운다 —
+// 확인 대상이 백엔드 판정이 아니라 이 화면의 스타일이기 때문이다.
+test.describe("지급 큐 — 세 번째 배지도 배지로 그려진다(#91)", () => {
+  const TRANSFER_ROW = {
+    idempotency_key: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    contest_id: 4242,
+    developer_user_id: 77,
+    net_amount: 856_000,
+    status: "confirmed_seller_pending",
+    transfer_status: "failed",
+    blocked_on: "transfer",
+    seller_status: "partially_approved",
+    has_identity: true,
+    created_at: new Date().toISOString(),
+  };
+
+  test("실이체 대기 배지도 칠해진다 — 무스타일 본문 텍스트가 아니다", async ({ page }) => {
+    const operator = seedE2eOperator();
+    await loginAsOperator(page, operator.username);
+
+    await page.route("**/api/backend/operator/payouts?blocked_on=transfer", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([TRANSFER_ROW]),
+      }),
+    );
+
+    await page.goto("/payouts?blocked_on=transfer");
+    await waitForQueueSettled(page);
+
+    const badge = page.getByTestId("payout-blocked-badge-transfer");
+    await expect(badge).toBeVisible();
+
+    // 배경이 투명하면 배지가 아니다 — 다른 두 종류는 각자 배경·테두리를 갖는다.
+    const background = await badge.evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(background).not.toBe("rgba(0, 0, 0, 0)");
+    expect(background).not.toBe("transparent");
+
+    // 그리고 다른 두 종류와 같은 색이어서도 안 된다 — 뭉뚱그리지 않는다(#68 AC).
+    const identityBackground = await badge.evaluate((el) => {
+      const probe = document.createElement("span");
+      probe.className = "badge-waiting badge-waiting-identity";
+      el.parentElement?.appendChild(probe);
+      const value = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return value;
+    });
+    expect(background).not.toBe(identityBackground);
+  });
+});

@@ -1378,6 +1378,14 @@ export interface paths {
          *     `blocked_on=identity`나 `blocked_on=seller`로 필터링할 수 있다 — 운영자가
          *     "지금 내가 처리해야 할 것은 어느 쪽인가"에 바로 답할 수 있어야 한다는 요구가
          *     여기 있다. 값을 주지 않으면 전체를 최신순으로 본다.
+         *
+         *     **행마다 조회하지 않는다**(#91) — `hold_of` 는 "조회를 내지 않는다, 호출부가
+         *     Seller 와 신원 제출 여부를 미리 가져온다"고 못 박아 두었는데(`progress.py`) 이
+         *     큐만 그 규율을 어겨 행마다 Seller 1회 + TaxIdentity 1회를 쳤고, 그것도
+         *     `blocked_on` 으로 걸러내기 **전에** 쳤다. 운영자 홈이 세 큐를 병렬로 부르므로
+         *     그대로 3배가 된다. 신원은 `contests.sponsorship` 과 같은 `Exists` 관용구로 붙이고,
+         *     Seller 는 FK 가 아니라 Developer 단위 개념이라(`Payout.seller` 는 속성이다)
+         *     한 질의로 모아 사상한다.
          */
         get: operations["payouts_api_list_payouts_for_operator"];
         put?: never;
@@ -1619,7 +1627,13 @@ export interface paths {
          *     본문 구조는 벤더 문서가 공개한 뼈대(`eventType`/`data`)를 최선으로
          *     추정한 것이다 — staging에서 실제로 한 번 받아 확인하기 전까지는 정확한
          *     필드명을 단정하지 않는다(#57 알아둘 것). `refPayoutId`(우리
-         *     idempotency_key)를 찾지 못하면 다른 방식(`data.id`)도 시도한다.
+         *     idempotency_key)를 찾지 못하면 벤더가 만든 자기 식별자(`data.id`)로 조회한다.
+         *
+         *     **`data.id` 는 우리 참조가 아니다**(#91) — 이전에는 그것을 `refPayoutId` 인 양
+         *     `parse_vendor_ref` 에 넘겼는데, 벤더 식별자는 UUID 도 아니고 attempt 접미어도
+         *     없으니 파싱이 언제나 실패해 이 폴백은 **있는데 반드시 422 로 끝나는** 경로였다.
+         *     그 값을 저장해 두는 자리가 이미 있으므로(`Payout.vendor_payout_id` —
+         *     `TossPayoutAdapter` 가 POST 응답의 `id` 를 거기 넣는다) 그 열로 조회한다.
          *
          *     **지급 식별자는 `{idempotency_key}-{transfer_attempt}` 형식이다**(코드리뷰
          *     지적 1, 5차 — 이전에는 접미어 없는 순수 UUID만 기대해 `UUID(str(...))`가
