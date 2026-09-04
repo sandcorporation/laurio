@@ -3196,3 +3196,199 @@ def test_operator_queue_flags_an_unclassifiable_payout_as_operator_hold_and_logs
     row = next(r for r in resp.json() if r["idempotency_key"] == requested["idempotency_key"])
     assert row["blocked_on"] == "operator"
     assert any("bogus" in record.getMessage() for record in caplog.records)
+
+
+# --- #91: 지급 화면·운영자 큐 정리 — #57 이 의도적으로 남긴 것들 ------------------
+
+
+@pytest.mark.django_db
+def test_toss_payout_webhook_falls_back_to_vendor_payout_id_when_ref_is_absent(
+    client, category, landing_type
+):
+    """`refPayoutId` 없이 `data.id` 만 온 웹훅도 받는다 (#91).
+
+    폴백 경로는 `data.id` 를 우리 `refPayoutId`(`{idempotency_key}-{attempt}`)인 양
+    파싱했는데, `data.id` 는 **벤더가 만든 자기 식별자**다(`TossPayoutAdapter` 가 POST
+    응답의 `id` 를 그대로 `Payout.vendor_payout_id` 에 저장한다). UUID 도 아니고 attempt
+    접미어도 없으니 `parse_vendor_ref` 가 언제나 None 을 돌려주고, 이 폴백은 **항상 422**
+    였다 — 있으나 마나가 아니라, 있는데 반드시 실패하는 경로였다. 벤더 식별자로 조회하는
+    길이 이미 있으므로(`vendor_payout_id`) 그것을 쓴다.
+    """
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+
+    # 실이체 시도가 벤더 식별자를 받아 둔 상태를 재현한다 — adapter 가 POST 응답의
+    # `id` 를 저장하는 그 자리다.
+    Payout.objects.filter(idempotency_key=requested["idempotency_key"]).update(
+        vendor_payout_id="toss-vendor-payout-99"
+    )
+
+    transmission_time = "2024-01-01T00:00:00+09:00"
+    payload = json.dumps(
+        {
+            "eventType": "payout.changed",
+            # refPayoutId 가 없다 — 벤더가 자기 식별자만 실어 보낸 경우다.
+            "data": {"id": "toss-vendor-payout-99", "status": "COMPLETED"},
+        }
+    ).encode("utf-8")
+
+    with override_settings(TOSS_API_SECURE_KEY=_TEST_TOSS_SECURE_KEY):
+        signature = _sign_toss_webhook(payload=payload, transmission_time=transmission_time)
+        resp = client.post(
+            f"{PAYOUTS_URL}/webhook/toss",
+            data=payload,
+            content_type="application/json",
+            HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_TIME=transmission_time,
+            HTTP_TOSSPAYMENTS_WEBHOOK_SIGNATURE=signature,
+            HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_ID="whid-fallback-1",
+        )
+
+    assert resp.status_code == 200, resp.content
+    assert resp.json()["status"] == "confirmed_identity_pending"
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    assert payout.status == Payout.Status.CONFIRMED_IDENTITY_PENDING
+
+
+@pytest.mark.django_db
+def test_toss_payout_webhook_still_404s_on_an_unknown_vendor_payout_id(
+    client, category, landing_type
+):
+    """폴백이 열렸다고 아무 식별자나 통과시키지 않는다 (#91) — 모르는 벤더 식별자는
+    404 다(아는 idempotency_key 가 아닐 때와 같은 답)."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    _request_payout(client, dev, contest["id"])
+
+    transmission_time = "2024-01-01T00:00:00+09:00"
+    payload = json.dumps(
+        {"eventType": "payout.changed", "data": {"id": "nobody-knows-this", "status": "COMPLETED"}}
+    ).encode("utf-8")
+
+    with override_settings(TOSS_API_SECURE_KEY=_TEST_TOSS_SECURE_KEY):
+        signature = _sign_toss_webhook(payload=payload, transmission_time=transmission_time)
+        resp = client.post(
+            f"{PAYOUTS_URL}/webhook/toss",
+            data=payload,
+            content_type="application/json",
+            HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_TIME=transmission_time,
+            HTTP_TOSSPAYMENTS_WEBHOOK_SIGNATURE=signature,
+            HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_ID="whid-fallback-2",
+        )
+
+    assert resp.status_code == 404, resp.content
+
+
+@pytest.mark.django_db
+def test_operator_payout_queue_does_not_query_per_row(client, category, landing_type):
+    """운영자 지급 큐는 행이 늘어도 질의 수가 늘지 않는다 (#91).
+
+    `hold_of` 는 「조회를 내지 않는다 — 호출부가 Seller 와 신원 제출 여부를 미리
+    가져온다」고 못 박아 두었는데(`payouts/progress.py`), 이 큐만 그 규율을 지키지
+    않아 행마다 Seller 1회 + TaxIdentity 1회를 쳤다. 홈이 세 큐를 병렬로 부르므로
+    그대로 3배가 된다.
+    """
+
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    sponsor1, dev1, contest1, _s1 = _ready_for_payout(
+        client, category, landing_type, sponsor_uid="sponsor-nplus1-1", dev_uid="dev-nplus1-1"
+    )
+    requested1 = _request_payout(client, dev1, contest1["id"])
+    _confirm_payout(client, dev1, requested1["idempotency_key"], seller_simulate="review_required")
+
+    operator = _operator_client(username="payouts-op-nplus1")
+
+    with CaptureQueriesContext(connection) as one_row:
+        resp = operator.get("/api/operator/payouts")
+        assert resp.status_code == 200
+    assert len(resp.json()) == 1
+
+    ClockOverride.objects.filter(pk=1).delete()
+    _sponsor2, dev2, contest2, _s2 = _ready_for_payout(
+        client, category, landing_type, sponsor_uid="sponsor-nplus1-2", dev_uid="dev-nplus1-2"
+    )
+    requested2 = _request_payout(client, dev2, contest2["id"])
+    _confirm_payout(client, dev2, requested2["idempotency_key"])  # identity_pending
+
+    ClockOverride.objects.filter(pk=1).delete()
+    _sponsor3, dev3, contest3, _s3 = _ready_for_payout(
+        client, category, landing_type, sponsor_uid="sponsor-nplus1-3", dev_uid="dev-nplus1-3"
+    )
+    requested3 = _request_payout(client, dev3, contest3["id"])
+    _confirm_payout(client, dev3, requested3["idempotency_key"], seller_simulate="rejected")
+
+    with CaptureQueriesContext(connection) as three_rows:
+        resp = operator.get("/api/operator/payouts")
+        assert resp.status_code == 200
+    assert len(resp.json()) == 3
+
+    assert len(three_rows) == len(one_row), (
+        "행이 1개에서 3개로 늘었는데 질의 수가 늘었다 — 행마다 조회하고 있다.\n"
+        + "\n".join(q["sql"][:160] for q in three_rows)
+    )
+
+
+class _CountingSellerAdapter(FakeSellerAdapter):
+    """`register()` 호출 횟수를 세는 테스트 전용 더블 (#91).
+
+    등록이 READY 로 끝나지 않는 시나리오를 골라(`approval_required`)
+    `ensure_seller_registered` 의 조기 반환에 걸리지 않게 한다 — 그래야
+    「Payout 마다 벤더를 부른다」가 실제로 드러난다.
+    """
+
+    calls: list[str] = []
+
+    def register(self, registration, *, simulate: str | None = None) -> SellerRegistrationResult:
+        type(self).calls.append(registration.ref_seller_id)
+        return super().register(registration, simulate="approval_required")
+
+
+@pytest.mark.django_db
+def test_submit_seller_phone_calls_the_vendor_once_no_matter_how_many_payouts(
+    client, category, landing_type
+):
+    """전화번호 제출 한 번이 Payout 개수만큼 벤더를 부르지 않는다 (#91).
+
+    Seller 는 Developer 단위 개념이라 등록도 한 번이면 된다. 그런데
+    `submit_seller_phone` 은 대기 중인 Payout 마다 `retry_seller_registration` 을
+    불렀고, 그 각각이 `ensure_seller_registered` 를 거쳐 최대 30초짜리 벤더 호출을
+    했다 — 몫이 여럿인 Developer 의 제출 요청은 워커 타임아웃을 넘긴다.
+    `advance_seller_pending_payouts` 가 이미 쓰는 모양(등록은 밖에서 한 번, 루프는
+    `register_seller=False`)을 따른다.
+    """
+
+    _CountingSellerAdapter.calls = []
+
+    with override_settings(SELLER_ADAPTER_MODE="tests.test_payouts._CountingSellerAdapter"):
+        sponsor1, dev, contest1, _s1 = _ready_for_payout(
+            client, category, landing_type, sponsor_uid="sponsor-phone-1", dev_uid="dev-phone-1"
+        )
+        requested1 = _request_payout(client, dev, contest1["id"])
+        _confirm_payout(client, dev, requested1["idempotency_key"])
+
+        ClockOverride.objects.filter(pk=1).delete()
+        _sponsor2, dev_again, contest2, _s2 = _ready_for_payout(
+            client, category, landing_type, sponsor_uid="sponsor-phone-2", dev_uid="dev-phone-1"
+        )
+        requested2 = _request_payout(client, dev_again, contest2["id"])
+        _confirm_payout(client, dev_again, requested2["idempotency_key"])
+
+        # 둘 다 Seller 대기에 걸려 있다 — 여기까지가 준비다.
+        assert Payout.objects.filter(status=Payout.Status.CONFIRMED_SELLER_PENDING).count() == 2
+
+        _CountingSellerAdapter.calls = []
+        resp = client.post(
+            f"{PAYOUTS_URL}/{requested1['idempotency_key']}/seller-phone",
+            data={"phone_number": "01012345678"},
+            content_type="application/json",
+            **_auth_header(dev["access"]),
+        )
+
+    assert resp.status_code == 200, resp.content
+    assert len(_CountingSellerAdapter.calls) == 1, (
+        f"Payout 2건에 벤더 등록 호출이 {len(_CountingSellerAdapter.calls)}회 났다 — "
+        "Seller 는 Developer 단위라 한 번이면 된다."
+    )

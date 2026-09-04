@@ -434,6 +434,15 @@ def submit_seller_phone(developer, phone_number: str) -> Seller:
     전화번호가 없어 PENDING에 계속 머물렀던 경우, `TossSellerAdapter.register`
     참고) 저장 직후 곧바로 재시도한다 — Developer가 전화번호를 내고 나서도
     "다시 시도" 버튼을 또 눌러야 한다면 그 자체가 침묵으로 읽힌다.
+
+    **등록은 Payout 마다가 아니라 Developer 마다 한 번이다**(#91). 이전에는 대기 중인
+    Payout 마다 `retry_seller_registration` 을 불렀고 그 각각이
+    `ensure_seller_registered` 를 거쳐 최대 30초짜리 벤더 호출을 냈다 — 등록이 READY 로
+    끝나지 않는 갈래(승인 대기·심사·거절)에서는 조기 반환에도 걸리지 않아, 몫이 셋인
+    Developer 의 제출 요청 하나가 벤더 호출 셋을 직렬로 기다리다 워커 타임아웃을 넘겼다.
+    Seller 는 Developer 단위 개념이니 등록도 한 번이면 된다 —
+    `advance_seller_pending_payouts` 가 이미 쓰는 모양(판정은 루프 밖에서 한 번, 루프는
+    `register_seller=False`)을 그대로 따른다.
     """
 
     with transaction.atomic():
@@ -441,9 +450,16 @@ def submit_seller_phone(developer, phone_number: str) -> Seller:
         seller.phone_number = phone_number
         seller.save(update_fields=["phone_number_encrypted", "updated_at"])
 
-    pending_payouts = Payout.objects.filter(status=Payout.Status.CONFIRMED_SELLER_PENDING).for_developer(developer)
-    for pending_payout in pending_payouts:
-        retry_seller_registration(pending_payout)
+    has_pending_payout = (
+        Payout.objects.filter(status=Payout.Status.CONFIRMED_SELLER_PENDING)
+        .for_developer(developer)
+        .exists()
+    )
+    if has_pending_payout:
+        # 등록을 **앞당기지는** 않는다(ADR-0020) — 확정된 Payout 이 이미 기다리고 있을
+        # 때만 부른다. 벤더 호출은 락 밖이다.
+        ensure_seller_registered(developer)
+        advance_seller_pending_payouts(developer)
 
     seller.refresh_from_db()
     return seller

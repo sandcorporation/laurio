@@ -231,3 +231,84 @@ test("세션이 없으면 렌더링 전에 로그인으로 돌아간다", async 
   await expect(page).toHaveURL(/\/login/);
   expect(await page.content()).not.toContain("상금 지급");
 });
+
+// --- #91: 폼 조건이 백엔드 안내와 어긋난다 ---------------------------------------
+//
+// 전화번호 폼은 `!has_seller_phone` 하나만 보고 떴다. 그런데 백엔드의 Hold 표
+// (`payouts/progress.py`)가 전화번호를 요구하는 것은 Seller 가 아직 없거나 PENDING
+// 일 때뿐이다 — 심사 중(under_review)이나 거절(rejected)에는 "심사가 끝나면 자동으로
+// 넘어간다"·"운영자에게 문의하라"고 말한다. 화면이 시키는 대로 번호를 내면 아무 일도
+// 일어나지 않는다.
+
+test("심사 중에는 전화번호를 요구하지 않는다 — 백엔드 안내와 같은 것을 말한다", async ({
+  page,
+}) => {
+  const seeded = seedE2eContests();
+  await login(page, seeded.judging.developer_login_seed);
+  const contestId = seeded.judging.id;
+
+  await stubPayout(page, contestId, {
+    status: "confirmed_seller_pending",
+    has_identity: true,
+    has_seller_phone: false,
+    seller_status: "under_review",
+    next_action_message:
+      "지급대행사 심사가 진행 중입니다(주간 지급 한도 초과 또는 추가 확인 요청) — 상금은 안전하게 보관되어 있으며 심사가 끝나면 자동으로 다음 단계로 넘어갑니다.",
+  });
+  await page.goto(`/console/payouts/${contestId}`);
+
+  await expect(page.getByTestId("payout-next-action-message")).toContainText("심사가 끝나면");
+  await expect(page.getByTestId("payout-seller-phone-form")).toHaveCount(0);
+});
+
+test("등록이 거절된 상태에서도 전화번호를 요구하지 않는다 — 할 일은 재시도다", async ({
+  page,
+}) => {
+  const seeded = seedE2eContests();
+  await login(page, seeded.judging.developer_login_seed);
+  const contestId = seeded.judging.id;
+
+  await stubPayout(page, contestId, {
+    status: "confirmed_seller_pending",
+    has_identity: true,
+    has_seller_phone: false,
+    seller_status: "rejected",
+    next_action_message:
+      "지급대행사 수취인 등록이 거절되었습니다. 상금은 원장에 그대로 남아 있습니다 — 운영자에게 문의해주세요.",
+  });
+  await page.goto(`/console/payouts/${contestId}`);
+
+  // 먼저 이 상태에서 **있어야 할 것**이 그려질 때까지 기다린다 — 곧바로
+  // toHaveCount(0)부터 치면 아직 렌더 전인 순간에 통과해버린다(이 저장소가
+  // 겪은 거짓 성공).
+  await expect(page.getByTestId("payout-seller-retry-rejected")).toBeVisible();
+  await expect(page.getByTestId("payout-seller-phone-form")).toHaveCount(0);
+});
+
+test("아직 등록 전이면 전화번호 폼은 그대로 뜬다 — 이 경로를 막지 않았다", async ({ page }) => {
+  const seeded = seedE2eContests();
+  await login(page, seeded.judging.developer_login_seed);
+  const contestId = seeded.judging.id;
+
+  await stubPayout(page, contestId, {
+    status: "confirmed_seller_pending",
+    has_identity: true,
+    has_seller_phone: false,
+    seller_status: null,
+    next_action_message: "지급대행사 수취인 등록에 전화번호가 필요합니다 — 아래에서 제출해주세요.",
+  });
+  await page.goto(`/console/payouts/${contestId}`);
+  await expect(page.getByTestId("payout-seller-phone-form")).toBeVisible();
+
+  // 등록은 접수됐지만 아직 PENDING 인 경우도 같다 — 벤더가 아직 전화번호를 못 받았다.
+  await page.unrouteAll();
+  await stubPayout(page, contestId, {
+    status: "confirmed_seller_pending",
+    has_identity: true,
+    has_seller_phone: false,
+    seller_status: "pending",
+    next_action_message: "지급대행사 수취인 등록에 전화번호가 필요합니다 — 아래에서 제출해주세요.",
+  });
+  await page.goto(`/console/payouts/${contestId}`);
+  await expect(page.getByTestId("payout-seller-phone-form")).toBeVisible();
+});
