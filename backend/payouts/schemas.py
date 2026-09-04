@@ -80,7 +80,10 @@ class WebhookIn(Schema):
 
 class WebhookOut(Schema):
     received: bool
-    idempotency_key: UUID
+    # 모르는 참조에도 200 으로 답하므로(#170) 돌려줄 키가 없을 수 있다 —
+    # refPayoutId 를 읽지 못해 벤더 식별자로 폴백했는데 그것도 우리 것이
+    # 아니었던 경우다. 「받았다」는 사실만 남기고 키는 비운다.
+    idempotency_key: UUID | None = None
     status: str
 
 

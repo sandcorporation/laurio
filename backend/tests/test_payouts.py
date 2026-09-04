@@ -35,7 +35,7 @@ from core.models import ClockOverride
 from handovers.models import Handover
 from ledger.services import contest_entries
 from payouts.adapters import FakePayoutAdapter, FakeSellerAdapter, SellerRegistrationResult
-from payouts.models import Payout, Seller, TaxIdentity
+from payouts.models import Payout, PayoutWebhookDelivery, Seller, TaxIdentity
 
 TICK_URL = "/api/internal/tick"
 CONTESTS_URL = "/api/contests"
@@ -3261,11 +3261,14 @@ def test_toss_payout_webhook_falls_back_to_vendor_payout_id_when_ref_is_absent(
 
 
 @pytest.mark.django_db
-def test_toss_payout_webhook_still_404s_on_an_unknown_vendor_payout_id(
+def test_toss_payout_webhook_does_not_apply_an_unknown_vendor_payout_id(
     client, category, landing_type
 ):
-    """폴백이 열렸다고 아무 식별자나 통과시키지 않는다 (#91) — 모르는 벤더 식별자는
-    404 다(아는 idempotency_key 가 아닐 때와 같은 답)."""
+    """폴백이 열렸다고 아무 식별자나 통과시키지 않는다 (#91).
+
+    #170 이 응답을 404 에서 200 으로 바꿨지만(모르는 참조는 「내 것이 아니다」이지
+    「전달 실패」가 아니다) 이 티켓이 지키려던 것은 상태 코드가 아니라 **아무
+    Payout 도 건드리지 않는다**는 쪽이다 — 그것을 직접 단언한다."""
 
     sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
     _request_payout(client, dev, contest["id"])
@@ -3286,7 +3289,10 @@ def test_toss_payout_webhook_still_404s_on_an_unknown_vendor_payout_id(
             HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_ID="whid-fallback-2",
         )
 
-    assert resp.status_code == 404, resp.content
+    assert resp.status_code == 200, resp.content
+    # 아무 Payout 도 이 웹훅으로 전진하지 않았다 — 이것이 #91 의 실제 요구다.
+    assert not Payout.objects.exclude(status=Payout.Status.REQUESTED).exists()
+    assert not PayoutWebhookDelivery.objects.exists()
 
 
 @pytest.mark.django_db
@@ -3922,3 +3928,162 @@ def test_operator_queue_rejects_a_cursor_it_cannot_read(client, category, landin
     resp = operator.get("/api/operator/payouts?after=not-a-cursor")
 
     assert resp.status_code == 422, resp.content
+
+
+# --- #170: 모르는 참조는 404 가 아니라 200 이다 -------------------------------------
+#
+# dev 와 staging 이 같은 토스 상점의 웹훅을 나눠 받는다(실측: 두 환경이 같은
+# 보안 키로 서명한 요청을 둘 다 통과시킨다). 그러면 모든 이벤트가 양쪽에 다 가고
+# 그 Payout 은 한쪽 DB 에만 있다 — 없는 쪽이 404 를 내면 벤더는 「전달 실패」로
+# 보고 재전송하는데, 재전송해도 그 키는 영원히 없으니 무한히 반복된다. 그
+# 재전송 로그는 진짜 결함과 같은 모양이라 원인을 가린다.
+
+
+@pytest.mark.django_db
+def test_toss_payout_webhook_answers_200_for_an_unknown_idempotency_key(client):
+    """서명은 맞는데 그 idempotency_key 가 우리 DB 에 없다 — 「내 것이 아니다」다."""
+
+    payload = json.dumps(
+        {
+            "eventType": "payout.changed",
+            "data": {"refPayoutId": f"{uuid.uuid4()}-1", "status": "COMPLETED"},
+        }
+    ).encode("utf-8")
+    transmission_time = "2024-01-01T00:00:00+09:00"
+
+    with override_settings(TOSS_API_SECURE_KEY=_TEST_TOSS_SECURE_KEY):
+        resp = client.post(
+            f"{PAYOUTS_URL}/webhook/toss",
+            data=payload,
+            content_type="application/json",
+            HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_TIME=transmission_time,
+            HTTP_TOSSPAYMENTS_WEBHOOK_SIGNATURE=_sign_toss_webhook(
+                payload=payload, transmission_time=transmission_time
+            ),
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["received"] is True
+
+
+@pytest.mark.django_db
+def test_toss_payout_webhook_answers_200_for_an_unknown_vendor_payout_id(client):
+    """refPayoutId 가 읽히지 않아 벤더 식별자로 폴백했는데 그것도 모르는 값이다."""
+
+    payload = json.dumps(
+        {
+            "eventType": "payout.changed",
+            "data": {"refPayoutId": "읽을-수-없는-참조", "id": "someone-elses-payout", "status": "COMPLETED"},
+        }
+    ).encode("utf-8")
+    transmission_time = "2024-01-01T00:00:00+09:00"
+
+    with override_settings(TOSS_API_SECURE_KEY=_TEST_TOSS_SECURE_KEY):
+        resp = client.post(
+            f"{PAYOUTS_URL}/webhook/toss",
+            data=payload,
+            content_type="application/json",
+            HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_TIME=transmission_time,
+            HTTP_TOSSPAYMENTS_WEBHOOK_SIGNATURE=_sign_toss_webhook(
+                payload=payload, transmission_time=transmission_time
+            ),
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["received"] is True
+
+
+@pytest.mark.django_db
+def test_toss_seller_webhook_answers_200_for_an_unknown_seller(client):
+    payload = json.dumps(
+        {
+            "eventType": "seller.changed",
+            "data": {
+                "refSellerId": "laurio-developer-99999999",
+                "sellerId": "someone-elses-seller",
+                "status": "APPROVAL_REQUIRED",
+            },
+        }
+    ).encode("utf-8")
+    transmission_time = "2024-01-01T00:00:00+09:00"
+
+    with override_settings(TOSS_API_SECURE_KEY=_TEST_TOSS_SECURE_KEY):
+        resp = client.post(
+            f"{PAYOUTS_URL}/webhook/toss-seller",
+            data=payload,
+            content_type="application/json",
+            HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_TIME=transmission_time,
+            HTTP_TOSSPAYMENTS_WEBHOOK_SIGNATURE=_sign_toss_webhook(
+                payload=payload, transmission_time=transmission_time
+            ),
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["received"] is True
+
+
+@pytest.mark.django_db
+def test_unknown_reference_does_not_weaken_signature_rejection(client):
+    """모르는 참조에 200 을 주는 것이 위조 방어를 낮추지 않는다 — 서명이 먼저다.
+
+    이 둘이 갈리지 않으면 「200 으로 조용히 끝낸다」가 「누구나 아무 본문이나
+    보내도 된다」가 된다(#9 리뷰 지적 2가 세운 순서: 서명은 DB 를 건드리기 전에).
+    """
+
+    payload = json.dumps(
+        {
+            "eventType": "payout.changed",
+            "data": {"refPayoutId": f"{uuid.uuid4()}-1", "status": "COMPLETED"},
+        }
+    ).encode("utf-8")
+
+    with override_settings(TOSS_API_SECURE_KEY=_TEST_TOSS_SECURE_KEY):
+        resp = client.post(
+            f"{PAYOUTS_URL}/webhook/toss",
+            data=payload,
+            content_type="application/json",
+            HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_TIME="2024-01-01T00:00:00+09:00",
+            HTTP_TOSSPAYMENTS_WEBHOOK_SIGNATURE="v1:d3Jvbmc=",
+        )
+
+    assert resp.status_code == 401
+
+
+@pytest.mark.django_db
+def test_toss_webhooks_still_reject_a_body_we_cannot_read(client):
+    """형식 자체를 못 읽는 본문은 여전히 422 다 — 「모르는 참조」와 다르다.
+
+    이쪽은 **우리 추정이 틀렸다**는 신호이고(#57: 본문 구조는 벤더 문서를
+    최선으로 추정한 것이지 실물로 확인되지 않았다), 그 신호까지 200 으로
+    덮으면 #97 이 확인하려는 바로 그것이 조용해진다.
+    """
+
+    transmission_time = "2024-01-01T00:00:00+09:00"
+    payload = json.dumps({"eventType": "payout.changed", "data": {}}).encode("utf-8")
+
+    with override_settings(TOSS_API_SECURE_KEY=_TEST_TOSS_SECURE_KEY):
+        resp = client.post(
+            f"{PAYOUTS_URL}/webhook/toss",
+            data=payload,
+            content_type="application/json",
+            HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_TIME=transmission_time,
+            HTTP_TOSSPAYMENTS_WEBHOOK_SIGNATURE=_sign_toss_webhook(
+                payload=payload, transmission_time=transmission_time
+            ),
+        )
+    assert resp.status_code == 422
+
+    payload = json.dumps(
+        {"eventType": "seller.changed", "data": {"refSellerId": "laurio-developer-1", "status": "무슨상태"}}
+    ).encode("utf-8")
+    with override_settings(TOSS_API_SECURE_KEY=_TEST_TOSS_SECURE_KEY):
+        resp = client.post(
+            f"{PAYOUTS_URL}/webhook/toss-seller",
+            data=payload,
+            content_type="application/json",
+            HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_TIME=transmission_time,
+            HTTP_TOSSPAYMENTS_WEBHOOK_SIGNATURE=_sign_toss_webhook(
+                payload=payload, transmission_time=transmission_time
+            ),
+        )
+    assert resp.status_code == 422

@@ -129,6 +129,18 @@ services:
       STORAGE_ACCESS_KEY: laurio
       STORAGE_SECRET_KEY: laurio-secret
       STORAGE_REGION: us-east-1
+      # 어댑터는 dev 에서 전부 Fake 가 기본이다(settings.py). 다만 벤더가 실제로
+      # 쏘는 웹훅 본문 구조를 확인하려면(#97) 지급·셀러만 실물로 물려야 하는데,
+      # 그 값을 `backend/.env` 에 두면 **호스트 pytest 가 같이 읽어** 62건이 깨지고
+      # 배포 가드 테스트의 `manage.py check` 서브프로세스까지 오염된다(실측).
+      # 그래서 컨테이너에만 닿는 이 자리로 통과시킨다 — 값은 `docker/.env`
+      # (gitignore) 에 두고, 없으면 기본값 그대로 Fake 다.
+      PAYOUT_ADAPTER_MODE: ${PAYOUT_ADAPTER_MODE:-fake}
+      SELLER_ADAPTER_MODE: ${SELLER_ADAPTER_MODE:-fake}
+      TOSS_API_SECRET_KEY: ${TOSS_API_SECRET_KEY:-}
+      # 셀러 등록 JWE 키이자 payout.changed/seller.changed 웹훅 서명 검증 키다.
+      # 비어 있으면 웹훅이 와도 전부 401 이라 등록해 두고 아무것도 못 본다.
+      TOSS_API_SECURE_KEY: ${TOSS_API_SECURE_KEY:-}
     ports:
       - "${LAURIO_API_PORT:-58000}:8000"
     volumes:
