@@ -17,16 +17,22 @@
 // 평소대로 심은 쿠키가 그대로 이 페이지의 세션이 된다. 쿠키 속성(httpOnly·sameSite·
 // 만료)을 여기서 손으로 흉내내지 않는다는 뜻이기도 하다. 그것을 복제하면 언젠가 실제
 // 라우트와 갈린다.
+import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 // 오리진은 playwright.config.ts 의 baseURL 과 같은 규약으로 읽는다 — 컨텍스트의 baseURL 을
 // 꺼내는 비공개 API 에 기대지 않는다.
+// **`new URL(...).origin` 으로 정규화한다.** Playwright 의 baseURL 은 끝에 슬래시가 있어도
+// 요청이 정상적으로 풀리지만, Origin 헤더는 문자열로 비교된다 — `assertSameOrigin` 이
+// Host 헤더에서 만든 `http://127.0.0.1:53100` 과 env 의 `http://127.0.0.1:53100/` 는 다르고,
+// 그러면 세션을 세우는 모든 호출이 403 이 된다. 체인 전용 포트를 env 로 주는 환경이
+// 정확히 이 경우다.
 function publicOrigin(): string {
-  return process.env.LAURIO_E2E_BASE_URL ?? "http://127.0.0.1:53000";
+  return new URL(process.env.LAURIO_E2E_BASE_URL ?? "http://127.0.0.1:53000").origin;
 }
 
 function operatorOrigin(): string {
-  return process.env.LAURIO_OPERATOR_E2E_BASE_URL ?? "http://127.0.0.1:53001";
+  return new URL(process.env.LAURIO_OPERATOR_E2E_BASE_URL ?? "http://127.0.0.1:53001").origin;
 }
 
 /** 공개 앱: dev seed 로그인(`SOCIAL_AUTH_MODE=fake`)을 화면 없이 통과한다.
@@ -59,6 +65,11 @@ export async function establishDeveloperSession(page: Page, seed: string): Promi
   // 이전 계정의 것에 머문다. 조건 없이 옮기는 편이 규칙이 하나이고 옛 동작과 같다 —
   // 그래도 옛 흐름보다 화면 이동이 하나 적다(옛 흐름: /login → /console 리다이렉트).
   await page.goto("/console");
+  // **도착했는지 확인한다.** 옛 흐름은 `/console` 에 닿는 것을 단언했다 — 그 사후조건을
+  // 잃으면, 라우트가 200 을 냈지만 브라우저가 쿠키를 버린 경우(예: 배포 설정으로 띄운 앱이
+  // http 위에서 `secure` 쿠키를 심는다) 이 헬퍼가 성공을 보고하고 호출부가 엉뚱한 자리에서
+  // 알 수 없는 타임아웃으로 죽는다. 200 은 「BFF 가 Set-Cookie 를 냈다」까지만 증명한다.
+  await expect(page).not.toHaveURL(/\/login/);
 }
 
 /** 본인확인을 화면 없이 통과시킨다 (#155) — 제출·개최의 관문이라(ADR-0011) 여러 스펙이
@@ -103,4 +114,5 @@ export async function establishOperatorSession(
   // 공개 앱과 같은 이유로, 옛 로그인이 도착하던 자리(운영자 홈)에 둔다 — 호출부 대부분이
   // 곧바로 `operator-home-heading` 이 보이는지를 단언한다.
   await page.goto("/");
+  await expect(page).not.toHaveURL(/\/login/);
 }
