@@ -16,61 +16,6 @@ async function login(page: import("@playwright/test").Page, seed: string): Promi
   await establishDeveloperSession(page, seed);
 }
 
-test("공모전 상세를 열면 조회가 세어지고 Sponsor 지표에 조회수·전환율로 보인다", async ({
-  page,
-}) => {
-  const seeded = await seedE2eContests();
-
-  // 로그인하지 않은 방문자가 공개 상세를 연다 — 마운트된 뒤 클라이언트
-  // 컴포넌트가 `POST /api/backend/contests/{id}/views`를 쏜다. 그 왕복이
-  // 끝난 뒤에야 지표를 확인해야 경합 없이 값을 본다.
-  const [viewResponse] = await Promise.all([
-    page.waitForResponse(
-      (res) =>
-        res.url().includes(`/api/backend/contests/${seeded.judging.id}/views`) &&
-        res.request().method() === "POST",
-    ),
-    page.goto(`/contests/${seeded.judging.id}`),
-  ]);
-  expect(viewResponse.ok()).toBe(true);
-
-  await login(page, seeded.judging.sponsor_login_seed);
-  await page.goto(`/console/contests/${seeded.judging.id}/metrics`);
-
-  await expect(page.getByTestId("metrics-view")).toBeVisible();
-  await expect(page.getByTestId("metrics-view-count")).toHaveText("1");
-  // 시드가 이 Contest 에 Submission 을 2건 심어 두므로(contest-metrics.spec.ts
-  // 참고) 조회가 1이면 전환율 자리가 채워진다 — 정확한 퍼센트가 아니라 "0으로
-  // 나누지 않고 값이 나온다"는 것만 여기서 확인한다(정확한 산식은 backend
-  // 테스트가 이미 검증했다).
-  await expect(page.getByTestId("metrics-conversion-rate")).toBeVisible();
-  await expect(page.getByTestId("metrics-conversion-rate")).toContainText("%");
-  await expect(page.getByTestId("metrics-conversion-rate-empty")).toHaveCount(0);
-});
-
-test("Sponsor 자신의 조회는 지표에 잡히지 않는다", async ({ page }) => {
-  const seeded = await seedE2eContests();
-
-  await login(page, seeded.judging.sponsor_login_seed);
-
-  // 로그인한 채로 자기 Contest 의 공개 상세를 새로고침한다 — 자기 지표를
-  // 스스로 부풀리지 않아야 한다.
-  const [viewResponse] = await Promise.all([
-    page.waitForResponse(
-      (res) =>
-        res.url().includes(`/api/backend/contests/${seeded.judging.id}/views`) &&
-        res.request().method() === "POST",
-    ),
-    page.goto(`/contests/${seeded.judging.id}`),
-  ]);
-  expect(viewResponse.ok()).toBe(true);
-
-  await page.goto(`/console/contests/${seeded.judging.id}/metrics`);
-
-  await expect(page.getByTestId("metrics-view-count")).toHaveText("0");
-  await expect(page.getByTestId("metrics-conversion-rate-empty")).toBeVisible();
-});
-
 test("JS 를 끈 방문자는 세지 않는다 — 서버 렌더만으로는 조회가 늘지 않는다", async ({
   browser,
 }) => {

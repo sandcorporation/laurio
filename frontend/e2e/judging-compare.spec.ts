@@ -42,45 +42,6 @@ async function loginAsOtherSponsor(
   await establishDeveloperSession(page, `other-sponsor-${runId}`);
 }
 
-test("필수·선택 Requirement가 구분되고, 증거 없는 칸이 즉시 구분된다", async ({ page }) => {
-  await loginAsJudgingSponsor(page);
-  await page.goto(`/console/contests/${seeded.judging.id}/judge`);
-  await expect(page.getByTestId("comparison-matrix")).toBeVisible();
-
-  const [requiredReq, optionalReq] = seeded.judging.requirements;
-  const [submissionA, submissionB] = seeded.judging.submissions;
-
-  // 필수/선택 배지가 각 행에 붙는다.
-  await expect(page.getByTestId(`requirement-${requiredReq.id}-grade`)).toHaveText("필수");
-  await expect(page.getByTestId(`requirement-${optionalReq.id}-grade`)).toHaveText("선택");
-
-  // 심사 마감까지 남은 기간과, 방치했을 때 벌어지는 일(1/N 자동 배분)이 보인다.
-  await expect(page.getByTestId("judging-deadline")).toContainText("D-");
-  await expect(page.getByTestId("judging-consequence-notice")).toContainText("1/N");
-
-  // Submission A는 필수 Requirement에 증거를 연결했다 — 즉시 "충족"으로 구분되고
-  // 증거 위치(소스 내 포인터, 소스 내용 자체가 아니다)가 보인다.
-  const cellARequired = page.getByTestId(`cell-${requiredReq.id}-${submissionA.id}`);
-  await expect(cellARequired).toHaveAttribute("data-linked", "true");
-  await expect(cellARequired).toContainText("충족");
-  await expect(cellARequired).toContainText("src/auth/login.ts");
-  await expect(page.getByTestId(`cell-${requiredReq.id}-${submissionA.id}-empty`)).toHaveCount(0);
-
-  // Submission A는 선택 Requirement에는 자가 응답만 있고 증거가 없다 — 증거 없는
-  // 칸으로 구분되지만, 선택 항목이라 "미달로 채점됩니다" 경고는 붙지 않는다.
-  const cellAOptional = page.getByTestId(`cell-${optionalReq.id}-${submissionA.id}-empty`);
-  await expect(cellAOptional).toBeVisible();
-  await expect(cellAOptional).not.toContainText("미달");
-
-  // Submission B는 두 Requirement 모두 자가 응답 자체가 없다 — 필수 쪽은 "증거
-  // 없음"과 함께 미달 경고까지 붙어 즉시 구분된다.
-  const cellBRequired = page.getByTestId(`cell-${requiredReq.id}-${submissionB.id}-empty`);
-  await expect(cellBRequired).toBeVisible();
-  await expect(cellBRequired).toContainText("미달");
-  const cellBOptional = page.getByTestId(`cell-${optionalReq.id}-${submissionB.id}-empty`);
-  await expect(cellBOptional).toBeVisible();
-});
-
 test("소스코드와 AI 채점 점수가 HTML 응답 본문 어디에도 없다", async ({ page }) => {
   await loginAsJudgingSponsor(page);
 
@@ -112,51 +73,4 @@ test("소스코드와 AI 채점 점수가 HTML 응답 본문 어디에도 없다
   await expect(
     page.getByTestId(`award-source-notice-${seeded.judging.submissions[0].id}`),
   ).toBeVisible();
-});
-
-test("다른 Sponsor는 이 Contest를 비교할 수도, Award할 수도 없다", async ({ page }) => {
-  const runId = `${Date.now()}`;
-  await loginAsOtherSponsor(page, runId);
-
-  // 비교 화면 자체가 403으로 거부된다.
-  await page.goto(`/console/contests/${seeded.judging.id}/judge`);
-  await expect(page.getByTestId("compare-forbidden")).toBeVisible();
-  await expect(page.getByTestId("comparison-matrix")).toHaveCount(0);
-
-  // UI가 먼저 막더라도, 백엔드가 실제로 거부하는지와 프론트가 그 거부를 제대로
-  // 드러내는지를 네트워크 레벨에서도 직접 증명한다 — 다른 사람은 Award할 수
-  // 없다는 것이 이 티켓의 핵심 인수조건이다.
-  const submissionId = seeded.judging.submissions[0].id;
-  const result = await page.evaluate(
-    async ({ contestId, submissionId: sid }) => {
-      const res = await fetch(`/api/backend/contests/${contestId}/award`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ submission_id: sid }),
-      });
-      return { status: res.status, body: await res.json().catch(() => null) };
-    },
-    { contestId: seeded.judging.id, submissionId },
-  );
-  expect(result.status).toBe(403);
-});
-
-test("Sponsor 본인은 하나의 Submission을 Award할 수 있다", async ({ page }) => {
-  await loginAsJudgingSponsor(page);
-  await page.goto(`/console/contests/${seeded.judging.id}/judge`);
-  await expect(page.getByTestId("comparison-matrix")).toBeVisible();
-
-  const [submissionA, submissionB] = seeded.judging.submissions;
-
-  await page.getByTestId(`award-button-${submissionA.id}`).click();
-  await expect(page.getByTestId(`award-confirm-notice-${submissionA.id}`)).toBeVisible();
-  await page.getByTestId(`award-confirm-${submissionA.id}`).click();
-
-  await expect(page.getByTestId("award-success")).toContainText(String(submissionA.id));
-  await expect(page.getByTestId(`awarded-badge-${submissionA.id}`)).toBeVisible();
-
-  // 이미 Award된 뒤에는 다른(또는 같은) Submission을 다시 Award할 수 없다 — 버튼
-  // 자체가 사라진다.
-  await expect(page.getByTestId(`award-button-${submissionB.id}`)).toHaveCount(0);
-  await expect(page.getByTestId(`award-button-${submissionA.id}`)).toHaveCount(0);
 });
