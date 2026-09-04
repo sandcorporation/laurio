@@ -2273,11 +2273,18 @@ def test_seller_changed_webhook_ignores_out_of_order_regression(client, category
 
 
 @pytest.mark.django_db
-def test_seller_changed_webhook_rejected_always_applies_even_after_approval(
+def test_seller_changed_webhook_unknown_status_422s_and_does_not_touch_seller(
     client, category, landing_type
 ):
-    """REJECTED는 순위와 무관하게 항상 반영된다 -- 벤더가 이미 승인된 셀러를
-    나중에 거절하는 것도 정상적인 사실이다."""
+    """벤더 문서(docs.tosspayments.com/reference/additional, 웹 확인 —
+    #174)가 실제로 규정하는 Seller.status 는 APPROVAL_REQUIRED·
+    PARTIALLY_APPROVED·KYC_REQUIRED·APPROVED 넷뿐이다 — REJECTED 는 이
+    문서에 없다. 예전 맵은 "토스에 재확인한 실제 상태 흐름(ADR-0020)"이라며
+    UNDER_REVIEW·REJECTED·DENIED 도 함께 실었지만 그 재확인 기록에도 근거가
+    없었다(#174). 벤더 거절은 이 비동기 웹훅이 아니라 등록 응답의 4xx로
+    온다(#172, `TossSellerAdapter._parse_seller_response`) — 그러니 이
+    웹훅이 알지 못하는 status 를 받으면 422 로 크게 남기고 Seller 는
+    건드리지 않는다(#174 AC: 모르는 값은 조용히 진행시키지 않는다)."""
 
     sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
     requested = _request_payout(client, dev, contest["id"])
@@ -2305,11 +2312,10 @@ def test_seller_changed_webhook_rejected_always_applies_even_after_approval(
             HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_TIME=transmission_time,
             HTTP_TOSSPAYMENTS_WEBHOOK_SIGNATURE=signature,
         )
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "rejected"
+    assert resp.status_code == 422
 
     seller.refresh_from_db()
-    assert seller.status == Seller.Status.REJECTED
+    assert seller.status == Seller.Status.APPROVED  # 건드려지지 않았다
 
 
 
@@ -3627,6 +3633,94 @@ def test_toss_seller_webhook_partially_approved_uses_policy_weekly_limit_not_ent
 
     seller.refresh_from_db()
     assert seller.weekly_limit_amount == 10_000_000  # 정책 기본값 -- entityBody 의 1 이 아니다
+
+
+# --- #174: 벤더 상태 어휘를 문서에 맞춘다 -------------------------------------------
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("vendor_status", ["CANCELED", "DELETED", "REJECTED"])
+def test_toss_payout_webhook_maps_undocumented_terminal_statuses_to_failed(
+    client, category, landing_type, vendor_status
+):
+    """벤더 문서(웹 확인 — #174)의 Payout.status 일곱 값 중 CANCELED·
+    DELETED·REJECTED 를 예전엔 어댑터가 예외로, 이 웹훅은 "진행 중"으로
+    서로 다르게 다뤘다. 셋 다 "돈이 나가지 못했다"는 사실이므로 FAILED 와
+    같은 도메인 값으로 옮긴다 — 어댑터·웹훅이 같은 표(`adapters_toss` 의
+    분류 집합)를 본다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+
+    transmission_time = "2024-01-01T00:00:00+09:00"
+    payload = json.dumps(
+        {
+            "eventType": "payout.changed",
+            "entityBody": {
+                "refPayoutId": f"{requested['idempotency_key']}-0",
+                "status": vendor_status,
+            },
+        }
+    ).encode("utf-8")
+
+    with override_settings(TOSS_API_SECURE_KEY=_TEST_TOSS_SECURE_KEY):
+        signature = _sign_toss_webhook(payload=payload, transmission_time=transmission_time)
+        resp = client.post(
+            f"{PAYOUTS_URL}/webhook/toss",
+            data=payload,
+            content_type="application/json",
+            HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_TIME=transmission_time,
+            HTTP_TOSSPAYMENTS_WEBHOOK_SIGNATURE=signature,
+            HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_ID=f"whid-{vendor_status.lower()}",
+        )
+    assert resp.status_code == 200, resp.content
+    assert resp.json()["status"] == "failed"
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    assert payout.status == Payout.Status.FAILED
+    assert payout.journal_entry_id is None  # 원장 분개가 아예 없다 -- 첫 확정 전 거절이다.
+
+
+@pytest.mark.django_db
+def test_toss_payout_webhook_unknown_status_logs_loudly_and_stays_pending(
+    client, category, landing_type, caplog
+):
+    """#174 AC: 벤더 문서의 일곱 값 밖의 새 문자열이 와도 이 Payout 하나
+    때문에 요청이 죽지 않고(500이 아니라 200), 조용히 삼켜지지도 않는다
+    (ERROR 로그로 크게 남는다) — 상태는 건드리지 않는다."""
+
+    import logging
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+
+    transmission_time = "2024-01-01T00:00:00+09:00"
+    payload = json.dumps(
+        {
+            "eventType": "payout.changed",
+            "entityBody": {
+                "refPayoutId": f"{requested['idempotency_key']}-0",
+                "status": "SOMETHING_NEW_FROM_THE_VENDOR",
+            },
+        }
+    ).encode("utf-8")
+
+    with override_settings(TOSS_API_SECURE_KEY=_TEST_TOSS_SECURE_KEY):
+        signature = _sign_toss_webhook(payload=payload, transmission_time=transmission_time)
+        with caplog.at_level(logging.ERROR):
+            resp = client.post(
+                f"{PAYOUTS_URL}/webhook/toss",
+                data=payload,
+                content_type="application/json",
+                HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_TIME=transmission_time,
+                HTTP_TOSSPAYMENTS_WEBHOOK_SIGNATURE=signature,
+            )
+    assert resp.status_code == 200, resp.content
+    assert resp.json()["status"] == "requested"  # 건드리지 않았다
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    assert payout.status == Payout.Status.REQUESTED
+    assert any("알 수 없는 status" in record.getMessage() for record in caplog.records)
 
 
 # --- #149: 좁히기를 SQL 로 내린다 --------------------------------------------------

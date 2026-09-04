@@ -127,22 +127,80 @@ _TIMEOUT_SECONDS = 10
 # 라우팅 실수인데도 사람의 차례로 둔갑한다(#97 실측).
 _OUR_INTEGRATION_ERROR_STATUSES = {401, 403, 404}
 
-# 벤더가 실제로 확인해 준 Seller 상태 흐름(ADR-0020) — 여기 없는 문자열을
-# 받으면 임의로 뭉개지 않고 예외를 던진다.
+# 벤더 문서(docs.tosspayments.com/reference/additional, Seller 객체, 2026-09
+# 웹 확인 — #174)가 실제로 규정하는 Seller.status 값은 이 넷뿐이다. 예전 맵은
+# UNDER_REVIEW·REJECTED·DENIED 도 "토스에 재확인한 실제 상태 흐름(ADR-0020)"
+# 이라 주석에 적어 뒀지만, ADR-0020 이 실제로 재확인해 남긴 흐름
+# (APPROVAL_REQUIRED → PARTIALLY_APPROVED → APPROVED, KYC_REQUIRED 는 그
+# 사이 한도 초과 심사)에도, 지금 문서에도 그 셋의 근거가 없다 — 출처 없는
+# 벤더 문자열을 맵에 남겨 두면 "벤더가 거절을 이 웹훅으로 보낸다"고 잘못
+# 설계할 위험만 남는다. 등록 자체의 거절(REJECTED)은 이 표를 거치지
+# 않는다 — `_parse_seller_response`의 4xx 분기가 직접
+# `SellerRegistrationResult(status="rejected")`를 돌려준다(#172) — 그러니
+# REJECTED 를 여기서 빼도 우리 도메인의 Seller.Status.REJECTED(ADR-0020,
+# 건드리지 않는다) 자체가 도달 불가능해지지 않는다. 근거가 새로 나오면 그때
+# 출처와 함께 다시 넣는다.
 _SELLER_STATUS_MAP = {
     "APPROVAL_REQUIRED": "approval_required",
     "PARTIALLY_APPROVED": "partially_approved",
     "KYC_REQUIRED": "under_review",
-    "UNDER_REVIEW": "under_review",
     "APPROVED": "approved",
-    "REJECTED": "rejected",
-    "DENIED": "rejected",
 }
 
-# 실이체 상태(벤더 문서: REQUESTED → IN_PROGRESS → COMPLETED/FAILED).
+# 벤더 문서가 실제로 규정하는 값은 넷이 아니라 일곱이다(#174, 위와 같은 출처
+# 확인) — REQUESTED · IN_PROGRESS · COMPLETED · FAILED · CANCELED · DELETED ·
+# REJECTED. 예전 코드는 뒤의 셋(CANCELED·DELETED·REJECTED)을 몰라 예외를
+# 던졌다. 셋 다 "돈이 실제로 나가지 못했다"는 사실이므로 FAILED 와 같은
+# 도메인 값으로 옮긴다 — 원장 분개는 FAILED 와 동일하게 그대로 남고
+# (ADR-0004), 재시도 경로도 그대로 열린다. 문서는 REJECTED 의 웹훅은
+# FAILED 로 온다고도 적어 두지만(우리는 어차피 REJECTED 자체도 같은 값으로
+# 옮기므로 무관하다), DELETED 는 웹훅 자체가 오지 않는다고 적는다 — 그래도
+# 조회(query_status) 경로에서는 만날 수 있으므로 여기 셋에 넣어 둔다.
 _PAID_PAYOUT_STATUSES = {"COMPLETED"}
-_FAILED_PAYOUT_STATUSES = {"FAILED"}
+_FAILED_PAYOUT_STATUSES = {"FAILED", "CANCELED", "DELETED", "REJECTED"}
 _PENDING_PAYOUT_STATUSES = {"REQUESTED", "IN_PROGRESS"}
+
+# 위 세 집합이 문서의 일곱 값을 빠짐없이 덮는지 모듈 로드 시 증명한다 —
+# `payouts.progress.assert_covers_all_kinds`(HoldKind 번역표)·
+# `distributions`의 `Contest.Status` 분류와 같은 관용구(#174 AC). 값이 하나
+# 늘면(또는 오타로 하나 빠지면) import 시점에 바로 터진다 — 배치 스캔
+# 한복판에서야 발견되지 않는다.
+_ALL_DOCUMENTED_PAYOUT_STATUSES = {
+    "REQUESTED",
+    "IN_PROGRESS",
+    "COMPLETED",
+    "FAILED",
+    "CANCELED",
+    "DELETED",
+    "REJECTED",
+}
+# 문서의 넷을 `_SELLER_STATUS_MAP`이 전부 아는지도 같은 방식으로 증명한다.
+_ALL_DOCUMENTED_SELLER_STATUSES = {
+    "APPROVAL_REQUIRED",
+    "PARTIALLY_APPROVED",
+    "KYC_REQUIRED",
+    "APPROVED",
+}
+
+
+def assert_covers_all_documented_values(covered: set[str], documented: set[str], *, name: str) -> None:
+    """`covered`(우리 분류표가 실제로 아는 문자열)가 `documented`(벤더 문서의
+    값 전체)를 빠짐없이 덮는지 — 아니면 던진다. 모듈 로드 시 호출해 값이
+    하나 늘거나 오타로 하나 빠지면 import 시점에 바로 터지게 한다."""
+
+    missing = documented - covered
+    if missing:
+        raise RuntimeError(f"{name} 이 벤더 문서의 값을 전부 덮지 않는다: {sorted(missing)}")
+
+
+assert_covers_all_documented_values(
+    _PAID_PAYOUT_STATUSES | _FAILED_PAYOUT_STATUSES | _PENDING_PAYOUT_STATUSES,
+    _ALL_DOCUMENTED_PAYOUT_STATUSES,
+    name="Payout 상태 분류(_PAID/_FAILED/_PENDING_PAYOUT_STATUSES)",
+)
+assert_covers_all_documented_values(
+    set(_SELLER_STATUS_MAP), _ALL_DOCUMENTED_SELLER_STATUSES, name="_SELLER_STATUS_MAP"
+)
 
 # 실이체 4xx 중 "한도·rate limit"류로 보이는 벤더 코드 키워드(코드리뷰 지적
 # 2) — 정확한 코드 목록은 토스가 공개 문서에 못박아 두지 않아, 코드 문자열에

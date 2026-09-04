@@ -24,6 +24,7 @@ from payouts.models import Seller
 from payouts.adapters_toss import (
     TossPayoutAdapter,
     TossSellerAdapter,
+    assert_covers_all_documented_values,
     jwe_decrypt,
     jwe_encrypt,
     verify_toss_webhook_signature,
@@ -31,6 +32,24 @@ from payouts.adapters_toss import (
 from verification.models import Verification
 
 _SECURE_KEY_HEX = "a" * 64  # 32바이트(A256GCM) — 값 자체는 테스트 전용 더미다.
+
+
+# --- #174: 상태 분류표가 문서를 빠짐없이 덮는지 -------------------------------------
+
+
+def test_assert_covers_all_documented_values_raises_on_gap():
+    """`HoldKind` 번역표·`Contest.Status` 분류와 같은 관용구(#174 AC) — 값이
+    하나 늘거나 오타로 하나 빠지면 모듈 로드 시 바로 터진다는 것을 이 함수
+    자체로 증명한다(실물 모듈은 이미 로드에 성공했으니 그 자체로는 증명이
+    안 된다)."""
+
+    with pytest.raises(RuntimeError, match=r"덮지 않는다.*'B'"):
+        assert_covers_all_documented_values({"A"}, {"A", "B"}, name="_어떤_표")
+
+
+def test_assert_covers_all_documented_values_passes_when_covered():
+    assert_covers_all_documented_values({"A", "B"}, {"A", "B"}, name="_어떤_표")
+
 
 
 def _settings(**overrides):
@@ -448,6 +467,32 @@ def test_confirm_maps_failed_status_to_failed():
         with patch("payouts.adapters_toss.requests.post") as mock_post:
             mock_post.return_value = _encrypted_response(200, {"status": "FAILED"})
             result = adapter.confirm(_req())
+    assert result.status == "failed"
+
+
+@pytest.mark.parametrize("vendor_status", ["CANCELED", "DELETED", "REJECTED"])
+def test_confirm_maps_undocumented_terminal_statuses_to_failed(vendor_status):
+    """벤더 문서(웹 확인 — #174)의 Payout.status 일곱 값 중 CANCELED·
+    DELETED·REJECTED 는 예전엔 몰라서 예외를 던졌다. 셋 다 "돈이 나가지
+    못했다"는 사실이므로 FAILED 와 같은 값으로 옮긴다 — 원장 분개는
+    caller(`payouts.progress`)가 FAILED 와 동일하게 처리한다."""
+    with _settings():
+        adapter = TossPayoutAdapter()
+        with patch("payouts.adapters_toss.requests.post") as mock_post:
+            mock_post.return_value = _encrypted_response(200, {"status": vendor_status})
+            result = adapter.confirm(_req())
+    assert result.status == "failed"
+
+
+@pytest.mark.parametrize("vendor_status", ["CANCELED", "DELETED", "REJECTED"])
+def test_query_status_maps_undocumented_terminal_statuses_to_failed(vendor_status):
+    """조회(GET) 경로도 POST 응답 경로와 같은 표를 본다(#174) — 어댑터
+    안에서도 두 진입점이 서로 다르게 판정하지 않는다."""
+    with _settings():
+        adapter = TossPayoutAdapter()
+        with patch("payouts.adapters_toss.requests.get") as mock_get:
+            mock_get.return_value = _encrypted_response(200, {"status": vendor_status})
+            result = adapter.query_status(_req(vendor_payout_id="toss-payout-id-999"))
     assert result.status == "failed"
 
 

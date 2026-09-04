@@ -30,6 +30,7 @@
 # 함정(`QueryParams is not fully defined` 로 500)을 다시 밟는다.
 
 import json
+import logging
 from uuid import UUID
 
 from django.db.models import Count
@@ -44,6 +45,8 @@ from distributions.models import DistributionShare
 from handovers.models import Handover
 from payments.webhook_security import verify_webhook_signature
 from policies.scope import current_policy
+
+logger = logging.getLogger(__name__)
 
 from .progress import (
     BLOCKED_ON_VALUES,
@@ -534,15 +537,31 @@ def receive_toss_payout_webhook(request: HttpRequest):
             422, "웹훅의 지급 식별자가 유효한 형식(idempotency_key-attempt)이 아닙니다."
         )
 
-    from .adapters_toss import _FAILED_PAYOUT_STATUSES, _PAID_PAYOUT_STATUSES
+    from .adapters_toss import (
+        _PENDING_PAYOUT_STATUSES,
+        _FAILED_PAYOUT_STATUSES,
+        _PAID_PAYOUT_STATUSES,
+    )
 
+    # 어댑터(_request_real_payout/query_status)와 **같은 표**를 본다(#174) — 예전에는
+    # 어댑터가 CANCELED·DELETED·REJECTED에 예외를 던지는데 이 웹훅은 같은 문자열을
+    # "진행 중"으로 조용히 읽어, 같은 벤더 사실을 두 경로가 다르게 다뤘다.
     if vendor_status in _PAID_PAYOUT_STATUSES:
         our_status = "paid"
     elif vendor_status in _FAILED_PAYOUT_STATUSES:
         our_status = "failed"
     else:
-        # 아직 REQUESTED/IN_PROGRESS다 — 확정할 수 없으니 조용히 기록만 하고
-        # 상태는 건드리지 않는다.
+        if vendor_status not in _PENDING_PAYOUT_STATUSES:
+            # 문서의 일곱 값 중 어디에도 없다 — 벤더가 새 값을 보내는 날이다(#174 AC).
+            # 이 Payout 하나의 문제로 스캔 전체를 죽이지 않되(그래서 예외를 던지지
+            # 않는다), 조용히 "진행 중"으로 삼키지도 않는다 — 크게 남긴다.
+            logger.error(
+                "토스 payout.changed 웹훅에 알 수 없는 status가 왔다(idempotency_key=%s): %r",
+                ref_payout_id or vendor_payout_id,
+                vendor_status,
+            )
+        # 아직 REQUESTED/IN_PROGRESS(또는 알 수 없는 값)다 — 확정할 수 없으니
+        # 기록만 하고 상태는 건드리지 않는다.
         our_status = "pending"
 
     PayoutWebhookDelivery.objects.create(
@@ -662,6 +681,14 @@ def receive_toss_seller_webhook(request: HttpRequest):
     # 동기 응답이 Seller.status를 직접 갱신하는 경로로만 일어난다 — 이
     # 비동기 웹훅만으로는 "오래된 이벤트"와 "거절 이후의 새 진행"을 구별할
     # 수 없으므로 항상 보수적으로 거절을 유지한다.
+    #
+    # (#174) `_SELLER_STATUS_MAP`은 이제 어떤 벤더 문자열도 "rejected"로
+    # 옮기지 않는다 — 문서가 확인해 주는 벤더 거절 경로는 등록 응답의 4xx뿐이다
+    # (`TossSellerAdapter._parse_seller_response`가 그 자리에서 직접
+    # `status="rejected"`를 만든다). 그래서 `our_status`가 이 웹훅에서
+    # `Seller.Status.REJECTED`가 되는 경우는 지금은 없다 — 이 분기는 그 근거가
+    # 다시 나오거나 문서가 벤더의 비동기 거절 통지를 확인해 줄 때를 대비한
+    # 방어선으로 남긴다.
     incoming_rank = _SELLER_STATUS_RANK.get(our_status, 0)
     allowed_source_statuses = [
         status
