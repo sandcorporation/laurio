@@ -87,7 +87,7 @@ test.describe("세 큐 건수 — 정확성(ADR-0020)", () => {
     await page.route("**/api/backend/operator/appeals*", (route) =>
       route.fulfill({ status: 500, body: JSON.stringify({ detail: "boom" }) }),
     );
-    await page.route("**/api/backend/operator/payouts*", (route) =>
+    await page.route("**/api/backend/operator/payouts**", (route) =>
       route.fulfill({ status: 500, body: JSON.stringify({ detail: "boom" }) }),
     );
 

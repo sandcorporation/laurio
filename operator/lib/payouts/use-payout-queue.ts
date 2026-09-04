@@ -37,9 +37,8 @@ function pathFor(filter: BlockedOnFilter): string {
  * 버리는 것은 `usePagedList` 가 한다(#149) — 「새 탭 아래 이전 필터의 행」이 한
  * 프레임이라도 보이면 ADR-0020이 두 대기를 갈라 둔 이유가 그 자리에서 무너진다. */
 export function usePayoutQueue(filter: BlockedOnFilter, enabled: boolean): PayoutQueueState {
-  // 세션 확인 전에는 아무 경로도 치지 않는다. `usePagedList` 는 경로를 받으면 곧바로
-  // 부르므로, 「아직 부르지 않는다」를 경로 밖에서 표현할 자리가 없다 — 그래서 이
-  // 훅이 로딩 상태를 그대로 돌려준다.
-  const state = usePagedList<OperatorPayoutRow>(bffClient, pathFor(filter));
-  return enabled ? state : { status: "loading" };
+  // 세션 확인 전에는 **경로를 주지 않는다**(#149 코드리뷰) — 반환값만 loading 으로
+  // 덮으면 요청은 이미 나간 뒤다. 만료된 세션에서는 그 401 이 세션 조회와 경합해
+  // 로그인으로 튕기고, 그렇게 실패한 조회는 `enabled` 가 참이 돼도 다시 시도되지 않는다.
+  return usePagedList<OperatorPayoutRow>(bffClient, enabled ? pathFor(filter) : null);
 }
