@@ -439,7 +439,11 @@ class TossSellerAdapter:
             # refSellerId로 다시 POST하면 벤더가 "이미 등록된 셀러"류의 4xx로 거절하고, 그 4xx는
             # 일반 거절 처리를 거쳐 "rejected"로 잘못 매핑돼 진행 중인 상태를 덮어쓴다. 재시도·
             # 재확인의 실제 경로는 등록이 아니라 조회다.
-            return self._query_seller_status(registration.existing_seller_id, ref=ref)
+            return self._query_seller_status(
+                registration.existing_seller_id,
+                ref=ref,
+                weekly_limit_hint=registration.weekly_limit_hint,
+            )
 
         body = {
             "refSellerId": ref,
@@ -468,9 +472,13 @@ class TossSellerAdapter:
         except requests.RequestException as exc:
             raise SellerError(f"토스 Seller 등록 요청이 네트워크 오류로 실패했다(ref={ref}): {exc}") from exc
 
-        return self._parse_seller_response(response, ref=ref)
+        return self._parse_seller_response(
+            response, ref=ref, weekly_limit_hint=registration.weekly_limit_hint
+        )
 
-    def _query_seller_status(self, seller_id: str, *, ref: str) -> SellerRegistrationResult:
+    def _query_seller_status(
+        self, seller_id: str, *, ref: str, weekly_limit_hint: int | None = None
+    ) -> SellerRegistrationResult:
         """이미 등록된(seller_id를 받은) Seller의 현재 상태를 GET으로 다시
         확인한다(코드리뷰 지적 7) — register()가 벤더에 새 등록을 요청하는
         게 아니라 이 메서드로 재조회하도록 갈아탄 것이 이 티켓의 핵심 수정이다.
@@ -499,10 +507,10 @@ class TossSellerAdapter:
             # 시도할 수 있게 pending으로 돌려준다.
             return SellerRegistrationResult(seller_id="", status="pending", weekly_limit_amount=None)
 
-        return self._parse_seller_response(response, ref=ref)
+        return self._parse_seller_response(response, ref=ref, weekly_limit_hint=weekly_limit_hint)
 
     def _parse_seller_response(
-        self, response: requests.Response, *, ref: str
+        self, response: requests.Response, *, ref: str, weekly_limit_hint: int | None = None
     ) -> SellerRegistrationResult:
         if response.status_code >= 500:
             # 벤더 쪽 일시 오류 — 등록이 실제로 접수됐는지 알 수 없다(코드리뷰
@@ -563,10 +571,13 @@ class TossSellerAdapter:
             )
 
         seller_id = body.get("sellerId") or body.get("refSellerId") or ""
-        weekly_limit = None
-        if status == "partially_approved":
-            weekly_limit_body = body.get("weeklyLimit") or {}
-            weekly_limit = weekly_limit_body.get("amount")
+        # 벤더 문서의 Seller 객체에 weeklyLimit 필드가 없다(#173, 웹 확인) —
+        # 벤더가 한도를 알려주지 않으므로 caller가 이미 조립해 둔 정책값
+        # (`weekly_limit_hint` — ADR-0020, 토스가 정한 사실)을 쓴다.
+        # `FakeSellerAdapter`가 힌트가 없을 때 정책을 스스로 읽는 것과 달리
+        # 이 어댑터는 DB를 읽지 않는다(ADR-0007) — caller가 이미 실어 보낸
+        # 값만 쓴다.
+        weekly_limit = weekly_limit_hint if status == "partially_approved" else None
 
         return SellerRegistrationResult(
             seller_id=seller_id, status=status, weekly_limit_amount=weekly_limit

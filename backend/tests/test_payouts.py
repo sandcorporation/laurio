@@ -1876,7 +1876,7 @@ def test_toss_payout_webhook_rejects_missing_or_wrong_signature(client, category
     payload = json.dumps(
         {
             "eventType": "payout.changed",
-            "data": {
+            "entityBody": {
                 # 벤더가 실제로 돌려주는 refPayoutId는 우리가 보낸 것과 같은
                 # `{idempotency_key}-{transfer_attempt}` 형식이다(코드리뷰
                 # 지적 1, 5차) — 접미어 없는 순수 UUID를 손으로 넣으면 이
@@ -1921,7 +1921,7 @@ def test_toss_payout_webhook_confirms_and_is_idempotent_on_redelivery(
             # 422가 나던 결함을 이 테스트가 잡지 못했다). REQUESTED에서
             # confirm()을 거치지 않고 곧바로 웹훅으로 확정하므로
             # transfer_attempt는 아직 기본값 0이다.
-            "data": {"refPayoutId": f"{requested['idempotency_key']}-0", "status": "COMPLETED"},
+            "entityBody": {"refPayoutId": f"{requested['idempotency_key']}-0", "status": "COMPLETED"},
         }
     ).encode("utf-8")
 
@@ -1972,9 +1972,9 @@ def test_toss_seller_webhook_advances_seller_pending_payout(client, category, la
     payload = json.dumps(
         {
             "eventType": "seller.changed",
-            "data": {
+            "entityBody": {
                 "refSellerId": ref_seller_id,
-                "sellerId": seller.seller_id,
+                "id": seller.seller_id,
                 "status": "PARTIALLY_APPROVED",
                 "weeklyLimit": {"amount": 10_000_000},
             },
@@ -2008,7 +2008,7 @@ def test_toss_seller_webhook_rejects_bad_signature(client, category, landing_typ
     _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="approval_required")
 
     payload = json.dumps(
-        {"eventType": "seller.changed", "data": {"refSellerId": "x", "status": "APPROVED"}}
+        {"eventType": "seller.changed", "entityBody": {"refSellerId": "x", "status": "APPROVED"}}
     ).encode("utf-8")
 
     with override_settings(TOSS_API_SECURE_KEY=_TEST_TOSS_SECURE_KEY):
@@ -2197,7 +2197,7 @@ def test_toss_payout_webhook_failed_after_confirmed_updates_transfer_status(
             # attempt 선점은 caller(payouts.progress)가 하므로(#135) 어댑터가 무엇이든
             # 실이체를 시도한 순간 transfer_attempt 는 1 이다 — 실제 형식 그대로 그 값을 쓴다
             # (코드리뷰 지적 1, 5차). 낡은 attempt 의 배달은 조용히 버려진다.
-            "data": {
+            "entityBody": {
                 "refPayoutId": f"{requested['idempotency_key']}-{payout.transfer_attempt}",
                 "status": "FAILED",
             },
@@ -2247,9 +2247,9 @@ def test_seller_changed_webhook_ignores_out_of_order_regression(client, category
     stale_payload = json.dumps(
         {
             "eventType": "seller.changed",
-            "data": {
+            "entityBody": {
                 "refSellerId": ref_seller_id,
-                "sellerId": seller.seller_id,
+                "id": seller.seller_id,
                 "status": "APPROVAL_REQUIRED",
             },
         }
@@ -2292,7 +2292,7 @@ def test_seller_changed_webhook_rejected_always_applies_even_after_approval(
     payload = json.dumps(
         {
             "eventType": "seller.changed",
-            "data": {"refSellerId": ref_seller_id, "sellerId": seller.seller_id, "status": "REJECTED"},
+            "entityBody": {"refSellerId": ref_seller_id, "id": seller.seller_id, "status": "REJECTED"},
         }
     ).encode("utf-8")
 
@@ -2463,9 +2463,9 @@ def test_seller_changed_webhook_stale_event_cannot_resurrect_rejected(
     stale_payload = json.dumps(
         {
             "eventType": "seller.changed",
-            "data": {
+            "entityBody": {
                 "refSellerId": ref_seller_id,
-                "sellerId": seller.seller_id,
+                "id": seller.seller_id,
                 "status": "APPROVAL_REQUIRED",
             },
         }
@@ -2514,9 +2514,9 @@ def test_seller_changed_webhook_exact_duplicate_does_not_reprocess(
         payload = json.dumps(
             {
                 "eventType": "seller.changed",
-                "data": {
+                "entityBody": {
                     "refSellerId": ref_seller_id,
-                    "sellerId": seller.seller_id or "seller-dup-test",
+                    "id": seller.seller_id or "seller-dup-test",
                     "status": "PARTIALLY_APPROVED",
                     "weeklyLimit": {"amount": 10_000_000},
                 },
@@ -3028,7 +3028,7 @@ def test_toss_payout_webhook_stale_attempt_delivery_is_discarded(
             "eventType": "payout.changed",
             # attempt=1(낡은 시도)의 지연 배달을 흉내낸다 -- 이미 attempt 2로
             # 넘어간 뒤라 이 결과는 버려야 한다.
-            "data": {"refPayoutId": f"{requested['idempotency_key']}-1", "status": "FAILED"},
+            "entityBody": {"refPayoutId": f"{requested['idempotency_key']}-1", "status": "FAILED"},
         }
     ).encode("utf-8")
 
@@ -3238,7 +3238,7 @@ def test_toss_payout_webhook_falls_back_to_vendor_payout_id_when_ref_is_absent(
         {
             "eventType": "payout.changed",
             # refPayoutId 가 없다 — 벤더가 자기 식별자만 실어 보낸 경우다.
-            "data": {"id": "toss-vendor-payout-99", "status": "COMPLETED"},
+            "entityBody": {"id": "toss-vendor-payout-99", "status": "COMPLETED"},
         }
     ).encode("utf-8")
 
@@ -3272,7 +3272,7 @@ def test_toss_payout_webhook_still_404s_on_an_unknown_vendor_payout_id(
 
     transmission_time = "2024-01-01T00:00:00+09:00"
     payload = json.dumps(
-        {"eventType": "payout.changed", "data": {"id": "nobody-knows-this", "status": "COMPLETED"}}
+        {"eventType": "payout.changed", "entityBody": {"id": "nobody-knows-this", "status": "COMPLETED"}}
     ).encode("utf-8")
 
     with override_settings(TOSS_API_SECURE_KEY=_TEST_TOSS_SECURE_KEY):
@@ -3425,7 +3425,7 @@ def test_toss_payout_webhook_falls_back_when_the_reference_is_present_but_unpars
     payload = json.dumps(
         {
             "eventType": "payout.changed",
-            "data": {
+            "entityBody": {
                 # 접미어가 없다 — `parse_vendor_ref` 가 읽지 못하는 형식이다.
                 "refPayoutId": str(requested["idempotency_key"]),
                 "id": "toss-vendor-payout-legacy",
@@ -3462,7 +3462,7 @@ def test_toss_payout_webhook_422s_when_neither_identifier_can_be_resolved(
 
     transmission_time = "2024-01-01T00:00:00+09:00"
     payload = json.dumps(
-        {"eventType": "payout.changed", "data": {"refPayoutId": "not-a-reference", "status": "COMPLETED"}}
+        {"eventType": "payout.changed", "entityBody": {"refPayoutId": "not-a-reference", "status": "COMPLETED"}}
     ).encode("utf-8")
 
     with override_settings(TOSS_API_SECURE_KEY=_TEST_TOSS_SECURE_KEY):
@@ -3477,6 +3477,156 @@ def test_toss_payout_webhook_422s_when_neither_identifier_can_be_resolved(
         )
 
     assert resp.status_code == 422, resp.content
+
+
+# --- #173: 웹훅의 봉투는 entityBody 다 ---------------------------------------------
+
+
+@pytest.mark.django_db
+def test_toss_payout_webhook_422s_when_entity_body_is_missing(client, category, landing_type):
+    """entityBody 자체가 없으면 「우리 추정이 또 틀렸다」는 신호다(#173) —
+    #170 이 200 으로 덮은 것은 모르는 *참조*이지 못 읽는 *본문*이 아니다.
+    (예전 봉투 키 `data` 로 온 웹훅이 바로 이 모양이다.)"""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+
+    transmission_time = "2024-01-01T00:00:00+09:00"
+    payload = json.dumps(
+        {
+            "eventType": "payout.changed",
+            "data": {"refPayoutId": f"{requested['idempotency_key']}-0", "status": "COMPLETED"},
+        }
+    ).encode("utf-8")
+
+    with override_settings(TOSS_API_SECURE_KEY=_TEST_TOSS_SECURE_KEY):
+        signature = _sign_toss_webhook(payload=payload, transmission_time=transmission_time)
+        resp = client.post(
+            f"{PAYOUTS_URL}/webhook/toss",
+            data=payload,
+            content_type="application/json",
+            HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_TIME=transmission_time,
+            HTTP_TOSSPAYMENTS_WEBHOOK_SIGNATURE=signature,
+        )
+    assert resp.status_code == 422, resp.content
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    assert payout.status == Payout.Status.REQUESTED  # 건드리지 않았다
+
+
+@pytest.mark.django_db
+def test_toss_seller_webhook_422s_when_entity_body_is_missing(client, category, landing_type):
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="approval_required")
+
+    transmission_time = "2024-01-01T00:00:00+09:00"
+    payload = json.dumps(
+        {"eventType": "seller.changed", "data": {"refSellerId": "x", "status": "APPROVED"}}
+    ).encode("utf-8")
+
+    with override_settings(TOSS_API_SECURE_KEY=_TEST_TOSS_SECURE_KEY):
+        signature = _sign_toss_webhook(payload=payload, transmission_time=transmission_time)
+        resp = client.post(
+            f"{PAYOUTS_URL}/webhook/toss-seller",
+            data=payload,
+            content_type="application/json",
+            HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_TIME=transmission_time,
+            HTTP_TOSSPAYMENTS_WEBHOOK_SIGNATURE=signature,
+        )
+    assert resp.status_code == 422, resp.content
+
+
+@pytest.mark.django_db
+def test_toss_seller_webhook_falls_back_to_id_field_when_ref_seller_id_is_unrecognized(
+    client, category, landing_type
+):
+    """벤더 문서의 Seller 객체 필드는 `id` 다(#173, 웹 확인) — `sellerId` 는
+    없다. `refSellerId`(우리가 보낸 `laurio-developer-{id}`)로 찾는 기존
+    경로가 안 먹히면 `entityBody.id`(우리가 등록 시점에 저장해 둔
+    `seller.seller_id`)로 폴백한다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="approval_required")
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    developer_id = payout.handover.award.submission.developer_id
+    seller = Seller.objects.get(developer_id=developer_id)
+    assert seller.seller_id  # Fake 등록이 이미 벤더 식별자를 줬다
+
+    transmission_time = "2024-01-01T00:00:00+09:00"
+    payload = json.dumps(
+        {
+            "eventType": "seller.changed",
+            "entityBody": {
+                "refSellerId": "not-our-convention",
+                "id": seller.seller_id,
+                "status": "PARTIALLY_APPROVED",
+            },
+        }
+    ).encode("utf-8")
+
+    with override_settings(TOSS_API_SECURE_KEY=_TEST_TOSS_SECURE_KEY):
+        signature = _sign_toss_webhook(payload=payload, transmission_time=transmission_time)
+        resp = client.post(
+            f"{PAYOUTS_URL}/webhook/toss-seller",
+            data=payload,
+            content_type="application/json",
+            HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_TIME=transmission_time,
+            HTTP_TOSSPAYMENTS_WEBHOOK_SIGNATURE=signature,
+        )
+    assert resp.status_code == 200, resp.content
+    assert resp.json()["status"] == "partially_approved"
+
+    seller.refresh_from_db()
+    assert seller.status == Seller.Status.PARTIALLY_APPROVED
+
+
+@pytest.mark.django_db
+def test_toss_seller_webhook_partially_approved_uses_policy_weekly_limit_not_entity_body(
+    client, category, landing_type
+):
+    """벤더 문서의 Seller 객체에 weeklyLimit 필드가 없다(#173, 웹 확인) —
+    entityBody 에 그 필드를 실어 보내도(실제로는 절대 안 온다) 무시하고
+    정책의 기본 한도(ADR-0020)를 쓴다는 판단을 남긴다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="approval_required")
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    developer_id = payout.handover.award.submission.developer_id
+    seller = Seller.objects.get(developer_id=developer_id)
+    ref_seller_id = f"laurio-developer-{developer_id}"
+
+    transmission_time = "2024-01-01T00:00:00+09:00"
+    payload = json.dumps(
+        {
+            "eventType": "seller.changed",
+            "entityBody": {
+                "refSellerId": ref_seller_id,
+                "id": seller.seller_id,
+                "status": "PARTIALLY_APPROVED",
+                # 문서에 없는 필드다 — 코드가 이 값을 읽지 않는다는 것을 함께 증명한다.
+                "weeklyLimit": {"amount": 1},
+            },
+        }
+    ).encode("utf-8")
+
+    with override_settings(TOSS_API_SECURE_KEY=_TEST_TOSS_SECURE_KEY):
+        signature = _sign_toss_webhook(payload=payload, transmission_time=transmission_time)
+        resp = client.post(
+            f"{PAYOUTS_URL}/webhook/toss-seller",
+            data=payload,
+            content_type="application/json",
+            HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_TIME=transmission_time,
+            HTTP_TOSSPAYMENTS_WEBHOOK_SIGNATURE=signature,
+        )
+    assert resp.status_code == 200, resp.content
+
+    seller.refresh_from_db()
+    assert seller.weekly_limit_amount == 10_000_000  # 정책 기본값 -- entityBody 의 1 이 아니다
 
 
 # --- #149: 좁히기를 SQL 로 내린다 --------------------------------------------------

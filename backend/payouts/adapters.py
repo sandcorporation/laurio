@@ -221,9 +221,11 @@ class SellerRegistration:
     email: str
     phone: str
     existing_seller_id: str = ""
-    # Fake 전용 — 「토스가 알려줄 주간 한도」를 흉내낼 값. caller 가 스코프에서 이미 읽은
-    # PlatformPolicy 에서 채운다(#78, ADR-0023: 스캔당 한 번). 실물 adapter 는 벤더 응답이 한도를
-    # 알려주므로 이 값을 쓰지 않는다.
+    # caller 가 스코프에서 이미 읽은 PlatformPolicy 에서 채운다(#78, ADR-0023: 스캔당 한 번).
+    # Fake 는 이 값이 없을 때만 스스로 정책을 읽어 흉내낸다. 실물 adapter(`TossSellerAdapter`)도
+    # 이 값을 쓴다(#173) — 벤더 문서의 Seller 객체에는 weeklyLimit 필드가 없어(웹 확인) 벤더가
+    # 한도를 알려주지 않는다. 어댑터가 DB를 직접 읽는 대신(ADR-0007) caller 가 실어 보낸 이 값을
+    # 그대로 쓴다.
     weekly_limit_hint: int | None = None
 
 

@@ -203,6 +203,10 @@ def _reg(**overrides):
         email="dev@example.com",
         phone="01099998888",
         existing_seller_id="",
+        # 실물 어댑터가 실제로 쓰는 값이다(#173) — 벤더 문서의 Seller 객체에
+        # weeklyLimit 필드가 없어, caller(ensure_seller_registered)가 정책에서
+        # 읽어 실어 보낸 값을 그대로 쓴다.
+        weekly_limit_hint=10_000_000,
     )
     base.update(overrides)
     return SellerRegistration(**base)
@@ -264,13 +268,17 @@ def test_register_posts_to_v2_sellers_not_v1():
 @pytest.mark.parametrize(
     "vendor_body,expected_status,expected_limit",
     [
-        ({"sellerId": "s", "status": "PARTIALLY_APPROVED", "weeklyLimit": {"amount": 10_000_000}}, "partially_approved", 10_000_000),
+        ({"sellerId": "s", "status": "PARTIALLY_APPROVED"}, "partially_approved", 10_000_000),
         ({"sellerId": "s", "status": "KYC_REQUIRED"}, "under_review", None),
         ({"sellerId": "s", "status": "APPROVED"}, "approved", None),
     ],
     ids=["partially-approved", "kyc-required", "approved"],
 )
 def test_register_maps_vendor_statuses(vendor_body, expected_status, expected_limit):
+    """벤더 문서의 Seller 객체에는 weeklyLimit 필드가 없다(#173, 웹 확인) —
+    vendor_body 에 그 필드를 아예 실어 보내지 않아도(실제로는 절대 안 온다)
+    partially_approved 는 caller 가 실어 보낸 `weekly_limit_hint`(위 `_reg()`
+    의 기본값 10_000_000)로 채워져야 한다."""
     with _settings():
         adapter = TossSellerAdapter()
         with patch("payouts.adapters_toss.requests.post") as mock_post:
@@ -374,6 +382,7 @@ def test_register_with_existing_seller_id_queries_instead_of_posting():
     assert "already-registered-seller-id" in url
     assert "/v2/sellers/" in url  # v2 다(#172) — register()의 POST 경로와 같은 세대.
     assert result.status == "partially_approved"
+    assert result.weekly_limit_amount == 10_000_000  # `_reg()`가 실어 보낸 hint(#173).
 
 
 def test_query_seller_status_unknown_id_returns_pending():

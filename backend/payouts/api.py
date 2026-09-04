@@ -43,6 +43,7 @@ from core.operator_auth import OperatorAuth
 from distributions.models import DistributionShare
 from handovers.models import Handover
 from payments.webhook_security import verify_webhook_signature
+from policies.scope import current_policy
 
 from .progress import (
     BLOCKED_ON_VALUES,
@@ -456,12 +457,15 @@ def receive_toss_payout_webhook(request: HttpRequest):
     """실제 토스가 보내는 `payout.changed` 웹훅. 서명은 DB를 건드리기 전에
     가장 먼저 검증한다(#9 리뷰 지적 2와 같은 순서).
 
-    본문 구조는 벤더 문서가 공개한 뼈대(`eventType`/`data`)를 최선으로
-    추정한 것이다 — staging에서 실제로 한 번 받아 확인하기 전까지는 정확한
-    필드명을 단정하지 않는다(#57 알아둘 것). `refPayoutId`(우리
-    idempotency_key)를 찾지 못하면 벤더가 만든 자기 식별자(`data.id`)로 조회한다.
+    **봉투는 `entityBody` 다**(#173, 벤더 문서 확인 + #97 실측 — 403 응답
+    본문이 `{"version",…,"entityBody":null,"entityType":null,"error":{…}}`
+    모양 그대로였다). 이전에는 `body["data"]`를 읽었는데, 그건 문서가 규정한
+    적 없는 최선의 추정이었고 실제로는 존재하지 않는 키였다 — 실물 웹훅은
+    서명은 통과하고 이 자리에서 전부 422 로 죽었다. `refPayoutId`(우리
+    idempotency_key)를 찾지 못하면 벤더가 만든 자기 식별자(`entityBody.id`)로
+    조회한다.
 
-    **`data.id` 는 우리 참조가 아니다**(#91) — 이전에는 그것을 `refPayoutId` 인 양
+    **`entityBody.id` 는 우리 참조가 아니다**(#91) — 이전에는 그것을 `refPayoutId` 인 양
     `parse_vendor_ref` 에 넘겼는데, 벤더 식별자는 UUID 도 아니고 attempt 접미어도
     없으니 파싱이 언제나 실패해 이 폴백은 **있는데 반드시 422 로 끝나는** 경로였다.
     그 값을 저장해 두는 자리가 이미 있으므로(`Payout.vendor_payout_id` —
@@ -486,10 +490,16 @@ def receive_toss_payout_webhook(request: HttpRequest):
     except (ValueError, UnicodeDecodeError) as exc:
         raise HttpError(400, "웹훅 본문이 JSON이 아닙니다.") from exc
 
-    data = body.get("data") or {}
-    ref_payout_id = data.get("refPayoutId") or ""
-    vendor_payout_id = data.get("id") or ""
-    vendor_status = data.get("status")
+    entity_body = body.get("entityBody")
+    if not isinstance(entity_body, dict):
+        # entityBody 자체가 없다 — 「우리 추정이 또 틀렸다」는 신호다(#173). #170
+        # 이 200으로 덮은 것은 「서명은 맞는데 모르는 참조」이지 「본문을 못
+        # 읽는다」가 아니다 — 여기서도 422를 유지한다.
+        raise HttpError(422, "웹훅 본문에서 entityBody를 찾을 수 없습니다.")
+
+    ref_payout_id = entity_body.get("refPayoutId") or ""
+    vendor_payout_id = entity_body.get("id") or ""
+    vendor_status = entity_body.get("status")
     webhook_id = request.headers.get("tosspayments-webhook-transmission-id", "")
 
     if not ref_payout_id and not vendor_payout_id:
@@ -572,6 +582,8 @@ def receive_toss_seller_webhook(request: HttpRequest):
     부르지 않아도 이 경로로 Seller.status가 갱신되고, 그 즉시 이 Developer의
     CONFIRMED_SELLER_PENDING Payout들을 다음 단계로 밀어준다
     (`advance_seller_pending_payouts`).
+
+    **봉투는 `entityBody` 다**(#173) — `payout.changed`와 같은 결함, 같은 수정.
     """
 
     if not _toss_webhook_signature_ok(request):
@@ -582,10 +594,16 @@ def receive_toss_seller_webhook(request: HttpRequest):
     except (ValueError, UnicodeDecodeError) as exc:
         raise HttpError(400, "웹훅 본문이 JSON이 아닙니다.") from exc
 
-    data = body.get("data") or {}
-    ref_seller_id = data.get("refSellerId") or ""
-    seller_id = data.get("sellerId") or ""
-    vendor_status = data.get("status")
+    entity_body = body.get("entityBody")
+    if not isinstance(entity_body, dict):
+        raise HttpError(422, "웹훅 본문에서 entityBody를 찾을 수 없습니다.")
+
+    ref_seller_id = entity_body.get("refSellerId") or ""
+    # 벤더 문서의 Seller 객체 필드는 `id` 다 — `sellerId` 는 없다(#173, 웹
+    # 확인). `refSellerId` 로 찾는(우리가 등록 시 보낸 `laurio-developer-{id}`)
+    # 기존 경로는 그대로 두고, 폴백만 고친다.
+    seller_id = entity_body.get("id") or ""
+    vendor_status = entity_body.get("status")
 
     from .adapters_toss import _SELLER_STATUS_MAP
 
@@ -603,8 +621,14 @@ def receive_toss_seller_webhook(request: HttpRequest):
     if seller is None:
         raise HttpError(404, "알 수 없는 Seller 입니다.")
 
-    weekly_limit_body = data.get("weeklyLimit") or {}
-    new_weekly_limit = weekly_limit_body.get("amount") if our_status == "partially_approved" else None
+    # 벤더 문서의 Seller 객체에는 weeklyLimit 필드가 없다(#173, 웹 확인) —
+    # 벤더가 한도를 알려주지 않으므로 정책의 기본 한도(ADR-0020, 토스가 정한
+    # 사실)를 쓴다. `payouts.adapters_toss.TossSellerAdapter`가 같은 이유로
+    # `weekly_limit_hint`를 쓰는 것과 같은 판단이다 — 이 자리는 HTTP 요청
+    # 스코프 안이라 `current_policy()`를 직접 읽는다(#145).
+    new_weekly_limit = (
+        current_policy().seller_weekly_limit_amount if our_status == "partially_approved" else None
+    )
 
     if our_status == seller.status:
         # 완전히 같은 상태의 재전송이다(코드리뷰 지적 4, 3차 — "동급 rank가
