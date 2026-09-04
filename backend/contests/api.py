@@ -103,7 +103,7 @@ def _minimum_total(deliverable_type_ids: list[int]) -> int:
     return total or 0
 
 
-def _serialize_contest(contest: Contest) -> ContestOut:
+def _serialize_contest(contest: Contest, auth_user: object | None = None) -> ContestOut:
     # `contest.submission_count`는 annotate로 미리 실려 있어야 한다
     # (list_contests/get_contest/get_home_curation) — 새로 만든 Contest는
     # 호출부가 0을 직접 채워 넣는다(create_contest/reopen_contest, 둘 다 방금
@@ -111,6 +111,12 @@ def _serialize_contest(contest: Contest) -> ContestOut:
     # 주지 않는 이유는, annotate를 빠뜨린 새 호출부가 있으면 AttributeError로
     # 바로 드러나야 하기 때문이다 — getattr로 감싸면 그 실수가 "항상 0"이라는
     # 그럴듯한 값으로 위장해 테스트를 통과할 수 있다.
+    #
+    # `auth_user`를 넘기지 않는 호출부는 `is_owner=False`로 응답한다(ContestOut의
+    # 기본값, #164) — list_contests/get_home_curation처럼 "내 것인가"가 화면에
+    # 드러나지 않는 목록이다. `contest.sponsor`가 이미 select_related로 실려
+    # 있어야 N+1 없이 비교할 수 있다(get_contest가 그렇게 한다).
+    is_owner = auth_user is not None and contest.sponsor.user_id == getattr(auth_user, "id", None)
     return ContestOut(
         id=contest.id,
         title=contest.title,
@@ -133,6 +139,7 @@ def _serialize_contest(contest: Contest) -> ContestOut:
         created_at=contest.created_at,
         judging_ends_at=contest.judging_ends_at,
         submission_count=contest.submission_count,
+        is_owner=is_owner,
     )
 
 
@@ -444,7 +451,11 @@ def get_home_curation(request: HttpRequest):
 def get_contest(request: HttpRequest, contest_id: int):
     try:
         contest = (
-            Contest.objects.select_related("category")
+            # `sponsor`도 select_related한다 — draft 소유자 판정(아래)과
+            # `is_owner`(#164, `_serialize_contest`) 둘 다 `contest.sponsor.user_id`를
+            # 읽으므로, 여기서 미리 조인해 두지 않으면 로그인한 방문자가 볼 때마다
+            # SponsorProfile을 한 번 더 조회하는 N+1이 생긴다.
+            Contest.objects.select_related("category", "sponsor")
             .prefetch_related("deliverable_types", "requirements")
             # 참가작 수(#106, spec #105) — 단건이라도 annotate로 얻는다.
             # `_serialize_contest`가 `contest.submission_count`를 그대로 읽는다.
@@ -454,15 +465,23 @@ def get_contest(request: HttpRequest, contest_id: int):
     except Contest.DoesNotExist as exc:
         raise HttpError(404, "Contest를 찾을 수 없습니다.") from exc
 
+    auth_user = getattr(request, "auth_user", None)
+
     # PUBLISHED·CLOSED·AWARDED·JUDGING_ENDED 모두 공개다 — list_contests와 같은
     # 기준(Contest.Status.PUBLICLY_VISIBLE).
     if not Contest.Status.PUBLICLY_VISIBLE(contest.status):
-        auth_user = getattr(request, "auth_user", None)
         is_owner = auth_user is not None and contest.sponsor.user_id == auth_user.id
         if not is_owner:
             raise HttpError(404, "Contest를 찾을 수 없습니다.")
 
-    return _serialize_contest(contest)
+    # 익명(SSR 공개 상세, ADR-0015 — 서버 컴포넌트는 Authorization을 보내지 않는다)
+    # 이면 auth_user가 None이라 `_serialize_contest`가 그대로 is_owner=False를
+    # 낸다. 로그인한 브라우저가 BFF를 거쳐 이 엔드포인트를 다시 부를 때만(예:
+    # 공개 상세의 "제출하러 가기" CTA가 자기 Contest인지 확인할 때) 실제 값이
+    # 나온다 — 공개 SSR과 인증 구역이 같은 엔드포인트를 서로 다른 신뢰 수준으로
+    # 부르는 것은 이 파일의 다른 auth=None 엔드포인트(예: record_contest_view)와
+    # 같은 모양이다.
+    return _serialize_contest(contest, auth_user=auth_user)
 
 
 @router.patch("/contests/{contest_id}", response=ContestOut, auth=jwt_auth)

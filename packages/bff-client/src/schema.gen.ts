@@ -2504,6 +2504,11 @@ export interface components {
             description: string;
             /** Id */
             id: number;
+            /**
+             * Is Owner
+             * @default false
+             */
+            is_owner: boolean;
             /** Is Underfunded */
             is_underfunded: boolean;
             /** Judging Ends At */

@@ -193,6 +193,15 @@ class ContestOut(Schema):
     # 채워 넣은(`create_contest`/`reopen_contest`) `Contest.submission_count`
     # 에서 온다 — 화면과 마찬가지로 이 스키마도 따로 세지 않는다.
     submission_count: int
+    # 이 응답을 받은 사람이 이 Contest의 Sponsor 본인인가 (#164). `SubmissionOut.
+    # is_owner`(submissions/schemas.py)와 같은 패턴 — 공개 상세는 인증 없이도
+    # 응답하므로 익명·타인에게는 항상 False다. 값의 정확도를 보장하는 것은
+    # `contests.api.get_contest` 하나뿐이다(auth_user를 실제로 넘긴다) — 목록·홈
+    # 큐레이션처럼 "이 화면에 자기 것이 섞여 있는가"가 의미 없는 자리는 계산 비용을
+    # 아끼려 기본값 False를 그대로 둔다. 프론트가 소유자 CTA를 감추는 유일한 근거는
+    # 이 필드이므로, 새 호출부를 추가할 때 "내 것인지가 화면에 드러나는가"를 먼저
+    # 따져야 한다.
+    is_owner: bool = False
 
 
 class HomeCurationGroupOut(Schema):
