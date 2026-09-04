@@ -10,10 +10,12 @@
 화면이라, 조회마다 Contest 행을 갱신하면 그 행에 경합이 생긴다(#109
 인수조건). 이 저장소가 이미 갖고 있는 Redis 캐시(`caches["sessions"]`,
 ADR-0018이 Operator 세션을 위해 붙인 것)를 키 접두어로 나눠 함께 쓴다 — 새
-Redis 인스턴스·DB 인덱스를 새로 배선하지 않는다(`SESSION_REDIS_URL`의
-인덱스 배정은 병렬 pytest 워커 수만큼 이미 빠듯하다, `tests/conftest.py`).
-그 대가로 `tests/conftest.py`의 `_reset_operator_sessions`(매 테스트
-FLUSHDB)이 이 카운터도 함께 비워 준다 — 테스트 격리가 공짜로 따라온다.
+Redis 인스턴스를 새로 배선하지 않는다. 그 대가로 `tests/conftest.py`의
+`_reset_operator_sessions`가 이 카운터도 함께 비워 준다 — 테스트 격리가
+공짜로 따라온다. 테스트에서 그 캐시는 LocMem 이라(`config/settings.py`의
+`_RUNNING_TESTS`) 그 정리는 **이 프로세스 안만** 비운다. 예전에는 실물
+Redis 의 FLUSHDB 였고, 그래서 호스트에서 돌린 pytest 가 떠 있는 dev 환경의
+운영자 세션과 이 카운터까지 통째로 지웠다.
 
 **중복 판별은 날짜 단위다.** Submission이 사람당 하나로 제약돼 있어(한
 Developer는 한 Contest에 하나만 낸다) 전환율의 분모도 사람 단위여야
