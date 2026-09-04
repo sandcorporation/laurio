@@ -17,8 +17,8 @@ const BULK = 120;
 let seeded: SeededContests;
 let bulk: SeededBulk;
 
-test.beforeAll(() => {
-  seeded = seedE2eContests({ bulk: BULK });
+test.beforeAll(async () => {
+  seeded = await seedE2eContests({ bulk: BULK });
   expect(seeded.bulk, "--bulk 로 심은 대량 Contest 가 시드 출력에 없다").toBeDefined();
   bulk = seeded.bulk!;
 });

@@ -13,7 +13,7 @@ async function login(page: import("@playwright/test").Page, seed: string): Promi
 }
 
 test("내 참가 현황의 행에서 클릭으로 채점 결과에 도달한다", async ({ page }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.developer_login_seed);
 
   await page.goto("/console/participation");
@@ -29,7 +29,7 @@ test("내 참가 현황의 행에서 클릭으로 채점 결과에 도달한다"
 test("채점 결과와 이의 제기 폼이 함께 보인다 — 무엇에 이의를 거는지 보고 쓴다", async ({
   page,
 }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.developer_login_seed);
 
   await page.goto(`/console/participation/${seeded.judging.submissions[0].id}/appeal`);
@@ -41,7 +41,7 @@ test("채점 결과와 이의 제기 폼이 함께 보인다 — 무엇에 이�
 });
 
 test("이의를 접수하면 폼이 사라지고 접수된 이의가 보인다", async ({ page }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.developer_login_seed);
 
   await page.goto(`/console/participation/${seeded.judging.submissions[0].id}/appeal`);
@@ -63,7 +63,7 @@ test("이의를 접수하면 폼이 사라지고 접수된 이의가 보인다",
 test("채점 전이면 「아직 채점되지 않았다」고 말한다 — 실패로 보이지 않는다", async ({
   page,
 }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.developer_login_seed);
 
   const submissionId = seeded.judging.submissions[0].id;
@@ -85,7 +85,7 @@ test("채점 전이면 「아직 채점되지 않았다」고 말한다 — 실�
 });
 
 test("이의 기한이 화면에 있고, 지났으면 폼 대신 이유가 있다", async ({ page }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.developer_login_seed);
   const submissionId = seeded.judging.submissions[0].id;
 
@@ -113,7 +113,7 @@ test("이의 기한이 화면에 있고, 지났으면 폼 대신 이유가 있�
 });
 
 test("조회에 실패하면 실패했다고 말한다 — 「채점 전」처럼 보이지 않는다", async ({ page }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.developer_login_seed);
 
   const submissionId = seeded.judging.submissions[0].id;
@@ -128,7 +128,7 @@ test("조회에 실패하면 실패했다고 말한다 — 「채점 전」처�
 });
 
 test("열람 기록 조회가 실패하면 「아무도 안 봤다」고 하지 않는다", async ({ page }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.developer_login_seed);
 
   const submissionId = seeded.judging.submissions[0].id;
@@ -159,7 +159,7 @@ test("열람 기록 조회가 실패하면 「아무도 안 봤다」고 하지 
 });
 
 test("남의 제출이면 채점 결과가 보이지 않는다", async ({ page }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   // 시드의 다른 개발자로 로그인해 남의 submission 을 직접 친다.
   await login(page, `e2e-appeal-intruder-${Date.now()}`);
 
@@ -171,7 +171,7 @@ test("남의 제출이면 채점 결과가 보이지 않는다", async ({ page }
 });
 
 test("내 이의가 배분을 붙잡고 있으면 그렇게 말한다 — 사라진 게 아니다", async ({ page }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.developer_login_seed);
   const submissionId = seeded.judging.submissions[0].id;
 

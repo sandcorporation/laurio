@@ -52,7 +52,7 @@ async function stubPayout(
 }
 
 test("상금 그대로가 들어오지 않는다는 것을 지급 전에 본다", async ({ page }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.developer_login_seed);
 
   const contestId = seeded.judging.id;
@@ -72,7 +72,7 @@ test("상금 그대로가 들어오지 않는다는 것을 지급 전에 본다"
 });
 
 test("주민등록번호 대기와 지급대행 등록 대기를 다르게 그린다", async ({ page }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.developer_login_seed);
   const contestId = seeded.judging.id;
 
@@ -100,7 +100,7 @@ test("주민등록번호 대기와 지급대행 등록 대기를 다르게 그�
 });
 
 test("지급대행사가 별도 인증 문자를 보낸다고 미리 말한다", async ({ page }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.developer_login_seed);
   const contestId = seeded.judging.id;
 
@@ -118,7 +118,7 @@ test("지급대행사가 별도 인증 문자를 보낸다고 미리 말한다",
 test("주민등록번호는 화면에 남지 않는다 — 제출 뒤 입력칸이 비고 마스킹된다", async ({
   page,
 }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.developer_login_seed);
   const contestId = seeded.judging.id;
 
@@ -149,7 +149,7 @@ test("주민등록번호는 화면에 남지 않는다 — 제출 뒤 입력칸�
 });
 
 test("Seller 등록이 거절돼도 상금이 남아 있다고 말하고 재시도를 준다", async ({ page }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.developer_login_seed);
   const contestId = seeded.judging.id;
 
@@ -172,7 +172,7 @@ test("실이체 자체가 거절되면 등록 거절과 다른 문구로 재시�
   // #57 코드리뷰 지적 11(3차) — Seller 등록은 끝났는데(READY) 실이체 자체가
   // 거절된 경우, "수취인 등록이 거절되었습니다"라고 말하면 실제 원인과
   // 어긋난다.
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.developer_login_seed);
   const contestId = seeded.judging.id;
 
@@ -196,7 +196,7 @@ test("실이체 자체가 거절되면 등록 거절과 다른 문구로 재시�
 });
 
 test("수상하지 않은 행에는 지급 링크 자체가 없다", async ({ page }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.developer_login_seed);
 
   await page.goto("/console/participation");
@@ -210,7 +210,7 @@ test("수상하지 않은 행에는 지급 링크 자체가 없다", async ({ pa
 });
 
 test("남의 Contest 를 직접 쳐도 금액이 새지 않는다", async ({ page }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, `e2e-payout-intruder-${Date.now()}`);
 
   await page.goto(`/console/payouts/${seeded.judging.id}`);
@@ -243,7 +243,7 @@ test("세션이 없으면 렌더링 전에 로그인으로 돌아간다", async 
 test("심사 중에는 전화번호를 요구하지 않는다 — 백엔드 안내와 같은 것을 말한다", async ({
   page,
 }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.developer_login_seed);
   const contestId = seeded.judging.id;
 
@@ -264,7 +264,7 @@ test("심사 중에는 전화번호를 요구하지 않는다 — 백엔드 안�
 test("등록이 거절된 상태에서도 전화번호를 요구하지 않는다 — 할 일은 재시도다", async ({
   page,
 }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.developer_login_seed);
   const contestId = seeded.judging.id;
 
@@ -286,7 +286,7 @@ test("등록이 거절된 상태에서도 전화번호를 요구하지 않는다
 });
 
 test("아직 등록 전이면 전화번호 폼은 그대로 뜬다 — 이 경로를 막지 않았다", async ({ page }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.developer_login_seed);
   const contestId = seeded.judging.id;
 
@@ -320,7 +320,7 @@ test("지급대행사 본인인증이 남았으면 「하실 일은 없습니다
   // (`progress.py` 의 SELLER_AUTH → Turn.DEVELOPER) — 토스가 보낸 본인인증
   // 문자로 인증을 끝내야 다음으로 간다. 그 안내 바로 아래에 "하실 일은
   // 없습니다"가 찍히면 한 화면이 서로 모순된다.
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.developer_login_seed);
   const contestId = seeded.judging.id;
 

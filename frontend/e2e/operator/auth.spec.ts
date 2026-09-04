@@ -60,7 +60,7 @@ test.describe("로그인 — 아이디·비밀번호(ADR-0018)", () => {
   test("올바른 아이디·비밀번호로 로그인하면 홈이 아이디와 등급을 보여준다", async ({
     page,
   }) => {
-    const operator = seedE2eOperator({ username: `e2e-op-basic-${Date.now()}`, superuser: false });
+    const operator = await seedE2eOperator({ username: `e2e-op-basic-${Date.now()}`, superuser: false });
 
     await page.goto("/login");
     await page.getByTestId("login-username").fill(operator.username);
@@ -73,7 +73,7 @@ test.describe("로그인 — 아이디·비밀번호(ADR-0018)", () => {
   });
 
   test("상위 등급 계정은 홈에서 상위 등급이라고 말한다", async ({ page }) => {
-    const operator = seedE2eOperator({
+    const operator = await seedE2eOperator({
       username: `e2e-op-super-${Date.now()}`,
       superuser: true,
     });
@@ -89,7 +89,7 @@ test.describe("로그인 — 아이디·비밀번호(ADR-0018)", () => {
   test("틀린 아이디와 틀린 비밀번호가 구별되지 않는 하나의 메시지를 낸다", async ({
     page,
   }) => {
-    const operator = seedE2eOperator({ username: `e2e-op-wrongpw-${Date.now()}` });
+    const operator = await seedE2eOperator({ username: `e2e-op-wrongpw-${Date.now()}` });
 
     await page.goto("/login");
     await page.getByTestId("login-username").fill("no-such-operator-9134");
@@ -110,7 +110,7 @@ test.describe("로그인 — 아이디·비밀번호(ADR-0018)", () => {
 
 test.describe("세션 쿠키(ADR-0016/0019)", () => {
   test("세션 쿠키는 HttpOnly라 브라우저 스크립트에서 읽히지 않는다", async ({ page }) => {
-    const operator = seedE2eOperator({ username: `e2e-op-httponly-${Date.now()}` });
+    const operator = await seedE2eOperator({ username: `e2e-op-httponly-${Date.now()}` });
 
     await page.goto("/login");
     await page.getByTestId("login-username").fill(operator.username);
@@ -128,7 +128,7 @@ test.describe("세션 쿠키(ADR-0016/0019)", () => {
   });
 
   test("로그아웃하면 쿠키가 사라지고 보호된 화면에 다시 못 들어간다", async ({ page }) => {
-    const operator = seedE2eOperator({ username: `e2e-op-logout-${Date.now()}` });
+    const operator = await seedE2eOperator({ username: `e2e-op-logout-${Date.now()}` });
 
     await page.goto("/login");
     await page.getByTestId("login-username").fill(operator.username);
@@ -149,7 +149,7 @@ test.describe("세션 쿠키(ADR-0016/0019)", () => {
   test("로그아웃 요청이 실패하면 실패했다고 말할 뿐 로그인 화면으로 보내지 않는다", async ({
     page,
   }) => {
-    const operator = seedE2eOperator({ username: `e2e-op-logoutfail-${Date.now()}` });
+    const operator = await seedE2eOperator({ username: `e2e-op-logoutfail-${Date.now()}` });
 
     await page.goto("/login");
     await page.getByTestId("login-username").fill(operator.username);
@@ -182,7 +182,7 @@ test.describe("세션 쿠키(ADR-0016/0019)", () => {
   test("브라우저의 쿠키 헤더를 통째로 중계하지 않는다 — 무관한 쿠키가 섞여도 정상 응답한다", async ({
     page,
   }) => {
-    const operator = seedE2eOperator({ username: `e2e-op-cookierelay-${Date.now()}` });
+    const operator = await seedE2eOperator({ username: `e2e-op-cookierelay-${Date.now()}` });
 
     await page.goto("/login");
     await page.getByTestId("login-username").fill(operator.username);
@@ -212,7 +212,7 @@ test.describe("세션 쿠키(ADR-0016/0019)", () => {
 
 test.describe("Origin 검증 — 로그인도 예외가 아니다(ADR-0016/0019)", () => {
   test("다른 Origin에서 온 로그인 요청은 403으로 거부된다", async ({ request }) => {
-    const operator = seedE2eOperator({ username: `e2e-op-badorigin-${Date.now()}` });
+    const operator = await seedE2eOperator({ username: `e2e-op-badorigin-${Date.now()}` });
 
     const res = await request.post("/api/auth/login", {
       headers: { origin: "https://evil.example.test" },
@@ -225,7 +225,7 @@ test.describe("Origin 검증 — 로그인도 예외가 아니다(ADR-0016/0019)
     // Playwright의 raw request는 브라우저와 달리 Origin을 자동으로 싣지 않는다 —
     // 그 자체로 "브라우저가 보낸 게 아닌 요청"의 좋은 대리 시험이다
     // (frontend/e2e/auth.spec.ts와 같은 관용구).
-    const operator = seedE2eOperator({ username: `e2e-op-noorigin-${Date.now()}` });
+    const operator = await seedE2eOperator({ username: `e2e-op-noorigin-${Date.now()}` });
 
     const res = await request.post("/api/auth/login", {
       data: { username: operator.username, password: E2E_OPERATOR_PASSWORD },
@@ -236,7 +236,7 @@ test.describe("Origin 검증 — 로그인도 예외가 아니다(ADR-0016/0019)
 
 test.describe("open redirect 방어 — ?next= 는 같은 오리진의 절대경로만 허용한다", () => {
   test("완전한 외부 URL을 next로 주면 무시하고 홈으로 보낸다", async ({ page, baseURL }) => {
-    const operator = seedE2eOperator({ username: `e2e-op-openredirect-abs-${Date.now()}` });
+    const operator = await seedE2eOperator({ username: `e2e-op-openredirect-abs-${Date.now()}` });
 
     await page.goto("/login?next=" + encodeURIComponent("https://evil.example.test/phish"));
     await page.getByTestId("login-username").fill(operator.username);
@@ -252,7 +252,7 @@ test.describe("open redirect 방어 — ?next= 는 같은 오리진의 절대경
     page,
     baseURL,
   }) => {
-    const operator = seedE2eOperator({ username: `e2e-op-openredirect-proto-${Date.now()}` });
+    const operator = await seedE2eOperator({ username: `e2e-op-openredirect-proto-${Date.now()}` });
     const protocolRelative = "//" + "evil.example.test";
 
     await page.goto("/login?next=" + encodeURIComponent(protocolRelative));
@@ -266,7 +266,7 @@ test.describe("open redirect 방어 — ?next= 는 같은 오리진의 절대경
   });
 
   test("같은 오리진의 상대경로 next는 정상적으로 그리로 보낸다", async ({ page }) => {
-    const operator = seedE2eOperator({ username: `e2e-op-openredirect-legit-${Date.now()}` });
+    const operator = await seedE2eOperator({ username: `e2e-op-openredirect-legit-${Date.now()}` });
 
     await page.goto("/login?next=" + encodeURIComponent("/appeals"));
     await page.getByTestId("login-username").fill(operator.username);

@@ -39,7 +39,7 @@ async function readQueueValue(page: Page, testId: string): Promise<number> {
 
 test.describe("세 큐 건수 — 정확성(ADR-0020)", () => {
   test("실제로 심은 뒤 홈의 세 숫자가 그것과 정확히 맞는다", async ({ page }) => {
-    const operator = seedE2eOperator();
+    const operator = await seedE2eOperator();
     await loginAsOperator(page, operator.username);
 
     const before = {
@@ -48,7 +48,7 @@ test.describe("세 큐 건수 — 정확성(ADR-0020)", () => {
       seller: await readQueueValue(page, "queue-payouts-seller"),
     };
 
-    seedE2eOperatorQueues();
+    await seedE2eOperatorQueues();
 
     await page.reload();
     const after = {
@@ -63,9 +63,9 @@ test.describe("세 큐 건수 — 정확성(ADR-0020)", () => {
   });
 
   test("0건은 0건이라고 명시적으로 말한다 — 빈 영역이 아니다", async ({ page }) => {
-    clearE2eOperatorQueues();
+    await clearE2eOperatorQueues();
 
-    const operator = seedE2eOperator();
+    const operator = await seedE2eOperator();
     await loginAsOperator(page, operator.username);
 
     await expect(page.getByTestId("queue-appeals-pending-empty")).toContainText("처리할 것이 없습니다");
@@ -77,7 +77,7 @@ test.describe("세 큐 건수 — 정확성(ADR-0020)", () => {
   });
 
   test("조회 실패는 실패라고 말한다 — 0건처럼 보이지 않는다", async ({ page }) => {
-    const operator = seedE2eOperator();
+    const operator = await seedE2eOperator();
 
     // 세 큐 조회만 실패시킨다 — 세션 확인(/api/auth/session)이나 로그인 자체는
     // 그대로 실제 백엔드를 친다(ADR-0017은 SSR·가드·허용목록/Origin 검증이라는
@@ -105,7 +105,7 @@ test.describe("세 큐 건수 — 정확성(ADR-0020)", () => {
 
 test.describe("각 건수가 자기 목록으로 이어진다", () => {
   test("이의 큐 카드를 클릭하면 이의 목록 경로로 이동한다", async ({ page }) => {
-    const operator = seedE2eOperator();
+    const operator = await seedE2eOperator();
     await loginAsOperator(page, operator.username);
 
     await readQueueValue(page, "queue-appeals-pending"); // 로딩이 끝나길 기다린다.
@@ -116,7 +116,7 @@ test.describe("각 건수가 자기 목록으로 이어진다", () => {
   test("신원 대기 지급 카드를 클릭하면 payouts?blocked_on=identity로 이동한다", async ({
     page,
   }) => {
-    const operator = seedE2eOperator();
+    const operator = await seedE2eOperator();
     await loginAsOperator(page, operator.username);
 
     await readQueueValue(page, "queue-payouts-identity");
@@ -127,7 +127,7 @@ test.describe("각 건수가 자기 목록으로 이어진다", () => {
   test("Seller 대기 지급 카드를 클릭하면 payouts?blocked_on=seller로 이동한다", async ({
     page,
   }) => {
-    const operator = seedE2eOperator();
+    const operator = await seedE2eOperator();
     await loginAsOperator(page, operator.username);
 
     await readQueueValue(page, "queue-payouts-seller");
@@ -141,7 +141,7 @@ test.describe("세션 만료(ADR-0016/0019)", () => {
     page,
     context,
   }) => {
-    const operator = seedE2eOperator();
+    const operator = await seedE2eOperator();
     await loginAsOperator(page, operator.username);
 
     // 서버 쪽에서 세션이 무효화된 것과 같은 효과를 브라우저 쪽에서 흉내낸다 —

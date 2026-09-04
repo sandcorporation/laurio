@@ -48,7 +48,7 @@ test("홈에서 클릭으로 도달한다 — URL 을 직접 쳐야만 닿는 �
 
 test("내가 연 공모전이 행으로 보이고 「다음 행동」을 먼저 말한다", async ({ page }) => {
   // 시드가 만든 심사 Contest 의 진짜 Sponsor 로 로그인한다.
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.sponsor_login_seed);
 
   await page.goto("/console/contests");
@@ -68,7 +68,7 @@ test("내가 연 공모전이 행으로 보이고 「다음 행동」을 먼저 
 });
 
 test("심사할 수 있는 단계면 심사 화면으로 클릭해 들어간다", async ({ page }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.sponsor_login_seed);
 
   await page.goto("/console/contests");
@@ -78,7 +78,7 @@ test("심사할 수 있는 단계면 심사 화면으로 클릭해 들어간다"
 });
 
 test("심사할 수 없는 단계에는 심사 링크가 없다", async ({ page }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.sponsor_login_seed);
 
   // 배분 대기는 심사가 끝난 뒤다 — 링크를 걸어 두면 눌러 봐야 보여줄 것이 없다.
@@ -111,7 +111,7 @@ test("이의로 배분이 보류된 공모전은 「보류」라고 말한다 �
   // backend/tests/test_my_contests.py 가 실물로 친다 — 참으로 만들려면 전역
   // 시계를 심사기간 + 배분 대기일만큼 밀어야 하고, 그러면 같은 실행의 다른
   // 스펙이 함께 움직인다.
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.sponsor_login_seed);
 
   await page.route("**/api/backend/contests/mine*", async (route) => {
@@ -141,7 +141,7 @@ test("이의로 배분이 보류된 공모전은 「보류」라고 말한다 �
 test("20개를 넘으면 「더 보기」로 나머지에 도달한다 — 잘린 채 끝나지 않는다", async ({
   page,
 }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.sponsor_login_seed);
 
   // 서버는 `page_size=20` 으로 페이지네이션한다. 1페이지만 그리면 21번째부터는

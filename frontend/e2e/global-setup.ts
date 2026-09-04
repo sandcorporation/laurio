@@ -16,10 +16,11 @@
 // 때문에 "실행 토큰으로 가른다"는 백엔드 수정만으로는 깨끗한 스택에서 연달아
 // 두 번 돌리는 시나리오가 여전히 깨졌다. 그래서 어떤 프로젝트의 테스트가
 // 실행되기도 전에, 이 파일에서 직접 정리를 먼저 끝낸다.
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+
+import { runSeed } from "./lib/seed-http";
 
 const RUN_ID_FILE = path.resolve(__dirname, "../.e2e-run-id");
 // 이 파일은 frontend/e2e/에 있다 — e2e/lib/seed-operator.ts(frontend/e2e/lib/)
@@ -27,11 +28,7 @@ const RUN_ID_FILE = path.resolve(__dirname, "../.e2e-run-id");
 // 밖(워크트리 상위)을 가리켜 `spawnSync uv ENOENT`로 표면화된 적이 있다 — 실제
 // 원인은 PATH가 아니라 잘못된 cwd였다. 디렉터리 깊이가 다르면 상대 경로도
 // 다시 계산해야 한다.
-const BACKEND_DIR = path.resolve(__dirname, "../../backend");
 
-function backendDbPort(): string {
-  return process.env.LAURIO_DB_PORT ?? "55432";
-}
 
 // Next dev 서버는 라우트를 **요청받을 때** 컴파일한다. 그래서 스위트의 첫
 // 실행은 테스트가 아니라 컴파일을 기다린다 — 실측으로 public 프로젝트가 콜드
@@ -75,19 +72,13 @@ export default async function globalSetup(): Promise<void> {
   // seed_e2e_operator_queues.py의 `--prune-other-runs` — 심지 않고, 이 run id가
   // 아닌 own-prefix Contest만 정리한다. `_refuse_in_deployed_environment()`가
   // 배포 환경에서는 이 호출 자체를 거부한다(그 명령의 기존 안전장치 그대로).
-  const output = execFileSync(
-    "uv",
-    ["run", "python", "manage.py", "seed_e2e_operator_queues", "--prune-other-runs"],
-    {
-      cwd: BACKEND_DIR,
-      env: { ...process.env, LAURIO_DB_PORT: backendDbPort(), LAURIO_E2E_RUN_ID: runId },
-      encoding: "utf-8",
-      stdio: ["ignore", "pipe", "inherit"],
-    },
-  );
+  const pruneOtherRuns = (await runSeed("operator-queues", {
+    run_id: runId,
+    prune_other_runs: true,
+  })) as { pruned: number };
   // eslint-disable-next-line no-console -- globalSetup은 CI 로그에서 눈에 보여야
   // 실제로 뭔가를 정리했는지 확인할 수 있다.
-  console.log(`[global-setup] e2e run id ${runId} — ${output.trim().split("\n").pop()}`);
+  console.log(`[global-setup] e2e run id ${runId} — 이전 실행 ${pruneOtherRuns.pruned}건 정리`);
 
   // **워커별 정리가 걷지 못하는 것을 여기서 한 번 걷는다** (#104).
   // `seed_e2e_contests` 는 이제 자기 네임스페이스만 지운다 — 그래야 옆 워커를
@@ -96,18 +87,11 @@ export default async function globalSetup(): Promise<void> {
   // 접두어가 없던 시절 그것들이 쌓여 목록 페이지네이션 스펙이 조용히 깨졌다.
   //
   // 여기는 워커가 아직 하나도 없는 시점이라 경합이 성립하지 않는다.
-  const pruned = execFileSync(
-    "uv",
-    ["run", "python", "manage.py", "seed_e2e_contests", "--prune-all-namespaces"],
-    {
-      cwd: BACKEND_DIR,
-      env: { ...process.env, LAURIO_DB_PORT: backendDbPort() },
-      encoding: "utf-8",
-      stdio: ["ignore", "pipe", "inherit"],
-    },
-  );
+  const prunedAll = (await runSeed("contests", { prune_all_namespaces: true })) as {
+    output?: string;
+  };
   // eslint-disable-next-line no-console -- 위와 같은 이유.
-  console.log(`[global-setup] ${pruned.trim().split(String.fromCharCode(10)).pop()}`);
+  console.log(`[global-setup] ${prunedAll.output ?? "pruned"}`);
 
   // **호출을 잊고 있었다.** 이 함수는 진작 있었고 CLAUDE.md 는 워밍업이 돌고
   // 있다고 적어 뒀는데, 정의만 되고 불리지 않았다 — 즉 기록된 "웜 2.5분" 이

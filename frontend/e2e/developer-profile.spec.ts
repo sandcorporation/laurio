@@ -15,8 +15,8 @@ import { seedE2eContests, type SeededContests } from "./lib/seed";
 // SSR 증명이다.
 let seeded: SeededContests;
 
-test.beforeAll(() => {
-  seeded = seedE2eContests();
+test.beforeAll(async () => {
+  seeded = await seedE2eContests();
 });
 
 test('이 페이지에 "use client" 가 없다', () => {

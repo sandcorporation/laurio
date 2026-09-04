@@ -3,23 +3,12 @@
 // 데이터다"). 하드코딩한 프론트 픽스처를 쓰면 그 구분이 사라지므로, 실제
 // Django DB에 진짜 Contest 를 심는다.
 //
-// `backend/contests/management/commands/seed_e2e_contests.py` 를 호스트에서
-// `uv run manage.py` 로 직접 돌린다 — `docker compose exec` 를 쓰지 않는 이유는
-// compose 프로젝트 이름(`-p`)이 실행 환경마다 다르기 때문이다(디스패치 지침의
-// 체인 전용 포트처럼, 로컬은 `laurio-ch-c`, CI는 compose 파일의 기본
-// `laurio-dev`) — 이름을 잘못 짚으면 엉뚱한(또는 无관한) 스택의 backend
-// 컨테이너를 건드릴 위험이 생긴다. 반면 dev DB는 항상 호스트에 포트로
-// 노출되어 있고(docker/compose.dev.yaml, LAURIO_DB_PORT) `cd backend && uv run
-// pytest` 가 이미 이 경로로 같은 DB에 붙는 것이 이 저장소의 기존 관례다
-// (CLAUDE.md) — manage.py 커맨드도 같은 경로로 같은 DB에 붙으면 프로젝트
-// 이름과 완전히 무관해진다.
-import { execFileSync } from "node:child_process";
-import path from "node:path";
+// 심는 것은 이미 떠 있는 백엔드다(#156) — 예전에는 `uv run manage.py` 서브프로세스라
+// 호출마다 Django 부팅 0.9초를 치렀다. `docker compose exec` 를 쓰지 않는다는 옛 규율은
+// 그대로 지켜진다(compose 프로젝트 이름이 실행 환경마다 다르다): 호스트에 포트로 노출된
+// 백엔드를 `LAURIO_API_BASE_URL` 로 직접 치므로 프로젝트 이름과 무관하다.
+import { runSeed } from "./seed-http";
 
-// playwright 는 이 저장소에서 CommonJS 로 스펙을 트랜스파일한다(package.json 에
-// "type": "module" 이 없다) — 그래서 `import.meta.url` 대신 CJS 전역인
-// `__dirname` 을 그대로 쓴다.
-const BACKEND_DIR = path.resolve(__dirname, "../../../backend");
 
 export type SeededRequirement = { text: string; grade: "required" | "optional" };
 
@@ -110,9 +99,6 @@ export type SeededContests = {
 // dev compose 의 기본값(docker/compose.dev.yaml, config/settings.py)과 같다 —
 // 이 체인이 포트를 비켜 잡았다면(디스패치 지침) 테스트 실행 전에
 // `LAURIO_DB_PORT` 를 그 값으로 export 해야 한다.
-function backendDbPort(): string {
-  return process.env.LAURIO_DB_PORT ?? "55432";
-}
 
 export type SeedOptions = {
   /** 전용 Category 에 공개 Contest 를 이만큼 더 심는다(#39). 느리므로 필요한 스펙에서만 쓴다. */
@@ -153,43 +139,20 @@ function workerNamespace(): string {
   }
 }
 
-export function seedE2eContests(options: SeedOptions = {}): SeededContests {
-  const args = ["run", "python", "manage.py", "seed_e2e_contests"];
+export async function seedE2eContests(options: SeedOptions = {}): Promise<SeededContests> {
   const namespace = workerNamespace();
-  if (namespace) args.push("--namespace", namespace);
-  if (options.bulk) args.push("--bulk", String(options.bulk));
-
-  const output = execFileSync("uv", args, {
-    cwd: BACKEND_DIR,
-    env: { ...process.env, LAURIO_DB_PORT: backendDbPort() },
-    encoding: "utf-8",
-    stdio: ["ignore", "pipe", "inherit"],
+  const parsed = await runSeed("contests", {
+    namespace: namespace || undefined,
+    bulk: options.bulk || undefined,
   });
 
-  // 명령은 마지막 줄에 JSON 한 덩어리만 찍는다(관리 명령 docstring 참고) —
-  // 그래도 `uv run` 이 최초 실행 시 남기는 진행 로그(가상환경 생성 등)가 stdout
-  // 앞에 섞일 수 있어, 마지막 줄만 파싱한다.
-  const lines = output.trim().split("\n");
-  const lastLine = lines[lines.length - 1] ?? "";
-
-  // 조용히 실패하지 않게 막는다. 시드 명령이 깨지면 반환값이 뭔가 이상해지고,
-  // 그 상태로 스펙이 계속 돌면 진짜 이유(시드가 죽었다)가 아니라 증상(모르는
-  // id 로 404)만 보여 진단이 멀어진다 — 실제로 Category 삭제가 ProtectedError
-  // 로 죽었을 때 그렇게 헤맸다.
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(lastLine);
-  } catch {
-    throw new Error(
-      "seed_e2e_contests 가 JSON 을 내지 않았다 — 명령이 죽었을 가능성이 크다" +
-        ` (stderr 는 위에 그대로 찍힌다). 마지막 줄: ${JSON.stringify(lastLine.slice(0, 300))}`,
-    );
-  }
-
+  // 조용히 실패하지 않게 막는다. 시드가 깨지면 반환값이 뭔가 이상해지고, 그 상태로
+  // 스펙이 계속 돌면 진짜 이유(시드가 죽었다)가 아니라 증상(모르는 id 로 404)만 보여
+  // 진단이 멀어진다 — 실제로 Category 삭제가 ProtectedError 로 죽었을 때 그렇게 헤맸다.
   const seeded = parsed as SeededContests;
   if (!seeded?.funded?.id || !seeded?.judging?.id || !seeded?.developer?.id) {
     throw new Error(
-      `seed_e2e_contests 의 출력에 기대한 키가 없다: ${JSON.stringify(Object.keys(seeded ?? {}))}`,
+      `contests 시드의 출력에 기대한 키가 없다: ${JSON.stringify(Object.keys(seeded ?? {}))}`,
     );
   }
   return seeded;

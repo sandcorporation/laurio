@@ -1,12 +1,19 @@
 // 운영자 앱 e2e 전용 시드(#63). `e2e/lib/seed.ts`(공개 앱 콘테스트 시드)와 같은
 // 관용구를 따르되 별도 파일로 둔다 — 두 시드는 서로 다른 도메인을 건드리고,
 // 독립적인 체인들이 같은 파일을 동시에 고칠 필요가 없게 한다.
-import { execFileSync } from "node:child_process";
-import path from "node:path";
 
 import { e2eRunId } from "./run-id";
 
 const BACKEND_DIR = path.resolve(__dirname, "../../../backend");
+
+function backendDbPort(): string {
+  return process.env.LAURIO_DB_PORT ?? "55432";
+}
+import { execFileSync } from "node:child_process";
+import path from "node:path";
+
+import { runSeed } from "./seed-http";
+
 
 export type SeededOperator = {
   id: number;
@@ -16,31 +23,38 @@ export type SeededOperator = {
 
 export const E2E_OPERATOR_PASSWORD = "e2e-operator-pw-9134-xyz";
 
-function backendDbPort(): string {
-  return process.env.LAURIO_DB_PORT ?? "55432";
+/** 등록부의 시드 하나를 HTTP 로 돌린다 (#156).
+ *
+ * `run_id` 를 매번 명시적으로 실어 보낸다 — 이번 스위트 실행이 심은 Contest 를 이전
+ * 실행이 남긴 것과 구별하는 토큰이다(e2e/lib/run-id.ts, seed_e2e_operator_queues.py 의
+ * `_own_title_prefix`). 예전에는 환경변수로 넘겼는데, HTTP 로 부르면 **부르는 쪽의
+ * 환경변수가 백엔드 프로세스에 있을 리 없다.** 어긋나면 「매 호출이 서로 다른 토큰을 받아
+ * 서로의 형제를 지우는」 조용한 사고가 된다. */
+async function runSeedCommand(name: string, options: Record<string, unknown> = {}): Promise<unknown> {
+  return runSeed(name, options);
 }
 
-/** `manage.py <command> <args>`를 돌리고 마지막 줄의 JSON을 파싱한다 —
- * seed_e2e_operator*.py 관리 명령들이 공통으로 쓰는 관용구
- * (frontend/e2e/lib/seed.ts의 seedE2eContests와 같은 이유: uv run이 남기는
- * 진행 로그가 stdout 앞에 섞일 수 있어 마지막 줄만 파싱한다). */
-function runSeedCommand(command: string, args: string[]): unknown {
+/** **아직 서브프로세스로 도는 시드** (#156) — 채점을 거치는 것들이다.
+ *
+ * 이 시드들은 Submission 을 심고 채점 스캔을 돌린 뒤 그 Score 를 근거로 이의를 만드는데,
+ * 채점이 소스를 **스토리지에서 읽는다.** 그리고 이 시드들은 `STORAGE_BACKEND=fake` 를
+ * 전제로 쓰였다 — 지금까지 항상 호스트에서 돌아 그 기본값을 탔기 때문이다. dev 의 backend
+ * 컨테이너는 업로드 e2e 때문에 `STORAGE_BACKEND=s3`(실물 MinIO)로 뜨므로, 그 안에서
+ * 부르면 채점이 소스를 못 찾아 「아직 채점되지 않았다」로 죽는다.
+ *
+ * **HTTP 때문에 생긴 문제가 아니다** — 호스트에서 `STORAGE_BACKEND=s3` 를 주고 관리
+ * 명령으로 돌려도 똑같이 죽는다. 원래 있던 결합이 이 이관으로 드러났을 뿐이다. 그래서
+ * 이 둘만 옛 경로로 남긴다 — 시드를 스토리지 백엔드와 무관하게 만드는 것은 별개의 일이다.
+ */
+function runSeedSubprocess(command: string, args: string[]): unknown {
   const output = execFileSync("uv", ["run", "python", "manage.py", command, ...args], {
     cwd: BACKEND_DIR,
-    // LAURIO_E2E_RUN_ID: 이번 스위트 실행이 심은 Contest를 이전 실행이 남긴
-    // 것과 구별하는 토큰(e2e/lib/run-id.ts, seed_e2e_operator_queues.py의
-    // `_own_title_prefix` 참고) — 여기서 파일을 직접 읽어 매번 명시적으로
-    // 실어 보낸다. Playwright가 globalSetup 이후 워커에 process.env를
-    // 상속시켜 준다는 것과 별개로, 그 상속에만 기대면 어긋났을 때 "매 호출이
-    // 서로 다른 토큰을 받아 서로의 형제를 지우는" 조용한 사고가 된다.
     env: { ...process.env, LAURIO_DB_PORT: backendDbPort(), LAURIO_E2E_RUN_ID: e2eRunId() },
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "inherit"],
   });
-
   const lines = output.trim().split("\n");
   const lastLine = lines[lines.length - 1] ?? "";
-
   try {
     return JSON.parse(lastLine);
   } catch {
@@ -81,27 +95,26 @@ let sharedOperator: SeededOperator | null = null;
  *
  * 인자 없이 부르면 이 프로세스가 이미 만든 공유 계정을 그대로 돌려준다. 계정을
  * 변경하는 테스트는 반드시 고유한 `username` 을 줘야 한다. */
-export function seedE2eOperator(options: SeedOperatorOptions = {}): SeededOperator {
+export async function seedE2eOperator(options: SeedOperatorOptions = {}): Promise<SeededOperator> {
   const wantsShared =
     options.username === undefined && options.password === undefined && !options.superuser;
   if (wantsShared && sharedOperator) return sharedOperator;
   if (wantsShared) {
-    sharedOperator = seedOperatorAccount({ ...options, username: SHARED_OPERATOR_USERNAME });
+    sharedOperator = await seedOperatorAccount({ ...options, username: SHARED_OPERATOR_USERNAME });
     return sharedOperator;
   }
   return seedOperatorAccount(options);
 }
 
-function seedOperatorAccount(options: SeedOperatorOptions): SeededOperator {
-  const args: string[] = [];
-  if (options.username) args.push("--username", options.username);
-  args.push("--password", options.password ?? E2E_OPERATOR_PASSWORD);
-  if (options.superuser) args.push("--superuser");
-
-  const seeded = runSeedCommand("seed_e2e_operator", args) as SeededOperator;
+async function seedOperatorAccount(options: SeedOperatorOptions): Promise<SeededOperator> {
+  const seeded = (await runSeedCommand("operator", {
+    username: options.username || undefined,
+    password: options.password ?? E2E_OPERATOR_PASSWORD,
+    superuser: options.superuser || undefined,
+  })) as SeededOperator;
   if (!seeded?.id || !seeded?.username) {
     throw new Error(
-      `seed_e2e_operator 의 출력에 기대한 키가 없다: ${JSON.stringify(Object.keys(seeded ?? {}))}`,
+      `operator 시드의 출력에 기대한 키가 없다: ${JSON.stringify(Object.keys(seeded ?? {}))}`,
     );
   }
   return seeded;
@@ -127,15 +140,19 @@ export type SeededOperatorQueues = {
  * (backend/accounts/management/commands/seed_e2e_operator_queues.py). **멱등하지
  * 않다** — 부를 때마다 새 데이터가 쌓인다. 그래서 호출부는 항상 부르기 전
  * baseline 대비 증분으로 검증해야 한다. `only`를 주면 그 큐 하나만 심는다. */
-export function seedE2eOperatorQueues(only?: "appeal" | "identity" | "seller"): SeededOperatorQueues {
-  const args = only ? ["--only", only] : [];
-  return runSeedCommand("seed_e2e_operator_queues", args) as SeededOperatorQueues;
+export async function seedE2eOperatorQueues(
+  only?: "appeal" | "identity" | "seller",
+): Promise<SeededOperatorQueues> {
+  return runSeedSubprocess("seed_e2e_operator_queues", only ? ["--only", only] : []) as SeededOperatorQueues;
 }
 
 /** 세 큐를 전부 빈 상태로 되돌린다("0건은 0건이라고 말한다"는 인수조건을 실제
  * 0 상태에서 확인하기 위한 것) — 이 체인의 compose 스택 전용 DB에서만 안전하다. */
-export function clearE2eOperatorQueues(): { appeals_deleted: number; payouts_deleted: number } {
-  return runSeedCommand("seed_e2e_operator_queues", ["--clear"]) as {
+export async function clearE2eOperatorQueues(): Promise<{
+  appeals_deleted: number;
+  payouts_deleted: number;
+}> {
+  return runSeedSubprocess("seed_e2e_operator_queues", ["--clear"]) as {
     appeals_deleted: number;
     payouts_deleted: number;
   };
@@ -176,9 +193,10 @@ export type SeededAppealForDetail = {
  * 폼을 만들지 않지만(#67), 이미 심판된 이의를 필터·읽기 전용 화면으로 보여주는
  * 것은 검증해야 한다. 멱등하지 않다 — 매 호출이 새 Contest·Submission·Appeal을
  * 만든다. */
-export function seedE2eOperatorAppeal(rule?: "uphold" | "reject"): SeededAppealForDetail {
-  const args = rule ? ["--rule", rule] : [];
-  return runSeedCommand("seed_e2e_operator_appeal", args) as SeededAppealForDetail;
+export async function seedE2eOperatorAppeal(
+  rule?: "uphold" | "reject",
+): Promise<SeededAppealForDetail> {
+  return runSeedSubprocess("seed_e2e_operator_appeal", rule ? ["--rule", rule] : []) as SeededAppealForDetail;
 }
 
 function backendApiPort(): string {
@@ -209,10 +227,9 @@ export async function sourceReadingCount(submissionId: number, devAccess: string
  * 원장에서 센다(#67). 재심판 시도가 409로 거절되는 것으로 멈추지 않고, 그
  * 거절이 실제로 정정 분개를 하나도 더 만들지 않았음을 확인하는 데 쓴다 —
  * 원장은 append-only라 잘못 남은 정정은 지울 수 없다. */
-export function ledgerEntryCount(contestId: number): number {
-  const result = runSeedCommand("count_ledger_entries", [
-    "--contest-id",
-    String(contestId),
-  ]) as { count: number };
+export async function ledgerEntryCount(contestId: number): Promise<number> {
+  const result = (await runSeedCommand("ledger-entry-count", { contest_id: contestId })) as {
+    count: number;
+  };
   return result.count;
 }
