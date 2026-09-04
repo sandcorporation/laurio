@@ -4,6 +4,16 @@
 // 아무도 링크하지 않는다. e2e·백엔드 테스트 둘 다 이걸 못 본다 — `page.goto(...)`로
 // URL을 직접 치는 테스트는 원리적으로 "사람이 거기 도달할 수 있는가"를 보지 않는다.
 //
+// **공유 워크스페이스 패키지에 두는 이유**: 이 규칙은 공개 앱·운영자 앱 둘 다 같은
+// 정의를 써야 한다 — 한쪽만 스캐너를 고치면 두 앱이 조용히 다른 기준으로 갈리고,
+// 그건 이 검사가 막으려는 것과 같은 종류의 문제("조용히 갈라지는 것")다. `packages/
+// bff-shared`에 얹지 않은 이유는 그 패키지가 BFF 런타임(프록시 전달·Origin 검증)
+// 성격이 뚜렷해서다 — 빌드 시점 정적 분석 도구를 거기 섞으면 그 패키지의 경계가
+// 흐려진다. 대신 ADR-0021이 이미 세운 선례(`packages/bff-shared`·`packages/
+// bff-client`)를 그대로 따라 새 워크스페이스 패키지(`@laurio/route-audit`)를 둔다.
+// 앱마다 남는 것은 두 가지뿐이다 — 어느 디렉터리를 훑는지(`orphan-suite.ts`의
+// `appRoot`), 그리고 그 앱의 허용목록(`lib/routes/allowlist.ts`).
+//
 // 이 파일은 두 가지를 한다:
 //   1. `app/**/page.tsx`(또는 `page.ts`)에서 라우트 목록을 만든다.
 //   2. 소스 전체(TypeScript AST, `typescript` 컴파일러 API)에서 링크를 내는
@@ -67,6 +77,16 @@ export interface RouteEntry {
 export interface LinkSegment {
   text: string;
   dynamic: boolean;
+}
+
+// 의도적으로 인바운드 링크가 없는 라우트 한 건. 목록의 **내용**(경로 문자열과 이유)은
+// `packages/bff-shared`의 허용목록 선례와 같은 이유로 이 파일에 두지 않는다 — 각 앱이
+// 자기 `lib/routes/allowlist.ts`에 갖는다. 여기서는 타입만 정의해 두 앱이 같은 모양을
+// 쓰도록 강제한다.
+export interface OrphanAllowlistEntry {
+  /** 정규화 전 라우트 경로. RouteEntry.display와 정확히 같은 형식. */
+  route: string;
+  reason: string;
 }
 
 // ---------------------------------------------------------------------------
