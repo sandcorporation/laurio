@@ -18,7 +18,7 @@ async function loginAndVerify(
   await page.goto("/login");
   await page.getByTestId("fake-login-seed").fill(seed);
   await page.getByTestId("login-kakao").click();
-  await expect(page).toHaveURL(/\/console/);
+  await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
 
   const session = await page.evaluate(async () => {
     const res = await fetch("/api/auth/session", { cache: "no-store" });

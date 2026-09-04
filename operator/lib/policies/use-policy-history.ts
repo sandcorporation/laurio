@@ -5,7 +5,6 @@
 // 하기 때문이다(값 조회는 됐는데 이력 조회만 실패해도 값 표는 그대로 보여야
 // 한다).
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 
 import { fetchPolicyChanges } from "./actions";
 import type { PolicyChangeEntry } from "./types";
@@ -19,7 +18,6 @@ export function usePolicyHistory(enabled: boolean): {
   state: PolicyHistoryState;
   reload: () => void;
 } {
-  const router = useRouter();
   const [state, setState] = useState<PolicyHistoryState>({ status: "loading" });
   const [version, setVersion] = useState(0);
 
@@ -33,11 +31,8 @@ export function usePolicyHistory(enabled: boolean): {
       const result = await fetchPolicyChanges();
       if (cancelled) return;
 
+      // 401 은 클라이언트가 로그인으로 보낸다(#148) — 여기서는 「값을 모른다」로만 남는다.
       if (!result.ok) {
-        if (result.status === 401) {
-          router.replace("/login");
-          return;
-        }
         setState({ status: "error" });
         return;
       }
@@ -50,7 +45,7 @@ export function usePolicyHistory(enabled: boolean): {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, router, version]);
+  }, [enabled, version]);
 
   return { state, reload };
 }

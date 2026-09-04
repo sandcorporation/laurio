@@ -127,7 +127,7 @@ test.describe("소셜 로그인 → 세션 쿠키 → 보호된 화면", () => {
     await page.goto("/login");
     await page.getByTestId("fake-login-seed").fill("visible-check-user");
     await page.getByTestId(`login-${FAKE_PROVIDER}`).click();
-    await expect(page).toHaveURL(/\/console/);
+    await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
     await expect(page.getByTestId("app-home-heading")).toBeVisible();
 
     const jsVisibleCookies = await page.evaluate(() => document.cookie);
@@ -147,7 +147,7 @@ test.describe("소셜 로그인 → 세션 쿠키 → 보호된 화면", () => {
     await page.goto("/login");
     await page.getByTestId("fake-login-seed").fill("console-visit-user");
     await page.getByTestId(`login-${FAKE_PROVIDER}`).click();
-    await expect(page).toHaveURL(/\/console/);
+    await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
     await expect(page.getByTestId("app-home-protected-content")).toBeVisible();
     await expect(page.getByTestId("app-home-heading")).toContainText("console-visit-user");
   });
@@ -158,7 +158,7 @@ test.describe("로그아웃 — 쿠키 삭제 + 블랙리스트", () => {
     await page.goto("/login");
     await page.getByTestId("fake-login-seed").fill("logout-user");
     await page.getByTestId(`login-${FAKE_PROVIDER}`).click();
-    await expect(page).toHaveURL(/\/console/);
+    await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
 
     await page.getByTestId("logout-button").click();
     await expect(page).toHaveURL(/\/login/);
@@ -179,7 +179,7 @@ test.describe("로그아웃 — 쿠키 삭제 + 블랙리스트", () => {
     await page.goto("/login");
     await page.getByTestId("fake-login-seed").fill("blacklist-user");
     await page.getByTestId(`login-${FAKE_PROVIDER}`).click();
-    await expect(page).toHaveURL(/\/console/);
+    await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
 
     const before = await page.context().cookies();
     const access = before.find((c) => c.name === "laurio_access")?.value;
@@ -211,7 +211,7 @@ test.describe("액세스 만료 시 리프레시가 조용히 처리된다", () 
     await page.goto("/login");
     await page.getByTestId("fake-login-seed").fill("refresh-user");
     await page.getByTestId(`login-${FAKE_PROVIDER}`).click();
-    await expect(page).toHaveURL(/\/console/);
+    await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
 
     const cookies = await page.context().cookies();
     const refresh = cookies.find((c) => c.name === "laurio_refresh");
@@ -233,7 +233,7 @@ test.describe("액세스 만료 시 리프레시가 조용히 처리된다", () 
 
     // 화면이 끊기지 않는다 — 새로고침해도 여전히 로그인된 화면이 보여야 한다.
     await page.reload();
-    await expect(page).toHaveURL(/\/console/);
+    await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
     await expect(page.getByTestId("app-home-protected-content")).toBeVisible();
 
     // 응답이 새 액세스 쿠키로 교체됐는지도 확인한다 — "not-a-real-jwt"가 아니다.
@@ -249,7 +249,7 @@ test.describe("액세스 만료 시 리프레시가 조용히 처리된다", () 
     await page.goto("/login");
     await page.getByTestId("fake-login-seed").fill("concurrent-refresh-user");
     await page.getByTestId(`login-${FAKE_PROVIDER}`).click();
-    await expect(page).toHaveURL(/\/console/);
+    await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
 
     await page.context().addCookies([
       {

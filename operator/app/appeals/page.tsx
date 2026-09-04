@@ -12,7 +12,7 @@ import { Suspense } from "react";
 import { useSession } from "@/lib/auth/use-session";
 import { useAppealList } from "@/lib/appeals/use-appeal-list";
 import type { AppealStatus } from "@/lib/appeals/types";
-import { APPEAL_STATUS_LABELS } from "@/lib/appeals/types";
+import { APPEAL_STATUS_LABELS, appealStatusLabel } from "@/lib/appeals/types";
 
 const STATUS_OPTIONS: Array<{ value: AppealStatus | "all"; label: string }> = [
   { value: "pending", label: APPEAL_STATUS_LABELS.pending },
@@ -92,7 +92,7 @@ function AppealsListInner() {
                   {new Date(appeal.created_at).toLocaleString("ko-KR")}
                 </span>
                 <span data-testid={`appeal-row-${appeal.id}-status`}>
-                  {APPEAL_STATUS_LABELS[appeal.status]}
+                  {appealStatusLabel(appeal.status)}
                 </span>
                 {/* **이 심판이 돈을 막고 있다**(#74). 배분은 이의가 심판될
                     때까지 기다리므로, 밀린 심판 하나가 그 Contest 참가자

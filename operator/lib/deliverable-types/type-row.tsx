@@ -58,7 +58,7 @@ export function TypeRow({
     setPending(false);
 
     if (!result.ok) {
-      if (result.status === 401) {
+      if (result.code === "unauthorized") {
         onSessionExpired();
         return;
       }
@@ -79,7 +79,7 @@ export function TypeRow({
     setPending(false);
 
     if (!result.ok) {
-      if (result.status === 401) {
+      if (result.code === "unauthorized") {
         onSessionExpired();
         return;
       }

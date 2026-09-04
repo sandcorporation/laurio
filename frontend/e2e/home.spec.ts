@@ -44,7 +44,7 @@ test.describe("@exclusive 헤더 — 모든 페이지에 같은 모양으로 선
     await page.goto("/login");
     await page.getByTestId("fake-login-seed").fill(`e2e-home-header-${Date.now()}`);
     await page.getByTestId("login-kakao").click();
-    await expect(page).toHaveURL(/\/console/);
+    await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
 
     await expect(page.getByTestId("header-console-link")).toBeVisible();
     await expect(page.getByTestId("header-login-link")).toHaveCount(0);

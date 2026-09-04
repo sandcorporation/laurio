@@ -8,7 +8,6 @@
 // 실패 상태도 절대 `{ platform_fee_bps: 0, ... }` 같은 값을 만들어내지 않는다.
 // `state.status`가 "loaded"일 때만 값이 존재한다는 것을 타입으로 강제한다.
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 
 import { fetchPolicy } from "./actions";
 import type { PlatformPolicy } from "./types";
@@ -19,7 +18,6 @@ export type PolicyState =
   | { status: "loaded"; policy: PlatformPolicy };
 
 export function usePolicy(enabled: boolean): { state: PolicyState; reload: () => void } {
-  const router = useRouter();
   const [state, setState] = useState<PolicyState>({ status: "loading" });
   const [version, setVersion] = useState(0);
 
@@ -36,11 +34,8 @@ export function usePolicy(enabled: boolean): { state: PolicyState; reload: () =>
       const result = await fetchPolicy();
       if (cancelled) return;
 
+      // 401 은 클라이언트가 로그인으로 보낸다(#148) — 여기서는 「값을 모른다」로만 남는다.
       if (!result.ok) {
-        if (result.status === 401) {
-          router.replace("/login");
-          return;
-        }
         setState({ status: "error" });
         return;
       }
@@ -53,7 +48,7 @@ export function usePolicy(enabled: boolean): { state: PolicyState; reload: () =>
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, router, version]);
+  }, [enabled, version]);
 
   return { state, reload };
 }

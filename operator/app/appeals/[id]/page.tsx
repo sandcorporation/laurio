@@ -12,7 +12,7 @@ import { useState } from "react";
 import { useSession } from "@/lib/auth/use-session";
 import { useAppealDetail } from "@/lib/appeals/use-appeal-detail";
 import type { AppealRuling } from "@/lib/appeals/types";
-import { APPEAL_STATUS_LABELS } from "@/lib/appeals/types";
+import { appealStatusLabel } from "@/lib/appeals/types";
 import { SourceReveal } from "@/lib/appeals/source-reveal";
 import { RulingForm } from "@/lib/appeals/ruling-form";
 
@@ -93,7 +93,7 @@ export default function AppealDetailPage() {
     <main>
       <h1 data-testid="appeal-detail-heading">이의 #{appeal.id}</h1>
       <p data-testid="appeal-detail-submission">Submission #{appeal.submission_id}</p>
-      <p data-testid="appeal-detail-status">{APPEAL_STATUS_LABELS[status]}</p>
+      <p data-testid="appeal-detail-status">{appealStatusLabel(status)}</p>
       <p data-testid="appeal-detail-created-at">
         {new Date(appeal.created_at).toLocaleString("ko-KR")}
       </p>
@@ -128,7 +128,7 @@ export default function AppealDetailPage() {
       {ruling && (
         <section data-testid="appeal-detail-ruling">
           <h2>심판 결과</h2>
-          <p data-testid="appeal-detail-ruling-decision">{APPEAL_STATUS_LABELS[ruling.decision]}</p>
+          <p data-testid="appeal-detail-ruling-decision">{appealStatusLabel(ruling.decision)}</p>
           <p data-testid="appeal-detail-ruling-ruled-by">{ruling.ruled_by_username}</p>
           <p data-testid="appeal-detail-ruling-note">{ruling.note}</p>
           <p data-testid="appeal-detail-ruling-ruled-at">

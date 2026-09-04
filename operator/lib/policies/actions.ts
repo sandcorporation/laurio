@@ -1,64 +1,26 @@
-// 정책 변경 API 호출(#77). `operator/lib/operators/actions.ts`와 같은 계약이다
-// — 백엔드가 안정적인 `code`와 사람이 읽을 `detail`을 같이 준다는 것, 그리고
-// **`detail`이 항상 문자열은 아니라는 것**(django-ninja의 요청 검증 422는
-// `detail`이 오류 객체의 배열이다 — 그대로 렌더하면 React가 "Objects are not
-// valid as a React child"로 화면 전체를 죽인다, #69에서 실제로 겪었다).
-// `normalizeDetail`이 두 형태(우리 라우터의 문자열 detail, ninja의 배열
-// detail)를 모두 사람이 읽을 수 있는 문자열 하나로 좁힌다.
+// 정책 조회·변경 API 호출(#77) — 실패의 모양과 `detail` 정규화는 `@laurio/bff-client` 가
+// 소유한다(#148).
+//
+// 예전에는 이 파일과 operators·deliverable-types 의 actions 가 `ApiResult`·`normalizeDetail`·
+// `toFailure` 를 **세 벌로 복사**해 갖고 있었다. 그 정규화가 필요한 이유는 그대로다:
+// django-ninja 의 요청 검증 422 는 `detail` 이 오류 객체의 배열이라, 그대로 렌더하면 React 가
+// "Objects are not valid as a React child" 로 화면 전체를 죽인다(#69 에서 실제로 겪었다).
+// 이제 그 방어는 패키지 한 곳에 있고 공개 앱도 같은 것을 쓴다.
+
+import type { ApiResult } from "@laurio/bff-client";
+
+import { bffClient } from "@/lib/bff/client";
+
 import type { PlatformPolicy, PolicyChangeEntry, PolicyField } from "./types";
 
-export interface ApiFailure {
-  ok: false;
-  status: number;
-  code: string;
-  detail: string;
+export type { ApiFailure, ApiResult, ApiSuccess } from "@laurio/bff-client";
+
+export function fetchPolicy(): Promise<ApiResult<PlatformPolicy>> {
+  return bffClient.get<PlatformPolicy>("/api/backend/operator/policy");
 }
 
-export interface ApiSuccess<T> {
-  ok: true;
-  data: T;
-}
-
-export type ApiResult<T> = ApiSuccess<T> | ApiFailure;
-
-function normalizeDetail(detail: unknown, status: number): string {
-  if (typeof detail === "string" && detail.length > 0) return detail;
-
-  // ninja/pydantic 요청 검증 오류: [{"type": "...", "loc": [...], "msg": "..."}]
-  if (Array.isArray(detail) && detail.length > 0) {
-    const messages = detail
-      .map((item) =>
-        item && typeof item === "object" && "msg" in item && typeof (item as { msg: unknown }).msg === "string"
-          ? (item as { msg: string }).msg
-          : null,
-      )
-      .filter((msg): msg is string => msg !== null);
-    if (messages.length > 0) return messages.join(" ");
-  }
-
-  return `요청이 실패했습니다 (${status}).`;
-}
-
-async function toFailure(res: Response): Promise<ApiFailure> {
-  const body = (await res.json().catch(() => null)) as { detail?: unknown; code?: string } | null;
-  return {
-    ok: false,
-    status: res.status,
-    code: body?.code ?? "error",
-    detail: normalizeDetail(body?.detail, res.status),
-  };
-}
-
-export async function fetchPolicy(): Promise<ApiResult<PlatformPolicy>> {
-  const res = await fetch("/api/backend/operator/policy", { cache: "no-store" });
-  if (!res.ok) return toFailure(res);
-  return { ok: true, data: (await res.json()) as PlatformPolicy };
-}
-
-export async function fetchPolicyChanges(): Promise<ApiResult<PolicyChangeEntry[]>> {
-  const res = await fetch("/api/backend/operator/policy/changes", { cache: "no-store" });
-  if (!res.ok) return toFailure(res);
-  return { ok: true, data: (await res.json()) as PolicyChangeEntry[] };
+export function fetchPolicyChanges(): Promise<ApiResult<PolicyChangeEntry[]>> {
+  return bffClient.get<PolicyChangeEntry[]>("/api/backend/operator/policy/changes");
 }
 
 export interface UpdatePolicyInput {
@@ -67,16 +29,10 @@ export interface UpdatePolicyInput {
   expectedVersion: number;
 }
 
-export async function updatePolicy(input: UpdatePolicyInput): Promise<ApiResult<PlatformPolicy>> {
-  const res = await fetch("/api/backend/operator/policy", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      ...input.changes,
-      reason: input.reason,
-      expected_version: input.expectedVersion,
-    }),
+export function updatePolicy(input: UpdatePolicyInput): Promise<ApiResult<PlatformPolicy>> {
+  return bffClient.post<PlatformPolicy>("/api/backend/operator/policy", {
+    ...input.changes,
+    reason: input.reason,
+    expected_version: input.expectedVersion,
   });
-  if (!res.ok) return toFailure(res);
-  return { ok: true, data: (await res.json()) as PlatformPolicy };
 }

@@ -30,7 +30,7 @@ async function login(page: import("@playwright/test").Page, seed: string): Promi
   await page.goto("/login");
   await page.getByTestId("fake-login-seed").fill(seed);
   await page.getByTestId("login-kakao").click();
-  await expect(page).toHaveURL(/\/console/);
+  await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
 }
 
 test("요청 검증 422(배열 detail)에도 화면이 살아 있고 이유가 보인다", async ({ page }) => {

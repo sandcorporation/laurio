@@ -1,5 +1,11 @@
-// 정책 화면 타입(#77). 백엔드(policies/schemas.py)의 PolicyOut·PolicyChangeOut과
-// 1:1로 대응한다.
+// 정책 화면이 쓰는 타입 (#76) — 응답 모양은 생성 타입 그대로다(#148). 남는 것은 화면의
+// 어휘(운영자가 고칠 수 있는 필드와 그 문구)다: 이 목록은 응답 모양이 아니라 **이 화면이 편집을
+// 허용하는 범위**이고, 백엔드의 `UPDATABLE_FIELDS` 와 짝을 이룬다.
+
+import type { components } from "@laurio/bff-client/schema";
+
+export type PlatformPolicy = components["schemas"]["PolicyOut"];
+export type PolicyChangeEntry = components["schemas"]["PolicyChangeOut"];
 
 export const POLICY_FIELDS = [
   "platform_fee_bps",
@@ -10,30 +16,7 @@ export const POLICY_FIELDS = [
 
 export type PolicyField = (typeof POLICY_FIELDS)[number];
 
-export interface PlatformPolicyValues {
-  platform_fee_bps: number;
-  withholding_tax_bps: number;
-  withholding_necessary_expense_bps: number;
-  withholding_minor_income_exempt_won: number;
-}
-
-// GET 응답 — 낙관적 동시성에 쓰는 version이 함께 온다. PATCH할 때 이 값을
-// expected_version으로 그대로 되돌려 보내야 한다(#76).
-export interface PlatformPolicy extends PlatformPolicyValues {
-  version: number;
-  updated_at: string;
-}
-
-// before/after는 그 변경이 실제로 건드린 필드만 담은 부분 집합이다 — 건드리지
-// 않은 필드는 나타나지 않는다.
-export interface PolicyChangeEntry {
-  id: number;
-  operator_username: string;
-  reason: string;
-  before: Partial<Record<PolicyField, number>>;
-  after: Partial<Record<PolicyField, number>>;
-  changed_at: string;
-}
+export type PlatformPolicyValues = Record<PolicyField, number>;
 
 export const POLICY_FIELD_LABELS: Record<PolicyField, string> = {
   platform_fee_bps: "플랫폼 수수료율",

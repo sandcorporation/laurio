@@ -12,8 +12,11 @@
 // 일치한다(#68 AC).
 //
 // 0건과 조회 실패를 구별한다 — operator/lib/home/use-queue-counts.ts와 같은 원칙.
-import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+
+import type { components } from "@laurio/bff-client/schema";
+
+import { bffClient } from "@/lib/bff/client";
 
 export type BlockedOnFilter = "all" | "identity" | "seller" | "transfer";
 // "transfer"(#57 코드리뷰 2차 지적 1) -- Seller 자체는 이미 READY인데 실이체
@@ -22,32 +25,19 @@ export type BlockedOnFilter = "all" | "identity" | "seller" | "transfer";
 // 조회하지 않으면 그 행들이 운영자 눈에서 완전히 사라진다.
 export type BlockedOnKind = "identity" | "seller" | "transfer";
 
-export interface OperatorPayoutRow {
-  idempotency_key: string;
-  contest_id: number;
-  developer_user_id: number;
-  net_amount: number;
-  status: string;
-  blocked_on: BlockedOnKind | null;
-  seller_status: string | null;
-  has_identity: boolean;
-  created_at: string;
-}
+/** 응답 모양은 생성 타입 그대로다(#148) — 손으로 맞춘 사본을 두지 않는다. */
+export type OperatorPayoutRow = components["schemas"]["OperatorPayoutOut"];
 
 export type PayoutQueueState =
   | { status: "loading" }
   | { status: "loaded"; payouts: OperatorPayoutRow[] }
   | { status: "error" };
 
-async function fetchBlocked(
-  kind: BlockedOnKind,
-): Promise<{ status: number; rows: OperatorPayoutRow[] | null }> {
-  const res = await fetch(`/api/backend/operator/payouts?blocked_on=${kind}`, {
-    cache: "no-store",
-  });
-  if (!res.ok) return { status: res.status, rows: null };
-  const body = (await res.json()) as OperatorPayoutRow[];
-  return { status: res.status, rows: body };
+async function fetchBlocked(kind: BlockedOnKind): Promise<OperatorPayoutRow[] | null> {
+  const result = await bffClient.get<OperatorPayoutRow[]>(
+    `/api/backend/operator/payouts?blocked_on=${kind}`,
+  );
+  return result.ok ? result.data : null;
 }
 
 function kindsFor(filter: BlockedOnFilter): BlockedOnKind[] {
@@ -58,7 +48,6 @@ function kindsFor(filter: BlockedOnFilter): BlockedOnKind[] {
 /** `enabled`가 true가 될 때까지(세션이 확인될 때까지) 조회를 미룬다 —
  * operator/lib/home/use-queue-counts.ts와 같은 이유. */
 export function usePayoutQueue(filter: BlockedOnFilter, enabled: boolean): PayoutQueueState {
-  const router = useRouter();
   const [state, setState] = useState<PayoutQueueState>({ status: "loading" });
   // 지금 `state`가 어느 필터에 대한 응답인지를 따로 들고 있는다 — 필터가
   // 바뀐 순간과 useEffect가 실제로 도는 순간 사이에는 한 틱의 간격이 있고,
@@ -84,34 +73,22 @@ export function usePayoutQueue(filter: BlockedOnFilter, enabled: boolean): Payou
     let cancelled = false;
     setState({ status: "loading" });
 
-    async function load() {
-      try {
-        const results = await Promise.all(kindsFor(filter).map(fetchBlocked));
-        if (cancelled) return;
-
-        if (results.some((r) => r.status === 401)) {
-          router.replace("/login");
-          return;
-        }
-
-        if (results.some((r) => r.rows === null)) {
-          setState({ status: "error" });
-          return;
-        }
-
-        const merged = results.flatMap((r) => r.rows ?? []);
-        merged.sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0));
-        setState({ status: "loaded", payouts: merged });
-      } catch {
-        if (!cancelled) setState({ status: "error" });
+    void Promise.all(kindsFor(filter).map(fetchBlocked)).then((results) => {
+      if (cancelled) return;
+      // 401 은 클라이언트가 로그인으로 보낸다(#148) — 여기서는 「값을 모른다」다.
+      if (results.some((rows) => rows === null)) {
+        setState({ status: "error" });
+        return;
       }
-    }
+      const merged = results.flatMap((rows) => rows ?? []);
+      merged.sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0));
+      setState({ status: "loaded", payouts: merged });
+    });
 
-    load();
     return () => {
       cancelled = true;
     };
-  }, [filter, enabled, router]);
+  }, [filter, enabled]);
 
   return state;
 }

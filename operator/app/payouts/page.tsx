@@ -29,6 +29,7 @@ function parseFilter(value: string | null): BlockedOnFilter {
 
 // 같은 라벨·같은 색으로 뭉뚱그리지 않는다(#68 AC) — 문구도, 테스트가 읽는
 // data-testid·className도 종류마다 갈린다.
+// 생성 타입의 `blocked_on` 은 `string` 이다(#148) — 모르는 값이 오면 그 값을 그대로 보여준다.
 const BLOCKED_ON_LABEL: Record<BlockedOnKind, string> = {
   identity: "세무 신원 대기 — Laurio 처리 대기",
   seller: "Seller 등록 대기 — 지급대행사 처리 대기",
@@ -38,14 +39,14 @@ const BLOCKED_ON_LABEL: Record<BlockedOnKind, string> = {
   transfer: "실이체 대기 — 이체 재시도 필요",
 };
 
-function PayoutBadge({ blockedOn }: { blockedOn: BlockedOnKind }) {
+function PayoutBadge({ blockedOn }: { blockedOn: string }) {
   return (
     <span
       data-testid={`payout-blocked-badge-${blockedOn}`}
       data-blocked-on={blockedOn}
       className={`badge-waiting badge-waiting-${blockedOn}`}
     >
-      {BLOCKED_ON_LABEL[blockedOn]}
+      {BLOCKED_ON_LABEL[blockedOn as BlockedOnKind] ?? blockedOn}
     </span>
   );
 }

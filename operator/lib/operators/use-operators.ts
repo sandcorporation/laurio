@@ -14,7 +14,8 @@
 // 화면이 자기가 만든 변화를 스스로 반영해야, 사용자가 방금 한 일이 실제로 반영됐는지
 // 페이지를 새로고침하지 않고도 확인할 수 있다.
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+
+import { bffClient } from "@/lib/bff/client";
 
 import type { OperatorAccount } from "./types";
 
@@ -25,7 +26,6 @@ export type OperatorsState =
   | { status: "loaded"; operators: OperatorAccount[] };
 
 export function useOperators(enabled: boolean): { state: OperatorsState; reload: () => void } {
-  const router = useRouter();
   const [state, setState] = useState<OperatorsState>({ status: "loading" });
   const [version, setVersion] = useState(0);
 
@@ -45,37 +45,22 @@ export function useOperators(enabled: boolean): { state: OperatorsState; reload:
     // 전부 날아간다. 대신 이미 그려진 화면(loaded든 forbidden·error든)을
     // 그대로 유지한 채 조용히 다시 읽고, 응답이 오면 그 결과로만 갱신한다.
 
-    async function load() {
-      try {
-        const res = await fetch("/api/backend/operator/operators", { cache: "no-store" });
-        if (cancelled) return;
-
-        if (res.status === 401) {
-          router.replace("/login");
-          return;
-        }
-        if (res.status === 403) {
-          setState({ status: "forbidden" });
-          return;
-        }
-        if (!res.ok) {
-          setState({ status: "error" });
-          return;
-        }
-
-        const operators = (await res.json()) as OperatorAccount[];
-        if (!cancelled) setState({ status: "loaded", operators });
-      } catch {
-        if (!cancelled) setState({ status: "error" });
+    void bffClient.get<OperatorAccount[]>("/api/backend/operator/operators").then((result) => {
+      if (cancelled) return;
+      if (result.ok) {
+        setState({ status: "loaded", operators: result.data });
+        return;
       }
-    }
+      // 401 은 클라이언트가 로그인으로 보낸다(#148). 403 은 다르다 — 로그인은 살아 있고 이
+      // 계정에 권한이 없다는 뜻이라, 화면이 그렇게 말해야 한다.
+      setState(result.status === 403 ? { status: "forbidden" } : { status: "error" });
+    });
 
-    load();
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, router, version]);
+  }, [enabled, version]);
 
   return { state, reload };
 }
