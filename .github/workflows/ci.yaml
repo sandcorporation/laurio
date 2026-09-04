@@ -262,6 +262,10 @@ jobs:
       - name: Install workspace dependencies from lockfile
         run: pnpm install --frozen-lockfile
 
+      - name: Shared BFF package — path safety·allowlist·origin
+        working-directory: packages/bff-shared
+        run: pnpm run test
+
       - name: Operator app — pure modules
         working-directory: operator
         run: pnpm run test:unit

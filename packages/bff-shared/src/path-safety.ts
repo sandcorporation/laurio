@@ -37,15 +37,19 @@ function isSafeSegment(segment: string): boolean {
 }
 
 /**
- * catch-all 세그먼트 배열을 백엔드로 보낼 안전한 경로 문자열로 조립한다.
- * 세그먼트 중 하나라도 경로 구분자·경로 순회로 의심되면 `null`을 반환한다 —
- * 호출부는 이를 "허용목록에 없는 경로"와 같은 404로 처리하면 된다(기본 거부
- * 원칙은 두 실패 모두에 동일하게 적용된다).
+ * 2차 방어선만 단독으로 노출한다(#161) — 세그먼트를 인코딩해 조립한 뒤 URL
+ * 정규화에 통과시켜 원본과 비교한다. `sanitizeBackendPath`는 이 함수 앞에 항상
+ * `isSafeSegment` 게이트(1차 방어선)를 두므로, **정상 경로에서는 이 함수 혼자
+ * 거부를 낼 일이 없다** — 그래서 e2e로는 1차를 실수로 완화하지 않는 한 이 함수가
+ * 실제로 무언가를 거부하는 순간에 구조상 도달할 수 없다(도달하려면 1차가 이미
+ * 뚫려 있어야 하는데, 뚫려 있다는 것 자체가 사고다).
+ *
+ * 그래서 이 함수를 따로 내보낸다 — 테스트가 `isSafeSegment`를 우회해(1차가 없다고
+ * 가정하고) 이 함수를 직접 불러 "1차가 실수로 완화돼도 2차가 여전히 거부하는가"를
+ * 직접 확인할 수 있게 한다. `sanitizeBackendPath.test.ts`의 "2차 방어선" 절이 그
+ * 시나리오다.
  */
-export function sanitizeBackendPath(segments: string[]): string | null {
-  if (segments.length === 0) return null;
-  if (!segments.every(isSafeSegment)) return null;
-
+export function assembleAndVerifyBackendPath(segments: string[]): string | null {
   const candidate = `/api/${segments.map(encodeURIComponent).join("/")}`;
 
   // 최후의 구조적 확인 — 조립 결과를 URL 정규화에 통과시켜 원본과 비교한다.
@@ -55,4 +59,17 @@ export function sanitizeBackendPath(segments: string[]): string | null {
   if (normalized !== candidate) return null;
 
   return candidate;
+}
+
+/**
+ * catch-all 세그먼트 배열을 백엔드로 보낼 안전한 경로 문자열로 조립한다.
+ * 세그먼트 중 하나라도 경로 구분자·경로 순회로 의심되면 `null`을 반환한다 —
+ * 호출부는 이를 "허용목록에 없는 경로"와 같은 404로 처리하면 된다(기본 거부
+ * 원칙은 두 실패 모두에 동일하게 적용된다).
+ */
+export function sanitizeBackendPath(segments: string[]): string | null {
+  if (segments.length === 0) return null;
+  if (!segments.every(isSafeSegment)) return null;
+
+  return assembleAndVerifyBackendPath(segments);
 }
