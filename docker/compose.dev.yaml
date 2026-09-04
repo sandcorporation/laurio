@@ -267,6 +267,7 @@ services:
       - laurio-dev-web-frontend-node-modules:/app/frontend/node_modules
       - laurio-dev-web-shared-node-modules:/app/packages/bff-shared/node_modules
       - laurio-dev-web-bff-client-node-modules:/app/packages/bff-client/node_modules
+      - laurio-dev-web-route-audit-node-modules:/app/packages/route-audit/node_modules
       - laurio-dev-web-next:/app/frontend/.next
       # node_modules 볼륨은 처음 만들어질 때 딱 한 번만 이미지 내용으로 채워진다
       # (도커의 명명된 볼륨 규칙). 그래서 이미 떠 있는 스택에 `pnpm add` 로 의존성을
@@ -343,6 +344,7 @@ services:
       - laurio-dev-operator-app-node-modules:/app/operator/node_modules
       - laurio-dev-operator-shared-node-modules:/app/packages/bff-shared/node_modules
       - laurio-dev-operator-bff-client-node-modules:/app/packages/bff-client/node_modules
+      - laurio-dev-operator-route-audit-node-modules:/app/packages/route-audit/node_modules
       - laurio-dev-operator-next:/app/operator/.next
       - laurio-dev-operator-pnpm-store:/pnpm/store
     # frontend 서비스 command 주석 참고 — `--filter laurio-operator...`가 이
@@ -363,12 +365,14 @@ volumes:
   laurio-dev-web-frontend-node-modules:
   laurio-dev-web-shared-node-modules:
   laurio-dev-web-bff-client-node-modules:
+  laurio-dev-web-route-audit-node-modules:
   laurio-dev-web-next:
   laurio-dev-web-pnpm-store:
   laurio-dev-operator-node-modules:
   laurio-dev-operator-app-node-modules:
   laurio-dev-operator-shared-node-modules:
   laurio-dev-operator-bff-client-node-modules:
+  laurio-dev-operator-route-audit-node-modules:
   laurio-dev-operator-next:
   laurio-dev-operator-pnpm-store:
   laurio-dev-minio:

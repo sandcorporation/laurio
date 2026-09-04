@@ -17,6 +17,11 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY frontend/package.json ./frontend/package.json
 COPY packages/bff-shared/package.json ./packages/bff-shared/package.json
 COPY packages/bff-client/package.json ./packages/bff-client/package.json
+# route-audit 는 테스트 전용 정적 분석 도구지만(#166) 여기 빠지면 안 된다 —
+# 각 앱의 `lib/routes/allowlist.ts` 가 그 타입을 쓰므로 builder 의 타입 검사가
+# 통째로 깨진다. runner 스테이지는 `.next/standalone` 만 가져가므로 실행
+# 이미지에는 들어가지 않는다.
+COPY packages/route-audit/package.json ./packages/route-audit/package.json
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile
 
@@ -27,6 +32,7 @@ FROM base AS dev
 COPY frontend/ ./frontend/
 COPY packages/bff-shared/ ./packages/bff-shared/
 COPY packages/bff-client/ ./packages/bff-client/
+COPY packages/route-audit/ ./packages/route-audit/
 WORKDIR /app/frontend
 EXPOSE 3000
 CMD ["pnpm", "dev"]
@@ -41,6 +47,7 @@ FROM base AS builder
 COPY frontend/ ./frontend/
 COPY packages/bff-shared/ ./packages/bff-shared/
 COPY packages/bff-client/ ./packages/bff-client/
+COPY packages/route-audit/ ./packages/route-audit/
 WORKDIR /app/frontend
 # NEXT_PUBLIC_*는 브라우저에서 도는 코드에 빌드타임에 인라인된다 — 런타임
 # environment로 넘겨도 이미 굳어진 번들에는 반영되지 않는다(#85 코드리뷰 지적

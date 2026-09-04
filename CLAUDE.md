@@ -396,6 +396,30 @@ VM 을 24GB 로 올린 뒤에야 4워커가 성립했다 — 그때 실측이 �
 (카카오 authorize 등). dev 에서는 `request.url` 이 우연히 맞아 이 버그가 보이지
 않는다 — e2e 가 Location 이 `/` 로 시작하는지를 직접 단언하는 이유다.
 
+**워크스페이스 패키지를 새로 더하면 손으로 관리되는 목록 셋을 같이 고쳐야 한다.**
+`pnpm-workspace.yaml` 은 글롭이라 저절로 잡지만, 그 아래 셋은 멤버를 하나씩 적어 둔다 —
+`docker/frontend.Dockerfile` 과 `docker/operator.Dockerfile` 의 COPY(각각 base·dev·builder
+셋)와 `docker/compose.dev.yaml` 의 **멤버별 `node_modules` 이름 있는 볼륨**(두 서비스 ×
+볼륨 선언). **로컬 게이트는 셋 다 보지 않는다** — `typecheck` 는 호스트의 node_modules 를
+쓰고, e2e 는 로컬에서 돌리지 않기 때문이다. #166 이 `packages/route-audit` 를 더하면서
+정확히 이걸 빠뜨려 CI 가 4잡 빨갛게 났고, 증상이 둘로 갈려 원인이 하나로 안 보였다:
+
+- **deploy-guard 둘** — 프로덕션 이미지의 builder 가 `Cannot find module '@laurio/route-audit'`
+  로 죽는다. 앱 소스(`lib/routes/allowlist.ts`)가 그 패키지의 타입을 쓰는데 Dockerfile 이
+  패키지를 복사하지 않았다. runner 스테이지는 `.next/standalone` 만 가져가므로 실행
+  이미지에는 안 들어간다 — 그래도 builder 에는 있어야 한다.
+- **e2e 둘** — 러너의 `pnpm install --frozen-lockfile` 이 `EACCES ... packages/route-audit/
+  node_modules/.bin/tsc` 로 죽는다. 볼륨이 없으면 바인드 마운트가 그대로 남아, 컨테이너의
+  `pnpm install` 이 **호스트 경로에 root 로** 쓴다. compose 의 그 볼륨 목록 옆 주석이 경고하는
+  바로 그 상황이다.
+
+재현은 CI 와 같은 명령으로 로컬에서 된다(스택 없이 몇 분):
+
+```bash
+docker build -f docker/frontend.Dockerfile --target runner -t x .   # deploy-guard 와 같은 것
+docker build -f docker/operator.Dockerfile --target runner -t y .
+```
+
 **API 타입은 손으로 쓰지 않는다.** `packages/bff-client/src/schema.gen.ts` 는
 `pnpm --dir frontend generate:api`(`packages/bff-client/scripts/generate-api-types.mjs`)가
 백엔드의 OpenAPI 스키마에서 생성해 커밋한 산출물이다. 이 명령은 **스택이 필요
