@@ -3,7 +3,9 @@
 환경별 차이는 전부 환경변수로 주입한다. dev/staging/prod compose 분리는 티켓 22에서 다룬다.
 """
 
+import hashlib
 import os
+import sys
 from datetime import timedelta
 from pathlib import Path
 
@@ -200,6 +202,43 @@ ASGI_APPLICATION = "config.asgi.application"
 # 잘못 붙는 사고를 막기 위함이다.
 _DEV_DB_PORT = _env("LAURIO_DB_PORT", "55432")
 
+# --- 병렬 격리 (#104, 테스트 격리 개편) -------------------------------------------
+#
+# 같은 머신에서 두 체크아웃(워크트리)이 각자 테스트를 돌리는 것이 이 저장소의 일상이다.
+# 그때 **공유되는 것이 무엇인가**가 조용한 실패의 원천이었다 — 같은 이름의 테스트 DB 를
+# 두고 싸워 `DROP DATABASE ... is being accessed by other users` 로 서로를 떨어뜨렸고,
+# 그 실패는 코드 회귀와 구분되지 않는다.
+#
+# 손으로 환경변수를 갈라 주는 규약이 있었지만 잊으면 그만이다. 이제 **경로에서 파생**한다.
+_CHECKOUT_TOKEN = hashlib.sha256(str(BASE_DIR.resolve()).encode("utf-8")).hexdigest()[:8]
+
+
+def _default_test_db_name() -> str:
+    """이 체크아웃 전용 테스트 DB 이름. pytest-django 가 워커별로 `_gwN` 을 덧붙인다."""
+
+    return f"test_laurio_{_CHECKOUT_TOKEN}"
+
+
+# **테스트에서는 세션 캐시가 프로세스 안에 산다.**
+#
+# 운영에서 세션이 Redis 에 사는 것은 ADR-0018 의 결정이고 그대로다 — 세션을 지우는 것이
+# 곧 즉시 무효화이고, 돈을 움직이는 권한은 즉시 빼앗을 수 있어야 한다. 그 결정은 **운영**에
+# 대한 것이지 「테스트도 실물 Redis 를 써야 한다」가 아니다.
+#
+# 테스트가 실물 Redis 를 쓰면 두 가지가 따라온다.
+#
+# 1. `tests/conftest.py` 가 매 테스트 캐시를 비우는데 Django 의 RedisCache 는 그것을
+#    **FLUSHDB** 로 구현한다 — 키 접두어로는 막을 수 없다. 그래서 워커마다, 체인마다
+#    인덱스를 갈라 줘야 했고(Redis 기본 범위가 0~15 이라 금방 바닥난다) 잊으면 서로의
+#    세션을 지웠다.
+# 2. 호스트에서 돌리는 pytest 의 기본 세션 URL 이 dev compose 가 노출한 **바로 그 Redis
+#    의 같은 인덱스**였다. 즉 `uv run pytest` 한 번이 떠 있는 dev 환경의 운영자 세션과
+#    조회 카운터를 통째로 지웠다.
+#
+# LocMem 은 프로세스별로 갈리므로 워커 격리도 체인 격리도 공짜이고, 위 둘이 함께 사라진다.
+# 실물 Redis 위의 세션 동작은 운영자 로그인 e2e 가 실물 스택으로 계속 덮는다.
+_RUNNING_TESTS = "pytest" in sys.modules or _env("LAURIO_TEST_CACHE", "") == "locmem"
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
@@ -217,8 +256,10 @@ DATABASES = {
         # 서로를 떨어뜨린다. 실제로 겪었고, 그때 나오는 실패는 코드 회귀와
         # 구분되지 않아 사람이 시간을 버린다.
         #
-        # 체인마다 `LAURIO_TEST_DB_NAME` 을 달리 주면 격리된다.
-        "TEST": {"NAME": _env("LAURIO_TEST_DB_NAME", "") or None},
+        # **체크아웃 경로에서 자동으로 갈린다.** 손으로 주는 것을 잊으면 조용히 서로를
+        # 떨어뜨리므로(위 설명) 기본값 자체를 경로에서 만든다. 명시적으로 주면 그 값이
+        # 이긴다 — CI 처럼 경로가 매번 달라지는 곳에서 이름을 고정하고 싶을 때가 있다.
+        "TEST": {"NAME": _env("LAURIO_TEST_DB_NAME", "") or _default_test_db_name()},
     }
 }
 
@@ -242,10 +283,18 @@ SESSION_REDIS_URL = _env("SESSION_REDIS_URL", f"redis://127.0.0.1:{_DEV_REDIS_PO
 
 CACHES = {
     "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"},
-    "sessions": {
-        "BACKEND": "django.core.cache.backends.redis.RedisCache",
-        "LOCATION": SESSION_REDIS_URL,
-    },
+    "sessions": (
+        # 위 `_RUNNING_TESTS` 설명 참고. 별칭 이름과 사용법은 같으므로 호출부는 모른다.
+        {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": f"laurio-sessions-{_CHECKOUT_TOKEN}",
+        }
+        if _RUNNING_TESTS
+        else {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": SESSION_REDIS_URL,
+        }
+    ),
 }
 
 SESSION_ENGINE = "django.contrib.sessions.backends.cache"

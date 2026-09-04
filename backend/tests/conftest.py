@@ -14,9 +14,7 @@
 """
 
 import pytest
-from django.conf import settings
 from django.core.cache import caches
-from django.test import override_settings
 
 from payments.adapters import FakePGAdapter
 from storage.adapters.fake import FakeStorageAdapter
@@ -36,43 +34,6 @@ def _reset_fake_pg_adapter():
     FakePGAdapter._final_refund_status.clear()
 
 
-@pytest.fixture(scope="session", autouse=True)
-def _scope_session_cache_to_xdist_worker(worker_id):
-    """워커마다 다른 Redis DB 인덱스를 준다 — `-n` 으로 병렬 실행할 때만 (#104).
-
-    아래 `_reset_operator_sessions` 가 매 테스트마다 세션 캐시를 비우는데, Django 의
-    RedisCache 는 그것을 **FLUSHDB** 로 구현한다 — **키 접두어로는 막을 수 없다.**
-    워커 넷이 같은 인덱스를 쓰면 한 워커의 정리가 다른 워커의 로그인 세션을 통째로
-    지우고, 피해자는 원인과 무관한 401 무더기를 본다. Postgres 쪽은 pytest-django 가
-    워커별 테스트 DB 를 알아서 만들어 주지만 캐시는 그렇지 않다.
-
-    `override_settings` 로 바꾸는 이유 — Django 의 캐시 핸들러가 `setting_changed`
-    신호를 듣고 연결을 다시 만든다. 값만 바꾸면 이미 열린 연결이 옛 인덱스를 계속
-    쓴다.
-    """
-
-    if worker_id == "master":
-        yield
-        return
-
-    base, _, index = settings.SESSION_REDIS_URL.rpartition("/")
-    offset = int(worker_id.removeprefix("gw"))
-    scoped = int(index) + offset + 1
-    if scoped > 15:
-        raise RuntimeError(
-            f"워커 {worker_id} 의 세션 Redis 인덱스가 {scoped} 라 Redis 기본 범위(0~15)를 "
-            f"넘는다. SESSION_REDIS_URL 의 인덱스를 낮추거나 워커 수를 줄여라 — "
-            "인덱스가 겹치면 워커들이 서로의 세션을 FLUSHDB 로 지운다."
-        )
-
-    caches_setting = {
-        name: dict(config) for name, config in settings.CACHES.items()
-    }
-    caches_setting["sessions"]["LOCATION"] = f"{base}/{scoped}"
-    with override_settings(CACHES=caches_setting):
-        yield
-
-
 @pytest.fixture(autouse=True)
 def _reset_operator_sessions():
     """Operator 세션은 실제 Redis 에 산다(#43) — DB 처럼 롤백되지 않는다.
@@ -82,8 +43,15 @@ def _reset_operator_sessions():
     "로그아웃하면 그 자리에서 막힌다"를 검증하는 테스트들이 그 오염에 가장 약하다.
     매 테스트 전후로 세션 캐시를 비운다.
 
-    별도 DB 인덱스(settings.SESSION_REDIS_URL 의 /1)를 쓰므로 Celery 브로커의
-    키를 지우지 않는다.
+    **이 캐시는 테스트에서 LocMem 이다**(config/settings.py 의 `_RUNNING_TESTS`) — 즉
+    이 `clear()` 는 이 프로세스 안만 비운다. 예전에는 실물 Redis 라 FLUSHDB 였고, 그래서
+    워커마다 인덱스를 갈라 줘야 했으며 호스트에서 돌린 pytest 가 떠 있는 dev 환경까지
+    지웠다.
+
+    **세션 때문만은 아니다.** 세션 키는 무작위이고 어떤 테스트도 세션 수를 세지 않아
+    남은 세션은 무해하다. 실제로 이 정리에 기대는 것은 **ContestView 카운터**다 —
+    `contests/view_tracking.py` 가 같은 캐시 별칭에 `timeout=None` 으로 영구 저장하고,
+    `tests/test_contest_metrics.py` 가 그 값을 0·1·2·3 으로 정확히 단언한다.
     """
 
     caches["sessions"].clear()

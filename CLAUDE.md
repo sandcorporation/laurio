@@ -26,6 +26,23 @@ cd backend && uv run pytest                           # 테스트
 호스트에서 `uv run pytest`를 돌릴 때 붙는 DB 포트 기본값도 `LAURIO_DB_PORT`를 따라간다
 (`backend/config/settings.py`). 컨테이너 안에서는 compose가 `POSTGRES_*`를 직접 주입한다.
 
+**워크트리는 스택을 통째로 따로 띄운다.**
+
+```bash
+eval "$(sh docker/dev-env.sh)"
+docker compose -f docker/compose.dev.yaml up -d
+```
+
+`docker/dev-env.sh` 가 체크아웃 경로에서 compose 프로젝트 이름과 **모든 포트**를 파생한다 —
+DB·Redis·MinIO·두 앱이 통째로 갈리므로 체인 둘이 서로의 데이터를 보지 않는다. 예전에는
+스택 하나를 공유하고 시드 이름 접두어로 막았는데, 그 방식은 전역 건수나 단일 행(정책·시계)
+앞에서는 성립하지 않는다.
+
+**주 워크트리는 오프셋 0 이다** — 위 표의 포트가 그대로다. 판정 기준은 디렉터리 이름이
+아니라 `git worktree list` 가 말하는 주 워크트리인가이고(다른 이름으로 클론해도 맞는다),
+스크립트는 cwd 가 아니라 **자기 위치**를 기준으로 삼는다. 해시가 겹치면 나중에 뜨는 쪽이
+포트 바인딩 실패로 **못 뜬다** — 조용히 남의 스택에 붙는 것보다 낫다.
+
 ## 배포 (dev / staging / prod)
 
 세 compose 파일이 분리되어 있다 — 시크릿·어댑터 바인딩이 환경을 넘어 섞이지 않는다:
@@ -153,8 +170,9 @@ cd backend && uv run python manage.py create_operator <아이디> --superuser
 
 ## 테스트
 
-Operator 세션은 실제 Redis 에 산다(#43, ADR-0018) — 그래서 테스트에도 `redis` 가
-필요하다. DB 와 같은 구조다: 인프라는 compose 가 주고 pytest 는 호스트에서 붙는다.
+운영에서 Operator 세션은 실제 Redis 에 산다(#43, ADR-0018). **다만 테스트는 그렇지
+않다** — 세션 캐시가 LocMem 이라 pytest 에는 `db` 하나면 된다(아래 「테스트는 서로를
+밟지 않는다」). 인프라는 compose 가 주고 pytest 는 호스트에서 붙는 구조는 그대로다.
 
 **HTTP가 유일한 시임이다.** 테스트는 마운트된 django-ninja API를 전체 요청 스택(URLconf +
 미들웨어 + 라우터)을 통해 호출한다. 모델 메서드나 서비스 클래스를 직접 부르지 않고, 라우터를
@@ -176,33 +194,35 @@ cd backend && LAURIO_DB_PORT=55432 uv run pytest   # 포트는 쓰는 스택에 
 dev compose의 `db` 서비스는 호스트 포트로 이미 노출돼 있으므로 호스트의 `uv run
 pytest`가 그 DB에 직접 붙는다 — 컨테이너를 거칠 이유가 없다.
 
-**스위트는 기본으로 병렬 실행된다**(#104). `pyproject.toml` 의 `addopts` 가 `-n 4` 를
-준다 — 직렬 4분 11초가 1분 18초다(실측, 1132건). 워커별 테스트 DB 는 pytest-django 가,
-세션 Redis 인덱스는 `tests/conftest.py` 가 갈라 준다. 직렬로 보려면 `-n 0`.
+**스위트는 기본으로 병렬 실행된다**(#104). `pyproject.toml` 의 `addopts` 가 `-n auto` 를
+준다 — 실측(이 머신, 1192건) `-n 4` 84초 → `-n auto` 57초. 직렬로 보려면 `-n 0`.
 
-**`-n auto` 를 쓰지 마라 — `-n 4` 가 기본값인 이유가 있다.** `auto` 는 논리 코어
-수(이 머신은 12)를 잡는데, 세션 Redis 인덱스가 워커마다 하나씩 올라간다
-(`tests/conftest.py`: 기준 인덱스 + 워커 번호 + 1). 기본 `/1` 에 12워커면 최대 13 이라
-아슬아슬하게 통과하지만, 인덱스를 조금만 올려 잡으면 그대로 Redis 기본 범위(0~15)를
-넘겨 conftest 의 가드가 그 자리에서 막는다 — `/13` 이면 워커 넷만으로도 넘는다.
-병렬 워크트리에서는 **낮은 인덱스를 골라 4칸씩 띄워 쓴다**(예: 체인마다 /0, /5, /10).
+**테스트는 서로를 밟지 않는다 — 손으로 갈라 줄 것이 없다.**
 
-**pytest 를 두 개 이상 동시에 돌린다면 `LAURIO_TEST_DB_NAME` 을 서로 다르게
-줘라.** 기본값은 Django 관례대로 `test_laurio` 하나라, 병렬 워크트리에서 체인 둘이
-각자 pytest 를 돌리면 같은 DB 를 두고 싸운다 — `DROP DATABASE ... is being
-accessed by other users` 로 서로를 떨어뜨리고, 그 실패는 **코드 회귀와 구분되지
-않는다.** 실제로 겪었다.
+예전에는 체인마다 `LAURIO_TEST_DB_NAME` 과 `SESSION_REDIS_URL` 의 인덱스를 손으로 달리
+줘야 했고, 잊으면 조용히 서로를 떨어뜨렸다(`DROP DATABASE ... is being accessed`, 그리고
+남의 로그인 세션이 통째로 지워져 나오는 401 무더기 — 둘 다 코드 회귀와 구분되지 않는다).
+지금은 둘 다 자동이다:
 
-**같은 이유로 `SESSION_REDIS_URL` 의 DB 인덱스도 달리 줘라.** Operator 세션은
-실제 Redis 에 산다(ADR-0018). `tests/conftest.py` 가 테스트마다
-`caches["sessions"].clear()` 를 부르는데 Django 의 RedisCache 는 그것을
-**FLUSHDB** 로 구현한다 — **키 접두어로는 막을 수 없다.** 두 체인이 같은 인덱스를
-쓰면 한쪽의 테스트 정리가 다른 쪽의 로그인 세션을 통째로 지우고, 피해자는
-원인과 무관한 401 무더기를 본다.
+- **테스트 DB 이름**이 체크아웃 경로에서 파생된다(`config/settings.py` 의
+  `_default_test_db_name`). `LAURIO_TEST_DB_NAME` 을 주면 그 값이 이긴다.
+- **세션 캐시가 테스트에서는 LocMem 이다**(같은 파일의 `_RUNNING_TESTS`). 프로세스별로
+  갈리므로 워커 격리도 체인 격리도 공짜다.
+
+**그래서 pytest 에 Redis 가 필요 없다** — `db` 하나만 띄우면 된다. 예전 문장(「Operator
+세션은 실제 Redis 에 산다, 그래서 테스트에도 redis 가 필요하다」)은 더 이상 사실이 아니다.
+ADR-0018 은 **운영**에서 세션이 Redis 에 산다고 정한 것이고, 실물 Redis 위의 세션 동작은
+운영자 로그인 e2e 가 실물 스택으로 계속 덮는다.
 
 ```bash
-cd backend && LAURIO_DB_PORT=55432   LAURIO_TEST_DB_NAME=test_laurio_c2   SESSION_REDIS_URL=redis://127.0.0.1:16379/5   uv run pytest
+docker compose -f docker/compose.dev.yaml up -d db   # pytest 에 필요한 것은 이것뿐이다
+cd backend && LAURIO_DB_PORT=55432 uv run pytest
 ```
+
+**그리고 이것이 실제 사고를 하나 막는다.** 호스트 pytest 의 기본 세션 URL 은 dev compose
+가 노출한 **바로 그 Redis 의 같은 인덱스**였다. 즉 `uv run pytest` 한 번이 떠 있는 dev
+환경의 운영자 세션과 조회 카운터를 통째로 지웠다(`RedisCache.clear()` 는 FLUSHDB 다).
+LocMem 으로 바뀌면서 그 경로 자체가 사라졌다.
 
 ## 프론트엔드
 
