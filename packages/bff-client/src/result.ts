@@ -17,6 +17,10 @@ export type ApiFailure = {
     | "not_found"
     | "conflict"
     | "validation"
+    /** 2xx 인데 본문을 해석하지 못했다 — 프록시가 HTML 에러 페이지를 대신 돌려준 경우처럼.
+     * 「서버가 거절했다」와 다르므로 호출부가 갈라 다룰 수 있어야 한다(대화 화면은 이때 사과
+     * 한 턴만 남기고 대화를 끊지 않는다). */
+    | "malformed"
     | "network"
     | "error";
   /** 사람이 읽는 문구 — 서버 문구를 그대로, 없으면 폴백. */

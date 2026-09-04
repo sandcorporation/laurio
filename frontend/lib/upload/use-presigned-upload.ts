@@ -9,6 +9,7 @@
 // "/api/backend/storage/uploads"(우리 오리진)로, 업로드는 백엔드가 돌려준
 // 절대 URL(스토리지 오리진)로 나간다.
 import { useCallback, useRef, useState } from "react";
+import { bffClient } from "@/lib/bff/client";
 
 export type UploadStatus = "idle" | "requesting" | "uploading" | "done" | "error";
 
@@ -31,18 +32,14 @@ async function requestPresignedUpload(
   targetRef: string,
   contentType: string | undefined,
 ): Promise<PresignedUpload> {
-  const res = await fetch("/api/backend/storage/uploads", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ target_ref: targetRef, content_type: contentType ?? null }),
+  // 인증 구역 호출이다 — 맨 fetch 였을 때는 401 이 그냥 「발급 실패」로 보였다(#147).
+  const result = await bffClient.post<PresignedUpload>("/api/backend/storage/uploads", {
+    target_ref: targetRef,
+    content_type: contentType ?? null,
   });
 
-  if (!res.ok) {
-    const detail = (await res.json().catch(() => null)) as { detail?: string } | null;
-    throw new Error(detail?.detail ?? `업로드 URL 발급에 실패했습니다 (${res.status})`);
-  }
-
-  return (await res.json()) as PresignedUpload;
+  if (!result.ok) throw new Error(result.detail);
+  return result.data;
 }
 
 function putWithProgress(

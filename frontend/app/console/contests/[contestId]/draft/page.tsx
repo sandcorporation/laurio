@@ -24,12 +24,11 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
-import { sessionFetch } from "@/lib/auth/client-fetch";
+import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
 import {
   FALLBACK_CHAT_REPLY,
   parseChatReply,
-  readErrorDetail,
   sanitizeChatTurns,
   type ChatProposal,
   type ParsedChatTurn,
@@ -92,54 +91,38 @@ export default function ContestDraftPage() {
     let cancelled = false;
 
     async function loadAll() {
-      const contestRes = await sessionFetch(`/api/backend/contests/${contestId}`);
+      const contest = await bffClient.get<ContestDetail>(`/api/backend/contests/${contestId}`);
       if (cancelled) return;
 
-      if (contestRes.status === 404) {
-        setLoad({ status: "not-found" });
-        return;
+      if (!contest.ok) {
+        if (contest.status === 404) return setLoad({ status: "not-found" });
+        return setLoad({ status: "error", message: "공모전 정보를 불러오지 못했습니다." });
       }
-      if (!contestRes.ok) {
-        setLoad({ status: "error", message: "공모전 정보를 불러오지 못했습니다." });
-        return;
-      }
-      const contest = (await contestRes.json().catch(() => null)) as ContestDetail | null;
-      if (cancelled) return;
-      if (contest === null) {
-        setLoad({ status: "error", message: "공모전 정보를 해석하지 못했습니다." });
-        return;
+      if (contest.data === undefined) {
+        return setLoad({ status: "error", message: "공모전 정보를 해석하지 못했습니다." });
       }
 
-      if (contest.status !== "draft") {
-        setLoad({ status: "closed", contest });
-        return;
+      if (contest.data.status !== "draft") {
+        return setLoad({ status: "closed", contest: contest.data });
       }
 
-      // 대화 이력·브리프 편집 폼이 쓸 선택지도 함께 읽는다 — "다시 들어와도
-      // 이어갈 수 있게 한다"(contests/models.py RequirementChatMessage)와,
-      // 브리프 수정 폼(#113)이 카테고리·요구형태 선택지를 그리는 데 쓴다. 이
-      // 조회들이 실패해도 화면 자체는 죽지 않는다 — 빈 대화·빈 선택지로
-      // 이어가면 그만이다(수정 폼은 선택지가 없으면 저장이 막힐 뿐이다).
-      // 각 fetch를 개별적으로 catch한다 — `Promise.all`을 그대로 쓰면 셋 중
-      // 하나가 네트워크 수준에서 reject(fetch 자체가 던짐)될 때 나머지 둘이
-      // 성공했어도 전체가 reject되어 아래 `loadAll().catch()`가 이미 확인한
-      // Contest까지 통째로 "error" 상태로 덮어버린다 — 바로 위 주석이 약속한
-      // "실패해도 화면 자체는 죽지 않는다"가 깨진다.
-      const [chatRes, catRes, dtRes] = await Promise.all([
-        sessionFetch(`/api/backend/contests/${contestId}/requirement-chat/messages`).catch(() => null),
-        sessionFetch("/api/backend/contests/categories").catch(() => null),
-        sessionFetch("/api/backend/contests/deliverable-types").catch(() => null),
+      // 대화 이력·브리프 편집 폼이 쓸 선택지도 함께 읽는다 — "다시 들어와도 이어갈 수 있게
+      // 한다"(contests/models.py RequirementChatMessage)와, 브리프 수정 폼(#113)이 카테고리·
+      // 요구형태 선택지를 그리는 데 쓴다. 이 조회들이 실패해도 화면 자체는 죽지 않는다 —
+      // 빈 대화·빈 선택지로 이어가면 그만이다. 클라이언트가 네트워크 실패까지 `ApiResult` 로
+      // 돌려주므로(#146) 셋 중 하나가 죽어도 나머지가 함께 무너지지 않는다.
+      const [chat, categoriesResult, deliverableTypesResult] = await Promise.all([
+        bffClient.get<unknown>(`/api/backend/contests/${contestId}/requirement-chat/messages`),
+        bffClient.get<unknown>("/api/backend/contests/categories"),
+        bffClient.get<unknown>("/api/backend/contests/deliverable-types"),
       ]);
-      const chatBody = chatRes?.ok ? await chatRes.json().catch(() => null) : null;
-      const categoriesBody = catRes?.ok ? await catRes.json().catch(() => null) : null;
-      const deliverableTypesBody = dtRes?.ok ? await dtRes.json().catch(() => null) : null;
       if (cancelled) return;
 
-      setRequirements(Array.isArray(contest.requirements) ? contest.requirements : []);
-      setMessages(sanitizeChatTurns(chatBody));
-      setCategories(Array.isArray(categoriesBody) ? categoriesBody : []);
-      setDeliverableTypes(Array.isArray(deliverableTypesBody) ? deliverableTypesBody : []);
-      setLoad({ status: "ready", contest });
+      setRequirements(Array.isArray(contest.data.requirements) ? contest.data.requirements : []);
+      setMessages(sanitizeChatTurns(chat.ok ? chat.data : null));
+      setCategories(categoriesResult.ok && Array.isArray(categoriesResult.data) ? categoriesResult.data : []);
+      setDeliverableTypes(deliverableTypesResult.ok && Array.isArray(deliverableTypesResult.data) ? deliverableTypesResult.data : []);
+      setLoad({ status: "ready", contest: contest.data });
     }
 
     loadAll().catch(() => {
@@ -157,31 +140,28 @@ export default function ContestDraftPage() {
     setChatError(null);
     setSending(true);
     try {
-      const res = await sessionFetch(`/api/backend/contests/${contestId}/requirement-chat/messages`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ message: text }),
-      });
+      const sent = await bffClient.post<unknown>(
+        `/api/backend/contests/${contestId}/requirement-chat/messages`,
+        { message: text },
+      );
 
-      if (!res.ok) {
-        setChatError((await readErrorDetail(res)) ?? `메시지를 보내지 못했습니다 (${res.status})`);
+      if (!sent.ok) {
+        if (sent.code === "malformed") {
+          // 2xx 인데 본문이 JSON이 아니다 — 프록시가 대신 HTML 에러 페이지 등을 돌려준
+          // 경우다. 대화는 끊지 않고 사과 메시지 한 턴만 화면에 남긴다.
+          const now = new Date().toISOString();
+          setMessages((prev) => [
+            ...prev,
+            { role: "sponsor", content: text, created_at: now },
+            { role: "assistant", content: FALLBACK_CHAT_REPLY, created_at: now },
+          ]);
+          return;
+        }
+        setChatError(sent.detail);
         return;
       }
 
-      let body: unknown;
-      try {
-        body = await res.json();
-      } catch {
-        // 본문이 JSON이 아니다 — 프록시가 대신 HTML 에러 페이지 등을 돌려준
-        // 경우다. 대화는 끊지 않고 사과 메시지 한 턴만 화면에 남긴다.
-        const now = new Date().toISOString();
-        setMessages((prev) => [
-          ...prev,
-          { role: "sponsor", content: text, created_at: now },
-          { role: "assistant", content: FALLBACK_CHAT_REPLY, created_at: now },
-        ]);
-        return;
-      }
+      const body = sent.data;
 
       const parsed = parseChatReply(body);
       const sanitizedHistory = sanitizeChatTurns(
@@ -211,18 +191,17 @@ export default function ContestDraftPage() {
     setRequirementError(null);
     setRequirementBusy(true);
     try {
-      const res = await sessionFetch(`/api/backend/contests/${contestId}/requirements`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text, grade }),
-      });
+      const response = await bffClient.post<unknown>(
+        `/api/backend/contests/${contestId}/requirements`,
+        { text, grade },
+      );
 
-      if (!res.ok) {
-        setRequirementError((await readErrorDetail(res)) ?? `추가하지 못했습니다 (${res.status})`);
+      if (!response.ok) {
+        setRequirementError(response.detail);
         return;
       }
 
-      const created = await res.json().catch(() => null);
+      const created = response.data;
       if (isPlainRecord(created) && typeof created.id === "number" && typeof created.text === "string") {
         setRequirements((prev) => [...prev, created as unknown as RequirementOut]);
         if (fromProposal) {
@@ -244,18 +223,21 @@ export default function ContestDraftPage() {
   ): Promise<boolean> {
     setRequirementError(null);
     try {
-      const res = await sessionFetch(`/api/backend/contests/${contestId}/requirements/${id}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(patch),
-      });
+      const response = await bffClient.request<unknown>(
+        `/api/backend/contests/${contestId}/requirements/${id}`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(patch),
+        },
+      );
 
-      if (!res.ok) {
-        setRequirementError((await readErrorDetail(res)) ?? `수정하지 못했습니다 (${res.status})`);
+      if (!response.ok) {
+        setRequirementError(response.detail);
         return false;
       }
 
-      const updated = await res.json().catch(() => null);
+      const updated = response.data;
       if (isPlainRecord(updated) && typeof updated.id === "number") {
         setRequirements((prev) =>
           prev.map((r) => (r.id === id ? (updated as unknown as RequirementOut) : r)),
@@ -284,19 +266,19 @@ export default function ContestDraftPage() {
     setBriefError(null);
     setBriefSaving(true);
     try {
-      const res = await sessionFetch(`/api/backend/contests/${contestId}`, {
+      const response = await bffClient.request<ContestDetail>(`/api/backend/contests/${contestId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(patch),
       });
 
-      if (!res.ok) {
-        setBriefError((await readErrorDetail(res)) ?? `수정하지 못했습니다 (${res.status})`);
+      if (!response.ok) {
+        setBriefError(response.detail);
         return false;
       }
 
-      const updated = (await res.json().catch(() => null)) as ContestDetail | null;
-      if (updated === null) {
+      const updated = response.data;
+      if (updated === undefined) {
         setBriefError("수정 응답을 해석하지 못했습니다. 새로고침해 확인해 주세요.");
         return false;
       }
@@ -323,11 +305,12 @@ export default function ContestDraftPage() {
   async function handleDeleteRequirement(id: number) {
     setRequirementError(null);
     try {
-      const res = await sessionFetch(`/api/backend/contests/${contestId}/requirements/${id}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) {
-        setRequirementError((await readErrorDetail(res)) ?? `삭제하지 못했습니다 (${res.status})`);
+      const response = await bffClient.request(
+        `/api/backend/contests/${contestId}/requirements/${id}`,
+        { method: "DELETE" },
+      );
+      if (!response.ok) {
+        setRequirementError(response.detail);
         return;
       }
       setRequirements((prev) => prev.filter((r) => r.id !== id));

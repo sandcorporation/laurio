@@ -25,7 +25,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 
-import { sessionFetch } from "@/lib/auth/client-fetch";
+import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
 import type { ContestMetricsOut } from "@/lib/submissions/types";
 
@@ -49,38 +49,27 @@ export default function ContestMetricsPage() {
     if (session.status !== "authenticated") return;
     let cancelled = false;
 
-    async function loadAll() {
-      const [contestRes, metricsRes] = await Promise.all([
-        sessionFetch(`/api/backend/contests/${contestId}`),
-        sessionFetch(`/api/backend/contests/${contestId}/metrics`),
-      ]);
+    // 두 조회를 함께 낸다 — 화면 하나가 Contest 제목과 지표를 동시에 필요로 한다. 실패의 뜻은
+    // 코드마다 다르다: 404 는 「없다」, 403 은 「남의 것」(서버 문구를 그대로 보여준다), 나머지는
+    // 「못 불러왔다」. 401 은 여기서 다루지 않는다 — 클라이언트가 로그인으로 보낸다(#146).
+    void Promise.all([
+      bffClient.get<ContestMeta>(`/api/backend/contests/${contestId}`),
+      bffClient.get<ContestMetricsOut>(`/api/backend/contests/${contestId}/metrics`),
+    ]).then(([contest, metrics]) => {
       if (cancelled) return;
-
-      if (contestRes.status === 404 || metricsRes.status === 404) {
+      if (contest.ok && metrics.ok) {
+        setLoad({ status: "ready", contest: contest.data, metrics: metrics.data });
+        return;
+      }
+      if (contest.status === 404 || metrics.status === 404) {
         setLoad({ status: "not-found" });
         return;
       }
-      if (metricsRes.status === 403) {
-        const body = (await metricsRes.json().catch(() => null)) as { detail?: string } | null;
-        setLoad({
-          status: "forbidden",
-          message: body?.detail ?? "본인이 개최한 Contest만 지표를 볼 수 있습니다.",
-        });
+      if (!metrics.ok && metrics.status === 403) {
+        setLoad({ status: "forbidden", message: metrics.detail });
         return;
       }
-      if (!contestRes.ok || !metricsRes.ok) {
-        setLoad({ status: "error", message: "지표를 불러오지 못했습니다." });
-        return;
-      }
-
-      const contest = (await contestRes.json()) as ContestMeta;
-      const metrics = (await metricsRes.json()) as ContestMetricsOut;
-      if (cancelled) return;
-      setLoad({ status: "ready", contest, metrics });
-    }
-
-    loadAll().catch(() => {
-      if (!cancelled) setLoad({ status: "error", message: "불러오는 중 오류가 발생했습니다." });
+      setLoad({ status: "error", message: "지표를 불러오지 못했습니다." });
     });
 
     return () => {
