@@ -31,7 +31,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
-import { sessionFetch } from "@/lib/auth/client-fetch";
+import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
 import { formatPrize } from "@/lib/contest-format";
 import {
@@ -100,68 +100,47 @@ export default function ContestPaymentPage() {
     if (session.status !== "authenticated") return;
     let cancelled = false;
 
-    async function loadAll() {
-      const contestRes = await sessionFetch(`/api/backend/contests/${contestId}`);
+    void (async () => {
+      const contest = await bffClient.get<ContestMeta>(`/api/backend/contests/${contestId}`);
       if (cancelled) return;
 
-      if (contestRes.status === 404) {
-        setLoad({ status: "not-found" });
-        return;
-      }
-      if (!contestRes.ok) {
-        setLoad({ status: "error", message: "공모전 정보를 불러오지 못했습니다." });
-        return;
-      }
-      const contest = (await contestRes.json()) as ContestMeta;
-      if (cancelled) return;
-
-      if (contest.status !== "draft") {
-        // 이미 결제되어 공개된(또는 그 뒤로 넘어간) Contest다 — 새 결제 요청을
-        // 만들 이유가 없다. 여기서 걸러야 initiate_payment의 409를 화면이
-        // 매번 대신 겪지 않는다.
-        setLoad({ status: "already-paid", title: contest.title });
-        return;
+      if (!contest.ok) {
+        if (contest.status === 404) return setLoad({ status: "not-found" });
+        return setLoad({ status: "error", message: "공모전 정보를 불러오지 못했습니다." });
       }
 
-      // draft다 — 결제를 시작(또는 이미 진행 중인 활성 결제를 그대로 이어받아)
-      // 금액을 받아온다. 이 호출 자체가 소유자 확인이다: 남의 Contest면 403,
-      // 없으면 404 — 어느 쪽도 금액을 돌려주지 않는다.
-      const paymentRes = await sessionFetch("/api/backend/payments", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ contest_id: Number(contestId) }),
+      if (contest.data.status !== "draft") {
+        // 이미 결제되어 공개된(또는 그 뒤로 넘어간) Contest다 — 새 결제 요청을 만들 이유가
+        // 없다. 여기서 걸러야 initiate_payment의 409를 화면이 매번 대신 겪지 않는다.
+        return setLoad({ status: "already-paid", title: contest.data.title });
+      }
+
+      // draft다 — 결제를 시작(또는 이미 진행 중인 활성 결제를 그대로 이어받아) 금액을
+      // 받아온다. 이 호출 자체가 소유자 확인이다: 남의 Contest면 403, 없으면 404 — 어느
+      // 쪽도 금액을 돌려주지 않는다.
+      const payment = await bffClient.post<PaymentOut>("/api/backend/payments", {
+        contest_id: Number(contestId),
       });
       if (cancelled) return;
 
-      if (paymentRes.status === 409) {
-        // GET과 POST 사이에 다른 경로로 이미 결제·공개됐다 — 드문 경합이지만
-        // "두 번 청구되지 않는다"는 여기서도 성립해야 한다.
-        setLoad({ status: "already-paid", title: contest.title });
-        return;
+      if (!payment.ok) {
+        if (payment.status === 409) {
+          // GET과 POST 사이에 다른 경로로 이미 결제·공개됐다 — 드문 경합이지만 "두 번
+          // 청구되지 않는다"는 여기서도 성립해야 한다.
+          return setLoad({ status: "already-paid", title: contest.data.title });
+        }
+        if (payment.status === 403 || payment.status === 404) {
+          // 남의 Contest다. 제목도 이미 응답에 있었지만, 여기서부터는 아무 금액도 보여주지
+          // 않는다 — not-found로 합류시켜 남의 결제 화면이 다른 문구로 "여기 뭔가 있다"는
+          // 것조차 알려주지 않게 한다.
+          return setLoad({ status: "not-found" });
+        }
+        return setLoad({ status: "error", message: "결제 정보를 불러오지 못했습니다." });
       }
-      if (paymentRes.status === 403 || paymentRes.status === 404) {
-        // 남의 Contest다. 제목도 이미 응답에 있었지만, 여기서부터는 아무 금액도
-        // 보여주지 않는다 — not-found로 합류시켜 남의 결제 화면이 다른 문구로
-        // "여기 뭔가 있다"는 것조차 알려주지 않게 한다.
-        setLoad({ status: "not-found" });
-        return;
-      }
-      if (!paymentRes.ok) {
-        setLoad({ status: "error", message: "결제 정보를 불러오지 못했습니다." });
-        return;
-      }
-      const payment = (await paymentRes.json()) as PaymentOut;
-      if (cancelled) return;
-      setLoad({ status: "ready", title: contest.title, payment });
-    }
 
-    loadAll().catch(() => {
-      if (!cancelled) setLoad({ status: "error", message: "불러오는 중 오류가 발생했습니다." });
-    });
+      setLoad({ status: "ready", title: contest.data.title, payment: payment.data });
+    })();
 
-    return () => {
-      cancelled = true;
-    };
   }, [session.status, contestId, reloadTick]);
 
   // 토스 결제창에서 돌아왔는지 마운트 시점에(그리고 로드가 끝난 뒤) 확인한다
@@ -233,38 +212,29 @@ export default function ContestPaymentPage() {
 
     setConfirm({ status: "confirming" });
 
-    let res: Response;
-    try {
-      res = await sessionFetch(`/api/backend/payments/${load.payment.order_id}/confirm`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ payment_key: paymentKey }),
-      });
-    } catch {
-      // 네트워크 자체가 끊겨 요청이 우리 서버에 닿지 않았다 — 토스 쪽에서는
-      // 이미 이 paymentKey로 결제가 승인됐을 수 있으므로 재시도할 수 있어야
-      // 한다.
-      setConfirm({
-        status: "failed",
-        message: "네트워크 오류로 결제 확인 결과를 알 수 없습니다. 다시 확인해주세요.",
-      });
-      return { ok: false, recoverable: true };
+    const confirmed = await bffClient.post<PaymentOut>(
+      `/api/backend/payments/${load.payment.order_id}/confirm`,
+      { payment_key: paymentKey },
+    );
+
+    if (!confirmed.ok) {
+      if (confirmed.code === "network") {
+        // 네트워크 자체가 끊겨 요청이 우리 서버에 닿지 않았다 — 토스 쪽에서는 이미 이
+        // paymentKey로 결제가 승인됐을 수 있으므로 재시도할 수 있어야 한다.
+        setConfirm({
+          status: "failed",
+          message: "네트워크 오류로 결제 확인 결과를 알 수 없습니다. 다시 확인해주세요.",
+        });
+        return { ok: false, recoverable: true };
+      }
+      setConfirm({ status: "failed", message: confirmed.detail });
+      // 5xx(BFF 502 포함)는 우리 인프라 쪽 일시적 실패다 — 요청이 실제로 처리됐는지조차
+      // 불확실하므로 재시도할 수 있어야 한다. 4xx는 우리 서버가 이 요청 자체를 확정적으로
+      // 거절한 것이라 같은 paymentKey를 다시 보내도 결과가 달라지지 않는다.
+      return { ok: false, recoverable: confirmed.status >= 500 };
     }
 
-    if (!res.ok) {
-      const body = (await res.json().catch(() => null)) as { detail?: string } | null;
-      setConfirm({
-        status: "failed",
-        message: body?.detail ?? `결제 확인에 실패했습니다 (${res.status})`,
-      });
-      // 5xx(BFF 502 포함)는 우리 인프라 쪽 일시적 실패다 — 요청이 실제로
-      // 처리됐는지조차 불확실하므로 재시도할 수 있어야 한다. 4xx는 우리
-      // 서버가 이 요청 자체를 확정적으로 거절한 것이라 같은 paymentKey를
-      // 다시 보내도 결과가 달라지지 않는다.
-      return { ok: false, recoverable: res.status >= 500 };
-    }
-
-    const result = (await res.json()) as PaymentOut;
+    const result = confirmed.data;
     if (result.status === "paid") {
       setConfirm({ status: "paid" });
       return { ok: true };

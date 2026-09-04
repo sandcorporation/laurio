@@ -9,7 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 
 import { UploadField } from "@/components/upload/upload-field";
-import { sessionFetch } from "@/lib/auth/client-fetch";
+import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
 import type {
   ContestDetail,
@@ -83,39 +83,31 @@ export default function SubmitPage() {
     let cancelled = false;
 
     async function loadAll() {
-      const [contestRes, verificationRes] = await Promise.all([
-        sessionFetch(`/api/backend/contests/${contestId}`),
-        sessionFetch("/api/backend/verification/me"),
+      const [contest, verification] = await Promise.all([
+        bffClient.get<ContestDetail>(`/api/backend/contests/${contestId}`),
+        bffClient.get<VerificationStatusOut>("/api/backend/verification/me"),
       ]);
       if (cancelled) return;
 
-      if (contestRes.status === 404) {
-        setLoad({ status: "not-found" });
-        return;
+      if (!contest.ok) {
+        if (contest.status === 404) return setLoad({ status: "not-found" });
+        return setLoad({ status: "error", message: "Contest 정보를 불러오지 못했습니다." });
       }
-      if (!contestRes.ok) {
-        setLoad({ status: "error", message: "Contest 정보를 불러오지 못했습니다." });
-        return;
+      if (!verification.ok) {
+        return setLoad({ status: "error", message: "본인확인 상태를 확인하지 못했습니다." });
       }
-      const contest = (await contestRes.json()) as ContestDetail;
-
-      if (!verificationRes.ok) {
-        setLoad({ status: "error", message: "본인확인 상태를 확인하지 못했습니다." });
-        return;
-      }
-      const verification = (await verificationRes.json()) as VerificationStatusOut;
 
       let submission: SubmissionOut | null = null;
-      if (verification.status === "verified") {
-        const submissionRes = await sessionFetch(
+      if (verification.data.status === "verified") {
+        // 404 는 실패가 아니다 — 「아직 안 냈다」는 정상적인 사실이다.
+        const existing = await bffClient.get<SubmissionOut>(
           `/api/backend/contests/${contestId}/submissions/me`,
         );
-        if (submissionRes.status === 200) {
-          submission = (await submissionRes.json()) as SubmissionOut;
-        } else if (submissionRes.status !== 404) {
-          if (cancelled) return;
-          setLoad({ status: "error", message: "제출 정보를 불러오지 못했습니다." });
-          return;
+        if (cancelled) return;
+        if (existing.ok) {
+          submission = existing.data;
+        } else if (existing.status !== 404) {
+          return setLoad({ status: "error", message: "제출 정보를 불러오지 못했습니다." });
         }
       }
 
@@ -127,7 +119,7 @@ export default function SubmitPage() {
       setTestAccount(submission?.test_account ?? "");
 
       const initialStates: Record<number, RequirementFieldState> = {};
-      for (const requirement of contest.requirements) {
+      for (const requirement of contest.data.requirements) {
         const existing = submission?.requirement_responses.find(
           (r) => r.requirement_id === requirement.id,
         );
@@ -138,7 +130,7 @@ export default function SubmitPage() {
         };
       }
       setRequirementStates(initialStates);
-      setLoad({ status: "ready", contest, verification, submission });
+      setLoad({ status: "ready", contest: contest.data, verification: verification.data, submission });
     }
 
     loadAll().catch(() => {
@@ -175,12 +167,10 @@ export default function SubmitPage() {
     setVerifying(true);
     try {
       const seed = session.user.username;
-      const res = await sessionFetch("/api/backend/verification/verify", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ verification_token: `${seed}|1990-01-01|ci-${seed}|di-${seed}` }),
+      const result = await bffClient.post("/api/backend/verification/verify", {
+        verification_token: `${seed}|1990-01-01|ci-${seed}|di-${seed}`,
       });
-      if (res.ok) setReloadTick((t) => t + 1);
+      if (result.ok) setReloadTick((t) => t + 1);
     } finally {
       setVerifying(false);
     }
@@ -195,14 +185,15 @@ export default function SubmitPage() {
   type FinalizeOutcome = { ok: true } | { ok: false; recoverable: boolean; message: string };
 
   async function finalizeLiveVerification(identityVerificationId: string): Promise<FinalizeOutcome> {
-    let res: Response;
-    try {
-      res = await sessionFetch("/api/backend/verification/verify", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ verification_token: identityVerificationId }),
-      });
-    } catch {
+    const result = await bffClient.post("/api/backend/verification/verify", {
+      verification_token: identityVerificationId,
+    });
+
+    if (result.ok) {
+      setReloadTick((t) => t + 1);
+      return { ok: true };
+    }
+    if (result.code === "network") {
       return {
         ok: false,
         recoverable: true,
@@ -211,13 +202,7 @@ export default function SubmitPage() {
           "새로고침해 다시 시도해 주세요.",
       };
     }
-
-    if (res.ok) {
-      setReloadTick((t) => t + 1);
-      return { ok: true };
-    }
-    const body = (await res.json().catch(() => null)) as { detail?: string } | null;
-    return { ok: false, recoverable: false, message: body?.detail ?? "본인확인에 실패했습니다." };
+    return { ok: false, recoverable: false, message: result.detail };
   }
 
   async function handleVerifyLive() {
@@ -304,19 +289,18 @@ export default function SubmitPage() {
       ? `/api/backend/contests/${contestId}/submissions/me`
       : `/api/backend/contests/${contestId}/submissions`;
 
-    const res = await sessionFetch(path, {
+    const saved = await bffClient.request<SubmissionOut>(path, {
       method: isUpdate ? "PUT" : "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
     });
 
-    if (!res.ok) {
-      const body = (await res.json().catch(() => null)) as { detail?: string } | null;
-      setSaveState({ status: "error", message: body?.detail ?? `저장에 실패했습니다 (${res.status})` });
+    if (!saved.ok) {
+      setSaveState({ status: "error", message: saved.detail });
       return;
     }
 
-    const submission = (await res.json()) as SubmissionOut;
+    const submission = saved.data;
     setLoad((prev) => (prev.status === "ready" ? { ...prev, submission } : prev));
     setSaveState({ status: "done" });
   }

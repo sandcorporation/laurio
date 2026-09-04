@@ -85,22 +85,3 @@ export function sanitizeChatTurns(raw: unknown): ParsedChatTurn[] {
   }
   return turns;
 }
-
-/**
- * 실패 응답(4xx/5xx)에서 사람이 읽을 수 있는 이유를 뽑아낸다. 본문이 JSON이
- * 아니거나(프록시가 HTML 에러 페이지를 대신 돌려준 경우), `detail`이 문자열이
- * 아닌 경우(django-ninja가 pydantic 필드 검증 실패를 `detail`이 객체 배열인
- * 형태로 돌려줄 때가 있다) 모두 `null`을 돌려주고, 호출부가 상태 코드 기반의
- * 일반 메시지로 대체하게 한다.
- */
-export async function readErrorDetail(res: Response): Promise<string | null> {
-  try {
-    const body: unknown = await res.json();
-    if (isPlainObject(body) && typeof body.detail === "string" && body.detail.trim()) {
-      return body.detail;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}

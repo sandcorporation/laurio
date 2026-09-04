@@ -20,7 +20,7 @@
 // "실제 본인확인하기" 버튼)가 렌더링 자체를 건너뛴다. 기존 Fake 어댑터 기반
 // dev 버튼("지금 본인확인하기(dev)")은 이 모듈과 무관하게 그대로 남는다.
 
-import { sessionFetch } from "@/lib/auth/client-fetch";
+import { bffClient } from "@/lib/bff/client";
 
 const SDK_SRC = "https://cdn.portone.io/v2/browser-sdk.js";
 
@@ -100,12 +100,11 @@ function loadPortOneSdk(): Promise<void> {
 }
 
 async function fetchServerIssuedIdentityVerificationId(): Promise<string> {
-  const res = await sessionFetch("/api/backend/verification/start", { method: "POST" });
-  if (!res.ok) {
-    throw new Error("본인확인 요청 발급에 실패했습니다.");
-  }
-  const body = (await res.json()) as { identity_verification_id: string };
-  return body.identity_verification_id;
+  const result = await bffClient.post<{ identity_verification_id: string }>(
+    "/api/backend/verification/start",
+  );
+  if (!result.ok) throw new Error("본인확인 요청 발급에 실패했습니다.");
+  return result.data.identity_verification_id;
 }
 
 /**

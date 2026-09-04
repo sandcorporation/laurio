@@ -16,10 +16,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { sessionFetch } from "@/lib/auth/client-fetch";
+import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
 import { formatPrize } from "@/lib/contest-format";
-import { readErrorDetail } from "@/lib/contests/chat-response";
 import type { Category, DeliverableType, VerificationStatusOut } from "@/lib/contests/grill-types";
 
 import {
@@ -83,33 +82,33 @@ export default function NewContestGrillPage() {
     let cancelled = false;
 
     async function loadAll() {
-      const [catRes, dtRes, verRes] = await Promise.all([
-        sessionFetch("/api/backend/contests/categories"),
-        sessionFetch("/api/backend/contests/deliverable-types"),
-        sessionFetch("/api/backend/verification/me"),
+      const [categories, deliverableTypes, verification] = await Promise.all([
+        bffClient.get<unknown>("/api/backend/contests/categories"),
+        bffClient.get<unknown>("/api/backend/contests/deliverable-types"),
+        bffClient.get<unknown>("/api/backend/verification/me"),
       ]);
       if (cancelled) return;
 
-      if (!catRes.ok || !dtRes.ok || !verRes.ok) {
+      if (!categories.ok || !deliverableTypes.ok || !verification.ok) {
         setLoad({ status: "error", message: "화면을 불러오지 못했습니다." });
         return;
       }
-
-      const categories = await catRes.json().catch(() => null);
-      const deliverableTypes = await dtRes.json().catch(() => null);
-      const verification = await verRes.json().catch(() => null);
-      if (cancelled) return;
-
-      if (!Array.isArray(categories) || !Array.isArray(deliverableTypes) || !isPlainRecord(verification)) {
+      // 응답 모양을 여기서 한 번 더 본다 — 프록시가 다른 것을 돌려줘도 화면이 빈 목록을
+      // 그럴듯하게 그리지 않는다.
+      if (
+        !Array.isArray(categories.data) ||
+        !Array.isArray(deliverableTypes.data) ||
+        !isPlainRecord(verification.data)
+      ) {
         setLoad({ status: "error", message: "화면을 불러오지 못했습니다." });
         return;
       }
 
       setLoad({
         status: "ready",
-        categories,
-        deliverableTypes,
-        verification: verification as unknown as VerificationStatusOut,
+        categories: categories.data,
+        deliverableTypes: deliverableTypes.data,
+        verification: verification.data as unknown as VerificationStatusOut,
       });
     }
 
@@ -132,26 +131,17 @@ export default function NewContestGrillPage() {
       return;
     }
     let cancelled = false;
-    sessionFetch("/api/backend/contests/quote", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ deliverable_type_ids: brief.deliverableTypeIds }),
-    })
-      .then(async (res) => {
+    void bffClient
+      .post<unknown>("/api/backend/contests/quote", {
+        deliverable_type_ids: brief.deliverableTypeIds,
+      })
+      .then((result) => {
         if (cancelled) return;
-        if (!res.ok) {
-          setQuoteTotal(null);
+        if (result.ok && isPlainRecord(result.data) && typeof result.data.minimum_total === "number") {
+          setQuoteTotal(result.data.minimum_total);
           return;
         }
-        const body = await res.json().catch(() => null);
-        if (isPlainRecord(body) && typeof body.minimum_total === "number") {
-          setQuoteTotal(body.minimum_total);
-        } else {
-          setQuoteTotal(null);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setQuoteTotal(null);
+        setQuoteTotal(null);
       });
     return () => {
       cancelled = true;
@@ -168,12 +158,10 @@ export default function NewContestGrillPage() {
     setVerifying(true);
     try {
       const seed = session.user.username;
-      const res = await sessionFetch("/api/backend/verification/verify", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ verification_token: `${seed}|1990-01-01|ci-${seed}|di-${seed}` }),
+      const result = await bffClient.post("/api/backend/verification/verify", {
+        verification_token: `${seed}|1990-01-01|ci-${seed}|di-${seed}`,
       });
-      if (res.ok) setReloadTick((t) => t + 1);
+      if (result.ok) setReloadTick((t) => t + 1);
     } finally {
       setVerifying(false);
     }
@@ -188,14 +176,15 @@ export default function NewContestGrillPage() {
   type FinalizeOutcome = { ok: true } | { ok: false; recoverable: boolean; message: string };
 
   async function finalizeLiveVerification(identityVerificationId: string): Promise<FinalizeOutcome> {
-    let res: Response;
-    try {
-      res = await sessionFetch("/api/backend/verification/verify", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ verification_token: identityVerificationId }),
-      });
-    } catch {
+    const result = await bffClient.post("/api/backend/verification/verify", {
+      verification_token: identityVerificationId,
+    });
+
+    if (result.ok) {
+      setReloadTick((t) => t + 1);
+      return { ok: true };
+    }
+    if (result.code === "network") {
       return {
         ok: false,
         recoverable: true,
@@ -204,13 +193,7 @@ export default function NewContestGrillPage() {
           "새로고침해 다시 시도해 주세요.",
       };
     }
-
-    if (res.ok) {
-      setReloadTick((t) => t + 1);
-      return { ok: true };
-    }
-    const body = (await res.json().catch(() => null)) as { detail?: string } | null;
-    return { ok: false, recoverable: false, message: body?.detail ?? "본인확인에 실패했습니다." };
+    return { ok: false, recoverable: false, message: result.detail };
   }
 
   async function handleVerifyLive() {
@@ -307,27 +290,21 @@ export default function NewContestGrillPage() {
 
     setCreating(true);
     try {
-      const res = await sessionFetch("/api/backend/contests", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          title,
-          category_id: brief.categoryId,
-          deliverable_type_ids: brief.deliverableTypeIds,
-          description: brief.description,
-          prize: prizeNumber,
-          deadline_at: new Date(brief.deadlineAt).toISOString(),
-          requirements: [],
-        }),
+      const created = await bffClient.post<unknown>("/api/backend/contests", {
+        title,
+        category_id: brief.categoryId,
+        deliverable_type_ids: brief.deliverableTypeIds,
+        description: brief.description,
+        prize: prizeNumber,
+        deadline_at: new Date(brief.deadlineAt).toISOString(),
+        requirements: [],
       });
 
-      if (!res.ok) {
-        setCreateError((await readErrorDetail(res)) ?? `초안을 만들지 못했습니다 (${res.status})`);
+      if (!created.ok) {
+        setCreateError(created.detail);
         return;
       }
-
-      const created = await res.json().catch(() => null);
-      if (!isPlainRecord(created) || typeof created.id !== "number") {
+      if (!isPlainRecord(created.data) || typeof created.data.id !== "number") {
         setCreateError("초안 생성 응답을 해석하지 못했습니다. 다시 시도해 주세요.");
         return;
       }
@@ -335,7 +312,7 @@ export default function NewContestGrillPage() {
       // 초안이 자기 URL을 갖는다(#111) — 여기서부터는 그 화면(요구사항 작성)이
       // 이어받는다. 새로고침·북마크·목록에서의 재진입이 전부 그 URL을 통해
       // 이뤄지므로, 이 화면(브리프)은 생성 후 상태를 들고 있지 않는다.
-      router.push(`/console/contests/${created.id}/draft`);
+      router.push(`/console/contests/${created.data.id}/draft`);
     } catch {
       setCreateError("연결에 실패했습니다. 잠시 후 다시 시도해 주세요.");
     } finally {

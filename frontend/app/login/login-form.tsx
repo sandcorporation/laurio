@@ -20,6 +20,7 @@
 //    app/login/page.tsx가 서버에서 판정) 이 절 자체가 렌더되지 않는다 — 배포
 //    환경에 로그인 우회가 실려 나가는 것이 막는 값이다(#95).
 import { Suspense, useState } from "react";
+import { normalizeDetail } from "@laurio/bff-client";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { resolveNextPath } from "@/lib/auth/next-path";
@@ -75,8 +76,8 @@ function LoginButtons({ showDevSeedForm }: LoginButtonsProps) {
       });
 
       if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { detail?: string } | null;
-        setDevSeedError(body?.detail ?? `로그인에 실패했습니다 (${res.status})`);
+        const body = (await res.json().catch(() => null)) as { detail?: unknown } | null;
+        setDevSeedError(normalizeDetail(body?.detail, `로그인에 실패했습니다 (${res.status})`));
         return;
       }
 

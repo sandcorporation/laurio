@@ -120,7 +120,7 @@ export function createBffClient(options: BffClientOptions): BffClient {
       try {
         return { ok: true, status: response.status, data: JSON.parse(text) as T };
       } catch {
-        return { ok: false, status: response.status, code: "error", detail: FALLBACK_DETAIL };
+        return { ok: false, status: response.status, code: "malformed", detail: FALLBACK_DETAIL };
       }
     }
 

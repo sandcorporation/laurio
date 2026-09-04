@@ -21,7 +21,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 
 import { daysUntil, formatDday } from "@/lib/contest-format";
-import { sessionFetch } from "@/lib/auth/client-fetch";
+import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
 import {
   EVIDENCE_KINDS,
@@ -68,38 +68,26 @@ export default function JudgeComparisonPage() {
     if (session.status !== "authenticated") return;
     let cancelled = false;
 
-    async function loadAll() {
-      const [contestRes, compareRes] = await Promise.all([
-        sessionFetch(`/api/backend/contests/${contestId}`),
-        sessionFetch(`/api/backend/contests/${contestId}/submissions/compare`),
-      ]);
+    // 실패의 뜻이 코드마다 다르다: 404 는 「없다」, 403 은 「남의 것」(서버 문구 그대로), 나머지는
+    // 「못 불러왔다」. 401 은 클라이언트가 로그인으로 보낸다(#146).
+    void Promise.all([
+      bffClient.get<ContestMeta>(`/api/backend/contests/${contestId}`),
+      bffClient.get<ContestComparisonOut>(`/api/backend/contests/${contestId}/submissions/compare`),
+    ]).then(([contest, comparison]) => {
       if (cancelled) return;
-
-      if (contestRes.status === 404 || compareRes.status === 404) {
+      if (contest.ok && comparison.ok) {
+        setLoad({ status: "ready", contest: contest.data, comparison: comparison.data });
+        return;
+      }
+      if (contest.status === 404 || comparison.status === 404) {
         setLoad({ status: "not-found" });
         return;
       }
-      if (compareRes.status === 403) {
-        const body = (await compareRes.json().catch(() => null)) as { detail?: string } | null;
-        setLoad({
-          status: "forbidden",
-          message: body?.detail ?? "본인이 개최한 Contest만 비교할 수 있습니다.",
-        });
+      if (!comparison.ok && comparison.status === 403) {
+        setLoad({ status: "forbidden", message: comparison.detail });
         return;
       }
-      if (!contestRes.ok || !compareRes.ok) {
-        setLoad({ status: "error", message: "심사 비교 정보를 불러오지 못했습니다." });
-        return;
-      }
-
-      const contest = (await contestRes.json()) as ContestMeta;
-      const comparison = (await compareRes.json()) as ContestComparisonOut;
-      if (cancelled) return;
-      setLoad({ status: "ready", contest, comparison });
-    }
-
-    loadAll().catch(() => {
-      if (!cancelled) setLoad({ status: "error", message: "불러오는 중 오류가 발생했습니다." });
+      setLoad({ status: "error", message: "심사 비교 정보를 불러오지 못했습니다." });
     });
 
     return () => {
@@ -115,21 +103,16 @@ export default function JudgeComparisonPage() {
 
   async function requestAward(submissionId: number) {
     setAward({ status: "saving", submissionId });
-    const res = await sessionFetch(`/api/backend/contests/${contestId}/award`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ submission_id: submissionId }),
+    const result = await bffClient.post<AwardOut>(`/api/backend/contests/${contestId}/award`, {
+      submission_id: submissionId,
     });
-    if (!res.ok) {
-      const body = (await res.json().catch(() => null)) as { detail?: string } | null;
-      setAward({
-        status: "error",
-        message: body?.detail ?? `선정에 실패했습니다 (${res.status})`,
-      });
+    // 실패 문구는 서버가 준 것을 그대로 쓴다 — 심사기간이 지났다·이미 선정됐다는 각각 다른
+    // 사실이고, 화면이 짐작해 다시 쓰면 갈라진다.
+    if (!result.ok) {
+      setAward({ status: "error", message: result.detail });
       return;
     }
-    const result = (await res.json()) as AwardOut;
-    setAward({ status: "done", result });
+    setAward({ status: "done", result: result.data });
   }
 
   if (session.status === "loading" || load.status === "loading") {
