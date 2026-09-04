@@ -24,11 +24,10 @@
 안에서 Seller 등록도 함께 시작한다(ADR-0020).
 """
 
-# `from __future__ import annotations` 를 쓰지 않는다 — 이 모듈에도 `@paginate` 로
-# 감싼 엔드포인트가 생겼고(list_payouts_for_operator, #149), 그 래퍼는 원본 함수의
-# `__globals__` 를 가져갈 수 없어서 문자열이 된 어노테이션을 해석하지 못한다.
-# `contests/api.py` 가 같은 이유로 같은 선택을 해 뒀다(#39) — 그쪽은 필터 하나
-# 붙이려다 `QueryParams is not fully defined` 로 500 이 났다.
+# `from __future__ import annotations` 를 쓰지 않는다. #149 가 `@paginate` 때문에 뺐고,
+# #151 이 그 데코레이터를 커서 페이지네이션으로 바꾸면서 그 이유는 사라졌지만 되돌리지
+# 않는다 — 되돌릴 이유가 없고, 되돌렸다가 다음에 누가 `@paginate` 를 다시 붙이면 같은
+# 함정(`QueryParams is not fully defined` 로 500)을 다시 밟는다.
 
 import json
 from uuid import UUID
@@ -37,9 +36,9 @@ from django.db.models import Count
 from django.http import HttpRequest
 from ninja import Router
 from ninja.errors import HttpError
-from ninja.pagination import PageNumberPagination, paginate
 
 from accounts.middleware import jwt_auth
+from core.keyset import decode_cursor, keyset_page
 from core.operator_auth import OperatorAuth
 from distributions.models import DistributionShare
 from handovers.models import Handover
@@ -66,6 +65,7 @@ from .schemas import (
     IdentitySubmitIn,
     OperatorPayoutCountsOut,
     OperatorPayoutOut,
+    OperatorPayoutPageOut,
     PayoutOut,
     SellerPhoneSubmitIn,
     SellerRegistrationRetryIn,
@@ -681,9 +681,14 @@ def count_payouts_for_operator(request: HttpRequest):
     )
 
 
-@operator_router.get("/payouts", response=list[OperatorPayoutOut])
-@paginate(PageNumberPagination, page_size=20)
-def list_payouts_for_operator(request: HttpRequest, blocked_on: str | None = None):
+# 한 페이지에 몇 행인가. 오프셋 시절의 `page_size=20` 을 그대로 이어받는다.
+_QUEUE_PAGE_SIZE = 20
+
+
+@operator_router.get("/payouts", response={200: OperatorPayoutPageOut, 422: ErrorOut})
+def list_payouts_for_operator(
+    request: HttpRequest, blocked_on: str | None = None, after: str | None = None
+):
     """Operator가 어느 Payout이 두 대기 중 어느 쪽에 막혀 있는지 본다(#50 AC).
 
     `blocked_on=identity`나 `blocked_on=seller`로 필터링할 수 있다 — 운영자가
@@ -704,6 +709,12 @@ def list_payouts_for_operator(request: HttpRequest, blocked_on: str | None = Non
     보장할 이유가 없고, 페이지마다 순서가 흔들리면 **같은 Payout 이 두 페이지에
     나오고 다른 하나는 어느 페이지에도 안 나온다**(#39 가 공개 목록에서 겪은
     그것). 운영자 큐에서 그 누락은 「처리해야 할 것을 못 본다」다.
+
+    **자르기는 커서다**(#151) — 「몇 번째부터」가 아니라 「마지막으로 본 행 다음부터」를
+    묻는다. 오프셋은 목록이 **머리 쪽에서** 자라면 경계가 밀려 2페이지가 1페이지의 행을
+    다시 돌려주고 그 사이 행 하나가 어느 페이지에도 안 나오는데, 이 큐는 스캔이 60초마다
+    Payout 을 확정하므로 운영자가 「더 보기」를 누르는 그 몇 초 사이에 실제로 일어난다.
+    커서가 가리키는 것(`created_at`, `id`)과 위 정렬 키가 같은 것이어야 성립한다.
     """
 
     if blocked_on is not None and blocked_on not in BLOCKED_ON_VALUES:
@@ -712,6 +723,12 @@ def list_payouts_for_operator(request: HttpRequest, blocked_on: str | None = Non
         # 운영자가 밀린 일을 못 본 채 지나간다.
         raise HttpError(422, f"blocked_on 은 {', '.join(BLOCKED_ON_VALUES)} 중 하나여야 합니다.")
 
+    if after is not None and decode_cursor(after) is None:
+        # 같은 이유로 읽을 수 없는 커서도 조용히 처음부터가 아니다 — 그러면 「더 보기」를
+        # 눌렀는데 목록이 처음으로 되돌아간 화면이 되고, 운영자는 무엇을 봤고 무엇을
+        # 못 봤는지 알 수 없게 된다.
+        raise HttpError(422, "읽을 수 없는 커서입니다.")
+
     payouts = (
         with_blocked_on(with_hold_facts(Payout.objects.with_target()))
         .filter(blocked_q())
@@ -719,4 +736,8 @@ def list_payouts_for_operator(request: HttpRequest, blocked_on: str | None = Non
     )
     if blocked_on is not None:
         payouts = payouts.filter(blocked_on_q(blocked_on))
-    return payouts
+
+    items, next_cursor = keyset_page(payouts, after=after, page_size=_QUEUE_PAGE_SIZE)
+    # `count` 는 이 페이지의 길이가 아니라 **전체** 건수다 — 화면이 「막혀 있는 지급 N건」을
+    # 말하고, 홈 배지와 그 숫자가 맞는지를 e2e 가 단언한다.
+    return 200, {"items": items, "count": payouts.count(), "next": next_cursor}
