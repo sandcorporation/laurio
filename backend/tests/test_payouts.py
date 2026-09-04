@@ -4325,7 +4325,7 @@ def test_toss_payout_webhook_answers_200_for_an_unknown_idempotency_key(client):
     payload = json.dumps(
         {
             "eventType": "payout.changed",
-            "data": {"refPayoutId": f"{uuid.uuid4()}-1", "status": "COMPLETED"},
+            "entityBody": {"refPayoutId": f"{uuid.uuid4()}-1", "status": "COMPLETED"},
         }
     ).encode("utf-8")
     transmission_time = "2024-01-01T00:00:00+09:00"
@@ -4352,7 +4352,7 @@ def test_toss_payout_webhook_answers_200_for_an_unknown_vendor_payout_id(client)
     payload = json.dumps(
         {
             "eventType": "payout.changed",
-            "data": {"refPayoutId": "읽을-수-없는-참조", "id": "someone-elses-payout", "status": "COMPLETED"},
+            "entityBody": {"refPayoutId": "읽을-수-없는-참조", "id": "someone-elses-payout", "status": "COMPLETED"},
         }
     ).encode("utf-8")
     transmission_time = "2024-01-01T00:00:00+09:00"
@@ -4377,9 +4377,9 @@ def test_toss_seller_webhook_answers_200_for_an_unknown_seller(client):
     payload = json.dumps(
         {
             "eventType": "seller.changed",
-            "data": {
+            "entityBody": {
                 "refSellerId": "laurio-developer-99999999",
-                "sellerId": "someone-elses-seller",
+                "id": "someone-elses-seller",
                 "status": "APPROVAL_REQUIRED",
             },
         }
@@ -4438,6 +4438,8 @@ def test_toss_webhooks_still_reject_a_body_we_cannot_read(client):
     """
 
     transmission_time = "2024-01-01T00:00:00+09:00"
+    # 봉투 자체가 우리가 모르는 모양이다(#173 이후 상태 객체는 `entityBody` 에 온다) —
+    # 「우리 추정이 또 틀렸다」는 신호이므로 200 으로 덮지 않는다.
     payload = json.dumps({"eventType": "payout.changed", "data": {}}).encode("utf-8")
 
     with override_settings(TOSS_API_SECURE_KEY=_TEST_TOSS_SECURE_KEY):
@@ -4453,7 +4455,8 @@ def test_toss_webhooks_still_reject_a_body_we_cannot_read(client):
     assert resp.status_code == 422
 
     payload = json.dumps(
-        {"eventType": "seller.changed", "data": {"refSellerId": "laurio-developer-1", "status": "무슨상태"}}
+        # 이쪽은 봉투는 맞고 **상태 문자열**을 모르는 경우다 — 그것도 422 다.
+        {"eventType": "seller.changed", "entityBody": {"refSellerId": "laurio-developer-1", "status": "무슨상태"}}
     ).encode("utf-8")
     with override_settings(TOSS_API_SECURE_KEY=_TEST_TOSS_SECURE_KEY):
         resp = client.post(
