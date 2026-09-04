@@ -32,7 +32,7 @@ async function readFeeBps(page: Page): Promise<number> {
 }
 
 test.describe("조회 — 일반 등급도 지금 값을 본다(#77)", () => {
-  test("일반 등급으로 홈에서 눌러 들어가면 정책값 표가 보인다", async ({ page }) => {
+  test("@exclusive 일반 등급으로 홈에서 눌러 들어가면 정책값 표가 보인다", async ({ page }) => {
     const ordinary = await seedE2eOperator({ username: `e2e-op-policy-view-${Date.now()}` });
 
     await loginAndExpectHome(page, ordinary.username);
@@ -50,7 +50,7 @@ test.describe("조회 — 일반 등급도 지금 값을 본다(#77)", () => {
     expect(Number.isNaN(value)).toBe(false);
   });
 
-  test("상위 등급으로 홈에서 눌러 들어가도 같은 값 표와 이력이 보인다", async ({ page }) => {
+  test("@exclusive 상위 등급으로 홈에서 눌러 들어가도 같은 값 표와 이력이 보인다", async ({ page }) => {
     const superuser = await seedE2eOperator({
       username: `e2e-op-policy-view-super-${Date.now()}`,
       superuser: true,
@@ -65,7 +65,7 @@ test.describe("조회 — 일반 등급도 지금 값을 본다(#77)", () => {
 });
 
 test.describe("일반 등급 — 편집 없음, 그리고 그것이 빈 화면이 아니다(#77)", () => {
-  test("일반 등급에게는 편집 폼이 없고, 대신 등급이 필요하다는 안내가 명시적으로 보인다", async ({
+  test("@exclusive 일반 등급에게는 편집 폼이 없고, 대신 등급이 필요하다는 안내가 명시적으로 보인다", async ({
     page,
   }) => {
     const ordinary = await seedE2eOperator({ username: `e2e-op-policy-forbidden-${Date.now()}` });
@@ -85,7 +85,7 @@ test.describe("일반 등급 — 편집 없음, 그리고 그것이 빈 화면�
 });
 
 test.describe("변경 — 상위 등급, 이유가 함께 남는다(#77)", () => {
-  test("상위 등급이 값을 바꾸고 이유를 남기면 저장되고, 표와 이력이 새 값을 보여준다", async ({
+  test("@exclusive 상위 등급이 값을 바꾸고 이유를 남기면 저장되고, 표와 이력이 새 값을 보여준다", async ({
     page,
   }) => {
     const superuser = await seedE2eOperator({
@@ -117,7 +117,7 @@ test.describe("변경 — 상위 등급, 이유가 함께 남는다(#77)", () =>
     await expect(firstRow).toContainText(String(newFee));
   });
 
-  test("이유 없이 저장하려 하면 거부되고 그 이유가 화면에 보인다", async ({ page }) => {
+  test("@exclusive 이유 없이 저장하려 하면 거부되고 그 이유가 화면에 보인다", async ({ page }) => {
     const superuser = await seedE2eOperator({
       username: `e2e-op-policy-noreason-${Date.now()}`,
       superuser: true,
@@ -137,7 +137,7 @@ test.describe("변경 — 상위 등급, 이유가 함께 남는다(#77)", () =>
     await expect(page.getByTestId("policy-value-platform_fee_bps")).toHaveText(String(currentFee));
   });
 
-  test("말이 안 되는 값(상한 초과)이 거부되고 무엇이 잘못됐는지 화면이 말한다", async ({ page }) => {
+  test("@exclusive 말이 안 되는 값(상한 초과)이 거부되고 무엇이 잘못됐는지 화면이 말한다", async ({ page }) => {
     const superuser = await seedE2eOperator({
       username: `e2e-op-policy-invalid-${Date.now()}`,
       superuser: true,
@@ -166,7 +166,7 @@ test.describe("변경 — 상위 등급, 이유가 함께 남는다(#77)", () =>
     await expect(page.getByTestId("policy-value-platform_fee_bps")).toHaveText(String(currentFee));
   });
 
-  test("숫자가 아닌 입력은 요청 검증 422를 내고, detail이 배열이어도 화면이 죽지 않는다", async ({
+  test("@exclusive 숫자가 아닌 입력은 요청 검증 422를 내고, detail이 배열이어도 화면이 죽지 않는다", async ({
     page,
   }) => {
     // django-ninja의 요청 검증 422는 detail이 오류 객체의 **배열**이다 — 그걸
@@ -202,7 +202,7 @@ test.describe("변경 — 상위 등급, 이유가 함께 남는다(#77)", () =>
     expect(message).not.toContain("undefined");
   });
 
-  test("입력칸을 비운 채 저장하면 조용히 0이 되지 않는다(코드리뷰 지적)", async ({ page }) => {
+  test("@exclusive 입력칸을 비운 채 저장하면 조용히 0이 되지 않는다(코드리뷰 지적)", async ({ page }) => {
     // `Number("")`는 NaN이 아니라 0이다 — 입력칸을 비운 채 저장하면 그
     // 필드가 조용히 0으로 바뀔 뻔했다. 서버 경계(0~9000)가 0을 허용하므로
     // 이 사고는 200으로 "성공"해버려 화면에서 눈치채기 어렵다. 빈 입력은
@@ -234,7 +234,7 @@ test.describe("변경 — 상위 등급, 이유가 함께 남는다(#77)", () =>
 });
 
 test.describe("세션 만료 — 스피너에 갇히지 않는다(#77, #69의 함정)", () => {
-  test("세션이 아예 없으면 렌더링 전에 로그인으로 돌아간다", async ({ page, context }) => {
+  test("@exclusive 세션이 아예 없으면 렌더링 전에 로그인으로 돌아간다", async ({ page, context }) => {
     await context.clearCookies();
     await page.goto("/policy");
 
@@ -242,7 +242,7 @@ test.describe("세션 만료 — 스피너에 갇히지 않는다(#77, #69의 �
     await expect(page.getByTestId("policy-heading")).toHaveCount(0);
   });
 
-  test("저장 중 세션이 만료되면 로그인으로 돌아가고 값은 바뀌지 않는다", async ({ page }) => {
+  test("@exclusive 저장 중 세션이 만료되면 로그인으로 돌아가고 값은 바뀌지 않는다", async ({ page }) => {
     // 실제 세션 만료(Redis에서 세션을 지우는 등)는 이 화면의 렌더링 로직과
     // 무관한 배관이 필요하다. 401 자체는 이미 백엔드 HTTP 시임(SuperuserOperatorAuth)이
     // 커버하므로, appeals.spec.ts의 같은 분기와 같은 판단으로 route

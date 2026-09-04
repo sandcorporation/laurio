@@ -67,7 +67,14 @@ class Command(BaseCommand):
         operator.is_staff = True
         operator.is_superuser = superuser
         operator.is_active = True
-        operator.set_password(password)
+        # **이미 같은 비밀번호면 다시 설정하지 않는다** (#157). Django 는 비밀번호가
+        # 바뀌면 세션 인증 해시로 그 계정의 **살아 있는 세션을 전부** 무효화한다.
+        # 이 명령은 멱등하다고 적혀 있고 실제로 반복 호출되는데(공용 계정을 워커마다
+        # 한 번씩 심는다), 매번 해시를 새로 쓰면 옆 워커가 방금 로그인한 세션이
+        # 그 자리에서 죽는다 — 화면은 그저 로그인으로 튕기고 원인은 여기다.
+        # 직렬 실행에서는 프로세스당 한 번만 심어 드러나지 않았다.
+        if not operator.check_password(password):
+            operator.set_password(password)
         operator.save()
 
         # 명령이 마지막 줄에 JSON 한 덩어리만 찍는다 — frontend/e2e/lib/seed.ts의

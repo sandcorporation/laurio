@@ -36,7 +36,7 @@ async function readQueueValue(page: Page, testId: string): Promise<number> {
 }
 
 test.describe("세 큐 건수 — 정확성(ADR-0020)", () => {
-  test("실제로 심은 뒤 홈의 세 숫자가 그것과 정확히 맞는다", async ({ page }) => {
+  test("@exclusive 실제로 심은 뒤 홈의 세 숫자가 그것과 정확히 맞는다", async ({ page }) => {
     const operator = await seedE2eOperator();
     await loginAsOperator(page, operator.username);
 
@@ -60,7 +60,7 @@ test.describe("세 큐 건수 — 정확성(ADR-0020)", () => {
     expect(after.seller).toBe(before.seller + 1);
   });
 
-  test("0건은 0건이라고 명시적으로 말한다 — 빈 영역이 아니다", async ({ page }) => {
+  test("@exclusive 0건은 0건이라고 명시적으로 말한다 — 빈 영역이 아니다", async ({ page }) => {
     await clearE2eOperatorQueues();
 
     const operator = await seedE2eOperator();
