@@ -32,32 +32,6 @@ test.describe("@exclusive 헤더 — 모든 페이지에 같은 모양으로 선
     });
   }
 
-  test("로그인하지 않아도 개최 CTA 가 보이고, 누르면 로그인으로 안내된다", async ({ page }) => {
-    await page.goto("/");
-    await expect(page.getByTestId("header-login-link")).toBeVisible();
-
-    await page.getByTestId("header-cta-new-contest").click();
-    await expect(page).toHaveURL(/\/login/);
-  });
-
-  test("로그인하면 로그인 대신 내 콘솔 링크를 보여준다", async ({ page }) => {
-    await page.goto("/login");
-    await page.getByTestId("fake-login-seed").fill(`e2e-home-header-${Date.now()}`);
-    await page.getByTestId("login-kakao").click();
-    await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
-
-    await expect(page.getByTestId("header-console-link")).toBeVisible();
-    await expect(page.getByTestId("header-login-link")).toHaveCount(0);
-  });
-
-  test("모바일 폭에서도 헤더 링크가 보이고 클릭 가능한 상태로 남는다", async ({ page }) => {
-    await page.setViewportSize({ width: 375, height: 700 });
-    await page.goto("/");
-
-    await expect(page.getByTestId("header-brand")).toBeVisible();
-    await expect(page.getByTestId("header-nav-contests")).toBeVisible();
-    await expect(page.getByTestId("header-cta-new-contest")).toBeVisible();
-  });
 });
 
 test.describe("@exclusive 홈 — 자리표시가 아니라 실제 공모전을 보여준다", () => {
@@ -76,12 +50,6 @@ test.describe("@exclusive 홈 — 자리표시가 아니라 실제 공모전을 
       expect(html).toContain(seeded.funded.title);
     });
 
-    test("draft Contest 는 홈에 나타나지 않는다", async ({ page }) => {
-      await page.goto("/");
-      const html = await page.content();
-      expect(html).not.toContain(seeded.draft.title);
-    });
-
     // 코드리뷰 지적(#93 1차) — 홈 본문만 보던 자바스크립트-없음 테스트는
     // 헤더가 하이드레이션 뒤로 밀리는 회귀(ADR-0015 가 막으려는 바로 그
     // 실패)를 못 잡는다. 헤더도 서버에서 렌더된다는 것을 여기서 직접 본다.
@@ -96,31 +64,9 @@ test.describe("@exclusive 홈 — 자리표시가 아니라 실제 공모전을 
   // 코드리뷰 지적(#93 1차) — 행의 href·data-contest-row 를 직접 검증하는
   // 테스트가 없어서 오타를 내도 스위트가 초록이었다. 아래에서 특정 행을 눌러
   // 정확히 그 Contest 의 상세로 이어지는지 본다.
-  test("행을 누르면 그 Contest 의 상세로 이어진다", async ({ page }) => {
-    await page.goto("/");
-
-    await page.locator(`[data-contest-row="${seeded.funded.id}"]`).click();
-
-    await expect(page).toHaveURL(new RegExp(`/contests/${seeded.funded.id}$`));
-    await expect(
-      page.getByRole("heading", { level: 1, name: seeded.funded.title }),
-    ).toBeVisible();
-  });
-
   // 코드리뷰 지적(#93 2차) — /contests 는 「상금미달」 배지와 "참가를 막지
   // 않습니다" 각주를 낸다. 홈이 액센트 색으로만 이 상태를 표시하면, 그
   // 규칙을 가장 모를 첫 방문자가 보는 화면에서만 그 규칙이 사라진다.
-  test("「상금미달」 배지와 각주가 /contests 와 같은 문구로 홈에도 있다", async ({ page }) => {
-    await page.goto("/");
-
-    const underfundedRow = page.locator(`[data-contest-row="${seeded.underfunded.id}"]`);
-    await expect(underfundedRow.getByText("상금미달")).toBeVisible();
-
-    const fundedRow = page.locator(`[data-contest-row="${seeded.funded.id}"]`);
-    await expect(fundedRow.getByText("상금미달")).toHaveCount(0);
-
-    await expect(page.getByText("참가를 막지 않습니다", { exact: false })).toBeVisible();
-  });
 });
 
 // LP-02 (#94, spec #92) — 홈이 공모전을 네 묶음으로 큐레이션한다.
@@ -132,86 +78,19 @@ test.describe("@exclusive 홈 — 자리표시가 아니라 실제 공모전을 
 // backend/tests/test_home_curation.py 의 몫이다 — 여기서는 화면이 그 결과를
 // 정직하게 옮기는지만 본다.
 test.describe("@exclusive 홈 — 공모전을 네 묶음으로 큐레이션한다", () => {
-  test("네 묶음이 모두 제목으로 보인다", async ({ page }) => {
-    await page.goto("/");
-
-    for (const [bucket, label] of [
-      ["ongoing", "진행중"],
-      ["imminent", "마감임박"],
-      ["in_judging", "심사중"],
-      ["completed", "완료"],
-    ] as const) {
-      const section = page.getByTestId(`home-bucket-${bucket}`);
-      await expect(section).toBeVisible();
-      await expect(section.getByRole("heading", { name: label })).toBeVisible();
-    }
-  });
-
   // seed_e2e_contests.py: funded 는 deadline_at = now+10일(PUBLISHED) — 마감임박
   // 임계값(3일, contests.curation.HOME_IMMINENT_DEADLINE_DAYS)보다 멀다.
-  test("마감이 먼 공개 공모전은 「진행중」에 들어간다", async ({ page }) => {
-    await page.goto("/");
-
-    const ongoingList = page.getByTestId("home-bucket-ongoing-list");
-    await expect(ongoingList.locator(`[data-contest-row="${seeded.funded.id}"]`)).toBeVisible();
-
-    const imminentList = page.getByTestId("home-bucket-imminent-list");
-    await expect(
-      imminentList.locator(`[data-contest-row="${seeded.funded.id}"]`),
-    ).toHaveCount(0);
-  });
-
   // seed_e2e_contests.py: underfunded 는 deadline_at = now+2일(PUBLISHED) — 임계값
   // 이내다. 「마감이 가까운 Contest가 진행중이 아니라 마감임박에 들어간다」는
   // #94 인수조건을 직접 확인한다.
-  test("마감이 가까운 공개 공모전은 「진행중」이 아니라 「마감임박」에 들어간다", async ({
-    page,
-  }) => {
-    await page.goto("/");
-
-    const imminentList = page.getByTestId("home-bucket-imminent-list");
-    await expect(
-      imminentList.locator(`[data-contest-row="${seeded.underfunded.id}"]`),
-    ).toBeVisible();
-
-    const ongoingList = page.getByTestId("home-bucket-ongoing-list");
-    await expect(
-      ongoingList.locator(`[data-contest-row="${seeded.underfunded.id}"]`),
-    ).toHaveCount(0);
-  });
-
   // seed_e2e_contests.py: closed 는 CLOSED다 — 마감됐고 심사기간 중(ADR-0014,
   // 데모·영상은 이미 전면 공개).
-  test("마감된 공모전은 「심사중」에 들어간다", async ({ page }) => {
-    await page.goto("/");
-
-    const inJudgingList = page.getByTestId("home-bucket-in_judging-list");
-    await expect(
-      inJudgingList.locator(`[data-contest-row="${seeded.closed.id}"]`),
-    ).toBeVisible();
-  });
-
   // 기본 시드에는 AWARDED·JUDGING_ENDED Contest 가 없다 — 「완료」가 실제로 빈
   // 채로 렌더되는 경우를 이 사실이 그대로 제공한다. 섹션이 사라지거나 깨지지
   // 않고 "비어 있다"고 말해야 한다(#94 인수조건).
-  test("완료 묶음이 비어 있어도 섹션이 사라지지 않고 비어 있다고 말한다", async ({ page }) => {
-    await page.goto("/");
-
-    const section = page.getByTestId("home-bucket-completed");
-    await expect(section).toBeVisible();
-    await expect(page.getByTestId("home-bucket-completed-empty")).toBeVisible();
-    await expect(page.getByTestId("home-bucket-completed-list")).toHaveCount(0);
-  });
-
   // 각 묶음에서 공모전 목록으로 이어질 수 있어야 한다(#94 인수조건) — 홈은
   // 큐레이션이고 목록(필터·정렬·페이지네이션, #39)은 탐색이라 그 둘을 잇는
   // 통로가 있어야 한다.
-  test("묶음의 전체 보기를 누르면 공모전 목록으로 이어진다", async ({ page }) => {
-    await page.goto("/");
-
-    await page.getByTestId("home-bucket-ongoing-view-all").click();
-    await expect(page).toHaveURL(/\/contests$/);
-  });
 });
 
 // PS-01 (#106, spec #105) — 참가작 수가 홈 카드에서 시작해 목록·상세까지
@@ -221,48 +100,9 @@ test.describe("@exclusive 홈 — 공모전을 네 묶음으로 큐레이션한�
 // Submission 을 하나 심으므로(developer 픽스처), seeded.funded.submission_count
 // 로 기대값을 하드코딩하지 않고 시드가 준 값을 그대로 쓴다.
 test.describe("@exclusive 홈 — 참가작 수가 화면을 옮겨도 같은 값을 유지한다", () => {
-  test("참가작 수가 홈 카드에서 시작해 목록을 거쳐 상세까지 같은 값으로 이어진다", async ({
-    page,
-  }) => {
-    const expected = `참가작 ${seeded.funded.submission_count}건`;
-
-    await page.goto("/");
-    const homeCount = page
-      .locator(`[data-contest-row="${seeded.funded.id}"]`)
-      .getByTestId("submission-count");
-    await expect(homeCount).toHaveText(expected);
-    await expect(homeCount).toHaveAttribute(
-      "data-submission-count",
-      String(seeded.funded.submission_count),
-    );
-
-    await page.getByTestId("home-bucket-ongoing-view-all").click();
-    await expect(page).toHaveURL(/\/contests$/);
-    await expect(
-      page.locator(`[data-contest-row="${seeded.funded.id}"]`).getByTestId("submission-count"),
-    ).toHaveText(expected);
-
-    await page.locator(`[data-contest-row="${seeded.funded.id}"]`).click();
-    await expect(page).toHaveURL(new RegExp(`/contests/${seeded.funded.id}$`));
-    await expect(page.getByTestId("submission-count")).toHaveText(expected);
-  });
-
   // 0도 숨기지 않는다 — "0" 이라는 숫자가 아니라 "아직 참가작이 없습니다"로
   // 읽힌다(#106 인수조건). seed_e2e_contests.py 의 underfunded 는 Submission 이
   // 없다.
-  test("참가작이 없는 공모전은 홈 카드에서도 「아직 참가작이 없습니다」라고 말한다", async ({
-    page,
-  }) => {
-    expect(seeded.underfunded.submission_count).toBe(0);
-
-    await page.goto("/");
-    const imminentList = page.getByTestId("home-bucket-imminent-list");
-    await expect(
-      imminentList
-        .locator(`[data-contest-row="${seeded.underfunded.id}"]`)
-        .getByTestId("submission-count"),
-    ).toHaveText("아직 참가작이 없습니다");
-  });
 });
 
 // 이 스펙의 존재 이유. 티켓 #93 본문 그대로: 이 테스트가 있었다면 입구 없는

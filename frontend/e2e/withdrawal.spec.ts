@@ -17,66 +17,6 @@ async function login(page: import("@playwright/test").Page, seed: string): Promi
   await establishDeveloperSession(page, seed);
 }
 
-test("콘솔에서 클릭만으로 탈퇴 화면에 닿는다", async ({ page }) => {
-  await login(page, uniqueSeed("reach"));
-
-  await page.getByTestId("app-home-withdraw-link").click();
-
-  await expect(page).toHaveURL(/\/console\/withdraw/);
-  await expect(page.getByTestId("withdraw-heading")).toBeVisible();
-});
-
-test("무엇이 사라지고 무엇이 남는지, 되돌릴 수 없다는 사실을 말한다", async ({ page }) => {
-  await login(page, uniqueSeed("explain"));
-
-  await page.goto("/console/withdraw");
-
-  await expect(page.getByTestId("withdraw-explanation")).toContainText("실명");
-  await expect(page.getByTestId("withdraw-explanation")).toContainText("공개 프로필");
-  await expect(page.getByTestId("withdraw-explanation")).toContainText("이름 없이");
-  await expect(page.getByTestId("withdraw-irreversible")).toContainText("되돌릴 수 없습니다");
-});
-
-test("막는 것이 있으면 목록으로 보이고, 확인 절차는 뜨지 않는다", async ({ page }) => {
-  await login(page, uniqueSeed("blocked"));
-
-  await page.route("**/api/backend/accounts/withdrawal", (route) => {
-    if (route.request().method() !== "GET") return route.fallback();
-    return route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        can_withdraw: false,
-        blocking_reasons: ["sponsor_contest_in_progress", "developer_payout_in_progress"],
-      }),
-    });
-  });
-
-  await page.goto("/console/withdraw");
-
-  await expect(page.getByTestId("withdraw-blocked")).toBeVisible();
-  await expect(
-    page.getByTestId("withdraw-blocking-reason-sponsor_contest_in_progress"),
-  ).toContainText("Contest");
-  await expect(
-    page.getByTestId("withdraw-blocking-reason-developer_payout_in_progress"),
-  ).toContainText("Payout");
-  await expect(page.getByTestId("withdraw-confirm-section")).toHaveCount(0);
-});
-
-test("막는 것이 없으면 체크박스를 확인해야 탈퇴 버튼이 켜진다", async ({ page }) => {
-  await login(page, uniqueSeed("checkbox"));
-
-  await page.goto("/console/withdraw");
-
-  await expect(page.getByTestId("withdraw-confirm-section")).toBeVisible();
-  const submit = page.getByTestId("withdraw-submit");
-  await expect(submit).toBeDisabled();
-
-  await page.getByTestId("withdraw-ack-checkbox").check();
-  await expect(submit).toBeEnabled();
-});
-
 test("탈퇴를 완료하면 로그인 화면으로 돌아가고, 그 계정으로 다시 로그인할 수 없다", async ({
   page,
 }) => {

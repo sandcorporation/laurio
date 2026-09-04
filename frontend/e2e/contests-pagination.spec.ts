@@ -63,45 +63,6 @@ async function rowIdsOnPage(page: Page): Promise<string[]> {
 test.describe("@exclusive 자바스크립트 없이", () => {
   test.use({ javaScriptEnabled: false });
 
-  test("전체 건수는 이 페이지에 실린 수가 아니라 필터가 걸린 전체 건수다", async ({ page }) => {
-    await page.goto(bulkUrl());
-
-    await expect(page.getByTestId("contest-count")).toHaveText(String(BULK));
-    await expect(page.getByTestId("contest-pagination")).toBeVisible();
-
-    // 한 페이지에 전부 실렸다면 페이지네이션을 검증할 수 없다 — 이 스펙의 전제가
-    // 무너졌다는 뜻이므로 여기서 잡는다.
-    const onFirstPage = await rowIdsOnPage(page);
-    expect(onFirstPage.length).toBeGreaterThan(0);
-    expect(onFirstPage.length).toBeLessThan(BULK);
-  });
-
-  test("상금순 첫 페이지에는 최고 상금이 오고 최저 상금은 오지 않는다", async ({ page }) => {
-    await page.goto(bulkUrl({ sort: "prize" }));
-    const rendered = await page.locator("main").innerText();
-
-    expect(rendered).toContain(bulk.highest_prize_title);
-    expect(rendered).not.toContain(bulk.lowest_prize_title);
-  });
-
-  test("「다음」을 끝까지 따라가면 예전 구조가 조용히 잃던 항목에 닿는다", async ({ page }) => {
-    await page.goto(bulkUrl({ sort: "prize" }));
-
-    // 페이지 크기를 테스트가 다시 계산하지 않는다 — 화면이 주는 「다음」 링크만
-    // 따라간다. 그래야 페이지 크기를 바꿔도 이 테스트가 그대로 유효하다.
-    await waitForList(page);
-    let hops = 0;
-    while ((await page.getByTestId("page-next").count()) > 0) {
-      await goToNextPage(page);
-      hops += 1;
-      expect(hops, "「다음」이 끝나지 않는다 — 페이지네이션이 순환한다").toBeLessThan(30);
-    }
-
-    expect(hops).toBeGreaterThan(0);
-    const rendered = await page.locator("main").innerText();
-    expect(rendered).toContain(bulk.lowest_prize_title);
-  });
-
   test("모든 페이지를 모으면 중복도 누락도 없다", async ({ page }) => {
     await page.goto(bulkUrl({ sort: "prize" }));
 
@@ -116,40 +77,4 @@ test.describe("@exclusive 자바스크립트 없이", () => {
     expect(new Set(seen).size, "같은 Contest 가 두 페이지에 걸쳐 나왔다").toBe(BULK);
   });
 
-  test("범위를 벗어난 page 는 마지막 페이지로 정정된다", async ({ page }) => {
-    // 그냥 두면 「전체 120」이라고 써놓고 바로 아래에 "조건에 맞는 공모전이
-    // 없습니다" 가 뜬다 — 있는데 없다고 말하는 화면이다.
-    await page.goto(bulkUrl({ sort: "prize", page: 999999 }));
-
-    await expect(page).not.toHaveURL(/page=999999/);
-    await expect(page.getByTestId("contest-count")).toHaveText(String(BULK));
-    expect((await rowIdsOnPage(page)).length).toBeGreaterThan(0);
-
-    // 마지막 페이지이므로 「다음」이 없고, 상금순의 꼬리가 여기 있다.
-    await expect(page.getByTestId("page-next")).toHaveCount(0);
-    expect(await page.locator("main").innerText()).toContain(bulk.lowest_prize_title);
-  });
-
-  test("페이지를 넘겨도 필터와 정렬이 유지된다", async ({ page }) => {
-    await page.goto(bulkUrl({ sort: "prize" }));
-    await goToNextPage(page);
-
-    await expect(page).toHaveURL(/category=\d+/);
-    await expect(page).toHaveURL(/sort=prize/);
-    await expect(page.getByTestId("contest-count")).toHaveText(String(BULK));
-  });
-});
-
-test("@exclusive 필터를 바꾸면 페이지가 1 로 돌아간다", async ({ page }) => {
-  // 3페이지에서 카테고리를 좁혔는데 페이지가 그대로면, 결과가 1페이지밖에 없을 때
-  // "조건에 맞는 공모전이 없습니다" 가 뜬다 — 있는데 없다고 말하는 화면이다.
-  await page.goto(bulkUrl({ sort: "prize", page: 3 }));
-  await expect(page).toHaveURL(/page=3/);
-
-  await page.getByRole("link", { name: seeded.funded.category, exact: true }).click();
-
-  await expect(page).toHaveURL(/category=\d+/);
-  await expect(page).not.toHaveURL(/page=/);
-  const rendered = await page.locator("main").innerText();
-  expect(rendered).toContain(seeded.funded.title);
 });

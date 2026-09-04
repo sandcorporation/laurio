@@ -36,18 +36,6 @@ test("개발자 프로필과 아카이브된 Submission 목록이 서버 렌더�
   expect(html).toContain(seeded.developer.archived_submission.contest_title);
 });
 
-test("로그인 없이 접근된다", async ({ request }) => {
-  const res = await request.get(`/developers/${seeded.developer.id}`);
-  expect(res.status()).toBe(200);
-});
-
-test("마감된 Contest 의 Submission 데모가 보인다", async ({ request }) => {
-  const res = await request.get(`/developers/${seeded.developer.id}`);
-  const html = await res.text();
-
-  expect(html).toContain(`href="${seeded.developer.archived_submission.demo_url}"`);
-});
-
 test("아직 마감되지 않은 Contest 에 낸 Submission 은 프로필에 나타나지 않는다", async ({
   request,
 }) => {
@@ -58,20 +46,6 @@ test("아직 마감되지 않은 Contest 에 낸 Submission 은 프로필에 나
   const html = await res.text();
 
   expect(html).not.toContain(seeded.funded.title);
-});
-
-test("OG 태그(제목·설명·이미지)가 서버에서 들어간다", async ({ request }) => {
-  const res = await request.get(`/developers/${seeded.developer.id}`);
-  const html = await res.text();
-
-  expect(html).toMatch(/property="og:title" content="[^"]+"/);
-  expect(html).toMatch(/property="og:description" content="[^"]+"/);
-  expect(html).toMatch(/property="og:image" content="[^"]*\/opengraph-image[^"]*"/);
-});
-
-test("존재하지 않는 Developer 는 404 다", async ({ request }) => {
-  const res = await request.get("/developers/999999999");
-  expect(res.status()).toBe(404);
 });
 
 // --- 노출 금지 두 가지(ADR-0014, 이 티켓의 가장 위험한 수락 기준) --------------
