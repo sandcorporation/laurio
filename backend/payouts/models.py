@@ -453,3 +453,20 @@ class Seller(models.Model):
         from verification.crypto import encrypt
 
         self.phone_number_encrypted = encrypt(value) if value else ""
+
+    def erase_contact(self) -> None:
+        """연락처(전화번호·이메일)를 비운다(#171, Withdrawal) — 등록 식별자
+        (`seller_id`)와 `status`는 건드리지 않는다. 지급이 끝나야 탈퇴할 수
+        있으므로(`Payout.Status.BLOCKS_DEVELOPER_WITHDRAWAL`) 이 값들은 이미
+        목적을 다한 개인정보다.
+
+        지울 필드 집합을 이 모델이 소유한다 — 호출부(`accounts.withdrawal`)가
+        필드 이름을 손으로 나열하면, 나중에 연락처 성격의 필드가 하나 늘어도
+        (예: 우편 주소) 그 호출부를 고치는 것을 잊을 수 있다. `updated_at`
+        을 `update_fields` 에 명시한다 — `auto_now`는 `update_fields`에 없는
+        필드는 갱신하지 않으므로, 여기서 빠뜨리면 연락처가 지워진 사실이
+        `updated_at`에 남지 않는다."""
+
+        self.phone_number_encrypted = ""
+        self.email = ""
+        self.save(update_fields=["phone_number_encrypted", "email", "updated_at"])

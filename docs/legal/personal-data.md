@@ -40,7 +40,7 @@ CI 로 본인확인이 들어오면 거부한다 — 성인으로 확인받아 �
 
 | 사건 | 무엇이 지워지는가 | 무엇이 남는가 | 코드 |
 | --- | --- | --- | --- |
-| **탈퇴** (Withdrawal) | CI·DI·전화번호·표시 이름·소개 즉시. 계정은 비활성화 | Contest·Submission·원장·Payout. 거래가 있었으면 실명·생년월일이 RetainedIdentity 로 | `backend/accounts/withdrawal.py` |
+| **탈퇴** (Withdrawal) | CI·DI·전화번호·표시 이름·소개 즉시. Seller(#50, ADR-0020)의 연락처(전화번호·이메일)도 즉시(#171). 계정은 비활성화 | Contest·Submission·원장·Payout. 거래가 있었으면 실명·생년월일이 RetainedIdentity 로. Seller 의 등록 식별자(`seller_id`)·상태는 과거 Payout 의 감사 추적을 위해 남는다. `TaxIdentity`(주민등록번호)는 별도 세무 보존 규칙이라 건드리지 않는다([tax.md](tax.md)) | `backend/accounts/withdrawal.py` |
 | **2년 무행위** | 신원만 (위와 같은 항목). 계정·로그인·Submission 은 그대로, 다음 행위 때 재확인 | 위와 같음 | `backend/accounts/dormancy.py` `DORMANCY_PERIOD` |
 | **보존 만료** (5년) | RetainedIdentity 행 | — | `retained-identity-purge` 스캔(`backend/accounts/dormancy.py`, Celery beat 가 등록부에서 파생해 돌린다) |
 
