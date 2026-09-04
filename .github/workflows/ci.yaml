@@ -314,10 +314,26 @@ jobs:
       - name: Beat publishes a due task and the worker executes it
         # beat -> 브로커 -> worker 경로 전체를 한 번에 증명한다. 태스크가
         # "succeeded" 로 끝났다는 것은 내부 API 호출까지 통했다는 뜻이다
-        # (토큰이 어긋나면 401 로 실패한다).
+        # (토큰이 어긋나면 401 로, 등록부 밖의 스캔 이름이면 404 로 실패해
+        # "succeeded" 로 끝나지 않는다).
+        #
+        # 찾는 태스크 이름은 core/tasks.py 에서 직접 읽는다 — 손으로 적으면
+        # 이번(#163)처럼 스캔 등록부 도입으로 태스크 이름이 바뀌어도 검사는
+        # 낡은 문자열을 찾은 채 조용히 상수가 된다. beat 스케줄은 등록부
+        # (`core.scans.SCAN_REGISTRY`)에서 파생되고 스캔마다 이 태스크 하나를
+        # 부르므로(#137), 이 이름이 succeeded 로 찍혔다는 것은 등록부의 스캔
+        # 중 하나가 실제로 beat -> 브로커 -> worker 경로를 타고 돈 것이다.
         run: |
+          TASK_NAME=$(docker compose -f docker/compose.dev.yaml exec -T celery-worker \
+            python -c "from core.tasks import run_scan; print(run_scan.name)" | tr -d '\r\n')
+          if [ -z "$TASK_NAME" ]; then
+            echo "core.tasks.run_scan 의 태스크 이름을 읽지 못했다"
+            exit 1
+          fi
+          echo "찾는 태스크: $TASK_NAME"
           for i in $(seq 1 40); do
-            if docker compose -f docker/compose.dev.yaml logs celery-worker                  | grep -q "core.call_scheduler_tick.*succeeded"; then
+            if docker compose -f docker/compose.dev.yaml logs celery-worker \
+                 | grep -q "${TASK_NAME}.*succeeded"; then
               echo "beat -> worker 경로 확인"; exit 0
             fi
             sleep 3
