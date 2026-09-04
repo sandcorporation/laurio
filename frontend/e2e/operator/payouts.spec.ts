@@ -217,7 +217,7 @@ test.describe("지급 큐 — 무엇에 막혀 있는가(#68, ADR-0020)", () => 
     await expect(page.getByTestId(`payout-row-${identityPayout.idempotency_key}`)).toHaveCount(0);
   });
 
-  test("큐가 비어 있으면 명시적으로 말한다 — 빈 박스가 아니다", async ({ page }) => {
+  test("@exclusive 큐가 비어 있으면 명시적으로 말한다 — 빈 박스가 아니다", async ({ page }) => {
     await clearE2eOperatorQueues();
 
     const operator = await seedE2eOperator();
@@ -247,7 +247,7 @@ test.describe("지급 큐 — 무엇에 막혀 있는가(#68, ADR-0020)", () => 
     await expect(page.getByTestId("payout-queue-list")).toHaveCount(0);
   });
 
-  test("홈의 두 지급 건수와 이 목록의 건수가 일치한다", async ({ page }) => {
+  test("@exclusive 홈의 두 지급 건수와 이 목록의 건수가 일치한다", async ({ page }) => {
     const operator = await seedE2eOperator();
     await loginAsOperator(page, operator.username);
 

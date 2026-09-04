@@ -467,7 +467,7 @@ test.describe("이의 심판 — 인용·기각과 감사 추적(#67)", () => {
     expect(await ledgerEntryCount(seeded.contest_id)).toBe(before + 1);
   });
 
-  test("심판 후 홈의 「심판 대기」 건수가 줄어든다", async ({ page }) => {
+  test("@exclusive 심판 후 홈의 「심판 대기」 건수가 줄어든다", async ({ page }) => {
     const operator = await seedE2eOperator();
     const seeded = await seedE2eOperatorAppeal();
 

@@ -124,3 +124,38 @@ def test_operator_queue_seed_requires_a_run_id(client):
 
     assert resp.status_code == 422, resp.content
     assert "run_id" in resp.json()["detail"]
+
+
+@pytest.mark.django_db
+def test_reseeding_an_operator_does_not_log_out_live_sessions(client):
+    """같은 계정을 다시 심어도 이미 로그인한 세션이 죽지 않는다 (#157).
+
+    이 명령은 「멱등하다」고 적혀 있지만 실제로는 매번 `set_password` 를 다시 불렀고,
+    Django 는 비밀번호가 바뀌면 세션 인증 해시로 그 계정의 **살아 있는 세션을 전부**
+    무효화한다. 직렬 실행에서는 프로세스당 한 번만 심어 드러나지 않았는데, e2e 를
+    워커 여럿으로 돌리면 옆 워커가 같은 공용 계정을 심는 순간 이쪽 세션이 죽는다 —
+    화면은 그저 로그인으로 튕기고, 원인은 이 명령이다.
+    """
+
+    from django.test import Client
+
+    username = "e2e-op-reseed-1"
+    password = "e2e-operator-pw-9134-xyz"
+    assert _post(client, "operator", {"username": username, "password": password}).status_code == 200
+
+    logged_in = Client()
+    login = logged_in.post(
+        "/api/operator/login",
+        data={"username": username, "password": password},
+        content_type="application/json",
+        HTTP_ORIGIN="http://testserver",
+    )
+    assert login.status_code == 200, login.content
+
+    # 옆 워커가 같은 계정을 다시 심는다.
+    assert _post(client, "operator", {"username": username, "password": password}).status_code == 200
+
+    still_alive = logged_in.get("/api/operator/me")
+    assert still_alive.status_code == 200, (
+        "다시 심었더니 이미 로그인한 세션이 죽었다 — 비밀번호를 바꿀 이유가 없는데 바꿨다"
+    )
