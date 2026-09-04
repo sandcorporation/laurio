@@ -18,7 +18,7 @@ from accounts.models import DeveloperProfile, PhoneContact, SponsorProfile, With
 from accounts.withdrawal import WithdrawalBlockReason
 from contests.models import Category, Contest, DeliverableType
 from core.models import ClockOverride
-from payouts.models import Payout
+from payouts.models import Payout, Seller
 from verification.models import RetainedIdentity, Verification
 
 WITHDRAWAL_URL = "/api/accounts/withdrawal"
@@ -216,6 +216,15 @@ def _submit_identity(client, dev: dict, idempotency_key: str, rrn="9001011234567
     return client.post(
         f"{PAYOUTS_URL}/{idempotency_key}/identity",
         data={"resident_registration_number": rrn},
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+
+
+def _submit_seller_contact(client, dev: dict, idempotency_key: str, *, phone_number, email):
+    return client.post(
+        f"{PAYOUTS_URL}/{idempotency_key}/seller-contact",
+        data={"phone_number": phone_number, "email": email},
         content_type="application/json",
         **_auth_header(dev["access"]),
     )
@@ -550,6 +559,78 @@ def test_developer_with_a_confirmed_payout_can_withdraw_and_real_name_is_retaine
     retained = RetainedIdentity.objects.get(user=user)
     assert retained.reason == RetainedIdentity.Reason.DEVELOPER_CONFIRMED_PAYOUT
     assert retained.retained_because_id == payout.id
+
+
+@pytest.mark.django_db
+def test_withdrawal_erases_seller_contact_but_keeps_seller_id_and_status(
+    client, category, landing_type
+):
+    """탈퇴가 Seller 의 연락처(전화번호·이메일)도 지운다 — `seller_id` 와 상태는
+    남긴다(#171). 지급이 끝나야 탈퇴할 수 있으므로 그 값들은 이미 목적을 다한
+    개인정보다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(
+        client, category, landing_type, sponsor_uid="seller-erase-sponsor", dev_uid="seller-erase-dev"
+    )
+    requested = _request_payout(client, dev, contest["id"])
+    contact_resp = _submit_seller_contact(
+        client, dev, requested["idempotency_key"],
+        phone_number="01099998888", email="payout@example.com",
+    )
+    assert contact_resp.status_code == 200
+    _confirm_payout(client, dev, requested["idempotency_key"])
+    _submit_identity(client, dev, requested["idempotency_key"])
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    developer_id = payout.handover.award.submission.developer_id
+    seller_before = Seller.objects.get(developer_id=developer_id)
+    assert seller_before.phone_number == "01099998888"
+    assert seller_before.email == "payout@example.com"
+    seller_id_before = seller_before.seller_id
+    status_before = seller_before.status
+    updated_at_before = seller_before.updated_at
+    assert seller_id_before  # Fake 어댑터가 즉시 발급한다.
+
+    header = _auth_header(dev["access"])
+    response = client.post(WITHDRAWAL_URL, content_type="application/json", **header)
+    assert response.status_code == 200, response.content
+
+    seller_after = Seller.objects.get(developer_id=developer_id)
+    assert seller_after.phone_number == ""
+    assert seller_after.email == ""
+    assert "01099998888" not in seller_after.phone_number_encrypted
+    # 등록 식별자와 상태는 남는다 — 과거 Payout 의 감사 추적과 연결돼 있다(ADR-0025).
+    assert seller_after.seller_id == seller_id_before
+    assert seller_after.status == status_before
+    # 연락처가 지워진 사실이 updated_at 에도 남는다 — update_fields 에서
+    # 빠뜨리면(auto_now 는 명시된 필드에만 적용된다) 이 파기가 조용해진다.
+    assert seller_after.updated_at > updated_at_before
+
+    # TaxIdentity(주민등록번호)는 건드리지 않는다 — 세무 보존 의무가 걸린 값이라
+    # 연락처와 같은 규칙으로 다루지 않는다(#171, #167 Out of Scope).
+    tax_identity = payout.tax_identity
+    assert tax_identity.resident_registration_number_encrypted != ""
+
+
+@pytest.mark.django_db
+def test_withdrawal_without_a_seller_is_not_broken_by_the_new_step(client, category, landing_type):
+    """Seller 가 없는 Developer(DeveloperProfile 은 있지만 Payout 을 아예 받은
+    적 없는 사람)의 탈퇴가 이 변경으로 깨지지 않는다(#171)."""
+
+    dev = _verified_user(client, "no-seller-dev", "no-seller-dev-ci")
+    header = _auth_header(dev["access"])
+    # DeveloperProfile 을 지연 생성한다 — Seller 는 여전히 없다.
+    profile_resp = client.post(
+        "/api/accounts/developer-profile",
+        data={},
+        content_type="application/json",
+        **header,
+    )
+    assert profile_resp.status_code == 200
+    assert not Seller.objects.exists()
+
+    response = client.post(WITHDRAWAL_URL, content_type="application/json", **header)
+    assert response.status_code == 200, response.content
 
 
 @pytest.mark.django_db

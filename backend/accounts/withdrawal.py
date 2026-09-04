@@ -2,8 +2,11 @@
 
 `Withdrawal`은 Developer나 Sponsor가 자기 신원을 파기하고 계정을 닫는 것이다.
 계정 행은 지우지 않는다 — `User.is_active = False`로 로그인만 막는다. 지우는
-것은 값이다: CI·DI·전화번호·표시 이름·소개가 즉시 사라지고, 실명·생년월일은
-거래가 있었던 사람에 한해 `RetainedIdentity`로 옮겨 남는다(#101).
+것은 값이다: CI·DI·전화번호·표시 이름·소개가 즉시 사라지고, Developer 라면
+`payouts.models.Seller`의 연락처(전화번호·이메일)도 함께 사라진다(#171) —
+`seller_id`와 상태는 남긴다(과거 Payout의 감사 추적, ADR-0025의 "신원은
+지우되 계정은 남긴다"와 같은 선). 실명·생년월일은 거래가 있었던 사람에 한해
+`RetainedIdentity`로 옮겨 남는다(#101).
 
 **두 가지 다른 질문이 이 모듈에 섞여 있지 않다.**
 
@@ -234,6 +237,20 @@ def execute_withdrawal(user) -> Withdrawal:
         developer_profile.display_name = ""
         developer_profile.bio = ""
         developer_profile.save(update_fields=["display_name", "bio"])
+
+        # Seller(#50, ADR-0020)의 연락처도 목적을 다한 개인정보다(#171) — 지급이
+        # 끝나야 탈퇴할 수 있으므로(BLOCKS_DEVELOPER_WITHDRAWAL) 이 값들이 앞으로
+        # 다시 쓰일 일이 없다. 지울 필드 집합은 `Seller.erase_contact()` 가
+        # 소유한다 — `seller_id`와 `status`는 그 메서드가 건드리지 않는다(남긴다)
+        # — 지급대행사에 있는 수취인 등록의 외부 참조라 과거 Payout의 감사
+        # 추적과 연결돼 있다(ADR-0025 "신원은 지우되 계정은 남긴다"와 같은 선).
+        # `TaxIdentity.resident_registration_number_encrypted`는 **건드리지
+        # 않는다** — 세무 보존 의무가 걸린 값이라 연락처와 같은 규칙으로 다룰
+        # 수 없다(#167 Out of Scope). 보존 기간과 파기 주체는 별도의 세무 정책
+        # 결정이다.
+        seller = getattr(developer_profile, "seller", None)
+        if seller is not None:
+            seller.erase_contact()
 
     user.is_active = False
     user.save(update_fields=["is_active"])

@@ -103,27 +103,51 @@ def _all_combinations():
             for seller_status in _SELLER_STATUSES:
                 for has_identity in (False, True):
                     for has_phone in (False, True):
-                        if seller_status is None and has_phone:
-                            continue  # Seller 가 없으면 전화번호도 없다
-                        yield status, transfer_status, seller_status, has_identity, has_phone
+                        for has_email in (False, True):
+                            if seller_status is None and (has_phone or has_email):
+                                continue  # Seller 가 없으면 연락처도 없다
+                            yield (
+                                status,
+                                transfer_status,
+                                seller_status,
+                                has_identity,
+                                has_phone,
+                                has_email,
+                            )
 
 
 def test_blocked_on_q_and_hold_of_agree_on_every_combination():
-    """두 표현이 모든 조합에서 같은 답을 낸다 (#149).
+    """두 표현이 모든 조합에서 같은 답을 낸다 (#149, #168 이 이메일 축을 더한다).
 
     `blocked_on` 갈래는 서로소이고 빠짐이 없어야 한다 — 어떤 조합이든 정확히 하나의
     Q 가 고른다. 하나도 고르지 않으면 그 Payout 은 어느 큐에도 뜨지 않고(운영자 눈에서
     사라진다), 둘이 고르면 같은 행이 두 큐에 뜬다.
+
+    이메일 유무는 거친 축(`blocked_on`) 자체를 갈라 새 SQL 조건을 요구하지 않는다 —
+    `HoldKind.SELLER_CONTACT`(전화번호든 이메일이든 연락처 미제출)도 여전히
+    `blocked_on == "seller"` 하나로만 떨어진다(#168). 그래도 이 테스트에 이메일
+    축을 더하는 이유는, `hold_of` 의 파이썬 판정이 이메일 하나만 없는 조합에서
+    실수로 "seller" 밖(예: 없는 갈래)으로 새지 않는다는 것을 SQL 쪽과 나란히
+    증명하기 위해서다.
     """
 
     checked = 0
-    for status, transfer_status, seller_status, has_identity, has_phone in _all_combinations():
+    for (
+        status,
+        transfer_status,
+        seller_status,
+        has_identity,
+        has_phone,
+        has_email,
+    ) in _all_combinations():
         payout = Payout(status=status, transfer_status=transfer_status)
         seller = None
         if seller_status is not None:
             seller = Seller(status=seller_status)
             if has_phone:
                 seller.phone_number = "01012345678"
+            if has_email:
+                seller.email = "dev@example.com"
 
         expected = hold_of(payout, seller=seller, has_identity=has_identity).blocked_on
         facts = {
@@ -138,7 +162,7 @@ def test_blocked_on_q_and_hold_of_agree_on_every_combination():
         ]
         label = (
             f"status={status!r} transfer={transfer_status!r} seller={seller_status!r} "
-            f"identity={has_identity!r} phone={has_phone!r}"
+            f"identity={has_identity!r} phone={has_phone!r} email={has_email!r}"
         )
         assert selected_by == [expected], (
             f"{label}: hold_of 는 {expected!r} 인데 Q 는 {selected_by!r} 을 골랐다 — "
@@ -147,8 +171,9 @@ def test_blocked_on_q_and_hold_of_agree_on_every_combination():
         checked += 1
 
     # 조합을 실제로 다 돌았는지 — 생성기가 조용히 비면 이 테스트는 아무것도 증명하지
-    # 않는다. status 6 × 실이체 2 × 신원 2 × (Seller 없음 1 + Seller 6종 × 전화 2) = 312.
-    assert checked == 312, checked
+    # 않는다. status 6 × 실이체 2 × 신원 2 × (Seller 없음 1 + Seller 6종 × 전화 2 ×
+    # 이메일 2) = 600.
+    assert checked == 600, checked
 
 
 def test_blocked_q_is_exactly_the_complement_of_unblocked():
@@ -157,7 +182,7 @@ def test_blocked_q_is_exactly_the_complement_of_unblocked():
 
     from payouts.progress import blocked_q
 
-    for status, transfer_status, seller_status, has_identity, _phone in _all_combinations():
+    for status, transfer_status, seller_status, has_identity, _phone, _email in _all_combinations():
         facts = {
             "status": status,
             "transfer_status": transfer_status,

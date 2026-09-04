@@ -102,7 +102,7 @@ Developer가 Payout을 받기 위해 지급대행사(토스)에 등록되는 수
 _Avoid_: 셀러(한글 음역을 개념 이름처럼 쓰는 것), 정산 계좌, Merchant, Payee
 
 **Hold**:
-확정된 Payout 을 지금 붙들고 있는 것(신원 미제출 · Seller 의 전화번호·본인인증·심사·거절 · 실이체 실패)과 그것을 풀 차례가 누구에게 있는가(Developer · 지급대행사 · Operator). 신원이 실이체보다 앞서고, 정의되지 않은 조합은 Operator 의 차례다 — 돈은 움직이지 않고 사람이 본다.
+확정된 Payout 을 지금 붙들고 있는 것(신원 미제출 · Seller 의 연락처(전화번호·이메일)·본인인증·심사·거절 · 실이체 실패)과 그것을 풀 차례가 누구에게 있는가(Developer · 지급대행사 · Operator). 신원이 실이체보다 앞서고, 정의되지 않은 조합은 Operator 의 차례다 — 돈은 움직이지 않고 사람이 본다.
 _Avoid_: blocked_on(운영자 API 필드 이름일 뿐), 대기 상태(무엇을 기다리는지가 빠진다), 블로커, Pending, Blocker
 
 **Distribution**:

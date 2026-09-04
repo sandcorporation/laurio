@@ -23,27 +23,57 @@ class NotificationType(models.TextChoices):
     # 기록에 대해 세운 것과 같은 이유 — 운영자 신원을 참가자에게 흘리지 않는다).
     APPEAL_RULED = "appeal_ruled", "이의 심판 완료"
     NEW_CONTEST_IN_CATEGORY = "new_contest_in_category", "관심 Category 신규 Contest"
+    # `Hold`(CONTEXT.md)의 차례가 Developer 로 바뀐 Payout 을 알린다(#169) — 주민등록번호
+    # 제출 · 연락처 제출 · 지급대행사의 본인인증 문자 · 실이체 재시도 넷 전부 이 유형
+    # 하나다. 어느 `Hold` 인지는 유형이 아니라 알림의 context 로 싣는다(payouts.progress.
+    # HoldKind) — 상태마다 유형을 만들면 Hold → 문구 규칙이 두 곳에 생긴다(#130 이 세
+    # 렌더러에서 하나로 모은 것을 다시 쪼개는 셈이다).
+    PAYOUT_AWAITS_YOU = "payout_awaits_you", "지급이 당신을 기다린다"
 
 
-# 유형별 거래성/광고성 플래그. 광고성(is_promotional=True)은 옵트인 없이 발송되지
-# 않는다(ADR-0010). 거래성/광고성은 배타적이지 않게 둘 다 갖는 구조도 가능하지만,
-# 지금 정의된 유형들은 전부 어느 한쪽으로만 떨어진다.
+# 유형별 거래성/광고성/야간유예 플래그. 광고성(is_promotional=True)은 옵트인 없이
+# 발송되지 않는다(ADR-0010). 거래성/광고성은 배타적이지 않게 둘 다 갖는 구조도
+# 가능하지만, 지금 정의된 유형들은 전부 어느 한쪽으로만 떨어진다.
+#
+# `is_quiet_hours_exempt`(#169, ADR-0010 개정)는 야간(21~08시) 전면 유예의 예외를
+# 여는 유일한 자리다 — 호출부(`create_notification` 을 부르는 자리)가 발송할 때마다
+# "이건 급하다"고 주장할 수 있게 하지 않는다. 예외를 받는 것은 `PAYOUT_AWAITS_YOU`
+# 하나뿐이다.
 NOTIFICATION_TYPE_FLAGS: dict[str, dict[str, bool]] = {
-    NotificationType.DEADLINE_REMINDER: {"is_transactional": True, "is_promotional": False},
+    NotificationType.DEADLINE_REMINDER: {
+        "is_transactional": True, "is_promotional": False, "is_quiet_hours_exempt": False,
+    },
     NotificationType.JUDGING_PERIOD_ENDING_REMINDER: {
         "is_transactional": True,
         "is_promotional": False,
+        "is_quiet_hours_exempt": False,
     },
     NotificationType.DISTRIBUTION_FINAL_WARNING: {
         "is_transactional": True,
         "is_promotional": False,
+        "is_quiet_hours_exempt": False,
     },
-    NotificationType.RESULT_NOTICE: {"is_transactional": True, "is_promotional": False},
+    NotificationType.RESULT_NOTICE: {
+        "is_transactional": True, "is_promotional": False, "is_quiet_hours_exempt": False,
+    },
     # 둘 다 거래성이다 — 참가자가 낸 것에 대한 처리 결과이지 광고가 아니므로
     # 옵트인이 필요 없다(ADR-0010).
-    NotificationType.SCORING_COMPLETE: {"is_transactional": True, "is_promotional": False},
-    NotificationType.APPEAL_RULED: {"is_transactional": True, "is_promotional": False},
-    NotificationType.NEW_CONTEST_IN_CATEGORY: {"is_transactional": False, "is_promotional": True},
+    NotificationType.SCORING_COMPLETE: {
+        "is_transactional": True, "is_promotional": False, "is_quiet_hours_exempt": False,
+    },
+    NotificationType.APPEAL_RULED: {
+        "is_transactional": True, "is_promotional": False, "is_quiet_hours_exempt": False,
+    },
+    NotificationType.NEW_CONTEST_IN_CATEGORY: {
+        "is_transactional": False, "is_promotional": True, "is_quiet_hours_exempt": False,
+    },
+    # 유일한 예외(#169, ADR-0010 개정) — 광고성 옵트인과 무관하게(거래성) 발송되고,
+    # 야간에도 즉시 나간다. ADR-0010 자신이 전면 차단을 "의도적 초과 준수"라 적었고
+    # 정보통신망법의 야간 제한은 광고성에만 걸리므로, 법적 요구를 낮추는 것이 아니라
+    # 스스로 얹은 여유분을 이 유형 하나에서만 거두는 것이다.
+    NotificationType.PAYOUT_AWAITS_YOU: {
+        "is_transactional": True, "is_promotional": False, "is_quiet_hours_exempt": True,
+    },
 }
 
 

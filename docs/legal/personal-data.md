@@ -40,7 +40,7 @@ CI 로 본인확인이 들어오면 거부한다 — 성인으로 확인받아 �
 
 | 사건 | 무엇이 지워지는가 | 무엇이 남는가 | 코드 |
 | --- | --- | --- | --- |
-| **탈퇴** (Withdrawal) | CI·DI·전화번호·표시 이름·소개 즉시. 계정은 비활성화 | Contest·Submission·원장·Payout. 거래가 있었으면 실명·생년월일이 RetainedIdentity 로 | `backend/accounts/withdrawal.py` |
+| **탈퇴** (Withdrawal) | CI·DI·전화번호·표시 이름·소개 즉시. Seller(#50, ADR-0020)의 연락처(전화번호·이메일)도 즉시(#171). 계정은 비활성화 | Contest·Submission·원장·Payout. 거래가 있었으면 실명·생년월일이 RetainedIdentity 로. Seller 의 등록 식별자(`seller_id`)·상태는 과거 Payout 의 감사 추적을 위해 남는다. `TaxIdentity`(주민등록번호)는 별도 세무 보존 규칙이라 건드리지 않는다([tax.md](tax.md)) | `backend/accounts/withdrawal.py` |
 | **2년 무행위** | 신원만 (위와 같은 항목). 계정·로그인·Submission 은 그대로, 다음 행위 때 재확인 | 위와 같음 | `backend/accounts/dormancy.py` `DORMANCY_PERIOD` |
 | **보존 만료** (5년) | RetainedIdentity 행 | — | `retained-identity-purge` 스캔(`backend/accounts/dormancy.py`, Celery beat 가 등록부에서 파생해 돌린다) |
 
@@ -107,6 +107,14 @@ Notification 은 거래성과 광고성으로 나뉘고 **광고성만 사전 �
 아니라 다음 날 08시 발송, [ADR-0010](../adr/0010-quiet-hours-defer-not-drop.md)).
 민감 시간대 민원을 없애기 위한 의도적 초과 준수다. 반드시 닿아야 하는 통지
 (Distribution 최종 경고)는 애초에 낮 시각 고정 발송으로 잡는다.
+
+**예외가 하나 있다(#169).** `Hold` 의 차례가 Developer 로 바뀐 지급 알림("지급이
+당신을 기다린다" — 주민등록번호 제출 · 연락처 제출 · 지급대행사의 본인인증 문자 ·
+실이체 재시도)은 야간에도 즉시 나간다 — 정보통신망법의 야간 제한이 애초에 광고성
+에만 걸리므로 법적 요구를 낮추는 것이 아니라, 스스로 얹은 여유분을 이 유형 하나에서
+거두는 것이다(ADR-0010 개정). 예외를 받는 유형은 이것 하나뿐이고, 그 답은
+`NOTIFICATION_TYPE_FLAGS` 의 `is_quiet_hours_exempt` 표 한 곳에만 있다 — 호출부가
+발송할 때마다 "이건 급하다"고 주장할 수 없다.
 
 도달 여부와 무관하게 발송 이력이 통지의 증거다(ADR-0009) — 채널별 발송 시각·결과·
 실패 사유를 전부 보존하고 Sponsor 화면에도 노출한다. 이 발신주의가 약관에서

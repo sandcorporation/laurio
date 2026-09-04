@@ -12,6 +12,9 @@
   `payout.changed` 웹훅. 서명이 없거나 틀리면 거부한다.
 - `POST /payouts/{idempotency_key}/identity` — 지급이 확정된(CONFIRMED_IDENTITY_
   PENDING 이상) 뒤에만 Developer가 주민등록번호를 제출한다.
+- `POST /payouts/{idempotency_key}/seller-contact` — 토스 셀러 등록에 필요한
+  연락처(전화번호·이메일)를 제출한다(#168). 부분 제출을 허용한다 — 옛 전화번호
+  전용 경로(`seller-phone`)를 넓힌 것이라 그 경로는 남기지 않는다.
 - `POST /payouts/{idempotency_key}/seller-registration` — CONFIRMED_SELLER_
   PENDING에서 Seller 등록을 다시 시도한다(#50). 실물 어댑터가 붙기 전까지는
   fake 시나리오 재현용이기도 하다.
@@ -53,10 +56,10 @@ from .progress import (
     Hold,
     HoldKind,
     advance,
-    assert_covers_all_kinds,
     blocked_on_q,
     blocked_q,
     hold_of,
+    next_action_message,
     with_blocked_on,
     with_hold_facts,
 )
@@ -71,7 +74,7 @@ from .schemas import (
     OperatorPayoutOut,
     OperatorPayoutPageOut,
     PayoutOut,
-    SellerPhoneSubmitIn,
+    SellerContactSubmitIn,
     SellerRegistrationRetryIn,
     SellerWebhookOut,
     WebhookIn,
@@ -83,7 +86,7 @@ from .services import (
     resolve_transfer_webhook,
     retry_seller_registration,
     submit_identity,
-    submit_seller_phone,
+    submit_seller_contact,
 )
 
 router = Router(tags=["payouts"])
@@ -108,61 +111,6 @@ _SELLER_STATUS_RANK = {
 }
 
 
-# 다음 행동 안내(#50 AC — "Developer가 자기 Payout이 무엇을 기다리는지와 다음에
-# 무엇을 해야 하는지 볼 수 있다"). 판정은 `payouts.progress.hold_of` 가 하고(#130), 여기는
-# Hold → 사람이 읽을 문장의 번역표다 — 침묵은 상금이 사라진 것으로 읽힌다.
-_NEXT_ACTION_MESSAGES: dict[HoldKind, str] = {
-    HoldKind.REQUESTED: "지급 확인 절차가 진행 중입니다. 잠시만 기다려주세요.",
-    HoldKind.IDENTITY: "세무 신고를 위해 주민등록번호를 제출해주세요.",
-    HoldKind.IDENTITY_RECORDED: "세무 신고를 위해 주민등록번호를 제출해주세요.",
-    HoldKind.SELLER_PHONE: "지급대행사 수취인 등록에 전화번호가 필요합니다 — 아래에서 제출해주세요.",
-    HoldKind.SELLER_AUTH: (
-        "지급대행사(토스페이먼츠)가 보낸 본인인증 문자로 인증을 완료해주세요 — "
-        "이미 본인확인을 하셨더라도 지급대행사 자체 의무라 다시 인증이 "
-        "필요합니다. 인증이 끝나면 자동으로 다음 단계로 넘어갑니다."
-    ),
-    HoldKind.SELLER_REVIEW: (
-        "지급대행사 심사가 진행 중입니다(주간 지급 한도 초과 또는 추가 확인 "
-        "요청) — 상금은 안전하게 보관되어 있으며 심사가 끝나면 자동으로 다음 "
-        "단계로 넘어갑니다."
-    ),
-    HoldKind.SELLER_REJECTED: (
-        "지급대행사 수취인 등록이 거절되었습니다. 상금은 원장에 그대로 "
-        "남아 있습니다 — 운영자에게 문의해주세요."
-    ),
-    HoldKind.SELLER_PENDING: "지급대행사 수취인 등록이 진행 중입니다. 완료되면 자동으로 다음 단계로 넘어갑니다.",
-    HoldKind.TRANSFER_CONFIRMING: "실이체 확인이 진행 중입니다. 잠시만 기다려주세요.",
-    HoldKind.TRANSFER_RETRY: (
-        "지급대행사 등록은 끝났지만 실제 이체가 거절되었습니다 — 상금은 "
-        "원장에 그대로 남아 있습니다. 아래에서 다시 시도해주세요."
-    ),
-    HoldKind.TRANSFER_RETRY_IDENTITY_RECORDED: (
-        "실제 이체가 실패로 확인되었습니다 — 상금은 원장에 그대로 남아 "
-        "있습니다. 세무 신고를 위한 주민등록번호는 계속 제출해주세요."
-    ),
-    HoldKind.TRANSFER_OPERATOR: (
-        "지급이 확정되었지만 실제 이체가 실패로 확인되었습니다 — 상금은 "
-        "원장에 그대로 남아 있습니다. 운영자가 확인 후 다시 진행합니다."
-    ),
-    HoldKind.COMPLETE: "지급이 완료되었습니다.",
-    HoldKind.FAILED: "지급 요청이 실패했습니다. 다시 시도해주세요.",
-    HoldKind.UNKNOWN: "지급 상태를 확인하는 중입니다. 운영자가 확인 후 안내드립니다.",
-}
-assert_covers_all_kinds(_NEXT_ACTION_MESSAGES, name="_NEXT_ACTION_MESSAGES")
-
-# 신원 미제출 상태에서 실이체 실패도 함께 확인된 경우 — 신원 제출을 막을 이유는 없지만
-# (독립적인 두 축), 실이체가 실패했다는 사실을 감추지 않는다(#57 코드리뷰 지적 4).
-_IDENTITY_AFTER_TRANSFER_FAILURE_MESSAGE = _NEXT_ACTION_MESSAGES[
-    HoldKind.TRANSFER_RETRY_IDENTITY_RECORDED
-]
-
-
-def _next_action_message(hold: Hold) -> str:
-    if hold.kind is HoldKind.IDENTITY and hold.transfer_failed:
-        return _IDENTITY_AFTER_TRANSFER_FAILURE_MESSAGE
-    return _NEXT_ACTION_MESSAGES[hold.kind]
-
-
 def _serialize(payout: Payout) -> PayoutOut:
     seller = payout.seller
     has_identity = TaxIdentity.objects.filter(payout=payout).exists()
@@ -178,8 +126,9 @@ def _serialize(payout: Payout) -> PayoutOut:
         transfer_status=payout.transfer_status,
         has_identity=has_identity,
         has_seller_phone=bool(seller is not None and seller.phone_number),
+        has_seller_email=bool(seller is not None and seller.email),
         seller_status=seller.status if seller is not None else None,
-        next_action_message=_next_action_message(hold),
+        next_action_message=next_action_message(hold),
         created_at=payout.created_at,
     )
 
@@ -408,24 +357,34 @@ def retry_payout_seller_registration(
 
 
 @router.post(
-    "/payouts/{idempotency_key}/seller-phone",
-    response={200: PayoutOut, 403: ErrorOut, 404: ErrorOut},
+    "/payouts/{idempotency_key}/seller-contact",
+    response={200: PayoutOut, 403: ErrorOut, 404: ErrorOut, 422: ErrorOut},
     auth=jwt_auth,
 )
-def submit_payout_seller_phone(
-    request: HttpRequest, idempotency_key: UUID, payload: SellerPhoneSubmitIn
+def submit_payout_seller_contact(
+    request: HttpRequest, idempotency_key: UUID, payload: SellerContactSubmitIn
 ):
     """토스 셀러 등록(businessType=INDIVIDUAL)의 individual 객체가 요구하는
-    전화번호를 제출한다(#57 추가 인수조건).
+    연락처(전화번호·이메일)를 제출한다(#57 추가 인수조건, #168 이 이메일까지 넓힌다).
+
+    옛 전화번호 전용 경로(`seller-phone`)를 이 경로 하나로 합쳤다 — 소비자가
+    우리 프론트뿐이라 옛 경로를 남기지 않는다(#153 과 같은 규율). **부분 제출을
+    허용한다** — 전화번호만, 이메일만 내도 낸 것은 보존된다(둘 다 생략하면
+    422 다).
 
     `submit_payout_identity`와 달리 Payout 상태를 확인하지 않는다 — Seller는
-    Developer 단위 개념이라 전화번호도 마찬가지다(Payout이 아직 REQUESTED여도
+    Developer 단위 개념이라 연락처도 마찬가지다(Payout이 아직 REQUESTED여도
     미리 받아 둘 수 있다). 저장 직후 CONFIRMED_SELLER_PENDING에 머물던 같은
-    Developer의 Payout이 있으면 곧바로 재시도한다(`submit_seller_phone`).
+    Developer의 Payout이 있으면 곧바로 재시도한다(`submit_seller_contact`).
     """
 
+    if payload.phone_number is None and payload.email is None:
+        raise HttpError(422, "전화번호나 이메일 중 하나는 제출해야 합니다.")
+
     payout = _get_owned_payout(request, idempotency_key)
-    submit_seller_phone(payout.developer, payload.phone_number)
+    submit_seller_contact(
+        payout.developer, phone_number=payload.phone_number, email=payload.email
+    )
 
     payout.refresh_from_db()
     return 200, _serialize(payout)

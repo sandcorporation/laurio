@@ -1741,20 +1741,34 @@ def test_second_payout_does_not_reregister_when_seller_is_approved(client, categ
     assert seller_id_after_second == seller_id_after_first
 
 
-# --- #57: 전화번호 제출 -----------------------------------------------------------------
+# --- #57/#168: 연락처(전화번호·이메일) 제출 --------------------------------------------
+
+
+def _submit_seller_contact(client, dev, idempotency_key, *, phone_number=None, email=None):
+    body = {}
+    if phone_number is not None:
+        body["phone_number"] = phone_number
+    if email is not None:
+        body["email"] = email
+    return client.post(
+        f"{PAYOUTS_URL}/{idempotency_key}/seller-contact",
+        data=body,
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
 
 
 @pytest.mark.django_db
-def test_seller_phone_submission_stores_encrypted_value(client, category, landing_type):
+def test_seller_contact_submission_stores_encrypted_phone_and_plaintext_email(
+    client, category, landing_type
+):
     sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
     requested = _request_payout(client, dev, contest["id"])
     _confirm_payout(client, dev, requested["idempotency_key"])
 
-    resp = client.post(
-        f"{PAYOUTS_URL}/{requested['idempotency_key']}/seller-phone",
-        data={"phone_number": "01055556666"},
-        content_type="application/json",
-        **_auth_header(dev["access"]),
+    resp = _submit_seller_contact(
+        client, dev, requested["idempotency_key"],
+        phone_number="01055556666", email="payout@example.com",
     )
     assert resp.status_code == 200
 
@@ -1762,16 +1776,50 @@ def test_seller_phone_submission_stores_encrypted_value(client, category, landin
     developer_id = payout.handover.award.submission.developer_id
     seller = Seller.objects.get(developer_id=developer_id)
     assert seller.phone_number == "01055556666"
-    # DB 컬럼 자체는 평문이 아니어야 한다(TaxIdentity와 같은 원칙).
+    # DB 컬럼 자체는 평문이 아니어야 한다(TaxIdentity와 같은 원칙) — 이메일은
+    # 반대로 평문이어야 한다(#168 구현 결정: 로그인 계정 이메일과 같은 취급).
     assert "01055556666" not in seller.phone_number_encrypted
+    assert seller.email == "payout@example.com"
 
 
 @pytest.mark.django_db
-def test_seller_phone_submission_retries_registration_when_seller_pending(
+def test_seller_contact_partial_submission_preserves_what_was_already_given(
     client, category, landing_type
 ):
-    """Seller 등록이 대기 중이었다면(#50 심사 대기 시나리오), 전화번호 제출
-    직후 곧바로 재시도된다 — Developer가 전화번호를 낸 뒤 별도로 "다시 시도"
+    """전화번호만, 이메일만 내도 낸 것은 보존된다(#168) — 한 번에 둘 다 못 낸다고
+    이미 낸 쪽까지 버릴 이유가 없다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"])
+
+    resp = _submit_seller_contact(
+        client, dev, requested["idempotency_key"], phone_number="01055556666"
+    )
+    assert resp.status_code == 200
+    assert resp.json()["has_seller_phone"] is True
+    assert resp.json()["has_seller_email"] is False
+
+    resp2 = _submit_seller_contact(
+        client, dev, requested["idempotency_key"], email="payout@example.com"
+    )
+    assert resp2.status_code == 200
+    assert resp2.json()["has_seller_phone"] is True
+    assert resp2.json()["has_seller_email"] is True
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    developer_id = payout.handover.award.submission.developer_id
+    seller = Seller.objects.get(developer_id=developer_id)
+    assert seller.phone_number == "01055556666"
+    assert seller.email == "payout@example.com"
+
+
+@pytest.mark.django_db
+def test_seller_contact_submission_retries_registration_when_seller_pending(
+    client, category, landing_type
+):
+    """Seller 등록이 대기 중이었다면(#50 심사 대기 시나리오), 연락처 제출
+    직후 곧바로 재시도된다 — Developer가 연락처를 내고 나서 별도로 "다시 시도"
     버튼을 또 눌러야 한다면 그 자체가 침묵으로 읽힌다."""
 
     sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
@@ -1781,40 +1829,71 @@ def test_seller_phone_submission_retries_registration_when_seller_pending(
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
     assert payout.status == Payout.Status.CONFIRMED_SELLER_PENDING
 
-    resp = client.post(
-        f"{PAYOUTS_URL}/{requested['idempotency_key']}/seller-phone",
-        data={"phone_number": "01055556666"},
-        content_type="application/json",
-        **_auth_header(dev["access"]),
+    resp = _submit_seller_contact(
+        client, dev, requested["idempotency_key"],
+        phone_number="01055556666", email="payout@example.com",
     )
     assert resp.status_code == 200
     body = resp.json()
-    # FakeSellerAdapter는 phone_number를 쓰지 않으므로 재시도의 시나리오는
+    # FakeSellerAdapter는 이 값들을 쓰지 않으므로 재시도의 시나리오는
     # 기본값(성공)이다 — 곧바로 다음 단계로 넘어간다.
     assert body["status"] == "confirmed_identity_pending"
 
 
 @pytest.mark.django_db
-def test_seller_phone_rejects_malformed_value(client, category, landing_type):
+def test_seller_contact_rejects_malformed_phone(client, category, landing_type):
     sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
     requested = _request_payout(client, dev, contest["id"])
     _confirm_payout(client, dev, requested["idempotency_key"])
 
-    resp = client.post(
-        f"{PAYOUTS_URL}/{requested['idempotency_key']}/seller-phone",
-        data={"phone_number": "abc"},
-        content_type="application/json",
-        **_auth_header(dev["access"]),
-    )
+    resp = _submit_seller_contact(client, dev, requested["idempotency_key"], phone_number="abc")
     assert resp.status_code == 422
 
 
 @pytest.mark.django_db
-def test_next_action_message_asks_for_phone_when_seller_row_has_none(
+def test_seller_contact_rejects_empty_submission(client, category, landing_type):
+    """둘 다 안 내면 422 다 — 아무것도 안 낸 요청은 「낸 것을 보존한다」의 대상이
+    아니다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"])
+
+    resp = _submit_seller_contact(client, dev, requested["idempotency_key"])
+    assert resp.status_code == 422
+
+
+@pytest.mark.django_db
+def test_seller_contact_empty_string_email_is_rejected_not_treated_as_omitted(
     client, category, landing_type
 ):
-    """PENDING이면서 전화번호도 없으면 "우리가 응답을 기다린다"가 아니라
-    "Developer가 낼 것이 있다"는 뜻이어야 한다(#57 추가 인수조건) — 실물
+    """`email=""` 은 "안 보냄"(None)과 같이 취급되지 않는다(코드리뷰 지적) —
+    허용하면 이미 낸 이메일을 빈 값으로 조용히 지워, 부분 제출이 "낸 것을
+    보존한다"는 약속과 정반대가 된다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"])
+
+    first = _submit_seller_contact(client, dev, requested["idempotency_key"], email="a@example.com")
+    assert first.status_code == 200
+    assert first.json()["has_seller_email"] is True
+
+    resp = _submit_seller_contact(client, dev, requested["idempotency_key"], email="")
+    assert resp.status_code == 422
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    developer_id = payout.handover.award.submission.developer_id
+    seller = Seller.objects.get(developer_id=developer_id)
+    assert seller.email == "a@example.com"
+
+
+@pytest.mark.django_db
+def test_next_action_message_asks_for_contact_when_seller_row_has_none(
+    client, category, landing_type
+):
+    """PENDING이면서 연락처(전화번호·이메일)도 없으면 "우리가 응답을 기다린다"가
+    아니라 "Developer가 낼 것이 있다"는 뜻이어야 한다(#57 추가 인수조건) — 실물
     어댑터가 이 상태에 실제로 머무는 경로는 `test_payouts_toss_adapter.py`가
     이미 검증했으므로, 여기서는 그 상태에서 화면 문구가 올바른지만 확인한다."""
 
@@ -1824,7 +1903,7 @@ def test_next_action_message_asks_for_phone_when_seller_row_has_none(
 
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
     developer_id = payout.handover.award.submission.developer_id
-    # 실물 어댑터가 전화번호 없이 PENDING에 머무는 상황을 흉내낸다 — Fake는
+    # 실물 어댑터가 연락처 없이 PENDING에 머무는 상황을 흉내낸다 — Fake는
     # 이 상태를 직접 만들 시나리오가 없으므로(#50 네 시나리오에는 없다) 여기서만
     # ORM으로 상태를 조정한다(동작을 구동하는 게 아니라 화면 문구를 확인하기
     # 위한 사전 조건 설정이다 — `_freeze`가 ClockOverride를 직접 다루는 것과
@@ -1839,7 +1918,63 @@ def test_next_action_message_asks_for_phone_when_seller_row_has_none(
     assert resp.status_code == 200
     body = resp.json()
     assert body["seller_status"] == "pending"
-    assert "전화번호" in body["next_action_message"]
+    assert "연락처" in body["next_action_message"]
+
+
+@pytest.mark.django_db
+def test_next_action_message_asks_for_contact_when_only_email_is_missing(
+    client, category, landing_type
+):
+    """이메일만 없는 Payout 도 「Developer 의 차례」로 읽힌다 — 지금까지는
+    「벤더의 차례」였다. 이 스펙에서 가장 중요한 회귀 방지선이다(#168)."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="review_required")
+
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    developer_id = payout.handover.award.submission.developer_id
+    # 전화번호는 있고 이메일만 비어 있는 상태를 직접 만든다 — ORM 으로 상태를
+    # 조정할 뿐 동작을 구동하지 않는다(위 `test_next_action_message_asks_for_
+    # contact_when_seller_row_has_none` 과 같은 관용구). `submit_seller_contact`
+    # 를 거치면 Fake 어댑터의 기본 관대함(연락처 없이도 시나리오대로 답한다,
+    # #168 구현 결정)이 곧바로 등록을 성공시켜 이 상태를 관찰할 수 없게 된다.
+    Seller.objects.filter(developer_id=developer_id).update(
+        status=Seller.Status.PENDING, seller_id="", email=""
+    )
+    seller = Seller.objects.get(developer_id=developer_id)
+    seller.phone_number = "01055556666"
+    seller.save(update_fields=["phone_number_encrypted"])
+
+    resp = client.get(f"{CONTESTS_URL}/{contest['id']}/payout", **_auth_header(dev["access"]))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["seller_status"] == "pending"
+    assert body["has_seller_phone"] is True
+    assert body["has_seller_email"] is False
+    # "벤더의 차례"(예: "완료되면 자동으로") 가 아니라 여전히 "Developer 의 차례"다.
+    assert "연락처" in body["next_action_message"]
+
+
+@pytest.mark.django_db
+def test_fake_seller_adapter_missing_contact_scenario_stays_pending(
+    client, category, landing_type
+):
+    """Fake 셀러 어댑터의 `missing_contact` 시나리오는 실물이 걷는 "연락처가
+    없으면 벤더를 부르지 않는다" 경로를 재현한다(#168) — 등록 대기에 머물고
+    원장 분개(금액)는 그대로 남는다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    resp = _confirm_payout(
+        client, dev, requested["idempotency_key"], seller_simulate="missing_contact"
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "confirmed_seller_pending"
+    assert body["seller_status"] == "pending"
+    # 확정 자체(원장 분개)는 Seller 등록 결과와 무관하게 이미 남아 있다(ADR-0004/0020).
+    assert body["net_amount"] == body["prize_amount"] - body["platform_fee_amount"] - body["withholding_tax_amount"]
 
 
 # --- #57: 실물 토스 웹훅 --------------------------------------------------------------
@@ -3368,13 +3503,13 @@ class _CountingSellerAdapter(FakeSellerAdapter):
 
 
 @pytest.mark.django_db
-def test_submit_seller_phone_calls_the_vendor_once_no_matter_how_many_payouts(
+def test_submit_seller_contact_calls_the_vendor_once_no_matter_how_many_payouts(
     client, category, landing_type
 ):
-    """전화번호 제출 한 번이 Payout 개수만큼 벤더를 부르지 않는다 (#91).
+    """연락처 제출 한 번이 Payout 개수만큼 벤더를 부르지 않는다 (#91, #168).
 
     Seller 는 Developer 단위 개념이라 등록도 한 번이면 된다. 그런데
-    `submit_seller_phone` 은 대기 중인 Payout 마다 `retry_seller_registration` 을
+    `submit_seller_contact` 은 대기 중인 Payout 마다 `retry_seller_registration` 을
     불렀고, 그 각각이 `ensure_seller_registered` 를 거쳐 최대 30초짜리 벤더 호출을
     했다 — 몫이 여럿인 Developer 의 제출 요청은 워커 타임아웃을 넘긴다.
     `advance_seller_pending_payouts` 가 이미 쓰는 모양(등록은 밖에서 한 번, 루프는
@@ -3402,7 +3537,7 @@ def test_submit_seller_phone_calls_the_vendor_once_no_matter_how_many_payouts(
 
         _CountingSellerAdapter.calls = []
         resp = client.post(
-            f"{PAYOUTS_URL}/{requested1['idempotency_key']}/seller-phone",
+            f"{PAYOUTS_URL}/{requested1['idempotency_key']}/seller-contact",
             data={"phone_number": "01012345678"},
             content_type="application/json",
             **_auth_header(dev["access"]),

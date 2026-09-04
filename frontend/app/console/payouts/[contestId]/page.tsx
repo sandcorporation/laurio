@@ -21,7 +21,7 @@ import { useSession } from "@/lib/auth/use-session";
 import {
   requestPayout,
   retrySellerRegistration,
-  submitSellerPhone,
+  submitSellerContact,
   submitTaxIdentity,
   usePayout,
   type Payout,
@@ -58,7 +58,11 @@ export default function PayoutPage({ params }: { params: Promise<{ contestId: st
       ) : state.status === "none" ? (
         <RequestSection contestId={contestId} onRequested={reload} />
       ) : (
-        <PayoutDetail payout={state.payout} onChanged={reload} />
+        <PayoutDetail
+          payout={state.payout}
+          onChanged={reload}
+          accountEmail={session.user.email}
+        />
       )}
     </main>
   );
@@ -110,20 +114,33 @@ function RequestSection({
   );
 }
 
-function PayoutDetail({ payout, onChanged }: { payout: Payout; onChanged: () => void }) {
-  // 「전화번호를 내야 하는가」를 한 곳에서만 판정한다 — 아래에서 폼을 띄우는
+function PayoutDetail({
+  payout,
+  onChanged,
+  accountEmail,
+}: {
+  payout: Payout;
+  onChanged: () => void;
+  /** 로그인 계정의 이메일 — 연락처 폼이 이메일 입력의 기본값으로 보여줄 뿐,
+   * 저장은 항상 Seller 쪽에 한다(#168 구현 결정). 비어 있을 수 있다(#49
+   * 유저스토리 12 — 카카오가 이메일 동의를 안 주면). */
+  accountEmail: string;
+}) {
+  // 「연락처를 내야 하는가」를 한 곳에서만 판정한다 — 아래에서 폼을 띄우는
   // 조건과 "하실 일은 없습니다"를 감추는 조건이 같은 값을 봐야 한다. 두 조건이
   // 따로 적혀 있으면 한쪽만 고쳤을 때 **아무것도 없는 빈 대기 상자**가 남는다
   // (#91 — `has_seller_phone` 만 보던 시절의 실제 결과).
   //
-  // 백엔드의 Hold 표(`payouts/progress.py`)가 전화번호를 요구하는 조합과 정확히
-  // 같다: Seller 가 아직 없거나 PENDING 인데 번호가 없을 때. 심사 중
-  // (under_review)·거절(rejected)·본인인증 대기(approval_required)에는 백엔드가
-  // 다른 것을 안내하므로("심사가 끝나면 자동으로 넘어갑니다", "운영자에게
-  // 문의해주세요") 여기서 번호를 요구하면 화면이 시키는 대로 한 사람이 아무
-  // 변화도 못 본다.
-  const needsSellerPhone =
-    !payout.has_seller_phone &&
+  // 백엔드의 Hold 표(`payouts/progress.py`)가 연락처를 요구하는 조합과 정확히
+  // 같다: Seller 가 아직 없거나 PENDING 인데 전화번호나 이메일 중 하나라도
+  // 없을 때(#168 이 전화번호 전용이던 조건을 넓혔다). 심사 중(under_review)·
+  // 거절(rejected)·본인인증 대기(approval_required)에는 백엔드가 다른 것을
+  // 안내하므로("심사가 끝나면 자동으로 넘어갑니다", "운영자에게 문의해주세요")
+  // 여기서 연락처를 요구하면 화면이 시키는 대로 한 사람이 아무 변화도 못 본다.
+  const missingSellerPhone = !payout.has_seller_phone;
+  const missingSellerEmail = !payout.has_seller_email;
+  const needsSellerContact =
+    (missingSellerPhone || missingSellerEmail) &&
     (payout.seller_status === null || payout.seller_status === "pending");
 
   // 지급대행사가 보낸 본인인증 문자를 아직 처리하지 않았다 — 백엔드도 이것을
@@ -157,17 +174,27 @@ function PayoutDetail({ payout, onChanged }: { payout: Payout; onChanged: () => 
 
       {payout.status === "confirmed_seller_pending" ? (
         <section className="mt-6 rounded border border-subtle p-4" data-testid="payout-waiting">
-          {/* PENDING이면서 아직 전화번호를 안 냈으면 하실 일이 있다(#57
-              코드리뷰 지적 10) — next_action_message가 "아래에서 제출해주세요"
-              라고 말하는데 폼이 없으면 그 지시를 따를 수 없다. 실물 어댑터는
-              전화번호 없이 첫 등록을 시도조차 하지 않는다
+          {/* PENDING이면서 아직 연락처(전화번호·이메일)를 안 냈으면 하실 일이
+              있다(#57 코드리뷰 지적 10, #168) — next_action_message가 "아래에서
+              제출해주세요"라고 말하는데 폼이 없으면 그 지시를 따를 수 없다.
+              실물 어댑터는 연락처 없이 첫 등록을 시도조차 하지 않는다
               (TossSellerAdapter.register) — 그러니 이 폼 없이는 영구 정체다.
-              `has_seller_phone`(서버가 계산한 값)을 본다 — seller_status가
-              null/pending인지로 추론하면, 전화번호 말고 다른 정보(이메일 등)가
-              없어 계속 pending인 경우에도 이미 낸 전화번호를 또 내라는 폼이
-              된다(코드리뷰 지적 12, 3차). 그 값만으로 부족한 이유와 Seller 상태를
-              함께 보는 이유는 위 `needsSellerPhone` 에 적혀 있다(#91). */}
-          {needsSellerPhone ? <SellerPhoneForm payout={payout} onSubmitted={onChanged} /> : null}
+              `has_seller_phone`/`has_seller_email`(서버가 계산한 값)을 본다 —
+              seller_status가 null/pending인지로만 추론하면, 이미 낸 값을 또
+              내라는 폼이 된다(코드리뷰 지적 12, 3차). 그 값만으로 부족한
+              이유와 Seller 상태를 함께 보는 이유는 위 `needsSellerContact`
+              에 적혀 있다(#91). 폼 자신이 "무엇이 비었는지"를 두 사실로
+              구성한다 — 그 문구는 백엔드 Hold 번역표가 아니라 화면이 소유한다
+              (#168 구현 결정). */}
+          {needsSellerContact ? (
+            <SellerContactForm
+              payout={payout}
+              missingPhone={missingSellerPhone}
+              missingEmail={missingSellerEmail}
+              accountEmail={accountEmail}
+              onSubmitted={onChanged}
+            />
+          ) : null}
 
           {/* **거절도, 실이체 실패도 실패가 아니다**(#74 스토리 30·31, #57
               코드리뷰 지적 1). 지급대행사가 수취인 등록을 거절하거나, 등록은
@@ -186,11 +213,11 @@ function PayoutDetail({ payout, onChanged }: { payout: Payout; onChanged: () => 
           {payout.has_identity ? null : <TaxIdentityForm payout={payout} onSubmitted={onChanged} />}
 
           {/* "하실 일은 없습니다"는 정말로 할 일이 없을 때만 보인다(코드리뷰
-              지적 10, 3차) — 전화번호 폼·재시도 버튼·신원 제출 폼 중 어느
+              지적 10, 3차) — 연락처 폼·재시도 버튼·신원 제출 폼 중 어느
               것도 뜨지 않을 때만이다. 폼·버튼 바로 위에 이 문장이 뜨면
               "할 일이 없다"와 "여기 낼 것이 있다"가 한 화면에서 서로
               모순된다. */}
-          {!needsSellerPhone &&
+          {!needsSellerContact &&
           !awaitingSellerAuth &&
           payout.seller_status !== "rejected" &&
           payout.transfer_status !== "failed" &&
@@ -271,8 +298,23 @@ function SellerRetry({
   );
 }
 
-function SellerPhoneForm({ payout, onSubmitted }: { payout: Payout; onSubmitted: () => void }) {
-  const [value, setValue] = useState("");
+function SellerContactForm({
+  payout,
+  missingPhone,
+  missingEmail,
+  accountEmail,
+  onSubmitted,
+}: {
+  payout: Payout;
+  missingPhone: boolean;
+  missingEmail: boolean;
+  /** 계정 이메일 — 이메일 입력의 기본값으로만 쓴다. 저장은 항상 제출 시점의
+   * 입력값을 Seller 쪽에 한다(#168). */
+  accountEmail: string;
+  onSubmitted: () => void;
+}) {
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState(accountEmail);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -282,45 +324,85 @@ function SellerPhoneForm({ payout, onSubmitted }: { payout: Payout; onSubmitted:
     setPending(true);
     setMessage(null);
 
-    const result = await submitSellerPhone(payout.idempotency_key, value);
+    // **부분 제출을 보낸다** — 이미 낸 쪽(missing 이 아닌 쪽)은 아예 요청에
+    // 담지 않는다. 서버가 "안 보냄"과 "빈 값"을 구분하므로(#168), 이미 낸
+    // 값을 다시 덮어쓰는 요청을 만들지 않는다.
+    const result = await submitSellerContact(payout.idempotency_key, {
+      ...(missingPhone ? { phoneNumber: phone } : {}),
+      ...(missingEmail ? { email } : {}),
+    });
 
     if (result.ok) return onSubmitted();
     setMessage(result.message);
     setPending(false);
   }
 
+  const canSubmit = (!missingPhone || phone.length >= 10) && (!missingEmail || email.length > 0);
+
   return (
     <form
       className="mt-4 flex flex-col gap-3 rounded border border-subtle p-3"
       onSubmit={handleSubmit}
-      data-testid="payout-seller-phone-form"
+      data-testid="payout-seller-contact-form"
     >
-      <label className="text-sm" htmlFor="payout-seller-phone">
-        지급대행사 수취인 등록에 전화번호가 필요합니다 — 본인인증 문자를 받을 번호입니다.
-      </label>
-      <input
-        id="payout-seller-phone"
-        className="rounded border border-subtle p-3"
-        type="tel"
-        inputMode="numeric"
-        autoComplete="tel"
-        maxLength={11}
-        value={value}
-        onChange={(event) => setValue(event.target.value.replace(/\D/g, ""))}
-        placeholder="숫자만 (하이픈 없이)"
-        data-testid="payout-seller-phone-input"
-        required
-      />
+      {/* **무엇이 비었는지는 이 화면이 두 사실로 직접 구성한다** — Hold
+          번역표(백엔드)가 아니라 여기가 그 문구를 소유한다(#168 구현 결정).
+          이미 낸 값은 다시 내라고 하지 않는다. */}
+      <p className="text-sm" data-testid="payout-seller-contact-missing">
+        {missingPhone && missingEmail
+          ? "지급대행사 수취인 등록에 전화번호와 이메일이 모두 필요합니다."
+          : missingPhone
+            ? "지급대행사 수취인 등록에 전화번호가 필요합니다 — 이미 제출한 이메일은 그대로 유지됩니다."
+            : "지급대행사 수취인 등록에 이메일이 필요합니다 — 이미 제출한 전화번호는 그대로 유지됩니다."}
+      </p>
+      {missingPhone ? (
+        <div className="flex flex-col gap-1">
+          <label className="text-sm" htmlFor="payout-seller-phone">
+            전화번호 — 본인인증 문자를 받을 번호입니다.
+          </label>
+          <input
+            id="payout-seller-phone"
+            className="rounded border border-subtle p-3"
+            type="tel"
+            inputMode="numeric"
+            autoComplete="tel"
+            maxLength={11}
+            value={phone}
+            onChange={(event) => setPhone(event.target.value.replace(/\D/g, ""))}
+            placeholder="숫자만 (하이픈 없이)"
+            data-testid="payout-seller-phone-input"
+            required
+          />
+        </div>
+      ) : null}
+      {missingEmail ? (
+        <div className="flex flex-col gap-1">
+          <label className="text-sm" htmlFor="payout-seller-email">
+            이메일 — 로그인 계정의 이메일과 달라도 됩니다.
+          </label>
+          <input
+            id="payout-seller-email"
+            className="rounded border border-subtle p-3"
+            type="email"
+            autoComplete="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder="you@example.com"
+            data-testid="payout-seller-email-input"
+            required
+          />
+        </div>
+      ) : null}
       <button
         className="self-start rounded bg-accent px-4 py-2 text-white disabled:opacity-50"
         type="submit"
-        disabled={pending || value.length < 10}
-        data-testid="payout-seller-phone-submit"
+        disabled={pending || !canSubmit}
+        data-testid="payout-seller-contact-submit"
       >
         {pending ? "제출하는 중..." : "제출"}
       </button>
       {message ? (
-        <p className="text-attention" data-testid="payout-seller-phone-error">
+        <p className="text-attention" data-testid="payout-seller-contact-error">
           {message}
         </p>
       ) : null}
