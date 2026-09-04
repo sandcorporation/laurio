@@ -74,3 +74,26 @@ test("소스코드와 AI 채점 점수가 HTML 응답 본문 어디에도 없다
     page.getByTestId(`award-source-notice-${seeded.judging.submissions[0].id}`),
   ).toBeVisible();
 });
+
+// #165 — 공개 개발자 프로필(/developers/{id})로 가는 링크가 실제로 클릭 가능한지.
+// developer-profile.spec.ts 는 `request.get("/developers/{id}")`로 URL을 직접
+// 쳐서 SSR만 증명한다 — "사람이 거기 도달할 수 있는가"는 검증하지 않는다(#165
+// 본문이 지적한 바로 그 맹점). 이 테스트는 goto/request.get으로 프로필 URL을
+// 건너뛰지 않는다 — 심사 비교 화면에 실제로 있는 링크를 클릭해서 도달한다.
+test("개발자 이름을 클릭하면 그 개발자의 공개 프로필이 새 탭에 열린다", async ({ page }) => {
+  await loginAsJudgingSponsor(page);
+
+  await page.goto(`/console/contests/${seeded.judging.id}/judge`);
+  await expect(page.getByTestId("comparison-matrix")).toBeVisible();
+
+  const submission = seeded.judging.submissions[0];
+  const link = page.getByTestId(`submission-${submission.id}-developer-link`);
+  await expect(link).toHaveText(submission.developer_display_name);
+  await expect(link).toHaveAttribute("href", `/developers/${submission.developer_id}`);
+
+  const [profilePage] = await Promise.all([page.waitForEvent("popup"), link.click()]);
+  await profilePage.waitForLoadState();
+
+  expect(profilePage.url()).toContain(`/developers/${submission.developer_id}`);
+  await expect(profilePage.getByText(submission.developer_display_name).first()).toBeVisible();
+});

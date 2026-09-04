@@ -325,7 +325,30 @@ function SubmissionColumnHeader({
 
   return (
     <div className="flex flex-col gap-2">
-      <p className="font-semibold">{submission.developer_display_name}</p>
+      {/* #165 — 공개 개발자 프로필(/developers/{id})로 가는 유일한 인바운드 링크.
+          이 화면(심사 비교)을 골랐다: Sponsor가 이름만 보고 "이 사람이 누구인지"
+          궁금해질 자리가 여기다 — 상금을 걸고 선정을 고민하는 시점이라 참가
+          이력을 실제로 찾아볼 동기가 있다. 새 탭으로 연다 — 심사 중 이 표를
+          벗어나면 비교 상태(award 확인창 등)를 잃는다.
+          뺀 후보:
+            - metrics/page.tsx(#107) — ContestMetricsOut 스키마 자체에
+              developer_id 가 없다(lib/submissions/types.ts 상단 주석). 링크를
+              달 값 자체가 없다.
+            - console/participation/page.tsx — Developer 본인이 자기 제출 현황을
+              보는 화면이다. 본인 이름을 자기 공개 프로필로 링크할 이유가 없다.
+            - operator/app/payouts/page.tsx — 운영자가 보는 것은
+              `developer_user_id`(정산 대상 식별자)뿐이고 표시 이름조차 없다
+              ("개발자 #123"). 운영자는 내부 정산 상태를 보러 온 것이지 그
+              사람이 누구인지 궁금해서 온 게 아니다 — 궁금해지는 자리가 아니다. */}
+      <a
+        href={`/developers/${submission.developer_id}`}
+        target="_blank"
+        rel="noreferrer"
+        className="font-semibold underline"
+        data-testid={`submission-${submission.submission_id}-developer-link`}
+      >
+        {submission.developer_display_name}
+      </a>
       <p className="font-mono text-xs text-ink">
         증거 연결 {submission.completion.linked_requirement_count}/
         {submission.completion.total_requirement_count} · 권장 항목{" "}
