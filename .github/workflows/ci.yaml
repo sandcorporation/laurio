@@ -266,6 +266,10 @@ jobs:
         working-directory: packages/bff-shared
         run: pnpm run test
 
+      - name: Public app — pure modules
+        working-directory: frontend
+        run: pnpm run test:unit
+
       - name: Operator app — pure modules
         working-directory: operator
         run: pnpm run test:unit
