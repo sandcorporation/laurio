@@ -257,7 +257,7 @@ def test_register_sends_jwe_encrypted_body_with_individual_fields():
         with patch("payouts.adapters_toss.requests.post") as mock_post:
             mock_post.return_value = _encrypted_response(
                 200,
-                {"refSellerId": "laurio-developer-7", "sellerId": "seller-abc", "status": "APPROVAL_REQUIRED"},
+                {"refSellerId": "laurio-developer-7", "id": "seller-abc", "status": "APPROVAL_REQUIRED"},
             )
             result = adapter.register(_reg())
     assert result.status == "approval_required"
@@ -271,13 +271,36 @@ def test_register_sends_jwe_encrypted_body_with_individual_fields():
     assert sent_body["individual"] == {"name": "홍길동", "email": "dev@example.com", "phone": "01099998888"}
 
 
+def test_register_does_not_fall_back_to_our_own_ref_seller_id_as_vendor_id():
+    """벤더 문서(docs.tosspayments.com/reference/additional, 웹 확인)의
+    Seller 객체 필드는 `id`·`refSellerId`·`businessType`·`company`·
+    `individual`·`status`·`account`·`metadata` 다 — `sellerId` 는 없다
+    (코드리뷰 지적, #173 후속). 예전에는 `body.get("sellerId") or
+    body.get("refSellerId")`로 읽어, 실물 응답에 `sellerId`가 없으니
+    **우리가 보낸** `refSellerId`(`laurio-developer-{id}`)를 벤더 식별자인
+    양 저장했다 — 그 값으로 이후 `GET /v2/sellers/{seller_id}`를 치면
+    벤더가 모르는 문자열이라 영원히 404다. `id` 필드가 없으면(벤더가 이
+    응답에 그 필드를 안 줬거나 우리 가정이 또 틀렸으면) 조용히 잘못된
+    값을 저장하느니 빈 값이 낫다 — 빈 seller_id는 이미 "등록 시도 전"으로
+    정의돼 있고 재시도 경로가 있다."""
+    with _settings():
+        adapter = TossSellerAdapter()
+        with patch("payouts.adapters_toss.requests.post") as mock_post:
+            mock_post.return_value = _encrypted_response(
+                200, {"refSellerId": "laurio-developer-7", "status": "APPROVAL_REQUIRED"}
+            )
+            result = adapter.register(_reg())
+    assert result.status == "approval_required"
+    assert result.seller_id == ""  # "laurio-developer-7" 로 잘못 채워지지 않는다
+
+
 def test_register_posts_to_v2_sellers_not_v1():
     """셀러 등록은 v2 다(#172) — `/v1/sellers`는 라우트 자체가 없어 404(본문
     길이 0)를 받는다는 것을 실물로 확인했다(#97)."""
     with _settings():
         adapter = TossSellerAdapter()
         with patch("payouts.adapters_toss.requests.post") as mock_post:
-            mock_post.return_value = _encrypted_response(200, {"sellerId": "s", "status": "APPROVED"})
+            mock_post.return_value = _encrypted_response(200, {"id": "s", "status": "APPROVED"})
             adapter.register(_reg())
     url = mock_post.call_args[0][0]
     assert url.endswith("/v2/sellers")
@@ -287,9 +310,9 @@ def test_register_posts_to_v2_sellers_not_v1():
 @pytest.mark.parametrize(
     "vendor_body,expected_status,expected_limit",
     [
-        ({"sellerId": "s", "status": "PARTIALLY_APPROVED"}, "partially_approved", 10_000_000),
-        ({"sellerId": "s", "status": "KYC_REQUIRED"}, "under_review", None),
-        ({"sellerId": "s", "status": "APPROVED"}, "approved", None),
+        ({"id": "s", "status": "PARTIALLY_APPROVED"}, "partially_approved", 10_000_000),
+        ({"id": "s", "status": "KYC_REQUIRED"}, "under_review", None),
+        ({"id": "s", "status": "APPROVED"}, "approved", None),
     ],
     ids=["partially-approved", "kyc-required", "approved"],
 )
@@ -392,7 +415,7 @@ def test_register_with_existing_seller_id_queries_instead_of_posting():
             "payouts.adapters_toss.requests.get"
         ) as mock_get:
             mock_get.return_value = _encrypted_response(
-                200, {"sellerId": "already-registered-seller-id", "status": "PARTIALLY_APPROVED"}
+                200, {"id": "already-registered-seller-id", "status": "PARTIALLY_APPROVED"}
             )
             result = adapter.register(_reg(existing_seller_id="already-registered-seller-id"))
     mock_post.assert_not_called()

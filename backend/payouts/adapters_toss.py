@@ -628,7 +628,18 @@ class TossSellerAdapter:
                 f"{vendor_status!r}"
             )
 
-        seller_id = body.get("sellerId") or body.get("refSellerId") or ""
+        # 벤더 문서(#173/#174 와 같은 출처, docs.tosspayments.com/reference/
+        # additional)의 Seller 객체 필드는 `id`·`refSellerId`·`businessType`·
+        # `company`·`individual`·`status`·`account`·`metadata` 다 —
+        # `sellerId` 는 없다. `refSellerId`로 폴백하지 않는다(코드리뷰 지적,
+        # #173 후속) — 그건 **우리가 보낸** 값(`laurio-developer-{id}`)이지
+        # 벤더 식별자가 아니다. 실물 응답에 `sellerId`가 없어 그 폴백이
+        # 조용히 우리 자신의 ref 를 벤더 식별자인 양 저장하면, 이후
+        # `_query_seller_status`의 GET이 벤더가 모르는 문자열로 나가 영원히
+        # 404를 받고(재등록도 그 값을 다시 넘기므로 스스로 회복하지 못한다)
+        # — 틀린 값을 저장하느니 빈 값이 낫다(빈 seller_id는 이미 PENDING과
+        # 같은 "등록 시도 전"으로 정의돼 있고 재시도 경로가 있다).
+        seller_id = body.get("id") or ""
         # 벤더 문서의 Seller 객체에 weeklyLimit 필드가 없다(#173, 웹 확인) —
         # 벤더가 한도를 알려주지 않으므로 caller가 이미 조립해 둔 정책값
         # (`weekly_limit_hint` — ADR-0020, 토스가 정한 사실)을 쓴다.
