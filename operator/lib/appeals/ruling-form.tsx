@@ -15,8 +15,9 @@
 // **제출 중에는 두 버튼 모두 비활성화된다.** 서버의 조건부 UPDATE가 이중 심판의
 // 최후 방어선이지만(append-only 원장에 정정이 두 번 남지 않게), 화면이 먼저
 // 더블 클릭 자체를 막는 것도 필요하다 — #67이 그리는 두 겹의 방어와 같은 결.
-import { useRouter } from "next/navigation";
 import { useState } from "react";
+
+import { bffClient } from "@/lib/bff/client";
 
 import type { AppealRuling } from "./types";
 
@@ -33,7 +34,6 @@ export function RulingForm({
   appealId: number;
   onRuled: (ruling: AppealRuling) => void;
 }) {
-  const router = useRouter();
   const [note, setNote] = useState("");
   const [correctionAmount, setCorrectionAmount] = useState("");
   const [state, setState] = useState<RulingFormState>({ status: "idle" });
@@ -62,83 +62,54 @@ export function RulingForm({
     // "심판 요청을 보내지 못했습니다"로 보이고, 운영자가 그 말을 믿고
     // 재시도해 409를 만난다 — 돈을 움직이는 화면에서 "일어났다"와 "안
     // 일어났다"를 뒤집어 말하면 안 된다.
-    let res: Response;
-    try {
-      res = await fetch(`/api/backend/operator/appeals/${appealId}/rule`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-    } catch {
-      setState({ status: "error", message: "심판 요청을 보내지 못했습니다." });
-      return;
-    }
+    const ruled = await bffClient.post(`/api/backend/operator/appeals/${appealId}/rule`, payload);
 
-    if (res.status === 401) {
-      // 심판 중 세션이 만료됐다 — source-reveal.tsx와 같은 원칙: state를
-      // "submitting"에 남긴 채 router.replace만 부르면 이동이 늦거나 실패했을
-      // 때 비활성화된 버튼만 남고 화면이 그 상태에 갇힌다. 이동을 시작하기
-      // 전에 먼저 상태를 바꾼다. 이 분기에서 심판은 일어나지 않았다 — 서버가
-      // 401을 냈다는 것 자체가 이 요청이 인증되지 않아 아무 것도 반영되지
-      // 않았다는 뜻이다.
-      setState({ status: "redirecting" });
-      router.replace("/login");
-      return;
-    }
-
-    if (!res.ok) {
-      const body = (await res.json().catch(() => null)) as { detail?: unknown } | null;
-      // detail이 항상 문자열은 아니다 — 이 폼이 명시적으로 다루는 두 거절
-      // (correction_amount 누락, ruling_note 공백)은 커스텀 HttpError라 항상
-      // 문자열이지만, pydantic 필드 검증(예: correction_amount<=0)이 걸리면
-      // ninja가 배열 형태의 422를 낸다. 문자열이 아니면 그대로 렌더하지 않고
-      // 일반 메시지로 대체한다 — "Objects are not valid as a React child"로
-      // 화면이 깨지는 것을 막는다.
-      const detail = typeof body?.detail === "string" ? body.detail : null;
-      setState({
-        status: "error",
-        message: detail ?? `심판에 실패했습니다 (${res.status}).`,
-      });
-      return;
-    }
-
-    // 여기 도달했으면 심판은 이미 확정됐다(res.ok) — 아래는 그 결과를 화면에
-    // 옮기는 절차일 뿐이고, 여기서 무엇이 잘못돼도 "심판이 안 됐다"는 뜻이
-    // 아니다. rule 엔드포인트는 AppealOut(요약)만 돌려준다 — ruled_by_username
-    // 같은 심판자 신원은 상세 응답(AppealDetailOut.ruling)에만 있다. 손으로
-    // 재구성하지 않고 상세를 다시 조회해 그대로 쓴다 — 요청(uphold/reject)과
-    // 응답(upheld/rejected)의 어휘가 다른 함정(#66이 이미 겪었다)을 여기서
-    // 또 틀리지 않기 위해서다.
-    try {
-      const detailRes = await fetch(`/api/backend/operator/appeals/${appealId}`, {
-        cache: "no-store",
-      });
-      if (detailRes.status === 401) {
+    if (!ruled.ok) {
+      if (ruled.code === "network") {
+        setState({ status: "error", message: "심판 요청을 보내지 못했습니다." });
+        return;
+      }
+      if (ruled.code === "unauthorized") {
+        // 심판 중 세션이 만료됐다 — 클라이언트가 로그인으로 보낸다. 다만 state 를 "submitting"
+        // 에 남겨두면 이동이 늦거나 실패했을 때 비활성화된 버튼만 남고 화면이 그 상태에
+        // 갇힌다(코드리뷰 지적). 이 분기에서 심판은 일어나지 않았다 — 서버가 401 을 냈다는 것
+        // 자체가 이 요청이 인증되지 않아 아무 것도 반영되지 않았다는 뜻이다.
         setState({ status: "redirecting" });
-        router.replace("/login");
         return;
       }
-      if (!detailRes.ok) {
-        setState({
-          status: "error",
-          message: "심판은 반영됐지만 결과를 다시 불러오지 못했습니다. 새로고침해주세요.",
-        });
+      // `detail` 정규화(ninja 422 의 배열 detail 포함)는 패키지가 한다(#148).
+      setState({ status: "error", message: ruled.detail });
+      return;
+    }
+
+    // 재조회 실패는 「심판이 안 됐다」가 아니다 — 돈은 이미 움직였고 화면만 못 따라온 것이다.
+    {
+      const refreshed = await bffClient.get<{ ruling: AppealRuling | null }>(
+        `/api/backend/operator/appeals/${appealId}`,
+      );
+
+      if (!refreshed.ok) {
+        setState(
+          refreshed.code === "unauthorized"
+            ? { status: "redirecting" }
+            : {
+                status: "error",
+                message: "심판은 반영됐지만 결과를 다시 불러오지 못했습니다. 새로고침해 주세요.",
+              },
+        );
         return;
       }
-      const detail = (await detailRes.json()) as { ruling: AppealRuling | null };
+
+      const detail = refreshed.data;
       if (!detail.ruling) {
         setState({
           status: "error",
-          message: "심판은 반영됐지만 결과를 확인하지 못했습니다. 새로고침해주세요.",
+          message: "심판은 반영됐지만 결과를 다시 불러오지 못했습니다. 새로고침해 주세요.",
         });
         return;
       }
+
       onRuled(detail.ruling);
-    } catch {
-      setState({
-        status: "error",
-        message: "심판은 반영됐지만 결과를 다시 불러오지 못했습니다. 새로고침해주세요.",
-      });
     }
   }
 

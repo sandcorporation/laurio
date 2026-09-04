@@ -34,7 +34,7 @@ export function OperatorRow({
     const result = await deactivateOperator(operator.id);
     setPending(false);
     if (!result.ok) {
-      if (result.status === 401) {
+      if (result.code === "unauthorized") {
         onSessionExpired();
         return;
       }
@@ -50,7 +50,7 @@ export function OperatorRow({
     const result = await reactivateOperator(operator.id);
     setPending(false);
     if (!result.ok) {
-      if (result.status === 401) {
+      if (result.code === "unauthorized") {
         onSessionExpired();
         return;
       }

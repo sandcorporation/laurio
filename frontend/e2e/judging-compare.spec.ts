@@ -34,7 +34,7 @@ async function loginAsJudgingSponsor(page: import("@playwright/test").Page): Pro
   await page.goto("/login");
   await page.getByTestId("fake-login-seed").fill(seeded.judging.sponsor_login_seed);
   await page.getByTestId("login-kakao").click();
-  await expect(page).toHaveURL(/\/console/);
+  await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
 }
 
 async function loginAsOtherSponsor(
@@ -44,7 +44,7 @@ async function loginAsOtherSponsor(
   await page.goto("/login");
   await page.getByTestId("fake-login-seed").fill(`other-sponsor-${runId}`);
   await page.getByTestId("login-kakao").click();
-  await expect(page).toHaveURL(/\/console/);
+  await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
 }
 
 test("필수·선택 Requirement가 구분되고, 증거 없는 칸이 즉시 구분된다", async ({ page }) => {

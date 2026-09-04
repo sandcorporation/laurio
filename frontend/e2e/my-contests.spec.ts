@@ -11,7 +11,7 @@ async function login(page: import("@playwright/test").Page, seed: string): Promi
   await page.goto("/login");
   await page.getByTestId("fake-login-seed").fill(seed);
   await page.getByTestId("login-kakao").click();
-  await expect(page).toHaveURL(/\/console/);
+  await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
 }
 
 test("연 공모전이 없으면 빈 목록이라고 말한다 — 조회 실패와 구별된다", async ({ page }) => {

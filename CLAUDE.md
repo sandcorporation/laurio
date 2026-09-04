@@ -331,6 +331,12 @@ pnpm --dir frontend test:public     # 공개 앱만 (약 2.3분, 79건)
 만들어진 `[E2E] `)이 생겨, `global-setup` 이 시작 전에 `--prune-all-namespaces` 로
 한 번 걷는다.
 
+**스위트를 연달아 돌렸다면 `frontend` 컨테이너를 재시작한다.** `next dev` 의 메모리가 회차마다
+늘어(측정: 4.8GB → 6.3GB) 로그인 뒤 `/console` 이동이 5초를 넘기기 시작하고, 그러면 매 회차
+무작위로 한두 건이 `toHaveURL(/\/console/)` 타임아웃으로 붉어진다 — 코드 회귀와 구분되지 않는
+모양이다. `docker compose -f docker/compose.dev.yaml restart frontend` 한 번이면 그대로 초록으로
+돌아온다(로그인 헬퍼의 단언은 15초로 잡아 뒀지만 근본 원인은 이쪽이다).
+
 **메모리가 워커 수의 실제 상한이다.** 예전 머신(WSL, Docker VM 8GB)에서는 2워커에서도
 `next dev` 컨테이너가 OOM 으로 죽어 절반이 `ERR_CONNECTION_REFUSED` 로 실패했고,
 VM 을 24GB 로 올린 뒤에야 4워커가 성립했다 — 그때 실측이 공개 스위트 직렬 7.4분 →

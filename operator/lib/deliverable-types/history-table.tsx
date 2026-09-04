@@ -1,7 +1,7 @@
 "use client";
 
 // DeliverableType 변경 이력 표(#80) — 누가·언제·무엇을·왜. 일반 등급도 본다.
-import { ACTION_LABELS } from "./types";
+import { actionLabel } from "./types";
 import type { DeliverableType, DeliverableTypeChangeEntry } from "./types";
 
 function typeName(typeId: number, types: DeliverableType[]): string {
@@ -43,7 +43,7 @@ export function DeliverableTypeHistoryTable({
         {changes.map((change) => (
           <tr key={change.id} data-testid={`deliverable-type-history-row-${change.id}`}>
             <td>{typeName(change.deliverable_type_id, types)}</td>
-            <td>{ACTION_LABELS[change.action]}</td>
+            <td>{actionLabel(change.action)}</td>
             <td>{change.operator_username}</td>
             <td>{new Date(change.changed_at).toLocaleString("ko-KR")}</td>
             <td data-testid={`deliverable-type-history-row-${change.id}-diff`}>{formatDiff(change)}</td>

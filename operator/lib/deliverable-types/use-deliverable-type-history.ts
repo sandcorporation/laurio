@@ -2,7 +2,6 @@
 
 // DeliverableType 변경 이력 조회(#80) — use-policy-history.ts와 같은 계약.
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 
 import { fetchDeliverableTypeChanges } from "./actions";
 import type { DeliverableTypeChangeEntry } from "./types";
@@ -16,7 +15,6 @@ export function useDeliverableTypeHistory(enabled: boolean): {
   state: DeliverableTypeHistoryState;
   reload: () => void;
 } {
-  const router = useRouter();
   const [state, setState] = useState<DeliverableTypeHistoryState>({ status: "loading" });
   const [version, setVersion] = useState(0);
 
@@ -30,11 +28,8 @@ export function useDeliverableTypeHistory(enabled: boolean): {
       const result = await fetchDeliverableTypeChanges();
       if (cancelled) return;
 
+      // 401 은 클라이언트가 로그인으로 보낸다(#148) — 여기서는 「값을 모른다」로만 남는다.
       if (!result.ok) {
-        if (result.status === 401) {
-          router.replace("/login");
-          return;
-        }
         setState({ status: "error" });
         return;
       }
@@ -47,7 +42,7 @@ export function useDeliverableTypeHistory(enabled: boolean): {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, router, version]);
+  }, [enabled, version]);
 
   return { state, reload };
 }

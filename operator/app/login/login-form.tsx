@@ -5,6 +5,8 @@
 // 가질 수 없다). 색인 대상이 아니므로(ADR-0021) 서버 컴포넌트로 둘 이유가
 // 없어 클라이언트 컴포넌트로 남긴다.
 import { Suspense, useState } from "react";
+
+import { normalizeDetail } from "@laurio/bff-client";
 import type { FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
@@ -32,11 +34,11 @@ function LoginFields() {
       });
 
       if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { detail?: string } | null;
+        const body = (await res.json().catch(() => null)) as { detail?: unknown } | null;
         // 백엔드가 이미 계정 존재 여부를 드러내지 않는 단일 문구로 답한다
         // (accounts/operator_api.py의 _LOGIN_FAILED) — 이 화면은 그 문구를
         // 그대로 보여주기만 하고 되돌리지 않는다.
-        setError(body?.detail ?? `로그인에 실패했습니다 (${res.status})`);
+        setError(normalizeDetail(body?.detail, `로그인에 실패했습니다 (${res.status})`));
         return;
       }
 

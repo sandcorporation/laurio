@@ -9,11 +9,14 @@ import { expect, test } from "@playwright/test";
 
 import { seedE2eContests } from "./lib/seed";
 
+// 로그인 뒤 `/console` 도달까지 넉넉히 기다린다 — 4워커로 도는 dev 서버는 라우트를 요청받을 때
+// 컴파일하므로(globalSetup 이 미리 데워도 부하가 겹치면 늦다) 기본 5초를 넘길 때가 있다. 실제로
+// 이 헬퍼가 스위트 전체에서 무작위로 한 건씩 붉게 만들었다.
 async function login(page: import("@playwright/test").Page, seed: string): Promise<void> {
   await page.goto("/login");
   await page.getByTestId("fake-login-seed").fill(seed);
   await page.getByTestId("login-kakao").click();
-  await expect(page).toHaveURL(/\/console/);
+  await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
 }
 
 const AMOUNTS = {

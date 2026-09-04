@@ -15,7 +15,7 @@ async function login(page: import("@playwright/test").Page, seed: string): Promi
   await page.goto("/login");
   await page.getByTestId("fake-login-seed").fill(seed);
   await page.getByTestId("login-kakao").click();
-  await expect(page).toHaveURL(/\/console/);
+  await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
 }
 
 async function verify(page: import("@playwright/test").Page, seed: string): Promise<void> {

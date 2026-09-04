@@ -5,7 +5,6 @@
 // 그 외 실패는 "불러오지 못했다"로 뭉뚱그린다(forbidden 상태가 없다 — 이
 // 목록은 등급을 가리지 않는다).
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 
 import { fetchDeliverableTypes } from "./actions";
 import type { DeliverableType } from "./types";
@@ -19,7 +18,6 @@ export function useDeliverableTypes(enabled: boolean): {
   state: DeliverableTypesState;
   reload: () => void;
 } {
-  const router = useRouter();
   const [state, setState] = useState<DeliverableTypesState>({ status: "loading" });
   const [version, setVersion] = useState(0);
 
@@ -33,11 +31,8 @@ export function useDeliverableTypes(enabled: boolean): {
       const result = await fetchDeliverableTypes();
       if (cancelled) return;
 
+      // 401 은 클라이언트가 로그인으로 보낸다(#148) — 여기서는 「값을 모른다」로만 남는다.
       if (!result.ok) {
-        if (result.status === 401) {
-          router.replace("/login");
-          return;
-        }
         setState({ status: "error" });
         return;
       }
@@ -50,7 +45,7 @@ export function useDeliverableTypes(enabled: boolean): {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, router, version]);
+  }, [enabled, version]);
 
   return { state, reload };
 }

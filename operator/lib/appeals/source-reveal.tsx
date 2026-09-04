@@ -14,8 +14,9 @@
 // 소스만 얻는 경로가 없다. 그래서 경고 문구는 버튼을 누르기 **전에** 항상
 // 보인다: "펼치면 기록된다"는 사실을 행위 이후가 아니라 이전에 알려야 그 기록이
 // 운영자가 선택한 일이 된다(ADR-0022).
-import { useRouter } from "next/navigation";
 import { useState } from "react";
+
+import { bffClient } from "@/lib/bff/client";
 
 type RevealState =
   | { status: "collapsed" }
@@ -25,41 +26,30 @@ type RevealState =
   | { status: "error"; message: string };
 
 export function SourceReveal({ appealId }: { appealId: number }) {
-  const router = useRouter();
   const [state, setState] = useState<RevealState>({ status: "collapsed" });
 
   async function reveal() {
     setState({ status: "revealing" });
-    try {
-      const res = await fetch(`/api/backend/operator/appeals/${appealId}/source`, {
-        method: "POST",
-      });
 
-      if (res.status === 401) {
-        // 세션이 만료됐다 — 코드리뷰 지적: 이전에는 여기서 state를 그대로
-        // "revealing"에 남겨둔 채 router.replace만 불렀다. 내비게이션이
-        // 늦거나(느린 네트워크) 실패하면 비활성화된 "펼치는 중..." 버튼만
-        // 남고 오류도 재시도 수단도 없이 화면이 그 상태에 갇힌다. 이동을
-        // 시작하기 전에 먼저 상태를 바꿔, 내비게이션이 어떻게 되든 화면이
-        // 더 이상 "펼치는 중"으로 보이지 않게 한다.
-        setState({ status: "redirecting" });
-        router.replace("/login");
-        return;
-      }
-      if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { detail?: string } | null;
-        setState({
-          status: "error",
-          message: body?.detail ?? `소스를 펼치지 못했습니다 (${res.status}).`,
-        });
-        return;
-      }
+    const result = await bffClient.post<{ prompt: string }>(
+      `/api/backend/operator/appeals/${appealId}/source`,
+    );
 
-      const body = (await res.json()) as { prompt: string };
-      setState({ status: "revealed", prompt: body.prompt });
-    } catch {
-      setState({ status: "error", message: "소스를 펼치는 요청을 보내지 못했습니다." });
+    if (result.ok) {
+      setState({ status: "revealed", prompt: result.data.prompt });
+      return;
     }
+    if (result.code === "unauthorized") {
+      // 세션이 만료됐다 — 클라이언트가 로그인으로 보낸다. 이동이 늦거나 실패해도 화면이
+      // "펼치는 중..."에 갇히지 않도록 상태를 먼저 바꾼다(코드리뷰 지적).
+      setState({ status: "redirecting" });
+      return;
+    }
+    if (result.code === "network") {
+      setState({ status: "error", message: "소스를 펼치는 요청을 보내지 못했습니다." });
+      return;
+    }
+    setState({ status: "error", message: result.detail });
   }
 
   return (

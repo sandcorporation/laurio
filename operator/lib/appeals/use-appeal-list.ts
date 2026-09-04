@@ -5,8 +5,9 @@
 // 조회 실패("불러오지 못했습니다")를 다른 상태로 분리한다 — 하나로 뭉치면
 // 조회가 죽은 날 목록이 그냥 비어 보이고 아무도 눈치채지 못한다. 401은 세션
 // 만료로 보고 로그인으로 돌려보낸다.
-import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+
+import { bffClient } from "@/lib/bff/client";
 
 import type { AppealStatus, AppealSummary } from "./types";
 
@@ -22,7 +23,6 @@ export function useAppealList(
   filter: AppealStatus | "all",
   enabled: boolean,
 ): AppealListState {
-  const router = useRouter();
   const [state, setState] = useState<AppealListState>({ status: "loading" });
 
   useEffect(() => {
@@ -30,37 +30,22 @@ export function useAppealList(
     let cancelled = false;
     setState({ status: "loading" });
 
-    async function load() {
-      try {
-        const query = filter === "all" ? "" : `?status=${filter}`;
-        const res = await fetch(`/api/backend/operator/appeals${query}`, { cache: "no-store" });
-        if (cancelled) return;
-
-        if (res.status === 401) {
-          // use-appeal-detail.ts·source-reveal.tsx와 같은 코드리뷰 지적 —
-          // state를 "loading"에 남겨둔 채 이동만 시작하면, 내비게이션이
-          // 늦거나 실패했을 때 화면이 그 상태에 갇힌다.
-          setState({ status: "redirecting" });
-          router.replace("/login");
-          return;
-        }
-        if (!res.ok) {
-          setState({ status: "error" });
-          return;
-        }
-
-        const appeals = (await res.json()) as AppealSummary[];
-        if (!cancelled) setState({ status: "loaded", appeals });
-      } catch {
-        if (!cancelled) setState({ status: "error" });
+    const query = filter === "all" ? "" : `?status=${filter}`;
+    void bffClient.get<AppealSummary[]>(`/api/backend/operator/appeals${query}`).then((result) => {
+      if (cancelled) return;
+      if (result.ok) {
+        setState({ status: "loaded", appeals: result.data });
+        return;
       }
-    }
+      // 401 은 클라이언트가 로그인으로 보낸다 — 다만 state 를 "loading" 에 남겨두면 내비게이션이
+      // 늦거나 실패했을 때 화면이 그 상태에 갇힌다(코드리뷰 지적). 이동과 무관하게 먼저 바꾼다.
+      setState(result.code === "unauthorized" ? { status: "redirecting" } : { status: "error" });
+    });
 
-    load();
     return () => {
       cancelled = true;
     };
-  }, [filter, enabled, router]);
+  }, [filter, enabled]);
 
   return state;
 }
