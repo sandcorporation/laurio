@@ -24,8 +24,15 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class SeedEntry:
     command: str
-    # 요청이 고를 수 있는 옵션 이름 → 관리 명령의 옵션 이름. 여기 없는 것은 400 이다.
+    # 요청이 고를 수 있는 옵션 이름. 여기 없는 것은 거부된다.
     options: frozenset[str]
+    # 없으면 거부하는 옵션. `run_id` 가 여기 있는 이유는 **긴 수명의 서버에서 기본값이
+    # 위험하기 때문**이다 — 명령이 환경변수도 못 읽으면 프로세스 수명 내내 고정된
+    # 폴백 토큰을 쓰는데, 그러면 「이번 실행이 심지 않은 것」 판정이 서버 부팅 시점을
+    # 기준으로 서고, 그 시드가 다른 경로(아직 서브프로세스인 시드)가 방금 심은 Contest 를
+    # 남의 것으로 보고 지운다. 서브프로세스 시절에는 프로세스가 호출마다 새로 떠서
+    # 이 위험이 없었다.
+    required: frozenset[str] = frozenset()
 
 
 E2E_SEED_REGISTRY: dict[str, SeedEntry] = {
@@ -43,6 +50,7 @@ E2E_SEED_REGISTRY: dict[str, SeedEntry] = {
     "operator-queues": SeedEntry(
         command="seed_e2e_operator_queues",
         options=frozenset({"only", "clear", "prune_other_runs", "run_id"}),
+        required=frozenset({"run_id"}),
     ),
     "operator-appeal": SeedEntry(
         command="seed_e2e_operator_appeal",

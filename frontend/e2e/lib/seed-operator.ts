@@ -4,15 +4,16 @@
 
 import { e2eRunId } from "./run-id";
 
+import { execFileSync } from "node:child_process";
+import path from "node:path";
+
+import { runSeed } from "./seed-http";
+
 const BACKEND_DIR = path.resolve(__dirname, "../../../backend");
 
 function backendDbPort(): string {
   return process.env.LAURIO_DB_PORT ?? "55432";
 }
-import { execFileSync } from "node:child_process";
-import path from "node:path";
-
-import { runSeed } from "./seed-http";
 
 
 export type SeededOperator = {

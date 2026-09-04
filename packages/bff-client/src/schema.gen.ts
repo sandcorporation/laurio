@@ -848,6 +848,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/internal/e2e/seed/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * E2E Seed
+         * @description e2e 픽스처를 심는다 — 서브프로세스 대신 이미 떠 있는 프로세스가 답한다 (#156).
+         *
+         *     이름과 옵션은 `core.e2e_seeds.E2E_SEED_REGISTRY` 에서만 온다(`/scans/{name}` 과 같은
+         *     규약). 구현은 관리 명령이 그대로 갖고 여기는 두 번째 입구일 뿐이라, `call_command` 로
+         *     in-process 호출한다 — 로직이 두 벌이 되지 않는다.
+         */
+        post: operations["core_api_e2e_seed"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/internal/notifications": {
         parameters: {
             query?: never;
@@ -4753,6 +4777,26 @@ export interface operations {
             query?: never;
             header?: never;
             path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    core_api_e2e_seed: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
             cookie?: never;
         };
         requestBody?: never;

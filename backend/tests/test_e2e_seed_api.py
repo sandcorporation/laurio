@@ -108,3 +108,19 @@ def test_operator_queue_seed_honours_the_run_id_from_the_request(client):
     assert Contest.objects.filter(title__contains="[runhttp1]").exists(), (
         "요청으로 준 run id 가 심은 Contest 의 접두어에 반영되지 않았다"
     )
+
+
+@pytest.mark.django_db
+def test_operator_queue_seed_requires_a_run_id(client):
+    """`run_id` 를 안 주면 심지 않는다 (#156, 코드리뷰).
+
+    명령은 환경변수도 없으면 프로세스 수명 내내 고정된 폴백 토큰을 쓴다 — 호출마다 새로
+    뜨던 서브프로세스에서는 그것이 곧 「이번 호출」이었지만, 긴 수명의 서버에서는 그 판정이
+    **서버 부팅 시점**을 기준으로 서고, 그 시드가 다른 경로로 방금 심은 Contest 를 남의
+    것으로 보고 지운다. 기본값이 없는 편이 낫다.
+    """
+
+    resp = _post(client, "operator-queues", {"only": "identity"})
+
+    assert resp.status_code == 422, resp.content
+    assert "run_id" in resp.json()["detail"]

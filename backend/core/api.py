@@ -81,6 +81,9 @@ def e2e_seed(request, name: str):
         )
 
     options = _seed_options(request)
+    missing = set(entry.required) - set(options)
+    if missing:
+        raise HttpError(422, f"{name} 시드에 반드시 줘야 하는 옵션입니다: {sorted(missing)}")
     unknown = set(options) - set(entry.options)
     if unknown:
         raise HttpError(
@@ -96,6 +99,16 @@ def e2e_seed(request, name: str):
         # 명령의 거부(배포 환경·잘못된 네임스페이스 등)는 500 이 아니라 4xx 다 —
         # 호출부가 「내가 잘못 불렀다」와 「서버가 깨졌다」를 구별할 수 있어야 한다.
         raise HttpError(422, str(exc)) from exc
+    except Exception as exc:
+        # **역추적을 본문에 실어 보낸다.** 서브프로세스 시절에는 stderr 가 호출부의
+        # 터미널로 그대로 흘러 시드가 왜 죽었는지가 그 자리에 보였다. 그것을 잃으면
+        # 호출부는 Django 의 DEBUG HTML 500 을 400자만 잘라 보게 되고, 이 명령들이
+        # 실제로 겪은 종류의 실패(ProtectedError 로 Category 삭제가 죽는 것 같은)를
+        # 진단할 길이 사라진다. 이 표면은 내부 토큰 뒤에 있고 배포 환경에서는 아예
+        # 거부되므로 역추적이 새어도 잃을 것이 없다.
+        import traceback
+
+        raise HttpError(500, f"{entry.command} 가 죽었다:\n{traceback.format_exc()}") from exc
 
     # 명령들은 마지막 줄에 JSON 한 덩어리를 찍는다(각 명령 docstring 참고). 그 규약이
     # 깨지면 조용히 이상한 값을 돌려주는 대신 여기서 터뜨린다.
