@@ -11,7 +11,7 @@ const nextConfig: NextConfig = {
   // 산출물이 "operator/server.js"처럼 워크스페이스 상대 경로를 그대로 보존하게
   // 한다. docker/operator.Dockerfile의 runner 스테이지가 이 경로를 그대로 안다.
   outputFileTracingRoot: path.join(__dirname, ".."),
-  transpilePackages: ["@laurio/bff-shared"],
+  transpilePackages: ["@laurio/bff-shared", "@laurio/bff-client"],
   reactStrictMode: true,
   webpack: (config, { dev }) => {
     // frontend/next.config.ts와 같은 이유 — dev 컨테이너가 소스를 바인드

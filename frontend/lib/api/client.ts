@@ -1,6 +1,6 @@
 // 백엔드(django-ninja) 공개 표면을 부르는 타입 있는 클라이언트.
 //
-// `paths` 는 `schema.gen.ts` 가 백엔드의 OpenAPI 스키마에서 생성한다(FE-03, #28) —
+// `paths` 는 `@laurio/bff-client/schema` 가 백엔드의 OpenAPI 스키마에서 생성한다(FE-03, #28) —
 // 손으로 쓰지 않는다. 백엔드 스키마가 바뀌면(필드 삭제·타입 변경·경로 변경) 이
 // 클라이언트를 쓰는 모든 호출부에서 `tsc` 가 즉시 실패한다 — 런타임이 아니라
 // 빌드타임에 드러난다.
@@ -31,7 +31,7 @@
 // 없으므로 이 검사는 그 쪽에서 아무 영향이 없다.
 import createClient from "openapi-fetch";
 
-import type { paths } from "./schema.gen";
+import type { paths } from "@laurio/bff-client/schema";
 
 if (typeof window !== "undefined") {
   throw new Error(

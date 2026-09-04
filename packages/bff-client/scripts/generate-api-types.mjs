@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 백엔드의 OpenAPI 스키마에서 프론트엔드 타입을 생성한다(FE-03, #28).
+// 백엔드의 OpenAPI 스키마에서 두 앱이 함께 쓰는 타입을 생성한다(FE-03 #28; 패키지로 이사 #146).
 //
 // 손으로 쓰지 않는다 — 반드시 어긋나기 때문이다. `pnpm generate:api` 하나로 돈다.
 //
@@ -15,7 +15,7 @@
 //      뽑아 임시 파일에 쓴다(레포에는 커밋하지 않는다 — 커밋되는 유일한 산출물은
 //      아래 2번의 타입 파일이다. 원본 JSON까지 커밋하면 같은 사실을 두 파일이
 //      따로 갖게 되어 최신성 검사가 무엇을 기준으로 삼아야 하는지 애매해진다).
-//   2. `openapi-typescript` 로 그 스키마를 `lib/api/schema.gen.ts` 로 직접
+//   2. `openapi-typescript` 로 그 스키마를 `src/schema.gen.ts` 로 직접
 //      써낸다(`-o`) — Node 프로세스의 stdout으로 전체 산출물을 실어 보내지
 //      않는다. 코디네이터 리뷰 지적: 예전엔 stdout으로 받아 우리가 다시
 //      파일에 썼는데, `execFileSync` 의 기본 `maxBuffer` (1MiB)가 스키마가
@@ -33,9 +33,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const frontendRoot = path.resolve(__dirname, "..");
-const backendRoot = path.resolve(frontendRoot, "..", "backend");
-const outputFile = path.resolve(frontendRoot, "lib", "api", "schema.gen.ts");
+const packageRoot = path.resolve(__dirname, "..");
+const backendRoot = path.resolve(packageRoot, "..", "..", "backend");
+const outputFile = path.resolve(packageRoot, "src", "schema.gen.ts");
 
 function run(command, args, options) {
   console.log(`$ ${command} ${args.join(" ")}`);
@@ -55,19 +55,20 @@ try {
   });
 
   console.log("2/2 스키마에서 TypeScript 타입을 생성한다");
-  const cliPath = path.resolve(frontendRoot, "node_modules", "openapi-typescript", "bin", "cli.js");
+  const cliPath = path.resolve(packageRoot, "node_modules", "openapi-typescript", "bin", "cli.js");
   run("node", [cliPath, schemaJsonPath, "-o", outputFile]);
 
   const header = [
     "// 이 파일은 생성됩니다 — 손으로 고치지 마세요.",
     "// `pnpm --dir frontend generate:api` 로 backend/config/api.py 의 OpenAPI 스키마에서",
+    "// 다시 만듭니다 — 산출물은 packages/bff-client 가 소유하고 두 앱이 함께 씁니다(#146).",
     "// 다시 만듭니다. CI가 이 파일이 최신인지 확인합니다(재생성 후 diff가 나면 실패).",
     "",
   ].join("\n");
 
   const generated = readFileSync(outputFile, "utf-8");
   writeFileSync(outputFile, header + generated);
-  console.log(`written: ${path.relative(frontendRoot, outputFile)}`);
+  console.log(`written: ${path.relative(packageRoot, outputFile)}`);
 } finally {
   rmSync(tmpDir, { recursive: true, force: true });
 }

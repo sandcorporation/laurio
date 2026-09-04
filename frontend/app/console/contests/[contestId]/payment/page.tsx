@@ -41,7 +41,7 @@ import {
   openTossCheckout,
   peekRedirectPaymentResult,
 } from "@/lib/payments/toss";
-import type { components } from "@/lib/api/schema.gen";
+import type { components } from "@laurio/bff-client/schema";
 
 import { ContestStageStepper } from "../../_components/contest-stage-stepper";
 

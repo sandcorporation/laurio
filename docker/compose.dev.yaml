@@ -261,11 +261,12 @@ services:
       # 일회용 컨테이너에서 돌린다.
       #
       # 워크스페이스 멤버마다 자기 node_modules(심볼릭 링크 모음)를 갖는다 —
-      # 루트 것 하나만 가리면 frontend/·packages/bff-shared/ 밑에는 여전히 호스트
+      # 루트 것 하나만 가리면 frontend/·packages/* 밑에는 여전히 호스트
       # 바인드 마운트가 그대로 남아 옛(또는 없는) node_modules 가 노출된다.
       - laurio-dev-web-node-modules:/app/node_modules
       - laurio-dev-web-frontend-node-modules:/app/frontend/node_modules
       - laurio-dev-web-shared-node-modules:/app/packages/bff-shared/node_modules
+      - laurio-dev-web-bff-client-node-modules:/app/packages/bff-client/node_modules
       - laurio-dev-web-next:/app/frontend/.next
       # node_modules 볼륨은 처음 만들어질 때 딱 한 번만 이미지 내용으로 채워진다
       # (도커의 명명된 볼륨 규칙). 그래서 이미 떠 있는 스택에 `pnpm add` 로 의존성을
@@ -296,10 +297,10 @@ services:
     # 것으로 재현된다(호스트가 기대하는 Windows 바이너리가 컨테이너의 리눅스
     # 산출물로 조용히 덮인 것이다 — pnpm의 최신성 판정은 락파일 해시만 보지
     # 실제 바이너리 플랫폼은 보지 않는다). `--filter <패키지>...`는 그 패키지와
-    # 그 워크스페이스 의존성(laurio-frontend는 @laurio/bff-shared)만 설치 대상에
+    # 그 워크스페이스 의존성(laurio-frontend는 @laurio/bff-shared·@laurio/bff-client)만 설치 대상에
     # 넣는다 — operator/는 필터링 대상 밖이라 이 컨테이너가 그 디렉터리를 아예
     # 건드리지 않는다(`pnpm install --filter laurio-frontend... --frozen-lockfile`
-    # 을 직접 돌려 "Scope: 2 of 4 workspace projects"로 확인했다). 두 컨테이너가
+    # 을 직접 돌려 "Scope: 3 of 5 workspace projects"로 확인했다 — bff-client 가 늘며 수도 늘었다). 두 컨테이너가
     # 서로의 node_modules를 볼륨으로 가리는 것보다 이 편이 근본적이다 — 애초에
     # 쓰지 않는 디렉터리를 아예 쓰지 않게 만든다.
     #
@@ -341,6 +342,7 @@ services:
       - laurio-dev-operator-node-modules:/app/node_modules
       - laurio-dev-operator-app-node-modules:/app/operator/node_modules
       - laurio-dev-operator-shared-node-modules:/app/packages/bff-shared/node_modules
+      - laurio-dev-operator-bff-client-node-modules:/app/packages/bff-client/node_modules
       - laurio-dev-operator-next:/app/operator/.next
       - laurio-dev-operator-pnpm-store:/pnpm/store
     # frontend 서비스 command 주석 참고 — `--filter laurio-operator...`가 이
@@ -360,11 +362,13 @@ volumes:
   laurio-dev-web-node-modules:
   laurio-dev-web-frontend-node-modules:
   laurio-dev-web-shared-node-modules:
+  laurio-dev-web-bff-client-node-modules:
   laurio-dev-web-next:
   laurio-dev-web-pnpm-store:
   laurio-dev-operator-node-modules:
   laurio-dev-operator-app-node-modules:
   laurio-dev-operator-shared-node-modules:
+  laurio-dev-operator-bff-client-node-modules:
   laurio-dev-operator-next:
   laurio-dev-operator-pnpm-store:
   laurio-dev-minio:

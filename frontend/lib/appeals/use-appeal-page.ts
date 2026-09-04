@@ -12,8 +12,10 @@
 // 자기가 낸 적 없는 이의를 봤다고 믿게 된다.
 import { useCallback, useEffect, useState } from "react";
 
-import { sessionFetch } from "@/lib/auth/client-fetch";
-import type { components } from "@/lib/api/schema.gen";
+import type { ApiResult } from "@laurio/bff-client";
+import type { components } from "@laurio/bff-client/schema";
+
+import { bffClient } from "@/lib/bff/client";
 
 export type OwnScore = components["schemas"]["OwnScoreOut"];
 export type Appeal = components["schemas"]["AppealOut"];
@@ -33,12 +35,6 @@ export type AppealPageState =
       readingsFailed: boolean;
     };
 
-async function readJson<T>(path: string): Promise<{ ok: true; value: T } | { ok: false; status: number }> {
-  const response = await sessionFetch(path, { cache: "no-store" });
-  if (!response.ok) return { ok: false, status: response.status };
-  return { ok: true, value: (await response.json()) as T };
-}
-
 export function useAppealPage(submissionId: string): {
   state: AppealPageState;
   reload: () => void;
@@ -49,35 +45,32 @@ export function useAppealPage(submissionId: string): {
 
   useEffect(() => {
     let cancelled = false;
-
-    void (async () => {
-      try {
-        const [score, appeal, readings] = await Promise.all([
-          readJson<OwnScore>(`/api/backend/submissions/${submissionId}/score`),
-          readJson<Appeal>(`/api/backend/submissions/${submissionId}/appeal`),
-          readJson<{ items: SourceReading[] }>(
-            `/api/backend/submissions/${submissionId}/source-readings`,
-          ),
-        ]);
+    void Promise.all([
+      bffClient.get<OwnScore>(`/api/backend/submissions/${submissionId}/score`),
+      bffClient.get<Appeal>(`/api/backend/submissions/${submissionId}/appeal`),
+      bffClient.get<{ items: SourceReading[] }>(
+        `/api/backend/submissions/${submissionId}/source-readings`,
+      ),
+    ]).then(
+      ([score, appeal, readings]: [
+        ApiResult<OwnScore>,
+        ApiResult<Appeal>,
+        ApiResult<{ items: SourceReading[] }>,
+      ]) => {
         if (cancelled) return;
-
-        // 404 는 실패가 아니다 — "아직 채점 안 됐다"·"아직 이의가 없다"는 둘 다
-        // 정상적인 사실이다. 그 밖의 실패(403·500)는 화면 전체가 실패한 것이다.
+        // 404 는 실패가 아니다 — "아직 채점 안 됐다"·"아직 이의가 없다"는 둘 다 정상적인
+        // 사실이다. 그 밖의 실패(403·500)는 화면 전체가 실패한 것이다.
         if (!score.ok && score.status !== 404) return setState({ status: "error" });
         if (!appeal.ok && appeal.status !== 404) return setState({ status: "error" });
-
         setState({
           status: "ready",
-          score: score.ok ? score.value : null,
-          appeal: appeal.ok ? appeal.value : null,
-          readings: readings.ok ? readings.value.items : [],
+          score: score.ok ? score.data : null,
+          appeal: appeal.ok ? appeal.data : null,
+          readings: readings.ok ? readings.data.items : [],
           readingsFailed: !readings.ok,
         });
-      } catch {
-        if (!cancelled) setState({ status: "error" });
-      }
-    })();
-
+      },
+    );
     return () => {
       cancelled = true;
     };
@@ -92,17 +85,6 @@ export async function submitAppeal(
   submissionId: string,
   reason: string,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
-  const response = await sessionFetch(`/api/backend/submissions/${submissionId}/appeal`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ reason }),
-  });
-
-  if (response.status === 201) return { ok: true };
-
-  const detail = await response
-    .json()
-    .then((body: { detail?: string }) => body.detail)
-    .catch(() => undefined);
-  return { ok: false, message: detail ?? "이의를 접수하지 못했습니다. 잠시 후 다시 시도해주세요." };
+  const result = await bffClient.post(`/api/backend/submissions/${submissionId}/appeal`, { reason });
+  return result.ok ? { ok: true } : { ok: false, message: result.detail };
 }

@@ -15,6 +15,7 @@ WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY operator/package.json ./operator/package.json
 COPY packages/bff-shared/package.json ./packages/bff-shared/package.json
+COPY packages/bff-client/package.json ./packages/bff-client/package.json
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile
 
@@ -23,6 +24,7 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 FROM base AS dev
 COPY operator/ ./operator/
 COPY packages/bff-shared/ ./packages/bff-shared/
+COPY packages/bff-client/ ./packages/bff-client/
 WORKDIR /app/operator
 EXPOSE 3000
 CMD ["pnpm", "dev"]
@@ -31,6 +33,7 @@ CMD ["pnpm", "dev"]
 FROM base AS builder
 COPY operator/ ./operator/
 COPY packages/bff-shared/ ./packages/bff-shared/
+COPY packages/bff-client/ ./packages/bff-client/
 WORKDIR /app/operator
 RUN pnpm build
 

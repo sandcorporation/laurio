@@ -12,7 +12,8 @@
     "@laurio/bff-shared": "workspace:*",
     "next": "^15.5.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "@laurio/bff-client": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

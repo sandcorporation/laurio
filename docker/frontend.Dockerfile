@@ -16,6 +16,7 @@ WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY frontend/package.json ./frontend/package.json
 COPY packages/bff-shared/package.json ./packages/bff-shared/package.json
+COPY packages/bff-client/package.json ./packages/bff-client/package.json
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile
 
@@ -25,6 +26,7 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 FROM base AS dev
 COPY frontend/ ./frontend/
 COPY packages/bff-shared/ ./packages/bff-shared/
+COPY packages/bff-client/ ./packages/bff-client/
 WORKDIR /app/frontend
 EXPOSE 3000
 CMD ["pnpm", "dev"]
@@ -38,6 +40,7 @@ CMD ["pnpm", "dev"]
 FROM base AS builder
 COPY frontend/ ./frontend/
 COPY packages/bff-shared/ ./packages/bff-shared/
+COPY packages/bff-client/ ./packages/bff-client/
 WORKDIR /app/frontend
 # NEXT_PUBLIC_*는 브라우저에서 도는 코드에 빌드타임에 인라인된다 — 런타임
 # environment로 넘겨도 이미 굳어진 번들에는 반영되지 않는다(#85 코드리뷰 지적

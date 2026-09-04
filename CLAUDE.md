@@ -206,9 +206,11 @@ cd backend && LAURIO_DB_PORT=55432   LAURIO_TEST_DB_NAME=test_laurio_c2   SESSIO
 
 Next.js + React. 저장소 루트가 pnpm 워크스페이스다(운영자 앱 04 #62, ADR-0021) —
 락파일은 루트의 `pnpm-lock.yaml` 하나뿐이고, 공개 앱(`frontend/`, 위치·패키지 이름
-변경 없음)·운영자 앱(`operator/`)·공유 BFF 패키지(`packages/bff-shared`, 경로
-순회 방어·Origin 검증·허용목록 검사 함수·백엔드 전달 기계만 담는다 — 허용목록의
-**내용**은 앱마다 자기 파일에 남는다)가 그 멤버다. 명령은 그대로다 — 워크스페이스가
+변경 없음)·운영자 앱(`operator/`)·공유 BFF 패키지 둘이 그 멤버다 —
+`packages/bff-shared`(서버 쪽: 경로 순회 방어·Origin 검증·허용목록 검사 함수·백엔드
+전달 기계. 허용목록의 **내용**은 앱마다 자기 파일에 남는다)와 `packages/bff-client`
+(브라우저 쪽, #146: 인증 구역 호출의 클라이언트·`ApiResult`·`normalizeDetail`·
+`useBackendQuery`/`usePagedList`·생성 타입 `schema.gen.ts`). 명령은 그대로다 — 워크스페이스가
 생겨도 `pnpm --dir <앱>` 호출법은 바뀌지 않는다.
 
 테스트 시임은 **앱마다 하나**다(ADR-0021, ADR-0017 개정) — 앱이 둘이어도 그 아래로

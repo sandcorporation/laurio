@@ -1,9 +1,9 @@
-// AI grill 개최 화면(FE-12, #37)이 쓰는 타입 — lib/api/schema.gen.ts(FE-03, #28)가
+// AI grill 개최 화면(FE-12, #37)이 쓰는 타입 — @laurio/bff-client/schema(FE-03 #28, 패키지로 이사 #146)가
 // 백엔드 OpenAPI 스키마에서 생성한 것만 재노출한다. Contest·Verification 타입은
 // 이미 lib/submissions/types.ts(FE-10, #35)가 재노출해 뒀으므로 여기서 다시
 // 선언하지 않고 그대로 가져다 쓴다 — 같은 백엔드 스키마를 두 곳에서 각자
 // 손으로 베끼면 한쪽만 갱신되는 드리프트가 생긴다.
-import type { components } from "@/lib/api/schema.gen";
+import type { components } from "@laurio/bff-client/schema";
 
 export type { ContestDetail, VerificationStatusOut } from "@/lib/submissions/types";
 

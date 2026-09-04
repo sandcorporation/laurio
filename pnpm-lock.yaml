@@ -10,6 +10,9 @@ importers:
 
   frontend:
     dependencies:
+      '@laurio/bff-client':
+        specifier: workspace:*
+        version: link:../packages/bff-client
       '@laurio/bff-shared':
         specifier: workspace:*
         version: link:../packages/bff-shared
@@ -41,9 +44,6 @@ importers:
       '@types/react-dom':
         specifier: ^19.1.0
         version: 19.2.5(@types/react@19.2.18)
-      openapi-typescript:
-        specifier: ^7.13.0
-        version: 7.13.0(typescript@5.9.3)
       postcss:
         specifier: ^8.5.26
         version: 8.5.26
@@ -56,6 +56,9 @@ importers:
 
   operator:
     dependencies:
+      '@laurio/bff-client':
+        specifier: workspace:*
+        version: link:../packages/bff-client
       '@laurio/bff-shared':
         specifier: workspace:*
         version: link:../packages/bff-shared
@@ -78,6 +81,25 @@ importers:
       '@types/react-dom':
         specifier: ^19.1.0
         version: 19.2.5(@types/react@19.2.18)
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  packages/bff-client:
+    dependencies:
+      openapi-fetch:
+        specifier: ^0.13.8
+        version: 0.13.8
+      react:
+        specifier: ^19.1.0
+        version: 19.2.8
+    devDependencies:
+      '@types/react':
+        specifier: ^19.1.0
+        version: 19.2.18
+      openapi-typescript:
+        specifier: ^7.13.0
+        version: 7.13.0(typescript@5.9.3)
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
