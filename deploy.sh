@@ -13,6 +13,7 @@
 #   frontend/            -> frontend
 #   operator/            -> operator
 #   packages/bff-shared/ -> frontend + operator                    (둘이 함께 쓴다)
+#   packages/bff-client/ -> frontend + operator                    (둘이 함께 쓴다)
 #   pnpm-lock.yaml       -> frontend + operator
 #   docker/*.Dockerfile / compose.<target>.yaml -> 그 파일이 짓는 것 전부
 #
@@ -122,7 +123,7 @@ else
   fi
 
   SHARED=false
-  if touched '^(packages/bff-shared/|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|package\.json$)'; then
+  if touched '^(packages/|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|package\.json$)'; then
     SHARED=true
   fi
 

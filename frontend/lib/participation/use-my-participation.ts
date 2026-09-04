@@ -16,27 +16,19 @@
 // 0건·조회 실패·불러오는 중을 셋으로 구별한다(운영자 앱의 큐 훅과 같은 원칙) —
 // "참가한 게 없다" 와 "불러오지 못했다" 가 같아 보이면, 조회가 죽은 날 아무도
 // 눈치채지 못한 채 참가자가 자기 상금을 놓친다.
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { type PagedListState, usePagedList } from "@laurio/bff-client";
+import type { components } from "@laurio/bff-client/schema";
 
-import { sessionFetch } from "@/lib/auth/client-fetch";
-import type { components } from "@/lib/api/schema.gen";
+import { bffClient } from "@/lib/bff/client";
 
 export type NextAction = components["schemas"]["NextAction"];
 export type ParticipationRow = components["schemas"]["MyParticipationOut"];
 
-export type ParticipationState =
-  | { status: "loading" }
-  | { status: "error" }
-  | {
-      status: "ready";
-      rows: ParticipationRow[];
-      count: number;
-      /** 아직 안 받은 페이지가 남았는가. */
-      hasMore: boolean;
-      loadMore: () => void;
-      loadingMore: boolean;
-    };
+/** loading · error · ready(rows·count·hasMore·loadMore·loadingMore) — 이 상태기계는 패키지의
+ * `usePagedList` 가 소유한다(#146). 「0건」과 「불러오지 못했다」와 「불러오는 중」을 셋으로
+ * 구별한다는 계약은 그대로다 — 셋이 같아 보이면 조회가 죽은 날 아무도 눈치채지 못한 채 참가자가
+ * 자기 상금을 놓친다. */
+export type ParticipationState = PagedListState<ParticipationRow>;
 
 /** 「다음 행동」의 번역표.
  *
@@ -107,60 +99,5 @@ export const NEXT_ACTION_LABELS: Record<NextAction, NextActionLabel> = {
  * 그대로 일어난다.
  */
 export function useMyParticipation(): ParticipationState {
-  const router = useRouter();
-  const [phase, setPhase] = useState<"loading" | "error" | "ready" | "more">("loading");
-  const [rows, setRows] = useState<ParticipationRow[]>([]);
-  const [count, setCount] = useState(0);
-  const [page, setPage] = useState(1);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    void (async () => {
-      try {
-        const response = await sessionFetch(`/api/backend/submissions/mine?page=${page}`, {
-          cache: "no-store",
-        });
-        if (cancelled) return;
-
-        if (response.status === 401) {
-          router.replace("/login");
-          return;
-        }
-        if (!response.ok) {
-          setPhase("error");
-          return;
-        }
-
-        const body = (await response.json()) as { items: ParticipationRow[]; count: number };
-        if (cancelled) return;
-
-        // 페이지를 **이어 붙인다.** 갈아끼우면 「더 보기」가 앞 페이지를 지운다.
-        setRows((previous) => (page === 1 ? body.items : [...previous, ...body.items]));
-        setCount(body.count);
-        setPhase("ready");
-      } catch {
-        if (!cancelled) setPhase("error");
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [router, page]);
-
-  if (phase === "loading") return { status: "loading" };
-  if (phase === "error") return { status: "error" };
-
-  return {
-    status: "ready",
-    rows,
-    count,
-    hasMore: rows.length < count,
-    loadingMore: phase === "more",
-    loadMore: () => {
-      setPhase("more");
-      setPage((current) => current + 1);
-    },
-  };
+  return usePagedList<ParticipationRow>(bffClient, "/api/backend/submissions/mine");
 }

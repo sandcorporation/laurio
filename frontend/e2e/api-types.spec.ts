@@ -4,7 +4,7 @@ import { fetchContestCategories } from "@/lib/api/contests";
 
 // FE-03(#28) 인수조건 — "타입이 실제로 쓰이는 예시 호출이 하나 이상 있고 타입
 // 체크를 통과한다"를 실행으로도 증명한다. `fetchContestCategories` 는
-// `lib/api/schema.gen.ts`(백엔드 OpenAPI 스키마에서 생성) 의 타입만으로 응답을
+// `@laurio/bff-client/schema`(백엔드 OpenAPI 스키마에서 생성) 의 타입만으로 응답을
 // 해석한다. 이 파일 자체가 `tsc --noEmit` 대상이므로(ADR-0017 — e2e도 타입체크
 // 대상), 백엔드 스키마가 바뀌어 `Category` 의 필드가 사라지거나 이름이 바뀌면
 // 빌드가 여기서 먼저 죽는다.

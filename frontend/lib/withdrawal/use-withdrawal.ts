@@ -10,10 +10,10 @@
 //
 // `BLOCK_REASON_LABELS`가 `Record<WithdrawalBlockReason, string>`인 이유도
 // 같다 — 값이 하나 늘면 `tsc --noEmit`이 이 파일에서 빌드타임에 잡는다.
-import { useEffect, useState } from "react";
+import { normalizeDetail, useBackendQuery } from "@laurio/bff-client";
+import type { components } from "@laurio/bff-client/schema";
 
-import { sessionFetch } from "@/lib/auth/client-fetch";
-import type { components } from "@/lib/api/schema.gen";
+import { bffClient } from "@/lib/bff/client";
 
 export type WithdrawalBlockReason = components["schemas"]["WithdrawalBlockReason"];
 export type WithdrawalEligibility = components["schemas"]["WithdrawalEligibilityOut"];
@@ -31,35 +31,16 @@ export type WithdrawalEligibilityState =
   | { status: "ready"; eligibility: WithdrawalEligibility };
 
 export function useWithdrawalEligibility(): WithdrawalEligibilityState {
-  const [state, setState] = useState<WithdrawalEligibilityState>({ status: "loading" });
+  const { state } = useBackendQuery<WithdrawalEligibility>(
+    bffClient,
+    "/api/backend/accounts/withdrawal",
+  );
 
-  useEffect(() => {
-    let cancelled = false;
-
-    void (async () => {
-      try {
-        const response = await sessionFetch("/api/backend/accounts/withdrawal", {
-          cache: "no-store",
-        });
-        if (cancelled) return;
-        if (!response.ok) {
-          setState({ status: "error" });
-          return;
-        }
-        const eligibility = (await response.json()) as WithdrawalEligibility;
-        setState({ status: "ready", eligibility });
-      } catch {
-        if (!cancelled) setState({ status: "error" });
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return state;
+  if (state.status === "loading") return { status: "loading" };
+  if (state.status === "error") return { status: "error" };
+  return { status: "ready", eligibility: state.data };
 }
+
 
 export type WithdrawalResult =
   | { ok: true; withdrawn_at: string }
@@ -67,7 +48,10 @@ export type WithdrawalResult =
 
 /** 탈퇴를 실제로 실행한다. 유예 없이 즉시 반영된다(ADR-0025). */
 export async function executeWithdrawal(): Promise<WithdrawalResult> {
-  const response = await sessionFetch("/api/backend/accounts/withdrawal", {
+  // 409 는 실패이지만 **본문에 막고 있는 것들이 실려 있다** — 화면이 그 목록을 그대로 보여줘야
+  // 사용자가 무엇을 끝내야 하는지 안다. 그래서 이 한 곳만 응답 본문을 직접 읽는다(`request` 는
+  // 실패에서 detail 만 남긴다).
+  const response = await bffClient.fetch("/api/backend/accounts/withdrawal", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
   });
@@ -77,14 +61,12 @@ export async function executeWithdrawal(): Promise<WithdrawalResult> {
     return { ok: true, withdrawn_at: body.withdrawn_at };
   }
 
-  if (response.status === 409) {
-    const body = (await response.json()) as components["schemas"]["WithdrawalRejectedOut"];
-    return { ok: false, blockingReasons: body.blocking_reasons, message: body.detail };
-  }
-
+  const body = (await response.json().catch(() => null)) as
+    | components["schemas"]["WithdrawalRejectedOut"]
+    | null;
   return {
     ok: false,
-    blockingReasons: [],
-    message: "탈퇴를 처리하지 못했습니다. 잠시 후 다시 시도해주세요.",
+    blockingReasons: body?.blocking_reasons ?? [],
+    message: normalizeDetail(body?.detail, "탈퇴를 처리하지 못했습니다. 잠시 후 다시 시도해주세요."),
   };
 }

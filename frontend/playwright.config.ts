@@ -22,6 +22,11 @@ import { defineConfig, devices } from "@playwright/test";
 const publicBaseURL = process.env.LAURIO_E2E_BASE_URL ?? "http://127.0.0.1:53000";
 const operatorBaseURL = process.env.LAURIO_OPERATOR_E2E_BASE_URL ?? "http://127.0.0.1:53001";
 
+function workersFromEnv(value: string | undefined): number | string | undefined {
+  if (value === undefined || value.trim() === "") return undefined;
+  return /^\d+$/.test(value.trim()) ? Number(value) : value;
+}
+
 export default defineConfig({
   // 운영자 큐 시드가 "이번 실행"과 "이전 실행"을 구별할 토큰을 스위트 시작 시
   // 한 번 발급한다(코드리뷰 지적, #70 — e2e/lib/run-id.ts 상단 주석 참고).
@@ -54,7 +59,10 @@ export default defineConfig({
   // `next dev` 컨테이너가 OOM 으로 죽어 절반이 ERR_CONNECTION_REFUSED 로
   // 실패했다 — 24GB 로 올린 뒤에야 4워커가 성립했다. 이 값을 올리기 전에
   // `docker stats` 로 여유를 먼저 본다.
-  workers: process.env.PLAYWRIGHT_WORKERS ?? "50%",
+  // `PLAYWRIGHT_WORKERS` 는 숫자("4")와 퍼센트("50%") 둘 다 받는다 — 문자열 "4" 를 그대로 넘기면
+  // Playwright 가 "config.workers must be a number or percentage" 로 **설정 로딩 단계에서** 죽는다
+  // (CLAUDE.md 가 이 변수로 워커를 낮추라고 안내하는데 그 말대로 하면 실행조차 안 됐다).
+  workers: workersFromEnv(process.env.PLAYWRIGHT_WORKERS) ?? "50%",
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [["github"], ["list"]] : "list",
