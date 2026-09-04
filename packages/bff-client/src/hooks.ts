@@ -122,10 +122,15 @@ export function usePagedList<Row>(
   const [rows, setRows] = useState<Row[]>([]);
   const [count, setCount] = useState(0);
   const [page, setPage] = useState(1);
-  // 커서 모드에서 다음에 물을 자리. `null` 은 「처음부터」, `undefined` 는 「더 없다」다 —
-  // 그 둘을 하나로 뭉치면 끝에 도달한 목록이 처음부터 다시 읽힌다.
+  // 커서 모드에서 다음에 물을 자리. `null` 은 「처음부터」다.
   const [cursor, setCursor] = useState<string | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  // **「처음인가」를 커서 값에서 읽지 않는다.** 커서의 `null` 은 「처음부터」이고 다음
+  // 커서의 `null` 은 「더 없다」인데, 둘 다 `string | null` 이라 하나로 뭉치기 쉽다 —
+  // 실제로 `loadMore()` 가 끝에서 불리면 커서가 null 이 되어 「처음부터」로 읽히고,
+  // 쌓아 둔 행이 1묶음으로 **갈아치워진다.** 「이번 조회가 이어 붙이는 것인가」를
+  // 따로 들고 있으면 그 혼동이 성립하지 않는다(페이지 모드의 `page === 1` 과 같은 역할).
+  const [appending, setAppending] = useState(false);
 
   // **경로가 바뀌면 쌓아 둔 페이지를 버린다**(#149). 이 훅은 「더 보기」를 위해 페이지를
   // 이어 붙이는데, 그 상태가 경로에 딸린 것이라는 사실이 코드에 없었다 — 필터가 붙은
@@ -143,6 +148,7 @@ export function usePagedList<Row>(
     setPage(1);
     setCursor(null);
     setNextCursor(null);
+    setAppending(false);
     setPhase("loading");
   }
 
@@ -155,7 +161,6 @@ export function usePagedList<Row>(
         ? ""
         : `${separator}after=${encodeURIComponent(cursor)}`
       : `${separator}page=${page}`;
-    const first = cursorMode ? cursor === null : page === 1;
     void client.get<PagedBody<Row>>(`${path}${query}`).then((result) => {
       if (cancelled) return;
       if (!result.ok) {
@@ -163,7 +168,22 @@ export function usePagedList<Row>(
         setPhase("error");
         return;
       }
-      setRows((previous) => (first ? result.data.items : [...previous, ...result.data.items]));
+      if (cursorMode && result.data.next === undefined) {
+        // **`next` 가 아예 없는 응답은 「끝」이 아니라 규약 위반이다.** 커서 모드를 켠
+        // 호출부가 아직 커서를 말하지 않는 엔드포인트를 가리키면(#153 이관 중에 생길 수
+        // 있는 일이다) 목록이 20행에서 **조용히 잘리고** 「더 보기」도 없이 끝난 것처럼
+        // 보인다 — 그 사이 머리말은 전체 건수를 그대로 말한다. 조용한 누락이 이 훅이
+        // 막으려던 바로 그것이라, 여기서는 실패라고 말한다.
+        setFailure({
+          ok: false,
+          status: 0,
+          code: "malformed",
+          detail: "커서 모드인데 응답에 next 가 없다 — 이 엔드포인트는 커서를 말하지 않는다.",
+        });
+        setPhase("error");
+        return;
+      }
+      setRows((previous) => (appending ? [...previous, ...result.data.items] : result.data.items));
       setCount(result.data.count);
       if (cursorMode) setNextCursor(result.data.next ?? null);
       setPhase("ready");
@@ -171,6 +191,9 @@ export function usePagedList<Row>(
     return () => {
       cancelled = true;
     };
+    // `appending` 은 이 조회가 이어 붙이는 것인지만 정한다 — 그 값이 바뀌었다고 다시
+    // 읽을 이유는 없다(다시 읽는 계기는 경로·페이지·커서다).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, path, page, cursor, cursorMode]);
 
   if (phase === "loading") return { status: "loading" };
@@ -190,7 +213,12 @@ export function usePagedList<Row>(
     hasMore: cursorMode ? nextCursor !== null : rows.length < count,
     loadingMore: phase === "more",
     loadMore: () => {
+      // 끝에서 부르면 아무 일도 하지 않는다 — 커서를 null 로 되돌리면 그것은 「처음부터」다.
+      // 지금 호출부는 `hasMore` 로 막지만, 무한 스크롤처럼 그 판정 없이 부르는 자리가
+      // 생기면 목록이 통째로 1묶음으로 갈아치워진다.
+      if (cursorMode && nextCursor === null) return;
       setPhase("more");
+      setAppending(true);
       if (cursorMode) {
         setCursor(nextCursor);
         return;

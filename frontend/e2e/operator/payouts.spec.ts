@@ -313,7 +313,7 @@ test.describe("지급 큐 — 세 번째 배지도 배지로 그려진다(#91)",
         status: 200,
         contentType: "application/json",
         // 페이지네이션이 붙어(#149) 본문이 `{items, count}` 다.
-        body: JSON.stringify({ items: [TRANSFER_ROW], count: 1 }),
+        body: JSON.stringify({ items: [TRANSFER_ROW], count: 1, next: null }),
       }),
     );
 
@@ -581,7 +581,7 @@ test.describe("지급 큐 — 좁히기와 자르기는 백엔드가 한다(#149
       route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ items, count: 1 }),
+        body: JSON.stringify({ items, count: 1, next: null }),
       });
     });
 
