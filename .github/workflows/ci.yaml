@@ -239,6 +239,33 @@ jobs:
             exit 1
           fi
 
+  # 순수 함수 시임(#160, ADR-0026) — react·next(next/server 제외)를 임포트하지 않는
+  # 모듈만 대상으로 한다. dev compose 스택을 기다리지 않는다(frontend-openapi-types와
+  # 같은 이유 — 백엔드도 브라우저도 필요 없다). `vitest.shared.mts`의
+  # `pureModuleGuard()`가 그 경계를 CI에서 실제로 강제한다: 대상 모듈이 react나
+  # next의 렌더링/라우팅 표면을 임포트하면 이 잡이 빨간불로 끝난다(리뷰가 아니라
+  # 러너가 거부한다).
+  frontend-pure-unit-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Install workspace dependencies from lockfile
+        run: pnpm install --frozen-lockfile
+
+      - name: Operator app — pure modules
+        working-directory: operator
+        run: pnpm run test:unit
+
   # 프론트엔드 e2e. ADR-0017 — 시임은 **실행 중인 Next 앱 하나**이므로, 모킹하지 않고
   # dev compose 로 전체 스택(db·minio·backend·frontend)을 실제로 띄운 뒤 그걸 친다.
   # dev compose 는 모든 어댑터가 fake 로 바인딩되므로 실제 PG·LLM·알림 벤더가 필요 없다.

@@ -235,41 +235,35 @@ test.describe("Origin 검증 — 로그인도 예외가 아니다(ADR-0016/0019)
 });
 
 test.describe("open redirect 방어 — ?next= 는 같은 오리진의 절대경로만 허용한다", () => {
-  test("완전한 외부 URL을 next로 주면 무시하고 홈으로 보낸다", async ({ page, baseURL }) => {
-    const operator = await seedE2eOperator({ username: `e2e-op-openredirect-abs-${Date.now()}` });
-
-    await page.goto("/login?next=" + encodeURIComponent("https://evil.example.test/phish"));
-    await page.getByTestId("login-username").fill(operator.username);
-    await page.getByTestId("login-password").fill(E2E_OPERATOR_PASSWORD);
-    await page.getByTestId("login-submit").click();
-
-    await expect(page.getByTestId("operator-home-heading")).toBeVisible();
-    expect(new URL(page.url()).origin).toBe(baseURL);
-    expect(page.url()).not.toContain("evil.example.test");
-  });
-
-  test("프로토콜 상대 URL(슬래시 두 개로 시작)도 거부하고 홈으로 보낸다", async ({
+  // sanitizeNextPath의 다섯 거부 종류(빈 값·완전한 외부 URL·프로토콜 상대 URL·역슬래시·
+  // 제어 문자)와 그 경계는 operator/lib/auth/sanitize-next.test.ts가 전수로 덮는다
+  // (#160, ADR-0026) — 순수 함수라 브라우저 없이 밀리초 단위로 돈다. 여기 남기는
+  // 이 한 건은 그 함수가 옳다는 것이 아니라 **로그인 화면이 실제로 그 함수를 호출해
+  // 걸러낸다**는 배선 사실만 증명한다. 그래서 한 번의 로그인 왕복 안에서 거부(외부
+  // URL)와 허용(같은 오리진 경로)을 함께 본다 — 둘 중 하나만 보면 "next를 통째로
+  // 무시하는 버그"와 "실제로 걸러내는 가드"를 구별하지 못한다.
+  test("외부 URL은 무시하고 홈으로, 같은 오리진 경로는 그리로 보낸다 — 가드가 로그인 흐름에 실제로 붙어 있다", async ({
     page,
     baseURL,
   }) => {
-    const operator = await seedE2eOperator({ username: `e2e-op-openredirect-proto-${Date.now()}` });
-    const protocolRelative = "//" + "evil.example.test";
+    const rejected = await seedE2eOperator({ username: `e2e-op-openredirect-rejected-${Date.now()}` });
 
-    await page.goto("/login?next=" + encodeURIComponent(protocolRelative));
-    await page.getByTestId("login-username").fill(operator.username);
+    await page.goto("/login?next=" + encodeURIComponent("https://evil.example.test/phish"));
+    await page.getByTestId("login-username").fill(rejected.username);
     await page.getByTestId("login-password").fill(E2E_OPERATOR_PASSWORD);
     await page.getByTestId("login-submit").click();
 
     await expect(page.getByTestId("operator-home-heading")).toBeVisible();
     expect(new URL(page.url()).origin).toBe(baseURL);
     expect(page.url()).not.toContain("evil.example.test");
-  });
 
-  test("같은 오리진의 상대경로 next는 정상적으로 그리로 보낸다", async ({ page }) => {
-    const operator = await seedE2eOperator({ username: `e2e-op-openredirect-legit-${Date.now()}` });
+    await page.getByTestId("logout-button").click();
+    await expect(page).toHaveURL(/\/login/);
+
+    const accepted = await seedE2eOperator({ username: `e2e-op-openredirect-accepted-${Date.now()}` });
 
     await page.goto("/login?next=" + encodeURIComponent("/appeals"));
-    await page.getByTestId("login-username").fill(operator.username);
+    await page.getByTestId("login-username").fill(accepted.username);
     await page.getByTestId("login-password").fill(E2E_OPERATOR_PASSWORD);
     await page.getByTestId("login-submit").click();
 
