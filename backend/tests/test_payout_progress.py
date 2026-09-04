@@ -96,7 +96,7 @@ def _toss_payout_webhook(client, *, idempotency_key: str, vendor_status: str, at
     payload = json.dumps(
         {
             "eventType": "payout.changed",
-            "data": {"refPayoutId": f"{idempotency_key}-{attempt}", "status": vendor_status},
+            "entityBody": {"refPayoutId": f"{idempotency_key}-{attempt}", "status": vendor_status},
         }
     ).encode("utf-8")
     transmission_time = "2024-01-01T00:00:00+09:00"

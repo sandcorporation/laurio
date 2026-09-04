@@ -119,26 +119,88 @@ logger = logging.getLogger(__name__)
 _BASE_URL = "https://api.tosspayments.com"
 _TIMEOUT_SECONDS = 10
 
-# 이 코드가 우리 쪽 설정 문제(자격증명·요청 자체가 잘못됨)라고 판단하는 HTTP
-# 상태다 — `payments.adapters_toss`와 같은 판단 기준이다.
-_OUR_INTEGRATION_ERROR_STATUSES = {401, 403}
+# 이 코드가 우리 쪽 설정 문제(자격증명·요청 자체가 잘못됨, 또는 라우트 자체가
+# 없는 우리 쪽 경로 오타)라고 판단하는 HTTP 상태다 — `payments.adapters_toss`와
+# 같은 401·403 판단 기준에 404 를 더한다(#172). 404 를 빼 두면 `/v1/sellers`
+# 같은 경로 오타가 "거절"로 굳어 Seller 를 REJECTED 로 만들고, 그 하나가
+# Operator 큐로 넘어간다 — 벤더가 실제로 심사해 내린 결정이 아니라 우리
+# 라우팅 실수인데도 사람의 차례로 둔갑한다(#97 실측).
+_OUR_INTEGRATION_ERROR_STATUSES = {401, 403, 404}
 
-# 벤더가 실제로 확인해 준 Seller 상태 흐름(ADR-0020) — 여기 없는 문자열을
-# 받으면 임의로 뭉개지 않고 예외를 던진다.
+# 벤더 문서(docs.tosspayments.com/reference/additional, Seller 객체, 2026-09
+# 웹 확인 — #174)가 실제로 규정하는 Seller.status 값은 이 넷뿐이다. 예전 맵은
+# UNDER_REVIEW·REJECTED·DENIED 도 "토스에 재확인한 실제 상태 흐름(ADR-0020)"
+# 이라 주석에 적어 뒀지만, ADR-0020 이 실제로 재확인해 남긴 흐름
+# (APPROVAL_REQUIRED → PARTIALLY_APPROVED → APPROVED, KYC_REQUIRED 는 그
+# 사이 한도 초과 심사)에도, 지금 문서에도 그 셋의 근거가 없다 — 출처 없는
+# 벤더 문자열을 맵에 남겨 두면 "벤더가 거절을 이 웹훅으로 보낸다"고 잘못
+# 설계할 위험만 남는다. 등록 자체의 거절(REJECTED)은 이 표를 거치지
+# 않는다 — `_parse_seller_response`의 4xx 분기가 직접
+# `SellerRegistrationResult(status="rejected")`를 돌려준다(#172) — 그러니
+# REJECTED 를 여기서 빼도 우리 도메인의 Seller.Status.REJECTED(ADR-0020,
+# 건드리지 않는다) 자체가 도달 불가능해지지 않는다. 근거가 새로 나오면 그때
+# 출처와 함께 다시 넣는다.
 _SELLER_STATUS_MAP = {
     "APPROVAL_REQUIRED": "approval_required",
     "PARTIALLY_APPROVED": "partially_approved",
     "KYC_REQUIRED": "under_review",
-    "UNDER_REVIEW": "under_review",
     "APPROVED": "approved",
-    "REJECTED": "rejected",
-    "DENIED": "rejected",
 }
 
-# 실이체 상태(벤더 문서: REQUESTED → IN_PROGRESS → COMPLETED/FAILED).
+# 벤더 문서가 실제로 규정하는 값은 넷이 아니라 일곱이다(#174, 위와 같은 출처
+# 확인) — REQUESTED · IN_PROGRESS · COMPLETED · FAILED · CANCELED · DELETED ·
+# REJECTED. 예전 코드는 뒤의 셋(CANCELED·DELETED·REJECTED)을 몰라 예외를
+# 던졌다. 셋 다 "돈이 실제로 나가지 못했다"는 사실이므로 FAILED 와 같은
+# 도메인 값으로 옮긴다 — 원장 분개는 FAILED 와 동일하게 그대로 남고
+# (ADR-0004), 재시도 경로도 그대로 열린다. 문서는 REJECTED 의 웹훅은
+# FAILED 로 온다고도 적어 두지만(우리는 어차피 REJECTED 자체도 같은 값으로
+# 옮기므로 무관하다), DELETED 는 웹훅 자체가 오지 않는다고 적는다 — 그래도
+# 조회(query_status) 경로에서는 만날 수 있으므로 여기 셋에 넣어 둔다.
 _PAID_PAYOUT_STATUSES = {"COMPLETED"}
-_FAILED_PAYOUT_STATUSES = {"FAILED"}
+_FAILED_PAYOUT_STATUSES = {"FAILED", "CANCELED", "DELETED", "REJECTED"}
 _PENDING_PAYOUT_STATUSES = {"REQUESTED", "IN_PROGRESS"}
+
+# 위 세 집합이 문서의 일곱 값을 빠짐없이 덮는지 모듈 로드 시 증명한다 —
+# `payouts.progress.assert_covers_all_kinds`(HoldKind 번역표)·
+# `distributions`의 `Contest.Status` 분류와 같은 관용구(#174 AC). 값이 하나
+# 늘면(또는 오타로 하나 빠지면) import 시점에 바로 터진다 — 배치 스캔
+# 한복판에서야 발견되지 않는다.
+_ALL_DOCUMENTED_PAYOUT_STATUSES = {
+    "REQUESTED",
+    "IN_PROGRESS",
+    "COMPLETED",
+    "FAILED",
+    "CANCELED",
+    "DELETED",
+    "REJECTED",
+}
+# 문서의 넷을 `_SELLER_STATUS_MAP`이 전부 아는지도 같은 방식으로 증명한다.
+_ALL_DOCUMENTED_SELLER_STATUSES = {
+    "APPROVAL_REQUIRED",
+    "PARTIALLY_APPROVED",
+    "KYC_REQUIRED",
+    "APPROVED",
+}
+
+
+def assert_covers_all_documented_values(covered: set[str], documented: set[str], *, name: str) -> None:
+    """`covered`(우리 분류표가 실제로 아는 문자열)가 `documented`(벤더 문서의
+    값 전체)를 빠짐없이 덮는지 — 아니면 던진다. 모듈 로드 시 호출해 값이
+    하나 늘거나 오타로 하나 빠지면 import 시점에 바로 터지게 한다."""
+
+    missing = documented - covered
+    if missing:
+        raise RuntimeError(f"{name} 이 벤더 문서의 값을 전부 덮지 않는다: {sorted(missing)}")
+
+
+assert_covers_all_documented_values(
+    _PAID_PAYOUT_STATUSES | _FAILED_PAYOUT_STATUSES | _PENDING_PAYOUT_STATUSES,
+    _ALL_DOCUMENTED_PAYOUT_STATUSES,
+    name="Payout 상태 분류(_PAID/_FAILED/_PENDING_PAYOUT_STATUSES)",
+)
+assert_covers_all_documented_values(
+    set(_SELLER_STATUS_MAP), _ALL_DOCUMENTED_SELLER_STATUSES, name="_SELLER_STATUS_MAP"
+)
 
 # 실이체 4xx 중 "한도·rate limit"류로 보이는 벤더 코드 키워드(코드리뷰 지적
 # 2) — 정확한 코드 목록은 토스가 공개 문서에 못박아 두지 않아, 코드 문자열에
@@ -324,6 +386,27 @@ def _safe_json(response: requests.Response) -> dict | None:
         return None
 
 
+def _extract_error(body: dict | None) -> tuple[str | None, str | None]:
+    """v2 에러 응답에서 `code`·`message`를 읽는다(#172).
+
+    지급대행은 v2 인데 이 파일이 결제(v1) 어댑터의 관용구를 그대로 복사해
+    최상위 `code`·`message`를 읽고 있었다 — v2 는 `{"version","traceId",
+    "entityBody","entityType","error":{"code","message"}}` 형태로 `error`
+    객체 아래에 중첩한다(#97 실측: 403 응답 본문이 정확히 이 모양이었다).
+    최상위를 읽으면 `code`가 항상 `None`이라 한도·rate limit 재시도 판정
+    (`_looks_like_retryable_payout_code`)이 늘 거짓이 되고, 로그도
+    `code=None`으로 이유 없이 남았다. `payments.adapters_toss`(v1, 진짜 최상위가
+    맞다)는 건드리지 않는다.
+    """
+
+    if not body:
+        return None, None
+    error = body.get("error")
+    if isinstance(error, dict):
+        return error.get("code"), error.get("message")
+    return None, None
+
+
 def _validate_secure_key(secure_key: str, *, mode_setting_name: str) -> None:
     """`TOSS_API_SECURE_KEY`가 실제로 64자 hex인지 부팅 시점에 확인한다(코드리뷰
     지적 12). "비었는가"만 보면 잘못 붙여넣은 값(길이가 다르거나 hex가 아닌
@@ -414,7 +497,11 @@ class TossSellerAdapter:
             # refSellerId로 다시 POST하면 벤더가 "이미 등록된 셀러"류의 4xx로 거절하고, 그 4xx는
             # 일반 거절 처리를 거쳐 "rejected"로 잘못 매핑돼 진행 중인 상태를 덮어쓴다. 재시도·
             # 재확인의 실제 경로는 등록이 아니라 조회다.
-            return self._query_seller_status(registration.existing_seller_id, ref=ref)
+            return self._query_seller_status(
+                registration.existing_seller_id,
+                ref=ref,
+                weekly_limit_hint=registration.weekly_limit_hint,
+            )
 
         body = {
             "refSellerId": ref,
@@ -429,7 +516,11 @@ class TossSellerAdapter:
 
         try:
             response = requests.post(
-                f"{_BASE_URL}/v1/sellers",
+                # 셀러 등록은 v2 다(#172, #97 실측) — `/v1/sellers`는 라우트 자체가
+                # 없어(404, 본문 길이 0) 지급 요청 쪽(`/v2/payouts`, 처음부터 v2였다)과
+                # 세대가 갈려 있었다. 결제(payments.adapters_toss)는 진짜 v1이라
+                # 건드리지 않는다.
+                f"{_BASE_URL}/v2/sellers",
                 data=encrypted_body,
                 headers=self._headers(),
                 timeout=_TIMEOUT_SECONDS,
@@ -439,9 +530,13 @@ class TossSellerAdapter:
         except requests.RequestException as exc:
             raise SellerError(f"토스 Seller 등록 요청이 네트워크 오류로 실패했다(ref={ref}): {exc}") from exc
 
-        return self._parse_seller_response(response, ref=ref)
+        return self._parse_seller_response(
+            response, ref=ref, weekly_limit_hint=registration.weekly_limit_hint
+        )
 
-    def _query_seller_status(self, seller_id: str, *, ref: str) -> SellerRegistrationResult:
+    def _query_seller_status(
+        self, seller_id: str, *, ref: str, weekly_limit_hint: int | None = None
+    ) -> SellerRegistrationResult:
         """이미 등록된(seller_id를 받은) Seller의 현재 상태를 GET으로 다시
         확인한다(코드리뷰 지적 7) — register()가 벤더에 새 등록을 요청하는
         게 아니라 이 메서드로 재조회하도록 갈아탄 것이 이 티켓의 핵심 수정이다.
@@ -449,7 +544,7 @@ class TossSellerAdapter:
 
         try:
             response = requests.get(
-                f"{_BASE_URL}/v1/sellers/{seller_id}",
+                f"{_BASE_URL}/v2/sellers/{seller_id}",  # v2 다(#172) — register()와 같은 세대.
                 headers=_basic_auth_headers(self._secret_key, api_version=self._api_version),
                 timeout=_TIMEOUT_SECONDS,
             )
@@ -465,13 +560,15 @@ class TossSellerAdapter:
 
         if response.status_code == 404:
             # 벤더가 이 seller_id를 모른다 — 우리 기록과 벤더 상태가 어긋난
-            # 드문 경우다. 처음부터 다시 시도할 수 있게 pending으로 돌려준다.
+            # 드문 경우다(라우트 오타의 404 와는 다른 자리 — 이건 seller_id 로
+            # 특정 지어 물은 뒤에 오는 「그 행이 없다」다). 처음부터 다시
+            # 시도할 수 있게 pending으로 돌려준다.
             return SellerRegistrationResult(seller_id="", status="pending", weekly_limit_amount=None)
 
-        return self._parse_seller_response(response, ref=ref)
+        return self._parse_seller_response(response, ref=ref, weekly_limit_hint=weekly_limit_hint)
 
     def _parse_seller_response(
-        self, response: requests.Response, *, ref: str
+        self, response: requests.Response, *, ref: str, weekly_limit_hint: int | None = None
     ) -> SellerRegistrationResult:
         if response.status_code >= 500:
             # 벤더 쪽 일시 오류 — 등록이 실제로 접수됐는지 알 수 없다(코드리뷰
@@ -490,8 +587,9 @@ class TossSellerAdapter:
 
         if response.status_code >= 400:
             body = _safe_json(response)
-            code = body.get("code") if body else None
-            message = body.get("message") if body else response.text
+            code, message = _extract_error(body)  # v2 는 error 아래 중첩이다(#172).
+            if message is None:
+                message = response.text
             if response.status_code in _OUR_INTEGRATION_ERROR_STATUSES:
                 raise SellerError(
                     f"토스 Seller 등록이 우리 쪽 설정 문제로 거부됐다"
@@ -530,11 +628,25 @@ class TossSellerAdapter:
                 f"{vendor_status!r}"
             )
 
-        seller_id = body.get("sellerId") or body.get("refSellerId") or ""
-        weekly_limit = None
-        if status == "partially_approved":
-            weekly_limit_body = body.get("weeklyLimit") or {}
-            weekly_limit = weekly_limit_body.get("amount")
+        # 벤더 문서(#173/#174 와 같은 출처, docs.tosspayments.com/reference/
+        # additional)의 Seller 객체 필드는 `id`·`refSellerId`·`businessType`·
+        # `company`·`individual`·`status`·`account`·`metadata` 다 —
+        # `sellerId` 는 없다. `refSellerId`로 폴백하지 않는다(코드리뷰 지적,
+        # #173 후속) — 그건 **우리가 보낸** 값(`laurio-developer-{id}`)이지
+        # 벤더 식별자가 아니다. 실물 응답에 `sellerId`가 없어 그 폴백이
+        # 조용히 우리 자신의 ref 를 벤더 식별자인 양 저장하면, 이후
+        # `_query_seller_status`의 GET이 벤더가 모르는 문자열로 나가 영원히
+        # 404를 받고(재등록도 그 값을 다시 넘기므로 스스로 회복하지 못한다)
+        # — 틀린 값을 저장하느니 빈 값이 낫다(빈 seller_id는 이미 PENDING과
+        # 같은 "등록 시도 전"으로 정의돼 있고 재시도 경로가 있다).
+        seller_id = body.get("id") or ""
+        # 벤더 문서의 Seller 객체에 weeklyLimit 필드가 없다(#173, 웹 확인) —
+        # 벤더가 한도를 알려주지 않으므로 caller가 이미 조립해 둔 정책값
+        # (`weekly_limit_hint` — ADR-0020, 토스가 정한 사실)을 쓴다.
+        # `FakeSellerAdapter`가 힌트가 없을 때 정책을 스스로 읽는 것과 달리
+        # 이 어댑터는 DB를 읽지 않는다(ADR-0007) — caller가 이미 실어 보낸
+        # 값만 쓴다.
+        weekly_limit = weekly_limit_hint if status == "partially_approved" else None
 
         return SellerRegistrationResult(
             seller_id=seller_id, status=status, weekly_limit_amount=weekly_limit
@@ -628,8 +740,9 @@ class TossPayoutAdapter:
             )
         if response.status_code >= 400:
             body_json = _safe_json(response)
-            code = body_json.get("code") if body_json else None
-            message = body_json.get("message") if body_json else response.text
+            code, message = _extract_error(body_json)  # v2 는 error 아래 중첩이다(#172).
+            if message is None:
+                message = response.text
             if response.status_code in _OUR_INTEGRATION_ERROR_STATUSES:
                 raise PayoutError(
                     f"토스 지급 요청이 우리 쪽 설정 문제로 거부됐다"
