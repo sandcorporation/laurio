@@ -3850,11 +3850,8 @@ export interface components {
         };
         /** WebhookOut */
         WebhookOut: {
-            /**
-             * Idempotency Key
-             * Format: uuid
-             */
-            idempotency_key: string;
+            /** Idempotency Key */
+            idempotency_key?: string | null;
             /** Received */
             received: boolean;
             /** Status */
@@ -6117,15 +6114,6 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorOut"];
                 };
             };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOut"];
-                };
-            };
             /** @description Unprocessable Content */
             422: {
                 headers: {
@@ -6166,15 +6154,6 @@ export interface operations {
             };
             /** @description Unauthorized */
             401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOut"];
-                };
-            };
-            /** @description Not Found */
-            404: {
                 headers: {
                     [name: string]: unknown;
                 };

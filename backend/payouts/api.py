@@ -30,6 +30,7 @@
 # 함정(`QueryParams is not fully defined` 로 500)을 다시 밟는다.
 
 import json
+import logging
 from uuid import UUID
 
 from django.db.models import Count
@@ -85,6 +86,8 @@ from .services import (
 router = Router(tags=["payouts"])
 # Operator 표면 — appeals.api.operator_router와 같은 원칙으로 라우터 전체가
 # 기본 거부다(#44).
+logger = logging.getLogger(__name__)
+
 operator_router = Router(tags=["operator", "payouts"], auth=OperatorAuth())
 
 # seller.changed 웹훅의 out-of-order/재전송 방어에 쓰는 순위(코드리뷰 지적 9)
@@ -449,7 +452,8 @@ def _toss_webhook_signature_ok(request: HttpRequest) -> bool:
 
 @router.post(
     "/payouts/webhook/toss",
-    response={200: WebhookOut, 400: ErrorOut, 401: ErrorOut, 404: ErrorOut, 422: ErrorOut},
+    # 404 는 더 이상 나지 않는다(#170) — 모르는 참조는 200 이다.
+    response={200: WebhookOut, 400: ErrorOut, 401: ErrorOut, 422: ErrorOut},
     auth=None,
 )
 def receive_toss_payout_webhook(request: HttpRequest):
@@ -508,12 +512,36 @@ def receive_toss_payout_webhook(request: HttpRequest):
         webhook_attempt = parsed[1]
         try:
             known_payout = Payout.objects.get(idempotency_key=idempotency_key)
-        except Payout.DoesNotExist as exc:
-            raise HttpError(404, "알 수 없는 idempotency_key 입니다.") from exc
+        except Payout.DoesNotExist:
+            # 우리 것이 아니다 — 「전달 실패」가 아니라 「내 것이 아니다」이므로
+            # 200 으로 끝낸다(#170). 같은 토스 상점의 웹훅을 두 환경이 나눠 받으면
+            # (실측: dev·staging 이 같은 보안 키로 서명한 요청을 둘 다 통과시킨다)
+            # 모든 이벤트가 양쪽에 다 가고 그 Payout 은 한쪽에만 있다. 없는 쪽이
+            # 404 를 내면 벤더는 재전송하는데, 재전송해도 그 키는 영원히 없다.
+            #
+            # **대가를 알고 한다**: 「우리 것인데 못 찾는다」는 진짜 결함도 함께
+            # 조용해진다 — 그래서 로그로만 남는다.
+            logger.warning(
+                "모르는 idempotency_key 의 payout.changed 웹훅을 200 으로 흘려보낸다"
+                "(idempotency_key=%s, vendor_payout_id=%r) — 다른 환경의 이벤트이거나,"
+                " 우리 것인데 찾지 못한 것이다.",
+                idempotency_key,
+                vendor_payout_id,
+            )
+            return 200, WebhookOut(received=True, idempotency_key=idempotency_key, status="unknown")
     elif vendor_payout_id:
         known_payout = Payout.objects.filter(vendor_payout_id=str(vendor_payout_id)).first()
         if known_payout is None:
-            raise HttpError(404, "알 수 없는 지급 식별자입니다.")
+            # 위와 같은 이유로 200 이다(#170). 폴백이 열렸다고 아무 식별자나
+            # 통과시키지 않는다는 #91 의 요구는 상태 코드가 아니라 「아무 Payout 도
+            # 건드리지 않는다」이고, 그것은 여기서 그대로 지켜진다.
+            logger.warning(
+                "모르는 지급 식별자의 payout.changed 웹훅을 200 으로 흘려보낸다"
+                "(vendor_payout_id=%r, refPayoutId=%r).",
+                vendor_payout_id,
+                ref_payout_id,
+            )
+            return 200, WebhookOut(received=True, idempotency_key=None, status="unknown")
         idempotency_key = known_payout.idempotency_key
         # 벤더 식별자는 언제나 **현재** attempt 의 것이다 — 새 시도를 선점할 때마다
         # `vendor_payout_id` 를 반드시 비우기 때문이다(`adapters_toss` 상단 주석).
@@ -563,7 +591,8 @@ def receive_toss_payout_webhook(request: HttpRequest):
 
 @router.post(
     "/payouts/webhook/toss-seller",
-    response={200: SellerWebhookOut, 400: ErrorOut, 401: ErrorOut, 404: ErrorOut, 422: ErrorOut},
+    # 404 는 더 이상 나지 않는다(#170) — 모르는 Seller 는 200 이다.
+    response={200: SellerWebhookOut, 400: ErrorOut, 401: ErrorOut, 422: ErrorOut},
     auth=None,
 )
 def receive_toss_seller_webhook(request: HttpRequest):
@@ -601,7 +630,14 @@ def receive_toss_seller_webhook(request: HttpRequest):
     if seller is None and seller_id:
         seller = Seller.objects.filter(seller_id=seller_id).first()
     if seller is None:
-        raise HttpError(404, "알 수 없는 Seller 입니다.")
+        # 같은 이유로 200 이다(#170) — 다른 환경의 Developer 에 대한 이벤트다.
+        logger.warning(
+            "모르는 Seller 의 seller.changed 웹훅을 200 으로 흘려보낸다"
+            "(refSellerId=%r, sellerId=%r).",
+            ref_seller_id,
+            seller_id,
+        )
+        return 200, SellerWebhookOut(received=True, seller_id=seller_id, status="unknown")
 
     weekly_limit_body = data.get("weeklyLimit") or {}
     new_weekly_limit = weekly_limit_body.get("amount") if our_status == "partially_approved" else None
