@@ -1377,17 +1377,47 @@ export interface paths {
          *
          *     `blocked_on=identity`나 `blocked_on=seller`로 필터링할 수 있다 — 운영자가
          *     "지금 내가 처리해야 할 것은 어느 쪽인가"에 바로 답할 수 있어야 한다는 요구가
-         *     여기 있다. 값을 주지 않으면 전체를 최신순으로 본다.
+         *     여기 있다.
          *
-         *     **행마다 조회하지 않는다**(#91) — `hold_of` 는 "조회를 내지 않는다, 호출부가
-         *     Seller 와 신원 제출 여부를 미리 가져온다"고 못 박아 두었는데(`progress.py`) 이
-         *     큐만 그 규율을 어겨 행마다 Seller 1회 + TaxIdentity 1회를 쳤고, 그것도
-         *     `blocked_on` 으로 걸러내기 **전에** 쳤다. 운영자 홈이 세 큐를 병렬로 부르므로
-         *     그대로 3배가 된다. 신원은 `contests.sponsorship` 과 같은 `Exists` 관용구로 붙이고,
-         *     Seller 는 FK 가 아니라 Developer 단위 개념이라(`Payout.seller` 는 속성이다)
-         *     한 질의로 모아 사상한다.
+         *     **좁히기는 전부 SQL 이 한다**(#149). 값을 주지 않으면 **막혀 있는 것 전부**를
+         *     최신순으로 본다 — 확정 전(REQUESTED)이거나 이미 끝난(CONFIRMED·FAILED) Payout 은
+         *     애초에 오지 않는다. 이전에는 이 엔드포인트가 `Payout` 테이블을 통째로 가져와
+         *     파이썬 루프의 `continue` 로 걸렀다: 필터가 좁히는 것이 질의가 아니라 응답뿐이라
+         *     `blocked_on=identity` 를 줘도 DB 에서 오는 행 수는 같았고, `developer_id__in`
+         *     목록이 행 수만큼 자라 개발자가 많아지면 느려지는 게 아니라 바인드 파라미터
+         *     한도에서 **500** 이 났다. 판정 자체는 여전히 `progress.py` 하나가 소유한다 —
+         *     여기 Q 는 그 표에서 파생되고, 둘의 일치는 `tests/test_operator_payout_queue.py`
+         *     가 모든 조합에서 증명한다.
+         *
+         *     정렬 마지막 키에 `id` 를 붙인다 — `created_at` 이 같은 두 행의 순서를 DB 가
+         *     보장할 이유가 없고, 페이지마다 순서가 흔들리면 **같은 Payout 이 두 페이지에
+         *     나오고 다른 하나는 어느 페이지에도 안 나온다**(#39 가 공개 목록에서 겪은
+         *     그것). 운영자 큐에서 그 누락은 「처리해야 할 것을 못 본다」다.
          */
         get: operations["payouts_api_list_payouts_for_operator"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/payouts/counts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Count Payouts For Operator
+         * @description 운영자 홈의 배지 숫자 셋 (#149) — 한 요청, 한 질의, 직렬화되는 행 0개.
+         *
+         *     이전에는 홈이 `?blocked_on=` 목록 셋을 통째로 받아 `.length` 를 셌다. 홈을 한 번
+         *     여는 데 Payout 전체를 세 번 긁어 전부 직렬화하고, 숫자 셋만 남기고 버렸다.
+         */
+        get: operations["payouts_api_count_payouts_for_operator"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2963,6 +2993,26 @@ export interface components {
             username: string;
         };
         /**
+         * OperatorPayoutCountsOut
+         * @description 운영자 홈의 지급 배지 숫자 (#149).
+         *
+         *     이전에는 홈이 큐 목록 셋을 통째로 받아 `.length` 를 셌다 — Payout 전체를 세 번
+         *     긁어 직렬화하고 숫자 셋만 남기고 버렸다. 건수는 건수로 답한다.
+         *
+         *     필드 이름은 `BLOCKED_ON_OF` 의 값 집합과 같아야 한다 — 갈래가 하나 늘면 여기가
+         *     모듈 로드 시점에 터진다(`assert_covers_all_kinds` 와 같은 규율).
+         */
+        OperatorPayoutCountsOut: {
+            /** Identity */
+            identity: number;
+            /** Operator */
+            operator: number;
+            /** Seller */
+            seller: number;
+            /** Transfer */
+            transfer: number;
+        };
+        /**
          * OperatorPayoutOut
          * @description Operator가 Payout 하나가 무엇을 기다리는지 보는 표면(#50 AC).
          *
@@ -3058,6 +3108,13 @@ export interface components {
             count: number;
             /** Items */
             items: components["schemas"]["MySponsoredContestOut"][];
+        };
+        /** PagedOperatorPayoutOut */
+        PagedOperatorPayoutOut: {
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["OperatorPayoutOut"][];
         };
         /** PagedRetainedIdentityOut */
         PagedRetainedIdentityOut: {
@@ -5497,6 +5554,8 @@ export interface operations {
         parameters: {
             query?: {
                 blocked_on?: string | null;
+                page?: number;
+                page_size?: number | null;
             };
             header?: never;
             path?: never;
@@ -5510,7 +5569,27 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OperatorPayoutOut"][];
+                    "application/json": components["schemas"]["PagedOperatorPayoutOut"];
+                };
+            };
+        };
+    };
+    payouts_api_count_payouts_for_operator: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorPayoutCountsOut"];
                 };
             };
         };

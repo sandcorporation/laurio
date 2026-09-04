@@ -91,15 +91,38 @@ interface PagedBody<Row> {
  * 없는데**, 빈 상태 판정에 쓰는 `count` 는 전체 건수라 잘렸다는 사실이 화면에 드러나지도 않는다.
  * `-created_at` 정렬이라 잘리는 쪽이 오래된 것들이고, 그중 하나가 「내 차례」면 그 화면이 막으려던
  * 결과가 그대로 일어난다 — 그래서 `hasMore`·`loadMore` 가 상태의 일부다.
+ *
+ * `path` 가 `null` 이면 아무것도 읽지 않고 loading 에 머문다 — `useBackendQuery` 와 같은 규약이다.
+ * 「아직 무엇을 읽을지 모른다」(세션 확인 전 등)를 호출부가 표현할 자리가 여기 말고 없다(#149):
+ * 반환값만 loading 으로 덮으면 요청은 이미 나간 뒤라, 만료된 세션에서 401 이 세션 조회와 경합해
+ * 로그인으로 튕기고, 그 사이 실패한 조회는 조건이 참이 돼도 **다시 시도되지 않는다**.
  */
-export function usePagedList<Row>(client: BffClient, path: string): PagedListState<Row> {
+export function usePagedList<Row>(client: BffClient, path: string | null): PagedListState<Row> {
   const [phase, setPhase] = useState<"loading" | "error" | "ready" | "more">("loading");
   const [failure, setFailure] = useState<ApiFailure | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
   const [count, setCount] = useState(0);
   const [page, setPage] = useState(1);
 
+  // **경로가 바뀌면 쌓아 둔 페이지를 버린다**(#149). 이 훅은 「더 보기」를 위해 페이지를
+  // 이어 붙이는데, 그 상태가 경로에 딸린 것이라는 사실이 코드에 없었다 — 필터가 붙은
+  // 경로로 이 훅을 쓰면 3페이지를 보던 중 필터를 바꿨을 때 **새 필터의 3페이지**를 받아
+  // 옛 목록 뒤에 이어 붙인다. 지금까지의 호출부 둘(`/contests/mine`·`/submissions/mine`)이
+  // 고정 경로라 드러나지 않았을 뿐이다.
+  //
+  // effect 가 아니라 렌더 도중에 되돌린다("Adjusting state when a prop changes", React)
+  // — effect 는 이미 한 번 커밋된 뒤라 그 한 프레임이 화면에 그려진다.
+  const [committedPath, setCommittedPath] = useState(path);
+  if (path !== committedPath) {
+    setCommittedPath(path);
+    setRows([]);
+    setCount(0);
+    setPage(1);
+    setPhase("loading");
+  }
+
   useEffect(() => {
+    if (path === null) return;
     let cancelled = false;
     const separator = path.includes("?") ? "&" : "?";
     void client.get<PagedBody<Row>>(`${path}${separator}page=${page}`).then((result) => {
