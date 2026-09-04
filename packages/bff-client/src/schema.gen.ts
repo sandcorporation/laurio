@@ -1417,6 +1417,12 @@ export interface paths {
          *     보장할 이유가 없고, 페이지마다 순서가 흔들리면 **같은 Payout 이 두 페이지에
          *     나오고 다른 하나는 어느 페이지에도 안 나온다**(#39 가 공개 목록에서 겪은
          *     그것). 운영자 큐에서 그 누락은 「처리해야 할 것을 못 본다」다.
+         *
+         *     **자르기는 커서다**(#151) — 「몇 번째부터」가 아니라 「마지막으로 본 행 다음부터」를
+         *     묻는다. 오프셋은 목록이 **머리 쪽에서** 자라면 경계가 밀려 2페이지가 1페이지의 행을
+         *     다시 돌려주고 그 사이 행 하나가 어느 페이지에도 안 나오는데, 이 큐는 스캔이 60초마다
+         *     Payout 을 확정하므로 운영자가 「더 보기」를 누르는 그 몇 초 사이에 실제로 일어난다.
+         *     커서가 가리키는 것(`created_at`, `id`)과 위 정렬 키가 같은 것이어야 성립한다.
          */
         get: operations["payouts_api_list_payouts_for_operator"];
         put?: never;
@@ -3075,6 +3081,25 @@ export interface components {
             transfer_status: string;
         };
         /**
+         * OperatorPayoutPageOut
+         * @description 운영자 지급 큐 한 페이지 (#151).
+         *
+         *     `count` 는 **전체** 건수다(이 페이지의 길이가 아니다) — 화면이 「막혀 있는 지급 N건」을
+         *     말하고 홈 배지와 맞는지를 e2e 가 단언한다.
+         *
+         *     `next` 는 「마지막으로 본 행 다음부터」를 가리키는 커서다. 더 없으면 null 이고, 그
+         *     **행의 존재**로 판정한다 — 받은 수와 전체 건수를 비교하는 방식은 목록이 자라는 동안
+         *     틀린다(#150 이 적은 증상 중 하나다).
+         */
+        OperatorPayoutPageOut: {
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["OperatorPayoutOut"][];
+            /** Next */
+            next: string | null;
+        };
+        /**
          * OwnScoreOut
          * @description Developer 가 자기 Submission 의 채점 결과를 볼 때 받는 것 (#74).
          *
@@ -3132,13 +3157,6 @@ export interface components {
             count: number;
             /** Items */
             items: components["schemas"]["MySponsoredContestOut"][];
-        };
-        /** PagedOperatorPayoutOut */
-        PagedOperatorPayoutOut: {
-            /** Count */
-            count: number;
-            /** Items */
-            items: components["schemas"]["OperatorPayoutOut"][];
         };
         /** PagedRetainedIdentityOut */
         PagedRetainedIdentityOut: {
@@ -5598,8 +5616,7 @@ export interface operations {
         parameters: {
             query?: {
                 blocked_on?: string | null;
-                page?: number;
-                page_size?: number | null;
+                after?: string | null;
             };
             header?: never;
             path?: never;
@@ -5613,7 +5630,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PagedOperatorPayoutOut"];
+                    "application/json": components["schemas"]["OperatorPayoutPageOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
                 };
             };
         };

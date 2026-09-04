@@ -40,5 +40,10 @@ export function usePayoutQueue(filter: BlockedOnFilter, enabled: boolean): Payou
   // 세션 확인 전에는 **경로를 주지 않는다**(#149 코드리뷰) — 반환값만 loading 으로
   // 덮으면 요청은 이미 나간 뒤다. 만료된 세션에서는 그 401 이 세션 조회와 경합해
   // 로그인으로 튕기고, 그렇게 실패한 조회는 `enabled` 가 참이 돼도 다시 시도되지 않는다.
-  return usePagedList<OperatorPayoutRow>(bffClient, enabled ? pathFor(filter) : null);
+  // **커서 모드다**(#151). 이 큐는 스캔이 60초마다 Payout 을 확정해 계속 머리에 행이
+  // 들어온다 — 오프셋이면 운영자가 「더 보기」를 누르는 그 몇 초 사이에 경계가 밀려 같은
+  // 행이 두 번 나오고 그 사이 행 하나가 어느 페이지에도 안 나온다.
+  return usePagedList<OperatorPayoutRow>(bffClient, enabled ? pathFor(filter) : null, {
+    cursor: true,
+  });
 }

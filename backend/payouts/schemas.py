@@ -158,6 +158,22 @@ class OperatorPayoutOut(Schema):
         return blocked_on_of_row(obj)
 
 
+class OperatorPayoutPageOut(Schema):
+    """운영자 지급 큐 한 페이지 (#151).
+
+    `count` 는 **전체** 건수다(이 페이지의 길이가 아니다) — 화면이 「막혀 있는 지급 N건」을
+    말하고 홈 배지와 맞는지를 e2e 가 단언한다.
+
+    `next` 는 「마지막으로 본 행 다음부터」를 가리키는 커서다. 더 없으면 null 이고, 그
+    **행의 존재**로 판정한다 — 받은 수와 전체 건수를 비교하는 방식은 목록이 자라는 동안
+    틀린다(#150 이 적은 증상 중 하나다).
+    """
+
+    items: list[OperatorPayoutOut]
+    count: int
+    next: str | None
+
+
 class OperatorPayoutCountsOut(Schema):
     """운영자 홈의 지급 배지 숫자 (#149).
 

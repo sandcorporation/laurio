@@ -83,6 +83,20 @@ export type PagedListState<Row> =
 interface PagedBody<Row> {
   items: Row[];
   count: number;
+  /** 커서 모드에서만 온다 — 더 없으면 null. */
+  next?: string | null;
+}
+
+export interface PagedListOptions {
+  /** **커서(keyset) 모드**(#151). `?page=N` 대신 `?after=<커서>` 로 「마지막으로 본 행
+   * 다음부터」를 묻고, 「더 있는가」를 받은 수와 전체 건수의 비교가 아니라 **서버가 준
+   * 다음 커서의 유무**로 판정한다.
+   *
+   * 오프셋은 목록이 머리 쪽에서 자라면 조용히 틀린다 — 경계가 밀려 다음 묶음이 앞
+   * 묶음의 행을 다시 돌려주고, 그 중복이 `rows.length` 를 부풀려 「더 보기」가 아직 안 본
+   * 행을 남긴 채 사라진다(#150). 옛 모드를 함께 두는 것은 호출부를 한 번에 다 옮기지
+   * 않기 위해서다 — 이관이 끝나면 옛 모드는 사라진다(#153). */
+  cursor?: boolean;
 }
 
 /** django-ninja PageNumberPagination(`?page=N` → `{items, count}`) 목록을 페이지 이어붙이기로 읽는다.
@@ -97,12 +111,21 @@ interface PagedBody<Row> {
  * 반환값만 loading 으로 덮으면 요청은 이미 나간 뒤라, 만료된 세션에서 401 이 세션 조회와 경합해
  * 로그인으로 튕기고, 그 사이 실패한 조회는 조건이 참이 돼도 **다시 시도되지 않는다**.
  */
-export function usePagedList<Row>(client: BffClient, path: string | null): PagedListState<Row> {
+export function usePagedList<Row>(
+  client: BffClient,
+  path: string | null,
+  options: PagedListOptions = {},
+): PagedListState<Row> {
+  const cursorMode = options.cursor === true;
   const [phase, setPhase] = useState<"loading" | "error" | "ready" | "more">("loading");
   const [failure, setFailure] = useState<ApiFailure | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
   const [count, setCount] = useState(0);
   const [page, setPage] = useState(1);
+  // 커서 모드에서 다음에 물을 자리. `null` 은 「처음부터」, `undefined` 는 「더 없다」다 —
+  // 그 둘을 하나로 뭉치면 끝에 도달한 목록이 처음부터 다시 읽힌다.
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
 
   // **경로가 바뀌면 쌓아 둔 페이지를 버린다**(#149). 이 훅은 「더 보기」를 위해 페이지를
   // 이어 붙이는데, 그 상태가 경로에 딸린 것이라는 사실이 코드에 없었다 — 필터가 붙은
@@ -118,6 +141,8 @@ export function usePagedList<Row>(client: BffClient, path: string | null): Paged
     setRows([]);
     setCount(0);
     setPage(1);
+    setCursor(null);
+    setNextCursor(null);
     setPhase("loading");
   }
 
@@ -125,21 +150,28 @@ export function usePagedList<Row>(client: BffClient, path: string | null): Paged
     if (path === null) return;
     let cancelled = false;
     const separator = path.includes("?") ? "&" : "?";
-    void client.get<PagedBody<Row>>(`${path}${separator}page=${page}`).then((result) => {
+    const query = cursorMode
+      ? cursor === null
+        ? ""
+        : `${separator}after=${encodeURIComponent(cursor)}`
+      : `${separator}page=${page}`;
+    const first = cursorMode ? cursor === null : page === 1;
+    void client.get<PagedBody<Row>>(`${path}${query}`).then((result) => {
       if (cancelled) return;
       if (!result.ok) {
         setFailure(result);
         setPhase("error");
         return;
       }
-      setRows((previous) => (page === 1 ? result.data.items : [...previous, ...result.data.items]));
+      setRows((previous) => (first ? result.data.items : [...previous, ...result.data.items]));
       setCount(result.data.count);
+      if (cursorMode) setNextCursor(result.data.next ?? null);
       setPhase("ready");
     });
     return () => {
       cancelled = true;
     };
-  }, [client, path, page]);
+  }, [client, path, page, cursor, cursorMode]);
 
   if (phase === "loading") return { status: "loading" };
   if (phase === "error") {
@@ -152,10 +184,17 @@ export function usePagedList<Row>(client: BffClient, path: string | null): Paged
     status: "ready",
     rows,
     count,
-    hasMore: rows.length < count,
+    // 커서 모드에서는 **서버가 다음 커서를 줬는가**로 판정한다. 받은 수와 전체 건수를
+    // 비교하는 방식은 목록이 자라는 동안 틀린다 — 중복이 섞이면 아직 안 본 행이 남았는데도
+    // 「더 보기」가 사라진다(#150).
+    hasMore: cursorMode ? nextCursor !== null : rows.length < count,
     loadingMore: phase === "more",
     loadMore: () => {
       setPhase("more");
+      if (cursorMode) {
+        setCursor(nextCursor);
+        return;
+      }
       setPage((current) => current + 1);
     },
   };

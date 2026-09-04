@@ -406,15 +406,15 @@ test.describe("지급 큐 — 좁히기와 자르기는 백엔드가 한다(#149
       created_at: new Date().toISOString(),
     });
 
-    await page.route("**/api/backend/operator/payouts?page=*", (route) => {
-      const page2 = route.request().url().includes("page=2");
-      const items = page2
+    await page.route("**/api/backend/operator/payouts*", (route) => {
+      const second = route.request().url().includes("after=");
+      const items = second
         ? [row(21), row(22), row(23), row(24), row(25)]
         : Array.from({ length: 20 }, (_unused, index) => row(index + 1));
       route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ items, count: 25 }),
+        body: JSON.stringify({ items, count: 25, next: second ? null : "cursor-20" }),
       });
     });
 
@@ -429,6 +429,73 @@ test.describe("지급 큐 — 좁히기와 자르기는 백엔드가 한다(#149
 
     // **이어 붙는다.** 갈아끼우면 「더 보기」가 앞 페이지를 지운다.
     await expect(page.getByTestId("payout-queue-list").getByRole("listitem")).toHaveCount(25);
+    await expect(page.getByTestId("payout-queue-load-more")).toHaveCount(0);
+  });
+
+  test("목록이 자라 건수와 받은 수가 어긋나도 「더 보기」가 서버 말을 따른다", async ({
+    page,
+  }) => {
+    // **여기서 클라이언트가 실제로 틀릴 수 있는 자리**(#150·#151). 「더 있는가」를
+    // `받은 수 < 전체 건수` 로 판정하면, 목록이 자라는 동안 그 둘이 계속 어긋나 컨트롤이
+    // 영원히 남는다(눌러도 같은 끝을 다시 받는다). 반대로 중복이 섞이면 받은 수가 부풀어
+    // 아직 안 본 행이 남았는데도 컨트롤이 사라진다.
+    //
+    // 커서 모드는 그 판정을 **서버가 준 다음 커서의 유무**로 한다. 그래서 건수가 어긋나도
+    // 옳다 — 그것을 스텁으로 만든다: 마지막 묶음은 `next: null` 인데 `count` 는 훨씬 크다.
+    //
+    // (같은 행이 두 묶음에 겹쳐 오는 상황은 여기서 만들지 않는다 — 정상적인 커서 서버는
+    // 커서보다 앞선 행을 돌려주지 않고, 그 성질은 backend/tests 가 실물 DB 로 증명한다.)
+    const operator = await seedE2eOperator();
+    await loginAsOperator(page, operator.username);
+
+    const row = (index: number) => ({
+      idempotency_key: `33333333-0000-4000-8000-${String(index).padStart(12, "0")}`,
+      contest_id: index,
+      developer_user_id: 1,
+      net_amount: 100,
+      status: "confirmed_seller_pending",
+      transfer_status: "not_requested",
+      blocked_on: "seller",
+      seller_status: "pending",
+      has_identity: true,
+      created_at: new Date().toISOString(),
+    });
+
+    await page.route("**/api/backend/operator/payouts*", (route) => {
+      const url = route.request().url();
+      if (url.includes("after=cursor-a")) {
+        route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          // 마지막 묶음이다. 그 사이 목록이 자라 `count` 는 40 인데 우리가 걸어온 것은
+          // 23 뿐 — 그래도 「더 없다」는 것은 `next` 가 정한다.
+          body: JSON.stringify({ items: [row(21), row(22), row(23)], count: 40, next: null }),
+        });
+        return;
+      }
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          items: Array.from({ length: 20 }, (_unused, index) => row(index + 1)),
+          count: 40,
+          next: "cursor-a",
+        }),
+      });
+    });
+
+    await page.goto("/payouts");
+    await waitForQueueSettled(page);
+    await expect(page.getByTestId("payout-queue-list").getByRole("listitem")).toHaveCount(20);
+    await expect(page.getByTestId("payout-queue-load-more")).toBeVisible();
+
+    await page.getByTestId("payout-queue-load-more").click();
+
+    // 이어 붙는다.
+    await expect(page.getByTestId("payout-queue-list").getByRole("listitem")).toHaveCount(23);
+    await expect(page.getByTestId("payout-row-33333333-0000-4000-8000-000000000023")).toBeVisible();
+    // **그리고 컨트롤이 사라진다** — 받은 수(23)가 전체(40)에 한참 못 미치는데도.
+    // 옛 판정(`받은 수 < 전체`)이었다면 여기서 컨트롤이 영원히 남았다.
     await expect(page.getByTestId("payout-queue-load-more")).toHaveCount(0);
   });
 
@@ -458,17 +525,17 @@ test.describe("지급 큐 — 좁히기와 자르기는 백엔드가 한다(#149
     const sellerRow = (index: number) =>
       row(`22222222-0000-4000-8000-${String(index).padStart(12, "0")}`, "seller");
 
-    await page.route("**/api/backend/operator/payouts?*", (route) => {
+    await page.route("**/api/backend/operator/payouts*", (route) => {
       const url = route.request().url();
       const make = url.includes("blocked_on=seller") ? sellerRow : identityRow;
-      const secondPage = url.includes("page=2");
-      const items = secondPage
+      const second = url.includes("after=");
+      const items = second
         ? [make(21), make(22)]
         : Array.from({ length: 20 }, (_unused, index) => make(index + 1));
       route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ items, count: 22 }),
+        body: JSON.stringify({ items, count: 22, next: second ? null : "cursor-20" }),
       });
     });
 

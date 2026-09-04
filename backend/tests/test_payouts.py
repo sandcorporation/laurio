@@ -3653,7 +3653,8 @@ def test_operator_queue_pages_without_losing_or_repeating_a_row(client, category
     first_keys = [row["idempotency_key"] for row in _queue_rows(first)]
     assert len(first_keys) == 20, "한 페이지가 20행이어야 한다"
 
-    second = operator.get("/api/operator/payouts?page=2")
+    # 다음 묶음은 「마지막으로 본 행 다음부터」다(#151) — 「2페이지」가 아니다.
+    second = operator.get(f"/api/operator/payouts?after={first.json()['next']}")
     second_keys = [row["idempotency_key"] for row in _queue_rows(second)]
     assert len(second_keys) == 5
 
@@ -3780,3 +3781,144 @@ def test_operator_queue_resolves_seller_and_identity_for_the_distribution_path_t
         "Distribution 경로의 Payout 에서 Seller 상태가 안 풀렸다 — READY 인데 "
         "seller 대기로 분류됐다"
     )
+
+
+# --- #151: 커서 페이지네이션 --------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_operator_queue_does_not_repeat_or_lose_a_row_when_the_list_grows(
+    client, category, landing_type
+):
+    """1페이지를 받은 뒤 목록이 자라도 같은 행이 두 번 나오거나 빠지지 않는다 (#151).
+
+    오프셋(`?page=N`)이던 시절에는 **머리 쪽에서** 새 행이 하나만 생겨도 경계가 한 칸
+    밀려서, 2페이지가 1페이지의 마지막 행을 다시 돌려주고 원래 그 자리에 와야 했던 행은
+    어느 페이지에도 안 나왔다. 운영자 큐는 스캔이 60초마다 Payout 을 확정하므로 「더 보기」를
+    누르는 그 몇 초 사이에 실제로 일어난다.
+    """
+
+    sponsor, dev, contest, submission = _ready_for_payout(
+        client, category, landing_type, sponsor_uid="sponsor-151-1", dev_uid="dev-151-1"
+    )
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="review_required")
+    developer = Payout.objects.get(idempotency_key=requested["idempotency_key"]).developer
+    _clone_blocked_payouts(
+        24,
+        contest_id=contest["id"],
+        developer=developer,
+        status=Payout.Status.CONFIRMED_SELLER_PENDING,
+    )
+
+    operator = _operator_client(username="payouts-op-151-1")
+
+    first = operator.get("/api/operator/payouts")
+    assert first.status_code == 200, first.content
+    first_body = first.json()
+    first_keys = [row["idempotency_key"] for row in first_body["items"]]
+    assert len(first_keys) == 20
+    assert first_body["next"], "더 있는데 다음 커서를 주지 않았다"
+
+    # **여기서 목록이 자란다** — 머리 쪽에 새 행이 셋 생긴다(스캔이 하는 일 그대로).
+    _clone_blocked_payouts(
+        3,
+        contest_id=contest["id"],
+        developer=developer,
+        status=Payout.Status.CONFIRMED_SELLER_PENDING,
+    )
+
+    second = operator.get(f"/api/operator/payouts?after={first_body['next']}")
+    assert second.status_code == 200, second.content
+    second_keys = [row["idempotency_key"] for row in second.json()["items"]]
+
+    assert not set(first_keys) & set(second_keys), (
+        "목록이 자란 뒤 2페이지가 1페이지의 행을 다시 돌려줬다"
+    )
+    # 1페이지 이후로 밀린 다섯(25건 중 나머지)은 그대로 나온다 — 새로 생긴 셋은 이미 지나간
+    # 커서보다 앞이라 나오지 않는 것이 옳다(그건 다음 조회의 몫이다).
+    assert len(second_keys) == 5, second_keys
+
+
+@pytest.mark.django_db
+def test_operator_queue_walks_every_blocked_row_exactly_once(client, category, landing_type):
+    """끝까지 넘기면 그 시점에 막혀 있던 모든 행이 정확히 한 번씩 나온다 (#151)."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(
+        client, category, landing_type, sponsor_uid="sponsor-151-2", dev_uid="dev-151-2"
+    )
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="review_required")
+    developer = Payout.objects.get(idempotency_key=requested["idempotency_key"]).developer
+    _clone_blocked_payouts(
+        44,
+        contest_id=contest["id"],
+        developer=developer,
+        status=Payout.Status.CONFIRMED_SELLER_PENDING,
+    )
+    # 같은 시각이 섞여도 흔들리지 않아야 한다 — 정렬 마지막 키가 id 인 이유다.
+    Payout.objects.all().update(created_at=timezone.now())
+
+    operator = _operator_client(username="payouts-op-151-2")
+
+    seen: list[str] = []
+    cursor = None
+    for _ in range(10):  # 45건이면 세 번이면 끝난다 — 넉넉히 두고 무한 루프만 막는다
+        url = "/api/operator/payouts" + (f"?after={cursor}" if cursor else "")
+        body = operator.get(url).json()
+        seen.extend(row["idempotency_key"] for row in body["items"])
+        cursor = body["next"]
+        if cursor is None:
+            break
+
+    assert cursor is None, "끝까지 못 갔다"
+    assert len(seen) == 45, len(seen)
+    assert len(set(seen)) == 45, "같은 행이 두 번 나왔다"
+    assert set(seen) == set(
+        str(key) for key in Payout.objects.values_list("idempotency_key", flat=True)
+    )
+
+
+@pytest.mark.django_db
+def test_operator_queue_still_reports_the_total_count(client, category, landing_type):
+    """전체 건수는 그대로 전체 건수다 (#151) — 커서로 바꾸면서 「막혀 있는 지급 N건」을
+    잃지 않는다. 홈 배지와 이 숫자가 맞는다는 단언이 그 위에 서 있다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(
+        client, category, landing_type, sponsor_uid="sponsor-151-3", dev_uid="dev-151-3"
+    )
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="review_required")
+    developer = Payout.objects.get(idempotency_key=requested["idempotency_key"]).developer
+    _clone_blocked_payouts(
+        24,
+        contest_id=contest["id"],
+        developer=developer,
+        status=Payout.Status.CONFIRMED_SELLER_PENDING,
+    )
+
+    operator = _operator_client(username="payouts-op-151-3")
+    body = operator.get("/api/operator/payouts").json()
+
+    assert body["count"] == 25
+    assert len(body["items"]) == 20
+
+
+@pytest.mark.django_db
+def test_operator_queue_rejects_a_cursor_it_cannot_read(client, category, landing_type):
+    """읽을 수 없는 커서는 조용히 처음부터가 아니라 422 다 (#151).
+
+    조용히 1페이지를 돌려주면 「더 보기」를 눌렀는데 목록이 처음으로 되돌아간 화면이 되고,
+    운영자는 무엇을 봤고 무엇을 못 봤는지 알 수 없게 된다.
+    """
+
+    sponsor, dev, contest, submission = _ready_for_payout(
+        client, category, landing_type, sponsor_uid="sponsor-151-4", dev_uid="dev-151-4"
+    )
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="review_required")
+
+    operator = _operator_client(username="payouts-op-151-4")
+    resp = operator.get("/api/operator/payouts?after=not-a-cursor")
+
+    assert resp.status_code == 422, resp.content
