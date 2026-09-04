@@ -29,6 +29,7 @@ from contests.sponsorship import sponsored_contest_queryset
 from accounts.models import SponsorProfile
 from accounts.sanitize import sanitize_free_text
 from core.clock import Clock
+from core.keyset import decode_cursor, keyset_page
 from payments.adapters import PGError, get_adapter
 from payments.charges import settle_charge
 from payments.models import Payment
@@ -54,6 +55,7 @@ from .requirement_chat import (
 from .view_tracking import record_view
 from .schemas import (
     MySponsoredContestOut,
+    MySponsoredContestPageOut,
     CategoryOut,
     ContestListFilters,
     ContestSort,
@@ -311,9 +313,12 @@ def list_contests(request: HttpRequest, filters: Query[ContestListFilters]):
     )
 
 
-@router.get("/contests/mine", response=list[MySponsoredContestOut], auth=jwt_auth)
-@paginate(PageNumberPagination, page_size=20)
-def list_my_sponsored_contests(request: HttpRequest, **kwargs):
+# 한 페이지에 몇 행인가. 오프셋 시절의 `page_size=20` 을 그대로 이어받는다.
+_MY_CONTESTS_PAGE_SIZE = 20
+
+
+@router.get("/contests/mine", response=MySponsoredContestPageOut, auth=jwt_auth)
+def list_my_sponsored_contests(request: HttpRequest, after: str | None = None):
     """Sponsor 가 자기가 연 공모전들과 각각의 「다음 행동」을 본다 (#81).
 
     **`/contests/{contest_id}` 보다 먼저 등록해야 한다.** 아래에 두면 django-ninja
@@ -326,11 +331,24 @@ def list_my_sponsored_contests(request: HttpRequest, **kwargs):
 
     Sponsor 프로필이 없으면 빈 목록이다 — 개최한 적 없는 사람은 정상적인 상태이지
     없는 리소스가 아니다(`/submissions/mine` 과 같은 관용구).
+
+    **자르기는 커서다**(#151/#152) — 「몇 번째부터」가 아니라 「마지막으로 본 행
+    다음부터」를 묻는다. 오프셋은 목록이 머리 쪽에서 자라면 경계가 밀린다 — 개최자가
+    「더 보기」를 넘기는 중에 공모전을 하나 더 열면 2페이지가 1페이지의 행을 다시
+    돌려주고, 원래 그 자리에 와야 했던 행은 어느 페이지에도 안 나온다. 정렬 마지막
+    키에 `id` 를 붙이는 이유도 운영자 지급 큐와 같다 — `created_at` 이 같은 두 행의
+    순서를 DB 가 보장하지 않는다.
     """
+
+    if after is not None and decode_cursor(after) is None:
+        # 읽을 수 없는 커서는 조용히 처음부터가 아니라 422 다 — 그러면 「더 보기」를
+        # 눌렀는데 목록이 처음으로 되돌아간 화면이 되고, 무엇을 봤고 못 봤는지 알 수
+        # 없게 된다(운영자 지급 큐와 같은 규율, #151).
+        raise HttpError(422, "읽을 수 없는 커서입니다.")
 
     profile = SponsorProfile.objects.filter(user=request.auth_user).first()
     if profile is None:
-        return Contest.objects.none()
+        return {"items": [], "count": 0, "next": None}
 
     # 시각과 정책을 이 요청 스코프에서 **한 번씩만** 구한다 — `core.api.tick` 과
     # `distributions.services.run_due_distributions` 가 쓰는 것과 같은 관용구
@@ -339,11 +357,16 @@ def list_my_sponsored_contests(request: HttpRequest, **kwargs):
     as_of = Clock.now()
     policy = current_policy()
 
-    return sponsored_contest_queryset(
-        Contest.objects.filter(sponsor=profile), as_of=as_of, policy=policy
-    ).annotate(judged_as_of=Value(as_of, output_field=DateTimeField())).order_by(
-        "-created_at"
+    contests = (
+        sponsored_contest_queryset(
+            Contest.objects.filter(sponsor=profile), as_of=as_of, policy=policy
+        )
+        .annotate(judged_as_of=Value(as_of, output_field=DateTimeField()))
+        .order_by("-created_at", "-id")
     )
+
+    items, next_cursor = keyset_page(contests, after=after, page_size=_MY_CONTESTS_PAGE_SIZE)
+    return {"items": items, "count": contests.count(), "next": next_cursor}
 
 
 @router.get("/contests/home", response=list[HomeCurationGroupOut], auth=None)

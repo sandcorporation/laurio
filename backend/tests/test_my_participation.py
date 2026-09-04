@@ -453,3 +453,107 @@ def test_ruling_an_appeal_notifies_the_developer_without_the_operators_name(
     assert notice.context["decision"] == "rejected"
     assert notice.context["ruling_note"] == "판정을 유지한다."
     assert operator_name not in str(notice.context), "심판자의 이름이 통지에 들어갔다"
+
+
+# --- #152: 커서 페이지네이션 --------------------------------------------------------
+
+
+def _clone_submissions(count: int, *, developer, category) -> None:
+    """개발자에게 딸린 제출을 `count` 개 더 만든다 — 페이지네이션 부피용이다.
+
+    한 Developer 는 한 Contest 에 하나만 낼 수 있으므로
+    (`unique_submission_per_contest_developer`), Contest 도 함께 새로 만든다.
+    HTTP 흐름(`_seed_submission`)을 스물몇 번 다시 태울 이유가 없다 — 여기서
+    확인할 것은 개최·제출이 아니라 목록이 자라는 동안 커서가 버티는가다.
+    픽스처는 ORM 으로, 단언은 HTTP 로(운영자 지급 큐의 `_clone_blocked_payouts`
+    와 같은 관용구, #151).
+    """
+
+    import uuid
+    from datetime import timedelta
+
+    from django.contrib.auth import get_user_model
+
+    from accounts.models import SponsorProfile
+    from contests.models import Contest
+    from submissions.models import Submission
+
+    suffix = uuid.uuid4().hex[:8]
+    sponsor_user = get_user_model().objects.create_user(
+        username=f"clone-sponsor-{suffix}", email=f"clone-sponsor-{suffix}@example.invalid"
+    )
+    sponsor_profile = SponsorProfile.objects.create(
+        user=sponsor_user, display_name="사본 스폰서"
+    )
+
+    for index in range(count):
+        contest = Contest.objects.create(
+            sponsor=sponsor_profile,
+            title=f"사본 공모전 {suffix}-{index}",
+            category=category,
+            prize=900_000,
+            deadline_at=timezone.now() + timedelta(hours=1),
+            status=Contest.Status.PUBLISHED,
+        )
+        Submission.objects.create(
+            contest=contest,
+            developer=developer,
+            source_object_key=f"submission:{contest.id}:{developer.id}:source/clone-{index}",
+        )
+
+
+@pytest.mark.django_db
+def test_my_participation_does_not_repeat_or_lose_a_row_when_the_list_grows(
+    client, category, landing_type
+):
+    """1페이지를 받은 뒤 참가가 하나 더 생겨도 「더 보기」가 같은 행을 두 번
+    그리지 않고, 경계에 있던 행을 잃지 않는다 (#152).
+
+    다른 탭에서 제출을 하나 더 하면 머리에 새 행이 들어온다 — 오프셋이면 그
+    몇 초 사이에 경계가 밀려 2페이지가 1페이지의 마지막 행을 다시 돌려주고,
+    원래 그 자리에 와야 했던 행은 어느 페이지에도 안 나온다(#151 이 운영자
+    지급 큐에서 세운 것과 같은 시나리오).
+    """
+
+    from submissions.models import Submission
+
+    seeded = _seed_submission(client, category, landing_type, uid="dev-152-1")
+    developer = Submission.objects.get(id=seeded["submission_id"]).developer
+    _clone_submissions(24, developer=developer, category=category)
+
+    first = client.get(MY_PARTICIPATION_URL, **_auth_header(seeded["access"]))
+    assert first.status_code == 200, first.content
+    first_body = first.json()
+    first_ids = [row["submission_id"] for row in first_body["items"]]
+    assert len(first_ids) == 20
+    assert first_body["next"], "더 있는데 다음 커서를 주지 않았다"
+
+    # **여기서 목록이 자란다** — 다른 탭에서 제출을 셋 더 한다.
+    _clone_submissions(3, developer=developer, category=category)
+
+    second = client.get(
+        f"{MY_PARTICIPATION_URL}?after={first_body['next']}", **_auth_header(seeded["access"])
+    )
+    assert second.status_code == 200, second.content
+    second_ids = [row["submission_id"] for row in second.json()["items"]]
+
+    assert not set(first_ids) & set(second_ids), (
+        "목록이 자란 뒤 2페이지가 1페이지의 행을 다시 돌려줬다"
+    )
+    # 1페이지 이후로 밀린 다섯(25건 중 나머지)은 그대로 나온다 — 새로 생긴 셋은
+    # 이미 지나간 커서보다 앞이라 나오지 않는 것이 옳다(그건 다음 조회의 몫이다).
+    assert len(second_ids) == 5, second_ids
+
+
+@pytest.mark.django_db
+def test_my_participation_rejects_a_cursor_it_cannot_read(client, category, landing_type):
+    """읽을 수 없는 커서는 조용히 처음부터가 아니라 422 다 (#152) — 운영자 지급
+    큐와 같은 규율(#151)."""
+
+    seeded = _seed_submission(client, category, landing_type, uid="dev-152-2")
+
+    response = client.get(
+        f"{MY_PARTICIPATION_URL}?after=not-a-cursor", **_auth_header(seeded["access"])
+    )
+
+    assert response.status_code == 422, response.content

@@ -127,6 +127,21 @@ class MyParticipationOut(Schema):
         return next_action_for(obj)
 
 
+class MyParticipationPageOut(Schema):
+    """「내 참가 현황」 한 페이지 (#152) — 운영자 지급 큐의 `OperatorPayoutPageOut`
+    (payouts/schemas.py, #151)과 같은 모양이다.
+
+    `count` 는 **전체** 건수다(이 페이지의 길이가 아니다). `next` 는 「마지막으로
+    본 행 다음부터」를 가리키는 커서이고, 더 없으면 null 이다 — 「더 있는가」를
+    받은 수와 전체 건수의 비교가 아니라 **다음 커서의 유무**로 판정한다(#150 이
+    적은 증상 중 하나다).
+    """
+
+    items: list[MyParticipationOut]
+    count: int
+    next: str | None
+
+
 class PublicSubmissionOut(Schema):
     """Developer 공개 프로필 아카이브 한 항목 (#11, ADR-0014).
 

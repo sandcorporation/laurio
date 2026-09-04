@@ -97,7 +97,14 @@ export const NEXT_ACTION_LABELS: Record<NextAction, NextActionLabel> = {
  * 않는다. `-created_at` 정렬이라 잘리는 쪽이 오래된 것들이고, 그중 하나가
  * 「내 차례」(이의 기한이 남은 채점, 지급 요청)면 이 화면이 막으려던 결과가
  * 그대로 일어난다.
+ *
+ * **커서 모드다**(#151/#152). 개발자가 다른 탭에서 제출을 하나 더 하는 동안
+ * 「더 보기」를 넘기면 머리에 새 행이 들어온다 — 오프셋이면 그 몇 초 사이에
+ * 경계가 밀려 같은 행이 두 번 나오고 그 사이 행 하나가 어느 페이지에도 안
+ * 나온다(#150). 운영자 지급 큐가 이미 증명한 모드를 그대로 쓴다.
  */
 export function useMyParticipation(): ParticipationState {
-  return usePagedList<ParticipationRow>(bffClient, "/api/backend/submissions/mine");
+  return usePagedList<ParticipationRow>(bffClient, "/api/backend/submissions/mine", {
+    cursor: true,
+  });
 }

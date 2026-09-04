@@ -319,6 +319,13 @@ export interface paths {
          *
          *     Sponsor 프로필이 없으면 빈 목록이다 — 개최한 적 없는 사람은 정상적인 상태이지
          *     없는 리소스가 아니다(`/submissions/mine` 과 같은 관용구).
+         *
+         *     **자르기는 커서다**(#151/#152) — 「몇 번째부터」가 아니라 「마지막으로 본 행
+         *     다음부터」를 묻는다. 오프셋은 목록이 머리 쪽에서 자라면 경계가 밀린다 — 개최자가
+         *     「더 보기」를 넘기는 중에 공모전을 하나 더 열면 2페이지가 1페이지의 행을 다시
+         *     돌려주고, 원래 그 자리에 와야 했던 행은 어느 페이지에도 안 나온다. 정렬 마지막
+         *     키에 `id` 를 붙이는 이유도 운영자 지급 큐와 같다 — `created_at` 이 같은 두 행의
+         *     순서를 DB 가 보장하지 않는다.
          */
         get: operations["contests_api_list_my_sponsored_contests"];
         put?: never;
@@ -1881,6 +1888,12 @@ export interface paths {
          *     정상적인 사실이지 없는 리소스가 아니다. 이 경로가
          *     `/submissions/{submission_id}` 보다 **먼저** 등록돼야 한다는 점에 주의한다
          *     — 뒤에 두면 "mine" 이 submission_id 로 먹혀 404 가 난다.
+         *
+         *     **자르기는 커서다**(#151/#152) — 오프셋은 목록이 머리 쪽에서 자라면 경계가
+         *     밀린다. 개발자가 다른 탭에서 제출을 하나 더 하는 동안 「더 보기」를 넘기면
+         *     2페이지가 1페이지의 행을 다시 돌려주고, 원래 그 자리에 와야 했던 행은 어느
+         *     페이지에도 안 나온다. 정렬 마지막 키에 `id` 를 붙이는 이유도 운영자 지급
+         *     큐와 같다 — `created_at` 이 같은 두 행의 순서를 DB 가 보장하지 않는다.
          */
         get: operations["submissions_api_list_my_participation"];
         put?: never;
@@ -2889,6 +2902,24 @@ export interface components {
             submitted_at: string;
         };
         /**
+         * MyParticipationPageOut
+         * @description 「내 참가 현황」 한 페이지 (#152) — 운영자 지급 큐의 `OperatorPayoutPageOut`
+         *     (payouts/schemas.py, #151)과 같은 모양이다.
+         *
+         *     `count` 는 **전체** 건수다(이 페이지의 길이가 아니다). `next` 는 「마지막으로
+         *     본 행 다음부터」를 가리키는 커서이고, 더 없으면 null 이다 — 「더 있는가」를
+         *     받은 수와 전체 건수의 비교가 아니라 **다음 커서의 유무**로 판정한다(#150 이
+         *     적은 증상 중 하나다).
+         */
+        MyParticipationPageOut: {
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["MyParticipationOut"][];
+            /** Next */
+            next: string | null;
+        };
+        /**
          * MySponsoredContestOut
          * @description 「내 공모전」의 한 행 (#81) — Sponsor 가 자기가 연 공모전을 볼 때 받는 것.
          *
@@ -2928,6 +2959,24 @@ export interface components {
             submission_count: number;
             /** Title */
             title: string;
+        };
+        /**
+         * MySponsoredContestPageOut
+         * @description 「내 공모전」 한 페이지 (#152) — 운영자 지급 큐의 `OperatorPayoutPageOut`
+         *     (payouts/schemas.py, #151)과 같은 모양이다.
+         *
+         *     `count` 는 **전체** 건수다(이 페이지의 길이가 아니다). `next` 는 「마지막으로
+         *     본 행 다음부터」를 가리키는 커서이고, 더 없으면 null 이다 — 「더 있는가」를
+         *     받은 수와 전체 건수의 비교가 아니라 **다음 커서의 유무**로 판정한다(#150 이
+         *     적은 증상 중 하나다).
+         */
+        MySponsoredContestPageOut: {
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["MySponsoredContestOut"][];
+            /** Next */
+            next: string | null;
         };
         /**
          * NextAction
@@ -3143,20 +3192,6 @@ export interface components {
             count: number;
             /** Items */
             items: components["schemas"]["ContestOut"][];
-        };
-        /** PagedMyParticipationOut */
-        PagedMyParticipationOut: {
-            /** Count */
-            count: number;
-            /** Items */
-            items: components["schemas"]["MyParticipationOut"][];
-        };
-        /** PagedMySponsoredContestOut */
-        PagedMySponsoredContestOut: {
-            /** Count */
-            count: number;
-            /** Items */
-            items: components["schemas"]["MySponsoredContestOut"][];
         };
         /** PagedRetainedIdentityOut */
         PagedRetainedIdentityOut: {
@@ -4151,8 +4186,7 @@ export interface operations {
     contests_api_list_my_sponsored_contests: {
         parameters: {
             query?: {
-                page?: number;
-                page_size?: number | null;
+                after?: string | null;
             };
             header?: never;
             path?: never;
@@ -4166,7 +4200,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PagedMySponsoredContestOut"];
+                    "application/json": components["schemas"]["MySponsoredContestPageOut"];
                 };
             };
         };
@@ -6381,8 +6415,7 @@ export interface operations {
     submissions_api_list_my_participation: {
         parameters: {
             query?: {
-                page?: number;
-                page_size?: number | null;
+                after?: string | null;
             };
             header?: never;
             path?: never;
@@ -6396,7 +6429,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PagedMyParticipationOut"];
+                    "application/json": components["schemas"]["MyParticipationPageOut"];
                 };
             };
         };
