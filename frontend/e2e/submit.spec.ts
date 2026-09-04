@@ -24,6 +24,14 @@ interface CreateContestOptions {
   deadlineAt: Date;
   requirements: { text: string; grade: "required" | "optional" }[];
   publish: boolean;
+  // #164 엔트리 포인트 스펙 전용 — `/contests?sort=prize`에서 이 Contest가
+  // 항상 1등이도록 다른 스펙들의 통상적인 상금(1~2백만원대)보다 확실히 크게
+  // 준다. 목록이 페이지네이션(page_size=20)되므로, 병렬로 도는 다른 스펙이
+  // 만든 Contest 수십 건 사이에서 특정 행을 클릭하려면 정렬 1등이 가장
+  // 확실하다 — 마감임박순 기본 정렬은 다른 스펙들도 짧은 마감을 흔히 써서
+  // 순위가 보장되지 않는다.
+  prize?: number;
+  title?: string;
 }
 
 /** 현재 로그인된 사용자를 Sponsor로 Contest를 만든다. 본인확인이 먼저 돼 있어야 한다. */
@@ -41,16 +49,16 @@ async function createContestAsCurrentUser(
   });
 
   const created = await page.evaluate(
-    async ({ categoryId, deliverableTypeId, deadlineAt, requirements }) => {
+    async ({ categoryId, deliverableTypeId, deadlineAt, requirements, prize, title }) => {
       const res = await fetch("/api/backend/contests", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          title: "[E2E] 제출 폼 데모용 Contest",
+          title,
           category_id: categoryId,
           deliverable_type_ids: [deliverableTypeId],
           description: "",
-          prize: 2_000_000,
+          prize,
           deadline_at: deadlineAt,
           requirements,
         }),
@@ -61,6 +69,8 @@ async function createContestAsCurrentUser(
       categoryId: categories[0].id,
       deliverableTypeId: deliverableTypes[0].id,
       deadlineAt: options.deadlineAt.toISOString(),
+      prize: options.prize ?? 2_000_000,
+      title: options.title ?? "[E2E] 제출 폼 데모용 Contest",
       requirements: options.requirements,
     },
   );
@@ -132,4 +142,48 @@ test.describe("@exclusive 소스 필수 · Evidence 연결 · 완성도", () => 
     await expect(page.getByTestId("verification-required")).toHaveCount(0, { timeout: 10_000 });
   });
 
+});
+
+// #164 — 공개 상세(`/contests/{id}`)에 제출로 갈 링크가 아예 없던 버그의 회귀
+// 스펙. 이 파일의 다른 스펙들은 전부 `page.goto(`/console/contests/${id}/submit`)`
+// 로 URL을 직접 쳐서 폼 자체를 검증한다 — 그게 정확히 이 버그를 놓친 방식이다
+// (#164 본문: "e2e/submit.spec.ts가 URL을 직접 친다... 사람이 거기 도달할 수
+// 있는가는 검증 대상이 아니었다"). 그래서 이 스펙 하나만 `goto`를 목록
+// 페이지까지만 쓰고, 그 뒤(상세 → 제출)는 전부 클릭이다 — home.spec.ts의
+// "첫 방문자가 클릭만으로 닿는다" 스펙(#93)과 같은 원칙을 여기 적용한다.
+test.describe("@exclusive 공개 상세의 제출 진입점 (#164)", () => {
+  test("목록에서 클릭해 상세로, 상세에서 클릭해 제출 화면에 도달한다", async ({ page }) => {
+    const runId = `entry-${Date.now()}`;
+    const title = `[E2E] 제출 진입점 확인용 ${runId}`;
+    const contestId = await createContestAsSponsor(page, runId, {
+      deadlineAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      requirements: [],
+      publish: true,
+      // 목록은 page_size=20으로 잘린다(#39) — 병렬로 도는 다른 스펙들이 만든
+      // Contest 사이에서 이 행이 항상 1페이지에 잡히도록 `sort=prize`
+      // 1등이 확실한 상금을 준다(다른 스펙은 전부 1~2백만원대를 쓴다).
+      prize: 999_000_000,
+      title,
+    });
+
+    // Sponsor 본인에게는 이 CTA가 안 보인다(#164 인수조건 — 자기 공모전에는
+    // 안 보인다) — 그래서 반드시 다른 사람(Developer)으로 갈아탄 뒤 걷는다.
+    const developerSeed = `developer-${runId}`;
+    await login(page, developerSeed);
+    await verify(page, developerSeed);
+
+    // 여기서부터 goto가 없다 — 목록에서 실제로 렌더된 행을 클릭해 상세로,
+    // 상세에서 실제로 렌더된 CTA를 클릭해 제출 화면으로.
+    await page.goto("/contests?sort=prize");
+    await page.locator(`[data-contest-row="${contestId}"]`).click();
+    await expect(page).toHaveURL(new RegExp(`/contests/${contestId}$`));
+
+    await page.getByTestId("submit-cta-link").click();
+    await expect(page).toHaveURL(new RegExp(`/console/contests/${contestId}/submit$`));
+
+    // 도착한 화면이 진짜 이 Contest의 제출 폼이다 — 404·에러 화면이 아니라
+    // 본인확인을 마친 이 Developer가 실제로 제출을 시작할 수 있는 상태.
+    await expect(page.getByTestId("submit-contest-title")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("submit-contest-title")).toContainText(title);
+  });
 });

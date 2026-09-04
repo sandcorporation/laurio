@@ -279,3 +279,45 @@ def test_owner_can_view_own_draft_but_stranger_cannot(client, category, landing_
         f"/api/contests/{draft_id}", **_auth_header(stranger_pair["access"])
     )
     assert stranger_view.status_code == 404
+
+
+@pytest.mark.django_db
+def test_contest_detail_is_owner_reflects_the_viewer(client, category, landing_type):
+    """#164 — 공개 상세의 "제출하러 가기" CTA가 자기 Contest를 감추는 유일한 근거.
+
+    익명(SSR 공개 상세는 Authorization을 보내지 않는다, ADR-0015)에게는
+    Sponsor 본인이어도 항상 False다. 로그인해 다시 부르면(BFF를 거치는 인증
+    구역 호출을 흉내낸다) 본인에게만 True, 남에게는 False.
+    """
+
+    owner_pair = _login(client, uid="cta-owner", email="cta-owner@example.com")
+    _verify(client, owner_pair["access"], ci="cta-owner-ci-1")
+
+    created = client.post(
+        "/api/contests",
+        data={
+            "title": "공개 CTA 확인용",
+            "category_id": category.id,
+            "deliverable_type_ids": [landing_type.id],
+            "prize": 1_000_000,
+            "deadline_at": "2030-01-01T00:00:00Z",
+        },
+        content_type="application/json",
+        **_auth_header(owner_pair["access"]),
+    ).json()
+    contest_id = created["id"]
+    Contest.objects.filter(id=contest_id).update(status=Contest.Status.PUBLISHED)
+
+    anon_detail = client.get(f"/api/contests/{contest_id}").json()
+    assert anon_detail["is_owner"] is False
+
+    owner_detail = client.get(
+        f"/api/contests/{contest_id}", **_auth_header(owner_pair["access"])
+    ).json()
+    assert owner_detail["is_owner"] is True
+
+    stranger_pair = _login(client, uid="cta-stranger", email="cta-stranger@example.com")
+    stranger_detail = client.get(
+        f"/api/contests/{contest_id}", **_auth_header(stranger_pair["access"])
+    ).json()
+    assert stranger_detail["is_owner"] is False
