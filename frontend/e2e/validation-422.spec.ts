@@ -13,6 +13,7 @@
 import { expect, test } from "@playwright/test";
 
 import { seedE2eContests } from "./lib/seed";
+import { establishDeveloperSession } from "./lib/session";
 
 /** ninja 요청 검증 422 의 실제 본문 모양. */
 const NINJA_VALIDATION_BODY = {
@@ -27,10 +28,7 @@ const NINJA_VALIDATION_BODY = {
 };
 
 async function login(page: import("@playwright/test").Page, seed: string): Promise<void> {
-  await page.goto("/login");
-  await page.getByTestId("fake-login-seed").fill(seed);
-  await page.getByTestId("login-kakao").click();
-  await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
+  await establishDeveloperSession(page, seed);
 }
 
 test("요청 검증 422(배열 detail)에도 화면이 살아 있고 이유가 보인다", async ({ page }) => {

@@ -7,6 +7,7 @@ import {
   seedE2eOperator,
   seedE2eOperatorQueues,
 } from "../lib/seed-operator";
+import { establishOperatorSession } from "../lib/session";
 
 // 운영자 앱 10(#68) — 지급 큐: 확정 후 막혀 있는 Payout이 "무엇에" 막혀 있는지
 // 보여준다(ADR-0008/0020). ADR-0020이 CONFIRMED_IDENTITY_PENDING과
@@ -18,10 +19,7 @@ import {
 // idempotency_key가 보이는가/안 보이는가"나 "부르기 전 대비 증분"으로만 단언한다.
 
 async function loginAsOperator(page: Page, username: string): Promise<void> {
-  await page.goto("/login");
-  await page.getByTestId("login-username").fill(username);
-  await page.getByTestId("login-password").fill(E2E_OPERATOR_PASSWORD);
-  await page.getByTestId("login-submit").click();
+  await establishOperatorSession(page, username, E2E_OPERATOR_PASSWORD);
   await expect(page.getByTestId("operator-home-heading")).toBeVisible();
 }
 

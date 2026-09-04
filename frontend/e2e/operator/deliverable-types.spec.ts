@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 import { E2E_OPERATOR_PASSWORD, seedE2eOperator } from "../lib/seed-operator";
+import { establishOperatorSession } from "../lib/session";
 
 // 운영자 앱 — 산출물 종류(DeliverableType) 관리 화면(#80, ADR-0023).
 //
@@ -15,10 +16,7 @@ function backendApiPort(): string {
 }
 
 async function loginAsOperator(page: Page, username: string, password = E2E_OPERATOR_PASSWORD): Promise<void> {
-  await page.goto("/login");
-  await page.getByTestId("login-username").fill(username);
-  await page.getByTestId("login-password").fill(password);
-  await page.getByTestId("login-submit").click();
+  await establishOperatorSession(page, username, password);
 }
 
 async function loginAndExpectHome(page: Page, username: string): Promise<void> {

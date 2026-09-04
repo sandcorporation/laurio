@@ -4,12 +4,10 @@
 import { expect, test } from "@playwright/test";
 
 import { seedE2eContests } from "./lib/seed";
+import { establishDeveloperSession } from "./lib/session";
 
 async function login(page: import("@playwright/test").Page, seed: string): Promise<void> {
-  await page.goto("/login");
-  await page.getByTestId("fake-login-seed").fill(seed);
-  await page.getByTestId("login-kakao").click();
-  await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
+  await establishDeveloperSession(page, seed);
 }
 
 test("내 참가 현황의 행에서 클릭으로 채점 결과에 도달한다", async ({ page }) => {

@@ -6,12 +6,10 @@
 import { expect, test } from "@playwright/test";
 
 import { seedE2eContests } from "./lib/seed";
+import { establishDeveloperSession } from "./lib/session";
 
 async function login(page: import("@playwright/test").Page, seed: string): Promise<void> {
-  await page.goto("/login");
-  await page.getByTestId("fake-login-seed").fill(seed);
-  await page.getByTestId("login-kakao").click();
-  await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
+  await establishDeveloperSession(page, seed);
 }
 
 test("참가한 게 없으면 빈 목록이라고 말한다 — 조회 실패와 구별된다", async ({ page }) => {
