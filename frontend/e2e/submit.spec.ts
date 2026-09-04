@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { establishDeveloperSession, establishVerification } from "./lib/session";
 
 // 제출 폼 (FE-10, #35, ADR-0014). 이 화면이 Laurio에서 가장 고유한 지점이다.
 //
@@ -12,22 +13,11 @@ import { expect, test } from "@playwright/test";
 // Developer 로그인을 뚜렷이 구분한다.
 
 async function login(page: import("@playwright/test").Page, seed: string): Promise<void> {
-  await page.goto("/login");
-  await page.getByTestId("fake-login-seed").fill(seed);
-  await page.getByTestId("login-kakao").click();
-  await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
+  await establishDeveloperSession(page, seed);
 }
 
 async function verify(page: import("@playwright/test").Page, seed: string): Promise<void> {
-  const status = await page.evaluate(async (s) => {
-    const res = await fetch("/api/backend/verification/verify", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ verification_token: `${s}|1990-01-01|ci-${s}|di-${s}` }),
-    });
-    return res.status;
-  }, seed);
-  expect(status).toBe(200);
+  await establishVerification(page, seed);
 }
 
 interface CreateContestOptions {

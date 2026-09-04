@@ -7,6 +7,7 @@ import {
   seedE2eOperator,
   seedE2eOperatorQueues,
 } from "../lib/seed-operator";
+import { establishOperatorSession } from "../lib/session";
 
 // 운영자 앱 07(#65) — 「할 일」 홈의 세 큐 건수(ADR-0020).
 //
@@ -17,10 +18,7 @@ import {
 // 비운 뒤의 0"으로만 검증한다.
 
 async function loginAsOperator(page: Page, username: string): Promise<void> {
-  await page.goto("/login");
-  await page.getByTestId("login-username").fill(username);
-  await page.getByTestId("login-password").fill(E2E_OPERATOR_PASSWORD);
-  await page.getByTestId("login-submit").click();
+  await establishOperatorSession(page, username, E2E_OPERATOR_PASSWORD);
   await expect(page.getByTestId("operator-home-heading")).toBeVisible();
 }
 

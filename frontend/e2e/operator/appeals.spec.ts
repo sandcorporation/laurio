@@ -8,6 +8,7 @@ import {
   seedE2eOperatorAppeal,
   sourceReadingCount,
 } from "../lib/seed-operator";
+import { establishOperatorSession } from "../lib/session";
 
 // 운영자 앱 08(#66) — 이의 큐와 상세, 그리고 이 티켓의 핵심인 "소스는 접혀
 // 있다"(ADR-0022).
@@ -19,10 +20,7 @@ import {
 // 개수를 가정하지 않는다.
 
 async function loginAsOperator(page: Page, username: string): Promise<void> {
-  await page.goto("/login");
-  await page.getByTestId("login-username").fill(username);
-  await page.getByTestId("login-password").fill(E2E_OPERATOR_PASSWORD);
-  await page.getByTestId("login-submit").click();
+  await establishOperatorSession(page, username, E2E_OPERATOR_PASSWORD);
   await expect(page.getByTestId("operator-home-heading")).toBeVisible();
 }
 

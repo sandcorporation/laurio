@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 import { E2E_OPERATOR_PASSWORD, seedE2eOperator } from "../lib/seed-operator";
+import { establishOperatorSession } from "../lib/session";
 
 // 운영자 앱 11(#69) — Operator 계정 관리(ADR-0018).
 //
@@ -14,10 +15,7 @@ import { E2E_OPERATOR_PASSWORD, seedE2eOperator } from "../lib/seed-operator";
 // 재활성화 뒤 다시 된다) — 트랩 노트가 지적하는 "라벨만 확인하는 단언"을 피한다.
 
 async function loginAsOperator(page: Page, username: string, password = E2E_OPERATOR_PASSWORD): Promise<void> {
-  await page.goto("/login");
-  await page.getByTestId("login-username").fill(username);
-  await page.getByTestId("login-password").fill(password);
-  await page.getByTestId("login-submit").click();
+  await establishOperatorSession(page, username, password);
 }
 
 async function loginAndExpectHome(page: Page, username: string, password = E2E_OPERATOR_PASSWORD): Promise<void> {
@@ -39,7 +37,13 @@ async function logout(page: Page): Promise<void> {
 /** 로그인 실패 — 계정이 존재하지 않는 것과 같은 하나의 문구로 답한다
  * (accounts/operator_api.py의 _LOGIN_FAILED, 비활성 계정도 여기 포함된다). */
 async function expectLoginRefused(page: Page, username: string, password = E2E_OPERATOR_PASSWORD): Promise<void> {
-  await loginAsOperator(page, username, password);
+  // **여기만 로그인 화면을 실제로 걷는다**(#155) — 확인하려는 것이 「거절이 화면에
+  // 어떻게 보이는가」이기 때문이다. 성공 전제를 만들 때 쓰는 API 경로로 부르면 예외가
+  // 날 뿐이고, 이 테스트가 묻는 질문(문구가 뜨는가)은 사라진다.
+  await page.goto("/login");
+  await page.getByTestId("login-username").fill(username);
+  await page.getByTestId("login-password").fill(password);
+  await page.getByTestId("login-submit").click();
   await expect(page.getByTestId("login-error")).toBeVisible();
   await expect(page).toHaveURL(/\/login/);
 }

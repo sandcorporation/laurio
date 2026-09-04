@@ -7,16 +7,14 @@
 // 시나리오는 백엔드를 다시 처음부터 세팅하지 않고 그 응답을 라우트로 흉내 낸다
 // (appeal.spec.ts의 채점 전 404 목킹과 같은 관용구).
 import { expect, test } from "@playwright/test";
+import { establishDeveloperSession } from "./lib/session";
 
 function uniqueSeed(label: string): string {
   return `wd-${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 async function login(page: import("@playwright/test").Page, seed: string): Promise<void> {
-  await page.goto("/login");
-  await page.getByTestId("fake-login-seed").fill(seed);
-  await page.getByTestId("login-kakao").click();
-  await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
+  await establishDeveloperSession(page, seed);
 }
 
 test("콘솔에서 클릭만으로 탈퇴 화면에 닿는다", async ({ page }) => {

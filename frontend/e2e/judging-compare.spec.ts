@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { seedE2eContests, type SeededContests } from "./lib/seed";
+import { establishDeveloperSession } from "./lib/session";
 
 // 심사 비교 화면 — Requirement 축 매트릭스 + Award (FE-11, #36, ADR-0006, ADR-0014).
 //
@@ -31,20 +32,14 @@ test.beforeAll(async () => {
 });
 
 async function loginAsJudgingSponsor(page: import("@playwright/test").Page): Promise<void> {
-  await page.goto("/login");
-  await page.getByTestId("fake-login-seed").fill(seeded.judging.sponsor_login_seed);
-  await page.getByTestId("login-kakao").click();
-  await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
+  await establishDeveloperSession(page, seeded.judging.sponsor_login_seed);
 }
 
 async function loginAsOtherSponsor(
   page: import("@playwright/test").Page,
   runId: string,
 ): Promise<void> {
-  await page.goto("/login");
-  await page.getByTestId("fake-login-seed").fill(`other-sponsor-${runId}`);
-  await page.getByTestId("login-kakao").click();
-  await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
+  await establishDeveloperSession(page, `other-sponsor-${runId}`);
 }
 
 test("필수·선택 Requirement가 구분되고, 증거 없는 칸이 즉시 구분된다", async ({ page }) => {

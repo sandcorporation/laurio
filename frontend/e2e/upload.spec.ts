@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { establishDeveloperSession } from "./lib/session";
 
 // presigned 업로드 (FE-09, #34, ADR-0005).
 //
@@ -15,10 +16,7 @@ async function loginAndVerify(
   page: import("@playwright/test").Page,
   seed: string,
 ): Promise<number> {
-  await page.goto("/login");
-  await page.getByTestId("fake-login-seed").fill(seed);
-  await page.getByTestId("login-kakao").click();
-  await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
+  await establishDeveloperSession(page, seed);
 
   const session = await page.evaluate(async () => {
     const res = await fetch("/api/auth/session", { cache: "no-store" });

@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { establishDeveloperSession, establishVerification } from "./lib/session";
 
 // AI grill 개최 (FE-12, #37, spec #25 User Story 40-48).
 //
@@ -12,22 +13,11 @@ import { expect, test } from "@playwright/test";
 // 조건이다) — 전부 dev compose의 fake LLM 어댑터(ADR-0007)로, 실제 LLM 없이 돈다.
 
 async function login(page: import("@playwright/test").Page, seed: string): Promise<void> {
-  await page.goto("/login");
-  await page.getByTestId("fake-login-seed").fill(seed);
-  await page.getByTestId("login-kakao").click();
-  await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
+  await establishDeveloperSession(page, seed);
 }
 
 async function verify(page: import("@playwright/test").Page, seed: string): Promise<void> {
-  const status = await page.evaluate(async (s) => {
-    const res = await fetch("/api/backend/verification/verify", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ verification_token: `${s}|1990-01-01|ci-${s}|di-${s}` }),
-    });
-    return res.status;
-  }, seed);
-  expect(status).toBe(200);
+  await establishVerification(page, seed);
 }
 
 // "grill-proposal-0"의 testid 접두어를 "grill-proposal-0-add"(추가 버튼)도
