@@ -119,9 +119,13 @@ logger = logging.getLogger(__name__)
 _BASE_URL = "https://api.tosspayments.com"
 _TIMEOUT_SECONDS = 10
 
-# 이 코드가 우리 쪽 설정 문제(자격증명·요청 자체가 잘못됨)라고 판단하는 HTTP
-# 상태다 — `payments.adapters_toss`와 같은 판단 기준이다.
-_OUR_INTEGRATION_ERROR_STATUSES = {401, 403}
+# 이 코드가 우리 쪽 설정 문제(자격증명·요청 자체가 잘못됨, 또는 라우트 자체가
+# 없는 우리 쪽 경로 오타)라고 판단하는 HTTP 상태다 — `payments.adapters_toss`와
+# 같은 401·403 판단 기준에 404 를 더한다(#172). 404 를 빼 두면 `/v1/sellers`
+# 같은 경로 오타가 "거절"로 굳어 Seller 를 REJECTED 로 만들고, 그 하나가
+# Operator 큐로 넘어간다 — 벤더가 실제로 심사해 내린 결정이 아니라 우리
+# 라우팅 실수인데도 사람의 차례로 둔갑한다(#97 실측).
+_OUR_INTEGRATION_ERROR_STATUSES = {401, 403, 404}
 
 # 벤더가 실제로 확인해 준 Seller 상태 흐름(ADR-0020) — 여기 없는 문자열을
 # 받으면 임의로 뭉개지 않고 예외를 던진다.
@@ -324,6 +328,27 @@ def _safe_json(response: requests.Response) -> dict | None:
         return None
 
 
+def _extract_error(body: dict | None) -> tuple[str | None, str | None]:
+    """v2 에러 응답에서 `code`·`message`를 읽는다(#172).
+
+    지급대행은 v2 인데 이 파일이 결제(v1) 어댑터의 관용구를 그대로 복사해
+    최상위 `code`·`message`를 읽고 있었다 — v2 는 `{"version","traceId",
+    "entityBody","entityType","error":{"code","message"}}` 형태로 `error`
+    객체 아래에 중첩한다(#97 실측: 403 응답 본문이 정확히 이 모양이었다).
+    최상위를 읽으면 `code`가 항상 `None`이라 한도·rate limit 재시도 판정
+    (`_looks_like_retryable_payout_code`)이 늘 거짓이 되고, 로그도
+    `code=None`으로 이유 없이 남았다. `payments.adapters_toss`(v1, 진짜 최상위가
+    맞다)는 건드리지 않는다.
+    """
+
+    if not body:
+        return None, None
+    error = body.get("error")
+    if isinstance(error, dict):
+        return error.get("code"), error.get("message")
+    return None, None
+
+
 def _validate_secure_key(secure_key: str, *, mode_setting_name: str) -> None:
     """`TOSS_API_SECURE_KEY`가 실제로 64자 hex인지 부팅 시점에 확인한다(코드리뷰
     지적 12). "비었는가"만 보면 잘못 붙여넣은 값(길이가 다르거나 hex가 아닌
@@ -429,7 +454,11 @@ class TossSellerAdapter:
 
         try:
             response = requests.post(
-                f"{_BASE_URL}/v1/sellers",
+                # 셀러 등록은 v2 다(#172, #97 실측) — `/v1/sellers`는 라우트 자체가
+                # 없어(404, 본문 길이 0) 지급 요청 쪽(`/v2/payouts`, 처음부터 v2였다)과
+                # 세대가 갈려 있었다. 결제(payments.adapters_toss)는 진짜 v1이라
+                # 건드리지 않는다.
+                f"{_BASE_URL}/v2/sellers",
                 data=encrypted_body,
                 headers=self._headers(),
                 timeout=_TIMEOUT_SECONDS,
@@ -449,7 +478,7 @@ class TossSellerAdapter:
 
         try:
             response = requests.get(
-                f"{_BASE_URL}/v1/sellers/{seller_id}",
+                f"{_BASE_URL}/v2/sellers/{seller_id}",  # v2 다(#172) — register()와 같은 세대.
                 headers=_basic_auth_headers(self._secret_key, api_version=self._api_version),
                 timeout=_TIMEOUT_SECONDS,
             )
@@ -465,7 +494,9 @@ class TossSellerAdapter:
 
         if response.status_code == 404:
             # 벤더가 이 seller_id를 모른다 — 우리 기록과 벤더 상태가 어긋난
-            # 드문 경우다. 처음부터 다시 시도할 수 있게 pending으로 돌려준다.
+            # 드문 경우다(라우트 오타의 404 와는 다른 자리 — 이건 seller_id 로
+            # 특정 지어 물은 뒤에 오는 「그 행이 없다」다). 처음부터 다시
+            # 시도할 수 있게 pending으로 돌려준다.
             return SellerRegistrationResult(seller_id="", status="pending", weekly_limit_amount=None)
 
         return self._parse_seller_response(response, ref=ref)
@@ -490,8 +521,9 @@ class TossSellerAdapter:
 
         if response.status_code >= 400:
             body = _safe_json(response)
-            code = body.get("code") if body else None
-            message = body.get("message") if body else response.text
+            code, message = _extract_error(body)  # v2 는 error 아래 중첩이다(#172).
+            if message is None:
+                message = response.text
             if response.status_code in _OUR_INTEGRATION_ERROR_STATUSES:
                 raise SellerError(
                     f"토스 Seller 등록이 우리 쪽 설정 문제로 거부됐다"
@@ -628,8 +660,9 @@ class TossPayoutAdapter:
             )
         if response.status_code >= 400:
             body_json = _safe_json(response)
-            code = body_json.get("code") if body_json else None
-            message = body_json.get("message") if body_json else response.text
+            code, message = _extract_error(body_json)  # v2 는 error 아래 중첩이다(#172).
+            if message is None:
+                message = response.text
             if response.status_code in _OUR_INTEGRATION_ERROR_STATUSES:
                 raise PayoutError(
                     f"토스 지급 요청이 우리 쪽 설정 문제로 거부됐다"

@@ -248,6 +248,19 @@ def test_register_sends_jwe_encrypted_body_with_individual_fields():
     assert sent_body["individual"] == {"name": "홍길동", "email": "dev@example.com", "phone": "01099998888"}
 
 
+def test_register_posts_to_v2_sellers_not_v1():
+    """셀러 등록은 v2 다(#172) — `/v1/sellers`는 라우트 자체가 없어 404(본문
+    길이 0)를 받는다는 것을 실물로 확인했다(#97)."""
+    with _settings():
+        adapter = TossSellerAdapter()
+        with patch("payouts.adapters_toss.requests.post") as mock_post:
+            mock_post.return_value = _encrypted_response(200, {"sellerId": "s", "status": "APPROVED"})
+            adapter.register(_reg())
+    url = mock_post.call_args[0][0]
+    assert url.endswith("/v2/sellers")
+    assert "/v1/" not in url
+
+
 @pytest.mark.parametrize(
     "vendor_body,expected_status,expected_limit",
     [
@@ -271,7 +284,9 @@ def test_register_vendor_rejection_returns_rejected_not_raise():
     with _settings():
         adapter = TossSellerAdapter()
         with patch("payouts.adapters_toss.requests.post") as mock_post:
-            mock_post.return_value = _response(400, {"code": "INVALID_REQUEST", "message": "심사 기준 미달"})
+            mock_post.return_value = _response(
+                400, {"error": {"code": "INVALID_REQUEST", "message": "심사 기준 미달"}}
+            )
             result = adapter.register(_reg())
     assert result.status == "rejected"
 
@@ -280,7 +295,21 @@ def test_register_our_credentials_rejected_raises_sellererror():
     with _settings():
         adapter = TossSellerAdapter()
         with patch("payouts.adapters_toss.requests.post") as mock_post:
-            mock_post.return_value = _response(401, {"code": "UNAUTHORIZED_KEY"})
+            mock_post.return_value = _response(401, {"error": {"code": "UNAUTHORIZED_KEY"}})
+            with pytest.raises(SellerError, match="UNAUTHORIZED_KEY"):
+                adapter.register(_reg())
+
+
+def test_register_unknown_route_404_raises_sellererror_not_rejected():
+    """#172, #97 실측: `/v1/sellers`로 잘못 치면 404(본문 길이 0)를 받는다 —
+    라우트 자체가 없는 우리 쪽 실수인데, 예전에는 401·403만 걸러 404가
+    "일반 거절"로 굳어 Seller 를 REJECTED 로 만들었다(dev DB Payout
+    5e3ecb24-… 가 그 실측 사례). 404도 우리 쪽 설정 문제로 걸러
+    상태를 보존해야 한다."""
+    with _settings():
+        adapter = TossSellerAdapter()
+        with patch("payouts.adapters_toss.requests.post") as mock_post:
+            mock_post.return_value = _response(404, text="")
             with pytest.raises(SellerError):
                 adapter.register(_reg())
 
@@ -341,7 +370,9 @@ def test_register_with_existing_seller_id_queries_instead_of_posting():
             result = adapter.register(_reg(existing_seller_id="already-registered-seller-id"))
     mock_post.assert_not_called()
     mock_get.assert_called_once()
-    assert "already-registered-seller-id" in mock_get.call_args[0][0]
+    url = mock_get.call_args[0][0]
+    assert "already-registered-seller-id" in url
+    assert "/v2/sellers/" in url  # v2 다(#172) — register()의 POST 경로와 같은 세대.
     assert result.status == "partially_approved"
 
 
@@ -504,10 +535,14 @@ def test_payout_adapter_rejects_non_hex_secure_key():
 
 
 def test_confirm_limit_exceeded_code_raises_timeout_not_failed():
+    """v2 에러 객체는 `error` 아래 중첩이다(#172) — 최상위를 읽으면 `code`가 늘 `None`이라
+    이 판정(`_looks_like_retryable_payout_code`)이 실측대로 늘 거짓이었다."""
     with _settings():
         adapter = TossPayoutAdapter()
         with patch("payouts.adapters_toss.requests.post") as mock_post:
-            mock_post.return_value = _response(400, {"code": "EXCEED_WEEKLY_PAYOUT_LIMIT", "message": "주간 한도 초과"})
+            mock_post.return_value = _response(
+                400, {"error": {"code": "EXCEED_WEEKLY_PAYOUT_LIMIT", "message": "주간 한도 초과"}}
+            )
             with pytest.raises(PayoutTimeoutError):
                 adapter.confirm(_req())
 
@@ -516,7 +551,7 @@ def test_confirm_rate_limited_429_raises_timeout_not_failed():
     with _settings():
         adapter = TossPayoutAdapter()
         with patch("payouts.adapters_toss.requests.post") as mock_post:
-            mock_post.return_value = _response(429, {"code": "TOO_MANY_REQUESTS"})
+            mock_post.return_value = _response(429, {"error": {"code": "TOO_MANY_REQUESTS"}})
             with pytest.raises(PayoutTimeoutError):
                 adapter.confirm(_req())
 
@@ -527,6 +562,33 @@ def test_confirm_genuine_decline_still_returns_failed():
     with _settings():
         adapter = TossPayoutAdapter()
         with patch("payouts.adapters_toss.requests.post") as mock_post:
-            mock_post.return_value = _response(400, {"code": "INVALID_ACCOUNT", "message": "invalid account"})
+            mock_post.return_value = _response(
+                400, {"error": {"code": "INVALID_ACCOUNT", "message": "invalid account"}}
+            )
             result = adapter.confirm(_req())
     assert result.status == "failed"
+
+
+def test_confirm_our_credentials_rejected_raises_payouterror():
+    """#172: 401·403은 우리 쪽 설정 문제다 — 벤더의 실제 거절과 구분해야
+    한다. 로그에 code 가 실제로 실린다(예전에는 최상위를 읽어 늘 None)."""
+    with _settings():
+        adapter = TossPayoutAdapter()
+        with patch("payouts.adapters_toss.requests.post") as mock_post:
+            mock_post.return_value = _response(
+                403, {"error": {"code": "FORBIDDEN_REQUEST", "message": "허용되지 않은 요청입니다."}}
+            )
+            with pytest.raises(PayoutError, match="FORBIDDEN_REQUEST"):
+                adapter.confirm(_req())
+
+
+def test_confirm_unknown_route_404_raises_payouterror_not_failed():
+    """#172, #97 실측: 라우트 오타의 404는 "거절"로 굳지 않는다 — 우리 쪽
+    설정 문제로 걸러 예외가 되고, VendorResult(status="failed")로 조용히
+    끝나지 않는다."""
+    with _settings():
+        adapter = TossPayoutAdapter()
+        with patch("payouts.adapters_toss.requests.post") as mock_post:
+            mock_post.return_value = _response(404, text="")
+            with pytest.raises(PayoutError):
+                adapter.confirm(_req())
