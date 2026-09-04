@@ -170,6 +170,15 @@ def list_own_source_readings(request: HttpRequest, submission_id: int, **kwargs)
 
     소유권 검사는 페이지네이션보다 **먼저** 일어난다 — 남의 Submission 이면 빈
     페이지가 아니라 403 이다.
+
+    **오프셋 페이지네이션을 그대로 둔다(#153의 결정).** #150~#153이 걷어낸 것은
+    공유 훅 `usePagedList` 가 읽는 세 표면(운영자 지급 큐·「내 공모전」·「내 참가
+    현황」)뿐이다. 여기는 `frontend/lib/appeals/use-appeal-page.ts` 가 이 훅을
+    거치지 않고 직접 `bffClient.get` 으로 1페이지(`items`)만 읽는다 — 「더 보기」
+    자체가 없다. 오프셋이 조용히 틀리는 것은 목록이 **머리 쪽에서** 자라며 페이지
+    경계를 넘나들 때인데, 이 화면은 애초에 경계를 넘지 않으므로 그 결함이 성립하지
+    않는다. 다시 여는 화면이 생기면(2페이지 이상을 실제로 요청하게 되면) 그때 이
+    훅으로 옮긴다.
     """
 
     submission = _get_owned_submission(request, submission_id)

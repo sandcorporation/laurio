@@ -99,6 +99,12 @@ export const SPONSOR_ACTION_LABELS: Record<SponsorNextAction, SponsorActionLabel
  * 빈 상태 판정에 쓰는 `count` 는 전체 건수라 잘렸다는 사실이 화면에 드러나지도
  * 않는다. `-created_at` 정렬이라 잘리는 쪽이 오래된 것들이고, 그중 하나가 「내
  * 차례」면 이 화면이 막으려던 결과가 그대로 일어난다.
+ *
+ * **커서로 읽는다**(#151/#152/#153). 개최자가 목록을 넘기는 동안 공모전을 하나
+ * 더 열면 머리에 새 행이 들어온다 — 오프셋이면 그 몇 초 사이에 경계가 밀려 같은
+ * 행이 두 번 나오고 그 사이 행 하나가 어느 페이지에도 안 나온다(#150). 운영자
+ * 지급 큐(`operator/lib/payouts/use-payout-queue.ts`)가 이미 증명한 모드를
+ * 그대로 쓴다 — `usePagedList` 는 이제 이 모드 하나뿐이다.
  */
 export function useMyContests(): MyContestsState {
   return usePagedList<SponsoredContestRow>(bffClient, "/api/backend/contests/mine");

@@ -83,53 +83,46 @@ export type PagedListState<Row> =
 interface PagedBody<Row> {
   items: Row[];
   count: number;
-  /** 커서 모드에서만 온다 — 더 없으면 null. */
-  next?: string | null;
+  /** 더 없으면 null — 「더 있는가」는 이 값의 유무로만 판정한다. */
+  next: string | null;
 }
 
-export interface PagedListOptions {
-  /** **커서(keyset) 모드**(#151). `?page=N` 대신 `?after=<커서>` 로 「마지막으로 본 행
-   * 다음부터」를 묻고, 「더 있는가」를 받은 수와 전체 건수의 비교가 아니라 **서버가 준
-   * 다음 커서의 유무**로 판정한다.
-   *
-   * 오프셋은 목록이 머리 쪽에서 자라면 조용히 틀린다 — 경계가 밀려 다음 묶음이 앞
-   * 묶음의 행을 다시 돌려주고, 그 중복이 `rows.length` 를 부풀려 「더 보기」가 아직 안 본
-   * 행을 남긴 채 사라진다(#150). 옛 모드를 함께 두는 것은 호출부를 한 번에 다 옮기지
-   * 않기 위해서다 — 이관이 끝나면 옛 모드는 사라진다(#153). */
-  cursor?: boolean;
-}
-
-/** django-ninja PageNumberPagination(`?page=N` → `{items, count}`) 목록을 페이지 이어붙이기로 읽는다.
+/** 커서(keyset) 목록을 「더 보기」로 이어 받는다(#151/#152/#153).
  *
- * 목록은 `page_size=20` 으로 잘린다. 1페이지만 그리면 그보다 많은 사람은 나머지에 **도달할 길이
- * 없는데**, 빈 상태 판정에 쓰는 `count` 는 전체 건수라 잘렸다는 사실이 화면에 드러나지도 않는다.
- * `-created_at` 정렬이라 잘리는 쪽이 오래된 것들이고, 그중 하나가 「내 차례」면 그 화면이 막으려던
- * 결과가 그대로 일어난다 — 그래서 `hasMore`·`loadMore` 가 상태의 일부다.
+ * `?page=N` 대신 `?after=<커서>` 로 「마지막으로 본 행 다음부터」를 묻고, 「더
+ * 있는가」를 받은 수와 전체 건수의 비교가 아니라 **서버가 준 다음 커서의 유무**로
+ * 판정한다. 오프셋은 목록이 머리 쪽에서 자라면 조용히 틀린다 — 경계가 밀려 다음
+ * 묶음이 앞 묶음의 행을 다시 돌려주고, 그 중복이 `rows.length` 를 부풀려 「더
+ * 보기」가 아직 안 본 행을 남긴 채 사라진다(#150). 목록은 `page_size=20` 으로
+ * 잘린다 — `-created_at` 정렬이라 잘리는 쪽이 오래된 것들이고, 그중 하나가 「내
+ * 차례」면 그 화면이 막으려던 결과가 그대로 일어난다.
+ *
+ * **옛 오프셋 모드는 여기 없다**(#153). 세 호출부(운영자 지급 큐·「내 공모전」·
+ * 「내 참가 현황」)가 전부 커서로 옮겨진 뒤 걷어냈다 — 어느 쪽으로 부르느냐에 따라
+ * 다른 답이 성립하는 상태를 영구히 남기지 않기 위해서다. 오프셋으로 페이지네이션된
+ * 채 이 훅 **밖에서** 읽히는 표면이 둘 더 있다(`appeals.api.list_own_source_readings`·
+ * `verification.operator_api.list_retained_identities`) — 둘 다 이 훅을 거치지 않고
+ * 1페이지만 읽으므로 이 이관과 무관하다. 고치지 않기로 했다는 사실은 그 두 함수의
+ * docstring 에 남겨 뒀다.
  *
  * `path` 가 `null` 이면 아무것도 읽지 않고 loading 에 머문다 — `useBackendQuery` 와 같은 규약이다.
  * 「아직 무엇을 읽을지 모른다」(세션 확인 전 등)를 호출부가 표현할 자리가 여기 말고 없다(#149):
  * 반환값만 loading 으로 덮으면 요청은 이미 나간 뒤라, 만료된 세션에서 401 이 세션 조회와 경합해
  * 로그인으로 튕기고, 그 사이 실패한 조회는 조건이 참이 돼도 **다시 시도되지 않는다**.
  */
-export function usePagedList<Row>(
-  client: BffClient,
-  path: string | null,
-  options: PagedListOptions = {},
-): PagedListState<Row> {
-  const cursorMode = options.cursor === true;
+export function usePagedList<Row>(client: BffClient, path: string | null): PagedListState<Row> {
   const [phase, setPhase] = useState<"loading" | "error" | "ready" | "more">("loading");
   const [failure, setFailure] = useState<ApiFailure | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
   const [count, setCount] = useState(0);
-  const [page, setPage] = useState(1);
-  // 커서 모드에서 다음에 물을 자리. `null` 은 「처음부터」다.
+  // 다음에 물을 자리. `null` 은 「처음부터」다.
   const [cursor, setCursor] = useState<string | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   // **「처음인가」를 커서 값에서 읽지 않는다.** 커서의 `null` 은 「처음부터」이고 다음
   // 커서의 `null` 은 「더 없다」인데, 둘 다 `string | null` 이라 하나로 뭉치기 쉽다 —
   // 실제로 `loadMore()` 가 끝에서 불리면 커서가 null 이 되어 「처음부터」로 읽히고,
   // 쌓아 둔 행이 1묶음으로 **갈아치워진다.** 「이번 조회가 이어 붙이는 것인가」를
-  // 따로 들고 있으면 그 혼동이 성립하지 않는다(페이지 모드의 `page === 1` 과 같은 역할).
+  // 따로 들고 있으면 그 혼동이 성립하지 않는다.
   const [appending, setAppending] = useState(false);
 
   // **경로가 바뀌면 쌓아 둔 페이지를 버린다**(#149). 이 훅은 「더 보기」를 위해 페이지를
@@ -145,7 +138,6 @@ export function usePagedList<Row>(
     setCommittedPath(path);
     setRows([]);
     setCount(0);
-    setPage(1);
     setCursor(null);
     setNextCursor(null);
     setAppending(false);
@@ -156,11 +148,7 @@ export function usePagedList<Row>(
     if (path === null) return;
     let cancelled = false;
     const separator = path.includes("?") ? "&" : "?";
-    const query = cursorMode
-      ? cursor === null
-        ? ""
-        : `${separator}after=${encodeURIComponent(cursor)}`
-      : `${separator}page=${page}`;
+    const query = cursor === null ? "" : `${separator}after=${encodeURIComponent(cursor)}`;
     void client.get<PagedBody<Row>>(`${path}${query}`).then((result) => {
       if (cancelled) return;
       if (!result.ok) {
@@ -168,33 +156,32 @@ export function usePagedList<Row>(
         setPhase("error");
         return;
       }
-      if (cursorMode && result.data.next === undefined) {
-        // **`next` 가 아예 없는 응답은 「끝」이 아니라 규약 위반이다.** 커서 모드를 켠
-        // 호출부가 아직 커서를 말하지 않는 엔드포인트를 가리키면(#153 이관 중에 생길 수
-        // 있는 일이다) 목록이 20행에서 **조용히 잘리고** 「더 보기」도 없이 끝난 것처럼
-        // 보인다 — 그 사이 머리말은 전체 건수를 그대로 말한다. 조용한 누락이 이 훅이
-        // 막으려던 바로 그것이라, 여기서는 실패라고 말한다.
+      if (result.data.next === undefined) {
+        // **`next` 가 아예 없는 응답은 「끝」이 아니라 규약 위반이다.** 호출부가 아직
+        // 커서를 말하지 않는 엔드포인트를 가리키면 목록이 20행에서 **조용히 잘리고**
+        // 「더 보기」도 없이 끝난 것처럼 보인다 — 그 사이 머리말은 전체 건수를 그대로
+        // 말한다. 조용한 누락이 이 훅이 막으려던 바로 그것이라, 여기서는 실패라고 말한다.
         setFailure({
           ok: false,
           status: 0,
           code: "malformed",
-          detail: "커서 모드인데 응답에 next 가 없다 — 이 엔드포인트는 커서를 말하지 않는다.",
+          detail: "커서 목록인데 응답에 next 가 없다 — 이 엔드포인트는 커서를 말하지 않는다.",
         });
         setPhase("error");
         return;
       }
       setRows((previous) => (appending ? [...previous, ...result.data.items] : result.data.items));
       setCount(result.data.count);
-      if (cursorMode) setNextCursor(result.data.next ?? null);
+      setNextCursor(result.data.next);
       setPhase("ready");
     });
     return () => {
       cancelled = true;
     };
     // `appending` 은 이 조회가 이어 붙이는 것인지만 정한다 — 그 값이 바뀌었다고 다시
-    // 읽을 이유는 없다(다시 읽는 계기는 경로·페이지·커서다).
+    // 읽을 이유는 없다(다시 읽는 계기는 경로·커서다).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, path, page, cursor, cursorMode]);
+  }, [client, path, cursor]);
 
   if (phase === "loading") return { status: "loading" };
   if (phase === "error") {
@@ -207,23 +194,19 @@ export function usePagedList<Row>(
     status: "ready",
     rows,
     count,
-    // 커서 모드에서는 **서버가 다음 커서를 줬는가**로 판정한다. 받은 수와 전체 건수를
-    // 비교하는 방식은 목록이 자라는 동안 틀린다 — 중복이 섞이면 아직 안 본 행이 남았는데도
-    // 「더 보기」가 사라진다(#150).
-    hasMore: cursorMode ? nextCursor !== null : rows.length < count,
+    // **서버가 다음 커서를 줬는가**로 판정한다. 받은 수와 전체 건수를 비교하는 방식은
+    // 목록이 자라는 동안 틀린다 — 중복이 섞이면 아직 안 본 행이 남았는데도 「더 보기」가
+    // 사라진다(#150).
+    hasMore: nextCursor !== null,
     loadingMore: phase === "more",
     loadMore: () => {
       // 끝에서 부르면 아무 일도 하지 않는다 — 커서를 null 로 되돌리면 그것은 「처음부터」다.
       // 지금 호출부는 `hasMore` 로 막지만, 무한 스크롤처럼 그 판정 없이 부르는 자리가
       // 생기면 목록이 통째로 1묶음으로 갈아치워진다.
-      if (cursorMode && nextCursor === null) return;
+      if (nextCursor === null) return;
       setPhase("more");
       setAppending(true);
-      if (cursorMode) {
-        setCursor(nextCursor);
-        return;
-      }
-      setPage((current) => current + 1);
+      setCursor(nextCursor);
     },
   };
 }

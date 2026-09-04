@@ -66,6 +66,15 @@ def list_retained_identities(request: HttpRequest, user_id: int | None = None, *
 
     목록을 훑는 것만으로 값이 새면 "펼치는 행위가 있어야 기록이 신호가 된다"는
     ADR-0022의 설계가 무너진다.
+
+    **오프셋 페이지네이션을 그대로 둔다(#153의 결정).** #150~#153이 걷어낸 것은
+    공유 훅 `usePagedList` 가 읽는 세 표면(운영자 지급 큐·「내 공모전」·「내 참가
+    현황」)뿐이다. 이 엔드포인트는 지금 어떤 프론트/운영자 화면도 소비하지 않는다
+    — 운영자가 이 API를 직접 친다(CLAUDE.md, ADR-0019: 운영자 앱이 나오기 전까지
+    사람이 판단하는 행위는 `/api/operator/*`를 HTTP로 직접 호출한다). 소비하는
+    화면이 없으니 오프셋이 조용히 틀리는 증상(목록이 머리 쪽에서 자라며 페이지
+    경계를 넘나드는 것)을 볼 사람도 없다. 운영자 앱에 이 표면의 화면이 생기면
+    그때 이 훅으로 옮긴다.
     """
 
     qs = RetainedIdentity.objects.all().order_by("-created_at")

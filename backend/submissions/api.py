@@ -20,11 +20,12 @@
 "스크린샷" 값도 마찬가지로 storage object_key를 담을 수 있는 불투명한 문자열이다.
 """
 
-# `from __future__ import annotations` 를 쓰지 않는다 — 이 모듈에는 `@paginate` 로
-# 감싼 엔드포인트가 있고(list_my_participation, #74), 그 래퍼는 원본 함수의
-# `__globals__` 를 가져갈 수 없어 문자열이 된 어노테이션을 해석하지 못한다.
-# contests/api.py(#39)와 appeals/api.py(#72)가 같은 자리에서
-# `QueryParams is not fully defined` 500 을 겪고 같은 결론에 도달했다.
+# list_my_participation(#74)이 예전엔 `@paginate`로 감쌌었다(그 래퍼는 원본 함수의
+# `__globals__`를 가져갈 수 없어 `from __future__ import annotations`를 쓰면 문자열이
+# 된 어노테이션을 해석하지 못했다 — contests/api.py(#39)와 appeals/api.py(#72)가 같은
+# 자리에서 `QueryParams is not fully defined` 500을 겪었다). #152가 그 엔드포인트를
+# 커서로 옮기며 `@paginate`는 이 파일에서 사라졌지만, 다른 이유로 다시 걸릴 수 있어
+# `from __future__ import annotations`는 여전히 쓰지 않는다.
 
 import logging
 
@@ -35,7 +36,6 @@ from django.http import HttpRequest
 from django.utils import timezone
 from ninja import Router
 from ninja.errors import HttpError
-from ninja.pagination import PageNumberPagination, paginate
 
 from accounts.middleware import jwt_auth
 from accounts.models import DeveloperProfile
@@ -44,6 +44,7 @@ from awards.models import Award
 from contests.models import Contest, Requirement
 from contests.view_tracking import get_view_count
 from core.clock import Clock
+from core.keyset import decode_cursor, keyset_page
 from verification.models import Verification
 
 from .models import Evidence, RequirementResponse, Submission
@@ -51,6 +52,7 @@ from .participation import next_action_for
 from .schemas import (
     ErrorOut,
     MyParticipationOut,
+    MyParticipationPageOut,
     OwnScoreOut,
     ComparisonEntryOut,
     ComparisonSubmissionOut,
@@ -468,9 +470,12 @@ def get_my_submission(request: HttpRequest, contest_id: int):
     )
 
 
-@router.get("/submissions/mine", response=list[MyParticipationOut], auth=jwt_auth)
-@paginate(PageNumberPagination, page_size=20)
-def list_my_participation(request: HttpRequest, **kwargs):
+# 한 페이지에 몇 행인가. 오프셋 시절의 `page_size=20` 을 그대로 이어받는다.
+_MY_PARTICIPATION_PAGE_SIZE = 20
+
+
+@router.get("/submissions/mine", response=MyParticipationPageOut, auth=jwt_auth)
+def list_my_participation(request: HttpRequest, after: str | None = None):
     """Developer 가 자기 제출들과 각각의 「다음 행동」을 본다 (#74).
 
     이 표면이 없어서 로그인한 Developer 가 "내가 어디에 냈고 각각 지금 어떤
@@ -485,19 +490,36 @@ def list_my_participation(request: HttpRequest, **kwargs):
     정상적인 사실이지 없는 리소스가 아니다. 이 경로가
     `/submissions/{submission_id}` 보다 **먼저** 등록돼야 한다는 점에 주의한다
     — 뒤에 두면 "mine" 이 submission_id 로 먹혀 404 가 난다.
+
+    **자르기는 커서다**(#151/#152) — 오프셋은 목록이 머리 쪽에서 자라면 경계가
+    밀린다. 개발자가 다른 탭에서 제출을 하나 더 하는 동안 「더 보기」를 넘기면
+    2페이지가 1페이지의 행을 다시 돌려주고, 원래 그 자리에 와야 했던 행은 어느
+    페이지에도 안 나온다. 정렬 마지막 키에 `id` 를 붙이는 이유도 운영자 지급
+    큐와 같다 — `created_at` 이 같은 두 행의 순서를 DB 가 보장하지 않는다.
     """
+
+    if after is not None and decode_cursor(after) is None:
+        # 읽을 수 없는 커서는 조용히 처음부터가 아니라 422 다 — 운영자 지급
+        # 큐와 같은 규율(#151). 조용히 1페이지로 되돌리면 「더 보기」를 눌렀는데
+        # 목록이 처음으로 돌아간 화면이 되어 무엇을 봤고 못 봤는지 알 수 없어진다.
+        raise HttpError(422, "읽을 수 없는 커서입니다.")
 
     profile = DeveloperProfile.objects.filter(user=request.auth_user).first()
     if profile is None:
-        return Submission.objects.none()
+        return {"items": [], "count": 0, "next": None}
 
     # 「다음 행동」을 고르려면 Contest·Score·Award·Handover·Appeal 을 함께 본다.
     # 행마다 새로 조회하면 참가가 쌓일수록 N+1 이 된다.
-    return (
+    submissions = (
         Submission.objects.filter(developer=profile)
         .select_related("contest", "score", "appeal", "contest__award__handover")
-        .order_by("-created_at")
+        .order_by("-created_at", "-id")
     )
+
+    items, next_cursor = keyset_page(
+        submissions, after=after, page_size=_MY_PARTICIPATION_PAGE_SIZE
+    )
+    return {"items": items, "count": submissions.count(), "next": next_cursor}
 
 @router.get(
     "/submissions/{submission_id}/score",

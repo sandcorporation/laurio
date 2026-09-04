@@ -335,3 +335,18 @@ class MySponsoredContestOut(Schema):
         # 조회가 나가고, 게다가 한 화면 안에서 행마다 다른 시각으로 판정하게
         # 된다(마감 직전 목록에서 실제로 갈릴 수 있다).
         return sponsor_next_action_for(obj, now=obj.judged_as_of)
+
+
+class MySponsoredContestPageOut(Schema):
+    """「내 공모전」 한 페이지 (#152) — 운영자 지급 큐의 `OperatorPayoutPageOut`
+    (payouts/schemas.py, #151)과 같은 모양이다.
+
+    `count` 는 **전체** 건수다(이 페이지의 길이가 아니다). `next` 는 「마지막으로
+    본 행 다음부터」를 가리키는 커서이고, 더 없으면 null 이다 — 「더 있는가」를
+    받은 수와 전체 건수의 비교가 아니라 **다음 커서의 유무**로 판정한다(#150 이
+    적은 증상 중 하나다).
+    """
+
+    items: list[MySponsoredContestOut]
+    count: int
+    next: str | None

@@ -567,3 +567,91 @@ def test_a_distribution_whose_payouts_have_not_settled_is_not_called_complete(
 
     assert Distribution.objects.filter(contest_id=contest["id"]).exists()
     assert _mine(client, sponsor["access"])[0]["next_action"] == "awaiting_payout"
+
+
+# --- #152: 커서 페이지네이션 --------------------------------------------------------
+
+
+def _clone_contests(count: int, *, profile, category) -> None:
+    """개최자에게 딸린 공모전을 `count` 개 더 만든다 — 페이지네이션 부피용이다.
+
+    HTTP 흐름(`_publish_contest`)을 스물몇 번 다시 태울 이유가 없다 — 여기서
+    확인할 것은 개최·결제가 아니라 목록이 자라는 동안 커서가 버티는가다.
+    픽스처는 ORM 으로, 단언은 HTTP 로(운영자 지급 큐의 `_clone_blocked_payouts`
+    와 같은 관용구, #151).
+    """
+
+    from contests.models import Contest
+
+    for index in range(count):
+        Contest.objects.create(
+            sponsor=profile,
+            title=f"{profile.display_name} 사본 {index}",
+            category=category,
+            prize=900_000,
+            deadline_at=timezone.now() + timedelta(hours=1),
+            status=Contest.Status.PUBLISHED,
+        )
+
+
+@pytest.mark.django_db
+def test_my_contests_does_not_repeat_or_lose_a_row_when_the_list_grows(
+    client, category, landing_type
+):
+    """1페이지를 받은 뒤 공모전이 하나 더 생겨도 「더 보기」가 같은 행을 두 번
+    그리지 않고, 경계에 있던 행을 잃지 않는다 (#152).
+
+    개최자가 목록을 넘기는 동안 공모전을 하나 더 열면 머리에 새 행이 들어온다 —
+    오프셋이면 그 몇 초 사이에 경계가 밀려 2페이지가 1페이지의 마지막 행을 다시
+    돌려주고, 원래 그 자리에 와야 했던 행은 어느 페이지에도 안 나온다(#151 이
+    운영자 지급 큐에서 세운 것과 같은 시나리오).
+    """
+
+    from accounts.models import SponsorProfile
+
+    sponsor, _first_contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type,
+        sponsor_uid="sponsor-152-1", sponsor_ci="ci-152-1",
+    )
+    profile = SponsorProfile.objects.get(user_id=sponsor["user_id"])
+    _clone_contests(24, profile=profile, category=category)
+
+    first = client.get(MY_CONTESTS_URL, **_auth_header(sponsor["access"]))
+    assert first.status_code == 200, first.content
+    first_body = first.json()
+    first_ids = [row["contest_id"] for row in first_body["items"]]
+    assert len(first_ids) == 20
+    assert first_body["next"], "더 있는데 다음 커서를 주지 않았다"
+
+    # **여기서 목록이 자란다** — 개최자가 공모전을 셋 더 연다.
+    _clone_contests(3, profile=profile, category=category)
+
+    second = client.get(
+        f"{MY_CONTESTS_URL}?after={first_body['next']}", **_auth_header(sponsor["access"])
+    )
+    assert second.status_code == 200, second.content
+    second_ids = [row["contest_id"] for row in second.json()["items"]]
+
+    assert not set(first_ids) & set(second_ids), (
+        "목록이 자란 뒤 2페이지가 1페이지의 행을 다시 돌려줬다"
+    )
+    # 1페이지 이후로 밀린 다섯(25건 중 나머지)은 그대로 나온다 — 새로 생긴 셋은
+    # 이미 지나간 커서보다 앞이라 나오지 않는 것이 옳다(그건 다음 조회의 몫이다).
+    assert len(second_ids) == 5, second_ids
+
+
+@pytest.mark.django_db
+def test_my_contests_rejects_a_cursor_it_cannot_read(client, category, landing_type):
+    """읽을 수 없는 커서는 조용히 처음부터가 아니라 422 다 (#152) — 운영자 지급
+    큐와 같은 규율(#151)."""
+
+    sponsor, _contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type,
+        sponsor_uid="sponsor-152-2", sponsor_ci="ci-152-2",
+    )
+
+    response = client.get(
+        f"{MY_CONTESTS_URL}?after=not-a-cursor", **_auth_header(sponsor["access"])
+    )
+
+    assert response.status_code == 422, response.content
