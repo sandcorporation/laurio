@@ -29,6 +29,9 @@ importers:
         specifier: ^19.1.0
         version: 19.2.8(react@19.2.8)
     devDependencies:
+      '@laurio/route-audit':
+        specifier: workspace:*
+        version: link:../packages/route-audit
       '@playwright/test':
         specifier: ^1.50.0
         version: 1.62.1
@@ -75,6 +78,9 @@ importers:
         specifier: ^19.1.0
         version: 19.2.8(react@19.2.8)
     devDependencies:
+      '@laurio/route-audit':
+        specifier: workspace:*
+        version: link:../packages/route-audit
       '@types/node':
         specifier: ^22.10.0
         version: 22.20.1
@@ -119,6 +125,19 @@ importers:
       vitest:
         specifier: ^5.0.0
         version: 5.0.0(@types/node@22.20.1)(vite@8.2.2(@types/node@22.20.1)(jiti@2.7.0))
+
+  packages/route-audit:
+    dependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^5.0.0
+        version: 5.0.0(@types/node@22.20.1)(vite@8.2.2(@types/node@22.20.1)(jiti@2.7.0))
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.0
+        version: 22.20.1
 
 packages:
 

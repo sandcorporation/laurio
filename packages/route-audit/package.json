@@ -1,0 +1,19 @@
+{
+  "name": "@laurio/route-audit",
+  "version": "0.0.0",
+  "private": true,
+  "description": "고아 라우트 탐지 스캐너 + vitest 스위트 정의 공유 패키지(#166) — 두 앱이 같은 규칙으로 검사하도록 강제한다. bff-shared에 두지 않은 이유: 그건 BFF 런타임(프록시 전달·Origin 검증) 성격이 뚜렷한 패키지라 빌드 시점 정적 분석 도구를 섞으면 경계가 흐려진다. 허용목록의 내용은 여기 두지 않는다 — 각 앱이 자기 것을 갖는다.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0"
+  }
+}
