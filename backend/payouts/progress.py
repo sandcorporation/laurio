@@ -33,8 +33,10 @@ class HoldKind(str, Enum):
     IDENTITY = "identity"
     # 신원은 냈고 전진(실이체 확정)을 기다린다.
     IDENTITY_RECORDED = "identity_recorded"
-    # Seller 등록에 전화번호가 필요하다 — Developer 의 차례.
-    SELLER_PHONE = "seller_phone"
+    # Seller 등록에 연락처(전화번호·이메일 중 하나 이상)가 필요하다 — Developer 의
+    # 차례(#168). 전화번호만 없든 이메일만 없든 둘 다 없든 Developer 가 갈 화면은
+    # 같다 — 갈래를 나누지 않는다.
+    SELLER_CONTACT = "seller_contact"
     # 지급대행사의 본인인증 문자 — Developer 의 차례.
     SELLER_AUTH = "seller_auth"
     # 지급대행사 심사 중 — 벤더의 차례.
@@ -70,7 +72,7 @@ TURN_OF: dict[HoldKind, Turn] = {
     HoldKind.REQUESTED: Turn.NONE,
     HoldKind.IDENTITY: Turn.DEVELOPER,
     HoldKind.IDENTITY_RECORDED: Turn.VENDOR,
-    HoldKind.SELLER_PHONE: Turn.DEVELOPER,
+    HoldKind.SELLER_CONTACT: Turn.DEVELOPER,
     HoldKind.SELLER_AUTH: Turn.DEVELOPER,
     HoldKind.SELLER_REVIEW: Turn.VENDOR,
     HoldKind.SELLER_REJECTED: Turn.OPERATOR,
@@ -90,7 +92,7 @@ BLOCKED_ON_OF: dict[HoldKind, str | None] = {
     HoldKind.REQUESTED: None,
     HoldKind.IDENTITY: "identity",
     HoldKind.IDENTITY_RECORDED: "identity",
-    HoldKind.SELLER_PHONE: "seller",
+    HoldKind.SELLER_CONTACT: "seller",
     HoldKind.SELLER_AUTH: "seller",
     HoldKind.SELLER_REVIEW: "seller",
     HoldKind.SELLER_REJECTED: "seller",
@@ -129,6 +131,71 @@ class Hold:
         return BLOCKED_ON_OF[self.kind]
 
 
+# Hold → 사람이 읽을 문장의 번역표(#50 AC, #130) — 침묵은 상금이 사라진 것으로
+# 읽힌다. 원래 `payouts.api` 에 있었는데(#130), #169 가 지급 알림 스캔에서도 같은
+# 문구를 재사용해야 해서 이 모듈로 옮겼다 — `hold_of` 를 이미 소유한 이 모듈이
+# 그 결과를 사람이 읽을 문장으로 바꾸는 규칙까지 한 곳에서 갖는다. 두 곳(화면·
+# 알림)이 각자 번역표를 가지면 #130 이 세 렌더러에서 하나로 모은 것을 다시
+# 쪼개는 셈이다.
+NEXT_ACTION_MESSAGES: dict[HoldKind, str] = {
+    HoldKind.REQUESTED: "지급 확인 절차가 진행 중입니다. 잠시만 기다려주세요.",
+    HoldKind.IDENTITY: "세무 신고를 위해 주민등록번호를 제출해주세요.",
+    HoldKind.IDENTITY_RECORDED: "세무 신고를 위해 주민등록번호를 제출해주세요.",
+    # #168 — 전화번호 전용이던 문구를 연락처(전화번호·이메일) 전반으로 넓힌다.
+    # 무엇이 구체적으로 비었는지는 이 번역표가 아니라 화면이 `has_seller_phone`·
+    # `has_seller_email` 두 사실로 만든다(#168 구현 결정) — 이미 낸 것을 다시
+    # 내라고 하지 않기 위해서다.
+    HoldKind.SELLER_CONTACT: "지급대행사 수취인 등록에 연락처 정보가 필요합니다 — 아래에서 제출해주세요.",
+    HoldKind.SELLER_AUTH: (
+        "지급대행사(토스페이먼츠)가 보낸 본인인증 문자로 인증을 완료해주세요 — "
+        "이미 본인확인을 하셨더라도 지급대행사 자체 의무라 다시 인증이 "
+        "필요합니다. 인증이 끝나면 자동으로 다음 단계로 넘어갑니다."
+    ),
+    HoldKind.SELLER_REVIEW: (
+        "지급대행사 심사가 진행 중입니다(주간 지급 한도 초과 또는 추가 확인 "
+        "요청) — 상금은 안전하게 보관되어 있으며 심사가 끝나면 자동으로 다음 "
+        "단계로 넘어갑니다."
+    ),
+    HoldKind.SELLER_REJECTED: (
+        "지급대행사 수취인 등록이 거절되었습니다. 상금은 원장에 그대로 "
+        "남아 있습니다 — 운영자에게 문의해주세요."
+    ),
+    HoldKind.SELLER_PENDING: "지급대행사 수취인 등록이 진행 중입니다. 완료되면 자동으로 다음 단계로 넘어갑니다.",
+    HoldKind.TRANSFER_CONFIRMING: "실이체 확인이 진행 중입니다. 잠시만 기다려주세요.",
+    HoldKind.TRANSFER_RETRY: (
+        "지급대행사 등록은 끝났지만 실제 이체가 거절되었습니다 — 상금은 "
+        "원장에 그대로 남아 있습니다. 아래에서 다시 시도해주세요."
+    ),
+    HoldKind.TRANSFER_RETRY_IDENTITY_RECORDED: (
+        "실제 이체가 실패로 확인되었습니다 — 상금은 원장에 그대로 남아 "
+        "있습니다. 세무 신고를 위한 주민등록번호는 계속 제출해주세요."
+    ),
+    HoldKind.TRANSFER_OPERATOR: (
+        "지급이 확정되었지만 실제 이체가 실패로 확인되었습니다 — 상금은 "
+        "원장에 그대로 남아 있습니다. 운영자가 확인 후 다시 진행합니다."
+    ),
+    HoldKind.COMPLETE: "지급이 완료되었습니다.",
+    HoldKind.FAILED: "지급 요청이 실패했습니다. 다시 시도해주세요.",
+    HoldKind.UNKNOWN: "지급 상태를 확인하는 중입니다. 운영자가 확인 후 안내드립니다.",
+}
+assert_covers_all_kinds(NEXT_ACTION_MESSAGES, name="NEXT_ACTION_MESSAGES")
+
+# 신원 미제출 상태에서 실이체 실패도 함께 확인된 경우 — 신원 제출을 막을 이유는 없지만
+# (독립적인 두 축), 실이체가 실패했다는 사실을 감추지 않는다(#57 코드리뷰 지적 4).
+_IDENTITY_AFTER_TRANSFER_FAILURE_MESSAGE = NEXT_ACTION_MESSAGES[
+    HoldKind.TRANSFER_RETRY_IDENTITY_RECORDED
+]
+
+
+def next_action_message(hold: "Hold") -> str:
+    """이 Hold 에 대해 사람이 읽을 다음 행동 문구 — 지급 화면과 지급 알림 스캔(#169)이
+    같이 쓴다."""
+
+    if hold.kind is HoldKind.IDENTITY and hold.transfer_failed:
+        return _IDENTITY_AFTER_TRANSFER_FAILURE_MESSAGE
+    return NEXT_ACTION_MESSAGES[hold.kind]
+
+
 def hold_of(payout: Payout, *, seller: Seller | None, has_identity: bool) -> Hold:
     """네 사실에서 Hold 하나를 읽어 낸다. 조회를 내지 않는다 — 호출부가 Seller 와 신원
     제출 여부를 미리 가져온다(목록에서 행마다 조회하지 않기 위해)."""
@@ -165,11 +232,13 @@ def hold_of(payout: Payout, *, seller: Seller | None, has_identity: bool) -> Hol
         elif seller is not None and seller.status == Seller.Status.APPROVAL_REQUIRED:
             kind = HoldKind.SELLER_AUTH
         elif (seller is None or seller.status == Seller.Status.PENDING) and not (
-            seller is not None and seller.phone_number
+            seller is not None and seller.phone_number and seller.email
         ):
-            # PENDING 이면서 전화번호도 없다 — 「우리가 응답을 기다린다」가 아니라
-            # 「Developer 가 낼 것이 있다」(#57 추가 인수조건).
-            kind = HoldKind.SELLER_PHONE
+            # PENDING 이면서 전화번호나 이메일 중 하나라도 없다 — 「우리가 응답을
+            # 기다린다」가 아니라 「Developer 가 낼 것이 있다」(#57 추가 인수조건,
+            # #168 이 이메일까지 넓힌다). 이메일이 없는 것만으로도 이 갈래다 —
+            # 이전에는 벤더의 차례로 잘못 읽혔다(#168 이 닫는 회귀).
+            kind = HoldKind.SELLER_CONTACT
         else:
             kind = HoldKind.SELLER_PENDING
     else:
@@ -202,10 +271,10 @@ def hold_of(payout: Payout, *, seller: Seller | None, has_identity: bool) -> Hol
 # (#141 이 `Contest.Status` 에 쓴 관용구). 조합이 하나 늘거나 표가 바뀌면 그 테스트가
 # 그 자리에서 터진다.
 #
-# `HoldKind.SELLER_PHONE` 과 `SELLER_PENDING` 을 가르는 다섯 번째 사실(전화번호 제출
-# 여부)은 여기 없다 — 둘 다 `blocked_on == "seller"` 라 이 축에서는 구별되지 않는다.
-# 애초에 그 값은 암호화되어 저장돼(`Seller.phone_number_encrypted`) SQL 이 읽을 수도
-# 없다. 「거친 축까지만」이 편의가 아니라 가능한 최대치라는 뜻이다.
+# `HoldKind.SELLER_CONTACT` 과 `SELLER_PENDING` 을 가르는 다섯 번째 사실(전화번호·
+# 이메일 제출 여부)은 여기 없다 — 둘 다 `blocked_on == "seller"` 라 이 축에서는
+# 구별되지 않는다. 전화번호는 애초에 암호화되어 저장돼(`Seller.phone_number_encrypted`)
+# SQL 이 읽을 수도 없다. 「거친 축까지만」이 편의가 아니라 가능한 최대치라는 뜻이다.
 
 _STATUS_VALUES = list(Payout.Status.values)
 

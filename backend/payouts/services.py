@@ -183,7 +183,11 @@ def _seller_registration_for(developer, existing: Seller | None):
     return SellerRegistration(
         ref_seller_id=f"laurio-developer-{developer.id}",
         name=verification.real_name if verification is not None else "",
-        email=developer.user.email or "",
+        # 로그인 계정의 이메일이 아니라 Seller 자신의 이메일이다(#168) — 소셜
+        # 로그인이 이메일을 안 줬으면(#49 유저스토리 12) 계정 이메일은 비어
+        # 있고, 그 공백은 여기서 developer.user.email 로 메워지지 않는다. 대신
+        # Developer가 지급 화면에서 낸 값(`Seller.email`)만 벤더에 실어 보낸다.
+        email=existing.email if existing is not None else "",
         phone=existing.phone_number if existing is not None else "",
         existing_seller_id=(
             existing.seller_id
@@ -419,20 +423,26 @@ def retry_seller_registration(payout: Payout, *, simulate: str | None = None) ->
     return current
 
 
-def submit_seller_phone(developer, phone_number: str) -> Seller:
+def submit_seller_contact(
+    developer, *, phone_number: str | None = None, email: str | None = None
+) -> Seller:
     """토스 셀러 등록(businessType=INDIVIDUAL)의 individual 객체가 요구하는
-    전화번호를 제출한다(#57).
+    연락처(전화번호·이메일)를 제출한다(#57, #168).
 
-    가입·제출 시점에는 어디에도 저장되지 않는 값이라(CLAUDE.md 도메인에 phone
-    개념 자체가 없다) `TaxIdentity.resident_registration_number`와 같은 원칙으로
-    별도 제출을 받는다 — Payout이 아직 확정되지 않았어도 미리 제출해 둘 수
-    있다(Seller 자체는 여전히 확정 시점에만 등록을 시도한다, ADR-0020 —
+    가입·제출 시점에는 어디에도 저장되지 않는 값들이라(로그인 계정의 이메일과는
+    별개다 — #168 구현 결정) `TaxIdentity.resident_registration_number`와 같은
+    원칙으로 별도 제출을 받는다 — Payout이 아직 확정되지 않았어도 미리 제출해
+    둘 수 있다(Seller 자체는 여전히 확정 시점에만 등록을 시도한다, ADR-0020 —
     이 함수는 그 규율을 어기지 않는다. 값을 미리 저장만 해 둘 뿐 등록을
     앞당기지 않는다).
 
+    **부분 제출을 허용한다**(#168) — `phone_number`/`email` 중 `None`인 쪽은
+    손대지 않는다. 전화번호만 내도, 이메일만 내도 이미 낸 값은 보존된다.
+    엔드포인트가 "둘 다 None"인 요청은 미리 거절하므로 여기서는 다루지 않는다.
+
     이미 CONFIRMED_SELLER_PENDING에 머물던 Payout이 있으면(실물 어댑터가
-    전화번호가 없어 PENDING에 계속 머물렀던 경우, `TossSellerAdapter.register`
-    참고) 저장 직후 곧바로 재시도한다 — Developer가 전화번호를 내고 나서도
+    연락처가 없어 PENDING에 계속 머물렀던 경우, `TossSellerAdapter.register`
+    참고) 저장 직후 곧바로 재시도한다 — Developer가 연락처를 내고 나서도
     "다시 시도" 버튼을 또 눌러야 한다면 그 자체가 침묵으로 읽힌다.
 
     **등록은 Payout 마다가 아니라 Developer 마다 한 번이다**(#91). 이전에는 대기 중인
@@ -447,8 +457,18 @@ def submit_seller_phone(developer, phone_number: str) -> Seller:
 
     with transaction.atomic():
         seller, _created = Seller.objects.select_for_update().get_or_create(developer=developer)
-        seller.phone_number = phone_number
-        seller.save(update_fields=["phone_number_encrypted", "updated_at"])
+        update_fields = ["updated_at"]
+        # 진리값으로 본다(`is not None`이 아니다) — 스키마가 빈 문자열을 이미
+        # 422로 막아내지만(`SellerContactSubmitIn`), 이 함수는 API 층을 거치지
+        # 않는 호출에도 "빈 문자열로 지운다"는 개념이 없다는 계약을 그대로
+        # 지킨다(코드리뷰 지적 — 방어를 스키마 한 곳에만 두지 않는다).
+        if phone_number:
+            seller.phone_number = phone_number
+            update_fields.append("phone_number_encrypted")
+        if email:
+            seller.email = email
+            update_fields.append("email")
+        seller.save(update_fields=update_fields)
 
     has_pending_payout = (
         Payout.objects.filter(status=Payout.Status.CONFIRMED_SELLER_PENDING)

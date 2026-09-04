@@ -21,6 +21,10 @@ class PayoutOut(Schema):
     # (예: 이메일)가 없어 register()가 계속 "pending"을 돌려주는 경우에도
     # 폼이 계속 다시 나타난다 — 이미 제출한 값을 또 내라고 요구하는 꼴이다.
     has_seller_phone: bool
+    # 지급용 이메일을 이미 제출했는가(#168) — has_seller_phone 과 같은 원칙이다.
+    # 화면이 이 값과 has_seller_phone 두 사실만으로 "무엇이 비었는지"를 구성한다 —
+    # 그 문구는 Hold 번역표가 아니라 화면이 소유한다(#168 구현 결정).
+    has_seller_email: bool
     # Seller가 아직 등록되지 않았으면 None. 있으면 "pending" |
     # "approval_required" | "partially_approved" | "under_review" | "approved"
     # | "rejected" 중 하나(#50, #57, ADR-0020) — 두 대기(신원/Seller) 중 이쪽이
@@ -101,13 +105,30 @@ class IdentitySubmitIn(Schema):
     resident_registration_number: str = Field(pattern=r"^\d{13}$")
 
 
-class SellerPhoneSubmitIn(Schema):
+class SellerContactSubmitIn(Schema):
     """토스 셀러 등록(businessType=INDIVIDUAL)의 individual 객체가 요구하는
-    전화번호(#57). 숫자로만 이루어진 10~11자리(하이픈 없이)만 허용한다 —
-    `IdentitySubmitIn.resident_registration_number`와 같은 원칙으로 형식만
-    검증한다."""
+    연락처(전화번호·이메일)를 하나의 경로로 받는다(#57, #168). 옛 전화번호
+    전용 스키마(`SellerPhoneSubmitIn`)를 넓힌 것이라 그 이름은 남기지 않는다.
 
-    phone_number: str = Field(pattern=r"^\d{10,11}$")
+    **둘 다 선택 입력이다** — 부분 제출을 허용한다(전화번호만, 이메일만).
+    `None`은 "이 필드는 안 보냈다"(손대지 않는다)를 뜻하고, 엔드포인트가 둘 다
+    `None`이면 422 로 거부한다(`accounts.schemas.ProfileIn`과 같은 "안 보냄"과
+    "빈 값" 구분 관용구 — 다만 여기는 "빈 문자열로 지운다"는 개념 자체가 없다,
+    연락처는 비우는 별도 API 가 없다). **빈 문자열도 "안 보냄"과 같이 취급하지
+    않고 422 로 거부한다** — `email=""` 을 허용하면 그 요청이 "안 보냄"(None)과
+    구분되지 않아 `payload.email is None` 가드를 조용히 통과하고, 이미 제출된
+    이메일을 빈 값으로 덮어써 버린다(코드리뷰 지적) — 부분 제출이 "낸 것을
+    보존한다"는 약속과 정반대다.
+
+    전화번호는 숫자로만 이루어진 10~11자리(하이픈 없이)만 허용한다 —
+    `IdentitySubmitIn.resident_registration_number`와 같은 원칙으로 형식만
+    검증한다(빈 문자열도 이 패턴에 맞지 않아 자동으로 422 다). 이메일은 이
+    저장소의 다른 이메일 필드(`accounts.MeOut.email`)와 같이 형식을 엄격히
+    검증하지 않는다 — Django `EmailField`가 저장 시점의 최소한의 형태만
+    본다. 다만 **비어 있지는 않아야 한다**(`min_length=1`)."""
+
+    phone_number: str | None = Field(default=None, pattern=r"^\d{10,11}$")
+    email: str | None = Field(default=None, min_length=1)
 
 
 class ErrorOut(Schema):

@@ -67,14 +67,22 @@ export async function retrySellerRegistration(idempotencyKey: string) {
   return outcome(await bffClient.post(`/api/backend/payouts/${idempotencyKey}/seller-registration`));
 }
 
-/** 토스 셀러 등록(businessType=INDIVIDUAL)의 individual 객체가 요구하는 전화번호를 제출한다
- * (#57 코드리뷰 지적 10 — next_action_message 가 "아래에서 제출해주세요"라고 말하는 폼이 실제로
- * 없었다). Payout 이 아직 확정되지 않았어도 미리 제출해 둘 수 있다.
+/** 토스 셀러 등록(businessType=INDIVIDUAL)의 individual 객체가 요구하는 연락처(전화번호·이메일)를
+ * 제출한다(#57 코드리뷰 지적 10 — next_action_message 가 "아래에서 제출해주세요"라고 말하는 폼이
+ * 실제로 없었다. #168 이 전화번호 전용이던 경로를 연락처 전반으로 넓혔다). Payout 이 아직
+ * 확정되지 않았어도 미리 제출해 둘 수 있다.
+ *
+ * **부분 제출을 허용한다** — `phoneNumber`/`email` 중 생략한 쪽은 손대지 않는다. 서버가 낸 것을
+ * 보존하므로(#168), 여기서도 보낼 값만 담는다.
  */
-export async function submitSellerPhone(idempotencyKey: string, phoneNumber: string) {
+export async function submitSellerContact(
+  idempotencyKey: string,
+  { phoneNumber, email }: { phoneNumber?: string; email?: string },
+) {
+  const body: Record<string, string> = {};
+  if (phoneNumber !== undefined) body.phone_number = phoneNumber;
+  if (email !== undefined) body.email = email;
   return outcome(
-    await bffClient.post(`/api/backend/payouts/${idempotencyKey}/seller-phone`, {
-      phone_number: phoneNumber,
-    }),
+    await bffClient.post(`/api/backend/payouts/${idempotencyKey}/seller-contact`, body),
   );
 }

@@ -417,12 +417,21 @@ class Seller(models.Model):
     weekly_limit_amount = models.PositiveIntegerField(null=True, blank=True)
     # 토스 셀러 등록(businessType=INDIVIDUAL)의 individual 객체가 요구하는
     # 전화번호(#57) — 가입 시점에는 어디에도 없어 Payout이 확정된 뒤 별도로
-    # 제출받는다(`POST /payouts/{idempotency_key}/seller-phone`). TaxIdentity.
+    # 제출받는다(`POST /payouts/{idempotency_key}/seller-contact`). TaxIdentity.
     # resident_registration_number_encrypted와 같은 이유로 암호화해 저장한다.
     # 아직 제출되지 않았으면 빈 문자열이고, 그동안 실물 어댑터는 벤더를 부르지
     # 않고 PENDING에 머문다(register()가 스스로 판단한다) — Fake 어댑터는 이
     # 값을 쓰지 않는다(기존 시나리오 동작을 바꾸지 않는다).
     phone_number_encrypted = models.CharField(max_length=500, blank=True)
+    # 지급용 이메일(#168) — 로그인 계정의 이메일과 별개의 값이다. 소셜 로그인이
+    # 이메일 동의를 주지 않으면(#49 유저스토리 12) 계정 이메일이 빈 문자열일 수
+    # 있는데, 토스 셀러 등록은 이메일을 필수로 요구한다. 화면은 계정 이메일을
+    # 기본값으로 보여주되 저장은 여기(Seller)에만 한다 — 로그인 제공자를
+    # 바꾸거나 계정 이메일이 바뀌어도 지급 경로가 흔들리지 않고, 카카오 계정
+    # 주소로 지급 안내를 받고 싶지 않은 Developer 에게 선택지가 남는다.
+    # 전화번호와 달리 평문으로 둔다 — 같은 종류의 값(계정 이메일)이 저장소에
+    # 따라 다른 취급(암호화 여부)을 받으면 파기 규칙이 갈린다(#168).
+    email = models.EmailField(max_length=254, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

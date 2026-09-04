@@ -67,3 +67,23 @@ existing_seller_id)` 을 `ensure_seller_registered` 가 조립한다. adapter �
 pending 을 돌려준다. claim·attempt·재선점·`vendor_payout_id` 저장은 `payouts.progress` 가 한다.
 
 「지급 확정이 Seller 등록보다 앞선다」는 순서 자체는 그대로다 — 바뀐 것은 그 순서를 누가 아는가다.
+
+## 보완 — 수취인은 비사업자 개인으로 제한된다, 벤더 확인 전 (#168)
+
+`businessType`이 셋 중 하나일 수 있다고 위에 적어 뒀지만, 지금 셀러 등록
+(`payouts.services._seller_registration_for`)은 코드에서만 `INDIVIDUAL`로
+고정되어 있고 그 사실은 어디에도 기록으로 남아 있지 않았다 — 사업자로
+활동하는 Developer가 왜 셀러 등록에서 막히는지 코드를 읽지 않고는 알 수
+없었다.
+
+**수취인은 비사업자 개인(`INDIVIDUAL`)으로 제한된다.** `INDIVIDUAL_BUSINESS`·
+`CORPORATE`는 지금 시도조차 하지 않는다. 이것은 **결정이 아니라 미확인이다** —
+토스가 사업자 Developer를 어떻게 다루는지(원천징수 계산이 달라지는지 포함,
+ADR-0008의 남은 미확인과 얽힌다) #97에서 벤더에 먼저 확인해야 한다. 그때까지
+사업자 Developer는 조용히 막히는 대신, 이 ADR과 CONTEXT.md에 남은 미확인으로
+존재를 알려야 한다 — #167 스펙의 Out of Scope다.
+
+**Seller의 연락처도 이 제한 위에 있다.** `Seller.email`(#168)과 `Seller.
+phone_number_encrypted`(#57)는 `individual` 객체(비사업자 개인)가 요구하는
+필드다 — 사업자 유형이 열리면 이 필드들이 그대로 재사용 가능한지도 함께
+확인해야 한다.

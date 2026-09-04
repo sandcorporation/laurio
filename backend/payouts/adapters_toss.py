@@ -27,12 +27,15 @@ Header를 base64url로 인코딩한 바이트 그대로다) — 별도 JWE 라�
 ## Seller 등록에 필요한 신원 정보를 어디서 가져오는가
 
 `businessType=INDIVIDUAL`의 `individual` 객체는 이름·이메일·전화번호를
-요구한다(#57 추가 인수조건). 이 정보들은 서로 다른 세 곳에 흩어져 있다 —
-실명은 `verification.models.Verification`(포트원 본인확인 결과), 이메일은
-`accounts` User, 전화번호는 이 도메인 어디에도 없던 값이라 이 티켓이
-`payouts.models.Seller.phone_number_encrypted`로 새로 들였다(별도 제출
-엔드포인트, `payouts.services.submit_seller_phone`). `FakeSellerAdapter`처럼
-`policies.scope.current_policy()`를 스스로 읽는 기존 관용구를 그대로
+요구한다(#57 추가 인수조건). 이 정보들은 서로 다른 두 곳에 흩어져 있다 —
+실명은 `verification.models.Verification`(포트원 본인확인 결과), 이메일·
+전화번호는 이 도메인 어디에도 없던 값이라 이 티켓과 #168이
+`payouts.models.Seller`에 `email`·`phone_number_encrypted`로 새로 들였다
+(별도 제출 엔드포인트 하나로 합쳐져 있다, `payouts.services.
+submit_seller_contact`). **이메일은 로그인 계정의 이메일이 아니다**(#168) —
+소셜 로그인이 이메일을 안 줬으면(#49 유저스토리 12) 계정 이메일이 비어
+있을 수 있고, 그 공백을 여기서 계정 값으로 메우지 않는다. `FakeSellerAdapter`
+처럼 `policies.scope.current_policy()`를 스스로 읽는 기존 관용구를 그대로
 따라, 이 어댑터도 `register()` 안에서 직접 조회한다 — `SellerAdapter.register`
 계약(Protocol)을 바꾸지 않는다.
 

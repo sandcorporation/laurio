@@ -245,7 +245,7 @@ class SellerAdapter(Protocol):
 
 
 class FakeSellerAdapter:
-    """dev/test 전용. 네트워크 없이 결정적으로 동작하며 여섯 시나리오를 흉내낸다.
+    """dev/test 전용. 네트워크 없이 결정적으로 동작하며 일곱 시나리오를 흉내낸다.
 
     `register`의 `simulate` 값:
     - None / "success" (기본) — 즉시 부분 승인. 주간 한도는
@@ -255,9 +255,15 @@ class FakeSellerAdapter:
     - "rejected" — 등록이 거절된다.
     - "approval_required"(#57) — 등록만 접수되고 아직 본인인증 전이다.
     - "approved"(#57) — KYC 심사까지 마쳐 주간 한도 자체가 없다.
+    - "missing_contact"(#168) — 연락처(전화번호·이메일)가 없어 벤더를 부르지
+      않는다는 **실물** 경로를 이 더블에서도 재현한다. 기본 동작의 관대함
+      (아래 참고)은 dev/e2e 를 위해 그대로 두되, 이 시나리오를 명시적으로
+      고르면 실물처럼 "pending"으로 답한다 — #57 이 겪은 "테스트 더블이
+      실물보다 관대해서 초록이었다"를 막는, 관대함 옆의 엄격한 문이다.
 
-    실물과 달리 이름·이메일·전화번호가 비어 있어도 시나리오대로 답한다 — dev/e2e 가 전화번호
-    없이도 지급 흐름 끝까지 걸을 수 있어야 하기 때문이다.
+    실물과 달리(기본 동작은) 이름·이메일·전화번호가 비어 있어도 시나리오대로
+    답한다 — dev/e2e 가 연락처 없이도 지급 흐름 끝까지 걸을 수 있어야 하기
+    때문이다.
     """
 
     def register(
@@ -291,6 +297,11 @@ class FakeSellerAdapter:
             return SellerRegistrationResult(
                 seller_id=seller_id, status="approved", weekly_limit_amount=None
             )
+        if scenario == "missing_contact":
+            # 실물(`TossSellerAdapter.register`)이 이름·이메일·전화번호 중 하나라도
+            # 없으면 벤더를 부르지 않고 돌려주는 바로 그 값이다 — seller_id 도 아직
+            # 접수되지 않았으므로 비운다(#168).
+            return SellerRegistrationResult(seller_id="", status="pending", weekly_limit_amount=None)
         raise SellerError(f"알 수 없는 fake Seller 등록 시나리오: {scenario!r}")
 
 
