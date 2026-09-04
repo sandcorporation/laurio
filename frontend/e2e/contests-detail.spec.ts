@@ -12,8 +12,8 @@ import { seedE2eContests, type SeededContests } from "./lib/seed";
 // SSR 증명이다(frontend/e2e/seam.spec.ts 상단 주석).
 let seeded: SeededContests;
 
-test.beforeAll(() => {
-  seeded = seedE2eContests();
+test.beforeAll(async () => {
+  seeded = await seedE2eContests();
 });
 
 test("@exclusive 이 페이지에 \"use client\" 가 없다", () => {

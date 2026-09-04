@@ -22,6 +22,7 @@ import hashlib
 import hmac
 import json
 import os
+from contextvars import ContextVar
 import uuid
 from datetime import timedelta
 
@@ -94,8 +95,15 @@ DEADLINE_OFFSET = timedelta(hours=1)
 _FALLBACK_RUN_ID = uuid.uuid4().hex[:8]
 
 
+# 요청으로 받은 run id (#156). 시드를 HTTP 로 부르면 **부르는 쪽의 환경변수가 백엔드
+# 프로세스에 있을 리 없다** — 서브프로세스를 띄우던 시절에는 환경변수가 곧 전달 수단이었다.
+# ContextVar 인 것은 요청마다 갈려야 하기 때문이다(모듈 전역이면 동시 요청이 서로의 값을
+# 덮는다).
+_RUN_ID_OVERRIDE: ContextVar[str | None] = ContextVar("laurio_e2e_run_id", default=None)
+
+
 def _run_id() -> str:
-    return os.environ.get("LAURIO_E2E_RUN_ID") or _FALLBACK_RUN_ID
+    return _RUN_ID_OVERRIDE.get() or os.environ.get("LAURIO_E2E_RUN_ID") or _FALLBACK_RUN_ID
 
 
 def _own_title_prefix() -> str:
@@ -489,6 +497,15 @@ class Command(BaseCommand):
             help="심지 않고 이 명령이 심은 데이터만 빈 상태로 되돌린다(다른 옵션과 함께 쓰지 않는다).",
         )
         parser.add_argument(
+            "--run-id",
+            default=None,
+            help=(
+                "이번 실행을 가리키는 토큰. 안 주면 예전처럼 LAURIO_E2E_RUN_ID 환경변수를 "
+                "읽는다 — HTTP 로 부를 때는(#156) 부르는 쪽의 환경변수가 이 프로세스에 없으므로 "
+                "이 인자로 실어 보낸다."
+            ),
+        )
+        parser.add_argument(
             "--prune-other-runs",
             action="store_true",
             help=(
@@ -503,6 +520,16 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options) -> None:
         _refuse_in_deployed_environment()
+
+        run_id = options.get("run_id")
+        token = _RUN_ID_OVERRIDE.set(run_id) if run_id else None
+        try:
+            self._handle(**options)
+        finally:
+            if token is not None:
+                _RUN_ID_OVERRIDE.reset(token)
+
+    def _handle(self, **options) -> None:
 
         if options.get("clear"):
             result = clear_queues()

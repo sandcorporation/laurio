@@ -34,7 +34,7 @@ async function login(page: import("@playwright/test").Page, seed: string): Promi
 }
 
 test("요청 검증 422(배열 detail)에도 화면이 살아 있고 이유가 보인다", async ({ page }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.developer_login_seed);
   const contestId = seeded.judging.id;
 

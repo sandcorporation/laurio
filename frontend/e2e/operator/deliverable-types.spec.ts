@@ -37,7 +37,7 @@ async function publicDeliverableTypeIds(page: Page): Promise<number[]> {
 
 test.describe("조회 — 일반 등급도 활성·비활성 전부를 본다(#80)", () => {
   test("상위 등급이 홈에서 눌러 들어가면 목록과 이력, 생성 폼이 보인다", async ({ page }) => {
-    const superuser = seedE2eOperator({
+    const superuser = await seedE2eOperator({
       username: `e2e-op-dtype-view-super-${Date.now()}`,
       superuser: true,
     });
@@ -54,7 +54,7 @@ test.describe("조회 — 일반 등급도 활성·비활성 전부를 본다(#8
 
 test.describe("일반 등급 — 편집 없음, 빈 화면이 아니다(#80)", () => {
   test("일반 등급은 목록을 보되 편집 컨트롤이 없고 명시적 안내가 보인다", async ({ page }) => {
-    const ordinary = seedE2eOperator({ username: `e2e-op-dtype-forbidden-${Date.now()}` });
+    const ordinary = await seedE2eOperator({ username: `e2e-op-dtype-forbidden-${Date.now()}` });
 
     await loginAndExpectHome(page, ordinary.username);
     await page.getByTestId("deliverable-types-nav-link").click();
@@ -68,7 +68,7 @@ test.describe("일반 등급 — 편집 없음, 빈 화면이 아니다(#80)", (
 
 test.describe("생성 — 상위 등급, 즉시 공개 선택지에 나타난다(#80)", () => {
   test("새 종류를 만들면 목록·공개 선택지 양쪽에 즉시 나타난다", async ({ page }) => {
-    const superuser = seedE2eOperator({
+    const superuser = await seedE2eOperator({
       username: `e2e-op-dtype-create-${Date.now()}`,
       superuser: true,
     });
@@ -94,7 +94,7 @@ test.describe("생성 — 상위 등급, 즉시 공개 선택지에 나타난다
   });
 
   test("이유 없이 생성하려 하면 거부되고 그 이유가 화면에 보인다", async ({ page }) => {
-    const superuser = seedE2eOperator({
+    const superuser = await seedE2eOperator({
       username: `e2e-op-dtype-create-noreason-${Date.now()}`,
       superuser: true,
     });
@@ -116,7 +116,7 @@ test.describe("생성 — 상위 등급, 즉시 공개 선택지에 나타난다
     // `Number("")`는 NaN이 아니라 0이다 — 최소 제안 상금을 비운 채 생성하면
     // 0원짜리 종류가 조용히 만들어질 뻔했다. 이름은 unique이고 되살리는
     // 경로가 없어(#80은 비활성화만 만든다) 그 이름이 영구히 묶인다.
-    const superuser = seedE2eOperator({
+    const superuser = await seedE2eOperator({
       username: `e2e-op-dtype-create-emptyprize-${Date.now()}`,
       superuser: true,
     });
@@ -147,7 +147,7 @@ test.describe("생성 — 상위 등급, 즉시 공개 선택지에 나타난다
 
 test.describe("수정 — 최소 제안 상금, 이유가 함께 남는다(#80)", () => {
   test("상위 등급이 최소 제안 상금을 바꾸면 표와 이력이 새 값을 보여준다", async ({ page }) => {
-    const superuser = seedE2eOperator({
+    const superuser = await seedE2eOperator({
       username: `e2e-op-dtype-update-${Date.now()}`,
       superuser: true,
     });
@@ -184,7 +184,7 @@ test.describe("수정 — 최소 제안 상금, 이유가 함께 남는다(#80)"
   }) => {
     // `Number("")`는 NaN이 아니라 0이다 — 비운 채 저장하면 그 종류의
     // "상금미달" 배지 판정이 사실상 꺼질 뻔했다.
-    const superuser = seedE2eOperator({
+    const superuser = await seedE2eOperator({
       username: `e2e-op-dtype-update-emptyprize-${Date.now()}`,
       superuser: true,
     });
@@ -231,7 +231,7 @@ test.describe("비활성화 — 지우지 않는다, 공개 선택지에서만 �
   test("비활성화하면 활성 여부가 바뀌고 공개 목록에서 사라지지만 행 자체는 남는다", async ({
     page,
   }) => {
-    const superuser = seedE2eOperator({
+    const superuser = await seedE2eOperator({
       username: `e2e-op-dtype-deactivate-${Date.now()}`,
       superuser: true,
     });
@@ -277,7 +277,7 @@ test.describe("세션 만료 — 스피너에 갇히지 않는다(#80, #69의 �
   });
 
   test("생성 중 세션이 만료되면 로그인으로 돌아간다", async ({ page }) => {
-    const superuser = seedE2eOperator({
+    const superuser = await seedE2eOperator({
       username: `e2e-op-dtype-expire-${Date.now()}`,
       superuser: true,
     });

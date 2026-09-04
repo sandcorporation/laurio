@@ -52,8 +52,8 @@ test.describe("지급 큐 — 무엇에 막혀 있는가(#68, ADR-0020)", () => 
   test("확정 후 막혀 있는 Payout이 콘테스트·개발자·금액·막힌 이유와 함께 보인다", async ({
     page,
   }) => {
-    const operator = seedE2eOperator();
-    const seeded = seedE2eOperatorQueues("identity");
+    const operator = await seedE2eOperator();
+    const seeded = await seedE2eOperatorQueues("identity");
     const identityPayout = seeded.identity_pending_payout;
     if (!identityPayout) throw new Error("identity_pending_payout 시드가 비어 있다");
 
@@ -72,8 +72,8 @@ test.describe("지급 큐 — 무엇에 막혀 있는가(#68, ADR-0020)", () => 
   test("필터가 실제로 배제한다 — identity로 걸러도 seller 행은 보이지 않는다(그 반대도)", async ({
     page,
   }) => {
-    const operator = seedE2eOperator();
-    const seeded = seedE2eOperatorQueues();
+    const operator = await seedE2eOperator();
+    const seeded = await seedE2eOperatorQueues();
     const identityPayout = seeded.identity_pending_payout;
     const sellerPayout = seeded.seller_pending_payout;
     if (!identityPayout || !sellerPayout) {
@@ -103,8 +103,8 @@ test.describe("지급 큐 — 무엇에 막혀 있는가(#68, ADR-0020)", () => 
   });
 
   test("필터 탭을 클릭해도 같은 결과가 된다 — URL이 바뀌고 목록이 갱신된다", async ({ page }) => {
-    const operator = seedE2eOperator();
-    const seeded = seedE2eOperatorQueues();
+    const operator = await seedE2eOperator();
+    const seeded = await seedE2eOperatorQueues();
     const identityPayout = seeded.identity_pending_payout;
     const sellerPayout = seeded.seller_pending_payout;
     if (!identityPayout || !sellerPayout) {
@@ -133,8 +133,8 @@ test.describe("지급 큐 — 무엇에 막혀 있는가(#68, ADR-0020)", () => 
   });
 
   test("두 대기가 서로 다른 것으로 읽힌다 — 같은 라벨·같은 클래스가 아니다", async ({ page }) => {
-    const operator = seedE2eOperator();
-    const seeded = seedE2eOperatorQueues();
+    const operator = await seedE2eOperator();
+    const seeded = await seedE2eOperatorQueues();
     const identityPayout = seeded.identity_pending_payout;
     const sellerPayout = seeded.seller_pending_payout;
     if (!identityPayout || !sellerPayout) {
@@ -178,8 +178,8 @@ test.describe("지급 큐 — 무엇에 막혀 있는가(#68, ADR-0020)", () => 
     // 볼 수 있을 만큼(수백 ms 이상) 늘려 놓고 그 구간 전체에서 잘못된 조합이
     // 없다는 것을 단언한다 — auto-retry를 우회하는 것이 아니라, auto-retry가
     // 절대 놓칠 수 없을 만큼 창을 넓히는 쪽이다.
-    const operator = seedE2eOperator();
-    const seeded = seedE2eOperatorQueues();
+    const operator = await seedE2eOperator();
+    const seeded = await seedE2eOperatorQueues();
     const identityPayout = seeded.identity_pending_payout;
     const sellerPayout = seeded.seller_pending_payout;
     if (!identityPayout || !sellerPayout) {
@@ -220,9 +220,9 @@ test.describe("지급 큐 — 무엇에 막혀 있는가(#68, ADR-0020)", () => 
   });
 
   test("큐가 비어 있으면 명시적으로 말한다 — 빈 박스가 아니다", async ({ page }) => {
-    clearE2eOperatorQueues();
+    await clearE2eOperatorQueues();
 
-    const operator = seedE2eOperator();
+    const operator = await seedE2eOperator();
     await loginAsOperator(page, operator.username);
 
     await page.goto("/payouts?blocked_on=identity");
@@ -234,7 +234,7 @@ test.describe("지급 큐 — 무엇에 막혀 있는가(#68, ADR-0020)", () => 
   });
 
   test("조회에 실패하면 실패라고 말한다 — 0건처럼 보이지 않는다", async ({ page }) => {
-    const operator = seedE2eOperator();
+    const operator = await seedE2eOperator();
 
     await page.route("**/api/backend/operator/payouts*", (route) =>
       route.fulfill({ status: 500, body: JSON.stringify({ detail: "boom" }) }),
@@ -250,11 +250,11 @@ test.describe("지급 큐 — 무엇에 막혀 있는가(#68, ADR-0020)", () => 
   });
 
   test("홈의 두 지급 건수와 이 목록의 건수가 일치한다", async ({ page }) => {
-    const operator = seedE2eOperator();
+    const operator = await seedE2eOperator();
     await loginAsOperator(page, operator.username);
 
-    seedE2eOperatorQueues("identity");
-    seedE2eOperatorQueues("seller");
+    await seedE2eOperatorQueues("identity");
+    await seedE2eOperatorQueues("seller");
 
     await page.reload();
     const identityHomeCount = await readHomeQueueValue(page, "queue-payouts-identity");
@@ -307,7 +307,7 @@ test.describe("지급 큐 — 세 번째 배지도 배지로 그려진다(#91)",
   };
 
   test("실이체 대기 배지도 칠해진다 — 무스타일 본문 텍스트가 아니다", async ({ page }) => {
-    const operator = seedE2eOperator();
+    const operator = await seedE2eOperator();
     await loginAsOperator(page, operator.username);
 
     await page.route("**/api/backend/operator/payouts?blocked_on=transfer*", (route) =>
@@ -363,8 +363,8 @@ test.describe("지급 큐 — 좁히기와 자르기는 백엔드가 한다(#149
   test("「전체」 탭이 요청 하나만 낸다 — 셋을 합쳐 브라우저에서 정렬하지 않는다", async ({
     page,
   }) => {
-    const operator = seedE2eOperator();
-    seedE2eOperatorQueues();
+    const operator = await seedE2eOperator();
+    await seedE2eOperatorQueues();
     await loginAsOperator(page, operator.username);
 
     const seen = countQueueRequests(page);
@@ -377,8 +377,8 @@ test.describe("지급 큐 — 좁히기와 자르기는 백엔드가 한다(#149
   });
 
   test("운영자 홈은 목록을 받아 세지 않는다 — 건수는 건수로 묻는다", async ({ page }) => {
-    const operator = seedE2eOperator();
-    seedE2eOperatorQueues();
+    const operator = await seedE2eOperator();
+    await seedE2eOperatorQueues();
 
     const seen = countQueueRequests(page);
     await loginAsOperator(page, operator.username);
@@ -392,7 +392,7 @@ test.describe("지급 큐 — 좁히기와 자르기는 백엔드가 한다(#149
     // 21건을 실제로 심으려면 공모전 21개를 개최·심사·선정해야 한다 — 여기서 볼 것은
     // 백엔드의 자르기가 아니라(그건 backend/tests 가 본다) **잘린 사실이 화면에
     // 드러나고 나머지에 도달할 길이 있는가**다. 그래서 응답을 갈아끼운다.
-    const operator = seedE2eOperator();
+    const operator = await seedE2eOperator();
     await loginAsOperator(page, operator.username);
 
     const row = (index: number) => ({
@@ -440,7 +440,7 @@ test.describe("지급 큐 — 좁히기와 자르기는 백엔드가 한다(#149
     // 쌓아 둔 페이지는 **경로에 딸린 상태**다(#149). 그 사실이 코드에 없으면, 2페이지를
     // 보던 중 필터를 바꿨을 때 새 필터의 **2페이지**를 받아 옛 목록 뒤에 이어 붙인다 —
     // 운영자가 보는 것은 두 필터가 섞인, 어느 쪽으로도 참이 아닌 목록이다.
-    const operator = seedE2eOperator();
+    const operator = await seedE2eOperator();
     await loginAsOperator(page, operator.username);
 
     const row = (key: string, blockedOn: string) => ({
@@ -491,7 +491,7 @@ test.describe("지급 큐 — 좁히기와 자르기는 백엔드가 한다(#149
     // 「더 보기」로 2페이지까지 본 뒤 필터를 바꾸면, 새 필터의 2페이지를 옛 목록 뒤에
     // 이어 붙이는 것이 예전 `usePagedList` 의 동작이었다(#149) — 호출부 둘이 고정
     // 경로라 드러나지 않았을 뿐이다.
-    const operator = seedE2eOperator();
+    const operator = await seedE2eOperator();
     await loginAsOperator(page, operator.username);
 
     const row = (key: string, blockedOn: string) => ({

@@ -36,6 +36,7 @@ from django.utils import timezone
 
 from .seed_e2e_operator_queues import (
     DEADLINE_OFFSET,
+    _RUN_ID_OVERRIDE,
     SCORING_RUN_PENDING_URL,
     _auth_header,
     _clear_stale_seed_contests,
@@ -162,6 +163,14 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser) -> None:
         parser.add_argument(
+            "--run-id",
+            default=None,
+            help=(
+                "이번 실행을 가리키는 토큰 — 이 명령도 `_own_title_prefix` 로 자기 것을 "
+                "가르므로 큐 시드와 같은 값을 받아야 한다(#156). 안 주면 환경변수를 읽는다."
+            ),
+        )
+        parser.add_argument(
             "--rule",
             choices=["uphold", "reject"],
             default=None,
@@ -170,6 +179,15 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options) -> None:
         _refuse_in_deployed_environment()
+        run_id = options.get("run_id")
+        token = _RUN_ID_OVERRIDE.set(run_id) if run_id else None
+        try:
+            self._handle(**options)
+        finally:
+            if token is not None:
+                _RUN_ID_OVERRIDE.reset(token)
+
+    def _handle(self, **options) -> None:
         # 이 명령도 자기 접두어(TITLE_PREFIX)의 Contest를 만든다 — 이번 실행이
         # 심지 않은 것을 먼저 정리한다(seed_e2e_operator_queues.py의
         # `_own_title_prefix` 설명 참고). #66이 이 명령을 새로 더하며 호출

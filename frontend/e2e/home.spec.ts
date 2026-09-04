@@ -18,8 +18,8 @@ import { seedE2eContests, type SeededContests } from "./lib/seed";
 
 let seeded: SeededContests;
 
-test.beforeAll(() => {
-  seeded = seedE2eContests();
+test.beforeAll(async () => {
+  seeded = await seedE2eContests();
 });
 
 test.describe("@exclusive 헤더 — 모든 페이지에 같은 모양으로 선다", () => {

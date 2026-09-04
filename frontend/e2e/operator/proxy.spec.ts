@@ -17,7 +17,7 @@ async function loginAsOperator(
   baseURL: string,
   options: { superuser?: boolean } = {},
 ): Promise<void> {
-  const operator = seedE2eOperator({
+  const operator = await seedE2eOperator({
     username: `e2e-op-proxy-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     superuser: options.superuser,
   });

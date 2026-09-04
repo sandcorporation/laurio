@@ -19,7 +19,7 @@ async function login(page: import("@playwright/test").Page, seed: string): Promi
 }
 
 test("내 공모전 목록에서 클릭만으로 지표 화면에 닿는다", async ({ page }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.sponsor_login_seed);
 
   await page.goto("/console/contests");
@@ -30,7 +30,7 @@ test("내 공모전 목록에서 클릭만으로 지표 화면에 닿는다", as
 });
 
 test("일자별 누적 참가작 수가 실제 참가작 수와 함께 보인다", async ({ page }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.sponsor_login_seed);
 
   await page.goto(`/console/contests/${seeded.judging.id}/metrics`);
@@ -49,7 +49,7 @@ test("일자별 누적 참가작 수가 실제 참가작 수와 함께 보인다
 });
 
 test("남의 Contest 지표로는 닿을 수 없다 — 있는지가 아니라 없는지를 본다", async ({ page }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   // judging Contest 의 Sponsor 로 로그인해, 자기 것이 아닌 funded Contest 의
   // 지표를 직접 URL 로 열어본다 — 기존 심사 비교 화면과 같은 소유권 검사를
   // 그대로 쓰므로 403 이어야 한다.
@@ -65,7 +65,7 @@ test("남의 Contest 지표로는 닿을 수 없다 — 있는지가 아니라 �
 test("Requirement 별 충족 분포가 보이고, 아무도 충족하지 못한 항목이 눈에 띈다", async ({
   page,
 }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.sponsor_login_seed);
   const [required, optional] = seeded.judging.requirements;
 
@@ -93,7 +93,7 @@ test("Requirement 별 충족 분포가 보이고, 아무도 충족하지 못한 
 });
 
 test("제출 완성도 분포가 실제 Submission 과 함께 보인다", async ({ page }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.sponsor_login_seed);
 
   await page.goto(`/console/contests/${seeded.judging.id}/metrics`);
@@ -110,7 +110,7 @@ test("제출 완성도 분포가 실제 Submission 과 함께 보인다", async 
 test("지표 화면 어디에도 Score 도 개별 참가자 신원도 없다 — 있는지가 아니라 없는지를 본다", async ({
   page,
 }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.sponsor_login_seed);
 
   await page.goto(`/console/contests/${seeded.judging.id}/metrics`);
@@ -131,7 +131,7 @@ test("지표 화면 어디에도 Score 도 개별 참가자 신원도 없다 —
 test("세션이 없으면 렌더링 전에 로그인으로 돌아간다 — 보호된 지표가 응답에 없다", async ({
   page,
 }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
 
   const response = await page.goto(`/console/contests/${seeded.judging.id}/metrics`);
 

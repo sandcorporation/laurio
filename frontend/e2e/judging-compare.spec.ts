@@ -26,8 +26,8 @@ test.describe.configure({ mode: "serial" });
 
 let seeded: SeededContests;
 
-test.beforeAll(() => {
-  seeded = seedE2eContests();
+test.beforeAll(async () => {
+  seeded = await seedE2eContests();
 });
 
 async function loginAsJudgingSponsor(page: import("@playwright/test").Page): Promise<void> {

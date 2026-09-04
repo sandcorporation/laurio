@@ -62,7 +62,7 @@ test("세션이 없으면 렌더링 전에 로그인으로 돌아간다 — 보�
 test("제출한 뒤에는 그 행이 「다음 행동」을 먼저 말한다", async ({ page }) => {
   // 시드가 만든 "제출이 있는 Developer" 로 로그인한다 — 개최·결제·제출을 UI 로
   // 다시 걷는 것은 이 화면이 검증하려는 것과 무관한 비용이다.
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
   await login(page, seeded.judging.developer_login_seed);
 
   await page.goto("/console/participation");

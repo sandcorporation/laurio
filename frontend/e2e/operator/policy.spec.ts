@@ -35,7 +35,7 @@ async function readFeeBps(page: Page): Promise<number> {
 
 test.describe("조회 — 일반 등급도 지금 값을 본다(#77)", () => {
   test("일반 등급으로 홈에서 눌러 들어가면 정책값 표가 보인다", async ({ page }) => {
-    const ordinary = seedE2eOperator({ username: `e2e-op-policy-view-${Date.now()}` });
+    const ordinary = await seedE2eOperator({ username: `e2e-op-policy-view-${Date.now()}` });
 
     await loginAndExpectHome(page, ordinary.username);
 
@@ -53,7 +53,7 @@ test.describe("조회 — 일반 등급도 지금 값을 본다(#77)", () => {
   });
 
   test("상위 등급으로 홈에서 눌러 들어가도 같은 값 표와 이력이 보인다", async ({ page }) => {
-    const superuser = seedE2eOperator({
+    const superuser = await seedE2eOperator({
       username: `e2e-op-policy-view-super-${Date.now()}`,
       superuser: true,
     });
@@ -70,7 +70,7 @@ test.describe("일반 등급 — 편집 없음, 그리고 그것이 빈 화면�
   test("일반 등급에게는 편집 폼이 없고, 대신 등급이 필요하다는 안내가 명시적으로 보인다", async ({
     page,
   }) => {
-    const ordinary = seedE2eOperator({ username: `e2e-op-policy-forbidden-${Date.now()}` });
+    const ordinary = await seedE2eOperator({ username: `e2e-op-policy-forbidden-${Date.now()}` });
 
     await loginAndExpectHome(page, ordinary.username);
     await page.getByTestId("policy-nav-link").click();
@@ -90,7 +90,7 @@ test.describe("변경 — 상위 등급, 이유가 함께 남는다(#77)", () =>
   test("상위 등급이 값을 바꾸고 이유를 남기면 저장되고, 표와 이력이 새 값을 보여준다", async ({
     page,
   }) => {
-    const superuser = seedE2eOperator({
+    const superuser = await seedE2eOperator({
       username: `e2e-op-policy-change-${Date.now()}`,
       superuser: true,
     });
@@ -120,7 +120,7 @@ test.describe("변경 — 상위 등급, 이유가 함께 남는다(#77)", () =>
   });
 
   test("이유 없이 저장하려 하면 거부되고 그 이유가 화면에 보인다", async ({ page }) => {
-    const superuser = seedE2eOperator({
+    const superuser = await seedE2eOperator({
       username: `e2e-op-policy-noreason-${Date.now()}`,
       superuser: true,
     });
@@ -140,7 +140,7 @@ test.describe("변경 — 상위 등급, 이유가 함께 남는다(#77)", () =>
   });
 
   test("말이 안 되는 값(상한 초과)이 거부되고 무엇이 잘못됐는지 화면이 말한다", async ({ page }) => {
-    const superuser = seedE2eOperator({
+    const superuser = await seedE2eOperator({
       username: `e2e-op-policy-invalid-${Date.now()}`,
       superuser: true,
     });
@@ -174,7 +174,7 @@ test.describe("변경 — 상위 등급, 이유가 함께 남는다(#77)", () =>
     // django-ninja의 요청 검증 422는 detail이 오류 객체의 **배열**이다 — 그걸
     // 문자열로 가정하고 그대로 렌더하면 React가 "Objects are not valid as a
     // React child"로 화면 전체를 죽인다(#69에서 실제로 겪었다).
-    const superuser = seedE2eOperator({
+    const superuser = await seedE2eOperator({
       username: `e2e-op-policy-badinput-${Date.now()}`,
       superuser: true,
     });
@@ -209,7 +209,7 @@ test.describe("변경 — 상위 등급, 이유가 함께 남는다(#77)", () =>
     // 필드가 조용히 0으로 바뀔 뻔했다. 서버 경계(0~9000)가 0을 허용하므로
     // 이 사고는 200으로 "성공"해버려 화면에서 눈치채기 어렵다. 빈 입력은
     // 명시적인 4xx로 거절되어야 하고, 표의 값도 그대로여야 한다.
-    const superuser = seedE2eOperator({
+    const superuser = await seedE2eOperator({
       username: `e2e-op-policy-emptyinput-${Date.now()}`,
       superuser: true,
     });
@@ -249,7 +249,7 @@ test.describe("세션 만료 — 스피너에 갇히지 않는다(#77, #69의 �
     // 무관한 배관이 필요하다. 401 자체는 이미 백엔드 HTTP 시임(SuperuserOperatorAuth)이
     // 커버하므로, appeals.spec.ts의 같은 분기와 같은 판단으로 route
     // 가로채기로 그 조건만 재현한다.
-    const superuser = seedE2eOperator({
+    const superuser = await seedE2eOperator({
       username: `e2e-op-policy-expire-${Date.now()}`,
       superuser: true,
     });

@@ -14,8 +14,8 @@ import { seedE2eContests, type SeededContests } from "./lib/seed";
 // 찾는다. 이 시드는 하드코딩 픽스처가 아니라 진짜 Django Contest 다(e2e/lib/seed.ts).
 let seeded: SeededContests;
 
-test.beforeAll(() => {
-  seeded = seedE2eContests();
+test.beforeAll(async () => {
+  seeded = await seedE2eContests();
 });
 
 test("@exclusive 이 페이지에 \"use client\" 가 없다", () => {

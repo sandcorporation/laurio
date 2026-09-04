@@ -52,11 +52,11 @@ test.describe("목록 — 아이디·등급·활성 여부(#69)", () => {
   test("상위 등급으로 로그인하면 Operator 목록이 아이디·등급·활성 여부와 함께 보인다", async ({
     page,
   }) => {
-    const superuser = seedE2eOperator({
+    const superuser = await seedE2eOperator({
       username: `e2e-op-mgmt-list-super-${Date.now()}`,
       superuser: true,
     });
-    const ordinary = seedE2eOperator({ username: `e2e-op-mgmt-list-ordinary-${Date.now()}` });
+    const ordinary = await seedE2eOperator({ username: `e2e-op-mgmt-list-ordinary-${Date.now()}` });
 
     await loginAndExpectHome(page, superuser.username);
     await openOperatorsPage(page);
@@ -82,7 +82,7 @@ test.describe("목록 — 아이디·등급·활성 여부(#69)", () => {
 
 test.describe("생성 — 실제로 로그인되는 계정이 만들어진다(#69)", () => {
   test("새 Operator를 만들 수 있고, 만들어진 계정으로 실제로 로그인된다", async ({ page }) => {
-    const superuser = seedE2eOperator({
+    const superuser = await seedE2eOperator({
       username: `e2e-op-mgmt-create-super-${Date.now()}`,
       superuser: true,
     });
@@ -108,11 +108,11 @@ test.describe("생성 — 실제로 로그인되는 계정이 만들어진다(#6
 
 test.describe("생성 실패 — 서로 다른 이유는 서로 다른 메시지다(#69)", () => {
   test("약한 비밀번호와 중복 아이디가 서로 다른 메시지로 거절된다", async ({ page }) => {
-    const superuser = seedE2eOperator({
+    const superuser = await seedE2eOperator({
       username: `e2e-op-mgmt-distinct-super-${Date.now()}`,
       superuser: true,
     });
-    const existing = seedE2eOperator({ username: `e2e-op-mgmt-existing-${Date.now()}` });
+    const existing = await seedE2eOperator({ username: `e2e-op-mgmt-existing-${Date.now()}` });
 
     await loginAndExpectHome(page, superuser.username);
     await openOperatorsPage(page);
@@ -154,7 +154,7 @@ test.describe("빈 입력 — 요청 검증 오류가 화면을 죽이지 않는
     // child"로 화면 전체를 죽인다. operator/lib/operators/actions.ts의
     // normalizeDetail이 그 배열을 사람이 읽을 문자열로 좁혀야 이 테스트가
     // 통과한다.
-    const superuser = seedE2eOperator({
+    const superuser = await seedE2eOperator({
       username: `e2e-op-mgmt-emptyfields-super-${Date.now()}`,
       superuser: true,
     });
@@ -189,11 +189,11 @@ test.describe("빈 입력 — 요청 검증 오류가 화면을 죽이지 않는
 
 test.describe("비활성화 — 효과로 증명한다(#69)", () => {
   test("Operator를 비활성화하면 그 계정으로 더 이상 로그인되지 않는다", async ({ page }) => {
-    const superuser = seedE2eOperator({
+    const superuser = await seedE2eOperator({
       username: `e2e-op-mgmt-deactivate-super-${Date.now()}`,
       superuser: true,
     });
-    const target = seedE2eOperator({ username: `e2e-op-mgmt-deactivate-target-${Date.now()}` });
+    const target = await seedE2eOperator({ username: `e2e-op-mgmt-deactivate-target-${Date.now()}` });
 
     // 비활성화 전에는 실제로 로그인이 된다는 것부터 확인한다 — 이후의 "안 된다"가
     // 애초에 안 되던 것이 아니라 비활성화의 효과라는 것을 보장한다.
@@ -214,11 +214,11 @@ test.describe("비활성화 — 효과로 증명한다(#69)", () => {
   });
 
   test("재활성화하면 다시 로그인된다", async ({ page }) => {
-    const superuser = seedE2eOperator({
+    const superuser = await seedE2eOperator({
       username: `e2e-op-mgmt-reactivate-super-${Date.now()}`,
       superuser: true,
     });
-    const target = seedE2eOperator({ username: `e2e-op-mgmt-reactivate-target-${Date.now()}` });
+    const target = await seedE2eOperator({ username: `e2e-op-mgmt-reactivate-target-${Date.now()}` });
 
     await loginAndExpectHome(page, superuser.username);
     await openOperatorsPage(page);
@@ -243,7 +243,7 @@ test.describe("비활성화 — 효과로 증명한다(#69)", () => {
 
 test.describe("마지막 상위 등급 계정(#69)", () => {
   test("마지막 상위 등급 계정의 비활성화가 거절되고, 화면이 그 이유를 말한다", async ({ page }) => {
-    const superuser = seedE2eOperator({
+    const superuser = await seedE2eOperator({
       username: `e2e-op-mgmt-last-super-${Date.now()}`,
       superuser: true,
     });
@@ -302,7 +302,7 @@ test.describe("일반 Operator — 403은 빈 목록이 아니다(#69)", () => {
   test("일반 Operator가 이 화면을 열면 등급이 필요하다는 취지가 보이고, 빈 목록도 깨진 화면도 아니다", async ({
     page,
   }) => {
-    const ordinary = seedE2eOperator({ username: `e2e-op-mgmt-forbidden-${Date.now()}` });
+    const ordinary = await seedE2eOperator({ username: `e2e-op-mgmt-forbidden-${Date.now()}` });
 
     await loginAndExpectHome(page, ordinary.username);
     await expect(page.getByTestId("operator-home-grade")).toContainText("일반 등급");
@@ -338,7 +338,7 @@ test.describe("홈에서 실제로 눌러 들어가는 경로(#69)", () => {
   test("상위 등급 홈에 계정 관리로 가는 링크가 있고, 클릭하면 /operators로 이동한다", async ({
     page,
   }) => {
-    const superuser = seedE2eOperator({
+    const superuser = await seedE2eOperator({
       username: `e2e-op-mgmt-navlink-super-${Date.now()}`,
       superuser: true,
     });
@@ -351,7 +351,7 @@ test.describe("홈에서 실제로 눌러 들어가는 경로(#69)", () => {
   });
 
   test("일반 등급 홈에는 계정 관리 링크가 없다", async ({ page }) => {
-    const ordinary = seedE2eOperator({ username: `e2e-op-mgmt-navlink-ordinary-${Date.now()}` });
+    const ordinary = await seedE2eOperator({ username: `e2e-op-mgmt-navlink-ordinary-${Date.now()}` });
 
     await loginAndExpectHome(page, ordinary.username);
 

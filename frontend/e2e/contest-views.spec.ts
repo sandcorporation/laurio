@@ -21,7 +21,7 @@ async function login(page: import("@playwright/test").Page, seed: string): Promi
 test("공모전 상세를 열면 조회가 세어지고 Sponsor 지표에 조회수·전환율로 보인다", async ({
   page,
 }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
 
   // 로그인하지 않은 방문자가 공개 상세를 연다 — 마운트된 뒤 클라이언트
   // 컴포넌트가 `POST /api/backend/contests/{id}/views`를 쏜다. 그 왕복이
@@ -51,7 +51,7 @@ test("공모전 상세를 열면 조회가 세어지고 Sponsor 지표에 조회
 });
 
 test("Sponsor 자신의 조회는 지표에 잡히지 않는다", async ({ page }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
 
   await login(page, seeded.judging.sponsor_login_seed);
 
@@ -76,7 +76,7 @@ test("Sponsor 자신의 조회는 지표에 잡히지 않는다", async ({ page 
 test("JS 를 끈 방문자는 세지 않는다 — 서버 렌더만으로는 조회가 늘지 않는다", async ({
   browser,
 }) => {
-  const seeded = seedE2eContests();
+  const seeded = await seedE2eContests();
 
   const noJsContext = await browser.newContext({ javaScriptEnabled: false });
   const noJsPage = await noJsContext.newPage();

@@ -43,9 +43,9 @@ test.describe("이의 큐 — 기본은 심판 대기, 필터로 그 외도 본�
   test("기본(쿼리 없음)은 심판 대기 건만 보여준다 — 인용된 건은 안 보인다", async ({
     page,
   }) => {
-    const operator = seedE2eOperator();
-    const pending = seedE2eOperatorAppeal();
-    const upheld = seedE2eOperatorAppeal("uphold");
+    const operator = await seedE2eOperator();
+    const pending = await seedE2eOperatorAppeal();
+    const upheld = await seedE2eOperatorAppeal("uphold");
 
     await loginAsOperator(page, operator.username);
     await page.goto("/appeals");
@@ -56,8 +56,8 @@ test.describe("이의 큐 — 기본은 심판 대기, 필터로 그 외도 본�
   });
 
   test("상태 필터로 인용·기각된 건도 볼 수 있다", async ({ page }) => {
-    const operator = seedE2eOperator();
-    const rejected = seedE2eOperatorAppeal("reject");
+    const operator = await seedE2eOperator();
+    const rejected = await seedE2eOperatorAppeal("reject");
 
     await loginAsOperator(page, operator.username);
     await page.goto("/appeals");
@@ -71,8 +71,8 @@ test.describe("이의 큐 — 기본은 심판 대기, 필터로 그 외도 본�
   });
 
   test("각 행이 어느 Submission인지와 제기 시각을 보여준다", async ({ page }) => {
-    const operator = seedE2eOperator();
-    const seeded = seedE2eOperatorAppeal();
+    const operator = await seedE2eOperator();
+    const seeded = await seedE2eOperatorAppeal();
 
     await loginAsOperator(page, operator.username);
     await page.goto("/appeals");
@@ -92,7 +92,7 @@ test.describe("이의 큐 — 기본은 심판 대기, 필터로 그 외도 본�
   test("배분을 막고 있는 이의는 그렇게 표시된다 — 밀리면 여러 사람의 돈이 밀린다", async ({
     page,
   }) => {
-    const operator = seedE2eOperator();
+    const operator = await seedE2eOperator();
     await loginAsOperator(page, operator.username);
 
     // 플래그가 **언제 참이 되는지**는 backend/tests/test_distributions.py 가
@@ -127,7 +127,7 @@ test.describe("이의 큐 — 기본은 심판 대기, 필터로 그 외도 본�
   });
 
   test("목록이 비어 있으면 빈 목록이라고 명시적으로 말한다", async ({ page }) => {
-    const operator = seedE2eOperator();
+    const operator = await seedE2eOperator();
     await loginAsOperator(page, operator.username);
 
     // 실제 DB에 이미 pending 이의가 있을 수 있으므로(다른 테스트가 같은 실행
@@ -145,7 +145,7 @@ test.describe("이의 큐 — 기본은 심판 대기, 필터로 그 외도 본�
   });
 
   test("조회 실패는 실패라고 말한다 — 빈 목록처럼 보이지 않는다", async ({ page }) => {
-    const operator = seedE2eOperator();
+    const operator = await seedE2eOperator();
     await loginAsOperator(page, operator.username);
 
     await page.route("**/api/backend/operator/appeals*", (route) =>
@@ -163,8 +163,8 @@ test.describe("이의 상세 — 사유와 Score 스냅샷", () => {
   test("이의 사유와 Score 스냅샷(점수·모델버전·근거·채점 시각)이 보인다", async ({
     page,
   }) => {
-    const operator = seedE2eOperator();
-    const seeded = seedE2eOperatorAppeal();
+    const operator = await seedE2eOperator();
+    const seeded = await seedE2eOperatorAppeal();
 
     await loginAsOperator(page, operator.username);
     await page.goto(`/appeals/${seeded.appeal_id}`);
@@ -179,7 +179,7 @@ test.describe("이의 상세 — 사유와 Score 스냅샷", () => {
   test("존재하지 않는 이의를 열면 없다고 말한다 — 빈 상세가 그려지지 않는다", async ({
     page,
   }) => {
-    const operator = seedE2eOperator();
+    const operator = await seedE2eOperator();
     await loginAsOperator(page, operator.username);
 
     await page.goto("/appeals/999999999");
@@ -192,8 +192,8 @@ test.describe("이의 상세 — 사유와 Score 스냅샷", () => {
   });
 
   test("이미 심판된 이의는 폼 없이 결과를 읽기 전용으로 보여준다", async ({ page }) => {
-    const operator = seedE2eOperator();
-    const seeded = seedE2eOperatorAppeal("uphold");
+    const operator = await seedE2eOperator();
+    const seeded = await seedE2eOperatorAppeal("uphold");
     const ruling = seeded.ruling;
     if (!ruling) throw new Error("uphold로 심은 이의에 ruling이 없다 — 시드 자체가 깨졌다.");
 
@@ -219,8 +219,8 @@ test.describe("소스는 접혀 있다(#66 핵심, ADR-0022)", () => {
   test("펼치기 전에는 화면 어디에도 소스 내용이 없다 — 아직 가져오지 않은 상태다", async ({
     page,
   }) => {
-    const operator = seedE2eOperator();
-    const seeded = seedE2eOperatorAppeal();
+    const operator = await seedE2eOperator();
+    const seeded = await seedE2eOperatorAppeal();
 
     await loginAsOperator(page, operator.username);
     await page.goto(`/appeals/${seeded.appeal_id}`);
@@ -240,8 +240,8 @@ test.describe("소스는 접혀 있다(#66 핵심, ADR-0022)", () => {
   test("펼치면 소스가 보이고, 그 행위가 Developer 쪽 열람 기록에 실제로 한 건을 남긴다", async ({
     page,
   }) => {
-    const operator = seedE2eOperator();
-    const seeded = seedE2eOperatorAppeal();
+    const operator = await seedE2eOperator();
+    const seeded = await seedE2eOperatorAppeal();
 
     const before = await sourceReadingCount(seeded.submission_id, seeded.dev_access);
 
@@ -264,8 +264,8 @@ test.describe("소스는 접혀 있다(#66 핵심, ADR-0022)", () => {
   test("같은 이의를 다시 펼치면 열람 기록이 하나 더 쌓인다 — 사건이지 상태가 아니다", async ({
     page,
   }) => {
-    const operator = seedE2eOperator();
-    const seeded = seedE2eOperatorAppeal();
+    const operator = await seedE2eOperator();
+    const seeded = await seedE2eOperatorAppeal();
 
     await loginAsOperator(page, operator.username);
     await page.goto(`/appeals/${seeded.appeal_id}`);
@@ -301,8 +301,8 @@ test.describe("이의 심판 — 인용·기각과 감사 추적(#67)", () => {
   test("정정 금액과 이유를 넣어 인용하면 심판이 확정되고, 화면이 확정된 심판을 보여주는 상태로 바뀐다", async ({
     page,
   }) => {
-    const operator = seedE2eOperator();
-    const seeded = seedE2eOperatorAppeal();
+    const operator = await seedE2eOperator();
+    const seeded = await seedE2eOperatorAppeal();
 
     await loginAsOperator(page, operator.username);
     await page.goto(`/appeals/${seeded.appeal_id}`);
@@ -336,8 +336,8 @@ test.describe("이의 심판 — 인용·기각과 감사 추적(#67)", () => {
   });
 
   test("이유를 넣어 기각하면 심판이 확정된다", async ({ page }) => {
-    const operator = seedE2eOperator();
-    const seeded = seedE2eOperatorAppeal();
+    const operator = await seedE2eOperator();
+    const seeded = await seedE2eOperatorAppeal();
 
     await loginAsOperator(page, operator.username);
     await page.goto(`/appeals/${seeded.appeal_id}`);
@@ -361,8 +361,8 @@ test.describe("이의 심판 — 인용·기각과 감사 추적(#67)", () => {
   });
 
   test("정정 금액 없이 인용하려 하면 거절되고, 그 이유가 화면에 보인다", async ({ page }) => {
-    const operator = seedE2eOperator();
-    const seeded = seedE2eOperatorAppeal();
+    const operator = await seedE2eOperator();
+    const seeded = await seedE2eOperatorAppeal();
 
     await loginAsOperator(page, operator.username);
     await page.goto(`/appeals/${seeded.appeal_id}`);
@@ -380,8 +380,8 @@ test.describe("이의 심판 — 인용·기각과 감사 추적(#67)", () => {
   test("이유 없이(공백만이어도) 심판하려 하면 인용·기각 양쪽 모두 거절된다", async ({
     page,
   }) => {
-    const operator = seedE2eOperator();
-    const seeded = seedE2eOperatorAppeal();
+    const operator = await seedE2eOperator();
+    const seeded = await seedE2eOperatorAppeal();
 
     await loginAsOperator(page, operator.username);
     await page.goto(`/appeals/${seeded.appeal_id}`);
@@ -406,10 +406,10 @@ test.describe("이의 심판 — 인용·기각과 감사 추적(#67)", () => {
     page,
     baseURL,
   }) => {
-    const operator = seedE2eOperator();
-    const seeded = seedE2eOperatorAppeal("uphold");
+    const operator = await seedE2eOperator();
+    const seeded = await seedE2eOperatorAppeal("uphold");
 
-    const before = ledgerEntryCount(seeded.contest_id);
+    const before = await ledgerEntryCount(seeded.contest_id);
 
     await loginAsOperator(page, operator.username);
     await page.goto(`/appeals/${seeded.appeal_id}`);
@@ -450,14 +450,14 @@ test.describe("이의 심판 — 인용·기각과 감사 추적(#67)", () => {
 
     // "409가 났다"에서 멈추지 않는다 — 원장이 append-only이므로 잘못된
     // 재심판이 정정 분개를 하나 더 만들지 않았는지 실제로 확인한다(#67 AC).
-    expect(ledgerEntryCount(seeded.contest_id)).toBe(before);
+    expect(await ledgerEntryCount(seeded.contest_id)).toBe(before);
   });
 
   test("인용이 만든 정정이 원장에 실제로 반영됐음을 확인한다", async ({ page }) => {
-    const operator = seedE2eOperator();
-    const seeded = seedE2eOperatorAppeal();
+    const operator = await seedE2eOperator();
+    const seeded = await seedE2eOperatorAppeal();
 
-    const before = ledgerEntryCount(seeded.contest_id);
+    const before = await ledgerEntryCount(seeded.contest_id);
 
     await loginAsOperator(page, operator.username);
     await page.goto(`/appeals/${seeded.appeal_id}`);
@@ -466,12 +466,12 @@ test.describe("이의 심판 — 인용·기각과 감사 추적(#67)", () => {
     await page.getByTestId("ruling-uphold-button").click();
     await expect(page.getByTestId("appeal-detail-ruling")).toBeVisible();
 
-    expect(ledgerEntryCount(seeded.contest_id)).toBe(before + 1);
+    expect(await ledgerEntryCount(seeded.contest_id)).toBe(before + 1);
   });
 
   test("심판 후 홈의 「심판 대기」 건수가 줄어든다", async ({ page }) => {
-    const operator = seedE2eOperator();
-    const seeded = seedE2eOperatorAppeal();
+    const operator = await seedE2eOperator();
+    const seeded = await seedE2eOperatorAppeal();
 
     await loginAsOperator(page, operator.username);
 
@@ -497,10 +497,10 @@ test.describe("이의 심판 — 인용·기각과 감사 추적(#67)", () => {
     // 커버하므로, 여기서는 route 가로채기로 그 조건만 재현한다 — 실제 동작이
     // 이미 백엔드 HTTP 시임에서 검증됐을 때만 쓰기로 한 ADR-0021의 좁은 예외
     // (source-reveal.tsx의 같은 분기와 같은 판단).
-    const operator = seedE2eOperator();
-    const seeded = seedE2eOperatorAppeal();
+    const operator = await seedE2eOperator();
+    const seeded = await seedE2eOperatorAppeal();
 
-    const before = ledgerEntryCount(seeded.contest_id);
+    const before = await ledgerEntryCount(seeded.contest_id);
 
     await loginAsOperator(page, operator.username);
     await page.goto(`/appeals/${seeded.appeal_id}`);
@@ -515,6 +515,6 @@ test.describe("이의 심판 — 인용·기각과 감사 추적(#67)", () => {
     await expect(page).toHaveURL(/\/login/);
 
     // 심판은 일어나지 않았다 — 원장에도 변화가 없다.
-    expect(ledgerEntryCount(seeded.contest_id)).toBe(before);
+    expect(await ledgerEntryCount(seeded.contest_id)).toBe(before);
   });
 });
