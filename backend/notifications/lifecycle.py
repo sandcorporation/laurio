@@ -43,8 +43,13 @@ from core.clock import Clock
 from core.scans import ScanSpec
 from policies.scope import current_policy
 
-from .models import Notification, NotificationType
-from .services import create_notification
+from .models import NotificationType
+# `_safe_notify`/`_safe_notify_once`는 원래 이 모듈에서 정의됐다(#19). #169가
+# 지급 알림 스캔(`payouts.notifications`)에서도 같은 "예외를 삼킨다"·"dedup_context로
+# 한 번만 만든다" 관용구가 필요해 `notifications.services`로 옮겼다 — 이름은
+# 이 모듈의 나머지 호출부(아래 다섯 스캔)가 안 바뀌도록 그대로 별칭한다.
+from .services import notify_once as _safe_notify_once
+from .services import notify_safely as _safe_notify
 
 logger = logging.getLogger(__name__)
 
@@ -54,53 +59,6 @@ def _budget_exhausted(ctx) -> bool:
     """이번 스캔 실행의 예산이 다 됐는가 — 즉시 경로(ctx=None)에서는 예산이 없다."""
 
     return ctx is not None and scans.budget_exhausted(ctx)
-
-
-def _safe_notify(*, recipient, notification_type: str, context: dict) -> None:
-    """`create_notification`을 호출하되, 어떤 예외도 호출자에게 전파하지 않는다."""
-
-    try:
-        create_notification(
-            recipient=recipient, notification_type=notification_type, context=context
-        )
-    except Exception:  # noqa: BLE001 - 알림 실패가 호출자의 흐름을 막으면 안 된다.
-        logger.exception(
-            "Notification(type=%s, recipient=%s) 생성 중 예외 — 호출자의 흐름은 계속된다",
-            notification_type,
-            getattr(recipient, "id", None),
-        )
-
-
-def _safe_notify_once(
-    *, recipient, notification_type: str, dedup_context: dict, context: dict
-) -> None:
-    """`recipient`에게 이 `dedup_context`에 대한 알림을 정확히 한 번만(재시도
-    안전하게) 만든다.
-
-    "완료 표시는 실제로 다 보낸 뒤에만 남긴다"(모듈 docstring)는 방식과 짝을
-    이루는 재시작 안전장치다(#19 리뷰 지적 2) — 스캔이 중간에 죽거나(타임아웃,
-    재배포) 다시 실행돼도, 이미 이 수신자에게 같은 `dedup_context`로 만들어진
-    Notification이 있으면 다시 만들지 않는다.
-
-    `dedup_context`는 보통 `{"contest_id": ...}`처럼 "이 Contest에 대해 평생
-    한 번"을 뜻하지만, 유료 연장처럼 같은 Contest에 대해 같은 유형의 알림이
-    **다시** 정당하게 나가야 하는 경우(#19 리뷰 지적 1)에는 그 "새로운 계기"를
-    구분하는 값(예: 갱신된 `judging_ends_at`)을 함께 넣어야 한다 — 그렇지
-    않으면 이 존재 검사가 예전 알림을 근거로 정당한 재발송까지 막아버린다.
-
-    동시에 실행되는 두 스캔이 이 존재 검사를 동시에 통과해 드물게 중복
-    발송될 가능성은 남아 있다 — 이는 "알림이 조용히 유실되는 것보다 드물게
-    중복되는 편이 낫다"는 이 코드베이스의 기존 입장(notifications.services의
-    STUCK_QUEUED 재선점과 같은 트레이드오프)과 일관된 선택이다.
-    """
-
-    filters = {f"context__{key}": value for key, value in dedup_context.items()}
-    already_sent = Notification.objects.filter(
-        recipient=recipient, notification_type=notification_type, **filters
-    ).exists()
-    if already_sent:
-        return
-    _safe_notify(recipient=recipient, notification_type=notification_type, context=context)
 
 
 def _participating_developer_users(contest: Contest):

@@ -5,7 +5,10 @@
 1. 광고성인데 옵트인이 없으면 아예 시도하지 않고 BLOCKED_NO_OPT_IN 으로 기록한다.
 2. 야간(21~08시)에 발생했으면 폐기하지 않고 다음 날 08시로 연기(DEFERRED)한다.
    거래성도 예외 없이 연기 대상이다 — 이 프로젝트는 법정 최소 기준(광고성만 야간
-   규제)보다 엄격하게, 야간에는 어떤 Notification 도 내보내지 않는다.
+   규제)보다 엄격하게, 야간에는 어떤 Notification 도 내보내지 않는다. **예외가
+   하나 있다**(#169, ADR-0010 개정) — `NOTIFICATION_TYPE_FLAGS` 에서
+   `is_quiet_hours_exempt` 가 참인 유형(`PAYOUT_AWAITS_YOU`)은 야간에도 즉시
+   채널 폴백을 시도한다.
 3. 그 외에는 즉시 채널 폴백 체인(알림톡 → SMS → LMS)을 시도한다.
 
 `notification-dispatch-deferred` 스캔 는 DEFERRED 로 쌓인 것 중 scheduled_for 가 지난 것을
@@ -94,6 +97,9 @@ def create_notification(
     flags = NOTIFICATION_TYPE_FLAGS[notification_type]
     is_transactional = flags["is_transactional"]
     is_promotional = flags["is_promotional"]
+    # 야간 전면 유예의 예외를 여는 유일한 자리(#169, ADR-0010 개정) — 호출부가 매번
+    # "이건 급하다"고 주장하지 못하게, 이 유형 표만 본다.
+    is_quiet_hours_exempt = flags["is_quiet_hours_exempt"]
     context = context or {}
 
     now = Clock.now()
@@ -109,7 +115,7 @@ def create_notification(
             created_at=now,
         )
 
-    if in_quiet_hours(now):
+    if in_quiet_hours(now) and not is_quiet_hours_exempt:
         notification = Notification.objects.create(
             recipient=recipient,
             notification_type=notification_type,
@@ -139,6 +145,59 @@ def create_notification(
     _attempt_dispatch(notification, now=now)
     notification.refresh_from_db()
     return notification
+
+
+def notify_safely(*, recipient, notification_type: str, context: dict) -> None:
+    """`create_notification` 을 호출하되 어떤 예외도 호출자에게 전파하지 않는다.
+
+    호출자의 흐름(lifecycle 전이·스캔)이 알림 실패로 막히면 안 된다는 규율
+    (ADR-0009)을 한 곳에 둔다 — 원래 `notifications.lifecycle._safe_notify` 였는데,
+    지급 알림 스캔(#169, `payouts.notifications`)도 같은 보장이 필요해 여기로
+    옮겼다. 여러 앱이 이 함수를 재사용하므로, 「알림 생성 실패가 호출자를 막지
+    않는다」는 규율이 두 곳에 따로 구현되어 갈리는 일이 없다.
+    """
+
+    try:
+        create_notification(
+            recipient=recipient, notification_type=notification_type, context=context
+        )
+    except Exception:  # noqa: BLE001 - 알림 실패가 호출자의 흐름을 막으면 안 된다.
+        logger.exception(
+            "Notification(type=%s, recipient=%s) 생성 중 예외 — 호출자의 흐름은 계속된다",
+            notification_type,
+            getattr(recipient, "id", None),
+        )
+
+
+def notify_once(*, recipient, notification_type: str, dedup_context: dict, context: dict) -> None:
+    """`recipient` 에게 이 `dedup_context` 에 대한 알림을 정확히 한 번만(재시도
+    안전하게) 만든다.
+
+    원래 `notifications.lifecycle._safe_notify_once` 였다 — 그 함수의 독스트링이
+    설명하는 관용구("이 수신자에게 이 dedup 맥락으로 한 번만")를 그대로 옮긴 것이다.
+    지급 알림 스캔(#169)이 dedup_context 로 Payout 식별자·`HoldKind`·실이체 시도
+    횟수 셋을 준다 — 스캔이 60초마다 돌아도 같은 차례에는 한 번만 발송되고,
+    재시도로 시도 횟수가 오르면 새 dedup_context 라 다시 발송된다.
+
+    **멱등 검사는 이전에 저장된 `context` 필드를 되짚어 읽는다** — 그러니
+    `dedup_context` 의 키가 실제로 저장되는 `context` 에 없으면, 다음 호출이
+    "아직 안 보냈다"로 잘못 판정해 매번 새로 보낸다(#169 에서 실제로 겪은
+    실수). 호출부가 그 실수를 반복하지 않도록, 여기서 `dedup_context` 를
+    `context` 에 항상 덮어써 넣는다 — 호출부가 두 dict 를 손으로 맞출 필요가
+    없다.
+    """
+
+    filters = {f"context__{key}": value for key, value in dedup_context.items()}
+    already_sent = Notification.objects.filter(
+        recipient=recipient, notification_type=notification_type, **filters
+    ).exists()
+    if already_sent:
+        return
+    notify_safely(
+        recipient=recipient,
+        notification_type=notification_type,
+        context={**context, **dedup_context},
+    )
 
 
 def _attempt_dispatch(notification: Notification, *, now=None) -> None:
@@ -308,9 +367,19 @@ def _process_claimed_queued_row(pk: int, *, now) -> bool:
     한다(ADR-0010). 재연기했으면 False, 실제로 발송을 시도했으면 True를 돌려준다 —
     호출자가 "이 스캔에서 몇 건이나 실제로 처리됐는지"를 셀 때 재연기를 발송으로
     잘못 세지 않게 하기 위해서다.
+
+    **야간 유예의 예외 유형은 재연기하지 않는다**(#169) — 예외 유형은 애초에
+    DEFERRED 를 거치지 않지만(`create_notification`), QUEUED 에서 멈췄다가 야간에
+    재선점되는 경로(`_reclaim_stuck`)에서는 이 함수가 그 사실을 다시 확인해야 한다.
     """
 
-    if in_quiet_hours(now):
+    # 재연기로 끝나는 경로(가장 흔한 야간 재선점)에는 유형 하나만 있으면 된다 —
+    # 코드리뷰 지적: 행 전체(context JSON 포함)를 끌어와 놓고 그 값을 발송
+    # 없이 버리는 낭비를 만들지 않는다. 실제로 발송을 시도하는 경로에서만
+    # 전체 행을 다시 읽는다.
+    notification_type = Notification.objects.values_list("notification_type", flat=True).get(pk=pk)
+    is_quiet_hours_exempt = NOTIFICATION_TYPE_FLAGS[notification_type]["is_quiet_hours_exempt"]
+    if in_quiet_hours(now) and not is_quiet_hours_exempt:
         Notification.objects.filter(pk=pk, status=Notification.Status.QUEUED).update(
             status=Notification.Status.DEFERRED, scheduled_for=next_quiet_hours_end(now)
         )

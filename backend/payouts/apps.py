@@ -15,3 +15,11 @@ class PayoutsConfig(AppConfig):
 
         register(checks.check_payout_adapter_mode)
         register(checks.check_seller_adapter_mode)
+
+        # 「지급이 당신을 기다린다」 스캔(#169) — 등록부에 올라 틱 한 바퀴에 함께 돈다.
+        from core.scans import register_scan
+
+        from .notifications import PAYOUT_NOTIFICATION_SCANS
+
+        for spec in PAYOUT_NOTIFICATION_SCANS:
+            register_scan(spec)
