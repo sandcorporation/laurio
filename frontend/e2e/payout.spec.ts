@@ -312,3 +312,28 @@ test("아직 등록 전이면 전화번호 폼은 그대로 뜬다 — 이 경�
   await page.goto(`/console/payouts/${contestId}`);
   await expect(page.getByTestId("payout-seller-phone-form")).toBeVisible();
 });
+
+test("지급대행사 본인인증이 남았으면 「하실 일은 없습니다」라고 말하지 않는다", async ({
+  page,
+}) => {
+  // 백엔드는 이 상태(approval_required)를 Developer 의 차례로 본다
+  // (`progress.py` 의 SELLER_AUTH → Turn.DEVELOPER) — 토스가 보낸 본인인증
+  // 문자로 인증을 끝내야 다음으로 간다. 그 안내 바로 아래에 "하실 일은
+  // 없습니다"가 찍히면 한 화면이 서로 모순된다.
+  const seeded = seedE2eContests();
+  await login(page, seeded.judging.developer_login_seed);
+  const contestId = seeded.judging.id;
+
+  await stubPayout(page, contestId, {
+    status: "confirmed_seller_pending",
+    has_identity: true,
+    has_seller_phone: true,
+    seller_status: "approval_required",
+    next_action_message:
+      "지급대행사(토스페이먼츠)가 보낸 본인인증 문자로 인증을 완료해주세요 — 이미 본인확인을 하셨더라도 지급대행사 자체 의무라 다시 인증이 필요합니다. 인증이 끝나면 자동으로 다음 단계로 넘어갑니다.",
+  });
+  await page.goto(`/console/payouts/${contestId}`);
+
+  await expect(page.getByTestId("payout-next-action-message")).toContainText("본인인증 문자");
+  await expect(page.getByTestId("payout-waiting")).not.toContainText("하실 일은 없습니다");
+});

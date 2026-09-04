@@ -126,6 +126,13 @@ function PayoutDetail({ payout, onChanged }: { payout: Payout; onChanged: () => 
     !payout.has_seller_phone &&
     (payout.seller_status === null || payout.seller_status === "pending");
 
+  // 지급대행사가 보낸 본인인증 문자를 아직 처리하지 않았다 — 백엔드도 이것을
+  // Developer 의 차례로 본다(`progress.py` 의 SELLER_AUTH → Turn.DEVELOPER).
+  // 여기 화면이 줄 수 있는 것은 없지만(인증은 토스 쪽에서 끝난다)
+  // "하실 일은 없습니다"라고 말해서는 안 된다 — 바로 위 안내가 정반대를
+  // 말하고 있다.
+  const awaitingSellerAuth = payout.seller_status === "approval_required";
+
   return (
     <>
       <AmountBreakdown payout={payout} />
@@ -184,6 +191,7 @@ function PayoutDetail({ payout, onChanged }: { payout: Payout; onChanged: () => 
               "할 일이 없다"와 "여기 낼 것이 있다"가 한 화면에서 서로
               모순된다. */}
           {!needsSellerPhone &&
+          !awaitingSellerAuth &&
           payout.seller_status !== "rejected" &&
           payout.transfer_status !== "failed" &&
           payout.has_identity ? (

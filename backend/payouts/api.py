@@ -480,19 +480,20 @@ def receive_toss_payout_webhook(request: HttpRequest):
 
     from .adapters_toss import parse_vendor_ref
 
-    if ref_payout_id:
-        parsed = parse_vendor_ref(str(ref_payout_id))
-        if parsed is None:
-            raise HttpError(
-                422, "웹훅의 지급 식별자가 유효한 형식(idempotency_key-attempt)이 아닙니다."
-            )
+    # **읽을 수 없는 참조는 없는 참조와 같이 다룬다**(#91, 코드리뷰) — 폴백을
+    # 「refPayoutId 가 아예 없을 때」로만 열어 두면, 벤더가 접미어 없는 옛 참조를
+    # 돌려주거나 값이 잘려 오는 순간 그 웹훅은 재전송을 몇 번 받든 영구히 422 다.
+    # 폴백이 막으려던 것이 정확히 그 상황이다.
+    parsed = parse_vendor_ref(str(ref_payout_id)) if ref_payout_id else None
+
+    if parsed is not None:
         idempotency_key = UUID(parsed[0])
         webhook_attempt = parsed[1]
         try:
             known_payout = Payout.objects.get(idempotency_key=idempotency_key)
         except Payout.DoesNotExist as exc:
             raise HttpError(404, "알 수 없는 idempotency_key 입니다.") from exc
-    else:
+    elif vendor_payout_id:
         known_payout = Payout.objects.filter(vendor_payout_id=str(vendor_payout_id)).first()
         if known_payout is None:
             raise HttpError(404, "알 수 없는 지급 식별자입니다.")
@@ -501,6 +502,10 @@ def receive_toss_payout_webhook(request: HttpRequest):
         # `vendor_payout_id` 를 반드시 비우기 때문이다(`adapters_toss` 상단 주석).
         # 그러니 아래 attempt 대조는 이 경로에서 항상 통과해야 맞다.
         webhook_attempt = known_payout.transfer_attempt
+    else:
+        raise HttpError(
+            422, "웹훅의 지급 식별자가 유효한 형식(idempotency_key-attempt)이 아닙니다."
+        )
 
     from .adapters_toss import _FAILED_PAYOUT_STATUSES, _PAID_PAYOUT_STATUSES
 

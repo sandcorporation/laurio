@@ -3392,3 +3392,79 @@ def test_submit_seller_phone_calls_the_vendor_once_no_matter_how_many_payouts(
         f"Payout 2건에 벤더 등록 호출이 {len(_CountingSellerAdapter.calls)}회 났다 — "
         "Seller 는 Developer 단위라 한 번이면 된다."
     )
+
+
+@pytest.mark.django_db
+def test_toss_payout_webhook_falls_back_when_the_reference_is_present_but_unparseable(
+    client, category, landing_type
+):
+    """참조가 **있는데 못 읽는** 경우에도 폴백이 산다 (#91, 코드리뷰).
+
+    폴백을 「refPayoutId 가 아예 없을 때」로만 열어 두면, 벤더가 접미어 없는 옛
+    참조를 돌려주거나 값이 잘려 오는 순간 그 웹훅은 재전송을 몇 번 받든 영구히
+    422 다 — 폴백이 막으려던 바로 그 상황이다. 읽을 수 없는 참조는 「없는 것」과
+    같이 취급하고 벤더 식별자로 넘어간다.
+    """
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    requested = _request_payout(client, dev, contest["id"])
+    Payout.objects.filter(idempotency_key=requested["idempotency_key"]).update(
+        vendor_payout_id="toss-vendor-payout-legacy"
+    )
+
+    transmission_time = "2024-01-01T00:00:00+09:00"
+    payload = json.dumps(
+        {
+            "eventType": "payout.changed",
+            "data": {
+                # 접미어가 없다 — `parse_vendor_ref` 가 읽지 못하는 형식이다.
+                "refPayoutId": str(requested["idempotency_key"]),
+                "id": "toss-vendor-payout-legacy",
+                "status": "COMPLETED",
+            },
+        }
+    ).encode("utf-8")
+
+    with override_settings(TOSS_API_SECURE_KEY=_TEST_TOSS_SECURE_KEY):
+        signature = _sign_toss_webhook(payload=payload, transmission_time=transmission_time)
+        resp = client.post(
+            f"{PAYOUTS_URL}/webhook/toss",
+            data=payload,
+            content_type="application/json",
+            HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_TIME=transmission_time,
+            HTTP_TOSSPAYMENTS_WEBHOOK_SIGNATURE=signature,
+            HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_ID="whid-fallback-3",
+        )
+
+    assert resp.status_code == 200, resp.content
+    payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
+    assert payout.status == Payout.Status.CONFIRMED_IDENTITY_PENDING
+
+
+@pytest.mark.django_db
+def test_toss_payout_webhook_422s_when_neither_identifier_can_be_resolved(
+    client, category, landing_type
+):
+    """폴백까지 실패하면 그때는 422 다 (#91) — 읽을 수 없는 참조에 짚이는
+    벤더 식별자도 없으면 이 웹훅으로는 어느 Payout 인지 알 길이 없다."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(client, category, landing_type)
+    _request_payout(client, dev, contest["id"])
+
+    transmission_time = "2024-01-01T00:00:00+09:00"
+    payload = json.dumps(
+        {"eventType": "payout.changed", "data": {"refPayoutId": "not-a-reference", "status": "COMPLETED"}}
+    ).encode("utf-8")
+
+    with override_settings(TOSS_API_SECURE_KEY=_TEST_TOSS_SECURE_KEY):
+        signature = _sign_toss_webhook(payload=payload, transmission_time=transmission_time)
+        resp = client.post(
+            f"{PAYOUTS_URL}/webhook/toss",
+            data=payload,
+            content_type="application/json",
+            HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_TIME=transmission_time,
+            HTTP_TOSSPAYMENTS_WEBHOOK_SIGNATURE=signature,
+            HTTP_TOSSPAYMENTS_WEBHOOK_TRANSMISSION_ID="whid-fallback-4",
+        )
+
+    assert resp.status_code == 422, resp.content
