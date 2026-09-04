@@ -358,7 +358,7 @@ VM 을 24GB 로 올린 뒤에야 4워커가 성립했다 — 그때 실측이 �
 (카카오 authorize 등). dev 에서는 `request.url` 이 우연히 맞아 이 버그가 보이지
 않는다 — e2e 가 Location 이 `/` 로 시작하는지를 직접 단언하는 이유다.
 
-**API 타입은 손으로 쓰지 않는다.** `frontend/lib/api/schema.gen.ts` 는
+**API 타입은 손으로 쓰지 않는다.** `packages/bff-client/src/schema.gen.ts` 는
 `pnpm --dir frontend generate:api`(`frontend/scripts/generate-api-types.mjs`)가
 백엔드의 OpenAPI 스키마에서 생성해 커밋한 산출물이다. 이 명령은 **스택이 필요
 없다** — `uv run python manage.py export_openapi_schema`(DB 접속 없이 등록된

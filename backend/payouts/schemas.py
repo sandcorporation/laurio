@@ -134,3 +134,57 @@ class OperatorPayoutOut(Schema):
     seller_status: str | None
     has_identity: bool
     created_at: datetime
+
+    # 네 값 모두 질의가 이미 알고 있다(#149) — `payouts.progress.with_hold_facts` ·
+    # `with_blocked_on` 이 붙인 주석과 `with_target()` 의 select_related 다. 페이지를
+    # 자른 뒤 행마다 다시 묻지 않는다는 것이 이 티켓의 요점이라, 여기 resolver 는
+    # 조회를 내지 않는다.
+    @staticmethod
+    def resolve_contest_id(obj) -> int:
+        return obj.contest.id
+
+    @staticmethod
+    def resolve_developer_user_id(obj) -> int:
+        return obj.developer.user_id
+
+    @staticmethod
+    def resolve_has_identity(obj) -> bool:
+        return obj.identity_submitted
+
+    @staticmethod
+    def resolve_blocked_on(obj):
+        from .progress import blocked_on_of_row
+
+        return blocked_on_of_row(obj)
+
+
+class OperatorPayoutCountsOut(Schema):
+    """운영자 홈의 지급 배지 숫자 (#149).
+
+    이전에는 홈이 큐 목록 셋을 통째로 받아 `.length` 를 셌다 — Payout 전체를 세 번
+    긁어 직렬화하고 숫자 셋만 남기고 버렸다. 건수는 건수로 답한다.
+
+    필드 이름은 `BLOCKED_ON_OF` 의 값 집합과 같아야 한다 — 갈래가 하나 늘면 여기가
+    모듈 로드 시점에 터진다(`assert_covers_all_kinds` 와 같은 규율).
+    """
+
+    identity: int
+    seller: int
+    transfer: int
+    operator: int
+
+
+def _assert_counts_cover_all_blocked_on_values() -> None:
+    from .progress import BLOCKED_ON_VALUES
+
+    declared = set(OperatorPayoutCountsOut.model_fields)
+    missing = set(BLOCKED_ON_VALUES) - declared
+    extra = declared - set(BLOCKED_ON_VALUES)
+    if missing or extra:
+        raise RuntimeError(
+            "OperatorPayoutCountsOut 가 blocked_on 갈래와 어긋난다 — "
+            f"빠진 것 {sorted(missing)}, 남는 것 {sorted(extra)}"
+        )
+
+
+_assert_counts_cover_all_blocked_on_values()

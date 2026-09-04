@@ -194,7 +194,7 @@ test.describe("지급 큐 — 무엇에 막혀 있는가(#68, ADR-0020)", () => 
     // seller 쪽 응답만 늦춘다 — identity 쪽은 이미 화면에 반영된 뒤라 건드릴
     // 필요가 없다(kindsFor("seller")가 seller 하나만 부른다는 것을 이 지연이
     // 그대로 이용한다).
-    await page.route("**/api/backend/operator/payouts?blocked_on=seller", async (route) => {
+    await page.route("**/api/backend/operator/payouts?blocked_on=seller*", async (route) => {
       await new Promise((resolve) => setTimeout(resolve, 1500));
       await route.continue();
     });
@@ -260,17 +260,18 @@ test.describe("지급 큐 — 무엇에 막혀 있는가(#68, ADR-0020)", () => 
     const identityHomeCount = await readHomeQueueValue(page, "queue-payouts-identity");
     const sellerHomeCount = await readHomeQueueValue(page, "queue-payouts-seller");
 
+    // **보이는 행 수가 아니라 전체 건수와 맞춘다**(#149). 목록이 페이지로 잘리면서
+    // 그 둘이 갈렸다 — 20건을 넘는 순간 「보이는 행 수」로 맞추면 홈이 틀렸다고
+    // 말하게 되고, 실제로 틀린 것은 비교 대상이다.
     await page.goto("/payouts?blocked_on=identity");
     await waitForQueueSettled(page);
-    await expect(page.getByTestId("payout-queue-list").getByRole("listitem")).toHaveCount(
-      identityHomeCount,
+    await expect(page.getByTestId("payout-queue-total-count")).toHaveText(
+      String(identityHomeCount),
     );
 
     await page.goto("/payouts?blocked_on=seller");
     await waitForQueueSettled(page);
-    await expect(page.getByTestId("payout-queue-list").getByRole("listitem")).toHaveCount(
-      sellerHomeCount,
-    );
+    await expect(page.getByTestId("payout-queue-total-count")).toHaveText(String(sellerHomeCount));
   });
 
   test("세션이 없으면 렌더링 전에 로그인으로 돌아간다", async ({ page, context }) => {
@@ -309,11 +310,12 @@ test.describe("지급 큐 — 세 번째 배지도 배지로 그려진다(#91)",
     const operator = seedE2eOperator();
     await loginAsOperator(page, operator.username);
 
-    await page.route("**/api/backend/operator/payouts?blocked_on=transfer", (route) =>
+    await page.route("**/api/backend/operator/payouts?blocked_on=transfer*", (route) =>
       route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify([TRANSFER_ROW]),
+        // 페이지네이션이 붙어(#149) 본문이 `{items, count}` 다.
+        body: JSON.stringify({ items: [TRANSFER_ROW], count: 1 }),
       }),
     );
 
@@ -338,5 +340,196 @@ test.describe("지급 큐 — 세 번째 배지도 배지로 그려진다(#91)",
       return value;
     });
     expect(background).not.toBe(identityBackground);
+  });
+});
+
+// --- #149: 좁히기·자르기는 백엔드가 한다 ------------------------------------------
+//
+// 예전에는 이 화면이 「전체」에서 엔드포인트 셋을 병렬로 부른 뒤 응답을 이어 붙이고
+// **브라우저에서 정렬**했고, 홈은 배지 숫자 셋을 얻으려고 그 목록 셋을 통째로 받아
+// `.length` 를 셌다. 목록에 페이지네이션이 붙는 순간 그 둘은 조용히 틀린다 — 세
+// 목록의 1페이지를 합친 것은 합집합의 1페이지가 아니고, 첫 페이지의 길이는 전체
+// 건수가 아니다.
+test.describe("지급 큐 — 좁히기와 자르기는 백엔드가 한다(#149)", () => {
+  function countQueueRequests(page: Page): { urls: string[] } {
+    const urls: string[] = [];
+    page.on("request", (request) => {
+      const url = request.url();
+      if (url.includes("/api/backend/operator/payouts")) urls.push(url);
+    });
+    return { urls };
+  }
+
+  test("「전체」 탭이 요청 하나만 낸다 — 셋을 합쳐 브라우저에서 정렬하지 않는다", async ({
+    page,
+  }) => {
+    const operator = seedE2eOperator();
+    seedE2eOperatorQueues();
+    await loginAsOperator(page, operator.username);
+
+    const seen = countQueueRequests(page);
+    await page.goto("/payouts");
+    await waitForQueueSettled(page);
+
+    const listRequests = seen.urls.filter((url) => !url.includes("/payouts/counts"));
+    expect(listRequests).toHaveLength(1);
+    expect(listRequests[0]).not.toContain("blocked_on=");
+  });
+
+  test("운영자 홈은 목록을 받아 세지 않는다 — 건수는 건수로 묻는다", async ({ page }) => {
+    const operator = seedE2eOperator();
+    seedE2eOperatorQueues();
+
+    const seen = countQueueRequests(page);
+    await loginAsOperator(page, operator.username);
+    await expect(page.getByTestId("queue-payouts-seller-count").or(page.getByTestId("queue-payouts-seller-empty"))).toBeVisible();
+
+    expect(seen.urls.filter((url) => url.includes("blocked_on="))).toEqual([]);
+    expect(seen.urls.some((url) => url.includes("/payouts/counts"))).toBe(true);
+  });
+
+  test("한 페이지를 넘는 큐는 잘렸다고 말하고, 더 보기가 이어 붙인다", async ({ page }) => {
+    // 21건을 실제로 심으려면 공모전 21개를 개최·심사·선정해야 한다 — 여기서 볼 것은
+    // 백엔드의 자르기가 아니라(그건 backend/tests 가 본다) **잘린 사실이 화면에
+    // 드러나고 나머지에 도달할 길이 있는가**다. 그래서 응답을 갈아끼운다.
+    const operator = seedE2eOperator();
+    await loginAsOperator(page, operator.username);
+
+    const row = (index: number) => ({
+      idempotency_key: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+      contest_id: 1000 + index,
+      developer_user_id: 1,
+      net_amount: 856_000,
+      status: "confirmed_seller_pending",
+      transfer_status: "not_requested",
+      blocked_on: "seller",
+      seller_status: "pending",
+      has_identity: true,
+      created_at: new Date().toISOString(),
+    });
+
+    await page.route("**/api/backend/operator/payouts?page=*", (route) => {
+      const page2 = route.request().url().includes("page=2");
+      const items = page2
+        ? [row(21), row(22), row(23), row(24), row(25)]
+        : Array.from({ length: 20 }, (_unused, index) => row(index + 1));
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ items, count: 25 }),
+      });
+    });
+
+    await page.goto("/payouts");
+    await waitForQueueSettled(page);
+
+    // 잘렸다는 사실이 화면에 있다 — 「20건」이 전부인 것처럼 보이지 않는다.
+    await expect(page.getByTestId("payout-queue-total-count")).toHaveText("25");
+    await expect(page.getByTestId("payout-queue-list").getByRole("listitem")).toHaveCount(20);
+
+    await page.getByTestId("payout-queue-load-more").click();
+
+    // **이어 붙는다.** 갈아끼우면 「더 보기」가 앞 페이지를 지운다.
+    await expect(page.getByTestId("payout-queue-list").getByRole("listitem")).toHaveCount(25);
+    await expect(page.getByTestId("payout-queue-load-more")).toHaveCount(0);
+  });
+
+  test("「더 보기」로 2페이지까지 본 뒤 필터를 바꾸면 페이지가 1로 돌아간다", async ({
+    page,
+  }) => {
+    // 쌓아 둔 페이지는 **경로에 딸린 상태**다(#149). 그 사실이 코드에 없으면, 2페이지를
+    // 보던 중 필터를 바꿨을 때 새 필터의 **2페이지**를 받아 옛 목록 뒤에 이어 붙인다 —
+    // 운영자가 보는 것은 두 필터가 섞인, 어느 쪽으로도 참이 아닌 목록이다.
+    const operator = seedE2eOperator();
+    await loginAsOperator(page, operator.username);
+
+    const row = (key: string, blockedOn: string) => ({
+      idempotency_key: key,
+      contest_id: 1,
+      developer_user_id: 1,
+      net_amount: 100,
+      status: "confirmed_seller_pending",
+      transfer_status: "not_requested",
+      blocked_on: blockedOn,
+      seller_status: "pending",
+      has_identity: true,
+      created_at: new Date().toISOString(),
+    });
+    const identityRow = (index: number) =>
+      row(`11111111-0000-4000-8000-${String(index).padStart(12, "0")}`, "identity");
+    const sellerRow = (index: number) =>
+      row(`22222222-0000-4000-8000-${String(index).padStart(12, "0")}`, "seller");
+
+    await page.route("**/api/backend/operator/payouts?*", (route) => {
+      const url = route.request().url();
+      const make = url.includes("blocked_on=seller") ? sellerRow : identityRow;
+      const secondPage = url.includes("page=2");
+      const items = secondPage
+        ? [make(21), make(22)]
+        : Array.from({ length: 20 }, (_unused, index) => make(index + 1));
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ items, count: 22 }),
+      });
+    });
+
+    await page.goto("/payouts?blocked_on=identity");
+    await waitForQueueSettled(page);
+    await page.getByTestId("payout-queue-load-more").click();
+    await expect(page.getByTestId("payout-queue-list").getByRole("listitem")).toHaveCount(22);
+
+    await page.getByTestId("payout-filter-seller").click();
+
+    // seller 의 **1페이지**만 보인다 — 2페이지를 받아 이어 붙이지 않았다.
+    await expect(page.getByTestId("payout-queue-list").getByRole("listitem")).toHaveCount(20);
+    await expect(page.getByTestId("payout-row-11111111-0000-4000-8000-000000000001")).toHaveCount(0);
+    await expect(page.getByTestId("payout-row-22222222-0000-4000-8000-000000000001")).toBeVisible();
+  });
+
+  test("필터를 바꾸면 앞 필터에서 쌓아 둔 페이지를 버린다", async ({ page }) => {
+    // 「더 보기」로 2페이지까지 본 뒤 필터를 바꾸면, 새 필터의 2페이지를 옛 목록 뒤에
+    // 이어 붙이는 것이 예전 `usePagedList` 의 동작이었다(#149) — 호출부 둘이 고정
+    // 경로라 드러나지 않았을 뿐이다.
+    const operator = seedE2eOperator();
+    await loginAsOperator(page, operator.username);
+
+    const row = (key: string, blockedOn: string) => ({
+      idempotency_key: key,
+      contest_id: 1,
+      developer_user_id: 1,
+      net_amount: 100,
+      status: "confirmed_seller_pending",
+      transfer_status: "not_requested",
+      blocked_on: blockedOn,
+      seller_status: "pending",
+      has_identity: true,
+      created_at: new Date().toISOString(),
+    });
+
+    await page.route("**/api/backend/operator/payouts?*", (route) => {
+      const url = route.request().url();
+      const seller = url.includes("blocked_on=seller");
+      const items = seller
+        ? [row("aaaaaaaa-0000-4000-8000-000000000001", "seller")]
+        : [row("bbbbbbbb-0000-4000-8000-000000000002", "identity")];
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ items, count: 1 }),
+      });
+    });
+
+    await page.goto("/payouts?blocked_on=identity");
+    await waitForQueueSettled(page);
+    await expect(
+      page.getByTestId("payout-row-bbbbbbbb-0000-4000-8000-000000000002"),
+    ).toBeVisible();
+
+    await page.getByTestId("payout-filter-seller").click();
+
+    await expect(page.getByTestId("payout-row-aaaaaaaa-0000-4000-8000-000000000001")).toBeVisible();
+    await expect(page.getByTestId("payout-row-bbbbbbbb-0000-4000-8000-000000000002")).toHaveCount(0);
+    await expect(page.getByTestId("payout-queue-list").getByRole("listitem")).toHaveCount(1);
   });
 });

@@ -4,11 +4,18 @@
 // 뭉치지 않은 것은 운영자가 어느 쪽을 처리해야 하는지 알아야 하기 때문이다 —
 // 여기서 그 구분이 실제로 세 개의 숫자가 된다.
 //
-// 세 조회를 병렬로 부르고, 하나라도 401(세션 만료)이면 로그인으로 돌려보낸다 —
+// 두 조회를 병렬로 부르고, 하나라도 401(세션 만료)이면 로그인으로 돌려보낸다 —
 // 깨진 화면을 보여주는 대신 useSession과 같은 원칙을 따른다. 0건과 조회 실패를
 // 반드시 구별한다: 0은 "성공했고 값이 0"이고, 실패는 "값을 모른다"이다 — 둘을
 // 하나의 상태로 뭉치면 조회가 죽은 날 아무도 눈치채지 못한 채 이의가 쌓인다.
+//
+// **건수는 건수로 묻는다**(#149). 예전에는 지급 큐 **목록 셋**을 통째로 받아
+// `.length` 를 셌다 — 홈을 한 번 여는 데 `Payout` 테이블을 세 번 긁어 전부
+// 직렬화하고 숫자 셋만 남기고 버렸다. 게다가 목록에 페이지네이션이 붙는 순간
+// 그 숫자는 「전체」가 아니라 「첫 페이지」가 되어 **조용히 20에서 멈춘다**.
 import { useEffect, useState } from "react";
+
+import type { components } from "@laurio/bff-client/schema";
 
 import { bffClient } from "@/lib/bff/client";
 
@@ -27,10 +34,17 @@ export type QueueCountsState =
   | { status: "loaded"; counts: QueueCounts }
   | { status: "error" };
 
+type PayoutCounts = components["schemas"]["OperatorPayoutCountsOut"];
+
 async function countFrom(path: string): Promise<number | null> {
   const result = await bffClient.get<unknown>(path);
   if (!result.ok) return null;
   return Array.isArray(result.data) ? result.data.length : null;
+}
+
+async function payoutCounts(): Promise<PayoutCounts | null> {
+  const result = await bffClient.get<PayoutCounts>("/api/backend/operator/payouts/counts");
+  return result.ok ? result.data : null;
 }
 
 /** `enabled`가 true가 될 때까지(세션이 확인될 때까지) 조회를 미룬다 — 세션이
@@ -47,12 +61,10 @@ export function useQueueCounts(enabled: boolean): QueueCountsState {
     // 모른다"이다 — 둘을 하나로 뭉치면 조회가 죽은 날 아무도 눈치채지 못한 채 이의가 쌓인다.
     void Promise.all([
       countFrom("/api/backend/operator/appeals?status=pending"),
-      countFrom("/api/backend/operator/payouts?blocked_on=identity"),
-      countFrom("/api/backend/operator/payouts?blocked_on=seller"),
-      countFrom("/api/backend/operator/payouts?blocked_on=transfer"),
-    ]).then(([pendingAppeals, identity, seller, transfer]) => {
+      payoutCounts(),
+    ]).then(([pendingAppeals, payouts]) => {
       if (cancelled) return;
-      if (pendingAppeals === null || identity === null || seller === null || transfer === null) {
+      if (pendingAppeals === null || payouts === null) {
         setState({ status: "error" });
         return;
       }
@@ -60,9 +72,9 @@ export function useQueueCounts(enabled: boolean): QueueCountsState {
         status: "loaded",
         counts: {
           pendingAppeals,
-          identityPendingPayouts: identity,
-          sellerPendingPayouts: seller,
-          transferPendingPayouts: transfer,
+          identityPendingPayouts: payouts.identity,
+          sellerPendingPayouts: payouts.seller,
+          transferPendingPayouts: payouts.transfer,
         },
       });
     });

@@ -135,16 +135,43 @@ function PayoutQueueContent() {
         </p>
       )}
 
-      {queue.status === "loaded" && queue.payouts.length === 0 && (
+      {queue.status === "ready" && queue.rows.length === 0 && (
         <p data-testid="payout-queue-empty">막혀 있는 지급이 없습니다.</p>
       )}
 
-      {queue.status === "loaded" && queue.payouts.length > 0 && (
-        <ul data-testid="payout-queue-list">
-          {queue.payouts.map((payout) => (
-            <PayoutRow key={payout.idempotency_key} payout={payout} />
-          ))}
-        </ul>
+      {queue.status === "ready" && queue.rows.length > 0 && (
+        <>
+          {/* **전체 건수를 화면에 적는다**(#149). 목록이 페이지로 잘리면서 「보이는
+              행 수」와 「막혀 있는 지급 수」가 갈렸다 — 운영자가 화면을 세어 밀린 일의
+              양을 판단하던 것을 그대로 두면 20에서 멈춘 숫자를 전부라고 읽는다. */}
+          <p data-testid="payout-queue-total">
+            막혀 있는 지급 <strong data-testid="payout-queue-total-count">{queue.count}</strong>건
+            (이 화면에 {queue.rows.length}건 표시)
+          </p>
+
+          <ul data-testid="payout-queue-list">
+            {queue.rows.map((payout) => (
+              <PayoutRow key={payout.idempotency_key} payout={payout} />
+            ))}
+          </ul>
+
+          {/* 목록은 페이지네이션된다(#149). 컨트롤이 없으면 20건을 넘는 순간 나머지는
+              **도달할 길이 없는데**, 잘렸다는 사실조차 화면에 없다 — 이 큐에서
+              「못 본 행」은 곧 「처리하지 않은 지급」이다. 공개 앱의 「내 공모전」이
+              같은 이유로 같은 모양을 쓴다. */}
+          {queue.hasMore ? (
+            <button
+              type="button"
+              onClick={queue.loadMore}
+              disabled={queue.loadingMore}
+              data-testid="payout-queue-load-more"
+            >
+              {queue.loadingMore
+                ? "불러오는 중..."
+                : `더 보기 (${queue.rows.length} / ${queue.count})`}
+            </button>
+          ) : null}
+        </>
       )}
     </main>
   );

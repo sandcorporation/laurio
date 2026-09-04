@@ -99,6 +99,23 @@ export function usePagedList<Row>(client: BffClient, path: string): PagedListSta
   const [count, setCount] = useState(0);
   const [page, setPage] = useState(1);
 
+  // **경로가 바뀌면 쌓아 둔 페이지를 버린다**(#149). 이 훅은 「더 보기」를 위해 페이지를
+  // 이어 붙이는데, 그 상태가 경로에 딸린 것이라는 사실이 코드에 없었다 — 필터가 붙은
+  // 경로로 이 훅을 쓰면 3페이지를 보던 중 필터를 바꿨을 때 **새 필터의 3페이지**를 받아
+  // 옛 목록 뒤에 이어 붙인다. 지금까지의 호출부 둘(`/contests/mine`·`/submissions/mine`)이
+  // 고정 경로라 드러나지 않았을 뿐이다.
+  //
+  // effect 가 아니라 렌더 도중에 되돌린다("Adjusting state when a prop changes", React)
+  // — effect 는 이미 한 번 커밋된 뒤라 그 한 프레임이 화면에 그려진다.
+  const [committedPath, setCommittedPath] = useState(path);
+  if (path !== committedPath) {
+    setCommittedPath(path);
+    setRows([]);
+    setCount(0);
+    setPage(1);
+    setPhase("loading");
+  }
+
   useEffect(() => {
     let cancelled = false;
     const separator = path.includes("?") ? "&" : "?";

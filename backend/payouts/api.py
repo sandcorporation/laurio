@@ -24,15 +24,20 @@
 안에서 Seller 등록도 함께 시작한다(ADR-0020).
 """
 
-from __future__ import annotations
+# `from __future__ import annotations` 를 쓰지 않는다 — 이 모듈에도 `@paginate` 로
+# 감싼 엔드포인트가 생겼고(list_payouts_for_operator, #149), 그 래퍼는 원본 함수의
+# `__globals__` 를 가져갈 수 없어서 문자열이 된 어노테이션을 해석하지 못한다.
+# `contests/api.py` 가 같은 이유로 같은 선택을 해 뒀다(#39) — 그쪽은 필터 하나
+# 붙이려다 `QueryParams is not fully defined` 로 500 이 났다.
 
 import json
 from uuid import UUID
 
-from django.db.models import Exists, OuterRef
+from django.db.models import Count
 from django.http import HttpRequest
 from ninja import Router
 from ninja.errors import HttpError
+from ninja.pagination import PageNumberPagination, paginate
 
 from accounts.middleware import jwt_auth
 from core.operator_auth import OperatorAuth
@@ -40,7 +45,18 @@ from distributions.models import DistributionShare
 from handovers.models import Handover
 from payments.webhook_security import verify_webhook_signature
 
-from .progress import Hold, HoldKind, advance, assert_covers_all_kinds, hold_of
+from .progress import (
+    BLOCKED_ON_VALUES,
+    Hold,
+    HoldKind,
+    advance,
+    assert_covers_all_kinds,
+    blocked_on_q,
+    blocked_q,
+    hold_of,
+    with_blocked_on,
+    with_hold_facts,
+)
 from .adapters import PayoutError, get_adapter
 from .adapters_toss import verify_toss_webhook_signature
 from .models import Payout, PayoutWebhookDelivery, Seller, TaxIdentity
@@ -48,6 +64,7 @@ from .schemas import (
     ConfirmPayoutIn,
     ErrorOut,
     IdentitySubmitIn,
+    OperatorPayoutCountsOut,
     OperatorPayoutOut,
     PayoutOut,
     SellerPhoneSubmitIn,
@@ -645,56 +662,61 @@ def receive_toss_seller_webhook(request: HttpRequest):
 # --- Operator 표면 (#50 AC) ------------------------------------------------------
 
 
+@operator_router.get("/payouts/counts", response=OperatorPayoutCountsOut)
+def count_payouts_for_operator(request: HttpRequest):
+    """운영자 홈의 배지 숫자 셋 (#149) — 한 요청, 한 질의, 직렬화되는 행 0개.
+
+    이전에는 홈이 `?blocked_on=` 목록 셋을 통째로 받아 `.length` 를 셌다. 홈을 한 번
+    여는 데 Payout 전체를 세 번 긁어 전부 직렬화하고, 숫자 셋만 남기고 버렸다.
+    """
+
+    payouts = with_hold_facts(Payout.objects.all())
+    return payouts.aggregate(
+        # 갈래 목록은 `BLOCKED_ON_OF` 표에서 나온다 — 손으로 적어 두면 갈래가 늘 때
+        # 홈만 조용히 옛 셋을 센다. 스키마 필드와의 대조는 모듈 로드 시점에 한다.
+        **{
+            value: Count("pk", filter=blocked_on_q(value))
+            for value in BLOCKED_ON_VALUES
+        }
+    )
+
+
 @operator_router.get("/payouts", response=list[OperatorPayoutOut])
+@paginate(PageNumberPagination, page_size=20)
 def list_payouts_for_operator(request: HttpRequest, blocked_on: str | None = None):
     """Operator가 어느 Payout이 두 대기 중 어느 쪽에 막혀 있는지 본다(#50 AC).
 
     `blocked_on=identity`나 `blocked_on=seller`로 필터링할 수 있다 — 운영자가
     "지금 내가 처리해야 할 것은 어느 쪽인가"에 바로 답할 수 있어야 한다는 요구가
-    여기 있다. 값을 주지 않으면 전체를 최신순으로 본다.
+    여기 있다.
 
-    **행마다 조회하지 않는다**(#91) — `hold_of` 는 "조회를 내지 않는다, 호출부가
-    Seller 와 신원 제출 여부를 미리 가져온다"고 못 박아 두었는데(`progress.py`) 이
-    큐만 그 규율을 어겨 행마다 Seller 1회 + TaxIdentity 1회를 쳤고, 그것도
-    `blocked_on` 으로 걸러내기 **전에** 쳤다. 운영자 홈이 세 큐를 병렬로 부르므로
-    그대로 3배가 된다. 신원은 `contests.sponsorship` 과 같은 `Exists` 관용구로 붙이고,
-    Seller 는 FK 가 아니라 Developer 단위 개념이라(`Payout.seller` 는 속성이다)
-    한 질의로 모아 사상한다.
+    **좁히기는 전부 SQL 이 한다**(#149). 값을 주지 않으면 **막혀 있는 것 전부**를
+    최신순으로 본다 — 확정 전(REQUESTED)이거나 이미 끝난(CONFIRMED·FAILED) Payout 은
+    애초에 오지 않는다. 이전에는 이 엔드포인트가 `Payout` 테이블을 통째로 가져와
+    파이썬 루프의 `continue` 로 걸렀다: 필터가 좁히는 것이 질의가 아니라 응답뿐이라
+    `blocked_on=identity` 를 줘도 DB 에서 오는 행 수는 같았고, `developer_id__in`
+    목록이 행 수만큼 자라 개발자가 많아지면 느려지는 게 아니라 바인드 파라미터
+    한도에서 **500** 이 났다. 판정 자체는 여전히 `progress.py` 하나가 소유한다 —
+    여기 Q 는 그 표에서 파생되고, 둘의 일치는 `tests/test_operator_payout_queue.py`
+    가 모든 조합에서 증명한다.
+
+    정렬 마지막 키에 `id` 를 붙인다 — `created_at` 이 같은 두 행의 순서를 DB 가
+    보장할 이유가 없고, 페이지마다 순서가 흔들리면 **같은 Payout 이 두 페이지에
+    나오고 다른 하나는 어느 페이지에도 안 나온다**(#39 가 공개 목록에서 겪은
+    그것). 운영자 큐에서 그 누락은 「처리해야 할 것을 못 본다」다.
     """
 
-    payouts = list(
-        Payout.objects.with_target()
-        .annotate(identity_submitted=Exists(TaxIdentity.objects.filter(payout=OuterRef("pk"))))
-        .order_by("-created_at")
+    if blocked_on is not None and blocked_on not in BLOCKED_ON_VALUES:
+        # 알 수 없는 값은 500 도 「0건」도 아니다(`contests.api.list_contests` 와 같은
+        # 규율) — 빈 큐는 「처리할 것이 없다」는 뜻이라 오타 하나가 그렇게 읽히면
+        # 운영자가 밀린 일을 못 본 채 지나간다.
+        raise HttpError(422, f"blocked_on 은 {', '.join(BLOCKED_ON_VALUES)} 중 하나여야 합니다.")
+
+    payouts = (
+        with_blocked_on(with_hold_facts(Payout.objects.with_target()))
+        .filter(blocked_q())
+        .order_by("-created_at", "-id")
     )
-    sellers_by_developer = {
-        seller.developer_id: seller
-        for seller in Seller.objects.filter(
-            developer_id__in={payout.developer.id for payout in payouts}
-        )
-    }
-
-    results: list[OperatorPayoutOut] = []
-    for payout in payouts:
-        seller = sellers_by_developer.get(payout.developer.id)
-        has_identity = payout.identity_submitted
-        blocked = hold_of(payout, seller=seller, has_identity=has_identity).blocked_on
-        if blocked_on is not None and blocked != blocked_on:
-            continue
-
-        results.append(
-            OperatorPayoutOut(
-                idempotency_key=payout.idempotency_key,
-                contest_id=payout.contest.id,
-                developer_user_id=payout.developer.user_id,
-                net_amount=payout.net_amount,
-                status=payout.status,
-                transfer_status=payout.transfer_status,
-                blocked_on=blocked,
-                seller_status=seller.status if seller is not None else None,
-                has_identity=has_identity,
-                created_at=payout.created_at,
-            )
-        )
-
-    return results
+    if blocked_on is not None:
+        payouts = payouts.filter(blocked_on_q(blocked_on))
+    return payouts

@@ -268,6 +268,15 @@ def _operator_client(username="payouts-op-1", *, superuser=False):
     return operator
 
 
+def _queue_rows(response) -> list[dict]:
+    """운영자 지급 큐 응답의 행들. 페이지네이션이 붙어(#149) 본문이
+    `{"items": [...], "count": N}` 이다 — 건수는 `response.json()["count"]` 로 따로 본다."""
+
+    body = response.json()
+    assert "items" in body, body
+    return body["items"]
+
+
 @pytest.fixture
 def category(db):
     return Category.objects.create(name="라이프스타일")
@@ -1448,18 +1457,18 @@ def test_operator_sees_which_payouts_are_blocked_on_seller_vs_identity(
 
     seller_blocked = operator.get("/api/operator/payouts?blocked_on=seller")
     assert seller_blocked.status_code == 200
-    seller_keys = {row["idempotency_key"] for row in seller_blocked.json()}
+    seller_keys = {row["idempotency_key"] for row in _queue_rows(seller_blocked)}
     assert requested1["idempotency_key"] in seller_keys
     assert requested2["idempotency_key"] not in seller_keys
     seller_row = next(
-        row for row in seller_blocked.json() if row["idempotency_key"] == requested1["idempotency_key"]
+        row for row in _queue_rows(seller_blocked) if row["idempotency_key"] == requested1["idempotency_key"]
     )
     assert seller_row["blocked_on"] == "seller"
     assert seller_row["seller_status"] == "under_review"
 
     identity_blocked = operator.get("/api/operator/payouts?blocked_on=identity")
     assert identity_blocked.status_code == 200
-    identity_keys = {row["idempotency_key"] for row in identity_blocked.json()}
+    identity_keys = {row["idempotency_key"] for row in _queue_rows(identity_blocked)}
     assert requested2["idempotency_key"] in identity_keys
     assert requested1["idempotency_key"] not in identity_keys
 
@@ -2660,13 +2669,13 @@ def test_operator_blocked_on_transfer_for_identity_pending_with_failed_transfer(
     operator = _operator_client()
     resp = operator.get(f"{PAYOUTS_URL.replace('/payouts', '/operator/payouts')}?blocked_on=transfer")
     assert resp.status_code == 200
-    idempotency_keys = [row["idempotency_key"] for row in resp.json()]
+    idempotency_keys = [row["idempotency_key"] for row in _queue_rows(resp)]
     assert requested["idempotency_key"] in idempotency_keys
 
     identity_resp = operator.get(
         f"{PAYOUTS_URL.replace('/payouts', '/operator/payouts')}?blocked_on=identity"
     )
-    assert requested["idempotency_key"] not in [row["idempotency_key"] for row in identity_resp.json()]
+    assert requested["idempotency_key"] not in [row["idempotency_key"] for row in _queue_rows(identity_resp)]
 
 
 @pytest.mark.django_db
@@ -2693,12 +2702,12 @@ def test_operator_blocked_on_identity_takes_priority_when_identity_missing(
     identity_resp = operator.get(
         f"{PAYOUTS_URL.replace('/payouts', '/operator/payouts')}?blocked_on=identity"
     )
-    assert requested["idempotency_key"] in [row["idempotency_key"] for row in identity_resp.json()]
+    assert requested["idempotency_key"] in [row["idempotency_key"] for row in _queue_rows(identity_resp)]
 
     transfer_resp = operator.get(
         f"{PAYOUTS_URL.replace('/payouts', '/operator/payouts')}?blocked_on=transfer"
     )
-    assert requested["idempotency_key"] not in [row["idempotency_key"] for row in transfer_resp.json()]
+    assert requested["idempotency_key"] not in [row["idempotency_key"] for row in _queue_rows(transfer_resp)]
 
 
 
@@ -3193,7 +3202,7 @@ def test_operator_queue_flags_an_unclassifiable_payout_as_operator_hold_and_logs
     with caplog.at_level(logging.ERROR):
         resp = operator.get("/api/operator/payouts")
     assert resp.status_code == 200
-    row = next(r for r in resp.json() if r["idempotency_key"] == requested["idempotency_key"])
+    row = next(r for r in _queue_rows(resp) if r["idempotency_key"] == requested["idempotency_key"])
     assert row["blocked_on"] == "operator"
     assert any("bogus" in record.getMessage() for record in caplog.records)
 
@@ -3304,7 +3313,7 @@ def test_operator_payout_queue_does_not_query_per_row(client, category, landing_
     with CaptureQueriesContext(connection) as one_row:
         resp = operator.get("/api/operator/payouts")
         assert resp.status_code == 200
-    assert len(resp.json()) == 1
+    assert len(_queue_rows(resp)) == 1
 
     ClockOverride.objects.filter(pk=1).delete()
     _sponsor2, dev2, contest2, _s2 = _ready_for_payout(
@@ -3323,7 +3332,7 @@ def test_operator_payout_queue_does_not_query_per_row(client, category, landing_
     with CaptureQueriesContext(connection) as three_rows:
         resp = operator.get("/api/operator/payouts")
         assert resp.status_code == 200
-    assert len(resp.json()) == 3
+    assert len(_queue_rows(resp)) == 3
 
     assert len(three_rows) == len(one_row), (
         "행이 1개에서 3개로 늘었는데 질의 수가 늘었다 — 행마다 조회하고 있다.\n"
@@ -3468,3 +3477,306 @@ def test_toss_payout_webhook_422s_when_neither_identifier_can_be_resolved(
         )
 
     assert resp.status_code == 422, resp.content
+
+
+# --- #149: 좁히기를 SQL 로 내린다 --------------------------------------------------
+
+
+def _clone_blocked_payouts(count: int, *, contest_id: int, developer, status: str) -> list[Payout]:
+    """막혀 있는 Payout 을 `count` 개 더 만든다 — 페이지네이션과 질의 수를 보기 위한
+    부피용이다.
+
+    HTTP 흐름(`_ready_for_payout`)을 스물몇 번 다시 태울 이유가 없다 — 여기서 확인할
+    것은 개최·심사·선정이 아니라 **큐가 어떻게 좁히고 자르는가**다. 픽스처는 ORM 으로,
+    단언은 HTTP 로(`test_contest_listing._publish` 와 같은 관용구).
+    """
+
+    from awards.models import Award
+    from contests.models import Contest
+    from handovers.models import Handover
+    from submissions.models import Submission
+
+    template = Contest.objects.get(id=contest_id)
+    deliverable_types = list(template.deliverable_types.all())
+    made: list[Payout] = []
+    for index in range(count):
+        contest = Contest.objects.create(
+            sponsor=template.sponsor,
+            title=f"{template.title} 사본 {index}",
+            category=template.category,
+            prize=template.prize,
+            deadline_at=template.deadline_at,
+            status=Contest.Status.CLOSED,
+        )
+        contest.deliverable_types.set(deliverable_types)
+        submission = Submission.objects.create(
+            contest=contest, developer=developer, source_object_key=f"src-{contest.id}"
+        )
+        award = Award.objects.create(
+            contest=contest, submission=submission, awarded_at=timezone.now()
+        )
+        handover = Handover.objects.create(
+            award=award,
+            status=Handover.Status.RELEASED,
+            release_deadline_at=timezone.now() + timedelta(days=7),
+        )
+        made.append(
+            Payout.objects.create(
+                handover=handover,
+                prize_amount=1_000_000,
+                platform_fee_amount=100_000,
+                withholding_tax_amount=44_000,
+                net_amount=856_000,
+                platform_fee_bps=1_000,
+                withholding_tax_bps=440,
+                status=status,
+            )
+        )
+    return made
+
+
+@pytest.mark.django_db
+def test_operator_queue_ignores_payouts_that_are_not_blocked_at_all(
+    client, category, landing_type
+):
+    """막혀 있지 않은 Payout 은 큐의 질의에도 응답에도 없다 (#149).
+
+    이전에는 `Payout` 테이블 전체를 가져온 뒤 파이썬 루프가 걸렀다 — 아직
+    REQUESTED 이거나 이미 CONFIRMED 인 행까지 전부 DB 에서 끌어와 Seller 를 찾고
+    나서야 버렸다. 확정되지 않은 지급이 쌓일수록 운영자 홈이 느려지는데, 그 행들은
+    운영자가 볼 것이 아니다.
+    """
+
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    sponsor, dev, contest, submission = _ready_for_payout(
+        client, category, landing_type, sponsor_uid="sponsor-149-1", dev_uid="dev-149-1"
+    )
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="review_required")
+    developer = Payout.objects.get(idempotency_key=requested["idempotency_key"]).developer
+
+    operator = _operator_client(username="payouts-op-149-1")
+    with CaptureQueriesContext(connection) as before:
+        resp = operator.get("/api/operator/payouts")
+    assert [row["idempotency_key"] for row in _queue_rows(resp)] == [requested["idempotency_key"]]
+
+    # 막혀 있지 않은 것들을 잔뜩 심는다 — 확정 전(REQUESTED)과 이미 끝난 것(CONFIRMED).
+    _clone_blocked_payouts(
+        10, contest_id=contest["id"], developer=developer, status=Payout.Status.REQUESTED
+    )
+    _clone_blocked_payouts(
+        10, contest_id=contest["id"], developer=developer, status=Payout.Status.CONFIRMED
+    )
+
+    with CaptureQueriesContext(connection) as after:
+        resp = operator.get("/api/operator/payouts")
+    assert [row["idempotency_key"] for row in _queue_rows(resp)] == [requested["idempotency_key"]]
+    assert resp.json()["count"] == 1, "막히지 않은 20건이 건수에 섞였다"
+    assert len(after) == len(before), (
+        "막혀 있지 않은 Payout 20건을 심었더니 질의 수가 달라졌다 — 큐가 그것들까지 "
+        "가져오고 있다.\n" + "\n".join(q["sql"][:200] for q in after)
+    )
+
+
+@pytest.mark.django_db
+def test_operator_queue_filter_narrows_the_query_not_just_the_response(
+    client, category, landing_type
+):
+    """`blocked_on=identity` 가 DB 에서 오는 행 수를 실제로 줄인다 (#149).
+
+    파이썬 `continue` 로 거를 때는 필터를 줘도 질의가 그대로였다 — 「지금 내가 처리할
+    것은 어느 쪽인가」에 답하는 화면이 어느 쪽을 골라도 같은 비용을 냈다.
+    """
+
+    sponsor, dev, contest, submission = _ready_for_payout(
+        client, category, landing_type, sponsor_uid="sponsor-149-2", dev_uid="dev-149-2"
+    )
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="review_required")
+    developer = Payout.objects.get(idempotency_key=requested["idempotency_key"]).developer
+    _clone_blocked_payouts(
+        5,
+        contest_id=contest["id"],
+        developer=developer,
+        status=Payout.Status.CONFIRMED_IDENTITY_PENDING,
+    )
+
+    operator = _operator_client(username="payouts-op-149-2")
+
+    everything = operator.get("/api/operator/payouts")
+    assert everything.json()["count"] == 6
+
+    identity_only = operator.get("/api/operator/payouts?blocked_on=identity")
+    assert identity_only.json()["count"] == 5
+    assert requested["idempotency_key"] not in {
+        row["idempotency_key"] for row in _queue_rows(identity_only)
+    }
+
+    seller_only = operator.get("/api/operator/payouts?blocked_on=seller")
+    assert seller_only.json()["count"] == 1
+    assert [row["idempotency_key"] for row in _queue_rows(seller_only)] == [
+        requested["idempotency_key"]
+    ]
+
+
+@pytest.mark.django_db
+def test_operator_queue_pages_without_losing_or_repeating_a_row(client, category, landing_type):
+    """페이지가 갈려도 빠지거나 겹치는 행이 없다 (#149).
+
+    `created_at` 만으로 정렬하면 같은 시각의 두 행 순서를 DB 가 보장할 이유가 없고,
+    그러면 **같은 Payout 이 두 페이지에 나오고 다른 하나는 어느 페이지에도 안
+    나온다**(#39 가 공개 목록에서 겪은 그것). 운영자 큐에서 그 누락은 「처리해야 할
+    것을 못 본다」다 — 그래서 픽스처의 `created_at` 을 일부러 같은 값으로 맞춘다.
+    """
+
+    sponsor, dev, contest, submission = _ready_for_payout(
+        client, category, landing_type, sponsor_uid="sponsor-149-3", dev_uid="dev-149-3"
+    )
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="review_required")
+    developer = Payout.objects.get(idempotency_key=requested["idempotency_key"]).developer
+    _clone_blocked_payouts(
+        24,
+        contest_id=contest["id"],
+        developer=developer,
+        status=Payout.Status.CONFIRMED_SELLER_PENDING,
+    )
+    same_moment = timezone.now()
+    Payout.objects.all().update(created_at=same_moment)
+
+    operator = _operator_client(username="payouts-op-149-3")
+
+    first = operator.get("/api/operator/payouts")
+    assert first.json()["count"] == 25
+    first_keys = [row["idempotency_key"] for row in _queue_rows(first)]
+    assert len(first_keys) == 20, "한 페이지가 20행이어야 한다"
+
+    second = operator.get("/api/operator/payouts?page=2")
+    second_keys = [row["idempotency_key"] for row in _queue_rows(second)]
+    assert len(second_keys) == 5
+
+    assert not set(first_keys) & set(second_keys), "같은 행이 두 페이지에 나왔다"
+    assert len(set(first_keys) | set(second_keys)) == 25, "어느 페이지에도 없는 행이 있다"
+
+
+@pytest.mark.django_db
+def test_operator_queue_counts_answer_without_sending_the_rows(client, category, landing_type):
+    """홈의 배지 숫자를 목록을 받아 세지 않는다 (#149) — 한 요청, 행 0개."""
+
+    sponsor, dev, contest, submission = _ready_for_payout(
+        client, category, landing_type, sponsor_uid="sponsor-149-4", dev_uid="dev-149-4"
+    )
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="review_required")
+    developer = Payout.objects.get(idempotency_key=requested["idempotency_key"]).developer
+    _clone_blocked_payouts(
+        3,
+        contest_id=contest["id"],
+        developer=developer,
+        status=Payout.Status.CONFIRMED_IDENTITY_PENDING,
+    )
+    # 막혀 있지 않은 것은 세지 않는다.
+    _clone_blocked_payouts(
+        7, contest_id=contest["id"], developer=developer, status=Payout.Status.REQUESTED
+    )
+
+    operator = _operator_client(username="payouts-op-149-4")
+    resp = operator.get("/api/operator/payouts/counts")
+
+    assert resp.status_code == 200, resp.content
+    assert resp.json() == {"identity": 3, "seller": 1, "transfer": 0, "operator": 0}
+
+
+@pytest.mark.django_db
+def test_operator_queue_rejects_an_unknown_blocked_on_instead_of_saying_zero(
+    client, category, landing_type
+):
+    """알 수 없는 `blocked_on` 은 빈 큐가 아니라 422 다 (#149).
+
+    빈 큐는 「처리할 것이 없다」는 뜻이라, 오타 하나가 그렇게 읽히면 운영자가 밀린
+    일을 못 본 채 지나간다(`contests.api.list_contests` 와 같은 규율).
+    """
+
+    sponsor, dev, contest, submission = _ready_for_payout(
+        client, category, landing_type, sponsor_uid="sponsor-149-5", dev_uid="dev-149-5"
+    )
+    requested = _request_payout(client, dev, contest["id"])
+    _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="review_required")
+
+    operator = _operator_client(username="payouts-op-149-5")
+    resp = operator.get("/api/operator/payouts?blocked_on=selller")
+
+    assert resp.status_code == 422, resp.content
+
+
+@pytest.mark.django_db
+def test_operator_queue_resolves_seller_and_identity_for_the_distribution_path_too(
+    client, category, landing_type
+):
+    """Seller·신원 주석이 두 지급 경로 모두에서 풀린다 (#149).
+
+    `Payout` 은 Handover(Award 경로)나 DistributionShare(무응답 1/N 배분 경로) 중
+    하나를 가리킨다. `with_hold_facts` 는 Developer 를 그 둘 중 채워진 쪽으로 찾는데,
+    한쪽만 맞춰 두면 다른 경로의 Payout 은 Seller 가 있어도 NULL 로 읽혀 늘 「등록
+    대기」로 분류된다 — 조용히 틀린 큐가 된다.
+    """
+
+    from distributions.models import Distribution, DistributionShare
+    from submissions.models import Submission
+
+    sponsor, dev, contest, submission = _ready_for_payout(
+        client, category, landing_type, sponsor_uid="sponsor-149-6", dev_uid="dev-149-6"
+    )
+    requested = _request_payout(client, dev, contest["id"])
+    # Seller 를 READY 로 만들어 둔다 — 그래야 「seller 가 아니라 transfer」라는 구별이
+    # 주석이 실제로 풀렸을 때만 나온다.
+    _confirm_payout(client, dev, requested["idempotency_key"])
+    developer = Payout.objects.get(idempotency_key=requested["idempotency_key"]).developer
+    assert Seller.objects.get(developer=developer).status in Seller.READY_STATUSES
+
+    # 배분은 **다른** Contest 에서 일어난다 — 같은 Developer 가 한 Contest 에 두 번
+    # 제출할 수는 없다(unique_submission_per_contest_developer).
+    template = Contest.objects.get(id=contest["id"])
+    contest_row = Contest.objects.create(
+        sponsor=template.sponsor,
+        title="배분 경로 공모전",
+        category=template.category,
+        prize=template.prize,
+        deadline_at=template.deadline_at,
+        status=Contest.Status.CLOSED,
+    )
+    contest_row.deliverable_types.set(template.deliverable_types.all())
+    distribution = Distribution.objects.create(
+        contest=contest_row,
+        cutline_percentage=0,
+        total_prize=1_000_000,
+        qualifying_count=1,
+        share_amount=1_000_000,
+    )
+    share_submission = Submission.objects.create(
+        contest=contest_row, developer=developer, source_object_key="src-share"
+    )
+    share = DistributionShare.objects.create(
+        distribution=distribution, submission=share_submission, amount=1_000_000
+    )
+    distribution_payout = Payout.objects.create(
+        distribution_share=share,
+        prize_amount=1_000_000,
+        platform_fee_amount=100_000,
+        withholding_tax_amount=44_000,
+        net_amount=856_000,
+        platform_fee_bps=1_000,
+        withholding_tax_bps=440,
+        status=Payout.Status.CONFIRMED_SELLER_PENDING,
+    )
+
+    operator = _operator_client(username="payouts-op-149-6")
+    resp = operator.get("/api/operator/payouts?blocked_on=transfer")
+
+    keys = {row["idempotency_key"] for row in _queue_rows(resp)}
+    assert str(distribution_payout.idempotency_key) in keys, (
+        "Distribution 경로의 Payout 에서 Seller 상태가 안 풀렸다 — READY 인데 "
+        "seller 대기로 분류됐다"
+    )

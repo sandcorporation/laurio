@@ -187,6 +187,155 @@ def hold_of(payout: Payout, *, seller: Seller | None, has_identity: bool) -> Hol
     return Hold(kind=kind, turn=TURN_OF[kind], transfer_failed=transfer_failed)
 
 
+# --- 같은 표를 SQL 로 묻는 길 (#149) --------------------------------------------------
+#
+# 운영자 큐는 「무엇에 막혀 있는가」로 좁힌 목록을 페이지 단위로 읽는다. 그 좁히기를
+# 파이썬에서 하면 필터가 응답만 줄이고 질의는 그대로라, 막혀 있지도 않은 Payout 까지
+# 전부 가져온 뒤 버리게 된다(#149 가 고치는 것). 그래서 **같은 표를 SQL 에서도** 물어야
+# 한다.
+#
+# **표를 옮겨 적는 것이 위험한 이유를 알고 한다.** #130 이 세 렌더러의 재파생을 `hold_of`
+# 하나로 모은 이유가 「같은 규칙이 세 곳에 서로 맞춰 달라는 주석과 함께 따로 적혀
+# 있었다」였다. 그래서 여기 Q 는 **거친 축(`blocked_on`)까지만** 내려간다 — `HoldKind`
+# 열다섯 갈래는 여전히 `hold_of` 만 안다 — 그리고 두 표현이 모든 조합에서 같은 답을
+# 낸다는 것을 `tests/test_operator_payout_queue.py` 의 빠짐없음 테스트가 증명한다
+# (#141 이 `Contest.Status` 에 쓴 관용구). 조합이 하나 늘거나 표가 바뀌면 그 테스트가
+# 그 자리에서 터진다.
+#
+# `HoldKind.SELLER_PHONE` 과 `SELLER_PENDING` 을 가르는 다섯 번째 사실(전화번호 제출
+# 여부)은 여기 없다 — 둘 다 `blocked_on == "seller"` 라 이 축에서는 구별되지 않는다.
+# 애초에 그 값은 암호화되어 저장돼(`Seller.phone_number_encrypted`) SQL 이 읽을 수도
+# 없다. 「거친 축까지만」이 편의가 아니라 가능한 최대치라는 뜻이다.
+
+_STATUS_VALUES = list(Payout.Status.values)
+
+
+def with_hold_facts(payouts):
+    """`blocked_on_q` 가 읽는 사실을 질의에 붙인다 — Seller 상태와 신원 제출 여부.
+
+    `Payout.seller` 는 FK 가 아니라 Developer 를 거쳐 찾는 속성이라(한 Developer 는
+    Contest 를 여러 번 이길 수 있고 등록은 한 번뿐이다) `select_related` 로는 안 붙는다.
+    Award 경로와 Distribution 경로 중 채워진 쪽을 `Coalesce` 로 고른다 —
+    `payout_exactly_one_target` 이 정확히 하나만 채워져 있음을 보장한다.
+    """
+
+    from django.db.models import Exists, OuterRef, Subquery
+    from django.db.models.functions import Coalesce
+
+    from .models import TaxIdentity
+
+    def _seller_status_via(developer_path: str):
+        return Subquery(
+            Seller.objects.filter(developer_id=OuterRef(developer_path)).values("status")[:1]
+        )
+
+    return payouts.annotate(
+        identity_submitted=Exists(TaxIdentity.objects.filter(payout=OuterRef("pk"))),
+        seller_status=Coalesce(
+            _seller_status_via("handover__award__submission__developer_id"),
+            _seller_status_via("distribution_share__submission__developer_id"),
+        ),
+    )
+
+
+def blocked_on_q(value: str | None):
+    """`with_hold_facts` 를 거친 질의에서 「`blocked_on` 이 이 값인 행」을 고르는 Q.
+
+    `value=None` 은 「아무것에도 막혀 있지 않다」 — 큐가 통째로 배제하는 쪽이다.
+    위 `BLOCKED_ON_OF` 표를 `hold_of` 의 분기 순서 그대로 옮긴 것이다:
+
+    - REQUESTED · FAILED — 확정 전이거나 끝났다. 붙드는 것이 없다
+    - CONFIRMED — 실이체가 실패로 확인됐으면 `transfer`, 아니면 완료(None)
+    - CONFIRMED_IDENTITY_PENDING — 신원을 냈고 실이체가 실패했을 때만 `transfer`,
+      그 밖에는 `identity`(신원 미제출이 실이체 재시도보다 앞선다)
+    - CONFIRMED_SELLER_PENDING — Seller 가 READY 면 남은 것은 실이체뿐이라 `transfer`,
+      아니면 `seller`
+    - 표에 없는 status — `operator`. 열거하지 않고 **여집합**으로 잡는다: 알 수 없는
+      값이 새 갈래로 조용히 사라지는 것이 이 표가 가장 막고 싶어 하는 일이다
+    """
+
+    from django.db.models import Q
+
+    S = Payout.Status
+    transfer_failed = Q(transfer_status=Payout.TransferStatus.FAILED)
+    seller_ready = Q(seller_status__in=list(Seller.READY_STATUSES))
+    # **NULL 을 손으로 적는다.** `seller_status` 는 컬럼이 아니라 Subquery 주석이라
+    # 등록이 아직 시작되지 않은 Payout 에서 NULL 이고, SQL 의 `NOT (x IN (...))` 는
+    # NULL 에 대해 참이 아니라 **NULL** 이다 — 그대로 뒀으면 「Seller 가 아예 없는」
+    # Payout 이 seller 큐에서 통째로 사라졌을 것이다. 그게 큐에 가장 먼저 떠야 할
+    # 행이다(등록조차 시작되지 않았다는 뜻이므로).
+    seller_not_ready = Q(seller_status__isnull=True) | ~seller_ready
+    identity_recorded_and_transfer_failed = Q(identity_submitted=True) & transfer_failed
+
+    if value is None:
+        return (
+            Q(status=S.REQUESTED)
+            | Q(status=S.FAILED)
+            | (Q(status=S.CONFIRMED) & ~transfer_failed)
+        )
+    if value == "identity":
+        return Q(status=S.CONFIRMED_IDENTITY_PENDING) & ~identity_recorded_and_transfer_failed
+    if value == "seller":
+        return Q(status=S.CONFIRMED_SELLER_PENDING) & seller_not_ready
+    if value == "transfer":
+        return (
+            (Q(status=S.CONFIRMED_IDENTITY_PENDING) & identity_recorded_and_transfer_failed)
+            | (Q(status=S.CONFIRMED_SELLER_PENDING) & seller_ready)
+            | (Q(status=S.CONFIRMED) & transfer_failed)
+        )
+    if value == "operator":
+        return ~Q(status__in=_STATUS_VALUES)
+    raise ValueError(f"blocked_on 표에 없는 값: {value!r}")
+
+
+BLOCKED_ON_VALUES: tuple[str, ...] = tuple(
+    # 표에서 뽑는다 — 손으로 적어 두면 갈래가 늘 때 큐만 조용히 옛 목록을 쓴다.
+    dict.fromkeys(value for value in BLOCKED_ON_OF.values() if value is not None)
+)
+
+
+def blocked_q():
+    """막혀 있는 행 전부 — 큐가 보여주는 것의 전체다. `blocked_on=None` 의 여집합이라
+    표에 없는 status 도 빠짐없이 들어온다(그쪽은 `operator` 로 분류된다)."""
+
+    return ~blocked_on_q(None)
+
+
+def with_blocked_on(payouts):
+    """`blocked_on` 값 자체를 질의에 붙인다 — 위 Q 들에서 **파생**하므로 표가 셋이 되지
+    않는다. 이 값이 주석이라야 페이지를 자른 뒤에 파이썬으로 다시 계산하지 않는다."""
+
+    from django.db.models import Case, CharField, Value, When
+
+    return payouts.annotate(
+        blocked_on_value=Case(
+            *(When(blocked_on_q(value), then=Value(value)) for value in BLOCKED_ON_VALUES),
+            default=Value(None),
+            output_field=CharField(null=True),
+        )
+    )
+
+
+def blocked_on_of_row(payout) -> str | None:
+    """`with_blocked_on` 이 붙인 값을 읽는다 — 표 밖의 조합이면 그 자리에서 소리를 낸다.
+
+    `hold_of` 의 마지막 `else` 가 내던 ERROR 를 이 경로에서도 잃지 않기 위해서다.
+    도달 불가여야 하는 곳에 도달했다면 불변식이 깨진 것이고, 큐에 조용히 한 줄 더
+    뜨는 것으로 끝나서는 안 된다(ADR-0025).
+    """
+
+    value = payout.blocked_on_value
+    if value == "operator":
+        logger.error(
+            "Hold 표에 없는 Payout 조합이 운영자 큐에 떴다 — status=%r transfer_status=%r "
+            "(idempotency_key=%s). 돈은 움직이지 않고 Operator 의 차례로 표시한다.",
+            payout.status,
+            payout.transfer_status,
+            payout.idempotency_key,
+        )
+    return value
+
+
 def _confirmation_journal(payout: Payout):
     """첫 홈에서 남기는 수수료·원천징수 공제 분개. 원천징수는 반드시 원천징수 예수금 계정에
     계상된다(ADR-0004/0008) — 국세청에 낼 남의 돈이므로 플랫폼 수수료 수익과 섞이지 않는다.
