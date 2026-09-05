@@ -47,35 +47,30 @@ jobs:
           POSTGRES_USER: laurio
           POSTGRES_PASSWORD: laurio
         ports:
-          - 5432:5432
+          # **표준 포트를 쓰지 않는다.** 셀프호스티드 러너는 호스트를 다른 것과
+          # 나눠 쓰므로(이 러너 호스트에서 5432 가 이미 점유돼 「Initialize
+          # containers」가 죽었다) 서비스 컨테이너도 비켜 잡는다 — 이 저장소가
+          # dev 스택에 대해 이미 하는 것과 같은 이유다(CLAUDE.md 포트 표).
+          # dev 의 55432 와도 겹치지 않게 다시 한 칸 옮긴다.
+          - 55532:5432
         options: >-
           --health-cmd "pg_isready -U laurio -d laurio"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
 
-      redis:
-        # Operator 세션 저장소(#43). 테스트가 실제 Redis 를 상대로 돈다 — conftest 의
-        # autouse 픽스처가 매 테스트마다 세션 캐시를 비우므로, 이게 없으면 스위트
-        # 전체가 ConnectionError 로 죽는다.
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
+    # **redis 서비스는 없앴다.** 예전 주석은 「테스트가 실제 Redis 를 상대로 돈다」고
+    # 적었지만 더 이상 사실이 아니다 — `config/settings.py` 의 `_RUNNING_TESTS` 가
+    # 테스트에서 세션 캐시를 LocMem 으로 바꾼다(CLAUDE.md 도 「pytest 에 Redis 가
+    # 필요 없다, 예전 문장은 더 이상 사실이 아니다」라고 못박는다). 공유 호스트에서
+    # 6379 를 잡을 이유가 없다.
 
     env:
-      # 러너에서는 서비스 컨테이너가 표준 포트로 붙으므로 dev 기본값을 덮어쓴다.
       POSTGRES_HOST: 127.0.0.1
-      POSTGRES_PORT: "5432"
+      POSTGRES_PORT: "55532"
       POSTGRES_DB: laurio
       POSTGRES_USER: laurio
       POSTGRES_PASSWORD: laurio
-      # 러너의 redis 도 표준 포트다 — dev 가 비켜 잡은 16379 기본값을 덮어쓴다.
-      SESSION_REDIS_URL: redis://127.0.0.1:6379/1
       DJANGO_SECRET_KEY: ci-only-insecure-key
       DJANGO_DEBUG: "false"
       DJANGO_ALLOWED_HOSTS: "*"
@@ -314,6 +309,27 @@ jobs:
     # 착각해 두 번 데었다). 그래서 **실제로 붙는지**를 매번 확인한다.
     runs-on: [self-hosted, sub]
 
+    # **이 잡만의 스택으로 가른다.** 셀프호스티드 러너에서는 잡들이 같은 호스트를
+    # 나눠 쓰는데, dev compose 를 띄우는 잡이 셋이라 기본값 그대로면 셋이 같은
+    # 프로젝트(`laurio-dev`)와 같은 포트를 잡는다 — 동시에 돌면 서로의 컨테이너를
+    # 건드리고, celery 잡의 `down -v` 가 남의 스택을 지운다. 호스티드 러너에서는
+    # 잡마다 VM 이 달라 드러나지 않던 문제다.
+    #
+    # `docker/dev-env.sh` 가 워크트리에 대해 하는 것과 같은 방식이다 — 프로젝트
+    # 이름과 **모든 포트**를 함께 옮긴다. 오프셋은 워크트리가 쓰지 않는 10 이상을
+    # 골라, 같은 호스트의 워크트리 스택과도 겹치지 않게 한다.
+    env:
+      COMPOSE_PROJECT_NAME: laurio-ci-celery
+      LAURIO_DB_PORT: "56432"
+      LAURIO_API_PORT: "59000"
+      LAURIO_REDIS_PORT: "17379"
+      LAURIO_MINIO_PORT: "20000"
+      LAURIO_MINIO_CONSOLE_PORT: "20001"
+      LAURIO_WEB_PORT: "54000"
+      LAURIO_OPERATOR_WEB_PORT: "54001"
+      LAURIO_E2E_BASE_URL: http://127.0.0.1:54000
+      LAURIO_OPERATOR_E2E_BASE_URL: http://127.0.0.1:54001
+
     steps:
       - uses: actions/checkout@v4
 
@@ -384,6 +400,27 @@ jobs:
   frontend-e2e-public:
     runs-on: [self-hosted, sub]
 
+    # **이 잡만의 스택으로 가른다.** 셀프호스티드 러너에서는 잡들이 같은 호스트를
+    # 나눠 쓰는데, dev compose 를 띄우는 잡이 셋이라 기본값 그대로면 셋이 같은
+    # 프로젝트(`laurio-dev`)와 같은 포트를 잡는다 — 동시에 돌면 서로의 컨테이너를
+    # 건드리고, celery 잡의 `down -v` 가 남의 스택을 지운다. 호스티드 러너에서는
+    # 잡마다 VM 이 달라 드러나지 않던 문제다.
+    #
+    # `docker/dev-env.sh` 가 워크트리에 대해 하는 것과 같은 방식이다 — 프로젝트
+    # 이름과 **모든 포트**를 함께 옮긴다. 오프셋은 워크트리가 쓰지 않는 10 이상을
+    # 골라, 같은 호스트의 워크트리 스택과도 겹치지 않게 한다.
+    env:
+      COMPOSE_PROJECT_NAME: laurio-ci-e2e-public
+      LAURIO_DB_PORT: "56532"
+      LAURIO_API_PORT: "59100"
+      LAURIO_REDIS_PORT: "17479"
+      LAURIO_MINIO_PORT: "20100"
+      LAURIO_MINIO_CONSOLE_PORT: "20101"
+      LAURIO_WEB_PORT: "54100"
+      LAURIO_OPERATOR_WEB_PORT: "54101"
+      LAURIO_E2E_BASE_URL: http://127.0.0.1:54100
+      LAURIO_OPERATOR_E2E_BASE_URL: http://127.0.0.1:54101
+
     steps:
       - uses: actions/checkout@v4
 
@@ -427,7 +464,7 @@ jobs:
         run: |
           curl --fail --silent --show-error \
                --retry 60 --retry-delay 3 --retry-all-errors --retry-connrefused \
-               http://127.0.0.1:53000/healthz
+               "http://127.0.0.1:${LAURIO_WEB_PORT}/healthz"
 
       # 운영자 앱(#63, ADR-0021) — 같은 dev compose 스택에 붙는 두 번째 앱. 한
       # 스위트가 프로젝트 둘로 둘 다 친다(playwright.config.ts) — 이 앱이 뜨지
@@ -435,9 +472,10 @@ jobs:
       # FE-04/FE-05(#29·#30) SSR 테스트가 `frontend/e2e/lib/seed.ts` 로 호스트에서
       # `uv run manage.py seed_e2e_contests` 를 돌려 실제 Contest 를 dev DB에 심는다
       # (하드코딩 픽스처가 아니라 백엔드가 준 값이어야 SSR 증명이 성립한다 —
-      # frontend/e2e/seam.spec.ts 상단 주석). dev compose 의 db 서비스는 호스트
-      # 55432(기본값)에 이미 노출돼 있으므로 `cd backend && uv run pytest` 와 같은
-      # 경로로 같은 DB에 붙는다.
+      # frontend/e2e/seam.spec.ts 상단 주석). dev compose 의 db 서비스는 이 잡의
+      # `LAURIO_DB_PORT` 로 호스트에 노출돼 있고, 호스트에서 도는 이 시드도 같은
+      # 값을 읽으므로(`config/settings.py` 의 `_DEV_DB_PORT`) 같은 DB에 붙는다 —
+      # 잡마다 포트가 다른 것은 위 env 블록이 설명한다.
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
@@ -465,11 +503,10 @@ jobs:
         working-directory: frontend
         run: pnpm exec playwright install --with-deps chromium
 
+      # baseURL 은 잡 레벨 env 가 준다 — 이 잡의 포트 슬롯과 같은 값이어야 하므로
+      # 여기서 다시 적지 않는다(두 곳에 적으면 한쪽만 고쳤을 때 조용히 갈린다).
       - name: Run e2e against the running apps
         working-directory: frontend
-        env:
-          LAURIO_E2E_BASE_URL: http://127.0.0.1:53000
-          LAURIO_OPERATOR_E2E_BASE_URL: http://127.0.0.1:53001
         run: pnpm run test:public
 
       - name: Dump stack logs on failure
@@ -493,6 +530,27 @@ jobs:
   # 큐의 전체 건수를 단언하고 「0건」 테스트가 빈 큐를 요구하기 때문이다.
   frontend-e2e-operator:
     runs-on: [self-hosted, sub]
+
+    # **이 잡만의 스택으로 가른다.** 셀프호스티드 러너에서는 잡들이 같은 호스트를
+    # 나눠 쓰는데, dev compose 를 띄우는 잡이 셋이라 기본값 그대로면 셋이 같은
+    # 프로젝트(`laurio-dev`)와 같은 포트를 잡는다 — 동시에 돌면 서로의 컨테이너를
+    # 건드리고, celery 잡의 `down -v` 가 남의 스택을 지운다. 호스티드 러너에서는
+    # 잡마다 VM 이 달라 드러나지 않던 문제다.
+    #
+    # `docker/dev-env.sh` 가 워크트리에 대해 하는 것과 같은 방식이다 — 프로젝트
+    # 이름과 **모든 포트**를 함께 옮긴다. 오프셋은 워크트리가 쓰지 않는 10 이상을
+    # 골라, 같은 호스트의 워크트리 스택과도 겹치지 않게 한다.
+    env:
+      COMPOSE_PROJECT_NAME: laurio-ci-e2e-operator
+      LAURIO_DB_PORT: "56632"
+      LAURIO_API_PORT: "59200"
+      LAURIO_REDIS_PORT: "17579"
+      LAURIO_MINIO_PORT: "20200"
+      LAURIO_MINIO_CONSOLE_PORT: "20201"
+      LAURIO_WEB_PORT: "54200"
+      LAURIO_OPERATOR_WEB_PORT: "54201"
+      LAURIO_E2E_BASE_URL: http://127.0.0.1:54200
+      LAURIO_OPERATOR_E2E_BASE_URL: http://127.0.0.1:54201
 
     steps:
       - uses: actions/checkout@v4
@@ -540,14 +598,15 @@ jobs:
         run: |
           curl --fail --silent --show-error \
                --retry 60 --retry-delay 3 --retry-all-errors --retry-connrefused \
-               http://127.0.0.1:53001/healthz
+               "http://127.0.0.1:${LAURIO_OPERATOR_WEB_PORT}/healthz"
 
       # FE-04/FE-05(#29·#30) SSR 테스트가 `frontend/e2e/lib/seed.ts` 로 호스트에서
       # `uv run manage.py seed_e2e_contests` 를 돌려 실제 Contest 를 dev DB에 심는다
       # (하드코딩 픽스처가 아니라 백엔드가 준 값이어야 SSR 증명이 성립한다 —
-      # frontend/e2e/seam.spec.ts 상단 주석). dev compose 의 db 서비스는 호스트
-      # 55432(기본값)에 이미 노출돼 있으므로 `cd backend && uv run pytest` 와 같은
-      # 경로로 같은 DB에 붙는다.
+      # frontend/e2e/seam.spec.ts 상단 주석). dev compose 의 db 서비스는 이 잡의
+      # `LAURIO_DB_PORT` 로 호스트에 노출돼 있고, 호스트에서 도는 이 시드도 같은
+      # 값을 읽으므로(`config/settings.py` 의 `_DEV_DB_PORT`) 같은 DB에 붙는다 —
+      # 잡마다 포트가 다른 것은 위 env 블록이 설명한다.
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
@@ -575,11 +634,10 @@ jobs:
         working-directory: frontend
         run: pnpm exec playwright install --with-deps chromium
 
+      # baseURL 은 잡 레벨 env 가 준다 — 이 잡의 포트 슬롯과 같은 값이어야 하므로
+      # 여기서 다시 적지 않는다(두 곳에 적으면 한쪽만 고쳤을 때 조용히 갈린다).
       - name: Run e2e against the running apps
         working-directory: frontend
-        env:
-          LAURIO_E2E_BASE_URL: http://127.0.0.1:53000
-          LAURIO_OPERATOR_E2E_BASE_URL: http://127.0.0.1:53001
         run: pnpm run test:operator
 
       - name: Dump stack logs on failure
