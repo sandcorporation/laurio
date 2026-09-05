@@ -102,6 +102,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # **`timeout` 값은 러너 속도에 민감하다.** 이 가드들은 「컨테이너가 부팅을
+      # 거부하고 죽는가」를 보고, 124(타임아웃)를 「안 죽었다 = 가드가 깨졌다」로
+      # 읽는다. 그 판정은 맞지만 숫자가 호스티드 러너 속도에 맞춰 20초였고,
+      # 셀프호스티드 러너에서 그 문턱을 넘겨 **멀쩡한 가드가 깨진 것으로 보고됐다**.
+      # 60초로 올린다 — 45초 걸려 거부해도 거부는 거부다. 타임아웃은 「죽지 않는
+      # 컨테이너가 CI 를 영원히 붙잡지 않게」 하는 상한이지 성능 단언이 아니다.
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
@@ -461,10 +467,22 @@ jobs:
         run: docker compose -f docker/compose.dev.yaml up -d --build frontend
 
       - name: Wait for the public app to answer
+        # **curl 재시도 플래그에 기대지 않는다.** `--retry-all-errors` 는 curl 7.71+
+        # 에만 있어서 셀프호스티드 러너에서 `option --retry-all-errors: is unknown`
+        # 으로 **curl 이 실행 자체를 거부했다** — 스택은 멀쩡히 떠 있었는데 기다리는
+        # 쪽이 죽었다. 호스티드 러너에만 있는 것에 기대면 러너를 옮기는 순간
+        # 이렇게 드러난다. 셸 반복은 어느 curl 에서도 같게 돈다.
         run: |
-          curl --fail --silent --show-error \
-               --retry 60 --retry-delay 3 --retry-all-errors --retry-connrefused \
-               "http://127.0.0.1:${LAURIO_WEB_PORT}/healthz"
+          url="http://127.0.0.1:${LAURIO_WEB_PORT}/healthz"
+          for i in $(seq 1 60); do
+            if curl --fail --silent --show-error "$url" >/dev/null 2>&1; then
+              echo "공개 앱 응답함 ($url, ${i}회째)"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::공개 앱이 180초 안에 응답하지 않았다 ($url)"
+          exit 1
 
       # 운영자 앱(#63, ADR-0021) — 같은 dev compose 스택에 붙는 두 번째 앱. 한
       # 스위트가 프로젝트 둘로 둘 다 친다(playwright.config.ts) — 이 앱이 뜨지
@@ -595,10 +613,22 @@ jobs:
       # 스위트가 프로젝트 둘로 둘 다 친다(playwright.config.ts) — 이 앱이 뜨지
       # 않으면 그 프로젝트 전체가 실패한다.
       - name: Wait for the operator app to answer
+        # **curl 재시도 플래그에 기대지 않는다.** `--retry-all-errors` 는 curl 7.71+
+        # 에만 있어서 셀프호스티드 러너에서 `option --retry-all-errors: is unknown`
+        # 으로 **curl 이 실행 자체를 거부했다** — 스택은 멀쩡히 떠 있었는데 기다리는
+        # 쪽이 죽었다. 호스티드 러너에만 있는 것에 기대면 러너를 옮기는 순간
+        # 이렇게 드러난다. 셸 반복은 어느 curl 에서도 같게 돈다.
         run: |
-          curl --fail --silent --show-error \
-               --retry 60 --retry-delay 3 --retry-all-errors --retry-connrefused \
-               "http://127.0.0.1:${LAURIO_OPERATOR_WEB_PORT}/healthz"
+          url="http://127.0.0.1:${LAURIO_OPERATOR_WEB_PORT}/healthz"
+          for i in $(seq 1 60); do
+            if curl --fail --silent --show-error "$url" >/dev/null 2>&1; then
+              echo "운영자 앱 응답함 ($url, ${i}회째)"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::운영자 앱이 180초 안에 응답하지 않았다 ($url)"
+          exit 1
 
       # FE-04/FE-05(#29·#30) SSR 테스트가 `frontend/e2e/lib/seed.ts` 로 호스트에서
       # `uv run manage.py seed_e2e_contests` 를 돌려 실제 Contest 를 dev DB에 심는다
@@ -728,7 +758,7 @@ jobs:
       - name: Refuses to boot in production with missing config (and actually exits — not just logs)
         run: |
           set +e
-          output=$(timeout 20 docker run --rm -e LAURIO_DEPLOYMENT_TARGET=production laurio-frontend-runner-ci 2>&1)
+          output=$(timeout 60 docker run --rm -e LAURIO_DEPLOYMENT_TARGET=production laurio-frontend-runner-ci 2>&1)
           status=$?
           set -e
           echo "$output"
@@ -742,7 +772,7 @@ jobs:
       - name: Refuses to boot in staging with only one required value missing
         run: |
           set +e
-          output=$(timeout 20 docker run --rm \
+          output=$(timeout 60 docker run --rm \
             -e LAURIO_DEPLOYMENT_TARGET=staging \
             -e LAURIO_WEB_ORIGIN=https://staging.laurio.example \
             laurio-frontend-runner-ci 2>&1)
@@ -762,7 +792,7 @@ jobs:
       - name: Refuses to boot in production without kakao oauth credentials
         run: |
           set +e
-          output=$(timeout 20 docker run --rm \
+          output=$(timeout 60 docker run --rm \
             -e LAURIO_DEPLOYMENT_TARGET=production \
             -e LAURIO_WEB_ORIGIN=https://laurio.example \
             -e LAURIO_API_BASE_URL=http://127.0.0.1:1 \
@@ -785,7 +815,7 @@ jobs:
       - name: Refuses to boot in production without a toss client key baked in
         run: |
           set +e
-          output=$(timeout 20 docker run --rm \
+          output=$(timeout 60 docker run --rm \
             -e LAURIO_DEPLOYMENT_TARGET=production \
             -e LAURIO_WEB_ORIGIN=https://laurio.example \
             -e LAURIO_API_BASE_URL=http://127.0.0.1:1 \
@@ -940,7 +970,7 @@ jobs:
       - name: Refuses to boot in production with missing config (and actually exits — not just logs)
         run: |
           set +e
-          output=$(timeout 20 docker run --rm -e LAURIO_DEPLOYMENT_TARGET=production laurio-operator-runner-ci 2>&1)
+          output=$(timeout 60 docker run --rm -e LAURIO_DEPLOYMENT_TARGET=production laurio-operator-runner-ci 2>&1)
           status=$?
           set -e
           echo "$output"
@@ -954,7 +984,7 @@ jobs:
       - name: Refuses to boot in staging with only one required value missing
         run: |
           set +e
-          output=$(timeout 20 docker run --rm \
+          output=$(timeout 60 docker run --rm \
             -e LAURIO_DEPLOYMENT_TARGET=staging \
             -e LAURIO_OPERATOR_ORIGIN=https://operator.staging.laurio.example \
             laurio-operator-runner-ci 2>&1)
