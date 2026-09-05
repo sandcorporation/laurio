@@ -55,6 +55,17 @@ def test_operator_can_retry_a_rejected_seller_registration(client, category, lan
     )
 
     operator = p._operator_client(username="payout-retry-op-1")
+
+    # 큐 화면이 버튼을 뜨게 하는 바로 그 신호다 — 세 갈래(SELLER_REJECTED·
+    # SELLER_REGISTRATION_STUCK·TRANSFER_OPERATOR) 모두 이 필드로 게이트되므로,
+    # 이 값이 실제 재시도 가능 여부와 갈리면 버튼은 있는데 눌러도 409만 돌아온다.
+    queue_resp = operator.get("/api/operator/payouts?blocked_on=seller")
+    row = next(
+        r for r in queue_resp.json()["items"]
+        if r["idempotency_key"] == requested["idempotency_key"]
+    )
+    assert row["operator_actionable"] is True
+
     resp = _operator_post(
         operator, f"/api/operator/payouts/{requested['idempotency_key']}/retry"
     )
@@ -201,6 +212,16 @@ def test_operator_retry_rejects_a_developer_turn_payout(client, category, landin
     assert payout.status == Payout.Status.CONFIRMED_IDENTITY_PENDING
 
     operator = p._operator_client(username="payout-retry-op-4")
+
+    # 큐에서도 이 행에는 버튼이 뜨지 않아야 한다 — Developer 의 차례에 진행
+    # 버튼을 보여주면 눌러도 서버가 거절하는 버튼이 된다.
+    queue_resp = operator.get("/api/operator/payouts?blocked_on=identity")
+    row = next(
+        r for r in queue_resp.json()["items"]
+        if r["idempotency_key"] == requested["idempotency_key"]
+    )
+    assert row["operator_actionable"] is False
+
     resp = _operator_post(
         operator, f"/api/operator/payouts/{requested['idempotency_key']}/retry"
     )

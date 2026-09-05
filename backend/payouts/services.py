@@ -212,6 +212,19 @@ def ensure_seller_registered(developer, *, simulate: str | None = None) -> Selle
     벤더에 보낼 신원(실명·이메일·전화번호)과 기존 식별자는 **여기서** 조립한다(#136) — adapter 는
     우리 테이블을 읽지 않는다. 거절된 등록의 재시도는 새 등록이어야 하므로 그때는 기존 식별자를
     넘기지 않는다. 주간 한도 힌트(weekly_limit_hint)는 스코프의 정책에서 읽어 Fake 에 실어 준다.
+
+    **알려진 한계 — 이 함수는 락도 조건부 UPDATE 도 없다**(#178/#182 코드리뷰 지적). 읽기
+    (`existing = Seller.objects.filter(...).first()`) 와 쓰기(`update_or_create`) 사이에
+    벤더 HTTP 호출이 끼는데, `_request_real_transfer`의 `_claim_transfer_attempt`(조건부
+    UPDATE 로 먼저 선점한 뒤에 벤더를 부른다)와 같은 선점 장치가 여기 없다. 이 함수를
+    부르는 자리가 이제 넷이다(확정·Developer 재시도·자력 회복 스캔·운영자 재시도) —
+    자력 회복 스캔(60초 주기)이 사람의 재시도와 거의 동시에 같은 Seller 를 다시 부르면,
+    두 호출이 같은 옛 상태를 읽고 각각 벤더를 부른 뒤 나중에 커밋하는 쪽이 먼저 커밋한
+    쪽의 결과를 조용히 덮어쓸 수 있다(예: 거절이 방금 성공으로 되돌아온 것을 다시
+    PENDING 으로 덮거나, 늘어야 할 registration_error_count 가 한 번 씻긴다). 최악의
+    결과는 재시도 타이밍이 한 주기 어긋나는 것이지 원장이나 Seller.status 가 실제로
+    틀린 값에 영구히 머무는 것은 아니다(다음 스캔 실행이 다시 시도한다) — 그래도 실물
+    벤더 아래에서 이 자리를 굳히려면 같은 선점 패턴을 들여야 한다.
     """
 
     existing = Seller.objects.filter(developer=developer).first()
@@ -537,6 +550,16 @@ def retry_payout_for_operator(payout: Payout, *, operator) -> Payout:
     남긴다 — 이 호출이 있었다는 사실 자체가 감사 대상이다. 행동이 아무 효과도
     못 냈을 때(예: 그 사이 벤더가 다시 거절했다)도 "운영자가 눌렀다"는 사실은
     남아야 한다.
+
+    **알려진 한계 — 감사 기록이 재시도와 같은 트랜잭션이 아니다**(코드리뷰
+    지적). `retry_seller_registration`/`retry_confirmed_transfer` 는 내부에서
+    벤더 HTTP 를 부르므로(이 저장소의 규율상 벤더 호출은 트랜잭션 밖에서 한다 —
+    `advance()` 독스트링과 같은 이유) 그 호출과 `OperatorPayoutAction.objects.
+    create()` 를 하나의 `transaction.atomic()` 으로 묶을 수 없다. 재시도가
+    커밋된 뒤, 감사 행 삽입 전에 프로세스가 죽으면 "운영자가 눌렀다"는 기록
+    없이 상태만 바뀐 채 남는다 — 이 함수 docstring 이 요구하는 "이 호출이
+    있었다는 사실은 항상 남는다"가 이 좁은 창에서는 지켜지지 않는다. 원장·
+    Seller 상태는 어느 경우에도 올바르므로 돈이 새는 경로는 아니다.
     """
 
     from .progress import HoldKind, hold_of, retry_confirmed_transfer

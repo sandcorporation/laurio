@@ -221,10 +221,20 @@ function PayoutDetail({
               지적 10, 3차) — 연락처 폼·재시도 버튼·신원 제출 폼 중 어느
               것도 뜨지 않을 때만이다. 폼·버튼 바로 위에 이 문장이 뜨면
               "할 일이 없다"와 "여기 낼 것이 있다"가 한 화면에서 서로
-              모순된다. */}
+              모순된다.
+
+              `seller_status === "pending"` 도 제외한다(#178) — 연락처를 이미
+              낸 상태에서 seller_status 가 pending 인 것은 오직 두 가지뿐이다:
+              자력 회복 스캔이 재시도하는 중(SELLER_PENDING)이거나 재시도를
+              포기해 운영자의 차례가 된 것(SELLER_REGISTRATION_STUCK). 둘 다
+              `next_action_message` 가 이미 그 사실을 정확히 말하고 있으므로
+              (위에서 렌더된다), 바로 아래에 "하실 일은 없습니다 ... 자동으로
+              다음 단계로 넘어갑니다"를 또 찍으면 자력 회복을 포기한 뒤에도
+              여전히 자동으로 풀릴 것처럼 모순되게 말한다. */}
           {!needsSellerContact &&
           !awaitingSellerAuth &&
           payout.seller_status !== "rejected" &&
+          payout.seller_status !== "pending" &&
           payout.transfer_status !== "failed" &&
           payout.has_identity ? (
             <p className="text-muted">

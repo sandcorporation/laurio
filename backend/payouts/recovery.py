@@ -64,24 +64,27 @@ def _unaccepted_seller_registrations(as_of, ctx):
 def _retry_unaccepted_registration(seller: Seller, as_of, ctx):
     """`ensure_seller_registered` 를 그대로 부른다 — Developer 의 「다시 시도」와
     같은 함수다. `seller_simulate`(scan_params)는 fake 셀러 어댑터 전용 시나리오
-    선택이다(#178) — 실제 어댑터에서는 무시된다."""
+    선택이다(#178) — 실제 어댑터에서는 무시된다.
+
+    **항상 행을 낸다 — "바뀐 것이 없으면 None" 이 아니다.** 이 스캔의 후보는
+    전부 「등록을 다시 시도해야 하는 Seller」이고, 이 함수는 매번 실제로 벤더를
+    부른다(스캔 뼈대의 `None` 은 "이번엔 시도조차 안 했다"는 뜻이지 "시도했지만
+    실패했다"가 아니다) — `registration_error_count` 는 벤더 오류가 날 때마다
+    올라가므로 실패가 계속돼도 이전 값과 절대 같아지지 않는다. 그래서 "값이
+    바뀌었는가"로 판정하면 항상 참이 되어 그 판정 자체가 무의미하다. 대신
+    시도했다는 사실 자체와 그 결과(성공이든 여전한 실패든)를 매번 그대로
+    보고한다 — 벤더가 계속 오류를 내는 동안 스캔이 실제로 계속 재시도하고
+    있다는 것을 로그·응답에서 볼 수 있어야 한다."""
 
     simulate = scan_params(ctx).get("seller_simulate")
-    before = (seller.status, seller.seller_id, seller.registration_error_count)
 
     ensure_seller_registered(seller.developer, simulate=simulate)
 
     seller.refresh_from_db()
-    after = (seller.status, seller.seller_id, seller.registration_error_count)
-    if after == before:
-        # 여전히 벤더 오류다 — registration_error_count 는 이미
-        # ensure_seller_registered 안에서 늘었다. 이번 실행이 바꾼 것이
-        # 없으므로 rows 에 넣지 않는다(스캔 뼈대의 관용구).
-        return None
-
     return {
         "developer_id": seller.developer_id,
         "seller_status": seller.status,
+        "seller_id_accepted": bool(seller.seller_id),
         "registration_error_count": seller.registration_error_count,
     }
 

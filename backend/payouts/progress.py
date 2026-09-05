@@ -257,26 +257,6 @@ def next_action_message(hold: "Hold") -> str:
 MAX_AUTO_SELLER_REGISTRATION_ATTEMPTS = 5
 
 
-def seller_registration_status_of(seller: Seller | None) -> str | None:
-    """연락처는 있는데 `seller_id` 가 없는 Seller 가 벤더 오류로 계속 접수되지 못한 채
-    자력 회복 스캔이 재시도하는 중인지("retrying"), 재시도를 포기해 Operator 의
-    차례가 됐는지("stuck")를 답한다 — 그 밖에는 None.
-
-    운영자 큐가 거친 축("seller") 문구를 사실대로 갈라 말하기 위해서만 쓴다(#178
-    나머지 인수조건) — `hold_of` 가 이미 아는 바로 그 판정을 재사용한다. 두 곳에
-    같은 규칙을 따로 적으면 언젠가 갈린다.
-    """
-
-    if seller is None or seller.status != Seller.Status.PENDING or seller.seller_id:
-        return None
-    if not (seller.phone_number and seller.email):
-        # 연락처 자체가 없다 — 이건 SELLER_CONTACT(Developer 의 차례)다.
-        return None
-    if seller.registration_error_count >= MAX_AUTO_SELLER_REGISTRATION_ATTEMPTS:
-        return "stuck"
-    return "retrying"
-
-
 def hold_of(payout: Payout, *, seller: Seller | None, has_identity: bool) -> Hold:
     """네 사실에서 Hold 하나를 읽어 낸다. 조회를 내지 않는다 — 호출부가 Seller 와 신원
     제출 여부를 미리 가져온다(목록에서 행마다 조회하지 않기 위해)."""
@@ -410,10 +390,15 @@ def with_seller_registration_status(payouts):
     이미 강제하듯, 행마다 `Payout.seller` 를 다시 읽으면 페이지 안 행 수만큼
     질의가 늘어난다.
 
-    판정 규칙은 `seller_registration_status_of`(파이썬, `Seller` 인스턴스를 직접
-    받는 쪽 — `payouts.recovery` 등 이미 Seller 를 들고 있는 호출부용)와 **같아야
-    한다** — 둘이 갈리면 큐 목록과(SQL) 다른 조회가(파이썬) 다른 답을 낸다. 표를
-    옮겨 적는 위험은 `blocked_on_q` 위의 주석과 같다.
+    판정 규칙은 `hold_of` 의 `SELLER_REGISTRATION_STUCK`/`SELLER_PENDING` 분기와
+    **같아야 한다** — 둘이 갈리면 큐 목록(SQL)과 단건 조회(파이썬)가 다른 답을
+    낸다. 표를 옮겨 적는 위험은 `blocked_on_q` 위의 주석과 같다.
+
+    **`with_hold_facts` 뒤에 이어 붙여야 한다** — Seller 상태 자체는 다시
+    묻지 않고 그 함수가 이미 annotate 해 둔 `seller_status` 를 그대로 쓴다
+    (호출부 둘 다 이미 `with_hold_facts(...)` 뒤에 이 함수를 잇는다). 여기서
+    또 같은 Subquery/Coalesce 쌍을 새로 만들면 페이지·응답 하나마다 같은
+    Seller 상태 질의가 두 번 실행된다.
     """
 
     from django.db.models import Case, CharField, OuterRef, Q, Subquery, Value, When
@@ -432,7 +417,6 @@ def with_seller_registration_status(payouts):
         )
 
     annotated = payouts.annotate(
-        _seller_status_for_registration=_seller_field("status", ""),
         _seller_id_for_registration=_seller_field("seller_id", ""),
         # 값을 복호화하지 않는다 — 이 판정에 필요한 것은 「제출됐는가」(빈
         # 문자열이 아닌가)뿐이고, 그건 암호문 자체의 존재로 답할 수 있다
@@ -443,7 +427,7 @@ def with_seller_registration_status(payouts):
     )
 
     pending_unaccepted = (
-        Q(_seller_status_for_registration=Seller.Status.PENDING)
+        Q(seller_status=Seller.Status.PENDING)
         & Q(_seller_id_for_registration="")
         & ~Q(_seller_phone_for_registration="")
         & ~Q(_seller_email_for_registration="")

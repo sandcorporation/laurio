@@ -206,19 +206,32 @@ class OperatorPayoutOut(Schema):
         SELLER_REGISTRATION_STUCK·TRANSFER_OPERATOR)와 같은 조건이다 — 필요한
         사실(모델 컬럼 둘 + 이미 annotate 된 `seller_status`·
         `seller_registration_status`)이 이 행에 이미 다 있어 추가 조회를 내지
-        않는다. 두 판정이 갈리면 큐가 보여주는 버튼과 실제로 되는 행동이
-        어긋난다 — `tests/test_payouts_operator_retry.py` 의 빠짐없음 테스트가
-        그 어긋남을 잡는다."""
+        않는다.
+
+        **`seller_status`·`seller_registration_status` 는 이 Payout 이 아니라
+        Developer(Seller) 단위 사실이다**(`with_hold_facts`가 developer_id 로
+        붙인 Subquery) — 한 Developer 가 Contest 를 여러 번 이겨 활성 Payout 이
+        둘 이상이면, 그중 하나가 Seller 문제로 막혀 있어도 나머지 하나가
+        Identity 대기 등 **전혀 다른 축**으로 막혀 있을 수 있다. `blocked_on_q`
+        의 "seller" 갈래가 이미 자기 `status` 를 먼저 확인한 뒤에만 Seller 쪽
+        사실을 보듯(`progress.py`), 여기서도 이 Payout 자신의 `status` 가
+        CONFIRMED_SELLER_PENDING 일 때만 Seller 쪽 사실을 본다 — 그러지 않으면
+        옆 Payout의 Seller 문제가 이 Payout에도 새어 들어와 실제로는 Developer
+        의 차례(예: IDENTITY)인 행에 진행 버튼이 뜨고, 눌러도
+        `retry_payout_for_operator`가 다시 계산한 Hold 와 어긋나 409 만 돌아온다.
+        """
 
         from .models import Payout, Seller
 
+        S = Payout.Status
         T = Payout.TransferStatus
-        if obj.status == Payout.Status.CONFIRMED and obj.transfer_status == T.FAILED:
+        if obj.status == S.CONFIRMED and obj.transfer_status == T.FAILED:
             return True
-        if obj.seller_status == Seller.Status.REJECTED:
-            return True
-        if obj.seller_registration_status == "stuck":
-            return True
+        if obj.status == S.CONFIRMED_SELLER_PENDING:
+            if obj.seller_status == Seller.Status.REJECTED:
+                return True
+            if obj.seller_registration_status == "stuck":
+                return True
         return False
 
 
