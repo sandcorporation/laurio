@@ -138,6 +138,20 @@ function SponsoredContestCard({ row }: { row: SponsoredContestRow }) {
         </Link>
       ) : null}
 
+      {/* 인수 확인 화면은 그 확인이 의미 있는 단계에만 건다(#179) — 「내 차례 ·
+          인수를 확인하세요」가 뜨는 그 자리에서 그 행동으로 갈 수 있어야 한다.
+          canJudge·canPay와 같은 이유로 번역표를 거친다: 새 상태가 생기면
+          `tsc --noEmit`이 결정을 요구한다. */}
+      {label.canAcceptHandover ? (
+        <Link
+          className="mt-2 inline-block text-sm underline"
+          href={`/console/contests/${row.contest_id}/handover`}
+          data-testid={`my-contest-row-${row.contest_id}-handover`}
+        >
+          인수 확인하러 가기
+        </Link>
+      ) : null}
+
       {/* 지표 화면(#107)은 「다음 행동」과 무관하게 항상 열려 있다 — 마감 전에도
           Sponsor 는 자기 Contest 의 참가 추이를 볼 수 있어야 하고(마감 전에도
           개별 Submission 을 볼 수 있으므로 집계도 새로 알려주는 것이 없다),

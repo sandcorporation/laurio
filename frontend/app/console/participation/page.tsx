@@ -138,6 +138,20 @@ function ParticipationCard({ row }: { row: ParticipationRow }) {
           상금 지급
         </Link>
       ) : null}
+
+      {/* 인수 자료 업로드(#180)도 지급 단계와 같은 조건에 건다 — 인수 확인
+          대기부터가 Award된 뒤이므로, payoutStage가 참인 행은 이미 Award된
+          Submission이다(위 NEXT_ACTION_LABELS 주석). 선택 사항이라 안 올려도
+          되지만, 올릴 곳이 있다는 것 자체는 보여야 한다. */}
+      {label.payoutStage ? (
+        <Link
+          className="mt-2 ml-4 inline-block text-sm underline"
+          href={`/console/participation/${row.submission_id}/handover`}
+          data-testid={`participation-row-${row.submission_id}-handover`}
+        >
+          인수 자료
+        </Link>
+      ) : null}
     </li>
   );
 }

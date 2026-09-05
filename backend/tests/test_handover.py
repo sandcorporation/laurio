@@ -398,6 +398,10 @@ def test_handover_status_visible_to_sponsor_and_developer_only(client, category,
     body = sponsor_view.json()
     assert body["status"] == "pending_acceptance"
     assert "스토어 배포" in body["note"]
+    # #180 — Sponsor의 확인 화면이 이 Handover가 인수하는 Submission의 빌드
+    # 자산을 보여주려면, 어느 Submission의 빌드 자산을 물어야 하는지 알아야
+    # 한다. HandoverOut 자체가 그 참조를 실어야 화면이 별도 조회 없이 잇는다.
+    assert body["submission_id"] == submission["id"]
 
     dev_view = client.get(
         f"{CONTESTS_URL}/{contest['id']}/handover", **_auth_header(dev["access"])

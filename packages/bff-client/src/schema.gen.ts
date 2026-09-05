@@ -2758,6 +2758,8 @@ export interface components {
             released_via?: string | null;
             /** Status */
             status: string;
+            /** Submission Id */
+            submission_id: number;
         };
         /**
          * HomeCurationBucket
