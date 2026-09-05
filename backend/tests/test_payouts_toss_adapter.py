@@ -465,9 +465,13 @@ def test_confirm_posts_the_request_as_given_and_maps_completed_to_paid():
     _, kwargs = mock_post.call_args
     assert kwargs["headers"]["Idempotency-Key"] == "22222222-2222-2222-2222-222222222222-1"
     sent_body = jwe_decrypt(kwargs["data"], secure_key_hex=_SECURE_KEY_HEX)
-    assert sent_body["sellerId"] == "seller-1"
+    # 필드 모양은 #175 가 벤더 문서를 다시 확인해 고쳤다 — `sellerId`가 아니라
+    # `destination`(Seller 객체의 `id` 값), `amount`는 정수가 아니라
+    # `{"currency","value"}` 객체(이 도메인은 원 단위 정수만 다룬다, ADR-0004).
+    assert sent_body["destination"] == "seller-1"
     assert sent_body["refPayoutId"] == "22222222-2222-2222-2222-222222222222-1"
-    assert sent_body["amount"] == 900_000
+    assert sent_body["amount"] == {"currency": "KRW", "value": 900_000}
+    assert sent_body["transactionDescription"]
 
 
 def test_confirm_maps_failed_status_to_failed():

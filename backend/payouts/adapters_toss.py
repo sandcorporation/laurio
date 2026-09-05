@@ -206,6 +206,11 @@ assert_covers(
 # 이 키워드 집합을 정확한 코드 목록으로 좁혀야 한다(#57 알아둘 것).
 _PAYOUT_RETRYABLE_CODE_KEYWORDS = ("LIMIT", "RATE", "TOO_MANY", "THROTTL")
 
+# 이체 요청의 `transactionDescription`(#175) — 벤더 문서는 이 필드가 필수이고
+# 최대 7자라고만 정한다. 무슨 문구를 담을지는 벤더 계약이 아니라 우리 쪽
+# 선택이라 짧고 고정된 값을 쓴다.
+_TRANSFER_DESCRIPTION = "상금지급"
+
 
 
 def _looks_like_retryable_payout_code(code: str | None) -> bool:
@@ -704,10 +709,25 @@ class TossPayoutAdapter:
         # "이미 처리한 요청"으로 보고 예전 FAILED 응답을 그대로 재생한다 — 실운영에서 영구히
         # 복구 불가능하다. 그 참조를 조립하는 것은 caller(payouts.progress)다 — attempt 를
         # 선점하는 쪽이 그 값을 안다.
+        #
+        # 필드 모양은 #175 가 벤더 문서(docs.tosspayments.com/reference/additional,
+        # POST /v2/payouts 요청 파라미터)를 다시 확인해 고쳤다 — 확인된 것만:
+        #   - 수취인은 `sellerId` 가 아니라 `destination` 이다(Seller 객체의 `id` 값,
+        #     #172/#173 이 Seller 웹훅에서 이미 확인한 "sellerId 는 없다"와 같은 결의 사실).
+        #   - `amount` 는 정수가 아니라 `{"currency","value"}` 객체다 — 이 도메인은
+        #     원 단위 정수 하나만 다루므로(ADR-0004) `currency` 는 "KRW" 로 고정한다.
+        #   - `transactionDescription` 은 필수다(문서: "이체 내역에 표시되는 적요",
+        #     최대 7자). 내용 자체는 벤더 계약이 정하는 것이 아니라 우리 쪽 표시
+        #     문구 선택이라 짧고 고정된 값을 쓴다 — Payout 마다 다른 문구를 넣으려면
+        #     `TransferRequest` 에 필드를 더해야 하는데(#175 범위 밖) 문서가 요구하는
+        #     것은 "적요가 있다"이지 "적요가 무엇을 담는가"가 아니다.
+        # 단건 요청이 배열이어야 하는지는 문서에서 JSON 예시를 찾지 못해 확인하지
+        # 못했다 — #175 코멘트에 남기고 이 모양(단일 객체) 그대로 둔다.
         body = {
             "refPayoutId": request.vendor_ref,
-            "sellerId": request.seller_id,
-            "amount": request.amount,
+            "destination": request.seller_id,
+            "amount": {"currency": "KRW", "value": request.amount},
+            "transactionDescription": _TRANSFER_DESCRIPTION,
             "scheduleType": "EXPRESS",
         }
         encrypted_body = jwe_encrypt(body, secure_key_hex=self._secure_key)
@@ -757,6 +777,8 @@ class TossPayoutAdapter:
             return VendorResult(status="failed")
 
         response_body = self._decode_response_body(response)
+        # `id`가 맞다(#175, 벤더 문서 Payout 객체 재확인) — Seller 객체와 같은
+        # 결(#173)로 벤더 자신의 식별자는 항상 `id`다. 바꿀 이유가 없어 그대로 둔다.
         vendor_payout_id = response_body.get("id") or ""
         vendor_status = response_body.get("status")
         if vendor_status in _PAID_PAYOUT_STATUSES:
