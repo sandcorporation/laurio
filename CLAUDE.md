@@ -194,6 +194,18 @@ cd backend && LAURIO_DB_PORT=55432 uv run pytest   # 포트는 쓰는 스택에 
 dev compose의 `db` 서비스는 호스트 포트로 이미 노출돼 있으므로 호스트의 `uv run
 pytest`가 그 DB에 직접 붙는다 — 컨테이너를 거칠 이유가 없다.
 
+**`seed_e2e_*` 관리 명령도 마찬가지다 — 호스트에서 돌린다.** 같은 어댑터 불일치이고,
+증상이 훨씬 헷갈린다: 시드는 제출물 소스를 **Fake 스토리지**에 쓰는데 컨테이너의
+backend 는 `STORAGE_BACKEND=s3` 로 MinIO 를 물고 있어, 채점 스캔이 그 소스를 못 찾아
+(`source_not_found`) Score 를 남기지 않는다. 그러면 시드가 다음 줄에서
+**「아직 채점되지 않은 Submission은 이의제기할 수 없습니다」**로 죽는다 — 스토리지
+이야기는 어디에도 안 나온다. 실제로 이 오류를 스토리지가 아니라 채점 결함으로 한 번
+쫓았다.
+
+```bash
+cd backend && LAURIO_DB_PORT=55432 uv run python manage.py seed_e2e_operator_appeal
+```
+
 **스위트는 기본으로 병렬 실행된다**(#104). `pyproject.toml` 의 `addopts` 가 `-n auto` 를
 준다 — 실측(이 머신, 1192건) `-n 4` 84초 → `-n auto` 57초. 직렬로 보려면 `-n 0`.
 
