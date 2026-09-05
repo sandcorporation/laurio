@@ -107,6 +107,8 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
+from core.coverage import assert_covers
+
 from .adapters import (
     PayoutError,
     PayoutTimeoutError,
@@ -164,10 +166,11 @@ _FAILED_PAYOUT_STATUSES = {"FAILED", "CANCELED", "DELETED", "REJECTED"}
 _PENDING_PAYOUT_STATUSES = {"REQUESTED", "IN_PROGRESS"}
 
 # 위 세 집합이 문서의 일곱 값을 빠짐없이 덮는지 모듈 로드 시 증명한다 —
-# `payouts.progress.assert_covers_all_kinds`(HoldKind 번역표)·
-# `distributions`의 `Contest.Status` 분류와 같은 관용구(#174 AC). 값이 하나
-# 늘면(또는 오타로 하나 빠지면) import 시점에 바로 터진다 — 배치 스캔
-# 한복판에서야 발견되지 않는다.
+# `core.coverage.assert_covers`(HoldKind 번역표·`OperatorPayoutCountsOut` 배지
+# 필드도 같은 도구를 쓴다, #176 이 이 파일에 있던 사본을 그리로 접었다)·
+# `distributions`의 `Contest.Status` 분류와 같은 관용구. 값이 하나 늘면(또는
+# 오타로 하나 빠지면) import 시점에 바로 터진다 — 배치 스캔 한복판에서야
+# 발견되지 않는다.
 _ALL_DOCUMENTED_PAYOUT_STATUSES = {
     "REQUESTED",
     "IN_PROGRESS",
@@ -186,22 +189,12 @@ _ALL_DOCUMENTED_SELLER_STATUSES = {
 }
 
 
-def assert_covers_all_documented_values(covered: set[str], documented: set[str], *, name: str) -> None:
-    """`covered`(우리 분류표가 실제로 아는 문자열)가 `documented`(벤더 문서의
-    값 전체)를 빠짐없이 덮는지 — 아니면 던진다. 모듈 로드 시 호출해 값이
-    하나 늘거나 오타로 하나 빠지면 import 시점에 바로 터지게 한다."""
-
-    missing = documented - covered
-    if missing:
-        raise RuntimeError(f"{name} 이 벤더 문서의 값을 전부 덮지 않는다: {sorted(missing)}")
-
-
-assert_covers_all_documented_values(
+assert_covers(
     _PAID_PAYOUT_STATUSES | _FAILED_PAYOUT_STATUSES | _PENDING_PAYOUT_STATUSES,
     _ALL_DOCUMENTED_PAYOUT_STATUSES,
     name="Payout 상태 분류(_PAID/_FAILED/_PENDING_PAYOUT_STATUSES)",
 )
-assert_covers_all_documented_values(
+assert_covers(
     set(_SELLER_STATUS_MAP), _ALL_DOCUMENTED_SELLER_STATUSES, name="_SELLER_STATUS_MAP"
 )
 
@@ -389,7 +382,7 @@ def _safe_json(response: requests.Response) -> dict | None:
         return None
 
 
-def _extract_error(body: dict | None) -> tuple[str | None, str | None]:
+def _extract_error(response: requests.Response) -> tuple[str | None, str | None]:
     """v2 에러 응답에서 `code`·`message`를 읽는다(#172).
 
     지급대행은 v2 인데 이 파일이 결제(v1) 어댑터의 관용구를 그대로 복사해
@@ -400,14 +393,20 @@ def _extract_error(body: dict | None) -> tuple[str | None, str | None]:
     (`_looks_like_retryable_payout_code`)이 늘 거짓이 되고, 로그도
     `code=None`으로 이유 없이 남았다. `payments.adapters_toss`(v1, 진짜 최상위가
     맞다)는 건드리지 않는다.
+
+    본문에 `message`가 없으면(JSON이 아니거나, `error` 객체가 없거나, `error`에
+    `message` 키 자체가 없거나) 응답 원문(`response.text`)을 대신 쓴다 — 두
+    호출부가 이 판단을 각자 복사해 두고 있었다(#176) — 최소한 무엇이 왔는지는
+    로그·예외 메시지에 남아야 한다.
     """
 
-    if not body:
-        return None, None
-    error = body.get("error")
-    if isinstance(error, dict):
-        return error.get("code"), error.get("message")
-    return None, None
+    body = _safe_json(response)
+    error = body.get("error") if body else None
+    code = error.get("code") if isinstance(error, dict) else None
+    message = error.get("message") if isinstance(error, dict) else None
+    if message is None:
+        message = response.text
+    return code, message
 
 
 def _validate_secure_key(secure_key: str, *, mode_setting_name: str) -> None:
@@ -589,10 +588,7 @@ class TossSellerAdapter:
             )
 
         if response.status_code >= 400:
-            body = _safe_json(response)
-            code, message = _extract_error(body)  # v2 는 error 아래 중첩이다(#172).
-            if message is None:
-                message = response.text
+            code, message = _extract_error(response)  # v2 는 error 아래 중첩이다(#172).
             if response.status_code in _OUR_INTEGRATION_ERROR_STATUSES:
                 raise SellerError(
                     f"토스 Seller 등록이 우리 쪽 설정 문제로 거부됐다"
@@ -742,10 +738,7 @@ class TossPayoutAdapter:
                 "실제 결과는 query_status로 확정해야 한다."
             )
         if response.status_code >= 400:
-            body_json = _safe_json(response)
-            code, message = _extract_error(body_json)  # v2 는 error 아래 중첩이다(#172).
-            if message is None:
-                message = response.text
+            code, message = _extract_error(response)  # v2 는 error 아래 중첩이다(#172).
             if response.status_code in _OUR_INTEGRATION_ERROR_STATUSES:
                 raise PayoutError(
                     f"토스 지급 요청이 우리 쪽 설정 문제로 거부됐다"

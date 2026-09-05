@@ -5,6 +5,8 @@ from uuid import UUID
 
 from ninja import Field, Schema
 
+from core.coverage import assert_covers
+
 
 class PayoutOut(Schema):
     idempotency_key: UUID
@@ -204,8 +206,11 @@ class OperatorPayoutCountsOut(Schema):
     이전에는 홈이 큐 목록 셋을 통째로 받아 `.length` 를 셌다 — Payout 전체를 세 번
     긁어 직렬화하고 숫자 셋만 남기고 버렸다. 건수는 건수로 답한다.
 
-    필드 이름은 `BLOCKED_ON_OF` 의 값 집합과 같아야 한다 — 갈래가 하나 늘면 여기가
-    모듈 로드 시점에 터진다(`assert_covers_all_kinds` 와 같은 규율).
+    필드 이름은 `BLOCKED_ON_OF` 의 값 집합과 정확히 같아야 한다 — 갈래가 하나
+    늘거나 줄면 여기가 모듈 로드 시점에 터진다(`core.coverage.assert_covers`,
+    #176). 필드 이름은 blocked_on 값과 **정확히 일치**해야 하므로(남는 필드도
+    허용하지 않는다) `bidirectional=True` 로 검사한다 — HoldKind 번역표(빠짐만
+    보면 되는 쪽)와는 다른 엄격도다.
     """
 
     identity: int
@@ -217,14 +222,12 @@ class OperatorPayoutCountsOut(Schema):
 def _assert_counts_cover_all_blocked_on_values() -> None:
     from .progress import BLOCKED_ON_VALUES
 
-    declared = set(OperatorPayoutCountsOut.model_fields)
-    missing = set(BLOCKED_ON_VALUES) - declared
-    extra = declared - set(BLOCKED_ON_VALUES)
-    if missing or extra:
-        raise RuntimeError(
-            "OperatorPayoutCountsOut 가 blocked_on 갈래와 어긋난다 — "
-            f"빠진 것 {sorted(missing)}, 남는 것 {sorted(extra)}"
-        )
+    assert_covers(
+        OperatorPayoutCountsOut.model_fields,
+        BLOCKED_ON_VALUES,
+        name="OperatorPayoutCountsOut",
+        bidirectional=True,
+    )
 
 
 _assert_counts_cover_all_blocked_on_values()

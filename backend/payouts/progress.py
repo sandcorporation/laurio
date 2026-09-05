@@ -21,6 +21,8 @@ import logging
 from dataclasses import dataclass
 from enum import Enum
 
+from core.coverage import assert_covers
+
 from .models import Payout, Seller
 
 logger = logging.getLogger(__name__)
@@ -107,12 +109,23 @@ BLOCKED_ON_OF: dict[HoldKind, str | None] = {
 }
 
 
-def assert_covers_all_kinds(table: dict, *, name: str) -> None:
-    """번역표가 HoldKind 전체를 덮는지 — 값이 하나 늘면 모듈 로드 시 터진다."""
+def assert_covers_all_kinds(table, *, name: str) -> None:
+    """번역표(`table`)가 `HoldKind` 전체를 덮는지 — 값이 하나 늘거나 오타로 하나
+    빠지면 모듈 로드 시점에 바로 터진다.
 
-    missing = set(HoldKind) - set(table)
-    if missing:
-        raise RuntimeError(f"{name} 이 HoldKind 를 전부 덮지 않는다: {sorted(k.value for k in missing)}")
+    이 파일의 세 번역표(`TURN_OF`·`BLOCKED_ON_OF`·`NEXT_ACTION_MESSAGES`)와
+    `submissions.participation`의 액션 표가 이 얇은 래퍼를 지난다 — 전부
+    `HoldKind` 만 검사하므로 그 자리에 고정한다. 일반화된 원시 도구는
+    `core.coverage.assert_covers`(#176)다 — `expected`를 호출자가 고를 수 있게
+    열어 두면, 이 파일의 호출부가 실수로 그 인자를 빠뜨렸을 때 조용히
+    `HoldKind`와 비교해 버리는 함정이 생긴다(#176 코드리뷰 지적) — 그래서 이
+    래퍼는 `HoldKind`를 하드코딩해 그 함정 자체를 없앤다. `payouts.adapters_toss`
+    의 벤더 상태 분류표·`payouts.schemas`의 배지 필드 표는 `HoldKind`가 아닌
+    다른 값을 검사하므로 이 래퍼가 아니라 `core.coverage.assert_covers`를
+    직접 부른다.
+    """
+
+    assert_covers(table, HoldKind, name=name)
 
 
 assert_covers_all_kinds(TURN_OF, name="TURN_OF")
