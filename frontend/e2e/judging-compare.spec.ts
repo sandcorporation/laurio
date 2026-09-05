@@ -97,3 +97,35 @@ test("개발자 이름을 클릭하면 그 개발자의 공개 프로필이 새 
   expect(profilePage.url()).toContain(`/developers/${submission.developer_id}`);
   await expect(profilePage.getByText(submission.developer_display_name).first()).toBeVisible();
 });
+
+// #179 — Award 직후 Sponsor가 「내 차례 · 인수를 확인하세요」를 보고도 갈 곳이
+// 없던 자리. Escrow 해제는 돈이 움직이는 곳이라(CLAUDE.md 「남길 것」) 스펙을
+// 하나 남긴다 — 새 스펙 파일을 만들지 않고, Award를 실제로 수행하는 이 파일에
+// 이어 붙인다(위 serial 주석이 이미 이 자리를 예고하고 있었다). 이 테스트가
+// Contest를 AWARDED로 영구히 바꾸므로 파일의 **마지막**에 둔다.
+test("Award 뒤 Sponsor가 인수를 확인하면 Escrow가 해제된다", async ({ page }) => {
+  await loginAsJudgingSponsor(page);
+
+  const submission = seeded.judging.submissions[0];
+  await page.goto(`/console/contests/${seeded.judging.id}/judge`);
+  await expect(page.getByTestId("comparison-matrix")).toBeVisible();
+
+  await page.getByTestId(`award-button-${submission.id}`).click();
+  await page.getByTestId(`award-confirm-${submission.id}`).click();
+  await expect(page.getByTestId("award-success")).toBeVisible();
+
+  // Award 직후 인수 확인 화면으로 간다 — 「내 공모전」의 「인수 확인하러
+  // 가기」 링크가 실제로 여기로 보낸다(use-my-contests.ts의
+  // canAcceptHandover).
+  await page.goto(`/console/contests/${seeded.judging.id}/handover`);
+  await expect(page.getByTestId("handover-pending-notice")).toBeVisible();
+  // 자동 해제가 있다는 사실을 숨기지 않는다 — 방치해도 상금이 묶이지 않는다.
+  await expect(page.getByTestId("handover-deadline-notice")).toBeVisible();
+
+  await page.getByTestId("handover-accept-button").click();
+  await expect(page.getByTestId("handover-accept-confirm-notice")).toBeVisible();
+  await page.getByTestId("handover-accept-confirm").click();
+
+  await expect(page.getByTestId("handover-released")).toBeVisible();
+  await expect(page.getByTestId("handover-accept-button")).toHaveCount(0);
+});

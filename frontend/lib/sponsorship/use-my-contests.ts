@@ -33,6 +33,10 @@ export type SponsorActionLabel = {
    * `next_action`을 직접 비교하지 않고 이 표를 거친다 — 새 상태가 생기면
    * `Record<SponsorNextAction, ...>` 타입 오류로 빌드가 깨진다. */
   canPay: boolean;
+  /** 인수 확인 화면으로 갈 수 있는 단계인가 (#179). 「내 차례 · 인수를
+   * 확인하세요」가 뜨는데 갈 곳이 없던 자리 — canJudge·canPay와 같은 이유로
+   * 화면이 `next_action`을 직접 비교하지 않는다. */
+  canAcceptHandover: boolean;
 };
 
 /** 「다음 행동」의 번역표.
@@ -47,6 +51,7 @@ export const SPONSOR_ACTION_LABELS: Record<SponsorNextAction, SponsorActionLabel
     mine: true,
     canJudge: false,
     canPay: true,
+    canAcceptHandover: false,
   },
   // 이 화면의 핵심. 지금 고르지 않으면 심사기간이 지나 무응답 배분으로 넘어간다.
   judge_and_award: {
@@ -54,41 +59,66 @@ export const SPONSOR_ACTION_LABELS: Record<SponsorNextAction, SponsorActionLabel
     mine: true,
     canJudge: true,
     canPay: false,
+    canAcceptHandover: false,
   },
+  // #179 — 「내 차례」라고 말하면서도 갈 곳이 없던 자리. 이 값만 true다.
   accept_handover: {
     text: "인수를 확인하세요 — 확인해야 개발자에게 상금이 갑니다",
     mine: true,
     canJudge: false,
     canPay: false,
+    canAcceptHandover: true,
   },
   awaiting_submissions: {
     text: "제출을 기다리는 중입니다",
     mine: false,
     canJudge: false,
     canPay: false,
+    canAcceptHandover: false,
   },
-  awaiting_scoring: { text: "채점을 기다리는 중입니다", mine: false, canJudge: false, canPay: false },
+  awaiting_scoring: {
+    text: "채점을 기다리는 중입니다",
+    mine: false,
+    canJudge: false,
+    canPay: false,
+    canAcceptHandover: false,
+  },
   // 스토리 40 — #81 이 존재하는 이유. 「늦음」이 아니라 「보류」다.
   awaiting_appeal_ruling: {
     text: "이의 심판이 끝날 때까지 상금 배분이 보류되어 있습니다",
     mine: false,
     canJudge: false,
     canPay: false,
+    canAcceptHandover: false,
   },
   awaiting_distribution: {
     text: "상금 배분을 기다리는 중입니다",
     mine: false,
     canJudge: false,
     canPay: false,
+    canAcceptHandover: false,
   },
   awaiting_payout: {
     text: "개발자에게 지급되는 중입니다",
     mine: false,
     canJudge: false,
     canPay: false,
+    canAcceptHandover: false,
   },
-  no_submissions: { text: "제출 없이 마감되었습니다", mine: false, canJudge: false, canPay: false },
-  contest_complete: { text: "완료되었습니다", mine: false, canJudge: false, canPay: false },
+  no_submissions: {
+    text: "제출 없이 마감되었습니다",
+    mine: false,
+    canJudge: false,
+    canPay: false,
+    canAcceptHandover: false,
+  },
+  contest_complete: {
+    text: "완료되었습니다",
+    mine: false,
+    canJudge: false,
+    canPay: false,
+    canAcceptHandover: false,
+  },
 };
 
 
