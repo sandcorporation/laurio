@@ -1,18 +1,42 @@
-# CI 전용 오버라이드 — dev 의 **핫리로드 마운트**만 걷어낸다.
+# CI 전용 오버라이드 — **CI 는 배포되는 산출물을 친다.**
 #
-# `compose.dev.yaml` 의 backend 서비스는 `../backend:/app` 을 마운트한다. 그것은
-# 개발 중 코드를 고치면 즉시 반영되게 하는 장치이고, **CI 에는 있을 이유가 없다** —
-# 체크아웃이 고정이고, `backend.Dockerfile` 이 `COPY backend/ ./` 로 코드를 이미
-# 이미지에 굽는다. 마운트를 걷어도 같은 코드가 돈다.
+# `compose.dev.yaml` 은 개발용이다. 앱 서비스가 `target: dev` 로 지어져
+# `pnpm dev` 를 돌리고, 저장소를 `..:/app` 으로 마운트해 코드를 고치면 즉시
+# 반영되게 한다. 그 마운트는 **핫리로드 장치**이고 체크아웃이 고정인 CI 에는
+# 있을 이유가 없다.
 #
-# 걷어내야 하는 이유는 그것이 **틀린 코드를 실행시키기 때문**이다. CI 러너가
-# 컨테이너 안에서 호스트 Docker 소켓을 쓰면 바인드 경로가 호스트 기준으로 풀려
-# 러너 안의 체크아웃을 가리키지 못하고, `/app` 이 빈 채로 마운트된다 — 실측:
-# `python: can't open file '/app/manage.py'`. 호스티드 러너에서는 러너의
-# 파일시스템이 곧 Docker 호스트라 이 차이가 드러나지 않았다.
+# 그리고 그것이 틀린 코드를 실행시킬 수 있다. CI 러너가 컨테이너 안에서 호스트
+# Docker 소켓을 쓰면 바인드 경로가 호스트 기준으로 풀려 러너 안의 체크아웃을
+# 가리키지 못하고 `/app` 이 빈 채로 마운트된다 — 실측:
+# `python: can't open file '/app/manage.py'`,
+# `Scope: all 0 workspace projects` → `Command "dev" not found`.
+# 호스티드 러너에서는 러너의 파일시스템이 곧 Docker 호스트라 우연히 맞아떨어져
+# 이 차이가 드러나지 않았다.
+#
+# **그래서 CI 는 `runner` 타깃을 쓴다** — 배포 compose 가 고르는 바로 그 스테이지다
+# (`docker/frontend.Dockerfile`·`operator.Dockerfile` 의 3스테이지 중 마지막,
+# `CMD ["node", "<app>/server.js"]`). 코드가 이미지에 구워지므로 마운트가 필요 없고,
+# 덤으로 **CI 가 실제로 배포되는 산출물을 검증하게 된다** — dev 서버가 아니라.
+#
+# backend 는 스테이지가 하나뿐이지만 `backend.Dockerfile` 이 `COPY backend/ ./` 로
+# 코드를 굽는다. 마운트만 걷으면 같은 코드가 돈다.
 #
 # `!reset` 은 Compose 2.24+ 가 필요하다. 못 알아들으면 파싱 단계에서 크게 실패한다 —
 # 조용히 마운트가 남는 것보다 낫다.
 services:
   backend:
+    volumes: !reset []
+
+  frontend:
+    build:
+      target: runner
+    # dev compose 의 command 는 `pnpm install && pnpm dev` 다 — 마운트된 소스를
+    # 전제한다. 비우면 이미지의 CMD(standalone 서버)가 그대로 돈다.
+    command: !reset null
+    volumes: !reset []
+
+  operator:
+    build:
+      target: runner
+    command: !reset null
     volumes: !reset []
