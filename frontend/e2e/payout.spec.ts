@@ -108,20 +108,20 @@ test("연락처를 부분 제출해도 이미 낸 값은 다시 묻지 않는다
     },
   );
 
+  // **이미 전화번호는 낸 상태에서 시작한다.** 「둘 다 보이는 화면에서 하나만
+  // 제출한다」는 이 UI 에 없는 동작이다 — 제출 버튼이 하나이고 이메일 입력은
+  // 계정 이메일로 미리 채워지므로(#168), 전화번호만 채우고 눌러도 그 이메일이
+  // 함께 실려 간다. 이 스펙이 지키려는 사실은 그게 아니라 **서버가 하나만
+  // 비었다고 말할 때 그 하나만 묻는다**는 것이다(제목 그대로).
+  phoneSubmitted = true;
+
   await page.goto(`/console/payouts/${contestId}`);
 
-  // 둘 다 비어 있다 — 폼이 두 입력 모두 보여준다.
-  await expect(page.getByTestId("payout-seller-phone-input")).toBeVisible();
-  await expect(page.getByTestId("payout-seller-email-input")).toBeVisible();
-
-  // 전화번호만 낸다.
-  await page.getByTestId("payout-seller-phone-input").fill("01012345678");
-  await page.getByTestId("payout-seller-contact-submit").click();
-
-  // 전화번호는 이미 냈다 — 재조회한 화면이 전화번호 입력을 다시 보여주지 않는다.
-  // 이메일 입력은 여전히 남아 있다(부분 제출이 낸 것을 보존한다).
+  // 이메일만 비었다 — 이미 낸 전화번호는 다시 묻지 않는다.
+  await expect(page.getByTestId("payout-seller-contact-form")).toBeVisible();
   await expect(page.getByTestId("payout-seller-phone-input")).toHaveCount(0);
   await expect(page.getByTestId("payout-seller-email-input")).toBeVisible();
+  await expect(page.getByTestId("payout-seller-contact-missing")).toContainText("이메일");
 
   await page.getByTestId("payout-seller-email-input").fill("payout@example.com");
   await page.getByTestId("payout-seller-contact-submit").click();
