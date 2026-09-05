@@ -82,9 +82,11 @@ from .schemas import (
     WebhookOut,
 )
 from .services import (
+    PayoutNotOperatorActionable,
     advance_seller_pending_payouts,
     get_or_create_payout,
     resolve_transfer_webhook,
+    retry_payout_for_operator,
     retry_seller_registration,
     submit_identity,
     submit_seller_contact,
@@ -787,3 +789,46 @@ def list_payouts_for_operator(
     # `count` 는 이 페이지의 길이가 아니라 **전체** 건수다 — 화면이 「막혀 있는 지급 N건」을
     # 말하고, 홈 배지와 그 숫자가 맞는지를 e2e 가 단언한다.
     return 200, {"items": items, "count": payouts.count(), "next": next_cursor}
+
+
+@operator_router.post(
+    "/payouts/{idempotency_key}/retry",
+    response={200: OperatorPayoutOut, 404: ErrorOut, 409: ErrorOut},
+)
+def retry_payout_for_operator_view(request: HttpRequest, idempotency_key: UUID):
+    """Operator가 큐에서 막힌 Payout을 진행시킨다(#182) — 「이체 재시도 필요」라고
+    적어 놓고 그것을 할 방법이 없던 결함을 닫는다.
+
+    **행동은 기존 도메인 경로를 그대로 지난다**(#182 AC) — 운영자 전용 재시도
+    로직이 따로 없다. `payouts.services.retry_payout_for_operator`가 Hold 를 계산해
+    정확히 세 갈래(수취인 등록 거절·자력 회복 포기(#178)·확정 후 실이체 실패)만
+    받고, 각각 Developer 의 「다시 시도」와 같은 함수(`retry_seller_registration`)
+    또는 다른 모든 실이체 재시도가 쓰는 것과 같은 함수(`payouts.progress.
+    retry_confirmed_transfer`)를 그대로 부른다. 그 밖(`UNKNOWN` 포함)은 409다 —
+    `OperatorPayoutOut.operator_actionable` 이 큐 화면에서 이미 그 사실을 미리
+    알려준다.
+
+    **권한 등급은 `OperatorAuth`다**(이 라우터 기본값, #182 AC — 근거를 남긴다).
+    정책 변경(`SuperuserOperatorAuth`, ADR-0023)은 앞으로의 모든 돈에 영향을
+    주는 요율 변경이라 상위 등급을 요구하지만, 이 행동은 이의 심판
+    (`appeals.api`, ADR-0022 — 같은 `OperatorAuth`)처럼 **이미 존재하는 개별
+    사례**에 대해 이미 정해진 절차(등록 재시도·실이체 재시도)를 실행할 뿐이다 —
+    새 정책을 만들지 않는다.
+
+    **누가 눌렀는지 남는다**(`OperatorPayoutAction`) — 돈을 움직이는 운영자
+    행위를 정책 변경·이의 심판과 같은 무게로 다룬다(ADR-0022/0023).
+    """
+
+    payout = Payout.objects.with_target().filter(idempotency_key=idempotency_key).first()
+    if payout is None:
+        raise HttpError(404, "지급 요청을 찾을 수 없습니다.")
+
+    try:
+        retry_payout_for_operator(payout, operator=request.auth)
+    except PayoutNotOperatorActionable as exc:
+        raise HttpError(409, str(exc)) from exc
+
+    row = with_seller_registration_status(
+        with_blocked_on(with_hold_facts(Payout.objects.with_target()))
+    ).get(pk=payout.pk)
+    return 200, row

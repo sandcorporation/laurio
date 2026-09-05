@@ -36,6 +36,7 @@ import logging
 from django.db import IntegrityError, transaction
 from django.db.models import F
 
+from core.clock import Clock
 from ledger.models import Account, EntrySide
 from ledger.services import LineInput, post_journal_entry
 from policies.models import PlatformPolicy
@@ -43,7 +44,7 @@ from policies.scope import current_policy
 from verification.crypto import encrypt
 
 from .adapters import SellerError, get_seller_adapter
-from .models import Payout, Seller, TaxIdentity
+from .models import OperatorPayoutAction, Payout, Seller, TaxIdentity
 from .targets import PayoutTarget
 
 logger = logging.getLogger(__name__)
@@ -505,3 +506,55 @@ def submit_seller_contact(
 
     seller.refresh_from_db()
     return seller
+
+
+class PayoutNotOperatorActionable(Exception):
+    """Operator 가 이 Payout 에 대해 지금 취할 수 있는 행동이 없다(#182) — API 층이
+    이것을 409 로 옮긴다."""
+
+
+def retry_payout_for_operator(payout: Payout, *, operator) -> Payout:
+    """Operator 가 큐에서 막힌 Payout 을 기존 도메인 경로로 진행시킨다(#182).
+
+    Hold 가 정확히 「Operator 의 차례」인 세 갈래만 받는다 — 그 밖(Developer·
+    벤더의 차례, 또는 이미 안 막힘)은 `PayoutNotOperatorActionable` 이다. 셋
+    다 **기존 서비스 함수를 그대로 부른다** — 운영자 전용 재시도 로직을 따로
+    만들지 않는다(#182 AC):
+
+    - `SELLER_REJECTED`·`SELLER_REGISTRATION_STUCK` — 수취인 재등록
+      (`retry_seller_registration`, Developer 의 「다시 시도」 버튼과 같은 함수).
+    - `TRANSFER_OPERATOR` — 실이체 재시도(`payouts.progress.
+      retry_confirmed_transfer` — 다른 모든 실이체 재시도가 쓰는
+      `_request_real_transfer` 그대로다).
+
+    `UNKNOWN`은 받지 않는다 — Hold 표에 없는 조합이라는 뜻이고(`progress.py`가
+    "도달 불가여야 하는 곳에 도달했다면 불변식이 깨진 것"이라 적은 자리), 어느
+    기존 함수를 부르는 것이 옳은지 자체를 코드가 모른다. 버튼을 다는 대신
+    사람이 데이터를 직접 살펴보게 두는 것이 이 티켓의 결정이다(#182 AC — 보이게만
+    한다).
+
+    성공하든 이미 다른 경로로 풀려 있든(재전송·경합) `OperatorPayoutAction`을
+    남긴다 — 이 호출이 있었다는 사실 자체가 감사 대상이다. 행동이 아무 효과도
+    못 냈을 때(예: 그 사이 벤더가 다시 거절했다)도 "운영자가 눌렀다"는 사실은
+    남아야 한다.
+    """
+
+    from .progress import HoldKind, hold_of, retry_confirmed_transfer
+
+    seller = payout.seller
+    has_identity = TaxIdentity.objects.filter(payout=payout).exists()
+    hold = hold_of(payout, seller=seller, has_identity=has_identity)
+
+    if hold.kind in (HoldKind.SELLER_REJECTED, HoldKind.SELLER_REGISTRATION_STUCK):
+        payout = retry_seller_registration(payout)
+    elif hold.kind is HoldKind.TRANSFER_OPERATOR:
+        payout = retry_confirmed_transfer(payout)
+    else:
+        raise PayoutNotOperatorActionable(
+            f"이 지급은 Operator 가 진행시킬 수 있는 상태가 아닙니다(hold={hold.kind.value})."
+        )
+
+    OperatorPayoutAction.objects.create(
+        payout=payout, operator=operator, hold_kind=hold.kind.value, acted_at=Clock.now()
+    )
+    return payout

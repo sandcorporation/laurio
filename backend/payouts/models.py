@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import uuid
 
+from django.conf import settings
 from django.db import models
 from django.db.models import Q
 
@@ -480,3 +481,38 @@ class Seller(models.Model):
         self.phone_number_encrypted = ""
         self.email = ""
         self.save(update_fields=["phone_number_encrypted", "email", "updated_at"])
+
+
+class OperatorPayoutAction(models.Model):
+    """Operator 가 막힌 Payout 을 진행시키려 시도한 사건 — 누가·언제·무엇을(#182).
+
+    `AppealRuling.ruled_by`·`PolicyChange.operator` 와 같은 무게로 다룬다(ADR-0022/
+    0023) — 돈을 움직이는 운영자 행위이므로 신원 없는 행이 존재할 수 없다.
+    `reason`/`note` 는 두지 않는다 — 저 둘은 사람의 재량 판단(무엇이 옳은가)을
+    기록하지만, 이 행위는 재량이 없다(이미 도메인이 정한 재시도 함수를 그대로
+    부를 뿐이다). 이유를 적게 하면 "큐가 그렇게 말해서"를 반복해 적는 칸이 되어
+    감사 기록에 정보를 더하지 않는다.
+
+    `operator` 는 PROTECT 다 — 계정을 지워도 감사 기록이 주인을 잃지 않는다
+    (#72 가 세운 관용구). `payout` 도 PROTECT 다 — Payout 은 애초에 지워지지
+    않지만(원장 기록이라 CASCADE 대상이 될 이유가 없다), 지운다면 이 행위
+    기록이 먼저 명시적으로 지워져야 한다.
+    """
+
+    payout = models.ForeignKey(Payout, related_name="operator_actions", on_delete=models.PROTECT)
+    operator = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="payout_actions", on_delete=models.PROTECT
+    )
+    # 행위 시점의 Hold 갈래(`payouts.progress.HoldKind` 값) — 무엇을 보고 눌렀는지
+    # 감사 기록에 남긴다. 자유 문자열이다(HoldKind 자체를 이 모델이 import 하면
+    # progress.py 가 models.py 를 참조하는 순환 임포트가 생긴다).
+    hold_kind = models.CharField(max_length=32)
+    acted_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ["-acted_at", "-id"]
+        verbose_name = "운영자 지급 조치 이력"
+        verbose_name_plural = "운영자 지급 조치 이력"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"OperatorPayoutAction(payout={self.payout_id}, operator={self.operator_id})"

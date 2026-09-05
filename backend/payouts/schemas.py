@@ -166,6 +166,12 @@ class OperatorPayoutOut(Schema):
     # 사실이라 별도로 내려준다. 그 밖의 "seller" 행(연락처 미제출·본인인증
     # 대기·심사 중·거절)에는 null 이다.
     seller_registration_status: str | None
+    # 지금 `POST /operator/payouts/{key}/retry` 로 이 Payout 을 진행시킬 수
+    # 있는가(#182) — Hold 가 정확히 「Operator 의 차례」인 세 갈래(수취인 등록
+    # 거절 · 자력 회복 포기 · 확정 후 실이체 실패)에서만 참이다. `UNKNOWN`(표에
+    # 없는 조합)은 포함하지 않는다 — 그 값에는 버튼이 아니라 사람의 판단이
+    # 필요하다는 것이 이 티켓의 결정이다.
+    operator_actionable: bool
 
     # 다섯 값 모두 질의가 이미 안다(#149, #178) — `payouts.progress.with_hold_facts` ·
     # `with_blocked_on` · `with_seller_registration_status` 가 붙인 주석과
@@ -193,6 +199,27 @@ class OperatorPayoutOut(Schema):
     @staticmethod
     def resolve_seller_registration_status(obj):
         return obj.seller_registration_status
+
+    @staticmethod
+    def resolve_operator_actionable(obj) -> bool:
+        """`payouts.progress.hold_of` 의 세 갈래(SELLER_REJECTED·
+        SELLER_REGISTRATION_STUCK·TRANSFER_OPERATOR)와 같은 조건이다 — 필요한
+        사실(모델 컬럼 둘 + 이미 annotate 된 `seller_status`·
+        `seller_registration_status`)이 이 행에 이미 다 있어 추가 조회를 내지
+        않는다. 두 판정이 갈리면 큐가 보여주는 버튼과 실제로 되는 행동이
+        어긋난다 — `tests/test_payouts_operator_retry.py` 의 빠짐없음 테스트가
+        그 어긋남을 잡는다."""
+
+        from .models import Payout, Seller
+
+        T = Payout.TransferStatus
+        if obj.status == Payout.Status.CONFIRMED and obj.transfer_status == T.FAILED:
+            return True
+        if obj.seller_status == Seller.Status.REJECTED:
+            return True
+        if obj.seller_registration_status == "stuck":
+            return True
+        return False
 
 
 class OperatorPayoutPageOut(Schema):

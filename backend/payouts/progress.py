@@ -874,3 +874,39 @@ def advance(
     payout.refresh_from_db()
     return payout
 
+
+def retry_confirmed_transfer(payout: Payout, *, adapter=None) -> Payout:
+    """`HoldKind.TRANSFER_OPERATOR`(CONFIRMED 뒤 뒤늦게 실이체 실패가 확인된 Payout)의
+    실이체를 다시 시도한다(#182 — 운영자 표면의 새 진입점).
+
+    벤더를 부르는 코드는 새로 만들지 않는다 — 다른 모든 실이체 재시도가 쓰는
+    `_request_real_transfer` 그대로다. `advance()`는 `status` 가
+    `CONFIRMED_IDENTITY_PENDING`/`CONFIRMED_SELLER_PENDING` 일 때만 이 상태를
+    다시 진행시키는데(위 early return), CONFIRMED 로 이미 넘어간 뒤에는 그
+    조건에 걸리지 않아 이 상태(#57/ADR-0008 이 "자기 서비스 재시도 경로가 아직
+    없다"고 적어 둔 바로 그 자리)를 아무도 다시 부를 수 없었다 — 이 함수가 그
+    진입로를 연다.
+
+    `status` 는 이미 CONFIRMED 였으므로 성공해도 되돌리지 않는다(ADR-0004,
+    `TransferStatus` 의 독스트링 — 원장 분개는 확정 시점에 이미 남았고 이
+    필드는 실이체 자체의 진행만 기록한다). Seller 가 READY 가 아니면(웹훅으로
+    거절이 뒤늦게 들어온 경우 등) 아무 것도 하지 않고 그대로 돌려준다 — 이
+    함수는 호출부(`payouts.services.retry_payout_for_operator`)가 Hold 로 미리
+    걸러 준 상태에서만 불린다는 전제이지만, 그 전제가 깨져도 안전하게 아무
+    일도 하지 않는다.
+    """
+
+    from .adapters import get_adapter as _get_adapter
+
+    T = Payout.TransferStatus
+    payout.refresh_from_db()
+    if payout.status != Payout.Status.CONFIRMED or payout.transfer_status != T.FAILED:
+        return payout
+
+    seller = payout.seller
+    if seller is None or seller.status not in Seller.READY_STATUSES:
+        return payout
+
+    _request_real_transfer(payout, seller, adapter or _get_adapter())
+    payout.refresh_from_db()
+    return payout
