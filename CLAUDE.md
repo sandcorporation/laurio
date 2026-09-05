@@ -443,6 +443,36 @@ export_openapi_schema.py`)로 스키마를 뽑은 뒤 `openapi-typescript` 로 �
 이유다. 백엔드 스키마가 바뀌었는데 재생성을 안 하면(혹은 재생성해도 필드가
 없어졌는데 호출부를 안 고치면) `tsc --noEmit` 이 빌드타임에 잡는다.
 
+## CI 는 셀프호스티드 러너에서, 프로덕션 이미지로 돈다
+
+GitHub 호스티드 러너는 과금이 막혀 못 쓴다. 9개 잡 전부 `runs-on: [self-hosted, sub]` —
+staging 배포 호스트와 **같은 머신**이다. 러너 컨테이너는 `--network host` 로 돌고 호스트
+docker 소켓을 물어 컨테이너를 바깥에 띄운다(DooD).
+
+**CI 는 `docker/compose.ci.yaml` 을 dev compose 위에 겹쳐 쓴다 — 지우면 CI 가 깨진다.**
+`compose.dev.yaml` 의 `..:/app` 은 **개발용 핫리로드 장치**다. 러너 안에서 그 상대 경로는
+호스트 데몬 기준으로 풀려 `/app` 이 통째로 비고, backend 는 `can't open file '/app/manage.py'`
+로, 두 앱은 `Scope: all 0 workspace projects` 로 죽는다. 오버라이드가 하는 일은 셋뿐이다:
+
+- 세 서비스의 `volumes` 를 `!reset []` — 마운트 없이 **이미지 안의 코드**로 돈다.
+- 두 앱의 빌드 `target` 을 `runner` 로 — dev 서버가 아니라 **배포되는 그 이미지**를 친다.
+- 두 앱의 `command` 를 `!reset null` — 이미지의 `node server.js` 가 산다.
+
+**그래서 e2e 가 검증하는 대상이 바뀌었다.** 예전엔 `next dev` 를, 지금은 프로덕션 빌드를
+친다 — 배포되는 것과 테스트되는 것이 같아졌다. 위 `next dev` 메모리 주의는 이제
+**로컬에서 스위트를 돌릴 때만** 해당한다.
+
+**잡마다 스택을 갈라 준다.** compose 를 쓰는 세 잡(`celery-broker`·e2e 둘)이 한 러너에서
+겹치므로 각자 다른 `COMPOSE_PROJECT_NAME` 과 포트 슬롯을 잡는다 — 안 그러면 서로의
+컨테이너를 `down -v` 로 지운다. 뒷정리는 `if: always()` 로 건다.
+
+**pytest 잡에 redis 서비스가 없다.** 테스트 세션 캐시가 LocMem 이라(위 「테스트는 서로를
+밟지 않는다」) 필요가 없어졌다. postgres 는 `55532` 로 노출한다 — 러너 호스트의 5432 는
+이미 점유돼 있다.
+
+실측(9잡 전부 초록, 2026-09-05): 전체 **6분**. e2e 운영자 4분 · 공개 3분 ·
+`celery-broker` 2분 · `pytest` 1분 · 나머지 다섯은 각 1분 미만.
+
 ## Agent skills
 
 ### Issue tracker
