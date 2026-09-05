@@ -203,9 +203,13 @@ NEXT_ACTION_MESSAGES: dict[HoldKind, str] = {
         "지급대행사 등록은 끝났지만 실제 이체가 거절되었습니다 — 상금은 "
         "원장에 그대로 남아 있습니다. 아래에서 다시 시도해주세요."
     ),
+    # #181 — 이 갈래는 정의상 주민등록번호가 이미 제출된 상태다("_RECORDED").
+    # 옛 문구는 옆 갈래(신원 미제출 + 이체 실패)가 빌려 쓰려고 쓴 것을 그대로
+    # 자기 이름의 갈래에도 붙여 둔 것이었다 — 이미 낸 사람에게 계속 내라고
+    # 말하는 거짓이었다. 이 갈래 자신의 사실(이체만 다시 시도하면 된다)을 말한다.
     HoldKind.TRANSFER_RETRY_IDENTITY_RECORDED: (
         "실제 이체가 실패로 확인되었습니다 — 상금은 원장에 그대로 남아 "
-        "있습니다. 세무 신고를 위한 주민등록번호는 계속 제출해주세요."
+        "있습니다. 아래에서 다시 시도해주세요."
     ),
     HoldKind.TRANSFER_OPERATOR: (
         "지급이 확정되었지만 실제 이체가 실패로 확인되었습니다 — 상금은 "
@@ -219,9 +223,18 @@ assert_covers_all_kinds(NEXT_ACTION_MESSAGES, name="NEXT_ACTION_MESSAGES")
 
 # 신원 미제출 상태에서 실이체 실패도 함께 확인된 경우 — 신원 제출을 막을 이유는 없지만
 # (독립적인 두 축), 실이체가 실패했다는 사실을 감추지 않는다(#57 코드리뷰 지적 4).
-_IDENTITY_AFTER_TRANSFER_FAILURE_MESSAGE = NEXT_ACTION_MESSAGES[
-    HoldKind.TRANSFER_RETRY_IDENTITY_RECORDED
-]
+#
+# **독립된 문구다 — 빌려 쓰지 않는다(#181).** 예전에는 이 문구를
+# `NEXT_ACTION_MESSAGES[HoldKind.TRANSFER_RETRY_IDENTITY_RECORDED]`에서 빌려 왔는데,
+# 그 갈래는 정의상 신원이 이미 제출된 상태라 자기 이름의 문구가 "주민등록번호를
+# 계속 제출해주세요"를 말하는 거짓이 됐다(#181이 고친 회귀). 이 문구(신원 미제출 +
+# 이체 실패)만 신원 제출을 안내해야 하므로 독립적으로 적는다 — 다른 갈래의 문구가
+# 바뀌어도 이 문구는 따라 흔들리지 않는다.
+_IDENTITY_AFTER_TRANSFER_FAILURE_MESSAGE = (
+    "세무 신고를 위해 주민등록번호를 제출해주세요 — 그리고 실제 이체가 실패로 "
+    "확인되었습니다. 상금은 원장에 그대로 남아 있으니 이체는 아래에서 다시 "
+    "시도할 수 있습니다."
+)
 
 
 def next_action_message(hold: "Hold") -> str:

@@ -62,6 +62,7 @@ export default function PayoutPage({ params }: { params: Promise<{ contestId: st
           payout={state.payout}
           onChanged={reload}
           accountEmail={session.user.email}
+          contestId={contestId}
         />
       )}
     </main>
@@ -118,6 +119,7 @@ function PayoutDetail({
   payout,
   onChanged,
   accountEmail,
+  contestId,
 }: {
   payout: Payout;
   onChanged: () => void;
@@ -125,6 +127,9 @@ function PayoutDetail({
    * 저장은 항상 Seller 쪽에 한다(#168 구현 결정). 비어 있을 수 있다(#49
    * 유저스토리 12 — 카카오가 이메일 동의를 안 주면). */
   accountEmail: string;
+  /** 실패한 지급을 다시 요청할 때 쓴다(#181) — `POST /contests/{contestId}/payout`
+   * 이 기존 재시도 경로(`get_or_create_payout`)를 그대로 탄다. */
+  contestId: string;
 }) {
   // 「연락처를 내야 하는가」를 한 곳에서만 판정한다 — 아래에서 폼을 띄우는
   // 조건과 "하실 일은 없습니다"를 감추는 조건이 같은 값을 봐야 한다. 두 조건이
@@ -241,7 +246,57 @@ function PayoutDetail({
           바로 아래에 모순되는 "지급이 완료되었습니다"를 또 찍지 않는다.
           Developer 쪽 자기 서비스 재시도 경로는 아직 없다(ADR-0008에 남긴
           한계) — 여기서 새 버튼을 만들지 않는다. */}
+
+      {/* 벤더가 이 시도를 거절해 끝났다(#181) — 백엔드는 이 경우를 명시적으로
+          지원한다(`get_or_create_payout`: 가장 최근 시도가 FAILED뿐이면 새
+          REQUESTED 행을 만들어 재시도를 허용한다). "다시 시도해주세요"라고
+          말해 놓고 버튼이 없던 것이 이 티켓이 고치는 결함이다. */}
+      {payout.status === "failed" ? (
+        <RetryFailedPayout contestId={contestId} onRetried={onChanged} />
+      ) : null}
     </>
+  );
+}
+
+function RetryFailedPayout({
+  contestId,
+  onRetried,
+}: {
+  contestId: string;
+  onRetried: () => void;
+}) {
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function handleClick() {
+    setPending(true);
+    setMessage(null);
+    // 새 재시도 경로를 만들지 않는다(#181 AC) — Developer가 처음 지급을
+    // 요청할 때와 같은 엔드포인트다. `get_or_create_payout`이 가장 최근
+    // 시도가 FAILED뿐임을 보고 새 REQUESTED 행을 만든다.
+    const result = await requestPayout(contestId);
+    if (result.ok) return onRetried();
+    setMessage(result.message);
+    setPending(false);
+  }
+
+  return (
+    <div className="mt-3" data-testid="payout-retry-failed">
+      <button
+        className="mt-2 rounded border border-subtle px-3 py-2 text-sm disabled:opacity-50"
+        type="button"
+        onClick={handleClick}
+        disabled={pending}
+        data-testid="payout-retry-failed-submit"
+      >
+        {pending ? "다시 요청하는 중..." : "다시 요청"}
+      </button>
+      {message ? (
+        <p className="mt-2 text-attention" data-testid="payout-retry-failed-error">
+          {message}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
