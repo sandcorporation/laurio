@@ -23,6 +23,11 @@ import { use, useState } from "react";
 
 import { useSession } from "@/lib/auth/use-session";
 import { acceptHandover, useHandover, type Handover } from "@/lib/handovers/use-handover";
+import {
+  buildAssetKindLabel,
+  useBuildAssets,
+  type BuildAssetsState,
+} from "@/lib/handovers/use-build-assets";
 
 type AcceptState = { status: "idle" | "confirming" | "saving" | "error"; message?: string };
 
@@ -32,13 +37,19 @@ export default function HandoverPage({ params }: { params: Promise<{ contestId: 
   const { state } = useHandover(contestId);
   const [accept, setAccept] = useState<AcceptState>({ status: "idle" });
   // POST /handover/accept 가 이미 최신 Handover 를 돌려준다 — 그 값을 직접
-  // 반영한다. 다시 GET 을 걸면, 그 응답이 오기 전까지 화면이 잠깐 옛
-  // pending_acceptance 상태로 되돌아가 "확인이 씹혔나?" 로 보이고, 하필 그
-  // 재조회가 실패하면 **성공한, 되돌릴 수 없는 확인**을 조회 실패 문구로
-  // 덮어버린다 — 서버가 이미 답을 줬으므로 다시 묻지 않는다.
+  // 반영한다. reload()로 다시 GET을 걸면, 그 응답이 오기 전까지 화면이 잠깐
+  // 옛 pending_acceptance 상태로 되돌아가 "확인이 씹혔나?" 로 보이고, 하필
+  // 그 재조회가 실패하면 **성공한, 되돌릴 수 없는 확인**을 조회 실패 문구로
+  // 덮어버린다(코드리뷰 지적) — 서버가 이미 answer를 줬으므로 다시 묻지 않는다.
   const [acceptedHandover, setAcceptedHandover] = useState<Handover | null>(null);
   const displayedHandover =
     acceptedHandover ?? (state.status === "ready" ? state.handover : null);
+
+  // Handover 조회가 끝나야 어느 Submission의 빌드 자산인지 안다 — 그 전까지는
+  // null을 줘 훅이 요청을 보내지 않는다(hook 순서를 지키려 조건부로 부르지
+  // 않는다).
+  const submissionId = displayedHandover?.submission_id ?? null;
+  const buildAssets = useBuildAssets(submissionId);
 
   // 세션 만료를 로딩 게이트보다 먼저 본다(#69).
   if (session.status === "unauthenticated") return null;
@@ -71,17 +82,24 @@ export default function HandoverPage({ params }: { params: Promise<{ contestId: 
       </h1>
 
       {displayedHandover !== null ? (
-        displayedHandover.status === "released" ? (
-          <ReleasedNotice handover={displayedHandover} />
-        ) : (
-          <PendingAcceptance
-            handover={displayedHandover}
-            accept={accept}
-            onAcceptClick={() => setAccept({ status: "confirming" })}
-            onCancel={() => setAccept({ status: "idle" })}
-            onConfirm={handleAccept}
-          />
-        )
+        <>
+          {displayedHandover.status === "released" ? (
+            <ReleasedNotice handover={displayedHandover} />
+          ) : (
+            <PendingAcceptance
+              handover={displayedHandover}
+              accept={accept}
+              onAcceptClick={() => setAccept({ status: "confirming" })}
+              onCancel={() => setAccept({ status: "idle" })}
+              onConfirm={handleAccept}
+            />
+          )}
+
+          {/* #180 — 무엇을 받았다는 확인인지 보여준다. 자료가 없어도 확인은
+              막지 않는다(그 규율은 백엔드에 이미 있다 — 이 목록은 안내일
+              뿐, 인수 확인 버튼의 활성 조건이 아니다). */}
+          <BuildAssetsSection state={buildAssets.state} />
+        </>
       ) : state.status === "not-found" ? (
         <p className="mt-6" data-testid="handover-not-found">
           이 공모전은 아직 Award되지 않아 인수 정보가 없습니다.
@@ -99,8 +117,53 @@ export default function HandoverPage({ params }: { params: Promise<{ contestId: 
   );
 }
 
+function BuildAssetsSection({ state }: { state: BuildAssetsState }) {
+  if (state.status === "loading") return null;
+  if (state.status === "forbidden") return null;
+  if (state.status === "error") {
+    // 조회 실패와 "아직 안 올렸다"는 다른 사실이다 — 같아 보이면 Sponsor는
+    // 자료가 없다고 믿고 확인 버튼을 누르게 된다(위 handover-error와 같은
+    // 원칙). 조용히 섹션 자체를 지우지 않는다.
+    return (
+      <p className="mt-8 text-sm text-attention" role="alert" data-testid="handover-build-assets-error">
+        빌드 자산 목록을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.
+      </p>
+    );
+  }
+
+  return (
+    <section className="mt-8 border-t border-subtle pt-6" data-testid="handover-build-assets">
+      <h2 className="text-lg font-semibold">Developer가 올린 빌드 자산</h2>
+      {state.assets.length === 0 ? (
+        <p className="mt-2 text-sm text-muted" data-testid="handover-build-assets-empty">
+          아직 올린 빌드 자산이 없습니다 — 없어도 인수 확인에는 영향이 없습니다.
+        </p>
+      ) : (
+        <ul className="mt-2 flex flex-col gap-2" data-testid="handover-build-assets-list">
+          {state.assets.map((asset) => (
+            <li
+              key={asset.id}
+              className="rounded border border-subtle p-3 text-sm"
+              data-testid={`handover-build-asset-${asset.id}`}
+            >
+              <span className="rounded-sm border border-rule px-2 py-0.5 text-xs">
+                {buildAssetKindLabel(asset.kind)}
+              </span>{" "}
+              {asset.label || <span className="text-muted">(라벨 없음)</span>}
+              <p className="mt-1 font-mono text-xs text-muted">{asset.object_key}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 function ReleasedNotice({ handover }: { handover: Handover }) {
-  const via = handover.released_via === "timeout" ? "확인 없이 기한이 지나 자동으로" : "직접 확인해";
+  const via =
+    handover.released_via === "timeout"
+      ? "확인 없이 기한이 지나 자동으로"
+      : "직접 확인해";
   const releasedAt = handover.released_at
     ? new Date(handover.released_at).toLocaleString("ko-KR")
     : "";

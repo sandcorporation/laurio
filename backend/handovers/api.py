@@ -32,6 +32,7 @@ def _serialize_handover(handover: Handover) -> HandoverOut:
     return HandoverOut(
         contest_id=handover.award.contest_id,
         award_id=handover.award_id,
+        submission_id=handover.award.submission_id,
         status=handover.status,
         release_deadline_at=handover.release_deadline_at,
         released_via=handover.released_via or None,

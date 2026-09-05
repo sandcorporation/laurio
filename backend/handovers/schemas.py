@@ -18,6 +18,10 @@ STORE_DEPLOYMENT_OUT_OF_SCOPE_NOTE = (
 class HandoverOut(Schema):
     contest_id: int
     award_id: int
+    # #180 — Sponsor의 인수 확인 화면이 이 Handover가 인수하는 Submission의
+    # 빌드 자산(`GET /submissions/{id}/build-assets`)을 이어 보려면 어느
+    # Submission인지 알아야 한다. 별도 조회 없이 이 응답이 그 참조를 싣는다.
+    submission_id: int
     status: str
     release_deadline_at: datetime
     released_via: str | None = None
