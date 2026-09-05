@@ -1027,6 +1027,61 @@ def test_developer_can_view_and_finalize_distribution_payout(client, category, l
 
 
 @pytest.mark.django_db
+def test_distribution_recipient_reaches_the_payout_stage_in_my_participation(
+    client, category, landing_type
+):
+    """배분으로 상금을 받은 Developer 의 「내 참가 현황」이 지급 단계로 읽힌다(#177) —
+    이전에는 `_payout_action`이 Award 경로만 봐서 곧바로 None 을 돌려주고, 화면이
+    「채점 결과에 이의를 제기할 수 있습니다」같은 사실이 아닌 문구를 보였다.
+
+    판정은 `payouts.progress.hold_of` 하나가 한다 — Award 경로와 같은 값이다."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+        prize=900_000,
+    )
+    requirement_id = contest["requirements"][0]["id"]
+    dev_high = _verified_user(client, "dev-dist-participation-high", "dev-dist-participation-high-ci")
+    dev_low = _verified_user(client, "dev-dist-participation-low", "dev-dist-participation-low-ci")
+    submission_high = _submit(
+        client, dev_high, contest["id"], requirement_id=requirement_id, grounded=True
+    )
+    submission_low = _submit(
+        client, dev_low, contest["id"], requirement_id=requirement_id, grounded=False
+    )
+
+    _close_contest(client, contest, deadline=deadline)
+    _run_scoring(client)
+    _end_judging_period(client, contest["id"])
+    _advance_past_distribution_wait(contest["id"])
+    _run_due_distributions(client)
+
+    payout = Payout.objects.get(distribution_share__submission_id=submission_high["id"])
+    assert payout.status == Payout.Status.CONFIRMED_IDENTITY_PENDING
+    assert not DistributionShare.objects.filter(submission_id=submission_low["id"]).exists()
+
+    resp = client.get("/api/submissions/mine", **_auth_header(dev_high["access"]))
+    assert resp.status_code == 200
+    row = next(r for r in resp.json()["items"] if r["submission_id"] == submission_high["id"])
+    # Award 경로의 같은 Hold(IDENTITY)가 내는 것과 정확히 같은 값이다 — 배분
+    # 경로가 자기만의 번역을 갖지 않는다(#177 AC).
+    assert row["next_action"] == "submit_tax_identity"
+
+    # 컷라인을 넘지 못해 DistributionShare 자체가 없는 Developer 에게는 여전히
+    # 지급 링크가 없다(#177 AC "모든 행에 건다로 넓히지 않는다") — 눌러 봐야
+    # 서버가 거절할 버튼을 만들지 않는다.
+    low_resp = client.get("/api/submissions/mine", **_auth_header(dev_low["access"]))
+    assert low_resp.status_code == 200
+    low_row = next(r for r in low_resp.json()["items"] if r["submission_id"] == submission_low["id"])
+    assert low_row["next_action"] == "awaiting_distribution"
+
+
+@pytest.mark.django_db
 def test_one_poisoned_share_does_not_block_other_shares_in_same_scan(
     client, category, landing_type
 ):

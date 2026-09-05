@@ -45,8 +45,14 @@ class HoldKind(str, Enum):
     SELLER_REVIEW = "seller_review"
     # 수취인 등록 거절 — Operator 의 차례.
     SELLER_REJECTED = "seller_rejected"
-    # 등록 접수 후 응답 대기 — 벤더의 차례.
+    # 연락처는 다 있는데 등록이 벤더 오류로 접수되지 못했다 — 자력 회복 스캔
+    # (#178, `payouts.recovery`)이 다시 시도하는 중이다. 벤더의 차례다: 우리가
+    # 계속 다시 부르고 있고, 사람이 할 일은 아직 없다.
     SELLER_PENDING = "seller_pending"
+    # 위 자력 회복 스캔이 상한(`MAX_AUTO_SELLER_REGISTRATION_ATTEMPTS`)만큼
+    # 재시도하고도 등록을 접수시키지 못했다 — 계속 벤더의 차례라고 말하면
+    # 아무도 다시 보지 않는다(#178). Operator 의 차례.
+    SELLER_REGISTRATION_STUCK = "seller_registration_stuck"
     # Seller 는 READY, 실이체 확인 중 — 벤더의 차례.
     TRANSFER_CONFIRMING = "transfer_confirming"
     # Seller 는 READY 인데 실이체가 거절됐다 — Developer 가 다시 시도할 수 있다.
@@ -79,6 +85,7 @@ TURN_OF: dict[HoldKind, Turn] = {
     HoldKind.SELLER_REVIEW: Turn.VENDOR,
     HoldKind.SELLER_REJECTED: Turn.OPERATOR,
     HoldKind.SELLER_PENDING: Turn.VENDOR,
+    HoldKind.SELLER_REGISTRATION_STUCK: Turn.OPERATOR,
     HoldKind.TRANSFER_CONFIRMING: Turn.VENDOR,
     HoldKind.TRANSFER_RETRY: Turn.DEVELOPER,
     HoldKind.TRANSFER_RETRY_IDENTITY_RECORDED: Turn.DEVELOPER,
@@ -99,6 +106,10 @@ BLOCKED_ON_OF: dict[HoldKind, str | None] = {
     HoldKind.SELLER_REVIEW: "seller",
     HoldKind.SELLER_REJECTED: "seller",
     HoldKind.SELLER_PENDING: "seller",
+    # Turn 은 Operator 지만 거친 축은 그대로 "seller" 다(SELLER_REJECTED 와
+    # 같은 이유) — 무엇이 막고 있는지(Seller 등록)는 바뀌지 않았고, 누구
+    # 차례인지만 바뀌었다. 운영자 큐의 "Seller" 탭에서 계속 보인다.
+    HoldKind.SELLER_REGISTRATION_STUCK: "seller",
     HoldKind.TRANSFER_CONFIRMING: "transfer",
     HoldKind.TRANSFER_RETRY: "transfer",
     HoldKind.TRANSFER_RETRY_IDENTITY_RECORDED: "transfer",
@@ -173,15 +184,32 @@ NEXT_ACTION_MESSAGES: dict[HoldKind, str] = {
         "지급대행사 수취인 등록이 거절되었습니다. 상금은 원장에 그대로 "
         "남아 있습니다 — 운영자에게 문의해주세요."
     ),
-    HoldKind.SELLER_PENDING: "지급대행사 수취인 등록이 진행 중입니다. 완료되면 자동으로 다음 단계로 넘어갑니다.",
+    # #178 — "진행 중"이 아니라 "접수되지 않았다"가 사실이다. 자력 회복
+    # 스캔(`payouts.recovery`)이 다시 시도하고 있다는 것까지 정직하게 말한다 —
+    # 「완료되면 자동으로 넘어갑니다」는 그 스캔이 실제로 돌고 있어야만 참이다.
+    HoldKind.SELLER_PENDING: (
+        "지급대행사 수취인 등록 요청이 아직 접수되지 않았습니다 — 시스템이 "
+        "자동으로 다시 시도하고 있습니다. 완료되면 자동으로 다음 단계로 "
+        "넘어갑니다."
+    ),
+    # #178 — 위 자력 회복이 상한만큼 시도하고도 풀지 못했다. 계속 "자동으로
+    # 넘어갑니다"라고 말하면 침묵을 상금이 사라진 것으로 읽게 만든다.
+    HoldKind.SELLER_REGISTRATION_STUCK: (
+        "지급대행사 수취인 등록이 반복적으로 접수되지 않았습니다. 상금은 "
+        "원장에 그대로 남아 있습니다 — 운영자가 확인 후 다시 진행합니다."
+    ),
     HoldKind.TRANSFER_CONFIRMING: "실이체 확인이 진행 중입니다. 잠시만 기다려주세요.",
     HoldKind.TRANSFER_RETRY: (
         "지급대행사 등록은 끝났지만 실제 이체가 거절되었습니다 — 상금은 "
         "원장에 그대로 남아 있습니다. 아래에서 다시 시도해주세요."
     ),
+    # #181 — 이 갈래는 정의상 주민등록번호가 이미 제출된 상태다("_RECORDED").
+    # 옛 문구는 옆 갈래(신원 미제출 + 이체 실패)가 빌려 쓰려고 쓴 것을 그대로
+    # 자기 이름의 갈래에도 붙여 둔 것이었다 — 이미 낸 사람에게 계속 내라고
+    # 말하는 거짓이었다. 이 갈래 자신의 사실(이체만 다시 시도하면 된다)을 말한다.
     HoldKind.TRANSFER_RETRY_IDENTITY_RECORDED: (
         "실제 이체가 실패로 확인되었습니다 — 상금은 원장에 그대로 남아 "
-        "있습니다. 세무 신고를 위한 주민등록번호는 계속 제출해주세요."
+        "있습니다. 아래에서 다시 시도해주세요."
     ),
     HoldKind.TRANSFER_OPERATOR: (
         "지급이 확정되었지만 실제 이체가 실패로 확인되었습니다 — 상금은 "
@@ -195,9 +223,18 @@ assert_covers_all_kinds(NEXT_ACTION_MESSAGES, name="NEXT_ACTION_MESSAGES")
 
 # 신원 미제출 상태에서 실이체 실패도 함께 확인된 경우 — 신원 제출을 막을 이유는 없지만
 # (독립적인 두 축), 실이체가 실패했다는 사실을 감추지 않는다(#57 코드리뷰 지적 4).
-_IDENTITY_AFTER_TRANSFER_FAILURE_MESSAGE = NEXT_ACTION_MESSAGES[
-    HoldKind.TRANSFER_RETRY_IDENTITY_RECORDED
-]
+#
+# **독립된 문구다 — 빌려 쓰지 않는다(#181).** 예전에는 이 문구를
+# `NEXT_ACTION_MESSAGES[HoldKind.TRANSFER_RETRY_IDENTITY_RECORDED]`에서 빌려 왔는데,
+# 그 갈래는 정의상 신원이 이미 제출된 상태라 자기 이름의 문구가 "주민등록번호를
+# 계속 제출해주세요"를 말하는 거짓이 됐다(#181이 고친 회귀). 이 문구(신원 미제출 +
+# 이체 실패)만 신원 제출을 안내해야 하므로 독립적으로 적는다 — 다른 갈래의 문구가
+# 바뀌어도 이 문구는 따라 흔들리지 않는다.
+_IDENTITY_AFTER_TRANSFER_FAILURE_MESSAGE = (
+    "세무 신고를 위해 주민등록번호를 제출해주세요 — 그리고 실제 이체가 실패로 "
+    "확인되었습니다. 상금은 원장에 그대로 남아 있으니 이체는 아래에서 다시 "
+    "시도할 수 있습니다."
+)
 
 
 def next_action_message(hold: "Hold") -> str:
@@ -207,6 +244,17 @@ def next_action_message(hold: "Hold") -> str:
     if hold.kind is HoldKind.IDENTITY and hold.transfer_failed:
         return _IDENTITY_AFTER_TRANSFER_FAILURE_MESSAGE
     return NEXT_ACTION_MESSAGES[hold.kind]
+
+
+# 자력 회복 스캔(`payouts.recovery`, #178)이 벤더 오류를 몇 번까지 다시 시도한 뒤
+# Operator 의 차례로 넘기는가. 스캔 기본 주기(`core.scans.DEFAULT_INTERVAL_SECONDS`,
+# 60초) 기준으로 5회면 약 5분 — 일시적 벤더 5xx·네트워크 오류가 몇 분 안에 걷히는
+# 것은 자동으로 회복시키고, 그래도 안 풀리면(자격증명 오류처럼 재시도로는 절대
+# 안 풀리는 원인일 수 있다) 더 기다리지 않고 사람에게 넘긴다 — 상금이 조용히
+# 묶이는 시간을 최소로 좁힌다. 시도 횟수 상한이지 시간 간격이 아니다 — 스캔이
+# 아니라 Developer의 연락처 재제출(`submit_seller_contact`)로도 재시도가 걸릴 수
+# 있어(#168), 시간 기준이면 그 경로가 상한을 우회한다.
+MAX_AUTO_SELLER_REGISTRATION_ATTEMPTS = 5
 
 
 def hold_of(payout: Payout, *, seller: Seller | None, has_identity: bool) -> Hold:
@@ -252,6 +300,17 @@ def hold_of(payout: Payout, *, seller: Seller | None, has_identity: bool) -> Hol
             # #168 이 이메일까지 넓힌다). 이메일이 없는 것만으로도 이 갈래다 —
             # 이전에는 벤더의 차례로 잘못 읽혔다(#168 이 닫는 회귀).
             kind = HoldKind.SELLER_CONTACT
+        elif (
+            seller is not None
+            and seller.status == Seller.Status.PENDING
+            and seller.registration_error_count >= MAX_AUTO_SELLER_REGISTRATION_ATTEMPTS
+        ):
+            # 연락처는 다 있다(위 SELLER_CONTACT 분기를 지났다) — 그런데도
+            # seller_id 가 없다는 것은 등록이 벤더 오류로 계속 접수되지
+            # 못했다는 뜻이고, 자력 회복 스캔이 상한만큼 다시 시도하고도
+            # 풀지 못했다(#178). 더 기다리게 하지 않고 Operator 의 차례로
+            # 넘긴다.
+            kind = HoldKind.SELLER_REGISTRATION_STUCK
         else:
             kind = HoldKind.SELLER_PENDING
     else:
@@ -317,6 +376,74 @@ def with_hold_facts(payouts):
             _seller_status_via("handover__award__submission__developer_id"),
             _seller_status_via("distribution_share__submission__developer_id"),
         ),
+    )
+
+
+def with_seller_registration_status(payouts):
+    """운영자 큐 전용 추가 사실(#178, `OperatorPayoutOut.seller_registration_status`).
+
+    `with_hold_facts` 의 `seller_status` 만으로는 「연락처를 아직 못 받았다」·
+    「연락처는 있는데 등록이 벤더 오류로 접수 안 됐다(재시도 중)」·「재시도를
+    포기했다」 셋이 구별되지 않는다 — 셋 다 `Seller.Status.PENDING` 이다. 이
+    함수가 Seller 의 나머지 사실(등록 식별자·연락처 존재·오류 횟수)을 SQL 에서
+    추가로 물어 온다 — `test_operator_payout_queue_does_not_query_per_row`(#91)가
+    이미 강제하듯, 행마다 `Payout.seller` 를 다시 읽으면 페이지 안 행 수만큼
+    질의가 늘어난다.
+
+    판정 규칙은 `hold_of` 의 `SELLER_REGISTRATION_STUCK`/`SELLER_PENDING` 분기와
+    **같아야 한다** — 둘이 갈리면 큐 목록(SQL)과 단건 조회(파이썬)가 다른 답을
+    낸다. 표를 옮겨 적는 위험은 `blocked_on_q` 위의 주석과 같다.
+
+    **`with_hold_facts` 뒤에 이어 붙여야 한다** — Seller 상태 자체는 다시
+    묻지 않고 그 함수가 이미 annotate 해 둔 `seller_status` 를 그대로 쓴다
+    (호출부 둘 다 이미 `with_hold_facts(...)` 뒤에 이 함수를 잇는다). 여기서
+    또 같은 Subquery/Coalesce 쌍을 새로 만들면 페이지·응답 하나마다 같은
+    Seller 상태 질의가 두 번 실행된다.
+    """
+
+    from django.db.models import Case, CharField, OuterRef, Q, Subquery, Value, When
+    from django.db.models.functions import Coalesce
+
+    def _seller_field_via(developer_path: str, field: str):
+        return Subquery(
+            Seller.objects.filter(developer_id=OuterRef(developer_path)).values(field)[:1]
+        )
+
+    def _seller_field(field: str, default):
+        return Coalesce(
+            _seller_field_via("handover__award__submission__developer_id", field),
+            _seller_field_via("distribution_share__submission__developer_id", field),
+            Value(default),
+        )
+
+    annotated = payouts.annotate(
+        _seller_id_for_registration=_seller_field("seller_id", ""),
+        # 값을 복호화하지 않는다 — 이 판정에 필요한 것은 「제출됐는가」(빈
+        # 문자열이 아닌가)뿐이고, 그건 암호문 자체의 존재로 답할 수 있다
+        # (`Seller.phone_number` setter — 값이 없으면 암호문도 빈 문자열이다).
+        _seller_phone_for_registration=_seller_field("phone_number_encrypted", ""),
+        _seller_email_for_registration=_seller_field("email", ""),
+        _seller_errors_for_registration=_seller_field("registration_error_count", 0),
+    )
+
+    pending_unaccepted = (
+        Q(seller_status=Seller.Status.PENDING)
+        & Q(_seller_id_for_registration="")
+        & ~Q(_seller_phone_for_registration="")
+        & ~Q(_seller_email_for_registration="")
+    )
+
+    return annotated.annotate(
+        seller_registration_status=Case(
+            When(
+                pending_unaccepted
+                & Q(_seller_errors_for_registration__gte=MAX_AUTO_SELLER_REGISTRATION_ATTEMPTS),
+                then=Value("stuck"),
+            ),
+            When(pending_unaccepted, then=Value("retrying")),
+            default=Value(None),
+            output_field=CharField(null=True),
+        )
     )
 
 
@@ -741,5 +868,42 @@ def advance(
 
     if target != original:
         Payout.objects.filter(pk=payout.pk, status=original).update(status=target)
+    payout.refresh_from_db()
+    return payout
+
+
+def retry_confirmed_transfer(payout: Payout, *, adapter=None) -> Payout:
+    """`HoldKind.TRANSFER_OPERATOR`(CONFIRMED 뒤 뒤늦게 실이체 실패가 확인된 Payout)의
+    실이체를 다시 시도한다(#182 — 운영자 표면의 새 진입점).
+
+    벤더를 부르는 코드는 새로 만들지 않는다 — 다른 모든 실이체 재시도가 쓰는
+    `_request_real_transfer` 그대로다. `advance()`는 `status` 가
+    `CONFIRMED_IDENTITY_PENDING`/`CONFIRMED_SELLER_PENDING` 일 때만 이 상태를
+    다시 진행시키는데(위 early return), CONFIRMED 로 이미 넘어간 뒤에는 그
+    조건에 걸리지 않아 이 상태(#57/ADR-0008 이 "자기 서비스 재시도 경로가 아직
+    없다"고 적어 둔 바로 그 자리)를 아무도 다시 부를 수 없었다 — 이 함수가 그
+    진입로를 연다.
+
+    `status` 는 이미 CONFIRMED 였으므로 성공해도 되돌리지 않는다(ADR-0004,
+    `TransferStatus` 의 독스트링 — 원장 분개는 확정 시점에 이미 남았고 이
+    필드는 실이체 자체의 진행만 기록한다). Seller 가 READY 가 아니면(웹훅으로
+    거절이 뒤늦게 들어온 경우 등) 아무 것도 하지 않고 그대로 돌려준다 — 이
+    함수는 호출부(`payouts.services.retry_payout_for_operator`)가 Hold 로 미리
+    걸러 준 상태에서만 불린다는 전제이지만, 그 전제가 깨져도 안전하게 아무
+    일도 하지 않는다.
+    """
+
+    from .adapters import get_adapter as _get_adapter
+
+    T = Payout.TransferStatus
+    payout.refresh_from_db()
+    if payout.status != Payout.Status.CONFIRMED or payout.transfer_status != T.FAILED:
+        return payout
+
+    seller = payout.seller
+    if seller is None or seller.status not in Seller.READY_STATUSES:
+        return payout
+
+    _request_real_transfer(payout, seller, adapter or _get_adapter())
     payout.refresh_from_db()
     return payout

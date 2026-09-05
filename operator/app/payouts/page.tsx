@@ -11,10 +11,11 @@
 //
 // 색인 대상이 아니므로(ADR-0021) 클라이언트 컴포넌트로 둔다 — operator/app/page.tsx
 // 와 같은 판단.
-import { Suspense } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 
 import { useSession } from "@/lib/auth/use-session";
+import { retryPayoutForOperator } from "@/lib/payouts/actions";
 import {
   usePayoutQueue,
   type BlockedOnFilter,
@@ -39,26 +40,102 @@ const BLOCKED_ON_LABEL: Record<BlockedOnKind, string> = {
   transfer: "실이체 대기 — 이체 재시도 필요",
 };
 
-function PayoutBadge({ blockedOn }: { blockedOn: string }) {
+// 접수되지 않은 Seller 등록의 두 하위 사실(#178) — "seller" 축의 기본 문구
+// (「지급대행사 처리 대기」)는 이 경우엔 거짓이다: 지급대행사는 이 등록을
+// 모른다. 자동 재시도가 도는 중인지, 포기해서 사람의 차례가 됐는지를 갈라
+// 말한다(`seller_registration_status`, `payouts.progress.
+// seller_registration_status_of` 가 판정한 값).
+const SELLER_REGISTRATION_LABEL: Record<"retrying" | "stuck", string> = {
+  retrying: "Seller 등록 대기 — 등록이 아직 접수되지 않아 자동으로 재시도하는 중입니다",
+  stuck: "Seller 등록 대기 — 자동 재시도가 실패해 운영자 확인이 필요합니다",
+};
+
+function labelFor(blockedOn: string, sellerRegistrationStatus: string | null): string {
+  if (
+    blockedOn === "seller" &&
+    (sellerRegistrationStatus === "retrying" || sellerRegistrationStatus === "stuck")
+  ) {
+    return SELLER_REGISTRATION_LABEL[sellerRegistrationStatus];
+  }
+  return BLOCKED_ON_LABEL[blockedOn as BlockedOnKind] ?? blockedOn;
+}
+
+function PayoutBadge({
+  blockedOn,
+  sellerRegistrationStatus,
+}: {
+  blockedOn: string;
+  sellerRegistrationStatus: string | null;
+}) {
   return (
     <span
       data-testid={`payout-blocked-badge-${blockedOn}`}
       data-blocked-on={blockedOn}
+      data-seller-registration-status={sellerRegistrationStatus ?? undefined}
       className={`badge-waiting badge-waiting-${blockedOn}`}
     >
-      {BLOCKED_ON_LABEL[blockedOn as BlockedOnKind] ?? blockedOn}
+      {labelFor(blockedOn, sellerRegistrationStatus)}
     </span>
   );
 }
 
-function PayoutRow({ payout }: { payout: OperatorPayoutRow }) {
+function PayoutRow({ payout, onRetried }: { payout: OperatorPayoutRow; onRetried: () => void }) {
   return (
     <li data-testid={`payout-row-${payout.idempotency_key}`} data-blocked-on={payout.blocked_on ?? ""}>
       <span data-testid="payout-row-contest">콘테스트 #{payout.contest_id}</span>
       <span data-testid="payout-row-developer">개발자 #{payout.developer_user_id}</span>
       <span data-testid="payout-row-amount">{payout.net_amount.toLocaleString("ko-KR")}원</span>
-      {payout.blocked_on && <PayoutBadge blockedOn={payout.blocked_on} />}
+      {payout.blocked_on && (
+        <PayoutBadge
+          blockedOn={payout.blocked_on}
+          sellerRegistrationStatus={payout.seller_registration_status}
+        />
+      )}
+      {/* 큐가 "재시도 필요"라고 적어 놓고 할 방법이 없던 자리다(#182) — Operator
+          의 차례인 행에만 뜬다(`operator_actionable`, 서버가 판정한다). 그 밖
+          (UNKNOWN 포함)에는 뜨지 않는다 — 눌러 봐야 서버가 거절할 버튼을 만들지
+          않는다. 실제 행동은 기존 도메인 경로(수취인 재등록·실이체 재시도)를
+          그대로 탄다. */}
+      {payout.operator_actionable ? (
+        <RetryButton idempotencyKey={payout.idempotency_key} onRetried={onRetried} />
+      ) : null}
     </li>
+  );
+}
+
+function RetryButton({
+  idempotencyKey,
+  onRetried,
+}: {
+  idempotencyKey: string;
+  onRetried: () => void;
+}) {
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function handleClick() {
+    setPending(true);
+    setMessage(null);
+    const result = await retryPayoutForOperator(idempotencyKey);
+    if (result.ok) {
+      onRetried();
+      return;
+    }
+    setMessage(result.message);
+    setPending(false);
+  }
+
+  return (
+    <span data-testid={`payout-retry-${idempotencyKey}`}>
+      <button type="button" onClick={handleClick} disabled={pending} data-testid="payout-retry-submit">
+        {pending ? "진행하는 중..." : "진행"}
+      </button>
+      {message ? (
+        <span role="alert" data-testid="payout-retry-error">
+          {message}
+        </span>
+      ) : null}
+    </span>
   );
 }
 
@@ -93,7 +170,11 @@ function PayoutQueueContent() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const filter = parseFilter(searchParams.get("blocked_on"));
-  const queue = usePayoutQueue(filter, session.status === "authenticated");
+  // 운영자가 막힌 지급을 진행시킨 뒤 큐를 다시 읽는다(#182) — 그 행이 실제로
+  // 바뀌었는지(문구가 바뀌거나 큐에서 사라지는지)를 새로 고침 없이 보여준다.
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const queue = usePayoutQueue(filter, session.status === "authenticated", refreshNonce);
+  const refetchAfterRetry = () => setRefreshNonce((current) => current + 1);
 
   function selectFilter(next: BlockedOnFilter) {
     if (next === "all") {
@@ -151,7 +232,7 @@ function PayoutQueueContent() {
 
           <ul data-testid="payout-queue-list">
             {queue.rows.map((payout) => (
-              <PayoutRow key={payout.idempotency_key} payout={payout} />
+              <PayoutRow key={payout.idempotency_key} payout={payout} onRetried={refetchAfterRetry} />
             ))}
           </ul>
 

@@ -34,7 +34,9 @@ from __future__ import annotations
 import logging
 
 from django.db import IntegrityError, transaction
+from django.db.models import F
 
+from core.clock import Clock
 from ledger.models import Account, EntrySide
 from ledger.services import LineInput, post_journal_entry
 from policies.models import PlatformPolicy
@@ -42,7 +44,7 @@ from policies.scope import current_policy
 from verification.crypto import encrypt
 
 from .adapters import SellerError, get_seller_adapter
-from .models import Payout, Seller, TaxIdentity
+from .models import OperatorPayoutAction, Payout, Seller, TaxIdentity
 from .targets import PayoutTarget
 
 logger = logging.getLogger(__name__)
@@ -210,6 +212,19 @@ def ensure_seller_registered(developer, *, simulate: str | None = None) -> Selle
     벤더에 보낼 신원(실명·이메일·전화번호)과 기존 식별자는 **여기서** 조립한다(#136) — adapter 는
     우리 테이블을 읽지 않는다. 거절된 등록의 재시도는 새 등록이어야 하므로 그때는 기존 식별자를
     넘기지 않는다. 주간 한도 힌트(weekly_limit_hint)는 스코프의 정책에서 읽어 Fake 에 실어 준다.
+
+    **알려진 한계 — 이 함수는 락도 조건부 UPDATE 도 없다**(#178/#182 코드리뷰 지적). 읽기
+    (`existing = Seller.objects.filter(...).first()`) 와 쓰기(`update_or_create`) 사이에
+    벤더 HTTP 호출이 끼는데, `_request_real_transfer`의 `_claim_transfer_attempt`(조건부
+    UPDATE 로 먼저 선점한 뒤에 벤더를 부른다)와 같은 선점 장치가 여기 없다. 이 함수를
+    부르는 자리가 이제 넷이다(확정·Developer 재시도·자력 회복 스캔·운영자 재시도) —
+    자력 회복 스캔(60초 주기)이 사람의 재시도와 거의 동시에 같은 Seller 를 다시 부르면,
+    두 호출이 같은 옛 상태를 읽고 각각 벤더를 부른 뒤 나중에 커밋하는 쪽이 먼저 커밋한
+    쪽의 결과를 조용히 덮어쓸 수 있다(예: 거절이 방금 성공으로 되돌아온 것을 다시
+    PENDING 으로 덮거나, 늘어야 할 registration_error_count 가 한 번 씻긴다). 최악의
+    결과는 재시도 타이밍이 한 주기 어긋나는 것이지 원장이나 Seller.status 가 실제로
+    틀린 값에 영구히 머무는 것은 아니다(다음 스캔 실행이 다시 시도한다) — 그래도 실물
+    벤더 아래에서 이 자리를 굳히려면 같은 선점 패턴을 들여야 한다.
     """
 
     existing = Seller.objects.filter(developer=developer).first()
@@ -234,9 +249,26 @@ def ensure_seller_registered(developer, *, simulate: str | None = None) -> Selle
             "두고 기존 Seller 상태를 유지한다.",
             developer.id,
         )
+        # 이 벤더 오류 자체를 센다(#178) — 자력 회복 스캔(`payouts.recovery`)이
+        # 이 값을 보고 언제 재시도를 멈추고 Operator 의 차례로 넘길지 정한다.
+        # 등록이 (정상 응답으로) 다시 성공하면 아래 update_or_create 가 0으로
+        # 되돌린다.
         if existing is not None:
+            Seller.objects.filter(pk=existing.pk).update(
+                registration_error_count=F("registration_error_count") + 1
+            )
+            existing.refresh_from_db(fields=["registration_error_count"])
             return existing
-        seller, _created = Seller.objects.get_or_create(developer=developer)
+        seller, created = Seller.objects.get_or_create(
+            developer=developer, defaults={"registration_error_count": 1}
+        )
+        if not created:
+            # 락 없는 조회-후-생성 경합으로 그 사이 다른 호출이 이미 만들어
+            # 둔 것이다(드물다) — 그래도 이 오류는 잃지 않는다.
+            Seller.objects.filter(pk=seller.pk).update(
+                registration_error_count=F("registration_error_count") + 1
+            )
+            seller.refresh_from_db(fields=["registration_error_count"])
         return seller
 
     if result.status == "pending":
@@ -260,6 +292,10 @@ def ensure_seller_registered(developer, *, simulate: str | None = None) -> Selle
             "seller_id": stored_seller_id,
             "status": result.status,
             "weekly_limit_amount": result.weekly_limit_amount,
+            # 벤더가 정상 응답했다(성공이든 거절이든 심사든) — 연속 벤더 오류
+            # 카운터를 되돌린다(#178). 오류는 어댑터가 예기치 못하게 실패했을
+            # 때만 세므로, 여기 도달했다는 사실 자체가 "이번엔 오류가 아니다".
+            "registration_error_count": 0,
         },
     )
 
@@ -483,3 +519,65 @@ def submit_seller_contact(
 
     seller.refresh_from_db()
     return seller
+
+
+class PayoutNotOperatorActionable(Exception):
+    """Operator 가 이 Payout 에 대해 지금 취할 수 있는 행동이 없다(#182) — API 층이
+    이것을 409 로 옮긴다."""
+
+
+def retry_payout_for_operator(payout: Payout, *, operator) -> Payout:
+    """Operator 가 큐에서 막힌 Payout 을 기존 도메인 경로로 진행시킨다(#182).
+
+    Hold 가 정확히 「Operator 의 차례」인 세 갈래만 받는다 — 그 밖(Developer·
+    벤더의 차례, 또는 이미 안 막힘)은 `PayoutNotOperatorActionable` 이다. 셋
+    다 **기존 서비스 함수를 그대로 부른다** — 운영자 전용 재시도 로직을 따로
+    만들지 않는다(#182 AC):
+
+    - `SELLER_REJECTED`·`SELLER_REGISTRATION_STUCK` — 수취인 재등록
+      (`retry_seller_registration`, Developer 의 「다시 시도」 버튼과 같은 함수).
+    - `TRANSFER_OPERATOR` — 실이체 재시도(`payouts.progress.
+      retry_confirmed_transfer` — 다른 모든 실이체 재시도가 쓰는
+      `_request_real_transfer` 그대로다).
+
+    `UNKNOWN`은 받지 않는다 — Hold 표에 없는 조합이라는 뜻이고(`progress.py`가
+    "도달 불가여야 하는 곳에 도달했다면 불변식이 깨진 것"이라 적은 자리), 어느
+    기존 함수를 부르는 것이 옳은지 자체를 코드가 모른다. 버튼을 다는 대신
+    사람이 데이터를 직접 살펴보게 두는 것이 이 티켓의 결정이다(#182 AC — 보이게만
+    한다).
+
+    성공하든 이미 다른 경로로 풀려 있든(재전송·경합) `OperatorPayoutAction`을
+    남긴다 — 이 호출이 있었다는 사실 자체가 감사 대상이다. 행동이 아무 효과도
+    못 냈을 때(예: 그 사이 벤더가 다시 거절했다)도 "운영자가 눌렀다"는 사실은
+    남아야 한다.
+
+    **알려진 한계 — 감사 기록이 재시도와 같은 트랜잭션이 아니다**(코드리뷰
+    지적). `retry_seller_registration`/`retry_confirmed_transfer` 는 내부에서
+    벤더 HTTP 를 부르므로(이 저장소의 규율상 벤더 호출은 트랜잭션 밖에서 한다 —
+    `advance()` 독스트링과 같은 이유) 그 호출과 `OperatorPayoutAction.objects.
+    create()` 를 하나의 `transaction.atomic()` 으로 묶을 수 없다. 재시도가
+    커밋된 뒤, 감사 행 삽입 전에 프로세스가 죽으면 "운영자가 눌렀다"는 기록
+    없이 상태만 바뀐 채 남는다 — 이 함수 docstring 이 요구하는 "이 호출이
+    있었다는 사실은 항상 남는다"가 이 좁은 창에서는 지켜지지 않는다. 원장·
+    Seller 상태는 어느 경우에도 올바르므로 돈이 새는 경로는 아니다.
+    """
+
+    from .progress import HoldKind, hold_of, retry_confirmed_transfer
+
+    seller = payout.seller
+    has_identity = TaxIdentity.objects.filter(payout=payout).exists()
+    hold = hold_of(payout, seller=seller, has_identity=has_identity)
+
+    if hold.kind in (HoldKind.SELLER_REJECTED, HoldKind.SELLER_REGISTRATION_STUCK):
+        payout = retry_seller_registration(payout)
+    elif hold.kind is HoldKind.TRANSFER_OPERATOR:
+        payout = retry_confirmed_transfer(payout)
+    else:
+        raise PayoutNotOperatorActionable(
+            f"이 지급은 Operator 가 진행시킬 수 있는 상태가 아닙니다(hold={hold.kind.value})."
+        )
+
+    OperatorPayoutAction.objects.create(
+        payout=payout, operator=operator, hold_kind=hold.kind.value, acted_at=Clock.now()
+    )
+    return payout

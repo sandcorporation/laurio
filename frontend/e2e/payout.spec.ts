@@ -129,3 +129,65 @@ test("연락처를 부분 제출해도 이미 낸 값은 다시 묻지 않는다
   // 둘 다 냈다 — 폼 자체가 사라진다.
   await expect(page.getByTestId("payout-seller-contact-form")).toHaveCount(0);
 });
+
+// --- #181: 실패한 지급도 다시 요청할 수 있다 ---------------------------------------
+//
+// 「남길 것」기준의 돈이 움직이는 곳(지급) — 백엔드가 명시적으로 지원하는 재시도
+// 경로(get_or_create_payout, backend/tests/test_payout_retry_and_wording.py 가 실물로
+// 검증한다)를 화면이 실제로 열어 주는지가 여기서 볼 것이다.
+test("실패한 지급에 다시 요청 버튼이 있고 누르면 새 요청이 나간다", async ({ page }) => {
+  const seeded = await seedE2eContests();
+  await login(page, `e2e-payout-retry-failed-${Date.now()}`);
+  const contestId = seeded.judging.id;
+
+  let retried = false;
+
+  await page.route(`**/api/backend/contests/${contestId}/payout`, (route) => {
+    if (route.request().method() === "POST") {
+      retried = true;
+      return route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...AMOUNTS,
+          contest_id: contestId,
+          idempotency_key: "66666666-7777-8888-9999-000000000000",
+          status: "requested",
+          next_action_message: "지급 확인 절차가 진행 중입니다. 잠시만 기다려주세요.",
+        }),
+      });
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(
+        retried
+          ? {
+              ...AMOUNTS,
+              contest_id: contestId,
+              idempotency_key: "66666666-7777-8888-9999-000000000000",
+              status: "requested",
+              next_action_message: "지급 확인 절차가 진행 중입니다. 잠시만 기다려주세요.",
+            }
+          : {
+              ...AMOUNTS,
+              contest_id: contestId,
+              status: "failed",
+              next_action_message: "지급 요청이 실패했습니다. 다시 시도해주세요.",
+            },
+      ),
+    });
+  });
+
+  await page.goto(`/console/payouts/${contestId}`);
+
+  await expect(page.getByTestId("payout-next-action-message")).toContainText("다시 시도");
+  await expect(page.getByTestId("payout-retry-failed-submit")).toBeVisible();
+
+  await page.getByTestId("payout-retry-failed-submit").click();
+
+  // 새 요청(get_or_create_payout)이 실제로 나갔고, 화면이 그 결과로 갱신된다 —
+  // "다시 시도해주세요"가 남아 있으면 버튼이 아무 일도 하지 않은 것이다.
+  await expect(page.getByTestId("payout-next-action-message")).toContainText("진행 중");
+  await expect(page.getByTestId("payout-retry-failed-submit")).toHaveCount(0);
+});

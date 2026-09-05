@@ -95,6 +95,82 @@ test.describe("지급 큐 — 세 번째 배지도 배지로 그려진다(#91)",
 
 });
 
+// --- #182: 막힌 지급을 큐에서 실제로 진행시킨다 ------------------------------------
+//
+// 「남길 것」기준의 돈이 움직이는 곳(지급) — 운영자 지급 큐가 조회 전용이던 결함을
+// 닫는 이 티켓의 핵심 화면 변화다. 이 조합(Operator 의 차례가 된 Seller 등록)을
+// 만드는 시드가 없으므로(위 TRANSFER_ROW 와 같은 이유) 응답을 갈아끼운다 — 확인
+// 대상이 백엔드 판정이 아니라 버튼이 실제로 도메인 경로를 태우는가이기 때문이다
+// (백엔드 실물 검증은 backend/tests/test_operator_payout_retry.py).
+test.describe("지급 큐 — 막힌 지급을 진행시킨다(#182)", () => {
+  const STUCK_ROW = {
+    idempotency_key: "12121212-3434-5656-7878-909090909090",
+    contest_id: 9191,
+    developer_user_id: 88,
+    net_amount: 923_600,
+    status: "confirmed_seller_pending",
+    transfer_status: "not_requested",
+    blocked_on: "seller",
+    seller_status: "pending",
+    seller_registration_status: "stuck",
+    operator_actionable: true,
+    has_identity: false,
+    created_at: new Date().toISOString(),
+  };
+
+  test("Operator 의 차례인 행에 진행 버튼이 뜨고, 누르면 큐에서 사라진다", async ({ page }) => {
+    const operator = await seedE2eOperator();
+
+    let retried = false;
+
+    await page.route("**/api/backend/operator/payouts?**", (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          items: retried ? [] : [STUCK_ROW],
+          count: retried ? 0 : 1,
+          next: null,
+        }),
+      });
+    });
+    await page.route(
+      `**/api/backend/operator/payouts/${STUCK_ROW.idempotency_key}/retry`,
+      (route) => {
+        retried = true;
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ...STUCK_ROW,
+            status: "confirmed_identity_pending",
+            seller_status: "partially_approved",
+            seller_registration_status: null,
+            blocked_on: "identity",
+            operator_actionable: false,
+          }),
+        });
+      },
+    );
+
+    await loginAsOperator(page, operator.username);
+    await page.goto("/payouts?blocked_on=seller");
+    await waitForQueueSettled(page);
+
+    const row = page.getByTestId(`payout-row-${STUCK_ROW.idempotency_key}`);
+    await expect(row).toBeVisible();
+    await expect(row.getByTestId("payout-retry-submit")).toBeVisible();
+
+    await row.getByTestId("payout-retry-submit").click();
+
+    // 재시도 요청이 실제로 나갔고(retried), 그 뒤 큐를 다시 읽어 이 행이
+    // 사라진 것을 보여준다 — 버튼만 있고 아무 일도 안 일어나는 화면이 아니다.
+    await expect(page.getByTestId("payout-queue-empty")).toBeVisible();
+    expect(retried).toBe(true);
+  });
+});
+
 // --- #149: 좁히기·자르기는 백엔드가 한다 ------------------------------------------
 //
 // 예전에는 이 화면이 「전체」에서 엔드포인트 셋을 병렬로 부른 뒤 응답을 이어 붙이고

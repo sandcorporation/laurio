@@ -27,21 +27,37 @@ export type OperatorPayoutRow = components["schemas"]["OperatorPayoutOut"];
 
 export type PayoutQueueState = PagedListState<OperatorPayoutRow>;
 
-function pathFor(filter: BlockedOnFilter): string {
+function pathFor(filter: BlockedOnFilter, refreshNonce: number): string {
   const base = "/api/backend/operator/payouts";
-  return filter === "all" ? base : `${base}?blocked_on=${filter}`;
+  const params = new URLSearchParams();
+  if (filter !== "all") params.set("blocked_on", filter);
+  // 운영자가 막힌 지급을 진행시킨 뒤 목록을 다시 읽기 위한 것뿐이다(#182) —
+  // 백엔드는 이 값을 보지 않는다(선언된 파라미터가 아니라 무시된다). `usePagedList`
+  // 는 "경로가 바뀌면 쌓아 둔 페이지를 버리고 다시 읽는다"는 규약을 이미 갖고
+  // 있으므로(#149), 이 훅에 별도의 refetch 를 새로 만들지 않고 그 규약에 얹는다.
+  if (refreshNonce > 0) params.set("_retried", String(refreshNonce));
+  const query = params.toString();
+  return query ? `${base}?${query}` : base;
 }
 
 /** `enabled`가 false인 동안(세션이 아직 확인되지 않은 동안)은 조회하지 않는다 —
  * operator/lib/home/use-queue-counts.ts와 같은 이유. 경로가 바뀌면 쌓아 둔 페이지를
  * 버리는 것은 `usePagedList` 가 한다(#149) — 「새 탭 아래 이전 필터의 행」이 한
- * 프레임이라도 보이면 ADR-0020이 두 대기를 갈라 둔 이유가 그 자리에서 무너진다. */
-export function usePayoutQueue(filter: BlockedOnFilter, enabled: boolean): PayoutQueueState {
+ * 프레임이라도 보이면 ADR-0020이 두 대기를 갈라 둔 이유가 그 자리에서 무너진다.
+ *
+ * `refreshNonce` 를 올리면 같은 필터를 처음부터 다시 읽는다(#182) — 운영자가
+ * 막힌 지급을 진행시킨 뒤 그 행이 큐에서 실제로 사라지는(또는 문구가 바뀌는)
+ * 것을 보려면 다시 읽어야 한다. */
+export function usePayoutQueue(
+  filter: BlockedOnFilter,
+  enabled: boolean,
+  refreshNonce: number = 0,
+): PayoutQueueState {
   // 세션 확인 전에는 **경로를 주지 않는다**(#149 코드리뷰) — 반환값만 loading 으로
   // 덮으면 요청은 이미 나간 뒤다. 만료된 세션에서는 그 401 이 세션 조회와 경합해
   // 로그인으로 튕기고, 그렇게 실패한 조회는 `enabled` 가 참이 돼도 다시 시도되지 않는다.
   // **커서로 읽는다**(#151/#153). 이 큐는 스캔이 60초마다 Payout 을 확정해 계속 머리에
   // 행이 들어온다 — 오프셋이면 운영자가 「더 보기」를 누르는 그 몇 초 사이에 경계가 밀려
   // 같은 행이 두 번 나오고 그 사이 행 하나가 어느 페이지에도 안 나온다.
-  return usePagedList<OperatorPayoutRow>(bffClient, enabled ? pathFor(filter) : null);
+  return usePagedList<OperatorPayoutRow>(bffClient, enabled ? pathFor(filter, refreshNonce) : null);
 }

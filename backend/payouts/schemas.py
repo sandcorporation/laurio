@@ -160,11 +160,24 @@ class OperatorPayoutOut(Schema):
     seller_status: str | None
     has_identity: bool
     created_at: datetime
+    # 접수되지 않은 Seller 등록이 벤더 오류로 자력 회복 스캔의 재시도를 받는
+    # 중인지("retrying"), 재시도를 포기해 Operator 의 차례가 됐는지("stuck")다
+    # (#178) — "seller" 로 뭉친 축 안에서 「지급대행사 처리 대기」와 가장 갈리는
+    # 사실이라 별도로 내려준다. 그 밖의 "seller" 행(연락처 미제출·본인인증
+    # 대기·심사 중·거절)에는 null 이다.
+    seller_registration_status: str | None
+    # 지금 `POST /operator/payouts/{key}/retry` 로 이 Payout 을 진행시킬 수
+    # 있는가(#182) — Hold 가 정확히 「Operator 의 차례」인 세 갈래(수취인 등록
+    # 거절 · 자력 회복 포기 · 확정 후 실이체 실패)에서만 참이다. `UNKNOWN`(표에
+    # 없는 조합)은 포함하지 않는다 — 그 값에는 버튼이 아니라 사람의 판단이
+    # 필요하다는 것이 이 티켓의 결정이다.
+    operator_actionable: bool
 
-    # 네 값 모두 질의가 이미 알고 있다(#149) — `payouts.progress.with_hold_facts` ·
-    # `with_blocked_on` 이 붙인 주석과 `with_target()` 의 select_related 다. 페이지를
-    # 자른 뒤 행마다 다시 묻지 않는다는 것이 이 티켓의 요점이라, 여기 resolver 는
-    # 조회를 내지 않는다.
+    # 다섯 값 모두 질의가 이미 안다(#149, #178) — `payouts.progress.with_hold_facts` ·
+    # `with_blocked_on` · `with_seller_registration_status` 가 붙인 주석과
+    # `with_target()` 의 select_related 다. 페이지를 자른 뒤 행마다 다시 묻지
+    # 않는다는 것이 이 티켓의 요점이라, 여기 resolver 는 조회를 내지 않는다
+    # (`test_operator_payout_queue_does_not_query_per_row`, #91).
     @staticmethod
     def resolve_contest_id(obj) -> int:
         return obj.contest.id
@@ -182,6 +195,44 @@ class OperatorPayoutOut(Schema):
         from .progress import blocked_on_of_row
 
         return blocked_on_of_row(obj)
+
+    @staticmethod
+    def resolve_seller_registration_status(obj):
+        return obj.seller_registration_status
+
+    @staticmethod
+    def resolve_operator_actionable(obj) -> bool:
+        """`payouts.progress.hold_of` 의 세 갈래(SELLER_REJECTED·
+        SELLER_REGISTRATION_STUCK·TRANSFER_OPERATOR)와 같은 조건이다 — 필요한
+        사실(모델 컬럼 둘 + 이미 annotate 된 `seller_status`·
+        `seller_registration_status`)이 이 행에 이미 다 있어 추가 조회를 내지
+        않는다.
+
+        **`seller_status`·`seller_registration_status` 는 이 Payout 이 아니라
+        Developer(Seller) 단위 사실이다**(`with_hold_facts`가 developer_id 로
+        붙인 Subquery) — 한 Developer 가 Contest 를 여러 번 이겨 활성 Payout 이
+        둘 이상이면, 그중 하나가 Seller 문제로 막혀 있어도 나머지 하나가
+        Identity 대기 등 **전혀 다른 축**으로 막혀 있을 수 있다. `blocked_on_q`
+        의 "seller" 갈래가 이미 자기 `status` 를 먼저 확인한 뒤에만 Seller 쪽
+        사실을 보듯(`progress.py`), 여기서도 이 Payout 자신의 `status` 가
+        CONFIRMED_SELLER_PENDING 일 때만 Seller 쪽 사실을 본다 — 그러지 않으면
+        옆 Payout의 Seller 문제가 이 Payout에도 새어 들어와 실제로는 Developer
+        의 차례(예: IDENTITY)인 행에 진행 버튼이 뜨고, 눌러도
+        `retry_payout_for_operator`가 다시 계산한 Hold 와 어긋나 409 만 돌아온다.
+        """
+
+        from .models import Payout, Seller
+
+        S = Payout.Status
+        T = Payout.TransferStatus
+        if obj.status == S.CONFIRMED and obj.transfer_status == T.FAILED:
+            return True
+        if obj.status == S.CONFIRMED_SELLER_PENDING:
+            if obj.seller_status == Seller.Status.REJECTED:
+                return True
+            if obj.seller_registration_status == "stuck":
+                return True
+        return False
 
 
 class OperatorPayoutPageOut(Schema):

@@ -132,6 +132,10 @@ def _payout_actions():
         HoldKind.SELLER_REVIEW: NextAction.AWAITING_SELLER_REGISTRATION,
         HoldKind.SELLER_REJECTED: NextAction.AWAITING_SELLER_REGISTRATION,
         HoldKind.SELLER_PENDING: NextAction.AWAITING_SELLER_REGISTRATION,
+        # 자력 회복 스캔이 포기해 Operator 의 차례가 된 상태(#178) — SELLER_REJECTED와
+        # 같은 이유로 같은 값에 묶는다: Developer 관점에서는 둘 다 "지급대행 등록이
+        # 여전히 안 끝났고 지금은 내가 할 게 없다"는 같은 사실이다.
+        HoldKind.SELLER_REGISTRATION_STUCK: NextAction.AWAITING_SELLER_REGISTRATION,
         HoldKind.TRANSFER_CONFIRMING: NextAction.AWAITING_SELLER_REGISTRATION,
         HoldKind.TRANSFER_RETRY: NextAction.RETRY_TRANSFER,
         HoldKind.TRANSFER_RETRY_IDENTITY_RECORDED: NextAction.RETRY_TRANSFER,
@@ -147,24 +151,57 @@ def _payout_actions():
 
 
 def _payout_action(submission):
-    """돈이 걸린 단계 — Award·Handover 까지는 여기서 보고, Payout 이 있으면 Hold 로 넘긴다."""
+    """돈이 걸린 단계 — Award·Handover 경로와 Distribution 경로 중 이 submission 이
+    속한 쪽으로 Payout 을 찾고, 있으면 Hold 로 넘긴다(#177).
+
+    **Award 가 있는 Contest 에는 Distribution 이 없다** — Distribution 은 Sponsor 가
+    기한 내 Award 하지 않았을 때만 일어나는 배분이다(CONTEXT.md 「Distribution」).
+    그래서 두 경로는 배타적이고, `award` 유무로 어느 쪽을 볼지 가른다. 판정 자체는
+    어느 경로든 같은 `payouts.progress.hold_of` 하나가 한다 — Award 경로와
+    Distribution 경로가 지급 단계 여부를 각자 적지 않는다(#177 AC).
+    """
 
     from handovers.models import Handover
     from payouts.models import Payout, TaxIdentity
     from payouts.progress import hold_of
 
     award = getattr(submission.contest, "award", None)
-    if award is None or award.submission_id != submission.id:
-        return None
-    handover = getattr(award, "handover", None)
-    if handover is None:
-        return None
-    # `payouts.api.request_payout` 이 요구하는 것과 같은 조건이다.
-    if handover.status != Handover.Status.RELEASED:
-        return NextAction.AWAITING_HANDOVER_RELEASE
-    payout = Payout.objects.filter(handover=handover).order_by("-created_at").first()
-    if payout is None:
-        return NextAction.REQUEST_PAYOUT
+    if award is not None:
+        if award.submission_id != submission.id:
+            return None
+        handover = getattr(award, "handover", None)
+        if handover is None:
+            return None
+        # `payouts.api.request_payout` 이 요구하는 것과 같은 조건이다.
+        if handover.status != Handover.Status.RELEASED:
+            return NextAction.AWAITING_HANDOVER_RELEASE
+        payout = Payout.objects.filter(handover=handover).order_by("-created_at").first()
+        if payout is None:
+            # Award 경로는 Developer 가 직접 요청한다 — `POST .../payout` 이
+            # 있다(request_payout). 이 갈래의 동작은 #177 이전과 그대로다.
+            return NextAction.REQUEST_PAYOUT
+    else:
+        # Award 가 없다 — Distribution 대상일 수 있다(#177). 컷라인을 통과하지
+        # 못한 Submission 은 애초에 `DistributionShare` 가 없으므로(수상하지
+        # 않은 Developer 에게 링크를 넓히지 않는다, #177 AC) 여기서 그대로 빠진다.
+        distribution_share = getattr(submission, "distribution_share", None)
+        if distribution_share is None:
+            return None
+        payout = (
+            Payout.objects.filter(distribution_share=distribution_share)
+            .order_by("-created_at")
+            .first()
+        )
+        if payout is None:
+            # Distribution 경로는 Developer 가 요청하지 않는다 — 내부 스캔이
+            # 자동으로 Payout 을 만든다(`distributions.services`, #16). 여기서
+            # REQUEST_PAYOUT 을 돌려주면 `POST /contests/{id}/payout` 이 Award
+            # 를 요구해(`_get_owned_handover`) 곧바로 404 를 내는 버튼을 보여주게
+            # 된다 — 눌러 봐야 서버가 거절하는 버튼은 만들지 않는다(#177 AC).
+            # 스캔이 아직 이 몫을 처리하지 않은 그 짧은 사이는 배분을 기다리는
+            # 중이라는 말이 그대로 사실이므로 None 을 돌려 `AWAITING_DISTRIBUTION`
+            # 으로 자연스럽게 떨어지게 둔다.
+            return None
 
     has_identity = TaxIdentity.objects.filter(payout=payout).exists()
     hold = hold_of(payout, seller=payout.seller, has_identity=has_identity)

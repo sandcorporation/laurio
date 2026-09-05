@@ -20,6 +20,11 @@ class PayoutsConfig(AppConfig):
         from core.scans import register_scan
 
         from .notifications import PAYOUT_NOTIFICATION_SCANS
+        from .recovery import SELLER_REGISTRATION_RECOVERY_SCANS
 
         for spec in PAYOUT_NOTIFICATION_SCANS:
+            register_scan(spec)
+
+        # 접수되지 않은 Seller 등록의 자력 회복 스캔(#178).
+        for spec in SELLER_REGISTRATION_RECOVERY_SCANS:
             register_scan(spec)
