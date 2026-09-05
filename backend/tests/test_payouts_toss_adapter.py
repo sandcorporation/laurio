@@ -24,7 +24,6 @@ from payouts.models import Seller
 from payouts.adapters_toss import (
     TossPayoutAdapter,
     TossSellerAdapter,
-    assert_covers_all_documented_values,
     jwe_decrypt,
     jwe_encrypt,
     verify_toss_webhook_signature,
@@ -33,22 +32,9 @@ from verification.models import Verification
 
 _SECURE_KEY_HEX = "a" * 64  # 32바이트(A256GCM) — 값 자체는 테스트 전용 더미다.
 
-
-# --- #174: 상태 분류표가 문서를 빠짐없이 덮는지 -------------------------------------
-
-
-def test_assert_covers_all_documented_values_raises_on_gap():
-    """`HoldKind` 번역표·`Contest.Status` 분류와 같은 관용구(#174 AC) — 값이
-    하나 늘거나 오타로 하나 빠지면 모듈 로드 시 바로 터진다는 것을 이 함수
-    자체로 증명한다(실물 모듈은 이미 로드에 성공했으니 그 자체로는 증명이
-    안 된다)."""
-
-    with pytest.raises(RuntimeError, match=r"덮지 않는다.*'B'"):
-        assert_covers_all_documented_values({"A"}, {"A", "B"}, name="_어떤_표")
-
-
-def test_assert_covers_all_documented_values_passes_when_covered():
-    assert_covers_all_documented_values({"A", "B"}, {"A", "B"}, name="_어떤_표")
+# 상태 분류표가 문서를 빠짐없이 덮는지 증명하는 원시 도구(`core.coverage.assert_covers`)
+# 자체의 단위 테스트는 `tests/test_core_coverage.py` 로 옮겼다(#176) — 이 파일이
+# 아니라 그 도구가 사는 자리를 따른다.
 
 
 
@@ -479,9 +465,13 @@ def test_confirm_posts_the_request_as_given_and_maps_completed_to_paid():
     _, kwargs = mock_post.call_args
     assert kwargs["headers"]["Idempotency-Key"] == "22222222-2222-2222-2222-222222222222-1"
     sent_body = jwe_decrypt(kwargs["data"], secure_key_hex=_SECURE_KEY_HEX)
-    assert sent_body["sellerId"] == "seller-1"
+    # 필드 모양은 #175 가 벤더 문서를 다시 확인해 고쳤다 — `sellerId`가 아니라
+    # `destination`(Seller 객체의 `id` 값), `amount`는 정수가 아니라
+    # `{"currency","value"}` 객체(이 도메인은 원 단위 정수만 다룬다, ADR-0004).
+    assert sent_body["destination"] == "seller-1"
     assert sent_body["refPayoutId"] == "22222222-2222-2222-2222-222222222222-1"
-    assert sent_body["amount"] == 900_000
+    assert sent_body["amount"] == {"currency": "KRW", "value": 900_000}
+    assert sent_body["transactionDescription"]
 
 
 def test_confirm_maps_failed_status_to_failed():
