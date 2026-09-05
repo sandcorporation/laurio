@@ -543,6 +543,14 @@ jobs:
             frontend/test-results/
           retention-days: 7
 
+      # **스택을 치우고 끝낸다.** 셀프호스티드 러너는 머신이 남으므로, 안 치우면
+      # 이 잡의 컨테이너·볼륨이 실행마다 쌓이고 포트를 계속 물고 있는다. celery
+      # 잡은 이미 그렇게 하고 있었는데 e2e 두 잡만 빠져 있었다 — 호스티드
+      # 러너에서는 VM 이 사라져 티가 나지 않던 차이다.
+      - name: Tear down the stack
+        if: always()
+        run: docker compose -f docker/compose.dev.yaml down -v --remove-orphans
+
 
   # **운영자 앱 e2e.** 위 잡과 동시에 돈다. 여전히 워커 하나로 돈다 —
   # 큐의 전체 건수를 단언하고 「0건」 테스트가 빈 큐를 요구하기 때문이다.
@@ -685,6 +693,14 @@ jobs:
             frontend/playwright-report/
             frontend/test-results/
           retention-days: 7
+
+      # **스택을 치우고 끝낸다.** 셀프호스티드 러너는 머신이 남으므로, 안 치우면
+      # 이 잡의 컨테이너·볼륨이 실행마다 쌓이고 포트를 계속 물고 있는다. celery
+      # 잡은 이미 그렇게 하고 있었는데 e2e 두 잡만 빠져 있었다 — 호스티드
+      # 러너에서는 VM 이 사라져 티가 나지 않던 차이다.
+      - name: Tear down the stack
+        if: always()
+        run: docker compose -f docker/compose.dev.yaml down -v --remove-orphans
 
   # 프론트 배포 부팅 가드 (FE-13, #38).
   #
@@ -843,9 +859,16 @@ jobs:
       # 브라우저 번들에 값을 구웠는가가 아니다(후자는 docker/frontend.Dockerfile의
       # ARG/ENV 선언이 전담하고, 이미 로컬에서 직접 --build-arg로 지어 확인했다
       # -- 구조가 단순해 회귀 위험이 낮다).
+      # **머신이 남는다 — 잡이 자기 뒤를 치워야 한다.** 호스티드 러너는 VM 이
+      # 통째로 사라져 잔여물이 없지만, 셀프호스티드는 아니다. 앞선 실행이 이
+      # 스텝에서 실패해 컨테이너를 남기자 다음 실행이 `Conflict. The container
+      # name "/frontend-boot-ok" is already in use` 로 죽었다 — 원인은 이번 커밋이 아닌데
+      # 이번 실행이 빨갛게 나는, 진단이 가장 헷갈리는 모양이다.
+      # 시작 전에 지우고(멱등), 끝나면 성공·실패 무관하게 지운다.
       - name: Boots with a complete production config and forces Secure cookies
         run: |
           set -euo pipefail
+          docker rm -f frontend-boot-ok >/dev/null 2>&1 || true
           docker run -d --name frontend-boot-ok \
             -e LAURIO_DEPLOYMENT_TARGET=production \
             -e LAURIO_WEB_ORIGIN=https://laurio.example \
@@ -904,7 +927,10 @@ jobs:
           echo "$set_cookie" | grep -qi "laurio_refresh=.*Secure" \
             || { echo "::error::production인데 laurio_refresh 쿠키에 Secure가 없다"; exit 1; }
 
-          docker rm -f frontend-boot-ok
+
+      - name: Tear down the boot-guard container
+        if: always()
+        run: docker rm -f frontend-boot-ok >/dev/null 2>&1 || true
 
       - name: Dump container state on failure
         if: failure()
@@ -997,9 +1023,16 @@ jobs:
           fi
           echo "$output" | grep -q "LAURIO_API_BASE_URL" || { echo "::error::에러 메시지에 원인이 안 남는다"; exit 1; }
 
+      # **머신이 남는다 — 잡이 자기 뒤를 치워야 한다.** 호스티드 러너는 VM 이
+      # 통째로 사라져 잔여물이 없지만, 셀프호스티드는 아니다. 앞선 실행이 이
+      # 스텝에서 실패해 컨테이너를 남기자 다음 실행이 `Conflict. The container
+      # name "/operator-boot-ok" is already in use` 로 죽었다 — 원인은 이번 커밋이 아닌데
+      # 이번 실행이 빨갛게 나는, 진단이 가장 헷갈리는 모양이다.
+      # 시작 전에 지우고(멱등), 끝나면 성공·실패 무관하게 지운다.
       - name: Boots with a complete production config and forces Secure cookies
         run: |
           set -euo pipefail
+          docker rm -f operator-boot-ok >/dev/null 2>&1 || true
           docker run -d --name operator-boot-ok \
             -e LAURIO_DEPLOYMENT_TARGET=production \
             -e LAURIO_OPERATOR_ORIGIN=https://operator.laurio.example \
@@ -1048,7 +1081,10 @@ jobs:
           echo "$set_cookie" | grep -qi "laurio_operator_session=.*Secure" \
             || { echo "::error::production인데 laurio_operator_session 쿠키에 Secure가 없다"; exit 1; }
 
-          docker rm -f operator-boot-ok
+
+      - name: Tear down the boot-guard container
+        if: always()
+        run: docker rm -f operator-boot-ok >/dev/null 2>&1 || true
 
       - name: Dump container state on failure
         if: failure()
