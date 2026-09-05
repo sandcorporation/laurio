@@ -342,25 +342,25 @@ jobs:
       - name: Bring up the stack with celery
         # dev 기본 기동에는 celery 가 빠져 있다(beat 의 60초 스캔이 e2e 시드를
         # 건드리면 비결정적 실패가 된다) — 이 잡만 프로필로 켠다.
-        run: docker compose -f docker/compose.dev.yaml --profile celery up -d --build
+        run: docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml --profile celery up -d --build
 
       - name: The redis transport driver is actually in the image
         # 파일에 적힌 의존성이 아니라 빌드된 이미지 안을 본다.
         run: |
-          docker compose -f docker/compose.dev.yaml exec -T celery-worker             python -c "import redis, kombu; print('redis', redis.__version__, 'kombu', kombu.__version__)"
+          docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml exec -T celery-worker             python -c "import redis, kombu; print('redis', redis.__version__, 'kombu', kombu.__version__)"
 
       - name: The worker is actually connected to the broker
         # inspect ping 은 브로커를 통해 왕복한다 — 드라이버가 없거나 붙지 못하면
         # 여기서 끝난다.
         run: |
           for i in $(seq 1 30); do
-            if docker compose -f docker/compose.dev.yaml exec -T celery-worker                  celery -A config inspect ping | grep -q pong; then
+            if docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml exec -T celery-worker                  celery -A config inspect ping | grep -q pong; then
               echo "worker: pong"; exit 0
             fi
             sleep 3
           done
           echo "worker 가 브로커에 붙지 못했다"
-          docker compose -f docker/compose.dev.yaml logs celery-worker | tail -50
+          docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml logs celery-worker | tail -50
           exit 1
 
       - name: Beat publishes a due task and the worker executes it
@@ -376,7 +376,7 @@ jobs:
         # 부르므로(#137), 이 이름이 succeeded 로 찍혔다는 것은 등록부의 스캔
         # 중 하나가 실제로 beat -> 브로커 -> worker 경로를 타고 돈 것이다.
         run: |
-          TASK_NAME=$(docker compose -f docker/compose.dev.yaml exec -T celery-worker \
+          TASK_NAME=$(docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml exec -T celery-worker \
             python -c "from core.tasks import run_scan; print(run_scan.name)" | tr -d '\r\n')
           if [ -z "$TASK_NAME" ]; then
             echo "core.tasks.run_scan 의 태스크 이름을 읽지 못했다"
@@ -384,20 +384,20 @@ jobs:
           fi
           echo "찾는 태스크: $TASK_NAME"
           for i in $(seq 1 40); do
-            if docker compose -f docker/compose.dev.yaml logs celery-worker \
+            if docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml logs celery-worker \
                  | grep -q "${TASK_NAME}.*succeeded"; then
               echo "beat -> worker 경로 확인"; exit 0
             fi
             sleep 3
           done
           echo "beat 가 쏜 태스크를 worker 가 실행하지 못했다"
-          docker compose -f docker/compose.dev.yaml logs celery-beat | tail -50
-          docker compose -f docker/compose.dev.yaml logs celery-worker | tail -50
+          docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml logs celery-beat | tail -50
+          docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml logs celery-worker | tail -50
           exit 1
 
       - name: Tear down
         if: always()
-        run: docker compose -f docker/compose.dev.yaml --profile celery down -v
+        run: docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml --profile celery down -v
 
   # **공개 앱 e2e.** 운영자 e2e 와 나눠 **동시에** 돈다 (#104) — 한 잡이 둘을
   # 이어 돌리면 직렬로 남는 부분(공개 배타 패스 2.8분 + 운영자 6.4분)이 병렬
@@ -442,16 +442,13 @@ jobs:
         working-directory: frontend
         run: pnpm install --frozen-lockfile
 
-      # **타입체크와 빌드는 dev 스택을 띄우기 전에 돌린다.** 순서가 취향이 아니라
-      # 필요다: dev compose 의 frontend 서비스는 저장소를 컨테이너에 마운트하고
-      # (`..:/app`) `/app/frontend/.next` 를 이름 있는 볼륨으로 가리는데, Docker 가
-      # 그 마운트 지점을 **호스트 체크아웃에 root 소유로 만든다**. 그러면 러너
-      # 사용자로 도는 `pnpm build` 가 `.next/trace` 를 열지 못해
-      # `EACCES: permission denied` 로 죽는다 — 실제로 이 잡을 연속으로 빨간불로
-      # 만들었다. 빌드가 먼저 돌면 `.next` 는 러너 것이고, 그 뒤 볼륨이 그것을
-      # 가려도 아무도 다시 쓰지 않는다.
+      # next build 만 잡는 오류가 있다(라우트 핸들러 시그니처, standalone 산출물 등).
+      # 여기서 안 돌리면 배포 시점까지 미검출로 남는다.
       #
-      # 부수 효과도 좋다 — 타입 오류가 이미지 빌드를 기다리지 않고 즉시 잡힌다.
+      # **예전에는 이 순서가 필수였다.** dev compose 의 앱 서비스가 저장소를 컨테이너에
+      # 마운트하면서 `.next` 를 호스트 체크아웃에 root 소유로 만들었고, 그러면 러너
+      # 사용자의 `pnpm build` 가 `EACCES` 로 죽었다. CI 가 앱을 컨테이너로 띄우지 않게
+      # 되면서 그 이유는 사라졌다 — 이제 순서는 「오류를 빨리 본다」는 편의일 뿐이다.
       - name: Typecheck (public app)
         working-directory: frontend
         run: pnpm typecheck
@@ -463,37 +460,6 @@ jobs:
         working-directory: frontend
         run: pnpm build
 
-      - name: Bring up the dev stack
-        run: docker compose -f docker/compose.dev.yaml up -d --build frontend
-
-      - name: Wait for the public app to answer
-        # **curl 재시도 플래그에 기대지 않는다.** `--retry-all-errors` 는 curl 7.71+
-        # 에만 있어서 셀프호스티드 러너에서 `option --retry-all-errors: is unknown`
-        # 으로 **curl 이 실행 자체를 거부했다** — 스택은 멀쩡히 떠 있었는데 기다리는
-        # 쪽이 죽었다. 호스티드 러너에만 있는 것에 기대면 러너를 옮기는 순간
-        # 이렇게 드러난다. 셸 반복은 어느 curl 에서도 같게 돈다.
-        run: |
-          url="http://127.0.0.1:${LAURIO_WEB_PORT}/healthz"
-          for i in $(seq 1 60); do
-            if curl --fail --silent --show-error "$url" >/dev/null 2>&1; then
-              echo "공개 앱 응답함 ($url, ${i}회째)"
-              exit 0
-            fi
-            sleep 3
-          done
-          echo "::error::공개 앱이 180초 안에 응답하지 않았다 ($url)"
-          exit 1
-
-      # 운영자 앱(#63, ADR-0021) — 같은 dev compose 스택에 붙는 두 번째 앱. 한
-      # 스위트가 프로젝트 둘로 둘 다 친다(playwright.config.ts) — 이 앱이 뜨지
-      # 않으면 그 프로젝트 전체가 실패한다.
-      # FE-04/FE-05(#29·#30) SSR 테스트가 `frontend/e2e/lib/seed.ts` 로 호스트에서
-      # `uv run manage.py seed_e2e_contests` 를 돌려 실제 Contest 를 dev DB에 심는다
-      # (하드코딩 픽스처가 아니라 백엔드가 준 값이어야 SSR 증명이 성립한다 —
-      # frontend/e2e/seam.spec.ts 상단 주석). dev compose 의 db 서비스는 이 잡의
-      # `LAURIO_DB_PORT` 로 호스트에 노출돼 있고, 호스트에서 도는 이 시드도 같은
-      # 값을 읽으므로(`config/settings.py` 의 `_DEV_DB_PORT`) 같은 DB에 붙는다 —
-      # 잡마다 포트가 다른 것은 위 env 블록이 설명한다.
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
@@ -503,19 +469,81 @@ jobs:
         working-directory: backend
         run: uv sync --locked
 
-      # **스택을 띄운 뒤 워크스페이스 설치를 한 번 되돌린다.** dev compose 의
-      # frontend·operator 서비스는 바인드된 체크아웃(`..:/app`) 위에서
-      # `pnpm install --force` 를 돌린다 — node_modules 대부분은 이름 있는 볼륨이
-      # 가리지만, 러너의 워크스페이스 트리가 그 과정에서 흔들려 `pnpm exec
-      # playwright` 가 바이너리를 못 찾는 상태가 된다(실측: 빌드를 앞으로 옮긴
-      # 뒤 이 스텝이 `Command "playwright" not found` 로 죽었다).
+      # **앱은 프로세스로 띄운다 — 컨테이너로 띄우지 않는다.**
       #
-      # 앞의 설치를 없애고 여기 하나만 두지 않는 이유 — 타입체크와 빌드가 스택
-      # **앞에** 있어야 `.next` 가 root 소유로 생기지 않는다(위 주석). 두 번
-      # 도는 비용은 pnpm store 가 이미 더워 몇 초다.
-      - name: Reinstall workspace dependencies after the stack settled
+      # dev compose 의 backend·frontend·operator 서비스는 저장소를 컨테이너에
+      # 마운트하는데(`..:/app`, 핫리로드용), 이 러너는 **컨테이너 안에서 돌면서
+      # 호스트 Docker 소켓을 쓴다**. 그러면 바인드 마운트 경로가 호스트 기준으로
+      # 풀려 러너 안의 체크아웃을 가리키지 못하고 `/app` 이 빈 채로 뜬다 — 실측:
+      # backend 는 `can't open file '/app/manage.py'`, frontend 는
+      # `Scope: all 0 workspace projects` → `Command "dev" not found`.
+      #
+      # 마운트가 없는 인프라(db·redis·minio)만 컨테이너로 두고 앱은 러너에서 직접
+      # 띄운다. CLAUDE.md 의 워크트리 절이 이미 쓰는 방식이라 새 발명이 아니다.
+      # 시임도 그대로다 — ADR-0017/0021 이 정한 시임은 **실행 중인 앱**이지 그것을
+      # 감싼 컨테이너가 아니다.
+      - name: Bring up infrastructure (db·redis·minio)
+        run: |
+          docker compose -f docker/compose.dev.yaml up -d --wait db redis minio
+          docker compose -f docker/compose.dev.yaml up -d minio-init
+
+      # 값은 dev compose 의 backend 서비스가 주던 것 그대로다 — 컨테이너 이름
+      # (db·redis·minio) 대신 호스트에 노출된 이 잡의 포트를 가리킬 뿐이다.
+      - name: Start the backend
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          export POSTGRES_HOST=127.0.0.1
+          export POSTGRES_DB=laurio POSTGRES_USER=laurio POSTGRES_PASSWORD=laurio
+          export DJANGO_DEBUG=true
+          export DJANGO_SECRET_KEY=dev-only-insecure-key
+          export DJANGO_ALLOWED_HOSTS='*'
+          export SESSION_REDIS_URL="redis://127.0.0.1:${LAURIO_REDIS_PORT}/1"
+          export STORAGE_BACKEND=s3 STORAGE_BUCKET=laurio-dev
+          export STORAGE_ENDPOINT_URL="http://127.0.0.1:${LAURIO_MINIO_PORT}"
+          export STORAGE_PUBLIC_ENDPOINT_URL="http://127.0.0.1:${LAURIO_MINIO_PORT}"
+          export STORAGE_ACCESS_KEY=laurio STORAGE_SECRET_KEY=laurio-secret
+          export STORAGE_REGION=us-east-1
+          uv run python manage.py migrate --noinput
+          uv run python manage.py seed_dev_data
+          nohup uv run python manage.py runserver "0.0.0.0:${LAURIO_API_PORT}" \
+            > "${RUNNER_TEMP}/backend.log" 2>&1 &
+          echo $! > "${RUNNER_TEMP}/backend.pid"
+
+      - name: Wait for the backend to answer
+        run: |
+          url="http://127.0.0.1:${LAURIO_API_PORT}/api/contests"
+          for i in $(seq 1 60); do
+            if curl --fail --silent --show-error "$url" >/dev/null 2>&1; then
+              echo "backend 응답함 ($url, ${i}회째)"; exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::backend 가 120초 안에 응답하지 않았다 ($url)"
+          cat "${RUNNER_TEMP}/backend.log" || true
+          exit 1
+
+      - name: Start the public app
         working-directory: frontend
-        run: pnpm install --frozen-lockfile
+        run: |
+          set -euo pipefail
+          export LAURIO_API_BASE_URL="http://127.0.0.1:${LAURIO_API_PORT}"
+          nohup pnpm exec next dev --port "${LAURIO_WEB_PORT}" \
+            > "${RUNNER_TEMP}/frontend.log" 2>&1 &
+          echo $! > "${RUNNER_TEMP}/frontend.pid"
+
+      - name: Wait for the public app to answer
+        run: |
+          url="http://127.0.0.1:${LAURIO_WEB_PORT}/healthz"
+          for i in $(seq 1 60); do
+            if curl --fail --silent --show-error "$url" >/dev/null 2>&1; then
+              echo "공개 앱 응답함 ($url, ${i}회째)"; exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::공개 앱이 180초 안에 응답하지 않았다 ($url)"
+          cat "${RUNNER_TEMP}/frontend.log" || true
+          exit 1
 
       - name: Install Playwright browser
         working-directory: frontend
@@ -527,9 +555,17 @@ jobs:
         working-directory: frontend
         run: pnpm run test:public
 
-      - name: Dump stack logs on failure
+      # **앱은 이제 컨테이너가 아니라 프로세스다** — compose 로그만 찍으면 정작
+      # 원인이 있는 곳을 못 본다. 인프라 로그와 두 프로세스 로그를 함께 남긴다.
+      - name: Dump logs on failure
         if: failure()
-        run: docker compose -f docker/compose.dev.yaml logs --tail 100
+        run: |
+          echo "───────── 인프라 (db·redis·minio) ─────────"
+          docker compose -f docker/compose.dev.yaml logs --tail 100 || true
+          echo "───────── backend ─────────"
+          tail -100 "${RUNNER_TEMP}/backend.log" || true
+          echo "───────── frontend ─────────"
+          tail -100 "${RUNNER_TEMP}/frontend.log" || true
 
       # playwright.config.ts 가 재시도 시 트레이스를 남긴다. 올리지 않으면 실패한
       # CI 실행에서 그게 그대로 버려져 원인을 못 본다.
@@ -547,9 +583,17 @@ jobs:
       # 이 잡의 컨테이너·볼륨이 실행마다 쌓이고 포트를 계속 물고 있는다. celery
       # 잡은 이미 그렇게 하고 있었는데 e2e 두 잡만 빠져 있었다 — 호스티드
       # 러너에서는 VM 이 사라져 티가 나지 않던 차이다.
-      - name: Tear down the stack
+      # **프로세스도 거둔다.** GHA 가 잡 끝에 고아 프로세스를 정리하긴 하지만,
+      # 러너 호스트를 여럿이 나눠 쓰므로 우리가 띄운 것은 우리가 확실히 끈다.
+      # PID 는 잡별 임시 디렉터리에 남겨 다른 잡의 것을 건드리지 않는다.
+      - name: Tear down
         if: always()
-        run: docker compose -f docker/compose.dev.yaml down -v --remove-orphans
+        run: |
+          for name in backend frontend; do
+            pidfile="${RUNNER_TEMP}/${name}.pid"
+            [ -f "$pidfile" ] && kill "$(cat "$pidfile")" 2>/dev/null || true
+          done
+          docker compose -f docker/compose.dev.yaml down -v --remove-orphans || true
 
 
   # **운영자 앱 e2e.** 위 잡과 동시에 돈다. 여전히 워커 하나로 돈다 —
@@ -593,16 +637,13 @@ jobs:
         working-directory: frontend
         run: pnpm install --frozen-lockfile
 
-      # **타입체크와 빌드는 dev 스택을 띄우기 전에 돌린다.** 순서가 취향이 아니라
-      # 필요다: dev compose 의 frontend 서비스는 저장소를 컨테이너에 마운트하고
-      # (`..:/app`) `/app/frontend/.next` 를 이름 있는 볼륨으로 가리는데, Docker 가
-      # 그 마운트 지점을 **호스트 체크아웃에 root 소유로 만든다**. 그러면 러너
-      # 사용자로 도는 `pnpm build` 가 `.next/trace` 를 열지 못해
-      # `EACCES: permission denied` 로 죽는다 — 실제로 이 잡을 연속으로 빨간불로
-      # 만들었다. 빌드가 먼저 돌면 `.next` 는 러너 것이고, 그 뒤 볼륨이 그것을
-      # 가려도 아무도 다시 쓰지 않는다.
+      # next build 만 잡는 오류가 있다(라우트 핸들러 시그니처, standalone 산출물 등).
+      # 여기서 안 돌리면 배포 시점까지 미검출로 남는다.
       #
-      # 부수 효과도 좋다 — 타입 오류가 이미지 빌드를 기다리지 않고 즉시 잡힌다.
+      # **예전에는 이 순서가 필수였다.** dev compose 의 앱 서비스가 저장소를 컨테이너에
+      # 마운트하면서 `.next` 를 호스트 체크아웃에 root 소유로 만들었고, 그러면 러너
+      # 사용자의 `pnpm build` 가 `EACCES` 로 죽었다. CI 가 앱을 컨테이너로 띄우지 않게
+      # 되면서 그 이유는 사라졌다 — 이제 순서는 「오류를 빨리 본다」는 편의일 뿐이다.
       - name: Typecheck (operator app)
         working-directory: operator
         run: pnpm typecheck
@@ -614,37 +655,6 @@ jobs:
         working-directory: operator
         run: pnpm build
 
-      - name: Bring up the dev stack
-        run: docker compose -f docker/compose.dev.yaml up -d --build operator
-
-      # 운영자 앱(#63, ADR-0021) — 같은 dev compose 스택에 붙는 두 번째 앱. 한
-      # 스위트가 프로젝트 둘로 둘 다 친다(playwright.config.ts) — 이 앱이 뜨지
-      # 않으면 그 프로젝트 전체가 실패한다.
-      - name: Wait for the operator app to answer
-        # **curl 재시도 플래그에 기대지 않는다.** `--retry-all-errors` 는 curl 7.71+
-        # 에만 있어서 셀프호스티드 러너에서 `option --retry-all-errors: is unknown`
-        # 으로 **curl 이 실행 자체를 거부했다** — 스택은 멀쩡히 떠 있었는데 기다리는
-        # 쪽이 죽었다. 호스티드 러너에만 있는 것에 기대면 러너를 옮기는 순간
-        # 이렇게 드러난다. 셸 반복은 어느 curl 에서도 같게 돈다.
-        run: |
-          url="http://127.0.0.1:${LAURIO_OPERATOR_WEB_PORT}/healthz"
-          for i in $(seq 1 60); do
-            if curl --fail --silent --show-error "$url" >/dev/null 2>&1; then
-              echo "운영자 앱 응답함 ($url, ${i}회째)"
-              exit 0
-            fi
-            sleep 3
-          done
-          echo "::error::운영자 앱이 180초 안에 응답하지 않았다 ($url)"
-          exit 1
-
-      # FE-04/FE-05(#29·#30) SSR 테스트가 `frontend/e2e/lib/seed.ts` 로 호스트에서
-      # `uv run manage.py seed_e2e_contests` 를 돌려 실제 Contest 를 dev DB에 심는다
-      # (하드코딩 픽스처가 아니라 백엔드가 준 값이어야 SSR 증명이 성립한다 —
-      # frontend/e2e/seam.spec.ts 상단 주석). dev compose 의 db 서비스는 이 잡의
-      # `LAURIO_DB_PORT` 로 호스트에 노출돼 있고, 호스트에서 도는 이 시드도 같은
-      # 값을 읽으므로(`config/settings.py` 의 `_DEV_DB_PORT`) 같은 DB에 붙는다 —
-      # 잡마다 포트가 다른 것은 위 env 블록이 설명한다.
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
@@ -654,19 +664,82 @@ jobs:
         working-directory: backend
         run: uv sync --locked
 
-      # **스택을 띄운 뒤 워크스페이스 설치를 한 번 되돌린다.** dev compose 의
-      # frontend·operator 서비스는 바인드된 체크아웃(`..:/app`) 위에서
-      # `pnpm install --force` 를 돌린다 — node_modules 대부분은 이름 있는 볼륨이
-      # 가리지만, 러너의 워크스페이스 트리가 그 과정에서 흔들려 `pnpm exec
-      # playwright` 가 바이너리를 못 찾는 상태가 된다(실측: 빌드를 앞으로 옮긴
-      # 뒤 이 스텝이 `Command "playwright" not found` 로 죽었다).
+      # **앱은 프로세스로 띄운다 — 컨테이너로 띄우지 않는다.**
       #
-      # 앞의 설치를 없애고 여기 하나만 두지 않는 이유 — 타입체크와 빌드가 스택
-      # **앞에** 있어야 `.next` 가 root 소유로 생기지 않는다(위 주석). 두 번
-      # 도는 비용은 pnpm store 가 이미 더워 몇 초다.
-      - name: Reinstall workspace dependencies after the stack settled
-        working-directory: frontend
-        run: pnpm install --frozen-lockfile
+      # dev compose 의 backend·frontend·operator 서비스는 저장소를 컨테이너에
+      # 마운트하는데(`..:/app`, 핫리로드용), 이 러너는 **컨테이너 안에서 돌면서
+      # 호스트 Docker 소켓을 쓴다**. 그러면 바인드 마운트 경로가 호스트 기준으로
+      # 풀려 러너 안의 체크아웃을 가리키지 못하고 `/app` 이 빈 채로 뜬다 — 실측:
+      # backend 는 `can't open file '/app/manage.py'`, frontend 는
+      # `Scope: all 0 workspace projects` → `Command "dev" not found`.
+      #
+      # 마운트가 없는 인프라(db·redis·minio)만 컨테이너로 두고 앱은 러너에서 직접
+      # 띄운다. CLAUDE.md 의 워크트리 절이 이미 쓰는 방식이라 새 발명이 아니다.
+      # 시임도 그대로다 — ADR-0017/0021 이 정한 시임은 **실행 중인 앱**이지 그것을
+      # 감싼 컨테이너가 아니다.
+      - name: Bring up infrastructure (db·redis·minio)
+        run: |
+          docker compose -f docker/compose.dev.yaml up -d --wait db redis minio
+          docker compose -f docker/compose.dev.yaml up -d minio-init
+
+      # 값은 dev compose 의 backend 서비스가 주던 것 그대로다 — 컨테이너 이름
+      # (db·redis·minio) 대신 호스트에 노출된 이 잡의 포트를 가리킬 뿐이다.
+      - name: Start the backend
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          export POSTGRES_HOST=127.0.0.1
+          export POSTGRES_DB=laurio POSTGRES_USER=laurio POSTGRES_PASSWORD=laurio
+          export DJANGO_DEBUG=true
+          export DJANGO_SECRET_KEY=dev-only-insecure-key
+          export DJANGO_ALLOWED_HOSTS='*'
+          export SESSION_REDIS_URL="redis://127.0.0.1:${LAURIO_REDIS_PORT}/1"
+          export STORAGE_BACKEND=s3 STORAGE_BUCKET=laurio-dev
+          export STORAGE_ENDPOINT_URL="http://127.0.0.1:${LAURIO_MINIO_PORT}"
+          export STORAGE_PUBLIC_ENDPOINT_URL="http://127.0.0.1:${LAURIO_MINIO_PORT}"
+          export STORAGE_ACCESS_KEY=laurio STORAGE_SECRET_KEY=laurio-secret
+          export STORAGE_REGION=us-east-1
+          uv run python manage.py migrate --noinput
+          uv run python manage.py seed_dev_data
+          nohup uv run python manage.py runserver "0.0.0.0:${LAURIO_API_PORT}" \
+            > "${RUNNER_TEMP}/backend.log" 2>&1 &
+          echo $! > "${RUNNER_TEMP}/backend.pid"
+
+      - name: Wait for the backend to answer
+        run: |
+          url="http://127.0.0.1:${LAURIO_API_PORT}/api/contests"
+          for i in $(seq 1 60); do
+            if curl --fail --silent --show-error "$url" >/dev/null 2>&1; then
+              echo "backend 응답함 ($url, ${i}회째)"; exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::backend 가 120초 안에 응답하지 않았다 ($url)"
+          cat "${RUNNER_TEMP}/backend.log" || true
+          exit 1
+
+      - name: Start the operator app
+        working-directory: operator
+        run: |
+          set -euo pipefail
+          export LAURIO_API_BASE_URL="http://127.0.0.1:${LAURIO_API_PORT}"
+          export LAURIO_OPERATOR_ORIGIN="http://127.0.0.1:${LAURIO_OPERATOR_WEB_PORT}"
+          nohup pnpm exec next dev --port "${LAURIO_OPERATOR_WEB_PORT}" \
+            > "${RUNNER_TEMP}/operator.log" 2>&1 &
+          echo $! > "${RUNNER_TEMP}/operator.pid"
+
+      - name: Wait for the operator app to answer
+        run: |
+          url="http://127.0.0.1:${LAURIO_OPERATOR_WEB_PORT}/healthz"
+          for i in $(seq 1 60); do
+            if curl --fail --silent --show-error "$url" >/dev/null 2>&1; then
+              echo "운영자 앱 응답함 ($url, ${i}회째)"; exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::운영자 앱이 180초 안에 응답하지 않았다 ($url)"
+          cat "${RUNNER_TEMP}/operator.log" || true
+          exit 1
 
       - name: Install Playwright browser
         working-directory: frontend
@@ -678,9 +751,17 @@ jobs:
         working-directory: frontend
         run: pnpm run test:operator
 
-      - name: Dump stack logs on failure
+      # **앱은 이제 컨테이너가 아니라 프로세스다** — compose 로그만 찍으면 정작
+      # 원인이 있는 곳을 못 본다. 인프라 로그와 두 프로세스 로그를 함께 남긴다.
+      - name: Dump logs on failure
         if: failure()
-        run: docker compose -f docker/compose.dev.yaml logs --tail 100
+        run: |
+          echo "───────── 인프라 (db·redis·minio) ─────────"
+          docker compose -f docker/compose.dev.yaml logs --tail 100 || true
+          echo "───────── backend ─────────"
+          tail -100 "${RUNNER_TEMP}/backend.log" || true
+          echo "───────── operator ─────────"
+          tail -100 "${RUNNER_TEMP}/operator.log" || true
 
       # playwright.config.ts 가 재시도 시 트레이스를 남긴다. 올리지 않으면 실패한
       # CI 실행에서 그게 그대로 버려져 원인을 못 본다.
@@ -698,9 +779,17 @@ jobs:
       # 이 잡의 컨테이너·볼륨이 실행마다 쌓이고 포트를 계속 물고 있는다. celery
       # 잡은 이미 그렇게 하고 있었는데 e2e 두 잡만 빠져 있었다 — 호스티드
       # 러너에서는 VM 이 사라져 티가 나지 않던 차이다.
-      - name: Tear down the stack
+      # **프로세스도 거둔다.** GHA 가 잡 끝에 고아 프로세스를 정리하긴 하지만,
+      # 러너 호스트를 여럿이 나눠 쓰므로 우리가 띄운 것은 우리가 확실히 끈다.
+      # PID 는 잡별 임시 디렉터리에 남겨 다른 잡의 것을 건드리지 않는다.
+      - name: Tear down
         if: always()
-        run: docker compose -f docker/compose.dev.yaml down -v --remove-orphans
+        run: |
+          for name in backend operator; do
+            pidfile="${RUNNER_TEMP}/${name}.pid"
+            [ -f "$pidfile" ] && kill "$(cat "$pidfile")" 2>/dev/null || true
+          done
+          docker compose -f docker/compose.dev.yaml down -v --remove-orphans || true
 
   # 프론트 배포 부팅 가드 (FE-13, #38).
   #
