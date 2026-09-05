@@ -39,14 +39,41 @@ const BLOCKED_ON_LABEL: Record<BlockedOnKind, string> = {
   transfer: "실이체 대기 — 이체 재시도 필요",
 };
 
-function PayoutBadge({ blockedOn }: { blockedOn: string }) {
+// 접수되지 않은 Seller 등록의 두 하위 사실(#178) — "seller" 축의 기본 문구
+// (「지급대행사 처리 대기」)는 이 경우엔 거짓이다: 지급대행사는 이 등록을
+// 모른다. 자동 재시도가 도는 중인지, 포기해서 사람의 차례가 됐는지를 갈라
+// 말한다(`seller_registration_status`, `payouts.progress.
+// seller_registration_status_of` 가 판정한 값).
+const SELLER_REGISTRATION_LABEL: Record<"retrying" | "stuck", string> = {
+  retrying: "Seller 등록 대기 — 등록이 아직 접수되지 않아 자동으로 재시도하는 중입니다",
+  stuck: "Seller 등록 대기 — 자동 재시도가 실패해 운영자 확인이 필요합니다",
+};
+
+function labelFor(blockedOn: string, sellerRegistrationStatus: string | null): string {
+  if (
+    blockedOn === "seller" &&
+    (sellerRegistrationStatus === "retrying" || sellerRegistrationStatus === "stuck")
+  ) {
+    return SELLER_REGISTRATION_LABEL[sellerRegistrationStatus];
+  }
+  return BLOCKED_ON_LABEL[blockedOn as BlockedOnKind] ?? blockedOn;
+}
+
+function PayoutBadge({
+  blockedOn,
+  sellerRegistrationStatus,
+}: {
+  blockedOn: string;
+  sellerRegistrationStatus: string | null;
+}) {
   return (
     <span
       data-testid={`payout-blocked-badge-${blockedOn}`}
       data-blocked-on={blockedOn}
+      data-seller-registration-status={sellerRegistrationStatus ?? undefined}
       className={`badge-waiting badge-waiting-${blockedOn}`}
     >
-      {BLOCKED_ON_LABEL[blockedOn as BlockedOnKind] ?? blockedOn}
+      {labelFor(blockedOn, sellerRegistrationStatus)}
     </span>
   );
 }
@@ -57,7 +84,12 @@ function PayoutRow({ payout }: { payout: OperatorPayoutRow }) {
       <span data-testid="payout-row-contest">콘테스트 #{payout.contest_id}</span>
       <span data-testid="payout-row-developer">개발자 #{payout.developer_user_id}</span>
       <span data-testid="payout-row-amount">{payout.net_amount.toLocaleString("ko-KR")}원</span>
-      {payout.blocked_on && <PayoutBadge blockedOn={payout.blocked_on} />}
+      {payout.blocked_on && (
+        <PayoutBadge
+          blockedOn={payout.blocked_on}
+          sellerRegistrationStatus={payout.seller_registration_status}
+        />
+      )}
     </li>
   );
 }

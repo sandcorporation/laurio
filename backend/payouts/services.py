@@ -34,6 +34,7 @@ from __future__ import annotations
 import logging
 
 from django.db import IntegrityError, transaction
+from django.db.models import F
 
 from ledger.models import Account, EntrySide
 from ledger.services import LineInput, post_journal_entry
@@ -234,9 +235,26 @@ def ensure_seller_registered(developer, *, simulate: str | None = None) -> Selle
             "두고 기존 Seller 상태를 유지한다.",
             developer.id,
         )
+        # 이 벤더 오류 자체를 센다(#178) — 자력 회복 스캔(`payouts.recovery`)이
+        # 이 값을 보고 언제 재시도를 멈추고 Operator 의 차례로 넘길지 정한다.
+        # 등록이 (정상 응답으로) 다시 성공하면 아래 update_or_create 가 0으로
+        # 되돌린다.
         if existing is not None:
+            Seller.objects.filter(pk=existing.pk).update(
+                registration_error_count=F("registration_error_count") + 1
+            )
+            existing.refresh_from_db(fields=["registration_error_count"])
             return existing
-        seller, _created = Seller.objects.get_or_create(developer=developer)
+        seller, created = Seller.objects.get_or_create(
+            developer=developer, defaults={"registration_error_count": 1}
+        )
+        if not created:
+            # 락 없는 조회-후-생성 경합으로 그 사이 다른 호출이 이미 만들어
+            # 둔 것이다(드물다) — 그래도 이 오류는 잃지 않는다.
+            Seller.objects.filter(pk=seller.pk).update(
+                registration_error_count=F("registration_error_count") + 1
+            )
+            seller.refresh_from_db(fields=["registration_error_count"])
         return seller
 
     if result.status == "pending":
@@ -260,6 +278,10 @@ def ensure_seller_registered(developer, *, simulate: str | None = None) -> Selle
             "seller_id": stored_seller_id,
             "status": result.status,
             "weekly_limit_amount": result.weekly_limit_amount,
+            # 벤더가 정상 응답했다(성공이든 거절이든 심사든) — 연속 벤더 오류
+            # 카운터를 되돌린다(#178). 오류는 어댑터가 예기치 못하게 실패했을
+            # 때만 세므로, 여기 도달했다는 사실 자체가 "이번엔 오류가 아니다".
+            "registration_error_count": 0,
         },
     )
 

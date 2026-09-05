@@ -62,6 +62,7 @@ from .progress import (
     next_action_message,
     with_blocked_on,
     with_hold_facts,
+    with_seller_registration_status,
 )
 from .adapters import PayoutError, get_adapter
 from .adapters_toss import verify_toss_webhook_signature
@@ -775,7 +776,7 @@ def list_payouts_for_operator(
         raise HttpError(422, "읽을 수 없는 커서입니다.")
 
     payouts = (
-        with_blocked_on(with_hold_facts(Payout.objects.with_target()))
+        with_seller_registration_status(with_blocked_on(with_hold_facts(Payout.objects.with_target())))
         .filter(blocked_q())
         .order_by("-created_at", "-id")
     )

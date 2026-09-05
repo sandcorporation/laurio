@@ -3158,6 +3158,8 @@ export interface components {
             idempotency_key: string;
             /** Net Amount */
             net_amount: number;
+            /** Seller Registration Status */
+            seller_registration_status: string | null;
             /** Seller Status */
             seller_status: string | null;
             /** Status */

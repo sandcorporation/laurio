@@ -160,11 +160,18 @@ class OperatorPayoutOut(Schema):
     seller_status: str | None
     has_identity: bool
     created_at: datetime
+    # 접수되지 않은 Seller 등록이 벤더 오류로 자력 회복 스캔의 재시도를 받는
+    # 중인지("retrying"), 재시도를 포기해 Operator 의 차례가 됐는지("stuck")다
+    # (#178) — "seller" 로 뭉친 축 안에서 「지급대행사 처리 대기」와 가장 갈리는
+    # 사실이라 별도로 내려준다. 그 밖의 "seller" 행(연락처 미제출·본인인증
+    # 대기·심사 중·거절)에는 null 이다.
+    seller_registration_status: str | None
 
-    # 네 값 모두 질의가 이미 알고 있다(#149) — `payouts.progress.with_hold_facts` ·
-    # `with_blocked_on` 이 붙인 주석과 `with_target()` 의 select_related 다. 페이지를
-    # 자른 뒤 행마다 다시 묻지 않는다는 것이 이 티켓의 요점이라, 여기 resolver 는
-    # 조회를 내지 않는다.
+    # 다섯 값 모두 질의가 이미 안다(#149, #178) — `payouts.progress.with_hold_facts` ·
+    # `with_blocked_on` · `with_seller_registration_status` 가 붙인 주석과
+    # `with_target()` 의 select_related 다. 페이지를 자른 뒤 행마다 다시 묻지
+    # 않는다는 것이 이 티켓의 요점이라, 여기 resolver 는 조회를 내지 않는다
+    # (`test_operator_payout_queue_does_not_query_per_row`, #91).
     @staticmethod
     def resolve_contest_id(obj) -> int:
         return obj.contest.id
@@ -182,6 +189,10 @@ class OperatorPayoutOut(Schema):
         from .progress import blocked_on_of_row
 
         return blocked_on_of_row(obj)
+
+    @staticmethod
+    def resolve_seller_registration_status(obj):
+        return obj.seller_registration_status
 
 
 class OperatorPayoutPageOut(Schema):

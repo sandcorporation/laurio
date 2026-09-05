@@ -433,6 +433,16 @@ class Seller(models.Model):
     # 따라 다른 취급(암호화 여부)을 받으면 파기 규칙이 갈린다(#168).
     email = models.EmailField(max_length=254, blank=True)
 
+    # 등록 시도가 벤더 오류(어댑터가 예기치 못하게 실패한 경우, `SellerError`)로
+    # 접수조차 되지 못한 연속 횟수(#178) — 한도 초과·심사·거절 같은 **정상 응답**은
+    # 여기 안 들어간다(그것들은 이미 자기 상태를 가진다). 자력 회복 스캔
+    # (`payouts.recovery`)이 이 값을 올리고, 등록이 정상 응답(성공이든 거절이든
+    # 무엇이든)을 받으면 0으로 되돌아간다. 상한(`payouts.progress.
+    # MAX_AUTO_SELLER_REGISTRATION_ATTEMPTS`)에 이르면 스캔이 재시도를 멈추고
+    # Hold 판정이 Operator 의 차례로 넘긴다 — 벤더에 같은 요청을 무한히 쏘지
+    # 않기 위해서다.
+    registration_error_count = models.PositiveIntegerField(default=0)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

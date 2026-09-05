@@ -132,6 +132,10 @@ def _payout_actions():
         HoldKind.SELLER_REVIEW: NextAction.AWAITING_SELLER_REGISTRATION,
         HoldKind.SELLER_REJECTED: NextAction.AWAITING_SELLER_REGISTRATION,
         HoldKind.SELLER_PENDING: NextAction.AWAITING_SELLER_REGISTRATION,
+        # 자력 회복 스캔이 포기해 Operator 의 차례가 된 상태(#178) — SELLER_REJECTED와
+        # 같은 이유로 같은 값에 묶는다: Developer 관점에서는 둘 다 "지급대행 등록이
+        # 여전히 안 끝났고 지금은 내가 할 게 없다"는 같은 사실이다.
+        HoldKind.SELLER_REGISTRATION_STUCK: NextAction.AWAITING_SELLER_REGISTRATION,
         HoldKind.TRANSFER_CONFIRMING: NextAction.AWAITING_SELLER_REGISTRATION,
         HoldKind.TRANSFER_RETRY: NextAction.RETRY_TRANSFER,
         HoldKind.TRANSFER_RETRY_IDENTITY_RECORDED: NextAction.RETRY_TRANSFER,
