@@ -37,7 +37,7 @@ class Command(BaseCommand):
         parser.add_argument("--contest-id", type=int, required=True)
 
     def handle(self, *args, **options) -> None:
-        _refuse_in_deployed_environment()
+        _refuse_in_deployed_environment("count_ledger_entries")
 
         contest = Contest.objects.get(id=options["contest_id"])
         count = JournalEntry.objects.filter(contest_id=contest.ledger_id).count()
