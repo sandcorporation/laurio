@@ -178,7 +178,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options) -> None:
-        _refuse_in_deployed_environment()
+        _refuse_in_deployed_environment("seed_e2e_operator_appeal")
         run_id = options.get("run_id")
         token = _RUN_ID_OVERRIDE.set(run_id) if run_id else None
         try:

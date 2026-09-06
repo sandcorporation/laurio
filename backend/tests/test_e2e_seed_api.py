@@ -159,3 +159,24 @@ def test_reseeding_an_operator_does_not_log_out_live_sessions(client):
     assert still_alive.status_code == 200, (
         "다시 심었더니 이미 로그인한 세션이 죽었다 — 비밀번호를 바꿀 이유가 없는데 바꿨다"
     )
+
+
+@pytest.mark.django_db
+def test_the_junk_prune_is_reachable_by_the_name_global_setup_uses(client):
+    """`prune-junk` 가 이 이름으로 실제로 닿는다 (#183).
+
+    `global-setup.ts` 가 이 키로 부른다. 등록부 키와 호출부 문자열이 어긋나거나 관리 명령이
+    이름을 바꾸면 **백엔드 테스트는 전부 통과하고** 증상은 스위트 전체가 `globalSetup` 에서
+    404 로 죽는 모양으로만 나타난다 — 그 실패는 「청소가 없다」가 아니라 「e2e 가 통째로
+    깨졌다」로 보인다. 응답의 네 키까지 고정하는 것은 호출부가 그 모양을 읽기 때문이다.
+    """
+
+    resp = _post(client, "prune-junk")
+
+    assert resp.status_code == 200, resp.content
+    assert set(resp.json()) == {
+        "categories_deleted",
+        "deliverable_types_deleted",
+        "skipped",
+        "policy_reset",
+    }

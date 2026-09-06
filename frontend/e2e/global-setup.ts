@@ -93,6 +93,45 @@ export default async function globalSetup(): Promise<void> {
   // eslint-disable-next-line no-console -- 위와 같은 이유.
   console.log(`[global-setup] ${prunedAll.output ?? "pruned"}`);
 
+  // **Contest 만 걷혔고 기준데이터와 정책은 안 걷혔다** (#183). 위 두 정리는 제목
+  // 접두어로 Contest 를 가르는데, 같은 e2e 가 만드는 Category·DeliverableType 과
+  // 정책 단일 행에는 그 관용구가 적용된 적이 없다. 그래서 dev 스택에서 산출물
+  // 종류가 132개(진짜는 5개)까지 쌓여 개최 화면의 요구형태 체크박스 목록이 통째로
+  // 묻혔고, 플랫폼 수수료율은 e2e 가 남긴 324bps 였다 — 화면에 보이는 실수령액이
+  // 실제 정책과 다르다는 뜻이라, 눈으로 확인하는 개발 방식 자체가 무뎌진다.
+  //
+  // 여기에 두는 이유는 위 둘과 같다: 워커가 아직 하나도 없어 경합이 성립하지 않고,
+  // 어떤 프로젝트의 첫 테스트보다도 먼저 끝난다.
+  // **이 정리만은 실패해도 스위트를 세우지 않는다.** 위 둘은 테스트의 정확성을
+  // 떠받치지만(이전 실행이 남긴 Contest 가 목록 스펙을 깨뜨린다) 이것은 dev 화면의
+  // 가독성을 위한 것이라 없어도 테스트는 옳다. 그런데 여기서 던지면 `globalSetup`
+  // 이 죽어 **102건이 한 건도 못 돈다** — 그리고 그 실패는 가장 그럴듯한 원인이
+  // 하필 무관한 것이다: CLAUDE.md 대로 `frontend` 컨테이너는 바깥 체크아웃을 서빙
+  // 하는데 백엔드가 이 등록부 항목을 아직 모르면 404 가 나고, 그러면 「청소가 아직
+  // 없다」가 「e2e 전부 실패」로 보인다.
+  try {
+    const prunedJunk = (await runSeed("prune-junk", {})) as {
+      categories_deleted: number;
+      deliverable_types_deleted: number;
+      skipped: string[];
+      policy_reset: Record<string, [number, number]>;
+    };
+    const skipped = prunedJunk.skipped ?? [];
+    const policyFields = Object.keys(prunedJunk.policy_reset ?? {});
+    // eslint-disable-next-line no-console -- 위와 같은 이유. 건너뛴 것이 있으면 그것도
+    // 보여야 한다 — 청소가 조용히 아무것도 못 한 것과 할 일이 없던 것은 다르다.
+    console.log(
+      `[global-setup] e2e 기준데이터 정리 — 카테고리 ${prunedJunk.categories_deleted}건, ` +
+        `산출물 종류 ${prunedJunk.deliverable_types_deleted}건 삭제` +
+        (skipped.length ? `, 참조가 걸려 건너뜀: ${skipped.join(", ")}` : "") +
+        (policyFields.length ? `, 정책 ${policyFields.length}개 필드를 기준값으로 되돌림` : ""),
+    );
+  } catch (cause) {
+    // eslint-disable-next-line no-console -- 조용히 넘어가지는 않는다. 화면이 다시
+    // 잡데이터로 덮이기 시작하면 이 줄이 그 이유를 말해 준다.
+    console.warn(`[global-setup] e2e 기준데이터 정리를 건너뛴다: ${String(cause)}`);
+  }
+
   // **호출을 잊고 있었다.** 이 함수는 진작 있었고 CLAUDE.md 는 워밍업이 돌고
   // 있다고 적어 뒀는데, 정의만 되고 불리지 않았다 — 즉 기록된 "웜 2.5분" 이
   // 아니라 계속 "콜드 5.6분" 을 내고 있었다. 코드리뷰가 잡았다.

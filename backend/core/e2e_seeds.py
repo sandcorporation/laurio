@@ -57,6 +57,15 @@ E2E_SEED_REGISTRY: dict[str, SeedEntry] = {
         # 이 시드도 `_own_title_prefix` 로 자기 것을 가르므로 run_id 를 받는다.
         options=frozenset({"rule", "run_id"}),
     ),
+    # **심지 않고 걷기만 하는 것도 여기 둔다** (#183). 스위트 시작에 한 번 불려
+    # e2e 가 남긴 Category·DeliverableType 을 지우고 정책 단일 행을 기준값으로
+    # 되돌린다 — Contest 를 걷는 `contests --prune-all-namespaces` 와 같은 시점,
+    # 같은 관용구다. 옵션이 없다: 무엇을 걷을지는 이름 하나로 정해져 있고,
+    # 「무엇을 남길지」를 HTTP 로 고르게 하면 그 순간 이 표면이 삭제 도구가 된다.
+    "prune-junk": SeedEntry(
+        command="prune_e2e_junk",
+        options=frozenset(),
+    ),
     # 심지 않고 읽기만 하는 것도 여기 둔다 — e2e 가 원장을 직접 세는 자리다(#67).
     # 같은 입구를 쓰는 편이 「시드는 HTTP, 조회는 서브프로세스」보다 낫다.
     "ledger-entry-count": SeedEntry(
