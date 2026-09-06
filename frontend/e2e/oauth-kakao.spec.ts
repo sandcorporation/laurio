@@ -1,27 +1,55 @@
 import { expect, test } from "@playwright/test";
 import type { APIRequestContext } from "@playwright/test";
 
-// 카카오 OAuth BFF 시임 테스트 (#95, spec #92). proxy.spec.ts의 관용구를 그대로
-// 따른다 — 브라우저(page)가 필요 없는 것(authorize의 리다이렉트 대상, state
-// 왕복, next 검증, 콜백의 거절 경로)은 raw `request`로 친다. code→token 교환
-// 자체(유일한 벤더 호출)는 여기서 치지 않는다 — 옵인 live 테스트
-// (e2e/live/kakao-oauth-live.spec.ts)가 따로 있다.
+// 소셜 OAuth BFF 시임 테스트 (#95, spec #92 / #189). 이 라우트들은 원래 카카오
+// 전용이었지만(app/api/auth/social/kakao/{authorize,callback}) #189가
+// `[provider]`로 일반화했다 — 카카오·GitHub·구글 셋이 같은 route.ts 파일을
+// 공유한다. 그래서 카카오 케이스로 이 파일에서 검증하는 「state 검증」·
+// 「next 안전성」·「우리 화면으로의 상대 경로 리다이렉트」는 그 공유 코드
+// 경로 전체를 이미 증명한다 — 세 provider마다 반복하지 않는다(그러면 CLAUDE.md가
+// 경고하는 「같은 함수를 경로 문자열만 바꿔 7번 친다」모양이 된다). provider별로
+// 실제로 갈리는 지점(authorize URL이 가리키는 호스트, 자격증명 유무에 따른
+// oauth_unconfigured 분기)만 아래에서 표로 확인한다.
 //
-// **이 파일은 카카오 자격증명이 있는지 없는지를 스스로 감지해 갈라 돈다**
-// (코드리뷰 지적으로 되돌린 설계). dev compose는 이제 KAKAO_REST_API_KEY 등을
-// 일부러 채우지 않는다 — 더미 값을 채웠더니 dev에서 카카오 버튼을 누르면
-// 실제로 카카오(kauth.kakao.com)까지 나갔다가 존재하지 않는 앱이라 카카오
-// 자신의 에러 페이지(KOE101)로 이탈했다. "설정 안 됨이면 우리 문구로
-// 돌아간다"는 이 스펙의 핵심 인수조건과 정반대였다. 그래서 자격증명이 있어야만
-// 관찰되는 단언(kauth.kakao.com으로의 실제 리다이렉트, state 쿠키 발급)은
-// `kakaoIsConfigured`로 감지해 없으면 skip하고, **콜백의 state 검증과 next
-// 안전성 검증은 자격증명과 무관하게 항상 돈다** — 필요한 쿠키를 직접
-// 조작해서 만들어 authorize가 발급했는지에 기대지 않는다.
-async function kakaoIsConfigured(request: APIRequestContext): Promise<boolean> {
-  const res = await request.get("/api/auth/social/kakao/authorize?next=/console", {
+// proxy.spec.ts의 관용구를 그대로 따른다 — 브라우저(page)가 필요 없는 것
+// (authorize의 리다이렉트 대상, state 왕복, next 검증, 콜백의 거절 경로)은 raw
+// `request`로 친다. code→token 교환 자체(유일한 벤더 호출)는 여기서 치지
+// 않는다 — 카카오는 옵인 live 테스트(e2e/live/kakao-oauth-live.spec.ts)가 따로
+// 있다. GitHub·구글은 client_id/secret이 아직 어느 환경에도 등록돼 있지
+// 않으므로(#189 — 사람이 할 일로 남아 있다) 그 live 테스트가 없다.
+//
+// **이 파일은 각 provider의 자격증명이 있는지 없는지를 스스로 감지해 갈라
+// 돈다**(코드리뷰 지적으로 되돌린 설계, 카카오 한정이었던 것을 #189가
+// provider 인자로 일반화했다). dev compose는 셋 다 일부러 비워 둔다 — 카카오는
+// 한때 더미 값을 채웠다가 dev에서 버튼을 누르면 실제로 kauth.kakao.com까지
+// 나갔다가 존재하지 않는 앱이라 카카오 자신의 에러 페이지(KOE101)로 이탈하는
+// 사고를 겪었다. "설정 안 됨이면 우리 문구로 돌아간다"는 이 스펙의 핵심
+// 인수조건과 정반대였다. 그래서 자격증명이 있어야만 관찰되는 단언(제공자
+// authorize URL로의 실제 리다이렉트, state 쿠키 발급)은 `providerIsConfigured`로
+// 감지해 없으면 skip하고, **콜백의 state 검증과 next 안전성 검증은 자격증명과
+// 무관하게 항상 돈다** — 필요한 쿠키를 직접 조작해서 만들어 authorize가
+// 발급했는지에 기대지 않는다.
+const AUTHORIZE_HOSTS = {
+  kakao: "kauth.kakao.com",
+  github: "github.com",
+  google: "accounts.google.com",
+} as const;
+
+type Provider = keyof typeof AUTHORIZE_HOSTS;
+
+async function providerIsConfigured(
+  request: APIRequestContext,
+  provider: Provider,
+): Promise<boolean> {
+  const res = await request.get(`/api/auth/social/${provider}/authorize?next=/console`, {
     maxRedirects: 0,
   });
-  return (res.headers()["location"] ?? "").includes("kauth.kakao.com");
+  return (res.headers()["location"] ?? "").includes(AUTHORIZE_HOSTS[provider]);
+}
+
+// 예전 카카오 전용 헬퍼 — 아래 카카오 전용 블록들이 계속 쓴다.
+async function kakaoIsConfigured(request: APIRequestContext): Promise<boolean> {
+  return providerIsConfigured(request, "kakao");
 }
 
 test.describe("카카오 authorize — 자격증명이 없을 때(dev 기본)", () => {
@@ -45,6 +73,36 @@ test.describe("카카오 authorize — 자격증명이 없을 때(dev 기본)", 
     // 않으므로 왕복을 지킬 이유가 없다.
     expect(res.headers()["set-cookie"] ?? "").not.toContain("laurio_oauth_state=");
   });
+});
+
+// #189 — GitHub·구글도 카카오와 같은 route.ts를 공유하므로 자격증명 없는
+// 분기(oauth_unconfigured)가 이 둘에서도 도는지 확인한다. **자격증명이 있을
+// 때의 대응 블록은 없다** — GitHub·구글 OAuth 앱이 아직 어느 환경에도
+// 등록돼 있지 않아(사람이 할 일, 티켓 핸드오프 참고) 항상 이 분기를 탄다.
+// 사람이 등록해 이 실행 환경에 값을 채우면 이 테스트는 스스로 skip으로
+// 넘어간다(providerIsConfigured가 그때는 true를 돌려주므로) — 그 순간부터는
+// 카카오의 "자격증명이 있을 때" 블록과 같은 모양의 확인이 새로 필요해진다.
+test.describe("GitHub·구글 authorize — 자격증명이 없을 때(지금 모든 환경)", () => {
+  for (const provider of ["github", "google"] as const) {
+    test(`${provider}로 가지 않고 우리 로그인 화면으로 이유와 함께 돌아간다`, async ({
+      request,
+    }) => {
+      test.skip(
+        await providerIsConfigured(request, provider),
+        `이 실행 환경에는 ${provider} 자격증명이 설정돼 있다 — 이 테스트는 미설정 상태를 검증한다.`,
+      );
+
+      const res = await request.get(`/api/auth/social/${provider}/authorize?next=/console`, {
+        maxRedirects: 0,
+      });
+
+      const location = res.headers()["location"] ?? "";
+      expect(location).not.toContain(AUTHORIZE_HOSTS[provider]);
+      expect(location).toContain("/login");
+      expect(location).toContain("error=oauth_unconfigured");
+      expect(res.headers()["set-cookie"] ?? "").not.toContain("laurio_oauth_state=");
+    });
+  }
 });
 
 test.describe("카카오 authorize — 자격증명이 있을 때", () => {
@@ -266,8 +324,16 @@ test.describe("우리 화면으로 돌아가는 리다이렉트는 상대 경로
 });
 
 test.describe("로그인 화면 — 실물 버튼과 dev seed 폼이 공존한다", () => {
-  test("카카오 버튼은 authorize로 가는 링크이고, GitHub·구글은 준비 중으로 비활성화돼 있다", async ({
+  // 카카오는 하드코딩된 링크가 아니라 이 화면도 결국 config-derived다(#189) —
+  // 다만 카카오는 배포 환경에서 자격증명이 필수라(#96) 이 실행 환경에서 항상
+  // configured==true로 관찰된다. GitHub·구글은 사람이 OAuth 앱을 등록하기
+  // 전까지(핸드오프 참고) 항상 준비 중으로 남는다 — 그 판정은
+  // app/login/page.tsx가 lib/auth/github·google.ts의 readGithubOAuthConfig/
+  // readGoogleOAuthConfig로 서버에서 내리고, 값이 채워지면 코드를 더 고치지
+  // 않아도 이 화면이 실제 링크로 바뀐다.
+  test("카카오 버튼은 authorize로 가는 링크이고, GitHub·구글은 설정 여부로 링크/준비 중이 갈린다", async ({
     page,
+    request,
   }) => {
     await page.goto("/login");
 
@@ -275,15 +341,20 @@ test.describe("로그인 화면 — 실물 버튼과 dev seed 폼이 공존한�
     await expect(kakaoLink).toBeVisible();
     await expect(kakaoLink).toHaveAttribute("href", /\/api\/auth\/social\/kakao\/authorize/);
 
-    const githubButton = page.getByTestId("oauth-login-github");
-    await expect(githubButton).toBeVisible();
-    await expect(githubButton).toBeDisabled();
-    await expect(githubButton).toContainText("준비 중");
+    for (const provider of ["github", "google"] as const) {
+      const button = page.getByTestId(`oauth-login-${provider}`);
+      await expect(button).toBeVisible();
 
-    const googleButton = page.getByTestId("oauth-login-google");
-    await expect(googleButton).toBeVisible();
-    await expect(googleButton).toBeDisabled();
-    await expect(googleButton).toContainText("준비 중");
+      if (await providerIsConfigured(request, provider)) {
+        await expect(button).toHaveAttribute(
+          "href",
+          new RegExp(`/api/auth/social/${provider}/authorize`),
+        );
+      } else {
+        await expect(button).toBeDisabled();
+        await expect(button).toContainText("준비 중");
+      }
+    }
   });
 
   test("?error= 코드가 있으면 로그인 화면에 이유가 보인다 — 빈 화면이 아니다", async ({
