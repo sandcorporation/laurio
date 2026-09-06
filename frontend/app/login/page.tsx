@@ -1,8 +1,17 @@
 import { isDeployedEnvironment } from "@/lib/auth/cookies";
+import { readGithubOAuthConfig } from "@/lib/auth/github";
+import { readGoogleOAuthConfig } from "@/lib/auth/google";
 
 import LoginForm from "./login-form";
 
-// 서버 컴포넌트다 — dev seed 폼을 보일지는 여기서 서버가 결정한다(#95, spec #92).
+// 서버 컴포넌트다 — dev seed 폼을 보일지, GitHub·구글 버튼을 실제 링크로 그릴지는
+// 여기서 서버가 결정한다(#95, spec #92 / #189). client_id·secret 자체는 절대
+// 클라이언트 컴포넌트로 내려주지 않는다 — "설정돼 있는가"라는 boolean 하나만
+// prop으로 넘긴다(readGithubOAuthConfig/readGoogleOAuthConfig가 이미 이 판정을
+// 하고 있어 authorize 라우트와 정확히 같은 기준을 쓴다 — 카카오와 달리
+// 배포 환경에서도 필수가 아니다: 사람이 GitHub·구글 OAuth 앱을 등록하기 전까지는
+// 여기서 false가 나오고, 등록해 이 프로세스의 환경변수를 채우면 코드를 더
+// 고치지 않아도 true가 된다).
 // 배포 환경(staging/production)에서 로그인 우회가 실려 나가는 것이 불편한 것보다
 // 나쁘다는 판단이라, 클라이언트에서 process.env를 읽는 게 아니라(빌드 시점에
 // 굳어 배포마다 다시 빌드해야 하고, NEXT_PUBLIC_ 없이는 애초에 브라우저에 값이
@@ -21,5 +30,11 @@ import LoginForm from "./login-form";
 export const dynamic = "force-dynamic";
 
 export default function LoginPage() {
-  return <LoginForm showDevSeedForm={!isDeployedEnvironment()} />;
+  return (
+    <LoginForm
+      showDevSeedForm={!isDeployedEnvironment()}
+      githubConfigured={readGithubOAuthConfig() !== null}
+      googleConfigured={readGoogleOAuthConfig() !== null}
+    />
+  );
 }

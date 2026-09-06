@@ -10,13 +10,9 @@ import type { NextRequest } from "next/server";
 import { setSessionCookies } from "@/lib/auth/cookies";
 import { assertSameOrigin } from "@/lib/auth/origin";
 import { loginWithSocialAccessToken } from "@/lib/auth/social-login";
+import { isSocialProvider } from "@/lib/auth/social-providers";
 
 export const dynamic = "force-dynamic";
-
-// 백엔드가 실제로 구현한 제공자만 통과시킨다(accounts/social.py의 _REAL_ADAPTERS) —
-// 목록이 갈라지면 백엔드는 "unsupported provider"로 401을 내는데, 여기서 먼저
-// 걸러 그 왕복 없이 바로 404로 답한다.
-const SUPPORTED_PROVIDERS = new Set(["kakao", "github", "google"]);
 
 interface SocialLoginRequestBody {
   access_token?: unknown;
@@ -30,7 +26,7 @@ export async function POST(
   if (originDenied) return originDenied;
 
   const { provider } = await context.params;
-  if (!SUPPORTED_PROVIDERS.has(provider)) {
+  if (!isSocialProvider(provider)) {
     return NextResponse.json({ detail: "지원하지 않는 로그인 방식입니다." }, { status: 404 });
   }
 

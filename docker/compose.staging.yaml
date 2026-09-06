@@ -349,6 +349,18 @@ services:
       KAKAO_REST_API_KEY: ${KAKAO_REST_API_KEY:?staging KAKAO_REST_API_KEY 를 .env.staging 에 설정하라}
       KAKAO_SECRET_KEY: ${KAKAO_SECRET_KEY:?staging KAKAO_SECRET_KEY 를 .env.staging 에 설정하라}
       KAKAO_REDIRECT_URI: ${KAKAO_REDIRECT_URI:?staging KAKAO_REDIRECT_URI 를 .env.staging 에 설정하라 — 카카오 콘솔에 등록한 값과 정확히 같아야 한다}
+      # GitHub·구글 OAuth 앱 자격증명(#189) — 카카오와 달리 **선택**이다.
+      # `:-`(비어 있으면 빈 문자열)라 .env.staging에 없어도 기동을 막지 않는다.
+      # 비어 있으면 frontend/lib/auth/{github,google}.ts가 null을 돌려주고
+      # 로그인 화면의 해당 버튼이 "준비 중"으로 남는다(app/login/page.tsx) —
+      # 사람이 OAuth 앱을 등록하고 이 세 값을 채우면 재배포만으로 실제 링크가
+      # 된다(docker/staging.env.example 참고).
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
     ports:
       # staging은 검증용 서브 호스트에 직접 노출한다 — backend의
       # INTERNAL_API_PORT 노출과 같은 이유다. prod처럼 127.0.0.1로 좁히지
