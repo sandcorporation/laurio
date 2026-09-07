@@ -192,6 +192,11 @@ jobs:
       SELLER_ADAPTER_MODE: tests.adapter_stubs.StubSellerAdapter
       LLM_ADAPTER_MODE: tests.adapter_stubs.StubLLMScoringAdapter
       LLM_REQUIREMENT_CHAT_ADAPTER_MODE: tests.adapter_stubs.StubRequirementChatAdapter
+      # #193 — 일곱 번째 어댑터. 이 값이 빠져 있으면 부팅 가드가 거부해 이 잡이
+      # 통째로 실패한다. 실제로 #193 머지에서 그랬다: 배포 파일 넷(compose 둘,
+      # env.example 둘)은 갱신됐는데 이 잡의 env 만 빠졌고, 체인의 로컬 게이트
+      # (pytest·typecheck)는 이 잡을 돌리지 않아 볼 수 없었다.
+      GITHUB_ADAPTER_MODE: tests.adapter_stubs.StubGitHubAdapter
       # #89: RealAlimtalkAdapter/RealSmsAdapter/RealLmsAdapter는 저장소에 없는
       # 클래스였다 — 그 사실이 부팅 가드 없이는 드러나지 않았다. 실물 벤더
       # 어댑터(#51, notifications.adapters_aligo)는 이제 존재하지만, 이 잡은
