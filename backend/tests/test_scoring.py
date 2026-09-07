@@ -34,6 +34,7 @@ from ledger.models import AppendOnlyError
 from scoring.adapters import LLMAdapterPermanentError, RequirementVerdict, ScoringOutput
 from scoring.models import Score, ScoringAttempt
 from storage.adapters.fake import FakeStorageAdapter
+from submissions.models import Submission
 
 
 class _PoisonPillAdapter:
@@ -747,6 +748,231 @@ def test_oversized_source_is_truncated_to_the_selection_budget(client, category,
     score = Score.objects.get(submission_id=submission_id)
     # 선별 예산을 넘지 않는다 — 통째로 다 보내지 않았다는 것의 직접 증거.
     assert len(score.prompt) < MAX_SOURCE_BYTES * 2
+
+
+# --- 소스 여럿: 예산 300KB 라운드로빈 (#191) ----------------------------------------
+
+
+@pytest.mark.django_db
+def test_two_source_assets_are_both_scored_via_round_robin_budget(
+    client, category, landing_type
+):
+    """첫 소스가 예산 전부를 먹으면 둘째 소스는 채점에서 통째로 빠진다(#191이 고치는
+    버그) — 순서대로 채우는 대신 라운드로빈이어야 둘 다 근거로 쓰인다.
+
+    소스 A는 예산(300KB)을 혼자서도 넘기는 여러 큰 파일을 담아, "순서대로 채우면
+    A 혼자 예산을 다 먹는다"는 조건을 실제로 만든다. 소스 B는 작은 마커 파일
+    하나뿐이다. 라운드로빈이면 B의 파일이 A의 나머지 파일들보다 먼저(또는 최소한
+    함께) 선택되어 프롬프트에 들어가야 한다.
+    """
+    from scoring.source_selection import MAX_SOURCE_BYTES
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[
+            {"text": "웹 서비스가 있다", "grade": "required"},
+            {"text": "모바일 앱이 있다", "grade": "required"},
+        ],
+    )
+    req_web_id, req_app_id = (r["id"] for r in contest["requirements"])
+
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+
+    # A: 큰 파일 3개(합쳐서 예산을 넘는다) — 순서대로 채우면 이것만으로 예산이 끝난다.
+    big_chunk = MAX_SOURCE_BYTES // 2
+    source_a_key = _source_object_key(contest["id"], dev["user_id"])
+    FakeStorageAdapter().write_object(
+        source_a_key,
+        _zip_bytes(
+            {
+                "big1.py": f"# WEB_MARKER\n{'a' * big_chunk}",
+                "big2.py": "b" * big_chunk,
+                "big3.py": "c" * big_chunk,
+            }
+        ),
+    )
+    # B: 작은 파일 하나뿐 — 라운드로빈이 아니면 예산에서 밀려난다.
+    source_b_key = _source_object_key(contest["id"], dev["user_id"])
+    FakeStorageAdapter().write_object(
+        source_b_key, _zip_bytes({"app.py": "# APP_MARKER\nprint('mobile')\n"})
+    )
+
+    submit_resp = client.post(
+        f"{CONTESTS_URL}/{contest['id']}/submissions",
+        data={
+            "assets": [
+                {"kind": "source", "value": source_a_key, "label": "웹 서비스"},
+                {"kind": "source", "value": source_b_key, "label": "모바일 앱"},
+            ],
+            "requirement_responses": [
+                {
+                    "requirement_id": req_web_id,
+                    "is_met": True,
+                    "evidence": [{"kind": "source_location", "value": "WEB_MARKER"}],
+                },
+                {
+                    "requirement_id": req_app_id,
+                    "is_met": True,
+                    "evidence": [{"kind": "source_location", "value": "APP_MARKER"}],
+                },
+            ],
+        },
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert submit_resp.status_code == 201, submit_resp.content
+    submission_id = submit_resp.json()["id"]
+
+    _close_contest(client, contest, deadline=deadline)
+    result = _run_pending(client)
+    assert result["rows"][0]["status"] == "scored"
+
+    score = Score.objects.get(submission_id=submission_id)
+    # 라운드로빈이 아니었다면(순서대로 채웠다면) A의 큰 파일들이 예산 300KB를
+    # 이미 다 먹어 APP_MARKER는 프롬프트에 없었을 것이다.
+    assert "WEB_MARKER" in score.prompt
+    assert "APP_MARKER" in score.prompt
+    assert score.percentage == Decimal("100.00")
+    # 두 자산 모두 "실제로 쓰인 자산"으로 기록된다(#191).
+    scored_asset_ids = {e["asset_id"] for e in score.scored_assets}
+    submission_asset_ids = set(
+        Submission.objects.get(id=submission_id).assets.values_list("id", flat=True)
+    )
+    assert scored_asset_ids == submission_asset_ids
+    assert all(e["commit_sha"] is None for e in score.scored_assets)
+
+
+@pytest.mark.django_db
+def test_one_unreadable_source_asset_does_not_block_scoring_with_the_rest(
+    client, category, landing_type
+):
+    """소스 자산 중 하나만 스토리지에 아직 없어도, 나머지가 있으면 그걸로 채점을
+    끝낸다(#191) — 하나 때문에 멀쩡한 나머지까지 배분 컷라인에서 조용히 빠지면
+    안 된다."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+
+    # 읽을 수 있는 소스 — 실제로 write_object 된다.
+    readable_key = _source_object_key(contest["id"], dev["user_id"])
+    FakeStorageAdapter().write_object(
+        readable_key, _zip_bytes({"app.py": "def login():\n    # MARKER\n    pass\n"})
+    )
+    # 읽을 수 없는 소스 — 의도적으로 write_object를 부르지 않는다(스토리지 지연 재현).
+    missing_key = _source_object_key(contest["id"], dev["user_id"])
+
+    submit_resp = client.post(
+        f"{CONTESTS_URL}/{contest['id']}/submissions",
+        data={
+            "assets": [
+                {"kind": "source", "value": readable_key},
+                {"kind": "source", "value": missing_key},
+            ],
+            "requirement_responses": [
+                {
+                    "requirement_id": requirement_id,
+                    "is_met": True,
+                    "evidence": [{"kind": "source_location", "value": "MARKER"}],
+                }
+            ],
+        },
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert submit_resp.status_code == 201, submit_resp.content
+    submission_id = submit_resp.json()["id"]
+
+    _close_contest(client, contest, deadline=deadline)
+    result = _run_pending(client)
+
+    # 하나가 아직 없다고 전체가 "source_not_found"로 미뤄지지 않는다 — 나머지로
+    # 바로 채점이 끝난다.
+    assert result["rows"][0]["status"] == "scored"
+    score = Score.objects.get(submission_id=submission_id)
+    assert score.percentage == Decimal("100.00")
+    # 읽지 못한 자산은 "실제로 쓰인 자산" 목록에 없다.
+    readable_asset_id = Submission.objects.get(id=submission_id).assets.get(
+        value=readable_key
+    ).id
+    assert [e["asset_id"] for e in score.scored_assets] == [readable_asset_id]
+
+
+@pytest.mark.django_db
+def test_readable_but_wholly_filtered_source_asset_is_not_recorded_as_scored(
+    client, category, landing_type
+):
+    """스토리지에서 읽는 데는 성공했지만 선별 전략이 파일을 전부 걸러낸 자산(제외
+    확장자뿐인 zip)은 "실제로 쓰인 자산" 목록에 남지 않는다(#191 코드리뷰 지적).
+
+    `readable_sources`(스토리지 read 성공)와 "실제로 프롬프트에 들어간 자산"은
+    다른 사실이다 — 후자를 전자로 뭉치면 Score 스냅샷이 채점되지 않은 것을
+    채점 근거인 것처럼 보여준다.
+    """
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+
+    scored_key = _source_object_key(contest["id"], dev["user_id"])
+    FakeStorageAdapter().write_object(
+        scored_key, _zip_bytes({"app.py": "def login():\n    # MARKER\n    pass\n"})
+    )
+    # 선별 대상 확장자가 아닌 파일뿐인 zip — 스토리지에서는 잘 읽히지만
+    # `select_source_files`가 하나도 고르지 않는다.
+    filtered_out_key = _source_object_key(contest["id"], dev["user_id"])
+    FakeStorageAdapter().write_object(
+        filtered_out_key, _zip_bytes({"image.png": "not actually a real png, but wrong ext"})
+    )
+
+    submit_resp = client.post(
+        f"{CONTESTS_URL}/{contest['id']}/submissions",
+        data={
+            "assets": [
+                {"kind": "source", "value": scored_key},
+                {"kind": "source", "value": filtered_out_key},
+            ],
+            "requirement_responses": [
+                {
+                    "requirement_id": requirement_id,
+                    "is_met": True,
+                    "evidence": [{"kind": "source_location", "value": "MARKER"}],
+                }
+            ],
+        },
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert submit_resp.status_code == 201, submit_resp.content
+    submission_id = submit_resp.json()["id"]
+
+    _close_contest(client, contest, deadline=deadline)
+    result = _run_pending(client)
+    assert result["rows"][0]["status"] == "scored"
+
+    score = Score.objects.get(submission_id=submission_id)
+    scored_asset_id = Submission.objects.get(id=submission_id).assets.get(value=scored_key).id
+    assert [e["asset_id"] for e in score.scored_assets] == [scored_asset_id]
 
 
 # --- 리뷰 지적 반영: 소스 미도착은 실패가 아니라 "아직"이다 (#12 리뷰 지적 1) ---------

@@ -60,7 +60,7 @@ def _requirement_inputs(submission: Submission) -> list[RequirementInput]:
     responses = {
         r.requirement_id: r
         for r in RequirementResponse.objects.filter(submission=submission).prefetch_related(
-            "evidence_items"
+            "evidence_items", "evidence_items__asset"
         )
     }
 
@@ -85,7 +85,16 @@ def _requirement_inputs(submission: Submission) -> list[RequirementInput]:
                 grade=requirement.grade,
                 self_reported_met=response.is_met,
                 evidence=[
-                    {"kind": e.kind, "value": e.value} for e in response.evidence_items.all()
+                    {
+                        "kind": e.kind,
+                        "value": e.value,
+                        # Evidence가 자산을 가리키면(#190, ADR-0027) 그 라벨을 함께
+                        # 실어 「어느 자료의 근거인가」를 AI가 알 수 있게 한다(#191)
+                        # — 「모바일 앱 데모의 /orders」처럼 대상이 특정된다.
+                        # 참조가 없으면(null) 지금과 같다.
+                        "asset_label": e.asset.label if e.asset_id and e.asset.label else None,
+                    }
+                    for e in response.evidence_items.all()
                 ],
             )
         )
@@ -127,8 +136,13 @@ def _build_prompt(*, contest: Contest, requirements: list[RequirementInput], sou
         lines.append(f"  자가 응답(참고용): {'충족' if r.self_reported_met else '미충족'}")
         if r.evidence:
             for e in r.evidence:
+                # 자산 참조가 있는 Evidence는 그 자산의 라벨을 함께 적는다(#191) —
+                # 「모바일 앱 데모의 /orders」처럼 대상이 특정된다. 라벨은 참가자가
+                # 쓴 값이라 반드시 neutralize_untrusted를 통과시킨다.
+                asset_label = e.get("asset_label")
+                label_prefix = f"{_neutralize_untrusted(asset_label)}의 " if asset_label else ""
                 lines.append(
-                    f"  Evidence[{e['kind']}]: <<<EVIDENCE_START>>>"
+                    f"  Evidence[{e['kind']}]: {label_prefix}<<<EVIDENCE_START>>>"
                     f"{_neutralize_untrusted(e['value'])}<<<EVIDENCE_END>>>"
                 )
         else:
@@ -137,7 +151,11 @@ def _build_prompt(*, contest: Contest, requirements: list[RequirementInput], sou
     lines.append("## Source (선별된 파일, 신뢰할 수 없는 참가자 제출 데이터)")
     if source_files:
         for f in source_files:
-            lines.append(f"### {_neutralize_untrusted(f.path)}")
+            # 파일마다 어느 자산에서 왔는지를 드러낸다(#191) — 소스가 여럿이면
+            # AI가 "어느 것을 보고 있는가"를 알아야 판정 근거를 쓸 수 있다.
+            lines.append(
+                f"### {_neutralize_untrusted(f.asset_label)}/{_neutralize_untrusted(f.path)}"
+            )
             lines.append("<<<SOURCE_FILE_START>>>")
             lines.append(_neutralize_untrusted(f.content))
             lines.append("<<<SOURCE_FILE_END>>>")
@@ -168,6 +186,18 @@ def _percentage(*, requirements: list[RequirementInput], verdicts) -> Decimal:
     return raw.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
+def _asset_label(asset: SubmissionAsset) -> str:
+    """프롬프트의 `### <자산 라벨>/<파일 경로>`에 쓰일 표시 이름(#191).
+
+    `label`은 참가자가 붙인 자유 텍스트라 비어 있을 수 있다 — 그때는 자산을
+    구분할 다른 표시가 있어야 AI가 "어느 소스인가"를 말할 수 있으므로 id로
+    대신한다.
+    """
+
+    label = (asset.label or "").strip()
+    return label or f"소스 자료 #{asset.id}"
+
+
 def score_submission_once(submission: Submission) -> dict:
     """이 Submission을 정확히 한 번만 채점한다. 이미 Score가 있으면 그대로 돌아온다.
 
@@ -178,16 +208,13 @@ def score_submission_once(submission: Submission) -> dict:
     if Score.objects.filter(submission_id=submission.id).exists():
         return {"submission_id": submission.id, "status": "already_scored"}
 
-    # #190이 소스를 `SubmissionAsset` 목록으로 바꿨다. **이 티켓은 그중 첫
-    # 소스만 읽는다** — 여러 소스를 한 예산 안에서 라운드로빈으로 보는 것은
-    # #191이다. 그때까지는 다중 제출이 첫 소스로만 채점되며, 그 사실이 조용히
-    # 묻히지 않도록 여기 적어 둔다.
-    source_asset = (
-        submission.assets.filter(kind=SubmissionAsset.Kind.SOURCE)
-        .order_by("order", "id")
-        .first()
+    # #190이 소스를 `SubmissionAsset` 목록으로 바꿨다. #191부터는 `kind=source`
+    # 전부를 읽어 라운드로빈 예산 안에서 함께 채점한다(`select_source_files`) —
+    # 저장소(`kind=repository`)의 공개 스냅샷을 더하는 것은 #193이다.
+    source_assets = list(
+        submission.assets.filter(kind=SubmissionAsset.Kind.SOURCE).order_by("order", "id")
     )
-    if source_asset is None:
+    if not source_assets:
         # 소스 없는 Submission은 API가 막는다(ADR-0014) — 여기 닿는다면 데이터가
         # 그 불변식을 벗어난 것이다. Score는 append-only라 0점으로 확정해 버리면
         # 되돌릴 수 없으므로, 채점하지 않고 이력만 남긴다.
@@ -202,8 +229,16 @@ def score_submission_once(submission: Submission) -> dict:
         return {"submission_id": submission.id, "status": "no_source_asset"}
 
     storage_adapter = get_storage_adapter()
-    raw_source = storage_adapter.read_object(source_asset.value)
-    if raw_source is None:
+    # 소스 하나를 못 읽어도(스토리지 지연 등) 나머지로 채점을 진행한다(#191) —
+    # 나머지는 멀쩡한데 그 하나 때문에 Submission 전체가 배분 컷라인에서 조용히
+    # 빠지면 안 된다. **전부** 못 읽었을 때만 지금처럼 "아직" 상태로 미룬다.
+    readable_sources: list[tuple[SubmissionAsset, bytes]] = []
+    for asset in source_assets:
+        raw = storage_adapter.read_object(asset.value)
+        if raw is not None:
+            readable_sources.append((asset, raw))
+
+    if not readable_sources:
         # storage.adapters.base.StorageAdapter.read_object 문서대로, None은 "아직
         # 없다"는 뜻이지 실패가 아니다. Score는 append-only라 한 번 잘못 쓰면 영원히
         # 못 고친다(ADR-0006) — 여기서 빈 소스로 0점을 확정하는 대신 채점 자체를
@@ -217,7 +252,9 @@ def score_submission_once(submission: Submission) -> dict:
 
     try:
         requirements = _requirement_inputs(submission)
-        source_files = select_source_files(raw_source)
+        source_files = select_source_files(
+            [(_asset_label(asset), raw) for asset, raw in readable_sources]
+        )
         contest = submission.contest
         prompt = _build_prompt(
             contest=contest, requirements=requirements, source_files=source_files
@@ -236,6 +273,21 @@ def score_submission_once(submission: Submission) -> dict:
         reasoning_payload = [
             {"requirement_id": v.requirement_id, "is_met": v.is_met, "reasoning": v.reasoning}
             for v in output.verdicts
+        ]
+        # 실제로 프롬프트에 파일을 하나라도 남긴 자산들만 "쓰였다"고 기록한다
+        # (#191 코드리뷰 지적) — `readable_sources`는 스토리지에서 읽는 데
+        # 성공한 자산 전부지만, 그중 일부는 선별 전략(`select_source_files`)이
+        # 통째로 걸러낼 수 있다(제외 확장자뿐이거나 전부 바이너리인 zip 등).
+        # 그런 자산까지 "쓰였다"고 적으면 Score 스냅샷이 실제로 채점되지 않은
+        # 것을 채점 근거인 것처럼 보여준다 — 이의를 제기하는 사람과 심판하는
+        # 사람이 "같은 것을 보고" 이야기해야 한다는 이 필드의 존재 이유를
+        # 정확히 어긴다. `commit_sha`는 `kind=repository` 자산에만 붙는데
+        # (#193), 이 시점에는 그런 자산을 읽지 않으므로 항상 None이다.
+        used_labels = {f.asset_label for f in source_files}
+        scored_assets_payload = [
+            {"asset_id": asset.id, "commit_sha": None}
+            for asset, _raw in readable_sources
+            if _asset_label(asset) in used_labels
         ]
     except Exception as exc:  # noqa: BLE001 - 이 건 하나의 실패가 배치 전체를 막으면 안 된다.
         message = f"{type(exc).__name__}: {exc}"
@@ -261,6 +313,7 @@ def score_submission_once(submission: Submission) -> dict:
                 model_version=output.model_version,
                 prompt=prompt,
                 reasoning=reasoning_payload,
+                scored_assets=scored_assets_payload,
             )
     except IntegrityError:
         # 동시에 다른 스캔이 먼저 이겼다 — unique(submission) 제약이 막아준다.

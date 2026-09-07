@@ -5,6 +5,8 @@ from datetime import datetime
 from ninja import Schema
 from pydantic import Field
 
+from submissions.schemas import ScoredAssetOut
+
 
 class ErrorOut(Schema):
     detail: str
@@ -55,6 +57,9 @@ class ScoreSnapshotOut(Schema):
     model_version: str
     reasoning: list[dict]
     created_at: datetime
+    # 채점에 실제로 쓰인 자산 목록 (#191) — Developer가 보는 `OwnScoreOut`과
+    # 같은 사실을 운영자도 봐야 이의 심판이 같은 근거 위에서 이루어진다.
+    scored_assets: list[ScoredAssetOut] = []
 
 
 class RulingOut(Schema):

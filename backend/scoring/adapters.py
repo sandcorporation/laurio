@@ -33,10 +33,17 @@ from core.adapters import resolve_adapter
 
 @dataclass(frozen=True)
 class SourceFile:
-    """채점 대상으로 선별된 소스 파일 하나 (scoring.source_selection)."""
+    """채점 대상으로 선별된 소스 파일 하나 (scoring.source_selection).
+
+    `asset_label`은 이 파일이 어느 `SubmissionAsset`에서 왔는지 참가자가 붙인
+    라벨이다(#191) — 소스가 여럿이 되면 AI가 "어느 것을 보고 있는가"를 알아야
+    판정 근거를 쓸 수 있다. 라벨이 비어 있으면 자산을 식별할 다른 표시로
+    채워진다(`scoring.source_selection`).
+    """
 
     path: str
     content: str
+    asset_label: str = ""
 
 
 @dataclass(frozen=True)
@@ -47,7 +54,9 @@ class RequirementInput:
     text: str
     grade: str
     self_reported_met: bool
-    evidence: list[dict]  # [{"kind": str, "value": str}, ...]
+    # [{"kind": str, "value": str, "asset_label": str | None}, ...] — asset_label은
+    # 이 Evidence가 가리키는 자산의 라벨이다(#191). 참조가 없으면(null) None이다.
+    evidence: list[dict]
 
 
 @dataclass(frozen=True)

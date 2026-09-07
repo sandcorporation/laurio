@@ -1,4 +1,4 @@
-"""대형 저장소를 통째로 LLM에 보내지 않기 위한 채점 대상 파일 선별 전략 (#12).
+"""대형 저장소를 통째로 LLM에 보내지 않기 위한 채점 대상 파일 선별 전략 (#12, #191).
 
 ADR-0014의 소비: "대형 프로젝트의 소스는 채점 컨텍스트 비용이 크다. 채점 대상
 파일을 선별하는 전략이 필요하다"를 여기서 만족시킨다.
@@ -18,18 +18,33 @@ ADR-0014의 소비: "대형 프로젝트의 소스는 채점 컨텍스트 비용
 4. zip이 아니면(단일 텍스트 파일처럼 온 경우) 원문을 예산까지만 담는다 — 실제
    업로드는 아카이브가 보통이지만, 이 분기가 있어야 선별 전략이 입력 형태 하나에
    의존해 깨지지 않는다.
+
+**소스가 여럿이면 라운드로빈으로 나눠 담는다(#191).** 제출작이 `SubmissionAsset`
+목록을 담게 되면서(ADR-0027) 채점 입력도 목록이 됐다 — 순서대로 채우면 첫 소스가
+예산을 다 먹고 둘째부터는 채점에서 통째로 빠진다. 매 라운드마다 그 라운드에 아직
+남은 소스 수로 예산을 공평하게 나눠, 한 소스가 크더라도 다른 소스의 차례를
+빼앗지 못하게 한다. 어느 소스가 그 라운드에서 쓰지 않은 몫은 버려지지 않고 같은
+라운드의 다음 소스에게 넘어간다(파일 하나가 그 라운드의 몫보다 작을 수 있으므로).
 """
 
 from __future__ import annotations
 
+import contextlib
 import io
 import zipfile
+from dataclasses import dataclass
+from typing import Callable, Iterator
 
 from .adapters import SourceFile
 
 # LLM 컨텍스트 비용을 억제하는 예산. 정확한 토큰 수가 아니라 대략적인 바이트
-# 상한이다 — 실제 어댑터가 붙으면 모델별 토큰 한도에 맞춰 조정하면 된다.
-MAX_SOURCE_BYTES = 200_000
+# 상한이다. gpt-4o-mini(128K 토큰)를 기준으로 보수적으로 3~4바이트/토큰 환산해
+# 요구사항·지시문·출력 여유를 뺀 실질 상한이 250~300KB 근처라 300_000으로 잡는다
+# (#191) — 이 값을 넘기면 컨텍스트 초과가 `LLMAdapterPermanentError`로 잡혀 그
+# Submission이 이후 스캔에서 통째로 빠지므로, 소스를 많이 낸 참가자일수록 손해를
+# 본다. 이 값은 정책(`PlatformPolicy`)이 아니라 코드 상수로 남는다 — 모델 토큰
+# 한도에 묶인 기술값이지 사업이 정하는 값이 아니다(ADR-0027).
+MAX_SOURCE_BYTES = 300_000
 
 ALLOWED_EXTENSIONS = {
     ".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".kt", ".kts", ".go", ".rb",
@@ -69,34 +84,92 @@ def _decode_utf8_prefix(data: bytes) -> str | None:
     return None
 
 
-def select_source_files(raw: bytes, *, max_bytes: int = MAX_SOURCE_BYTES) -> list[SourceFile]:
+@dataclass(frozen=True)
+class _Candidate:
+    """소스 하나 안에서 채점 대상이 될 수 있는 파일 하나 — 실제로 뽑힐 때까지는
+    읽지 않는다(zip bomb 방어는 `reader`가 호출될 때 예산만큼만 스트리밍한다)."""
+
+    path: str
+    reader: Callable[[int], bytes]
+
+
+def _zip_candidates(raw: bytes, stack: contextlib.ExitStack) -> list[_Candidate]:
+    archive = stack.enter_context(zipfile.ZipFile(io.BytesIO(raw)))
+    candidates: list[_Candidate] = []
+    for info in sorted(archive.infolist(), key=lambda i: i.filename):
+        if info.is_dir() or not _is_selectable(info.filename):
+            continue
+
+        def _reader(budget: int, *, info=info) -> bytes:
+            # archive.read(info)는 멤버 전체를 먼저 압축 해제한다 — 예산과 무관하게
+            # zip bomb 하나가 메모리를 다 먹을 수 있다. archive.open()이 돌려주는
+            # 스트림에서 예산만큼만 read()하면 그만큼만 압축 해제된다.
+            with archive.open(info) as member:
+                return member.read(budget)
+
+        candidates.append(_Candidate(path=info.filename, reader=_reader))
+    return candidates
+
+
+def _source_candidates(raw: bytes, stack: contextlib.ExitStack) -> list[_Candidate]:
     if not raw:
         return []
-
     try:
-        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
-            files: list[SourceFile] = []
-            budget = max_bytes
-            for info in sorted(archive.infolist(), key=lambda i: i.filename):
-                if budget <= 0:
-                    break
-                if info.is_dir() or not _is_selectable(info.filename):
-                    continue
-                # archive.read(info)는 멤버 전체를 먼저 압축 해제한다 — 예산과
-                # 무관하게 zip bomb 하나가 메모리를 다 먹을 수 있다. archive.open()이
-                # 돌려주는 스트림에서 예산만큼만 read()하면 그만큼만 압축 해제된다.
-                with archive.open(info) as member:
-                    content_bytes = member.read(budget)
-                text = _decode_utf8_prefix(content_bytes)
-                if text is None:
-                    continue
-                files.append(SourceFile(path=info.filename, content=text))
-                budget -= len(content_bytes)
-            return files
+        return _zip_candidates(raw, stack)
     except zipfile.BadZipFile:
-        pass
+        return [_Candidate(path="source", reader=lambda budget: raw[:budget])]
 
-    text = _decode_utf8_prefix(raw[:max_bytes])
-    if text is None:
-        return []
-    return [SourceFile(path="source", content=text)]
+
+def select_source_files(
+    sources: list[tuple[str, bytes]], *, max_bytes: int = MAX_SOURCE_BYTES
+) -> list[SourceFile]:
+    """여러 소스(각각 `(자산 라벨, 원본 바이트)`)를 예산 안에서 라운드로빈으로 고른다.
+
+    `sources`가 비어 있으면 빈 목록을 돌려준다. 소스 하나짜리 입력에서도 동작은
+    이전과 같다 — 예산 전체를 그 하나가 쓴다.
+    """
+
+    files: list[SourceFile] = []
+    budget = max_bytes
+
+    with contextlib.ExitStack() as stack:
+        queues: list[tuple[str, Iterator[_Candidate]]] = []
+        for label, raw in sources:
+            candidates = _source_candidates(raw, stack)
+            if candidates:
+                queues.append((label, iter(candidates)))
+
+        while queues and budget > 0:
+            round_queues = queues
+            remaining_in_round = len(round_queues)
+            next_queues: list[tuple[str, Iterator[_Candidate]]] = []
+
+            for label, queue in round_queues:
+                if budget <= 0:
+                    remaining_in_round -= 1
+                    continue
+
+                # 이 라운드에서 아직 처리되지 않은 소스 수로 남은 예산을 공평하게
+                # 나눈다 — 앞선 소스가 크더라도 뒤 소스의 차례를 통째로 빼앗지
+                # 못하게 한다(#191). 어느 소스가 실제로 덜 쓰면 그 차이는 `budget`
+                # 갱신을 통해 같은 라운드의 다음 소스에게 자연히 넘어간다.
+                share = max(budget // remaining_in_round, 1)
+                remaining_in_round -= 1
+
+                candidate = next(queue, None)
+                if candidate is None:
+                    continue  # 이 소스는 다 소진됐다 — 이번 라운드부터 회전에서 뺀다.
+
+                content_bytes = candidate.reader(min(share, budget))
+                text = _decode_utf8_prefix(content_bytes)
+                if text is not None:
+                    files.append(
+                        SourceFile(path=candidate.path, content=text, asset_label=label)
+                    )
+                    budget -= len(content_bytes)
+
+                next_queues.append((label, queue))
+
+            queues = next_queues
+
+    return files
