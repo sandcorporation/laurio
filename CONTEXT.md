@@ -1,15 +1,28 @@
 # Laurio
 
 발주자가 상금을 걸고 요구사항을 공개하면, 개발자들이 앱·서비스를 만들어 제출하고,
-기한 내에 선정된 하나에게 상금이 지급되는 공개 공모전 플랫폼.
+기한 내에 선정된 하나에게 상금이 지급되는 공개 공모전 플랫폼. 같은 얼개 위에
+상금 없는 Assignment도 산다 — 초대로만 열리고 채점으로 끝난다.
 
 ## Language
 
 ### 공모전
 
 **Contest**:
-발주자가 상금을 걸고 요구사항을 공개해 개발자들이 경쟁하는 하나의 이벤트. 요구사항·체크리스트·상금·기한을 모두 담는 최소 단위이며, 유찰 후 다시 열 때는 복제된 새 Contest가 원본을 참조한다. **결제가 문을 닫는다** — 그 전(초안)에는 무엇이든 고칠 수 있고 몇 번이든 이어서 작성할 수 있다. 공개되지 않아 아무도 보지 않았고 참가자도 없기 때문이다. 결제가 끝나면 공개되고, 그때부터는 남들이 그 조건을 보고 노동을 들이므로 바꿀 수 없다.
+Sponsor가 요구사항과 기한을 걸고 Developer들이 제출물을 내는 하나의 이벤트. 요구사항·체크리스트·상금·기한을 모두 담는 최소 단위이며, 유찰 후 다시 열 때는 복제된 새 Contest가 원본을 참조한다. **종류가 둘이다** — 상금을 걸고 공개로 여는 공모전, 그리고 상금 없이 초대로만 여는 Assignment. **문이 닫히면 조건을 바꿀 수 없다**: 공모전은 결제가 닫고 Assignment는 첫 제출이 닫는다. 그 전(초안)에는 무엇이든 몇 번이든 고칠 수 있다 — 아직 아무도 그 조건을 보고 노동을 들이지 않았기 때문이다.
 _Avoid_: 의뢰, Request, Project, Job, Brief, Round
+
+**Assignment**:
+상금도 결제도 없는 Contest 한 종류. 강사가 InviteCode로 열고 학생이 제출하면 마감 후 한 번 채점되는 것으로 끝난다 — Award도 Appeal도 Distribution도 Payout도 없고, 원장에 아무것도 남지 않는다. 공개 목록에 나타나지 않으며, 여는 데 본인확인을 요구하지 않는 대신 그 자격을 Operator가 준다.
+_Avoid_: 숙제, 실습, 비공개 공모전, 무료 공모전, Homework, Exercise, Task
+
+**InviteCode**:
+Assignment의 유일한 경계. 이것을 아는 사람이 참가자이며 명단은 따로 두지 않는다 — 제출한 사람만 보이고, 내지 않은 사람은 플랫폼이 알지 못한다. 새어 나가면 Sponsor가 다시 발급해 새 진입만 막는다: 이미 낸 사람의 제출물은 그대로 남는다.
+_Avoid_: 참여 코드, 비밀번호, 접근 키, Access code, Token, Passcode
+
+**AssignmentPermission**:
+Operator가 한 Sponsor에게 Assignment를 열 자격을 준 사실. 과제에는 결제가 없어 비용이 스스로 제어되지 않으므로, 결제가 서 있던 자리를 사람이 여는 문이 대신한다. 주고 거둔 일에는 누가·언제·왜가 남는다. 자격을 거두어도 이미 열린 Assignment는 끝까지 돈다 — 학생이 이미 시간을 썼기 때문이다.
+_Avoid_: 강사 인증, 화이트리스트, 승인 상태, Whitelist, Approval flag
 
 **ContestView**:
 사람이 Contest 상세를 연 사건. **그 사건을 저장하지 않는다** — 날짜별 고유 수만 남기고, 같은 사람이 같은 날 여러 번 열어도 하나다. 중복을 가리는 식별자는 하루만 살고 스스로 사라져, 방문 기록이라는 개인정보 축을 새로 열지 않는다. 서버가 렌더하며 세지 않고 브라우저가 열린 뒤 알린다 — 프리페치와 크롤러는 사람이 본 것이 아니고, 렌더는 두 번 그려도 같은 결과여야 하기 때문이다.
@@ -30,12 +43,12 @@ _Avoid_: 체크리스트 항목, Criterion, Spec, AcceptanceCriteria
 ### 당사자
 
 **Sponsor**:
-Contest를 개최하고 Prize를 예치하며 Award 권한을 갖는 당사자.
-_Avoid_: 의뢰자, 발주처, Client, Buyer, Orderer, Requester
+Contest를 개최하는 당사자. 공모전에서는 Prize를 예치하고 Award 권한을 가지며, Assignment에서는 상금 없이 과제를 여는 강사다 — 예치할 것도 선정할 것도 없는 대신 제출된 소스를 지도를 위해 볼 수 있고 그 열람이 남는다.
+_Avoid_: 의뢰자, 발주처, 강사를 별도 역할로 부르는 것, Client, Buyer, Orderer, Requester, Instructor
 
 **Developer**:
-Contest에 Submission을 내는 당사자. 한 사람이 어떤 Contest에서는 Sponsor이고 다른 Contest에서는 Developer일 수 있다.
-_Avoid_: 참가자, Entrant, Contestant, Contractor, Freelancer
+Contest에 Submission을 내는 당사자. 공모전에서는 상금을 두고 경쟁하는 참가자이고, Assignment에서는 과제를 내는 학생이다 — 같은 신원이라 과제를 낸 사람이 그대로 공모전에 나갈 수 있다. 한 사람이 어떤 Contest에서는 Sponsor이고 다른 Contest에서는 Developer일 수 있다.
+_Avoid_: 참가자, 학생을 별도 역할로 부르는 것, Entrant, Contestant, Contractor, Freelancer, Student
 
 **Operator**:
 Laurio를 운영하며 Appeal에 Ruling을 내리는 당사자. Sponsor·Developer와 서로소다 — 소셜 계정을 가진 계정은 Operator가 될 수 없고, Operator는 소셜 계정을 붙일 수 없다. 이 구분이 「돈을 움직인 사람이 누구인가」를 애매하지 않게 만든다.
@@ -120,7 +133,7 @@ _Avoid_: 유찰 배분, 자동 지급, Refund, Split
 _Avoid_: 인증(Verification과 뭉뚱그리는 것), 로그인 상태를 본인확인으로 부르는 것
 
 **Verification**:
-휴대폰 본인확인으로 실명·생년월일·CI를 확보한 상태. Submission 제출과 Contest 개최를 여는 관문이며, 가입과 열람에는 요구되지 않는다. **한 계정의 신원은 한 번 정해지면 다른 사람의 것으로 바뀌지 않는다** — 이미 CI 가 있는 계정에 다른 CI 로 본인확인이 들어오면 거부한다. 이 불변식이 없으면 성인으로 확인받아 개최한 사람이 재확인 한 번으로 미성년이 되어, 그 Contest 의 자전거래 차단이 조용히 꺼진다.
+휴대폰 본인확인으로 실명·생년월일·CI를 확보한 상태. 상금이 걸린 Contest의 개최와 제출을 여는 관문이며, 가입·열람에는 요구되지 않고 **Assignment에도 요구되지 않는다** — 돈도 지식재산권 이전도 없는 곳에는 이 관문이 지킬 것이 없다. 그래서 본인확인을 하지 않은 사람에게는 통지할 수단도 없다: 연락처는 이 확인에서만 들어온다. **한 계정의 신원은 한 번 정해지면 다른 사람의 것으로 바뀌지 않는다** — 이미 CI 가 있는 계정에 다른 CI 로 본인확인이 들어오면 거부한다. 이 불변식이 없으면 성인으로 확인받아 개최한 사람이 재확인 한 번으로 미성년이 되어, 그 Contest 의 자전거래 차단이 조용히 꺼진다.
 _Avoid_: 인증(Authentication과 뭉뚱그리는 것), 실명인증, KYC(토스 셀러 심사를 가리키는 별개 용어)
 
 **Withdrawal**:
