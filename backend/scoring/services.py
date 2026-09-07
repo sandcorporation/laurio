@@ -32,9 +32,11 @@ Score를 만들지 않았다"로 돌아온다. `submission-scoring` 스캔이 �
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 from django.db import IntegrityError, transaction
+from django.db.models import Exists, OuterRef
 
 from contests.models import Contest, Requirement
 from core.clock import Clock
@@ -333,14 +335,14 @@ def score_submission_once(submission: Submission) -> dict:
         commit_sha_by_asset_id = {
             asset.id: cloned.commit_sha for asset, cloned in cloned_repositories
         }
-        used_asset_ids = {f.asset_id for f in source_files}
-        candidate_assets = [asset for asset, _raw in readable_sources] + [
-            asset for asset, _cloned in cloned_repositories
-        ]
+        # `dict.fromkeys`로 순서를 보존한 유일 집합을 만든다 — `source_files`가
+        # 이미 라운드로빈이 고른 순서이므로, 그 순서를 스냅샷에도 그대로
+        # 남긴다(코드리뷰 지적: 자산 객체를 다시 조립해 거르는 중간 단계가
+        # 불필요했다).
+        used_asset_ids = dict.fromkeys(f.asset_id for f in source_files)
         scored_assets_payload = [
-            {"asset_id": asset.id, "commit_sha": commit_sha_by_asset_id.get(asset.id)}
-            for asset in candidate_assets
-            if asset.id in used_asset_ids
+            {"asset_id": asset_id, "commit_sha": commit_sha_by_asset_id.get(asset_id)}
+            for asset_id in used_asset_ids
         ]
     except Exception as exc:  # noqa: BLE001 - 이 건 하나의 실패가 배치 전체를 막으면 안 된다.
         message = f"{type(exc).__name__}: {exc}"
@@ -429,6 +431,27 @@ def _notify_scored(submission: Submission) -> None:
         )
 
 
+# 저장소 공개 여부가 아직 안 정해진 채로 채점을 시작하면 안 된다(#193 코드리뷰
+# 지적) — `SCAN_REGISTRY`는 `INSTALLED_APPS` 등록 순서를 따르는 평범한 dict라
+# `submission-scoring`(scoring 앱)이 `repository-visibility`(repositories 앱)
+# 보다 먼저 등록·실행된다. 마감 전이가 일어난 바로 그 tick 안에서 채점이 먼저
+# 돌면, 방금 마감된 Contest의 `is_public`이 아직 null인 저장소는 조회조차
+# 되지 못한 채(`is_public=True` 필터) Score가 확정된다 — Score는 append-only라
+# (ADR-0006) 그 뒤 가시성 스캔이 아무리 부지런히 값을 채워도 이미 늦는다.
+#
+# 그렇다고 무기한 기다릴 수는 없다 — GitHub이 죽었거나 어댑터가 계속 실패하면
+# 그 Submission이 영원히 Score 없이 남아 배분 컷라인에서 조용히 탈락한다(#190·
+# #191이 `no_source_asset`/`source_not_found`를 가른 것과 같은 이유로 피해야
+# 하는 실패 형태다). 그래서 마감(`deadline_at`) 이후 이 유예 기간 안에서만
+# 미루고, 지나면 미해결 저장소를 "채점 입력이 아님"으로 확정하고 채점을
+# 진행한다 — `is_public`이 여전히 null인 저장소는 어차피 `is_public=True`
+# 필터에 걸리지 않으므로 별도 처리 없이 자연히 빠진다.
+#
+# 가시성 스캔의 재확인 주기(`repositories.services._STALE_AFTER`, 1시간)보다
+# 넉넉히 잡아 정상적인 비동기 지연은 이 안에서 끝나게 한다.
+_REPOSITORY_VISIBILITY_GRACE = timedelta(hours=2)
+
+
 def _pending_submissions(as_of, ctx):
     """CLOSED Contest 중 아직 Score 없는 Submission — 마감 전이가 일어난 바로 다음 스캔에서
     채점이 1회 시작된다(ADR-0006).
@@ -437,12 +460,26 @@ def _pending_submissions(as_of, ctx):
     않고 일어날 수 있으므로(ADR-0006/0014, Score는 Award를 결정하지 않는다), 채점이 끝나기
     전에 Contest가 CLOSED를 벗어날 수 있다. CLOSED만 보면 그 순간 이 Contest의 미채점
     Submission이 이 스캔에서 영원히 빠진다 — 새 상태를 추가할 때 옛 상태만 보던 호출부를
-    놓치는 정확히 그 실패 형태다.
+    놓치는 정확히 그 실패 형태다. (`contests.models`의 `Contest.Status.SCOREABLE`·
+    `REFUNDABLE` Classification이 같은 실패 형태를 "한 tick 안에서 다른 스캔이 상태를
+    앞질러 후보가 사라진다"는 이름으로 이미 겪었다 — 아래 저장소 유예는 Contest.Status가
+    아니라 관련 없는 비동기 사실(저장소 공개 여부)에 대한 것이라 Classification으로
+    표현되지는 않지만, 같은 부류의 경합이다.)
 
     결정적으로 실패한 건(#88 코드리뷰 지적 2, `ScoringAttempt.permanent=True`)은 뺀다 —
     안 그러면 매 스캔이 order_by("id")의 앞머리에서 같은 건을 다시 집어 영원히 재시도만
     하고, 그 뒤의 새 Submission은 배치 안에 들어오지 못할 수 있다.
+
+    저장소 공개 여부가 아직 안 정해졌고(`is_public` null) 유예 기간이 남은
+    Submission도 뺀다(#193 코드리뷰 지적, `_REPOSITORY_VISIBILITY_GRACE`) —
+    자세한 이유는 그 상수의 주석.
     """
+
+    unresolved_repository = SubmissionAsset.objects.filter(
+        submission=OuterRef("pk"),
+        kind=SubmissionAsset.Kind.REPOSITORY,
+        is_public__isnull=True,
+    )
 
     return (
         Submission.objects.filter(
@@ -450,6 +487,11 @@ def _pending_submissions(as_of, ctx):
             score__isnull=True,
         )
         .exclude(scoring_attempts__permanent=True)
+        .annotate(_has_unresolved_repository=Exists(unresolved_repository))
+        .exclude(
+            _has_unresolved_repository=True,
+            contest__deadline_at__gt=as_of - _REPOSITORY_VISIBILITY_GRACE,
+        )
         .select_related("contest")
     )
 

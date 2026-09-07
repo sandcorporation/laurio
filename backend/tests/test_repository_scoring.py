@@ -431,3 +431,113 @@ def test_visibility_check_transient_failure_leaves_is_public_null_not_false(
     )
     repo_asset = next(a for a in detail.json()["assets"] if a["kind"] == "repository")
     assert repo_asset["is_public"] is None
+
+
+@pytest.mark.django_db
+def test_scoring_is_deferred_while_repository_visibility_is_still_unresolved(
+    client, category, landing_type
+):
+    """`SCAN_REGISTRY`는 `INSTALLED_APPS` 등록 순서를 따르는 평범한 dict라
+    `submission-scoring`이 `repository-visibility`보다 먼저 등록·실행된다 —
+    마감이 일어난 바로 그 틱에서 채점이 먼저 돌면, 방금 마감된 저장소는
+    `is_public`이 아직 null이라 조회조차 되지 못한 채(`is_public=True` 필터)
+    Score가 확정되고, Score는 append-only라(ADR-0006) 그 뒤 가시성 스캔이
+    아무리 부지런히 값을 채워도 이미 늦는다.
+
+    이 테스트는 정확히 그 순서(`submission-scoring`을 `repository-visibility`
+    보다 먼저 호출)로 재현해, 채점이 그 틱에서 진행되지 않고 가시성이 확정된
+    뒤에야 진행되는지를 고정한다(#193 코드리뷰 지적).
+    """
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+
+    repo_url = _repository_url("public-org")
+    submission = _submit_with_repository(
+        client,
+        dev,
+        contest["id"],
+        requirement_id=requirement_id,
+        repo_url=repo_url,
+        source_marker="SRC_MARKER",
+    )
+
+    # 가시성 스캔을 아직 한 번도 돌리지 않은 채(is_public이 여전히 null) 마감시키고
+    # 채점 스캔을 먼저 부른다 — "contest-close 직후 submission-scoring이
+    # repository-visibility보다 먼저 도는 틱"을 그대로 재현한다.
+    _close_contest(client, contest, deadline=deadline)
+    deferred = _run_scoring(client)
+
+    assert not Score.objects.filter(submission_id=submission["id"]).exists(), (
+        "저장소 공개 여부가 아직 안 정해졌는데 채점이 먼저 진행됐다"
+    )
+    assert all(row["submission_id"] != submission["id"] for row in deferred["rows"])
+
+    # 이제 가시성이 확정된다 — 다음 채점 스캔은 더 이상 미루지 않는다.
+    _run_visibility_scan(client)
+    result = _run_scoring(client)
+
+    assert result["rows"][0]["status"] == "scored"
+    assert Score.objects.filter(submission_id=submission["id"]).exists()
+
+
+@pytest.mark.django_db
+def test_scoring_proceeds_after_the_grace_period_even_if_visibility_never_resolves(
+    client, category, landing_type
+):
+    """GitHub이 계속 죽어 있어도(가시성 스캔이 한 번도 성공하지 못해도) 그
+    Submission이 영원히 Score 없이 남으면 안 된다 — 배분 컷라인에서 조용히
+    탈락한다(#190·#191이 `no_source_asset`/`source_not_found`를 가른 것과 같은
+    이유). 유예 기간이 지나면 미해결 저장소를 "채점 입력이 아님"으로 확정하고
+    소스만으로 채점을 진행해야 한다(#193 코드리뷰 지적).
+    """
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+
+    repo_url = _repository_url("public-org")
+    submission = _submit_with_repository(
+        client,
+        dev,
+        contest["id"],
+        requirement_id=requirement_id,
+        repo_url=repo_url,
+        source_marker="SRC_MARKER",
+    )
+
+    _close_contest(client, contest, deadline=deadline)
+    # 가시성 스캔을 한 번도 성공시키지 않은 채(is_public은 계속 null) 유예 기간을
+    # 훌쩍 넘긴 시각으로 시계를 옮긴다.
+    from core.models import ClockOverride
+
+    ClockOverride.objects.update_or_create(
+        pk=1, defaults={"overridden_at": deadline + timedelta(hours=3)}
+    )
+
+    result = _run_scoring(client)
+
+    assert result["rows"][0]["status"] == "scored"
+    score = Score.objects.get(submission_id=submission["id"])
+    assert score.percentage == Decimal("100.00")  # 소스만으로 충족
+
+    repository_asset = Submission.objects.get(id=submission["id"]).assets.get(
+        kind=SubmissionAsset.Kind.REPOSITORY
+    )
+    assert all(e["asset_id"] != repository_asset.id for e in score.scored_assets)
+    assert not RepositorySnapshot.objects.filter(asset=repository_asset).exists()

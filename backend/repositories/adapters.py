@@ -22,17 +22,19 @@ PG·스토리지·LLM과 같은 원칙(ADR-0007): 실제 GitHub 연동을 인터
 
 from __future__ import annotations
 
+import hashlib
 import io
 import logging
-import re
 import zipfile
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
+from urllib.parse import quote
 
 import requests
 from django.conf import settings
 
 from core.adapters import resolve_adapter
+from submissions.models import GITHUB_REPO_URL_PATTERN
 
 logger = logging.getLogger(__name__)
 
@@ -82,20 +84,23 @@ class GitHubAdapter(Protocol):
     def clone(self, url: str) -> ClonedRepository: ...
 
 
-# `submissions.models.GITHUB_REPO_URL_PATTERN`이 제출 시점에 이미 이 모양만
-# 받아들인다 — 여기서는 그 전제 위에서 owner/repo만 뽑는다. 그래도 방어적으로
-# 다시 검증한다: 이 값은 참가자가 쓴 URL이고, 이 함수를 부르는 시점(스캔·채점)은
-# 제출 검증과 시간·경로가 다르다.
-_GITHUB_URL_RE = re.compile(
-    r"^https://github\.com/(?P<owner>[A-Za-z0-9._-]{1,100})/(?P<repo>[A-Za-z0-9._-]{1,100})/?$"
-)
-
-
 def _parse_github_url(url: str) -> tuple[str, str]:
-    match = _GITHUB_URL_RE.match(url)
-    if match is None:
+    """`submissions.models.GITHUB_REPO_URL_PATTERN`이 제출 시점에 이미 이 모양만
+    받아들인다 — "GitHub 저장소 URL은 이렇게 생겼다"의 정의를 여기서 다시
+    타이핑하지 않고 그 패턴을 그대로 재사용한다(#193 코드리뷰 지적). 두 벌로
+    적으면 형식이 넓어질 때(예: 더 긴 저장소 이름) 한쪽만 고쳐져 제출 시점에
+    받아들이는 URL과 clone이 파싱하는 URL이 갈릴 수 있다.
+
+    그래도 여기서 다시 검증한다 — 이 값은 참가자가 쓴 URL이고, 이 함수를 부르는
+    시점(스캔·채점)은 제출 검증과 시간·경로가 다르다. `GITHUB_REPO_URL_PATTERN`은
+    이름 있는 그룹이 없으므로, 형식만 확인한 뒤 이미 검증된 접두사를 잘라내
+    owner/repo를 나눈다.
+    """
+
+    if not GITHUB_REPO_URL_PATTERN.match(url):
         raise GitHubAdapterError(f"github.com 저장소 URL 형식이 아니다: {url!r}")
-    return match.group("owner"), match.group("repo")
+    owner, repo = url[len("https://github.com/") :].rstrip("/").split("/", 1)
+    return owner, repo
 
 
 class FakeGitHubAdapter:
@@ -142,8 +147,6 @@ class FakeGitHubAdapter:
             for path, content in files.items():
                 zf.writestr(path, content)
 
-        import hashlib
-
         commit_sha = hashlib.sha1(url.encode("utf-8")).hexdigest()
         return ClonedRepository(commit_sha=commit_sha, zip_bytes=buf.getvalue())
 
@@ -176,18 +179,31 @@ class GitHubAPIAdapter:
             headers["Authorization"] = f"Bearer {self._token}"
         return headers
 
-    def _repo_info(self, owner: str, repo: str) -> dict:
+    def _request(
+        self, url: str, *, what: str, owner: str, repo: str, stream: bool = False
+    ) -> requests.Response:
+        """GitHub 호출 셋(저장소 조회·브랜치 조회·zip 다운로드)이 공유하는 네트워크
+        오류 처리 — 상태 코드별 처리는 호출부마다 다르므로 응답 그대로 돌려준다
+        (#193 코드리뷰 지적: 세 호출이 같은 `try/except requests.RequestException`을
+        메시지 문자열만 바꿔 반복하고 있었다)."""
+
         try:
-            response = requests.get(
-                f"{_GITHUB_API_BASE}/repos/{owner}/{repo}",
-                headers=self._headers(),
-                timeout=self._timeout,
+            return requests.get(
+                url, headers=self._headers(), timeout=self._timeout, stream=stream
             )
         except requests.RequestException as exc:
             raise GitHubAdapterError(
-                f"GitHub 저장소 조회가 네트워크 오류로 실패했다({type(exc).__name__}, "
+                f"{what}이(가) 네트워크 오류로 실패했다({type(exc).__name__}, "
                 f"owner={owner}, repo={repo})."
             ) from None
+
+    def _repo_info(self, owner: str, repo: str) -> dict:
+        response = self._request(
+            f"{_GITHUB_API_BASE}/repos/{owner}/{repo}",
+            what="GitHub 저장소 조회",
+            owner=owner,
+            repo=repo,
+        )
 
         if response.status_code == 404:
             # 존재하지 않거나 비공개(GitHub은 권한 없는 조회에 404를 준다) — 이건
@@ -233,17 +249,19 @@ class GitHubAPIAdapter:
         if not default_branch:
             raise GitHubAdapterError(f"기본 브랜치를 확인할 수 없다(owner={owner}, repo={repo}).")
 
-        try:
-            branch_response = requests.get(
-                f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/branches/{default_branch}",
-                headers=self._headers(),
-                timeout=self._timeout,
-            )
-        except requests.RequestException as exc:
-            raise GitHubAdapterError(
-                f"GitHub 브랜치 조회가 네트워크 오류로 실패했다({type(exc).__name__}, "
-                f"owner={owner}, repo={repo})."
-            ) from None
+        # `default_branch`는 owner/repo와 달리 우리 정규식이 제약한 입력이 아니라
+        # GitHub API 응답에서 그대로 온 값이다 — "release/2024"처럼 슬래시가
+        # 유효한 브랜치 이름이 있다(#193 코드리뷰 지적). 인코딩하지 않으면 URL이
+        # `.../branches/release/2024`가 되어 GitHub이 그 경로를 브랜치 이름으로
+        # 풀지 않고, 매 시도가 같은 깨진 URL을 만들어 공개 저장소인데도 영원히
+        # clone되지 못한다(non-200 → GitHubAdapterError → 그 자산만 조용히
+        # 버려진다).
+        branch_response = self._request(
+            f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/branches/{quote(default_branch, safe='')}",
+            what="GitHub 브랜치 조회",
+            owner=owner,
+            repo=repo,
+        )
         if branch_response.status_code != 200:
             raise GitHubAdapterError(
                 f"GitHub 브랜치 조회가 실패했다(status={branch_response.status_code}, "
@@ -256,33 +274,34 @@ class GitHubAPIAdapter:
                 f"GitHub 브랜치 응답에서 커밋 SHA를 읽을 수 없다(owner={owner}, repo={repo})."
             ) from None
 
-        try:
-            zip_response = requests.get(
-                f"https://codeload.github.com/{owner}/{repo}/zip/{commit_sha}",
-                timeout=self._timeout,
-                stream=True,
-            )
-        except requests.RequestException as exc:
-            raise GitHubAdapterError(
-                f"GitHub zip 다운로드가 네트워크 오류로 실패했다({type(exc).__name__}, "
-                f"owner={owner}, repo={repo})."
-            ) from None
-        if zip_response.status_code != 200:
-            raise GitHubAdapterError(
-                f"GitHub zip 다운로드가 실패했다(status={zip_response.status_code}, "
-                f"owner={owner}, repo={repo})."
-            )
-
-        chunks: list[bytes] = []
-        total = 0
-        for chunk in zip_response.iter_content(chunk_size=65536):
-            total += len(chunk)
-            if total > _MAX_CLONE_DOWNLOAD_BYTES:
+        # `with`로 감싼다 — non-200 분기에서도, 아래 반복 도중 다운로드 상한에
+        # 걸려 예외를 던질 때도 스트리밍 연결이 열린 채 남으면 안 된다(#193
+        # 코드리뷰 지적). GC가 나중에 거둘 때까지 소켓·커넥션 풀 슬롯이 샌다 —
+        # 상한을 넘는 저장소나 codeload 딸꾹질이 반복되면 스캔이 도는 동안
+        # 조금씩 마른다.
+        with self._request(
+            f"https://codeload.github.com/{owner}/{repo}/zip/{commit_sha}",
+            what="GitHub zip 다운로드",
+            owner=owner,
+            repo=repo,
+            stream=True,
+        ) as zip_response:
+            if zip_response.status_code != 200:
                 raise GitHubAdapterError(
-                    f"저장소 zip이 다운로드 상한({_MAX_CLONE_DOWNLOAD_BYTES}바이트)을 "
-                    f"넘었다(owner={owner}, repo={repo})."
+                    f"GitHub zip 다운로드가 실패했다(status={zip_response.status_code}, "
+                    f"owner={owner}, repo={repo})."
                 )
-            chunks.append(chunk)
+
+            chunks: list[bytes] = []
+            total = 0
+            for chunk in zip_response.iter_content(chunk_size=65536):
+                total += len(chunk)
+                if total > _MAX_CLONE_DOWNLOAD_BYTES:
+                    raise GitHubAdapterError(
+                        f"저장소 zip이 다운로드 상한({_MAX_CLONE_DOWNLOAD_BYTES}바이트)을 "
+                        f"넘었다(owner={owner}, repo={repo})."
+                    )
+                chunks.append(chunk)
 
         return ClonedRepository(commit_sha=commit_sha, zip_bytes=b"".join(chunks))
 
