@@ -24,6 +24,7 @@ import type { components } from "@laurio/bff-client/schema";
 import { bffClient } from "@/lib/bff/client";
 import { ASSET_KIND_LABELS } from "@/lib/submissions/types";
 import type { SubmissionIn, SubmissionOut } from "@/lib/submissions/types";
+import { AssignmentSourceReadingLog } from "@/lib/assignments/source-reading-log";
 
 import {
   AssetKindSection,
@@ -320,6 +321,8 @@ export default function AssignmentInvitePage() {
         <p data-testid="assignment-invite-submission-loading">불러오는 중...</p>
       ) : (
         <>
+          {submission ? <AssignmentSourceReadingLog submissionId={submission.id} /> : null}
+
           <section
             className="flex flex-col gap-2"
             data-testid="assignment-completion-indicator"
