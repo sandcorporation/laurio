@@ -1538,10 +1538,14 @@ def test_evidence_can_point_at_one_asset_and_dies_with_it(client, category, land
     evidence = linked.json()["requirement_responses"][0]["evidence"][0]
     assert evidence["asset_id"] == demo["id"]
 
-    # 그 데모를 지우면서 그것을 가리키는 근거를 그대로 두면 거부된다 — 가리킬
-    # 곳이 없는 근거를 조용히 저장하면 채점이 그 값을 어느 대상의 것으로도
-    # 해석하지 못한 채 프롬프트에 싣게 된다.
-    dangling = _edit(
+    # **그 데모를 지우면서 그것을 가리키는 근거를 그대로 보내도 거부되지 않는다**
+    # (#195). 서버가 병합 뒤의 자산을 이미 알고 있으므로 서버가 연결을 푼다 —
+    # 클라이언트가 `_merge_assets` 의 정체성 규칙을 흉내 내어 미리 풀어 보낼
+    # 이유가 없다. 그 미러링은 실제로 두 번 틀렸다(#192).
+    #
+    # 근거 자체는 사라지지 않는다 — 대상을 특정하지 않은 근거도 여전히 유효하다
+    # (다중화 이전의 모든 근거가 그 모양이다).
+    unlinked = _edit(
         client,
         dev["access"],
         contest["id"],
@@ -1558,28 +1562,15 @@ def test_evidence_can_point_at_one_asset_and_dies_with_it(client, category, land
             ],
         },
     )
-    assert dangling.status_code == 422
 
-    # 참조를 놓으면 근거는 그대로 남는다 — 대상을 특정하지 않은 근거는 여전히
-    # 유효하다(다중화 이전의 모든 근거가 그 모양이다).
-    unlinked = _edit(
-        client,
-        dev["access"],
-        contest["id"],
-        {
-            "assets": [{"kind": "source", "value": source_key}],
-            "requirement_responses": [
-                {
-                    "requirement_id": requirement_id,
-                    "is_met": True,
-                    "evidence": [{"kind": "demo_path", "value": "/orders"}],
-                }
-            ],
-        },
-    )
     assert unlinked.status_code == 200, unlinked.content
-    assert unlinked.json()["requirement_responses"][0]["evidence"][0]["asset_id"] is None
-    assert assets_of(unlinked.json(), "demo_url") == []
+    body = unlinked.json()
+    evidence = body["requirement_responses"][0]["evidence"][0]
+    # 값과 종류는 그대로고 연결만 풀렸다 — 화면은 보낸 값과 돌아온 값을 견주어
+    # 「연결이 해제되었습니다」를 말할 수 있다.
+    assert evidence["value"] == "/orders"
+    assert evidence["asset_id"] is None
+    assert assets_of(body, "demo_url") == []
 
 
 @pytest.mark.django_db
@@ -1636,3 +1627,88 @@ def test_evidence_cannot_point_at_another_submissions_asset(client, category, la
     )
 
     assert response.status_code == 422
+
+
+@pytest.mark.django_db
+def test_removing_an_asset_does_not_open_a_path_to_another_submissions_asset(
+    client, category, landing_type
+):
+    """#195 가 「이번 요청이 지운 자료」를 조용히 풀도록 열었는데, 그 분기가 「남의
+    자료」까지 함께 뭉개면 #190 의 방어가 사라진다.
+
+    기존 `test_evidence_cannot_point_at_another_submissions_asset` 은 POST 만 걷는다 —
+    첫 제출에는 지울 자료가 없어 `removed_asset_ids` 가 항상 비어 있으므로 그 테스트는
+    새 분기를 한 번도 지나지 않는다. 여기서는 **같은 요청에서 자기 자료를 지우면서**
+    남의 자료 id 를 근거로 지정한다.
+    """
+
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        requirements=[{"text": "주문 목록", "grade": "required"}],
+    )
+    victim = _verified_user(client, "dev-1", "dev-ci-1")
+    attacker = _verified_user(client, "dev-2", "dev-ci-2")
+    requirement_id = contest["requirements"][0]["id"]
+
+    victim_submission = _submit(
+        client,
+        victim["access"],
+        contest["id"],
+        {
+            "assets": [
+                {
+                    "kind": "source",
+                    "value": _source_object_key(contest["id"], victim["user_id"]),
+                }
+            ]
+        },
+    )
+    assert victim_submission.status_code == 201
+    victim_asset_id = assets_of(victim_submission.json(), "source")[0]["id"]
+
+    attacker_source = _source_object_key(contest["id"], attacker["user_id"])
+    created = _submit(
+        client,
+        attacker["access"],
+        contest["id"],
+        {
+            "assets": [
+                {"kind": "source", "value": attacker_source},
+                {"kind": "demo_url", "value": "https://example.invalid/gone"},
+            ]
+        },
+    )
+    assert created.status_code == 201
+
+    # 자기 데모를 지우면서(= removed_asset_ids 가 비어 있지 않은 요청) 남의 자료를
+    # 근거로 지정한다. 지운 자료의 연결은 풀어주지만 남의 것은 여전히 거부다.
+    response = _edit(
+        client,
+        attacker["access"],
+        contest["id"],
+        {
+            "assets": [{"kind": "source", "value": attacker_source}],
+            "requirement_responses": [
+                {
+                    "requirement_id": requirement_id,
+                    "is_met": True,
+                    "evidence": [
+                        {
+                            "kind": "source_location",
+                            "value": "src/x.ts",
+                            "asset_id": victim_asset_id,
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 422
+    # 거부됐으니 공격자의 데모도 그대로 남아 있어야 한다(트랜잭션이 통째로 되돌아간다).
+    still_there = client.get(
+        f"{CONTESTS_URL}/{contest['id']}/submissions/me", **_auth_header(attacker["access"])
+    )
+    assert len(assets_of(still_there.json(), "demo_url")) == 1

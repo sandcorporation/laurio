@@ -127,17 +127,17 @@ export default function SubmitPage() {
     Record<number, RequirementFieldState>
   >({});
   const [saveState, setSaveState] = useState<SaveState>({ status: "idle" });
+  // 직전 저장에서 서버가 연결을 푼 근거 수 (#195) — 자료를 지우면 그것을 가리키던
+  // 근거의 연결이 함께 풀린다는 것을 참가자에게 알린다.
+  const [unlinkedEvidenceCount, setUnlinkedEvidenceCount] = useState(0);
   const [verifying, setVerifying] = useState(false);
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const portOneConfig = useMemo(() => getPortOneBrowserConfig(), []);
 
   // 로드 직후와 저장 성공 직후 둘 다 이 함수를 부른다 — **서버 응답이 이
   // 화면의 자료 id에 대한 유일한 출처다.** 저장 직후에도 다시 부르지 않으면
-  // 방금 새로 만든 자료의 id를 이 화면이 계속 모른 채로 남아, 다음 저장에서
-  // evidence의 asset_id 생존 판정(handleSubmit의 survivingAssetIds)이 "id가
-  // 없으니 이 자료는 사라진다"로 잘못 판단해 방금 막 연결한 근거를 조용히
-  // 풀어버린다 — (kind, value) 정체성 병합 덕에 실제로는 서버에 그대로
-  // 남아있는데도 그렇다.
+  // 방금 새로 만든 자료의 id를 이 화면이 계속 모른 채로 남아, 다음에 그 자료를
+  // 근거로 고르는 드롭다운이 그것을 선택지로 내놓지 못한다.
   function applySubmissionAssets(submission: SubmissionOut | null) {
     const assets = submission?.assets ?? [];
     const nextSourceAssets = assetsOfKind(assets, "source");
@@ -354,6 +354,9 @@ export default function SubmitPage() {
     }
 
     setSaveState({ status: "saving" });
+    // 직전 저장의 알림은 여기서 지운다 — 안 그러면 이번 저장이 아무 것도 풀지
+    // 않았는데도 옛 문구가 그대로 남는다.
+    setUnlinkedEvidenceCount(0);
 
     const assets: SubmissionIn["assets"] = [
       ...rowsToAssetsIn(sourceAssets, "source"),
@@ -372,25 +375,18 @@ export default function SubmitPage() {
       })),
     ];
 
-    // Evidence가 가리키던 자료가 이번 저장에서 사라지면(삭제됐거나, 값이
-    // 바뀌어 실제로는 다른 자료가 됐으면 — `_merge_assets`의 규칙이다) 그
-    // asset_id를 그대로 보내면 백엔드가 422를 낸다("이 Submission에 속하지
-    // 않은 자료를 근거로 지정했습니다"). 살아남는 id만 계산해 그 밖은 미리
-    // 연결을 풀어 보낸다 — 근거 자체는 사라지지 않는다(연결 안 된 근거도
-    // 여전히 유효하다).
+    // **근거의 asset_id는 손대지 않고 그대로 보낸다**(#195). 예전에는 여기서
+    // `_merge_assets`의 `(kind, value)` 정체성 규칙을 클라이언트에서 다시 구현해,
+    // 이번 저장으로 사라질 자료를 가리키는 연결을 미리 풀어 보냈다 — 안 그러면
+    // 백엔드가 422를 냈기 때문이다.
     //
-    // 판정은 **`_merge_assets`와 정확히 같은 규칙**이어야 한다 — id가 아니라
-    // `(kind, value)` 정체성으로 살아남는지를 본다. id로 판정하면 "기존 행을
-    // 지우고 같은 값으로 새 행을 추가"했을 때(새 행은 id가 없다) 실제로는
-    // 서버가 identity 매칭으로 원래 id를 그대로 살리는데도 이 계산은
-    // "사라졌다"고 오판해 멀쩡히 남을 근거 연결을 조용히 끊는다.
-    const currentIdentities = new Set(assets.map((a) => `${a.kind} ${a.value}`));
-    const survivingAssetIds = new Set<number>();
-    for (const original of load.submission?.assets ?? []) {
-      if (currentIdentities.has(`${original.kind} ${original.value}`)) {
-        survivingAssetIds.add(original.id);
-      }
-    }
+    // **그 미러링이 두 번 틀렸다**(#192): 처음엔 값만 비교했고(서버는 kind도 본다),
+    // 고친 뒤엔 id로 판정했다(서버는 id 없는 행도 정체성으로 맞춰 원래 id를 살린다).
+    // 서버 규칙이 바뀔 때마다 조용히 어긋나는 구조였다.
+    //
+    // 이제 서버가 판정한다 — 병합 뒤의 자산을 이미 아는 쪽이 그 일을 한다. 이번
+    // 요청이 지운 자료를 가리킨 근거는 서버가 연결만 풀어 돌려주고, **남의 자료
+    // id는 여전히 422다**(#190의 방어는 그대로다).
 
     const payload: SubmissionIn = {
       assets,
@@ -403,7 +399,7 @@ export default function SubmitPage() {
           evidence: (state?.evidence ?? []).map((e) => ({
             kind: e.kind,
             value: e.value,
-            asset_id: e.asset_id != null && survivingAssetIds.has(e.asset_id) ? e.asset_id : null,
+            asset_id: e.asset_id,
           })),
         };
       }),
@@ -429,20 +425,41 @@ export default function SubmitPage() {
     setLoad((prev) => (prev.status === "ready" ? { ...prev, submission } : prev));
     applySubmissionAssets(submission);
 
-    // 저장 응답이 자산 id의 새 기준이다. 값이 바뀌어 옛 id가 사라진 자산을
-    // 가리키던 근거가 화면 상태(`requirementStates`)에는 그 옛 asset_id를
-    // 그대로 들고 남는다 — 드롭다운 옵션 목록에는 이제 그 id가 없으니
-    // "선택 안 함"처럼 보이면서 내부값만 옛 id인 상태가 된다. 다음 저장에서
-    // survivingAssetIds가 결국 null로 정리하긴 하지만, 그 사이 화면이
-    // 잠깐 거짓말하지 않도록 여기서 바로 정리한다.
-    const validAssetIds = new Set(submission.assets.map((a) => a.id));
+    // **보낸 것과 돌아온 것을 견준다**(#195). 서버가 사라진 자료를 가리키던 근거의
+    // 연결을 풀었다면 응답의 `asset_id`가 null로 온다. 이건 서버 규칙을 흉내 내는
+    // 것이 아니라 **서버의 답을 읽는 것**이라, 그 규칙이 바뀌어도 어긋나지 않는다.
+    //
+    // **순서에 기대지 않는다**(#195 리뷰). 처음엔 (requirement_id, 인덱스)로 짝지었는데
+    // 그건 두 곳에서 깨진다: 응답의 근거 순서가 보장되지 않았고(그건 별도로 `Evidence`에
+    // `ordering`을 줘서 고쳤다), 저장이 도는 동안 사용자가 근거를 지우면 나중에 도는
+    // 업데이터의 `prev`가 보낸 것과 어긋나 **남의 근거에 남의 자료 id를 덮어쓴다.**
+    // 그래서 세는 것은 개수 차이로, 정리하는 것은 "응답에 없는 id"로 한다 — 둘 다
+    // 순서와 무관하다.
+    //
+    // 세는 값은 클로저의 `requirementStates`(=방금 보낸 것)와 응답을 비교한 것이라
+    // 저장 중 편집의 영향을 받지 않는다.
+    const linkedCount = (evidences: { asset_id?: number | null }[]) =>
+      evidences.filter((e) => e.asset_id != null).length;
+    const sentLinked = Object.values(requirementStates).reduce(
+      (n, state) => n + linkedCount(state.evidence),
+      0,
+    );
+    const savedLinked = submission.requirement_responses.reduce(
+      (n, response) => n + linkedCount(response.evidence),
+      0,
+    );
+    setUnlinkedEvidenceCount(Math.max(sentLinked - savedLinked, 0));
+
+    // 응답에 없는 자료를 가리키는 연결만 푼다 — 위치가 아니라 id로 판정하므로
+    // 저장 중에 근거가 늘거나 줄어도 엉뚱한 행을 건드리지 않는다.
+    const savedAssetIds = new Set(submission.assets.map((a) => a.id));
     setRequirementStates((prev) => {
       const next: Record<number, RequirementFieldState> = {};
       for (const [key, state] of Object.entries(prev)) {
         next[Number(key)] = {
           ...state,
           evidence: state.evidence.map((e) =>
-            e.asset_id != null && !validAssetIds.has(e.asset_id) ? { ...e, asset_id: null } : e,
+            e.asset_id != null && !savedAssetIds.has(e.asset_id) ? { ...e, asset_id: null } : e,
           ),
         };
       }
@@ -658,6 +675,15 @@ export default function SubmitPage() {
           {saveState.status === "done" && (
             <p data-testid="submit-success" className="text-sm text-verified">
               저장되었습니다. 마감 전까지 몇 번이든 다시 수정할 수 있습니다.
+            </p>
+          )}
+          {/* 자료를 지우면 그것을 가리키던 근거의 연결이 함께 풀린다(#195) —
+              말해주지 않으면 참가자는 다음에 화면을 열어서야 안다. 근거 자체는
+              남으므로 경고(attention)가 아니라 알림이다. */}
+          {saveState.status === "done" && unlinkedEvidenceCount > 0 && (
+            <p data-testid="evidence-unlinked-notice" className="text-sm text-ink/70">
+              지운 자료를 가리키던 증거 {unlinkedEvidenceCount}건의 연결이 해제되었습니다.
+              증거 자체는 그대로 남아 있으니 다른 자료에 다시 연결할 수 있습니다.
             </p>
           )}
         </div>
