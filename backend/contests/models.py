@@ -275,6 +275,35 @@ class Contest(models.Model):
             and getattr(self, "distribution", None) is None
         )
 
+    @property
+    def is_assignment(self) -> bool:
+        """이 Contest 가 Assignment(ADR-0028, #207)인가 — **`category_id`가 예약된
+        Assignment 카테고리와 같은지**로 판정한다.
+
+        `status` 로는 판정할 수 없다 — `DRAFT` 는 공모전과 Assignment 가 공유하므로
+        (ADR-0028), 아직 열리지 않은 Assignment 는 어느 `Contest.Status.*`
+        Classification 으로도 구별되지 않는다. `category_id` 는 생성 시점에 한 번
+        정해지고 이후 절대 바뀌지 않는(공모전 쪽은 활성 Category 로만 바꿀 수 있고
+        `contests.assignment_category` 가 그 자동배정 Category 를 예약해 두므로
+        공모전이 우연히든 의도적으로든 이 값을 가리킬 수 없다) **유일하게 신뢰할
+        수 있는 신호**다.
+
+        **새 호출부는 이 프로퍼티를 통해서만 판정한다.** #207/#208 코드리뷰에서
+        `category_id`를 손으로 비교하는 자리가 흩어져 있었고, 그중 하나
+        (`_get_owned_draft_contest`, `contests.api`)가 실제로 이 검사를 빠뜨려 —
+        Assignment 가 DRAFT 인 동안은 EDITABLE 이 아니라 `status != DRAFT` 만으로
+        걸러지는 게이트였는데, 아직 열리지 않은 Assignment 는 정확히 그 DRAFT 를
+        공모전과 공유하므로 그대로 통과해 Prize·Category 편집·AI grill 대화 표면에
+        닿을 뻔했다(본인확인 없이 만들어진 Assignment 가 그 경로로 상금 있는
+        공개 Contest 로 발행될 수 있었다는 뜻이다 — ADR-0011 이 지키려던 것이
+        정확히 이 문이다). 흩어진 비교 하나하나가 아니라 이 프로퍼티 하나가
+        틀리지 않으면 되는 구조로 만든다.
+        """
+
+        from .assignment_category import get_assignment_category
+
+        return self.category_id == get_assignment_category().id
+
 
 class HomeStatusAxis(models.TextChoices):
     """홈 큐레이션 버킷의 status 축 (#94, #141) — status 만으로 정해지는 부분. OPEN 은 마감 시각이
@@ -524,17 +553,46 @@ Contest.Status.HOME_AXIS = Classification(
     },
     question="홈의 어느 묶음 축에 속하는가",
 )
-del _S
-
-# Assignment 종류(ADR-0028)에 속하는 status 집합. Classification 이 아니라 평범한 집합이다 —
-# 스캔이 "이 status 에서 무엇을 할까"를 묻는 질문이 아니라, submissions.api 가 "본인확인·
-# 자전거래 검사를 건너뛸까"를 묻는 라우팅 판단이라 "모든 값에 답한다" 규율이 적용될 자리가
-# 아니다. DRAFT 는 공모전과 Assignment 가 공유하므로(ADR-0028) 여기 포함하지 않는다 — DRAFT
-# 상태만으로는 어느 쪽인지 알 수 없고, 알아야 하는 순간(제출)에는 이미 ASSIGNMENT_OPEN 을
-# 지난 뒤다.
-ASSIGNMENT_STATUSES = frozenset(
-    {Contest.Status.ASSIGNMENT_OPEN, Contest.Status.ASSIGNMENT_CLOSED}
+# 제출 시 본인확인·자전거래 검사가 필요한가(#208) — `submissions.api`의 create_submission·
+# update_submission이 쓴다. 이 질문이 실제로 갈리는 두 값은 SUBMITTABLE과 같은 PUBLISHED·
+# ASSIGNMENT_OPEN뿐이지만(다른 값은 애초에 제출 자체가 막힌다, SUBMITTABLE 참고), 이
+# Classification은 "질문마다 모든 값에 명시적으로 답한다"는 규율을 그대로 따른다 — 예전에
+# `contest.status in ASSIGNMENT_STATUSES`(bare frozenset 멤버십)로 흩어져 있던 코드였는데,
+# `core.classification`의 module docstring이 정확히 이 모양(호출부마다 손으로 쓴 집합)이
+# 이 저장소에서 이미 세 번 회귀를 냈다고 적어 두고 있다 — 새 status가 생겨도 멤버십 검사
+# 여러 곳 중 하나를 빠뜨리면 조용히 틀린다. 값 자체는 PUBLICLY_VISIBLE과 같은 네 값에서
+# True다(공모전 계열 status 전부) — REQUIRES_IDENTITY_RETENTION과 마찬가지로 우연이다,
+# 질문이 다르다.
+Contest.Status.SUBMISSION_REQUIRES_VERIFICATION = Classification(
+    {
+        _S.DRAFT: False,
+        _S.PUBLISHED: True,
+        _S.CLOSED: True,
+        _S.AWARDED: True,
+        _S.JUDGING_ENDED: True,
+        _S.ASSIGNMENT_OPEN: False,
+        _S.ASSIGNMENT_CLOSED: False,
+    },
+    question="제출 시 본인확인·자전거래 검사가 필요한가",
 )
+# 본인 제출을 조회할 수 있는 status 인가(#208) — `submissions.api._get_viewable_contest_or_404`
+# (GET .../submissions/me)가 쓴다. PUBLICLY_VISIBLE과 달리 두 Assignment status 도 True다 —
+# 익명·타인에게는 계속 숨어 있어도(ADR-0028) 실제로 그 InviteCode 로 제출한 본인은 자기
+# 제출을 마감 전후 가리지 않고 계속 읽을 수 있어야 한다. DRAFT 만 False 다 — 그 상태에서는
+# 어느 종류든 Submission 이 존재할 수 없다(제출은 SUBMITTABLE 을 통과해야만 생긴다).
+Contest.Status.OWN_SUBMISSION_VIEWABLE = Classification(
+    {
+        _S.DRAFT: False,
+        _S.PUBLISHED: True,
+        _S.CLOSED: True,
+        _S.AWARDED: True,
+        _S.JUDGING_ENDED: True,
+        _S.ASSIGNMENT_OPEN: True,
+        _S.ASSIGNMENT_CLOSED: True,
+    },
+    question="본인 제출을 조회할 수 있는 status 인가",
+)
+del _S
 
 
 class Requirement(models.Model):

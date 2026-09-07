@@ -17,14 +17,27 @@ status만으로는 구별할 수 없다, ADR-0028).
 
 from __future__ import annotations
 
+from functools import lru_cache
+
 from .models import Category
 
 ASSIGNMENT_CATEGORY_NAME = "과제"
 
 
+@lru_cache(maxsize=1)
 def get_assignment_category() -> Category:
     """마이그레이션(`0013_assignment_category`)이 이미 심어 둔 행을 읽기만 한다 — 요청
     경로에서 `get_or_create`를 쓰지 않는 이유는, 이름이 이미 있는데 `is_active`가
-    운영자의 다른 조작으로 달라져 있는 경우를 조용히 되살리지 않기 위해서다."""
+    운영자의 다른 조작으로 달라져 있는 경우를 조용히 되살리지 않기 위해서다.
+
+    **프로세스당 한 번만 조회한다**(`storage/adapters/s3.py`의 `lru_cache(maxsize=1)`와
+    같은 관용구) — 이 행은 마이그레이션이 한 번 심고 나면 절대 바뀌지 않는다(이름을
+    바꿀 운영자 화면도, 지울 경로도 없다). `contests.models.Contest.is_assignment`가
+    이 함수를 인스턴스마다(때로는 목록 한 화면에서 행마다) 부르므로, 캐시가 없으면
+    "그저 카테고리 하나를 비교하는" 프로퍼티 접근이 매번 쿼리를 낸다 — 심하면 목록
+    엔드포인트에서 N+1이 된다(#207/#208 코드리뷰). 이 행이 실제로 바뀌는 유일한
+    경로는 손으로 미이그레이션을 다시 쓰는 것뿐이고, 그런 변경은 어차피 프로세스
+    재시작을 동반한다.
+    """
 
     return Category.objects.get(name=ASSIGNMENT_CATEGORY_NAME)

@@ -422,3 +422,54 @@ def test_assignment_never_appears_in_my_sponsored_contests_list(client, landing_
     assert my_contests.status_code == 200, my_contests.content
     ids = [row["contest_id"] for row in my_contests.json()["items"]]
     assert assignment_id not in ids
+
+
+@pytest.mark.django_db
+def test_unverified_assignment_owner_cannot_reach_paid_contest_edit_gate(client, landing_type):
+    """보안 회귀 — 자격은 있지만 본인확인은 없는 Sponsor가 만든 Assignment(DRAFT)를
+    공모전 전용 편집 표면(`PATCH /api/contests/{id}`)으로 직접 치면 거부돼야 한다.
+
+    `DRAFT`는 공모전과 Assignment가 공유한다(ADR-0028) — 아직 열리지 않은
+    Assignment는 `status != DRAFT`만으로는 걸러지지 않는다. 이 게이트를 통과하면
+    Prize·활성 Category를 그대로 받아들이고(`ContestUpdateIn`에 둘 다 있다), 이어서
+    `POST /api/payments`(`PAYABLE`도 DRAFT 전부에 True다)로 결제까지 확정해 본인확인
+    없이 만들어진 행이 상금 있는 공개 Contest로 발행될 수 있었다 — Verification이
+    아예 없으므로 자전거래 차단의 근거(CI)조차 없는 채였다. `contests.models.Contest.
+    is_assignment`를 `_get_owned_draft_contest`가 함께 거부해 막는다.
+    """
+
+    root = _operator_client("root-asgn-exploit")
+    # 검증 없음 — 자격만 부여한다. Assignment 경로는 본인확인을 요구하지 않는다
+    # (ADR-0029)는 정확히 이 계정이 그 경로로만 움직여야 한다는 뜻이다.
+    pair = _sponsor_with_permission(client, root, "exploit-sponsor-1")
+
+    created = _create_assignment(client, pair["access"], deliverable_type_ids=[landing_type.id])
+    assert created.status_code == 201, created.content
+    assignment_id = created.json()["id"]
+    assert created.json()["status"] == Contest.Status.DRAFT
+
+    from contests.models import Category
+
+    real_category = Category.objects.create(name="교육-exploit")
+
+    escalate = client.patch(
+        f"{CONTESTS_URL}/{assignment_id}",
+        data={"category_id": real_category.id, "prize": 5_000_000},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+
+    assert escalate.status_code == 409, escalate.content
+
+    contest = Contest.objects.get(id=assignment_id)
+    assert contest.category_id != real_category.id
+    assert contest.prize == 0
+
+    # 편집이 막혔으니 결제도 시작될 수 없어야 한다 — 같은 계정으로 한 번 더 확인한다.
+    pay_attempt = client.post(
+        "/api/payments",
+        data={"contest_id": assignment_id},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert pay_attempt.status_code in (403, 409), pay_attempt.content

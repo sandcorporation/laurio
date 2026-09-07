@@ -42,7 +42,7 @@ from accounts.middleware import jwt_auth
 from accounts.models import DeveloperProfile
 from accounts.sanitize import sanitize_free_text
 from awards.models import Award
-from contests.models import ASSIGNMENT_STATUSES, Contest, InviteCode, Requirement
+from contests.models import Contest, InviteCode, Requirement
 from contests.view_tracking import get_view_count
 from core.clock import Clock
 from core.keyset import decode_cursor, keyset_page
@@ -114,12 +114,13 @@ def _require_invite_code_for_assignment(contest: Contest, invite_code: str | Non
     `InviteCode._generate_invite_code`) 이 값을 아는 것 자체가 "초대받았다"의 증거다.
 
     상금 공모전(PUBLISHED)에는 이 검사를 걸지 않는다 — 그 경로에는 애초에
-    InviteCode 라는 경계가 없다(호출부가 `contest.status in ASSIGNMENT_STATUSES`일
-    때만 이 함수를 부른다). 실제로 도달하는 값은 언제나 `ASSIGNMENT_OPEN` 뿐이다 —
-    `_get_published_contest_or_404`가 SUBMITTABLE(ASSIGNMENT_CLOSED 는 포함하지
-    않는다)을 먼저 걸러 `ASSIGNMENT_CLOSED` Contest 는 이 함수에 닿기 전에 이미
-    404 로 끝나기 때문이다. 그 전제가 바뀌면(예: 마감 후에도 SUBMITTABLE 을 넓히는
-    변경) 이 함수는 여전히 옳게 동작한다 — 검사 자체가 status 를 가리지 않는다.
+    InviteCode 라는 경계가 없다(호출부가 `Contest.Status.SUBMISSION_REQUIRES_
+    VERIFICATION`이 False로 답할 때만 이 함수를 부른다, #208 코드리뷰). 실제로
+    도달하는 값은 언제나 `ASSIGNMENT_OPEN` 뿐이다 — `_get_published_contest_or_404`
+    가 SUBMITTABLE(ASSIGNMENT_CLOSED 는 포함하지 않는다)을 먼저 걸러
+    `ASSIGNMENT_CLOSED` Contest 는 이 함수에 닿기 전에 이미 404 로 끝나기 때문이다.
+    그 전제가 바뀌어도(예: 마감 후에도 SUBMITTABLE 을 넓히는 변경) 이 함수는 여전히
+    옳게 동작한다 — 검사 자체가 status 를 가리지 않는다.
     """
 
     if not invite_code or not InviteCode.objects.filter(
@@ -160,12 +161,18 @@ def _get_viewable_contest_or_404(contest_id: int) -> Contest:
     Submission으로만 필터하므로(InviteCode를 거쳐 실제로 제출한 사람만 결과를
     받는다), 여기서 Assignment를 막으면 학생이 마감 전까지 자기 제출을 고치려
     되읽는 경로 자체가 막힌다 — PUBLICLY_VISIBLE을 그대로 썼다면 냈던 회귀다.
+
+    `Contest.Status.OWN_SUBMISSION_VIEWABLE`(#208 코드리뷰)이 이 정확한 질문에
+    답한다 — "PUBLICLY_VISIBLE 이거나 status 가 Assignment 집합에 있는가"를 이
+    호출부에서 매번 조합하는 대신, DRAFT 만 False 인 하나의 Classification 으로
+    묶었다. 새 status 가 생기면 `tests/test_status_classification.py`가 이 질문에도
+    답을 요구한다 — bare 멤버십 검사(`in ASSIGNMENT_STATUSES`)는 그 강제가 없었다.
     """
     try:
         contest = Contest.objects.select_related("sponsor").get(id=contest_id)
     except Contest.DoesNotExist as exc:
         raise HttpError(404, "Contest를 찾을 수 없습니다.") from exc
-    if not Contest.Status.PUBLICLY_VISIBLE(contest.status) and contest.status not in ASSIGNMENT_STATUSES:
+    if not Contest.Status.OWN_SUBMISSION_VIEWABLE(contest.status):
         raise HttpError(404, "Contest를 찾을 수 없습니다.")
     return contest
 
@@ -742,11 +749,17 @@ def create_submission(request: HttpRequest, contest_id: int, payload: Submission
     # 대신 InviteCode 를 반드시 확인한다(둘 다 스펙 #197 인수조건: "본인확인 없는
     # 계정이 과제에 제출할 수 있다" + "InviteCode 를 모르는 사람은 제출할 수 없다").
     # 마감 검사(위 `_reject_if_past_deadline`)는 두 종류 모두에게 그대로 선다.
-    if contest.status in ASSIGNMENT_STATUSES:
-        _require_invite_code_for_assignment(contest, payload.invite_code)
-    else:
+    #
+    # `Contest.Status.SUBMISSION_REQUIRES_VERIFICATION`(#208 코드리뷰)으로 답한다 —
+    # 예전에는 `contest.status in ASSIGNMENT_STATUSES`(bare frozenset 멤버십)로
+    # 갈랐는데, `core.classification`이 경고하는 바로 그 모양(호출부가 손으로 쓴
+    # 집합)이었다. Classification 은 일곱 값 전부에 답을 강제하므로 새 status 가
+    # 생겨도 이 분기가 조용히 틀리지 않는다.
+    if Contest.Status.SUBMISSION_REQUIRES_VERIFICATION(contest.status):
         verification = _require_verification(request.auth_user)
         _reject_self_dealing(contest, verification)
+    else:
+        _require_invite_code_for_assignment(contest, payload.invite_code)
 
     developer, _created = DeveloperProfile.objects.get_or_create(user=request.auth_user)
 
@@ -788,11 +801,11 @@ def update_submission(request: HttpRequest, contest_id: int, payload: Submission
     _reject_if_past_deadline(contest)
 
     # Assignment 수정도 생성과 같은 게이트 — 위 create_submission 주석 참고.
-    if contest.status in ASSIGNMENT_STATUSES:
-        _require_invite_code_for_assignment(contest, payload.invite_code)
-    else:
+    if Contest.Status.SUBMISSION_REQUIRES_VERIFICATION(contest.status):
         verification = _require_verification(request.auth_user)
         _reject_self_dealing(contest, verification)
+    else:
+        _require_invite_code_for_assignment(contest, payload.invite_code)
 
     developer = DeveloperProfile.objects.filter(user=request.auth_user).first()
     submission = (
@@ -967,7 +980,9 @@ def get_submission(request: HttpRequest, submission_id: int):
     is_owner = auth_user is not None and submission.developer.user_id == auth_user.id
     is_sponsor = auth_user is not None and contest.sponsor.user_id == auth_user.id
     past_deadline = Clock.now() >= contest.deadline_at
-    publicly_readable_after_deadline = past_deadline and contest.status not in ASSIGNMENT_STATUSES
+    # "이 Contest 가 어느 종류인가"는 status 가 아니라 kind(카테고리) 질문이다
+    # (#208 코드리뷰) — `Contest.is_assignment`가 그 유일한 판정처다.
+    publicly_readable_after_deadline = past_deadline and not contest.is_assignment
 
     if not (is_owner or is_sponsor or publicly_readable_after_deadline):
         # 다른 Developer(혹은 비로그인)에게는 진행 중인 Submission의 존재 자체를

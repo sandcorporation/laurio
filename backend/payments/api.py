@@ -25,6 +25,7 @@ from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
 from contests.models import Contest
+from verification.models import Verification
 
 from .adapters import PGError, checkout_flow_for_current_mode, get_adapter
 from .charges import Outcome, apply_vendor_outcome, settle_charge
@@ -83,6 +84,25 @@ def initiate_payment(request: HttpRequest, payload: InitiatePaymentIn):
     """
 
     from policies.scope import current_policy
+
+    # 심층 방어(#207/#208 코드리뷰) — **잠금 밖, 소유권 확인보다도 먼저** 확인한다.
+    # 정상 경로에서는 이미 `contests.api.create_contest`가 본인확인을 요구했으므로
+    # 이 엔드포인트에 도달하는 모든 요청자는 이미 VERIFIED다. 이 검사가 실제로 막는
+    # 것은 그 정상 경로를 통해 만들어지지 않은 Contest — Assignment(본인확인 없이
+    # 만들어진다, ADR-0029)가 어떤 경로로든(오늘은 `_get_owned_draft_contest`가
+    # `is_assignment`를 함께 거부해 막혔지만, DRAFT를 공모전과 공유하는 구조상 새
+    # 게이트가 또 하나 빠질 수 있다) 이 엔드포인트까지 왔을 경우다.
+    #
+    # `contest.sponsor`가 아니라 **요청자 본인**(`request.auth_user`)의 Verification
+    # 을 본다 — 아래에서 소유권이 확인되면(`contest.sponsor.user_id ==
+    # request.auth_user.id`) 둘은 항상 같은 사람이므로 결과가 갈리지 않으면서도,
+    # `select_for_update()` 로 행을 잠그기 전에 이 조회를 끝낼 수 있다. Contest 를
+    # 아직 읽지 않아도 되는 검사를 잠금 뒤로 미루지 않는다 — "PG 등록은 그 잠금
+    # 밖에서 한다"는 이 함수의 기존 규율(#127)과 같은 이유다.
+    if not Verification.objects.filter(
+        user_id=request.auth_user.id, status=Verification.Status.VERIFIED
+    ).exists():
+        raise HttpError(403, "본인확인을 완료해야 Contest를 개최할 수 있습니다.")
 
     with transaction.atomic():
         try:

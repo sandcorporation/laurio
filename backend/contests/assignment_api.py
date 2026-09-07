@@ -272,26 +272,51 @@ def update_assignment(request: HttpRequest, assignment_id: int, payload: Assignm
 
     contest = _get_owned_editable_assignment(request, assignment_id)
 
+    # 어떤 필드를 실제로 바꿨는지 직접 모은다(코드리뷰 지적 — 실제 보안 사고로
+    # 확인됨). 이 인스턴스는 `select_for_update()` 없이 읽었으므로, 바로 이 요청이
+    # 도는 사이에 마감 전이 스캔(`assignment-close`, `contests/apps.py`)이 조건부
+    # UPDATE(ADR-0003)로 `status`를 `ASSIGNMENT_CLOSED`로 이미 옮겼을 수 있다.
+    # `contest.save()`(전체 컬럼 UPDATE)를 그대로 쓰면 메모리에 남아 있는 옛
+    # `status="assignment_open"`을 그 위에 덮어써, 이미 마감된 과제가 이 PATCH
+    # 하나로 다시 열린 것처럼 돌아가 버린다 — 스캔의 조건부 UPDATE가 "정확히 한 번
+    # 이기면 그 결과가 유지된다"고 약속한 것을 평범한 저장이 조용히 무효화하는
+    # 모양이다. `update_fields`로 이 핸들러가 실제로 대입한 필드만 적어, `status`가
+    # 이 UPDATE 문에 아예 실리지 않게 한다.
+    update_fields: list[str] = []
+
     with transaction.atomic():
         if payload.title is not None:
             sanitized_title = sanitize_free_text(payload.title)
             if not sanitized_title:
                 raise HttpError(422, "제목이 비어 있습니다.")
             contest.title = sanitized_title
+            update_fields.append("title")
 
         if payload.description is not None:
             contest.description = sanitize_free_text(payload.description)
+            update_fields.append("description")
 
         if payload.deadline_at is not None:
             contest.deadline_at = payload.deadline_at
+            update_fields.append("deadline_at")
 
         if payload.deliverable_type_ids is not None:
             deliverable_types = _validate_deliverable_types(payload.deliverable_type_ids)
+            # m2m `.set()`은 그 자체로 DB에 반영된다 — `Contest.save()`가 필요 없다.
             contest.deliverable_types.set(deliverable_types)
 
-        contest.save()
+        if update_fields:
+            contest.save(update_fields=update_fields)
 
-    contest.refresh_from_db()
+    # `refresh_from_db()`를 부르지 않는다(코드리뷰 지적) — `contest`는 이미 방금 쓴
+    # 값을 그대로 들고 있다(title·description·deadline_at은 위에서 직접 대입했다).
+    # `.set()`은 스스로 캐시를 갱신하는 것이 아니라 그 관계의 prefetch 캐시를
+    # **비운다** — 그래서 아래 `_serialize_assignment`의 `.all()`이 다시 쿼리해
+    # 최신 값을 그대로 받는다(Django 동작 확인, 코드리뷰). 결과는 같다: 인자 없는
+    # `refresh_from_db()`처럼 `_get_owned_editable_assignment`가 미리 해 둔
+    # `prefetch_related("deliverable_types", "requirements")`를 통째로 버리지 않고,
+    # `deliverable_type_ids`를 안 바꾼 요청에서는 `requirements`(그리고 바뀌지
+    # 않았다면 `deliverable_types`도) prefetch가 그대로 살아남는다.
     return _serialize_assignment(
         contest, auth_user=request.auth_user, invite_code=_active_invite_code(contest)
     )
@@ -309,25 +334,42 @@ def open_assignment(request: HttpRequest, assignment_id: int):
     조건부 UPDATE(`core.transitions.claim_transition`, ADR-0003) 한 번으로 전이한다 —
     중복 클릭이 InviteCode를 두 번 발급하지 않는다: 두 번째 호출은 `from_state=DRAFT`
     조건에 걸려 `won=False`가 되고 409로 끝난다.
+
+    **전이와 InviteCode 발급을 한 트랜잭션으로 묶는다**(코드리뷰 지적) — 이 프로젝트는
+    `ATOMIC_REQUESTS`를 켜지 않으므로 `transaction.atomic()` 없이 두 문장을 그냥
+    나란히 두면 각자 따로 커밋된다. `claim_transition`이 커밋된 뒤
+    `InviteCode.objects.create`가 실패(IntegrityError·연결 끊김 등)하면 Contest는
+    `ASSIGNMENT_OPEN`인데 활성 InviteCode가 하나도 없는 채로 멈춘다 — 재시도는
+    `from_state=DRAFT` 조건에 걸려 그때부터 영영 409다(과제를 다시 열 방법이 없다).
     """
 
     contest = _get_owned_assignment(request, assignment_id)
     _require_assignment_permission(request.auth_user)
 
-    won = claim_transition(
-        Contest,
-        contest.pk,
-        from_state=Contest.Status.DRAFT,
-        to_state=Contest.Status.ASSIGNMENT_OPEN,
-        state_field="status",
-        now=Clock.now(),
-    )
-    if not won:
-        raise HttpError(409, "이미 열렸거나 초안 상태가 아닙니다.")
+    with transaction.atomic():
+        won = claim_transition(
+            Contest,
+            contest.pk,
+            from_state=Contest.Status.DRAFT,
+            to_state=Contest.Status.ASSIGNMENT_OPEN,
+            state_field="status",
+            now=Clock.now(),
+        )
+        if not won:
+            raise HttpError(409, "이미 열렸거나 초안 상태가 아닙니다.")
 
-    invite = InviteCode.objects.create(contest=contest)
+        invite = InviteCode.objects.create(contest=contest)
 
-    contest.refresh_from_db()
+    # `claim_transition`은 조건부 UPDATE(원시 SQL, ADR-0003)로 DB 행만 옮긴다 —
+    # 이 Python 인스턴스는 `status`뿐 아니라 `updated_at`(auto_now, claim_transition이
+    # 그 UPDATE 문 안에서 함께 찍는다)도 여전히 옛 값이다. 인자 없는
+    # `refresh_from_db()`는 그 둘을 바로잡지만 `_get_owned_assignment`가 미리 해 둔
+    # `prefetch_related("deliverable_types", "requirements")`까지 통째로 버려
+    # `_serialize_assignment`가 그 둘을 다시 쿼리하게 만든다(코드리뷰 지적) — 반면
+    # `fields=`를 주는 형태는 prefetch 캐시를 건드리지 않는다(Django). 두 필드만
+    # 지정해 DB 가 실제로 갖고 있는 값을 그대로 읽어 온다 — "이 인스턴스가 옮긴 값과
+    # 같다"를 주석으로 약속하는 대신 실제로 다시 읽어 보장한다.
+    contest.refresh_from_db(fields=["status", "updated_at"])
     return 200, _serialize_assignment(
         contest, auth_user=request.auth_user, invite_code=invite.code
     )

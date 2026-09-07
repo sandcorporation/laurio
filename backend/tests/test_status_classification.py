@@ -51,6 +51,12 @@ def test_contest_status_sets_are_the_ones_the_call_sites_used_to_spell_out():
     assert S.HOME_AXIS.where(HomeStatusAxis.IN_JUDGING) == {S.CLOSED}
     assert S.HOME_AXIS.where(HomeStatusAxis.COMPLETED) == {S.AWARDED, S.JUDGING_ENDED}
     assert S.HOME_AXIS.where(HomeStatusAxis.HIDDEN) == {S.DRAFT, S.ASSIGNMENT_OPEN, S.ASSIGNMENT_CLOSED}
+    # #208 코드리뷰 — 예전에 submissions.api 가 bare frozenset(ASSIGNMENT_STATUSES) 멤버십으로
+    # 손으로 갈랐던 두 질문을 Classification 으로 승격했다.
+    assert S.SUBMISSION_REQUIRES_VERIFICATION.statuses == {S.PUBLISHED, S.CLOSED, S.AWARDED, S.JUDGING_ENDED}
+    assert S.OWN_SUBMISSION_VIEWABLE.statuses == {
+        S.PUBLISHED, S.CLOSED, S.AWARDED, S.JUDGING_ENDED, S.ASSIGNMENT_OPEN, S.ASSIGNMENT_CLOSED
+    }
 
 
 def test_an_unknown_status_value_is_loud_not_silently_false():
