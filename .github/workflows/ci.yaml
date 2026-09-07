@@ -489,7 +489,10 @@ jobs:
         run: |
           C="docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml"
           $C up -d minio
-          port=$($C port minio 9000 | sed 's/.*://')
+          # `docker compose port` 는 도커 설정에 따라 IPv4·IPv6 두 줄을 낼 수 있다
+          # (`0.0.0.0:32768` 과 `[::]:32768`) — 두 줄이 그대로 env 에 들어가면 값이
+          # 깨진다. 첫 줄만 쓰고 번호만 잘라낸다.
+          port=$($C port minio 9000 | head -n 1 | sed 's/.*://')
           if [ -z "$port" ]; then
             echo "::error::minio 의 호스트 포트를 읽지 못했다"; $C ps; exit 1
           fi
@@ -506,7 +509,8 @@ jobs:
         run: |
           C="docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml"
           read_port() {
-            p=$($C port "$1" "$2" | sed 's/.*://')
+            # IPv4·IPv6 두 줄이 나올 수 있다 — 첫 줄만 쓴다(위 minio 스텝과 같은 이유).
+            p=$($C port "$1" "$2" | head -n 1 | sed 's/.*://')
             if [ -z "$p" ]; then
               echo "::error::$1 의 호스트 포트를 읽지 못했다"; $C ps; exit 1
             fi
@@ -653,7 +657,10 @@ jobs:
         run: |
           C="docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml"
           $C up -d minio
-          port=$($C port minio 9000 | sed 's/.*://')
+          # `docker compose port` 는 도커 설정에 따라 IPv4·IPv6 두 줄을 낼 수 있다
+          # (`0.0.0.0:32768` 과 `[::]:32768`) — 두 줄이 그대로 env 에 들어가면 값이
+          # 깨진다. 첫 줄만 쓰고 번호만 잘라낸다.
+          port=$($C port minio 9000 | head -n 1 | sed 's/.*://')
           if [ -z "$port" ]; then
             echo "::error::minio 의 호스트 포트를 읽지 못했다"; $C ps; exit 1
           fi
@@ -670,7 +677,8 @@ jobs:
         run: |
           C="docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml"
           read_port() {
-            p=$($C port "$1" "$2" | sed 's/.*://')
+            # IPv4·IPv6 두 줄이 나올 수 있다 — 첫 줄만 쓴다(위 minio 스텝과 같은 이유).
+            p=$($C port "$1" "$2" | head -n 1 | sed 's/.*://')
             if [ -z "$p" ]; then
               echo "::error::$1 의 호스트 포트를 읽지 못했다"; $C ps; exit 1
             fi
