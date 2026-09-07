@@ -25,6 +25,14 @@
 # 조용히 마운트가 남는 것보다 낫다.
 # **CI 는 dev 의 개발용 장치를 하나도 상속하지 않는다 — 마운트도, 포트도**(#194).
 # 이 파일이 마운트에 대해서만 그 규율을 갖고 있어서 포트가 조용히 따라왔다.
+#
+# **그리고 남은 포트도 번호를 고르지 않는다**(#196). #194 가 안 쓰는 노출을 걷었지만
+# 「쓰는 포트를 고정 슬롯으로 잡는다」는 것 자체가 남은 문제였다 — 러너에 남은
+# `docker-proxy` 하나가 그 번호를 물고 있으면 잡이 통째로 죽고, 사전 정리의
+# `docker ps --filter publish=` 는 컨테이너가 사라진 그 누수를 못 본다. 실측으로
+# 두 번(#190·#195 머지) 그렇게 죽었다. 번호를 커널이 고르면 그 실패 종류가 사라진다.
+#
+# 대신 **잡이 번호를 읽어야 한다** — `docker compose port <service> <container-port>`.
 services:
   db:
     # 호스트에서 Postgres 에 붙는 CI 잡이 없다 (#194). 마지막 사용처였던 e2e 의
@@ -36,9 +44,17 @@ services:
     # **콘솔(9001)은 CI 에서 아무도 안 연다** — 사람이 브라우저로 보는 관리 UI 다.
     # API(9000)는 남긴다: 업로드 e2e 에서 브라우저가 presigned URL 로 직접 PUT 하고,
     # 그 URL 은 `STORAGE_PUBLIC_ENDPOINT_URL`(=127.0.0.1:${LAURIO_MINIO_PORT})을
-    # 가리킨다. `ports` 는 병합될 때 이어붙으므로 줄이려면 `!override` 여야 한다.
+    # 가리킨다.
+    #
+    # **호스트 포트를 커널이 고른다**(#196) — 번호를 적지 않으면 임의 포트다.
+    # `ports` 는 병합될 때 이어붙으므로 줄이려면 `!override` 여야 한다.
+    #
+    # **이 서비스만 두 단계로 띄운다.** 다른 셋과 달리 이 번호가 **기동 시점에**
+    # 필요하다 — backend 컨테이너가 `STORAGE_PUBLIC_ENDPOINT_URL` 로 그 값을 받고,
+    # 브라우저가 presigned URL 로 그 주소에 직접 PUT 하기 때문이다. 그래서 잡은
+    # minio 를 먼저 띄우고 `docker compose port` 로 번호를 읽은 뒤 나머지를 띄운다.
     ports: !override
-      - "${LAURIO_MINIO_PORT:-19000}:9000"
+      - "9000"
 
   redis:
     # 호스트에서 Redis 에 붙는 CI 잡이 없다 — pytest 세션 캐시가 LocMem 이 된 뒤로
@@ -49,6 +65,10 @@ services:
 
   backend:
     volumes: !reset []
+    # 호스트가 이 API 를 친다 — e2e 시드(`seed-http.ts`)와 헬스 체크. 번호는
+    # 커널이 고르고 잡이 `docker compose port` 로 읽는다(#196).
+    ports: !override
+      - "8000"
 
   frontend:
     build:
@@ -57,9 +77,14 @@ services:
     # 전제한다. 비우면 이미지의 CMD(standalone 서버)가 그대로 돈다.
     command: !reset null
     volumes: !reset []
+    # Playwright 가 호스트에서 친다. 번호는 커널이 고른다(#196).
+    ports: !override
+      - "3000"
 
   operator:
     build:
       target: runner
     command: !reset null
     volumes: !reset []
+    ports: !override
+      - "3000"
