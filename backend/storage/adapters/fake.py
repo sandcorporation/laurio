@@ -64,5 +64,10 @@ class FakeStorageAdapter:
         return self._store.get(object_key)
 
     def write_object(self, object_key: str, content: bytes) -> None:
-        """테스트 전용 — 실제 업로드(presigned PUT)를 흉내내 미리 바이트를 채운다."""
+        """실제 업로드(presigned PUT)를 흉내내 미리 바이트를 채운다.
+
+        #194 부터 `StorageAdapter` 계약의 일부다 — 「테스트 전용」이 아니라 「e2e 시드
+        전용」이고, S3 어댑터에도 같은 메서드가 있다. 그 대칭이 있어야 시드가 어느
+        환경에서 돌든 자기 완결적이다.
+        """
         self._store[object_key] = content

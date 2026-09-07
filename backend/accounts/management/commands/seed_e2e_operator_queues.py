@@ -270,10 +270,17 @@ def _submit(
     # 안 왔다 → 펼치면 왔다"를 판정하려면 호출마다 다른 유일한 마커를 소스에 심을
     # 수 있어야 한다. 기본값은 그대로라 기존 호출부(seed_pending_appeal 등)는
     # 영향받지 않는다.
-    from storage.adapters.fake import FakeStorageAdapter
+    # **설정된 어댑터로 쓴다**(#194). 이 시드는 소스를 쓴 뒤 **같은 프로세스에서**
+    # 채점 스캔을 부르고(아래 `SCORING_RUN_PENDING_URL`), 그 채점이 소스를 스토리지에서
+    # 읽는다. 쓰기와 읽기가 같은 어댑터인 한 어느 환경에서든 자기 완결적이다 —
+    # 호스트에서는 fake, `STORAGE_BACKEND=s3` 인 컨테이너 안에서는 MinIO.
+    #
+    # fake 를 박아 두면 이 시드는 호스트에서만 돌 수 있고, 그 제약 하나가 e2e 러너에
+    # 파이썬 툴체인과 DB 포트 노출을 남겼다(#194).
+    from storage.adapters import get_storage_adapter
 
     source_key = _source_object_key(contest_id, dev["user_id"])
-    FakeStorageAdapter().write_object(source_key, source_bytes)
+    get_storage_adapter().write_object(source_key, source_bytes)
 
     responses = []
     if requirement_id is not None:

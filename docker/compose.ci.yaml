@@ -26,6 +26,20 @@
 # **CI 는 dev 의 개발용 장치를 하나도 상속하지 않는다 — 마운트도, 포트도**(#194).
 # 이 파일이 마운트에 대해서만 그 규율을 갖고 있어서 포트가 조용히 따라왔다.
 services:
+  db:
+    # 호스트에서 Postgres 에 붙는 CI 잡이 없다 (#194). 마지막 사용처였던 e2e 의
+    # 서브프로세스 시드 둘이 HTTP 로 옮겨졌다 — pytest 는 이 스택을 쓰지 않고
+    # (GitHub `services:` 의 postgres 를 쓴다) 나머지는 전부 컨테이너 안이다.
+    ports: !reset []
+
+  minio:
+    # **콘솔(9001)은 CI 에서 아무도 안 연다** — 사람이 브라우저로 보는 관리 UI 다.
+    # API(9000)는 남긴다: 업로드 e2e 에서 브라우저가 presigned URL 로 직접 PUT 하고,
+    # 그 URL 은 `STORAGE_PUBLIC_ENDPOINT_URL`(=127.0.0.1:${LAURIO_MINIO_PORT})을
+    # 가리킨다. `ports` 는 병합될 때 이어붙으므로 줄이려면 `!override` 여야 한다.
+    ports: !override
+      - "${LAURIO_MINIO_PORT:-19000}:9000"
+
   redis:
     # 호스트에서 Redis 에 붙는 CI 잡이 없다 — pytest 세션 캐시가 LocMem 이 된 뒤로
     # 필요가 사라졌고(CLAUDE.md 「테스트는 서로를 밟지 않는다」), compose 안의

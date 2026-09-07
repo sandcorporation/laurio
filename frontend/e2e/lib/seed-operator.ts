@@ -4,16 +4,17 @@
 
 import { e2eRunId } from "./run-id";
 
-import { execFileSync } from "node:child_process";
-import path from "node:path";
-
 import { runSeed } from "./seed-http";
 
-const BACKEND_DIR = path.resolve(__dirname, "../../../backend");
-
-function backendDbPort(): string {
-  return process.env.LAURIO_DB_PORT ?? "55432";
-}
+// **서브프로세스로 도는 시드는 더 이상 없다** (#194). 채점을 거치는 시드 둘만
+// `uv run python manage.py` 로 남아 있었는데, 그 이유는 소스를 `FakeStorageAdapter`
+// 에 **직접** 쓴 뒤 같은 프로세스에서 채점 스캔을 돌렸기 때문이다 —
+// `STORAGE_BACKEND=fake` 인 호스트에서만 성립하는 결합이었다. `write_object` 가
+// 어댑터 계약에 들어가면서(#194) 그 시드가 설정된 어댑터를 쓰게 됐고, 컨테이너 안의
+// MinIO 로도 자기 완결적이 됐다.
+//
+// 그 결합 하나가 e2e 러너에 파이썬 툴체인과 **DB 포트 노출**을 남기고 있었다.
+// 둘 다 이 파일에서 사라진다.
 
 
 export type SeededOperator = {
@@ -33,37 +34,6 @@ export const E2E_OPERATOR_PASSWORD = "e2e-operator-pw-9134-xyz";
  * 서로의 형제를 지우는」 조용한 사고가 된다. */
 async function runSeedCommand(name: string, options: Record<string, unknown> = {}): Promise<unknown> {
   return runSeed(name, options);
-}
-
-/** **아직 서브프로세스로 도는 시드** (#156) — 채점을 거치는 것들이다.
- *
- * 이 시드들은 Submission 을 심고 채점 스캔을 돌린 뒤 그 Score 를 근거로 이의를 만드는데,
- * 채점이 소스를 **스토리지에서 읽는다.** 그리고 이 시드들은 `STORAGE_BACKEND=fake` 를
- * 전제로 쓰였다 — 지금까지 항상 호스트에서 돌아 그 기본값을 탔기 때문이다. dev 의 backend
- * 컨테이너는 업로드 e2e 때문에 `STORAGE_BACKEND=s3`(실물 MinIO)로 뜨므로, 그 안에서
- * 부르면 채점이 소스를 못 찾아 「아직 채점되지 않았다」로 죽는다.
- *
- * **HTTP 때문에 생긴 문제가 아니다** — 호스트에서 `STORAGE_BACKEND=s3` 를 주고 관리
- * 명령으로 돌려도 똑같이 죽는다. 원래 있던 결합이 이 이관으로 드러났을 뿐이다. 그래서
- * 이 둘만 옛 경로로 남긴다 — 시드를 스토리지 백엔드와 무관하게 만드는 것은 별개의 일이다.
- */
-function runSeedSubprocess(command: string, args: string[]): unknown {
-  const output = execFileSync("uv", ["run", "python", "manage.py", command, ...args], {
-    cwd: BACKEND_DIR,
-    env: { ...process.env, LAURIO_DB_PORT: backendDbPort(), LAURIO_E2E_RUN_ID: e2eRunId() },
-    encoding: "utf-8",
-    stdio: ["ignore", "pipe", "inherit"],
-  });
-  const lines = output.trim().split("\n");
-  const lastLine = lines[lines.length - 1] ?? "";
-  try {
-    return JSON.parse(lastLine);
-  } catch {
-    throw new Error(
-      `${command} 가 JSON 을 내지 않았다 — 명령이 죽었을 가능성이 크다` +
-        ` (stderr 는 위에 그대로 찍힌다). 마지막 줄: ${JSON.stringify(lastLine.slice(0, 300))}`,
-    );
-  }
 }
 
 export type SeedOperatorOptions = {
@@ -144,7 +114,10 @@ export type SeededOperatorQueues = {
 export async function seedE2eOperatorQueues(
   only?: "appeal" | "identity" | "seller",
 ): Promise<SeededOperatorQueues> {
-  return runSeedSubprocess("seed_e2e_operator_queues", only ? ["--only", only] : []) as SeededOperatorQueues;
+  return (await runSeedCommand("operator-queues", {
+    run_id: e2eRunId(),
+    ...(only ? { only } : {}),
+  })) as SeededOperatorQueues;
 }
 
 /** 세 큐를 전부 빈 상태로 되돌린다("0건은 0건이라고 말한다"는 인수조건을 실제
@@ -153,7 +126,7 @@ export async function clearE2eOperatorQueues(): Promise<{
   appeals_deleted: number;
   payouts_deleted: number;
 }> {
-  return runSeedSubprocess("seed_e2e_operator_queues", ["--clear"]) as {
+  return (await runSeedCommand("operator-queues", { run_id: e2eRunId(), clear: true })) as {
     appeals_deleted: number;
     payouts_deleted: number;
   };
@@ -197,7 +170,10 @@ export type SeededAppealForDetail = {
 export async function seedE2eOperatorAppeal(
   rule?: "uphold" | "reject",
 ): Promise<SeededAppealForDetail> {
-  return runSeedSubprocess("seed_e2e_operator_appeal", rule ? ["--rule", rule] : []) as SeededAppealForDetail;
+  return (await runSeedCommand("operator-appeal", {
+    run_id: e2eRunId(),
+    ...(rule ? { rule } : {}),
+  })) as SeededAppealForDetail;
 }
 
 function backendApiPort(): string {

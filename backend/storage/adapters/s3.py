@@ -121,3 +121,9 @@ class S3StorageAdapter:
                 return None
             raise
         return response["Body"].read()
+
+    def write_object(self, object_key: str, content: bytes) -> None:
+        # `self._client`(서버가 붙는 호스트)를 쓴다 — `self._public_client` 는
+        # 브라우저가 여는 URL 을 만들기 위한 것이라 컨테이너 안에서는 풀리지 않을
+        # 수 있다(FE-09/#34 의 minio:9000 대 127.0.0.1:19000).
+        self._client.put_object(Bucket=self._bucket, Key=object_key, Body=content)

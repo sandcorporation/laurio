@@ -18,9 +18,8 @@
 # 컨테이너는 사라진 상태면 그 검사에 안 걸린다(그때도 경고가 안 찍혔는데 35초 뒤
 # bind 가 실패했다). **아무도 안 쓰는 포트에 남은 누수 하나가 잡을 죽인다** —
 # 그래서 안 여는 것이 방어다.
+# `db`·`redis` 는 공유 `compose.ci.yaml` 이 이미 걷는다 — 여기서 다시 적지 않는다.
 services:
-  db:
-    ports: !reset []
   minio:
     ports: !reset []
   backend:
