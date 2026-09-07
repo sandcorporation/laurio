@@ -782,15 +782,35 @@ class RequirementChatMessage(models.Model):
         return f"[{self.role}] {self.content[:30]}"
 
 
+_INVITE_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+"""InviteCode 생성 문자집합(#216) — 대문자 A-Z(26) + 숫자 0-9(10) = 36 에서 다섯을 뺐다:
+`-`·`_`(구분 기호로 오인돼 복사 중 잘려 나간다 — 실측 `2LP2Tx5gFpcgDLphvs4UOJrO90BOJ-0S`의
+꼬리 `-0S`가 그렇게 사라졌다), `0`/`O`, `1`/`I`, `L`(구두로 불러줄 때·손글씨로 옮겨 적을 때
+서로 헷갈린다). 남는 31자에서 대소문자를 섞지 않는 것도 같은 이유다 — "소문자 엘"과
+"대문자 아이"를 전화로 구분시킬 수 없다."""
+
+_INVITE_CODE_LENGTH = 40
+"""문자집합이 base64url(64자, `secrets.token_urlsafe`)에서 31자로 줄었으므로 같은 길이면
+추측 불가능성이 낮아진다 — 옛 생성값(`token_urlsafe(24)`)은 24바이트, 즉 정확히 192비트
+엔트로피였다. 새 문자집합은 문자당 log2(31) ≈ 4.954비트이므로, 192비트를 밑돌지 않으려면
+최소 39자가 필요하다(39 × 4.954 ≈ 193.2). 40자를 골라 198.17비트로 여유를 둔다 —
+`tests/test_invite_code_generation.py`가 이 하한을 고정한다."""
+
+
 def _generate_invite_code() -> str:
-    """추측 불가능한 InviteCode 값 — URL 에 그대로 실려도 안전한 문자 집합
-    (`secrets.token_urlsafe`)이다. 32바이트는 base64url 인코딩 후 43자 안팎이 되고,
-    이 저장소의 다른 불투명 토큰(예: `RefreshToken.jti`)과 달리 사람이 손으로 학생에게
-    전달할 수도 있어야 하므로 UUID보다 짧고 하이픈이 없는 형태를 쓴다."""
+    """추측 불가능한 InviteCode 값(#216) — Sponsor 가 강의실에서 학생에게 구두로
+    불러주거나 손으로 옮겨 적어도 안전하도록 `_INVITE_CODE_ALPHABET`(구분 기호·혼동
+    글자를 뺀 31자) 중에서만 `_INVITE_CODE_LENGTH`(40)자를 고른다. 문자집합을 줄인
+    대가는 길이로 갚는다 — 목표 엔트로피와 근거는 두 상수의 주석과 테스트가 함께
+    고정한다.
+
+    이미 발급된 옛 형식(`secrets.token_urlsafe` 기반, `-`·`_` 포함 가능)의 값은 이 함수를
+    다시 부르지 않는 한 그대로 남고, 조회(`InviteCode.objects.filter(code=...)`)는 문자집합을
+    검사하지 않으므로 계속 유효하다."""
 
     import secrets
 
-    return secrets.token_urlsafe(24)
+    return "".join(secrets.choice(_INVITE_CODE_ALPHABET) for _ in range(_INVITE_CODE_LENGTH))
 
 
 class InviteCode(models.Model):
