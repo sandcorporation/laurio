@@ -322,47 +322,35 @@ jobs:
 
     # **이 잡만의 스택으로 가른다.** 셀프호스티드 러너에서는 잡들이 같은 호스트를
     # 나눠 쓰는데, dev compose 를 띄우는 잡이 셋이라 기본값 그대로면 셋이 같은
-    # 프로젝트(`laurio-dev`)와 같은 포트를 잡는다 — 동시에 돌면 서로의 컨테이너를
-    # 건드리고, celery 잡의 `down -v` 가 남의 스택을 지운다. 호스티드 러너에서는
-    # 잡마다 VM 이 달라 드러나지 않던 문제다.
+    # 프로젝트(`laurio-dev`)를 잡는다 — 동시에 돌면 서로의 컨테이너를 건드리고,
+    # celery 잡의 `down -v` 가 남의 스택을 지운다.
     #
-    # `docker/dev-env.sh` 가 워크트리에 대해 하는 것과 같은 방식이다 — 프로젝트
-    # 이름과 **모든 포트**를 함께 옮긴다. 오프셋은 워크트리가 쓰지 않는 10 이상을
-    # 골라, 같은 호스트의 워크트리 스택과도 겹치지 않게 한다.
+    # **포트 슬롯은 더 이상 여기서 정하지 않는다**(#196). `compose.ci.yaml` 이
+    # 호스트 포트를 임의 포트로 두고, 아래 스텝이 `docker compose port` 로 읽어
+    # `$GITHUB_ENV` 에 넣는다 — 번호를 손으로 나눠 갖는 한 러너에 남은
+    # `docker-proxy` 하나가 그 번호를 물고 있으면 잡이 통째로 죽었다(실측 두 번).
     env:
+      # 포트 슬롯이 없다 — 이 잡은 호스트 포트를 하나도 열지 않고(#194,
+      # `compose.ci-internal-only.yaml`) e2e 도 돌리지 않는다. 프로젝트 이름만
+      # 갈라 다른 잡의 컨테이너·볼륨과 섞이지 않게 한다.
       COMPOSE_PROJECT_NAME: laurio-ci-celery
-      LAURIO_DB_PORT: "56432"
-      LAURIO_API_PORT: "59000"
-      LAURIO_REDIS_PORT: "17379"
-      LAURIO_MINIO_PORT: "20000"
-      LAURIO_MINIO_CONSOLE_PORT: "20001"
-      LAURIO_WEB_PORT: "54000"
-      LAURIO_OPERATOR_WEB_PORT: "54001"
-      LAURIO_E2E_BASE_URL: http://127.0.0.1:54000
-      LAURIO_OPERATOR_E2E_BASE_URL: http://127.0.0.1:54001
 
     steps:
       - uses: actions/checkout@v4
 
       # **`up` 전에 자기 스택을 먼저 치운다.** 아래 `if: always()` 뒷정리가 있어도
       # 그것만으로는 부족하다 — 러너가 잡 도중에 재시작하거나 실행이 강제로 끊기면
-      # 컨테이너가 포트를 문 채 살아남고, 다음 실행의 `up` 이
-      # `failed to bind host port ...: address already in use` 로 죽는다. 실제로
-      # 문서 한 줄만 바꾼 커밋에서 공개 e2e 가 그렇게 붉었다 — 코드 회귀와 구분되지
-      # 않는 모양이라 원인을 찾는 데 로그를 끝까지 읽어야 했다.
+      # 컨테이너와 볼륨이 남는다. 남의 컨테이너는 건드리지 않는다(이 러너는 staging
+      # 배포 호스트와 같은 머신이다) — 우리 compose 프로젝트만 내린다.
       #
-      # 남의 컨테이너는 건드리지 않는다. 이 러너는 staging 배포 호스트와 같은 머신이라
-      # 포트로 찾아 `rm -f` 하는 것은 위험하다 — 우리 compose 프로젝트만 내리고, 그래도
-      # 포트가 잡혀 있으면 **누가 물고 있는지만 찍어** 다음 진단을 공짜로 만든다.
+      # **포트 점유자를 찾아 경고하던 루프는 지웠다**(#196). 두 가지가 틀렸다:
+      # 이제 고정 포트가 없어 검사할 번호가 없고, 애초에 그 검사는 **한 번도
+      # 잡아내지 못했다** — `docker ps --filter publish=` 는 running 컨테이너만
+      # 보는데 실제 원인은 컨테이너가 사라진 뒤 남은 `docker-proxy` 였다.
+      # 실측 두 번(#190·#195 머지) 모두 경고 없이 bind 만 실패했다.
       - name: Clear anything left behind by an earlier run
         run: |
           docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml -f docker/compose.ci-internal-only.yaml down -v --remove-orphans || true
-          for port in "$LAURIO_API_PORT" "$LAURIO_WEB_PORT" "$LAURIO_OPERATOR_WEB_PORT" "$LAURIO_DB_PORT" "$LAURIO_REDIS_PORT"; do
-            holder=$(docker ps --filter "publish=$port" --format '{{.Names}} ({{.Image}})' || true)
-            if [ -n "$holder" ]; then
-              echo "::warning::포트 $port 를 아직 물고 있는 컨테이너가 있다: $holder"
-            fi
-          done
 
       - name: Bring up the stack with celery
         # dev 기본 기동에는 celery 가 빠져 있다(beat 의 60초 스캔이 e2e 시드를
@@ -433,24 +421,15 @@ jobs:
 
     # **이 잡만의 스택으로 가른다.** 셀프호스티드 러너에서는 잡들이 같은 호스트를
     # 나눠 쓰는데, dev compose 를 띄우는 잡이 셋이라 기본값 그대로면 셋이 같은
-    # 프로젝트(`laurio-dev`)와 같은 포트를 잡는다 — 동시에 돌면 서로의 컨테이너를
-    # 건드리고, celery 잡의 `down -v` 가 남의 스택을 지운다. 호스티드 러너에서는
-    # 잡마다 VM 이 달라 드러나지 않던 문제다.
+    # 프로젝트(`laurio-dev`)를 잡는다 — 동시에 돌면 서로의 컨테이너를 건드리고,
+    # celery 잡의 `down -v` 가 남의 스택을 지운다.
     #
-    # `docker/dev-env.sh` 가 워크트리에 대해 하는 것과 같은 방식이다 — 프로젝트
-    # 이름과 **모든 포트**를 함께 옮긴다. 오프셋은 워크트리가 쓰지 않는 10 이상을
-    # 골라, 같은 호스트의 워크트리 스택과도 겹치지 않게 한다.
+    # **포트 슬롯은 더 이상 여기서 정하지 않는다**(#196). `compose.ci.yaml` 이
+    # 호스트 포트를 임의 포트로 두고, 아래 스텝이 `docker compose port` 로 읽어
+    # `$GITHUB_ENV` 에 넣는다 — 번호를 손으로 나눠 갖는 한 러너에 남은
+    # `docker-proxy` 하나가 그 번호를 물고 있으면 잡이 통째로 죽었다(실측 두 번).
     env:
       COMPOSE_PROJECT_NAME: laurio-ci-e2e-public
-      LAURIO_DB_PORT: "56532"
-      LAURIO_API_PORT: "59100"
-      LAURIO_REDIS_PORT: "17479"
-      LAURIO_MINIO_PORT: "20100"
-      LAURIO_MINIO_CONSOLE_PORT: "20101"
-      LAURIO_WEB_PORT: "54100"
-      LAURIO_OPERATOR_WEB_PORT: "54101"
-      LAURIO_E2E_BASE_URL: http://127.0.0.1:54100
-      LAURIO_OPERATOR_E2E_BASE_URL: http://127.0.0.1:54101
 
     steps:
       - uses: actions/checkout@v4
@@ -480,38 +459,72 @@ jobs:
 
       # **`up` 전에 자기 스택을 먼저 치운다.** 아래 `if: always()` 뒷정리가 있어도
       # 그것만으로는 부족하다 — 러너가 잡 도중에 재시작하거나 실행이 강제로 끊기면
-      # 컨테이너가 포트를 문 채 살아남고, 다음 실행의 `up` 이
-      # `failed to bind host port ...: address already in use` 로 죽는다. 실제로
-      # 문서 한 줄만 바꾼 커밋에서 공개 e2e 가 그렇게 붉었다 — 코드 회귀와 구분되지
-      # 않는 모양이라 원인을 찾는 데 로그를 끝까지 읽어야 했다.
+      # 컨테이너와 볼륨이 남는다. 남의 컨테이너는 건드리지 않는다(이 러너는 staging
+      # 배포 호스트와 같은 머신이다) — 우리 compose 프로젝트만 내린다.
       #
-      # 남의 컨테이너는 건드리지 않는다. 이 러너는 staging 배포 호스트와 같은 머신이라
-      # 포트로 찾아 `rm -f` 하는 것은 위험하다 — 우리 compose 프로젝트만 내리고, 그래도
-      # 포트가 잡혀 있으면 **누가 물고 있는지만 찍어** 다음 진단을 공짜로 만든다.
+      # **포트 점유자를 찾아 경고하던 루프는 지웠다**(#196). 두 가지가 틀렸다:
+      # 이제 고정 포트가 없어 검사할 번호가 없고, 애초에 그 검사는 **한 번도
+      # 잡아내지 못했다** — `docker ps --filter publish=` 는 running 컨테이너만
+      # 보는데 실제 원인은 컨테이너가 사라진 뒤 남은 `docker-proxy` 였다.
+      # 실측 두 번(#190·#195 머지) 모두 경고 없이 bind 만 실패했다.
       - name: Clear anything left behind by an earlier run
         run: |
           docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml down -v --remove-orphans || true
-          for port in "$LAURIO_API_PORT" "$LAURIO_WEB_PORT" "$LAURIO_OPERATOR_WEB_PORT" "$LAURIO_DB_PORT" "$LAURIO_REDIS_PORT"; do
-            holder=$(docker ps --filter "publish=$port" --format '{{.Names}} ({{.Image}})' || true)
-            if [ -n "$holder" ]; then
-              echo "::warning::포트 $port 를 아직 물고 있는 컨테이너가 있다: $holder"
-            fi
-          done
 
       # **CI 는 배포되는 산출물을 친다.** `compose.ci.yaml` 이 앱 서비스를
       # `target: runner` 로 돌린다 — 배포 compose 가 고르는 그 스테이지다. 코드가
       # 이미지에 구워지므로 저장소 마운트가 필요 없고(그 마운트는 개발용 핫리로드
       # 장치이며, 컨테이너 안에서 도는 러너에서는 빈 `/app` 을 만든다), 덤으로 CI 가
       # dev 서버가 아니라 **실제로 배포되는 물건**을 검증하게 된다.
+      # **두 단계로 띄운다**(#196). `compose.ci.yaml` 이 호스트 포트를 임의 포트로
+      # 두므로 번호를 잡이 읽어야 하는데, **MinIO 만은 그 번호가 기동 시점에
+      # 필요하다** — `STORAGE_PUBLIC_ENDPOINT_URL` 이 `127.0.0.1:$LAURIO_MINIO_PORT`
+      # 로 backend 컨테이너에 주입되고, 업로드 e2e 에서 브라우저가 presigned URL 로
+      # 그 주소에 직접 PUT 하기 때문이다. 띄운 뒤에 읽으면 늦다.
+      #
+      # 그래서 minio 를 먼저 띄워 번호를 읽고, 그 값으로 나머지를 띄운다. 두 번째
+      # `up` 은 minio 를 다시 만들지 않는다 — 그 서비스의 설정(임의 포트)이 그대로라
+      # compose 가 `Running` 으로 두고 지나간다(로컬에서 확인했다).
+      - name: Bring up MinIO and learn its port
+        run: |
+          C="docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml"
+          $C up -d minio
+          port=$($C port minio 9000 | sed 's/.*://')
+          if [ -z "$port" ]; then
+            echo "::error::minio 의 호스트 포트를 읽지 못했다"; $C ps; exit 1
+          fi
+          echo "LAURIO_MINIO_PORT=$port" >> "$GITHUB_ENV"
+          echo "MinIO -> 127.0.0.1:$port"
+
       - name: Build the images and bring up the stack
         run: docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml up -d --build frontend
+
+      # 커널이 고른 번호를 읽어 뒤 스텝들에 넘긴다 — 헬스 체크의 URL,
+      # `frontend/e2e/lib/seed-http.ts` 가 보는 `LAURIO_API_PORT`, 그리고
+      # Playwright 의 baseURL 이 전부 여기서 나온다.
+      - name: Learn the host ports the kernel picked
+        run: |
+          C="docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml"
+          read_port() {
+            p=$($C port "$1" "$2" | sed 's/.*://')
+            if [ -z "$p" ]; then
+              echo "::error::$1 의 호스트 포트를 읽지 못했다"; $C ps; exit 1
+            fi
+            echo "$p"
+          }
+          api=$(read_port backend 8000)
+          web=$(read_port frontend 3000)
+          echo "LAURIO_API_PORT=$api" >> "$GITHUB_ENV"
+          echo "LAURIO_E2E_BASE_URL=http://127.0.0.1:$web" >> "$GITHUB_ENV"
+          echo "FRONTEND_HEALTH_URL=http://127.0.0.1:$web/healthz" >> "$GITHUB_ENV"
+          echo "backend -> 127.0.0.1:$api | frontend -> 127.0.0.1:$web"
 
       - name: Wait for the public app to answer
         # curl 재시도 플래그에 기대지 않는다 — `--retry-all-errors` 는 curl 7.71+
         # 에만 있어서 셀프호스티드 러너에서 `option ... is unknown` 으로 **curl 이
         # 실행 자체를 거부했다**(스택은 멀쩡했는데 기다리는 쪽이 죽었다).
         run: |
-          url="http://127.0.0.1:${LAURIO_WEB_PORT}/healthz"
+          url="$FRONTEND_HEALTH_URL"
           for i in $(seq 1 60); do
             if curl --fail --silent --show-error "$url" >/dev/null 2>&1; then
               echo "public app 응답함 ($url, ${i}회째)"; exit 0
@@ -572,24 +585,15 @@ jobs:
 
     # **이 잡만의 스택으로 가른다.** 셀프호스티드 러너에서는 잡들이 같은 호스트를
     # 나눠 쓰는데, dev compose 를 띄우는 잡이 셋이라 기본값 그대로면 셋이 같은
-    # 프로젝트(`laurio-dev`)와 같은 포트를 잡는다 — 동시에 돌면 서로의 컨테이너를
-    # 건드리고, celery 잡의 `down -v` 가 남의 스택을 지운다. 호스티드 러너에서는
-    # 잡마다 VM 이 달라 드러나지 않던 문제다.
+    # 프로젝트(`laurio-dev`)를 잡는다 — 동시에 돌면 서로의 컨테이너를 건드리고,
+    # celery 잡의 `down -v` 가 남의 스택을 지운다.
     #
-    # `docker/dev-env.sh` 가 워크트리에 대해 하는 것과 같은 방식이다 — 프로젝트
-    # 이름과 **모든 포트**를 함께 옮긴다. 오프셋은 워크트리가 쓰지 않는 10 이상을
-    # 골라, 같은 호스트의 워크트리 스택과도 겹치지 않게 한다.
+    # **포트 슬롯은 더 이상 여기서 정하지 않는다**(#196). `compose.ci.yaml` 이
+    # 호스트 포트를 임의 포트로 두고, 아래 스텝이 `docker compose port` 로 읽어
+    # `$GITHUB_ENV` 에 넣는다 — 번호를 손으로 나눠 갖는 한 러너에 남은
+    # `docker-proxy` 하나가 그 번호를 물고 있으면 잡이 통째로 죽었다(실측 두 번).
     env:
       COMPOSE_PROJECT_NAME: laurio-ci-e2e-operator
-      LAURIO_DB_PORT: "56632"
-      LAURIO_API_PORT: "59200"
-      LAURIO_REDIS_PORT: "17579"
-      LAURIO_MINIO_PORT: "20200"
-      LAURIO_MINIO_CONSOLE_PORT: "20201"
-      LAURIO_WEB_PORT: "54200"
-      LAURIO_OPERATOR_WEB_PORT: "54201"
-      LAURIO_E2E_BASE_URL: http://127.0.0.1:54200
-      LAURIO_OPERATOR_E2E_BASE_URL: http://127.0.0.1:54201
 
     steps:
       - uses: actions/checkout@v4
@@ -619,38 +623,72 @@ jobs:
 
       # **`up` 전에 자기 스택을 먼저 치운다.** 아래 `if: always()` 뒷정리가 있어도
       # 그것만으로는 부족하다 — 러너가 잡 도중에 재시작하거나 실행이 강제로 끊기면
-      # 컨테이너가 포트를 문 채 살아남고, 다음 실행의 `up` 이
-      # `failed to bind host port ...: address already in use` 로 죽는다. 실제로
-      # 문서 한 줄만 바꾼 커밋에서 공개 e2e 가 그렇게 붉었다 — 코드 회귀와 구분되지
-      # 않는 모양이라 원인을 찾는 데 로그를 끝까지 읽어야 했다.
+      # 컨테이너와 볼륨이 남는다. 남의 컨테이너는 건드리지 않는다(이 러너는 staging
+      # 배포 호스트와 같은 머신이다) — 우리 compose 프로젝트만 내린다.
       #
-      # 남의 컨테이너는 건드리지 않는다. 이 러너는 staging 배포 호스트와 같은 머신이라
-      # 포트로 찾아 `rm -f` 하는 것은 위험하다 — 우리 compose 프로젝트만 내리고, 그래도
-      # 포트가 잡혀 있으면 **누가 물고 있는지만 찍어** 다음 진단을 공짜로 만든다.
+      # **포트 점유자를 찾아 경고하던 루프는 지웠다**(#196). 두 가지가 틀렸다:
+      # 이제 고정 포트가 없어 검사할 번호가 없고, 애초에 그 검사는 **한 번도
+      # 잡아내지 못했다** — `docker ps --filter publish=` 는 running 컨테이너만
+      # 보는데 실제 원인은 컨테이너가 사라진 뒤 남은 `docker-proxy` 였다.
+      # 실측 두 번(#190·#195 머지) 모두 경고 없이 bind 만 실패했다.
       - name: Clear anything left behind by an earlier run
         run: |
           docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml down -v --remove-orphans || true
-          for port in "$LAURIO_API_PORT" "$LAURIO_WEB_PORT" "$LAURIO_OPERATOR_WEB_PORT" "$LAURIO_DB_PORT" "$LAURIO_REDIS_PORT"; do
-            holder=$(docker ps --filter "publish=$port" --format '{{.Names}} ({{.Image}})' || true)
-            if [ -n "$holder" ]; then
-              echo "::warning::포트 $port 를 아직 물고 있는 컨테이너가 있다: $holder"
-            fi
-          done
 
       # **CI 는 배포되는 산출물을 친다.** `compose.ci.yaml` 이 앱 서비스를
       # `target: runner` 로 돌린다 — 배포 compose 가 고르는 그 스테이지다. 코드가
       # 이미지에 구워지므로 저장소 마운트가 필요 없고(그 마운트는 개발용 핫리로드
       # 장치이며, 컨테이너 안에서 도는 러너에서는 빈 `/app` 을 만든다), 덤으로 CI 가
       # dev 서버가 아니라 **실제로 배포되는 물건**을 검증하게 된다.
+      # **두 단계로 띄운다**(#196). `compose.ci.yaml` 이 호스트 포트를 임의 포트로
+      # 두므로 번호를 잡이 읽어야 하는데, **MinIO 만은 그 번호가 기동 시점에
+      # 필요하다** — `STORAGE_PUBLIC_ENDPOINT_URL` 이 `127.0.0.1:$LAURIO_MINIO_PORT`
+      # 로 backend 컨테이너에 주입되고, 업로드 e2e 에서 브라우저가 presigned URL 로
+      # 그 주소에 직접 PUT 하기 때문이다. 띄운 뒤에 읽으면 늦다.
+      #
+      # 그래서 minio 를 먼저 띄워 번호를 읽고, 그 값으로 나머지를 띄운다. 두 번째
+      # `up` 은 minio 를 다시 만들지 않는다 — 그 서비스의 설정(임의 포트)이 그대로라
+      # compose 가 `Running` 으로 두고 지나간다(로컬에서 확인했다).
+      - name: Bring up MinIO and learn its port
+        run: |
+          C="docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml"
+          $C up -d minio
+          port=$($C port minio 9000 | sed 's/.*://')
+          if [ -z "$port" ]; then
+            echo "::error::minio 의 호스트 포트를 읽지 못했다"; $C ps; exit 1
+          fi
+          echo "LAURIO_MINIO_PORT=$port" >> "$GITHUB_ENV"
+          echo "MinIO -> 127.0.0.1:$port"
+
       - name: Build the images and bring up the stack
         run: docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml up -d --build operator
+
+      # 커널이 고른 번호를 읽어 뒤 스텝들에 넘긴다 — 헬스 체크의 URL,
+      # `frontend/e2e/lib/seed-http.ts` 가 보는 `LAURIO_API_PORT`, 그리고
+      # Playwright 의 baseURL 이 전부 여기서 나온다.
+      - name: Learn the host ports the kernel picked
+        run: |
+          C="docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml"
+          read_port() {
+            p=$($C port "$1" "$2" | sed 's/.*://')
+            if [ -z "$p" ]; then
+              echo "::error::$1 의 호스트 포트를 읽지 못했다"; $C ps; exit 1
+            fi
+            echo "$p"
+          }
+          api=$(read_port backend 8000)
+          web=$(read_port operator 3000)
+          echo "LAURIO_API_PORT=$api" >> "$GITHUB_ENV"
+          echo "LAURIO_OPERATOR_E2E_BASE_URL=http://127.0.0.1:$web" >> "$GITHUB_ENV"
+          echo "OPERATOR_HEALTH_URL=http://127.0.0.1:$web/healthz" >> "$GITHUB_ENV"
+          echo "backend -> 127.0.0.1:$api | operator -> 127.0.0.1:$web"
 
       - name: Wait for the operator app to answer
         # curl 재시도 플래그에 기대지 않는다 — `--retry-all-errors` 는 curl 7.71+
         # 에만 있어서 셀프호스티드 러너에서 `option ... is unknown` 으로 **curl 이
         # 실행 자체를 거부했다**(스택은 멀쩡했는데 기다리는 쪽이 죽었다).
         run: |
-          url="http://127.0.0.1:${LAURIO_OPERATOR_WEB_PORT}/healthz"
+          url="$OPERATOR_HEALTH_URL"
           for i in $(seq 1 60); do
             if curl --fail --silent --show-error "$url" >/dev/null 2>&1; then
               echo "operator app 응답함 ($url, ${i}회째)"; exit 0
