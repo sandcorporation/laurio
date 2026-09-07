@@ -59,6 +59,7 @@ export default function AssignmentDetailPage() {
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
   const [reissuing, setReissuing] = useState(false);
   const [reissueError, setReissueError] = useState<string | null>(null);
@@ -161,6 +162,29 @@ export default function AssignmentDetailPage() {
     }
   }
 
+  // 학생이 여는 절대 주소. **`window.location.origin` 을 쓴다** — 서버가 아니라
+  // 브라우저가 만든다. 컨테이너 안의 Next 는 자기가 어떤 공개 주소로 불렸는지 모르고
+  // (CLAUDE.md — standalone 모드에서 origin 이 바인드 주소로 나온다), 이 값은 강사가
+  // 복사해 남에게 보내는 것이라 틀리면 링크가 통째로 죽는다.
+  const studentLink =
+    typeof window === "undefined" || !assignment?.invite_code
+      ? ""
+      : `${window.location.origin}/assignments/${assignment.invite_code}`;
+
+  async function handleCopyLink() {
+    // 클립보드는 권한·비보안 컨텍스트·구형 브라우저에서 조용히 실패한다. 실패해도
+    // 링크 자체는 화면에 그대로 적혀 있으므로(위 `assignment-invite-link`) 손으로
+    // 긁어 갈 수 있다 — 그래서 실패를 오류로 키우지 않고 「복사했습니다」만 띄우지
+    // 않는다.
+    try {
+      await navigator.clipboard.writeText(studentLink);
+      setLinkCopied(true);
+      window.setTimeout(() => setLinkCopied(false), 2000);
+    } catch {
+      setLinkCopied(false);
+    }
+  }
+
   async function handleReissue() {
     setReissueError(null);
     setReissued(false);
@@ -218,25 +242,49 @@ export default function AssignmentDetailPage() {
 
       {assignment.invite_code ? (
         <div className="border border-rule p-4">
-          <p className="text-sm text-ink/70">InviteCode — 학생에게 이 코드만 알려주면 됩니다.</p>
-          <p
-            className="mt-2 font-mono text-lg font-semibold"
-            data-testid="assignment-invite-code"
-          >
-            {assignment.invite_code}
+          {/* **코드를 불러주는 것만으로는 학생이 들어올 수 없다.** 코드를 받는
+              입력 화면은 없고, 학생이 닿는 유일한 길은 코드가 박힌 주소
+              (`/assignments/[code]`)를 여는 것이다. 그래서 강사에게 주는 것은
+              코드가 아니라 **링크**여야 한다 — 예전 문구("이 코드만 알려주면
+              됩니다")는 그 사실과 어긋나 있었다. */}
+          <p className="text-sm text-ink/70">
+            학생에게 아래 링크를 보내세요 — 이 링크를 여는 것이 과제에 들어오는 유일한
+            방법입니다.
           </p>
-          {/* 학생이 실제로 보게 될 화면을 강사가 미리 확인할 수 있는 링크(#208) —
-              InviteCode 로만 닿는 그 화면(app/assignments/[code])의 유일한
-              제품 내 진입점이기도 하다. */}
-          <a
-            href={`/assignments/${assignment.invite_code}`}
-            target="_blank"
-            rel="noreferrer"
-            data-testid="assignment-invite-preview-link"
-            className="mt-2 inline-block text-sm underline"
+          <p
+            className="mt-2 break-all font-mono text-sm"
+            data-testid="assignment-invite-link"
           >
-            학생 화면 미리보기
-          </a>
+            {studentLink}
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => void handleCopyLink()}
+              data-testid="assignment-invite-copy-link-button"
+              className="border border-ink px-3 py-1.5 text-xs hover:bg-ink hover:text-paper"
+            >
+              {linkCopied ? "복사했습니다" : "링크 복사"}
+            </button>
+            {/* 학생이 실제로 보게 될 화면을 강사가 미리 확인할 수 있는 링크(#208) —
+                InviteCode 로만 닿는 그 화면의 유일한 제품 내 진입점이기도 하다. */}
+            <a
+              href={`/assignments/${assignment.invite_code}`}
+              target="_blank"
+              rel="noreferrer"
+              data-testid="assignment-invite-preview-link"
+              className="text-sm underline"
+            >
+              학생 화면 미리보기
+            </a>
+          </div>
+          <p className="mt-3 text-xs text-ink/60">
+            코드 자체는{" "}
+            <span className="font-mono" data-testid="assignment-invite-code">
+              {assignment.invite_code}
+            </span>{" "}
+            입니다.
+          </p>
 
           {assignment.status === "assignment_open" ? (
             <div className="mt-4 border-t border-rule pt-4">
