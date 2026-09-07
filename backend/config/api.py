@@ -9,6 +9,7 @@ from appeals.api import operator_router as appeals_operator_router
 from appeals.api import router as appeals_router
 from awards.api import router as awards_router
 from contests.api import router as contests_router
+from contests.assignment_api import router as assignments_router
 from contests.operator_api import operator_router as contests_operator_router
 from core.api import router as core_internal_router
 from handovers.api import router as handovers_router
@@ -31,6 +32,7 @@ api = NinjaAPI(title="Laurio API", version="0.1.0")
 api.add_router("", accounts_router)
 api.add_router("", verification_router)
 api.add_router("", contests_router)
+api.add_router("", assignments_router)
 api.add_router("", payments_router)
 api.add_router("", submissions_router)
 api.add_router("", awards_router)

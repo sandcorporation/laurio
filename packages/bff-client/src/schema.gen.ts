@@ -95,6 +95,141 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/assignments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Assignment
+         * @description 자격 있는 Sponsor가 본인확인 없이 과제를 DRAFT로 만든다(ADR-0028/0029).
+         *
+         *     `contests.api.create_contest`와 짝이지만 Verification 검사를 부르지 않고, Prize·
+         *     Category를 받지 않는다 — Prize는 0, Category는 `assignment_category`가 자동
+         *     배정된다. `required_minimum_prize`·`is_underfunded`도 항상 0/False다(스펙 #197 —
+         *     과제에는 "상금미달" 개념이 없다).
+         */
+        post: operations["contests_assignment_api_create_assignment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assignments/invite/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Assignment By Invite Code
+         * @description InviteCode를 아는 사람만 과제 상세·Requirement를 본다(ADR-0028) — 인증이 필요
+         *     없다: 본인확인은커녕 로그인조차 이 조회의 전제가 아니다(학생이 코드를 받아 처음
+         *     들어오는 순간에는 아직 로그인 전일 수 있다).
+         *
+         *     코드가 없거나 비활성(재발급으로 무효화된 옛 코드, #209 소관)이면 404 — 존재를
+         *     드러내지 않는다(공모전의 draft 은닉과 같은 원칙).
+         */
+        get: operations["contests_assignment_api_get_assignment_by_invite_code"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assignments/mine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List My Assignments
+         * @description Sponsor 자신이 연/만든 과제 목록 — 「과제 만들기·수정·열기·코드 표시」 화면의 진입점.
+         *
+         *     **`/assignments/{assignment_id}`보다 먼저 등록해야 한다** — `contests.api.
+         *     list_my_sponsored_contests`와 같은 이유(정적 경로가 동적 컨버터보다 먼저 매치돼야
+         *     한다).
+         */
+        get: operations["contests_assignment_api_list_my_assignments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assignments/{assignment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get My Assignment */
+        get: operations["contests_assignment_api_get_my_assignment"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Assignment
+         * @description DRAFT·ASSIGNMENT_OPEN 과제를 고친다(스펙 #197) — `EDITABLE`이 두 상태 모두 True다.
+         *
+         *     **제출 0건 술어는 여기 없다.** `EDITABLE: True`가 「고칠 수 있다」의 절반이고
+         *     나머지 절반(첫 제출이 문을 닫는다)은 #209가 얹는다 — 지금은 ASSIGNMENT_OPEN이면
+         *     제출이 있어도 계속 고칠 수 있다.
+         */
+        patch: operations["contests_assignment_api_update_assignment"];
+        trace?: never;
+    };
+    "/api/assignments/{assignment_id}/open": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open Assignment
+         * @description DRAFT -> ASSIGNMENT_OPEN — 결제를 거치지 않는 유일한 공개 전이(ADR-0028).
+         *
+         *     자격을 여기서 **다시** 확인한다 — 생성과 열기 사이에 Operator가 자격을 거뒀을 수
+         *     있다(ADR-0029: "자격을 거두면 새 과제를 못 만든다"는 새로 여는 것도 막아야
+         *     일관된다. 이미 열린 과제는 이 검사를 다시 지나지 않으므로 "이미 열린 과제는
+         *     끝까지 돈다"는 그대로 성립한다).
+         *
+         *     조건부 UPDATE(`core.transitions.claim_transition`, ADR-0003) 한 번으로 전이한다 —
+         *     중복 클릭이 InviteCode를 두 번 발급하지 않는다: 두 번째 호출은 `from_state=DRAFT`
+         *     조건에 걸려 `won=False`가 되고 409로 끝난다.
+         *
+         *     **전이와 InviteCode 발급을 한 트랜잭션으로 묶는다**(코드리뷰 지적) — 이 프로젝트는
+         *     `ATOMIC_REQUESTS`를 켜지 않으므로 `transaction.atomic()` 없이 두 문장을 그냥
+         *     나란히 두면 각자 따로 커밋된다. `claim_transition`이 커밋된 뒤
+         *     `InviteCode.objects.create`가 실패(IntegrityError·연결 끊김 등)하면 Contest는
+         *     `ASSIGNMENT_OPEN`인데 활성 InviteCode가 하나도 없는 채로 멈춘다 — 재시도는
+         *     `from_state=DRAFT` 조건에 걸려 그때부터 영영 409다(과제를 다시 열 방법이 없다).
+         */
+        post: operations["contests_assignment_api_open_assignment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/logout": {
         parameters: {
             query?: never;
@@ -2044,6 +2179,14 @@ export interface paths {
          *
          *     마감 후에는 누구나(비로그인 포함) 조회할 수 있지만 소스는 여전히 소유자 본인에게만
          *     보인다 — ADR-0014.
+         *
+         *     **Assignment(ADR-0028, #208)는 마감 후에도 공개되지 않는다.** 공모전의 "마감 후
+         *     전면 공개"는 순수 콘테스트의 보상 구조(#105) — 탈락자에게도 포트폴리오로 남는다 —
+         *     를 위한 것인데, Assignment에는 그 구조 자체가 없다(상금·경쟁·Award가 없다).
+         *     오히려 Assignment는 InviteCode를 아는 사람만 본다는 약속이 마감 후에도 그대로
+         *     이어져야 한다(스펙 #197: "명단은 없다, 제출한 사람만 보인다" — 그 제출한
+         *     사람이란 본인과 그 과제의 Sponsor 뿐이다) — 그러지 않으면 `submission_id`를
+         *     순차로 훑는 것만으로 학생의 제출 내용(소스 제외)이 인터넷에 새어 나간다.
          */
         get: operations["submissions_api_get_submission"];
         put?: never;
@@ -2379,6 +2522,72 @@ export interface components {
             value: string;
         };
         /**
+         * AssignmentCreateIn
+         * @description `ContestCreateIn`과 같은 자리지만 `category_id`·`prize`가 없다 — Category는
+         *     `contests.assignment_category`가 자동 배정하고(스펙 #197), Prize는 0으로 고정된다
+         *     (ADR-0028).
+         */
+        AssignmentCreateIn: {
+            /**
+             * Deadline At
+             * Format: date-time
+             */
+            deadline_at: string;
+            /** Deliverable Type Ids */
+            deliverable_type_ids: number[];
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Requirements
+             * @default []
+             */
+            requirements: components["schemas"]["RequirementIn"][];
+            /** Title */
+            title: string;
+        };
+        /**
+         * AssignmentOut
+         * @description `ContestOut`과 같은 자리지만 상금·결제·Award·Escrow에 닿는 필드가 하나도 없다
+         *     (스펙 #197 인수조건 — 과제 화면에 그 개념이 전혀 나타나지 않는다).
+         *
+         *     `invite_code`는 열리기 전(DRAFT)에는 null이고, 연 뒤에는 활성 InviteCode의 값이다
+         *     — 재발급(#209)이 생기기 전까지는 언제나 최대 하나다.
+         */
+        AssignmentOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Deadline At
+             * Format: date-time
+             */
+            deadline_at: string;
+            /** Deliverable Types */
+            deliverable_types: components["schemas"]["DeliverableTypeOut"][];
+            /** Description */
+            description: string;
+            /** Id */
+            id: number;
+            /** Invite Code */
+            invite_code?: string | null;
+            /**
+             * Is Owner
+             * @default false
+             */
+            is_owner: boolean;
+            /** Requirements */
+            requirements: components["schemas"]["RequirementOut"][];
+            /** Status */
+            status: string;
+            /** Title */
+            title: string;
+        };
+        /**
          * AssignmentPermissionChangeOut
          * @description `AssignmentPermissionChange` 한 건 — 누가·언제·무엇을·왜.
          *
@@ -2451,6 +2660,22 @@ export interface components {
         AssignmentPermissionRevokeIn: {
             /** Reason */
             reason: string;
+        };
+        /**
+         * AssignmentUpdateIn
+         * @description DRAFT·ASSIGNMENT_OPEN Assignment를 고치는 요청(#207) — `ContestUpdateIn`과 달리
+         *     `prize`·`category_id`가 없다. 전부 선택 필드다(부분 갱신, `ContestUpdateIn`과 같은
+         *     규율).
+         */
+        AssignmentUpdateIn: {
+            /** Deadline At */
+            deadline_at?: string | null;
+            /** Deliverable Type Ids */
+            deliverable_type_ids?: number[] | null;
+            /** Description */
+            description?: string | null;
+            /** Title */
+            title?: string | null;
         };
         /** AwardIn */
         AwardIn: {
@@ -4091,6 +4316,8 @@ export interface components {
              * @default []
              */
             assets: components["schemas"]["SubmissionAssetIn"][];
+            /** Invite Code */
+            invite_code?: string | null;
             /**
              * Requirement Responses
              * @default []
@@ -4384,6 +4611,142 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WithdrawalRejectedOut"];
+                };
+            };
+        };
+    };
+    contests_assignment_api_create_assignment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssignmentCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentOut"];
+                };
+            };
+        };
+    };
+    contests_assignment_api_get_assignment_by_invite_code: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentOut"];
+                };
+            };
+        };
+    };
+    contests_assignment_api_list_my_assignments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentOut"][];
+                };
+            };
+        };
+    };
+    contests_assignment_api_get_my_assignment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentOut"];
+                };
+            };
+        };
+    };
+    contests_assignment_api_update_assignment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssignmentUpdateIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentOut"];
+                };
+            };
+        };
+    };
+    contests_assignment_api_open_assignment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentOut"];
                 };
             };
         };

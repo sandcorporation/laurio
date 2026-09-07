@@ -79,4 +79,11 @@ E2E_SEED_REGISTRY: dict[str, SeedEntry] = {
         command="seed_e2e_assignment_permission_sponsor",
         options=frozenset(),
     ),
+    # Assignment 3·4(#207/#208) e2e 전용 — 자격을 이미 받은 Sponsor 와 학생 계정.
+    # 옵션이 없다: 둘 다 고정된 (provider, provider_uid)라 몇 번을 불러도 같은
+    # 계정으로 귀결된다.
+    "assignment-sponsor-and-student": SeedEntry(
+        command="seed_e2e_assignment_sponsor_and_student",
+        options=frozenset(),
+    ),
 }
