@@ -281,6 +281,26 @@ jobs:
   # `pureModuleGuard()`가 그 경계를 CI에서 실제로 강제한다: 대상 모듈이 react나
   # next의 렌더링/라우팅 표면을 임포트하면 이 잡이 빨간불로 끝난다(리뷰가 아니라
   # 러너가 거부한다).
+  # **문서가 스스로 낡았다고 말하게 한다** (#docs-freshness). ADR 은 「그때의 판단」이고
+  # 현재 상태는 CLAUDE.md 가 말한다 — 그 구분이 서려면 모든 ADR 이 Status 줄을 가져야
+  # 한다. **표시가 없는 것이 정보가 되려면 조용히 깨지지 않아야 하기 때문**이다: 일부에만
+  # 붙어 있으면 표시 없는 ADR 이 「살아있다」인지 「아무도 안 고쳤다」인지 구별되지 않는다.
+  #
+  # **다른 잡에 얹지 않는다.** 이 검사가 `frontend-pure-unit-tests` 안에서 실패하면 빨간
+  # 잡 이름이 무엇이 깨졌는지 거짓말한다 — 이 저장소가 내내 경계하는 「코드 회귀와
+  # 구분되지 않는 모양」이다. 10초짜리 잡 하나가 그 값을 한다.
+  #
+  # ADR 템플릿은 이 저장소가 아니라 플러그인 스킬 안에 있어, 저장소가 새 ADR 의 모양을
+  # 강제할 다른 수단이 없다.
+  adr-status:
+    runs-on: [self-hosted, sub]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Every ADR says whether it is still in force
+        run: python3 scripts/check_adr_status.py
+
   frontend-pure-unit-tests:
     runs-on: [self-hosted, sub]
 

@@ -1,5 +1,7 @@
 # 세션은 localStorage의 JWT + 블랙리스트로 관리한다
 
+Status: Amended by ADR-0016 (2026-08-28 결정)
+
 SPA(frontend, admin)와 향후 모바일까지 붙이기 쉬운 구성을 우선해 JWT를 localStorage에 둔다. stateless JWT의 고질적 문제인 "탈취를 알아도 만료까지 못 막는다"는 서버측 블랙리스트로 해결한다.
 
 HttpOnly 쿠키를 쓰면 토큰이 JS에 노출되지 않지만, 별도 도메인 구성과 SameSite·CORS 제약이 따라붙는다. 그 편의를 택한 대신 XSS로 토큰이 유출되는 경로는 열려 있으므로, 방어를 다른 층에서 세운다.
