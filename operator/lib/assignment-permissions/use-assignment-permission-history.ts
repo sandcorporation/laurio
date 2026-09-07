@@ -1,9 +1,11 @@
 "use client";
 
-// AssignmentPermissionChange 이력 조회(#206) — use-deliverable-type-history.ts와 같은 계약.
-import { useCallback, useEffect, useState } from "react";
+// AssignmentPermissionChange 이력 조회(#206) — use-assignment-permission-holders.ts와
+// 같은 계약, `useBackendQuery`(#146·#122) 위의 얇은 이름 다시 붙이기.
+import { useBackendQuery } from "@laurio/bff-client";
 
-import { fetchAssignmentPermissionChanges } from "./actions";
+import { bffClient } from "@/lib/bff/client";
+
 import type { AssignmentPermissionChangeEntry } from "./types";
 
 export type AssignmentPermissionHistoryState =
@@ -15,33 +17,12 @@ export function useAssignmentPermissionHistory(enabled: boolean): {
   state: AssignmentPermissionHistoryState;
   reload: () => void;
 } {
-  const [state, setState] = useState<AssignmentPermissionHistoryState>({ status: "loading" });
-  const [version, setVersion] = useState(0);
+  const { state, reload } = useBackendQuery<AssignmentPermissionChangeEntry[]>(
+    bffClient,
+    enabled ? "/api/backend/operator/assignment-permissions/changes" : null,
+  );
 
-  const reload = useCallback(() => setVersion((v) => v + 1), []);
-
-  useEffect(() => {
-    if (!enabled) return;
-    let cancelled = false;
-
-    async function load() {
-      const result = await fetchAssignmentPermissionChanges();
-      if (cancelled) return;
-
-      if (!result.ok) {
-        setState({ status: "error" });
-        return;
-      }
-
-      setState({ status: "loaded", changes: result.data });
-    }
-
-    load();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, version]);
-
-  return { state, reload };
+  if (state.status === "loading") return { state: { status: "loading" }, reload };
+  if (state.status === "error") return { state: { status: "error" }, reload };
+  return { state: { status: "loaded", changes: state.data }, reload };
 }
