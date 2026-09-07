@@ -351,7 +351,7 @@ jobs:
       # 포트가 잡혀 있으면 **누가 물고 있는지만 찍어** 다음 진단을 공짜로 만든다.
       - name: Clear anything left behind by an earlier run
         run: |
-          docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml down -v --remove-orphans || true
+          docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml -f docker/compose.ci-internal-only.yaml down -v --remove-orphans || true
           for port in "$LAURIO_API_PORT" "$LAURIO_WEB_PORT" "$LAURIO_OPERATOR_WEB_PORT" "$LAURIO_DB_PORT" "$LAURIO_REDIS_PORT"; do
             holder=$(docker ps --filter "publish=$port" --format '{{.Names}} ({{.Image}})' || true)
             if [ -n "$holder" ]; then
@@ -362,25 +362,25 @@ jobs:
       - name: Bring up the stack with celery
         # dev 기본 기동에는 celery 가 빠져 있다(beat 의 60초 스캔이 e2e 시드를
         # 건드리면 비결정적 실패가 된다) — 이 잡만 프로필로 켠다.
-        run: docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml --profile celery up -d --build
+        run: docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml -f docker/compose.ci-internal-only.yaml --profile celery up -d --build
 
       - name: The redis transport driver is actually in the image
         # 파일에 적힌 의존성이 아니라 빌드된 이미지 안을 본다.
         run: |
-          docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml exec -T celery-worker             python -c "import redis, kombu; print('redis', redis.__version__, 'kombu', kombu.__version__)"
+          docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml -f docker/compose.ci-internal-only.yaml exec -T celery-worker             python -c "import redis, kombu; print('redis', redis.__version__, 'kombu', kombu.__version__)"
 
       - name: The worker is actually connected to the broker
         # inspect ping 은 브로커를 통해 왕복한다 — 드라이버가 없거나 붙지 못하면
         # 여기서 끝난다.
         run: |
           for i in $(seq 1 30); do
-            if docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml exec -T celery-worker                  celery -A config inspect ping | grep -q pong; then
+            if docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml -f docker/compose.ci-internal-only.yaml exec -T celery-worker                  celery -A config inspect ping | grep -q pong; then
               echo "worker: pong"; exit 0
             fi
             sleep 3
           done
           echo "worker 가 브로커에 붙지 못했다"
-          docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml logs celery-worker | tail -50
+          docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml -f docker/compose.ci-internal-only.yaml logs celery-worker | tail -50
           exit 1
 
       - name: Beat publishes a due task and the worker executes it
@@ -396,7 +396,7 @@ jobs:
         # 부르므로(#137), 이 이름이 succeeded 로 찍혔다는 것은 등록부의 스캔
         # 중 하나가 실제로 beat -> 브로커 -> worker 경로를 타고 돈 것이다.
         run: |
-          TASK_NAME=$(docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml exec -T celery-worker \
+          TASK_NAME=$(docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml -f docker/compose.ci-internal-only.yaml exec -T celery-worker \
             python -c "from core.tasks import run_scan; print(run_scan.name)" | tr -d '\r\n')
           if [ -z "$TASK_NAME" ]; then
             echo "core.tasks.run_scan 의 태스크 이름을 읽지 못했다"
@@ -404,20 +404,20 @@ jobs:
           fi
           echo "찾는 태스크: $TASK_NAME"
           for i in $(seq 1 40); do
-            if docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml logs celery-worker \
+            if docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml -f docker/compose.ci-internal-only.yaml logs celery-worker \
                  | grep -q "${TASK_NAME}.*succeeded"; then
               echo "beat -> worker 경로 확인"; exit 0
             fi
             sleep 3
           done
           echo "beat 가 쏜 태스크를 worker 가 실행하지 못했다"
-          docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml logs celery-beat | tail -50
-          docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml logs celery-worker | tail -50
+          docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml -f docker/compose.ci-internal-only.yaml logs celery-beat | tail -50
+          docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml -f docker/compose.ci-internal-only.yaml logs celery-worker | tail -50
           exit 1
 
       - name: Tear down
         if: always()
-        run: docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml --profile celery down -v
+        run: docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml -f docker/compose.ci-internal-only.yaml --profile celery down -v
 
   # **공개 앱 e2e.** 운영자 e2e 와 나눠 **동시에** 돈다 (#104) — 한 잡이 둘을
   # 이어 돌리면 직렬로 남는 부분(공개 배타 패스 2.8분 + 운영자 6.4분)이 병렬
@@ -517,19 +517,11 @@ jobs:
           docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml logs --tail 100 || true
           exit 1
 
-      # 호스트의 uv 는 e2e 시드가 쓴다 — `frontend/e2e/lib/seed.ts` 가
-      # `uv run manage.py seed_e2e_contests` 로 실제 Contest 를 심는다(하드코딩
-      # 픽스처가 아니라 백엔드가 준 값이어야 SSR 증명이 성립한다). db 는 이 잡의
-      # `LAURIO_DB_PORT` 로 호스트에 노출돼 있고 시드도 같은 값을 읽는다
-      # (`config/settings.py` 의 `_DEV_DB_PORT`).
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-
-      - name: Install backend dependencies from lockfile
-        working-directory: backend
-        run: uv sync --locked
+      # **이 잡에는 uv 가 없다** (#194). 시드는 이미 떠 있는 백엔드를 HTTP 로 친다
+      # (`frontend/e2e/lib/seed-http.ts`, #156) — `global-setup.ts` 의 정리 셋도
+      # 전부 그 경로다. 여기 있던 「호스트의 uv 는 e2e 시드가 쓴다」 주석과 `uv sync`
+      # 스텝은 #156 이전 세계를 설명하던 것이라 지웠다. `seed-operator.ts`(아직
+      # 서브프로세스로 도는 시드 둘)를 임포트하는 것은 운영자 스펙뿐이다.
 
       - name: Install Playwright browser
         working-directory: frontend
@@ -664,11 +656,14 @@ jobs:
           docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml logs --tail 100 || true
           exit 1
 
-      # 호스트의 uv 는 e2e 시드가 쓴다 — `frontend/e2e/lib/seed.ts` 가
-      # `uv run manage.py seed_e2e_contests` 로 실제 Contest 를 심는다(하드코딩
-      # 픽스처가 아니라 백엔드가 준 값이어야 SSR 증명이 성립한다). db 는 이 잡의
-      # `LAURIO_DB_PORT` 로 호스트에 노출돼 있고 시드도 같은 값을 읽는다
-      # (`config/settings.py` 의 `_DEV_DB_PORT`).
+      # **운영자 잡에만 uv 가 남는다** (#194). 시드는 대부분 HTTP 다(#156) — 남은
+      # 예외가 `seed-operator.ts` 의 `runSeedSubprocess` 둘(`seed_e2e_operator_queues`·
+      # `seed_e2e_operator_appeal`)이고, 그 둘이 소스를 **`FakeStorageAdapter` 에
+      # 직접** 쓴 뒤 같은 프로세스에서 채점 스캔을 돌린다. 그래서 `STORAGE_BACKEND=fake`
+      # 인 호스트에서만 돌 수 있고, 그 제약 하나가 이 잡에 파이썬 툴체인과 **DB 포트
+      # 노출**을 남긴다. 그 결합을 푸는 것은 별개다 — `write_object` 가 어댑터 계약에
+      # 없어서(fake 에만 「테스트 전용」으로 있다) S3 어댑터에 서버측 쓰기를 여는
+      # 판단이 먼저 필요하다.
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:

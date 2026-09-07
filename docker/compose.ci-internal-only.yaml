@@ -1,0 +1,31 @@
+# `celery-broker` 잡 전용 — **호스트 포트를 하나도 열지 않는다** (#194).
+#
+# 그 잡이 검증하는 것(브로커 왕복, beat → worker 경로)은 전부 `docker compose exec`
+# 로 컨테이너 안에서 이뤄진다. 컨테이너끼리는 compose 네트워크의 서비스 이름으로
+# 통하므로 호스트 노출이 하나도 필요 없다.
+#
+# **그런데 열려 있었다.** `compose.ci.yaml` 이 `volumes`·`target`·`command` 는
+# 덮어쓰면서 `ports` 는 그대로 뒀고, dev compose 의 노출은 「호스트에서
+# `uv run pytest` 를 돌릴 때 붙으려고」 있는 **개발용 장치**다 — 바인드 마운트와
+# 같은 종류의 잔재인데 그때 포트만 안 걷었다.
+#
+# 대가는 실제로 치렀다: `#190` 머지 커밋의 CI 가
+# `failed to bind host port 0.0.0.0:56432/tcp: address already in use` 로 죽었다.
+# 56432 는 이 잡의 DB 포트인데 이 잡은 DB 를 호스트에서 한 번도 치지 않는다.
+#
+# 그리고 사전 정리 스텝은 그 상황을 못 잡는다 — `docker ps --filter publish=` 는
+# **running 컨테이너만** 본다. 강제 종료가 남긴 `docker-proxy` 가 포트를 문 채
+# 컨테이너는 사라진 상태면 그 검사에 안 걸린다(그때도 경고가 안 찍혔는데 35초 뒤
+# bind 가 실패했다). **아무도 안 쓰는 포트에 남은 누수 하나가 잡을 죽인다** —
+# 그래서 안 여는 것이 방어다.
+services:
+  db:
+    ports: !reset []
+  minio:
+    ports: !reset []
+  backend:
+    ports: !reset []
+  frontend:
+    ports: !reset []
+  operator:
+    ports: !reset []
