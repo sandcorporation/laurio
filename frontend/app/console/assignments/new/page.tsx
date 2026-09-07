@@ -11,6 +11,11 @@ import { useRouter } from "next/navigation";
 
 import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
+import {
+  RequirementChecklistEditor,
+  requirementDraftsToIn,
+  type RequirementDraft,
+} from "@/lib/assignments/requirement-checklist-editor";
 
 type DeliverableType = { id: number; name: string; minimum_prize: number };
 
@@ -24,6 +29,7 @@ type AssignmentForm = {
   deliverableTypeIds: number[];
   deadlineAt: string;
   description: string;
+  requirements: RequirementDraft[];
 };
 
 const EMPTY_FORM: AssignmentForm = {
@@ -31,6 +37,7 @@ const EMPTY_FORM: AssignmentForm = {
   deliverableTypeIds: [],
   deadlineAt: "",
   description: "",
+  requirements: [],
 };
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -110,6 +117,10 @@ export default function NewAssignmentPage() {
       setCreateError("마감 기한을 선택해주세요.");
       return;
     }
+    if (form.requirements.some((r) => r.text.trim() === "")) {
+      setCreateError("빈 요구사항 항목이 있습니다. 내용을 채우거나 삭제해주세요.");
+      return;
+    }
 
     setCreating(true);
     try {
@@ -118,7 +129,7 @@ export default function NewAssignmentPage() {
         deliverable_type_ids: form.deliverableTypeIds,
         description: form.description,
         deadline_at: new Date(form.deadlineAt).toISOString(),
-        requirements: [],
+        requirements: requirementDraftsToIn(form.requirements),
       });
 
       if (!created.ok) {
@@ -203,6 +214,12 @@ export default function NewAssignmentPage() {
           className="border border-rule bg-surface px-3 py-2"
         />
       </label>
+
+      <RequirementChecklistEditor
+        requirements={form.requirements}
+        onChange={(next) => setForm((prev) => ({ ...prev, requirements: next }))}
+        testIdPrefix="new-assignment-requirement"
+      />
 
       {createError && (
         <p role="alert" data-testid="new-assignment-error" className="text-sm text-attention">
