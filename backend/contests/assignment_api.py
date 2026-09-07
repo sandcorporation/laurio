@@ -21,6 +21,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from django.db import transaction
+from django.db.models import Count
 from django.http import HttpRequest
 from ninja import Router
 from ninja.errors import HttpError
@@ -64,10 +65,49 @@ def _require_assignment_permission(user) -> SponsorProfile:
     return profile
 
 
+def _is_locked_by_first_submission(status: str, submission_count: int) -> bool:
+    """「첫 제출이 문을 닫는다」(#209)의 유일한 정의 — 이 한 곳에서만 판정한다.
+
+    `_get_owned_editable_assignment`(수정을 실제로 막는 게이트)와
+    `_serialize_assignment`(그 결과를 `is_editable`로 미리 화면에 실어 보내는 자리)
+    양쪽이 이 함수를 부른다. 둘로 갈라 각자 조건을 다시 쓰면(코드리뷰 지적 — 전에는
+    프론트가 `status === "draft" || status === "assignment_open"`으로 이 규칙을
+    화면에서 다시 적고 있었다) 언젠가 한쪽만 고쳐져 게이트는 막는데 화면은 편집
+    폼을 계속 보여주는 fail-open이 생긴다.
+    """
+
+    return status == Contest.Status.ASSIGNMENT_OPEN and submission_count > 0
+
+
 def _serialize_assignment(
-    contest: Contest, *, auth_user: object | None = None, invite_code: str | None = None
+    contest: Contest,
+    *,
+    auth_user: object | None = None,
+    invite_code: str | None = None,
+    submission_count: int | None = None,
 ) -> AssignmentOut:
+    """`submission_count`는 호출부가 이미 알고 있으면 넘긴다 — 모르면(`None`) 여기서
+    한 번 센다. `list_my_assignments`처럼 여러 Contest를 순회하는 자리가 매번 이
+    기본값에 기대면 행마다 COUNT 쿼리가 하나씩 붙는다(N+1, 코드리뷰 지적) — 그런
+    자리는 쿼리셋을 `annotate(submission_count=Count("submissions"))`로 미리 세어
+    여기 넘긴다. `get_assignment_by_invite_code`(로그인조차 필요 없는 공개
+    엔드포인트)는 명시적으로 `0`을 넘긴다 — Assignment는 명단을 두지 않는다는
+    원칙(스펙 #197)이 "몇 명이 냈는지"까지는 다루지 않지만, 굳이 인증 없는 요청에
+    실제 제출 건수를 새로 노출할 이유도 없다.
+
+    `is_editable`은 `_get_owned_editable_assignment`가 실제로 막는 조건과 정확히
+    같은 술어(`Contest.Status.EDITABLE` + `_is_locked_by_first_submission`)로
+    계산한다 — 화면이 PATCH를 시도해 409를 받아보기 전에 편집 폼 자체를 숨길 수
+    있게(#209 코드리뷰 지적, `is_owner`와 같은 자리에서 같은 이유로 계산해 나간다).
+    """
+
     is_owner = auth_user is not None and contest.sponsor.user_id == getattr(auth_user, "id", None)
+    resolved_submission_count = (
+        contest.submissions.count() if submission_count is None else submission_count
+    )
+    is_editable = Contest.Status.EDITABLE(contest.status) and not _is_locked_by_first_submission(
+        contest.status, resolved_submission_count
+    )
     return AssignmentOut(
         id=contest.id,
         title=contest.title,
@@ -85,6 +125,8 @@ def _serialize_assignment(
         created_at=contest.created_at,
         invite_code=invite_code,
         is_owner=is_owner,
+        submission_count=resolved_submission_count,
+        is_editable=is_editable,
     )
 
 
@@ -129,10 +171,36 @@ def _get_owned_assignment(request: HttpRequest, assignment_id: int) -> Contest:
 
 
 def _get_owned_editable_assignment(request: HttpRequest, assignment_id: int) -> Contest:
+    """수정 가능 여부는 `EDITABLE` 하나로 끝나지 않는다(#209, ADR-0028).
+
+    「첫 제출이 문을 닫는다」— `ASSIGNMENT_OPEN`이면서 제출이 0건일 때만 고칠 수
+    있다. DRAFT는 `EDITABLE`을 통과하면 이 술어에 걸릴 일이 없다(제출은
+    ASSIGNMENT_OPEN 이후에만 가능하다, `submissions.api`). 공모전의 "결제가 문을
+    닫는다"에 대응하는 값이고, Escrow의 "참가자가 한 명이라도 있으면 되돌아가지
+    않는다"와 같은 결이다 — 채점 기준이 제출 뒤에 바뀌면 그 점수가 무엇을 측정한
+    것인지 알 수 없게 되고, Assignment에는 이의제기가 없어 학생에게 구제 수단이
+    없다. 거부 이유를 일반적인 409("지금은 고칠 수 없는 상태")와 다른 문구로
+    돌려준다 — Sponsor가 왜 막혔는지 화면에서 바로 알아야 한다(#209).
+    """
+
     contest = _get_owned_assignment(request, assignment_id)
 
     if not Contest.Status.EDITABLE(contest.status):
         raise HttpError(409, "지금은 이 과제를 고칠 수 없는 상태입니다.")
+
+    # `_is_locked_by_first_submission`이 이 판정의 유일한 정의다 — `_serialize_
+    # assignment`가 같은 함수로 `is_editable`을 계산해 화면에 미리 실어 보낸다(#209
+    # 코드리뷰 지적). 여기서 조건을 다시 쓰면 둘이 갈릴 수 있다.
+    if _is_locked_by_first_submission(contest.status, contest.submissions.count()):
+        # "요구사항을"이라 쓰지 않는다 — 이 게이트가 지키는 `update_assignment`는
+        # title·description·deadline_at·deliverable_type_ids를 고치는 자리이지
+        # Requirement 행 자체를 건드리는 엔드포인트가 아니다(그건 이 티켓 범위
+        # 밖이다). "과제 내용"이라고 해야 실제로 잠그는 대상과 문구가 맞는다.
+        raise HttpError(
+            409,
+            "이미 제출한 학생이 있어 과제 내용을 더 이상 고칠 수 없습니다. "
+            "제출 뒤 기준이 바뀌면 이미 낸 학생이 불리해집니다.",
+        )
 
     return contest
 
@@ -201,7 +269,8 @@ def create_assignment(request: HttpRequest, payload: AssignmentCreateIn):
         )
 
     contest.refresh_from_db()
-    return 201, _serialize_assignment(contest, auth_user=request.auth_user)
+    # 방금 만든 Contest다 — 제출이 있을 수 없으니 COUNT 쿼리 없이 0을 넘긴다.
+    return 201, _serialize_assignment(contest, auth_user=request.auth_user, submission_count=0)
 
 
 @router.get("/assignments/mine", response=list[AssignmentOut], auth=jwt_auth)
@@ -217,15 +286,24 @@ def list_my_assignments(request: HttpRequest):
     if profile is None:
         return []
 
+    # `annotate(Count("submissions"))`로 목록 전체를 쿼리 하나에 센다 — 그러지 않고
+    # `_serialize_assignment`의 기본 동작(모르면 직접 센다)에 맡기면 행마다 COUNT가
+    # 하나씩 붙는다(N+1, 코드리뷰 지적). `submissions`는 FK 역참조라(M2M이 아니다)
+    # 이 자리에서 `deliverable_types`·`requirements`·`invite_codes`를 함께
+    # `prefetch_related`해도(별도 쿼리라 JOIN 팬아웃이 없다) `distinct` 없이 정확하다.
     contests = (
         Contest.objects.filter(sponsor=profile, category=get_assignment_category())
         .select_related("sponsor", "category")
         .prefetch_related("deliverable_types", "requirements", "invite_codes")
+        .annotate(submission_count=Count("submissions"))
         .order_by("-created_at", "-id")
     )
     return [
         _serialize_assignment(
-            c, auth_user=request.auth_user, invite_code=_active_invite_code(c)
+            c,
+            auth_user=request.auth_user,
+            invite_code=_active_invite_code(c),
+            submission_count=c.submission_count,
         )
         for c in contests
     ]
@@ -253,7 +331,11 @@ def get_assignment_by_invite_code(request: HttpRequest, code: str):
     # 상태와 무관하게 보여준다 — ASSIGNMENT_CLOSED(마감) 후에도 학생이 자기 과제와
     # 점수를 계속 볼 수 있어야 한다(스펙 #197 user story 31). DRAFT는 InviteCode가
     # 아직 없어 이 분기에 도달할 수 없다(열 때만 발급된다).
-    return _serialize_assignment(contest, invite_code=code)
+    #
+    # `submission_count=0`을 명시한다 — 로그인조차 요구하지 않는 공개 엔드포인트다.
+    # Assignment는 명단을 두지 않는다는 원칙(스펙 #197)이 "몇 명이 냈는지"까지 다루진
+    # 않지만, 인증 없는 요청에 실제 제출 건수를 새로 노출할 이유도 없다(코드리뷰 지적).
+    return _serialize_assignment(contest, invite_code=code, submission_count=0)
 
 
 @router.get("/assignments/{assignment_id}", response=AssignmentOut, auth=jwt_auth)
@@ -268,9 +350,9 @@ def get_my_assignment(request: HttpRequest, assignment_id: int):
 def update_assignment(request: HttpRequest, assignment_id: int, payload: AssignmentUpdateIn):
     """DRAFT·ASSIGNMENT_OPEN 과제를 고친다(스펙 #197) — `EDITABLE`이 두 상태 모두 True다.
 
-    **제출 0건 술어는 여기 없다.** `EDITABLE: True`가 「고칠 수 있다」의 절반이고
-    나머지 절반(첫 제출이 문을 닫는다)은 #209가 얹는다 — 지금은 ASSIGNMENT_OPEN이면
-    제출이 있어도 계속 고칠 수 있다.
+    **제출 0건 술어는 `_get_owned_editable_assignment`에 있다(#209).** `EDITABLE:
+    True`가 「고칠 수 있다」의 절반이고, ASSIGNMENT_OPEN이면서 제출이 1건이라도
+    있으면 나머지 절반(첫 제출이 문을 닫는다)에 걸려 409로 거부된다.
     """
 
     contest = _get_owned_editable_assignment(request, assignment_id)
@@ -361,7 +443,14 @@ def open_assignment(request: HttpRequest, assignment_id: int):
         if not won:
             raise HttpError(409, "이미 열렸거나 초안 상태가 아닙니다.")
 
-        invite = InviteCode.objects.create(contest=contest)
+        # 방금 만든 코드를 직접 들고 있지 않고 `_active_invite_code`로 다시 읽는다 —
+        # `list_my_assignments`·`get_my_assignment`·`update_assignment`·아래 재발급까지
+        # "이 과제의 활성 InviteCode가 무엇인가"를 항상 같은 한 자리(`_active_invite_
+        # code`)로 답하게 해서(#209 코드리뷰 지적), 방금 만든 객체를 들고 다니는 경로와
+        # 다시 조회하는 경로가 갈릴 여지를 없앤다. 생성은 위 `claim_transition`과 같은
+        # `transaction.atomic()` 안에 남는다(#207 통합) — 전이만 커밋되고 코드가 없는
+        # 과제가 남으면 재시도가 409라 아무도 들어올 수 없다.
+        InviteCode.objects.create(contest=contest)
 
     # `claim_transition`은 조건부 UPDATE(원시 SQL, ADR-0003)로 DB 행만 옮긴다 —
     # 이 Python 인스턴스는 `status`뿐 아니라 `updated_at`(auto_now, claim_transition이
@@ -374,7 +463,60 @@ def open_assignment(request: HttpRequest, assignment_id: int):
     # 같다"를 주석으로 약속하는 대신 실제로 다시 읽어 보장한다.
     contest.refresh_from_db(fields=["status", "updated_at"])
     return 200, _serialize_assignment(
-        contest, auth_user=request.auth_user, invite_code=invite.code
+        contest, auth_user=request.auth_user, invite_code=_active_invite_code(contest)
+    )
+
+
+@router.post(
+    "/assignments/{assignment_id}/invite-code/reissue",
+    response={200: AssignmentOut},
+    auth=jwt_auth,
+)
+def reissue_invite_code(request: HttpRequest, assignment_id: int):
+    """코드가 새어 나가면 강사가 다시 발급한다(#209) — **새 진입만 막는다.**
+
+    옛 InviteCode는 지우지 않고 `is_active=False`로만 죽인다 — `InviteCode.contest`가
+    append-only 이력을 위해 `ForeignKey`(OneToOne이 아니다, `models.py` 주석)로 둔
+    이유가 정확히 이것이다. 이미 그 코드로 낸 `Submission`은 InviteCode 행이 아니라
+    `Submission.developer`로 존재하므로 옛 코드가 죽어도 전혀 건드리지 않는다 — 명단이
+    없어(스펙 #197) "이미 낸 사람"은 애초에 InviteCode가 아니라 Submission의 존재로
+    판정된다.
+
+    `ASSIGNMENT_OPEN`에서만 의미가 있다 — DRAFT는 아직 InviteCode 자체가 없고(열 때
+    발급된다), `ASSIGNMENT_CLOSED` 이후에는 더 막을 새 진입이 없다(마감 후 학생은
+    이미 손에 쥔 코드로 자기 점수를 계속 볼 뿐 새로 제출하지 않는다).
+
+    두 번 연달아 눌러도 활성 코드가 둘 남지 않는다 — `select_for_update`로 Contest
+    행을 잠근 채 비활성화와 재발급을 한 트랜잭션에 묶는다(`unique_active_invite_code_
+    per_contest`가 DB 레벨 최후 방어선으로 이미 서 있다, `models.py`).
+
+    **상태를 잠근 행에서 다시 확인한다.** 소유권만 확인한 `contest`(트랜잭션 밖에서
+    읽은 스냅샷)로 상태를 판정하면, 그 판정과 `select_for_update` 사이에 마감 스캔
+    (`ASSIGNMENT_OPEN -> ASSIGNMENT_CLOSED`, `contests/apps.py`)이 끼어들 수 있다 —
+    체크는 통과했는데 잠근 순간에는 이미 CLOSED라, "CLOSED 이후에는 재발급이 의미
+    없다"는 위 설명을 스스로 어기며 마감된 과제에 새 활성 코드를 만들게 된다
+    (코드리뷰 지적). 그래서 상태 판정 자체를 잠근 행 안으로 옮긴다 — `accounts.
+    assignment_permission_services.grant_assignment_permission`이 같은 이유로
+    `select_for_update` 뒤에 상태(`can_open_assignments`)를 다시 보는 것과 같은
+    자리다.
+    """
+
+    contest = _get_owned_assignment(request, assignment_id)
+
+    with transaction.atomic():
+        locked_contest = Contest.objects.select_for_update().get(pk=contest.pk)
+        if locked_contest.status != Contest.Status.ASSIGNMENT_OPEN:
+            raise HttpError(409, "열린 과제만 InviteCode를 재발급할 수 있습니다.")
+
+        InviteCode.objects.filter(contest=locked_contest, is_active=True).update(is_active=False)
+        InviteCode.objects.create(contest=locked_contest)
+
+    # 방금 만든 코드를 직접 들고 있지 않고 `_active_invite_code`로 다시 읽는다 —
+    # `open_assignment`와 같은 이유(#209 코드리뷰 지적): "이 과제의 활성 InviteCode가
+    # 무엇인가"를 항상 같은 한 자리로 답한다.
+    contest.refresh_from_db()
+    return 200, _serialize_assignment(
+        contest, auth_user=request.auth_user, invite_code=_active_invite_code(contest)
     )
 
 

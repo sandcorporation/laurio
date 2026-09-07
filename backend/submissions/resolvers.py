@@ -21,7 +21,7 @@ Contest)는 예외를 던지지 않고 소유자 없는 private으로 fail-close
 from __future__ import annotations
 
 from awards.services import sponsor_user_id_if_awarded
-from contests.models import ASSIGNMENT_STATUSES, Contest
+from contests.models import Contest
 from core.clock import Clock
 from storage.policy import TargetState, Visibility
 
@@ -78,7 +78,7 @@ class SubmissionTargetStateResolver:
         # 통과하지 못한다" 주석)를 비켜가며 조용히 공개된다. `contest_id`·
         # `developer_id`는 평범한 정수라 target_ref 자체를 순회할 수 있다는 점도
         # 같은 이유다.
-        if contest.status not in ASSIGNMENT_STATUSES and Clock.now() >= contest.deadline_at:
+        if not contest.is_assignment and Clock.now() >= contest.deadline_at:
             return TargetState(visibility=Visibility.PUBLIC, owner_id=developer_user_id)
 
         return TargetState(

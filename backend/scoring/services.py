@@ -38,7 +38,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from django.db import IntegrityError, transaction
 from django.db.models import Exists, OuterRef
 
-from contests.models import ASSIGNMENT_STATUSES, Contest, Requirement
+from contests.models import Contest, Requirement
 from core.clock import Clock
 from core.prompt_safety import neutralize_untrusted as _neutralize_untrusted
 from core.scans import ScanSpec
@@ -405,7 +405,7 @@ def score_submission_once(submission: Submission) -> dict:
     # 본인확인 없는 학생에게는 연락처가 없어(ADR-0029) 실패한 발송 기록이
     # 채널마다 쌓이고, 과제에는 애초에 이의(Appeal) 자체가 없으니 이 통지의
     # 내용("이의 창이 열렸다") 자체가 거짓이다.
-    if submission.contest.status not in ASSIGNMENT_STATUSES:
+    if not submission.contest.is_assignment:
         _notify_scored(submission)
 
     return {"submission_id": submission.id, "status": "scored", "percentage": str(percentage)}

@@ -114,7 +114,11 @@ class ContestQuerySet(models.QuerySet):
 
     def appeal_window_open(self, now):
         # Assignment 는 항상 제외한다 — 파이썬 짝(`Contest.appeal_window_open`)과 같은 이유.
-        return self.exclude(status__in=ASSIGNMENT_STATUSES).filter(
+        # 인스턴스 짝은 `Contest.is_assignment` 를 쓰지만 프로퍼티는 쿼리셋에 실을 수 없어,
+        # 저장소가 이미 쓰는 카테고리 제외 관용구를 따른다(`contests.api` 의 개최 목록과 같다).
+        from .assignment_category import get_assignment_category
+
+        return self.exclude(category=get_assignment_category()).filter(
             Q(judging_ends_at__isnull=True) | Q(judging_ends_at__gt=now)
         )
 
@@ -272,7 +276,7 @@ class Contest(models.Model):
         없다) — 그 허용을 그대로 두면 채점이 끝난 과제 제출에 이의가 접수돼 버린다. 과제에는
         Appeal 자체가 없다(스펙 #197 Out of Scope) — 이견은 강사에게 직접 말한다."""
 
-        if self.status in ASSIGNMENT_STATUSES:
+        if self.is_assignment:
             return False
         return self.judging_ends_at is None or now < self.judging_ends_at
 
@@ -796,19 +800,20 @@ class InviteCode(models.Model):
     `Submission.developer`로 보이고, 코드를 받았지만 아직 내지 않은 사람은
     플랫폼이 알지 못한다.
 
-    `contest`를 `OneToOneField`가 아니라 `ForeignKey`로 둔다 — 지금(#207)은
-    Assignment 하나에 활성 코드가 언제나 정확히 하나뿐이지만, 재발급(#209)이
-    새어 나간 코드를 무효화하고 새 코드를 발급하면서도 이미 낸 사람의
-    `Submission`을 건드리지 않으려면 옛 코드 행을 지우지 않고 `is_active`만
-    끄는 이력이 필요하다 — `DeliverableTypeChange`·`AssignmentPermissionChange`와
-    같은 append-only 감사 규율이다. 이 티켓은 재발급 자체를 구현하지 않지만
-    (#209 소관), 나중에 그 티켓이 이 모델을 append-only로 확장할 수 있도록
-    처음부터 여러 개를 가리킬 수 있는 모양으로 둔다.
+    `contest`를 `OneToOneField`가 아니라 `ForeignKey`로 둔다 — Assignment 하나가
+    한 번에 갖는 활성 코드는 언제나 정확히 하나이지만(open 이 처음 하나를 만들고,
+    재발급(`contests.assignment_api.reissue_invite_code`, #209)이 새어 나간 코드를
+    무효화하며 새 코드를 만든다), 이미 낸 사람의 `Submission`을 건드리지 않으려면
+    옛 코드 행을 지우지 않고 `is_active`만 끄는 이력이 필요하다 —
+    `DeliverableTypeChange`·`AssignmentPermissionChange`와 같은 append-only 감사
+    규율이다. `contest`가 처음부터 여러 개를 가리킬 수 있는 모양이었기 때문에
+    #209 는 이 모델을 손대지 않고 그 위에 재발급을 얹을 수 있었다.
 
     `unique_active_invite_code_per_contest`(부분 유니크)는 "활성 코드는 언제나
-    최대 하나"라는 불변식의 DB 레벨 최후 방어선이다 — #207에서는 열 때 한 번만
-    만들어 이 제약에 걸릴 일이 없지만, #209의 재발급이 이 제약을 어기면 즉시
-    `IntegrityError`로 드러난다.
+    최대 하나"라는 불변식의 DB 레벨 최후 방어선이다 — 재발급(`reissue_invite_code`)
+    은 옛 코드를 비활성화하고 새 코드를 만드는 두 쓰기를 `select_for_update`로 잠근
+    한 트랜잭션에 묶어 이 제약을 어기지 않는다; 어기면 즉시 `IntegrityError`로
+    드러난다.
     """
 
     contest = models.ForeignKey(Contest, related_name="invite_codes", on_delete=models.CASCADE)

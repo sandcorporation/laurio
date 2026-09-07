@@ -194,6 +194,51 @@ export interface paths {
         patch: operations["contests_assignment_api_update_assignment"];
         trace?: never;
     };
+    "/api/assignments/{assignment_id}/invite-code/reissue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reissue Invite Code
+         * @description 코드가 새어 나가면 강사가 다시 발급한다(#209) — **새 진입만 막는다.**
+         *
+         *     옛 InviteCode는 지우지 않고 `is_active=False`로만 죽인다 — `InviteCode.contest`가
+         *     append-only 이력을 위해 `ForeignKey`(OneToOne이 아니다, `models.py` 주석)로 둔
+         *     이유가 정확히 이것이다. 이미 그 코드로 낸 `Submission`은 InviteCode 행이 아니라
+         *     `Submission.developer`로 존재하므로 옛 코드가 죽어도 전혀 건드리지 않는다 — 명단이
+         *     없어(스펙 #197) "이미 낸 사람"은 애초에 InviteCode가 아니라 Submission의 존재로
+         *     판정된다.
+         *
+         *     `ASSIGNMENT_OPEN`에서만 의미가 있다 — DRAFT는 아직 InviteCode 자체가 없고(열 때
+         *     발급된다), `ASSIGNMENT_CLOSED` 이후에는 더 막을 새 진입이 없다(마감 후 학생은
+         *     이미 손에 쥔 코드로 자기 점수를 계속 볼 뿐 새로 제출하지 않는다).
+         *
+         *     두 번 연달아 눌러도 활성 코드가 둘 남지 않는다 — `select_for_update`로 Contest
+         *     행을 잠근 채 비활성화와 재발급을 한 트랜잭션에 묶는다(`unique_active_invite_code_
+         *     per_contest`가 DB 레벨 최후 방어선으로 이미 서 있다, `models.py`).
+         *
+         *     **상태를 잠근 행에서 다시 확인한다.** 소유권만 확인한 `contest`(트랜잭션 밖에서
+         *     읽은 스냅샷)로 상태를 판정하면, 그 판정과 `select_for_update` 사이에 마감 스캔
+         *     (`ASSIGNMENT_OPEN -> ASSIGNMENT_CLOSED`, `contests/apps.py`)이 끼어들 수 있다 —
+         *     체크는 통과했는데 잠근 순간에는 이미 CLOSED라, "CLOSED 이후에는 재발급이 의미
+         *     없다"는 위 설명을 스스로 어기며 마감된 과제에 새 활성 코드를 만들게 된다
+         *     (코드리뷰 지적). 그래서 상태 판정 자체를 잠근 행 안으로 옮긴다 — `accounts.
+         *     assignment_permission_services.grant_assignment_permission`이 같은 이유로
+         *     `select_for_update` 뒤에 상태(`can_open_assignments`)를 다시 보는 것과 같은
+         *     자리다.
+         */
+        post: operations["contests_assignment_api_reissue_invite_code"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/assignments/{assignment_id}/open": {
         parameters: {
             query?: never;
@@ -2579,7 +2624,21 @@ export interface components {
          *     (스펙 #197 인수조건 — 과제 화면에 그 개념이 전혀 나타나지 않는다).
          *
          *     `invite_code`는 열리기 전(DRAFT)에는 null이고, 연 뒤에는 활성 InviteCode의 값이다
-         *     — 재발급(#209)이 생기기 전까지는 언제나 최대 하나다.
+         *     (재발급(#209) 후에는 언제나 최신 값 하나 — 옛 코드는 비활성화될 뿐 응답에
+         *     나타나지 않는다).
+         *
+         *     `submission_count`는 「첫 제출이 문을 닫는다」(#209)를 화면이 미리 알 수 있게
+         *     한다 — Sponsor가 PATCH를 시도해 409를 받고서야 이유를 아는 것이 아니라, 제출이
+         *     1건이라도 있으면 화면이 애초에 편집 폼 대신 잠금 안내를 보여준다.
+         *
+         *     `is_editable`은 그 판정을 화면 대신 **백엔드가 직접 계산해 실어 보낸다**(#209
+         *     코드리뷰 지적). `EDITABLE`(status)과 "ASSIGNMENT_OPEN이면서 제출 0건"이라는 두
+         *     조건이 합쳐진 값인데, 프론트가 `status === "draft" || status === "assignment_open"`
+         *     처럼 그 규칙을 화면에서 다시 적으면 백엔드가 규칙을 하나 더 얹을 때마다(이번
+         *     티켓이 바로 그 경우다) 화면이 따로 갱신되지 않는 한 어긋난다 — 그러면 이미
+         *     `_get_owned_editable_assignment`가 409로 막는 상태인데도 화면은 편집 폼을 계속
+         *     보여주는 fail-open이 생긴다. `is_owner`가 이미 같은 자리에서 같은 이유로
+         *     계산되어 나가는 값이라 그 옆에 나란히 둔다.
          */
         AssignmentOut: {
             /**
@@ -2601,6 +2660,11 @@ export interface components {
             /** Invite Code */
             invite_code?: string | null;
             /**
+             * Is Editable
+             * @default false
+             */
+            is_editable: boolean;
+            /**
              * Is Owner
              * @default false
              */
@@ -2609,6 +2673,11 @@ export interface components {
             requirements: components["schemas"]["RequirementOut"][];
             /** Status */
             status: string;
+            /**
+             * Submission Count
+             * @default 0
+             */
+            submission_count: number;
             /** Title */
             title: string;
         };
@@ -4785,6 +4854,28 @@ export interface operations {
                 "application/json": components["schemas"]["AssignmentUpdateIn"];
             };
         };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentOut"];
+                };
+            };
+        };
+    };
+    contests_assignment_api_reissue_invite_code: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description OK */
             200: {
