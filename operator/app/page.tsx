@@ -103,6 +103,16 @@ export default function OperatorHome() {
         </Link>
       </p>
 
+      {/* 과제 개최 자격 관리(#206)로 가는 진입점 — 정책·산출물 종류 화면과 같은
+          이유로 두 등급 모두에게 보인다. 조회는 일반 등급도 되므로(#76의
+          규율) 이 링크는 두 등급 모두에게 보이고, 편집 가능 여부는 화면
+          안에서 갈린다. */}
+      <p>
+        <Link href="/assignment-permissions" data-testid="assignment-permissions-nav-link">
+          과제 개최 자격 관리
+        </Link>
+      </p>
+
       <section data-testid="operator-home-queues">
         <QueueCard
           testId="queue-appeals-pending"

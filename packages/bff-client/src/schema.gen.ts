@@ -1182,6 +1182,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operator/assignment-permissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Assignment Permission Holders */
+        get: operations["accounts_assignment_permission_operator_api_list_assignment_permission_holders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/assignment-permissions/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Assignment Permission Changes */
+        get: operations["accounts_assignment_permission_operator_api_list_assignment_permission_changes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/assignment-permissions/grant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Grant Assignment Permission Endpoint */
+        post: operations["accounts_assignment_permission_operator_api_grant_assignment_permission_endpoint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/assignment-permissions/{sponsor_profile_id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke Assignment Permission Endpoint */
+        post: operations["accounts_assignment_permission_operator_api_revoke_assignment_permission_endpoint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/operator/deliverable-types": {
         parameters: {
             query?: never;
@@ -2309,6 +2377,80 @@ export interface components {
             order: number;
             /** Value */
             value: string;
+        };
+        /**
+         * AssignmentPermissionChangeOut
+         * @description `AssignmentPermissionChange` 한 건 — 누가·언제·무엇을·왜.
+         *
+         *     `sponsor_profile_id`만이 아니라 `username`도 함께 준다 — 회수된 Sponsor는
+         *     자격 보유자 목록(`GET /operator/assignment-permissions`)에서 빠지므로,
+         *     `contests.DeliverableTypeChangeOut`처럼 별도 목록과 조인하지 않고 이 행
+         *     하나로 화면이 "누구의 이력인가"에 답할 수 있어야 한다.
+         */
+        AssignmentPermissionChangeOut: {
+            /** Action */
+            action: string;
+            /** After */
+            after: {
+                [key: string]: unknown;
+            };
+            /** Before */
+            before: {
+                [key: string]: unknown;
+            };
+            /**
+             * Changed At
+             * Format: date-time
+             */
+            changed_at: string;
+            /** Id */
+            id: number;
+            /** Operator Username */
+            operator_username: string;
+            /** Reason */
+            reason: string;
+            /** Sponsor Profile Id */
+            sponsor_profile_id: number;
+            /** Username */
+            username: string;
+        };
+        /** AssignmentPermissionErrorOut */
+        AssignmentPermissionErrorOut: {
+            /**
+             * Code
+             * @default error
+             */
+            code: string;
+            /** Detail */
+            detail: string;
+        };
+        /** AssignmentPermissionGrantIn */
+        AssignmentPermissionGrantIn: {
+            /** Reason */
+            reason: string;
+            /** Username */
+            username: string;
+        };
+        /**
+         * AssignmentPermissionHolderOut
+         * @description 지금 과제 개최 자격을 가진 Sponsor 한 명 (#206, ADR-0029).
+         */
+        AssignmentPermissionHolderOut: {
+            /** Can Open Assignments */
+            can_open_assignments: boolean;
+            /** Display Name */
+            display_name: string;
+            /** Sponsor Profile Id */
+            sponsor_profile_id: number;
+            /** User Id */
+            user_id: number;
+            /** Username */
+            username: string;
+        };
+        /** AssignmentPermissionRevokeIn */
+        AssignmentPermissionRevokeIn: {
+            /** Reason */
+            reason: string;
         };
         /** AwardIn */
         AwardIn: {
@@ -5487,6 +5629,150 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    accounts_assignment_permission_operator_api_list_assignment_permission_holders: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentPermissionHolderOut"][];
+                };
+            };
+        };
+    };
+    accounts_assignment_permission_operator_api_list_assignment_permission_changes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentPermissionChangeOut"][];
+                };
+            };
+        };
+    };
+    accounts_assignment_permission_operator_api_grant_assignment_permission_endpoint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssignmentPermissionGrantIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentPermissionHolderOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentPermissionErrorOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentPermissionErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentPermissionErrorOut"];
+                };
+            };
+        };
+    };
+    accounts_assignment_permission_operator_api_revoke_assignment_permission_endpoint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sponsor_profile_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssignmentPermissionRevokeIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentPermissionHolderOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentPermissionErrorOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentPermissionErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentPermissionErrorOut"];
                 };
             };
         };

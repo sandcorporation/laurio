@@ -72,4 +72,11 @@ E2E_SEED_REGISTRY: dict[str, SeedEntry] = {
         command="count_ledger_entries",
         options=frozenset({"contest_id"}),
     ),
+    # 과제 개최 자격 화면(#206) e2e 전용 — 자격을 줄 대상 Sponsor 계정. 옵션이
+    # 없다: (provider, provider_uid)가 고정이라 몇 번을 불러도 같은 사용자명을
+    # 돌려준다(get_or_create).
+    "assignment-permission-sponsor": SeedEntry(
+        command="seed_e2e_assignment_permission_sponsor",
+        options=frozenset(),
+    ),
 }

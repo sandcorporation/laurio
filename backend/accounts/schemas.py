@@ -69,3 +69,45 @@ class WithdrawalRejectedOut(Schema):
 
     detail: str
     blocking_reasons: list[WithdrawalBlockReason]
+
+
+class AssignmentPermissionHolderOut(Schema):
+    """지금 과제 개최 자격을 가진 Sponsor 한 명 (#206, ADR-0029)."""
+
+    sponsor_profile_id: int
+    user_id: int
+    username: str
+    display_name: str
+    can_open_assignments: bool
+
+
+class AssignmentPermissionGrantIn(Schema):
+    # 사용자명으로 대상을 찾는다 — SponsorProfile은 지연 생성이라 아직 존재하지
+    # 않을 수 있고(accounts.assignment_permission_services.grant_assignment_permission
+    # 참고), user_id보다 운영자가 지원 대화에서 실제로 들고 오는 값에 더 가깝다.
+    username: str
+    reason: str
+
+
+class AssignmentPermissionRevokeIn(Schema):
+    reason: str
+
+
+class AssignmentPermissionChangeOut(Schema):
+    """`AssignmentPermissionChange` 한 건 — 누가·언제·무엇을·왜.
+
+    `sponsor_profile_id`만이 아니라 `username`도 함께 준다 — 회수된 Sponsor는
+    자격 보유자 목록(`GET /operator/assignment-permissions`)에서 빠지므로,
+    `contests.DeliverableTypeChangeOut`처럼 별도 목록과 조인하지 않고 이 행
+    하나로 화면이 "누구의 이력인가"에 답할 수 있어야 한다.
+    """
+
+    id: int
+    sponsor_profile_id: int
+    username: str
+    operator_username: str
+    action: str
+    reason: str
+    before: dict
+    after: dict
+    changed_at: datetime
