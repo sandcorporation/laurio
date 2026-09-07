@@ -5,12 +5,25 @@
 // 핵심 인수조건: **Evidence가 비어 있는 필수 항목은 시각적으로 구분되고, 그대로
 // 내면 미달로 채점된다는 것이 그 자리에 표시된다**(ADR-0014) — 강제로 막지는
 // 않는다. 그 신호를 이 컴포넌트 하나가 책임진다.
-import { EVIDENCE_KINDS, type EvidenceIn, type RequirementOut } from "@/lib/submissions/types";
+//
+// 자료가 여럿이 된 뒤(#190, ADR-0027)로는 "데모 내 경로" 같은 근거가 어느
+// 자료를 가리키는지도 골라야 한다(`EvidenceIn.asset_id`, #192) — 그러지
+// 않으면 데모가 둘일 때 AI 도 사람도 어느 것의 경로인지 알 수 없다. 이 화면이
+// 고를 수 있게 해 주는 목록은 **이미 저장된** 자료뿐이다(`assets` prop) — 이
+// 폼에서 방금 추가한 자료는 저장 전까지 id 가 없어 가리킬 대상 자체가 없다.
+import { ASSET_KIND_LABELS, EVIDENCE_KINDS, type EvidenceIn, type RequirementOut } from "@/lib/submissions/types";
 
 export interface RequirementFieldState {
   isMet: boolean;
   note: string;
   evidence: EvidenceIn[];
+}
+
+export interface RequirementFieldAssetOption {
+  id: number;
+  kind: string;
+  label: string;
+  value: string;
 }
 
 export interface RequirementFieldProps {
@@ -19,6 +32,8 @@ export interface RequirementFieldProps {
   onChange: (next: RequirementFieldState) => void;
   disabled: boolean;
   testId: string;
+  /** 근거가 가리킬 수 있는, 이미 저장된 자료 목록. */
+  assets: RequirementFieldAssetOption[];
 }
 
 export function RequirementField({
@@ -27,13 +42,17 @@ export function RequirementField({
   onChange,
   disabled,
   testId,
+  assets,
 }: RequirementFieldProps) {
   const isRequired = requirement.grade === "required";
   const isUnlinked = state.evidence.length === 0;
   const showUnmetWarning = isRequired && isUnlinked;
 
   function addEvidence() {
-    onChange({ ...state, evidence: [...state.evidence, { kind: "screenshot", value: "" }] });
+    onChange({
+      ...state,
+      evidence: [...state.evidence, { kind: "screenshot", value: "", asset_id: null }],
+    });
   }
 
   function updateEvidence(index: number, patch: Partial<EvidenceIn>) {
@@ -93,7 +112,7 @@ export function RequirementField({
 
       <div className="flex flex-col gap-2">
         {state.evidence.map((item, index) => (
-          <div key={index} className="flex items-center gap-2">
+          <div key={index} className="flex flex-wrap items-center gap-2">
             <select
               value={item.kind}
               disabled={disabled}
@@ -104,6 +123,24 @@ export function RequirementField({
               {EVIDENCE_KINDS.map((kind) => (
                 <option key={kind.value} value={kind.value}>
                   {kind.label}
+                </option>
+              ))}
+            </select>
+            <select
+              value={item.asset_id != null ? String(item.asset_id) : ""}
+              disabled={disabled}
+              onChange={(event) =>
+                updateEvidence(index, {
+                  asset_id: event.target.value === "" ? null : Number(event.target.value),
+                })
+              }
+              data-testid={`${testId}-evidence-${index}-asset`}
+              className="rounded-sm border border-rule bg-paper px-2 py-1 text-sm"
+            >
+              <option value="">어느 자료의 근거인지 (선택 안 함)</option>
+              {assets.map((asset) => (
+                <option key={asset.id} value={asset.id}>
+                  {ASSET_KIND_LABELS[asset.kind] ?? asset.kind}: {asset.label || asset.value}
                 </option>
               ))}
             </select>

@@ -142,6 +142,80 @@ test.describe("@exclusive 소스 필수 · Evidence 연결 · 완성도", () => 
     await expect(page.getByTestId("verification-required")).toHaveCount(0, { timeout: 10_000 });
   });
 
+  // #192 — 제출 폼이 종류당 자료 하나만 편집하던 임시 장치(editedAssetIds·
+  // untouchedAssets, #190)를 진짜 다중 편집 UI로 갈아끼웠다. 백엔드
+  // pytest(`test_editing_keeps_assets_sent_with_their_id_and_drops_the_omitted_ones`)
+  // 는 "id를 받으면 병합한다"만 고정한다 — **폼이 실제로 그 id를 실어
+  // 보내는가**는 실제 브라우저·실제 저장·실제 재조회를 거쳐야만 보이는
+  // 사실이라 여기서만 잡을 수 있다. 새 describe를 만들지 않는다(#192 코드
+  // 리뷰 지적) — 이 사실도 위 화면의 유저스토리 한 조각이다.
+  test("소스 두 개·저장소·데모 URL을 추가해 저장하면, 다시 열어도 그대로다", async ({ page }) => {
+    const runId = `multi-asset-${Date.now()}`;
+    const contestId = await createContestAsSponsor(page, runId, {
+      deadlineAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      requirements: [],
+      publish: true,
+    });
+
+    const developerSeed = `developer-${runId}`;
+    await login(page, developerSeed);
+    await verify(page, developerSeed);
+
+    await page.goto(`/console/contests/${contestId}/submit`);
+    await expect(page.getByTestId("submit-contest-title")).toBeVisible({ timeout: 10_000 });
+
+    // 소스 두 번째 행을 추가하고 둘 다 업로드한다 — "종류당 하나"였던 옛
+    // 제약이 실제로 풀렸는지가 이 스펙의 핵심이다.
+    await page.getByTestId("source-asset-0-upload-input").setInputFiles({
+      name: "source-a.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from(`source A — ${runId}`, "utf-8"),
+    });
+    await expect(page.getByTestId("source-asset-0-value")).toBeVisible({ timeout: 10_000 });
+
+    await page.getByTestId("source-asset-add").click();
+    await page.getByTestId("source-asset-1-upload-input").setInputFiles({
+      name: "source-b.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from(`source B — ${runId}`, "utf-8"),
+    });
+    await expect(page.getByTestId("source-asset-1-value")).toBeVisible({ timeout: 10_000 });
+
+    // 저장소 하나(ADR-0027) — 공개 여부는 이 시점에 늘 "확인 중"이다(#193의
+    // 스캔이 채우기 전까지).
+    await page.getByTestId("repository-asset-add").click();
+    await page.getByTestId("repository-asset-0-label").fill("웹 저장소");
+    await page.getByTestId("repository-asset-0-value").fill("https://github.com/laurio/e2e-repo");
+    await expect(page.getByTestId("repository-checking-badge")).toBeVisible();
+
+    // 데모 URL 하나 — 라벨·테스트 계정까지 함께 저장돼야 한다.
+    await page.getByTestId("demo-url-asset-add").click();
+    await page.getByTestId("demo-url-asset-0-label").fill("모바일 데모");
+    await page.getByTestId("demo-url-asset-0-value").fill("https://demo.laurio.test/e2e");
+    await page.getByTestId("demo-url-asset-0-test-account").fill("e2e/e2e1234");
+
+    await page.getByTestId("submit-button").click();
+    await expect(page.getByTestId("submit-success")).toBeVisible({ timeout: 10_000 });
+
+    // 다시 연다 — 새로 GET 한 화면이 곧 서버가 실제로 저장한 것이다. id가
+    // 실려가지 않았다면(#190 이전 장치가 하던 실수) 여기서 자료가 통째로
+    // 사라지거나 다른 종류의 자료를 밀어냈을 것이다.
+    await page.reload();
+    await expect(page.getByTestId("submit-contest-title")).toBeVisible({ timeout: 10_000 });
+
+    await expect(page.getByTestId("source-asset-0-value")).toBeVisible();
+    await expect(page.getByTestId("source-asset-1-value")).toBeVisible();
+    await expect(page.getByTestId("source-asset-2-value")).toHaveCount(0);
+    await expect(page.getByTestId("repository-asset-0-label")).toHaveValue("웹 저장소");
+    await expect(page.getByTestId("repository-asset-0-value")).toHaveValue(
+      "https://github.com/laurio/e2e-repo",
+    );
+    await expect(page.getByTestId("demo-url-asset-0-label")).toHaveValue("모바일 데모");
+    await expect(page.getByTestId("demo-url-asset-0-value")).toHaveValue(
+      "https://demo.laurio.test/e2e",
+    );
+    await expect(page.getByTestId("demo-url-asset-0-test-account")).toHaveValue("e2e/e2e1234");
+  });
 });
 
 // #164 — 공개 상세(`/contests/{id}`)에 제출로 갈 링크가 아예 없던 버그의 회귀

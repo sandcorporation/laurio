@@ -8,9 +8,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 
-import { UploadField } from "@/components/upload/upload-field";
 import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
+import { ASSET_KIND_LABELS } from "@/lib/submissions/types";
 import type {
   ContestDetail,
   SubmissionIn,
@@ -25,7 +25,61 @@ import {
   requestPortOneIdentityVerification,
 } from "@/lib/verification/portone";
 
+import { AssetKindSection, createEmptyAsset, type EditableAsset } from "./asset-kind-section";
 import { RequirementField, type RequirementFieldState } from "./requirement-field";
+
+// #190 이후 제출작은 자료 목록을 담는다(ADR-0027) — 종류는 넷: 전체 소스코드
+// (필수, 최소 1개), 시연 영상·데모 URL(권장), GitHub 저장소(권장, 공개
+// 저장소는 채점에 반영된다). `EditableAsset[]`을 종류별로 따로 두는 이유는
+// 종류마다 값 편집 UI(업로드 vs URL 텍스트)와 허용되는 부가 필드(테스트
+// 계정은 demo_url뿐)가 달라서다.
+const KNOWN_ASSET_KINDS = new Set(["source", "demo_video", "demo_url", "repository"]);
+
+function assetsOfKind(assets: SubmissionOut["assets"], kind: string): EditableAsset[] {
+  return assets
+    .filter((asset) => asset.kind === kind)
+    .map((asset) => ({
+      key: `existing-${asset.id}`,
+      id: asset.id,
+      value: asset.value,
+      label: asset.label,
+      testAccount: asset.test_account,
+      isPublic: asset.is_public,
+    }));
+}
+
+// 이 폼이 모르는 종류의 자료를 위한 통과 버킷 — #190의 `untouchedAssets`가
+// 하던 일과 같다. 오늘 `KNOWN_ASSET_KINDS`는 `SubmissionAsset.Kind` 전부라
+// 항상 빈 배열이지만, 없애면 서버에 다섯 번째 종류가 생기고 이 폼이 함께
+// 못 고쳐졌을 때 `_merge_assets`가 그 자료를 "페이로드에 없음"으로 보고
+// 지운다 — 그 자료를 가리키던 Evidence까지 CASCADE로 함께 사라진다. 손대지
+// 않고 그대로 되돌려 보내면 그 사고를 막는다.
+function unknownKindAssetsOf(assets: SubmissionOut["assets"]): SubmissionOut["assets"] {
+  return assets.filter((asset) => !KNOWN_ASSET_KINDS.has(asset.kind));
+}
+
+// 종류 하나의 편집 행을 저장 페이로드로 접는다. 값이 빈 행(추가만 하고
+// 채우지 않은 행)은 조용히 뺀다 — 서버는 빈 값을 422로 거절하는데, 그냥
+// 빈 채로 둔 행까지 실패로 만들 이유가 없다. `order`는 화면에 보이는
+// 순서(위/아래로 버튼이 바꾼 순서) 그대로 인덱스로 다시 매긴다.
+//
+// **모듈 스코프에 둔다** — 컴포넌트 상태에 기대지 않는 순수 함수라, 저장
+// 시점(handleSubmit)과 완성도 계산(completion useMemo) 둘 다 이 함수를
+// 불러써야 "실제로 보낼 자산"과 "화면이 채워졌다고 말하는 것"이 갈리지
+// 않는다 — 갈리면 참가자가 테스트 계정만 채우고 데모 URL을 비웠을 때
+// 화면은 "채워졌다"고 말하지만 저장은 그 행을 통째로 버리는 사고가 난다.
+function rowsToAssetsIn(rows: EditableAsset[], kind: string): SubmissionIn["assets"] {
+  return rows
+    .filter((row) => row.value.trim() !== "")
+    .map((row, index) => ({
+      ...(row.id != null ? { id: row.id } : {}),
+      kind,
+      value: row.value.trim(),
+      label: row.label.trim(),
+      test_account: kind === "demo_url" ? row.testAccount.trim() : "",
+      order: index,
+    }));
+}
 
 type LoadState =
   | { status: "loading" }
@@ -61,19 +115,14 @@ export default function SubmitPage() {
   const [reloadTick, setReloadTick] = useState(0);
   const [now, setNow] = useState(() => Date.now());
 
-  const [sourceObjectKey, setSourceObjectKey] = useState("");
-  const [demoVideoObjectKey, setDemoVideoObjectKey] = useState("");
-  const [demoUrl, setDemoUrl] = useState("");
-  const [testAccount, setTestAccount] = useState("");
-  // 이 폼이 편집 중인 자료의 id (#190) — 저장할 때 되돌려 보내야 기존 행이 유지된다.
-  const [editedAssetIds, setEditedAssetIds] = useState<{
-    source?: number;
-    demo_video?: number;
-    demo_url?: number;
-  }>({});
-  // 이 폼이 다루지 않는 자료(두 번째 소스, 저장소 등) — 손대지 않고 그대로
-  // 되돌려 보낸다. 여러 개를 편집하는 UI 는 #192 다.
-  const [untouchedAssets, setUntouchedAssets] = useState<SubmissionOut["assets"]>([]);
+  const [sourceAssets, setSourceAssets] = useState<EditableAsset[]>([createEmptyAsset()]);
+  const [demoVideoAssets, setDemoVideoAssets] = useState<EditableAsset[]>([]);
+  const [demoUrlAssets, setDemoUrlAssets] = useState<EditableAsset[]>([]);
+  const [repositoryAssets, setRepositoryAssets] = useState<EditableAsset[]>([]);
+  // 이 폼이 편집하지 않는(모르는) 종류의 자료 — 통과 버킷. 오늘은 항상
+  // 빈 배열이지만 없애면 다섯 번째 종류가 생겼을 때 조용히 삭제된다(위
+  // `unknownKindAssetsOf` 주석).
+  const [unknownKindAssets, setUnknownKindAssets] = useState<SubmissionOut["assets"]>([]);
   const [requirementStates, setRequirementStates] = useState<
     Record<number, RequirementFieldState>
   >({});
@@ -81,6 +130,23 @@ export default function SubmitPage() {
   const [verifying, setVerifying] = useState(false);
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const portOneConfig = useMemo(() => getPortOneBrowserConfig(), []);
+
+  // 로드 직후와 저장 성공 직후 둘 다 이 함수를 부른다 — **서버 응답이 이
+  // 화면의 자료 id에 대한 유일한 출처다.** 저장 직후에도 다시 부르지 않으면
+  // 방금 새로 만든 자료의 id를 이 화면이 계속 모른 채로 남아, 다음 저장에서
+  // evidence의 asset_id 생존 판정(handleSubmit의 survivingAssetIds)이 "id가
+  // 없으니 이 자료는 사라진다"로 잘못 판단해 방금 막 연결한 근거를 조용히
+  // 풀어버린다 — (kind, value) 정체성 병합 덕에 실제로는 서버에 그대로
+  // 남아있는데도 그렇다.
+  function applySubmissionAssets(submission: SubmissionOut | null) {
+    const assets = submission?.assets ?? [];
+    const nextSourceAssets = assetsOfKind(assets, "source");
+    setSourceAssets(nextSourceAssets.length > 0 ? nextSourceAssets : [createEmptyAsset()]);
+    setDemoVideoAssets(assetsOfKind(assets, "demo_video"));
+    setDemoUrlAssets(assetsOfKind(assets, "demo_url"));
+    setRepositoryAssets(assetsOfKind(assets, "repository"));
+    setUnknownKindAssets(unknownKindAssetsOf(assets));
+  }
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -122,25 +188,7 @@ export default function SubmitPage() {
 
       if (cancelled) return;
 
-      // #190 이후 제출작은 자료 **목록**을 담는다. 이 폼은 아직 종류당 하나만
-      // 편집한다(여러 개를 넣고 빼는 UI 는 #192 다) — 그래서 각 종류의 첫 자료를
-      // 칸에 채우고, **나머지는 건드리지 않은 채 그대로 되돌려 보낸다**
-      // (`untouchedAssets`). 그러지 않으면 API 로 자료를 여럿 낸 참가자가 이
-      // 화면에서 한 번 저장하는 순간 나머지를 통째로 잃는다.
-      const assets = submission?.assets ?? [];
-      const firstOfKind = (kind: string) => assets.find((a) => a.kind === kind);
-      const source = firstOfKind("source");
-      const video = firstOfKind("demo_video");
-      const demo = firstOfKind("demo_url");
-
-      setSourceObjectKey(source?.value ?? "");
-      setDemoVideoObjectKey(video?.value ?? "");
-      setDemoUrl(demo?.value ?? "");
-      setTestAccount(demo?.test_account ?? "");
-      setEditedAssetIds({ source: source?.id, demo_video: video?.id, demo_url: demo?.id });
-      setUntouchedAssets(
-        assets.filter((a) => a.id !== source?.id && a.id !== video?.id && a.id !== demo?.id),
-      );
+      applySubmissionAssets(submission);
 
       const initialStates: Record<number, RequirementFieldState> = {};
       for (const requirement of contest.data.requirements) {
@@ -150,7 +198,12 @@ export default function SubmitPage() {
         initialStates[requirement.id] = {
           isMet: existing?.is_met ?? false,
           note: existing?.note ?? "",
-          evidence: existing?.evidence.map((e) => ({ kind: e.kind, value: e.value })) ?? [],
+          evidence:
+            existing?.evidence.map((e) => ({
+              kind: e.kind,
+              value: e.value,
+              asset_id: e.asset_id ?? null,
+            })) ?? [],
         };
       }
       setRequirementStates(initialStates);
@@ -176,15 +229,20 @@ export default function SubmitPage() {
       (r) => (requirementStates[r.id]?.evidence.length ?? 0) > 0,
     ).length;
     const checklistRatio = total > 0 ? linked / total : 1;
+    // `rowsToAssetsIn`으로 계산한다 — 값이 빈 행(예: 데모 URL은 비우고
+    // 테스트 계정만 채운 행)은 저장 시 통째로 버려지므로, 완성도가 "채워짐"
+    // 이라 말하면서 저장은 그 행을 버리는 모순을 막는다.
+    const demoVideoToSave = rowsToAssetsIn(demoVideoAssets, "demo_video");
+    const demoUrlToSave = rowsToAssetsIn(demoUrlAssets, "demo_url");
     const optionalSignals = [
-      Boolean(demoVideoObjectKey),
-      Boolean(demoUrl.trim()),
-      Boolean(testAccount.trim()),
+      demoVideoToSave.length > 0,
+      demoUrlToSave.length > 0,
+      demoUrlToSave.some((a) => a.test_account.trim() !== ""),
     ];
     const optionalRatio = optionalSignals.filter(Boolean).length / optionalSignals.length;
     const percent = Math.round((checklistRatio * 0.7 + optionalRatio * 0.3) * 100);
     return { percent, linked, total, optionalFilled: optionalSignals.filter(Boolean).length };
-  }, [requirements, requirementStates, demoVideoObjectKey, demoUrl, testAccount]);
+  }, [requirements, requirementStates, demoVideoAssets, demoUrlAssets]);
 
   async function handleVerifyDev() {
     if (session.status !== "authenticated") return;
@@ -289,65 +347,66 @@ export default function SubmitPage() {
 
   async function handleSubmit() {
     if (load.status !== "ready") return;
-    if (!sourceObjectKey.trim()) {
+    const hasSource = sourceAssets.some((row) => row.value.trim() !== "");
+    if (!hasSource) {
       setSaveState({ status: "error", message: "소스코드를 먼저 업로드해주세요." });
       return;
     }
 
     setSaveState({ status: "saving" });
 
-    // 이 폼이 편집하는 세 자료 + 이 폼이 모르는 나머지(그대로 되돌려 보낸다).
-    // id 를 함께 실어야 기존 행이 유지된다 — 빠뜨리면 같은 파일이 매번 새 행이
-    // 되어 「언제 올렸는가」가 전부 마지막 수정 시각으로 뭉갠다.
     const assets: SubmissionIn["assets"] = [
-      {
-        kind: "source",
-        value: sourceObjectKey,
-        label: "",
-        test_account: "",
-        order: 0,
-        ...(editedAssetIds.source ? { id: editedAssetIds.source } : {}),
-      },
-    ];
-    if (demoVideoObjectKey) {
-      assets.push({
-        kind: "demo_video",
-        value: demoVideoObjectKey,
-        label: "",
-        test_account: "",
-        order: 0,
-        ...(editedAssetIds.demo_video ? { id: editedAssetIds.demo_video } : {}),
-      });
-    }
-    if (demoUrl) {
-      assets.push({
-        kind: "demo_url",
-        value: demoUrl,
-        label: "",
-        test_account: testAccount,
-        order: 0,
-        ...(editedAssetIds.demo_url ? { id: editedAssetIds.demo_url } : {}),
-      });
-    }
-    for (const asset of untouchedAssets) {
-      assets.push({
+      ...rowsToAssetsIn(sourceAssets, "source"),
+      ...rowsToAssetsIn(demoVideoAssets, "demo_video"),
+      ...rowsToAssetsIn(demoUrlAssets, "demo_url"),
+      ...rowsToAssetsIn(repositoryAssets, "repository"),
+      // 이 폼이 모르는 종류의 자료도 그대로 되돌려 보낸다 — 손대지 않고
+      // 지나가는 것 자체가 이 배열이 하는 일의 전부다.
+      ...unknownKindAssets.map((asset) => ({
         id: asset.id,
         kind: asset.kind,
         value: asset.value,
         label: asset.label,
         test_account: asset.test_account,
         order: asset.order,
-      });
+      })),
+    ];
+
+    // Evidence가 가리키던 자료가 이번 저장에서 사라지면(삭제됐거나, 값이
+    // 바뀌어 실제로는 다른 자료가 됐으면 — `_merge_assets`의 규칙이다) 그
+    // asset_id를 그대로 보내면 백엔드가 422를 낸다("이 Submission에 속하지
+    // 않은 자료를 근거로 지정했습니다"). 살아남는 id만 계산해 그 밖은 미리
+    // 연결을 풀어 보낸다 — 근거 자체는 사라지지 않는다(연결 안 된 근거도
+    // 여전히 유효하다).
+    //
+    // 판정은 **`_merge_assets`와 정확히 같은 규칙**이어야 한다 — id가 아니라
+    // `(kind, value)` 정체성으로 살아남는지를 본다. id로 판정하면 "기존 행을
+    // 지우고 같은 값으로 새 행을 추가"했을 때(새 행은 id가 없다) 실제로는
+    // 서버가 identity 매칭으로 원래 id를 그대로 살리는데도 이 계산은
+    // "사라졌다"고 오판해 멀쩡히 남을 근거 연결을 조용히 끊는다.
+    const currentIdentities = new Set(assets.map((a) => `${a.kind} ${a.value}`));
+    const survivingAssetIds = new Set<number>();
+    for (const original of load.submission?.assets ?? []) {
+      if (currentIdentities.has(`${original.kind} ${original.value}`)) {
+        survivingAssetIds.add(original.id);
+      }
     }
 
     const payload: SubmissionIn = {
       assets,
-      requirement_responses: load.contest.requirements.map((r) => ({
-        requirement_id: r.id,
-        is_met: requirementStates[r.id]?.isMet ?? false,
-        note: requirementStates[r.id]?.note ?? "",
-        evidence: requirementStates[r.id]?.evidence ?? [],
-      })),
+      requirement_responses: load.contest.requirements.map((r) => {
+        const state = requirementStates[r.id];
+        return {
+          requirement_id: r.id,
+          is_met: state?.isMet ?? false,
+          note: state?.note ?? "",
+          evidence: (state?.evidence ?? []).map((e) => ({
+            kind: e.kind,
+            value: e.value,
+            asset_id: e.asset_id != null && survivingAssetIds.has(e.asset_id) ? e.asset_id : null,
+          })),
+        };
+      }),
     };
 
     const isUpdate = load.submission !== null;
@@ -368,6 +427,28 @@ export default function SubmitPage() {
 
     const submission = saved.data;
     setLoad((prev) => (prev.status === "ready" ? { ...prev, submission } : prev));
+    applySubmissionAssets(submission);
+
+    // 저장 응답이 자산 id의 새 기준이다. 값이 바뀌어 옛 id가 사라진 자산을
+    // 가리키던 근거가 화면 상태(`requirementStates`)에는 그 옛 asset_id를
+    // 그대로 들고 남는다 — 드롭다운 옵션 목록에는 이제 그 id가 없으니
+    // "선택 안 함"처럼 보이면서 내부값만 옛 id인 상태가 된다. 다음 저장에서
+    // survivingAssetIds가 결국 null로 정리하긴 하지만, 그 사이 화면이
+    // 잠깐 거짓말하지 않도록 여기서 바로 정리한다.
+    const validAssetIds = new Set(submission.assets.map((a) => a.id));
+    setRequirementStates((prev) => {
+      const next: Record<number, RequirementFieldState> = {};
+      for (const [key, state] of Object.entries(prev)) {
+        next[Number(key)] = {
+          ...state,
+          evidence: state.evidence.map((e) =>
+            e.asset_id != null && !validAssetIds.has(e.asset_id) ? { ...e, asset_id: null } : e,
+          ),
+        };
+      }
+      return next;
+    });
+
     setSaveState({ status: "done" });
   }
 
@@ -477,66 +558,66 @@ export default function SubmitPage() {
         </div>
       </section>
 
-      <section className="flex flex-col gap-2">
-        <h2 className="text-lg font-semibold">소스코드 (필수)</h2>
-        <p className="text-sm text-ink" data-testid="source-privacy-notice">
-          제출한 소스코드는 선정(Award) 전까지 Sponsor에게 공개되지 않습니다. AI 채점과
-          플랫폼만 열람합니다.
-        </p>
-        {sourceTargetRef && (
-          <UploadField
-            targetRef={sourceTargetRef}
-            label="전체 소스코드 업로드"
-            testId="source-upload"
-            onUploaded={setSourceObjectKey}
-          />
-        )}
-        {sourceObjectKey && (
-          <p className="font-mono text-sm text-verified" data-testid="source-uploaded-key">
-            업로드됨: {sourceObjectKey}
-          </p>
-        )}
-        {!sourceObjectKey && (
-          <p className="text-sm text-attention" data-testid="source-missing-warning">
-            소스코드가 아직 없습니다 — 없으면 제출이 거부됩니다.
-          </p>
-        )}
-      </section>
+      <p className="text-sm text-ink" data-testid="source-privacy-notice">
+        제출한 소스코드와 GitHub 저장소는 선정(Award) 전까지 Sponsor에게 공개되지 않습니다.
+        AI 채점과 플랫폼만 열람합니다.
+      </p>
 
-      <section className="flex flex-col gap-2">
-        <h2 className="text-lg font-semibold">권장 항목 (비워도 제출됩니다)</h2>
-        {demoVideoTargetRef && (
-          <UploadField
-            targetRef={demoVideoTargetRef}
-            label="시연 영상"
-            testId="demo-video-upload"
-            onUploaded={setDemoVideoObjectKey}
-          />
-        )}
-        <label className="flex flex-col gap-1 text-sm">
-          데모 URL
-          <input
-            className="rounded-sm border border-rule bg-paper px-2 py-1"
-            value={demoUrl}
-            disabled={isPastDeadline}
-            onChange={(event) => setDemoUrl(event.target.value)}
-            data-testid="demo-url-input"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          테스트 계정
-          <input
-            className="rounded-sm border border-rule bg-paper px-2 py-1"
-            value={testAccount}
-            disabled={isPastDeadline}
-            onChange={(event) => setTestAccount(event.target.value)}
-            data-testid="test-account-input"
-          />
-        </label>
-      </section>
+      <AssetKindSection
+        kind="source"
+        title={ASSET_KIND_LABELS.source}
+        required
+        addLabel="+ 소스코드 추가"
+        testIdPrefix="source-asset"
+        rows={sourceAssets}
+        onChange={setSourceAssets}
+        disabled={isPastDeadline}
+        targetRefPrefix={sourceTargetRef ?? undefined}
+      />
+
+      <AssetKindSection
+        kind="repository"
+        title={ASSET_KIND_LABELS.repository}
+        helperText={
+          <p className="text-sm text-ink/70" data-testid="repository-helper">
+            공개 저장소는 마감 전 자동으로 확인되어 채점에 반영됩니다(비워도 제출됩니다).
+            저장소는 소스 제출을 대체하지 않습니다 — 소스코드는 그래도 필수입니다.
+          </p>
+        }
+        addLabel="+ 저장소 추가"
+        testIdPrefix="repository-asset"
+        rows={repositoryAssets}
+        onChange={setRepositoryAssets}
+        disabled={isPastDeadline}
+      />
+
+      <AssetKindSection
+        kind="demo_video"
+        title={ASSET_KIND_LABELS.demo_video}
+        addLabel="+ 시연 영상 추가"
+        testIdPrefix="demo-video-asset"
+        rows={demoVideoAssets}
+        onChange={setDemoVideoAssets}
+        disabled={isPastDeadline}
+        targetRefPrefix={demoVideoTargetRef ?? undefined}
+      />
+
+      <AssetKindSection
+        kind="demo_url"
+        title={ASSET_KIND_LABELS.demo_url}
+        addLabel="+ 데모 URL 추가"
+        testIdPrefix="demo-url-asset"
+        rows={demoUrlAssets}
+        onChange={setDemoUrlAssets}
+        disabled={isPastDeadline}
+      />
 
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold">요구사항 체크리스트</h2>
+        <p className="text-xs text-ink/60" data-testid="evidence-asset-picker-notice">
+          근거가 가리킬 수 있는 자료 목록은 마지막으로 저장된 자료 기준입니다 — 방금
+          추가한 자료는 한 번 저장한 뒤에 근거로 연결할 수 있습니다.
+        </p>
         {contest.requirements.map((requirement) => (
           <RequirementField
             key={requirement.id}
@@ -549,6 +630,7 @@ export default function SubmitPage() {
             }
             disabled={isPastDeadline}
             testId={`requirement-${requirement.id}`}
+            assets={submission?.assets ?? []}
           />
         ))}
       </section>
