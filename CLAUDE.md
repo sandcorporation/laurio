@@ -59,17 +59,19 @@ DB·Redis·MinIO·두 앱이 통째로 갈리므로 체인 둘이 서로의 데�
 
 **staging 은 떠 있다** — `https://laurio.honeycombpizza.link`(공개 앱),
 `operator.laurio.honeycombpizza.link`(운영자 앱), `storage.honeycombpizza.link`(브라우저가
-직접 PUT 하는 MinIO). 어댑터 6종 전부 실물 구현이 있다: `PortOneV2VerificationAdapter`(#85) ·
+직접 PUT 하는 MinIO). 어댑터가 전부 실물 구현이다: `PortOneV2VerificationAdapter`(#85) ·
 `TossPGAdapter`(#87) · `TossPayoutAdapter`·`TossSellerAdapter`(#57) ·
-`OpenAIScoringAdapter`(#88) · `OpenAIRequirementChatAdapter`. 각 dotted path 는
-`docker/staging.env.example` 에 그대로 적혀 있다.
+`OpenAIScoringAdapter`(#88) · `OpenAIRequirementChatAdapter` ·
+`GitHubAPIAdapter`(#193) · 알림 3채널(`AligoAlimtalkAdapter`·`AligoSmsAdapter`·
+`AligoLmsAdapter`). 각 dotted path 는 `docker/staging.env.example` 에 그대로 적혀 있다.
 
 **그래도 가드는 그대로다.** `core.adapters.check_adapter_mode`(`django.core.checks` 로
 등록되어 `django.setup()` 이후 `manage.py migrate`/`check`/`runserver` 부팅 파이프라인에서
-평가된다, #83)가 여섯 값(`VERIFICATION_ADAPTER_MODE`·`PAYMENT_ADAPTER_MODE`·
+평가된다, #83)가 **열 값**(`VERIFICATION_ADAPTER_MODE`·`PAYMENT_ADAPTER_MODE`·
 `PAYOUT_ADAPTER_MODE`·`SELLER_ADAPTER_MODE`·`LLM_ADAPTER_MODE`·
-`LLM_REQUIREMENT_CHAT_ADAPTER_MODE`)이 배포 환경에서 fake 이거나 임포트되지 않으면 부팅
-자체를 거부한다 — 컨테이너가 뜬 채로 첫 요청에서야 죽는 것보다 정직하게 못 뜨는 편이다.
+`LLM_REQUIREMENT_CHAT_ADAPTER_MODE`·`GITHUB_ADAPTER_MODE`(#193)·
+`NOTIFICATION_ALIMTALK_ADAPTER`·`NOTIFICATION_SMS_ADAPTER`·`NOTIFICATION_LMS_ADAPTER`)이
+배포 환경에서 fake 이거나 임포트되지 않으면 부팅 자체를 거부한다 — 컨테이너가 뜬 채로 첫 요청에서야 죽는 것보다 정직하게 못 뜨는 편이다.
 
 `config/settings.py`의 `IS_DEPLOYED_ENVIRONMENT`(staging+production)가 fake 어댑터
 바인딩을 부팅 시점에 거부하고, `IS_PRODUCTION_DEPLOYMENT`(production만)가 추가로
@@ -246,7 +248,7 @@ cd backend && LAURIO_DB_PORT=55432 uv run python manage.py prune_e2e_junk
 `global-setup.ts` 의 순서가 그래서 그 순서다.
 
 **스위트는 기본으로 병렬 실행된다**(#104). `pyproject.toml` 의 `addopts` 가 `-n auto` 를
-준다 — 실측(이 머신, 1192건) `-n 4` 84초 → `-n auto` 57초. 직렬로 보려면 `-n 0`.
+준다 — 실측(이 머신, 당시 1192건 — 지금 1312건) `-n 4` 84초 → `-n auto` 57초. 직렬로 보려면 `-n 0`.
 
 **테스트는 서로를 밟지 않는다 — 손으로 갈라 줄 것이 없다.**
 
@@ -417,7 +419,7 @@ pnpm --dir frontend exec playwright test --project=public e2e/payout.spec.ts -g 
 **CI 가 돌리는 것 (참고용 수치).**
 
 ```bash
-pnpm --dir frontend test            # 전체 (약 1.8분, 102건)
+pnpm --dir frontend test            # 전체 (102건이던 시절 약 1.8분 — 지금 112건)
 pnpm --dir frontend test:public     # 공개 앱만 (약 1.4분, 74건)
 pnpm --dir frontend test:operator   # 운영자 앱만 (약 25초, 28건)
 ```
@@ -576,7 +578,7 @@ docker 소켓을 물어 컨테이너를 바깥에 띄운다(DooD).
 밟지 않는다」) 필요가 없어졌다. postgres 는 `55532` 로 노출한다 — 러너 호스트의 5432 는
 이미 점유돼 있다.
 
-실측(9잡 전부 초록, 2026-09-05): 전체 **6분**. e2e 운영자 4분 · 공개 3분 ·
+실측(당시 9잡 전부 초록, 2026-09-05): 전체 **6분**. 지금은 `adr-status` 가 늘어 10잡이다. e2e 운영자 4분 · 공개 3분 ·
 `celery-broker` 2분 · `pytest` 1분 · 나머지 다섯은 각 1분 미만.
 
 ## Agent skills
