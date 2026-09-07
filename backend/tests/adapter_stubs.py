@@ -80,6 +80,16 @@ class StubLLMScoringAdapter:
         raise NotImplementedError("배포 가드 검증 전용 stub — 실제로 호출되면 안 된다.")
 
 
+class StubGitHubAdapter:
+    """`repositories.adapters.GitHubAdapter` 계약을 구조적으로 만족한다(#193)."""
+
+    def check_public(self, url: str):
+        raise NotImplementedError("배포 가드 검증 전용 stub — 실제로 호출되면 안 된다.")
+
+    def clone(self, url: str):
+        raise NotImplementedError("배포 가드 검증 전용 stub — 실제로 호출되면 안 된다.")
+
+
 class StubRequirementChatAdapter:
     """`contests.requirement_chat.RequirementChatAdapter` 계약을 구조적으로 만족한다."""
 

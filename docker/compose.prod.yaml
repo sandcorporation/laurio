@@ -31,6 +31,7 @@
 #               미구현 — #88)
 #   AI grill  : FakeRequirementChatAdapter -> contests.requirement_chat.
 #               OpenAIRequirementChatAdapter(#55)
+#   GitHub 저장소 : FakeGitHubAdapter    -> repositories.adapters.GitHubAPIAdapter(#193)
 #   알림 채널  : Fake*Adapter           -> 실제 카카오 알림톡/SMS·LMS 벤더(dotted path로
 #               지정, 아직 미구현 — .env.prod에서 반드시 채워야 하는 이유가 이것이다.
 #               구현되지 않은 클래스 이름을 여기 하드코딩하지 않는다)
@@ -39,7 +40,8 @@
 # staging과 동일한 가드지만, production은 추가로 IS_PRODUCTION_DEPLOYMENT 하드닝
 # (HSTS·SSL 리다이렉트·secure 쿠키·강한 SECRET_KEY, `manage.py check --deploy`가 검증)
 # 도 함께 켜진다. VERIFICATION_ADAPTER_MODE·PAYMENT_ADAPTER_MODE·PAYOUT_ADAPTER_MODE·
-# SELLER_ADAPTER_MODE·LLM_ADAPTER_MODE·LLM_REQUIREMENT_CHAT_ADAPTER_MODE는 그 값이
+# SELLER_ADAPTER_MODE·LLM_ADAPTER_MODE·LLM_REQUIREMENT_CHAT_ADAPTER_MODE·
+# GITHUB_ADAPTER_MODE(#193)는 그 값이
 # "fake"도 아니고 실제로 쓸 수도 없으면(임포트·인스턴스화·계약 충족 중 하나라도
 # 실패하면) 역시 부팅을 거부한다(#83, core.adapters.check_adapter_mode —
 # django.core.checks로 등록되어 django.setup() 이후에만 평가된다). 그래서 실물
@@ -147,6 +149,15 @@ x-backend-env: &backend-env
   # 컷라인이 안정적이다)와 절대 같은 키를 쓰지 않는다. 비우면 기본값 0.7(대화가
   # 매 턴 기계적으로 똑같아지지 않게 한다).
   LLM_REQUIREMENT_CHAT_OPENAI_TEMPERATURE: ${LLM_REQUIREMENT_CHAT_OPENAI_TEMPERATURE:-0.7}
+
+  # --- GitHub 저장소 어댑터 (#193, ADR-0007/0027) ---
+  # 실물 어댑터는 repositories.adapters.GitHubAPIAdapter다 — GITHUB_ADAPTER_MODE를
+  # 그 dotted path로 채운다. 위 값들과 같은 이유로 비워 두면 fake로 조용히 뜨는
+  # 게 아니라 부팅이 거부된다(#83).
+  GITHUB_ADAPTER_MODE: ${GITHUB_ADAPTER_MODE:?실제 GitHub 어댑터의 dotted path를 .env.prod 에 채워라 — repositories.adapters.GitHubAPIAdapter(#193)}
+  # 선택값이다 — 공개 저장소 조회·다운로드는 인증 없이도 되고, 참가자의 GitHub
+  # 자격증명이 아니라 platform 자신의 것이라 없어도 부팅을 막지 않는다.
+  GITHUB_API_TOKEN: ${GITHUB_API_TOKEN:-}
 
   # --- 알림 채널 어댑터 (ADR-0007/0009) ---
   # 코디네이터 리뷰 지적: 존재하지 않는 클래스 이름을 여기 하드코딩하지 않는다 —

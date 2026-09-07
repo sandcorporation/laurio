@@ -118,8 +118,13 @@ class SubmissionAsset(models.Model):
     # `REPOSITORY`가 공개인가 — #193의 스캔이 채운다. **null은 "비공개"가 아니라
     # "아직 확인하지 않음"이다**: 제출·수정 API는 GitHub을 치지 않으므로(마감 직전에
     # 몰리는 제출이 남의 서비스 상태에 인질로 잡히면 안 된다) 제출 직후에는 항상
-    # null이고, 마감 전에 스캔이 값을 채운다. 이 티켓은 컬럼만 만들고 채우지 않는다.
+    # null이고, 마감 전에 스캔이 값을 채운다.
     is_public = models.BooleanField(null=True, blank=True)
+    # `is_public`을 마지막으로 확인한 시각(#193) — 스캔이 "null이거나 오래된
+    # 항목"을 다시 본다(ADR-0027). null이거나 오래됐다는 것만으로는 "한 번도
+    # 안 봤다"와 "봤는데 오래됐다"를 `is_public`(null 하나)만으로 구별할 수
+    # 없어서 따로 둔다.
+    is_public_checked_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

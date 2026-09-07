@@ -96,6 +96,7 @@ def _base_env(*, target: str, secret_key: str) -> dict[str, str]:
         "SELLER_ADAPTER_MODE": "tests.adapter_stubs.StubSellerAdapter",
         "LLM_ADAPTER_MODE": "tests.adapter_stubs.StubLLMScoringAdapter",
         "LLM_REQUIREMENT_CHAT_ADAPTER_MODE": "tests.adapter_stubs.StubRequirementChatAdapter",
+        "GITHUB_ADAPTER_MODE": "tests.adapter_stubs.StubGitHubAdapter",
         # #89: notifications.adapters.RealAlimtalkAdapter/RealSmsAdapter/RealLmsAdapter는
         # 저장소에 없는 클래스였다(그것이 이 티켓이 고치는 버그) — 실물 벤더
         # 어댑터(#51)가 나오기 전까지는 나머지 어댑터들과 같은 원칙으로 stub을
@@ -184,6 +185,7 @@ _FAKE_ADAPTER_OVERRIDES = [
     ("SELLER_ADAPTER_MODE", "fake"),
     ("LLM_ADAPTER_MODE", "fake"),
     ("LLM_REQUIREMENT_CHAT_ADAPTER_MODE", "fake"),
+    ("GITHUB_ADAPTER_MODE", "fake"),
     ("NOTIFICATION_ALIMTALK_ADAPTER", "notifications.adapters.FakeAlimtalkAdapter"),
     ("NOTIFICATION_SMS_ADAPTER", "notifications.adapters.FakeSmsAdapter"),
     ("NOTIFICATION_LMS_ADAPTER", "notifications.adapters.FakeLmsAdapter"),
@@ -293,6 +295,7 @@ _FAKE_DOTTED_PATH_BYPASSES = [
     ("PAYMENT_ADAPTER_MODE", "payments.adapters.FakePGAdapter"),
     ("PAYOUT_ADAPTER_MODE", "payouts.adapters.FakePayoutAdapter"),
     ("SELLER_ADAPTER_MODE", "payouts.adapters.FakeSellerAdapter"),
+    ("GITHUB_ADAPTER_MODE", "repositories.adapters.FakeGitHubAdapter"),
 ]
 
 
@@ -334,6 +337,7 @@ _UNRESOLVABLE_ADAPTER_MODE_FIELDS = [
     "SELLER_ADAPTER_MODE",
     "LLM_ADAPTER_MODE",
     "LLM_REQUIREMENT_CHAT_ADAPTER_MODE",
+    "GITHUB_ADAPTER_MODE",
     # #89: 알림 채널 셋도 이제 같은 가드(core.adapters.check_adapter_mode)를 받는다 —
     # 이전에는 존재하지 않는 클래스를 가리켜도 부팅이 통과했다(정확히 이 티켓이
     # 고치는 버그).

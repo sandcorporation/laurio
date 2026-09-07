@@ -45,6 +45,7 @@ from core.clock import Clock
 from distributions.services import is_holding_distribution
 from core.operator_auth import OperatorAuth
 from submissions.models import Submission
+from submissions.scored_assets import resolve_scored_assets
 
 from .models import Appeal, SourceReading
 from .schemas import (
@@ -225,6 +226,7 @@ def _serialize_detail(appeal: Appeal) -> AppealDetailOut:
             model_version=score.model_version,
             reasoning=score.reasoning,
             created_at=score.created_at,
+            scored_assets=resolve_scored_assets(score.scored_assets),
         ),
         ruling=_serialize_ruling(ruling),
     )

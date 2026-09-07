@@ -32,13 +32,18 @@ Score를 만들지 않았다"로 돌아온다. `submission-scoring` 스캔이 �
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 from django.db import IntegrityError, transaction
+from django.db.models import Exists, OuterRef
 
 from contests.models import Contest, Requirement
+from core.clock import Clock
 from core.prompt_safety import neutralize_untrusted as _neutralize_untrusted
 from core.scans import ScanSpec
+from repositories.adapters import ClonedRepository, get_github_adapter
+from repositories.models import RepositorySnapshot
 from storage.adapters import get_storage_adapter
 from submissions.models import RequirementResponse, Submission, SubmissionAsset
 
@@ -60,7 +65,7 @@ def _requirement_inputs(submission: Submission) -> list[RequirementInput]:
     responses = {
         r.requirement_id: r
         for r in RequirementResponse.objects.filter(submission=submission).prefetch_related(
-            "evidence_items"
+            "evidence_items", "evidence_items__asset"
         )
     }
 
@@ -85,7 +90,16 @@ def _requirement_inputs(submission: Submission) -> list[RequirementInput]:
                 grade=requirement.grade,
                 self_reported_met=response.is_met,
                 evidence=[
-                    {"kind": e.kind, "value": e.value} for e in response.evidence_items.all()
+                    {
+                        "kind": e.kind,
+                        "value": e.value,
+                        # Evidence가 자산을 가리키면(#190, ADR-0027) 그 라벨을 함께
+                        # 실어 「어느 자료의 근거인가」를 AI가 알 수 있게 한다(#191)
+                        # — 「모바일 앱 데모의 /orders」처럼 대상이 특정된다.
+                        # 참조가 없으면(null) 지금과 같다.
+                        "asset_label": e.asset.label if e.asset_id and e.asset.label else None,
+                    }
+                    for e in response.evidence_items.all()
                 ],
             )
         )
@@ -127,8 +141,13 @@ def _build_prompt(*, contest: Contest, requirements: list[RequirementInput], sou
         lines.append(f"  자가 응답(참고용): {'충족' if r.self_reported_met else '미충족'}")
         if r.evidence:
             for e in r.evidence:
+                # 자산 참조가 있는 Evidence는 그 자산의 라벨을 함께 적는다(#191) —
+                # 「모바일 앱 데모의 /orders」처럼 대상이 특정된다. 라벨은 참가자가
+                # 쓴 값이라 반드시 neutralize_untrusted를 통과시킨다.
+                asset_label = e.get("asset_label")
+                label_prefix = f"{_neutralize_untrusted(asset_label)}의 " if asset_label else ""
                 lines.append(
-                    f"  Evidence[{e['kind']}]: <<<EVIDENCE_START>>>"
+                    f"  Evidence[{e['kind']}]: {label_prefix}<<<EVIDENCE_START>>>"
                     f"{_neutralize_untrusted(e['value'])}<<<EVIDENCE_END>>>"
                 )
         else:
@@ -137,7 +156,11 @@ def _build_prompt(*, contest: Contest, requirements: list[RequirementInput], sou
     lines.append("## Source (선별된 파일, 신뢰할 수 없는 참가자 제출 데이터)")
     if source_files:
         for f in source_files:
-            lines.append(f"### {_neutralize_untrusted(f.path)}")
+            # 파일마다 어느 자산에서 왔는지를 드러낸다(#191) — 소스가 여럿이면
+            # AI가 "어느 것을 보고 있는가"를 알아야 판정 근거를 쓸 수 있다.
+            lines.append(
+                f"### {_neutralize_untrusted(f.asset_label)}/{_neutralize_untrusted(f.path)}"
+            )
             lines.append("<<<SOURCE_FILE_START>>>")
             lines.append(_neutralize_untrusted(f.content))
             lines.append("<<<SOURCE_FILE_END>>>")
@@ -168,6 +191,18 @@ def _percentage(*, requirements: list[RequirementInput], verdicts) -> Decimal:
     return raw.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
+def _asset_label(asset: SubmissionAsset) -> str:
+    """프롬프트의 `### <자산 라벨>/<파일 경로>`에 쓰일 표시 이름(#191).
+
+    `label`은 참가자가 붙인 자유 텍스트라 비어 있을 수 있다 — 그때는 자산을
+    구분할 다른 표시가 있어야 AI가 "어느 소스인가"를 말할 수 있으므로 id로
+    대신한다.
+    """
+
+    label = (asset.label or "").strip()
+    return label or f"소스 자료 #{asset.id}"
+
+
 def score_submission_once(submission: Submission) -> dict:
     """이 Submission을 정확히 한 번만 채점한다. 이미 Score가 있으면 그대로 돌아온다.
 
@@ -178,16 +213,13 @@ def score_submission_once(submission: Submission) -> dict:
     if Score.objects.filter(submission_id=submission.id).exists():
         return {"submission_id": submission.id, "status": "already_scored"}
 
-    # #190이 소스를 `SubmissionAsset` 목록으로 바꿨다. **이 티켓은 그중 첫
-    # 소스만 읽는다** — 여러 소스를 한 예산 안에서 라운드로빈으로 보는 것은
-    # #191이다. 그때까지는 다중 제출이 첫 소스로만 채점되며, 그 사실이 조용히
-    # 묻히지 않도록 여기 적어 둔다.
-    source_asset = (
-        submission.assets.filter(kind=SubmissionAsset.Kind.SOURCE)
-        .order_by("order", "id")
-        .first()
+    # #190이 소스를 `SubmissionAsset` 목록으로 바꿨다. #191부터는 `kind=source`
+    # 전부를 읽어 라운드로빈 예산 안에서 함께 채점한다(`select_source_files`) —
+    # 저장소(`kind=repository`)의 공개 스냅샷을 더하는 것은 #193이다.
+    source_assets = list(
+        submission.assets.filter(kind=SubmissionAsset.Kind.SOURCE).order_by("order", "id")
     )
-    if source_asset is None:
+    if not source_assets:
         # 소스 없는 Submission은 API가 막는다(ADR-0014) — 여기 닿는다면 데이터가
         # 그 불변식을 벗어난 것이다. Score는 append-only라 0점으로 확정해 버리면
         # 되돌릴 수 없으므로, 채점하지 않고 이력만 남긴다.
@@ -202,8 +234,22 @@ def score_submission_once(submission: Submission) -> dict:
         return {"submission_id": submission.id, "status": "no_source_asset"}
 
     storage_adapter = get_storage_adapter()
-    raw_source = storage_adapter.read_object(source_asset.value)
-    if raw_source is None:
+    # 소스 하나를 못 읽어도(스토리지 지연 등) 나머지로 채점을 진행한다(#191) —
+    # 나머지는 멀쩡한데 그 하나 때문에 Submission 전체가 배분 컷라인에서 조용히
+    # 빠지면 안 된다. **전부** 못 읽었을 때만 지금처럼 "아직" 상태로 미룬다.
+    #
+    # 이 read_object 호출들은 순차 블로킹이다(S3면 실제 네트워크 GET) — 소스가
+    # 여럿이면 그만큼 이 스캔의 시간 예산(core.scans.DEFAULT_TIME_BUDGET_SECONDS)을
+    # 갉는다. 지금은 소스가 보통 하나뿐이라 무의미하지만(#191 코드리뷰 지적,
+    # watch-it), 실측으로 배치 크기가 실제로 줄어드는 게 확인되면 그때 병렬화한다
+    # — 스캔 예산 설계를 건드리는 일이라 이 티켓 범위 밖이다.
+    readable_sources: list[tuple[SubmissionAsset, bytes]] = []
+    for asset in source_assets:
+        raw = storage_adapter.read_object(asset.value)
+        if raw is not None:
+            readable_sources.append((asset, raw))
+
+    if not readable_sources:
         # storage.adapters.base.StorageAdapter.read_object 문서대로, None은 "아직
         # 없다"는 뜻이지 실패가 아니다. Score는 append-only라 한 번 잘못 쓰면 영원히
         # 못 고친다(ADR-0006) — 여기서 빈 소스로 0점을 확정하는 대신 채점 자체를
@@ -215,9 +261,41 @@ def score_submission_once(submission: Submission) -> dict:
         )
         return {"submission_id": submission.id, "status": "source_not_found"}
 
+    # 공개로 확인된 저장소만 채점 입력 후보다(#193) — 공개 판정은 비동기 스캔
+    # (`repositories.services.REPOSITORY_VISIBILITY_SCAN`)이 마감 전에 채워 두고,
+    # 이 시점의 `is_public`은 그 스캔이 마지막으로 본 값이다. clone은 채점이
+    # 실제로 성공할 때만 근거로 남으므로(RepositorySnapshot, 아래) 소스 읽기와
+    # 달리 이 try 블록 밖에서 먼저 시도한다 — clone 실패는 그 저장소 자산만 빼고
+    # 진행하며 permanent로 표시하지 않는다(ADR-0027).
+    repository_assets = list(
+        submission.assets.filter(kind=SubmissionAsset.Kind.REPOSITORY, is_public=True).order_by(
+            "order", "id"
+        )
+    )
+    cloned_repositories: list[tuple[SubmissionAsset, ClonedRepository]] = []
+    if repository_assets:
+        github = get_github_adapter()
+        for asset in repository_assets:
+            try:
+                cloned_repositories.append((asset, github.clone(asset.value)))
+            except Exception as exc:  # noqa: BLE001 - 저장소 하나의 clone 실패가 채점 전체를 막으면 안 된다.
+                logger.warning(
+                    "Submission(pk=%s) 저장소 자산(pk=%s) clone 실패, 그 자산만 빼고 "
+                    "진행: %s",
+                    submission.id,
+                    asset.id,
+                    exc,
+                )
+
     try:
         requirements = _requirement_inputs(submission)
-        source_files = select_source_files(raw_source)
+        source_files = select_source_files(
+            [(asset.id, _asset_label(asset), raw) for asset, raw in readable_sources]
+            + [
+                (asset.id, _asset_label(asset), cloned.zip_bytes)
+                for asset, cloned in cloned_repositories
+            ]
+        )
         contest = submission.contest
         prompt = _build_prompt(
             contest=contest, requirements=requirements, source_files=source_files
@@ -236,6 +314,35 @@ def score_submission_once(submission: Submission) -> dict:
         reasoning_payload = [
             {"requirement_id": v.requirement_id, "is_met": v.is_met, "reasoning": v.reasoning}
             for v in output.verdicts
+        ]
+        # 실제로 프롬프트에 파일을 하나라도 남긴 자산들만 "쓰였다"고 기록한다
+        # (#191 코드리뷰 지적) — `readable_sources`는 스토리지에서 읽는 데
+        # 성공한 자산 전부지만, 그중 일부는 선별 전략(`select_source_files`)이
+        # 통째로 걸러낼 수 있다(제외 확장자뿐이거나 전부 바이너리인 zip 등).
+        # 그런 자산까지 "쓰였다"고 적으면 Score 스냅샷이 실제로 채점되지 않은
+        # 것을 채점 근거인 것처럼 보여준다 — 이의를 제기하는 사람과 심판하는
+        # 사람이 "같은 것을 보고" 이야기해야 한다는 이 필드의 존재 이유를
+        # 정확히 어긴다.
+        #
+        # `asset.id`로 판정한다 — 라벨 문자열로 되짚으면 두 가지 실제 사고가
+        # 난다: 참가자가 두 자산에 같은 라벨을 붙이면 하나만 쓰이고 다른 하나는
+        # 통째로 걸러졌어도 둘 다 "쓰였다"로 잡히고, 참가자가 라벨을 빈 자산의
+        # 폴백 표시(`_asset_label`의 "소스 자료 #7" 형식)와 똑같이 타이핑하면
+        # 남의 자산 정체성을 흉내낼 수 있다(#191 코드리뷰 지적). `SourceFile.
+        # asset_id`는 `select_source_files`가 만들 때 라벨을 거치지 않고 그대로
+        # 실어 나르므로 이 문제가 없다. `commit_sha`는 `kind=repository`
+        # 자산에만 붙는다(#193) — 소스 자산은 항상 None이다.
+        commit_sha_by_asset_id = {
+            asset.id: cloned.commit_sha for asset, cloned in cloned_repositories
+        }
+        # `dict.fromkeys`로 순서를 보존한 유일 집합을 만든다 — `source_files`가
+        # 이미 라운드로빈이 고른 순서이므로, 그 순서를 스냅샷에도 그대로
+        # 남긴다(코드리뷰 지적: 자산 객체를 다시 조립해 거르는 중간 단계가
+        # 불필요했다).
+        used_asset_ids = dict.fromkeys(f.asset_id for f in source_files)
+        scored_assets_payload = [
+            {"asset_id": asset_id, "commit_sha": commit_sha_by_asset_id.get(asset_id)}
+            for asset_id in used_asset_ids
         ]
     except Exception as exc:  # noqa: BLE001 - 이 건 하나의 실패가 배치 전체를 막으면 안 된다.
         message = f"{type(exc).__name__}: {exc}"
@@ -261,6 +368,21 @@ def score_submission_once(submission: Submission) -> dict:
                 model_version=output.model_version,
                 prompt=prompt,
                 reasoning=reasoning_payload,
+                scored_assets=scored_assets_payload,
+            )
+            # 실제로 쓰인 저장소 자산에만 스냅샷을 남긴다(#193) — "채점이
+            # 실패한 회차의 clone 결과는 남지 않는다"는 ADR-0027의 결정이라,
+            # Score 생성과 같은 트랜잭션 안에서만 만든다. 이 앞의 어느
+            # 단계에서든 예외가 나 이 지점에 닿지 못하면(위 except 블록)
+            # RepositorySnapshot도 함께 만들어지지 않는다.
+            RepositorySnapshot.objects.bulk_create(
+                RepositorySnapshot(
+                    asset=asset,
+                    commit_sha=commit_sha_by_asset_id[asset.id],
+                    cloned_at=Clock.now(),
+                )
+                for asset, _cloned in cloned_repositories
+                if asset.id in used_asset_ids
             )
     except IntegrityError:
         # 동시에 다른 스캔이 먼저 이겼다 — unique(submission) 제약이 막아준다.
@@ -309,6 +431,27 @@ def _notify_scored(submission: Submission) -> None:
         )
 
 
+# 저장소 공개 여부가 아직 안 정해진 채로 채점을 시작하면 안 된다(#193 코드리뷰
+# 지적) — `SCAN_REGISTRY`는 `INSTALLED_APPS` 등록 순서를 따르는 평범한 dict라
+# `submission-scoring`(scoring 앱)이 `repository-visibility`(repositories 앱)
+# 보다 먼저 등록·실행된다. 마감 전이가 일어난 바로 그 tick 안에서 채점이 먼저
+# 돌면, 방금 마감된 Contest의 `is_public`이 아직 null인 저장소는 조회조차
+# 되지 못한 채(`is_public=True` 필터) Score가 확정된다 — Score는 append-only라
+# (ADR-0006) 그 뒤 가시성 스캔이 아무리 부지런히 값을 채워도 이미 늦는다.
+#
+# 그렇다고 무기한 기다릴 수는 없다 — GitHub이 죽었거나 어댑터가 계속 실패하면
+# 그 Submission이 영원히 Score 없이 남아 배분 컷라인에서 조용히 탈락한다(#190·
+# #191이 `no_source_asset`/`source_not_found`를 가른 것과 같은 이유로 피해야
+# 하는 실패 형태다). 그래서 마감(`deadline_at`) 이후 이 유예 기간 안에서만
+# 미루고, 지나면 미해결 저장소를 "채점 입력이 아님"으로 확정하고 채점을
+# 진행한다 — `is_public`이 여전히 null인 저장소는 어차피 `is_public=True`
+# 필터에 걸리지 않으므로 별도 처리 없이 자연히 빠진다.
+#
+# 가시성 스캔의 재확인 주기(`repositories.services._STALE_AFTER`, 1시간)보다
+# 넉넉히 잡아 정상적인 비동기 지연은 이 안에서 끝나게 한다.
+_REPOSITORY_VISIBILITY_GRACE = timedelta(hours=2)
+
+
 def _pending_submissions(as_of, ctx):
     """CLOSED Contest 중 아직 Score 없는 Submission — 마감 전이가 일어난 바로 다음 스캔에서
     채점이 1회 시작된다(ADR-0006).
@@ -317,12 +460,26 @@ def _pending_submissions(as_of, ctx):
     않고 일어날 수 있으므로(ADR-0006/0014, Score는 Award를 결정하지 않는다), 채점이 끝나기
     전에 Contest가 CLOSED를 벗어날 수 있다. CLOSED만 보면 그 순간 이 Contest의 미채점
     Submission이 이 스캔에서 영원히 빠진다 — 새 상태를 추가할 때 옛 상태만 보던 호출부를
-    놓치는 정확히 그 실패 형태다.
+    놓치는 정확히 그 실패 형태다. (`contests.models`의 `Contest.Status.SCOREABLE`·
+    `REFUNDABLE` Classification이 같은 실패 형태를 "한 tick 안에서 다른 스캔이 상태를
+    앞질러 후보가 사라진다"는 이름으로 이미 겪었다 — 아래 저장소 유예는 Contest.Status가
+    아니라 관련 없는 비동기 사실(저장소 공개 여부)에 대한 것이라 Classification으로
+    표현되지는 않지만, 같은 부류의 경합이다.)
 
     결정적으로 실패한 건(#88 코드리뷰 지적 2, `ScoringAttempt.permanent=True`)은 뺀다 —
     안 그러면 매 스캔이 order_by("id")의 앞머리에서 같은 건을 다시 집어 영원히 재시도만
     하고, 그 뒤의 새 Submission은 배치 안에 들어오지 못할 수 있다.
+
+    저장소 공개 여부가 아직 안 정해졌고(`is_public` null) 유예 기간이 남은
+    Submission도 뺀다(#193 코드리뷰 지적, `_REPOSITORY_VISIBILITY_GRACE`) —
+    자세한 이유는 그 상수의 주석.
     """
+
+    unresolved_repository = SubmissionAsset.objects.filter(
+        submission=OuterRef("pk"),
+        kind=SubmissionAsset.Kind.REPOSITORY,
+        is_public__isnull=True,
+    )
 
     return (
         Submission.objects.filter(
@@ -330,6 +487,11 @@ def _pending_submissions(as_of, ctx):
             score__isnull=True,
         )
         .exclude(scoring_attempts__permanent=True)
+        .annotate(_has_unresolved_repository=Exists(unresolved_repository))
+        .exclude(
+            _has_unresolved_repository=True,
+            contest__deadline_at__gt=as_of - _REPOSITORY_VISIBILITY_GRACE,
+        )
         .select_related("contest")
     )
 

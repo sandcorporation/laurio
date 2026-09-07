@@ -36,6 +36,15 @@ class Score(AppendOnlyModel):
     prompt = models.TextField()
     # Requirement별 판정 근거. [{"requirement_id": int, "is_met": bool, "reasoning": str}, ...]
     reasoning = models.JSONField()
+    # 채점에 실제로 쓰인 자산 목록 (#191, ADR-0027) —
+    # [{"asset_id": int, "commit_sha": str | None}, ...]. 이의를 제기하는 사람과
+    # 심판하는 사람이 "같은 것을 보고" 이야기하려면 무엇을 보고 채점했는지가
+    # 스냅샷에 고정돼야 한다. `commit_sha`는 `kind=repository` 자산에만 붙고
+    # (#193이 채운다), `kind=source` 자산은 항상 null이다. Score는 append-only라
+    # (ADR-0006) 이 목록도 한 번 쓰이면 다시 바뀌지 않는다 — 나중에 자산이 지워져도
+    # (제출 수정은 마감 전에만 가능하므로 실제로는 일어나지 않지만) 이 스냅샷은
+    # 그대로 남는다.
+    scored_assets = models.JSONField(default=list)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

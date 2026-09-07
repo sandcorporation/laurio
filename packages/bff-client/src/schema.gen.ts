@@ -3323,6 +3323,11 @@ export interface components {
             reasoning: {
                 [key: string]: unknown;
             }[];
+            /**
+             * Scored Assets
+             * @default []
+             */
+            scored_assets: components["schemas"]["ScoredAssetOut"][];
         };
         /** PagedContestOut */
         PagedContestOut: {
@@ -3776,6 +3781,30 @@ export interface components {
             reasoning: {
                 [key: string]: unknown;
             }[];
+            /**
+             * Scored Assets
+             * @default []
+             */
+            scored_assets: components["schemas"]["ScoredAssetOut"][];
+        };
+        /**
+         * ScoredAssetOut
+         * @description 채점에 실제로 쓰인 자산 하나 (#191, ADR-0027).
+         *
+         *     이의를 제기하는 사람과 심판하는 사람이 "같은 것을 보고" 이야기하려면 무엇을
+         *     근거로 채점했는지가 보여야 한다 — 소스가 여럿이 되면서 그중 무엇이 실제로
+         *     쓰였는지가 더 이상 자명하지 않다. `commit_sha`는 `kind=repository` 자산에만
+         *     붙고(#193), 그 전까지는 항상 null이다.
+         */
+        ScoredAssetOut: {
+            /** Asset Id */
+            asset_id: number;
+            /** Commit Sha */
+            commit_sha?: string | null;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
         };
         /**
          * SellerContactSubmitIn
