@@ -248,8 +248,8 @@ cd backend && LAURIO_DB_PORT=55432 uv run python manage.py prune_e2e_junk
 `global-setup.ts` 의 순서가 그래서 그 순서다.
 
 **스위트는 기본으로 병렬 실행된다**(#104). `pyproject.toml` 의 `addopts` 가 `-n auto` 를
-준다 — 실측(이 머신, 당시 1192건 — 지금 1377건, Assignment 여섯 티켓 #205~#212 로
-1312건에서 늘었다) `-n 4` 84초 →
+준다 — 실측(이 머신, 당시 1192건 — 지금 1389건, Assignment 가 #205~#212 로 1312건에서
+1377건까지, 그 뒤 staging 검증이 낳은 #214~#217 로 여기까지 늘었다) `-n 4` 84초 →
 `-n auto` 57초. 직렬로 보려면 `-n 0`.
 
 **테스트는 서로를 밟지 않는다 — 손으로 갈라 줄 것이 없다.**
