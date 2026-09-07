@@ -17,7 +17,7 @@ _Avoid_: 의뢰, Request, Project, Job, Brief, Round
 _Avoid_: 숙제, 실습, 비공개 공모전, 무료 공모전, Homework, Exercise, Task
 
 **InviteCode**:
-Assignment의 유일한 경계. 이것을 아는 사람이 참가자이며 명단은 따로 두지 않는다 — 제출한 사람만 보이고, 내지 않은 사람은 플랫폼이 알지 못한다. 새어 나가면 Sponsor가 다시 발급해 새 진입만 막는다: 이미 낸 사람의 제출물은 그대로 남는다.
+Assignment의 유일한 경계. 이것을 아는 사람이 참가자이며 명단은 따로 두지 않는다 — 제출한 사람만 보이고, 내지 않은 사람은 플랫폼이 알지 못한다. 새어 나가면 Sponsor가 다시 발급해 새 진입만 막는다: 이미 낸 사람의 제출물은 그대로 남는다. Sponsor가 강의실에서 학생에게 구두로 불러주는 값이기도 하므로(#216), 생성 문자집합은 구분 기호와 혼동 글자(0/O, 1/l/I 등)를 뺀 것이고 그만큼 길이로 추측 불가능성을 보상한다 — 이미 발급된 옛 형식 코드도 계속 유효하다.
 _Avoid_: 참여 코드, 비밀번호, 접근 키, Access code, Token, Passcode
 
 **AssignmentPermission**:
