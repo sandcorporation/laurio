@@ -1,6 +1,9 @@
 from ninja import NinjaAPI
 
 from accounts.api import router as accounts_router
+from accounts.assignment_permission_operator_api import (
+    operator_router as assignment_permission_operator_router,
+)
 from accounts.operator_api import router as operator_router
 from appeals.api import operator_router as appeals_operator_router
 from appeals.api import router as appeals_router
@@ -58,6 +61,7 @@ def storage_access_denied(request, exc: StorageAccessDenied):
 # 이루어진다. 라우터 자체가 기본 거부이며 Origin 검증 미들웨어가 경로 접두어로
 # 걸려 있다.
 api.add_router("/operator", operator_router)
+api.add_router("/operator", assignment_permission_operator_router)
 api.add_router("/operator", appeals_operator_router)
 api.add_router("/operator", payouts_operator_router)
 api.add_router("/operator", policies_operator_router)

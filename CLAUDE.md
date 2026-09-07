@@ -248,7 +248,8 @@ cd backend && LAURIO_DB_PORT=55432 uv run python manage.py prune_e2e_junk
 `global-setup.ts` 의 순서가 그래서 그 순서다.
 
 **스위트는 기본으로 병렬 실행된다**(#104). `pyproject.toml` 의 `addopts` 가 `-n auto` 를
-준다 — 실측(이 머신, 당시 1192건 — 지금 1312건) `-n 4` 84초 → `-n auto` 57초. 직렬로 보려면 `-n 0`.
+준다 — 실측(이 머신, 당시 1192건 — 1312건 이후 지금 1327건, #206 이 15건 추가) `-n 4` 84초 →
+`-n auto` 57초. 직렬로 보려면 `-n 0`.
 
 **테스트는 서로를 밟지 않는다 — 손으로 갈라 줄 것이 없다.**
 
@@ -419,9 +420,9 @@ pnpm --dir frontend exec playwright test --project=public e2e/payout.spec.ts -g 
 **CI 가 돌리는 것 (참고용 수치).**
 
 ```bash
-pnpm --dir frontend test            # 전체 (102건이던 시절 약 1.8분 — 지금 112건)
+pnpm --dir frontend test            # 전체 (102건이던 시절 약 1.8분 — 112건 이후 지금 113건, #206)
 pnpm --dir frontend test:public     # 공개 앱만 (약 1.4분, 74건)
-pnpm --dir frontend test:operator   # 운영자 앱만 (약 25초, 28건)
+pnpm --dir frontend test:operator   # 운영자 앱만 (약 25초, 28건이던 시절 이후 지금 29건, #206)
 ```
 
 **293건이 102건이 됐다.** 남긴 기준은 위 「남길 것」이다. 지운 것의 대부분은 「로그인된
