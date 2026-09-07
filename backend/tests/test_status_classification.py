@@ -29,15 +29,19 @@ def test_every_contest_status_question_answers_for_every_value(name):
 
 
 def test_contest_status_sets_are_the_ones_the_call_sites_used_to_spell_out():
+    """ASSIGNMENT_OPEN·ASSIGNMENT_CLOSED(#207, ADR-0028)가 더해진 뒤의 집합 — 등록된 스캔
+    21개 중 19개가 이 표(스펙 #197)만으로 Assignment 를 비켜간다: 상금·결제·Award·Escrow·
+    Distribution·라이프사이클 알림·탈퇴 시 실명 보존 어디에도 Assignment 가 걸리지 않는다."""
+
     assert S.PUBLICLY_VISIBLE.statuses == {S.PUBLISHED, S.CLOSED, S.AWARDED, S.JUDGING_ENDED}
-    assert S.SUBMITTABLE.statuses == {S.PUBLISHED}
+    assert S.SUBMITTABLE.statuses == {S.PUBLISHED, S.ASSIGNMENT_OPEN}
     assert S.SENDS_LIFECYCLE_NOTICES.statuses == {S.PUBLISHED}
-    assert S.SCOREABLE.statuses == {S.CLOSED, S.AWARDED, S.JUDGING_ENDED}
+    assert S.SCOREABLE.statuses == {S.CLOSED, S.AWARDED, S.JUDGING_ENDED, S.ASSIGNMENT_CLOSED}
     assert S.AWARDABLE.statuses == {S.CLOSED}
     assert S.JUDGING_EXTENDABLE.statuses == {S.CLOSED}
     assert S.REFUNDABLE.statuses == {S.CLOSED, S.JUDGING_ENDED}
     assert S.REOPENABLE.statuses == {S.CLOSED, S.JUDGING_ENDED}
-    assert S.EDITABLE.statuses == {S.DRAFT}
+    assert S.EDITABLE.statuses == {S.DRAFT, S.ASSIGNMENT_OPEN}
     assert S.PAYABLE.statuses == {S.DRAFT}
     assert S.BLOCKS_SPONSOR_WITHDRAWAL.statuses == {S.PUBLISHED, S.CLOSED}
     assert S.HAS_AWARD.statuses == {S.AWARDED}
@@ -46,7 +50,7 @@ def test_contest_status_sets_are_the_ones_the_call_sites_used_to_spell_out():
     assert S.HOME_AXIS.where(HomeStatusAxis.OPEN) == {S.PUBLISHED}
     assert S.HOME_AXIS.where(HomeStatusAxis.IN_JUDGING) == {S.CLOSED}
     assert S.HOME_AXIS.where(HomeStatusAxis.COMPLETED) == {S.AWARDED, S.JUDGING_ENDED}
-    assert S.HOME_AXIS.where(HomeStatusAxis.HIDDEN) == {S.DRAFT}
+    assert S.HOME_AXIS.where(HomeStatusAxis.HIDDEN) == {S.DRAFT, S.ASSIGNMENT_OPEN, S.ASSIGNMENT_CLOSED}
 
 
 def test_an_unknown_status_value_is_loud_not_silently_false():

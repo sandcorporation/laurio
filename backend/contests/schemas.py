@@ -359,3 +359,49 @@ class MySponsoredContestPageOut(Schema):
     items: list[MySponsoredContestOut]
     count: int
     next: str | None
+
+
+# --- Assignment(ADR-0028, #207) — 상금·결제·Award·Escrow가 전혀 나오지 않는다 ------------
+
+
+class AssignmentCreateIn(Schema):
+    """`ContestCreateIn`과 같은 자리지만 `category_id`·`prize`가 없다 — Category는
+    `contests.assignment_category`가 자동 배정하고(스펙 #197), Prize는 0으로 고정된다
+    (ADR-0028)."""
+
+    title: str = Field(max_length=200)
+    deliverable_type_ids: list[int]
+    description: str = ""
+    deadline_at: datetime
+    requirements: list[RequirementIn] = []
+
+
+class AssignmentUpdateIn(Schema):
+    """DRAFT·ASSIGNMENT_OPEN Assignment를 고치는 요청(#207) — `ContestUpdateIn`과 달리
+    `prize`·`category_id`가 없다. 전부 선택 필드다(부분 갱신, `ContestUpdateIn`과 같은
+    규율)."""
+
+    title: str | None = Field(default=None, max_length=200)
+    description: str | None = None
+    deliverable_type_ids: list[int] | None = None
+    deadline_at: datetime | None = None
+
+
+class AssignmentOut(Schema):
+    """`ContestOut`과 같은 자리지만 상금·결제·Award·Escrow에 닿는 필드가 하나도 없다
+    (스펙 #197 인수조건 — 과제 화면에 그 개념이 전혀 나타나지 않는다).
+
+    `invite_code`는 열리기 전(DRAFT)에는 null이고, 연 뒤에는 활성 InviteCode의 값이다
+    — 재발급(#209)이 생기기 전까지는 언제나 최대 하나다.
+    """
+
+    id: int
+    title: str
+    deliverable_types: list[DeliverableTypeOut]
+    description: str
+    deadline_at: datetime
+    status: str
+    requirements: list[RequirementOut]
+    created_at: datetime
+    invite_code: str | None = None
+    is_owner: bool = False

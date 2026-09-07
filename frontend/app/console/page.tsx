@@ -65,6 +65,16 @@ export default function AppHome() {
       >
         내 공모전
       </Link>
+      {/* 과제(Assignment) 진입점(#207, ADR-0028/0029). 상금 없는 과제는 자격을
+          받은 강사가 여기서 만들고 연다 — 공모전과 나란히 두되 역할로 화면을
+          가르지 않는다(위 "내 공모전"과 같은 원칙). */}
+      <Link
+        href="/console/assignments"
+        data-testid="app-home-my-assignments-link"
+        className="w-fit rounded-sm border border-rule px-4 py-2 text-sm hover:border-ink"
+      >
+        내 과제
+      </Link>
       <button
         type="button"
         onClick={handleLogout}

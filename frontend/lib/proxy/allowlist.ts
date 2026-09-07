@@ -6,9 +6,10 @@
 // 백엔드(backend/config/api.py)의 라우터 마운트를 그대로 옮겨 적었다 — 새로
 // 발명하지 않는다:
 //
-//   accounts(""), verification(""), contests(""), payments(""), submissions(""),
-//   awards(""), handovers(""), payouts(""), appeals(""), notifications("/notifications"),
-//   ledger("/ledger")                                   → 아래 9개 접두어로 노출
+//   accounts(""), verification(""), contests(""), assignments("", #207 ADR-0028),
+//   payments(""), submissions(""), awards(""), handovers(""), payouts(""),
+//   appeals(""), notifications("/notifications"), ledger("/ledger")
+//                                                        → 아래 10개 접두어로 노출
 //
 //   core("/internal"), notifications("/internal/notifications"),
 //   scoring("/internal/scoring"), handovers("/internal/handovers"),
@@ -35,6 +36,7 @@ export const BACKEND_PROXY_ALLOWLIST: readonly string[] = [
   "/api/accounts",
   "/api/verification",
   "/api/contests",
+  "/api/assignments",
   "/api/payments",
   "/api/submissions",
   "/api/payouts",

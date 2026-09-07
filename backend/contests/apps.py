@@ -28,6 +28,12 @@ class ContestsConfig(AppConfig):
            않은 Contest 를 옮긴다(#13). Award된 Contest 는 이미 AWARDED 상태라 이
            규칙의 from_state(CLOSED) 조건에 애초에 걸리지 않는다 — Award가 이
            스케줄러 전이보다 먼저 일어나도, 늦게 일어나도 서로를 밟지 않는다.
+        3. ASSIGNMENT_OPEN -> ASSIGNMENT_CLOSED(#207, ADR-0028) — deadline_at 이
+           지나면 옮긴다. extra_fields 가 없다 — Assignment 에는 심사기간·Award·
+           Distribution 이 전혀 없으므로 judging_ends_at 을 채울 이유가 없다(계속
+           null 로 남는다). 채점 스캔(Contest.Status.SCOREABLE)이 이 상태를 집어
+           Score 를 남기는 것으로 수명이 끝난다 — CLOSED 로 가는 공모전 전이와
+           같은 뼈대를 쓰지만 다음 단계로 이어지는 전이가 없다는 점이 다르다.
         """
 
         from django.core.checks import register
@@ -79,6 +85,20 @@ class ContestsConfig(AppConfig):
                     state_field="status",
                 ),
                 name="contest-judging-end",
+                batch_size=500,
+            )
+        )
+
+        register_scan(
+            transition_scan(
+                TransitionSpec(
+                    model=Contest,
+                    due_field="deadline_at",
+                    from_state=Contest.Status.ASSIGNMENT_OPEN,
+                    to_state=Contest.Status.ASSIGNMENT_CLOSED,
+                    state_field="status",
+                ),
+                name="assignment-close",
                 batch_size=500,
             )
         )

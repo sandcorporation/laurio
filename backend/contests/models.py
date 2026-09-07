@@ -144,6 +144,19 @@ class Contest(models.Model):
         # 조건(CLOSED)에 걸리지 않는다. Distribution(#16)이 "무응답 14일" 카운트다운의
         # 시작점으로 이 상태를 쓴다.
         JUDGING_ENDED = "judging_ended", "심사기간 종료"
+        # ASSIGNMENT_OPEN 은 #207(ADR-0028/0029)이 더한 값 — 상금도 결제도 없는
+        # Assignment 가 DRAFT 를 벗어나는 사건이다. PUBLISHED 를 여는 것이 결제
+        # 확인인 것과 짝을 이루지만, 여기서는 Sponsor 의 명시적 「열기」
+        # (assignment_api.open_assignment) 가 조건부 UPDATE 로 직접 이 상태를
+        # 찍는다 — 기다리는 스캔이 없다. 여는 순간 InviteCode 가 함께 발급된다.
+        ASSIGNMENT_OPEN = "assignment_open", "과제 진행중"
+        # ASSIGNMENT_CLOSED 는 core.transitions 레지스트리에 등록된 세 번째
+        # 전이(contests/apps.py) — 스케줄러 틱이 deadline_at 이 지난
+        # ASSIGNMENT_OPEN Assignment 를 조건부 UPDATE 로 옮긴다. CLOSED 와 달리
+        # judging_ends_at 을 찍지 않는다 — 심사기간·Award·Distribution 이 전혀
+        # 없으므로(ADR-0028) 그 컬럼을 채울 이유가 없다. 채점 스캔이 이 상태를
+        # 집어 Score 를 남기는 것으로 Assignment 의 수명이 끝난다.
+        ASSIGNMENT_CLOSED = "assignment_closed", "과제 마감"
 
     sponsor = models.ForeignKey(
         "accounts.SponsorProfile", related_name="contests", on_delete=models.CASCADE
@@ -159,7 +172,8 @@ class Contest(models.Model):
     description = models.TextField(blank=True)
     prize = models.PositiveIntegerField()
     deadline_at = models.DateTimeField()
-    status = models.CharField(max_length=16, choices=Status.choices, default=Status.DRAFT)
+    # max_length=20 — "assignment_closed"(#207)가 17자라 예전 16에 걸린다.
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
 
     # 심사기간 종료 시각 (#13, ADR-0003). CLOSED 전이가 일어나는 조건부 UPDATE 안에서
     # deadline_at + PlatformPolicy.judging_period_days(#78/ADR-0023)로 함께
@@ -273,100 +287,231 @@ class HomeStatusAxis(models.TextChoices):
     HIDDEN = "hidden", "숨김"
 
 
-# --- Contest.Status 가 소유하는 분류 (#141, #121) --------------------------------------------
+# --- Contest.Status 가 소유하는 분류 (#141, #121, #207) ----------------------------------------
 #
-# 질문마다 다섯 값 전부에 명시적으로 답한다. 집합은 여기서 파생되고(`.statuses`), 단일값 비교도
+# 질문마다 일곱 값 전부에 명시적으로 답한다. 집합은 여기서 파생되고(`.statuses`), 단일값 비교도
 # 질문으로 한다 — 값이 하나 끼어들면(예: 심사 중 PAUSED) `== CLOSED` 자리들이 조용히 False 가
 # 되는 것을 tests/test_status_classification.py 의 키 집합 단언이 막는다. 값 집합의 내용은 이관 전과
 # 같다(#121 — 같은 질문에 다른 집합을 쓰는 곳은 없었다).
+#
+# ASSIGNMENT_OPEN·ASSIGNMENT_CLOSED(#207, ADR-0028)는 이 표(스펙 #197)를 그대로 옮긴 것이다 —
+# 등록된 스캔 21개 중 19개가 이 선언만으로 Assignment 를 비켜간다. 상금·결제·Award·Escrow·
+# Distribution·라이프사이클 알림·탈퇴 시 실명 보존, 그 무엇도 Assignment 에는 없으므로 그 전부를
+# False 로 못 박는다 — 결제가 서 있던 자리를 Sponsor 의 명시적 「열기」가 대신할 뿐이다(EDITABLE·
+# SUBMITTABLE 만 True).
 _S = Contest.Status
 
-# 마감(#11) 이후에도 계속 공개로 남는다 — CLOSED 뿐 아니라 AWARDED·JUDGING_ENDED 도(#13). 아니면
-# 심사기간이 끝나거나 Award 되는 순간 목록·상세·제출물 조회가 404 가 된다.
+# 마감(#11) 이후에도 계속 공개로 남는다 — CLOSED 뿐 아니라 AWARDED·JUDGING_ENDED 도(#13).
+# Assignment 는 열려도 마감돼도 절대 나오지 않는다 — InviteCode 를 아는 사람만 본다(ADR-0028).
 Contest.Status.PUBLICLY_VISIBLE = Classification(
-    {_S.DRAFT: False, _S.PUBLISHED: True, _S.CLOSED: True, _S.AWARDED: True, _S.JUDGING_ENDED: True},
+    {
+        _S.DRAFT: False,
+        _S.PUBLISHED: True,
+        _S.CLOSED: True,
+        _S.AWARDED: True,
+        _S.JUDGING_ENDED: True,
+        _S.ASSIGNMENT_OPEN: False,
+        _S.ASSIGNMENT_CLOSED: False,
+    },
     question="공개 목록·상세에 보이는가",
 )
-# 결제로 공개됐고 아직 마감 전이가 안 됐다 — 제출·수정의 status 전제(시각은 따로 본다).
+# 결제로 공개됐거나(공모전) 명시적으로 열렸고(Assignment) 아직 마감 전이가 안 됐다 — 제출·수정의
+# status 전제(시각은 따로 본다).
 Contest.Status.SUBMITTABLE = Classification(
-    {_S.DRAFT: False, _S.PUBLISHED: True, _S.CLOSED: False, _S.AWARDED: False, _S.JUDGING_ENDED: False},
+    {
+        _S.DRAFT: False,
+        _S.PUBLISHED: True,
+        _S.CLOSED: False,
+        _S.AWARDED: False,
+        _S.JUDGING_ENDED: False,
+        _S.ASSIGNMENT_OPEN: True,
+        _S.ASSIGNMENT_CLOSED: False,
+    },
     question="status 상 제출을 받는가",
 )
 # 라이프사이클 알림(마감 임박 등)을 보내는 status 인가 — 프리팩터(#205, ADR-0028)로 SUBMITTABLE 에서
 # 떼어냈다. 「제출을 받는가」와 「통지를 보내는가」는 지금까지 우연히 같은 답이었을 뿐 같은 질문이
-# 아니다 — Assignment(ADR-0028)가 들어오면 갈라진다: Assignment 는 본인확인이 없어 연락처
-# (`accounts.PhoneContact`)가 없는 수신자가 섞이므로 통지를 보내지 않아야 하지만, 제출은 받는다.
-# 지금은 두 질문이 아직 갈라지지 않았으므로 집합이 SUBMITTABLE 과 똑같다 — 이 티켓은 동작을
-# 바꾸지 않는다.
+# 아니었고, Assignment 가 그 갈라짐의 실제 이유다 — Assignment 는 본인확인이 없어 연락처
+# (`accounts.PhoneContact`)가 없는 수신자가 섞이므로(ADR-0029) 통지를 보내지 않아야 하지만,
+# 제출은 받는다(위 SUBMITTABLE). ASSIGNMENT_OPEN 을 여기서 False 로 두지 않으면 dev·테스트에서는
+# 안 보이고 프로덕션에서만 실패한 NotificationDispatch 가 학생마다 쌓인다(ADR-0028 이 적어 둔
+# 함정 그대로).
 Contest.Status.SENDS_LIFECYCLE_NOTICES = Classification(
-    {_S.DRAFT: False, _S.PUBLISHED: True, _S.CLOSED: False, _S.AWARDED: False, _S.JUDGING_ENDED: False},
+    {
+        _S.DRAFT: False,
+        _S.PUBLISHED: True,
+        _S.CLOSED: False,
+        _S.AWARDED: False,
+        _S.JUDGING_ENDED: False,
+        _S.ASSIGNMENT_OPEN: False,
+        _S.ASSIGNMENT_CLOSED: False,
+    },
     question="라이프사이클 알림을 보내는 status 인가",
 )
 # CLOSED 뿐 아니라 AWARDED·JUDGING_ENDED 도(#13) — Award 는 Score 를 기다리지 않으므로 채점이 끝나기
 # 전에 CLOSED 를 벗어날 수 있다. CLOSED 만 보면 그 순간 미채점 Submission 이 영원히 빠진다.
+# ASSIGNMENT_CLOSED 도 True — Assignment 의 채점은 이 상태로만 진입한다(Award 가 없어 갈아탈 다른
+# 경로가 없다).
 Contest.Status.SCOREABLE = Classification(
-    {_S.DRAFT: False, _S.PUBLISHED: False, _S.CLOSED: True, _S.AWARDED: True, _S.JUDGING_ENDED: True},
+    {
+        _S.DRAFT: False,
+        _S.PUBLISHED: False,
+        _S.CLOSED: True,
+        _S.AWARDED: True,
+        _S.JUDGING_ENDED: True,
+        _S.ASSIGNMENT_OPEN: False,
+        _S.ASSIGNMENT_CLOSED: True,
+    },
     question="채점 스캔의 대상인가",
 )
-# 심사 창 안에서만 — 시각(judging_ends_at)은 따로 본다.
+# 심사 창 안에서만 — 시각(judging_ends_at)은 따로 본다. Assignment 는 Award 자체가 없다.
 Contest.Status.AWARDABLE = Classification(
-    {_S.DRAFT: False, _S.PUBLISHED: False, _S.CLOSED: True, _S.AWARDED: False, _S.JUDGING_ENDED: False},
+    {
+        _S.DRAFT: False,
+        _S.PUBLISHED: False,
+        _S.CLOSED: True,
+        _S.AWARDED: False,
+        _S.JUDGING_ENDED: False,
+        _S.ASSIGNMENT_OPEN: False,
+        _S.ASSIGNMENT_CLOSED: False,
+    },
     question="status 상 Award 할 수 있는가",
 )
-# PUBLISHED·DRAFT 는 심사기간 자체가 없고, AWARDED·JUDGING_ENDED 는 더 늘릴 대상이 없다.
+# PUBLISHED·DRAFT 는 심사기간 자체가 없고, AWARDED·JUDGING_ENDED 는 더 늘릴 대상이 없다. Assignment
+# 는 심사기간이라는 개념 자체가 없다 — judging_ends_at 을 영원히 null 로 둔다.
 Contest.Status.JUDGING_EXTENDABLE = Classification(
-    {_S.DRAFT: False, _S.PUBLISHED: False, _S.CLOSED: True, _S.AWARDED: False, _S.JUDGING_ENDED: False},
+    {
+        _S.DRAFT: False,
+        _S.PUBLISHED: False,
+        _S.CLOSED: True,
+        _S.AWARDED: False,
+        _S.JUDGING_ENDED: False,
+        _S.ASSIGNMENT_OPEN: False,
+        _S.ASSIGNMENT_CLOSED: False,
+    },
     question="심사기간을 연장할 수 있는가",
 )
 # 참여자 0명 전액 환불의 status 전제 — JUDGING_ENDED 도(#13 뒤 남아 있던 격차). 스케줄러가
 # judging_ends_at 이 지나면 CLOSED -> JUDGING_ENDED 로 무조건 옮기므로, CLOSED 만 보면 그 순간부터
-# Prize 가 Escrow 에 갇힌다. 참가자 없음·refund_disabled 는 payments 가 따로 본다.
+# Prize 가 Escrow 에 갇힌다. 참가자 없음·refund_disabled 는 payments 가 따로 본다. Assignment 에는
+# Prize 도 Escrow 도 없다 — 환불할 것이 없다.
 Contest.Status.REFUNDABLE = Classification(
-    {_S.DRAFT: False, _S.PUBLISHED: False, _S.CLOSED: True, _S.AWARDED: False, _S.JUDGING_ENDED: True},
+    {
+        _S.DRAFT: False,
+        _S.PUBLISHED: False,
+        _S.CLOSED: True,
+        _S.AWARDED: False,
+        _S.JUDGING_ENDED: True,
+        _S.ASSIGNMENT_OPEN: False,
+        _S.ASSIGNMENT_CLOSED: False,
+    },
     question="참여자 0명 환불의 status 전제를 만족하는가",
 )
 # 유찰된 Contest 의 재개최 — 같은 이유로 JUDGING_ENDED 도. 실제 판정 근거는 REFUNDED Payment 다.
+# Assignment 에는 결제 자체가 없어 REFUNDED Payment 가 존재할 수 없다.
 Contest.Status.REOPENABLE = Classification(
-    {_S.DRAFT: False, _S.PUBLISHED: False, _S.CLOSED: True, _S.AWARDED: False, _S.JUDGING_ENDED: True},
+    {
+        _S.DRAFT: False,
+        _S.PUBLISHED: False,
+        _S.CLOSED: True,
+        _S.AWARDED: False,
+        _S.JUDGING_ENDED: True,
+        _S.ASSIGNMENT_OPEN: False,
+        _S.ASSIGNMENT_CLOSED: False,
+    },
     question="재개최할 수 있는 status 인가",
 )
-# 결제 전이라 고칠 수 있고, 결제를 (다시) 시작할 수 있다 — 둘 다 DRAFT 뿐이다.
+# 결제 전이라 고칠 수 있고, 결제를 (다시) 시작할 수 있다 — 공모전은 DRAFT 뿐이다. Assignment 는
+# ASSIGNMENT_OPEN 도 True — 「고칠 수 있다」의 절반이다(스펙 #197): 나머지 절반(제출 0건)은 #209 가
+# 얹는 술어다. 문을 닫는 것은 결제가 아니라 첫 제출이라는 것이 ADR-0028 의 핵심이다.
 Contest.Status.EDITABLE = Classification(
-    {_S.DRAFT: True, _S.PUBLISHED: False, _S.CLOSED: False, _S.AWARDED: False, _S.JUDGING_ENDED: False},
+    {
+        _S.DRAFT: True,
+        _S.PUBLISHED: False,
+        _S.CLOSED: False,
+        _S.AWARDED: False,
+        _S.JUDGING_ENDED: False,
+        _S.ASSIGNMENT_OPEN: True,
+        _S.ASSIGNMENT_CLOSED: False,
+    },
     question="초안으로서 고칠 수 있는가",
 )
+# Assignment 는 결제 자체가 없다 — DRAFT 를 벗어나는 사건이 Sponsor 의 「열기」다.
 Contest.Status.PAYABLE = Classification(
-    {_S.DRAFT: True, _S.PUBLISHED: False, _S.CLOSED: False, _S.AWARDED: False, _S.JUDGING_ENDED: False},
+    {
+        _S.DRAFT: True,
+        _S.PUBLISHED: False,
+        _S.CLOSED: False,
+        _S.AWARDED: False,
+        _S.JUDGING_ENDED: False,
+        _S.ASSIGNMENT_OPEN: False,
+        _S.ASSIGNMENT_CLOSED: False,
+    },
     question="Prize 결제를 시작할 수 있는가",
 )
 # 진행 중인 거래 — Sponsor 는 이 상태의 Contest 가 있으면 탈퇴할 수 없다(ADR-0025, #142 가 쓴다).
+# Assignment 는 돈이 걸리지 않은 활동이라 계정을 붙잡지 않는다(스펙 #197 user story 19) — 열려
+# 있어도 탈퇴를 막지 않는다.
 Contest.Status.BLOCKS_SPONSOR_WITHDRAWAL = Classification(
-    {_S.DRAFT: False, _S.PUBLISHED: True, _S.CLOSED: True, _S.AWARDED: False, _S.JUDGING_ENDED: False},
+    {
+        _S.DRAFT: False,
+        _S.PUBLISHED: True,
+        _S.CLOSED: True,
+        _S.AWARDED: False,
+        _S.JUDGING_ENDED: False,
+        _S.ASSIGNMENT_OPEN: False,
+        _S.ASSIGNMENT_CLOSED: False,
+    },
     question="Sponsor 의 탈퇴를 막는 진행 중 거래인가",
 )
-# Award 가 이미 확정됐다 — 두 번째 Award 는 409 다.
+# Award 가 이미 확정됐다 — 두 번째 Award 는 409 다. Assignment 에는 Award 자체가 없다.
 Contest.Status.HAS_AWARD = Classification(
-    {_S.DRAFT: False, _S.PUBLISHED: False, _S.CLOSED: False, _S.AWARDED: True, _S.JUDGING_ENDED: False},
+    {
+        _S.DRAFT: False,
+        _S.PUBLISHED: False,
+        _S.CLOSED: False,
+        _S.AWARDED: True,
+        _S.JUDGING_ENDED: False,
+        _S.ASSIGNMENT_OPEN: False,
+        _S.ASSIGNMENT_CLOSED: False,
+    },
     question="Award 가 이미 확정됐는가",
 )
 # 심사기간이 Award 없이 끝나 「무응답 N일」 카운트다운 중이다 — Distribution 의 대상 status.
+# Assignment 에는 Distribution 자체가 없다.
 Contest.Status.AWAITING_DISTRIBUTION = Classification(
-    {_S.DRAFT: False, _S.PUBLISHED: False, _S.CLOSED: False, _S.AWARDED: False, _S.JUDGING_ENDED: True},
+    {
+        _S.DRAFT: False,
+        _S.PUBLISHED: False,
+        _S.CLOSED: False,
+        _S.AWARDED: False,
+        _S.JUDGING_ENDED: True,
+        _S.ASSIGNMENT_OPEN: False,
+        _S.ASSIGNMENT_CLOSED: False,
+    },
     question="Distribution 을 기다리는가",
 )
 # 탈퇴 후 실명·생년월일을 RetainedIdentity 로 보존할 법적 의무를 낳는 거래가 있었는가
 # (전자상거래법상 거래기록 보존) — accounts.withdrawal._transaction_basis 의 유일한 소비처가
-# 실제로 묻는 질문은 이것이다. 지금은 "결제 확인"과 답이 같다 — Contest 가 DRAFT 를 벗어나는
-# 유일한 경로가 결제 확인이기 때문이다(Assignment(ADR-0028)가 들어오기 전까지는). 이름이
-# "결제가 있었는가"가 아니라 이 질문을 말하는 이유는 Assignment 가 결제 없이 DRAFT 를 벗어나는
-# 순간에도 여전히 정확해야 해서다 — 과제만 연 사람은 실명을 보존할 의무가 없으므로 그때도
-# False 로 남는다(집합은 그대로, 뒤 티켓이 채운다). 집합이 PUBLICLY_VISIBLE 과 같은 것은
-# 우연이다 — 질문이 다르다.
+# 실제로 묻는 질문은 이것이다. 공모전은 "결제 확인"과 답이 같다 — Contest 가 DRAFT 를 벗어나는
+# 유일한 경로가 결제 확인이기 때문이다. Assignment 는 결제 없이 DRAFT 를 벗어나므로 여기서 갈라진다
+# — 과제만 연 사람은 실명을 보존할 의무가 없다(오히려 보존하면 과잉 보관이다, ADR-0028). 이름이
+# "결제가 있었는가"가 아니라 이 질문을 말하는 이유가 바로 이것이다 — 이름을 그대로 뒀다면
+# ASSIGNMENT_OPEN 을 True 로 적는 실수가 나기 쉬웠다.
 Contest.Status.REQUIRES_IDENTITY_RETENTION = Classification(
-    {_S.DRAFT: False, _S.PUBLISHED: True, _S.CLOSED: True, _S.AWARDED: True, _S.JUDGING_ENDED: True},
+    {
+        _S.DRAFT: False,
+        _S.PUBLISHED: True,
+        _S.CLOSED: True,
+        _S.AWARDED: True,
+        _S.JUDGING_ENDED: True,
+        _S.ASSIGNMENT_OPEN: False,
+        _S.ASSIGNMENT_CLOSED: False,
+    },
     question="탈퇴 후 실명 보존 의무를 낳는 거래가 있었는가",
 )
-# 홈 큐레이션의 status 축(#94). PUBLISHED 는 마감 시각이 마저 가른다.
+# 홈 큐레이션의 status 축(#94). PUBLISHED 는 마감 시각이 마저 가른다. Assignment 는 어느 홈 묶음에도
+# 들어가지 않는다 — DRAFT 와 같은 HIDDEN.
 Contest.Status.HOME_AXIS = Classification(
     {
         _S.DRAFT: HomeStatusAxis.HIDDEN,
@@ -374,10 +519,22 @@ Contest.Status.HOME_AXIS = Classification(
         _S.CLOSED: HomeStatusAxis.IN_JUDGING,
         _S.AWARDED: HomeStatusAxis.COMPLETED,
         _S.JUDGING_ENDED: HomeStatusAxis.COMPLETED,
+        _S.ASSIGNMENT_OPEN: HomeStatusAxis.HIDDEN,
+        _S.ASSIGNMENT_CLOSED: HomeStatusAxis.HIDDEN,
     },
     question="홈의 어느 묶음 축에 속하는가",
 )
 del _S
+
+# Assignment 종류(ADR-0028)에 속하는 status 집합. Classification 이 아니라 평범한 집합이다 —
+# 스캔이 "이 status 에서 무엇을 할까"를 묻는 질문이 아니라, submissions.api 가 "본인확인·
+# 자전거래 검사를 건너뛸까"를 묻는 라우팅 판단이라 "모든 값에 답한다" 규율이 적용될 자리가
+# 아니다. DRAFT 는 공모전과 Assignment 가 공유하므로(ADR-0028) 여기 포함하지 않는다 — DRAFT
+# 상태만으로는 어느 쪽인지 알 수 없고, 알아야 하는 순간(제출)에는 이미 ASSIGNMENT_OPEN 을
+# 지난 뒤다.
+ASSIGNMENT_STATUSES = frozenset(
+    {Contest.Status.ASSIGNMENT_OPEN, Contest.Status.ASSIGNMENT_CLOSED}
+)
 
 
 class Requirement(models.Model):
@@ -550,3 +707,55 @@ class RequirementChatMessage(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"[{self.role}] {self.content[:30]}"
+
+
+def _generate_invite_code() -> str:
+    """추측 불가능한 InviteCode 값 — URL 에 그대로 실려도 안전한 문자 집합
+    (`secrets.token_urlsafe`)이다. 32바이트는 base64url 인코딩 후 43자 안팎이 되고,
+    이 저장소의 다른 불투명 토큰(예: `RefreshToken.jti`)과 달리 사람이 손으로 학생에게
+    전달할 수도 있어야 하므로 UUID보다 짧고 하이픈이 없는 형태를 쓴다."""
+
+    import secrets
+
+    return secrets.token_urlsafe(24)
+
+
+class InviteCode(models.Model):
+    """Assignment(ADR-0028)의 유일한 경계 — 이것을 아는 사람이 참가자다.
+
+    명단(참가 기록)은 두지 않는다(스펙 #197 Out of Scope) — 제출한 사람만
+    `Submission.developer`로 보이고, 코드를 받았지만 아직 내지 않은 사람은
+    플랫폼이 알지 못한다.
+
+    `contest`를 `OneToOneField`가 아니라 `ForeignKey`로 둔다 — 지금(#207)은
+    Assignment 하나에 활성 코드가 언제나 정확히 하나뿐이지만, 재발급(#209)이
+    새어 나간 코드를 무효화하고 새 코드를 발급하면서도 이미 낸 사람의
+    `Submission`을 건드리지 않으려면 옛 코드 행을 지우지 않고 `is_active`만
+    끄는 이력이 필요하다 — `DeliverableTypeChange`·`AssignmentPermissionChange`와
+    같은 append-only 감사 규율이다. 이 티켓은 재발급 자체를 구현하지 않지만
+    (#209 소관), 나중에 그 티켓이 이 모델을 append-only로 확장할 수 있도록
+    처음부터 여러 개를 가리킬 수 있는 모양으로 둔다.
+
+    `unique_active_invite_code_per_contest`(부분 유니크)는 "활성 코드는 언제나
+    최대 하나"라는 불변식의 DB 레벨 최후 방어선이다 — #207에서는 열 때 한 번만
+    만들어 이 제약에 걸릴 일이 없지만, #209의 재발급이 이 제약을 어기면 즉시
+    `IntegrityError`로 드러난다.
+    """
+
+    contest = models.ForeignKey(Contest, related_name="invite_codes", on_delete=models.CASCADE)
+    code = models.CharField(max_length=64, unique=True, default=_generate_invite_code)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["contest"],
+                condition=Q(is_active=True),
+                name="unique_active_invite_code_per_contest",
+            )
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"InviteCode(contest_id={self.contest_id}, active={self.is_active})"
