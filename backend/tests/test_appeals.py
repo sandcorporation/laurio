@@ -223,9 +223,7 @@ def _submit(
 
     response = client.post(
         f"{CONTESTS_URL}/{contest_id}/submissions",
-        data={
-            "source_object_key": source_key,
-            "requirement_responses": [
+        data={"assets": [{"kind": "source", "value": source_key}], "requirement_responses": [
                 {
                     "requirement_id": requirement_id,
                     "is_met": True,
@@ -233,8 +231,7 @@ def _submit(
                         [{"kind": "source_location", "value": marker}] if grounded else []
                     ),
                 }
-            ],
-        },
+            ]},
         content_type="application/json",
         **_auth_header(dev["access"]),
     )

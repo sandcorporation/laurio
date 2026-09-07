@@ -63,7 +63,6 @@ class HandoverBackfillMigrationTests(TransactionTestCase):
         submission = Submission.objects.create(
             contest=contest,
             developer=developer,
-            source_object_key=f"submission:{contest.id}:{developer_user.id}:source/deadbeef",
         )
         awarded_at = timezone.now() - timedelta(days=20)
         award = Award.objects.create(contest=contest, submission=submission, awarded_at=awarded_at)

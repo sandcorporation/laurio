@@ -182,9 +182,7 @@ def _submit(
 
     response = client.post(
         f"{CONTESTS_URL}/{contest_id}/submissions",
-        data={
-            "source_object_key": source_key,
-            "requirement_responses": [
+        data={"assets": [{"kind": "source", "value": source_key}], "requirement_responses": [
                 {
                     "requirement_id": requirement_id,
                     "is_met": True,
@@ -192,8 +190,7 @@ def _submit(
                         [{"kind": "source_location", "value": marker}] if grounded else []
                     ),
                 }
-            ],
-        },
+            ]},
         content_type="application/json",
         **_auth_header(dev["access"]),
     )
@@ -217,17 +214,14 @@ def _submit_multi(
 
     response = client.post(
         f"{CONTESTS_URL}/{contest_id}/submissions",
-        data={
-            "source_object_key": source_key,
-            "requirement_responses": [
+        data={"assets": [{"kind": "source", "value": source_key}], "requirement_responses": [
                 {
                     "requirement_id": rid,
                     "is_met": True,
                     "evidence": [{"kind": "source_location", "value": marker}] if grounded else [],
                 }
                 for rid, grounded in zip(requirement_ids, grounded_flags)
-            ],
-        },
+            ]},
         content_type="application/json",
         **_auth_header(dev["access"]),
     )

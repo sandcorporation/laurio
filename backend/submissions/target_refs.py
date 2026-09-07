@@ -30,3 +30,26 @@ def demo_video_target_ref(contest_id: int, developer_user_id: int) -> str:
 
 def build_asset_target_ref(contest_id: int, developer_user_id: int) -> str:
     return f"submission:{contest_id}:{developer_user_id}:{BUILD_ASSET_SLOT}"
+
+
+# `SubmissionAsset.Kind` 중 값이 storage object_key인 종류가 어느 슬롯에 속하는가
+# (#190). 슬롯은 그대로다 — 자산이 여럿이 되어도 각 업로드가 고유한 object_key를
+# 받으므로 한 슬롯 아래 여럿이 쌓여도 서로를 덮지 않는다(`handovers.BuildAsset`이
+# 이미 그렇게 쓴다). 그래서 `SubmissionTargetStateResolver`는 손댈 것이 없다.
+#
+# `demo_url`·`repository`는 여기 없다 — storage를 거치지 않는 URL이다.
+SLOT_BY_ASSET_KIND = {
+    "source": SOURCE_SLOT,
+    "demo_video": DEMO_VIDEO_SLOT,
+}
+
+
+def target_ref_for_asset_kind(
+    kind: str, *, contest_id: int, developer_user_id: int
+) -> str | None:
+    """이 종류의 자산이 속해야 할 target_ref. URL 종류면 None."""
+
+    slot = SLOT_BY_ASSET_KIND.get(kind)
+    if slot is None:
+        return None
+    return f"submission:{contest_id}:{developer_user_id}:{slot}"

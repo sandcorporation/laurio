@@ -53,16 +53,18 @@ def _submit_full(
     source_key = f"{source_target_ref(contest_id, dev['user_id'])}/{uuid.uuid4().hex}"
     FakeStorageAdapter().write_object(source_key, b"fake source zip bytes")
 
-    payload = {
-        "source_object_key": source_key,
-        "requirement_responses": responses,
-        "demo_url": demo_url,
-        "test_account": test_account,
-    }
+    assets = [{"kind": "source", "value": source_key}]
+    # 테스트 계정은 데모 URL 자료에 붙는다(#190) — 계정만 주고 데모를 안 주면
+    # 붙일 곳이 없으므로 데모 하나를 만들어 준다.
+    url = demo_url or ("https://example.invalid/acct" if test_account else "")
+    if url:
+        assets.append({"kind": "demo_url", "value": url, "test_account": test_account})
     if demo_video:
         video_key = f"{demo_video_target_ref(contest_id, dev['user_id'])}/{uuid.uuid4().hex}"
         FakeStorageAdapter().write_object(video_key, b"fake video bytes")
-        payload["demo_video_object_key"] = video_key
+        assets.append({"kind": "demo_video", "value": video_key})
+
+    payload = {"assets": assets, "requirement_responses": responses}
 
     response = client.post(
         SUBMISSIONS_URL.format(contest_id=contest_id),
@@ -405,6 +407,7 @@ def test_completion_distribution_is_all_zero_when_there_are_no_submissions(
         "demo_video_count": 0,
         "demo_url_count": 0,
         "test_account_count": 0,
+        "repository_count": 0,
     }
 
 

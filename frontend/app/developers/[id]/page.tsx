@@ -99,6 +99,8 @@ export default async function DeveloperProfilePage({ params }: { params: Promise
 }
 
 function ArchivedSubmissionRow({ submission }: { submission: PublicSubmission }) {
+  const videoCount = submission.assets.filter((asset) => asset.kind === "demo_video").length;
+
   return (
     <li
       className="flex flex-col gap-2 border-b border-rule py-3"
@@ -112,23 +114,28 @@ function ArchivedSubmissionRow({ submission }: { submission: PublicSubmission })
         {new Date(submission.created_at).toLocaleDateString("ko-KR")}
       </span>
       <div className="flex flex-wrap gap-2 text-xs">
-        {submission.demo_url && (
-          <a
-            href={submission.demo_url}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="border border-verified px-1.5 py-0.5 text-verified"
-            data-testid="demo-url-link"
-          >
-            데모 보기
-          </a>
-        )}
-        {submission.demo_video_object_key && (
+        {/* 자료는 여럿일 수 있다(#190) — 데모마다 링크를 하나씩 낸다. 라벨이
+            있으면 그것이 링크 이름이 된다(「모바일 앱 데모」). */}
+        {submission.assets
+          .filter((asset) => asset.kind === "demo_url")
+          .map((asset) => (
+            <a
+              key={asset.id}
+              href={asset.value}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="border border-verified px-1.5 py-0.5 text-verified"
+              data-testid="demo-url-link"
+            >
+              {asset.label || "데모 보기"}
+            </a>
+          ))}
+        {videoCount > 0 && (
           <span
             className="border border-rule px-1.5 py-0.5 text-ink/70"
             data-testid="demo-video-indicator"
           >
-            시연 영상 있음
+            시연 영상 {videoCount > 1 ? `${videoCount}편 ` : ""}있음
           </span>
         )}
       </div>

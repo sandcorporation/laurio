@@ -42,7 +42,7 @@ Laurio를 운영하며 Appeal에 Ruling을 내리는 당사자. Sponsor·Develop
 _Avoid_: 관리자, 스태프, Admin, Staff, Moderator
 
 **PlatformPolicy**:
-플랫폼이 정한 요율과 기간 — 수수료, 원천징수, 개최비, 연장비, 심사기간, 배분 대기, 배분 컷라인. 환경이 아니라 사업이 정하는 값이라 staging 과 production 에서 같아야 하고, 바뀌면 누가 언제 바꿨는지가 남는다(ADR-0023). 값을 쓴 Payout·Distribution 은 그때의 요율을 자기 안에 기억한다.
+플랫폼이 정한 요율·기간·한도 — 수수료, 원천징수, 개최비, 연장비, 심사기간, 배분 대기, 배분 컷라인, 제출 자료 개수 상한. 환경이 아니라 사업이 정하는 값이라 staging 과 production 에서 같아야 하고, 바뀌면 누가 언제 바꿨는지가 남는다(ADR-0023). 값을 쓴 Payout·Distribution 은 그때의 요율을 자기 안에 기억한다.
 _Avoid_: 설정, config, 환경변수(그 셋은 환경마다 달라도 되는 것을 가리킨다)
 
 **PolicyChange**:
@@ -56,8 +56,16 @@ _Avoid_: 조회 로그, 접근 기록, 감사 로그(감사 대상 전체를 가
 ### 제출과 선정
 
 **Submission**:
-한 Developer가 한 Contest에 낸 결과물 일체(시연 영상, 데모, 테스트 계정, Requirement 자가 응답).
+한 Developer가 한 Contest에 낸 결과물 일체 — SubmissionAsset 목록과 Requirement 자가 응답. 한 Contest가 요구하는 산출물이 여럿일 수 있으므로(DeliverableType은 복수 선택된다) 자료도 종류마다 여럿이다.
 _Avoid_: 제출물, 출품작, Entry, Work, Proposal
+
+**SubmissionAsset**:
+Submission이 자기를 보여주기 위해 담는 자료 하나 — 소스코드, 시연 영상, 데모 URL, GitHub 저장소 중 하나다. **무엇을 보여주는지는 라벨이 말한다**("모바일 앱 데모") — 자료가 여럿이면 그 라벨 없이는 Sponsor도 AI도 어느 것이 무엇인지 알 수 없다. 데모에 들어가는 테스트 계정은 제출작이 아니라 그 데모에 붙는다 — 데모마다 다를 수 있기 때문이다. 소스와 저장소는 Award 전까지 Developer 본인만 보고, 데모와 영상은 마감 후 전면 공개된다 — 공개 저장소라도 플랫폼이 Sponsor에게 코드로 가는 길을 먼저 열지는 않는다(ADR-0027).
+_Avoid_: 첨부·Attachment(소스는 첨부가 아니다), 산출물(DeliverableType이 그 종류를 가리킨다), 제출 항목, 파일(URL도 자료다)
+
+**RepositorySnapshot**:
+플랫폼이 채점하려고 공개 저장소를 열었던 그 시점 — 어느 커밋이었는가. **참가자가 낸 것이 아니라 플랫폼이 본 것이라** SubmissionAsset과 같은 자리에 두지 않는다. Score는 불변인데 저장소는 마감 다음날 사라질 수 있어, 이 기록이 없으면 심판하는 사람이 「AI가 본 것」을 특정할 수 없다. 파일 내용 자체는 여기 없다 — 그것은 이미 Score가 프롬프트로 통째로 보존한다.
+_Avoid_: 클론, 캐시, 백업, 미러
 
 **Score**:
 마감 직후 한 번만 산출되어 불변으로 고정되는, Submission의 필수 Requirement 달성률. Distribution 대상 판정의 유일한 근거다.
@@ -136,5 +144,5 @@ Laurio가 당사자에게 보내는 통지. 거래성과 광고성으로 나뉘�
 _Avoid_: 알림톡(특정 채널명을 통지 전체의 이름으로 쓰는 것), 메시지, 푸시
 
 **Evidence**:
-각 Requirement 자가 응답을 뒷받침하도록 Developer가 지정한 근거. 시연 영상의 타임스탬프, 스크린샷, 데모 내 경로, 소스 위치 중 하나다. 증거가 없는 주장은 Score 산출에서 미달로 처리된다.
+각 Requirement 자가 응답을 뒷받침하도록 Developer가 지정한 근거. 시연 영상의 타임스탬프, 스크린샷, 데모 내 경로, 소스 위치 중 하나다. 증거가 없는 주장은 Score 산출에서 미달로 처리된다. **어느 SubmissionAsset의 근거인지 가리킬 수 있다** — 데모가 둘이면 「데모 내 경로」가 어느 것의 경로인지 그 참조 없이는 아무도(AI도) 모른다. 가리키지 않는 근거도 여전히 유효하고, 가리키던 자료가 사라지면 그 근거도 함께 사라진다.
 _Avoid_: 근거자료, 첨부, Proof, Attachment

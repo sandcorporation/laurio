@@ -103,11 +103,7 @@ def _plant_submissions(contest, count, *, prefix):
 
     for i in range(count):
         developer = _make_developer(f"{prefix}-{i}")
-        Submission.objects.create(
-            contest=contest,
-            developer=developer,
-            source_object_key=f"submission:{contest.id}:{prefix}:{i}:source/deadbeef",
-        )
+        Submission.objects.create(contest=contest, developer=developer)
 
 
 @pytest.mark.django_db
@@ -285,11 +281,7 @@ def test_individual_submission_still_404_before_deadline_despite_open_aggregate(
         deadline_at=timezone.now() + timedelta(days=10),
     )
     developer = _make_developer("aggregate-vs-individual")
-    submission = Submission.objects.create(
-        contest=contest,
-        developer=developer,
-        source_object_key=f"submission:{contest.id}:agg:source/deadbeef",
-    )
+    submission = Submission.objects.create(contest=contest, developer=developer)
 
     # 집계는 열려 있다.
     detail = client.get(f"{CONTESTS_URL}/{contest.id}")

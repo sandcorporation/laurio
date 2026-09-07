@@ -45,9 +45,16 @@ from contests.models import Contest, Requirement
 from contests.view_tracking import get_view_count
 from core.clock import Clock
 from core.keyset import decode_cursor, keyset_page
+from policies.services import get_current_policy
 from verification.models import Verification
 
-from .models import Evidence, RequirementResponse, Submission
+from .models import (
+    GITHUB_REPO_URL_PATTERN,
+    Evidence,
+    RequirementResponse,
+    Submission,
+    SubmissionAsset,
+)
 from .participation import next_action_for
 from .schemas import (
     ErrorOut,
@@ -59,6 +66,7 @@ from .schemas import (
     CompletionDistributionOut,
     CompletionOut,
     ContestComparisonOut,
+    AssetSummaryOut,
     ContestMetricsOut,
     DailyParticipationOut,
     DeveloperPublicProfileOut,
@@ -67,11 +75,12 @@ from .schemas import (
     RequirementComparisonOut,
     RequirementFulfillmentOut,
     RequirementResponseOut,
+    SubmissionAssetOut,
     SubmissionIn,
     SubmissionOut,
     ViewMetricsOut,
 )
-from .target_refs import demo_video_target_ref, source_target_ref
+from .target_refs import target_ref_for_asset_kind
 
 logger = logging.getLogger(__name__)
 
@@ -214,25 +223,174 @@ def _reject_self_dealing(contest: Contest, developer_verification: Verification)
         )
 
 
-def _validate_object_key(
-    object_key: str | None, *, expected_target_ref: str, field_name: str
-) -> None:
-    if not object_key:
-        return
-    if not object_key.startswith(f"{expected_target_ref}/"):
-        raise HttpError(
-            422, f"{field_name}가 본인의 업로드 대상(target_ref)에 속하지 않습니다."
+_ASSET_KINDS = {k.value for k in SubmissionAsset.Kind}
+
+_KIND_LIMIT_FIELDS = {
+    SubmissionAsset.Kind.SOURCE: "max_source_assets",
+    SubmissionAsset.Kind.DEMO_VIDEO: "max_demo_video_assets",
+    SubmissionAsset.Kind.DEMO_URL: "max_demo_url_assets",
+    SubmissionAsset.Kind.REPOSITORY: "max_repository_assets",
+}
+
+_KIND_LABELS = dict(SubmissionAsset.Kind.choices)
+
+
+def _clean_assets_in(assets_in, *, contest: Contest, developer_user_id: int) -> list:
+    """페이로드의 자료를 검증하고 저장 가능한 값으로 다듬는다 (#190).
+
+    여기서 걸러지는 것: 알 수 없는 종류, 소스 없음, 남의 업로드 대상을 가리키는
+    object_key, GitHub 형식이 아닌 저장소 URL, 종류별·합산 개수 상한, 같은 값의
+    중복. 마지막 하나를 API가 막는 이유는 `UniqueConstraint`가 대신 걸리면
+    422가 아니라 500(IntegrityError)이 나기 때문이다.
+    """
+
+    cleaned: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    counts: dict[str, int] = {}
+
+    for item in assets_in:
+        if item.kind not in _ASSET_KINDS:
+            raise HttpError(422, f"알 수 없는 자료 종류입니다: {item.kind}")
+
+        value = (item.value or "").strip()
+        if not value:
+            raise HttpError(422, f"{_KIND_LABELS[item.kind]} 자료의 값이 비어 있습니다.")
+
+        expected_ref = target_ref_for_asset_kind(
+            item.kind, contest_id=contest.id, developer_user_id=developer_user_id
+        )
+        if expected_ref is not None:
+            if not value.startswith(f"{expected_ref}/"):
+                raise HttpError(
+                    422,
+                    f"{_KIND_LABELS[item.kind]} 자료가 본인의 업로드 대상(target_ref)에 "
+                    "속하지 않습니다.",
+                )
+        elif item.kind == SubmissionAsset.Kind.REPOSITORY:
+            if not GITHUB_REPO_URL_PATTERN.match(value):
+                raise HttpError(
+                    422,
+                    "저장소는 https://github.com/<owner>/<repo> 형식만 받습니다.",
+                )
+        else:
+            # 데모 URL은 자유 텍스트다 — 다중화 이전과 같은 취급이다.
+            value = sanitize_free_text(value)
+            if not value:
+                raise HttpError(422, "데모 URL 자료의 값이 비어 있습니다.")
+
+        if (item.kind, value) in seen:
+            raise HttpError(422, "같은 자료가 두 번 담겼습니다.")
+        seen.add((item.kind, value))
+        counts[item.kind] = counts.get(item.kind, 0) + 1
+
+        test_account = sanitize_free_text(item.test_account or "")
+        if test_account and item.kind not in SubmissionAsset.TEST_ACCOUNT_KINDS:
+            # 모델의 CheckConstraint가 최후의 방어선이지만 그것이 걸리면 500이다
+            # (ADR-0023과 같은 규율).
+            raise HttpError(
+                422,
+                f"{_KIND_LABELS[item.kind]} 자료에는 테스트 계정을 붙일 수 없습니다.",
+            )
+
+        cleaned.append(
+            {
+                "id": item.id,
+                "kind": item.kind,
+                "value": value,
+                "label": sanitize_free_text(item.label or ""),
+                "test_account": test_account,
+                "order": item.order,
+            }
         )
 
-
-def _require_source_object_key(source_object_key: str, *, expected_target_ref: str) -> None:
-    if not source_object_key or not source_object_key.strip():
+    if not counts.get(SubmissionAsset.Kind.SOURCE):
         # ADR-0014: 전체 소스코드는 필수다. 이 항목만 "강제하지 않고 신호한다"는
-        # 플랫폼 원칙의 예외다.
-        raise HttpError(422, "전체 소스코드(source_object_key)는 필수입니다.")
-    _validate_object_key(
-        source_object_key, expected_target_ref=expected_target_ref, field_name="source_object_key"
-    )
+        # 플랫폼 원칙의 예외다. 다중화 이후 그 뜻은 "소스 자료가 최소 하나"다.
+        raise HttpError(422, "전체 소스코드는 최소 하나가 필수입니다.")
+
+    policy = get_current_policy()
+    for kind, limit_field in _KIND_LIMIT_FIELDS.items():
+        limit = getattr(policy, limit_field)
+        if counts.get(kind, 0) > limit:
+            raise HttpError(
+                422, f"{_KIND_LABELS[kind]} 자료는 최대 {limit}개까지 담을 수 있습니다."
+            )
+
+    scoring_inputs = sum(counts.get(k, 0) for k in SubmissionAsset.SCORING_INPUT_KINDS)
+    if scoring_inputs > policy.max_scoring_input_assets:
+        # 소스와 저장소는 같은 채점 예산을 나눠 쓴다(#191) — 종류별 상한만으로는
+        # 막을 수 없다.
+        raise HttpError(
+            422,
+            "소스코드와 GitHub 저장소를 합쳐 최대 "
+            f"{policy.max_scoring_input_assets}개까지 담을 수 있습니다.",
+        )
+
+    return cleaned
+
+
+def _merge_assets(submission: Submission, cleaned: list[dict]) -> None:
+    """자료를 병합한다 — 이 API에서 부분 갱신 의미론을 갖는 유일한 곳이다 (#190).
+
+    **자료는 그 값이 곧 정체성이다.** `(submission, kind, value)`가 이미 유일하므로,
+    id를 실어 보내지 않아도 같은 값이면 같은 행이다 — 그렇게 보지 않으면 편집 UI가
+    id를 하나라도 빠뜨릴 때 유니크 제약이 대신 걸려 422가 아니라 500이 난다.
+
+    그래서 병합은 이렇게 한다:
+
+    - `id`가 있으면 그 행이 **이 Submission의 것인지** 먼저 확인한다. 그 검사가
+      없으면 남의 행을 자기 제출작으로 옮길 수 있다.
+    - `id`가 있는데 값이나 종류가 바뀌었으면 그건 **다른 자료**다 — 옛 행은
+      사라지고 새 행이 생긴다(파일을 갈아끼우면 object_key 자체가 새로 발급된다).
+      값을 제자리에서 바꾸지 않는 덕분에, 두 행이 값을 맞바꾸는 편집도 유니크
+      제약에 걸리지 않는다.
+    - `id`가 없으면 같은 (종류, 값)의 기존 행을 찾아 그대로 이어 쓴다.
+    - 어디에도 걸리지 않은 기존 행은 지워진다. 그것을 가리키던 `Evidence`도
+      함께 사라진다(FK가 CASCADE다).
+
+    삭제를 생성보다 **먼저** 한다 — 그래야 지워지는 행이 쓰던 값을 새 행이 바로
+    다시 쓸 수 있다.
+    """
+
+    existing = {a.id: a for a in submission.assets.all()}
+    by_value = {(a.kind, a.value): a for a in existing.values()}
+
+    kept: dict[int, dict] = {}
+    creates: list[dict] = []
+
+    for row in cleaned:
+        asset_id = row.pop("id", None)
+        identity = (row["kind"], row["value"])
+
+        if asset_id is not None:
+            asset = existing.get(asset_id)
+            if asset is None:
+                raise HttpError(422, "이 Submission에 속하지 않은 자료 id입니다.")
+            if (asset.kind, asset.value) == identity and asset.id not in kept:
+                kept[asset.id] = row
+                continue
+            creates.append(row)
+            continue
+
+        match = by_value.get(identity)
+        if match is not None and match.id not in kept:
+            kept[match.id] = row
+            continue
+        creates.append(row)
+
+    stale = [aid for aid in existing if aid not in kept]
+    if stale:
+        SubmissionAsset.objects.filter(id__in=stale).delete()
+
+    for asset_id, row in kept.items():
+        asset = existing[asset_id]
+        asset.label = row["label"]
+        asset.test_account = row["test_account"]
+        asset.order = row["order"]
+        asset.save(update_fields=["label", "test_account", "order", "updated_at"])
+
+    for row in creates:
+        SubmissionAsset.objects.create(submission=submission, **row)
 
 
 # --- 자가 응답 · Evidence -----------------------------------------------------
@@ -242,6 +400,10 @@ def _replace_requirement_responses(submission: Submission, contest: Contest, res
     valid_requirement_ids = set(
         Requirement.objects.filter(contest=contest).values_list("id", flat=True)
     )
+
+    # 근거가 가리킬 수 있는 자료는 이 Submission의 것뿐이다 (#190) — 남의 자료
+    # id를 근거에 붙여 그 존재를 확인하는 경로를 만들지 않는다.
+    own_asset_ids = set(submission.assets.values_list("id", flat=True))
 
     seen_ids: set[int] = set()
     for item in responses_in:
@@ -253,6 +415,8 @@ def _replace_requirement_responses(submission: Submission, contest: Contest, res
         for evidence in item.evidence:
             if evidence.kind not in _EVIDENCE_KINDS:
                 raise HttpError(422, f"알 수 없는 Evidence 종류입니다: {evidence.kind}")
+            if evidence.asset_id is not None and evidence.asset_id not in own_asset_ids:
+                raise HttpError(422, "이 Submission에 속하지 않은 자료를 근거로 지정했습니다.")
 
     # 편집 UI가 매번 체크리스트 전체를 다시 제출하는 형태와 맞춘다 — 부분 갱신이
     # 아니라 이 Submission의 자가 응답 전체를 새로 쓴다.
@@ -266,13 +430,95 @@ def _replace_requirement_responses(submission: Submission, contest: Contest, res
         )
         Evidence.objects.bulk_create(
             [
-                Evidence(response=response, kind=e.kind, value=sanitize_free_text(e.value))
+                Evidence(
+                    response=response,
+                    kind=e.kind,
+                    value=sanitize_free_text(e.value),
+                    asset_id=e.asset_id,
+                )
                 for e in item.evidence
             ]
         )
 
 
 # --- 직렬화 -------------------------------------------------------------------
+
+
+#: 마감 후 전면 공개되는 종류 (ADR-0014의 "데모·영상" 칸).
+_PUBLIC_AFTER_DEADLINE_KINDS = (
+    SubmissionAsset.Kind.DEMO_VIDEO,
+    SubmissionAsset.Kind.DEMO_URL,
+)
+#: Award 전까지 본인만 보는 종류. 저장소가 여기 있는 이유는 ADR-0027 — 공개
+#: 레포라도 플랫폼이 Sponsor에게 코드로 가는 길을 먼저 열어주지는 않는다.
+_OWNER_UNTIL_AWARD_KINDS = (
+    SubmissionAsset.Kind.SOURCE,
+    SubmissionAsset.Kind.REPOSITORY,
+)
+
+
+def _visible_asset_kinds(
+    *, is_owner: bool, is_sponsor: bool, is_awarded: bool, past_deadline: bool
+) -> tuple[str, ...]:
+    """이 뷰어에게 보이는 자료 종류 (ADR-0014, ADR-0027).
+
+    **볼 수 없는 종류는 목록에서 빠진다** — 예전에는 종류마다 필드가 하나씩이라
+    null로 "존재하지만 안 보임"을 표현했지만, 목록에서는 그 구분이 성립하지 않는다.
+    """
+
+    kinds: list[str] = []
+    if is_owner or is_awarded:
+        kinds.extend(_OWNER_UNTIL_AWARD_KINDS)
+    if is_owner or is_sponsor or past_deadline:
+        kinds.extend(_PUBLIC_AFTER_DEADLINE_KINDS)
+    return tuple(kinds)
+
+
+def _evidence_outs(evidence_items, visible_asset_ids: set[int]) -> list[EvidenceOut]:
+    """근거를 직렬화한다 — **보이지 않는 자료를 가리키는 참조는 지운다** (#190).
+
+    id 자체는 불투명한 정수지만, 그것을 그대로 내리면 "이 사람에게 보이지 않는
+    자료가 존재한다"가 근거를 통해 새어나간다. 자료가 안 보이면 그것을 가리킨다는
+    사실도 안 보여야 한다 — 근거의 `kind`·`value`는 그대로 남으므로 심사에
+    필요한 정보는 잃지 않는다.
+    """
+
+    return [
+        EvidenceOut(
+            kind=e.kind,
+            value=e.value,
+            asset_id=e.asset_id if e.asset_id in visible_asset_ids else None,
+        )
+        for e in evidence_items
+    ]
+
+
+def _completion_of(assets, *, total_requirements: int, linked_count: int) -> CompletionOut:
+    """자료 목록에서 완성도 지표를 만든다 (#190).
+
+    `assets`는 **가시성으로 거르기 전의 전체 목록**이어야 한다 — 이 지표는
+    "제출작이 얼마나 채워졌는가"이지 "당신에게 몇 개가 보이는가"가 아니다.
+    """
+
+    counts: dict[str, int] = {}
+    has_test_account = False
+    for asset in assets:
+        counts[asset.kind] = counts.get(asset.kind, 0) + 1
+        if asset.test_account:
+            has_test_account = True
+
+    return CompletionOut(
+        has_demo_video=bool(counts.get(SubmissionAsset.Kind.DEMO_VIDEO)),
+        has_demo_url=bool(counts.get(SubmissionAsset.Kind.DEMO_URL)),
+        has_test_account=has_test_account,
+        source_count=counts.get(SubmissionAsset.Kind.SOURCE, 0),
+        demo_video_count=counts.get(SubmissionAsset.Kind.DEMO_VIDEO, 0),
+        demo_url_count=counts.get(SubmissionAsset.Kind.DEMO_URL, 0),
+        repository_count=counts.get(SubmissionAsset.Kind.REPOSITORY, 0),
+        total_requirement_count=total_requirements,
+        linked_requirement_count=linked_count,
+        unlinked_requirement_count=max(total_requirements - linked_count, 0),
+    )
 
 
 def _serialize(
@@ -288,6 +534,25 @@ def _serialize(
         r.requirement_id: r
         for r in submission.requirement_responses.all().prefetch_related("evidence_items")
     }
+
+    # 소스·저장소는 소유자 본인과, Award된 뒤의 Sponsor에게만 나온다(ADR-0014,
+    # ADR-0027, #14 Handover) — Award되지 않은 Submission의 소스는 Sponsor에게도
+    # 절대 보이지 않는다. 데모·영상은 진행 중엔 본인·Sponsor, 마감 후엔 전면 공개.
+    #
+    # `test_account`는 데모 URL 자료에 붙어 있다 — 마감 후 공개되는 건 데모·영상
+    # 뿐이고, 그걸 들여다볼 로그인 정보까지 공개 범위에 들어가지는 않는다(#10 리뷰
+    # 지적). 그래서 자료 자체는 마감 후 공개되어도 계정은 본인·Sponsor로만 좁힌다.
+    assets = list(submission.assets.all())
+    is_awarded = is_sponsor and Award.objects.filter(submission_id=submission.id).exists()
+    visible_kinds = _visible_asset_kinds(
+        is_owner=is_owner,
+        is_sponsor=is_sponsor,
+        is_awarded=is_awarded,
+        past_deadline=past_deadline,
+    )
+    visible_assets = [a for a in assets if a.kind in visible_kinds]
+    visible_asset_ids = {a.id for a in visible_assets}
+    show_test_account = is_owner or is_sponsor
 
     response_outs: list[RequirementResponseOut] = []
     linked_count = 0
@@ -314,41 +579,31 @@ def _serialize(
                 requirement_id=requirement.id,
                 is_met=response.is_met,
                 note=response.note,
-                evidence=[EvidenceOut(kind=e.kind, value=e.value) for e in evidence_items],
+                evidence=_evidence_outs(evidence_items, visible_asset_ids),
                 is_linked=is_linked,
             )
         )
 
     total = len(requirements)
-    completion = CompletionOut(
-        has_demo_video=bool(submission.demo_video_object_key),
-        has_demo_url=bool(submission.demo_url),
-        has_test_account=bool(submission.test_account),
-        total_requirement_count=total,
-        linked_requirement_count=linked_count,
-        unlinked_requirement_count=max(total - linked_count, 0),
-    )
-
-    # 소스는 소유자 본인과, Award된 뒤의 Sponsor에게만 나온다(ADR-0014, #14
-    # Handover) — Award되지 않은 Submission의 소스는 Sponsor에게도 절대 보이지
-    # 않는다. 데모·영상은 진행 중엔 본인·Sponsor, 마감 후엔 전면 공개(ADR-0014의
-    # "데모·영상" 칸). test_account는 그 칸에 없다 — 마감 후 공개되는 건 데모·영상
-    # 뿐이고, 그걸 들여다볼 로그인 정보까지 공개 범위에 들어가지는 않는다(#10 리뷰
-    # 지적). 그래서 test_account는 진행 중이든 마감 후든 항상 본인·Sponsor로만 좁힌다.
-    is_awarded = is_sponsor and Award.objects.filter(submission_id=submission.id).exists()
-    show_source = is_owner or is_awarded
-    show_demo = is_owner or is_sponsor or past_deadline
-    show_test_account = is_owner or is_sponsor
+    completion = _completion_of(assets, total_requirements=total, linked_count=linked_count)
 
     return SubmissionOut(
         id=submission.id,
         contest_id=submission.contest_id,
         developer_id=submission.developer_id,
         is_owner=is_owner,
-        source_object_key=submission.source_object_key if show_source else None,
-        demo_video_object_key=(submission.demo_video_object_key or None) if show_demo else None,
-        demo_url=(submission.demo_url or None) if show_demo else None,
-        test_account=(submission.test_account or None) if show_test_account else None,
+        assets=[
+            SubmissionAssetOut(
+                id=a.id,
+                kind=a.kind,
+                value=a.value,
+                label=a.label,
+                test_account=a.test_account if show_test_account else "",
+                order=a.order,
+                is_public=a.is_public,
+            )
+            for a in visible_assets
+        ],
         requirement_responses=response_outs,
         completion=completion,
         created_at=submission.created_at,
@@ -376,26 +631,19 @@ def create_submission(request: HttpRequest, contest_id: int, payload: Submission
             409, "이미 이 Contest에 제출한 Submission이 있습니다. 수정은 PUT을 사용하세요."
         )
 
-    expected_source_ref = source_target_ref(contest.id, request.auth_user.id)
-    _require_source_object_key(payload.source_object_key, expected_target_ref=expected_source_ref)
-
-    expected_demo_video_ref = demo_video_target_ref(contest.id, request.auth_user.id)
-    _validate_object_key(
-        payload.demo_video_object_key,
-        expected_target_ref=expected_demo_video_ref,
-        field_name="demo_video_object_key",
+    cleaned_assets = _clean_assets_in(
+        payload.assets, contest=contest, developer_user_id=request.auth_user.id
     )
+    if any(row["id"] is not None for row in cleaned_assets):
+        # 첫 제출에는 유지할 기존 자료가 없다. id를 실어 보냈다면 그것은 다른
+        # Submission의 것이거나 클라이언트 버그다 — 어느 쪽이든 조용히 무시하면
+        # 안 된다.
+        raise HttpError(422, "첫 제출에는 자료 id를 실을 수 없습니다.")
 
     try:
         with transaction.atomic():
-            submission = Submission.objects.create(
-                contest=contest,
-                developer=developer,
-                source_object_key=payload.source_object_key,
-                demo_video_object_key=payload.demo_video_object_key or "",
-                demo_url=sanitize_free_text(payload.demo_url or ""),
-                test_account=sanitize_free_text(payload.test_account or ""),
-            )
+            submission = Submission.objects.create(contest=contest, developer=developer)
+            _merge_assets(submission, cleaned_assets)
             _replace_requirement_responses(submission, contest, payload.requirement_responses)
     except IntegrityError as exc:
         raise HttpError(409, "이미 이 Contest에 제출한 Submission이 있습니다.") from exc
@@ -425,22 +673,15 @@ def update_submission(request: HttpRequest, contest_id: int, payload: Submission
     if submission is None:
         raise HttpError(404, "수정할 Submission이 없습니다. 먼저 제출하세요.")
 
-    expected_source_ref = source_target_ref(contest.id, request.auth_user.id)
-    _require_source_object_key(payload.source_object_key, expected_target_ref=expected_source_ref)
-
-    expected_demo_video_ref = demo_video_target_ref(contest.id, request.auth_user.id)
-    _validate_object_key(
-        payload.demo_video_object_key,
-        expected_target_ref=expected_demo_video_ref,
-        field_name="demo_video_object_key",
+    cleaned_assets = _clean_assets_in(
+        payload.assets, contest=contest, developer_user_id=request.auth_user.id
     )
 
     with transaction.atomic():
-        submission.source_object_key = payload.source_object_key
-        submission.demo_video_object_key = payload.demo_video_object_key or ""
-        submission.demo_url = sanitize_free_text(payload.demo_url or "")
-        submission.test_account = sanitize_free_text(payload.test_account or "")
-        submission.save()
+        _merge_assets(submission, cleaned_assets)
+        # `updated_at`(auto_now)이 자료만 바뀐 수정에도 움직이게 한다 — 안 그러면
+        # "마지막으로 손댄 때"가 체크리스트를 고친 때만 가리킨다.
+        submission.save(update_fields=["updated_at"])
         _replace_requirement_responses(submission, contest, payload.requirement_responses)
 
     submission.refresh_from_db()
@@ -633,6 +874,7 @@ def get_developer_public_profile(request: HttpRequest, developer_id: int):
     submissions = (
         Submission.objects.filter(developer=developer, contest__deadline_at__lte=now)
         .select_related("contest")
+        .prefetch_related("assets")
         .order_by("-contest__deadline_at")
     )
 
@@ -645,8 +887,13 @@ def get_developer_public_profile(request: HttpRequest, developer_id: int):
                 submission_id=s.id,
                 contest_id=s.contest_id,
                 contest_title=s.contest.title,
-                demo_video_object_key=s.demo_video_object_key or None,
-                demo_url=s.demo_url or None,
+                assets=[
+                    AssetSummaryOut(
+                        id=a.id, kind=a.kind, value=a.value, label=a.label, order=a.order
+                    )
+                    for a in s.assets.all()
+                    if a.kind in _PUBLIC_AFTER_DEADLINE_KINDS
+                ],
                 created_at=s.created_at,
             )
             for s in submissions
@@ -686,7 +933,7 @@ def compare_submissions(request: HttpRequest, contest_id: int):
     submissions = (
         Submission.objects.filter(contest=contest)
         .select_related("developer")
-        .prefetch_related("requirement_responses__evidence_items")
+        .prefetch_related("requirement_responses__evidence_items", "assets")
         .order_by("id")
     )
 
@@ -699,6 +946,12 @@ def compare_submissions(request: HttpRequest, contest_id: int):
         )
         responses_by_requirement = {
             r.requirement_id: r for r in submission.requirement_responses.all()
+        }
+        assets = list(submission.assets.all())
+        # 이 화면에 나오는 자료는 데모·영상뿐이다 — 소스·저장소를 가리키는 근거는
+        # 참조 없이 나간다(`_evidence_outs` 참고).
+        visible_asset_ids = {
+            a.id for a in assets if a.kind in _PUBLIC_AFTER_DEADLINE_KINDS
         }
 
         linked_count = 0
@@ -729,7 +982,7 @@ def compare_submissions(request: HttpRequest, contest_id: int):
                     developer_display_name=developer_name,
                     is_met=response.is_met,
                     note=response.note,
-                    evidence=[EvidenceOut(kind=e.kind, value=e.value) for e in evidence_items],
+                    evidence=_evidence_outs(evidence_items, visible_asset_ids),
                     is_linked=is_linked,
                 )
             )
@@ -740,15 +993,15 @@ def compare_submissions(request: HttpRequest, contest_id: int):
                 submission_id=submission.id,
                 developer_id=submission.developer_id,
                 developer_display_name=developer_name,
-                demo_video_object_key=submission.demo_video_object_key or None,
-                demo_url=submission.demo_url or None,
-                completion=CompletionOut(
-                    has_demo_video=bool(submission.demo_video_object_key),
-                    has_demo_url=bool(submission.demo_url),
-                    has_test_account=bool(submission.test_account),
-                    total_requirement_count=total,
-                    linked_requirement_count=linked_count,
-                    unlinked_requirement_count=max(total - linked_count, 0),
+                assets=[
+                    AssetSummaryOut(
+                        id=a.id, kind=a.kind, value=a.value, label=a.label, order=a.order
+                    )
+                    for a in assets
+                    if a.kind in _PUBLIC_AFTER_DEADLINE_KINDS
+                ],
+                completion=_completion_of(
+                    assets, total_requirements=total, linked_count=linked_count
                 ),
             )
         )
@@ -850,16 +1103,30 @@ def get_contest_metrics(request: HttpRequest, contest_id: int):
 
     # #108 — 제출 완성도 분포. 세 boolean을 한 집계 질의로 센다(`Count` +
     # `filter=~Q(...)`) — Submission마다 훑지 않는다.
+    # 세는 것은 여전히 "그 자료를 **하나라도** 가진 Submission 수"다(자료 수가
+    # 아니다) — `Count(distinct=True)`가 그것이다. 다중화 이후 자료 수를 그대로
+    # 세면 영상 다섯 편을 낸 한 사람이 분모(제출 수)를 넘겨 100%를 넘는 비율이
+    # 나온다.
     completion_agg = submissions_qs.aggregate(
-        demo_video_count=Count("id", filter=~Q(demo_video_object_key="")),
-        demo_url_count=Count("id", filter=~Q(demo_url="")),
-        test_account_count=Count("id", filter=~Q(test_account="")),
+        demo_video_count=Count(
+            "id", filter=Q(assets__kind=SubmissionAsset.Kind.DEMO_VIDEO), distinct=True
+        ),
+        demo_url_count=Count(
+            "id", filter=Q(assets__kind=SubmissionAsset.Kind.DEMO_URL), distinct=True
+        ),
+        repository_count=Count(
+            "id", filter=Q(assets__kind=SubmissionAsset.Kind.REPOSITORY), distinct=True
+        ),
+        test_account_count=Count(
+            "id", filter=~Q(assets__test_account=""), distinct=True
+        ),
     )
     completion_distribution = CompletionDistributionOut(
         total_submission_count=total_submission_count,
         demo_video_count=completion_agg["demo_video_count"],
         demo_url_count=completion_agg["demo_url_count"],
         test_account_count=completion_agg["test_account_count"],
+        repository_count=completion_agg["repository_count"],
     )
 
     # #109 — 조회수와 전환율. 쓰기는 `contests.view_tracking`이 캐시에서

@@ -206,7 +206,7 @@ def _submit(client, access: str, contest_id: int) -> None:
     developer_user_id = me.json()["id"]
     response = client.post(
         f"{CONTESTS_URL}/{contest_id}/submissions",
-        data={"source_object_key": _source_object_key(contest_id, developer_user_id)},
+        data={"assets": [{"kind": "source", "value": _source_object_key(contest_id, developer_user_id)}]},
         content_type="application/json",
         **_auth_header(access),
     )

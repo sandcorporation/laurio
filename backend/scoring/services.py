@@ -40,7 +40,7 @@ from contests.models import Contest, Requirement
 from core.prompt_safety import neutralize_untrusted as _neutralize_untrusted
 from core.scans import ScanSpec
 from storage.adapters import get_storage_adapter
-from submissions.models import RequirementResponse, Submission
+from submissions.models import RequirementResponse, Submission, SubmissionAsset
 
 from .adapters import LLMAdapterPermanentError, RequirementInput, ScoringInput, get_adapter
 from .models import Score, ScoringAttempt
@@ -178,8 +178,28 @@ def score_submission_once(submission: Submission) -> dict:
     if Score.objects.filter(submission_id=submission.id).exists():
         return {"submission_id": submission.id, "status": "already_scored"}
 
+    # #190이 소스를 `SubmissionAsset` 목록으로 바꿨다. **이 티켓은 그중 첫
+    # 소스만 읽는다** — 여러 소스를 한 예산 안에서 라운드로빈으로 보는 것은
+    # #191이다. 그때까지는 다중 제출이 첫 소스로만 채점되며, 그 사실이 조용히
+    # 묻히지 않도록 여기 적어 둔다.
+    source_asset = (
+        submission.assets.filter(kind=SubmissionAsset.Kind.SOURCE)
+        .order_by("order", "id")
+        .first()
+    )
+    if source_asset is None:
+        # 소스 없는 Submission은 API가 막는다(ADR-0014) — 여기 닿는다면 데이터가
+        # 그 불변식을 벗어난 것이다. Score는 append-only라 0점으로 확정해 버리면
+        # 되돌릴 수 없으므로, 채점하지 않고 이력만 남긴다.
+        ScoringAttempt.objects.create(
+            submission=submission,
+            error="소스 자료가 하나도 없다 — 채점하지 않는다.",
+            permanent=True,
+        )
+        return {"submission_id": submission.id, "status": "source_not_found"}
+
     storage_adapter = get_storage_adapter()
-    raw_source = storage_adapter.read_object(submission.source_object_key)
+    raw_source = storage_adapter.read_object(source_asset.value)
     if raw_source is None:
         # storage.adapters.base.StorageAdapter.read_object 문서대로, None은 "아직
         # 없다"는 뜻이지 실패가 아니다. Score는 append-only라 한 번 잘못 쓰면 영원히

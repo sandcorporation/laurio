@@ -27,6 +27,7 @@ from contests.models import Category, Contest, DeliverableType
 from core.models import ClockOverride
 from handovers.models import Handover
 from ledger.services import contest_entries
+from tests.submission_assets import assets_of, first_value, demo_account_of
 
 TICK_URL = "/api/internal/tick"
 CONTESTS_URL = "/api/contests"
@@ -145,10 +146,7 @@ def _source_object_key(contest_id: int, developer_user_id: int) -> str:
 def _submit(client, dev: dict, contest_id: int) -> dict:
     response = client.post(
         f"{CONTESTS_URL}/{contest_id}/submissions",
-        data={
-            "source_object_key": _source_object_key(contest_id, dev["user_id"]),
-            "requirement_responses": [],
-        },
+        data={"assets": [{"kind": "source", "value": _source_object_key(contest_id, dev["user_id"])}], "requirement_responses": []},
         content_type="application/json",
         **_auth_header(dev["access"]),
     )
@@ -214,8 +212,8 @@ def test_award_opens_source_access_to_sponsor(client, category, landing_type):
     )
     assert detail.status_code == 200
     body = detail.json()
-    assert body["source_object_key"] is not None
-    assert body["source_object_key"] == submission["source_object_key"]
+    assert first_value(body, "source") is not None
+    assert first_value(body, "source") == first_value(submission, "source")
 
 
 @pytest.mark.django_db
@@ -226,7 +224,7 @@ def test_award_opens_source_download_url_to_sponsor(client, category, landing_ty
         f"{STORAGE_URL}/downloads",
         data={
             "target_ref": f"submission:{contest['id']}:{dev['user_id']}:source",
-            "object_key": submission["source_object_key"],
+            "object_key": first_value(submission, "source"),
         },
         content_type="application/json",
         **_auth_header(sponsor["access"]),
@@ -253,13 +251,13 @@ def test_non_awarded_submission_source_stays_hidden_from_sponsor(client, categor
         f"{SUBMISSIONS_URL}/{submission_other['id']}", **_auth_header(sponsor["access"])
     )
     assert other_detail.status_code == 200
-    assert other_detail.json()["source_object_key"] is None
+    assert assets_of(other_detail.json(), "source") == []
 
     download_resp = client.post(
         f"{STORAGE_URL}/downloads",
         data={
             "target_ref": f"submission:{contest['id']}:{dev_other['user_id']}:source",
-            "object_key": submission_other["source_object_key"],
+            "object_key": first_value(submission_other, "source"),
         },
         content_type="application/json",
         **_auth_header(sponsor["access"]),
@@ -275,7 +273,7 @@ def test_developer_source_still_visible_to_self(client, category, landing_type):
         f"{SUBMISSIONS_URL}/{submission['id']}", **_auth_header(dev["access"])
     )
     assert own_detail.status_code == 200
-    assert own_detail.json()["source_object_key"] == submission["source_object_key"]
+    assert first_value(own_detail.json(), "source") == first_value(submission, "source")
 
 
 # --- 빌드 자산 -----------------------------------------------------------------

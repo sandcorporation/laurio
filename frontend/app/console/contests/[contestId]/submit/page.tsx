@@ -65,6 +65,15 @@ export default function SubmitPage() {
   const [demoVideoObjectKey, setDemoVideoObjectKey] = useState("");
   const [demoUrl, setDemoUrl] = useState("");
   const [testAccount, setTestAccount] = useState("");
+  // 이 폼이 편집 중인 자료의 id (#190) — 저장할 때 되돌려 보내야 기존 행이 유지된다.
+  const [editedAssetIds, setEditedAssetIds] = useState<{
+    source?: number;
+    demo_video?: number;
+    demo_url?: number;
+  }>({});
+  // 이 폼이 다루지 않는 자료(두 번째 소스, 저장소 등) — 손대지 않고 그대로
+  // 되돌려 보낸다. 여러 개를 편집하는 UI 는 #192 다.
+  const [untouchedAssets, setUntouchedAssets] = useState<SubmissionOut["assets"]>([]);
   const [requirementStates, setRequirementStates] = useState<
     Record<number, RequirementFieldState>
   >({});
@@ -113,10 +122,25 @@ export default function SubmitPage() {
 
       if (cancelled) return;
 
-      setSourceObjectKey(submission?.source_object_key ?? "");
-      setDemoVideoObjectKey(submission?.demo_video_object_key ?? "");
-      setDemoUrl(submission?.demo_url ?? "");
-      setTestAccount(submission?.test_account ?? "");
+      // #190 이후 제출작은 자료 **목록**을 담는다. 이 폼은 아직 종류당 하나만
+      // 편집한다(여러 개를 넣고 빼는 UI 는 #192 다) — 그래서 각 종류의 첫 자료를
+      // 칸에 채우고, **나머지는 건드리지 않은 채 그대로 되돌려 보낸다**
+      // (`untouchedAssets`). 그러지 않으면 API 로 자료를 여럿 낸 참가자가 이
+      // 화면에서 한 번 저장하는 순간 나머지를 통째로 잃는다.
+      const assets = submission?.assets ?? [];
+      const firstOfKind = (kind: string) => assets.find((a) => a.kind === kind);
+      const source = firstOfKind("source");
+      const video = firstOfKind("demo_video");
+      const demo = firstOfKind("demo_url");
+
+      setSourceObjectKey(source?.value ?? "");
+      setDemoVideoObjectKey(video?.value ?? "");
+      setDemoUrl(demo?.value ?? "");
+      setTestAccount(demo?.test_account ?? "");
+      setEditedAssetIds({ source: source?.id, demo_video: video?.id, demo_url: demo?.id });
+      setUntouchedAssets(
+        assets.filter((a) => a.id !== source?.id && a.id !== video?.id && a.id !== demo?.id),
+      );
 
       const initialStates: Record<number, RequirementFieldState> = {};
       for (const requirement of contest.data.requirements) {
@@ -271,11 +295,53 @@ export default function SubmitPage() {
     }
 
     setSaveState({ status: "saving" });
+
+    // 이 폼이 편집하는 세 자료 + 이 폼이 모르는 나머지(그대로 되돌려 보낸다).
+    // id 를 함께 실어야 기존 행이 유지된다 — 빠뜨리면 같은 파일이 매번 새 행이
+    // 되어 「언제 올렸는가」가 전부 마지막 수정 시각으로 뭉갠다.
+    const assets: SubmissionIn["assets"] = [
+      {
+        kind: "source",
+        value: sourceObjectKey,
+        label: "",
+        test_account: "",
+        order: 0,
+        ...(editedAssetIds.source ? { id: editedAssetIds.source } : {}),
+      },
+    ];
+    if (demoVideoObjectKey) {
+      assets.push({
+        kind: "demo_video",
+        value: demoVideoObjectKey,
+        label: "",
+        test_account: "",
+        order: 0,
+        ...(editedAssetIds.demo_video ? { id: editedAssetIds.demo_video } : {}),
+      });
+    }
+    if (demoUrl) {
+      assets.push({
+        kind: "demo_url",
+        value: demoUrl,
+        label: "",
+        test_account: testAccount,
+        order: 0,
+        ...(editedAssetIds.demo_url ? { id: editedAssetIds.demo_url } : {}),
+      });
+    }
+    for (const asset of untouchedAssets) {
+      assets.push({
+        id: asset.id,
+        kind: asset.kind,
+        value: asset.value,
+        label: asset.label,
+        test_account: asset.test_account,
+        order: asset.order,
+      });
+    }
+
     const payload: SubmissionIn = {
-      source_object_key: sourceObjectKey,
-      demo_video_object_key: demoVideoObjectKey || null,
-      demo_url: demoUrl || null,
-      test_account: testAccount || null,
+      assets,
       requirement_responses: load.contest.requirements.map((r) => ({
         requirement_id: r.id,
         is_met: requirementStates[r.id]?.isMet ?? false,

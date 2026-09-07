@@ -281,7 +281,10 @@ def _submit(
 
     response = client.post(
         f"{CONTESTS_URL}/{contest_id}/submissions",
-        data={"source_object_key": source_key, "requirement_responses": responses},
+        data={
+            "assets": [{"kind": "source", "value": source_key}],
+            "requirement_responses": responses,
+        },
         content_type="application/json",
         **_auth_header(dev["access"]),
     )

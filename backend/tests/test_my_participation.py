@@ -495,11 +495,7 @@ def _clone_submissions(count: int, *, developer, category) -> None:
             deadline_at=timezone.now() + timedelta(hours=1),
             status=Contest.Status.PUBLISHED,
         )
-        Submission.objects.create(
-            contest=contest,
-            developer=developer,
-            source_object_key=f"submission:{contest.id}:{developer.id}:source/clone-{index}",
-        )
+        Submission.objects.create(contest=contest, developer=developer)
 
 
 @pytest.mark.django_db
