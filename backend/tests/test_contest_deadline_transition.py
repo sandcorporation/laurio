@@ -20,6 +20,7 @@ from django.utils import timezone
 
 from contests.models import Category, Contest, DeliverableType
 from core.models import ClockOverride
+from tests.submission_assets import assets_of, first_value, demo_account_of
 
 TICK_URL = "/api/internal/tick"
 CONTESTS_URL = "/api/contests"
@@ -257,11 +258,7 @@ def test_after_tick_closes_contest_demo_is_public_but_source_stays_hidden(
     demo_key = _demo_video_object_key(contest["id"], dev["user_id"])
     submit_resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
-        data={
-            "source_object_key": source_key,
-            "demo_video_object_key": demo_key,
-            "test_account": "demo-id/demo-pw",
-        },
+        data={"assets": [{"kind": "source", "value": source_key}, {"kind": "demo_video", "value": demo_key}, {"kind": "demo_url", "value": "https://example.invalid/deadline-demo", "test_account": "demo-id/demo-pw"}]},
         content_type="application/json",
         **_auth_header(dev["access"]),
     )
@@ -277,25 +274,25 @@ def test_after_tick_closes_contest_demo_is_public_but_source_stays_hidden(
     anon_resp = client.get(f"{SUBMISSIONS_URL}/{submission_id}")
     assert anon_resp.status_code == 200
     body = anon_resp.json()
-    assert body["demo_video_object_key"] == demo_key
+    assert first_value(body, "demo_video") == demo_key
 
     # 소스는 마감 후에도, Sponsor에게도, 누구에게도 공개되지 않는다.
-    assert body["source_object_key"] is None
-    assert body["test_account"] is None
+    assert assets_of(body, "source") == []
+    assert demo_account_of(body) == ""
 
     sponsor_resp = client.get(
         f"{SUBMISSIONS_URL}/{submission_id}", **_auth_header(sponsor["access"])
     )
     assert sponsor_resp.status_code == 200
     sponsor_body = sponsor_resp.json()
-    assert sponsor_body["source_object_key"] is None
+    assert assets_of(sponsor_body, "source") == []
     # test_account는 owner+sponsor에게만 계속 열려 있다.
-    assert sponsor_body["test_account"] == "demo-id/demo-pw"
+    assert demo_account_of(sponsor_body) == "demo-id/demo-pw"
 
     owner_resp = client.get(
         f"{SUBMISSIONS_URL}/{submission_id}", **_auth_header(dev["access"])
     )
-    assert owner_resp.json()["source_object_key"] == source_key
+    assert first_value(owner_resp.json(), "source") == source_key
 
 
 @pytest.mark.django_db
@@ -315,7 +312,7 @@ def test_no_storage_bytes_move_object_keys_are_unchanged_by_the_deadline(
     demo_key = _demo_video_object_key(contest["id"], dev["user_id"])
     submit_resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
-        data={"source_object_key": source_key, "demo_video_object_key": demo_key},
+        data={"assets": [{"kind": "source", "value": source_key}, {"kind": "demo_video", "value": demo_key}]},
         content_type="application/json",
         **_auth_header(dev["access"]),
     )
@@ -324,16 +321,17 @@ def test_no_storage_bytes_move_object_keys_are_unchanged_by_the_deadline(
 
     from submissions.models import Submission
 
+    def _keys(submission) -> dict[str, str]:
+        return {a.kind: a.value for a in submission.assets.all()}
+
     before = Submission.objects.get(id=submission_id)
-    assert before.source_object_key == source_key
-    assert before.demo_video_object_key == demo_key
+    assert _keys(before) == {"source": source_key, "demo_video": demo_key}
 
     _freeze(deadline + timedelta(minutes=1))
     client.post(TICK_URL, **_internal_headers())
 
     after = Submission.objects.get(id=submission_id)
-    assert after.source_object_key == source_key
-    assert after.demo_video_object_key == demo_key
+    assert _keys(after) == {"source": source_key, "demo_video": demo_key}
 
 
 # --- Developer 공개 프로필 아카이브 (#11 새 AC) ---------------------------------
@@ -356,11 +354,7 @@ def test_closed_submission_appears_on_developer_public_profile(client, category,
     demo_key = _demo_video_object_key(contest["id"], dev["user_id"])
     submit_resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
-        data={
-            "source_object_key": _source_object_key(contest["id"], dev["user_id"]),
-            "demo_video_object_key": demo_key,
-            "demo_url": "https://example.com/demo",
-        },
+        data={"assets": [{"kind": "source", "value": _source_object_key(contest["id"], dev["user_id"])}, {"kind": "demo_video", "value": demo_key}, {"kind": "demo_url", "value": "https://example.com/demo"}]},
         content_type="application/json",
         **_auth_header(dev["access"]),
     )
@@ -385,19 +379,18 @@ def test_closed_submission_appears_on_developer_public_profile(client, category,
     assert after.status_code == 200
     after_body = after.json()
     assert after_body["display_name"] == "포트폴리오 개발자"
-    assert after_body["submissions"] == [
-        {
-            "submission_id": submission_id,
-            "contest_id": contest["id"],
-            "contest_title": contest["title"],
-            "demo_video_object_key": demo_key,
-            "demo_url": "https://example.com/demo",
-            "created_at": after_body["submissions"][0]["created_at"],
-        }
-    ]
-    # 소스·test_account는 공개 프로필 스키마 자체에 없다.
-    assert "source_object_key" not in after_body["submissions"][0]
-    assert "test_account" not in after_body["submissions"][0]
+    assert len(after_body["submissions"]) == 1
+    archived = after_body["submissions"][0]
+    assert archived["submission_id"] == submission_id
+    assert archived["contest_id"] == contest["id"]
+    assert archived["contest_title"] == contest["title"]
+    assert {(a["kind"], a["value"]) for a in archived["assets"]} == {
+        ("demo_video", demo_key),
+        ("demo_url", "https://example.com/demo"),
+    }
+    # 공개 프로필의 자료 목록에는 소스가 아예 들어오지 않고, 원소 타입에
+    # test_account 필드 자체가 없다(#190).
+    assert all("test_account" not in a for a in archived["assets"])
 
 
 @pytest.mark.django_db
@@ -425,7 +418,7 @@ def test_developer_can_still_view_own_submission_after_contest_closes(
     dev = _verified_user(client, "dev-1", "dev-ci-1")
     submit_resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
-        data={"source_object_key": _source_object_key(contest["id"], dev["user_id"])},
+        data={"assets": [{"kind": "source", "value": _source_object_key(contest["id"], dev["user_id"])}]},
         content_type="application/json",
         **_auth_header(dev["access"]),
     )

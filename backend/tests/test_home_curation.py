@@ -21,6 +21,7 @@ from django.utils import timezone
 from accounts.models import SponsorProfile
 from contests.curation import HOME_IMMINENT_DEADLINE_DAYS, HomeCurationBucket, home_bucket_for
 from contests.models import Category, Contest, DeliverableType
+from tests.submission_assets import assets_of, first_value, demo_account_of
 
 HOME_URL = "/api/contests/home"
 
@@ -588,9 +589,9 @@ def test_demo_seed_gives_every_contest_entrants(db, client):
 
     # 마감 후에도 소스와 테스트 계정은 소유자 본인에게만 보인다(ADR-0014) —
     # 시드가 그 경계를 우회해 만든 데이터가 아니라는 것을 함께 고정한다.
-    assert body["source_object_key"] is None
-    assert body["test_account"] is None
-    assert body["demo_url"]
+    assert assets_of(body, "source") == []
+    assert demo_account_of(body) == ""
+    assert first_value(body, "demo_url")
     assert body["requirement_responses"], "Requirement 응답이 없으면 심사 비교 화면이 빈다"
 
 

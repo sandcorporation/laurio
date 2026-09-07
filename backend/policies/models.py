@@ -151,6 +151,30 @@ class PlatformPolicy(models.Model):
     distribution_cutline_percentage = models.DecimalField(
         max_digits=5, decimal_places=2, default=Decimal("60.00")
     )
+    # --- 제출 자산 개수 상한 (#190, ADR-0027) --------------------------------
+    # 한 Submission이 담을 수 있는 자산 수. 사업이 정하는 값이라 배포 없이 운영자가
+    # 조정할 수 있어야 하고 바뀌면 이력이 남아야 한다(ADR-0023).
+    #
+    # **채점 예산 자체는 여기 없다.** `scoring.source_selection.MAX_SOURCE_BYTES`는
+    # 모델 토큰 한도에 묶인 기술값이라 환경이 아니라 모델이 정한다 — 정책이 갖는
+    # 것은 개수뿐이다.
+    max_source_assets = models.PositiveIntegerField(default=5)
+    max_demo_video_assets = models.PositiveIntegerField(default=5)
+    max_demo_url_assets = models.PositiveIntegerField(default=10)
+    max_repository_assets = models.PositiveIntegerField(default=8)
+
+    # `source` + `repository` **합산** 상한. 그 둘은 같은 LLM 컨텍스트 예산을 나눠
+    # 쓰므로(#191) 종류별 상한만으로는 막을 수 없다: 5 + 8 = 13개가 300KB를 나누면
+    # 개당 23KB로 사실상 무의미한 채점이 되고, 모델 컨텍스트를 넘기면 그 400이
+    # `LLMAdapterPermanentError`로 잡혀 **소스를 많이 낸 참가자가 오히려 Score 없이
+    # 배분 컷라인에서 탈락한다**.
+    #
+    # **공개 여부와 무관하게 제출 시점에 센다.** 저장소 공개 판정은 비동기라(#193)
+    # 제출 시점에는 어느 저장소가 채점 입력인지 알 수 없다 — 비공개 저장소도 정원을
+    # 먹는 대신, "낸 것은 전부 채점된다"가 보장된다. `max_repository_assets`를 10이
+    # 아니라 8로 두는 이유도 이것이다(합산 8이 지배하므로 10은 거짓말이 된다).
+    max_scoring_input_assets = models.PositiveIntegerField(default=8)
+
     # 낙관적 동시성 제어(#76) — GET이 이 값을 함께 돌려주고, PATCH는 호출자가
     # 그때 읽은 값을 `expected_version`으로 되돌려 보내야 한다.
     # `select_for_update()`로 잠근 뒤 `version`이 일치할 때만 갱신하고, 갱신할
@@ -279,6 +303,24 @@ class PlatformPolicy(models.Model):
                 )
                 & models.Q(distribution_cutline_percentage__lte=Decimal("100.00")),
                 name="distribution_cutline_percentage_within_0_100",
+            ),
+            # 자산 상한 0은 "제한 없음"이 아니라 "아무 것도 못 낸다"다 — 소스가
+            # 필수인 이상 `max_source_assets=0`이나 `max_scoring_input_assets=0`은
+            # 제출 자체를 불가능하게 만든다. 상한 쪽은 오타 방지다: 자산 50개를
+            # 허용해야 할 사업적 이유가 없고, 채점 예산을 그만큼 쪼개면 채점이
+            # 무의미해진다(#190).
+            *(
+                models.CheckConstraint(
+                    condition=models.Q(**{f"{field}__gte": 1, f"{field}__lte": 50}),
+                    name=f"{field}_between_1_and_50",
+                )
+                for field in (
+                    "max_source_assets",
+                    "max_demo_video_assets",
+                    "max_demo_url_assets",
+                    "max_repository_assets",
+                    "max_scoring_input_assets",
+                )
             ),
         ]
 

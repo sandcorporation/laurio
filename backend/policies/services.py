@@ -27,6 +27,14 @@ UPDATABLE_FIELDS = frozenset(
         "withholding_tax_bps",
         "withholding_necessary_expense_bps",
         "withholding_minor_income_exempt_won",
+        # #190 — 제출 자산 개수 상한. 다른 정책값과 달리 처음부터 이 집합에
+        # 들어온다: 이 값들은 참가자가 마감 전에 부딪히는 문턱이라, 실제 공모전이
+        # 돌아가는 중에 조정이 필요해지는 종류의 값이다.
+        "max_source_assets",
+        "max_demo_video_assets",
+        "max_demo_url_assets",
+        "max_repository_assets",
+        "max_scoring_input_assets",
     }
 )
 
@@ -39,6 +47,11 @@ _FIELD_BOUNDS: dict[str, tuple[int, int]] = {
     "withholding_tax_bps": (0, 9000),
     "withholding_necessary_expense_bps": (0, 9999),
     "withholding_minor_income_exempt_won": (0, 2**31 - 1),
+    "max_source_assets": (1, 50),
+    "max_demo_video_assets": (1, 50),
+    "max_demo_url_assets": (1, 50),
+    "max_repository_assets": (1, 50),
+    "max_scoring_input_assets": (1, 50),
 }
 
 

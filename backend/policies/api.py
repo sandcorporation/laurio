@@ -45,6 +45,11 @@ def _serialize_policy(policy: PlatformPolicy) -> PolicyOut:
         withholding_tax_bps=policy.withholding_tax_bps,
         withholding_necessary_expense_bps=policy.withholding_necessary_expense_bps,
         withholding_minor_income_exempt_won=policy.withholding_minor_income_exempt_won,
+        max_source_assets=policy.max_source_assets,
+        max_demo_video_assets=policy.max_demo_video_assets,
+        max_demo_url_assets=policy.max_demo_url_assets,
+        max_repository_assets=policy.max_repository_assets,
+        max_scoring_input_assets=policy.max_scoring_input_assets,
         version=policy.version,
         updated_at=policy.updated_at,
     )

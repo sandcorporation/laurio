@@ -20,6 +20,7 @@ from django.utils import timezone
 from contests.models import Category, Contest, DeliverableType
 from core.models import ClockOverride
 from submissions.models import Submission
+from tests.submission_assets import assets_of, first_value, demo_account_of
 
 CONTESTS_URL = "/api/contests"
 PAYMENTS_URL = "/api/payments"
@@ -177,7 +178,7 @@ def test_submission_without_source_is_rejected(client, category, landing_type):
     _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
     dev = _verified_user(client, "dev-1", "dev-ci-1")
 
-    response = _submit(client, dev["access"], contest["id"], {"source_object_key": ""})
+    response = _submit(client, dev["access"], contest["id"], {"assets": []})
 
     assert response.status_code == 422
     assert Submission.objects.count() == 0
@@ -188,7 +189,7 @@ def test_submission_with_whitespace_only_source_is_rejected(client, category, la
     _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
     dev = _verified_user(client, "dev-1", "dev-ci-1")
 
-    response = _submit(client, dev["access"], contest["id"], {"source_object_key": "   "})
+    response = _submit(client, dev["access"], contest["id"], {"assets": [{"kind": "source", "value": "   "}]})
 
     assert response.status_code == 422
 
@@ -202,7 +203,7 @@ def test_source_object_key_must_belong_to_callers_own_target_ref(client, categor
     other = _verified_user(client, "dev-2", "dev-ci-2")
 
     stolen_key = _source_object_key(contest["id"], other["user_id"])
-    response = _submit(client, dev["access"], contest["id"], {"source_object_key": stolen_key})
+    response = _submit(client, dev["access"], contest["id"], {"assets": [{"kind": "source", "value": stolen_key}]})
 
     assert response.status_code == 422
     assert Submission.objects.count() == 0
@@ -214,11 +215,11 @@ def test_developer_can_submit_with_source_only(client, category, landing_type):
     dev = _verified_user(client, "dev-1", "dev-ci-1")
     source_key = _source_object_key(contest["id"], dev["user_id"])
 
-    response = _submit(client, dev["access"], contest["id"], {"source_object_key": source_key})
+    response = _submit(client, dev["access"], contest["id"], {"assets": [{"kind": "source", "value": source_key}]})
 
     assert response.status_code == 201, response.content
     body = response.json()
-    assert body["source_object_key"] == source_key
+    assert first_value(body, "source") == source_key
     assert body["is_owner"] is True
     assert body["completion"]["has_demo_video"] is False
     assert body["completion"]["has_demo_url"] is False
@@ -237,10 +238,7 @@ def test_oversized_test_account_is_rejected_with_422_not_500(client, category, l
         client,
         dev["access"],
         contest["id"],
-        {
-            "source_object_key": _source_object_key(contest["id"], dev["user_id"]),
-            "test_account": "x" * 5000,
-        },
+        {"assets": [{"kind": "source", "value": _source_object_key(contest["id"], dev["user_id"])}, {"kind": "demo_url", "value": "https://example.invalid/oversized", "test_account": "x" * 5000}]},
     )
 
     assert response.status_code == 422
@@ -262,12 +260,9 @@ def test_oversized_requirement_note_is_rejected_with_422_not_500(client, categor
         client,
         dev["access"],
         contest["id"],
-        {
-            "source_object_key": _source_object_key(contest["id"], dev["user_id"]),
-            "requirement_responses": [
+        {"assets": [{"kind": "source", "value": _source_object_key(contest["id"], dev["user_id"])}], "requirement_responses": [
                 {"requirement_id": requirement_id, "is_met": True, "note": "x" * 5000}
-            ],
-        },
+            ]},
     )
 
     assert response.status_code == 422
@@ -286,7 +281,7 @@ def test_submission_without_verification_is_rejected_with_reason(client, categor
         client,
         pair["access"],
         contest["id"],
-        {"source_object_key": _source_object_key(contest["id"], 999)},
+        {"assets": [{"kind": "source", "value": _source_object_key(contest["id"], 999)}]},
     )
 
     assert response.status_code == 403
@@ -313,7 +308,7 @@ def test_underage_developer_cannot_submit(client, category, landing_type):
         client,
         pair["access"],
         contest["id"],
-        {"source_object_key": _source_object_key(contest["id"], 999)},
+        {"assets": [{"kind": "source", "value": _source_object_key(contest["id"], 999)}]},
     )
 
     assert submit_response.status_code == 403
@@ -338,7 +333,7 @@ def test_submission_after_deadline_is_rejected(client, category, landing_type):
         client,
         dev["access"],
         contest["id"],
-        {"source_object_key": _source_object_key(contest["id"], dev["user_id"])},
+        {"assets": [{"kind": "source", "value": _source_object_key(contest["id"], dev["user_id"])}]},
     )
 
     assert response.status_code == 403
@@ -354,7 +349,7 @@ def test_edit_after_deadline_is_rejected(client, category, landing_type):
     dev = _verified_user(client, "dev-1", "dev-ci-1")
     source_key = _source_object_key(contest["id"], dev["user_id"])
 
-    created = _submit(client, dev["access"], contest["id"], {"source_object_key": source_key})
+    created = _submit(client, dev["access"], contest["id"], {"assets": [{"kind": "source", "value": source_key}]})
     assert created.status_code == 201
 
     ClockOverride.objects.update_or_create(
@@ -362,12 +357,12 @@ def test_edit_after_deadline_is_rejected(client, category, landing_type):
     )
 
     new_key = _source_object_key(contest["id"], dev["user_id"])
-    response = _edit(client, dev["access"], contest["id"], {"source_object_key": new_key})
+    response = _edit(client, dev["access"], contest["id"], {"assets": [{"kind": "source", "value": new_key}]})
 
     assert response.status_code == 403
     # 마감 후 수정이 거부되었으니 소스는 원래 값 그대로여야 한다.
     submission = Submission.objects.get(contest_id=contest["id"])
-    assert submission.source_object_key == source_key
+    assert [a.value for a in submission.assets.filter(kind="source")] == [source_key]
 
 
 @pytest.mark.django_db
@@ -375,7 +370,7 @@ def test_developer_can_edit_before_deadline(client, category, landing_type):
     _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
     dev = _verified_user(client, "dev-1", "dev-ci-1")
     first_key = _source_object_key(contest["id"], dev["user_id"])
-    created = _submit(client, dev["access"], contest["id"], {"source_object_key": first_key})
+    created = _submit(client, dev["access"], contest["id"], {"assets": [{"kind": "source", "value": first_key}]})
     assert created.status_code == 201
 
     second_key = _source_object_key(contest["id"], dev["user_id"])
@@ -383,13 +378,13 @@ def test_developer_can_edit_before_deadline(client, category, landing_type):
         client,
         dev["access"],
         contest["id"],
-        {"source_object_key": second_key, "demo_url": "https://example.com/demo"},
+        {"assets": [{"kind": "source", "value": second_key}, {"kind": "demo_url", "value": "https://example.com/demo"}]},
     )
 
     assert response.status_code == 200
     body = response.json()
-    assert body["source_object_key"] == second_key
-    assert body["demo_url"] == "https://example.com/demo"
+    assert first_value(body, "source") == second_key
+    assert first_value(body, "demo_url") == "https://example.com/demo"
     assert body["completion"]["has_demo_url"] is True
 
 
@@ -402,7 +397,7 @@ def test_editing_a_submission_that_does_not_exist_is_rejected(client, category, 
         client,
         dev["access"],
         contest["id"],
-        {"source_object_key": _source_object_key(contest["id"], dev["user_id"])},
+        {"assets": [{"kind": "source", "value": _source_object_key(contest["id"], dev["user_id"])}]},
     )
 
     assert response.status_code == 404
@@ -412,7 +407,7 @@ def test_editing_a_submission_that_does_not_exist_is_rejected(client, category, 
 def test_submitting_twice_without_editing_is_rejected(client, category, landing_type):
     _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
     dev = _verified_user(client, "dev-1", "dev-ci-1")
-    payload = {"source_object_key": _source_object_key(contest["id"], dev["user_id"])}
+    payload = {"assets": [{"kind": "source", "value": _source_object_key(contest["id"], dev["user_id"])}]}
 
     first = _submit(client, dev["access"], contest["id"], payload)
     assert first.status_code == 201
@@ -421,7 +416,7 @@ def test_submitting_twice_without_editing_is_rejected(client, category, landing_
         client,
         dev["access"],
         contest["id"],
-        {"source_object_key": _source_object_key(contest["id"], dev["user_id"])},
+        {"assets": [{"kind": "source", "value": _source_object_key(contest["id"], dev["user_id"])}]},
     )
 
     assert second.status_code == 409
@@ -451,7 +446,7 @@ def test_submission_to_unpublished_contest_is_rejected(client, category, landing
         client,
         dev["access"],
         draft_contest["id"],
-        {"source_object_key": _source_object_key(draft_contest["id"], dev["user_id"])},
+        {"assets": [{"kind": "source", "value": _source_object_key(draft_contest["id"], dev["user_id"])}]},
     )
 
     assert submit_response.status_code == 404
@@ -473,11 +468,9 @@ def test_sponsors_own_ci_cannot_submit_to_their_own_contest(client, category, la
         client,
         same_person_other_account["access"],
         contest["id"],
-        {
-            "source_object_key": _source_object_key(
+        {"assets": [{"kind": "source", "value": _source_object_key(
                 contest["id"], same_person_other_account["user_id"]
-            )
-        },
+            )}]},
     )
 
     assert response.status_code == 403
@@ -495,7 +488,7 @@ def test_different_ci_developer_can_submit(client, category, landing_type):
         client,
         dev["access"],
         contest["id"],
-        {"source_object_key": _source_object_key(contest["id"], dev["user_id"])},
+        {"assets": [{"kind": "source", "value": _source_object_key(contest["id"], dev["user_id"])}]},
     )
 
     assert response.status_code == 201
@@ -557,7 +550,7 @@ def test_ci_less_developer_can_never_reach_the_self_dealing_check(client, catego
         client,
         dev_pair["access"],
         contest["id"],
-        {"source_object_key": _source_object_key(contest["id"], me.json()["id"])},
+        {"assets": [{"kind": "source", "value": _source_object_key(contest["id"], me.json()["id"])}]},
     )
 
     # self-dealing 판정이 아니라 "본인확인이 안 됐다"는 훨씬 앞선 게이트에서
@@ -613,7 +606,7 @@ def test_submission_is_rejected_when_sponsor_has_no_verified_identity(
             client,
             dev["access"],
             contest["id"],
-            {"source_object_key": _source_object_key(contest["id"], dev["user_id"])},
+            {"assets": [{"kind": "source", "value": _source_object_key(contest["id"], dev["user_id"])}]},
         )
 
     assert response.status_code == 403
@@ -664,7 +657,7 @@ def test_submission_is_rejected_when_sponsor_verified_but_ci_hash_is_empty(
             client,
             dev["access"],
             contest["id"],
-            {"source_object_key": _source_object_key(contest["id"], dev["user_id"])},
+            {"assets": [{"kind": "source", "value": _source_object_key(contest["id"], dev["user_id"])}]},
         )
 
     assert response.status_code == 403
@@ -695,17 +688,14 @@ def test_requirement_response_without_evidence_is_marked_unlinked(client, catego
         client,
         dev["access"],
         contest["id"],
-        {
-            "source_object_key": _source_object_key(contest["id"], dev["user_id"]),
-            "requirement_responses": [
+        {"assets": [{"kind": "source", "value": _source_object_key(contest["id"], dev["user_id"])}], "requirement_responses": [
                 {"requirement_id": requirement_ids[0], "is_met": True, "evidence": []},
                 {
                     "requirement_id": requirement_ids[1],
                     "is_met": True,
                     "evidence": [{"kind": "video_timestamp", "value": "00:01:23"}],
                 },
-            ],
-        },
+            ]},
     )
 
     assert response.status_code == 201
@@ -738,12 +728,9 @@ def test_all_met_with_no_evidence_still_succeeds_but_stays_fully_unlinked(
         client,
         dev["access"],
         contest["id"],
-        {
-            "source_object_key": _source_object_key(contest["id"], dev["user_id"]),
-            "requirement_responses": [
+        {"assets": [{"kind": "source", "value": _source_object_key(contest["id"], dev["user_id"])}], "requirement_responses": [
                 {"requirement_id": requirement_id, "is_met": True, "evidence": []}
-            ],
-        },
+            ]},
     )
 
     assert response.status_code == 201
@@ -774,12 +761,9 @@ def test_requirement_response_for_foreign_requirement_is_rejected(client, catego
         client,
         dev["access"],
         contest["id"],
-        {
-            "source_object_key": _source_object_key(contest["id"], dev["user_id"]),
-            "requirement_responses": [
+        {"assets": [{"kind": "source", "value": _source_object_key(contest["id"], dev["user_id"])}], "requirement_responses": [
                 {"requirement_id": foreign_requirement_id, "is_met": True, "evidence": []}
-            ],
-        },
+            ]},
     )
 
     assert response.status_code == 422
@@ -801,16 +785,13 @@ def test_unknown_evidence_kind_is_rejected(client, category, landing_type):
         client,
         dev["access"],
         contest["id"],
-        {
-            "source_object_key": _source_object_key(contest["id"], dev["user_id"]),
-            "requirement_responses": [
+        {"assets": [{"kind": "source", "value": _source_object_key(contest["id"], dev["user_id"])}], "requirement_responses": [
                 {
                     "requirement_id": requirement_id,
                     "is_met": True,
                     "evidence": [{"kind": "smell", "value": "x"}],
                 }
-            ],
-        },
+            ]},
     )
 
     assert response.status_code == 422
@@ -828,7 +809,7 @@ def test_other_developer_cannot_view_submission_during_contest(client, category,
         client,
         dev["access"],
         contest["id"],
-        {"source_object_key": _source_object_key(contest["id"], dev["user_id"])},
+        {"assets": [{"kind": "source", "value": _source_object_key(contest["id"], dev["user_id"])}]},
     )
     submission_id = created.json()["id"]
 
@@ -848,7 +829,7 @@ def test_anonymous_cannot_view_submission_during_contest(client, category, landi
         client,
         dev["access"],
         contest["id"],
-        {"source_object_key": _source_object_key(contest["id"], dev["user_id"])},
+        {"assets": [{"kind": "source", "value": _source_object_key(contest["id"], dev["user_id"])}]},
     )
     submission_id = created.json()["id"]
 
@@ -866,12 +847,7 @@ def test_sponsor_can_view_demo_but_not_source_during_contest(client, category, l
         client,
         dev["access"],
         contest["id"],
-        {
-            "source_object_key": _source_object_key(contest["id"], dev["user_id"]),
-            "demo_video_object_key": demo_key,
-            "demo_url": "https://example.com/demo",
-            "test_account": "id/pw",
-        },
+        {"assets": [{"kind": "source", "value": _source_object_key(contest["id"], dev["user_id"])}, {"kind": "demo_video", "value": demo_key}, {"kind": "demo_url", "value": "https://example.com/demo", "test_account": "id/pw"}]},
     )
     submission_id = created.json()["id"]
 
@@ -879,10 +855,10 @@ def test_sponsor_can_view_demo_but_not_source_during_contest(client, category, l
 
     assert response.status_code == 200
     body = response.json()
-    assert body["source_object_key"] is None
-    assert body["demo_video_object_key"] == demo_key
-    assert body["demo_url"] == "https://example.com/demo"
-    assert body["test_account"] == "id/pw"
+    assert assets_of(body, "source") == []
+    assert first_value(body, "demo_video") == demo_key
+    assert first_value(body, "demo_url") == "https://example.com/demo"
+    assert demo_account_of(body) == "id/pw"
     assert body["is_owner"] is False
 
 
@@ -891,13 +867,13 @@ def test_owner_can_view_own_source(client, category, landing_type):
     _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
     dev = _verified_user(client, "dev-1", "dev-ci-1")
     source_key = _source_object_key(contest["id"], dev["user_id"])
-    created = _submit(client, dev["access"], contest["id"], {"source_object_key": source_key})
+    created = _submit(client, dev["access"], contest["id"], {"assets": [{"kind": "source", "value": source_key}]})
     submission_id = created.json()["id"]
 
     response = client.get(f"{SUBMISSIONS_URL}/{submission_id}", **_auth_header(dev["access"]))
 
     assert response.status_code == 200
-    assert response.json()["source_object_key"] == source_key
+    assert first_value(response.json(), "source") == source_key
 
 
 @pytest.mark.django_db
@@ -922,11 +898,7 @@ def test_after_deadline_demo_is_public_but_source_and_test_account_stay_hidden(
         client,
         dev["access"],
         contest["id"],
-        {
-            "source_object_key": source_key,
-            "demo_video_object_key": demo_key,
-            "test_account": "demo-login/demo-password",
-        },
+        {"assets": [{"kind": "source", "value": source_key}, {"kind": "demo_video", "value": demo_key}, {"kind": "demo_url", "value": "https://example.invalid/after-deadline-demo", "test_account": "demo-login/demo-password"}]},
     )
     submission_id = created.json()["id"]
 
@@ -941,28 +913,28 @@ def test_after_deadline_demo_is_public_but_source_and_test_account_stay_hidden(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["demo_video_object_key"] == demo_key
-    assert body["source_object_key"] is None
-    assert body["test_account"] is None
+    assert first_value(body, "demo_video") == demo_key
+    assert assets_of(body, "source") == []
+    assert demo_account_of(body) == ""
 
     anon_response = client.get(f"{SUBMISSIONS_URL}/{submission_id}")
     assert anon_response.status_code == 200
     anon_body = anon_response.json()
-    assert anon_body["source_object_key"] is None
-    assert anon_body["test_account"] is None
-    assert anon_body["demo_video_object_key"] == demo_key
+    assert assets_of(anon_body, "source") == []
+    assert demo_account_of(anon_body) == ""
+    assert first_value(anon_body, "demo_video") == demo_key
 
     # Owner와 Sponsor는 마감 후에도 test_account를 계속 볼 수 있다 — 숨기는 대상은
     # "낯선 사람"이지 정당한 당사자가 아니다.
     owner_response = client.get(
         f"{SUBMISSIONS_URL}/{submission_id}", **_auth_header(dev["access"])
     )
-    assert owner_response.json()["test_account"] == "demo-login/demo-password"
+    assert demo_account_of(owner_response.json()) == "demo-login/demo-password"
 
     sponsor_response = client.get(
         f"{SUBMISSIONS_URL}/{submission_id}", **_auth_header(sponsor["access"])
     )
-    assert sponsor_response.json()["test_account"] == "demo-login/demo-password"
+    assert demo_account_of(sponsor_response.json()) == "demo-login/demo-password"
 
 
 @pytest.mark.django_db
@@ -994,14 +966,14 @@ def test_get_my_submission_after_creating_one_returns_it_with_source(
     _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
     dev = _verified_user(client, "dev-1", "dev-ci-1")
     source_key = _source_object_key(contest["id"], dev["user_id"])
-    _submit(client, dev["access"], contest["id"], {"source_object_key": source_key})
+    _submit(client, dev["access"], contest["id"], {"assets": [{"kind": "source", "value": source_key}]})
 
     response = client.get(
         f"{CONTESTS_URL}/{contest['id']}/submissions/me", **_auth_header(dev["access"])
     )
 
     assert response.status_code == 200
-    assert response.json()["source_object_key"] == source_key
+    assert first_value(response.json(), "source") == source_key
 
 
 # --- STORAGE_TARGET_RESOLVER 실배선 (실제 presigned URL 발급까지) ------------------
@@ -1033,7 +1005,7 @@ def test_resolver_wiring_grants_source_download_to_owner_only(client, category, 
     assert upload.status_code == 200
     object_key = upload.json()["object_key"]
 
-    _submit(client, dev["access"], contest["id"], {"source_object_key": object_key})
+    _submit(client, dev["access"], contest["id"], {"assets": [{"kind": "source", "value": object_key}]})
 
     # 소유자 본인은 다운로드 URL을 받을 수 있다.
     download = client.post(
@@ -1127,3 +1099,540 @@ def test_resolver_wiring_opens_demo_to_everyone_after_deadline(client, category,
     )
 
     assert response.status_code == 200
+
+
+# --- 자료 여럿 (#190, ADR-0027) ------------------------------------------------
+#
+# 여기까지의 테스트는 "종류당 하나"를 전제로 쓰였고 #190이 그 전제를 자산 목록으로
+# 옮겼다. 아래는 목록이 되면서 **새로 생긴 사실들**만 고정한다.
+
+
+def _repo_url(name: str) -> str:
+    return f"https://github.com/laurio-test/{name}"
+
+
+@pytest.mark.django_db
+def test_a_submission_can_carry_several_sources_videos_demos_and_repositories(
+    client, category, landing_type
+):
+    """Contest가 산출물 종류 여럿을 요구할 수 있는데(`Contest.deliverable_types`가
+    M2M이다) 자료가 종류당 하나면 참가자는 자기가 만든 것의 일부만 낼 수 있었다."""
+
+    _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+
+    web_source = _source_object_key(contest["id"], dev["user_id"])
+    app_source = _source_object_key(contest["id"], dev["user_id"])
+    video = _demo_video_object_key(contest["id"], dev["user_id"])
+
+    response = _submit(
+        client,
+        dev["access"],
+        contest["id"],
+        {
+            "assets": [
+                {"kind": "source", "value": web_source, "label": "웹"},
+                {"kind": "source", "value": app_source, "label": "모바일 앱"},
+                {"kind": "demo_video", "value": video},
+                {
+                    "kind": "demo_url",
+                    "value": "https://example.invalid/web",
+                    "test_account": "web-id/web-pw",
+                },
+                {
+                    "kind": "demo_url",
+                    "value": "https://example.invalid/app",
+                    "test_account": "app-id/app-pw",
+                },
+                {"kind": "repository", "value": _repo_url("web")},
+            ]
+        },
+    )
+
+    assert response.status_code == 201, response.content
+    body = response.json()
+    assert sorted(a["value"] for a in assets_of(body, "source")) == sorted(
+        [web_source, app_source]
+    )
+    assert len(assets_of(body, "demo_url")) == 2
+    assert demo_account_of(body, "https://example.invalid/app") == "app-id/app-pw"
+
+    completion = body["completion"]
+    # boolean은 "하나라도 있는가"로 그대로 살고, 개수가 옆에 따로 온다.
+    assert completion["has_demo_url"] is True
+    assert completion["source_count"] == 2
+    assert completion["demo_url_count"] == 2
+    assert completion["repository_count"] == 1
+
+
+@pytest.mark.django_db
+def test_editing_keeps_assets_sent_with_their_id_and_drops_the_omitted_ones(
+    client, category, landing_type
+):
+    """자료만 id로 병합된다 — 그 병합이 없으면 저장할 때마다 같은 파일이 새 행이
+    되어 "언제 올렸는가"가 전부 마지막 수정 시각으로 뭉갠다."""
+
+    _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+
+    kept_key = _source_object_key(contest["id"], dev["user_id"])
+    created = _submit(
+        client,
+        dev["access"],
+        contest["id"],
+        {
+            "assets": [
+                {"kind": "source", "value": kept_key},
+                {"kind": "demo_url", "value": "https://example.invalid/gone"},
+            ]
+        },
+    )
+    assert created.status_code == 201
+    kept = assets_of(created.json(), "source")[0]
+
+    edited = _edit(
+        client,
+        dev["access"],
+        contest["id"],
+        {
+            "assets": [
+                # id를 실어 보낸 것은 그 행 그대로 살아남는다.
+                {"kind": "source", "value": kept_key, "id": kept["id"], "label": "웹"},
+                # id 없이 보낸 것은 새로 생긴다.
+                {"kind": "demo_url", "value": "https://example.invalid/new"},
+            ]
+        },
+    )
+
+    assert edited.status_code == 200, edited.content
+    body = edited.json()
+    surviving = assets_of(body, "source")[0]
+    assert surviving["id"] == kept["id"]
+    assert surviving["label"] == "웹"
+    # 페이로드에 없던 데모는 사라지고 새 것만 남는다.
+    assert [a["value"] for a in assets_of(body, "demo_url")] == [
+        "https://example.invalid/new"
+    ]
+
+
+@pytest.mark.django_db
+def test_another_developers_asset_id_cannot_be_claimed(client, category, landing_type):
+    """id 병합이 이 API에 처음 들여온 부분 갱신 의미론이다 — 소유권 검사가 없으면
+    남의 행을 자기 제출작으로 옮길 수 있다."""
+
+    _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    victim = _verified_user(client, "dev-1", "dev-ci-1")
+    attacker = _verified_user(client, "dev-2", "dev-ci-2")
+
+    victim_submission = _submit(
+        client,
+        victim["access"],
+        contest["id"],
+        {
+            "assets": [
+                {
+                    "kind": "source",
+                    "value": _source_object_key(contest["id"], victim["user_id"]),
+                }
+            ]
+        },
+    )
+    assert victim_submission.status_code == 201
+    victim_asset_id = assets_of(victim_submission.json(), "source")[0]["id"]
+
+    attacker_key = _source_object_key(contest["id"], attacker["user_id"])
+    _submit(
+        client,
+        attacker["access"],
+        contest["id"],
+        {"assets": [{"kind": "source", "value": attacker_key}]},
+    )
+
+    stolen = _edit(
+        client,
+        attacker["access"],
+        contest["id"],
+        {"assets": [{"kind": "source", "value": attacker_key, "id": victim_asset_id}]},
+    )
+
+    assert stolen.status_code == 422
+    # 피해자의 자료는 그대로 자기 제출작에 남아 있다.
+    victim_after = client.get(
+        f"{CONTESTS_URL}/{contest['id']}/submissions/me", **_auth_header(victim["access"])
+    )
+    assert assets_of(victim_after.json(), "source")[0]["id"] == victim_asset_id
+
+
+@pytest.mark.django_db
+def test_first_submission_cannot_carry_asset_ids(client, category, landing_type):
+    _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+
+    response = _submit(
+        client,
+        dev["access"],
+        contest["id"],
+        {
+            "assets": [
+                {
+                    "kind": "source",
+                    "value": _source_object_key(contest["id"], dev["user_id"]),
+                    "id": 1,
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+    assert Submission.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_repository_must_be_a_github_url(client, category, landing_type):
+    """임의의 git URL을 받으면 플랫폼 서버가 참가자가 지정한 주소로 나가게 된다
+    (SSRF) — 저장소를 실제로 clone하는 것은 #193이지만 받아들일 수 있는 값만
+    지금부터 저장한다."""
+
+    _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+    source = {"kind": "source", "value": _source_object_key(contest["id"], dev["user_id"])}
+
+    for bad in [
+        "http://169.254.169.254/latest/meta-data",
+        "https://gitlab.com/owner/repo",
+        "https://github.com/owner",
+        "https://github.com.evil.invalid/owner/repo",
+        "git@github.com:owner/repo.git",
+    ]:
+        response = _submit(
+            client,
+            dev["access"],
+            contest["id"],
+            {"assets": [source, {"kind": "repository", "value": bad}]},
+        )
+        assert response.status_code == 422, f"허용되면 안 되는 값: {bad}"
+
+    ok = _submit(
+        client,
+        dev["access"],
+        contest["id"],
+        {"assets": [source, {"kind": "repository", "value": _repo_url("ok")}]},
+    )
+    assert ok.status_code == 201, ok.content
+
+
+@pytest.mark.django_db
+def test_a_repository_is_hidden_from_the_sponsor_like_the_source_is(
+    client, category, landing_type
+):
+    """공개 레포라도 플랫폼이 Sponsor에게 코드로 가는 길을 먼저 열어주지는
+    않는다(ADR-0027) — 검색해서 찾아내는 것까지 막을 수는 없어도 떠먹이지는 않는다."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+    submitted = _submit(
+        client,
+        dev["access"],
+        contest["id"],
+        {
+            "assets": [
+                {
+                    "kind": "source",
+                    "value": _source_object_key(contest["id"], dev["user_id"]),
+                },
+                {"kind": "repository", "value": _repo_url("hidden")},
+                {"kind": "demo_url", "value": "https://example.invalid/demo"},
+            ]
+        },
+    )
+    assert submitted.status_code == 201
+    submission_id = submitted.json()["id"]
+
+    sponsor_view = client.get(
+        f"{SUBMISSIONS_URL}/{submission_id}", **_auth_header(sponsor["access"])
+    )
+    assert assets_of(sponsor_view.json(), "repository") == []
+    assert assets_of(sponsor_view.json(), "source") == []
+    # 데모는 보인다 — 감추는 것은 코드로 가는 길뿐이다.
+    assert first_value(sponsor_view.json(), "demo_url") == "https://example.invalid/demo"
+
+    # 마감이 지나도 저장소는 전면 공개되지 않는다 — ADR-0014가 명시한
+    # "탈락작의 소스는 마감 후에도 공개되지 않는다"가 저장소에도 적용된다.
+    ClockOverride.objects.update_or_create(
+        pk=1, defaults={"overridden_at": deadline + timedelta(minutes=1)}
+    )
+    anon_view = client.get(f"{SUBMISSIONS_URL}/{submission_id}")
+    assert assets_of(anon_view.json(), "repository") == []
+    assert first_value(anon_view.json(), "demo_url") == "https://example.invalid/demo"
+
+    # 본인에게는 언제나 보인다.
+    own_view = client.get(
+        f"{SUBMISSIONS_URL}/{submission_id}", **_auth_header(dev["access"])
+    )
+    assert first_value(own_view.json(), "repository") == _repo_url("hidden")
+
+
+@pytest.mark.django_db
+def test_scoring_input_limit_counts_sources_and_repositories_together(
+    client, category, landing_type
+):
+    """소스와 저장소는 같은 채점 예산을 나눠 쓴다 — 종류별 상한만으로는 막을 수
+    없다. 상한이 없으면 채점 예산이 잘게 쪼개져 사실상 무의미한 채점이 되고,
+    모델 컨텍스트를 넘기면 그 실패가 permanent로 잡혀 소스를 많이 낸 참가자가
+    오히려 Score 없이 배분 컷라인에서 탈락한다."""
+
+    from policies.services import get_current_policy
+
+    _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+
+    policy = get_current_policy()
+    assert policy.max_scoring_input_assets == 8
+    assert policy.max_source_assets == 5
+
+    # 소스 5 + 저장소 4 = 9 > 8. 종류별 상한(5, 8)에는 각각 걸리지 않는다.
+    assets = [
+        {"kind": "source", "value": _source_object_key(contest["id"], dev["user_id"])}
+        for _ in range(5)
+    ] + [{"kind": "repository", "value": _repo_url(f"r{i}")} for i in range(4)]
+
+    response = _submit(client, dev["access"], contest["id"], {"assets": assets})
+
+    assert response.status_code == 422
+    assert "8" in response.json()["detail"]
+    assert Submission.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_per_kind_limit_comes_from_the_policy_not_from_code(client, category, landing_type):
+    """상한은 사업이 정하는 값이라 배포 없이 운영자가 조정할 수 있어야 한다
+    (ADR-0023) — 정책 행을 바꾸면 API의 판정도 함께 바뀐다."""
+
+    from policies.services import get_current_policy
+
+    _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+
+    policy = get_current_policy()
+    policy.max_demo_url_assets = 1
+    policy.save(update_fields=["max_demo_url_assets"])
+
+    assets = [
+        {"kind": "source", "value": _source_object_key(contest["id"], dev["user_id"])},
+        {"kind": "demo_url", "value": "https://example.invalid/a"},
+        {"kind": "demo_url", "value": "https://example.invalid/b"},
+    ]
+    rejected = _submit(client, dev["access"], contest["id"], {"assets": assets})
+    assert rejected.status_code == 422
+
+    policy.max_demo_url_assets = 2
+    policy.save(update_fields=["max_demo_url_assets"])
+    accepted = _submit(client, dev["access"], contest["id"], {"assets": assets})
+    assert accepted.status_code == 201, accepted.content
+
+
+@pytest.mark.django_db
+def test_the_same_value_cannot_be_listed_twice(client, category, landing_type):
+    """UniqueConstraint가 대신 걸리면 422가 아니라 500(IntegrityError)이 난다."""
+
+    _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+    key = _source_object_key(contest["id"], dev["user_id"])
+
+    response = _submit(
+        client,
+        dev["access"],
+        contest["id"],
+        {"assets": [{"kind": "source", "value": key}, {"kind": "source", "value": key}]},
+    )
+
+    assert response.status_code == 422
+    assert Submission.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_a_test_account_cannot_hang_on_a_source_or_repository(client, category, landing_type):
+    """"이 소스를 열어보는 로그인 정보"라는 것은 존재하지 않는다. 모델의
+    CheckConstraint가 최후의 방어선이지만 그것이 걸리면 500이다."""
+
+    _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+
+    response = _submit(
+        client,
+        dev["access"],
+        contest["id"],
+        {
+            "assets": [
+                {
+                    "kind": "source",
+                    "value": _source_object_key(contest["id"], dev["user_id"]),
+                    "test_account": "id/pw",
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.django_db
+def test_evidence_can_point_at_one_asset_and_dies_with_it(client, category, landing_type):
+    """데모·영상이 여럿이 되는 순간 "데모 내 경로"가 어느 대상의 것인지 알 수
+    없어진다. 자료를 지우면 그것을 가리키던 근거도 함께 사라진다 — 가리킬 곳이
+    없는 근거는 근거가 아니다."""
+
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        requirements=[{"text": "주문 목록", "grade": "required"}],
+    )
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+    source_key = _source_object_key(contest["id"], dev["user_id"])
+
+    created = _submit(
+        client,
+        dev["access"],
+        contest["id"],
+        {
+            "assets": [
+                {"kind": "source", "value": source_key},
+                {"kind": "demo_url", "value": "https://example.invalid/app", "label": "앱"},
+            ]
+        },
+    )
+    assert created.status_code == 201
+    demo = assets_of(created.json(), "demo_url")[0]
+    requirement_id = contest["requirements"][0]["id"]
+
+    linked = _edit(
+        client,
+        dev["access"],
+        contest["id"],
+        {
+            "assets": [
+                {"kind": "source", "value": source_key},
+                {
+                    "kind": "demo_url",
+                    "value": "https://example.invalid/app",
+                    "label": "앱",
+                    "id": demo["id"],
+                },
+            ],
+            "requirement_responses": [
+                {
+                    "requirement_id": requirement_id,
+                    "is_met": True,
+                    "evidence": [
+                        {"kind": "demo_path", "value": "/orders", "asset_id": demo["id"]}
+                    ],
+                }
+            ],
+        },
+    )
+    assert linked.status_code == 200, linked.content
+    evidence = linked.json()["requirement_responses"][0]["evidence"][0]
+    assert evidence["asset_id"] == demo["id"]
+
+    # 그 데모를 지우면서 그것을 가리키는 근거를 그대로 두면 거부된다 — 가리킬
+    # 곳이 없는 근거를 조용히 저장하면 채점이 그 값을 어느 대상의 것으로도
+    # 해석하지 못한 채 프롬프트에 싣게 된다.
+    dangling = _edit(
+        client,
+        dev["access"],
+        contest["id"],
+        {
+            "assets": [{"kind": "source", "value": source_key}],
+            "requirement_responses": [
+                {
+                    "requirement_id": requirement_id,
+                    "is_met": True,
+                    "evidence": [
+                        {"kind": "demo_path", "value": "/orders", "asset_id": demo["id"]}
+                    ],
+                }
+            ],
+        },
+    )
+    assert dangling.status_code == 422
+
+    # 참조를 놓으면 근거는 그대로 남는다 — 대상을 특정하지 않은 근거는 여전히
+    # 유효하다(다중화 이전의 모든 근거가 그 모양이다).
+    unlinked = _edit(
+        client,
+        dev["access"],
+        contest["id"],
+        {
+            "assets": [{"kind": "source", "value": source_key}],
+            "requirement_responses": [
+                {
+                    "requirement_id": requirement_id,
+                    "is_met": True,
+                    "evidence": [{"kind": "demo_path", "value": "/orders"}],
+                }
+            ],
+        },
+    )
+    assert unlinked.status_code == 200, unlinked.content
+    assert unlinked.json()["requirement_responses"][0]["evidence"][0]["asset_id"] is None
+    assert assets_of(unlinked.json(), "demo_url") == []
+
+
+@pytest.mark.django_db
+def test_evidence_cannot_point_at_another_submissions_asset(client, category, landing_type):
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        requirements=[{"text": "주문 목록", "grade": "required"}],
+    )
+    victim = _verified_user(client, "dev-1", "dev-ci-1")
+    attacker = _verified_user(client, "dev-2", "dev-ci-2")
+
+    victim_submission = _submit(
+        client,
+        victim["access"],
+        contest["id"],
+        {
+            "assets": [
+                {
+                    "kind": "source",
+                    "value": _source_object_key(contest["id"], victim["user_id"]),
+                }
+            ]
+        },
+    )
+    victim_asset_id = assets_of(victim_submission.json(), "source")[0]["id"]
+
+    response = _submit(
+        client,
+        attacker["access"],
+        contest["id"],
+        {
+            "assets": [
+                {
+                    "kind": "source",
+                    "value": _source_object_key(contest["id"], attacker["user_id"]),
+                }
+            ],
+            "requirement_responses": [
+                {
+                    "requirement_id": contest["requirements"][0]["id"],
+                    "is_met": True,
+                    "evidence": [
+                        {
+                            "kind": "source_location",
+                            "value": "src/x.ts",
+                            "asset_id": victim_asset_id,
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 422

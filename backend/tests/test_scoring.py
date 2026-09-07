@@ -303,9 +303,7 @@ def test_evidence_grounded_in_source_scores_required_requirement_as_met(
 
     submit_resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
-        data={
-            "source_object_key": source_key,
-            "requirement_responses": [
+        data={"assets": [{"kind": "source", "value": source_key}], "requirement_responses": [
                 {
                     "requirement_id": requirement_id,
                     "is_met": True,
@@ -313,8 +311,7 @@ def test_evidence_grounded_in_source_scores_required_requirement_as_met(
                         {"kind": "source_location", "value": "MAGIC_MARKER_LOGIN"}
                     ],
                 }
-            ],
-        },
+            ]},
         content_type="application/json",
         **_auth_header(dev["access"]),
     )
@@ -367,12 +364,9 @@ def test_self_report_all_met_with_no_evidence_converges_to_zero(client, category
 
     submit_resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
-        data={
-            "source_object_key": source_key,
-            "requirement_responses": [
+        data={"assets": [{"kind": "source", "value": source_key}], "requirement_responses": [
                 {"requirement_id": rid, "is_met": True, "evidence": []} for rid in req_ids
-            ],
-        },
+            ]},
         content_type="application/json",
         **_auth_header(dev["access"]),
     )
@@ -407,9 +401,7 @@ def test_evidence_present_but_not_grounded_in_source_is_unmet(client, category, 
 
     submit_resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
-        data={
-            "source_object_key": source_key,
-            "requirement_responses": [
+        data={"assets": [{"kind": "source", "value": source_key}], "requirement_responses": [
                 {
                     "requirement_id": requirement_id,
                     "is_met": True,
@@ -417,8 +409,7 @@ def test_evidence_present_but_not_grounded_in_source_is_unmet(client, category, 
                         {"kind": "source_location", "value": "NONEXISTENT_PAYMENT_FUNC"}
                     ],
                 }
-            ],
-        },
+            ]},
         content_type="application/json",
         **_auth_header(dev["access"]),
     )
@@ -453,16 +444,13 @@ def test_running_pending_scan_twice_scores_only_once(client, category, landing_t
 
     submit_resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
-        data={
-            "source_object_key": source_key,
-            "requirement_responses": [
+        data={"assets": [{"kind": "source", "value": source_key}], "requirement_responses": [
                 {
                     "requirement_id": requirement_id,
                     "is_met": True,
                     "evidence": [{"kind": "source_location", "value": "MARKER"}],
                 }
-            ],
-        },
+            ]},
         content_type="application/json",
         **_auth_header(dev["access"]),
     )
@@ -504,16 +492,13 @@ def test_score_cannot_be_modified_after_creation(client, category, landing_type)
 
     submit_resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
-        data={
-            "source_object_key": source_key,
-            "requirement_responses": [
+        data={"assets": [{"kind": "source", "value": source_key}], "requirement_responses": [
                 {
                     "requirement_id": requirement_id,
                     "is_met": True,
                     "evidence": [{"kind": "source_location", "value": "MARKER"}],
                 }
-            ],
-        },
+            ]},
         content_type="application/json",
         **_auth_header(dev["access"]),
     )
@@ -559,16 +544,13 @@ def test_llm_failure_is_logged_and_retried_on_next_scan(client, category, landin
 
     submit_resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
-        data={
-            "source_object_key": source_key,
-            "requirement_responses": [
+        data={"assets": [{"kind": "source", "value": source_key}], "requirement_responses": [
                 {
                     "requirement_id": requirement_id,
                     "is_met": True,
                     "evidence": [{"kind": "source_location", "value": "MARKER"}],
                 }
-            ],
-        },
+            ]},
         content_type="application/json",
         **_auth_header(dev["access"]),
     )
@@ -609,16 +591,13 @@ def test_incomplete_contests_endpoint_lists_unscored_closed_contest(
     FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": "MARKER\n"}))
     submit_resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
-        data={
-            "source_object_key": source_key,
-            "requirement_responses": [
+        data={"assets": [{"kind": "source", "value": source_key}], "requirement_responses": [
                 {
                     "requirement_id": requirement_id,
                     "is_met": True,
                     "evidence": [{"kind": "source_location", "value": "MARKER"}],
                 }
-            ],
-        },
+            ]},
         content_type="application/json",
         **_auth_header(dev["access"]),
     )
@@ -659,16 +638,13 @@ def test_run_pending_never_scores_submissions_of_a_still_open_contest(
     FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": "MARKER\n"}))
     submit_resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
-        data={
-            "source_object_key": source_key,
-            "requirement_responses": [
+        data={"assets": [{"kind": "source", "value": source_key}], "requirement_responses": [
                 {
                     "requirement_id": requirement_id,
                     "is_met": True,
                     "evidence": [{"kind": "source_location", "value": "MARKER"}],
                 }
-            ],
-        },
+            ]},
         content_type="application/json",
         **_auth_header(dev["access"]),
     )
@@ -710,16 +686,13 @@ def test_excluded_vendor_directories_are_never_sent_to_the_llm(client, category,
 
     submit_resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
-        data={
-            "source_object_key": source_key,
-            "requirement_responses": [
+        data={"assets": [{"kind": "source", "value": source_key}], "requirement_responses": [
                 {
                     "requirement_id": requirement_id,
                     "is_met": True,
                     "evidence": [{"kind": "source_location", "value": "REAL_MARKER"}],
                 }
-            ],
-        },
+            ]},
         content_type="application/json",
         **_auth_header(dev["access"]),
     )
@@ -756,16 +729,13 @@ def test_oversized_source_is_truncated_to_the_selection_budget(client, category,
 
     submit_resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
-        data={
-            "source_object_key": source_key,
-            "requirement_responses": [
+        data={"assets": [{"kind": "source", "value": source_key}], "requirement_responses": [
                 {
                     "requirement_id": requirement_id,
                     "is_met": True,
                     "evidence": [{"kind": "source_location", "value": "x" * 20}],
                 }
-            ],
-        },
+            ]},
         content_type="application/json",
         **_auth_header(dev["access"]),
     )
@@ -808,16 +778,13 @@ def test_missing_source_object_leaves_submission_unscored_for_next_scan(
 
     submit_resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
-        data={
-            "source_object_key": source_key,
-            "requirement_responses": [
+        data={"assets": [{"kind": "source", "value": source_key}], "requirement_responses": [
                 {
                     "requirement_id": requirement_id,
                     "is_met": True,
                     "evidence": [{"kind": "source_location", "value": "MARKER"}],
                 }
-            ],
-        },
+            ]},
         content_type="application/json",
         **_auth_header(dev["access"]),
     )
@@ -872,16 +839,13 @@ def test_one_poisoned_submission_does_not_block_the_rest_of_the_batch(
     def _submit(dev, key):
         resp = client.post(
             f"{CONTESTS_URL}/{contest['id']}/submissions",
-            data={
-                "source_object_key": key,
-                "requirement_responses": [
+            data={"assets": [{"kind": "source", "value": key}], "requirement_responses": [
                     {
                         "requirement_id": requirement_id,
                         "is_met": True,
                         "evidence": [{"kind": "source_location", "value": "MARKER"}],
                     }
-                ],
-            },
+                ]},
             content_type="application/json",
             **_auth_header(dev["access"]),
         )
@@ -941,16 +905,13 @@ def test_permanent_failure_is_excluded_from_the_next_scan(client, category, land
     def _submit(dev, key):
         resp = client.post(
             f"{CONTESTS_URL}/{contest['id']}/submissions",
-            data={
-                "source_object_key": key,
-                "requirement_responses": [
+            data={"assets": [{"kind": "source", "value": key}], "requirement_responses": [
                     {
                         "requirement_id": requirement_id,
                         "is_met": True,
                         "evidence": [{"kind": "source_location", "value": "MARKER"}],
                     }
-                ],
-            },
+                ]},
             content_type="application/json",
             **_auth_header(dev["access"]),
         )
@@ -1025,16 +986,13 @@ def test_scan_stops_early_once_it_exceeds_its_time_budget(
         FakeStorageAdapter().write_object(key, _zip_bytes({"app.py": "MARKER\n"}))
         resp = client.post(
             f"{CONTESTS_URL}/{contest['id']}/submissions",
-            data={
-                "source_object_key": key,
-                "requirement_responses": [
+            data={"assets": [{"kind": "source", "value": key}], "requirement_responses": [
                     {
                         "requirement_id": requirement_id,
                         "is_met": True,
                         "evidence": [{"kind": "source_location", "value": "MARKER"}],
                     }
-                ],
-            },
+                ]},
             content_type="application/json",
             **_auth_header(dev["access"]),
         )
@@ -1097,17 +1055,14 @@ def test_adapter_omitting_a_verdict_treats_it_as_unmet_instead_of_crashing(
 
     submit_resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
-        data={
-            "source_object_key": source_key,
-            "requirement_responses": [
+        data={"assets": [{"kind": "source", "value": source_key}], "requirement_responses": [
                 {
                     "requirement_id": rid,
                     "is_met": True,
                     "evidence": [{"kind": "source_location", "value": "MARKER"}],
                 }
                 for rid in req_ids
-            ],
-        },
+            ]},
         content_type="application/json",
         **_auth_header(dev["access"]),
     )
@@ -1149,7 +1104,7 @@ def test_contest_with_no_required_requirements_scores_full_percentage(
 
     submit_resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
-        data={"source_object_key": source_key, "requirement_responses": []},
+        data={"assets": [{"kind": "source", "value": source_key}], "requirement_responses": []},
         content_type="application/json",
         **_auth_header(dev["access"]),
     )
@@ -1193,9 +1148,7 @@ def test_injected_delimiter_markers_in_untrusted_content_are_neutralized(
 
     submit_resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
-        data={
-            "source_object_key": source_key,
-            "requirement_responses": [
+        data={"assets": [{"kind": "source", "value": source_key}], "requirement_responses": [
                 {
                     "requirement_id": requirement_id,
                     "is_met": True,
@@ -1206,8 +1159,7 @@ def test_injected_delimiter_markers_in_untrusted_content_are_neutralized(
                         }
                     ],
                 }
-            ],
-        },
+            ]},
         content_type="application/json",
         **_auth_header(dev["access"]),
     )
@@ -1257,16 +1209,13 @@ def test_multibyte_utf8_cut_at_budget_boundary_keeps_valid_prefix(client, catego
 
     submit_resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
-        data={
-            "source_object_key": source_key,
-            "requirement_responses": [
+        data={"assets": [{"kind": "source", "value": source_key}], "requirement_responses": [
                 {
                     "requirement_id": requirement_id,
                     "is_met": True,
                     "evidence": [{"kind": "source_location", "value": "가"}],
                 }
-            ],
-        },
+            ]},
         content_type="application/json",
         **_auth_header(dev["access"]),
     )

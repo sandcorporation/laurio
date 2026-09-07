@@ -37,7 +37,7 @@ from accounts.models import DeveloperProfile, SponsorProfile
 from awards.models import Award
 from contests.curation import HomeCurationBucket, home_bucket_for
 from contests.models import Category, Contest, DeliverableType, Requirement
-from submissions.models import RequirementResponse, Submission
+from submissions.models import RequirementResponse, Submission, SubmissionAsset
 
 PREFIX = "[데모] "
 
@@ -299,17 +299,25 @@ class Command(BaseCommand):
         비어, 그 화면이 무엇을 보여주는 곳인지 데모에서 알 수 없다.
         """
 
-        submission = Submission.objects.create(
-            contest=contest,
-            developer=developer,
-            source_object_key=f"submission:demo:{contest.pk}/{rank}/source.zip",
-            demo_url=f"https://demo.laurio.invalid/{contest.pk}/{rank}",
-            # 영상은 일부만 낸다 — 실제로도 전원이 내지는 않는다.
-            demo_video_object_key=(
-                f"submission:demo:{contest.pk}/{rank}/demo.mp4" if rank % 2 == 0 else ""
-            ),
+        submission = Submission.objects.create(contest=contest, developer=developer)
+        SubmissionAsset.objects.create(
+            submission=submission,
+            kind=SubmissionAsset.Kind.SOURCE,
+            value=f"submission:demo:{contest.pk}/{rank}/source.zip",
+        )
+        SubmissionAsset.objects.create(
+            submission=submission,
+            kind=SubmissionAsset.Kind.DEMO_URL,
+            value=f"https://demo.laurio.invalid/{contest.pk}/{rank}",
             test_account="demo@example.invalid / demo1234" if rank % 3 != 2 else "",
         )
+        # 영상은 일부만 낸다 — 실제로도 전원이 내지는 않는다.
+        if rank % 2 == 0:
+            SubmissionAsset.objects.create(
+                submission=submission,
+                kind=SubmissionAsset.Kind.DEMO_VIDEO,
+                value=f"submission:demo:{contest.pk}/{rank}/demo.mp4",
+            )
 
         for requirement in contest.requirements.all().order_by("order", "id"):
             # 필수는 대체로 충족하고 선택은 갈린다 — 전부 충족으로 심으면

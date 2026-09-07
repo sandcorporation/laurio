@@ -2288,6 +2288,28 @@ export interface components {
              */
             ruling_note: string;
         };
+        /**
+         * AssetSummaryOut
+         * @description `test_account`가 **없는** 자료 (#190).
+         *
+         *     공개 프로필과 심사 비교 화면이 쓴다. 두 스키마 모두 다중화 이전에도
+         *     `test_account` 필드가 없었다 — 마감 후 공개되는 것은 데모·영상이지 그것을
+         *     들여다볼 로그인 정보까지가 아니고(ADR-0014의 "데모·영상" 칸, #10 리뷰 지적),
+         *     비교 화면은 애초에 그 필드를 내지 않았다. `SubmissionAssetOut`을 그대로 쓰면
+         *     다중화가 그 두 자리에 로그인 정보를 조용히 새로 흘려보내게 된다.
+         */
+        AssetSummaryOut: {
+            /** Id */
+            id: number;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Order */
+            order: number;
+            /** Value */
+            value: string;
+        };
         /** AwardIn */
         AwardIn: {
             /** Submission Id */
@@ -2378,11 +2400,9 @@ export interface components {
         };
         /** ComparisonSubmissionOut */
         ComparisonSubmissionOut: {
+            /** Assets */
+            assets: components["schemas"]["AssetSummaryOut"][];
             completion: components["schemas"]["CompletionOut"];
-            /** Demo Url */
-            demo_url: string | null;
-            /** Demo Video Object Key */
-            demo_video_object_key: string | null;
             /** Developer Display Name */
             developer_display_name: string;
             /** Developer Id */
@@ -2404,6 +2424,11 @@ export interface components {
             demo_url_count: number;
             /** Demo Video Count */
             demo_video_count: number;
+            /**
+             * Repository Count
+             * @default 0
+             */
+            repository_count: number;
             /** Test Account Count */
             test_account_count: number;
             /** Total Submission Count */
@@ -2414,8 +2439,25 @@ export interface components {
          * @description 시연 영상·데모 URL·테스트 계정·Evidence 연결 상태를 요약한 완성도 지표.
          *
          *     강제 항목은 아무 것도 없다 — 소스만 필수다. 이 지표는 신호일 뿐이다.
+         *
+         *     **`has_*` 세 boolean은 "하나라도 있는가"로 그대로 남는다**(#190). 자료가
+         *     여럿이 될 수 있게 된 뒤에도 이 셋을 개수로 갈아치우지 않은 이유는, 배지를
+         *     그리는 자리에서 필요한 것이 여전히 있다/없다이고 그 자리마다 `count > 0`을
+         *     다시 쓰게 만들 이유가 없기 때문이다. 개수는 옆에 따로 낸다 — 영상 다섯 편을
+         *     낸 제출과 한 편을 낸 제출이 Sponsor에게 같은 배지로 보이면 다중화를 해 놓고
+         *     그 신호를 버리는 셈이다.
          */
         CompletionOut: {
+            /**
+             * Demo Url Count
+             * @default 0
+             */
+            demo_url_count: number;
+            /**
+             * Demo Video Count
+             * @default 0
+             */
+            demo_video_count: number;
             /** Has Demo Url */
             has_demo_url: boolean;
             /** Has Demo Video */
@@ -2424,6 +2466,16 @@ export interface components {
             has_test_account: boolean;
             /** Linked Requirement Count */
             linked_requirement_count: number;
+            /**
+             * Repository Count
+             * @default 0
+             */
+            repository_count: number;
+            /**
+             * Source Count
+             * @default 0
+             */
+            source_count: number;
             /** Total Requirement Count */
             total_requirement_count: number;
             /** Unlinked Requirement Count */
@@ -2764,6 +2816,8 @@ export interface components {
         };
         /** EvidenceIn */
         EvidenceIn: {
+            /** Asset Id */
+            asset_id?: number | null;
             /** Kind */
             kind: string;
             /** Value */
@@ -2771,6 +2825,8 @@ export interface components {
         };
         /** EvidenceOut */
         EvidenceOut: {
+            /** Asset Id */
+            asset_id?: number | null;
             /** Kind */
             kind: string;
             /** Value */
@@ -3377,6 +3433,16 @@ export interface components {
         };
         /** PolicyOut */
         PolicyOut: {
+            /** Max Demo Url Assets */
+            max_demo_url_assets: number;
+            /** Max Demo Video Assets */
+            max_demo_video_assets: number;
+            /** Max Repository Assets */
+            max_repository_assets: number;
+            /** Max Scoring Input Assets */
+            max_scoring_input_assets: number;
+            /** Max Source Assets */
+            max_source_assets: number;
             /** Platform Fee Bps */
             platform_fee_bps: number;
             /**
@@ -3397,6 +3463,16 @@ export interface components {
         PolicyUpdateIn: {
             /** Expected Version */
             expected_version: number;
+            /** Max Demo Url Assets */
+            max_demo_url_assets?: number | null;
+            /** Max Demo Video Assets */
+            max_demo_video_assets?: number | null;
+            /** Max Repository Assets */
+            max_repository_assets?: number | null;
+            /** Max Scoring Input Assets */
+            max_scoring_input_assets?: number | null;
+            /** Max Source Assets */
+            max_source_assets?: number | null;
             /** Platform Fee Bps */
             platform_fee_bps?: number | null;
             /** Reason */
@@ -3432,11 +3508,13 @@ export interface components {
          * PublicSubmissionOut
          * @description Developer 공개 프로필 아카이브 한 항목 (#11, ADR-0014).
          *
-         *     마감된 Contest의 데모·영상만 담는다 — 소스·test_account는 이 스키마 자체에
-         *     없다("존재하지만 안 보임"이 아니라 애초에 필드가 없다). ADR-0014의 "마감 후"
-         *     칸에 있는 건 데모·영상뿐이다.
+         *     마감된 Contest의 데모·영상만 담는다 — 소스·저장소·test_account는 이 스키마
+         *     자체에 없다("존재하지만 안 보임"이 아니라 애초에 필드가 없다). ADR-0014의
+         *     "마감 후" 칸에 있는 건 데모·영상뿐이다.
          */
         PublicSubmissionOut: {
+            /** Assets */
+            assets: components["schemas"]["AssetSummaryOut"][];
             /** Contest Id */
             contest_id: number;
             /** Contest Title */
@@ -3446,10 +3524,6 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
-            /** Demo Url */
-            demo_url: string | null;
-            /** Demo Video Object Key */
-            demo_video_object_key: string | null;
             /** Submission Id */
             submission_id: number;
         };
@@ -3787,24 +3861,75 @@ export interface components {
          * @enum {string}
          */
         SponsorNextAction: "pay_to_publish" | "judge_and_award" | "accept_handover" | "awaiting_submissions" | "awaiting_scoring" | "awaiting_appeal_ruling" | "awaiting_distribution" | "awaiting_payout" | "no_submissions" | "contest_complete";
+        /**
+         * SubmissionAssetIn
+         * @description 제출 페이로드가 담는 자료 하나 (#190).
+         *
+         *     `id`가 있으면 **기존 자료를 유지**하고(그 자리에 새 행을 만들지 않는다),
+         *     없으면 새로 만든다. 페이로드에 없는 기존 자료는 지워진다. 이 API에서
+         *     부분 갱신 의미론을 갖는 것은 자료뿐이다 — `requirement_responses`는
+         *     지금까지처럼 통째로 재생성된다(편집 UI가 매번 체크리스트 전체를 보낸다).
+         *
+         *     id를 실어 보내지 않으면 저장할 때마다 같은 파일이 새 행이 되어 "언제
+         *     올렸는가"가 전부 마지막 수정 시각으로 뭉갠다.
+         */
+        SubmissionAssetIn: {
+            /** Id */
+            id?: number | null;
+            /** Kind */
+            kind: string;
+            /**
+             * Label
+             * @default
+             */
+            label: string;
+            /**
+             * Order
+             * @default 0
+             */
+            order: number;
+            /**
+             * Test Account
+             * @default
+             */
+            test_account: string;
+            /** Value */
+            value: string;
+        };
+        /** SubmissionAssetOut */
+        SubmissionAssetOut: {
+            /** Id */
+            id: number;
+            /** Is Public */
+            is_public?: boolean | null;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Order */
+            order: number;
+            /** Test Account */
+            test_account: string;
+            /** Value */
+            value: string;
+        };
         /** SubmissionIn */
         SubmissionIn: {
-            /** Demo Url */
-            demo_url?: string | null;
-            /** Demo Video Object Key */
-            demo_video_object_key?: string | null;
+            /**
+             * Assets
+             * @default []
+             */
+            assets: components["schemas"]["SubmissionAssetIn"][];
             /**
              * Requirement Responses
              * @default []
              */
             requirement_responses: components["schemas"]["RequirementResponseIn"][];
-            /** Source Object Key */
-            source_object_key: string;
-            /** Test Account */
-            test_account?: string | null;
         };
         /** SubmissionOut */
         SubmissionOut: {
+            /** Assets */
+            assets: components["schemas"]["SubmissionAssetOut"][];
             completion: components["schemas"]["CompletionOut"];
             /** Contest Id */
             contest_id: number;
@@ -3813,10 +3938,6 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
-            /** Demo Url */
-            demo_url: string | null;
-            /** Demo Video Object Key */
-            demo_video_object_key: string | null;
             /** Developer Id */
             developer_id: number;
             /** Id */
@@ -3825,10 +3946,6 @@ export interface components {
             is_owner: boolean;
             /** Requirement Responses */
             requirement_responses: components["schemas"]["RequirementResponseOut"][];
-            /** Source Object Key */
-            source_object_key: string | null;
-            /** Test Account */
-            test_account: string | null;
             /**
              * Updated At
              * Format: date-time

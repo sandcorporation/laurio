@@ -151,10 +151,7 @@ def _source_object_key(contest_id: int, developer_user_id: int) -> str:
 def _submit(client, dev: dict, contest_id: int, *, requirement_responses=None) -> dict:
     response = client.post(
         f"{CONTESTS_URL}/{contest_id}/submissions",
-        data={
-            "source_object_key": _source_object_key(contest_id, dev["user_id"]),
-            "requirement_responses": requirement_responses or [],
-        },
+        data={"assets": [{"kind": "source", "value": _source_object_key(contest_id, dev["user_id"])}], "requirement_responses": requirement_responses or []},
         content_type="application/json",
         **_auth_header(dev["access"]),
     )

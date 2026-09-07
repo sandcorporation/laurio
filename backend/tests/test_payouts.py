@@ -164,10 +164,7 @@ def _source_object_key(contest_id: int, developer_user_id: int) -> str:
 def _submit(client, dev: dict, contest_id: int) -> dict:
     response = client.post(
         f"{CONTESTS_URL}/{contest_id}/submissions",
-        data={
-            "source_object_key": _source_object_key(contest_id, dev["user_id"]),
-            "requirement_responses": [],
-        },
+        data={"assets": [{"kind": "source", "value": _source_object_key(contest_id, dev["user_id"])}], "requirement_responses": []},
         content_type="application/json",
         **_auth_header(dev["access"]),
     )
@@ -3895,7 +3892,7 @@ def _clone_blocked_payouts(count: int, *, contest_id: int, developer, status: st
         )
         contest.deliverable_types.set(deliverable_types)
         submission = Submission.objects.create(
-            contest=contest, developer=developer, source_object_key=f"src-{contest.id}"
+            contest=contest, developer=developer
         )
         award = Award.objects.create(
             contest=contest, submission=submission, awarded_at=timezone.now()
@@ -4142,7 +4139,7 @@ def test_operator_queue_resolves_seller_and_identity_for_the_distribution_path_t
         share_amount=1_000_000,
     )
     share_submission = Submission.objects.create(
-        contest=contest_row, developer=developer, source_object_key="src-share"
+        contest=contest_row, developer=developer
     )
     share = DistributionShare.objects.create(
         distribution=distribution, submission=share_submission, amount=1_000_000

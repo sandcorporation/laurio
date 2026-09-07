@@ -19,6 +19,12 @@ class PolicyOut(Schema):
     withholding_tax_bps: int
     withholding_necessary_expense_bps: int
     withholding_minor_income_exempt_won: int
+    # #190 — 제출 자산 개수 상한.
+    max_source_assets: int
+    max_demo_video_assets: int
+    max_demo_url_assets: int
+    max_repository_assets: int
+    max_scoring_input_assets: int
     # 낙관적 동시성 제어에 쓰는 값 — PATCH의 `expected_version`에 그대로
     # 되돌려 보내야 한다.
     version: int
@@ -32,6 +38,12 @@ class PolicyUpdateIn(Schema):
     withholding_tax_bps: int | None = Field(default=None, ge=0)
     withholding_necessary_expense_bps: int | None = Field(default=None, ge=0)
     withholding_minor_income_exempt_won: int | None = Field(default=None, ge=0)
+    # #190 — 자산 상한은 1 미만이면 제출 자체가 불가능해진다(소스가 필수다).
+    max_source_assets: int | None = Field(default=None, ge=1)
+    max_demo_video_assets: int | None = Field(default=None, ge=1)
+    max_demo_url_assets: int | None = Field(default=None, ge=1)
+    max_repository_assets: int | None = Field(default=None, ge=1)
+    max_scoring_input_assets: int | None = Field(default=None, ge=1)
     # 돈을 움직이는 판단에 근거가 없으면 감사 기록으로서 값이 없다
     # (AppealRuling.note와 같은 규율).
     reason: str

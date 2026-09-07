@@ -11,11 +11,16 @@ from pydantic import Field
 class EvidenceIn(Schema):
     kind: str
     value: str = Field(max_length=500)
+    # 이 근거가 가리키는 자료의 id (#190). 같은 요청의 `assets`에 담겨 새로
+    # 만들어지는 자료는 아직 id가 없으므로 가리킬 수 없다 — 자료를 먼저 저장한
+    # 다음 요청에서 연결한다. 없으면 지금까지와 같은 "대상을 특정하지 않은 근거"다.
+    asset_id: int | None = None
 
 
 class EvidenceOut(Schema):
     kind: str
     value: str
+    asset_id: int | None = None
 
 
 class RequirementResponseIn(Schema):
@@ -37,14 +42,60 @@ class RequirementResponseOut(Schema):
     is_linked: bool
 
 
+class SubmissionAssetIn(Schema):
+    """제출 페이로드가 담는 자료 하나 (#190).
+
+    `id`가 있으면 **기존 자료를 유지**하고(그 자리에 새 행을 만들지 않는다),
+    없으면 새로 만든다. 페이로드에 없는 기존 자료는 지워진다. 이 API에서
+    부분 갱신 의미론을 갖는 것은 자료뿐이다 — `requirement_responses`는
+    지금까지처럼 통째로 재생성된다(편집 UI가 매번 체크리스트 전체를 보낸다).
+
+    id를 실어 보내지 않으면 저장할 때마다 같은 파일이 새 행이 되어 "언제
+    올렸는가"가 전부 마지막 수정 시각으로 뭉갠다.
+    """
+
+    id: int | None = None
+    kind: str
+    # 아래 max_length는 submissions.models.SubmissionAsset의 같은 필드와 길이를
+    # 맞춘다(#10 리뷰 지적) — 스키마가 막지 않으면 DB CHECK가 대신 걸려 422 대신
+    # 500(DataError)이 난다.
+    value: str = Field(max_length=2000)
+    label: str = Field(default="", max_length=200)
+    test_account: str = Field(default="", max_length=500)
+    order: int = Field(default=0, ge=0)
+
+
+class AssetSummaryOut(Schema):
+    """`test_account`가 **없는** 자료 (#190).
+
+    공개 프로필과 심사 비교 화면이 쓴다. 두 스키마 모두 다중화 이전에도
+    `test_account` 필드가 없었다 — 마감 후 공개되는 것은 데모·영상이지 그것을
+    들여다볼 로그인 정보까지가 아니고(ADR-0014의 "데모·영상" 칸, #10 리뷰 지적),
+    비교 화면은 애초에 그 필드를 내지 않았다. `SubmissionAssetOut`을 그대로 쓰면
+    다중화가 그 두 자리에 로그인 정보를 조용히 새로 흘려보내게 된다.
+    """
+
+    id: int
+    kind: str
+    value: str
+    label: str
+    order: int
+
+
+class SubmissionAssetOut(Schema):
+    id: int
+    kind: str
+    value: str
+    label: str
+    test_account: str
+    order: int
+    # `repository`가 공개인가 — null은 "비공개"가 아니라 "아직 확인하지 않음"이다
+    # (#190/#193). 다른 종류에서는 항상 null이다.
+    is_public: bool | None = None
+
+
 class SubmissionIn(Schema):
-    # 아래 세 max_length는 각각 submissions.models.Submission의 같은 필드와
-    # 길이를 맞춘다(#10 리뷰 지적) — 스키마가 막지 않으면 DB CHECK가 대신 걸려
-    # 422 대신 500(DataError)이 난다.
-    source_object_key: str = Field(max_length=600)
-    demo_video_object_key: str | None = Field(default=None, max_length=600)
-    demo_url: str | None = Field(default=None, max_length=2000)
-    test_account: str | None = Field(default=None, max_length=500)
+    assets: list[SubmissionAssetIn] = []
     requirement_responses: list[RequirementResponseIn] = []
 
 
@@ -52,11 +103,23 @@ class CompletionOut(Schema):
     """시연 영상·데모 URL·테스트 계정·Evidence 연결 상태를 요약한 완성도 지표.
 
     강제 항목은 아무 것도 없다 — 소스만 필수다. 이 지표는 신호일 뿐이다.
+
+    **`has_*` 세 boolean은 "하나라도 있는가"로 그대로 남는다**(#190). 자료가
+    여럿이 될 수 있게 된 뒤에도 이 셋을 개수로 갈아치우지 않은 이유는, 배지를
+    그리는 자리에서 필요한 것이 여전히 있다/없다이고 그 자리마다 `count > 0`을
+    다시 쓰게 만들 이유가 없기 때문이다. 개수는 옆에 따로 낸다 — 영상 다섯 편을
+    낸 제출과 한 편을 낸 제출이 Sponsor에게 같은 배지로 보이면 다중화를 해 놓고
+    그 신호를 버리는 셈이다.
     """
 
     has_demo_video: bool
     has_demo_url: bool
     has_test_account: bool
+    # #190 — 종류별 자료 수.
+    source_count: int = 0
+    demo_video_count: int = 0
+    demo_url_count: int = 0
+    repository_count: int = 0
     total_requirement_count: int
     linked_requirement_count: int
     unlinked_requirement_count: int
@@ -67,12 +130,11 @@ class SubmissionOut(Schema):
     contest_id: int
     developer_id: int
     is_owner: bool
-    # 뷰어가 볼 수 없는 필드는 값을 지우지 않고 아예 null로 내려 "존재하지만 안 보임"과
-    # "비어 있음"을 구분한다.
-    source_object_key: str | None
-    demo_video_object_key: str | None
-    demo_url: str | None
-    test_account: str | None
+    # 뷰어가 볼 수 없는 종류는 **목록에서 뺀다**(#190). 예전에는 종류마다 필드가
+    # 하나씩이라 null로 "존재하지만 안 보임"을 표현할 수 있었지만, 목록에서는
+    # 그 구분이 애초에 성립하지 않는다 — 없는 자료와 안 보이는 자료를 구별해 세면
+    # 그 수 자체가 감춘 것을 드러낸다.
+    assets: list[SubmissionAssetOut]
     requirement_responses: list[RequirementResponseOut]
     completion: CompletionOut
     created_at: datetime
@@ -145,16 +207,17 @@ class MyParticipationPageOut(Schema):
 class PublicSubmissionOut(Schema):
     """Developer 공개 프로필 아카이브 한 항목 (#11, ADR-0014).
 
-    마감된 Contest의 데모·영상만 담는다 — 소스·test_account는 이 스키마 자체에
-    없다("존재하지만 안 보임"이 아니라 애초에 필드가 없다). ADR-0014의 "마감 후"
-    칸에 있는 건 데모·영상뿐이다.
+    마감된 Contest의 데모·영상만 담는다 — 소스·저장소·test_account는 이 스키마
+    자체에 없다("존재하지만 안 보임"이 아니라 애초에 필드가 없다). ADR-0014의
+    "마감 후" 칸에 있는 건 데모·영상뿐이다.
     """
 
     submission_id: int
     contest_id: int
     contest_title: str
-    demo_video_object_key: str | None
-    demo_url: str | None
+    # `demo_video`·`demo_url` 자료만 담긴다(#190) — `source`·`repository`는
+    # 이 목록에 절대 들어오지 않고, 원소 타입에 `test_account`가 없다.
+    assets: list[AssetSummaryOut]
     created_at: datetime
 
 
@@ -193,8 +256,10 @@ class ComparisonSubmissionOut(Schema):
     submission_id: int
     developer_id: int
     developer_display_name: str
-    demo_video_object_key: str | None
-    demo_url: str | None
+    # 데모·영상 자료만 담긴다(#190). 원소 타입에 `test_account`가 없다 — 이
+    # 스키마는 다중화 이전에도 그 필드를 내지 않았고, Sponsor가 로그인 정보를
+    # 보는 자리는 단건 조회(`SubmissionOut`)다.
+    assets: list[AssetSummaryOut]
     completion: CompletionOut
 
 
@@ -319,6 +384,8 @@ class CompletionDistributionOut(Schema):
     demo_video_count: int
     demo_url_count: int
     test_account_count: int
+    # #190 — 저장소를 붙인 Submission 수. 위 셋과 같은 "하나라도 있는가"의 집계다.
+    repository_count: int = 0
 
 
 class ViewMetricsOut(Schema):

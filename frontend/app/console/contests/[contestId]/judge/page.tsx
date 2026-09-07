@@ -359,17 +359,21 @@ function SubmissionColumnHeader({
         ].filter(Boolean).length}
         /3
       </p>
-      {submission.demo_url && (
-        <a
-          href={submission.demo_url}
-          target="_blank"
-          rel="noreferrer"
-          className="text-xs underline"
-          data-testid={`submission-${submission.submission_id}-demo-url`}
-        >
-          데모 보기
-        </a>
-      )}
+      {/* 데모는 여럿일 수 있다(#190) — 웹과 앱을 따로 낸 참가작이면 링크도 둘이다. */}
+      {submission.assets
+        .filter((asset) => asset.kind === "demo_url")
+        .map((asset) => (
+          <a
+            key={asset.id}
+            href={asset.value}
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs underline"
+            data-testid={`submission-${submission.submission_id}-demo-url`}
+          >
+            {asset.label || "데모 보기"}
+          </a>
+        ))}
 
       {isAwarded && (
         <p className="text-xs font-semibold text-verified" data-testid={`awarded-badge-${submission.submission_id}`}>

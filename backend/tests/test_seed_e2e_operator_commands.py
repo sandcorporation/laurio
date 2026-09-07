@@ -139,7 +139,7 @@ def _make_unrelated_pending_appeal(uid: str) -> Appeal:
     contest.deliverable_types.add(deliverable_type)
 
     submission = Submission.objects.create(
-        contest=contest, developer=developer, source_object_key=f"unrelated/{uid}/source"
+        contest=contest, developer=developer
     )
     return Appeal.objects.create(
         submission=submission, reason="이 명령과 무관한 이의", status=Appeal.Status.PENDING
@@ -198,7 +198,7 @@ def _make_unrelated_published_contest_with_submission(uid: str) -> tuple[Contest
     contest.deliverable_types.add(deliverable_type)
 
     submission = Submission.objects.create(
-        contest=contest, developer=developer, source_object_key=f"unrelated-published/{uid}/source"
+        contest=contest, developer=developer
     )
     return contest, submission
 
@@ -279,7 +279,7 @@ def _make_own_prefix_contest_with_award(uid: str, *, run_id: str, age=timedelta(
     Contest.objects.filter(pk=contest.pk).update(created_at=timezone.now() - age)
 
     submission = Submission.objects.create(
-        contest=contest, developer=developer, source_object_key=f"stale/{uid}/source"
+        contest=contest, developer=developer
     )
     Award.objects.create(contest=contest, submission=submission, awarded_at=timezone.now())
 
