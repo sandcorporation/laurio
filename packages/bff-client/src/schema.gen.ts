@@ -190,6 +190,11 @@ export interface paths {
          *     **제출 0건 술어는 `_get_owned_editable_assignment`에 있다(#209).** `EDITABLE:
          *     True`가 「고칠 수 있다」의 절반이고, ASSIGNMENT_OPEN이면서 제출이 1건이라도
          *     있으면 나머지 절반(첫 제출이 문을 닫는다)에 걸려 409로 거부된다.
+         *
+         *     **`requirements`도 title·description·deadline_at·deliverable_type_ids와 같은
+         *     게이트를 탄다(#217).** 새 잠금 규칙을 만들지 않는다 — 제출이 있으면 이 핸들러에
+         *     들어오기도 전에 `_get_owned_editable_assignment`가 이미 409로 막는다. 그래서
+         *     아래 `requirements` 처리는 "이미 통과한 게이트를 다시 확인"하지 않는다.
          */
         patch: operations["contests_assignment_api_update_assignment"];
         trace?: never;
@@ -2893,9 +2898,16 @@ export interface components {
         };
         /**
          * AssignmentUpdateIn
-         * @description DRAFT·ASSIGNMENT_OPEN Assignment를 고치는 요청(#207) — `ContestUpdateIn`과 달리
-         *     `prize`·`category_id`가 없다. 전부 선택 필드다(부분 갱신, `ContestUpdateIn`과 같은
-         *     규율).
+         * @description DRAFT·ASSIGNMENT_OPEN Assignment를 고치는 요청(#207/#217) — `ContestUpdateIn`과
+         *     달리 `prize`·`category_id`가 없다. 전부 선택 필드다(부분 갱신, `ContestUpdateIn`과
+         *     같은 규율) — `requirements`가 `None`(필드를 아예 보내지 않음)이면 기존 체크리스트를
+         *     건드리지 않는다.
+         *
+         *     `requirements`가 있으면(빈 리스트 포함) **통째 교체**다(#217) — 기존 항목을 부분
+         *     수정하는 것이 아니라 옛 항목을 전부 지우고 새 목록으로 다시 만든다. 그래서 이
+         *     리스트 안의 개별 항목에는 `id`가 없다(`RequirementIn`은 생성 스키마와 같은 모양 —
+         *     `text`·`grade`뿐이다) — 통째 교체이므로 "이 id의 항목을 이렇게 고친다"는 요청
+         *     자체가 성립하지 않는다.
          */
         AssignmentUpdateIn: {
             /** Deadline At */
@@ -2904,6 +2916,8 @@ export interface components {
             deliverable_type_ids?: number[] | null;
             /** Description */
             description?: string | null;
+            /** Requirements */
+            requirements?: components["schemas"]["RequirementIn"][] | null;
             /** Title */
             title?: string | null;
         };

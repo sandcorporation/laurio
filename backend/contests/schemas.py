@@ -377,14 +377,22 @@ class AssignmentCreateIn(Schema):
 
 
 class AssignmentUpdateIn(Schema):
-    """DRAFT·ASSIGNMENT_OPEN Assignment를 고치는 요청(#207) — `ContestUpdateIn`과 달리
-    `prize`·`category_id`가 없다. 전부 선택 필드다(부분 갱신, `ContestUpdateIn`과 같은
-    규율)."""
+    """DRAFT·ASSIGNMENT_OPEN Assignment를 고치는 요청(#207/#217) — `ContestUpdateIn`과
+    달리 `prize`·`category_id`가 없다. 전부 선택 필드다(부분 갱신, `ContestUpdateIn`과
+    같은 규율) — `requirements`가 `None`(필드를 아예 보내지 않음)이면 기존 체크리스트를
+    건드리지 않는다.
+
+    `requirements`가 있으면(빈 리스트 포함) **통째 교체**다(#217) — 기존 항목을 부분
+    수정하는 것이 아니라 옛 항목을 전부 지우고 새 목록으로 다시 만든다. 그래서 이
+    리스트 안의 개별 항목에는 `id`가 없다(`RequirementIn`은 생성 스키마와 같은 모양 —
+    `text`·`grade`뿐이다) — 통째 교체이므로 "이 id의 항목을 이렇게 고친다"는 요청
+    자체가 성립하지 않는다."""
 
     title: str | None = Field(default=None, max_length=200)
     description: str | None = None
     deliverable_type_ids: list[int] | None = None
     deadline_at: datetime | None = None
+    requirements: list[RequirementIn] | None = None
 
 
 class AssignmentOut(Schema):

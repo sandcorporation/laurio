@@ -195,10 +195,13 @@ def _get_owned_editable_assignment(request: HttpRequest, assignment_id: int) -> 
     # assignment`가 같은 함수로 `is_editable`을 계산해 화면에 미리 실어 보낸다(#209
     # 코드리뷰 지적). 여기서 조건을 다시 쓰면 둘이 갈릴 수 있다.
     if _is_locked_by_first_submission(contest.status, contest.submissions.count()):
-        # "요구사항을"이라 쓰지 않는다 — 이 게이트가 지키는 `update_assignment`는
-        # title·description·deadline_at·deliverable_type_ids를 고치는 자리이지
-        # Requirement 행 자체를 건드리는 엔드포인트가 아니다(그건 이 티켓 범위
-        # 밖이다). "과제 내용"이라고 해야 실제로 잠그는 대상과 문구가 맞는다.
+        # "과제 내용"이라고 쓴다(구체적으로 "요구사항을"이라 쓰지 않는다) — 이
+        # 게이트가 지키는 `update_assignment`는 title·description·deadline_at·
+        # deliverable_type_ids뿐 아니라 requirements 통째 교체(#217)도 같은 이유로
+        # 여기서 막는다. 새 잠금 규칙을 만들지 않고 이 게이트 하나를 그대로
+        # 재사용한다 — 제출 뒤 채점 기준이 바뀌면 이미 낸 학생이 불리해지고,
+        # Assignment에는 이의제기가 없어(ADR-0028) 구제 수단이 없다는 이유는
+        # title이든 requirements든 다르지 않다.
         raise HttpError(
             409,
             "이미 제출한 학생이 있어 과제 내용을 더 이상 고칠 수 없습니다. "
@@ -356,6 +359,11 @@ def update_assignment(request: HttpRequest, assignment_id: int, payload: Assignm
     **제출 0건 술어는 `_get_owned_editable_assignment`에 있다(#209).** `EDITABLE:
     True`가 「고칠 수 있다」의 절반이고, ASSIGNMENT_OPEN이면서 제출이 1건이라도
     있으면 나머지 절반(첫 제출이 문을 닫는다)에 걸려 409로 거부된다.
+
+    **`requirements`도 title·description·deadline_at·deliverable_type_ids와 같은
+    게이트를 탄다(#217).** 새 잠금 규칙을 만들지 않는다 — 제출이 있으면 이 핸들러에
+    들어오기도 전에 `_get_owned_editable_assignment`가 이미 409로 막는다. 그래서
+    아래 `requirements` 처리는 "이미 통과한 게이트를 다시 확인"하지 않는다.
     """
 
     contest = _get_owned_editable_assignment(request, assignment_id)
@@ -393,6 +401,27 @@ def update_assignment(request: HttpRequest, assignment_id: int, payload: Assignm
             # m2m `.set()`은 그 자체로 DB에 반영된다 — `Contest.save()`가 필요 없다.
             contest.deliverable_types.set(deliverable_types)
 
+        if payload.requirements is not None:
+            # 통째 교체다(#217, `AssignmentUpdateIn` 독스트링) — 부분 수정이 아니라
+            # 옛 항목을 전부 지우고 새 목록을 그 자리에 다시 만든다. 검증을 먼저
+            # 끝내 둔다 — grade가 잘못돼 422가 나면(아래) `transaction.atomic()`이
+            # 이 블록에서 일어난 delete까지 통째로 롤백하지만, 순서를 바꿔 delete
+            # 뒤에 검증하면 "실패했는데 옛 항목이 이미 지워졌다"는 중간 상태를
+            # 트랜잭션 밖에서 관찰할 여지를 만들 이유가 없다.
+            _validate_requirement_grades(payload.requirements)
+            contest.requirements.all().delete()
+            Requirement.objects.bulk_create(
+                [
+                    Requirement(
+                        contest=contest,
+                        text=sanitize_free_text(r.text),
+                        grade=r.grade,
+                        order=index,
+                    )
+                    for index, r in enumerate(payload.requirements)
+                ]
+            )
+
         if update_fields:
             contest.save(update_fields=update_fields)
 
@@ -400,11 +429,14 @@ def update_assignment(request: HttpRequest, assignment_id: int, payload: Assignm
     # 값을 그대로 들고 있다(title·description·deadline_at은 위에서 직접 대입했다).
     # `.set()`은 스스로 캐시를 갱신하는 것이 아니라 그 관계의 prefetch 캐시를
     # **비운다** — 그래서 아래 `_serialize_assignment`의 `.all()`이 다시 쿼리해
-    # 최신 값을 그대로 받는다(Django 동작 확인, 코드리뷰). 결과는 같다: 인자 없는
-    # `refresh_from_db()`처럼 `_get_owned_editable_assignment`가 미리 해 둔
-    # `prefetch_related("deliverable_types", "requirements")`를 통째로 버리지 않고,
-    # `deliverable_type_ids`를 안 바꾼 요청에서는 `requirements`(그리고 바뀌지
-    # 않았다면 `deliverable_types`도) prefetch가 그대로 살아남는다.
+    # 최신 값을 그대로 받는다(Django 동작 확인, 코드리뷰). `requirements`도 같은
+    # 모양이다(#217): `contest.requirements.all()`이 돌려주는 것은
+    # `_get_owned_editable_assignment`가 미리 `prefetch_related`해 둔 바로 그
+    # QuerySet 객체이고, 그 위에서 부른 `.delete()`가 (Django `QuerySet.delete()`
+    # 구현이) 자기 `_result_cache`를 비운다 — 그래서 이후 `.all()`이 다시 그 캐시를
+    # 참조해도 재조회가 일어난다. 결과는 같다: 인자 없는 `refresh_from_db()`처럼
+    # `deliverable_types` prefetch를 통째로 버리지 않고, `deliverable_type_ids`를
+    # 안 바꾼 요청에서는 그 prefetch가 그대로 살아남는다.
     return _serialize_assignment(
         contest, auth_user=request.auth_user, invite_code=_active_invite_code(contest)
     )

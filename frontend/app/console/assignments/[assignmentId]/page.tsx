@@ -19,6 +19,12 @@ import { useSession } from "@/lib/auth/use-session";
 import { ASSIGNMENT_STATUS_LABELS } from "@/lib/assignments/use-my-assignments";
 import { ScoreSummary } from "@/lib/assignments/score-summary";
 import { AssignmentSourceReveal } from "@/lib/assignments/submission-source-panel";
+import {
+  RequirementChecklistEditor,
+  requirementDraftsFromOut,
+  requirementDraftsToIn,
+  type RequirementDraft,
+} from "@/lib/assignments/requirement-checklist-editor";
 
 type AssignmentDetail = components["schemas"]["AssignmentOut"];
 type AssignmentSubmissionRow = components["schemas"]["AssignmentSubmissionOut"];
@@ -49,6 +55,7 @@ export default function AssignmentDetailPage() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [deadlineAt, setDeadlineAt] = useState("");
+  const [requirementDrafts, setRequirementDrafts] = useState<RequirementDraft[]>([]);
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
@@ -62,6 +69,7 @@ export default function AssignmentDetailPage() {
     setTitle(state.data.title);
     setDescription(state.data.description);
     setDeadlineAt(toDeadlineInputValue(state.data.deadline_at));
+    setRequirementDrafts(requirementDraftsFromOut(state.data.requirements));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 응답이 새로 도착했을 때만 폼을 되돌린다.
   }, [state.status === "ready" ? state.data.id : null, state.status === "ready" ? state.data.status : null]);
 
@@ -105,6 +113,10 @@ export default function AssignmentDetailPage() {
       setEditError("제목을 입력해주세요.");
       return;
     }
+    if (requirementDrafts.some((r) => r.text.trim() === "")) {
+      setEditError("빈 요구사항 항목이 있습니다. 내용을 채우거나 삭제해주세요.");
+      return;
+    }
     setSavingEdit(true);
     try {
       const response = await bffClient.request<AssignmentDetail>(
@@ -116,6 +128,9 @@ export default function AssignmentDetailPage() {
             title: trimmedTitle,
             description,
             deadline_at: new Date(deadlineAt).toISOString(),
+            // 통째 교체다(#217, 백엔드 `AssignmentUpdateIn`) — 편집기에 지금 보이는
+            // 목록 그대로가 저장 후의 전체 목록이 된다.
+            requirements: requirementDraftsToIn(requirementDrafts),
           }),
         },
       );
@@ -302,6 +317,13 @@ export default function AssignmentDetailPage() {
               className="border border-rule bg-surface px-3 py-2"
             />
           </label>
+
+          <RequirementChecklistEditor
+            requirements={requirementDrafts}
+            onChange={setRequirementDrafts}
+            testIdPrefix="assignment-edit-requirement"
+          />
+
           {editError && (
             <p role="alert" data-testid="assignment-edit-error" className="text-sm text-attention">
               {editError}
@@ -319,16 +341,22 @@ export default function AssignmentDetailPage() {
         </div>
       ) : null}
 
-      <div className="border-t border-rule pt-4 text-sm text-ink/70">
-        <p>Requirement</p>
-        <ul className="mt-2 flex flex-col gap-1" data-testid="assignment-requirements">
-          {assignment.requirements.map((r) => (
-            <li key={r.id} data-testid={`assignment-requirement-${r.id}`}>
-              [{r.grade === "required" ? "필수" : "선택"}] {r.text}
-            </li>
-          ))}
-        </ul>
-      </div>
+      {/* 편집 가능한 동안은 위 `RequirementChecklistEditor`가 유일한 목록이다 —
+          같은 항목을 여기서 다시 읽기 전용으로 그리면 저장 전 임시 상태와 마지막
+          저장 상태가 한 화면에 둘 다 보여 혼동을 준다(#217). 잠긴 뒤(첫 제출 이후·
+          마감 후)에는 이 목록이 유일한 표시 자리가 된다. */}
+      {!isEditable ? (
+        <div className="border-t border-rule pt-4 text-sm text-ink/70">
+          <p>Requirement</p>
+          <ul className="mt-2 flex flex-col gap-1" data-testid="assignment-requirements">
+            {assignment.requirements.map((r) => (
+              <li key={r.id} data-testid={`assignment-requirement-${r.id}`}>
+                [{r.grade === "required" ? "필수" : "선택"}] {r.text}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       <SubmissionsSection state={submissionsState} assignmentId={assignmentId} />
     </main>
