@@ -36,6 +36,7 @@ import {
   RequirementField,
   type RequirementFieldState,
 } from "../../console/contests/[contestId]/submit/requirement-field";
+import { ReadOnlyAssetSection, ReadOnlyRequirementField } from "./read-only-assignment-view";
 
 type AssignmentDetail = components["schemas"]["AssignmentOut"];
 type OwnScore = components["schemas"]["OwnScoreOut"];
@@ -377,62 +378,109 @@ export default function AssignmentInvitePage() {
             </div>
           </section>
 
-          <AssetKindSection
-            kind="source"
-            title={ASSET_KIND_LABELS.source}
-            required
-            addLabel="+ 소스코드 추가"
-            testIdPrefix="assignment-source-asset"
-            rows={sourceAssets}
-            onChange={setSourceAssets}
-            disabled={isPastDeadline}
-            targetRefPrefix={sourceTargetRef ?? undefined}
-          />
-          <AssetKindSection
-            kind="repository"
-            title={ASSET_KIND_LABELS.repository}
-            addLabel="+ 저장소 추가"
-            testIdPrefix="assignment-repository-asset"
-            rows={repositoryAssets}
-            onChange={setRepositoryAssets}
-            disabled={isPastDeadline}
-          />
-          <AssetKindSection
-            kind="demo_video"
-            title={ASSET_KIND_LABELS.demo_video}
-            addLabel="+ 시연 영상 추가"
-            testIdPrefix="assignment-demo-video-asset"
-            rows={demoVideoAssets}
-            onChange={setDemoVideoAssets}
-            disabled={isPastDeadline}
-            targetRefPrefix={demoVideoTargetRef ?? undefined}
-          />
-          <AssetKindSection
-            kind="demo_url"
-            title={ASSET_KIND_LABELS.demo_url}
-            addLabel="+ 데모 URL 추가"
-            testIdPrefix="assignment-demo-url-asset"
-            rows={demoUrlAssets}
-            onChange={setDemoUrlAssets}
-            disabled={isPastDeadline}
-          />
-
-          <section className="flex flex-col gap-3">
-            <h2 className="text-lg font-semibold">요구사항 체크리스트</h2>
-            {data.requirements.map((requirement) => (
-              <RequirementField
-                key={requirement.id}
-                requirement={requirement}
-                state={requirementStates[requirement.id] ?? { isMet: false, note: "", evidence: [] }}
-                onChange={(next) =>
-                  setRequirementStates((prev) => ({ ...prev, [requirement.id]: next }))
-                }
-                disabled={isPastDeadline}
-                testId={`assignment-requirement-${requirement.id}`}
-                assets={submission?.assets ?? []}
+          {isPastDeadline ? (
+            <>
+              {/* 마감 후에는 읽는 화면이다(#215) — 자료를 바꾸는 컨트롤(추가·교체·
+                  삭제·업로드)이 트리에서 아예 빠진다. 제출 버튼에 이미 적용된
+                  `isPastDeadline` 판단을 그대로 넓힌 것이지 새 조건이 아니다. */}
+              <ReadOnlyAssetSection
+                kind="source"
+                title={ASSET_KIND_LABELS.source}
+                rows={sourceAssets}
+                testIdPrefix="assignment-source-asset"
               />
-            ))}
-          </section>
+              <ReadOnlyAssetSection
+                kind="repository"
+                title={ASSET_KIND_LABELS.repository}
+                rows={repositoryAssets}
+                testIdPrefix="assignment-repository-asset"
+              />
+              <ReadOnlyAssetSection
+                kind="demo_video"
+                title={ASSET_KIND_LABELS.demo_video}
+                rows={demoVideoAssets}
+                testIdPrefix="assignment-demo-video-asset"
+              />
+              <ReadOnlyAssetSection
+                kind="demo_url"
+                title={ASSET_KIND_LABELS.demo_url}
+                rows={demoUrlAssets}
+                testIdPrefix="assignment-demo-url-asset"
+              />
+
+              <section className="flex flex-col gap-3">
+                <h2 className="text-lg font-semibold">요구사항 체크리스트</h2>
+                {data.requirements.map((requirement) => (
+                  <ReadOnlyRequirementField
+                    key={requirement.id}
+                    requirement={requirement}
+                    state={requirementStates[requirement.id] ?? { isMet: false, note: "", evidence: [] }}
+                    testId={`assignment-requirement-${requirement.id}`}
+                    assets={submission?.assets ?? []}
+                  />
+                ))}
+              </section>
+            </>
+          ) : (
+            <>
+              <AssetKindSection
+                kind="source"
+                title={ASSET_KIND_LABELS.source}
+                required
+                addLabel="+ 소스코드 추가"
+                testIdPrefix="assignment-source-asset"
+                rows={sourceAssets}
+                onChange={setSourceAssets}
+                disabled={false}
+                targetRefPrefix={sourceTargetRef ?? undefined}
+              />
+              <AssetKindSection
+                kind="repository"
+                title={ASSET_KIND_LABELS.repository}
+                addLabel="+ 저장소 추가"
+                testIdPrefix="assignment-repository-asset"
+                rows={repositoryAssets}
+                onChange={setRepositoryAssets}
+                disabled={false}
+              />
+              <AssetKindSection
+                kind="demo_video"
+                title={ASSET_KIND_LABELS.demo_video}
+                addLabel="+ 시연 영상 추가"
+                testIdPrefix="assignment-demo-video-asset"
+                rows={demoVideoAssets}
+                onChange={setDemoVideoAssets}
+                disabled={false}
+                targetRefPrefix={demoVideoTargetRef ?? undefined}
+              />
+              <AssetKindSection
+                kind="demo_url"
+                title={ASSET_KIND_LABELS.demo_url}
+                addLabel="+ 데모 URL 추가"
+                testIdPrefix="assignment-demo-url-asset"
+                rows={demoUrlAssets}
+                onChange={setDemoUrlAssets}
+                disabled={false}
+              />
+
+              <section className="flex flex-col gap-3">
+                <h2 className="text-lg font-semibold">요구사항 체크리스트</h2>
+                {data.requirements.map((requirement) => (
+                  <RequirementField
+                    key={requirement.id}
+                    requirement={requirement}
+                    state={requirementStates[requirement.id] ?? { isMet: false, note: "", evidence: [] }}
+                    onChange={(next) =>
+                      setRequirementStates((prev) => ({ ...prev, [requirement.id]: next }))
+                    }
+                    disabled={false}
+                    testId={`assignment-requirement-${requirement.id}`}
+                    assets={submission?.assets ?? []}
+                  />
+                ))}
+              </section>
+            </>
+          )}
 
           {!isPastDeadline && (
             <div className="flex flex-col gap-2">
