@@ -187,9 +187,9 @@ export interface paths {
          * Update Assignment
          * @description DRAFT·ASSIGNMENT_OPEN 과제를 고친다(스펙 #197) — `EDITABLE`이 두 상태 모두 True다.
          *
-         *     **제출 0건 술어는 여기 없다.** `EDITABLE: True`가 「고칠 수 있다」의 절반이고
-         *     나머지 절반(첫 제출이 문을 닫는다)은 #209가 얹는다 — 지금은 ASSIGNMENT_OPEN이면
-         *     제출이 있어도 계속 고칠 수 있다.
+         *     **제출 0건 술어는 `_get_owned_editable_assignment`에 있다(#209).** `EDITABLE:
+         *     True`가 「고칠 수 있다」의 절반이고, ASSIGNMENT_OPEN이면서 제출이 1건이라도
+         *     있으면 나머지 절반(첫 제출이 문을 닫는다)에 걸려 409로 거부된다.
          */
         patch: operations["contests_assignment_api_update_assignment"];
         trace?: never;
@@ -294,6 +294,42 @@ export interface paths {
         get: operations["contests_assignment_api_list_assignment_submissions"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assignments/{assignment_id}/submissions/{submission_id}/source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reveal Assignment Submission Source
+         * @description Sponsor가 마감 전에도 제출 소스를 펼친다 — 이 요청 자체가
+         *     `AssignmentSourceReading`을 하나 남긴다(#211).
+         *
+         *     **소스는 presigned URL로 준다, 프롬프트가 아니다.** `appeals.api.
+         *     reveal_appeal_source`는 이미 채점이 끝난 뒤 `Score.prompt`(LLM에 넣은 텍스트)를
+         *     돌려주지만, 여기는 마감 전(Score가 아직 없을 때)에도 불릴 수 있어 그 값이 없다.
+         *     그래서 `SubmissionAsset`(kind=source/repository)을 직접 본다 — source는
+         *     storage 어댑터가 그 자리에서 발급한 짧은 수명의 다운로드 URL, repository는
+         *     이미 URL인 값 그대로.
+         *
+         *     **storage.policy를 거치지 않는다.** 일반 다운로드 게이트(`storage.api.
+         *     request_download`)는 이 대상을 "Award 전까지 Developer 본인만"으로 판정해
+         *     Sponsor를 막는다(`submissions.resolvers`) — 그 판정은 ADR-0014를 위한 것이라
+         *     Assignment에서까지 다시 열 수 없다. 대신 이 엔드포인트 자신이 권한 판정
+         *     (Sponsor가 이 Assignment의 소유자인가, `_get_owned_assignment`)을 마치고
+         *     직접 presign한다 — Operator의 `reveal_appeal_source`가 storage를 거치지 않고
+         *     `Score.prompt`를 바로 내주는 것과 같은 구조다.
+         */
+        post: operations["contests_assignment_api_reveal_assignment_submission_source"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2285,6 +2321,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/submissions/{submission_id}/assignment-source-readings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Own Assignment Source Readings
+         * @description Developer 가 본인 Submission 의 (Assignment) 소스 열람 기록을 본다 (#211,
+         *     ADR-0022/0028).
+         *
+         *     `appeals.api.list_own_source_readings`와 같은 이유로 존재한다 — 기록은 있는데
+         *     아무도 읽지 못하면 이 저장소가 반복해 겪은 "쓰기만 하고 소비처가 없는 필드"가
+         *     된다. **누가 봤는지는 여기 없다** — `AssignmentSourceReadingOut`에 `read_at`뿐이다.
+         *
+         *     공모전 Submission 이면 이 목록은 언제나 비어 있다 — `AssignmentSourceReading`은
+         *     Assignment 경로(`contests.assignment_api.reveal_assignment_submission_source`)
+         *     에서만 만들어지고, 그 경로는 Assignment가 아닌 Contest의 Submission에는 애초에
+         *     닿지 않는다(ADR-0014는 바뀌지 않는다).
+         */
+        get: operations["submissions_api_list_own_assignment_source_readings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/submissions/{submission_id}/build-assets": {
         parameters: {
             query?: never;
@@ -2754,6 +2820,33 @@ export interface components {
         AssignmentPermissionRevokeIn: {
             /** Reason */
             reason: string;
+        };
+        /**
+         * AssignmentSourceReadingOut
+         * @description Developer가 보는 자기 Submission의 (Assignment) 소스 열람 기록 한 건 (#211).
+         *
+         *     `appeals.schemas.SourceReadingOut`과 같은 이유로 누가 봤는지는 여기 없다 —
+         *     Assignment는 Sponsor가 한 명뿐이라 굳이 신원을 숨길 필요는 적지만, 필드
+         *     모양을 통일해 두면 "몇 번 열렸는가"만으로 약속을 검증할 수 있다는 사실이
+         *     코드베이스 전체에서 같은 모양으로 읽힌다.
+         */
+        AssignmentSourceReadingOut: {
+            /**
+             * Read At
+             * Format: date-time
+             */
+            read_at: string;
+        };
+        /**
+         * AssignmentSourceRevealOut
+         * @description Sponsor의 소스 펼침 응답 (#211, ADR-0022/0028).
+         *
+         *     이 요청 자체가 `AssignmentSourceReading`을 하나 남긴다 — 기록 없이 이 응답을
+         *     얻는 경로는 없다(`appeals.api.reveal_appeal_source`와 같은 규율).
+         */
+        AssignmentSourceRevealOut: {
+            /** Assets */
+            assets: components["schemas"]["SourceRevealAssetOut"][];
         };
         /**
          * AssignmentSubmissionOut
@@ -4378,6 +4471,25 @@ export interface components {
             read_at: string;
         };
         /**
+         * SourceRevealAssetOut
+         * @description 펼쳐진 소스 자료 하나 (#211, ADR-0022/0028).
+         *
+         *     `kind=source`는 storage 어댑터가 발급한 짧은 수명의 presigned 다운로드
+         *     URL이다(ADR-0005 — 앱은 바이트를 중계하지 않는다). `kind=repository`는
+         *     `SubmissionAsset.value`에 이미 들어 있는 GitHub URL 그대로다 — storage를
+         *     거치지 않는다.
+         */
+        SourceRevealAssetOut: {
+            /** Id */
+            id: number;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Url */
+            url: string;
+        };
+        /**
          * SourceRevealOut
          * @description 소스 펼침 응답 (#60, ADR-0022).
          *
@@ -4928,6 +5040,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AssignmentSubmissionOut"][];
+                };
+            };
+        };
+    };
+    contests_assignment_api_reveal_assignment_submission_source: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: number;
+                submission_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentSourceRevealOut"];
                 };
             };
         };
@@ -7646,6 +7781,46 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    submissions_api_list_own_assignment_source_readings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                submission_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentSourceReadingOut"][];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

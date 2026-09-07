@@ -18,6 +18,7 @@ import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
 import { ASSIGNMENT_STATUS_LABELS } from "@/lib/assignments/use-my-assignments";
 import { ScoreSummary } from "@/lib/assignments/score-summary";
+import { AssignmentSourceReveal } from "@/lib/assignments/submission-source-panel";
 
 type AssignmentDetail = components["schemas"]["AssignmentOut"];
 type AssignmentSubmissionRow = components["schemas"]["AssignmentSubmissionOut"];
@@ -329,7 +330,7 @@ export default function AssignmentDetailPage() {
         </ul>
       </div>
 
-      <SubmissionsSection state={submissionsState} />
+      <SubmissionsSection state={submissionsState} assignmentId={assignmentId} />
     </main>
   );
 }
@@ -338,11 +339,13 @@ export default function AssignmentDetailPage() {
 // 명시적으로 펼쳐야 기록과 함께 이루어지는 별도 경로다(#211, ADR-0022).
 function SubmissionsSection({
   state,
+  assignmentId,
 }: {
   state:
     | { status: "loading" }
     | { status: "error" }
     | { status: "ready"; data: AssignmentSubmissionRow[] };
+  assignmentId: string;
 }) {
   return (
     <div className="border-t border-rule pt-4" data-testid="assignment-submissions-section">
@@ -383,6 +386,8 @@ function SubmissionsSection({
                   <ScoreSummary score={row.score} testIdPrefix="assignment-submission-score" />
                 </div>
               )}
+              {/* 소스는 목록에 담기지 않는다 — 펼쳐야 나오고, 펼치면 기록된다(#211, ADR-0022). */}
+              <AssignmentSourceReveal assignmentId={assignmentId} submissionId={row.submission_id} />
             </li>
           ))}
         </ul>

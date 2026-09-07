@@ -451,3 +451,40 @@ class ErrorOut(Schema):
     """django-ninja 의 `HttpError` 가 내는 모양 — 4xx 를 생성 타입에 드러낸다."""
 
     detail: str
+
+
+class SourceRevealAssetOut(Schema):
+    """펼쳐진 소스 자료 하나 (#211, ADR-0022/0028).
+
+    `kind=source`는 storage 어댑터가 발급한 짧은 수명의 presigned 다운로드
+    URL이다(ADR-0005 — 앱은 바이트를 중계하지 않는다). `kind=repository`는
+    `SubmissionAsset.value`에 이미 들어 있는 GitHub URL 그대로다 — storage를
+    거치지 않는다.
+    """
+
+    id: int
+    kind: str
+    label: str
+    url: str
+
+
+class AssignmentSourceRevealOut(Schema):
+    """Sponsor의 소스 펼침 응답 (#211, ADR-0022/0028).
+
+    이 요청 자체가 `AssignmentSourceReading`을 하나 남긴다 — 기록 없이 이 응답을
+    얻는 경로는 없다(`appeals.api.reveal_appeal_source`와 같은 규율).
+    """
+
+    assets: list[SourceRevealAssetOut]
+
+
+class AssignmentSourceReadingOut(Schema):
+    """Developer가 보는 자기 Submission의 (Assignment) 소스 열람 기록 한 건 (#211).
+
+    `appeals.schemas.SourceReadingOut`과 같은 이유로 누가 봤는지는 여기 없다 —
+    Assignment는 Sponsor가 한 명뿐이라 굳이 신원을 숨길 필요는 적지만, 필드
+    모양을 통일해 두면 "몇 번 열렸는가"만으로 약속을 검증할 수 있다는 사실이
+    코드베이스 전체에서 같은 모양으로 읽힌다.
+    """
+
+    read_at: datetime

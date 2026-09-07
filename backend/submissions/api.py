@@ -51,6 +51,7 @@ from verification.models import Verification
 
 from .models import (
     GITHUB_REPO_URL_PATTERN,
+    AssignmentSourceReading,
     Evidence,
     RequirementResponse,
     Submission,
@@ -59,6 +60,7 @@ from .models import (
 from .participation import next_action_for
 from .schemas import (
     AssetSummaryOut,
+    AssignmentSourceReadingOut,
     ErrorOut,
     MyParticipationOut,
     MyParticipationPageOut,
@@ -931,6 +933,31 @@ def get_own_score(request: HttpRequest, submission_id: int):
         raise HttpError(404, "아직 채점되지 않았습니다.")
 
     return 200, score
+
+
+@router.get(
+    "/submissions/{submission_id}/assignment-source-readings",
+    response={200: list[AssignmentSourceReadingOut], 403: ErrorOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def list_own_assignment_source_readings(request: HttpRequest, submission_id: int):
+    """Developer 가 본인 Submission 의 (Assignment) 소스 열람 기록을 본다 (#211,
+    ADR-0022/0028).
+
+    `appeals.api.list_own_source_readings`와 같은 이유로 존재한다 — 기록은 있는데
+    아무도 읽지 못하면 이 저장소가 반복해 겪은 "쓰기만 하고 소비처가 없는 필드"가
+    된다. **누가 봤는지는 여기 없다** — `AssignmentSourceReadingOut`에 `read_at`뿐이다.
+
+    공모전 Submission 이면 이 목록은 언제나 비어 있다 — `AssignmentSourceReading`은
+    Assignment 경로(`contests.assignment_api.reveal_assignment_submission_source`)
+    에서만 만들어지고, 그 경로는 Assignment가 아닌 Contest의 Submission에는 애초에
+    닿지 않는다(ADR-0014는 바뀌지 않는다).
+    """
+
+    submission = _get_owned_submission(request, submission_id)
+    return 200, list(
+        AssignmentSourceReading.objects.filter(submission=submission).order_by("-read_at")
+    )
 
 
 def _get_owned_submission(request: HttpRequest, submission_id: int) -> Submission:

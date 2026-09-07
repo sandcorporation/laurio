@@ -18,8 +18,9 @@ InviteCode는 열 때(`open_assignment`) 발급된다 — 추측 불가능한 �
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Count
 from django.http import HttpRequest
@@ -31,7 +32,9 @@ from accounts.models import SponsorProfile
 from accounts.sanitize import sanitize_free_text
 from core.clock import Clock
 from core.transitions import claim_transition
-from submissions.models import Submission
+from storage.adapters import get_storage_adapter
+from submissions.models import AssignmentSourceReading, Submission, SubmissionAsset
+from submissions.schemas import AssignmentSourceRevealOut, SourceRevealAssetOut
 
 from .assignment_category import get_assignment_category
 from .models import Contest, DeliverableType, InviteCode, Requirement
@@ -560,3 +563,65 @@ def list_assignment_submissions(request: HttpRequest, assignment_id: int):
         )
         for s in submissions
     ]
+
+
+# 제출 목록은 #210 의 것 하나만 둔다 — #211 도 소스 펼치기를 걸 자리로 같은
+# 엔드포인트를 따로 만들었는데, 두 체인이 병렬로 짜다 겹친 것이라 통합에서
+# 하나로 합쳤다. Score 를 싣는 #210 쪽이 상위집합이다.
+@router.post(
+    "/assignments/{assignment_id}/submissions/{submission_id}/source",
+    response={200: AssignmentSourceRevealOut},
+    auth=jwt_auth,
+)
+def reveal_assignment_submission_source(
+    request: HttpRequest, assignment_id: int, submission_id: int
+):
+    """Sponsor가 마감 전에도 제출 소스를 펼친다 — 이 요청 자체가
+    `AssignmentSourceReading`을 하나 남긴다(#211).
+
+    **소스는 presigned URL로 준다, 프롬프트가 아니다.** `appeals.api.
+    reveal_appeal_source`는 이미 채점이 끝난 뒤 `Score.prompt`(LLM에 넣은 텍스트)를
+    돌려주지만, 여기는 마감 전(Score가 아직 없을 때)에도 불릴 수 있어 그 값이 없다.
+    그래서 `SubmissionAsset`(kind=source/repository)을 직접 본다 — source는
+    storage 어댑터가 그 자리에서 발급한 짧은 수명의 다운로드 URL, repository는
+    이미 URL인 값 그대로.
+
+    **storage.policy를 거치지 않는다.** 일반 다운로드 게이트(`storage.api.
+    request_download`)는 이 대상을 "Award 전까지 Developer 본인만"으로 판정해
+    Sponsor를 막는다(`submissions.resolvers`) — 그 판정은 ADR-0014를 위한 것이라
+    Assignment에서까지 다시 열 수 없다. 대신 이 엔드포인트 자신이 권한 판정
+    (Sponsor가 이 Assignment의 소유자인가, `_get_owned_assignment`)을 마치고
+    직접 presign한다 — Operator의 `reveal_appeal_source`가 storage를 거치지 않고
+    `Score.prompt`를 바로 내주는 것과 같은 구조다.
+    """
+
+    contest = _get_owned_assignment(request, assignment_id)
+    try:
+        submission = Submission.objects.prefetch_related("assets").get(
+            id=submission_id, contest=contest
+        )
+    except Submission.DoesNotExist as exc:
+        raise HttpError(404, "제출물을 찾을 수 없습니다.") from exc
+
+    adapter = get_storage_adapter()
+    out_assets: list[SourceRevealAssetOut] = []
+    for asset in submission.assets.all():
+        if asset.kind == SubmissionAsset.Kind.SOURCE:
+            presigned = adapter.presign_download(
+                asset.value,
+                expires_in=timedelta(seconds=settings.STORAGE_DOWNLOAD_URL_TTL_SECONDS),
+            )
+            url = presigned.url
+        elif asset.kind == SubmissionAsset.Kind.REPOSITORY:
+            url = asset.value
+        else:
+            continue
+        out_assets.append(SourceRevealAssetOut(id=asset.id, kind=asset.kind, label=asset.label, url=url))
+
+    # 열람은 상태가 아니라 사건이다 — 같은 Sponsor가 다시 펼치면 행이 하나 더
+    # 쌓인다(중복 제거하지 않는다, ADR-0022와 같은 규율).
+    AssignmentSourceReading.objects.create(
+        submission=submission, read_by=request.auth_user, read_at=Clock.now()
+    )
+
+    return 200, AssignmentSourceRevealOut(assets=out_assets)
