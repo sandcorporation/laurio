@@ -76,7 +76,7 @@ def _deadline_reminder_candidates(as_of, ctx):
 
     lead = timedelta(hours=current_policy().deadline_reminder_lead_hours)
     return Contest.objects.filter(
-        status__in=Contest.Status.SUBMITTABLE.statuses,
+        status__in=Contest.Status.SENDS_LIFECYCLE_NOTICES.statuses,
         deadline_reminder_sent_at__isnull=True,
         deadline_at__lte=as_of + lead,
     ).select_related("sponsor__user")

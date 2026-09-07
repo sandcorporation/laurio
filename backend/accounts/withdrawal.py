@@ -114,7 +114,7 @@ def _transaction_basis(user) -> tuple[str, int] | None:
     if sponsor_profile is not None:
         contest = (
             Contest.objects.filter(
-                sponsor=sponsor_profile, status__in=Contest.Status.EVER_PAID.statuses
+                sponsor=sponsor_profile, status__in=Contest.Status.REQUIRES_IDENTITY_RETENTION.statuses
             )
             .order_by("id")
             .first()

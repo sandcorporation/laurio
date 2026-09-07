@@ -31,6 +31,7 @@ def test_every_contest_status_question_answers_for_every_value(name):
 def test_contest_status_sets_are_the_ones_the_call_sites_used_to_spell_out():
     assert S.PUBLICLY_VISIBLE.statuses == {S.PUBLISHED, S.CLOSED, S.AWARDED, S.JUDGING_ENDED}
     assert S.SUBMITTABLE.statuses == {S.PUBLISHED}
+    assert S.SENDS_LIFECYCLE_NOTICES.statuses == {S.PUBLISHED}
     assert S.SCOREABLE.statuses == {S.CLOSED, S.AWARDED, S.JUDGING_ENDED}
     assert S.AWARDABLE.statuses == {S.CLOSED}
     assert S.JUDGING_EXTENDABLE.statuses == {S.CLOSED}
@@ -41,7 +42,7 @@ def test_contest_status_sets_are_the_ones_the_call_sites_used_to_spell_out():
     assert S.BLOCKS_SPONSOR_WITHDRAWAL.statuses == {S.PUBLISHED, S.CLOSED}
     assert S.HAS_AWARD.statuses == {S.AWARDED}
     assert S.AWAITING_DISTRIBUTION.statuses == {S.JUDGING_ENDED}
-    assert S.EVER_PAID.statuses == {S.PUBLISHED, S.CLOSED, S.AWARDED, S.JUDGING_ENDED}
+    assert S.REQUIRES_IDENTITY_RETENTION.statuses == {S.PUBLISHED, S.CLOSED, S.AWARDED, S.JUDGING_ENDED}
     assert S.HOME_AXIS.where(HomeStatusAxis.OPEN) == {S.PUBLISHED}
     assert S.HOME_AXIS.where(HomeStatusAxis.IN_JUDGING) == {S.CLOSED}
     assert S.HOME_AXIS.where(HomeStatusAxis.COMPLETED) == {S.AWARDED, S.JUDGING_ENDED}

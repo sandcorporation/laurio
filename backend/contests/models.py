@@ -292,6 +292,16 @@ Contest.Status.SUBMITTABLE = Classification(
     {_S.DRAFT: False, _S.PUBLISHED: True, _S.CLOSED: False, _S.AWARDED: False, _S.JUDGING_ENDED: False},
     question="status 상 제출을 받는가",
 )
+# 라이프사이클 알림(마감 임박 등)을 보내는 status 인가 — 프리팩터(#205, ADR-0028)로 SUBMITTABLE 에서
+# 떼어냈다. 「제출을 받는가」와 「통지를 보내는가」는 지금까지 우연히 같은 답이었을 뿐 같은 질문이
+# 아니다 — Assignment(ADR-0028)가 들어오면 갈라진다: Assignment 는 본인확인이 없어 연락처
+# (`accounts.PhoneContact`)가 없는 수신자가 섞이므로 통지를 보내지 않아야 하지만, 제출은 받는다.
+# 지금은 두 질문이 아직 갈라지지 않았으므로 집합이 SUBMITTABLE 과 똑같다 — 이 티켓은 동작을
+# 바꾸지 않는다.
+Contest.Status.SENDS_LIFECYCLE_NOTICES = Classification(
+    {_S.DRAFT: False, _S.PUBLISHED: True, _S.CLOSED: False, _S.AWARDED: False, _S.JUDGING_ENDED: False},
+    question="라이프사이클 알림을 보내는 status 인가",
+)
 # CLOSED 뿐 아니라 AWARDED·JUDGING_ENDED 도(#13) — Award 는 Score 를 기다리지 않으므로 채점이 끝나기
 # 전에 CLOSED 를 벗어날 수 있다. CLOSED 만 보면 그 순간 미채점 Submission 이 영원히 빠진다.
 Contest.Status.SCOREABLE = Classification(
@@ -344,12 +354,17 @@ Contest.Status.AWAITING_DISTRIBUTION = Classification(
     {_S.DRAFT: False, _S.PUBLISHED: False, _S.CLOSED: False, _S.AWARDED: False, _S.JUDGING_ENDED: True},
     question="Distribution 을 기다리는가",
 )
-# DRAFT 를 벗어나는 유일한 경로가 결제 확인이라, 지금 상태가 무엇이든 DRAFT 가 아니면 과거에
-# 결제가 있었다(accounts.withdrawal 의 거래 근거, ADR-0025). 집합이 PUBLICLY_VISIBLE 과 같은 것은
+# 탈퇴 후 실명·생년월일을 RetainedIdentity 로 보존할 법적 의무를 낳는 거래가 있었는가
+# (전자상거래법상 거래기록 보존) — accounts.withdrawal._transaction_basis 의 유일한 소비처가
+# 실제로 묻는 질문은 이것이다. 지금은 "결제 확인"과 답이 같다 — Contest 가 DRAFT 를 벗어나는
+# 유일한 경로가 결제 확인이기 때문이다(Assignment(ADR-0028)가 들어오기 전까지는). 이름이
+# "결제가 있었는가"가 아니라 이 질문을 말하는 이유는 Assignment 가 결제 없이 DRAFT 를 벗어나는
+# 순간에도 여전히 정확해야 해서다 — 과제만 연 사람은 실명을 보존할 의무가 없으므로 그때도
+# False 로 남는다(집합은 그대로, 뒤 티켓이 채운다). 집합이 PUBLICLY_VISIBLE 과 같은 것은
 # 우연이다 — 질문이 다르다.
-Contest.Status.EVER_PAID = Classification(
+Contest.Status.REQUIRES_IDENTITY_RETENTION = Classification(
     {_S.DRAFT: False, _S.PUBLISHED: True, _S.CLOSED: True, _S.AWARDED: True, _S.JUDGING_ENDED: True},
-    question="결제가 확인된 적이 있는가",
+    question="탈퇴 후 실명 보존 의무를 낳는 거래가 있었는가",
 )
 # 홈 큐레이션의 status 축(#94). PUBLISHED 는 마감 시각이 마저 가른다.
 Contest.Status.HOME_AXIS = Classification(
