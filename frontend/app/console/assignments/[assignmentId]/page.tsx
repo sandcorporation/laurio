@@ -15,8 +15,10 @@ import type { components } from "@laurio/bff-client/schema";
 import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
 import { ASSIGNMENT_STATUS_LABELS } from "@/lib/assignments/use-my-assignments";
+import { ScoreSummary } from "@/lib/assignments/score-summary";
 
 type AssignmentDetail = components["schemas"]["AssignmentOut"];
+type AssignmentSubmissionRow = components["schemas"]["AssignmentSubmissionOut"];
 
 function toDeadlineInputValue(iso: string): string {
   const date = new Date(iso);
@@ -33,6 +35,12 @@ export default function AssignmentDetailPage() {
   const { state, reload } = useBackendQuery<AssignmentDetail>(
     bffClient,
     `/api/backend/assignments/${assignmentId}`,
+  );
+  // 제출 목록과 각 제출의 Score·근거(#210) — 채점 전에는 `score`가 null인 행으로
+  // 온다. DRAFT일 때는 항상 빈 목록이다(제출 자체가 있을 수 없다).
+  const { state: submissionsState } = useBackendQuery<AssignmentSubmissionRow[]>(
+    bffClient,
+    `/api/backend/assignments/${assignmentId}/submissions`,
   );
 
   const [title, setTitle] = useState("");
@@ -240,6 +248,65 @@ export default function AssignmentDetailPage() {
           ))}
         </ul>
       </div>
+
+      <SubmissionsSection state={submissionsState} />
     </main>
+  );
+}
+
+// 제출 목록과 각 제출의 Score·근거(#210). 소스는 여기 없다 — 소스 열람은
+// 명시적으로 펼쳐야 기록과 함께 이루어지는 별도 경로다(#211, ADR-0022).
+function SubmissionsSection({
+  state,
+}: {
+  state:
+    | { status: "loading" }
+    | { status: "error" }
+    | { status: "ready"; data: AssignmentSubmissionRow[] };
+}) {
+  return (
+    <div className="border-t border-rule pt-4" data-testid="assignment-submissions-section">
+      <p className="text-sm text-ink/70">제출 목록</p>
+
+      {state.status === "loading" && (
+        <p className="mt-2 text-sm" data-testid="assignment-submissions-loading">
+          불러오는 중...
+        </p>
+      )}
+      {state.status === "error" && (
+        <p role="alert" className="mt-2 text-sm text-attention" data-testid="assignment-submissions-error">
+          제출 목록을 불러오지 못했습니다.
+        </p>
+      )}
+      {state.status === "ready" && state.data.length === 0 && (
+        <p className="mt-2 text-sm text-ink/70" data-testid="assignment-submissions-empty">
+          아직 제출한 학생이 없습니다.
+        </p>
+      )}
+      {state.status === "ready" && state.data.length > 0 && (
+        <ul className="mt-3 flex flex-col gap-3" data-testid="assignment-submissions-list">
+          {state.data.map((row) => (
+            <li
+              key={row.submission_id}
+              className="border border-rule p-4 text-sm"
+              data-testid={`assignment-submission-${row.submission_id}`}
+            >
+              <p className="font-medium" data-testid="assignment-submission-developer">
+                {row.developer_display_name}
+              </p>
+              {row.score === null || row.score === undefined ? (
+                <p className="mt-1 text-ink/70" data-testid="assignment-submission-not-scored">
+                  아직 채점되지 않았습니다.
+                </p>
+              ) : (
+                <div className="mt-2 flex flex-col gap-2">
+                  <ScoreSummary score={row.score} testIdPrefix="assignment-submission-score" />
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }

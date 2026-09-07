@@ -113,7 +113,10 @@ class ContestQuerySet(models.QuerySet):
         return self.filter(judging_ends_at__gt=now)
 
     def appeal_window_open(self, now):
-        return self.filter(Q(judging_ends_at__isnull=True) | Q(judging_ends_at__gt=now))
+        # Assignment 는 항상 제외한다 — 파이썬 짝(`Contest.appeal_window_open`)과 같은 이유.
+        return self.exclude(status__in=ASSIGNMENT_STATUSES).filter(
+            Q(judging_ends_at__isnull=True) | Q(judging_ends_at__gt=now)
+        )
 
     def distribution_due(self, as_of, policy):
         from distributions.services import distribution_due_q
@@ -261,8 +264,16 @@ class Contest(models.Model):
         """Developer 가 이의를 낼 수 있는 시간 창 = 심사 창의 끝과 같은 시각(#74) — 그래서 Sponsor 의
         유료 연장이 이의 창도 늘린다. 그 결합이 한 파일에 보이도록 여기 둔다. 심사기간이 없는
         Contest 는 창이 닫히지 않는다(`SubmissionDetailOut.appeal_deadline` 이 그렇게 약속한다) —
-        심사 창과 다른 점이다."""
+        심사 창과 다른 점이다.
 
+        **Assignment(ADR-0028, #210)는 항상 닫혀 있다.** "심사기간이 없으면 닫히지 않는다"는
+        원래 CLOSED 전이가 judging_ends_at 을 아직 안 찍은 찰나(도달 불가능했다)를 위한
+        허용이었는데, Assignment 는 심사기간을 **영원히** null 로 둔다(Award·Distribution 이
+        없다) — 그 허용을 그대로 두면 채점이 끝난 과제 제출에 이의가 접수돼 버린다. 과제에는
+        Appeal 자체가 없다(스펙 #197 Out of Scope) — 이견은 강사에게 직접 말한다."""
+
+        if self.status in ASSIGNMENT_STATUSES:
+            return False
         return self.judging_ends_at is None or now < self.judging_ends_at
 
     def distribution_due(self, as_of, policy) -> bool:

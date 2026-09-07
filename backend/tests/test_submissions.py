@@ -1101,6 +1101,115 @@ def test_resolver_wiring_opens_demo_to_everyone_after_deadline(client, category,
     assert response.status_code == 200
 
 
+@pytest.mark.django_db
+def test_resolver_wiring_keeps_assignment_demo_private_after_deadline(client, landing_type):
+    """Assignment(ADR-0028, #212)는 공모전과 달리 마감 후에도 전면 공개로 돌아서지
+    않는다 — InviteCode 를 아는 사람만 본다는 약속이 마감 뒤에도 이어져야 한다
+    (스펙 #197). `submissions.resolvers.SubmissionTargetStateResolver` 는 원래
+    `deadline_at` 하나만 보고 데모·영상 슬롯을 PUBLIC 으로 뒤집었는데, 그 판정이
+    Assignment 인지 전혀 묻지 않아서 InviteCode 경계가 마감 시각에 조용히
+    사라졌다 — 위 `test_resolver_wiring_opens_demo_to_everyone_after_deadline`
+    (진짜 콘테스트, 여전히 공개돼야 한다)과 짝을 이룬다."""
+
+    from django.core.management import call_command
+
+    call_command("create_operator", "root-resolver-asgn", password="correct-horse-battery-resolver", superuser=True)
+    operator = client.__class__()
+    operator_login = operator.post(
+        "/api/operator/login",
+        data={"username": "root-resolver-asgn", "password": "correct-horse-battery-resolver"},
+        content_type="application/json",
+        HTTP_ORIGIN="http://testserver",
+    )
+    assert operator_login.status_code == 200, operator_login.content
+
+    sponsor_pair = _login(client, uid="asgn-resolver-sponsor")
+    sponsor_me = client.get("/api/accounts/me", **_auth_header(sponsor_pair["access"]))
+    grant = operator.post(
+        "/api/operator/assignment-permissions/grant",
+        data={"username": sponsor_me.json()["username"], "reason": "리졸버 검증"},
+        content_type="application/json",
+        HTTP_ORIGIN="http://testserver",
+    )
+    assert grant.status_code == 200, grant.content
+
+    deadline = timezone.now() + timedelta(hours=1)
+    created = client.post(
+        "/api/assignments",
+        data={
+            "title": "리졸버 검증용 과제",
+            "deliverable_type_ids": [landing_type.id],
+            "description": "",
+            "deadline_at": deadline.isoformat(),
+            "requirements": [],
+        },
+        content_type="application/json",
+        **_auth_header(sponsor_pair["access"]),
+    )
+    assert created.status_code == 201, created.content
+    assignment_id = created.json()["id"]
+
+    opened = client.post(
+        f"/api/assignments/{assignment_id}/open",
+        content_type="application/json",
+        **_auth_header(sponsor_pair["access"]),
+    )
+    assert opened.status_code == 200, opened.content
+    invite_code = opened.json()["invite_code"]
+
+    student_pair = _login(client, uid="asgn-resolver-student")
+    student_me = client.get("/api/accounts/me", **_auth_header(student_pair["access"]))
+    student_id = student_me.json()["id"]
+
+    demo_target_ref = f"submission:{assignment_id}:{student_id}:demo-video"
+    demo_object_key = f"{demo_target_ref}/{uuid.uuid4().hex}"
+    submit = client.post(
+        f"{CONTESTS_URL}/{assignment_id}/submissions",
+        data={
+            "assets": [
+                {"kind": "source", "value": f"submission:{assignment_id}:{student_id}:source/{uuid.uuid4().hex}"},
+                {"kind": "demo_video", "value": demo_object_key},
+            ],
+            "invite_code": invite_code,
+        },
+        content_type="application/json",
+        **_auth_header(student_pair["access"]),
+    )
+    assert submit.status_code == 201, submit.content
+
+    ClockOverride.objects.update_or_create(
+        pk=1, defaults={"overridden_at": deadline + timedelta(minutes=1)}
+    )
+
+    anon_download = client.post(
+        "/api/storage/downloads",
+        data={"target_ref": demo_target_ref, "object_key": demo_object_key},
+        content_type="application/json",
+    )
+    assert anon_download.status_code == 403
+
+    # 학생 본인과 강사는 여전히 받을 수 있다 — 잠근 대상은 "낯선 사람"이지 당사자가
+    # 아니다.
+    assert (
+        client.post(
+            "/api/storage/downloads",
+            data={"target_ref": demo_target_ref, "object_key": demo_object_key},
+            content_type="application/json",
+            **_auth_header(student_pair["access"]),
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            "/api/storage/downloads",
+            data={"target_ref": demo_target_ref, "object_key": demo_object_key},
+            content_type="application/json",
+            **_auth_header(sponsor_pair["access"]),
+        ).status_code
+        == 200
+    )
+
+
 # --- 자료 여럿 (#190, ADR-0027) ------------------------------------------------
 #
 # 여기까지의 테스트는 "종류당 하나"를 전제로 쓰였고 #190이 그 전제를 자산 목록으로

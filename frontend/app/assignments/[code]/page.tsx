@@ -22,6 +22,7 @@ import { useBackendQuery } from "@laurio/bff-client";
 import type { components } from "@laurio/bff-client/schema";
 
 import { bffClient } from "@/lib/bff/client";
+import { ScoreSummary } from "@/lib/assignments/score-summary";
 import { ASSET_KIND_LABELS } from "@/lib/submissions/types";
 import type { SubmissionIn, SubmissionOut } from "@/lib/submissions/types";
 
@@ -36,6 +37,13 @@ import {
 } from "../../console/contests/[contestId]/submit/requirement-field";
 
 type AssignmentDetail = components["schemas"]["AssignmentOut"];
+type OwnScore = components["schemas"]["OwnScoreOut"];
+type ScoreState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "not-scored" }
+  | { status: "error" }
+  | { status: "ready"; data: OwnScore };
 
 type SessionUser = { id: number; username: string };
 type SessionState =
@@ -101,6 +109,7 @@ export default function AssignmentInvitePage() {
   const [saveState, setSaveState] = useState<{ status: "idle" | "saving" | "done" | "error"; message?: string }>({
     status: "idle",
   });
+  const [score, setScore] = useState<ScoreState>({ status: "idle" });
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -179,11 +188,45 @@ export default function AssignmentInvitePage() {
   const isPastDeadline = deadlineAt !== null && now >= deadlineAt;
   const requirements = assignment.status === "ready" ? assignment.data.requirements : [];
 
+  // 마감 후 내 Score 를 본다(#210, ADR-0006) — 채점은 마감 후 스캔이 한 번만
+  // 만든다(ADR-0003)이므로 마감 직후에는 아직 없을 수 있다("아직 채점 전"과
+  // "실패"는 다른 사실이라 404 를 에러로 취급하지 않는다).
+  useEffect(() => {
+    if (!isPastDeadline || submission === null) return;
+    let cancelled = false;
+    setScore({ status: "loading" });
+    void bffClient.get<OwnScore>(`/api/backend/submissions/${submission.id}/score`).then((result) => {
+      if (cancelled) return;
+      if (!result.ok) {
+        setScore(result.status === 404 ? { status: "not-scored" } : { status: "error" });
+        return;
+      }
+      setScore({ status: "ready", data: result.data });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isPastDeadline, submission]);
+
   const completion = useMemo(() => {
     const total = requirements.length;
     const linked = requirements.filter((r) => (requirementStates[r.id]?.evidence.length ?? 0) > 0).length;
     return total > 0 ? Math.round((linked / total) * 100) : 0;
   }, [requirements, requirementStates]);
+
+  // 업로드 대상 — `console/contests/[contestId]/submit`와 같은 object key 모양
+  // (`submission:{contest_id}:{developer_user_id}:{종류}`, `submissions.api`가
+  // presigned URL을 발급할 때 검증하는 접두어). 이게 없으면 `AssetKindSection`이
+  // `UploadField`를 아예 그리지 않아 소스를 업로드할 방법이 없다 — 이 화면이
+  // 실제로 그 상태였다(#210 이 브라우저로 걸어보다 발견).
+  const assignmentId = assignment.status === "ready" ? assignment.data.id : null;
+  const userId = session.status === "authenticated" ? session.user.id : null;
+  const sourceTargetRef =
+    assignmentId !== null && userId !== null ? `submission:${assignmentId}:${userId}:source` : null;
+  const demoVideoTargetRef =
+    assignmentId !== null && userId !== null
+      ? `submission:${assignmentId}:${userId}:demo-video`
+      : null;
 
   async function handleSubmit() {
     if (assignment.status !== "ready" || session.status !== "authenticated") return;
@@ -340,6 +383,7 @@ export default function AssignmentInvitePage() {
             rows={sourceAssets}
             onChange={setSourceAssets}
             disabled={isPastDeadline}
+            targetRefPrefix={sourceTargetRef ?? undefined}
           />
           <AssetKindSection
             kind="repository"
@@ -358,6 +402,7 @@ export default function AssignmentInvitePage() {
             rows={demoVideoAssets}
             onChange={setDemoVideoAssets}
             disabled={isPastDeadline}
+            targetRefPrefix={demoVideoTargetRef ?? undefined}
           />
           <AssetKindSection
             kind="demo_url"
@@ -409,8 +454,46 @@ export default function AssignmentInvitePage() {
               )}
             </div>
           )}
+
+          {isPastDeadline && submission !== null && <ScoreSection score={score} />}
         </>
       )}
     </main>
+  );
+}
+
+// 마감 후 내 Score 와 판정 근거(#210, ADR-0006) — 과제에는 이의제기가 없다
+// (스펙 #197 Out of Scope). 점수에 이견이 있으면 갈 곳은 화면(운영자 이의)이
+// 아니라 사람(강사)이라는 것을 여기서 분명히 말한다.
+function ScoreSection({ score }: { score: ScoreState }) {
+  return (
+    <section
+      className="flex flex-col gap-3 border-t border-rule pt-6"
+      data-testid="assignment-score-section"
+    >
+      <h2 className="text-lg font-semibold">채점 결과</h2>
+
+      {score.status === "loading" && (
+        <p data-testid="assignment-score-loading">불러오는 중...</p>
+      )}
+      {score.status === "not-scored" && (
+        <p data-testid="assignment-score-not-scored" className="text-sm text-ink/70">
+          아직 채점되지 않았습니다. 조금만 기다려주세요.
+        </p>
+      )}
+      {score.status === "error" && (
+        <p role="alert" data-testid="assignment-score-error" className="text-sm text-attention">
+          채점 결과를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.
+        </p>
+      )}
+      {score.status === "ready" && <ScoreSummary score={score.data} testIdPrefix="assignment-score" />}
+
+      {/* 이의제기가 없다는 사실은 채점 결과와 무관하게(로딩·미채점 포함) 항상
+          알린다 — 학생이 언제 이 화면을 보든 "다음에 이견이 있으면 어디로
+          가야 하는가"를 미리 알아야 한다(스펙 #197 인수조건). */}
+      <p className="text-sm text-ink/70" data-testid="assignment-no-appeal-notice">
+        과제에는 이의제기 절차가 없습니다. 점수에 이견이 있으면 강사에게 직접 문의해 주세요.
+      </p>
+    </section>
   );
 }
