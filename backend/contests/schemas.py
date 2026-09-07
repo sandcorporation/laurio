@@ -392,7 +392,21 @@ class AssignmentOut(Schema):
     (스펙 #197 인수조건 — 과제 화면에 그 개념이 전혀 나타나지 않는다).
 
     `invite_code`는 열리기 전(DRAFT)에는 null이고, 연 뒤에는 활성 InviteCode의 값이다
-    — 재발급(#209)이 생기기 전까지는 언제나 최대 하나다.
+    (재발급(#209) 후에는 언제나 최신 값 하나 — 옛 코드는 비활성화될 뿐 응답에
+    나타나지 않는다).
+
+    `submission_count`는 「첫 제출이 문을 닫는다」(#209)를 화면이 미리 알 수 있게
+    한다 — Sponsor가 PATCH를 시도해 409를 받고서야 이유를 아는 것이 아니라, 제출이
+    1건이라도 있으면 화면이 애초에 편집 폼 대신 잠금 안내를 보여준다.
+
+    `is_editable`은 그 판정을 화면 대신 **백엔드가 직접 계산해 실어 보낸다**(#209
+    코드리뷰 지적). `EDITABLE`(status)과 "ASSIGNMENT_OPEN이면서 제출 0건"이라는 두
+    조건이 합쳐진 값인데, 프론트가 `status === "draft" || status === "assignment_open"`
+    처럼 그 규칙을 화면에서 다시 적으면 백엔드가 규칙을 하나 더 얹을 때마다(이번
+    티켓이 바로 그 경우다) 화면이 따로 갱신되지 않는 한 어긋난다 — 그러면 이미
+    `_get_owned_editable_assignment`가 409로 막는 상태인데도 화면은 편집 폼을 계속
+    보여주는 fail-open이 생긴다. `is_owner`가 이미 같은 자리에서 같은 이유로
+    계산되어 나가는 값이라 그 옆에 나란히 둔다.
     """
 
     id: int
@@ -405,3 +419,5 @@ class AssignmentOut(Schema):
     created_at: datetime
     invite_code: str | None = None
     is_owner: bool = False
+    submission_count: int = 0
+    is_editable: bool = False

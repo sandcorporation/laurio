@@ -1,10 +1,12 @@
 "use client";
 
-// 과제 상세·수정·열기 (#207, ADR-0028/0029).
+// 과제 상세·수정·열기·잠금·재발급 (#207/#209, ADR-0028/0029).
 //
-// 세 가지 일을 한 화면에서 한다 — DRAFT일 때 고치고, 「열기」를 누르면
+// 네 가지 일을 한 화면에서 한다 — DRAFT일 때 고치고, 「열기」를 누르면
 // InviteCode를 받고(`POST /assignments/{id}/open`), 연 뒤에도(ASSIGNMENT_OPEN)
-// 계속 고칠 수 있다(`EDITABLE`이 두 상태 모두 True다, `contests.assignment_api`).
+// 제출이 없는 동안은 계속 고치며(`EDITABLE`이 두 상태 모두 True다,
+// `contests.assignment_api`), 첫 제출이 들어오면 편집 폼 대신 잠금 안내를 보여준다
+// (#209 — 「첫 제출이 문을 닫는다」). 코드가 새면 재발급해 새 진입만 막는다.
 // 상금·결제·Award·Escrow는 이 화면 어디에도 나오지 않는다(스펙 #197 인수조건).
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
@@ -42,6 +44,9 @@ export default function AssignmentDetailPage() {
   const [editError, setEditError] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
+  const [reissuing, setReissuing] = useState(false);
+  const [reissueError, setReissueError] = useState<string | null>(null);
+  const [reissued, setReissued] = useState(false);
 
   useEffect(() => {
     if (state.status !== "ready") return;
@@ -71,7 +76,18 @@ export default function AssignmentDetailPage() {
   }
 
   const assignment = state.data;
-  const isEditable = assignment.status === "draft" || assignment.status === "assignment_open";
+  // `is_editable`은 백엔드가 계산해 실어 보낸다(`contests.assignment_api.
+  // _get_owned_editable_assignment`가 실제로 막는 것과 정확히 같은 술어) — 화면이
+  // `status === "draft" || status === "assignment_open"`처럼 그 규칙을 다시 적으면
+  // 안 된다. 그러면 백엔드가 규칙을 하나 더 얹을 때(바로 이 티켓의 "첫 제출이 문을
+  // 닫는다") 화면이 따로 갱신되지 않는 한 어긋나 — 게이트는 막는데 화면은 편집
+  // 폼을 계속 보여주는 fail-open이 생긴다(#209 코드리뷰 지적).
+  const isEditable = assignment.is_editable;
+  // 잠금 배너는 "열려 있는데 편집이 안 된다" — 즉 여러 잠김 사유(EDITABLE이 아닌
+  // 상태 vs. 첫 제출) 중 「첫 제출이 문을 닫는다」에 해당하는 경우에만 이 문구를
+  // 보여준다. ASSIGNMENT_CLOSED처럼 다른 이유로 안 열리는 경우는 애초에 이 화면의
+  // "제출 후 잠김" 배너가 설명할 대상이 아니다.
+  const isLockedByFirstSubmission = assignment.status === "assignment_open" && !isEditable;
 
   async function handleSaveEdit() {
     setEditError(null);
@@ -118,6 +134,25 @@ export default function AssignmentDetailPage() {
       reload();
     } finally {
       setOpening(false);
+    }
+  }
+
+  async function handleReissue() {
+    setReissueError(null);
+    setReissued(false);
+    setReissuing(true);
+    try {
+      const response = await bffClient.post<AssignmentDetail>(
+        `/api/backend/assignments/${assignmentId}/invite-code/reissue`,
+      );
+      if (!response.ok) {
+        setReissueError(response.detail);
+        return;
+      }
+      setReissued(true);
+      reload();
+    } finally {
+      setReissuing(false);
     }
   }
 
@@ -178,6 +213,51 @@ export default function AssignmentDetailPage() {
           >
             학생 화면 미리보기
           </a>
+
+          {assignment.status === "assignment_open" ? (
+            <div className="mt-4 border-t border-rule pt-4">
+              <p className="text-sm text-ink/70">
+                코드가 새어 나갔나요? 재발급하면 이 코드는 더 이상 쓸 수 없게 되고 새
+                코드가 발급됩니다 — 이미 제출한 학생의 과제물은 그대로 남습니다.
+              </p>
+              <button
+                type="button"
+                onClick={() => void handleReissue()}
+                disabled={reissuing}
+                data-testid="assignment-invite-reissue-button"
+                className="mt-3 w-fit border border-ink px-4 py-2 text-sm hover:bg-ink hover:text-paper disabled:opacity-50"
+              >
+                {reissuing ? "재발급하는 중..." : "InviteCode 재발급"}
+              </button>
+              {reissued && (
+                <p
+                  data-testid="assignment-invite-reissue-success"
+                  className="mt-2 text-sm text-ink/70"
+                >
+                  재발급했습니다. 위 코드가 새 코드이고, 이전 코드는 더 이상 쓸 수
+                  없습니다.
+                </p>
+              )}
+              {reissueError && (
+                <p
+                  role="alert"
+                  data-testid="assignment-invite-reissue-error"
+                  className="mt-2 text-sm text-attention"
+                >
+                  {reissueError}
+                </p>
+              )}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {isLockedByFirstSubmission ? (
+        <div className="border-t border-rule pt-6" data-testid="assignment-requirements-locked">
+          <p className="text-sm text-attention">
+            이미 제출한 학생이 있어 과제 내용을 더 이상 고칠 수 없습니다. 제출 뒤 기준이
+            바뀌면 이미 낸 학생이 불리해지기 때문입니다.
+          </p>
         </div>
       ) : null}
 
