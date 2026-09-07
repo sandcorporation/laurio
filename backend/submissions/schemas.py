@@ -97,6 +97,11 @@ class SubmissionAssetOut(Schema):
 class SubmissionIn(Schema):
     assets: list[SubmissionAssetIn] = []
     requirement_responses: list[RequirementResponseIn] = []
+    # Assignment(ADR-0028, #208) 전용 — 대상 Contest 가 ASSIGNMENT_OPEN 일 때만 검사한다
+    # (`submissions.api._require_invite_code_for_assignment`). 상금 공모전 제출은 이
+    # 필드를 무시한다 — InviteCode 는 Assignment 의 경계일 뿐 공모전에는 그런 경계가
+    # 없다(공모전은 결제로 이미 공개됐다).
+    invite_code: str | None = None
 
 
 class CompletionOut(Schema):

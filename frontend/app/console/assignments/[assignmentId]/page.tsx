@@ -166,6 +166,18 @@ export default function AssignmentDetailPage() {
           >
             {assignment.invite_code}
           </p>
+          {/* 학생이 실제로 보게 될 화면을 강사가 미리 확인할 수 있는 링크(#208) —
+              InviteCode 로만 닿는 그 화면(app/assignments/[code])의 유일한
+              제품 내 진입점이기도 하다. */}
+          <a
+            href={`/assignments/${assignment.invite_code}`}
+            target="_blank"
+            rel="noreferrer"
+            data-testid="assignment-invite-preview-link"
+            className="mt-2 inline-block text-sm underline"
+          >
+            학생 화면 미리보기
+          </a>
         </div>
       ) : null}
 

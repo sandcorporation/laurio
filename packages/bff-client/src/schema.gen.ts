@@ -2172,6 +2172,14 @@ export interface paths {
          *
          *     마감 후에는 누구나(비로그인 포함) 조회할 수 있지만 소스는 여전히 소유자 본인에게만
          *     보인다 — ADR-0014.
+         *
+         *     **Assignment(ADR-0028, #208)는 마감 후에도 공개되지 않는다.** 공모전의 "마감 후
+         *     전면 공개"는 순수 콘테스트의 보상 구조(#105) — 탈락자에게도 포트폴리오로 남는다 —
+         *     를 위한 것인데, Assignment에는 그 구조 자체가 없다(상금·경쟁·Award가 없다).
+         *     오히려 Assignment는 InviteCode를 아는 사람만 본다는 약속이 마감 후에도 그대로
+         *     이어져야 한다(스펙 #197: "명단은 없다, 제출한 사람만 보인다" — 그 제출한
+         *     사람이란 본인과 그 과제의 Sponsor 뿐이다) — 그러지 않으면 `submission_id`를
+         *     순차로 훑는 것만으로 학생의 제출 내용(소스 제외)이 인터넷에 새어 나간다.
          */
         get: operations["submissions_api_get_submission"];
         put?: never;
@@ -4301,6 +4309,8 @@ export interface components {
              * @default []
              */
             assets: components["schemas"]["SubmissionAssetIn"][];
+            /** Invite Code */
+            invite_code?: string | null;
             /**
              * Requirement Responses
              * @default []
