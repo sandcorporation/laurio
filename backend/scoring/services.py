@@ -37,8 +37,11 @@ from decimal import ROUND_HALF_UP, Decimal
 from django.db import IntegrityError, transaction
 
 from contests.models import Contest, Requirement
+from core.clock import Clock
 from core.prompt_safety import neutralize_untrusted as _neutralize_untrusted
 from core.scans import ScanSpec
+from repositories.adapters import ClonedRepository, get_github_adapter
+from repositories.models import RepositorySnapshot
 from storage.adapters import get_storage_adapter
 from submissions.models import RequirementResponse, Submission, SubmissionAsset
 
@@ -256,10 +259,40 @@ def score_submission_once(submission: Submission) -> dict:
         )
         return {"submission_id": submission.id, "status": "source_not_found"}
 
+    # 공개로 확인된 저장소만 채점 입력 후보다(#193) — 공개 판정은 비동기 스캔
+    # (`repositories.services.REPOSITORY_VISIBILITY_SCAN`)이 마감 전에 채워 두고,
+    # 이 시점의 `is_public`은 그 스캔이 마지막으로 본 값이다. clone은 채점이
+    # 실제로 성공할 때만 근거로 남으므로(RepositorySnapshot, 아래) 소스 읽기와
+    # 달리 이 try 블록 밖에서 먼저 시도한다 — clone 실패는 그 저장소 자산만 빼고
+    # 진행하며 permanent로 표시하지 않는다(ADR-0027).
+    repository_assets = list(
+        submission.assets.filter(kind=SubmissionAsset.Kind.REPOSITORY, is_public=True).order_by(
+            "order", "id"
+        )
+    )
+    cloned_repositories: list[tuple[SubmissionAsset, ClonedRepository]] = []
+    if repository_assets:
+        github = get_github_adapter()
+        for asset in repository_assets:
+            try:
+                cloned_repositories.append((asset, github.clone(asset.value)))
+            except Exception as exc:  # noqa: BLE001 - 저장소 하나의 clone 실패가 채점 전체를 막으면 안 된다.
+                logger.warning(
+                    "Submission(pk=%s) 저장소 자산(pk=%s) clone 실패, 그 자산만 빼고 "
+                    "진행: %s",
+                    submission.id,
+                    asset.id,
+                    exc,
+                )
+
     try:
         requirements = _requirement_inputs(submission)
         source_files = select_source_files(
             [(asset.id, _asset_label(asset), raw) for asset, raw in readable_sources]
+            + [
+                (asset.id, _asset_label(asset), cloned.zip_bytes)
+                for asset, cloned in cloned_repositories
+            ]
         )
         contest = submission.contest
         prompt = _build_prompt(
@@ -296,12 +329,17 @@ def score_submission_once(submission: Submission) -> dict:
         # 남의 자산 정체성을 흉내낼 수 있다(#191 코드리뷰 지적). `SourceFile.
         # asset_id`는 `select_source_files`가 만들 때 라벨을 거치지 않고 그대로
         # 실어 나르므로 이 문제가 없다. `commit_sha`는 `kind=repository`
-        # 자산에만 붙는데(#193), 이 시점에는 그런 자산을 읽지 않으므로 항상
-        # None이다.
+        # 자산에만 붙는다(#193) — 소스 자산은 항상 None이다.
+        commit_sha_by_asset_id = {
+            asset.id: cloned.commit_sha for asset, cloned in cloned_repositories
+        }
         used_asset_ids = {f.asset_id for f in source_files}
+        candidate_assets = [asset for asset, _raw in readable_sources] + [
+            asset for asset, _cloned in cloned_repositories
+        ]
         scored_assets_payload = [
-            {"asset_id": asset.id, "commit_sha": None}
-            for asset, _raw in readable_sources
+            {"asset_id": asset.id, "commit_sha": commit_sha_by_asset_id.get(asset.id)}
+            for asset in candidate_assets
             if asset.id in used_asset_ids
         ]
     except Exception as exc:  # noqa: BLE001 - 이 건 하나의 실패가 배치 전체를 막으면 안 된다.
@@ -329,6 +367,20 @@ def score_submission_once(submission: Submission) -> dict:
                 prompt=prompt,
                 reasoning=reasoning_payload,
                 scored_assets=scored_assets_payload,
+            )
+            # 실제로 쓰인 저장소 자산에만 스냅샷을 남긴다(#193) — "채점이
+            # 실패한 회차의 clone 결과는 남지 않는다"는 ADR-0027의 결정이라,
+            # Score 생성과 같은 트랜잭션 안에서만 만든다. 이 앞의 어느
+            # 단계에서든 예외가 나 이 지점에 닿지 못하면(위 except 블록)
+            # RepositorySnapshot도 함께 만들어지지 않는다.
+            RepositorySnapshot.objects.bulk_create(
+                RepositorySnapshot(
+                    asset=asset,
+                    commit_sha=commit_sha_by_asset_id[asset.id],
+                    cloned_at=Clock.now(),
+                )
+                for asset, _cloned in cloned_repositories
+                if asset.id in used_asset_ids
             )
     except IntegrityError:
         # 동시에 다른 스캔이 먼저 이겼다 — unique(submission) 제약이 막아준다.

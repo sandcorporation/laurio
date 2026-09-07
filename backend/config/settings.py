@@ -140,6 +140,7 @@ INSTALLED_APPS = [
     "storage",
     "submissions",
     "scoring",
+    "repositories",
     "awards",
     "handovers",
     "payouts",
@@ -728,6 +729,32 @@ if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(LLM_REQUIREMENT_CHAT_ADA
 LLM_REQUIREMENT_CHAT_FAKE_RAISING_CONTEST_IDS = [
     int(x) for x in _env("LLM_REQUIREMENT_CHAT_FAKE_RAISING_CONTEST_IDS", "").split(",") if x
 ]
+
+# --- GitHub 저장소 어댑터 (#193, ADR-0007, ADR-0027) --------------------------------
+#
+# LLM_ADAPTER_MODE와 같은 원칙: 기본값은 항상 fake다. dev/CI는 네트워크 없이
+# 결정적으로 공개 여부 판정·clone을 흉내낸다. staging/production 배포만
+# GITHUB_ADAPTER_MODE에 실제 어댑터의 dotted path를 명시한다 — 이 값이
+# fake이거나 임포트되지 않으면 `core.adapters.check_adapter_mode`(#83)가 부팅을
+# 거부한다(여섯 값이던 것이 이제 일곱이다).
+GITHUB_ADAPTER_MODE = _env("GITHUB_ADAPTER_MODE", "fake")
+if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(GITHUB_ADAPTER_MODE):
+    raise ImproperlyConfigured(
+        f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 인데 GITHUB_ADAPTER_MODE 가 "
+        "fake 다. staging/production 배포에서는 실제 GitHub 어댑터의 dotted path를 "
+        "반드시 설정해야 한다."
+    )
+
+# 실물 어댑터가 GitHub REST API를 칠 때 쓰는 선택적 자격증명. 없어도 동작한다 —
+# 공개 저장소 조회·zipball 다운로드는 인증 없이도 가능하고(익명 요청은 시간당
+# 요청 한도만 더 낮다), 참가자의 자격증명을 platform이 보관하지 않는다는
+# ADR-0027의 결정과 다른 층위다(이건 platform 자신의 GitHub App/PAT다).
+GITHUB_API_TOKEN = _env("GITHUB_API_TOKEN", "")
+
+# 테스트/dev가 fake 어댑터의 clone 결과를 결정적으로 채우고 싶을 때 쓴다 —
+# {repository_url: {path: content}} 모양. 없는 URL은
+# `repositories.adapters.FakeGitHubAdapter`의 기본 파일로 응답한다.
+GITHUB_FAKE_REPO_FILES: dict = {}
 
 # --- Handover · Escrow 해제 (#14, ADR-0003/0004/0005/0014) --------------------------
 #
