@@ -232,6 +232,12 @@ def score_submission_once(submission: Submission) -> dict:
     # 소스 하나를 못 읽어도(스토리지 지연 등) 나머지로 채점을 진행한다(#191) —
     # 나머지는 멀쩡한데 그 하나 때문에 Submission 전체가 배분 컷라인에서 조용히
     # 빠지면 안 된다. **전부** 못 읽었을 때만 지금처럼 "아직" 상태로 미룬다.
+    #
+    # 이 read_object 호출들은 순차 블로킹이다(S3면 실제 네트워크 GET) — 소스가
+    # 여럿이면 그만큼 이 스캔의 시간 예산(core.scans.DEFAULT_TIME_BUDGET_SECONDS)을
+    # 갉는다. 지금은 소스가 보통 하나뿐이라 무의미하지만(#191 코드리뷰 지적,
+    # watch-it), 실측으로 배치 크기가 실제로 줄어드는 게 확인되면 그때 병렬화한다
+    # — 스캔 예산 설계를 건드리는 일이라 이 티켓 범위 밖이다.
     readable_sources: list[tuple[SubmissionAsset, bytes]] = []
     for asset in source_assets:
         raw = storage_adapter.read_object(asset.value)
@@ -253,7 +259,7 @@ def score_submission_once(submission: Submission) -> dict:
     try:
         requirements = _requirement_inputs(submission)
         source_files = select_source_files(
-            [(_asset_label(asset), raw) for asset, raw in readable_sources]
+            [(asset.id, _asset_label(asset), raw) for asset, raw in readable_sources]
         )
         contest = submission.contest
         prompt = _build_prompt(
@@ -281,13 +287,22 @@ def score_submission_once(submission: Submission) -> dict:
         # 그런 자산까지 "쓰였다"고 적으면 Score 스냅샷이 실제로 채점되지 않은
         # 것을 채점 근거인 것처럼 보여준다 — 이의를 제기하는 사람과 심판하는
         # 사람이 "같은 것을 보고" 이야기해야 한다는 이 필드의 존재 이유를
-        # 정확히 어긴다. `commit_sha`는 `kind=repository` 자산에만 붙는데
-        # (#193), 이 시점에는 그런 자산을 읽지 않으므로 항상 None이다.
-        used_labels = {f.asset_label for f in source_files}
+        # 정확히 어긴다.
+        #
+        # `asset.id`로 판정한다 — 라벨 문자열로 되짚으면 두 가지 실제 사고가
+        # 난다: 참가자가 두 자산에 같은 라벨을 붙이면 하나만 쓰이고 다른 하나는
+        # 통째로 걸러졌어도 둘 다 "쓰였다"로 잡히고, 참가자가 라벨을 빈 자산의
+        # 폴백 표시(`_asset_label`의 "소스 자료 #7" 형식)와 똑같이 타이핑하면
+        # 남의 자산 정체성을 흉내낼 수 있다(#191 코드리뷰 지적). `SourceFile.
+        # asset_id`는 `select_source_files`가 만들 때 라벨을 거치지 않고 그대로
+        # 실어 나르므로 이 문제가 없다. `commit_sha`는 `kind=repository`
+        # 자산에만 붙는데(#193), 이 시점에는 그런 자산을 읽지 않으므로 항상
+        # None이다.
+        used_asset_ids = {f.asset_id for f in source_files}
         scored_assets_payload = [
             {"asset_id": asset.id, "commit_sha": None}
             for asset, _raw in readable_sources
-            if _asset_label(asset) in used_labels
+            if asset.id in used_asset_ids
         ]
     except Exception as exc:  # noqa: BLE001 - 이 건 하나의 실패가 배치 전체를 막으면 안 된다.
         message = f"{type(exc).__name__}: {exc}"

@@ -121,40 +121,49 @@ def _source_candidates(raw: bytes, stack: contextlib.ExitStack) -> list[_Candida
 
 
 def select_source_files(
-    sources: list[tuple[str, bytes]], *, max_bytes: int = MAX_SOURCE_BYTES
+    sources: list[tuple[int, str, bytes]], *, max_bytes: int = MAX_SOURCE_BYTES
 ) -> list[SourceFile]:
-    """여러 소스(각각 `(자산 라벨, 원본 바이트)`)를 예산 안에서 라운드로빈으로 고른다.
+    """여러 소스(각각 `(자산 id, 자산 라벨, 원본 바이트)`)를 예산 안에서 라운드로빈으로
+    고른다.
 
     `sources`가 비어 있으면 빈 목록을 돌려준다. 소스 하나짜리 입력에서도 동작은
     이전과 같다 — 예산 전체를 그 하나가 쓴다.
+
+    **자산 id는 정체성, 라벨은 표시일 뿐이다(#191 코드리뷰 지적).** 라벨은
+    참가자가 자유 텍스트로 쓰는 값이라 서로 다른 자산이 같은 라벨을 가질 수
+    있고(`SubmissionAsset.label`에는 유니크 제약이 없다), 라벨이 비었을 때의
+    폴백 표시(`scoring.services._asset_label`)도 참가자가 그대로 타이핑하면
+    충돌한다. 그래서 "이 파일이 어느 자산에서 왔는가"는 `SourceFile.asset_id`로만
+    판단해야 한다 — 호출자가 `Score.scored_assets`를 채울 때 라벨 문자열로
+    되짚어 찾지 않게 하기 위해서다.
     """
 
     files: list[SourceFile] = []
     budget = max_bytes
 
     with contextlib.ExitStack() as stack:
-        queues: list[tuple[str, Iterator[_Candidate]]] = []
-        for label, raw in sources:
+        queues: list[tuple[int, str, Iterator[_Candidate]]] = []
+        for asset_id, label, raw in sources:
             candidates = _source_candidates(raw, stack)
             if candidates:
-                queues.append((label, iter(candidates)))
+                queues.append((asset_id, label, iter(candidates)))
 
         while queues and budget > 0:
             round_queues = queues
-            remaining_in_round = len(round_queues)
-            next_queues: list[tuple[str, Iterator[_Candidate]]] = []
+            round_size = len(round_queues)
+            next_queues: list[tuple[int, str, Iterator[_Candidate]]] = []
 
-            for label, queue in round_queues:
+            for index, (asset_id, label, queue) in enumerate(round_queues):
                 if budget <= 0:
-                    remaining_in_round -= 1
                     continue
 
-                # 이 라운드에서 아직 처리되지 않은 소스 수로 남은 예산을 공평하게
-                # 나눈다 — 앞선 소스가 크더라도 뒤 소스의 차례를 통째로 빼앗지
-                # 못하게 한다(#191). 어느 소스가 실제로 덜 쓰면 그 차이는 `budget`
-                # 갱신을 통해 같은 라운드의 다음 소스에게 자연히 넘어간다.
-                share = max(budget // remaining_in_round, 1)
-                remaining_in_round -= 1
+                # 이 라운드에서 아직 처리되지 않은 소스 수(자기 자신 포함)로 남은
+                # 예산을 공평하게 나눈다 — 앞선 소스가 크더라도 뒤 소스의 차례를
+                # 통째로 빼앗지 못하게 한다(#191). 어느 소스가 실제로 덜 쓰면 그
+                # 차이는 `budget` 갱신을 통해 같은 라운드의 다음 소스에게 자연히
+                # 넘어간다. 라운드 안에서의 순서(`index`)만으로 나머지 수를 구하므로
+                # 별도의 감소 카운터가 필요 없다.
+                share = max(budget // (round_size - index), 1)
 
                 candidate = next(queue, None)
                 if candidate is None:
@@ -164,11 +173,16 @@ def select_source_files(
                 text = _decode_utf8_prefix(content_bytes)
                 if text is not None:
                     files.append(
-                        SourceFile(path=candidate.path, content=text, asset_label=label)
+                        SourceFile(
+                            path=candidate.path,
+                            content=text,
+                            asset_id=asset_id,
+                            asset_label=label,
+                        )
                     )
                     budget -= len(content_bytes)
 
-                next_queues.append((label, queue))
+                next_queues.append((asset_id, label, queue))
 
             queues = next_queues
 

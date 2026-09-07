@@ -35,14 +35,17 @@ from core.adapters import resolve_adapter
 class SourceFile:
     """채점 대상으로 선별된 소스 파일 하나 (scoring.source_selection).
 
-    `asset_label`은 이 파일이 어느 `SubmissionAsset`에서 왔는지 참가자가 붙인
-    라벨이다(#191) — 소스가 여럿이 되면 AI가 "어느 것을 보고 있는가"를 알아야
-    판정 근거를 쓸 수 있다. 라벨이 비어 있으면 자산을 식별할 다른 표시로
-    채워진다(`scoring.source_selection`).
+    `asset_id`는 이 파일이 어느 `SubmissionAsset`에서 왔는지 가리키는 정체성이다
+    (#191 코드리뷰 지적) — "실제로 쓰인 자산"을 판정할 때(`scoring.services`)는
+    반드시 이 값으로 판정한다. `asset_label`은 참가자가 붙인 자유 텍스트라
+    서로 다른 자산이 같은 라벨을 가질 수 있어(유니크 제약이 없다) 정체성으로
+    쓸 수 없다 — 프롬프트에 "어느 것을 보고 있는가"를 보여주는 **표시 용도**로만
+    쓴다.
     """
 
     path: str
     content: str
+    asset_id: int
     asset_label: str = ""
 
 

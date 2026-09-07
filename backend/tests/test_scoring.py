@@ -975,6 +975,69 @@ def test_readable_but_wholly_filtered_source_asset_is_not_recorded_as_scored(
     assert [e["asset_id"] for e in score.scored_assets] == [scored_asset_id]
 
 
+@pytest.mark.django_db
+def test_scored_assets_are_attributed_by_id_not_label(client, category, landing_type):
+    """`label`은 자유 텍스트라 서로 다른 자산이 같은 값을 가질 수 있다(#191 코드리뷰
+    지적) — 두 소스 자산에 **같은 라벨**을 붙이고 하나만 파일을 기여하면, "쓰였다"고
+    기록되는 것은 실제로 기여한 그 하나뿐이어야 한다. 라벨 문자열로 되짚어 판정하면
+    아무것도 기여하지 않은 나머지 자산까지 "쓰였다"로 잘못 기록된다.
+    """
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+
+    contributing_key = _source_object_key(contest["id"], dev["user_id"])
+    FakeStorageAdapter().write_object(
+        contributing_key, _zip_bytes({"app.py": "def login():\n    # MARKER\n    pass\n"})
+    )
+    # 같은 라벨("웹 서비스")을 붙이지만 선별 대상 확장자가 아닌 파일뿐이라 이
+    # 자산은 프롬프트에 아무것도 남기지 못한다.
+    non_contributing_key = _source_object_key(contest["id"], dev["user_id"])
+    FakeStorageAdapter().write_object(
+        non_contributing_key, _zip_bytes({"image.png": "not a selectable extension"})
+    )
+
+    submit_resp = client.post(
+        f"{CONTESTS_URL}/{contest['id']}/submissions",
+        data={
+            "assets": [
+                {"kind": "source", "value": contributing_key, "label": "웹 서비스"},
+                {"kind": "source", "value": non_contributing_key, "label": "웹 서비스"},
+            ],
+            "requirement_responses": [
+                {
+                    "requirement_id": requirement_id,
+                    "is_met": True,
+                    "evidence": [{"kind": "source_location", "value": "MARKER"}],
+                }
+            ],
+        },
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert submit_resp.status_code == 201, submit_resp.content
+    submission_id = submit_resp.json()["id"]
+
+    _close_contest(client, contest, deadline=deadline)
+    result = _run_pending(client)
+    assert result["rows"][0]["status"] == "scored"
+
+    score = Score.objects.get(submission_id=submission_id)
+    contributing_asset_id = Submission.objects.get(id=submission_id).assets.get(
+        value=contributing_key
+    ).id
+    assert [e["asset_id"] for e in score.scored_assets] == [contributing_asset_id]
+
+
 # --- 리뷰 지적 반영: 소스 미도착은 실패가 아니라 "아직"이다 (#12 리뷰 지적 1) ---------
 
 
