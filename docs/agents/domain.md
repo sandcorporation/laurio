@@ -38,6 +38,35 @@ Multi-context repo (presence of `CONTEXT-MAP.md` at the root):
         └── docs/adr/
 ```
 
+## ADRs are history — only two files describe the present
+
+**`CONTEXT.md` and the repo root's `CLAUDE.md` are the only documents that describe how
+things are *now*.** Everything else — every ADR, `REQUEST.md`, every closed issue and spec
+— records a judgement **as of the day it was written**.
+
+Read an ADR for *why a decision was made*, never as a statement of current state. The same
+goes for the "Problem Statement" of a spec issue: it describes the world the spec was
+written to change, which by the time you read it may already have been changed.
+
+**This bit us.** A session read the Problem Statement of a staging-integration spec —
+"only one adapter is actually implemented" — and told the user that as current fact. It had
+been true when the spec was written; by then all ten adapters were bound to real
+implementations. The spec was still open only because a few execution sub-issues remained.
+
+Every ADR carries a `Status:` line saying whether it still binds:
+
+- `Status: Accepted (YYYY-MM-DD 결정)` — in force.
+- `Status: Amended by ADR-XXXX (…)` — **still in force**, but a later ADR builds on or
+  narrows part of it.
+- `Status: Superseded by ADR-XXXX (…)` — no longer in force.
+
+**Every ADR has one** — CI's `adr-status` job fails the build otherwise. That is what makes
+"no marker" mean "nobody has amended this", rather than "nobody got around to it".
+
+When you need to state a present fact — which adapters are real, which ports are used, what
+a budget is — read `CLAUDE.md` or the code and config, not a document that was describing
+its own moment.
+
 ## Use the glossary's vocabulary
 
 When your output names a domain concept (in an issue title, a refactor proposal, a hypothesis, a test name), use the term as defined in `CONTEXT.md`. Don't drift to synonyms the glossary explicitly avoids.
