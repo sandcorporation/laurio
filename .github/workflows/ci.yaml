@@ -656,22 +656,11 @@ jobs:
           docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml logs --tail 100 || true
           exit 1
 
-      # **운영자 잡에만 uv 가 남는다** (#194). 시드는 대부분 HTTP 다(#156) — 남은
-      # 예외가 `seed-operator.ts` 의 `runSeedSubprocess` 둘(`seed_e2e_operator_queues`·
-      # `seed_e2e_operator_appeal`)이고, 그 둘이 소스를 **`FakeStorageAdapter` 에
-      # 직접** 쓴 뒤 같은 프로세스에서 채점 스캔을 돌린다. 그래서 `STORAGE_BACKEND=fake`
-      # 인 호스트에서만 돌 수 있고, 그 제약 하나가 이 잡에 파이썬 툴체인과 **DB 포트
-      # 노출**을 남긴다. 그 결합을 푸는 것은 별개다 — `write_object` 가 어댑터 계약에
-      # 없어서(fake 에만 「테스트 전용」으로 있다) S3 어댑터에 서버측 쓰기를 여는
-      # 판단이 먼저 필요하다.
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-
-      - name: Install backend dependencies from lockfile
-        working-directory: backend
-        run: uv sync --locked
+      # **이 잡에도 uv 가 없다** (#194). 마지막까지 남아 있던 서브프로세스 시드 둘이
+      # HTTP 로 옮겨졌다 — 그 둘이 소스를 `FakeStorageAdapter` 에 직접 쓴 뒤 같은
+      # 프로세스에서 채점을 돌려 `STORAGE_BACKEND=fake` 인 호스트를 요구했는데,
+      # `write_object` 가 어댑터 계약에 들어가면서 컨테이너 안의 MinIO 로도 성립하게
+      # 됐다. 그 결합 하나가 이 잡의 파이썬 툴체인과 DB 포트 노출을 함께 붙들고 있었다.
 
       - name: Install Playwright browser
         working-directory: frontend
