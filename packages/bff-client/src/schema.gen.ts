@@ -223,6 +223,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/assignments/{assignment_id}/submissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Assignment Submissions
+         * @description Sponsor 가 제출 목록과 각 제출의 Score·근거를 본다(#210, ADR-0006/0028).
+         *
+         *     상태·시각과 무관하게 항상 조회할 수 있다 — 채점 전에는 `score`가 null일 뿐이다.
+         *     소스는 여기 없다: 소스 열람은 명시적으로 펼쳐야 기록과 함께 이루어지는 별도
+         *     경로다(#211, ADR-0022) — 목록을 훑는 것만으로 소스가 눈에 들어오면 그 기록이
+         *     잡음으로 가득 차 의미를 잃는다.
+         */
+        get: operations["contests_assignment_api_list_assignment_submissions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/logout": {
         parameters: {
             query?: never;
@@ -2655,6 +2680,49 @@ export interface components {
             reason: string;
         };
         /**
+         * AssignmentSubmissionOut
+         * @description Sponsor 의 제출 목록 한 행(#210) — 채점 전에는 `score`가 null이다(빈 배열도 0도
+         *     아니다: "아직 안 됐다"와 "0점"은 다른 사실이다).
+         */
+        AssignmentSubmissionOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Developer Display Name */
+            developer_display_name: string;
+            /** Developer Id */
+            developer_id: number;
+            score?: components["schemas"]["AssignmentSubmissionScoreOut"] | null;
+            /** Submission Id */
+            submission_id: number;
+        };
+        /**
+         * AssignmentSubmissionScoreOut
+         * @description Sponsor 가 보는 채점 결과 — Developer 자신이 보는 `submissions.schemas.OwnScoreOut`과
+         *     같은 자리이지만 이의 관련 필드(`appeal_deadline`·`can_appeal`)가 없다. 과제에는
+         *     이의제기가 없다(스펙 #197 Out of Scope) — Sponsor 화면에 그 개념을 만들 이유가 없다.
+         *
+         *     `prompt`는 여기도 없다 — 소스가 통째로 임베드돼 있어 응답 크기 상한이 사라진다
+         *     (`OwnScoreOut`과 같은 이유, #72). 소스를 직접 보는 경로는 따로 있다(#211, ADR-0022).
+         */
+        AssignmentSubmissionScoreOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Model Version */
+            model_version: string;
+            /** Percentage */
+            percentage: string;
+            /** Reasoning */
+            reasoning: {
+                [key: string]: unknown;
+            }[];
+        };
+        /**
          * AssignmentUpdateIn
          * @description DRAFT·ASSIGNMENT_OPEN Assignment를 고치는 요청(#207) — `ContestUpdateIn`과 달리
          *     `prize`·`category_id`가 없다. 전부 선택 필드다(부분 갱신, `ContestUpdateIn`과 같은
@@ -4740,6 +4808,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AssignmentOut"];
+                };
+            };
+        };
+    };
+    contests_assignment_api_list_assignment_submissions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentSubmissionOut"][];
                 };
             };
         };

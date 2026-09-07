@@ -30,12 +30,15 @@ from accounts.models import SponsorProfile
 from accounts.sanitize import sanitize_free_text
 from core.clock import Clock
 from core.transitions import claim_transition
+from submissions.models import Submission
 
 from .assignment_category import get_assignment_category
 from .models import Contest, DeliverableType, InviteCode, Requirement
 from .schemas import (
     AssignmentCreateIn,
     AssignmentOut,
+    AssignmentSubmissionOut,
+    AssignmentSubmissionScoreOut,
     AssignmentUpdateIn,
     RequirementOut,
 )
@@ -331,3 +334,45 @@ def open_assignment(request: HttpRequest, assignment_id: int):
     return 200, _serialize_assignment(
         contest, auth_user=request.auth_user, invite_code=invite.code
     )
+
+
+@router.get(
+    "/assignments/{assignment_id}/submissions",
+    response=list[AssignmentSubmissionOut],
+    auth=jwt_auth,
+)
+def list_assignment_submissions(request: HttpRequest, assignment_id: int):
+    """Sponsor 가 제출 목록과 각 제출의 Score·근거를 본다(#210, ADR-0006/0028).
+
+    상태·시각과 무관하게 항상 조회할 수 있다 — 채점 전에는 `score`가 null일 뿐이다.
+    소스는 여기 없다: 소스 열람은 명시적으로 펼쳐야 기록과 함께 이루어지는 별도
+    경로다(#211, ADR-0022) — 목록을 훑는 것만으로 소스가 눈에 들어오면 그 기록이
+    잡음으로 가득 차 의미를 잃는다.
+    """
+
+    contest = _get_owned_assignment(request, assignment_id)
+
+    submissions = (
+        Submission.objects.filter(contest=contest)
+        .select_related("developer", "score")
+        .order_by("created_at", "id")
+    )
+    return [
+        AssignmentSubmissionOut(
+            submission_id=s.id,
+            developer_id=s.developer_id,
+            developer_display_name=s.developer.display_name or f"Developer#{s.developer_id}",
+            created_at=s.created_at,
+            score=(
+                AssignmentSubmissionScoreOut(
+                    percentage=str(s.score.percentage),
+                    model_version=s.score.model_version,
+                    reasoning=s.score.reasoning,
+                    created_at=s.score.created_at,
+                )
+                if hasattr(s, "score")
+                else None
+            ),
+        )
+        for s in submissions
+    ]

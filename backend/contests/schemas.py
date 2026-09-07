@@ -405,3 +405,32 @@ class AssignmentOut(Schema):
     created_at: datetime
     invite_code: str | None = None
     is_owner: bool = False
+
+
+class AssignmentSubmissionScoreOut(Schema):
+    """Sponsor 가 보는 채점 결과 — Developer 자신이 보는 `submissions.schemas.OwnScoreOut`과
+    같은 자리이지만 이의 관련 필드(`appeal_deadline`·`can_appeal`)가 없다. 과제에는
+    이의제기가 없다(스펙 #197 Out of Scope) — Sponsor 화면에 그 개념을 만들 이유가 없다.
+
+    `prompt`는 여기도 없다 — 소스가 통째로 임베드돼 있어 응답 크기 상한이 사라진다
+    (`OwnScoreOut`과 같은 이유, #72). 소스를 직접 보는 경로는 따로 있다(#211, ADR-0022).
+    """
+
+    percentage: str
+    model_version: str
+    reasoning: list[dict]
+    created_at: datetime
+
+
+class AssignmentSubmissionOut(Schema):
+    """Sponsor 의 제출 목록 한 행(#210) — 채점 전에는 `score`가 null이다(빈 배열도 0도
+    아니다: "아직 안 됐다"와 "0점"은 다른 사실이다)."""
+
+    submission_id: int
+    developer_id: int
+    # 탈퇴한 학생은 없다 — Assignment 는 Developer 탈퇴로 Submission 이 사라지지
+    # 않는다. `display_name`이 비어 있을 수 있는 것은 오히려 Sponsor 쪽이다(#212,
+    # ADR-0025) — 이 화면은 이름이 빈 학생을 다루지 않는다.
+    developer_display_name: str
+    created_at: datetime
+    score: AssignmentSubmissionScoreOut | None = None
