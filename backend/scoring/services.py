@@ -172,7 +172,7 @@ def score_submission_once(submission: Submission) -> dict:
     """이 Submission을 정확히 한 번만 채점한다. 이미 Score가 있으면 그대로 돌아온다.
 
     이 함수는 절대 예외를 밖으로 던지지 않는다(모듈 docstring 참고) — 모든 실패는
-    ScoringAttempt에 남고 "failed"(또는 "source_not_found")로 돌아온다.
+    ScoringAttempt에 남고 "failed"·"source_not_found"·"no_source_asset"로 돌아온다.
     """
 
     if Score.objects.filter(submission_id=submission.id).exists():
@@ -196,7 +196,10 @@ def score_submission_once(submission: Submission) -> dict:
             error="소스 자료가 하나도 없다 — 채점하지 않는다.",
             permanent=True,
         )
-        return {"submission_id": submission.id, "status": "source_not_found"}
+        # "source_not_found"(스토리지에 아직 없다, 다시 시도한다)와 다른 사실이다 —
+        # 이건 다시 시도해도 같고 스캔 대상에서 빠진다. 상태를 뭉치면 운영자가
+        # 「기다리면 되는 것」과 「사람이 봐야 하는 것」을 구별할 수 없다.
+        return {"submission_id": submission.id, "status": "no_source_asset"}
 
     storage_adapter = get_storage_adapter()
     raw_source = storage_adapter.read_object(source_asset.value)

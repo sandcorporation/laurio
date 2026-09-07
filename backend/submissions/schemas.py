@@ -80,7 +80,6 @@ class AssetSummaryOut(Schema):
     value: str
     label: str
     order: int
-    is_public: bool | None = None
 
 
 class SubmissionAssetOut(Schema):

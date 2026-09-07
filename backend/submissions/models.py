@@ -59,6 +59,12 @@ GITHUB_REPO_URL_PATTERN = re.compile(
 )
 
 
+#: `test_account`를 붙일 수 있는 종류. `SubmissionAsset.Meta.constraints`가 읽어야
+#: 하는데 `Meta`는 클래스 본문 안에서 평가되어 `SubmissionAsset` 이름이 아직 없으므로
+#: 모듈 수준에 둔다 — 같은 사실을 제약과 클래스 속성이 따로 적는 것을 막는다.
+TEST_ACCOUNT_ASSET_KINDS = ("demo_url",)
+
+
 class SubmissionAsset(models.Model):
     """제출작에 딸린 자료 하나 — 소스·시연 영상·데모 URL·GitHub 저장소 (#190).
 
@@ -91,7 +97,7 @@ class SubmissionAsset(models.Model):
     #: 값이 storage object_key인 종류(나머지는 URL이다).
     OBJECT_KEY_KINDS = (Kind.SOURCE, Kind.DEMO_VIDEO)
     #: 로그인 정보를 붙일 수 있는 종류 — 소스와 저장소에는 테스트 계정이 없다.
-    TEST_ACCOUNT_KINDS = (Kind.DEMO_URL,)
+    TEST_ACCOUNT_KINDS = TEST_ACCOUNT_ASSET_KINDS
 
     submission = models.ForeignKey(Submission, related_name="assets", on_delete=models.CASCADE)
     kind = models.CharField(max_length=20, choices=Kind.choices)
@@ -131,7 +137,7 @@ class SubmissionAsset(models.Model):
             # 쌓이지 않게 한다.
             models.CheckConstraint(
                 condition=(
-                    models.Q(kind__in=["demo_url"])
+                    models.Q(kind__in=list(TEST_ACCOUNT_ASSET_KINDS))
                     | models.Q(test_account="")
                 ),
                 name="test_account_only_on_demo_url_asset",

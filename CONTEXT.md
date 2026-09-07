@@ -63,10 +63,6 @@ _Avoid_: 제출물, 출품작, Entry, Work, Proposal
 Submission이 자기를 보여주기 위해 담는 자료 하나 — 소스코드, 시연 영상, 데모 URL, GitHub 저장소 중 하나다. **무엇을 보여주는지는 라벨이 말한다**("모바일 앱 데모") — 자료가 여럿이면 그 라벨 없이는 Sponsor도 AI도 어느 것이 무엇인지 알 수 없다. 데모에 들어가는 테스트 계정은 제출작이 아니라 그 데모에 붙는다 — 데모마다 다를 수 있기 때문이다. 소스와 저장소는 Award 전까지 Developer 본인만 보고, 데모와 영상은 마감 후 전면 공개된다 — 공개 저장소라도 플랫폼이 Sponsor에게 코드로 가는 길을 먼저 열지는 않는다(ADR-0027).
 _Avoid_: 첨부·Attachment(소스는 첨부가 아니다), 산출물(DeliverableType이 그 종류를 가리킨다), 제출 항목, 파일(URL도 자료다)
 
-**RepositorySnapshot**:
-플랫폼이 채점하려고 공개 저장소를 열었던 그 시점 — 어느 커밋이었는가. **참가자가 낸 것이 아니라 플랫폼이 본 것이라** SubmissionAsset과 같은 자리에 두지 않는다. Score는 불변인데 저장소는 마감 다음날 사라질 수 있어, 이 기록이 없으면 심판하는 사람이 「AI가 본 것」을 특정할 수 없다. 파일 내용 자체는 여기 없다 — 그것은 이미 Score가 프롬프트로 통째로 보존한다.
-_Avoid_: 클론, 캐시, 백업, 미러
-
 **Score**:
 마감 직후 한 번만 산출되어 불변으로 고정되는, Submission의 필수 Requirement 달성률. Distribution 대상 판정의 유일한 근거다.
 _Avoid_: 평가, 점수, Grade, Rating, Evaluation

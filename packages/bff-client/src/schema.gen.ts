@@ -2301,8 +2301,6 @@ export interface components {
         AssetSummaryOut: {
             /** Id */
             id: number;
-            /** Is Public */
-            is_public?: boolean | null;
             /** Kind */
             kind: string;
             /** Label */

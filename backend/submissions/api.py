@@ -28,6 +28,7 @@
 # `from __future__ import annotations`는 여전히 쓰지 않는다.
 
 import logging
+from dataclasses import dataclass
 
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
@@ -57,6 +58,7 @@ from .models import (
 )
 from .participation import next_action_for
 from .schemas import (
+    AssetSummaryOut,
     ErrorOut,
     MyParticipationOut,
     MyParticipationPageOut,
@@ -66,7 +68,6 @@ from .schemas import (
     CompletionDistributionOut,
     CompletionOut,
     ContestComparisonOut,
-    AssetSummaryOut,
     ContestMetricsOut,
     DailyParticipationOut,
     DeveloperPublicProfileOut,
@@ -235,7 +236,42 @@ _KIND_LIMIT_FIELDS = {
 _KIND_LABELS = dict(SubmissionAsset.Kind.choices)
 
 
-def _clean_assets_in(assets_in, *, contest: Contest, developer_user_id: int) -> list:
+@dataclass(frozen=True)
+class _CleanedAsset:
+    """검증을 통과해 저장할 수 있게 다듬어진 자료 하나 (#190).
+
+    `_clean_assets_in`과 `_merge_assets` 사이의 계약이다. dict로 넘기면 그 키가
+    말없이 모델 필드 이름 노릇을 하게 되고(`**row`), `id`를 언제 꺼내느냐에 따라
+    호출부가 조용히 달라진다 — 그 결합을 이름 있는 타입 하나로 끊는다.
+    """
+
+    kind: str
+    value: str
+    label: str
+    test_account: str
+    order: int
+    #: 기존 자료를 가리키는 id. 첫 제출에는 언제나 None이다.
+    id: int | None = None
+
+    def as_model_fields(self) -> dict:
+        return {
+            "kind": self.kind,
+            "value": self.value,
+            "label": self.label,
+            "test_account": self.test_account,
+            "order": self.order,
+        }
+
+    @property
+    def identity(self) -> tuple[str, str]:
+        """자료의 정체성 — `SubmissionAsset`의 UniqueConstraint와 같은 키다."""
+
+        return (self.kind, self.value)
+
+
+def _clean_assets_in(
+    assets_in, *, contest: Contest, developer_user_id: int
+) -> list[_CleanedAsset]:
     """페이로드의 자료를 검증하고 저장 가능한 값으로 다듬는다 (#190).
 
     여기서 걸러지는 것: 알 수 없는 종류, 소스 없음, 남의 업로드 대상을 가리키는
@@ -244,7 +280,7 @@ def _clean_assets_in(assets_in, *, contest: Contest, developer_user_id: int) -> 
     422가 아니라 500(IntegrityError)이 나기 때문이다.
     """
 
-    cleaned: list[dict] = []
+    cleaned: list[_CleanedAsset] = []
     seen: set[tuple[str, str]] = set()
     counts: dict[str, int] = {}
 
@@ -293,14 +329,14 @@ def _clean_assets_in(assets_in, *, contest: Contest, developer_user_id: int) -> 
             )
 
         cleaned.append(
-            {
-                "id": item.id,
-                "kind": item.kind,
-                "value": value,
-                "label": sanitize_free_text(item.label or ""),
-                "test_account": test_account,
-                "order": item.order,
-            }
+            _CleanedAsset(
+                id=item.id,
+                kind=item.kind,
+                value=value,
+                label=sanitize_free_text(item.label or ""),
+                test_account=test_account,
+                order=item.order,
+            )
         )
 
     if not counts.get(SubmissionAsset.Kind.SOURCE):
@@ -329,7 +365,7 @@ def _clean_assets_in(assets_in, *, contest: Contest, developer_user_id: int) -> 
     return cleaned
 
 
-def _merge_assets(submission: Submission, cleaned: list[dict]) -> None:
+def _merge_assets(submission: Submission, cleaned: list[_CleanedAsset]) -> None:
     """자료를 병합한다 — 이 API에서 부분 갱신 의미론을 갖는 유일한 곳이다 (#190).
 
     **자료는 그 값이 곧 정체성이다.** `(submission, kind, value)`가 이미 유일하므로,
@@ -353,26 +389,23 @@ def _merge_assets(submission: Submission, cleaned: list[dict]) -> None:
     """
 
     existing = {a.id: a for a in submission.assets.all()}
-    by_value = {(a.kind, a.value): a for a in existing.values()}
+    by_identity = {(a.kind, a.value): a for a in existing.values()}
 
-    kept: dict[int, dict] = {}
-    creates: list[dict] = []
+    kept: dict[int, _CleanedAsset] = {}
+    creates: list[_CleanedAsset] = []
 
     for row in cleaned:
-        asset_id = row.pop("id", None)
-        identity = (row["kind"], row["value"])
-
-        if asset_id is not None:
-            asset = existing.get(asset_id)
+        if row.id is not None:
+            asset = existing.get(row.id)
             if asset is None:
                 raise HttpError(422, "이 Submission에 속하지 않은 자료 id입니다.")
-            if (asset.kind, asset.value) == identity and asset.id not in kept:
+            if (asset.kind, asset.value) == row.identity and asset.id not in kept:
                 kept[asset.id] = row
                 continue
             creates.append(row)
             continue
 
-        match = by_value.get(identity)
+        match = by_identity.get(row.identity)
         if match is not None and match.id not in kept:
             kept[match.id] = row
             continue
@@ -384,13 +417,13 @@ def _merge_assets(submission: Submission, cleaned: list[dict]) -> None:
 
     for asset_id, row in kept.items():
         asset = existing[asset_id]
-        asset.label = row["label"]
-        asset.test_account = row["test_account"]
-        asset.order = row["order"]
+        asset.label = row.label
+        asset.test_account = row.test_account
+        asset.order = row.order
         asset.save(update_fields=["label", "test_account", "order", "updated_at"])
 
     for row in creates:
-        SubmissionAsset.objects.create(submission=submission, **row)
+        SubmissionAsset.objects.create(submission=submission, **row.as_model_fields())
 
 
 # --- 자가 응답 · Evidence -----------------------------------------------------
@@ -493,7 +526,23 @@ def _evidence_outs(evidence_items, visible_asset_ids: set[int]) -> list[Evidence
     ]
 
 
-def _completion_of(assets, *, total_requirements: int, linked_count: int) -> CompletionOut:
+def _public_asset_summaries(assets) -> list[AssetSummaryOut]:
+    """마감 후 공개되는 자료(데모·영상)만 요약한다 (#190).
+
+    공개 프로필과 심사 비교가 같은 것을 낸다 — 두 자리가 각자 종류를 거르면
+    언젠가 한쪽만 새 종류를 흘린다. 원소 타입에 `test_account`가 없다.
+    """
+
+    return [
+        AssetSummaryOut(id=a.id, kind=a.kind, value=a.value, label=a.label, order=a.order)
+        for a in assets
+        if a.kind in _PUBLIC_AFTER_DEADLINE_KINDS
+    ]
+
+
+def _completion_of(
+    assets, *, total_requirements: int, linked_count: int
+) -> CompletionOut:
     """자료 목록에서 완성도 지표를 만든다 (#190).
 
     `assets`는 **가시성으로 거르기 전의 전체 목록**이어야 한다 — 이 지표는
@@ -634,7 +683,7 @@ def create_submission(request: HttpRequest, contest_id: int, payload: Submission
     cleaned_assets = _clean_assets_in(
         payload.assets, contest=contest, developer_user_id=request.auth_user.id
     )
-    if any(row["id"] is not None for row in cleaned_assets):
+    if any(row.id is not None for row in cleaned_assets):
         # 첫 제출에는 유지할 기존 자료가 없다. id를 실어 보냈다면 그것은 다른
         # Submission의 것이거나 클라이언트 버그다 — 어느 쪽이든 조용히 무시하면
         # 안 된다.
@@ -887,13 +936,7 @@ def get_developer_public_profile(request: HttpRequest, developer_id: int):
                 submission_id=s.id,
                 contest_id=s.contest_id,
                 contest_title=s.contest.title,
-                assets=[
-                    AssetSummaryOut(
-                        id=a.id, kind=a.kind, value=a.value, label=a.label, order=a.order
-                    )
-                    for a in s.assets.all()
-                    if a.kind in _PUBLIC_AFTER_DEADLINE_KINDS
-                ],
+                assets=_public_asset_summaries(s.assets.all()),
                 created_at=s.created_at,
             )
             for s in submissions
@@ -993,13 +1036,7 @@ def compare_submissions(request: HttpRequest, contest_id: int):
                 submission_id=submission.id,
                 developer_id=submission.developer_id,
                 developer_display_name=developer_name,
-                assets=[
-                    AssetSummaryOut(
-                        id=a.id, kind=a.kind, value=a.value, label=a.label, order=a.order
-                    )
-                    for a in assets
-                    if a.kind in _PUBLIC_AFTER_DEADLINE_KINDS
-                ],
+                assets=_public_asset_summaries(assets),
                 completion=_completion_of(
                     assets, total_requirements=total, linked_count=linked_count
                 ),
