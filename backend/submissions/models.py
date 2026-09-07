@@ -212,5 +212,14 @@ class Evidence(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        # **순서를 명시한다** (#195 리뷰). 이 모델에는 `Meta` 자체가 없었고, 그래서
+        # `response.evidence_items.all()` 이 정렬 없는 SELECT 였다 — 순서가 우연히
+        # 삽입 순이었을 뿐이다. `_replace_requirement_responses` 가 저장할 때마다
+        # 이전 행을 전부 지우고 다시 만들므로 힙 재사용으로 순서가 뒤집힐 수 있고,
+        # 그러면 참가자가 적어 둔 근거가 화면에서 자리를 바꾼다. 형제인
+        # `RequirementResponse`·`SubmissionAsset` 은 둘 다 `ordering` 을 갖는다.
+        ordering = ["id"]
+
     def __str__(self) -> str:  # pragma: no cover
         return f"Evidence({self.kind}={self.value!r})"

@@ -365,7 +365,7 @@ def _clean_assets_in(
     return cleaned
 
 
-def _merge_assets(submission: Submission, cleaned: list[_CleanedAsset]) -> None:
+def _merge_assets(submission: Submission, cleaned: list[_CleanedAsset]) -> set[int]:
     """자료를 병합한다 — 이 API에서 부분 갱신 의미론을 갖는 유일한 곳이다 (#190).
 
     **자료는 그 값이 곧 정체성이다.** `(submission, kind, value)`가 이미 유일하므로,
@@ -386,6 +386,11 @@ def _merge_assets(submission: Submission, cleaned: list[_CleanedAsset]) -> None:
 
     삭제를 생성보다 **먼저** 한다 — 그래야 지워지는 행이 쓰던 값을 새 행이 바로
     다시 쓸 수 있다.
+
+    **지운 자산의 id를 돌려준다**(#195). 그것을 가리키던 `Evidence`는 거부가 아니라
+    조용히 연결이 풀려야 하는데, 그 판정은 「이번 요청이 지운 것인가」와 「애초에 남의
+    것인가」를 가를 수 있어야 한다 — 삭제가 끝난 뒤에는 둘 다 똑같이 「없는 id」로
+    보이므로 여기서 알려주는 수밖에 없다.
     """
 
     existing = {a.id: a for a in submission.assets.all()}
@@ -425,17 +430,35 @@ def _merge_assets(submission: Submission, cleaned: list[_CleanedAsset]) -> None:
     for row in creates:
         SubmissionAsset.objects.create(submission=submission, **row.as_model_fields())
 
+    return set(stale)
+
 
 # --- 자가 응답 · Evidence -----------------------------------------------------
 
 
-def _replace_requirement_responses(submission: Submission, contest: Contest, responses_in) -> None:
+def _replace_requirement_responses(
+    submission: Submission,
+    contest: Contest,
+    responses_in,
+    *,
+    removed_asset_ids: set[int],
+) -> None:
+    """자가 응답과 그 근거를 통째로 새로 쓴다.
+
+    **근거가 가리키는 자료의 판정이 세 갈래다**(#190, #195):
+
+    - 살아 있는 이 Submission의 자료 → 그대로 연결한다.
+    - **이번 요청이 지운** 이 Submission의 자료 → 연결만 조용히 푼다. 자료를 지우면서
+      그 근거를 함께 정리하는 것은 클라이언트가 아니라 **서버가 할 일이다** — 서버는
+      `_merge_assets` 뒤의 자산을 이미 알고 있고, 클라이언트가 그 정체성 규칙을
+      흉내 내면 규칙이 바뀔 때마다 조용히 어긋난다(#192에서 실제로 두 번 틀렸다).
+    - 그 밖의 id → 여전히 422다. **남의 자료 id를 근거에 붙여 그 존재를 확인하는
+      경로를 만들지 않는다**(#190) — 이 갈래를 함께 뭉개면 그 방어가 사라진다.
+    """
+
     valid_requirement_ids = set(
         Requirement.objects.filter(contest=contest).values_list("id", flat=True)
     )
-
-    # 근거가 가리킬 수 있는 자료는 이 Submission의 것뿐이다 (#190) — 남의 자료
-    # id를 근거에 붙여 그 존재를 확인하는 경로를 만들지 않는다.
     own_asset_ids = set(submission.assets.values_list("id", flat=True))
 
     seen_ids: set[int] = set()
@@ -448,7 +471,11 @@ def _replace_requirement_responses(submission: Submission, contest: Contest, res
         for evidence in item.evidence:
             if evidence.kind not in _EVIDENCE_KINDS:
                 raise HttpError(422, f"알 수 없는 Evidence 종류입니다: {evidence.kind}")
-            if evidence.asset_id is not None and evidence.asset_id not in own_asset_ids:
+            if (
+                evidence.asset_id is not None
+                and evidence.asset_id not in own_asset_ids
+                and evidence.asset_id not in removed_asset_ids
+            ):
                 raise HttpError(422, "이 Submission에 속하지 않은 자료를 근거로 지정했습니다.")
 
     # 편집 UI가 매번 체크리스트 전체를 다시 제출하는 형태와 맞춘다 — 부분 갱신이
@@ -467,7 +494,8 @@ def _replace_requirement_responses(submission: Submission, contest: Contest, res
                     response=response,
                     kind=e.kind,
                     value=sanitize_free_text(e.value),
-                    asset_id=e.asset_id,
+                    # 이번 요청이 지운 자료를 가리켰다면 연결만 푼다(#195).
+                    asset_id=e.asset_id if e.asset_id in own_asset_ids else None,
                 )
                 for e in item.evidence
             ]
@@ -499,10 +527,18 @@ def _visible_asset_kinds(
     null로 "존재하지만 안 보임"을 표현했지만, 목록에서는 그 구분이 성립하지 않는다.
     """
 
+    if is_owner:
+        # **소유자는 종류를 가리지 않고 자기 자료를 전부 본다** (#195 리뷰). 아래
+        # 두 목록은 알려진 네 종류만 열거하므로, 종류가 하나 늘고 이 함수를 함께
+        # 고치지 않으면 **주인에게도 자기 자료가 안 보인다** — 그리고 그 자료를
+        # 가리키는 근거의 참조가 `_evidence_outs`에서 지워져, 화면이 "연결이
+        # 풀렸다"고 거짓으로 말하게 된다.
+        return tuple(SubmissionAsset.Kind.values)
+
     kinds: list[str] = []
-    if is_owner or is_awarded:
+    if is_awarded:
         kinds.extend(_OWNER_UNTIL_AWARD_KINDS)
-    if is_owner or is_sponsor or past_deadline:
+    if is_sponsor or past_deadline:
         kinds.extend(_PUBLIC_AFTER_DEADLINE_KINDS)
     return tuple(kinds)
 
@@ -692,8 +728,10 @@ def create_submission(request: HttpRequest, contest_id: int, payload: Submission
     try:
         with transaction.atomic():
             submission = Submission.objects.create(contest=contest, developer=developer)
-            _merge_assets(submission, cleaned_assets)
-            _replace_requirement_responses(submission, contest, payload.requirement_responses)
+            removed = _merge_assets(submission, cleaned_assets)
+            _replace_requirement_responses(
+                submission, contest, payload.requirement_responses, removed_asset_ids=removed
+            )
     except IntegrityError as exc:
         raise HttpError(409, "이미 이 Contest에 제출한 Submission이 있습니다.") from exc
 
@@ -727,11 +765,13 @@ def update_submission(request: HttpRequest, contest_id: int, payload: Submission
     )
 
     with transaction.atomic():
-        _merge_assets(submission, cleaned_assets)
+        removed = _merge_assets(submission, cleaned_assets)
         # `updated_at`(auto_now)이 자료만 바뀐 수정에도 움직이게 한다 — 안 그러면
         # "마지막으로 손댄 때"가 체크리스트를 고친 때만 가리킨다.
         submission.save(update_fields=["updated_at"])
-        _replace_requirement_responses(submission, contest, payload.requirement_responses)
+        _replace_requirement_responses(
+            submission, contest, payload.requirement_responses, removed_asset_ids=removed
+        )
 
     submission.refresh_from_db()
     return 200, _serialize(
