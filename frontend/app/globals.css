@@ -8,3 +8,18 @@
 body {
   @apply bg-paper text-ink font-sans;
 }
+
+/*
+ * Tailwind v4 의 preflight 가 `button` 기본 커서를 `pointer` 에서 `default` 로
+ * 바꿨다(v3 까지는 pointer 였다). 운영자 앱은 globals.css 에 자체 버튼 스킨이
+ * 있어 그 안에서 pointer 를 되살렸지만, 공개 앱은 버튼마다 유틸리티로 칠하는
+ * 구조라 스킨이 없고 — 그래서 버튼 전부가 화살표 커서로 남아 있었다.
+ *
+ * 스킨을 들이지 않고 커서만 되돌린다. 버튼마다 `cursor-pointer` 를 붙이는 대신
+ * 여기 한 줄로 두는 이유는, 빠뜨린 버튼이 조용히 화살표로 남는 것을 막기 위해서다
+ * (지금 이 상태가 정확히 그렇게 생겼다).
+ */
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer;
+}
