@@ -45,7 +45,8 @@ from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 from django.db import IntegrityError, transaction
-from django.db.models import Exists, OuterRef
+from django.db.models import Count, Exists, OuterRef, Subquery
+from django.db.models.functions import Coalesce
 
 from contests.models import Contest, Requirement
 from core.clock import Clock
@@ -774,12 +775,27 @@ def _pending_submissions(as_of, ctx):
     저장소 공개 여부가 아직 안 정해졌고(`is_public` null) 유예 기간이 남은
     Submission도 뺀다(#193 코드리뷰 지적, `_REPOSITORY_VISIBILITY_GRACE`) —
     자세한 이유는 그 상수의 주석.
+
+    **정렬은 시도 횟수 오름차순이다(#221, ADR-0031).** `id` 오름차순만 쓰면 막힌
+    오래된 제출이 항상 배치 앞자리를 차지해, 그 수가 배치 상한을 넘는 순간 새
+    제출이 한 번도 시도되지 못한다. `ScoringAttempt`가 시도 횟수의 유일한
+    원천이므로(`Submission`에 카운터를 두지 않는다 — 카운터 증가와 이력 생성이
+    갈리면 어느 쪽이 참인지 정할 방법이 없다) 여기서 그 이력을 집계해 함께
+    정렬 기준으로 싣는다. 서브쿼리 하나로 annotate하므로 후보 수가 늘어도 이
+    함수의 쿼리 수는 그대로다(N+1이 아니다).
     """
 
     unresolved_repository = SubmissionAsset.objects.filter(
         submission=OuterRef("pk"),
         kind=SubmissionAsset.Kind.REPOSITORY,
         is_public__isnull=True,
+    )
+    attempt_count = (
+        ScoringAttempt.objects.filter(submission=OuterRef("pk"))
+        .order_by()
+        .values("submission")
+        .annotate(count=Count("id"))
+        .values("count")
     )
 
     return (
@@ -793,6 +809,7 @@ def _pending_submissions(as_of, ctx):
             _has_unresolved_repository=True,
             contest__deadline_at__gt=as_of - _REPOSITORY_VISIBILITY_GRACE,
         )
+        .annotate(attempt_count=Coalesce(Subquery(attempt_count), 0))
         .select_related("contest")
     )
 
@@ -818,6 +835,15 @@ def _score_one(submission, as_of, ctx):
 # 30초 HTTP 타임아웃을 넘길 수 있고, 그 상태로 워커가 SIGKILL되면 진행 중이던 건은
 # ScoringAttempt조차 못 남기고 사라져 다음 beat가 같은 앞머리를 다시 집어 똑같이 죽는다.
 # 예산을 넘기면 남은 Submission을 시작하지 않는다 — 나머지는 다음 스캔이 이어받는다.
+#
+# order_by 는 뼈대 기본값(`id` 오름차순)의 예외다(#221, ADR-0031) — `ScanSpec.order_by`가
+# 이미 열어 둔 override 자리를 쓴다. `attempt_count`(위 `_pending_submissions`가 annotate)가
+# 먼저고 `id`가 동률을 가른다: 한 번도 시도되지 않은 제출이 재시도 중인 것보다 항상
+# 앞선다. 시도 횟수가 같은 후보끼리는 `id`가 결정적 이차 정렬이라 회차마다 같은
+# 앞머리를 반복해 집는다(순서가 흔들리지 않는다).
 SUBMISSION_SCORING_SCAN = ScanSpec(
-    name="submission-scoring", candidates=_pending_submissions, handle_row=_score_one
+    name="submission-scoring",
+    candidates=_pending_submissions,
+    handle_row=_score_one,
+    order_by=("attempt_count", "id"),
 )

@@ -573,6 +573,138 @@ def test_llm_failure_is_logged_and_retried_on_next_scan(client, category, landin
     assert Score.objects.filter(submission_id=submission_id).count() == 1
 
 
+# --- #221(ADR-0031): 후보 정렬 — 시도 적은 것 먼저, 막힌 것이 새 것을 굶기지 않는다 ----
+
+
+@pytest.mark.django_db
+def test_never_attempted_submission_is_scored_before_one_stuck_in_retries(
+    client, category, landing_type, monkeypatch
+):
+    """오래된 제출이 실패를 반복하고 있어도(`ScoringAttempt` 이력이 쌓여 있어도),
+    한 번도 시도되지 않은 새 제출이 같은 스캔 회차에 채점된다(#221). 예전
+    정렬(`id` 오름차순)이라면 배치 상한을 몽키패치로 1로 좁혔을 때 id가 더
+    작은 stuck 제출이 매번 앞자리를 차지해 새 제출은 영원히 후보에 들지
+    못했을 것이다."""
+
+    from dataclasses import replace
+
+    from core import scans
+
+    spec = scans.SCAN_REGISTRY["submission-scoring"]
+    monkeypatch.setitem(scans.SCAN_REGISTRY, "submission-scoring", replace(spec, batch_size=1))
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+
+    def _submit(dev, key):
+        resp = client.post(
+            f"{CONTESTS_URL}/{contest['id']}/submissions",
+            data={"assets": [{"kind": "source", "value": key}], "requirement_responses": [
+                    {
+                        "requirement_id": requirement_id,
+                        "is_met": True,
+                        "evidence": [{"kind": "source_location", "value": "MARKER"}],
+                    }
+                ]},
+            content_type="application/json",
+            **_auth_header(dev["access"]),
+        )
+        assert resp.status_code == 201
+        return resp.json()["id"]
+
+    # stuck: 낮은 id, 이미 여러 번 실패했다(이전 스캔 회차들의 이력).
+    dev1 = _verified_user(client, "dev-1", "dev-ci-1")
+    key1 = _source_object_key(contest["id"], dev1["user_id"])
+    FakeStorageAdapter().write_object(key1, _zip_bytes({"app.py": "MARKER\n"}))
+    stuck_id = _submit(dev1, key1)
+
+    # fresh: 높은 id, 아직 한 번도 시도되지 않았다.
+    dev2 = _verified_user(client, "dev-2", "dev-ci-2")
+    key2 = _source_object_key(contest["id"], dev2["user_id"])
+    FakeStorageAdapter().write_object(key2, _zip_bytes({"app.py": "MARKER\n"}))
+    fresh_id = _submit(dev2, key2)
+
+    assert stuck_id < fresh_id
+
+    _close_contest(client, contest, deadline=deadline)
+
+    ScoringAttempt.objects.create(submission_id=stuck_id, error="네트워크 순단 1", permanent=False)
+    ScoringAttempt.objects.create(submission_id=stuck_id, error="네트워크 순단 2", permanent=False)
+
+    result = _run_pending(client)
+    assert result["count"] == 1
+    assert result["rows"][0]["submission_id"] == fresh_id
+    assert result["rows"][0]["status"] == "scored"
+    assert Score.objects.filter(submission_id=fresh_id).exists()
+    assert not Score.objects.filter(submission_id=stuck_id).exists()
+
+
+@pytest.mark.django_db
+def test_candidates_with_equal_attempt_counts_are_ordered_by_id(
+    client, category, landing_type, monkeypatch
+):
+    """시도 횟수가 같으면(둘 다 0회) `id` 오름차순이 그대로 이차 정렬 기준이다 —
+    회차마다 순서가 흔들려 같은 앞머리를 반복해 집지 않는다(#221 AC)."""
+
+    from dataclasses import replace
+
+    from core import scans
+
+    spec = scans.SCAN_REGISTRY["submission-scoring"]
+    monkeypatch.setitem(scans.SCAN_REGISTRY, "submission-scoring", replace(spec, batch_size=1))
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+
+    def _submit(dev, key):
+        resp = client.post(
+            f"{CONTESTS_URL}/{contest['id']}/submissions",
+            data={"assets": [{"kind": "source", "value": key}], "requirement_responses": [
+                    {
+                        "requirement_id": requirement_id,
+                        "is_met": True,
+                        "evidence": [{"kind": "source_location", "value": "MARKER"}],
+                    }
+                ]},
+            content_type="application/json",
+            **_auth_header(dev["access"]),
+        )
+        assert resp.status_code == 201
+        return resp.json()["id"]
+
+    dev1 = _verified_user(client, "dev-1", "dev-ci-1")
+    key1 = _source_object_key(contest["id"], dev1["user_id"])
+    FakeStorageAdapter().write_object(key1, _zip_bytes({"app.py": "MARKER\n"}))
+    lower_id = _submit(dev1, key1)
+
+    dev2 = _verified_user(client, "dev-2", "dev-ci-2")
+    key2 = _source_object_key(contest["id"], dev2["user_id"])
+    FakeStorageAdapter().write_object(key2, _zip_bytes({"app.py": "MARKER\n"}))
+    higher_id = _submit(dev2, key2)
+
+    assert lower_id < higher_id
+
+    _close_contest(client, contest, deadline=deadline)
+
+    result = _run_pending(client)
+    assert result["count"] == 1
+    assert result["rows"][0]["submission_id"] == lower_id
+
+
 @pytest.mark.django_db
 def test_incomplete_contests_endpoint_lists_unscored_closed_contest(
     client, category, landing_type
