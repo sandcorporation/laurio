@@ -59,7 +59,11 @@ DB·Redis·MinIO·두 앱이 통째로 갈리므로 체인 둘이 서로의 데�
 
 **staging 은 떠 있다** — `https://laurio.honeycombpizza.link`(공개 앱),
 `operator.laurio.honeycombpizza.link`(운영자 앱), `storage.honeycombpizza.link`(브라우저가
-직접 PUT 하는 MinIO). 어댑터가 전부 실물 구현이다: `PortOneV2VerificationAdapter`(#85) ·
+직접 PUT 하는 MinIO). **그 MinIO 안에 버킷이 둘이다**(#233, ADR-0032) — 제출물이 사는
+비공개 버킷과, 공모전 이미지만 사는 **익명 읽기 버킷**(`laurio-staging-public-images`)이다.
+서버가 아니라 버킷을 가른다: 공개 읽기 정책이 버킷 단위라 이미지 쪽 설정을 잘못해도
+소스에 닿지 못한다. 버킷 생성·정책·CORS 는 이 저장소 밖의 수작업이다. 어댑터가 전부
+실물 구현이다: `PortOneV2VerificationAdapter`(#85) ·
 `TossPGAdapter`(#87) · `TossPayoutAdapter`·`TossSellerAdapter`(#57) ·
 `OpenAIScoringAdapter`(#88) · `OpenAIRequirementChatAdapter` ·
 `GitHubAPIAdapter`(#193) · 알림 3채널(`AligoAlimtalkAdapter`·`AligoSmsAdapter`·
@@ -249,11 +253,11 @@ cd backend && LAURIO_DB_PORT=55432 uv run python manage.py prune_e2e_junk
 `global-setup.ts` 의 순서가 그래서 그 순서다.
 
 **스위트는 기본으로 병렬 실행된다**(#104). `pyproject.toml` 의 `addopts` 가 `-n auto` 를
-준다 — 실측(이 머신, 당시 1192건 — 지금 1467건 통과·1건 skip. Assignment 가 #205~#212 로
+준다 — 실측(이 머신, 당시 1192건 — 지금 1512건 통과·1건 skip. Assignment 가 #205~#212 로
 1312건에서 1377건까지, staging 검증이 낳은 #214~#217 로 1388건까지, 저장소만으로
 제출하고 채점 시점에 박제하는 #218~#220 으로 1407건까지, 채점 상한과 화면 열한 개
-(#213·#221~#231)로 1463건까지, 종류 게이트(#232)로 여기까지 늘었다) `-n 4` 84초 →
-`-n auto` 57초. 직렬로 보려면 `-n 0`.
+(#213·#221~#231)로 1463건까지, 종류 게이트(#232)로 1467건까지, 공모전 이미지
+(#233~#236)로 여기까지 늘었다) `-n 4` 84초 → `-n auto` 57초. 직렬로 보려면 `-n 0`.
 
 **테스트는 서로를 밟지 않는다 — 손으로 갈라 줄 것이 없다.**
 
@@ -404,7 +408,7 @@ ADR-0017 은 프론트에만 있는 위험을 셋으로 못 박았다. 여기 �
 | --- | --- | --- |
 | red→green 반복 | 백엔드 테스트 파일 하나 | **12초** |
 | red→green 반복 | 브라우저로 화면 하나 걸어보기 | **수 초** |
-| 티켓 커밋 직전 | `pytest` 전체 | 1분 17초 |
+| 티켓 커밋 직전 | `pytest` 전체 | 1분 32초 |
 | 티켓 커밋 직전 | 두 앱 `typecheck` | 각 10~20초 |
 | CI (push 후) | 전체 | 백엔드 + e2e |
 
@@ -424,8 +428,8 @@ pnpm --dir frontend exec playwright test --project=public e2e/payout.spec.ts -g 
 **CI 가 돌리는 것 (참고용 수치).**
 
 ```bash
-pnpm --dir frontend test            # 전체 (102건이던 시절 약 1.8분 — 지금 118건)
-pnpm --dir frontend test:public     # 공개 앱만 (74건이던 시절 약 1.4분 — 지금 86건)
+pnpm --dir frontend test            # 전체 (102건이던 시절 약 1.8분 — 지금 119건)
+pnpm --dir frontend test:public     # 공개 앱만 (74건이던 시절 약 1.4분 — 지금 87건)
 pnpm --dir frontend test:operator   # 운영자 앱만 (28건이던 시절 약 25초 — 지금 32건)
 ```
 

@@ -1,26 +1,37 @@
 "use client";
 
-// Contest 이미지 패널 (#234, ADR-0032, design 선례 requirement-draft-panel.tsx).
+// Contest/Assignment 이미지 패널 (#234/#236, ADR-0032, design 선례
+// requirement-draft-panel.tsx).
 //
-// Sponsor 가 참고 이미지를 여러 장 올리고, 순서를 바꾸고, 잘못 올린 것을 뺀다 —
-// 전부 결제가 문을 닫기 전(DRAFT)에만 된다. 업로드는 presigned POST(크기 상한·
-// content-type 이 서명된 정책에 묶인다, `lib/upload/use-contest-image-upload.ts`)
-// 이고, 업로드가 끝나면 이 화면에 바로 그려진다(spec #225 user story 5 — "결제
-// 전에 무엇이 올라갔는지 확인할 수 있다").
+// Sponsor(강사 포함)가 참고 이미지를 여러 장 올리고, 순서를 바꾸고, 잘못 올린
+// 것을 뺀다 — 전부 각 자원의 편집 게이트가 열려 있는 동안에만 된다(공모전은
+// 결제가 문을 닫기 전 DRAFT, 과제는 첫 제출이 들어오기 전). 업로드는 presigned
+// POST(크기 상한·content-type 이 서명된 정책에 묶인다,
+// `lib/upload/use-contest-image-upload.ts`)이고, 업로드가 끝나면 이 화면에
+// 바로 그려진다(spec #225 user story 5 — "결제 전에 무엇이 올라갔는지 확인할
+// 수 있다").
+//
+// **`resourcePath`가 두 자원을 가른다.** 백엔드가 같은 `ContestImage` 모델을
+// 두 URL 접두어(`/contests/{id}/images/...` · `/assignments/{id}/images/...`)로
+// 똑같이 다루므로(#236), 이 컴포넌트도 그 접두어 하나만 넘겨받으면 그대로
+// 재사용된다 — 화면마다 두 벌을 만들지 않는다.
 import { useRef, useState } from "react";
 
 import { bffClient } from "@/lib/bff/client";
 import {
   useContestImageUpload,
   type ContestImage,
+  type ContestImageResourcePath,
 } from "@/lib/upload/use-contest-image-upload";
 
 export interface ContestImagePanelProps {
   contestId: number;
   images: ContestImage[];
-  /** DRAFT 가 아니면 false — 업로드·순서변경·제거를 전부 숨기고 읽기 전용으로 그린다. */
+  /** 편집 게이트가 닫혀 있으면 false — 업로드·순서변경·제거를 전부 숨기고 읽기 전용으로 그린다. */
   editable: boolean;
   onImagesChange: (images: ContestImage[]) => void;
+  /** 기본값 `"contests"` — Assignment 화면은 `"assignments"`를 넘긴다. */
+  resourcePath?: ContestImageResourcePath;
 }
 
 function byOrder(a: ContestImage, b: ContestImage): number {
@@ -32,8 +43,9 @@ export function ContestImagePanel({
   images,
   editable,
   onImagesChange,
+  resourcePath = "contests",
 }: ContestImagePanelProps) {
-  const { state, upload } = useContestImageUpload(contestId);
+  const { state, upload } = useContestImageUpload(contestId, resourcePath);
   const [actionError, setActionError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -65,7 +77,7 @@ export function ContestImagePanel({
 
   async function patchOrder(imageId: number, order: number): Promise<ContestImage | null> {
     const response = await bffClient.request<ContestImage>(
-      `/api/backend/contests/${contestId}/images/${imageId}`,
+      `/api/backend/${resourcePath}/${contestId}/images/${imageId}`,
       {
         method: "PATCH",
         headers: { "content-type": "application/json" },
@@ -107,7 +119,7 @@ export function ContestImagePanel({
   async function handleRemove(image: ContestImage) {
     setActionError(null);
     const response = await bffClient.request(
-      `/api/backend/contests/${contestId}/images/${image.id}`,
+      `/api/backend/${resourcePath}/${contestId}/images/${image.id}`,
       { method: "DELETE" },
     );
     if (!response.ok) {
@@ -126,8 +138,10 @@ export function ContestImagePanel({
     >
       <h2 className="text-sm font-medium">참고 이미지</h2>
       <p className="text-xs text-ink/60">
-        시안·와이어프레임처럼 글로 풀면 흐려지는 조건을 이미지로 보여주세요. 결제가
-        끝나면 더 이상 고칠 수 없습니다.
+        시안·와이어프레임처럼 글로 풀면 흐려지는 조건을 이미지로 보여주세요.{" "}
+        {resourcePath === "assignments"
+          ? "학생이 제출을 시작하면 더 이상 고칠 수 없습니다."
+          : "결제가 끝나면 더 이상 고칠 수 없습니다."}
       </p>
 
       {sorted.length === 0 ? (

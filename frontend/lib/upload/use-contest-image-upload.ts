@@ -1,6 +1,6 @@
 "use client";
 
-// Contest 이미지 업로드 (#234, ADR-0032).
+// Contest/Assignment 이미지 업로드 (#234/#236, ADR-0032).
 //
 // `lib/upload/use-presigned-upload.ts`(소스·시연 영상 등)와 갈리는 이유가 하나다 —
 // 저 훅은 presigned **PUT**(파일 바이트를 그대로 요청 본문으로 보내고, 서명은
@@ -9,11 +9,21 @@
 // 거절하게 한다 — ADR-0032). POST는 본문이 multipart/form-data이고, 서명된
 // 필드들을 파일보다 **먼저** 실어야 정책이 성립한다.
 //
-// 업로드가 끝나도 아직 Contest에 붙지 않는다 — `POST /contests/{id}/images`로
-// object_key를 등록해야 화면에 나타나고 결제 뒤 잠기는 대상이 된다. 그래서 이
-// 훅의 결과는 "등록까지 끝난 ContestImage"다.
+// 업로드가 끝나도 아직 Contest/Assignment에 붙지 않는다 — `POST
+// /{resourcePath}/{id}/images`로 object_key를 등록해야 화면에 나타나고
+// 편집 게이트가 닫힌 뒤 잠기는 대상이 된다. 그래서 이 훅의 결과는 "등록까지
+// 끝난 ContestImage"다.
+//
+// **`resourcePath`가 URL의 앞마디를 고른다.** 백엔드는 같은 `ContestImage`
+// 모델을 공모전(`/api/contests/{id}/images/...`)과 과제
+// (`/api/assignments/{id}/images/...`) 양쪽에서 똑같은 규칙으로 다룬다(#236,
+// `contests.images`가 두 라우터에 로직을 빌려준다) — 이 훅도 URL 접두어 하나만
+// 갈아 끼우면 그대로 재사용된다. 기본값은 `"contests"`다(기존 호출부를 그대로
+// 둔다).
 import { useCallback, useState } from "react";
 import { bffClient } from "@/lib/bff/client";
+
+export type ContestImageResourcePath = "contests" | "assignments";
 
 export interface ContestImage {
   id: number;
@@ -37,11 +47,12 @@ export interface ContestImageUploadState {
 }
 
 async function requestUploadUrl(
+  resourcePath: ContestImageResourcePath,
   contestId: number,
   contentType: string,
 ): Promise<UploadUrlResponse> {
   const result = await bffClient.post<UploadUrlResponse>(
-    `/api/backend/contests/${contestId}/images/upload-url`,
+    `/api/backend/${resourcePath}/${contestId}/images/upload-url`,
     { content_type: contentType },
   );
   if (!result.ok) throw new Error(result.detail);
@@ -77,10 +88,15 @@ function postToStorage(presigned: UploadUrlResponse, file: File): Promise<void> 
   });
 }
 
-async function registerImage(contestId: number, objectKey: string): Promise<ContestImage> {
-  const result = await bffClient.post<ContestImage>(`/api/backend/contests/${contestId}/images`, {
-    object_key: objectKey,
-  });
+async function registerImage(
+  resourcePath: ContestImageResourcePath,
+  contestId: number,
+  objectKey: string,
+): Promise<ContestImage> {
+  const result = await bffClient.post<ContestImage>(
+    `/api/backend/${resourcePath}/${contestId}/images`,
+    { object_key: objectKey },
+  );
   if (!result.ok) throw new Error(result.detail);
   return result.data;
 }
@@ -90,20 +106,27 @@ export interface UseContestImageUploadResult {
   upload: (file: File) => Promise<ContestImage>;
 }
 
-export function useContestImageUpload(contestId: number): UseContestImageUploadResult {
+export function useContestImageUpload(
+  contestId: number,
+  resourcePath: ContestImageResourcePath = "contests",
+): UseContestImageUploadResult {
   const [state, setState] = useState<ContestImageUploadState>({ status: "idle", error: null });
 
   const upload = useCallback(
     async (file: File): Promise<ContestImage> => {
       setState({ status: "requesting", error: null });
       try {
-        const presigned = await requestUploadUrl(contestId, file.type || "application/octet-stream");
+        const presigned = await requestUploadUrl(
+          resourcePath,
+          contestId,
+          file.type || "application/octet-stream",
+        );
 
         setState({ status: "uploading", error: null });
         await postToStorage(presigned, file);
 
         setState({ status: "registering", error: null });
-        const image = await registerImage(contestId, presigned.object_key);
+        const image = await registerImage(resourcePath, contestId, presigned.object_key);
 
         setState({ status: "idle", error: null });
         return image;
@@ -113,7 +136,7 @@ export function useContestImageUpload(contestId: number): UseContestImageUploadR
         throw error;
       }
     },
-    [contestId],
+    [contestId, resourcePath],
   );
 
   return { state, upload };

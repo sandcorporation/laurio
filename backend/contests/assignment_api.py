@@ -37,6 +37,13 @@ from submissions.models import AssignmentSourceReading, Submission, SubmissionAs
 from submissions.schemas import AssignmentSourceRevealOut, SourceRevealAssetOut
 
 from .assignment_category import get_assignment_category
+from .images import (
+    create_image as create_assignment_image_for,
+    remove_image as remove_assignment_image_for,
+    reorder_image as reorder_assignment_image_for,
+    request_upload_url as request_assignment_image_upload_url_for,
+    serialize_contest_image,
+)
 from .models import Contest, DeliverableType, InviteCode, Requirement
 from .schemas import (
     AssignmentCreateIn,
@@ -44,6 +51,11 @@ from .schemas import (
     AssignmentSubmissionOut,
     AssignmentSubmissionScoreOut,
     AssignmentUpdateIn,
+    ContestImageCreateIn,
+    ContestImageOut,
+    ContestImageReorderIn,
+    ContestImageUploadUrlIn,
+    ContestImageUploadUrlOut,
     RequirementOut,
 )
 
@@ -125,6 +137,7 @@ def _serialize_assignment(
             RequirementOut(id=r.id, text=r.text, grade=r.grade, order=r.order)
             for r in contest.requirements.all()
         ],
+        images=[serialize_contest_image(image) for image in contest.images.all()],
         created_at=contest.created_at,
         invite_code=invite_code,
         is_owner=is_owner,
@@ -160,7 +173,7 @@ def _get_owned_assignment(request: HttpRequest, assignment_id: int) -> Contest:
     try:
         contest = (
             Contest.objects.select_related("sponsor", "category")
-            .prefetch_related("deliverable_types", "requirements")
+            .prefetch_related("deliverable_types", "requirements", "images")
             .get(id=assignment_id, kind=Contest.Kind.ASSIGNMENT)
         )
     except Contest.DoesNotExist as exc:
@@ -296,12 +309,12 @@ def list_my_assignments(request: HttpRequest):
     # `annotate(Count("submissions"))`로 목록 전체를 쿼리 하나에 센다 — 그러지 않고
     # `_serialize_assignment`의 기본 동작(모르면 직접 센다)에 맡기면 행마다 COUNT가
     # 하나씩 붙는다(N+1, 코드리뷰 지적). `submissions`는 FK 역참조라(M2M이 아니다)
-    # 이 자리에서 `deliverable_types`·`requirements`·`invite_codes`를 함께
-    # `prefetch_related`해도(별도 쿼리라 JOIN 팬아웃이 없다) `distinct` 없이 정확하다.
+    # 이 자리에서 `deliverable_types`·`requirements`·`invite_codes`·`images`(#236)를
+    # 함께 `prefetch_related`해도(별도 쿼리라 JOIN 팬아웃이 없다) `distinct` 없이 정확하다.
     contests = (
         Contest.objects.filter(sponsor=profile, kind=Contest.Kind.ASSIGNMENT)
         .select_related("sponsor", "category")
-        .prefetch_related("deliverable_types", "requirements", "invite_codes")
+        .prefetch_related("deliverable_types", "requirements", "invite_codes", "images")
         .annotate(submission_count=Count("submissions"))
         .order_by("-created_at", "-id")
     )
@@ -441,6 +454,71 @@ def update_assignment(request: HttpRequest, assignment_id: int, payload: Assignm
     return _serialize_assignment(
         contest, auth_user=request.auth_user, invite_code=_active_invite_code(contest)
     )
+
+
+# --- AssignmentImage (#236, ADR-0032) ------------------------------------------
+#
+# 강사가 조건을 보여줄 이유는 공모전과 같다(spec #225) — 그래서 발급·등록·순서
+# 변경·제거의 실제 로직은 `contests.images`를 공모전 표면과 그대로 공유한다.
+# 다른 것은 게이트 하나뿐이다: 공모전은 결제가 문을 닫고
+# (`_get_owned_draft_contest`), 과제는 **첫 제출**이 문을 닫는다
+# (`_get_owned_editable_assignment` — #209가 이미 정의한 잠금, 새로 만들지
+# 않는다). DRAFT뿐 아니라 아직 제출이 없는 ASSIGNMENT_OPEN 과제도 고칠 수
+# 있다는 점까지 그 게이트가 그대로 답한다.
+
+
+@router.post(
+    "/assignments/{assignment_id}/images/upload-url",
+    response=ContestImageUploadUrlOut,
+    auth=jwt_auth,
+)
+def request_assignment_image_upload_url(
+    request: HttpRequest, assignment_id: int, payload: ContestImageUploadUrlIn
+):
+    """강사가 참고 이미지를 올리기 전, 공개 이미지 버킷으로의 presigned POST를
+    받는다 — `contests.api.request_contest_image_upload_url`과 같은 자리."""
+
+    contest = _get_owned_editable_assignment(request, assignment_id)
+    return request_assignment_image_upload_url_for(contest, payload)
+
+
+@router.post(
+    "/assignments/{assignment_id}/images", response=ContestImageOut, auth=jwt_auth
+)
+def add_assignment_image(
+    request: HttpRequest, assignment_id: int, payload: ContestImageCreateIn
+):
+    """브라우저가 presigned POST로 실제 바이트를 올린 뒤, 그 object_key를 이
+    과제의 이미지 목록에 등록한다."""
+
+    contest = _get_owned_editable_assignment(request, assignment_id)
+    return create_assignment_image_for(contest, payload)
+
+
+@router.patch(
+    "/assignments/{assignment_id}/images/{image_id}",
+    response=ContestImageOut,
+    auth=jwt_auth,
+)
+def reorder_assignment_image(
+    request: HttpRequest, assignment_id: int, image_id: int, payload: ContestImageReorderIn
+):
+    """강사가 이미지의 노출 순서를 고친다."""
+
+    contest = _get_owned_editable_assignment(request, assignment_id)
+    return reorder_assignment_image_for(contest, image_id, payload)
+
+
+@router.delete("/assignments/{assignment_id}/images/{image_id}", auth=jwt_auth)
+def remove_assignment_image(request: HttpRequest, assignment_id: int, image_id: int):
+    """이미지를 뺀다 — 이 행만 지운다(공모전과 같은 이유, ADR-0005/0032). 재개최는
+    과제에 없으므로(REOPENABLE이 REFUNDED Payment를 요구하고 과제에는 결제가
+    없다) 지금은 어느 다른 Contest도 이 object_key를 참조하지 않지만, 어댑터에
+    삭제 메서드가 없다는 사실 자체는 종류와 무관하다."""
+
+    contest = _get_owned_editable_assignment(request, assignment_id)
+    remove_assignment_image_for(contest, image_id)
+    return {"success": True}
 
 
 @router.post("/assignments/{assignment_id}/open", response={200: AssignmentOut}, auth=jwt_auth)

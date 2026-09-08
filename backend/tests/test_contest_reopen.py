@@ -20,9 +20,11 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
-from contests.models import Category, Contest, DeliverableType, Requirement
+from contests.models import Category, Contest, ContestImage, DeliverableType, Requirement
 from core.models import ClockOverride
 from payments.models import Payment
+from storage.adapters.base import Bucket
+from storage.adapters.fake import FakeStorageAdapter
 from verification.models import Verification
 
 RUN_REFUNDS_URL = "/api/internal/scans/payment-refund-request"
@@ -192,6 +194,33 @@ def _close_via_tick(client, *, at) -> None:
         assert response.status_code == 200
 
 
+def _attach_image(client, access: str, contest_id: int) -> dict:
+    """DRAFT Contest에 이미지 한 장을 올려 등록한다 — `tests/test_contest_images.py`의
+    `_upload_and_register`와 같은 두 단계 흐름(presigned POST 발급 -> FakeStorageAdapter에
+    바이트를 미리 채운다 -> 등록)이다. 재개최가 그 이미지를 그대로 복제하는지는
+    별도로 확인한다(#236)."""
+
+    issued = client.post(
+        f"{CONTESTS_URL}/{contest_id}/images/upload-url",
+        data={"content_type": "image/png"},
+        content_type="application/json",
+        **_auth_header(access),
+    )
+    assert issued.status_code == 200, issued.content
+    object_key = issued.json()["object_key"]
+
+    FakeStorageAdapter().write_object(object_key, b"fake image bytes", bucket=Bucket.PUBLIC_IMAGES)
+
+    created = client.post(
+        f"{CONTESTS_URL}/{contest_id}/images",
+        data={"object_key": object_key},
+        content_type="application/json",
+        **_auth_header(access),
+    )
+    assert created.status_code == 200, created.content
+    return created.json()
+
+
 def _lapsed_contest(
     client,
     *,
@@ -204,9 +233,10 @@ def _lapsed_contest(
     description="원본 설명",
     prize=1_000_000,
     requirements=None,
+    image_count=0,
 ) -> tuple[dict, dict]:
     """참여자 0명으로 유찰(마감 + 전액 환불)된 Contest를 만들어 (sponsor, contest)로
-    돌려준다."""
+    돌려준다. `image_count`가 양수면 결제 전(DRAFT)에 그만큼 이미지를 올려 둔다."""
 
     sponsor = _verified_user(client, sponsor_uid, sponsor_ci)
     deadline = timezone.now() + timedelta(hours=1)
@@ -222,6 +252,9 @@ def _lapsed_contest(
         prize=prize,
         requirements=requirements,
     )
+    for _ in range(image_count):
+        _attach_image(client, sponsor["access"], contest["id"])
+
     _pay_and_publish(client, sponsor, contest["id"])
     _close_via_tick(client, at=deadline + timedelta(minutes=1))
 
@@ -334,6 +367,83 @@ def test_reopened_contest_copies_requirements_deliverable_types_category_and_tex
     )
     new_requirement_ids = {r["id"] for r in body["requirements"]}
     assert original_requirement_ids.isdisjoint(new_requirement_ids)
+
+
+# --- 참고 이미지 복제 (#236, ADR-0032 「지우지 않고 행만 뗀다」) -----------------
+
+
+@pytest.mark.django_db
+def test_reopened_contest_copies_images_in_order_pointing_at_the_same_object(
+    client, category, landing_type
+):
+    sponsor, original = _lapsed_contest(
+        client, category=category, deliverable_type=landing_type, image_count=2
+    )
+    new_deadline = timezone.now() + timedelta(days=14)
+
+    response = _reopen(client, sponsor["access"], original["id"], prize=1_500_000, deadline_at=new_deadline)
+    assert response.status_code == 200, response.content
+    body = response.json()
+
+    original_images = list(ContestImage.objects.filter(contest_id=original["id"]).order_by("order"))
+    new_images = body["images"]
+
+    assert len(new_images) == 2
+    # 순서까지 그대로 복제된다.
+    assert [img["order"] for img in new_images] == [0, 1]
+
+    # 새 행이 원본과 **같은 object_key**를 가리킨다 — 바이트를 옮기지 않는다
+    # (ADR-0005/0032). 새 ContestImage 행 자체는 pk가 다른 별개의 레코드다.
+    new_image_rows = list(ContestImage.objects.filter(contest_id=body["id"]).order_by("order"))
+    assert [row.object_key for row in new_image_rows] == [
+        row.object_key for row in original_images
+    ]
+    original_image_ids = {row.id for row in original_images}
+    new_image_ids = {row.id for row in new_image_rows}
+    assert original_image_ids.isdisjoint(new_image_ids)
+
+
+@pytest.mark.django_db
+def test_removing_an_image_from_the_original_does_not_break_the_reopened_copy(
+    client, category, landing_type
+):
+    """#234가 이미 정한 「빼는 것은 행만 뗀다」가 재개최에서도 지켜지는지 —
+    원본에서 이미지를 뺀다고 사본이 가리키는 오브젝트가 사라지면 안 된다. 원본은
+    재개최 이후에도 owner GET으로 자기 이미지를 계속 고칠 수 없지만(CLOSED,
+    편집 게이트는 DRAFT만 허용), 이 테스트가 확인하는 것은 행 자체의 생존이다 —
+    ORM으로 직접 지워 「원본 Contest에서 이 오브젝트를 참조하는 행이 없어져도
+    사본의 행은 살아 있다」는 사실 자체를 고정한다.
+    """
+
+    sponsor, original = _lapsed_contest(
+        client, category=category, deliverable_type=landing_type, image_count=1
+    )
+    new_deadline = timezone.now() + timedelta(days=14)
+
+    response = _reopen(client, sponsor["access"], original["id"], prize=1_000_000, deadline_at=new_deadline)
+    assert response.status_code == 200, response.content
+    new_contest_id = response.json()["id"]
+
+    shared_object_key = ContestImage.objects.get(contest_id=original["id"]).object_key
+
+    # 원본의 행을 지운다(행만 떼는 것 — #234가 이미 지키는 규칙, 여기서는 그
+    # 규칙이 오브젝트를 실제로 지우지 않는다는 전제를 ORM으로 직접 확인한다).
+    ContestImage.objects.filter(contest_id=original["id"]).delete()
+
+    # 사본은 그대로 살아 있다 — 같은 object_key를 가리키는 자신의 행이 원본의
+    # 행과 별개였기 때문이다.
+    detail = client.get(f"{CONTESTS_URL}/{new_contest_id}", **_auth_header(sponsor["access"]))
+    assert detail.status_code == 200
+    reopened_images = detail.json()["images"]
+    assert len(reopened_images) == 1
+    assert ContestImage.objects.get(contest_id=new_contest_id).object_key == shared_object_key
+
+    # 오브젝트 자신도 FakeStorageAdapter에 여전히 존재한다 — 삭제 메서드가 없어
+    # 어느 쪽에서도 바이트를 지울 수 없었다는 뜻이다(ADR-0005/0032).
+    assert (
+        FakeStorageAdapter().read_object(shared_object_key, bucket=Bucket.PUBLIC_IMAGES)
+        == b"fake image bytes"
+    )
 
 
 @pytest.mark.django_db
