@@ -33,7 +33,10 @@
 ([ADR-0014](../adr/0014-source-at-submission-time-scored-by-ai-hidden-from-sponsor.md)):
 
 - 제출 시점에 전체 소스를 받는다 — AI 채점의 근거로 쓰기 위해서다. 필수다(플랫폼의
-  「강제하지 않는다」 원칙의 유일한 예외).
+  「강제하지 않는다」 원칙의 유일한 예외). **다만 「소스 zip」이 아니라 「소스 또는
+  도달 가능한 공개 저장소」다**(ADR-0030) — 저장소만 낸 제출은 마감 후 채점 시점에
+  그 저장소가 닫혀 있으면 필수 요건 전부 미달로 채점되고, 열려 있으면 플랫폼이 그
+  코드를 받아 보관한다. 우승 시 Sponsor 에게 넘어가는 것이 그 보관본이다.
 - **Sponsor 는 Award 전까지 소스에 접근할 수 없다.** 선정하지 않고 코드만 챙겨가는
   먹튀를 막는다. private 버킷 + DB 상태 판정으로 강제한다
   ([ADR-0005](../adr/0005-private-bucket-with-presigned-urls.md)).
@@ -70,7 +73,8 @@ Score 는 불변 스냅샷이라 「그때 무엇을 근거로 판정했는가�
 | 1 | Laurio 는 통신판매중개자이며 거래 당사자가 아니다 (책임 범위) | 전원 | 전자상거래법, [commerce-and-payments.md](commerce-and-payments.md) |
 | 2 | 만 19세 미만은 제출·개최할 수 없다 — Assignment 에서는 본인확인이 없어 자기신고에 의한다 | 전원 | ADR-0011, ADR-0029 |
 | 3 | 선정작의 저작권은 Sponsor 에게 이전되고, 탈락작은 Developer 가 보유하며 마감 후 마스킹 없이 공개된다 — **Sponsor 는 개최 시 이 조건에 동의한다** | Sponsor·Developer | REQUEST.md, 열린 항목 8 |
-| 4 | 소스는 제출 시 필수이고 Sponsor 는 Award 전까지 볼 수 없으며, 탈락작 소스는 공개되지 않는다 | Developer·Sponsor | ADR-0014 |
+| 4 | 소스 또는 공개 저장소 중 하나는 제출 시 필수이고, Sponsor 는 Award 전까지 볼 수 없으며, 탈락작 소스는 공개되지 않는다 | Developer·Sponsor | ADR-0014, ADR-0030 |
+| 4-1 | **저장소만 낸 경우 마감·채점 시점까지 공개로 두어야 한다** — 그때 비공개이거나 삭제돼 있으면 필수 요건 전부 미달(0점)로 채점되고, 그 판정은 되돌릴 수 없다. 열려 있으면 플랫폼이 채점 시점의 코드를 보관해 우승 시 Sponsor 에게 넘긴다 | Developer | ADR-0030 |
 | 5 | Operator 는 이의 심판 과정에서 소스를 볼 수 있고 그 열람은 기록되며 Developer 가 확인할 수 있다. LLM 판정 근거에 딸려 나오는 조각은 기록 밖이다 | Developer | ADR-0022 |
 | 6 | **제출 소스와 자가 응답은 AI 채점을 위해 외부 LLM(OpenAI, 국외)으로 전송된다** | Developer | [personal-data.md](personal-data.md) 열린 항목 7 |
 | 7 | 참가자가 한 명이라도 있으면 상금은 Sponsor 에게 돌아가지 않으며, 기한 내 Award 가 없으면 컷라인 통과자에게 1/N 배분된다 | Sponsor | CONTEXT.md 「Escrow」·「Distribution」, 열린 항목 3 |
@@ -88,7 +92,7 @@ Score 는 불변 스냅샷이라 「그때 무엇을 근거로 판정했는가�
 
 ## 열린 항목
 
-1. **약관·고지 문서가 없다.** 위 표의 18개 조항이 갈 곳이 없고, 통신판매중개자
+1. **약관·고지 문서가 없다.** 위 표의 19개 조항이 갈 곳이 없고, 통신판매중개자
    표시 화면도 없다. 개인정보처리방침 부재와 같은 항목이다.
 8. **Sponsor 의 동의를 코드가 기록하지 않는다.** REQUEST.md 는 「발주자는 의뢰 등록
    시 이 조건에 동의해야 한다」고 했지만 Contest 개최 경로(`backend/contests/`)에
