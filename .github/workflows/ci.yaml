@@ -169,6 +169,11 @@ jobs:
       STORAGE_ACCESS_KEY: ci-deploy-check-only-access-key
       STORAGE_SECRET_KEY: ci-deploy-check-only-secret-key
       STORAGE_REGION: us-east-1
+      # 공개 이미지 버킷의 기준 주소(#233, ADR-0032) — 배포 환경에서 비면
+      # config/settings.py 의 부팅 가드가 거부한다. 위 STORAGE_* 자격증명과 같은
+      # 이유로 여기 있다: 이 잡이 검증하는 "배포 하드닝이 통과하는가"에 포함된다.
+      # 실제로 이 주소를 치지는 않는다(backend 만 도는 잡이다).
+      STORAGE_IMAGES_BASE_URL: https://cdn.ci-deploy-check-only.invalid/laurio-prod-public-images
       SOCIAL_AUTH_MODE: real
       # 카카오 OAuth 앱 자격증명(#95/#96) — authorize・code→token 교환은
       # frontend BFF가 지므로 이 잡(backend만 돈다)은 실제로 쓰지 않지만,

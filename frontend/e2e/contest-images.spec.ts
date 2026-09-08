@@ -39,7 +39,13 @@ async function findIdByName(
 test("개최자가 올린 이미지가 공개 상세에 서버 렌더링되고, 로그아웃 상태에서도 실제로 로드된다", async ({
   page,
   request,
+  baseURL,
 }) => {
+  // **변경 요청에는 Origin 을 손으로 붙인다.** Playwright 의 raw `request` 는
+  // 브라우저와 달리 Origin 을 자동으로 싣지 않고, BFF 프록시는 그것을 「브라우저가
+  // 보낸 게 아닌 요청」으로 보고 403 으로 막는다(ADR-0016) — `auth.spec.ts` 가 그
+  // fail-closed 동작을 일부러 단언한다. GET 은 검사 대상이 아니라 그대로 둔다.
+  const sameOrigin = { origin: baseURL! };
   const runId = `${Date.now()}`;
   await establishDeveloperSession(page, `img-${runId}`);
   await establishVerification(page, `img-${runId}`);
@@ -53,6 +59,7 @@ test("개최자가 올린 이미지가 공개 상세에 서버 렌더링되고, 
 
   // draft 개최.
   const created = await request.post("/api/backend/contests", {
+    headers: sameOrigin,
     data: {
       title: `[E2E] 이미지 공개 검증 ${runId}`,
       category_id: categoryId,
@@ -67,6 +74,7 @@ test("개최자가 올린 이미지가 공개 상세에 서버 렌더링되고, 
 
   // presigned POST 발급.
   const issued = await request.post(`/api/backend/contests/${contestId}/images/upload-url`, {
+    headers: sameOrigin,
     data: { content_type: "image/png" },
   });
   expect(issued.ok(), await issued.text()).toBeTruthy();
@@ -89,6 +97,7 @@ test("개최자가 올린 이미지가 공개 상세에 서버 렌더링되고, 
 
   // 업로드 완료를 Contest에 등록.
   const registered = await request.post(`/api/backend/contests/${contestId}/images`, {
+    headers: sameOrigin,
     data: { object_key: uploadUrl.object_key },
   });
   expect(registered.ok(), await registered.text()).toBeTruthy();
@@ -97,11 +106,13 @@ test("개최자가 올린 이미지가 공개 상세에 서버 렌더링되고, 
   // 결제를 완료해 공개한다(Fake PG, #86) — 이미지도 "결제가 닫는 조건"의
   // 일부이므로 공개 뒤에도 그대로 보여야 한다는 것까지 함께 확인한다.
   const payment = await request.post("/api/backend/payments", {
+    headers: sameOrigin,
     data: { contest_id: contestId },
   });
   expect(payment.ok(), await payment.text()).toBeTruthy();
   const orderId = (await payment.json()).order_id as string;
   const confirmed = await request.post(`/api/backend/payments/${orderId}/confirm`, {
+    headers: sameOrigin,
     data: { payment_key: `e2e-fake-${runId}` },
   });
   expect(confirmed.ok(), await confirmed.text()).toBeTruthy();
