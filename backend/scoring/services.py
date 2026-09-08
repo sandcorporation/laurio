@@ -774,13 +774,22 @@ def score_submission_once(submission: Submission, as_of) -> dict:
                 "error": message,
             }
 
-    # 실제로 쓰인 저장소 자산에만 스냅샷을 남긴다(#193) — "채점이 실패한 회차의
-    # clone 결과는 남지 않는다"는 ADR-0027의 결정이라, Score 생성과 같은
-    # 트랜잭션 안에서만 만든다(`_finalize_score`).
+    # clone에 성공한 저장소 전부에 스냅샷을 남긴다(#224, ADR-0031 「clone 한
+    # 커밋은 전부 남긴다」) — 선별(`select_source_files`)이 그 저장소에서 파일을
+    # 하나도 고르지 못했어도(확장자 화이트리스트 등) 남는다. 예전에는
+    # `used_asset_ids`(실제로 프롬프트에 들어간 자산)로 걸러 "clone은 됐는데
+    # 스냅샷은 없는" 상태가 성립했다 — staging에서 `octocat/Hello-World`가 그
+    # 상태였고(확장자 없는 README만 있어 선별이 하나도 못 골랐다), 그 clone이
+    # 어느 커밋이었는지는 박제 자산의 한국어 라벨 문자열 안에만 남았다.
+    # "채점이 실제로 무엇을 근거로 썼는가"는 계속 `Score.scored_assets`(위
+    # `used_asset_ids`로 만든다)가 답한다 — 여기서 구분 플래그를 더하지 않는다:
+    # 같은 사실을 두 곳에 적으면 불변인 Score와 불변이 아닌 스냅샷이 어긋났을 때
+    # 어느 쪽이 참인지 정할 근거가 없어진다. "채점이 실패한 회차의 clone
+    # 결과는 남지 않는다"는 ADR-0027의 결정은 그대로다 — clone 자체가 실패한
+    # 자산은 애초에 `cloned_repositories`에 들어오지 않으므로 스냅샷도 생기지
+    # 않는다(Score 생성과 같은 트랜잭션 안에서만 만든다, `_finalize_score`).
     repository_snapshots = [
-        (asset, commit_sha_by_asset_id[asset.id])
-        for asset, _cloned in cloned_repositories
-        if asset.id in used_asset_ids
+        (asset, commit_sha_by_asset_id[asset.id]) for asset, _cloned in cloned_repositories
     ]
     return _finalize_score(
         submission,
