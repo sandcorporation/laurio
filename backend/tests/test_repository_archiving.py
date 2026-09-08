@@ -142,9 +142,14 @@ def test_repository_only_submission_is_archived_as_source_at_scoring_time(
 
     # 추가 GitHub 호출 없이, 채점이 이미 손에 쥔 zip 그대로다 — 저장된 바이트
     # 안에 저장소 clone 마커가 그대로 있다.
-    stored = FakeStorageAdapter().read_object(archived.value)
+    fake_adapter = FakeStorageAdapter()
+    stored = fake_adapter.read_object(archived.value)
     assert stored is not None
     assert repo_marker.encode("utf-8") in stored
+
+    # 박제본도 자기 형식을 밝힌다(#238) — Handover가 여는 다운로드가 형식을 모른
+    # 채 내려주지 않는다.
+    assert fake_adapter.written_content_type(archived.value) == "application/zip"
 
     # 참가자에게도 이 자료가 보이고, 출처가 플랫폼임이 드러난다.
     detail = client.get(

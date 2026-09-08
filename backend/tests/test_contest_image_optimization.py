@@ -192,6 +192,11 @@ def test_scan_creates_both_derivatives_after_one_run(client, category, landing_t
     assert image_out["url"].endswith(f"/{image.detail_key}")
     assert image_out["thumbnail_url"] != image_out["url"]
 
+    # 파생본은 자기 형식을 밝힌다 — 이걸 빠뜨리면 CDN 이 "모르는 바이트"로 보고
+    # 압축·캐시 최적화를 걸지 않는다(#238, staging 실측: 예전엔 binary/octet-stream).
+    assert adapter.written_content_type(image.thumbnail_key, bucket=Bucket.PUBLIC_IMAGES) == "image/webp"
+    assert adapter.written_content_type(image.detail_key, bucket=Bucket.PUBLIC_IMAGES) == "image/webp"
+
     # 원본은 지워지지 않는다.
     assert adapter.read_object(image.object_key, bucket=Bucket.PUBLIC_IMAGES) is not None
 

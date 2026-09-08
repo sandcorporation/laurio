@@ -7,6 +7,11 @@ CI와 로컬 테스트는 MinIO 없이 돈다(ADR-0007). 이 어댑터는 네트
 **#233부터 버킷이 둘이다(ADR-0032).** `bucket`을 생략하는 모든 기존 호출부는
 지금까지와 같은 `base_url`(private 버킷)을 받는다 — `Bucket.PUBLIC_IMAGES`를
 넘긴 호출만 `images_base_url`로 갈린다.
+
+**#238부터 `write_object`가 실은 content-type도 기록한다.** 실물 S3 어댑터는 그 값을
+`put_object`의 `ContentType`으로 스토리지에 실어 보내 눈으로 확인할 수 없지만, 이
+더블은 값을 그대로 들고 있다가 `written_content_type`으로 돌려준다 — 테스트가
+"실제로 무엇이 실렸는지"를 관찰하는 유일한 창구다(#238 AC).
 """
 
 from __future__ import annotations
@@ -15,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 
 from django.conf import settings
 
-from .base import Bucket, PresignedDownload, PresignedUpload, StorageAdapterError
+from .base import DEFAULT_CONTENT_TYPE, Bucket, PresignedDownload, PresignedUpload, StorageAdapterError
 
 
 class FakeStorageAdapter:
@@ -33,6 +38,9 @@ class FakeStorageAdapter:
     # 키가 (bucket, object_key) 튜플인 이유는 두 버킷이 같은 object_key를 각자
     # 독립적으로 가질 수 있어서다.
     _store: dict[tuple[Bucket, str], bytes] = {}
+    # write_object가 받은(또는 기본값으로 채운) content-type — 테스트가 실제로
+    # 무엇이 실렸는지 관찰하는 자리다(#238). _store와 키가 같다.
+    _content_types: dict[tuple[Bucket, str], str] = {}
 
     def _base_url(self, bucket: Bucket) -> str:
         return self.images_base_url if bucket is Bucket.PUBLIC_IMAGES else self.base_url
@@ -104,7 +112,12 @@ class FakeStorageAdapter:
         return self._store.get((bucket, object_key))
 
     def write_object(
-        self, object_key: str, content: bytes, *, bucket: Bucket = Bucket.PRIVATE
+        self,
+        object_key: str,
+        content: bytes,
+        *,
+        bucket: Bucket = Bucket.PRIVATE,
+        content_type: str | None = None,
     ) -> None:
         """실제 업로드(presigned PUT/POST)를 흉내내 미리 바이트를 채운다.
 
@@ -117,6 +130,9 @@ class FakeStorageAdapter:
         target_ref(=`<target_ref>/<hex>`의 앞부분)가 있으면 `StorageAdapterError`를
         던진다 — 박제 저장 실패(#220)를 테스트가 재현하는 유일한 방법이다
         (`LLM_FAKE_RAISING_SUBMISSION_IDS`와 같은 원칙).
+
+        `content_type`을 생략하면(#238) `DEFAULT_CONTENT_TYPE`을 기록한다 — S3
+        어댑터가 같은 상황에서 하는 일과 같다.
         """
         raising_target_refs = getattr(settings, "STORAGE_FAKE_WRITE_RAISING_TARGET_REFS", ())
         if any(object_key.startswith(f"{ref}/") for ref in raising_target_refs):
@@ -125,3 +141,11 @@ class FakeStorageAdapter:
                 f"object_key={object_key!r})."
             )
         self._store[(bucket, object_key)] = content
+        self._content_types[(bucket, object_key)] = content_type or DEFAULT_CONTENT_TYPE
+
+    def written_content_type(self, object_key: str, *, bucket: Bucket = Bucket.PRIVATE) -> str | None:
+        """`write_object`가 이 object_key에 실제로 기록한 content-type 을 돌려준다
+        (#238) — 테스트가 "무엇이 실렸는지"를 관찰하는 유일한 창구다. 아직 쓰이지
+        않았으면 None이다."""
+
+        return self._content_types.get((bucket, object_key))
