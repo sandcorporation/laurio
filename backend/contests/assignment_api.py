@@ -150,10 +150,10 @@ def _active_invite_code(contest: Contest) -> str | None:
 def _get_owned_assignment(request: HttpRequest, assignment_id: int) -> Contest:
     """소유자만 통과하는 게이트 — 상태는 안 본다(읽기·상태 전이 공통으로 쓴다).
 
-    `contests.assignment_category`가 배정한 Category로만 Assignment를 가려낸다 — DRAFT는
+    `kind=Contest.Kind.ASSIGNMENT`로만 Assignment를 가려낸다(#213) — DRAFT는
     공모전과 Assignment가 공유하므로(ADR-0028) status만으로는 구별할 수 없다. 이 필터가
     없으면 공모전 DRAFT의 id를 안 타인이 이 라우터로 접근해 "존재는 하는데 과제가
-    아니다"를 확인해버릴 수 있다 — 그래서 카테고리 불일치도 404로 감춘다(공모전
+    아니다"를 확인해버릴 수 있다 — 그래서 종류 불일치도 404로 감춘다(공모전
     `get_contest`가 타인의 draft를 감추는 것과 같은 원칙).
     """
 
@@ -161,7 +161,7 @@ def _get_owned_assignment(request: HttpRequest, assignment_id: int) -> Contest:
         contest = (
             Contest.objects.select_related("sponsor", "category")
             .prefetch_related("deliverable_types", "requirements")
-            .get(id=assignment_id, category=get_assignment_category())
+            .get(id=assignment_id, kind=Contest.Kind.ASSIGNMENT)
         )
     except Contest.DoesNotExist as exc:
         raise HttpError(404, "과제를 찾을 수 없습니다.") from exc
@@ -253,6 +253,7 @@ def create_assignment(request: HttpRequest, payload: AssignmentCreateIn):
             sponsor=sponsor_profile,
             title=sanitize_free_text(payload.title),
             category=get_assignment_category(),
+            kind=Contest.Kind.ASSIGNMENT,
             description=sanitize_free_text(payload.description),
             prize=0,
             deadline_at=payload.deadline_at,
@@ -298,7 +299,7 @@ def list_my_assignments(request: HttpRequest):
     # 이 자리에서 `deliverable_types`·`requirements`·`invite_codes`를 함께
     # `prefetch_related`해도(별도 쿼리라 JOIN 팬아웃이 없다) `distinct` 없이 정확하다.
     contests = (
-        Contest.objects.filter(sponsor=profile, category=get_assignment_category())
+        Contest.objects.filter(sponsor=profile, kind=Contest.Kind.ASSIGNMENT)
         .select_related("sponsor", "category")
         .prefetch_related("deliverable_types", "requirements", "invite_codes")
         .annotate(submission_count=Count("submissions"))

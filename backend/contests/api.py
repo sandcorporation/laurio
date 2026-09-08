@@ -24,7 +24,6 @@ from ninja.errors import HttpError
 from ninja.pagination import PageNumberPagination, paginate
 
 from accounts.middleware import jwt_auth
-from contests.assignment_category import get_assignment_category
 from contests.curation import HomeCurationBucket, home_bucket_for, home_bucket_queryset
 from contests.sponsorship import sponsored_contest_queryset
 from accounts.models import SponsorProfile
@@ -233,6 +232,7 @@ def create_contest(request: HttpRequest, payload: ContestCreateIn):
             sponsor=sponsor_profile,
             title=sanitize_free_text(payload.title),
             category=category,
+            kind=Contest.Kind.CONTEST,
             description=sanitize_free_text(payload.description),
             prize=payload.prize,
             deadline_at=payload.deadline_at,
@@ -373,7 +373,7 @@ def list_my_sponsored_contests(request: HttpRequest, after: str | None = None):
             # 판정에 쓴다. Assignment는 그 무엇도 해당하지 않으므로 섞이면 상금 0원짜리
             # 행이 엉뚱한(때로는 틀린) 「다음 행동」 문구와 함께 나타난다. 자기 과제는
             # `GET /api/assignments/mine`(contests.assignment_api)이 따로 보여준다.
-            Contest.objects.filter(sponsor=profile).exclude(category=get_assignment_category()),
+            Contest.objects.filter(sponsor=profile).exclude(kind=Contest.Kind.ASSIGNMENT),
             as_of=as_of,
             policy=policy,
         )
@@ -712,6 +712,10 @@ def reopen_contest(request: HttpRequest, contest_id: int, payload: ContestReopen
             sponsor=original.sponsor,
             title=original.title,
             category=original.category,
+            # `original`은 항상 공모전이다 — REOPENABLE은 REFUNDED Payment를
+            # 요구하고(Assignment에는 결제 자체가 없다), 그래서 여기 도달하는
+            # `original.kind`는 항상 CONTEST다. 그래도 손으로 못 박아 둔다(#213).
+            kind=Contest.Kind.CONTEST,
             description=original.description,
             prize=payload.prize,
             deadline_at=payload.deadline_at,

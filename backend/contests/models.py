@@ -115,10 +115,8 @@ class ContestQuerySet(models.QuerySet):
     def appeal_window_open(self, now):
         # Assignment 는 항상 제외한다 — 파이썬 짝(`Contest.appeal_window_open`)과 같은 이유.
         # 인스턴스 짝은 `Contest.is_assignment` 를 쓰지만 프로퍼티는 쿼리셋에 실을 수 없어,
-        # 저장소가 이미 쓰는 카테고리 제외 관용구를 따른다(`contests.api` 의 개최 목록과 같다).
-        from .assignment_category import get_assignment_category
-
-        return self.exclude(category=get_assignment_category()).filter(
+        # `kind` 필드를 직접 거른다(#213 — 예전에는 예약된 Assignment Category 행과 비교했다).
+        return self.exclude(kind=Contest.Kind.ASSIGNMENT).filter(
             Q(judging_ends_at__isnull=True) | Q(judging_ends_at__gt=now)
         )
 
@@ -129,6 +127,22 @@ class ContestQuerySet(models.QuerySet):
 
 
 class Contest(models.Model):
+    class Kind(models.TextChoices):
+        """생성 시점에 한 번 정해지고 다시는 바뀌지 않는 종류 (#213, ADR-0033).
+
+        예전에는 `category_id`가 예약된 Assignment `Category` 행과 같은지로 이
+        질문에 답했다(`is_assignment`, ADR-0028) — `DRAFT`를 공모전과 Assignment가
+        공유해 status로는 구별할 수 없었기 때문이다. 그 카테고리 비교는 "새
+        호출부는 반드시 `is_assignment`를 통해서만 판정해야 한다"는 규율에
+        기대고 있었고, 그 규율이 세 번(#207/#208 코드리뷰) 깨졌다. 이 필드는
+        생성 시점에 한 번 찍히고 API가 이후 절대 고치지 않으므로, `DRAFT`
+        상태에서도 종류가 항상 명확하고 어느 호출부도 캐시된 기준행을 조회할
+        필요가 없다.
+        """
+
+        CONTEST = "contest", "공모전"
+        ASSIGNMENT = "assignment", "과제"
+
     class Status(models.TextChoices):
         DRAFT = "draft", "초안"
         # PUBLISHED 는 #9(결제/Escrow)가 결제 확인 후 이 상태로 전이시킨다.
@@ -181,6 +195,12 @@ class Contest(models.Model):
     deadline_at = models.DateTimeField()
     # max_length=20 — "assignment_closed"(#207)가 17자라 예전 16에 걸린다.
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
+    # 생성 시점에 정해지고 API가 이후 절대 고치지 않는다(#213, ADR-0033) — `is_assignment`가
+    # 이 필드 하나로 답한다. `editable=False`는 admin이 없는(ADR-0019) 이 저장소에서
+    # 장식이지만, "이 값을 바꿀 화면은 없다"는 의도를 코드에도 남겨 둔다.
+    kind = models.CharField(
+        max_length=10, choices=Kind.choices, default=Kind.CONTEST, editable=False
+    )
 
     # 심사기간 종료 시각 (#13, ADR-0003). CLOSED 전이가 일어나는 조건부 UPDATE 안에서
     # deadline_at + PlatformPolicy.judging_period_days(#78/ADR-0023)로 함께
@@ -292,16 +312,17 @@ class Contest(models.Model):
 
     @property
     def is_assignment(self) -> bool:
-        """이 Contest 가 Assignment(ADR-0028, #207)인가 — **`category_id`가 예약된
-        Assignment 카테고리와 같은지**로 판정한다.
+        """이 Contest 가 Assignment(ADR-0028, #207)인가 — **`kind` 필드 하나**로 답한다
+        (#213, ADR-0033).
 
         `status` 로는 판정할 수 없다 — `DRAFT` 는 공모전과 Assignment 가 공유하므로
         (ADR-0028), 아직 열리지 않은 Assignment 는 어느 `Contest.Status.*`
-        Classification 으로도 구별되지 않는다. `category_id` 는 생성 시점에 한 번
-        정해지고 이후 절대 바뀌지 않는(공모전 쪽은 활성 Category 로만 바꿀 수 있고
-        `contests.assignment_category` 가 그 자동배정 Category 를 예약해 두므로
-        공모전이 우연히든 의도적으로든 이 값을 가리킬 수 없다) **유일하게 신뢰할
-        수 있는 신호**다.
+        Classification 으로도 구별되지 않는다. `kind` 는 생성 시점에 한 번 정해지고
+        API 가 이후 절대 고치지 않으므로, `DRAFT` 상태에서도 이 프로퍼티는 항상
+        정확하고 조회도 필요 없다 — 예전에는 `category_id` 를 예약된 Assignment
+        `Category` 행과 비교했고, 그 조회가 프로세스당 한 번만 일어나도록
+        `lru_cache` 를 붙여야 했다(그 캐시의 안전 조건이 "이 행을 바꿀 화면이
+        없다"였다 — #231 이 정확히 그 화면을 만들므로 이 필드가 먼저 있어야 했다).
 
         **새 호출부는 이 프로퍼티를 통해서만 판정한다.** #207/#208 코드리뷰에서
         `category_id`를 손으로 비교하는 자리가 흩어져 있었고, 그중 하나
@@ -315,9 +336,7 @@ class Contest(models.Model):
         틀리지 않으면 되는 구조로 만든다.
         """
 
-        from .assignment_category import get_assignment_category
-
-        return self.category_id == get_assignment_category().id
+        return self.kind == self.Kind.ASSIGNMENT
 
 
 class HomeStatusAxis(models.TextChoices):
