@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { establishDeveloperSession, establishVerification } from "./lib/session";
+import { establishDeveloperSession, establishVerification, publicOrigin } from "./lib/session";
 
 // ContestImage — 공개 버킷과 CDN (#234, ADR-0032).
 //
@@ -39,26 +39,36 @@ async function findIdByName(
 test("개최자가 올린 이미지가 공개 상세에 서버 렌더링되고, 로그아웃 상태에서도 실제로 로드된다", async ({
   page,
   request,
-  baseURL,
 }) => {
-  // **변경 요청에는 Origin 을 손으로 붙인다.** Playwright 의 raw `request` 는
-  // 브라우저와 달리 Origin 을 자동으로 싣지 않고, BFF 프록시는 그것을 「브라우저가
-  // 보낸 게 아닌 요청」으로 보고 403 으로 막는다(ADR-0016) — `auth.spec.ts` 가 그
-  // fail-closed 동작을 일부러 단언한다. GET 은 검사 대상이 아니라 그대로 둔다.
-  const sameOrigin = { origin: baseURL! };
+  // **인증 구역 호출은 `page.context().request` 로 한다** — 독립 `request` 픽스처가
+  // 아니라. 그 픽스처는 브라우저 컨텍스트와 별개라 (1) 로그인 쿠키를 공유하지 않아
+  // 401 이 나고, (2) Origin 을 자동으로 싣지 않아 BFF 프록시가 「브라우저가 보낸 게
+  // 아닌 요청」으로 보고 403 으로 막는다(ADR-0016 — `auth.spec.ts` 가 그 fail-closed
+  // 동작을 일부러 단언한다). 브라우저 컨텍스트의 request 는 둘 다 공짜로 해결한다 —
+  // `e2e/lib/session.ts` 가 이미 그렇게 한다.
+  //
+  // 스토리지로 직행하는 presigned POST 만 독립 `request` 를 쓴다: 그건 프록시를
+  // 거치지 않고 MinIO 를 직접 치므로 우리 쿠키도 오리진도 실을 이유가 없다.
+  //
+  // **Origin 은 그래도 손으로 붙인다.** 컨텍스트에 묶인 request 도 브라우저의 fetch 가
+  // 아니라 API 클라이언트라 Origin 을 자동으로 싣지 않는다 — 쿠키만 공유한다.
+  // `publicOrigin()` 을 쓰는 이유는 그 함수 위 주석에 있다(끝의 슬래시 하나로 전부
+  // 403 이 된다).
+  const api = page.context().request;
+  const sameOrigin = { origin: publicOrigin() };
   const runId = `${Date.now()}`;
   await establishDeveloperSession(page, `img-${runId}`);
   await establishVerification(page, `img-${runId}`);
 
-  const categoryId = await findIdByName(request, "/api/backend/contests/categories", "게임");
+  const categoryId = await findIdByName(api, "/api/backend/contests/categories", "게임");
   const deliverableTypeId = await findIdByName(
-    request,
+    api,
     "/api/backend/contests/deliverable-types",
     "웹 서비스",
   );
 
   // draft 개최.
-  const created = await request.post("/api/backend/contests", {
+  const created = await api.post("/api/backend/contests", {
     headers: sameOrigin,
     data: {
       title: `[E2E] 이미지 공개 검증 ${runId}`,
@@ -73,7 +83,7 @@ test("개최자가 올린 이미지가 공개 상세에 서버 렌더링되고, 
   const contestId = (await created.json()).id as number;
 
   // presigned POST 발급.
-  const issued = await request.post(`/api/backend/contests/${contestId}/images/upload-url`, {
+  const issued = await api.post(`/api/backend/contests/${contestId}/images/upload-url`, {
     headers: sameOrigin,
     data: { content_type: "image/png" },
   });
@@ -96,7 +106,7 @@ test("개최자가 올린 이미지가 공개 상세에 서버 렌더링되고, 
   expect(uploaded.ok(), `스토리지 업로드 실패: ${uploaded.status()} ${await uploaded.text()}`).toBeTruthy();
 
   // 업로드 완료를 Contest에 등록.
-  const registered = await request.post(`/api/backend/contests/${contestId}/images`, {
+  const registered = await api.post(`/api/backend/contests/${contestId}/images`, {
     headers: sameOrigin,
     data: { object_key: uploadUrl.object_key },
   });
@@ -105,13 +115,13 @@ test("개최자가 올린 이미지가 공개 상세에 서버 렌더링되고, 
 
   // 결제를 완료해 공개한다(Fake PG, #86) — 이미지도 "결제가 닫는 조건"의
   // 일부이므로 공개 뒤에도 그대로 보여야 한다는 것까지 함께 확인한다.
-  const payment = await request.post("/api/backend/payments", {
+  const payment = await api.post("/api/backend/payments", {
     headers: sameOrigin,
     data: { contest_id: contestId },
   });
   expect(payment.ok(), await payment.text()).toBeTruthy();
   const orderId = (await payment.json()).order_id as string;
-  const confirmed = await request.post(`/api/backend/payments/${orderId}/confirm`, {
+  const confirmed = await api.post(`/api/backend/payments/${orderId}/confirm`, {
     headers: sameOrigin,
     data: { payment_key: `e2e-fake-${runId}` },
   });

@@ -27,7 +27,7 @@ import type { Page } from "@playwright/test";
 // Host 헤더에서 만든 `http://127.0.0.1:53100` 과 env 의 `http://127.0.0.1:53100/` 는 다르고,
 // 그러면 세션을 세우는 모든 호출이 403 이 된다. 체인 전용 포트를 env 로 주는 환경이
 // 정확히 이 경우다.
-function publicOrigin(): string {
+export function publicOrigin(): string {
   return new URL(process.env.LAURIO_E2E_BASE_URL ?? "http://127.0.0.1:53000").origin;
 }
 
