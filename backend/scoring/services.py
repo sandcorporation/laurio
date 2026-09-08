@@ -40,6 +40,7 @@ Score를 만들지 않았다"로 돌아온다. `submission-scoring` 스캔이 �
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -52,8 +53,9 @@ from core.prompt_safety import neutralize_untrusted as _neutralize_untrusted
 from core.scans import ScanSpec
 from repositories.adapters import ClonedRepository, get_github_adapter
 from repositories.models import RepositorySnapshot
-from storage.adapters import get_storage_adapter
+from storage.adapters import StorageAdapterError, get_storage_adapter
 from submissions.models import RequirementResponse, Submission, SubmissionAsset
+from submissions.target_refs import source_target_ref
 
 from .adapters import LLMAdapterPermanentError, RequirementInput, ScoringInput, get_adapter
 from .models import Score, ScoringAttempt
@@ -246,8 +248,9 @@ def _finalize_score(
     scored_assets_payload: list[dict],
     repository_snapshots: list[tuple[SubmissionAsset, str]] = (),
     repository_reachability_check: list[dict] = (),
+    archived_source_assets: list[dict] = (),
 ) -> dict:
-    """Score(+RepositorySnapshot)를 한 트랜잭션으로 만들고 통지한다.
+    """Score(+RepositorySnapshot(+박제 소스 자료))를 한 트랜잭션으로 만들고 통지한다.
 
     AI가 실제로 채점한 경우와 #218의 자동 미달(채점 입력 0건) 경우가 이 지점을
     공유한다 — "Score 하나가 정확히 한 번 만들어지고, 만들어지면 통지한다"는
@@ -257,6 +260,12 @@ def _finalize_score(
     `repository_reachability_check`(#219)는 채점 직전 저장소 도달 가능성을
     직접 재확인했을 때만 채워진다 — 소스만으로 충분했거나 저장소 자체가 없는
     채점은 재확인을 하지 않았으므로 빈 리스트 그대로다.
+
+    `archived_source_assets`(#220)는 저장소만 낸 제출이 실제로 clone에 성공했을
+    때만 채워진다 — 각 항목은 이미 스토리지에 쓰기까지 끝난(`_archive_cloned_repository`)
+    `SubmissionAsset.objects.create` 인자 dict다. 바이트를 스토리지에 쓰는 것은 이
+    트랜잭션 **밖에서** 먼저 끝내 둬야 한다(외부 I/O는 DB 트랜잭션으로 되돌릴 수
+    없다) — 여기서는 이미 성공한 쓰기를 가리키는 행만 만든다.
     """
 
     try:
@@ -273,6 +282,10 @@ def _finalize_score(
             RepositorySnapshot.objects.bulk_create(
                 RepositorySnapshot(asset=asset, commit_sha=commit_sha, cloned_at=Clock.now())
                 for asset, commit_sha in repository_snapshots
+            )
+            SubmissionAsset.objects.bulk_create(
+                SubmissionAsset(submission=submission, **fields)
+                for fields in archived_source_assets
             )
     except IntegrityError:
         # 동시에 다른 스캔이 먼저 이겼다 — unique(submission) 제약이 막아준다.
@@ -357,6 +370,37 @@ def _live_repository_reachability(
                 }
             )
     return effective, audit
+
+
+def _archive_cloned_repository(
+    submission: Submission, asset: SubmissionAsset, cloned: ClonedRepository
+) -> dict:
+    """clone된 저장소 zip을 그대로 소스 자료로 박제한다 (#220, ADR-0030).
+
+    소스 자료가 하나도 없는 제출에 한해 호출된다(`score_submission_once`) —
+    이미 채점이 손에 쥔 `cloned.zip_bytes`를 그대로 쓰므로 GitHub을 다시 치지
+    않는다. Award 후 Sponsor에게 열리는 것은 kind=`source` 자료다(ADR-0014) —
+    별도 모델을 만들지 않고 이 종류 그대로 쓰면 Handover·소스 열람 기록·
+    스토리지 인가가 전부 손대지 않고도 이 자료를 인식한다. object_key는
+    참가자가 실제로 올렸을 때와 같은 target_ref(`submissions.target_refs.
+    source_target_ref`) 아래에 만든다 — `SubmissionTargetStateResolver`가
+    "이 target_ref의 소유자"로 판정하는 것도 그대로 재사용하기 위해서다.
+
+    실패(스토리지 쓰기 오류)하면 예외를 그대로 던진다 — 호출자가 "Score를
+    만들지 않고 다음 스캔에서 재시도"로 다룬다.
+    """
+
+    target_ref = source_target_ref(submission.contest_id, submission.developer.user_id)
+    object_key = f"{target_ref}/{uuid.uuid4().hex}"
+    get_storage_adapter().write_object(object_key, cloned.zip_bytes)
+
+    origin_label = (asset.label or "").strip() or asset.value
+    return {
+        "kind": SubmissionAsset.Kind.SOURCE,
+        "value": object_key,
+        "label": f"{origin_label} 박제본 (commit {cloned.commit_sha[:12]})"[:200],
+        "created_by_platform": True,
+    }
 
 
 def score_submission_once(submission: Submission) -> dict:
@@ -595,6 +639,37 @@ def score_submission_once(submission: Submission) -> dict:
         status = "failed_permanently" if is_permanent else "failed"
         return {"submission_id": submission.id, "status": status, "error": message}
 
+    archived_source_assets: list[dict] = []
+    if not source_assets and cloned_repositories:
+        # #220(ADR-0030): 소스 자료가 하나도 없는 제출에 한해, 채점이 이미 손에
+        # 쥔 clone 전체(`cloned.zip_bytes`)를 그대로 소스 자료로 박제한다 —
+        # **발췌(`source_files`)가 아니다.** 발췌는 300KB 예산 안에서 선별된
+        # 채점 근거이지 Sponsor에게 넘길 인도물이 아니다(ADR-0027이 clone 보관을
+        # 기각했던 근거는 발췌와 인도물을 혼동한 것이었다 — ADR-0030이 그 판단을
+        # 뒤집는다). 소스를 올린 제출은 이미 Handover에 넘길 것이 있으므로
+        # 박제하지 않는다 — 탈락작까지 저장소당 수십 MB를 지고 가지 않는다.
+        try:
+            archived_source_assets = [
+                _archive_cloned_repository(submission, asset, cloned)
+                for asset, cloned in cloned_repositories
+            ]
+        except Exception as exc:  # noqa: BLE001 - 박제 실패는 이 Submission의 이번 시도만 막는다.
+            message = f"{type(exc).__name__}: {exc}"
+            logger.exception(
+                "Submission(pk=%s) 저장소 박제 실패, Score를 만들지 않고 다음 스캔에서 "
+                "재시도한다",
+                submission.id,
+            )
+            # LLM 호출 비용을 한 번 더 쓰는 것이, 인도물이 빈 채로 불변 Score가
+            # 확정되는 것보다 싸다(ADR-0030). permanent로 남기지 않는다 — 다음
+            # 스캔이 이 Submission을 처음부터(LLM 재호출 포함) 다시 시도한다.
+            ScoringAttempt.objects.create(submission=submission, error=message[:2000])
+            return {
+                "submission_id": submission.id,
+                "status": "archive_failed",
+                "error": message,
+            }
+
     # 실제로 쓰인 저장소 자산에만 스냅샷을 남긴다(#193) — "채점이 실패한 회차의
     # clone 결과는 남지 않는다"는 ADR-0027의 결정이라, Score 생성과 같은
     # 트랜잭션 안에서만 만든다(`_finalize_score`).
@@ -615,6 +690,7 @@ def score_submission_once(submission: Submission) -> dict:
         # 참가자가 "왜 방금 (되)살아났는지"를 볼 수 있어야 한다. 소스만으로
         # 이미 충분했던 채점은 재확인 자체를 하지 않았으므로 빈 리스트다.
         repository_reachability_check=repository_reachability_payload,
+        archived_source_assets=archived_source_assets,
     )
 
 

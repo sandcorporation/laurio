@@ -376,6 +376,14 @@ STORAGE_REGION = _env("STORAGE_REGION", "us-east-1")
 STORAGE_UPLOAD_URL_TTL_SECONDS = int(_env("STORAGE_UPLOAD_URL_TTL_SECONDS", "900"))
 STORAGE_DOWNLOAD_URL_TTL_SECONDS = int(_env("STORAGE_DOWNLOAD_URL_TTL_SECONDS", "300"))
 
+# 테스트가 override_settings로 특정 target_ref 아래의 write_object 실패를 흉내낼
+# 때 쓴다(#220, LLM_FAKE_RAISING_SUBMISSION_IDS와 같은 원칙) — 저장소만 낸
+# 제출의 채점 박제(scoring.services)가 저장 실패를 만나면 Score를 만들지 않고
+# 다음 스캔에서 재시도하는지를 이 훅으로만 재현할 수 있다.
+STORAGE_FAKE_WRITE_RAISING_TARGET_REFS = [
+    x for x in _env("STORAGE_FAKE_WRITE_RAISING_TARGET_REFS", "").split(",") if x
+]
+
 # target_ref -> 소유자·공개상태 판정 훅(storage.policy.TargetStateResolver).
 # #10이 Submission의 소스·데모 가시성 판정을 여기 꽂았다(ADR-0005, ADR-0014).
 # 비어 있으면 storage.policy.DenyUnknownTargetResolver 로 fail-closed 한다 — 테스트가

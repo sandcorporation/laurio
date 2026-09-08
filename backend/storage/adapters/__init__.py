@@ -10,7 +10,7 @@ from __future__ import annotations
 from django.conf import settings
 from django.utils.module_loading import import_string
 
-from .base import PresignedDownload, PresignedUpload, StorageAdapter
+from .base import PresignedDownload, PresignedUpload, StorageAdapter, StorageAdapterError
 
 _BACKENDS = {
     "fake": "storage.adapters.fake.FakeStorageAdapter",
@@ -21,6 +21,7 @@ __all__ = [
     "PresignedDownload",
     "PresignedUpload",
     "StorageAdapter",
+    "StorageAdapterError",
     "get_storage_adapter",
 ]
 

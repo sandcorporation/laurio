@@ -4571,6 +4571,11 @@ export interface components {
         };
         /** SubmissionAssetOut */
         SubmissionAssetOut: {
+            /**
+             * Created By Platform
+             * @default false
+             */
+            created_by_platform: boolean;
             /** Id */
             id: number;
             /** Is Public */

@@ -92,6 +92,10 @@ class SubmissionAssetOut(Schema):
     # `repository`가 공개인가 — null은 "비공개"가 아니라 "아직 확인하지 않음"이다
     # (#190/#193). 다른 종류에서는 항상 null이다.
     is_public: bool | None = None
+    # 이 자료를 참가자가 아니라 플랫폼이 만들었는가 (#220, ADR-0030) — 저장소만
+    # 낸 제출의 채점 박제가 남긴 소스 자료만 True다. 화면이 "이 자료는 지우거나
+    # 고칠 수 없다"를 보일 근거가 된다.
+    created_by_platform: bool = False
 
 
 class SubmissionIn(Schema):

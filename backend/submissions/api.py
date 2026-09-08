@@ -457,6 +457,14 @@ def _merge_assets(submission: Submission, cleaned: list[_CleanedAsset]) -> set[i
             asset = existing.get(row.id)
             if asset is None:
                 raise HttpError(422, "이 Submission에 속하지 않은 자료 id입니다.")
+            if asset.created_by_platform:
+                # #220(ADR-0030): 저장소만 낸 제출이 채점 시점에 남기는 박제
+                # 소스는 참가자가 지우거나 고칠 수 없다. 실제로는 그 자료가
+                # 생기는 시점(마감 후 채점)에 이미 이 API 전체가 마감을 이유로
+                # 거부하므로 여기 닿지 않는다 — 그래도 그 불변식이 나중에
+                # (예: 마감 후 부분 수정을 여는 기능이 생기면) 느슨해져도
+                # 조용히 깨지지 않게 한 번 더 막는다.
+                raise HttpError(422, "플랫폼이 만든 자료는 수정할 수 없습니다.")
             if (asset.kind, asset.value) == row.identity and asset.id not in kept:
                 kept[asset.id] = row
                 continue
@@ -469,7 +477,10 @@ def _merge_assets(submission: Submission, cleaned: list[_CleanedAsset]) -> set[i
             continue
         creates.append(row)
 
-    stale = [aid for aid in existing if aid not in kept]
+    # 같은 이유로, 페이로드에 없다는 것만으로 박제 자료를 지우지 않는다.
+    stale = [
+        aid for aid in existing if aid not in kept and not existing[aid].created_by_platform
+    ]
     if stale:
         SubmissionAsset.objects.filter(id__in=stale).delete()
 
@@ -739,6 +750,7 @@ def _serialize(
                 test_account=a.test_account if show_test_account else "",
                 order=a.order,
                 is_public=a.is_public,
+                created_by_platform=a.created_by_platform,
             )
             for a in visible_assets
         ],

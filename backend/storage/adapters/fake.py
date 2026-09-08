@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from .base import PresignedDownload, PresignedUpload
+from django.conf import settings
+
+from .base import PresignedDownload, PresignedUpload, StorageAdapterError
 
 
 class FakeStorageAdapter:
@@ -67,7 +69,19 @@ class FakeStorageAdapter:
         """실제 업로드(presigned PUT)를 흉내내 미리 바이트를 채운다.
 
         #194 부터 `StorageAdapter` 계약의 일부다 — 「테스트 전용」이 아니라 「e2e 시드
-        전용」이고, S3 어댑터에도 같은 메서드가 있다. 그 대칭이 있어야 시드가 어느
+        전용」이었고, #220부터는 저장소 박제(`scoring.services`)도 부른다. S3
+        어댑터에도 같은 메서드가 있다 — 그 대칭이 있어야 시드·박제 둘 다 어느
         환경에서 돌든 자기 완결적이다.
+
+        `settings.STORAGE_FAKE_WRITE_RAISING_TARGET_REFS`에 이 object_key가 속한
+        target_ref(=`<target_ref>/<hex>`의 앞부분)가 있으면 `StorageAdapterError`를
+        던진다 — 박제 저장 실패(#220)를 테스트가 재현하는 유일한 방법이다
+        (`LLM_FAKE_RAISING_SUBMISSION_IDS`와 같은 원칙).
         """
+        raising_target_refs = getattr(settings, "STORAGE_FAKE_WRITE_RAISING_TARGET_REFS", ())
+        if any(object_key.startswith(f"{ref}/") for ref in raising_target_refs):
+            raise StorageAdapterError(
+                f"fake storage adapter가 write_object에 실패했다(강제된 실패 시나리오, "
+                f"object_key={object_key!r})."
+            )
         self._store[object_key] = content

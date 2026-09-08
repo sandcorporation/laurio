@@ -127,6 +127,18 @@ class SubmissionAsset(models.Model):
     # 없어서 따로 둔다.
     is_public_checked_at = models.DateTimeField(null=True, blank=True)
 
+    # 이 자료를 누가 넣었는가 (#220, ADR-0030). 거의 모두 Developer가 넣지만
+    # 전부는 아니다 — 소스 없이 저장소만 낸 제출이 채점 시점에 그 저장소를
+    # clone한 zip을 그대로 kind=SOURCE 자료로 남긴다("박제"). Award 후 그
+    # 저장소가 닫혀도 Sponsor에게 넘길 것이 있게 하기 위해서다(ADR-0014의
+    # Handover가 열어줄 것이 없어지는 사고를 막는다). **참가자는 이 자료를
+    # 지우거나 고칠 수 없다** — 실제로는 제출 수정 자체가 마감 전에만 가능하고
+    # (`submissions.api`) 이 자료는 마감 후 채점 시점에만 생기므로, API 경로가
+    # 그 시점에 이미 모든 수정을 거부해 구조적으로 도달하지 못한다. 그래도
+    # `_merge_assets`가 한 번 더 방어한다 — 이 불변식이 나중에(예: 마감 후
+    # 수정을 여는 기능이 생기면) 느슨해져도 조용히 깨지지 않게 한다.
+    created_by_platform = models.BooleanField(default=False)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
