@@ -56,9 +56,12 @@ services:
       timeout: 3s
       retries: 20
 
-  # 스토리지 어댑터(ADR-0005, ADR-0007)의 dev 바인딩. S3 호환 API라 앱은 STORAGE_BACKEND=s3
-  # 그대로 두고 엔드포인트만 여기를 가리킨다. 버킷은 항상 private — 이 스택 어디에도
-  # 버킷을 public으로 만들거나 정책을 고치는 코드는 없다.
+  # 스토리지 어댑터(ADR-0005, ADR-0007, ADR-0032)의 dev 바인딩. S3 호환 API라 앱은
+  # STORAGE_BACKEND=s3 그대로 두고 엔드포인트만 여기를 가리킨다. 버킷은 이제 둘이다
+  # (#233) — laurio-dev(소스 등, private)와 laurio-dev-public-images(Contest 이미지,
+  # 익명 읽기). 아래 minio-init 이 익명 읽기를 거는 것은 laurio-dev-public-images
+  # **하나뿐**이다 — laurio-dev 를 public으로 만들거나 정책을 고치는 코드는 이 스택
+  # 어디에도 없다.
   minio:
     image: minio/minio:latest
     environment:
@@ -77,8 +80,14 @@ services:
       timeout: 3s
       retries: 20
 
-  # laurio-dev 버킷을 한 번 만들고 종료하는 초기화 잡. private 그대로 둔다 —
-  # `mc anonymous set` 같은 공개 전환 명령은 절대 여기 넣지 않는다(ADR-0005).
+  # 버킷 둘을 한 번 만들고 종료하는 초기화 잡(#233, ADR-0032).
+  #
+  # laurio-dev(소스 등)는 private 그대로 둔다 — `mc anonymous set` 같은 공개 전환
+  # 명령은 이 버킷에는 절대 넣지 않는다(ADR-0005).
+  #
+  # laurio-dev-public-images(Contest 이미지)만 `mc anonymous set download`로
+  # 익명 읽기를 건다 — 정책이 버킷 단위이므로 이미지 쪽 설정을 아무리 잘못 써도
+  # laurio-dev에는 닿지 못한다(ADR-0032 "가르는 것은 버킷이지 접두어가 아니다").
   minio-init:
     image: minio/mc:latest
     depends_on:
@@ -88,7 +97,9 @@ services:
       <<: *default-minio-env
     entrypoint: >
       sh -c "mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD &&
-             mc mb --ignore-existing local/laurio-dev"
+             mc mb --ignore-existing local/laurio-dev &&
+             mc mb --ignore-existing local/laurio-dev-public-images &&
+             mc anonymous set download local/laurio-dev-public-images"
     restart: "no"
 
   backend:

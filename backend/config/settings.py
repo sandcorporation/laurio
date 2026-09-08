@@ -372,6 +372,40 @@ STORAGE_ACCESS_KEY = _env("STORAGE_ACCESS_KEY", "")
 STORAGE_SECRET_KEY = _env("STORAGE_SECRET_KEY", "")
 STORAGE_REGION = _env("STORAGE_REGION", "us-east-1")
 
+# 공개 이미지 버킷 (#233, ADR-0032) — 이 저장소의 첫 공개 오브젝트가 사는 곳.
+# 이름에 "public"과 "images"가 둘 다 들어간다: 이 저장소가 지키는 불변식은
+# 「소스는 공개될 수 없다」이고, 그 방어의 마지막 한 겹은 스토리지 콘솔을 연
+# 사람이 버킷 이름만 보고 무엇을 넣으면 안 되는지 아는 것이다 — 종류만 말하면
+# world-readable이라는 사실이 감춰지고, 위험만 말하면 "공개해도 되는 건 다
+# 여기"로 읽힌다.
+#
+# 이름에 STORAGE_PUBLIC_ENDPOINT_URL 의 "PUBLIC" 을 그대로 재사용하지 않는다 —
+# 그 값은 "공개 버킷"이 아니라 "브라우저가 presigned 요청을 쏘는 주소"라는
+# 뜻으로 이미 쓰이고 있다(비공개 버킷용). 같은 낱말을 새 값에 쓰면 두 의미가
+# 한 접두어를 나눠 갖게 된다.
+STORAGE_IMAGES_BUCKET = _env("STORAGE_IMAGES_BUCKET", "laurio-dev-public-images")
+
+# 공개 이미지 버킷의 서명 없는 기준 주소. `storage.public.compose_public_image_url`
+# 이 `{이 값}/{object_key}` 로 조립해 API 응답에 싣는다 — presigned URL이 아니므로
+# 매 요청 같은 문자열이 나오고, CDN이 그대로 캐시한다(ADR-0032).
+#
+# DJANGO_SECRET_KEY·STORAGE_BACKEND·LAURIO_OPERATOR_ORIGIN 가드(위)와 같은 원칙 —
+# 배포 환경에서 비면 부팅을 거부한다. 컨테이너가 뜬 채 깨진 이미지 링크만 그리는
+# 것보다 정직하게 못 뜨는 편이 낫다.
+_storage_images_base_url_env = _env("STORAGE_IMAGES_BASE_URL", "")
+if IS_DEPLOYED_ENVIRONMENT and not _storage_images_base_url_env:
+    raise ImproperlyConfigured(
+        f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 인데 "
+        "STORAGE_IMAGES_BASE_URL 이 비어 있다. 배포 환경에서는 공개 이미지 버킷의 "
+        "CDN 기준 주소를 명시해야 한다 — 비면 컨테이너가 뜬 채 이미지 링크가 전부 깨진다."
+    )
+if _storage_images_base_url_env:
+    STORAGE_IMAGES_BASE_URL = _storage_images_base_url_env
+else:
+    # dev·테스트: 로컬 MinIO의 (브라우저가 여는) 공개 endpoint + 버킷 이름으로
+    # 스스로 조립한다 — 설정 없이도 뜬다.
+    STORAGE_IMAGES_BASE_URL = f"{STORAGE_PUBLIC_ENDPOINT_URL}/{STORAGE_IMAGES_BUCKET}"
+
 # 업로드는 수백 MB 파일을 올릴 시간을 준다. 다운로드는 짧게 끊어 재사용을 막는다.
 STORAGE_UPLOAD_URL_TTL_SECONDS = int(_env("STORAGE_UPLOAD_URL_TTL_SECONDS", "900"))
 STORAGE_DOWNLOAD_URL_TTL_SECONDS = int(_env("STORAGE_DOWNLOAD_URL_TTL_SECONDS", "300"))

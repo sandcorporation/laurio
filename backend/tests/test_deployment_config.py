@@ -83,6 +83,9 @@ def _base_env(*, target: str, secret_key: str) -> dict[str, str]:
         "STORAGE_ACCESS_KEY": "dummy",
         "STORAGE_SECRET_KEY": "dummy",
         "STORAGE_REGION": "us-east-1",
+        # 공개 이미지 버킷(#233, ADR-0032) — 비면 부팅이 거부된다(아래 전용 테스트).
+        "STORAGE_IMAGES_BUCKET": f"laurio-{target}-public-images",
+        "STORAGE_IMAGES_BASE_URL": f"https://images.{target}.laurio.example",
         "SOCIAL_AUTH_MODE": "real",
         # 카카오 OAuth 앱 자격증명(#95/#96) — authorize・code→token 교환은
         # 프론트엔드 BFF가 지므로 이 프로세스는 실제로 쓰지 않지만, 부팅 가드
@@ -641,6 +644,36 @@ def test_development_target_boots_without_an_operator_origin():
     env = _base_env(target="development", secret_key=_STRONG_SECRET_KEY)
     env["LAURIO_DEPLOYMENT_TARGET"] = "development"
     env["LAURIO_OPERATOR_ORIGIN"] = ""
+
+    result = _run_check(env)
+
+    assert result.returncode == 0, result.stderr
+
+
+# --- 공개 이미지 버킷 기준 주소: 비어 있으면 배포 환경에서 부팅을 거부한다 (#233, ADR-0032) --
+
+
+@pytest.mark.parametrize("target", ["staging", "production"])
+def test_deployed_environment_refuses_to_boot_without_a_storage_images_base_url(target):
+    """비면 컨테이너가 뜬 채 Contest 이미지 링크가 전부 깨진다 — LAURIO_OPERATOR_ORIGIN
+    과 같은 판단으로, 첫 요청에서야 드러나는 대신 정직하게 못 뜬다."""
+
+    env = (_production_env if target == "production" else _staging_env)()
+    env["STORAGE_IMAGES_BASE_URL"] = ""
+
+    result = _run_check(env)
+
+    assert result.returncode != 0
+    assert "STORAGE_IMAGES_BASE_URL" in result.stderr
+
+
+def test_development_target_boots_without_a_storage_images_base_url():
+    """dev·테스트는 STORAGE_PUBLIC_ENDPOINT_URL + STORAGE_IMAGES_BUCKET 으로
+    스스로 기준 주소를 조립한다 — 강제하지 않는다."""
+
+    env = _base_env(target="development", secret_key=_STRONG_SECRET_KEY)
+    env["LAURIO_DEPLOYMENT_TARGET"] = "development"
+    env["STORAGE_IMAGES_BASE_URL"] = ""
 
     result = _run_check(env)
 
