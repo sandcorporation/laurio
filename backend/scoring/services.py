@@ -245,6 +245,7 @@ def _finalize_score(
     reasoning_payload: list[dict],
     scored_assets_payload: list[dict],
     repository_snapshots: list[tuple[SubmissionAsset, str]] = (),
+    repository_reachability_check: list[dict] = (),
 ) -> dict:
     """Score(+RepositorySnapshot)를 한 트랜잭션으로 만들고 통지한다.
 
@@ -252,6 +253,10 @@ def _finalize_score(
     공유한다 — "Score 하나가 정확히 한 번 만들어지고, 만들어지면 통지한다"는
     계약은 그 Score가 AI의 산물인지와 무관하기 때문이다(ADR-0030, Score는
     항상 AI의 산물은 아니게 됐다).
+
+    `repository_reachability_check`(#219)는 채점 직전 저장소 도달 가능성을
+    직접 재확인했을 때만 채워진다 — 소스만으로 충분했거나 저장소 자체가 없는
+    채점은 재확인을 하지 않았으므로 빈 리스트 그대로다.
     """
 
     try:
@@ -263,6 +268,7 @@ def _finalize_score(
                 prompt=prompt,
                 reasoning=reasoning_payload,
                 scored_assets=scored_assets_payload,
+                repository_reachability_check=list(repository_reachability_check),
             )
             RepositorySnapshot.objects.bulk_create(
                 RepositorySnapshot(asset=asset, commit_sha=commit_sha, cloned_at=Clock.now())
@@ -293,6 +299,64 @@ def _finalize_score(
         _notify_scored(submission)
 
     return {"submission_id": submission.id, "status": "scored", "percentage": str(percentage)}
+
+
+def _live_repository_reachability(
+    repository_assets_all: list[SubmissionAsset],
+) -> tuple[dict[int, bool | None], list[dict]]:
+    """채점이 저장소 도달 가능성을 그 순간에 직접 재확인한다 (#219, ADR-0030).
+
+    스캔(`repositories.services.REPOSITORY_VISIBILITY_SCAN`)이 남긴
+    `is_public`은 최대 1시간 낡았을 수 있다 — "채점 당시 닫혀 있었다"는 판정의
+    근거로 한 시간 전의 사실을 쓰는 것은 정직하지 않다. 그래서 채점 직전에
+    그 자산들만 다시 직접 확인한다.
+
+    재확인이 실패(네트워크 순단·5xx·rate limit — `check_public`이 404만 확정적
+    으로 구분하고 그 밖의 실패는 예외로 올린다)하면 **마지막으로 알던 값을
+    쓰고 그대로 진행한다** — 채점이 GitHub 상태에 인질로 잡히면 안 된다는
+    원칙(ADR-0027이 제출 API에 대해 세운 것)을 채점에도 같은 이유로 적용한다.
+
+    반환값: (asset_id -> 이 채점이 최종적으로 쓸 is_public 값, 감사 기록).
+    감사 기록은 그대로 `Score.repository_reachability_check`에 실려 이의
+    심판이 "그 순간 무엇을 보고 그렇게 판정했는지"를 추측하지 않게 한다.
+    """
+
+    github = get_github_adapter()
+    checked_at = Clock.now().isoformat()
+    effective: dict[int, bool | None] = {}
+    audit: list[dict] = []
+    for asset in repository_assets_all:
+        try:
+            is_public = github.check_public(asset.value)
+            effective[asset.id] = is_public
+            audit.append(
+                {
+                    "asset_id": asset.id,
+                    "checked_at": checked_at,
+                    "is_public": is_public,
+                    "source": "live_check",
+                    "detail": "public" if is_public else "private_or_not_found",
+                }
+            )
+        except Exception as exc:  # noqa: BLE001 - 재확인 실패는 마지막 값으로 대체한다.
+            logger.warning(
+                "Submission 저장소 자산(pk=%s) 채점 직전 재확인 실패, 마지막으로 알던 "
+                "값(is_public=%s)으로 진행: %s",
+                asset.id,
+                asset.is_public,
+                exc,
+            )
+            effective[asset.id] = asset.is_public
+            audit.append(
+                {
+                    "asset_id": asset.id,
+                    "checked_at": checked_at,
+                    "is_public": asset.is_public,
+                    "source": "fallback_last_known",
+                    "detail": f"check_failed:{type(exc).__name__}",
+                }
+            )
+    return effective, audit
 
 
 def score_submission_once(submission: Submission) -> dict:
@@ -386,16 +450,54 @@ def score_submission_once(submission: Submission) -> dict:
     # 성공한 저장소도 없다. 저장소만으로 낸 제출에서만 실제로 일어난다(소스가
     # 있었으면 위에서 이미 "source_not_found"로 갈렸다).
     #
-    # **자동 미달은 모든 저장소가 확정적으로 도달 불가능일 때만 발동한다.** 하나라도
-    # `is_public`이 아직 null(스캔이 아직 못 봤다)이거나 True(공개로 확인됐는데
-    # 이번 clone만 실패했다 — 네트워크 순단일 수 있다)면, 그건 "닫혔다"는 확정
-    # 사실이 아니라 "아직 모른다"다. GitHub 장애·rate limit·네트워크 오류를
-    # 참가자 불이익으로 치지 않는다(ADR-0030) — Score는 불변이라 나중에 사정을
-    # 알아도 되돌릴 수 없으므로, 확정되지 않은 채로 0%를 굳히지 않고 다음 스캔이
-    # 다시 시도하게 한다.
+    # **여기서만 채점 직전 재확인을 한다(#219).** 소스가 있거나 스캔이 남긴
+    # 값만으로 이미 clone에 성공했다면 재확인할 이유가 없다 — 이 재확인은
+    # "0%로 굳히기 전 마지막으로 한 번 더 본다"는 안전장치이지, 모든 채점이
+    # 매번 GitHub을 새로 치는 것이 아니다.
+    repository_reachability_payload: list[dict] = []
+    if not readable_sources and not cloned_repositories and repository_assets_all:
+        effective_is_public, repository_reachability_payload = _live_repository_reachability(
+            repository_assets_all
+        )
+
+        # 스캔이 마지막으로 본 값보다 이 재확인이 최신이다 — 그 사이 참가자가
+        # 저장소를 다시 공개로 돌려놨다면, 아직 clone을 시도하지 않은 자산만
+        # 지금 다시 시도한다(#219, "마지막 스캔 이후 공개로 되돌린 저장소는
+        # 0%가 되지 않는다").
+        already_attempted_ids = {asset.id for asset, _cloned in cloned_repositories}
+        newly_public_assets = [
+            a
+            for a in repository_assets_all
+            if effective_is_public.get(a.id) is True and a.id not in already_attempted_ids
+        ]
+        if newly_public_assets:
+            github = get_github_adapter()
+            for asset in newly_public_assets:
+                try:
+                    cloned_repositories.append((asset, github.clone(asset.value)))
+                except Exception as exc:  # noqa: BLE001 - 이 저장소 하나의 clone 실패가 채점 전체를 막으면 안 된다.
+                    logger.warning(
+                        "Submission(pk=%s) 저장소 자산(pk=%s) 재확인 후 clone 실패, "
+                        "그 자산만 빼고 진행: %s",
+                        submission.id,
+                        asset.id,
+                        exc,
+                    )
+
     if not readable_sources and not cloned_repositories:
+        # **자동 미달은 모든 저장소가 확정적으로 도달 불가능일 때만 발동한다.**
+        # 재확인 결과(있으면 그것을, 없으면 스캔이 마지막으로 본 값을) 기준으로
+        # 하나라도 null(아직 모른다)이거나 True(공개인데 clone만 실패했다 — 네트워크
+        # 순단일 수 있다)면, 그건 "닫혔다"는 확정 사실이 아니라 "아직 모른다"다.
+        # GitHub 장애·rate limit·네트워크 오류를 참가자 불이익으로 치지 않는다
+        # (ADR-0030) — Score는 불변이라 나중에 사정을 알아도 되돌릴 수 없으므로,
+        # 확정되지 않은 채로 0%를 굳히지 않고 다음 스캔이 다시 시도하게 한다.
+        effective_is_public_by_id = {
+            entry["asset_id"]: entry["is_public"] for entry in repository_reachability_payload
+        }
         all_confirmed_unreachable = bool(repository_assets_all) and all(
-            a.is_public is False for a in repository_assets_all
+            effective_is_public_by_id.get(a.id, a.is_public) is False
+            for a in repository_assets_all
         )
         if not all_confirmed_unreachable:
             ScoringAttempt.objects.create(
@@ -417,6 +519,7 @@ def score_submission_once(submission: Submission) -> dict:
             prompt=_NO_SCORING_INPUT_REASONING,
             reasoning_payload=_zero_score_reasoning(submission),
             scored_assets_payload=[],
+            repository_reachability_check=repository_reachability_payload,
         )
 
     try:
@@ -508,6 +611,10 @@ def score_submission_once(submission: Submission) -> dict:
         reasoning_payload=reasoning_payload,
         scored_assets_payload=scored_assets_payload,
         repository_snapshots=repository_snapshots,
+        # #219: 채점 직전 재확인이 실제로 이 채점을 되살렸을 때만 채워진다 —
+        # 참가자가 "왜 방금 (되)살아났는지"를 볼 수 있어야 한다. 소스만으로
+        # 이미 충분했던 채점은 재확인 자체를 하지 않았으므로 빈 리스트다.
+        repository_reachability_check=repository_reachability_payload,
     )
 
 

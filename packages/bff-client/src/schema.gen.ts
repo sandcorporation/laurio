@@ -3935,6 +3935,13 @@ export interface components {
                 [key: string]: unknown;
             }[];
             /**
+             * Repository Reachability Check
+             * @default []
+             */
+            repository_reachability_check: {
+                [key: string]: unknown;
+            }[];
+            /**
              * Scored Assets
              * @default []
              */
@@ -4390,6 +4397,13 @@ export interface components {
             percentage: string;
             /** Reasoning */
             reasoning: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Repository Reachability Check
+             * @default []
+             */
+            repository_reachability_check: {
                 [key: string]: unknown;
             }[];
             /**

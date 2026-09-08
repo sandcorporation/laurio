@@ -320,6 +320,13 @@ class OwnScoreOut(Schema):
     # 채점에 실제로 쓰인 자산 목록 (#191). 소스가 여럿이 되면서 "무엇을 보고
     # 채점했는가"가 이의 창의 전제 중 하나가 됐다.
     scored_assets: list[ScoredAssetOut] = []
+    # 채점 직전 저장소 도달 가능성 재확인 기록 (#219, ADR-0030) —
+    # [{"asset_id", "checked_at", "is_public", "source", "detail"}, ...]. 재확인이
+    # 일어나지 않은 채점(소스만으로 충분했거나 저장소가 없는 제출)에는 빈
+    # 리스트다. "내 저장소는 공개였는데 왜 0%인가"라는 이의가 추측이 되지 않게
+    # 한다 — `SubmissionAsset.is_public_checked_at`은 그 뒤 스캔이 계속 덮어쓰지만
+    # 이 필드는 Score와 함께 불변으로 고정된다.
+    repository_reachability_check: list[dict] = []
 
     @staticmethod
     def resolve_scored_assets(obj) -> list[dict]:

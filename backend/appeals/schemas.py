@@ -60,6 +60,10 @@ class ScoreSnapshotOut(Schema):
     # 채점에 실제로 쓰인 자산 목록 (#191) — Developer가 보는 `OwnScoreOut`과
     # 같은 사실을 운영자도 봐야 이의 심판이 같은 근거 위에서 이루어진다.
     scored_assets: list[ScoredAssetOut] = []
+    # 채점 직전 저장소 도달 가능성 재확인 기록 (#219, ADR-0030) — Developer가
+    # 보는 `OwnScoreOut`과 같은 사실이다. "내 저장소는 공개였는데 0%를 받았다"는
+    # 이의를 운영자가 추측으로 심판하지 않게 한다.
+    repository_reachability_check: list[dict] = []
 
 
 class RulingOut(Schema):

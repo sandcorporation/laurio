@@ -1,4 +1,4 @@
-"""AI 채점 결과 (#12, ADR-0006, ADR-0014).
+"""AI 채점 결과 (#12, ADR-0006, ADR-0014, #219/ADR-0030).
 
 `Score`는 편의 기능이 아니라 Distribution 대상을 가르는 판정자다. LLM은 비결정적이라
 같은 Submission을 두 번 채점하면 다른 점수가 나올 수 있으므로, 마감 직후 1회 채점한
@@ -45,6 +45,14 @@ class Score(AppendOnlyModel):
     # (제출 수정은 마감 전에만 가능하므로 실제로는 일어나지 않지만) 이 스냅샷은
     # 그대로 남는다.
     scored_assets = models.JSONField(default=list)
+    # 채점 시점에 저장소 도달 가능성을 직접 재확인한 기록 (#219, ADR-0030) —
+    # [{"asset_id": int, "checked_at": iso str, "is_public": bool | None,
+    #   "source": "live_check" | "fallback_last_known", "detail": str}, ...].
+    # `SubmissionAsset.is_public_checked_at`은 그 뒤 스캔이 계속 덮어쓰는 값이라
+    # "채점 그 순간에 어떤 상태였는가"를 나중에 복원할 수 없다 — 이 필드가 그
+    # 순간을 스냅샷으로 고정한다. 재확인이 일어나지 않은 채점(소스만으로
+    # 충분했거나 저장소 자체가 없는 제출)에는 빈 리스트로 남는다.
+    repository_reachability_check = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
