@@ -222,6 +222,16 @@ export default function SubmitPage() {
   const deadlineAt = load.status === "ready" ? new Date(load.contest.deadline_at).getTime() : null;
   const isPastDeadline = deadlineAt !== null && now >= deadlineAt;
 
+  // #218(ADR-0030): 소스 또는 저장소 중 하나만 있으면 제출할 수 있다 — 그래서
+  // "필수" 배지·경고는 더 이상 소스 하나에 고정되지 않는다. 저장소만 있고
+  // 그 저장소 전부가 아직 공개로 확인되지 않았으면(비어 있거나 아직 확인 중),
+  // "마감까지 공개로 두지 않으면 0%"를 미리 보여준다 — 제출 시점에는 공개 여부를
+  // 알 수 없으므로(ADR-0027) 이 경고는 언제나 뜬다, 배지 자체가 그 불확실성을
+  // 이미 보여준다.
+  const hasFilledSource = sourceAssets.some((row) => row.value.trim() !== "");
+  const hasFilledRepository = repositoryAssets.some((row) => row.value.trim() !== "");
+  const showRepositoryOnlyWarning = !hasFilledSource && hasFilledRepository;
+
   const requirements = load.status === "ready" ? load.contest.requirements : [];
   const completion = useMemo(() => {
     const total = requirements.length;
@@ -348,8 +358,15 @@ export default function SubmitPage() {
   async function handleSubmit() {
     if (load.status !== "ready") return;
     const hasSource = sourceAssets.some((row) => row.value.trim() !== "");
-    if (!hasSource) {
-      setSaveState({ status: "error", message: "소스코드를 먼저 업로드해주세요." });
+    const hasRepository = repositoryAssets.some((row) => row.value.trim() !== "");
+    // #218(ADR-0030): 소스 또는 GitHub 저장소 중 최소 하나만 있으면 된다 —
+    // 저장소만 낸 제출은 마감까지 공개로 남지 않으면 채점이 0%를 남긴다(위
+    // repository-only-warning 배너가 그 사실을 미리 보여준다).
+    if (!hasSource && !hasRepository) {
+      setSaveState({
+        status: "error",
+        message: "소스코드 또는 GitHub 저장소 중 최소 하나가 필요합니다.",
+      });
       return;
     }
 
@@ -583,7 +600,9 @@ export default function SubmitPage() {
       <AssetKindSection
         kind="source"
         title={ASSET_KIND_LABELS.source}
-        required
+        // #218: 저장소가 채워져 있으면 소스는 더 이상 필수가 아니다 — 마지막
+        // 빈 행도 지울 수 있어야 하고, "없으면 거부됩니다" 경고도 뜨면 안 된다.
+        required={!hasFilledRepository}
         addLabel="+ 소스코드 추가"
         testIdPrefix="source-asset"
         rows={sourceAssets}
@@ -598,7 +617,8 @@ export default function SubmitPage() {
         helperText={
           <p className="text-sm text-ink/70" data-testid="repository-helper">
             공개 저장소는 마감 전 자동으로 확인되어 채점에 반영됩니다(비워도 제출됩니다).
-            저장소는 소스 제출을 대체하지 않습니다 — 소스코드는 그래도 필수입니다.
+            소스코드가 없다면 저장소만으로도 제출할 수 있습니다 — 대신 마감까지
+            공개 상태여야 합니다.
           </p>
         }
         addLabel="+ 저장소 추가"
@@ -607,6 +627,17 @@ export default function SubmitPage() {
         onChange={setRepositoryAssets}
         disabled={isPastDeadline}
       />
+
+      {showRepositoryOnlyWarning && (
+        <p
+          role="alert"
+          className="text-sm text-attention"
+          data-testid="repository-only-warning"
+        >
+          소스코드 없이 저장소만 냈습니다 — 마감까지 모든 저장소를 공개 상태로
+          두지 않으면 채점이 0%가 됩니다.
+        </p>
+      )}
 
       <AssetKindSection
         kind="demo_video"

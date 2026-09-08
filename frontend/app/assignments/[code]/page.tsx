@@ -233,8 +233,14 @@ export default function AssignmentInvitePage() {
   async function handleSubmit() {
     if (assignment.status !== "ready" || session.status !== "authenticated") return;
     const hasSource = sourceAssets.some((row) => row.value.trim() !== "");
-    if (!hasSource) {
-      setSaveState({ status: "error", message: "소스코드를 먼저 업로드해주세요." });
+    const hasRepository = repositoryAssets.some((row) => row.value.trim() !== "");
+    // #218(ADR-0030): 소스 또는 GitHub 저장소 중 최소 하나만 있으면 된다 — 이
+    // 규칙은 과제에도 그대로 적용된다(플랫폼 전체 규칙, 개최자가 고르지 않는다).
+    if (!hasSource && !hasRepository) {
+      setSaveState({
+        status: "error",
+        message: "소스코드 또는 GitHub 저장소 중 최소 하나가 필요합니다.",
+      });
       return;
     }
 
@@ -426,7 +432,10 @@ export default function AssignmentInvitePage() {
               <AssetKindSection
                 kind="source"
                 title={ASSET_KIND_LABELS.source}
-                required
+                // #218: 저장소가 채워져 있으면 소스는 더 이상 필수가 아니다.
+                required={
+                  !repositoryAssets.some((row) => row.value.trim() !== "")
+                }
                 addLabel="+ 소스코드 추가"
                 testIdPrefix="assignment-source-asset"
                 rows={sourceAssets}
@@ -443,6 +452,18 @@ export default function AssignmentInvitePage() {
                 onChange={setRepositoryAssets}
                 disabled={false}
               />
+
+              {!sourceAssets.some((row) => row.value.trim() !== "") &&
+                repositoryAssets.some((row) => row.value.trim() !== "") && (
+                  <p
+                    role="alert"
+                    className="text-sm text-attention"
+                    data-testid="assignment-repository-only-warning"
+                  >
+                    소스코드 없이 저장소만 냈습니다 — 마감까지 모든 저장소를 공개
+                    상태로 두지 않으면 채점이 0%가 됩니다.
+                  </p>
+                )}
               <AssetKindSection
                 kind="demo_video"
                 title={ASSET_KIND_LABELS.demo_video}

@@ -1,9 +1,12 @@
-"""Submission API — 제출·수정·조회 (#10, ADR-0014, ADR-0005, ADR-0011).
+"""Submission API — 제출·수정·조회 (#10, ADR-0014, ADR-0005, ADR-0011, #218/ADR-0030).
 
 핵심 규율:
 
-- 전체 소스코드는 필수다. 없으면 422로 거부한다(플랫폼의 "강제하지 않고 신호한다"
-  원칙에서 유일한 예외 — ADR-0014).
+- 전체 소스코드 또는 공개 GitHub 저장소 중 최소 하나는 필수다. 둘 다 없으면
+  422로 거부한다(플랫폼의 "강제하지 않고 신호한다" 원칙에서 유일한 예외 —
+  ADR-0014, #218이 저장소를 그 예외의 두 번째 길로 열었다). 저장소만 낸
+  제출은 마감 시점에 그 저장소가 도달 불가능(private·404)이면 채점이 0%
+  Score를 남긴다(`scoring.services`) — Score 자체가 없어지지는 않는다.
 - `Verification`을 마치지 않았거나(또는 만 19세 미만이라 VERIFIED에 도달하지 못했거나)
   마감이 지났으면 제출·수정 모두 거부한다. "마감"은 Contest 상태 전이(#11)를 기다리지
   않고 `deadline_at`과 `core.clock.Clock.now()`를 직접 비교한다.
@@ -315,9 +318,9 @@ def _clean_assets_in(
 ) -> list[_CleanedAsset]:
     """페이로드의 자료를 검증하고 저장 가능한 값으로 다듬는다 (#190).
 
-    여기서 걸러지는 것: 알 수 없는 종류, 소스 없음, 남의 업로드 대상을 가리키는
-    object_key, GitHub 형식이 아닌 저장소 URL, 종류별·합산 개수 상한, 같은 값의
-    중복. 마지막 하나를 API가 막는 이유는 `UniqueConstraint`가 대신 걸리면
+    여기서 걸러지는 것: 알 수 없는 종류, 소스도 저장소도 없음(#218), 남의 업로드
+    대상을 가리키는 object_key, GitHub 형식이 아닌 저장소 URL, 종류별·합산 개수
+    상한, 같은 값의 중복. 마지막 하나를 API가 막는 이유는 `UniqueConstraint`가 대신 걸리면
     422가 아니라 500(IntegrityError)이 나기 때문이다.
     """
 
@@ -380,10 +383,19 @@ def _clean_assets_in(
             )
         )
 
-    if not counts.get(SubmissionAsset.Kind.SOURCE):
-        # ADR-0014: 전체 소스코드는 필수다. 이 항목만 "강제하지 않고 신호한다"는
-        # 플랫폼 원칙의 예외다. 다중화 이후 그 뜻은 "소스 자료가 최소 하나"다.
-        raise HttpError(422, "전체 소스코드는 최소 하나가 필수입니다.")
+    if not counts.get(SubmissionAsset.Kind.SOURCE) and not counts.get(
+        SubmissionAsset.Kind.REPOSITORY
+    ):
+        # ADR-0014/0030: 전체 소스코드 또는 공개 GitHub 저장소 중 최소 하나는
+        # 필수다. 이 항목만 "강제하지 않고 신호한다"는 플랫폼 원칙의 예외다 —
+        # 그러지 않으면 아무도 채점 입력을 내지 않은 Contest에서 Distribution
+        # 대상이 0명이 되어 상금이 Escrow에 갇힌다(ADR-0014의 함정, ADR-0030이
+        # 저장소를 그 예외의 두 번째 길로 연다). 저장소만 낸 제출은 마감 후
+        # 그 저장소가 닫혀 있으면 0% Score로 채점된다(`scoring.services`) —
+        # Score가 아예 없어지는 것은 아니다.
+        raise HttpError(
+            422, "전체 소스코드 또는 GitHub 저장소 중 최소 하나가 필수입니다."
+        )
 
     policy = get_current_policy()
     for kind, limit_field in _KIND_LIMIT_FIELDS.items():

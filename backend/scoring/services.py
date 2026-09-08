@@ -1,4 +1,12 @@
-"""AI 채점 도메인 로직 (#12, ADR-0006, ADR-0014).
+"""AI 채점 도메인 로직 (#12, ADR-0006, ADR-0014, #218/ADR-0030).
+
+**Score가 항상 AI의 산물은 아니다(#218, ADR-0030).** 소스 없이 저장소만 낸
+제출의 그 저장소가 채점 시점에 확정적으로 도달 불가능(private·404)이면,
+LLM을 부르지 않고 전체 미달(0%) `Score`를 직접 만든다 — 0%도 Score이므로
+Distribution 컷라인 판정은 그대로 진행된다(`_finalize_score`,
+`NO_SCORING_INPUT_MODEL_VERSION`). 아직 확정되지 않은 경우(GitHub 장애 등)는
+0%로 굳히지 않고 다음 스캔이 다시 시도한다 — 그 판정은 참가자가 통제하는 상태
+(비공개·삭제)에만 근거해야 한다.
 
 API 레이어(`scoring.api`)에서만 호출된다 — 테스트의 유일한 시임은 HTTP다
 (`CLAUDE.md`). 여기 함수를 테스트가 직접 부르지 않는다.
@@ -203,11 +211,96 @@ def _asset_label(asset: SubmissionAsset) -> str:
     return label or f"소스 자료 #{asset.id}"
 
 
+#: #218(ADR-0030)의 자동 미달 Score가 `model_version`에 남기는 값 — 사람이 읽을 수
+#: 있는 문구로 "AI가 판정하지 않았다"를 스스로 밝힌다. 실제 LLM 모델 식별자
+#: 형식("fake-llm-v1" 등)과 겹치지 않아야 이의 화면에서 한눈에 구별된다.
+NO_SCORING_INPUT_MODEL_VERSION = "platform-auto (채점 입력 없음)"
+
+#: 자동 미달 Score의 판정 근거 문구 — ADR-0030 "판정 근거에 「채점할 입력이
+#: 없었다」를 항목마다 적는다"를 그대로 옮긴다.
+_NO_SCORING_INPUT_REASONING = (
+    "채점할 입력이 없었다 — 소스 자료가 없고 저장소는 마감 시점에 도달할 수 없었다 "
+    "(비공개이거나 삭제·이름 변경됨). AI가 판정하지 않았다."
+)
+
+
+def _zero_score_reasoning(submission: Submission) -> list[dict]:
+    """자동 미달 Score의 Requirement별 판정 근거 — 전부 미달, 이유는 모두 같다."""
+
+    requirement_ids = Requirement.objects.filter(
+        contest_id=submission.contest_id
+    ).order_by("order", "id").values_list("id", flat=True)
+    return [
+        {"requirement_id": rid, "is_met": False, "reasoning": _NO_SCORING_INPUT_REASONING}
+        for rid in requirement_ids
+    ]
+
+
+def _finalize_score(
+    submission: Submission,
+    *,
+    percentage: Decimal,
+    model_version: str,
+    prompt: str,
+    reasoning_payload: list[dict],
+    scored_assets_payload: list[dict],
+    repository_snapshots: list[tuple[SubmissionAsset, str]] = (),
+) -> dict:
+    """Score(+RepositorySnapshot)를 한 트랜잭션으로 만들고 통지한다.
+
+    AI가 실제로 채점한 경우와 #218의 자동 미달(채점 입력 0건) 경우가 이 지점을
+    공유한다 — "Score 하나가 정확히 한 번 만들어지고, 만들어지면 통지한다"는
+    계약은 그 Score가 AI의 산물인지와 무관하기 때문이다(ADR-0030, Score는
+    항상 AI의 산물은 아니게 됐다).
+    """
+
+    try:
+        with transaction.atomic():
+            Score.objects.create(
+                submission=submission,
+                percentage=percentage,
+                model_version=model_version,
+                prompt=prompt,
+                reasoning=reasoning_payload,
+                scored_assets=scored_assets_payload,
+            )
+            RepositorySnapshot.objects.bulk_create(
+                RepositorySnapshot(asset=asset, commit_sha=commit_sha, cloned_at=Clock.now())
+                for asset, commit_sha in repository_snapshots
+            )
+    except IntegrityError:
+        # 동시에 다른 스캔이 먼저 이겼다 — unique(submission) 제약이 막아준다.
+        # 이미 Score가 있으므로 여기서도 재채점하지 않는다(ADR-0006).
+        return {"submission_id": submission.id, "status": "already_scored"}
+
+    # 채점이 끝났다는 것은 Developer 에게 **이의 창이 열렸다**는 뜻이다(#74).
+    # 기한을 만들었으면 그 시작을 알리는 것까지가 같은 결정이다 — 알리지 않으면
+    # 그 기한은 "들어와 본 사람에게만 공정한" 규칙이 된다.
+    #
+    # 알림 실패가 채점을 되돌리면 안 된다. 이 함수는 절대 예외를 밖으로 던지지
+    # 않는다는 계약을 갖고 있고(모듈 docstring), `_notify_scored` 가 그 계약을
+    # 지킨다 — notifications 쪽의 `_safe_notify` 와 같은 규율이다.
+    #
+    # **Assignment(ADR-0028, #212)에는 이 통지가 없다.** 이 스캔은 `Contest.
+    # Status.SCOREABLE` 하나만 보고 과제도 그대로 집으므로(#210 — 그것이 채점의
+    # 요지다), 여기서 걸러주지 않으면 이 통지만 `SENDS_LIFECYCLE_NOTICES`
+    # 선언(#205/#207 — 마감 임박 등 *주기 스캔이 보내는* 리마인더 셋 전용이라
+    # 이 호출은 원래 그 선언을 지나가지 않는다)을 비켜간 채 새어 나간다.
+    # 본인확인 없는 학생에게는 연락처가 없어(ADR-0029) 실패한 발송 기록이
+    # 채널마다 쌓이고, 과제에는 애초에 이의(Appeal) 자체가 없으니 이 통지의
+    # 내용("이의 창이 열렸다") 자체가 거짓이다.
+    if not submission.contest.is_assignment:
+        _notify_scored(submission)
+
+    return {"submission_id": submission.id, "status": "scored", "percentage": str(percentage)}
+
+
 def score_submission_once(submission: Submission) -> dict:
     """이 Submission을 정확히 한 번만 채점한다. 이미 Score가 있으면 그대로 돌아온다.
 
     이 함수는 절대 예외를 밖으로 던지지 않는다(모듈 docstring 참고) — 모든 실패는
-    ScoringAttempt에 남고 "failed"·"source_not_found"·"no_source_asset"로 돌아온다.
+    ScoringAttempt에 남고 "failed"·"source_not_found"·"repository_unresolved"·
+    "no_scoring_asset"로 돌아온다.
     """
 
     if Score.objects.filter(submission_id=submission.id).exists():
@@ -215,23 +308,27 @@ def score_submission_once(submission: Submission) -> dict:
 
     # #190이 소스를 `SubmissionAsset` 목록으로 바꿨다. #191부터는 `kind=source`
     # 전부를 읽어 라운드로빈 예산 안에서 함께 채점한다(`select_source_files`) —
-    # 저장소(`kind=repository`)의 공개 스냅샷을 더하는 것은 #193이다.
+    # 저장소(`kind=repository`)의 공개 스냅샷을 더하는 것은 #193이다. #218부터는
+    # 소스가 하나도 없어도 된다(ADR-0030) — 저장소만으로도 제출할 수 있다.
     source_assets = list(
         submission.assets.filter(kind=SubmissionAsset.Kind.SOURCE).order_by("order", "id")
     )
-    if not source_assets:
-        # 소스 없는 Submission은 API가 막는다(ADR-0014) — 여기 닿는다면 데이터가
-        # 그 불변식을 벗어난 것이다. Score는 append-only라 0점으로 확정해 버리면
-        # 되돌릴 수 없으므로, 채점하지 않고 이력만 남긴다.
+    repository_assets_all = list(
+        submission.assets.filter(kind=SubmissionAsset.Kind.REPOSITORY).order_by("order", "id")
+    )
+    if not source_assets and not repository_assets_all:
+        # 소스도 저장소도 없는 Submission은 API가 막는다(ADR-0014/0030) — 여기
+        # 닿는다면 데이터가 그 불변식을 벗어난 것이다. Score는 append-only라
+        # 0점으로 확정해 버리면 되돌릴 수 없으므로, 채점하지 않고 이력만 남긴다.
         ScoringAttempt.objects.create(
             submission=submission,
-            error="소스 자료가 하나도 없다 — 채점하지 않는다.",
+            error="소스도 저장소도 없다 — 채점하지 않는다.",
             permanent=True,
         )
         # "source_not_found"(스토리지에 아직 없다, 다시 시도한다)와 다른 사실이다 —
         # 이건 다시 시도해도 같고 스캔 대상에서 빠진다. 상태를 뭉치면 운영자가
         # 「기다리면 되는 것」과 「사람이 봐야 하는 것」을 구별할 수 없다.
-        return {"submission_id": submission.id, "status": "no_source_asset"}
+        return {"submission_id": submission.id, "status": "no_scoring_asset"}
 
     storage_adapter = get_storage_adapter()
     # 소스 하나를 못 읽어도(스토리지 지연 등) 나머지로 채점을 진행한다(#191) —
@@ -249,12 +346,14 @@ def score_submission_once(submission: Submission) -> dict:
         if raw is not None:
             readable_sources.append((asset, raw))
 
-    if not readable_sources:
+    if source_assets and not readable_sources:
         # storage.adapters.base.StorageAdapter.read_object 문서대로, None은 "아직
         # 없다"는 뜻이지 실패가 아니다. Score는 append-only라 한 번 잘못 쓰면 영원히
         # 못 고친다(ADR-0006) — 여기서 빈 소스로 0점을 확정하는 대신 채점 자체를
         # 미루고 다음 스캔이 다시 시도하게 한다(#12 리뷰 지적: 일시적 스토리지
-        # 상태로 개발자가 영구히 배제되면 안 된다).
+        # 상태로 개발자가 영구히 배제되면 안 된다). 저장소만으로 대체하지 않는다 —
+        # 참가자가 실제로 올린 소스가 아직 스토리지에 없는 것과 저장소로 채점을
+        # 진행하는 것은 다른 사실이다.
         ScoringAttempt.objects.create(
             submission=submission,
             error="소스 오브젝트를 아직 스토리지에서 찾을 수 없다 — 다음 스캔에서 재시도한다.",
@@ -267,11 +366,7 @@ def score_submission_once(submission: Submission) -> dict:
     # 실제로 성공할 때만 근거로 남으므로(RepositorySnapshot, 아래) 소스 읽기와
     # 달리 이 try 블록 밖에서 먼저 시도한다 — clone 실패는 그 저장소 자산만 빼고
     # 진행하며 permanent로 표시하지 않는다(ADR-0027).
-    repository_assets = list(
-        submission.assets.filter(kind=SubmissionAsset.Kind.REPOSITORY, is_public=True).order_by(
-            "order", "id"
-        )
-    )
+    repository_assets = [a for a in repository_assets_all if a.is_public is True]
     cloned_repositories: list[tuple[SubmissionAsset, ClonedRepository]] = []
     if repository_assets:
         github = get_github_adapter()
@@ -286,6 +381,43 @@ def score_submission_once(submission: Submission) -> dict:
                     asset.id,
                     exc,
                 )
+
+    # #218(ADR-0030): 채점 입력이 하나도 남지 않았다 — 읽을 수 있는 소스도, clone에
+    # 성공한 저장소도 없다. 저장소만으로 낸 제출에서만 실제로 일어난다(소스가
+    # 있었으면 위에서 이미 "source_not_found"로 갈렸다).
+    #
+    # **자동 미달은 모든 저장소가 확정적으로 도달 불가능일 때만 발동한다.** 하나라도
+    # `is_public`이 아직 null(스캔이 아직 못 봤다)이거나 True(공개로 확인됐는데
+    # 이번 clone만 실패했다 — 네트워크 순단일 수 있다)면, 그건 "닫혔다"는 확정
+    # 사실이 아니라 "아직 모른다"다. GitHub 장애·rate limit·네트워크 오류를
+    # 참가자 불이익으로 치지 않는다(ADR-0030) — Score는 불변이라 나중에 사정을
+    # 알아도 되돌릴 수 없으므로, 확정되지 않은 채로 0%를 굳히지 않고 다음 스캔이
+    # 다시 시도하게 한다.
+    if not readable_sources and not cloned_repositories:
+        all_confirmed_unreachable = bool(repository_assets_all) and all(
+            a.is_public is False for a in repository_assets_all
+        )
+        if not all_confirmed_unreachable:
+            ScoringAttempt.objects.create(
+                submission=submission,
+                error=(
+                    "저장소 도달 가능성이 아직 확정되지 않았다(GitHub 장애일 수 있다) "
+                    "— 다음 스캔에서 재시도한다."
+                ),
+            )
+            return {"submission_id": submission.id, "status": "repository_unresolved"}
+
+        # 모든 저장소가 확정적으로 닫혀 있다(private 또는 404) — ADR-0030의
+        # 자동 미달. LLM을 부르지 않는다: 답이 정해진 호출에 돈을 쓸 이유가 없고,
+        # 응답이 흔들려 100%가 나오면 더 나쁘다.
+        return _finalize_score(
+            submission,
+            percentage=Decimal("0.00"),
+            model_version=NO_SCORING_INPUT_MODEL_VERSION,
+            prompt=_NO_SCORING_INPUT_REASONING,
+            reasoning_payload=_zero_score_reasoning(submission),
+            scored_assets_payload=[],
+        )
 
     try:
         requirements = _requirement_inputs(submission)
@@ -360,55 +492,23 @@ def score_submission_once(submission: Submission) -> dict:
         status = "failed_permanently" if is_permanent else "failed"
         return {"submission_id": submission.id, "status": status, "error": message}
 
-    try:
-        with transaction.atomic():
-            Score.objects.create(
-                submission=submission,
-                percentage=percentage,
-                model_version=output.model_version,
-                prompt=prompt,
-                reasoning=reasoning_payload,
-                scored_assets=scored_assets_payload,
-            )
-            # 실제로 쓰인 저장소 자산에만 스냅샷을 남긴다(#193) — "채점이
-            # 실패한 회차의 clone 결과는 남지 않는다"는 ADR-0027의 결정이라,
-            # Score 생성과 같은 트랜잭션 안에서만 만든다. 이 앞의 어느
-            # 단계에서든 예외가 나 이 지점에 닿지 못하면(위 except 블록)
-            # RepositorySnapshot도 함께 만들어지지 않는다.
-            RepositorySnapshot.objects.bulk_create(
-                RepositorySnapshot(
-                    asset=asset,
-                    commit_sha=commit_sha_by_asset_id[asset.id],
-                    cloned_at=Clock.now(),
-                )
-                for asset, _cloned in cloned_repositories
-                if asset.id in used_asset_ids
-            )
-    except IntegrityError:
-        # 동시에 다른 스캔이 먼저 이겼다 — unique(submission) 제약이 막아준다.
-        # 이미 Score가 있으므로 여기서도 재채점하지 않는다(ADR-0006).
-        return {"submission_id": submission.id, "status": "already_scored"}
-
-    # 채점이 끝났다는 것은 Developer 에게 **이의 창이 열렸다**는 뜻이다(#74).
-    # 기한을 만들었으면 그 시작을 알리는 것까지가 같은 결정이다 — 알리지 않으면
-    # 그 기한은 "들어와 본 사람에게만 공정한" 규칙이 된다.
-    #
-    # 알림 실패가 채점을 되돌리면 안 된다. 이 함수는 절대 예외를 밖으로 던지지
-    # 않는다는 계약을 갖고 있고(모듈 docstring), `_notify_scored` 가 그 계약을
-    # 지킨다 — notifications 쪽의 `_safe_notify` 와 같은 규율이다.
-    #
-    # **Assignment(ADR-0028, #212)에는 이 통지가 없다.** 이 스캔은 `Contest.
-    # Status.SCOREABLE` 하나만 보고 과제도 그대로 집으므로(#210 — 그것이 채점의
-    # 요지다), 여기서 걸러주지 않으면 이 통지만 `SENDS_LIFECYCLE_NOTICES`
-    # 선언(#205/#207 — 마감 임박 등 *주기 스캔이 보내는* 리마인더 셋 전용이라
-    # 이 호출은 원래 그 선언을 지나가지 않는다)을 비켜간 채 새어 나간다.
-    # 본인확인 없는 학생에게는 연락처가 없어(ADR-0029) 실패한 발송 기록이
-    # 채널마다 쌓이고, 과제에는 애초에 이의(Appeal) 자체가 없으니 이 통지의
-    # 내용("이의 창이 열렸다") 자체가 거짓이다.
-    if not submission.contest.is_assignment:
-        _notify_scored(submission)
-
-    return {"submission_id": submission.id, "status": "scored", "percentage": str(percentage)}
+    # 실제로 쓰인 저장소 자산에만 스냅샷을 남긴다(#193) — "채점이 실패한 회차의
+    # clone 결과는 남지 않는다"는 ADR-0027의 결정이라, Score 생성과 같은
+    # 트랜잭션 안에서만 만든다(`_finalize_score`).
+    repository_snapshots = [
+        (asset, commit_sha_by_asset_id[asset.id])
+        for asset, _cloned in cloned_repositories
+        if asset.id in used_asset_ids
+    ]
+    return _finalize_score(
+        submission,
+        percentage=percentage,
+        model_version=output.model_version,
+        prompt=prompt,
+        reasoning_payload=reasoning_payload,
+        scored_assets_payload=scored_assets_payload,
+        repository_snapshots=repository_snapshots,
+    )
 
 
 def _notify_scored(submission: Submission) -> None:
@@ -449,13 +549,21 @@ def _notify_scored(submission: Submission) -> None:
 # 되지 못한 채(`is_public=True` 필터) Score가 확정된다 — Score는 append-only라
 # (ADR-0006) 그 뒤 가시성 스캔이 아무리 부지런히 값을 채워도 이미 늦는다.
 #
-# 그렇다고 무기한 기다릴 수는 없다 — GitHub이 죽었거나 어댑터가 계속 실패하면
-# 그 Submission이 영원히 Score 없이 남아 배분 컷라인에서 조용히 탈락한다(#190·
-# #191이 `no_source_asset`/`source_not_found`를 가른 것과 같은 이유로 피해야
-# 하는 실패 형태다). 그래서 마감(`deadline_at`) 이후 이 유예 기간 안에서만
-# 미루고, 지나면 미해결 저장소를 "채점 입력이 아님"으로 확정하고 채점을
-# 진행한다 — `is_public`이 여전히 null인 저장소는 어차피 `is_public=True`
-# 필터에 걸리지 않으므로 별도 처리 없이 자연히 빠진다.
+# 그렇다고 무기한 기다릴 수는 없다 — 소스가 있는 제출이라면 GitHub이 죽었거나
+# 어댑터가 계속 실패해도 그 소스만으로 채점이 진행돼야 한다(#190·#191이
+# `no_source_asset`/`source_not_found`를 가른 것과 같은 이유로 피해야 하는 실패
+# 형태다). 그래서 마감(`deadline_at`) 이후 이 유예 기간 안에서만 미루고, 지나면
+# 미해결 저장소를 "채점 입력이 아님"으로 확정하고 채점을 진행한다 — `is_public`이
+# 여전히 null인 저장소는 어차피 `is_public=True` 필터에 걸리지 않으므로 별도 처리
+# 없이 자연히 빠진다.
+#
+# **저장소만 낸 제출(#218, ADR-0030)은 이 유예를 지나도 계속 미뤄질 수 있다.**
+# 소스도 없고 clone에 성공한 저장소도 없는데, 그 저장소가 확정적으로 닫힌 것도
+# 아니라면(`is_public`이 여전히 null이거나 True인데 clone만 실패했다면)
+# `score_submission_once`가 "repository_unresolved"로 다시 미룬다 — GitHub
+# 장애를 참가자 불이익(불변인 0% Score)으로 확정하지 않기 위해서다. 이 유예
+# 상수는 "언제부터 저장소 없이도 진행해 볼 것인가"의 하한일 뿐, 저장소만 낸
+# 제출에게 "그때까지도 안 되면 무조건 0%"를 보장하지 않는다.
 #
 # 가시성 스캔의 재확인 주기(`repositories.services._STALE_AFTER`, 1시간)보다
 # 넉넉히 잡아 정상적인 비동기 지연은 이 안에서 끝나게 한다.
