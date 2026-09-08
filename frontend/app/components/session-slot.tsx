@@ -1,49 +1,30 @@
 "use client";
 
-// 헤더의 세션 슬롯(#93, spec #92) — 헤더 전체를 클라이언트 컴포넌트로 만들지
+// 헤더의 세션 슬롯(#93, spec #92). 헤더 전체를 클라이언트 컴포넌트로 만들지
 // 않기 위해 세션에 따라 갈리는 부분만 따로 뗀 조각이다(ADR-0015). 헤더는
 // 색인 대상 공개 페이지에도 실리므로, 이 슬롯 밖의 나머지(브랜드·공모전 링크·
 // 개최 CTA)는 여전히 서버에서 렌더된다.
 //
-// `lib/auth/use-session.ts`를 그대로 쓰지 않는다 — 그 훅은 인증 구역
-// (app/console/**)을 지키려고 "세션이 없으면 /login 으로 보낸다"를 내장하고
-// 있다. 헤더는 공개 페이지에도 서므로 로그인 안 한 방문자가 정상이다 — 그
-// 상태를 리다이렉트가 아니라 "로그인" 링크로 보여줘야 한다.
-//
-// 그래도 fetch 는 맨 것을 쓰지 않고 BFF 클라이언트(`lib/bff/client.ts`)를 쓴다(#93 코드리뷰). 액세스가 만료된 채 `/console` 진입 직후처럼, 이 슬롯과
-// `useSession`(console/page.tsx)이 같은 순간 같은 401 을 동시에 만나면 리프레시
-// 토큰은 1회용이라 몫이 갈린다 — 맨 fetch 로 진 쪽은 되살리지 못한 401 을 그대로
-// "비로그인"으로 굳혀버려, 로그인한 사용자에게 경로가 바뀔 때까지 "로그인"이
-// 뜨는 결과를 냈다(직접 재현해 확인했다). 클라이언트는 401 을 만나면 단일 비행으로
-// 세션을 되살린 뒤 재시도해 이 경합을 흡수한다. 다만 여기서는 `unauthorizedIsAnswer` 로 「그래도
-// 401 이면 로그인으로 보낸다」만 끈다 — 이 슬롯에게 401 은 정상적인 답이다(#146).
+// **세션은 여기서 묻지 않는다(#237).** 예전에는 이 컴포넌트가 직접
+// `GET /api/auth/session`을 불렀는데, 헤더의 `NotificationBell`도 자기 조회의
+// 401을 되살리려고 같은 경로를 다시 불러 — 방문자 하나가 열어 둔 페이지
+// 하나에서 그 경로가 여러 번 불렸다(실측 staging 7회). 지금은 `HeaderSessionZone`이
+// 한 번만 묻고 그 결과를 `sessionState`로 내려준다 — 이 컴포넌트는 그것을
+// 그대로 그린다.
 import Link from "next/link";
-import { usePathname } from "next/navigation";
 
-import { useBackendQuery } from "@laurio/bff-client";
+import type { HeaderSessionState } from "@/lib/auth/header-session-state";
 
-import { bffClient } from "@/lib/bff/client";
-
-export function SessionSlot() {
-  // 헤더는 루트 레이아웃에 살아서 페이지 이동에도 마운트가 유지된다(Next App Router) — 로그인
-  // 직후 `/console` 로 클라이언트 내비게이션해도 이 컴포넌트는 그대로 남는다. 그래서 마운트 시
-  // 한 번뿐인 조회로는 로그인 전에 확인한 "비로그인" 상태가 영영 굳어버린다. `pathname` 을
-  // `refetchKey` 로 줘 경로가 바뀔 때마다(=로그인·로그아웃 직후 이동 포함) 다시 확인한다.
-  const pathname = usePathname();
-  const { state } = useBackendQuery<unknown>(bffClient, "/api/auth/session", {
-    unauthorizedIsAnswer: true,
-    refetchKey: pathname,
-  });
-
+export function SessionSlot({ sessionState }: { sessionState: HeaderSessionState }) {
   // 로딩 중에는 아무 링크도 단언하지 않는다 — 자바스크립트가 없으면(ADR-0015
   // 검증 기법, seam.spec.ts) 이 자리에 영원히 머무르지만, 헤더의 나머지(브랜드·
   // 공모전·개최 CTA)는 서버에서 이미 렌더돼 있어 사이트가 걷는 데는 지장이
   // 없다.
-  if (state.status === "loading") {
+  if (sessionState.status === "loading") {
     return <span data-testid="header-session-loading" aria-hidden="true" />;
   }
 
-  if (state.status === "ready") {
+  if (sessionState.status === "authenticated") {
     return (
       <Link
         href="/console"
