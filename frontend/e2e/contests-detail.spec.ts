@@ -16,12 +16,21 @@ test.beforeAll(async () => {
   seeded = await seedE2eContests();
 });
 
+// **지시어는 파일 맨 앞에 있을 때만 지시어다.** 예전에는 파일 전체에서 그 문자열을
+// 찾았는데, #234 가 이미지 섹션에 「이 파일에는 `"use client"` 가 없다」고 설명하는
+// 주석을 달자 그 주석에 걸려 CI 가 빨개졌다 — 페이지는 멀쩡한 서버 컴포넌트인데도.
+// 주석과 문자열 리터럴을 걷어내고 **첫 실행 문장**만 본다. 진짜 회귀(맨 위에 지시어가
+// 붙는 것)는 그대로 잡히고, 그것을 설명하는 글은 잡히지 않는다.
 test("@exclusive 이 페이지에 \"use client\" 가 없다", () => {
   const source = fs.readFileSync(
     path.join(__dirname, "../app/contests/[id]/page.tsx"),
     "utf-8",
   );
-  expect(source).not.toContain('"use client"');
+  const withoutComments = source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+  const firstStatement = withoutComments.split("\n").map((l) => l.trim()).find(Boolean);
+  expect(firstStatement).not.toMatch(/^["']use client["']/);
 });
 
 test("@exclusive 요구사항과 Requirement 체크리스트가 서버 렌더링된 HTML 에 들어 있다", async ({ request }) => {
