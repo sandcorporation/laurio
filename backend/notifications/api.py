@@ -15,6 +15,7 @@ from ninja import Router, Schema
 
 from accounts.middleware import jwt_auth
 from core.auth import InternalAuth
+from core.clock import Clock
 
 from .models import Notification, NotificationType
 from .services import create_notification
@@ -64,6 +65,17 @@ class NotificationOut(Schema):
     created_at: str
     context: dict
     dispatches: list[DispatchOut]
+    # 수신자의 열람 여부(#230) — 발송 측 `status`와 독립인 축이다(위 `Notification.
+    # read_at` 필드 독스트링). `null`이면 아직 안 읽었다는 뜻이다.
+    read_at: str | None
+
+
+class UnreadCountOut(Schema):
+    count: int
+
+
+class MarkAllReadOut(Schema):
+    marked_count: int
 
 
 def _serialize(notification: Notification) -> dict:
@@ -88,6 +100,7 @@ def _serialize(notification: Notification) -> dict:
             }
             for d in notification.dispatches.all()
         ],
+        "read_at": notification.read_at.isoformat() if notification.read_at else None,
     }
 
 
@@ -129,6 +142,36 @@ def list_my_notifications(
         .order_by("-created_at")[offset : offset + limit]
     )
     return [_serialize(n) for n in notifications]
+
+
+@public_router.get("/unread-count", response=UnreadCountOut, auth=jwt_auth)
+def unread_count(request):
+    """헤더 벨의 배지 숫자(#230). 목록 전체를 가져오지 않고 개수만 센다 — 벨은
+    목록 화면 밖에서도(다른 페이지를 보는 동안) 계속 나타나야 하므로 가벼워야
+    한다."""
+
+    count = Notification.objects.filter(recipient=request.auth_user, read_at__isnull=True).count()
+    return UnreadCountOut(count=count)
+
+
+@public_router.post("/mark-read", response=MarkAllReadOut, auth=jwt_auth)
+def mark_all_read(request):
+    """지금 안 읽은 알림을 전부 읽음으로 표시한다(#230 AC: "목록을 열면 그 시점의
+    안 읽은 알림이 전부 읽음이 된다").
+
+    `recipient=request.auth_user`로만 골라 갱신한다 — 남의 알림은 이 계정으로
+    어떤 요청을 보내도 이 WHERE 절 밖에 있어 손댈 수 없다(AC: "남의 알림은 어떤
+    방법으로도 읽거나 읽음 처리할 수 없다"). 개별 알림 id를 받는 파라미터가
+    아예 없다 — 그런 파라미터가 있었다면 그 자체가 남의 알림 id를 넣어보는
+    시도의 표면이 됐을 것이다.
+
+    발송 측 필드(`status`·`dispatches`)는 이 갱신이 전혀 건드리지 않는다 — 읽음
+    처리가 발송 이력을 바꾸지 않는다는 AC가 그래서 구조적으로 성립한다."""
+
+    marked_count = Notification.objects.filter(
+        recipient=request.auth_user, read_at__isnull=True
+    ).update(read_at=Clock.now())
+    return MarkAllReadOut(marked_count=marked_count)
 
 
 @router.get("/types/")
