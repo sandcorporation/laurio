@@ -446,6 +446,13 @@ export default function AssignmentInvitePage() {
               <AssetKindSection
                 kind="repository"
                 title={ASSET_KIND_LABELS.repository}
+                helperText={
+                  <p className="text-sm text-ink/70" data-testid="assignment-repository-helper">
+                    공개 저장소는 마감 전 자동으로 확인되어 채점에 반영됩니다(비워도
+                    제출됩니다). 소스코드가 없다면 저장소만으로도 제출할 수 있습니다 —
+                    대신 마감까지 공개 상태여야 합니다.
+                  </p>
+                }
                 addLabel="+ 저장소 추가"
                 testIdPrefix="assignment-repository-asset"
                 rows={repositoryAssets}
