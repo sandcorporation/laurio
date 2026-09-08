@@ -746,6 +746,13 @@ def test_incomplete_contests_endpoint_lists_unscored_closed_contest(
     assert matching[0]["unscored_submissions"] == 1
     assert matching[0]["total_submissions"] == 1
 
+    # #223(ADR-0031): 건수 하나로 뭉뚱그리지 않고 제출을 개별로 답한다.
+    submissions = matching[0]["submissions"]
+    assert len(submissions) == 1
+    assert submissions[0]["submission_id"] == submission_id
+    assert submissions[0]["attempt_count"] == 0
+    assert submissions[0]["permanent"] is False
+
     _run_pending(client)
 
     after = client.get(INCOMPLETE_CONTESTS_URL, **_internal_headers())
@@ -1614,6 +1621,170 @@ def test_capped_submission_of_a_contest_with_an_existing_distribution_is_not_ret
 
     assert result["rows"][0]["status"] == "cap_reached_settled_contest"
     assert not Score.objects.filter(submission_id=stuck_id).exists()
+
+
+# --- #223(ADR-0031): 운영자가 굳기 전 6시간을 본다 — 미완 목록이 제출별 상세를 답한다 ---
+
+
+@pytest.mark.django_db
+def test_incomplete_contests_lists_attempts_left_before_grace_period_left(
+    client, category, landing_type
+):
+    """실패가 5회에 못 미친 제출은 `waiting_on.attempts`가 True, 유예가 아직 안
+    지났으면 `waiting_on.grace_period`도 True다 — 「횟수가 모자란다」와 「시간이
+    안 됐다」가 함께 있어도 각각 읽힌다(#223 AC)."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+    submission_id = _submit_with_marker(client, contest, requirement_id, dev)
+
+    _close_contest(client, contest, deadline=deadline)  # as_of = deadline + 1분
+
+    with override_settings(LLM_FAKE_RAISING_SUBMISSION_IDS=[submission_id]):
+        _run_pending(client)
+        _run_pending(client)
+
+    body = client.get(INCOMPLETE_CONTESTS_URL, **_internal_headers()).json()
+    matching = next(c for c in body["contests"] if c["contest_id"] == contest["id"])
+    sub = next(s for s in matching["submissions"] if s["submission_id"] == submission_id)
+
+    assert sub["attempt_count"] == 2
+    assert sub["latest_error"]
+    assert sub["permanent"] is False
+    assert sub["waiting_on"] == {"attempts": True, "grace_period": True}
+    assert sub["finalizes_at"] == (deadline + timedelta(hours=6)).isoformat()
+
+
+@pytest.mark.django_db
+def test_incomplete_contests_distinguishes_attempts_met_from_grace_period_left(
+    client, category, landing_type
+):
+    """시도 횟수는 상한(5회)에 이르렀지만 마감 후 유예가 아직 안 지났으면
+    `waiting_on.attempts`는 False, `waiting_on.grace_period`는 True다 — 둘이
+    독립적으로 읽힌다는 것을 반대쪽(횟수 부족)과 구별해서 증명한다(#223 AC)."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+    submission_id = _submit_with_marker(client, contest, requirement_id, dev)
+
+    _close_contest(client, contest, deadline=deadline)
+
+    with override_settings(LLM_FAKE_RAISING_SUBMISSION_IDS=[submission_id]):
+        for _ in range(5):
+            _run_pending(client)
+
+    body = client.get(INCOMPLETE_CONTESTS_URL, **_internal_headers()).json()
+    matching = next(c for c in body["contests"] if c["contest_id"] == contest["id"])
+    sub = next(s for s in matching["submissions"] if s["submission_id"] == submission_id)
+
+    assert sub["attempt_count"] == 5
+    assert sub["waiting_on"] == {"attempts": False, "grace_period": True}
+    assert sub["finalizes_at"] == (deadline + timedelta(hours=6)).isoformat()
+
+
+@pytest.mark.django_db
+def test_incomplete_contests_marks_permanent_failure_as_finalizable_now(
+    client, category, landing_type
+):
+    """영구 실패(#88 코드리뷰 지적 2)로 즉시 확정될 제출은 `permanent`가 True고
+    `waiting_on`이 둘 다 False다 — 유예를 기다리지 않으므로 `finalizes_at`이
+    없다(#223 AC)."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+    submission_id = _submit_with_marker(client, contest, requirement_id, dev)
+
+    _close_contest(client, contest, deadline=deadline)
+
+    with override_settings(
+        LLM_ADAPTER_MODE="tests.test_scoring._PermanentFailureAdapter",
+        LLM_PERMANENT_FAILURE_SUBMISSION_IDS=[submission_id],
+    ):
+        _run_pending(client)
+
+    body = client.get(INCOMPLETE_CONTESTS_URL, **_internal_headers()).json()
+    matching = next(c for c in body["contests"] if c["contest_id"] == contest["id"])
+    sub = next(s for s in matching["submissions"] if s["submission_id"] == submission_id)
+
+    assert sub["attempt_count"] == 1
+    assert sub["permanent"] is True
+    assert sub["waiting_on"] == {"attempts": False, "grace_period": False}
+    assert sub["finalizes_at"] is None
+
+
+@pytest.mark.django_db
+def test_incomplete_contests_query_count_is_independent_of_contest_and_submission_count(
+    client, category, landing_type
+):
+    """Contest 수나 Submission 수에 비례해 쿼리가 늘지 않는다(#223 AC) — Contest
+    통계 1회, Submission 상세 1회로 고정이다. Contest 하나·Submission 하나일 때와
+    Contest 셋·Submission 다섯일 때 쿼리 수가 같은지로 증명한다."""
+
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    def _make_incomplete_contest(n_submissions: int) -> None:
+        deadline = timezone.now() + timedelta(hours=1)
+        _sponsor, contest = _publish_contest(
+            client,
+            category=category,
+            deliverable_type=landing_type,
+            sponsor_uid=f"sponsor-{uuid.uuid4().hex[:8]}",
+            sponsor_ci=f"sponsor-ci-{uuid.uuid4().hex[:8]}",
+            deadline_at=deadline,
+            requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+        )
+        requirement_id = contest["requirements"][0]["id"]
+        for _ in range(n_submissions):
+            dev = _verified_user(client, f"dev-{uuid.uuid4().hex[:8]}", f"ci-{uuid.uuid4().hex[:8]}")
+            _submit_with_marker(client, contest, requirement_id, dev)
+        _close_contest(client, contest, deadline=deadline)
+        # _close_contest이 시계를 그 마감 직후로 얼려 둔다 — 다음 Contest를 실제
+        # 현재 시각 기준 마감으로 만들려면 여기서 풀어 준다(안 그러면 다음 Contest의
+        # deadline_at이 이미 얼어붙은 시계보다 과거로 보여 제출이 403으로 막힌다).
+        ClockOverride.objects.filter(pk=1).delete()
+
+    def _get():
+        response = client.get(INCOMPLETE_CONTESTS_URL, **_internal_headers())
+        assert response.status_code == 200
+        return response
+
+    _make_incomplete_contest(1)
+    with CaptureQueriesContext(connection) as ctx_small:
+        _get()
+    small_query_count = len(ctx_small.captured_queries)
+
+    _make_incomplete_contest(2)
+    _make_incomplete_contest(2)
+    with CaptureQueriesContext(connection) as ctx_large:
+        _get()
+    large_query_count = len(ctx_large.captured_queries)
+
+    assert large_query_count == small_query_count
 
 
 # --- #88 코드리뷰 지적 1: 시간 예산을 넘기면 배치를 조기 종료한다 -------------------
