@@ -8,8 +8,9 @@
   채점 입력에 들어간다(#191의 라운드로빈이 그대로 적용된다).
 - 비공개 저장소는 clone을 시도하지 않고, clone 실패는 그 자산만 빼고 진행한다
   — 둘 다 `permanent`로 표시되지 않아 다음 스캔에서도 Submission이 채점 대상이다.
-- `RepositorySnapshot`은 실제로 채점에 쓰인(=Score가 만들어진) 저장소 자산에만
-  남고, 커밋 SHA가 `OwnScoreOut.scored_assets`에 나간다.
+- `RepositorySnapshot`은 clone에 성공한 저장소 자산마다 남는다(#224, ADR-0031) —
+  선별이 그 저장소에서 파일을 하나도 고르지 못했어도 남는다. 실제로 채점 근거로
+  쓰였는지는 별도로 `OwnScoreOut.scored_assets`가 답한다(커밋 SHA도 거기 나간다).
 
 시임은 언제나 HTTP다(CLAUDE.md) — `repositories`/`scoring` 도메인 함수를 테스트가
 직접 부르지 않는다.
@@ -286,6 +287,92 @@ def test_private_repository_is_never_cloned_and_scoring_relies_on_source_alone(
     )
     assert not RepositorySnapshot.objects.filter(asset=repository_asset).exists()
     assert all(e["asset_id"] != repository_asset.id for e in score.scored_assets)
+
+
+@pytest.mark.django_db
+def test_repository_snapshot_is_kept_even_when_source_selection_picks_no_file_from_it(
+    client, category, landing_type
+):
+    """clone은 성공했지만 그 저장소의 파일이 확장자 화이트리스트를 하나도 통과하지
+    못해 채점 근거로 선택되지 않았다면(=`Score.scored_assets`에 없다), 그래도
+    스냅샷은 남아야 한다(#224, ADR-0031 「clone 한 커밋은 전부 남긴다」) —
+    「이 저장소를 언제 어느 커밋으로 받았는가」와 「그중 무엇이 채점에 쓰였는가」는
+    다른 질문이다. staging에서 `octocat/Hello-World`가 실제로 이 경로를 밟았다 —
+    확장자 없는 파일(README)만 있어 선별이 하나도 못 골랐는데, 박제본은 만들어졌고
+    스냅샷은 없었다.
+    """
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+
+    repo_url = _repository_url("public-org")
+
+    # README(확장자 없음)는 source_selection.ALLOWED_EXTENSIONS 어디에도 걸리지
+    # 않아 선별에서 통째로 빠진다 — octocat/Hello-World가 staging에서 실제로
+    # 이 모양이었다. 소스 자료는 하나도 내지 않는다(저장소만 낸 제출) — ADR-0030의
+    # 박제 조건과 이 티켓의 스냅샷 조건이 같은 clone 위에서 함께 성립하는지를
+    # 이 테스트가 함께 고정한다.
+    with override_settings(GITHUB_FAKE_REPO_FILES={repo_url: {"README": "Hello World!\n"}}):
+        response = client.post(
+            f"{CONTESTS_URL}/{contest['id']}/submissions",
+            data={
+                "assets": [{"kind": "repository", "value": repo_url}],
+                "requirement_responses": [
+                    {
+                        "requirement_id": requirement_id,
+                        "is_met": True,
+                        "evidence": [
+                            {"kind": "source_location", "value": "never appears anywhere"}
+                        ],
+                    }
+                ],
+            },
+            content_type="application/json",
+            **_auth_header(dev["access"]),
+        )
+        assert response.status_code == 201, response.content
+        submission = response.json()
+
+        _run_visibility_scan(client)
+        _close_contest(client, contest, deadline=deadline)
+        result = _run_scoring(client)
+
+    assert result["rows"][0]["status"] == "scored"
+
+    score = Score.objects.get(submission_id=submission["id"])
+    # 근거가 선별된 소스 어디에도 없었으니 미달로 채점된다 — LLM이 실제로 호출된
+    # 정상 경로다(ADR-0030의 "채점 입력 0건" 자동 미달과는 다르다: clone은
+    # 성공했으므로 `cloned_repositories`가 비지 않아 그 분기를 타지 않는다).
+    assert score.percentage == Decimal("0.00")
+    assert score.model_version != "platform-auto (채점 입력 없음)"
+
+    repository_asset = Submission.objects.get(id=submission["id"]).assets.get(
+        kind=SubmissionAsset.Kind.REPOSITORY
+    )
+    # 선별이 그 저장소에서 파일을 하나도 고르지 못했으므로 scored_assets에는
+    # 없다 — "쓰였는가"는 여전히 그것이 답한다. 스냅샷에 그 구분을 담는 필드를
+    # 만들지 않는다는 것이 이 티켓의 규율이다(#224).
+    assert all(e["asset_id"] != repository_asset.id for e in score.scored_assets)
+
+    # 그래도 clone은 성공했으므로 스냅샷은 남아야 한다 — 이 티켓의 핵심.
+    snapshot = RepositorySnapshot.objects.get(asset=repository_asset)
+    assert len(snapshot.commit_sha) == 40
+
+    # 소스 자료가 하나도 없는 제출이므로 ADR-0030의 박제도 함께 일어난다 — 박제와
+    # 스냅샷이 이제 같은 조건(clone 성공) 위에서 함께 생긴다.
+    archived = Submission.objects.get(id=submission["id"]).assets.filter(
+        kind=SubmissionAsset.Kind.SOURCE, created_by_platform=True
+    )
+    assert archived.count() == 1
+    assert snapshot.commit_sha[:12] in archived.get().label
 
 
 @pytest.mark.django_db
