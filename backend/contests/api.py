@@ -12,11 +12,8 @@
 # 없어도 아쉬울 것이 없다.
 
 import logging
-from uuid import UUID, uuid4
+from uuid import UUID
 
-from datetime import timedelta
-
-from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import Count, DateTimeField, Q, QuerySet, Sum, Value
 from django.http import HttpRequest
@@ -27,9 +24,10 @@ from ninja.pagination import PageNumberPagination, paginate
 from accounts.middleware import jwt_auth
 from contests.curation import HomeCurationBucket, home_bucket_for, home_bucket_queryset
 from contests.images import (
-    ALLOWED_CONTEST_IMAGE_CONTENT_TYPES,
-    MAX_CONTEST_IMAGE_BYTES,
-    contest_image_target_ref,
+    create_image as create_contest_image_for,
+    remove_image as remove_contest_image_for,
+    reorder_image as reorder_contest_image_for,
+    request_upload_url as request_contest_image_upload_url_for,
 )
 from contests.sponsorship import sponsored_contest_queryset
 from accounts.models import SponsorProfile
@@ -40,7 +38,6 @@ from payments.adapters import PGError, get_adapter
 from payments.charges import settle_charge
 from payments.models import Payment
 from policies.scope import current_policy
-from storage.adapters import Bucket, get_storage_adapter
 from storage.public import compose_public_image_url
 from verification.models import Verification
 
@@ -684,9 +681,13 @@ def reopen_contest(request: HttpRequest, contest_id: int, payload: ContestReopen
     (#22, ADR-0001).
 
     요구사항(`Requirement`, 이 프로젝트의 "체크리스트")·`Category`·`DeliverableType`
-    선택·제목·설명은 원본에서 그대로 복제된다 — Prize와 마감기한만 새로 받는다. 이
-    코드베이스에는 아직 Contest에 별도의 Attachment 모델이 없다(그런 필드가 추가되면
-    이 복제 로직도 함께 손봐야 한다).
+    선택·제목·설명·**참고 이미지(`ContestImage`, #236)**는 원본에서 그대로
+    복제된다 — Prize와 마감기한만 새로 받는다. 이미지는 순서까지 그대로
+    복제되지만 바이트는 옮기지 않는다: 새 `ContestImage` 행이 원본과 **같은
+    `object_key`**를 가리킨다(어댑터에 복사 메서드가 없다, ADR-0005/0032) — 그래서
+    한 오브젝트를 원본과 사본 두 Contest가 함께 참조하게 되고, 어느 한쪽에서
+    이미지를 빼도(`remove_contest_image`가 행만 지운다) 다른 쪽의 이미지는
+    깨지지 않는다.
 
     새 Contest는 원본과 완전히 별개의 행이다 — `ledger_id`가 새로 발급되고(모델
     필드의 `default=uuid.uuid4`), `source_contest`만 원본을 가리킨다. 그래서 결제·
@@ -787,6 +788,21 @@ def reopen_contest(request: HttpRequest, contest_id: int, payload: ContestReopen
                     order=requirement.order,
                 )
                 for requirement in original.requirements.all()
+            ]
+        )
+
+        # 참고 이미지도 순서까지 그대로 복제한다(#236) — 새 행이 원본과 같은
+        # object_key를 가리킨다("지우지 않고 행만 뗀다", ADR-0032). 원본이 재개최
+        # 시점에 이미 정원(`PlatformPolicy.max_contest_images`)을 지켰던 행이므로
+        # 그 상한을 여기서 다시 확인할 이유가 없다 — 개수가 늘지 않는 복제다.
+        ContestImage.objects.bulk_create(
+            [
+                ContestImage(
+                    contest=new_contest,
+                    object_key=image.object_key,
+                    order=image.order,
+                )
+                for image in original.images.all()
             ]
         )
 
@@ -1176,13 +1192,14 @@ def delete_requirement(request: HttpRequest, contest_id: int, requirement_id: in
     return {"success": True}
 
 
-# --- ContestImage (#234, ADR-0032) -----------------------------------------------
-
-
-def _serialize_contest_image(image: ContestImage) -> ContestImageOut:
-    return ContestImageOut(
-        id=image.id, url=compose_public_image_url(image.object_key), order=image.order
-    )
+# --- ContestImage (#234/#236, ADR-0032) ---------------------------------------
+#
+# 발급·등록·순서변경·제거의 실제 로직은 `contests.images`에 있다 — 이 라우터는
+# 자기 게이트(`_get_owned_draft_contest`: 소유자 + DRAFT + not is_assignment)로
+# 확인한 `Contest`를 그 함수들에 넘길 뿐이다. `contests.assignment_api`가 같은
+# 함수들을 자신의 게이트(`_get_owned_editable_assignment`)로 부른다(#236) — 「무엇을
+# 고칠 수 있는가」는 두 게이트가 각자 답하고 「어떻게 고치는가」는 이 모듈이
+# 한 번만 답한다.
 
 
 @router.post(
@@ -1208,37 +1225,7 @@ def request_contest_image_upload_url(
     """
 
     contest = _get_owned_draft_contest(request, contest_id)
-
-    if payload.content_type not in ALLOWED_CONTEST_IMAGE_CONTENT_TYPES:
-        raise HttpError(
-            422,
-            "이미지는 png/jpeg/webp/gif 형식만 올릴 수 있습니다.",
-        )
-
-    policy = current_policy()
-    if contest.images.count() >= policy.max_contest_images:
-        raise HttpError(
-            422, f"이미지는 최대 {policy.max_contest_images}장까지 올릴 수 있습니다."
-        )
-
-    target_ref = contest_image_target_ref(contest.id)
-    object_key = f"{target_ref}/{uuid4().hex}"
-
-    adapter = get_storage_adapter()
-    presigned = adapter.presign_upload(
-        object_key,
-        bucket=Bucket.PUBLIC_IMAGES,
-        content_type=payload.content_type,
-        expires_in=timedelta(seconds=settings.STORAGE_UPLOAD_URL_TTL_SECONDS),
-        max_size_bytes=MAX_CONTEST_IMAGE_BYTES,
-    )
-    return ContestImageUploadUrlOut(
-        object_key=presigned.object_key,
-        upload_url=presigned.url,
-        method=presigned.method,
-        fields=presigned.fields,
-        expires_at=presigned.expires_at.isoformat(),
-    )
+    return request_contest_image_upload_url_for(contest, payload)
 
 
 @router.post(
@@ -1246,31 +1233,10 @@ def request_contest_image_upload_url(
 )
 def add_contest_image(request: HttpRequest, contest_id: int, payload: ContestImageCreateIn):
     """브라우저가 presigned POST로 실제 바이트를 올린 뒤, 그 object_key를 이
-    Contest의 이미지 목록에 등록한다 (#234).
-
-    `object_key`가 이 Contest의 target_ref 아래인지 확인한다 — 안 그러면 남의
-    upload-url 응답에서 얻은(또는 추측한) object_key를 자기 Contest에 붙여
-    다른 Contest의 이미지를 여기 슬롯에 매다는 경로가 열린다(storage/api.py의
-    `request_download`가 target_ref/object_key 일치를 확인하는 것과 같은 이유).
-    """
+    Contest의 이미지 목록에 등록한다 (#234)."""
 
     contest = _get_owned_draft_contest(request, contest_id)
-
-    target_ref = contest_image_target_ref(contest.id)
-    if not payload.object_key.startswith(f"{target_ref}/"):
-        raise HttpError(422, "object_key가 이 Contest에 속하지 않습니다.")
-
-    policy = current_policy()
-    if contest.images.count() >= policy.max_contest_images:
-        raise HttpError(
-            422, f"이미지는 최대 {policy.max_contest_images}장까지 올릴 수 있습니다."
-        )
-
-    next_order = contest.images.count()
-    image = ContestImage.objects.create(
-        contest=contest, object_key=payload.object_key, order=next_order
-    )
-    return _serialize_contest_image(image)
+    return create_contest_image_for(contest, payload)
 
 
 @router.patch(
@@ -1282,15 +1248,7 @@ def reorder_contest_image(
     """Sponsor가 이미지의 노출 순서를 고친다 (#234) — Requirement.order와 같은 모양."""
 
     contest = _get_owned_draft_contest(request, contest_id)
-
-    try:
-        image = contest.images.get(id=image_id)
-    except ContestImage.DoesNotExist as exc:
-        raise HttpError(404, "이미지를 찾을 수 없습니다.") from exc
-
-    image.order = payload.order
-    image.save(update_fields=["order"])
-    return _serialize_contest_image(image)
+    return reorder_contest_image_for(contest, image_id, payload)
 
 
 @router.delete("/contests/{contest_id}/images/{image_id}", auth=jwt_auth)
@@ -1300,11 +1258,5 @@ def remove_contest_image(request: HttpRequest, contest_id: int, image_id: int):
     오브젝트를 가리키는 새 행을 만들 수 있기 때문이다."""
 
     contest = _get_owned_draft_contest(request, contest_id)
-
-    try:
-        image = contest.images.get(id=image_id)
-    except ContestImage.DoesNotExist as exc:
-        raise HttpError(404, "이미지를 찾을 수 없습니다.") from exc
-
-    image.delete()
+    remove_contest_image_for(contest, image_id)
     return {"success": True}

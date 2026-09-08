@@ -199,6 +199,75 @@ export interface paths {
         patch: operations["contests_assignment_api_update_assignment"];
         trace?: never;
     };
+    "/api/assignments/{assignment_id}/images": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Assignment Image
+         * @description 브라우저가 presigned POST로 실제 바이트를 올린 뒤, 그 object_key를 이
+         *     과제의 이미지 목록에 등록한다.
+         */
+        post: operations["contests_assignment_api_add_assignment_image"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assignments/{assignment_id}/images/upload-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request Assignment Image Upload Url
+         * @description 강사가 참고 이미지를 올리기 전, 공개 이미지 버킷으로의 presigned POST를
+         *     받는다 — `contests.api.request_contest_image_upload_url`과 같은 자리.
+         */
+        post: operations["contests_assignment_api_request_assignment_image_upload_url"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assignments/{assignment_id}/images/{image_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Assignment Image
+         * @description 이미지를 뺀다 — 이 행만 지운다(공모전과 같은 이유, ADR-0005/0032). 재개최는
+         *     과제에 없으므로(REOPENABLE이 REFUNDED Payment를 요구하고 과제에는 결제가
+         *     없다) 지금은 어느 다른 Contest도 이 object_key를 참조하지 않지만, 어댑터에
+         *     삭제 메서드가 없다는 사실 자체는 종류와 무관하다.
+         */
+        delete: operations["contests_assignment_api_remove_assignment_image"];
+        options?: never;
+        head?: never;
+        /**
+         * Reorder Assignment Image
+         * @description 강사가 이미지의 노출 순서를 고친다.
+         */
+        patch: operations["contests_assignment_api_reorder_assignment_image"];
+        trace?: never;
+    };
     "/api/assignments/{assignment_id}/invite-code/reissue": {
         parameters: {
             query?: never;
@@ -793,11 +862,6 @@ export interface paths {
          * Add Contest Image
          * @description 브라우저가 presigned POST로 실제 바이트를 올린 뒤, 그 object_key를 이
          *     Contest의 이미지 목록에 등록한다 (#234).
-         *
-         *     `object_key`가 이 Contest의 target_ref 아래인지 확인한다 — 안 그러면 남의
-         *     upload-url 응답에서 얻은(또는 추측한) object_key를 자기 Contest에 붙여
-         *     다른 Contest의 이미지를 여기 슬롯에 매다는 경로가 열린다(storage/api.py의
-         *     `request_download`가 target_ref/object_key 일치를 확인하는 것과 같은 이유).
          */
         post: operations["contests_api_add_contest_image"];
         delete?: never;
@@ -941,9 +1005,13 @@ export interface paths {
          *     (#22, ADR-0001).
          *
          *     요구사항(`Requirement`, 이 프로젝트의 "체크리스트")·`Category`·`DeliverableType`
-         *     선택·제목·설명은 원본에서 그대로 복제된다 — Prize와 마감기한만 새로 받는다. 이
-         *     코드베이스에는 아직 Contest에 별도의 Attachment 모델이 없다(그런 필드가 추가되면
-         *     이 복제 로직도 함께 손봐야 한다).
+         *     선택·제목·설명·**참고 이미지(`ContestImage`, #236)**는 원본에서 그대로
+         *     복제된다 — Prize와 마감기한만 새로 받는다. 이미지는 순서까지 그대로
+         *     복제되지만 바이트는 옮기지 않는다: 새 `ContestImage` 행이 원본과 **같은
+         *     `object_key`**를 가리킨다(어댑터에 복사 메서드가 없다, ADR-0005/0032) — 그래서
+         *     한 오브젝트를 원본과 사본 두 Contest가 함께 참조하게 되고, 어느 한쪽에서
+         *     이미지를 빼도(`remove_contest_image`가 행만 지운다) 다른 쪽의 이미지는
+         *     깨지지 않는다.
          *
          *     새 Contest는 원본과 완전히 별개의 행이다 — `ledger_id`가 새로 발급되고(모델
          *     필드의 `default=uuid.uuid4`), `source_contest`만 원본을 가리킨다. 그래서 결제·
@@ -2977,6 +3045,11 @@ export interface components {
             description: string;
             /** Id */
             id: number;
+            /**
+             * Images
+             * @default []
+             */
+            images: components["schemas"]["ContestImageOut"][];
             /** Invite Code */
             invite_code?: string | null;
             /**
@@ -5391,6 +5464,106 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AssignmentOut"];
+                };
+            };
+        };
+    };
+    contests_assignment_api_add_assignment_image: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContestImageCreateIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContestImageOut"];
+                };
+            };
+        };
+    };
+    contests_assignment_api_request_assignment_image_upload_url: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContestImageUploadUrlIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContestImageUploadUrlOut"];
+                };
+            };
+        };
+    };
+    contests_assignment_api_remove_assignment_image: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: number;
+                image_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    contests_assignment_api_reorder_assignment_image: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: number;
+                image_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContestImageReorderIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContestImageOut"];
                 };
             };
         };

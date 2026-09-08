@@ -25,6 +25,8 @@ import {
   requirementDraftsToIn,
   type RequirementDraft,
 } from "@/lib/assignments/requirement-checklist-editor";
+import { ContestImagePanel } from "../../contests/_components/contest-image-panel";
+import type { ContestImage } from "@/lib/upload/use-contest-image-upload";
 
 type AssignmentDetail = components["schemas"]["AssignmentOut"];
 type AssignmentSubmissionRow = components["schemas"]["AssignmentSubmissionOut"];
@@ -56,6 +58,7 @@ export default function AssignmentDetailPage() {
   const [description, setDescription] = useState("");
   const [deadlineAt, setDeadlineAt] = useState("");
   const [requirementDrafts, setRequirementDrafts] = useState<RequirementDraft[]>([]);
+  const [images, setImages] = useState<ContestImage[]>([]);
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
@@ -71,6 +74,7 @@ export default function AssignmentDetailPage() {
     setDescription(state.data.description);
     setDeadlineAt(toDeadlineInputValue(state.data.deadline_at));
     setRequirementDrafts(requirementDraftsFromOut(state.data.requirements));
+    setImages(Array.isArray(state.data.images) ? state.data.images : []);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 응답이 새로 도착했을 때만 폼을 되돌린다.
   }, [state.status === "ready" ? state.data.id : null, state.status === "ready" ? state.data.status : null]);
 
@@ -323,6 +327,19 @@ export default function AssignmentDetailPage() {
           ) : null}
         </div>
       ) : null}
+
+      {/* 참고 이미지 (#236, ADR-0032) — 공모전과 같은 규칙, 게이트만 다르다:
+          「첫 제출이 문을 닫는다」(`isEditable`이 이미 그 판정을 담고 있다,
+          `_get_owned_editable_assignment`와 정확히 같은 술어). 잠긴 뒤에도
+          섹션 자체는 그려 강사가 무엇을 올렸는지 계속 볼 수 있게 하고,
+          업로드·순서변경·제거 컨트롤만 숨긴다(`ContestImagePanel`의 `editable`). */}
+      <ContestImagePanel
+        contestId={Number(assignmentId)}
+        images={images}
+        editable={isEditable}
+        onImagesChange={setImages}
+        resourcePath="assignments"
+      />
 
       {isLockedByFirstSubmission ? (
         <div className="border-t border-rule pt-6" data-testid="assignment-requirements-locked">

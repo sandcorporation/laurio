@@ -347,6 +347,33 @@ export default function AssignmentInvitePage() {
         </p>
       </div>
 
+      {/* 강사가 붙인 참고 이미지 (#236, ADR-0032) — 공모전 상세와 같은 자리
+          (spec #225 user story 10/24). InviteCode를 아는 사람만 이 화면 자체에
+          닿으므로(`GET /assignments/invite/{code}`, auth=None) 이미지 URL을
+          따로 감출 이유는 없다 — 경계는 InviteCode이지 URL의 추측 불가능성이
+          아니다. 이미지가 없으면 섹션 자체를 그리지 않는다(공모전과 같은 원칙 —
+          spec #225 user story 15). */}
+      {data.images.length > 0 && (
+        <section className="flex flex-col gap-3" data-testid="assignment-invite-images">
+          <h2 className="text-sm font-medium">참고 이미지</h2>
+          <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {data.images.map((image) => (
+              <li key={image.id}>
+                <a href={image.url} target="_blank" rel="noreferrer" data-testid="assignment-image-link">
+                  {/* eslint-disable-next-line @next/next/no-img-element -- 공개 버킷의 서명 없는 URL */}
+                  <img
+                    src={image.url}
+                    alt=""
+                    loading="lazy"
+                    className="aspect-video w-full rounded-sm border border-rule object-cover"
+                  />
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {/* 제출 전 고지 둘 — 스펙 #197, 약관 항목 17·18. */}
       <div className="flex flex-col gap-1 border border-rule p-4 text-sm text-ink/80">
         <p data-testid="assignment-source-reading-notice">

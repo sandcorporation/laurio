@@ -510,6 +510,12 @@ class AssignmentOut(Schema):
     deadline_at: datetime
     status: str
     requirements: list[RequirementOut]
+    # 강사가 붙인 참고 이미지 (#236, ADR-0032) — `ContestOut.images`와 같은 자리
+    # (spec #225 "규칙을 가르면 화면마다 설명할 문장이 늘어난다"). 순서대로
+    # 온다. 편집 가능 여부는 이 목록이 아니라 `is_editable`이 답한다 — 이미지
+    # 추가·순서변경·제거도 그 값과 같은 게이트(`_get_owned_editable_assignment`)를
+    # 받는다.
+    images: list[ContestImageOut] = []
     created_at: datetime
     invite_code: str | None = None
     is_owner: bool = False
