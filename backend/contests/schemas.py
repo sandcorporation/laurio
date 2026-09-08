@@ -102,6 +102,46 @@ class DeliverableTypeChangeOut(Schema):
     changed_at: datetime
 
 
+# --- Category 운영자 관리 (#231) — DeliverableType과 같은 무게(위 주석 참고), 다만
+# minimum_prize가 없는 대신 이름을 고칠 수 있다. `CategoryOut`(공개, id·name만)과 갈라
+# 두는 이유도 위 `OperatorDeliverableTypeOut`과 같다 — 운영자는 비활성 Category도 봐야
+# 한다.
+
+
+class OperatorCategoryOut(Schema):
+    id: int
+    name: str
+    is_active: bool
+    # 예약된 Assignment Category(#213, ADR-0033)인가 — 화면이 이 값 하나로 편집·감추기
+    # 버튼을 꺼서, "왜 이 행만 안 먹히지"를 백엔드 422 메시지에서 처음 알게 하지 않는다.
+    is_reserved: bool
+
+
+class CategoryCreateIn(Schema):
+    name: str = Field(min_length=1, max_length=100)
+    reason: str
+
+
+class CategoryRenameIn(Schema):
+    name: str = Field(min_length=1, max_length=100)
+    reason: str
+
+
+class DeactivateCategoryIn(Schema):
+    reason: str
+
+
+class CategoryChangeOut(Schema):
+    id: int
+    category_id: int
+    operator_username: str
+    action: str
+    reason: str
+    before: dict
+    after: dict
+    changed_at: datetime
+
+
 class QuoteIn(Schema):
     deliverable_type_ids: list[int]
 

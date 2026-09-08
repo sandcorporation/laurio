@@ -24,7 +24,17 @@ from payments.charges import ChargeBase
 
 
 class Category(models.Model):
-    """Contest가 속한 산업·장르. DeliverableType과는 다른 축이다."""
+    """Contest가 속한 산업·장르. DeliverableType과는 다른 축이다.
+
+    운영자 앱이 `POST /operator/categories`(생성)·`POST /operator/categories/{id}`
+    (이름 수정)·`POST /operator/categories/{id}/deactivate`(감추기)로 조정한다
+    (#231, ADR-0023 준용). admin은 ADR-0019로 내려갔다. `DeliverableType`과 같은
+    무게로 다룬다 — 최소 제안 상금 같은 정책값은 없지만, 공개 목록의 분류 축이고
+    `Contest.category`가 PROTECT로 참조를 붙드는 것은 같다.
+
+    지우지 않고 비활성화(`is_active=False`)만 하는 이유도 `DeliverableType`과
+    같다 — 이미 이 Category로 열린 `Contest`가 있을 수 있어서다.
+    """
 
     name = models.CharField(max_length=100, unique=True)
     is_active = models.BooleanField(default=True)
@@ -34,6 +44,39 @@ class Category(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return self.name
+
+
+class CategoryChange(models.Model):
+    """`Category`에 대한 한 번의 변경 사건 — 누가·언제·무엇을·왜 (#231).
+
+    `DeliverableTypeChange`와 같은 규율이다(ADR-0023 준용) — Category는
+    공개 목록의 분류 축이고 Contest가 참조를 붙들고 있어 조용히 바뀌면
+    안 되는 무게가 있다. `action`으로 생성·이름 수정·비활성화 세 가지를
+    구별한다. `category`는 PROTECT다 — 이 이력이 참조를 잃지 않는다.
+    """
+
+    class Action(models.TextChoices):
+        CREATED = "created", "생성"
+        UPDATED = "updated", "수정"
+        DEACTIVATED = "deactivated", "비활성화"
+
+    category = models.ForeignKey(Category, related_name="changes", on_delete=models.PROTECT)
+    operator = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="category_changes", on_delete=models.PROTECT
+    )
+    action = models.CharField(max_length=16, choices=Action.choices)
+    reason = models.TextField()
+    before = models.JSONField()
+    after = models.JSONField()
+    changed_at = models.DateTimeField()
+
+    class Meta:
+        verbose_name = "카테고리 변경 이력"
+        verbose_name_plural = "카테고리 변경 이력"
+        ordering = ["-changed_at", "-id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"CategoryChange({self.action}, category_id={self.category_id})"
 
 
 class DeliverableType(models.Model):

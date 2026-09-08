@@ -1496,6 +1496,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operator/categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Categories */
+        get: operations["contests_operator_api_list_categories"];
+        put?: never;
+        /** Create Category Endpoint */
+        post: operations["contests_operator_api_create_category_endpoint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/categories/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Category Changes */
+        get: operations["contests_operator_api_list_category_changes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/categories/{category_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rename Category Endpoint */
+        post: operations["contests_operator_api_rename_category_endpoint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/categories/{category_id}/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Deactivate Category Endpoint */
+        post: operations["contests_operator_api_deactivate_category_endpoint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/operator/deliverable-types": {
         parameters: {
             query?: never;
@@ -2968,12 +3037,52 @@ export interface components {
             /** Submission Id */
             submission_id: number;
         };
+        /** CategoryChangeOut */
+        CategoryChangeOut: {
+            /** Action */
+            action: string;
+            /** After */
+            after: {
+                [key: string]: unknown;
+            };
+            /** Before */
+            before: {
+                [key: string]: unknown;
+            };
+            /** Category Id */
+            category_id: number;
+            /**
+             * Changed At
+             * Format: date-time
+             */
+            changed_at: string;
+            /** Id */
+            id: number;
+            /** Operator Username */
+            operator_username: string;
+            /** Reason */
+            reason: string;
+        };
+        /** CategoryCreateIn */
+        CategoryCreateIn: {
+            /** Name */
+            name: string;
+            /** Reason */
+            reason: string;
+        };
         /** CategoryOut */
         CategoryOut: {
             /** Id */
             id: number;
             /** Name */
             name: string;
+        };
+        /** CategoryRenameIn */
+        CategoryRenameIn: {
+            /** Name */
+            name: string;
+            /** Reason */
+            reason: string;
         };
         /** CiLookupIn */
         CiLookupIn: {
@@ -3315,6 +3424,11 @@ export interface components {
             cumulative_count: number;
             /** Date */
             date: string;
+        };
+        /** DeactivateCategoryIn */
+        DeactivateCategoryIn: {
+            /** Reason */
+            reason: string;
         };
         /** DeactivateDeliverableTypeIn */
         DeactivateDeliverableTypeIn: {
@@ -3759,6 +3873,17 @@ export interface components {
          * @enum {string}
          */
         NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "scoring_complete" | "appeal_ruled" | "new_contest_in_category" | "payout_awaits_you";
+        /** OperatorCategoryOut */
+        OperatorCategoryOut: {
+            /** Id */
+            id: number;
+            /** Is Active */
+            is_active: boolean;
+            /** Is Reserved */
+            is_reserved: boolean;
+            /** Name */
+            name: string;
+        };
         /** OperatorCreateIn */
         OperatorCreateIn: {
             /**
@@ -6485,6 +6610,194 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AssignmentPermissionErrorOut"];
+                };
+            };
+        };
+    };
+    contests_operator_api_list_categories: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorCategoryOut"][];
+                };
+            };
+        };
+    };
+    contests_operator_api_create_category_endpoint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CategoryCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorCategoryOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+        };
+    };
+    contests_operator_api_list_category_changes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CategoryChangeOut"][];
+                };
+            };
+        };
+    };
+    contests_operator_api_rename_category_endpoint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                category_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CategoryRenameIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorCategoryOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+        };
+    };
+    contests_operator_api_deactivate_category_endpoint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                category_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeactivateCategoryIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorCategoryOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
                 };
             };
         };
