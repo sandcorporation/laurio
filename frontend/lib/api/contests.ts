@@ -14,6 +14,7 @@ export type Category = components["schemas"]["CategoryOut"];
 export type DeliverableType = components["schemas"]["DeliverableTypeOut"];
 export type Contest = components["schemas"]["ContestOut"];
 export type Requirement = components["schemas"]["RequirementOut"];
+export type ContestImage = components["schemas"]["ContestImageOut"];
 
 export type ContestSort = components["schemas"]["ContestSort"];
 

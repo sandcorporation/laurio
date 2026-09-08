@@ -25,6 +25,8 @@ class PolicyOut(Schema):
     max_demo_url_assets: int
     max_repository_assets: int
     max_scoring_input_assets: int
+    # #234 — Contest 하나에 붙일 수 있는 ContestImage 개수 상한.
+    max_contest_images: int
     # 낙관적 동시성 제어에 쓰는 값 — PATCH의 `expected_version`에 그대로
     # 되돌려 보내야 한다.
     version: int
@@ -44,6 +46,8 @@ class PolicyUpdateIn(Schema):
     max_demo_url_assets: int | None = Field(default=None, ge=1)
     max_repository_assets: int | None = Field(default=None, ge=1)
     max_scoring_input_assets: int | None = Field(default=None, ge=1)
+    # #234
+    max_contest_images: int | None = Field(default=None, ge=1)
     # 돈을 움직이는 판단에 근거가 없으면 감사 기록으로서 값이 없다
     # (AppealRuling.note와 같은 규율).
     reason: str

@@ -691,6 +691,41 @@ class Requirement(models.Model):
         return self.text
 
 
+class ContestImage(models.Model):
+    """Sponsor가 Contest에 붙이는 참고 이미지 (#234, ADR-0032). CONTEXT.md 「ContestImage」.
+
+    `object_key`는 공개 이미지 버킷(`storage.adapters.base.Bucket.PUBLIC_IMAGES`)에
+    사는 오브젝트를 가리킨다 — 브라우저가 presigned POST로 그 버킷에 직접 올린 뒤,
+    이 행이 그 object_key를 기록해 Contest와 순서를 붙인다. 이 티켓은 원본만
+    다룬다 — 썸네일·본문용 webp 파생본은 #235가 얹는다.
+
+    편집 게이트는 Requirement와 똑같다 — `contests.api._get_owned_draft_contest`
+    (소유자 + status==DRAFT + not is_assignment)가 이미지 추가·순서 변경·제거를
+    함께 지킨다. 이미지도 Contest의 조건이므로 결제가 문을 닫으면 더 이상 손댈 수
+    없다(spec #225 "결제가 이미지도 닫는다").
+
+    **빼는 것은 이 행만 지우는 일이다 — object_key가 가리키는 바이트는 지우지
+    않는다.** 어댑터에 삭제 메서드가 없다(ADR-0005/0032가 의도적으로 뺐다). 재개최
+    (#236)가 같은 object_key를 가리키는 새 행을 만들 수 있으므로, 실제로 오브젝트를
+    지우면 원본 Contest의 이미지가 깨진다.
+    """
+
+    contest = models.ForeignKey(Contest, related_name="images", on_delete=models.CASCADE)
+    # 공개 이미지 버킷의 오브젝트 키. storage/api.py의 object_key 상한(600자
+    # 이하 — "<target_ref>/<32자리 hex>")과 같은 여유를 둔다.
+    object_key = models.CharField(max_length=600)
+    order = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["order", "id"]
+        verbose_name = "공모전 이미지"
+        verbose_name_plural = "공모전 이미지"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ContestImage(contest_id={self.contest_id}, object_key={self.object_key})"
+
+
 class JudgingExtensionPayment(ChargeBase):
     """심사기간 유료 연장 결제 시도 하나 (#13, #126, ADR-0004/0007/0008).
 

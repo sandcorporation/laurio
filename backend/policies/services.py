@@ -35,6 +35,9 @@ UPDATABLE_FIELDS = frozenset(
         "max_demo_url_assets",
         "max_repository_assets",
         "max_scoring_input_assets",
+        # #234 — Contest 하나에 붙일 수 있는 ContestImage 개수 상한. 같은 이유로
+        # 처음부터 이 집합에 들어온다.
+        "max_contest_images",
     }
 )
 
@@ -52,6 +55,7 @@ _FIELD_BOUNDS: dict[str, tuple[int, int]] = {
     "max_demo_url_assets": (1, 50),
     "max_repository_assets": (1, 50),
     "max_scoring_input_assets": (1, 50),
+    "max_contest_images": (1, 50),
 }
 
 

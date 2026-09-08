@@ -175,6 +175,13 @@ class PlatformPolicy(models.Model):
     # 아니라 8로 두는 이유도 이것이다(합산 8이 지배하므로 10은 거짓말이 된다).
     max_scoring_input_assets = models.PositiveIntegerField(default=8)
 
+    # Contest 하나에 붙일 수 있는 ContestImage 개수 상한 (#234, ADR-0032). 나머지
+    # 자산 상한과 같은 자리(단일 행)에 둔다 — 사업이 정하는 값이라 배포 없이
+    # 운영자가 조정할 수 있어야 하고 바뀌면 이력이 남아야 한다(ADR-0023). 이미지는
+    # 채점 입력이 아니므로 `max_scoring_input_assets`가 묶는 LLM 컨텍스트 예산과는
+    # 무관하다 — 그래서 별도 필드다.
+    max_contest_images = models.PositiveIntegerField(default=10)
+
     # 낙관적 동시성 제어(#76) — GET이 이 값을 함께 돌려주고, PATCH는 호출자가
     # 그때 읽은 값을 `expected_version`으로 되돌려 보내야 한다.
     # `select_for_update()`로 잠근 뒤 `version`이 일치할 때만 갱신하고, 갱신할
@@ -320,6 +327,7 @@ class PlatformPolicy(models.Model):
                     "max_demo_url_assets",
                     "max_repository_assets",
                     "max_scoring_input_assets",
+                    "max_contest_images",
                 )
             ),
         ]

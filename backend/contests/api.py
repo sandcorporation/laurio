@@ -12,10 +12,11 @@
 # 없어도 아쉬울 것이 없다.
 
 import logging
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from datetime import timedelta
 
+from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import Count, DateTimeField, Q, QuerySet, Sum, Value
 from django.http import HttpRequest
@@ -25,6 +26,11 @@ from ninja.pagination import PageNumberPagination, paginate
 
 from accounts.middleware import jwt_auth
 from contests.curation import HomeCurationBucket, home_bucket_for, home_bucket_queryset
+from contests.images import (
+    ALLOWED_CONTEST_IMAGE_CONTENT_TYPES,
+    MAX_CONTEST_IMAGE_BYTES,
+    contest_image_target_ref,
+)
 from contests.sponsorship import sponsored_contest_queryset
 from accounts.models import SponsorProfile
 from accounts.sanitize import sanitize_free_text
@@ -34,11 +40,14 @@ from payments.adapters import PGError, get_adapter
 from payments.charges import settle_charge
 from payments.models import Payment
 from policies.scope import current_policy
+from storage.adapters import Bucket, get_storage_adapter
+from storage.public import compose_public_image_url
 from verification.models import Verification
 
 from .models import (
     Category,
     Contest,
+    ContestImage,
     DeliverableType,
     HomeStatusAxis,
     JudgingExtensionPayment,
@@ -58,6 +67,11 @@ from .schemas import (
     MySponsoredContestOut,
     MySponsoredContestPageOut,
     CategoryOut,
+    ContestImageCreateIn,
+    ContestImageOut,
+    ContestImageReorderIn,
+    ContestImageUploadUrlIn,
+    ContestImageUploadUrlOut,
     ContestListFilters,
     ContestSort,
     ConfirmJudgingExtensionIn,
@@ -135,6 +149,10 @@ def _serialize_contest(contest: Contest, auth_user: object | None = None) -> Con
         requirements=[
             RequirementOut(id=r.id, text=r.text, grade=r.grade, order=r.order)
             for r in contest.requirements.all()
+        ],
+        images=[
+            ContestImageOut(id=img.id, url=compose_public_image_url(img.object_key), order=img.order)
+            for img in contest.images.all()
         ],
         source_contest_id=contest.source_contest_id,
         created_at=contest.created_at,
@@ -345,7 +363,7 @@ def list_contests(request: HttpRequest, filters: Query[ContestListFilters]):
     return (
         queryset.order_by(*ordering)
         .select_related("category")
-        .prefetch_related("deliverable_types", "requirements")
+        .prefetch_related("deliverable_types", "requirements", "images")
         # 참가작 수(#106, spec #105) — 목록은 행이 가장 많은 화면이라 행마다
         # 세면 N+1이 정확히 여기서 터진다. `distinct=True`는 `deliverable_type`
         # 필터가 M2M을 조인할 때(위 `deliverable_types__id` 필터) Count가 그
@@ -452,7 +470,7 @@ def get_home_curation(request: HttpRequest):
 
     base = (
         Contest.objects.select_related("category")
-        .prefetch_related("deliverable_types", "requirements")
+        .prefetch_related("deliverable_types", "requirements", "images")
         # 참가작 수(#106, spec #105) — 네 묶음 각각의 쿼리(home_bucket_queryset)가
         # 이 `base`를 그대로 이어받아 필터만 얹으므로, annotate를 여기 한 번만
         # 둬도 네 쿼리 전부에 실린다. 홈 큐레이션이 이미 경계해 둔 N+1(#94)과
@@ -499,7 +517,7 @@ def get_contest(request: HttpRequest, contest_id: int):
             # 읽으므로, 여기서 미리 조인해 두지 않으면 로그인한 방문자가 볼 때마다
             # SponsorProfile을 한 번 더 조회하는 N+1이 생긴다.
             Contest.objects.select_related("category", "sponsor")
-            .prefetch_related("deliverable_types", "requirements")
+            .prefetch_related("deliverable_types", "requirements", "images")
             # 참가작 수(#106, spec #105) — 단건이라도 annotate로 얻는다.
             # `_serialize_contest`가 `contest.submission_count`를 그대로 읽는다.
             .annotate(submission_count=Count("submissions", distinct=True))
@@ -1155,4 +1173,138 @@ def delete_requirement(request: HttpRequest, contest_id: int, requirement_id: in
         raise HttpError(404, "Requirement를 찾을 수 없습니다.") from exc
 
     requirement.delete()
+    return {"success": True}
+
+
+# --- ContestImage (#234, ADR-0032) -----------------------------------------------
+
+
+def _serialize_contest_image(image: ContestImage) -> ContestImageOut:
+    return ContestImageOut(
+        id=image.id, url=compose_public_image_url(image.object_key), order=image.order
+    )
+
+
+@router.post(
+    "/contests/{contest_id}/images/upload-url",
+    response=ContestImageUploadUrlOut,
+    auth=jwt_auth,
+)
+def request_contest_image_upload_url(
+    request: HttpRequest, contest_id: int, payload: ContestImageUploadUrlIn
+):
+    """Sponsor가 참고 이미지를 올리기 전, 공개 이미지 버킷으로의 presigned POST를
+    받는다 (#234).
+
+    게이트는 Requirement와 같은 `_get_owned_draft_contest` — 소유자가 아니면
+    404, DRAFT를 벗어났으면 409다("자기 공모전이 아니면 업로드를 발급받을 수
+    없다", spec #225 acceptance criteria).
+
+    presigned **POST**를 쓴다(presigned PUT이 아니다) — 크기 상한
+    (`MAX_CONTEST_IMAGE_BYTES`)과 `content_type`을 서명된 정책 조건에 담아,
+    브라우저를 믿지 않고 스토리지 자신이 위반을 거절하게 한다(ADR-0032). 실제로
+    행이 생기는 것은 업로드 완료 뒤 `POST .../images`를 호출할 때다 — 이 엔드포인트는
+    URL만 내준다.
+    """
+
+    contest = _get_owned_draft_contest(request, contest_id)
+
+    if payload.content_type not in ALLOWED_CONTEST_IMAGE_CONTENT_TYPES:
+        raise HttpError(
+            422,
+            "이미지는 png/jpeg/webp/gif 형식만 올릴 수 있습니다.",
+        )
+
+    policy = current_policy()
+    if contest.images.count() >= policy.max_contest_images:
+        raise HttpError(
+            422, f"이미지는 최대 {policy.max_contest_images}장까지 올릴 수 있습니다."
+        )
+
+    target_ref = contest_image_target_ref(contest.id)
+    object_key = f"{target_ref}/{uuid4().hex}"
+
+    adapter = get_storage_adapter()
+    presigned = adapter.presign_upload(
+        object_key,
+        bucket=Bucket.PUBLIC_IMAGES,
+        content_type=payload.content_type,
+        expires_in=timedelta(seconds=settings.STORAGE_UPLOAD_URL_TTL_SECONDS),
+        max_size_bytes=MAX_CONTEST_IMAGE_BYTES,
+    )
+    return ContestImageUploadUrlOut(
+        object_key=presigned.object_key,
+        upload_url=presigned.url,
+        method=presigned.method,
+        fields=presigned.fields,
+        expires_at=presigned.expires_at.isoformat(),
+    )
+
+
+@router.post(
+    "/contests/{contest_id}/images", response=ContestImageOut, auth=jwt_auth
+)
+def add_contest_image(request: HttpRequest, contest_id: int, payload: ContestImageCreateIn):
+    """브라우저가 presigned POST로 실제 바이트를 올린 뒤, 그 object_key를 이
+    Contest의 이미지 목록에 등록한다 (#234).
+
+    `object_key`가 이 Contest의 target_ref 아래인지 확인한다 — 안 그러면 남의
+    upload-url 응답에서 얻은(또는 추측한) object_key를 자기 Contest에 붙여
+    다른 Contest의 이미지를 여기 슬롯에 매다는 경로가 열린다(storage/api.py의
+    `request_download`가 target_ref/object_key 일치를 확인하는 것과 같은 이유).
+    """
+
+    contest = _get_owned_draft_contest(request, contest_id)
+
+    target_ref = contest_image_target_ref(contest.id)
+    if not payload.object_key.startswith(f"{target_ref}/"):
+        raise HttpError(422, "object_key가 이 Contest에 속하지 않습니다.")
+
+    policy = current_policy()
+    if contest.images.count() >= policy.max_contest_images:
+        raise HttpError(
+            422, f"이미지는 최대 {policy.max_contest_images}장까지 올릴 수 있습니다."
+        )
+
+    next_order = contest.images.count()
+    image = ContestImage.objects.create(
+        contest=contest, object_key=payload.object_key, order=next_order
+    )
+    return _serialize_contest_image(image)
+
+
+@router.patch(
+    "/contests/{contest_id}/images/{image_id}", response=ContestImageOut, auth=jwt_auth
+)
+def reorder_contest_image(
+    request: HttpRequest, contest_id: int, image_id: int, payload: ContestImageReorderIn
+):
+    """Sponsor가 이미지의 노출 순서를 고친다 (#234) — Requirement.order와 같은 모양."""
+
+    contest = _get_owned_draft_contest(request, contest_id)
+
+    try:
+        image = contest.images.get(id=image_id)
+    except ContestImage.DoesNotExist as exc:
+        raise HttpError(404, "이미지를 찾을 수 없습니다.") from exc
+
+    image.order = payload.order
+    image.save(update_fields=["order"])
+    return _serialize_contest_image(image)
+
+
+@router.delete("/contests/{contest_id}/images/{image_id}", auth=jwt_auth)
+def remove_contest_image(request: HttpRequest, contest_id: int, image_id: int):
+    """이미지를 뺀다 — **이 행만 지운다.** object_key가 가리키는 오브젝트는 그대로
+    남는다(어댑터에 삭제 메서드가 없다, ADR-0005/0032) — 재개최(#236)가 같은
+    오브젝트를 가리키는 새 행을 만들 수 있기 때문이다."""
+
+    contest = _get_owned_draft_contest(request, contest_id)
+
+    try:
+        image = contest.images.get(id=image_id)
+    except ContestImage.DoesNotExist as exc:
+        raise HttpError(404, "이미지를 찾을 수 없습니다.") from exc
+
+    image.delete()
     return {"success": True}

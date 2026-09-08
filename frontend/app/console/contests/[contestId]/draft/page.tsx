@@ -43,9 +43,11 @@ import {
 } from "@/lib/contests/grill-types";
 
 import { BriefEditPanel, type BriefEditPatch } from "../../_components/brief-edit-panel";
+import { ContestImagePanel } from "../../_components/contest-image-panel";
 import { ContestStageStepper } from "../../_components/contest-stage-stepper";
 import { GrillChatPanel } from "../../_components/grill-chat-panel";
 import { RequirementDraftPanel } from "../../_components/requirement-draft-panel";
+import type { ContestImage } from "@/lib/upload/use-contest-image-upload";
 
 type LoadState =
   | { status: "loading" }
@@ -71,6 +73,7 @@ export default function ContestDraftPage() {
   const [load, setLoad] = useState<LoadState>({ status: "loading" });
 
   const [requirements, setRequirements] = useState<RequirementOut[]>([]);
+  const [images, setImages] = useState<ContestImage[]>([]);
   const [messages, setMessages] = useState<ParsedChatTurn[]>([]);
   const [proposals, setProposals] = useState<ChatProposal[]>([]);
   const [sending, setSending] = useState(false);
@@ -119,6 +122,7 @@ export default function ContestDraftPage() {
       if (cancelled) return;
 
       setRequirements(Array.isArray(contest.data.requirements) ? contest.data.requirements : []);
+      setImages(Array.isArray(contest.data.images) ? contest.data.images : []);
       setMessages(sanitizeChatTurns(chat.ok ? chat.data : null));
       setCategories(categoriesResult.ok && Array.isArray(categoriesResult.data) ? categoriesResult.data : []);
       setDeliverableTypes(deliverableTypesResult.ok && Array.isArray(deliverableTypesResult.data) ? deliverableTypesResult.data : []);
@@ -292,6 +296,7 @@ export default function ContestDraftPage() {
       }
 
       setRequirements(Array.isArray(updated.requirements) ? updated.requirements : requirements);
+      setImages(Array.isArray(updated.images) ? updated.images : images);
       setLoad({ status: "ready", contest: updated });
       return true;
     } catch {
@@ -384,6 +389,12 @@ export default function ContestDraftPage() {
         deliverableTypesChangedNotice={deliverableTypesChangedNotice}
         onDismissDeliverableTypesChangedNotice={() => setDeliverableTypesChangedNotice(false)}
         onSave={handleSaveBrief}
+      />
+      <ContestImagePanel
+        contestId={contest.id}
+        images={images}
+        editable
+        onImagesChange={setImages}
       />
       <div className="grid flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_452px]">
         <GrillChatPanel

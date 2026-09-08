@@ -50,6 +50,7 @@ def _serialize_policy(policy: PlatformPolicy) -> PolicyOut:
         max_demo_url_assets=policy.max_demo_url_assets,
         max_repository_assets=policy.max_repository_assets,
         max_scoring_input_assets=policy.max_scoring_input_assets,
+        max_contest_images=policy.max_contest_images,
         version=policy.version,
         updated_at=policy.updated_at,
     )

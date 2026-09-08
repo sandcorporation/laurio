@@ -780,6 +780,89 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/contests/{contest_id}/images": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Contest Image
+         * @description 브라우저가 presigned POST로 실제 바이트를 올린 뒤, 그 object_key를 이
+         *     Contest의 이미지 목록에 등록한다 (#234).
+         *
+         *     `object_key`가 이 Contest의 target_ref 아래인지 확인한다 — 안 그러면 남의
+         *     upload-url 응답에서 얻은(또는 추측한) object_key를 자기 Contest에 붙여
+         *     다른 Contest의 이미지를 여기 슬롯에 매다는 경로가 열린다(storage/api.py의
+         *     `request_download`가 target_ref/object_key 일치를 확인하는 것과 같은 이유).
+         */
+        post: operations["contests_api_add_contest_image"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/contests/{contest_id}/images/upload-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request Contest Image Upload Url
+         * @description Sponsor가 참고 이미지를 올리기 전, 공개 이미지 버킷으로의 presigned POST를
+         *     받는다 (#234).
+         *
+         *     게이트는 Requirement와 같은 `_get_owned_draft_contest` — 소유자가 아니면
+         *     404, DRAFT를 벗어났으면 409다("자기 공모전이 아니면 업로드를 발급받을 수
+         *     없다", spec #225 acceptance criteria).
+         *
+         *     presigned **POST**를 쓴다(presigned PUT이 아니다) — 크기 상한
+         *     (`MAX_CONTEST_IMAGE_BYTES`)과 `content_type`을 서명된 정책 조건에 담아,
+         *     브라우저를 믿지 않고 스토리지 자신이 위반을 거절하게 한다(ADR-0032). 실제로
+         *     행이 생기는 것은 업로드 완료 뒤 `POST .../images`를 호출할 때다 — 이 엔드포인트는
+         *     URL만 내준다.
+         */
+        post: operations["contests_api_request_contest_image_upload_url"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/contests/{contest_id}/images/{image_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Contest Image
+         * @description 이미지를 뺀다 — **이 행만 지운다.** object_key가 가리키는 오브젝트는 그대로
+         *     남는다(어댑터에 삭제 메서드가 없다, ADR-0005/0032) — 재개최(#236)가 같은
+         *     오브젝트를 가리키는 새 행을 만들 수 있기 때문이다.
+         */
+        delete: operations["contests_api_remove_contest_image"];
+        options?: never;
+        head?: never;
+        /**
+         * Reorder Contest Image
+         * @description Sponsor가 이미지의 노출 순서를 고친다 (#234) — Requirement.order와 같은 모양.
+         */
+        patch: operations["contests_api_reorder_contest_image"];
+        trace?: never;
+    };
     "/api/contests/{contest_id}/metrics": {
         parameters: {
             query?: never;
@@ -3366,6 +3449,53 @@ export interface components {
             /** Title */
             title: string;
         };
+        /** ContestImageCreateIn */
+        ContestImageCreateIn: {
+            /** Object Key */
+            object_key: string;
+        };
+        /**
+         * ContestImageOut
+         * @description ContestImage 하나 (#234, ADR-0032).
+         *
+         *     `url`은 백엔드가 이미 조립한 서명 없는 공개 주소다(`storage.public.
+         *     compose_public_image_url`) — 화면은 "무엇을 보여줄지"를 다시 판정하지 않는다.
+         *     이 티켓은 원본만 있으므로 `url`은 항상 원본을 가리킨다 — 파생본이 생기면(#235)
+         *     이 필드가 그 규칙(최적화됐으면 파생본, 아니면 원본)을 그대로 흡수한다.
+         */
+        ContestImageOut: {
+            /** Id */
+            id: number;
+            /** Order */
+            order: number;
+            /** Url */
+            url: string;
+        };
+        /** ContestImageReorderIn */
+        ContestImageReorderIn: {
+            /** Order */
+            order: number;
+        };
+        /** ContestImageUploadUrlIn */
+        ContestImageUploadUrlIn: {
+            /** Content Type */
+            content_type: string;
+        };
+        /** ContestImageUploadUrlOut */
+        ContestImageUploadUrlOut: {
+            /** Expires At */
+            expires_at: string;
+            /** Fields */
+            fields: {
+                [key: string]: string;
+            };
+            /** Method */
+            method: string;
+            /** Object Key */
+            object_key: string;
+            /** Upload Url */
+            upload_url: string;
+        };
         /**
          * ContestListFilters
          * @description `GET /api/contests` 의 필터·정렬 쿼리 (#39).
@@ -3434,6 +3564,11 @@ export interface components {
             description: string;
             /** Id */
             id: number;
+            /**
+             * Images
+             * @default []
+             */
+            images: components["schemas"]["ContestImageOut"][];
             /**
              * Is Owner
              * @default false
@@ -4296,6 +4431,8 @@ export interface components {
         };
         /** PolicyOut */
         PolicyOut: {
+            /** Max Contest Images */
+            max_contest_images: number;
             /** Max Demo Url Assets */
             max_demo_url_assets: number;
             /** Max Demo Video Assets */
@@ -4326,6 +4463,8 @@ export interface components {
         PolicyUpdateIn: {
             /** Expected Version */
             expected_version: number;
+            /** Max Contest Images */
+            max_contest_images?: number | null;
             /** Max Demo Url Assets */
             max_demo_url_assets?: number | null;
             /** Max Demo Video Assets */
@@ -5768,6 +5907,106 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    contests_api_add_contest_image: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contest_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContestImageCreateIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContestImageOut"];
+                };
+            };
+        };
+    };
+    contests_api_request_contest_image_upload_url: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contest_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContestImageUploadUrlIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContestImageUploadUrlOut"];
+                };
+            };
+        };
+    };
+    contests_api_remove_contest_image: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contest_id: number;
+                image_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    contests_api_reorder_contest_image: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contest_id: number;
+                image_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContestImageReorderIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContestImageOut"];
                 };
             };
         };

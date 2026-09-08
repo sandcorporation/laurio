@@ -11,7 +11,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { fetchContest, type Requirement } from "@/lib/api/contests";
+import { fetchContest, type ContestImage, type Requirement } from "@/lib/api/contests";
 import { formatDday, formatPrize, formatSubmissionCount, isImminent } from "@/lib/contest-format";
 
 import { SponsorJudgingEntry } from "./judging-entry";
@@ -161,6 +161,28 @@ export default async function ContestDetailPage({ params }: { params: Promise<Pa
         </section>
       )}
 
+      {/* 참고 이미지 (#234, ADR-0032) — 서버 컴포넌트가 그대로 <img>로 그린다.
+          JS 를 끄면 이 태그가 사라지는 게 아니라 그리는 코드 자체가 사라지므로
+          (`"use client"` 가 이 파일에 없다), 「공개 페이지가 실제로 서버
+          렌더링되는가」(CLAUDE.md 「남길 것」1번)를 이 섹션이 그대로 물려받는다.
+          이미지가 없으면 섹션 자체를 그리지 않는다 — 빈 자리가 의도된 것으로
+          읽힌다(spec #225 user story 15). 원본만 있다(#235가 파생본을 얹는다)
+          — url 은 백엔드가 이미 조립한 서명 없는 공개 주소이므로 화면은 그 값을
+          그대로 쓴다. */}
+      {contest.images.length > 0 && (
+        <section className="flex flex-col gap-3 border-b border-rule pb-6">
+          <h2 className="text-sm font-medium">참고 이미지</h2>
+          <ul
+            data-testid="contest-images"
+            className="grid grid-cols-2 gap-3 sm:grid-cols-3"
+          >
+            {contest.images.map((image) => (
+              <ContestImageThumb key={image.id} image={image} />
+            ))}
+          </ul>
+        </section>
+      )}
+
       {contest.description && (
         <section className="flex flex-col gap-2 border-b border-rule pb-6">
           <h2 className="text-sm font-medium">요구사항</h2>
@@ -183,6 +205,27 @@ export default async function ContestDetailPage({ params }: { params: Promise<Pa
         )}
       </section>
     </main>
+  );
+}
+
+function ContestImageThumb({ image }: { image: ContestImage }) {
+  return (
+    <li>
+      {/* 원본을 새 탭에서 그대로 연다(#234 AC "전체 크기로 열어 세부를 읽는다")
+          — 별도 라이트박스 없이 <a target="_blank">로 충분하다. 좁은 화면에서
+          가로 스크롤을 만들지 않도록 썸네일은 항상 카드 너비를 넘지 않는다. */}
+      <a href={image.url} target="_blank" rel="noreferrer" data-testid="contest-image-link">
+        {/* eslint-disable-next-line @next/next/no-img-element -- 오브젝트 키가 uuid라 캐시
+            무효화가 필요 없고(ADR-0032), next/image의 원격 최적화는 STORAGE_IMAGES_BASE_URL
+            을 배포마다 remotePatterns에 등록해야 해 배포 설정을 하나 더 늘린다. */}
+        <img
+          src={image.url}
+          alt=""
+          loading="lazy"
+          className="aspect-video w-full rounded-sm border border-rule object-cover"
+        />
+      </a>
+    </li>
   );
 }
 

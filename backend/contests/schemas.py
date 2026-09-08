@@ -170,6 +170,42 @@ class RequirementOut(Schema):
     order: int
 
 
+class ContestImageOut(Schema):
+    """ContestImage 하나 (#234, ADR-0032).
+
+    `url`은 백엔드가 이미 조립한 서명 없는 공개 주소다(`storage.public.
+    compose_public_image_url`) — 화면은 "무엇을 보여줄지"를 다시 판정하지 않는다.
+    이 티켓은 원본만 있으므로 `url`은 항상 원본을 가리킨다 — 파생본이 생기면(#235)
+    이 필드가 그 규칙(최적화됐으면 파생본, 아니면 원본)을 그대로 흡수한다.
+    """
+
+    id: int
+    url: str
+    order: int
+
+
+class ContestImageUploadUrlIn(Schema):
+    content_type: str
+
+
+class ContestImageUploadUrlOut(Schema):
+    object_key: str
+    upload_url: str
+    method: str
+    # presigned POST(#234)의 서명된 정책 필드 — multipart/form-data 본문에
+    # `file`보다 먼저 실어야 한다. PUT 이었던 시절에는 없었다(빈 dict).
+    fields: dict[str, str]
+    expires_at: str
+
+
+class ContestImageCreateIn(Schema):
+    object_key: str = Field(max_length=600)
+
+
+class ContestImageReorderIn(Schema):
+    order: int = Field(ge=0)
+
+
 class ContestCreateIn(Schema):
     title: str = Field(max_length=200)
     category_id: int
@@ -215,6 +251,9 @@ class ContestOut(Schema):
     required_minimum_prize: int
     is_underfunded: bool
     requirements: list[RequirementOut]
+    # Sponsor가 붙인 참고 이미지 (#234, ADR-0032) — 순서대로 온다. 빈 목록이면
+    # 화면이 "이미지가 없는 게 의도됐다"로 그린다(spec #225 user story 15).
+    images: list[ContestImageOut] = []
     # 유찰 재개최(#22, ADR-0001)로 만들어진 사본이면 원본 Contest의 id를 가리킨다.
     # 원본이면 None이다.
     source_contest_id: int | None = None
