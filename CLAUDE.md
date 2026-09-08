@@ -170,8 +170,9 @@ docker compose -f docker/compose.dev.yaml --profile celery up -d
 `admin.py` 도 없다 — admin 은 모델 행을 직접 편집할 수 있어서, `Appeal`·
 `AppealRuling` 을 그 화면에서 고칠 수 있는 한 감사 추적에 우회로가 남는다.
 
-사람이 판단하는 행위는 `/api/operator/*` 로만 한다. 운영자 앱이 나올 때까지는
-운영자가 HTTP 로 그 API 를 직접 친다.
+사람이 판단하는 행위는 `/api/operator/*` 로만 한다. 그 API 에는 이제 화면이 있다
+(`operator/`, #63) — 이의 심판·지급·정책·산출물 종류·카테고리(#231)·과제 자격·운영자
+계정이 각각 한 화면씩이다. 화면이 없는 조작만 운영자가 HTTP 로 직접 친다.
 
 개발 중 데이터를 훑던 수단도 함께 사라졌다. 대신 이렇게 한다:
 
@@ -248,10 +249,10 @@ cd backend && LAURIO_DB_PORT=55432 uv run python manage.py prune_e2e_junk
 `global-setup.ts` 의 순서가 그래서 그 순서다.
 
 **스위트는 기본으로 병렬 실행된다**(#104). `pyproject.toml` 의 `addopts` 가 `-n auto` 를
-준다 — 실측(이 머신, 당시 1192건 — 지금 1407건 통과·1건 skip, Assignment 가 #205~#212 로
+준다 — 실측(이 머신, 당시 1192건 — 지금 1463건 통과·1건 skip. Assignment 가 #205~#212 로
 1312건에서 1377건까지, staging 검증이 낳은 #214~#217 로 1388건까지, 저장소만으로
-제출하고 채점 시점에 박제하는 #218~#220 으로 여기까지 늘었다) `-n 4` 84초 →
-`-n auto` 57초. 직렬로 보려면 `-n 0`.
+제출하고 채점 시점에 박제하는 #218~#220 으로 1407건까지, 채점 상한과 화면 열한 개
+(#213·#221~#231)로 여기까지 늘었다) `-n 4` 84초 → `-n auto` 57초. 직렬로 보려면 `-n 0`.
 
 **테스트는 서로를 밟지 않는다 — 손으로 갈라 줄 것이 없다.**
 
@@ -402,7 +403,7 @@ ADR-0017 은 프론트에만 있는 위험을 셋으로 못 박았다. 여기 �
 | --- | --- | --- |
 | red→green 반복 | 백엔드 테스트 파일 하나 | **12초** |
 | red→green 반복 | 브라우저로 화면 하나 걸어보기 | **수 초** |
-| 티켓 커밋 직전 | `pytest` 전체 | 1분 28초 |
+| 티켓 커밋 직전 | `pytest` 전체 | 1분 17초 |
 | 티켓 커밋 직전 | 두 앱 `typecheck` | 각 10~20초 |
 | CI (push 후) | 전체 | 백엔드 + e2e |
 
@@ -422,8 +423,8 @@ pnpm --dir frontend exec playwright test --project=public e2e/payout.spec.ts -g 
 **CI 가 돌리는 것 (참고용 수치).**
 
 ```bash
-pnpm --dir frontend test            # 전체 (102건이던 시절 약 1.8분 — 지금 117건)
-pnpm --dir frontend test:public     # 공개 앱만 (74건이던 시절 약 1.4분 — 지금 85건)
+pnpm --dir frontend test            # 전체 (102건이던 시절 약 1.8분 — 지금 118건)
+pnpm --dir frontend test:public     # 공개 앱만 (74건이던 시절 약 1.4분 — 지금 86건)
 pnpm --dir frontend test:operator   # 운영자 앱만 (28건이던 시절 약 25초 — 지금 32건)
 ```
 
