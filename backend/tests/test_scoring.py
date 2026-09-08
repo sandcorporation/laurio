@@ -1300,11 +1300,14 @@ def test_one_poisoned_submission_does_not_block_the_rest_of_the_batch(
 
 
 @pytest.mark.django_db
-def test_permanent_failure_is_excluded_from_the_next_scan(client, category, landing_type):
+def test_permanent_failure_is_finalized_as_zero_on_the_next_scan(client, category, landing_type):
     """LLMAdapterPermanentError로 죽은 Submission은 `ScoringAttempt.permanent=True`로
-    남고, 다음 스캔의 대상 조회에서 아예 빠진다 — 안 그러면 결정적 실패(모델명
-    오타, 잘린 응답 등)를 영원히 재시도만 하며 Score 없이 배분 컷라인에서 조용히
-    빠지는 사고가 난다(#88 코드리뷰 지적 2)."""
+    남고, 다음 스캔에서 **유예 없이 즉시** 0% Score로 확정된다(#222, ADR-0031).
+
+    예전(#88 코드리뷰 지적 2)에는 대상 조회에서 영원히 제외해 Score 없이 배분
+    컷라인에서 조용히 빠지는 채로 남겨 뒀는데, 그게 정확히 ADR-0031이 "채점은
+    반드시 끝난다"로 닫은 함정이다 — "다시 해도 같은 결과"가 확정된 실패에
+    5회·6시간 유예를 주는 것은 아무 정보도 사지 못하므로 즉시 0%로 끝난다."""
 
     deadline = timezone.now() + timedelta(hours=1)
     _sponsor, contest = _publish_contest(
@@ -1359,14 +1362,258 @@ def test_permanent_failure_is_excluded_from_the_next_scan(client, category, land
     assert not Score.objects.filter(submission_id=sub1).exists()
 
     # 두 번째 스캔 — sub1이 이제는 성공할 수 있는 조건(LLM_PERMANENT_FAILURE_
-    # SUBMISSION_IDS를 안 준다)이어도 대상 조회에서 아예 빠져 있어야 한다.
-    # "계속 결정적으로 실패한다"가 아니라 "다시는 시도조차 안 한다"는 것을
-    # 증명한다.
+    # SUBMISSION_IDS를 안 준다)이어도 대상 조회에는 다시 걸린다(#222 — 예전처럼
+    # 영원히 빠지지 않는다). 하지만 LLM을 다시 부르지 않고 즉시 0%로 확정된다 —
+    # 어댑터가 여전히 항상 permanent로 죽도록 설정돼 있어도 그 사실이 실제로
+    # 호출되지 않았음을 증명한다.
     with override_settings(LLM_ADAPTER_MODE="tests.test_scoring._PermanentFailureAdapter"):
         second = _run_pending(client)
 
-    assert second["count"] == 0
-    assert not Score.objects.filter(submission_id=sub1).exists()
+    assert second["count"] == 1
+    assert second["rows"][0]["submission_id"] == sub1
+    assert second["rows"][0]["status"] == "scored"
+
+    score = Score.objects.get(submission_id=sub1)
+    assert score.percentage == Decimal("0.00")
+    assert score.model_version == "platform-auto (채점 실패 상한)"
+    assert "플랫폼" in score.reasoning[0]["reasoning"]
+    # 영구 실패는 이번 확정을 위한 새 ScoringAttempt를 남기지 않는다 — 첫 스캔의
+    # 이력 하나로 충분히 판정된다.
+    assert ScoringAttempt.objects.filter(submission_id=sub1).count() == 1
+
+
+# --- #222(ADR-0031): 실패 상한 — 5회 그리고 마감 후 6시간이 둘 다 차야 0%로 끝난다 -----
+
+
+def _submit_with_marker(client, contest, requirement_id, dev):
+    key = _source_object_key(contest["id"], dev["user_id"])
+    FakeStorageAdapter().write_object(key, _zip_bytes({"app.py": "MARKER\n"}))
+    resp = client.post(
+        f"{CONTESTS_URL}/{contest['id']}/submissions",
+        data={"assets": [{"kind": "source", "value": key}], "requirement_responses": [
+                {
+                    "requirement_id": requirement_id,
+                    "is_met": True,
+                    "evidence": [{"kind": "source_location", "value": "MARKER"}],
+                }
+            ]},
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert resp.status_code == 201
+    return resp.json()["id"]
+
+
+@pytest.mark.django_db
+def test_five_failures_without_six_hour_grace_does_not_finalize_yet(
+    client, category, landing_type
+):
+    """실패 5회에 이르렀지만 마감 후 6시간이 지나지 않았으면 아직 Score가 없고
+    다음 회차에 다시 시도된다(#222 AC)."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+    submission_id = _submit_with_marker(client, contest, requirement_id, dev)
+
+    _close_contest(client, contest, deadline=deadline)  # as_of = deadline + 1분
+
+    with override_settings(LLM_FAKE_RAISING_SUBMISSION_IDS=[submission_id]):
+        for _ in range(5):
+            result = _run_pending(client)
+            assert result["rows"][0]["status"] == "failed"
+
+    assert ScoringAttempt.objects.filter(submission_id=submission_id).count() == 5
+    assert not Score.objects.filter(submission_id=submission_id).exists()
+
+
+@pytest.mark.django_db
+def test_six_hour_grace_without_five_failures_does_not_finalize_yet(
+    client, category, landing_type
+):
+    """마감 후 6시간이 지났지만 실패가 5회에 못 미치면 아직 Score가 없다(#222 AC)."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+    submission_id = _submit_with_marker(client, contest, requirement_id, dev)
+
+    _close_contest(client, contest, deadline=deadline)
+
+    with override_settings(LLM_FAKE_RAISING_SUBMISSION_IDS=[submission_id]):
+        for _ in range(2):
+            result = _run_pending(client)
+            assert result["rows"][0]["status"] == "failed"
+
+        _freeze(deadline + timedelta(hours=7))
+        result = _run_pending(client)
+        assert result["rows"][0]["status"] == "failed"
+
+    assert ScoringAttempt.objects.filter(submission_id=submission_id).count() == 3
+    assert not Score.objects.filter(submission_id=submission_id).exists()
+
+
+@pytest.mark.django_db
+def test_five_failures_and_six_hour_grace_finalizes_as_zero_without_calling_llm(
+    client, category, landing_type
+):
+    """둘 다 충족되면 필수 요건 전부 미달인 0% Score가 만들어지고, 그 Score는
+    AI가 판정하지 않았음과 플랫폼이 채점하지 못했다는 사유를 스스로 밝힌다 —
+    ADR-0030의 「저장소가 닫혀서」와 구별된다(#222 AC). 어댑터가 여전히 이
+    Submission을 raise 하도록 설정돼 있어도 확정되므로, LLM이 다시 불리지
+    않았다는 것도 함께 증명한다."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+    submission_id = _submit_with_marker(client, contest, requirement_id, dev)
+
+    _close_contest(client, contest, deadline=deadline)
+
+    with override_settings(LLM_FAKE_RAISING_SUBMISSION_IDS=[submission_id]):
+        for _ in range(5):
+            result = _run_pending(client)
+            assert result["rows"][0]["status"] == "failed"
+
+        _freeze(deadline + timedelta(hours=6, minutes=1))
+        result = _run_pending(client)
+
+    assert result["count"] == 1
+    assert result["rows"][0]["submission_id"] == submission_id
+    assert result["rows"][0]["status"] == "scored"
+
+    score = Score.objects.get(submission_id=submission_id)
+    assert score.percentage == Decimal("0.00")
+    assert score.model_version == "platform-auto (채점 실패 상한)"
+    assert score.model_version != "fake-llm-v1"
+    assert all(not item["is_met"] for item in score.reasoning)
+    assert "플랫폼" in score.reasoning[0]["reasoning"]
+
+    # 확정을 위한 새 ScoringAttempt를 남기지 않는다 — 5회 이력만으로 판정된다.
+    assert ScoringAttempt.objects.filter(submission_id=submission_id).count() == 5
+
+    # 통지는 기존 채점 완료 알림 그대로다 — 새 알림 종류를 만들지 않는다.
+    from notifications.models import Notification, NotificationType
+
+    assert Notification.objects.filter(
+        recipient_id=dev["user_id"], notification_type=NotificationType.SCORING_COMPLETE
+    ).exists()
+
+
+@pytest.mark.django_db
+def test_capped_submission_of_an_already_awarded_contest_is_not_retroactively_scored(
+    client, category, landing_type
+):
+    """배분이나 Award가 이미 끝난 Contest의 제출에는 Score가 새로 생기지 않는다
+    (#222 AC) — 원장이 이미 그 제출 없이 확정됐다."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+
+    winner_dev = _verified_user(client, "dev-winner", "dev-ci-winner")
+    winner_id = _submit_with_marker(client, contest, requirement_id, winner_dev)
+
+    stuck_dev = _verified_user(client, "dev-stuck", "dev-ci-stuck")
+    stuck_id = _submit_with_marker(client, contest, requirement_id, stuck_dev)
+
+    _close_contest(client, contest, deadline=deadline)
+
+    # stuck_id는 채점 실패를 반복하다 상한(5회·6시간)에 이른다.
+    with override_settings(LLM_FAKE_RAISING_SUBMISSION_IDS=[stuck_id]):
+        for _ in range(5):
+            result = _run_pending(client)
+            failed_row = next(r for r in result["rows"] if r["submission_id"] == stuck_id)
+            assert failed_row["status"] == "failed"
+
+    # winner_id를 Award — Contest가 AWARDED로 전이한다. Score는 Award를 결정하지
+    # 않으므로(ADR-0006) winner_id에 아직 Score가 없어도 Award할 수 있다.
+    award_resp = client.post(
+        f"{CONTESTS_URL}/{contest['id']}/award",
+        data={"submission_id": winner_id},
+        content_type="application/json",
+        **_auth_header(_sponsor["access"]),
+    )
+    assert award_resp.status_code == 200
+
+    _freeze(deadline + timedelta(hours=7))
+    with override_settings(LLM_FAKE_RAISING_SUBMISSION_IDS=[stuck_id]):
+        result = _run_pending(client)
+
+    stuck_row = next(r for r in result["rows"] if r["submission_id"] == stuck_id)
+    assert stuck_row["status"] == "cap_reached_settled_contest"
+    assert not Score.objects.filter(submission_id=stuck_id).exists()
+
+
+@pytest.mark.django_db
+def test_capped_submission_of_a_contest_with_an_existing_distribution_is_not_retroactively_scored(
+    client, category, landing_type
+):
+    """Distribution이 이미 만들어진 Contest의 제출도 소급해 Score를 만들지
+    않는다(#222 AC) — Award와 같은 이유."""
+
+    from distributions.models import Distribution
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+    stuck_dev = _verified_user(client, "dev-stuck", "dev-ci-stuck")
+    stuck_id = _submit_with_marker(client, contest, requirement_id, stuck_dev)
+
+    _close_contest(client, contest, deadline=deadline)
+
+    with override_settings(LLM_FAKE_RAISING_SUBMISSION_IDS=[stuck_id]):
+        for _ in range(5):
+            result = _run_pending(client)
+            assert result["rows"][0]["status"] == "failed"
+
+    Distribution.objects.create(
+        contest_id=contest["id"],
+        cutline_percentage=Decimal("50.00"),
+        total_prize=1_000_000,
+        qualifying_count=0,
+        share_amount=0,
+    )
+
+    _freeze(deadline + timedelta(hours=7))
+    with override_settings(LLM_FAKE_RAISING_SUBMISSION_IDS=[stuck_id]):
+        result = _run_pending(client)
+
+    assert result["rows"][0]["status"] == "cap_reached_settled_contest"
+    assert not Score.objects.filter(submission_id=stuck_id).exists()
 
 
 # --- #88 코드리뷰 지적 1: 시간 예산을 넘기면 배치를 조기 종료한다 -------------------

@@ -35,6 +35,17 @@ Score를 만들지 않았다"로 돌아온다. `submission-scoring` 스캔이 �
 같은 행이 매번 배치 맨 앞에서 다시 걸려 그 뒤의 정상 건들까지 영원히 채점되지
 못하는 poison pill이 된다(notifications 의 notification-dispatch-deferred 스캔가 이미 겪고
 고친 것과 같은 종류의 사고).
+
+**채점은 반드시 끝난다(#222, ADR-0031).** 실패가 **5회**(`SCORING_FAILURE_LIMIT`)에
+이르고 **동시에** 마감 후 **6시간**(`SCORING_FAILURE_GRACE`)이 지나면, 재시도를
+멈추고 전체 미달(0%) `Score`를 직접 만든다(`_scoring_cap_reached`,
+`PLATFORM_FAILURE_MODEL_VERSION`) — ADR-0030의 0%(참가자가 저장소를 닫았다)와
+값은 같아도 책임이 정반대라 Score가 자기 사유를 직접 밝힌다. `permanent=True`인
+실패(위 `LLMAdapterPermanentError`)는 이 유예를 기다리지 않고 즉시 0%로 끝난다 —
+"다시 해도 같은 결과"가 확정된 실패에 유예를 주는 것은 아무 정보도 사지 못한다.
+**단, 배분이나 Award가 이미 끝난 Contest의 제출에는 소급하지 않는다** — 원장이
+이미 그 제출 없이 확정됐으므로, 뒤늦게 Score를 끼워 넣으면 자기 모순되는
+기록이 남는다(`_contest_already_settled`).
 """
 
 from __future__ import annotations
@@ -45,7 +56,7 @@ from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Exists, OuterRef, Subquery
+from django.db.models import Count, Exists, OuterRef, Q, Subquery
 from django.db.models.functions import Coalesce
 
 from contests.models import Contest, Requirement
@@ -226,16 +237,35 @@ _NO_SCORING_INPUT_REASONING = (
     "(비공개이거나 삭제·이름 변경됨). AI가 판정하지 않았다."
 )
 
+#: #222(ADR-0031)의 자동 미달 Score가 `model_version`에 남기는 값 — ADR-0030의
+#: `NO_SCORING_INPUT_MODEL_VERSION`과 짝이지만 책임 주체가 반대다(참가자가 아니라
+#: 플랫폼). 실제 LLM 모델 식별자 형식과도, 위 값과도 겹치지 않아야 이의 화면에서
+#: 어느 0%인지 한눈에 구별된다.
+PLATFORM_FAILURE_MODEL_VERSION = "platform-auto (채점 실패 상한)"
 
-def _zero_score_reasoning(submission: Submission) -> list[dict]:
-    """자동 미달 Score의 Requirement별 판정 근거 — 전부 미달, 이유는 모두 같다."""
+#: #222(ADR-0031)의 자동 미달 Score의 판정 근거 문구 — ADR-0030의 "저장소가
+#: 닫혀서"와 달리 "플랫폼이 채점하지 못했다"를 명시한다. Appeal 심판이 같은
+#: 0%라도 결론이 정반대라는 것을 이 문장만 보고 알 수 있어야 한다.
+_PLATFORM_FAILURE_REASONING = (
+    "채점이 반복적으로 실패해 상한(5회, 마감 후 6시간)에 도달했다 — 플랫폼이 "
+    "채점하지 못했다는 뜻이다. AI가 판정하지 않았다. 참가자가 저장소를 닫아서가 "
+    "아니라(ADR-0030) 플랫폼 쪽 채점 실패다(ADR-0031)."
+)
+
+
+def _all_unmet_reasoning(submission: Submission, *, reasoning: str) -> list[dict]:
+    """자동 미달 Score의 Requirement별 판정 근거 — 전부 미달, 이유는 모두 같다.
+
+    ADR-0030(#218, 채점 입력 없음)과 ADR-0031(#222, 채점 실패 상한)이 이 모양을
+    공유한다 — 둘 다 "AI가 판정하지 않았다"를 스스로 밝히는 자동 0%이고, 다른
+    것은 그 사유 문구뿐이다.
+    """
 
     requirement_ids = Requirement.objects.filter(
         contest_id=submission.contest_id
     ).order_by("order", "id").values_list("id", flat=True)
     return [
-        {"requirement_id": rid, "is_met": False, "reasoning": _NO_SCORING_INPUT_REASONING}
-        for rid in requirement_ids
+        {"requirement_id": rid, "is_met": False, "reasoning": reasoning} for rid in requirement_ids
     ]
 
 
@@ -253,10 +283,10 @@ def _finalize_score(
 ) -> dict:
     """Score(+RepositorySnapshot(+박제 소스 자료))를 한 트랜잭션으로 만들고 통지한다.
 
-    AI가 실제로 채점한 경우와 #218의 자동 미달(채점 입력 0건) 경우가 이 지점을
-    공유한다 — "Score 하나가 정확히 한 번 만들어지고, 만들어지면 통지한다"는
-    계약은 그 Score가 AI의 산물인지와 무관하기 때문이다(ADR-0030, Score는
-    항상 AI의 산물은 아니게 됐다).
+    AI가 실제로 채점한 경우, #218의 자동 미달(채점 입력 0건), #222의 자동 미달
+    (채점 실패 상한 도달)이 이 지점을 공유한다 — "Score 하나가 정확히 한 번
+    만들어지고, 만들어지면 통지한다"는 계약은 그 Score가 AI의 산물인지와
+    무관하기 때문이다(ADR-0030, Score는 항상 AI의 산물은 아니게 됐다).
 
     `repository_reachability_check`(#219)는 채점 직전 저장소 도달 가능성을
     직접 재확인했을 때만 채워진다 — 소스만으로 충분했거나 저장소 자체가 없는
@@ -404,16 +434,89 @@ def _archive_cloned_repository(
     }
 
 
-def score_submission_once(submission: Submission) -> dict:
+#: #222(ADR-0031): 실패 상한 — 이 횟수에 이르고 **동시에** 아래 유예가 지나야 0%로
+#: 확정된다. 스캔이 60초마다 도므로 횟수만 세면 5회가 5분이 된다 — 새벽 마감
+#: 직후 스토리지가 잠깐 흔들리면 멀쩡한 참가작 전원이 5분 만에 되돌릴 수 없는
+#: 0%를 받는다.
+SCORING_FAILURE_LIMIT = 5
+
+#: #222(ADR-0031): 마감 후 유예. 시간만 세면 명백히 가망 없는 건까지 이 시간 동안
+#: 배치 앞자리를 잡는다 — 둘을 함께 요구하면 일시 장애는 유예 안에서 낫고, 끝내
+#: 안 나아도 유예 뒤엔 반드시 끝난다. 며칠짜리 심사기간(judging_period_days)에서
+#: 하루조차 쓰지 않는 값이다 — 유예가 배분을 밀지 않는다.
+SCORING_FAILURE_GRACE = timedelta(hours=6)
+
+
+def _scoring_cap_reached(submission: Submission, *, as_of) -> bool:
+    """실패 상한(#222, ADR-0031)에 이르렀는가 — 영구 실패가 하나라도 있으면 유예 없이
+    즉시 True다. 아니면 실패 횟수가 `SCORING_FAILURE_LIMIT`에 이르고 **동시에**
+    마감 후 `SCORING_FAILURE_GRACE`가 지났을 때만 True다.
+
+    `ScoringAttempt`를 집계해서만 판정한다(#221과 같은 이유 — `Submission`에
+    카운터를 두지 않는다. 카운터 증가와 이력 생성이 같은 트랜잭션을 벗어나는
+    순간 어느 쪽이 참인지 정할 방법이 없다). 한 번도 시도되지 않은(count=0)
+    제출은 당연히 False다.
+    """
+
+    counts = submission.scoring_attempts.aggregate(
+        total=Count("id"), permanent=Count("id", filter=Q(permanent=True))
+    )
+    if counts["permanent"]:
+        return True
+    if (counts["total"] or 0) < SCORING_FAILURE_LIMIT:
+        return False
+    return as_of >= submission.contest.deadline_at + SCORING_FAILURE_GRACE
+
+
+def _contest_already_settled(contest: Contest) -> bool:
+    """배분이나 Award가 이미 끝났는가(#222, ADR-0031).
+
+    배포 직후 첫 스캔은 상한을 한참 넘긴 것들을 한꺼번에 만날 수 있다. 그중 이미
+    Award되거나 Distribution이 끝난 Contest의 제출에 뒤늦게 Score를 만들면 원장과
+    어긋난다 — 그 Contest의 재무는 이미 이 제출 없이 확정됐다. 아직 채점 대상인
+    것까지만 0%로 정리하고, 지난 것은 그대로 둔다(소급하지 않는다).
+
+    `hasattr`로 판정한다 — `Award.contest`·`Distribution.contest`가 각각
+    `OneToOneField`라 역참조가 없으면 Django가 `RelatedObjectDoesNotExist`를
+    던지는데, 그 예외는 `AttributeError`의 서브클래스라 `hasattr`가 그대로
+    False로 받아준다.
+    """
+
+    return hasattr(contest, "award") or hasattr(contest, "distribution")
+
+
+def score_submission_once(submission: Submission, as_of) -> dict:
     """이 Submission을 정확히 한 번만 채점한다. 이미 Score가 있으면 그대로 돌아온다.
 
     이 함수는 절대 예외를 밖으로 던지지 않는다(모듈 docstring 참고) — 모든 실패는
     ScoringAttempt에 남고 "failed"·"source_not_found"·"repository_unresolved"·
     "no_scoring_asset"로 돌아온다.
+
+    `as_of`는 이번 스캔 실행이 한 번만 구한 시각이다(ADR-0003) — 실패 상한의 6시간
+    유예(#222, ADR-0031)를 이 시각과 마감(`deadline_at`) 사이로 판정한다.
     """
 
     if Score.objects.filter(submission_id=submission.id).exists():
         return {"submission_id": submission.id, "status": "already_scored"}
+
+    if _scoring_cap_reached(submission, as_of=as_of):
+        if _contest_already_settled(submission.contest):
+            # 이미 지난 것에는 소급하지 않는다 — 채점하지도, 이력을 더 남기지도
+            # 않고 그대로 둔다(위 `_contest_already_settled` docstring).
+            return {"submission_id": submission.id, "status": "cap_reached_settled_contest"}
+        # 실패 상한에 도달했다 — 더 시도하지 않고 전체 미달로 확정한다. LLM을
+        # 부르지 않는다(ADR-0030과 같은 이유: 답이 정해진 호출에 돈을 쓸 이유가
+        # 없다). 이 분기는 소스·저장소 상태와 무관하게 항상 우선한다 — "네 실패
+        # 경로가 같은 상한을 받는다"(#222 AC)를 만족하려면 아래 개별 실패 분기가
+        # 각자 다른 상한을 갖지 않고 이 하나의 판정만 따라야 한다.
+        return _finalize_score(
+            submission,
+            percentage=Decimal("0.00"),
+            model_version=PLATFORM_FAILURE_MODEL_VERSION,
+            prompt=_PLATFORM_FAILURE_REASONING,
+            reasoning_payload=_all_unmet_reasoning(submission, reasoning=_PLATFORM_FAILURE_REASONING),
+            scored_assets_payload=[],
+        )
 
     # #190이 소스를 `SubmissionAsset` 목록으로 바꿨다. #191부터는 `kind=source`
     # 전부를 읽어 라운드로빈 예산 안에서 함께 채점한다(`select_source_files`) —
@@ -562,7 +665,7 @@ def score_submission_once(submission: Submission) -> dict:
             percentage=Decimal("0.00"),
             model_version=NO_SCORING_INPUT_MODEL_VERSION,
             prompt=_NO_SCORING_INPUT_REASONING,
-            reasoning_payload=_zero_score_reasoning(submission),
+            reasoning_payload=_all_unmet_reasoning(submission, reasoning=_NO_SCORING_INPUT_REASONING),
             scored_assets_payload=[],
             repository_reachability_check=repository_reachability_payload,
         )
@@ -768,9 +871,11 @@ def _pending_submissions(as_of, ctx):
     아니라 관련 없는 비동기 사실(저장소 공개 여부)에 대한 것이라 Classification으로
     표현되지는 않지만, 같은 부류의 경합이다.)
 
-    결정적으로 실패한 건(#88 코드리뷰 지적 2, `ScoringAttempt.permanent=True`)은 뺀다 —
-    안 그러면 매 스캔이 order_by("id")의 앞머리에서 같은 건을 다시 집어 영원히 재시도만
-    하고, 그 뒤의 새 Submission은 배치 안에 들어오지 못할 수 있다.
+    **결정적으로 실패한 건(#88 코드리뷰 지적 2, `ScoringAttempt.permanent=True`)은
+    더 이상 빼지 않는다(#222, ADR-0031).** 예전에는 여기서 영원히 제외해 Score
+    없이 배분 컷라인에서 조용히 빠지는 채로 남겨 뒀는데, 그게 정확히 ADR-0031이
+    닫으려는 함정이다 — 이제 후보에 그대로 두어 `score_submission_once`가
+    (`_scoring_cap_reached`를 거쳐) 유예 없이 즉시 0%로 확정한다.
 
     저장소 공개 여부가 아직 안 정해졌고(`is_public` null) 유예 기간이 남은
     Submission도 뺀다(#193 코드리뷰 지적, `_REPOSITORY_VISIBILITY_GRACE`) —
@@ -803,7 +908,6 @@ def _pending_submissions(as_of, ctx):
             contest__status__in=Contest.Status.SCOREABLE.statuses,
             score__isnull=True,
         )
-        .exclude(scoring_attempts__permanent=True)
         .annotate(_has_unresolved_repository=Exists(unresolved_repository))
         .exclude(
             _has_unresolved_repository=True,
@@ -817,10 +921,12 @@ def _pending_submissions(as_of, ctx):
 def _score_one(submission, as_of, ctx):
     """`score_submission_once`가 이미 모든 예외를 흡수하지만(모듈 docstring), 여기서 한 번 더
     감싼다 — 뼈대의 행별 격리에 맡기지 않는 이유는 실패를 **ScoringAttempt 로 남겨야** 하기
-    때문이다: `permanent=True` 가 다음 스캔의 대상 조회에서 그 건을 빼는 유일한 근거다."""
+    때문이다: `permanent=True`·5회 실패가 실패 상한 판정(#222, ADR-0031)의 유일한 근거다.
+
+    `as_of`를 그대로 넘긴다 — 이번 스캔 실행 전체가 같은 시각을 쓴다(ADR-0003)."""
 
     try:
-        return score_submission_once(submission)
+        return score_submission_once(submission, as_of)
     except Exception as exc:  # noqa: BLE001 - 한 행의 실패가 나머지 배치를 막으면 안 된다.
         logger.exception("Submission(pk=%s) 채점 스캔 처리 중 예외, 다음 건으로 계속", submission.id)
         is_permanent = isinstance(exc, LLMAdapterPermanentError)
