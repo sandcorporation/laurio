@@ -96,3 +96,30 @@ def test_compose_public_image_url_appends_object_key_to_the_configured_base(sett
     url = compose_public_image_url("contest-image:1/abc123")
 
     assert url == "https://images.example.test/laurio-public-images/contest-image:1/abc123"
+
+
+# --- content-type (#238) ------------------------------------------------------
+
+
+def test_write_object_records_the_given_content_type():
+    """호출자가 형식을 아는 바이트를 쓸 때 넘긴 content_type이 그대로 기록된다."""
+
+    adapter = FakeStorageAdapter()
+    key = "contest-image:1/with-type"
+    adapter.write_object(key, b"webp bytes", bucket=Bucket.PUBLIC_IMAGES, content_type="image/webp")
+
+    assert adapter.written_content_type(key, bucket=Bucket.PUBLIC_IMAGES) == "image/webp"
+
+
+def test_write_object_without_content_type_falls_back_to_the_shared_default():
+    """형식을 모르는 바이트는 어댑터 계약이 한 번 정한 기본값을 받는다 — 호출부가
+    매번 그것을 다시 고르지 않는다."""
+
+    from storage.adapters.base import DEFAULT_CONTENT_TYPE
+
+    adapter = FakeStorageAdapter()
+    key = "submission:1:2:source/no-type"
+    adapter.write_object(key, b"legacy bytes")
+
+    assert adapter.written_content_type(key) == DEFAULT_CONTENT_TYPE
+    assert DEFAULT_CONTENT_TYPE == "application/octet-stream"

@@ -25,7 +25,7 @@ from botocore.client import BaseClient, Config
 from botocore.exceptions import ClientError
 from django.conf import settings
 
-from .base import Bucket, PresignedDownload, PresignedUpload
+from .base import DEFAULT_CONTENT_TYPE, Bucket, PresignedDownload, PresignedUpload
 
 
 @lru_cache(maxsize=1)
@@ -167,9 +167,24 @@ class S3StorageAdapter:
         return response["Body"].read()
 
     def write_object(
-        self, object_key: str, content: bytes, *, bucket: Bucket = Bucket.PRIVATE
+        self,
+        object_key: str,
+        content: bytes,
+        *,
+        bucket: Bucket = Bucket.PRIVATE,
+        content_type: str | None = None,
     ) -> None:
         # `self._client`(서버가 붙는 호스트)를 쓴다 — `self._public_client` 는
         # 브라우저가 여는 URL 을 만들기 위한 것이라 컨테이너 안에서는 풀리지 않을
         # 수 있다(FE-09/#34 의 minio:9000 대 127.0.0.1:19000).
-        self._client.put_object(Bucket=self._bucket_name(bucket), Key=object_key, Body=content)
+        #
+        # ContentType을 명시적으로 채운다(#238) — 생략하면 boto3/S3가 임의로
+        # `binary/octet-stream`을 붙이는데, 그 사실이 코드에 안 보여 호출부가
+        # 매번 "이래도 되나"를 다시 판단하게 된다. `DEFAULT_CONTENT_TYPE`을 여기
+        # 한 곳에서만 적용해 그 판단을 없앤다.
+        self._client.put_object(
+            Bucket=self._bucket_name(bucket),
+            Key=object_key,
+            Body=content,
+            ContentType=content_type or DEFAULT_CONTENT_TYPE,
+        )

@@ -20,6 +20,14 @@
 전부 `bucket` 을 생략한다 — 기본값 `Bucket.PRIVATE` 이 지금까지의 동작과 그대로
 같다. 이 매개변수가 여는 것은 "어느 버킷에 쓰는가" 하나뿐이고, 공개 전환·복사·삭제
 메서드는 여전히 없다.
+
+**#238부터 `write_object`가 `content_type`을 받는다.** 새 능력이 아니라 이미 쓰고 있는
+바이트에 대한 메타데이터다 — 서버가 직접 쓰는 두 경로(ContestImage 파생본, 저장소
+박제본)가 자기 형식을 밝힐 자리가 계약에 없어 둘 다 `binary/octet-stream`으로 나갔다
+(staging 실측). 호출자가 형식을 아는 바이트(webp 파생본·zip 박제본)를 쓸 때는 그 MIME을
+넘기고, 모르면 생략한다 — 그러면 `DEFAULT_CONTENT_TYPE`이 쓰인다. 기본값이 어댑터
+계약에 한 번만 정해져 있으므로 호출부마다 그것을 다시 고르지 않는다. `presign_upload`는
+손대지 않는다 — 브라우저가 올리는 바이트의 content-type은 이미 서명된 정책이 정한다.
 """
 
 from __future__ import annotations
@@ -28,6 +36,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Protocol
+
+#: `write_object`가 `content_type`을 받지 않았을 때 쓰는 기본값 (#238). 형식을 모르는
+#: 바이트에 어떤 content-type을 실을지를 어댑터 계약에 한 번만 정해 두어, 호출부마다
+#: 매번 다시 고르지 않게 한다.
+DEFAULT_CONTENT_TYPE = "application/octet-stream"
 
 
 class StorageAdapterError(Exception):
@@ -116,7 +129,12 @@ class StorageAdapter(Protocol):
         ...
 
     def write_object(
-        self, object_key: str, content: bytes, *, bucket: Bucket = Bucket.PRIVATE
+        self,
+        object_key: str,
+        content: bytes,
+        *,
+        bucket: Bucket = Bucket.PRIVATE,
+        content_type: str | None = None,
     ) -> None:
         """바이트를 서버 프로세스 자신의 자격증명으로 직접 쓴다 (#194).
 
@@ -141,5 +159,10 @@ class StorageAdapter(Protocol):
         같은 object_key 에 두 번 쓰면 덮어쓴다. 실패(네트워크 오류 등)하면
         `StorageAdapterError`를 던진다 — 호출자(#220 의 박제 경로)는 이 실패를
         "Score 를 만들지 않고 다음 스캔에서 재시도"로 다룬다.
+
+        **`content_type`은 새 능력이 아니라 지금 쓰는 바이트의 메타데이터다 (#238).**
+        호출자가 형식을 아는 바이트(ContestImage의 webp 파생본·저장소 박제 zip)를 쓸 때
+        넘긴다 — 생략하면 `DEFAULT_CONTENT_TYPE`이 쓰인다. 이 오브젝트에는 presigned
+        업로드가 없으므로(서버가 직접 쓴다) 여기가 유일하게 content-type을 실을 자리다.
         """
         ...

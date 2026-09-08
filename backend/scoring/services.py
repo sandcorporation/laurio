@@ -423,7 +423,10 @@ def _archive_cloned_repository(
 
     target_ref = source_target_ref(submission.contest_id, submission.developer.user_id)
     object_key = f"{target_ref}/{uuid.uuid4().hex}"
-    get_storage_adapter().write_object(object_key, cloned.zip_bytes)
+    # content_type을 명시한다(#238) — 이 바이트는 항상 clone된 저장소를 묶은
+    # zip이다(`ClonedRepository`). 생략하면 이 오브젝트 앞단(다운로드 시 Handover가
+    # 여는 presigned GET)이 형식을 모른 채 내려준다.
+    get_storage_adapter().write_object(object_key, cloned.zip_bytes, content_type="application/zip")
 
     origin_label = (asset.label or "").strip() or asset.value
     return {

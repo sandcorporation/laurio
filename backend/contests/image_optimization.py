@@ -181,8 +181,16 @@ def _optimize_one(image: ContestImage, as_of, ctx) -> dict:
 
         thumbnail_bytes, detail_bytes = generate_derivatives(original_bytes)
         thumbnail_key, detail_key = _derivative_keys(image.object_key)
-        adapter.write_object(thumbnail_key, thumbnail_bytes, bucket=Bucket.PUBLIC_IMAGES)
-        adapter.write_object(detail_key, detail_bytes, bucket=Bucket.PUBLIC_IMAGES)
+        # content_type을 명시한다(#238) — 이 파생본은 항상 webp로 인코딩하므로
+        # (`_to_webp_bytes`) 형식을 모르는 바이트가 아니다. 이걸 생략하면 CDN
+        # 앞단이 "모르는 바이트"로 보고 압축·캐시 최적화를 걸지 않는다(스토리지
+        # 어댑터 계약이 이 문제를 만났던 지점, staging 실측).
+        adapter.write_object(
+            thumbnail_key, thumbnail_bytes, bucket=Bucket.PUBLIC_IMAGES, content_type="image/webp"
+        )
+        adapter.write_object(
+            detail_key, detail_bytes, bucket=Bucket.PUBLIC_IMAGES, content_type="image/webp"
+        )
     except Exception as exc:  # noqa: BLE001 - 한 행의 실패가 배치를 막으면 안 된다.
         logger.exception(
             "ContestImage(pk=%s) 최적화 중 예외, 다음 건으로 계속", image.id
