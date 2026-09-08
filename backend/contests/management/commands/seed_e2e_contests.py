@@ -200,7 +200,10 @@ class Command(BaseCommand):
             title=f"{self.prefix}마감된 공모전",
             category=category_lifestyle,
             deliverable_types=[web_service],
-            description="이미 마감되었지만 공개 목록·상세에 남아야 하는 공모전입니다.",
+            # #227 이후: 공개 상세에는 계속 남지만, 기본 목록(GET /api/contests)
+            # 에서는 빠지고 ?closed=true 로만 나온다 — "공개 목록·상세에 남아야
+            # 한다"던 예전 문장은 상세에만 해당한다.
+            description="이미 마감되었지만 공개 상세에는 계속 남아야 하는 공모전입니다.",
             prize=2_500_000,
             deadline_at=now - timedelta(days=2),
             status=Contest.Status.CLOSED,

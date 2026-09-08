@@ -23,7 +23,13 @@ import {
   type ContestSort,
   type DeliverableType,
 } from "@/lib/api/contests";
-import { formatDday, formatPrize, formatSubmissionCount, isImminent } from "@/lib/contest-format";
+import {
+  finishedStatusLabel,
+  formatDday,
+  formatPrize,
+  formatSubmissionCount,
+  isImminent,
+} from "@/lib/contest-format";
 
 type SearchParams = { [key: string]: string | string[] | undefined };
 
@@ -31,6 +37,8 @@ type Current = {
   category?: number;
   deliverableType?: number;
   sort: ContestSort;
+  // #227 — 기본은 지금 참가할 수 있는 것만(false), 켜면(true) 마감된 것만.
+  closed: boolean;
   page: number;
 };
 
@@ -49,6 +57,14 @@ function parseSort(value: string | string[] | undefined): ContestSort {
   return raw === "prize" ? "prize" : "deadline";
 }
 
+// 손으로 친 값이 뭐든 "꺼짐"이 안전한 기본값이다(#39 관용구를 그대로 따른다) —
+// `?closed=` 든 `?closed=nonsense` 든 "참가 가능한 것만"으로 떨어진다. 명시적으로
+// `"1"`을 준 경우만 켠다 — 링크(아래 buildHref)가 항상 그 값으로 켠다.
+function parseClosed(value: string | string[] | undefined): boolean {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return raw === "1";
+}
+
 function parsePage(value: string | string[] | undefined): number {
   const raw = Array.isArray(value) ? value[0] : value;
   const parsed = Number(raw);
@@ -63,7 +79,10 @@ function parsePage(value: string | string[] | undefined): number {
 // 공모전이 없습니다" 가 뜬다 — 실제로는 있는데 없다고 말하는 화면이다.
 function buildHref(current: Current, overrides: Partial<Current>): string {
   const resetsPage =
-    "category" in overrides || "deliverableType" in overrides || "sort" in overrides;
+    "category" in overrides ||
+    "deliverableType" in overrides ||
+    "sort" in overrides ||
+    "closed" in overrides;
   const next = { ...current, ...(resetsPage ? { page: 1 } : {}), ...overrides };
 
   const params = new URLSearchParams();
@@ -71,6 +90,7 @@ function buildHref(current: Current, overrides: Partial<Current>): string {
   if (next.deliverableType !== undefined)
     params.set("deliverableType", String(next.deliverableType));
   if (next.sort !== "deadline") params.set("sort", next.sort);
+  if (next.closed) params.set("closed", "1");
   if (next.page > 1) params.set("page", String(next.page));
 
   const qs = params.toString();
@@ -87,6 +107,7 @@ export default async function ContestsPage({
     category: parseId(sp.category),
     deliverableType: parseId(sp.deliverableType),
     sort: parseSort(sp.sort),
+    closed: parseClosed(sp.closed),
     page: parsePage(sp.page),
   };
 
@@ -111,7 +132,9 @@ export default async function ContestsPage({
       <header className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold">공모전</h1>
         <p className="text-sm text-ink/70">
-          발주자가 상금을 걸고 요구사항을 공개한 공모전 목록입니다. 로그인 없이 볼 수 있습니다.
+          {current.closed
+            ? "마감된 공모전 목록입니다. 데모·영상은 공개돼 있지만 더 이상 참가할 수 없습니다."
+            : "발주자가 상금을 걸고 요구사항을 공개한, 지금 참가할 수 있는 공모전 목록입니다. 로그인 없이 볼 수 있습니다."}
         </p>
       </header>
 
@@ -130,7 +153,12 @@ export default async function ContestsPage({
             aria-current={current.sort === "deadline" ? "true" : undefined}
             className={current.sort === "deadline" ? "font-medium text-ink" : "text-ink/60"}
           >
-            마감 임박순
+            {/* #227 — deadline 정렬의 방향이 closed 축에 따라 뒤집힌다(참가 가능은
+                마감임박순 오름차순, 마감된 것은 최근 마감순 내림차순 — 백엔드
+                list_contests 독스트링과 같은 근거). 방향이 바뀌는데 라벨이
+                그대로면 "마감임박순"이라 써놓고 실제로는 정반대로 동작한다 —
+                #227이 고치는 바로 그 버그를 라벨에서 재현하지 않는다. */}
+            {current.closed ? "최근 마감순" : "마감 임박순"}
           </Link>
           <Link
             href={buildHref(current, { sort: "prize" })}
@@ -141,6 +169,37 @@ export default async function ContestsPage({
           </Link>
         </nav>
       </div>
+
+      {/* #227 — 기본은 "참가 가능"만 보여준다. 마감된 것을 보는 길은 필터
+          형태로 명시적으로 켜야 하고, 그 상태가 URL(`?closed=1`)에 남아
+          새로고침·공유·뒤로가기에도 유지된다(buildHref가 다른 필터처럼 이
+          값을 계속 실어 나른다). */}
+      <nav aria-label="참가 가능 여부로 좁히기" className="flex flex-wrap gap-2">
+        <Link
+          href={buildHref(current, { closed: false })}
+          aria-current={!current.closed ? "true" : undefined}
+          data-testid="contests-filter-open"
+          className={
+            !current.closed
+              ? "border border-ink bg-ink px-3 py-1.5 text-sm text-paper"
+              : "border border-rule px-3 py-1.5 text-sm text-ink/70"
+          }
+        >
+          참가 가능한 것
+        </Link>
+        <Link
+          href={buildHref(current, { closed: true })}
+          aria-current={current.closed ? "true" : undefined}
+          data-testid="contests-filter-closed"
+          className={
+            current.closed
+              ? "border border-ink bg-ink px-3 py-1.5 text-sm text-paper"
+              : "border border-rule px-3 py-1.5 text-sm text-ink/70"
+          }
+        >
+          마감된 것
+        </Link>
+      </nav>
 
       <CategoryFilter categories={categories} current={current} />
       <DeliverableTypeFilter deliverableTypes={deliverableTypes} current={current} />
@@ -314,8 +373,13 @@ function ContestRow({ contest }: { contest: Contest }) {
         <div className="flex items-center gap-2">
           <span className="truncate text-[15.5px] font-medium">{contest.title}</span>
           {contest.is_underfunded && <UnderfundedBadge />}
-          {contest.status === "closed" && (
-            <span className="border border-rule px-1.5 py-0.5 text-[11px] text-ink/60">마감</span>
+          {/* #227 인수조건 — 끝난 공모전이 목록에 나올 때는 끝났다는 것이 보인다.
+              선정완료·심사종료도 마찬가지다(예전에는 "마감"만 배지가 있었다 —
+              그때는 그 둘이 기본 목록에 아예 안 나와 드러나지 않았던 격차다). */}
+          {finishedStatusLabel(contest.status) && (
+            <span className="border border-rule px-1.5 py-0.5 text-[11px] text-ink/60">
+              {finishedStatusLabel(contest.status)}
+            </span>
           )}
         </div>
         <div className="text-xs text-ink/60">

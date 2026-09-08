@@ -442,10 +442,18 @@ def test_developer_can_still_view_own_submission_after_contest_closes(
 
 
 @pytest.mark.django_db
-def test_closed_contest_still_appears_in_public_list_and_detail(client, category, landing_type):
-    """#12 리뷰 지적 5 — CLOSED가 list_contests/get_contest에서 빠지면, #11이 만든
-    공개 프로필 아카이브가 돌려주는 contest_id·title이 가리키는 상세 페이지가 전부
-    404가 되어 아카이브의 존재 이유 자체가 무너진다."""
+def test_closed_contest_still_appears_in_detail_but_only_the_closed_list(
+    client, category, landing_type
+):
+    """#12 리뷰 지적 5 — CLOSED가 get_contest에서 빠지면, #11이 만든 공개 프로필
+    아카이브가 돌려주는 contest_id·title이 가리키는 상세 페이지가 전부 404가 되어
+    아카이브의 존재 이유 자체가 무너진다. 상세는 그래서 여전히 열려 있어야 한다.
+
+    목록 쪽은 #227이 계약을 바꿨다 — 기본 목록(`GET /api/contests`)은 이제
+    "지금 참가할 수 있는 것"만 보여주므로 CLOSED는 빠진다. CLOSED를 보려면
+    `?closed=true`를 명시해야 한다(이 파일이 검증하는 것은 그 계약이 유지되는가다
+    — `tests/test_contest_listing.py`가 `closed` 축 자체의 필터·정렬을 자세히
+    본다)."""
 
     deadline = timezone.now() + timedelta(hours=1)
     _sponsor, contest = _publish_contest(
@@ -461,10 +469,13 @@ def test_closed_contest_still_appears_in_public_list_and_detail(client, category
     assert detail_resp.status_code == 200
     assert detail_resp.json()["status"] == "closed"
 
-    list_resp = client.get(CONTESTS_URL)
-    assert list_resp.status_code == 200
-    listed_ids = [c["id"] for c in list_resp.json()["items"]]
-    assert contest["id"] in listed_ids
+    default_list_resp = client.get(CONTESTS_URL)
+    assert default_list_resp.status_code == 200
+    assert contest["id"] not in [c["id"] for c in default_list_resp.json()["items"]]
+
+    closed_list_resp = client.get(f"{CONTESTS_URL}?closed=true")
+    assert closed_list_resp.status_code == 200
+    assert contest["id"] in [c["id"] for c in closed_list_resp.json()["items"]]
 
 
 @pytest.mark.django_db

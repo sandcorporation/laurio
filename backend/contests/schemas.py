@@ -38,11 +38,18 @@ class ContestListFilters(Schema):
     알 수 없는 값은 500 이 아니라 4xx 여야 한다 — `sort` 는 Enum 이라, id 두 개는
     int 라 ninja 가 422 로 막는다. 존재하지 않는 id 는 오류가 아니라 빈 목록이다
     (필터는 "그런 게 있느냐"가 아니라 "그것으로 좁혀라"이다).
+
+    `closed`(#227)는 `category`/`deliverable_type`과 다른 축이다 — 저 둘은 AND로
+    좁히는 필터지만, `closed`는 **무엇을 보여줄지 자체**를 가른다(참가 가능 vs
+    마감됨). 기본값 `False`가 "지금 참가할 수 있는 것"이다 — 예전 기본값(전부
+    보여주고 마감 오름차순 정렬)은 마감된 Contest가 정의상 항상 과거라 첫 페이지
+    위쪽을 가장 오래전에 끝난 것들로 채웠다.
     """
 
     category: int | None = None
     deliverable_type: int | None = None
     sort: ContestSort = ContestSort.DEADLINE
+    closed: bool = False
 
 
 class DeliverableTypeOut(Schema):

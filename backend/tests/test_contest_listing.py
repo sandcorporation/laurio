@@ -249,3 +249,195 @@ def test_draft_contests_are_still_invisible_through_the_new_filters(
     for query in ("", f"?category={games.id}", f"?deliverable_type={web.id}", "?sort=prize"):
         payload = client.get(f"/api/contests{query}").json()
         assert draft.id not in _ids(payload), query
+
+
+# --- closed 축(#227) — 기본은 참가 가능한 것만, closed=true 로 뒤집는다 ------------
+
+
+def _finished(sponsor, category, deliverable_types, *, title, prize, days_ago, status):
+    """이미 마감된 Contest — deadline_at 이 과거다. CLOSED 는 judging_ends_at 을
+    전이 스캔이 채우지만, 여기서는 status 를 직접 심으므로 그 시각도 손으로 채운다
+    (COMPLETED 판정은 status 만 보므로 없어도 되지만, 실제 데이터 모양에 가깝게 둔다)."""
+
+    deadline_at = timezone.now() - timedelta(days=days_ago)
+    contest = Contest.objects.create(
+        sponsor=sponsor,
+        title=title,
+        category=category,
+        prize=prize,
+        deadline_at=deadline_at,
+        status=status,
+        judging_ends_at=deadline_at + timedelta(days=7) if status != Contest.Status.CLOSED else None,
+    )
+    contest.deliverable_types.set(deliverable_types)
+    return contest
+
+
+@pytest.mark.django_db
+def test_default_list_shows_only_joinable_contests(client, sponsor, games, web):
+    """#227 핵심 — 아무 조건 없이 열면 지금 참가할 수 있는 것만 나온다."""
+
+    joinable = _publish(sponsor, games, [web], title="참가 가능", prize=1_000_000, days=5)
+    closed = _finished(
+        sponsor, games, [web], title="마감", prize=1_000_000, days_ago=1, status=Contest.Status.CLOSED
+    )
+    awarded = _finished(
+        sponsor, games, [web], title="선정완료", prize=1_000_000, days_ago=2,
+        status=Contest.Status.AWARDED,
+    )
+    judging_ended = _finished(
+        sponsor, games, [web], title="심사종료", prize=1_000_000, days_ago=3,
+        status=Contest.Status.JUDGING_ENDED,
+    )
+
+    payload = client.get("/api/contests").json()
+
+    assert _ids(payload) == [joinable.id]
+    for finished in (closed, awarded, judging_ended):
+        assert finished.id not in _ids(payload)
+    assert payload["count"] == 1
+
+
+@pytest.mark.django_db
+def test_closed_true_shows_only_finished_contests_sorted_by_most_recently_closed(
+    client, sponsor, games, web
+):
+    joinable = _publish(sponsor, games, [web], title="참가 가능", prize=1_000_000, days=5)
+    # days_ago 가 클수록 더 예전에 마감됐다 — 최근 마감순이면 days_ago 가 작은
+    # 것부터 나와야 한다.
+    long_ago = _finished(
+        sponsor, games, [web], title="오래전 마감", prize=1_000_000, days_ago=30,
+        status=Contest.Status.CLOSED,
+    )
+    recent = _finished(
+        sponsor, games, [web], title="방금 선정완료", prize=1_000_000, days_ago=1,
+        status=Contest.Status.AWARDED,
+    )
+    middle = _finished(
+        sponsor, games, [web], title="심사종료", prize=1_000_000, days_ago=10,
+        status=Contest.Status.JUDGING_ENDED,
+    )
+
+    payload = client.get("/api/contests?closed=true").json()
+
+    assert _ids(payload) == [recent.id, middle.id, long_ago.id]
+    assert joinable.id not in _ids(payload)
+    assert payload["count"] == 3
+
+
+@pytest.mark.django_db
+def test_closed_finished_contests_show_up_regardless_of_which_finished_status(
+    client, sponsor, games, web
+):
+    """마감·선정완료·심사종료 셋 다 "끝났다"로 묶인다 — 하나라도 빠지면 그 종류의
+    Contest 가 어느 목록(참가 가능/마감)에도 안 보이는 채로 새는 것과 같다."""
+
+    finished = {
+        status: _finished(
+            sponsor, games, [web], title=f"끝남-{status}", prize=1_000_000, days_ago=1, status=status
+        )
+        for status in (
+            Contest.Status.CLOSED,
+            Contest.Status.AWARDED,
+            Contest.Status.JUDGING_ENDED,
+        )
+    }
+
+    payload = client.get("/api/contests?closed=true").json()
+
+    assert set(_ids(payload)) == {c.id for c in finished.values()}
+
+
+@pytest.mark.django_db
+def test_prize_sort_does_not_change_what_is_shown_only_the_order(client, sponsor, games, web):
+    """#227 인수조건 — 상금순 정렬을 골라도 무엇이 보이는지는 바뀌지 않는다."""
+
+    joinable_small = _publish(sponsor, games, [web], title="참가 가능 적음", prize=1_000_000, days=5)
+    joinable_big = _publish(sponsor, games, [web], title="참가 가능 많음", prize=9_000_000, days=6)
+    closed = _finished(
+        sponsor, games, [web], title="마감", prize=99_000_000, days_ago=1,
+        status=Contest.Status.CLOSED,
+    )
+
+    open_payload = client.get("/api/contests?sort=prize").json()
+    assert set(_ids(open_payload)) == {joinable_small.id, joinable_big.id}
+    assert _ids(open_payload) == [joinable_big.id, joinable_small.id]
+
+    closed_payload = client.get("/api/contests?closed=true&sort=prize").json()
+    assert _ids(closed_payload) == [closed.id]
+
+
+@pytest.mark.django_db
+def test_closed_true_combines_with_category_and_deliverable_type_filters(
+    client, sponsor, games, productivity, web, mobile
+):
+    target = _finished(
+        sponsor, games, [web], title="게임+웹 마감", prize=1_000_000, days_ago=1,
+        status=Contest.Status.CLOSED,
+    )
+    _finished(
+        sponsor, productivity, [web], title="생산성+웹 마감", prize=1_000_000, days_ago=1,
+        status=Contest.Status.CLOSED,
+    )
+    _finished(
+        sponsor, games, [mobile], title="게임+모바일 마감", prize=1_000_000, days_ago=1,
+        status=Contest.Status.CLOSED,
+    )
+
+    payload = client.get(
+        f"/api/contests?closed=true&category={games.id}&deliverable_type={web.id}"
+    ).json()
+
+    assert _ids(payload) == [target.id]
+
+
+@pytest.mark.django_db
+def test_pagination_count_matches_the_active_closed_filter(client, sponsor, games, web):
+    """#227 인수조건 — 페이지네이션 개수가 걸러진 결과와 맞는다."""
+
+    for i in range(3):
+        _publish(sponsor, games, [web], title=f"참가 가능 {i}", prize=1_000_000, days=i + 1)
+    for i in range(5):
+        _finished(
+            sponsor, games, [web], title=f"마감 {i}", prize=1_000_000, days_ago=i + 1,
+            status=Contest.Status.CLOSED,
+        )
+
+    assert client.get("/api/contests").json()["count"] == 3
+    assert client.get("/api/contests?closed=true").json()["count"] == 5
+
+
+@pytest.mark.django_db
+def test_assignments_never_appear_in_either_open_or_closed_list(client, sponsor):
+    """과제는 카테고리가 다르고(kind=ASSIGNMENT) 애초에 공개 목록 표면이 아니다
+    (ADR-0028) — closed 축을 더해도 이 배제는 흔들리면 안 된다."""
+
+    from contests.assignment_category import get_assignment_category
+
+    assignment_category = get_assignment_category()
+    open_assignment = Contest.objects.create(
+        sponsor=sponsor,
+        title="열린 과제",
+        category=assignment_category,
+        kind=Contest.Kind.ASSIGNMENT,
+        prize=0,
+        deadline_at=timezone.now() + timedelta(days=5),
+        status=Contest.Status.ASSIGNMENT_OPEN,
+    )
+    closed_assignment = Contest.objects.create(
+        sponsor=sponsor,
+        title="마감된 과제",
+        category=assignment_category,
+        kind=Contest.Kind.ASSIGNMENT,
+        prize=0,
+        deadline_at=timezone.now() - timedelta(days=1),
+        status=Contest.Status.ASSIGNMENT_CLOSED,
+    )
+
+    open_payload = client.get("/api/contests").json()
+    closed_payload = client.get("/api/contests?closed=true").json()
+
+    assert open_assignment.id not in _ids(open_payload)
+    assert open_assignment.id not in _ids(closed_payload)
+    assert closed_assignment.id not in _ids(open_payload)
+    assert closed_assignment.id not in _ids(closed_payload)
