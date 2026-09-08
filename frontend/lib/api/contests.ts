@@ -36,6 +36,8 @@ export type ContestListQuery = {
   category?: number;
   deliverableType?: number;
   sort?: ContestSort;
+  /** #227 — 기본(false/undefined)은 지금 참가할 수 있는 것만, true면 마감된 것만. */
+  closed?: boolean;
   page?: number;
 };
 
@@ -60,6 +62,7 @@ export async function fetchContests(query: ContestListQuery = {}): Promise<Conte
         category: query.category,
         deliverable_type: query.deliverableType,
         sort: query.sort ?? "deadline",
+        closed: query.closed ?? false,
         page,
         page_size: CONTESTS_PAGE_SIZE,
       },

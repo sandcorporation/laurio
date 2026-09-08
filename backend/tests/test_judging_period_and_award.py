@@ -1231,9 +1231,17 @@ def test_awarded_and_judging_ended_contests_stay_publicly_visible(
     assert detail_resp.status_code == 200
     assert detail_resp.json()["status"] == "awarded"
 
-    list_resp = client.get(CONTESTS_URL)
-    assert list_resp.status_code == 200
-    assert contest["id"] in [c["id"] for c in list_resp.json()["items"]]
+    # #227 — 기본 목록은 이제 "지금 참가할 수 있는 것"만 보여준다. AWARDED는
+    # 상세에서는 여전히 보이지만(위 단언), 기본 목록에서는 빠지고
+    # `?closed=true`로만 나온다(closed 축 자체의 필터·정렬은
+    # tests/test_contest_listing.py가 자세히 본다).
+    default_list_resp = client.get(CONTESTS_URL)
+    assert default_list_resp.status_code == 200
+    assert contest["id"] not in [c["id"] for c in default_list_resp.json()["items"]]
+
+    closed_list_resp = client.get(f"{CONTESTS_URL}?closed=true")
+    assert closed_list_resp.status_code == 200
+    assert contest["id"] in [c["id"] for c in closed_list_resp.json()["items"]]
 
     # Developer 본인도 자기 Submission을 계속 조회할 수 있다.
     me_resp = client.get(

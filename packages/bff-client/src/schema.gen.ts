@@ -418,13 +418,22 @@ export interface paths {
         };
         /**
          * List Contests
-         * @description 공개된 Contest만 나온다 — draft는 비로그인·타인에게 보이지 않는다.
+         * @description 지금 참가할 수 있는 Contest가 기본이다 — draft·과제는 아무 조건에서도 나오지
+         *     않는다(#227).
          *
-         *     PUBLISHED뿐 아니라 CLOSED도 공개 목록에 남는다 — 마감 전이(#11)는 결제 취소가
-         *     아니라 "데모·영상이 전면 공개되는 시점"일 뿐이다(ADR-0014). CLOSED를 여기서
-         *     빼면 submissions.api.get_developer_public_profile이 돌려주는 contest_id·title이
-         *     가리키는 곳이 404가 되어, 마감된 Submission을 아카이브하는 #11의 취지 자체가
-         *     무너진다(#12 리뷰 지적).
+         *     **`closed=true`가 아니면 PUBLISHED만 나온다(#227).** 예전에는 여기가
+         *     `Contest.Status.PUBLICLY_VISIBLE`(PUBLISHED·CLOSED·AWARDED·JUDGING_ENDED
+         *     전부) 통째를 대상으로 삼고 기본 정렬만 마감 오름차순이었다 — 마감된 Contest는
+         *     정의상 마감이 과거이므로 **항상 진행 중인 것보다 앞에 왔고**, 첫 페이지
+         *     위쪽이 가장 오래전에 끝난 Contest로 채워졌다. 화면의 "마감 임박순"이라는
+         *     말이 실제로는 "가장 오래전에 끝난 것 먼저"로 동작하던 버그다. 홈 큐레이션
+         *     (`contests.curation`)이 이미 같은 질문(`HomeStatusAxis`)에 답을 갖고 있으므로
+         *     그 축을 그대로 재사용한다 — OPEN(PUBLISHED)이 기본, `closed=true`면
+         *     IN_JUDGING·COMPLETED(CLOSED·AWARDED·JUDGING_ENDED)로 뒤집는다. 마감된
+         *     Contest의 **상세**는 이 필터와 무관하게 계속 열린다(`get_contest`가 독립적으로
+         *     `PUBLICLY_VISIBLE` 전체를 본다) — 공개 개발자 프로필이 가리키는 Contest가
+         *     404가 되면 안 되므로(#12 리뷰 지적, ADR-0014), 이 엔드포인트가 바꾸는 것은
+         *     "기본으로 무엇을 보여주는가"이지 "무엇을 볼 수 있는가"가 아니다.
          *
          *     `select_related("category")`가 없으면 목록의 Contest마다 Category를 한 번씩 더
          *     조회하는 N+1이 난다. 목록은 무한정 커질 수 있으므로 페이지네이션도 둔다.
@@ -440,6 +449,16 @@ export interface paths {
          *     `Category`와 `DeliverableType`은 서로 다른 축이다(ADR-0001) — 둘 다 주면 AND로
          *     좁혀진다. `deliverable_type`은 M2M이지만 값이 하나뿐이라 조인이 Contest당 최대
          *     한 행이므로 중복이 생기지 않는다(그래서 `distinct()`가 필요 없다).
+         *
+         *     **`sort`는 무엇을 보여줄지를 바꾸지 않는다 — 순서만 바꾼다(#227 인수조건).**
+         *     `deliverable_type`/`category`와 달리 `closed`는 필터가 아니라 별도 축이라, 둘을
+         *     조합해도 서로 간섭하지 않는다: `sort=prize`는 `closed` 값과 무관하게 항상
+         *     상금 내림차순이고, `sort=deadline`(기본)만 `closed`에 따라 방향이 뒤집힌다 —
+         *     참가 가능한 것은 마감이 가까운 순(오름차순, "마감임박순"), 마감된 것은 최근에
+         *     마감된 순(내림차순, "최근 마감순")이다. 이 내림차순은 홈 완료 묶음
+         *     (`contests.curation.home_bucket_queryset`의 COMPLETED)이 쓰는 것과 정확히
+         *     같은 표현(`-deadline_at, -id`)이다 — 같은 질문에 두 화면이 다른 순서로
+         *     답하지 않는다.
          *
          *     정렬에는 항상 `id`를 마지막 키로 붙인다. 상금이나 마감이 동점이면 DB가 순서를
          *     보장할 이유가 없고, 페이지마다 순서가 달라지면 **같은 Contest가 두 페이지에
@@ -1490,6 +1509,75 @@ export interface paths {
         put?: never;
         /** Revoke Assignment Permission Endpoint */
         post: operations["accounts_assignment_permission_operator_api_revoke_assignment_permission_endpoint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Categories */
+        get: operations["contests_operator_api_list_categories"];
+        put?: never;
+        /** Create Category Endpoint */
+        post: operations["contests_operator_api_create_category_endpoint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/categories/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Category Changes */
+        get: operations["contests_operator_api_list_category_changes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/categories/{category_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rename Category Endpoint */
+        post: operations["contests_operator_api_rename_category_endpoint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/categories/{category_id}/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Deactivate Category Endpoint */
+        post: operations["contests_operator_api_deactivate_category_endpoint"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2968,12 +3056,52 @@ export interface components {
             /** Submission Id */
             submission_id: number;
         };
+        /** CategoryChangeOut */
+        CategoryChangeOut: {
+            /** Action */
+            action: string;
+            /** After */
+            after: {
+                [key: string]: unknown;
+            };
+            /** Before */
+            before: {
+                [key: string]: unknown;
+            };
+            /** Category Id */
+            category_id: number;
+            /**
+             * Changed At
+             * Format: date-time
+             */
+            changed_at: string;
+            /** Id */
+            id: number;
+            /** Operator Username */
+            operator_username: string;
+            /** Reason */
+            reason: string;
+        };
+        /** CategoryCreateIn */
+        CategoryCreateIn: {
+            /** Name */
+            name: string;
+            /** Reason */
+            reason: string;
+        };
         /** CategoryOut */
         CategoryOut: {
             /** Id */
             id: number;
             /** Name */
             name: string;
+        };
+        /** CategoryRenameIn */
+        CategoryRenameIn: {
+            /** Name */
+            name: string;
+            /** Reason */
+            reason: string;
         };
         /** CiLookupIn */
         CiLookupIn: {
@@ -3176,10 +3304,21 @@ export interface components {
          *     알 수 없는 값은 500 이 아니라 4xx 여야 한다 — `sort` 는 Enum 이라, id 두 개는
          *     int 라 ninja 가 422 로 막는다. 존재하지 않는 id 는 오류가 아니라 빈 목록이다
          *     (필터는 "그런 게 있느냐"가 아니라 "그것으로 좁혀라"이다).
+         *
+         *     `closed`(#227)는 `category`/`deliverable_type`과 다른 축이다 — 저 둘은 AND로
+         *     좁히는 필터지만, `closed`는 **무엇을 보여줄지 자체**를 가른다(참가 가능 vs
+         *     마감됨). 기본값 `False`가 "지금 참가할 수 있는 것"이다 — 예전 기본값(전부
+         *     보여주고 마감 오름차순 정렬)은 마감된 Contest가 정의상 항상 과거라 첫 페이지
+         *     위쪽을 가장 오래전에 끝난 것들로 채웠다.
          */
         ContestListFilters: {
             /** Category */
             category?: number | null;
+            /**
+             * Closed
+             * @default false
+             */
+            closed: boolean;
             /** Deliverable Type */
             deliverable_type?: number | null;
             /** @default deadline */
@@ -3315,6 +3454,11 @@ export interface components {
             cumulative_count: number;
             /** Date */
             date: string;
+        };
+        /** DeactivateCategoryIn */
+        DeactivateCategoryIn: {
+            /** Reason */
+            reason: string;
         };
         /** DeactivateDeliverableTypeIn */
         DeactivateDeliverableTypeIn: {
@@ -3759,6 +3903,17 @@ export interface components {
          * @enum {string}
          */
         NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "scoring_complete" | "appeal_ruled" | "new_contest_in_category" | "payout_awaits_you";
+        /** OperatorCategoryOut */
+        OperatorCategoryOut: {
+            /** Id */
+            id: number;
+            /** Is Active */
+            is_active: boolean;
+            /** Is Reserved */
+            is_reserved: boolean;
+            /** Name */
+            name: string;
+        };
         /** OperatorCreateIn */
         OperatorCreateIn: {
             /**
@@ -5178,6 +5333,7 @@ export interface operations {
                 category?: number | null;
                 deliverable_type?: number | null;
                 sort?: "deadline" | "prize";
+                closed?: boolean;
                 page?: number;
                 page_size?: number | null;
             };
@@ -6485,6 +6641,194 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AssignmentPermissionErrorOut"];
+                };
+            };
+        };
+    };
+    contests_operator_api_list_categories: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorCategoryOut"][];
+                };
+            };
+        };
+    };
+    contests_operator_api_create_category_endpoint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CategoryCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorCategoryOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+        };
+    };
+    contests_operator_api_list_category_changes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CategoryChangeOut"][];
+                };
+            };
+        };
+    };
+    contests_operator_api_rename_category_endpoint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                category_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CategoryRenameIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorCategoryOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+        };
+    };
+    contests_operator_api_deactivate_category_endpoint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                category_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeactivateCategoryIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorCategoryOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
                 };
             };
         };

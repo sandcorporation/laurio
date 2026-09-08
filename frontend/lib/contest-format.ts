@@ -31,6 +31,24 @@ export function formatPrize(amount: number): string {
   return amount.toLocaleString("ko-KR");
 }
 
+// 끝난 공모전의 배지 문구(#227 인수조건 — "끝난 공모전이 목록에 나올 때는
+// 끝났다는 것이 보인다. 선정완료·심사종료도 마찬가지다"). 예전에는 목록 행이
+// `status === "closed"`일 때만 배지를 그렸다 — AWARDED·JUDGING_ENDED는 기본
+// 목록에 아예 안 보였으니 드러나지 않았던 격차인데, `closed=true`로 그 둘도
+// 목록에 나오게 되면서 배지 없이 섞이면 방문자가 그것이 끝난 공모전인 줄
+// 모른다. 라벨은 백엔드 `Contest.Status` 선택지의 한글 이름과 맞춘다
+// (backend/contests/models.py) — 같은 상태를 두 화면이 다른 말로 부르지
+// 않는다.
+const FINISHED_STATUS_LABELS: Record<string, string> = {
+  closed: "마감",
+  awarded: "선정 완료",
+  judging_ended: "심사기간 종료",
+};
+
+export function finishedStatusLabel(status: string): string | null {
+  return FINISHED_STATUS_LABELS[status] ?? null;
+}
+
 // 참가작 수 문구(#106, spec #105). 백엔드(`ContestOut.submission_count`)는 숫자
 // 0을 그대로 보낸다 — 그것을 "아직 참가작이 없습니다"로 읽히게 바꾸는 것은
 // 화면의 몫이다. 숫자와 문구가 **다른 층**에서 결정된다는 것이 #106 인수조건

@@ -51,6 +51,21 @@ test.describe("@exclusive 자바스크립트 없이", () => {
     expect(html).not.toContain(seeded.draft.title);
   });
 
+  // #227 — 기본 목록은 "지금 참가할 수 있는 것"만 보여준다. seed_e2e_contests.py
+  // 의 `closed` 는 CLOSED 상태로 심긴다(마감 시각이 과거) — 예전에는 이것도
+  // 기본 목록에 나왔지만, 이제는 `?closed=true` 로 명시해야만 나온다. 백엔드가
+  // 준 값이 어느 조건에서 나오고 어느 조건에서 안 나오는지를 JS-off HTML 로
+  // 직접 본다 — 이 파일의 나머지 테스트들과 같은 시임(risk 1, ADR-0017).
+  test("마감된 Contest 는 기본 목록에서 빠지고 closed=true 로만 나온다", async ({ page }) => {
+    await page.goto("/contests");
+    expect(await page.content()).not.toContain(seeded.closed.title);
+
+    await page.goto("/contests?closed=true");
+    const html = await page.content();
+    expect(html).toContain(seeded.closed.title);
+    expect(html).toContain(seeded.closed.prize.toLocaleString("ko-KR"));
+  });
+
 });
 
 // `page.content()` 는 쓰지 않는다 — Next 의 `<Link>` 클릭은 클라이언트 소프트

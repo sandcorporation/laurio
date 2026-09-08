@@ -1,4 +1,4 @@
-"""DeliverableType 운영자 API (#80, ADR-0023).
+"""DeliverableType·Category 운영자 API (#80/#231, ADR-0023).
 
 `accounts.operator_api`와 같은 분리 이유 — `contests.api`(공개 표면, 인증 계층이
 다르고 파일이 이미 크다)와 이 표면(세션 인증, 등급이 갈린다)을 한 파일에 두지
@@ -14,9 +14,16 @@
 - `POST /operator/deliverable-types/{id}` — 최소 제안 상금 수정. 상위 등급만.
 - `POST /operator/deliverable-types/{id}/deactivate` — 비활성화. 상위 등급만.
 
+`/operator/categories`도 같은 다섯 모양(목록·생성·이력·이름 수정·감추기)을
+그대로 반복한다(#231) — Category에는 최소 제안 상금이 없는 대신 이름을 고칠
+수 있고, 예약된 Assignment Category(#213, ADR-0033)는 이름 수정·감추기 둘 다
+`contests.category_services`가 거부한다.
+
 라우터 기본값이 이미 거부(`OperatorAuth`)다. 변경 엔드포인트는 그 위에 상위
 등급까지 요구한다(`SuperuserOperatorAuth`) — 최소 제안 상금은 "상금미달" 배지
 판정에 그대로 쓰이므로, 이 값을 바꾸는 것도 정책값과 같은 무게의 판단이다.
+Category도 같은 무게로 다룬다(공개 목록의 분류 축이고 Contest가 참조를
+붙든다) — 정책값이 없다는 차이가 등급 요구까지 낮추지는 않는다.
 """
 
 from __future__ import annotations
@@ -26,6 +33,14 @@ from ninja import Router, Schema
 
 from core.operator_auth import OperatorAuth, SuperuserOperatorAuth
 
+from .assignment_category import get_assignment_category
+from .category_services import (
+    CategoryConflictError,
+    CategoryValidationError,
+    create_category,
+    deactivate_category,
+    rename_category,
+)
 from .deliverable_type_services import (
     DeliverableTypeConflictError,
     DeliverableTypeValidationError,
@@ -33,12 +48,17 @@ from .deliverable_type_services import (
     deactivate_deliverable_type,
     update_minimum_prize,
 )
-from .models import DeliverableType, DeliverableTypeChange
+from .models import Category, CategoryChange, DeliverableType, DeliverableTypeChange
 from .schemas import (
+    CategoryChangeOut,
+    CategoryCreateIn,
+    CategoryRenameIn,
+    DeactivateCategoryIn,
     DeactivateDeliverableTypeIn,
     DeliverableTypeChangeOut,
     DeliverableTypeCreateIn,
     DeliverableTypeUpdateIn,
+    OperatorCategoryOut,
     OperatorDeliverableTypeOut,
 )
 
@@ -172,3 +192,111 @@ def deactivate_deliverable_type_endpoint(
         return 409, {"detail": str(exc), "code": "already_inactive"}
 
     return 200, _serialize(updated)
+
+
+# --- Category (#231) — 위 DeliverableType 다섯 엔드포인트와 같은 모양이다 ------------------
+
+
+def _serialize_category(category: Category) -> OperatorCategoryOut:
+    return OperatorCategoryOut(
+        id=category.id,
+        name=category.name,
+        is_active=category.is_active,
+        is_reserved=category.id == get_assignment_category().id,
+    )
+
+
+def _serialize_category_change(change: CategoryChange) -> CategoryChangeOut:
+    return CategoryChangeOut(
+        id=change.id,
+        category_id=change.category_id,
+        operator_username=change.operator.username,
+        action=change.action,
+        reason=change.reason,
+        before=change.before,
+        after=change.after,
+        changed_at=change.changed_at,
+    )
+
+
+def _get_category_or_404(category_id: int) -> Category | None:
+    return Category.objects.filter(id=category_id).first()
+
+
+@operator_router.get("/categories", response={200: list[OperatorCategoryOut]})
+def list_categories(request: HttpRequest):
+    return 200, [_serialize_category(c) for c in Category.objects.all().order_by("name")]
+
+
+@operator_router.post(
+    "/categories",
+    response={201: OperatorCategoryOut, 409: OperatorErrorOut, 422: OperatorErrorOut},
+    auth=_SUPERUSER,
+)
+def create_category_endpoint(request: HttpRequest, payload: CategoryCreateIn):
+    try:
+        category = create_category(
+            operator=request.auth,
+            name=payload.name,
+            reason=payload.reason,
+        )
+    except CategoryValidationError as exc:
+        return 422, {"detail": str(exc), "code": "invalid"}
+    except CategoryConflictError as exc:
+        return 409, {"detail": str(exc), "code": "duplicate"}
+
+    return 201, _serialize_category(category)
+
+
+# **등록 순서가 중요하다** — 위 `/deliverable-types/changes` 주석과 같은 이유
+# (`{category_id}`가 별도 컨버터 없이 "changes"까지 매치해버린다).
+@operator_router.get("/categories/changes", response={200: list[CategoryChangeOut]})
+def list_category_changes(request: HttpRequest):
+    changes = CategoryChange.objects.select_related("operator").order_by("-changed_at", "-id")[
+        :200
+    ]
+    return 200, [_serialize_category_change(change) for change in changes]
+
+
+@operator_router.post(
+    "/categories/{category_id}",
+    response={200: OperatorCategoryOut, 404: OperatorErrorOut, 409: OperatorErrorOut, 422: OperatorErrorOut},
+    auth=_SUPERUSER,
+)
+def rename_category_endpoint(request: HttpRequest, category_id: int, payload: CategoryRenameIn):
+    category = _get_category_or_404(category_id)
+    if category is None:
+        return 404, {"detail": "Category를 찾을 수 없습니다.", "code": "not_found"}
+
+    try:
+        updated = rename_category(
+            category, operator=request.auth, name=payload.name, reason=payload.reason
+        )
+    except CategoryValidationError as exc:
+        return 422, {"detail": str(exc), "code": "invalid"}
+    except CategoryConflictError as exc:
+        return 409, {"detail": str(exc), "code": "duplicate"}
+
+    return 200, _serialize_category(updated)
+
+
+@operator_router.post(
+    "/categories/{category_id}/deactivate",
+    response={200: OperatorCategoryOut, 404: OperatorErrorOut, 409: OperatorErrorOut, 422: OperatorErrorOut},
+    auth=_SUPERUSER,
+)
+def deactivate_category_endpoint(
+    request: HttpRequest, category_id: int, payload: DeactivateCategoryIn
+):
+    category = _get_category_or_404(category_id)
+    if category is None:
+        return 404, {"detail": "Category를 찾을 수 없습니다.", "code": "not_found"}
+
+    try:
+        updated = deactivate_category(category, operator=request.auth, reason=payload.reason)
+    except CategoryValidationError as exc:
+        return 422, {"detail": str(exc), "code": "invalid"}
+    except CategoryConflictError as exc:
+        return 409, {"detail": str(exc), "code": "already_inactive"}
+
+    return 200, _serialize_category(updated)
