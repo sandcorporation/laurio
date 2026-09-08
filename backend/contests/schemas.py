@@ -171,16 +171,20 @@ class RequirementOut(Schema):
 
 
 class ContestImageOut(Schema):
-    """ContestImage 하나 (#234, ADR-0032).
+    """ContestImage 하나 (#234/#235, ADR-0031/0032).
 
-    `url`은 백엔드가 이미 조립한 서명 없는 공개 주소다(`storage.public.
-    compose_public_image_url`) — 화면은 "무엇을 보여줄지"를 다시 판정하지 않는다.
-    이 티켓은 원본만 있으므로 `url`은 항상 원본을 가리킨다 — 파생본이 생기면(#235)
-    이 필드가 그 규칙(최적화됐으면 파생본, 아니면 원본)을 그대로 흡수한다.
+    `url`·`thumbnail_url`은 백엔드가 이미 조립한 서명 없는 공개 주소다
+    (`ContestImage.url`/`.thumbnail_url` 프로퍼티, `storage.public.
+    compose_public_image_url`) — 화면은 "무엇을 보여줄지"를 다시 판정하지
+    않는다. 목록은 `thumbnail_url`을, 상세는 `url`을 그대로 쓴다(spec #225 AC).
+    최적화 전이거나(스캔 한 회차의 틈) 실패가 상한에 이르러 「최적화 불가」로
+    확정됐으면 둘 다 원본을 가리킨다 — 화면이 "최적화됐는가"를 다시 판정할
+    필요가 없다.
     """
 
     id: int
     url: str
+    thumbnail_url: str
     order: int
 
 

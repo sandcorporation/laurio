@@ -19,6 +19,7 @@ from django.db import models
 from django.db.models import Q
 
 from core.classification import Classification
+from core.clock import Clock
 
 from payments.charges import ChargeBase
 
@@ -696,8 +697,32 @@ class ContestImage(models.Model):
 
     `object_key`는 공개 이미지 버킷(`storage.adapters.base.Bucket.PUBLIC_IMAGES`)에
     사는 오브젝트를 가리킨다 — 브라우저가 presigned POST로 그 버킷에 직접 올린 뒤,
-    이 행이 그 object_key를 기록해 Contest와 순서를 붙인다. 이 티켓은 원본만
-    다룬다 — 썸네일·본문용 webp 파생본은 #235가 얹는다.
+    이 행이 그 object_key를 기록해 Contest와 순서를 붙인다.
+
+    **`thumbnail_key`·`detail_key`는 #235가 스캔으로 만드는 파생본이다(ADR-0031/
+    0032).** 업로드 직후에는 둘 다 비어 있고, 그동안은 `url`/`thumbnail_url`
+    프로퍼티가 원본으로 대신 답한다 — 화면이 "최적화됐는가"를 판정하지 않는다.
+    **둘은 함께 성립한다.** `optimize_derivatives`(image_optimization.py)가 스캔
+    한 회차 안에서 두 오브젝트를 쓴 뒤 두 필드를 **한 UPDATE**로 같이 채운다 — 한
+    종만 성공한 중간 상태를 이 모델이 표현할 수 없게 한다. 파생본 object_key는
+    원본 object_key에서 결정적으로 파생되므로(`{object_key}-thumbnail.webp` 등)
+    재시도가 매번 같은 자리를 덮어써, 실패한 시도가 고아 오브젝트를 남기지 않는다.
+
+    **`optimization_failed_at`이 채워지면 「최적화 불가」로 확정된 것이다**
+    (#235, ADR-0031) — 실패가 `IMAGE_OPTIMIZATION_FAILURE_LIMIT`회에 이르고
+    **동시에** `created_at` 이후 `IMAGE_OPTIMIZATION_FAILURE_GRACE`가 지나야
+    확정된다(scoring의 `_scoring_cap_reached`와 같은 이유 — 스토리지가 잠깐
+    흔들린 것만으로 되돌릴 수 없는 실패로 굳지 않는다). 확정된 뒤에도 원본은
+    계속 보인다 — 이 행이 사라지지도, 원본 object_key가 지워지지도 않는다.
+    `optimization_error`가 가장 최근 실패 사유를 들고 있어 나중에 "왜"에 답할
+    수 있다. 시도 이력 자체는 `ContestImageOptimizationAttempt`에 쌓인다 — 카운터를
+    이 행에 직접 두지 않는 이유는 `scoring.models.ScoringAttempt`와 같다: 카운터
+    증가와 이력 생성이 갈리는 순간 진실이 둘이 된다. 이력이 유일한 원천이다.
+
+    `created_at`은 `auto_now_add`가 아니라 `Clock.now()`를 기본값으로 쓴다(ADR-0003)
+    — 실제 벽시계가 아니라 이 저장소의 주입 가능한 시계를 따라야, 위 유예 판정을
+    테스트가 `ClockOverride`로 앞당길 수 있다(`changed_at=Clock.now()` 등 이
+    저장소 전역의 관용구와 같다).
 
     편집 게이트는 Requirement와 똑같다 — `contests.api._get_owned_draft_contest`
     (소유자 + status==DRAFT + not is_assignment)가 이미지 추가·순서 변경·제거를
@@ -707,7 +732,7 @@ class ContestImage(models.Model):
     **빼는 것은 이 행만 지우는 일이다 — object_key가 가리키는 바이트는 지우지
     않는다.** 어댑터에 삭제 메서드가 없다(ADR-0005/0032가 의도적으로 뺐다). 재개최
     (#236)가 같은 object_key를 가리키는 새 행을 만들 수 있으므로, 실제로 오브젝트를
-    지우면 원본 Contest의 이미지가 깨진다.
+    지우면 원본 Contest의 이미지가 깨진다. 파생본도 같은 이유로 지우지 않는다.
     """
 
     contest = models.ForeignKey(Contest, related_name="images", on_delete=models.CASCADE)
@@ -715,7 +740,16 @@ class ContestImage(models.Model):
     # 이하 — "<target_ref>/<32자리 hex>")과 같은 여유를 둔다.
     object_key = models.CharField(max_length=600)
     order = models.PositiveIntegerField(default=0)
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(default=Clock.now)
+
+    # #235, ADR-0031/0032 — 파생본 두 종. 비어 있으면(기본값) 아직 최적화되지
+    # 않았다 — 위 클래스 docstring 참고.
+    thumbnail_key = models.CharField(max_length=600, blank=True, default="")
+    detail_key = models.CharField(max_length=600, blank=True, default="")
+    # 확정된 「최적화 불가」 시각 — null이면 아직 후보다(스캔이 계속 재시도한다).
+    optimization_failed_at = models.DateTimeField(null=True, blank=True)
+    # 가장 최근 실패 사유. 확정 여부와 무관하게 실패할 때마다 갱신된다.
+    optimization_error = models.TextField(blank=True, default="")
 
     class Meta:
         ordering = ["order", "id"]
@@ -724,6 +758,52 @@ class ContestImage(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"ContestImage(contest_id={self.contest_id}, object_key={self.object_key})"
+
+    @property
+    def is_optimized(self) -> bool:
+        """썸네일·본문용 파생본이 둘 다 있는가 — 위 docstring의 "함께 성립" 규칙대로
+        이 프로퍼티는 항상 「둘 다」거나 「둘 다 아니거나」다."""
+
+        return bool(self.thumbnail_key) and bool(self.detail_key)
+
+    @property
+    def thumbnail_url(self) -> str:
+        """목록용 URL. 최적화 전이거나 「최적화 불가」로 확정됐으면 원본을 그대로
+        가리킨다 — 화면은 이 값이 파생본인지 원본인지 판정하지 않는다."""
+
+        from storage.public import compose_public_image_url
+
+        return compose_public_image_url(self.thumbnail_key or self.object_key)
+
+    @property
+    def url(self) -> str:
+        """상세용 URL. thumbnail_url과 같은 원칙 — 최적화 전/실패 시 원본."""
+
+        from storage.public import compose_public_image_url
+
+        return compose_public_image_url(self.detail_key or self.object_key)
+
+
+class ContestImageOptimizationAttempt(models.Model):
+    """ContestImage 최적화 실패 이력 (#235, ADR-0031) — `scoring.models.ScoringAttempt`와
+    같은 자리. Score와 달리 append-only일 필요는 없지만, 카운터를 `ContestImage`에
+    직접 두지 않고 여기 쌓아 집계하는 이유는 같다 — 카운터 증가와 이력 생성이 갈리는
+    순간 어느 쪽이 참인지 정할 방법이 없다.
+    """
+
+    contest_image = models.ForeignKey(
+        ContestImage, related_name="optimization_attempts", on_delete=models.CASCADE
+    )
+    attempted_at = models.DateTimeField(auto_now_add=True)
+    error = models.TextField()
+
+    class Meta:
+        ordering = ["-attempted_at"]
+        verbose_name = "이미지 최적화 실패 이력"
+        verbose_name_plural = "이미지 최적화 실패 이력"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ContestImageOptimizationAttempt(contest_image={self.contest_image_id}, at={self.attempted_at})"
 
 
 class JudgingExtensionPayment(ChargeBase):

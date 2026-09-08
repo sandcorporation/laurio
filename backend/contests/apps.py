@@ -102,3 +102,8 @@ class ContestsConfig(AppConfig):
                 batch_size=500,
             )
         )
+
+        # ContestImage 최적화 — 썸네일·본문용 webp 파생본 (#235, ADR-0031/0032).
+        from .image_optimization import CONTEST_IMAGE_OPTIMIZATION_SCAN
+
+        register_scan(CONTEST_IMAGE_OPTIMIZATION_SCAN)

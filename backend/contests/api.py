@@ -41,7 +41,6 @@ from payments.charges import settle_charge
 from payments.models import Payment
 from policies.scope import current_policy
 from storage.adapters import Bucket, get_storage_adapter
-from storage.public import compose_public_image_url
 from verification.models import Verification
 
 from .models import (
@@ -151,7 +150,7 @@ def _serialize_contest(contest: Contest, auth_user: object | None = None) -> Con
             for r in contest.requirements.all()
         ],
         images=[
-            ContestImageOut(id=img.id, url=compose_public_image_url(img.object_key), order=img.order)
+            ContestImageOut(id=img.id, url=img.url, thumbnail_url=img.thumbnail_url, order=img.order)
             for img in contest.images.all()
         ],
         source_contest_id=contest.source_contest_id,
@@ -1181,7 +1180,7 @@ def delete_requirement(request: HttpRequest, contest_id: int, requirement_id: in
 
 def _serialize_contest_image(image: ContestImage) -> ContestImageOut:
     return ContestImageOut(
-        id=image.id, url=compose_public_image_url(image.object_key), order=image.order
+        id=image.id, url=image.url, thumbnail_url=image.thumbnail_url, order=image.order
     )
 
 
