@@ -32,6 +32,7 @@ from notifications.adapters_aligo import (
     query_remaining_balance,
 )
 from notifications.models import Notification, NotificationType
+from notifications.rendering import render_message
 
 _ALIGO_SETTINGS = dict(
     ALIGO_API_KEY="test-api-key",
@@ -437,3 +438,134 @@ def test_query_remaining_balance_error_does_not_leak_credentials_in_the_exceptio
     # 자격증명(API 키)이 예외 메시지 어디에도 없다 — raise_for_status()가
     # 쓰던 response.url에는 쿼리스트링으로 실린 키가 그대로 담겼었다.
     assert "test-api-key" not in str(exc_info.value)
+
+
+# --- PAYOUT_AWAITS_YOU: 지급 대기 알림의 문자 본문 (#229) -------------------
+#
+# `payouts.notifications._notify_if_developer_turn`가 이미 context에
+# `message`(payouts.progress.next_action_message의 결과)를 실어 보낸다 — 렌더러가
+# 없어서 그 값이 벤더에 닿지 못하고 폴백("새 알림이 있습니다...")으로 나가던
+# 것이 갭이다. 이 절은 렌더러가 그 값을 실제로 쓰는지만 본다 — Hold별 문구
+# 자체(HoldKind → 문장 번역표)의 정확성은 `payouts.progress`가 이미 검증한다
+# (`assert_covers_all_kinds`, 모듈 로드 시점 검사).
+
+
+def _payout_awaits_you_notification(recipient, *, message: str | None, contest_title: str = "테스트 대회"):
+    context: dict = {"contest_id": 1, "contest_title": contest_title}
+    if message is not None:
+        context["message"] = message
+    return _notification(
+        recipient, notification_type=NotificationType.PAYOUT_AWAITS_YOU, context=context
+    )
+
+
+@override_settings(**_ALIGO_SETTINGS)
+def test_payout_awaits_you_sms_body_carries_the_hold_message(recipient):
+    """AC: 지금 무엇이 막고 있고 무엇을 하면 되는지가 문자 본문에 실린다."""
+
+    PhoneContact.objects.create(user=recipient, phone_number="01011112222")
+    adapter = AligoSmsAdapter()
+    message = "세무 신고를 위해 주민등록번호를 제출해주세요."
+    notification = _payout_awaits_you_notification(recipient, message=message)
+
+    with patch("notifications.adapters_aligo.requests.post") as mock_post:
+        mock_post.return_value = _response(200, {"result_code": "1", "message": "success"})
+        result = adapter.send(recipient=recipient, notification=notification)
+
+    assert result.success is True
+    sent_body = mock_post.call_args.kwargs["data"]["msg"]
+    assert message in sent_body
+    # 폴백 문구로 새지 않았다.
+    assert "새 알림이 있습니다" not in sent_body
+
+
+@override_settings(**_ALIGO_SETTINGS)
+def test_payout_awaits_you_different_hold_kinds_produce_different_sms_bodies(recipient):
+    """AC: 막는 사유 네 가지가 각각 다른 문장으로 나간다."""
+
+    identity_message = "세무 신고를 위해 주민등록번호를 제출해주세요."
+    seller_auth_message = (
+        "지급대행사(토스페이먼츠)가 보낸 본인인증 문자로 인증을 완료해주세요 — "
+        "이미 본인확인을 하셨더라도 지급대행사 자체 의무라 다시 인증이 "
+        "필요합니다. 인증이 끝나면 자동으로 다음 단계로 넘어갑니다."
+    )
+
+    identity_body = render_message(_payout_awaits_you_notification(recipient, message=identity_message))
+    seller_auth_body = render_message(
+        _payout_awaits_you_notification(recipient, message=seller_auth_message)
+    )
+
+    assert identity_message in identity_body
+    assert seller_auth_message in seller_auth_body
+    assert identity_body != seller_auth_body
+
+
+@override_settings(**_ALIGO_SETTINGS)
+def test_payout_awaits_you_long_hold_message_is_promoted_to_lms_without_truncating(recipient):
+    """AC: 문구가 길어져 문자 한 통을 넘기면 기존 승격 규칙이 그대로 처리한다 —
+    발송이 실패하지 않는다. `SELLER_AUTH`의 문구(#57, `payouts.progress`)가 실제로
+    SMS 한도를 넘는다."""
+
+    PhoneContact.objects.create(user=recipient, phone_number="01011112222")
+    adapter = AligoSmsAdapter()
+    seller_auth_message = (
+        "지급대행사(토스페이먼츠)가 보낸 본인인증 문자로 인증을 완료해주세요 — "
+        "이미 본인확인을 하셨더라도 지급대행사 자체 의무라 다시 인증이 "
+        "필요합니다. 인증이 끝나면 자동으로 다음 단계로 넘어갑니다."
+    )
+    notification = _payout_awaits_you_notification(recipient, message=seller_auth_message)
+    assert _byte_length(render_message(notification)) > 90  # 전제 확인 — 실제로 SMS 한도를 넘는다.
+
+    with patch("notifications.adapters_aligo.requests.post") as mock_post:
+        mock_post.return_value = _response(200, {"result_code": "1", "message": "success"})
+        result = adapter.send(recipient=recipient, notification=notification)
+
+    assert result.success is True
+    assert "LMS" in result.failure_reason and "승격" in result.failure_reason
+    kwargs = mock_post.call_args.kwargs
+    assert kwargs["data"]["msg_type"] == "LMS"
+    assert seller_auth_message in kwargs["data"]["msg"]  # 잘리지 않았다.
+
+
+@override_settings(**_ALIGO_SETTINGS)
+def test_payout_awaits_you_falls_back_to_generic_message_when_context_has_no_message(recipient):
+    """AC: 알 수 없는 사유가 오면(여기서는 context에 message가 아예 없는 경우로
+    흉내낸다) 기존 폴백 문구로 나가고 발송 자체는 성공한다."""
+
+    PhoneContact.objects.create(user=recipient, phone_number="01011112222")
+    adapter = AligoSmsAdapter()
+    notification = _payout_awaits_you_notification(recipient, message=None)
+
+    with patch("notifications.adapters_aligo.requests.post") as mock_post:
+        mock_post.return_value = _response(200, {"result_code": "1", "message": "success"})
+        result = adapter.send(recipient=recipient, notification=notification)
+
+    assert result.success is True
+    sent_body = mock_post.call_args.kwargs["data"]["msg"]
+    assert "새 알림이 있습니다" in sent_body
+
+
+def test_payout_awaits_you_body_contains_no_personal_information(recipient):
+    """AC: 본문에 이름·연락처·계좌 같은 개인정보가 들어가지 않는다.
+
+    context 자체가 그런 값을 담지 않는다(`payouts.notifications._notify_if_developer_turn`
+    — contest_id·message뿐) — 렌더러가 새로 담지 않는지만 확인한다."""
+
+    message = "세무 신고를 위해 주민등록번호를 제출해주세요."
+    body = render_message(_payout_awaits_you_notification(recipient, message=message))
+
+    assert recipient.username not in body
+    assert recipient.email not in body or recipient.email == ""
+
+
+def test_other_notification_type_bodies_are_unaffected_by_the_new_branch():
+    """AC: 다른 알림 종류의 본문은 바뀌지 않는다 — 회귀 고정."""
+
+    notification = Notification(
+        recipient_id=1,
+        notification_type=NotificationType.APPEAL_RULED,
+        is_transactional=True,
+        is_promotional=False,
+        context={"contest_title": "테스트 대회"},
+    )
+    assert render_message(notification) == "[Laurio] 제기하신 이의 심판이 완료됐습니다. laurio에서 결과를 확인하세요."

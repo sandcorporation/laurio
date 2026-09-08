@@ -69,4 +69,17 @@ def render_message(notification: Notification) -> str:
     if notification_type == NotificationType.NEW_CONTEST_IN_CATEGORY:
         return f"{_BRAND_PREFIX} 관심 카테고리에 새 Contest '{contest_title}'가 등록됐습니다."
 
+    if notification_type == NotificationType.PAYOUT_AWAITS_YOU:
+        # `payouts.notifications._notify_if_developer_turn`가 이미 context에
+        # `message`(payouts.progress.next_action_message — Hold별 사람이 읽을
+        # 문장, #169)를 실어 보낸다(#229). 여기서 새 번역표를 만들지 않는다 —
+        # Hold → 문구 규칙은 `payouts.progress` 하나에만 있어야 한다(그 모듈
+        # 독스트링, #130이 세 렌더러를 하나로 모은 이유). 그 값이 없으면(정의상
+        # 없어서는 안 되지만, 방어적으로) 아래 공통 폴백으로 떨어진다 — 이름·
+        # 연락처·계좌는 이 context에 애초에 없으므로(위 함수 참고) 새로
+        # 담을 것도 없다.
+        message = context.get("message")
+        if message:
+            return f"{_BRAND_PREFIX} {message}"
+
     return f"{_BRAND_PREFIX} 새 알림이 있습니다. laurio에서 확인하세요."
