@@ -14,6 +14,7 @@ import { notFound } from "next/navigation";
 import { fetchContest, type Requirement } from "@/lib/api/contests";
 import { formatDday, formatPrize, formatSubmissionCount, isImminent } from "@/lib/contest-format";
 
+import { SponsorJudgingEntry } from "./judging-entry";
 import { HideIfOwnContest } from "./submit-cta";
 import { ContestViewBeacon } from "./view-beacon";
 
@@ -133,6 +134,9 @@ export default async function ContestDetailPage({ params }: { params: Promise<Pa
           </span>
         </div>
       </section>
+
+      {/* 자기 공모전을 연 Sponsor 를 심사 화면으로 보내는 진입점 (#226). */}
+      <SponsorJudgingEntry contestId={contest.id} />
 
       {/* 제출 화면으로 가는 주 CTA (#164) — 공개 상세에 참가·제출로 갈 길이
           하나도 없던 문제 자체를 고친다. `contest.status === "published"`는
