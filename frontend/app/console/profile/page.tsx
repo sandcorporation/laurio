@@ -37,7 +37,11 @@ type LoadState =
   | { status: "error" }
   | { status: "ready"; display_name: string; bio: string };
 
-type SaveState = { status: "idle" } | { status: "saving" } | { status: "error"; message: string };
+type SaveState =
+  | { status: "idle" }
+  | { status: "saving" }
+  | { status: "success" }
+  | { status: "error"; message: string };
 
 type Role = "sponsor" | "developer";
 
@@ -113,6 +117,7 @@ function RoleSection({ role }: { role: Role }) {
   }, [copy.path]);
 
   async function handleSave() {
+    if (save.status === "saving") return; // 중복 클릭 방지 — 버튼도 disabled 지만 방어로 한 번 더.
     setSave({ status: "saving" });
     const result = await bffClient.post<ProfileOut>(`/api/backend/accounts/${copy.path}`, {
       display_name: displayName,
@@ -125,7 +130,19 @@ function RoleSection({ role }: { role: Role }) {
     setLoad({ status: "ready", display_name: result.data.display_name, bio: result.data.bio });
     setDisplayName(result.data.display_name);
     setBio(result.data.bio);
-    setSave({ status: "idle" });
+    // "success"로 남긴다("idle"이 아니라) — 빈 값으로 저장했을 때 화면이 저장 전과
+    // 똑같아 보이는 문제(#239)가 바로 이 상태가 메우는 자리다. 다음 입력 수정이
+    // 오면(아래 onChange) 다시 idle로 돌려 낡은 성공 표시가 새 편집을 가리지 않게 한다.
+    setSave({ status: "success" });
+  }
+
+  function handleFieldChange<T>(setField: (value: T) => void) {
+    return (value: T) => {
+      setField(value);
+      // 성공 표시가 뜬 채로 사용자가 다시 고치기 시작하면 그 표시는 이미 낡은 정보다
+      // (AC: "성공 표시가 다음 편집을 방해하지 않는다").
+      setSave((current) => (current.status === "success" ? { status: "idle" } : current));
+    };
   }
 
   return (
@@ -149,7 +166,7 @@ function RoleSection({ role }: { role: Role }) {
               id={`${role}-display-name`}
               type="text"
               value={displayName}
-              onChange={(event) => setDisplayName(event.target.value)}
+              onChange={(event) => handleFieldChange(setDisplayName)(event.target.value)}
               maxLength={100}
               data-testid={`profile-${role}-display-name-input`}
               className="rounded-sm border border-rule px-3 py-2"
@@ -161,7 +178,7 @@ function RoleSection({ role }: { role: Role }) {
             <textarea
               id={`${role}-bio`}
               value={bio}
-              onChange={(event) => setBio(event.target.value)}
+              onChange={(event) => handleFieldChange(setBio)(event.target.value)}
               rows={3}
               data-testid={`profile-${role}-bio-input`}
               className="rounded-sm border border-rule px-3 py-2"
@@ -171,6 +188,12 @@ function RoleSection({ role }: { role: Role }) {
           {save.status === "error" && (
             <p className="mt-2 text-sm text-attention" data-testid={`profile-${role}-save-error`}>
               {save.message}
+            </p>
+          )}
+
+          {save.status === "success" && (
+            <p className="mt-2 text-sm text-ink" role="status" data-testid={`profile-${role}-save-success`}>
+              {copy.title} 저장했습니다.
             </p>
           )}
 
