@@ -75,6 +75,16 @@ export default function AppHome() {
       >
         내 과제
       </Link>
+      {/* 표시 이름·소개를 보고 고치는 화면으로 가는 진입점(#228). 콘솔에서
+          찾아갈 수 있어야 한다는 것이 이 티켓의 AC다 — URL을 직접 쳐야만
+          닿는 화면을 만들지 않는다("내 참가 현황"·"탈퇴" 링크와 같은 이유). */}
+      <Link
+        href="/console/profile"
+        data-testid="app-home-profile-link"
+        className="w-fit rounded-sm border border-rule px-4 py-2 text-sm hover:border-ink"
+      >
+        내 정보
+      </Link>
       <button
         type="button"
         onClick={handleLogout}
