@@ -131,6 +131,17 @@ class Notification(models.Model):
     claimed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField()
 
+    # 수신자가 알림 목록을 연 시점 — 발송 측 상태(위 `Status`)와는 완전히 다른 축이다
+    # (#230). `status`는 "우리가 이걸 내보냈는가"를, `read_at`은 "받는 사람이 이걸
+    # 봤는가"를 답한다 — 하나가 없어도(예: `FAILED`) 다른 하나는 성립할 수 있고(웹
+    # 화면에서 실패 이력을 읽었다), 읽었다고 발송 이력(`status`·`dispatches`)이
+    # 바뀌지 않는다는 AC가 그래서 구조적으로 성립한다: 이 필드는 어떤 발송 로직도
+    # 참조하지 않는 순수 추가 컬럼이다. `null`이 "안 읽음", 값이 있으면 그 시각에
+    # 읽었다는 뜻 — boolean이 아니라 시각을 남기는 이유는 이 저장소의 다른 "언제
+    # 됐는가" 필드들(`claimed_at`·`scheduled_for`)과 같다: 나중에 "언제 읽었는지"가
+    # 필요해지면 다시 물을 컬럼이 이미 있다.
+    read_at = models.DateTimeField(null=True, blank=True)
+
     # 실제 발송 문구를 채우는 데 쓰이는 구조화된 맥락(#19) — 예: Distribution
     # 최종 경고의 금액(ADR-0009 "무엇을 잃게 되는지 알아야 한다"), 대상 Contest.
     # notifications 기반(#18)의 dispatch·quiet-hours·fallback 로직은 이 필드를
@@ -148,6 +159,9 @@ class Notification(models.Model):
             # QUEUED에 멈춰 있는 행을 찾는 WHERE 절(status='queued' AND claimed_at<=...)
             # 이 타는 인덱스.
             models.Index(fields=["status", "claimed_at"], name="notif_status_claimed_idx"),
+            # 안 읽은 개수(벨 배지, #230)의 WHERE 절
+            # (recipient_id=... AND read_at IS NULL)이 타는 인덱스.
+            models.Index(fields=["recipient", "read_at"], name="notif_recipient_read_idx"),
         ]
 
     def __str__(self) -> str:  # pragma: no cover - admin 편의용

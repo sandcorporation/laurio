@@ -13,6 +13,7 @@
 // 리다이렉트는 결함이 아니다.
 import Link from "next/link";
 
+import { NotificationBell } from "./notification-bell";
 import { SessionSlot } from "./session-slot";
 
 export function SiteHeader() {
@@ -38,6 +39,7 @@ export function SiteHeader() {
           >
             공모전 개최
           </Link>
+          <NotificationBell />
           <SessionSlot />
         </nav>
       </div>
