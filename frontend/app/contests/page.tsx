@@ -58,11 +58,17 @@ function parseSort(value: string | string[] | undefined): ContestSort {
 }
 
 // 손으로 친 값이 뭐든 "꺼짐"이 안전한 기본값이다(#39 관용구를 그대로 따른다) —
-// `?closed=` 든 `?closed=nonsense` 든 "참가 가능한 것만"으로 떨어진다. 명시적으로
-// `"1"`을 준 경우만 켠다 — 링크(아래 buildHref)가 항상 그 값으로 켠다.
+// `?closed=` 든 `?closed=nonsense` 든 "참가 가능한 것만"으로 떨어진다.
+//
+// **켜는 값은 `"1"` 과 `"true"` 둘 다다.** 링크(아래 buildHref)는 항상 `"1"` 로
+// 켜지만, 백엔드의 같은 파라미터는 `closed=true` 를 받는다(django-ninja 의 bool
+// 파싱) — 화면만 그것을 모르면 사람이 API 를 보고 손으로 친 URL 이나 공유된 링크가
+// **오류도 없이 엉뚱한 목록**을 보여준다. 실제로 #227 의 e2e 가 `?closed=true` 로
+// 걸어 CI 에서 그렇게 걸렸다. 「알 수 없는 값은 안전한 기본값으로」는 그대로다 —
+// 아는 값의 목록만 백엔드와 맞춘다.
 function parseClosed(value: string | string[] | undefined): boolean {
   const raw = Array.isArray(value) ? value[0] : value;
-  return raw === "1";
+  return raw === "1" || raw === "true";
 }
 
 function parsePage(value: string | string[] | undefined): number {

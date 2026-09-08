@@ -24,6 +24,7 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
+from contests import gates
 from contests.models import Contest
 from verification.models import Verification
 
@@ -87,11 +88,16 @@ def initiate_payment(request: HttpRequest, payload: InitiatePaymentIn):
 
     # 심층 방어(#207/#208 코드리뷰) — **잠금 밖, 소유권 확인보다도 먼저** 확인한다.
     # 정상 경로에서는 이미 `contests.api.create_contest`가 본인확인을 요구했으므로
-    # 이 엔드포인트에 도달하는 모든 요청자는 이미 VERIFIED다. 이 검사가 실제로 막는
-    # 것은 그 정상 경로를 통해 만들어지지 않은 Contest — Assignment(본인확인 없이
-    # 만들어진다, ADR-0029)가 어떤 경로로든(오늘은 `_get_owned_draft_contest`가
-    # `is_assignment`를 함께 거부해 막혔지만, DRAFT를 공모전과 공유하는 구조상 새
-    # 게이트가 또 하나 빠질 수 있다) 이 엔드포인트까지 왔을 경우다.
+    # 이 엔드포인트에 도달하는 모든 요청자는 이미 VERIFIED다.
+    #
+    # **이 검사는 과제를 막지 않는다 — 그렇게 믿었던 것이 #232였다.** 여기 있던
+    # 옛 주석은 "이 검사가 실제로 막는 것은 Assignment가 이 엔드포인트까지 왔을
+    # 경우"라고 적었는데, 그것은 과제를 만든 사람이 본인확인을 하지 않았을 때만
+    # 참이다(ADR-0029는 요구하지 않을 뿐 금지하지도 않는다). 본인확인을 마친
+    # Sponsor가 자기 과제에 결제를 걸면 이 검사를 그대로 통과했고, 아래
+    # `Contest.Status.PAYABLE`도 DRAFT 전부에 True라 막지 않아 결제가 확정되면
+    # `Payment.on_paid()`가 DRAFT → PUBLISHED로 옮겼다 — `kind`는 과제인데 공개
+    # 목록에 뜨는 행이 됐다. 종류는 아래 `contests.gates.payable()`이 막는다.
     #
     # `contest.sponsor`가 아니라 **요청자 본인**(`request.auth_user`)의 Verification
     # 을 본다 — 아래에서 소유권이 확인되면(`contest.sponsor.user_id ==
@@ -117,7 +123,14 @@ def initiate_payment(request: HttpRequest, payload: InitiatePaymentIn):
         if contest.sponsor.user_id != request.auth_user.id:
             raise HttpError(403, "본인이 개최한 Contest만 결제할 수 있습니다.")
 
-        if not Contest.Status.PAYABLE(contest.status):
+        # 종류와 상태를 **한 판정으로** 본다(#232) — `Contest.Status.PAYABLE` 을 직접
+        # 부르지 않는 이유는 `contests.gates` 의 모듈 독스트링에 있다. 거절 사유는
+        # 그 뒤에 문구로만 가른다: 과제 소유자가 「이미 결제가 완료되어」를 읽으면
+        # 자기가 무엇을 잘못했는지 알 수 없고, 그 문의를 받는 운영자도 두 경우를
+        # 구별할 수 없다.
+        if not gates.payable(contest):
+            if contest.is_assignment:
+                raise HttpError(409, "과제에는 상금도 개최 등록비도 없어 결제할 수 없습니다.")
             raise HttpError(409, "이미 결제가 완료되어 공개된 Contest입니다.")
 
         # 이미 진행 중이거나 완료된 결제가 있으면 새로 만들지 않고 그대로 돌려준다 —

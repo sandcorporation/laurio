@@ -473,3 +473,51 @@ def test_unverified_assignment_owner_cannot_reach_paid_contest_edit_gate(client,
         **_auth_header(pair["access"]),
     )
     assert pay_attempt.status_code in (403, 409), pay_attempt.content
+
+
+@pytest.mark.django_db
+def test_verified_assignment_owner_cannot_pay_to_publish_it(client, landing_type):
+    """보안 회귀 — **본인확인을 마친** Sponsor도 자기 Assignment에 결제를 걸 수 없다 (#232).
+
+    #207이 닫은 것은 미인증 경로였고, 결제 쪽에 남긴 것은 본인확인 재검사였다
+    (`payments.api.initiate_payment`). 그 검사는 인증만 보므로 **인증을 마친
+    사람에게는 문이 그대로 열려 있었다**: `Contest.Status.PAYABLE`은 status만의
+    순수 함수이고 `DRAFT: True`인데 그 DRAFT를 공모전과 Assignment가 공유한다
+    (ADR-0028). 결제가 확정되면 `Payment.on_paid()`가 DRAFT → PUBLISHED로 옮겨
+    `kind`는 과제인데 공개 목록에 뜨는 모순된 행이 된다.
+    """
+
+    root = _operator_client("root-asgn-paid-exploit")
+    pair = _sponsor_with_permission(client, root, "paid-exploit-sponsor-1")
+
+    # 이번에는 본인확인까지 마친다 — #207 회귀 테스트와 갈리는 유일한 지점이다.
+    verified = client.post(
+        "/api/verification/verify",
+        data={"verification_token": "발주자|1985-06-01|paid-exploit-ci-1|paid-exploit-di-1"},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert verified.status_code == 200, verified.content
+
+    created = _create_assignment(client, pair["access"], deliverable_type_ids=[landing_type.id])
+    assert created.status_code == 201, created.content
+    assignment_id = created.json()["id"]
+    assert created.json()["status"] == Contest.Status.DRAFT
+
+    pay_attempt = client.post(
+        "/api/payments",
+        data={"contest_id": assignment_id},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+
+    assert pay_attempt.status_code == 409, pay_attempt.content
+    # 「지금은 결제할 수 없는 상태」가 아니라 **종류 때문**임이 응답에서 구별된다.
+    assert "과제" in pay_attempt.json()["detail"], pay_attempt.json()
+
+    from payments.models import Payment
+
+    assert not Payment.objects.filter(contest_id=assignment_id).exists()
+    contest = Contest.objects.get(id=assignment_id)
+    assert contest.status == Contest.Status.DRAFT
+    assert contest.is_assignment

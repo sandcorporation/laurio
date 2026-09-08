@@ -126,9 +126,15 @@ def sponsor_next_action_for(contest, *, now) -> str:
     한다. 이 함수는 조회를 내지 않는다.
     """
 
+    from contests import gates
     from contests.models import Contest
 
-    if Contest.Status.PAYABLE(contest.status):
+    # 종류를 함께 보는 게이트를 쓴다(#232) — 이 함수는 호출부
+    # (`contests.api.list_my_contests`)가 과제를 이미 걸러 주기 때문에만 안전했다.
+    # 「호출부가 기억해서 안전하다」가 방어인 상태를 없앤다. `is_assignment` 는
+    # 행에 실린 `kind` 필드 하나를 읽으므로 "조회를 내지 않는다"는 이 함수의
+    # 규율도 그대로다.
+    if gates.payable(contest):
         return SponsorNextAction.PAY_TO_PUBLISH
 
     if Contest.Status.SUBMITTABLE(contest.status) and now < contest.deadline_at:
