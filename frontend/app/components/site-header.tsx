@@ -1,6 +1,7 @@
 // 모든 페이지에 서는 헤더(#93, spec #92). 서버 컴포넌트다 — 헤더는 색인 대상인
 // 공개 페이지(`/`, `/contests`, ...)에도 실리므로 ADR-0015 의 경계를 지킨다.
-// 세션에 따라 갈리는 조각만 `SessionSlot` 으로 떼어 클라이언트에 맡긴다.
+// 세션에 따라 갈리는 조각만 `HeaderSessionZone`(벨 + 세션 슬롯, #237)으로 떼어
+// 클라이언트에 맡긴다.
 //
 // **역할로 갈리지 않는다.** CONTEXT.md 는 한 사람이 어떤 Contest 에서는
 // Sponsor 이고 다른 Contest 에서는 Developer 일 수 있다고 정의한다 — 제출·개최
@@ -13,8 +14,7 @@
 // 리다이렉트는 결함이 아니다.
 import Link from "next/link";
 
-import { NotificationBell } from "./notification-bell";
-import { SessionSlot } from "./session-slot";
+import { HeaderSessionZone } from "./header-session-zone";
 
 export function SiteHeader() {
   return (
@@ -39,8 +39,7 @@ export function SiteHeader() {
           >
             공모전 개최
           </Link>
-          <NotificationBell />
-          <SessionSlot />
+          <HeaderSessionZone />
         </nav>
       </div>
     </header>
