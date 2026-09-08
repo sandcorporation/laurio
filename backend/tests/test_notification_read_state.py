@@ -184,11 +184,25 @@ def test_read_state_is_independent_of_delivery_status(client):
 
     from django.test import override_settings
 
+    from core.models import ClockOverride
+
     pair = _login(client, "bell-failed-status")
     user_id = _user_id_from_me(client, pair)
 
-    with override_settings(NOTIFICATION_FAKE_FAILING_CHANNELS=["alimtalk", "sms", "lms"]):
-        created = _create_notification(client, recipient_id=user_id)
+    # **시각을 낮으로 고정한다.** 이 테스트는 전 채널이 실패해 `FAILED` 가 되는 것을
+    # 보는데, 야간(21~08시, ADR-0010)에는 발송을 **시도하기도 전에** DEFERRED 로
+    # 연기되므로 벽시계에 맡기면 밤에 도는 CI 에서만 깨진다 — 실제로 그렇게 깨졌다
+    # (01:44 KST 실행에서 'deferred' != 'failed'). 바로 아래 테스트는 정반대를
+    # 증명하려고 23시로 고정하고 있었는데, 이쪽만 고정이 빠져 있었다.
+    # 시간은 시임이 아니라 주입 가능한 의존성이다(ADR-0003).
+    ClockOverride.objects.update_or_create(
+        pk=1, defaults={"overridden_at": datetime(2026, 1, 10, 13, 0, tzinfo=KST)}
+    )
+    try:
+        with override_settings(NOTIFICATION_FAKE_FAILING_CHANNELS=["alimtalk", "sms", "lms"]):
+            created = _create_notification(client, recipient_id=user_id)
+    finally:
+        ClockOverride.objects.filter(pk=1).delete()
     assert created["status"] == Notification.Status.FAILED
     dispatches_before = created["dispatches"]
 
