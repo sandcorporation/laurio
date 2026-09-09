@@ -21,11 +21,53 @@
 
 **production 에서는 거부한다.** staging 은 검증용 서브 호스트지만 production 은
 아니다 — 홈에 가짜 공모전이 실려 나가는 것은 되돌리기 어려운 종류의 사고다.
+
+**데모 Developer·Sponsor 는 VERIFIED 신원을 함께 심는다(#252).** staging 실측 —
+이 시드가 만드는 Developer 는 전원 Verification 이 없어, 데모 계정으로 로그인해도
+「내 참여 → 제출물 수정하러 가기」가 본인확인 안내 화면에서 막혔다. 공모전 참가의
+중심 화면 하나가 통째로 막혀 있으면 데모의 목적(걸어서 보여주는 것)이 반쯤
+무너진다.
+
+무엇을 심을지가 이 티켓의 진짜 판단이었다 — "가짜 신원을 심자"가 아니다.
+`Verification`은 암호화된 실명·생년월일·CI/DI 를 담고, 지급·정산 경로
+(`payouts.services.ensure_seller_registered`)가 그 값을 그대로 벤더(토스)에
+실어 보낸다. 그래서 데모가 필요로 하는 것("제출 화면이 열린다")과 데모가
+허락되지 않는 것("지급까지 된다")의 경계를 여기서 정한다:
+
+- **CI 는 채운다 — 비울 수 없다.** `submissions.api._require_verification`은
+  `status == VERIFIED`만 보지만, 그 바로 다음에 도는
+  `_reject_self_dealing`(자전거래 차단, ADR-0011/0025)은 VERIFIED인데
+  `ci_hash`가 비어 있으면 "불변식 위반"으로 보고 fail-closed 403을 던진다 —
+  정상 운영에서는 도달 불가능해야 하는 그 경로를 데모가 밟게 된다. CI 없이
+  VERIFIED로 두면 제출 화면이 오히려 새로운 방식으로 막힌다. Sponsor 쪽도
+  같은 이유로 VERIFIED + CI 가 필요하다 — 없으면 데모 Contest 전체가 이
+  가드에 걸려 죽는다.
+- **그래도 실제 CI 포맷을 흉내 내지 않는다.** 값을 `demo-seed-ci-` 로 시작하는
+  합성 문자열로 짓는다 — 실제 CI(NICE/KMC 가 발급하는 불투명 base64)와 절대
+  겹치지 않고, 복호화해서 봐도 데모임이 즉시 드러난다. real_name 도
+  "데모"라는 말을 담아 실제 이름으로 오인되지 않게 한다.
+- **DI 는 비운다.** 이 저장소에서 `.di`를 읽어 비교하는 코드가 없다(탈퇴·휴면이
+  지울 때만 건드린다) — 안 쓰이는 합성 개인정보를 만들 이유가 없다.
+- **Seller·Payout·Handover 는 만들지 않는다.** 지급 경로가 이 데모 신원을 써서
+  실제 이체를 "시도"하려면 다음 중 하나가 있어야 하는데, 이 시드는 둘 다
+  만들지 않는다:
+  1. `distributions.services.distribution_due_q`(배분 스캔의 후보) — JUDGING_ENDED
+     이면서 `distribution_wait_days` 가 지나야 후보가 된다. 데모의 JUDGING_ENDED
+     Contest 는 `judging_ends_at` 을 의도적으로 "하루 전"에 둬서(아래
+     `_create_contest`) 이 스캔의 후보가 되지 않는다 — 이미 `test_demo_seed_
+     leaves_nothing_for_the_money_scans`가 이걸 고정하고 있었다.
+  2. `POST /contests/{id}/payout`(Developer 본인의 명시적 요청) — `Handover`가
+     `RELEASED`여야 한다. 데모의 AWARDED Contest 는 `awards.api`(진짜 개최
+     플로우)를 거치지 않고 ORM 으로 Award 행만 만들므로 Handover 자체가
+     없다 — 지급 요청은 404 로 끝난다.
+
+  즉 VERIFIED 신원은 **제출 화면을 여는 열쇠**일 뿐, 지급·정산 경로로 이어지는
+  문(Handover·Seller·Payout)은 이 시드가 애초에 만들지 않는다.
 """
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -38,8 +80,13 @@ from awards.models import Award
 from contests.curation import HomeCurationBucket, home_bucket_for
 from contests.models import Category, Contest, DeliverableType, Requirement
 from submissions.models import RequirementResponse, Submission, SubmissionAsset
+from verification.models import Verification
 
 PREFIX = "[데모] "
+
+# 데모 신원의 생년월일 — 값 자체에 의미는 없고(성인이기만 하면 된다), 모두가 같은
+# 값을 쓴다는 사실이 "실제로 조사해서 넣은 값이 아니다"를 스스로 말해준다.
+_DEMO_BIRTH_DATE = date(2000, 1, 1)
 
 # 각 묶음에 몇 개씩 보일지. 카드가 하나만 있으면 "목록"으로 보이지 않고, 너무
 # 많으면 스크롤만 길어진다.
@@ -266,12 +313,36 @@ class Command(BaseCommand):
         get_user_model().objects.filter(username__startswith="demo-seed-").delete()
         return removed
 
+    def _demo_verification(self, user, *, ci_seed: str, label: str) -> Verification:
+        """VERIFIED 신원 하나 — 모듈 docstring의 경계(CI는 채우되 합성값, DI는
+        비움, Seller/Payout/Handover는 만들지 않음)를 그대로 구현한다.
+
+        `Verification.set_ci`는 빈 값을 거부하므로(#84, ADR-0024) 먼저 만든
+        뒤 `set_ci`로 채운다 — 모델이 강제하는 "CI 없이 VERIFIED 없다"를
+        시드도 그대로 따른다.
+        """
+
+        # 암호화 필드(real_name·birth_date·ci)는 프로퍼티라 생성자 kwargs 가 아니라
+        # 속성 대입으로 채운다 — `accounts.withdrawal.execute_withdrawal`이 이미
+        # 같은 모양으로 `RetainedIdentity`를 만든다.
+        verification = Verification(
+            user=user,
+            status=Verification.Status.VERIFIED,
+            verified_at=timezone.now(),
+        )
+        verification.real_name = f"(데모 시드 가상신원) {label}"
+        verification.birth_date = _DEMO_BIRTH_DATE
+        verification.set_ci(f"demo-seed-ci-{ci_seed}")
+        verification.save()
+        return verification
+
     def _demo_sponsor(self) -> SponsorProfile:
         user = get_user_model().objects.create_user(
             username="demo-seed-sponsor", email="demo-seed-sponsor@example.invalid"
         )
         user.set_unusable_password()
         user.save(update_fields=["password"])
+        self._demo_verification(user, ci_seed="sponsor", label="발주자")
         return SponsorProfile.objects.create(user=user, display_name=f"{PREFIX}발주자")
 
     def _demo_developer(self, index: int, name: str) -> DeveloperProfile:
@@ -284,6 +355,10 @@ class Command(BaseCommand):
         )
         user.set_unusable_password()
         user.save(update_fields=["password"])
+        # CI 시드도 username 과 같은 규칙(고정 index) — 다시 심어도 같은 값이어야
+        # 데모가 "다시 심을 때마다 같다"는 규율(위 username 주석)이 신원에서도
+        # 깨지지 않는다.
+        self._demo_verification(user, ci_seed=f"dev-{index:02d}", label=name)
         return DeveloperProfile.objects.create(
             user=user,
             display_name=f"{PREFIX}{name}",

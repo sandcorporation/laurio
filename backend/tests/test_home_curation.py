@@ -626,6 +626,185 @@ def test_demo_seed_awarded_contest_actually_has_an_award(db):
         assert award.submission.contest_id == contest.pk
 
 
+def _demo_auth_header(user_id: int) -> dict:
+    from accounts.tokens import issue_token_pair
+
+    pair = issue_token_pair(user_id)
+    return {"HTTP_AUTHORIZATION": f"Bearer {pair.access}"}
+
+
+def test_demo_seed_developers_and_sponsor_are_verified(db):
+    """데모 Developer 전원과 데모 Sponsor 가 VERIFIED 신원을 갖는다 (#252).
+
+    staging 실측 — `seed_demo_contests` 가 만든 데모 Developer 는 전원
+    Verification 이 없어, 「내 참여 → 제출물 수정하러 가기」가 본인확인 안내
+    화면에서 막혔다. 이 테스트는 시드가 그 구멍을 메우는지를 관리 명령
+    직접 호출로 고정한다(다른 `seed_*` 명령의 시임과 같은 자리 — HTTP 가 아니라
+    커맨드 자체의 산출물을 본다).
+
+    Sponsor 도 함께 확인한다 — `submissions.api._reject_self_dealing`은 Sponsor
+    쪽에 VERIFIED 신원이나 `ci_hash`가 없으면 "불변식 위반"으로 보고 제출 자체를
+    403 으로 막는다(정상 운영에서는 개최에 본인확인이 필수라 도달 불가능해야
+    하는 경로). 데모는 정상 개최 플로우를 타지 않으므로(ORM 으로 직접 상태를
+    만든다) 이 시드가 Sponsor 몫까지 채우지 않으면 데모 전체가 그 가드에
+    걸려 죽는다.
+    """
+
+    from django.core.management import call_command
+
+    from accounts.models import DeveloperProfile, SponsorProfile
+    from verification.models import Verification
+
+    call_command("seed_demo_contests", verbosity=0)
+
+    sponsor = SponsorProfile.objects.get(user__username="demo-seed-sponsor")
+    sponsor_verification = Verification.objects.get(user_id=sponsor.user_id)
+    assert sponsor_verification.status == Verification.Status.VERIFIED
+    assert sponsor_verification.ci_hash
+
+    developers = DeveloperProfile.objects.filter(user__username__startswith="demo-seed-dev-")
+    assert developers.count() == 6
+    for developer in developers:
+        verification = Verification.objects.get(user_id=developer.user_id)
+        assert verification.status == Verification.Status.VERIFIED
+        assert verification.ci_hash, f"{developer.display_name} 의 ci_hash 가 비어 있다"
+
+
+def test_demo_seed_verification_declares_itself_as_demo_and_never_collides(db):
+    """심는 본인확인이 실제 신원처럼 보이지 않고, 서로/실사용자와 CI 가 겹치지 않는다 (#252).
+
+    ADR-0025 의 "한 계정의 신원은 다른 사람의 것으로 바뀌지 않는다" 불변식은 CI 가
+    같으면 동일인으로 본다는 뜻이다 — 데모 CI 가 우연히도 실제 발급 CI 포맷(NICE/KMC
+    의 불투명 base64 문자열)과 겹칠 걱정이 없도록, 애초에 실제 CI 가 취하지 않는
+    모양("demo-seed-ci-" 접두)으로 짓는다. real_name 도 복호화했을 때 실제 이름으로
+    오인되지 않도록 자기 정체를 밝히는 문구를 포함한다.
+    """
+
+    from django.core.management import call_command
+
+    from accounts.models import DeveloperProfile, SponsorProfile
+    from verification.models import Verification
+
+    call_command("seed_demo_contests", verbosity=0)
+
+    sponsor = SponsorProfile.objects.get(user__username="demo-seed-sponsor")
+    developers = list(
+        DeveloperProfile.objects.filter(user__username__startswith="demo-seed-dev-")
+    )
+    verifications = [Verification.objects.get(user_id=sponsor.user_id)] + [
+        Verification.objects.get(user_id=d.user_id) for d in developers
+    ]
+
+    ci_hashes = {v.ci_hash for v in verifications}
+    assert len(ci_hashes) == len(verifications), "데모 신원끼리 CI 가 겹친다 — 자전거래 오탐"
+
+    for verification in verifications:
+        assert verification.ci.startswith("demo-seed-ci-"), (
+            "데모 CI 가 실제 CI 포맷과 구별되지 않는다"
+        )
+        assert "데모" in verification.real_name, (
+            "복호화된 real_name 이 데모임을 스스로 밝히지 않는다"
+        )
+
+
+def test_demo_seed_developer_can_reach_submission_edit_screen(db, client):
+    """데모 Developer 가 진행중 공모전의 제출물 수정 화면까지 막힘 없이 간다 (#252).
+
+    `submissions.api._require_verification`이 실제로 이 요청 경로를 막는 서버
+    쪽 관문이다 — 시드가 Verification 을 채우기 전에는 이 PUT 이 403
+    "본인확인(Verification)을 완료해야..." 으로 죽었다. 시드 이후에는 그 관문을
+    지나 정상적으로 갱신된다는 것을 HTTP 시임(CLAUDE.md)으로 고정한다.
+
+    **소스 자료는 새로 하나 싣는다 — 시드가 심어 둔 기존 값을 그대로 되보내지
+    않는다.** `_create_submission`이 심은 `submission:demo:{contest.pk}/{rank}/
+    source.zip`은 실제 `target_ref_for_asset_kind`가 기대하는 형식
+    (`submission:{contest_id}:{developer_user_id}:source/...`, #190)과 다르다 —
+    이 티켓(#252)의 범위가 아닌, 그 이전부터 있던 시드 결함이라 여기서 고치지
+    않는다(자산 값 생성은 Verification 과 무관하다). 그래서 이 테스트는 그
+    결함을 우회해 본인확인 관문 하나만 격리해서 본다 — 기존 값을 그대로 보내면
+    422(target_ref 불일치)가 나서 200 과 403 을 구별할 수 없다.
+    """
+
+    from django.core.management import call_command
+
+    from contests.models import Contest
+    from submissions.models import Submission
+    from submissions.target_refs import source_target_ref
+
+    call_command("seed_demo_contests", verbosity=0)
+
+    contest = Contest.objects.filter(
+        title__startswith="[데모] ", status=Contest.Status.PUBLISHED
+    ).first()
+    submission = Submission.objects.filter(contest=contest).first()
+    developer_user_id = submission.developer.user_id
+    headers = _demo_auth_header(developer_user_id)
+
+    existing = client.get(
+        f"/api/contests/{contest.id}/submissions/me", **headers
+    ).json()
+
+    valid_source_ref = source_target_ref(contest.id, developer_user_id)
+    response = client.put(
+        f"/api/contests/{contest.id}/submissions/me",
+        data={
+            "assets": [{"kind": "source", "value": f"{valid_source_ref}/source.zip"}],
+            "requirement_responses": [
+                {
+                    "requirement_id": r["requirement_id"],
+                    "is_met": r["is_met"],
+                    "note": r["note"],
+                }
+                for r in existing["requirement_responses"]
+            ],
+        },
+        content_type="application/json",
+        **headers,
+    )
+
+    assert response.status_code == 200, response.content
+
+
+def test_demo_seed_verification_cannot_reach_a_real_transfer(db, client):
+    """데모 신원이 있어도 지급·정산 경로가 실제 이체를 시도할 준비조차 되지 않는다 (#252).
+
+    Verification 만으로는 아무 돈도 움직이지 않는다는 것을 두 지점에서 확인한다:
+
+    1. `payouts.services.ensure_seller_registered`가 실제로 불리는 유일한 계기는
+       Distribution 스캔(`distribution_due_q` — JUDGING_ENDED 이면서
+       `distribution_wait_days` 가 지나야 후보다, 위
+       `test_demo_seed_leaves_nothing_for_the_money_scans` 가 이미 그 후보가
+       비어 있음을 고정한다)과 `POST /contests/{id}/payout`(Handover 가
+       RELEASED 여야 하는 사람의 명시적 요청)뿐이다. 이 시드는 그 어느 것도
+       만들지 않는다 — Seller·Payout 행이 하나도 없다.
+    2. 데모 AWARDED Contest 는 `awards.api`(진짜 개최 플로우)를 거치지 않고
+       ORM 으로 직접 Award 만 만든다 — Handover 가 없다. 그래서 진짜 Developer가
+       로그인해 지급을 "요청"해도 서버는 404 로 답한다: 이 신원으로는 지급
+       요청 자체가 도달 불가능하다.
+    """
+
+    from django.core.management import call_command
+
+    from contests.models import Contest
+    from payouts.models import Payout, Seller
+
+    call_command("seed_demo_contests", verbosity=0)
+
+    assert not Seller.objects.exists(), "데모 시드가 Seller 등록을 만들었다"
+    assert not Payout.objects.exists(), "데모 시드가 Payout 을 만들었다"
+
+    awarded = Contest.objects.filter(
+        title__startswith="[데모] ", status=Contest.Status.AWARDED
+    ).first()
+    developer_user_id = awarded.submissions.first().developer.user_id
+    headers = _demo_auth_header(developer_user_id)
+
+    response = client.post(f"/api/contests/{awarded.id}/payout", **headers)
+
+    assert response.status_code == 404
+    assert "Handover" in response.json()["detail"]
+
+
 @pytest.mark.django_db
 def test_each_bucket_query_matches_home_bucket_for_at_every_boundary(
     sponsor, category, deliverable_type
