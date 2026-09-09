@@ -893,7 +893,8 @@ class JudgingExtensionPayment(ChargeBase):
         from datetime import timedelta
 
         from core.clock import Clock
-        from core.transitions import claim_transition
+
+        from .transitions import claim_contest_in_place_update
 
         contest = Contest.objects.select_for_update().get(pk=self.contest_id)
         if not Contest.Status.JUDGING_EXTENDABLE(contest.status) or contest.judging_ends_at is None:
@@ -904,15 +905,13 @@ class JudgingExtensionPayment(ChargeBase):
         # initiate 시점에 amount 와 함께 스냅샷된 값이다.
         new_judging_ends_at = contest.judging_ends_at + timedelta(days=self.extension_days)
 
-        # claim_transition을 그대로 재사용한다 — from/to 가 둘 다 CLOSED인 "제자리"
-        # 전이이지만, ① WHERE status='closed' 조건부 UPDATE 규율을 한 번 더 지키고
-        # ② auto_now 필드(updated_at)를 이 메커니즘이 채워준다(#13 리뷰 지적 6).
-        claim_transition(
-            Contest,
+        # 「judging-extension」으로 선언된 제자리 갱신(CLOSED -> CLOSED,
+        # contests.transitions, #255)을 그대로 재사용한다 — 전이가 아니라 ① WHERE
+        # status='closed' 조건부 UPDATE 규율을 한 번 더 지키고 ② auto_now 필드
+        # (updated_at)를 이 메커니즘이 채워주기 위해서다(#13 리뷰 지적 6).
+        claim_contest_in_place_update(
+            "judging-extension",
             contest.pk,
-            from_state=Contest.Status.CLOSED,
-            to_state=Contest.Status.CLOSED,
-            state_field="status",
             now=Clock.now(),
             extra_fields={
                 "judging_ends_at": new_judging_ends_at,

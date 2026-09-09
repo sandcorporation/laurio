@@ -113,13 +113,27 @@ class Payment(ChargeBase):
     def on_paid(self) -> None:
         """결제가 문을 닫는다(CONTEXT.md Contest) — draft 일 때만 published 로. 이 결제가 이미
         REQUESTED→PAID 를 이겼으므로 정상 경로에서는 항상 draft 여야 하지만, 조건을 남겨
-        이중 공개를 구조적으로 막는다."""
+        이중 공개를 구조적으로 막는다.
 
-        from contests.models import Contest
+        「publish-on-payment」로 선언된 간선(DRAFT -> PUBLISHED, contests.transitions)을
+        쓴다(#255) — 예전에는 이 자리만 손으로 쓴 조건부 UPDATE(`Contest.objects.filter(...)
+        .update(status=...)`)였다. 같은 WHERE 조건이라 rowcount 규율은 지켜졌지만
+        `claim_transition`을 거치지 않아 `updated_at`(auto_now)이 갱신되지 않는 결함이
+        있었다 — 이 전환이 그것도 함께 고친다.
 
-        Contest.objects.filter(pk=self.contest_id, status=Contest.Status.DRAFT).update(
-            status=Contest.Status.PUBLISHED
-        )
+        `now=` 를 넘기지 않는다 — `claim_contest_transition` 이 내부에서 `Clock.now()` 를
+        한 번 더 부르는(SELECT 한 번) 대가를 문다. `on_paid()` 는 `ChargeBase` 가 여러
+        Charge 종류(`Payment`·`JudgingExtensionPayment`)에 공통으로 요구하는 훅이고
+        `payments.charges.claim_and_post` 가 `on_claimed=lambda c: c.on_paid()` 로
+        인자 없이 부른다 — 이 자리 하나를 위해 그 훅의 시그니처에 `now` 를 얹으면
+        나머지 Charge 종류·그 훅을 부르는 자리 전부가 그 인자를 알아야 한다. 결제
+        확정은 요청당 한 번이라(스캔처럼 행마다 반복되지 않는다) SELECT 한 번의
+        비용이 그 리스크보다 싸다고 판단했다.
+        """
+
+        from contests.transitions import claim_contest_transition
+
+        claim_contest_transition("publish-on-payment", self.contest_id)
 
 
 class WebhookDelivery(models.Model):

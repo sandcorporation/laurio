@@ -10,6 +10,10 @@ class ContestsConfig(AppConfig):
         """마감 전이·심사기간 종료 전이를 core.scans 등록부에 스캔으로 등록한다
         (#11/#13, ADR-0003).
 
+        아래 세 규칙의 from_state/to_state/due_field 는 `contests.transitions` 가
+        선언한 전이 그래프에서 파생된다(#255) — 그 모듈이 이 세 자리를 포함한 Contest
+        상태 전이 전체가 사는 한 곳이다.
+
         core.scans 등록부에 스캔으로 올라 beat 가 주기적으로, /tick 이 한 바퀴에 스캔한다(#137).
         `claim_transition` 이 이미 `WHERE id=? AND status='<이전상태>'` 형태의 단일
         UPDATE 문으로 rowcount==1 일 때만 통과시키므로, 틱을 두 번 쏴도 각 전이는
@@ -49,22 +53,20 @@ class ContestsConfig(AppConfig):
 
         from core.scans import register_scan, transition_scan
         from policies.scope import current_policy
-        from core.transitions import TransitionSpec
 
-        from .models import Contest
+        from .transitions import contest_transition_spec
 
         def _judging_period_days() -> int:
             # 스캔 실행당 한 번 읽는다(#78, ADR-0023) — 정책 스코프는 뼈대가 연다(#145).
             return current_policy().judging_period_days
 
+        # 세 TransitionSpec 은 이제 `contests.transitions` 의 선언에서 파생된다(#255) —
+        # from_state/to_state/due_field 를 여기서 다시 적지 않는다. 그 선언이 이 그래프가
+        # 사는 한 곳이다.
         register_scan(
             transition_scan(
-                TransitionSpec(
-                    model=Contest,
-                    due_field="deadline_at",
-                    from_state=Contest.Status.PUBLISHED,
-                    to_state=Contest.Status.CLOSED,
-                    state_field="status",
+                contest_transition_spec(
+                    "contest-close",
                     extra_fields=lambda contest, now, ctx: {
                         "judging_ends_at": contest.deadline_at
                         + timedelta(days=_judging_period_days())
@@ -77,13 +79,7 @@ class ContestsConfig(AppConfig):
 
         register_scan(
             transition_scan(
-                TransitionSpec(
-                    model=Contest,
-                    due_field="judging_ends_at",
-                    from_state=Contest.Status.CLOSED,
-                    to_state=Contest.Status.JUDGING_ENDED,
-                    state_field="status",
-                ),
+                contest_transition_spec("contest-judging-end"),
                 name="contest-judging-end",
                 batch_size=500,
             )
@@ -91,13 +87,7 @@ class ContestsConfig(AppConfig):
 
         register_scan(
             transition_scan(
-                TransitionSpec(
-                    model=Contest,
-                    due_field="deadline_at",
-                    from_state=Contest.Status.ASSIGNMENT_OPEN,
-                    to_state=Contest.Status.ASSIGNMENT_CLOSED,
-                    state_field="status",
-                ),
+                contest_transition_spec("assignment-close"),
                 name="assignment-close",
                 batch_size=500,
             )

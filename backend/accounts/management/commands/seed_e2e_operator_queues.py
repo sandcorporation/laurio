@@ -33,7 +33,7 @@ from django.utils import timezone
 
 from awards.models import Award
 from contests.models import Category, Contest, DeliverableType
-from core.transitions import claim_transition
+from contests.transitions import claim_contest_transition
 from ledger.models import hard_delete_e2e_fixture_rows
 from policies.scope import current_policy
 from scoring.models import Score
@@ -320,22 +320,20 @@ def _close_contest(client: Client, contest: dict, *, deadline) -> None:
     얼릴수록 그 반경이 넓어지는 구조였다(예전 FAR_FUTURE_DEADLINE 실수가
     정확히 그 반경을 400일치로 넓혔다).
 
-    지금은 `core.transitions.claim_transition` — 스케줄러 틱이 내부에서
-    쓰는 것과 같은 원자적 빌딩 블록 — 을 이 Contest의 pk 하나에만 직접
-    적용한다. 스캔이 없으니 다른 Contest는 손대지 않고, 시계를 얼릴
-    필요도 없어 그 흔적을 되돌리는 코드(_unfreeze)도 함께 사라진다.
-    `extra_fields`는 contests/apps.py에 등록된 실제 전이 규칙과 같은 계산
-    (judging_ends_at = 이 Contest의 deadline_at + PlatformPolicy.judging_period_days,
-    #78/ADR-0023)을 그대로 재현한다 — Award 엔드포인트가 이 값을 실시간과
-    비교하므로(awards/api.py) 값 자체는 여전히 정확해야 한다.
+    지금은 `contests.transitions.claim_contest_transition("contest-close", ...)`
+    (#255) — 스케줄러 틱이 내부에서 쓰는 것과 같은 원자적 빌딩 블록, 「contest-close」
+    로 선언된 바로 그 간선 — 을 이 Contest의 pk 하나에만 직접 적용한다. 스캔이 없으니
+    다른 Contest는 손대지 않고, 시계를 얼릴 필요도 없어 그 흔적을 되돌리는 코드
+    (_unfreeze)도 함께 사라진다. `extra_fields`는 contests/apps.py에 등록된 실제
+    전이 규칙과 같은 계산(judging_ends_at = 이 Contest의 deadline_at +
+    PlatformPolicy.judging_period_days, #78/ADR-0023)을 그대로 재현한다 — Award
+    엔드포인트가 이 값을 실시간과 비교하므로(awards/api.py) 값 자체는 여전히
+    정확해야 한다.
     """
 
-    ok = claim_transition(
-        Contest,
+    ok = claim_contest_transition(
+        "contest-close",
         contest["id"],
-        from_state=Contest.Status.PUBLISHED,
-        to_state=Contest.Status.CLOSED,
-        state_field="status",
         now=timezone.now(),
         extra_fields={
             "judging_ends_at": deadline

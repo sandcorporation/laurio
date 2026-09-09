@@ -6,10 +6,10 @@
 - 심사기간(judging_ends_at 이전)에만 가능하다 — 지난 뒤에는 거부한다. `Contest.status`
   가 아직 CLOSED로 보여도(스캔 주기만큼 늦어질 수 있다, ADR-0003) `judging_ends_at`
   을 직접 비교해 한 번 더 막는다.
-- 한 Contest에 Award는 정확히 하나뿐이다. `core.transitions.claim_transition`으로
-  `Contest.status`를 CLOSED -> AWARDED로 조건부 UPDATE하고, 그 UPDATE가 이겼을
-  때만(rowcount==1) `Award` 행을 만든다 — 두 Submission이 동시에 Award 요청을
-  보내도 하나만 통과한다.
+- 한 Contest에 Award는 정확히 하나뿐이다. `contests.transitions.claim_contest_transition`
+  (「award」로 선언된 간선, #255)으로 `Contest.status`를 CLOSED -> AWARDED로 조건부
+  UPDATE하고, 그 UPDATE가 이겼을 때만(rowcount==1) `Award` 행을 만든다 — 두 Submission이
+  동시에 Award 요청을 보내도 하나만 통과한다.
 - `Score`는 Award를 결정하지 않는다(ADR-0006/0014) — Award는 Sponsor 본인의 판단이다.
   이 엔드포인트는 Score를 전혀 조회하지 않는다.
 - Award는 지식재산권 이전을 기록할 뿐, 소스 접근 권한을 여는 것(Handover, #14)이나
@@ -27,8 +27,8 @@ from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
 from contests.models import Contest
+from contests.transitions import claim_contest_transition
 from core.clock import Clock
-from core.transitions import claim_transition
 from handovers.models import Handover
 from notifications.lifecycle import notify_award_result
 from policies.scope import current_policy
@@ -70,14 +70,9 @@ def award_submission(request: HttpRequest, contest_id: int, payload: AwardIn):
         raise HttpError(403, "심사기간이 지나 Award할 수 없습니다.")
 
     with transaction.atomic():
-        transitioned = claim_transition(
-            Contest,
-            contest.id,
-            from_state=Contest.Status.CLOSED,
-            to_state=Contest.Status.AWARDED,
-            state_field="status",
-            now=now,
-        )
+        # 「award」로 선언된 간선(CLOSED -> AWARDED, contests.transitions) 밖으로는
+        # 이 함수가 애초에 상태를 옮길 수 없다(#255).
+        transitioned = claim_contest_transition("award", contest.id, now=now)
         if not transitioned:
             # 동시에 들어온 다른 요청이 먼저 이겼거나, 그 사이 스케줄러 틱이
             # JUDGING_ENDED로 옮겼다 — 어느 쪽이든 이 요청은 통과시키지 않는다.

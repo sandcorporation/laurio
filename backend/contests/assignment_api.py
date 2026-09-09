@@ -31,7 +31,6 @@ from accounts.middleware import jwt_auth
 from accounts.models import SponsorProfile
 from accounts.sanitize import sanitize_free_text
 from core.clock import Clock
-from core.transitions import claim_transition
 from storage.adapters import get_storage_adapter
 from storage.filenames import build_download_filename
 from submissions.models import AssignmentSourceReading, Submission, SubmissionAsset
@@ -60,6 +59,7 @@ from .schemas import (
     ContestImageUploadUrlOut,
     RequirementOut,
 )
+from .transitions import claim_contest_transition
 
 router = Router(tags=["assignments"])
 
@@ -532,13 +532,15 @@ def open_assignment(request: HttpRequest, assignment_id: int):
     일관된다. 이미 열린 과제는 이 검사를 다시 지나지 않으므로 "이미 열린 과제는
     끝까지 돈다"는 그대로 성립한다).
 
-    조건부 UPDATE(`core.transitions.claim_transition`, ADR-0003) 한 번으로 전이한다 —
-    중복 클릭이 InviteCode를 두 번 발급하지 않는다: 두 번째 호출은 `from_state=DRAFT`
-    조건에 걸려 `won=False`가 되고 409로 끝난다.
+    `contests.transitions.claim_contest_transition("open-assignment", ...)`(#255) —
+    「open-assignment」로 선언된 간선(DRAFT -> ASSIGNMENT_OPEN) 하나를 조건부 UPDATE
+    (`core.transitions.claim_transition`, ADR-0003) 한 번으로 전이한다 — 중복 클릭이
+    InviteCode를 두 번 발급하지 않는다: 두 번째 호출은 `from_state=DRAFT` 조건에
+    걸려 `won=False`가 되고 409로 끝난다.
 
     **전이와 InviteCode 발급을 한 트랜잭션으로 묶는다**(코드리뷰 지적) — 이 프로젝트는
     `ATOMIC_REQUESTS`를 켜지 않으므로 `transaction.atomic()` 없이 두 문장을 그냥
-    나란히 두면 각자 따로 커밋된다. `claim_transition`이 커밋된 뒤
+    나란히 두면 각자 따로 커밋된다. `claim_contest_transition`이 커밋된 뒤
     `InviteCode.objects.create`가 실패(IntegrityError·연결 끊김 등)하면 Contest는
     `ASSIGNMENT_OPEN`인데 활성 InviteCode가 하나도 없는 채로 멈춘다 — 재시도는
     `from_state=DRAFT` 조건에 걸려 그때부터 영영 409다(과제를 다시 열 방법이 없다).
@@ -548,14 +550,9 @@ def open_assignment(request: HttpRequest, assignment_id: int):
     _require_assignment_permission(request.auth_user)
 
     with transaction.atomic():
-        won = claim_transition(
-            Contest,
-            contest.pk,
-            from_state=Contest.Status.DRAFT,
-            to_state=Contest.Status.ASSIGNMENT_OPEN,
-            state_field="status",
-            now=Clock.now(),
-        )
+        # 「open-assignment」로 선언된 간선(DRAFT -> ASSIGNMENT_OPEN, contests.transitions,
+        # #255) 밖으로는 이 함수가 상태를 옮길 수 없다.
+        won = claim_contest_transition("open-assignment", contest.pk, now=Clock.now())
         if not won:
             raise HttpError(409, "이미 열렸거나 초안 상태가 아닙니다.")
 
