@@ -67,6 +67,13 @@ from repositories.adapters import ClonedRepository, get_github_adapter
 from repositories.models import RepositorySnapshot
 from storage.adapters import StorageAdapterError, get_storage_adapter
 from submissions.models import RequirementResponse, Submission, SubmissionAsset
+# 아래 두 상수는 재노출이다 — 원본은 `submissions.scoring_basis`에 있다(#246
+# 모듈 docstring 참고). 이름을 그대로 다시 import해 `scoring.services.
+# NO_SCORING_INPUT_MODEL_VERSION`처럼 기존 경로로도 계속 접근할 수 있게 한다.
+from submissions.scoring_basis import (
+    NO_SCORING_INPUT_MODEL_VERSION,
+    PLATFORM_FAILURE_MODEL_VERSION,
+)
 from submissions.target_refs import source_target_ref
 
 from .adapters import LLMAdapterPermanentError, RequirementInput, ScoringInput, get_adapter
@@ -228,7 +235,15 @@ def _asset_label(asset: SubmissionAsset) -> str:
 #: #218(ADR-0030)의 자동 미달 Score가 `model_version`에 남기는 값 — 사람이 읽을 수
 #: 있는 문구로 "AI가 판정하지 않았다"를 스스로 밝힌다. 실제 LLM 모델 식별자
 #: 형식("fake-llm-v1" 등)과 겹치지 않아야 이의 화면에서 한눈에 구별된다.
-NO_SCORING_INPUT_MODEL_VERSION = "platform-auto (채점 입력 없음)"
+#:
+#: **원본은 `submissions.scoring_basis`에 있고 여기서는 import로 재노출한다
+#: 뿐이다(#246).** `appeals`가 `scoring`을 import하지 않는다는 정적 불변식
+#: (`test_no_rescoring_code_path_exists_in_appeals_app`) 때문에, 참가자·운영자
+#: 응답이 이 값을 함께 참조하는 파생 로직은 `scoring`이 아니라 `submissions`에
+#: 산다 — `scoring`은 이미 `submissions.models`를 그렇게 쓰고 있으므로(`scoring`
+#: → `submissions` 방향 하나만 존재) 여기서 값을 가져다 그대로 쓰면 순환이
+#: 생기지 않는다. `scoring.services.NO_SCORING_INPUT_MODEL_VERSION`으로도 여전히
+#: 접근할 수 있다(위 import 문이 그 이름을 이 모듈에 그대로 바인딩한다).
 
 #: 자동 미달 Score의 판정 근거 문구 — ADR-0030 "판정 근거에 「채점할 입력이
 #: 없었다」를 항목마다 적는다"를 그대로 옮긴다.
@@ -240,8 +255,8 @@ _NO_SCORING_INPUT_REASONING = (
 #: #222(ADR-0031)의 자동 미달 Score가 `model_version`에 남기는 값 — ADR-0030의
 #: `NO_SCORING_INPUT_MODEL_VERSION`과 짝이지만 책임 주체가 반대다(참가자가 아니라
 #: 플랫폼). 실제 LLM 모델 식별자 형식과도, 위 값과도 겹치지 않아야 이의 화면에서
-#: 어느 0%인지 한눈에 구별된다.
-PLATFORM_FAILURE_MODEL_VERSION = "platform-auto (채점 실패 상한)"
+#: 어느 0%인지 한눈에 구별된다. 원본은 위와 같은 이유로 `submissions.scoring_basis`에
+#: 있다(#246).
 
 #: #222(ADR-0031)의 자동 미달 Score의 판정 근거 문구 — ADR-0030의 "저장소가
 #: 닫혀서"와 달리 "플랫폼이 채점하지 못했다"를 명시한다. Appeal 심판이 같은

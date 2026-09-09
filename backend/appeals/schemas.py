@@ -6,6 +6,7 @@ from ninja import Schema
 from pydantic import Field
 
 from submissions.schemas import ScoredAssetOut
+from submissions.scoring_basis import ScoringBasis
 
 
 class ErrorOut(Schema):
@@ -51,6 +52,13 @@ class ScoreSnapshotOut(Schema):
     그 요청은 `SourceReading` 을 남긴다(#60) — `Score` 자체는 프롬프트를 여전히
     그대로 보관한다(재현성을 위한 불변 스냅샷, ADR-0006). 이 스키마가 바뀐 것은
     **누가 볼 수 있는지** 뿐이다.
+
+    **`reasoning`은 항상 원문이다(#246).** Developer가 보는 `submissions.schemas.
+    OwnScoreOut`은 자동 0%(ADR-0030·ADR-0031) 두 경우만 참가자용 한 문장으로
+    바꿔 내지만, 여기는 그 변환을 절대 거치지 않는다 — ADR-0030(참가자 귀책)과
+    ADR-0031(플랫폼 귀책)을 정확히 구별해야 하는 이의 심판에서 원문이 감사
+    기록이기 때문이다. `scoring_basis`가 그 구별을 기계가 읽을 수 있는 값으로도
+    낸다 — 원문을 파싱해 추측할 필요가 없다.
     """
 
     percentage: str
@@ -64,6 +72,11 @@ class ScoreSnapshotOut(Schema):
     # 보는 `OwnScoreOut`과 같은 사실이다. "내 저장소는 공개였는데 0%를 받았다"는
     # 이의를 운영자가 추측으로 심판하지 않게 한다.
     repository_reachability_check: list[dict] = []
+    # 채점의 성격을 기계가 읽을 수 있는 값으로 말한다(#246 AC) — Developer가
+    # 보는 `OwnScoreOut`과 같은 사실(`submissions.scoring_basis.
+    # scoring_basis_for`에서 같은 방식으로 파생된다)이지만, 여기서는 `reasoning`
+    # 이 원문 그대로라는 것과 짝을 이룬다.
+    scoring_basis: ScoringBasis
 
 
 class RulingOut(Schema):

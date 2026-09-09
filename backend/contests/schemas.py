@@ -5,6 +5,7 @@ from ninja import Schema
 from pydantic import Field
 from contests.curation import HomeCurationBucket
 from contests.sponsorship import SponsorNextAction, sponsor_next_action_for
+from submissions.scoring_basis import ScoringBasis
 
 
 class CategoryOut(Schema):
@@ -543,11 +544,20 @@ class AssignmentSubmissionScoreOut(Schema):
 
     `prompt`는 여기도 없다 — 소스가 통째로 임베드돼 있어 응답 크기 상한이 사라진다
     (`OwnScoreOut`과 같은 이유, #72). 소스를 직접 보는 경로는 따로 있다(#211, ADR-0022).
+
+    `reasoning`도 `OwnScoreOut`과 같은 규칙을 받는다(#246) — 자동 0%(ADR-0030·
+    ADR-0031)는 `submissions.scoring_basis.participant_facing_reasoning`이 만든
+    한 문장으로 나간다. 과제에는 이의제기가 없어(스펙 #197 Out of Scope) 원문을
+    지킬 심판자가 없으므로 여기 예외를 두지 않는다. `scoring_basis`도
+    `OwnScoreOut`·`appeals.schemas.ScoreSnapshotOut`과 같은 값을 같은 방식으로
+    낸다 — 셋 중 하나만 빠지면 이 값에 기대는 프론트 분기가 세 화면 중 하나에서
+    조용히 어긋난다.
     """
 
     percentage: str
     model_version: str
     reasoning: list[dict]
+    scoring_basis: ScoringBasis
     created_at: datetime
 
 

@@ -36,6 +36,7 @@ from storage.adapters import get_storage_adapter
 from storage.filenames import build_download_filename
 from submissions.models import AssignmentSourceReading, Submission, SubmissionAsset
 from submissions.schemas import AssignmentSourceRevealOut, SourceRevealAssetOut
+from submissions.scoring_basis import participant_facing_reasoning, scoring_basis_for
 
 from .assignment_category import get_assignment_category
 from .images import (
@@ -666,7 +667,17 @@ def list_assignment_submissions(request: HttpRequest, assignment_id: int):
                 AssignmentSubmissionScoreOut(
                     percentage=str(s.score.percentage),
                     model_version=s.score.model_version,
-                    reasoning=s.score.reasoning,
+                    # 자동 0%(ADR-0030·ADR-0031, #246)의 원문에는 ADR 번호와
+                    # 내부 임계값이 그대로 박혀 있다. 과제에는 이의제기 자체가
+                    # 없어(스펙 #197 Out of Scope) 그 원문을 지킬 심판자가
+                    # 없으므로, `submissions.schemas.OwnScoreOut`과 같은 함수로
+                    # 강사용 한 문장으로 바꿔 낸다 — `lib/assignments/
+                    # score-summary.tsx`가 이 값과 학생 자기 점수 화면
+                    # (`OwnScoreOut`)을 같은 컴포넌트로 그린다.
+                    reasoning=participant_facing_reasoning(
+                        model_version=s.score.model_version, reasoning=s.score.reasoning
+                    ),
+                    scoring_basis=scoring_basis_for(s.score.model_version),
                     created_at=s.score.created_at,
                 )
                 if hasattr(s, "score")

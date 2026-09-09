@@ -3207,6 +3207,14 @@ export interface components {
          *
          *     `prompt`는 여기도 없다 — 소스가 통째로 임베드돼 있어 응답 크기 상한이 사라진다
          *     (`OwnScoreOut`과 같은 이유, #72). 소스를 직접 보는 경로는 따로 있다(#211, ADR-0022).
+         *
+         *     `reasoning`도 `OwnScoreOut`과 같은 규칙을 받는다(#246) — 자동 0%(ADR-0030·
+         *     ADR-0031)는 `submissions.scoring_basis.participant_facing_reasoning`이 만든
+         *     한 문장으로 나간다. 과제에는 이의제기가 없어(스펙 #197 Out of Scope) 원문을
+         *     지킬 심판자가 없으므로 여기 예외를 두지 않는다. `scoring_basis`도
+         *     `OwnScoreOut`·`appeals.schemas.ScoreSnapshotOut`과 같은 값을 같은 방식으로
+         *     낸다 — 셋 중 하나만 빠지면 이 값에 기대는 프론트 분기가 세 화면 중 하나에서
+         *     조용히 어긋난다.
          */
         AssignmentSubmissionScoreOut: {
             /**
@@ -3222,6 +3230,7 @@ export interface components {
             reasoning: {
                 [key: string]: unknown;
             }[];
+            scoring_basis: components["schemas"]["ScoringBasis"];
         };
         /**
          * AssignmentUpdateIn
@@ -4382,6 +4391,21 @@ export interface components {
          *
          *     `percentage` 는 문자열이다. 배분 컷라인이 쓰는 것과 같은 십진값이라, float 로
          *     내리면 화면이 보여준 값과 돈을 가른 값이 갈릴 수 있다.
+         *
+         *     **`reasoning`은 저장된 원문 그대로가 아니다(#246).** AI가 실제로 판정했으면
+         *     `Score.reasoning`(Requirement별 근거)을 그대로 낸다. 자동 0% 둘(ADR-0030
+         *     "채점 입력 없음"·ADR-0031 "채점 실패 상한")만 `scoring_basis`에 맞춰 직렬화
+         *     시점에 새로 만든 문장 **하나**로 바꾼다 — 저장된 문구에는 ADR 번호와 내부
+         *     임계값(5회, 6시간)이 그대로 박혀 있고 `Score`는 append-only라(ADR-0006) 그
+         *     문구 자체를 고칠 방법이 없다. 운영자가 보는 `appeals.schemas.
+         *     ScoreSnapshotOut`은 이 변환을 거치지 않고 원문을 그대로 낸다 — 이의 심판이
+         *     ADR-0030과 ADR-0031을 정확히 구별해야 하는 감사 기록이기 때문이다. **이것은
+         *     "같은 것을 본다"는 두 스키마의 원칙을 어기는 것이 아니다** — 어느 쪽이든
+         *     "AI가 판정하지 않았다"와 "누가 책임인가"라는 같은 사실을 말한다. 참가자
+         *     쪽은 그 사실을 문서 참조 없이 한 문장으로, 운영자 쪽은 감사에 필요한 원문
+         *     그대로 Requirement별로 반복해 말한다는 표현만 다르다(#244가 알림 발송 실패
+         *     사유에 대해 세운 것과 같은 모양 — 저장된 문자열을 소독하지 않고 청중을
+         *     구조로 가른다, `notifications.api._recipient_facing_reason`).
          */
         OwnScoreOut: {
             /** Appeal Deadline */
@@ -4416,6 +4440,7 @@ export interface components {
              * @default []
              */
             scored_assets: components["schemas"]["ScoredAssetOut"][];
+            scoring_basis: components["schemas"]["ScoringBasis"];
         };
         /** PagedContestOut */
         PagedContestOut: {
@@ -4858,6 +4883,13 @@ export interface components {
          *     그 요청은 `SourceReading` 을 남긴다(#60) — `Score` 자체는 프롬프트를 여전히
          *     그대로 보관한다(재현성을 위한 불변 스냅샷, ADR-0006). 이 스키마가 바뀐 것은
          *     **누가 볼 수 있는지** 뿐이다.
+         *
+         *     **`reasoning`은 항상 원문이다(#246).** Developer가 보는 `submissions.schemas.
+         *     OwnScoreOut`은 자동 0%(ADR-0030·ADR-0031) 두 경우만 참가자용 한 문장으로
+         *     바꿔 내지만, 여기는 그 변환을 절대 거치지 않는다 — ADR-0030(참가자 귀책)과
+         *     ADR-0031(플랫폼 귀책)을 정확히 구별해야 하는 이의 심판에서 원문이 감사
+         *     기록이기 때문이다. `scoring_basis`가 그 구별을 기계가 읽을 수 있는 값으로도
+         *     낸다 — 원문을 파싱해 추측할 필요가 없다.
          */
         ScoreSnapshotOut: {
             /**
@@ -4885,6 +4917,7 @@ export interface components {
              * @default []
              */
             scored_assets: components["schemas"]["ScoredAssetOut"][];
+            scoring_basis: components["schemas"]["ScoringBasis"];
         };
         /**
          * ScoredAssetOut
@@ -4905,6 +4938,18 @@ export interface components {
             /** Label */
             label: string;
         };
+        /**
+         * ScoringBasis
+         * @description 참가자 응답이 채점의 성격을 기계가 읽을 수 있는 값으로 말한다(#246 AC).
+         *
+         *     `Score.model_version`의 세 가지 뜻(AI가 실제로 판정했다 / 참가자 귀책으로
+         *     못했다 / 플랫폼 귀책으로 못했다)을 프론트가 `model_version` 문자열을 다시
+         *     파싱해 추측하지 않도록 닫힌 값 하나로 묶는다. 값이 하나 늘면(자동 미달
+         *     경로가 하나 더 생기면) 여기도 같이 늘고, 생성된 TS 타입도 함께 늘어
+         *     `tsc --noEmit`이 프론트의 누락된 분기를 잡는다.
+         * @enum {string}
+         */
+        ScoringBasis: "ai_judged" | "no_scoring_input" | "platform_failure";
         /**
          * SellerContactSubmitIn
          * @description 토스 셀러 등록(businessType=INDIVIDUAL)의 individual 객체가 요구하는

@@ -5,6 +5,7 @@ from datetime import datetime
 from ninja import Schema
 
 from .participation import NextAction
+from .scoring_basis import ScoringBasis
 from pydantic import Field
 
 
@@ -331,11 +332,31 @@ class OwnScoreOut(Schema):
 
     `percentage` 는 문자열이다. 배분 컷라인이 쓰는 것과 같은 십진값이라, float 로
     내리면 화면이 보여준 값과 돈을 가른 값이 갈릴 수 있다.
+
+    **`reasoning`은 저장된 원문 그대로가 아니다(#246).** AI가 실제로 판정했으면
+    `Score.reasoning`(Requirement별 근거)을 그대로 낸다. 자동 0% 둘(ADR-0030
+    "채점 입력 없음"·ADR-0031 "채점 실패 상한")만 `scoring_basis`에 맞춰 직렬화
+    시점에 새로 만든 문장 **하나**로 바꾼다 — 저장된 문구에는 ADR 번호와 내부
+    임계값(5회, 6시간)이 그대로 박혀 있고 `Score`는 append-only라(ADR-0006) 그
+    문구 자체를 고칠 방법이 없다. 운영자가 보는 `appeals.schemas.
+    ScoreSnapshotOut`은 이 변환을 거치지 않고 원문을 그대로 낸다 — 이의 심판이
+    ADR-0030과 ADR-0031을 정확히 구별해야 하는 감사 기록이기 때문이다. **이것은
+    "같은 것을 본다"는 두 스키마의 원칙을 어기는 것이 아니다** — 어느 쪽이든
+    "AI가 판정하지 않았다"와 "누가 책임인가"라는 같은 사실을 말한다. 참가자
+    쪽은 그 사실을 문서 참조 없이 한 문장으로, 운영자 쪽은 감사에 필요한 원문
+    그대로 Requirement별로 반복해 말한다는 표현만 다르다(#244가 알림 발송 실패
+    사유에 대해 세운 것과 같은 모양 — 저장된 문자열을 소독하지 않고 청중을
+    구조로 가른다, `notifications.api._recipient_facing_reason`).
     """
 
     percentage: str
     model_version: str
     reasoning: list[dict]
+    # 채점의 성격을 기계가 읽을 수 있는 값으로 말한다(#246 AC) — 프론트가
+    # `model_version` 문자열을 다시 파싱해 "AI가 판정했는가"를 추측하지 않게
+    # 한다. `Score`에 저장된 것에서만 파생된다(`scoring_basis_for`) — 새
+    # 컬럼도 기존 행에 대한 마이그레이션도 없다.
+    scoring_basis: ScoringBasis
     created_at: datetime
     # 이의 창이 언제 닫히는지. 기한을 만들어 놓고 화면에 적지 않으면 그 기한은
     # 달력을 들고 계산한 사람에게만 유리한 함정이 된다. 심사기간이 없는 Contest
@@ -380,6 +401,20 @@ class OwnScoreOut(Schema):
         # `Decimal` 을 그대로 두면 JSON 에서 float 가 된다 — 배분 컷라인이 쓰는
         # 것과 같은 십진값이므로 자릿수를 잃지 않게 문자열로 내린다.
         return str(obj.percentage)
+
+    @staticmethod
+    def resolve_scoring_basis(obj) -> ScoringBasis:
+        from .scoring_basis import scoring_basis_for
+
+        return scoring_basis_for(obj.model_version)
+
+    @staticmethod
+    def resolve_reasoning(obj) -> list[dict]:
+        from .scoring_basis import participant_facing_reasoning
+
+        return participant_facing_reasoning(
+            model_version=obj.model_version, reasoning=obj.reasoning
+        )
 
 
 # --- Sponsor 지표 화면 (#107, 부모 #105) ---------------------------------------

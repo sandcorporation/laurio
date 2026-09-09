@@ -46,6 +46,7 @@ from distributions.services import is_holding_distribution
 from core.operator_auth import OperatorAuth
 from submissions.models import Submission
 from submissions.scored_assets import resolve_scored_assets
+from submissions.scoring_basis import scoring_basis_for
 
 from .models import Appeal, SourceReading
 from .schemas import (
@@ -227,6 +228,7 @@ def _serialize_detail(appeal: Appeal) -> AppealDetailOut:
             reasoning=score.reasoning,
             created_at=score.created_at,
             scored_assets=resolve_scored_assets(score.scored_assets),
+            scoring_basis=scoring_basis_for(score.model_version),
         ),
         ruling=_serialize_ruling(ruling),
     )
