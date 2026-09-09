@@ -5,7 +5,7 @@
 // 지켜야 할 비대칭: 소스코드는 필수(플랫폼의 "강제하지 않고 배지로 신호한다"
 // 원칙의 유일한 예외 — ADR-0014)이고, 시연 영상·데모 URL·테스트 계정은 비워도
 // 제출이 성공한다. 이 파일에서 그 둘을 같은 방식으로 다루면 안 된다.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
@@ -16,6 +16,7 @@ import { useSession } from "@/lib/auth/use-session";
 import { NEXT_ACTION_LABELS } from "@/lib/participation/use-my-participation";
 import { ScoreSummary } from "@/lib/submissions/score-summary";
 import { ASSET_KIND_LABELS } from "@/lib/submissions/types";
+import { useDeadlineRefetch } from "@/lib/submissions/use-deadline-refetch";
 import type {
   ContestDetail,
   SubmissionIn,
@@ -290,36 +291,23 @@ export default function SubmitPage() {
     };
   }, [hasScore, currentSubmission]);
 
-  // **시각 비교는 여전히 쓰지만, 판정에는 안 쓴다** — 언제 서버에게 다시 물을지
-  // 고르는 자리일 뿐이다(/code-review 지적). `next_action`은 이 화면이 처음
-  // 불러온 시점의 스냅샷이라, 편집 가능한 채로 화면을 켜 둔 사이 마감을 넘기면
-  // 다시 묻기 전까지는 여전히 "수정할 수 있습니다"로 보인다 — 서버가
-  // `next_action_for`에서 `Clock.now() < contest.deadline_at`을 직접 보므로
-  // (스캔을 기다리지 않는다) 다시 물으면 즉시 정답이 온다. 그래서 시계가 마감을
-  // 넘는 그 순간 제출물만 한 번 다시 불러온다 — **무엇을 보여줄지는 여전히
-  // 서버가 답한 값**이고, 이 훅은 그 답을 늦게 받지 않도록 타이밍만 고른다.
+  // 시계가 마감을 넘는 순간 제출물을 한 번 다시 불러와 `next_action`을
+  // 갱신한다(#247, #248) — 판정기는 여전히 서버 하나다(`useDeadlineRefetch`
+  // 참고, 과제 학생 화면과 같은 훅을 쓴다).
   //
   // `applySubmissionAssets`는 부르지 않는다 — 그 시점에 사용자가 폼에 입력해
   // 둔 것(아직 저장 전)을 서버 값으로 조용히 덮어쓰면 안 된다. 대신
   // `next_action`이 갱신되어 `canEdit`이 꺼지고, 폼은 지금까지 입력한 값 그대로
   // 잠긴다 — "더 이상 저장은 안 되지만 방금 쓴 것은 그대로 보인다".
-  const deadlineRefetchedRef = useRef(false);
-  useEffect(() => {
-    if (deadlineAt === null || !canEdit || !hasSubmission) return;
-    if (now < deadlineAt) {
-      deadlineRefetchedRef.current = false;
-      return;
-    }
-    if (deadlineRefetchedRef.current) return;
-    deadlineRefetchedRef.current = true;
-
-    bffClient
-      .get<SubmissionOut>(`/api/backend/contests/${contestId}/submissions/me`)
-      .then((result) => {
-        if (!result.ok) return;
-        setLoad((prev) => (prev.status === "ready" ? { ...prev, submission: result.data } : prev));
-      });
-  }, [now, deadlineAt, canEdit, hasSubmission, contestId]);
+  useDeadlineRefetch({
+    now,
+    deadlineAt,
+    canEdit,
+    hasSubmission,
+    path: `/api/backend/contests/${contestId}/submissions/me`,
+    onResult: (submission) =>
+      setLoad((prev) => (prev.status === "ready" ? { ...prev, submission } : prev)),
+  });
 
   // #218(ADR-0030): 소스 또는 저장소 중 하나만 있으면 제출할 수 있다 — 그래서
   // "필수" 배지·경고는 더 이상 소스 하나에 고정되지 않는다. 저장소만 있고

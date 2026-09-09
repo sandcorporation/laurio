@@ -15,7 +15,7 @@
 // 상금·결제·Award·Escrow는 이 화면 어디에도 나오지 않는다 — 대신 제출 전에
 // 두 가지를 고지한다: 강사가 소스를 열람할 수 있다는 것, 저작권은 학생에게
 // 남는다는 것(스펙 #197, 약관 항목 17·18).
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 
 import { useBackendQuery } from "@laurio/bff-client";
@@ -26,6 +26,7 @@ import { NEXT_ACTION_LABELS } from "@/lib/participation/use-my-participation";
 import { ScoreSummary } from "@/lib/submissions/score-summary";
 import { ASSET_KIND_LABELS } from "@/lib/submissions/types";
 import type { SubmissionIn, SubmissionOut } from "@/lib/submissions/types";
+import { useDeadlineRefetch } from "@/lib/submissions/use-deadline-refetch";
 import { AssignmentSourceReadingLog } from "@/lib/assignments/source-reading-log";
 
 import {
@@ -207,25 +208,17 @@ export default function AssignmentInvitePage() {
   const nextAction = submission?.next_action ?? null;
   const canEdit = !hasSubmission || nextAction === "can_edit_submission";
 
-  // 시각 비교(`isPastDeadline`)는 여전히 쓰지만 판정에는 안 쓴다 — 언제 서버에게
-  // 다시 물을지 고르는 자리일 뿐이다(#247과 같은 이유). 시계가 마감을 넘는 그
-  // 순간 제출물만 한 번 다시 불러와 `next_action`을 갱신한다.
-  const deadlineRefetchedRef = useRef(false);
-  useEffect(() => {
-    if (deadlineAt === null || !canEdit || !hasSubmission || assignmentId === null) return;
-    if (now < deadlineAt) {
-      deadlineRefetchedRef.current = false;
-      return;
-    }
-    if (deadlineRefetchedRef.current) return;
-    deadlineRefetchedRef.current = true;
-
-    bffClient
-      .get<SubmissionOut>(`/api/backend/contests/${assignmentId}/submissions/me`)
-      .then((result) => {
-        if (result.ok) setSubmission(result.data);
-      });
-  }, [now, deadlineAt, canEdit, hasSubmission, assignmentId]);
+  // 시계가 마감을 넘는 순간 제출물을 한 번 다시 불러와 `next_action`을
+  // 갱신한다(#247, #248) — 판정기는 여전히 서버 하나다(`useDeadlineRefetch`
+  // 참고, 공모전 제출 화면과 같은 훅을 쓴다).
+  useDeadlineRefetch({
+    now,
+    deadlineAt,
+    canEdit,
+    hasSubmission,
+    path: assignmentId !== null ? `/api/backend/contests/${assignmentId}/submissions/me` : null,
+    onResult: setSubmission,
+  });
 
   // 채점 여부도 `next_action`이 이미 답한다(#248) — 마감 전(`can_edit_
   // submission`)과 채점 대기(`awaiting_scoring`) 둘만 아니면 Score가 있다.

@@ -671,9 +671,10 @@ def list_assignment_submissions(request: HttpRequest, assignment_id: int):
                     # 내부 임계값이 그대로 박혀 있다. 과제에는 이의제기 자체가
                     # 없어(스펙 #197 Out of Scope) 그 원문을 지킬 심판자가
                     # 없으므로, `submissions.schemas.OwnScoreOut`과 같은 함수로
-                    # 강사용 한 문장으로 바꿔 낸다 — `lib/assignments/
-                    # score-summary.tsx`가 이 값과 학생 자기 점수 화면
-                    # (`OwnScoreOut`)을 같은 컴포넌트로 그린다.
+                    # 강사용 한 문장으로 바꿔 낸다 — `frontend/lib/submissions/
+                    # score-summary.tsx`(#248 프리팩터 전에는 `lib/assignments/`
+                    # 에 있었다)가 이 값과 학생 자기 점수 화면(`OwnScoreOut`)을
+                    # 같은 컴포넌트로 그린다.
                     reasoning=participant_facing_reasoning(
                         model_version=s.score.model_version, reasoning=s.score.reasoning
                     ),
