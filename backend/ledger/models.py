@@ -72,6 +72,23 @@ class AppendOnlyModel(models.Model):
         )
 
 
+def hard_delete_e2e_fixture_rows(queryset: "models.QuerySet") -> tuple[int, dict]:
+    """append-only 가드를 우회해 실제로 지운다 — e2e 시드 자신의 픽스처 정리 전용(#240).
+
+    `AppendOnlyQuerySet.delete()`는 실데이터(Score·JournalEntry·LedgerLine)를 보호하려고
+    있다. 그런데 `seed_e2e_contests`·`seed_e2e_operator_queues`는 이름 접두어로 격리한
+    **자기 자신이 만든** 판정 스냅샷(Score)을 매 재시드마다 지우고 새로 만든다 — 그
+    재현성이 이 시드들의 존재 이유다(네임스페이스 격리, #104/#66). Django의 캐스케이드
+    collector가 매니저를 거치지 않고 우회하던 것(#240이 막은 그 구멍)과 이 함수는 다르다
+    — 이건 **명시적으로, 이 한 곳에서만** 같은 우회를 허락한다.
+
+    **프로덕션 코드는 절대 이 함수를 부르지 않는다.** 호출부가 `management/commands/
+    seed_*` 밖이면 그 자체가 리뷰에서 걸려야 한다. `models.QuerySet.delete`를 언바운드로
+    직접 호출해 `AppendOnlyQuerySet.delete`의 오버라이드를 건너뛴다.
+    """
+    return models.QuerySet.delete(queryset)
+
+
 class Account(models.TextChoices):
     """계정과목 (ADR-0004).
 

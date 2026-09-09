@@ -524,6 +524,140 @@ def test_score_cannot_be_modified_after_creation(client, category, landing_type)
     assert unchanged.percentage == Decimal("100.00")
 
 
+# --- append-only 는 캐스케이드로도 우회되지 않는다 (#240) ------------------------------
+#
+# `AppendOnlyModel`(위 테스트)은 자기 자신의 save/delete와 QuerySet의 update/delete만
+# 막는다. Django의 캐스케이드 삭제 collector는 그 인스턴스 메서드도 매니저도 거치지
+# 않고 직접 DELETE 질의를 만들어, `Contest.delete()` -> (CASCADE) -> `Submission` ->
+# (CASCADE) -> `Score`로 이어지면 그 우회로 스냅샷이 조용히 함께 사라졌다(staging
+# 실측: Contest 하나를 지우는 조회에 `scoring.Score: 3`이 삭제 대상으로 잡혔다).
+# `Score.submission`을 `on_delete=PROTECT`로 바꿔 이 경로를 끊는다.
+
+
+@pytest.mark.django_db
+def test_deleting_a_submission_with_a_score_is_blocked_not_cascaded(client, category, landing_type):
+    """Score가 있는 Submission을 지우려 하면 참조 무결성이 막는다 — Score가 조용히
+    캐스케이드로 사라지는 일은 없다."""
+
+    from django.db.models.deletion import ProtectedError
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+
+    dev = _verified_user(client, "dev-240-1", "dev-ci-240-1")
+    source_key = _source_object_key(contest["id"], dev["user_id"])
+    FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": "MARKER\n"}))
+
+    submit_resp = client.post(
+        f"{CONTESTS_URL}/{contest['id']}/submissions",
+        data={
+            "assets": [{"kind": "source", "value": source_key}],
+            "requirement_responses": [
+                {
+                    "requirement_id": requirement_id,
+                    "is_met": True,
+                    "evidence": [{"kind": "source_location", "value": "MARKER"}],
+                }
+            ],
+        },
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    submission_id = submit_resp.json()["id"]
+
+    _close_contest(client, contest, deadline=deadline)
+    _run_pending(client)
+
+    assert Score.objects.filter(submission_id=submission_id).exists()
+
+    with pytest.raises(ProtectedError):
+        Submission.objects.get(id=submission_id).delete()
+
+    assert Score.objects.filter(submission_id=submission_id).exists()
+    assert Submission.objects.filter(id=submission_id).exists()
+
+
+@pytest.mark.django_db
+def test_deleting_a_contest_with_a_scored_submission_is_blocked_not_cascaded(
+    client, category, landing_type
+):
+    """구멍은 Contest 삭제 경로에서 실측됐다(#240) — Contest -> Submission ->
+    Score 캐스케이드 전체가 같은 가드로 막혀야 한다."""
+
+    from django.db.models.deletion import ProtectedError
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+
+    dev = _verified_user(client, "dev-240-2", "dev-ci-240-2")
+    source_key = _source_object_key(contest["id"], dev["user_id"])
+    FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": "MARKER\n"}))
+
+    submit_resp = client.post(
+        f"{CONTESTS_URL}/{contest['id']}/submissions",
+        data={
+            "assets": [{"kind": "source", "value": source_key}],
+            "requirement_responses": [
+                {
+                    "requirement_id": requirement_id,
+                    "is_met": True,
+                    "evidence": [{"kind": "source_location", "value": "MARKER"}],
+                }
+            ],
+        },
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    submission_id = submit_resp.json()["id"]
+    contest_id = contest["id"]
+
+    _close_contest(client, contest, deadline=deadline)
+    _run_pending(client)
+
+    assert Score.objects.filter(submission_id=submission_id).exists()
+
+    with pytest.raises(ProtectedError):
+        Contest.objects.get(id=contest_id).delete()
+
+    assert Contest.objects.filter(id=contest_id).exists()
+    assert Submission.objects.filter(id=submission_id).exists()
+    assert Score.objects.filter(submission_id=submission_id).exists()
+
+
+@pytest.mark.django_db
+def test_a_contest_with_no_score_can_still_be_deleted(client, category, landing_type):
+    """이 가드는 삭제를 통째로 막지 않는다 — Score가 없는 Contest는 지금처럼
+    지워진다."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    contest_id = contest["id"]
+
+    Contest.objects.get(id=contest_id).delete()
+
+    assert not Contest.objects.filter(id=contest_id).exists()
+
+
 # --- LLM 실패 재시도 + 운영자 가시성 --------------------------------------------------
 
 

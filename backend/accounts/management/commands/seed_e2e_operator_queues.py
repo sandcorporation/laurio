@@ -34,7 +34,9 @@ from django.utils import timezone
 from awards.models import Award
 from contests.models import Category, Contest, DeliverableType
 from core.transitions import claim_transition
+from ledger.models import hard_delete_e2e_fixture_rows
 from policies.scope import current_policy
+from scoring.models import Score
 
 CONTESTS_URL = "/api/contests"
 PAYMENTS_URL = "/api/payments"
@@ -199,6 +201,13 @@ def _clear_stale_seed_contests() -> int:
     # 감사 기록 -> Appeal/Submission -> Contest 순서. PROTECT라 순서가 곧 조건이다.
     SourceReading.objects.filter(submission__contest_id__in=stale_contest_ids).delete()
     AppealRuling.objects.filter(appeal__submission__contest_id__in=stale_contest_ids).delete()
+    # `Score.submission`도 PROTECT다(#240) — 이 명령은 appeal 큐 픽스처를 실제
+    # `/api/internal/scans/submission-scoring`으로 채점해 진짜 Score를 남긴다
+    # (`seed_pending_appeal`, `SCORING_RUN_PENDING_URL`). 다음 실행의 이 정리가
+    # 그 Score를 만나면 Contest 삭제가 `ProtectedError`로 막힌다. 이 Score는 이 명령
+    # 자신이 이름 접두어로 격리해 심은 재현 가능한 픽스처일 뿐이라(ADR-0006이 지키려는
+    # 실데이터 감사 추적이 아니다) `hard_delete_e2e_fixture_rows`로 먼저 지운다.
+    hard_delete_e2e_fixture_rows(Score.objects.filter(submission__contest_id__in=stale_contest_ids))
     Contest.objects.filter(id__in=stale_contest_ids).delete()
     return len(stale_contest_ids)
 

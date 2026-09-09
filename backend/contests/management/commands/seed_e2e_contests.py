@@ -37,6 +37,7 @@ from django.utils import timezone
 from accounts.models import DeveloperProfile, SocialAccount, SponsorProfile
 from awards.models import Award
 from contests.models import Category, Contest, DeliverableType, Requirement
+from ledger.models import hard_delete_e2e_fixture_rows
 from scoring.models import Score
 from submissions.models import (
     Evidence,
@@ -451,6 +452,13 @@ class Command(BaseCommand):
         # `Award.submission` 이 PROTECT 라 Contest 부터 지우면 막힌다.
         stem = "[E2E"
         Award.objects.filter(contest__title__startswith=stem).delete()
+        # `Score.submission` 도 이제 PROTECT 다(#240) — `handle` 안 심사 픽스처(judging)가
+        # `Score.objects.create(...)`로 실제 Score 를 심으므로 먼저 지우지 않으면 Contest
+        # 삭제가 `ProtectedError` 로 막힌다. 이 픽스처의 Score 는 이름 접두어로 격리된 이
+        # 명령 자신의 재현 가능한 시드 데이터일 뿐이라 지워도 ADR-0006 이 지키려는
+        # 실데이터 감사 추적에 해당하지 않는다 — `hard_delete_e2e_fixture_rows`가 그
+        # 좁은 우회를 명시적으로 허락한다.
+        hard_delete_e2e_fixture_rows(Score.objects.filter(submission__contest__title__startswith=stem))
         removed, _ = Contest.objects.filter(title__startswith=stem).delete()
         # **`e2e-` 로 뭉뚱그리지 않는다.** 그렇게 하면 운영자 시드가 만든 계정까지
         # 잡히는데, 그 계정들은 `AppealRuling.ruled_by`·`PolicyChange.operator` 가
@@ -481,6 +489,11 @@ class Command(BaseCommand):
         # 그 Contest 에 걸린 Award 를 먼저 지워야 한다 — Handover.award 는 CASCADE
         # 라 Award 를 지우면 함께 정리된다.
         Award.objects.filter(contest__title__startswith=self.prefix).delete()
+        # `Score.submission` 도 PROTECT 다(#240, 위 `_prune_all_namespaces` 와 같은 이유) —
+        # 심사 픽스처가 실제 Score 를 심으므로 Contest 를 지우기 전에 먼저 지운다.
+        hard_delete_e2e_fixture_rows(
+            Score.objects.filter(submission__contest__title__startswith=self.prefix)
+        )
         # 다른 스펙이 런타임에 만드는 Contest(submit/upload/grill)도 제목에 이 접두어를
         # 달아 여기서 함께 정리된다(#39). 접두어가 없던 시절에는 스위트를 돌릴 때마다
         # 쌓이기만 해서, 목록이 페이지네이션되기 시작하면 시드 Contest 가 1페이지 밖으로

@@ -7,6 +7,16 @@
 "한 번 저장되면 다시 저장(수정)하거나 지울 수 없다"는 요구가 Score에도 글자 그대로
 적용되기 때문이다. 재채점 코드 경로는 존재하지 않는다: `scoring.services`는 이미
 Score가 있는 Submission을 항상 건드리지 않고 지나친다.
+
+**`AppendOnlyModel`은 자기 자신의 `save`/`delete`와 QuerySet의 `update`/`delete`만
+막는다(#240).** Django의 캐스케이드 삭제 collector는 그 어느 것도 거치지 않고 직접
+DELETE 질의를 만든다 — `Contest.delete()` → (CASCADE) → `Submission` → (CASCADE) →
+`Score`로 이어지면 이 스냅샷이 조용히 함께 사라진다(staging에서 실측: Contest 하나를
+지우는 조회에 `scoring.Score: 3`이 삭제 대상으로 잡혔다). `Score.submission`을
+`on_delete=PROTECT`로 바꿔 그 경로를 끊는다 — `distributions.DistributionShare.submission`
+이 이미 같은 이유로 PROTECT다. Contest·Submission을 지우려는 시도는 `Score`가 하나라도
+달려 있으면 `django.db.models.deletion.ProtectedError`로 실패하고, `Score`가 없는
+Contest·Submission은 지금처럼 지워진다(PROTECT는 참조가 있을 때만 막는다).
 """
 
 from __future__ import annotations
@@ -20,7 +30,7 @@ class Score(AppendOnlyModel):
     """Submission 하나에 대한 불변 채점 스냅샷. 마감 직후 정확히 한 번만 만들어진다."""
 
     submission = models.OneToOneField(
-        "submissions.Submission", related_name="score", on_delete=models.CASCADE
+        "submissions.Submission", related_name="score", on_delete=models.PROTECT
     )
     # 필수 Requirement 달성률(0.00 ~ 100.00). Distribution(#16) 컷라인 판정의
     # 유일한 근거가 될 값이다(CONTEXT.md의 Score 정의) — 이 티켓은 그 소비처를
