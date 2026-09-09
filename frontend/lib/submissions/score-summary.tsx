@@ -1,7 +1,7 @@
 import Link from "next/link";
 
-// Score 요약(달성률·판정 모델·Requirement별 근거) — 세 화면이 같은 세 필드를
-// 나란히 그린다(#210, #248): 과제 학생의 자기 점수 화면(app/assignments/[code]/
+// Score 요약(달성률·판정 모델·Requirement별 근거) — 세 화면이 같은 네 필드를
+// 나란히 그린다(#210, #248, #251): 과제 학생의 자기 점수 화면(app/assignments/[code]/
 // page.tsx), 과제 강사의 제출 목록(app/console/assignments/[assignmentId]/
 // page.tsx), 그리고 공모전 제출 화면(app/console/contests/[contestId]/submit/
 // page.tsx). 백엔드도 같은 자리다 — `submissions.schemas.OwnScoreOut`(공모전·
@@ -12,9 +12,21 @@ import Link from "next/link";
 // **원래 `lib/assignments/`에 있었다(#248 프리팩터).** 과제 전용 자리에 있던
 // 컴포넌트를 공모전 제출 화면이 가져다 쓰려면 옮겨야 했다 — 과제 쪽이 먼저
 // 생겼을 뿐 이 컴포넌트 자체는 과제 개념에 의존하지 않는다.
+
+// `submissions.scoring_basis.ScoringBasis`(#246)와 같은 세 값. 그 문자열
+// 리터럴 유니온을 그대로 옮겨 적는다 — 이 파일이 이미 `percentage`·
+// `model_version`도 생성 타입을 참조하지 않고 손으로 옮겨 적은 구조적
+// 인터페이스라(호출부 셋의 서로 다른 스키마를 하나로 받기 위해), 여기만
+// 생성 타입을 import하면 그 하나만 명목 타이핑이 섞인다.
+export type ScoringBasis = "ai_judged" | "no_scoring_input" | "platform_failure";
+
 export interface ScoreSummaryData {
   percentage: string;
   model_version: string;
+  // 채점의 성격(#251) — 이 값으로만 갈린다. `model_version` 문자열을 다시
+  // 해석해 "AI가 판정했는가"를 추측하지 않는다(#246이 백엔드에서 없앤
+  // 커플링을 프론트에서 재도입하지 않는다).
+  scoring_basis: ScoringBasis;
   reasoning: unknown[];
 }
 
@@ -23,6 +35,31 @@ function reasoningTextOf(item: unknown): string {
     return String((item as { reasoning?: unknown }).reasoning ?? "");
   }
   return "";
+}
+
+// 「판정 모델」 줄의 문구(#251) — 자동 0% 둘(ADR-0030 참가자 귀책·ADR-0031
+// 플랫폼 귀책)은 AI가 이 제출을 보지 않았으므로 모델을 자처하는 문구를 내지
+// 않는다. 내부 표식 문자열(`Score.model_version`의 sentinel,
+// `platform-auto (...)`)도 노출하지 않는다 — 그 문자열은 append-only인
+// `Score` 행과 운영자 심판 화면(`appeals.schemas.ScoreSnapshotOut`)을 위한
+// 것이지 참가자가 읽을 라벨이 아니다. 두 사유는 문구 자체로 구별된다 — 뒤엣
+// 것만 이의를 낼 사유이므로(플랫폼 탓) 섞이면 안 된다.
+//
+// **export하는 이유 — 이의 화면도 같은 줄을 쓴다.** `app/console/participation/
+// [submissionId]/appeal/page.tsx`의 `ScoreSection`은 `ScoreSummary`를 쓰지
+// 않고 자기 레이아웃(달성률·판정 모델·이의 기한·Requirement별 근거 전문)을
+// 직접 그린다 — 근거를 전문으로 펼치는 화면이 여기뿐이라 `reasoningLink`
+// 분기로 흡수되지 않는다. 그래도 「판정 모델」 문구가 갈리면 참가자가 두
+// 화면에서 다른 사유를 읽는다 — 그래서 문구 함수만 공유한다.
+export function modelLineOf(score: ScoreSummaryData): string {
+  switch (score.scoring_basis) {
+    case "ai_judged":
+      return `판정 모델 ${score.model_version}`;
+    case "no_scoring_input":
+      return "AI가 판정하지 않았습니다 — 채점할 자료가 없었습니다";
+    case "platform_failure":
+      return "AI가 판정하지 않았습니다 — 채점이 반복 실패했습니다";
+  }
 }
 
 export function ScoreSummary({
@@ -51,7 +88,7 @@ export function ScoreSummary({
         <strong data-testid={`${testIdPrefix}-percentage`}>{score.percentage}%</strong>
       </p>
       <p className="text-sm text-ink/70" data-testid={`${testIdPrefix}-model`}>
-        판정 모델 {score.model_version}
+        {modelLineOf(score)}
       </p>
       {reasoningLink ? (
         <Link

@@ -22,6 +22,7 @@ import {
   type OwnScore,
   type SourceReading,
 } from "@/lib/appeals/use-appeal-page";
+import { modelLineOf } from "@/lib/submissions/score-summary";
 
 const APPEAL_STATUS_LABELS: Record<string, string> = {
   pending: "심판을 기다리는 중입니다",
@@ -92,8 +93,12 @@ function ScoreSection({ score }: { score: OwnScore }) {
         필수 요건 달성률{" "}
         <strong data-testid="appeal-score-percentage">{score.percentage}%</strong>
       </p>
+      {/* 자동 0%(ADR-0030/0031)는 AI가 판정하지 않았다 — 내부 표식 문자열
+          (`model_version`의 sentinel)을 그대로 보여주지 않는다(#251).
+          `scoring_basis`로만 갈린다 — `submit-score-model`과 같은 함수
+          (`modelLineOf`)를 써서 두 화면이 같은 사유를 말하게 한다. */}
       <p className="text-sm text-muted" data-testid="appeal-score-model">
-        판정 모델 {score.model_version}
+        {modelLineOf(score)}
       </p>
 
       {/* 근거가 없으면 이의를 쓸 수 없다 — 무엇을 반박할지 모른다. */}
