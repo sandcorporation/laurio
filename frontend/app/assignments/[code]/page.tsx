@@ -15,13 +15,14 @@
 // 상금·결제·Award·Escrow는 이 화면 어디에도 나오지 않는다 — 대신 제출 전에
 // 두 가지를 고지한다: 강사가 소스를 열람할 수 있다는 것, 저작권은 학생에게
 // 남는다는 것(스펙 #197, 약관 항목 17·18).
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 
 import { useBackendQuery } from "@laurio/bff-client";
 import type { components } from "@laurio/bff-client/schema";
 
 import { bffClient } from "@/lib/bff/client";
+import { NEXT_ACTION_LABELS } from "@/lib/participation/use-my-participation";
 import { ScoreSummary } from "@/lib/submissions/score-summary";
 import { ASSET_KIND_LABELS } from "@/lib/submissions/types";
 import type { SubmissionIn, SubmissionOut } from "@/lib/submissions/types";
@@ -40,10 +41,12 @@ import { ReadOnlyAssetSection, ReadOnlyRequirementField } from "./read-only-assi
 
 type AssignmentDetail = components["schemas"]["AssignmentOut"];
 type OwnScore = components["schemas"]["OwnScoreOut"];
+// "채점 전"과 "채점 대기"는 더 이상 이 조회의 404로 짐작하지 않는다(#248) —
+// `next_action`이 이미 그 경계를 답하므로, 이 상태는 그 뒤에 오는 조회 하나만
+// 감싼다(공모전 제출 화면(#248)의 `ScoreState`와 같은 모양).
 type ScoreState =
   | { status: "idle" }
   | { status: "loading" }
-  | { status: "not-scored" }
   | { status: "error" }
   | { status: "ready"; data: OwnScore };
 
@@ -193,18 +196,56 @@ export default function AssignmentInvitePage() {
     assignment.status === "ready" ? new Date(assignment.data.deadline_at).getTime() : null;
   const isPastDeadline = deadlineAt !== null && now >= deadlineAt;
   const requirements = assignment.status === "ready" ? assignment.data.requirements : [];
+  const assignmentId = assignment.status === "ready" ? assignment.data.id : null;
 
-  // 마감 후 내 Score 를 본다(#210, ADR-0006) — 채점은 마감 후 스캔이 한 번만
-  // 만든다(ADR-0003)이므로 마감 직후에는 아직 없을 수 있다("아직 채점 전"과
-  // "실패"는 다른 사실이라 404 를 에러로 취급하지 않는다).
+  // **판정은 서버 하나뿐이다**(#248, 공모전 제출 화면(#247)과 같은 원칙). 학생
+  // 화면이 마감 시각을 직접 비교해 "수정 가능한가"·"채점됐는가"를 스스로
+  // 판정하면, 새 상태가 생겨도 이 화면은 조용히 낡은 것을 말한다.
+  // `next_action`(`SubmissionOut`, `submissions.participation.next_action_for`
+  // — 공모전 제출 화면·「내 참가 현황」과 **같은 판정기**)이 이미 답한다.
+  const hasSubmission = submission !== null;
+  const nextAction = submission?.next_action ?? null;
+  const canEdit = !hasSubmission || nextAction === "can_edit_submission";
+
+  // 시각 비교(`isPastDeadline`)는 여전히 쓰지만 판정에는 안 쓴다 — 언제 서버에게
+  // 다시 물을지 고르는 자리일 뿐이다(#247과 같은 이유). 시계가 마감을 넘는 그
+  // 순간 제출물만 한 번 다시 불러와 `next_action`을 갱신한다.
+  const deadlineRefetchedRef = useRef(false);
   useEffect(() => {
-    if (!isPastDeadline || submission === null) return;
+    if (deadlineAt === null || !canEdit || !hasSubmission || assignmentId === null) return;
+    if (now < deadlineAt) {
+      deadlineRefetchedRef.current = false;
+      return;
+    }
+    if (deadlineRefetchedRef.current) return;
+    deadlineRefetchedRef.current = true;
+
+    bffClient
+      .get<SubmissionOut>(`/api/backend/contests/${assignmentId}/submissions/me`)
+      .then((result) => {
+        if (result.ok) setSubmission(result.data);
+      });
+  }, [now, deadlineAt, canEdit, hasSubmission, assignmentId]);
+
+  // 채점 여부도 `next_action`이 이미 답한다(#248) — 마감 전(`can_edit_
+  // submission`)과 채점 대기(`awaiting_scoring`) 둘만 아니면 Score가 있다.
+  // 404로 짐작하지 않는다: 조회는 그 값이 "있다"고 말할 때만 나간다.
+  const hasScore =
+    nextAction !== null &&
+    nextAction !== "can_edit_submission" &&
+    nextAction !== "awaiting_scoring";
+
+  useEffect(() => {
+    if (!hasScore || submission === null) {
+      setScore({ status: "idle" });
+      return;
+    }
     let cancelled = false;
     setScore({ status: "loading" });
     void bffClient.get<OwnScore>(`/api/backend/submissions/${submission.id}/score`).then((result) => {
       if (cancelled) return;
       if (!result.ok) {
-        setScore(result.status === 404 ? { status: "not-scored" } : { status: "error" });
+        setScore({ status: "error" });
         return;
       }
       setScore({ status: "ready", data: result.data });
@@ -212,7 +253,7 @@ export default function AssignmentInvitePage() {
     return () => {
       cancelled = true;
     };
-  }, [isPastDeadline, submission]);
+  }, [hasScore, submission]);
 
   const completion = useMemo(() => {
     const total = requirements.length;
@@ -225,7 +266,6 @@ export default function AssignmentInvitePage() {
   // presigned URL을 발급할 때 검증하는 접두어). 이게 없으면 `AssetKindSection`이
   // `UploadField`를 아예 그리지 않아 소스를 업로드할 방법이 없다 — 이 화면이
   // 실제로 그 상태였다(#210 이 브라우저로 걸어보다 발견).
-  const assignmentId = assignment.status === "ready" ? assignment.data.id : null;
   const userId = session.status === "authenticated" ? session.user.id : null;
   const sourceTargetRef =
     assignmentId !== null && userId !== null ? `submission:${assignmentId}:${userId}:source` : null;
@@ -352,6 +392,16 @@ export default function AssignmentInvitePage() {
           마감 {new Date(data.deadline_at).toLocaleString("ko-KR")}
           {isPastDeadline ? " — 마감되었습니다" : ""}
         </p>
+        {/* 공모전 제출 화면(#247/#248)과 같은 어휘로 지금 단계를 말한다 — 이
+            학생이 제출을 냈을 때만 뜻이 있다(내지 않았으면 볼 단계가 없다). */}
+        {nextAction !== null && (
+          <p
+            className={`mt-2 font-mono text-sm ${canEdit ? "text-ink" : "text-attention"}`}
+            data-testid="assignment-state-band"
+          >
+            {NEXT_ACTION_LABELS[nextAction].text}
+          </p>
+        )}
       </div>
 
       {/* 강사가 붙인 참고 이미지 (#236, ADR-0032) — 공모전 상세와 같은 자리
@@ -418,11 +468,12 @@ export default function AssignmentInvitePage() {
             </div>
           </section>
 
-          {isPastDeadline ? (
+          {!canEdit ? (
             <>
               {/* 마감 후에는 읽는 화면이다(#215) — 자료를 바꾸는 컨트롤(추가·교체·
-                  삭제·업로드)이 트리에서 아예 빠진다. 제출 버튼에 이미 적용된
-                  `isPastDeadline` 판단을 그대로 넓힌 것이지 새 조건이 아니다. */}
+                  삭제·업로드)이 트리에서 아예 빠진다. **판정은 `next_action`
+                  하나다**(#248) — 제출 버튼과 같은 조건(`canEdit`)을 그대로
+                  넓힌 것이지 새 조건이 아니다. */}
               <ReadOnlyAssetSection
                 kind="source"
                 title={ASSET_KIND_LABELS.source}
@@ -544,7 +595,7 @@ export default function AssignmentInvitePage() {
             </>
           )}
 
-          {!isPastDeadline && (
+          {canEdit && (
             <div className="flex flex-col gap-2">
               <button
                 type="button"
@@ -568,17 +619,33 @@ export default function AssignmentInvitePage() {
             </div>
           )}
 
-          {isPastDeadline && submission !== null && <ScoreSection score={score} />}
+          {hasSubmission && nextAction !== null && (
+            <ScoreSection nextAction={nextAction} score={score} />
+          )}
         </>
       )}
     </main>
   );
 }
 
-// 마감 후 내 Score 와 판정 근거(#210, ADR-0006) — 과제에는 이의제기가 없다
+// 내 Score 와 지금 단계(#210, ADR-0006, #248) — 과제에는 이의제기가 없다
 // (스펙 #197 Out of Scope). 점수에 이견이 있으면 갈 곳은 화면(운영자 이의)이
 // 아니라 사람(강사)이라는 것을 여기서 분명히 말한다.
-function ScoreSection({ score }: { score: ScoreState }) {
+//
+// **점수가 없을 때 이유가 갈린다** — 공모전 제출 화면(#248)과 같은 어휘다:
+// 마감 전이라 채점이 시작되지 않았다 / 마감됐고 채점을 기다리는 중이다.
+// `next_action`이 이미 그 경계를 답하므로 화면이 다시 판정하지 않는다.
+//
+// **`ScoreSummary`에 `reasoningLink`를 주지 않는다** — 과제에는 이의 화면
+// 자체가 없어(ADR-0028) 근거를 링크로 미룰 다른 자리가 없다. 여기가 유일한
+// 자리이므로 전체를 그대로 나열한다(기본 동작).
+function ScoreSection({
+  nextAction,
+  score,
+}: {
+  nextAction: NonNullable<SubmissionOut["next_action"]>;
+  score: ScoreState;
+}) {
   return (
     <section
       className="flex flex-col gap-3 border-t border-rule pt-6"
@@ -586,22 +653,25 @@ function ScoreSection({ score }: { score: ScoreState }) {
     >
       <h2 className="text-lg font-semibold">채점 결과</h2>
 
-      {score.status === "loading" && (
-        <p data-testid="assignment-score-loading">불러오는 중...</p>
-      )}
-      {score.status === "not-scored" && (
-        <p data-testid="assignment-score-not-scored" className="text-sm text-ink/70">
-          아직 채점되지 않았습니다. 조금만 기다려주세요.
+      {nextAction === "can_edit_submission" ? (
+        <p data-testid="assignment-score-before-deadline" className="text-sm text-ink/70">
+          아직 마감 전이라 채점이 시작되지 않았습니다.
         </p>
-      )}
-      {score.status === "error" && (
+      ) : nextAction === "awaiting_scoring" ? (
+        <p data-testid="assignment-score-awaiting" className="text-sm text-ink/70">
+          마감되었고 채점을 기다리는 중입니다.
+        </p>
+      ) : score.status === "loading" ? (
+        <p data-testid="assignment-score-loading">불러오는 중...</p>
+      ) : score.status === "error" ? (
         <p role="alert" data-testid="assignment-score-error" className="text-sm text-attention">
           채점 결과를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.
         </p>
-      )}
-      {score.status === "ready" && <ScoreSummary score={score.data} testIdPrefix="assignment-score" />}
+      ) : score.status === "ready" ? (
+        <ScoreSummary score={score.data} testIdPrefix="assignment-score" />
+      ) : null}
 
-      {/* 이의제기가 없다는 사실은 채점 결과와 무관하게(로딩·미채점 포함) 항상
+      {/* 이의제기가 없다는 사실은 채점 결과와 무관하게(로딩·대기 포함) 항상
           알린다 — 학생이 언제 이 화면을 보든 "다음에 이견이 있으면 어디로
           가야 하는가"를 미리 알아야 한다(스펙 #197 인수조건). */}
       <p className="text-sm text-ink/70" data-testid="assignment-no-appeal-notice">

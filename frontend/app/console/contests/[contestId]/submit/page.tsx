@@ -6,11 +6,15 @@
 // 원칙의 유일한 예외 — ADR-0014)이고, 시연 영상·데모 URL·테스트 계정은 비워도
 // 제출이 성공한다. 이 파일에서 그 둘을 같은 방식으로 다루면 안 된다.
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
+
+import type { components } from "@laurio/bff-client/schema";
 
 import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
 import { NEXT_ACTION_LABELS } from "@/lib/participation/use-my-participation";
+import { ScoreSummary } from "@/lib/submissions/score-summary";
 import { ASSET_KIND_LABELS } from "@/lib/submissions/types";
 import type {
   ContestDetail,
@@ -99,6 +103,17 @@ type LoadState =
 
 type SaveState = { status: "idle" | "saving" | "done" | "error"; message?: string };
 
+// 채점 결과 (#248) — `next_action`이 이미 "채점이 끝났는가"를 답하므로, 이
+// 상태는 그 뒤에 오는 조회 하나만 감싼다("불러오는 중"·"불러오지 못함"·"됐음"
+// 셋). 채점 전 두 상태(마감 전/채점 대기)는 `next_action`만으로 이미 구별되어
+// 조회 자체를 하지 않는다 — 아래 `ScoreSection` 참고.
+type OwnScore = components["schemas"]["OwnScoreOut"];
+type ScoreState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "error" }
+  | { status: "ready"; data: OwnScore };
+
 function formatRemaining(ms: number): string {
   if (ms <= 0) return "마감";
   const totalSeconds = Math.floor(ms / 1000);
@@ -137,6 +152,7 @@ export default function SubmitPage() {
   const [unlinkedEvidenceCount, setUnlinkedEvidenceCount] = useState(0);
   const [verifying, setVerifying] = useState(false);
   const [verifyError, setVerifyError] = useState<string | null>(null);
+  const [score, setScore] = useState<ScoreState>({ status: "idle" });
   const portOneConfig = useMemo(() => getPortOneBrowserConfig(), []);
 
   // 로드 직후와 저장 성공 직후 둘 다 이 함수를 부른다 — **서버 응답이 이
@@ -242,6 +258,37 @@ export default function SubmitPage() {
   const nextAction = currentSubmission?.next_action ?? null;
   const canEdit = !hasSubmission || nextAction === "can_edit_submission";
   const stateLabel = nextAction !== null ? NEXT_ACTION_LABELS[nextAction].text : null;
+
+  // 채점이 됐는지도 `next_action`이 이미 답한다(#248) — `next_action_for`가
+  // `hasattr(submission, "score")`를 그 경계로 쓰므로, 마감 전(`can_edit_
+  // submission`)과 채점 대기(`awaiting_scoring`) 둘만 아니면 Score가 있다.
+  // **404로 짐작하지 않는다** — 조회 자체를 그 값이 "있다"고 말할 때만 보낸다.
+  const hasScore =
+    nextAction !== null &&
+    nextAction !== "can_edit_submission" &&
+    nextAction !== "awaiting_scoring";
+
+  useEffect(() => {
+    if (!hasScore || currentSubmission === null) {
+      setScore({ status: "idle" });
+      return;
+    }
+    let cancelled = false;
+    setScore({ status: "loading" });
+    void bffClient
+      .get<OwnScore>(`/api/backend/submissions/${currentSubmission.id}/score`)
+      .then((result) => {
+        if (cancelled) return;
+        if (!result.ok) {
+          setScore({ status: "error" });
+          return;
+        }
+        setScore({ status: "ready", data: result.data });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasScore, currentSubmission]);
 
   // **시각 비교는 여전히 쓰지만, 판정에는 안 쓴다** — 언제 서버에게 다시 물을지
   // 고르는 자리일 뿐이다(/code-review 지적). `next_action`은 이 화면이 처음
@@ -779,6 +826,81 @@ export default function SubmitPage() {
           )}
         </div>
       )}
+
+      {hasSubmission && currentSubmission !== null && nextAction !== null && (
+        <ScoreSection nextAction={nextAction} score={score} submissionId={currentSubmission.id} />
+      )}
     </main>
+  );
+}
+
+// 자기 점수와 「다음 갈래」(#248) — 요구사항·자료를 다시 그리지 않는 이
+// 화면에서 "낸 것이 그래서 어떻게 됐나"까지 한 곳에서 끝까지 읽는다.
+//
+// **점수가 없을 때 이유가 갈린다.** `next_action`이 이미 그 경계를 답한다 —
+// 마감 전(`can_edit_submission`)과 채점 대기(`awaiting_scoring`)는 자기
+// 문장을 그대로 말하고, 그 둘이 아니면 Score가 있다는 뜻이라 조회한다. 자동
+// 0%(ADR-0030/0031)의 사유는 백엔드가 이미 참가자용 한 문장으로 접어 보낸다
+// (`OwnScoreOut.reasoning`, #246) — 여기서 `scoring_basis`를 다시 해석하지
+// 않는다.
+//
+// **판정 근거 전문·이의 제기·인수 확인은 링크로 간다.** 이 화면이 그 내용을
+// 다시 그리면 이의 화면(`/console/participation/{id}/appeal`)과 언젠가
+// 어긋난다. 인수 링크는 `next_action === "awaiting_handover_release"`일
+// 때만 보인다 — 서버가 준 상태값이 유일한 판정 근거다.
+function ScoreSection({
+  nextAction,
+  score,
+  submissionId,
+}: {
+  nextAction: NonNullable<SubmissionOut["next_action"]>;
+  score: ScoreState;
+  submissionId: number;
+}) {
+  return (
+    <section
+      className="flex flex-col gap-3 border-t border-rule pt-6"
+      data-testid="submit-score-section"
+    >
+      <h2 className="text-lg font-semibold">채점 결과</h2>
+
+      {nextAction === "can_edit_submission" ? (
+        <p data-testid="submit-score-before-deadline" className="text-sm text-ink/70">
+          아직 마감 전이라 채점이 시작되지 않았습니다.
+        </p>
+      ) : nextAction === "awaiting_scoring" ? (
+        <p data-testid="submit-score-awaiting" className="text-sm text-ink/70">
+          마감되었고 채점을 기다리는 중입니다.
+        </p>
+      ) : score.status === "loading" ? (
+        <p data-testid="submit-score-loading">불러오는 중...</p>
+      ) : score.status === "error" ? (
+        <p role="alert" data-testid="submit-score-error" className="text-sm text-attention">
+          채점 결과를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.
+        </p>
+      ) : score.status === "ready" ? (
+        <>
+          <ScoreSummary
+            score={score.data}
+            testIdPrefix="submit-score"
+            reasoningLink={{
+              href: `/console/participation/${submissionId}/appeal`,
+              label: "판정 근거 전문·이의 제기 보기 →",
+            }}
+          />
+          {/* 인수는 지금 실제로 할 수 있을 때만 링크한다 — 서버가 준
+              `next_action` 하나가 그 판단이다. */}
+          {nextAction === "awaiting_handover_release" && (
+            <Link
+              className="text-sm underline"
+              href={`/console/participation/${submissionId}/handover`}
+              data-testid="submit-score-handover-link"
+            >
+              인수 자료 올리기 →
+            </Link>
+          )}
+        </>
+      ) : null}
+    </section>
   );
 }
