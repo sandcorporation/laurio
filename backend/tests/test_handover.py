@@ -318,6 +318,54 @@ def test_developer_can_upload_and_sponsor_can_list_build_asset(client, category,
 
 
 @pytest.mark.django_db
+def test_build_asset_download_filename_has_extension_from_stored_content_type(
+    client, category, landing_type
+):
+    """#241: 빌드 자산도 소스와 같은 일반 다운로드 게이트(`storage.api.
+    request_download`)를 거치므로, 업로드 발급 시 받은 content-type을 기록해
+    두면 다운로드 URL의 파일명에 확장자가 실린다."""
+
+    sponsor, dev, contest, submission = _publish_close_award(client, category, landing_type)
+
+    upload_resp = client.post(
+        f"{STORAGE_URL}/uploads",
+        data={
+            "target_ref": f"submission:{contest['id']}:{dev['user_id']}:build-asset",
+            "content_type": "application/pdf",
+        },
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert upload_resp.status_code == 200, upload_resp.content
+    object_key = upload_resp.json()["object_key"]
+
+    record_resp = client.post(
+        f"{SUBMISSIONS_URL}/{submission['id']}/build-assets",
+        data={
+            "kind": "run_docs",
+            "object_key": object_key,
+            "label": "실행 문서",
+            "content_type": "application/pdf",
+        },
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert record_resp.status_code == 201, record_resp.content
+
+    download = client.post(
+        f"{STORAGE_URL}/downloads",
+        data={
+            "target_ref": f"submission:{contest['id']}:{dev['user_id']}:build-asset",
+            "object_key": object_key,
+        },
+        content_type="application/json",
+        **_auth_header(sponsor["access"]),
+    )
+    assert download.status_code == 200, download.content
+    assert 'filename="download.pdf"' in download.json()["download_url"]
+
+
+@pytest.mark.django_db
 def test_build_asset_label_over_200_chars_is_rejected_with_422_not_500(
     client, category, landing_type
 ):

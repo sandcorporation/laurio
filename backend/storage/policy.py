@@ -96,6 +96,41 @@ def get_target_resolver() -> TargetStateResolver:
     return resolver_cls()
 
 
+class ContentTypeResolver(Protocol):
+    """(target_ref, object_key) -> 그 오브젝트에 저장된 content-type, 또는 모르면 None.
+
+    다운로드 파일명에 확장자를 붙이려면(#241) 업로드 발급 시점에 받은 content-type을
+    돌려봐야 하는데, 그 값은 storage 앱이 아니라 도메인 쪽 자산(`SubmissionAsset`·
+    `handovers.BuildAsset`)에 남는다(target_ref가 이 앱 입장에서 불투명한 문자열인
+    것과 같은 이유로, storage 앱은 그 모델들을 모른다). `TargetStateResolver`와 같은
+    확장점 패턴이다 — 다만 target_ref만으로는 한 슬롯 아래 쌓인 여러 오브젝트 중
+    어느 것인지 가릴 수 없어(`submissions.target_refs`의 BUILD_ASSET_SLOT 설명 참고)
+    object_key도 함께 받는다.
+    """
+
+    def resolve(self, target_ref: str, object_key: str) -> str | None: ...
+
+
+class UnknownContentTypeResolver:
+    """실제 도메인 리졸버가 붙기 전까지의 기본값 — 항상 "모른다"(fail-safe).
+
+    `DenyUnknownTargetResolver`와 다른 방향으로 fail한다 — 권한은 모르면 막아야
+    하지만(fail-closed), content-type을 모르는 것은 확장자 없는 파일명으로
+    떨어질 뿐 다운로드 자체를 막을 이유가 아니다(#241 AC).
+    """
+
+    def resolve(self, target_ref: str, object_key: str) -> str | None:
+        return None
+
+
+def get_content_type_resolver() -> ContentTypeResolver:
+    path = getattr(settings, "STORAGE_CONTENT_TYPE_RESOLVER", "") or (
+        "storage.policy.UnknownContentTypeResolver"
+    )
+    resolver_cls = import_string(path)
+    return resolver_cls()
+
+
 def _authenticated_user_id(request: HttpRequest) -> int | None:
     """JWT로 확인된 호출자의 User pk. 없으면(비로그인·무효 토큰) None."""
 

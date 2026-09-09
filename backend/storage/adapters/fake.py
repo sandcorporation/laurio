@@ -12,6 +12,11 @@ CI와 로컬 테스트는 MinIO 없이 돈다(ADR-0007). 이 어댑터는 네트
 `put_object`의 `ContentType`으로 스토리지에 실어 보내 눈으로 확인할 수 없지만, 이
 더블은 값을 그대로 들고 있다가 `written_content_type`으로 돌려준다 — 테스트가
 "실제로 무엇이 실렸는지"를 관찰하는 유일한 창구다(#238 AC).
+
+**#241부터 `presign_download`가 받는 `filename`도 URL 쿼리에 그대로 실린다.** 실물
+S3 어댑터는 그 값을 `ResponseContentDisposition`으로 서명해 넣어 URL 문자열만으로도
+확인할 수 있는데, 이 더블도 같은 자리에 같은 문자열을 붙여 테스트가 "다운로드 URL에
+확장자 있는 파일명이 실제로 실렸다"를 검사할 수 있게 한다.
 """
 
 from __future__ import annotations
@@ -97,6 +102,7 @@ class FakeStorageAdapter:
         *,
         bucket: Bucket = Bucket.PRIVATE,
         expires_in: timedelta,
+        filename: str,
     ) -> PresignedDownload:
         expires_at = datetime.now(timezone.utc) + expires_in
         url = (
@@ -104,7 +110,9 @@ class FakeStorageAdapter:
             f"?X-Fake-Signature=download&X-Fake-Expires={int(expires_at.timestamp())}"
             # S3StorageAdapter가 ResponseContentDisposition=attachment 를 강제하는 것과
             # 대응시켜, 테스트가 "다운로드는 항상 첨부파일로 강제된다"를 검증할 수 있게 한다.
-            "&X-Fake-Response-Content-Disposition=attachment"
+            # `filename`(#241)도 그대로 실어, 테스트가 "확장자 있는 이름이 실제로
+            # 실렸다"를 문자열 검사로 확인할 수 있게 한다.
+            f'&X-Fake-Response-Content-Disposition=attachment; filename="{filename}"'
         )
         return PresignedDownload(url=url, object_key=object_key, expires_at=expires_at)
 

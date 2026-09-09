@@ -240,6 +240,44 @@ def test_sponsor_can_reveal_submission_source_before_deadline_and_it_is_recorded
 
 
 @pytest.mark.django_db
+def test_revealed_source_download_url_has_a_filename_with_extension(client, landing_type):
+    """#241: 이 경로는 storage.api를 거치지 않고 직접 presign하지만(위 `_reveal`
+    docstring), 그래도 같은 헬퍼(`storage.filenames.build_download_filename`)로
+    파일명을 만들어야 한다 — 한 곳만 고치면 나머지에서 같은 신고가 다시 온다는
+    것이 #241의 범위 진술이다."""
+
+    assignment = _create_and_open_assignment(
+        client, deliverable_type_ids=[landing_type.id], sponsor_uid="asrc-sponsor-ext"
+    )
+    student_pair = _login(client, "asrc-student-ext")
+    developer_user_id = _me(client, student_pair["access"])["id"]
+
+    submit = client.post(
+        f"{CONTESTS_URL}/{assignment['id']}/submissions",
+        data={
+            "assets": [
+                {
+                    "kind": "source",
+                    "value": _source_object_key(assignment["id"], developer_user_id),
+                    "label": "메인 소스",
+                    "content_type": "application/zip",
+                },
+            ],
+            "invite_code": assignment["invite_code"],
+        },
+        content_type="application/json",
+        **_auth_header(student_pair["access"]),
+    )
+    assert submit.status_code == 201, submit.content
+    submission = submit.json()
+
+    reveal = _reveal(client, assignment["sponsor_access"], assignment["id"], submission["id"])
+    assert reveal.status_code == 200, reveal.content
+    source_asset = next(a for a in reveal.json()["assets"] if a["kind"] == "source")
+    assert 'filename="download.zip"' in source_asset["url"]
+
+
+@pytest.mark.django_db
 def test_browsing_list_and_detail_does_not_create_a_reading(client, landing_type):
     assignment = _create_and_open_assignment(
         client, deliverable_type_ids=[landing_type.id], sponsor_uid="asrc-sponsor-2"

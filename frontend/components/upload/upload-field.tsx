@@ -10,7 +10,11 @@ export interface UploadFieldProps {
   targetRef: string;
   label: string;
   accept?: string;
-  onUploaded?: (objectKey: string) => void;
+  // 두 번째 인자(#241)는 업로드한 File의 MIME 타입이다(모르면 null) — 호출자가
+  // 그대로 제출 페이로드의 content_type에 실으면 백엔드가 다운로드 파일명의
+  // 확장자를 유도한다. 기존 호출부(인자 하나만 받는 콜백)는 그대로 동작한다 —
+  // 여분의 인자를 무시하는 함수는 그 타입에 그대로 대입된다.
+  onUploaded?: (objectKey: string, contentType: string | null) => void;
   testId: string;
 }
 
@@ -22,8 +26,8 @@ export function UploadField({ targetRef, label, accept, onUploaded, testId }: Up
     const file = event.target.files?.[0];
     if (!file) return;
     try {
-      const objectKey = await upload(file);
-      onUploaded?.(objectKey);
+      const { objectKey, contentType } = await upload(file);
+      onUploaded?.(objectKey, contentType);
     } catch {
       // state.error가 이미 이유를 담고 있다 — 아래 UI가 보여준다.
     }
@@ -31,8 +35,8 @@ export function UploadField({ targetRef, label, accept, onUploaded, testId }: Up
 
   async function handleRetry() {
     try {
-      const objectKey = await retry();
-      onUploaded?.(objectKey);
+      const { objectKey, contentType } = await retry();
+      onUploaded?.(objectKey, contentType);
     } catch {
       // 마찬가지로 state.error에서 보여준다.
     }
