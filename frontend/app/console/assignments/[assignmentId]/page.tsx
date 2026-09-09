@@ -17,7 +17,7 @@ import type { components } from "@laurio/bff-client/schema";
 import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
 import { ASSIGNMENT_STATUS_LABELS } from "@/lib/assignments/use-my-assignments";
-import { ScoreSummary } from "@/lib/assignments/score-summary";
+import { ScoreSummary } from "@/lib/submissions/score-summary";
 import { AssignmentSourceReveal } from "@/lib/assignments/submission-source-panel";
 import {
   RequirementChecklistEditor,

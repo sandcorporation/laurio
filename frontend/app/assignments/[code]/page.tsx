@@ -22,7 +22,7 @@ import { useBackendQuery } from "@laurio/bff-client";
 import type { components } from "@laurio/bff-client/schema";
 
 import { bffClient } from "@/lib/bff/client";
-import { ScoreSummary } from "@/lib/assignments/score-summary";
+import { ScoreSummary } from "@/lib/submissions/score-summary";
 import { ASSET_KIND_LABELS } from "@/lib/submissions/types";
 import type { SubmissionIn, SubmissionOut } from "@/lib/submissions/types";
 import { AssignmentSourceReadingLog } from "@/lib/assignments/source-reading-log";
