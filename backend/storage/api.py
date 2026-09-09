@@ -7,6 +7,13 @@ presigned URL을 그대로 돌려줄 뿐이고, 실제 파일은 클라이언트
 `target_ref`는 이 앱 입장에서 불투명한 문자열이다 — 어떤 Submission의 어떤
 슬롯(소스/빌드/영상)을 가리키는지는 이 티켓이 알 필요가 없다. 호출자 권한과
 대상 상태 판정은 전부 `storage.policy`로 위임한다.
+
+**다운로드 파일명(#241)도 같은 방식으로 위임한다.** 이 오브젝트에 어떤
+content-type이 저장돼 있는지는 storage 앱이 모른다 — 업로드 시점에 받은
+content-type을 `SubmissionAsset`·`handovers.BuildAsset`에 남기는 것은 도메인
+쪽 책임이다(#241 결정). `STORAGE_CONTENT_TYPE_RESOLVER`가 그 값을 돌려주면
+`storage.filenames.build_download_filename`이 파일명을 만든다 — content-type을
+몰라도(리졸버가 None을 돌려줘도) 이름 자체는 항상 만든다.
 """
 
 from __future__ import annotations
@@ -18,7 +25,8 @@ from django.conf import settings
 from ninja import Field, Router, Schema
 
 from storage.adapters import get_storage_adapter
-from storage.policy import StorageAccessDenied, StorageAccessPolicy
+from storage.filenames import build_download_filename
+from storage.policy import StorageAccessDenied, StorageAccessPolicy, get_content_type_resolver
 
 router = Router(tags=["storage"])
 
@@ -93,9 +101,13 @@ def request_download(request, payload: DownloadRequest) -> DownloadResponse:
 
     StorageAccessPolicy().authorize_download(request, payload.target_ref)
 
+    content_type = get_content_type_resolver().resolve(payload.target_ref, payload.object_key)
+    filename = build_download_filename(content_type)
+
     adapter = get_storage_adapter()
     presigned = adapter.presign_download(
         payload.object_key,
+        filename=filename,
         expires_in=timedelta(seconds=settings.STORAGE_DOWNLOAD_URL_TTL_SECONDS),
     )
     return DownloadResponse(

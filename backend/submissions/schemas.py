@@ -63,6 +63,13 @@ class SubmissionAssetIn(Schema):
     label: str = Field(default="", max_length=200)
     test_account: str = Field(default="", max_length=500)
     order: int = Field(default=0, ge=0)
+    # 업로드 발급(`POST /storage/uploads`)에 실었던 content-type을 그대로
+    # 되돌려 보낸다(#241) — storage 앱은 그 값을 버리므로(target_ref가 불투명한
+    # 문자열이라 자산 모델을 모른다), 다시 저장할 자리가 여기뿐이다. SOURCE·
+    # DEMO_VIDEO가 아닌 종류(URL)에는 의미가 없어 저장 시 무시된다
+    # (`submissions.api._clean_assets_in`). 응답 헤더에 그대로 실리지 않는다 —
+    # 확장자를 고르는 조회 키일 뿐이다(`storage.filenames.build_download_filename`).
+    content_type: str = Field(default="", max_length=255)
 
 
 class AssetSummaryOut(Schema):

@@ -16,6 +16,17 @@ target_ref 형식은 `submissions.target_refs`에 있다: 이 리졸버는 그 �
 형식을 벗어난 target_ref(구분자 개수가 다르거나 정수가 아닌 id, 존재하지 않는
 Contest)는 예외를 던지지 않고 소유자 없는 private으로 fail-closed한다 —
 `storage.policy.DenyUnknownTargetResolver`와 같은 원칙이다.
+
+**`SubmissionContentTypeResolver`(#241)는 별도 확장점이다.** 다운로드 파일명에
+확장자를 붙이려면 그 오브젝트에 저장된 content-type을 알아야 하는데, 그 값은
+`SubmissionAsset`(소스·시연 영상)이나 `handovers.BuildAsset`(빌드 자산)에 남는다
+— 자산이 곧 정체성이 아니라 **object_key가** 정체성이라, target_ref는 보지 않고
+object_key로만 찾는다(한 target_ref/슬롯 아래 여러 오브젝트가 쌓일 수 있어
+target_ref만으로는 어느 것인지 가릴 수 없다 — `submissions.target_refs`의
+BUILD_ASSET_SLOT 설명 참고). `handovers.models`를 함수 안에서 지역 임포트하는
+이유는 순환 임포트를 피하기 위해서다 — `handovers`가 이미 `submissions.models`를
+임포트하므로, 모듈 최상단에서 반대 방향으로 임포트하면 두 앱이 서로를 참조하게
+된다.
 """
 
 from __future__ import annotations
@@ -25,6 +36,7 @@ from contests.models import Contest
 from core.clock import Clock
 from storage.policy import TargetState, Visibility
 
+from .models import SubmissionAsset
 from .target_refs import BUILD_ASSET_SLOT, SOURCE_SLOT
 
 _DENY = TargetState(visibility=Visibility.PRIVATE, owner_id=None)
@@ -85,4 +97,31 @@ class SubmissionTargetStateResolver:
             visibility=Visibility.PRIVATE,
             owner_id=developer_user_id,
             additional_viewer_ids=frozenset({contest.sponsor.user_id}),
+        )
+
+
+class SubmissionContentTypeResolver:
+    """object_key -> 그 오브젝트에 저장된 content-type, 또는 모르면 None (#241).
+
+    `target_ref`는 인자로만 받고 보지 않는다 — object_key 하나가 이미 전역적으로
+    유일하다(둘 다 storage의 `_new_object_key`가 uuid4로 만든 값을 정체성으로 쓴다).
+    """
+
+    def resolve(self, target_ref: str, object_key: str) -> str | None:
+        content_type = (
+            SubmissionAsset.objects.filter(value=object_key)
+            .exclude(content_type="")
+            .values_list("content_type", flat=True)
+            .first()
+        )
+        if content_type:
+            return content_type
+
+        from handovers.models import BuildAsset
+
+        return (
+            BuildAsset.objects.filter(object_key=object_key)
+            .exclude(content_type="")
+            .values_list("content_type", flat=True)
+            .first()
         )

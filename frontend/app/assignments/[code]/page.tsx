@@ -87,6 +87,10 @@ function rowsToAssetsIn(rows: EditableAsset[], kind: string): SubmissionIn["asse
       label: row.label.trim(),
       test_account: kind === "demo_url" ? row.testAccount.trim() : "",
       order: index,
+      // 방금 업로드한 File의 MIME 타입(#241) — 기존 자료를 그대로 불러온 행에는
+      // 없다(서버가 다시 내주지 않는다). 그래도 안전하다: value가 안 바뀐 자료의
+      // content_type은 서버가 건드리지 않는다(`submissions.api._merge_assets`).
+      content_type: row.contentType ?? "",
     }));
 }
 
@@ -258,6 +262,9 @@ export default function AssignmentInvitePage() {
         label: asset.label,
         test_account: asset.test_account,
         order: asset.order,
+        // 이 폼이 모르는 종류라 content_type도 모른다 — value가 안 바뀐 자료라
+        // 서버가 그대로 무시한다(위 rowsToAssetsIn과 같은 이유, #241).
+        content_type: "",
       })),
     ];
 

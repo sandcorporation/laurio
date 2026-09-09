@@ -151,6 +151,7 @@ def upload_build_asset(request: HttpRequest, submission_id: int, payload: BuildA
         kind=payload.kind,
         object_key=payload.object_key,
         label=payload.label,
+        content_type=(payload.content_type or "").strip(),
     )
     return 201, _serialize_build_asset(asset)
 

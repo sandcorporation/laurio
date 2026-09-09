@@ -97,6 +97,10 @@ class BuildAsset(models.Model):
     # storage.api가 발급한 object_key("<target_ref>/<32자리 hex>").
     object_key = models.CharField(max_length=600)
     label = models.CharField(max_length=200, blank=True)
+    # 업로드 발급 시 클라이언트가 넘긴 content-type(#241) — `submissions.
+    # SubmissionAsset.content_type`과 같은 이유다. 다운로드 파일명의 확장자를
+    # 이 값으로 유도한다. 빈 문자열은 "모른다"이고 다운로드를 막지 않는다.
+    content_type = models.CharField(max_length=255, blank=True, default="")
 
     created_at = models.DateTimeField(auto_now_add=True)
 

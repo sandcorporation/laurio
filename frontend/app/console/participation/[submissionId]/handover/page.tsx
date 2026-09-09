@@ -76,9 +76,9 @@ export default function DeveloperBuildAssetsPage({
     );
   }
 
-  async function handleUploaded(objectKey: string) {
+  async function handleUploaded(objectKey: string, contentType: string | null) {
     setSaveError(null);
-    const result = await recordBuildAsset(submissionId, { kind, objectKey, label });
+    const result = await recordBuildAsset(submissionId, { kind, objectKey, label, contentType });
     if (!result.ok) {
       setSaveError(result.message);
       return;

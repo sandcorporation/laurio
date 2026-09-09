@@ -24,6 +24,12 @@ export interface EditableAsset {
   testAccount: string;
   /** `repository` 자료만 의미가 있다 — #193 의 스캔이 채우기 전까지는 null. */
   isPublic?: boolean | null;
+  // 방금 업로드한 File의 MIME 타입(#241) — `UploadField.onUploaded`가 채운다.
+  // 기존 자료를 그대로 불러온 행(`assetsOfKind`)에는 없다 — 서버가 이 값을
+  // 다시 내주지 않고(`SubmissionAssetOut`), 그래도 된다: value(object_key)가
+  // 안 바뀐 자료는 서버가 이 필드를 건드리지 않는다(`submissions.api.
+  // _merge_assets`).
+  contentType?: string | null;
 }
 
 let localKeySeq = 0;
@@ -213,7 +219,9 @@ export function AssetKindSection({
                       targetRef={targetRefPrefix}
                       label={row.value ? "다른 파일로 교체" : "파일 선택"}
                       testId={`${testIdPrefix}-${index}-upload`}
-                      onUploaded={(objectKey) => update(index, { value: objectKey })}
+                      onUploaded={(objectKey, contentType) =>
+                        update(index, { value: objectKey, contentType })
+                      }
                     />
                   )}
                   {row.value && (

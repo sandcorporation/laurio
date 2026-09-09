@@ -434,6 +434,9 @@ def _archive_cloned_repository(
         "value": object_key,
         "label": f"{origin_label} 박제본 (commit {cloned.commit_sha[:12]})"[:200],
         "created_by_platform": True,
+        # write_object에 실은 것과 같은 값이다(#241) — 위에서 이미 "application/zip"
+        # 임을 알고 썼으므로, 다운로드 파일명도 그 확장자를 그대로 유도할 수 있다.
+        "content_type": "application/zip",
     }
 
 

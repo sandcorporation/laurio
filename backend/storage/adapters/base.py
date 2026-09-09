@@ -28,6 +28,13 @@
 넘기고, 모르면 생략한다 — 그러면 `DEFAULT_CONTENT_TYPE`이 쓰인다. 기본값이 어댑터
 계약에 한 번만 정해져 있으므로 호출부마다 그것을 다시 고르지 않는다. `presign_upload`는
 손대지 않는다 — 브라우저가 올리는 바이트의 content-type은 이미 서명된 정책이 정한다.
+
+**#241부터 `presign_download`가 `filename`을 받는다(필수 키워드 인자).** 지금까지는
+`ResponseContentDisposition`이 `"attachment"`뿐이라 파일명이 없었다 — 브라우저가
+URL의 마지막 조각(서버가 만든 32자리 hex object_key)을 파일명으로 대신 써 확장자
+없는 이름이 떨어졌다. 호출자는 `storage.filenames.build_download_filename`으로
+항상 채워진 이름을 만들어 넘긴다(원본 파일명은 쓰지 않는다 — 사용자 입력을 헤더에
+실으면 RFC 5987 이스케이프가 필요해진다는 것이 #241의 결정이다).
 """
 
 from __future__ import annotations
@@ -118,7 +125,16 @@ class StorageAdapter(Protocol):
         *,
         bucket: Bucket = Bucket.PRIVATE,
         expires_in: timedelta,
-    ) -> PresignedDownload: ...
+        filename: str,
+    ) -> PresignedDownload:
+        """`filename`이 응답의 `Content-Disposition`에 실린다(#241).
+
+        브라우저는 `attachment`에 파일명이 없으면 URL의 마지막 조각(서버가 만든
+        32자리 hex object_key)을 파일명으로 쓴다 — 확장자 없는 이름이 떨어지는
+        원인이 그것이다. `filename`은 항상 채워야 한다(`storage.filenames.
+        build_download_filename`가 content-type을 몰라도 확장자 없는 이름을
+        낸다) — 이름이 없는 것보다는 확장자가 없는 이름이 낫다."""
+        ...
 
     def read_object(self, object_key: str, *, bucket: Bucket = Bucket.PRIVATE) -> bytes | None:
         """object_key가 가리키는 바이트를 서버 프로세스 자신의 자격증명으로 직접 읽는다.

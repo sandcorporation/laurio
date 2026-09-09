@@ -68,11 +68,17 @@ export function useBuildAssets(submissionId: number | string | null): {
  * 자체는 presigned 업로드(ADR-0005)가 이미 옮겼다. */
 export async function recordBuildAsset(
   submissionId: number | string,
-  payload: { kind: string; objectKey: string; label?: string },
+  payload: { kind: string; objectKey: string; label?: string; contentType?: string | null },
 ): Promise<{ ok: true; asset: BuildAsset } | { ok: false; message: string }> {
   const result = await bffClient.post<BuildAsset>(
     `/api/backend/submissions/${submissionId}/build-assets`,
-    { kind: payload.kind, object_key: payload.objectKey, label: payload.label ?? "" },
+    {
+      kind: payload.kind,
+      object_key: payload.objectKey,
+      label: payload.label ?? "",
+      // 업로드한 File의 MIME 타입(#241) — 다운로드 파일명의 확장자를 유도한다.
+      content_type: payload.contentType ?? "",
+    },
   );
   if (!result.ok) return { ok: false, message: result.detail };
   return { ok: true, asset: result.data };

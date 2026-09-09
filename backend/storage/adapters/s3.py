@@ -138,6 +138,7 @@ class S3StorageAdapter:
         *,
         bucket: Bucket = Bucket.PRIVATE,
         expires_in: timedelta,
+        filename: str,
     ) -> PresignedDownload:
         url = self._public_client.generate_presigned_url(
             "get_object",
@@ -147,7 +148,10 @@ class S3StorageAdapter:
                 # 이 버킷은 Developer가 올린 신뢰할 수 없는 콘텐츠(소스·빌드)를 담는다.
                 # 저장된 Content-Type과 무관하게 항상 첨부파일로 강제해, 브라우저가
                 # text/html 같은 걸 스토리지 오리진에서 인라인으로 실행하지 못하게 막는다.
-                "ResponseContentDisposition": "attachment",
+                # `filename`은 플랫폼이 만든 값이다(#241) — 사용자 입력이 아니라서
+                # 그대로 붙여도 RFC 5987 이스케이프가 필요 없다(storage.adapters.base
+                # 참고).
+                "ResponseContentDisposition": f'attachment; filename="{filename}"',
             },
             ExpiresIn=int(expires_in.total_seconds()),
         )

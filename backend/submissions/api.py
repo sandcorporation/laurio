@@ -296,6 +296,9 @@ class _CleanedAsset:
     order: int
     #: 기존 자료를 가리키는 id. 첫 제출에는 언제나 None이다.
     id: int | None = None
+    #: 업로드 발급 시 받은 content-type(#241) — SOURCE·DEMO_VIDEO가 아니면 항상
+    #: 빈 문자열이다(`_clean_assets_in`이 그 외 종류에서는 무시한다).
+    content_type: str = ""
 
     def as_model_fields(self) -> dict:
         return {
@@ -304,6 +307,7 @@ class _CleanedAsset:
             "label": self.label,
             "test_account": self.test_account,
             "order": self.order,
+            "content_type": self.content_type,
         }
 
     @property
@@ -372,6 +376,15 @@ def _clean_assets_in(
                 f"{_KIND_LABELS[item.kind]} 자료에는 테스트 계정을 붙일 수 없습니다.",
             )
 
+        # content-type은 storage object_key를 갖는 종류(SOURCE·DEMO_VIDEO)에만
+        # 의미가 있다(#241) — URL 종류에 실려 와도 조용히 버린다. 저장해 봐야 쓰는
+        # 곳(다운로드 파일명)이 없고, 의미 없는 데이터가 쌓이지 않게 한다.
+        content_type = (
+            (item.content_type or "").strip()
+            if item.kind in SubmissionAsset.OBJECT_KEY_KINDS
+            else ""
+        )
+
         cleaned.append(
             _CleanedAsset(
                 id=item.id,
@@ -380,6 +393,7 @@ def _clean_assets_in(
                 label=sanitize_free_text(item.label or ""),
                 test_account=test_account,
                 order=item.order,
+                content_type=content_type,
             )
         )
 
@@ -489,6 +503,11 @@ def _merge_assets(submission: Submission, cleaned: list[_CleanedAsset]) -> set[i
         asset.label = row.label
         asset.test_account = row.test_account
         asset.order = row.order
+        # content_type은 여기서 건드리지 않는다(#241) — value(object_key)가 같다는
+        # 것은 같은 파일을 가리킨다는 뜻이고, 파일이 그대로면 그 형식도 그대로다.
+        # 편집 화면이 기존 자료를 다시 보낼 때 content_type을 모른 채(서버가
+        # `SubmissionAssetOut`에 이 필드를 내주지 않는다) 빈 문자열로 채워 보내도,
+        # 여기서 그 값을 무시하므로 이미 알려진 content_type을 조용히 지우지 않는다.
         asset.save(update_fields=["label", "test_account", "order", "updated_at"])
 
     for row in creates:

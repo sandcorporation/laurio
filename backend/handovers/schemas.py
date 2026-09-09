@@ -36,6 +36,10 @@ class BuildAssetIn(Schema):
     # 200자를 넘는 label이 422가 아니라 Postgres DataError로 새어 500이 된다
     # (ContestCreateIn.prize의 Field(gt=0)와 같은 원칙, #15 리뷰 지적 3).
     label: str = Field(default="", max_length=200)
+    # 업로드 발급(`POST /storage/uploads`)에 실었던 content-type(#241) —
+    # `submissions.schemas.SubmissionAssetIn.content_type`과 같은 이유·같은 자리다.
+    # 다운로드 파일명의 확장자를 여기서 유도한다.
+    content_type: str = Field(default="", max_length=255)
 
 
 class BuildAssetOut(Schema):

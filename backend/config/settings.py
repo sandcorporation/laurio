@@ -426,6 +426,14 @@ STORAGE_TARGET_RESOLVER = _env(
     "STORAGE_TARGET_RESOLVER", "submissions.resolvers.SubmissionTargetStateResolver"
 )
 
+# object_key -> 저장된 content-type 조회 훅(storage.policy.ContentTypeResolver, #241).
+# 다운로드 presigned URL의 파일명에 확장자를 붙이는 데 쓴다. 비어 있으면
+# storage.policy.UnknownContentTypeResolver 로 "모른다"만 돌려준다 — 그래도
+# 파일명 자체는 여전히 만들어진다(확장자만 없다).
+STORAGE_CONTENT_TYPE_RESOLVER = _env(
+    "STORAGE_CONTENT_TYPE_RESOLVER", "submissions.resolvers.SubmissionContentTypeResolver"
+)
+
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},

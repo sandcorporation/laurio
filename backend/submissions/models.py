@@ -116,6 +116,15 @@ class SubmissionAsset(models.Model):
     test_account = models.CharField(max_length=500, blank=True)
     order = models.PositiveIntegerField(default=0)
 
+    # 업로드 발급 시(`storage.api.request_upload`) 클라이언트가 넘긴 content-type
+    # (#241). `OBJECT_KEY_KINDS`(SOURCE·DEMO_VIDEO)에만 의미가 있다 — URL 종류는
+    # storage를 거치지 않아 이 값이 필요 없다. 다운로드 파일명의 확장자를 이
+    # 값으로 유도한다(`storage.filenames.build_download_filename`) — 그러지 않으면
+    # 브라우저가 URL의 마지막 조각(object_key, 확장자 없는 32자리 hex)을 파일명으로
+    # 대신 쓴다. 빈 문자열은 "모른다"이고(이 필드가 생기기 전 기존 행이 전부 이렇다),
+    # 다운로드를 막지 않는다 — 확장자만 없는 이름이 붙는다.
+    content_type = models.CharField(max_length=255, blank=True, default="")
+
     # `REPOSITORY`가 공개인가 — #193의 스캔이 채운다. **null은 "비공개"가 아니라
     # "아직 확인하지 않음"이다**: 제출·수정 API는 GitHub을 치지 않으므로(마감 직전에
     # 몰리는 제출이 남의 서비스 상태에 인질로 잡히면 안 된다) 제출 직후에는 항상

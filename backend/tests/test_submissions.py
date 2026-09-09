@@ -19,7 +19,7 @@ from django.utils import timezone
 
 from contests.models import Category, Contest, DeliverableType
 from core.models import ClockOverride
-from submissions.models import Submission
+from submissions.models import Submission, SubmissionAsset
 from tests.submission_assets import assets_of, first_value, demo_account_of
 
 CONTESTS_URL = "/api/contests"
@@ -1030,6 +1030,164 @@ def test_resolver_wiring_grants_source_download_to_owner_only(client, category, 
         **_auth_header(sponsor["access"]),
     )
     assert sponsor_download.status_code == 403
+
+
+# --- 다운로드 파일명 (#241) ---------------------------------------------------
+#
+# 확장자 없는 32자리 hex object_key가 그대로 파일명으로 떨어지던 결함(#241)의
+# 재현·수정 확인. 업로드 발급 시점에 받은 content-type을 자산(SubmissionAsset)에
+# 남기고, 다운로드 시점에 그 값으로 파일명을 만든다 — 원본 파일명은 절대 쓰지
+# 않는다(RFC 5987 이스케이프가 필요한 자리를 새로 만들지 않으려는 결정).
+
+
+@pytest.mark.django_db
+def test_download_filename_gets_extension_from_stored_content_type(
+    client, category, landing_type
+):
+    _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+
+    upload = client.post(
+        "/api/storage/uploads",
+        data={
+            "target_ref": f"submission:{contest['id']}:{dev['user_id']}:source",
+            "content_type": "application/zip",
+        },
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert upload.status_code == 200
+    object_key = upload.json()["object_key"]
+
+    submit = _submit(
+        client,
+        dev["access"],
+        contest["id"],
+        {
+            "assets": [
+                {"kind": "source", "value": object_key, "content_type": "application/zip"}
+            ]
+        },
+    )
+    assert submit.status_code == 201, submit.content
+
+    download = client.post(
+        "/api/storage/downloads",
+        data={
+            "target_ref": f"submission:{contest['id']}:{dev['user_id']}:source",
+            "object_key": object_key,
+        },
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert download.status_code == 200
+    assert 'filename="download.zip"' in download.json()["download_url"]
+
+
+@pytest.mark.django_db
+def test_editing_an_unchanged_asset_does_not_erase_its_stored_content_type(
+    client, category, landing_type
+):
+    """`SubmissionAssetOut`은 content_type을 내주지 않으므로(#241), 편집 화면이
+    기존 자료를 그대로 재전송할 때 이 필드를 알 도리가 없어 빈 문자열로 보낸다.
+    value(object_key)가 같다는 것은 같은 파일을 가리킨다는 뜻이라 그 형식도
+    바뀔 수 없다 — `_merge_assets`가 "kept" 자료의 content_type을 건드리지 않아야
+    이런 재전송이 이미 알려진 확장자를 조용히 지우지 않는다."""
+
+    _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+    source_key = _source_object_key(contest["id"], dev["user_id"])
+
+    submit = _submit(
+        client,
+        dev["access"],
+        contest["id"],
+        {"assets": [{"kind": "source", "value": source_key, "content_type": "application/zip"}]},
+    )
+    assert submit.status_code == 201, submit.content
+
+    # 편집 UI는 content_type을 모른 채(응답에 없다) 같은 value를 그대로 되돌려 보낸다.
+    edit = _edit(
+        client, dev["access"], contest["id"], {"assets": [{"kind": "source", "value": source_key}]}
+    )
+    assert edit.status_code == 200, edit.content
+
+    download = client.post(
+        "/api/storage/downloads",
+        data={
+            "target_ref": f"submission:{contest['id']}:{dev['user_id']}:source",
+            "object_key": source_key,
+        },
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert download.status_code == 200
+    assert 'filename="download.zip"' in download.json()["download_url"]
+
+
+@pytest.mark.django_db
+def test_download_filename_has_no_extension_when_content_type_is_unknown(
+    client, category, landing_type
+):
+    """content-type을 안 보냈어도(기존에 올라간 자산과 같은 상황) 다운로드가
+    실패하지 않고, 확장자 없는 이름이 그대로 붙는다(#241 AC — 마이그레이션이
+    기존 데이터를 깨지 않는다는 것과 같은 자리다)."""
+
+    _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+    source_key = _source_object_key(contest["id"], dev["user_id"])
+
+    submit = _submit(
+        client, dev["access"], contest["id"], {"assets": [{"kind": "source", "value": source_key}]}
+    )
+    assert submit.status_code == 201, submit.content
+
+    download = client.post(
+        "/api/storage/downloads",
+        data={
+            "target_ref": f"submission:{contest['id']}:{dev['user_id']}:source",
+            "object_key": source_key,
+        },
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert download.status_code == 200
+    body = download.json()
+    assert 'filename="download"' in body["download_url"]
+    assert ".zip" not in body["download_url"].split('filename="download"')[1][:5]
+
+
+@pytest.mark.django_db
+def test_content_type_on_a_url_kind_asset_is_ignored(client, category, landing_type):
+    """소스가 아니라 데모 URL 같은 종류에 content_type을 실어 보내도 조용히
+    버려진다 — 그 자료는 storage를 거치지 않아 다운로드 파일명이라는 개념 자체가
+    없다(#241)."""
+
+    _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+    source_key = _source_object_key(contest["id"], dev["user_id"])
+
+    submit = _submit(
+        client,
+        dev["access"],
+        contest["id"],
+        {
+            "assets": [
+                {"kind": "source", "value": source_key},
+                {
+                    "kind": "demo_url",
+                    "value": "https://example.com/demo",
+                    "content_type": "text/html",
+                },
+            ]
+        },
+    )
+    assert submit.status_code == 201, submit.content
+
+    demo_asset = SubmissionAsset.objects.get(
+        submission_id=submit.json()["id"], kind="demo_url"
+    )
+    assert demo_asset.content_type == ""
 
 
 @pytest.mark.django_db

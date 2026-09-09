@@ -33,6 +33,7 @@ from accounts.sanitize import sanitize_free_text
 from core.clock import Clock
 from core.transitions import claim_transition
 from storage.adapters import get_storage_adapter
+from storage.filenames import build_download_filename
 from submissions.models import AssignmentSourceReading, Submission, SubmissionAsset
 from submissions.schemas import AssignmentSourceRevealOut, SourceRevealAssetOut
 
@@ -704,6 +705,11 @@ def reveal_assignment_submission_source(
     (Sponsor가 이 Assignment의 소유자인가, `_get_owned_assignment`)을 마치고
     직접 presign한다 — Operator의 `reveal_appeal_source`가 storage를 거치지 않고
     `Score.prompt`를 바로 내주는 것과 같은 구조다.
+
+    **`storage.api.request_download`와 같은 방식으로 파일명을 붙인다(#241).**
+    `asset.content_type`(제출 시점에 받은 값, 없으면 빈 문자열)을
+    `storage.filenames.build_download_filename`에 넘긴다 — storage.policy를
+    거치지 않아도 그 헬퍼는 그대로 재사용할 수 있다.
     """
 
     contest = _get_owned_assignment(request, assignment_id)
@@ -720,6 +726,7 @@ def reveal_assignment_submission_source(
         if asset.kind == SubmissionAsset.Kind.SOURCE:
             presigned = adapter.presign_download(
                 asset.value,
+                filename=build_download_filename(asset.content_type),
                 expires_in=timedelta(seconds=settings.STORAGE_DOWNLOAD_URL_TTL_SECONDS),
             )
             url = presigned.url

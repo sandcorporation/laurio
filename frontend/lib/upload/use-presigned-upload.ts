@@ -18,6 +18,15 @@ export interface UploadState {
   progress: number;
   error: string | null;
   objectKey: string | null;
+  // 업로드한 File의 MIME 타입(#241) — 제출 시 그대로 실어 보내면 백엔드가
+  // SubmissionAsset.content_type에 남겨 다운로드 파일명의 확장자를 유도한다.
+  // 브라우저가 형식을 못 알아낸 파일(빈 문자열)이면 null로 정규화한다.
+  contentType: string | null;
+}
+
+export interface UploadResult {
+  objectKey: string;
+  contentType: string | null;
 }
 
 interface PresignedUpload {
@@ -74,8 +83,8 @@ function putWithProgress(
 
 export interface UsePresignedUploadResult {
   state: UploadState;
-  upload: (file: File) => Promise<string>;
-  retry: () => Promise<string>;
+  upload: (file: File) => Promise<UploadResult>;
+  retry: () => Promise<UploadResult>;
 }
 
 export function usePresignedUpload(targetRef: string): UsePresignedUploadResult {
@@ -84,13 +93,21 @@ export function usePresignedUpload(targetRef: string): UsePresignedUploadResult 
     progress: 0,
     error: null,
     objectKey: null,
+    contentType: null,
   });
   const fileRef = useRef<File | null>(null);
 
   const attempt = useCallback(
-    async (file: File): Promise<string> => {
-      setState({ status: "requesting", progress: 0, error: null, objectKey: null });
-      const presigned = await requestPresignedUpload(targetRef, file.type || undefined);
+    async (file: File): Promise<UploadResult> => {
+      const contentType = file.type || null;
+      setState({
+        status: "requesting",
+        progress: 0,
+        error: null,
+        objectKey: null,
+        contentType,
+      });
+      const presigned = await requestPresignedUpload(targetRef, contentType ?? undefined);
 
       setState((prev) => ({ ...prev, status: "uploading" }));
       try {
@@ -100,37 +117,49 @@ export function usePresignedUpload(targetRef: string): UsePresignedUploadResult 
       } catch (uploadError) {
         // 발급받은 URL이 만료됐을 수 있다(FE-09 인수조건) — 한 번 재발급받아
         // 다시 시도한다. 그래도 실패하면 진짜 실패로 본다.
-        const reissued = await requestPresignedUpload(targetRef, file.type || undefined);
+        const reissued = await requestPresignedUpload(targetRef, contentType ?? undefined);
         await putWithProgress(reissued, file, (percent) => {
           setState((prev) => ({ ...prev, progress: percent }));
         }).catch((retryError: unknown) => {
           throw retryError instanceof Error ? retryError : uploadError;
         });
-        setState({ status: "done", progress: 100, error: null, objectKey: reissued.object_key });
-        return reissued.object_key;
+        setState({
+          status: "done",
+          progress: 100,
+          error: null,
+          objectKey: reissued.object_key,
+          contentType,
+        });
+        return { objectKey: reissued.object_key, contentType };
       }
 
-      setState({ status: "done", progress: 100, error: null, objectKey: presigned.object_key });
-      return presigned.object_key;
+      setState({
+        status: "done",
+        progress: 100,
+        error: null,
+        objectKey: presigned.object_key,
+        contentType,
+      });
+      return { objectKey: presigned.object_key, contentType };
     },
     [targetRef],
   );
 
   const upload = useCallback(
-    async (file: File): Promise<string> => {
+    async (file: File): Promise<UploadResult> => {
       fileRef.current = file;
       try {
         return await attempt(file);
       } catch (error) {
         const message = error instanceof Error ? error.message : "업로드에 실패했습니다.";
-        setState({ status: "error", progress: 0, error: message, objectKey: null });
+        setState({ status: "error", progress: 0, error: message, objectKey: null, contentType: null });
         throw error;
       }
     },
     [attempt],
   );
 
-  const retry = useCallback((): Promise<string> => {
+  const retry = useCallback((): Promise<UploadResult> => {
     if (!fileRef.current) {
       return Promise.reject(new Error("다시 시도할 파일이 없습니다. 파일을 다시 선택해주세요."));
     }
