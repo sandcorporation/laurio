@@ -156,6 +156,12 @@ class SubmissionOut(Schema):
     completion: CompletionOut
     created_at: datetime
     updated_at: datetime
+    # 지금 무엇을 해야/기다려야 하는가 (#247). `MyParticipationOut.next_action`과
+    # **같은 함수**(`participation.next_action_for`)에서 나온다 — 판정기를 두
+    # 벌로 쓰면 언젠가 갈라지고, 그때 제출 화면은 「내 참가 현황」과 다른 말을
+    # 한다. 자기 제출물일 때만 값이 실린다 — `is_owner`가 False면 항상 null이다
+    # (남의 제출을 볼 수 있는 Sponsor·마감 후 공개 열람 경로에는 노출하지 않는다).
+    next_action: NextAction | None = None
 
 
 class MyParticipationOut(Schema):

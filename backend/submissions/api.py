@@ -755,11 +755,18 @@ def _serialize(
     total = len(requirements)
     completion = _completion_of(assets, total_requirements=total, linked_count=linked_count)
 
+    # 「지금 무엇을 해야/기다려야 하는가」(#247) — 자기 제출물일 때만 낸다.
+    # `list_my_participation`이 쓰는 것과 **같은 함수**다(조건을 두 벌로 두지
+    # 않는다). 판정 자체가 관련 객체를 더 읽을 수 있으므로(점수·이의·Award·
+    # Payout), 남의 제출물에는 그 값을 계산조차 하지 않는다.
+    next_action = next_action_for(submission) if is_owner else None
+
     return SubmissionOut(
         id=submission.id,
         contest_id=submission.contest_id,
         developer_id=submission.developer_id,
         is_owner=is_owner,
+        next_action=next_action,
         assets=[
             SubmissionAssetOut(
                 id=a.id,
@@ -887,8 +894,13 @@ def get_my_submission(request: HttpRequest, contest_id: int):
     contest = _get_viewable_contest_or_404(contest_id)
 
     developer = DeveloperProfile.objects.filter(user=request.auth_user).first()
+    # `next_action_for`(#247)가 보는 관계를 함께 당긴다 — `list_my_participation`
+    # 이 이미 쓰는 것과 같은 목록이다. 이 조회는 한 건뿐이라 N+1 이 되진 않지만,
+    # 미리 당기지 않으면 왕복이 여러 번(점수·이의·Award·Handover) 생긴다.
     submission = (
-        Submission.objects.filter(contest=contest, developer=developer).first()
+        Submission.objects.filter(contest=contest, developer=developer)
+        .select_related("contest", "score", "appeal", "contest__award__handover")
+        .first()
         if developer is not None
         else None
     )
@@ -1043,8 +1055,11 @@ def get_submission(request: HttpRequest, submission_id: int):
     """
 
     try:
+        # `contest__award__handover`·`score`·`appeal`은 소유자에게만 계산하는
+        # `next_action_for`(#247)이 보는 관계다 — 미리 당겨 두면 소유자 본인이
+        # 조회할 때 왕복이 늘지 않는다.
         submission = Submission.objects.select_related(
-            "contest__sponsor", "developer"
+            "contest__sponsor", "developer", "score", "appeal", "contest__award__handover"
         ).get(id=submission_id)
     except Submission.DoesNotExist as exc:
         raise HttpError(404, "Submission을 찾을 수 없습니다.") from exc

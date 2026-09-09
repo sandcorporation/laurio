@@ -5148,6 +5148,7 @@ export interface components {
             id: number;
             /** Is Owner */
             is_owner: boolean;
+            next_action?: components["schemas"]["NextAction"] | null;
             /** Requirement Responses */
             requirement_responses: components["schemas"]["RequirementResponseOut"][];
             /**

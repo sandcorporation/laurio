@@ -5,11 +5,12 @@
 // 지켜야 할 비대칭: 소스코드는 필수(플랫폼의 "강제하지 않고 배지로 신호한다"
 // 원칙의 유일한 예외 — ADR-0014)이고, 시연 영상·데모 URL·테스트 계정은 비워도
 // 제출이 성공한다. 이 파일에서 그 둘을 같은 방식으로 다루면 안 된다.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 
 import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
+import { NEXT_ACTION_LABELS } from "@/lib/participation/use-my-participation";
 import { ASSET_KIND_LABELS } from "@/lib/submissions/types";
 import type {
   ContestDetail,
@@ -224,7 +225,54 @@ export default function SubmitPage() {
   }, [session.status, contestId, reloadTick]);
 
   const deadlineAt = load.status === "ready" ? new Date(load.contest.deadline_at).getTime() : null;
-  const isPastDeadline = deadlineAt !== null && now >= deadlineAt;
+
+  // **판정은 서버 하나뿐이다**(#247). 예전에는 이 화면이 `now >= deadlineAt`을
+  // 직접 비교해 "마감됐다"를 스스로 판단했다 — 그 판정기가 하나 더 생기면
+  // 나중에 새 상태(채점 대기·심사 중 등)가 생겨도 이 화면은 "마감 전/후" 둘로만
+  // 나뉜 채 조용히 틀린 것을 말한다. `next_action`(`SubmissionOut`, 「내 참가
+  // 현황」과 같은 판정기 `submissions.participation.next_action_for`)이 이미
+  // "지금 무엇을 해야/기다려야 하는가"를 답한다 — 화면은 그 값만 쓴다.
+  //
+  // 아직 한 번도 제출하지 않았으면(`submission === null`) Submission 단위
+  // 판정 자체가 없다 — 그때는 폼을 열어 둔다. 마감을 넘긴 뒤의 첫 시도는
+  // 여전히 서버가 거절한다(`_reject_if_past_deadline`, 409) — 폼을 안 주는
+  // 것과 서버가 거절하는 것 둘 다 필요하다는 원칙에서, 여기서는 후자만 선다.
+  const currentSubmission = load.status === "ready" ? load.submission : null;
+  const hasSubmission = currentSubmission !== null;
+  const nextAction = currentSubmission?.next_action ?? null;
+  const canEdit = !hasSubmission || nextAction === "can_edit_submission";
+  const stateLabel = nextAction !== null ? NEXT_ACTION_LABELS[nextAction].text : null;
+
+  // **시각 비교는 여전히 쓰지만, 판정에는 안 쓴다** — 언제 서버에게 다시 물을지
+  // 고르는 자리일 뿐이다(/code-review 지적). `next_action`은 이 화면이 처음
+  // 불러온 시점의 스냅샷이라, 편집 가능한 채로 화면을 켜 둔 사이 마감을 넘기면
+  // 다시 묻기 전까지는 여전히 "수정할 수 있습니다"로 보인다 — 서버가
+  // `next_action_for`에서 `Clock.now() < contest.deadline_at`을 직접 보므로
+  // (스캔을 기다리지 않는다) 다시 물으면 즉시 정답이 온다. 그래서 시계가 마감을
+  // 넘는 그 순간 제출물만 한 번 다시 불러온다 — **무엇을 보여줄지는 여전히
+  // 서버가 답한 값**이고, 이 훅은 그 답을 늦게 받지 않도록 타이밍만 고른다.
+  //
+  // `applySubmissionAssets`는 부르지 않는다 — 그 시점에 사용자가 폼에 입력해
+  // 둔 것(아직 저장 전)을 서버 값으로 조용히 덮어쓰면 안 된다. 대신
+  // `next_action`이 갱신되어 `canEdit`이 꺼지고, 폼은 지금까지 입력한 값 그대로
+  // 잠긴다 — "더 이상 저장은 안 되지만 방금 쓴 것은 그대로 보인다".
+  const deadlineRefetchedRef = useRef(false);
+  useEffect(() => {
+    if (deadlineAt === null || !canEdit || !hasSubmission) return;
+    if (now < deadlineAt) {
+      deadlineRefetchedRef.current = false;
+      return;
+    }
+    if (deadlineRefetchedRef.current) return;
+    deadlineRefetchedRef.current = true;
+
+    bffClient
+      .get<SubmissionOut>(`/api/backend/contests/${contestId}/submissions/me`)
+      .then((result) => {
+        if (!result.ok) return;
+        setLoad((prev) => (prev.status === "ready" ? { ...prev, submission: result.data } : prev));
+      });
+  }, [now, deadlineAt, canEdit, hasSubmission, contestId]);
 
   // #218(ADR-0030): 소스 또는 저장소 중 하나만 있으면 제출할 수 있다 — 그래서
   // "필수" 배지·경고는 더 이상 소스 하나에 고정되지 않는다. 저장소만 있고
@@ -575,17 +623,22 @@ export default function SubmitPage() {
         <h1 className="text-2xl font-semibold" data-testid="submit-contest-title">
           {contest.title} — 제출
         </h1>
+        {/* **상태 문구는 항상 같은 자리에 있다**(#247) — 마감 전(수정 가능)·채점
+            대기·심사 중·마감 뒤 어느 상태로 들어와도 이 한 줄이 "지금 무엇을
+            기다리는가/할 수 있는가"를 말한다. 아직 한 번도 제출하지 않았을 때는
+            보여줄 상태가 없으므로(제출물 자체가 없다) 남은 시간만 보여준다 —
+            이건 판정이 아니라 시계 표시다. */}
         <p
-          className={`mt-2 font-mono text-sm ${isPastDeadline ? "text-attention" : "text-ink"}`}
-          data-testid="submit-deadline"
+          className={`mt-2 font-mono text-sm ${canEdit ? "text-ink" : "text-attention"}`}
+          data-testid="submit-state-band"
         >
-          {isPastDeadline ? "마감되었습니다" : formatRemaining(deadlineAt! - now)}
+          {stateLabel ?? formatRemaining(deadlineAt! - now)}
         </p>
       </div>
 
-      {isPastDeadline && (
-        <p role="alert" data-testid="deadline-passed-notice" className="text-sm text-attention">
-          마감 시각이 지나 더 이상 제출하거나 수정할 수 없습니다.
+      {hasSubmission && !canEdit && (
+        <p role="alert" data-testid="edit-locked-notice" className="text-sm text-attention">
+          지금은 제출물을 수정할 수 없습니다 — {stateLabel}
         </p>
       )}
 
@@ -614,7 +667,7 @@ export default function SubmitPage() {
         testIdPrefix="source-asset"
         rows={sourceAssets}
         onChange={setSourceAssets}
-        disabled={isPastDeadline}
+        disabled={!canEdit}
         targetRefPrefix={sourceTargetRef ?? undefined}
       />
 
@@ -632,7 +685,7 @@ export default function SubmitPage() {
         testIdPrefix="repository-asset"
         rows={repositoryAssets}
         onChange={setRepositoryAssets}
-        disabled={isPastDeadline}
+        disabled={!canEdit}
       />
 
       {showRepositoryOnlyWarning && (
@@ -653,7 +706,7 @@ export default function SubmitPage() {
         testIdPrefix="demo-video-asset"
         rows={demoVideoAssets}
         onChange={setDemoVideoAssets}
-        disabled={isPastDeadline}
+        disabled={!canEdit}
         targetRefPrefix={demoVideoTargetRef ?? undefined}
       />
 
@@ -664,7 +717,7 @@ export default function SubmitPage() {
         testIdPrefix="demo-url-asset"
         rows={demoUrlAssets}
         onChange={setDemoUrlAssets}
-        disabled={isPastDeadline}
+        disabled={!canEdit}
       />
 
       <section className="flex flex-col gap-3">
@@ -683,14 +736,14 @@ export default function SubmitPage() {
             onChange={(next) =>
               setRequirementStates((prev) => ({ ...prev, [requirement.id]: next }))
             }
-            disabled={isPastDeadline}
+            disabled={!canEdit}
             testId={`requirement-${requirement.id}`}
             assets={submission?.assets ?? []}
           />
         ))}
       </section>
 
-      {!isPastDeadline && (
+      {canEdit && (
         <div className="flex flex-col gap-2">
           <button
             type="button"
