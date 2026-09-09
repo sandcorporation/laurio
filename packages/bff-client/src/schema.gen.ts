@@ -3650,6 +3650,11 @@ export interface components {
             deliverable_types: components["schemas"]["DeliverableTypeOut"][];
             /** Description */
             description: string;
+            /**
+             * Has Own Submission
+             * @default false
+             */
+            has_own_submission: boolean;
             /** Id */
             id: number;
             /**
@@ -4082,6 +4087,8 @@ export interface components {
              * Format: date-time
              */
             deadline_at: string;
+            /** Invite Code */
+            invite_code?: string | null;
             next_action: components["schemas"]["NextAction"];
             /** Prize */
             prize: number;
@@ -4175,7 +4182,7 @@ export interface components {
          * @description Developer 가 지금 무엇을 해야 하는가 — 또는 무엇을 기다리는가.
          * @enum {string}
          */
-        NextAction: "awaiting_deadline" | "awaiting_scoring" | "awaiting_judging" | "awaiting_appeal_ruling" | "awaiting_distribution" | "awaiting_handover_release" | "awaiting_seller_registration" | "can_appeal" | "request_payout" | "submit_tax_identity" | "not_selected" | "payout_complete" | "retry_transfer" | "awaiting_transfer_resolution";
+        NextAction: "awaiting_scoring" | "awaiting_judging" | "awaiting_appeal_ruling" | "awaiting_distribution" | "awaiting_handover_release" | "awaiting_seller_registration" | "can_edit_submission" | "can_appeal" | "request_payout" | "submit_tax_identity" | "not_selected" | "payout_complete" | "retry_transfer" | "awaiting_transfer_resolution";
         /** NotificationOut */
         NotificationOut: {
             /** Context */

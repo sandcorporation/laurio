@@ -113,6 +113,33 @@ function ParticipationCard({ row }: { row: ParticipationRow }) {
         {new Date(row.deadline_at).toLocaleString("ko-KR")}
       </p>
 
+      {/* 자기 제출로 돌아가는 길 (#245) — 「내 참여」에 이 링크가 없어서 제출
+          화면에 도달할 방법이 공개 상세의 CTA(공모전에만 있다)뿐이었다.
+          「지금 고칠 수 있는가」를 여기서 시각으로 다시 재는 대신 서버가 준
+          `next_action`을 그대로 쓴다 — `can_edit_submission`은
+          `_reject_if_past_deadline`과 같은 조건(`now < deadline_at`)에서
+          나온다(submissions/participation.py). 마감이 지나면 이 링크가
+          사라지고, 그 대신 위 「다음 행동」 문구가 왜 없는지를 말한다(예:
+          "채점을 기다리는 중입니다") — 사라지기만 하면 기능이 없어진 것으로
+          보인다는 것이 이 티켓의 인수조건이다.
+          Assignment 행은 URL이 다르다 — `invite_code`가 있으면(#245,
+          `MyParticipationOut.resolve_invite_code`) 본인확인을 요구하는
+          `/console/contests/{id}/submit` 대신 InviteCode로만 여는
+          `/assignments/{code}`로 보낸다. */}
+      {row.next_action === "can_edit_submission" ? (
+        <Link
+          className="mt-2 block text-sm underline"
+          href={
+            row.invite_code
+              ? `/assignments/${row.invite_code}`
+              : `/console/contests/${row.contest_id}/submit`
+          }
+          data-testid={`participation-row-${row.submission_id}-edit`}
+        >
+          제출물 수정하러 가기
+        </Link>
+      ) : null}
+
       {/* **모든 행에 건다.** 「채점됐을 때만」으로 좁히면 서버가 이미 내린 판정을
           화면이 다시 파생하는 것이고, 이의가 기각된 사람은 자기 점수를 다시 볼
           길이 없어진다. 채점 전이면 그 화면이 "아직 채점되지 않았다"고 말한다. */}

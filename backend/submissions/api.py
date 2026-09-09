@@ -940,10 +940,14 @@ def list_my_participation(request: HttpRequest, after: str | None = None):
         return {"items": [], "count": 0, "next": None}
 
     # 「다음 행동」을 고르려면 Contest·Score·Award·Handover·Appeal 을 함께 본다.
-    # 행마다 새로 조회하면 참가가 쌓일수록 N+1 이 된다.
+    # 행마다 새로 조회하면 참가가 쌓일수록 N+1 이 된다. `contest__invite_codes`도
+    # 함께 당긴다 — Assignment 행이 「내 참여」에서 자기 제출로 돌아가려면 지금
+    # 활성인 InviteCode가 있어야 하고(#245, `MyParticipationOut.resolve_invite_
+    # code`), 행마다 새로 조회하면 같은 N+1이 Assignment 쪽에서 재발한다.
     submissions = (
         Submission.objects.filter(developer=profile)
         .select_related("contest", "score", "appeal", "contest__award__handover")
+        .prefetch_related("contest__invite_codes")
         .order_by("-created_at", "-id")
     )
 

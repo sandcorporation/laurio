@@ -37,7 +37,6 @@ class NextAction(models.TextChoices):
     """Developer 가 지금 무엇을 해야 하는가 — 또는 무엇을 기다리는가."""
 
     # --- 기다리는 중: 할 일이 없다 -------------------------------------------
-    AWAITING_DEADLINE = "awaiting_deadline", "마감 대기"
     AWAITING_SCORING = "awaiting_scoring", "채점 대기"
     AWAITING_JUDGING = "awaiting_judging", "심사 대기"
     AWAITING_APPEAL_RULING = "awaiting_appeal_ruling", "이의 심판 대기"
@@ -46,6 +45,14 @@ class NextAction(models.TextChoices):
     AWAITING_SELLER_REGISTRATION = "awaiting_seller_registration", "지급대행 등록 대기"
 
     # --- 네 차례 -------------------------------------------------------------
+    # 마감 전(#245) — 예전 이름은 `AWAITING_DEADLINE`("마감 대기")이었다. 그 이름은
+    # 거짓이었다: 마감 전에는 기다리는 것 말고도 할 일이 있다 — 자료와 체크리스트를
+    # 고치는 것(제출 화면은 이미 기존 제출을 불러와 POST 대신 PUT을 스스로 골라
+    # 보낸다). `submissions.api.update_submission`이 거절하는 유일한 시각 조건이
+    # `_reject_if_past_deadline`(`Clock.now() >= contest.deadline_at`)이므로, 이
+    # 값도 같은 조건(`now < contest.deadline_at`)에서 나와야 화면이 시키는 대로
+    # 했는데 API가 거절하는 일이 없다.
+    CAN_EDIT_SUBMISSION = "can_edit_submission", "제출물 수정 가능"
     CAN_APPEAL = "can_appeal", "이의 제기 가능"
     REQUEST_PAYOUT = "request_payout", "지급 요청"
     SUBMIT_TAX_IDENTITY = "submit_tax_identity", "세무 신원 제출"
@@ -80,11 +87,11 @@ def next_action_for(submission) -> str:
     contest = submission.contest
     now = Clock.now()
 
-    # 마감 전 — 제출은 끝났고 기다리는 것 말고 할 일이 없다. Contest.status 가
-    # 아직 PUBLISHED 여도 시각이 지났으면 스캔이 아직 안 돈 것뿐이므로,
-    # `submissions.resolvers` 가 그러듯 시각을 직접 본다.
+    # 마감 전 — 아직 제출물을 고칠 수 있다(#245). Contest.status 가 아직
+    # PUBLISHED 여도 시각이 지났으면 스캔이 아직 안 돈 것뿐이므로, 시각을
+    # 직접 본다 — `submissions.api._reject_if_past_deadline`과 같은 기준이다.
     if now < contest.deadline_at:
-        return NextAction.AWAITING_DEADLINE
+        return NextAction.CAN_EDIT_SUBMISSION
 
     if not hasattr(submission, "score"):
         return NextAction.AWAITING_SCORING
@@ -206,3 +213,22 @@ def _payout_action(submission):
     has_identity = TaxIdentity.objects.filter(payout=payout).exists()
     hold = hold_of(payout, seller=payout.seller, has_identity=has_identity)
     return _payout_actions()[hold.kind]
+
+
+def active_invite_code_for(contest) -> str | None:
+    """`contest`가 Assignment면 지금 활성인 InviteCode, 아니면 `None` (#245).
+
+    `contest.invite_codes.all()`을 쓴다 — `.filter(is_active=True)`로 새
+    QuerySet을 만들면 호출부가 이미 채워 둔 prefetch 캐시를 쓰지 않고 행마다
+    새 쿼리를 낸다(`contests.assignment_api._active_invite_code`와 같은 이유로
+    같은 모양을 여기서도 지킨다 — `list_my_participation`이 `contest__invite_
+    codes`를 prefetch해 둔다). 활성 코드는 Contest 당 많아야 하나다
+    (`unique_active_invite_code_per_contest`).
+    """
+
+    if not contest.is_assignment:
+        return None
+    for code in contest.invite_codes.all():
+        if code.is_active:
+            return code.code
+    return None

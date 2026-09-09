@@ -49,7 +49,11 @@ export type ParticipationState = PagedListState<ParticipationRow>;
 export type NextActionLabel = { text: string; mine: boolean; payoutStage: boolean };
 
 export const NEXT_ACTION_LABELS: Record<NextAction, NextActionLabel> = {
-  awaiting_deadline: { text: "마감을 기다리는 중입니다", mine: false, payoutStage: false },
+  // 마감 전(#245) — 예전 값 `awaiting_deadline`("마감을 기다리는 중입니다")은
+  // 거짓이었다: 마감 전에는 기다리는 것 말고도 할 일이 있다. `mine`을 `true`로
+  // 두는 이유는 다른 `mine` 값들(예: `can_appeal`)과 같다 — 강제는 아니지만
+  // 지금 할 수 있는 행동이 있다는 뜻이다.
+  can_edit_submission: { text: "제출물을 수정할 수 있습니다", mine: true, payoutStage: false },
   awaiting_scoring: { text: "채점을 기다리는 중입니다", mine: false, payoutStage: false },
   awaiting_judging: { text: "발주자의 심사를 기다리는 중입니다", mine: false, payoutStage: false },
   awaiting_appeal_ruling: { text: "이의 심판을 기다리는 중입니다", mine: false, payoutStage: false },

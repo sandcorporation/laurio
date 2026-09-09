@@ -292,6 +292,15 @@ class ContestOut(Schema):
     # 이 필드이므로, 새 호출부를 추가할 때 "내 것인지가 화면에 드러나는가"를 먼저
     # 따져야 한다.
     is_owner: bool = False
+    # 이 응답을 받은 사람이 이미 이 Contest에 Submission을 낸 적이 있는가 (#245).
+    # `is_owner`와 같은 자리·같은 이유로 계산한다 — 공개 상세는 인증 없이도
+    # 응답하므로 익명 방문자에게는 항상 False고, `contests.api.get_contest`만
+    # `auth_user`를 실제로 넘겨 정확한 값을 낸다. 공개 상세의 제출 CTA가 "제출한
+    # 사람에게는 문구가 다르다"(수정임을 누르기 전에 알린다)를 판정하는 유일한
+    # 근거다 — 화면이 별도로 `GET .../submissions/me`를 불러 재판정하지 않는다
+    # (이 필드가 이미 하는 조회를 화면에서 다시 하면 익명 방문자에게는 401을
+    # 낳는 별도 인증 필요 호출이 하나 더 생긴다).
+    has_own_submission: bool = False
 
 
 class HomeCurationGroupOut(Schema):

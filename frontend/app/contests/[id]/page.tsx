@@ -8,14 +8,13 @@
 // 404 로 답하므로(contests.api.get_contest) `fetchContest` 가 null 을 돌려주는 자리에서
 // `notFound()` 를 부른다 — draft 존재 여부를 응답 형태로 드러내지 않는다.
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { fetchContest, type ContestImage, type Requirement } from "@/lib/api/contests";
 import { formatDday, formatPrize, formatSubmissionCount, isImminent } from "@/lib/contest-format";
 
 import { SponsorJudgingEntry } from "./judging-entry";
-import { HideIfOwnContest } from "./submit-cta";
+import { SubmitCta } from "./submit-cta";
 import { ContestViewBeacon } from "./view-beacon";
 
 type Params = { id: string };
@@ -146,18 +145,11 @@ export default async function ContestDetailPage({ params }: { params: Promise<Pa
           감춘다. 본인확인·마감 시각은 제출 화면(app/console/contests/
           [contestId]/submit/page.tsx)이 스스로 안내하므로 이 CTA는 그 조건을
           다시 구현하지 않는다 — 이미 제출한 사람에게도 같은 링크가 맞다(그
-          화면이 수정도 겸한다). */}
+          화면이 수정도 겸한다). 다만 문구는 다르다(#245) — 누르면 자기가 낸
+          것을 덮어쓴다는 것이 눌리기 전에 드러나야 한다. */}
       {contest.status === "published" && (
         <section className="border-b border-rule pb-6">
-          <HideIfOwnContest contestId={contest.id}>
-            <Link
-              href={`/console/contests/${contest.id}/submit`}
-              data-testid="submit-cta-link"
-              className="inline-flex w-fit items-center rounded-sm border border-ink bg-ink px-6 py-2.5 text-sm font-medium text-paper hover:bg-ink/90"
-            >
-              제출하러 가기
-            </Link>
-          </HideIfOwnContest>
+          <SubmitCta contestId={contest.id} />
         </section>
       )}
 
