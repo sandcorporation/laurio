@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+from django.conf import settings
 from django.db import models
 
 
@@ -82,10 +83,26 @@ def hard_delete_e2e_fixture_rows(queryset: "models.QuerySet") -> tuple[int, dict
     collector가 매니저를 거치지 않고 우회하던 것(#240이 막은 그 구멍)과 이 함수는 다르다
     — 이건 **명시적으로, 이 한 곳에서만** 같은 우회를 허락한다.
 
-    **프로덕션 코드는 절대 이 함수를 부르지 않는다.** 호출부가 `management/commands/
-    seed_*` 밖이면 그 자체가 리뷰에서 걸려야 한다. `models.QuerySet.delete`를 언바운드로
-    직접 호출해 `AppendOnlyQuerySet.delete`의 오버라이드를 건너뛴다.
+    **배포 환경(`IS_DEPLOYED_ENVIRONMENT`)에서는 구조적으로 실행되지 않는다** — 독스트링의
+    "프로덕션 코드는 부르지 않는다"는 약속을 리뷰에만 맡기지 않는다. `Contest.is_assignment`의
+    "새 호출부는 이 프로퍼티로만 판정한다"는 같은 모양의 독스트링 규율이 #207에서 실제로
+    뚫려 ADR-0033이 "규율이 세 번 실패했다"고 적었고, #240 자체가 "지울 수 없다고 적혀
+    있었지만 캐스케이드가 그것을 우회했다"는 사고였다 — 여기서 같은 실패를 세 번째로
+    반복하지 않는다. staging에서 `seed_e2e_contests`를 돌리면(그 명령엔 배포 거부 가드가
+    없다) 이 함수를 거치지 않고는 Contest 정리가 `ProtectedError`로 막히므로, 호출부가
+    무엇이든 이 함수 자신이 배포 환경에서 예외를 던져야 실물 `Score`가 하드 삭제될 길이
+    구조적으로 막힌다.
+
+    `models.QuerySet.delete`를 언바운드로 직접 호출해 `AppendOnlyQuerySet.delete`의
+    오버라이드를 건너뛴다.
     """
+    if settings.IS_DEPLOYED_ENVIRONMENT:
+        raise AppendOnlyError(
+            f"LAURIO_DEPLOYMENT_TARGET={settings.LAURIO_DEPLOYMENT_TARGET} 인데 "
+            "hard_delete_e2e_fixture_rows 가 호출됐다 — 이 함수는 e2e 시드 자신의 "
+            "픽스처 정리 전용이라 배포 환경에서는 항상 거부된다. append-only 실데이터를 "
+            "지우려는 시도로 취급한다."
+        )
     return models.QuerySet.delete(queryset)
 
 

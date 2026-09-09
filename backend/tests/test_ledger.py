@@ -372,7 +372,9 @@ def test_post_entry_from_our_own_origin_succeeds():
 # 결함 2 (MEDIUM) — append-only 우회. QuerySet.update()/.delete()는 인스턴스의
 # save()/delete() 오버라이드를 타지 않는다. 이 방어 장치는 애플리케이션 동작이 아니라
 # ORM 매니저 자체이고, 대응하는 HTTP 엔드포인트가 있어서도 안 되므로(있으면 그게 바로
-# 이번에 막는 취약점) 아래 두 테스트만 예외적으로 모델을 직접 호출한다.
+# 이번에 막는 취약점) 아래 테스트들만 예외적으로 모델을 직접 호출한다. 세 번째
+# (`hard_delete_e2e_fixture_rows`, #240)도 같은 이유다 — e2e 시드 관리 명령의
+# 내부 헬퍼라 HTTP 엔드포인트가 없다.
 # ---------------------------------------------------------------------------
 
 
@@ -402,6 +404,28 @@ def test_queryset_delete_is_blocked_at_the_manager_level():
         LedgerLine.objects.filter(entry=entry).delete()
 
     assert LedgerLine.objects.filter(entry=entry).count() == 2
+
+
+@pytest.mark.django_db
+def test_hard_delete_e2e_fixture_rows_refuses_in_a_deployed_environment():
+    """`hard_delete_e2e_fixture_rows`(#240)는 e2e 시드 자신의 픽스처 정리 전용이고,
+    독스트링만으로는 규율이 지켜진다는 보장이 없다 — `Contest.is_assignment`가 같은
+    모양의 독스트링 규율로 적어 뒀지만 #207에서 실제로 뚫려 ADR-0033이 남긴 교훈이다.
+    이 테스트는 그 규율을 코드로 고정한다: 배포 환경으로 설정을 덮으면 이 함수 자신이
+    거부해야 한다 — 어떤 관리 명령이 호출부가 되든(`seed_e2e_contests`에는 배포 거부
+    가드가 없다) staging에서 실물 `Score`가 하드 삭제될 길이 구조적으로 막힌다."""
+
+    from django.test import override_settings
+
+    from ledger.models import hard_delete_e2e_fixture_rows
+
+    entry = JournalEntry.objects.create(contest_id=uuid.uuid4(), memo="배포 가드 확인용")
+
+    with override_settings(IS_DEPLOYED_ENVIRONMENT=True, LAURIO_DEPLOYMENT_TARGET="staging"):
+        with pytest.raises(AppendOnlyError):
+            hard_delete_e2e_fixture_rows(JournalEntry.objects.filter(pk=entry.pk))
+
+    assert JournalEntry.objects.filter(pk=entry.pk).exists()
 
 
 @pytest.mark.django_db
