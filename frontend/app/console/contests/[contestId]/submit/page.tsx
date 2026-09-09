@@ -194,8 +194,24 @@ export default function SubmitPage() {
         return setLoad({ status: "error", message: "본인확인 상태를 확인하지 못했습니다." });
       }
 
+      // **`verified`가 아니어도 조회한다**(#250, ADR-0025) — 신원 파기(EXPIRED)
+      // 는 실명·CI 등 신원 정보를 지우는 것이지 그 사람이 낸 제출물을 감추는
+      // 것이 아니다. 예전에는 `verified`일 때만 이 요청을 보내, 2년 쉬고
+      // 돌아온 사람(신원만 파기된 채 로그인은 그대로 되는 상태)에게 자기
+      // 제출물이 통째로 사라진 것처럼 보였다. 쓰기(생성·수정)는 여전히
+      // 서버가 `_require_verification`으로 막는다 — 여기서 여는 것은 읽기뿐이다.
+      //
+      // **다만 `unverified`·`underage`는 건너뛴다.** 이 둘은 애초에 제출물을
+      // 만든 적이 없는 상태다 — 쓰기(`create_submission`)가 그 시점에 이미
+      // `verified`를 요구하므로, `unverified`(Verification 행 자체가 없음)나
+      // `underage`인 계정에 제출물이 있는 것은 구조적으로 불가능하다. 한 번
+      // `verified`였다가 다른 CI로 `underage`가 되는 경로도 없다 — ADR-0025의
+      // `would_change_identity`가 CI가 다른 재확인 자체를 거부한다. 그래서 이
+      // 두 상태에서는 조회해 봐야 항상 404 — 낼 게 없어 아래에서 어차피 전체
+      // 화면을 본인확인 안내로 막을 상태에, 처음 방문할 때마다(가장 흔한
+      // 경로 — 누구나 여기서 시작한다) 헛수고인 요청을 하나 더 보내지 않는다.
       let submission: SubmissionOut | null = null;
-      if (verification.data.status === "verified") {
+      if (verification.data.status !== "unverified" && verification.data.status !== "underage") {
         // 404 는 실패가 아니다 — 「아직 안 냈다」는 정상적인 사실이다.
         const existing = await bffClient.get<SubmissionOut>(
           `/api/backend/contests/${contestId}/submissions/me`,
@@ -257,16 +273,25 @@ export default function SubmitPage() {
   const currentSubmission = load.status === "ready" ? load.submission : null;
   const hasSubmission = currentSubmission !== null;
   const nextAction = currentSubmission?.next_action ?? null;
+  // **판정기가 둘로 갈리지 않는다**(#250). 본인확인이 `verified`가 아니면
+  // (신원 파기로 `expired`가 된 경우 포함) 마감 전이어도 수정은 막혀야
+  // 하는데, 그 판단을 여기서 다시 내리지 않는다 — `next_action_for`
+  // (`submissions/participation.py`)가 `update_submission`이 실제로 보는
+  // 조건(`_reject_if_past_deadline` + `_require_verification`)을 그대로
+  // 재사용해 이미 `needs_reverification`을 돌려준다. 아래는 그 값 하나만
+  // 본다 — `can_edit_submission`일 때만 폼을 연다.
   const canEdit = !hasSubmission || nextAction === "can_edit_submission";
   const stateLabel = nextAction !== null ? NEXT_ACTION_LABELS[nextAction].text : null;
 
   // 채점이 됐는지도 `next_action`이 이미 답한다(#248) — `next_action_for`가
-  // `hasattr(submission, "score")`를 그 경계로 쓰므로, 마감 전(`can_edit_
-  // submission`)과 채점 대기(`awaiting_scoring`) 둘만 아니면 Score가 있다.
-  // **404로 짐작하지 않는다** — 조회 자체를 그 값이 "있다"고 말할 때만 보낸다.
+  // `hasattr(submission, "score")`를 그 경계로 쓰므로, 마감 전 두 값
+  // (`can_edit_submission`·`needs_reverification`, #250)과 채점 대기
+  // (`awaiting_scoring`) 셋만 아니면 Score가 있다. **404로 짐작하지 않는다**
+  // — 조회 자체를 그 값이 "있다"고 말할 때만 보낸다.
   const hasScore =
     nextAction !== null &&
     nextAction !== "can_edit_submission" &&
+    nextAction !== "needs_reverification" &&
     nextAction !== "awaiting_scoring";
 
   useEffect(() => {
@@ -606,44 +631,34 @@ export default function SubmitPage() {
 
   const { contest, verification, submission } = load;
 
-  if (verification.status !== "verified") {
+  // 낼 것이 아무것도 없을 때만(한 번도 제출하지 않았을 때) 화면 전체를 본인확인
+  // 안내로 막는다(#250). 이미 낸 제출물이 있으면 — 신원이 파기(`expired`)됐어도
+  // — 아래로 내려가 그 내용을 읽기 전용으로 보여준다(수정 자체를 막는 판정은
+  // `next_action`이 `needs_reverification`으로 이미 하고 있다, 아래 `canEdit`
+  // 참고). ADR-0025가 지우는 것은 신원 정보(실명·생년월일·CI/DI·전화번호)이지
+  // 제출물이 아니다.
+  //
+  // `verification.status`로 직접 판정한다 — 여기는 아직 Submission이 없을 수
+  // 있는 자리라 `next_action`(있어도 없어도 되는 값)에 기댈 수 없다. 이론상
+  // `withdrawn`(탈퇴)도 이 조건을 만족하지만 실제로 이 화면에 닿지 않는다 —
+  // 탈퇴 계정은 `User.is_active`가 꺼져 로그인 자체가 막힌다(ADR-0025) — 그래도
+  // 값 자체는 `underage`와 다르지 않게 다룬다: 재확인 버튼은 감추고 이유만
+  // 보여준다(`VerificationReason`).
+  if (verification.status !== "verified" && !hasSubmission) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-4 p-10">
         <p role="alert" data-testid="verification-required" className="text-attention">
           본인확인(Verification)을 완료해야 제출할 수 있습니다.
         </p>
-        <p className="text-sm text-ink" data-testid="verification-reason">
-          {verification.status === "underage"
-            ? verification.reason || "만 19세 미만은 본인확인을 완료할 수 없습니다."
-            : "휴대폰 본인확인을 먼저 마쳐주세요."}
-        </p>
-        {verification.status !== "underage" && (
-          <button
-            type="button"
-            onClick={handleVerifyDev}
-            disabled={verifying}
-            data-testid="verify-now-dev"
-            className="rounded-sm border border-rule px-4 py-2 text-sm hover:border-ink disabled:opacity-50"
-          >
-            {verifying ? "확인 중..." : "지금 본인확인하기(dev)"}
-          </button>
-        )}
-        {verification.status !== "underage" && portOneConfig && (
-          <button
-            type="button"
-            onClick={handleVerifyLive}
-            disabled={verifying}
-            data-testid="verify-now-live"
-            className="rounded-sm border border-rule px-4 py-2 text-sm hover:border-ink disabled:opacity-50"
-          >
-            {verifying ? "확인 중..." : "실제 본인확인하기(PortOne)"}
-          </button>
-        )}
-        {verifyError && (
-          <p role="alert" data-testid="verify-live-error" className="text-sm text-attention">
-            {verifyError}
-          </p>
-        )}
+        <VerificationReason verification={verification} />
+        <VerifyActions
+          verification={verification}
+          verifying={verifying}
+          verifyError={verifyError}
+          portOneConfig={portOneConfig}
+          onVerifyDev={handleVerifyDev}
+          onVerifyLive={handleVerifyLive}
+        />
       </main>
     );
   }
@@ -672,9 +687,36 @@ export default function SubmitPage() {
       </div>
 
       {hasSubmission && !canEdit && (
-        <p role="alert" data-testid="edit-locked-notice" className="text-sm text-attention">
-          지금은 제출물을 수정할 수 없습니다 — {stateLabel}
-        </p>
+        <div className="flex flex-col gap-3">
+          {/* **상태 문구가 둘로 갈리지 않는다**(#250). 여기도 위 상태 배너와
+              같은 `stateLabel`(=`next_action`의 문구)만 쓴다 — 본인확인이
+              필요한 경우 그 값 자체가 이미 "본인확인 필요"라, 이 알림과 위
+              배너가 같은 렌더에서 서로 다른 말을 하는 일이 없다. */}
+          <p role="alert" data-testid="edit-locked-notice" className="text-sm text-attention">
+            지금은 제출물을 수정할 수 없습니다 — {stateLabel}
+          </p>
+          {/* 신원 파기(EXPIRED)로 본인확인이 풀린 경우(#250, ADR-0025) — 아래
+              내용은 그대로 읽히지만, 새로 내거나 고치려면 본인확인을 다시
+              마쳐야 한다는 것과 그 길을 여기서 바로 준다. 조건은 `next_action`
+              값 하나다 — 화면이 별도로 "본인확인이 필요한가"를 다시 판정하지
+              않는다. */}
+          {nextAction === "needs_reverification" && (
+            <div
+              className="flex flex-col items-start gap-2 rounded-md border border-rule p-3"
+              data-testid="resubmit-verification-notice"
+            >
+              <VerificationReason verification={verification} />
+              <VerifyActions
+                verification={verification}
+                verifying={verifying}
+                verifyError={verifyError}
+                portOneConfig={portOneConfig}
+                onVerifyDev={handleVerifyDev}
+                onVerifyLive={handleVerifyLive}
+              />
+            </div>
+          )}
+        </div>
       )}
 
       <section className="flex flex-col gap-2" data-testid="completion-indicator" data-percent={completion.percent}>
@@ -826,8 +868,10 @@ export default function SubmitPage() {
 // 화면에서 "낸 것이 그래서 어떻게 됐나"까지 한 곳에서 끝까지 읽는다.
 //
 // **점수가 없을 때 이유가 갈린다.** `next_action`이 이미 그 경계를 답한다 —
-// 마감 전(`can_edit_submission`)과 채점 대기(`awaiting_scoring`)는 자기
-// 문장을 그대로 말하고, 그 둘이 아니면 Score가 있다는 뜻이라 조회한다. 자동
+// 마감 전 두 값(`can_edit_submission`·`needs_reverification`, #250 — 후자는
+// 본인확인이 풀린 채 마감 전인 경우로, 마감 전이라는 사실 자체는 같아서 같은
+// 문장을 쓴다)과 채점 대기(`awaiting_scoring`)는 자기 문장을 그대로 말하고,
+// 그 셋이 아니면 Score가 있다는 뜻이라 조회한다. 자동
 // 0%(ADR-0030/0031)의 사유는 백엔드가 이미 참가자용 한 문장으로 접어 보낸다
 // (`OwnScoreOut.reasoning`, #246) — 여기서 `scoring_basis`를 다시 해석하지
 // 않는다.
@@ -852,7 +896,7 @@ function ScoreSection({
     >
       <h2 className="text-lg font-semibold">채점 결과</h2>
 
-      {nextAction === "can_edit_submission" ? (
+      {nextAction === "can_edit_submission" || nextAction === "needs_reverification" ? (
         <p data-testid="submit-score-before-deadline" className="text-sm text-ink/70">
           아직 마감 전이라 채점이 시작되지 않았습니다.
         </p>
@@ -890,5 +934,78 @@ function ScoreSection({
         </>
       ) : null}
     </section>
+  );
+}
+
+// 본인확인이 필요한 이유 한 줄(#250) — 「제출할 것이 아무것도 없어 화면 전체를
+// 막는 경우」와 「이미 낸 것은 읽히지만 새로 내거나 고치려면 다시 확인해야
+// 하는 경우」 둘 다 같은 문구를 쓴다. 신원 파기(`expired`, ADR-0025)는
+// `underage`가 아니므로 일반 안내로 떨어진다 — 다시 확인하면 그대로 통과한다.
+//
+// **`console/contests/new/page.tsx`에 거의 같은 블록이 이미 있다**(공모전
+// 개최의 본인확인 게이트, `grill-verification-required` 등 testid를 쓴다) —
+// 이 컴포넌트로 옮겨 공유하지 않는다. 그 화면의 testid는 이 화면과 다른
+// 접두어(`grill-*`)를 쓰고 있어, 공유하려면 testid를 매개변수화하거나 그
+// 화면의 e2e testid를 바꿔야 한다 — 이 티켓의 스코프는 이 제출 화면과
+// `asset-kind-section.tsx`뿐이라(#250 지시), 관계없는 화면의 testid를
+// 건드리는 대가를 감수하지 않는다. 셋째 자리가 또 생기면 그때 공유 위치를
+// 만든다.
+function VerificationReason({ verification }: { verification: VerificationStatusOut }) {
+  return (
+    <p className="text-sm text-ink" data-testid="verification-reason">
+      {verification.status === "underage"
+        ? verification.reason || "만 19세 미만은 본인확인을 완료할 수 없습니다."
+        : "휴대폰 본인확인을 먼저 마쳐주세요."}
+    </p>
+  );
+}
+
+// 본인확인으로 가는 버튼 둘(dev fake·실물 PortOne) — 위 두 자리(전체 화면
+// 안내, 읽기 전용 화면의 인라인 배너)가 같은 동작을 공유한다.
+function VerifyActions({
+  verification,
+  verifying,
+  verifyError,
+  portOneConfig,
+  onVerifyDev,
+  onVerifyLive,
+}: {
+  verification: VerificationStatusOut;
+  verifying: boolean;
+  verifyError: string | null;
+  portOneConfig: ReturnType<typeof getPortOneBrowserConfig>;
+  onVerifyDev: () => void;
+  onVerifyLive: () => void;
+}) {
+  return (
+    <>
+      {verification.status !== "underage" && (
+        <button
+          type="button"
+          onClick={onVerifyDev}
+          disabled={verifying}
+          data-testid="verify-now-dev"
+          className="rounded-sm border border-rule px-4 py-2 text-sm hover:border-ink disabled:opacity-50"
+        >
+          {verifying ? "확인 중..." : "지금 본인확인하기(dev)"}
+        </button>
+      )}
+      {verification.status !== "underage" && portOneConfig && (
+        <button
+          type="button"
+          onClick={onVerifyLive}
+          disabled={verifying}
+          data-testid="verify-now-live"
+          className="rounded-sm border border-rule px-4 py-2 text-sm hover:border-ink disabled:opacity-50"
+        >
+          {verifying ? "확인 중..." : "실제 본인확인하기(PortOne)"}
+        </button>
+      )}
+      {verifyError && (
+        <p role="alert" data-testid="verify-live-error" className="text-sm text-attention">
+          {verifyError}
+        </p>
+      )}
+    </>
   );
 }

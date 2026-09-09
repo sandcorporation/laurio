@@ -54,6 +54,17 @@ export const NEXT_ACTION_LABELS: Record<NextAction, NextActionLabel> = {
   // 두는 이유는 다른 `mine` 값들(예: `can_appeal`)과 같다 — 강제는 아니지만
   // 지금 할 수 있는 행동이 있다는 뜻이다.
   can_edit_submission: { text: "제출물을 수정할 수 있습니다", mine: true, payoutStage: false },
+  // 마감 전인데 본인확인이 `verified`가 아닌 경우(#250, ADR-0025) — 가장 흔한
+  // 실사용 경로는 2년 미이용으로 스캔이 신원만 파기한 `expired`다(#102). `mine`
+  // 을 `true`로 두는 이유는 `can_edit_submission`과 같다 — 본인확인을 다시
+  // 마치면 지금 바로 풀리는, 지금 나에게 온 일이다. 이 값이 없으면 「내 참여」
+  // 는 이 상태의 사람에게 "제출물을 수정할 수 있습니다"라고 거짓말한다(실제
+  // PUT은 서버가 403으로 거절한다) — #250 코드리뷰가 실제로 잡아낸 문제다.
+  needs_reverification: {
+    text: "본인확인이 필요합니다",
+    mine: true,
+    payoutStage: false,
+  },
   awaiting_scoring: { text: "채점을 기다리는 중입니다", mine: false, payoutStage: false },
   awaiting_judging: { text: "발주자의 심사를 기다리는 중입니다", mine: false, payoutStage: false },
   awaiting_appeal_ruling: { text: "이의 심판을 기다리는 중입니다", mine: false, payoutStage: false },

@@ -1,5 +1,6 @@
 from datetime import date, datetime
 
+from django.db import models
 from ninja import Schema
 
 
@@ -17,8 +18,30 @@ class VerificationStartOut(Schema):
     identity_verification_id: str
 
 
+class VerificationStatusValue(models.TextChoices):
+    """`Verification.Status` 네 값에 「행 자체가 없음」을 더한, API 응답 전용 값
+    (#250). `Verification.Status`를 그대로 재사용하지 못하는 이유는 "한 번도
+    확인한 적이 없다"가 그 모델에서는 행이 아예 없다는 뜻이라 값 자체가 없어서다
+    (`verification.api._to_status_out`이 그 경우 이 값의 `UNVERIFIED`를 만들어
+    낸다).
+
+    `submissions.participation.NextAction`과 같은 이유로 `str` 이 아니라 enum
+    이다 — 필드가 `str`이면 생성된 TS 타입도 `status: string`이 되어, 값이
+    새로 생기거나(`expired`·`withdrawn`이 그랬다, #102/#100) 화면이 그중 하나만
+    분기해도 `tsc`가 누락을 잡지 못한다. 실제로 #250 이전에는 이 필드가 `str`
+    이었고, 주석만 "unverified" | "verified" | "underage" 라 적혀 있어 `expired`
+    가 이미 실사용에 등장한 지 한참 지나서도 낡은 채였다.
+    """
+
+    UNVERIFIED = "unverified", "본인확인 안 함"
+    VERIFIED = "verified", "본인확인 완료"
+    UNDERAGE = "underage", "만 19세 미만"
+    WITHDRAWN = "withdrawn", "탈퇴(신원 파기)"
+    EXPIRED = "expired", "미이용으로 신원 파기"
+
+
 class VerificationStatusOut(Schema):
-    status: str  # "unverified" | "verified" | "underage"
+    status: VerificationStatusValue
     reason: str | None = None
     verified_at: datetime | None = None
 

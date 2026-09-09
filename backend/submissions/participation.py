@@ -30,6 +30,7 @@ Escrow 해제를, 이의 제기는 채점 완료와 중복 아님을). 여기 �
 
 from django.db import models
 
+from contests.models import Contest
 from core.clock import Clock
 
 
@@ -53,6 +54,16 @@ class NextAction(models.TextChoices):
     # 값도 같은 조건(`now < contest.deadline_at`)에서 나와야 화면이 시키는 대로
     # 했는데 API가 거절하는 일이 없다.
     CAN_EDIT_SUBMISSION = "can_edit_submission", "제출물 수정 가능"
+    # 마감 전인데 본인확인이 `verified`가 아닌 경우(#250, ADR-0025) — 가장 흔한
+    # 실사용 경로는 2년 미이용으로 스캔이 신원만 파기한 `expired`다(#102). 이
+    # 값을 두지 않으면 `CAN_EDIT_SUBMISSION`을 그대로 돌려주게 되는데,
+    # `submissions.api.update_submission`은 그 시각 조건(`now < deadline_at`)
+    # 뿐 아니라 `_require_verification`도 함께 검사한다 — 조건이 갈리면 화면은
+    # "수정할 수 있습니다"라고 말하고 서버는 403을 낸다(이 파일 module docstring이
+    # 경계하는 바로 그 사고이자, #250 코드리뷰가 실제로 잡아낸 것이다). 자료·
+    # 요구사항 응답 자체는 여전히 읽을 수 있다 — ADR-0025가 지우는 것은 신원
+    # 정보이지 제출물이 아니다.
+    NEEDS_REVERIFICATION = "needs_reverification", "본인확인 필요"
     CAN_APPEAL = "can_appeal", "이의 제기 가능"
     REQUEST_PAYOUT = "request_payout", "지급 요청"
     SUBMIT_TAX_IDENTITY = "submit_tax_identity", "세무 신원 제출"
@@ -88,15 +99,27 @@ def next_action_for(submission) -> str:
 
     호출부는 `Submission` 을 관련 객체와 함께 미리 가져와야 한다 — 이 함수는
     행마다 새 조회를 내지 않는다(목록이 N+1 이 되면 참가가 쌓일수록 느려진다).
+    마감 전 분기가 보는 `developer__user__verification` 도 같은 규율이다 —
+    호출부가 select_related 로 미리 당겨 둬야 한다(`submissions.api`의
+    `get_my_submission`·`get_submission`·`list_my_participation` 참고).
     """
 
     contest = submission.contest
     now = Clock.now()
 
-    # 마감 전 — 아직 제출물을 고칠 수 있다(#245). Contest.status 가 아직
-    # PUBLISHED 여도 시각이 지났으면 스캔이 아직 안 돈 것뿐이므로, 시각을
-    # 직접 본다 — `submissions.api._reject_if_past_deadline`과 같은 기준이다.
+    # 마감 전 — 아직 제출물을 고칠 수 있다(#245)... **단, 본인확인이 열려
+    # 있을 때만이다(#250).** `submissions.api.update_submission`이 시각
+    # 조건(`_reject_if_past_deadline`)과 `_require_verification`을 **함께**
+    # 검사하므로, 이 함수도 같은 두 조건을 함께 봐야 한다 — 하나만 보면
+    # 화면은 "수정할 수 있습니다"라고 말하고 서버는 403을 낸다. 조건은
+    # 글자 그대로 같은 판정처(`Contest.Status.SUBMISSION_REQUIRES_
+    # VERIFICATION`)를 재사용한다 — 두 벌로 쓰면 이 모듈의 docstring이
+    # 경계하는 바로 그 사고가 난다.
     if now < contest.deadline_at:
+        if Contest.Status.SUBMISSION_REQUIRES_VERIFICATION(
+            contest.status
+        ) and not _owner_identity_is_verified(submission):
+            return NextAction.NEEDS_REVERIFICATION
         return NextAction.CAN_EDIT_SUBMISSION
 
     if not hasattr(submission, "score"):
@@ -137,6 +160,22 @@ def next_action_for(submission) -> str:
 def _is_awarded_to_someone_else(submission) -> bool:
     award = getattr(submission.contest, "award", None)
     return award is not None and award.submission_id != submission.id
+
+
+def _owner_identity_is_verified(submission) -> bool:
+    """이 Submission 주인의 본인확인이 지금 `verified` 인가(#250).
+
+    `verification.models.Verification.is_verified`와 같은 질문을 다시 묻는다 —
+    다만 여기서는 새 조회를 내지 않는다(모듈 docstring). `getattr(user,
+    "verification", None)`이 안전한 이유는 `Verification.user`가
+    `related_name="verification"`인 역방향 OneToOne이라, 행이 없으면 Django가
+    `RelatedObjectDoesNotExist`(`AttributeError`의 서브클래스)를 던지고 `getattr`
+    의 기본값이 그것을 그대로 삼키기 때문이다 — 이 함수 바로 위 `AWAITING_SCORING`
+    분기의 `hasattr(submission, "score")`와 같은 관용구다.
+    """
+
+    verification = getattr(submission.developer.user, "verification", None)
+    return verification is not None and verification.is_verified
 
 
 # Hold → NextAction 번역표 (#130). 판정은 `payouts.progress.hold_of` 가 한다 — 여기서

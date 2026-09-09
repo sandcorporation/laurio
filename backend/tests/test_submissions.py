@@ -21,6 +21,10 @@ from contests.models import Category, Contest, DeliverableType
 from core.models import ClockOverride
 from submissions.models import Submission, SubmissionAsset
 from tests.submission_assets import assets_of, first_value, demo_account_of
+# 신원 파기(EXPIRED) 시나리오(#250)를 만드는 데 쓰는 내부 스캔 호출 헬퍼 — 이 파일이
+# 다시 구현하는 대신 그 스캔을 처음 세운 파일(#102)의 것을 그대로 쓴다(이 저장소의
+# 관용구, 예: test_contest_metrics.py가 test_source_readings.py를 그대로 쓰는 것과 같다).
+from tests.test_withdrawal import DORMANCY_SCAN_URL, _freeze, _internal_headers, _unfreeze
 
 CONTESTS_URL = "/api/contests"
 PAYMENTS_URL = "/api/payments"
@@ -974,6 +978,156 @@ def test_get_my_submission_after_creating_one_returns_it_with_source(
 
     assert response.status_code == 200
     assert first_value(response.json(), "source") == source_key
+
+
+# --- 신원 파기(EXPIRED) 뒤에도 읽기는 열려 있다 (#250, ADR-0025) ------------------
+#
+# `Verification.Status.EXPIRED`는 2년간 행위가 없을 때 스캔이 신원만 파기하고
+# 남기는 상태다(#102) — 계정은 비활성화되지 않고 로그인도 그대로 되며, 다음
+# 개최·제출 시도에서만 본인확인을 다시 요구받는다. ADR-0025가 지우는 것은
+# 실명·생년월일·CI/DI·전화번호 같은 신원 정보이지 그 사람이 낸 제출물이 아니다
+# — 그런데 예전 화면은 `verified`가 아니면 조회 자체를 시도하지 않아, 신원이
+# 파기된 본인에게 자기 제출물이 통째로 사라진 것처럼 보였다. 아래는 그 경계가
+# 서버(HTTP)에서 실제로 어디 있는지 고정한다: 읽기(GET .../submissions/me)는
+# 세 상태(본인확인 없음·`expired`·`verified`) 어디서도 열려 있고, 쓰기(생성·
+# 수정)는 `verified`가 아니면 여전히 거부된다.
+
+
+def _expire_identity_via_dormancy_scan(client) -> None:
+    """지금 시점에 살아 있는 모든 `Verification`을 2년 미이용으로 판정해 스캔이
+    신원을 파기하게 만든다.
+
+    백데이트(`tests.test_withdrawal._backdate_activity`)로 `User.date_joined`
+    ·`Verification.updated_at`만 과거로 되돌리는 방식은 이 파일과 맞지 않는다
+    — 최근 행위 판정(`accounts.dormancy._dormant_verifications`)이
+    `Submission.created_at`도 함께 보는데, 이 파일의 제출 픽스처들은 방금
+    만든 Submission을 곧바로 쓴다. 그래서 여기서는 반대로 시계를 2년+1일
+    앞으로 밀어 "방금"을 "2년 전"으로 만든다. 스캔이 끝나면 시계를 원래대로
+    돌려놓는다 — 안 그러면 뒤이은 호출이 전부 마감을 훌쩍 넘긴 시점으로
+    보여 `_reject_if_past_deadline`이 엉뚱한 이유로 먼저 걸린다.
+    """
+
+    from accounts.dormancy import DORMANCY_PERIOD
+
+    _freeze(timezone.now() + DORMANCY_PERIOD + timedelta(days=1))
+    try:
+        resp = client.post(DORMANCY_SCAN_URL, **_internal_headers())
+        assert resp.status_code == 200, resp.content
+    finally:
+        _unfreeze()
+
+
+@pytest.mark.django_db
+def test_owner_can_still_read_submission_after_identity_is_purged(client, category, landing_type):
+    """신원이 파기(EXPIRED)돼도 이미 낸 제출물은 그대로 읽힌다(#250 AC).
+
+    **`next_action`도 함께 고정한다.** 그 값이 이 화면군의 유일한 판정처다
+    (`submissions.participation.next_action_for`) — 읽기가 되는 것만 보고
+    `next_action`이 여전히 `can_edit_submission`(마감 전이라는 이유만으로)을
+    돌려주면, 「내 참여」와 제출 화면은 "수정할 수 있습니다"라고 말하고
+    실제 PUT은 403으로 거절해 화면이 시킨 대로 한 사용자를 배신한다."""
+
+    _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    dev = _verified_user(client, "dormant-dev", "dormant-dev-ci")
+    source_key = _source_object_key(contest["id"], dev["user_id"])
+    submit_resp = _submit(
+        client, dev["access"], contest["id"], {"assets": [{"kind": "source", "value": source_key}]}
+    )
+    assert submit_resp.status_code == 201, submit_resp.content
+
+    _expire_identity_via_dormancy_scan(client)
+
+    from verification.models import Verification
+
+    verification = Verification.objects.get(user_id=dev["user_id"])
+    assert verification.status == Verification.Status.EXPIRED
+
+    response = client.get(
+        f"{CONTESTS_URL}/{contest['id']}/submissions/me", **_auth_header(dev["access"])
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert first_value(body, "source") == source_key
+    assert body["next_action"] == "needs_reverification"
+
+    # 「내 참여」(`GET /submissions/mine`)도 같은 판정기를 쓴다 — 두 화면이
+    # 다른 말을 하지 않는다.
+    mine_response = client.get(f"{SUBMISSIONS_URL}/mine", **_auth_header(dev["access"]))
+    assert mine_response.status_code == 200
+    mine_body = mine_response.json()
+    assert len(mine_body["items"]) == 1
+    assert mine_body["items"][0]["next_action"] == "needs_reverification"
+
+
+@pytest.mark.django_db
+def test_write_is_still_rejected_after_identity_is_purged(client, category, landing_type):
+    """읽기는 열려도 새로 내거나 고치는 것은 여전히 막힌다(#250 AC) — 화면이
+    막는 것과 서버가 거절하는 것은 둘 다 필요하다(#67과 같은 원칙)."""
+
+    _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    dev = _verified_user(client, "dormant-dev-2", "dormant-dev-2-ci")
+    submit_resp = _submit(
+        client,
+        dev["access"],
+        contest["id"],
+        {"assets": [{"kind": "source", "value": _source_object_key(contest["id"], dev["user_id"])}]},
+    )
+    assert submit_resp.status_code == 201, submit_resp.content
+
+    _expire_identity_via_dormancy_scan(client)
+
+    edit_resp = _edit(
+        client,
+        dev["access"],
+        contest["id"],
+        {"assets": [{"kind": "source", "value": _source_object_key(contest["id"], dev["user_id"])}]},
+    )
+    assert edit_resp.status_code == 403
+    assert "본인확인" in edit_resp.json()["detail"]
+
+    # 새 Contest에 첫 제출을 시도하는 것도 같은 이유로 막힌다 — `create_submission`
+    # 도 `update_submission`과 같은 게이트(`_require_verification`)를 먼저 통과해야
+    # 한다.
+    _, another_contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        sponsor_uid="dormant-sponsor-2",
+        sponsor_ci="dormant-sponsor-2-ci",
+    )
+    create_resp = _submit(
+        client,
+        dev["access"],
+        another_contest["id"],
+        {
+            "assets": [
+                {"kind": "source", "value": _source_object_key(another_contest["id"], dev["user_id"])}
+            ]
+        },
+    )
+    assert create_resp.status_code == 403
+    assert "본인확인" in create_resp.json()["detail"]
+
+
+@pytest.mark.django_db
+def test_reading_without_ever_verifying_is_a_plain_404_not_a_verification_error(
+    client, category, landing_type
+):
+    """조회 경로 자체는 본인확인을 요구하지 않는다는 것을 뒤집어서도 보인다 —
+    한 번도 본인확인하지 않은 사람이 자기 제출물을 찾을 때(있을 리 없다)
+    "아직 안 냈다"(404)와 "본인확인이 필요하다"(403, 쓰기 경로의 메시지)가
+    같은 응답으로 뭉개지지 않는다."""
+
+    _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    pair = _login(client, uid="never-verified-dev")
+
+    response = client.get(
+        f"{CONTESTS_URL}/{contest['id']}/submissions/me", **_auth_header(pair["access"])
+    )
+
+    assert response.status_code == 404
+    assert "본인확인" not in response.json()["detail"]
 
 
 # --- STORAGE_TARGET_RESOLVER 실배선 (실제 presigned URL 발급까지) ------------------

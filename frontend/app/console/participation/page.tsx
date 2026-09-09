@@ -125,8 +125,16 @@ function ParticipationCard({ row }: { row: ParticipationRow }) {
           Assignment 행은 URL이 다르다 — `invite_code`가 있으면(#245,
           `MyParticipationOut.resolve_invite_code`) 본인확인을 요구하는
           `/console/contests/{id}/submit` 대신 InviteCode로만 여는
-          `/assignments/{code}`로 보낸다. */}
-      {row.next_action === "can_edit_submission" ? (
+          `/assignments/{code}`로 보낸다.
+
+          **`needs_reverification`(#250)도 이 링크를 켠다.** 마감 전인데
+          본인확인이 `verified`가 아닌 상태(신원 파기 `expired`가 가장 흔한
+          경로, ADR-0025)는 수정은 아직 못 해도 제출물 자체는 읽을 수 있고
+          (#250이 연 바로 그 경로) 그 화면에서 본인확인으로 가는 길도 준다 —
+          거기서도 이 링크가 사라지면 「내 참여」가 유일한 진입점을 끊는
+          꼴이다. 문구만 갈린다: 실제로 고칠 수 있을 때만 "수정하러"라고
+          말한다. */}
+      {row.next_action === "can_edit_submission" || row.next_action === "needs_reverification" ? (
         <Link
           className="mt-2 block text-sm underline"
           href={
@@ -136,7 +144,9 @@ function ParticipationCard({ row }: { row: ParticipationRow }) {
           }
           data-testid={`participation-row-${row.submission_id}-edit`}
         >
-          제출물 수정하러 가기
+          {row.next_action === "needs_reverification"
+            ? "내 제출물 보기 (본인확인 필요)"
+            : "제출물 수정하러 가기"}
         </Link>
       ) : null}
 

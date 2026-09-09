@@ -225,11 +225,26 @@ export function AssetKindSection({
                     />
                   )}
                   {row.value && (
+                    // 사람이 읽을 수 있는 이름을 보인다(#250) — 예전에는 여기
+                    // `row.value`(스토리지 object_key, 예:
+                    // `submission:33:27:source/1b5ef7092b...`)를 그대로
+                    // 찍었다. 유출은 아니다(본인 자료다) — 다만 읽는 사람에게
+                    // 아무 뜻이 없는 문자열이었다. 라벨을 채웠으면 그 라벨,
+                    // 아니면 종류 이름 + 순번("소스코드 파일 1" 등)으로
+                    // 대신한다. **순번을 붙이는 이유** — 라벨을 안 채운 행이
+                    // 여럿이면(예: 소스 두 개를 그냥 올리기만 한 경우) 종류
+                    // 이름만으로는 옛 raw key와 달리 행끼리 구별이 안 된다
+                    // (#250 코드리뷰 지적) — 옛 key는 못 읽어도 최소한
+                    // 서로 달랐다. 서버는 원본 파일명을 남기지 않는다(#241
+                    // 결정, 응답 헤더 이스케이프 비용을 피하려고 다운로드
+                    // 파일명도 고정 이름 + content-type 유도 확장자로 낸다) —
+                    // 그래서 순번이 이 화면에서 낼 수 있는 가장 구체적인
+                    // 구별자다.
                     <p
-                      className="font-mono text-xs text-verified"
+                      className="text-xs text-verified"
                       data-testid={`${testIdPrefix}-${index}-value`}
                     >
-                      업로드됨: {row.value}
+                      업로드됨: {row.label.trim() || `${title} 파일 ${index + 1}`}
                     </p>
                   )}
                 </>

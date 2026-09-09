@@ -894,12 +894,18 @@ def get_my_submission(request: HttpRequest, contest_id: int):
     contest = _get_viewable_contest_or_404(contest_id)
 
     developer = DeveloperProfile.objects.filter(user=request.auth_user).first()
-    # `next_action_for`(#247)가 보는 관계를 함께 당긴다 — `list_my_participation`
-    # 이 이미 쓰는 것과 같은 목록이다. 이 조회는 한 건뿐이라 N+1 이 되진 않지만,
-    # 미리 당기지 않으면 왕복이 여러 번(점수·이의·Award·Handover) 생긴다.
+    # `next_action_for`(#247, #250)가 보는 관계를 함께 당긴다 — `list_my_
+    # participation`이 이미 쓰는 것과 같은 목록이다. `developer__user__
+    # verification`은 #250이 더한 것 — 본인확인이 `verified`가 아니면 마감
+    # 전이어도 `NEEDS_REVERIFICATION`을 돌려줘야 하는데, `next_action_for`는
+    # 그 판정에 새 조회를 내지 않기로 돼 있다(같은 파일 docstring). 이 조회는
+    # 한 건뿐이라 N+1 이 되진 않지만, 미리 당기지 않으면 왕복이 여러 번(점수·
+    # 이의·Award·Handover·본인확인) 생긴다.
     submission = (
         Submission.objects.filter(contest=contest, developer=developer)
-        .select_related("contest", "score", "appeal", "contest__award__handover")
+        .select_related(
+            "contest", "score", "appeal", "contest__award__handover", "developer__user__verification"
+        )
         .first()
         if developer is not None
         else None
@@ -956,9 +962,15 @@ def list_my_participation(request: HttpRequest, after: str | None = None):
     # 함께 당긴다 — Assignment 행이 「내 참여」에서 자기 제출로 돌아가려면 지금
     # 활성인 InviteCode가 있어야 하고(#245, `MyParticipationOut.resolve_invite_
     # code`), 행마다 새로 조회하면 같은 N+1이 Assignment 쪽에서 재발한다.
+    # `developer__user__verification`도 같은 이유로 더한다(#250) — 이 목록의
+    # 모든 행이 같은 Developer(`profile`)의 것이라 실제로는 값이 하나뿐이지만,
+    # select_related 없이 `next_action_for`가 행마다 `submission.developer.user.
+    # verification`을 걸으면 JOIN 대신 행마다 왕복이 난다.
     submissions = (
         Submission.objects.filter(developer=profile)
-        .select_related("contest", "score", "appeal", "contest__award__handover")
+        .select_related(
+            "contest", "score", "appeal", "contest__award__handover", "developer__user__verification"
+        )
         .prefetch_related("contest__invite_codes")
         .order_by("-created_at", "-id")
     )
@@ -1055,11 +1067,18 @@ def get_submission(request: HttpRequest, submission_id: int):
     """
 
     try:
-        # `contest__award__handover`·`score`·`appeal`은 소유자에게만 계산하는
-        # `next_action_for`(#247)이 보는 관계다 — 미리 당겨 두면 소유자 본인이
-        # 조회할 때 왕복이 늘지 않는다.
+        # `contest__award__handover`·`score`·`appeal`·`developer__user__
+        # verification`은 소유자에게만 계산하는 `next_action_for`(#247, #250)이
+        # 보는 관계다 — 미리 당겨 두면 소유자 본인이 조회할 때 왕복이 늘지
+        # 않는다. `developer`단독 대신 `developer__user__verification`으로
+        # 적는다 — 뒤엣것이 앞엣것을 포함하면서 본인확인 상태까지 한 JOIN으로
+        # 당긴다.
         submission = Submission.objects.select_related(
-            "contest__sponsor", "developer", "score", "appeal", "contest__award__handover"
+            "contest__sponsor",
+            "developer__user__verification",
+            "score",
+            "appeal",
+            "contest__award__handover",
         ).get(id=submission_id)
     except Submission.DoesNotExist as exc:
         raise HttpError(404, "Submission을 찾을 수 없습니다.") from exc

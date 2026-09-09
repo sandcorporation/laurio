@@ -4191,7 +4191,7 @@ export interface components {
          * @description Developer 가 지금 무엇을 해야 하는가 — 또는 무엇을 기다리는가.
          * @enum {string}
          */
-        NextAction: "awaiting_scoring" | "awaiting_judging" | "awaiting_appeal_ruling" | "awaiting_distribution" | "awaiting_handover_release" | "awaiting_seller_registration" | "can_edit_submission" | "can_appeal" | "request_payout" | "submit_tax_identity" | "not_selected" | "payout_complete" | "assignment_scored" | "retry_transfer" | "awaiting_transfer_resolution";
+        NextAction: "awaiting_scoring" | "awaiting_judging" | "awaiting_appeal_ruling" | "awaiting_distribution" | "awaiting_handover_release" | "awaiting_seller_registration" | "can_edit_submission" | "needs_reverification" | "can_appeal" | "request_payout" | "submit_tax_identity" | "not_selected" | "payout_complete" | "assignment_scored" | "retry_transfer" | "awaiting_transfer_resolution";
         /** NotificationOut */
         NotificationOut: {
             /** Context */
@@ -5211,11 +5211,27 @@ export interface components {
         VerificationStatusOut: {
             /** Reason */
             reason?: string | null;
-            /** Status */
-            status: string;
+            status: components["schemas"]["VerificationStatusValue"];
             /** Verified At */
             verified_at?: string | null;
         };
+        /**
+         * VerificationStatusValue
+         * @description `Verification.Status` 네 값에 「행 자체가 없음」을 더한, API 응답 전용 값
+         *     (#250). `Verification.Status`를 그대로 재사용하지 못하는 이유는 "한 번도
+         *     확인한 적이 없다"가 그 모델에서는 행이 아예 없다는 뜻이라 값 자체가 없어서다
+         *     (`verification.api._to_status_out`이 그 경우 이 값의 `UNVERIFIED`를 만들어
+         *     낸다).
+         *
+         *     `submissions.participation.NextAction`과 같은 이유로 `str` 이 아니라 enum
+         *     이다 — 필드가 `str`이면 생성된 TS 타입도 `status: string`이 되어, 값이
+         *     새로 생기거나(`expired`·`withdrawn`이 그랬다, #102/#100) 화면이 그중 하나만
+         *     분기해도 `tsc`가 누락을 잡지 못한다. 실제로 #250 이전에는 이 필드가 `str`
+         *     이었고, 주석만 "unverified" | "verified" | "underage" 라 적혀 있어 `expired`
+         *     가 이미 실사용에 등장한 지 한참 지나서도 낡은 채였다.
+         * @enum {string}
+         */
+        VerificationStatusValue: "unverified" | "verified" | "underage" | "withdrawn" | "expired";
         /** VerifyIn */
         VerifyIn: {
             /** Verification Token */

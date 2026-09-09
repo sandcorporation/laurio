@@ -181,6 +181,12 @@ def test_unverified_student_can_submit_to_assignment_with_invite_code(client, la
 
     assert response.status_code == 201, response.content
     assert Submission.objects.filter(contest_id=assignment["id"]).count() == 1
+    # 본인확인이 없어도(Assignment는 애초에 요구하지 않는다, ADR-0028) 마감 전
+    # 「다음 행동」은 그대로 `can_edit_submission`이다(#250) — 상금 공모전에서만
+    # 본인확인 미달이 `needs_reverification`로 바뀐다
+    # (`Contest.Status.SUBMISSION_REQUIRES_VERIFICATION`이 Assignment에서
+    # False라서다). 이 학생은 계속 학생일 뿐 본인확인을 다시 요구받지 않는다.
+    assert response.json()["next_action"] == "can_edit_submission"
 
 
 @pytest.mark.django_db
