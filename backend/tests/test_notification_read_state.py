@@ -180,7 +180,12 @@ def test_read_state_is_independent_of_delivery_status(client):
     """AC: 읽음 여부가 발송 상태와 독립이다 — 읽었다고 발송 이력이 바뀌지 않는다.
 
     전 채널이 실패하도록 강제해 `FAILED` 상태의 Notification을 만들고, 그것도
-    읽음 처리가 되며 그 처리로 `status`·`dispatches`가 전혀 바뀌지 않는지 본다."""
+    읽음 처리가 되며 그 처리로 `status`·`dispatches`가 전혀 바뀌지 않는지 본다.
+
+    `dispatches`의 `failure_reason`은 `/me`(수신자 본인)와 내부 생성 응답 사이에
+    **일부러** 다르다(#244 — 수신자용 문구는 원문을 사람이 읽는 문장으로 바꿔
+    낸다). 그래서 여기서는 채널·상태·시각만 비교하고, `failure_reason`은 따로
+    "원문이 아니게 됐는지"만 확인한다."""
 
     from django.test import override_settings
 
@@ -212,8 +217,17 @@ def test_read_state_is_independent_of_delivery_status(client):
     me = client.get(ME_URL, **_auth_header(pair)).json()
     assert len(me) == 1
     assert me[0]["status"] == Notification.Status.FAILED
-    assert me[0]["dispatches"] == dispatches_before
     assert me[0]["read_at"] is not None
+
+    dispatches_after = me[0]["dispatches"]
+    assert [
+        {k: v for k, v in d.items() if k != "failure_reason"} for d in dispatches_after
+    ] == [{k: v for k, v in d.items() if k != "failure_reason"} for d in dispatches_before]
+    # 원문(내부 생성 응답의 fake 어댑터 사유)이 수신자 화면에는 그대로 나오지
+    # 않는다 — 이 티켓이 고치는 바로 그 누출.
+    for dispatch in dispatches_after:
+        assert dispatch["failure_reason"] != "fake-alimtalk-forced-failure"
+        assert dispatch["failure_reason"]
 
 
 @pytest.mark.django_db

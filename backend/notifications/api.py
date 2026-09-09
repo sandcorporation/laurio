@@ -17,7 +17,7 @@ from accounts.middleware import jwt_auth
 from core.auth import InternalAuth
 from core.clock import Clock
 
-from .models import Notification, NotificationType
+from .models import Notification, NotificationDispatch, NotificationType
 from .services import create_notification
 
 router = Router(tags=["internal", "notifications"], auth=InternalAuth())
@@ -52,6 +52,10 @@ class DispatchOut(Schema):
     channel: str
     status: str
     attempted_at: str
+    # 청중에 따라 값의 출처가 갈린다(#244) — `router`(내부/운영자)는
+    # `NotificationDispatch.failure_reason` 원문을, `public_router`(수신자 본인의
+    # `/notifications/me`)는 `_recipient_facing_reason`이 `status`만으로 만든
+    # 사람이 읽는 문구를 낸다. 스키마 모양은 하나지만 값은 같은 필드가 아니다.
     failure_reason: str
 
 
@@ -78,7 +82,36 @@ class MarkAllReadOut(Schema):
     marked_count: int
 
 
-def _serialize(notification: Notification) -> dict:
+# 수신자 화면(`/notifications/me`)에 낼 발송 실패 문구를 만드는 유일한 자리(#244).
+# `NotificationDispatch.failure_reason`은 애초에 운영자용으로 쓰인 자유서술이라
+# ADR 번호·과금 기준·벤더 원문 오류가 그대로 섞여 있다(adapters_aligo.py) —
+# 그 문자열을 순화해 재사용하면 다음에 쓰는 사람이 또 내부 말을 적어 넣는
+# 순간 다시 샌다. 그래서 원문은 전혀 들여다보지 않고 `status`만으로 정한다:
+# 새 실패 사유가 앞으로 늘어도(운영자가 또 내부 말을 적어도) 이 매핑에 없으면
+# 아래 기본값으로 떨어져 저절로 안전하다. 운영자용 원문은 그대로 `router`
+# (`/api/internal/notifications*`)를 통해 여전히 볼 수 있다 — 이 함수는
+# `public_router`에만 쓰인다.
+_RECIPIENT_DISPATCH_REASONS: dict[str, str] = {
+    NotificationDispatch.Status.PENDING: "발송을 시도하고 있습니다.",
+    NotificationDispatch.Status.SENT: "",
+    NotificationDispatch.Status.FAILED: "알 수 없는 이유로 도달하지 못했습니다.",
+    NotificationDispatch.Status.INDETERMINATE: "발송 결과를 확인하지 못했습니다.",
+}
+# 위 매핑에 없는 상태가 생기더라도(예: 앞으로 새 Status가 추가돼도) 빈 문자열
+# 대신 이 문구가 남는다 — AC: "사유를 모르는 실패도 이력에 남는다".
+_RECIPIENT_DISPATCH_REASON_FALLBACK = "알 수 없는 이유로 도달하지 못했습니다."
+
+
+def _recipient_facing_reason(dispatch: NotificationDispatch) -> str:
+    return _RECIPIENT_DISPATCH_REASONS.get(dispatch.status, _RECIPIENT_DISPATCH_REASON_FALLBACK)
+
+
+def _serialize(notification: Notification, *, for_recipient: bool = False) -> dict:
+    """`for_recipient=True`면 `public_router`(수신자 본인)용 — 채널별 시도
+    시각·결과(ADR-0009가 요구하는 이력)는 그대로 두고 `failure_reason`만
+    `_recipient_facing_reason`이 만든 문구로 바꾼다. 기본값(`False`)은
+    `router`(내부/운영자)용으로, 원문 `failure_reason`을 그대로 낸다."""
+
     return {
         "id": notification.pk,
         "notification_type": notification.notification_type,
@@ -96,7 +129,9 @@ def _serialize(notification: Notification) -> dict:
                 "channel": d.channel,
                 "status": d.status,
                 "attempted_at": d.attempted_at.isoformat(),
-                "failure_reason": d.failure_reason,
+                "failure_reason": (
+                    _recipient_facing_reason(d) if for_recipient else d.failure_reason
+                ),
             }
             for d in notification.dispatches.all()
         ],
@@ -141,7 +176,7 @@ def list_my_notifications(
         .prefetch_related("dispatches")
         .order_by("-created_at")[offset : offset + limit]
     )
-    return [_serialize(n) for n in notifications]
+    return [_serialize(n, for_recipient=True) for n in notifications]
 
 
 @public_router.get("/unread-count", response=UnreadCountOut, auth=jwt_auth)
