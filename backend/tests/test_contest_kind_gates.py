@@ -17,25 +17,13 @@ from pathlib import Path
 
 import pytest
 
-BACKEND_ROOT = Path(__file__).resolve().parent.parent
+from tests.ast_scan_support import BACKEND_ROOT, python_sources
 
 #: 이 분류를 직접 불러도 되는 자리 — 정의하는 곳과, 종류를 함께 보는 게이트 하나뿐이다.
 ALLOWED = {
     Path("contests/models.py"),
     Path("contests/gates.py"),
 }
-
-#: 검사에서 빼는 경로. 마이그레이션은 과거의 스냅샷이고, 테스트는 분류 자체를 검증한다
-#: (`tests/test_status_classification.py` 가 모든 status 에 대한 답을 리터럴로 고정한다).
-SKIPPED_PARTS = {".venv", "migrations", "tests", "__pycache__"}
-
-
-def _python_sources() -> list[Path]:
-    return [
-        path
-        for path in BACKEND_ROOT.rglob("*.py")
-        if not SKIPPED_PARTS & set(path.relative_to(BACKEND_ROOT).parts)
-    ]
 
 
 def _references_payable(tree: ast.AST) -> bool:
@@ -54,7 +42,7 @@ def _references_payable(tree: ast.AST) -> bool:
 
 def test_payable_classification_is_only_called_through_the_kind_gate():
     offenders = []
-    for path in _python_sources():
+    for path in python_sources():
         relative = path.relative_to(BACKEND_ROOT)
         if relative in ALLOWED:
             continue

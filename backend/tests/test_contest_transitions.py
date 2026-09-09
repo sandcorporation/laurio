@@ -21,7 +21,6 @@ test_charges.py·test_assignments.py)가 이미 고정하고 있다. 여기서 �
 from __future__ import annotations
 
 import ast
-from pathlib import Path
 
 import pytest
 
@@ -36,9 +35,7 @@ from contests.transitions import (
     contest_transition_spec,
 )
 from core.clock import Clock
-
-BACKEND_ROOT = Path(__file__).resolve().parent.parent
-SKIPPED_PARTS = {".venv", "migrations", "tests", "__pycache__"}
+from tests.ast_scan_support import BACKEND_ROOT, python_sources
 
 # contests.transitions 가 이름으로 받는 세 함수 — 각자 어느 표에서 이름을 찾는지.
 _NAME_LOOKUP_FUNCTIONS = {
@@ -161,14 +158,6 @@ def test_in_place_update_is_also_a_single_conditional_update(django_assert_num_q
     assert won is True
 
 
-def _python_sources() -> list[Path]:
-    return [
-        path
-        for path in BACKEND_ROOT.rglob("*.py")
-        if not SKIPPED_PARTS & set(path.relative_to(BACKEND_ROOT).parts)
-    ]
-
-
 def _declared_name_calls(tree: ast.AST) -> list[tuple[str, str]]:
     """`(함수 이름, 첫 인자 문자열)` 쌍 — `claim_contest_transition("award", ...)` 같은
     호출에서 이름 리터럴을 뽑는다. 변수로 넘긴 이름은(지금 호출부 어디에도 없다) 잡지
@@ -192,10 +181,10 @@ def test_every_call_site_uses_a_name_the_declaration_actually_has():
     정적으로 훑어 그 대가를 좁힌다: 선언에 없는 이름을 쓰는 자리가 있으면 지금
     당장(그 코드가 실행되기 한참 전에) 여기서 잡는다."""
 
-    # `_python_sources()` 는 tests/ 전체를 건너뛴다 — 이 파일 자신이 일부러 잘못된
+    # `python_sources()` 는 tests/ 전체를 건너뛴다 — 이 파일 자신이 일부러 잘못된
     # 이름("no-such-edge" 등)으로 KeyError 를 확인하므로, 이 검사에 끼면 안 된다.
     offenders = []
-    for path in _python_sources():
+    for path in python_sources():
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for func_name, name in _declared_name_calls(tree):
             table = _NAME_LOOKUP_FUNCTIONS[func_name]
