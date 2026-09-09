@@ -15,20 +15,35 @@ import { runInternalScan, runSeed } from "./lib/seed-http";
 // 섞지 않는다).
 //
 // **celery가 이 e2e 잡에 없다**(#40) — 그래서 마감이 지나도 저절로 전이·채점되지
-// 않는다. 진짜 시간이 지나가게 기다린 뒤(`waitForTimeout`), `runInternalScan`으로
-// `assignment-close`·`submission-scoring`을 직접 쏜다 — 시연 지침(CLAUDE.md "tick은
-// 시간을 앞당기지 않는다")과 같은 이유로, 시계를 조작하지 않고 실제 마감 시각을
-// 실제로 지나가게 한다.
+// 않는다. `runInternalScan`으로 `assignment-close`·`submission-scoring`을 직접 쏜다.
 //
-// **`ClockOverride`(#3, ADR-0003)를 쓰지 않는 이유는 공유 DB가 아니다 — CI는
-// 잡마다 격리된 스택을 쓴다.** 그 대신: (1) `ClockOverride`는 HTTP로 노출된 적이
-// 없다 — 새 내부 엔드포인트를 이 스펙 하나를 위해 여는 것은 시계라는 전역 자원에
-// 손대는 표면을 늘리는 과잉이다. (2) 대안(과제를 편 뒤 곧바로 `deadline_at`을
-// 과거로 PATCH)은 그 순간 제출이 아직 0건이라 지금은 통과하지만, #209(이 스펙과
-// 동시에 진행 중)가 "제출이 있으면 고칠 수 없다"를 걸면 학생의 제출이 그 PATCH
-// 보다 먼저 있어야 이 흐름이 뜻이 있으므로 순서를 못 바꾼다 — 앞으로 깨질 전제를
-// 심는 셈이다. 그래서 실제 시간 경과를 택하되, 아래 창을 느슨하게 잡아 CI가 느려도
-// "학생이 제출을 누르기 전에 마감이 지나버리는" 진짜 flake 원인을 없앤다.
+// **마감을 실제 시간으로 기다리지 않는다(#242).** 예전에는 마감을 45초 뒤로 잡고
+// 학생 제출까지 마친 뒤 그 시각을 실제로 `waitForTimeout`으로 흘려보냈다 —
+// `test.setTimeout(150_000)` 예산의 3분의 1이 순수 벽시계 대기였고, CI(러너 하나에서
+// e2e 잡 셋이 프로덕션 빌드를 상대로 도는 환경)의 얇은 여유 안에서 남은 100여 초에
+// 로그인 둘·과제 생성·열기·InviteCode·학생 로그인·이동·업로드·제출·스캔·점수 확인이
+// 전부 들어가야 했다. 예산이 다하면 그 순간 진행 중이던 호출이 보고됐다(관측된
+// 자리는 우연히 매번 `setInputFiles`) — CI 네 번, 매번 재시도로만 통과해 `1 flaky`로
+// 가려졌다.
+//
+// CLAUDE.md("tick은 시간을 앞당기지 않는다 … 데이터의 시각을 과거로 옮긴다")와 같은
+// 이유로, 이제 마감은 넉넉한 미래로 잡아 두고(브라우저 조작이 며칠 걸릴 리 없으므로
+// 그 사이 마감이 지날 걱정이 없다) **학생의 제출이 끝난 뒤** `assignment-expire-deadline`
+// 시드로 이 과제 하나의 `deadline_at`만 과거로 직접 옮긴다
+// (`seed_e2e_expire_assignment_deadline.py`).
+//
+// **`ClockOverride`(#3, ADR-0003)를 쓰지 않는 이유는 그것이 프로세스 전역 단일
+// 행이기 때문이다** — 이 e2e 잡은 워커 여럿이 같은 백엔드에 병렬로 다른 스펙을
+// 치므로(`playwright.config.ts`의 `fullyParallel`), 시계를 통째로 미래로 밀면 그
+// 순간 도는 다른 스펙의 시간 감각까지 함께 틀어진다(`seed_e2e_operator_queues.py`가
+// 이미 겪은 사고와 같은 모양 — 전역 스캔 반경을 건드려 DB의 Contest를 전부
+// 전이시킨 적이 있다). 이 과제 하나의 `deadline_at`만 UPDATE하면 그 반경이 이
+// 행으로 좁혀진다.
+//
+// **공개 `PATCH`(`update_assignment`)로 옮기지 않는 이유는 #209 때문이다** — 첫
+// 제출이 과제 내용(마감 포함)을 잠가 그 엔드포인트가 409로 거부한다. 그래서
+// 관리 명령이 ORM으로 직접 쓰는 시드를 쓴다 — 다른 `seed_e2e_*` 명령들도 이미
+// 같은 일을 한다(공개 API의 잠금·검증을 거치지 않고 데이터를 직접 조립한다).
 
 function toDatetimeLocalInput(date: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -40,9 +55,12 @@ function toDatetimeLocalInput(date: Date): string {
 test("강사가 과제를 열어 InviteCode를 주고, 학생이 제출하고, 마감 후 점수를 본다", async ({
   page,
 }) => {
-  // 기본 테스트 타임아웃(30초)이 아래 실제 대기(마감을 실제로 흘려보낸다)를
-  // 못 견딘다 — 넉넉히 늘린다.
-  test.setTimeout(150_000);
+  // 기본 테스트 타임아웃(30초)은 로그인 둘·폼 채우기 둘·업로드 하나·스캔
+  // 둘까지 CI(프로덕션 빌드, 러너 하나에 e2e 잡 셋이 겹치는 환경)에서 못
+  // 견딜 수 있다 — 여유를 준다. **더 이상 실제 시간 대기가 없으므로**(#242)
+  // 이 값은 순수하게 네트워크·렌더링 여유일 뿐, 예산의 일부를 미리 깎아
+  // 먹는 고정 비용이 아니다.
+  test.setTimeout(60_000);
 
   // 자격 있는 Sponsor와 학생 계정 — 둘 다 고정된 (provider, provider_uid)로
   // 귀결되는 멱등 시드다(seed_e2e_assignment_sponsor_and_student.py). username은
@@ -55,13 +73,13 @@ test("강사가 과제를 열어 InviteCode를 주고, 학생이 제출하고, �
   const sponsorSeed = seeded.sponsor_username.replace(/^kakao:/, "");
   const studentSeed = seeded.student_username.replace(/^kakao:/, "");
 
-  // 창을 준다 — 아래 브라우저 조작(로그인 둘·폼 채우기 둘·업로드 하나) 전부가
-  // 이 시각 이전에 끝나야 제출이 막히지 않는다(`_reject_if_past_deadline`).
-  // **진짜 flake 원인은 이 창이 너무 짧아 느린 CI에서 학생이 제출 버튼을
-  // 누르기 전에 마감이 지나버리는 것**이지 뒤이은 `waitForTimeout` 자체가
-  // 아니다 — 그래서 넉넉히 45초를 준다(총 타임아웃 150초 안에 여유 있게
-  // 들어온다).
-  const deadlineAt = new Date(Date.now() + 45_000);
+  // 마감을 넉넉한 미래로 잡는다 — 아래 브라우저 조작(로그인 둘·폼 채우기
+  // 둘·업로드 하나·제출) 전부가 이 시각 이전에 끝나야 제출이 막히지 않는다
+  // (`_reject_if_past_deadline`). 더 이상 "그 시각까지 실제로 기다렸다가
+  // 지나게 하는" 쪽이 아니라 "제출이 끝난 뒤 이 값을 직접 과거로 옮기는"
+  // 쪽이므로(#242, 아래 3번), CI가 아무리 느려도 제출이 이 마감보다 먼저
+  // 끝나기만 하면 된다 — 45초처럼 총 예산과 맞물린 값을 고를 이유가 없다.
+  const deadlineAt = new Date(Date.now() + 10 * 60_000);
 
   // 1) 강사 — 과제를 만들고 연다.
   await establishDeveloperSession(page, sponsorSeed);
@@ -78,6 +96,8 @@ test("강사가 과제를 열어 InviteCode를 주고, 학생이 제출하고, �
   await expect(page).toHaveURL(/\/console\/assignments\/\d+$/, { timeout: 10_000 });
   await expect(page.getByTestId("assignment-detail-heading")).toHaveText(title);
   const assignmentDetailUrl = page.url();
+  const assignmentId = Number(assignmentDetailUrl.match(/\/assignments\/(\d+)$/)?.[1]);
+  expect(Number.isInteger(assignmentId)).toBe(true);
 
   await page.getByTestId("assignment-open-button").click();
   await expect(page.getByTestId("assignment-invite-code")).toBeVisible({ timeout: 10_000 });
@@ -103,11 +123,15 @@ test("강사가 과제를 열어 InviteCode를 주고, 학생이 제출하고, �
   await page.getByTestId("assignment-submit-button").click();
   await expect(page.getByTestId("assignment-submit-success")).toBeVisible({ timeout: 10_000 });
 
-  // 3) 마감을 실제로 기다린 뒤, celery가 없는 이 잡에서 스캔을 직접 쏜다.
-  const remainingMs = deadlineAt.getTime() - Date.now();
-  if (remainingMs > 0) {
-    await page.waitForTimeout(remainingMs + 2_000);
-  }
+  // 3) 제출이 끝난 뒤에야 마감을 과거로 옮긴다(#242) — 순서가 중요하다: 먼저
+  // 옮기면 #209(첫 제출이 과제 내용을 잠근다)가 성립하기 전이라 지금은 통과할
+  // 것처럼 보여도, 이 스펙이 검증해야 하는 흐름("학생이 마감 전에 제출한다")과
+  // 어긋난다. 실제 시간이 지나가길 기다리지 않고 이 과제 하나의 `deadline_at`만
+  // 직접 UPDATE한다(`seed_e2e_expire_assignment_deadline.py`) — 시계
+  // (`ClockOverride`)는 건드리지 않으므로 같은 잡에서 병렬로 도는 다른 스펙에
+  // 영향이 없다.
+  await runSeed("assignment-expire-deadline", { assignment_id: assignmentId });
+  // celery가 없는 이 잡에서(#40) 전이·채점 스캔을 직접 쏜다.
   await runInternalScan("assignment-close");
   await runInternalScan("submission-scoring");
 
