@@ -1,0 +1,60 @@
+# 기능 명세 — 지금 이 서비스가 무엇을 하는가
+
+**이 디렉터리는 현재형이다.** `CLAUDE.md`·`CONTEXT.md` 와 같은 시제이고, ADR·이슈·스펙과는
+다르다. 저 셋은 「그때의 판단」이고 여기는 「지금의 동작」이다.
+
+| | 무엇을 말하는가 |
+| --- | --- |
+| [`backend.md`](backend.md) | 서버가 무엇을 받고, 무엇을 스스로 하고, 무엇을 기록하는가 |
+| [`frontend.md`](frontend.md) | 공개 앱의 화면과 그 화면이 사람에게 시키는 일 |
+| [`operator.md`](operator.md) | 운영자 앱의 화면과 사람이 판단하는 행위 |
+
+**여기에 없는 것은 일부러 없다.** 왜 그렇게 정했는지는 `docs/adr/`, 도메인 낱말의 뜻은
+`CONTEXT.md`, 저장소를 어떻게 굴리는지는 `CLAUDE.md` 다. 같은 사실을 두 곳에 적으면
+언젠가 갈라지고, 갈라진 쪽을 읽은 사람이 틀린다.
+
+## 갱신 규율 — 이 문서가 낡으면 대신 참을 말해 줄 문서가 없다
+
+**티켓을 닫을 때, 그 티켓이 이 문서의 어떤 문장을 거짓으로 만들었는지 확인하고 같은
+커밋에서 고친다.** `CLAUDE.md`·`CONTEXT.md` 에 이미 걸려 있는 의무와 같은 것이고, 이제
+셋이다.
+
+무엇이 바뀌면 어디를 고쳐야 하는지:
+
+| 바뀐 것 | 고칠 곳 |
+| --- | --- |
+| API 엔드포인트가 늘거나 줄었다 | `backend.md` 의 해당 표면 |
+| 스캔이 늘거나 줄었다, 주기가 바뀌었다 | `backend.md` 「스스로 도는 일」 |
+| 화면이 생기거나 사라졌다 | `frontend.md` / `operator.md` 의 라우트 표 |
+| 상태 값·전이 조건이 바뀌었다 | `backend.md` 「Contest 의 상태」 |
+| 정책 기본값이 바뀌었다 | `backend.md` 「정책 값」 |
+| 어댑터가 늘거나 바인딩이 바뀌었다 | `backend.md` 「바깥 세계」 |
+| 알림 종류가 늘었다 | `backend.md` 「알림」 |
+
+**수치와 목록이 가장 잘 썩는다.** 엔드포인트 개수, 스캔 개수, 정책 기본값, 화면 목록 —
+그것을 바꾸는 티켓이면 그 표를 같이 고친다.
+
+**세는 것은 손으로 하지 않는다.** 아래 명령이 지금의 사실을 그대로 뱉는다:
+
+```bash
+# 엔드포인트 전부 (스택 없이 돈다)
+cd backend && uv run python manage.py export_openapi_schema | \
+  python3 -c "import json,sys; s=json.load(sys.stdin); print(sum(len([m for m in o if m in ('get','post','put','patch','delete')]) for o in s['paths'].values()))"
+
+# 스캔 등록부
+cd backend && LAURIO_DB_PORT=55432 uv run python manage.py shell -c \
+  "from core.scans import SCAN_REGISTRY; print(len(SCAN_REGISTRY)); print(*SCAN_REGISTRY, sep='\n')"
+
+# 화면
+find frontend/app operator/app -name page.tsx | sed 's|/page.tsx||'
+```
+
+## 마지막 실측
+
+**2026-09-09**, 커밋 `621da6c` 기준. 아래 수치는 그 시점에 위 명령으로 뽑았다.
+
+- 공개·운영자·내부 API 오퍼레이션 **127개** (경로 111개)
+- 등록된 스캔 **23개** (전부 60초 주기)
+- 공개 앱 화면 **27개**, 운영자 앱 화면 **10개**
+- ADR **33개**
+- 백엔드 테스트 **1554건** 통과·1건 skip

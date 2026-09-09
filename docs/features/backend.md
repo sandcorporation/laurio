@@ -1,0 +1,265 @@
+# 백엔드 기능 명세
+
+**현재형 문서다** — [`README.md`](README.md) 의 갱신 규율을 먼저 읽는다.
+
+Django + django-ninja. 하나의 `NinjaAPI` 에 라우터를 붙여 `/api` 아래로 낸다
+(`backend/config/api.py`). **HTTP 가 유일한 시임이다** — 테스트도 이 스택을 통과해 들어온다.
+
+## 표면이 넷이다
+
+경로 접두어가 곧 「누가 부르는가」다. 인증 방식도, 실패했을 때 무엇이 막히는지도 다르다.
+
+| 표면 | 접두어 | 누가 부르는가 | 인증 |
+| --- | --- | --- | --- |
+| 공개·참가자 | `/api/…` | 브라우저(공개 앱의 BFF 경유) | JWT(HttpOnly 쿠키에서 BFF 가 꺼내 헤더로) |
+| 운영자 | `/api/operator/…` | 운영자 앱 | Django 세션 쿠키 + Origin 검증 미들웨어 |
+| 내부 | `/api/internal/…` | Celery beat·운영자의 수동 tick | `X-Internal-Token` |
+| 스토리지 | `/api/storage/…` | 브라우저(업로드·다운로드 URL 발급) | JWT |
+
+**운영자 표면은 기본 거부다.** 라우터 자체가 거부로 시작하고 Origin 검증이 경로 접두어로
+걸린다. 그 오리진이 어긋나면 로그인을 포함한 모든 운영자 변경 요청이 조용히 403 이 된다 —
+fail-closed 라 구멍은 아니지만 원인을 찾기 어렵다.
+
+**내부 표면과 운영자 표면은 다른 것이다.** 내부는 사람이 판단하지 않는 자동 스캔 전용이고,
+사람이 판단하는 행위는 전부 운영자 표면에서 신원과 함께 이루어진다(ADR-0019).
+
+## 무엇을 받는가 — 참가자·발주자 표면
+
+### 계정과 신원
+
+| | |
+| --- | --- |
+| `POST /api/auth/social/{provider}/login` | 소셜 로그인 — 토큰 쌍을 발급한다 |
+| `POST /api/auth/refresh` · `POST /api/auth/logout` | 갱신·블랙리스트 |
+| `GET /api/accounts/me` | 나 |
+| `POST /api/accounts/developer-profile` · `sponsor-profile` | 역할 프로필을 만든다(멱등) |
+| `GET`·`POST /api/accounts/withdrawal` | 탈퇴 가능 여부와 탈퇴 실행 |
+| `POST /api/verification/start` · `verify` | 본인확인 시작·확정 |
+| `GET /api/verification/me` | 내 본인확인 상태 |
+| `POST /api/verification/lookup-by-ci` | CI 로 조회 |
+
+**본인확인은 행위 시점에 요구한다**(ADR-0011) — 가입할 때가 아니라 개최·제출처럼 돈이나
+책임이 걸리는 순간이다. 성인만 통과한다. **과제는 예외다**(ADR-0029) — 학생은 본인확인
+없이 InviteCode 로 제출한다.
+
+**신원은 파기되어도 계정은 남는다**(ADR-0025). 탈퇴는 신원 정보를 지우고 상태를
+`withdrawn` 으로 내리며, 2년 미이용 계정은 스캔이 `expired` 로 내린다 — 계정은 살아 있고
+로그인도 되며, 다음에 개최·제출을 시도할 때 본인확인을 다시 요구받는다.
+
+### 공모전
+
+| | |
+| --- | --- |
+| `GET /api/contests` | 공개 목록 — 참가 가능한 것이 기본, `closed=1` 로 마감된 것 |
+| `GET /api/contests/home` | 홈 큐레이션 |
+| `GET /api/contests/{id}` | 상세 — 로그인 없이 열린다 |
+| `POST /api/contests` · `PATCH /api/contests/{id}` | 개최·초안 수정 |
+| `POST /api/contests/quote` | 개최 견적 |
+| `GET /api/contests/mine` | 내가 연 것 |
+| `POST`·`PATCH`·`DELETE .../requirements[/{id}]` | 요구사항 |
+| `.../requirement-chat/messages` | 요구사항을 LLM 과 함께 다듬는다 |
+| `POST .../images/upload-url` · `images` · `PATCH`·`DELETE .../images/{id}` | 이미지 |
+| `POST .../views` | 조회 기록 |
+| `GET .../metrics` | 개최자용 지표 |
+| `POST .../reopen` | 재개최 |
+| `POST .../extend-judging-period[/{order}/confirm]` | 심사기간 연장(유료) |
+| `GET .../submissions/compare` | 제출작 비교 |
+| `POST .../award` | 선정 |
+| `GET`·`POST .../handover[/accept]` | 인수 |
+| `GET`·`POST .../payout` | 지급 |
+
+**Contest 는 하나의 엔티티다**(ADR-0001) — 공모전과 과제가 같은 표를 쓰고 `kind` 로
+갈린다(ADR-0033). `kind` 는 카테고리 표식이 아니라 일급 필드다.
+
+### 과제
+
+| | |
+| --- | --- |
+| `POST /api/assignments` · `PATCH /api/assignments/{id}` | 개설·수정 |
+| `POST .../open` | 열기 — 이 순간 InviteCode 가 발급된다 |
+| `POST .../invite-code/reissue` | 코드 재발급(옛 코드는 죽고 기존 제출은 산다) |
+| `GET /api/assignments/invite/{code}` | 학생이 코드로 여는 문 |
+| `GET /api/assignments/mine` · `/{id}` | 강사의 목록·상세 |
+| `GET .../submissions` | 제출 목록 |
+| `POST .../submissions/{id}/source` | 소스 열람 — 열람은 기록된다 |
+| 이미지 4종 | 공모전과 같다 |
+
+**과제에는 상금도 결제도 심사도 이의도 인수도 배분도 없다**(ADR-0028). 마감되면 채점하고,
+그것으로 수명이 끝난다.
+
+### 제출
+
+| | |
+| --- | --- |
+| `POST /api/contests/{id}/submissions` | 제출 |
+| `GET`·`PUT /api/contests/{id}/submissions/me` | 내 제출 조회·수정 |
+| `GET /api/submissions/mine` | 내 참가 현황 |
+| `GET /api/submissions/{id}` | 제출물 하나 |
+| `GET /api/submissions/{id}/score` | 내 점수 |
+| `GET`·`POST /api/submissions/{id}/appeal` | 이의 |
+| `GET`·`POST /api/submissions/{id}/build-assets` | 인수용 빌드 산출물 |
+| `GET .../source-readings` · `assignment-source-readings` | 내 소스를 누가 열람했는가 |
+
+**제출물은 자료를 여럿 갖는다**(ADR-0027) — 소스·저장소·시연 영상·데모 URL. 업로드 자료의
+값은 `submission:{공모전id}:{개발자id}:{슬롯}/…` 로 시작해야 한다. 그 접두어가 「이 파일이
+누구의 어느 제출에 속하는가」를 값 자체에 박아 남의 오브젝트를 자기 제출에 붙이지 못하게
+한다.
+
+**「지금 무엇을 해야 하는가」는 서버가 판단한다.** `next_action` 하나가 **16개 값** 중
+하나로 답한다 — 기다리는 것(채점 대기 · 심사 대기 · 이의 심판 대기 · 배분 대기 · 인수 확인
+대기 · 지급대행 등록 대기 · 지급 처리 확인 중), 네 차례인 것(제출물 수정 가능 · 이의 제기
+가능 · 재확인 필요 · 지급 요청 · 세무 신원 제출 · 실이체 재시도), 끝난 것(미선정 · 지급
+완료 · 과제 채점 완료). 값이 enum 이라 하나 늘면 생성된 TS 타입에도 늘고 `tsc --noEmit` 이
+프론트의 누락된 분기를 빌드타임에 잡는다.
+
+**「마감 대기」는 없다.** 예전에 있었고 지웠다 — 마감 전에는 기다리는 것 말고도 할 일이
+있기 때문이다(자료와 체크리스트를 고치는 것). 지금 그 자리는 「제출물 수정 가능」이다.
+
+**그 값은 행위 엔드포인트의 전제와 같은 조건에서 나와야 한다.** 조건을 두 벌로 쓰면
+언젠가 갈라지고, 그때 화면은 시키는 대로 한 사용자에게 403 을 보여준다.
+
+### 돈
+
+| | |
+| --- | --- |
+| `POST /api/payments` · `/{order}/confirm` · `/webhook` | 결제 |
+| `POST /api/payouts/{key}/confirm` | 지급 확정 |
+| `POST /api/payouts/{key}/identity` · `seller-contact` · `seller-registration` | 지급대행 등록 |
+| `POST /api/payouts/webhook[/toss|/toss-seller]` | 웹훅 |
+| `GET /api/ledger/contests/{id}/balance` · `entries` | 원장 |
+
+**복식부기 원장이 진실이다**(ADR-0004). 계정은 다섯이다 — 발주자 예치금 · 개발자 미지급금 ·
+플랫폼 수수료 수익 · 원천징수 예수금 · PG 수수료 비용. 분개는 **append-only** 이고, 배포
+환경에서는 삭제 자체가 거부된다.
+
+**지급대행 등록은 지급 확정 뒤에 일어난다**(ADR-0020) — 순서가 반대면 아직 받을지도 모르는
+사람에게 판매자 등록을 요구하게 된다. 신원은 토스가, 세무는 Laurio 가 맡는다(ADR-0008).
+
+### 스토리지와 알림
+
+| | |
+| --- | --- |
+| `POST /api/storage/uploads` · `downloads` | presigned URL 발급 |
+| `GET /api/notifications/me` · `unread-count` · `POST mark-read` | 내 알림 |
+
+**버킷이 둘이다**(ADR-0032) — 제출물이 사는 비공개 버킷과 공모전 이미지만 사는 익명 읽기
+버킷. 서버가 아니라 **버킷을 가른다**: 공개 읽기 정책이 버킷 단위라 이미지 쪽 설정을
+잘못해도 소스에 닿지 못한다.
+
+**소스는 선정 전까지 발주자에게 보이지 않는다**(ADR-0014). 운영자는 이의 심판을 위해 볼 수
+있지만 **모든 열람이 기록된다**(ADR-0022).
+
+## 스스로 도는 일 — 스캔 23개
+
+**시간은 시임이 아니라 주입 가능한 의존성이다**(ADR-0003). 시각이 지났다고 상태가 저절로
+바뀌지 않는다 — 스캔이 조건부 UPDATE 로 옮긴다. 등록부가 곧 beat 스케줄이고, 전부 60초
+주기다.
+
+| 무엇을 | 스캔 |
+| --- | --- |
+| 상태 전이 | `contest-close` · `contest-judging-end` · `assignment-close` |
+| 채점 | `submission-scoring` · `repository-visibility` |
+| 이미지 | `contest-image-optimization` |
+| 환불 | `payment-refund-request` · `payment-refund-reconcile` |
+| 배분·지급 | `distribution-create` · `distribution-share-payout` · `handover-release` · `payout-awaits-you` · `seller-registration-recovery` |
+| 알림 | `notification-dispatch-deferred` · `notification-reclaim-stuck` · `deadline-reminder` · `judging-end-reminder` · `distribution-final-warning` · `award-result-notice-recovery` · `distribution-result-notice-recovery` |
+| 개인정보 | `identity-dormancy-purge` · `retained-identity-purge` |
+| 데모 | `scheduled-state-demo` |
+
+`POST /api/internal/tick` 이 등록 순서로 전부 한 바퀴 돌고, `POST /api/internal/scans/{name}`
+이 하나만 돌린다. **tick 은 시간을 앞당기지 않는다** — 「이미 밀린 일을 beat 를 기다리지
+않고 즉시 처리한다」이다.
+
+**채점은 반드시 끝난다**(ADR-0031). 실패가 5회에 이르고 **동시에** 마감 후 6시간이 지나면
+0% 로 확정한다. 영구 실패는 유예를 기다리지 않고 즉시 끝난다.
+
+**자동 0% 는 자기 사유를 밝힌다.** 두 종류이고 책임 주체가 반대다 — 참가자가 저장소를 닫아
+채점 입력이 없었던 경우(ADR-0030)와 플랫폼이 채점하지 못한 경우(ADR-0031). 뒤엣것은 이의를
+낼 사유다. 참가자에게는 내부 참조 없는 문장으로, 운영자 심판에는 원문 그대로 나간다.
+
+**Score 는 불변이다**(ADR-0006). 고치는 길은 없고, 잘못된 판정의 구제는 이의와 원장으로만
+한다.
+
+## Contest 의 상태
+
+| 상태 | 무엇인가 | 어떻게 들어오는가 |
+| --- | --- | --- |
+| `draft` | 초안 | 개최 |
+| `published` | 공개 | 결제 확인 |
+| `closed` | 마감 | 스캔(마감 시각 경과) — 이때 심사 종료 시각도 함께 찍힌다 |
+| `awarded` | 선정 완료 | 발주자의 선정 |
+| `judging_ended` | 심사기간 종료 | 스캔(아무도 선정하지 않은 채 심사 종료) |
+| `assignment_open` | 과제 진행중 | 강사의 「열기」 — 스캔이 아니라 명시적 행위 |
+| `assignment_closed` | 과제 마감 | 스캔(마감 시각 경과) |
+
+**상태에 대한 질문은 순수 함수로 묻는다**(ADR-0026, `Classification`) — 「이 상태에서 결제할
+수 있는가」 같은 질문이 enum 의 **모든** 값에 답을 갖는다. 값이 하나 늘면 답을 채우지 않은
+질문이 즉시 터진다. 종류에 따라 갈리는 게이트는 `contests/gates.py` 한 곳에 모인다.
+
+## 알림
+
+종류는 여덟이다 — 마감 임박 · 심사기간 종료 임박 · Distribution 최종 경고 · 결과 · 채점 완료 ·
+이의 심판 완료 · 관심 카테고리 신규 공모전 · 지급이 당신을 기다린다.
+
+**알림톡이 주 채널이고, 도달하지 않아도 배분은 진행된다**(ADR-0009) — 대신 발송 이력을
+드러내는 것이 방어다. **야간(21:00~08:00)은 버리지 않고 미룬다**(ADR-0010).
+
+**도달 실패 사유는 청중을 가른다.** 운영자·도구에는 원문 그대로, 수신자에게는 전달 상태만
+보고 만든 문장이 간다 — 원문에는 내부 참조와 벤더 오류가 들어 있다.
+
+## 정책 값
+
+**정책은 DB 에 살고 운영자 API 로만 바뀐다**(ADR-0023). 단일 행이고 모든 변경이 이력으로
+남는다.
+
+| | 기본값 |
+| --- | --- |
+| 플랫폼 수수료 | 1000 bps |
+| 원천징수 | 440 bps (필요경비 8000 bps, 소액부징수 50,000원) |
+| 개최 등록비 · 심사 연장비 | 50,000원 · 30,000원 |
+| 심사기간 · 연장 | 7일 · 7일 |
+| 인수 확인 기간 | 14일 |
+| 배분 대기 | 14일 |
+| 리마인더 선행 | 마감 24시간 · 심사종료 24시간 · 배분 최종경고 1일 |
+| 배분 컷라인 | `distribution_cutline_percentage` |
+| 자료 개수 상한 | 소스 5 · 영상 5 · 데모 URL 10 · 저장소 8 |
+| 판매자 주간 한도 | 10,000,000원 |
+
+## 바깥 세계
+
+**모든 외부 의존은 어댑터 뒤에 있다**(ADR-0007). 열 값이 바인딩을 고르고, **배포 환경에서
+fake 이거나 임포트되지 않으면 부팅 자체를 거부한다** — 컨테이너가 뜬 채로 첫 요청에서야
+죽는 것보다 정직하게 못 뜨는 편이다.
+
+| 무엇 | 열 값 |
+| --- | --- |
+| 본인확인 | `VERIFICATION_ADAPTER_MODE` |
+| 결제 | `PAYMENT_ADAPTER_MODE` |
+| 지급·판매자 | `PAYOUT_ADAPTER_MODE` · `SELLER_ADAPTER_MODE` |
+| 채점 LLM | `LLM_ADAPTER_MODE` |
+| 요구사항 대화 LLM | `LLM_REQUIREMENT_CHAT_ADAPTER_MODE` |
+| GitHub | `GITHUB_ADAPTER_MODE` |
+| 알림 3채널 | `NOTIFICATION_ALIMTALK_ADAPTER` · `_SMS_` · `_LMS_` |
+| 스토리지 | `STORAGE_BACKEND` |
+
+**Django admin 은 없다**(ADR-0019). 모델 행을 직접 편집할 수 있는 한 감사 추적에 우회로가
+남는다.
+
+## 앱과 모델
+
+| 앱 | 모델 |
+| --- | --- |
+| `accounts` | SocialAccount · SponsorProfile · DeveloperProfile · PhoneContact · RefreshToken · BlacklistedToken · Withdrawal · AssignmentPermissionChange |
+| `verification` | Verification · VerificationRequest · RetainedIdentity · IdentityReading |
+| `contests` | Contest · Category · DeliverableType · Requirement · ContestImage · InviteCode · RequirementChatMessage · JudgingExtensionPayment · 변경 이력 셋 |
+| `submissions` | Submission · SubmissionAsset · RequirementResponse · Evidence · AssignmentSourceReading |
+| `scoring` | Score · ScoringAttempt |
+| `repositories` | RepositorySnapshot |
+| `awards` · `handovers` | Award · Handover · BuildAsset |
+| `appeals` | Appeal · AppealRuling · SourceReading |
+| `payments` · `payouts` | Payment · Payout · TaxIdentity · Seller · 웹훅 전달 기록 · OperatorPayoutAction |
+| `distributions` | Distribution · DistributionShare |
+| `ledger` | Account · JournalEntry · LedgerLine (전부 append-only) |
+| `notifications` | Notification · NotificationDispatch · NotificationOptIn |
+| `policies` | PlatformPolicy · PolicyChange |
+| `core` | ClockOverride · ScheduledStateDemo |
