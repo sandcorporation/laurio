@@ -177,6 +177,17 @@ class MyParticipationOut(Schema):
     # 타입이 `next_action: string` 으로 나오는 것을 보고 고쳤다).
     next_action: NextAction
     submitted_at: datetime
+    # Assignment(ADR-0028)로 돌아갈 길이다(#245) — `/console/contests/{id}/submit`은
+    # 본인확인을 요구해 Assignment 제출을 못 받는다(`submissions.api.create_
+    # submission`의 `SUBMISSION_REQUIRES_VERIFICATION` 분기). Assignment는 대신
+    # InviteCode 로만 여는 `/assignments/{code}`가 그 화면이고, 그 URL을 조립하려면
+    # 코드가 있어야 한다. 공모전 행은 항상 null이다. 지금 **활성인** 코드를 낸다 —
+    # 학생이 처음에 쓴 코드가 재발급으로 죽었어도(#209) 새 코드로는 계속 자기
+    # 제출을 조회·수정할 수 있다는 것이 이미 정해진 동작이다
+    # (`test_old_invite_code_dies_but_existing_submission_survives_reissue`).
+    # Assignment인데 활성 코드가 없으면(닫혔거나 아직 InviteCode가 없는 이상 상태)
+    # null이다 — 화면은 이 값이 없으면 그 링크를 그리지 않는다.
+    invite_code: str | None = None
 
     @staticmethod
     def resolve_submission_id(obj) -> int:
@@ -197,6 +208,12 @@ class MyParticipationOut(Schema):
     @staticmethod
     def resolve_submitted_at(obj):
         return obj.created_at
+
+    @staticmethod
+    def resolve_invite_code(obj) -> str | None:
+        from .participation import active_invite_code_for
+
+        return active_invite_code_for(obj.contest)
 
     @staticmethod
     def resolve_next_action(obj) -> str:

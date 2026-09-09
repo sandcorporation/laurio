@@ -321,3 +321,52 @@ def test_contest_detail_is_owner_reflects_the_viewer(client, category, landing_t
         f"/api/contests/{contest_id}", **_auth_header(stranger_pair["access"])
     ).json()
     assert stranger_detail["is_owner"] is False
+
+
+@pytest.mark.django_db
+def test_contest_detail_has_own_submission_reflects_the_viewer(client, category, landing_type):
+    """#245 — 공개 상세의 제출 CTA가 "이미 냈다"를 판정하는 유일한 근거.
+
+    `is_owner`와 같은 자리·같은 이유로 계산된다: 익명에게는 항상 False, 아직
+    내지 않은 로그인 사용자에게도 False, 실제로 제출한 사람에게만 True다.
+    """
+
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from tests.test_source_readings import _publish_contest, _submit, _verified_user
+
+    deadline_at = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        sponsor_uid="hos-sponsor",
+        sponsor_ci="hos-sponsor-ci",
+        deadline_at=deadline_at,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    contest_id = contest["id"]
+
+    anon_detail = client.get(f"/api/contests/{contest_id}").json()
+    assert anon_detail["has_own_submission"] is False
+
+    dev = _verified_user(client, "hos-dev", "hos-dev-ci")
+    before_submit = client.get(
+        f"/api/contests/{contest_id}", **_auth_header(dev["access"])
+    ).json()
+    assert before_submit["has_own_submission"] is False
+
+    _submit(client, dev, contest_id, requirement_id=contest["requirements"][0]["id"])
+
+    after_submit = client.get(
+        f"/api/contests/{contest_id}", **_auth_header(dev["access"])
+    ).json()
+    assert after_submit["has_own_submission"] is True
+
+    stranger = _verified_user(client, "hos-stranger", "hos-stranger-ci")
+    stranger_detail = client.get(
+        f"/api/contests/{contest_id}", **_auth_header(stranger["access"])
+    ).json()
+    assert stranger_detail["has_own_submission"] is False
