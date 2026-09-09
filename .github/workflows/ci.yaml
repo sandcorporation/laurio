@@ -25,8 +25,10 @@ on:
 #    `docker/dev-env.sh` 가 적어 둔 그대로 "조용히 남의 스택에 붙는 것보다 못 뜨는
 #    편이 낫다".
 #
-#    다만 `test` 잡의 서비스 컨테이너는 **표준 포트**(5432·6379)를 호스트에 맵핑한다.
-#    같은 호스트에 그 포트를 쓰는 것이 생기면 그 잡이 못 뜬다 — 역시 조용하지 않다.
+#    `test` 잡의 postgres 서비스 컨테이너는 호스트 포트를 **고정하지 않는다**(#243) —
+#    Docker 가 그때그때 비어 있는 포트를 골라 주므로 이 호스트의 어떤 것과도, 그리고
+#    이 워크플로 자신의 동시 실행과도 겹치지 않는다. 이유는 `test` 잡 정의 옆
+#    주석에 있다.
 
 # **한 번에 한 실행만 돈다.** 러너 호스트가 공유 자원이라(같은 프로젝트 이름의 dev
 # 스택을 여러 잡이 띄운다) 두 실행이 겹치면 서로의 컨테이너를 건드린다. 취소하지 않고
@@ -47,12 +49,29 @@ jobs:
           POSTGRES_USER: laurio
           POSTGRES_PASSWORD: laurio
         ports:
-          # **표준 포트를 쓰지 않는다.** 셀프호스티드 러너는 호스트를 다른 것과
-          # 나눠 쓰므로(이 러너 호스트에서 5432 가 이미 점유돼 「Initialize
-          # containers」가 죽었다) 서비스 컨테이너도 비켜 잡는다 — 이 저장소가
-          # dev 스택에 대해 이미 하는 것과 같은 이유다(CLAUDE.md 포트 표).
-          # dev 의 55432 와도 겹치지 않게 다시 한 칸 옮긴다.
-          - 55532:5432
+          # **호스트 포트를 고정하지 않는다(#243).** 예전엔 `55532:5432` 로 고정했다 —
+          # 표준 포트(5432)를 피하고(이 러너 호스트에서 5432 가 이미 점유돼 「Initialize
+          # containers」가 죽은 적이 있다) dev 스택의 55432(CLAUDE.md 포트 표)와도
+          # 겹치지 않게 한 칸 더 옮긴 값이었다. 그런데 그 고정값 자체가 새 충돌점이
+          # 됐다: 이 워크플로엔 `concurrency: ci-${{ github.ref }}` 가 있어 **같은**
+          # ref 의 실행은 큐에 서지만, **다른** ref(다른 브랜치·PR)의 실행은 같은
+          # 셀프호스티드 러너에서 동시에 돌 수 있다 — 두 실행이 똑같이 55532 를
+          # 잡으려 하면 나중 것이 `failed to bind host port 0.0.0.0:55532/tcp:
+          # address already in use` 로 「Initialize containers」에서 죽는다(실제로
+          # 한 번 그렇게 죽었다, 원인은 이 워크플로 자체 조사로는 확정하지 못했지만
+          # 이게 남은 유력한 설명이다). 고정값을 아무리 옮겨도 이 워크플로의 두
+          # 동시 실행끼리는 항상 같은 값을 다시 잡으므로 이 충돌은 번호를 바꿔서는
+          # 못 없앤다.
+          #
+          # 그래서 호스트 포트를 아예 비워 둔다 — 컨테이너 포트(5432)만 적으면
+          # Docker 가 그 순간 비어 있는 포트를 골라 매핑한다(GitHub Actions 문서가
+          # 보장하는 동작). 그러면 5432·55432 와 겹칠 일도, 이 워크플로의 다른
+          # 실행과 겹칠 일도 구조적으로 없어진다 — 특정 번호를 다시 고르는 문제가
+          # 아니라 번호를 고르지 않는 것으로 치웠다. 실제로 배정된 포트는 실행
+          # 중에만 알 수 있으므로, 아래 "Resolve dynamically assigned postgres
+          # port" 스텝이 `${{ job.services.postgres.ports['5432'] }}` 로 읽어
+          # `POSTGRES_PORT` 로 내려 준다.
+          - 5432/tcp
         options: >-
           --health-cmd "pg_isready -U laurio -d laurio"
           --health-interval 5s
@@ -67,7 +86,10 @@ jobs:
 
     env:
       POSTGRES_HOST: 127.0.0.1
-      POSTGRES_PORT: "55532"
+      # POSTGRES_PORT 는 여기 없다 — 위 services.postgres.ports 가 호스트 포트를
+      # 고정하지 않으므로(#243) 잡이 시작되는 시점엔 아직 그 값을 모른다. 아래
+      # "Resolve dynamically assigned postgres port" 스텝이 `$GITHUB_ENV` 로
+      # 내려 준 뒤에야 이후 스텝에서 쓸 수 있다.
       POSTGRES_DB: laurio
       POSTGRES_USER: laurio
       POSTGRES_PASSWORD: laurio
@@ -101,6 +123,15 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # postgres 서비스 컨테이너의 호스트 포트가 동적으로 배정되므로(위
+      # services.postgres.ports 주석, #243) 이후 스텝이 쓸 POSTGRES_PORT 를 여기서
+      # 한 번 계산해 `$GITHUB_ENV` 에 적어 둔다. `job.services.<서비스 id>.ports`
+      # 는 컨테이너 포트 → 실제 배정된 호스트 포트 매핑을 주는, GitHub Actions 가
+      # 문서로 보장하는 컨텍스트다 — 호스트 포트를 비워 둔 서비스 컨테이너에서
+      # 그 값을 읽는 표준적인 방법이다.
+      - name: Resolve dynamically assigned postgres port
+        run: echo "POSTGRES_PORT=${{ job.services.postgres.ports['5432'] }}" >> "$GITHUB_ENV"
 
       # **`timeout` 값은 러너 속도에 민감하다.** 이 가드들은 「컨테이너가 부팅을
       # 거부하고 죽는가」를 보고, 124(타임아웃)를 「안 죽었다 = 가드가 깨졌다」로
