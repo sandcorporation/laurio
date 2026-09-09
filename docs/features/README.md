@@ -69,4 +69,4 @@ cd backend && uv run python manage.py print_contest_transition_diagram
 - 등록된 스캔 **23개** (전부 60초 주기)
 - 공개 앱 화면 **27개**, 운영자 앱 화면 **10개**
 - ADR **34개**
-- 백엔드 테스트 **1587건** 통과·1건 skip
+- 백엔드 테스트 **1593건** 통과·1건 skip
