@@ -104,7 +104,7 @@ class SubmissionContentTypeResolver:
     """object_key -> 그 오브젝트에 저장된 content-type, 또는 모르면 None (#241).
 
     `target_ref`는 인자로만 받고 보지 않는다 — object_key 하나가 이미 전역적으로
-    유일하다(둘 다 storage의 `_new_object_key`가 uuid4로 만든 값을 정체성으로 쓴다).
+    유일하다(둘 다 storage의 `new_object_key`가 uuid4로 만든 값을 정체성으로 쓴다).
     """
 
     def resolve(self, target_ref: str, object_key: str) -> str | None:

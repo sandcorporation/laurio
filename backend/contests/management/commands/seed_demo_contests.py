@@ -79,7 +79,8 @@ from accounts.models import DeveloperProfile, SponsorProfile
 from awards.models import Award
 from contests.curation import HomeCurationBucket, home_bucket_for
 from contests.models import Category, Contest, DeliverableType, Requirement
-from submissions.models import RequirementResponse, Submission, SubmissionAsset
+from submissions.models import Evidence, RequirementResponse, Submission, SubmissionAsset
+from submissions.target_refs import target_ref_for_asset_kind
 from verification.models import Verification
 
 PREFIX = "[데모] "
@@ -87,6 +88,82 @@ PREFIX = "[데모] "
 # 데모 신원의 생년월일 — 값 자체에 의미는 없고(성인이기만 하면 된다), 모두가 같은
 # 값을 쓴다는 사실이 "실제로 조사해서 넣은 값이 아니다"를 스스로 말해준다.
 _DEMO_BIRTH_DATE = date(2000, 1, 1)
+
+
+def _requirement_symbol(requirement) -> str:
+    """Requirement 하나가 소스에서 갖는 이름."""
+
+    return f"feature_{requirement.order}"
+
+
+def _evidence_value(requirement) -> str:
+    """근거가 가리키는 소스 위치 — **소스에 문자 그대로 있어야 한다**.
+
+    채점은 근거가 소스에서 실제로 확인되는지를 본다(ADR-0014). dev/test 의 fake
+    어댑터는 그것을 「근거 문자열이 소스 텍스트에 등장하는가」로 결정적으로
+    흉내내므로, 여기서 지어낸 문구를 쓰면 데모의 모든 요구사항이 「근거를 소스에서
+    찾지 못했다」로 미달이 된다 — 실측했다: 채점은 도달하는데 12건 전부 0.00% 였다.
+
+    그래서 값을 소스가 실제로 담는 줄과 **같은 문자열**로 만든다. 시드가 소스와
+    근거를 둘 다 만드는 이상, 둘이 어긋나면 그건 데이터가 스스로 모순인 것이다.
+    """
+
+    return f"def {_requirement_symbol(requirement)}():"
+
+
+def _demo_source_bytes(contest, rank: int, met_requirements) -> bytes:
+    """데모 제출물의 소스 (#253).
+
+    **읽을 수 있는 내용이어야 한다.** 채점은 이 바이트를 실제로 읽어 Requirement
+    별로 판정한다 — 빈 파일이나 뜻 없는 문자열을 심으면 채점이 도달하기는 해도
+    전부 미달이 나와, 데모가 보여주는 것이 「채점이 된다」가 아니라 「전부 0점」이
+    된다.
+
+    **참가자가 미달이라고 적은 요구사항의 구현은 넣지 않는다.** 넣으면 소스가
+    참가자 자신의 응답과 모순된다 — dev 의 fake 어댑터는 근거 문자열만 보므로
+    그 모순을 못 보지만, staging 의 실제 LLM 은 소스를 읽고 「구현되어 있다」고
+    판정할 수 있다. 그러면 심사·이의 화면에서 참가자의 「미달」 메모와 채점 결과가
+    서로 다른 말을 하고, 그 화면들의 존재 이유(같은 것을 보고 이야기한다)가
+    무너진다.
+
+    충족이라고 적은 것에는 함수 하나를 두고 이름을 `_requirement_symbol` 로
+    맞춘다 — 근거(Evidence)가 가리키는 위치와 소스가 실제로 일치해야 한다.
+    """
+
+    met_ids = {r.id for r in met_requirements}
+    lines = [
+        f"# {contest.title} — 데모 제출물 #{rank}",
+        "# staging/dev 데모용으로 생성된 소스입니다. 실제 참가작이 아닙니다.",
+        "",
+    ]
+    for requirement in contest.requirements.all().order_by("order", "id"):
+        if requirement.id not in met_ids:
+            lines += [
+                f"# TODO: {requirement.text} — 아직 구현하지 못했습니다.",
+                "",
+            ]
+            continue
+        lines += [
+            f"def {_requirement_symbol(requirement)}():",
+            f'    """{requirement.text}"""',
+            "    # 데모 구현 — 이 요구사항을 만족하는 자리입니다.",
+            "    return True",
+            "",
+        ]
+    return "\n".join(lines).encode("utf-8")
+
+
+def _is_met(requirement, rank: int) -> bool:
+    """이 참가작이 그 요구사항을 충족했다고 적는가.
+
+    필수는 대체로 충족하고 선택은 갈린다 — 전부 충족으로 심으면 심사 비교 화면의
+    매트릭스가 한 색이 되어 아무것도 말하지 않는다.
+    """
+
+    if requirement.grade == Requirement.Grade.REQUIRED:
+        return rank % 4 != 3
+    return rank % 2 == 0
+
 
 # 각 묶음에 몇 개씩 보일지. 카드가 하나만 있으면 "목록"으로 보이지 않고, 너무
 # 많으면 스크롤만 길어진다.
@@ -303,6 +380,16 @@ class Command(BaseCommand):
         )
 
     def _clear(self) -> int:
+        """`[데모]` 접두어가 붙은 것만 지운다.
+
+        **스토리지 오브젝트는 남는다**(#253). 재시드마다 새 `uuid4` 키를 받으므로
+        옛 오브젝트는 아무도 참조하지 않는 채로 버킷에 남는다. 지우려면 스토리지
+        포트에 삭제를 더해야 하는데, ADR-0005 는 그 포트를 **의도적으로 좁게**
+        유지하기로 정했다 — 시드 청소를 위해 그 경계를 넓히는 것은 그 ADR 이
+        경계하는 바로 그 일이다. 데모 오브젝트는 작은 텍스트 몇 개이고(회차당
+        20여 개), 버킷 정리는 저장소 밖의 운영 작업으로 둔다.
+        """
+
         # **Award 를 먼저 지운다.** `Award.submission` 은 `on_delete=PROTECT` 인데,
         # Django 의 delete collector 는 "그 Award 자체도 이번 삭제로 함께 사라진다"는
         # 것을 감안하지 않고 PROTECT 를 만나는 즉시 막는다 — Contest 부터 지우면
@@ -365,6 +452,87 @@ class Command(BaseCommand):
             bio=f"{name} 입니다. 웹과 모바일을 주로 만듭니다. (staging 검증용 데모 계정)",
         )
 
+    def _upload_asset(
+        self,
+        submission: Submission,
+        *,
+        kind: str,
+        content_type: str,
+        content: bytes,
+        label: str,
+    ) -> SubmissionAsset:
+        """업로드가 실제로 일어난 것처럼 자료 하나를 만든다 (#253).
+
+        **값을 손으로 조립하지 않는다.** 접두어는 쓰기 검증이 쓰는
+        `target_ref_for_asset_kind`, 그 뒤는 업로드 발급이 쓰는
+        `storage.api.new_object_key` — 둘 다 실제 경로가 쓰는 바로 그 함수다.
+        시드가 규칙을 따로 적던 동안 그 값은 **세 곳**에서 걸렸다: 쓰기 검증
+        (「본인의 업로드 대상에 속하지 않습니다」), 다운로드의 object_key 패턴,
+        그리고 채점(오브젝트가 없어 소스를 못 찾는다). 셋 다 저장·다운로드·채점을
+        실제로 해 본 사람만 발견한다.
+
+        **오브젝트도 함께 쓴다.** 값만 맞고 파일이 없으면 채점이 소스를 못 찾아
+        재시도하다 상한에 걸리고, 참가자는 「플랫폼이 채점하지 못했다」는 0% 를
+        받는다(ADR-0031). staging 실측 — 데모 제출물 14건이 전부 그 상태였다.
+        데모가 플랫폼 장애를 전시하고 있었던 셈이다.
+
+        **라벨을 붙인다.** 업로드 자료의 `value` 는 오브젝트 키라 사람이 읽을 것이
+        없다 — 근거(Evidence)를 어느 자료에 걸지 고르는 드롭다운은 그 값을 그대로
+        보여주므로, 라벨이 없으면 데모에서 그 화면이 16진수 나열이 된다.
+
+        **설정된 어댑터로 쓴다** — 채점이 읽는 것과 같은 어댑터여야 하기
+        때문이다(`seed_e2e_operator_queues` 가 같은 이유로 같은 관용구를 쓴다).
+
+        **다만 fake 스토리지는 이 프로세스보다 오래 살지 못한다.**
+        `FakeStorageAdapter._store` 는 클래스 딕셔너리라 명령이 끝나면 사라진다 —
+        테스트는 같은 프로세스에서 곧바로 읽으니 괜찮지만, 호스트에서 시드만
+        돌리고 컨테이너의 backend(=MinIO)가 나중에 채점하면 소스가 없는 것과
+        같다. 그게 정확히 이 티켓이 없앤 증상이므로, 그 조합이면 **경고한다** —
+        거부하지는 않는다(테스트가 바로 그 조합으로 돈다).
+        """
+
+        from storage.adapters import get_storage_adapter
+        from storage.api import new_object_key
+
+        self._warn_once_if_storage_is_ephemeral()
+
+        target_ref = target_ref_for_asset_kind(
+            kind,
+            contest_id=submission.contest_id,
+            developer_user_id=submission.developer.user_id,
+        )
+        object_key = new_object_key(target_ref)
+        # content_type 을 **쓰기에도** 넘긴다 — 행에만 남기면 오브젝트는
+        # `application/octet-stream` 으로 올라가고, 다운로드 파일명(#241)이
+        # 확장자를 고를 근거를 스토리지 쪽에서 잃는다.
+        get_storage_adapter().write_object(object_key, content, content_type=content_type)
+        return SubmissionAsset.objects.create(
+            submission=submission,
+            kind=kind,
+            value=object_key,
+            content_type=content_type,
+            label=label,
+        )
+
+    def _warn_once_if_storage_is_ephemeral(self) -> None:
+        """fake 스토리지에 쓰고 있으면 한 번 경고한다.
+
+        조용히 지나가면 「시드는 성공했는데 나중에 채점만 실패한다」가 되고, 그
+        증상은 스토리지 이야기를 어디에도 하지 않는다 — 이 저장소가 이미 한 번
+        그 길로 진단을 헤맸다(`CLAUDE.md` 의 `seed_e2e_*` 주의).
+        """
+
+        if getattr(self, "_warned_ephemeral_storage", False):
+            return
+        if (getattr(settings, "STORAGE_BACKEND", "") or "fake") != "fake":
+            return
+        self._warned_ephemeral_storage = True
+        self.stderr.write(
+            "경고: STORAGE_BACKEND 가 fake 다 — 방금 쓴 오브젝트는 이 프로세스가 "
+            "끝나면 사라진다. 컨테이너의 backend(MinIO)가 이 데모를 채점하게 하려면 "
+            "STORAGE_BACKEND=s3 와 접속 정보를 함께 주고 다시 돌려라."
+        )
+
     def _create_submission(
         self, *, contest: Contest, developer: DeveloperProfile, rank: int
     ) -> Submission:
@@ -375,41 +543,61 @@ class Command(BaseCommand):
         """
 
         submission = Submission.objects.create(contest=contest, developer=developer)
-        SubmissionAsset.objects.create(
-            submission=submission,
+        requirements = list(contest.requirements.all().order_by("order", "id"))
+        # 소스를 만들기 **전에** 무엇을 충족으로 적을지 정한다 — 소스와 응답이
+        # 같은 판정에서 나와야 둘이 서로를 반박하지 않는다.
+        met = [r for r in requirements if _is_met(r, rank)]
+        source_asset = self._upload_asset(
+            submission,
             kind=SubmissionAsset.Kind.SOURCE,
-            value=f"submission:demo:{contest.pk}/{rank}/source.zip",
+            content_type="text/plain",
+            content=_demo_source_bytes(contest, rank, met),
+            label="제출 소스 (데모 데이터)",
         )
         SubmissionAsset.objects.create(
             submission=submission,
             kind=SubmissionAsset.Kind.DEMO_URL,
             value=f"https://demo.laurio.invalid/{contest.pk}/{rank}",
+            # **링크 텍스트가 곧 이 라벨이다**(#253) — 화면은 `label || "데모 보기"`
+            # 로 그린다. `.invalid` 는 예약 TLD라 절대 열리지 않는데(그게 의도다 —
+            # 실재하는 남의 사이트를 가리키는 것보다 정직하다), 「데모 보기」라고만
+            # 적혀 있으면 누른 사람은 서비스가 깨졌다고 읽는다.
+            label="데모 보기 (데모 데이터 — 열리지 않습니다)",
             test_account="demo@example.invalid / demo1234" if rank % 3 != 2 else "",
         )
         # 영상은 일부만 낸다 — 실제로도 전원이 내지는 않는다.
         if rank % 2 == 0:
-            SubmissionAsset.objects.create(
-                submission=submission,
+            self._upload_asset(
+                submission,
                 kind=SubmissionAsset.Kind.DEMO_VIDEO,
-                value=f"submission:demo:{contest.pk}/{rank}/demo.mp4",
+                content_type="video/mp4",
+                content=f"demo video placeholder — contest {contest.pk} rank {rank}".encode(),
+                label="시연 영상 (데모 데이터)",
             )
 
-        for requirement in contest.requirements.all().order_by("order", "id"):
-            # 필수는 대체로 충족하고 선택은 갈린다 — 전부 충족으로 심으면
-            # 매트릭스가 한 색이 되어 비교 화면이 아무것도 말하지 않는다.
-            if requirement.grade == Requirement.Grade.REQUIRED:
-                is_met = rank % 4 != 3
-            else:
-                is_met = rank % 2 == 0
+        met_ids = {r.id for r in met}
+        for requirement in requirements:
+            is_met = requirement.id in met_ids
             note_index = 0 if is_met else 2
             if is_met and rank % 3 == 1:
                 note_index = 1
-            RequirementResponse.objects.create(
+            response = RequirementResponse.objects.create(
                 submission=submission,
                 requirement=requirement,
                 is_met=is_met,
                 note=_RESPONSE_NOTES[note_index],
             )
+            # **충족 주장에는 근거를 붙인다**(#253). 근거 없는 주장은 미달로
+            # 채점된다(CONTEXT.md 의 Evidence) — 소스를 제대로 심어 놓고 근거를
+            # 빼면 데모의 점수가 전부 0% 로 남는다. 「플랫폼이 채점하지 못했다」가
+            # 「참가자가 근거를 안 냈다」로 바뀔 뿐 보이는 것은 똑같다.
+            if is_met:
+                Evidence.objects.create(
+                    response=response,
+                    kind=Evidence.Kind.SOURCE_LOCATION,
+                    value=_evidence_value(requirement),
+                    asset=source_asset,
+                )
 
         return submission
 

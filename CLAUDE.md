@@ -230,6 +230,27 @@ backend 는 `STORAGE_BACKEND=s3` 로 MinIO 를 물고 있어, 채점 스캔이 �
 cd backend && LAURIO_DB_PORT=55432 uv run python manage.py seed_e2e_operator_appeal
 ```
 
+**`seed_demo_contests` 는 반대다 — 스토리지를 실물로 물려 돌린다**(#253). 이 시드는
+제출물 소스를 스토리지에 **실제로 쓰고**, 그 뒤 컨테이너의 backend(=MinIO)가 그것을
+읽어 채점한다. fake 로 돌리면 오브젝트가 명령과 함께 사라져 채점이 소스를 못 찾고,
+결국 상한에 걸려 **「플랫폼이 채점하지 못했다」 0%** 만 남는다(ADR-0031) — staging 에서
+데모 14건이 통째로 그 상태였다. 시드가 fake 를 감지하면 경고하지만, 처음부터 이렇게
+돌린다:
+
+```bash
+cd backend && LAURIO_DB_PORT=55432 \
+  STORAGE_BACKEND=s3 STORAGE_BUCKET=laurio-dev \
+  STORAGE_ENDPOINT_URL=http://127.0.0.1:19000 \
+  STORAGE_PUBLIC_ENDPOINT_URL=http://127.0.0.1:19000 \
+  STORAGE_ACCESS_KEY=laurio STORAGE_SECRET_KEY=laurio-secret STORAGE_REGION=us-east-1 \
+  uv run python manage.py seed_demo_contests
+```
+
+**그리고 채점이 한 번 돈 뒤에는 다시 심을 수 없다.** `Score.submission` 이 PROTECT 라
+데모 Contest 삭제가 `ProtectedError` 로 막히고, append-only 우회는 배포 환경에서
+거부된다(#240) — 즉 staging 에서는 재시드가 통째로 불가능하다. 시드가 스스로 「멱등하다」고
+적어 둔 계약이 그 지점에서 깨져 있다.
+
 **e2e 가 남긴 것이 dev 화면을 덮으면 걷어낸다**(#183). Contest 는 스위트 시작에 저절로
 걷히지만(`global-setup.ts` 가 세 정리를 순서대로 부른다 — 실행 토큰별 큐, 네임스페이스별
 Contest, 그리고 기준데이터), 스위트를 한동안 안 돌렸다면 손으로 한 번 부른다:
@@ -253,7 +274,7 @@ cd backend && LAURIO_DB_PORT=55432 uv run python manage.py prune_e2e_junk
 `global-setup.ts` 의 순서가 그래서 그 순서다.
 
 **스위트는 기본으로 병렬 실행된다**(#104). `pyproject.toml` 의 `addopts` 가 `-n auto` 를
-준다 — 실측(이 머신, 당시 1192건 — 지금 1554건 통과·1건 skip. Assignment 가 #205~#212 로
+준다 — 실측(이 머신, 당시 1192건 — 지금 1562건 통과·1건 skip. Assignment 가 #205~#212 로
 1312건에서 1377건까지, staging 검증이 낳은 #214~#217 로 1388건까지, 저장소만으로
 제출하고 채점 시점에 박제하는 #218~#220 으로 1407건까지, 채점 상한과 화면 열한 개
 (#213·#221~#231)로 1463건까지, 종류 게이트(#232)로 1467건까지, 공모전 이미지
@@ -262,7 +283,8 @@ cd backend && LAURIO_DB_PORT=55432 uv run python manage.py prune_e2e_junk
 (#244·#245)으로, 채점 사유 청중 분리(#246)와 제출 화면의 「다음 행동」 단일화(#247)로,
 제출 화면이 점수와 다음 갈래를 함께 보여주는 것(#248)으로, 신원 파기 뒤에도 제출물을
 읽을 수 있게 하고 그 「다음 행동」에 재확인 상태를 접은 것(#250)·자동 0% 의 판정 주체
-(#251)·데모 신원 시드(#252)로 여기까지 늘었다) `-n 4` 84초 → `-n auto` 57초.
+(#251)·데모 신원 시드(#252)·데모 제출물이 실제로 쓰이고 채점되게 한 것(#253)으로
+여기까지 늘었다) `-n 4` 84초 → `-n auto` 57초.
 직렬로 보려면 `-n 0`.
 
 **테스트는 서로를 밟지 않는다 — 손으로 갈라 줄 것이 없다.**

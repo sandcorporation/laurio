@@ -715,21 +715,19 @@ def test_demo_seed_developer_can_reach_submission_edit_screen(db, client):
     "본인확인(Verification)을 완료해야..." 으로 죽었다. 시드 이후에는 그 관문을
     지나 정상적으로 갱신된다는 것을 HTTP 시임(CLAUDE.md)으로 고정한다.
 
-    **소스 자료는 새로 하나 싣는다 — 시드가 심어 둔 기존 값을 그대로 되보내지
-    않는다.** `_create_submission`이 심은 `submission:demo:{contest.pk}/{rank}/
-    source.zip`은 실제 `target_ref_for_asset_kind`가 기대하는 형식
-    (`submission:{contest_id}:{developer_user_id}:source/...`, #190)과 다르다 —
-    이 티켓(#252)의 범위가 아닌, 그 이전부터 있던 시드 결함이라 여기서 고치지
-    않는다(자산 값 생성은 Verification 과 무관하다). 그래서 이 테스트는 그
-    결함을 우회해 본인확인 관문 하나만 격리해서 본다 — 기존 값을 그대로 보내면
-    422(target_ref 불일치)가 나서 200 과 403 을 구별할 수 없다.
+    **예전에는 소스 자료를 새로 하나 지어 실어야 했다.** 시드가 심던 값
+    (`submission:demo:{contest.pk}/{rank}/source.zip`)이 쓰기 검증이 기대하는
+    형식과 달라, 기존 값을 그대로 되보내면 422 가 나서 200 과 403 을 구별할 수
+    없었기 때문이다. #253 이 그 결함을 고쳐 시드가 실제 업로드 경로와 같은
+    규칙으로 값을 만들므로, 이제는 우회 없이 **시드가 심은 그대로** 되보낸다 —
+    우회가 남아 있으면 이 테스트는 「실제로 되보내면 어떻게 되는가」를 영원히
+    안 보게 된다.
     """
 
     from django.core.management import call_command
 
     from contests.models import Contest
     from submissions.models import Submission
-    from submissions.target_refs import source_target_ref
 
     call_command("seed_demo_contests", verbosity=0)
 
@@ -737,27 +735,15 @@ def test_demo_seed_developer_can_reach_submission_edit_screen(db, client):
         title__startswith="[데모] ", status=Contest.Status.PUBLISHED
     ).first()
     submission = Submission.objects.filter(contest=contest).first()
-    developer_user_id = submission.developer.user_id
-    headers = _demo_auth_header(developer_user_id)
+    headers = _demo_auth_header(submission.developer.user_id)
 
     existing = client.get(
         f"/api/contests/{contest.id}/submissions/me", **headers
     ).json()
 
-    valid_source_ref = source_target_ref(contest.id, developer_user_id)
     response = client.put(
         f"/api/contests/{contest.id}/submissions/me",
-        data={
-            "assets": [{"kind": "source", "value": f"{valid_source_ref}/source.zip"}],
-            "requirement_responses": [
-                {
-                    "requirement_id": r["requirement_id"],
-                    "is_met": r["is_met"],
-                    "note": r["note"],
-                }
-                for r in existing["requirement_responses"]
-            ],
-        },
+        data=_echo_payload(existing),
         content_type="application/json",
         **headers,
     )
@@ -849,3 +835,302 @@ def test_each_bucket_query_matches_home_bucket_for_at_every_boundary(
             lambda contest, bucket=bucket: home_bucket_for(contest, now=now) == bucket,
             home_bucket_queryset(Contest.objects.all(), bucket, now=now),
         )
+
+
+# --- 데모 제출물이 실제로 쓸 수 있는 데이터인가 (#253) ---------------------------
+#
+# #252 가 본인확인을 심어 제출 화면이 열리게 했더니 한 걸음 뒤에서 다시 막혔다 —
+# 시드가 심은 자료 값이 쓰기 검증이 요구하는 형식이 아니었다. 「열린다」와 「쓸 수
+# 있다」는 다르고, 후자는 저장을 눌러 본 사람만 발견한다. 그래서 여기서 고정한다.
+
+
+def _open_demo_contest_and_submission():
+    from contests.models import Contest
+    from submissions.models import Submission
+
+    contest = Contest.objects.filter(
+        title__startswith="[데모] ", status=Contest.Status.PUBLISHED
+    ).first()
+    submission = Submission.objects.filter(contest=contest).first()
+    return contest, submission
+
+
+def _echo_payload(existing: dict) -> dict:
+    """제출 화면이 「아무것도 바꾸지 않고 저장」할 때 보내는 것과 같은 모양.
+
+    **`evidence` 를 반드시 함께 되보낸다.** 화면은 근거를 왕복시키는데 여기서
+    빼면 두 가지가 동시에 망가진다 — 저장이 근거를 **지워** 이후 채점이 전부
+    미달이 되고, 근거 왕복이 422 로 막혀도 이 테스트는 초록으로 남는다. 한
+    걸음 뒤에서 다시 막히는 것을 잡자고 만든 테스트가 정확히 그 실패를 놓치게
+    된다.
+    """
+
+    return {
+        "assets": [
+            {
+                "id": asset["id"],
+                "kind": asset["kind"],
+                "value": asset["value"],
+                "label": asset["label"],
+                "test_account": asset["test_account"],
+                "order": asset["order"],
+            }
+            for asset in existing["assets"]
+        ],
+        "requirement_responses": [
+            {
+                "requirement_id": r["requirement_id"],
+                "is_met": r["is_met"],
+                "note": r["note"],
+                "evidence": [
+                    {"kind": e["kind"], "value": e["value"], "asset_id": e["asset_id"]}
+                    for e in r["evidence"]
+                ],
+            }
+            for r in existing["requirement_responses"]
+        ],
+    }
+
+
+def test_demo_submission_saves_unchanged(db, client):
+    """데모 제출물을 아무것도 바꾸지 않고 저장해도 성공한다 (#253 AC1).
+
+    화면은 기존 자료를 그대로 되보낸다. 시드가 심은 값이 쓰기 검증을 통과하지
+    못하면 사용자는 **자기가 아무것도 안 했는데** 422 를 본다.
+    """
+
+    from django.core.management import call_command
+
+    call_command("seed_demo_contests", verbosity=0)
+    contest, submission = _open_demo_contest_and_submission()
+    headers = _demo_auth_header(submission.developer.user_id)
+
+    existing = client.get(f"/api/contests/{contest.id}/submissions/me", **headers).json()
+    before = sum(len(r["evidence"]) for r in existing["requirement_responses"])
+    assert before > 0, "시드가 근거를 안 붙였다 — 이 테스트가 볼 것이 없다"
+
+    response = client.put(
+        f"/api/contests/{contest.id}/submissions/me",
+        data=_echo_payload(existing),
+        content_type="application/json",
+        **headers,
+    )
+
+    assert response.status_code == 200, response.content
+
+    # **되보내기가 근거를 지우지 않는다.** 지우면 저장은 성공한 채로 이후 채점이
+    # 전부 미달이 된다 — 사용자는 저장만 눌렀는데 점수가 0 이 되는 셈이다.
+    after = client.get(f"/api/contests/{contest.id}/submissions/me", **headers).json()
+    assert sum(len(r["evidence"]) for r in after["requirement_responses"]) == before
+
+
+def test_demo_submission_saves_after_an_edit(db, client):
+    """고쳐서 저장하는 것도 성공한다 (#253 AC2).
+
+    되보내기만 통과하고 편집이 막히면 데모는 여전히 반쪽이다.
+    """
+
+    from django.core.management import call_command
+
+    call_command("seed_demo_contests", verbosity=0)
+    contest, submission = _open_demo_contest_and_submission()
+    headers = _demo_auth_header(submission.developer.user_id)
+
+    existing = client.get(f"/api/contests/{contest.id}/submissions/me", **headers).json()
+    payload = _echo_payload(existing)
+    payload["assets"].append(
+        {"kind": "demo_url", "value": "https://example.invalid/added-by-test", "label": "추가"}
+    )
+
+    response = client.put(
+        f"/api/contests/{contest.id}/submissions/me",
+        data=payload,
+        content_type="application/json",
+        **headers,
+    )
+
+    assert response.status_code == 200, response.content
+    after = client.get(f"/api/contests/{contest.id}/submissions/me", **headers).json()
+    assert any(a["value"].endswith("/added-by-test") for a in after["assets"])
+
+
+def test_demo_asset_values_come_from_the_real_upload_rule(db):
+    """시드가 자료 값을 손으로 조립하지 않는다 (#253 AC3).
+
+    규칙을 시드가 따로 적으면 조용히 갈라진다 — 실제로 갈라져 있었다. 이
+    테스트는 **모든** 데모 자료를 훑어 실제 업로드 경로가 쓰는 것과 같은
+    접두어인지 본다.
+    """
+
+    from django.core.management import call_command
+
+    from submissions.models import Submission, SubmissionAsset
+    from submissions.target_refs import target_ref_for_asset_kind
+
+    call_command("seed_demo_contests", verbosity=0)
+
+    checked = 0
+    for submission in Submission.objects.select_related("contest", "developer").all():
+        for asset in SubmissionAsset.objects.filter(submission=submission):
+            expected = target_ref_for_asset_kind(
+                asset.kind,
+                contest_id=submission.contest_id,
+                developer_user_id=submission.developer.user_id,
+            )
+            if expected is None:
+                continue
+            assert asset.value.startswith(f"{expected}/"), (
+                f"{asset.kind} 자료가 업로드 대상 밖이다: {asset.value}"
+            )
+            checked += 1
+
+    assert checked > 0, "검사한 자료가 없다 — 시드가 자료를 안 만든 것인지 확인하라"
+
+
+def test_demo_seed_writes_the_objects_it_points_at(db):
+    """값만 맞고 파일이 없으면 채점이 소스를 못 찾는다 (#253 AC4).
+
+    staging 실측 — 데모 제출물 14건이 전부 「플랫폼이 채점하지 못했다」(0%)로
+    끝나 있었다. 데모가 플랫폼 장애를 전시하고 있었던 셈이다. 원인은 시드가
+    가리키는 오브젝트를 아무도 쓰지 않은 것이다.
+    """
+
+    from django.core.management import call_command
+
+    from storage.adapters import get_storage_adapter
+    from submissions.models import Submission, SubmissionAsset
+    from submissions.target_refs import SLOT_BY_ASSET_KIND
+
+    call_command("seed_demo_contests", verbosity=0)
+
+    adapter = get_storage_adapter()
+    checked = 0
+    for asset in SubmissionAsset.objects.filter(
+        kind__in=list(SLOT_BY_ASSET_KIND), submission__in=Submission.objects.all()
+    ):
+        assert adapter.read_object(asset.value) is not None, (
+            f"가리키는 오브젝트가 없다: {asset.value}"
+        )
+        checked += 1
+
+    assert checked > 0
+
+
+def test_demo_submissions_get_a_real_score_not_a_platform_failure(db, client):
+    """데모 제출물이 실제로 채점된다 (#253 AC4).
+
+    앞 테스트가 오브젝트의 존재를 보고, 이 테스트는 그 결과 **채점이 실제로
+    도달하는지**를 본다 — 자동 0% 두 종류 중 어느 것도 아니어야 한다.
+    """
+
+    from django.core.management import call_command
+
+    from contests.models import Contest
+    from scoring.models import Score
+    from scoring.services import (
+        NO_SCORING_INPUT_MODEL_VERSION,
+        PLATFORM_FAILURE_MODEL_VERSION,
+    )
+
+    call_command("seed_demo_contests", verbosity=0)
+
+    scoreable = Contest.objects.filter(
+        title__startswith="[데모] ", status__in=Contest.Status.SCOREABLE.statuses
+    )
+    assert scoreable.exists(), "채점 대상 데모 공모전이 없다"
+
+    from tests.test_withdrawal import _internal_headers
+
+    response = client.post(
+        "/api/internal/scans/submission-scoring", **_internal_headers()
+    )
+    assert response.status_code == 200, response.content
+
+    scores = list(
+        Score.objects.filter(submission__contest__in=scoreable).values_list(
+            "model_version", flat=True
+        )
+    )
+    assert scores, "채점이 하나도 남지 않았다"
+    assert NO_SCORING_INPUT_MODEL_VERSION not in scores
+    assert PLATFORM_FAILURE_MODEL_VERSION not in scores
+
+
+def test_demo_url_says_it_will_not_open(db):
+    """죽은 링크가 죽은 링크로 보이지 않는다 (#253 AC5).
+
+    데모 URL 은 예약 TLD(`.invalid`)를 가리킨다 — 일부러 열리지 않는 주소이고,
+    실재하는 남의 사이트를 가리키는 것보다 낫다. 다만 화면은 링크 텍스트로
+    `label` 을 쓰므로(없으면 「데모 보기」), 그 자리에서 열리지 않는다는 것을
+    말해야 누른 사람이 깨졌다고 오해하지 않는다.
+    """
+
+    from django.core.management import call_command
+
+    from submissions.models import SubmissionAsset
+
+    call_command("seed_demo_contests", verbosity=0)
+
+    demo_urls = SubmissionAsset.objects.filter(kind=SubmissionAsset.Kind.DEMO_URL)
+    assert demo_urls.exists()
+    for asset in demo_urls:
+        assert asset.label.strip(), f"데모 URL 에 라벨이 없다: {asset.value}"
+        assert "열리지 않" in asset.label, f"열리지 않는다는 말이 없다: {asset.label}"
+
+
+def test_demo_assets_carry_readable_labels(db):
+    """업로드 자료에도 라벨이 있다 (#253).
+
+    `value` 는 오브젝트 키라 사람이 읽을 것이 없는데, 근거(Evidence)를 어느
+    자료에 걸지 고르는 드롭다운은 라벨이 없으면 그 값을 그대로 보여준다 —
+    dev 에서 실측했다: 「소스코드: submission:12836:14467:source/794e2024…」.
+    데모가 그 화면을 16진수 나열로 보여주면 그 화면이 무엇을 고르는 곳인지
+    알 수 없다.
+    """
+
+    from django.core.management import call_command
+
+    from submissions.models import SubmissionAsset
+    from submissions.target_refs import SLOT_BY_ASSET_KIND
+
+    call_command("seed_demo_contests", verbosity=0)
+
+    uploaded = SubmissionAsset.objects.filter(kind__in=list(SLOT_BY_ASSET_KIND))
+    assert uploaded.exists()
+    for asset in uploaded:
+        assert asset.label.strip(), f"업로드 자료에 라벨이 없다: {asset.kind} {asset.value}"
+        assert asset.value not in asset.label
+
+
+def test_demo_scores_are_not_all_zero(db, client):
+    """데모 채점이 전부 0% 로 나오지 않는다 (#253).
+
+    「채점이 도달한다」와 「채점이 무언가를 보여준다」는 다르다 — 실측으로 한 번
+    더 겪었다: 오브젝트를 심어 플랫폼 실패는 없앴는데, 근거 문구가 소스에 문자
+    그대로 없어서 12건이 전부 0.00% 로 나왔다. 데모가 보여주는 것이 「전부
+    0점」이면 채점 화면·비교 화면·이의 화면 어느 것도 자기 일을 못 한다.
+    """
+
+    from django.core.management import call_command
+
+    from contests.models import Contest
+    from scoring.models import Score
+    from tests.test_withdrawal import _internal_headers
+
+    call_command("seed_demo_contests", verbosity=0)
+
+    response = client.post("/api/internal/scans/submission-scoring", **_internal_headers())
+    assert response.status_code == 200, response.content
+
+    percentages = {
+        str(p)
+        for p in Score.objects.filter(
+            submission__contest__title__startswith="[데모] "
+        ).values_list("percentage", flat=True)
+    }
+    assert percentages, "데모 채점이 하나도 없다"
+    assert percentages != {"0.00"}, f"데모 점수가 전부 0% 다: {percentages}"
+    # **아직 0% 아니면 100% 뿐이다.** 데모 공모전마다 필수 Requirement 가 하나라
+    # 달성률이 두 값밖에 못 나온다(실측: 100% 11건·0% 1건). 상·중·하가 보이려면
+    # 데모 공모전의 요구사항 구성을 바꿔야 하는데 그건 이 티켓의 범위가 아니다 —
+    # 여기서는 「전부 0%」만 막는다. 이 주석이 다음 사람에게 그 사실을 넘긴다.

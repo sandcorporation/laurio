@@ -36,7 +36,7 @@ router = Router(tags=["storage"])
 _TARGET_REF_FRAGMENT = r"[A-Za-z0-9][A-Za-z0-9:_-]{0,199}"
 _TARGET_REF_PATTERN = rf"^{_TARGET_REF_FRAGMENT}$"
 
-# object_key는 서버가 _new_object_key()로만 만든다 — 항상 "<target_ref>/<32자리
+# object_key는 서버가 new_object_key()로만 만든다 — 항상 "<target_ref>/<32자리
 # 소문자 16진수>" 모양이다. 클라이언트가 다운로드 요청에 이 값을 그대로 되돌려
 # 보내므로, 우리가 실제로 만드는 모양 그대로를 화이트리스트로 강제한다. object_key
 # 쪽 문자 집합에 "."과 추가 "/"가 아예 없으므로 botocore가 SigV4 서명 전에
@@ -68,7 +68,15 @@ class DownloadResponse(Schema):
     expires_at: str
 
 
-def _new_object_key(target_ref: str) -> str:
+def new_object_key(target_ref: str) -> str:
+    """업로드 하나가 받는 object_key. **이 형식을 아는 곳은 여기뿐이어야 한다.**
+
+    공개 이름인 이유는 데모 시드(#253)가 같은 규칙을 써야 하기 때문이다 — 시드가
+    값을 손으로 조립하던 동안 그 값은 `_OBJECT_KEY_PATTERN`(다운로드)과
+    `target_ref_for_asset_kind`(쓰기 검증) 둘 다에 걸렸고, 아무도 눌러 보기
+    전까지 아무도 몰랐다.
+    """
+
     return f"{target_ref}/{uuid4().hex}"
 
 
@@ -77,7 +85,7 @@ def request_upload(request, payload: UploadRequest) -> UploadResponse:
     StorageAccessPolicy().authorize_upload(request, payload.target_ref)
 
     adapter = get_storage_adapter()
-    object_key = _new_object_key(payload.target_ref)
+    object_key = new_object_key(payload.target_ref)
     presigned = adapter.presign_upload(
         object_key,
         content_type=payload.content_type,
