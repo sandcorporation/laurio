@@ -192,6 +192,42 @@ fail-closed 라 구멍은 아니지만 원인을 찾기 어렵다.
 | `assignment_open` | 과제 진행중 | 강사의 「열기」 — 스캔이 아니라 명시적 행위 |
 | `assignment_closed` | 과제 마감 | 스캔(마감 시각 경과) |
 
+**전이 그래프는 `contests/transitions.py` 한 곳에 선언되어 있다**(#255) — 위 표의
+「어떻게 들어오는가」열이 서술하는 여섯 간선이 그 선언의 `CONTEST_TRANSITIONS`다.
+그 밖에서 `Contest.status`를 바꾸는 코드는 태어날 수 없다(#256, AST 정적 스캔).
+아래 다이어그램은 그 선언에서 **자동으로 낸다** — 손으로 그리지 않는다:
+
+```mermaid
+stateDiagram-v2
+    published --> closed : contest-close
+    closed --> judging_ended : contest-judging-end
+    assignment_open --> assignment_closed : assignment-close
+    draft --> published : publish-on-payment
+    closed --> awarded : award
+    draft --> assignment_open : open-assignment
+    note right of closed : judging-extension (제자리 갱신, 상태 불변)
+```
+
+**심사 연장(`judging-extension`)은 화살표가 아니다** — CLOSED에서 CLOSED로 돌아오는
+제자리 갱신(상태는 그대로, `judging_ends_at`만 늘어난다)이라 전이 그래프의 간선이
+아니라 note로만 그린다(#255가 그 둘을 타입으로 가른다).
+
+**다시 만드는 법**(선언이 바뀌면 이 블록을 통째로 바꿔 넣는다):
+
+```bash
+cd backend && uv run python manage.py print_contest_transition_diagram
+```
+
+CI의 `pytest` 잡이 매번 같은 텍스트를 재생성해 이 블록과 글자 그대로 비교한다
+(`tests/test_contest_transition_graph.py`) — 선언과 이 문서가 갈리면 그 자리에서
+빨개진다.
+
+**그래프 자체의 모순도 테스트가 잡는다**(`tests/test_contest_transition_graph.py`,
+#257): 어느 간선으로도, 생성으로도 닿지 않는 상태(도달 불가능), 시각이 지나면
+일어나야 하는데 스캔 등록부에 없는 전이, 끝 상태가 아닌데 나가는 간선이 없는
+상태(갇힌 상태) 셋이다. 끝 상태(`AWARDED`·`JUDGING_ENDED`·`ASSIGNMENT_CLOSED`)는
+`contests/transitions.py`의 `TERMINAL_STATES`가 선언한다.
+
 **상태에 대한 질문은 순수 함수로 묻는다**(ADR-0026, `Classification`) — 「이 상태에서 결제할
 수 있는가」 같은 질문이 enum 의 **모든** 값에 답을 갖는다. 값이 하나 늘면 답을 채우지 않은
 질문이 즉시 터진다. 종류에 따라 갈리는 게이트는 `contests/gates.py` 한 곳에 모인다.

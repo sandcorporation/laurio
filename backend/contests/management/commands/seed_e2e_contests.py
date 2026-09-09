@@ -37,6 +37,7 @@ from django.utils import timezone
 from accounts.models import DeveloperProfile, SocialAccount, SponsorProfile
 from awards.models import Award
 from contests.models import Category, Contest, DeliverableType, Requirement
+from core.management.stdout_utf8 import write_stdout_utf8
 from ledger.models import hard_delete_e2e_fixture_rows
 from scoring.models import Score
 from submissions.models import (
@@ -388,7 +389,7 @@ class Command(BaseCommand):
         if bulk_count > 0:
             payload["bulk"] = self._seed_bulk(sponsor, web_service, count=bulk_count)
 
-        self._write_stdout_utf8(json.dumps(payload, ensure_ascii=False) + "\n")
+        write_stdout_utf8(self.stdout, json.dumps(payload, ensure_ascii=False) + "\n")
 
     def _seed_bulk(self, sponsor, deliverable_type, *, count: int) -> dict:
         """전용 Category 에 공개 Contest 를 count 건 심는다 (#39).
@@ -704,12 +705,3 @@ class Command(BaseCommand):
             "sensitive_score_model_version": JUDGING_SCORE_MODEL_SENTINEL,
         }
 
-    def _write_stdout_utf8(self, payload: str) -> None:
-        # export_openapi_schema.py 와 같은 이유 — Windows 콘솔 기본 코덱(cp949)이
-        # 한글을 인코딩하지 못해 UnicodeEncodeError 로 죽는 것을 피한다.
-        buffer = getattr(self.stdout, "buffer", None)
-        if buffer is not None:
-            buffer.write(payload.encode("utf-8"))
-            buffer.flush()
-        else:
-            self.stdout.write(payload, ending="")

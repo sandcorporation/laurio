@@ -229,6 +229,88 @@ def test_contest_status_is_never_written_outside_contests_transitions():
 
 
 # ---------------------------------------------------------------------------
+# CREATION_STATES(contests.transitions) 가 실제 생성 호출부와 갈리지 않았는지 —
+# 손으로 든 값(그 상수의 독스트링)이 손으로 든 값답게 실제로 흔들리지 않는지를
+# 정적으로 확인한다(#257 코드리뷰). 「생성은 이 그래프 밖」 이라는 경계 자체는
+# 여전히 사람이 판단하지만, 그 판단을 적은 상수가 코드와 갈리는 것은 기계가 잡는다.
+# ---------------------------------------------------------------------------
+
+
+def _status_literal_name(node: ast.AST) -> str | None:
+    """`<Contest 참조>.Status.<NAME>` 모양이면 `<NAME>`(예: "DRAFT")을 돌려준다.
+
+    변수·함수 호출 등 리터럴이 아닌 값은 `None` — 정적으로 확인할 수 없다는 뜻이고,
+    호출부가 이 함수의 결과를 `None` 이면 건너뛴다(시드가 `status=status` 처럼 변수를
+    넘기는 자리가 여기 해당한다 — 생성의 정의가 아니라 테스트 픽스처의 특권이라
+    `CREATION_STATES` 도 원래 이 자리를 보지 않는다, `contests/transitions.py` 의
+    `CREATION_STATES` 독스트링 참고).
+    """
+
+    if not (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Attribute)):
+        return None
+    if node.value.attr != "Status":
+        return None
+    if not _is_contest_ref(node.value.value, set()):
+        return None
+    return node.attr
+
+
+def _creation_status_literals(tree: ast.AST) -> list[tuple[int, str]]:
+    """`<Contest 참조>.objects.create(status=<리터럴>, ...)` 호출에서 `(줄 번호, 이름)`
+    쌍을 뽑는다. `.create()` 만 본다 — `.update()`/`.bulk_update()` 는 위 `_offenses_in`
+    이 이미 전이 경로 밖에서는 아예 못 쓰게 막는다."""
+
+    aliases = _build_contest_queryset_aliases(tree)
+    found = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            continue
+        if node.func.attr != "create":
+            continue
+        receiver = node.func.value
+        targets_contest = _is_contest_ref(receiver, aliases) or _is_contest_ref(
+            _model_of_queryset_chain(receiver), aliases
+        )
+        if not targets_contest:
+            continue
+        for kw in node.keywords:
+            if kw.arg != "status":
+                continue
+            name = _status_literal_name(kw.value)
+            if name is not None:
+                found.append((node.lineno, name))
+    return found
+
+
+def test_every_literal_creation_status_is_declared_in_creation_states():
+    """`contests/transitions.py` 의 `CREATION_STATES` 는 손으로 든 값이다 — 실제
+    `Contest.objects.create(status=Contest.Status.<이름>, ...)` 호출부와 정적으로
+    갈리지 않는지 여기서 확인한다. 리터럴로 안 쓰고 변수를 넘기는 자리(시드)는
+    `_status_literal_name` 이 `None` 을 돌려주므로 애초에 이 검사에 안 걸린다 —
+    그 경계가 의도적이라는 것은 위 두 헬퍼 함수의 독스트링에 적혀 있다."""
+
+    from contests.transitions import CREATION_STATES
+
+    declared_names = {status.name for status in CREATION_STATES}
+
+    offenders = []
+    for path in python_sources():
+        relative = path.relative_to(BACKEND_ROOT)
+        if relative in ALLOWED:
+            continue
+        for lineno, name in _creation_status_literals(ast.parse(path.read_text(encoding="utf-8"))):
+            if name not in declared_names:
+                offenders.append(f"{relative}:{lineno} — status=Contest.Status.{name}")
+
+    assert not offenders, (
+        "Contest.objects.create(status=Contest.Status.<이름>) 이 CREATION_STATES 에 없는 "
+        f"값을 리터럴로 찍는 자리가 있다: {offenders}. contests/transitions.py 의 "
+        "CREATION_STATES 에 그 값을 더하거나(정말 새 생성 경로라면), 이 생성이 정말 "
+        "맞는지(전이여야 하는 건 아닌지) 다시 확인한다."
+    )
+
+
+# ---------------------------------------------------------------------------
 # `_offenses_in` 자체의 경계를 직접 확인한다 — 스캔 로직이 옳은지는 실제 저장소가
 # 우연히 깨끗해서가 아니라 이 표(무엇을 잡고 무엇을 통과시키는가)로 보장돼야 한다.
 # ---------------------------------------------------------------------------

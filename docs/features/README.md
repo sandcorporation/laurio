@@ -35,7 +35,7 @@
 | 스캔이 늘거나 줄었다, 주기가 바뀌었다 | `backend.md` 「스스로 도는 일」 |
 | 화면이 생기거나 사라졌다 | `frontend.md` / `operator.md` — 그 화면의 절을 더하거나 지운다 |
 | 화면이 하는 일이 바뀌었다 | 같은 두 문서의 **그 화면 절** |
-| 상태 값·전이 조건이 바뀌었다 | `backend.md` 「Contest 의 상태」 |
+| 상태 값·전이 조건이 바뀌었다 | `backend.md` 「Contest 의 상태」의 표 **와** mermaid 다이어그램(`cd backend && uv run python manage.py print_contest_transition_diagram` 으로 재생성 — `tests/test_contest_transition_graph.py` 가 갈리면 CI 에서 잡는다) |
 | 정책 기본값이 바뀌었다 | `backend.md` 「정책 값」 |
 | 어댑터가 늘거나 바인딩이 바뀌었다 | `backend.md` 「바깥 세계」 |
 | 알림 종류가 늘었다 | `backend.md` 「알림」 |
@@ -56,14 +56,17 @@ cd backend && LAURIO_DB_PORT=55432 uv run python manage.py shell -c \
 
 # 화면
 find frontend/app operator/app -name page.tsx | sed 's|/page.tsx||'
+
+# Contest 전이 그래프 다이어그램 (docs/features/backend.md 「Contest 의 상태」 절)
+cd backend && uv run python manage.py print_contest_transition_diagram
 ```
 
 ## 마지막 실측
 
-**2026-09-09**, 커밋 `621da6c` 기준. 아래 수치는 그 시점에 위 명령으로 뽑았다.
+**2026-09-09**, 커밋 `abf9276` 기준. 아래 수치는 그 시점에 위 명령으로 뽑았다.
 
 - 공개·운영자·내부 API 오퍼레이션 **127개** (경로 111개)
 - 등록된 스캔 **23개** (전부 60초 주기)
 - 공개 앱 화면 **27개**, 운영자 앱 화면 **10개**
-- ADR **33개**
-- 백엔드 테스트 **1554건** 통과·1건 skip
+- ADR **34개**
+- 백엔드 테스트 **1587건** 통과·1건 skip

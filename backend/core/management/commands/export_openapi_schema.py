@@ -15,6 +15,7 @@ import json
 from django.core.management.base import BaseCommand, CommandParser
 
 from config.api import api
+from core.management.stdout_utf8 import write_stdout_utf8
 
 
 class Command(BaseCommand):
@@ -37,29 +38,9 @@ class Command(BaseCommand):
             with open(output_path, "w", encoding="utf-8", newline="\n") as f:
                 f.write(payload)
         else:
-            self._write_stdout_utf8(payload)
-
-    def _write_stdout_utf8(self, payload: str) -> None:
-        """`self.stdout` 로 UTF-8을 강제해서 쓴다.
-
-        코디네이터 리뷰 지적: `--output` 없이 표준출력으로 그대로 돌리는 것이 이
-        명령의 문서화된 기본 사용법인데(이 파일의 모듈 docstring, CLAUDE.md), 그
-        경로만 콘솔의 로케일 코덱을 그대로 썼다. 이 저장소의 개발 플랫폼인
-        Windows 콘솔의 기본 코덱(cp949)은 스키마에 섞인 한글 설명(백엔드 Schema
-        docstring 원문, 예: em dash "—")을 인코딩하지 못해
-        `UnicodeEncodeError` 로 죽는다 — `--output` 경로만 안전한 걸로는
-        부족하다.
-
-        실제 콘솔에 연결된 스트림은 바이트 버퍼(`.buffer`)를 갖고 있으므로 그걸
-        직접 얻어 UTF-8로 인코딩한 바이트를 쓴다. 테스트가
-        `call_command(..., stdout=StringIO())` 로 바꿔치기한 스트림처럼 버퍼가
-        없으면(`OutputWrapper.__getattr__` 이 위임하다 `AttributeError` 를
-        던지고 `getattr` 의 기본값으로 떨어진다) 애초에 인코딩 문제가 없으므로
-        그냥 문자열로 쓴다.
-        """
-        buffer = getattr(self.stdout, "buffer", None)
-        if buffer is not None:
-            buffer.write(payload.encode("utf-8"))
-            buffer.flush()
-        else:
-            self.stdout.write(payload, ending="")
+            # `--output` 없이 표준출력으로 그대로 돌리는 것이 이 명령의 문서화된
+            # 기본 사용법이다(이 파일의 모듈 docstring, CLAUDE.md) — Windows 콘솔의
+            # 기본 코덱(cp949)이 스키마에 섞인 한글 설명을 인코딩 못 해 죽는 것을
+            # `core.management.stdout_utf8.write_stdout_utf8`(#257 이 세 번째 사본을
+            # 만드는 대신 여기로 모았다)가 막는다.
+            write_stdout_utf8(self.stdout, payload)

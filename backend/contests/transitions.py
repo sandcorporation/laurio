@@ -140,14 +140,19 @@ CONTEST_TRANSITIONS: dict[str, ContestTransition] = {
 @dataclass(frozen=True)
 class ContestInPlaceUpdate:
     """전이가 아닌 제자리 갱신 하나 — `from_state == to_state`. `claim_transition` 의
-    조건부 UPDATE 규율과 `auto_now` 를 빌려 쓸 뿐 상태는 바뀌지 않는다."""
+    조건부 UPDATE 규율과 `auto_now` 를 빌려 쓸 뿐 상태는 바뀌지 않는다.
 
-    name: str
+    `name` 필드가 없다(`ContestTransition` 과 다르다) — 이 레지스트리는 하나뿐이고
+    이름은 `CONTEST_IN_PLACE_UPDATES` 의 딕셔너리 키 하나로만 산다. `ContestTransition`
+    처럼 `name=` 을 따로 들고 있으면 키와 그 값이 갈릴 수 있는 두 번째 자리가 생긴다
+    (아래 `CONTEST_TRANSITIONS` 의 키/`name` 일치 검사가 정확히 그 문제를 겨냥한다) —
+    필드 자체를 없애면 그 문제가 애초에 생기지 않는다."""
+
     state: str
 
 
 CONTEST_IN_PLACE_UPDATES: dict[str, ContestInPlaceUpdate] = {
-    "judging-extension": ContestInPlaceUpdate(name="judging-extension", state=Contest.Status.CLOSED),
+    "judging-extension": ContestInPlaceUpdate(state=Contest.Status.CLOSED),
 }
 
 
@@ -159,6 +164,20 @@ if _duplicate_names:
     raise RuntimeError(
         f"전이와 제자리 갱신 이름이 겹친다: {sorted(_duplicate_names)} — 하나의 이름은 "
         "전이 아니면 제자리 갱신, 둘 다일 수 없다"
+    )
+
+_renamed_transitions = {
+    key: edge.name for key, edge in CONTEST_TRANSITIONS.items() if edge.name != key
+}
+if _renamed_transitions:
+    # ContestTransition 은 __post_init__ 의 오류 메시지에 자기 이름을 적어야 해서
+    # `name` 필드를 그대로 갖고 있다(위 ContestInPlaceUpdate 와 다른 점) — 그런데
+    # 그 값이 딕셔너리 키와 갈리면 __post_init__ 의 오류 메시지·다이어그램의 간선
+    # 라벨(딕셔너리 키를 쓴다)이 서로 다른 이름을 말하게 된다. 하나를 고치고 다른
+    # 하나를 잊는 사고를 여기서 막는다.
+    raise RuntimeError(
+        f"CONTEST_TRANSITIONS 의 키와 그 값의 name 이 다르다: {_renamed_transitions} — "
+        "둘 다 같은 문자열이어야 한다"
     )
 
 
@@ -221,3 +240,128 @@ def contest_transition_spec(name: str, *, extra_fields=None) -> TransitionSpec:
         state_field=_STATUS_FIELD,
         extra_fields=extra_fields,
     )
+
+
+# ---------------------------------------------------------------------------
+# 그래프의 모순을 잡는 세 검사가 읽는 두 선언 (#257).
+# ---------------------------------------------------------------------------
+
+#: 생성(이 그래프 밖, 위 모듈 독스트링)이 실제로 만들어내는 상태 — `contests/api.py`의
+#: `create_contest`와 `contests/assignment_api.py`의 `create_assignment` 둘 다 지금
+#: `Contest.Status.DRAFT` 하나만 리터럴로 찍는다. 도달 불가능 검사(아래 그래프 검사
+#: 참고)가 "이 상태는 간선으로도 못 오고 생성으로도 못 온다"를 판정할 때 이 집합을
+#: 더한다 — 시드(`seed_e2e_contests`·`seed_demo_contests`)가 임의 상태를 변수로
+#: 찍는 것은 생성의 정의 자체가 아니라 테스트 픽스처의 특권이라 여기 넣지 않는다.
+#:
+#: **손으로 든 값이다 — 코드가 자동으로 맞춰 주지 않는다.** 이 상수와 실제
+#: `Contest.objects.create(status=Contest.Status.DRAFT, ...)` 호출 세 곳이 갈리지
+#: 않는지는 `tests/test_contest_status_writes_are_declared.py` 의 AST 스캔이 정적으로
+#: 확인한다(리터럴 `Contest.Status.<이름>` 만 — 시드처럼 변수를 넘기는 자리는 정적으로
+#: 확인할 수 없어 그 스캔도 건너뛴다, 그 파일의 독스트링 참고).
+CREATION_STATES: frozenset[str] = frozenset({Contest.Status.DRAFT})
+
+#: 끝 상태 — 나가는 간선이 없어도 정상인 상태들(선정 완료·심사기간 종료·과제 마감).
+#: 「나가는 길이 없는 상태」 검사(아래)가 이 목록에 없는 상태는 반드시 나가는 간선이
+#: 있어야 한다고 요구한다 — 이 목록에 없이 나가는 길이 없으면 그건 갇힌 것이다.
+#:
+#: **`{to_state 전체} - {from_state 전체}` 로 파생하지 않는다 — 일부러다.** 지금은
+#: 그 파생이 이 리터럴과 우연히 같은 값을 내놓겠지만, "끝 상태 = 나가는 간선이 없는
+#: 상태"로 정의를 뒤집으면 `test_every_non_terminal_state_has_an_outgoing_edge` 가
+#: 항상 참인 동어반복이 된다 — 갇힌 상태가 생겨도 그 상태가 자동으로 "끝"으로
+#: 재분류되어 테스트가 계속 초록으로 남는다. 그러면 그 테스트는 아무것도 지키지
+#: 않으면서 지키고 있는 것처럼 보인다(위 도달 불가능 검사의 「래칫」과 같은 종류의
+#: 함정이지만 방향이 반대다 — 그건 오늘 아무것도 안 잡아서 위험해 보이고, 이건
+#: 스스로 조용해질 수 있어서 위험하다). 그래서 끝 상태는 도메인 판단으로 사람이
+#: 적는다 — 나가는 간선이 없다는 사실에서 역산하지 않는다.
+TERMINAL_STATES: frozenset[str] = frozenset(
+    {Contest.Status.AWARDED, Contest.Status.JUDGING_ENDED, Contest.Status.ASSIGNMENT_CLOSED}
+)
+
+
+@dataclass(frozen=True)
+class ContestGraphValidation:
+    """`validate_contest_transition_graph()` 의 결과 — 그래프 자체의 모순 셋."""
+
+    unreachable_states: frozenset[str]
+    unregistered_scan_edges: frozenset[str]
+    stuck_states: frozenset[str]
+
+    @property
+    def problems(self) -> list[str]:
+        problems = []
+        if self.unreachable_states:
+            problems.append(
+                f"어느 간선으로도, 생성으로도 닿지 않는 상태: {sorted(self.unreachable_states)}"
+            )
+        if self.unregistered_scan_edges:
+            problems.append(
+                f"시간기반 전이인데 스캔 등록부에 없다(영원히 안 일어난다): "
+                f"{sorted(self.unregistered_scan_edges)}"
+            )
+        if self.stuck_states:
+            problems.append(
+                f"끝 상태가 아닌데 나가는 간선이 없다(갇힌 상태): {sorted(self.stuck_states)}"
+            )
+        return problems
+
+
+def validate_contest_transition_graph(*, scan_registry) -> ContestGraphValidation:
+    """그래프 자체가 스스로 모순인 세 경우를 찾는다(#257) — 도달 불가능한 상태, 스캔
+    등록부에 없는 시간기반 전이, 끝이 아닌데 나가는 간선이 없는 상태(갇힌 상태).
+
+    `scan_registry` 를 인자로 받아 이 함수를 순수하게 남긴다 — `core.scans` 를 이
+    모듈이 임포트하지 않는다(호출부, 즉 테스트가 `core.scans.SCAN_REGISTRY` 를 넘긴다).
+
+    **`django.core.checks` 로 등록하지 않는다 — 의도적인 선택이다.** 이 모듈 위쪽의
+    「이름이 겹치면 즉시 죽는다」 두 가드(`_duplicate_names`·`_renamed_transitions`)는
+    부팅 시점에 예외로 터진다. 이 함수가 찾는 셋은 그러지 않는다 — 이유가 다르기
+    때문이다. 이름 충돌은 **런타임 정확성 버그**다: 조회가 조용히 엉뚱한 간선으로
+    풀려 실제 요청이 잘못된 UPDATE 를 낸다. 이 함수가 찾는 것(도달 불가능·미등록
+    스캔·갇힌 상태)은 **모델링 결함**이다 — 지금 선언된 간선의 동작을 하나도 깨뜨리지
+    않는다, 다만 그래프의 모양이 이상하다는 신호다. 정확성 버그는 어떤 환경(로컬·CI·
+    staging·prod)에서도 조용히 넘어가면 안 되므로 부팅 자체를 막고, 모델링 결함은
+    배포 전에 CI 의 `pytest` 잡(모든 티켓이 이미 통과해야 하는 게이트, CLAUDE.md
+    「티켓을 닫는 기준」)이 잡으면 충분하다 — `check_adapter_mode`(#83)처럼 프로덕션
+    부팅 자체를 거부할 만큼 위험하지 않다.
+    """
+
+    reachable = set(CREATION_STATES) | {edge.to_state for edge in CONTEST_TRANSITIONS.values()}
+    unreachable_states = frozenset(set(Contest.Status) - reachable)
+
+    unregistered_scan_edges = frozenset(
+        name
+        for name, edge in CONTEST_TRANSITIONS.items()
+        if isinstance(edge, ScanContestTransition) and name not in scan_registry
+    )
+
+    non_terminal = set(Contest.Status) - TERMINAL_STATES
+    have_outgoing_edge = {edge.from_state for edge in CONTEST_TRANSITIONS.values()}
+    stuck_states = frozenset(non_terminal - have_outgoing_edge)
+
+    return ContestGraphValidation(
+        unreachable_states=unreachable_states,
+        unregistered_scan_edges=unregistered_scan_edges,
+        stuck_states=stuck_states,
+    )
+
+
+def contest_transition_diagram() -> str:
+    """`CONTEST_TRANSITIONS`/`CONTEST_IN_PLACE_UPDATES` 에서 mermaid `stateDiagram-v2`
+    텍스트를 낸다(#257) — 손으로 그리지 않는다.
+
+    전이는 화살표(`A --> B : 이름`)로, 제자리 갱신은 화살표가 아니라 `note` 로 그린다
+    — 심사 연장이 CLOSED 에서 CLOSED 로 가는 화살표를 그리면 도메인에 없는 자기
+    자신으로의 전이가 그려진다(위 모듈 독스트링 「제자리 갱신은 전이가 아니다」).
+
+    `docs/features/backend.md` 의 「Contest 의 상태」 절에 붙는 블록과 **글자 그대로**
+    같아야 한다 — `tests/test_contest_transition_graph.py` 가 재생성해 그 파일과
+    비교한다(다이어그램이 선언과 갈라지면 그 테스트가 빨개진다). 사람이 다시 만들
+    때는 `cd backend && uv run python manage.py print_contest_transition_diagram`.
+    """
+
+    lines = ["stateDiagram-v2"]
+    for name, edge in CONTEST_TRANSITIONS.items():
+        lines.append(f"    {edge.from_state} --> {edge.to_state} : {name}")
+    for name, update in CONTEST_IN_PLACE_UPDATES.items():
+        lines.append(f"    note right of {update.state} : {name} (제자리 갱신, 상태 불변)")
+    return "\n".join(lines)
