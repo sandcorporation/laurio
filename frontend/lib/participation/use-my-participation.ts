@@ -78,6 +78,11 @@ export const NEXT_ACTION_LABELS: Record<NextAction, NextActionLabel> = {
     payoutStage: true,
   },
   not_selected: { text: "선정되지 않았습니다", mine: false, payoutStage: false },
+  // 과제(Assignment, ADR-0028)가 채점을 마친 뒤의 끝난 자리다(#248). 과제에는
+  // 이의도 인수도 배분도 없다 — `not_selected`("미선정")나
+  // `awaiting_distribution`("상금 배분을 기다리는 중")을 쓰면 과제에 없는
+  // 개념을 말하게 된다.
+  assignment_scored: { text: "채점이 완료되었습니다", mine: false, payoutStage: false },
   // 끝난 뒤에도 내역을 다시 볼 수 있어야 한다 — 얼마가 떼였는지 확인할 곳이
   // 여기밖에 없다.
   payout_complete: { text: "지급이 완료되었습니다", mine: false, payoutStage: true },

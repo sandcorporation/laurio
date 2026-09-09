@@ -323,6 +323,46 @@ def test_student_sees_own_score_and_reasoning_with_no_appeal_window(client, land
 
 
 @pytest.mark.django_db
+def test_scored_assignment_submission_next_action_names_no_missing_concept(client, landing_type):
+    """#248 — 채점이 끝난 과제 제출의 `next_action`이 과제에 없는 개념(이의·인수·
+    배분)을 가리키면 안 된다(ADR-0028).
+
+    `submissions.participation.next_action_for`는 공모전을 염두에 두고
+    짜였다 — 이의 창(`appeal_window_open`)과 심사 창(`judging_window_open`)이
+    둘 다 거짓이면(과제는 항상 그렇다, 위 다른 테스트가 이미 고정한 사실) 그
+    뒤에 남는 유일한 기본 분기는 `AWAITING_DISTRIBUTION`("상금 배분을
+    기다리는 중입니다")이다. 과제에는 Award도 Distribution도 없으므로 그
+    문장은 거짓이고, 학생 화면(#248)이 그 거짓을 그대로 옮겨 보여주게 된다."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    assignment = _create_and_open_assignment(
+        client, deliverable_type_ids=[landing_type.id], sponsor_uid="ascore-sponsor-nextaction",
+        deadline_at=deadline,
+    )
+    student_pair = _login(client, "ascore-student-nextaction")
+    student_id = client.get(
+        "/api/accounts/me", **_auth_header(student_pair["access"])
+    ).json()["id"]
+    submission = _submit_scoreable(client, student_pair["access"], student_id, assignment)
+
+    _move_deadline_into_the_past(assignment["id"], deadline=deadline)
+    client.post(TICK_URL, **_internal_headers())
+
+    own = client.get(
+        f"{CONTESTS_URL}/{assignment['id']}/submissions/me", **_auth_header(student_pair["access"])
+    )
+    assert own.status_code == 200, own.content
+    assert own.json()["next_action"] == "assignment_scored"
+
+    # 「내 참가 현황」도 같은 값을 낸다 — 판정기가 하나(`next_action_for`)뿐이라
+    # 두 조회가 갈릴 수 없다.
+    mine = client.get("/api/submissions/mine", **_auth_header(student_pair["access"]))
+    assert mine.status_code == 200, mine.content
+    (row,) = [item for item in mine.json()["items"] if item["submission_id"] == submission["id"]]
+    assert row["next_action"] == "assignment_scored"
+
+
+@pytest.mark.django_db
 def test_creating_an_appeal_for_an_assignment_submission_is_rejected(client, landing_type):
     """과제에는 Appeal 이 없다(스펙 #197 Out of Scope). `Contest.appeal_window_open`이
     심사기간 없는 Contest 를 "닫히지 않았다"로 답해 왔는데, Assignment 는 심사기간이

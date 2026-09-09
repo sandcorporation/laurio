@@ -4191,7 +4191,7 @@ export interface components {
          * @description Developer 가 지금 무엇을 해야 하는가 — 또는 무엇을 기다리는가.
          * @enum {string}
          */
-        NextAction: "awaiting_scoring" | "awaiting_judging" | "awaiting_appeal_ruling" | "awaiting_distribution" | "awaiting_handover_release" | "awaiting_seller_registration" | "can_edit_submission" | "can_appeal" | "request_payout" | "submit_tax_identity" | "not_selected" | "payout_complete" | "retry_transfer" | "awaiting_transfer_resolution";
+        NextAction: "awaiting_scoring" | "awaiting_judging" | "awaiting_appeal_ruling" | "awaiting_distribution" | "awaiting_handover_release" | "awaiting_seller_registration" | "can_edit_submission" | "can_appeal" | "request_payout" | "submit_tax_identity" | "not_selected" | "payout_complete" | "assignment_scored" | "retry_transfer" | "awaiting_transfer_resolution";
         /** NotificationOut */
         NotificationOut: {
             /** Context */
