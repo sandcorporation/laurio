@@ -11,7 +11,7 @@
     "test": "pnpm run test:unit && pnpm run test:public && pnpm run test:operator && pnpm run test:classroom",
     "test:public": "playwright test --project=public --grep-invert @exclusive && playwright test --project=public --grep @exclusive --workers=1",
     "test:operator": "playwright test --project=operator --grep-invert @exclusive && playwright test --project=operator --grep @exclusive --workers=1",
-    "test:classroom": "playwright test --project=classroom --grep-invert @exclusive && playwright test --project=classroom --grep @exclusive --workers=1",
+    "test:classroom": "playwright test --project=classroom --grep-invert @exclusive && playwright test --project=classroom --grep @exclusive --workers=1 --pass-with-no-tests",
     "generate:api": "pnpm --dir ../packages/bff-client generate:api"
   },
   "dependencies": {

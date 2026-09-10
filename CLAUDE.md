@@ -558,8 +558,14 @@ pnpm --dir frontend exec playwright test --project=public e2e/payout.spec.ts -g 
 pnpm --dir frontend test            # 전체 (102건이던 시절 약 1.8분 — 지금 124건)
 pnpm --dir frontend test:public     # 공개 앱만 (74건이던 시절 약 1.4분 — 지금 87건)
 pnpm --dir frontend test:operator   # 운영자 앱만 (28건이던 시절 약 25초 — 지금 32건)
-pnpm --dir frontend test:classroom  # 강의실만 (#276, 5건 — 아직 실측 없음, CI 첫 실행이 잰다)
+pnpm --dir frontend test:classroom  # 강의실만 (6건, CI 첫 실행 1.7초)
 ```
+
+**`test:classroom` 만 `--pass-with-no-tests` 를 붙인다.** 세 스크립트는 2단계다 —
+`@exclusive` 아닌 것을 병렬로 돌리고, `@exclusive` 를 워커 하나로 다시 돈다. 그런데
+강의실에는 아직 `@exclusive` 스펙이 없어 둘째 명령이 「No tests found」로 **exit 1**
+한다(CI 가 실제로 그렇게 빨갛게 났다). 스크립트 모양은 그대로 두고 그 한 자리만
+연다 — 나중에 강의실에 배타 스펙이 생기면 아무것도 안 고쳐도 돌아간다.
 
 **293건이 102건이 됐다.** 남긴 기준은 위 「남길 것」이다. 지운 것의 대부분은 「로그인된
 상태에서 화면이 서버 값을 어떻게 그리는가」였고, 그 사실들은 대개 백엔드 테스트가 이미
