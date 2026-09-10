@@ -148,6 +148,16 @@ class SubmissionAsset(models.Model):
     # 수정을 여는 기능이 생기면) 느슨해져도 조용히 깨지지 않게 한다.
     created_by_platform = models.BooleanField(default=False)
 
+    # 이 자료의 **파일**이 보존 기간을 넘겨 파기된 시각(ADR-0035) — 행 자체는
+    # 지우지 않는다. null이면 아직 파일이 있다. `DEMO_VIDEO`에만 채워진다 —
+    # 소스는 파기 대상이 아니고(인수·이의 심판이 여는 대상이라 문제가 없는
+    # 곳을 건드리지 않는다), URL 종류(`DEMO_URL`·`REPOSITORY`)는 storage를
+    # 거치지 않아 지울 파일 자체가 없다. `submissions.retention` 의 스캔만
+    # 이 컬럼을 채운다. 값이 차도 `Evidence.asset` 은 그대로 살아, 그 영상을
+    # 가리키던 근거가 함께 사라지지 않는다 — `Evidence.asset` 이 가리키는 것은
+    # 이 행이고, 이 행은 파일이 사라져도 존재한다.
+    destroyed_at = models.DateTimeField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

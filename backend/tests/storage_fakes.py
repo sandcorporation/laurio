@@ -35,3 +35,12 @@ class FakeTargetStateResolver:
                 owner_id = None
 
         return TargetState(visibility=visibility, owner_id=owner_id)
+
+
+class FakeAlwaysDestroyedResolver:
+    """storage.policy.ObjectDestructionResolver 더블(#262) — 항상 "파기됐다"고
+    답한다. storage 앱이 실제 도메인 모델을 몰라도 다운로드의 "파기 응답" 경로를
+    검증할 수 있게 한다."""
+
+    def resolve(self, object_key: str) -> bool:
+        return True

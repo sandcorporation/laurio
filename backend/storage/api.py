@@ -14,6 +14,11 @@ content-type을 `SubmissionAsset`·`handovers.BuildAsset`에 남기는 것은 �
 쪽 책임이다(#241 결정). `STORAGE_CONTENT_TYPE_RESOLVER`가 그 값을 돌려주면
 `storage.filenames.build_download_filename`이 파일명을 만든다 — content-type을
 몰라도(리졸버가 None을 돌려줘도) 이름 자체는 항상 만든다.
+
+**파기 여부(#262)도 같은 방식으로 위임한다.** 보존 기간이 지나 파일만 지워진
+오브젝트인지는 `STORAGE_DESTRUCTION_RESOLVER`가 답한다 — 그러면 `request_download`는
+presigned URL을 발급하지 않고 `expired=True`를 낸다. 오류(4xx)가 아니라 200이다:
+권한도 있고 자료도 있지만 내려줄 바이트만 없다는 사실이 오류가 아니라서다.
 """
 
 from __future__ import annotations
@@ -26,7 +31,12 @@ from ninja import Field, Router, Schema
 
 from storage.adapters import get_storage_adapter
 from storage.filenames import build_download_filename
-from storage.policy import StorageAccessDenied, StorageAccessPolicy, get_content_type_resolver
+from storage.policy import (
+    StorageAccessDenied,
+    StorageAccessPolicy,
+    get_content_type_resolver,
+    get_destruction_resolver,
+)
 
 router = Router(tags=["storage"])
 
@@ -64,8 +74,12 @@ class DownloadRequest(Schema):
 
 
 class DownloadResponse(Schema):
-    download_url: str
-    expires_at: str
+    # 보존 기간이 지나 파일이 파기된 오브젝트(#262, ADR-0035)는 `expired=True`고
+    # 나머지 둘은 null이다 — 자료 행·근거는 그대로 있지만 내려줄 파일이 없다는
+    # 뜻이라, 이 요청 자체는 정상(200)으로 끝난다. 오류도 빈 응답도 아니다.
+    download_url: str | None = None
+    expires_at: str | None = None
+    expired: bool = False
 
 
 def new_object_key(target_ref: str) -> str:
@@ -108,6 +122,12 @@ def request_download(request, payload: DownloadRequest) -> DownloadResponse:
         raise StorageAccessDenied("object_key가 target_ref에 속하지 않는다")
 
     StorageAccessPolicy().authorize_download(request, payload.target_ref)
+
+    if get_destruction_resolver().resolve(payload.object_key):
+        # 보존 기간이 지나 파일만 파기됐다(#262) — 권한은 있었지만 내려줄
+        # 바이트가 없다. presigned URL을 발급해도 스토리지가 404를 낼 뿐이니
+        # 발급 자체를 건너뛴다.
+        return DownloadResponse(expired=True)
 
     content_type = get_content_type_resolver().resolve(payload.target_ref, payload.object_key)
     filename = build_download_filename(content_type)

@@ -104,6 +104,12 @@ class SubmissionAssetOut(Schema):
     # 낸 제출의 채점 박제가 남긴 소스 자료만 True다. 화면이 "이 자료는 지우거나
     # 고칠 수 없다"를 보일 근거가 된다.
     created_by_platform: bool = False
+    # 시연 영상 파일의 보관 시점 (#262, ADR-0035) — 그 시각이 지나면 스토리지
+    # 오브젝트가 지워진다. `kind`가 `demo_video`가 아니거나, 아직 그 시각이
+    # 정해지지 않았으면(심사기간이 아직 시작되지 않은 진행 중 공모전) null이다.
+    demo_video_retention_deadline: datetime | None = None
+    # 그 파일이 이미 파기됐는가 — True면 위 시점은 지나간 과거를 말한다.
+    demo_video_destroyed: bool = False
 
 
 class SubmissionIn(Schema):

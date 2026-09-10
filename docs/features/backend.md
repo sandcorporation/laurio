@@ -149,7 +149,7 @@ fail-closed 라 구멍은 아니지만 원인을 찾기 어렵다.
 **소스는 선정 전까지 발주자에게 보이지 않는다**(ADR-0014). 운영자는 이의 심판을 위해 볼 수
 있지만 **모든 열람이 기록된다**(ADR-0022).
 
-## 스스로 도는 일 — 스캔 23개
+## 스스로 도는 일 — 스캔 24개
 
 **시간은 시임이 아니라 주입 가능한 의존성이다**(ADR-0003). 시각이 지났다고 상태가 저절로
 바뀌지 않는다 — 스캔이 조건부 UPDATE 로 옮긴다. 등록부가 곧 beat 스케줄이고, 전부 60초
@@ -164,6 +164,7 @@ fail-closed 라 구멍은 아니지만 원인을 찾기 어렵다.
 | 배분·지급 | `distribution-create` · `distribution-share-payout` · `handover-release` · `payout-awaits-you` · `seller-registration-recovery` |
 | 알림 | `notification-dispatch-deferred` · `notification-reclaim-stuck` · `deadline-reminder` · `judging-end-reminder` · `distribution-final-warning` · `award-result-notice-recovery` · `distribution-result-notice-recovery` |
 | 개인정보 | `identity-dormancy-purge` · `retained-identity-purge` |
+| 자료 | `demo-video-retention-purge` |
 | 데모 | `scheduled-state-demo` |
 
 `POST /api/internal/tick` 이 등록 순서로 전부 한 바퀴 돌고, `POST /api/internal/scans/{name}`
@@ -179,6 +180,13 @@ fail-closed 라 구멍은 아니지만 원인을 찾기 어렵다.
 
 **Score 는 불변이다**(ADR-0006). 고치는 길은 없고, 잘못된 판정의 구제는 이의와 원장으로만
 한다.
+
+**시연 영상은 보존 기간 뒤 파일만 파기된다**(ADR-0035). `demo-video-retention-purge`가
+이의 창의 끝(`judging_ends_at`, 공모전) 또는 마감(`deadline_at`, Assignment — 심사기간이
+없다) + `demo_video_retention_grace_days`가 지난 시연 영상을 집어 **스토리지 오브젝트만**
+지운다. 자료 행·라벨·그것을 가리키던 근거는 그대로 남는다 — Score는 불변인데(ADR-0006)
+판정의 근거만 없어지는 사고를 피한다. 소스는 이 스캔의 대상이 아니다. 파일이 사라진
+자료의 다운로드는 오류가 아니라 "보존 기간이 지났다"를 정상 응답으로 답한다.
 
 ## Contest 의 상태
 
@@ -261,7 +269,7 @@ CI의 `pytest` 잡이 매번 같은 텍스트를 재생성해 이 블록과 글�
 | 자료 개수 상한 | 소스 5 · 영상 5 · 데모 URL 10 · 저장소 8 · 채점 입력 합산 8 · 공모전 이미지 10 · 스크린샷 10 |
 | 판매자 주간 한도 | 10,000,000원 |
 | 자료 업로드 용량 상한(#263, 자리만 있다 — 강제는 #261) | 소스 50MB · 시연 영상 500MB · 스크린샷 10MB · 인수 산출물 20MB |
-| 시연 영상 보존 유예일수(#263, ADR-0035, 파기는 #262) | 30일 |
+| 시연 영상 보존 유예일수(ADR-0035, `demo-video-retention-purge` 스캔이 읽는다) | 30일 |
 
 ## 바깥 세계
 

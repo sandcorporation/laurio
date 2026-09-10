@@ -315,6 +315,53 @@ def test_object_key_with_path_traversal_is_rejected(client):
 
 
 @pytest.mark.django_db
+@override_settings(
+    STORAGE_TARGET_RESOLVER=FAKE_RESOLVER,
+    STORAGE_DESTRUCTION_RESOLVER="tests.storage_fakes.FakeAlwaysDestroyedResolver",
+)
+def test_download_of_a_destroyed_object_reports_expired_not_an_error(client):
+    """보존 기간이 지나 파일만 지워진 오브젝트(#262, ADR-0035)는 권한이 있어도
+    presigned URL을 받지 못한다 — 대신 200과 함께 "만료" 사실을 정상 응답으로
+    받는다. storage 앱은 도메인 모델을 모르므로 이 더블로 확장점만 확인한다."""
+
+    access, user_id = _login_and_get_id(client)
+    target_ref = f"private:{user_id}:submission-source"
+
+    response = client.post(
+        "/api/storage/downloads",
+        data={"target_ref": target_ref, "object_key": _object_key(target_ref)},
+        content_type="application/json",
+        **_auth_header(access),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["expired"] is True
+    assert body["download_url"] is None
+    assert body["expires_at"] is None
+
+
+@pytest.mark.django_db
+@override_settings(STORAGE_TARGET_RESOLVER=FAKE_RESOLVER)
+def test_download_of_a_non_destroyed_object_is_not_expired_by_default(client):
+    """기본 리졸버(`UnknownDestructionResolver`)는 항상 "파기되지 않았다"만
+    답한다 — 지금까지의 동작(항상 presigned URL을 발급한다)이 그대로다."""
+
+    access, user_id = _login_and_get_id(client)
+    target_ref = f"private:{user_id}:submission-source"
+
+    response = client.post(
+        "/api/storage/downloads",
+        data={"target_ref": target_ref, "object_key": _object_key(target_ref)},
+        content_type="application/json",
+        **_auth_header(access),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["expired"] is False
+
+
+@pytest.mark.django_db
 @override_settings(STORAGE_TARGET_RESOLVER="storage.policy.DenyUnknownTargetResolver")
 def test_download_falls_back_to_deny_by_default_without_a_real_resolver(client):
     """리졸버가 아무 도메인도 모르면(fail-closed 기본값) 로그인한 사용자라도

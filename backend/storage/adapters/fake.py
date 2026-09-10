@@ -151,6 +151,13 @@ class FakeStorageAdapter:
         self._store[(bucket, object_key)] = content
         self._content_types[(bucket, object_key)] = content_type or DEFAULT_CONTENT_TYPE
 
+    def delete_object(self, object_key: str, *, bucket: Bucket = Bucket.PRIVATE) -> None:
+        """실제 S3 호환 DeleteObject와 같은 semantics — 없는 키를 지워도 조용히
+        성공한다(#262의 멱등성 요구, 재시도가 예외를 만나지 않아야 한다)."""
+
+        self._store.pop((bucket, object_key), None)
+        self._content_types.pop((bucket, object_key), None)
+
     def written_content_type(self, object_key: str, *, bucket: Bucket = Bucket.PRIVATE) -> str | None:
         """`write_object`가 이 object_key에 실제로 기록한 content-type 을 돌려준다
         (#238) — 테스트가 "무엇이 실렸는지"를 관찰하는 유일한 창구다. 아직 쓰이지
