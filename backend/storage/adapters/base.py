@@ -142,11 +142,23 @@ class StorageAdapter(Protocol):
         낸다) — 이름이 없는 것보다는 확장자가 없는 이름이 낫다."""
         ...
 
-    def read_object(self, object_key: str, *, bucket: Bucket = Bucket.PRIVATE) -> bytes | None:
+    def read_object(
+        self,
+        object_key: str,
+        *,
+        bucket: Bucket = Bucket.PRIVATE,
+        max_bytes: int | None = None,
+    ) -> bytes | None:
         """object_key가 가리키는 바이트를 서버 프로세스 자신의 자격증명으로 직접 읽는다.
 
         존재하지 않으면 None을 돌려준다(예외를 던지지 않는다) — 아직 업로드가 완료되지
         않은 object_key를 채점 스캔이 만났을 때, 그건 장애가 아니라 "아직" 상태다.
+
+        `max_bytes`를 주면 **앞에서 그만큼만** 읽는다(#268 후속). 형식을 알아내려고
+        매직 바이트 몇 개만 보는 호출자가 있는데(`backfill_asset_content_types`),
+        시연 영상은 상한이 500MB라 그걸 통째로 메모리에 올리는 것은 읽는 목적에
+        비해 터무니없다. 좁히는 인자일 뿐 새 능력이 아니다 — 주지 않으면 지금까지처럼
+        전부 읽는다. 오브젝트가 요청한 것보다 짧으면 있는 만큼만 온다.
         """
         ...
 

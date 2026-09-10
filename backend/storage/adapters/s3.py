@@ -158,15 +158,28 @@ class S3StorageAdapter:
         expires_at = datetime.now(timezone.utc) + expires_in
         return PresignedDownload(url=url, object_key=object_key, expires_at=expires_at)
 
-    def read_object(self, object_key: str, *, bucket: Bucket = Bucket.PRIVATE) -> bytes | None:
+    def read_object(
+        self,
+        object_key: str,
+        *,
+        bucket: Bucket = Bucket.PRIVATE,
+        max_bytes: int | None = None,
+    ) -> bytes | None:
+        # `max_bytes`는 Range 헤더로 내려보낸다 — 바이트를 받아 자르는 것이 아니라
+        # **애초에 그만큼만 받는다**(계약 참고). Range 는 끝을 포함하므로 -1 이다.
+        extra = {"Range": f"bytes=0-{max_bytes - 1}"} if max_bytes else {}
         try:
             response = self._client.get_object(
-                Bucket=self._bucket_name(bucket), Key=object_key
+                Bucket=self._bucket_name(bucket), Key=object_key, **extra
             )
         except ClientError as exc:
             error_code = exc.response.get("Error", {}).get("Code", "")
             if error_code in {"NoSuchKey", "404"}:
                 return None
+            # 오브젝트가 요청한 범위보다 짧으면 S3는 416 을 낼 수 있다 — 그건
+            # "없다"도 "장애"도 아니라 "더 짧다"이므로, 범위 없이 다시 읽는다.
+            if max_bytes and error_code in {"InvalidRange", "416"}:
+                return self.read_object(object_key, bucket=bucket)
             raise
         return response["Body"].read()
 

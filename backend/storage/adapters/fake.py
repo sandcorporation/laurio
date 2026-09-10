@@ -116,8 +116,17 @@ class FakeStorageAdapter:
         )
         return PresignedDownload(url=url, object_key=object_key, expires_at=expires_at)
 
-    def read_object(self, object_key: str, *, bucket: Bucket = Bucket.PRIVATE) -> bytes | None:
-        return self._store.get((bucket, object_key))
+    def read_object(
+        self,
+        object_key: str,
+        *,
+        bucket: Bucket = Bucket.PRIVATE,
+        max_bytes: int | None = None,
+    ) -> bytes | None:
+        content = self._store.get((bucket, object_key))
+        if content is None or max_bytes is None:
+            return content
+        return content[:max_bytes]
 
     def write_object(
         self,
