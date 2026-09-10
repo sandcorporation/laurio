@@ -12,9 +12,14 @@
 #   backend/             -> backend + celery-worker + celery-beat  (같은 Dockerfile, 이미지는 셋)
 #   frontend/            -> frontend
 #   operator/            -> operator
-#   packages/bff-shared/ -> frontend + operator                    (둘이 함께 쓴다)
-#   packages/bff-client/ -> frontend + operator                    (둘이 함께 쓴다)
-#   pnpm-lock.yaml       -> frontend + operator
+#   classroom/           -> classroom                              (#276/#277, ADR-0037)
+#   packages/bff-shared/ -> frontend + operator + classroom        (셋이 함께 쓴다)
+#   packages/bff-client/ -> frontend + operator                    (classroom 은 아직 안 쓴다 —
+#                                                                    화면이 백엔드 프록시를 아직
+#                                                                    안 타서 이 클라이언트가 필요
+#                                                                    없다, classroom/lib/proxy/
+#                                                                    allowlist.ts 의 빈 목록 참고)
+#   pnpm-lock.yaml       -> frontend + operator + classroom
 #   docker/*.Dockerfile / compose.<target>.yaml -> 그 파일이 짓는 것 전부
 #
 # **`backend` 만 바꿔 끼우는 것은 사고다.** celery-worker 와 beat 가 옛 코드로
@@ -111,11 +116,13 @@ touched() {
 BUILD_BACKEND=false
 BUILD_FRONTEND=false
 BUILD_OPERATOR=false
+BUILD_CLASSROOM=false
 
 if [ "$EVERYTHING" = true ]; then
   BUILD_BACKEND=true
   BUILD_FRONTEND=true
   BUILD_OPERATOR=true
+  BUILD_CLASSROOM=true
 else
   # 한 경로가 여러 서비스를 건드린다. 그 팬아웃이 이 스크립트의 전부다.
   if touched '^(backend/|docker/backend\.Dockerfile$)'; then
@@ -133,6 +140,9 @@ else
   if [ "$SHARED" = true ] || touched '^(operator/|docker/operator\.Dockerfile$)'; then
     BUILD_OPERATOR=true
   fi
+  if [ "$SHARED" = true ] || touched '^(classroom/|docker/classroom\.Dockerfile$)'; then
+    BUILD_CLASSROOM=true
+  fi
 
   # compose 파일 자체가 바뀌면 어느 서비스의 환경이 바뀌었는지 알 수 없다.
   # 전부 다시 세운다.
@@ -141,6 +151,7 @@ else
     BUILD_BACKEND=true
     BUILD_FRONTEND=true
     BUILD_OPERATOR=true
+    BUILD_CLASSROOM=true
   fi
 fi
 
@@ -164,6 +175,10 @@ fi
 if missing operator; then
   log "operator 컨테이너가 없다 — 굽는다."
   BUILD_OPERATOR=true
+fi
+if missing classroom; then
+  log "classroom 컨테이너가 없다 — 굽는다."
+  BUILD_CLASSROOM=true
 fi
 
 # NEXT_PUBLIC_TOSS_CLIENT_KEY 회전 감지 (#112 코드리뷰 지적 3). 이 값은
@@ -197,8 +212,9 @@ echo "계획"
 echo "  backend(+celery-worker,+celery-beat) : $(plan "$BUILD_BACKEND")"
 echo "  frontend                             : $(plan "$BUILD_FRONTEND")"
 echo "  operator                             : $(plan "$BUILD_OPERATOR")"
+echo "  classroom                            : $(plan "$BUILD_CLASSROOM")"
 
-if [ "$BUILD_BACKEND" = false ] && [ "$BUILD_FRONTEND" = false ] && [ "$BUILD_OPERATOR" = false ]; then
+if [ "$BUILD_BACKEND" = false ] && [ "$BUILD_FRONTEND" = false ] && [ "$BUILD_OPERATOR" = false ] && [ "$BUILD_CLASSROOM" = false ]; then
   log "바뀐 것이 없다. 배포할 것이 없다."
   $GIT rev-parse HEAD > "$DEPLOYED"
   exit 0
@@ -236,6 +252,7 @@ start_build() {
 if [ "$BUILD_BACKEND" = true ]; then start_build backend backend celery-worker celery-beat; fi
 if [ "$BUILD_FRONTEND" = true ]; then start_build frontend frontend; fi
 if [ "$BUILD_OPERATOR" = true ]; then start_build operator operator; fi
+if [ "$BUILD_CLASSROOM" = true ]; then start_build classroom classroom; fi
 
 BUILD_FAILED=""
 for entry in $PIDS; do
@@ -280,13 +297,14 @@ if [ "$BUILD_BACKEND" = true ]; then
 fi
 if [ "$BUILD_FRONTEND" = true ]; then $COMPOSE up -d --no-deps frontend; fi
 if [ "$BUILD_OPERATOR" = true ]; then $COMPOSE up -d --no-deps operator; fi
+if [ "$BUILD_CLASSROOM" = true ]; then $COMPOSE up -d --no-deps classroom; fi
 
 # ------------------------------------------------------- 떴는지 확인한다
 
 # 부팅 거부는 이 저장소가 **의도한** 동작이다(#83, #96) — 어댑터 값이나 OAuth
 # 자격증명이 풀리지 않으면 컨테이너가 뜨지 않는다. 그러니 "떴다"를 실제로
 # 확인해야 하고, 죽었으면 로그를 남겨야 원인을 안다.
-for svc in backend celery-worker celery-beat frontend operator; do
+for svc in backend celery-worker celery-beat frontend operator classroom; do
   cid=$($COMPOSE ps -q "$svc" 2>/dev/null | head -1)
   if [ -z "$cid" ]; then
     echo "[$svc] 컨테이너가 없다"

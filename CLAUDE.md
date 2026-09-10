@@ -22,6 +22,7 @@ cd backend && uv run pytest                           # 테스트
 | Redis | `16379` | 6379 | `LAURIO_REDIS_PORT` |
 | 공개 앱(`frontend/`) | `53000` | 3000 | `LAURIO_WEB_PORT` |
 | 운영자 앱(`operator/`, #63) | `53001` | 3000 | `LAURIO_OPERATOR_WEB_PORT` |
+| 강의실 앱(`classroom/`, #276) | `53002` | 3000 | `LAURIO_CLASSROOM_WEB_PORT` |
 
 호스트에서 `uv run pytest`를 돌릴 때 붙는 DB 포트 기본값도 `LAURIO_DB_PORT`를 따라간다
 (`backend/config/settings.py`). 컨테이너 안에서는 compose가 `POSTGRES_*`를 직접 주입한다.
@@ -34,7 +35,8 @@ docker compose -f docker/compose.dev.yaml up -d
 ```
 
 `docker/dev-env.sh` 가 체크아웃 경로에서 compose 프로젝트 이름과 **모든 포트**를 파생한다 —
-DB·Redis·MinIO·두 앱이 통째로 갈리므로 체인 둘이 서로의 데이터를 보지 않는다. 예전에는
+DB·Redis·MinIO·세 앱(#276부터 강의실이 더해졌다)이 통째로 갈리므로 체인 둘이 서로의
+데이터를 보지 않는다. 예전에는
 스택 하나를 공유하고 시드 이름 접두어로 막았는데, 그 방식은 전역 건수나 단일 행(정책·시계)
 앞에서는 성립하지 않는다.
 
@@ -59,7 +61,11 @@ DB·Redis·MinIO·두 앱이 통째로 갈리므로 체인 둘이 서로의 데�
 
 **staging 은 떠 있다** — `https://laurio.honeycombpizza.link`(공개 앱),
 `operator.laurio.honeycombpizza.link`(운영자 앱), `storage.honeycombpizza.link`(브라우저가
-직접 PUT 하는 MinIO). **그 MinIO 안에 버킷이 둘이다**(#233, ADR-0032) — 제출물이 사는
+직접 PUT 하는 MinIO), `classroom.laurio.honeycombpizza.link`(강의실 앱, #277 —
+`docker/compose.staging.yaml`의 `classroom` 서비스는 `${LAURIO_CLASSROOM_WEB_PORT:-3002}`에
+평문 HTTP로만 듣는다, 그 앞단에 이 도메인을 그 포트로 넘겨주는 TLS 종단 리버스 프록시가
+저장소 밖의 수작업으로 있어야 실제로 열린다 — storage.honeycombpizza.link의 버킷 생성과
+같은 종류의 바깥 작업이다). **그 MinIO 안에 버킷이 둘이다**(#233, ADR-0032) — 제출물이 사는
 비공개 버킷과, 공모전 이미지만 사는 **익명 읽기 버킷**(`laurio-staging-public-images`)이다.
 서버가 아니라 버킷을 가른다: 공개 읽기 정책이 버킷 단위라 이미지 쪽 설정을 잘못해도
 소스에 닿지 못한다. 버킷 생성·정책·CORS 는 이 저장소 밖의 수작업이다. 어댑터가 전부
@@ -164,8 +170,10 @@ Pipeline 이 아니라 **freestyle** 이고, 셸 스텝이 `sh ./deploy.sh stagi
 Dockerfile 을 쓰지만 공유 `image:` 태그가 없어 **이미지가 셋**이다 — `build backend`
 만 하면 워커 둘은 옛 이미지에 남고, `up -d` 는 바뀐 게 없으니 Running 이라 적고
 지나가 배포가 초록으로 끝난 채 스캔만 옛 코드로 돈다),
-`packages/bff-shared/` 와 `pnpm-lock.yaml` 은 **frontend + operator** 를 함께 간다.
-없는 컨테이너는 변경 여부와 무관하게 굽는다 — 「없음」은 「최신」이 아니다.
+`packages/bff-shared/` 와 `pnpm-lock.yaml` 은 **frontend + operator + classroom**(#277)을
+함께 간다 — `packages/bff-client/` 는 아직 **frontend + operator** 뿐이다(강의실은 이
+패키지를 쓰지 않는다, 위 「프론트엔드」절 참고). 없는 컨테이너는 변경 여부와 무관하게
+굽는다 — 「없음」은 「최신」이 아니다.
 
 **헬스 체크는 Host 헤더를 붙여야 한다.** 루프백으로 치면 Host 가 `127.0.0.1` 이
 되는데 그건 `ALLOWED_HOSTS` 에 없어 Django 가 400 을 낸다 — gunicorn 이 멀쩡히
@@ -324,7 +332,8 @@ Contest 전이 그래프를 한 곳에 선언하고 선언 밖을 정적으로 �
 확장자를 되돌리는 백필과 과제 소스 파일명에 제출자 이름을 붙인 것(#268 후속)으로
 1640건까지, 앱 경계를 테스트로 세운 것(#269)으로 1659건까지, 제출물을 공통 부모와
 공모전 자식으로 쪼갠 것(#270)으로 1661건까지, 공모전 제품 스위치(#271)로 1678건까지,
-`classroom` 앱을 세우고 경계표에 등록한 것(#275)으로 1679건까지
+`classroom` 앱을 세우고 경계표에 등록한 것(#275)으로 1679건까지, Class·Problem·
+체크리스트(#278·#282·#283)로 1699건까지
 여기까지 늘었다) `-n 4` 84초 → `-n auto` 57초.
 직렬로 보려면 `-n 0`.
 
@@ -382,21 +391,33 @@ LocMem 으로 바뀌면서 그 경로 자체가 사라졌다.
 
 Next.js + React. 저장소 루트가 pnpm 워크스페이스다(운영자 앱 04 #62, ADR-0021) —
 락파일은 루트의 `pnpm-lock.yaml` 하나뿐이고, 공개 앱(`frontend/`, 위치·패키지 이름
-변경 없음)·운영자 앱(`operator/`)·공유 BFF 패키지 둘이 그 멤버다 —
-`packages/bff-shared`(서버 쪽: 경로 순회 방어·Origin 검증·허용목록 검사 함수·백엔드
-전달 기계. 허용목록의 **내용**은 앱마다 자기 파일에 남는다)와 `packages/bff-client`
-(브라우저 쪽, #146: 인증 구역 호출의 클라이언트·`ApiResult`·`normalizeDetail`·
-`useBackendQuery`/`usePagedList`·생성 타입 `schema.gen.ts`). 명령은 그대로다 — 워크스페이스가
-생겨도 `pnpm --dir <앱>` 호출법은 바뀌지 않는다.
+변경 없음)·운영자 앱(`operator/`)·강의실 앱(`classroom/`, #276)·공유 BFF 패키지 둘이
+그 멤버다 — `packages/bff-shared`(서버 쪽: 경로 순회 방어·Origin 검증·허용목록 검사
+함수·백엔드 전달 기계. 허용목록의 **내용**은 앱마다 자기 파일에 남는다)와
+`packages/bff-client`(브라우저 쪽, #146: 인증 구역 호출의 클라이언트·`ApiResult`·
+`normalizeDetail`·`useBackendQuery`/`usePagedList`·생성 타입 `schema.gen.ts` — 강의실은
+아직 이 패키지를 쓰지 않는다, 백엔드 프록시 허용목록이 비어 있어 화면이 아직 그 클라이언트를
+쓸 일이 없다). 명령은 그대로다 — 워크스페이스가 생겨도 `pnpm --dir <앱>` 호출법은
+바뀌지 않는다.
 
-테스트 시임은 **앱마다 하나**다(ADR-0021, ADR-0017 개정) — 앱이 둘이어도 그 아래로
-내려가는 컴포넌트 테스트·모킹은 없다. `docker compose -f docker/compose.dev.yaml up`
-으로 두 앱이 다 뜬 스택을 띄운 뒤 `pnpm --dir frontend test` 로 Playwright 가 프로젝트
-둘로 두 앱을 한 번에 친다(공개 앱 스펙은 `frontend/e2e/*.spec.ts`, 운영자 앱 스펙은
-`frontend/e2e/operator/*.spec.ts` — `playwright.config.ts` 가 프로젝트마다 다른
-`testDir`·`baseURL` 을 준다). `LAURIO_E2E_BASE_URL`/`LAURIO_OPERATOR_E2E_BASE_URL`
-로 각 프로젝트의 `baseURL` 을 바꿀 수 있다(기본값은 위 포트 표와 같다).
-`pnpm --dir frontend typecheck`/`pnpm --dir operator typecheck` 는 스택 없이 돈다.
+테스트 시임은 **앱마다 하나**다(ADR-0021, ADR-0017 개정) — 앱이 셋(#276부터 강의실이
+더해졌다)이어도 그 아래로 내려가는 컴포넌트 테스트·모킹은 없다. `docker compose -f
+docker/compose.dev.yaml up` 으로 세 앱이 다 뜬 스택을 띄운 뒤 `pnpm --dir frontend test`
+로 Playwright 가 프로젝트 셋으로 세 앱을 한 번에 친다(공개 앱 스펙은
+`frontend/e2e/*.spec.ts`, 운영자 앱 스펙은 `frontend/e2e/operator/*.spec.ts`, 강의실
+스펙은 `frontend/e2e/classroom/*.spec.ts` — `playwright.config.ts` 가 프로젝트마다 다른
+`testDir`·`baseURL` 을 준다). `LAURIO_E2E_BASE_URL`/`LAURIO_OPERATOR_E2E_BASE_URL`/
+`LAURIO_CLASSROOM_E2E_BASE_URL` 로 각 프로젝트의 `baseURL` 을 바꿀 수 있다(기본값은 위
+포트 표와 같다). `pnpm --dir frontend typecheck`/`pnpm --dir operator typecheck`/
+`pnpm --dir classroom typecheck` 는 스택 없이 돈다.
+
+**강의실은 자기 로그인을 갖지 않는다**(ADR-0038, #276) — 회원은 공개 앱과 공유한다.
+그래서 공개 앱·운영자 앱과 달리 강의실 e2e 스펙은 "로그인해서 인증 구역을 본다"를
+걷지 않는다: 부모 도메인 쿠키 공유는 dev(localhost, 포트로 앱을 가른다)에서 재현할
+수 없고, 실제 공유는 staging에서만 검증된다(#277). dev에서 강의실의 인증 구역을
+눈으로 확인하려면 공개 앱에 로그인해 받은 `laurio_access`/`laurio_refresh` 쿠키
+값을 강의실 오리진에 수동으로 심는다(Playwright의 `context.addCookies`) — 실제
+브라우저가 두 쿠키를 부모 도메인으로 공유하는 것을 로컬에서 흉내 내는 유일한 길이다.
 
 **운영자 앱은 인증의 모양이 다르다**(#63, ADR-0018/0019). 공개 앱은 쿠키의 JWT를
 `Authorization` 헤더로 바꿔 달지만, 운영자 앱은 Django 세션 쿠키
@@ -479,7 +500,7 @@ ADR-0017 은 프론트에만 있는 위험을 셋으로 못 박았다. 여기 �
 
 ### 티켓을 닫는 기준
 
-로컬 게이트는 셋이다 — **백엔드 `pytest`**, **두 앱 `typecheck`**, **에이전트가 브라우저로
+로컬 게이트는 셋이다 — **백엔드 `pytest`**, **세 앱 `typecheck`**, **에이전트가 브라우저로
 걸어본 결과**. 통과하면 머지하고 **push 한다**. 다음 티켓을 시작하기 전에 CI 결과를 확인해
 보고한다.
 
@@ -508,7 +529,7 @@ ADR-0017 은 프론트에만 있는 위험을 셋으로 못 박았다. 여기 �
 | red→green 반복 | 백엔드 테스트 파일 하나 | **12초** |
 | red→green 반복 | 브라우저로 화면 하나 걸어보기 | **수 초** |
 | 티켓 커밋 직전 | `pytest` 전체 | 1분 28초 |
-| 티켓 커밋 직전 | 두 앱 `typecheck` | 각 10~20초 |
+| 티켓 커밋 직전 | 세 앱 `typecheck` | 각 10~20초 |
 | CI (push 후) | 전체 | 백엔드 + e2e |
 
 로컬에서 `pnpm --dir frontend test` 를 돌리지 않는다. 스크립트는 CI 와 e2e 자체를 고치는
@@ -527,9 +548,10 @@ pnpm --dir frontend exec playwright test --project=public e2e/payout.spec.ts -g 
 **CI 가 돌리는 것 (참고용 수치).**
 
 ```bash
-pnpm --dir frontend test            # 전체 (102건이던 시절 약 1.8분 — 지금 119건)
+pnpm --dir frontend test            # 전체 (102건이던 시절 약 1.8분 — 지금 124건)
 pnpm --dir frontend test:public     # 공개 앱만 (74건이던 시절 약 1.4분 — 지금 87건)
 pnpm --dir frontend test:operator   # 운영자 앱만 (28건이던 시절 약 25초 — 지금 32건)
+pnpm --dir frontend test:classroom  # 강의실만 (#276, 5건 — 아직 실측 없음, CI 첫 실행이 잰다)
 ```
 
 **293건이 102건이 됐다.** 남긴 기준은 위 「남길 것」이다. 지운 것의 대부분은 「로그인된
@@ -568,9 +590,10 @@ VM 을 24GB 로 올린 뒤에야 4워커가 성립했다 — 그때 실측이 �
 
 **워크스페이스 패키지를 새로 더하면 손으로 관리되는 목록 셋을 같이 고쳐야 한다.**
 `pnpm-workspace.yaml` 은 글롭이라 저절로 잡지만, 그 아래 셋은 멤버를 하나씩 적어 둔다 —
-`docker/frontend.Dockerfile` 과 `docker/operator.Dockerfile` 의 COPY(각각 base·dev·builder
-셋)와 `docker/compose.dev.yaml` 의 **멤버별 `node_modules` 이름 있는 볼륨**(두 서비스 ×
-볼륨 선언). **로컬 게이트는 셋 다 보지 않는다** — `typecheck` 는 호스트의 node_modules 를
+`docker/frontend.Dockerfile`·`docker/operator.Dockerfile`·`docker/classroom.Dockerfile`(#276)의
+COPY(각각 base·dev·builder 셋)와 `docker/compose.dev.yaml` 의 **멤버별 `node_modules` 이름
+있는 볼륨**(세 서비스 × 볼륨 선언 — 다만 강의실은 아직 `@laurio/bff-client` 를 쓰지 않으므로
+그 패키지의 볼륨만 없다). **로컬 게이트는 셋 다 보지 않는다** — `typecheck` 는 호스트의 node_modules 를
 쓰고, e2e 는 로컬에서 돌리지 않기 때문이다. #166 이 `packages/route-audit` 를 더하면서
 정확히 이걸 빠뜨려 CI 가 4잡 빨갛게 났고, 증상이 둘로 갈려 원인이 하나로 안 보였다:
 
@@ -663,7 +686,7 @@ Problem Statement 를 읽고 「어댑터 실제 구현은 스토리지 하나�
 
 ## CI 는 셀프호스티드 러너에서, 프로덕션 이미지로 돈다
 
-GitHub 호스티드 러너는 과금이 막혀 못 쓴다. 11개 잡 전부 `runs-on: [self-hosted, sub]` —
+GitHub 호스티드 러너는 과금이 막혀 못 쓴다. 12개 잡 전부 `runs-on: [self-hosted, sub]` —
 staging 배포 호스트와 **같은 머신**이다. 러너 컨테이너는 `--network host` 로 돌고 호스트
 docker 소켓을 물어 컨테이너를 바깥에 띄운다(DooD).
 
@@ -672,17 +695,19 @@ docker 소켓을 물어 컨테이너를 바깥에 띄운다(DooD).
 호스트 데몬 기준으로 풀려 `/app` 이 통째로 비고, backend 는 `can't open file '/app/manage.py'`
 로, 두 앱은 `Scope: all 0 workspace projects` 로 죽는다. 오버라이드가 하는 일은 셋뿐이다:
 
-- 세 서비스의 `volumes` 를 `!reset []` — 마운트 없이 **이미지 안의 코드**로 돈다.
-- 두 앱의 빌드 `target` 을 `runner` 로 — dev 서버가 아니라 **배포되는 그 이미지**를 친다.
-- 두 앱의 `command` 를 `!reset null` — 이미지의 `node server.js` 가 산다.
+- 네 서비스(backend·frontend·operator·classroom)의 `volumes` 를 `!reset []` — 마운트 없이
+  **이미지 안의 코드**로 돈다.
+- 세 앱(frontend·operator·classroom, #277)의 빌드 `target` 을 `runner` 로 — dev 서버가
+  아니라 **배포되는 그 이미지**를 친다.
+- 세 앱의 `command` 를 `!reset null` — 이미지의 `node server.js` 가 산다.
 
 **그래서 e2e 가 검증하는 대상이 바뀌었다.** 예전엔 `next dev` 를, 지금은 프로덕션 빌드를
 친다 — 배포되는 것과 테스트되는 것이 같아졌다. 위 `next dev` 메모리 주의는 이제
 **로컬에서 스위트를 돌릴 때만** 해당한다.
 
-**잡마다 스택을 갈라 준다.** compose 를 쓰는 세 잡(`celery-broker`·e2e 둘)이 한 러너에서
-겹치므로 각자 다른 `COMPOSE_PROJECT_NAME` 과 포트 슬롯을 잡는다 — 안 그러면 서로의
-컨테이너를 `down -v` 로 지운다. 뒷정리는 `if: always()` 로 건다.
+**잡마다 스택을 갈라 준다.** compose 를 쓰는 네 잡(`celery-broker`·e2e 셋 — 공개·운영자·
+강의실, #277)이 한 러너에서 겹치므로 각자 다른 `COMPOSE_PROJECT_NAME` 과 포트 슬롯을
+잡는다 — 안 그러면 서로의 컨테이너를 `down -v` 로 지운다. 뒷정리는 `if: always()` 로 건다.
 
 **pytest 잡에 redis 서비스가 없다.** 테스트 세션 캐시가 LocMem 이라(위 「테스트는 서로를
 밟지 않는다」) 필요가 없어졌다. postgres 는 호스트 포트를 고정하지 않는다(#243) —
@@ -690,9 +715,10 @@ docker 소켓을 물어 컨테이너를 바깥에 띄운다(DooD).
 동시에 그 번호를 다시 잡으려다 죽은 적이 있어서 Docker 가 그때 비어 있는 포트를
 골라 쓰게 두고, 잡 안에서 `${{ job.services.postgres.ports['5432'] }}` 로 읽는다.
 
-실측(당시 9잡 전부 초록, 2026-09-05): 전체 **6분**. 지금은 `adr-status`·`screen-language` 가
-늘어 11잡이다. e2e 운영자 4분 · 공개 3분 · `celery-broker` 2분 · `pytest` 1분 · 나머지
-여섯은 각 1분 미만.
+실측(당시 9잡 전부 초록, 2026-09-05): 전체 **6분**. `adr-status`·`screen-language` 가 늘어
+11잡이 됐고, `frontend-e2e-classroom`(#277)이 늘어 지금은 12잡이다(강의실 e2e 실측은
+아직 없다 — CI 첫 실행이 잰다). e2e 운영자 4분 · 공개 3분 · `celery-broker` 2분 · `pytest`
+1분 · 나머지 일곱은 각 1분 미만.
 
 **`screen-language` 잡**(#267, #268)은 스텝 둘로 두 표면을 막는다. 첫 스텝
 (`scripts/check_screen_language.py`)은 공개 앱(`frontend/`)의 화면 문자열에

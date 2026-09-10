@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
-"""공개 앱(`frontend/`)의 화면 문자열에 영어 도메인 용어나 내부 문서 번호가
-다시 새어 들어오지 않는지 검사한다(#267).
+"""공개 앱(`frontend/`)과 강의실 앱(`classroom/`)의 화면 문자열에 영어 도메인
+용어나 내부 문서 번호가 다시 새어 들어오지 않는지 검사한다(#267, #278).
+
+강의실도 로그인한 사람(강사·참여자)이 읽는 화면이라 같은 규율을 받는다 —
+운영자 앱(`operator/`)만 대상 밖이다(아래 SCAN_DIRS 주석 참고).
 
 #266 이 그 시점의 19곳을 치웠지만, 그것만으로는 같은 일이 다시 쌓인다 —
 새 화면을 쓰는 사람도 에이전트도 `CONTEXT.md` 의 `_화면에서_` 줄을 매번
@@ -34,7 +37,10 @@ CONTEXT_MD = REPO_ROOT / "CONTEXT.md"
 
 # 운영자 앱(`operator/`)은 대상이 아니다 — 그 앱에서는 이 용어들이 오히려
 # 정확하다(#266). e2e(`frontend/e2e/`)도 화면이 아니라 시임 코드이므로 뺀다.
-SCAN_DIRS = ["frontend/app", "frontend/components", "frontend/lib"]
+# 강의실(`classroom/`, #278)은 공개 앱과 같은 이유로 대상이다 — 강사·참여자가
+# 읽는 화면이라 CONTEXT.md 어휘 규율이 그대로 적용된다. `classroom/components`는
+# 아직 없다 — 생기면 여기 더한다(frontend/components처럼).
+SCAN_DIRS = ["frontend/app", "frontend/components", "frontend/lib", "classroom/app", "classroom/lib"]
 
 TERM_HEADER_RE = re.compile(r"^\*\*([A-Za-z][A-Za-z0-9]*)\*\*:\s*$")
 SCREEN_NAME_RE = re.compile(r"^_화면에서_:\s*(.+)$")

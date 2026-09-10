@@ -21,6 +21,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 const publicBaseURL = process.env.LAURIO_E2E_BASE_URL ?? "http://127.0.0.1:53000";
 const operatorBaseURL = process.env.LAURIO_OPERATOR_E2E_BASE_URL ?? "http://127.0.0.1:53001";
+const classroomBaseURL = process.env.LAURIO_CLASSROOM_E2E_BASE_URL ?? "http://127.0.0.1:53002";
 
 function workersFromEnv(value: string | undefined): number | string | undefined {
   if (value === undefined || value.trim() === "") return undefined;
@@ -74,13 +75,18 @@ export default defineConfig({
     {
       name: "public",
       testDir: "./e2e",
-      testIgnore: ["**/operator/**"],
+      testIgnore: ["**/operator/**", "**/classroom/**"],
       use: { ...devices["Desktop Chrome"], baseURL: publicBaseURL },
     },
     {
       name: "operator",
       testDir: "./e2e/operator",
       use: { ...devices["Desktop Chrome"], baseURL: operatorBaseURL },
+    },
+    {
+      name: "classroom",
+      testDir: "./e2e/classroom",
+      use: { ...devices["Desktop Chrome"], baseURL: classroomBaseURL },
     },
   ],
 });

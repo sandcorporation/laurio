@@ -1,0 +1,203 @@
+"""Problem — 문제를 만들고 목록에서 본다 (#282, CONTEXT.md 「강의실」, ADR-0039).
+
+핵심 대상: 강사가 문제를 만들고 고치며, 마감 필드는 애초에 없다. 제출 형식은
+소스·저장소 둘 중 하나. 클래스 상세에 문제가 순서대로 서고 순서를 바꿀 수
+있다. 초안과 열린 문제가 모델 수준에서 구별된다 — 초안에서 열림으로의 전이와
+그 전이가 요구하는 체크리스트 조건은 #283이 붙인다.
+
+`ClassMember`(가입)가 아직 없어(#279/#280) 참여자 열람은 이 티켓의 범위 밖이다
+— 강사가 아닌 요청은 클래스 자체가 없는 것으로 취급한다(#278과 같은 404).
+"""
+
+from __future__ import annotations
+
+from classroom.models import Problem
+
+CLASSES_URL = "/api/classroom/classes"
+
+
+def _login(client, uid="instructor-1", email=None):
+    email = email or f"{uid}@example.com"
+    response = client.post(
+        "/api/auth/social/kakao/login",
+        data={"access_token": f"{uid}:{email}"},
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+def _auth_header(access: str) -> dict:
+    return {"HTTP_AUTHORIZATION": f"Bearer {access}"}
+
+
+def _create_class(client, access: str, name: str = "웹 스터디") -> int:
+    response = client.post(
+        CLASSES_URL,
+        data={"name": name},
+        content_type="application/json",
+        **_auth_header(access),
+    )
+    assert response.status_code == 201
+    return response.json()["id"]
+
+
+def test_instructor_creates_a_problem_with_source_or_repository_format(client, db):
+    pair = _login(client)
+    class_id = _create_class(client, pair["access"])
+
+    response = client.post(
+        f"{CLASSES_URL}/{class_id}/problems",
+        data={
+            "title": "1주차 — Todo API",
+            "description": "REST API를 만든다",
+            "submission_format": "source",
+        },
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["title"] == "1주차 — Todo API"
+    assert body["submission_format"] == "source"
+    assert body["status"] == Problem.Status.DRAFT
+    assert "deadline_at" not in body
+    assert "deadline" not in body
+
+
+def test_unknown_submission_format_is_rejected(client, db):
+    pair = _login(client)
+    class_id = _create_class(client, pair["access"])
+
+    response = client.post(
+        f"{CLASSES_URL}/{class_id}/problems",
+        data={"title": "1주차", "submission_format": "demo_url"},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert response.status_code == 422
+
+
+def test_instructor_edits_title_description_and_format(client, db):
+    pair = _login(client)
+    class_id = _create_class(client, pair["access"])
+    created = client.post(
+        f"{CLASSES_URL}/{class_id}/problems",
+        data={"title": "1주차", "submission_format": "source"},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    problem_id = created.json()["id"]
+
+    patched = client.patch(
+        f"{CLASSES_URL}/{class_id}/problems/{problem_id}",
+        data={"title": "1주차 — 수정", "submission_format": "repository"},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert patched.status_code == 200
+    body = patched.json()
+    assert body["title"] == "1주차 — 수정"
+    assert body["submission_format"] == "repository"
+
+
+def test_problems_are_ordered_and_reorderable(client, db):
+    pair = _login(client)
+    class_id = _create_class(client, pair["access"])
+
+    ids = []
+    for title in ["1주차", "2주차", "3주차"]:
+        created = client.post(
+            f"{CLASSES_URL}/{class_id}/problems",
+            data={"title": title, "submission_format": "source"},
+            content_type="application/json",
+            **_auth_header(pair["access"]),
+        )
+        ids.append(created.json()["id"])
+
+    listing = client.get(f"{CLASSES_URL}/{class_id}/problems", **_auth_header(pair["access"]))
+    assert [p["id"] for p in listing.json()] == ids
+
+    reordered = client.post(
+        f"{CLASSES_URL}/{class_id}/problems/reorder",
+        data={"problem_ids": [ids[2], ids[0], ids[1]]},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert reordered.status_code == 200
+    assert [p["id"] for p in reordered.json()] == [ids[2], ids[0], ids[1]]
+
+    listing_again = client.get(f"{CLASSES_URL}/{class_id}/problems", **_auth_header(pair["access"]))
+    assert [p["id"] for p in listing_again.json()] == [ids[2], ids[0], ids[1]]
+
+
+def test_reorder_rejects_a_mismatched_problem_set(client, db):
+    pair = _login(client)
+    class_id = _create_class(client, pair["access"])
+    created = client.post(
+        f"{CLASSES_URL}/{class_id}/problems",
+        data={"title": "1주차", "submission_format": "source"},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    problem_id = created.json()["id"]
+
+    response = client.post(
+        f"{CLASSES_URL}/{class_id}/problems/reorder",
+        data={"problem_ids": [problem_id, 999999]},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert response.status_code == 422
+
+
+def test_new_problems_default_to_draft_and_status_is_a_distinct_field(client, db):
+    """초안과 열림이 모델 수준에서 구별된다는 것의 최소 증거 — 전이 자체는
+    체크리스트가 붙는 #283에서 검증한다."""
+
+    pair = _login(client)
+    class_id = _create_class(client, pair["access"])
+    created = client.post(
+        f"{CLASSES_URL}/{class_id}/problems",
+        data={"title": "1주차", "submission_format": "source"},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert created.json()["status"] == Problem.Status.DRAFT
+
+    stored = Problem.objects.get(id=created.json()["id"])
+    assert stored.status == Problem.Status.DRAFT
+    assert {choice for choice, _label in Problem.Status.choices} == {"draft", "open"}
+
+
+def test_instructor_reads_a_single_problem(client, db):
+    pair = _login(client)
+    class_id = _create_class(client, pair["access"])
+    created = client.post(
+        f"{CLASSES_URL}/{class_id}/problems",
+        data={"title": "1주차", "description": "설명", "submission_format": "source"},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    problem_id = created.json()["id"]
+
+    response = client.get(
+        f"{CLASSES_URL}/{class_id}/problems/{problem_id}", **_auth_header(pair["access"])
+    )
+    assert response.status_code == 200
+    assert response.json()["title"] == "1주차"
+
+
+def test_a_non_instructor_cannot_see_another_classs_problems(client, db):
+    a = _login(client, uid="instructor-a")
+    b = _login(client, uid="instructor-b")
+    class_id = _create_class(client, a["access"])
+    client.post(
+        f"{CLASSES_URL}/{class_id}/problems",
+        data={"title": "1주차", "submission_format": "source"},
+        content_type="application/json",
+        **_auth_header(a["access"]),
+    )
+
+    response = client.get(f"{CLASSES_URL}/{class_id}/problems", **_auth_header(b["access"]))
+    assert response.status_code == 404

@@ -95,6 +95,24 @@ test.describe("쿠키 Secure — 배포 여부에 따라 갈린다 (ADR-0016, FE
     expect(setCookie).toContain("laurio_access");
     expect(setCookie).not.toContain("secure");
   });
+
+  // 부모 도메인 쿠키(ADR-0038, #273)도 같은 이유로 dev에서는 꺼져 있어야 한다 —
+  // LAURIO_SESSION_COOKIE_DOMAIN을 dev compose는 절대 설정하지 않으므로(로컬은
+  // 서브도메인이 아니라 포트로 앱을 가른다), domain 속성이 아예 없어야 한다.
+  // "staging/prod에서는 domain이 붙는다"는 반대쪽 절반은 위 Secure와 같은 이유로
+  // 여기서 증명할 수 없다 — lib/auth/cookies.test.ts(vitest)가 그 절반을 덮는다.
+  test("dev(LAURIO_SESSION_COOKIE_DOMAIN 미설정)에서는 쿠키에 domain이 붙지 않는다", async ({
+    request,
+    baseURL,
+  }) => {
+    const res = await request.post("/api/auth/logout", {
+      headers: { origin: baseURL! },
+    });
+    expect(res.status()).toBe(200);
+    const setCookie = (res.headers()["set-cookie"] ?? "").toLowerCase();
+    expect(setCookie).toContain("laurio_access");
+    expect(setCookie).not.toContain("domain=");
+  });
 });
 
 test.describe("소셜 로그인 → 세션 쿠키 → 보호된 화면", () => {
