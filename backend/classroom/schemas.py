@@ -198,6 +198,28 @@ class ClassroomProblemSubmissionsOut(Schema):
     submissions: list[ClassroomSubmissionOut]
 
 
+class ClassroomInstructorSubmissionOut(Schema):
+    """강사가 보는 시도 하나(#291) — 참여자용 `ClassroomSubmissionOut`과 같은
+    모양에 `member_id`·`member_display_name`을 더한다. 강사는 자기 시도가
+    아니라 클래스 전체를 훑어보므로 어느 참여자의 것인지가 함께 실려야
+    한다."""
+
+    id: int
+    problem_id: int
+    member_id: int
+    member_display_name: str
+    attempt_number: int
+    submission_format: str
+    value: str
+    #: 소스 제출에만 채워진다(참여자용과 같은 이유) — 파일명은 참여자 이름과
+    #: 시도 번호로 구별된다(#291 AC), 참여자 본인 이메일이 아니다.
+    download_url: str | None = None
+    created_at: datetime
+    status: str
+    score: ClassroomScoreOut | None = None
+    passed: bool = False
+
+
 class ClassroomProblemListItemOut(Schema):
     """참여자의 문제 목록 한 줄(#288) — 통과/미통과가 한눈에 보이도록 문제
     상세보다 훨씬 좁다."""
