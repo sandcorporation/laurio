@@ -1395,6 +1395,11 @@ def test_resolver_wiring_grants_source_download_to_owner_only(client, category, 
         ("source", "max_source_asset_bytes"),
         ("demo-video", "max_demo_video_asset_bytes"),
         ("build-asset", "max_build_asset_bytes"),
+        # 스크린샷(#264)은 이 표에 늦게 들어왔다 — #261(상한 강제)과 #264(종류
+        # 신설)가 병렬로 만들어져 서로의 슬롯을 몰랐고, 그래서 staging 에서
+        # 스크린샷만 상한 없는 presigned PUT 으로 발급됐다. #263 이 만든
+        # `max_screenshot_asset_bytes` 를 아무도 읽지 않는 상태였다.
+        ("screenshot", "max_screenshot_asset_bytes"),
     ],
 )
 def test_resolver_wiring_binds_upload_byte_cap_from_policy(

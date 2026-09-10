@@ -45,7 +45,7 @@ from policies.scope import current_policy
 from storage.policy import TargetState, Visibility
 
 from .models import SubmissionAsset
-from .target_refs import BUILD_ASSET_SLOT, DEMO_VIDEO_SLOT, SOURCE_SLOT
+from .target_refs import BUILD_ASSET_SLOT, DEMO_VIDEO_SLOT, SCREENSHOT_SLOT, SOURCE_SLOT
 
 _DENY = TargetState(visibility=Visibility.PRIVATE, owner_id=None)
 
@@ -167,9 +167,15 @@ class SubmissionContentTypeResolver:
 # (#261, #263). SOURCE_SLOT·BUILD_ASSET_SLOT·DEMO_VIDEO_SLOT 셋만 올라 있다 —
 # 스크린샷 종류(#264)와 URL 종류(demo_url·repository, storage를 거치지 않는다)는
 # 여기 없다.
+# **object_key 를 갖는 슬롯은 빠짐없이 여기 있어야 한다.** 빠진 슬롯은 거절되지
+# 않고 조용히 **상한 없는 presigned PUT** 으로 발급된다(아래 fail-safe) — 즉
+# 누락의 대가가 오류가 아니라 무제한 업로드다. 스크린샷(#264)이 실제로 그랬다:
+# #261(상한 강제)과 #264(종류 신설)가 병렬로 만들어져 서로의 슬롯을 몰랐고,
+# staging 에서 스크린샷만 상한 없이 열려 있었다.
 _MAX_BYTES_FIELD_BY_SLOT = {
     SOURCE_SLOT: "max_source_asset_bytes",
     DEMO_VIDEO_SLOT: "max_demo_video_asset_bytes",
+    SCREENSHOT_SLOT: "max_screenshot_asset_bytes",
     BUILD_ASSET_SLOT: "max_build_asset_bytes",
 }
 

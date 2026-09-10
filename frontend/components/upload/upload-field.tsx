@@ -16,9 +16,21 @@ export interface UploadFieldProps {
   // 여분의 인자를 무시하는 함수는 그 타입에 그대로 대입된다.
   onUploaded?: (objectKey: string, contentType: string | null) => void;
   testId: string;
+  // 읽기 전용 화면에서 파일 선택 자체를 막는다. 제출 화면은 마감 뒤 읽기
+  // 전용으로 서는데(#245/#258) 이 필드만 그 판정을 못 받아, 다른 컨트롤이 전부
+  // 잠긴 화면에서 「다른 파일로 교체」만 살아 있었다 — 고르면 업로드까지 되고
+  // 저장할 길이 없어 사용자에게는 고장으로 보인다. staging 에서 확인했다.
+  disabled?: boolean;
 }
 
-export function UploadField({ targetRef, label, accept, onUploaded, testId }: UploadFieldProps) {
+export function UploadField({
+  targetRef,
+  label,
+  accept,
+  onUploaded,
+  testId,
+  disabled = false,
+}: UploadFieldProps) {
   const { state, upload, retry } = usePresignedUpload(targetRef);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -54,7 +66,7 @@ export function UploadField({ targetRef, label, accept, onUploaded, testId }: Up
         type="file"
         accept={accept}
         onChange={handleFileChange}
-        disabled={state.status === "requesting" || state.status === "uploading"}
+        disabled={disabled || state.status === "requesting" || state.status === "uploading"}
       />
 
       {(state.status === "requesting" || state.status === "uploading") && (

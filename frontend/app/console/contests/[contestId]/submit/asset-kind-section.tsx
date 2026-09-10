@@ -272,6 +272,7 @@ export function AssetKindSection({
                 <>
                   {targetRefPrefix && (
                     <UploadField
+                      disabled={disabled}
                       targetRef={targetRefPrefix}
                       label={row.value ? "다른 파일로 교체" : "파일 선택"}
                       accept={
