@@ -1,6 +1,6 @@
 "use client";
 
-// 「내 과제」 (#207, ADR-0028/0029) — 강사가 연/만든 Assignment 목록.
+// 「내 과제」 (#207, ADR-0028/0029) — 출제자가 연/만든 Assignment 목록.
 //
 // `/console/contests`(내 공모전)와 같은 자리지만 상금·결제·Award·Escrow에 닿는
 // 것이 하나도 없다(스펙 #197 인수조건) — 행마다 보여주는 것은 상태와 InviteCode

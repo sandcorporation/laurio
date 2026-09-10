@@ -1,11 +1,11 @@
 import Link from "next/link";
 
 // Score 요약(달성률·판정 모델·Requirement별 근거) — 세 화면이 같은 네 필드를
-// 나란히 그린다(#210, #248, #251): 과제 학생의 자기 점수 화면(app/assignments/[code]/
-// page.tsx), 과제 강사의 제출 목록(app/console/assignments/[assignmentId]/
+// 나란히 그린다(#210, #248, #251): 과제 제출자의 자기 점수 화면(app/assignments/[code]/
+// page.tsx), 과제 출제자의 제출 목록(app/console/assignments/[assignmentId]/
 // page.tsx), 그리고 공모전 제출 화면(app/console/contests/[contestId]/submit/
 // page.tsx). 백엔드도 같은 자리다 — `submissions.schemas.OwnScoreOut`(공모전·
-// 과제 학생용)과 `contests.schemas.AssignmentSubmissionScoreOut`(과제 강사용)이
+// 과제 제출자용)과 `contests.schemas.AssignmentSubmissionScoreOut`(과제 출제자용)이
 // 이의 관련 필드만 다르고 나머지는 같다. 화면이 갈려 있으면 채점 스키마가 바뀔 때
 // 한쪽만 고쳐 문구가 갈릴 수 있다 — 그래서 여기 하나로 모은다.
 //
@@ -68,7 +68,7 @@ export function ScoreSummary({
   reasoningLink,
 }: {
   score: ScoreSummaryData;
-  /** data-testid 접두어 — 학생 화면은 "assignment-score", 강사 목록의 한 행은
+  /** data-testid 접두어 — 제출자 화면은 "assignment-score", 출제자 목록의 한 행은
    * "assignment-submission-score"를 쓴다(기존 e2e·수기 검증이 이미 그 값을
    * 단언하고 있어 바꾸지 않는다). */
   testIdPrefix: string;

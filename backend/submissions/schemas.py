@@ -209,7 +209,7 @@ class MyParticipationOut(Schema):
     # submission`의 `SUBMISSION_REQUIRES_VERIFICATION` 분기). Assignment는 대신
     # InviteCode 로만 여는 `/assignments/{code}`가 그 화면이고, 그 URL을 조립하려면
     # 코드가 있어야 한다. 공모전 행은 항상 null이다. 지금 **활성인** 코드를 낸다 —
-    # 학생이 처음에 쓴 코드가 재발급으로 죽었어도(#209) 새 코드로는 계속 자기
+    # 제출자가 처음에 쓴 코드가 재발급으로 죽었어도(#209) 새 코드로는 계속 자기
     # 제출을 조회·수정할 수 있다는 것이 이미 정해진 동작이다
     # (`test_old_invite_code_dies_but_existing_submission_survives_reissue`).
     # Assignment인데 활성 코드가 없으면(닫혔거나 아직 InviteCode가 없는 이상 상태)

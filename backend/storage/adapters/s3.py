@@ -153,7 +153,7 @@ class S3StorageAdapter:
                 # **헤더 값을 여기서 조립하지 않는다**(#268 후속). 예전에는 이
                 # 자리에 f-string 이 있었고 "`filename` 은 플랫폼이 만든 값이라
                 # 이스케이프가 필요 없다"는 전제가 숨어 있었다 — 이제 그 이름에
-                # 학생 이름이 들어오므로 그 전제가 깨진다. RFC 5987 이스케이프는
+                # 제출자 이름이 들어오므로 그 전제가 깨진다. RFC 5987 이스케이프는
                 # `storage.filenames.content_disposition` 한 곳에만 둔다.
                 "ResponseContentDisposition": content_disposition(filename),
             },

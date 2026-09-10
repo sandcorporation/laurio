@@ -338,7 +338,7 @@ class Contest(models.Model):
         원래 CLOSED 전이가 judging_ends_at 을 아직 안 찍은 찰나(도달 불가능했다)를 위한
         허용이었는데, Assignment 는 심사기간을 **영원히** null 로 둔다(Award·Distribution 이
         없다) — 그 허용을 그대로 두면 채점이 끝난 과제 제출에 이의가 접수돼 버린다. 과제에는
-        Appeal 자체가 없다(스펙 #197 Out of Scope) — 이견은 강사에게 직접 말한다."""
+        Appeal 자체가 없다(스펙 #197 Out of Scope) — 이견은 출제자에게 직접 말한다."""
 
         if self.is_assignment:
             return False
@@ -441,7 +441,7 @@ Contest.Status.SUBMITTABLE = Classification(
 # 아니었고, Assignment 가 그 갈라짐의 실제 이유다 — Assignment 는 본인확인이 없어 연락처
 # (`accounts.PhoneContact`)가 없는 수신자가 섞이므로(ADR-0029) 통지를 보내지 않아야 하지만,
 # 제출은 받는다(위 SUBMITTABLE). ASSIGNMENT_OPEN 을 여기서 False 로 두지 않으면 dev·테스트에서는
-# 안 보이고 프로덕션에서만 실패한 NotificationDispatch 가 학생마다 쌓인다(ADR-0028 이 적어 둔
+# 안 보이고 프로덕션에서만 실패한 NotificationDispatch 가 제출자마다 쌓인다(ADR-0028 이 적어 둔
 # 함정 그대로).
 Contest.Status.SENDS_LIFECYCLE_NOTICES = Classification(
     {
@@ -974,7 +974,7 @@ _INVITE_CODE_LENGTH = 40
 
 
 def _generate_invite_code() -> str:
-    """추측 불가능한 InviteCode 값(#216) — Sponsor 가 강의실에서 학생에게 구두로
+    """추측 불가능한 InviteCode 값(#216) — Sponsor 가 자리에서 제출자에게 구두로
     불러주거나 손으로 옮겨 적어도 안전하도록 `_INVITE_CODE_ALPHABET`(구분 기호·혼동
     글자를 뺀 31자) 중에서만 `_INVITE_CODE_LENGTH`(40)자를 고른다. 문자집합을 줄인
     대가는 길이로 갚는다 — 목표 엔트로피와 근거는 두 상수의 주석과 테스트가 함께

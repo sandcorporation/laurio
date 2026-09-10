@@ -4,13 +4,13 @@ import { establishDeveloperSession } from "./lib/session";
 import { runInternalScan, runSeed } from "./lib/seed-http";
 
 // Assignment 전체 기능의 유일한 공개 앱 e2e (#210, ADR-0028/0029). CLAUDE.md
-// "남길 것"의 「앱마다 유저스토리 한 벌」— 강사가 과제를 만들고 열어 InviteCode를
-// 얻고, 학생이 그 코드로 들어와 제출하고, 마감 후 점수를 보는 한 벌이다. 프록시
+// "남길 것"의 「앱마다 유저스토리 한 벌」— 출제자가 과제를 만들고 열어 InviteCode를
+// 얻고, 제출자가 그 코드로 들어와 제출하고, 마감 후 점수를 보는 한 벌이다. 프록시
 // 허용목록(위험 3, `/api/assignments`·`/api/submissions`)이 실제로 막는지는 이
 // 흐름이 그 경로들을 실제로 지나가며 함께 덮는다.
 //
 // Assignment 3(#207)·4(#208)가 만든 화면(과제 만들기·열기·InviteCode 진입·제출)과
-// 6(#210)이 만든 화면(마감 후 학생의 채점 결과)을 한 번에 걷는다 — 그 사이(5, 7 —
+// 6(#210)이 만든 화면(마감 후 제출자의 채점 결과)을 한 번에 걷는다 — 그 사이(5, 7 —
 // 재발급·소스 열람)는 각자의 체인이 자기 스펙을 갖는다(스코프 펜스, 이 스펙에
 // 섞지 않는다).
 //
@@ -18,17 +18,17 @@ import { runInternalScan, runSeed } from "./lib/seed-http";
 // 않는다. `runInternalScan`으로 `assignment-close`·`submission-scoring`을 직접 쏜다.
 //
 // **마감을 실제 시간으로 기다리지 않는다(#242).** 예전에는 마감을 45초 뒤로 잡고
-// 학생 제출까지 마친 뒤 그 시각을 실제로 `waitForTimeout`으로 흘려보냈다 —
+// 제출자 제출까지 마친 뒤 그 시각을 실제로 `waitForTimeout`으로 흘려보냈다 —
 // `test.setTimeout(150_000)` 예산의 3분의 1이 순수 벽시계 대기였고, CI(러너 하나에서
 // e2e 잡 셋이 프로덕션 빌드를 상대로 도는 환경)의 얇은 여유 안에서 남은 100여 초에
-// 로그인 둘·과제 생성·열기·InviteCode·학생 로그인·이동·업로드·제출·스캔·점수 확인이
+// 로그인 둘·과제 생성·열기·InviteCode·제출자 로그인·이동·업로드·제출·스캔·점수 확인이
 // 전부 들어가야 했다. 예산이 다하면 그 순간 진행 중이던 호출이 보고됐다(관측된
 // 자리는 우연히 매번 `setInputFiles`) — CI 네 번, 매번 재시도로만 통과해 `1 flaky`로
 // 가려졌다.
 //
 // CLAUDE.md("tick은 시간을 앞당기지 않는다 … 데이터의 시각을 과거로 옮긴다")와 같은
 // 이유로, 이제 마감은 넉넉한 미래로 잡아 두고(브라우저 조작이 며칠 걸릴 리 없으므로
-// 그 사이 마감이 지날 걱정이 없다) **학생의 제출이 끝난 뒤** `assignment-expire-deadline`
+// 그 사이 마감이 지날 걱정이 없다) **제출자의 제출이 끝난 뒤** `assignment-expire-deadline`
 // 시드로 이 과제 하나의 `deadline_at`만 과거로 직접 옮긴다
 // (`seed_e2e_expire_assignment_deadline.py`).
 //
@@ -52,7 +52,7 @@ function toDatetimeLocalInput(date: Date): string {
   )}:${pad(date.getMinutes())}`;
 }
 
-test("강사가 과제를 열어 InviteCode를 주고, 학생이 제출하고, 마감 후 점수를 본다", async ({
+test("출제자가 과제를 열어 InviteCode를 주고, 제출자가 제출하고, 마감 후 점수를 본다", async ({
   page,
 }) => {
   // 기본 테스트 타임아웃(30초)은 로그인 둘·폼 채우기 둘·업로드 하나·스캔
@@ -62,7 +62,7 @@ test("강사가 과제를 열어 InviteCode를 주고, 학생이 제출하고, �
   // 먹는 고정 비용이 아니다.
   test.setTimeout(60_000);
 
-  // 자격 있는 Sponsor와 학생 계정 — 둘 다 고정된 (provider, provider_uid)로
+  // 자격 있는 Sponsor와 제출자 계정 — 둘 다 고정된 (provider, provider_uid)로
   // 귀결되는 멱등 시드다(seed_e2e_assignment_sponsor_and_student.py). username은
   // "kakao:<provider_uid>" 모양이라(accounts.api._username_for) 그 접두어를
   // 떼면 `establishDeveloperSession`이 받는 seed 값이 된다.
@@ -81,7 +81,7 @@ test("강사가 과제를 열어 InviteCode를 주고, 학생이 제출하고, �
   // 끝나기만 하면 된다 — 45초처럼 총 예산과 맞물린 값을 고를 이유가 없다.
   const deadlineAt = new Date(Date.now() + 10 * 60_000);
 
-  // 1) 강사 — 과제를 만들고 연다.
+  // 1) 출제자 — 과제를 만들고 연다.
   await establishDeveloperSession(page, sponsorSeed);
   await page.goto("/console/assignments/new");
   await expect(page.getByTestId("new-assignment-heading")).toBeVisible();
@@ -104,7 +104,7 @@ test("강사가 과제를 열어 InviteCode를 주고, 학생이 제출하고, �
   const inviteCode = (await page.getByTestId("assignment-invite-code").innerText()).trim();
   expect(inviteCode.length).toBeGreaterThan(0);
 
-  // 2) 학생 — InviteCode로 들어와 제출한다. 본인확인이 없다(ADR-0029) — 로그인만
+  // 2) 제출자 — InviteCode로 들어와 제출한다. 본인확인이 없다(ADR-0029) — 로그인만
   // 하고 바로 제출할 수 있어야 한다.
   await establishDeveloperSession(page, studentSeed);
   await page.goto(`/assignments/${inviteCode}`);
@@ -125,7 +125,7 @@ test("강사가 과제를 열어 InviteCode를 주고, 학생이 제출하고, �
 
   // 3) 제출이 끝난 뒤에야 마감을 과거로 옮긴다(#242) — 순서가 중요하다: 먼저
   // 옮기면 #209(첫 제출이 과제 내용을 잠근다)가 성립하기 전이라 지금은 통과할
-  // 것처럼 보여도, 이 스펙이 검증해야 하는 흐름("학생이 마감 전에 제출한다")과
+  // 것처럼 보여도, 이 스펙이 검증해야 하는 흐름("제출자가 마감 전에 제출한다")과
   // 어긋난다. 실제 시간이 지나가길 기다리지 않고 이 과제 하나의 `deadline_at`만
   // 직접 UPDATE한다(`seed_e2e_expire_assignment_deadline.py`) — 시계
   // (`ClockOverride`)는 건드리지 않으므로 같은 잡에서 병렬로 도는 다른 스펙에
@@ -135,17 +135,17 @@ test("강사가 과제를 열어 InviteCode를 주고, 학생이 제출하고, �
   await runInternalScan("assignment-close");
   await runInternalScan("submission-scoring");
 
-  // 4) 학생 — 마감 후 자기 Score와 판정 근거를 본다. 요구사항을 하나도 걸지
+  // 4) 제출자 — 마감 후 자기 Score와 판정 근거를 본다. 요구사항을 하나도 걸지
   // 않았으므로(Assignment 3 시점 폼의 알려진 범위 — 요구사항 없는 과제는
   // "미달"이 성립할 여지가 없어 100.00%로 채점된다, scoring/services.py
   // `_percentage`) 값이 결정적이다.
   await page.reload();
   await expect(page.getByTestId("assignment-score-section")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId("assignment-score-percentage")).toHaveText("100.00%");
-  // 과제에는 이의제기가 없다 — 학생 화면이 그것을 말한다(스펙 #197 인수조건).
+  // 과제에는 이의제기가 없다 — 제출자 화면이 그것을 말한다(스펙 #197 인수조건).
   await expect(page.getByTestId("assignment-no-appeal-notice")).toBeVisible();
 
-  // 5) 강사 — 제출 목록에서 같은 학생·같은 Score를 본다.
+  // 5) 출제자 — 제출 목록에서 같은 제출자·같은 Score를 본다.
   await establishDeveloperSession(page, sponsorSeed);
   await page.goto(assignmentDetailUrl);
   await expect(page.getByTestId("assignment-submission-score-percentage")).toContainText("100.00%", {

@@ -1,6 +1,6 @@
 "use client";
 
-// 강사가 마감 전에도 제출 소스를 펼쳐 본다 (#211, ADR-0022/0028).
+// 출제자가 마감 전에도 제출 소스를 펼쳐 본다 (#211, ADR-0022/0028).
 //
 // **목록·상세를 훑는 것만으로는 소스가 보이지 않는다.** 제출 목록(`GET /assignments/
 // {id}/submissions`)은 소스를 아예 담지 않는다 — 「펼치기」 버튼을 눌러야만
@@ -61,7 +61,7 @@ export function AssignmentSourceReveal({
 
       {reveal.status === "idle" || reveal.status === "revealing" ? (
         <p className="text-xs text-ink/60" data-testid="assignment-submission-reveal-notice">
-          기본은 접혀 있습니다 — 펼치면 그 열람이 기록되고 학생이 확인할 수 있습니다.
+          기본은 접혀 있습니다 — 펼치면 그 열람이 기록되고 제출자가 확인할 수 있습니다.
         </p>
       ) : null}
 

@@ -42,7 +42,7 @@ export type CompletionDistributionOut = components["schemas"]["CompletionDistrib
 // 방문자 식별자는 이 타입에도 없다.
 export type ViewMetricsOut = components["schemas"]["ViewMetricsOut"];
 
-// Assignment 7(#211, ADR-0022/0028) — 강사의 소스 펼침과 그 기록.
+// Assignment 7(#211, ADR-0022/0028) — 출제자의 소스 펼침과 그 기록.
 export type SourceRevealAssetOut = components["schemas"]["SourceRevealAssetOut"];
 export type AssignmentSourceRevealOut = components["schemas"]["AssignmentSourceRevealOut"];
 export type AssignmentSourceReadingOut = components["schemas"]["AssignmentSourceReadingOut"];

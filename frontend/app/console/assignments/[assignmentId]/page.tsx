@@ -166,9 +166,9 @@ export default function AssignmentDetailPage() {
     }
   }
 
-  // 학생이 여는 절대 주소. **`window.location.origin` 을 쓴다** — 서버가 아니라
+  // 제출자가 여는 절대 주소. **`window.location.origin` 을 쓴다** — 서버가 아니라
   // 브라우저가 만든다. 컨테이너 안의 Next 는 자기가 어떤 공개 주소로 불렸는지 모르고
-  // (CLAUDE.md — standalone 모드에서 origin 이 바인드 주소로 나온다), 이 값은 강사가
+  // (CLAUDE.md — standalone 모드에서 origin 이 바인드 주소로 나온다), 이 값은 출제자가
   // 복사해 남에게 보내는 것이라 틀리면 링크가 통째로 죽는다.
   const studentLink =
     typeof window === "undefined" || !assignment?.invite_code
@@ -225,7 +225,7 @@ export default function AssignmentDetailPage() {
       {assignment.status === "draft" ? (
         <div className="border border-rule p-4">
           <p className="text-sm text-ink/70">
-            아직 열리지 않았습니다. 열면 초대 코드가 발급되어 학생에게 알려줄 수 있습니다.
+            아직 열리지 않았습니다. 열면 초대 코드가 발급되어 제출자에게 알려줄 수 있습니다.
           </p>
           <button
             type="button"
@@ -246,13 +246,13 @@ export default function AssignmentDetailPage() {
 
       {assignment.invite_code ? (
         <div className="border border-rule p-4">
-          {/* **코드를 불러주는 것만으로는 학생이 들어올 수 없다.** 코드를 받는
-              입력 화면은 없고, 학생이 닿는 유일한 길은 코드가 박힌 주소
-              (`/assignments/[code]`)를 여는 것이다. 그래서 강사에게 주는 것은
+          {/* **코드를 불러주는 것만으로는 제출자가 들어올 수 없다.** 코드를 받는
+              입력 화면은 없고, 제출자가 닿는 유일한 길은 코드가 박힌 주소
+              (`/assignments/[code]`)를 여는 것이다. 그래서 출제자에게 주는 것은
               코드가 아니라 **링크**여야 한다 — 예전 문구("이 코드만 알려주면
               됩니다")는 그 사실과 어긋나 있었다. */}
           <p className="text-sm text-ink/70">
-            학생에게 아래 링크를 보내세요 — 이 링크를 여는 것이 과제에 들어오는 유일한
+            제출자에게 아래 링크를 보내세요 — 이 링크를 여는 것이 과제에 들어오는 유일한
             방법입니다.
           </p>
           <p
@@ -270,7 +270,7 @@ export default function AssignmentDetailPage() {
             >
               {linkCopied ? "복사했습니다" : "링크 복사"}
             </button>
-            {/* 학생이 실제로 보게 될 화면을 강사가 미리 확인할 수 있는 링크(#208) —
+            {/* 제출자가 실제로 보게 될 화면을 출제자가 미리 확인할 수 있는 링크(#208) —
                 InviteCode 로만 닿는 그 화면의 유일한 제품 내 진입점이기도 하다. */}
             <a
               href={`/assignments/${assignment.invite_code}`}
@@ -279,7 +279,7 @@ export default function AssignmentDetailPage() {
               data-testid="assignment-invite-preview-link"
               className="text-sm underline"
             >
-              학생 화면 미리보기
+              제출자 화면 미리보기
             </a>
           </div>
           <p className="mt-3 text-xs text-ink/60">
@@ -294,7 +294,7 @@ export default function AssignmentDetailPage() {
             <div className="mt-4 border-t border-rule pt-4">
               <p className="text-sm text-ink/70">
                 코드가 새어 나갔나요? 재발급하면 이 코드는 더 이상 쓸 수 없게 되고 새
-                코드가 발급됩니다 — 이미 제출한 학생의 과제물은 그대로 남습니다.
+                코드가 발급됩니다 — 이미 낸 사람의 과제물은 그대로 남습니다.
               </p>
               <button
                 type="button"
@@ -331,7 +331,7 @@ export default function AssignmentDetailPage() {
       {/* 참고 이미지 (#236, ADR-0032) — 공모전과 같은 규칙, 게이트만 다르다:
           「첫 제출이 문을 닫는다」(`isEditable`이 이미 그 판정을 담고 있다,
           `_get_owned_editable_assignment`와 정확히 같은 술어). 잠긴 뒤에도
-          섹션 자체는 그려 강사가 무엇을 올렸는지 계속 볼 수 있게 하고,
+          섹션 자체는 그려 출제자가 무엇을 올렸는지 계속 볼 수 있게 하고,
           업로드·순서변경·제거 컨트롤만 숨긴다(`ContestImagePanel`의 `editable`). */}
       <ContestImagePanel
         contestId={Number(assignmentId)}
@@ -344,8 +344,8 @@ export default function AssignmentDetailPage() {
       {isLockedByFirstSubmission ? (
         <div className="border-t border-rule pt-6" data-testid="assignment-requirements-locked">
           <p className="text-sm text-attention">
-            이미 제출한 학생이 있어 과제 내용을 더 이상 고칠 수 없습니다. 제출 뒤 기준이
-            바뀌면 이미 낸 학생이 불리해지기 때문입니다.
+            이미 낸 사람이 있어 과제 내용을 더 이상 고칠 수 없습니다. 제출 뒤 기준이
+            바뀌면 이미 낸 사람이 불리해지기 때문입니다.
           </p>
         </div>
       ) : null}
@@ -456,7 +456,7 @@ function SubmissionsSection({
       )}
       {state.status === "ready" && state.data.length === 0 && (
         <p className="mt-2 text-sm text-ink/70" data-testid="assignment-submissions-empty">
-          아직 제출한 학생이 없습니다.
+          아직 낸 사람이 없습니다.
         </p>
       )}
       {state.status === "ready" && state.data.length > 0 && (

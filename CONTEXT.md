@@ -18,17 +18,17 @@ Sponsor가 Contest에 붙이는 참고 이미지. 시안·와이어프레임처�
 _Avoid_: 첨부, 배너, 썸네일(그건 파생본의 한 종류다), 자료(SubmissionAsset이 그 말을 쓴다), 브리프 이미지
 
 **Assignment**:
-상금도 결제도 없는 Contest 한 종류. 강사가 InviteCode로 열고 학생이 제출하면 마감 후 한 번 채점되는 것으로 끝난다 — Award도 Appeal도 Distribution도 Payout도 없고, 원장에 아무것도 남지 않는다. 공개 목록에 나타나지 않으며, 여는 데 본인확인을 요구하지 않는 대신 그 자격을 Operator가 준다.
+상금도 결제도 없는 Contest 한 종류. 출제자가 InviteCode로 열고 제출자가 내면 마감 후 한 번 채점되는 것으로 끝난다 — Award도 Appeal도 Distribution도 Payout도 없고, 원장에 아무것도 남지 않는다. 공개 목록에 나타나지 않으며, 여는 데 본인확인을 요구하지 않는 대신 그 자격을 Operator가 준다.
 _Avoid_: 숙제, 실습, 비공개 공모전, 무료 공모전, Homework, Exercise, Task
 
 **InviteCode**:
-Assignment의 유일한 경계. 이것을 아는 사람이 참가자이며 명단은 따로 두지 않는다 — 제출한 사람만 보이고, 내지 않은 사람은 플랫폼이 알지 못한다. 새어 나가면 Sponsor가 다시 발급해 새 진입만 막는다: 이미 낸 사람의 제출물은 그대로 남는다. Sponsor가 강의실에서 학생에게 구두로 불러주는 값이기도 하므로(#216), 생성 문자집합은 구분 기호와 혼동 글자(0/O, 1/l/I 등)를 뺀 것이고 그만큼 길이로 추측 불가능성을 보상한다 — 이미 발급된 옛 형식 코드도 계속 유효하다.
+Assignment의 유일한 경계. 이것을 아는 사람이 참가자이며 명단은 따로 두지 않는다 — 제출한 사람만 보이고, 내지 않은 사람은 플랫폼이 알지 못한다. 새어 나가면 Sponsor가 다시 발급해 새 진입만 막는다: 이미 낸 사람의 제출물은 그대로 남는다. Sponsor가 자리에서 제출자에게 구두로 불러주는 값이기도 하므로(#216), 생성 문자집합은 구분 기호와 혼동 글자(0/O, 1/l/I 등)를 뺀 것이고 그만큼 길이로 추측 불가능성을 보상한다 — 이미 발급된 옛 형식 코드도 계속 유효하다.
 _화면에서_: 「초대 코드」
 _Avoid_: 참여 코드, 비밀번호, 접근 키, Access code, Token, Passcode
 
 **AssignmentPermission**:
-Operator가 한 Sponsor에게 Assignment를 열 자격을 준 사실. 과제에는 결제가 없어 비용이 스스로 제어되지 않으므로, 결제가 서 있던 자리를 사람이 여는 문이 대신한다. 주고 거둔 일에는 누가·언제·왜가 남는다. 자격을 거두어도 이미 열린 Assignment는 끝까지 돈다 — 학생이 이미 시간을 썼기 때문이다.
-_Avoid_: 강사 인증, 화이트리스트, 승인 상태, Whitelist, Approval flag
+Operator가 한 Sponsor에게 Assignment를 열 자격을 준 사실. 과제에는 결제가 없어 비용이 스스로 제어되지 않으므로, 결제가 서 있던 자리를 사람이 여는 문이 대신한다. 주고 거둔 일에는 누가·언제·왜가 남는다. 자격을 거두어도 이미 열린 Assignment는 끝까지 돈다 — 제출자가 이미 시간을 썼기 때문이다.
+_Avoid_: 출제자 인증, 화이트리스트, 승인 상태, Whitelist, Approval flag
 
 **ContestView**:
 사람이 Contest 상세를 연 사건. **그 사건을 저장하지 않는다** — 날짜별 고유 수만 남기고, 같은 사람이 같은 날 여러 번 열어도 하나다. 중복을 가리는 식별자는 하루만 살고 스스로 사라져, 방문 기록이라는 개인정보 축을 새로 열지 않는다. 서버가 렌더하며 세지 않고 브라우저가 열린 뒤 알린다 — 프리페치와 크롤러는 사람이 본 것이 아니고, 렌더는 두 번 그려도 같은 결과여야 하기 때문이다.
@@ -50,13 +50,13 @@ _Avoid_: 체크리스트 항목, Criterion, Spec, AcceptanceCriteria
 ### 당사자
 
 **Sponsor**:
-Contest를 개최하는 당사자. 공모전에서는 Prize를 예치하고 Award 권한을 가지며, Assignment에서는 상금 없이 과제를 여는 강사다 — 예치할 것도 선정할 것도 없는 대신 제출된 소스를 지도를 위해 볼 수 있고 그 열람이 남는다.
-_화면에서_: 공모전 「개최자」 · 과제 「강사」
+Contest를 개최하는 당사자. 공모전에서는 Prize를 예치하고 Award 권한을 가지며, Assignment에서는 상금 없이 과제를 여는 출제자다 — 예치할 것도 선정할 것도 없는 대신 제출된 소스를 지도를 위해 볼 수 있고 그 열람이 남는다.
+_화면에서_: 공모전 「개최자」 · 과제 「출제자」
 _Avoid_: 의뢰자, 발주처, Client, Buyer, Orderer, Requester, Instructor, 그리고 **역할을 둘로 나누는 것** — 화면이 맥락에 따라 다른 이름으로 부르는 것은 번역이지 분화가 아니다
 
 **Developer**:
-Contest에 Submission을 내는 당사자. 공모전에서는 상금을 두고 경쟁하는 참가자이고, Assignment에서는 과제를 내는 학생이다 — 같은 신원이라 과제를 낸 사람이 그대로 공모전에 나갈 수 있다. 한 사람이 어떤 Contest에서는 Sponsor이고 다른 Contest에서는 Developer일 수 있다.
-_화면에서_: 공모전 「참가자」 · 과제 「학생」
+Contest에 Submission을 내는 당사자. 공모전에서는 상금을 두고 경쟁하는 참가자이고, Assignment에서는 과제를 내는 제출자다 — 같은 신원이라 과제를 낸 사람이 그대로 공모전에 나갈 수 있다. 한 사람이 어떤 Contest에서는 Sponsor이고 다른 Contest에서는 Developer일 수 있다.
+_화면에서_: 공모전 「참가자」 · 과제 「제출자」
 _Avoid_: Entrant, Contestant, Contractor, Freelancer, Student, 그리고 **역할을 둘로 나누는 것** — Sponsor와 같은 이유다
 
 **Operator**:

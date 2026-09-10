@@ -46,7 +46,7 @@ def grant_assignment_permission(*, operator, username: str, reason: str) -> Spon
     """username으로 찾은 사용자에게 과제 개최 자격을 준다.
 
     `SponsorProfile`이 아직 없으면 지연 생성한다(`accounts.api.ensure_sponsor_profile`과
-    같은 관용구) — Operator가 강사에게 자격을 먼저 주고, 강사가 나중에 처음
+    같은 관용구) — Operator가 출제자에게 자격을 먼저 주고, 출제자가 나중에 처음
     Sponsor로 행동하는 순서가 자연스럽다(과제를 열기 전에는 이 프로필을 만들
     이유가 없었다).
     """

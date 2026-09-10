@@ -39,7 +39,7 @@ fail-closed 라 구멍은 아니지만 원인을 찾기 어렵다.
 | `POST /api/verification/lookup-by-ci` | CI 로 조회 |
 
 **본인확인은 행위 시점에 요구한다**(ADR-0011) — 가입할 때가 아니라 개최·제출처럼 돈이나
-책임이 걸리는 순간이다. 성인만 통과한다. **과제는 예외다**(ADR-0029) — 학생은 본인확인
+책임이 걸리는 순간이다. 성인만 통과한다. **과제는 예외다**(ADR-0029) — 제출자는 본인확인
 없이 InviteCode 로 제출한다.
 
 **신원은 파기되어도 계정은 남는다**(ADR-0025). 탈퇴는 신원 정보를 지우고 상태를
@@ -78,8 +78,8 @@ fail-closed 라 구멍은 아니지만 원인을 찾기 어렵다.
 | `POST /api/assignments` · `PATCH /api/assignments/{id}` | 개설·수정 |
 | `POST .../open` | 열기 — 이 순간 InviteCode 가 발급된다 |
 | `POST .../invite-code/reissue` | 코드 재발급(옛 코드는 죽고 기존 제출은 산다) |
-| `GET /api/assignments/invite/{code}` | 학생이 코드로 여는 문 |
-| `GET /api/assignments/mine` · `/{id}` | 강사의 목록·상세 |
+| `GET /api/assignments/invite/{code}` | 제출자가 코드로 여는 문 |
+| `GET /api/assignments/mine` · `/{id}` | 출제자의 목록·상세 |
 | `GET .../submissions` | 제출 목록 |
 | `POST .../submissions/{id}/source` | 소스 열람 — 열람은 기록된다 |
 | 이미지 4종 | 공모전과 같다 |
@@ -206,7 +206,7 @@ ADR-0036). 업로드 자료의 값은 `submission:{공모전id}:{개발자id}:{�
 | `closed` | 마감 | 스캔(마감 시각 경과) — 이때 심사 종료 시각도 함께 찍힌다 |
 | `awarded` | 선정 완료 | 발주자의 선정 |
 | `judging_ended` | 심사기간 종료 | 스캔(아무도 선정하지 않은 채 심사 종료) |
-| `assignment_open` | 과제 진행중 | 강사의 「열기」 — 스캔이 아니라 명시적 행위 |
+| `assignment_open` | 과제 진행중 | 출제자의 「열기」 — 스캔이 아니라 명시적 행위 |
 | `assignment_closed` | 과제 마감 | 스캔(마감 시각 경과) |
 
 **전이 그래프는 `contests/transitions.py` 한 곳에 선언되어 있다**(#255) — 위 표의

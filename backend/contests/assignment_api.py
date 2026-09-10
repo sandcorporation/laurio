@@ -196,7 +196,7 @@ def _get_owned_editable_assignment(request: HttpRequest, assignment_id: int) -> 
     ASSIGNMENT_OPEN 이후에만 가능하다, `submissions.api`). 공모전의 "결제가 문을
     닫는다"에 대응하는 값이고, Escrow의 "참가자가 한 명이라도 있으면 되돌아가지
     않는다"와 같은 결이다 — 채점 기준이 제출 뒤에 바뀌면 그 점수가 무엇을 측정한
-    것인지 알 수 없게 되고, Assignment에는 이의제기가 없어 학생에게 구제 수단이
+    것인지 알 수 없게 되고, Assignment에는 이의제기가 없어 제출자에게 구제 수단이
     없다. 거부 이유를 일반적인 409("지금은 고칠 수 없는 상태")와 다른 문구로
     돌려준다 — Sponsor가 왜 막혔는지 화면에서 바로 알아야 한다(#209).
     """
@@ -214,13 +214,13 @@ def _get_owned_editable_assignment(request: HttpRequest, assignment_id: int) -> 
         # 게이트가 지키는 `update_assignment`는 title·description·deadline_at·
         # deliverable_type_ids뿐 아니라 requirements 통째 교체(#217)도 같은 이유로
         # 여기서 막는다. 새 잠금 규칙을 만들지 않고 이 게이트 하나를 그대로
-        # 재사용한다 — 제출 뒤 채점 기준이 바뀌면 이미 낸 학생이 불리해지고,
+        # 재사용한다 — 제출 뒤 채점 기준이 바뀌면 이미 낸 제출자가 불리해지고,
         # Assignment에는 이의제기가 없어(ADR-0028) 구제 수단이 없다는 이유는
         # title이든 requirements든 다르지 않다.
         raise HttpError(
             409,
-            "이미 제출한 학생이 있어 과제 내용을 더 이상 고칠 수 없습니다. "
-            "제출 뒤 기준이 바뀌면 이미 낸 학생이 불리해집니다.",
+            "이미 낸 사람이 있어 과제 내용을 더 이상 고칠 수 없습니다. "
+            "제출 뒤 기준이 바뀌면 이미 낸 사람이 불리해집니다.",
         )
 
     return contest
@@ -334,7 +334,7 @@ def list_my_assignments(request: HttpRequest):
 @router.get("/assignments/invite/{code}", response=AssignmentOut, auth=None)
 def get_assignment_by_invite_code(request: HttpRequest, code: str):
     """InviteCode를 아는 사람만 과제 상세·Requirement를 본다(ADR-0028) — 인증이 필요
-    없다: 본인확인은커녕 로그인조차 이 조회의 전제가 아니다(학생이 코드를 받아 처음
+    없다: 본인확인은커녕 로그인조차 이 조회의 전제가 아니다(제출자가 코드를 받아 처음
     들어오는 순간에는 아직 로그인 전일 수 있다).
 
     코드가 없거나 비활성(재발급으로 무효화된 옛 코드, #209 소관)이면 404 — 존재를
@@ -350,7 +350,7 @@ def get_assignment_by_invite_code(request: HttpRequest, code: str):
         raise HttpError(404, "초대 코드를 찾을 수 없습니다.")
 
     contest = invite.contest
-    # 상태와 무관하게 보여준다 — ASSIGNMENT_CLOSED(마감) 후에도 학생이 자기 과제와
+    # 상태와 무관하게 보여준다 — ASSIGNMENT_CLOSED(마감) 후에도 제출자가 자기 과제와
     # 점수를 계속 볼 수 있어야 한다(스펙 #197 user story 31). DRAFT는 InviteCode가
     # 아직 없어 이 분기에 도달할 수 없다(열 때만 발급된다).
     #
@@ -460,7 +460,7 @@ def update_assignment(request: HttpRequest, assignment_id: int, payload: Assignm
 
 # --- AssignmentImage (#236, ADR-0032) ------------------------------------------
 #
-# 강사가 조건을 보여줄 이유는 공모전과 같다(spec #225) — 그래서 발급·등록·순서
+# 출제자가 조건을 보여줄 이유는 공모전과 같다(spec #225) — 그래서 발급·등록·순서
 # 변경·제거의 실제 로직은 `contests.images`를 공모전 표면과 그대로 공유한다.
 # 다른 것은 게이트 하나뿐이다: 공모전은 결제가 문을 닫고
 # (`_get_owned_draft_contest`), 과제는 **첫 제출**이 문을 닫는다
@@ -477,7 +477,7 @@ def update_assignment(request: HttpRequest, assignment_id: int, payload: Assignm
 def request_assignment_image_upload_url(
     request: HttpRequest, assignment_id: int, payload: ContestImageUploadUrlIn
 ):
-    """강사가 참고 이미지를 올리기 전, 공개 이미지 버킷으로의 presigned POST를
+    """출제자가 참고 이미지를 올리기 전, 공개 이미지 버킷으로의 presigned POST를
     받는다 — `contests.api.request_contest_image_upload_url`과 같은 자리."""
 
     contest = _get_owned_editable_assignment(request, assignment_id)
@@ -505,7 +505,7 @@ def add_assignment_image(
 def reorder_assignment_image(
     request: HttpRequest, assignment_id: int, image_id: int, payload: ContestImageReorderIn
 ):
-    """강사가 이미지의 노출 순서를 고친다."""
+    """출제자가 이미지의 노출 순서를 고친다."""
 
     contest = _get_owned_editable_assignment(request, assignment_id)
     return reorder_assignment_image_for(contest, image_id, payload)
@@ -586,7 +586,7 @@ def open_assignment(request: HttpRequest, assignment_id: int):
     auth=jwt_auth,
 )
 def reissue_invite_code(request: HttpRequest, assignment_id: int):
-    """코드가 새어 나가면 강사가 다시 발급한다(#209) — **새 진입만 막는다.**
+    """코드가 새어 나가면 출제자가 다시 발급한다(#209) — **새 진입만 막는다.**
 
     옛 InviteCode는 지우지 않고 `is_active=False`로만 죽인다 — `InviteCode.contest`가
     append-only 이력을 위해 `ForeignKey`(OneToOne이 아니다, `models.py` 주석)로 둔
@@ -596,7 +596,7 @@ def reissue_invite_code(request: HttpRequest, assignment_id: int):
     판정된다.
 
     `ASSIGNMENT_OPEN`에서만 의미가 있다 — DRAFT는 아직 InviteCode 자체가 없고(열 때
-    발급된다), `ASSIGNMENT_CLOSED` 이후에는 더 막을 새 진입이 없다(마감 후 학생은
+    발급된다), `ASSIGNMENT_CLOSED` 이후에는 더 막을 새 진입이 없다(마감 후 제출자는
     이미 손에 쥔 코드로 자기 점수를 계속 볼 뿐 새로 제출하지 않는다).
 
     두 번 연달아 눌러도 활성 코드가 둘 남지 않는다 — `select_for_update`로 Contest
@@ -668,9 +668,9 @@ def list_assignment_submissions(request: HttpRequest, assignment_id: int):
                     # 내부 임계값이 그대로 박혀 있다. 과제에는 이의제기 자체가
                     # 없어(스펙 #197 Out of Scope) 그 원문을 지킬 심판자가
                     # 없으므로, `submissions.schemas.OwnScoreOut`과 같은 함수로
-                    # 강사용 한 문장으로 바꿔 낸다 — `frontend/lib/submissions/
+                    # 출제자용 한 문장으로 바꿔 낸다 — `frontend/lib/submissions/
                     # score-summary.tsx`(#248 프리팩터 전에는 `lib/assignments/`
-                    # 에 있었다)가 이 값과 학생 자기 점수 화면(`OwnScoreOut`)을
+                    # 에 있었다)가 이 값과 제출자 자기 점수 화면(`OwnScoreOut`)을
                     # 같은 컴포넌트로 그린다.
                     reasoning=participant_facing_reasoning(
                         model_version=s.score.model_version, reasoning=s.score.reasoning
@@ -715,9 +715,9 @@ def reveal_assignment_submission_source(
     직접 presign한다 — Operator의 `reveal_appeal_source`가 storage를 거치지 않고
     `Score.prompt`를 바로 내주는 것과 같은 구조다.
 
-    **파일명에 학생 이름을 붙인다(#268 후속).** `storage.api.request_download`는
+    **파일명에 제출자 이름을 붙인다(#268 후속).** `storage.api.request_download`는
     `download.zip` 처럼 고정된 이름을 쓰는데(#241), 그건 받는 사람이 **자기 것 하나**를
-    받는 자리라 성립한다. 여기는 반대다 — 강사 한 사람이 학생 서른 명의 소스를
+    받는 자리라 성립한다. 여기는 반대다 — 출제자 한 사람이 제출자 서른 명의 소스를
     차례로 내려받으므로 전부 `download.py` 로 떨어지면 받는 순간 누구 것인지 알 수
     없다. #241 이 거절한 것은 「업로드된 파일이 자기 이름을 헤더에 밀어 넣는 것」이고,
     여기서 쓰는 것은 **플랫폼이 아는 맥락**(누구의 제출물인가)이다.
@@ -736,7 +736,7 @@ def reveal_assignment_submission_source(
         raise HttpError(404, "제출물을 찾을 수 없습니다.") from exc
 
     adapter = get_storage_adapter()
-    # 같은 학생이 소스를 여럿 냈으면 이름만으로는 갈리지 않는다 — 두 번째부터
+    # 같은 제출자가 소스를 여럿 냈으면 이름만으로는 갈리지 않는다 — 두 번째부터
     # 순번을 붙인다(첫 번째는 그대로 두어 흔한 경우가 깔끔하다).
     base_name = safe_download_base_name(submission.developer.display_name)
     source_index = 0

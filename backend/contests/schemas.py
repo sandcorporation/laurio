@@ -524,7 +524,7 @@ class AssignmentOut(Schema):
     deadline_at: datetime
     status: str
     requirements: list[RequirementOut]
-    # 강사가 붙인 참고 이미지 (#236, ADR-0032) — `ContestOut.images`와 같은 자리
+    # 출제자가 붙인 참고 이미지 (#236, ADR-0032) — `ContestOut.images`와 같은 자리
     # (spec #225 "규칙을 가르면 화면마다 설명할 문장이 늘어난다"). 순서대로
     # 온다. 편집 가능 여부는 이 목록이 아니라 `is_editable`이 답한다 — 이미지
     # 추가·순서변경·제거도 그 값과 같은 게이트(`_get_owned_editable_assignment`)를
@@ -567,9 +567,9 @@ class AssignmentSubmissionOut(Schema):
 
     submission_id: int
     developer_id: int
-    # 탈퇴한 학생은 없다 — Assignment 는 Developer 탈퇴로 Submission 이 사라지지
+    # 탈퇴한 제출자는 없다 — Assignment 는 Developer 탈퇴로 Submission 이 사라지지
     # 않는다. `display_name`이 비어 있을 수 있는 것은 오히려 Sponsor 쪽이다(#212,
-    # ADR-0025) — 이 화면은 이름이 빈 학생을 다루지 않는다.
+    # ADR-0025) — 이 화면은 이름이 빈 제출자을 다루지 않는다.
     developer_display_name: str
     created_at: datetime
     score: AssignmentSubmissionScoreOut | None = None

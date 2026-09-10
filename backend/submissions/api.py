@@ -175,7 +175,7 @@ def _get_viewable_contest_or_404(contest_id: int) -> Contest:
     이 헬퍼가 지키는 것은 "익명이 봐도 되는가"가 아니라 "존재를 감출 만큼 은밀한가"
     다. `get_my_submission`은 `auth=jwt_auth`로 이미 로그인을 요구하고 본인
     Submission으로만 필터하므로(InviteCode를 거쳐 실제로 제출한 사람만 결과를
-    받는다), 여기서 Assignment를 막으면 학생이 마감 전까지 자기 제출을 고치려
+    받는다), 여기서 Assignment를 막으면 제출자가 마감 전까지 자기 제출을 고치려
     되읽는 경로 자체가 막힌다 — PUBLICLY_VISIBLE을 그대로 썼다면 냈던 회귀다.
 
     `Contest.Status.OWN_SUBMISSION_VIEWABLE`(#208 코드리뷰)이 이 정확한 질문에
@@ -1171,7 +1171,7 @@ def get_submission(request: HttpRequest, submission_id: int):
     오히려 Assignment는 InviteCode를 아는 사람만 본다는 약속이 마감 후에도 그대로
     이어져야 한다(스펙 #197: "명단은 없다, 제출한 사람만 보인다" — 그 제출한
     사람이란 본인과 그 과제의 Sponsor 뿐이다) — 그러지 않으면 `submission_id`를
-    순차로 훑는 것만으로 학생의 제출 내용(소스 제외)이 인터넷에 새어 나간다.
+    순차로 훑는 것만으로 제출자의 제출 내용(소스 제외)이 인터넷에 새어 나간다.
     """
 
     try:

@@ -14,7 +14,7 @@ appeals_app`가 AST를 파싱해 그것을 고정한다. 이 모듈이 다루는
 
 `submissions.schemas.OwnScoreOut`(Developer용)·`appeals.schemas.
 ScoreSnapshotOut`(Operator용)·`contests.schemas.AssignmentSubmissionScoreOut`
-(과제 강사용 — 과제에는 이의제기 자체가 없어 원문을 지킬 심판자가 없다)이 이
+(과제 출제자용 — 과제에는 이의제기 자체가 없어 원문을 지킬 심판자가 없다)이 이
 모듈을 함께 쓴다.
 
 **청중을 구조로 가른다 — 저장된 문자열을 소독하지 않는다.** #244가 알림

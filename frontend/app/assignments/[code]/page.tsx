@@ -7,13 +7,13 @@
 // 코드는 URL 자체가 들고 있고, 제출·수정 요청마다 서버가 다시 확인한다
 // (`submissions.api._require_invite_code_for_assignment`).
 //
-// **`/console` 밖에 둔다.** 학생은 로그인 전에 이 URL을 열 수 있어야 한다 —
+// **`/console` 밖에 둔다.** 제출자는 로그인 전에 이 URL을 열 수 있어야 한다 —
 // `useSession()`(app/console/**)은 401을 만나면 곧장 `/login`으로 리다이렉트해
 // 버려 "먼저 과제를 구경하고 나중에 로그인" 흐름을 끊는다. 그래서 헤더의
 // `SessionSlot`과 같은 관용구(`unauthorizedIsAnswer: true`)로 세션을 직접 확인한다.
 //
 // 상금·결제·Award·Escrow는 이 화면 어디에도 나오지 않는다 — 대신 제출 전에
-// 두 가지를 고지한다: 강사가 소스를 열람할 수 있다는 것, 저작권은 학생에게
+// 두 가지를 고지한다: 출제자가 소스를 열람할 수 있다는 것, 저작권은 제출자에게
 // 남는다는 것(스펙 #197, 약관 항목 17·18).
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
@@ -199,7 +199,7 @@ export default function AssignmentInvitePage() {
   const requirements = assignment.status === "ready" ? assignment.data.requirements : [];
   const assignmentId = assignment.status === "ready" ? assignment.data.id : null;
 
-  // **판정은 서버 하나뿐이다**(#248, 공모전 제출 화면(#247)과 같은 원칙). 학생
+  // **판정은 서버 하나뿐이다**(#248, 공모전 제출 화면(#247)과 같은 원칙). 제출자
   // 화면이 마감 시각을 직접 비교해 "수정 가능한가"·"채점됐는가"를 스스로
   // 판정하면, 새 상태가 생겨도 이 화면은 조용히 낡은 것을 말한다.
   // `next_action`(`SubmissionOut`, `submissions.participation.next_action_for`
@@ -209,7 +209,7 @@ export default function AssignmentInvitePage() {
   // **한 번도 내지 않은 사람에게도 닫힌 과제는 닫혀 보여야 한다**(#268 후속).
   // 예전에는 `!hasSubmission` 이면 무조건 편집 가능이었다 — Submission 단위
   // 판정(`next_action`)이 아직 없으니 폼을 열어 두고 첫 제출은 서버가 409 로
-  // 거절한다는 설계였다. 그런데 강사의 「학생 화면 미리보기」가 정확히 그
+  // 거절한다는 설계였다. 그런데 출제자의 「제출자 화면 미리보기」가 정확히 그
   // 경우라, **마감된 과제에서도 입력과 제출 버튼이 전부 살아 있었다.** 눌러야만
   // 안 된다는 것을 알게 되는 화면은 거절을 늦게 말하는 것이지 말하는 것이 아니다.
   //
@@ -398,7 +398,7 @@ export default function AssignmentInvitePage() {
           {isPastDeadline ? " — 마감되었습니다" : ""}
         </p>
         {/* 공모전 제출 화면(#247/#248)과 같은 어휘로 지금 단계를 말한다 — 이
-            학생이 제출을 냈을 때만 뜻이 있다(내지 않았으면 볼 단계가 없다). */}
+            제출자가 제출을 냈을 때만 뜻이 있다(내지 않았으면 볼 단계가 없다). */}
         {nextAction !== null && (
           <p
             className={`mt-2 font-mono text-sm ${canEdit ? "text-ink" : "text-attention"}`}
@@ -420,7 +420,7 @@ export default function AssignmentInvitePage() {
         )}
       </div>
 
-      {/* 강사가 붙인 참고 이미지 (#236, ADR-0032) — 공모전 상세와 같은 자리
+      {/* 출제자가 붙인 참고 이미지 (#236, ADR-0032) — 공모전 상세와 같은 자리
           (spec #225 user story 10/24). InviteCode를 아는 사람만 이 화면 자체에
           닿으므로(`GET /assignments/invite/{code}`, auth=None) 이미지 URL을
           따로 감출 이유는 없다 — 경계는 InviteCode이지 URL의 추측 불가능성이
@@ -450,10 +450,10 @@ export default function AssignmentInvitePage() {
       {/* 제출 전 고지 둘 — 스펙 #197, 약관 항목 17·18. */}
       <div className="flex flex-col gap-1 border border-rule p-4 text-sm text-ink/80">
         <p data-testid="assignment-source-reading-notice">
-          강사가 지도·채점을 위해 제출한 소스를 열람할 수 있으며, 그 열람은 기록됩니다.
+          출제자가 지도·채점을 위해 제출한 소스를 열람할 수 있으며, 그 열람은 기록됩니다.
         </p>
         <p data-testid="assignment-copyright-notice">
-          제출한 소스코드의 저작권은 학생 본인에게 그대로 남습니다.
+          제출한 소스코드의 저작권은 제출자 본인에게 그대로 남습니다.
         </p>
       </div>
 
@@ -646,7 +646,7 @@ export default function AssignmentInvitePage() {
 
 // 내 Score 와 지금 단계(#210, ADR-0006, #248) — 과제에는 이의제기가 없다
 // (스펙 #197 Out of Scope). 점수에 이견이 있으면 갈 곳은 화면(운영자 이의)이
-// 아니라 사람(강사)이라는 것을 여기서 분명히 말한다.
+// 아니라 사람(출제자)이라는 것을 여기서 분명히 말한다.
 //
 // **점수가 없을 때 이유가 갈린다** — 공모전 제출 화면(#248)과 같은 어휘다:
 // 마감 전이라 채점이 시작되지 않았다 / 마감됐고 채점을 기다리는 중이다.
@@ -688,10 +688,10 @@ function ScoreSection({
       ) : null}
 
       {/* 이의제기가 없다는 사실은 채점 결과와 무관하게(로딩·대기 포함) 항상
-          알린다 — 학생이 언제 이 화면을 보든 "다음에 이견이 있으면 어디로
+          알린다 — 제출자가 언제 이 화면을 보든 "다음에 이견이 있으면 어디로
           가야 하는가"를 미리 알아야 한다(스펙 #197 인수조건). */}
       <p className="text-sm text-ink/70" data-testid="assignment-no-appeal-notice">
-        과제에는 이의제기 절차가 없습니다. 점수에 이견이 있으면 강사에게 직접 문의해 주세요.
+        과제에는 이의제기 절차가 없습니다. 점수에 이견이 있으면 출제자에게 직접 문의해 주세요.
       </p>
     </section>
   );

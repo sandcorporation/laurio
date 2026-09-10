@@ -3,7 +3,7 @@
 // Contest/Assignment 이미지 패널 (#234/#236, ADR-0032, design 선례
 // requirement-draft-panel.tsx).
 //
-// Sponsor(강사 포함)가 참고 이미지를 여러 장 올리고, 순서를 바꾸고, 잘못 올린
+// Sponsor(출제자 포함)가 참고 이미지를 여러 장 올리고, 순서를 바꾸고, 잘못 올린
 // 것을 뺀다 — 전부 각 자원의 편집 게이트가 열려 있는 동안에만 된다(공모전은
 // 결제가 문을 닫기 전 DRAFT, 과제는 첫 제출이 들어오기 전). 업로드는 presigned
 // POST(크기 상한·content-type 이 서명된 정책에 묶인다,
@@ -140,7 +140,7 @@ export function ContestImagePanel({
       <p className="text-xs text-ink/60">
         시안·와이어프레임처럼 글로 풀면 흐려지는 조건을 이미지로 보여주세요.{" "}
         {resourcePath === "assignments"
-          ? "학생이 제출을 시작하면 더 이상 고칠 수 없습니다."
+          ? "제출자가 제출을 시작하면 더 이상 고칠 수 없습니다."
           : "결제가 끝나면 더 이상 고칠 수 없습니다."}
       </p>
 
