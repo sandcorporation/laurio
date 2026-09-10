@@ -31,13 +31,15 @@ BUILD_ASSET_SLOT 설명 참고). `handovers.models`를 함수 안에서 지역 �
 
 from __future__ import annotations
 
+from django.conf import settings
+
 from awards.services import sponsor_user_id_if_awarded
 from contests.models import Contest
 from core.clock import Clock
 from storage.policy import TargetState, Visibility
 
 from .models import SubmissionAsset
-from .target_refs import BUILD_ASSET_SLOT, SOURCE_SLOT
+from .target_refs import BUILD_ASSET_SLOT, DEMO_VIDEO_SLOT, SOURCE_SLOT
 
 _DENY = TargetState(visibility=Visibility.PRIVATE, owner_id=None)
 
@@ -99,6 +101,22 @@ class SubmissionTargetStateResolver:
             owner_id=developer_user_id,
             additional_viewer_ids=frozenset({contest.sponsor.user_id}),
         )
+
+
+class SubmissionDownloadTTLResolver:
+    """target_ref -> 다운로드 URL 수명(초) (#265, ADR-0036).
+
+    시연 영상(`DEMO_VIDEO_SLOT`)만 화면 안 재생을 위해 긴 수명
+    (`settings.STORAGE_VIDEO_DOWNLOAD_URL_TTL_SECONDS`)을 쓴다. 스크린샷을 포함한
+    나머지 슬롯은 기본값(`settings.STORAGE_DOWNLOAD_URL_TTL_SECONDS`) 그대로다 —
+    클릭해서 내려받는 파일과 이미지 하나를 여는 데는 300초로 충분하다.
+    """
+
+    def resolve(self, target_ref: str) -> int:
+        parts = target_ref.split(":")
+        if len(parts) == 4 and parts[0] == "submission" and parts[3] == DEMO_VIDEO_SLOT:
+            return settings.STORAGE_VIDEO_DOWNLOAD_URL_TTL_SECONDS
+        return settings.STORAGE_DOWNLOAD_URL_TTL_SECONDS
 
 
 class SubmissionContentTypeResolver:

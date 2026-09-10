@@ -504,6 +504,51 @@ def test_sponsor_can_compare_submissions_along_requirement_checklist(
 
 
 @pytest.mark.django_db
+def test_compare_submissions_includes_a_playable_download_url_for_video_and_screenshot(
+    client, category, landing_type
+):
+    """#265: 비교 화면이 데모 URL만 링크로 그리던 것을 넘어, 영상·스크린샷을
+    화면 안에서 열 수 있는 presigned URL을 함께 낸다. 데모 URL은 이미 외부
+    URL이라 서명이 필요 없다."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+    dev = _verified_user(client, "dev-a", "ci-a")
+    demo_key = f"submission:{contest['id']}:{dev['user_id']}:demo-video/{uuid.uuid4().hex}"
+    screenshot_key = f"submission:{contest['id']}:{dev['user_id']}:screenshot/{uuid.uuid4().hex}"
+
+    submit_resp = client.post(
+        f"{CONTESTS_URL}/{contest['id']}/submissions",
+        data={
+            "assets": [
+                {"kind": "source", "value": _source_object_key(contest["id"], dev["user_id"])},
+                {"kind": "demo_video", "value": demo_key, "content_type": "video/mp4"},
+                {"kind": "screenshot", "value": screenshot_key, "content_type": "image/png"},
+                {"kind": "demo_url", "value": "https://example.com/demo"},
+            ]
+        },
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert submit_resp.status_code == 201, submit_resp.content
+
+    _close_contest(client, contest, deadline=deadline)
+
+    resp = client.get(
+        f"{CONTESTS_URL}/{contest['id']}/submissions/compare", **_auth_header(sponsor["access"])
+    )
+    assert resp.status_code == 200
+    assets = resp.json()["submissions"][0]["assets"]
+    assets_by_kind = {a["kind"]: a for a in assets}
+
+    assert assets_by_kind["demo_video"]["download_url"].startswith("https://fake-storage.test/")
+    assert assets_by_kind["screenshot"]["download_url"].startswith("https://fake-storage.test/")
+    assert assets_by_kind["demo_url"]["download_url"] is None
+
+
+@pytest.mark.django_db
 def test_non_sponsor_cannot_compare_submissions(client, category, landing_type):
     deadline = timezone.now() + timedelta(hours=1)
     _sponsor, contest = _publish_contest(

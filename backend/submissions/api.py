@@ -32,6 +32,7 @@
 
 import logging
 from dataclasses import dataclass
+from datetime import timedelta
 
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
@@ -51,6 +52,9 @@ from contests.view_tracking import get_view_count
 from core.clock import Clock
 from core.keyset import decode_cursor, keyset_page
 from policies.services import get_current_policy
+from storage.adapters import get_storage_adapter
+from storage.filenames import build_download_filename
+from storage.policy import get_download_ttl_resolver
 from verification.models import Verification
 
 from .models import (
@@ -684,18 +688,56 @@ def _evidence_outs(evidence_items, visible_asset_ids: set[int]) -> list[Evidence
     ]
 
 
-def _public_asset_summaries(assets) -> list[AssetSummaryOut]:
-    """마감 후 공개되는 자료(데모·영상·스크린샷)만 요약한다 (#190, #264).
+def _public_asset_summaries(
+    assets, *, contest_id: int, developer_user_id: int
+) -> list[AssetSummaryOut]:
+    """마감 후 공개되는 자료(데모·영상·스크린샷)만 요약한다 (#190, #264/#265).
 
     공개 프로필과 심사 비교가 같은 것을 낸다 — 두 자리가 각자 종류를 거르면
     언젠가 한쪽만 새 종류를 흘린다. 원소 타입에 `test_account`가 없다.
+
+    **호출하는 두 화면 다 이미 마감 후에만 이 함수를 부른다**(비교 화면은 마감
+    전 403, 공개 프로필은 `contest__deadline_at__lte=now`로 이미 걸렀다) — 그래서
+    이 함수에 넘어오는 대상은 언제나 `SubmissionTargetStateResolver`가 PUBLIC으로
+    판정할 대상이다. 그 전제 위에서 object_key 자산(`DEMO_VIDEO`·`SCREENSHOT`)에는
+    **presigned 다운로드 URL을 직접 실어 보낸다**(#265) — target_ref 형식(ADR-0005)을
+    프론트에 새로 노출하는 대신, 이미 여는 것으로 확정된 URL 하나를 낸다. 영상은
+    화면 안에서 재생해야 해서 다른 종류보다 긴 서명 수명을 쓴다
+    (`storage.policy.get_download_ttl_resolver`, ADR-0036).
     """
 
-    return [
-        AssetSummaryOut(id=a.id, kind=a.kind, value=a.value, label=a.label, order=a.order)
-        for a in assets
-        if a.kind in _PUBLIC_AFTER_DEADLINE_KINDS
-    ]
+    adapter = None
+    out: list[AssetSummaryOut] = []
+    for a in assets:
+        if a.kind not in _PUBLIC_AFTER_DEADLINE_KINDS:
+            continue
+
+        download_url = None
+        if a.kind in SubmissionAsset.OBJECT_KEY_KINDS:
+            if adapter is None:
+                adapter = get_storage_adapter()
+            target_ref = target_ref_for_asset_kind(
+                a.kind, contest_id=contest_id, developer_user_id=developer_user_id
+            )
+            ttl_seconds = get_download_ttl_resolver().resolve(target_ref)
+            presigned = adapter.presign_download(
+                a.value,
+                expires_in=timedelta(seconds=ttl_seconds),
+                filename=build_download_filename(a.content_type or None),
+            )
+            download_url = presigned.url
+
+        out.append(
+            AssetSummaryOut(
+                id=a.id,
+                kind=a.kind,
+                value=a.value,
+                label=a.label,
+                order=a.order,
+                download_url=download_url,
+            )
+        )
+    return out
 
 
 def _completion_of(
@@ -1195,7 +1237,9 @@ def get_developer_public_profile(request: HttpRequest, developer_id: int):
                 submission_id=s.id,
                 contest_id=s.contest_id,
                 contest_title=s.contest.title,
-                assets=_public_asset_summaries(s.assets.all()),
+                assets=_public_asset_summaries(
+                    s.assets.all(), contest_id=s.contest_id, developer_user_id=developer.user_id
+                ),
                 created_at=s.created_at,
             )
             for s in submissions
@@ -1295,7 +1339,11 @@ def compare_submissions(request: HttpRequest, contest_id: int):
                 submission_id=submission.id,
                 developer_id=submission.developer_id,
                 developer_display_name=developer_name,
-                assets=_public_asset_summaries(assets),
+                assets=_public_asset_summaries(
+                    assets,
+                    contest_id=contest.id,
+                    developer_user_id=submission.developer.user_id,
+                ),
                 completion=_completion_of(
                     assets, total_requirements=total, linked_count=linked_count
                 ),

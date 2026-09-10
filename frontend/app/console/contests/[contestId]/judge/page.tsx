@@ -375,6 +375,38 @@ function SubmissionColumnHeader({
           </a>
         ))}
 
+      {/* 시연 영상·스크린샷(#265) — 화면을 떠나지 않고 재생·열람한다. 자료가
+          여럿이면(영상 둘, 스크린샷 여럿) 라벨로 구별된다. `download_url`은
+          이미 presigned된 URL이라(`submissions.api._public_asset_summaries`)
+          여기서 별도 요청 없이 바로 쓴다 — 이 화면은 이미 마감 후에만 열린다. */}
+      {submission.assets
+        .filter((asset) => asset.kind === "demo_video" && asset.download_url)
+        .map((asset) => (
+          <div key={asset.id} className="flex flex-col gap-1">
+            <span className="text-xs text-ink/60">{asset.label || "시연 영상"}</span>
+            <video
+              controls
+              preload="metadata"
+              className="w-40 rounded-sm border border-rule"
+              data-testid={`submission-${submission.submission_id}-demo-video`}
+            >
+              <source src={asset.download_url!} />
+            </video>
+          </div>
+        ))}
+      {submission.assets
+        .filter((asset) => asset.kind === "screenshot" && asset.download_url)
+        .map((asset) => (
+          // eslint-disable-next-line @next/next/no-img-element -- presigned URL, Next Image 최적화 대상이 아니다
+          <img
+            key={asset.id}
+            src={asset.download_url!}
+            alt={asset.label || "스크린샷"}
+            className="w-40 rounded-sm border border-rule"
+            data-testid={`submission-${submission.submission_id}-screenshot`}
+          />
+        ))}
+
       {isAwarded && (
         <p className="text-xs font-semibold text-verified" data-testid={`awarded-badge-${submission.submission_id}`}>
           선정됨

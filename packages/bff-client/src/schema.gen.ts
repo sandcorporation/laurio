@@ -2969,12 +2969,14 @@ export interface components {
          * @description `test_account`가 **없는** 자료 (#190).
          *
          *     공개 프로필과 심사 비교 화면이 쓴다. 두 스키마 모두 다중화 이전에도
-         *     `test_account` 필드가 없었다 — 마감 후 공개되는 것은 데모·영상이지 그것을
-         *     들여다볼 로그인 정보까지가 아니고(ADR-0014의 "데모·영상" 칸, #10 리뷰 지적),
-         *     비교 화면은 애초에 그 필드를 내지 않았다. `SubmissionAssetOut`을 그대로 쓰면
-         *     다중화가 그 두 자리에 로그인 정보를 조용히 새로 흘려보내게 된다.
+         *     `test_account` 필드가 없었다 — 마감 후 공개되는 것은 데모·영상·스크린샷이지
+         *     그것을 들여다볼 로그인 정보까지가 아니고(ADR-0014의 "데모·영상" 칸, #10 리뷰
+         *     지적), 비교 화면은 애초에 그 필드를 내지 않았다. `SubmissionAssetOut`을 그대로
+         *     쓰면 다중화가 그 두 자리에 로그인 정보를 조용히 새로 흘려보내게 된다.
          */
         AssetSummaryOut: {
+            /** Download Url */
+            download_url?: string | null;
             /** Id */
             id: number;
             /** Kind */

@@ -1593,6 +1593,42 @@ def test_resolver_wiring_lets_sponsor_but_not_other_developer_download_demo_befo
 
 
 @pytest.mark.django_db
+def test_demo_video_download_ttl_is_longer_than_the_default(client, category, landing_type):
+    """시연 영상은 화면 안에서 재생해야 해서 다른 종류보다 서명 수명이 길다
+    (#265, ADR-0036) — 그 값은 PlatformPolicy가 아니라 설정 상수다."""
+
+    from datetime import datetime, timezone as dt_timezone
+
+    from django.conf import settings
+
+    _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+
+    def _expires_delta(target_ref: str) -> float:
+        object_key = f"{target_ref}/{uuid.uuid4().hex}"
+        response = client.post(
+            "/api/storage/downloads",
+            data={"target_ref": target_ref, "object_key": object_key},
+            content_type="application/json",
+            **_auth_header(dev["access"]),
+        )
+        assert response.status_code == 200, response.content
+        expires_at = datetime.fromisoformat(response.json()["expires_at"])
+        return (expires_at - datetime.now(dt_timezone.utc)).total_seconds()
+
+    source_delta = _expires_delta(f"submission:{contest['id']}:{dev['user_id']}:source")
+    video_delta = _expires_delta(f"submission:{contest['id']}:{dev['user_id']}:demo-video")
+
+    assert source_delta <= settings.STORAGE_DOWNLOAD_URL_TTL_SECONDS
+    assert video_delta > settings.STORAGE_DOWNLOAD_URL_TTL_SECONDS
+    assert (
+        settings.STORAGE_VIDEO_DOWNLOAD_URL_TTL_SECONDS - 5
+        <= video_delta
+        <= settings.STORAGE_VIDEO_DOWNLOAD_URL_TTL_SECONDS
+    )
+
+
+@pytest.mark.django_db
 def test_resolver_wiring_opens_demo_to_everyone_after_deadline(client, category, landing_type):
     deadline = timezone.now() + timedelta(hours=1)
     _sponsor, contest = _publish_contest(

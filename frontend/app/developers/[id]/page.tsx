@@ -99,7 +99,12 @@ export default async function DeveloperProfilePage({ params }: { params: Promise
 }
 
 function ArchivedSubmissionRow({ submission }: { submission: PublicSubmission }) {
-  const videoCount = submission.assets.filter((asset) => asset.kind === "demo_video").length;
+  const videos = submission.assets.filter(
+    (asset) => asset.kind === "demo_video" && asset.download_url,
+  );
+  const screenshots = submission.assets.filter(
+    (asset) => asset.kind === "screenshot" && asset.download_url,
+  );
 
   return (
     <li
@@ -130,15 +135,40 @@ function ArchivedSubmissionRow({ submission }: { submission: PublicSubmission })
               {asset.label || "데모 보기"}
             </a>
           ))}
-        {videoCount > 0 && (
-          <span
-            className="border border-rule px-1.5 py-0.5 text-ink/70"
-            data-testid="demo-video-indicator"
-          >
-            시연 영상 {videoCount > 1 ? `${videoCount}편 ` : ""}있음
-          </span>
-        )}
       </div>
+      {/* #265 — 「시연 영상 N편 있음」이라고만 말하던 죽은 배지 대신, 실제로
+          재생·열람할 수 있는 영상·스크린샷을 낸다(ADR-0036). `download_url`은
+          백엔드가 이미 서명해 실어 보낸 것이라(`submissions.api.
+          _public_asset_summaries`) 이 서버 컴포넌트가 별도 요청 없이 그대로
+          렌더링한다 — JS를 꺼도 재생·열람이 가능하다. 라벨로 자료를 구별한다
+          (영상 둘, 스크린샷 여럿이 나란히 선다). */}
+      {(videos.length > 0 || screenshots.length > 0) && (
+        <div className="flex flex-wrap gap-3">
+          {videos.map((asset) => (
+            <div key={asset.id} className="flex flex-col gap-1">
+              <span className="text-xs text-ink/60">{asset.label || "시연 영상"}</span>
+              <video
+                controls
+                preload="metadata"
+                className="w-48 rounded-sm border border-rule"
+                data-testid="demo-video-player"
+              >
+                <source src={asset.download_url!} />
+              </video>
+            </div>
+          ))}
+          {screenshots.map((asset) => (
+            // eslint-disable-next-line @next/next/no-img-element -- presigned URL, Next Image 최적화 대상이 아니다
+            <img
+              key={asset.id}
+              src={asset.download_url!}
+              alt={asset.label || "스크린샷"}
+              className="w-48 rounded-sm border border-rule"
+              data-testid="screenshot-image"
+            />
+          ))}
+        </div>
+      )}
     </li>
   );
 }
