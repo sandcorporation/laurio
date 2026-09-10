@@ -29,6 +29,12 @@ class NotificationType(models.TextChoices):
     # HoldKind) — 상태마다 유형을 만들면 Hold → 문구 규칙이 두 곳에 생긴다(#130 이 세
     # 렌더러에서 하나로 모은 것을 다시 쪼개는 셈이다).
     PAYOUT_AWAITS_YOU = "payout_awaits_you", "지급이 당신을 기다린다"
+    # 강의실 채점 예산이 경고 임계를 넘었다(#295) — 강사가 자기 클래스의
+    # `classroom.Class.token_budget`을 정했을 때만 쓰인다. 강의실은 공모전
+    # 가족이 아니라(ADR-0037) 이 유형을 만드는 쪽(`classroom.scoring`)이
+    # `notifications`를 부르지 이 앱이 강의실을 알지 않는다 — 유형 어휘만
+    # 여기 산다.
+    CLASSROOM_TOKEN_BUDGET_WARNING = "classroom_token_budget_warning", "강의실 채점 예산 경고"
 
 
 # 유형별 거래성/광고성/야간유예 플래그. 광고성(is_promotional=True)은 옵트인 없이
@@ -73,6 +79,12 @@ NOTIFICATION_TYPE_FLAGS: dict[str, dict[str, bool]] = {
     # 스스로 얹은 여유분을 이 유형 하나에서만 거두는 것이다.
     NotificationType.PAYOUT_AWAITS_YOU: {
         "is_transactional": True, "is_promotional": False, "is_quiet_hours_exempt": True,
+    },
+    # 강사 본인의 지출에 대한 경고다 — 거래성이고 옵트인이 필요 없다. 야간
+    # 유예 예외는 아니다: 급전을 다투는 지급과 달리, 다음 아침에 봐도 늦지
+    # 않는다(예산이 다 찼다는 사실 자체는 채점 정지 상태로 이미 보존된다).
+    NotificationType.CLASSROOM_TOKEN_BUDGET_WARNING: {
+        "is_transactional": True, "is_promotional": False, "is_quiet_hours_exempt": False,
     },
 }
 

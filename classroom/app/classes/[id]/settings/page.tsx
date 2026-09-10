@@ -27,9 +27,18 @@ export default function ClassScoringSettingsPage() {
   const [modelSaving, setModelSaving] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
 
+  const [tokenBudget, setTokenBudget] = useState("");
+  const [warningThreshold, setWarningThreshold] = useState("");
+  const [budgetSaving, setBudgetSaving] = useState(false);
+  const [budgetError, setBudgetError] = useState<string | null>(null);
+
   useEffect(() => {
     if (state.status === "ready") {
       setDefaultModel(state.classroom.default_model);
+      setTokenBudget(
+        state.classroom.token_budget === null ? "" : String(state.classroom.token_budget),
+      );
+      setWarningThreshold(String(state.classroom.token_budget_warning_threshold_percent));
     }
   }, [state]);
 
@@ -85,6 +94,33 @@ export default function ClassScoringSettingsPage() {
       setModelError(err instanceof BackendError ? err.message : "기본 모델을 저장하지 못했습니다.");
     } finally {
       setModelSaving(false);
+    }
+  }
+
+  async function handleBudgetSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const parsedBudget = Number(tokenBudget);
+    const parsedThreshold = Number(warningThreshold);
+    if (!Number.isInteger(parsedBudget) || parsedBudget < 1) {
+      setBudgetError("예산 한도는 1 이상의 정수여야 합니다.");
+      return;
+    }
+    if (!Number.isInteger(parsedThreshold) || parsedThreshold < 1 || parsedThreshold > 100) {
+      setBudgetError("경고 임계는 1~100 사이의 정수여야 합니다.");
+      return;
+    }
+    setBudgetSaving(true);
+    setBudgetError(null);
+    try {
+      await updateClass(classId, {
+        token_budget: parsedBudget,
+        token_budget_warning_threshold_percent: parsedThreshold,
+      });
+      reload();
+    } catch (err) {
+      setBudgetError(err instanceof BackendError ? err.message : "채점 예산을 저장하지 못했습니다.");
+    } finally {
+      setBudgetSaving(false);
     }
   }
 
@@ -153,6 +189,61 @@ export default function ClassScoringSettingsPage() {
           </form>
         )}
         {modelError ? <p data-testid="class-default-model-error">{modelError}</p> : null}
+      </section>
+
+      <section>
+        <h2>채점 예산</h2>
+        <p>
+          이 클래스의 채점이 강사님의 채점 키로 쓰는 토큰에 상한을 둡니다 —
+          한도에 닿으면 새 채점이 멈추고, 제출은 그대로 쌓여 예산을 채우면
+          순서대로 이어서 채점됩니다.
+        </p>
+
+        {classroom.token_budget === null ? (
+          <p data-testid="token-budget-status">예산이 설정되지 않았습니다 — 채점 사용량에 상한이 없습니다.</p>
+        ) : (
+          <p data-testid="token-budget-status">
+            사용량 {classroom.token_usage_total.toLocaleString("ko-KR")} /{" "}
+            {classroom.token_budget.toLocaleString("ko-KR")} 토큰 · 남은 양{" "}
+            {(classroom.token_budget_remaining ?? 0).toLocaleString("ko-KR")} 토큰
+            {classroom.token_budget_exhausted ? (
+              <strong data-testid="token-budget-exhausted-badge"> · 채점 정지 중(예산 소진)</strong>
+            ) : null}
+          </p>
+        )}
+
+        <form onSubmit={handleBudgetSubmit}>
+          <label htmlFor="token-budget-input">예산 한도(토큰)</label>
+          <input
+            id="token-budget-input"
+            data-testid="token-budget-input"
+            type="number"
+            min={1}
+            step={1}
+            value={tokenBudget}
+            onChange={(event) => setTokenBudget(event.target.value)}
+            placeholder="예: 1000000"
+          />
+          <label htmlFor="token-budget-warning-threshold-input">경고 임계(%)</label>
+          <input
+            id="token-budget-warning-threshold-input"
+            data-testid="token-budget-warning-threshold-input"
+            type="number"
+            min={1}
+            max={100}
+            step={1}
+            value={warningThreshold}
+            onChange={(event) => setWarningThreshold(event.target.value)}
+          />
+          <button
+            type="submit"
+            data-testid="token-budget-submit"
+            disabled={budgetSaving || tokenBudget.trim() === ""}
+          >
+            {budgetSaving ? "저장하는 중..." : "저장"}
+          </button>
+        </form>
+        {budgetError ? <p data-testid="token-budget-error">{budgetError}</p> : null}
       </section>
     </main>
   );

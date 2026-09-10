@@ -11,6 +11,14 @@ export type ClassRow = {
   openai_key_masked: string | null;
   // 강사가 보관했는가(#294) — 참이면 새 가입·새 제출이 닫히고 읽기만 남는다.
   archived: boolean;
+  // `null`이면 무제한(#295) — 강사가 아직 예산을 정하지 않았다는 뜻이다.
+  token_budget: number | null;
+  token_budget_warning_threshold_percent: number;
+  token_usage_total: number;
+  // `token_budget - token_usage_total` — 예산이 없으면(무제한) `null`이다.
+  token_budget_remaining: number | null;
+  // 지금 채점이 예산 때문에 멈춰 있는가.
+  token_budget_exhausted: boolean;
 };
 
 export function fetchMyClasses(): Promise<ClassRow[]> {
@@ -30,7 +38,12 @@ export function createClass(name: string): Promise<ClassRow> {
 
 export function updateClass(
   classId: number,
-  patch: Partial<{ name: string; default_model: string }>,
+  patch: Partial<{
+    name: string;
+    default_model: string;
+    token_budget: number;
+    token_budget_warning_threshold_percent: number;
+  }>,
 ): Promise<ClassRow> {
   return backendJson<ClassRow>(`/classroom/classes/${classId}`, {
     method: "PATCH",

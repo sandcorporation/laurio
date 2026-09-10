@@ -16,6 +16,12 @@ class ClassIn(Schema):
 class ClassPatchIn(Schema):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     default_model: str | None = None
+    #: 채점 토큰 예산 상한(#295). 필드를 생략하면(`None`) 바꾸지 않는다 —
+    #: 기존 PATCH 관례 그대로다. 이 API에는 "다시 무제한으로 되돌리는" 값이
+    #: 없다 — 그 요구가 아직 없어 짓지 않는다.
+    token_budget: int | None = Field(default=None, ge=1)
+    #: 경고 알림을 보낼 임계, 예산 대비 백분율(1~100, #295).
+    token_budget_warning_threshold_percent: int | None = Field(default=None, ge=1, le=100)
 
 
 class ClassOut(Schema):
@@ -30,6 +36,16 @@ class ClassOut(Schema):
     #: 남는다. `archived_at`이 아니라 이 값을 내려주는 이유는 화면이 정확한
     #: 시각을 쓰지 않기 때문이다(진행중/보관 여부만 갈라 보이면 된다).
     archived: bool = False
+    #: `None`이면 무제한(#295) — 강사가 아직 예산을 정하지 않았다는 뜻이다.
+    token_budget: int | None = None
+    token_budget_warning_threshold_percent: int
+    #: 지금까지 실제로 쓴 토큰 누적합.
+    token_usage_total: int
+    #: `token_budget - token_usage_total` — 예산이 없으면(무제한) `None`이다.
+    token_budget_remaining: int | None = None
+    #: 지금 채점이 예산 때문에 멈춰 있는가 — 강사 화면이 이 값 하나로
+    #: "채점 정지 중" 배지를 낸다.
+    token_budget_exhausted: bool = False
 
 
 class OpenAIKeyIn(Schema):
@@ -207,6 +223,11 @@ class ClassroomSubmissionOut(Schema):
     #: 이 시도 하나가 통과인가 — 채점된 필수 체크리스트 항목을 전부
     #: 충족했는가(#288). 미채점("pending")이면 항상 거짓이다.
     passed: bool = False
+    #: "budget_exhausted" 또는 `None`(#295). `status`가 "pending"이고 그
+    #: 클래스의 채점 예산이 바닥나 채점이 잠시 멈췄을 때만 채워진다 — 참여자가
+    #: 스스로 어쩔 수 없는 다른 pending 사유(예: 강사가 채점 키를 아직
+    #: 설정하지 않음)는 여기 담지 않는다(강사 전용 문제로 남겨 둔다).
+    pending_reason: str | None = None
 
 
 class ClassroomProblemSubmissionsOut(Schema):

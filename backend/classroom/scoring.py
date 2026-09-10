@@ -36,6 +36,7 @@ import logging
 from django.db import models, transaction
 from django.db.models import Count
 
+from core.clock import Clock
 from core.crypto import decrypt
 from core.llm_scoring import (
     LLMAdapterError,
@@ -47,11 +48,19 @@ from core.llm_scoring import (
 from core.repository_adapters import GitHubAdapterError, get_github_adapter
 from core.scans import ScanSpec
 from core.source_selection import select_source_files
+from notifications.models import NotificationType
+from notifications.services import create_notification
 from storage.adapters import get_storage_adapter
 from submissions.models import SubmissionAsset
 from submissions.scoring_basis import PLATFORM_FAILURE_MODEL_VERSION
 
-from .models import ChecklistItem, ClassroomScore, ClassroomScoringAttempt, ClassroomSubmission
+from .models import (
+    ChecklistItem,
+    Class,
+    ClassroomScore,
+    ClassroomScoringAttempt,
+    ClassroomSubmission,
+)
 from .scoring_models import is_valid_model
 
 logger = logging.getLogger(__name__)
@@ -148,6 +157,52 @@ def _scoring_cap_reached(submission: ClassroomSubmission) -> bool:
     return (counts["total"] or 0) >= SCORING_FAILURE_LIMIT
 
 
+def _record_token_usage(class_obj: Class, total_tokens: int) -> None:
+    """이 클래스의 누적 토큰 사용량에 더하고, 경고 임계를 **처음** 넘는
+    순간에만 강사에게 서비스 내부 알림을 보낸다(#295).
+
+    `total_tokens`가 0 이하면(어댑터가 사용량을 보고하지 않았을 때, `core.
+    llm_scoring.ScoringOutput.total_tokens`의 기본값) 아무것도 하지 않는다 —
+    쓰지 않은 것으로 기록하면 예산이 실제보다 빨리 도는 셈이 된다.
+
+    `select_for_update`로 잠그고 다시 읽어 누적하는 이유는 같은 tick 안에서도
+    한 클래스의 시도 여러 개가 순서대로 처리되기 때문이다 — 그냥 파이썬 값에
+    더하면 경합 없이도 마지막에 처리된 시도의 계산이 앞선 것들을 덮어쓴다."""
+
+    if total_tokens <= 0:
+        return
+
+    should_notify = False
+    with transaction.atomic():
+        locked = Class.objects.select_for_update().get(pk=class_obj.pk)
+        locked.token_usage_total += total_tokens
+        update_fields = ["token_usage_total"]
+
+        if (
+            locked.token_budget is not None
+            and locked.token_budget_warning_sent_at is None
+            and locked.token_usage_total * 100
+            >= locked.token_budget * locked.token_budget_warning_threshold_percent
+        ):
+            locked.token_budget_warning_sent_at = Clock.now()
+            update_fields.append("token_budget_warning_sent_at")
+            should_notify = True
+
+        locked.save(update_fields=update_fields)
+
+    if should_notify:
+        create_notification(
+            recipient=locked.instructor,
+            notification_type=NotificationType.CLASSROOM_TOKEN_BUDGET_WARNING,
+            context={
+                "class_id": locked.id,
+                "class_name": locked.name,
+                "token_usage_total": locked.token_usage_total,
+                "token_budget": locked.token_budget,
+            },
+        )
+
+
 def _finalize_platform_failure(submission: ClassroomSubmission, checklist_items: list[ChecklistItem]) -> ClassroomScore:
     reasoning = [
         {"checklist_item_id": item.id, "is_met": False, "reasoning": _PLATFORM_FAILURE_REASONING}
@@ -178,6 +233,16 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
     if _scoring_cap_reached(submission):
         score = _finalize_platform_failure(submission, checklist_items)
         return {"submission_id": submission.id, "status": "cap_reached", "score_id": score.id}
+
+    # 후보 쿼리(_pending_submissions)가 이미 예산이 남은 클래스만 고르지만,
+    # 같은 배치 안에서 앞선 행이 방금 이 클래스의 예산을 다 써버렸을 수 있다
+    # — `problem.classroom`은 배치를 만들 때 한 번 읽은 값이라 그 갱신을
+    # 못 본다. 다시 읽어 확인한다(#295).
+    class_obj = Class.objects.get(pk=class_obj.pk)
+    if class_obj.token_budget_exhausted():
+        # no_key와 같은 규율 — 시도로 남기지 않고 조용히 건너뛴다("아직
+        # 시도하지 않았다"는 사실 그대로, 「실패했다」가 아니다).
+        return {"submission_id": submission.id, "status": "budget_exhausted"}
 
     raw_key = (class_obj.openai_api_key_encrypted or "").strip()
     if not raw_key:
@@ -238,6 +303,8 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
             return {"submission_id": submission.id, "status": "cap_reached", "score_id": score.id}
         return {"submission_id": submission.id, "status": "failed"}
 
+    _record_token_usage(class_obj, output.total_tokens)
+
     reasoning = [
         {"checklist_item_id": v.requirement_id, "is_met": v.is_met, "reasoning": v.reasoning}
         for v in output.verdicts
@@ -253,12 +320,17 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
 
 
 def _pending_submissions(as_of, ctx):
-    """아직 `ClassroomScore`가 없고, 그 클래스에 채점 키가 있는 시도(#287).
+    """아직 `ClassroomScore`가 없고, 그 클래스에 채점 키가 있고, 채점 예산이
+    바닥나지 않은 시도(#287, #295).
 
-    키 없는 클래스의 시도는 애초에 후보가 아니다 — "아직 시도하지 않았다"를
-    `ClassroomScoringAttempt` 이력 없이 유지한다(모듈 docstring). `scoring.
-    services._pending_submissions`와 같은 이유로 시도 횟수 오름차순 정렬한다
-    (한 번도 시도되지 않은 것이 재시도 중인 것보다 항상 앞선다, ADR-0031).
+    키 없는 클래스·예산이 바닥난 클래스의 시도는 애초에 후보가 아니다 —
+    "아직 시도하지 않았다"를 `ClassroomScoringAttempt` 이력 없이 유지한다
+    (모듈 docstring). 예산이 다시 차면(강사가 `token_budget`을 늘리면) 다음
+    tick부터 저절로 후보에 다시 들어온다 — 별도의 "재개" 신호가 필요 없다.
+    `scoring.services._pending_submissions`와 같은 이유로 시도 횟수 오름차순
+    정렬한다(한 번도 시도되지 않은 것이 재시도 중인 것보다 항상 앞선다,
+    ADR-0031) — 예산이 차서 쌓인 시도부터 다시 도는 것도 이 정렬 하나로
+    이미 "쌓인 순서대로"가 된다.
     """
 
     attempt_count = (
@@ -274,6 +346,14 @@ def _pending_submissions(as_of, ctx):
             classroom_score__isnull=True,
         )
         .exclude(problem__classroom__openai_api_key_encrypted="")
+        .exclude(
+            models.Q(problem__classroom__token_budget__isnull=False)
+            & models.Q(
+                problem__classroom__token_usage_total__gte=models.F(
+                    "problem__classroom__token_budget"
+                )
+            )
+        )
         .annotate(attempt_count=models.functions.Coalesce(models.Subquery(attempt_count), 0))
         .select_related("problem", "problem__classroom", "member")
     )
