@@ -72,7 +72,7 @@ async function createContest(page: import("@playwright/test").Page): Promise<num
   return result.body.id as number;
 }
 
-test("@exclusive presigned 업로드 발급은 프록시를 타지만 실제 PUT은 스토리지로 직행한다", async ({
+test("@exclusive presigned 업로드 발급은 프록시를 타지만 실제 전송은 스토리지로 직행한다", async ({
   page,
   baseURL,
 }) => {
@@ -102,18 +102,28 @@ test("@exclusive presigned 업로드 발급은 프록시를 타지만 실제 PUT
   expect(objectKey).toBeTruthy();
 
   // --- 목적지 호스트 검증 ---------------------------------------------------
+  // 메서드는 슬롯마다 다르다: 바이트 상한이 있는 슬롯은 presigned POST 로,
+  // 없는 슬롯은 PUT 으로 발급된다(#261 — PUT 은 서명에 크기를 묶을 수단이 없다).
+  // 이 스펙이 지키는 사실은 메서드가 아니라 **목적지**다 — 바이트가 우리
+  // 오리진을 거치지 않는다는 것.
   const nextOrigin = new URL(baseURL!).origin;
-  const putRequests = observedRequests.filter((r) => r.method === "PUT");
-  expect(putRequests.length).toBeGreaterThan(0);
-  for (const putRequest of putRequests) {
-    const putOrigin = new URL(putRequest.url).origin;
-    expect(putOrigin, `PUT이 ${putRequest.url}로 나갔다`).not.toBe(nextOrigin);
+  const issuePath = "/api/backend/storage/uploads";
+  const uploadRequests = observedRequests.filter(
+    (r) => (r.method === "PUT" || r.method === "POST") && !r.url.includes(issuePath),
+  );
+  expect(uploadRequests.length).toBeGreaterThan(0);
+  for (const uploadRequest of uploadRequests) {
+    const uploadOrigin = new URL(uploadRequest.url).origin;
+    expect(
+      uploadOrigin,
+      `업로드 전송이 ${uploadRequest.method} ${uploadRequest.url}로 나갔다`,
+    ).not.toBe(nextOrigin);
   }
 
   // 발급 요청(POST) 자체는 우리 오리진(BFF 프록시)을 거쳤어야 한다 — 대비되는
   // 증거로 함께 확인한다.
   const issueRequests = observedRequests.filter(
-    (r) => r.method === "POST" && r.url.includes("/api/backend/storage/uploads"),
+    (r) => r.method === "POST" && r.url.includes(issuePath),
   );
   expect(issueRequests.length).toBeGreaterThan(0);
   for (const issueRequest of issueRequests) {
