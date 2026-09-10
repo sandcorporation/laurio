@@ -99,8 +99,15 @@ class ClassMember(models.Model):
     )
     display_name = models.CharField(max_length=100)
     joined_at = models.DateTimeField(auto_now_add=True)
+    #: 강사가 내보낸 시각(#281). 행을 지우지 않는다 — 지우면 그 사람이 낸
+    #: 제출물이 이름을 잃어 "누군가의 제출"이 된다(CONTEXT.md 「ClassMember」).
+    #: null이면 아직(또는 다시는) 내보내지지 않았다는 뜻이다. 내보낸 사람이
+    #: 새 제출을 못 내는 것은 이 값을 보는 제출 엔드포인트(#286)의 몫이다 —
+    #: 이 티켓은 그 신호를 남기는 데까지다.
+    expelled_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
+        ordering = ["joined_at", "id"]
         constraints = [
             models.UniqueConstraint(
                 fields=["classroom", "user"], name="unique_classroom_member"

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from django.db import transaction
 from django.http import HttpRequest
+from django.utils import timezone
 from ninja import Router
 from ninja.errors import HttpError
 
@@ -39,6 +40,7 @@ from .schemas import (
     JoinLinkOut,
     JoinPreviewOut,
     JoinResultOut,
+    MemberOut,
     ProblemIn,
     ProblemOut,
     ProblemPatchIn,
@@ -152,6 +154,11 @@ def preview_join(request: HttpRequest, join_code: str):
     판단할 수 있어야 한다(#280 AC)."""
 
     class_obj = _get_class_by_join_code_or_404(join_code)
+    # `members.count()`는 강사 본인이 가입했으면 그 행도 센다 — CONTEXT.md
+    # 「ClassMember」가 강사를 빼라고 정한 것은 **달성률**의 분모뿐이다(그
+    # 계산은 아직 없는 티켓의 몫이다). 이 미리보기의 "참여자 수"는 그
+    # 지표가 아니라 문자 그대로 "이 클래스에 누가 있는가"라 뺄 이유가
+    # 없다.
     return 200, JoinPreviewOut(
         class_name=class_obj.name,
         instructor_email=class_obj.instructor.email,
@@ -179,6 +186,54 @@ def join_class(request: HttpRequest, join_code: str, payload: JoinIn):
     return 200, JoinResultOut(
         class_id=class_obj.id, class_name=class_obj.name, display_name=member.display_name
     )
+
+
+# --- Member (#281) ---------------------------------------------------------------
+
+
+def _serialize_member(member: ClassMember, *, instructor_id: int) -> MemberOut:
+    return MemberOut(
+        id=member.id,
+        display_name=member.display_name,
+        joined_at=member.joined_at,
+        expelled=member.expelled_at is not None,
+        is_instructor=member.user_id == instructor_id,
+    )
+
+
+@router.get(
+    "/classes/{class_id}/members", response={200: list[MemberOut], 404: ErrorOut}, auth=jwt_auth
+)
+def list_members(request: HttpRequest, class_id: int):
+    """강사만 본다 — 참여자는 자기 클래스든 남의 클래스든 명단에 닿지
+    못한다(#281 AC "참여자는 남의 명단을 볼 수 없다"), `_get_owned_class_or_404`가
+    강사가 아닌 모든 요청을 404로 돌리는 것과 같은 문이다."""
+
+    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    members = class_obj.members.all()
+    return 200, [_serialize_member(m, instructor_id=class_obj.instructor_id) for m in members]
+
+
+@router.post(
+    "/classes/{class_id}/members/{member_id}/expel",
+    response={200: MemberOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def expel_member(request: HttpRequest, class_id: int, member_id: int):
+    """행을 지우지 않는다 — 표시만 한다(#281). 이미 내보낸 사람을 다시
+    내보내도 오류를 내지 않고 그대로 둔다(멱등)."""
+
+    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    try:
+        member = class_obj.members.get(id=member_id)
+    except ClassMember.DoesNotExist as exc:
+        raise HttpError(404, "참여자를 찾을 수 없습니다.") from exc
+
+    if member.expelled_at is None:
+        member.expelled_at = timezone.now()
+        member.save(update_fields=["expelled_at"])
+
+    return 200, _serialize_member(member, instructor_id=class_obj.instructor_id)
 
 
 # --- Problem -------------------------------------------------------------------

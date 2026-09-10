@@ -1,8 +1,9 @@
 "use client";
 
-// 클래스 상세 (#278/#279/#282). 이름·만든 날짜에 이어 가입 링크, 그리고
-// 문제 목록을 순서대로 보여준다. 남의 클래스는 백엔드가 404를 주므로 그대로
-// "찾을 수 없다"로 보여준다(존재를 알려주지 않는다).
+// 클래스 상세 (#278/#279/#281/#282). 이름·만든 날짜에 이어 가입 링크·참여자
+// 명단으로 가는 문, 그리고 문제 목록을 순서대로 보여준다. 남의 클래스는
+// 백엔드가 404를 주므로 그대로 "찾을 수 없다"로 보여준다(존재를 알려주지
+// 않는다).
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
@@ -105,6 +106,12 @@ export default function ClassDetailPage() {
         regenerateError={classState.regenerateError}
         onRegenerate={regenerateJoinCode}
       />
+
+      <p>
+        <Link href={`/classes/${classId}/members`} data-testid="members-link">
+          참여자 명단
+        </Link>
+      </p>
 
       <h2>문제</h2>
       <p>

@@ -87,3 +87,11 @@ class JoinResultOut(Schema):
     class_id: int
     class_name: str
     display_name: str
+
+
+class MemberOut(Schema):
+    id: int
+    display_name: str
+    joined_at: datetime
+    expelled: bool
+    is_instructor: bool

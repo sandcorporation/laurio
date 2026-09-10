@@ -550,6 +550,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Members
+         * @description 강사만 본다 — 참여자는 자기 클래스든 남의 클래스든 명단에 닿지
+         *     못한다(#281 AC "참여자는 남의 명단을 볼 수 없다"), `_get_owned_class_or_404`가
+         *     강사가 아닌 모든 요청을 404로 돌리는 것과 같은 문이다.
+         */
+        get: operations["classroom_api_list_members"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/classes/{class_id}/members/{member_id}/expel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Expel Member
+         * @description 행을 지우지 않는다 — 표시만 한다(#281). 이미 내보낸 사람을 다시
+         *     내보내도 오류를 내지 않고 그대로 둔다(멱등).
+         */
+        post: operations["classroom_api_expel_member"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/problems": {
         parameters: {
             query?: never;
@@ -4449,6 +4492,22 @@ export interface components {
             /** Username */
             username: string;
         };
+        /** MemberOut */
+        MemberOut: {
+            /** Display Name */
+            display_name: string;
+            /** Expelled */
+            expelled: boolean;
+            /** Id */
+            id: number;
+            /** Is Instructor */
+            is_instructor: boolean;
+            /**
+             * Joined At
+             * Format: date-time
+             */
+            joined_at: string;
+        };
         /**
          * MyParticipationOut
          * @description 「내 참가 현황」의 한 행 (#74).
@@ -6367,6 +6426,69 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JoinLinkOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_list_members: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberOut"][];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_expel_member: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+                member_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberOut"];
                 };
             };
             /** @description Not Found */
