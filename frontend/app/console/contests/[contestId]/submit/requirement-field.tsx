@@ -146,7 +146,7 @@ export function RequirementField({
             </select>
             <input
               className="flex-1 rounded-sm border border-rule bg-paper px-2 py-1 text-sm"
-              placeholder="예: 01:23, screenshots/1.png, /checkout, src/api/pay.ts"
+              placeholder="예: 01:23, screenshots/1.png, /checkout, accounts/views.py 의 signup()"
               value={item.value}
               disabled={disabled}
               onChange={(event) => updateEvidence(index, { value: event.target.value })}

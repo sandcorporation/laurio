@@ -737,6 +737,22 @@ export default function SubmitPage() {
       <AssetKindSection
         kind="source"
         title={ASSET_KIND_LABELS.source}
+        helperText={
+          // 상한 숫자는 PlatformPolicy.max_source_assets의 코드 기본값이다
+          // (backend/policies/models.py) — 운영자가 정책 화면 밖 API로 바꿀 수
+          // 있는 값이라 이 문구가 항상 실제 상한과 같다고 보장하지 않는다.
+          // 공개 앱 BFF가 `/api/operator/*`를 막아(#43) 이 화면이 살아있는
+          // 값을 직접 물어볼 길이 없다(asset-kind-section.tsx 상단 주석과 같은
+          // 이유) — 그래서 "기본값"이라고 못박고, 실제로 넘으면 여전히 서버가
+          // 저장 시점에 422로 정확한 한도를 알려준다. **이 기본값이 바뀌면
+          // (policies/models.py) 여기와 docs/features/frontend.md의 같은
+          // 문장도 같이 고친다.**
+          <p className="text-sm text-ink/70" data-testid="source-helper">
+            여러 파일을 zip 하나로 묶어 올리는 것이 기본입니다 — 압축하지 않은 파일
+            하나만 올려도 받습니다. 기본값은 5개까지이고, 그보다 많이 올리면
+            저장할 때 안내합니다.
+          </p>
+        }
         // #218: 저장소가 채워져 있으면 소스는 더 이상 필수가 아니다 — 마지막
         // 빈 행도 지울 수 있어야 하고, "없으면 거부됩니다" 경고도 뜨면 안 된다.
         required={!hasFilledRepository}
@@ -801,7 +817,9 @@ export default function SubmitPage() {
         <h2 className="text-lg font-semibold">요구사항 체크리스트</h2>
         <p className="text-xs text-ink/60" data-testid="evidence-asset-picker-notice">
           근거가 가리킬 수 있는 자료 목록은 마지막으로 저장된 자료 기준입니다 — 방금
-          추가한 자료는 한 번 저장한 뒤에 근거로 연결할 수 있습니다.
+          추가한 자료는 한 번 저장한 뒤에 근거로 연결할 수 있습니다. 소스코드를
+          둘 이상 냈다면, 그 중 어느 것을 가리키는지 반드시 골라야 합니다 —
+          아니면 채점하는 쪽도 어느 소스의 어디를 봐야 하는지 알 수 없습니다.
         </p>
         {contest.requirements.map((requirement) => (
           <RequirementField

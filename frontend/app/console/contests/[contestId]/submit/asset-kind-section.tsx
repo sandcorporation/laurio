@@ -81,6 +81,13 @@ export interface AssetKindSectionProps {
   targetRefPrefix?: string;
 }
 
+// 소스 업로드 칸의 파일 선택창이 기본으로 보여줄 형식(#260). **강제가
+// 아니다** — `accept`는 브라우저 파일 선택창의 기본 필터일 뿐이고, 사용자가
+// "모든 파일"로 바꾸면 그대로 통과한다. 백엔드가 zip이 아닌 단일 파일도 이미
+// 받으므로(scoring/source_selection.py의 비-zip 폴백) 여기서 막을 이유가
+// 없다 — zip이 "기본"이라는 것만 알리면 된다.
+const SOURCE_UPLOAD_ACCEPT = ".zip";
+
 export function AssetKindSection({
   kind,
   title,
@@ -218,6 +225,7 @@ export function AssetKindSection({
                     <UploadField
                       targetRef={targetRefPrefix}
                       label={row.value ? "다른 파일로 교체" : "파일 선택"}
+                      accept={kind === "source" ? SOURCE_UPLOAD_ACCEPT : undefined}
                       testId={`${testIdPrefix}-${index}-upload`}
                       onUploaded={(objectKey, contentType) =>
                         update(index, { value: objectKey, contentType })
