@@ -17,6 +17,12 @@ class ClassOut(Schema):
     id: int
     name: str
     created_at: datetime
+    has_openai_key: bool
+    openai_key_masked: str | None = None
+
+
+class OpenAIKeyIn(Schema):
+    api_key: str = Field(min_length=1, max_length=400)
 
 
 class ChecklistItemIn(Schema):

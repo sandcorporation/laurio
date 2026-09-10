@@ -21,6 +21,7 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
+from core.crypto import encrypt
 
 from .models import ChecklistItem, Class, Problem
 from .schemas import (
@@ -31,6 +32,7 @@ from .schemas import (
     ClassIn,
     ClassOut,
     ErrorOut,
+    OpenAIKeyIn,
     ProblemIn,
     ProblemOut,
     ProblemPatchIn,
@@ -41,9 +43,25 @@ router = Router(tags=["classroom"])
 
 _SUBMISSION_FORMATS = {choice for choice, _label in Problem.SubmissionFormat.choices}
 
+#: 마스킹은 복호화가 아니라 저장 시점에 남긴 마지막 네 자리로만 만든다 —
+#: `Class.openai_api_key_encrypted`를 다시 풀지 않는다(#284, 파일 상단 라우터
+#: docstring과 같은 이유: 복호화는 채점 요청을 보낼 때만 한다).
+_KEY_MASK_PREFIX = "••••••••"
+
+
+def _mask_from_last4(last4: str) -> str:
+    return f"{_KEY_MASK_PREFIX}{last4}"
+
 
 def _serialize_class(class_obj: Class) -> ClassOut:
-    return ClassOut(id=class_obj.id, name=class_obj.name, created_at=class_obj.created_at)
+    has_key = bool(class_obj.openai_api_key_encrypted)
+    return ClassOut(
+        id=class_obj.id,
+        name=class_obj.name,
+        created_at=class_obj.created_at,
+        has_openai_key=has_key,
+        openai_key_masked=_mask_from_last4(class_obj.openai_api_key_last4) if has_key else None,
+    )
 
 
 def _serialize_checklist_item(item: ChecklistItem) -> ChecklistItemOut:
@@ -100,6 +118,27 @@ def list_my_classes(request: HttpRequest):
 @router.get("/classes/{class_id}", response={200: ClassOut, 404: ErrorOut}, auth=jwt_auth)
 def get_class(request: HttpRequest, class_id: int):
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    return 200, _serialize_class(class_obj)
+
+
+@router.put(
+    "/classes/{class_id}/openai-key",
+    response={200: ClassOut, 404: ErrorOut, 422: ErrorOut},
+    auth=jwt_auth,
+)
+def set_class_openai_key(request: HttpRequest, class_id: int, payload: OpenAIKeyIn):
+    """참여자에게는 어떤 형태로도 보이지 않는다(#284) — 이 엔드포인트도 강사
+    본인 전용이다. 응답은 마스킹된 `ClassOut`뿐, 평문은 어디에도 싣지 않는다."""
+
+    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+
+    raw_key = payload.api_key.strip()
+    if not raw_key:
+        raise HttpError(422, "채점 키를 입력해주세요.")
+
+    class_obj.openai_api_key_encrypted = encrypt(raw_key)
+    class_obj.openai_api_key_last4 = raw_key[-4:]
+    class_obj.save(update_fields=["openai_api_key_encrypted", "openai_api_key_last4"])
     return 200, _serialize_class(class_obj)
 
 

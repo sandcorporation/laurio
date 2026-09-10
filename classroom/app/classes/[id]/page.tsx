@@ -17,7 +17,7 @@ const STATUS_LABEL: Record<string, string> = {
 export default function ClassDetailPage() {
   const params = useParams<{ id: string }>();
   const classId = Number(params.id);
-  const classState = useClass(classId);
+  const { state: classState } = useClass(classId);
   const { state: problemsState, move } = useProblems(classId);
 
   if (classState.status === "loading") {
@@ -49,6 +49,11 @@ export default function ClassDetailPage() {
       <h1 data-testid="classroom-detail-heading">{classState.classroom.name}</h1>
       <p data-testid="classroom-detail-created-at">
         {new Date(classState.classroom.created_at).toLocaleDateString("ko-KR")} 만듦
+      </p>
+      <p>
+        <Link href={`/classes/${classId}/settings`} data-testid="scoring-settings-link">
+          채점 설정
+        </Link>
       </p>
 
       <h2>문제</h2>

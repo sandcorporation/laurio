@@ -528,6 +528,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/openai-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Class Openai Key
+         * @description 참여자에게는 어떤 형태로도 보이지 않는다(#284) — 이 엔드포인트도 강사
+         *     본인 전용이다. 응답은 마스킹된 `ClassOut`뿐, 평문은 어디에도 싣지 않는다.
+         */
+        put: operations["classroom_api_set_class_openai_key"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/problems": {
         parameters: {
             query?: never;
@@ -3651,10 +3672,14 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Has Openai Key */
+            has_openai_key: boolean;
             /** Id */
             id: number;
             /** Name */
             name: string;
+            /** Openai Key Masked */
+            openai_key_masked?: string | null;
         };
         /** ComparisonEntryOut */
         ComparisonEntryOut: {
@@ -4515,6 +4540,11 @@ export interface components {
          * @enum {string}
          */
         NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "scoring_complete" | "appeal_ruled" | "new_contest_in_category" | "payout_awaits_you";
+        /** OpenAIKeyIn */
+        OpenAIKeyIn: {
+            /** Api Key */
+            api_key: string;
+        };
         /** OperatorCategoryOut */
         OperatorCategoryOut: {
             /** Id */
@@ -6257,6 +6287,50 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_set_class_openai_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenAIKeyIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
