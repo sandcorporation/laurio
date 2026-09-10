@@ -525,6 +525,28 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
+        /** Update Class */
+        patch: operations["classroom_api_update_class"];
+        trace?: never;
+    };
+    "/api/classroom/classes/{class_id}/openai-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Class Openai Key
+         * @description 참여자에게는 어떤 형태로도 보이지 않는다(#284) — 이 엔드포인트도 강사
+         *     본인 전용이다. 응답은 마스킹된 `ClassOut`뿐, 평문은 어디에도 싣지 않는다.
+         */
+        put: operations["classroom_api_set_class_openai_key"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
         patch?: never;
         trace?: never;
     };
@@ -665,6 +687,26 @@ export interface paths {
          *     않아 막는다(#283 AC).
          */
         post: operations["classroom_api_open_problem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/scoring-models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Scoring Models
+         * @description 「채점 설정」 화면이 선택지마다 컨텍스트 크기를 함께 보여주는 자리(#285).
+         */
+        get: operations["classroom_api_list_scoring_models"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3651,10 +3693,23 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Default Model */
+            default_model: string;
+            /** Has Openai Key */
+            has_openai_key: boolean;
             /** Id */
             id: number;
             /** Name */
             name: string;
+            /** Openai Key Masked */
+            openai_key_masked?: string | null;
+        };
+        /** ClassPatchIn */
+        ClassPatchIn: {
+            /** Default Model */
+            default_model?: string | null;
+            /** Name */
+            name?: string | null;
         };
         /** ComparisonEntryOut */
         ComparisonEntryOut: {
@@ -4515,6 +4570,11 @@ export interface components {
          * @enum {string}
          */
         NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "scoring_complete" | "appeal_ruled" | "new_contest_in_category" | "payout_awaits_you";
+        /** OpenAIKeyIn */
+        OpenAIKeyIn: {
+            /** Api Key */
+            api_key: string;
+        };
         /** OperatorCategoryOut */
         OperatorCategoryOut: {
             /** Id */
@@ -4941,8 +5001,12 @@ export interface components {
             classroom_id: number;
             /** Description */
             description: string;
+            /** Effective Model */
+            effective_model: string;
             /** Id */
             id: number;
+            /** Model */
+            model: string;
             /** Order */
             order: number;
             /** Status */
@@ -4956,6 +5020,8 @@ export interface components {
         ProblemPatchIn: {
             /** Description */
             description?: string | null;
+            /** Model */
+            model?: string | null;
             /** Submission Format */
             submission_format?: string | null;
             /** Title */
@@ -5310,6 +5376,15 @@ export interface components {
          * @enum {string}
          */
         ScoringBasis: "ai_judged" | "no_scoring_input" | "platform_failure";
+        /** ScoringModelOut */
+        ScoringModelOut: {
+            /** Context Window */
+            context_window: number;
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+        };
         /**
          * SellerContactSubmitIn
          * @description 토스 셀러 등록(businessType=INDIVIDUAL)의 individual 객체가 요구하는
@@ -6266,6 +6341,94 @@ export interface operations {
             };
         };
     };
+    classroom_api_update_class: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClassPatchIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_set_class_openai_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenAIKeyIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     classroom_api_list_problems: {
         parameters: {
             query?: never;
@@ -6648,6 +6811,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_list_scoring_models: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScoringModelOut"][];
                 };
             };
         };

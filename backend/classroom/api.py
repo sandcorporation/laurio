@@ -21,6 +21,7 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
+from core.crypto import encrypt
 
 from .models import ChecklistItem, Class, Problem
 from .schemas import (
@@ -30,27 +31,48 @@ from .schemas import (
     ChecklistReorderIn,
     ClassIn,
     ClassOut,
+    ClassPatchIn,
     ErrorOut,
+    OpenAIKeyIn,
     ProblemIn,
     ProblemOut,
     ProblemPatchIn,
     ProblemReorderIn,
+    ScoringModelOut,
 )
+from .scoring_models import SCORING_MODEL_CHOICES, is_valid_model
 
 router = Router(tags=["classroom"])
 
 _SUBMISSION_FORMATS = {choice for choice, _label in Problem.SubmissionFormat.choices}
 
+#: 마스킹은 복호화가 아니라 저장 시점에 남긴 마지막 네 자리로만 만든다 —
+#: `Class.openai_api_key_encrypted`를 다시 풀지 않는다(#284, 파일 상단 라우터
+#: docstring과 같은 이유: 복호화는 채점 요청을 보낼 때만 한다).
+_KEY_MASK_PREFIX = "••••••••"
+
+
+def _mask_from_last4(last4: str) -> str:
+    return f"{_KEY_MASK_PREFIX}{last4}"
+
 
 def _serialize_class(class_obj: Class) -> ClassOut:
-    return ClassOut(id=class_obj.id, name=class_obj.name, created_at=class_obj.created_at)
+    has_key = bool(class_obj.openai_api_key_encrypted)
+    return ClassOut(
+        id=class_obj.id,
+        name=class_obj.name,
+        created_at=class_obj.created_at,
+        default_model=class_obj.default_model,
+        has_openai_key=has_key,
+        openai_key_masked=_mask_from_last4(class_obj.openai_api_key_last4) if has_key else None,
+    )
 
 
 def _serialize_checklist_item(item: ChecklistItem) -> ChecklistItemOut:
     return ChecklistItemOut(id=item.id, label=item.label, required=item.required, order=item.order)
 
 
-def _serialize_problem(problem: Problem) -> ProblemOut:
+def _serialize_problem(problem: Problem, class_obj: Class) -> ProblemOut:
     return ProblemOut(
         id=problem.id,
         classroom_id=problem.classroom_id,
@@ -59,6 +81,8 @@ def _serialize_problem(problem: Problem) -> ProblemOut:
         submission_format=problem.submission_format,
         status=problem.status,
         order=problem.order,
+        model=problem.model,
+        effective_model=problem.model or class_obj.default_model,
         checklist_items=[_serialize_checklist_item(i) for i in problem.checklist_items.all()],
     )
 
@@ -103,6 +127,58 @@ def get_class(request: HttpRequest, class_id: int):
     return 200, _serialize_class(class_obj)
 
 
+@router.patch(
+    "/classes/{class_id}", response={200: ClassOut, 404: ErrorOut, 422: ErrorOut}, auth=jwt_auth
+)
+def update_class(request: HttpRequest, class_id: int, payload: ClassPatchIn):
+    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+
+    if payload.default_model is not None and not is_valid_model(payload.default_model):
+        raise HttpError(422, f"알 수 없는 채점 모델입니다: {payload.default_model}")
+
+    update_fields = []
+    if payload.name is not None:
+        class_obj.name = payload.name
+        update_fields.append("name")
+    if payload.default_model is not None:
+        class_obj.default_model = payload.default_model
+        update_fields.append("default_model")
+    if update_fields:
+        class_obj.save(update_fields=update_fields)
+    return 200, _serialize_class(class_obj)
+
+
+@router.put(
+    "/classes/{class_id}/openai-key",
+    response={200: ClassOut, 404: ErrorOut, 422: ErrorOut},
+    auth=jwt_auth,
+)
+def set_class_openai_key(request: HttpRequest, class_id: int, payload: OpenAIKeyIn):
+    """참여자에게는 어떤 형태로도 보이지 않는다(#284) — 이 엔드포인트도 강사
+    본인 전용이다. 응답은 마스킹된 `ClassOut`뿐, 평문은 어디에도 싣지 않는다."""
+
+    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+
+    raw_key = payload.api_key.strip()
+    if not raw_key:
+        raise HttpError(422, "채점 키를 입력해주세요.")
+
+    class_obj.openai_api_key_encrypted = encrypt(raw_key)
+    class_obj.openai_api_key_last4 = raw_key[-4:]
+    class_obj.save(update_fields=["openai_api_key_encrypted", "openai_api_key_last4"])
+    return 200, _serialize_class(class_obj)
+
+
+@router.get("/scoring-models", response={200: list[ScoringModelOut]}, auth=jwt_auth)
+def list_scoring_models(request: HttpRequest):
+    """「채점 설정」 화면이 선택지마다 컨텍스트 크기를 함께 보여주는 자리(#285)."""
+
+    return 200, [
+        ScoringModelOut(id=c.id, label=c.label, context_window=c.context_window)
+        for c in SCORING_MODEL_CHOICES
+    ]
+
+
 # --- Problem -------------------------------------------------------------------
 
 
@@ -125,7 +201,7 @@ def create_problem(request: HttpRequest, class_id: int, payload: ProblemIn):
         submission_format=payload.submission_format,
         order=next_order,
     )
-    return 201, _serialize_problem(problem)
+    return 201, _serialize_problem(problem, class_obj)
 
 
 @router.get(
@@ -136,7 +212,7 @@ def list_problems(request: HttpRequest, class_id: int):
 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problems = class_obj.problems.prefetch_related("checklist_items").all()
-    return 200, [_serialize_problem(p) for p in problems]
+    return 200, [_serialize_problem(p, class_obj) for p in problems]
 
 
 @router.post(
@@ -164,7 +240,7 @@ def reorder_problems(request: HttpRequest, class_id: int, payload: ProblemReorde
         Problem.objects.bulk_update(problems.values(), ["order"])
 
     ordered = sorted(problems.values(), key=lambda p: p.order)
-    return 200, [_serialize_problem(p) for p in ordered]
+    return 200, [_serialize_problem(p, class_obj) for p in ordered]
 
 
 @router.get(
@@ -177,7 +253,7 @@ def get_problem(request: HttpRequest, class_id: int, problem_id: int):
 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problem = _get_owned_problem_or_404(class_obj, problem_id)
-    return 200, _serialize_problem(problem)
+    return 200, _serialize_problem(problem, class_obj)
 
 
 @router.patch(
@@ -191,6 +267,8 @@ def update_problem(request: HttpRequest, class_id: int, problem_id: int, payload
 
     if payload.submission_format is not None and payload.submission_format not in _SUBMISSION_FORMATS:
         raise HttpError(422, f"알 수 없는 제출 형식입니다: {payload.submission_format}")
+    if payload.model and not is_valid_model(payload.model):
+        raise HttpError(422, f"알 수 없는 채점 모델입니다: {payload.model}")
 
     update_fields = []
     if payload.title is not None:
@@ -202,9 +280,12 @@ def update_problem(request: HttpRequest, class_id: int, problem_id: int, payload
     if payload.submission_format is not None:
         problem.submission_format = payload.submission_format
         update_fields.append("submission_format")
+    if payload.model is not None:
+        problem.model = payload.model
+        update_fields.append("model")
     if update_fields:
         problem.save(update_fields=[*update_fields, "updated_at"])
-    return 200, _serialize_problem(problem)
+    return 200, _serialize_problem(problem, class_obj)
 
 
 @router.post(
@@ -224,7 +305,7 @@ def open_problem(request: HttpRequest, class_id: int, problem_id: int):
 
     problem.status = Problem.Status.OPEN
     problem.save(update_fields=["status", "updated_at"])
-    return 200, _serialize_problem(problem)
+    return 200, _serialize_problem(problem, class_obj)
 
 
 # --- ChecklistItem -------------------------------------------------------------

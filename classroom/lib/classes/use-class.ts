@@ -14,10 +14,10 @@ export type ClassDetailState =
   | { status: "error" }
   | { status: "ready"; classroom: ClassRow };
 
-export function useClass(classId: number): ClassDetailState {
+export function useClass(classId: number) {
   const [state, setState] = useState<ClassDetailState>({ status: "loading" });
 
-  useEffect(() => {
+  function load() {
     let cancelled = false;
     setState({ status: "loading" });
     fetchClass(classId)
@@ -35,7 +35,13 @@ export function useClass(classId: number): ClassDetailState {
     return () => {
       cancelled = true;
     };
+  }
+
+  useEffect(() => {
+    const cancel = load();
+    return cancel;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [classId]);
 
-  return state;
+  return { state, reload: load };
 }
