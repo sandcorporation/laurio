@@ -32,7 +32,7 @@ from accounts.models import SponsorProfile
 from accounts.sanitize import sanitize_free_text
 from core.clock import Clock
 from storage.adapters import get_storage_adapter
-from storage.filenames import build_download_filename
+from storage.filenames import build_download_filename, safe_download_base_name
 from submissions.models import AssignmentSourceReading, Submission, SubmissionAsset
 from submissions.schemas import AssignmentSourceRevealOut, SourceRevealAssetOut
 from submissions.scoring_basis import participant_facing_reasoning, scoring_basis_for
@@ -715,27 +715,39 @@ def reveal_assignment_submission_source(
     직접 presign한다 — Operator의 `reveal_appeal_source`가 storage를 거치지 않고
     `Score.prompt`를 바로 내주는 것과 같은 구조다.
 
-    **`storage.api.request_download`와 같은 방식으로 파일명을 붙인다(#241).**
-    `asset.content_type`(제출 시점에 받은 값, 없으면 빈 문자열)을
-    `storage.filenames.build_download_filename`에 넘긴다 — storage.policy를
-    거치지 않아도 그 헬퍼는 그대로 재사용할 수 있다.
+    **파일명에 학생 이름을 붙인다(#268 후속).** `storage.api.request_download`는
+    `download.zip` 처럼 고정된 이름을 쓰는데(#241), 그건 받는 사람이 **자기 것 하나**를
+    받는 자리라 성립한다. 여기는 반대다 — 강사 한 사람이 학생 서른 명의 소스를
+    차례로 내려받으므로 전부 `download.py` 로 떨어지면 받는 순간 누구 것인지 알 수
+    없다. #241 이 거절한 것은 「업로드된 파일이 자기 이름을 헤더에 밀어 넣는 것」이고,
+    여기서 쓰는 것은 **플랫폼이 아는 맥락**(누구의 제출물인가)이다.
+
+    이름은 `storage.filenames.safe_download_base_name`이 걸러 내고, 헤더에 싣는
+    이스케이프는 `content_disposition`이 RFC 5987 로 한다.
     """
 
     contest = _get_owned_assignment(request, assignment_id)
     try:
-        submission = Submission.objects.prefetch_related("assets").get(
+        # `developer` 를 함께 당긴다 — 파일명이 그 표시 이름을 쓴다(#268 후속).
+        submission = Submission.objects.select_related("developer").prefetch_related("assets").get(
             id=submission_id, contest=contest
         )
     except Submission.DoesNotExist as exc:
         raise HttpError(404, "제출물을 찾을 수 없습니다.") from exc
 
     adapter = get_storage_adapter()
+    # 같은 학생이 소스를 여럿 냈으면 이름만으로는 갈리지 않는다 — 두 번째부터
+    # 순번을 붙인다(첫 번째는 그대로 두어 흔한 경우가 깔끔하다).
+    base_name = safe_download_base_name(submission.developer.display_name)
+    source_index = 0
     out_assets: list[SourceRevealAssetOut] = []
     for asset in submission.assets.all():
         if asset.kind == SubmissionAsset.Kind.SOURCE:
+            source_index += 1
+            numbered = base_name if source_index == 1 else f"{base_name}-{source_index}"
             presigned = adapter.presign_download(
                 asset.value,
-                filename=build_download_filename(asset.content_type),
+                filename=build_download_filename(asset.content_type, base_name=numbered),
                 expires_in=timedelta(seconds=settings.STORAGE_DOWNLOAD_URL_TTL_SECONDS),
             )
             url = presigned.url

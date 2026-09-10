@@ -450,3 +450,58 @@ def test_prize_contest_sponsor_source_access_rule_unchanged(client, landing_type
 
     assert AssignmentSourceReading.objects.filter(submission_id=submission_id).count() == 0
     assert Submission.objects.filter(id=submission_id).exists()
+
+
+@pytest.mark.django_db
+def test_revealed_source_filename_carries_the_student_name(client, landing_type):
+    """강사 한 사람이 학생 여럿의 소스를 내려받는 자리다 — 전부 `download.py` 로
+    떨어지면 받는 순간 누구 것인지 알 수 없다(#268 후속).
+
+    #241 이 거절한 것은 「업로드된 파일이 자기 이름을 헤더에 밀어 넣는 것」이고,
+    여기서 쓰는 것은 플랫폼이 아는 맥락(누구의 제출물인가)이다. 한글 이름은
+    RFC 5987 의 `filename*` 로 실리고, ASCII 만 아는 클라이언트를 위한
+    `filename=` 폴백은 확장자를 지키며 `download` 로 되돌아간다.
+    """
+
+    assignment = _create_and_open_assignment(
+        client, deliverable_type_ids=[landing_type.id], sponsor_uid="asrc-sponsor-named"
+    )
+    student_pair = _login(client, "asrc-student-named")
+    developer_user_id = _me(client, student_pair["access"])["id"]
+
+    named = client.post(
+        "/api/accounts/developer-profile",
+        data={"display_name": "최민재"},
+        content_type="application/json",
+        **_auth_header(student_pair["access"]),
+    )
+    assert named.status_code == 200, named.content
+
+    submit = client.post(
+        f"{CONTESTS_URL}/{assignment['id']}/submissions",
+        data={
+            "assets": [
+                {
+                    "kind": "source",
+                    "value": _source_object_key(assignment["id"], developer_user_id),
+                    "content_type": "application/zip",
+                },
+            ],
+            "invite_code": assignment["invite_code"],
+        },
+        content_type="application/json",
+        **_auth_header(student_pair["access"]),
+    )
+    assert submit.status_code == 201, submit.content
+
+    reveal = _reveal(client, assignment["sponsor_access"], assignment["id"], submit.json()["id"])
+    assert reveal.status_code == 200, reveal.content
+    url = next(a for a in reveal.json()["assets"] if a["kind"] == "source")["url"]
+
+    # 진짜 이름은 `filename*` 에 퍼센트 인코딩으로 실린다.
+    assert "filename%2A%3DUTF-8%27%27%EC%B5%9C%EB%AF%BC%EC%9E%AC.zip" in url or (
+        "filename*=UTF-8''%EC%B5%9C%EB%AF%BC%EC%9E%AC.zip" in url
+    )
+    # ASCII 폴백은 이름이 통째로 걸러져도 확장자를 잃지 않는다 — `.zip` 같은
+    # 숨김 파일이 되면 안 된다.
+    assert 'filename="download.zip"' in url or "filename%3D%22download.zip%22" in url

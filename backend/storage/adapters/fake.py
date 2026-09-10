@@ -25,6 +25,8 @@ from datetime import datetime, timedelta, timezone
 
 from django.conf import settings
 
+from storage.filenames import content_disposition
+
 from .base import DEFAULT_CONTENT_TYPE, Bucket, PresignedDownload, PresignedUpload, StorageAdapterError
 
 
@@ -110,9 +112,10 @@ class FakeStorageAdapter:
             f"?X-Fake-Signature=download&X-Fake-Expires={int(expires_at.timestamp())}"
             # S3StorageAdapter가 ResponseContentDisposition=attachment 를 강제하는 것과
             # 대응시켜, 테스트가 "다운로드는 항상 첨부파일로 강제된다"를 검증할 수 있게 한다.
-            # `filename`(#241)도 그대로 실어, 테스트가 "확장자 있는 이름이 실제로
-            # 실렸다"를 문자열 검사로 확인할 수 있게 한다.
-            f'&X-Fake-Response-Content-Disposition=attachment; filename="{filename}"'
+            # `filename`(#241)도 실물과 **같은 헬퍼로** 실어, 테스트가 "확장자 있는
+            # 이름이 실제로 실렸다"와 RFC 5987 이스케이프(#268 후속)를 둘 다
+            # 문자열 검사로 확인할 수 있게 한다.
+            f"&X-Fake-Response-Content-Disposition={content_disposition(filename)}"
         )
         return PresignedDownload(url=url, object_key=object_key, expires_at=expires_at)
 

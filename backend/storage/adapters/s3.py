@@ -25,6 +25,8 @@ from botocore.client import BaseClient, Config
 from botocore.exceptions import ClientError
 from django.conf import settings
 
+from storage.filenames import content_disposition
+
 from .base import DEFAULT_CONTENT_TYPE, Bucket, PresignedDownload, PresignedUpload
 
 
@@ -148,10 +150,12 @@ class S3StorageAdapter:
                 # 이 버킷은 Developer가 올린 신뢰할 수 없는 콘텐츠(소스·빌드)를 담는다.
                 # 저장된 Content-Type과 무관하게 항상 첨부파일로 강제해, 브라우저가
                 # text/html 같은 걸 스토리지 오리진에서 인라인으로 실행하지 못하게 막는다.
-                # `filename`은 플랫폼이 만든 값이다(#241) — 사용자 입력이 아니라서
-                # 그대로 붙여도 RFC 5987 이스케이프가 필요 없다(storage.adapters.base
-                # 참고).
-                "ResponseContentDisposition": f'attachment; filename="{filename}"',
+                # **헤더 값을 여기서 조립하지 않는다**(#268 후속). 예전에는 이
+                # 자리에 f-string 이 있었고 "`filename` 은 플랫폼이 만든 값이라
+                # 이스케이프가 필요 없다"는 전제가 숨어 있었다 — 이제 그 이름에
+                # 학생 이름이 들어오므로 그 전제가 깨진다. RFC 5987 이스케이프는
+                # `storage.filenames.content_disposition` 한 곳에만 둔다.
+                "ResponseContentDisposition": content_disposition(filename),
             },
             ExpiresIn=int(expires_in.total_seconds()),
         )

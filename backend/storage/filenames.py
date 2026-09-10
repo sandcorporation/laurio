@@ -19,6 +19,9 @@ content-type을 모르거나(기존에 올라간 자산 — 이 필드가 생기
 from __future__ import annotations
 
 import mimetypes
+import re
+import unicodedata
+from urllib.parse import quote
 
 #: 다운로드 파일명의 고정된 기본 이름. 사용자 입력을 담지 않는다(#241 결정) — 이
 #: 값 자체가 무엇을 보여주는 자료인지 말하지는 않지만, 확장자가 그 형식을 말해준다.
@@ -56,6 +59,66 @@ _KNOWN_EXTENSIONS: dict[str, str] = {
     "image/webp": ".webp",
     "image/gif": ".gif",
 }
+
+
+#: 이름에 쓰지 않는 문자. 헤더 인젝션(따옴표·개행)과 경로 조작(`/` `\\` `..`)을
+#: 한 번에 막는다 — 이 이름은 `Content-Disposition` 에도 실리고 사용자의 파일
+#: 시스템에도 떨어진다.
+_UNSAFE_IN_NAME = re.compile(r'[\x00-\x1f\x7f"\\/:*?<>|]+')
+
+#: 사람 이름·라벨이 길어도 파일명이 감당할 만한 길이로 자른다.
+_MAX_BASE_NAME = 60
+
+
+def safe_download_base_name(text: str | None, *, fallback: str = DEFAULT_DOWNLOAD_BASENAME) -> str:
+    """사람이 정한 문자열 -> 파일명에 써도 되는 기본 이름 (#268 후속).
+
+    **#241 은 "원본 파일명을 그대로 싣지 않는다"를 정했고 그 판단은 그대로다** —
+    업로드된 파일이 자기 이름을 헤더에 직접 밀어 넣는 길은 열지 않는다. 여는 것은
+    다른 것이다: **플랫폼이 아는 맥락**(누구의 제출물인가)으로 이름을 조립한다.
+    강사 한 사람이 학생 서른 명의 소스를 내려받는데 전부 `download.py` 로 떨어지면
+    받는 순간 누구 것인지 알 수 없다 — 그 자리가 #241 이 보지 못한 자리다.
+
+    그 대신 이스케이프를 진짜로 한다. 여기서 위험한 문자를 걷고,
+    `content_disposition` 이 RFC 5987 로 싣는다.
+    """
+
+    if not text:
+        return fallback
+
+    # 자모 분리된 한글(NFD, macOS 업로드에서 흔하다)을 합친다 — 그러지 않으면
+    # 파일명이 눈으로는 같은데 바이트가 달라진다.
+    cleaned = unicodedata.normalize("NFC", text)
+    cleaned = _UNSAFE_IN_NAME.sub(" ", cleaned)
+    # 앞뒤 점은 숨김 파일(.name)과 상위 경로(..)를 만든다.
+    cleaned = re.sub(r"\s+", " ", cleaned).strip().strip(".")
+    cleaned = cleaned[:_MAX_BASE_NAME].strip()
+    return cleaned or fallback
+
+
+def content_disposition(filename: str) -> str:
+    """`Content-Disposition` 헤더 값 — 항상 `attachment` 이고 이름을 둘로 싣는다.
+
+    `filename=` 은 ASCII 만 이해하는 오래된 클라이언트를 위한 폴백이고,
+    `filename*=UTF-8''...` 이 진짜 이름이다(RFC 5987). 한글 이름이 들어오면
+    폴백 쪽은 거의 다 지워지므로, 비면 `download` 로 되돌린다 — 이름이 없는 것보다
+    확장자만이라도 있는 편이 낫다는 #241 의 판단 그대로다.
+
+    **이 값을 문자열 조립으로 다시 만들지 마라.** 어댑터 둘이 각자 만들던 동안
+    그 안에는 사용자 문자열이 들어갈 수 없다는 전제가 숨어 있었다 — 이제 들어간다.
+    """
+
+    # **확장자를 떼고 이름만 ASCII 로 만든다.** 통째로 걸러 버리면 한글 이름은
+    # 이름이 사라지고 확장자만 남아 `.py` 라는 **숨김 파일**이 된다 — 직접 그렇게
+    # 만들어 보고 잡았다. 이름이 비면 `download` 로 되돌린다: 확장자만이라도
+    # 살리는 것이 #241 의 판단 그대로다.
+    stem, dot, extension = filename.rpartition(".")
+    if not dot:
+        stem, extension = filename, ""
+    ascii_stem = unicodedata.normalize("NFKD", stem).encode("ascii", "ignore").decode("ascii")
+    ascii_stem = _UNSAFE_IN_NAME.sub("", ascii_stem).strip(" .") or DEFAULT_DOWNLOAD_BASENAME
+    ascii_name = f"{ascii_stem}.{extension}" if extension else ascii_stem
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename, safe='')}"
 
 
 def is_unknown_content_type(content_type: str | None) -> bool:
