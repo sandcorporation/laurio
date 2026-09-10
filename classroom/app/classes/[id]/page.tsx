@@ -70,11 +70,48 @@ function JoinLinkSection({
 }
 
 type DetailTab = "problems" | "grid";
+function ArchiveSection({
+  archived,
+  archiveError,
+  onToggle,
+}: {
+  archived: boolean;
+  archiveError: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <section>
+      {archived ? (
+        <>
+          <p data-testid="classroom-archived-banner">
+            이 클래스는 보관되어 끝났습니다 — 새 가입과 새 제출은 받지 않지만, 지난 문제·제출물·판정은
+            그대로 볼 수 있습니다.
+          </p>
+          <button type="button" data-testid="classroom-unarchive" onClick={onToggle}>
+            보관 되돌리기
+          </button>
+        </>
+      ) : (
+        <>
+          <p>수업이 끝나면 보관합니다 — 새 가입과 새 제출만 닫히고, 언제든 되돌릴 수 있습니다.</p>
+          <button type="button" data-testid="classroom-archive" onClick={onToggle}>
+            보관하기
+          </button>
+        </>
+      )}
+      {archiveError ? (
+        <p data-testid="classroom-archive-error">
+          {archived ? "되돌리지" : "보관하지"} 못했습니다. 다시 시도해주세요.
+        </p>
+      ) : null}
+    </section>
+  );
+}
 
 export default function ClassDetailPage() {
   const params = useParams<{ id: string }>();
   const classId = Number(params.id);
-  const { state: classState, regenerateJoinCode } = useClass(classId);
+  const { state: classState, regenerateJoinCode, setArchived } = useClass(classId);
   const { state: problemsState, move } = useProblems(classId);
   const [tab, setTab] = useState<DetailTab>("problems");
   const router = useRouter();
@@ -122,6 +159,9 @@ export default function ClassDetailPage() {
   return (
     <main>
       <h1 data-testid="classroom-detail-heading">{classState.classroom.name}</h1>
+      <p data-testid="classroom-detail-status">
+        {classState.classroom.archived ? "보관됨" : "진행중"}
+      </p>
       <p data-testid="classroom-detail-created-at">
         {new Date(classState.classroom.created_at).toLocaleDateString("ko-KR")} 만듦
       </p>
@@ -136,6 +176,12 @@ export default function ClassDetailPage() {
         </button>
       </p>
       {copyError ? <p data-testid="copy-class-error">{copyError}</p> : null}
+
+      <ArchiveSection
+        archived={classState.classroom.archived}
+        archiveError={classState.archiveError}
+        onToggle={() => setArchived(!classState.classroom.archived)}
+      />
 
       <JoinLinkSection
         joinCode={classState.classroom.join_code}

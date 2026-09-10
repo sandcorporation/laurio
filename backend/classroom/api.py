@@ -104,6 +104,7 @@ def _serialize_class(class_obj: Class) -> ClassOut:
         default_model=class_obj.default_model,
         has_openai_key=has_key,
         openai_key_masked=_mask_from_last4(class_obj.openai_api_key_last4) if has_key else None,
+        archived=class_obj.archived_at is not None,
     )
 
 
@@ -429,6 +430,35 @@ def regenerate_join_link(request: HttpRequest, class_id: int):
     return 200, JoinLinkOut(join_code=class_obj.join_code)
 
 
+@router.post("/classes/{class_id}/archive", response={200: ClassOut, 404: ErrorOut}, auth=jwt_auth)
+def archive_class(request: HttpRequest, class_id: int):
+    """수업이 끝나면 보관한다(#294) — 지우지 않는다. 새 가입·새 제출만
+    닫히고, 지난 문제·제출물·판정·달성률은 계속 읽힌다(CONTEXT.md
+    「Class」). 이미 보관된 클래스를 다시 보관해도 오류를 내지 않는다(멱등,
+    `expel_member`와 같은 관용구)."""
+
+    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    if class_obj.archived_at is None:
+        class_obj.archived_at = timezone.now()
+        class_obj.save(update_fields=["archived_at"])
+    return 200, _serialize_class(class_obj)
+
+
+@router.post(
+    "/classes/{class_id}/unarchive", response={200: ClassOut, 404: ErrorOut}, auth=jwt_auth
+)
+def unarchive_class(request: HttpRequest, class_id: int):
+    """보관을 되돌린다(#294 AC "강사가 클래스를 보관하고 다시 되돌릴 수
+    있다") — `archived_at`을 지우면 그대로 진행중이다, 보관 이력을 따로
+    남기지 않는다."""
+
+    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    if class_obj.archived_at is not None:
+        class_obj.archived_at = None
+        class_obj.save(update_fields=["archived_at"])
+    return 200, _serialize_class(class_obj)
+
+
 # --- Join (#280) -----------------------------------------------------------------
 
 
@@ -446,7 +476,12 @@ def _get_class_by_join_code_or_404(join_code: str) -> Class:
 @router.get("/join/{join_code}", response={200: JoinPreviewOut, 404: ErrorOut}, auth=None)
 def preview_join(request: HttpRequest, join_code: str):
     """가입 여부와 무관하게 누구나 본다 — 계정이 없는 사람이 가입할지 먼저
-    판단할 수 있어야 한다(#280 AC)."""
+    판단할 수 있어야 한다(#280 AC).
+
+    **보관된 클래스도 404로 숨기지 않는다**(#294) — 재발급으로 죽은 코드와
+    달리, 보관은 "이 링크가 무효다"가 아니라 "이 수업이 끝났다"이다. 그
+    차이가 화면에서 "고장"과 "끝났다"를 가르므로(AC), 미리보기는 그대로
+    보여주고 `archived`만 참으로 켠다 — 가입 폼을 접는 판단은 화면의 몫."""
 
     class_obj = _get_class_by_join_code_or_404(join_code)
     # `members.count()`는 강사 본인이 가입했으면 그 행도 센다 — CONTEXT.md
@@ -459,20 +494,30 @@ def preview_join(request: HttpRequest, join_code: str):
         instructor_email=class_obj.instructor.email,
         problem_count=class_obj.problems.count(),
         participant_count=class_obj.members.count(),
+        archived=class_obj.archived_at is not None,
     )
 
 
 @router.post(
-    "/join/{join_code}", response={200: JoinResultOut, 404: ErrorOut, 422: ErrorOut}, auth=jwt_auth
+    "/join/{join_code}",
+    response={200: JoinResultOut, 403: ErrorOut, 404: ErrorOut, 422: ErrorOut},
+    auth=jwt_auth,
 )
 def join_class(request: HttpRequest, join_code: str, payload: JoinIn):
     """가입과 클래스 가입이 한 흐름이다 — 계정이 있으면(로그인 되어 있으면)
     이 요청 하나로 끝난다. 이미 참여자면 새로 만들지 않고 그 행을 그대로
     돌려준다(#280 AC "같은 사람이 같은 클래스에 두 번 들어가지 않는다") —
     두 번째 이름은 버려진다, 첫 가입 때 정한 이름이 그 클래스에서의 정체성이기
-    때문이다."""
+    때문이다.
+
+    **보관된 클래스는 새 가입을 받지 않는다**(#294 AC). 미리보기가 이미
+    `archived`를 알려 화면이 가입 폼을 접으므로, 여기 닿는 것은 그 안내를
+    보고도 보낸 요청뿐이다 — `expel_member`의 403과 같은 이유로, 이미 아는
+    사실을 403으로 정직하게 답한다."""
 
     class_obj = _get_class_by_join_code_or_404(join_code)
+    if class_obj.archived_at is not None:
+        raise HttpError(403, "이 클래스는 보관되어 더 이상 가입할 수 없습니다.")
     member, _created = ClassMember.objects.get_or_create(
         classroom=class_obj,
         user_id=request.auth_user.id,
@@ -800,7 +845,9 @@ def _get_member_or_404(class_id: int, user_id: int) -> ClassMember:
     없으면) 여기 닿지 못한다 — 참여자 표면은 어디까지나 ClassMember 기준이다."""
 
     try:
-        return ClassMember.objects.get(classroom_id=class_id, user_id=user_id)
+        return ClassMember.objects.select_related("classroom").get(
+            classroom_id=class_id, user_id=user_id
+        )
     except ClassMember.DoesNotExist as exc:
         raise HttpError(404, "문제를 찾을 수 없습니다.") from exc
 
@@ -870,6 +917,11 @@ def create_classroom_submission(
 
     member = _get_member_or_404(class_id, request.auth_user.id)
     problem = _get_open_problem_for_participant_or_404(class_id, problem_id)
+
+    if member.classroom.archived_at is not None:
+        # #294 AC "보관된 클래스에는 새 제출을 낼 수 없다" — 지난 시도는
+        # 그대로 읽히므로(`get_my_problem`) 이 엔드포인트만 막는다.
+        raise HttpError(403, "이 클래스는 보관되어 새 제출을 받지 않습니다.")
 
     if member.expelled_at is not None:
         # ClassMember.expelled_at의 docstring이 이 엔드포인트를 지목해 둔

@@ -26,6 +26,10 @@ class ClassOut(Schema):
     default_model: str
     has_openai_key: bool
     openai_key_masked: str | None = None
+    #: 강사가 보관했는가(#294) — 참이면 새 가입·새 제출이 닫히고 읽기만
+    #: 남는다. `archived_at`이 아니라 이 값을 내려주는 이유는 화면이 정확한
+    #: 시각을 쓰지 않기 때문이다(진행중/보관 여부만 갈라 보이면 된다).
+    archived: bool = False
 
 
 class OpenAIKeyIn(Schema):
@@ -111,6 +115,10 @@ class JoinPreviewOut(Schema):
     instructor_email: str
     problem_count: int
     participant_count: int
+    #: 보관된 클래스인가(#294). 죽은 링크(404)와 달리 미리보기 자체는 계속
+    #: 보여준다 — "고장"이 아니라 "끝났다"로 읽혀야 하기 때문이다. 참이면
+    #: 화면이 가입 폼 대신 안내문을 보여준다.
+    archived: bool = False
 
 
 class JoinIn(Schema):

@@ -9,6 +9,25 @@
 import Link from "next/link";
 
 import { useMyClasses } from "@/lib/classes/use-my-classes";
+import type { ClassRow } from "@/lib/classes/api";
+
+function ClassList({ classes, testId }: { classes: ClassRow[]; testId: string }) {
+  return (
+    <ul data-testid={testId}>
+      {classes.map((classroom) => (
+        <li key={classroom.id} data-testid={`classroom-row-${classroom.id}`}>
+          <Link href={`/classes/${classroom.id}`} data-testid={`classroom-row-${classroom.id}-link`}>
+            {classroom.name}
+          </Link>
+          <span>
+            {" "}
+            · {new Date(classroom.created_at).toLocaleDateString("ko-KR")} 만듦
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 export default function ClassroomHome() {
   const state = useMyClasses();
@@ -32,19 +51,29 @@ export default function ClassroomHome() {
       ) : state.classes.length === 0 ? (
         <p data-testid="classroom-empty-state">아직 가입하거나 개설한 클래스가 없습니다.</p>
       ) : (
-        <ul data-testid="classroom-list">
-          {state.classes.map((classroom) => (
-            <li key={classroom.id} data-testid={`classroom-row-${classroom.id}`}>
-              <Link href={`/classes/${classroom.id}`} data-testid={`classroom-row-${classroom.id}-link`}>
-                {classroom.name}
-              </Link>
-              <span>
-                {" "}
-                · {new Date(classroom.created_at).toLocaleDateString("ko-KR")} 만듦
-              </span>
-            </li>
-          ))}
-        </ul>
+        (() => {
+          // 진행중과 보관을 갈라 보여준다(#294 AC) — 보관은 "고장"이 아니라
+          // "끝났다"로 읽혀야 하므로 따로 묶어 조용히 아래에 둔다.
+          const ongoing = state.classes.filter((c) => !c.archived);
+          const archived = state.classes.filter((c) => c.archived);
+          return (
+            <>
+              <h2>진행중</h2>
+              {ongoing.length === 0 ? (
+                <p data-testid="classroom-ongoing-empty-state">진행중인 클래스가 없습니다.</p>
+              ) : (
+                <ClassList classes={ongoing} testId="classroom-ongoing-list" />
+              )}
+
+              <h2>보관</h2>
+              {archived.length === 0 ? (
+                <p data-testid="classroom-archived-empty-state">보관된 클래스가 없습니다.</p>
+              ) : (
+                <ClassList classes={archived} testId="classroom-archived-list" />
+              )}
+            </>
+          );
+        })()
       )}
     </main>
   );
