@@ -36,7 +36,7 @@ from django.utils import timezone
 from accounts.models import DeveloperProfile, SocialAccount, SponsorProfile
 from appeals.models import Appeal
 from awards.models import Award
-from contests.models import Category, Contest, DeliverableType
+from contests.models import Category, Contest, ContestSubmission, DeliverableType
 from django.contrib.auth import get_user_model
 from submissions.models import Submission
 
@@ -138,8 +138,11 @@ def _make_unrelated_pending_appeal(uid: str) -> Appeal:
     )
     contest.deliverable_types.add(deliverable_type)
 
-    submission = Submission.objects.create(
-        contest=contest, developer=developer
+    submission = ContestSubmission.objects.create(
+        user=developer.user,
+        product=Submission.Product.CONTEST,
+        contest=contest,
+        developer=developer,
     )
     return Appeal.objects.create(
         submission=submission, reason="이 명령과 무관한 이의", status=Appeal.Status.PENDING
@@ -197,8 +200,11 @@ def _make_unrelated_published_contest_with_submission(uid: str) -> tuple[Contest
     )
     contest.deliverable_types.add(deliverable_type)
 
-    submission = Submission.objects.create(
-        contest=contest, developer=developer
+    submission = ContestSubmission.objects.create(
+        user=developer.user,
+        product=Submission.Product.CONTEST,
+        contest=contest,
+        developer=developer,
     )
     return contest, submission
 
@@ -278,8 +284,11 @@ def _make_own_prefix_contest_with_award(uid: str, *, run_id: str, age=timedelta(
     # QuerySet.update()로 우회해 "오래됐다"를 흉내낸다.
     Contest.objects.filter(pk=contest.pk).update(created_at=timezone.now() - age)
 
-    submission = Submission.objects.create(
-        contest=contest, developer=developer
+    submission = ContestSubmission.objects.create(
+        user=developer.user,
+        product=Submission.Product.CONTEST,
+        contest=contest,
+        developer=developer,
     )
     Award.objects.create(contest=contest, submission=submission, awarded_at=timezone.now())
 

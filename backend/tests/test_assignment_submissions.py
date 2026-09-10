@@ -22,7 +22,7 @@ from django.core.management import call_command
 from django.test import Client
 from django.utils import timezone
 
-from contests.models import Category, Contest, DeliverableType
+from contests.models import Category, Contest, ContestSubmission, DeliverableType
 from submissions.models import Submission
 
 PAYMENTS_URL = "/api/payments"
@@ -180,7 +180,7 @@ def test_unverified_student_can_submit_to_assignment_with_invite_code(client, la
     )
 
     assert response.status_code == 201, response.content
-    assert Submission.objects.filter(contest_id=assignment["id"]).count() == 1
+    assert ContestSubmission.objects.filter(contest_id=assignment["id"]).count() == 1
     # 본인확인이 없어도(Assignment는 애초에 요구하지 않는다, ADR-0028) 마감 전
     # 「다음 행동」은 그대로 `can_edit_submission`이다(#250) — 상금 공모전에서만
     # 본인확인 미달이 `needs_reverification`로 바뀐다
@@ -276,7 +276,7 @@ def test_missing_or_wrong_invite_code_cannot_submit(client, landing_type):
         },
     )
     assert wrong.status_code == 403
-    assert Submission.objects.filter(contest_id=assignment["id"]).count() == 0
+    assert ContestSubmission.objects.filter(contest_id=assignment["id"]).count() == 0
 
 
 @pytest.mark.django_db

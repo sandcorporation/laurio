@@ -579,7 +579,7 @@ def test_withdrawal_erases_seller_contact_but_keeps_seller_id_and_status(
     _submit_identity(client, dev, requested["idempotency_key"])
 
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
-    developer_id = payout.handover.award.submission.developer_id
+    developer_id = payout.handover.award.submission.contestsubmission.developer_id
     seller_before = Seller.objects.get(developer_id=developer_id)
     assert seller_before.phone_number == "01099998888"
     assert seller_before.email == "payout@example.com"

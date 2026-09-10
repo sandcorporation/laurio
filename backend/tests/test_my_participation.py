@@ -514,7 +514,7 @@ def _clone_submissions(count: int, *, developer, category) -> None:
     from django.contrib.auth import get_user_model
 
     from accounts.models import SponsorProfile
-    from contests.models import Contest
+    from contests.models import Contest, ContestSubmission
     from submissions.models import Submission
 
     suffix = uuid.uuid4().hex[:8]
@@ -534,7 +534,12 @@ def _clone_submissions(count: int, *, developer, category) -> None:
             deadline_at=timezone.now() + timedelta(hours=1),
             status=Contest.Status.PUBLISHED,
         )
-        Submission.objects.create(contest=contest, developer=developer)
+        ContestSubmission.objects.create(
+            user=developer.user,
+            product=Submission.Product.CONTEST,
+            contest=contest,
+            developer=developer,
+        )
 
 
 @pytest.mark.django_db
@@ -550,10 +555,10 @@ def test_my_participation_does_not_repeat_or_lose_a_row_when_the_list_grows(
     지급 큐에서 세운 것과 같은 시나리오).
     """
 
-    from submissions.models import Submission
+    from contests.models import ContestSubmission
 
     seeded = _seed_submission(client, category, landing_type, uid="dev-152-1")
-    developer = Submission.objects.get(id=seeded["submission_id"]).developer
+    developer = ContestSubmission.objects.get(id=seeded["submission_id"]).developer
     _clone_submissions(24, developer=developer, category=category)
 
     first = client.get(MY_PARTICIPATION_URL, **_auth_header(seeded["access"]))

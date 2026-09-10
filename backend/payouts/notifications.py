@@ -81,8 +81,8 @@ def _confirmed_payouts_awaiting_the_two_holds(as_of, ctx):
             Payout.Status.CONFIRMED_SELLER_PENDING,
         )
     ).with_target().select_related(
-        "handover__award__submission__developer__user",
-        "distribution_share__submission__developer__user",
+        "handover__award__submission__contestsubmission__developer__user",
+        "distribution_share__submission__contestsubmission__developer__user",
     )
     return with_hold_facts(payouts)
 

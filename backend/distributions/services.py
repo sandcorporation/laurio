@@ -35,7 +35,7 @@ from django.db.models import Q
 from django.db import transaction
 
 from appeals.models import Appeal
-from contests.models import Contest
+from contests.models import Contest, ContestSubmission
 from core.clock import Clock
 from ledger.models import Account, EntrySide
 from ledger.services import LineInput, post_journal_entry
@@ -46,7 +46,6 @@ from payouts.progress import advance
 from payouts.services import get_or_create_payout
 from policies.models import PlatformPolicy
 from policies.scope import current_policy
-from submissions.models import Submission
 
 from core.scans import ScanSpec, scan_params
 
@@ -85,7 +84,7 @@ def _create_distribution_for_contest(
             return None
 
         submissions = list(
-            Submission.objects.filter(contest=locked_contest).select_related(
+            ContestSubmission.objects.filter(contest=locked_contest).select_related(
                 "score", "developer__user"
             )
         )
@@ -249,7 +248,7 @@ def is_holding_distribution(appeal) -> bool:
         return False
 
     return distribution_due_contests(Clock.now(), current_policy()).filter(
-        id=appeal.submission.contest_id
+        id=appeal.submission.contestsubmission.contest_id
     ).exists()
 
 

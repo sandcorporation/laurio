@@ -97,7 +97,7 @@ def test_confirming_with_a_failing_vendor_leaves_the_payout_recoverable(
     assert body["status"] == "confirmed_seller_pending"
 
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
-    developer_id = payout.handover.award.submission.developer_id
+    developer_id = payout.handover.award.submission.contestsubmission.developer_id
     seller = Seller.objects.get(developer_id=developer_id)
     assert seller.status == Seller.Status.PENDING
     assert seller.seller_id == ""
@@ -141,7 +141,7 @@ def test_scan_recovers_once_the_vendor_starts_accepting_the_registration(
     assert scan_result["failed"] == []
 
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
-    developer_id = payout.handover.award.submission.developer_id
+    developer_id = payout.handover.award.submission.contestsubmission.developer_id
     assert Seller.objects.get(developer_id=developer_id).registration_error_count == 2
 
     # 이제 벤더가 정상으로 돌아온다(기본 Fake 어댑터) — 스캔이 등록을 접수시키고
@@ -180,7 +180,7 @@ def test_repeated_vendor_errors_stop_retrying_and_escalate_to_operator(
     _confirm_with_vendor_error(client, dev, requested["idempotency_key"])  # 1회째 오류
 
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
-    developer_id = payout.handover.award.submission.developer_id
+    developer_id = payout.handover.award.submission.contestsubmission.developer_id
 
     # 상한에 이를 때까지 스캔이 계속 재시도한다.
     for _ in range(MAX_AUTO_SELLER_REGISTRATION_ATTEMPTS - 1):
@@ -212,5 +212,5 @@ def test_repeated_vendor_errors_stop_retrying_and_escalate_to_operator(
     queue_resp = operator.get("/api/operator/payouts?blocked_on=seller")
     assert queue_resp.status_code == 200
     rows = queue_resp.json()["items"]
-    row = next(r for r in rows if r["developer_user_id"] == payout.handover.award.submission.developer.user_id)
+    row = next(r for r in rows if r["developer_user_id"] == payout.handover.award.submission.contestsubmission.developer.user_id)
     assert row["seller_registration_status"] == "stuck"

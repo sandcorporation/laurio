@@ -32,11 +32,11 @@ from datetime import timedelta
 
 from django.db.models import Q, QuerySet
 
-from contests.models import Contest
 from core.scans import ScanSpec
 from storage.adapters import get_storage_adapter
+from submissions.models import SubmissionAsset
 
-from .models import SubmissionAsset
+from .models import Contest
 
 
 def demo_video_destroy_at(contest: Contest, grace_days: int):
@@ -59,12 +59,12 @@ def _due_q(as_of, grace_days: int) -> Q:
     grace = timedelta(days=grace_days)
     cutoff = as_of - grace
     return Q(
-        submission__contest__kind=Contest.Kind.ASSIGNMENT,
-        submission__contest__deadline_at__lte=cutoff,
+        submission__contestsubmission__contest__kind=Contest.Kind.ASSIGNMENT,
+        submission__contestsubmission__contest__deadline_at__lte=cutoff,
     ) | Q(
-        submission__contest__kind=Contest.Kind.CONTEST,
-        submission__contest__judging_ends_at__isnull=False,
-        submission__contest__judging_ends_at__lte=cutoff,
+        submission__contestsubmission__contest__kind=Contest.Kind.CONTEST,
+        submission__contestsubmission__contest__judging_ends_at__isnull=False,
+        submission__contestsubmission__contest__judging_ends_at__lte=cutoff,
     )
 
 
@@ -77,7 +77,7 @@ def _candidates(as_of, ctx) -> QuerySet:
             kind=SubmissionAsset.Kind.DEMO_VIDEO, destroyed_at__isnull=True
         )
         .filter(_due_q(as_of, policy.demo_video_retention_grace_days))
-        .select_related("submission__contest")
+        .select_related("submission__contestsubmission__contest")
     )
 
 

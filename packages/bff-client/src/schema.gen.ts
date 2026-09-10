@@ -956,17 +956,16 @@ export interface paths {
          *     엔드포인트가 일자별 누적 Submission 수(#107)에 이어 Requirement별 충족
          *     분포와 제출 완성도 분포(#108)를 낸다.
          *
-         *     `submissions.api.compare_submissions`와 같은 소유권 검사를 그대로 쓴다 —
-         *     새 예외를 만들지 않는다. **그 엔드포인트와 달리 마감 전에도 열린다** —
-         *     Sponsor는 마감 전에도 개별 Submission을 볼 수 있으므로(진행 중 비공개는
-         *     Developer 사이의 규율이다), 집계가 마감 전에 보여도 새로 알려주는 것이
-         *     없다.
+         *     `compare_submissions`와 같은 소유권 검사를 그대로 쓴다 — 새 예외를 만들지
+         *     않는다. **그 엔드포인트와 달리 마감 전에도 열린다** — Sponsor는 마감 전에도
+         *     개별 Submission을 볼 수 있으므로(진행 중 비공개는 Developer 사이의
+         *     규율이다), 집계가 마감 전에 보여도 새로 알려주는 것이 없다.
          *
          *     **Score는 이 함수 어디에도 조회하지 않는다** — `scoring.models.Score`를
          *     import조차 하지 않는다(ADR-0006/0014). **개별 Submission·Developer도
          *     응답에 없다** — 아래 어느 쿼리도 developer_id를 select하지 않는다.
          */
-        get: operations["submissions_api_get_contest_metrics"];
+        get: operations["contests_submission_api_get_contest_metrics"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1148,7 +1147,7 @@ export interface paths {
         get?: never;
         put?: never;
         /** Create Submission */
-        post: operations["submissions_api_create_submission"];
+        post: operations["contests_submission_api_create_submission"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1174,7 +1173,7 @@ export interface paths {
          *     적용된다. "마감"은 다른 곳과 같은 기준으로 deadline_at을 직접 비교한다(#11 이후
          *     이 코드베이스의 일관된 규약).
          */
-        get: operations["submissions_api_compare_submissions"];
+        get: operations["contests_submission_api_compare_submissions"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1191,9 +1190,9 @@ export interface paths {
             cookie?: never;
         };
         /** Get My Submission */
-        get: operations["submissions_api_get_my_submission"];
+        get: operations["contests_submission_api_get_my_submission"];
         /** Update Submission */
-        put: operations["submissions_api_update_submission"];
+        put: operations["contests_submission_api_update_submission"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1243,13 +1242,13 @@ export interface paths {
          * @description Developer 공개 프로필 — 마감된 Submission이 자동으로 아카이브된다 (#11).
          *
          *     "마감"은 여기서도 Contest.status(#11의 스케줄러 틱)가 아니라 `deadline_at`과
-         *     `Clock.now()`를 직접 비교한다 — submissions.resolvers/api의 다른 가시성 판정과
-         *     같은 기준이다. 파일이 움직이지 않는 것처럼(ADR-0005) 이 아카이브도 틱을 기다리지
-         *     않고 그 순간 이미 옳다.
+         *     `Clock.now()`를 직접 비교한다 — 다른 가시성 판정과 같은 기준이다. 파일이
+         *     움직이지 않는 것처럼(ADR-0005) 이 아카이브도 틱을 기다리지 않고 그 순간
+         *     이미 옳다.
          *
          *     데모·영상만 담는다 — 소스는 Award 전까지 아무에게도 공개되지 않고(ADR-0014),
          *     test_account는 "데모·영상" 칸에 없는 로그인 정보라 여기서도 내려주지 않는다
-         *     (submissions.api._serialize와 같은 원칙, #10 리뷰 지적).
+         *     (`_serialize`와 같은 원칙, #10 리뷰 지적).
          *
          *     **탈퇴한 Developer는 404다**(#100, ADR-0025) — "공개 프로필이 닫힌다"는
          *     실명·소개가 비는 것이 아니라 그 존재 자체가 더 이상 조회되지 않는 것이다.
@@ -1257,7 +1256,7 @@ export interface paths {
          *     탈퇴 시 이 값을 내린다) — 다른 이유로 존재하지 않는 Developer와 같은 404를
          *     돌려줘 탈퇴 여부 자체도 굳이 구별해 알려주지 않는다.
          */
-        get: operations["submissions_api_get_developer_public_profile"];
+        get: operations["contests_submission_api_get_developer_public_profile"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2582,9 +2581,9 @@ export interface paths {
          *     상태인가" 를 볼 곳이 없었다 — 공개 프로필은 마감 후 아카이브이고 단건
          *     조회는 하나씩이다. 이의도 지급도 걸 데가 없었다.
          *
-         *     **행은 도메인 상태가 아니라 「다음 행동」을 말한다**(`participation.py` 참고).
-         *     판정은 백엔드에 있고 값은 타입 있는 enum 이라, 값이 하나 늘면 프론트의
-         *     누락된 분기를 `tsc` 가 빌드타임에 잡는다.
+         *     **행은 도메인 상태가 아니라 「다음 행동」을 말한다**(`contests.submission_
+         *     participation` 참고). 판정은 백엔드에 있고 값은 타입 있는 enum 이라, 값이
+         *     하나 늘면 프론트의 누락된 분기를 `tsc` 가 빌드타임에 잡는다.
          *
          *     제출이 아직 없으면 빈 페이지로 200 이다 — "아직 아무 데도 안 냈다" 는
          *     정상적인 사실이지 없는 리소스가 아니다. 이 경로가
@@ -2597,7 +2596,7 @@ export interface paths {
          *     페이지에도 안 나온다. 정렬 마지막 키에 `id` 를 붙이는 이유도 운영자 지급
          *     큐와 같다 — `created_at` 이 같은 두 행의 순서를 DB 가 보장하지 않는다.
          */
-        get: operations["submissions_api_list_my_participation"];
+        get: operations["contests_submission_api_list_my_participation"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2628,7 +2627,7 @@ export interface paths {
          *     사람이란 본인과 그 과제의 Sponsor 뿐이다) — 그러지 않으면 `submission_id`를
          *     순차로 훑는 것만으로 제출자의 제출 내용(소스 제외)이 인터넷에 새어 나간다.
          */
-        get: operations["submissions_api_get_submission"];
+        get: operations["contests_submission_api_get_submission"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2676,7 +2675,7 @@ export interface paths {
          *     에서만 만들어지고, 그 경로는 Assignment가 아닌 Contest의 Submission에는 애초에
          *     닿지 않는다(ADR-0014는 바뀌지 않는다).
          */
-        get: operations["submissions_api_list_own_assignment_source_readings"];
+        get: operations["contests_submission_api_list_own_assignment_source_readings"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2733,7 +2732,7 @@ export interface paths {
          *     채점 전에는 404 다. 「아직 채점되지 않았다」와 「그런 제출이 없다」는 다른
          *     사실이므로 detail 로 구분한다 — 앞은 기다리면 되고 뒤는 뭔가 잘못된 것이다.
          */
-        get: operations["submissions_api_get_own_score"];
+        get: operations["contests_submission_api_get_own_score"];
         put?: never;
         post?: never;
         delete?: never;
@@ -6329,7 +6328,7 @@ export interface operations {
             };
         };
     };
-    submissions_api_get_contest_metrics: {
+    contests_submission_api_get_contest_metrics: {
         parameters: {
             query?: never;
             header?: never;
@@ -6588,7 +6587,7 @@ export interface operations {
             };
         };
     };
-    submissions_api_create_submission: {
+    contests_submission_api_create_submission: {
         parameters: {
             query?: never;
             header?: never;
@@ -6614,7 +6613,7 @@ export interface operations {
             };
         };
     };
-    submissions_api_compare_submissions: {
+    contests_submission_api_compare_submissions: {
         parameters: {
             query?: never;
             header?: never;
@@ -6636,7 +6635,7 @@ export interface operations {
             };
         };
     };
-    submissions_api_get_my_submission: {
+    contests_submission_api_get_my_submission: {
         parameters: {
             query?: never;
             header?: never;
@@ -6658,7 +6657,7 @@ export interface operations {
             };
         };
     };
-    submissions_api_update_submission: {
+    contests_submission_api_update_submission: {
         parameters: {
             query?: never;
             header?: never;
@@ -6704,7 +6703,7 @@ export interface operations {
             };
         };
     };
-    submissions_api_get_developer_public_profile: {
+    contests_submission_api_get_developer_public_profile: {
         parameters: {
             query?: never;
             header?: never;
@@ -8717,7 +8716,7 @@ export interface operations {
             };
         };
     };
-    submissions_api_list_my_participation: {
+    contests_submission_api_list_my_participation: {
         parameters: {
             query?: {
                 after?: string | null;
@@ -8739,7 +8738,7 @@ export interface operations {
             };
         };
     };
-    submissions_api_get_submission: {
+    contests_submission_api_get_submission: {
         parameters: {
             query?: never;
             header?: never;
@@ -8854,7 +8853,7 @@ export interface operations {
             };
         };
     };
-    submissions_api_list_own_assignment_source_readings: {
+    contests_submission_api_list_own_assignment_source_readings: {
         parameters: {
             query?: never;
             header?: never;
@@ -8978,7 +8977,7 @@ export interface operations {
             };
         };
     };
-    submissions_api_get_own_score: {
+    contests_submission_api_get_own_score: {
         parameters: {
             query?: never;
             header?: never;

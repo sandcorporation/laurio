@@ -19,8 +19,8 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
-from submissions.models import Submission
-from submissions.target_refs import build_asset_target_ref
+from contests.models import ContestSubmission
+from contests.submission_target_refs import build_asset_target_ref
 
 from .models import BuildAsset, Handover
 from .schemas import BuildAssetIn, BuildAssetOut, ErrorOut, HandoverOut, _BUILD_ASSET_KINDS
@@ -60,7 +60,9 @@ def get_handover(request: HttpRequest, contest_id: int):
     user_id = request.auth_user.id
 
     is_sponsor = contest.sponsor.user_id == user_id
-    is_awarded_developer = handover.award.submission.developer.user_id == user_id
+    is_awarded_developer = (
+        handover.award.submission.contestsubmission.developer.user_id == user_id
+    )
     if not (is_sponsor or is_awarded_developer):
         raise HttpError(403, "본인이 개최했거나 선정된 공모전의 인수 정보만 볼 수 있습니다.")
 
@@ -94,12 +96,12 @@ def accept_handover(request: HttpRequest, contest_id: int):
 # --- 빌드 자산 ----------------------------------------------------------------
 
 
-def _get_awarded_submission_or_404(submission_id: int) -> Submission:
+def _get_awarded_submission_or_404(submission_id: int) -> ContestSubmission:
     try:
-        submission = Submission.objects.select_related(
+        submission = ContestSubmission.objects.select_related(
             "contest__sponsor", "developer"
         ).get(id=submission_id)
-    except Submission.DoesNotExist as exc:
+    except ContestSubmission.DoesNotExist as exc:
         raise HttpError(404, "제출물을 찾을 수 없습니다.") from exc
 
     if not submission.awards.exists():

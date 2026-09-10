@@ -22,6 +22,7 @@ from core.classification import Classification
 from core.clock import Clock
 
 from payments.charges import ChargeBase
+from submissions.models import Submission
 
 
 class Category(models.Model):
@@ -1029,3 +1030,38 @@ class InviteCode(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"InviteCode(contest_id={self.contest_id}, active={self.is_active})"
+
+
+class ContestSubmission(Submission):
+    """공모전 자식 — `submissions.Submission`을 다중 테이블 상속으로 확장한다
+    (#270, ADR-0039).
+
+    부모와 테이블·pk를 나눠 갖는다 — 이 테이블에는 `contest`·`developer`
+    두 컬럼과 `submission_ptr`(부모를 가리키는 pk)만 있다. 자료(`assets`)·근거
+    (`requirement_responses`)는 부모 pk로 그대로 붙는다.
+
+    **생성은 언제나 이 클래스를 통해서다** — `submissions.Submission`을 직접
+    만들면 자식 없는 부모 행이 생긴다(이 자식이 없으면 어느 제품의 계약도
+    만족하지 못한다). `contests.submission_api.create_submission`이 유일한
+    HTTP 생성 경로이고, `Submission.user`는 언제나 `developer.user`와 같은
+    값으로 맞춰 만든다 — 둘은 같은 사실(`DeveloperProfile.user`가 OneToOne)의
+    두 표현이라 어긋나면 안 된다.
+    """
+
+    contest = models.ForeignKey(Contest, related_name="submissions", on_delete=models.CASCADE)
+    developer = models.ForeignKey(
+        "accounts.DeveloperProfile", related_name="submissions", on_delete=models.CASCADE
+    )
+
+    class Meta:
+        constraints = [
+            # 한 Developer가 한 Contest에 낼 수 있는 Submission은 하나뿐이다. 두 번째
+            # 제출은 새 행이 아니라 기존 행의 수정(PUT)이어야 한다 — #270 이전에는
+            # 이 제약이 부모(`submissions.Submission`)에 있었다.
+            models.UniqueConstraint(
+                fields=["contest", "developer"], name="unique_submission_per_contest_developer"
+            ),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ContestSubmission(contest={self.contest_id}, developer={self.developer_id})"

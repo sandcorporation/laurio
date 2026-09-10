@@ -11,10 +11,9 @@ from django.db.models import Count, Exists, OuterRef, Q, Subquery
 from django.db.models.functions import Coalesce
 from ninja import Router
 
-from contests.models import Contest
+from contests.models import Contest, ContestSubmission
 from core.auth import InternalAuth
 from core.clock import Clock
-from submissions.models import Submission
 
 from .models import ScoringAttempt
 from .services import SCORING_FAILURE_GRACE, SCORING_FAILURE_LIMIT
@@ -95,7 +94,7 @@ def incomplete_contests(request):
         ScoringAttempt.objects.filter(submission=OuterRef("pk"), permanent=True)
     )
 
-    submissions = Submission.objects.filter(
+    submissions = ContestSubmission.objects.filter(
         contest_id__in=contest_by_id.keys(), score__isnull=True
     ).annotate(
         attempt_count=Coalesce(Subquery(attempt_count_subquery), 0),

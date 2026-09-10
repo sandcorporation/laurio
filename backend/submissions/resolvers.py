@@ -38,7 +38,9 @@ from __future__ import annotations
 
 from django.conf import settings
 
+# APP-BOUNDARY-EXCEPTION: target_ref 형식이 아직 공모전 모양(contest_id를 품는다) 뿐이다 — 강의실이 자기 형식을 더할 때 이 리졸버가 갈래를 늘린다(ADR-0039)
 from awards.services import sponsor_user_id_if_awarded
+# APP-BOUNDARY-EXCEPTION: 위와 같은 이유 — Award 존재 여부로 Handover 가시성을 판정하려면 지금은 Contest를 직접 조회해야 한다
 from contests.models import Contest
 from core.clock import Clock
 from policies.scope import current_policy
@@ -153,6 +155,7 @@ class SubmissionContentTypeResolver:
         if content_type:
             return content_type
 
+        # APP-BOUNDARY-EXCEPTION: 빌드 자산의 content-type은 handovers 소유다 — object_key 하나로 소스·시연영상(submissions)과 빌드 자산(handovers) 두 테이블을 모두 찾아야 하는 이 리졸버의 태생적 결합이다(#241)
         from handovers.models import BuildAsset
 
         return (

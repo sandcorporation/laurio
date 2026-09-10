@@ -48,14 +48,18 @@ from django.conf import settings
 from tests.ast_scan_support import BACKEND_ROOT, python_sources
 
 #: 두 제품이 나눠 쓰는 층. 여기서 기능 앱으로 내려가는 것이 규칙 B 가 막는 방향이다.
-SHARED = frozenset({"accounts", "core", "policies", "storage", "notifications"})
+#: `submissions`가 #270(ADR-0039)로 여기 합류했다 — `Submission`(부모)이 공모전을
+#: 몰라야 강의실이 두 번째 자식(`ProblemSubmission`)을 붙일 수 있다. 공모전 전용
+#: 코드(자식 모델·제출 API·「다음 행동」 판정·target_ref 조립·파기 스캔)는
+#: `contests.submission_*`로 옮겨갔다 — 이 앱에는 부모·자료·근거·자가 응답과 그
+#: 규칙만 남는다.
+SHARED = frozenset({"accounts", "core", "policies", "storage", "notifications", "submissions"})
 
 #: 공모전 제품. `verification`(본인확인)과 `payments`·`ledger`·`payouts` 계열이 여기 있는
 #: 이유는 강의실이 본인확인도 결제도 쓰지 않기로 했기 때문이다(ADR-0037).
 CONTEST_FAMILY = frozenset(
     {
         "contests",
-        "submissions",
         "scoring",
         "repositories",
         "awards",

@@ -66,7 +66,7 @@ def test_payout_awaiting_identity_sends_exactly_one_sms(client, category, landin
     assert confirm_resp.json()["status"] == "confirmed_identity_pending"
 
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
-    developer_user_id = payout.handover.award.submission.developer.user_id
+    developer_user_id = payout.handover.award.submission.contestsubmission.developer.user_id
 
     result = _run_scan(client)
     assert result["count"] == 1
@@ -92,7 +92,7 @@ def test_payout_awaiting_vendor_turn_gets_no_notification(client, category, land
     assert confirm_resp.json()["seller_status"] == "under_review"
 
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
-    developer_user_id = payout.handover.award.submission.developer.user_id
+    developer_user_id = payout.handover.award.submission.contestsubmission.developer.user_id
 
     result = _run_scan(client)
     assert result["count"] == 0
@@ -109,8 +109,8 @@ def test_payout_awaiting_missing_contact_sends_notification(client, category, la
     p._confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="review_required")
 
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
-    developer_id = payout.handover.award.submission.developer_id
-    developer_user_id = payout.handover.award.submission.developer.user_id
+    developer_id = payout.handover.award.submission.contestsubmission.developer_id
+    developer_user_id = payout.handover.award.submission.contestsubmission.developer.user_id
     # 실물 어댑터가 연락처 없이 PENDING 에 머무는 상황을 흉내낸다(#168 과 같은
     # 관용구) — Fake 는 이 상태를 직접 만들 시나리오가 없다.
     Seller.objects.filter(developer_id=developer_id).update(status=Seller.Status.PENDING, seller_id="")
@@ -140,7 +140,7 @@ def test_retry_failure_after_retry_failure_notifies_again(client, category, land
         assert first_retry.json()["transfer_status"] == "failed"
 
         payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
-        developer_user_id = payout.handover.award.submission.developer.user_id
+        developer_user_id = payout.handover.award.submission.contestsubmission.developer.user_id
 
         first_result = _run_scan(client)
         assert first_result["count"] == 1
@@ -171,7 +171,7 @@ def test_payout_notification_sends_immediately_at_night_while_other_types_are_de
     p._confirm_payout(client, dev, requested["idempotency_key"])
 
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
-    developer_user_id = payout.handover.award.submission.developer.user_id
+    developer_user_id = payout.handover.award.submission.contestsubmission.developer.user_id
 
     _freeze(datetime(2026, 1, 10, 23, 0, tzinfo=KST))
     try:
@@ -219,7 +219,7 @@ def test_payout_notification_failure_does_not_touch_payout_status(client, catego
     assert payout_after.status == payout_before.status
     assert payout_after.transfer_status == payout_before.transfer_status
 
-    developer_user_id = payout_before.handover.award.submission.developer.user_id
+    developer_user_id = payout_before.handover.award.submission.contestsubmission.developer.user_id
     notification = _payout_awaits_you_notifications(developer_user_id).get()
     assert notification.status == Notification.Status.FAILED
     assert notification.dispatches.count() == 3

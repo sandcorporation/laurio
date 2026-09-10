@@ -18,7 +18,8 @@ def sponsor_user_id_if_awarded(contest_id: int, developer_user_id: int) -> int |
 
     award = (
         Award.objects.filter(
-            contest_id=contest_id, submission__developer__user_id=developer_user_id
+            contest_id=contest_id,
+            submission__contestsubmission__developer__user_id=developer_user_id,
         )
         .select_related("contest__sponsor")
         .first()

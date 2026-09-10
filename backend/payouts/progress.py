@@ -373,8 +373,8 @@ def with_hold_facts(payouts):
     return payouts.annotate(
         identity_submitted=Exists(TaxIdentity.objects.filter(payout=OuterRef("pk"))),
         seller_status=Coalesce(
-            _seller_status_via("handover__award__submission__developer_id"),
-            _seller_status_via("distribution_share__submission__developer_id"),
+            _seller_status_via("handover__award__submission__contestsubmission__developer_id"),
+            _seller_status_via("distribution_share__submission__contestsubmission__developer_id"),
         ),
     )
 
@@ -411,8 +411,8 @@ def with_seller_registration_status(payouts):
 
     def _seller_field(field: str, default):
         return Coalesce(
-            _seller_field_via("handover__award__submission__developer_id", field),
-            _seller_field_via("distribution_share__submission__developer_id", field),
+            _seller_field_via("handover__award__submission__contestsubmission__developer_id", field),
+            _seller_field_via("distribution_share__submission__contestsubmission__developer_id", field),
             Value(default),
         )
 

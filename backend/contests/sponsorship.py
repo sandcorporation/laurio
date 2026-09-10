@@ -71,10 +71,12 @@ def sponsored_contest_queryset(base, *, as_of, policy):
 
     return base.select_related("award__handover", "distribution").annotate(
         submission_count=Count("submissions", distinct=True),
-        has_any_score=Exists(Score.objects.filter(submission__contest=OuterRef("pk"))),
+        has_any_score=Exists(
+            Score.objects.filter(submission__contestsubmission__contest=OuterRef("pk"))
+        ),
         has_pending_appeal=Exists(
             Appeal.objects.filter(
-                submission__contest=OuterRef("pk"), status=Appeal.Status.PENDING
+                submission__contestsubmission__contest=OuterRef("pk"), status=Appeal.Status.PENDING
             )
         ),
         # transfer_status가 FAILED면 CONFIRMED라도 실이체가 실제로는 아직

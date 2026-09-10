@@ -24,6 +24,7 @@ from django.utils import timezone
 from accounts.models import DeveloperProfile, SponsorProfile
 from awards.models import Award
 from contests.models import Category, Contest
+from contests.models import ContestSubmission
 from submissions.models import Submission
 
 
@@ -60,7 +61,9 @@ class HandoverBackfillMigrationTests(TransactionTestCase):
             required_minimum_prize=0,
             is_underfunded=False,
         )
-        submission = Submission.objects.create(
+        submission = ContestSubmission.objects.create(
+            user=developer_user,
+            product=Submission.Product.CONTEST,
             contest=contest,
             developer=developer,
         )

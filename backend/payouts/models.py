@@ -43,15 +43,15 @@ class PayoutQuerySet(models.QuerySet):
 
         return self.select_related(
             "handover__award__contest",
-            "handover__award__submission__developer",
+            "handover__award__submission__contestsubmission__developer",
             "distribution_share__distribution__contest",
-            "distribution_share__submission__developer",
+            "distribution_share__submission__contestsubmission__developer",
         )
 
     def for_developer(self, developer):
         return self.filter(
-            Q(handover__award__submission__developer=developer)
-            | Q(distribution_share__submission__developer=developer)
+            Q(handover__award__submission__contestsubmission__developer=developer)
+            | Q(distribution_share__submission__contestsubmission__developer=developer)
         )
 
     def for_contest(self, contest_id):
@@ -62,8 +62,8 @@ class PayoutQuerySet(models.QuerySet):
 
     def owned_by(self, user_id):
         return self.filter(
-            Q(handover__award__submission__developer__user_id=user_id)
-            | Q(distribution_share__submission__developer__user_id=user_id)
+            Q(handover__award__submission__contestsubmission__developer__user_id=user_id)
+            | Q(distribution_share__submission__contestsubmission__developer__user_id=user_id)
         )
 
 
@@ -290,8 +290,8 @@ class Payout(models.Model):
         한 Developer 가 여러 Contest 를 이겨도 등록은 한 번."""
 
         if self.handover_id is not None:
-            return self.handover.award.submission.developer
-        return self.distribution_share.submission.developer
+            return self.handover.award.submission.contestsubmission.developer
+        return self.distribution_share.submission.contestsubmission.developer
 
     @property
     def seller(self):

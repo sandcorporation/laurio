@@ -26,13 +26,12 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
-from contests.models import Contest
+from contests.models import Contest, ContestSubmission
 from contests.transitions import claim_contest_transition
 from core.clock import Clock
 from handovers.models import Handover
 from notifications.lifecycle import notify_award_result
 from policies.scope import current_policy
-from submissions.models import Submission
 
 from .models import Award
 from .schemas import AwardIn, AwardOut
@@ -51,8 +50,8 @@ def award_submission(request: HttpRequest, contest_id: int, payload: AwardIn):
         raise HttpError(403, "본인이 개최한 공모전만 선정할 수 있습니다.")
 
     try:
-        submission = Submission.objects.get(id=payload.submission_id, contest=contest)
-    except Submission.DoesNotExist as exc:
+        submission = ContestSubmission.objects.get(id=payload.submission_id, contest=contest)
+    except ContestSubmission.DoesNotExist as exc:
         raise HttpError(404, "이 공모전에 속한 제출물을 찾을 수 없습니다.") from exc
 
     now = Clock.now()

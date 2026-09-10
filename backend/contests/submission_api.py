@@ -1,4 +1,5 @@
-"""Submission API — 제출·수정·조회 (#10, ADR-0014, ADR-0005, ADR-0011, #218/ADR-0030).
+"""공모전 Submission API — 제출·수정·조회 (#10, ADR-0014, ADR-0005, ADR-0011,
+#218/ADR-0030, #270/ADR-0039).
 
 핵심 규율:
 
@@ -21,6 +22,13 @@
 파일 자체는 이 API를 거치지 않는다 — presigned 업로드는 storage 앱이 이미 제공한다
 (#6). 이 API는 storage가 발급한 object_key 문자열을 받아서 저장할 뿐이다. Evidence의
 "스크린샷" 값도 마찬가지로 storage object_key를 담을 수 있는 불투명한 문자열이다.
+
+**#270(ADR-0039) 이후 이 모듈이 `submissions` 앱에서 이 앱으로 옮겨왔다.**
+`submissions`가 공유층이 되면서 공모전 전용 API·스키마·판정이 전부 이쪽으로
+왔다 — 엔드포인트 경로와 응답 스키마는 바뀌지 않았고, 어느 앱이 라우터를
+등록하는지만 달라졌다. 부모(`submissions.Submission`)를 직접 만들지 않는다 —
+`contests.models.ContestSubmission`(자식)을 통해서만 만든다, 그래야 자식 없는
+부모 행이 생기지 않는다.
 """
 
 # list_my_participation(#74)이 예전엔 `@paginate`로 감쌌었다(그 래퍼는 원본 함수의
@@ -46,9 +54,6 @@ from accounts.middleware import jwt_auth
 from accounts.models import DeveloperProfile
 from accounts.sanitize import sanitize_free_text
 from awards.models import Award
-from contests.images import ALLOWED_CONTEST_IMAGE_CONTENT_TYPES
-from contests.models import Contest, InviteCode, Requirement
-from contests.view_tracking import get_view_count
 from core.clock import Clock
 from core.keyset import decode_cursor, keyset_page
 from policies.scope import current_policy
@@ -56,9 +61,7 @@ from policies.services import get_current_policy
 from storage.adapters import get_storage_adapter
 from storage.filenames import build_download_filename
 from storage.policy import get_download_ttl_resolver
-from verification.models import Verification
-
-from .models import (
+from submissions.models import (
     GITHUB_REPO_URL_PATTERN,
     AssignmentSourceReading,
     Evidence,
@@ -66,34 +69,41 @@ from .models import (
     Submission,
     SubmissionAsset,
 )
-from .participation import next_action_for
-from .retention import demo_video_destroy_at
-from .schemas import (
+from submissions.schemas import (
     AssetSummaryOut,
+    CompletionOut,
+    EvidenceOut,
+    RequirementResponseOut,
+    SubmissionAssetOut,
+)
+from verification.models import Verification
+
+from .images import ALLOWED_CONTEST_IMAGE_CONTENT_TYPES
+from .models import Contest, ContestSubmission, InviteCode, Requirement
+from .submission_participation import next_action_for
+from .submission_retention import demo_video_destroy_at
+from .submission_schemas import (
     AssignmentSourceReadingOut,
-    ErrorOut,
-    MyParticipationOut,
-    MyParticipationPageOut,
-    OwnScoreOut,
     ComparisonEntryOut,
     ComparisonSubmissionOut,
     CompletionDistributionOut,
-    CompletionOut,
     ContestComparisonOut,
     ContestMetricsOut,
     DailyParticipationOut,
     DeveloperPublicProfileOut,
-    EvidenceOut,
+    ErrorOut,
+    MyParticipationOut,
+    MyParticipationPageOut,
+    OwnScoreOut,
     PublicSubmissionOut,
     RequirementComparisonOut,
     RequirementFulfillmentOut,
-    RequirementResponseOut,
-    SubmissionAssetOut,
     SubmissionIn,
     SubmissionOut,
     ViewMetricsOut,
 )
-from .target_refs import target_ref_for_asset_kind
+from .submission_target_refs import target_ref_for_asset_kind
+from .view_tracking import get_view_count
 
 logger = logging.getLogger(__name__)
 
@@ -295,7 +305,7 @@ _KIND_LABELS = dict(SubmissionAsset.Kind.choices)
 # `policies.models`의 `max_screenshot_asset_bytes`와 달리 여기서는 직접
 # import해도 순환이 생기지 않는다 — `contests.images`는 `submissions`를 (직접도
 # 간접도) 임포트하지 않는다(`contests.schemas`가 끌어오는 것은
-# `submissions.scoring_basis`뿐이라 `submissions.api`와는 별도 모듈이다).
+# `submissions.scoring_basis`뿐이라 이 모듈과는 별도 모듈이다).
 ALLOWED_SCREENSHOT_CONTENT_TYPES = ALLOWED_CONTEST_IMAGE_CONTENT_TYPES
 
 
@@ -479,7 +489,7 @@ def _clean_assets_in(
     return cleaned
 
 
-def _merge_assets(submission: Submission, cleaned: list[_CleanedAsset]) -> set[int]:
+def _merge_assets(submission: ContestSubmission, cleaned: list[_CleanedAsset]) -> set[int]:
     """자료를 병합한다 — 이 API에서 부분 갱신 의미론을 갖는 유일한 곳이다 (#190).
 
     **자료는 그 값이 곧 정체성이다.** `(submission, kind, value)`가 이미 유일하므로,
@@ -567,7 +577,7 @@ def _merge_assets(submission: Submission, cleaned: list[_CleanedAsset]) -> set[i
 
 
 def _replace_requirement_responses(
-    submission: Submission,
+    submission: ContestSubmission,
     contest: Contest,
     responses_in,
     *,
@@ -787,7 +797,7 @@ def _completion_of(
 
 
 def _serialize(
-    submission: Submission,
+    submission: ContestSubmission,
     *,
     contest: Contest,
     is_owner: bool,
@@ -919,7 +929,7 @@ def create_submission(request: HttpRequest, contest_id: int, payload: Submission
 
     developer, _created = DeveloperProfile.objects.get_or_create(user=request.auth_user)
 
-    if Submission.objects.filter(contest=contest, developer=developer).exists():
+    if ContestSubmission.objects.filter(contest=contest, developer=developer).exists():
         raise HttpError(
             409, "이미 제출한 적이 있습니다. 수정은 PUT을 사용하세요."
         )
@@ -935,7 +945,15 @@ def create_submission(request: HttpRequest, contest_id: int, payload: Submission
 
     try:
         with transaction.atomic():
-            submission = Submission.objects.create(contest=contest, developer=developer)
+            # 부모(`Submission`)를 직접 만들지 않는다 — 자식을 통해서만 만들어야
+            # 부모의 `user`가 언제나 자식의 `developer.user`와 일치한다(#270의
+            # 두 불변식 중 하나, ADR-0039).
+            submission = ContestSubmission.objects.create(
+                user=request.auth_user,
+                product=Submission.Product.CONTEST,
+                contest=contest,
+                developer=developer,
+            )
             removed = _merge_assets(submission, cleaned_assets)
             _replace_requirement_responses(
                 submission, contest, payload.requirement_responses, removed_asset_ids=removed
@@ -965,7 +983,7 @@ def update_submission(request: HttpRequest, contest_id: int, payload: Submission
 
     developer = DeveloperProfile.objects.filter(user=request.auth_user).first()
     submission = (
-        Submission.objects.filter(contest=contest, developer=developer).first()
+        ContestSubmission.objects.filter(contest=contest, developer=developer).first()
         if developer is not None
         else None
     )
@@ -1010,7 +1028,7 @@ def get_my_submission(request: HttpRequest, contest_id: int):
     # 한 건뿐이라 N+1 이 되진 않지만, 미리 당기지 않으면 왕복이 여러 번(점수·
     # 이의·Award·Handover·본인확인) 생긴다.
     submission = (
-        Submission.objects.filter(contest=contest, developer=developer)
+        ContestSubmission.objects.filter(contest=contest, developer=developer)
         .select_related(
             "contest", "score", "appeal", "contest__award__handover", "developer__user__verification"
         )
@@ -1039,9 +1057,9 @@ def list_my_participation(request: HttpRequest, after: str | None = None):
     상태인가" 를 볼 곳이 없었다 — 공개 프로필은 마감 후 아카이브이고 단건
     조회는 하나씩이다. 이의도 지급도 걸 데가 없었다.
 
-    **행은 도메인 상태가 아니라 「다음 행동」을 말한다**(`participation.py` 참고).
-    판정은 백엔드에 있고 값은 타입 있는 enum 이라, 값이 하나 늘면 프론트의
-    누락된 분기를 `tsc` 가 빌드타임에 잡는다.
+    **행은 도메인 상태가 아니라 「다음 행동」을 말한다**(`contests.submission_
+    participation` 참고). 판정은 백엔드에 있고 값은 타입 있는 enum 이라, 값이
+    하나 늘면 프론트의 누락된 분기를 `tsc` 가 빌드타임에 잡는다.
 
     제출이 아직 없으면 빈 페이지로 200 이다 — "아직 아무 데도 안 냈다" 는
     정상적인 사실이지 없는 리소스가 아니다. 이 경로가
@@ -1075,7 +1093,7 @@ def list_my_participation(request: HttpRequest, after: str | None = None):
     # select_related 없이 `next_action_for`가 행마다 `submission.developer.user.
     # verification`을 걸으면 JOIN 대신 행마다 왕복이 난다.
     submissions = (
-        Submission.objects.filter(developer=profile)
+        ContestSubmission.objects.filter(developer=profile)
         .select_related(
             "contest", "score", "appeal", "contest__award__handover", "developer__user__verification"
         )
@@ -1139,7 +1157,7 @@ def list_own_assignment_source_readings(request: HttpRequest, submission_id: int
     )
 
 
-def _get_owned_submission(request: HttpRequest, submission_id: int) -> Submission:
+def _get_owned_submission(request: HttpRequest, submission_id: int) -> ContestSubmission:
     """`appeals.api._get_owned_submission` 과 같은 경계다 — 없는 것과 남의 것을
     가른다. 두 앱이 각자 자기 라우터에서 쓰므로 한쪽이 다른 쪽을 import 하지
     않는다(순환을 만들 이유가 없다)."""
@@ -1147,10 +1165,10 @@ def _get_owned_submission(request: HttpRequest, submission_id: int) -> Submissio
     try:
         # `score.submission.contest` 와 `.appeal` 을 이 조회에서 함께 끌어온다 —
         # `OwnScoreOut` 의 이의 창 판정이 그것을 본다.
-        submission = Submission.objects.select_related(
+        submission = ContestSubmission.objects.select_related(
             "developer", "score", "contest", "appeal"
         ).get(id=submission_id)
-    except Submission.DoesNotExist as exc:
+    except ContestSubmission.DoesNotExist as exc:
         raise HttpError(404, "제출물을 찾을 수 없습니다.") from exc
 
     if submission.developer.user_id != request.auth_user.id:
@@ -1181,14 +1199,14 @@ def get_submission(request: HttpRequest, submission_id: int):
         # 않는다. `developer`단독 대신 `developer__user__verification`으로
         # 적는다 — 뒤엣것이 앞엣것을 포함하면서 본인확인 상태까지 한 JOIN으로
         # 당긴다.
-        submission = Submission.objects.select_related(
+        submission = ContestSubmission.objects.select_related(
             "contest__sponsor",
             "developer__user__verification",
             "score",
             "appeal",
             "contest__award__handover",
         ).get(id=submission_id)
-    except Submission.DoesNotExist as exc:
+    except ContestSubmission.DoesNotExist as exc:
         raise HttpError(404, "제출물을 찾을 수 없습니다.") from exc
 
     contest = submission.contest
@@ -1224,13 +1242,13 @@ def get_developer_public_profile(request: HttpRequest, developer_id: int):
     """Developer 공개 프로필 — 마감된 Submission이 자동으로 아카이브된다 (#11).
 
     "마감"은 여기서도 Contest.status(#11의 스케줄러 틱)가 아니라 `deadline_at`과
-    `Clock.now()`를 직접 비교한다 — submissions.resolvers/api의 다른 가시성 판정과
-    같은 기준이다. 파일이 움직이지 않는 것처럼(ADR-0005) 이 아카이브도 틱을 기다리지
-    않고 그 순간 이미 옳다.
+    `Clock.now()`를 직접 비교한다 — 다른 가시성 판정과 같은 기준이다. 파일이
+    움직이지 않는 것처럼(ADR-0005) 이 아카이브도 틱을 기다리지 않고 그 순간
+    이미 옳다.
 
     데모·영상만 담는다 — 소스는 Award 전까지 아무에게도 공개되지 않고(ADR-0014),
     test_account는 "데모·영상" 칸에 없는 로그인 정보라 여기서도 내려주지 않는다
-    (submissions.api._serialize와 같은 원칙, #10 리뷰 지적).
+    (`_serialize`와 같은 원칙, #10 리뷰 지적).
 
     **탈퇴한 Developer는 404다**(#100, ADR-0025) — "공개 프로필이 닫힌다"는
     실명·소개가 비는 것이 아니라 그 존재 자체가 더 이상 조회되지 않는 것이다.
@@ -1245,7 +1263,7 @@ def get_developer_public_profile(request: HttpRequest, developer_id: int):
 
     now = Clock.now()
     submissions = (
-        Submission.objects.filter(developer=developer, contest__deadline_at__lte=now)
+        ContestSubmission.objects.filter(developer=developer, contest__deadline_at__lte=now)
         .select_related("contest")
         .prefetch_related("assets")
         .order_by("-contest__deadline_at")
@@ -1300,7 +1318,7 @@ def compare_submissions(request: HttpRequest, contest_id: int):
 
     requirements = list(Requirement.objects.filter(contest=contest).order_by("order", "id"))
     submissions = (
-        Submission.objects.filter(contest=contest)
+        ContestSubmission.objects.filter(contest=contest)
         .select_related("developer")
         .prefetch_related("requirement_responses__evidence_items", "assets")
         .order_by("id")
@@ -1402,11 +1420,10 @@ def get_contest_metrics(request: HttpRequest, contest_id: int):
     엔드포인트가 일자별 누적 Submission 수(#107)에 이어 Requirement별 충족
     분포와 제출 완성도 분포(#108)를 낸다.
 
-    `submissions.api.compare_submissions`와 같은 소유권 검사를 그대로 쓴다 —
-    새 예외를 만들지 않는다. **그 엔드포인트와 달리 마감 전에도 열린다** —
-    Sponsor는 마감 전에도 개별 Submission을 볼 수 있으므로(진행 중 비공개는
-    Developer 사이의 규율이다), 집계가 마감 전에 보여도 새로 알려주는 것이
-    없다.
+    `compare_submissions`와 같은 소유권 검사를 그대로 쓴다 — 새 예외를 만들지
+    않는다. **그 엔드포인트와 달리 마감 전에도 열린다** — Sponsor는 마감 전에도
+    개별 Submission을 볼 수 있으므로(진행 중 비공개는 Developer 사이의
+    규율이다), 집계가 마감 전에 보여도 새로 알려주는 것이 없다.
 
     **Score는 이 함수 어디에도 조회하지 않는다** — `scoring.models.Score`를
     import조차 하지 않는다(ADR-0006/0014). **개별 Submission·Developer도
@@ -1421,7 +1438,7 @@ def get_contest_metrics(request: HttpRequest, contest_id: int):
     if contest.sponsor.user_id != request.auth_user.id:
         raise HttpError(403, "본인이 개최한 공모전만 지표를 볼 수 있습니다.")
 
-    submissions_qs = Submission.objects.filter(contest=contest)
+    submissions_qs = ContestSubmission.objects.filter(contest=contest)
     total_submission_count = submissions_qs.count()
 
     # 판정은 여기(백엔드)에서 한다 — 화면은 이미 묶인 일자별 누적치를 받아
@@ -1450,8 +1467,13 @@ def get_contest_metrics(request: HttpRequest, contest_id: int):
     # N+1이 된다. 분모는 total_submission_count다: 그 Requirement에 자가
     # 응답이 아예 없는 Submission도 "충족하지 못함"으로 세야
     # `RequirementFulfillmentOut`의 docstring이 약속한 채점 원칙과 맞는다.
+    # `submission__contestsubmission__contest`로 부모(RequirementResponse.
+    # submission, 손대지 않은 FK)에서 자식으로 내려간다 — #270 이후 `contest`는
+    # 자식(`ContestSubmission`)에만 있다.
     met_counts_by_requirement = dict(
-        RequirementResponse.objects.filter(submission__contest=contest, is_met=True)
+        RequirementResponse.objects.filter(
+            submission__contestsubmission__contest=contest, is_met=True
+        )
         .values("requirement_id")
         .annotate(met=Count("id"))
         .values_list("requirement_id", "met")

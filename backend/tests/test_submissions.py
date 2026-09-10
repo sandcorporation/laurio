@@ -17,7 +17,7 @@ import pytest
 from django.conf import settings
 from django.utils import timezone
 
-from contests.models import Category, Contest, DeliverableType
+from contests.models import Category, Contest, ContestSubmission, DeliverableType
 from core.models import ClockOverride
 from submissions.models import Submission, SubmissionAsset
 from tests.submission_assets import assets_of, first_value, demo_account_of
@@ -365,7 +365,7 @@ def test_edit_after_deadline_is_rejected(client, category, landing_type):
 
     assert response.status_code == 403
     # 마감 후 수정이 거부되었으니 소스는 원래 값 그대로여야 한다.
-    submission = Submission.objects.get(contest_id=contest["id"])
+    submission = ContestSubmission.objects.get(contest_id=contest["id"])
     assert [a.value for a in submission.assets.filter(kind="source")] == [source_key]
 
 
@@ -424,7 +424,7 @@ def test_submitting_twice_without_editing_is_rejected(client, category, landing_
     )
 
     assert second.status_code == 409
-    assert Submission.objects.filter(contest_id=contest["id"]).count() == 1
+    assert ContestSubmission.objects.filter(contest_id=contest["id"]).count() == 1
 
 
 @pytest.mark.django_db
@@ -2411,3 +2411,51 @@ def test_removing_an_asset_does_not_open_a_path_to_another_submissions_asset(
         f"{CONTESTS_URL}/{contest['id']}/submissions/me", **_auth_header(attacker["access"])
     )
     assert len(assets_of(still_there.json(), "demo_url")) == 1
+
+
+# --- #270(ADR-0039): 부모·자식 분할이 지키는 두 불변식 --------------------------------
+
+
+def test_submitting_creates_a_child_alongside_the_parent(client, category, landing_type):
+    """자식 없는 부모 행이 생기지 않는다 — 생성 경로가 `ContestSubmission`을 통해서만
+    열려 있다는 것을 pk가 같은 자식 행의 존재로 확인한다(ADR-0039).
+    """
+
+    _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    dev = _verified_user(client, "dev-parent-child", "dev-ci-parent-child")
+    source_key = _source_object_key(contest["id"], dev["user_id"])
+
+    created = _submit(
+        client, dev["access"], contest["id"], {"assets": [{"kind": "source", "value": source_key}]}
+    )
+    assert created.status_code == 201
+    submission_id = created.json()["id"]
+
+    parent = Submission.objects.get(pk=submission_id)
+    child = ContestSubmission.objects.get(pk=submission_id)
+    assert child.submission_ptr_id == parent.pk
+    assert parent.product == Submission.Product.CONTEST
+
+
+def test_the_parents_user_always_matches_the_childs_developer_user(
+    client, category, landing_type
+):
+    """부모의 `user`와 자식의 `developer.user`가 어긋난 행이 만들어지지 않는다
+    (ADR-0039) — `DeveloperProfile.user`가 OneToOne이라 둘은 같은 사실의 두
+    표현이고, 그 일치는 생성 경로(`contests.submission_api.create_submission`)
+    가 지킨다.
+    """
+
+    _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    dev = _verified_user(client, "dev-user-match", "dev-ci-user-match")
+    source_key = _source_object_key(contest["id"], dev["user_id"])
+
+    created = _submit(
+        client, dev["access"], contest["id"], {"assets": [{"kind": "source", "value": source_key}]}
+    )
+    assert created.status_code == 201
+    submission_id = created.json()["id"]
+
+    parent = Submission.objects.get(pk=submission_id)
+    child = ContestSubmission.objects.get(pk=submission_id)
+    assert parent.user_id == child.developer.user_id

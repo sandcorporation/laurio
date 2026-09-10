@@ -1,16 +1,33 @@
-"""Submission 도메인 모델 (CONTEXT.md, ADR-0014, ADR-0027).
+"""Submission 도메인 모델 (CONTEXT.md, ADR-0014, ADR-0027, ADR-0039, #270).
 
-`Submission`은 한 Developer가 한 Contest에 낸 결과물 일체다. 그 결과물은 자료
-하나가 아니라 **`SubmissionAsset` 목록**이다(#190, ADR-0027) — 소스·시연 영상·
-데모 URL·GitHub 저장소를 각각 여러 개 담을 수 있다. `Contest.deliverable_types`가
-M2M이라 한 Contest가 "웹 서비스 + 모바일 앱 + 관리자 페이지"를 함께 요구할 수
-있는데, 자료가 종류당 하나면 그런 Contest의 참가자는 자기가 만든 것의 일부만
-낼 수 있었다.
+`Submission`은 두 제품(공모전·강의실)이 공유하는 **부모**다 — 누가 냈는가(`user`),
+언제 냈는가, 그리고 **자료·근거·자가 응답이 매달리는 자리**만 든다. 제품별 계약은
+자식이 든다: 공모전은 `contests.ContestSubmission`(`contest`·`developer` FK와
+`(contest, developer)` 유니크 제약), 강의실은 아직 없다(이 티켓은 두 번째 자식을
+만들지 않는다 — ADR-0039).
+
+**Django 다중 테이블 상속이다.** 이 테이블과 pk가 그대로 부모로 남는다 — 자료
+(`SubmissionAsset`)·근거·자가 응답과, 이 테이블을 가리키는 다른 앱의 FK(Score·
+Award·DistributionShare·Handover·Appeal)가 전부 이 테이블을 그대로 가리킨다.
+**그 FK들은 손대지 않는다** — 자식(`ContestSubmission`)의 `contest`·`developer`가
+필요한 곳은 `submission.contestsubmission`(Django가 자동으로 여는 역방향
+접근자)을 거쳐야 한다.
+
+`product`는 이 행이 어느 제품의 것인지 **조인 없이** 말한다 — `Contest.kind`
+(공모전/과제)와는 다른 축이라 이름을 겹치지 않게 골랐다. 자식 없는 부모 행은
+생성 경로를 자식에서만 열어 막는다(`ContestSubmission.objects.create(...)`가
+유일한 생성 경로다) — 여기 모델 자체는 그 규율을 강제하지 않는다.
+
+그 결과물은 자료 하나가 아니라 **`SubmissionAsset` 목록**이다(#190, ADR-0027) —
+소스·시연 영상·데모 URL·GitHub 저장소를 각각 여러 개 담을 수 있다.
+`Contest.deliverable_types`가 M2M이라 한 Contest가 "웹 서비스 + 모바일 앱 +
+관리자 페이지"를 함께 요구할 수 있는데, 자료가 종류당 하나면 그런 Contest의
+참가자는 자기가 만든 것의 일부만 낼 수 있었다.
 
 전체 소스코드는 필수다 — 플랫폼의 "강제하지 않고 배지로 신호한다" 원칙에서
 유일한 예외다(ADR-0014). 다중화 이후 그 뜻은 **`kind=source`인 자산이 최소
-하나**다. 그 강제는 API 레이어(submissions.api)에서 하고, 여기 모델은 그 결과를
-담는 그릇이다.
+하나**다. 그 강제는 API 레이어(`contests.submission_api`, 공모전 전용)에서 하고,
+여기 모델은 그 결과를 담는 그릇이다.
 
 시연 영상·데모 URL·테스트 계정은 선택이며 완성도 지표로만 쓰인다. 각 `Requirement`
 자가 응답(`RequirementResponse`)에는 `Evidence`를 연결할 수 있다 — 연결되지 않아도
@@ -26,28 +43,30 @@ from django.db import models
 
 
 class Submission(models.Model):
-    contest = models.ForeignKey(
-        "contests.Contest", related_name="submissions", on_delete=models.CASCADE
+    class Product(models.TextChoices):
+        CONTEST = "contest", "공모전"
+        CLASSROOM = "classroom", "강의실"
+
+    #: 제출자. 공모전 참가자든 강의실 참여자든 계정은 언제나 `User`다 — 강의실
+    #: 참여자에게는 `DeveloperProfile`이 없다(ADR-0037). 공모전 쪽의 `developer_id`
+    #: (`accounts.DeveloperProfile`)가 필요한 코드는 자식(`ContestSubmission`)을
+    #: 거친다.
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="submissions", on_delete=models.CASCADE
     )
-    developer = models.ForeignKey(
-        "accounts.DeveloperProfile", related_name="submissions", on_delete=models.CASCADE
-    )
+    #: 이 행이 어느 제품의 것인가(#270, ADR-0039) — `Contest.kind`(공모전/과제)와는
+    #: 다른 축이다. 부모를 잡은 공유 코드(가시성 리졸버·다운로드 파일명·파기 스캔)가
+    #: 조인이나 `RelatedObjectDoesNotExist` 예외 없이 갈래를 타는 자리다.
+    product = models.CharField(max_length=20, choices=Product.choices)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["-created_at"]
-        constraints = [
-            # 한 Developer가 한 Contest에 낼 수 있는 Submission은 하나뿐이다. 두 번째
-            # 제출은 새 행이 아니라 기존 행의 수정(PUT)이어야 한다.
-            models.UniqueConstraint(
-                fields=["contest", "developer"], name="unique_submission_per_contest_developer"
-            ),
-        ]
 
     def __str__(self) -> str:  # pragma: no cover
-        return f"Submission(contest={self.contest_id}, developer={self.developer_id})"
+        return f"Submission(id={self.pk}, product={self.product})"
 
 
 # `kind=repository`의 `value`가 받는 유일한 모양. 임의의 git URL을 받으면 플랫폼

@@ -97,3 +97,10 @@ class ContestsConfig(AppConfig):
         from .image_optimization import CONTEST_IMAGE_OPTIMIZATION_SCAN
 
         register_scan(CONTEST_IMAGE_OPTIMIZATION_SCAN)
+
+        # 시연 영상 파일 보존 기간 만료 스캔(#262, ADR-0035) — 공모전 전용이라
+        # 여기서 등록한다(#270, ADR-0039가 submissions 앱을 공유층으로 옮기며
+        # 함께 옮겼다).
+        from .submission_retention import DEMO_VIDEO_RETENTION_PURGE_SCAN
+
+        register_scan(DEMO_VIDEO_RETENTION_PURGE_SCAN)

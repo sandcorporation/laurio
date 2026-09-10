@@ -79,8 +79,8 @@ def _developer_has_payout_in_progress(developer_profile: DeveloperProfile) -> bo
 
     statuses = set(
         Payout.objects.filter(
-            models.Q(handover__award__submission__developer=developer_profile)
-            | models.Q(distribution_share__submission__developer=developer_profile)
+            models.Q(handover__award__submission__contestsubmission__developer=developer_profile)
+            | models.Q(distribution_share__submission__contestsubmission__developer=developer_profile)
         ).values_list("status", flat=True)
     )
     return any(Payout.Status.BLOCKS_DEVELOPER_WITHDRAWAL(status) for status in statuses)
@@ -131,8 +131,8 @@ def _transaction_basis(user) -> tuple[str, int] | None:
     if developer_profile is not None:
         payout = (
             Payout.objects.filter(
-                models.Q(handover__award__submission__developer=developer_profile)
-                | models.Q(distribution_share__submission__developer=developer_profile),
+                models.Q(handover__award__submission__contestsubmission__developer=developer_profile)
+                | models.Q(distribution_share__submission__contestsubmission__developer=developer_profile),
                 status=Payout.Status.CONFIRMED,
             )
             .order_by("id")

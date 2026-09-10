@@ -23,7 +23,7 @@ from django.utils import timezone
 from contests.models import Category, DeliverableType
 from storage.adapters.fake import FakeStorageAdapter
 from submissions.models import Submission
-from submissions.target_refs import demo_video_target_ref, source_target_ref
+from contests.submission_target_refs import demo_video_target_ref, source_target_ref
 
 from tests.test_source_readings import _publish_contest, _submit, _verified_user
 

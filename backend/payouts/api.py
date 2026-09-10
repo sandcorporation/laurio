@@ -139,12 +139,12 @@ def _serialize(payout: Payout) -> PayoutOut:
 def _get_owned_handover(request: HttpRequest, contest_id: int) -> Handover:
     try:
         handover = Handover.objects.select_related(
-            "award__contest", "award__submission__developer"
+            "award__contest", "award__submission__contestsubmission__developer"
         ).get(award__contest_id=contest_id)
     except Handover.DoesNotExist as exc:
         raise HttpError(404, "이 공모전은 아직 선정되지 않아 인수 정보가 없습니다.") from exc
 
-    if handover.award.submission.developer.user_id != request.auth_user.id:
+    if handover.award.submission.contestsubmission.developer.user_id != request.auth_user.id:
         raise HttpError(403, "본인이 선정된 제출물의 참가자만 접근할 수 있습니다.")
     return handover
 
@@ -184,15 +184,15 @@ def get_payout(request: HttpRequest, contest_id: int):
     # 경로는 그 Developer 의 몫이 있는지가(없으면 404). Payout 자체의 조회는 어느 경로든
     # 하나다(#128).
     handover = (
-        Handover.objects.select_related("award__submission__developer")
+        Handover.objects.select_related("award__submission__contestsubmission__developer")
         .filter(award__contest_id=contest_id)
         .first()
     )
     if handover is not None:
-        if handover.award.submission.developer.user_id != user_id:
+        if handover.award.submission.contestsubmission.developer.user_id != user_id:
             raise HttpError(403, "본인이 선정된 제출물의 참가자만 접근할 수 있습니다.")
     elif not DistributionShare.objects.filter(
-        distribution__contest_id=contest_id, submission__developer__user_id=user_id
+        distribution__contest_id=contest_id, submission__contestsubmission__developer__user_id=user_id
     ).exists():
         raise HttpError(
             404, "이 공모전은 아직 선정되지 않았고, 배분 대상도 아닙니다."

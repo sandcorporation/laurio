@@ -1151,12 +1151,12 @@ def test_seller_registration_does_not_start_before_payout_is_confirmed(
     requested = _request_payout(client, dev, contest["id"])
 
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
-    assert not Seller.objects.filter(developer_id=payout.handover.award.submission.developer_id).exists()
+    assert not Seller.objects.filter(developer_id=payout.handover.award.submission.contestsubmission.developer_id).exists()
 
     _confirm_payout(client, dev, requested["idempotency_key"])
 
     assert Seller.objects.filter(
-        developer_id=payout.handover.award.submission.developer_id
+        developer_id=payout.handover.award.submission.contestsubmission.developer_id
     ).exists()
 
 
@@ -1220,7 +1220,7 @@ def test_limit_exceeded_seller_registration_is_under_review_not_failed(
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
     assert payout.status != Payout.Status.FAILED
 
-    developer_id = payout.handover.award.submission.developer_id
+    developer_id = payout.handover.award.submission.contestsubmission.developer_id
     seller = Seller.objects.get(developer_id=developer_id)
     assert seller.status == Seller.Status.UNDER_REVIEW
 
@@ -1257,7 +1257,7 @@ def test_seller_rejection_leaves_confirmed_amount_in_the_ledger(client, category
     outstanding = developer_payable_credit - developer_payable_debit
     assert outstanding == payout.net_amount
 
-    developer_id = payout.handover.award.submission.developer_id
+    developer_id = payout.handover.award.submission.contestsubmission.developer_id
     seller = Seller.objects.get(developer_id=developer_id)
     assert seller.status == Seller.Status.REJECTED
 
@@ -1374,7 +1374,7 @@ def test_second_payout_reuses_seller_id_and_does_not_reregister(
     _confirm_payout(client, dev, requested_a["idempotency_key"])
 
     payout_a = Payout.objects.get(idempotency_key=requested_a["idempotency_key"])
-    developer_id = payout_a.handover.award.submission.developer_id
+    developer_id = payout_a.handover.award.submission.contestsubmission.developer_id
     seller_after_first = Seller.objects.get(developer_id=developer_id)
     assert seller_after_first.status == Seller.Status.PARTIALLY_APPROVED
     first_seller_id = seller_after_first.seller_id
@@ -1640,7 +1640,7 @@ def test_seller_adapter_mode_resolves_a_dotted_path_to_a_real_class(
     assert resp.status_code == 200
 
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
-    developer_id = payout.handover.award.submission.developer_id
+    developer_id = payout.handover.award.submission.contestsubmission.developer_id
     seller = Seller.objects.get(developer_id=developer_id)
     assert seller.seller_id == f"dotted-path-marker-{developer_id}"
 
@@ -1667,7 +1667,7 @@ def test_approval_required_is_visible_and_distinct_from_pending(client, category
     assert "본인인증" in body["next_action_message"]
 
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
-    developer_id = payout.handover.award.submission.developer_id
+    developer_id = payout.handover.award.submission.contestsubmission.developer_id
     seller = Seller.objects.get(developer_id=developer_id)
     assert seller.status == Seller.Status.APPROVAL_REQUIRED
 
@@ -1710,7 +1710,7 @@ def test_second_payout_does_not_reregister_when_seller_is_approved(client, categ
     _confirm_payout(client, dev, requested_a["idempotency_key"], seller_simulate="approved")
 
     payout_a = Payout.objects.get(idempotency_key=requested_a["idempotency_key"])
-    developer_id = payout_a.handover.award.submission.developer_id
+    developer_id = payout_a.handover.award.submission.contestsubmission.developer_id
     seller_id_after_first = Seller.objects.get(developer_id=developer_id).seller_id
 
     ClockOverride.objects.filter(pk=1).delete()
@@ -1770,7 +1770,7 @@ def test_seller_contact_submission_stores_encrypted_phone_and_plaintext_email(
     assert resp.status_code == 200
 
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
-    developer_id = payout.handover.award.submission.developer_id
+    developer_id = payout.handover.award.submission.contestsubmission.developer_id
     seller = Seller.objects.get(developer_id=developer_id)
     assert seller.phone_number == "01055556666"
     # DB 컬럼 자체는 평문이 아니어야 한다(TaxIdentity와 같은 원칙) — 이메일은
@@ -1805,7 +1805,7 @@ def test_seller_contact_partial_submission_preserves_what_was_already_given(
     assert resp2.json()["has_seller_email"] is True
 
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
-    developer_id = payout.handover.award.submission.developer_id
+    developer_id = payout.handover.award.submission.contestsubmission.developer_id
     seller = Seller.objects.get(developer_id=developer_id)
     assert seller.phone_number == "01055556666"
     assert seller.email == "payout@example.com"
@@ -1880,7 +1880,7 @@ def test_seller_contact_empty_string_email_is_rejected_not_treated_as_omitted(
     assert resp.status_code == 422
 
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
-    developer_id = payout.handover.award.submission.developer_id
+    developer_id = payout.handover.award.submission.contestsubmission.developer_id
     seller = Seller.objects.get(developer_id=developer_id)
     assert seller.email == "a@example.com"
 
@@ -1899,7 +1899,7 @@ def test_next_action_message_asks_for_contact_when_seller_row_has_none(
     _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="review_required")
 
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
-    developer_id = payout.handover.award.submission.developer_id
+    developer_id = payout.handover.award.submission.contestsubmission.developer_id
     # 실물 어댑터가 연락처 없이 PENDING에 머무는 상황을 흉내낸다 — Fake는
     # 이 상태를 직접 만들 시나리오가 없으므로(#50 네 시나리오에는 없다) 여기서만
     # ORM으로 상태를 조정한다(동작을 구동하는 게 아니라 화면 문구를 확인하기
@@ -1930,7 +1930,7 @@ def test_next_action_message_asks_for_contact_when_only_email_is_missing(
     _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="review_required")
 
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
-    developer_id = payout.handover.award.submission.developer_id
+    developer_id = payout.handover.award.submission.contestsubmission.developer_id
     # 전화번호는 있고 이메일만 비어 있는 상태를 직접 만든다 — ORM 으로 상태를
     # 조정할 뿐 동작을 구동하지 않는다(위 `test_next_action_message_asks_for_
     # contact_when_seller_row_has_none` 과 같은 관용구). `submit_seller_contact`
@@ -2096,7 +2096,7 @@ def test_toss_seller_webhook_advances_seller_pending_payout(client, category, la
 
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
     assert payout.status == Payout.Status.CONFIRMED_SELLER_PENDING
-    developer_id = payout.handover.award.submission.developer_id
+    developer_id = payout.handover.award.submission.contestsubmission.developer_id
     seller = Seller.objects.get(developer_id=developer_id)
     ref_seller_id = f"laurio-developer-{developer_id}"
 
@@ -2208,7 +2208,7 @@ def test_real_transfer_failure_keeps_payout_at_seller_pending_not_confirmed(
     assert payout.status == Payout.Status.CONFIRMED_SELLER_PENDING
     assert payout.transfer_status == Payout.TransferStatus.FAILED
 
-    developer_id = payout.handover.award.submission.developer_id
+    developer_id = payout.handover.award.submission.contestsubmission.developer_id
     seller = Seller.objects.get(developer_id=developer_id)
     assert seller.status in Seller.READY_STATUSES  # Seller 자체는 준비됐다
 
@@ -2370,7 +2370,7 @@ def test_seller_changed_webhook_ignores_out_of_order_regression(client, category
     _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="approved")
 
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
-    developer_id = payout.handover.award.submission.developer_id
+    developer_id = payout.handover.award.submission.contestsubmission.developer_id
     seller = Seller.objects.get(developer_id=developer_id)
     assert seller.status == Seller.Status.APPROVED
     ref_seller_id = f"laurio-developer-{developer_id}"
@@ -2423,7 +2423,7 @@ def test_seller_changed_webhook_unknown_status_422s_and_does_not_touch_seller(
     _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="approved")
 
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
-    developer_id = payout.handover.award.submission.developer_id
+    developer_id = payout.handover.award.submission.contestsubmission.developer_id
     seller = Seller.objects.get(developer_id=developer_id)
     ref_seller_id = f"laurio-developer-{developer_id}"
 
@@ -2592,7 +2592,7 @@ def test_seller_changed_webhook_stale_event_cannot_resurrect_rejected(
     _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="rejected")
 
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
-    developer_id = payout.handover.award.submission.developer_id
+    developer_id = payout.handover.award.submission.contestsubmission.developer_id
     seller = Seller.objects.get(developer_id=developer_id)
     assert seller.status == Seller.Status.REJECTED
     ref_seller_id = f"laurio-developer-{developer_id}"
@@ -2644,7 +2644,7 @@ def test_seller_changed_webhook_exact_duplicate_does_not_reprocess(
         _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="review_required")
 
         payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
-        developer_id = payout.handover.award.submission.developer_id
+        developer_id = payout.handover.award.submission.contestsubmission.developer_id
         seller = Seller.objects.get(developer_id=developer_id)
         ref_seller_id = f"laurio-developer-{developer_id}"
 
@@ -2885,7 +2885,7 @@ def test_toss_payout_adapter_never_posts_twice_for_the_same_confirm_request(
     # payouts.api.confirm_payout의 첫 번째 adapter.confirm() 호출이 곳바로
     # 실이체를 시도하는 시나리오를 재현한다.
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
-    developer_id = payout.handover.award.submission.developer_id
+    developer_id = payout.handover.award.submission.contestsubmission.developer_id
     Seller.objects.create(
         developer_id=developer_id,
         seller_id="already-ready-seller",
@@ -3051,7 +3051,7 @@ def test_seller_register_stale_id_does_not_loop_forever_on_404(
     _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="review_required")
 
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
-    developer_id = payout.handover.award.submission.developer_id
+    developer_id = payout.handover.award.submission.contestsubmission.developer_id
     seller_before = Seller.objects.get(developer_id=developer_id)
     assert seller_before.seller_id  # 등록 접수 시 받은 식별자가 있다.
 
@@ -3225,7 +3225,7 @@ def test_toss_payout_interrupted_claim_is_recoverable_after_staleness_threshold(
     # 이 Developer는 이미 Seller가 READY다 -- confirm_payout의 첫 직접 호출이
     # 곧바로 실이체(POST)를 시도하는 시나리오를 재현한다.
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
-    developer_id = payout.handover.award.submission.developer_id
+    developer_id = payout.handover.award.submission.contestsubmission.developer_id
     Seller.objects.create(
         developer_id=developer_id,
         seller_id="already-ready-seller-interrupt",
@@ -3695,7 +3695,7 @@ def test_toss_seller_webhook_falls_back_to_id_field_when_ref_seller_id_is_unreco
     _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="approval_required")
 
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
-    developer_id = payout.handover.award.submission.developer_id
+    developer_id = payout.handover.award.submission.contestsubmission.developer_id
     seller = Seller.objects.get(developer_id=developer_id)
     assert seller.seller_id  # Fake 등록이 이미 벤더 식별자를 줬다
 
@@ -3740,7 +3740,7 @@ def test_toss_seller_webhook_partially_approved_uses_policy_weekly_limit_not_ent
     _confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="approval_required")
 
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
-    developer_id = payout.handover.award.submission.developer_id
+    developer_id = payout.handover.award.submission.contestsubmission.developer_id
     seller = Seller.objects.get(developer_id=developer_id)
     ref_seller_id = f"laurio-developer-{developer_id}"
 
@@ -3874,7 +3874,7 @@ def _clone_blocked_payouts(count: int, *, contest_id: int, developer, status: st
     """
 
     from awards.models import Award
-    from contests.models import Contest
+    from contests.models import Contest, ContestSubmission
     from handovers.models import Handover
     from submissions.models import Submission
 
@@ -3891,8 +3891,11 @@ def _clone_blocked_payouts(count: int, *, contest_id: int, developer, status: st
             status=Contest.Status.CLOSED,
         )
         contest.deliverable_types.set(deliverable_types)
-        submission = Submission.objects.create(
-            contest=contest, developer=developer
+        submission = ContestSubmission.objects.create(
+            user=developer.user,
+            product=Submission.Product.CONTEST,
+            contest=contest,
+            developer=developer,
         )
         award = Award.objects.create(
             contest=contest, submission=submission, awarded_at=timezone.now()
@@ -4106,6 +4109,7 @@ def test_operator_queue_resolves_seller_and_identity_for_the_distribution_path_t
     대기」로 분류된다 — 조용히 틀린 큐가 된다.
     """
 
+    from contests.models import ContestSubmission
     from distributions.models import Distribution, DistributionShare
     from submissions.models import Submission
 
@@ -4138,8 +4142,11 @@ def test_operator_queue_resolves_seller_and_identity_for_the_distribution_path_t
         qualifying_count=1,
         share_amount=1_000_000,
     )
-    share_submission = Submission.objects.create(
-        contest=contest_row, developer=developer
+    share_submission = ContestSubmission.objects.create(
+        user=developer.user,
+        product=Submission.Product.CONTEST,
+        contest=contest_row,
+        developer=developer,
     )
     share = DistributionShare.objects.create(
         distribution=distribution, submission=share_submission, amount=1_000_000

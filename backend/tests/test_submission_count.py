@@ -31,7 +31,7 @@ from django.utils import timezone
 
 from accounts.models import DeveloperProfile, SponsorProfile
 from contests.curation import HOME_IMMINENT_DEADLINE_DAYS, HomeCurationBucket
-from contests.models import Category, Contest, DeliverableType
+from contests.models import Category, Contest, ContestSubmission, DeliverableType
 from submissions.models import Submission
 
 CONTESTS_URL = "/api/contests"
@@ -103,7 +103,12 @@ def _plant_submissions(contest, count, *, prefix):
 
     for i in range(count):
         developer = _make_developer(f"{prefix}-{i}")
-        Submission.objects.create(contest=contest, developer=developer)
+        ContestSubmission.objects.create(
+            user=developer.user,
+            product=Submission.Product.CONTEST,
+            contest=contest,
+            developer=developer,
+        )
 
 
 @pytest.mark.django_db
@@ -125,7 +130,7 @@ def test_submission_count_in_list_matches_actual_submissions(
     item = next(c for c in response.json()["items"] if c["id"] == contest.id)
 
     assert item["submission_count"] == 3
-    assert item["submission_count"] == Submission.objects.filter(contest=contest).count()
+    assert item["submission_count"] == ContestSubmission.objects.filter(contest=contest).count()
 
 
 @pytest.mark.django_db
@@ -145,7 +150,7 @@ def test_submission_count_in_detail_matches_actual_submissions(
     assert response.status_code == 200, response.content
 
     assert response.json()["submission_count"] == 2
-    assert response.json()["submission_count"] == Submission.objects.filter(
+    assert response.json()["submission_count"] == ContestSubmission.objects.filter(
         contest=contest
     ).count()
 
@@ -281,7 +286,12 @@ def test_individual_submission_still_404_before_deadline_despite_open_aggregate(
         deadline_at=timezone.now() + timedelta(days=10),
     )
     developer = _make_developer("aggregate-vs-individual")
-    submission = Submission.objects.create(contest=contest, developer=developer)
+    submission = ContestSubmission.objects.create(
+        user=developer.user,
+        product=Submission.Product.CONTEST,
+        contest=contest,
+        developer=developer,
+    )
 
     # 집계는 열려 있다.
     detail = client.get(f"{CONTESTS_URL}/{contest.id}")

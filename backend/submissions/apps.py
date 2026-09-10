@@ -7,11 +7,6 @@ class SubmissionsConfig(AppConfig):
     name = "submissions"
     default_auto_field = "django.db.models.BigAutoField"
 
-    def ready(self) -> None:
-        # 시연 영상 파일 보존 기간 만료 스캔(#262, ADR-0035) — 등록부에 올라
-        # beat 가 주기적으로 돌린다.
-        from core.scans import register_scan
-
-        from .retention import DEMO_VIDEO_RETENTION_PURGE_SCAN
-
-        register_scan(DEMO_VIDEO_RETENTION_PURGE_SCAN)
+    # 시연 영상 파일 보존 기간 만료 스캔(#262, ADR-0035)은 공모전 전용이라
+    # `contests.apps.ContestsConfig.ready`로 옮겼다(#270, ADR-0039) — 이 앱은
+    # 이제 공유층이라 어느 제품 스캔도 스스로 등록하지 않는다.

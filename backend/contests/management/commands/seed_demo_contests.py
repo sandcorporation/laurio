@@ -78,9 +78,9 @@ from django.utils import timezone
 from accounts.models import DeveloperProfile, SponsorProfile
 from awards.models import Award
 from contests.curation import HomeCurationBucket, home_bucket_for
-from contests.models import Category, Contest, DeliverableType, Requirement
+from contests.models import Category, Contest, ContestSubmission, DeliverableType, Requirement
+from contests.submission_target_refs import target_ref_for_asset_kind
 from submissions.models import Evidence, RequirementResponse, Submission, SubmissionAsset
-from submissions.target_refs import target_ref_for_asset_kind
 from verification.models import Verification
 
 PREFIX = "[데모] "
@@ -454,7 +454,7 @@ class Command(BaseCommand):
 
     def _upload_asset(
         self,
-        submission: Submission,
+        submission: ContestSubmission,
         *,
         kind: str,
         content_type: str,
@@ -535,14 +535,19 @@ class Command(BaseCommand):
 
     def _create_submission(
         self, *, contest: Contest, developer: DeveloperProfile, rank: int
-    ) -> Submission:
+    ) -> ContestSubmission:
         """참가작 하나 — Requirement 응답까지 함께 붙인다.
 
         응답이 없으면 심사 비교 화면(#36)의 Requirement 축 매트릭스가 통째로
         비어, 그 화면이 무엇을 보여주는 곳인지 데모에서 알 수 없다.
         """
 
-        submission = Submission.objects.create(contest=contest, developer=developer)
+        submission = ContestSubmission.objects.create(
+            user=developer.user,
+            product=Submission.Product.CONTEST,
+            contest=contest,
+            developer=developer,
+        )
         requirements = list(contest.requirements.all().order_by("order", "id"))
         # 소스를 만들기 **전에** 무엇을 충족으로 적을지 정한다 — 소스와 응답이
         # 같은 판정에서 나와야 둘이 서로를 반박하지 않는다.

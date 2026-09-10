@@ -42,7 +42,7 @@ def release_escrow(handover: Handover, *, released_via: str, now=None) -> Handov
         ).update(status=Handover.Status.RELEASED, released_via=released_via, released_at=now)
 
         handover = Handover.objects.select_related(
-            "award__contest", "award__submission__developer"
+            "award__contest", "award__submission__contestsubmission__developer"
         ).get(pk=handover.pk)
 
         if updated != 1:

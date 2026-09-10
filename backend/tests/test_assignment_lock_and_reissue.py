@@ -16,7 +16,7 @@ import pytest
 from django.core.management import call_command
 from django.test import Client
 
-from contests.models import Contest, DeliverableType, InviteCode
+from contests.models import Contest, ContestSubmission, DeliverableType, InviteCode
 from submissions.models import Submission
 
 ASSIGNMENTS_URL = "/api/assignments"
@@ -294,7 +294,7 @@ def test_old_invite_code_dies_but_existing_submission_survives_reissue(client, l
     assert blocked.status_code == 403
 
     # 그러나 재발급 전에 이미 제출한 학생의 Submission 은 그대로 남는다.
-    assert Submission.objects.filter(
+    assert ContestSubmission.objects.filter(
         contest_id=assignment_id, developer__user__username=_username(client, student_pair["access"])
     ).exists()
 

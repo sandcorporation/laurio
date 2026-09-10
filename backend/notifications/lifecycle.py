@@ -275,7 +275,7 @@ def _pending_award_notices(as_of, ctx):
     from awards.models import Award
 
     return Award.objects.filter(result_notice_sent_at__isnull=True).select_related(
-        "submission__developer__user", "contest"
+        "submission__contestsubmission__developer__user", "contest"
     )
 
 
@@ -292,7 +292,7 @@ def _pending_share_notices(as_of, ctx):
     from distributions.models import DistributionShare
 
     return DistributionShare.objects.filter(result_notice_sent_at__isnull=True).select_related(
-        "submission__developer__user", "distribution__contest"
+        "submission__contestsubmission__developer__user", "distribution__contest"
     )
 
 
@@ -300,7 +300,7 @@ def _recover_share_notice(share, as_of, ctx):
     # notify_distribution_shares 는 (distribution, [submission, ...]) 모양을 기대한다 —
     # 몫 하나짜리 목록으로 그 함수를 그대로 재사용한다. 예산(ctx)도 넘겨 팬아웃에서도
     # 지켜지게 한다.
-    notify_distribution_shares(share.distribution, [share.submission], ctx=ctx)
+    notify_distribution_shares(share.distribution, [share.submission.contestsubmission], ctx=ctx)
     share.refresh_from_db(fields=["result_notice_sent_at"])
     if share.result_notice_sent_at is None:
         return None
@@ -366,7 +366,7 @@ def notify_award_result(award) -> None:
         submission = award.submission
         contest = award.contest
         _safe_notify(
-            recipient=submission.developer.user,
+            recipient=submission.contestsubmission.developer.user,
             notification_type=NotificationType.RESULT_NOTICE,
             context={
                 "contest_id": contest.id,

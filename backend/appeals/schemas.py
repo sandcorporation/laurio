@@ -5,7 +5,7 @@ from datetime import datetime
 from ninja import Schema
 from pydantic import Field
 
-from submissions.schemas import ScoredAssetOut
+from contests.submission_schemas import ScoredAssetOut
 from submissions.scoring_basis import ScoringBasis
 
 

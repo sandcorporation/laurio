@@ -33,8 +33,7 @@ from accounts.sanitize import sanitize_free_text
 from core.clock import Clock
 from storage.adapters import get_storage_adapter
 from storage.filenames import build_download_filename, safe_download_base_name
-from submissions.models import AssignmentSourceReading, Submission, SubmissionAsset
-from submissions.schemas import AssignmentSourceRevealOut, SourceRevealAssetOut
+from submissions.models import AssignmentSourceReading, SubmissionAsset
 from submissions.scoring_basis import participant_facing_reasoning, scoring_basis_for
 
 from .assignment_category import get_assignment_category
@@ -45,7 +44,7 @@ from .images import (
     request_upload_url as request_assignment_image_upload_url_for,
     serialize_contest_image,
 )
-from .models import Contest, DeliverableType, InviteCode, Requirement
+from .models import Contest, ContestSubmission, DeliverableType, InviteCode, Requirement
 from .schemas import (
     AssignmentCreateIn,
     AssignmentOut,
@@ -59,6 +58,7 @@ from .schemas import (
     ContestImageUploadUrlOut,
     RequirementOut,
 )
+from .submission_schemas import AssignmentSourceRevealOut, SourceRevealAssetOut
 from .transitions import claim_contest_transition
 
 router = Router(tags=["assignments"])
@@ -650,7 +650,7 @@ def list_assignment_submissions(request: HttpRequest, assignment_id: int):
     contest = _get_owned_assignment(request, assignment_id)
 
     submissions = (
-        Submission.objects.filter(contest=contest)
+        ContestSubmission.objects.filter(contest=contest)
         .select_related("developer", "score")
         .order_by("created_at", "id")
     )
@@ -729,10 +729,10 @@ def reveal_assignment_submission_source(
     contest = _get_owned_assignment(request, assignment_id)
     try:
         # `developer` 를 함께 당긴다 — 파일명이 그 표시 이름을 쓴다(#268 후속).
-        submission = Submission.objects.select_related("developer").prefetch_related("assets").get(
+        submission = ContestSubmission.objects.select_related("developer").prefetch_related("assets").get(
             id=submission_id, contest=contest
         )
-    except Submission.DoesNotExist as exc:
+    except ContestSubmission.DoesNotExist as exc:
         raise HttpError(404, "제출물을 찾을 수 없습니다.") from exc
 
     adapter = get_storage_adapter()

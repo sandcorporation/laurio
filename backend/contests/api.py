@@ -38,13 +38,13 @@ from payments.adapters import PGError, get_adapter
 from payments.charges import settle_charge
 from payments.models import Payment
 from policies.scope import current_policy
-from submissions.models import Submission
 from verification.models import Verification
 
 from .models import (
     Category,
     Contest,
     ContestImage,
+    ContestSubmission,
     DeliverableType,
     HomeStatusAxis,
     JudgingExtensionPayment,
@@ -133,7 +133,7 @@ def _serialize_contest(contest: Contest, auth_user: object | None = None) -> Con
     # — `auth_user`를 안 넘기는 호출부(list_contests/get_home_curation)는 목록에
     # "내가 이미 냈는가"가 드러나지 않으므로 쿼리를 내지 않고 기본값 False를 그대로
     # 둔다. `get_contest`만 실제 값을 계산해 공개 상세의 제출 CTA가 문구를 가른다.
-    has_own_submission = auth_user is not None and Submission.objects.filter(
+    has_own_submission = auth_user is not None and ContestSubmission.objects.filter(
         contest=contest, developer__user_id=getattr(auth_user, "id", None)
     ).exists()
     return ContestOut(

@@ -50,7 +50,7 @@ def test_operator_can_retry_a_rejected_seller_registration(client, category, lan
     p._confirm_payout(client, dev, requested["idempotency_key"], seller_simulate="rejected")
 
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
-    assert Seller.objects.get(developer_id=payout.handover.award.submission.developer_id).status == (
+    assert Seller.objects.get(developer_id=payout.handover.award.submission.contestsubmission.developer_id).status == (
         Seller.Status.REJECTED
     )
 
@@ -75,7 +75,7 @@ def test_operator_can_retry_a_rejected_seller_registration(client, category, lan
     assert body["status"] in ("confirmed_identity_pending", "confirmed")
     assert body["blocked_on"] != "seller"
 
-    seller = Seller.objects.get(developer_id=payout.handover.award.submission.developer_id)
+    seller = Seller.objects.get(developer_id=payout.handover.award.submission.contestsubmission.developer_id)
     assert seller.status in Seller.READY_STATUSES
 
     action = OperatorPayoutAction.objects.get(payout=payout)
@@ -125,7 +125,7 @@ def test_operator_can_retry_a_stuck_seller_registration(client, category, landin
             assert resp.status_code == 200
 
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
-    developer_id = payout.handover.award.submission.developer_id
+    developer_id = payout.handover.award.submission.contestsubmission.developer_id
     assert Seller.objects.get(developer_id=developer_id).registration_error_count == (
         MAX_AUTO_SELLER_REGISTRATION_ATTEMPTS
     )
@@ -134,7 +134,7 @@ def test_operator_can_retry_a_stuck_seller_registration(client, category, landin
     queue_resp = operator.get("/api/operator/payouts?blocked_on=seller")
     row = next(
         r for r in queue_resp.json()["items"]
-        if r["developer_user_id"] == payout.handover.award.submission.developer.user_id
+        if r["developer_user_id"] == payout.handover.award.submission.contestsubmission.developer.user_id
     )
     assert row["seller_registration_status"] == "stuck"
     assert row["operator_actionable"] is True
@@ -181,7 +181,7 @@ def test_operator_can_retry_a_confirmed_payout_with_failed_transfer(client, cate
     queue_resp = operator.get("/api/operator/payouts?blocked_on=transfer")
     row = next(
         r for r in queue_resp.json()["items"]
-        if r["developer_user_id"] == payout.handover.award.submission.developer.user_id
+        if r["developer_user_id"] == payout.handover.award.submission.contestsubmission.developer.user_id
     )
     assert row["operator_actionable"] is True
 

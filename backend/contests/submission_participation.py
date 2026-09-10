@@ -30,8 +30,9 @@ Escrow 해제를, 이의 제기는 채점 완료와 중복 아님을). 여기 �
 
 from django.db import models
 
-from contests.models import Contest
 from core.clock import Clock
+
+from .models import Contest
 
 
 class NextAction(models.TextChoices):
@@ -49,7 +50,7 @@ class NextAction(models.TextChoices):
     # 마감 전(#245) — 예전 이름은 `AWAITING_DEADLINE`("마감 대기")이었다. 그 이름은
     # 거짓이었다: 마감 전에는 기다리는 것 말고도 할 일이 있다 — 자료와 체크리스트를
     # 고치는 것(제출 화면은 이미 기존 제출을 불러와 POST 대신 PUT을 스스로 골라
-    # 보낸다). `submissions.api.update_submission`이 거절하는 유일한 시각 조건이
+    # 보낸다). `contests.submission_api.update_submission`이 거절하는 유일한 시각 조건이
     # `_reject_if_past_deadline`(`Clock.now() >= contest.deadline_at`)이므로, 이
     # 값도 같은 조건(`now < contest.deadline_at`)에서 나와야 화면이 시키는 대로
     # 했는데 API가 거절하는 일이 없다.
@@ -57,7 +58,7 @@ class NextAction(models.TextChoices):
     # 마감 전인데 본인확인이 `verified`가 아닌 경우(#250, ADR-0025) — 가장 흔한
     # 실사용 경로는 2년 미이용으로 스캔이 신원만 파기한 `expired`다(#102). 이
     # 값을 두지 않으면 `CAN_EDIT_SUBMISSION`을 그대로 돌려주게 되는데,
-    # `submissions.api.update_submission`은 그 시각 조건(`now < deadline_at`)
+    # `contests.submission_api.update_submission`은 그 시각 조건(`now < deadline_at`)
     # 뿐 아니라 `_require_verification`도 함께 검사한다 — 조건이 갈리면 화면은
     # "수정할 수 있습니다"라고 말하고 서버는 403을 낸다(이 파일 module docstring이
     # 경계하는 바로 그 사고이자, #250 코드리뷰가 실제로 잡아낸 것이다). 자료·
@@ -100,7 +101,7 @@ def next_action_for(submission) -> str:
     호출부는 `Submission` 을 관련 객체와 함께 미리 가져와야 한다 — 이 함수는
     행마다 새 조회를 내지 않는다(목록이 N+1 이 되면 참가가 쌓일수록 느려진다).
     마감 전 분기가 보는 `developer__user__verification` 도 같은 규율이다 —
-    호출부가 select_related 로 미리 당겨 둬야 한다(`submissions.api`의
+    호출부가 select_related 로 미리 당겨 둬야 한다(`contests.submission_api`의
     `get_my_submission`·`get_submission`·`list_my_participation` 참고).
     """
 
@@ -108,7 +109,7 @@ def next_action_for(submission) -> str:
     now = Clock.now()
 
     # 마감 전 — 아직 제출물을 고칠 수 있다(#245)... **단, 본인확인이 열려
-    # 있을 때만이다(#250).** `submissions.api.update_submission`이 시각
+    # 있을 때만이다(#250).** `contests.submission_api.update_submission`이 시각
     # 조건(`_reject_if_past_deadline`)과 `_require_verification`을 **함께**
     # 검사하므로, 이 함수도 같은 두 조건을 함께 봐야 한다 — 하나만 보면
     # 화면은 "수정할 수 있습니다"라고 말하고 서버는 403을 낸다. 조건은

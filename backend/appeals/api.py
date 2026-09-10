@@ -41,10 +41,10 @@ from ninja.errors import HttpError
 from ninja.pagination import PageNumberPagination, paginate
 
 from accounts.middleware import jwt_auth
+from contests.models import ContestSubmission
 from core.clock import Clock
 from distributions.services import is_holding_distribution
 from core.operator_auth import OperatorAuth
-from submissions.models import Submission
 from submissions.scored_assets import resolve_scored_assets
 from submissions.scoring_basis import scoring_basis_for
 
@@ -88,12 +88,12 @@ def _serialize(appeal: Appeal) -> AppealOut:
     )
 
 
-def _get_owned_submission(request: HttpRequest, submission_id: int) -> Submission:
+def _get_owned_submission(request: HttpRequest, submission_id: int) -> ContestSubmission:
     try:
-        submission = Submission.objects.select_related("developer", "contest").get(
+        submission = ContestSubmission.objects.select_related("developer", "contest").get(
             id=submission_id
         )
-    except Submission.DoesNotExist as exc:
+    except ContestSubmission.DoesNotExist as exc:
         raise HttpError(404, "제출물을 찾을 수 없습니다.") from exc
 
     if submission.developer.user_id != request.auth_user.id:
@@ -190,7 +190,7 @@ def list_own_source_readings(request: HttpRequest, submission_id: int, **kwargs)
 def _get_appeal_or_404(appeal_id: int) -> Appeal:
     try:
         return Appeal.objects.select_related(
-            "submission__score", "submission__contest", "ruling__ruled_by"
+            "submission__score", "submission__contestsubmission__contest", "ruling__ruled_by"
         ).get(id=appeal_id)
     except Appeal.DoesNotExist as exc:
         raise HttpError(404, "이의제기를 찾을 수 없습니다.") from exc

@@ -40,7 +40,7 @@ from contests.models import Category, DeliverableType
 from scoring.models import Score, ScoringAttempt
 from storage.adapters.fake import FakeStorageAdapter
 from submissions.models import Submission, SubmissionAsset
-from submissions.target_refs import source_target_ref
+from contests.submission_target_refs import source_target_ref
 
 from tests.test_assignment_source_readings import (
     _create_and_open_assignment,

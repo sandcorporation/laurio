@@ -59,14 +59,15 @@ from django.db import IntegrityError, transaction
 from django.db.models import Count, Exists, OuterRef, Q, Subquery
 from django.db.models.functions import Coalesce
 
-from contests.models import Contest, Requirement
+from contests.models import Contest, ContestSubmission, Requirement
+from contests.submission_target_refs import source_target_ref
 from core.clock import Clock
 from core.prompt_safety import neutralize_untrusted as _neutralize_untrusted
 from core.scans import ScanSpec
 from repositories.adapters import ClonedRepository, get_github_adapter
 from repositories.models import RepositorySnapshot
 from storage.adapters import StorageAdapterError, get_storage_adapter
-from submissions.models import RequirementResponse, Submission, SubmissionAsset
+from submissions.models import RequirementResponse, SubmissionAsset
 # 아래 두 상수는 재노출이다 — 원본은 `submissions.scoring_basis`에 있다(#246
 # 모듈 docstring 참고). 이름을 그대로 다시 import해 `scoring.services.
 # NO_SCORING_INPUT_MODEL_VERSION`처럼 기존 경로로도 계속 접근할 수 있게 한다.
@@ -74,7 +75,6 @@ from submissions.scoring_basis import (
     NO_SCORING_INPUT_MODEL_VERSION,
     PLATFORM_FAILURE_MODEL_VERSION,
 )
-from submissions.target_refs import source_target_ref
 
 from .adapters import LLMAdapterPermanentError, RequirementInput, ScoringInput, get_adapter
 from .models import Score, ScoringAttempt
@@ -87,7 +87,7 @@ logger = logging.getLogger(__name__)
 # (#12 리뷰 지적 9의 동작을 바꾸지 않는다).
 
 
-def _requirement_inputs(submission: Submission) -> list[RequirementInput]:
+def _requirement_inputs(submission: ContestSubmission) -> list[RequirementInput]:
     requirements = list(
         Requirement.objects.filter(contest_id=submission.contest_id).order_by("order", "id")
     )
@@ -286,7 +286,7 @@ _PLATFORM_FAILURE_REASONING = (
 )
 
 
-def _all_unmet_reasoning(submission: Submission, *, reasoning: str) -> list[dict]:
+def _all_unmet_reasoning(submission: ContestSubmission, *, reasoning: str) -> list[dict]:
     """자동 미달 Score의 Requirement별 판정 근거 — 전부 미달, 이유는 모두 같다.
 
     ADR-0030(#218, 채점 입력 없음)과 ADR-0031(#222, 채점 실패 상한)이 이 모양을
@@ -303,7 +303,7 @@ def _all_unmet_reasoning(submission: Submission, *, reasoning: str) -> list[dict
 
 
 def _finalize_score(
-    submission: Submission,
+    submission: ContestSubmission,
     *,
     percentage: Decimal,
     model_version: str,
@@ -437,7 +437,7 @@ def _live_repository_reachability(
 
 
 def _archive_cloned_repository(
-    submission: Submission, asset: SubmissionAsset, cloned: ClonedRepository
+    submission: ContestSubmission, asset: SubmissionAsset, cloned: ClonedRepository
 ) -> dict:
     """clone된 저장소 zip을 그대로 소스 자료로 박제한다 (#220, ADR-0030).
 
@@ -486,7 +486,7 @@ SCORING_FAILURE_LIMIT = 5
 SCORING_FAILURE_GRACE = timedelta(hours=6)
 
 
-def _scoring_cap_reached(submission: Submission, *, as_of) -> bool:
+def _scoring_cap_reached(submission: ContestSubmission, *, as_of) -> bool:
     """실패 상한(#222, ADR-0031)에 이르렀는가 — 영구 실패가 하나라도 있으면 유예 없이
     즉시 True다. 아니면 실패 횟수가 `SCORING_FAILURE_LIMIT`에 이르고 **동시에**
     마감 후 `SCORING_FAILURE_GRACE`가 지났을 때만 True다.
@@ -524,7 +524,7 @@ def _contest_already_settled(contest: Contest) -> bool:
     return hasattr(contest, "award") or hasattr(contest, "distribution")
 
 
-def score_submission_once(submission: Submission, as_of) -> dict:
+def score_submission_once(submission: ContestSubmission, as_of) -> dict:
     """이 Submission을 정확히 한 번만 채점한다. 이미 Score가 있으면 그대로 돌아온다.
 
     이 함수는 절대 예외를 밖으로 던지지 않는다(모듈 docstring 참고) — 모든 실패는
@@ -846,7 +846,7 @@ def score_submission_once(submission: Submission, as_of) -> dict:
     )
 
 
-def _notify_scored(submission: Submission) -> None:
+def _notify_scored(submission: ContestSubmission) -> None:
     """채점 완료를 Developer 에게 알린다 — 어떤 예외도 호출자에게 전파하지 않는다."""
 
     try:
@@ -952,7 +952,7 @@ def _pending_submissions(as_of, ctx):
     )
 
     return (
-        Submission.objects.filter(
+        ContestSubmission.objects.filter(
             contest__status__in=Contest.Status.SCOREABLE.statuses,
             score__isnull=True,
         )

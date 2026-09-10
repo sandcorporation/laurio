@@ -36,7 +36,7 @@ from django.utils import timezone
 
 from accounts.models import DeveloperProfile, SocialAccount, SponsorProfile
 from awards.models import Award
-from contests.models import Category, Contest, DeliverableType, Requirement
+from contests.models import Category, Contest, ContestSubmission, DeliverableType, Requirement
 from core.management.stdout_utf8 import write_stdout_utf8
 from ledger.models import hard_delete_e2e_fixture_rows
 from scoring.models import Score
@@ -267,7 +267,12 @@ class Command(BaseCommand):
         # 아니므로 노출해도 된다(submissions.schemas.EvidenceOut 이 이미 그렇게
         # 설계돼 있다) — source_object_key(전체 소스) sentinel 과는 다른 것을
         # 분명히 하려고 일부러 같은 테스트에서 둘 다 심는다.
-        submission_a = Submission.objects.create(contest=judging, developer=developer_a)
+        submission_a = ContestSubmission.objects.create(
+            user=developer_a.user,
+            product=Submission.Product.CONTEST,
+            contest=judging,
+            developer=developer_a,
+        )
         SubmissionAsset.objects.create(
             submission=submission_a,
             kind=SubmissionAsset.Kind.SOURCE,
@@ -297,7 +302,12 @@ class Command(BaseCommand):
         # Submission B — 두 Requirement 모두 자가 응답 자체가 없다. "증거가 없는
         # 칸이 즉시 구분된다"는 인수조건은 Evidence 만 비어있는 경우와, 응답
         # 자체가 없는 경우를 둘 다 커버해야 한다.
-        submission_b = Submission.objects.create(contest=judging, developer=developer_b)
+        submission_b = ContestSubmission.objects.create(
+            user=developer_b.user,
+            product=Submission.Product.CONTEST,
+            contest=judging,
+            developer=developer_b,
+        )
         SubmissionAsset.objects.create(
             submission=submission_b,
             kind=SubmissionAsset.Kind.SOURCE,
@@ -336,7 +346,12 @@ class Command(BaseCommand):
         # 가 API 응답 객체를 통째로 넘기는 실수를 하면 이 값이 SSR HTML 에 그대로
         # 샐 수 있다 — 그 실수를 잡는 게 이 sentinel 의 목적이다.
         developer = self._seed_developer()
-        archived = Submission.objects.create(contest=closed, developer=developer)
+        archived = ContestSubmission.objects.create(
+            user=developer.user,
+            product=Submission.Product.CONTEST,
+            contest=closed,
+            developer=developer,
+        )
         SubmissionAsset.objects.create(
             submission=archived,
             kind=SubmissionAsset.Kind.SOURCE,
@@ -354,7 +369,12 @@ class Command(BaseCommand):
             test_account=SENSITIVE_TEST_ACCOUNT,
         )
         # 아직 마감되지 않은 Contest 에 낸 Submission — 프로필에 나타나면 안 된다.
-        ongoing = Submission.objects.create(contest=funded, developer=developer)
+        ongoing = ContestSubmission.objects.create(
+            user=developer.user,
+            product=Submission.Product.CONTEST,
+            contest=funded,
+            developer=developer,
+        )
         SubmissionAsset.objects.create(
             submission=ongoing,
             kind=SubmissionAsset.Kind.SOURCE,
@@ -459,7 +479,7 @@ class Command(BaseCommand):
         # 명령 자신의 재현 가능한 시드 데이터일 뿐이라 지워도 ADR-0006 이 지키려는
         # 실데이터 감사 추적에 해당하지 않는다 — `hard_delete_e2e_fixture_rows`가 그
         # 좁은 우회를 명시적으로 허락한다.
-        hard_delete_e2e_fixture_rows(Score.objects.filter(submission__contest__title__startswith=stem))
+        hard_delete_e2e_fixture_rows(Score.objects.filter(submission__contestsubmission__contest__title__startswith=stem))
         removed, _ = Contest.objects.filter(title__startswith=stem).delete()
         # **`e2e-` 로 뭉뚱그리지 않는다.** 그렇게 하면 운영자 시드가 만든 계정까지
         # 잡히는데, 그 계정들은 `AppealRuling.ruled_by`·`PolicyChange.operator` 가
@@ -493,7 +513,7 @@ class Command(BaseCommand):
         # `Score.submission` 도 PROTECT 다(#240, 위 `_prune_all_namespaces` 와 같은 이유) —
         # 심사 픽스처가 실제 Score 를 심으므로 Contest 를 지우기 전에 먼저 지운다.
         hard_delete_e2e_fixture_rows(
-            Score.objects.filter(submission__contest__title__startswith=self.prefix)
+            Score.objects.filter(submission__contestsubmission__contest__title__startswith=self.prefix)
         )
         # 다른 스펙이 런타임에 만드는 Contest(submit/upload/grill)도 제목에 이 접두어를
         # 달아 여기서 함께 정리된다(#39). 접두어가 없던 시절에는 스위트를 돌릴 때마다
@@ -661,8 +681,8 @@ class Command(BaseCommand):
         contest: Contest,
         *,
         requirements: list[Requirement],
-        submission_a: Submission,
-        submission_b: Submission,
+        submission_a: ContestSubmission,
+        submission_b: ContestSubmission,
         developer_a: DeveloperProfile,
         developer_b: DeveloperProfile,
     ) -> dict:

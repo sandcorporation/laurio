@@ -107,7 +107,12 @@ _Avoid_: 조회 로그, 접근 기록, 감사 로그(감사 대상 전체를 가
 ### 제출과 선정
 
 **Submission**:
-한 Developer가 한 Contest에 낸 결과물 일체 — SubmissionAsset 목록과 Requirement 자가 응답. 한 Contest가 요구하는 산출물이 여럿일 수 있으므로(DeliverableType은 복수 선택된다) 자료도 종류마다 여럿이다.
+공모전과 강의실이 나눠 쓰는 제출의 **부모**(ADR-0039) — 누가 냈는가(User)와 언제 냈는가, 그리고 SubmissionAsset 목록·Requirement 자가 응답이 매달리는 자리만 든다. 제품별 계약(공모전은 Contest·Developer 짝과 그 유니크 제약)은 자식이 각자 든다 — 이 낱말 하나가 "한 Developer가 한 Contest에 낸 결과물 일체"를 뜻하던 시절이 있었지만, 강의실의 문제 제출(마감도 재도전 횟수 제한도 없다)이 같은 제약을 지지 않으면서 부모·자식으로 갈렸다. 자식 없는 부모 행은 만들어지지 않는다 — 생성 경로가 자식에서만 열려 있다.
+_화면에서_: 「제출물」
+_Avoid_: 출품작, Entry, Work, Proposal
+
+**ContestSubmission**:
+Submission의 공모전 자식 — 한 Developer가 한 Contest에 낸 결과물 일체다. `contest`·`developer` FK와 그 짝의 유니크 제약(한 Developer가 한 Contest에 낼 수 있는 것은 하나뿐이다, 두 번째는 새 행이 아니라 기존 행의 수정이다)을 든다. 자료(SubmissionAsset)·자가 응답은 부모 쪽 것을 그대로 물려받는다 — 한 Contest가 요구하는 산출물이 여럿일 수 있으므로(DeliverableType은 복수 선택된다) 자료도 종류마다 여럿이다.
 _화면에서_: 「제출물」
 _Avoid_: 출품작, Entry, Work, Proposal
 

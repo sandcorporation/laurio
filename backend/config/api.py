@@ -11,6 +11,7 @@ from awards.api import router as awards_router
 from contests.api import router as contests_router
 from contests.assignment_api import router as assignments_router
 from contests.operator_api import operator_router as contests_operator_router
+from contests.submission_api import router as submissions_router
 from core.api import router as core_internal_router
 from handovers.api import router as handovers_router
 from ledger.api import router as ledger_router
@@ -23,7 +24,6 @@ from policies.api import operator_router as policies_operator_router
 from scoring.api import router as scoring_internal_router
 from storage.api import router as storage_router
 from storage.policy import StorageAccessDenied
-from submissions.api import router as submissions_router
 from verification.api import router as verification_router
 from verification.operator_api import operator_router as verification_operator_router
 

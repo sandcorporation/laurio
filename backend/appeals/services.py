@@ -51,14 +51,14 @@ def uphold_appeal(
         updated = Appeal.objects.filter(pk=appeal.pk, status=Appeal.Status.PENDING).update(
             status=Appeal.Status.UPHELD
         )
-        appeal = Appeal.objects.select_related("submission__contest").get(pk=appeal.pk)
+        appeal = Appeal.objects.select_related("submission__contestsubmission__contest").get(pk=appeal.pk)
 
         if updated != 1:
             # 이미 인용·기각되어 있다 — 재전송이거나 경합에서 졌다. 원장에는
             # 이미 반영되어 있거나(먼저 인용됐다면) 애초에 없어야 한다(기각됐다면).
             return appeal
 
-        contest = appeal.submission.contest
+        contest = appeal.submission.contestsubmission.contest
         entry = post_journal_entry(
             contest_id=contest.ledger_id,
             memo=(
@@ -144,7 +144,7 @@ def _notify_ruled(appeal: Appeal) -> None:
 
         ruling = getattr(appeal, "ruling", None)
         create_notification(
-            recipient=appeal.submission.developer.user,
+            recipient=appeal.submission.contestsubmission.developer.user,
             notification_type=NotificationType.APPEAL_RULED,
             context={
                 "appeal_id": appeal.id,

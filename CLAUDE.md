@@ -290,7 +290,8 @@ Contest 전이 그래프를 한 곳에 선언하고 선언 밖을 정적으로 �
 시연 영상을 보존 기간 뒤 파기하고(#262) · 스크린샷을 자료 종류로 세우고(#264) · 심사
 비교와 공개 프로필이 영상·스크린샷을 실제로 열게 한 것(#265)으로, 옛 자료의 다운로드
 확장자를 되돌리는 백필과 과제 소스 파일명에 제출자 이름을 붙인 것(#268 후속)으로
-1640건까지, 앱 경계를 테스트로 세운 것(#269)으로 1659건까지
+1640건까지, 앱 경계를 테스트로 세운 것(#269)으로 1659건까지, 제출물을 공통 부모와
+공모전 자식으로 쪼갠 것(#270)으로 1661건까지
 여기까지 늘었다) `-n 4` 84초 → `-n auto` 57초.
 직렬로 보려면 `-n 0`.
 
@@ -323,11 +324,12 @@ cd backend && LAURIO_DB_PORT=55432 uv run pytest
   `import` 든 Django 가 import 없이 앱을 묶는 길(`ForeignKey("contests.Contest")` 꼴
   문자열·`apps.get_model`)이든 걸린다. 표시로 열 수 있는 문이 하나라도 있으면 마감에
   몰린 사람이 그 문을 쓴다.
-- **공유층**(`accounts`·`core`·`policies`·`storage`·`notifications`)**이 기능 앱을
-  부르면 막히되, 같은 줄이나 바로 앞 줄의 `APP-BOUNDARY-EXCEPTION: <이유>` 로 열린다**
-  — **이유가 비면 표시 자체가 실패한다**(`scripts/check_screen_language.py` 와 같은
-  관용구). 지금 **25곳**이고 대부분 순환을 끊으려 일부러 함수 안에 넣은 지연 import 라,
-  이 티켓은 지우지 않고 사유를 적어 세어지게만 했다.
+- **공유층**(`accounts`·`core`·`policies`·`storage`·`notifications`·`submissions`,
+  #270 이 마지막을 더했다)**이 기능 앱을 부르면 막히되, 같은 줄이나 바로 앞 줄의
+  `APP-BOUNDARY-EXCEPTION: <이유>` 로 열린다** — **이유가 비면 표시 자체가
+  실패한다**(`scripts/check_screen_language.py` 와 같은 관용구). 지금 **28곳**이고
+  대부분 순환을 끊으려 일부러 함수 안에 넣은 지연 import 라, 이 티켓은 지우지 않고
+  사유를 적어 세어지게만 했다.
   `grep -rn "APP-BOUNDARY-EXCEPTION" backend/` 로 나오는 그 숫자가 경계의 건강
   지표다 — 늘면 공유층이 기능으로 오염되는 중이라는 뜻이다.
 

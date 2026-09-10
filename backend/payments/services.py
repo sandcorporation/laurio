@@ -20,10 +20,9 @@ from __future__ import annotations
 
 from django.db import transaction
 
-from contests.models import Contest
+from contests.models import Contest, ContestSubmission
 from ledger.models import Account, EntrySide
 from ledger.services import LineInput, post_journal_entry
-from submissions.models import Submission
 
 from core.scans import ScanSpec, scan_params
 
@@ -282,7 +281,7 @@ def _eligible_contests():
     # refund_disabled인 Contest는 제외한다(#13이 만든 필드의 유일한 소비처) — REQUEST.md:
     # 유료 연장 2회 이상이면 환불 불가로 영구 확정된다. 이 플래그가 True인 Contest는 설령
     # 참여자가 0명이어도 이 경로로 환불하지 않는다.
-    contests_with_submissions = Submission.objects.values_list("contest_id", flat=True)
+    contests_with_submissions = ContestSubmission.objects.values_list("contest_id", flat=True)
     return Contest.objects.filter(
         status__in=Contest.Status.REFUNDABLE.statuses,
         refund_disabled=False,

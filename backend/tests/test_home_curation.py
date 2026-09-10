@@ -581,8 +581,7 @@ def test_demo_seed_gives_every_contest_entrants(db, client):
 
     from django.core.management import call_command
 
-    from contests.models import Contest
-    from submissions.models import Submission
+    from contests.models import Contest, ContestSubmission
 
     call_command("seed_demo_contests", verbosity=0)
 
@@ -592,7 +591,7 @@ def test_demo_seed_gives_every_contest_entrants(db, client):
         assert contest.submissions.exists(), f"{contest.title} 에 참가작이 없다"
 
     closed = demo.filter(status=Contest.Status.CLOSED).first()
-    submission = Submission.objects.filter(contest=closed).first()
+    submission = ContestSubmission.objects.filter(contest=closed).first()
     body = client.get(f"/api/submissions/{submission.pk}").json()
 
     # 마감 후에도 소스와 테스트 계정은 소유자 본인에게만 보인다(ADR-0014) —
@@ -623,7 +622,7 @@ def test_demo_seed_awarded_contest_actually_has_an_award(db):
     ):
         award = Award.objects.filter(contest=contest).first()
         assert award is not None, f"{contest.title} 이 AWARDED 인데 Award 가 없다"
-        assert award.submission.contest_id == contest.pk
+        assert award.submission.contestsubmission.contest_id == contest.pk
 
 
 def _demo_auth_header(user_id: int) -> dict:
@@ -726,15 +725,14 @@ def test_demo_seed_developer_can_reach_submission_edit_screen(db, client):
 
     from django.core.management import call_command
 
-    from contests.models import Contest
-    from submissions.models import Submission
+    from contests.models import Contest, ContestSubmission
 
     call_command("seed_demo_contests", verbosity=0)
 
     contest = Contest.objects.filter(
         title__startswith="[데모] ", status=Contest.Status.PUBLISHED
     ).first()
-    submission = Submission.objects.filter(contest=contest).first()
+    submission = ContestSubmission.objects.filter(contest=contest).first()
     headers = _demo_auth_header(submission.developer.user_id)
 
     existing = client.get(
@@ -845,13 +843,12 @@ def test_each_bucket_query_matches_home_bucket_for_at_every_boundary(
 
 
 def _open_demo_contest_and_submission():
-    from contests.models import Contest
-    from submissions.models import Submission
+    from contests.models import Contest, ContestSubmission
 
     contest = Contest.objects.filter(
         title__startswith="[데모] ", status=Contest.Status.PUBLISHED
     ).first()
-    submission = Submission.objects.filter(contest=contest).first()
+    submission = ContestSubmission.objects.filter(contest=contest).first()
     return contest, submission
 
 
@@ -964,13 +961,14 @@ def test_demo_asset_values_come_from_the_real_upload_rule(db):
 
     from django.core.management import call_command
 
-    from submissions.models import Submission, SubmissionAsset
-    from submissions.target_refs import target_ref_for_asset_kind
+    from contests.models import ContestSubmission
+    from contests.submission_target_refs import target_ref_for_asset_kind
+    from submissions.models import SubmissionAsset
 
     call_command("seed_demo_contests", verbosity=0)
 
     checked = 0
-    for submission in Submission.objects.select_related("contest", "developer").all():
+    for submission in ContestSubmission.objects.select_related("contest", "developer").all():
         for asset in SubmissionAsset.objects.filter(submission=submission):
             expected = target_ref_for_asset_kind(
                 asset.kind,
@@ -999,7 +997,7 @@ def test_demo_seed_writes_the_objects_it_points_at(db):
 
     from storage.adapters import get_storage_adapter
     from submissions.models import Submission, SubmissionAsset
-    from submissions.target_refs import SLOT_BY_ASSET_KIND
+    from contests.submission_target_refs import SLOT_BY_ASSET_KIND
 
     call_command("seed_demo_contests", verbosity=0)
 
@@ -1047,7 +1045,7 @@ def test_demo_submissions_get_a_real_score_not_a_platform_failure(db, client):
     assert response.status_code == 200, response.content
 
     scores = list(
-        Score.objects.filter(submission__contest__in=scoreable).values_list(
+        Score.objects.filter(submission__contestsubmission__contest__in=scoreable).values_list(
             "model_version", flat=True
         )
     )
@@ -1091,7 +1089,7 @@ def test_demo_assets_carry_readable_labels(db):
     from django.core.management import call_command
 
     from submissions.models import SubmissionAsset
-    from submissions.target_refs import SLOT_BY_ASSET_KIND
+    from contests.submission_target_refs import SLOT_BY_ASSET_KIND
 
     call_command("seed_demo_contests", verbosity=0)
 
@@ -1125,7 +1123,7 @@ def test_demo_scores_are_not_all_zero(db, client):
     percentages = {
         str(p)
         for p in Score.objects.filter(
-            submission__contest__title__startswith="[데모] "
+            submission__contestsubmission__contest__title__startswith="[데모] "
         ).values_list("percentage", flat=True)
     }
     assert percentages, "데모 채점이 하나도 없다"

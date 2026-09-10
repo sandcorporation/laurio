@@ -306,8 +306,8 @@ fake 이거나 임포트되지 않으면 부팅 자체를 거부한다** — 컨
 | --- | --- |
 | `accounts` | SocialAccount · SponsorProfile · DeveloperProfile · PhoneContact · RefreshToken · BlacklistedToken · Withdrawal · AssignmentPermissionChange |
 | `verification` | Verification · VerificationRequest · RetainedIdentity · IdentityReading |
-| `contests` | Contest · Category · DeliverableType · Requirement · ContestImage · InviteCode · RequirementChatMessage · JudgingExtensionPayment · 변경 이력 셋 |
-| `submissions` | Submission · SubmissionAsset · RequirementResponse · Evidence · AssignmentSourceReading |
+| `contests` | Contest · Category · DeliverableType · Requirement · ContestImage · InviteCode · RequirementChatMessage · JudgingExtensionPayment · ContestSubmission(#270, `submissions.Submission`의 공모전 자식) · 변경 이력 셋 |
+| `submissions`(공유층 — #270, ADR-0039) | Submission(부모) · SubmissionAsset · RequirementResponse · Evidence · AssignmentSourceReading |
 | `scoring` | Score · ScoringAttempt |
 | `repositories` | RepositorySnapshot |
 | `awards` · `handovers` | Award · Handover · BuildAsset |
