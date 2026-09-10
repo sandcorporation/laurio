@@ -147,6 +147,18 @@ export default async function ContestDetailPage({ params }: { params: Promise<Pa
           다시 구현하지 않는다 — 이미 제출한 사람에게도 같은 링크가 맞다(그
           화면이 수정도 겸한다). 다만 문구는 다르다(#245) — 누르면 자기가 낸
           것을 덮어쓴다는 것이 눌리기 전에 드러나야 한다. */}
+      {/* 마감 뒤에도 이 CTA 를 "제출물 보기"로 남기지 않기로 정했다(#258).
+          이 페이지는 SSR 공개 표면이라 `ContestOut` 에 `next_action` 이 없고
+          (`is_owner`·`has_own_submission` 둘뿐, ADR-0015), `SubmitCta` 는
+          "제출하러/수정하러 가기" 둘 중 하나만 말할 수 있다 — 마감 뒤에도
+          이 조건 그대로 노출하면 채점 대기·이의 기간처럼 실제로는 고칠 수
+          없는 상태에서 "제출물 수정하러 가기"라고 말하게 되어, 이 티켓이
+          「내 참가 현황」에서 고친 바로 그 거짓말을 여기서 다시 만든다.
+          `next_action` 기반 문구를 여기 들이려면 공개 스키마에 인증
+          구역에서만 뜻이 있는 값을 얹어야 하는데, 그건 이 티켓의 울타리
+          (진입점만 고친다) 밖이다. 로그인한 참가자에게는 「내 참가 현황」이
+          이미 정확한 문구로 같은 화면을 연결하므로, 공개 상세는 마감 전
+          진입점 하나로 남긴다. */}
       {contest.status === "published" && (
         <section className="border-b border-rule pb-6">
           <SubmitCta contestId={contest.id} />

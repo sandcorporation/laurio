@@ -113,42 +113,47 @@ function ParticipationCard({ row }: { row: ParticipationRow }) {
         {new Date(row.deadline_at).toLocaleString("ko-KR")}
       </p>
 
-      {/* 자기 제출로 돌아가는 길 (#245) — 「내 참여」에 이 링크가 없어서 제출
-          화면에 도달할 방법이 공개 상세의 CTA(공모전에만 있다)뿐이었다.
-          「지금 고칠 수 있는가」를 여기서 시각으로 다시 재는 대신 서버가 준
-          `next_action`을 그대로 쓴다 — `can_edit_submission`은
-          `_reject_if_past_deadline`과 같은 조건(`now < deadline_at`)에서
-          나온다(submissions/participation.py). 마감이 지나면 이 링크가
-          사라지고, 그 대신 위 「다음 행동」 문구가 왜 없는지를 말한다(예:
-          "채점을 기다리는 중입니다") — 사라지기만 하면 기능이 없어진 것으로
-          보인다는 것이 이 티켓의 인수조건이다.
+      {/* 자기 제출로 돌아가는 길 (#245, #258) — 「내 참여」에 이 링크가 없어서
+          제출 화면에 도달할 방법이 공개 상세의 CTA(공모전에만, 그리고
+          `published` 상태에만 있다)뿐이었다. **모든 행에 건다** — 아래 「채점
+          결과 보기」와 같은 이유다: 마감 뒤(채점 대기·이의 기간·미선정·배분·
+          지급·지급 완료)에도 자기 제출물은 읽을 수 있고(백엔드가 이미
+          `_serialize`에서 `past_deadline`으로 그 얼굴을 결정한다,
+          `submissions/api.py`), 제출 화면 자체가 마감 뒤에는 읽기 전용으로
+          서므로(`canEdit`) 저장 경로가 열릴 위험은 없다. #245 가 이 링크를
+          `can_edit_submission`로 좁혔던 것은 「수정 어포던스」를 없애려던
+          것이었는데, 링크가 하나뿐이어서 읽기까지 같이 사라진 누락이었다
+          (#258).
+
+          「지금 고칠 수 있는가」를 여기서 시각으로 다시 재지 않는다 — 서버가
+          준 `next_action`만 본다(`can_edit_submission`은
+          `_reject_if_past_deadline`과 같은 조건, `submissions/
+          participation.py`). 문구만 그 값으로 갈린다: 실제로 고칠 수 있을
+          때만 "수정하러"라고 말하고, `needs_reverification`(#250, 마감 전인데
+          본인확인이 풀린 상태)은 본인확인이 먼저라고 말하고, 그 밖의 모든
+          값(채점 대기부터 지급 완료까지)은 "내 제출물 보기"다.
+
           Assignment 행은 URL이 다르다 — `invite_code`가 있으면(#245,
           `MyParticipationOut.resolve_invite_code`) 본인확인을 요구하는
           `/console/contests/{id}/submit` 대신 InviteCode로만 여는
-          `/assignments/{code}`로 보낸다.
-
-          **`needs_reverification`(#250)도 이 링크를 켠다.** 마감 전인데
-          본인확인이 `verified`가 아닌 상태(신원 파기 `expired`가 가장 흔한
-          경로, ADR-0025)는 수정은 아직 못 해도 제출물 자체는 읽을 수 있고
-          (#250이 연 바로 그 경로) 그 화면에서 본인확인으로 가는 길도 준다 —
-          거기서도 이 링크가 사라지면 「내 참여」가 유일한 진입점을 끊는
-          꼴이다. 문구만 갈린다: 실제로 고칠 수 있을 때만 "수정하러"라고
-          말한다. */}
-      {row.next_action === "can_edit_submission" || row.next_action === "needs_reverification" ? (
-        <Link
-          className="mt-2 block text-sm underline"
-          href={
-            row.invite_code
-              ? `/assignments/${row.invite_code}`
-              : `/console/contests/${row.contest_id}/submit`
-          }
-          data-testid={`participation-row-${row.submission_id}-edit`}
-        >
-          {row.next_action === "needs_reverification"
+          `/assignments/{code}`로 보낸다 — 그 화면도 같은 `next_action`으로
+          마감 뒤 읽기 전용으로 서므로(`app/assignments/[code]/page.tsx`의
+          `canEdit`) 똑같이 모든 행에 걸 수 있다. */}
+      <Link
+        className="mt-2 block text-sm underline"
+        href={
+          row.invite_code
+            ? `/assignments/${row.invite_code}`
+            : `/console/contests/${row.contest_id}/submit`
+        }
+        data-testid={`participation-row-${row.submission_id}-edit`}
+      >
+        {row.next_action === "can_edit_submission"
+          ? "제출물 수정하러 가기"
+          : row.next_action === "needs_reverification"
             ? "내 제출물 보기 (본인확인 필요)"
-            : "제출물 수정하러 가기"}
-        </Link>
-      ) : null}
+            : "내 제출물 보기"}
+      </Link>
 
       {/* **모든 행에 건다.** 「채점됐을 때만」으로 좁히면 서버가 이미 내린 판정을
           화면이 다시 파생하는 것이고, 이의가 기각된 사람은 자기 점수를 다시 볼
