@@ -58,6 +58,20 @@ _KNOWN_EXTENSIONS: dict[str, str] = {
 }
 
 
+def is_unknown_content_type(content_type: str | None) -> bool:
+    """이 값이 형식을 말해 주지 않는가 (#268 후속).
+
+    백필(`storage.management.commands.backfill_asset_content_types`)이 스토리지에
+    기록된 형식을 쓸지 바이트로 판정할지 가를 때 이 판정을 쓴다 — 여기와 저기가
+    "모른다"의 목록을 따로 들면, 백필이 `application/octet-stream` 을 채워 넣고
+    이 파일이 그걸 다시 "모른다"로 읽는 어긋남이 생긴다.
+    """
+
+    if not content_type:
+        return True
+    return content_type.split(";", 1)[0].strip().lower() in _UNKNOWN_CONTENT_TYPES
+
+
 def _extension_for(content_type: str | None) -> str:
     if not content_type:
         return ""

@@ -162,6 +162,24 @@ class StorageAdapter(Protocol):
         """
         ...
 
+    def read_object_content_type(
+        self, object_key: str, *, bucket: Bucket = Bucket.PRIVATE
+    ) -> str | None:
+        """오브젝트에 **기록되어 있는** content-type. 없거나 오브젝트가 없으면 None.
+
+        업로드는 브라우저가 직접 하므로(ADR-0005) 스토리지에는 그때 브라우저가
+        보낸 형식이 남아 있다 — 우리 DB 의 `SubmissionAsset.content_type` 이 비어
+        있어도(#241 이전 행) 스토리지 쪽은 알고 있는 경우가 있다. staging 실측:
+        평문 파이썬 소스 3건이 `text/x-python` 으로 남아 있었고, 매직 바이트만
+        보던 백필은 그걸 통째로 버리고 있었다.
+
+        **새 능력이 아니라 좁은 읽기다.** `read_object` 를 부를 수 있는 쪽은 이미
+        같은 응답에서 이 값을 함께 받는다 — 바이트를 안 받고 형식만 묻는 길을
+        따로 열어 둘 뿐이다(ADR-0035 가 삭제 하나만 열며 세운 규율은 **쓰기**를
+        좁힌 것이고, 이쪽은 이미 가진 읽기보다 작다).
+        """
+        ...
+
     def write_object(
         self,
         object_key: str,

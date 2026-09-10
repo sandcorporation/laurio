@@ -183,6 +183,19 @@ class S3StorageAdapter:
             raise
         return response["Body"].read()
 
+    def read_object_content_type(
+        self, object_key: str, *, bucket: Bucket = Bucket.PRIVATE
+    ) -> str | None:
+        # head_object 는 바이트를 받지 않는다 — 형식만 묻는 데 본문을 끌어올 이유가 없다.
+        try:
+            response = self._client.head_object(Bucket=self._bucket_name(bucket), Key=object_key)
+        except ClientError as exc:
+            error_code = exc.response.get("Error", {}).get("Code", "")
+            if error_code in {"NoSuchKey", "404"}:
+                return None
+            raise
+        return response.get("ContentType") or None
+
     def write_object(
         self,
         object_key: str,

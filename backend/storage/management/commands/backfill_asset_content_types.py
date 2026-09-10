@@ -26,6 +26,7 @@ from __future__ import annotations
 from django.core.management.base import BaseCommand
 
 from storage.adapters import get_storage_adapter
+from storage.filenames import is_unknown_content_type
 from storage.sniffing import SNIFF_BYTES, sniff_content_type
 from submissions.models import SubmissionAsset
 
@@ -55,12 +56,21 @@ class Command(BaseCommand):
         unknown = 0
 
         for asset in targets.iterator():
-            head = adapter.read_object(asset.value, max_bytes=SNIFF_BYTES)
-            if head is None:
+            recorded = adapter.read_object_content_type(asset.value)
+            content_type = None if is_unknown_content_type(recorded) else recorded
+
+            if content_type is None:
+                head = adapter.read_object(asset.value, max_bytes=SNIFF_BYTES)
+                if head is None:
+                    missing += 1
+                    continue
+                content_type = sniff_content_type(head)
+            elif adapter.read_object(asset.value, max_bytes=1) is None:
+                # 형식은 알려주는데 바이트가 없는 경우는 없어야 하지만, 있다면
+                # 그건 채울 대상이 아니라 "오브젝트가 없다"쪽이다.
                 missing += 1
                 continue
 
-            content_type = sniff_content_type(head)
             if content_type is None:
                 unknown += 1
                 self.stderr.write(f"형식을 알 수 없다: 자료 {asset.id} ({asset.kind})")

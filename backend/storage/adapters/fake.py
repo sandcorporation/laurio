@@ -128,6 +128,13 @@ class FakeStorageAdapter:
             return content
         return content[:max_bytes]
 
+    def read_object_content_type(
+        self, object_key: str, *, bucket: Bucket = Bucket.PRIVATE
+    ) -> str | None:
+        if (bucket, object_key) not in self._store:
+            return None
+        return self._content_types.get((bucket, object_key)) or None
+
     def write_object(
         self,
         object_key: str,

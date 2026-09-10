@@ -160,3 +160,48 @@ def test_dry_run_changes_nothing(client, category, landing_type):
     asset.refresh_from_db()
     assert asset.content_type == ""
     assert 'filename="download"' in _download(client, dev, contest, source_key)
+
+
+@pytest.mark.django_db
+def test_backfill_prefers_the_type_recorded_on_the_object(client, category, landing_type):
+    """매직 바이트가 없는 평문도 스토리지가 알고 있으면 되살린다 (#268 후속).
+
+    업로드는 브라우저가 직접 하므로(ADR-0005) 오브젝트에는 그때 보낸 형식이 남는다
+    — DB 만 비어 있는 경우가 실제로 있었다. staging 실측: 33번 과제의 평문 파이썬
+    소스 3건이 `text/x-python` 으로 스토리지에 남아 있는데도 바이트만 보던 백필이
+    통째로 버렸다.
+    """
+
+    contest, dev, source_key, asset = _legacy_source(
+        client, category, landing_type, uid="dev-backfill-6", content=None
+    )
+    # 바이트에는 매직이 없지만 스토리지는 형식을 안다.
+    FakeStorageAdapter().write_object(
+        source_key, b"# TODO app\nfrom flask import Flask\n", content_type="text/x-python"
+    )
+
+    call_command("backfill_asset_content_types")
+
+    asset.refresh_from_db()
+    assert asset.content_type == "text/x-python"
+    assert 'filename="download.py"' in _download(client, dev, contest, source_key)
+
+
+@pytest.mark.django_db
+def test_backfill_ignores_a_recorded_type_that_says_nothing(client, category, landing_type):
+    """`application/octet-stream` 은 "모른다"의 다른 표기다 — 그걸 채우면
+    `build_download_filename` 이 다시 "모른다"로 읽어 결과는 같은데 DB 에만 거짓이
+    남는다. 그 경우 바이트로 넘어가고, 바이트가 zip 이면 zip 으로 채운다."""
+
+    contest, dev, source_key, asset = _legacy_source(
+        client, category, landing_type, uid="dev-backfill-7", content=None
+    )
+    FakeStorageAdapter().write_object(
+        source_key, _zip_bytes(), content_type="application/octet-stream"
+    )
+
+    call_command("backfill_asset_content_types")
+
+    asset.refresh_from_db()
+    assert asset.content_type == "application/zip"
+    assert 'filename="download.zip"' in _download(client, dev, contest, source_key)
