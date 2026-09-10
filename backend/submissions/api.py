@@ -707,6 +707,7 @@ def _public_asset_summaries(
     """
 
     adapter = None
+    ttl_resolver = None
     out: list[AssetSummaryOut] = []
     for a in assets:
         if a.kind not in _PUBLIC_AFTER_DEADLINE_KINDS:
@@ -716,10 +717,12 @@ def _public_asset_summaries(
         if a.kind in SubmissionAsset.OBJECT_KEY_KINDS:
             if adapter is None:
                 adapter = get_storage_adapter()
+            if ttl_resolver is None:
+                ttl_resolver = get_download_ttl_resolver()
             target_ref = target_ref_for_asset_kind(
                 a.kind, contest_id=contest_id, developer_user_id=developer_user_id
             )
-            ttl_seconds = get_download_ttl_resolver().resolve(target_ref)
+            ttl_seconds = ttl_resolver.resolve(target_ref)
             presigned = adapter.presign_download(
                 a.value,
                 expires_in=timedelta(seconds=ttl_seconds),

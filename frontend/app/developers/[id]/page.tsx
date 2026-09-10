@@ -151,7 +151,7 @@ function ArchivedSubmissionRow({ submission }: { submission: PublicSubmission })
                 controls
                 preload="metadata"
                 className="w-48 rounded-sm border border-rule"
-                data-testid="demo-video-player"
+                data-testid={`demo-video-player-${asset.id}`}
               >
                 <source src={asset.download_url!} />
               </video>
@@ -164,7 +164,7 @@ function ArchivedSubmissionRow({ submission }: { submission: PublicSubmission })
               src={asset.download_url!}
               alt={asset.label || "스크린샷"}
               className="w-48 rounded-sm border border-rule"
-              data-testid="screenshot-image"
+              data-testid={`screenshot-image-${asset.id}`}
             />
           ))}
         </div>

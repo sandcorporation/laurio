@@ -388,7 +388,7 @@ function SubmissionColumnHeader({
               controls
               preload="metadata"
               className="w-40 rounded-sm border border-rule"
-              data-testid={`submission-${submission.submission_id}-demo-video`}
+              data-testid={`submission-${submission.submission_id}-demo-video-${asset.id}`}
             >
               <source src={asset.download_url!} />
             </video>
@@ -403,7 +403,7 @@ function SubmissionColumnHeader({
             src={asset.download_url!}
             alt={asset.label || "스크린샷"}
             className="w-40 rounded-sm border border-rule"
-            data-testid={`submission-${submission.submission_id}-screenshot`}
+            data-testid={`submission-${submission.submission_id}-screenshot-${asset.id}`}
           />
         ))}
 
