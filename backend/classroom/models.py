@@ -1,4 +1,4 @@
-"""Classroom 도메인 모델 (CONTEXT.md 「강의실」, ADR-0037, #278/#282).
+"""Classroom 도메인 모델 (CONTEXT.md 「강의실」, ADR-0037, #278/#282/#283).
 
 강사 한 명이 열고 참여자를 모으는 학습 단위다. 상금도 결제도 본인확인도 없다 —
 그래서 `Class`·`Problem`은 `contests.Contest`와 닮았어도 그 모델을 재사용하지
@@ -64,3 +64,28 @@ class Problem(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"Problem(id={self.pk}, title={self.title!r})"
+
+
+class ChecklistItem(models.Model):
+    """채점이 보는 항목 하나(#283). `required=True`를 전부 충족하면 **통과**다
+    — 문제마다 합격선을 따로 두지 않는다(CONTEXT.md 「통과」). 필수 항목이
+    하나도 없으면 통과가 정의되지 않으므로, 그런 문제는 열 수 없다(API에서
+    강제한다).
+
+    이미 통과한 사람이 있어도 강사가 언제든 고친다 — 돈이 걸려 있지 않아
+    "나중에 낸 사람이 유리해진다"가 성립하지 않는다. 지난 점수는 그대로
+    남고 달성률만 새 기준으로 다시 셈된다(CONTEXT.md 「달성률」) — 그 셈은
+    Score가 생기는 채점 티켓의 몫이고, 여기서는 그 사실을 화면이 미리
+    말해 줄 수 있도록 `Problem.status`만 정확히 유지한다.
+    """
+
+    problem = models.ForeignKey(Problem, related_name="checklist_items", on_delete=models.CASCADE)
+    label = models.CharField(max_length=200)
+    required = models.BooleanField(default=True)
+    order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["order", "id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ChecklistItem(id={self.pk}, label={self.label!r})"

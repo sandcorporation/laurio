@@ -19,6 +19,27 @@ class ClassOut(Schema):
     created_at: datetime
 
 
+class ChecklistItemIn(Schema):
+    label: str = Field(min_length=1, max_length=200)
+    required: bool = True
+
+
+class ChecklistItemPatchIn(Schema):
+    label: str | None = Field(default=None, min_length=1, max_length=200)
+    required: bool | None = None
+
+
+class ChecklistItemOut(Schema):
+    id: int
+    label: str
+    required: bool
+    order: int
+
+
+class ChecklistReorderIn(Schema):
+    item_ids: list[int]
+
+
 class ProblemIn(Schema):
     title: str = Field(min_length=1, max_length=200)
     description: str = ""
@@ -39,6 +60,7 @@ class ProblemOut(Schema):
     submission_format: str
     status: str
     order: int
+    checklist_items: list[ChecklistItemOut] = []
 
 
 class ProblemReorderIn(Schema):

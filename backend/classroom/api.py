@@ -1,4 +1,4 @@
-"""Classroom API (#278/#282, ADR-0037).
+"""Classroom API (#278/#282/#283, ADR-0037).
 
 **강사 전용이다.** 참여자가 가입 링크로 들어와 문제를 보는 표면은 이 티켓들의
 범위 밖이다(#279 가입 링크 발급 · #280 가입 처리가 아직 없다) — `ClassMember`가
@@ -6,6 +6,11 @@
 클래스가 아예 없는 것처럼 404를 받는다. `Problem.status`(초안/열림)는 이미
 저장되고 응답에 실려 있어, #280이 참여자 열람을 추가할 때 필터 조건만 더하면
 된다.
+
+**라우트 등록 순서에 규칙이 있다.** 정적 세그먼트(`reorder`)를 가진 라우트는
+전부 그 바로 위 동적 세그먼트(`{problem_id}`·`{item_id}`) 라우트보다 먼저
+등록한다 — 나중이면 django-ninja가 정적 세그먼트를 동적 파라미터 값으로 먼저
+매치해 405가 난다.
 """
 
 from __future__ import annotations
@@ -17,8 +22,12 @@ from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
 
-from .models import Class, Problem
+from .models import ChecklistItem, Class, Problem
 from .schemas import (
+    ChecklistItemIn,
+    ChecklistItemOut,
+    ChecklistItemPatchIn,
+    ChecklistReorderIn,
     ClassIn,
     ClassOut,
     ErrorOut,
@@ -37,6 +46,10 @@ def _serialize_class(class_obj: Class) -> ClassOut:
     return ClassOut(id=class_obj.id, name=class_obj.name, created_at=class_obj.created_at)
 
 
+def _serialize_checklist_item(item: ChecklistItem) -> ChecklistItemOut:
+    return ChecklistItemOut(id=item.id, label=item.label, required=item.required, order=item.order)
+
+
 def _serialize_problem(problem: Problem) -> ProblemOut:
     return ProblemOut(
         id=problem.id,
@@ -46,6 +59,7 @@ def _serialize_problem(problem: Problem) -> ProblemOut:
         submission_format=problem.submission_format,
         status=problem.status,
         order=problem.order,
+        checklist_items=[_serialize_checklist_item(i) for i in problem.checklist_items.all()],
     )
 
 
@@ -121,7 +135,7 @@ def list_problems(request: HttpRequest, class_id: int):
     """강사 본인의 클래스 문제 전부(초안 + 열림), 순서대로."""
 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
-    problems = class_obj.problems.all()
+    problems = class_obj.problems.prefetch_related("checklist_items").all()
     return 200, [_serialize_problem(p) for p in problems]
 
 
@@ -191,3 +205,119 @@ def update_problem(request: HttpRequest, class_id: int, problem_id: int, payload
     if update_fields:
         problem.save(update_fields=[*update_fields, "updated_at"])
     return 200, _serialize_problem(problem)
+
+
+@router.post(
+    "/classes/{class_id}/problems/{problem_id}/open",
+    response={200: ProblemOut, 404: ErrorOut, 400: ErrorOut},
+    auth=jwt_auth,
+)
+def open_problem(request: HttpRequest, class_id: int, problem_id: int):
+    """초안을 연다. 필수 체크리스트 항목이 하나도 없으면 통과가 정의되지
+    않아 막는다(#283 AC)."""
+
+    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    problem = _get_owned_problem_or_404(class_obj, problem_id)
+
+    if not problem.checklist_items.filter(required=True).exists():
+        raise HttpError(400, "필수 항목이 하나도 없는 문제는 열 수 없습니다.")
+
+    problem.status = Problem.Status.OPEN
+    problem.save(update_fields=["status", "updated_at"])
+    return 200, _serialize_problem(problem)
+
+
+# --- ChecklistItem -------------------------------------------------------------
+
+
+def _get_owned_checklist_item_or_404(problem: Problem, item_id: int) -> ChecklistItem:
+    try:
+        return problem.checklist_items.get(id=item_id)
+    except ChecklistItem.DoesNotExist as exc:
+        raise HttpError(404, "체크리스트 항목을 찾을 수 없습니다.") from exc
+
+
+@router.post(
+    "/classes/{class_id}/problems/{problem_id}/checklist-items",
+    response={201: ChecklistItemOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def create_checklist_item(
+    request: HttpRequest, class_id: int, problem_id: int, payload: ChecklistItemIn
+):
+    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    problem = _get_owned_problem_or_404(class_obj, problem_id)
+
+    next_order = problem.checklist_items.count()
+    item = ChecklistItem.objects.create(
+        problem=problem, label=payload.label, required=payload.required, order=next_order
+    )
+    return 201, _serialize_checklist_item(item)
+
+
+@router.post(
+    "/classes/{class_id}/problems/{problem_id}/checklist-items/reorder",
+    response={200: list[ChecklistItemOut], 404: ErrorOut, 422: ErrorOut},
+    auth=jwt_auth,
+)
+def reorder_checklist_items(
+    request: HttpRequest, class_id: int, problem_id: int, payload: ChecklistReorderIn
+):
+    """정적 세그먼트("reorder")라 `{item_id}` 동적 라우트보다 먼저 등록한다
+    (파일 상단 docstring 참고)."""
+
+    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    problem = _get_owned_problem_or_404(class_obj, problem_id)
+    items = {i.id: i for i in problem.checklist_items.all()}
+
+    if set(payload.item_ids) != set(items):
+        raise HttpError(422, "이 문제의 체크리스트 항목과 일치하지 않습니다.")
+
+    with transaction.atomic():
+        for index, item_id in enumerate(payload.item_ids):
+            items[item_id].order = index
+        ChecklistItem.objects.bulk_update(items.values(), ["order"])
+
+    ordered = sorted(items.values(), key=lambda i: i.order)
+    return 200, [_serialize_checklist_item(i) for i in ordered]
+
+
+@router.patch(
+    "/classes/{class_id}/problems/{problem_id}/checklist-items/{item_id}",
+    response={200: ChecklistItemOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def update_checklist_item(
+    request: HttpRequest,
+    class_id: int,
+    problem_id: int,
+    item_id: int,
+    payload: ChecklistItemPatchIn,
+):
+    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    problem = _get_owned_problem_or_404(class_obj, problem_id)
+    item = _get_owned_checklist_item_or_404(problem, item_id)
+
+    update_fields = []
+    if payload.label is not None:
+        item.label = payload.label
+        update_fields.append("label")
+    if payload.required is not None:
+        item.required = payload.required
+        update_fields.append("required")
+    if update_fields:
+        item.save(update_fields=update_fields)
+    return 200, _serialize_checklist_item(item)
+
+
+@router.delete(
+    "/classes/{class_id}/problems/{problem_id}/checklist-items/{item_id}",
+    response={204: None, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def delete_checklist_item(request: HttpRequest, class_id: int, problem_id: int, item_id: int):
+    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    problem = _get_owned_problem_or_404(class_obj, problem_id)
+    item = _get_owned_checklist_item_or_404(problem, item_id)
+    item.delete()
+    return 204, None

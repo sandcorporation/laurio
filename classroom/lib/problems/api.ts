@@ -1,8 +1,15 @@
-// Problem 백엔드 호출 (#282).
+// Problem·체크리스트 백엔드 호출 (#282/#283).
 import { backendJson } from "@/lib/backend/client";
 
 export type SubmissionFormat = "source" | "repository";
 export type ProblemStatus = "draft" | "open";
+
+export type ChecklistItemRow = {
+  id: number;
+  label: string;
+  required: boolean;
+  order: number;
+};
 
 export type ProblemRow = {
   id: number;
@@ -12,6 +19,7 @@ export type ProblemRow = {
   submission_format: SubmissionFormat;
   status: ProblemStatus;
   order: number;
+  checklist_items: ChecklistItemRow[];
 };
 
 export function fetchProblems(classId: number): Promise<ProblemRow[]> {
@@ -43,5 +51,55 @@ export function reorderProblems(classId: number, problemIds: number[]): Promise<
   return backendJson<ProblemRow[]>(`/classroom/classes/${classId}/problems/reorder`, {
     method: "POST",
     body: JSON.stringify({ problem_ids: problemIds }),
+  });
+}
+
+export function openProblem(classId: number, problemId: number): Promise<ProblemRow> {
+  return backendJson<ProblemRow>(`/classroom/classes/${classId}/problems/${problemId}/open`, {
+    method: "POST",
+  });
+}
+
+function checklistItemsPath(classId: number, problemId: number): string {
+  return `/classroom/classes/${classId}/problems/${problemId}/checklist-items`;
+}
+
+export function createChecklistItem(
+  classId: number,
+  problemId: number,
+  input: { label: string; required: boolean },
+): Promise<ChecklistItemRow> {
+  return backendJson<ChecklistItemRow>(checklistItemsPath(classId, problemId), {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateChecklistItem(
+  classId: number,
+  problemId: number,
+  itemId: number,
+  patch: Partial<{ label: string; required: boolean }>,
+): Promise<ChecklistItemRow> {
+  return backendJson<ChecklistItemRow>(`${checklistItemsPath(classId, problemId)}/${itemId}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}
+
+export function deleteChecklistItem(classId: number, problemId: number, itemId: number): Promise<void> {
+  return backendJson<void>(`${checklistItemsPath(classId, problemId)}/${itemId}`, {
+    method: "DELETE",
+  });
+}
+
+export function reorderChecklistItems(
+  classId: number,
+  problemId: number,
+  itemIds: number[],
+): Promise<ChecklistItemRow[]> {
+  return backendJson<ChecklistItemRow[]>(`${checklistItemsPath(classId, problemId)}/reorder`, {
+    method: "POST",
+    body: JSON.stringify({ item_ids: itemIds }),
   });
 }
