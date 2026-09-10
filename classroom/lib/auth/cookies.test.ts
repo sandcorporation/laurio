@@ -23,7 +23,7 @@ function fakeJwt(expSecondsFromNow: number): string {
   return `header.${base64}.signature`;
 }
 
-describe("setSessionCookies — domain 속성이 공개 앱과 같다 (ADR-0038)", () => {
+describe("setSessionCookies — domain 속성이 공개 앱과 같다", () => {
   test("LAURIO_SESSION_COOKIE_DOMAIN이 비어 있으면(dev) domain을 주지 않는다", () => {
     delete process.env.LAURIO_SESSION_COOKIE_DOMAIN;
     const response = new NextResponse();

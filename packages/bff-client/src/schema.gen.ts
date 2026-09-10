@@ -490,6 +490,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List My Classes
+         * @description 「내 클래스」— 본인이 강사인 것만. 남의 클래스는 여기 나오지 않는다.
+         */
+        get: operations["classroom_api_list_my_classes"];
+        put?: never;
+        /** Create Class */
+        post: operations["classroom_api_create_class"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/classes/{class_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Class */
+        get: operations["classroom_api_get_class"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/contests": {
         parameters: {
             query?: never;
@@ -3425,6 +3463,23 @@ export interface components {
             /** Matches */
             matches: components["schemas"]["CiLookupMatchOut"][];
         };
+        /** ClassIn */
+        ClassIn: {
+            /** Name */
+            name: string;
+        };
+        /** ClassOut */
+        ClassOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+        };
         /** ComparisonEntryOut */
         ComparisonEntryOut: {
             /** Developer Display Name */
@@ -5908,6 +5963,81 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TokenPairOut"];
+                };
+            };
+        };
+    };
+    classroom_api_list_my_classes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassOut"][];
+                };
+            };
+        };
+    };
+    classroom_api_create_class: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClassIn"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassOut"];
+                };
+            };
+        };
+    };
+    classroom_api_get_class: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
                 };
             };
         };

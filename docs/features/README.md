@@ -8,8 +8,9 @@
 | [`backend.md`](backend.md) | 서버가 무엇을 받고, 무엇을 스스로 하고, 무엇을 기록하는가 |
 | [`frontend.md`](frontend.md) | 공개 앱의 화면과 그 화면이 사람에게 시키는 일 |
 | [`operator.md`](operator.md) | 운영자 앱의 화면과 사람이 판단하는 행위 |
+| [`classroom.md`](classroom.md) | 강의실 앱의 화면과 그 화면이 사람에게 시키는 일 |
 
-**두 앱 문서는 화면 하나에 절 하나다.** 그 화면이 무엇을 보여주고, 사람이 무엇을 할 수
+**세 앱 문서는 화면 하나에 절 하나다.** 그 화면이 무엇을 보여주고, 사람이 무엇을 할 수
 있고, 무엇을 요구하며, **무엇을 일부러 하지 않는지**를 적는다. 마지막 것이 가장 자주
 잊히는데, 「없는 이유」를 안 적으면 다음 사람이 그것을 결함으로 보고 만들어 넣는다.
 
@@ -33,8 +34,8 @@
 | --- | --- |
 | API 엔드포인트가 늘거나 줄었다 | `backend.md` 의 해당 표면 |
 | 스캔이 늘거나 줄었다, 주기가 바뀌었다 | `backend.md` 「스스로 도는 일」 |
-| 화면이 생기거나 사라졌다 | `frontend.md` / `operator.md` — 그 화면의 절을 더하거나 지운다 |
-| 화면이 하는 일이 바뀌었다 | 같은 두 문서의 **그 화면 절** |
+| 화면이 생기거나 사라졌다 | `frontend.md` / `operator.md` / `classroom.md` — 그 화면의 절을 더하거나 지운다 |
+| 화면이 하는 일이 바뀌었다 | 같은 세 문서의 **그 화면 절** |
 | 상태 값·전이 조건이 바뀌었다 | `backend.md` 「Contest 의 상태」의 표 **와** mermaid 다이어그램(`cd backend && uv run python manage.py print_contest_transition_diagram` 으로 재생성 — `tests/test_contest_transition_graph.py` 가 갈리면 CI 에서 잡는다) |
 | 정책 기본값이 바뀌었다 | `backend.md` 「정책 값」 |
 | 어댑터가 늘거나 바인딩이 바뀌었다 | `backend.md` 「바깥 세계」 |
@@ -55,7 +56,7 @@ cd backend && LAURIO_DB_PORT=55432 uv run python manage.py shell -c \
   "from core.scans import SCAN_REGISTRY; print(len(SCAN_REGISTRY)); print(*SCAN_REGISTRY, sep='\n')"
 
 # 화면
-find frontend/app operator/app -name page.tsx | sed 's|/page.tsx||'
+find frontend/app operator/app classroom/app -name page.tsx | sed 's|/page.tsx||'
 
 # Contest 전이 그래프 다이어그램 (docs/features/backend.md 「Contest 의 상태」 절)
 cd backend && uv run python manage.py print_contest_transition_diagram
