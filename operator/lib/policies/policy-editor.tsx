@@ -1,9 +1,9 @@
 "use client";
 
-// 정책 편집 폼(#77) — 상위 등급 Operator만 렌더된다(호출부가 `session.user.
-// is_superuser`로 게이트한다). 네 필드를 한 폼에 두고, 실제로 바뀐 값만 골라
-// 하나의 PATCH로 보낸다 — 여러 값을 같이 바꾸면 `PolicyChange` 한 사건으로
-// 남는다(#76의 규율을 이 화면이 그대로 활용한다).
+// 정책 편집 폼(#77, #263) — 상위 등급 Operator만 렌더된다(호출부가 `session.
+// user.is_superuser`로 게이트한다). `POLICY_FIELDS`의 필드를 한 폼에 두고,
+// 실제로 바뀐 값만 골라 하나의 PATCH로 보낸다 — 여러 값을 같이 바꾸면
+// `PolicyChange` 한 사건으로 남는다(#76의 규율을 이 화면이 그대로 활용한다).
 //
 // 클라이언트 검증을 두지 않는다(`create-operator-form.tsx`와 같은 판단) — 말이
 // 안 되는 값(음수·상한 초과)은 서버(policies.services.update_policy)가 4xx로
@@ -25,6 +25,12 @@ function toInputs(policy: PlatformPolicy): FieldInputs {
     withholding_tax_bps: String(policy.withholding_tax_bps),
     withholding_necessary_expense_bps: String(policy.withholding_necessary_expense_bps),
     withholding_minor_income_exempt_won: String(policy.withholding_minor_income_exempt_won),
+    max_source_asset_bytes: String(policy.max_source_asset_bytes),
+    max_demo_video_asset_bytes: String(policy.max_demo_video_asset_bytes),
+    max_screenshot_asset_bytes: String(policy.max_screenshot_asset_bytes),
+    max_build_asset_bytes: String(policy.max_build_asset_bytes),
+    demo_video_retention_grace_days: String(policy.demo_video_retention_grace_days),
+    max_screenshot_assets: String(policy.max_screenshot_assets),
   };
 }
 

@@ -182,6 +182,44 @@ class PlatformPolicy(models.Model):
     # 무관하다 — 그래서 별도 필드다.
     max_contest_images = models.PositiveIntegerField(default=10)
 
+    # --- 자리만 만든다 — #263 (ADR-0035) -------------------------------------
+    # 아래 여섯 필드는 아직 아무 동작도 바꾸지 않는다. #261(업로드 용량 강제)·
+    # #262(시연 영상 파기 스캔)·#264(스크린샷 자료 종류)가 각자 이 값을 읽어
+    # 실제로 쓴다 — 이 티켓은 세 후속 티켓이 서로를 기다리지 않도록
+    # `PlatformPolicy`에 필드를 한 번에 더해 마이그레이션 리프를 하나로 묶을
+    # 뿐이다.
+    #
+    # 종류별 업로드 바이트 상한(#261). `max_source_assets` 등(개수 상한)과
+    # 이름을 구별한다 — `_assets`는 몇 개까지고 `_asset_bytes`는 파일 하나가
+    # 얼마나 클 수 있는가다. `PositiveIntegerField`(최대 약 2.1GB)로는 넉넉한
+    # 시연 영상 상한을 표현하기 벅차 `PositiveBigIntegerField`를 쓴다
+    # (`ledger.models.JournalEntry.amount`와 같은 선택).
+    max_source_asset_bytes = models.PositiveBigIntegerField(default=50 * 1024 * 1024)
+    # 영상은 소스보다 넉넉하다 — 압도적으로 무거운 자료가 그것뿐이다(ADR-0035).
+    max_demo_video_asset_bytes = models.PositiveBigIntegerField(default=500 * 1024 * 1024)
+    # 스크린샷은 이미지라 공모전 이미지 상한(`contests.images.MAX_CONTEST_IMAGE_BYTES`,
+    # 10MB, ADR-0032)과 같은 자리에 맞춘다. **값을 직접 import하지 않는다** —
+    # `contests.images`가 이미 `policies.scope`를 가져다 쓰므로(#234), 반대
+    # 방향으로 가져오면 순환 임포트가 된다. 그래서 리터럴을 그대로 복사해 두고,
+    # 두 값이 갈라지지 않는지는
+    # `tests/test_policies.py::test_screenshot_byte_cap_default_matches_contest_image_cap`가
+    # 지킨다.
+    max_screenshot_asset_bytes = models.PositiveBigIntegerField(default=10 * 1024 * 1024)
+    # 인수 산출물(`handovers.BuildAsset`) — 빌드 설정·서명키·스토어 메타데이터·
+    # 실행 문서 같은 작은 파일이 대상이라 소스보다도 상한이 낮다.
+    max_build_asset_bytes = models.PositiveBigIntegerField(default=20 * 1024 * 1024)
+
+    # 시연 영상 파일을 파기하기까지의 유예일수 — 이의 창(`judging_ends_at`,
+    # 과제는 `assignment_closed`)이 닫힌 뒤 이만큼 지나야 스캔이 스토리지
+    # 오브젝트를 지운다(ADR-0035). 0은 "창이 닫히자마자 지운다"는 뜻이라
+    # 유효한 값이다 — 이의 심판이 끝나기 전에 지워지는 사고는 창이 닫혔다는
+    # 것 자체가 막는다. 쓰는 곳은 #262.
+    demo_video_retention_grace_days = models.PositiveIntegerField(default=30)
+
+    # Submission 하나에 붙일 수 있는 스크린샷 자료 개수 상한 —
+    # `max_source_assets` 등과 나란한 자리다. 쓰는 곳은 #264.
+    max_screenshot_assets = models.PositiveIntegerField(default=10)
+
     # 낙관적 동시성 제어(#76) — GET이 이 값을 함께 돌려주고, PATCH는 호출자가
     # 그때 읽은 값을 `expected_version`으로 되돌려 보내야 한다.
     # `select_for_update()`로 잠근 뒤 `version`이 일치할 때만 갱신하고, 갱신할
@@ -328,7 +366,37 @@ class PlatformPolicy(models.Model):
                     "max_repository_assets",
                     "max_scoring_input_assets",
                     "max_contest_images",
+                    "max_screenshot_assets",
                 )
+            ),
+            # 바이트 상한 0은 "제한 없음"이 아니라 "아무 파일도 못 올린다"다 —
+            # 위 자산 개수 상한과 같은 근거(#263). 상한 쪽은 오타 방지다: 자릿수
+            # 하나가 더 붙는 흔한 실수(50MB를 5GB로)를 막는다.
+            models.CheckConstraint(
+                condition=models.Q(max_source_asset_bytes__gte=1)
+                & models.Q(max_source_asset_bytes__lte=2_000_000_000),
+                name="max_source_asset_bytes_sane_range",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(max_demo_video_asset_bytes__gte=1)
+                & models.Q(max_demo_video_asset_bytes__lte=5_000_000_000),
+                name="max_demo_video_asset_bytes_sane_range",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(max_screenshot_asset_bytes__gte=1)
+                & models.Q(max_screenshot_asset_bytes__lte=100_000_000),
+                name="max_screenshot_asset_bytes_sane_range",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(max_build_asset_bytes__gte=1)
+                & models.Q(max_build_asset_bytes__lte=1_000_000_000),
+                name="max_build_asset_bytes_sane_range",
+            ),
+            # 유예일수 0(즉시 파기)은 유효한 값이다 — 위 필드 주석 참고. 상한만
+            # 막는다(다른 기간 필드와 같은 180일 상한, #78).
+            models.CheckConstraint(
+                condition=models.Q(demo_video_retention_grace_days__lte=180),
+                name="demo_video_retention_grace_days_sane_upper_bound",
             ),
         ]
 

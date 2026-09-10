@@ -4553,16 +4553,28 @@ export interface components {
         };
         /** PolicyOut */
         PolicyOut: {
+            /** Demo Video Retention Grace Days */
+            demo_video_retention_grace_days: number;
+            /** Max Build Asset Bytes */
+            max_build_asset_bytes: number;
             /** Max Contest Images */
             max_contest_images: number;
             /** Max Demo Url Assets */
             max_demo_url_assets: number;
+            /** Max Demo Video Asset Bytes */
+            max_demo_video_asset_bytes: number;
             /** Max Demo Video Assets */
             max_demo_video_assets: number;
             /** Max Repository Assets */
             max_repository_assets: number;
             /** Max Scoring Input Assets */
             max_scoring_input_assets: number;
+            /** Max Screenshot Asset Bytes */
+            max_screenshot_asset_bytes: number;
+            /** Max Screenshot Assets */
+            max_screenshot_assets: number;
+            /** Max Source Asset Bytes */
+            max_source_asset_bytes: number;
             /** Max Source Assets */
             max_source_assets: number;
             /** Platform Fee Bps */
@@ -4583,18 +4595,30 @@ export interface components {
         };
         /** PolicyUpdateIn */
         PolicyUpdateIn: {
+            /** Demo Video Retention Grace Days */
+            demo_video_retention_grace_days?: number | null;
             /** Expected Version */
             expected_version: number;
+            /** Max Build Asset Bytes */
+            max_build_asset_bytes?: number | null;
             /** Max Contest Images */
             max_contest_images?: number | null;
             /** Max Demo Url Assets */
             max_demo_url_assets?: number | null;
+            /** Max Demo Video Asset Bytes */
+            max_demo_video_asset_bytes?: number | null;
             /** Max Demo Video Assets */
             max_demo_video_assets?: number | null;
             /** Max Repository Assets */
             max_repository_assets?: number | null;
             /** Max Scoring Input Assets */
             max_scoring_input_assets?: number | null;
+            /** Max Screenshot Asset Bytes */
+            max_screenshot_asset_bytes?: number | null;
+            /** Max Screenshot Assets */
+            max_screenshot_assets?: number | null;
+            /** Max Source Asset Bytes */
+            max_source_asset_bytes?: number | null;
             /** Max Source Assets */
             max_source_assets?: number | null;
             /** Platform Fee Bps */

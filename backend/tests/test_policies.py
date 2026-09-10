@@ -69,3 +69,74 @@ def test_platform_policy_accepts_values_exactly_at_the_sane_upper_bound(db):
 
     assert policy.pk == 1
     assert policy.deadline_reminder_lead_hours == 720
+
+
+# --- 자리만 만든다 (#263, ADR-0035) — 값 자체는 아직 아무 동작도 바꾸지
+#     않지만, 저장 시점의 방어선(CheckConstraint)은 다른 정책값과 같은 규율을
+#     받는다. ------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_platform_policy_has_reasonable_defaults_for_the_new_prefactor_fields(db):
+    """기본값이 합리적이다 — 영상은 소스보다 크고, 스크린샷 개수는 다른 자료
+    개수 상한과 어울린다(#263 AC)."""
+
+    policy = PlatformPolicy.objects.create()
+
+    assert policy.max_demo_video_asset_bytes > policy.max_source_asset_bytes
+    assert 1 <= policy.max_screenshot_assets <= 50
+    assert policy.demo_video_retention_grace_days >= 0
+    assert policy.max_build_asset_bytes > 0
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "field_name, bad_value",
+    [
+        ("max_source_asset_bytes", 0),
+        ("max_source_asset_bytes", 2_000_000_001),
+        ("max_demo_video_asset_bytes", 0),
+        ("max_demo_video_asset_bytes", 5_000_000_001),
+        ("max_screenshot_asset_bytes", 0),
+        ("max_screenshot_asset_bytes", 100_000_001),
+        ("max_build_asset_bytes", 0),
+        ("max_build_asset_bytes", 1_000_000_001),
+        ("demo_video_retention_grace_days", 181),
+        ("max_screenshot_assets", 0),
+        ("max_screenshot_assets", 51),
+    ],
+)
+def test_platform_policy_rejects_out_of_range_prefactor_fields(db, field_name, bad_value):
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            PlatformPolicy.objects.create(**{field_name: bad_value})
+
+
+@pytest.mark.django_db
+def test_platform_policy_accepts_prefactor_fields_exactly_at_their_bounds(db):
+    policy = PlatformPolicy.objects.create(
+        pk=1,
+        max_source_asset_bytes=2_000_000_000,
+        max_demo_video_asset_bytes=5_000_000_000,
+        max_screenshot_asset_bytes=100_000_000,
+        max_build_asset_bytes=1_000_000_000,
+        demo_video_retention_grace_days=0,
+        max_screenshot_assets=50,
+    )
+
+    assert policy.demo_video_retention_grace_days == 0
+    assert policy.max_screenshot_assets == 50
+
+
+@pytest.mark.django_db
+def test_screenshot_byte_cap_default_matches_contest_image_cap(db):
+    """`max_screenshot_asset_bytes`의 기본값은 `MAX_CONTEST_IMAGE_BYTES`를 리터럴로
+    복사한 것이다(순환 임포트를 피하려고 — `contests.images`가 이미
+    `policies.scope`를 가져다 쓴다). 이 테스트가 그 둘이 갈라지지 않게 지킨다 —
+    지우면 `contests.images.MAX_CONTEST_IMAGE_BYTES`가 바뀌어도 아무도 모른다."""
+
+    from contests.images import MAX_CONTEST_IMAGE_BYTES
+
+    policy = PlatformPolicy.objects.create()
+
+    assert policy.max_screenshot_asset_bytes == MAX_CONTEST_IMAGE_BYTES

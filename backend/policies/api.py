@@ -51,6 +51,12 @@ def _serialize_policy(policy: PlatformPolicy) -> PolicyOut:
         max_repository_assets=policy.max_repository_assets,
         max_scoring_input_assets=policy.max_scoring_input_assets,
         max_contest_images=policy.max_contest_images,
+        max_source_asset_bytes=policy.max_source_asset_bytes,
+        max_demo_video_asset_bytes=policy.max_demo_video_asset_bytes,
+        max_screenshot_asset_bytes=policy.max_screenshot_asset_bytes,
+        max_build_asset_bytes=policy.max_build_asset_bytes,
+        demo_video_retention_grace_days=policy.demo_video_retention_grace_days,
+        max_screenshot_assets=policy.max_screenshot_assets,
         version=policy.version,
         updated_at=policy.updated_at,
     )

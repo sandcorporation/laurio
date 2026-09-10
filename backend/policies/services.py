@@ -38,6 +38,16 @@ UPDATABLE_FIELDS = frozenset(
         # #234 — Contest 하나에 붙일 수 있는 ContestImage 개수 상한. 같은 이유로
         # 처음부터 이 집합에 들어온다.
         "max_contest_images",
+        # #263(ADR-0035) — 자리만 만든다. 값 자체는 아직 아무 동작도 바꾸지
+        # 않지만(#261·#262·#264가 각자 읽어 쓴다), 운영자가 보고 바꾸고 그
+        # 변경이 이력에 남는 것은 이 티켓의 인수조건이라 처음부터 이 집합에
+        # 들어온다.
+        "max_source_asset_bytes",
+        "max_demo_video_asset_bytes",
+        "max_screenshot_asset_bytes",
+        "max_build_asset_bytes",
+        "demo_video_retention_grace_days",
+        "max_screenshot_assets",
     }
 )
 
@@ -56,6 +66,12 @@ _FIELD_BOUNDS: dict[str, tuple[int, int]] = {
     "max_repository_assets": (1, 50),
     "max_scoring_input_assets": (1, 50),
     "max_contest_images": (1, 50),
+    "max_source_asset_bytes": (1, 2_000_000_000),
+    "max_demo_video_asset_bytes": (1, 5_000_000_000),
+    "max_screenshot_asset_bytes": (1, 100_000_000),
+    "max_build_asset_bytes": (1, 1_000_000_000),
+    "demo_video_retention_grace_days": (0, 180),
+    "max_screenshot_assets": (1, 50),
 }
 
 

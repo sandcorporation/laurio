@@ -313,6 +313,60 @@ def test_history_entries_are_never_updated_or_deleted_by_any_endpoint():
     assert PolicyChange.objects.filter(id=change.id).exists()
 
 
+# --- 자리만 만든다 (#263, ADR-0035) — 값을 보고 바꿀 수 있고 이력이 남지만,
+#     아직 아무 동작도 바꾸지 않는다. -----------------------------------------
+
+
+@pytest.mark.django_db
+def test_new_prefactor_fields_appear_in_the_get_response_with_reasonable_defaults():
+    judge = _client_for("judge-policy-prefactor-get")
+
+    response = _get_policy(judge)
+
+    assert response.status_code == 200, response.content
+    body = response.json()
+    assert body["max_demo_video_asset_bytes"] > body["max_source_asset_bytes"]
+    assert body["max_screenshot_assets"] >= 1
+    assert body["demo_video_retention_grace_days"] >= 0
+    assert body["max_build_asset_bytes"] > 0
+
+
+@pytest.mark.django_db
+def test_superuser_can_change_the_new_prefactor_fields_and_it_is_recorded():
+    root = _client_for("root-policy-prefactor", superuser=True)
+
+    response = _change_policy(
+        root,
+        max_source_asset_bytes=60 * 1024 * 1024,
+        max_demo_video_asset_bytes=600 * 1024 * 1024,
+        max_screenshot_asset_bytes=12 * 1024 * 1024,
+        max_build_asset_bytes=25 * 1024 * 1024,
+        demo_video_retention_grace_days=45,
+        max_screenshot_assets=8,
+        reason="용량·보존·개수 자리를 미리 조정",
+    )
+
+    assert response.status_code == 200, response.content
+    body = response.json()
+    assert body["max_source_asset_bytes"] == 60 * 1024 * 1024
+    assert body["demo_video_retention_grace_days"] == 45
+    assert body["max_screenshot_assets"] == 8
+
+    change = PolicyChange.objects.get()
+    assert change.after["max_screenshot_assets"] == 8
+    assert change.before["max_screenshot_assets"] == 10
+
+
+@pytest.mark.django_db
+def test_new_prefactor_fields_out_of_bounds_are_rejected_with_4xx_not_500():
+    root = _client_for("root-policy-prefactor-bad", superuser=True)
+
+    response = _change_policy(root, max_screenshot_assets=51)
+
+    assert response.status_code == 422, response.content
+    assert PlatformPolicy.objects.get(pk=1).max_screenshot_assets == 10
+
+
 # --- 요율을 바꾸면 그 뒤의 지급이 실제로 달라진다는 것은 test_payouts.py의
 #     test_changing_the_policy_changes_new_payouts_but_not_past_ones가
 #     운영자 API를 통해 확인한다(#76이 그 테스트를 이 API로 갈아 끼웠다).

@@ -27,6 +27,13 @@ class PolicyOut(Schema):
     max_scoring_input_assets: int
     # #234 — Contest 하나에 붙일 수 있는 ContestImage 개수 상한.
     max_contest_images: int
+    # #263(ADR-0035) — 자리만 만든다. #261·#262·#264가 각자 읽어 쓴다.
+    max_source_asset_bytes: int
+    max_demo_video_asset_bytes: int
+    max_screenshot_asset_bytes: int
+    max_build_asset_bytes: int
+    demo_video_retention_grace_days: int
+    max_screenshot_assets: int
     # 낙관적 동시성 제어에 쓰는 값 — PATCH의 `expected_version`에 그대로
     # 되돌려 보내야 한다.
     version: int
@@ -48,6 +55,14 @@ class PolicyUpdateIn(Schema):
     max_scoring_input_assets: int | None = Field(default=None, ge=1)
     # #234
     max_contest_images: int | None = Field(default=None, ge=1)
+    # #263(ADR-0035) — 자리만 만든다. 바이트 상한은 0 미만이 말이 안 되므로
+    # ge=1, 유예일수는 0(즉시 파기)이 유효한 값이라 ge=0이다.
+    max_source_asset_bytes: int | None = Field(default=None, ge=1)
+    max_demo_video_asset_bytes: int | None = Field(default=None, ge=1)
+    max_screenshot_asset_bytes: int | None = Field(default=None, ge=1)
+    max_build_asset_bytes: int | None = Field(default=None, ge=1)
+    demo_video_retention_grace_days: int | None = Field(default=None, ge=0)
+    max_screenshot_assets: int | None = Field(default=None, ge=1)
     # 돈을 움직이는 판단에 근거가 없으면 감사 기록으로서 값이 없다
     # (AppealRuling.note와 같은 규율).
     reason: str

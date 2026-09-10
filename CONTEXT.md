@@ -64,7 +64,7 @@ Laurio를 운영하며 Appeal에 Ruling을 내리는 당사자. Sponsor·Develop
 _Avoid_: 관리자, 스태프, Admin, Staff, Moderator
 
 **PlatformPolicy**:
-플랫폼이 정한 요율·기간·한도 — 수수료, 원천징수, 개최비, 연장비, 심사기간, 배분 대기, 배분 컷라인, 제출 자료 개수 상한. 환경이 아니라 사업이 정하는 값이라 staging 과 production 에서 같아야 하고, 바뀌면 누가 언제 바꿨는지가 남는다(ADR-0023). 값을 쓴 Payout·Distribution 은 그때의 요율을 자기 안에 기억한다.
+플랫폼이 정한 요율·기간·한도 — 수수료, 원천징수, 개최비, 연장비, 심사기간, 배분 대기, 배분 컷라인, 제출 자료 개수·용량 상한, 시연 영상 보존 유예일수(ADR-0035). 환경이 아니라 사업이 정하는 값이라 staging 과 production 에서 같아야 하고, 바뀌면 누가 언제 바꿨는지가 남는다(ADR-0023). 값을 쓴 Payout·Distribution 은 그때의 요율을 자기 안에 기억한다.
 _Avoid_: 설정, config, 환경변수(그 셋은 환경마다 달라도 되는 것을 가리킨다)
 
 **PolicyChange**:
