@@ -395,6 +395,38 @@ services:
       # 수 있다 — 인터넷에 직접 노출하지 않는 것이 의도된 동작이다.
       - "127.0.0.1:${LAURIO_OPERATOR_WEB_PORT:-3001}:3000"
 
+  # 강의실 앱(#276/#277, ADR-0037). classroom.Dockerfile의 runner 스테이지 —
+  # frontend·operator 서비스와 같은 산출물 모양이고 같은 부팅 가드 원칙을
+  # 따른다(classroom/instrumentation.ts).
+  classroom:
+    build:
+      context: ..
+      dockerfile: docker/classroom.Dockerfile
+      target: runner
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    environment:
+      LAURIO_DEPLOYMENT_TARGET: production
+      LAURIO_API_BASE_URL: http://backend:8000
+      # 이 앱 자신의 Origin 검증이 쓰는 값 — 실제 운영 도메인이어야 한다.
+      # staging의 값과 같은 값을 쓰지 않는다.
+      LAURIO_CLASSROOM_ORIGIN: ${LAURIO_CLASSROOM_ORIGIN:?LAURIO_CLASSROOM_ORIGIN 을 설정해야 한다}
+      # 「로그인이 필요합니다」 화면이 공개 앱 로그인으로 안내하는 링크를 지을
+      # 때 읽는다 — frontend 서비스가 요구하는 것과 같은 변수, 같은 값.
+      LAURIO_WEB_ORIGIN: ${LAURIO_WEB_ORIGIN:?prod LAURIO_WEB_ORIGIN 를 .env.prod 에 설정하라}
+      # frontend 서비스가 요구하는 것과 같은 변수, 같은 값(ADR-0038).
+      LAURIO_SESSION_COOKIE_DOMAIN: ${LAURIO_SESSION_COOKIE_DOMAIN:?prod LAURIO_SESSION_COOKIE_DOMAIN 을 .env.prod 에 설정하라}
+    ports:
+      # frontend·operator와 같은 이유로 127.0.0.1에만 publish한다 — 이 호스트
+      # 앞단에 TLS 종단 리버스 프록시가 반드시 있어야 한다.
+      - "127.0.0.1:${LAURIO_CLASSROOM_WEB_PORT:-3002}:3000"
+
 volumes:
   laurio-prod-db:
   laurio-prod-redis:

@@ -61,7 +61,11 @@ DB·Redis·MinIO·세 앱(#276부터 강의실이 더해졌다)이 통째로 갈
 
 **staging 은 떠 있다** — `https://laurio.honeycombpizza.link`(공개 앱),
 `operator.laurio.honeycombpizza.link`(운영자 앱), `storage.honeycombpizza.link`(브라우저가
-직접 PUT 하는 MinIO). **그 MinIO 안에 버킷이 둘이다**(#233, ADR-0032) — 제출물이 사는
+직접 PUT 하는 MinIO), `classroom.laurio.honeycombpizza.link`(강의실 앱, #277 —
+`docker/compose.staging.yaml`의 `classroom` 서비스는 `${LAURIO_CLASSROOM_WEB_PORT:-3002}`에
+평문 HTTP로만 듣는다, 그 앞단에 이 도메인을 그 포트로 넘겨주는 TLS 종단 리버스 프록시가
+저장소 밖의 수작업으로 있어야 실제로 열린다 — storage.honeycombpizza.link의 버킷 생성과
+같은 종류의 바깥 작업이다). **그 MinIO 안에 버킷이 둘이다**(#233, ADR-0032) — 제출물이 사는
 비공개 버킷과, 공모전 이미지만 사는 **익명 읽기 버킷**(`laurio-staging-public-images`)이다.
 서버가 아니라 버킷을 가른다: 공개 읽기 정책이 버킷 단위라 이미지 쪽 설정을 잘못해도
 소스에 닿지 못한다. 버킷 생성·정책·CORS 는 이 저장소 밖의 수작업이다. 어댑터가 전부
@@ -166,8 +170,10 @@ Pipeline 이 아니라 **freestyle** 이고, 셸 스텝이 `sh ./deploy.sh stagi
 Dockerfile 을 쓰지만 공유 `image:` 태그가 없어 **이미지가 셋**이다 — `build backend`
 만 하면 워커 둘은 옛 이미지에 남고, `up -d` 는 바뀐 게 없으니 Running 이라 적고
 지나가 배포가 초록으로 끝난 채 스캔만 옛 코드로 돈다),
-`packages/bff-shared/` 와 `pnpm-lock.yaml` 은 **frontend + operator** 를 함께 간다.
-없는 컨테이너는 변경 여부와 무관하게 굽는다 — 「없음」은 「최신」이 아니다.
+`packages/bff-shared/` 와 `pnpm-lock.yaml` 은 **frontend + operator + classroom**(#277)을
+함께 간다 — `packages/bff-client/` 는 아직 **frontend + operator** 뿐이다(강의실은 이
+패키지를 쓰지 않는다, 위 「프론트엔드」절 참고). 없는 컨테이너는 변경 여부와 무관하게
+굽는다 — 「없음」은 「최신」이 아니다.
 
 **헬스 체크는 Host 헤더를 붙여야 한다.** 루프백으로 치면 Host 가 `127.0.0.1` 이
 되는데 그건 `ALLOWED_HOSTS` 에 없어 Django 가 400 을 낸다 — gunicorn 이 멀쩡히
@@ -678,7 +684,7 @@ Problem Statement 를 읽고 「어댑터 실제 구현은 스토리지 하나�
 
 ## CI 는 셀프호스티드 러너에서, 프로덕션 이미지로 돈다
 
-GitHub 호스티드 러너는 과금이 막혀 못 쓴다. 11개 잡 전부 `runs-on: [self-hosted, sub]` —
+GitHub 호스티드 러너는 과금이 막혀 못 쓴다. 12개 잡 전부 `runs-on: [self-hosted, sub]` —
 staging 배포 호스트와 **같은 머신**이다. 러너 컨테이너는 `--network host` 로 돌고 호스트
 docker 소켓을 물어 컨테이너를 바깥에 띄운다(DooD).
 
@@ -687,17 +693,19 @@ docker 소켓을 물어 컨테이너를 바깥에 띄운다(DooD).
 호스트 데몬 기준으로 풀려 `/app` 이 통째로 비고, backend 는 `can't open file '/app/manage.py'`
 로, 두 앱은 `Scope: all 0 workspace projects` 로 죽는다. 오버라이드가 하는 일은 셋뿐이다:
 
-- 세 서비스의 `volumes` 를 `!reset []` — 마운트 없이 **이미지 안의 코드**로 돈다.
-- 두 앱의 빌드 `target` 을 `runner` 로 — dev 서버가 아니라 **배포되는 그 이미지**를 친다.
-- 두 앱의 `command` 를 `!reset null` — 이미지의 `node server.js` 가 산다.
+- 네 서비스(backend·frontend·operator·classroom)의 `volumes` 를 `!reset []` — 마운트 없이
+  **이미지 안의 코드**로 돈다.
+- 세 앱(frontend·operator·classroom, #277)의 빌드 `target` 을 `runner` 로 — dev 서버가
+  아니라 **배포되는 그 이미지**를 친다.
+- 세 앱의 `command` 를 `!reset null` — 이미지의 `node server.js` 가 산다.
 
 **그래서 e2e 가 검증하는 대상이 바뀌었다.** 예전엔 `next dev` 를, 지금은 프로덕션 빌드를
 친다 — 배포되는 것과 테스트되는 것이 같아졌다. 위 `next dev` 메모리 주의는 이제
 **로컬에서 스위트를 돌릴 때만** 해당한다.
 
-**잡마다 스택을 갈라 준다.** compose 를 쓰는 세 잡(`celery-broker`·e2e 둘)이 한 러너에서
-겹치므로 각자 다른 `COMPOSE_PROJECT_NAME` 과 포트 슬롯을 잡는다 — 안 그러면 서로의
-컨테이너를 `down -v` 로 지운다. 뒷정리는 `if: always()` 로 건다.
+**잡마다 스택을 갈라 준다.** compose 를 쓰는 네 잡(`celery-broker`·e2e 셋 — 공개·운영자·
+강의실, #277)이 한 러너에서 겹치므로 각자 다른 `COMPOSE_PROJECT_NAME` 과 포트 슬롯을
+잡는다 — 안 그러면 서로의 컨테이너를 `down -v` 로 지운다. 뒷정리는 `if: always()` 로 건다.
 
 **pytest 잡에 redis 서비스가 없다.** 테스트 세션 캐시가 LocMem 이라(위 「테스트는 서로를
 밟지 않는다」) 필요가 없어졌다. postgres 는 호스트 포트를 고정하지 않는다(#243) —
@@ -705,9 +713,10 @@ docker 소켓을 물어 컨테이너를 바깥에 띄운다(DooD).
 동시에 그 번호를 다시 잡으려다 죽은 적이 있어서 Docker 가 그때 비어 있는 포트를
 골라 쓰게 두고, 잡 안에서 `${{ job.services.postgres.ports['5432'] }}` 로 읽는다.
 
-실측(당시 9잡 전부 초록, 2026-09-05): 전체 **6분**. 지금은 `adr-status`·`screen-language` 가
-늘어 11잡이다. e2e 운영자 4분 · 공개 3분 · `celery-broker` 2분 · `pytest` 1분 · 나머지
-여섯은 각 1분 미만.
+실측(당시 9잡 전부 초록, 2026-09-05): 전체 **6분**. `adr-status`·`screen-language` 가 늘어
+11잡이 됐고, `frontend-e2e-classroom`(#277)이 늘어 지금은 12잡이다(강의실 e2e 실측은
+아직 없다 — CI 첫 실행이 잰다). e2e 운영자 4분 · 공개 3분 · `celery-broker` 2분 · `pytest`
+1분 · 나머지 일곱은 각 1분 미만.
 
 **`screen-language` 잡**(#267, #268)은 스텝 둘로 두 표면을 막는다. 첫 스텝
 (`scripts/check_screen_language.py`)은 공개 앱(`frontend/`)의 화면 문자열에

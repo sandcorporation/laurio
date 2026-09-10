@@ -88,3 +88,11 @@ services:
     volumes: !reset []
     ports: !override
       - "3000"
+
+  classroom:
+    build:
+      target: runner
+    command: !reset null
+    volumes: !reset []
+    ports: !override
+      - "3000"
