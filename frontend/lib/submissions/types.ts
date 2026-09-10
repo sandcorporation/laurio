@@ -54,11 +54,12 @@ export const EVIDENCE_KINDS: { value: EvidenceIn["kind"]; label: string }[] = [
   { value: "source_location", label: "소스 위치" },
 ];
 
-// SubmissionAsset.Kind(백엔드 submissions/models.py)와 같은 네 값 — 제출 폼(#192)의
-// 자료 종류별 구역과 Evidence의 자료 선택 드롭다운이 같이 쓴다.
+// SubmissionAsset.Kind(백엔드 submissions/models.py)와 같은 다섯 값(#264) — 제출
+// 폼의 자료 종류별 구역과 Evidence의 자료 선택 드롭다운이 같이 쓴다.
 export const ASSET_KIND_LABELS: Record<string, string> = {
   source: "소스코드",
   demo_video: "시연 영상",
+  screenshot: "스크린샷",
   demo_url: "데모 URL",
   repository: "GitHub 저장소",
 };

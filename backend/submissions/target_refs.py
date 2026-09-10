@@ -12,6 +12,11 @@ from __future__ import annotations
 
 SOURCE_SLOT = "source"
 DEMO_VIDEO_SLOT = "demo-video"
+# 스크린샷(#264, ADR-0036) — 마감 전 비공개·마감 후 공개라는 점에서 DEMO_VIDEO_SLOT과
+# 같은 취급이다(`submissions.resolvers.SubmissionTargetStateResolver`의 "그 외 슬롯"
+# 분기가 그대로 적용된다). 다만 파일이 사는 버킷은 여전히 private다 — `ContestImage`의
+# 공개 버킷과는 다르다(ADR-0032/0036).
+SCREENSHOT_SLOT = "screenshot"
 # Award 이후 Developer가 추가로 올리는 빌드 자산(빌드 설정·서명키·스토어 메타데이터·
 # 실행 문서, #14 Handover). SOURCE_SLOT과 같은 이유로 별도 슬롯을 둔다 — 소스와
 # 가시성 판정 시점이 다르기 때문은 아니고(둘 다 Award 이후 Sponsor에게 열린다),
@@ -28,6 +33,10 @@ def demo_video_target_ref(contest_id: int, developer_user_id: int) -> str:
     return f"submission:{contest_id}:{developer_user_id}:{DEMO_VIDEO_SLOT}"
 
 
+def screenshot_target_ref(contest_id: int, developer_user_id: int) -> str:
+    return f"submission:{contest_id}:{developer_user_id}:{SCREENSHOT_SLOT}"
+
+
 def build_asset_target_ref(contest_id: int, developer_user_id: int) -> str:
     return f"submission:{contest_id}:{developer_user_id}:{BUILD_ASSET_SLOT}"
 
@@ -41,6 +50,7 @@ def build_asset_target_ref(contest_id: int, developer_user_id: int) -> str:
 SLOT_BY_ASSET_KIND = {
     "source": SOURCE_SLOT,
     "demo_video": DEMO_VIDEO_SLOT,
+    "screenshot": SCREENSHOT_SLOT,
 }
 
 

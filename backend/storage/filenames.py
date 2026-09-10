@@ -48,6 +48,13 @@ _KNOWN_EXTENSIONS: dict[str, str] = {
     "video/webm": ".webm",
     "video/x-msvideo": ".avi",
     "application/pdf": ".pdf",
+    # 스크린샷(#264, ADR-0036) — png/jpeg/webp/gif는 표준 mimetypes 테이블에도
+    # 있지만, 이 파일의 앞선 항목들과 같은 이유(환경마다 답이 갈릴 수 있다)로
+    # 여기 못박아 둔다.
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
 }
 
 

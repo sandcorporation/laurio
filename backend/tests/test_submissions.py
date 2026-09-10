@@ -941,6 +941,208 @@ def test_after_deadline_demo_is_public_but_source_and_test_account_stay_hidden(
     assert demo_account_of(sponsor_response.json()) == "demo-login/demo-password"
 
 
+# --- 스크린샷 (#264, ADR-0036) -----------------------------------------------
+
+
+def _screenshot_object_key(contest_id: int, developer_user_id: int) -> str:
+    return f"submission:{contest_id}:{developer_user_id}:screenshot/{uuid.uuid4().hex}"
+
+
+@pytest.mark.django_db
+def test_screenshot_is_accepted_and_public_after_deadline_like_demo_video(
+    client, category, landing_type
+):
+    """스크린샷은 데모·영상과 같은 모양이다 — 마감 전 비공개, 마감 후 전면 공개
+    (ADR-0036). 이미지 content-type이면 받아들여진다."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+    source_key = _source_object_key(contest["id"], dev["user_id"])
+    screenshot_key = _screenshot_object_key(contest["id"], dev["user_id"])
+
+    created = _submit(
+        client,
+        dev["access"],
+        contest["id"],
+        {
+            "assets": [
+                {"kind": "source", "value": source_key},
+                {
+                    "kind": "screenshot",
+                    "value": screenshot_key,
+                    "content_type": "image/png",
+                    "label": "메인 화면",
+                },
+            ]
+        },
+    )
+    assert created.status_code == 201, created.content
+    submission_id = created.json()["id"]
+
+    # 마감 전에는 낯선 사람에게 통째로 안 보인다(#10) — Submission 자체가 404다.
+    stranger = _login(client, uid="anyone")
+    before = client.get(
+        f"{SUBMISSIONS_URL}/{submission_id}", **_auth_header(stranger["access"])
+    )
+    assert before.status_code == 404
+
+    ClockOverride.objects.update_or_create(
+        pk=1, defaults={"overridden_at": deadline + timedelta(minutes=1)}
+    )
+
+    after = client.get(f"{SUBMISSIONS_URL}/{submission_id}")
+    assert after.status_code == 200
+    assert first_value(after.json(), "screenshot") == screenshot_key
+
+
+@pytest.mark.django_db
+def test_screenshot_with_disallowed_content_type_is_rejected(client, category, landing_type):
+    """ADR-0036: ContestImage와 같은 MIME 허용목록(png/jpeg/webp/gif)이다."""
+
+    _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+
+    response = _submit(
+        client,
+        dev["access"],
+        contest["id"],
+        {
+            "assets": [
+                {"kind": "source", "value": _source_object_key(contest["id"], dev["user_id"])},
+                {
+                    "kind": "screenshot",
+                    "value": _screenshot_object_key(contest["id"], dev["user_id"]),
+                    "content_type": "application/zip",
+                },
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+    assert "png/jpeg/webp/gif" in response.json()["detail"]
+    assert Submission.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_screenshot_without_a_content_type_is_rejected(client, category, landing_type):
+    """content-type을 아예 안 실은 것도 거절한다 — 빈 값으로 허용목록 검사를
+    건너뛸 수 없다."""
+
+    _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+
+    response = _submit(
+        client,
+        dev["access"],
+        contest["id"],
+        {
+            "assets": [
+                {"kind": "source", "value": _source_object_key(contest["id"], dev["user_id"])},
+                {
+                    "kind": "screenshot",
+                    "value": _screenshot_object_key(contest["id"], dev["user_id"]),
+                },
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.django_db
+def test_screenshot_count_cap_comes_from_the_policy(client, category, landing_type):
+    from policies.services import get_current_policy
+
+    _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+
+    policy = get_current_policy()
+    policy.max_screenshot_assets = 1
+    policy.save(update_fields=["max_screenshot_assets"])
+
+    assets = [
+        {"kind": "source", "value": _source_object_key(contest["id"], dev["user_id"])},
+        {
+            "kind": "screenshot",
+            "value": _screenshot_object_key(contest["id"], dev["user_id"]),
+            "content_type": "image/png",
+        },
+        {
+            "kind": "screenshot",
+            "value": _screenshot_object_key(contest["id"], dev["user_id"]),
+            "content_type": "image/png",
+        },
+    ]
+    rejected = _submit(client, dev["access"], contest["id"], {"assets": assets})
+    assert rejected.status_code == 422
+
+    policy.max_screenshot_assets = 2
+    policy.save(update_fields=["max_screenshot_assets"])
+    accepted = _submit(client, dev["access"], contest["id"], {"assets": assets})
+    assert accepted.status_code == 201, accepted.content
+
+
+@pytest.mark.django_db
+def test_evidence_can_point_at_a_screenshot_asset(client, category, landing_type):
+    """Evidence.asset은 종류를 가리지 않는다 — 스크린샷도 가리킬 수 있어야
+    「어느 자료의 근거인가」 선택에 스크린샷이 나온다(#264 AC)."""
+
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        requirements=[{"text": "온보딩 화면", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+    screenshot_key = _screenshot_object_key(contest["id"], dev["user_id"])
+
+    created = _submit(
+        client,
+        dev["access"],
+        contest["id"],
+        {
+            "assets": [
+                {"kind": "source", "value": _source_object_key(contest["id"], dev["user_id"])},
+                {
+                    "kind": "screenshot",
+                    "value": screenshot_key,
+                    "content_type": "image/png",
+                },
+            ]
+        },
+    )
+    assert created.status_code == 201, created.content
+    screenshot_asset_id = next(
+        a["id"] for a in created.json()["assets"] if a["kind"] == "screenshot"
+    )
+
+    edited = _edit(
+        client,
+        dev["access"],
+        contest["id"],
+        {
+            "assets": created.json()["assets"],
+            "requirement_responses": [
+                {
+                    "requirement_id": requirement_id,
+                    "is_met": True,
+                    "note": "화면 참고",
+                    "evidence": [
+                        {"kind": "screenshot", "value": "온보딩 1단계", "asset_id": screenshot_asset_id}
+                    ],
+                }
+            ],
+        },
+    )
+    assert edited.status_code == 200, edited.content
+    evidence = edited.json()["requirement_responses"][0]["evidence"][0]
+    assert evidence["asset_id"] == screenshot_asset_id
+
+
 @pytest.mark.django_db
 def test_viewing_a_nonexistent_submission_is_404(client):
     response = client.get(f"{SUBMISSIONS_URL}/999999")

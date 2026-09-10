@@ -45,6 +45,7 @@ from accounts.middleware import jwt_auth
 from accounts.models import DeveloperProfile
 from accounts.sanitize import sanitize_free_text
 from awards.models import Award
+from contests.images import ALLOWED_CONTEST_IMAGE_CONTENT_TYPES
 from contests.models import Contest, InviteCode, Requirement
 from contests.view_tracking import get_view_count
 from core.clock import Clock
@@ -273,11 +274,19 @@ _ASSET_KINDS = {k.value for k in SubmissionAsset.Kind}
 _KIND_LIMIT_FIELDS = {
     SubmissionAsset.Kind.SOURCE: "max_source_assets",
     SubmissionAsset.Kind.DEMO_VIDEO: "max_demo_video_assets",
+    SubmissionAsset.Kind.SCREENSHOT: "max_screenshot_assets",
     SubmissionAsset.Kind.DEMO_URL: "max_demo_url_assets",
     SubmissionAsset.Kind.REPOSITORY: "max_repository_assets",
 }
 
 _KIND_LABELS = dict(SubmissionAsset.Kind.choices)
+
+# ContestImage(#234, ADR-0032)와 같은 허용목록을 그대로 쓴다(#264, ADR-0036).
+# `policies.models`의 `max_screenshot_asset_bytes`와 달리 여기서는 직접
+# import해도 순환이 생기지 않는다 — `contests.images`는 `submissions`를 (직접도
+# 간접도) 임포트하지 않는다(`contests.schemas`가 끌어오는 것은
+# `submissions.scoring_basis`뿐이라 `submissions.api`와는 별도 모듈이다).
+ALLOWED_SCREENSHOT_CONTENT_TYPES = ALLOWED_CONTEST_IMAGE_CONTENT_TYPES
 
 
 @dataclass(frozen=True)
@@ -318,14 +327,27 @@ class _CleanedAsset:
 
 
 def _clean_assets_in(
-    assets_in, *, contest: Contest, developer_user_id: int
+    assets_in,
+    *,
+    contest: Contest,
+    developer_user_id: int,
+    existing_asset_values: set[tuple[str, str]] = frozenset(),
 ) -> list[_CleanedAsset]:
     """페이로드의 자료를 검증하고 저장 가능한 값으로 다듬는다 (#190).
 
     여기서 걸러지는 것: 알 수 없는 종류, 소스도 저장소도 없음(#218), 남의 업로드
     대상을 가리키는 object_key, GitHub 형식이 아닌 저장소 URL, 종류별·합산 개수
-    상한, 같은 값의 중복. 마지막 하나를 API가 막는 이유는 `UniqueConstraint`가 대신 걸리면
-    422가 아니라 500(IntegrityError)이 나기 때문이다.
+    상한, 같은 값의 중복, 스크린샷의 MIME 허용목록(#264). 마지막에서 둘째 것을
+    API가 막는 이유는 `UniqueConstraint`가 대신 걸리면 422가 아니라
+    500(IntegrityError)이 나기 때문이다.
+
+    `existing_asset_values`는 **이미 이 Submission에 있는 (kind, value) 정체성**이다
+    (수정 요청에서만 채워진다, 첫 제출에는 지울 기존 자료가 없다). 이미 있는
+    값이면 MIME 검사를 건너뛴다 — content-type은 업로드 시점에만 실려 오고
+    (`SubmissionAssetOut`에 그 필드가 없다, #241), 값이 바뀌지 않은 행을 그대로
+    되돌려 보내는 편집 UI는 content_type을 다시 채워 보내지 않는다
+    (`asset-kind-section.tsx`). 그 행까지 매번 다시 검사하면 스크린샷이 있는
+    제출작은 체크리스트 한 줄만 고쳐도 저장이 거절된다.
     """
 
     cleaned: list[_CleanedAsset] = []
@@ -376,14 +398,29 @@ def _clean_assets_in(
                 f"{_KIND_LABELS[item.kind]} 자료에는 테스트 계정을 붙일 수 없습니다.",
             )
 
-        # content-type은 storage object_key를 갖는 종류(SOURCE·DEMO_VIDEO)에만
-        # 의미가 있다(#241) — URL 종류에 실려 와도 조용히 버린다. 저장해 봐야 쓰는
-        # 곳(다운로드 파일명)이 없고, 의미 없는 데이터가 쌓이지 않게 한다.
+        # content-type은 storage object_key를 갖는 종류(SOURCE·DEMO_VIDEO·SCREENSHOT)
+        # 에만 의미가 있다(#241) — URL 종류에 실려 와도 조용히 버린다. 저장해 봐야
+        # 쓰는 곳(다운로드 파일명)이 없고, 의미 없는 데이터가 쌓이지 않게 한다.
         content_type = (
             (item.content_type or "").strip()
             if item.kind in SubmissionAsset.OBJECT_KEY_KINDS
             else ""
         )
+
+        if item.kind == SubmissionAsset.Kind.SCREENSHOT and (
+            item.kind, value
+        ) not in existing_asset_values:
+            # ADR-0036: ContestImage와 같은 MIME 허용목록으로 이미지가 아닌
+            # 파일을 거절한다. 바이트 상한(#261의 presigned POST 전환)과 달리
+            # 이 검사는 스토리지가 아니라 여기서 한다 — 업로드 자체는 아직 일반
+            # presigned PUT이라 declared content-type을 스토리지 조건에 실을 수
+            # 없다. content-type을 아예 안 실었어도(빈 문자열) 거절한다 — 안
+            # 그러면 이 검사를 빈 값 하나로 건너뛸 수 있다. **새 값에만 적용한다**
+            # — 위 docstring의 `existing_asset_values` 설명 참고.
+            if content_type not in ALLOWED_SCREENSHOT_CONTENT_TYPES:
+                raise HttpError(
+                    422, "스크린샷은 png/jpeg/webp/gif 형식만 올릴 수 있습니다."
+                )
 
         cleaned.append(
             _CleanedAsset(
@@ -588,9 +625,11 @@ def _replace_requirement_responses(
 # --- 직렬화 -------------------------------------------------------------------
 
 
-#: 마감 후 전면 공개되는 종류 (ADR-0014의 "데모·영상" 칸).
+#: 마감 후 전면 공개되는 종류 (ADR-0014의 "데모·영상" 칸 — 스크린샷도 #264/ADR-0036이
+#: 같은 칸에 세웠다).
 _PUBLIC_AFTER_DEADLINE_KINDS = (
     SubmissionAsset.Kind.DEMO_VIDEO,
+    SubmissionAsset.Kind.SCREENSHOT,
     SubmissionAsset.Kind.DEMO_URL,
 )
 #: Award 전까지 본인만 보는 종류. 저장소가 여기 있는 이유는 ADR-0027 — 공개
@@ -646,7 +685,7 @@ def _evidence_outs(evidence_items, visible_asset_ids: set[int]) -> list[Evidence
 
 
 def _public_asset_summaries(assets) -> list[AssetSummaryOut]:
-    """마감 후 공개되는 자료(데모·영상)만 요약한다 (#190).
+    """마감 후 공개되는 자료(데모·영상·스크린샷)만 요약한다 (#190, #264).
 
     공개 프로필과 심사 비교가 같은 것을 낸다 — 두 자리가 각자 종류를 거르면
     언젠가 한쪽만 새 종류를 흘린다. 원소 타입에 `test_account`가 없다.
@@ -868,8 +907,12 @@ def update_submission(request: HttpRequest, contest_id: int, payload: Submission
     if submission is None:
         raise HttpError(404, "수정할 Submission이 없습니다. 먼저 제출하세요.")
 
+    existing_asset_values = set(submission.assets.values_list("kind", "value"))
     cleaned_assets = _clean_assets_in(
-        payload.assets, contest=contest, developer_user_id=request.auth_user.id
+        payload.assets,
+        contest=contest,
+        developer_user_id=request.auth_user.id,
+        existing_asset_values=existing_asset_values,
     )
 
     with transaction.atomic():
@@ -1207,8 +1250,8 @@ def compare_submissions(request: HttpRequest, contest_id: int):
             r.requirement_id: r for r in submission.requirement_responses.all()
         }
         assets = list(submission.assets.all())
-        # 이 화면에 나오는 자료는 데모·영상뿐이다 — 소스·저장소를 가리키는 근거는
-        # 참조 없이 나간다(`_evidence_outs` 참고).
+        # 이 화면에 나오는 자료는 데모·영상·스크린샷뿐이다 — 소스·저장소를
+        # 가리키는 근거는 참조 없이 나간다(`_evidence_outs` 참고).
         visible_asset_ids = {
             a.id for a in assets if a.kind in _PUBLIC_AFTER_DEADLINE_KINDS
         }

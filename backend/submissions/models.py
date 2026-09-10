@@ -67,36 +67,45 @@ TEST_ACCOUNT_ASSET_KINDS = ("demo_url",)
 
 
 class SubmissionAsset(models.Model):
-    """제출작에 딸린 자료 하나 — 소스·시연 영상·데모 URL·GitHub 저장소 (#190).
+    """제출작에 딸린 자료 하나 — 소스·시연 영상·스크린샷·데모 URL·GitHub 저장소 (#190, #264).
 
     **`value` 컬럼 하나로 담는다.** 그 값이 storage object_key인지 URL인지는
     `kind`가 말한다 — 같은 모양을 `Evidence`(kind + value)가 이미 쓰고 있어
     저장소에 선례가 있다. 종류마다 컬럼을 따로 두면 어느 행에든 빈 컬럼이 하나씩
     남고, "kind에 따라 정확히 하나만 채워진다"를 CHECK 제약으로 직접 써야 한다.
 
-    가시성은 종류가 가른다(ADR-0014, ADR-0027):
+    가시성은 종류가 가른다(ADR-0014, ADR-0027, ADR-0036):
 
     - `SOURCE`·`REPOSITORY` — 본인 + Award 후 Sponsor
-    - `DEMO_VIDEO`·`DEMO_URL` — 진행 중엔 본인·Sponsor, 마감 후 전면 공개
+    - `DEMO_VIDEO`·`SCREENSHOT`·`DEMO_URL` — 진행 중엔 본인·Sponsor, 마감 후 전면 공개
 
-    `SOURCE`·`DEMO_VIDEO`는 `SubmissionTargetStateResolver`가 슬롯 단위로 이미
-    판정하므로 리졸버를 손댈 것이 없다 — object_key가 `<target_ref>/<32자리 hex>`라
+    `SOURCE`·`DEMO_VIDEO`·`SCREENSHOT`는 `SubmissionTargetStateResolver`가 슬롯 단위로
+    이미 판정하므로 리졸버를 손댈 것이 없다 — object_key가 `<target_ref>/<32자리 hex>`라
     한 슬롯에 여러 파일이 쌓여도 서로를 덮지 않는다(`handovers.BuildAsset`이 이미
     그렇게 쓴다). **`REPOSITORY`만 다르다** — storage를 거치지 않는 URL이라 API
     스키마가 직접 가시성을 판정해야 한다. 이 저장소에서 "본인만 보이는 URL"은
     처음이고 선례는 `test_account` 하나뿐이다.
+
+    **`SCREENSHOT`은 버킷도 마감도 `DEMO_VIDEO`와 같지만 채점 입력은 아니다**
+    (ADR-0036) — `SCORING_INPUT_KINDS`에 없다. AI 채점은 텍스트 프롬프트만 읽고
+    이미지를 보지 않으므로(`scoring.services._build_prompt`), 스크린샷 파일 자체를
+    프롬프트에 실어 봐야 채점기가 그것을 해석하지 못한다. 다만 이 자료를 가리키는
+    `Evidence`의 라벨은 다른 자료와 똑같이 프롬프트에 실린다(#191) — "이 요구사항의
+    근거가 스크린샷이다"라는 사실 자체는 여전히 AI에게 전달된다.
     """
 
     class Kind(models.TextChoices):
         SOURCE = "source", "소스코드"
         DEMO_VIDEO = "demo_video", "시연 영상"
+        SCREENSHOT = "screenshot", "스크린샷"
         DEMO_URL = "demo_url", "데모 URL"
         REPOSITORY = "repository", "GitHub 저장소"
 
-    #: 채점 입력이 되는 종류 — 같은 LLM 컨텍스트 예산을 나눠 쓴다(#191).
+    #: 채점 입력이 되는 종류 — 같은 LLM 컨텍스트 예산을 나눠 쓴다(#191). `SCREENSHOT`은
+    #: 위 클래스 docstring이 적은 이유로 여기 없다.
     SCORING_INPUT_KINDS = (Kind.SOURCE, Kind.REPOSITORY)
     #: 값이 storage object_key인 종류(나머지는 URL이다).
-    OBJECT_KEY_KINDS = (Kind.SOURCE, Kind.DEMO_VIDEO)
+    OBJECT_KEY_KINDS = (Kind.SOURCE, Kind.DEMO_VIDEO, Kind.SCREENSHOT)
     #: 로그인 정보를 붙일 수 있는 종류 — 소스와 저장소에는 테스트 계정이 없다.
     TEST_ACCOUNT_KINDS = TEST_ACCOUNT_ASSET_KINDS
 

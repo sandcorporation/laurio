@@ -75,7 +75,8 @@ class SubmissionTargetStateResolver:
                 additional_viewer_ids=frozenset({sponsor_user_id}),
             )
 
-        # 데모·영상 등 그 외 슬롯: 마감 전엔 Developer 본인 + Sponsor, 마감 후 전면 공개.
+        # 데모·영상·스크린샷(#264) 등 그 외 슬롯: 마감 전엔 Developer 본인 + Sponsor,
+        # 마감 후 전면 공개.
         # owner_id는 두 분기 모두에서 채운다 — PUBLIC은 "누구나 다운로드 가능"이라는
         # 뜻이지 "누구나 업로드 가능"이라는 뜻이 아니다(#10 리뷰). 업로드 권한은
         # storage.policy.authorize_upload가 owner_id만으로 판단하므로, 마감이 지나도
