@@ -1,12 +1,51 @@
-// 「내 클래스」 홈 (#276) — 뼈대뿐이다. Class 모델이 아직 없어(이 체인은 인프라만
-// 짓는다) 항상 빈 상태를 보여준다. 이 화면에 닿는다는 것 자체가 미들웨어 가드를
-// 통과했다는 뜻이라(middleware.ts) 여기서 다시 세션을 확인하지 않는다 — 강의실은
-// 자기 로그인이 없고(ADR-0038) 클라이언트 세션 훅도 아직 필요하지 않다.
+"use client";
+
+// 「내 클래스」 홈 (#278). Class 모델이 생겨 실제 목록을 그린다 — #276이 남긴
+// 뼈대(항상 빈 상태)를 대체한다. 여기 닿는다는 것 자체가 미들웨어 가드를
+// 통과했다는 뜻이라(middleware.ts) 여기서 다시 세션을 확인하지 않는다.
+//
+// 인증 구역이므로 SSR 하지 않는다(frontend/app/console/contests/page.tsx와
+// 같은 이유, ADR-0015) — 클라이언트 컴포넌트로 목록을 받아온다.
+import Link from "next/link";
+
+import { useMyClasses } from "@/lib/classes/use-my-classes";
+
 export default function ClassroomHome() {
+  const state = useMyClasses();
+
   return (
     <main>
       <h1 data-testid="classroom-home-heading">내 클래스</h1>
-      <p data-testid="classroom-empty-state">아직 가입하거나 개설한 클래스가 없습니다.</p>
+
+      <p>
+        <Link href="/classes/new" data-testid="classroom-new-class-link">
+          새 클래스
+        </Link>
+      </p>
+
+      {state.status === "loading" ? (
+        <p data-testid="classroom-loading">불러오는 중...</p>
+      ) : state.status === "error" ? (
+        // 조회 실패와 0건은 반드시 다르게 보여야 한다 — 같아 보이면 조회가 죽은
+        // 날 강사는 자기 클래스가 사라졌다고 읽는다.
+        <p data-testid="classroom-error">클래스 목록을 불러오지 못했습니다.</p>
+      ) : state.classes.length === 0 ? (
+        <p data-testid="classroom-empty-state">아직 가입하거나 개설한 클래스가 없습니다.</p>
+      ) : (
+        <ul data-testid="classroom-list">
+          {state.classes.map((classroom) => (
+            <li key={classroom.id} data-testid={`classroom-row-${classroom.id}`}>
+              <Link href={`/classes/${classroom.id}`} data-testid={`classroom-row-${classroom.id}-link`}>
+                {classroom.name}
+              </Link>
+              <span>
+                {" "}
+                · {new Date(classroom.created_at).toLocaleDateString("ko-KR")} 만듦
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </main>
   );
 }

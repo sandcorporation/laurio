@@ -13,6 +13,14 @@ export const dynamic = "force-dynamic";
 
 const NOT_ALLOWED_RESPONSE = { detail: "허용되지 않은 경로입니다." } as const;
 
+// 204(체크리스트 삭제, #283)·205·304 — `Response`/`NextResponse` 생성자는 이
+// 상태 코드에 본문을 실으면 그 자체로 던진다(WHATWG Fetch 표준의 null body
+// status). 백엔드가 202바이트짜리 빈 본문을 줘도 그대로 새 Response에
+// 넘기면 여기서 500이 된다 — 실제로 체크리스트 항목 삭제(DELETE)가 이걸로
+// 막혀 있었다(#283 코드리뷰, 이 저장소 전체에서 처음 204를 낸 엔드포인트라
+// 아무도 이 경로를 밟지 않았다).
+const NULL_BODY_STATUSES = new Set([204, 205, 304]);
+
 async function handle(request: NextRequest, path: string[]): Promise<NextResponse> {
   const backendPath = sanitizeBackendPath(path);
 
@@ -25,7 +33,8 @@ async function handle(request: NextRequest, path: string[]): Promise<NextRespons
 
   const result = await forwardToBackend(request, backendPath);
 
-  const responseBody = await result.response.arrayBuffer();
+  const isNullBodyStatus = NULL_BODY_STATUSES.has(result.response.status);
+  const responseBody = isNullBodyStatus ? null : await result.response.arrayBuffer();
   const response = new NextResponse(responseBody, {
     status: result.response.status,
     headers: {
