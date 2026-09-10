@@ -346,7 +346,7 @@ export default function NewContestGrillPage() {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-4 p-10">
         <p role="alert" data-testid="grill-verification-required" className="text-attention">
-          본인확인(Verification)을 완료해야 공모전을 개최할 수 있습니다.
+          본인확인을 완료해야 공모전을 개최할 수 있습니다.
         </p>
         <p className="text-sm text-ink" data-testid="grill-verification-reason">
           {verification.status === "underage"

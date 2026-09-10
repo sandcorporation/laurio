@@ -129,7 +129,7 @@ export function GrillChatPanel({
 
       {turnLimitReached && (
         <p className="text-sm text-attention" data-testid="grill-chat-turn-limit">
-          이 Contest의 AI grill 대화가 너무 길어졌습니다. 지금까지 나온 체크리스트로 진행해 주세요.
+          이 공모전의 AI 대화가 너무 길어졌습니다. 지금까지 나온 체크리스트로 진행해 주세요.
         </p>
       )}
 

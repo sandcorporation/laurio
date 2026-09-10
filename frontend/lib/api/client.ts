@@ -36,8 +36,12 @@ import type { paths } from "@laurio/bff-client/schema";
 
 if (typeof window !== "undefined") {
   throw new Error(
+    // SCREEN-LANGUAGE-EXCEPTION: 개발자용 불변식 크래시 메시지다 — 정상 동작에서는
+    // 사용자가 볼 수 없고, 이 모듈이 실수로 브라우저에 번들되는 버그가 났을 때만
+    // 개발자 콘솔에 뜬다.
     "lib/api/client.ts 는 서버 전용이다(ADR-0015) — 브라우저 번들에 들어가면 " +
       "LAURIO_API_BASE_URL 이 undefined 가 되어 127.0.0.1:58000 으로 조용히 요청을 " +
+      // SCREEN-LANGUAGE-EXCEPTION: 위와 같음 — 개발자용 크래시 메시지.
       "보내려 한다. 인증 구역(클라이언트 컴포넌트)은 BFF 프록시(FE-08, #32)를 거치는 " +
       "별도 클라이언트를 써야 한다 — 이 파일을 client component에서 import 하지 말 것.",
   );

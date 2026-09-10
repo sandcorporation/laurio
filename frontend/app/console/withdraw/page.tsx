@@ -153,7 +153,7 @@ function WhatHappensSection() {
       <div>
         <p className="font-semibold">남는 것</p>
         <ul className="mt-1 list-disc pl-5 text-sm text-muted">
-          <li>참가한 Contest와 제출물 — 다만 이름 없이 남습니다</li>
+          <li>참가한 공모전과 제출물 — 다만 이름 없이 남습니다</li>
           <li>결제·지급 원장 — 계약 상대방의 기록이라 법이 보존을 요구합니다</li>
         </ul>
       </div>

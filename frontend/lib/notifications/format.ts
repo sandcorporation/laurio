@@ -16,10 +16,10 @@ export function describeNotification(notification: NotificationOut): string {
         ? `주최하신 '${contestTitle}' 공모전 마감이 곧 도래합니다.`
         : `참가하신 '${contestTitle}' 공모전 마감이 곧 도래합니다.`;
     case "judging_period_ending_reminder":
-      return `주최하신 '${contestTitle}' 공모전의 심사기간 종료가 임박했습니다 — Award 처리를 완료해주세요.`;
+      return `주최하신 '${contestTitle}' 공모전의 심사기간 종료가 임박했습니다 — 선정 처리를 완료해주세요.`;
     case "distribution_final_warning": {
       const amount = typeof context.amount === "number" ? context.amount : 0;
-      return `주최하신 '${contestTitle}' 공모전, Award가 없으면 상금 ${amount.toLocaleString("ko-KR")}원이 참가자 전원에게 자동으로 균등 배분됩니다.`;
+      return `주최하신 '${contestTitle}' 공모전, 선정이 없으면 상금 ${amount.toLocaleString("ko-KR")}원이 참가자 전원에게 자동으로 균등 배분됩니다.`;
     }
     case "result_notice":
       if (context.outcome === "distributed") {
