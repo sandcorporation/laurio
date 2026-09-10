@@ -16,6 +16,20 @@ const STATUS_LABEL: Record<string, string> = {
   open: "열림",
 };
 
+// 달성률 표시(#289, CONTEXT.md 「달성률」) — 분모가 0이면 "0%"가 아니라
+// "아직 없음"으로 말한다(AC). 0%(참여자는 있지만 아무도 못 품)와 구별해야
+// 하므로 `pass_rate`가 아니라 `member_count`로 분기한다.
+function formatAchievementRate(problem: {
+  passed_count: number;
+  member_count: number;
+  pass_rate: number | null;
+}): string {
+  if (problem.member_count === 0 || problem.pass_rate === null) {
+    return "아직 없음";
+  }
+  return `${Math.round(problem.pass_rate * 100)}% (${problem.passed_count}/${problem.member_count}명)`;
+}
+
 function joinLinkUrl(joinCode: string): string {
   if (typeof window === "undefined") return "";
   return `${window.location.origin}/join/${joinCode}`;
@@ -146,6 +160,10 @@ export default function ClassDetailPage() {
                   {problem.title}
                 </Link>
                 <span data-testid={`problem-row-${problem.id}-status`}> · {STATUS_LABEL[problem.status]}</span>
+                <span data-testid={`problem-row-${problem.id}-achievement-rate`}>
+                  {" "}
+                  · 달성률 {formatAchievementRate(problem)}
+                </span>
                 <button
                   type="button"
                   data-testid={`problem-row-${problem.id}-move-up`}

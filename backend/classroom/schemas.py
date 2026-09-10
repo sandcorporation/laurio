@@ -92,6 +92,14 @@ class ProblemOut(Schema):
     #: 실제로 채점에 쓰일 값 — `model`이 비어 있으면 클래스의 `default_model`.
     effective_model: str
     checklist_items: list[ChecklistItemOut] = []
+    #: 이 문제를 한 번이라도 통과한 참여자 수(#289, CONTEXT.md 「달성률」) —
+    #: 강사 본인과 내보내진 참여자는 빼고 센다.
+    passed_count: int = 0
+    #: 달성률의 분모 — 강사 본인·내보내진 참여자를 뺀 참여자 수.
+    member_count: int = 0
+    #: `passed_count / member_count`. 분모가 0이면 `None`이다 — 화면이 그때
+    #: "0%"가 아니라 "아직 없음"으로 말하도록 0.0과 구별한다(#289 AC).
+    pass_rate: float | None = None
 
 
 class ProblemReorderIn(Schema):

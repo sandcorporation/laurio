@@ -5328,10 +5328,22 @@ export interface components {
             effective_model: string;
             /** Id */
             id: number;
+            /**
+             * Member Count
+             * @default 0
+             */
+            member_count: number;
             /** Model */
             model: string;
             /** Order */
             order: number;
+            /** Pass Rate */
+            pass_rate?: number | null;
+            /**
+             * Passed Count
+             * @default 0
+             */
+            passed_count: number;
             /** Status */
             status: string;
             /** Submission Format */

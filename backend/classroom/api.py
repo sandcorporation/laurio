@@ -104,7 +104,56 @@ def _serialize_checklist_item(item: ChecklistItem) -> ChecklistItemOut:
     return ChecklistItemOut(id=item.id, label=item.label, required=item.required, order=item.order)
 
 
-def _serialize_problem(problem: Problem, class_obj: Class) -> ProblemOut:
+def _required_checklist_item_ids(checklist_items) -> set[int]:
+    return {item.id for item in checklist_items if item.required}
+
+
+def _active_member_ids(class_obj: Class) -> set[int]:
+    """달성률의 분모를 이루는 참여자 id — 강사 본인과 내보내진 사람은 뺀다
+    (#289, CONTEXT.md 「달성률」)."""
+
+    return set(
+        class_obj.members.filter(expelled_at__isnull=True)
+        .exclude(user_id=class_obj.instructor_id)
+        .values_list("id", flat=True)
+    )
+
+
+def _problem_pass_stats(problem: Problem, active_member_ids: set[int]) -> tuple[int, int]:
+    """(passed_count, member_count) — 분모는 `active_member_ids`의 크기,
+    분자는 그중 이 문제를 한 번이라도 통과한 사람 수다(#289). 매번 지금의
+    체크리스트 기준으로 다시 셈한다 — `_is_score_passed`가 그렇게 되어
+    있어 여기서는 최신 `required_item_ids`만 넘기면 된다."""
+
+    member_count = len(active_member_ids)
+    if not active_member_ids:
+        return 0, 0
+
+    required_item_ids = _required_checklist_item_ids(problem.checklist_items.all())
+    if not required_item_ids:
+        return 0, member_count
+
+    submissions = ClassroomSubmission.objects.filter(
+        problem=problem, member_id__in=active_member_ids
+    ).select_related("classroom_score")
+
+    passed_member_ids: set[int] = set()
+    for submission in submissions:
+        if submission.member_id in passed_member_ids:
+            continue
+        score = getattr(submission, "classroom_score", None)
+        if _is_score_passed(score, required_item_ids):
+            passed_member_ids.add(submission.member_id)
+
+    return len(passed_member_ids), member_count
+
+
+def _serialize_problem(
+    problem: Problem, class_obj: Class, *, active_member_ids: set[int] | None = None
+) -> ProblemOut:
+    if active_member_ids is None:
+        active_member_ids = _active_member_ids(class_obj)
+    passed_count, member_count = _problem_pass_stats(problem, active_member_ids)
     return ProblemOut(
         id=problem.id,
         classroom_id=problem.classroom_id,
@@ -116,11 +165,10 @@ def _serialize_problem(problem: Problem, class_obj: Class) -> ProblemOut:
         model=problem.model,
         effective_model=problem.model or class_obj.default_model,
         checklist_items=[_serialize_checklist_item(i) for i in problem.checklist_items.all()],
+        passed_count=passed_count,
+        member_count=member_count,
+        pass_rate=(passed_count / member_count) if member_count else None,
     )
-
-
-def _required_checklist_item_ids(checklist_items) -> set[int]:
-    return {item.id for item in checklist_items if item.required}
 
 
 def _is_score_passed(score: ClassroomScore | None, required_item_ids: set[int]) -> bool:
@@ -450,7 +498,8 @@ def list_problems(request: HttpRequest, class_id: int):
 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problems = class_obj.problems.prefetch_related("checklist_items").all()
-    return 200, [_serialize_problem(p, class_obj) for p in problems]
+    active_member_ids = _active_member_ids(class_obj)
+    return 200, [_serialize_problem(p, class_obj, active_member_ids=active_member_ids) for p in problems]
 
 
 @router.post(
@@ -478,7 +527,8 @@ def reorder_problems(request: HttpRequest, class_id: int, payload: ProblemReorde
         Problem.objects.bulk_update(problems.values(), ["order"])
 
     ordered = sorted(problems.values(), key=lambda p: p.order)
-    return 200, [_serialize_problem(p, class_obj) for p in ordered]
+    active_member_ids = _active_member_ids(class_obj)
+    return 200, [_serialize_problem(p, class_obj, active_member_ids=active_member_ids) for p in ordered]
 
 
 @router.get(
