@@ -229,7 +229,7 @@ export function AssetKindSection({
                     onClick={() => moveRow(index, -1)}
                     disabled={disabled || index === 0}
                     data-testid={`${testIdPrefix}-${index}-move-up`}
-                    className="rounded-sm border border-rule px-2 py-0.5 text-xs hover:border-ink disabled:opacity-30"
+                    className="rounded-sm border border-rule px-2 py-0.5 text-xs hover:border-ink disabled:opacity-50"
                   >
                     위로
                   </button>
@@ -238,7 +238,7 @@ export function AssetKindSection({
                     onClick={() => moveRow(index, 1)}
                     disabled={disabled || index === rows.length - 1}
                     data-testid={`${testIdPrefix}-${index}-move-down`}
-                    className="rounded-sm border border-rule px-2 py-0.5 text-xs hover:border-ink disabled:opacity-30"
+                    className="rounded-sm border border-rule px-2 py-0.5 text-xs hover:border-ink disabled:opacity-50"
                   >
                     아래로
                   </button>
@@ -248,7 +248,7 @@ export function AssetKindSection({
                       onClick={() => removeRow(index)}
                       disabled={disabled}
                       data-testid={`${testIdPrefix}-${index}-remove`}
-                      className="rounded-sm border border-rule px-2 py-0.5 text-xs hover:border-ink disabled:opacity-30"
+                      className="rounded-sm border border-rule px-2 py-0.5 text-xs hover:border-ink disabled:opacity-50"
                     >
                       삭제
                     </button>

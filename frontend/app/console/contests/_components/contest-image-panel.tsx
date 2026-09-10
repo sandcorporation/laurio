@@ -166,7 +166,7 @@ export function ContestImagePanel({
                       onClick={() => void handleReorder(image, -1)}
                       disabled={index === 0}
                       data-testid={`contest-image-${image.id}-up`}
-                      className="rounded-sm border border-rule px-1.5 py-0.5 disabled:opacity-30"
+                      className="rounded-sm border border-rule px-1.5 py-0.5 disabled:opacity-50"
                       aria-label="앞으로 이동"
                     >
                       ↑
@@ -176,7 +176,7 @@ export function ContestImagePanel({
                       onClick={() => void handleReorder(image, 1)}
                       disabled={index === sorted.length - 1}
                       data-testid={`contest-image-${image.id}-down`}
-                      className="rounded-sm border border-rule px-1.5 py-0.5 disabled:opacity-30"
+                      className="rounded-sm border border-rule px-1.5 py-0.5 disabled:opacity-50"
                       aria-label="뒤로 이동"
                     >
                       ↓

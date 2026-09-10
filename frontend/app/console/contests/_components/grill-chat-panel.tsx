@@ -133,7 +133,12 @@ export function GrillChatPanel({
         </p>
       )}
 
-      <div className="flex items-end gap-3 border border-ink bg-surface p-3">
+      {/* 포커스 표시는 **이 상자**가 낸다. 안의 textarea 는 테두리 없는 작성칸이라
+          자기 링을 그리면 상자 안쪽에 이중선이 생겨 `outline-none` 을 걸어 뒀는데,
+          그러면 키보드 사용자가 지금 어디에 있는지를 통째로 잃는다 — 저장소 전체에서
+          `outline` 을 언급하는 유일한 자리가 그 제거 한 줄이었다. 링을 없애는 대신
+          한 단계 바깥으로 옮긴다. */}
+      <div className="flex items-end gap-3 border border-ink bg-surface p-3 focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-ink">
         <textarea
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
@@ -148,6 +153,8 @@ export function GrillChatPanel({
           placeholder="무엇을 만들고 싶은지 알려주세요"
           rows={2}
           data-testid="grill-chat-input"
+          // `outline-none` 은 표시를 없애려는 것이 아니라 위 상자로 옮겼기 때문이다
+          // (상자의 `focus-within:outline-*`).
           className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-ink/40"
         />
         <span className="pb-1 font-mono text-[11px] text-ink/40" data-testid="grill-chat-length">
@@ -158,7 +165,7 @@ export function GrillChatPanel({
           onClick={() => void handleSubmit()}
           disabled={!canSend}
           data-testid="grill-chat-send"
-          className="flex h-9 w-9 shrink-0 items-center justify-center bg-ink text-paper disabled:opacity-40"
+          className="flex h-9 w-9 shrink-0 items-center justify-center bg-ink text-paper disabled:opacity-50"
         >
           {sending ? "…" : "↑"}
         </button>

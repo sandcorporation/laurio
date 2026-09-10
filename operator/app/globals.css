@@ -30,11 +30,23 @@ label {
   font-size: 0.9rem;
 }
 
-input {
+/* 이 앱은 유틸리티가 아니라 요소 스킨으로 칠한다 — 그래서 **여기 없는 요소는
+ * 아무 것도 입지 않는다.** `input` 만 적혀 있던 동안 `select` 는 테두리조차 없이
+ * 맨 위젯으로 떠 있었다(이의 목록의 상태 필터). 폼 컨트롤 셋을 한 셀렉터로 묶어
+ * 그 함정을 닫는다 — 다음에 `textarea` 를 놓는 사람도 같은 자리에 빠지지 않는다. */
+input,
+select,
+textarea {
   border: 1px solid #cfcfcb;
   border-radius: 4px;
   padding: 0.5rem 0.6rem;
   font-size: 1rem;
+  font-family: inherit;
+}
+
+/* 고르는 컨트롤은 누를 수 있어 보여야 한다 — 버튼과 같은 이유다. */
+select:not(:disabled) {
+  cursor: pointer;
 }
 
 button {
