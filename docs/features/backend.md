@@ -163,9 +163,14 @@ ADR-0036). 업로드 자료의 값은 `submission:{공모전id}:{개발자id}:{�
 | | |
 | --- | --- |
 | `POST`·`GET /api/classroom/classes[/{id}]` | 클래스를 열고 내 것만 본다 |
+| `POST`·`GET /api/classroom/classes/{id}/problems[/{id}]` | 문제를 만들고 고친다 — 마감 필드가 없다 |
+| `PATCH .../problems/{id}` | 제목·설명·제출 형식을 고친다 |
+| `POST .../problems/reorder` | 클래스 상세의 문제 순서를 바꾼다 |
 
 **강사 전용이다, 아직은.** `ClassMember`(가입)가 없어 강사가 아닌 요청은 그 클래스가
 아예 없는 것처럼 404를 받는다 — 403이 아니다, 목록에도 상세에도 존재를 드러내지 않는다.
+`Problem.status`(초안/열림)는 이미 응답에 실리지만, 참여자가 실제로 열린 것만 보게
+거르는 표면은 아직 없다.
 
 ### 스토리지와 알림
 
