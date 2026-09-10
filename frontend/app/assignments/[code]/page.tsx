@@ -206,7 +206,19 @@ export default function AssignmentInvitePage() {
   // — 공모전 제출 화면·「내 참가 현황」과 **같은 판정기**)이 이미 답한다.
   const hasSubmission = submission !== null;
   const nextAction = submission?.next_action ?? null;
-  const canEdit = !hasSubmission || nextAction === "can_edit_submission";
+  // **한 번도 내지 않은 사람에게도 닫힌 과제는 닫혀 보여야 한다**(#268 후속).
+  // 예전에는 `!hasSubmission` 이면 무조건 편집 가능이었다 — Submission 단위
+  // 판정(`next_action`)이 아직 없으니 폼을 열어 두고 첫 제출은 서버가 409 로
+  // 거절한다는 설계였다. 그런데 강사의 「학생 화면 미리보기」가 정확히 그
+  // 경우라, **마감된 과제에서도 입력과 제출 버튼이 전부 살아 있었다.** 눌러야만
+  // 안 된다는 것을 알게 되는 화면은 거절을 늦게 말하는 것이지 말하는 것이 아니다.
+  //
+  // 판정기를 새로 만들지는 않는다 — 서버가 준 `status` 를 본다(#247). 시계는
+  // **닫는 방향으로만** 함께 쓴다: 마감 시각은 지났는데 마감 스캔이 아직 안 돈
+  // 창에서 폼을 열어 주지 않기 위해서다. 여는 방향으로는 절대 쓰지 않는다.
+  const canStartSubmission =
+    assignment.status === "ready" && assignment.data.status === "assignment_open" && !isPastDeadline;
+  const canEdit = hasSubmission ? nextAction === "can_edit_submission" : canStartSubmission;
 
   // 시계가 마감을 넘는 순간 제출물을 한 번 다시 불러와 `next_action`을
   // 갱신한다(#247, #248) — 판정기는 여전히 서버 하나다(`useDeadlineRefetch`
@@ -393,6 +405,17 @@ export default function AssignmentInvitePage() {
             data-testid="assignment-state-band"
           >
             {NEXT_ACTION_LABELS[nextAction].text}
+          </p>
+        )}
+        {/* 낸 것이 없는데 닫혀 있으면 `next_action` 이 없어 위 문구가 비어 있다 —
+            그 자리를 비워 두면 화면은 「낼 수 있는데 아무 말도 없는 상태」로
+            읽힌다. 왜 낼 수 없는지를 여기서 말한다(#268 후속). */}
+        {!hasSubmission && !canEdit && (
+          <p
+            className="mt-2 font-mono text-sm text-attention"
+            data-testid="assignment-closed-band"
+          >
+            마감되어 더 이상 제출할 수 없습니다.
           </p>
         )}
       </div>
