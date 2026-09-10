@@ -9,7 +9,7 @@ from ninja.errors import HttpError
 
 from .auth import InternalAuth
 from .e2e_seeds import E2E_SEED_REGISTRY
-from .scans import SCAN_REGISTRY, run_all, run_scan
+from .scans import is_scan_active, run_all, run_scan
 
 router = Router(tags=["internal"])
 
@@ -49,9 +49,14 @@ def tick(request):
 
 @router.post("/scans/{name}", auth=InternalAuth())
 def scan(request, name: str):
-    """등록부의 스캔 하나. Celery beat 가 스캔마다 이것을 부른다 — 이름은 등록부에서만 온다."""
+    """등록부의 스캔 하나. Celery beat 가 스캔마다 이것을 부른다 — 이름은 등록부에서만 온다.
 
-    if name not in SCAN_REGISTRY:
+    **꺼진 스캔은 이름을 몰라야 한다.** `is_scan_active`는 등록 여부와 지금 도는지를
+    한 판정으로 합친다 — 공모전 제품 스위치(#271)가 꺼지면 환불·배분·지급·인수인계
+    스캔은 여기서 "등록되지 않은 스캔"과 똑같이 404 다.
+    """
+
+    if not is_scan_active(name):
         raise HttpError(404, f"등록되지 않은 스캔입니다: {name}")
     return run_scan(name, params=_scan_params(request))
 

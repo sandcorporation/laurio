@@ -69,6 +69,11 @@ ENV NEXT_PUBLIC_PORTONE_CHANNEL_KEY=${NEXT_PUBLIC_PORTONE_CHANNEL_KEY}
 # 것은 #115의 범위다.
 ARG NEXT_PUBLIC_TOSS_CLIENT_KEY=""
 ENV NEXT_PUBLIC_TOSS_CLIENT_KEY=${NEXT_PUBLIC_TOSS_CLIENT_KEY}
+# 공모전 제품 스위치(#271, `frontend/lib/contest-switch.ts`) — 기본값 "true"라
+# ARG를 안 주는 dev/CI 빌드는 지금과 똑같이 공모전이 보인다. staging만
+# compose.staging.yaml이 이 build.args를 "false"로 겹쳐 준다.
+ARG NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED="true"
+ENV NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED=${NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED}
 RUN pnpm build
 
 # ---- runner: staging/prod가 실제로 쓰는 얇은 이미지 (compose.staging.yaml/
@@ -103,6 +108,14 @@ ENV NODE_ENV=production \
 #    `.env.<target>` 은 gitignore 라 git diff 기반 감지로는 절대 보이지 않는다.
 ARG NEXT_PUBLIC_TOSS_CLIENT_KEY=""
 ENV NEXT_PUBLIC_TOSS_CLIENT_KEY=${NEXT_PUBLIC_TOSS_CLIENT_KEY}
+
+# 공모전 제품 스위치(#271) — builder 와 같은 기본값("true")을 다시 노출한다.
+# 이 값을 읽는 부팅 가드는 없지만(`frontend/lib/contest-switch.ts`는 요청
+# 처리 코드 안에서만 읽히고 이미 번들에 굳어 있다), deploy.sh 의 변경 감지가
+# "이 컨테이너가 지금 서빙 중인 값"을 컨테이너에게 그대로 물어볼 수 있게
+# NEXT_PUBLIC_TOSS_CLIENT_KEY 와 같은 자리를 지킨다.
+ARG NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED="true"
+ENV NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED=${NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED}
 
 WORKDIR /app
 

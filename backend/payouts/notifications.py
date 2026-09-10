@@ -34,6 +34,7 @@ dedup_context 는 Payout 식별자 · `HoldKind` · 실이체 시도 횟수(`tra
 
 from __future__ import annotations
 
+from core.contest_switch import contest_product_enabled
 from core.scans import ScanSpec
 
 from notifications.models import NotificationType
@@ -122,11 +123,15 @@ def _notify_if_developer_turn(payout: Payout, as_of, ctx):
     return {"payout_id": payout.id, "hold_kind": hold.kind.value}
 
 
+# `enabled=contest_product_enabled`(#271) — Payout 은 상금이 있는 공모전 전용이다
+# (Assignment 에는 지급 자체가 없다). 공모전 제품 스위치가 꺼지면 이 스캔은
+# 등록부에서 사라진 것처럼 군다.
 PAYOUT_NOTIFICATION_SCANS = (
     ScanSpec(
         name="payout-awaits-you",
         candidates=_confirmed_payouts_awaiting_the_two_holds,
         handle_row=_notify_if_developer_turn,
         batch_size=_BATCH_SIZE,
+        enabled=contest_product_enabled,
     ),
 )

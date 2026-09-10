@@ -69,6 +69,38 @@ DB·Redis·MinIO·두 앱이 통째로 갈리므로 체인 둘이 서로의 데�
 `GitHubAPIAdapter`(#193) · 알림 3채널(`AligoAlimtalkAdapter`·`AligoSmsAdapter`·
 `AligoLmsAdapter`). 각 dotted path 는 `docker/staging.env.example` 에 그대로 적혀 있다.
 
+**staging은 공모전이 꺼져 있다 — 고장이 아니라 껐다**(#271, ADR-0037). 방향이
+바뀌어 공모전은 나중을 위한 기능이 됐고, 지금 사람을 모을 것은 과제다.
+`LAURIO_CONTEST_PRODUCT_ENABLED`(기본값 켜짐, `LAURIO_DEPLOYMENT_TARGET`과 무관한
+독립 값)를 `docker/compose.staging.yaml`이 기본 `false`로 겹쳐 쓴다 — dev·CI는
+건드리지 않으므로 지금과 똑같이 켜진 채다. 코드도 데이터도 하나도 지우지 않았다 —
+Score의 PROTECT 때문에 지울 수도 없고(아래 「테스트」 절의 「채점이 한 번 돈
+뒤에는」), 닫는 것은 표면뿐이다:
+
+- **백엔드가 거절한다(진짜 문).** 공모전 개최·수정·재개·견적, 요구사항 AI grill,
+  공모전 이미지, 목록·상세·홈 큐레이션·내가 개최한 목록·조회수 기록, 공모전 결제·
+  심사기간 연장 결제가 404다(403이 아니다 — 존재를 알려주지 않는다). `GET
+  /api/contests/categories`·`deliverable-types`는 예외다 — 주소는 `/contests/`
+  아래지만 과제 개설 화면이 읽는다. `contests.assignment_api`(별도 라우터)와
+  운영자 표면(`/api/operator/*`)은 이 스위치와 무관하게 그대로 연다.
+- **공개 앱이 감춘다.** 헤더의 「공모전」·「공모전 개최」, `/console`의 「내
+  공모전」, `/contests/**`·`/console/contests/**` 전체가 빠지거나 404다. 앱과
+  백엔드가 어긋나면 링크는 보이는데 앞이 404인 것이 고른 실패 모양이다
+  (`LAURIO_OPERATOR_ORIGIN`과 같은 종류의 어긋남).
+- **공모전 전용 스캔이 등록부에서 사라진다.** 환불 둘·배분 둘·지급 관련 둘·인수인계
+  (`payment-refund-request`·`payment-refund-reconcile`·`distribution-create`·
+  `distribution-share-payout`·`payout-awaits-you`·`seller-registration-recovery`·
+  `handover-release`) — `/api/internal/tick`·`/scans/{name}`·beat 스케줄 어디에도
+  안 나온다. 채점·저장소 가시성·알림·휴면·신원 파기·상태 전이는 그대로 돈다.
+
+**한 곳에 모은 목록**은 `backend/core/contest_switch.py` 모듈 docstring이다 —
+다시 켤 때 읽을 자리. **되돌리는 법**: `.env.staging`에
+`LAURIO_CONTEST_PRODUCT_ENABLED=true` 한 줄을 추가하고 backend와 frontend를
+재배포한다(frontend는 빌드 인자로 굽으므로 재빌드가 필요하다,
+`docker/frontend.Dockerfile`). ADR을 새로 쓰지 않는다 — 되돌리기가 환경변수 한
+줄이라 「되돌리기 어렵다」에 해당하지 않는다(방향 전환 자체의 근거는 ADR-0037에
+있다).
+
 **그래도 가드는 그대로다.** `core.adapters.check_adapter_mode`(`django.core.checks` 로
 등록되어 `django.setup()` 이후 `manage.py migrate`/`check`/`runserver` 부팅 파이프라인에서
 평가된다, #83)가 **열 값**(`VERIFICATION_ADAPTER_MODE`·`PAYMENT_ADAPTER_MODE`·

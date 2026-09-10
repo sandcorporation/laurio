@@ -30,9 +30,28 @@ import Link from "next/link";
 
 import { fetchHomeCuration, type Contest, type HomeCurationGroup } from "@/lib/api/contests";
 import { formatDday, formatPrize, formatSubmissionCount, isImminent } from "@/lib/contest-format";
+import { contestProductEnabled } from "@/lib/contest-switch";
 import { HOME_BUCKET_EMPTY_MESSAGES, HOME_BUCKET_LABELS } from "@/lib/home-curation";
 
 export default async function Home() {
+  // 공모전 제품 스위치(#271)가 꺼지면 이 홈은 공모전 큐레이션을 그리지 않는다 —
+  // 백엔드의 `GET /api/contests/home`도 같은 스위치로 404를 내므로(단일 집행자
+  // 원칙), 여기서 미리 갈리지 않으면 이 요청이 그대로 새고 홈 전체가 깨진
+  // 화면으로 보인다.
+  if (!contestProductEnabled()) {
+    return (
+      <main className="flex min-h-screen flex-col gap-4 bg-paper p-10 text-ink">
+        <header className="flex flex-col gap-2">
+          <h1 className="text-3xl font-semibold">Laurio</h1>
+          <p className="text-sm text-ink/70">
+            지금은 초대받은 과제만 이용할 수 있습니다. 출제자에게 받은 초대 링크로
+            들어와 주세요.
+          </p>
+        </header>
+      </main>
+    );
+  }
+
   const groups = await fetchHomeCuration();
 
   return (

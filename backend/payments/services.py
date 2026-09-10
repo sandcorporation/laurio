@@ -25,6 +25,7 @@ from ledger.models import Account, EntrySide
 from ledger.services import LineInput, post_journal_entry
 from submissions.models import Submission
 
+from core.contest_switch import contest_product_enabled
 from core.scans import ScanSpec, scan_params
 
 from .adapters import PGError, PGTimeoutError, get_adapter
@@ -316,7 +317,22 @@ def _reconcile(payment, as_of, ctx):
 # 배치 50은 뼈대 기본값 그대로다 — 무제한 스캔은 백로그가 쌓였을 때 이 스캔을 호출하는 HTTP
 # 요청 자체를 타임아웃으로 몰아넣는다(리뷰 지적 4). 배치를 넘는 잔여 분량은 다음 실행이 마저
 # 처리한다.
+#
+# `enabled=contest_product_enabled`(#271) — 공모전 제품 스위치가 꺼지면 이 둘은
+# 등록부에서 사라진 것처럼 군다. 환불은 상금이 있는 공모전에만 존재하므로
+# (Assignment 에는 Payment 자체가 없다) 이 스위치가 유일하게 지키려는 "돈이 실제
+# 결제 대행사로 나가는 경로" 그 자체다.
 REFUND_SCANS = (
-    ScanSpec(name="payment-refund-request", candidates=_new_refund_candidates, handle_row=_request_and_settle),
-    ScanSpec(name="payment-refund-reconcile", candidates=_pending_refund_candidates, handle_row=_reconcile),
+    ScanSpec(
+        name="payment-refund-request",
+        candidates=_new_refund_candidates,
+        handle_row=_request_and_settle,
+        enabled=contest_product_enabled,
+    ),
+    ScanSpec(
+        name="payment-refund-reconcile",
+        candidates=_pending_refund_candidates,
+        handle_row=_reconcile,
+        enabled=contest_product_enabled,
+    ),
 )
