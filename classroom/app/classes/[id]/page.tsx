@@ -4,8 +4,10 @@
 // 보여준다. 남의 클래스는 백엔드가 404를 주므로 그대로 "찾을 수 없다"로
 // 보여준다(존재를 알려주지 않는다).
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
+import { useState } from "react";
 
+import { copyClass } from "@/lib/classes/api";
 import { useClass } from "@/lib/classes/use-class";
 import { useProblems } from "@/lib/problems/use-problems";
 
@@ -17,8 +19,23 @@ const STATUS_LABEL: Record<string, string> = {
 export default function ClassDetailPage() {
   const params = useParams<{ id: string }>();
   const classId = Number(params.id);
+  const router = useRouter();
   const { state: classState } = useClass(classId);
   const { state: problemsState, move } = useProblems(classId);
+  const [copying, setCopying] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
+
+  async function handleCopyClass() {
+    setCopyError(null);
+    setCopying(true);
+    try {
+      const copy = await copyClass(classId);
+      router.push(`/classes/${copy.id}`);
+    } catch {
+      setCopyError("클래스를 복사하지 못했습니다. 잠시 후 다시 시도해주세요.");
+      setCopying(false);
+    }
+  }
 
   if (classState.status === "loading") {
     return (
@@ -55,6 +72,12 @@ export default function ClassDetailPage() {
           채점 설정
         </Link>
       </p>
+      <p>
+        <button type="button" data-testid="copy-class-button" onClick={handleCopyClass} disabled={copying}>
+          {copying ? "복사하는 중..." : "복사해서 새 기수 열기"}
+        </button>
+      </p>
+      {copyError ? <p data-testid="copy-class-error">{copyError}</p> : null}
 
       <h2>문제</h2>
       <p>

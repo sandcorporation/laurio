@@ -43,3 +43,11 @@ export function setOpenAIKey(classId: number, apiKey: string): Promise<ClassRow>
     body: JSON.stringify({ api_key: apiKey }),
   });
 }
+
+// 지난 기수로 다음 기수를 연다(#293) — 문제·체크리스트·채점 설정이
+// 순서 그대로 따라오고, 참여자·제출물·Score·OpenAI 키는 따라오지 않는다.
+export function copyClass(classId: number): Promise<ClassRow> {
+  return backendJson<ClassRow>(`/classroom/classes/${classId}/copy`, {
+    method: "POST",
+  });
+}

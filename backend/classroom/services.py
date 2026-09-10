@@ -1,4 +1,4 @@
-"""문제를 다른 클래스로 복사한다 (#292, CONTEXT.md 「강의실」).
+"""문제·클래스 복사 (#292/#293, CONTEXT.md 「강의실」).
 
 **복사는 언제나 문제와 체크리스트와 채점 설정(문제 자신의 `model`)만
 데려온다.** 제출물·시도·Score·참여자는 애초에 이 함수가 모르는
@@ -35,3 +35,26 @@ def copy_problem_to_class(problem: Problem, target_class: Class) -> Problem:
         for item in problem.checklist_items.all()
     )
     return copy
+
+
+def copy_class(class_obj: Class, instructor_id: int) -> Class:
+    """`class_obj`를 복사해 `instructor_id`가 여는 새 클래스를 만든다(#293 AC).
+
+    **OpenAI 키는 따라오지 않는다** — AC가 「문제와 체크리스트와 채점
+    설정」이라고만 적고 키는 언급하지 않는다: 키는 강사 본인의 결제 수단이지
+    「채점 설정」(어떤 모델을 쓸지)이 아니다. 새 클래스는 `has_openai_key`가
+    거짓으로 시작해 강사가 다시 넣어야 한다 — 저장 뒤에는 다시 못 보는
+    값이므로 어차피 이 코드가 평문을 복사할 방법이 없다(#284).
+
+    참여자·제출물·Score·달성률은 이 함수가 모르는 모델이라 자연히 따라오지
+    않는다 — `ClassMember`·`Submission`이 아직 없다(#279~#281/#286~#290).
+    """
+
+    new_class = Class.objects.create(
+        instructor_id=instructor_id,
+        name=class_obj.name,
+        default_model=class_obj.default_model,
+    )
+    for problem in class_obj.problems.order_by("order", "id"):
+        copy_problem_to_class(problem, new_class)
+    return new_class

@@ -58,8 +58,13 @@ Next.js + React. 강사·참여자가 쓰는 앱이다(ADR-0037) — 공모전 �
 `/classes/{id}/problems/new`로 이어진다. 「채점 설정」이 `/classes/{id}/settings`로
 이어진다.
 
-`GET /api/classroom/classes/{id}` · `GET .../problems` · `POST .../problems/reorder`로
-그린다.
+**「복사해서 새 기수 열기」**가 이 클래스를 복사해 새 클래스를 연다(#293) — 문제와
+체크리스트와 채점 설정(기본 모델·문제별 덮어쓰기)이 순서 그대로 따라오고, 참여자·
+제출물·Score·달성률·OpenAI 키는 따라오지 않는다. 복사본은 원본과 독립이고, 복사가
+끝나면 새 클래스 상세로 이동한다.
+
+`GET /api/classroom/classes/{id}` · `GET .../problems` · `POST .../problems/reorder` ·
+`POST .../classes/{id}/copy`로 그린다.
 
 ## `/classes/{id}/settings` 채점 설정
 

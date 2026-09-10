@@ -529,6 +529,28 @@ export interface paths {
         patch: operations["classroom_api_update_class"];
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/copy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Copy Class View
+         * @description 지난 기수로 다음 기수를 연다(#293) — 문제·체크리스트·채점 설정이
+         *     순서 그대로 따라오고, 참여자·제출물·Score·OpenAI 키는 따라오지 않는다
+         *     (`services.copy_class` docstring 참고).
+         */
+        post: operations["classroom_api_copy_class_view"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/openai-key": {
         parameters: {
             query?: never;
@@ -6403,6 +6425,37 @@ export interface operations {
             };
             /** @description Unprocessable Content */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_copy_class_view: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
