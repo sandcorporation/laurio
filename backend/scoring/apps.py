@@ -7,11 +7,9 @@ class ScoringConfig(AppConfig):
     verbose_name = "Score · AI 채점"
 
     def ready(self) -> None:
-        from django.core.checks import register
-
-        from . import checks
-
-        register(checks.check_llm_adapter_mode)
+        # 어댑터 부팅 가드(check_llm_adapter_mode)는 core.apps.CoreConfig.ready()가
+        # 등록한다(#274) — 검사 대상(LLMScoringAdapter)이 core.llm_scoring으로
+        # 옮겨가면서 검사도 함께 옮겨갔다. `scoring.checks`는 재노출만 남아 있다.
 
         # 채점 스캔(#12, #139) — 등록부에 올라 beat 가 주기적으로 돌린다.
         from core.scans import register_scan

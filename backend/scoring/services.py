@@ -62,6 +62,7 @@ from django.db.models.functions import Coalesce
 from contests.models import Contest, ContestSubmission, Requirement
 from contests.submission_target_refs import source_target_ref
 from core.clock import Clock
+from core.llm_scoring import LLMAdapterPermanentError, RequirementInput, ScoringInput, get_adapter
 from core.prompt_safety import neutralize_untrusted as _neutralize_untrusted
 from core.scans import ScanSpec
 from repositories.adapters import ClonedRepository, get_github_adapter
@@ -76,7 +77,6 @@ from submissions.scoring_basis import (
     PLATFORM_FAILURE_MODEL_VERSION,
 )
 
-from .adapters import LLMAdapterPermanentError, RequirementInput, ScoringInput, get_adapter
 from .models import Score, ScoringAttempt
 from .source_selection import select_source_files
 
