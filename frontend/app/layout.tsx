@@ -1,31 +1,36 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Mono, IBM_Plex_Sans_KR } from "next/font/google";
+import { IBM_Plex_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import type { ReactNode } from "react";
 import "./globals.css";
 
 import { SiteHeader } from "./components/site-header";
 
-// 「공모 게시판」 서체(FE-02, #27) — 시안(design/*.dc.html)이 확정한 두 서체다.
-// next/font 로 셀프호스팅해 레이아웃 시프트 없이 로드하고, 실패해도 무너지지
-// 않도록 폴백 스택은 app/tokens.css 의 --font-sans/--font-mono 가 최종 결정한다.
-// 여기서는 변수만 채운다.
+// 본문 서체는 Pretendard, 등폭은 IBM Plex Mono 다.
 //
-// subsets 는 "latin" 만 준다 — "korean" 은 next/font 15.5.24 기준 이 폰트에
-// 존재하지 않는 값이라 build/dev 가 즉시 `Unknown subset 'korean' for font
-// 'IBM Plex Sans KR'. Available subsets: 'latin', 'latin-ext'` 로 죽는다(직접
-// 재현해 확인했다). 그리고 굳이 필요하지도 않다 — next/font/google 이 이
-// subsets 로 하는 일은 <link rel=preload> 대상을 고르는 것뿐이고(글리프
-// 포함 여부와는 무관하다), Google Fonts 가 내려주는 CSS 자체가 이미 이
-// 패밀리의 한글 유니코드 레인지를 전부 포함한다 — 브라우저에서
-// `document.fonts.check('16px "IBM Plex Sans KR"', '공개 공모전')` 이 실제로
-// true 를 반환하고, 로드된 @font-face 목록에 한글 syllable 레인지(예:
-// U+AC00-D7A3 대역)를 커버하는 항목이 잡히는 것으로 직접 확인했다. 즉 한글은
-// 이미 IBM Plex Sans KR 로 렌더된다 — "korean" subset 을 추가하면 증상이
-// 고쳐지는 게 아니라 빌드가 깨진다.
-const ibmPlexSansKR = IBM_Plex_Sans_KR({
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
-  variable: "--font-ibm-plex-sans-kr",
+// **Pretendard 는 Google Fonts 에 없다** — 그래서 본문만 `next/font/local` 로
+// 저장소에 담은 파일에서 로드한다(`app/fonts/`). 그래도 `next/font` 를 쓰는
+// 이유는 이 앱이 원래 갖고 있던 성질을 잃지 않기 위해서다: 셀프호스팅(외부
+// 호스트의 가동에 기대지 않는다)과 폴백 메트릭 보정(스왑 순간의 레이아웃
+// 시프트를 줄인다).
+//
+// 파일은 **가변폰트 전체**(1.96MB)다. 상용 음절만 담은 서브셋(무게당 0.26MB)이
+// 훨씬 가볍지만, 이 앱은 사용자가 지은 이름과 공모전 제목을 그대로 렌더하므로
+// 그 안의 드문 음절이 문장 중간에 시스템 폰트로 떨어져 서체가 섞인다 — 무게를
+// 아끼는 대신 그 섞임을 감수하지 않기로 한다.
+//
+// 시안(design/*.dc.html)이 고른 것은 IBM Plex Sans KR 이었지만 그것은 브랜드가
+// 정해지기 전의 자리표시자였다(app/tokens.css 의 첫 주석). 폰트를 정한 ADR 은
+// 없으므로 이 교체는 어떤 결정도 뒤집지 않는다. 등폭은 시안 그대로 둔다.
+//
+// 폴백 스택의 최종 결정은 여전히 app/tokens.css 의 --font-sans/--font-mono 다.
+// 여기서는 변수만 채운다.
+const pretendard = localFont({
+  src: "./fonts/PretendardVariable.woff2",
+  // 가변폰트 wght 축의 전 범위. 이 값을 좁히면 브라우저가 범위 밖 굵기를
+  // 합성(faux bold)해 버려 가변폰트를 쓰는 뜻이 없어진다.
+  weight: "45 920",
+  variable: "--font-pretendard",
   display: "swap",
 });
 
@@ -46,7 +51,7 @@ export const metadata: Metadata = {
 // 페이지가 이 레이아웃 아래 걸리든 렌더링 방식이 갈리지 않는다.
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="ko" className={`${ibmPlexSansKR.variable} ${ibmPlexMono.variable}`}>
+    <html lang="ko" className={`${pretendard.variable} ${ibmPlexMono.variable}`}>
       <body>
         <SiteHeader />
         {children}

@@ -35,7 +35,8 @@ export default defineConfig({
   // **워커 여럿으로 돈다** (#104). 예전에는 `workers: 1` 이었다 —
   // `e2e/tokens.spec.ts` 가 app/tokens.css 를 실제로 편집해(FE-02 #27 의 핵심
   // 승인 기준) 그 창 동안 다른 워커가 여는 모든 페이지가 바뀐 색을 보기
-  // 때문이었다. `fullyParallel` 과 `describe.configure({ mode: "serial" })` 는
+  // 때문이었다(그 스펙 자체는 01a4ae3 에서 지워졌다 — 아래 장치는 남는다:
+  // 전역 상태를 건드리는 스펙은 언제든 다시 생긴다). `fullyParallel` 과 `describe.configure({ mode: "serial" })` 는
   // 같은 파일 안에서만 순서를 강제해 그것을 막지 못한다.
   //
   // 이제 그 보장은 워커 수가 아니라 **실행을 두 패스로 나누는 것**이 진다

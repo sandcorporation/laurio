@@ -6,8 +6,10 @@
  *
  * **브랜드가 정해지면 이 파일 하나만 교체한다.** 컴포넌트 마크업에는 `bg-paper`
  * `text-ink` 같은 의미 이름만 남고 리터럴 hex 색이 흩어지지 않아야 이 교체가
- * 성립한다. frontend/e2e/tokens.spec.ts 가 "이 파일만 바꾸면 화면이 바뀐다"를
- * 실제로 이 파일을 편집해 증명한다.
+ * 성립한다. 예전에는 `frontend/e2e/tokens.spec.ts` 가 이 파일을 실제로 편집해
+ * 그것을 증명했는데, 그 스펙은 스위트 정리(01a4ae3 — e2e 를 CI 로 옮기며 293건을
+ * 102건으로 줄인 커밋)에서 지워졌다. **지금 그 불변식을 기계가 지키지는 않는다**
+ * — 리터럴 hex 를 컴포넌트에 흩지 않는 것이 사람의 규율로만 남아 있다.
  */
 @theme {
   /* 바탕 3단 — 잉크(텍스트) / 종이(페이지 바탕) / 표면(카드·헤더처럼 종이 위에 뜬 면) */
@@ -22,10 +24,15 @@
   --color-attention: #c4442b;
   --color-verified: #2e6a4c;
 
-  /* IBM Plex Sans KR + IBM Plex Mono. 실제 폴백 스택을 명시한다 — 폰트 로드가
+  /* Pretendard + IBM Plex Mono. 실제 폴백 스택을 명시한다 — 폰트 로드가
    * 실패해도 화면이 시스템 기본 산세리프/모노로 무너지지 않게. next/font가
-   * 이 CSS 변수(--font-sans/--font-mono)를 채운다(app/layout.tsx). */
-  --font-sans: var(--font-ibm-plex-sans-kr), "Malgun Gothic", "Apple SD Gothic Neo",
+   * 이 CSS 변수(--font-sans/--font-mono)를 채운다(app/layout.tsx).
+   *
+   * 본문 서체만 시안(design/*.dc.html)의 IBM Plex Sans KR 에서 갈아탔다 — 시안
+   * 값은 브랜드가 정해지기 전의 자리표시자였고(위 첫 주석) 폰트를 정한 ADR 은
+   * 없다. 폴백 첫 자리에 "Pretendard" 를 둔다: 셀프호스팅한 파일이 어떤 이유로
+   * 못 오더라도 그 폰트가 깔린 기기에서는 같은 서체로 읽힌다. */
+  --font-sans: var(--font-pretendard), "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo",
     ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
     Arial, sans-serif;
   --font-mono: var(--font-ibm-plex-mono), ui-monospace, SFMono-Regular, "SF Mono",

@@ -27,11 +27,12 @@ const nextConfig: NextConfig = {
   // 렌더링이 되면 조용히 깨지므로, e2e 가 JS 를 끈 HTML 을 직접 확인한다.
   reactStrictMode: true,
   webpack: (config, { dev }) => {
-    // frontend/e2e/tokens.spec.ts 가 app/tokens.css 를 실제로 편집해 "토큰
-    // 파일 하나 교체가 화면을 바꾼다"(FE-02, #27)를 증명한다. dev 컨테이너는
-    // 소스를 바인드 마운트로 받는데(docker/compose.dev.yaml), Windows 호스트 →
-    // Linux 컨테이너 바인드 마운트에서는 기본 fs 이벤트 감시가 파일 변경을
-    // 놓칠 수 있어 폴링으로 강제한다.
+    // dev 컨테이너는 소스를 바인드 마운트로 받는데(docker/compose.dev.yaml),
+    // Windows 호스트 → Linux 컨테이너 바인드 마운트에서는 기본 fs 이벤트 감시가
+    // 파일 변경을 놓칠 수 있어 폴링으로 강제한다. 이 설정이 처음 들어온 이유는
+    // `frontend/e2e/tokens.spec.ts` 가 app/tokens.css 를 실제로 편집했기
+    // 때문이었지만(FE-02, #27), 그 스펙은 01a4ae3 에서 지워졌다 — 설정은 남긴다:
+    // 바인드 마운트 위의 핫리로드가 그 스펙 없이도 같은 이유로 필요하다.
     if (dev) {
       config.watchOptions = {
         ...config.watchOptions,

@@ -7,8 +7,9 @@ import { isDeployedEnvironment } from "@/lib/auth/cookies";
 // `/` 는 FE-02 시절 이 스트립을 담은 자리표시 페이지였다 — 이제 `/` 는 실제
 // 공모전을 보여주는 공개 표면이라(#93, spec #92) 이 진단용 마크업이 거기 있으면
 // 안 된다. `data-token-proof` 네 개는 그대로 옮겨왔을 뿐 값도 의미도 바뀌지
-// 않았다 — frontend/e2e/tokens.spec.ts 가 여전히 이 스트립의 계산된 스타일을
-// 읽는다(이제 이 경로에서). 리터럴 hex 는 여기도 없다 — 전부 app/tokens.css 의
+// 않았다. `frontend/e2e/tokens.spec.ts` 가 이 스트립의 계산된 스타일을 읽었지만
+// 그 스펙은 01a4ae3 에서 지워졌다 — 이 화면은 이제 기계가 아니라 사람이 눈으로
+// 확인하는 자리다. 리터럴 hex 는 여기도 없다 — 전부 app/tokens.css 의
 // `@theme` 가 만든 유틸리티(`bg-*` `text-*` `border-*`)다.
 //
 // 이 페이지는 헤더 어디에서도 링크되지 않는다 — 첫 방문자가 걸어서 닿을 이유가
@@ -23,7 +24,7 @@ import { isDeployedEnvironment } from "@/lib/auth/cookies";
 // 운영 호스트에 목적을 알 수 없는 페이지가 살아 있는 것 자체가 사고다.
 // `lib/auth/cookies.ts` 의 `isDeployedEnvironment()` 를 그대로 재사용한다 —
 // "배포 환경인가"의 판정이 여기서 다시 발명되면 두 곳이 어긋날 수 있다.
-// `tokens.spec.ts` 는 dev 스택에서만 도므로 이 게이트에 비용이 없다.
+// 이 게이트에 비용은 없다 — 배포 환경에서만 404 를 내고 dev 에서는 그대로 뜬다.
 // **정적 프리렌더 대상이 아니어야 한다.** 아래 `notFound()` 게이트는 요청
 // 시점에 판정돼야 뜻이 있는데, Next 는 동적 API 호출이 없는 이 페이지를
 // `next build` 때 한 번 렌더해 정적 HTML 로 굳힌다 — 그러면
