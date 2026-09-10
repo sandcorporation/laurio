@@ -70,3 +70,20 @@ class ProblemOut(Schema):
 
 class ProblemReorderIn(Schema):
     problem_ids: list[int]
+
+
+class JoinPreviewOut(Schema):
+    class_name: str
+    instructor_email: str
+    problem_count: int
+    participant_count: int
+
+
+class JoinIn(Schema):
+    display_name: str = Field(min_length=1, max_length=100)
+
+
+class JoinResultOut(Schema):
+    class_id: int
+    class_name: str
+    display_name: str

@@ -528,6 +528,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/join-link/regenerate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Regenerate Join Link
+         * @description 가입 링크를 다시 뽑는다(#279). 새 코드로 덮어쓰므로 이전 코드는 그
+         *     순간부터 어떤 클래스도 가리키지 않는다 — 링크가 새어 나갔을 때 강사가
+         *     쓸 수 있는 유일한 조치다.
+         */
+        post: operations["classroom_api_regenerate_join_link"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/problems": {
         parameters: {
             query?: never;
@@ -665,6 +687,35 @@ export interface paths {
          *     않아 막는다(#283 AC).
          */
         post: operations["classroom_api_open_problem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/join/{join_code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview Join
+         * @description 가입 여부와 무관하게 누구나 본다 — 계정이 없는 사람이 가입할지 먼저
+         *     판단할 수 있어야 한다(#280 AC).
+         */
+        get: operations["classroom_api_preview_join"];
+        put?: never;
+        /**
+         * Join Class
+         * @description 가입과 클래스 가입이 한 흐름이다 — 계정이 있으면(로그인 되어 있으면)
+         *     이 요청 하나로 끝난다. 이미 참여자면 새로 만들지 않고 그 행을 그대로
+         *     돌려준다(#280 AC "같은 사람이 같은 클래스에 두 번 들어가지 않는다") —
+         *     두 번째 이름은 버려진다, 첫 가입 때 정한 이름이 그 클래스에서의 정체성이기
+         *     때문이다.
+         */
+        post: operations["classroom_api_join_class"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3653,6 +3704,8 @@ export interface components {
             created_at: string;
             /** Id */
             id: number;
+            /** Join Code */
+            join_code: string;
             /** Name */
             name: string;
         };
@@ -4261,6 +4314,36 @@ export interface components {
             page: number;
             /** Page Size */
             page_size?: number | null;
+        };
+        /** JoinIn */
+        JoinIn: {
+            /** Display Name */
+            display_name: string;
+        };
+        /** JoinLinkOut */
+        JoinLinkOut: {
+            /** Join Code */
+            join_code: string;
+        };
+        /** JoinPreviewOut */
+        JoinPreviewOut: {
+            /** Class Name */
+            class_name: string;
+            /** Instructor Email */
+            instructor_email: string;
+            /** Participant Count */
+            participant_count: number;
+            /** Problem Count */
+            problem_count: number;
+        };
+        /** JoinResultOut */
+        JoinResultOut: {
+            /** Class Id */
+            class_id: number;
+            /** Class Name */
+            class_name: string;
+            /** Display Name */
+            display_name: string;
         };
         /** JournalEntryIn */
         JournalEntryIn: {
@@ -6266,6 +6349,37 @@ export interface operations {
             };
         };
     };
+    classroom_api_regenerate_join_link: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JoinLinkOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     classroom_api_list_problems: {
         parameters: {
             query?: never;
@@ -6643,6 +6757,81 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_preview_join: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                join_code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JoinPreviewOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_join_class: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                join_code: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JoinIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JoinResultOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

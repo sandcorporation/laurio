@@ -80,6 +80,37 @@ class Problem(models.Model):
         return f"Problem(id={self.pk}, title={self.title!r})"
 
 
+class ClassMember(models.Model):
+    """한 사람이 한 Class에 속한다는 사실(#280, CONTEXT.md 「ClassMember」).
+
+    가입 링크로 들어올 때 받는 **그 클래스에서 불릴 이름**(`display_name`)을
+    든다 — 계정의 표시 이름과 독립이다(회사 수업과 스터디에서 다른 이름을
+    쓸 수 있어야 한다). `user`는 `accounts.DeveloperProfile`이 아니라
+    `User`를 바로 가리킨다 — `Class.instructor`와 같은 이유(ADR-0037)다.
+
+    강사 본인도 자기 클래스에 들어와 이 모델의 행이 될 수 있다 — 그때를
+    구별하는 플래그는 두지 않는다: `classroom.instructor_id == user_id`로
+    즉시 판별되므로 중복 상태를 만들 이유가 없다.
+    """
+
+    classroom = models.ForeignKey(Class, related_name="members", on_delete=models.CASCADE)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="class_memberships", on_delete=models.CASCADE
+    )
+    display_name = models.CharField(max_length=100)
+    joined_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["classroom", "user"], name="unique_classroom_member"
+            )
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ClassMember(classroom_id={self.classroom_id}, user_id={self.user_id})"
+
+
 class ChecklistItem(models.Model):
     """채점이 보는 항목 하나(#283). `required=True`를 전부 충족하면 **통과**다
     — 문제마다 합격선을 따로 두지 않는다(CONTEXT.md 「통과」). 필수 항목이
