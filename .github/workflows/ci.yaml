@@ -337,13 +337,16 @@ jobs:
       - name: Every ADR says whether it is still in force
         run: python3 scripts/check_adr_status.py
 
-  # 공개 앱 화면 문자열에 영어 도메인 용어·ADR/이슈 번호가 다시 새지 않게 막는다
-  # (#267) — #266 이 그 시점의 19곳을 치웠지만 사람도 에이전트도 CONTEXT.md 의
-  # `_화면에서_` 줄을 매번 찾아보지는 않으므로 기계가 매 커밋 확인한다. 용어
-  # 목록은 `scripts/check_screen_language.py` 가 CONTEXT.md 에서 직접 읽는다 —
-  # 이 워크플로에 따로 베끼지 않는다. adr-status 와 같은 이유로 별도 잡이다:
-  # 컨테이너도 pnpm install 도 필요 없어 1분 안에 끝나고, 실패하면 잡 이름 자체가
-  # 무엇이 깨졌는지 말한다.
+  # 공개 앱 화면 문자열 + 백엔드가 공개 앱으로 던지는 오류 메시지에 영어
+  # 도메인 용어·ADR/이슈 번호가 다시 새지 않게 막는다(#267, #268) — #266이 그
+  # 시점의 프론트 19곳을, #268이 백엔드 `HttpError(...)` 메시지들을 치웠지만
+  # 사람도 에이전트도 CONTEXT.md 의 `_화면에서_` 줄을 매번 찾아보지는
+  # 않으므로 기계가 매 커밋 확인한다. 용어 목록은 두 스크립트 다
+  # CONTEXT.md 에서 직접 읽는다 — 이 워크플로에 따로 베끼지 않는다.
+  # `check_backend_error_language`는 `check_screen_language`를 그대로
+  # 임포트해 용어·예외 표시 로직을 공유한다(#268). adr-status 와 같은 이유로
+  # 별도 잡이다: 컨테이너도 pnpm install 도 필요 없어 1분 안에 끝나고,
+  # 실패하면 잡 이름 자체가 무엇이 깨졌는지 말한다.
   screen-language:
     runs-on: [self-hosted, sub]
 
@@ -352,6 +355,9 @@ jobs:
 
       - name: Public app screen strings stay in Korean
         run: python3 scripts/check_screen_language.py
+
+      - name: Backend error messages reaching the public app stay in Korean
+        run: python3 scripts/check_backend_error_language.py
 
   frontend-pure-unit-tests:
     runs-on: [self-hosted, sub]

@@ -115,7 +115,7 @@ def create_image(contest: Contest, payload: ContestImageCreateIn) -> ContestImag
 
     target_ref = contest_image_target_ref(contest.id)
     if not payload.object_key.startswith(f"{target_ref}/"):
-        raise HttpError(422, "object_key가 이 Contest에 속하지 않습니다.")
+        raise HttpError(422, "object_key가 이 대상에 속하지 않습니다.")
 
     policy = current_policy()
     if contest.images.count() >= policy.max_contest_images:

@@ -94,10 +94,10 @@ def _get_owned_submission(request: HttpRequest, submission_id: int) -> Submissio
             id=submission_id
         )
     except Submission.DoesNotExist as exc:
-        raise HttpError(404, "Submission을 찾을 수 없습니다.") from exc
+        raise HttpError(404, "제출물을 찾을 수 없습니다.") from exc
 
     if submission.developer.user_id != request.auth_user.id:
-        raise HttpError(403, "본인의 Submission에만 접근할 수 있습니다.")
+        raise HttpError(403, "본인의 제출물에만 접근할 수 있습니다.")
     return submission
 
 
@@ -110,10 +110,10 @@ def create_appeal(request: HttpRequest, submission_id: int, payload: AppealCreat
     submission = _get_owned_submission(request, submission_id)
 
     if not hasattr(submission, "score"):
-        raise HttpError(409, "아직 채점되지 않은 Submission은 이의제기할 수 없습니다.")
+        raise HttpError(409, "아직 채점되지 않은 제출물은 이의제기할 수 없습니다.")
 
     if Appeal.objects.filter(submission=submission).exists():
-        raise HttpError(409, "이미 이 Submission에 대한 이의제기가 접수되어 있습니다.")
+        raise HttpError(409, "이미 이 제출물에 대한 이의제기가 접수되어 있습니다.")
 
     # 기한은 심사기간 종료다(#74). `submissions.participation` 의 판정을 그대로
     # 쓴다 — 「내 참가 현황」의 `next_action` 도 같은 함수에서 나온다. 조건을 두
@@ -143,7 +143,7 @@ def get_own_appeal(request: HttpRequest, submission_id: int):
     try:
         appeal = Appeal.objects.get(submission=submission)
     except Appeal.DoesNotExist as exc:
-        raise HttpError(404, "이 Submission에 대한 이의제기가 없습니다.") from exc
+        raise HttpError(404, "이 제출물에 대한 이의제기가 없습니다.") from exc
 
     return 200, _serialize(appeal)
 

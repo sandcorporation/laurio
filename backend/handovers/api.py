@@ -46,7 +46,7 @@ def _get_handover_for_contest(contest_id: int) -> Handover:
             award__contest_id=contest_id
         )
     except Handover.DoesNotExist as exc:
-        raise HttpError(404, "이 Contest는 아직 Award되지 않아 Handover가 없습니다.") from exc
+        raise HttpError(404, "이 공모전은 아직 선정되지 않아 인수 정보가 없습니다.") from exc
 
 
 @router.get(
@@ -62,7 +62,7 @@ def get_handover(request: HttpRequest, contest_id: int):
     is_sponsor = contest.sponsor.user_id == user_id
     is_awarded_developer = handover.award.submission.developer.user_id == user_id
     if not (is_sponsor or is_awarded_developer):
-        raise HttpError(403, "본인이 개최했거나 Award된 Contest의 Handover만 볼 수 있습니다.")
+        raise HttpError(403, "본인이 개최했거나 선정된 공모전의 인수 정보만 볼 수 있습니다.")
 
     return 200, _serialize_handover(handover)
 
@@ -84,7 +84,7 @@ def accept_handover(request: HttpRequest, contest_id: int):
     contest = handover.award.contest
 
     if contest.sponsor.user_id != request.auth_user.id:
-        raise HttpError(403, "본인이 개최한 Contest만 인수 확인할 수 있습니다.")
+        raise HttpError(403, "본인이 개최한 공모전만 인수 확인할 수 있습니다.")
 
     if handover.acceptable():
         handover = release_escrow(handover, released_via=Handover.ReleasedVia.SPONSOR_ACCEPTED)
@@ -100,11 +100,11 @@ def _get_awarded_submission_or_404(submission_id: int) -> Submission:
             "contest__sponsor", "developer"
         ).get(id=submission_id)
     except Submission.DoesNotExist as exc:
-        raise HttpError(404, "Submission을 찾을 수 없습니다.") from exc
+        raise HttpError(404, "제출물을 찾을 수 없습니다.") from exc
 
     if not submission.awards.exists():
         raise HttpError(
-            409, "Award된 Submission에만 빌드 자산을 올리거나 조회할 수 있습니다."
+            409, "선정된 제출물에만 빌드 자산을 올리거나 조회할 수 있습니다."
         )
     return submission
 
@@ -137,7 +137,7 @@ def upload_build_asset(request: HttpRequest, submission_id: int, payload: BuildA
     submission = _get_awarded_submission_or_404(submission_id)
 
     if submission.developer.user_id != request.auth_user.id:
-        raise HttpError(403, "본인의 Submission에만 빌드 자산을 올릴 수 있습니다.")
+        raise HttpError(403, "본인의 제출물에만 빌드 자산을 올릴 수 있습니다.")
 
     if payload.kind not in _BUILD_ASSET_KINDS:
         raise HttpError(422, f"알 수 없는 빌드 자산 종류입니다: {payload.kind}")
@@ -170,7 +170,7 @@ def list_build_assets(request: HttpRequest, submission_id: int):
     is_owner = submission.developer.user_id == user_id
     is_sponsor = submission.contest.sponsor.user_id == user_id
     if not (is_owner or is_sponsor):
-        raise HttpError(403, "본인의 Submission이거나 본인이 개최한 Contest여야 합니다.")
+        raise HttpError(403, "본인의 제출물이거나 본인이 개최한 공모전이어야 합니다.")
 
     assets = submission.build_assets.all()
     return 200, [_serialize_build_asset(a) for a in assets]

@@ -108,7 +108,7 @@ def initiate_payment(request: HttpRequest, payload: InitiatePaymentIn):
     if not Verification.objects.filter(
         user_id=request.auth_user.id, status=Verification.Status.VERIFIED
     ).exists():
-        raise HttpError(403, "본인확인을 완료해야 Contest를 개최할 수 있습니다.")
+        raise HttpError(403, "본인확인을 완료해야 공모전을 개최할 수 있습니다.")
 
     with transaction.atomic():
         try:
@@ -118,10 +118,10 @@ def initiate_payment(request: HttpRequest, payload: InitiatePaymentIn):
                 .get(id=payload.contest_id)
             )
         except Contest.DoesNotExist as exc:
-            raise HttpError(404, "Contest를 찾을 수 없습니다.") from exc
+            raise HttpError(404, "공모전을 찾을 수 없습니다.") from exc
 
         if contest.sponsor.user_id != request.auth_user.id:
-            raise HttpError(403, "본인이 개최한 Contest만 결제할 수 있습니다.")
+            raise HttpError(403, "본인이 개최한 공모전만 결제할 수 있습니다.")
 
         # 종류와 상태를 **한 판정으로** 본다(#232) — `Contest.Status.PAYABLE` 을 직접
         # 부르지 않는 이유는 `contests.gates` 의 모듈 독스트링에 있다. 거절 사유는
@@ -131,7 +131,7 @@ def initiate_payment(request: HttpRequest, payload: InitiatePaymentIn):
         if not gates.payable(contest):
             if contest.is_assignment:
                 raise HttpError(409, "과제에는 상금도 개최 등록비도 없어 결제할 수 없습니다.")
-            raise HttpError(409, "이미 결제가 완료되어 공개된 Contest입니다.")
+            raise HttpError(409, "이미 결제가 완료되어 공개된 공모전입니다.")
 
         # 이미 진행 중이거나 완료된 결제가 있으면 새로 만들지 않고 그대로 돌려준다 —
         # 중복 클릭·재요청이 새 주문을 계속 만들어내지 않게 하는 멱등성이다.
@@ -195,7 +195,7 @@ def confirm_payment(request: HttpRequest, order_id: UUID, payload: ConfirmPaymen
         raise HttpError(404, "결제를 찾을 수 없습니다.") from exc
 
     if payment.contest.sponsor.user_id != request.auth_user.id:
-        raise HttpError(403, "본인이 개최한 Contest의 결제만 확인할 수 있습니다.")
+        raise HttpError(403, "본인이 개최한 공모전의 결제만 확인할 수 있습니다.")
 
     try:
         payment = settle_charge(

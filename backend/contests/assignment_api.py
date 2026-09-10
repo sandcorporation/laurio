@@ -234,14 +234,14 @@ def _validate_deliverable_types(deliverable_type_ids: list[int]) -> list[Deliver
         DeliverableType.objects.filter(id__in=deliverable_type_ids, is_active=True)
     )
     if len(deliverable_types) != len(set(deliverable_type_ids)):
-        raise HttpError(422, "존재하지 않는 DeliverableType이 포함되어 있습니다.")
+        raise HttpError(422, "존재하지 않는 산출물 종류가 포함되어 있습니다.")
     return deliverable_types
 
 
 def _validate_requirement_grades(requirements) -> None:
     for requirement in requirements:
         if requirement.grade not in _VALID_GRADES:
-            raise HttpError(422, "Requirement grade는 required 또는 optional 이어야 합니다.")
+            raise HttpError(422, "요구사항 등급은 필수 또는 선택 중 하나여야 합니다.")
 
 
 @router.post("/assignments", response={201: AssignmentOut}, auth=jwt_auth)
@@ -347,7 +347,7 @@ def get_assignment_by_invite_code(request: HttpRequest, code: str):
         .first()
     )
     if invite is None:
-        raise HttpError(404, "InviteCode를 찾을 수 없습니다.")
+        raise HttpError(404, "초대 코드를 찾을 수 없습니다.")
 
     contest = invite.contest
     # 상태와 무관하게 보여준다 — ASSIGNMENT_CLOSED(마감) 후에도 학생이 자기 과제와
@@ -619,7 +619,7 @@ def reissue_invite_code(request: HttpRequest, assignment_id: int):
     with transaction.atomic():
         locked_contest = Contest.objects.select_for_update().get(pk=contest.pk)
         if locked_contest.status != Contest.Status.ASSIGNMENT_OPEN:
-            raise HttpError(409, "열린 과제만 InviteCode를 재발급할 수 있습니다.")
+            raise HttpError(409, "열린 과제만 초대 코드를 재발급할 수 있습니다.")
 
         InviteCode.objects.filter(contest=locked_contest, is_active=True).update(is_active=False)
         InviteCode.objects.create(contest=locked_contest)

@@ -45,29 +45,29 @@ def award_submission(request: HttpRequest, contest_id: int, payload: AwardIn):
     try:
         contest = Contest.objects.select_related("sponsor").get(id=contest_id)
     except Contest.DoesNotExist as exc:
-        raise HttpError(404, "Contest를 찾을 수 없습니다.") from exc
+        raise HttpError(404, "공모전을 찾을 수 없습니다.") from exc
 
     if contest.sponsor.user_id != request.auth_user.id:
-        raise HttpError(403, "본인이 개최한 Contest만 Award할 수 있습니다.")
+        raise HttpError(403, "본인이 개최한 공모전만 선정할 수 있습니다.")
 
     try:
         submission = Submission.objects.get(id=payload.submission_id, contest=contest)
     except Submission.DoesNotExist as exc:
-        raise HttpError(404, "이 Contest에 속한 Submission을 찾을 수 없습니다.") from exc
+        raise HttpError(404, "이 공모전에 속한 제출물을 찾을 수 없습니다.") from exc
 
     now = Clock.now()
 
     if Contest.Status.HAS_AWARD(contest.status):
-        raise HttpError(409, "이미 다른 Submission이 Award되었습니다.")
+        raise HttpError(409, "이미 다른 제출물이 선정되었습니다.")
     if not Contest.Status.AWARDABLE(contest.status):
         # 어느 status 가 해당하는지는 Contest.Status.AWARDABLE 이 답한다(#142). JUDGING_ENDED 는 아래
         # judging_ends_at 비교와 같은 결론을, 스케줄러가 이미 반영한 경우 상태만으로 먼저 잡아준다.
-        raise HttpError(409, "지금은 Award할 수 있는 상태가 아닙니다.")
+        raise HttpError(409, "지금은 선정할 수 있는 상태가 아닙니다.")
 
     # 시간 창은 Contest 가 안다(#143) — 연장 가드와 Sponsor 번역기가 같은 메서드를 부른다. 스캔
     # 주기만큼 틱이 아직 CLOSED -> JUDGING_ENDED 를 못 옮겼더라도 시각으로 다시 한 번 막는다.
     if not contest.judging_window_open(now):
-        raise HttpError(403, "심사기간이 지나 Award할 수 없습니다.")
+        raise HttpError(403, "심사기간이 지나 선정할 수 없습니다.")
 
     with transaction.atomic():
         # 「award」로 선언된 간선(CLOSED -> AWARDED, contests.transitions) 밖으로는
@@ -77,7 +77,7 @@ def award_submission(request: HttpRequest, contest_id: int, payload: AwardIn):
             # 동시에 들어온 다른 요청이 먼저 이겼거나, 그 사이 스케줄러 틱이
             # JUDGING_ENDED로 옮겼다 — 어느 쪽이든 이 요청은 통과시키지 않는다.
             raise HttpError(
-                409, "이미 Award되었거나 심사기간이 종료되어 Award할 수 없습니다."
+                409, "이미 선정되었거나 심사기간이 종료되어 선정할 수 없습니다."
             )
 
         try:
@@ -88,7 +88,7 @@ def award_submission(request: HttpRequest, contest_id: int, payload: AwardIn):
             # unique(contest) 제약이 최후의 방어선이다 — 정상 경로에서는 위
             # claim_transition의 조건부 UPDATE가 이미 직렬화했으므로 도달하지
             # 않아야 한다.
-            raise HttpError(409, "이미 Award되었습니다.") from exc
+            raise HttpError(409, "이미 선정되었습니다.") from exc
 
         # Handover(#14)는 Award와 함께 태어난다 — Sponsor의 소스 접근 권한은 이
         # 행의 존재 자체가 아니라 `awards.Award`의 존재로 판정되므로(

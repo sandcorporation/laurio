@@ -108,6 +108,7 @@ _Avoid_: 낙찰, 채택, 당선, Selection, Win, Pick
 
 **Handover**:
 Award 이후 Developer가 소스코드와 빌드 자산을 Sponsor에게 넘기는 행위. 실제 스토어 배포는 여기에 포함되지 않는다.
+_화면에서_: 「인수」
 _Avoid_: 납품, 전달, 이관, Delivery, Transfer
 
 ### 돈

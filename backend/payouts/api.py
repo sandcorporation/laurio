@@ -142,10 +142,10 @@ def _get_owned_handover(request: HttpRequest, contest_id: int) -> Handover:
             "award__contest", "award__submission__developer"
         ).get(award__contest_id=contest_id)
     except Handover.DoesNotExist as exc:
-        raise HttpError(404, "이 Contest는 아직 Award되지 않아 Handover가 없습니다.") from exc
+        raise HttpError(404, "이 공모전은 아직 선정되지 않아 인수 정보가 없습니다.") from exc
 
     if handover.award.submission.developer.user_id != request.auth_user.id:
-        raise HttpError(403, "본인이 Award된 Submission의 Developer만 접근할 수 있습니다.")
+        raise HttpError(403, "본인이 선정된 제출물의 참가자만 접근할 수 있습니다.")
     return handover
 
 
@@ -158,7 +158,7 @@ def request_payout(request: HttpRequest, contest_id: int):
     handover = _get_owned_handover(request, contest_id)
 
     if handover.status != Handover.Status.RELEASED:
-        raise HttpError(409, "아직 Escrow가 해제되지 않아 지급을 요청할 수 없습니다.")
+        raise HttpError(409, "아직 예치금이 해제되지 않아 지급을 요청할 수 없습니다.")
 
     payout = get_or_create_payout(handover.payout_target())
 
@@ -190,12 +190,12 @@ def get_payout(request: HttpRequest, contest_id: int):
     )
     if handover is not None:
         if handover.award.submission.developer.user_id != user_id:
-            raise HttpError(403, "본인이 Award된 Submission의 Developer만 접근할 수 있습니다.")
+            raise HttpError(403, "본인이 선정된 제출물의 참가자만 접근할 수 있습니다.")
     elif not DistributionShare.objects.filter(
         distribution__contest_id=contest_id, submission__developer__user_id=user_id
     ).exists():
         raise HttpError(
-            404, "이 Contest는 아직 Award되지 않았고, Distribution 대상도 아닙니다."
+            404, "이 공모전은 아직 선정되지 않았고, 배분 대상도 아닙니다."
         )
 
     payout = Payout.objects.with_target().for_contest(contest_id).owned_by(user_id).first()
@@ -352,7 +352,7 @@ def retry_payout_seller_registration(
     )
     if not retryable:
         raise HttpError(
-            409, "Seller 등록 대기 또는 실이체 실패 상태에서만 재시도할 수 있습니다."
+            409, "지급대행사 수취인 등록 대기 또는 실이체 실패 상태에서만 재시도할 수 있습니다."
         )
 
     payout = retry_seller_registration(payout, simulate=payload.simulate)

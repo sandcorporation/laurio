@@ -788,7 +788,7 @@ def test_demo_seed_verification_cannot_reach_a_real_transfer(db, client):
     response = client.post(f"/api/contests/{awarded.id}/payout", **headers)
 
     assert response.status_code == 404
-    assert "Handover" in response.json()["detail"]
+    assert "인수" in response.json()["detail"]
 
 
 @pytest.mark.django_db

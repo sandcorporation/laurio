@@ -635,10 +635,18 @@ docker 소켓을 물어 컨테이너를 바깥에 띄운다(DooD).
 늘어 11잡이다. e2e 운영자 4분 · 공개 3분 · `celery-broker` 2분 · `pytest` 1분 · 나머지
 여섯은 각 1분 미만.
 
-**`screen-language` 잡**(#267)은 공개 앱(`frontend/`)의 화면 문자열에 `CONTEXT.md` 가
-정한 영어 도메인 용어(`Sponsor`·`Contest`·`Escrow` 등)나 `ADR-숫자`·`#숫자` 참조가
-있으면 막는다 — `scripts/check_screen_language.py`. 운영자 앱은 대상이 아니고, 정말
-필요한 예외는 `SCREEN-LANGUAGE-EXCEPTION: <이유>` 주석으로 표시한다.
+**`screen-language` 잡**(#267, #268)은 스텝 둘로 두 표면을 막는다. 첫 스텝
+(`scripts/check_screen_language.py`)은 공개 앱(`frontend/`)의 화면 문자열에
+`CONTEXT.md` 가 정한 영어 도메인 용어(`Sponsor`·`Contest`·`Escrow` 등)나
+`ADR-숫자`·`#숫자` 참조가 있으면 막는다. 둘째 스텝(`scripts/
+check_backend_error_language.py`, #268)은 백엔드가 공개 앱으로 던지는
+`HttpError(...)` 의 message 인자에 같은 것을 막는다 — 화면 문자열 자체가
+아니라 백엔드 오류를 그대로 렌더하는 자리(`packages/bff-client/src/
+result.ts` 의 `normalizeDetail`)라 첫 스텝이 볼 수 없던 표면이다. 운영자 API
+(`/api/operator/*`)는 두 스텝 다 대상이 아니다 — 뒤쪽은 파일이 아니라 함수
+단위로(데코레이터가 `router`인지 `operator_router`인지, 도우미는 호출
+그래프로) 가른다. 정말 필요한 예외는 둘 다 같은 `SCREEN-LANGUAGE-EXCEPTION:
+<이유>` 주석으로 표시한다.
 
 ## Agent skills
 

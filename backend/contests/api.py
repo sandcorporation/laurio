@@ -224,25 +224,25 @@ def create_contest(request: HttpRequest, payload: ContestCreateIn):
     if not Verification.objects.filter(
         user=request.auth_user, status=Verification.Status.VERIFIED
     ).exists():
-        raise HttpError(403, "본인확인을 완료해야 Contest를 개최할 수 있습니다.")
+        raise HttpError(403, "본인확인을 완료해야 공모전을 개최할 수 있습니다.")
 
     if not payload.deliverable_type_ids:
-        raise HttpError(422, "DeliverableType을 하나 이상 선택해야 합니다.")
+        raise HttpError(422, "산출물 종류를 하나 이상 선택해야 합니다.")
 
     try:
         category = Category.objects.get(id=payload.category_id, is_active=True)
     except Category.DoesNotExist as exc:
-        raise HttpError(422, "존재하지 않는 Category입니다.") from exc
+        raise HttpError(422, "존재하지 않는 카테고리입니다.") from exc
 
     deliverable_types = list(
         DeliverableType.objects.filter(id__in=payload.deliverable_type_ids, is_active=True)
     )
     if len(deliverable_types) != len(set(payload.deliverable_type_ids)):
-        raise HttpError(422, "존재하지 않는 DeliverableType이 포함되어 있습니다.")
+        raise HttpError(422, "존재하지 않는 산출물 종류가 포함되어 있습니다.")
 
     for requirement in payload.requirements:
         if requirement.grade not in _VALID_GRADES:
-            raise HttpError(422, "Requirement grade는 required 또는 optional 이어야 합니다.")
+            raise HttpError(422, "요구사항 등급은 필수 또는 선택 중 하나여야 합니다.")
 
     sponsor_profile, _created = SponsorProfile.objects.get_or_create(user=request.auth_user)
 
@@ -529,7 +529,7 @@ def get_contest(request: HttpRequest, contest_id: int):
             .get(id=contest_id)
         )
     except Contest.DoesNotExist as exc:
-        raise HttpError(404, "Contest를 찾을 수 없습니다.") from exc
+        raise HttpError(404, "공모전을 찾을 수 없습니다.") from exc
 
     auth_user = getattr(request, "auth_user", None)
 
@@ -538,7 +538,7 @@ def get_contest(request: HttpRequest, contest_id: int):
     if not Contest.Status.PUBLICLY_VISIBLE(contest.status):
         is_owner = auth_user is not None and contest.sponsor.user_id == auth_user.id
         if not is_owner:
-            raise HttpError(404, "Contest를 찾을 수 없습니다.")
+            raise HttpError(404, "공모전을 찾을 수 없습니다.")
 
     # 익명(SSR 공개 상세, ADR-0015 — 서버 컴포넌트는 Authorization을 보내지 않는다)
     # 이면 auth_user가 None이라 `_serialize_contest`가 그대로 is_owner=False를
@@ -590,7 +590,7 @@ def update_draft_contest(request: HttpRequest, contest_id: int, payload: Contest
             try:
                 contest.category = Category.objects.get(id=payload.category_id, is_active=True)
             except Category.DoesNotExist as exc:
-                raise HttpError(422, "존재하지 않는 Category입니다.") from exc
+                raise HttpError(422, "존재하지 않는 카테고리입니다.") from exc
 
         if payload.deadline_at is not None:
             contest.deadline_at = payload.deadline_at
@@ -598,14 +598,14 @@ def update_draft_contest(request: HttpRequest, contest_id: int, payload: Contest
         deliverable_types_changed = False
         if payload.deliverable_type_ids is not None:
             if not payload.deliverable_type_ids:
-                raise HttpError(422, "DeliverableType을 하나 이상 선택해야 합니다.")
+                raise HttpError(422, "산출물 종류를 하나 이상 선택해야 합니다.")
             deliverable_types = list(
                 DeliverableType.objects.filter(
                     id__in=payload.deliverable_type_ids, is_active=True
                 )
             )
             if len(deliverable_types) != len(set(payload.deliverable_type_ids)):
-                raise HttpError(422, "존재하지 않는 DeliverableType이 포함되어 있습니다.")
+                raise HttpError(422, "존재하지 않는 산출물 종류가 포함되어 있습니다.")
             contest.deliverable_types.set(deliverable_types)
             deliverable_types_changed = True
 
@@ -671,13 +671,13 @@ def record_contest_view(request: HttpRequest, contest_id: int):
     try:
         contest = Contest.objects.select_related("sponsor").get(id=contest_id)
     except Contest.DoesNotExist as exc:
-        raise HttpError(404, "Contest를 찾을 수 없습니다.") from exc
+        raise HttpError(404, "공모전을 찾을 수 없습니다.") from exc
 
     if not Contest.Status.PUBLICLY_VISIBLE(contest.status):
         auth_user = getattr(request, "auth_user", None)
         is_owner = auth_user is not None and contest.sponsor.user_id == auth_user.id
         if not is_owner:
-            raise HttpError(404, "Contest를 찾을 수 없습니다.")
+            raise HttpError(404, "공모전을 찾을 수 없습니다.")
 
     record_view(contest, request)
     return {"success": True}
@@ -731,32 +731,32 @@ def reopen_contest(request: HttpRequest, contest_id: int, payload: ContestReopen
                 .get(id=contest_id)
             )
         except Contest.DoesNotExist as exc:
-            raise HttpError(404, "Contest를 찾을 수 없습니다.") from exc
+            raise HttpError(404, "공모전을 찾을 수 없습니다.") from exc
 
         if original.sponsor.user_id != request.auth_user.id:
-            raise HttpError(403, "본인이 개최한 Contest만 재개최할 수 있습니다.")
+            raise HttpError(403, "본인이 개최한 공모전만 재개최할 수 있습니다.")
 
         if not Contest.Status.REOPENABLE(original.status):
             # 실제 판정 근거는 아래 REFUNDED Payment 존재 여부이지 이 status 값 자체가 아니다 —
             # 어느 status 가 해당하는지는 Contest.Status.REOPENABLE 이 답한다(#141).
-            raise HttpError(409, "마감된 Contest만 재개최할 수 있습니다.")
+            raise HttpError(409, "마감된 공모전만 재개최할 수 있습니다.")
 
         if not Payment.objects.filter(contest=original, status=Payment.Status.REFUNDED).exists():
             # CLOSED이지만 환불되지 않았다 — 참여자가 있어 정상적으로 마감됐거나
             # (Escrow: "참가자가 한 명이라도 있으면 Sponsor에게 되돌아가지 않는다"),
             # 아직 환불 스캔(#17)이 돌지 않았다. 어느 쪽이든 재개최 대상이 아니다.
-            raise HttpError(409, "전액 환불된(유찰) Contest만 재개최할 수 있습니다.")
+            raise HttpError(409, "전액 환불된(유찰) 공모전만 재개최할 수 있습니다.")
 
         if original.reopenings.exists():
             # 이미 한 번 재개최됐다 — original 행을 위에서 잠갔으므로 이 확인과
             # 아래 생성 사이에 다른 요청이 끼어들 수 없다(리뷰 지적 5). 몇 번째
             # 사본인지는 source_contest_id 체인을 따라가면 된다(ADR-0001).
-            raise HttpError(409, "이미 재개최된 Contest입니다.")
+            raise HttpError(409, "이미 재개최된 공모전입니다.")
 
         if not Verification.objects.filter(
             user=request.auth_user, status=Verification.Status.VERIFIED
         ).exists():
-            raise HttpError(403, "본인확인을 완료해야 Contest를 개최할 수 있습니다.")
+            raise HttpError(403, "본인확인을 완료해야 공모전을 개최할 수 있습니다.")
 
         if not original.category.is_active:
             raise HttpError(422, "카테고리가 더 이상 활성화되어 있지 않습니다.")
@@ -764,7 +764,7 @@ def reopen_contest(request: HttpRequest, contest_id: int, payload: ContestReopen
         active_deliverable_types = list(original.deliverable_types.filter(is_active=True))
         if not active_deliverable_types:
             raise HttpError(
-                422, "선택했던 DeliverableType이 더 이상 활성화되어 있지 않습니다."
+                422, "선택했던 산출물 종류가 더 이상 활성화되어 있지 않습니다."
             )
 
         minimum_total = sum(dt.minimum_prize for dt in active_deliverable_types)
@@ -867,10 +867,10 @@ def initiate_judging_period_extension(
                 id=contest_id
             )
         except Contest.DoesNotExist as exc:
-            raise HttpError(404, "Contest를 찾을 수 없습니다.") from exc
+            raise HttpError(404, "공모전을 찾을 수 없습니다.") from exc
 
         if contest.sponsor.user_id != request.auth_user.id:
-            raise HttpError(403, "본인이 개최한 Contest만 심사기간을 연장할 수 있습니다.")
+            raise HttpError(403, "본인이 개최한 공모전만 심사기간을 연장할 수 있습니다.")
 
         _reject_if_judging_period_is_not_extendable(contest)
 
@@ -930,7 +930,7 @@ def confirm_judging_period_extension(
         raise HttpError(404, "연장 결제를 찾을 수 없습니다.") from exc
 
     if payment.contest.sponsor.user_id != request.auth_user.id:
-        raise HttpError(403, "본인이 개최한 Contest의 연장 결제만 확인할 수 있습니다.")
+        raise HttpError(403, "본인이 개최한 공모전의 연장 결제만 확인할 수 있습니다.")
 
     try:
         payment = settle_charge(
@@ -960,11 +960,11 @@ def _get_owned_contest(request: HttpRequest, contest_id: int) -> Contest:
     try:
         contest = Contest.objects.select_related("sponsor").get(id=contest_id)
     except Contest.DoesNotExist as exc:
-        raise HttpError(404, "Contest를 찾을 수 없습니다.") from exc
+        raise HttpError(404, "공모전을 찾을 수 없습니다.") from exc
 
     auth_user = getattr(request, "auth_user", None)
     if auth_user is None or contest.sponsor.user_id != auth_user.id:
-        raise HttpError(404, "Contest를 찾을 수 없습니다.")
+        raise HttpError(404, "공모전을 찾을 수 없습니다.")
 
     return contest
 
@@ -1003,7 +1003,7 @@ def _get_owned_draft_contest(request: HttpRequest, contest_id: int) -> Contest:
     contest = _get_owned_contest(request, contest_id)
 
     if contest.status != Contest.Status.DRAFT or contest.is_assignment:
-        raise HttpError(409, "공개된 Contest의 Requirement 체크리스트는 더 이상 수정할 수 없습니다.")
+        raise HttpError(409, "공개된 공모전의 요구사항 체크리스트는 더 이상 수정할 수 없습니다.")
 
     return contest
 
@@ -1039,7 +1039,7 @@ def send_requirement_chat_message(
     if len(prior_messages) >= _MAX_CHAT_HISTORY_TURNS:
         raise HttpError(
             422,
-            "이 Contest의 AI grill 대화가 너무 길어졌습니다. 지금까지 나온 체크리스트로 "
+            "이 공모전의 AI grill 대화가 너무 길어졌습니다. 지금까지 나온 체크리스트로 "
             "진행해 주세요.",
         )
 
@@ -1132,11 +1132,11 @@ def add_requirement(request: HttpRequest, contest_id: int, payload: RequirementC
     contest = _get_owned_draft_contest(request, contest_id)
 
     if payload.grade not in _VALID_GRADES:
-        raise HttpError(422, "Requirement grade는 required 또는 optional 이어야 합니다.")
+        raise HttpError(422, "요구사항 등급은 필수 또는 선택 중 하나여야 합니다.")
 
     sanitized_text = sanitize_free_text(payload.text)
     if not sanitized_text:
-        raise HttpError(422, "Requirement 내용이 비어 있습니다.")
+        raise HttpError(422, "요구사항 내용이 비어 있습니다.")
 
     next_order = contest.requirements.count()
     requirement = Requirement.objects.create(
@@ -1165,16 +1165,16 @@ def update_requirement(
     try:
         requirement = contest.requirements.get(id=requirement_id)
     except Requirement.DoesNotExist as exc:
-        raise HttpError(404, "Requirement를 찾을 수 없습니다.") from exc
+        raise HttpError(404, "요구사항을 찾을 수 없습니다.") from exc
 
     if payload.grade is not None:
         if payload.grade not in _VALID_GRADES:
-            raise HttpError(422, "Requirement grade는 required 또는 optional 이어야 합니다.")
+            raise HttpError(422, "요구사항 등급은 필수 또는 선택 중 하나여야 합니다.")
         requirement.grade = payload.grade
     if payload.text is not None:
         sanitized = sanitize_free_text(payload.text)
         if not sanitized:
-            raise HttpError(422, "Requirement 내용이 비어 있습니다.")
+            raise HttpError(422, "요구사항 내용이 비어 있습니다.")
         requirement.text = sanitized
     if payload.order is not None:
         requirement.order = payload.order
@@ -1194,7 +1194,7 @@ def delete_requirement(request: HttpRequest, contest_id: int, requirement_id: in
     try:
         requirement = contest.requirements.get(id=requirement_id)
     except Requirement.DoesNotExist as exc:
-        raise HttpError(404, "Requirement를 찾을 수 없습니다.") from exc
+        raise HttpError(404, "요구사항을 찾을 수 없습니다.") from exc
 
     requirement.delete()
     return {"success": True}

@@ -110,7 +110,7 @@ def _require_verification(user) -> Verification:
     if verification is None or not verification.is_verified:
         raise HttpError(
             403,
-            "본인확인(Verification)을 완료해야 제출할 수 있습니다. "
+            "본인확인을 완료해야 제출할 수 있습니다. "
             "휴대폰 본인확인을 먼저 마쳐주세요.",
         )
     return verification
@@ -138,20 +138,24 @@ def _require_invite_code_for_assignment(contest: Contest, invite_code: str | Non
     if not invite_code or not InviteCode.objects.filter(
         contest=contest, code=invite_code, is_active=True
     ).exists():
-        raise HttpError(403, "InviteCode 가 없거나 올바르지 않아 제출할 수 없습니다.")
+        raise HttpError(403, "초대 코드가 없거나 올바르지 않아 제출할 수 없습니다.")
 
 
 def _get_published_contest_or_404(contest_id: int) -> Contest:
+    # "제출 대상"이라고 쓴다 — 이 함수는 공모전·과제 양쪽 제출 경로가 함께
+    # 쓰므로(create_submission/update_submission이 kind로 갈리기 전에 먼저
+    # 부른다) "공모전을 찾을 수 없습니다"라고 못 박으면 과제 제출에서 거짓말이
+    # 된다(#268).
     try:
         contest = Contest.objects.select_related("sponsor").get(id=contest_id)
     except Contest.DoesNotExist as exc:
-        raise HttpError(404, "Contest를 찾을 수 없습니다.") from exc
+        raise HttpError(404, "제출 대상을 찾을 수 없습니다.") from exc
     if not Contest.Status.SUBMITTABLE(contest.status):
         # draft Contest는 아직 결제가 끝나지 않아 공개되지 않았다 — 존재를
         # 드러내지 않는다(contests.api.get_contest와 같은 원칙). CLOSED는 여기
         # 포함하지 않는다 — 제출·수정은 어차피 _reject_if_past_deadline이 별도로
         # 막으므로, 이 헬퍼는 "결제로 공개되었는가"만 본다.
-        raise HttpError(404, "Contest를 찾을 수 없습니다.")
+        raise HttpError(404, "제출 대상을 찾을 수 없습니다.")
     return contest
 
 
@@ -183,9 +187,9 @@ def _get_viewable_contest_or_404(contest_id: int) -> Contest:
     try:
         contest = Contest.objects.select_related("sponsor").get(id=contest_id)
     except Contest.DoesNotExist as exc:
-        raise HttpError(404, "Contest를 찾을 수 없습니다.") from exc
+        raise HttpError(404, "제출 대상을 찾을 수 없습니다.") from exc
     if not Contest.Status.OWN_SUBMISSION_VIEWABLE(contest.status):
-        raise HttpError(404, "Contest를 찾을 수 없습니다.")
+        raise HttpError(404, "제출 대상을 찾을 수 없습니다.")
     return contest
 
 
@@ -248,7 +252,7 @@ def _reject_self_dealing(contest: Contest, developer_verification: Verification)
         )
         raise HttpError(
             403,
-            "이 Contest는 Sponsor의 본인확인 상태를 확인할 수 없어 제출할 수 없습니다. "
+            "이 공모전은 개최자의 본인확인 상태를 확인할 수 없어 제출할 수 없습니다. "
             "운영자에게 문의해 주세요.",
         )
     if not sponsor_verification.ci_hash:
@@ -265,13 +269,13 @@ def _reject_self_dealing(contest: Contest, developer_verification: Verification)
         )
         raise HttpError(
             403,
-            "이 Contest는 Sponsor의 본인확인 상태를 확인할 수 없어 제출할 수 없습니다. "
+            "이 공모전은 개최자의 본인확인 상태를 확인할 수 없어 제출할 수 없습니다. "
             "운영자에게 문의해 주세요.",
         )
 
     if sponsor_verification.ci_hash == developer_verification.ci_hash:
         raise HttpError(
-            403, "이 Contest의 Sponsor와 동일인으로 확인되어 제출할 수 없습니다(자전거래 차단)."
+            403, "이 공모전의 개최자와 동일인으로 확인되어 제출할 수 없습니다(자전거래 차단)."
         )
 
 
@@ -513,7 +517,7 @@ def _merge_assets(submission: Submission, cleaned: list[_CleanedAsset]) -> set[i
         if row.id is not None:
             asset = existing.get(row.id)
             if asset is None:
-                raise HttpError(422, "이 Submission에 속하지 않은 자료 id입니다.")
+                raise HttpError(422, "이 제출물에 속하지 않은 자료 id입니다.")
             if asset.created_by_platform:
                 # #220(ADR-0030): 저장소만 낸 제출이 채점 시점에 남기는 박제
                 # 소스는 참가자가 지우거나 고칠 수 없다. 실제로는 그 자료가
@@ -590,19 +594,19 @@ def _replace_requirement_responses(
     seen_ids: set[int] = set()
     for item in responses_in:
         if item.requirement_id in seen_ids:
-            raise HttpError(422, "같은 Requirement에 대한 응답이 중복되었습니다.")
+            raise HttpError(422, "같은 요구사항에 대한 응답이 중복되었습니다.")
         seen_ids.add(item.requirement_id)
         if item.requirement_id not in valid_requirement_ids:
-            raise HttpError(422, "이 Contest에 속하지 않은 Requirement입니다.")
+            raise HttpError(422, "이 제출 대상에 속하지 않은 요구사항입니다.")
         for evidence in item.evidence:
             if evidence.kind not in _EVIDENCE_KINDS:
-                raise HttpError(422, f"알 수 없는 Evidence 종류입니다: {evidence.kind}")
+                raise HttpError(422, f"알 수 없는 근거 종류입니다: {evidence.kind}")
             if (
                 evidence.asset_id is not None
                 and evidence.asset_id not in own_asset_ids
                 and evidence.asset_id not in removed_asset_ids
             ):
-                raise HttpError(422, "이 Submission에 속하지 않은 자료를 근거로 지정했습니다.")
+                raise HttpError(422, "이 제출물에 속하지 않은 자료를 근거로 지정했습니다.")
 
     # 편집 UI가 매번 체크리스트 전체를 다시 제출하는 형태와 맞춘다 — 부분 갱신이
     # 아니라 이 Submission의 자가 응답 전체를 새로 쓴다.
@@ -917,7 +921,7 @@ def create_submission(request: HttpRequest, contest_id: int, payload: Submission
 
     if Submission.objects.filter(contest=contest, developer=developer).exists():
         raise HttpError(
-            409, "이미 이 Contest에 제출한 Submission이 있습니다. 수정은 PUT을 사용하세요."
+            409, "이미 제출한 적이 있습니다. 수정은 PUT을 사용하세요."
         )
 
     cleaned_assets = _clean_assets_in(
@@ -937,7 +941,7 @@ def create_submission(request: HttpRequest, contest_id: int, payload: Submission
                 submission, contest, payload.requirement_responses, removed_asset_ids=removed
             )
     except IntegrityError as exc:
-        raise HttpError(409, "이미 이 Contest에 제출한 Submission이 있습니다.") from exc
+        raise HttpError(409, "이미 제출한 적이 있습니다.") from exc
 
     submission.refresh_from_db()
     return 201, _serialize(
@@ -966,7 +970,7 @@ def update_submission(request: HttpRequest, contest_id: int, payload: Submission
         else None
     )
     if submission is None:
-        raise HttpError(404, "수정할 Submission이 없습니다. 먼저 제출하세요.")
+        raise HttpError(404, "수정할 제출물이 없습니다. 먼저 제출하세요.")
 
     existing_asset_values = set(submission.assets.values_list("kind", "value"))
     cleaned_assets = _clean_assets_in(
@@ -1015,7 +1019,7 @@ def get_my_submission(request: HttpRequest, contest_id: int):
         else None
     )
     if submission is None:
-        raise HttpError(404, "Submission이 없습니다.")
+        raise HttpError(404, "제출물이 없습니다.")
 
     past_deadline = Clock.now() >= contest.deadline_at
     return 200, _serialize(
@@ -1147,10 +1151,10 @@ def _get_owned_submission(request: HttpRequest, submission_id: int) -> Submissio
             "developer", "score", "contest", "appeal"
         ).get(id=submission_id)
     except Submission.DoesNotExist as exc:
-        raise HttpError(404, "Submission을 찾을 수 없습니다.") from exc
+        raise HttpError(404, "제출물을 찾을 수 없습니다.") from exc
 
     if submission.developer.user_id != request.auth_user.id:
-        raise HttpError(403, "본인의 Submission에만 접근할 수 있습니다.")
+        raise HttpError(403, "본인의 제출물에만 접근할 수 있습니다.")
     return submission
 
 
@@ -1185,7 +1189,7 @@ def get_submission(request: HttpRequest, submission_id: int):
             "contest__award__handover",
         ).get(id=submission_id)
     except Submission.DoesNotExist as exc:
-        raise HttpError(404, "Submission을 찾을 수 없습니다.") from exc
+        raise HttpError(404, "제출물을 찾을 수 없습니다.") from exc
 
     contest = submission.contest
     auth_user = getattr(request, "auth_user", None)
@@ -1200,7 +1204,7 @@ def get_submission(request: HttpRequest, submission_id: int):
         # 다른 Developer(혹은 비로그인)에게는 진행 중인 Submission의 존재 자체를
         # 드러내지 않는다. Assignment는 마감 여부와 무관하게 이 분기를 통과하지
         # 못한다 — 위 docstring 참고.
-        raise HttpError(404, "Submission을 찾을 수 없습니다.")
+        raise HttpError(404, "제출물을 찾을 수 없습니다.")
 
     return 200, _serialize(
         submission,
@@ -1237,7 +1241,7 @@ def get_developer_public_profile(request: HttpRequest, developer_id: int):
 
     developer = DeveloperProfile.objects.filter(id=developer_id).select_related("user").first()
     if developer is None or not developer.user.is_active:
-        raise HttpError(404, "Developer를 찾을 수 없습니다.")
+        raise HttpError(404, "참가자를 찾을 수 없습니다.")
 
     now = Clock.now()
     submissions = (
@@ -1286,13 +1290,13 @@ def compare_submissions(request: HttpRequest, contest_id: int):
     try:
         contest = Contest.objects.select_related("sponsor").get(id=contest_id)
     except Contest.DoesNotExist as exc:
-        raise HttpError(404, "Contest를 찾을 수 없습니다.") from exc
+        raise HttpError(404, "공모전을 찾을 수 없습니다.") from exc
 
     if contest.sponsor.user_id != request.auth_user.id:
-        raise HttpError(403, "본인이 개최한 Contest만 비교할 수 있습니다.")
+        raise HttpError(403, "본인이 개최한 공모전만 비교할 수 있습니다.")
 
     if Clock.now() < contest.deadline_at:
-        raise HttpError(403, "마감 전에는 Submission을 비교할 수 없습니다.")
+        raise HttpError(403, "마감 전에는 제출물을 비교할 수 없습니다.")
 
     requirements = list(Requirement.objects.filter(contest=contest).order_by("order", "id"))
     submissions = (
@@ -1412,10 +1416,10 @@ def get_contest_metrics(request: HttpRequest, contest_id: int):
     try:
         contest = Contest.objects.select_related("sponsor").get(id=contest_id)
     except Contest.DoesNotExist as exc:
-        raise HttpError(404, "Contest를 찾을 수 없습니다.") from exc
+        raise HttpError(404, "공모전을 찾을 수 없습니다.") from exc
 
     if contest.sponsor.user_id != request.auth_user.id:
-        raise HttpError(403, "본인이 개최한 Contest만 지표를 볼 수 있습니다.")
+        raise HttpError(403, "본인이 개최한 공모전만 지표를 볼 수 있습니다.")
 
     submissions_qs = Submission.objects.filter(contest=contest)
     total_submission_count = submissions_qs.count()
