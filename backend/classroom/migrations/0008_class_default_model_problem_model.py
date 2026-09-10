@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('classroom', '0004_class_openai_api_key_encrypted_and_more'),
+        ('classroom', '0007_class_openai_api_key_encrypted_and_more'),
     ]
 
     operations = [

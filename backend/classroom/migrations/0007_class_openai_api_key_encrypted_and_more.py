@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('classroom', '0003_checklistitem'),
+        ('classroom', '0006_alter_classmember_options_classmember_expelled_at'),
     ]
 
     operations = [
