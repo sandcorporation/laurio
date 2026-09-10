@@ -672,6 +672,28 @@ export interface paths {
         patch: operations["classroom_api_update_checklist_item"];
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/problems/{problem_id}/copy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Copy Problem
+         * @description 자기 문제를 자기 다른 클래스로 복사한다(#292). 원본·대상 둘 다 강사
+         *     본인 소유여야 한다 — 어느 쪽이 남의 것이어도 404다(존재를 알려주지
+         *     않는다, 이 파일의 다른 소유권 검사와 같은 이유).
+         */
+        post: operations["classroom_api_copy_problem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/problems/{problem_id}/open": {
         parameters: {
             query?: never;
@@ -4978,6 +5000,11 @@ export interface components {
             /** Withholding Tax Bps */
             withholding_tax_bps?: number | null;
         };
+        /** ProblemCopyIn */
+        ProblemCopyIn: {
+            /** Target Class Id */
+            target_class_id: number;
+        };
         /** ProblemIn */
         ProblemIn: {
             /**
@@ -6761,6 +6788,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChecklistItemOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_copy_problem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+                problem_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProblemCopyIn"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemOut"];
                 };
             };
             /** @description Not Found */

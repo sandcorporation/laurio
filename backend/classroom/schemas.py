@@ -91,3 +91,7 @@ class ProblemOut(Schema):
 
 class ProblemReorderIn(Schema):
     problem_ids: list[int]
+
+
+class ProblemCopyIn(Schema):
+    target_class_id: int

@@ -99,6 +99,12 @@ Next.js + React. 강사·참여자가 쓰는 앱이다(ADR-0037) — 공모전 �
 「Problem」). 실제로 다시 셈하는 계산 자체는 채점(Score)이 붙는 뒤 티켓의 몫이다 —
 지금은 그 사실을 화면이 미리 알리는 것까지다.
 
+**「다른 클래스로 복사」**가 이 문제(체크리스트·채점 모델 포함)를 강사 본인의 다른
+클래스로 복사한다(#292) — 대상 클래스를 골라 복사하면 원본 상태와 무관하게 복사본은
+언제나 초안으로 들어오고, 복사가 끝나면 그 새 문제의 편집 화면으로 이동한다. 복사할
+다른 클래스가 없으면 그 사실을 안내한다.
+
 `GET`·`PATCH /api/classroom/classes/{id}/problems/{problemId}` ·
-`POST .../open` · `POST`·`GET`·`PATCH`·`DELETE .../checklist-items[/{itemId}]` ·
+`POST .../open` · `POST .../copy` ·
+`POST`·`GET`·`PATCH`·`DELETE .../checklist-items[/{itemId}]` ·
 `POST .../checklist-items/reorder`로 그린다.

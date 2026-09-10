@@ -69,6 +69,19 @@ export function openProblem(classId: number, problemId: number): Promise<Problem
   });
 }
 
+// 체크리스트·채점 설정은 함께 오고 제출물·시도·Score는 애초에 따라오지
+// 않는다(#292) — 복사본은 대상 클래스에서 언제나 초안으로 들어온다.
+export function copyProblem(
+  classId: number,
+  problemId: number,
+  targetClassId: number,
+): Promise<ProblemRow> {
+  return backendJson<ProblemRow>(`/classroom/classes/${classId}/problems/${problemId}/copy`, {
+    method: "POST",
+    body: JSON.stringify({ target_class_id: targetClassId }),
+  });
+}
+
 function checklistItemsPath(classId: number, problemId: number): string {
   return `/classroom/classes/${classId}/problems/${problemId}/checklist-items`;
 }

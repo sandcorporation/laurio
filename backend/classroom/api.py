@@ -34,6 +34,7 @@ from .schemas import (
     ClassPatchIn,
     ErrorOut,
     OpenAIKeyIn,
+    ProblemCopyIn,
     ProblemIn,
     ProblemOut,
     ProblemPatchIn,
@@ -41,6 +42,7 @@ from .schemas import (
     ScoringModelOut,
 )
 from .scoring_models import SCORING_MODEL_CHOICES, is_valid_model
+from .services import copy_problem_to_class
 
 router = Router(tags=["classroom"])
 
@@ -306,6 +308,24 @@ def open_problem(request: HttpRequest, class_id: int, problem_id: int):
     problem.status = Problem.Status.OPEN
     problem.save(update_fields=["status", "updated_at"])
     return 200, _serialize_problem(problem, class_obj)
+
+
+@router.post(
+    "/classes/{class_id}/problems/{problem_id}/copy",
+    response={201: ProblemOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def copy_problem(request: HttpRequest, class_id: int, problem_id: int, payload: ProblemCopyIn):
+    """자기 문제를 자기 다른 클래스로 복사한다(#292). 원본·대상 둘 다 강사
+    본인 소유여야 한다 — 어느 쪽이 남의 것이어도 404다(존재를 알려주지
+    않는다, 이 파일의 다른 소유권 검사와 같은 이유)."""
+
+    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    problem = _get_owned_problem_or_404(class_obj, problem_id)
+    target_class = _get_owned_class_or_404(payload.target_class_id, request.auth_user.id)
+
+    copy = copy_problem_to_class(problem, target_class)
+    return 201, _serialize_problem(copy, target_class)
 
 
 # --- ChecklistItem -------------------------------------------------------------
