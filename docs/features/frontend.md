@@ -25,6 +25,13 @@ Next.js + React. 발주자·개발자·방문자가 쓰는 앱이다. 운영자�
 **우리 화면으로 돌아가는 리다이렉트는 상대 경로로 낸다.** 컨테이너 안의 Next 는 자기가 어떤
 공개 주소로 불렸는지 모른다. 절대 URL 은 외부로 나갈 때만 쓴다.
 
+**공모전 제품 스위치**(`NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED`,
+`frontend/lib/contest-switch.ts`)가 꺼지면 헤더의 「공모전」·「공모전 개최」 진입점과
+`/console` 의 「내 공모전」 진입점이 빠지고, `/contests/**`·`/console/contests/**`
+전체가 없는 페이지(404)를 낸다 — 진짜 문은 백엔드다(`core.contest_switch`), 이 앱은
+진입점을 감출 뿐이다. `/console/assignments/**`는 별도 서브트리라 무관하다. 기본은
+켜짐이고 staging 배포만 끈다(`CLAUDE.md` 「배포」).
+
 | BFF 라우트 | |
 | --- | --- |
 | `/api/backend/[...path]` | 백엔드 프록시 — 허용목록·Origin 검증·토큰 부착 |
@@ -42,7 +49,8 @@ Next.js + React. 발주자·개발자·방문자가 쓰는 앱이다. 운영자�
 있으면 버킷마다 다른 문구를 낸다 — 「불러오지 못했다」와 「지금은 없다」가 같은 화면이 되면
 안 되기 때문이다.
 
-`GET /api/contests/home` 하나로 그린다.
+`GET /api/contests/home` 하나로 그린다. **공모전 제품 스위치가 꺼지면 이 요청 자체를
+내지 않는다** — 초대받은 과제로 안내하는 한 문장만 보여준다.
 
 ## `/contests` 공모전 목록
 

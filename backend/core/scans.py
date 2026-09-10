@@ -57,6 +57,13 @@ class ScanSpec:
     interval_seconds: float = DEFAULT_INTERVAL_SECONDS
     # 후보 QuerySet 에 뼈대가 거는 정렬 — 기본 id. 예외적으로 due 시각 순이 필요한 스캔이 준다.
     order_by: tuple[str, ...] = ("id",)
+    # 이 스캔이 지금 도는가 — None 이면 항상 돈다(대다수). #271: 공모전 제품 스위치가
+    # 꺼지면 공모전 전용 스캔(환불·배분·지급·인수인계)이 `core.contest_switch.
+    # contest_product_enabled`를 여기 꽂아 스스로를 숨긴다. 등록(`register_scan`)
+    # 자체는 앱 시작 시 그대로 해 두고, `is_scan_active`가 호출마다 이 콜백을 다시
+    # 평가한다 — 재기동 없이 설정이 곧바로 반영되고(override_settings로 테스트하기
+    # 위한 목적도 있다), tick·beat·`/scans/{name}` 직접 호출이 전부 같은 문을 본다.
+    enabled: Callable[[], bool] | None = None
 
 
 SCAN_REGISTRY: dict[str, ScanSpec] = {}
@@ -99,6 +106,18 @@ def register_scan(spec: ScanSpec) -> ScanSpec:
     return spec
 
 
+def is_scan_active(name: str) -> bool:
+    """등록되어 있고 **지금** 실행 대상인가 — `enabled` 콜백이 없으면 등록만으로 충분하다.
+
+    `enabled()`가 False면 이름이 `SCAN_REGISTRY`에 있어도 없는 것처럼 군다(#271) —
+    `/scans/{name}` 직접 호출·tick·beat 스케줄 셋이 모두 이 판정 하나를 본다."""
+
+    spec = SCAN_REGISTRY.get(name)
+    if spec is None:
+        return False
+    return spec.enabled is None or spec.enabled()
+
+
 def _batch(spec: ScanSpec, as_of, ctx: dict) -> list:
     candidates = spec.candidates(as_of, ctx)
     if hasattr(candidates, "order_by") and hasattr(candidates, "query"):
@@ -126,6 +145,11 @@ def run_scan(name: str, *, as_of=None, ctx: dict | None = None, params: dict | N
     """
 
     spec = SCAN_REGISTRY[name]
+    if spec.enabled is not None and not spec.enabled():
+        # 이름은 등록부에 있지만 지금은 꺼져 있다(#271) — 없는 스캔을 부른 것과
+        # 같은 예외로 통일한다. `is_scan_active`를 먼저 확인하지 않고 직접
+        # `run_scan`을 부르는 자리(Celery 태스크 등)도 같은 문을 보게 한다.
+        raise KeyError(name)
     as_of = as_of if as_of is not None else Clock.now()
     ctx = {} if ctx is None else ctx
     deadline = time.monotonic() + spec.time_budget_seconds
@@ -167,7 +191,11 @@ def run_all(*, as_of=None) -> dict:
 
     as_of = as_of if as_of is not None else Clock.now()
     ctx: dict = {}
-    scans = {name: run_scan(name, as_of=as_of, ctx=ctx) for name in SCAN_REGISTRY}
+    scans = {
+        name: run_scan(name, as_of=as_of, ctx=ctx)
+        for name in SCAN_REGISTRY
+        if is_scan_active(name)
+    }
     rows = [dict(scan=name, **row) for name, result in scans.items() for row in result["rows"]]
     return {
         "as_of": as_of.isoformat(),
@@ -188,6 +216,7 @@ def beat_schedule() -> dict:
             "args": [name],
         }
         for name, spec in SCAN_REGISTRY.items()
+        if is_scan_active(name)
     }
 
 

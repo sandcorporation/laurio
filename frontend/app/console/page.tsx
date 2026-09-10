@@ -8,6 +8,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import { useSession } from "@/lib/auth/use-session";
+import { contestProductEnabled } from "@/lib/contest-switch";
 
 export default function AppHome() {
   const session = useSession();
@@ -57,14 +58,18 @@ export default function AppHome() {
         내 참가 현황
       </Link>
       {/* 개최자 쪽 진입점(#81). 참가와 개최는 같은 계정이 둘 다 할 수 있으므로
-          둘 다 여기 있다 — 역할로 화면을 가르지 않는다. */}
-      <Link
-        href="/console/contests"
-        data-testid="app-home-my-contests-link"
-        className="w-fit rounded-sm border border-rule px-4 py-2 text-sm hover:border-ink"
-      >
-        내 공모전
-      </Link>
+          둘 다 여기 있다 — 역할로 화면을 가르지 않는다. 공모전 제품
+          스위치(#271)가 꺼지면 뺀다 — `/console/contests/**`가 없는 페이지이므로
+          그리로 가는 이 진입점도 감춘다. */}
+      {contestProductEnabled() && (
+        <Link
+          href="/console/contests"
+          data-testid="app-home-my-contests-link"
+          className="w-fit rounded-sm border border-rule px-4 py-2 text-sm hover:border-ink"
+        >
+          내 공모전
+        </Link>
+      )}
       {/* 과제(Assignment) 진입점(#207, ADR-0028/0029). 상금 없는 과제는 자격을
           받은 출제자가 여기서 만들고 연다 — 공모전과 나란히 두되 역할로 화면을
           가르지 않는다(위 "내 공모전"과 같은 원칙). */}

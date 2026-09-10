@@ -82,6 +82,16 @@ if LAURIO_DEPLOYMENT_TARGET not in _VALID_DEPLOYMENT_TARGETS:
 IS_PRODUCTION_DEPLOYMENT = LAURIO_DEPLOYMENT_TARGET == "production"
 IS_DEPLOYED_ENVIRONMENT = LAURIO_DEPLOYMENT_TARGET in {"staging", "production"}
 
+# 공모전 제품 스위치(#271) — 방향이 바뀌어 공모전은 나중을 위한 기능이 됐다(ADR-0037).
+# 코드도 데이터도 그대로 두고 표면만 닫는다. **기본값은 켜짐**이고, 이 값은
+# `LAURIO_DEPLOYMENT_TARGET`과 무관한 독립 값이다 — "배포 환경이면 끈다"로 묶으면
+# 나중에 prod에서 다시 켤 때 그 판단 규칙 자체를 고쳐야 한다. staging만
+# `docker/compose.staging.yaml`이 이 환경변수의 기본값을 false로 겹쳐 쓴다(dev·CI는
+# 이 값을 건드리지 않으므로 여전히 켜진 채다). 꺼졌을 때 무엇이 닫히고 무엇이 열려
+# 있어야 하는지의 전체 목록은 `core.contest_switch` 모듈 docstring 하나에 모아
+# 둔다 — 다시 켜는 날 읽을 자리다.
+CONTEST_PRODUCT_ENABLED = _env_bool("LAURIO_CONTEST_PRODUCT_ENABLED", True)
+
 # production인데 DEBUG=true로 뜨면 에러 페이지가 스택 트레이스·환경변수·SQL을 그대로
 # 노출한다(Django check --deploy의 security.W018과 같은 위협). DEBUG는 개별
 # 환경변수라 LAURIO_DEPLOYMENT_TARGET=production과 따로 놀 수 있으므로 여기서

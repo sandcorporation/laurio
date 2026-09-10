@@ -37,6 +37,7 @@ Payout 확정 시점에 남아 있다.
 
 from __future__ import annotations
 
+from core.contest_switch import contest_product_enabled
 from core.scans import ScanSpec, scan_params
 
 from .models import Seller
@@ -89,10 +90,14 @@ def _retry_unaccepted_registration(seller: Seller, as_of, ctx):
     }
 
 
+# `enabled=contest_product_enabled`(#271) — Seller(수취인) 등록은 Payout 확정
+# 이후에만 호출된다(ADR-0020) — 상금이 있는 공모전 전용이다. 공모전 제품 스위치가
+# 꺼지면 이 스캔은 등록부에서 사라진 것처럼 군다.
 SELLER_REGISTRATION_RECOVERY_SCANS = (
     ScanSpec(
         name="seller-registration-recovery",
         candidates=_unaccepted_seller_registrations,
         handle_row=_retry_unaccepted_registration,
+        enabled=contest_product_enabled,
     ),
 )

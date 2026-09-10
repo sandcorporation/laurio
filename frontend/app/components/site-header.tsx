@@ -12,7 +12,13 @@
 // 로 바로 링크한다. 로그인하지 않은 사람이 눌러도 미들웨어(middleware.ts)가
 // `/login?next=...` 로 보낸다. "무엇이 필요한지 미리 보는 것"이 목적이므로 이
 // 리다이렉트는 결함이 아니다.
+//
+// **공모전 제품 스위치(#271)가 꺼지면 이 둘을 뺀다.** 앱은 진입점을 감출 뿐이고
+// (백엔드가 유일한 집행자다), 이 헤더가 정확히 그 진입점 둘을 쥐고 있다 —
+// "공모전" 링크와 "공모전 개최" CTA.
 import Link from "next/link";
+
+import { contestProductEnabled } from "@/lib/contest-switch";
 
 import { HeaderSessionZone } from "./header-session-zone";
 
@@ -25,20 +31,24 @@ export function SiteHeader() {
         </Link>
 
         <nav aria-label="주 메뉴" className="flex flex-wrap items-center gap-3 text-sm">
-          <Link
-            href="/contests"
-            data-testid="header-nav-contests"
-            className="text-ink/80 hover:text-ink"
-          >
-            공모전
-          </Link>
-          <Link
-            href="/console/contests/new"
-            data-testid="header-cta-new-contest"
-            className="rounded-sm border border-ink px-3 py-1.5 font-medium text-ink hover:bg-ink hover:text-paper"
-          >
-            공모전 개최
-          </Link>
+          {contestProductEnabled() && (
+            <>
+              <Link
+                href="/contests"
+                data-testid="header-nav-contests"
+                className="text-ink/80 hover:text-ink"
+              >
+                공모전
+              </Link>
+              <Link
+                href="/console/contests/new"
+                data-testid="header-cta-new-contest"
+                className="rounded-sm border border-ink px-3 py-1.5 font-medium text-ink hover:bg-ink hover:text-paper"
+              >
+                공모전 개최
+              </Link>
+            </>
+          )}
           <HeaderSessionZone />
         </nav>
       </div>

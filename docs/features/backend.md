@@ -71,6 +71,16 @@ fail-closed 라 구멍은 아니지만 원인을 찾기 어렵다.
 **Contest 는 하나의 엔티티다**(ADR-0001) — 공모전과 과제가 같은 표를 쓰고 `kind` 로
 갈린다(ADR-0033). `kind` 는 카테고리 표식이 아니라 일급 필드다.
 
+**공모전 제품 스위치**(`settings.CONTEST_PRODUCT_ENABLED`, `core.contest_switch`)가
+꺼지면 위 표의 `contests.api` 소관 표면(목록·상세·홈·개최·수정·재개최·견적·
+요구사항·AI grill·이미지·조회 기록·심사기간 연장)이 404 다. `GET
+/api/contests/categories`·`deliverable-types`(과제 개설 화면이 읽는다)와,
+`award`·`handover`·`payout`·`metrics`·`submissions/compare`(각각 awards·
+handovers·payouts·submissions 앱 소관 — 이미 존재하는 공모전을 마무리하는
+표면이라 스위치와 무관하게 열려 있다)는 예외다. 기본은 켜짐이고 staging 배포만
+끈다(`CLAUDE.md` 「배포」). 닫히는 표면의 전체 목록은 `core.contest_switch` 모듈
+docstring 이 든다.
+
 ### 과제
 
 | | |
@@ -132,6 +142,12 @@ ADR-0036). 업로드 자료의 값은 `submission:{공모전id}:{개발자id}:{�
 | `POST /api/payouts/webhook[/toss|/toss-seller]` | 웹훅 |
 | `GET /api/ledger/contests/{id}/balance` · `entries` | 원장 |
 
+**공모전 제품 스위치가 꺼지면 `POST /api/payments`·`/{order}/confirm`이 404다**
+— 과제에는 결제가 없으므로 이미 그 검사(`contests.gates.payable`)가 막고 있었고,
+이 스위치는 공모전 쪽 새 결제까지 막는다. `/webhook`은 닫지 않는다(PG가 서버 대
+서버로 부른다) — 새 REQUESTED Payment 자체가 안 생기므로 사실상 부를 일이
+없어진다. 지급·원장은 그대로 연다 — 이미 확정된 지급을 마무리하는 표면이다.
+
 **복식부기 원장이 진실이다**(ADR-0004). 계정은 다섯이다 — 발주자 예치금 · 개발자 미지급금 ·
 플랫폼 수수료 수익 · 원천징수 예수금 · PG 수수료 비용. 분개는 **append-only** 이고, 배포
 환경에서는 삭제 자체가 거부된다.
@@ -179,6 +195,13 @@ ADR-0036). 업로드 자료의 값은 `submission:{공모전id}:{개발자id}:{�
 `POST /api/internal/tick` 이 등록 순서로 전부 한 바퀴 돌고, `POST /api/internal/scans/{name}`
 이 하나만 돌린다. **tick 은 시간을 앞당기지 않는다** — 「이미 밀린 일을 beat 를 기다리지
 않고 즉시 처리한다」이다.
+
+**공모전 제품 스위치가 꺼지면 환불·배분·지급 다섯 개(`payment-refund-request`·
+`payment-refund-reconcile`·`distribution-create`·`distribution-share-payout`·
+`handover-release`·`payout-awaits-you`·`seller-registration-recovery` — 상금이
+있는 공모전 전용이다)가 등록부에서 사라진 것처럼 군다** — tick·beat 스케줄·
+`/scans/{name}` 직접 호출 어디에도 안 나온다. 채점·이미지·저장소 가시성·개인정보·
+알림·상태 전이는 그대로 돈다(`core.contest_switch` 모듈 docstring).
 
 **채점은 반드시 끝난다**(ADR-0031). 실패가 5회에 이르고 **동시에** 마감 후 6시간이 지나면
 0% 로 확정한다. 영구 실패는 유예를 기다리지 않고 즉시 끝난다.

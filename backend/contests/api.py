@@ -33,6 +33,7 @@ from contests.sponsorship import sponsored_contest_queryset
 from accounts.models import SponsorProfile
 from accounts.sanitize import sanitize_free_text
 from core.clock import Clock
+from core.contest_switch import require_contest_product_enabled
 from core.keyset import decode_cursor, keyset_page
 from payments.adapters import PGError, get_adapter
 from payments.charges import settle_charge
@@ -205,7 +206,13 @@ def list_deliverable_types(request: HttpRequest):
 
 @router.post("/contests/quote", response=QuoteOut, auth=None)
 def quote(request: HttpRequest, payload: QuoteIn):
-    """선택한 DeliverableType들의 최소 제안 상금 합계를 등록 전에 보여준다."""
+    """선택한 DeliverableType들의 최소 제안 상금 합계를 등록 전에 보여준다.
+
+    과제에는 "상금미달" 개념이 없다(`contests.assignment_api` 모듈 docstring) —
+    이 견적은 공모전 전용이라 공모전 제품 스위치(#271)가 닫는다.
+    """
+
+    require_contest_product_enabled()
 
     return QuoteOut(
         deliverable_type_ids=payload.deliverable_type_ids,
@@ -219,7 +226,12 @@ def create_contest(request: HttpRequest, payload: ContestCreateIn):
 
     Prize가 선택한 DeliverableType 최소 상금 합계에 미달해도 등록은 성공한다 —
     「상금미달」 배지만 선다. 플랫폼은 신호를 줄 뿐 금지하지 않는다.
+
+    공모전 제품 스위치(#271)가 꺼지면 새 공모전을 열 수 없다 — 과제는
+    `contests.assignment_api.create_assignment`가 별도로, 이 스위치와 무관하게 만든다.
     """
+
+    require_contest_product_enabled()
 
     if not Verification.objects.filter(
         user=request.auth_user, status=Verification.Status.VERIFIED
@@ -338,7 +350,12 @@ def list_contests(request: HttpRequest, filters: Query[ContestListFilters]):
     알 수 없는 값은 500이 아니라 4xx다 — `sort`는 Enum이라 ninja가 422로 막고,
     `category`/`deliverable_type`도 int가 아니면 422다. 존재하지 않는 id는 오류가
     아니라 빈 목록이다(필터는 "그런 게 있느냐"가 아니라 "그것으로 좁혀라"이다).
+
+    공모전 제품 스위치(#271)가 꺼지면 이 목록도 닫는다 — 과제는 명단을 두지 않으므로
+    (ADR-0028) 대응하는 공개 목록이 애초에 없다.
     """
+
+    require_contest_product_enabled()
 
     # 참가 가능(OPEN=PUBLISHED)이 기본, closed=true면 마감된 쪽(IN_JUDGING·
     # COMPLETED = CLOSED·AWARDED·JUDGING_ENDED)이다 — 홈 큐레이션과 같은 축
@@ -403,7 +420,12 @@ def list_my_sponsored_contests(request: HttpRequest, after: str | None = None):
     돌려주고, 원래 그 자리에 와야 했던 행은 어느 페이지에도 안 나온다. 정렬 마지막
     키에 `id` 를 붙이는 이유도 운영자 지급 큐와 같다 — `created_at` 이 같은 두 행의
     순서를 DB 가 보장하지 않는다.
+
+    공모전 제품 스위치(#271)가 꺼지면 이 목록도 닫는다 — 이 화면은 애초에
+    Assignment를 제외한다(아래 exclude(kind=Contest.Kind.ASSIGNMENT)).
     """
+
+    require_contest_product_enabled()
 
     if after is not None and decode_cursor(after) is None:
         # 읽을 수 없는 커서는 조용히 처음부터가 아니라 422 다 — 그러면 「더 보기」를
@@ -469,7 +491,11 @@ def get_home_curation(request: HttpRequest):
 
     각 묶음은 최대 `_HOME_BUCKET_LIMIT`건만 담는다 — 홈은 큐레이션이지 탐색이
     아니다. 전체를 보려면 `/contests`(#39)로 간다.
+
+    공모전 제품 스위치(#271)가 꺼지면 이 큐레이션도 닫는다.
     """
+
+    require_contest_product_enabled()
 
     now = Clock.now()
 
@@ -515,6 +541,12 @@ def get_home_curation(request: HttpRequest):
 
 @router.get("/contests/{contest_id}", response=ContestOut, auth=None)
 def get_contest(request: HttpRequest, contest_id: int):
+    """공모전 제품 스위치(#271)가 꺼지면 이 상세도 닫는다 — 과제 상세는
+    `contests.assignment_api.get_my_assignment`/`get_assignment_by_invite_code`가
+    별도로 답한다."""
+
+    require_contest_product_enabled()
+
     try:
         contest = (
             # `sponsor`도 select_related한다 — draft 소유자 판정(아래)과
@@ -666,7 +698,11 @@ def record_contest_view(request: HttpRequest, contest_id: int):
 
     응답에 조회수를 싣지 않는다 — 조회수는 Sponsor 전용이고, 공개 표면
     어디에도 실리지 않는다는 것이 #109의 인수조건이다.
+
+    공모전 제품 스위치(#271)가 꺼지면 이 기록도 닫는다.
     """
+
+    require_contest_product_enabled()
 
     try:
         contest = Contest.objects.select_related("sponsor").get(id=contest_id)
@@ -721,7 +757,11 @@ def reopen_contest(request: HttpRequest, contest_id: int, payload: ContestReopen
     그렇지 않으면 `create_contest`라면 422로 거부했을 죽은 분류가 이 경로로만
     살아남고, 이미 은퇴한 `DeliverableType`의 낡은 최소 상금이 상금미달 배지
     계산에 계속 쓰인다.
+
+    공모전 제품 스위치(#271)가 꺼지면 재개최도 새 개최와 같이 막는다.
     """
+
+    require_contest_product_enabled()
 
     with transaction.atomic():
         try:
@@ -859,7 +899,12 @@ def initiate_judging_period_extension(
 
     **PG 호출은 그 잠금 밖에서 한다**(#126) — 벤더가 느리면 그 Contest 의 모든 쓰기가
     같이 멈추고 DB 커넥션을 물고 있게 된다. 행 생성까지만 트랜잭션 안이다.
+
+    공모전 제품 스위치(#271)가 꺼지면 이 결제도 닫는다 — 과제에는 심사기간
+    자체가 없다(ADR-0028).
     """
+
+    require_contest_product_enabled()
 
     with transaction.atomic():
         try:
@@ -921,7 +966,12 @@ def confirm_judging_period_extension(
     PG 호출은 어떤 `transaction.atomic()` 블록 밖에서 일어나고, 타임아웃이면 `query_status`
     로 확정하며, 그 재확인마저 실패하면 미확정으로 남긴다(#87 지적 4, #125). 벤더의
     명시적 거절은 502 다.
+
+    공모전 제품 스위치(#271)가 꺼지면 이 확인도 닫는다 — 스위치가 꺼진 뒤로는
+    `initiate_judging_period_extension`이 막혀 있어 새 진행 중 결제가 생기지 않는다.
     """
+
+    require_contest_product_enabled()
 
     charge_qs = JudgingExtensionPayment.objects.select_related("contest__sponsor")
     try:
@@ -955,7 +1005,15 @@ def _get_owned_contest(request: HttpRequest, contest_id: int) -> Contest:
     Sponsor 자신의 AI grill 대화 이력을 읽는 건 아무것도 바꾸지 않으므로, Contest가
     공개된 뒤에도 계속 볼 수 있어야 한다. 타인의 Contest는 존재 자체를 숨기려 404로
     응답한다(get_contest·test_owner_can_view_own_draft_but_stranger_cannot과 같은 이유).
+
+    **공모전 제품 스위치(#271)를 여기 한 곳에서 본다.** 이 함수의 유일한 두
+    호출부(`_get_owned_draft_contest`와 그 아래 `list_requirement_chat_messages`)가
+    AI grill·Requirement CRUD·이미지 CRUD·`update_draft_contest`까지 이 저장소의
+    공모전 전용 쓰기·읽기 표면 전부를 이 한 자리로 모은다 — 스위치가 꺼지면 그
+    표면 전부가 이 게이트 하나에서 404 로 닫힌다.
     """
+
+    require_contest_product_enabled()
 
     try:
         contest = Contest.objects.select_related("sponsor").get(id=contest_id)

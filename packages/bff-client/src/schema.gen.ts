@@ -549,6 +549,9 @@ export interface paths {
          *     알 수 없는 값은 500이 아니라 4xx다 — `sort`는 Enum이라 ninja가 422로 막고,
          *     `category`/`deliverable_type`도 int가 아니면 422다. 존재하지 않는 id는 오류가
          *     아니라 빈 목록이다(필터는 "그런 게 있느냐"가 아니라 "그것으로 좁혀라"이다).
+         *
+         *     공모전 제품 스위치(#271)가 꺼지면 이 목록도 닫는다 — 과제는 명단을 두지 않으므로
+         *     (ADR-0028) 대응하는 공개 목록이 애초에 없다.
          */
         get: operations["contests_api_list_contests"];
         put?: never;
@@ -558,6 +561,9 @@ export interface paths {
          *
          *     Prize가 선택한 DeliverableType 최소 상금 합계에 미달해도 등록은 성공한다 —
          *     「상금미달」 배지만 선다. 플랫폼은 신호를 줄 뿐 금지하지 않는다.
+         *
+         *     공모전 제품 스위치(#271)가 꺼지면 새 공모전을 열 수 없다 — 과제는
+         *     `contests.assignment_api.create_assignment`가 별도로, 이 스위치와 무관하게 만든다.
          */
         post: operations["contests_api_create_contest"];
         delete?: never;
@@ -634,6 +640,8 @@ export interface paths {
          *
          *     각 묶음은 최대 `_HOME_BUCKET_LIMIT`건만 담는다 — 홈은 큐레이션이지 탐색이
          *     아니다. 전체를 보려면 `/contests`(#39)로 간다.
+         *
+         *     공모전 제품 스위치(#271)가 꺼지면 이 큐레이션도 닫는다.
          */
         get: operations["contests_api_get_home_curation"];
         put?: never;
@@ -672,6 +680,9 @@ export interface paths {
          *     돌려주고, 원래 그 자리에 와야 했던 행은 어느 페이지에도 안 나온다. 정렬 마지막
          *     키에 `id` 를 붙이는 이유도 운영자 지급 큐와 같다 — `created_at` 이 같은 두 행의
          *     순서를 DB 가 보장하지 않는다.
+         *
+         *     공모전 제품 스위치(#271)가 꺼지면 이 목록도 닫는다 — 이 화면은 애초에
+         *     Assignment를 제외한다(아래 exclude(kind=Contest.Kind.ASSIGNMENT)).
          */
         get: operations["contests_api_list_my_sponsored_contests"];
         put?: never;
@@ -694,6 +705,9 @@ export interface paths {
         /**
          * Quote
          * @description 선택한 DeliverableType들의 최소 제안 상금 합계를 등록 전에 보여준다.
+         *
+         *     과제에는 "상금미달" 개념이 없다(`contests.assignment_api` 모듈 docstring) —
+         *     이 견적은 공모전 전용이라 공모전 제품 스위치(#271)가 닫는다.
          */
         post: operations["contests_api_quote"];
         delete?: never;
@@ -709,7 +723,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Contest */
+        /**
+         * Get Contest
+         * @description 공모전 제품 스위치(#271)가 꺼지면 이 상세도 닫는다 — 과제 상세는
+         *     `contests.assignment_api.get_my_assignment`/`get_assignment_by_invite_code`가
+         *     별도로 답한다.
+         */
         get: operations["contests_api_get_contest"];
         put?: never;
         post?: never;
@@ -785,6 +804,9 @@ export interface paths {
          *
          *     **PG 호출은 그 잠금 밖에서 한다**(#126) — 벤더가 느리면 그 Contest 의 모든 쓰기가
          *     같이 멈추고 DB 커넥션을 물고 있게 된다. 행 생성까지만 트랜잭션 안이다.
+         *
+         *     공모전 제품 스위치(#271)가 꺼지면 이 결제도 닫는다 — 과제에는 심사기간
+         *     자체가 없다(ADR-0028).
          */
         post: operations["contests_api_initiate_judging_period_extension"];
         delete?: never;
@@ -809,6 +831,9 @@ export interface paths {
          *     PG 호출은 어떤 `transaction.atomic()` 블록 밖에서 일어나고, 타임아웃이면 `query_status`
          *     로 확정하며, 그 재확인마저 실패하면 미확정으로 남긴다(#87 지적 4, #125). 벤더의
          *     명시적 거절은 502 다.
+         *
+         *     공모전 제품 스위치(#271)가 꺼지면 이 확인도 닫는다 — 스위치가 꺼진 뒤로는
+         *     `initiate_judging_period_extension`이 막혀 있어 새 진행 중 결제가 생기지 않는다.
          */
         post: operations["contests_api_confirm_judging_period_extension"];
         delete?: never;
@@ -1048,6 +1073,8 @@ export interface paths {
          *     그렇지 않으면 `create_contest`라면 422로 거부했을 죽은 분류가 이 경로로만
          *     살아남고, 이미 은퇴한 `DeliverableType`의 낡은 최소 상금이 상금미달 배지
          *     계산에 계속 쓰인다.
+         *
+         *     공모전 제품 스위치(#271)가 꺼지면 재개최도 새 개최와 같이 막는다.
          */
         post: operations["contests_api_reopen_contest"];
         delete?: never;
@@ -1222,6 +1249,8 @@ export interface paths {
          *
          *     응답에 조회수를 싣지 않는다 — 조회수는 Sponsor 전용이고, 공개 표면
          *     어디에도 실리지 않는다는 것이 #109의 인수조건이다.
+         *
+         *     공모전 제품 스위치(#271)가 꺼지면 이 기록도 닫는다.
          */
         post: operations["contests_api_record_contest_view"];
         delete?: never;
@@ -1369,6 +1398,10 @@ export interface paths {
         /**
          * Scan
          * @description 등록부의 스캔 하나. Celery beat 가 스캔마다 이것을 부른다 — 이름은 등록부에서만 온다.
+         *
+         *     **꺼진 스캔은 이름을 몰라야 한다.** `is_scan_active`는 등록 여부와 지금 도는지를
+         *     한 판정으로 합친다 — 공모전 제품 스위치(#271)가 꺼지면 환불·배분·지급·인수인계
+         *     스캔은 여기서 "등록되지 않은 스캔"과 똑같이 404 다.
          */
         post: operations["core_api_scan"];
         delete?: never;
@@ -2285,6 +2318,9 @@ export interface paths {
          *
          *     **PG 등록은 그 잠금 밖에서 한다**(#127) — 벤더가 느리면 그 Contest 의 모든 쓰기가
          *     같이 멈추고 DB 커넥션을 물고 있게 된다. 행 확보까지만 트랜잭션 안이다.
+         *
+         *     공모전 제품 스위치(#271)가 꺼지면 이 결제도 닫는다 — 아래 `gates.payable()`이
+         *     이미 과제 결제를 막고 있으므로, 이 검사는 공모전 쪽 새 결제만 추가로 막는다.
          */
         post: operations["payments_api_initiate_payment"];
         delete?: never;
@@ -2336,6 +2372,9 @@ export interface paths {
          *     확정하며, 그 재확인마저 실패하면 미확정으로 남긴다(#87 지적 3, #125). 벤더의 명시적
          *     거절은 502 다. 이미 다른 경로(웹훅 등)로 확정돼 있으면 벤더를 부르지 않고 현재 상태를
          *     돌려준다.
+         *
+         *     공모전 제품 스위치(#271)가 꺼지면 이 확인도 닫는다 — 스위치가 꺼진 뒤로는
+         *     `initiate_payment`가 막혀 있어 새 REQUESTED Payment가 생기지 않는다.
          */
         post: operations["payments_api_confirm_payment"];
         delete?: never;

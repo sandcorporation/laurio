@@ -64,6 +64,14 @@ x-backend-env: &backend-env
   DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?staging DJANGO_SECRET_KEY 를 .env.staging 에 설정하라}
   DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:?staging DJANGO_ALLOWED_HOSTS 를 .env.staging 에 설정하라}
 
+  # 공모전 제품 스위치(#271, `core.contest_switch`) — 기본값은 켜짐(config/settings.py)
+  # 이지만 staging만 이 기본을 꺼짐으로 겹쳐 쓴다. `LAURIO_DEPLOYMENT_TARGET`과는
+  # 무관한 독립 값이다 — `.env.staging`에 `LAURIO_CONTEST_PRODUCT_ENABLED=true`
+  # 한 줄만 추가하면(그리고 아래 frontend build.args도 같은 값을 읽으므로
+  # frontend 재빌드까지 함께) 다시 켜진다. 닫히는 표면 전체 목록은
+  # `backend/core/contest_switch.py` 모듈 docstring에 있다.
+  LAURIO_CONTEST_PRODUCT_ENABLED: ${LAURIO_CONTEST_PRODUCT_ENABLED:-false}
+
   POSTGRES_DB: ${POSTGRES_DB:?staging POSTGRES_DB 를 .env.staging 에 설정하라}
   POSTGRES_USER: ${POSTGRES_USER:?staging POSTGRES_USER 를 .env.staging 에 설정하라}
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?staging POSTGRES_PASSWORD 를 .env.staging 에 설정하라}
@@ -341,6 +349,13 @@ services:
         # 채로 배포가 초록불을 받는 사고가 생긴다. 이게 바로 이 티켓이 막으려는
         # 사고의 재현이다.
         NEXT_PUBLIC_TOSS_CLIENT_KEY: ${TOSS_SANDBOX_CLIENT_KEY:?토스 결제창 브라우저 SDK 클라이언트 키를 .env.staging 의 TOSS_SANDBOX_CLIENT_KEY 에 설정하라 — 빌드타임에 인라인되므로 부팅 후에는 되돌릴 수 없다}
+        # 공모전 제품 스위치(#271) — 위 backend의 `LAURIO_CONTEST_PRODUCT_ENABLED`와
+        # **같은 `.env.staging` 줄을 나눠 읽는다**(`LAURIO_OPERATOR_ORIGIN`과 같은
+        # 원칙 — 둘이 어긋나면 링크는 보이는데 API가 404인 상태가 된다, 다만 이
+        # 방향의 어긋남은 앱만 열려 있어도 백엔드가 닫혀 있으니 안전하다). 빌드
+        # 인자라 값을 바꾸면 이미지를 다시 굽어야 반영된다(NEXT_PUBLIC_TOSS_CLIENT_KEY
+        # 와 같은 제약).
+        NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED: ${LAURIO_CONTEST_PRODUCT_ENABLED:-false}
     restart: unless-stopped
     depends_on:
       backend:
