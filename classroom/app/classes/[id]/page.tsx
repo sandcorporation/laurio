@@ -5,7 +5,6 @@
 // 백엔드가 404를 주므로 그대로 "찾을 수 없다"로 보여준다(존재를 알려주지
 // 않는다).
 import Link from "next/link";
-import { useParams } from "next/navigation";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -115,8 +114,6 @@ export default function ClassDetailPage() {
   const { state: problemsState, move } = useProblems(classId);
   const [tab, setTab] = useState<DetailTab>("problems");
   const router = useRouter();
-  const { state: classState } = useClass(classId);
-  const { state: problemsState, move } = useProblems(classId);
   const [copying, setCopying] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
 

@@ -6,7 +6,10 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('classroom', '0010_classroomscore_classroomscoringattempt'),
+        # 통합 시 재번호했다(#289~#295 병렬 실행) — cls-11 의 0011 과 같은 번호로
+        # 충돌해 리프가 둘이 됐다. 두 변경(보관 시각 · 토큰 예산)이 서로 독립이라
+        # 어느 순서로 세워도 결과 스키마가 같다.
+        ('classroom', '0011_class_archived_at'),
     ]
 
     operations = [

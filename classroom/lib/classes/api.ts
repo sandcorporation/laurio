@@ -64,6 +64,10 @@ export function setOpenAIKey(classId: number, apiKey: string): Promise<ClassRow>
 // 가리키지 않는다.
 export function regenerateJoinLink(classId: number): Promise<{ join_code: string }> {
   return backendJson<{ join_code: string }>(`/classroom/classes/${classId}/join-link/regenerate`, {
+    method: "POST",
+  });
+}
+
 // 지난 기수로 다음 기수를 연다(#293) — 문제·체크리스트·채점 설정이
 // 순서 그대로 따라오고, 참여자·제출물·Score·OpenAI 키는 따라오지 않는다.
 export function copyClass(classId: number): Promise<ClassRow> {

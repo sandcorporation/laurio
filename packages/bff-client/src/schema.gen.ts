@@ -529,8 +529,52 @@ export interface paths {
         patch: operations["classroom_api_update_class"];
         trace?: never;
     };
-    "/api/classroom/classes/{class_id}/join-link/regenerate": {
+    "/api/classroom/classes/{class_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive Class
+         * @description 수업이 끝나면 보관한다(#294) — 지우지 않는다. 새 가입·새 제출만
+         *     닫히고, 지난 문제·제출물·판정·달성률은 계속 읽힌다(CONTEXT.md
+         *     「Class」). 이미 보관된 클래스를 다시 보관해도 오류를 내지 않는다(멱등,
+         *     `expel_member`와 같은 관용구).
+         */
+        post: operations["classroom_api_archive_class"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/copy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Copy Class View
+         * @description 지난 기수로 다음 기수를 연다(#293) — 문제·체크리스트·채점 설정이
+         *     순서 그대로 따라오고, 참여자·제출물·Score·OpenAI 키는 따라오지 않는다
+         *     (`services.copy_class` docstring 참고).
+         */
+        post: operations["classroom_api_copy_class_view"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/classes/{class_id}/join-link/regenerate": {
         parameters: {
             query?: never;
             header?: never;
@@ -589,12 +633,6 @@ export interface paths {
          *     내보내도 오류를 내지 않고 그대로 둔다(멱등).
          */
         post: operations["classroom_api_expel_member"];
-         * Copy Class View
-         * @description 지난 기수로 다음 기수를 연다(#293) — 문제·체크리스트·채점 설정이
-         *     순서 그대로 따라오고, 참여자·제출물·Score·OpenAI 키는 따라오지 않는다
-         *     (`services.copy_class` docstring 참고).
-         */
-        post: operations["classroom_api_copy_class_view"];
         delete?: never;
         options?: never;
         head?: never;
@@ -766,8 +804,29 @@ export interface paths {
         patch: operations["classroom_api_update_checklist_item"];
         trace?: never;
     };
-    "/api/classroom/classes/{class_id}/problems/{problem_id}/mine": {
     "/api/classroom/classes/{class_id}/problems/{problem_id}/copy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Copy Problem
+         * @description 자기 문제를 자기 다른 클래스로 복사한다(#292). 원본·대상 둘 다 강사
+         *     본인 소유여야 한다 — 어느 쪽이 남의 것이어도 404다(존재를 알려주지
+         *     않는다, 이 파일의 다른 소유권 검사와 같은 이유).
+         */
+        post: operations["classroom_api_copy_problem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/classes/{class_id}/problems/{problem_id}/mine": {
         parameters: {
             query?: never;
             header?: never;
@@ -783,15 +842,6 @@ export interface paths {
         get: operations["classroom_api_get_my_problem"];
         put?: never;
         post?: never;
-        get?: never;
-        put?: never;
-        /**
-         * Copy Problem
-         * @description 자기 문제를 자기 다른 클래스로 복사한다(#292). 원본·대상 둘 다 강사
-         *     본인 소유여야 한다 — 어느 쪽이 남의 것이어도 404다(존재를 알려주지
-         *     않는다, 이 파일의 다른 소유권 검사와 같은 이유).
-         */
-        post: operations["classroom_api_copy_problem"];
         delete?: never;
         options?: never;
         head?: never;
@@ -878,6 +928,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/unarchive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unarchive Class
+         * @description 보관을 되돌린다(#294 AC "강사가 클래스를 보관하고 다시 되돌릴 수
+         *     있다") — `archived_at`을 지우면 그대로 진행중이다, 보관 이력을 따로
+         *     남기지 않는다.
+         */
+        post: operations["classroom_api_unarchive_class"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/join/{join_code}": {
         parameters: {
             query?: never;
@@ -889,6 +961,11 @@ export interface paths {
          * Preview Join
          * @description 가입 여부와 무관하게 누구나 본다 — 계정이 없는 사람이 가입할지 먼저
          *     판단할 수 있어야 한다(#280 AC).
+         *
+         *     **보관된 클래스도 404로 숨기지 않는다**(#294) — 재발급으로 죽은 코드와
+         *     달리, 보관은 "이 링크가 무효다"가 아니라 "이 수업이 끝났다"이다. 그
+         *     차이가 화면에서 "고장"과 "끝났다"를 가르므로(AC), 미리보기는 그대로
+         *     보여주고 `archived`만 참으로 켠다 — 가입 폼을 접는 판단은 화면의 몫.
          */
         get: operations["classroom_api_preview_join"];
         put?: never;
@@ -899,6 +976,11 @@ export interface paths {
          *     돌려준다(#280 AC "같은 사람이 같은 클래스에 두 번 들어가지 않는다") —
          *     두 번째 이름은 버려진다, 첫 가입 때 정한 이름이 그 클래스에서의 정체성이기
          *     때문이다.
+         *
+         *     **보관된 클래스는 새 가입을 받지 않는다**(#294 AC). 미리보기가 이미
+         *     `archived`를 알려 화면이 가입 폼을 접으므로, 여기 닿는 것은 그 안내를
+         *     보고도 보낸 요청뿐이다 — `expel_member`의 403과 같은 이유로, 이미 아는
+         *     사실을 403으로 정직하게 답한다.
          */
         post: operations["classroom_api_join_class"];
         delete?: never;
@@ -3903,6 +3985,11 @@ export interface components {
         /** ClassOut */
         ClassOut: {
             /**
+             * Archived
+             * @default false
+             */
+            archived: boolean;
+            /**
              * Created At
              * Format: date-time
              */
@@ -3919,6 +4006,19 @@ export interface components {
             name: string;
             /** Openai Key Masked */
             openai_key_masked?: string | null;
+            /** Token Budget */
+            token_budget?: number | null;
+            /**
+             * Token Budget Exhausted
+             * @default false
+             */
+            token_budget_exhausted: boolean;
+            /** Token Budget Remaining */
+            token_budget_remaining?: number | null;
+            /** Token Budget Warning Threshold Percent */
+            token_budget_warning_threshold_percent: number;
+            /** Token Usage Total */
+            token_usage_total: number;
         };
         /** ClassPatchIn */
         ClassPatchIn: {
@@ -3926,6 +4026,10 @@ export interface components {
             default_model?: string | null;
             /** Name */
             name?: string | null;
+            /** Token Budget */
+            token_budget?: number | null;
+            /** Token Budget Warning Threshold Percent */
+            token_budget_warning_threshold_percent?: number | null;
         };
         /** ClassroomChecklistVerdictOut */
         ClassroomChecklistVerdictOut: {
@@ -4116,6 +4220,8 @@ export interface components {
              * @default false
              */
             passed: boolean;
+            /** Pending Reason */
+            pending_reason?: string | null;
             /** Problem Id */
             problem_id: number;
             score?: components["schemas"]["ClassroomScoreOut"] | null;
@@ -4744,6 +4850,11 @@ export interface components {
         };
         /** JoinPreviewOut */
         JoinPreviewOut: {
+            /**
+             * Archived
+             * @default false
+             */
+            archived: boolean;
             /** Class Name */
             class_name: string;
             /** Instructor Email */
@@ -5030,7 +5141,7 @@ export interface components {
          *     해둔다. User Story 80~89 에 나오는 유형 중 최소 집합을 담았다.
          * @enum {string}
          */
-        NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "scoring_complete" | "appeal_ruled" | "new_contest_in_category" | "payout_awaits_you";
+        NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "scoring_complete" | "appeal_ruled" | "new_contest_in_category" | "payout_awaits_you" | "classroom_token_budget_warning";
         /** OpenAIKeyIn */
         OpenAIKeyIn: {
             /** Api Key */
@@ -6863,8 +6974,7 @@ export interface operations {
             };
         };
     };
-    classroom_api_regenerate_join_link: {
-    classroom_api_copy_class_view: {
+    classroom_api_archive_class: {
         parameters: {
             query?: never;
             header?: never;
@@ -6877,8 +6987,68 @@ export interface operations {
         responses: {
             /** @description OK */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_copy_class_view: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
             /** @description Created */
             201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_regenerate_join_link: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6947,7 +7117,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MemberOut"];
-                    "application/json": components["schemas"]["ClassOut"];
                 };
             };
             /** @description Not Found */
@@ -7381,8 +7550,43 @@ export interface operations {
             };
         };
     };
-    classroom_api_get_my_problem: {
     classroom_api_copy_problem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+                problem_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProblemCopyIn"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_get_my_problem: {
         parameters: {
             query?: never;
             header?: never;
@@ -7396,20 +7600,11 @@ export interface operations {
         responses: {
             /** @description OK */
             200: {
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ProblemCopyIn"];
-            };
-        };
-        responses: {
-            /** @description Created */
-            201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["ClassroomProblemSubmissionsOut"];
-                    "application/json": components["schemas"]["ProblemOut"];
                 };
             };
             /** @description Not Found */
@@ -7581,6 +7776,37 @@ export interface operations {
             };
         };
     };
+    classroom_api_unarchive_class: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     classroom_api_preview_join: {
         parameters: {
             query?: never;
@@ -7634,6 +7860,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JoinResultOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
                 };
             };
             /** @description Not Found */
