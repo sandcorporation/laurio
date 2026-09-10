@@ -77,10 +77,10 @@ class AssetSummaryOut(Schema):
     """`test_account`가 **없는** 자료 (#190).
 
     공개 프로필과 심사 비교 화면이 쓴다. 두 스키마 모두 다중화 이전에도
-    `test_account` 필드가 없었다 — 마감 후 공개되는 것은 데모·영상이지 그것을
-    들여다볼 로그인 정보까지가 아니고(ADR-0014의 "데모·영상" 칸, #10 리뷰 지적),
-    비교 화면은 애초에 그 필드를 내지 않았다. `SubmissionAssetOut`을 그대로 쓰면
-    다중화가 그 두 자리에 로그인 정보를 조용히 새로 흘려보내게 된다.
+    `test_account` 필드가 없었다 — 마감 후 공개되는 것은 데모·영상·스크린샷이지
+    그것을 들여다볼 로그인 정보까지가 아니고(ADR-0014의 "데모·영상" 칸, #10 리뷰
+    지적), 비교 화면은 애초에 그 필드를 내지 않았다. `SubmissionAssetOut`을 그대로
+    쓰면 다중화가 그 두 자리에 로그인 정보를 조용히 새로 흘려보내게 된다.
     """
 
     id: int
@@ -88,6 +88,13 @@ class AssetSummaryOut(Schema):
     value: str
     label: str
     order: int
+    # 화면 안에서 바로 열 수 있는 presigned URL (#265). `DEMO_VIDEO`·`SCREENSHOT`
+    # (object_key를 갖는 종류)에만 값이 있다 — `DEMO_URL`은 `value` 자체가 이미
+    # 외부 URL이라 서명이 필요 없어 항상 null이다. 이 필드가 나가는 두 응답
+    # (공개 프로필·심사 비교) 모두 이미 마감 후로 확정된 자리라(`submissions.api.
+    # _public_asset_summaries`), 여기서 URL을 내려도 마감 전 비공개 원칙을
+    # 어기지 않는다.
+    download_url: str | None = None
 
 
 class SubmissionAssetOut(Schema):

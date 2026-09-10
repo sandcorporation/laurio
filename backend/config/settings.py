@@ -410,6 +410,16 @@ else:
 STORAGE_UPLOAD_URL_TTL_SECONDS = int(_env("STORAGE_UPLOAD_URL_TTL_SECONDS", "900"))
 STORAGE_DOWNLOAD_URL_TTL_SECONDS = int(_env("STORAGE_DOWNLOAD_URL_TTL_SECONDS", "300"))
 
+# 시연 영상 전용 다운로드 수명(#265, ADR-0036) — 화면 안에서 재생하는 동안 URL이
+# 살아 있어야 해서 위 기본값(300초)보다 길다. 24시간으로 잡는다(ADR-0036이 정한
+# 12~24시간 범위의 상단) — 유출된 링크가 그동안 유효하다는 대가는 있지만, 마감 후
+# 전면 공개되는 자료라 그 창이 여는 것은 이미 공개된 것뿐이다. **PlatformPolicy가
+# 아니라 설정 상수다** — 운영자가 화면에서 조정하게 하면 실수로 길게 잡는 길이
+# 열린다(`submissions.resolvers.SubmissionDownloadTTLResolver`가 이 값을 읽는다).
+STORAGE_VIDEO_DOWNLOAD_URL_TTL_SECONDS = int(
+    _env("STORAGE_VIDEO_DOWNLOAD_URL_TTL_SECONDS", str(24 * 60 * 60))
+)
+
 # 테스트가 override_settings로 특정 target_ref 아래의 write_object 실패를 흉내낼
 # 때 쓴다(#220, LLM_FAKE_RAISING_SUBMISSION_IDS와 같은 원칙) — 저장소만 낸
 # 제출의 채점 박제(scoring.services)가 저장 실패를 만나면 Score를 만들지 않고
@@ -441,6 +451,13 @@ STORAGE_CONTENT_TYPE_RESOLVER = _env(
 # 돌려준다(기존 PUT 동작 그대로).
 STORAGE_MAX_UPLOAD_SIZE_RESOLVER = _env(
     "STORAGE_MAX_UPLOAD_SIZE_RESOLVER", "submissions.resolvers.SubmissionMaxUploadSizeResolver"
+)
+
+# target_ref -> 다운로드 URL 수명(초) 훅(storage.policy.DownloadTTLResolver, #265).
+# 비어 있으면 storage.policy.DefaultDownloadTTLResolver 로 모든 target_ref에 같은
+# 기본 TTL(STORAGE_DOWNLOAD_URL_TTL_SECONDS)을 준다.
+STORAGE_DOWNLOAD_TTL_RESOLVER = _env(
+    "STORAGE_DOWNLOAD_TTL_RESOLVER", "submissions.resolvers.SubmissionDownloadTTLResolver"
 )
 
 AUTH_PASSWORD_VALIDATORS = [

@@ -34,12 +34,18 @@ import {
 import { AssetKindSection, createEmptyAsset, type EditableAsset } from "./asset-kind-section";
 import { RequirementField, type RequirementFieldState } from "./requirement-field";
 
-// #190 이후 제출작은 자료 목록을 담는다(ADR-0027) — 종류는 넷: 전체 소스코드
-// (필수, 최소 1개), 시연 영상·데모 URL(권장), GitHub 저장소(권장, 공개
-// 저장소는 채점에 반영된다). `EditableAsset[]`을 종류별로 따로 두는 이유는
-// 종류마다 값 편집 UI(업로드 vs URL 텍스트)와 허용되는 부가 필드(테스트
-// 계정은 demo_url뿐)가 달라서다.
-const KNOWN_ASSET_KINDS = new Set(["source", "demo_video", "demo_url", "repository"]);
+// #190 이후 제출작은 자료 목록을 담는다(ADR-0027) — 종류는 다섯: 전체 소스코드
+// (필수, 최소 1개), 시연 영상·스크린샷(#264, ADR-0036)·데모 URL(권장), GitHub
+// 저장소(권장, 공개 저장소는 채점에 반영된다). `EditableAsset[]`을 종류별로
+// 따로 두는 이유는 종류마다 값 편집 UI(업로드 vs URL 텍스트)와 허용되는 부가
+// 필드(테스트 계정은 demo_url뿐)가 달라서다.
+const KNOWN_ASSET_KINDS = new Set([
+  "source",
+  "demo_video",
+  "screenshot",
+  "demo_url",
+  "repository",
+]);
 
 function assetsOfKind(assets: SubmissionOut["assets"], kind: string): EditableAsset[] {
   return assets
@@ -138,6 +144,7 @@ export default function SubmitPage() {
 
   const [sourceAssets, setSourceAssets] = useState<EditableAsset[]>([createEmptyAsset()]);
   const [demoVideoAssets, setDemoVideoAssets] = useState<EditableAsset[]>([]);
+  const [screenshotAssets, setScreenshotAssets] = useState<EditableAsset[]>([]);
   const [demoUrlAssets, setDemoUrlAssets] = useState<EditableAsset[]>([]);
   const [repositoryAssets, setRepositoryAssets] = useState<EditableAsset[]>([]);
   // 이 폼이 편집하지 않는(모르는) 종류의 자료 — 통과 버킷. 오늘은 항상
@@ -165,6 +172,7 @@ export default function SubmitPage() {
     const nextSourceAssets = assetsOfKind(assets, "source");
     setSourceAssets(nextSourceAssets.length > 0 ? nextSourceAssets : [createEmptyAsset()]);
     setDemoVideoAssets(assetsOfKind(assets, "demo_video"));
+    setScreenshotAssets(assetsOfKind(assets, "screenshot"));
     setDemoUrlAssets(assetsOfKind(assets, "demo_url"));
     setRepositoryAssets(assetsOfKind(assets, "repository"));
     setUnknownKindAssets(unknownKindAssetsOf(assets));
@@ -490,6 +498,7 @@ export default function SubmitPage() {
     const assets: SubmissionIn["assets"] = [
       ...rowsToAssetsIn(sourceAssets, "source"),
       ...rowsToAssetsIn(demoVideoAssets, "demo_video"),
+      ...rowsToAssetsIn(screenshotAssets, "screenshot"),
       ...rowsToAssetsIn(demoUrlAssets, "demo_url"),
       ...rowsToAssetsIn(repositoryAssets, "repository"),
       // 이 폼이 모르는 종류의 자료도 그대로 되돌려 보낸다 — 손대지 않고
@@ -666,6 +675,7 @@ export default function SubmitPage() {
   const userId = session.status === "authenticated" ? session.user.id : null;
   const sourceTargetRef = userId ? `submission:${contestId}:${userId}:source` : null;
   const demoVideoTargetRef = userId ? `submission:${contestId}:${userId}:demo-video` : null;
+  const screenshotTargetRef = userId ? `submission:${contestId}:${userId}:screenshot` : null;
 
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-8 p-10">
@@ -801,6 +811,23 @@ export default function SubmitPage() {
         onChange={setDemoVideoAssets}
         disabled={!canEdit}
         targetRefPrefix={demoVideoTargetRef ?? undefined}
+      />
+
+      <AssetKindSection
+        kind="screenshot"
+        title={ASSET_KIND_LABELS.screenshot}
+        helperText={
+          <p className="text-sm text-ink/70" data-testid="screenshot-helper">
+            결과물의 화면을 찍은 이미지입니다(png/jpeg/webp/gif). 마감 후 데모·영상과
+            함께 공개됩니다.
+          </p>
+        }
+        addLabel="+ 스크린샷 추가"
+        testIdPrefix="screenshot-asset"
+        rows={screenshotAssets}
+        onChange={setScreenshotAssets}
+        disabled={!canEdit}
+        targetRefPrefix={screenshotTargetRef ?? undefined}
       />
 
       <AssetKindSection

@@ -168,6 +168,35 @@ def get_max_upload_size_resolver() -> MaxUploadSizeResolver:
     return resolver_cls()
 
 
+class DownloadTTLResolver(Protocol):
+    """target_ref -> 다운로드 presigned URL의 수명(초) (#265, ADR-0036).
+
+    거의 모든 target_ref는 클릭해서 내려받는 파일에 맞춘 기본값
+    (`settings.STORAGE_DOWNLOAD_URL_TTL_SECONDS`)이면 충분하다. 시연 영상만
+    다르다 — 화면 안에서 재생하는 동안 URL이 살아 있어야 하는데, 300초는 그
+    재생 시간보다 짧을 수 있다. **이 값은 PlatformPolicy가 아니라 설정
+    상수다** — 운영자가 화면에서 조정하게 하면 실수로 길게 잡는 길이 열린다는
+    것이 ADR-0036의 결정이다.
+    """
+
+    def resolve(self, target_ref: str) -> int: ...
+
+
+class DefaultDownloadTTLResolver:
+    """실제 도메인 리졸버가 붙기 전까지의 기본값 — 항상 기본 TTL."""
+
+    def resolve(self, target_ref: str) -> int:
+        return settings.STORAGE_DOWNLOAD_URL_TTL_SECONDS
+
+
+def get_download_ttl_resolver() -> DownloadTTLResolver:
+    path = getattr(settings, "STORAGE_DOWNLOAD_TTL_RESOLVER", "") or (
+        "storage.policy.DefaultDownloadTTLResolver"
+    )
+    resolver_cls = import_string(path)
+    return resolver_cls()
+
+
 def _authenticated_user_id(request: HttpRequest) -> int | None:
     """JWT로 확인된 호출자의 User pk. 없으면(비로그인·무효 토큰) None."""
 

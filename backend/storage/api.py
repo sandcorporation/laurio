@@ -36,6 +36,7 @@ from storage.policy import (
     StorageAccessDenied,
     StorageAccessPolicy,
     get_content_type_resolver,
+    get_download_ttl_resolver,
     get_max_upload_size_resolver,
 )
 
@@ -136,11 +137,12 @@ def request_download(request, payload: DownloadRequest) -> DownloadResponse:
     content_type = get_content_type_resolver().resolve(payload.target_ref, payload.object_key)
     filename = build_download_filename(content_type)
 
+    ttl_seconds = get_download_ttl_resolver().resolve(payload.target_ref)
     adapter = get_storage_adapter()
     presigned = adapter.presign_download(
         payload.object_key,
         filename=filename,
-        expires_in=timedelta(seconds=settings.STORAGE_DOWNLOAD_URL_TTL_SECONDS),
+        expires_in=timedelta(seconds=ttl_seconds),
     )
     return DownloadResponse(
         download_url=presigned.url,

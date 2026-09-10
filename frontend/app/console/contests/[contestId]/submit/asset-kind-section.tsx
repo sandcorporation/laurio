@@ -12,7 +12,12 @@
 // 넘치면 서버가 저장 시점에 422 로 알리는 문구를 그대로 보여준다(submit-error).
 import { UploadField } from "@/components/upload/upload-field";
 
-export type AssetKind = "source" | "demo_video" | "demo_url" | "repository";
+export type AssetKind = "source" | "demo_video" | "screenshot" | "demo_url" | "repository";
+
+// 스크린샷 업로드가 받는 파일 형식(ADR-0036) — 서버 검증(submissions.api.
+// ALLOWED_SCREENSHOT_CONTENT_TYPES)을 대신하지 않는다, 저장 전에 같은 실수를
+// 미리 걸러 왕복을 줄일 뿐이다.
+const SCREENSHOT_ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
 
 export interface EditableAsset {
   /** React key — 안정적이어야 재정렬 중에도 입력 포커스를 잃지 않는다. */
@@ -77,7 +82,7 @@ export interface AssetKindSectionProps {
   required?: boolean;
   addLabel: string;
   testIdPrefix: string;
-  /** source·demo_video 전용 presigned 업로드 대상. 나머지 종류는 쓰지 않는다. */
+  /** source·demo_video·screenshot 전용 presigned 업로드 대상. 나머지 종류는 쓰지 않는다. */
   targetRefPrefix?: string;
 }
 
@@ -100,7 +105,7 @@ export function AssetKindSection({
   testIdPrefix,
   targetRefPrefix,
 }: AssetKindSectionProps) {
-  const isUploadKind = kind === "source" || kind === "demo_video";
+  const isUploadKind = kind === "source" || kind === "demo_video" || kind === "screenshot";
   const canRemove = !required || rows.length > 1;
   // `required` 종류(오늘은 소스뿐)는 화면에 행이 하나 있어도 그 행이
   // **비어 있을 수 있다** — 첫 로드 때 항상 빈 행 하나로 시작하고
@@ -225,7 +230,13 @@ export function AssetKindSection({
                     <UploadField
                       targetRef={targetRefPrefix}
                       label={row.value ? "다른 파일로 교체" : "파일 선택"}
-                      accept={kind === "source" ? SOURCE_UPLOAD_ACCEPT : undefined}
+                      accept={
+                        kind === "source"
+                          ? SOURCE_UPLOAD_ACCEPT
+                          : kind === "screenshot"
+                            ? SCREENSHOT_ACCEPT
+                            : undefined
+                      }
                       testId={`${testIdPrefix}-${index}-upload`}
                       onUploaded={(objectKey, contentType) =>
                         update(index, { value: objectKey, contentType })

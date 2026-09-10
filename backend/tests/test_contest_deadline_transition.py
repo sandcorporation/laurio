@@ -394,6 +394,51 @@ def test_closed_submission_appears_on_developer_public_profile(client, category,
 
 
 @pytest.mark.django_db
+def test_public_profile_includes_a_playable_download_url_for_video_and_screenshot(
+    client, category, landing_type
+):
+    """#265: 「시연 영상 N편 있음」 죽은 배지 대신 실제로 열 수 있는 URL을 낸다.
+    스크린샷도 같은 칸이라(#264, ADR-0036) 함께 낸다."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+    demo_key = _demo_video_object_key(contest["id"], dev["user_id"])
+    screenshot_key = f"submission:{contest['id']}:{dev['user_id']}:screenshot/{uuid.uuid4().hex}"
+
+    submit_resp = client.post(
+        f"{CONTESTS_URL}/{contest['id']}/submissions",
+        data={
+            "assets": [
+                {"kind": "source", "value": _source_object_key(contest["id"], dev["user_id"])},
+                {"kind": "demo_video", "value": demo_key, "content_type": "video/mp4"},
+                {"kind": "screenshot", "value": screenshot_key, "content_type": "image/png"},
+            ]
+        },
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert submit_resp.status_code == 201, submit_resp.content
+
+    from accounts.models import DeveloperProfile
+
+    developer_id = DeveloperProfile.objects.get(user_id=dev["user_id"]).id
+
+    _freeze(deadline + timedelta(minutes=1))
+    tick_resp = client.post(TICK_URL, **_internal_headers())
+    assert tick_resp.status_code == 200
+
+    response = client.get(f"/api/developers/{developer_id}/profile")
+    assert response.status_code == 200
+    assets = response.json()["submissions"][0]["assets"]
+    assets_by_kind = {a["kind"]: a for a in assets}
+    assert assets_by_kind["demo_video"]["download_url"].startswith("https://fake-storage.test/")
+    assert assets_by_kind["screenshot"]["download_url"].startswith("https://fake-storage.test/")
+
+
+@pytest.mark.django_db
 def test_public_profile_for_unknown_developer_is_404(client):
     response = client.get(f"/api/developers/999999/profile")
     assert response.status_code == 404
