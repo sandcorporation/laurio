@@ -48,8 +48,8 @@ test.describe("미들웨어 가드 — 콘텐츠가 그려지기 전에 리다�
     expect([200, 503]).toContain(health.status());
 
     // BFF 프록시 자신도 가드 대상이 아니다 — 세션 판정은 프록시가 아니라
-    // 백엔드가 401로 한다(지금은 허용목록이 비어 있어 이 요청 자체가 404다,
-    // 아래 describe 참고).
+    // 백엔드가 401로 한다(허용목록 밖인 이 경로는 그 전에 404다, 아래 describe
+    // 참고).
     const proxied = await request.get("/api/backend/anything");
     expect(proxied.status()).not.toBe(302);
     expect(proxied.status()).not.toBe(307);
@@ -57,10 +57,21 @@ test.describe("미들웨어 가드 — 콘텐츠가 그려지기 전에 리다�
 });
 
 test.describe("BFF 프록시 허용목록 — 기본은 거부다 (ADR-0016, #276)", () => {
-  test("허용목록이 비어 있으므로 어떤 백엔드 경로도 통과하지 못한다", async ({ request }) => {
-    for (const path of ["/api/backend/accounts/me", "/api/backend/anything"]) {
+  // #276 이 이 스펙을 쓸 때는 허용목록이 비어 있어 **모든** 경로가 404였다.
+  // 그 뒤 #278·#286 이 `/api/classroom`·`/api/accounts`·`/api/storage` 를 열었다
+  // (classroom/lib/proxy/allowlist.ts 가 이유를 적고 있다). 그래도 이 스펙이
+  // 지키는 것은 그대로다: **목록에 없으면 백엔드에 닿지도 못한다.**
+  test("허용목록 밖의 경로는 백엔드에 닿지 못한다", async ({ request }) => {
+    for (const path of ["/api/backend/anything", "/api/backend/contests", "/api/backend/payments"]) {
       const res = await request.get(path);
       expect(res.status(), path).toBe(404);
     }
+  });
+
+  test("허용목록 안의 경로는 백엔드까지 가고, 거절은 백엔드가 한다", async ({ request }) => {
+    // 로그인하지 않았으므로 백엔드가 401 을 준다 — 404 라면 프록시가 막은
+    // 것이고, 그러면 참여자가 소스를 낼 때 자기 User pk 를 얻지 못한다(#286).
+    const res = await request.get("/api/backend/accounts/me");
+    expect(res.status()).toBe(401);
   });
 });

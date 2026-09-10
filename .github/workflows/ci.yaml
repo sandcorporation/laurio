@@ -1098,6 +1098,7 @@ jobs:
             -e LAURIO_DEPLOYMENT_TARGET=production \
             -e LAURIO_WEB_ORIGIN=https://laurio.example \
             -e LAURIO_API_BASE_URL=http://127.0.0.1:1 \
+            -e LAURIO_SESSION_COOKIE_DOMAIN=.laurio.example \
             -e KAKAO_REST_API_KEY=ci-guard-only-kakao-rest-api-key \
             -e KAKAO_SECRET_KEY=ci-guard-only-kakao-secret-key \
             -e KAKAO_REDIRECT_URI=https://laurio.example/api/auth/social/kakao/callback \
