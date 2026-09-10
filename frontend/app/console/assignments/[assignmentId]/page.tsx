@@ -225,7 +225,7 @@ export default function AssignmentDetailPage() {
       {assignment.status === "draft" ? (
         <div className="border border-rule p-4">
           <p className="text-sm text-ink/70">
-            아직 열리지 않았습니다. 열면 InviteCode가 발급되어 학생에게 알려줄 수 있습니다.
+            아직 열리지 않았습니다. 열면 초대 코드가 발급되어 학생에게 알려줄 수 있습니다.
           </p>
           <button
             type="button"
@@ -303,7 +303,7 @@ export default function AssignmentDetailPage() {
                 data-testid="assignment-invite-reissue-button"
                 className="mt-3 w-fit border border-ink px-4 py-2 text-sm hover:bg-ink hover:text-paper disabled:opacity-50"
               >
-                {reissuing ? "재발급하는 중..." : "InviteCode 재발급"}
+                {reissuing ? "재발급하는 중..." : "초대 코드 재발급"}
               </button>
               {reissued && (
                 <p
@@ -412,7 +412,7 @@ export default function AssignmentDetailPage() {
           마감 후)에는 이 목록이 유일한 표시 자리가 된다. */}
       {!isEditable ? (
         <div className="border-t border-rule pt-4 text-sm text-ink/70">
-          <p>Requirement</p>
+          <p>요구사항</p>
           <ul className="mt-2 flex flex-col gap-1" data-testid="assignment-requirements">
             {assignment.requirements.map((r) => (
               <li key={r.id} data-testid={`assignment-requirement-${r.id}`}>

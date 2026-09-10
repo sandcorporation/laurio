@@ -109,7 +109,7 @@ export default function DeveloperBuildAssetsPage({
 
       {load.status === "not-found" ? (
         <p className="mt-6" data-testid="build-assets-not-found">
-          Submission을 찾을 수 없습니다.
+          제출물을 찾을 수 없습니다.
         </p>
       ) : load.status === "forbidden" ? (
         <p className="mt-6 text-attention" role="alert" data-testid="build-assets-forbidden">
@@ -122,9 +122,9 @@ export default function DeveloperBuildAssetsPage({
       ) : (
         <>
           <p className="mt-6 text-sm text-ink" data-testid="build-assets-optional-notice">
-            빌드 설정·서명키·스토어 메타데이터·실행 문서 등 Sponsor의 인수에 도움이 될 자료를
+            빌드 설정·서명키·스토어 메타데이터·실행 문서 등 개최자의 인수에 도움이 될 자료를
             올릴 수 있습니다 — <strong>선택 사항입니다.</strong> 아무것도 올리지 않아도
-            Sponsor는 인수를 확인할 수 있고 상금은 그대로 지급됩니다. 소스코드는 Award
+            개최자는 인수를 확인할 수 있고 상금은 그대로 지급됩니다. 소스코드는 선정
             시점에 이미 공개되어 있습니다.
           </p>
 

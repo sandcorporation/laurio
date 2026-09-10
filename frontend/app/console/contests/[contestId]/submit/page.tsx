@@ -188,7 +188,7 @@ export default function SubmitPage() {
 
       if (!contest.ok) {
         if (contest.status === 404) return setLoad({ status: "not-found" });
-        return setLoad({ status: "error", message: "Contest 정보를 불러오지 못했습니다." });
+        return setLoad({ status: "error", message: "공모전 정보를 불러오지 못했습니다." });
       }
       if (!verification.ok) {
         return setLoad({ status: "error", message: "본인확인 상태를 확인하지 못했습니다." });
@@ -614,7 +614,7 @@ export default function SubmitPage() {
   if (load.status === "not-found") {
     return (
       <main className="flex min-h-screen items-center justify-center p-10">
-        <p data-testid="submit-not-found">Contest를 찾을 수 없습니다.</p>
+        <p data-testid="submit-not-found">공모전을 찾을 수 없습니다.</p>
       </main>
     );
   }
@@ -648,7 +648,7 @@ export default function SubmitPage() {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-4 p-10">
         <p role="alert" data-testid="verification-required" className="text-attention">
-          본인확인(Verification)을 완료해야 제출할 수 있습니다.
+          본인확인을 완료해야 제출할 수 있습니다.
         </p>
         <VerificationReason verification={verification} />
         <VerifyActions
@@ -730,7 +730,7 @@ export default function SubmitPage() {
       </section>
 
       <p className="text-sm text-ink" data-testid="source-privacy-notice">
-        제출한 소스코드와 GitHub 저장소는 선정(Award) 전까지 Sponsor에게 공개되지 않습니다.
+        제출한 소스코드와 GitHub 저장소는 선정 전까지 개최자에게 공개되지 않습니다.
         AI 채점과 플랫폼만 열람합니다.
       </p>
 

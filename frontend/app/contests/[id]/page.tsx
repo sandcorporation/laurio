@@ -185,9 +185,9 @@ export default async function ContestDetailPage({ params }: { params: Promise<Pa
       )}
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium">Requirement 체크리스트</h2>
+        <h2 className="text-sm font-medium">요구사항 체크리스트</h2>
         {contest.requirements.length === 0 ? (
-          <p className="text-sm text-ink/60">등록된 Requirement 가 없습니다.</p>
+          <p className="text-sm text-ink/60">등록된 요구사항이 없습니다.</p>
         ) : (
           <ul className="flex flex-col">
             {contest.requirements.map((requirement) => (

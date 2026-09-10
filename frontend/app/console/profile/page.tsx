@@ -47,14 +47,14 @@ type Role = "sponsor" | "developer";
 
 const ROLE_COPY: Record<Role, { title: string; description: string; path: string }> = {
   sponsor: {
-    title: "Sponsor 표시 이름 · 소개",
+    title: "개최자 표시 이름 · 소개",
     description: "공모전을 열고 심사할 때 참가자에게 보이는 이름입니다.",
     path: "sponsor-profile",
   },
   developer: {
-    title: "Developer 표시 이름 · 소개",
+    title: "참가자 표시 이름 · 소개",
     description:
-      "공개 개발자 프로필과 제출물에서 보이는 이름입니다. 비워두면 Developer#{id}로 보입니다.",
+      "공개 개발자 프로필과 제출물에서 보이는 이름입니다. 비워두면 참가자#{id}로 보입니다.",
     path: "developer-profile",
   },
 };
@@ -80,7 +80,7 @@ export default function ProfilePage() {
         내 정보
       </h1>
       <p className="mt-2 text-sm text-muted">
-        표시 이름과 소개는 Sponsor·Developer 역할마다 따로 저장됩니다. 실명·생년월일·연락처 같은
+        표시 이름과 소개는 개최자·참가자 역할마다 따로 저장됩니다. 실명·생년월일·연락처 같은
         본인확인 정보는 여기서 다루지 않습니다.
       </p>
 

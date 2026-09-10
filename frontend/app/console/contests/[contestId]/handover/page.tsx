@@ -102,7 +102,7 @@ export default function HandoverPage({ params }: { params: Promise<{ contestId: 
         </>
       ) : state.status === "not-found" ? (
         <p className="mt-6" data-testid="handover-not-found">
-          이 공모전은 아직 Award되지 않아 인수 정보가 없습니다.
+          이 공모전은 아직 선정되지 않아 인수 정보가 없습니다.
         </p>
       ) : state.status === "forbidden" ? (
         <p className="mt-6 text-attention" role="alert" data-testid="handover-forbidden">
@@ -133,7 +133,7 @@ function BuildAssetsSection({ state }: { state: BuildAssetsState }) {
 
   return (
     <section className="mt-8 border-t border-subtle pt-6" data-testid="handover-build-assets">
-      <h2 className="text-lg font-semibold">Developer가 올린 빌드 자산</h2>
+      <h2 className="text-lg font-semibold">개발자가 올린 빌드 자산</h2>
       {state.assets.length === 0 ? (
         <p className="mt-2 text-sm text-muted" data-testid="handover-build-assets-empty">
           아직 올린 빌드 자산이 없습니다 — 없어도 인수 확인에는 영향이 없습니다.
@@ -170,7 +170,7 @@ function ReleasedNotice({ handover }: { handover: Handover }) {
 
   return (
     <p className="mt-6 font-semibold text-verified" data-testid="handover-released">
-      {via} Escrow가 해제되었습니다{releasedAt ? ` (${releasedAt})` : ""} — 개발자에게 상금이
+      {via} 예치금이 해제되었습니다{releasedAt ? ` (${releasedAt})` : ""} — 개발자에게 상금이
       지급됩니다.
     </p>
   );
@@ -196,7 +196,7 @@ function PendingAcceptance({
   return (
     <div className="mt-6 flex flex-col gap-4">
       <p data-testid="handover-pending-notice">
-        인수를 확인하면 <strong>Escrow가 해제되어 개발자에게 상금이 지급됩니다</strong> — 되돌릴
+        인수를 확인하면 <strong>예치금이 해제되어 개발자에게 상금이 지급됩니다</strong> — 되돌릴
         수 없습니다.
       </p>
 
@@ -220,7 +220,7 @@ function PendingAcceptance({
       ) : (
         <div className="flex flex-col gap-2 rounded border border-attention p-4">
           <p data-testid="handover-accept-confirm-notice">
-            정말 확인하시겠습니까? Escrow가 즉시 해제되며 되돌릴 수 없습니다.
+            정말 확인하시겠습니까? 예치금이 즉시 해제되며 되돌릴 수 없습니다.
           </p>
           <div className="flex gap-2">
             <button
@@ -230,7 +230,7 @@ function PendingAcceptance({
               className="rounded border border-attention bg-attention px-3 py-2 text-sm text-paper disabled:opacity-50"
               data-testid="handover-accept-confirm"
             >
-              {isSaving ? "확인하는 중..." : "확인 — Escrow 해제"}
+              {isSaving ? "확인하는 중..." : "확인 — 예치금 해제"}
             </button>
             <button
               type="button"

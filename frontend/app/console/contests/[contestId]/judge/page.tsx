@@ -128,7 +128,7 @@ export default function JudgeComparisonPage() {
   if (load.status === "not-found") {
     return (
       <main className="flex min-h-screen items-center justify-center p-10">
-        <p data-testid="compare-not-found">Contest를 찾을 수 없습니다.</p>
+        <p data-testid="compare-not-found">공모전을 찾을 수 없습니다.</p>
       </main>
     );
   }
@@ -169,9 +169,9 @@ export default function JudgeComparisonPage() {
               {judgingDaysLeft !== null && judgingDaysLeft < 0 ? " (심사기간 종료)" : ""}
             </p>
             <p className="text-sm text-ink" data-testid="judging-consequence-notice">
-              심사기간 안에 선정(Award)하지 않으면, 그 이후 14일이 지나는 시점에 필수
+              심사기간 안에 선정하지 않으면, 그 이후 14일이 지나는 시점에 필수
               요구사항 달성률이 기준을 넘는 제출작들에게 상금 전액이 자동으로 1/N
-              배분됩니다. 방치해도 상금이 Sponsor에게 돌아오지 않습니다.
+              배분됩니다. 방치해도 상금이 개최자에게 돌아오지 않습니다.
             </p>
           </div>
         ) : (
@@ -183,19 +183,19 @@ export default function JudgeComparisonPage() {
 
       <p className="text-sm text-ink" data-testid="source-hidden-notice">
         소스코드와 AI 채점 점수는 이 화면 어디에도 표시되지 않습니다 — 소스는 선정
-        전까지 공개되지 않고(ADR-0014), 채점 점수는 무응답 배분 대상을 가릴 때만
+        전까지 공개되지 않고, 채점 점수는 무응답 배분 대상을 가릴 때만
         쓰입니다. 선정은 아래 증거만으로 판단해주세요.
       </p>
 
       {comparison.submissions.length === 0 ? (
-        <p data-testid="compare-empty">아직 제출된 Submission이 없습니다.</p>
+        <p data-testid="compare-empty">아직 제출물이 없습니다.</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[640px] border-collapse" data-testid="comparison-matrix">
             <thead>
               <tr>
                 <th className="border border-rule bg-surface p-3 text-left text-sm">
-                  Requirement
+                  요구사항
                 </th>
                 {comparison.submissions.map((submission) => (
                   <th
@@ -289,7 +289,7 @@ export default function JudgeComparisonPage() {
 
       {award.status === "done" && (
         <p data-testid="award-success" className="text-sm text-verified">
-          Submission #{award.result.submission_id}을(를) 선정했습니다. 이 제출작의
+          제출물 #{award.result.submission_id}을(를) 선정했습니다. 이 제출작의
           소스코드에 접근할 수 있습니다.
         </p>
       )}
@@ -401,7 +401,7 @@ function SubmissionColumnHeader({
               data-testid={`award-button-${submission.submission_id}`}
               className="w-fit rounded-sm border border-ink px-3 py-1 text-xs hover:bg-ink hover:text-paper disabled:opacity-50"
             >
-              이 Submission 선정(Award)
+              이 제출물 선정
             </button>
           ) : (
             <div className="flex flex-col gap-1">

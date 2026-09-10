@@ -336,7 +336,7 @@ export default function ContestDraftPage() {
   if (load.status === "not-found") {
     return (
       <main className="flex min-h-screen items-center justify-center p-10">
-        <p data-testid="draft-not-found">Contest를 찾을 수 없습니다.</p>
+        <p data-testid="draft-not-found">공모전을 찾을 수 없습니다.</p>
       </main>
     );
   }

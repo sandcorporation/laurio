@@ -20,9 +20,9 @@ export type WithdrawalEligibility = components["schemas"]["WithdrawalEligibility
 
 export const BLOCK_REASON_LABELS: Record<WithdrawalBlockReason, string> = {
   sponsor_contest_in_progress:
-    "진행 중인(심사가 끝나지 않은) Contest가 있습니다 — 심사가 끝난 뒤 다시 시도해주세요.",
+    "진행 중인(심사가 끝나지 않은) 공모전이 있습니다 — 심사가 끝난 뒤 다시 시도해주세요.",
   developer_payout_in_progress:
-    "지급이 끝나지 않은 Payout이 있습니다 — 지급이 끝난 뒤 다시 시도해주세요.",
+    "지급이 끝나지 않은 지급건이 있습니다 — 지급이 끝난 뒤 다시 시도해주세요.",
 };
 
 export type WithdrawalEligibilityState =

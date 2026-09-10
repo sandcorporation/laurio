@@ -354,7 +354,7 @@ export default function AssignmentInvitePage() {
     return (
       <main className="flex min-h-screen items-center justify-center p-10">
         <p data-testid="assignment-invite-not-found">
-          InviteCode 를 찾을 수 없습니다. 코드를 다시 확인해 주세요.
+          초대 코드를 찾을 수 없습니다. 코드를 다시 확인해 주세요.
         </p>
       </main>
     );

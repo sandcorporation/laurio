@@ -35,7 +35,7 @@ export default function UploadDemoPage() {
       <h1 className="text-2xl font-semibold">presigned 업로드 데모</h1>
 
       <label className="flex flex-col gap-1 text-sm">
-        Contest ID
+        공모전 ID
         <input
           className="w-40 rounded-sm border border-rule px-2 py-1 font-mono"
           value={contestId}

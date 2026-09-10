@@ -90,7 +90,7 @@ export default function ContestMetricsPage() {
   if (load.status === "not-found") {
     return (
       <main className="flex min-h-screen items-center justify-center p-10">
-        <p data-testid="metrics-not-found">Contest를 찾을 수 없습니다.</p>
+        <p data-testid="metrics-not-found">공모전을 찾을 수 없습니다.</p>
       </main>
     );
   }
@@ -181,11 +181,11 @@ function RequirementFulfillmentSection({ metrics }: { metrics: ContestMetricsOut
   // 정보라 여기 developer_id·submission_id 는 없다.
   return (
     <section className="flex flex-col gap-3" data-testid="metrics-requirement-fulfillment">
-      <h2 className="text-lg font-semibold">Requirement 별 충족 분포</h2>
+      <h2 className="text-lg font-semibold">요구사항별 충족 분포</h2>
 
       {metrics.requirement_fulfillment.length === 0 ? (
         <p className="text-sm text-muted" data-testid="metrics-requirement-fulfillment-empty">
-          아직 Requirement 가 없습니다.
+          아직 요구사항이 없습니다.
         </p>
       ) : (
         <ul className="flex flex-col gap-2" data-testid="metrics-requirement-fulfillment-list">

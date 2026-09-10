@@ -157,7 +157,7 @@ export default function NewAssignmentPage() {
           기본 정보를 알려주세요
         </h1>
         <p className="mt-2 text-sm text-ink/70">
-          상금·결제·본인확인 없이 InviteCode로만 여는 과제입니다.
+          상금·결제·본인확인 없이 초대 코드로만 여는 과제입니다.
         </p>
       </div>
 
