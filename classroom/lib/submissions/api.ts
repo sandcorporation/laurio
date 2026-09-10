@@ -80,3 +80,33 @@ export function submitAttempt(
     { method: "POST", body: JSON.stringify(input) },
   );
 }
+
+// 강사가 보는 시도 하나(#291) — 참여자용 `ClassroomSubmissionRow`와 같은 모양에
+// 어느 참여자의 것인지(`member_id`·`member_display_name`)가 더 실린다. 강사는
+// 자기 시도가 아니라 클래스 전체를 훑어보기 때문이다.
+export type InstructorSubmissionRow = {
+  id: number;
+  problem_id: number;
+  member_id: number;
+  member_display_name: string;
+  attempt_number: number;
+  submission_format: SubmissionFormat;
+  value: string;
+  download_url: string | null;
+  created_at: string;
+  status: SubmissionStatus;
+  score: ClassroomScore | null;
+  passed: boolean;
+};
+
+// 그 클래스의 강사만 200을 받는다 — 참여자나 남의 강사는 404다(#291 AC). 이
+// 요청 자체는 어디에도 기록되지 않는다(ADR-0040, 참여자의 소스 열람 이력이
+// 없는 것과 같은 이유).
+export function fetchProblemSubmissions(
+  classId: number,
+  problemId: number,
+): Promise<InstructorSubmissionRow[]> {
+  return backendJson<InstructorSubmissionRow[]>(
+    `/classroom/classes/${classId}/problems/${problemId}/submissions`,
+  );
+}

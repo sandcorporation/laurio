@@ -2,6 +2,7 @@
 
 // 문제 편집 (#282/#283/#285). 제목·설명·제출 형식·채점 모델에 이어
 // 체크리스트(필수·선택 항목과 순서)를 여기서 관리하고, 초안을 연다.
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
@@ -172,6 +173,13 @@ export default function EditProblemPage() {
   return (
     <main>
       <h1 data-testid="edit-problem-heading">문제 편집</h1>
+
+      <Link
+        href={`/classes/${classId}/problems/${problemId}/submissions`}
+        data-testid="problem-submissions-link"
+      >
+        제출 현황 보기
+      </Link>
 
       {problem.status === "open" ? (
         // 이미 열린 문제는 참여자가 이미 시도했을 수 있다. 체크리스트를 고쳐도

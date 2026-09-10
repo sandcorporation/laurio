@@ -53,6 +53,7 @@ from .schemas import (
     ClassroomChecklistVerdictOut,
     ClassroomGridCellOut,
     ClassroomGridMemberOut,
+    ClassroomInstructorSubmissionOut,
     ClassroomProblemListItemOut,
     ClassroomProblemMineOut,
     ClassroomProblemStatsOut,
@@ -248,6 +249,54 @@ def _serialize_classroom_submission(
     return ClassroomSubmissionOut(
         id=submission.id,
         problem_id=submission.problem_id,
+        attempt_number=submission.attempt_number,
+        submission_format=asset.kind,
+        value=asset.value,
+        download_url=download_url,
+        created_at=submission.created_at,
+        status="scored" if score is not None else "pending",
+        score=_serialize_score(score) if score is not None else None,
+        passed=_is_score_passed(score, required_item_ids),
+    )
+
+
+def _instructor_source_download_url(
+    asset: SubmissionAsset, *, member: ClassMember, attempt_number: int
+) -> str:
+    """강사가 소스를 내려받을 때의 presigned URL(#291) — 참여자 본인용
+    `_source_download_url`과 달리 파일명이 `User.email`이 아니라 **그 클래스에서
+    불릴 이름 + 시도 번호**로 조립된다. 강사 한 사람이 참여자 여러 명의, 그리고
+    한 참여자의 여러 시도를 잇달아 내려받으므로 이메일 하나로는(같은 참여자의
+    다른 시도끼리) 구별되지 않는다 — `contests.assignment_api.
+    reveal_assignment_submission_source`가 제출자 이름 뒤에 순번을 붙이는 것과
+    같은 이유다."""
+
+    adapter = get_storage_adapter()
+    base_name = safe_download_base_name(f"{member.display_name}-{attempt_number}")
+    presigned = adapter.presign_download(
+        asset.value,
+        filename=build_download_filename(asset.content_type or None, base_name=base_name),
+        expires_in=timedelta(seconds=settings.STORAGE_DOWNLOAD_URL_TTL_SECONDS),
+    )
+    return presigned.url
+
+
+def _serialize_instructor_submission(
+    submission: ClassroomSubmission, *, asset: SubmissionAsset, required_item_ids: set[int]
+) -> ClassroomInstructorSubmissionOut:
+    download_url = (
+        _instructor_source_download_url(
+            asset, member=submission.member, attempt_number=submission.attempt_number
+        )
+        if asset.kind == SubmissionAsset.Kind.SOURCE
+        else None
+    )
+    score = getattr(submission, "classroom_score", None)
+    return ClassroomInstructorSubmissionOut(
+        id=submission.id,
+        problem_id=submission.problem_id,
+        member_id=submission.member_id,
+        member_display_name=submission.member.display_name,
         attempt_number=submission.attempt_number,
         submission_format=asset.kind,
         value=asset.value,
@@ -857,6 +906,43 @@ def create_classroom_submission(
     return 201, _serialize_classroom_submission(
         submission, asset=asset, user=request.auth_user, required_item_ids=required_item_ids
     )
+
+
+@router.get(
+    "/classes/{class_id}/problems/{problem_id}/submissions",
+    response={200: list[ClassroomInstructorSubmissionOut], 404: ErrorOut},
+    auth=jwt_auth,
+)
+def list_problem_submissions(request: HttpRequest, class_id: int, problem_id: int):
+    """강사가 참여자들의 시도를 훑어본다(#291) — 소스 다운로드, 저장소 URL(이미
+    `value`가 그 주소다), AI 판정과 근거가 한 번에 실린다.
+
+    **이 요청은 어디에도 기록되지 않는다**(ADR-0040). Assignment의 Sponsor가
+    소스를 펼칠 때 `AssignmentSourceReading`을 남기는 것(#211, ADR-0022)과
+    갈리는 지점이다 — 강사가 보는 것은 지도 그 자체라 "몇 번 봤다"가 신호가
+    아니라 잡음이 된다. 그래서 이 엔드포인트는 어떤 모델도 만들지 않는다.
+
+    같은 경로에 있는 `POST`(참여자의 제출, 위 `create_classroom_submission`)와
+    메서드로만 갈린다 — `/join/{join_code}`가 GET(누구나)·POST(로그인)로
+    갈리는 것과 같은 모양이다."""
+
+    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    problem = _get_owned_problem_or_404(class_obj, problem_id)
+    required_item_ids = _required_checklist_item_ids(problem.checklist_items.all())
+
+    submissions = (
+        ClassroomSubmission.objects.filter(problem=problem)
+        .select_related("classroom_score", "member")
+        .prefetch_related("assets")
+        .order_by("member__display_name", "-attempt_number")
+    )
+    return 200, [
+        _serialize_instructor_submission(
+            # `_mine`과 같은 이유로 리스트를 먼저 받아 prefetch 캐시를 쓴다.
+            s, asset=list(s.assets.all())[0], required_item_ids=required_item_ids
+        )
+        for s in submissions
+    ]
 
 
 # --- ChecklistItem -------------------------------------------------------------

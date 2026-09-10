@@ -809,7 +809,21 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List Problem Submissions
+         * @description 강사가 참여자들의 시도를 훑어본다(#291) — 소스 다운로드, 저장소 URL(이미
+         *     `value`가 그 주소다), AI 판정과 근거가 한 번에 실린다.
+         *
+         *     **이 요청은 어디에도 기록되지 않는다**(ADR-0040). Assignment의 Sponsor가
+         *     소스를 펼칠 때 `AssignmentSourceReading`을 남기는 것(#211, ADR-0022)과
+         *     갈리는 지점이다 — 강사가 보는 것은 지도 그 자체라 "몇 번 봤다"가 신호가
+         *     아니라 잡음이 된다. 그래서 이 엔드포인트는 어떤 모델도 만들지 않는다.
+         *
+         *     같은 경로에 있는 `POST`(참여자의 제출, 위 `create_classroom_submission`)와
+         *     메서드로만 갈린다 — `/join/{join_code}`가 GET(누구나)·POST(로그인)로
+         *     갈리는 것과 같은 모양이다.
+         */
+        get: operations["classroom_api_list_problem_submissions"];
         put?: never;
         /**
          * Create Classroom Submission
@@ -3924,6 +3938,44 @@ export interface components {
             id: number;
             /** Is Instructor */
             is_instructor: boolean;
+        };
+        /**
+         * ClassroomInstructorSubmissionOut
+         * @description 강사가 보는 시도 하나(#291) — 참여자용 `ClassroomSubmissionOut`과 같은
+         *     모양에 `member_id`·`member_display_name`을 더한다. 강사는 자기 시도가
+         *     아니라 클래스 전체를 훑어보므로 어느 참여자의 것인지가 함께 실려야
+         *     한다.
+         */
+        ClassroomInstructorSubmissionOut: {
+            /** Attempt Number */
+            attempt_number: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Download Url */
+            download_url?: string | null;
+            /** Id */
+            id: number;
+            /** Member Display Name */
+            member_display_name: string;
+            /** Member Id */
+            member_id: number;
+            /**
+             * Passed
+             * @default false
+             */
+            passed: boolean;
+            /** Problem Id */
+            problem_id: number;
+            score?: components["schemas"]["ClassroomScoreOut"] | null;
+            /** Status */
+            status: string;
+            /** Submission Format */
+            submission_format: string;
+            /** Value */
+            value: string;
         };
         /**
          * ClassroomProblemListItemOut
@@ -7363,6 +7415,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_list_problem_submissions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+                problem_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassroomInstructorSubmissionOut"][];
                 };
             };
             /** @description Not Found */
