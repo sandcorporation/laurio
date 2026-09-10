@@ -127,6 +127,20 @@ const REQUIRED_IN_DEPLOYED_ENVIRONMENTS: Array<{ name: string; reason: string }>
       "docker/frontend.Dockerfile의 build.args로 넘겨야 한다 — 이미 빌드된 " +
       "이미지라면 재빌드해야 한다(런타임 재주입으로는 늦는다).",
   },
+  // 세션 쿠키의 domain 속성(ADR-0038, #273) — lib/auth/cookies.ts가 이 값이
+  // 비어 있으면 domain을 아예 주지 않아 dev와 똑같이 호스트 전용 쿠키로
+  // 조용히 되돌아간다. 배포 환경에서 그 상태가 되면 강의실 등 형제
+  // 서브도메인이 로그인을 공유하지 못하는 채로 조용히 뜬다 — 기능 결함이지
+  // 500은 아니라서 다른 가드보다 늦게 발견될 위험이 크다.
+  {
+    name: "LAURIO_SESSION_COOKIE_DOMAIN",
+    reason:
+      "부모 도메인(예: .laurio.honeycombpizza.link)을 주지 않으면 " +
+      "lib/auth/cookies.ts의 setSessionCookies가 dev와 동일하게 domain을 " +
+      "생략한다 — laurio.honeycombpizza.link에서 로그인한 세션 쿠키가 " +
+      "classroom.laurio.honeycombpizza.link 등 형제 서브도메인으로 가지 " +
+      "않아, 회원 공유라는 이 결정의 목적이 조용히 깨진다(ADR-0038).",
+  },
 ];
 
 export async function register(): Promise<void> {

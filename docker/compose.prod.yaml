@@ -331,6 +331,10 @@ services:
       # instrumentation.ts가 부팅을 거부한다. staging의 값과 같은 값을 쓰지 않는다
       # (실제 운영 도메인이어야 한다). .env.prod에서 반드시 채운다.
       LAURIO_WEB_ORIGIN: ${LAURIO_WEB_ORIGIN:?prod LAURIO_WEB_ORIGIN 를 .env.prod 에 설정하라}
+      # 세션 쿠키의 domain 속성(ADR-0038) — compose.staging.yaml과 같은
+      # 이유·같은 구조다. staging과 같은 값을 쓰지 않는다(실제 운영 도메인의
+      # 부모여야 한다).
+      LAURIO_SESSION_COOKIE_DOMAIN: ${LAURIO_SESSION_COOKIE_DOMAIN:?prod LAURIO_SESSION_COOKIE_DOMAIN 을 .env.prod 에 설정하라}
       # 카카오 OAuth 앱 자격증명(#95/#96) — staging의 frontend 서비스와 같은
       # 이유·같은 구조다(docker/compose.staging.yaml 참고). staging과 같은
       # 값을 쓰지 않는다 — 벤더 앱 자체가 다르고, redirect_uri는 실제 운영

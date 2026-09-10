@@ -25,6 +25,14 @@ export function isDeployedEnvironment(): boolean {
   return target === "staging" || target === "production";
 }
 
+// 부모 도메인(.laurio.…)으로 올려야 강의실 등 형제 서브도메인이 같은 로그인을
+// 공유한다(ADR-0038). dev(localhost)는 이 값을 비워 둔다 — domain을 주면 쿠키가
+// 아예 안 붙기 때문이다. staging/prod는 compose 파일이 이 값을 주입한다.
+function sessionCookieDomain(): string | undefined {
+  const domain = process.env.LAURIO_SESSION_COOKIE_DOMAIN;
+  return domain ? domain : undefined;
+}
+
 function baseCookieAttributes() {
   return {
     httpOnly: true,
@@ -36,6 +44,7 @@ function baseCookieAttributes() {
     sameSite: "lax" as const,
     secure: isDeployedEnvironment(),
     path: "/",
+    domain: sessionCookieDomain(),
   };
 }
 
