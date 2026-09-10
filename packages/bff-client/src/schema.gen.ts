@@ -2977,6 +2977,11 @@ export interface components {
         AssetSummaryOut: {
             /** Download Url */
             download_url?: string | null;
+            /**
+             * Expired
+             * @default false
+             */
+            expired: boolean;
             /** Id */
             id: number;
             /** Kind */

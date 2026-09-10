@@ -458,3 +458,66 @@ def test_download_of_a_purged_demo_video_reports_expired_without_error(
     assert body["expired"] is True
     assert body["download_url"] is None
     assert body["expires_at"] is None
+
+
+# --- 공개 표면: 파기된 영상은 「깨진 플레이어」가 아니라 만료로 나간다 -----------------
+
+
+@pytest.mark.django_db
+def test_public_profile_marks_a_purged_demo_video_expired_instead_of_signing_it(
+    client, category, landing_type
+):
+    """#262 와 #265 가 만나는 자리 — 병렬로 만들어져 서로를 못 봤다.
+
+    #265 는 공개 프로필과 심사 비교에 presigned URL 을 직접 실어 보낸다. 그 서명은
+    오브젝트가 실재하는지 묻지 않으므로, #262 가 파일을 지운 뒤에도 URL 이 그대로
+    나가고 화면은 **아무것도 재생하지 않는 `<video>`** 를 그린다 — 사용자에게는
+    플랫폼이 깨진 것으로 보인다. 다운로드 엔드포인트는 같은 사실을 이미
+    `expired=True` 로 정직하게 답하고 있으므로(위 테스트), 이 표면도 같은 말을 해야
+    한다. staging 에서 404 나는 `<video>` 를 실제로 보고 찾은 결함이다.
+    """
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+    dev = _verified_user(client, "dev-retain-6", "dev-retain-ci-6")
+    _submit_with_demo_video(client, dev, contest["id"], requirement_id=requirement_id)
+
+    _close_contest(client, contest, deadline=deadline)
+    closed = Contest.objects.get(id=contest["id"])
+
+    from accounts.models import DeveloperProfile
+
+    developer_id = DeveloperProfile.objects.get(user_id=dev["user_id"]).id
+
+    def _video_asset() -> dict:
+        response = client.get(f"/api/developers/{developer_id}/profile")
+        assert response.status_code == 200, response.content
+        videos = [
+            a
+            for s in response.json()["submissions"]
+            for a in s["assets"]
+            if a["kind"] == "demo_video"
+        ]
+        assert len(videos) == 1, videos
+        return videos[0]
+
+    # 파기 전 — 화면이 열 수 있는 URL 이 실려 나간다.
+    before = _video_asset()
+    assert before["expired"] is False
+    assert before["download_url"]
+
+    _freeze(closed.judging_ends_at + timedelta(days=GRACE_DAYS))
+    _run_retention_scan(client)
+
+    # 파기 후 — 자료 행과 라벨은 그대로 있고, URL 만 사라진다.
+    after = _video_asset()
+    assert after["expired"] is True
+    assert after["download_url"] is None
+    assert after["label"] == before["label"]

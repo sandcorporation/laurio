@@ -716,7 +716,13 @@ def _public_asset_summaries(
             continue
 
         download_url = None
-        if a.kind in SubmissionAsset.OBJECT_KEY_KINDS:
+        # 파일이 파기된 자료는 **서명하지 않는다**(#262, ADR-0035). 서명은
+        # 오브젝트가 실재하는지 묻지 않으므로, 그대로 두면 화면이 아무것도
+        # 재생하지 않는 `<video>`를 그린다 — 사실은 「보존 기간이 지났다」인데
+        # 사용자에게는 고장으로 보인다. 자료 행 자체는 그대로 내보낸다:
+        # 라벨과 근거는 살아 있고, 그것이 이 파기 규칙의 요지다.
+        expired = a.destroyed_at is not None
+        if a.kind in SubmissionAsset.OBJECT_KEY_KINDS and not expired:
             if adapter is None:
                 adapter = get_storage_adapter()
             if ttl_resolver is None:
@@ -740,6 +746,7 @@ def _public_asset_summaries(
                 label=a.label,
                 order=a.order,
                 download_url=download_url,
+                expired=expired,
             )
         )
     return out

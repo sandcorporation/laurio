@@ -406,6 +406,20 @@ function SubmissionColumnHeader({
             data-testid={`submission-${submission.submission_id}-screenshot-${asset.id}`}
           />
         ))}
+      {/* 보존 기간이 지나 파일이 파기된 자료는 **자리를 비우지 않는다**. 그냥
+          빼면 심사자는 이 참가작이 애초에 영상을 안 냈다고 읽는다 — 실제로는
+          냈고, 근거도 그것을 가리키고 있다. 사라진 것은 파일뿐이다. */}
+      {submission.assets
+        .filter((asset) => asset.expired)
+        .map((asset) => (
+          <p
+            key={asset.id}
+            className="text-xs text-ink/60"
+            data-testid={`submission-${submission.submission_id}-asset-expired-${asset.id}`}
+          >
+            {asset.label || "시연 영상"} — 보존 기간이 지나 파일이 삭제되었습니다.
+          </p>
+        ))}
 
       {isAwarded && (
         <p className="text-xs font-semibold text-verified" data-testid={`awarded-badge-${submission.submission_id}`}>

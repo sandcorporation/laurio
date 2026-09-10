@@ -105,6 +105,9 @@ function ArchivedSubmissionRow({ submission }: { submission: PublicSubmission })
   const screenshots = submission.assets.filter(
     (asset) => asset.kind === "screenshot" && asset.download_url,
   );
+  // 보존 기간이 지나 파일만 파기된 자료(#262, ADR-0035). 자료 행과 라벨은 남으므로
+  // 이 화면도 자리를 비우지 않는다 — 그냥 빼면 「영상을 안 냈다」로 읽힌다.
+  const expired = submission.assets.filter((asset) => asset.expired);
 
   return (
     <li
@@ -142,6 +145,15 @@ function ArchivedSubmissionRow({ submission }: { submission: PublicSubmission })
           _public_asset_summaries`) 이 서버 컴포넌트가 별도 요청 없이 그대로
           렌더링한다 — JS를 꺼도 재생·열람이 가능하다. 라벨로 자료를 구별한다
           (영상 둘, 스크린샷 여럿이 나란히 선다). */}
+      {expired.length > 0 && (
+        <ul className="flex flex-col gap-0.5">
+          {expired.map((asset) => (
+            <li key={asset.id} className="text-xs text-ink/60" data-testid="asset-expired">
+              {asset.label || "시연 영상"} — 보존 기간이 지나 파일이 삭제되었습니다.
+            </li>
+          ))}
+        </ul>
+      )}
       {(videos.length > 0 || screenshots.length > 0) && (
         <div className="flex flex-wrap gap-3">
           {videos.map((asset) => (

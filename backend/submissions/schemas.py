@@ -95,6 +95,13 @@ class AssetSummaryOut(Schema):
     # _public_asset_summaries`), 여기서 URL을 내려도 마감 전 비공개 원칙을
     # 어기지 않는다.
     download_url: str | None = None
+    # 보존 기간이 지나 **파일만** 파기된 자료인가 (#262, ADR-0035). 자료 행·라벨·
+    # 근거는 그대로 남으므로 이 요약도 그대로 나가지만, 서명할 오브젝트가 없어
+    # `download_url`이 null이다. 화면은 이 값을 보고 「보존 기간이 지났다」를
+    # 말한다 — 없는 파일을 가리키는 `<video>`를 그리면 사용자에게는 플랫폼이
+    # 깨진 것으로 보인다. 다운로드 엔드포인트의 `expired`와 같은 사실이다
+    # (`storage.api.DownloadResponse`).
+    expired: bool = False
 
 
 class SubmissionAssetOut(Schema):
