@@ -525,7 +525,8 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /** Update Class */
+        patch: operations["classroom_api_update_class"];
         trace?: never;
     };
     "/api/classroom/classes/{class_id}/openai-key": {
@@ -686,6 +687,26 @@ export interface paths {
          *     않아 막는다(#283 AC).
          */
         post: operations["classroom_api_open_problem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/scoring-models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Scoring Models
+         * @description 「채점 설정」 화면이 선택지마다 컨텍스트 크기를 함께 보여주는 자리(#285).
+         */
+        get: operations["classroom_api_list_scoring_models"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3672,6 +3693,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Default Model */
+            default_model: string;
             /** Has Openai Key */
             has_openai_key: boolean;
             /** Id */
@@ -3680,6 +3703,13 @@ export interface components {
             name: string;
             /** Openai Key Masked */
             openai_key_masked?: string | null;
+        };
+        /** ClassPatchIn */
+        ClassPatchIn: {
+            /** Default Model */
+            default_model?: string | null;
+            /** Name */
+            name?: string | null;
         };
         /** ComparisonEntryOut */
         ComparisonEntryOut: {
@@ -4971,8 +5001,12 @@ export interface components {
             classroom_id: number;
             /** Description */
             description: string;
+            /** Effective Model */
+            effective_model: string;
             /** Id */
             id: number;
+            /** Model */
+            model: string;
             /** Order */
             order: number;
             /** Status */
@@ -4986,6 +5020,8 @@ export interface components {
         ProblemPatchIn: {
             /** Description */
             description?: string | null;
+            /** Model */
+            model?: string | null;
             /** Submission Format */
             submission_format?: string | null;
             /** Title */
@@ -5340,6 +5376,15 @@ export interface components {
          * @enum {string}
          */
         ScoringBasis: "ai_judged" | "no_scoring_input" | "platform_failure";
+        /** ScoringModelOut */
+        ScoringModelOut: {
+            /** Context Window */
+            context_window: number;
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+        };
         /**
          * SellerContactSubmitIn
          * @description 토스 셀러 등록(businessType=INDIVIDUAL)의 individual 객체가 요구하는
@@ -6296,6 +6341,50 @@ export interface operations {
             };
         };
     };
+    classroom_api_update_class: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClassPatchIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     classroom_api_set_class_openai_key: {
         parameters: {
             query?: never;
@@ -6722,6 +6811,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_list_scoring_models: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScoringModelOut"][];
                 };
             };
         };

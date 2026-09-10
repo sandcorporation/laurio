@@ -1,4 +1,4 @@
-// Problem·체크리스트 백엔드 호출 (#282/#283).
+// Problem·체크리스트 백엔드 호출 (#282/#283/#285).
 import { backendJson } from "@/lib/backend/client";
 
 export type SubmissionFormat = "source" | "repository";
@@ -19,6 +19,10 @@ export type ProblemRow = {
   submission_format: SubmissionFormat;
   status: ProblemStatus;
   order: number;
+  // 문제 자신의 값. 빈 문자열이면 클래스 기본값을 따른다.
+  model: string;
+  // 실제로 채점에 쓰일 값.
+  effective_model: string;
   checklist_items: ChecklistItemRow[];
 };
 
@@ -39,7 +43,12 @@ export function createProblem(
 export function updateProblem(
   classId: number,
   problemId: number,
-  patch: Partial<{ title: string; description: string; submission_format: SubmissionFormat }>,
+  patch: Partial<{
+    title: string;
+    description: string;
+    submission_format: SubmissionFormat;
+    model: string;
+  }>,
 ): Promise<ProblemRow> {
   return backendJson<ProblemRow>(`/classroom/classes/${classId}/problems/${problemId}`, {
     method: "PATCH",

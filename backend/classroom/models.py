@@ -14,6 +14,8 @@ from __future__ import annotations
 from django.conf import settings
 from django.db import models
 
+from .scoring_models import DEFAULT_SCORING_MODEL
+
 
 class Class(models.Model):
     #: 이 클래스를 연 강사. `accounts.SponsorProfile`이 아니라 `User`를 바로
@@ -31,6 +33,11 @@ class Class(models.Model):
     #: 한다**는 규율(#284) 때문에, 화면에 보여줄 마스킹은 암호문을 다시 풀지
     #: 않고 저장 시점에 평문에서 떼어 둔 이 값으로만 만든다.
     openai_api_key_last4 = models.CharField(max_length=4, blank=True, default="")
+
+    #: 이 클래스의 기본 채점 모델(#285). 문제가 자기 값을 갖지 않으면 이
+    #: 값을 쓴다 — `classroom.scoring_models.SCORING_MODEL_CHOICES`에 있는
+    #: id 중 하나다.
+    default_model = models.CharField(max_length=50, default=DEFAULT_SCORING_MODEL)
 
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -65,6 +72,12 @@ class Problem(models.Model):
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.DRAFT)
     #: 클래스 상세에서의 노출 순서. 생성 순서가 아니라 강사가 직접 재배열한다.
     order = models.PositiveIntegerField(default=0)
+
+    #: 이 문제만의 채점 모델(#285). 빈 문자열이면 `classroom.default_model`을
+    #: 따른다 — API가 그 둘을 합쳐 `effective_model`로 내려준다. 지난 채점의
+    #: 근거는 이 필드가 아니라 그 채점(Score)이 그 시점에 남긴 값이 지킨다 —
+    #: 여기를 바꿔도 이미 산출된 판정은 다시 계산되지 않는다.
+    model = models.CharField(max_length=50, blank=True, default="")
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

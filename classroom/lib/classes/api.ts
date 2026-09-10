@@ -1,10 +1,11 @@
-// Class 백엔드 호출 (#278/#284).
+// Class 백엔드 호출 (#278/#284/#285).
 import { backendJson } from "@/lib/backend/client";
 
 export type ClassRow = {
   id: number;
   name: string;
   created_at: string;
+  default_model: string;
   has_openai_key: boolean;
   openai_key_masked: string | null;
 };
@@ -21,6 +22,16 @@ export function createClass(name: string): Promise<ClassRow> {
   return backendJson<ClassRow>("/classroom/classes", {
     method: "POST",
     body: JSON.stringify({ name }),
+  });
+}
+
+export function updateClass(
+  classId: number,
+  patch: Partial<{ name: string; default_model: string }>,
+): Promise<ClassRow> {
+  return backendJson<ClassRow>(`/classroom/classes/${classId}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
   });
 }
 
