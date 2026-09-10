@@ -32,8 +32,9 @@ import 금지를 AST 로 보는 테스트가 이미 하나 있다.
 ## 표가 `INSTALLED_APPS` 와 어긋나면 실패한다
 
 한 방향으로만 그렇다 — 설치된 앱은 전부 분류돼 있어야 하지만, 표는 아직 설치되지 않은
-앱(`classroom`)을 미리 이름 지을 수 있다. 그 한 방향이 강의실을 만드는 사람에게 분류를
-강제하는 장치다: 앱을 하나 더하면 표에 적기 전까지 빨갛다.
+앱을 미리 이름 지을 수 있다(`classroom` 이 #275 전까지 그런 자리였다). 그 한 방향이
+새 앱을 만드는 사람에게 분류를 강제하는 장치다: 앱을 하나 더하면 표에 적기 전까지
+빨갛다.
 """
 
 from __future__ import annotations
@@ -73,7 +74,7 @@ CONTEST_FAMILY = frozenset(
     }
 )
 
-#: 강의실. 아직 앱이 없다 — 그래도 지금 이름을 적어 두는 이유는 위 docstring 참고.
+#: 강의실. #275 로 섰다 — 모델은 아직 없다.
 CLASSROOM = frozenset({"classroom"})
 
 FEATURE_APPS = CONTEST_FAMILY | CLASSROOM
@@ -256,6 +257,13 @@ def test_the_three_groups_do_not_overlap():
     assert not (SHARED & CONTEST_FAMILY)
     assert not (SHARED & CLASSROOM)
     assert not (CONTEST_FAMILY & CLASSROOM)
+
+
+def test_classroom_is_actually_installed():
+    """#275 — 미리 분류만 해 두던 이름이 실제 앱으로 섰다. 이제부터는 규칙 A 가
+    합성 소스가 아니라 저장소 자체에서도 발효된다."""
+
+    assert "classroom" in settings.INSTALLED_APPS
 
 
 # --- 합성 소스로 빨강을 고정한다 ---------------------------------------------------
