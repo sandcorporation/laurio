@@ -100,6 +100,11 @@ export default function ClassDetailPage() {
       <p data-testid="classroom-detail-created-at">
         {new Date(classState.classroom.created_at).toLocaleDateString("ko-KR")} 만듦
       </p>
+      <p>
+        <Link href={`/classes/${classId}/settings`} data-testid="scoring-settings-link">
+          채점 설정
+        </Link>
+      </p>
 
       <JoinLinkSection
         joinCode={classState.classroom.join_code}

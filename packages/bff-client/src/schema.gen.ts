@@ -525,7 +525,8 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /** Update Class */
+        patch: operations["classroom_api_update_class"];
         trace?: never;
     };
     "/api/classroom/classes/{class_id}/join-link/regenerate": {
@@ -593,6 +594,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/openai-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Class Openai Key
+         * @description 참여자에게는 어떤 형태로도 보이지 않는다(#284) — 이 엔드포인트도 강사
+         *     본인 전용이다. 응답은 마스킹된 `ClassOut`뿐, 평문은 어디에도 싣지 않는다.
+         */
+        put: operations["classroom_api_set_class_openai_key"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/problems": {
         parameters: {
             query?: never;
@@ -608,6 +630,28 @@ export interface paths {
         put?: never;
         /** Create Problem */
         post: operations["classroom_api_create_problem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/classes/{class_id}/problems/mine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List My Problems
+         * @description 참여자의 문제 목록(#288) — 통과/미통과가 한눈에 보인다. 정적
+         *     세그먼트("mine")라 `/{problem_id}` 동적 라우트보다 먼저 등록한다(파일
+         *     상단 docstring, `reorder_problems`와 같은 이유).
+         */
+        get: operations["classroom_api_list_my_problems"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -715,6 +759,28 @@ export interface paths {
         patch: operations["classroom_api_update_checklist_item"];
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/problems/{problem_id}/mine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get My Problem
+         * @description 참여자가 보는 문제 하나 — 체크리스트와 본인의 시도 목록(#286). 남의
+         *     시도는 애초에 이 질의에 없다(`member=member` 필터) — "남의 제출물을 볼 수
+         *     없다"는 AC를 별도 권한 검사가 아니라 쿼리 모양으로 지킨다.
+         */
+        get: operations["classroom_api_get_my_problem"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/problems/{problem_id}/open": {
         parameters: {
             query?: never;
@@ -730,6 +796,28 @@ export interface paths {
          *     않아 막는다(#283 AC).
          */
         post: operations["classroom_api_open_problem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/classes/{class_id}/problems/{problem_id}/submissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Classroom Submission
+         * @description 제출할 때마다 새 시도가 쌓인다 — 마감도 시도 횟수 상한도 없다
+         *     (ADR-0039, CONTEXT.md 「Problem」). 근거 연결도 자가 체크도 없다: 소스
+         *     또는 저장소 값 하나만 받는다.
+         */
+        post: operations["classroom_api_create_classroom_submission"];
         delete?: never;
         options?: never;
         head?: never;
@@ -759,6 +847,26 @@ export interface paths {
          *     때문이다.
          */
         post: operations["classroom_api_join_class"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/scoring-models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Scoring Models
+         * @description 「채점 설정」 화면이 선택지마다 컨텍스트 크기를 함께 보여주는 자리(#285).
+         */
+        get: operations["classroom_api_list_scoring_models"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3745,12 +3853,140 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Default Model */
+            default_model: string;
+            /** Has Openai Key */
+            has_openai_key: boolean;
             /** Id */
             id: number;
             /** Join Code */
             join_code: string;
             /** Name */
             name: string;
+            /** Openai Key Masked */
+            openai_key_masked?: string | null;
+        };
+        /** ClassPatchIn */
+        ClassPatchIn: {
+            /** Default Model */
+            default_model?: string | null;
+            /** Name */
+            name?: string | null;
+        };
+        /** ClassroomChecklistVerdictOut */
+        ClassroomChecklistVerdictOut: {
+            /** Checklist Item Id */
+            checklist_item_id: number;
+            /** Is Met */
+            is_met: boolean;
+            /** Reasoning */
+            reasoning: string;
+        };
+        /**
+         * ClassroomProblemListItemOut
+         * @description 참여자의 문제 목록 한 줄(#288) — 통과/미통과가 한눈에 보이도록 문제
+         *     상세보다 훨씬 좁다.
+         */
+        ClassroomProblemListItemOut: {
+            /** Id */
+            id: number;
+            /** Passed */
+            passed: boolean;
+            /** Submission Format */
+            submission_format: string;
+            /** Title */
+            title: string;
+        };
+        /**
+         * ClassroomProblemMineOut
+         * @description 참여자가 보는 문제 하나(#286) — 강사 전용 `ProblemOut`과 달리 `status`가
+         *     없다(참여자는 열린 문제만 이 자리에 닿으므로 구별할 이유가 없다).
+         *
+         *     이름이 `Classroom` 접두어를 든다 — `contests.submission_schemas.
+         *     ProblemOut`은 없지만 `SubmissionIn`·`SubmissionOut`은 있고, django-ninja가
+         *     OpenAPI 컴포넌트 이름을 클래스명 그대로 쓰기 때문에 겹치면 조용히 한쪽을
+         *     덮어써 공개 앱의 생성 타입이 깨진다(실제로 한 번 그랬다 — `pnpm --dir
+         *     frontend typecheck`가 잡았다). 이 파일의 다른 `Submission*` 스키마도 같은
+         *     이유로 전부 `Classroom` 접두어를 든다.
+         */
+        ClassroomProblemMineOut: {
+            /**
+             * Checklist Items
+             * @default []
+             */
+            checklist_items: components["schemas"]["ChecklistItemOut"][];
+            /** Classroom Id */
+            classroom_id: number;
+            /** Description */
+            description: string;
+            /** Id */
+            id: number;
+            /**
+             * Passed
+             * @default false
+             */
+            passed: boolean;
+            /** Submission Format */
+            submission_format: string;
+            /** Title */
+            title: string;
+        };
+        /** ClassroomProblemSubmissionsOut */
+        ClassroomProblemSubmissionsOut: {
+            problem: components["schemas"]["ClassroomProblemMineOut"];
+            /** Submissions */
+            submissions: components["schemas"]["ClassroomSubmissionOut"][];
+        };
+        /**
+         * ClassroomScoreOut
+         * @description 채점 스냅샷 하나(#287) — `classroom.models.ClassroomScore`를 그대로
+         *     비춘다. append-only라 이 값은 한 번 나오면 바뀌지 않는다.
+         */
+        ClassroomScoreOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Model Version */
+            model_version: string;
+            /** Reasoning */
+            reasoning: components["schemas"]["ClassroomChecklistVerdictOut"][];
+        };
+        /** ClassroomSubmissionIn */
+        ClassroomSubmissionIn: {
+            /** Content Type */
+            content_type?: string | null;
+            /** Value */
+            value: string;
+        };
+        /** ClassroomSubmissionOut */
+        ClassroomSubmissionOut: {
+            /** Attempt Number */
+            attempt_number: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Download Url */
+            download_url?: string | null;
+            /** Id */
+            id: number;
+            /**
+             * Passed
+             * @default false
+             */
+            passed: boolean;
+            /** Problem Id */
+            problem_id: number;
+            score?: components["schemas"]["ClassroomScoreOut"] | null;
+            /** Status */
+            status: string;
+            /** Submission Format */
+            submission_format: string;
+            /** Value */
+            value: string;
         };
         /** ComparisonEntryOut */
         ComparisonEntryOut: {
@@ -4657,6 +4893,11 @@ export interface components {
          * @enum {string}
          */
         NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "scoring_complete" | "appeal_ruled" | "new_contest_in_category" | "payout_awaits_you";
+        /** OpenAIKeyIn */
+        OpenAIKeyIn: {
+            /** Api Key */
+            api_key: string;
+        };
         /** OperatorCategoryOut */
         OperatorCategoryOut: {
             /** Id */
@@ -5083,8 +5324,12 @@ export interface components {
             classroom_id: number;
             /** Description */
             description: string;
+            /** Effective Model */
+            effective_model: string;
             /** Id */
             id: number;
+            /** Model */
+            model: string;
             /** Order */
             order: number;
             /** Status */
@@ -5098,6 +5343,8 @@ export interface components {
         ProblemPatchIn: {
             /** Description */
             description?: string | null;
+            /** Model */
+            model?: string | null;
             /** Submission Format */
             submission_format?: string | null;
             /** Title */
@@ -5452,6 +5699,15 @@ export interface components {
          * @enum {string}
          */
         ScoringBasis: "ai_judged" | "no_scoring_input" | "platform_failure";
+        /** ScoringModelOut */
+        ScoringModelOut: {
+            /** Context Window */
+            context_window: number;
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+        };
         /**
          * SellerContactSubmitIn
          * @description 토스 셀러 등록(businessType=INDIVIDUAL)의 individual 객체가 요구하는
@@ -6408,6 +6664,50 @@ export interface operations {
             };
         };
     };
+    classroom_api_update_class: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClassPatchIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     classroom_api_regenerate_join_link: {
         parameters: {
             query?: never;
@@ -6502,6 +6802,50 @@ export interface operations {
             };
         };
     };
+    classroom_api_set_class_openai_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenAIKeyIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     classroom_api_list_problems: {
         parameters: {
             query?: never;
@@ -6568,6 +6912,37 @@ export interface operations {
             };
             /** @description Unprocessable Content */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_list_my_problems: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassroomProblemListItemOut"][];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6847,6 +7222,38 @@ export interface operations {
             };
         };
     };
+    classroom_api_get_my_problem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+                problem_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassroomProblemSubmissionsOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     classroom_api_open_problem: {
         parameters: {
             query?: never;
@@ -6879,6 +7286,60 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_create_classroom_submission: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+                problem_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClassroomSubmissionIn"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassroomSubmissionOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6959,6 +7420,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_list_scoring_models: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScoringModelOut"][];
                 };
             };
         };

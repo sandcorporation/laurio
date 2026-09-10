@@ -1,10 +1,9 @@
-"""Classroom API (#278/#279/#280/#282/#283, ADR-0037).
+"""Classroom API (#278/#279/#280/#282/#283/#286, ADR-0037).
 
-**Class·Problem·체크리스트 엔드포인트는 여전히 강사 전용이다.** 참여자가
-가입 링크로 들어와 문제를 실제로 보는 표면(진도·문제 열람)은 아직 없다 —
-`ClassMember`가 이번 티켓(#280)으로 생겼지만, 강사가 아닌 요청은 여전히 그
-클래스가 아예 없는 것처럼 404를 받는다. `Problem.status`(초안/열림)는 이미
-저장되고 응답에 실려 있어, 참여자 열람이 붙을 때 필터 조건만 더하면 된다.
+**Class·Problem·체크리스트 엔드포인트는 여전히 강사 전용이다.** `.../mine`과
+`.../submissions`(#286)만 예외다 — 참여자가 가입 링크로 들어와 열린 문제를
+보고 소스·저장소를 낸다. 강사가 아닌 요청은 그 강사 전용 엔드포인트에서는
+여전히 클래스가 아예 없는 것처럼 404를 받는다.
 
 **`/join/{join_code}` 둘만 예외다.** 미리보기(GET)는 누구나 인증 없이 보고,
 가입(POST)은 로그인만 되어 있으면 강사 전용 규칙과 무관하게 누구든(강사
@@ -19,6 +18,9 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
+from django.conf import settings
 from django.db import transaction
 from django.http import HttpRequest
 from django.utils import timezone
@@ -26,8 +28,20 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
+from core.crypto import encrypt
+from storage.adapters import get_storage_adapter
+from storage.filenames import build_download_filename, safe_download_base_name
+from submissions.models import GITHUB_REPO_URL_PATTERN, Submission, SubmissionAsset
 
-from .models import ChecklistItem, Class, ClassMember, Problem, _generate_join_code
+from .models import (
+    ChecklistItem,
+    Class,
+    ClassMember,
+    ClassroomScore,
+    ClassroomSubmission,
+    Problem,
+    _generate_join_code,
+)
 from .schemas import (
     ChecklistItemIn,
     ChecklistItemOut,
@@ -35,29 +49,54 @@ from .schemas import (
     ChecklistReorderIn,
     ClassIn,
     ClassOut,
+    ClassPatchIn,
+    ClassroomChecklistVerdictOut,
+    ClassroomProblemListItemOut,
+    ClassroomProblemMineOut,
+    ClassroomProblemSubmissionsOut,
+    ClassroomScoreOut,
+    ClassroomSubmissionIn,
+    ClassroomSubmissionOut,
     ErrorOut,
     JoinIn,
     JoinLinkOut,
     JoinPreviewOut,
     JoinResultOut,
     MemberOut,
+    OpenAIKeyIn,
     ProblemIn,
     ProblemOut,
     ProblemPatchIn,
     ProblemReorderIn,
+    ScoringModelOut,
 )
+from .scoring_models import SCORING_MODEL_CHOICES, is_valid_model
+from .submission_target_refs import source_target_ref
 
 router = Router(tags=["classroom"])
 
 _SUBMISSION_FORMATS = {choice for choice, _label in Problem.SubmissionFormat.choices}
 
+#: 마스킹은 복호화가 아니라 저장 시점에 남긴 마지막 네 자리로만 만든다 —
+#: `Class.openai_api_key_encrypted`를 다시 풀지 않는다(#284, 파일 상단 라우터
+#: docstring과 같은 이유: 복호화는 채점 요청을 보낼 때만 한다).
+_KEY_MASK_PREFIX = "••••••••"
+
+
+def _mask_from_last4(last4: str) -> str:
+    return f"{_KEY_MASK_PREFIX}{last4}"
+
 
 def _serialize_class(class_obj: Class) -> ClassOut:
+    has_key = bool(class_obj.openai_api_key_encrypted)
     return ClassOut(
         id=class_obj.id,
         name=class_obj.name,
         join_code=class_obj.join_code,
         created_at=class_obj.created_at,
+        default_model=class_obj.default_model,
+        has_openai_key=has_key,
+        openai_key_masked=_mask_from_last4(class_obj.openai_api_key_last4) if has_key else None,
     )
 
 
@@ -65,7 +104,7 @@ def _serialize_checklist_item(item: ChecklistItem) -> ChecklistItemOut:
     return ChecklistItemOut(id=item.id, label=item.label, required=item.required, order=item.order)
 
 
-def _serialize_problem(problem: Problem) -> ProblemOut:
+def _serialize_problem(problem: Problem, class_obj: Class) -> ProblemOut:
     return ProblemOut(
         id=problem.id,
         classroom_id=problem.classroom_id,
@@ -74,7 +113,97 @@ def _serialize_problem(problem: Problem) -> ProblemOut:
         submission_format=problem.submission_format,
         status=problem.status,
         order=problem.order,
+        model=problem.model,
+        effective_model=problem.model or class_obj.default_model,
         checklist_items=[_serialize_checklist_item(i) for i in problem.checklist_items.all()],
+    )
+
+
+def _required_checklist_item_ids(checklist_items) -> set[int]:
+    return {item.id for item in checklist_items if item.required}
+
+
+def _is_score_passed(score: ClassroomScore | None, required_item_ids: set[int]) -> bool:
+    """이 채점 하나가 통과인가(#288, CONTEXT.md 「통과」) — 필수 항목을
+    **전부** 충족했는가. 선택 항목은 판정에 관여하지 않는다(AC).
+
+    **항상 지금의 체크리스트 기준으로 다시 셈한다** — 저장된 판정(`score.
+    reasoning`)은 append-only라 바뀌지 않지만, `required_item_ids`는 호출부가
+    매번 최신 `ChecklistItem.required`에서 새로 구해 넘긴다. 강사가 채점 뒤에
+    체크리스트를 고치면(#283이 허용한다) 지난 판정에 없는 항목은 "충족 확인
+    안 됨"으로 본다 — Problem 모델 docstring의 "달성률만 새 기준으로 다시
+    셈된다"가 뜻하는 바로 그 재계산이다.
+
+    미채점("pending", `score is None`)이면 항상 거짓이다 — 아직 판정이 없다."""
+
+    if score is None or not required_item_ids:
+        return False
+    met_ids = {r["checklist_item_id"] for r in score.reasoning if r["is_met"]}
+    return required_item_ids.issubset(met_ids)
+
+
+def _serialize_problem_mine(problem: Problem, *, passed: bool = False) -> ClassroomProblemMineOut:
+    return ClassroomProblemMineOut(
+        id=problem.id,
+        classroom_id=problem.classroom_id,
+        title=problem.title,
+        description=problem.description,
+        submission_format=problem.submission_format,
+        checklist_items=[_serialize_checklist_item(i) for i in problem.checklist_items.all()],
+        passed=passed,
+    )
+
+
+def _source_download_url(asset: SubmissionAsset, user) -> str:
+    """소스 자료 하나의 presigned 다운로드 URL — 파일명은 제출자 본인의 User
+    정보를 따른다(#286 AC). 강의실 참여자는 `accounts.DeveloperProfile`이
+    없으므로 `contests.assignment_api`처럼 `developer.display_name`을 쓸 수
+    없다 — 대신 `User.email`을 쓴다(`classroom.api.preview_join`이 강사를
+    가리킬 때 이미 같은 값을 쓰고 있다)."""
+
+    adapter = get_storage_adapter()
+    base_name = safe_download_base_name(user.email)
+    presigned = adapter.presign_download(
+        asset.value,
+        filename=build_download_filename(asset.content_type or None, base_name=base_name),
+        expires_in=timedelta(seconds=settings.STORAGE_DOWNLOAD_URL_TTL_SECONDS),
+    )
+    return presigned.url
+
+
+def _serialize_score(score: ClassroomScore) -> ClassroomScoreOut:
+    return ClassroomScoreOut(
+        model_version=score.model_version,
+        reasoning=[
+            ClassroomChecklistVerdictOut(
+                checklist_item_id=r["checklist_item_id"],
+                is_met=r["is_met"],
+                reasoning=r["reasoning"],
+            )
+            for r in score.reasoning
+        ],
+        created_at=score.created_at,
+    )
+
+
+def _serialize_classroom_submission(
+    submission: ClassroomSubmission, *, asset: SubmissionAsset, user, required_item_ids: set[int]
+) -> ClassroomSubmissionOut:
+    download_url = (
+        _source_download_url(asset, user) if asset.kind == SubmissionAsset.Kind.SOURCE else None
+    )
+    score = getattr(submission, "classroom_score", None)
+    return ClassroomSubmissionOut(
+        id=submission.id,
+        problem_id=submission.problem_id,
+        attempt_number=submission.attempt_number,
+        submission_format=asset.kind,
+        value=asset.value,
+        download_url=download_url,
+        created_at=submission.created_at,
+        status="scored" if score is not None else "pending",
+        score=_serialize_score(score) if score is not None else None,
+        passed=_is_score_passed(score, required_item_ids),
     )
 
 
@@ -116,6 +245,58 @@ def list_my_classes(request: HttpRequest):
 def get_class(request: HttpRequest, class_id: int):
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     return 200, _serialize_class(class_obj)
+
+
+@router.patch(
+    "/classes/{class_id}", response={200: ClassOut, 404: ErrorOut, 422: ErrorOut}, auth=jwt_auth
+)
+def update_class(request: HttpRequest, class_id: int, payload: ClassPatchIn):
+    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+
+    if payload.default_model is not None and not is_valid_model(payload.default_model):
+        raise HttpError(422, f"알 수 없는 채점 모델입니다: {payload.default_model}")
+
+    update_fields = []
+    if payload.name is not None:
+        class_obj.name = payload.name
+        update_fields.append("name")
+    if payload.default_model is not None:
+        class_obj.default_model = payload.default_model
+        update_fields.append("default_model")
+    if update_fields:
+        class_obj.save(update_fields=update_fields)
+    return 200, _serialize_class(class_obj)
+
+
+@router.put(
+    "/classes/{class_id}/openai-key",
+    response={200: ClassOut, 404: ErrorOut, 422: ErrorOut},
+    auth=jwt_auth,
+)
+def set_class_openai_key(request: HttpRequest, class_id: int, payload: OpenAIKeyIn):
+    """참여자에게는 어떤 형태로도 보이지 않는다(#284) — 이 엔드포인트도 강사
+    본인 전용이다. 응답은 마스킹된 `ClassOut`뿐, 평문은 어디에도 싣지 않는다."""
+
+    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+
+    raw_key = payload.api_key.strip()
+    if not raw_key:
+        raise HttpError(422, "채점 키를 입력해주세요.")
+
+    class_obj.openai_api_key_encrypted = encrypt(raw_key)
+    class_obj.openai_api_key_last4 = raw_key[-4:]
+    class_obj.save(update_fields=["openai_api_key_encrypted", "openai_api_key_last4"])
+    return 200, _serialize_class(class_obj)
+
+
+@router.get("/scoring-models", response={200: list[ScoringModelOut]}, auth=jwt_auth)
+def list_scoring_models(request: HttpRequest):
+    """「채점 설정」 화면이 선택지마다 컨텍스트 크기를 함께 보여주는 자리(#285)."""
+
+    return 200, [
+        ScoringModelOut(id=c.id, label=c.label, context_window=c.context_window)
+        for c in SCORING_MODEL_CHOICES
+    ]
 
 
 @router.post(
@@ -258,7 +439,7 @@ def create_problem(request: HttpRequest, class_id: int, payload: ProblemIn):
         submission_format=payload.submission_format,
         order=next_order,
     )
-    return 201, _serialize_problem(problem)
+    return 201, _serialize_problem(problem, class_obj)
 
 
 @router.get(
@@ -269,7 +450,7 @@ def list_problems(request: HttpRequest, class_id: int):
 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problems = class_obj.problems.prefetch_related("checklist_items").all()
-    return 200, [_serialize_problem(p) for p in problems]
+    return 200, [_serialize_problem(p, class_obj) for p in problems]
 
 
 @router.post(
@@ -297,7 +478,49 @@ def reorder_problems(request: HttpRequest, class_id: int, payload: ProblemReorde
         Problem.objects.bulk_update(problems.values(), ["order"])
 
     ordered = sorted(problems.values(), key=lambda p: p.order)
-    return 200, [_serialize_problem(p) for p in ordered]
+    return 200, [_serialize_problem(p, class_obj) for p in ordered]
+
+
+@router.get(
+    "/classes/{class_id}/problems/mine",
+    response={200: list[ClassroomProblemListItemOut], 404: ErrorOut},
+    auth=jwt_auth,
+)
+def list_my_problems(request: HttpRequest, class_id: int):
+    """참여자의 문제 목록(#288) — 통과/미통과가 한눈에 보인다. 정적
+    세그먼트("mine")라 `/{problem_id}` 동적 라우트보다 먼저 등록한다(파일
+    상단 docstring, `reorder_problems`와 같은 이유)."""
+
+    member = _get_member_or_404(class_id, request.auth_user.id)
+    problems = list(
+        Problem.objects.filter(classroom_id=class_id, status=Problem.Status.OPEN)
+        .prefetch_related("checklist_items")
+        .order_by("order", "id")
+    )
+    submissions = (
+        ClassroomSubmission.objects.filter(problem__in=problems, member=member)
+        .select_related("classroom_score")
+    )
+    submissions_by_problem: dict[int, list[ClassroomSubmission]] = {}
+    for s in submissions:
+        submissions_by_problem.setdefault(s.problem_id, []).append(s)
+
+    out = []
+    for problem in problems:
+        required_item_ids = _required_checklist_item_ids(problem.checklist_items.all())
+        passed = any(
+            _is_score_passed(getattr(s, "classroom_score", None), required_item_ids)
+            for s in submissions_by_problem.get(problem.id, [])
+        )
+        out.append(
+            ClassroomProblemListItemOut(
+                id=problem.id,
+                title=problem.title,
+                submission_format=problem.submission_format,
+                passed=passed,
+            )
+        )
+    return 200, out
 
 
 @router.get(
@@ -310,7 +533,7 @@ def get_problem(request: HttpRequest, class_id: int, problem_id: int):
 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problem = _get_owned_problem_or_404(class_obj, problem_id)
-    return 200, _serialize_problem(problem)
+    return 200, _serialize_problem(problem, class_obj)
 
 
 @router.patch(
@@ -324,6 +547,8 @@ def update_problem(request: HttpRequest, class_id: int, problem_id: int, payload
 
     if payload.submission_format is not None and payload.submission_format not in _SUBMISSION_FORMATS:
         raise HttpError(422, f"알 수 없는 제출 형식입니다: {payload.submission_format}")
+    if payload.model and not is_valid_model(payload.model):
+        raise HttpError(422, f"알 수 없는 채점 모델입니다: {payload.model}")
 
     update_fields = []
     if payload.title is not None:
@@ -335,9 +560,12 @@ def update_problem(request: HttpRequest, class_id: int, problem_id: int, payload
     if payload.submission_format is not None:
         problem.submission_format = payload.submission_format
         update_fields.append("submission_format")
+    if payload.model is not None:
+        problem.model = payload.model
+        update_fields.append("model")
     if update_fields:
         problem.save(update_fields=[*update_fields, "updated_at"])
-    return 200, _serialize_problem(problem)
+    return 200, _serialize_problem(problem, class_obj)
 
 
 @router.post(
@@ -357,7 +585,139 @@ def open_problem(request: HttpRequest, class_id: int, problem_id: int):
 
     problem.status = Problem.Status.OPEN
     problem.save(update_fields=["status", "updated_at"])
-    return 200, _serialize_problem(problem)
+    return 200, _serialize_problem(problem, class_obj)
+
+
+# --- Submission (참여자, #286) --------------------------------------------------
+
+
+def _get_member_or_404(class_id: int, user_id: int) -> ClassMember:
+    """강사 전용 엔드포인트의 `_get_owned_class_or_404`와 같은 존재-숨김
+    규칙을 참여자 쪽에서 지킨다 — 참여자가 아니면 그 문제가 아예 없는 것처럼
+    404를 받는다(#286 AC "그 클래스의 참여자가 아니면 제출할 수 없다"). 강사
+    본인도 ClassMember 행이 없으면(가입 링크로 자기 클래스에 들어온 적이
+    없으면) 여기 닿지 못한다 — 참여자 표면은 어디까지나 ClassMember 기준이다."""
+
+    try:
+        return ClassMember.objects.get(classroom_id=class_id, user_id=user_id)
+    except ClassMember.DoesNotExist as exc:
+        raise HttpError(404, "문제를 찾을 수 없습니다.") from exc
+
+
+def _get_open_problem_for_participant_or_404(class_id: int, problem_id: int) -> Problem:
+    """참여자에게는 열린 문제만 존재한다 — 초안은 강사만 본다(Problem
+    docstring). 남의 클래스와 같은 이유로 404다."""
+
+    try:
+        return Problem.objects.prefetch_related("checklist_items").get(
+            id=problem_id, classroom_id=class_id, status=Problem.Status.OPEN
+        )
+    except Problem.DoesNotExist as exc:
+        raise HttpError(404, "문제를 찾을 수 없습니다.") from exc
+
+
+@router.get(
+    "/classes/{class_id}/problems/{problem_id}/mine",
+    response={200: ClassroomProblemSubmissionsOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
+    """참여자가 보는 문제 하나 — 체크리스트와 본인의 시도 목록(#286). 남의
+    시도는 애초에 이 질의에 없다(`member=member` 필터) — "남의 제출물을 볼 수
+    없다"는 AC를 별도 권한 검사가 아니라 쿼리 모양으로 지킨다."""
+
+    member = _get_member_or_404(class_id, request.auth_user.id)
+    problem = _get_open_problem_for_participant_or_404(class_id, problem_id)
+    required_item_ids = _required_checklist_item_ids(problem.checklist_items.all())
+
+    submissions = (
+        ClassroomSubmission.objects.filter(problem=problem, member=member)
+        .select_related("classroom_score")
+        .prefetch_related("assets")
+        .order_by("-attempt_number")
+    )
+    serialized_submissions = [
+        # `s.assets.all()[0]`이 아니라 리스트로 먼저 받는다 — 그래야
+        # `prefetch_related("assets")`가 채워 둔 캐시를 쓴다. `.get()`은
+        # 매니저를 거쳐 매번 새 질의를 날려 그 prefetch를 헛수고로 만든다.
+        _serialize_classroom_submission(
+            s, asset=list(s.assets.all())[0], user=request.auth_user, required_item_ids=required_item_ids
+        )
+        for s in submissions
+    ]
+    return 200, ClassroomProblemSubmissionsOut(
+        # 문제 자체의 통과 여부는 시도 전체의 OR이다(#288 AC "한 번 통과하면
+        # 유지된다") — 최신 시도만 보지 않는다.
+        problem=_serialize_problem_mine(
+            problem, passed=any(s.passed for s in serialized_submissions)
+        ),
+        submissions=serialized_submissions,
+    )
+
+
+@router.post(
+    "/classes/{class_id}/problems/{problem_id}/submissions",
+    response={201: ClassroomSubmissionOut, 403: ErrorOut, 404: ErrorOut, 422: ErrorOut},
+    auth=jwt_auth,
+)
+def create_classroom_submission(
+    request: HttpRequest, class_id: int, problem_id: int, payload: ClassroomSubmissionIn
+):
+    """제출할 때마다 새 시도가 쌓인다 — 마감도 시도 횟수 상한도 없다
+    (ADR-0039, CONTEXT.md 「Problem」). 근거 연결도 자가 체크도 없다: 소스
+    또는 저장소 값 하나만 받는다."""
+
+    member = _get_member_or_404(class_id, request.auth_user.id)
+    problem = _get_open_problem_for_participant_or_404(class_id, problem_id)
+
+    if member.expelled_at is not None:
+        # ClassMember.expelled_at의 docstring이 이 엔드포인트를 지목해 둔
+        # 자리다 — 행은 지우지 않되 새 제출만 막는다. 강사가 이미 그 사실을
+        # 아는 사람에게는 404(존재 자체를 숨김)보다 403(권한이 없다는 것을
+        # 안다)이 더 정직하다.
+        raise HttpError(403, "더 이상 이 클래스의 참여자가 아닙니다.")
+
+    value = payload.value.strip()
+    if not value:
+        raise HttpError(422, "제출 값을 입력해주세요.")
+
+    content_type = ""
+    if problem.submission_format == Problem.SubmissionFormat.SOURCE:
+        expected_ref = source_target_ref(problem.id, request.auth_user.id)
+        if not value.startswith(f"{expected_ref}/"):
+            raise HttpError(422, "본인의 업로드 대상에 속하지 않는 소스입니다.")
+        asset_kind = SubmissionAsset.Kind.SOURCE
+        content_type = (payload.content_type or "").strip()
+    else:
+        if not GITHUB_REPO_URL_PATTERN.match(value):
+            raise HttpError(422, "저장소는 https://github.com/<owner>/<repo> 형식만 받습니다.")
+        asset_kind = SubmissionAsset.Kind.REPOSITORY
+
+    with transaction.atomic():
+        # 시도 번호는 참여자 행을 잠그고 센다 — 같은 참여자가 같은 문제에
+        # 동시에 두 번 제출해도 번호가 겹치지 않게 한다(#10류 동시성 규율과
+        # 같은 이유, 유니크 제약이 없는 자리라 여기서 직접 막는다).
+        locked_member = ClassMember.objects.select_for_update().get(id=member.id)
+        next_attempt = (
+            ClassroomSubmission.objects.filter(problem=problem, member=locked_member).count() + 1
+        )
+        submission = ClassroomSubmission.objects.create(
+            user_id=request.auth_user.id,
+            product=Submission.Product.CLASSROOM,
+            problem=problem,
+            member=locked_member,
+            attempt_number=next_attempt,
+        )
+        asset = SubmissionAsset.objects.create(
+            submission=submission, kind=asset_kind, value=value, content_type=content_type
+        )
+
+    # 방금 만든 시도는 아직 채점되지 않아 required_item_ids와 무관하게
+    # 언제나 passed=False다 — 그래도 시그니처를 맞추려고 지금 값을 구해 넘긴다.
+    required_item_ids = _required_checklist_item_ids(problem.checklist_items.all())
+    return 201, _serialize_classroom_submission(
+        submission, asset=asset, user=request.auth_user, required_item_ids=required_item_ids
+    )
 
 
 # --- ChecklistItem -------------------------------------------------------------

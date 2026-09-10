@@ -1,7 +1,7 @@
 "use client";
 
-// 문제 편집 (#282/#283). 제목·설명·제출 형식에 이어 체크리스트(필수·선택
-// 항목과 순서)를 여기서 관리하고, 초안을 연다.
+// 문제 편집 (#282/#283/#285). 제목·설명·제출 형식·채점 모델에 이어
+// 체크리스트(필수·선택 항목과 순서)를 여기서 관리하고, 초안을 연다.
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
@@ -17,6 +17,7 @@ import {
   type SubmissionFormat,
 } from "@/lib/problems/api";
 import { useProblem } from "@/lib/problems/use-problem";
+import { useScoringModels } from "@/lib/scoring/use-scoring-models";
 
 export default function EditProblemPage() {
   const params = useParams<{ id: string; problemId: string }>();
@@ -25,10 +26,12 @@ export default function EditProblemPage() {
   const router = useRouter();
 
   const { state, reload } = useProblem(classId, problemId);
+  const modelsState = useScoringModels();
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [submissionFormat, setSubmissionFormat] = useState<SubmissionFormat>("source");
+  const [model, setModel] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,6 +45,7 @@ export default function EditProblemPage() {
       setTitle(state.problem.title);
       setDescription(state.problem.description);
       setSubmissionFormat(state.problem.submission_format);
+      setModel(state.problem.model);
     }
   }, [state]);
 
@@ -72,6 +76,7 @@ export default function EditProblemPage() {
         title: title.trim(),
         description,
         submission_format: submissionFormat,
+        model,
       });
       reload();
       router.push(`/classes/${classId}`);
@@ -228,6 +233,33 @@ export default function EditProblemPage() {
             저장소
           </label>
         </fieldset>
+
+        <label htmlFor="problem-model">채점 모델</label>
+        <p>문제 설명이 길면 컨텍스트가 작은 모델은 뒷부분이 잘린 채 채점됩니다 — 그래서 문제마다 다른 모델을 고를 수 있습니다.</p>
+        {modelsState.status === "ready" ? (
+          <select
+            id="problem-model"
+            data-testid="edit-problem-model-select"
+            value={model}
+            onChange={(event) => setModel(event.target.value)}
+          >
+            <option value="" data-testid="edit-problem-model-option-inherit">
+              클래스 기본값을 따릅니다
+            </option>
+            {modelsState.models.map((option) => (
+              <option key={option.id} value={option.id} data-testid={`edit-problem-model-option-${option.id}`}>
+                {option.label} · 컨텍스트 {option.context_window.toLocaleString("ko-KR")} 토큰
+              </option>
+            ))}
+          </select>
+        ) : (
+          <p data-testid="edit-problem-model-loading">모델 목록을 불러오는 중...</p>
+        )}
+        {model === "" ? (
+          <p data-testid="edit-problem-model-effective">
+            실제로 쓰일 모델: {problem.effective_model}
+          </p>
+        ) : null}
 
         <button type="submit" data-testid="edit-problem-submit" disabled={saving || title.trim() === ""}>
           {saving ? "저장하는 중..." : "저장"}

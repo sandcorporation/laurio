@@ -17,7 +17,7 @@ export type ClassDetailState =
 export function useClass(classId: number) {
   const [state, setState] = useState<ClassDetailState>({ status: "loading" });
 
-  useEffect(() => {
+  function load() {
     let cancelled = false;
     setState({ status: "loading" });
     fetchClass(classId)
@@ -35,6 +35,12 @@ export function useClass(classId: number) {
     return () => {
       cancelled = true;
     };
+  }
+
+  useEffect(() => {
+    const cancel = load();
+    return cancel;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [classId]);
 
   const regenerateJoinCode = useCallback(async () => {
@@ -51,5 +57,5 @@ export function useClass(classId: number) {
     }
   }, [classId, state]);
 
-  return { state, regenerateJoinCode };
+  return { state, reload: load, regenerateJoinCode };
 }
