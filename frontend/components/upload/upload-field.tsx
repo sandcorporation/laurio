@@ -65,6 +65,17 @@ export function UploadField({
         data-testid={`${testId}-input`}
         type="file"
         accept={accept}
+        // 브라우저가 그려 주는 `::file-selector-button` 을 이 브랜드의 버튼처럼
+        // 칠한다(`file:` 유틸리티). 맨 파일 입력은 OS 기본 위젯이라, 다른 컨트롤이
+        // 전부 1px 괘선 상자인 화면에서 이것만 남의 화면처럼 보였다 — 「누를 수
+        // 있다」는 신호가 없다는 뜻이기도 하다. 값은 이 저장소가 이미 쓰는 버튼
+        // 관용구 그대로다(`rounded-sm border border-rule … hover:border-ink`).
+        // 파일명 텍스트는 브라우저가 붙이는 것이라 여기서 건드리지 않는다.
+        className={
+          "text-sm file:mr-3 file:rounded-sm file:border file:border-rule file:bg-surface " +
+          "file:px-2 file:py-1 file:text-xs file:text-ink hover:file:border-ink " +
+          "disabled:opacity-50"
+        }
         onChange={handleFileChange}
         disabled={disabled || state.status === "requesting" || state.status === "uploading"}
       />
