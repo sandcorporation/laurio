@@ -20,7 +20,7 @@ type SubmitState =
   | { status: "submitting" }
   | { status: "needsLogin" }
   | { status: "error"; message: string }
-  | { status: "done"; className: string; displayName: string };
+  | { status: "done"; classId: number; className: string; displayName: string };
 
 export default function JoinPage() {
   const params = useParams<{ code: string }>();
@@ -34,7 +34,12 @@ export default function JoinPage() {
     setSubmit({ status: "submitting" });
     try {
       const result = await joinClass(code, displayName.trim());
-      setSubmit({ status: "done", className: result.class_name, displayName: result.display_name });
+      setSubmit({
+        status: "done",
+        classId: result.class_id,
+        className: result.class_name,
+        displayName: result.display_name,
+      });
     } catch (error) {
       if (error instanceof BackendError && error.status === 401) {
         setSubmit({ status: "needsLogin" });
@@ -79,6 +84,11 @@ export default function JoinPage() {
         <h1 data-testid="join-done-heading">가입 완료</h1>
         <p data-testid="join-done-message">
           {submit.className}에 &quot;{submit.displayName}&quot;(으)로 참여했습니다.
+        </p>
+        <p>
+          <Link href={`/classes/${submit.classId}/problems/mine`} data-testid="join-done-problems-link">
+            문제 목록 보러 가기
+          </Link>
         </p>
       </main>
     );

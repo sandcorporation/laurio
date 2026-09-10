@@ -93,6 +93,9 @@ export default function ProblemSubmitPage() {
   return (
     <main>
       <h1 data-testid="my-problem-title">{problem.title}</h1>
+      <p data-testid="my-problem-passed-status">
+        {problem.passed ? "이 문제를 통과했습니다" : "아직 통과하지 못했습니다"}
+      </p>
       {problem.description ? <p data-testid="my-problem-description">{problem.description}</p> : null}
 
       <section>
@@ -181,7 +184,9 @@ export default function ProblemSubmitPage() {
                   {submission.status === "pending" ? (
                     <span data-testid={`submission-row-${submission.id}-status`}>채점 중</span>
                   ) : (
-                    <span data-testid={`submission-row-${submission.id}-status`}>채점 완료</span>
+                    <span data-testid={`submission-row-${submission.id}-status`}>
+                      채점 완료 · {submission.passed ? "통과" : "미통과"}
+                    </span>
                   )}
                   {submission.status === "scored" && submission.score ? (
                     <ul data-testid={`submission-row-${submission.id}-verdicts`}>

@@ -636,6 +636,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/problems/mine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List My Problems
+         * @description 참여자의 문제 목록(#288) — 통과/미통과가 한눈에 보인다. 정적
+         *     세그먼트("mine")라 `/{problem_id}` 동적 라우트보다 먼저 등록한다(파일
+         *     상단 docstring, `reorder_problems`와 같은 이유).
+         */
+        get: operations["classroom_api_list_my_problems"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/problems/reorder": {
         parameters: {
             query?: never;
@@ -3861,6 +3883,21 @@ export interface components {
             reasoning: string;
         };
         /**
+         * ClassroomProblemListItemOut
+         * @description 참여자의 문제 목록 한 줄(#288) — 통과/미통과가 한눈에 보이도록 문제
+         *     상세보다 훨씬 좁다.
+         */
+        ClassroomProblemListItemOut: {
+            /** Id */
+            id: number;
+            /** Passed */
+            passed: boolean;
+            /** Submission Format */
+            submission_format: string;
+            /** Title */
+            title: string;
+        };
+        /**
          * ClassroomProblemMineOut
          * @description 참여자가 보는 문제 하나(#286) — 강사 전용 `ProblemOut`과 달리 `status`가
          *     없다(참여자는 열린 문제만 이 자리에 닿으므로 구별할 이유가 없다).
@@ -3884,6 +3921,11 @@ export interface components {
             description: string;
             /** Id */
             id: number;
+            /**
+             * Passed
+             * @default false
+             */
+            passed: boolean;
             /** Submission Format */
             submission_format: string;
             /** Title */
@@ -3931,6 +3973,11 @@ export interface components {
             download_url?: string | null;
             /** Id */
             id: number;
+            /**
+             * Passed
+             * @default false
+             */
+            passed: boolean;
             /** Problem Id */
             problem_id: number;
             score?: components["schemas"]["ClassroomScoreOut"] | null;
@@ -6865,6 +6912,37 @@ export interface operations {
             };
             /** @description Unprocessable Content */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_list_my_problems: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassroomProblemListItemOut"][];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

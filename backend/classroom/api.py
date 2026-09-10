@@ -51,6 +51,7 @@ from .schemas import (
     ClassOut,
     ClassPatchIn,
     ClassroomChecklistVerdictOut,
+    ClassroomProblemListItemOut,
     ClassroomProblemMineOut,
     ClassroomProblemSubmissionsOut,
     ClassroomScoreOut,
@@ -118,7 +119,30 @@ def _serialize_problem(problem: Problem, class_obj: Class) -> ProblemOut:
     )
 
 
-def _serialize_problem_mine(problem: Problem) -> ClassroomProblemMineOut:
+def _required_checklist_item_ids(checklist_items) -> set[int]:
+    return {item.id for item in checklist_items if item.required}
+
+
+def _is_score_passed(score: ClassroomScore | None, required_item_ids: set[int]) -> bool:
+    """이 채점 하나가 통과인가(#288, CONTEXT.md 「통과」) — 필수 항목을
+    **전부** 충족했는가. 선택 항목은 판정에 관여하지 않는다(AC).
+
+    **항상 지금의 체크리스트 기준으로 다시 셈한다** — 저장된 판정(`score.
+    reasoning`)은 append-only라 바뀌지 않지만, `required_item_ids`는 호출부가
+    매번 최신 `ChecklistItem.required`에서 새로 구해 넘긴다. 강사가 채점 뒤에
+    체크리스트를 고치면(#283이 허용한다) 지난 판정에 없는 항목은 "충족 확인
+    안 됨"으로 본다 — Problem 모델 docstring의 "달성률만 새 기준으로 다시
+    셈된다"가 뜻하는 바로 그 재계산이다.
+
+    미채점("pending", `score is None`)이면 항상 거짓이다 — 아직 판정이 없다."""
+
+    if score is None or not required_item_ids:
+        return False
+    met_ids = {r["checklist_item_id"] for r in score.reasoning if r["is_met"]}
+    return required_item_ids.issubset(met_ids)
+
+
+def _serialize_problem_mine(problem: Problem, *, passed: bool = False) -> ClassroomProblemMineOut:
     return ClassroomProblemMineOut(
         id=problem.id,
         classroom_id=problem.classroom_id,
@@ -126,6 +150,7 @@ def _serialize_problem_mine(problem: Problem) -> ClassroomProblemMineOut:
         description=problem.description,
         submission_format=problem.submission_format,
         checklist_items=[_serialize_checklist_item(i) for i in problem.checklist_items.all()],
+        passed=passed,
     )
 
 
@@ -162,7 +187,7 @@ def _serialize_score(score: ClassroomScore) -> ClassroomScoreOut:
 
 
 def _serialize_classroom_submission(
-    submission: ClassroomSubmission, *, asset: SubmissionAsset, user
+    submission: ClassroomSubmission, *, asset: SubmissionAsset, user, required_item_ids: set[int]
 ) -> ClassroomSubmissionOut:
     download_url = (
         _source_download_url(asset, user) if asset.kind == SubmissionAsset.Kind.SOURCE else None
@@ -178,6 +203,7 @@ def _serialize_classroom_submission(
         created_at=submission.created_at,
         status="scored" if score is not None else "pending",
         score=_serialize_score(score) if score is not None else None,
+        passed=_is_score_passed(score, required_item_ids),
     )
 
 
@@ -456,6 +482,48 @@ def reorder_problems(request: HttpRequest, class_id: int, payload: ProblemReorde
 
 
 @router.get(
+    "/classes/{class_id}/problems/mine",
+    response={200: list[ClassroomProblemListItemOut], 404: ErrorOut},
+    auth=jwt_auth,
+)
+def list_my_problems(request: HttpRequest, class_id: int):
+    """참여자의 문제 목록(#288) — 통과/미통과가 한눈에 보인다. 정적
+    세그먼트("mine")라 `/{problem_id}` 동적 라우트보다 먼저 등록한다(파일
+    상단 docstring, `reorder_problems`와 같은 이유)."""
+
+    member = _get_member_or_404(class_id, request.auth_user.id)
+    problems = list(
+        Problem.objects.filter(classroom_id=class_id, status=Problem.Status.OPEN)
+        .prefetch_related("checklist_items")
+        .order_by("order", "id")
+    )
+    submissions = (
+        ClassroomSubmission.objects.filter(problem__in=problems, member=member)
+        .select_related("classroom_score")
+    )
+    submissions_by_problem: dict[int, list[ClassroomSubmission]] = {}
+    for s in submissions:
+        submissions_by_problem.setdefault(s.problem_id, []).append(s)
+
+    out = []
+    for problem in problems:
+        required_item_ids = _required_checklist_item_ids(problem.checklist_items.all())
+        passed = any(
+            _is_score_passed(getattr(s, "classroom_score", None), required_item_ids)
+            for s in submissions_by_problem.get(problem.id, [])
+        )
+        out.append(
+            ClassroomProblemListItemOut(
+                id=problem.id,
+                title=problem.title,
+                submission_format=problem.submission_format,
+                passed=passed,
+            )
+        )
+    return 200, out
+
+
+@router.get(
     "/classes/{class_id}/problems/{problem_id}",
     response={200: ProblemOut, 404: ErrorOut},
     auth=jwt_auth,
@@ -560,6 +628,7 @@ def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
 
     member = _get_member_or_404(class_id, request.auth_user.id)
     problem = _get_open_problem_for_participant_or_404(class_id, problem_id)
+    required_item_ids = _required_checklist_item_ids(problem.checklist_items.all())
 
     submissions = (
         ClassroomSubmission.objects.filter(problem=problem, member=member)
@@ -567,15 +636,22 @@ def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
         .prefetch_related("assets")
         .order_by("-attempt_number")
     )
+    serialized_submissions = [
+        # `s.assets.all()[0]`이 아니라 리스트로 먼저 받는다 — 그래야
+        # `prefetch_related("assets")`가 채워 둔 캐시를 쓴다. `.get()`은
+        # 매니저를 거쳐 매번 새 질의를 날려 그 prefetch를 헛수고로 만든다.
+        _serialize_classroom_submission(
+            s, asset=list(s.assets.all())[0], user=request.auth_user, required_item_ids=required_item_ids
+        )
+        for s in submissions
+    ]
     return 200, ClassroomProblemSubmissionsOut(
-        problem=_serialize_problem_mine(problem),
-        submissions=[
-            # `s.assets.all()[0]`이 아니라 리스트로 먼저 받는다 — 그래야
-            # `prefetch_related("assets")`가 채워 둔 캐시를 쓴다. `.get()`은
-            # 매니저를 거쳐 매번 새 질의를 날려 그 prefetch를 헛수고로 만든다.
-            _serialize_classroom_submission(s, asset=list(s.assets.all())[0], user=request.auth_user)
-            for s in submissions
-        ],
+        # 문제 자체의 통과 여부는 시도 전체의 OR이다(#288 AC "한 번 통과하면
+        # 유지된다") — 최신 시도만 보지 않는다.
+        problem=_serialize_problem_mine(
+            problem, passed=any(s.passed for s in serialized_submissions)
+        ),
+        submissions=serialized_submissions,
     )
 
 
@@ -636,7 +712,12 @@ def create_classroom_submission(
             submission=submission, kind=asset_kind, value=value, content_type=content_type
         )
 
-    return 201, _serialize_classroom_submission(submission, asset=asset, user=request.auth_user)
+    # 방금 만든 시도는 아직 채점되지 않아 required_item_ids와 무관하게
+    # 언제나 passed=False다 — 그래도 시그니처를 맞추려고 지금 값을 구해 넘긴다.
+    required_item_ids = _required_checklist_item_ids(problem.checklist_items.all())
+    return 201, _serialize_classroom_submission(
+        submission, asset=asset, user=request.auth_user, required_item_ids=required_item_ids
+    )
 
 
 # --- ChecklistItem -------------------------------------------------------------

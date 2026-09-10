@@ -1,6 +1,5 @@
-// 참여자 제출 백엔드 호출 (#286/#287). 강사 전용 `problems/api.ts`와 달리
-// 여기는 `.../mine`·`.../submissions` 둘뿐이다 — 참여자는 자기 시도만 보고
-// 낸다.
+// 참여자 제출 백엔드 호출 (#286/#287/#288). 강사 전용 `problems/api.ts`와
+// 달리 여기는 참여자가 자기 시도만 보고 낸다.
 import { backendJson } from "@/lib/backend/client";
 import type { ChecklistItemRow, SubmissionFormat } from "@/lib/problems/api";
 
@@ -11,6 +10,18 @@ export type ProblemMine = {
   description: string;
   submission_format: SubmissionFormat;
   checklist_items: ChecklistItemRow[];
+  // 이 문제를 한 번이라도 통과한 적이 있는가(#288) — 최신 시도가 아니라
+  // 시도 전체의 OR. 한 번 통과하면 나중에 미통과가 나와도 계속 참이다.
+  passed: boolean;
+};
+
+// 참여자의 문제 목록 한 줄(#288) — 통과/미통과가 한눈에 보이도록 상세보다
+// 훨씬 좁다.
+export type ProblemListItem = {
+  id: number;
+  title: string;
+  submission_format: SubmissionFormat;
+  passed: boolean;
 };
 
 export type ChecklistVerdict = {
@@ -40,6 +51,8 @@ export type ClassroomSubmissionRow = {
   created_at: string;
   status: SubmissionStatus;
   score: ClassroomScore | null;
+  // 이 시도 하나가 통과인가(#288) — 미채점("pending")이면 항상 거짓이다.
+  passed: boolean;
 };
 
 export type ProblemSubmissions = {
@@ -51,6 +64,10 @@ export function fetchMyProblem(classId: number, problemId: number): Promise<Prob
   return backendJson<ProblemSubmissions>(
     `/classroom/classes/${classId}/problems/${problemId}/mine`,
   );
+}
+
+export function fetchMyProblems(classId: number): Promise<ProblemListItem[]> {
+  return backendJson<ProblemListItem[]>(`/classroom/classes/${classId}/problems/mine`);
 }
 
 export function submitAttempt(

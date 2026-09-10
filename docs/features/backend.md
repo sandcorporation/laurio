@@ -176,13 +176,15 @@ ADR-0036). 업로드 자료의 값은 `submission:{공모전id}:{개발자id}:{�
 | `POST .../problems/{id}/open` | 초안을 연다 — 필수 체크리스트 항목이 없으면 400 |
 | `POST`·`PATCH`·`DELETE .../checklist-items[/{id}]` | 체크리스트 항목을 더하고 고치고 지운다 |
 | `POST .../checklist-items/reorder` | 체크리스트 순서를 바꾼다 |
+| `GET .../problems/mine` | 참여자의 문제 목록 — 문제마다 통과 여부(#288) |
 | `GET .../problems/{id}/mine` | 참여자가 보는 문제 하나 + 본인의 시도 목록(#286) |
 | `POST .../problems/{id}/submissions` | 참여자가 소스 또는 저장소로 낸다 — 낼 때마다 새 시도가 쌓인다(#286) |
 
 **Class·Problem·체크리스트는 강사 전용이다.** 강사가 아닌 요청은 그 클래스가 아예
 없는 것처럼 404를 받는다 — 403이 아니다, 목록에도 상세에도 존재를 드러내지 않는다.
-`.../mine`·`.../submissions`만 예외다(#286) — `ClassMember`인지, 그 문제가 열려
-있는지를 같은 404로 가른다. 내보내진(`expelled`) 참여자는 새 시도만 403으로 막힌다.
+`.../problems/mine`·`.../problems/{id}/mine`·`.../submissions`만 예외다(#286/#288) —
+`ClassMember`인지, 그 문제가 열려 있는지를 같은 404로 가른다. 내보내진(`expelled`)
+참여자는 새 시도만 403으로 막힌다.
 
 **제출은 공모전 쪽(`submissions.Submission`)과 자료 모델을 공유한다**(ADR-0039).
 `classroom.ClassroomSubmission`이 그 강의실 자식이다 — `contests.ContestSubmission`과
@@ -213,11 +215,14 @@ llm_scoring`(#274)에 이어 `core.repository_adapters`(GitHub 저장소 clone·
 `docker/*.env.example`을 건드리지 않기 위해서다, #274와 같은 판단) — 공모전
 채점·저장소 스캔 동작은 그대로다.
 
-**통과는 필수 항목을 전부 충족했다는 판정이다**(CONTEXT.md 「통과」) — 문제마다
+**통과는 필수 항목을 전부 충족했다는 판정이다**(#288, CONTEXT.md 「통과」) — 문제마다
 합격선을 따로 두지 않는다. 그래서 필수 항목이 하나도 없는 문제는 통과가 정의되지
 않아 `open`으로 전이할 수 없다. 이미 열린 문제도 강사가 언제든 체크리스트를 고칠 수
 있다 — 돈이 걸려 있지 않아 순서상 불공평이 성립하지 않고, 지난 점수는 남고
-달성률만 새 기준으로 다시 셈된다(그 재계산은 Score가 붙는 뒤 티켓의 몫이다).
+「통과」는 **요청마다** 지금의 체크리스트 기준으로 다시 셈된다(저장해 두지 않는다) —
+지난 채점(`ClassroomScore.reasoning`)에 없는 항목(채점 뒤 새로 생긴 체크리스트
+항목)은 "충족 확인 안 됨"으로 본다. 문제 하나의 통과 여부는 그 참여자의 시도
+전체에 대한 OR이다 — 한 번 통과하면 나중에 미통과가 나와도 유지된다.
 
 ### 스토리지와 알림
 

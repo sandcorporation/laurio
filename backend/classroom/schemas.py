@@ -140,6 +140,10 @@ class ClassroomProblemMineOut(Schema):
     description: str
     submission_format: str
     checklist_items: list[ChecklistItemOut] = []
+    #: 이 문제를 한 번이라도 통과한 적이 있는가(#288, CONTEXT.md 「통과」) —
+    #: 최신 시도가 아니라 시도 전체에 대한 OR다. 한 번 통과하면 나중에 다시
+    #: 내서 미통과가 나와도 계속 참이다.
+    passed: bool = False
 
 
 class ClassroomSubmissionIn(Schema):
@@ -184,8 +188,21 @@ class ClassroomSubmissionOut(Schema):
     #: 클래스의 `has_openai_key`를 함께 봐서 구별한다.
     status: str
     score: ClassroomScoreOut | None = None
+    #: 이 시도 하나가 통과인가 — 채점된 필수 체크리스트 항목을 전부
+    #: 충족했는가(#288). 미채점("pending")이면 항상 거짓이다.
+    passed: bool = False
 
 
 class ClassroomProblemSubmissionsOut(Schema):
     problem: ClassroomProblemMineOut
     submissions: list[ClassroomSubmissionOut]
+
+
+class ClassroomProblemListItemOut(Schema):
+    """참여자의 문제 목록 한 줄(#288) — 통과/미통과가 한눈에 보이도록 문제
+    상세보다 훨씬 좁다."""
+
+    id: int
+    title: str
+    submission_format: str
+    passed: bool
