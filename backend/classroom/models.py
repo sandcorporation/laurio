@@ -11,8 +11,18 @@
 
 from __future__ import annotations
 
+import secrets
+
 from django.conf import settings
 from django.db import models
+
+
+def _generate_join_code() -> str:
+    """추측 불가능한 가입 코드(#279). `secrets.token_urlsafe(16)`은 22자라
+    URL 세그먼트 하나로 쓰기에 짧고, 링크 자체에는 클래스 이름 등 내용이
+    전혀 실리지 않는다 — 무작위 문자열뿐이다."""
+
+    return secrets.token_urlsafe(16)
 
 
 class Class(models.Model):
@@ -22,6 +32,10 @@ class Class(models.Model):
         settings.AUTH_USER_MODEL, related_name="classrooms", on_delete=models.CASCADE
     )
     name = models.CharField(max_length=200)
+    #: 가입 링크의 코드(#279). 다시 뽑으면 이 값이 새 무작위 문자열로
+    #: 바뀌어 이전 값은 어떤 클래스도 가리키지 않게 된다 — 그래서 별도
+    #: 이력 테이블이 필요 없다, 죽은 코드는 그냥 아무 행에도 없는 값이다.
+    join_code = models.CharField(max_length=32, unique=True, default=_generate_join_code)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -64,6 +78,44 @@ class Problem(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"Problem(id={self.pk}, title={self.title!r})"
+
+
+class ClassMember(models.Model):
+    """한 사람이 한 Class에 속한다는 사실(#280, CONTEXT.md 「ClassMember」).
+
+    가입 링크로 들어올 때 받는 **그 클래스에서 불릴 이름**(`display_name`)을
+    든다 — 계정의 표시 이름과 독립이다(회사 수업과 스터디에서 다른 이름을
+    쓸 수 있어야 한다). `user`는 `accounts.DeveloperProfile`이 아니라
+    `User`를 바로 가리킨다 — `Class.instructor`와 같은 이유(ADR-0037)다.
+
+    강사 본인도 자기 클래스에 들어와 이 모델의 행이 될 수 있다 — 그때를
+    구별하는 플래그는 두지 않는다: `classroom.instructor_id == user_id`로
+    즉시 판별되므로 중복 상태를 만들 이유가 없다.
+    """
+
+    classroom = models.ForeignKey(Class, related_name="members", on_delete=models.CASCADE)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="class_memberships", on_delete=models.CASCADE
+    )
+    display_name = models.CharField(max_length=100)
+    joined_at = models.DateTimeField(auto_now_add=True)
+    #: 강사가 내보낸 시각(#281). 행을 지우지 않는다 — 지우면 그 사람이 낸
+    #: 제출물이 이름을 잃어 "누군가의 제출"이 된다(CONTEXT.md 「ClassMember」).
+    #: null이면 아직(또는 다시는) 내보내지지 않았다는 뜻이다. 내보낸 사람이
+    #: 새 제출을 못 내는 것은 이 값을 보는 제출 엔드포인트(#286)의 몫이다 —
+    #: 이 티켓은 그 신호를 남기는 데까지다.
+    expelled_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["joined_at", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["classroom", "user"], name="unique_classroom_member"
+            )
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ClassMember(classroom_id={self.classroom_id}, user_id={self.user_id})"
 
 
 class ChecklistItem(models.Model):

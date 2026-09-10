@@ -16,7 +16,12 @@ class ClassIn(Schema):
 class ClassOut(Schema):
     id: int
     name: str
+    join_code: str
     created_at: datetime
+
+
+class JoinLinkOut(Schema):
+    join_code: str
 
 
 class ChecklistItemIn(Schema):
@@ -65,3 +70,28 @@ class ProblemOut(Schema):
 
 class ProblemReorderIn(Schema):
     problem_ids: list[int]
+
+
+class JoinPreviewOut(Schema):
+    class_name: str
+    instructor_email: str
+    problem_count: int
+    participant_count: int
+
+
+class JoinIn(Schema):
+    display_name: str = Field(min_length=1, max_length=100)
+
+
+class JoinResultOut(Schema):
+    class_id: int
+    class_name: str
+    display_name: str
+
+
+class MemberOut(Schema):
+    id: int
+    display_name: str
+    joined_at: datetime
+    expelled: bool
+    is_instructor: bool

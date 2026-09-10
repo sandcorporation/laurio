@@ -1,10 +1,13 @@
-// 인증 경로 가드 (ADR-0016/0038, #276). 공개 앱(frontend/middleware.ts)·운영자
+// 인증 경로 가드 (ADR-0016/0038, #276/#280). 공개 앱(frontend/middleware.ts)·운영자
 // 앱(operator/middleware.ts)과 같은 모양이다 — 세션 쿠키가 아예 없으면 렌더링
 // 전에 이 미들웨어가 /login으로 돌려보낸다.
 //
-// 강의실은 "/login"을 뺀 전부가 인증 구역이다(운영자 앱과 같은 이유 — 색인될
-// 공개 표면이 없다, ADR-0021/0037). matcher는 화이트리스트가 아니라 예외 목록이다
-// — 운영자 앱이 이미 겪은 "가드 없이 태어나는 페이지" 사고를 되풀이하지 않는다.
+// 강의실은 "/login"과 "/join/{code}"를 뺀 전부가 인증 구역이다(운영자 앱과 같은
+// 이유 — 색인될 공개 표면이 없다, ADR-0021/0037). "/join/{code}"만 예외인 이유는
+// #280 AC 그대로다 — 계정이 없는 사람도 그 링크를 열어 클래스 미리보기(이름·
+// 강사·문제 수·참여자 수)를 보고 가입할지 판단할 수 있어야 한다. matcher는
+// 화이트리스트가 아니라 예외 목록이다 — 운영자 앱이 이미 겪은 "가드 없이 태어나는
+// 페이지" 사고를 되풀이하지 않는다.
 //
 // 쿠키의 "존재"만 본다 — 유효성 판단은 언제나 백엔드 몫이다. 강의실은 자기
 // 로그인을 갖지 않으므로(ADR-0038 — 공개 앱에서 발급된 쿠키가 부모 도메인을 타고
@@ -29,5 +32,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!login|api|healthz|_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!login|join|api|healthz|_next/static|_next/image|favicon.ico).*)"],
 };

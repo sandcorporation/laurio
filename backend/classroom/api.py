@@ -1,11 +1,15 @@
-"""Classroom API (#278/#282/#283, ADR-0037).
+"""Classroom API (#278/#279/#280/#282/#283, ADR-0037).
 
-**강사 전용이다.** 참여자가 가입 링크로 들어와 문제를 보는 표면은 이 티켓들의
-범위 밖이다(#279 가입 링크 발급 · #280 가입 처리가 아직 없다) — `ClassMember`가
-없는 지금은 "참여자"를 가려낼 방법이 없으므로, 강사가 아닌 모든 요청은 그
+**Class·Problem·체크리스트 엔드포인트는 여전히 강사 전용이다.** 참여자가
+가입 링크로 들어와 문제를 실제로 보는 표면(진도·문제 열람)은 아직 없다 —
+`ClassMember`가 이번 티켓(#280)으로 생겼지만, 강사가 아닌 요청은 여전히 그
 클래스가 아예 없는 것처럼 404를 받는다. `Problem.status`(초안/열림)는 이미
-저장되고 응답에 실려 있어, #280이 참여자 열람을 추가할 때 필터 조건만 더하면
-된다.
+저장되고 응답에 실려 있어, 참여자 열람이 붙을 때 필터 조건만 더하면 된다.
+
+**`/join/{join_code}` 둘만 예외다.** 미리보기(GET)는 누구나 인증 없이 보고,
+가입(POST)은 로그인만 되어 있으면 강사 전용 규칙과 무관하게 누구든(강사
+본인 포함) 참여자가 된다 — 가입 링크가 하는 일 자체가 그 규칙 밖의 문이기
+때문이다.
 
 **라우트 등록 순서에 규칙이 있다.** 정적 세그먼트(`reorder`)를 가진 라우트는
 전부 그 바로 위 동적 세그먼트(`{problem_id}`·`{item_id}`) 라우트보다 먼저
@@ -17,12 +21,13 @@ from __future__ import annotations
 
 from django.db import transaction
 from django.http import HttpRequest
+from django.utils import timezone
 from ninja import Router
 from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
 
-from .models import ChecklistItem, Class, Problem
+from .models import ChecklistItem, Class, ClassMember, Problem, _generate_join_code
 from .schemas import (
     ChecklistItemIn,
     ChecklistItemOut,
@@ -31,6 +36,11 @@ from .schemas import (
     ClassIn,
     ClassOut,
     ErrorOut,
+    JoinIn,
+    JoinLinkOut,
+    JoinPreviewOut,
+    JoinResultOut,
+    MemberOut,
     ProblemIn,
     ProblemOut,
     ProblemPatchIn,
@@ -43,7 +53,12 @@ _SUBMISSION_FORMATS = {choice for choice, _label in Problem.SubmissionFormat.cho
 
 
 def _serialize_class(class_obj: Class) -> ClassOut:
-    return ClassOut(id=class_obj.id, name=class_obj.name, created_at=class_obj.created_at)
+    return ClassOut(
+        id=class_obj.id,
+        name=class_obj.name,
+        join_code=class_obj.join_code,
+        created_at=class_obj.created_at,
+    )
 
 
 def _serialize_checklist_item(item: ChecklistItem) -> ChecklistItemOut:
@@ -101,6 +116,124 @@ def list_my_classes(request: HttpRequest):
 def get_class(request: HttpRequest, class_id: int):
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     return 200, _serialize_class(class_obj)
+
+
+@router.post(
+    "/classes/{class_id}/join-link/regenerate",
+    response={200: JoinLinkOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def regenerate_join_link(request: HttpRequest, class_id: int):
+    """가입 링크를 다시 뽑는다(#279). 새 코드로 덮어쓰므로 이전 코드는 그
+    순간부터 어떤 클래스도 가리키지 않는다 — 링크가 새어 나갔을 때 강사가
+    쓸 수 있는 유일한 조치다."""
+
+    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    class_obj.join_code = _generate_join_code()
+    class_obj.save(update_fields=["join_code"])
+    return 200, JoinLinkOut(join_code=class_obj.join_code)
+
+
+# --- Join (#280) -----------------------------------------------------------------
+
+
+def _get_class_by_join_code_or_404(join_code: str) -> Class:
+    """코드가 없거나(오타) 재발급으로 죽었거나 — 이유를 구별하지 않는다.
+    둘 다 "이 링크는 더 이상 쓸 수 없다"로 같게 답하는 것이 곧 #279가 정한
+    재발급의 효과다."""
+
+    try:
+        return Class.objects.get(join_code=join_code)
+    except Class.DoesNotExist as exc:
+        raise HttpError(404, "이 가입 링크는 더 이상 사용할 수 없습니다.") from exc
+
+
+@router.get("/join/{join_code}", response={200: JoinPreviewOut, 404: ErrorOut}, auth=None)
+def preview_join(request: HttpRequest, join_code: str):
+    """가입 여부와 무관하게 누구나 본다 — 계정이 없는 사람이 가입할지 먼저
+    판단할 수 있어야 한다(#280 AC)."""
+
+    class_obj = _get_class_by_join_code_or_404(join_code)
+    # `members.count()`는 강사 본인이 가입했으면 그 행도 센다 — CONTEXT.md
+    # 「ClassMember」가 강사를 빼라고 정한 것은 **달성률**의 분모뿐이다(그
+    # 계산은 아직 없는 티켓의 몫이다). 이 미리보기의 "참여자 수"는 그
+    # 지표가 아니라 문자 그대로 "이 클래스에 누가 있는가"라 뺄 이유가
+    # 없다.
+    return 200, JoinPreviewOut(
+        class_name=class_obj.name,
+        instructor_email=class_obj.instructor.email,
+        problem_count=class_obj.problems.count(),
+        participant_count=class_obj.members.count(),
+    )
+
+
+@router.post(
+    "/join/{join_code}", response={200: JoinResultOut, 404: ErrorOut, 422: ErrorOut}, auth=jwt_auth
+)
+def join_class(request: HttpRequest, join_code: str, payload: JoinIn):
+    """가입과 클래스 가입이 한 흐름이다 — 계정이 있으면(로그인 되어 있으면)
+    이 요청 하나로 끝난다. 이미 참여자면 새로 만들지 않고 그 행을 그대로
+    돌려준다(#280 AC "같은 사람이 같은 클래스에 두 번 들어가지 않는다") —
+    두 번째 이름은 버려진다, 첫 가입 때 정한 이름이 그 클래스에서의 정체성이기
+    때문이다."""
+
+    class_obj = _get_class_by_join_code_or_404(join_code)
+    member, _created = ClassMember.objects.get_or_create(
+        classroom=class_obj,
+        user_id=request.auth_user.id,
+        defaults={"display_name": payload.display_name},
+    )
+    return 200, JoinResultOut(
+        class_id=class_obj.id, class_name=class_obj.name, display_name=member.display_name
+    )
+
+
+# --- Member (#281) ---------------------------------------------------------------
+
+
+def _serialize_member(member: ClassMember, *, instructor_id: int) -> MemberOut:
+    return MemberOut(
+        id=member.id,
+        display_name=member.display_name,
+        joined_at=member.joined_at,
+        expelled=member.expelled_at is not None,
+        is_instructor=member.user_id == instructor_id,
+    )
+
+
+@router.get(
+    "/classes/{class_id}/members", response={200: list[MemberOut], 404: ErrorOut}, auth=jwt_auth
+)
+def list_members(request: HttpRequest, class_id: int):
+    """강사만 본다 — 참여자는 자기 클래스든 남의 클래스든 명단에 닿지
+    못한다(#281 AC "참여자는 남의 명단을 볼 수 없다"), `_get_owned_class_or_404`가
+    강사가 아닌 모든 요청을 404로 돌리는 것과 같은 문이다."""
+
+    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    members = class_obj.members.all()
+    return 200, [_serialize_member(m, instructor_id=class_obj.instructor_id) for m in members]
+
+
+@router.post(
+    "/classes/{class_id}/members/{member_id}/expel",
+    response={200: MemberOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def expel_member(request: HttpRequest, class_id: int, member_id: int):
+    """행을 지우지 않는다 — 표시만 한다(#281). 이미 내보낸 사람을 다시
+    내보내도 오류를 내지 않고 그대로 둔다(멱등)."""
+
+    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    try:
+        member = class_obj.members.get(id=member_id)
+    except ClassMember.DoesNotExist as exc:
+        raise HttpError(404, "참여자를 찾을 수 없습니다.") from exc
+
+    if member.expelled_at is None:
+        member.expelled_at = timezone.now()
+        member.save(update_fields=["expelled_at"])
+
+    return 200, _serialize_member(member, instructor_id=class_obj.instructor_id)
 
 
 # --- Problem -------------------------------------------------------------------
