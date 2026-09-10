@@ -131,6 +131,43 @@ def get_content_type_resolver() -> ContentTypeResolver:
     return resolver_cls()
 
 
+class MaxUploadSizeResolver(Protocol):
+    """target_ref -> 이 슬롯에 허용되는 업로드 바이트 상한, 또는 상한이 없으면 None (#261).
+
+    `TargetStateResolver`와 같은 확장점 패턴이다 — storage 앱은 target_ref를
+    불투명한 문자열로만 다루므로, "이 슬롯은 몇 바이트까지인가"를 아는 것은
+    도메인 쪽(`submissions.resolvers.SubmissionMaxUploadSizeResolver`)이다.
+    이 값을 `presign_upload`의 `max_size_bytes`에 그대로 넘기면 어댑터가
+    presigned PUT 대신 POST로 발급해 크기 상한을 서명된 정책 조건에 묶는다
+    (ADR-0032가 연 경로) — presigned PUT은 서명에 크기를 묶을 수단이 없어
+    상한이 있는 한 POST여야 한다.
+    """
+
+    def resolve(self, target_ref: str) -> int | None: ...
+
+
+class UnboundedMaxUploadSizeResolver:
+    """실제 도메인 리졸버가 붙기 전까지의 기본값 — 항상 상한 없음(None).
+
+    `UnknownContentTypeResolver`와 같은 방향으로 fail한다: 상한을 모르는
+    target_ref에 강제로 상한을 씌우면 실제 도메인 리졸버가 붙기 전까지 그
+    네임스페이스의 모든 업로드가 이유 없이 막힌다. 업로드 자체의 인가는
+    `StorageAccessPolicy.authorize_upload`(소유자 확인)가 이미 fail-closed로
+    지키고 있으므로, 여기는 "얼마까지 허용하는가"만 답한다.
+    """
+
+    def resolve(self, target_ref: str) -> int | None:
+        return None
+
+
+def get_max_upload_size_resolver() -> MaxUploadSizeResolver:
+    path = getattr(settings, "STORAGE_MAX_UPLOAD_SIZE_RESOLVER", "") or (
+        "storage.policy.UnboundedMaxUploadSizeResolver"
+    )
+    resolver_cls = import_string(path)
+    return resolver_cls()
+
+
 def _authenticated_user_id(request: HttpRequest) -> int | None:
     """JWT로 확인된 호출자의 User pk. 없으면(비로그인·무효 토큰) None."""
 

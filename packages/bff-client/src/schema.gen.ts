@@ -5211,10 +5211,16 @@ export interface components {
         UploadResponse: {
             /** Expires At */
             expires_at: string;
+            /** Fields */
+            fields?: {
+                [key: string]: string;
+            };
             /** Headers */
             headers: {
                 [key: string]: string;
             };
+            /** Max Size Bytes */
+            max_size_bytes?: number | null;
             /** Method */
             method: string;
             /** Object Key */

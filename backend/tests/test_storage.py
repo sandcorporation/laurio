@@ -25,6 +25,7 @@ import pytest
 from django.test import override_settings
 
 FAKE_RESOLVER = "tests.storage_fakes.FakeTargetStateResolver"
+FAKE_MAX_SIZE_RESOLVER = "tests.storage_fakes.FakeMaxUploadSizeResolver"
 
 
 def _object_key(target_ref: str) -> str:
@@ -112,6 +113,58 @@ def test_authenticated_non_owner_cannot_request_upload_url(client):
     )
 
     assert response.status_code == 403
+
+
+@pytest.mark.django_db
+@override_settings(
+    STORAGE_TARGET_RESOLVER=FAKE_RESOLVER,
+    STORAGE_MAX_UPLOAD_SIZE_RESOLVER=FAKE_MAX_SIZE_RESOLVER,
+)
+def test_upload_with_a_byte_cap_is_issued_as_presigned_post(client):
+    """`STORAGE_MAX_UPLOAD_SIZE_RESOLVER`가 이 target_ref에 상한을 매기면
+    presigned PUT이 아니라 POST가 나가고, 상한이 서명된 정책 필드(fake 어댑터의
+    X-Fake-Max-Size-Bytes)에 실린다 — presigned PUT은 서명에 크기를 묶을
+    수단이 없어 상한이 권고에 그친다(#261, ADR-0035)."""
+    access, user_id = _login_and_get_id(client)
+    target_ref = f"private:{user_id}:cap100"
+
+    response = client.post(
+        "/api/storage/uploads",
+        data={"target_ref": target_ref},
+        content_type="application/json",
+        **_auth_header(access),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["method"] == "POST"
+    assert body["fields"]["X-Fake-Max-Size-Bytes"] == "100"
+    assert body["max_size_bytes"] == 100
+
+
+@pytest.mark.django_db
+@override_settings(
+    STORAGE_TARGET_RESOLVER=FAKE_RESOLVER,
+    STORAGE_MAX_UPLOAD_SIZE_RESOLVER=FAKE_MAX_SIZE_RESOLVER,
+)
+def test_upload_without_a_byte_cap_stays_presigned_put(client):
+    """이 target_ref에 상한이 없으면(리졸버가 None을 돌려주면) 지금까지처럼
+    presigned PUT이 나간다 — 상한 배선이 다른 모든 업로드를 바꾸지 않는다."""
+    access, user_id = _login_and_get_id(client)
+    target_ref = f"private:{user_id}:submission-42-source"
+
+    response = client.post(
+        "/api/storage/uploads",
+        data={"target_ref": target_ref},
+        content_type="application/json",
+        **_auth_header(access),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["method"] == "PUT"
+    assert body["fields"] == {}
+    assert body["max_size_bytes"] is None
 
 
 @pytest.mark.django_db

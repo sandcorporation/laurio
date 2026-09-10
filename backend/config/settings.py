@@ -434,6 +434,15 @@ STORAGE_CONTENT_TYPE_RESOLVER = _env(
     "STORAGE_CONTENT_TYPE_RESOLVER", "submissions.resolvers.SubmissionContentTypeResolver"
 )
 
+# target_ref -> 이 슬롯의 업로드 바이트 상한 훅(storage.policy.MaxUploadSizeResolver,
+# #261). 상한이 있으면 presigned URL이 PUT 대신 POST로 발급되어 크기가 서명된
+# 정책 조건에 묶인다(ADR-0032/ADR-0035 — PUT은 서명에 크기를 묶을 수단이 없다).
+# 비어 있으면 storage.policy.UnboundedMaxUploadSizeResolver 로 항상 상한 없음을
+# 돌려준다(기존 PUT 동작 그대로).
+STORAGE_MAX_UPLOAD_SIZE_RESOLVER = _env(
+    "STORAGE_MAX_UPLOAD_SIZE_RESOLVER", "submissions.resolvers.SubmissionMaxUploadSizeResolver"
+)
+
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
