@@ -2202,3 +2202,65 @@ def test_multibyte_utf8_cut_at_budget_boundary_keeps_valid_prefix(client, catego
     # 파일이 통째로 버려졌다면(옛 버그) Evidence("가")를 소스에서 찾지 못해 0%가
     # 나왔을 것이다. 유효한 접두부가 살아남아야 100%가 나온다.
     assert score.percentage == Decimal("100.00")
+
+
+# --- 리뷰 지적 반영: 채점기가 근거의 종류를 해석하는 법 (#259, CONTEXT.md Evidence) ----
+
+
+@pytest.mark.django_db
+def test_prompt_explains_how_to_verify_each_evidence_kind(client, category, landing_type):
+    """프롬프트가 Evidence 네 종류 각각을 "그 매체에서 어떻게 확인하는가"로 설명한다
+    (#259 AC). 소스 위치는 특히 "경로와 이름을 찾아 확인하고, 줄 번호만으로는 위치를
+    특정하지 않는다"는 취지를 담아야 한다(CONTEXT.md의 Evidence 정의)."""
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+    source_key = _source_object_key(contest["id"], dev["user_id"])
+    FakeStorageAdapter().write_object(
+        source_key, _zip_bytes({"accounts/views.py": "def signup():\n    pass\n"})
+    )
+
+    submit_resp = client.post(
+        f"{CONTESTS_URL}/{contest['id']}/submissions",
+        data={
+            "assets": [{"kind": "source", "value": source_key}],
+            "requirement_responses": [
+                {
+                    "requirement_id": requirement_id,
+                    "is_met": True,
+                    "evidence": [{"kind": "source_location", "value": "accounts/views.py:8-45"}],
+                }
+            ],
+        },
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    submission_id = submit_resp.json()["id"]
+
+    _close_contest(client, contest, deadline=deadline)
+    _run_pending(client)
+
+    score = Score.objects.get(submission_id=submission_id)
+    # 네 종류 전부 프롬프트 안에 등장한다 — 종류를 골라 가리기만 하지 않았는지 확인.
+    for kind in ("video_timestamp", "screenshot", "demo_path", "source_location"):
+        assert kind in score.prompt
+    # 소스 위치는 "경로와 이름"으로 확인하라는 지침이 있어야 한다.
+    assert "경로" in score.prompt
+    # 줄 번호만으로는 위치를 특정하지 않는다는 취지가 지침에 있어야 한다.
+    assert "줄 번호" in score.prompt
+    # 소스 덤프 자체에는 줄 번호를 붙이지 않는다(#259가 고정한 선택) — 소스 파일
+    # 섹션 안에 "1:" 같은 줄 번호 접두어가 없어야 한다.
+    source_section = score.prompt.split("<<<SOURCE_FILE_START>>>")[1].split(
+        "<<<SOURCE_FILE_END>>>"
+    )[0]
+    assert "1:def signup" not in source_section
+    assert "1| def signup" not in source_section
