@@ -130,7 +130,7 @@ export interface paths {
         /**
          * Get Assignment By Invite Code
          * @description InviteCode를 아는 사람만 과제 상세·Requirement를 본다(ADR-0028) — 인증이 필요
-         *     없다: 본인확인은커녕 로그인조차 이 조회의 전제가 아니다(학생이 코드를 받아 처음
+         *     없다: 본인확인은커녕 로그인조차 이 조회의 전제가 아니다(제출자가 코드를 받아 처음
          *     들어오는 순간에는 아직 로그인 전일 수 있다).
          *
          *     코드가 없거나 비활성(재발급으로 무효화된 옛 코드, #209 소관)이면 404 — 존재를
@@ -231,7 +231,7 @@ export interface paths {
         put?: never;
         /**
          * Request Assignment Image Upload Url
-         * @description 강사가 참고 이미지를 올리기 전, 공개 이미지 버킷으로의 presigned POST를
+         * @description 출제자가 참고 이미지를 올리기 전, 공개 이미지 버킷으로의 presigned POST를
          *     받는다 — `contests.api.request_contest_image_upload_url`과 같은 자리.
          */
         post: operations["contests_assignment_api_request_assignment_image_upload_url"];
@@ -263,7 +263,7 @@ export interface paths {
         head?: never;
         /**
          * Reorder Assignment Image
-         * @description 강사가 이미지의 노출 순서를 고친다.
+         * @description 출제자가 이미지의 노출 순서를 고친다.
          */
         patch: operations["contests_assignment_api_reorder_assignment_image"];
         trace?: never;
@@ -279,7 +279,7 @@ export interface paths {
         put?: never;
         /**
          * Reissue Invite Code
-         * @description 코드가 새어 나가면 강사가 다시 발급한다(#209) — **새 진입만 막는다.**
+         * @description 코드가 새어 나가면 출제자가 다시 발급한다(#209) — **새 진입만 막는다.**
          *
          *     옛 InviteCode는 지우지 않고 `is_active=False`로만 죽인다 — `InviteCode.contest`가
          *     append-only 이력을 위해 `ForeignKey`(OneToOne이 아니다, `models.py` 주석)로 둔
@@ -289,7 +289,7 @@ export interface paths {
          *     판정된다.
          *
          *     `ASSIGNMENT_OPEN`에서만 의미가 있다 — DRAFT는 아직 InviteCode 자체가 없고(열 때
-         *     발급된다), `ASSIGNMENT_CLOSED` 이후에는 더 막을 새 진입이 없다(마감 후 학생은
+         *     발급된다), `ASSIGNMENT_CLOSED` 이후에는 더 막을 새 진입이 없다(마감 후 제출자는
          *     이미 손에 쥔 코드로 자기 점수를 계속 볼 뿐 새로 제출하지 않는다).
          *
          *     두 번 연달아 눌러도 활성 코드가 둘 남지 않는다 — `select_for_update`로 Contest
@@ -405,10 +405,15 @@ export interface paths {
          *     직접 presign한다 — Operator의 `reveal_appeal_source`가 storage를 거치지 않고
          *     `Score.prompt`를 바로 내주는 것과 같은 구조다.
          *
-         *     **`storage.api.request_download`와 같은 방식으로 파일명을 붙인다(#241).**
-         *     `asset.content_type`(제출 시점에 받은 값, 없으면 빈 문자열)을
-         *     `storage.filenames.build_download_filename`에 넘긴다 — storage.policy를
-         *     거치지 않아도 그 헬퍼는 그대로 재사용할 수 있다.
+         *     **파일명에 제출자 이름을 붙인다(#268 후속).** `storage.api.request_download`는
+         *     `download.zip` 처럼 고정된 이름을 쓰는데(#241), 그건 받는 사람이 **자기 것 하나**를
+         *     받는 자리라 성립한다. 여기는 반대다 — 출제자 한 사람이 제출자 서른 명의 소스를
+         *     차례로 내려받으므로 전부 `download.py` 로 떨어지면 받는 순간 누구 것인지 알 수
+         *     없다. #241 이 거절한 것은 「업로드된 파일이 자기 이름을 헤더에 밀어 넣는 것」이고,
+         *     여기서 쓰는 것은 **플랫폼이 아는 맥락**(누구의 제출물인가)이다.
+         *
+         *     이름은 `storage.filenames.safe_download_base_name`이 걸러 내고, 헤더에 싣는
+         *     이스케이프는 `content_disposition`이 RFC 5987 로 한다.
          */
         post: operations["contests_assignment_api_reveal_assignment_submission_source"];
         delete?: never;
@@ -2621,7 +2626,7 @@ export interface paths {
          *     오히려 Assignment는 InviteCode를 아는 사람만 본다는 약속이 마감 후에도 그대로
          *     이어져야 한다(스펙 #197: "명단은 없다, 제출한 사람만 보인다" — 그 제출한
          *     사람이란 본인과 그 과제의 Sponsor 뿐이다) — 그러지 않으면 `submission_id`를
-         *     순차로 훑는 것만으로 학생의 제출 내용(소스 제외)이 인터넷에 새어 나간다.
+         *     순차로 훑는 것만으로 제출자의 제출 내용(소스 제외)이 인터넷에 새어 나간다.
          */
         get: operations["submissions_api_get_submission"];
         put?: never;
