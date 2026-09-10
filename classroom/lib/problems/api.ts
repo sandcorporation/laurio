@@ -24,6 +24,14 @@ export type ProblemRow = {
   // 실제로 채점에 쓰일 값.
   effective_model: string;
   checklist_items: ChecklistItemRow[];
+  // 이 문제를 한 번이라도 통과한 참여자 수(#289) — 강사 본인·내보낸
+  // 참여자는 빼고 센다.
+  passed_count: number;
+  // 달성률의 분모.
+  member_count: number;
+  // passed_count / member_count. 분모가 0이면 null — "아직 없음"으로
+  // 보여줘야 한다는 신호다(0%와 구별).
+  pass_rate: number | null;
 };
 
 export function fetchProblems(classId: number): Promise<ProblemRow[]> {

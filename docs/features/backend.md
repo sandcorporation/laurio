@@ -170,6 +170,7 @@ ADR-0036). 업로드 자료의 값은 `submission:{공모전id}:{개발자id}:{�
 | `GET`·`POST /api/classroom/join/{code}` | 가입 링크 미리보기(인증 불필요)와 가입(#280) |
 | `GET /api/classroom/classes/{id}/members` | 참여자 명단 — 강사 전용(#281) |
 | `POST .../members/{id}/expel` | 참여자를 내보낸다 — 행은 지우지 않는다(#281) |
+| `GET .../roster-grid` | 참여자 × 문제 격자 — 셀마다 통과 이력, 달성률 행은 `problems` 목록과 같은 계산을 재사용한다(#290) |
 | `POST`·`GET /api/classroom/classes/{id}/problems[/{id}]` | 문제를 만들고 고친다 — 마감 필드가 없다 |
 | `PATCH .../problems/{id}` | 제목·설명·제출 형식·채점 모델을 고친다 |
 | `POST .../problems/reorder` | 클래스 상세의 문제 순서를 바꾼다 |

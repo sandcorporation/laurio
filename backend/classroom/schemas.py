@@ -92,6 +92,14 @@ class ProblemOut(Schema):
     #: 실제로 채점에 쓰일 값 — `model`이 비어 있으면 클래스의 `default_model`.
     effective_model: str
     checklist_items: list[ChecklistItemOut] = []
+    #: 이 문제를 한 번이라도 통과한 참여자 수(#289, CONTEXT.md 「달성률」) —
+    #: 강사 본인과 내보내진 참여자는 빼고 센다.
+    passed_count: int = 0
+    #: 달성률의 분모 — 강사 본인·내보내진 참여자를 뺀 참여자 수.
+    member_count: int = 0
+    #: `passed_count / member_count`. 분모가 0이면 `None`이다 — 화면이 그때
+    #: "0%"가 아니라 "아직 없음"으로 말하도록 0.0과 구별한다(#289 AC).
+    pass_rate: float | None = None
 
 
 class ProblemReorderIn(Schema):
@@ -196,6 +204,41 @@ class ClassroomSubmissionOut(Schema):
 class ClassroomProblemSubmissionsOut(Schema):
     problem: ClassroomProblemMineOut
     submissions: list[ClassroomSubmissionOut]
+
+
+class ClassroomProblemStatsOut(Schema):
+    """참여자 × 문제 격자의 열 머리와 달성률 행(#290) — 문제 중심 탭의
+    `ProblemOut`과 같은 `passed_count`·`member_count`·`pass_rate`를 그대로
+    옮긴다(같은 계산 함수를 재사용해 두 화면이 어긋나지 않는다, AC "달성률
+    행의 값이 문제 중심 탭의 값과 정확히 같다")."""
+
+    id: int
+    title: str
+    passed_count: int
+    member_count: int
+    pass_rate: float | None = None
+
+
+class ClassroomGridCellOut(Schema):
+    problem_id: int
+    #: "passed" | "attempted_not_passed" | "scoring" | "not_submitted" —
+    #: 통과 이력을 그린다(최신 시도가 아니다, #290 AC). 우선순위는 이
+    #: 순서대로다: 한 번이라도 통과했으면 다른 시도의 결과와 무관하게
+    #: "passed"다.
+    status: str
+
+
+class ClassroomGridMemberOut(Schema):
+    id: int
+    display_name: str
+    is_instructor: bool
+    expelled: bool
+    cells: list[ClassroomGridCellOut]
+
+
+class ClassroomRosterGridOut(Schema):
+    problems: list[ClassroomProblemStatsOut]
+    members: list[ClassroomGridMemberOut]
 
 
 class ClassroomProblemListItemOut(Schema):
