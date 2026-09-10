@@ -1314,3 +1314,135 @@ jobs:
       - name: Dump container state on failure
         if: failure()
         run: docker ps -a
+
+  # 강의실 배포 부팅 가드 (#296 — #277 이 강의실을 배포 파이프라인에 올리며
+  # 빠뜨린 잡을 채운다. 그 잡이 왜 있는지는 #166).
+  #
+  # frontend-deploy-guard·operator-deploy-guard 와 정확히 같은 이유·같은 형태다:
+  # ADR-0021 의 프론트 테스트 시임("실행 중인 앱 하나")으로는 "앱이 뜨지 않는 것"
+  # 자체를 증명할 수 없고, `typecheck` 는 호스트 node_modules 를 쓰며 e2e 는
+  # 로컬에서 안 돈다 — 워크스페이스 멤버 하나를 Dockerfile 의 COPY 에서
+  # 빠뜨려도 그 셋 중 누구도 못 잡는다(#166 이 그렇게 났다). classroom.Dockerfile
+  # 의 runner 스테이지(staging/prod 가 실제로 배포하는 그 이미지)를 직접 빌드해
+  # 컨테이너로 띄우고, 프로세스 종료 코드와 로그를 확인한다.
+  #
+  # classroom/instrumentation.ts 도 frontend·operator 와 같은 함정을 피해
+  # process.exit(1)로 직접 프로세스를 끊는다 — 이 잡은 그게 실제로 그런지
+  # 직접 관찰한다.
+  #
+  # **다른 두 잡과 다른 점 하나.** 강의실은 자기 로그인이 없다(ADR-0038) — 세션
+  # 쿠키는 공개 앱이 굽고, 강의실이 쿠키를 지우는 유일한 경로는 백엔드 프록시
+  # (app/api/backend/[...path]/route.ts)뿐인데 그 경로는 먼저 assertSameOrigin
+  # 을 지나 실제로 forwardToBackend 를 호출한다 — 백엔드 없이는 도달할 수 없다.
+  # frontend·operator 의 "Secure 쿠키" 스텝처럼 백엔드 없이 쿠키 속성만 따로
+  # 관찰할 별도 경로가 없으므로 그 스텝은 옮기지 않는다 — Secure 플래그 자체는
+  # classroom/lib/auth/cookies.test.ts 의 유닛 테스트가 이미 고정하고 있다.
+  classroom-deploy-guard:
+    runs-on: [self-hosted, sub]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the production classroom image (runner stage)
+        run: docker build -f docker/classroom.Dockerfile --target runner -t laurio-classroom-runner-ci .
+
+      # frontend-deploy-guard와 같은 이유 — .dockerignore가 시크릿과 호스트
+      # node_modules를 실제로 막는지 이 앱에서도 직접 확인한다.
+      - name: .dockerignore actually keeps secrets and host node_modules out of the image
+        run: |
+          set -euo pipefail
+          echo "OPENAI_API_KEY=sk-ci-guard-fake-secret-do-not-leak" > classroom/.env
+          mkdir -p classroom/node_modules/.ci-guard-marker
+          echo "host-node-modules-should-not-leak-into-image" > classroom/node_modules/.ci-guard-marker/marker.txt
+          docker build -f docker/classroom.Dockerfile --target builder -t laurio-classroom-builder-ci-guard .
+          docker run --rm --entrypoint sh laurio-classroom-builder-ci-guard -c '
+            set -e
+            if [ -f /app/classroom/.env ]; then
+              echo "FOUND /app/classroom/.env — .dockerignore가 시크릿을 막지 못했다" >&2
+              exit 1
+            fi
+            if [ -d /app/classroom/node_modules/.ci-guard-marker ]; then
+              echo "FOUND /app/classroom/node_modules/.ci-guard-marker — .dockerignore가 호스트 node_modules를 막지 못했다" >&2
+              exit 1
+            fi
+            if grep -rl "sk-ci-guard-fake-secret\|host-node-modules-should-not-leak-into-image" /app > /dev/null 2>&1; then
+              echo "가짜 시크릿 또는 host node_modules 마커가 이미지 어딘가에 들어갔다" >&2
+              exit 1
+            fi
+            echo "confirmed: .env and host node_modules excluded from the image"
+          '
+          rm -f classroom/.env
+          rm -rf classroom/node_modules/.ci-guard-marker
+          docker rmi laurio-classroom-builder-ci-guard
+
+      - name: Refuses to boot in production with missing config (and actually exits — not just logs)
+        run: |
+          set +e
+          output=$(timeout 60 docker run --rm -e LAURIO_DEPLOYMENT_TARGET=production laurio-classroom-runner-ci 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
+            echo "::error::필수 설정 없이도 컨테이너가 죽지 않았다(status=$status) — 부팅 가드가 깨졌다"
+            exit 1
+          fi
+          echo "$output" | grep -q "LAURIO_CLASSROOM_ORIGIN" || { echo "::error::에러 메시지에 원인(LAURIO_CLASSROOM_ORIGIN)이 안 남는다"; exit 1; }
+          echo "$output" | grep -q "LAURIO_API_BASE_URL" || { echo "::error::에러 메시지에 원인(LAURIO_API_BASE_URL)이 안 남는다"; exit 1; }
+          echo "$output" | grep -q "LAURIO_SESSION_COOKIE_DOMAIN" || { echo "::error::에러 메시지에 원인(LAURIO_SESSION_COOKIE_DOMAIN)이 안 남는다"; exit 1; }
+
+      - name: Refuses to boot in staging with only one required value missing
+        run: |
+          set +e
+          output=$(timeout 60 docker run --rm \
+            -e LAURIO_DEPLOYMENT_TARGET=staging \
+            -e LAURIO_CLASSROOM_ORIGIN=https://classroom.staging.laurio.example \
+            laurio-classroom-runner-ci 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
+            echo "::error::LAURIO_API_BASE_URL/LAURIO_SESSION_COOKIE_DOMAIN 없이도 staging 컨테이너가 죽지 않았다(status=$status)"
+            exit 1
+          fi
+          echo "$output" | grep -q "LAURIO_API_BASE_URL" || { echo "::error::에러 메시지에 원인(LAURIO_API_BASE_URL)이 안 남는다"; exit 1; }
+          echo "$output" | grep -q "LAURIO_SESSION_COOKIE_DOMAIN" || { echo "::error::에러 메시지에 원인(LAURIO_SESSION_COOKIE_DOMAIN)이 안 남는다"; exit 1; }
+
+      # 머신이 남는다 — 잡이 자기 뒤를 치워야 한다(frontend-deploy-guard와 같은
+      # 이유). 시작 전에 지우고(멱등), 끝나면 성공·실패 무관하게 지운다.
+      - name: Boots with a complete production config
+        run: |
+          set -euo pipefail
+          docker rm -f classroom-boot-ok >/dev/null 2>&1 || true
+          docker run -d --name classroom-boot-ok \
+            -e LAURIO_DEPLOYMENT_TARGET=production \
+            -e LAURIO_CLASSROOM_ORIGIN=https://classroom.laurio.example \
+            -e LAURIO_API_BASE_URL=http://127.0.0.1:1 \
+            -e LAURIO_SESSION_COOKIE_DOMAIN=.laurio.example \
+            -p 3102:3000 \
+            laurio-classroom-runner-ci
+
+          # 백엔드가 없어 /healthz 는 503(degraded)이 정상이다 — 여기서 보는 건
+          # "완전한 설정에서는 강의실이 죽지 않고 응답한다"는 것뿐이다. 연결
+          # 자체가 안 되면(000) 컨테이너가 여전히 안 뜬 것이다. `|| echo "000"`을
+          # 쓰지 않는 이유는 frontend-deploy-guard와 같다(#70 코드리뷰 지적).
+          status="000"
+          for _ in $(seq 1 20); do
+            status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3102/healthz 2>/dev/null || true)
+            status="${status:-000}"
+            [ "$status" = "000" ] || break
+            sleep 1
+          done
+          echo "healthz status: $status"
+          if [ "$status" != "200" ] && [ "$status" != "503" ]; then
+            echo "::error::완전한 프로덕션 설정인데도 컨테이너가 응답하지 않는다(status=$status)"
+            docker logs classroom-boot-ok
+            exit 1
+          fi
+
+      - name: Tear down the boot-guard container
+        if: always()
+        run: docker rm -f classroom-boot-ok >/dev/null 2>&1 || true
+
+      - name: Dump container state on failure
+        if: failure()
+        run: docker ps -a
