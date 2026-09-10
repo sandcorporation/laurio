@@ -12,4 +12,12 @@ export const ORPHAN_ALLOWLIST: OrphanAllowlistEntry[] = [
       "가입 링크(#279/#280)는 강사가 클래스 상세에서 복사해 앱 밖으로 내보내는 " +
       "주소다 — 이 앱 안의 <Link>가 이 라우트로 이어질 이유가 없다.",
   },
+  {
+    route: "/classes/[id]/problems/[problemId]/submit",
+    reason:
+      // SCREEN-LANGUAGE-EXCEPTION: 위와 같은 이유 — 개발자용 근거 문서다.
+      "참여자 제출 화면(#286)이다 — 참여자가 자기 클래스에서 열린 문제로 들어오는 " +
+      "목록(참여자의 「문제 목록」)이 그 티켓의 몫이라 아직 없다. 그때 그 목록이 " +
+      "이 라우트로 이어지는 <Link>를 내면 이 항목을 지운다.",
+  },
 ];

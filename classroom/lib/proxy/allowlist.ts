@@ -3,12 +3,24 @@
 // 이 앱 안에만 있다.**
 //
 // 기본은 거부다: 새 backend 엔드포인트가 생겨도 여기 추가하기 전에는 이
-// 프록시를 통과하지 못한다. `/api/classroom`이 Class·Problem·체크리스트
-// 전부를 덮는다(backend/config/api.py의 `api.add_router("/classroom", ...)`
-// 그대로) — accounts처럼 공유층 엔드포인트가 필요해지면 그것도 여기 추가한다.
+// 프록시를 통과하지 못한다. `/api/classroom`이 Class·Problem·체크리스트·
+// 제출(#286) 전부를 덮는다(backend/config/api.py의 `api.add_router("/classroom",
+// ...)` 그대로).
+//
+// `/api/accounts`·`/api/storage`는 공유층 엔드포인트다(#286) — 참여자가 소스를
+// 낼 때 자기 User pk로 target_ref를 조립해야 해서(`GET /api/accounts/me`) 열고,
+// 그 소스 파일 자체를 storage에 직접 올려야 해서(`POST /api/storage/uploads`)
+// 연다. 공개 앱(frontend/lib/proxy/allowlist.ts)이 같은 이유로 이미 열어 둔
+// 접두어 둘을 그대로 옮겨 적었다 — "/api/auth/*"(소셜 로그인)는 이 앱에
+// 자기 로그인 라우트가 없으므로(로그인은 공개 앱 것을 그대로 쓴다, docs/
+// features/classroom.md) 필요 없다.
 import { isAllowedPath } from "@laurio/bff-shared";
 
-export const BACKEND_PROXY_ALLOWLIST: readonly string[] = ["/api/classroom"];
+export const BACKEND_PROXY_ALLOWLIST: readonly string[] = [
+  "/api/classroom",
+  "/api/accounts",
+  "/api/storage",
+];
 
 export function isAllowedBackendPath(pathname: string): boolean {
   return isAllowedPath(pathname, BACKEND_PROXY_ALLOWLIST);

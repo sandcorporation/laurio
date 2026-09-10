@@ -9,6 +9,11 @@ ADR-0005: 공개 여부는 presigned URL 발급 시점에 DB 상태를 보고 �
 target_ref 형식은 `submissions.target_refs`에 있다: 이 리졸버는 그 형식을 파싱해
 `storage.policy.TargetState`로 번역하는 역할만 한다.
 
+**형식이 접두어로 둘로 갈린다**(#286, ADR-0039). `"submission:..."`은 공모전
+모양(`contests.submission_target_refs`)이고, `"classroom-submission:..."`은
+강의실 모양(`classroom.submission_target_refs`)이다 — 강의실은 마감도 Award도
+Sponsor도 없어 `본인만`이라는 훨씬 단순한 규칙 하나로 끝난다.
+
 "마감"은 Contest.status가 아니라 `deadline_at`과 `core.clock.Clock.now()`를 직접
 비교한다 — Contest 상태 전이 자체(#11, 스케줄러 틱)를 기다리지 않는다. 이 티켓은
 그 전이를 만들지 않지만, #11이 나중에 상태를 뒤집어도 이 판정은 이미 옳다.
@@ -38,9 +43,11 @@ from __future__ import annotations
 
 from django.conf import settings
 
-# APP-BOUNDARY-EXCEPTION: target_ref 형식이 아직 공모전 모양(contest_id를 품는다) 뿐이다 — 강의실이 자기 형식을 더할 때 이 리졸버가 갈래를 늘린다(ADR-0039)
+# APP-BOUNDARY-EXCEPTION: 공모전 모양(contest_id를 품는다) target_ref를 판정하려면 Award 존재 여부를 봐야 한다(ADR-0039)
 from awards.services import sponsor_user_id_if_awarded
-# APP-BOUNDARY-EXCEPTION: 위와 같은 이유 — Award 존재 여부로 Handover 가시성을 판정하려면 지금은 Contest를 직접 조회해야 한다
+# APP-BOUNDARY-EXCEPTION: 강의실 모양(problem_id를 품는다) target_ref를 판정하려면 그 Problem이 실제로 있는지 확인해야 한다(#286, ADR-0039)
+from classroom.models import Problem as ClassroomProblem
+# APP-BOUNDARY-EXCEPTION: 위 awards와 같은 이유 — Award 존재 여부로 Handover 가시성을 판정하려면 지금은 Contest를 직접 조회해야 한다
 from contests.models import Contest
 from core.clock import Clock
 from policies.scope import current_policy
@@ -55,7 +62,12 @@ _DENY = TargetState(visibility=Visibility.PRIVATE, owner_id=None)
 class SubmissionTargetStateResolver:
     def resolve(self, target_ref: str) -> TargetState:
         parts = target_ref.split(":")
-        if len(parts) != 4 or parts[0] != "submission":
+        if len(parts) != 4:
+            return _DENY
+
+        if parts[0] == "classroom-submission":
+            return self._resolve_classroom(parts)
+        if parts[0] != "submission":
             return _DENY
 
         _, contest_id_raw, developer_id_raw, slot = parts
@@ -109,6 +121,29 @@ class SubmissionTargetStateResolver:
             owner_id=developer_user_id,
             additional_viewer_ids=frozenset({contest.sponsor.user_id}),
         )
+
+    def _resolve_classroom(self, parts: list[str]) -> TargetState:
+        """강의실 모양(#286) — 마감도 Award도 Sponsor도 없어 "본인만"이 끝이다.
+
+        `SOURCE_SLOT` 뿐이라 시연 영상·스크린샷·빌드 자산 분기가 아예 없다.
+        Problem 존재를 확인하는 이유는 공모전 분기의 `Contest.objects.filter(...)`와
+        같다 — 형식만 맞고 가리키는 대상이 없는 target_ref는 소유자 없는
+        private로 fail-closed한다."""
+
+        _, problem_id_raw, user_id_raw, slot = parts
+        if slot != SOURCE_SLOT:
+            return _DENY
+
+        try:
+            problem_id = int(problem_id_raw)
+            user_id = int(user_id_raw)
+        except ValueError:
+            return _DENY
+
+        if not ClassroomProblem.objects.filter(id=problem_id).exists():
+            return _DENY
+
+        return TargetState(visibility=Visibility.PRIVATE, owner_id=user_id)
 
 
 class SubmissionDownloadTTLResolver:
@@ -201,7 +236,7 @@ class SubmissionMaxUploadSizeResolver:
 
     def resolve(self, target_ref: str) -> int | None:
         parts = target_ref.split(":")
-        if len(parts) != 4 or parts[0] != "submission":
+        if len(parts) != 4 or parts[0] not in ("submission", "classroom-submission"):
             return None
 
         slot = parts[3]

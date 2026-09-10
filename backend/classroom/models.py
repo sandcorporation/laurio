@@ -16,6 +16,8 @@ import secrets
 from django.conf import settings
 from django.db import models
 
+from submissions.models import Submission
+
 from .scoring_models import DEFAULT_SCORING_MODEL
 
 
@@ -138,6 +140,36 @@ class ClassMember(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"ClassMember(classroom_id={self.classroom_id}, user_id={self.user_id})"
+
+
+class ClassroomSubmission(Submission):
+    """`submissions.Submission`의 강의실 자식(#286, ADR-0039) — 부모와 테이블·pk를
+    나눠 갖는 다중 테이블 상속이다(`contests.ContestSubmission`과 같은 모양).
+    자료(`assets`)는 부모 pk로 그대로 붙는다 — 근거 연결·자가 응답은 이 제품에
+    없다(CONTEXT.md 「Problem」).
+
+    **`ContestSubmission`과 달리 유니크 제약이 없다.** Problem에는 마감이
+    없고 한 사람이 몇 번이든 다시 내며, 낼 때마다 새 행이 쌓인다 — 두 번째
+    제출이 기존 행의 수정이 되는 공모전과 갈리는 지점이다(ADR-0039). 그래서
+    `(problem, member)`가 반복돼도 막지 않고, 대신 `attempt_number`가 그
+    쌓임에 순서를 매긴다.
+
+    **생성은 언제나 이 클래스를 통해서다** — `contests.ContestSubmission`과
+    같은 이유로, `classroom.submission_api`가 유일한 HTTP 생성 경로다.
+    """
+
+    problem = models.ForeignKey(Problem, related_name="submissions", on_delete=models.CASCADE)
+    member = models.ForeignKey(ClassMember, related_name="submissions", on_delete=models.CASCADE)
+    #: 이 참여자가 이 Problem에 낸 몇 번째 시도인가(1부터). CONTEXT.md
+    #: 「Problem」의 "제출할 때마다 새 시도가 쌓인다"를 화면과 채점이 셀 수
+    #: 있게 값으로 남긴다.
+    attempt_number = models.PositiveIntegerField()
+
+    class Meta:
+        ordering = ["-attempt_number"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ClassroomSubmission(problem={self.problem_id}, member={self.member_id}, attempt={self.attempt_number})"
 
 
 class ChecklistItem(models.Model):

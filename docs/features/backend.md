@@ -163,17 +163,33 @@ ADR-0036). 업로드 자료의 값은 `submission:{공모전id}:{개발자id}:{�
 | | |
 | --- | --- |
 | `POST`·`GET /api/classroom/classes[/{id}]` | 클래스를 열고 내 것만 본다 |
+| `PATCH /api/classroom/classes/{id}` | 이름·기본 채점 모델을 고친다 |
+| `PUT /api/classroom/classes/{id}/openai-key` | 강사 본인의 채점 키를 저장한다 — 마스킹된 값만 돌려준다(#284) |
+| `GET /api/classroom/scoring-models` | 선택 가능한 채점 모델과 컨텍스트 크기(#285) |
+| `POST /api/classroom/classes/{id}/join-link/regenerate` | 가입 링크를 다시 뽑는다 — 이전 코드는 죽는다(#279) |
+| `GET`·`POST /api/classroom/join/{code}` | 가입 링크 미리보기(인증 불필요)와 가입(#280) |
+| `GET /api/classroom/classes/{id}/members` | 참여자 명단 — 강사 전용(#281) |
+| `POST .../members/{id}/expel` | 참여자를 내보낸다 — 행은 지우지 않는다(#281) |
 | `POST`·`GET /api/classroom/classes/{id}/problems[/{id}]` | 문제를 만들고 고친다 — 마감 필드가 없다 |
-| `PATCH .../problems/{id}` | 제목·설명·제출 형식을 고친다 |
+| `PATCH .../problems/{id}` | 제목·설명·제출 형식·채점 모델을 고친다 |
 | `POST .../problems/reorder` | 클래스 상세의 문제 순서를 바꾼다 |
 | `POST .../problems/{id}/open` | 초안을 연다 — 필수 체크리스트 항목이 없으면 400 |
 | `POST`·`PATCH`·`DELETE .../checklist-items[/{id}]` | 체크리스트 항목을 더하고 고치고 지운다 |
 | `POST .../checklist-items/reorder` | 체크리스트 순서를 바꾼다 |
+| `GET .../problems/{id}/mine` | 참여자가 보는 문제 하나 + 본인의 시도 목록(#286) |
+| `POST .../problems/{id}/submissions` | 참여자가 소스 또는 저장소로 낸다 — 낼 때마다 새 시도가 쌓인다(#286) |
 
-**강사 전용이다, 아직은.** `ClassMember`(가입)가 없어 강사가 아닌 요청은 그 클래스가
-아예 없는 것처럼 404를 받는다 — 403이 아니다, 목록에도 상세에도 존재를 드러내지 않는다.
-`Problem.status`(초안/열림)는 이미 응답에 실리지만, 참여자가 실제로 열린 것만 보게
-거르는 표면은 아직 없다.
+**Class·Problem·체크리스트는 강사 전용이다.** 강사가 아닌 요청은 그 클래스가 아예
+없는 것처럼 404를 받는다 — 403이 아니다, 목록에도 상세에도 존재를 드러내지 않는다.
+`.../mine`·`.../submissions`만 예외다(#286) — `ClassMember`인지, 그 문제가 열려
+있는지를 같은 404로 가른다. 내보내진(`expelled`) 참여자는 새 시도만 403으로 막힌다.
+
+**제출은 공모전 쪽(`submissions.Submission`)과 자료 모델을 공유한다**(ADR-0039).
+`classroom.ClassroomSubmission`이 그 강의실 자식이다 — `contests.ContestSubmission`과
+달리 유니크 제약이 없어, 같은 문제에 몇 번을 내도 시도(`attempt_number`)로 쌓인다.
+소스 업로드의 target_ref는 `classroom-submission:<problem_id>:<user_id>:source`
+모양이다(공모전의 `submission:<contest_id>:<developer_user_id>:<slot>`과는 접두어로
+갈린다, `submissions.resolvers.SubmissionTargetStateResolver`).
 
 **통과는 필수 항목을 전부 충족했다는 판정이다**(CONTEXT.md 「통과」) — 문제마다
 합격선을 따로 두지 않는다. 그래서 필수 항목이 하나도 없는 문제는 통과가 정의되지

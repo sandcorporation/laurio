@@ -1,10 +1,9 @@
-"""Classroom API (#278/#279/#280/#282/#283, ADR-0037).
+"""Classroom API (#278/#279/#280/#282/#283/#286, ADR-0037).
 
-**Class·Problem·체크리스트 엔드포인트는 여전히 강사 전용이다.** 참여자가
-가입 링크로 들어와 문제를 실제로 보는 표면(진도·문제 열람)은 아직 없다 —
-`ClassMember`가 이번 티켓(#280)으로 생겼지만, 강사가 아닌 요청은 여전히 그
-클래스가 아예 없는 것처럼 404를 받는다. `Problem.status`(초안/열림)는 이미
-저장되고 응답에 실려 있어, 참여자 열람이 붙을 때 필터 조건만 더하면 된다.
+**Class·Problem·체크리스트 엔드포인트는 여전히 강사 전용이다.** `.../mine`과
+`.../submissions`(#286)만 예외다 — 참여자가 가입 링크로 들어와 열린 문제를
+보고 소스·저장소를 낸다. 강사가 아닌 요청은 그 강사 전용 엔드포인트에서는
+여전히 클래스가 아예 없는 것처럼 404를 받는다.
 
 **`/join/{join_code}` 둘만 예외다.** 미리보기(GET)는 누구나 인증 없이 보고,
 가입(POST)은 로그인만 되어 있으면 강사 전용 규칙과 무관하게 누구든(강사
@@ -19,6 +18,9 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
+from django.conf import settings
 from django.db import transaction
 from django.http import HttpRequest
 from django.utils import timezone
@@ -27,8 +29,11 @@ from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
 from core.crypto import encrypt
+from storage.adapters import get_storage_adapter
+from storage.filenames import build_download_filename, safe_download_base_name
+from submissions.models import GITHUB_REPO_URL_PATTERN, Submission, SubmissionAsset
 
-from .models import ChecklistItem, Class, ClassMember, Problem, _generate_join_code
+from .models import ChecklistItem, Class, ClassMember, ClassroomSubmission, Problem, _generate_join_code
 from .schemas import (
     ChecklistItemIn,
     ChecklistItemOut,
@@ -37,6 +42,10 @@ from .schemas import (
     ClassIn,
     ClassOut,
     ClassPatchIn,
+    ClassroomProblemMineOut,
+    ClassroomProblemSubmissionsOut,
+    ClassroomSubmissionIn,
+    ClassroomSubmissionOut,
     ErrorOut,
     JoinIn,
     JoinLinkOut,
@@ -51,6 +60,7 @@ from .schemas import (
     ScoringModelOut,
 )
 from .scoring_models import SCORING_MODEL_CHOICES, is_valid_model
+from .submission_target_refs import source_target_ref
 
 router = Router(tags=["classroom"])
 
@@ -95,6 +105,51 @@ def _serialize_problem(problem: Problem, class_obj: Class) -> ProblemOut:
         model=problem.model,
         effective_model=problem.model or class_obj.default_model,
         checklist_items=[_serialize_checklist_item(i) for i in problem.checklist_items.all()],
+    )
+
+
+def _serialize_problem_mine(problem: Problem) -> ClassroomProblemMineOut:
+    return ClassroomProblemMineOut(
+        id=problem.id,
+        classroom_id=problem.classroom_id,
+        title=problem.title,
+        description=problem.description,
+        submission_format=problem.submission_format,
+        checklist_items=[_serialize_checklist_item(i) for i in problem.checklist_items.all()],
+    )
+
+
+def _source_download_url(asset: SubmissionAsset, user) -> str:
+    """소스 자료 하나의 presigned 다운로드 URL — 파일명은 제출자 본인의 User
+    정보를 따른다(#286 AC). 강의실 참여자는 `accounts.DeveloperProfile`이
+    없으므로 `contests.assignment_api`처럼 `developer.display_name`을 쓸 수
+    없다 — 대신 `User.email`을 쓴다(`classroom.api.preview_join`이 강사를
+    가리킬 때 이미 같은 값을 쓰고 있다)."""
+
+    adapter = get_storage_adapter()
+    base_name = safe_download_base_name(user.email)
+    presigned = adapter.presign_download(
+        asset.value,
+        filename=build_download_filename(asset.content_type or None, base_name=base_name),
+        expires_in=timedelta(seconds=settings.STORAGE_DOWNLOAD_URL_TTL_SECONDS),
+    )
+    return presigned.url
+
+
+def _serialize_classroom_submission(
+    submission: ClassroomSubmission, *, asset: SubmissionAsset, user
+) -> ClassroomSubmissionOut:
+    download_url = (
+        _source_download_url(asset, user) if asset.kind == SubmissionAsset.Kind.SOURCE else None
+    )
+    return ClassroomSubmissionOut(
+        id=submission.id,
+        problem_id=submission.problem_id,
+        attempt_number=submission.attempt_number,
+        submission_format=asset.kind,
+        value=asset.value,
+        download_url=download_url,
+        created_at=submission.created_at,
     )
 
 
@@ -435,6 +490,124 @@ def open_problem(request: HttpRequest, class_id: int, problem_id: int):
     problem.status = Problem.Status.OPEN
     problem.save(update_fields=["status", "updated_at"])
     return 200, _serialize_problem(problem, class_obj)
+
+
+# --- Submission (참여자, #286) --------------------------------------------------
+
+
+def _get_member_or_404(class_id: int, user_id: int) -> ClassMember:
+    """강사 전용 엔드포인트의 `_get_owned_class_or_404`와 같은 존재-숨김
+    규칙을 참여자 쪽에서 지킨다 — 참여자가 아니면 그 문제가 아예 없는 것처럼
+    404를 받는다(#286 AC "그 클래스의 참여자가 아니면 제출할 수 없다"). 강사
+    본인도 ClassMember 행이 없으면(가입 링크로 자기 클래스에 들어온 적이
+    없으면) 여기 닿지 못한다 — 참여자 표면은 어디까지나 ClassMember 기준이다."""
+
+    try:
+        return ClassMember.objects.get(classroom_id=class_id, user_id=user_id)
+    except ClassMember.DoesNotExist as exc:
+        raise HttpError(404, "문제를 찾을 수 없습니다.") from exc
+
+
+def _get_open_problem_for_participant_or_404(class_id: int, problem_id: int) -> Problem:
+    """참여자에게는 열린 문제만 존재한다 — 초안은 강사만 본다(Problem
+    docstring). 남의 클래스와 같은 이유로 404다."""
+
+    try:
+        return Problem.objects.prefetch_related("checklist_items").get(
+            id=problem_id, classroom_id=class_id, status=Problem.Status.OPEN
+        )
+    except Problem.DoesNotExist as exc:
+        raise HttpError(404, "문제를 찾을 수 없습니다.") from exc
+
+
+@router.get(
+    "/classes/{class_id}/problems/{problem_id}/mine",
+    response={200: ClassroomProblemSubmissionsOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
+    """참여자가 보는 문제 하나 — 체크리스트와 본인의 시도 목록(#286). 남의
+    시도는 애초에 이 질의에 없다(`member=member` 필터) — "남의 제출물을 볼 수
+    없다"는 AC를 별도 권한 검사가 아니라 쿼리 모양으로 지킨다."""
+
+    member = _get_member_or_404(class_id, request.auth_user.id)
+    problem = _get_open_problem_for_participant_or_404(class_id, problem_id)
+
+    submissions = (
+        ClassroomSubmission.objects.filter(problem=problem, member=member)
+        .prefetch_related("assets")
+        .order_by("-attempt_number")
+    )
+    return 200, ClassroomProblemSubmissionsOut(
+        problem=_serialize_problem_mine(problem),
+        submissions=[
+            # `s.assets.all()[0]`이 아니라 리스트로 먼저 받는다 — 그래야
+            # `prefetch_related("assets")`가 채워 둔 캐시를 쓴다. `.get()`은
+            # 매니저를 거쳐 매번 새 질의를 날려 그 prefetch를 헛수고로 만든다.
+            _serialize_classroom_submission(s, asset=list(s.assets.all())[0], user=request.auth_user)
+            for s in submissions
+        ],
+    )
+
+
+@router.post(
+    "/classes/{class_id}/problems/{problem_id}/submissions",
+    response={201: ClassroomSubmissionOut, 403: ErrorOut, 404: ErrorOut, 422: ErrorOut},
+    auth=jwt_auth,
+)
+def create_classroom_submission(
+    request: HttpRequest, class_id: int, problem_id: int, payload: ClassroomSubmissionIn
+):
+    """제출할 때마다 새 시도가 쌓인다 — 마감도 시도 횟수 상한도 없다
+    (ADR-0039, CONTEXT.md 「Problem」). 근거 연결도 자가 체크도 없다: 소스
+    또는 저장소 값 하나만 받는다."""
+
+    member = _get_member_or_404(class_id, request.auth_user.id)
+    problem = _get_open_problem_for_participant_or_404(class_id, problem_id)
+
+    if member.expelled_at is not None:
+        # ClassMember.expelled_at의 docstring이 이 엔드포인트를 지목해 둔
+        # 자리다 — 행은 지우지 않되 새 제출만 막는다. 강사가 이미 그 사실을
+        # 아는 사람에게는 404(존재 자체를 숨김)보다 403(권한이 없다는 것을
+        # 안다)이 더 정직하다.
+        raise HttpError(403, "더 이상 이 클래스의 참여자가 아닙니다.")
+
+    value = payload.value.strip()
+    if not value:
+        raise HttpError(422, "제출 값을 입력해주세요.")
+
+    content_type = ""
+    if problem.submission_format == Problem.SubmissionFormat.SOURCE:
+        expected_ref = source_target_ref(problem.id, request.auth_user.id)
+        if not value.startswith(f"{expected_ref}/"):
+            raise HttpError(422, "본인의 업로드 대상에 속하지 않는 소스입니다.")
+        asset_kind = SubmissionAsset.Kind.SOURCE
+        content_type = (payload.content_type or "").strip()
+    else:
+        if not GITHUB_REPO_URL_PATTERN.match(value):
+            raise HttpError(422, "저장소는 https://github.com/<owner>/<repo> 형식만 받습니다.")
+        asset_kind = SubmissionAsset.Kind.REPOSITORY
+
+    with transaction.atomic():
+        # 시도 번호는 참여자 행을 잠그고 센다 — 같은 참여자가 같은 문제에
+        # 동시에 두 번 제출해도 번호가 겹치지 않게 한다(#10류 동시성 규율과
+        # 같은 이유, 유니크 제약이 없는 자리라 여기서 직접 막는다).
+        locked_member = ClassMember.objects.select_for_update().get(id=member.id)
+        next_attempt = (
+            ClassroomSubmission.objects.filter(problem=problem, member=locked_member).count() + 1
+        )
+        submission = ClassroomSubmission.objects.create(
+            user_id=request.auth_user.id,
+            product=Submission.Product.CLASSROOM,
+            problem=problem,
+            member=locked_member,
+            attempt_number=next_attempt,
+        )
+        asset = SubmissionAsset.objects.create(
+            submission=submission, kind=asset_kind, value=value, content_type=content_type
+        )
+
+    return 201, _serialize_classroom_submission(submission, asset=asset, user=request.auth_user)
 
 
 # --- ChecklistItem -------------------------------------------------------------
