@@ -55,6 +55,24 @@ class Class(models.Model):
     #: 바뀌어 이전 값은 어떤 클래스도 가리키지 않게 된다 — 그래서 별도
     #: 이력 테이블이 필요 없다, 죽은 코드는 그냥 아무 행에도 없는 값이다.
     join_code = models.CharField(max_length=32, unique=True, default=_generate_join_code)
+
+    #: 채점 토큰 예산 상한(#295) — `None`이면 무제한이다. 강사가 정하기
+    #: 전까지는 이 기능 자체가 꺼져 있는 것과 같아, 기존 클래스는 전부
+    #: 지금처럼 계속 채점된다.
+    token_budget = models.PositiveIntegerField(null=True, blank=True, default=None)
+    #: 경고 알림을 보낼 임계, 예산 대비 백분율(#295). `token_budget`이 없으면
+    #: 쓰이지 않는다.
+    token_budget_warning_threshold_percent = models.PositiveIntegerField(default=80)
+    #: 이 클래스의 채점이 지금까지 실제로 쓴 토큰 누적합(#295). 성공한
+    #: 채점 호출이 끝날 때마다 OpenAI 응답이 보고한 만큼만 더해진다 —
+    #: 실패한 호출(인증 오류 등, 토큰을 쓰지 않고 끝난 시도)은 더하지 않는다.
+    token_usage_total = models.PositiveIntegerField(default=0)
+    #: 경고 임계를 넘겨 강사에게 알림을 보낸 시각(#295). 강사가 `token_budget`을
+    #: 바꾸면(새 예산 주기로 본다) 이 값을 지워, 다음 임계 통과에서 다시
+    #: 알릴 수 있게 한다 — 그러지 않으면 한 번 경고한 뒤로는 예산을 아무리
+    #: 늘려도 다시는 경고가 가지 않는다.
+    token_budget_warning_sent_at = models.DateTimeField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -62,6 +80,11 @@ class Class(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"Class(id={self.pk}, name={self.name!r})"
+
+    def token_budget_exhausted(self) -> bool:
+        """예산이 없으면(`token_budget is None`) 항상 거짓 — 무제한이다(#295)."""
+
+        return self.token_budget is not None and self.token_usage_total >= self.token_budget
 
 
 class Problem(models.Model):

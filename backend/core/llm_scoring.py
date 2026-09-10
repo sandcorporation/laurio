@@ -95,6 +95,11 @@ class RequirementVerdict:
 class ScoringOutput:
     verdicts: list[RequirementVerdict]
     model_version: str
+    #: 이 채점 호출이 실제로 쓴 토큰 수(OpenAI 응답의 `usage.total_tokens`,
+    #: #295) — 강의실의 채점 예산이 여기 기댄다. `FakeLLMScoringAdapter`를
+    #: 포함해 이 값을 채우지 않는 호출자는 기본값 0이 그대로 남는다(공모전은
+    #: 예산 기능이 없어 이 필드를 쓰지 않는다).
+    total_tokens: int = 0
 
 
 class LLMAdapterError(Exception):
@@ -391,7 +396,13 @@ def _parse_openai_scoring_response(
 
     model_used = body.get("model") or "unknown"
     verdicts = [verdict_by_id[rid] for rid in requirement_ids]
-    return ScoringOutput(verdicts=verdicts, model_version=str(model_used))
+    usage = body.get("usage") or {}
+    total_tokens = usage.get("total_tokens", 0)
+    if not isinstance(total_tokens, int) or isinstance(total_tokens, bool):
+        # 벤더가 이상한 모양을 보내도(문자열·실수·bool) 채점 자체를 실패로 만들지
+        # 않는다 — 판정은 이미 유효하게 파싱됐다. 예산 집계만 0으로 조용히 빠진다.
+        total_tokens = 0
+    return ScoringOutput(verdicts=verdicts, model_version=str(model_used), total_tokens=total_tokens)
 
 
 class OpenAIScoringAdapter:

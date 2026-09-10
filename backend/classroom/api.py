@@ -89,6 +89,11 @@ def _mask_from_last4(last4: str) -> str:
 
 def _serialize_class(class_obj: Class) -> ClassOut:
     has_key = bool(class_obj.openai_api_key_encrypted)
+    token_budget_remaining = (
+        max(class_obj.token_budget - class_obj.token_usage_total, 0)
+        if class_obj.token_budget is not None
+        else None
+    )
     return ClassOut(
         id=class_obj.id,
         name=class_obj.name,
@@ -97,6 +102,11 @@ def _serialize_class(class_obj: Class) -> ClassOut:
         default_model=class_obj.default_model,
         has_openai_key=has_key,
         openai_key_masked=_mask_from_last4(class_obj.openai_api_key_last4) if has_key else None,
+        token_budget=class_obj.token_budget,
+        token_budget_warning_threshold_percent=class_obj.token_budget_warning_threshold_percent,
+        token_usage_total=class_obj.token_usage_total,
+        token_budget_remaining=token_budget_remaining,
+        token_budget_exhausted=class_obj.token_budget_exhausted(),
     )
 
 
@@ -187,12 +197,20 @@ def _serialize_score(score: ClassroomScore) -> ClassroomScoreOut:
 
 
 def _serialize_classroom_submission(
-    submission: ClassroomSubmission, *, asset: SubmissionAsset, user, required_item_ids: set[int]
+    submission: ClassroomSubmission,
+    *,
+    asset: SubmissionAsset,
+    user,
+    required_item_ids: set[int],
+    class_obj: Class,
 ) -> ClassroomSubmissionOut:
     download_url = (
         _source_download_url(asset, user) if asset.kind == SubmissionAsset.Kind.SOURCE else None
     )
     score = getattr(submission, "classroom_score", None)
+    # 참여자가 스스로 어쩔 수 없는 다른 pending 사유(채점 키 없음 등)는
+    # 담지 않는다 — 예산 소진만 알린다(#295, 스키마 docstring과 같은 이유).
+    pending_reason = "budget_exhausted" if score is None and class_obj.token_budget_exhausted() else None
     return ClassroomSubmissionOut(
         id=submission.id,
         problem_id=submission.problem_id,
@@ -204,6 +222,7 @@ def _serialize_classroom_submission(
         status="scored" if score is not None else "pending",
         score=_serialize_score(score) if score is not None else None,
         passed=_is_score_passed(score, required_item_ids),
+        pending_reason=pending_reason,
     )
 
 
@@ -263,6 +282,18 @@ def update_class(request: HttpRequest, class_id: int, payload: ClassPatchIn):
     if payload.default_model is not None:
         class_obj.default_model = payload.default_model
         update_fields.append("default_model")
+    if payload.token_budget is not None and payload.token_budget != class_obj.token_budget:
+        class_obj.token_budget = payload.token_budget
+        update_fields.append("token_budget")
+        if class_obj.token_budget_warning_sent_at is not None:
+            # 예산 값을 바꾸는 것을 새 주기의 시작으로 본다(#295) — 그러지
+            # 않으면 한 번 경고한 뒤로는 예산을 아무리 늘려도 다시는 경고가
+            # 가지 않는다.
+            class_obj.token_budget_warning_sent_at = None
+            update_fields.append("token_budget_warning_sent_at")
+    if payload.token_budget_warning_threshold_percent is not None:
+        class_obj.token_budget_warning_threshold_percent = payload.token_budget_warning_threshold_percent
+        update_fields.append("token_budget_warning_threshold_percent")
     if update_fields:
         class_obj.save(update_fields=update_fields)
     return 200, _serialize_class(class_obj)
@@ -609,8 +640,10 @@ def _get_open_problem_for_participant_or_404(class_id: int, problem_id: int) -> 
     docstring). 남의 클래스와 같은 이유로 404다."""
 
     try:
-        return Problem.objects.prefetch_related("checklist_items").get(
-            id=problem_id, classroom_id=class_id, status=Problem.Status.OPEN
+        return (
+            Problem.objects.select_related("classroom")
+            .prefetch_related("checklist_items")
+            .get(id=problem_id, classroom_id=class_id, status=Problem.Status.OPEN)
         )
     except Problem.DoesNotExist as exc:
         raise HttpError(404, "문제를 찾을 수 없습니다.") from exc
@@ -641,7 +674,11 @@ def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
         # `prefetch_related("assets")`가 채워 둔 캐시를 쓴다. `.get()`은
         # 매니저를 거쳐 매번 새 질의를 날려 그 prefetch를 헛수고로 만든다.
         _serialize_classroom_submission(
-            s, asset=list(s.assets.all())[0], user=request.auth_user, required_item_ids=required_item_ids
+            s,
+            asset=list(s.assets.all())[0],
+            user=request.auth_user,
+            required_item_ids=required_item_ids,
+            class_obj=problem.classroom,
         )
         for s in submissions
     ]
@@ -716,7 +753,11 @@ def create_classroom_submission(
     # 언제나 passed=False다 — 그래도 시그니처를 맞추려고 지금 값을 구해 넘긴다.
     required_item_ids = _required_checklist_item_ids(problem.checklist_items.all())
     return 201, _serialize_classroom_submission(
-        submission, asset=asset, user=request.auth_user, required_item_ids=required_item_ids
+        submission,
+        asset=asset,
+        user=request.auth_user,
+        required_item_ids=required_item_ids,
+        class_obj=problem.classroom,
     )
 
 

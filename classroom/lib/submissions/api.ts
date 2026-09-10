@@ -40,6 +40,10 @@ export type ClassroomScore = {
 // 「채점 중」을 구별하는 유일한 근거다(#287).
 export type SubmissionStatus = "pending" | "scored";
 
+// "budget_exhausted" 또는 `null`(#295). `status`가 "pending"이고 그 클래스의
+// 채점 예산이 바닥나 채점이 잠시 멈췄을 때만 채워진다.
+export type PendingReason = "budget_exhausted" | null;
+
 export type ClassroomSubmissionRow = {
   id: number;
   problem_id: number;
@@ -53,6 +57,7 @@ export type ClassroomSubmissionRow = {
   score: ClassroomScore | null;
   // 이 시도 하나가 통과인가(#288) — 미채점("pending")이면 항상 거짓이다.
   passed: boolean;
+  pending_reason: PendingReason;
 };
 
 export type ProblemSubmissions = {

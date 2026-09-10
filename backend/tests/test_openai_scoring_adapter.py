@@ -126,6 +126,32 @@ def test_score_returns_verdicts_and_records_actual_model_from_response(monkeypat
     assert all(v.reasoning for v in output.verdicts)
 
 
+def test_score_reports_total_tokens_from_usage(monkeypatch):
+    """강의실 채점 예산(#295)이 이 값에 기댄다 — 응답의 `usage.total_tokens`를
+    그대로 옮겨 담는다."""
+
+    body = _chat_completion_body([{"requirement_id": 10, "is_met": True, "reasoning": "ok"}])
+    body["usage"] = {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120}
+
+    monkeypatch.setattr("scoring.adapters.requests.post", lambda *a, **k: _FakeResponse(200, body))
+
+    adapter = OpenAIScoringAdapter()
+    output = adapter.score(_scoring_input(requirement_ids=[10]))
+
+    assert output.total_tokens == 120
+
+
+def test_score_defaults_total_tokens_to_zero_when_usage_is_missing(monkeypatch):
+    body = _chat_completion_body([{"requirement_id": 10, "is_met": True, "reasoning": "ok"}])
+
+    monkeypatch.setattr("scoring.adapters.requests.post", lambda *a, **k: _FakeResponse(200, body))
+
+    adapter = OpenAIScoringAdapter()
+    output = adapter.score(_scoring_input(requirement_ids=[10]))
+
+    assert output.total_tokens == 0
+
+
 # --- AC: 누락된 판정은 예외 — 「미충족」으로 조용히 채우지 않는다 -------------------
 
 
