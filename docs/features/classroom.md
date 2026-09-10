@@ -115,6 +115,13 @@ OR이고, 매번 지금의 체크리스트 기준으로 다시 셈된다. 분모
 
 `GET /api/classroom/classes/{id}/members` · `POST .../members/{memberId}/expel`로
 그린다.
+**「복사해서 새 기수 열기」**가 이 클래스를 복사해 새 클래스를 연다(#293) — 문제와
+체크리스트와 채점 설정(기본 모델·문제별 덮어쓰기)이 순서 그대로 따라오고, 참여자·
+제출물·Score·달성률·OpenAI 키는 따라오지 않는다. 복사본은 원본과 독립이고, 복사가
+끝나면 새 클래스 상세로 이동한다.
+
+`GET /api/classroom/classes/{id}` · `GET .../problems` · `POST .../problems/reorder` ·
+`POST .../classes/{id}/copy`로 그린다.
 
 ## `/classes/{id}/settings` 채점 설정
 
@@ -155,9 +162,14 @@ OR이고, 매번 지금의 체크리스트 기준으로 다시 셈된다. 분모
 지금은 그 사실을 화면이 미리 알리는 것까지다.
 
 「제출 현황 보기」가 아래 `/classes/{id}/problems/{problemId}/submissions`로 이어진다.
+**「다른 클래스로 복사」**가 이 문제(체크리스트·채점 모델 포함)를 강사 본인의 다른
+클래스로 복사한다(#292) — 대상 클래스를 골라 복사하면 원본 상태와 무관하게 복사본은
+언제나 초안으로 들어오고, 복사가 끝나면 그 새 문제의 편집 화면으로 이동한다. 복사할
+다른 클래스가 없으면 그 사실을 안내한다.
 
 `GET`·`PATCH /api/classroom/classes/{id}/problems/{problemId}` ·
-`POST .../open` · `POST`·`GET`·`PATCH`·`DELETE .../checklist-items[/{itemId}]` ·
+`POST .../open` · `POST .../copy` ·
+`POST`·`GET`·`PATCH`·`DELETE .../checklist-items[/{itemId}]` ·
 `POST .../checklist-items/reorder`로 그린다.
 
 ## `/join/{code}` 가입 링크(#280)

@@ -69,6 +69,7 @@ from .schemas import (
     JoinResultOut,
     MemberOut,
     OpenAIKeyIn,
+    ProblemCopyIn,
     ProblemIn,
     ProblemOut,
     ProblemPatchIn,
@@ -77,6 +78,7 @@ from .schemas import (
 )
 from .scoring_models import SCORING_MODEL_CHOICES, is_valid_model
 from .submission_target_refs import source_target_ref
+from .services import copy_class, copy_problem_to_class
 
 router = Router(tags=["classroom"])
 
@@ -388,6 +390,17 @@ def set_class_openai_key(request: HttpRequest, class_id: int, payload: OpenAIKey
     class_obj.openai_api_key_last4 = raw_key[-4:]
     class_obj.save(update_fields=["openai_api_key_encrypted", "openai_api_key_last4"])
     return 200, _serialize_class(class_obj)
+
+
+@router.post("/classes/{class_id}/copy", response={201: ClassOut, 404: ErrorOut}, auth=jwt_auth)
+def copy_class_view(request: HttpRequest, class_id: int):
+    """지난 기수로 다음 기수를 연다(#293) — 문제·체크리스트·채점 설정이
+    순서 그대로 따라오고, 참여자·제출물·Score·OpenAI 키는 따라오지 않는다
+    (`services.copy_class` docstring 참고)."""
+
+    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    new_class = copy_class(class_obj, request.auth_user.id)
+    return 201, _serialize_class(new_class)
 
 
 @router.get("/scoring-models", response={200: list[ScoringModelOut]}, auth=jwt_auth)
@@ -943,6 +956,22 @@ def list_problem_submissions(request: HttpRequest, class_id: int, problem_id: in
         )
         for s in submissions
     ]
+@router.post(
+    "/classes/{class_id}/problems/{problem_id}/copy",
+    response={201: ProblemOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def copy_problem(request: HttpRequest, class_id: int, problem_id: int, payload: ProblemCopyIn):
+    """자기 문제를 자기 다른 클래스로 복사한다(#292). 원본·대상 둘 다 강사
+    본인 소유여야 한다 — 어느 쪽이 남의 것이어도 404다(존재를 알려주지
+    않는다, 이 파일의 다른 소유권 검사와 같은 이유)."""
+
+    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    problem = _get_owned_problem_or_404(class_obj, problem_id)
+    target_class = _get_owned_class_or_404(payload.target_class_id, request.auth_user.id)
+
+    copy = copy_problem_to_class(problem, target_class)
+    return 201, _serialize_problem(copy, target_class)
 
 
 # --- ChecklistItem -------------------------------------------------------------

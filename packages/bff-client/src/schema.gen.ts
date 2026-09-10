@@ -530,6 +530,7 @@ export interface paths {
         trace?: never;
     };
     "/api/classroom/classes/{class_id}/join-link/regenerate": {
+    "/api/classroom/classes/{class_id}/copy": {
         parameters: {
             query?: never;
             header?: never;
@@ -588,6 +589,12 @@ export interface paths {
          *     내보내도 오류를 내지 않고 그대로 둔다(멱등).
          */
         post: operations["classroom_api_expel_member"];
+         * Copy Class View
+         * @description 지난 기수로 다음 기수를 연다(#293) — 문제·체크리스트·채점 설정이
+         *     순서 그대로 따라오고, 참여자·제출물·Score·OpenAI 키는 따라오지 않는다
+         *     (`services.copy_class` docstring 참고).
+         */
+        post: operations["classroom_api_copy_class_view"];
         delete?: never;
         options?: never;
         head?: never;
@@ -760,6 +767,7 @@ export interface paths {
         trace?: never;
     };
     "/api/classroom/classes/{class_id}/problems/{problem_id}/mine": {
+    "/api/classroom/classes/{class_id}/problems/{problem_id}/copy": {
         parameters: {
             query?: never;
             header?: never;
@@ -775,6 +783,15 @@ export interface paths {
         get: operations["classroom_api_get_my_problem"];
         put?: never;
         post?: never;
+        get?: never;
+        put?: never;
+        /**
+         * Copy Problem
+         * @description 자기 문제를 자기 다른 클래스로 복사한다(#292). 원본·대상 둘 다 강사
+         *     본인 소유여야 한다 — 어느 쪽이 남의 것이어도 404다(존재를 알려주지
+         *     않는다, 이 파일의 다른 소유권 검사와 같은 이유).
+         */
+        post: operations["classroom_api_copy_problem"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5422,6 +5439,11 @@ export interface components {
             /** Withholding Tax Bps */
             withholding_tax_bps?: number | null;
         };
+        /** ProblemCopyIn */
+        ProblemCopyIn: {
+            /** Target Class Id */
+            target_class_id: number;
+        };
         /** ProblemIn */
         ProblemIn: {
             /**
@@ -6842,6 +6864,7 @@ export interface operations {
         };
     };
     classroom_api_regenerate_join_link: {
+    classroom_api_copy_class_view: {
         parameters: {
             query?: never;
             header?: never;
@@ -6854,6 +6877,8 @@ export interface operations {
         responses: {
             /** @description OK */
             200: {
+            /** @description Created */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6922,6 +6947,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MemberOut"];
+                    "application/json": components["schemas"]["ClassOut"];
                 };
             };
             /** @description Not Found */
@@ -7356,6 +7382,7 @@ export interface operations {
         };
     };
     classroom_api_get_my_problem: {
+    classroom_api_copy_problem: {
         parameters: {
             query?: never;
             header?: never;
@@ -7369,11 +7396,20 @@ export interface operations {
         responses: {
             /** @description OK */
             200: {
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProblemCopyIn"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["ClassroomProblemSubmissionsOut"];
+                    "application/json": components["schemas"]["ProblemOut"];
                 };
             };
             /** @description Not Found */

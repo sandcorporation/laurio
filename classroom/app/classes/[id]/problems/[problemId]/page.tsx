@@ -8,7 +8,9 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import { BackendError } from "@/lib/backend/client";
+import { useMyClasses } from "@/lib/classes/use-my-classes";
 import {
+  copyProblem,
   createChecklistItem,
   deleteChecklistItem,
   openProblem,
@@ -28,6 +30,7 @@ export default function EditProblemPage() {
 
   const { state, reload } = useProblem(classId, problemId);
   const modelsState = useScoringModels();
+  const myClassesState = useMyClasses();
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -40,6 +43,10 @@ export default function EditProblemPage() {
   const [newItemRequired, setNewItemRequired] = useState(true);
   const [checklistError, setChecklistError] = useState<string | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
+
+  const [targetClassId, setTargetClassId] = useState("");
+  const [copying, setCopying] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
 
   useEffect(() => {
     if (state.status === "ready") {
@@ -153,6 +160,20 @@ export default function EditProblemPage() {
       reload();
     } catch {
       setChecklistError("순서를 바꾸지 못했습니다. 다시 시도해주세요.");
+    }
+  }
+
+  async function handleCopy(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setCopyError(null);
+    setCopying(true);
+    try {
+      const copy = await copyProblem(classId, problemId, Number(targetClassId));
+      router.push(`/classes/${copy.classroom_id}/problems/${copy.id}`);
+    } catch {
+      setCopyError("문제를 복사하지 못했습니다. 잠시 후 다시 시도해주세요.");
+    } finally {
+      setCopying(false);
     }
   }
 
@@ -275,6 +296,43 @@ export default function EditProblemPage() {
       </form>
 
       {error ? <p data-testid="edit-problem-error-message">{error}</p> : null}
+
+      <h2>다른 클래스로 복사</h2>
+      <p>체크리스트와 채점 설정이 함께 오고, 복사본은 대상 클래스에서 초안으로 들어옵니다.</p>
+      {myClassesState.status === "ready" ? (
+        (() => {
+          const otherClasses = myClassesState.classes.filter((c) => c.id !== classId);
+          if (otherClasses.length === 0) {
+            return <p data-testid="copy-problem-no-target">복사할 다른 클래스가 없습니다.</p>;
+          }
+          return (
+            <form onSubmit={handleCopy}>
+              <label htmlFor="copy-problem-target">대상 클래스</label>
+              <select
+                id="copy-problem-target"
+                data-testid="copy-problem-target-select"
+                value={targetClassId}
+                onChange={(event) => setTargetClassId(event.target.value)}
+              >
+                <option value="" data-testid="copy-problem-target-option-empty">
+                  클래스를 선택하세요
+                </option>
+                {otherClasses.map((c) => (
+                  <option key={c.id} value={c.id} data-testid={`copy-problem-target-option-${c.id}`}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              <button type="submit" data-testid="copy-problem-submit" disabled={copying || targetClassId === ""}>
+                {copying ? "복사하는 중..." : "복사"}
+              </button>
+            </form>
+          );
+        })()
+      ) : (
+        <p data-testid="copy-problem-classes-loading">클래스 목록을 불러오는 중...</p>
+      )}
+      {copyError ? <p data-testid="copy-problem-error">{copyError}</p> : null}
 
       <h2>체크리스트</h2>
       <p>필수 항목을 전부 충족해야 통과입니다 — 참여자도 무엇이 필수인지 볼 수 있습니다.</p>

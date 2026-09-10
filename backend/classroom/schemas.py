@@ -269,3 +269,5 @@ class ClassroomProblemListItemOut(Schema):
     title: str
     submission_format: str
     passed: bool
+class ProblemCopyIn(Schema):
+    target_class_id: int
