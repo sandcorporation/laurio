@@ -31,11 +31,16 @@ from django.core.management.base import BaseCommand, CommandError
 from django.test import Client
 from django.utils import timezone
 
+# APP-BOUNDARY-EXCEPTION: 이의 큐에 넣을 Award 를 심는다
 from awards.models import Award
+# APP-BOUNDARY-EXCEPTION: 큐의 재료인 Contest 를 심는다
 from contests.models import Category, Contest, DeliverableType
+# APP-BOUNDARY-EXCEPTION: 심은 Contest 를 심사 상태로 옮긴다
 from contests.transitions import claim_contest_transition
+# APP-BOUNDARY-EXCEPTION: 다시 심기 전에 e2e 원장 행을 걷는다
 from ledger.models import hard_delete_e2e_fixture_rows
 from policies.scope import current_policy
+# APP-BOUNDARY-EXCEPTION: 이의를 걸 수 있게 Score 를 심는다
 from scoring.models import Score
 
 CONTESTS_URL = "/api/contests"
@@ -195,6 +200,7 @@ def _clear_stale_seed_contests() -> int:
     if not stale_contest_ids:
         return 0
 
+    # APP-BOUNDARY-EXCEPTION: e2e 시드가 이의 큐를 심는다
     from appeals.models import AppealRuling, SourceReading
 
     Award.objects.filter(contest_id__in=stale_contest_ids).delete()
@@ -463,7 +469,9 @@ def clear_queues() -> dict:
     이 명령이 만든 Contest·Payout에 한정된 삭제라 감사 기록 보존을 신경 쓸
     대상이 아니다.
     """
+    # APP-BOUNDARY-EXCEPTION: e2e 시드가 이의 큐를 심는다
     from appeals.models import Appeal, SourceReading
+    # APP-BOUNDARY-EXCEPTION: e2e 시드가 지급 큐를 심는다
     from payouts.models import Payout
 
     # 심판 대기(pending) Appeal 이라 AppealRuling 은 없지만, **SourceReading 은

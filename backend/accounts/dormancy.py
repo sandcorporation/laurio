@@ -56,6 +56,7 @@ def _dormant_verifications(as_of, ctx):
     지점들이 2년간 하나도 없었다면 신원을 계속 들고 있을 근거가 실질적으로 없다.
     """
 
+    # APP-BOUNDARY-EXCEPTION: 휴면 판정의 기준 시점이 본인확인 기록에 있다
     from verification.models import Verification
 
     return (
@@ -85,6 +86,7 @@ def _purge_dormant_identity(verification, as_of, ctx):
     건너뛰고 다음 스캔이 다시 본다 — 파기하지 않는 쪽 실수가 되돌리기 쉽다.
     """
 
+    # APP-BOUNDARY-EXCEPTION: 파기 대상이 본인확인 기록 자체다
     from verification.models import RETAINED_IDENTITY_RETENTION_PERIOD, RetainedIdentity, Verification
 
     user = verification.user
@@ -121,6 +123,7 @@ def _purge_dormant_identity(verification, as_of, ctx):
 
 
 def _expired_retained_identities(as_of, ctx):
+    # APP-BOUNDARY-EXCEPTION: 파기 대상이 보존된 신원 자체다
     from verification.models import RetainedIdentity
 
     return RetainedIdentity.objects.filter(retained_until__lte=as_of)

@@ -159,7 +159,7 @@ def test_sms_adapter_refuses_to_call_vendor_when_stored_number_contains_a_comma(
     막는다 — 알리고의 receiver는 콤마를 다중 수신자 구분자로 해석해 최대
     1000명까지 팬아웃될 수 있다."""
 
-    from verification.crypto import encrypt
+    from core.crypto import encrypt
 
     contact = PhoneContact(user=recipient)
     contact.phone_number_encrypted = encrypt("01011112222,01099998888")

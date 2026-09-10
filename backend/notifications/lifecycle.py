@@ -37,6 +37,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
+# APP-BOUNDARY-EXCEPTION: 수명주기 알림이 공모전의 상태 전이에서 나온다
 from contests.models import Contest
 from core import scans
 from core.clock import Clock
@@ -270,6 +271,7 @@ def _send_final_warning(contest, as_of, ctx):
 
 
 def _pending_award_notices(as_of, ctx):
+    # APP-BOUNDARY-EXCEPTION: 선정 알림의 재료가 Award 다
     from awards.models import Award
 
     return Award.objects.filter(result_notice_sent_at__isnull=True).select_related(
@@ -286,6 +288,7 @@ def _recover_award_notice(award, as_of, ctx):
 
 
 def _pending_share_notices(as_of, ctx):
+    # APP-BOUNDARY-EXCEPTION: 배분 알림의 재료가 DistributionShare 다
     from distributions.models import DistributionShare
 
     return DistributionShare.objects.filter(result_notice_sent_at__isnull=True).select_related(

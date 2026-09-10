@@ -16,7 +16,7 @@ from __future__ import annotations
 from django.conf import settings
 from django.db import models
 
-from verification.crypto import decrypt, encrypt
+from core.crypto import decrypt, encrypt
 
 from .phone import normalize_phone_number
 
@@ -150,7 +150,7 @@ class PhoneContact(models.Model):
     정한다(`notifications.adapters_aligo`).
 
     같은 DB의 다른 신원 정보(Verification의 실명·생년월일·CI/DI)와 같은 규율로
-    평문 저장하지 않는다(#51 코드리뷰 지적 3) — `verification.crypto`의 Fernet
+    평문 저장하지 않는다(#51 코드리뷰 지적 3) — `core.crypto`의 Fernet
     암호화를 그대로 재사용한다(같은 VERIFICATION_ENCRYPTION_KEY).
     """
 

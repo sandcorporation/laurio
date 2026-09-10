@@ -28,6 +28,7 @@ from django.core.management.base import BaseCommand
 from storage.adapters import get_storage_adapter
 from storage.filenames import is_unknown_content_type
 from storage.sniffing import SNIFF_BYTES, sniff_content_type
+# APP-BOUNDARY-EXCEPTION: 백필 대상이 제출물 자료 행 자체다
 from submissions.models import SubmissionAsset
 
 

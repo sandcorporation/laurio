@@ -81,7 +81,7 @@ def test_identity_resubmission_after_confirmed_replaces_the_value_and_keeps_conf
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
     assert payout.status == Payout.Status.CONFIRMED
     identity = TaxIdentity.objects.get(payout=payout)
-    from verification.crypto import decrypt
+    from core.crypto import decrypt
 
     assert decrypt(identity.resident_registration_number_encrypted) == "9001017654321"
 

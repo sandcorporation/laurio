@@ -12,7 +12,7 @@ from datetime import date, timedelta
 from django.conf import settings
 from django.db import models
 
-from .crypto import ci_hash, decrypt, encrypt
+from core.crypto import ci_hash, decrypt, encrypt
 
 # 전자상거래법 시행령의 "대금결제 및 재화등의 공급에 관한 기록" 보존 기간(5년)을
 # 따른다 — RetainedIdentity가 실명을 남기는 이유가 결제·지급이 실제로 있었던
@@ -177,7 +177,7 @@ class RetainedIdentity(models.Model):
     아니라 별도 테이블인 이유는, 법이 파기 의무와 보존 의무의 충돌에 요구하는
     답이 "다른 개인정보와 분리하여 저장·관리"이고, CI 고시가 논리적 분리를
     명시적으로 인정하기 때문이다. 암호화는 `Verification`과 같은 방식
-    (`verification.crypto`의 Fernet)을 그대로 쓴다.
+    (`core.crypto`의 Fernet)을 그대로 쓴다.
 
     **CI·DI·전화번호가 들어올 칼럼 자체가 없다.** 그 값들은 동일인 판별과
     통지를 위한 것이라 목적이 탈퇴로 끝난다 — 자리를 아예 두지 않아야 나중에

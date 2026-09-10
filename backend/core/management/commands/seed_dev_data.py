@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from django.core.management.base import BaseCommand
 
+# APP-BOUNDARY-EXCEPTION: dev 시드가 공모전을 심는 것이 이 명령의 목적이다
 from contests.models import Category, DeliverableType
 
 _CATEGORIES = ["엔터테인먼트", "교육", "게임", "라이프스타일"]

@@ -32,6 +32,7 @@ from django.db.models.deletion import ProtectedError
 from accounts.management.commands.seed_e2e_operator_queues import (
     _refuse_in_deployed_environment,
 )
+# APP-BOUNDARY-EXCEPTION: e2e 정리는 Contest 를 먼저 걷어야 기준데이터가 풀린다
 from contests.models import Category, DeliverableType, DeliverableTypeChange
 from policies.models import PlatformPolicy
 from policies.services import UPDATABLE_FIELDS

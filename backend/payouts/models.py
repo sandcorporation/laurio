@@ -334,7 +334,7 @@ class TaxIdentity(models.Model):
     실명·생년월일·CI/DI를 두는 것과 물리적으로도 같은 테이블에 섞지 않는다(용도가
     다르다: Verification은 신원 확인, 이건 세무 신고용).
 
-    암호화는 `verification.crypto`의 Fernet 헬퍼를 그대로 재사용한다 — 이 필드가
+    암호화는 `core.crypto`의 Fernet 헬퍼를 그대로 재사용한다 — 이 필드가
     다루는 값도 "저장 전 암호화해야 하는 개인식별정보"라는 점에서 같은 요구사항이고,
     두 번째 암호화 구현을 새로 만들 이유가 없다.
     """
@@ -453,7 +453,7 @@ class Seller(models.Model):
     # --- 암호화된 필드 접근자 (verification.models.Verification과 같은 패턴) ----
     @property
     def phone_number(self) -> str:
-        from verification.crypto import decrypt
+        from core.crypto import decrypt
 
         if not self.phone_number_encrypted:
             return ""
@@ -461,7 +461,7 @@ class Seller(models.Model):
 
     @phone_number.setter
     def phone_number(self, value: str) -> None:
-        from verification.crypto import encrypt
+        from core.crypto import encrypt
 
         self.phone_number_encrypted = encrypt(value) if value else ""
 

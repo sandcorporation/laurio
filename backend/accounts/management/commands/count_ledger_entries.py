@@ -24,7 +24,9 @@ import json
 
 from django.core.management.base import BaseCommand
 
+# APP-BOUNDARY-EXCEPTION: 공모전별로 원장 건수를 센다
 from contests.models import Contest
+# APP-BOUNDARY-EXCEPTION: 세는 대상이 원장 분개다
 from ledger.models import JournalEntry
 
 from .seed_e2e_operator_queues import _refuse_in_deployed_environment

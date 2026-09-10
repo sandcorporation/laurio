@@ -61,6 +61,7 @@ def _sponsor_has_contest_in_progress(sponsor_profile: SponsorProfile) -> bool:
     전」인지는 Contest.Status.BLOCKS_SPONSOR_WITHDRAWAL 이 답한다(#142). 예전의 status 별 if 사슬과
     fail-closed 가지는 그 사상이 빠짐없음을 테스트로 강제하면서 사라졌다."""
 
+    # APP-BOUNDARY-EXCEPTION: 탈퇴 자격이 공모전 status 에 달려 있다 (ADR-0025)
     from contests.models import Contest
 
     # 필터(status__in)가 아니라 사상 조회다 — DB 에 enum 밖 값이 남는 마이그레이션 사고를 조용히
@@ -73,6 +74,7 @@ def _developer_has_payout_in_progress(developer_profile: DeveloperProfile) -> bo
     """ADR-0025 "지급이 끝나기 전에는 탈퇴할 수 없다"(User Story 6) — Payout.Status.
     BLOCKS_DEVELOPER_WITHDRAWAL 이 답한다(#142)."""
 
+    # APP-BOUNDARY-EXCEPTION: 탈퇴 자격이 지급 status 에 달려 있다 (ADR-0025)
     from payouts.models import Payout
 
     statuses = set(
@@ -106,8 +108,11 @@ def _transaction_basis(user) -> tuple[str, int] | None:
     이 파기 결정의 정당성에 영향을 주지 않는다.
     """
 
+    # APP-BOUNDARY-EXCEPTION: Sponsor 쪽 거래 이력이 공모전에 있다 (#171)
     from contests.models import Contest
+    # APP-BOUNDARY-EXCEPTION: Developer 쪽 거래 이력이 지급에 있다 (#171)
     from payouts.models import Payout
+    # APP-BOUNDARY-EXCEPTION: 파기 대상이 본인확인 기록 자체다
     from verification.models import RetainedIdentity
 
     sponsor_profile = getattr(user, "sponsor_profile", None)
@@ -198,6 +203,7 @@ def execute_withdrawal(user) -> Withdrawal:
         # 바꾸면 옮길 값이 이미 사라진 뒤에 옮기려는 꼴이 된다.
         basis = _transaction_basis(user)
         if basis is not None:
+            # APP-BOUNDARY-EXCEPTION: 보존할 실명을 본인확인 기록에서 옮긴다
             from verification.models import (
                 RETAINED_IDENTITY_RETENTION_PERIOD,
                 RetainedIdentity,

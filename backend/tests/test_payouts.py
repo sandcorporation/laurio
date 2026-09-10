@@ -1002,7 +1002,7 @@ def test_identity_submission_finalizes_payout_and_is_encrypted_in_separate_table
     assert identity.resident_registration_number_encrypted != rrn
     assert rrn not in identity.resident_registration_number_encrypted
 
-    from verification.crypto import decrypt
+    from core.crypto import decrypt
 
     assert decrypt(identity.resident_registration_number_encrypted) == rrn
 
@@ -1089,7 +1089,7 @@ def test_identity_can_be_corrected_after_a_typo(client, category, landing_type):
     identity = TaxIdentity.objects.get(payout=payout)
     assert TaxIdentity.objects.filter(payout=payout).count() == 1
 
-    from verification.crypto import decrypt
+    from core.crypto import decrypt
 
     assert decrypt(identity.resident_registration_number_encrypted) == corrected
 
