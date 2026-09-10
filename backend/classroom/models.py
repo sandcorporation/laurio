@@ -57,6 +57,14 @@ class Class(models.Model):
     join_code = models.CharField(max_length=32, unique=True, default=_generate_join_code)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    #: 강사가 수업을 보관한 시각(#294). null이면 진행중이다. 보관은 지우는
+    #: 것이 아니다 — 이 값만 지우면(되돌리기) 그대로 진행중으로 돌아온다.
+    #: 새 가입·새 제출을 막는 문은 각 엔드포인트가 이 값을 직접 본다 — 지난
+    #: 문제·제출물·판정·달성률을 읽는 경로는 이 값과 무관하게 그대로 연다
+    #: (CONTEXT.md 「Class」 "수업이 끝나면 보관되어 새 가입과 새 제출이
+    #: 닫히지만 읽기는 남는다").
+    archived_at = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         ordering = ["-created_at"]
 

@@ -9,6 +9,8 @@ export type ClassRow = {
   default_model: string;
   has_openai_key: boolean;
   openai_key_masked: string | null;
+  // 강사가 보관했는가(#294) — 참이면 새 가입·새 제출이 닫히고 읽기만 남는다.
+  archived: boolean;
 };
 
 export function fetchMyClasses(): Promise<ClassRow[]> {
@@ -51,4 +53,13 @@ export function regenerateJoinLink(classId: number): Promise<{ join_code: string
   return backendJson<{ join_code: string }>(`/classroom/classes/${classId}/join-link/regenerate`, {
     method: "POST",
   });
+}
+
+// 보관 — 수업이 끝나면 닫되 읽기는 남긴다(#294). 되돌릴 수 있다.
+export function archiveClass(classId: number): Promise<ClassRow> {
+  return backendJson<ClassRow>(`/classroom/classes/${classId}/archive`, { method: "POST" });
+}
+
+export function unarchiveClass(classId: number): Promise<ClassRow> {
+  return backendJson<ClassRow>(`/classroom/classes/${classId}/unarchive`, { method: "POST" });
 }

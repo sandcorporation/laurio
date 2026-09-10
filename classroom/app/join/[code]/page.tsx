@@ -101,7 +101,14 @@ export default function JoinPage() {
       <p data-testid="join-preview-problem-count">문제 {info.problem_count}개</p>
       <p data-testid="join-preview-participant-count">참여자 {info.participant_count}명</p>
 
-      {submit.status === "needsLogin" ? (
+      {info.archived ? (
+        // 보관된 클래스의 가입 링크는 "고장"이 아니라 "끝났다"로 읽혀야
+        // 한다(#294 AC) — 죽은 링크(preview.status === "dead")와 달리
+        // 미리보기는 그대로 보여주고, 가입 폼만 접는다.
+        <p data-testid="join-preview-archived">
+          이 클래스는 보관되어 더 이상 가입할 수 없습니다.
+        </p>
+      ) : submit.status === "needsLogin" ? (
         <div>
           <p data-testid="join-needs-login">
             가입하려면 먼저 로그인해야 합니다. 로그인한 뒤 이 링크로 다시 돌아와 주세요.

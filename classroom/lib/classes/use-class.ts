@@ -6,13 +6,13 @@ import { useCallback, useEffect, useState } from "react";
 
 import { BackendError } from "@/lib/backend/client";
 
-import { fetchClass, regenerateJoinLink, type ClassRow } from "./api";
+import { archiveClass, fetchClass, regenerateJoinLink, unarchiveClass, type ClassRow } from "./api";
 
 export type ClassDetailState =
   | { status: "loading" }
   | { status: "notFound" }
   | { status: "error" }
-  | { status: "ready"; classroom: ClassRow; regenerateError: boolean };
+  | { status: "ready"; classroom: ClassRow; regenerateError: boolean; archiveError: boolean };
 
 export function useClass(classId: number) {
   const [state, setState] = useState<ClassDetailState>({ status: "loading" });
@@ -22,7 +22,9 @@ export function useClass(classId: number) {
     setState({ status: "loading" });
     fetchClass(classId)
       .then((classroom) => {
-        if (!cancelled) setState({ status: "ready", classroom, regenerateError: false });
+        if (!cancelled) {
+          setState({ status: "ready", classroom, regenerateError: false, archiveError: false });
+        }
       })
       .catch((error: unknown) => {
         if (cancelled) return;
@@ -51,11 +53,28 @@ export function useClass(classId: number) {
         status: "ready",
         classroom: { ...state.classroom, join_code },
         regenerateError: false,
+        archiveError: state.archiveError,
       });
     } catch {
-      setState({ status: "ready", classroom: state.classroom, regenerateError: true });
+      setState({ ...state, regenerateError: true });
     }
   }, [classId, state]);
 
-  return { state, reload: load, regenerateJoinCode };
+  // 보관·되돌리기(#294) — 하나가 다른 하나를 대체한다: 되돌리기는 늘
+  // `unarchiveClass`를 부르고, 보관은 늘 `archiveClass`를 부른다. 강사가
+  // 연달아 눌러도(더블클릭 등) 백엔드가 멱등이라 마지막 응답이 이긴다.
+  const setArchived = useCallback(
+    async (archived: boolean) => {
+      if (state.status !== "ready") return;
+      try {
+        const classroom = await (archived ? archiveClass(classId) : unarchiveClass(classId));
+        setState({ status: "ready", classroom, regenerateError: state.regenerateError, archiveError: false });
+      } catch {
+        setState({ ...state, archiveError: true });
+      }
+    },
+    [classId, state],
+  );
+
+  return { state, reload: load, regenerateJoinCode, setArchived };
 }

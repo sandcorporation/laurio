@@ -167,6 +167,7 @@ ADR-0036). 업로드 자료의 값은 `submission:{공모전id}:{개발자id}:{�
 | `PUT /api/classroom/classes/{id}/openai-key` | 강사 본인의 채점 키를 저장한다 — 마스킹된 값만 돌려준다(#284) |
 | `GET /api/classroom/scoring-models` | 선택 가능한 채점 모델과 컨텍스트 크기(#285) |
 | `POST /api/classroom/classes/{id}/join-link/regenerate` | 가입 링크를 다시 뽑는다 — 이전 코드는 죽는다(#279) |
+| `POST .../archive`·`.../unarchive` | 클래스를 보관하고 되돌린다 — 지우지 않는다(#294) |
 | `GET`·`POST /api/classroom/join/{code}` | 가입 링크 미리보기(인증 불필요)와 가입(#280) |
 | `GET /api/classroom/classes/{id}/members` | 참여자 명단 — 강사 전용(#281) |
 | `POST .../members/{id}/expel` | 참여자를 내보낸다 — 행은 지우지 않는다(#281) |
@@ -185,6 +186,12 @@ ADR-0036). 업로드 자료의 값은 `submission:{공모전id}:{개발자id}:{�
 `.../problems/mine`·`.../problems/{id}/mine`·`.../submissions`만 예외다(#286/#288) —
 `ClassMember`인지, 그 문제가 열려 있는지를 같은 404로 가른다. 내보내진(`expelled`)
 참여자는 새 시도만 403으로 막힌다.
+
+**보관(`archived_at`)은 지우지 않는다**(#294) — `.../unarchive`로 언제든 되돌아온다.
+막는 것은 새 가입과 새 제출뿐이다: `GET /join/{code}`는 보관돼도 200과 `archived: true`를
+주고(재발급으로 죽은 코드의 404와 다른 모양 — "링크가 없다"가 아니라 "수업이 끝났다"),
+`POST /join/{code}`와 `POST .../submissions`는 보관된 클래스면 403이다. 그 밖의 모든 읽기
+(상세·문제·명단·참여자의 목록과 제출물·판정)는 보관 여부와 무관하게 그대로 연다.
 
 **제출은 공모전 쪽(`submissions.Submission`)과 자료 모델을 공유한다**(ADR-0039).
 `classroom.ClassroomSubmission`이 그 강의실 자식이다 — `contests.ContestSubmission`과
