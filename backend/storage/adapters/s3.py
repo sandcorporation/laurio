@@ -192,3 +192,9 @@ class S3StorageAdapter:
             Body=content,
             ContentType=content_type or DEFAULT_CONTENT_TYPE,
         )
+
+    def delete_object(self, object_key: str, *, bucket: Bucket = Bucket.PRIVATE) -> None:
+        # S3 호환 DeleteObject는 없는 키를 지워도 204를 낸다 — 재시도가 예외를
+        # 만나지 않는다(#262의 멱등성 요구). `self._client`(서버가 붙는 호스트)를
+        # 쓴다 — `write_object`·`read_object`와 같은 이유다.
+        self._client.delete_object(Bucket=self._bucket_name(bucket), Key=object_key)

@@ -125,6 +125,17 @@ class SubmissionDownloadTTLResolver:
         return settings.STORAGE_DOWNLOAD_URL_TTL_SECONDS
 
 
+class SubmissionAssetDestructionResolver:
+    """object_key -> 그 오브젝트의 파일이 파기되었는가 (#262, ADR-0035).
+
+    `submissions.retention`의 스캔이 `SubmissionAsset.destroyed_at`을 채우는
+    유일한 자리다 — 여기서는 그 값의 유무만 읽는다.
+    """
+
+    def resolve(self, object_key: str) -> bool:
+        return SubmissionAsset.objects.filter(value=object_key, destroyed_at__isnull=False).exists()
+
+
 class SubmissionContentTypeResolver:
     """object_key -> 그 오브젝트에 저장된 content-type, 또는 모르면 None (#241).
 

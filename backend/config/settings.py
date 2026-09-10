@@ -460,6 +460,14 @@ STORAGE_DOWNLOAD_TTL_RESOLVER = _env(
     "STORAGE_DOWNLOAD_TTL_RESOLVER", "submissions.resolvers.SubmissionDownloadTTLResolver"
 )
 
+# object_key -> 그 파일이 파기됐는가 조회 훅(storage.policy.ObjectDestructionResolver, #262).
+# 다운로드 요청이 "보존 기간이 지났다"를 오류가 아니라 정상 응답으로 답하는 데 쓴다.
+# 비어 있으면 storage.policy.UnknownDestructionResolver로 항상 "파기되지 않았다"만
+# 돌려준다 — 모른다고 다운로드를 막을 이유가 없다(#241의 content-type 리졸버와 같은 방향).
+STORAGE_DESTRUCTION_RESOLVER = _env(
+    "STORAGE_DESTRUCTION_RESOLVER", "submissions.resolvers.SubmissionAssetDestructionResolver"
+)
+
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},

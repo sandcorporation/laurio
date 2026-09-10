@@ -51,6 +51,7 @@ from contests.models import Contest, InviteCode, Requirement
 from contests.view_tracking import get_view_count
 from core.clock import Clock
 from core.keyset import decode_cursor, keyset_page
+from policies.scope import current_policy
 from policies.services import get_current_policy
 from storage.adapters import get_storage_adapter
 from storage.filenames import build_download_filename
@@ -66,6 +67,7 @@ from .models import (
     SubmissionAsset,
 )
 from .participation import next_action_for
+from .retention import demo_video_destroy_at
 from .schemas import (
     AssetSummaryOut,
     AssignmentSourceReadingOut,
@@ -844,6 +846,7 @@ def _serialize(
     # 않는다). 판정 자체가 관련 객체를 더 읽을 수 있으므로(점수·이의·Award·
     # Payout), 남의 제출물에는 그 값을 계산조차 하지 않는다.
     next_action = next_action_for(submission) if is_owner else None
+    grace_days = current_policy().demo_video_retention_grace_days
 
     return SubmissionOut(
         id=submission.id,
@@ -861,6 +864,12 @@ def _serialize(
                 order=a.order,
                 is_public=a.is_public,
                 created_by_platform=a.created_by_platform,
+                demo_video_retention_deadline=(
+                    None
+                    if a.kind != SubmissionAsset.Kind.DEMO_VIDEO or a.destroyed_at is not None
+                    else demo_video_destroy_at(contest, grace_days)
+                ),
+                demo_video_destroyed=a.destroyed_at is not None,
             )
             for a in visible_assets
         ],

@@ -111,6 +111,44 @@ def test_write_object_records_the_given_content_type():
     assert adapter.written_content_type(key, bucket=Bucket.PUBLIC_IMAGES) == "image/webp"
 
 
+# --- 삭제 (#262, ADR-0035) ----------------------------------------------------
+
+
+def test_delete_object_removes_the_bytes():
+    adapter = FakeStorageAdapter()
+    key = "submission:1:2:demo-video/to-delete"
+    adapter.write_object(key, b"video bytes")
+
+    adapter.delete_object(key)
+
+    assert adapter.read_object(key) is None
+
+
+def test_delete_object_is_idempotent_for_an_already_missing_key():
+    """파기 스캔의 멱등성 요구(#262) — 지운 다음 기록하기 전에 죽으면 다음 실행이
+    같은 키를 한 번 더 지운다. 그 재시도가 예외를 만나면 스캔이 poison pill을
+    만든다."""
+
+    adapter = FakeStorageAdapter()
+    key = "submission:1:2:demo-video/never-existed"
+
+    adapter.delete_object(key)  # 예외 없이 조용히 끝난다.
+
+    assert adapter.read_object(key) is None
+
+
+def test_delete_object_is_scoped_per_bucket():
+    adapter = FakeStorageAdapter()
+    key = "contest-image:1/same-key"
+    adapter.write_object(key, b"private bytes", bucket=Bucket.PRIVATE)
+    adapter.write_object(key, b"public bytes", bucket=Bucket.PUBLIC_IMAGES)
+
+    adapter.delete_object(key, bucket=Bucket.PRIVATE)
+
+    assert adapter.read_object(key, bucket=Bucket.PRIVATE) is None
+    assert adapter.read_object(key, bucket=Bucket.PUBLIC_IMAGES) == b"public bytes"
+
+
 def test_write_object_without_content_type_falls_back_to_the_shared_default():
     """형식을 모르는 바이트는 어댑터 계약이 한 번 정한 기본값을 받는다 — 호출부가
     매번 그것을 다시 고르지 않는다."""

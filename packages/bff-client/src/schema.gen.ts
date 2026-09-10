@@ -3869,9 +3869,14 @@ export interface components {
         /** DownloadResponse */
         DownloadResponse: {
             /** Download Url */
-            download_url: string;
+            download_url?: string | null;
+            /**
+             * Expired
+             * @default false
+             */
+            expired: boolean;
             /** Expires At */
-            expires_at: string;
+            expires_at?: string | null;
         };
         /**
          * EntrySide
@@ -5128,6 +5133,13 @@ export interface components {
              * @default false
              */
             created_by_platform: boolean;
+            /**
+             * Demo Video Destroyed
+             * @default false
+             */
+            demo_video_destroyed: boolean;
+            /** Demo Video Retention Deadline */
+            demo_video_retention_deadline?: string | null;
             /** Id */
             id: number;
             /** Is Public */

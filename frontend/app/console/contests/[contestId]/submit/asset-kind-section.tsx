@@ -29,6 +29,12 @@ export interface EditableAsset {
   testAccount: string;
   /** `repository` 자료만 의미가 있다 — #193 의 스캔이 채우기 전까지는 null. */
   isPublic?: boolean | null;
+  /** `demo_video` 자료만 의미가 있다(#262) — 파일이 지워지는(또는 지워진) 시각.
+   * 아직 정해지지 않았으면(진행 중 공모전) undefined. */
+  retentionDeadline?: string | null;
+  /** `demo_video` 자료만 의미가 있다(#262) — 보존 기간이 지나 파일이 이미
+   * 지워졌는가. 자료 행·근거는 그대로 있지만 이 파일만 없다는 뜻이다. */
+  retentionExpired?: boolean;
   // 방금 업로드한 File의 MIME 타입(#241) — `UploadField.onUploaded`가 채운다.
   // 기존 자료를 그대로 불러온 행(`assetsOfKind`)에는 없다 — 서버가 이 값을
   // 다시 내주지 않고(`SubmissionAssetOut`), 그래도 된다: value(object_key)가
@@ -48,6 +54,44 @@ export function createEmptyAsset(): EditableAsset {
 // 미리 보여줄 뿐이다.
 const GITHUB_REPO_URL_PATTERN =
   /^https:\/\/github\.com\/[A-Za-z0-9._-]{1,100}\/[A-Za-z0-9._-]{1,100}\/?$/;
+
+// 시연 영상 파일의 보관 시점(#262) — 예측 가능해지도록 파기 전에 미리
+// 알려준다("파기를 미리 말한다", 결정문). 알림을 새로 만들지 않는 대신
+// 이 문구 하나가 그 역할을 한다.
+function formatRetentionDate(iso: string): string {
+  const date = new Date(iso);
+  return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(
+    date.getDate()
+  ).padStart(2, "0")}`;
+}
+
+function DemoVideoRetentionNote({
+  retentionDeadline,
+  retentionExpired,
+}: {
+  retentionDeadline: string | null | undefined;
+  retentionExpired: boolean | undefined;
+}) {
+  if (retentionExpired) {
+    return (
+      <p className="text-xs text-attention" data-testid="demo-video-retention-expired">
+        보관 기간이 지나 파일이 삭제되었습니다. 자료와 근거는 그대로 남아 있습니다.
+      </p>
+    );
+  }
+  if (retentionDeadline) {
+    return (
+      <p className="text-xs text-ink/60" data-testid="demo-video-retention-deadline">
+        {formatRetentionDate(retentionDeadline)}까지 보관되고, 그 뒤 파일이 삭제됩니다.
+      </p>
+    );
+  }
+  return (
+    <p className="text-xs text-ink/60" data-testid="demo-video-retention-pending">
+      마감·심사가 끝나고 일정 기간이 지나면 파일이 삭제됩니다. 자료와 근거는 남습니다.
+    </p>
+  );
+}
 
 function RepositoryBadge({ isPublic }: { isPublic: boolean | null | undefined }) {
   if (isPublic === true) {
@@ -265,6 +309,12 @@ export function AssetKindSection({
                     >
                       업로드됨: {row.label.trim() || `${title} 파일 ${index + 1}`}
                     </p>
+                  )}
+                  {row.value && kind === "demo_video" && (
+                    <DemoVideoRetentionNote
+                      retentionDeadline={row.retentionDeadline}
+                      retentionExpired={row.retentionExpired}
+                    />
                   )}
                 </>
               ) : (

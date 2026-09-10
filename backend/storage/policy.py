@@ -197,6 +197,37 @@ def get_download_ttl_resolver() -> DownloadTTLResolver:
     return resolver_cls()
 
 
+class ObjectDestructionResolver(Protocol):
+    """object_key -> 이 오브젝트의 **파일**이 이미 파기되었는가(#262, ADR-0035).
+
+    보존 기간이 지난 시연 영상은 스토리지 오브젝트만 지워지고 자료 행은
+    남는다(`submissions.retention`) — 다운로드가 그 사실을 조회할 자리가
+    이 확장점이다. `TargetStateResolver`와 같은 이유로 storage 앱은
+    `SubmissionAsset`을 모르므로 object_key만 받는다.
+    """
+
+    def resolve(self, object_key: str) -> bool: ...
+
+
+class UnknownDestructionResolver:
+    """실제 도메인 리졸버가 붙기 전까지의 기본값 — 항상 "파기되지 않았다"(fail-safe).
+
+    `UnknownContentTypeResolver`와 같은 방향이다: 모른다고 다운로드 자체를
+    막을 이유가 없다 — 지금까지의 동작(항상 presigned URL을 발급한다)이 그대로다.
+    """
+
+    def resolve(self, object_key: str) -> bool:
+        return False
+
+
+def get_destruction_resolver() -> ObjectDestructionResolver:
+    path = getattr(settings, "STORAGE_DESTRUCTION_RESOLVER", "") or (
+        "storage.policy.UnknownDestructionResolver"
+    )
+    resolver_cls = import_string(path)
+    return resolver_cls()
+
+
 def _authenticated_user_id(request: HttpRequest) -> int | None:
     """JWT로 확인된 호출자의 User pk. 없으면(비로그인·무효 토큰) None."""
 
