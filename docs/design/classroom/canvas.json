@@ -1,0 +1,12 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html",    "title": "강사 · 클래스 상세 — 문제 중심",   "x": 0,    "y": 0,    "w": 1440, "h": 1020 },
+    { "file": "Roster.dc.html",  "title": "강사 · 클래스 상세 — 사람 중심",   "x": 1560, "y": 0,    "w": 1440, "h": 1180 },
+    { "file": "Join.dc.html",    "title": "가입 링크 (모바일)",              "x": 3120, "y": 0,    "w": 390,  "h": 844 },
+    { "file": "Classes.dc.html", "title": "강사 · 내 클래스",                "x": 0,    "y": 1320, "w": 1440, "h": 900 },
+    { "file": "Problem.dc.html", "title": "강사 · 문제 편집",                "x": 1560, "y": 1320, "w": 1440, "h": 1020 },
+    { "file": "Learner.dc.html", "title": "참여자 · 문제와 제출",            "x": 0,    "y": 2460, "w": 1440, "h": 1080 },
+    { "file": "Budget.dc.html",  "title": "강사 · 채점 설정과 예산",          "x": 1560, "y": 2460, "w": 1440, "h": 1080 }
+  ],
+  "launch": { "view": "canvas" }
+}

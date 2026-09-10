@@ -648,6 +648,7 @@ export_openapi_schema.py`)로 스키마를 뽑은 뒤 `openapi-typescript` 로 �
 | `CONTEXT.md` | 지금 이 도메인을 어떻게 부르는가 — 언어 | 현재 |
 | `docs/features/` | 지금 이 서비스가 무엇을 하는가 — 기능 | 현재 |
 | `docs/adr/` | 그때 무엇을 왜 정했는가 | 그 시점 |
+| `docs/design/` | 그때 화면을 어떻게 그리기로 했는가 — 시안 | 그 시점 |
 | `REQUEST.md` | 애초에 무엇을 만들자고 했는가 | 2026-08 |
 | 닫힌 이슈·스펙 | 그때 무엇이 문제였고 무엇을 했는가 | 그 시점 |
 
