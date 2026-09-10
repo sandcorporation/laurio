@@ -9,26 +9,15 @@ import { useParams } from "next/navigation";
 import { useState } from "react";
 
 import { useClass } from "@/lib/classes/use-class";
+import { formatAchievementRate } from "@/lib/problems/achievement";
 import { useProblems } from "@/lib/problems/use-problems";
+
+import { RosterGridTab } from "./roster-grid-tab";
 
 const STATUS_LABEL: Record<string, string> = {
   draft: "초안",
   open: "열림",
 };
-
-// 달성률 표시(#289, CONTEXT.md 「달성률」) — 분모가 0이면 "0%"가 아니라
-// "아직 없음"으로 말한다(AC). 0%(참여자는 있지만 아무도 못 품)와 구별해야
-// 하므로 `pass_rate`가 아니라 `member_count`로 분기한다.
-function formatAchievementRate(problem: {
-  passed_count: number;
-  member_count: number;
-  pass_rate: number | null;
-}): string {
-  if (problem.member_count === 0 || problem.pass_rate === null) {
-    return "아직 없음";
-  }
-  return `${Math.round(problem.pass_rate * 100)}% (${problem.passed_count}/${problem.member_count}명)`;
-}
 
 function joinLinkUrl(joinCode: string): string {
   if (typeof window === "undefined") return "";
@@ -78,11 +67,14 @@ function JoinLinkSection({
   );
 }
 
+type DetailTab = "problems" | "grid";
+
 export default function ClassDetailPage() {
   const params = useParams<{ id: string }>();
   const classId = Number(params.id);
   const { state: classState, regenerateJoinCode } = useClass(classId);
   const { state: problemsState, move } = useProblems(classId);
+  const [tab, setTab] = useState<DetailTab>("problems");
 
   if (classState.status === "loading") {
     return (
@@ -132,58 +124,89 @@ export default function ClassDetailPage() {
         </Link>
       </p>
 
-      <h2>문제</h2>
-      <p>
-        <Link href={`/classes/${classId}/problems/new`} data-testid="new-problem-link">
-          새 문제
-        </Link>
-      </p>
+      {/* 클래스 상세의 두 탭(#290) — 「문제 중심」은 문제마다 달성률을 보여주고
+          (#289), 「참여자별 현황」은 참여자 × 문제 격자로 누가 막혔는지 보여준다.
+          같은 사실을 두 번 셈하지 않도록 달성률 값은 둘 다 백엔드의 같은
+          계산에서 나온다(#290 AC). */}
+      <div role="tablist" aria-label="클래스 상세 탭">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "problems"}
+          data-testid="detail-tab-problems"
+          onClick={() => setTab("problems")}
+        >
+          문제 중심
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "grid"}
+          data-testid="detail-tab-grid"
+          onClick={() => setTab("grid")}
+        >
+          참여자별 현황
+        </button>
+      </div>
 
-      {problemsState.status === "loading" ? (
-        <p data-testid="problems-loading">불러오는 중...</p>
-      ) : problemsState.status === "error" ? (
-        <p data-testid="problems-error">문제 목록을 불러오지 못했습니다.</p>
-      ) : problemsState.problems.length === 0 ? (
-        <p data-testid="problems-empty-state">아직 만든 문제가 없습니다.</p>
-      ) : (
+      {tab === "problems" ? (
         <>
-          {problemsState.reorderError ? (
-            <p data-testid="problems-reorder-error">순서를 바꾸지 못했습니다. 다시 시도해주세요.</p>
-          ) : null}
-          <ol data-testid="problems-list">
-            {problemsState.problems.map((problem, index) => (
-              <li key={problem.id} data-testid={`problem-row-${problem.id}`}>
-                <Link
-                  href={`/classes/${classId}/problems/${problem.id}`}
-                  data-testid={`problem-row-${problem.id}-link`}
-                >
-                  {problem.title}
-                </Link>
-                <span data-testid={`problem-row-${problem.id}-status`}> · {STATUS_LABEL[problem.status]}</span>
-                <span data-testid={`problem-row-${problem.id}-achievement-rate`}>
-                  {" "}
-                  · 달성률 {formatAchievementRate(problem)}
-                </span>
-                <button
-                  type="button"
-                  data-testid={`problem-row-${problem.id}-move-up`}
-                  disabled={index === 0}
-                  onClick={() => move(problem.id, "up")}
-                >
-                  위로
-                </button>
-                <button
-                  type="button"
-                  data-testid={`problem-row-${problem.id}-move-down`}
-                  disabled={index === problemsState.problems.length - 1}
-                  onClick={() => move(problem.id, "down")}
-                >
-                  아래로
-                </button>
-              </li>
-            ))}
-          </ol>
+          <h2>문제</h2>
+          <p>
+            <Link href={`/classes/${classId}/problems/new`} data-testid="new-problem-link">
+              새 문제
+            </Link>
+          </p>
+
+          {problemsState.status === "loading" ? (
+            <p data-testid="problems-loading">불러오는 중...</p>
+          ) : problemsState.status === "error" ? (
+            <p data-testid="problems-error">문제 목록을 불러오지 못했습니다.</p>
+          ) : problemsState.problems.length === 0 ? (
+            <p data-testid="problems-empty-state">아직 만든 문제가 없습니다.</p>
+          ) : (
+            <>
+              {problemsState.reorderError ? (
+                <p data-testid="problems-reorder-error">순서를 바꾸지 못했습니다. 다시 시도해주세요.</p>
+              ) : null}
+              <ol data-testid="problems-list">
+                {problemsState.problems.map((problem, index) => (
+                  <li key={problem.id} data-testid={`problem-row-${problem.id}`}>
+                    <Link
+                      href={`/classes/${classId}/problems/${problem.id}`}
+                      data-testid={`problem-row-${problem.id}-link`}
+                    >
+                      {problem.title}
+                    </Link>
+                    <span data-testid={`problem-row-${problem.id}-status`}> · {STATUS_LABEL[problem.status]}</span>
+                    <span data-testid={`problem-row-${problem.id}-achievement-rate`}>
+                      {" "}
+                      · 달성률 {formatAchievementRate(problem)}
+                    </span>
+                    <button
+                      type="button"
+                      data-testid={`problem-row-${problem.id}-move-up`}
+                      disabled={index === 0}
+                      onClick={() => move(problem.id, "up")}
+                    >
+                      위로
+                    </button>
+                    <button
+                      type="button"
+                      data-testid={`problem-row-${problem.id}-move-down`}
+                      disabled={index === problemsState.problems.length - 1}
+                      onClick={() => move(problem.id, "down")}
+                    >
+                      아래로
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            </>
+          )}
         </>
+      ) : (
+        <RosterGridTab classId={classId} />
       )}
     </main>
   );

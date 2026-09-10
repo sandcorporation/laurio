@@ -51,9 +51,13 @@ from .schemas import (
     ClassOut,
     ClassPatchIn,
     ClassroomChecklistVerdictOut,
+    ClassroomGridCellOut,
+    ClassroomGridMemberOut,
     ClassroomProblemListItemOut,
     ClassroomProblemMineOut,
+    ClassroomProblemStatsOut,
     ClassroomProblemSubmissionsOut,
+    ClassroomRosterGridOut,
     ClassroomScoreOut,
     ClassroomSubmissionIn,
     ClassroomSubmissionOut,
@@ -463,6 +467,91 @@ def expel_member(request: HttpRequest, class_id: int, member_id: int):
         member.save(update_fields=["expelled_at"])
 
     return 200, _serialize_member(member, instructor_id=class_obj.instructor_id)
+
+
+# --- Roster grid (#290) -----------------------------------------------------------
+
+
+def _cell_status(submissions: list[ClassroomSubmission], required_item_ids: set[int]) -> str:
+    """이 참여자·이 문제 한 칸의 상태 — **통과 이력**을 그린다(최신 시도가
+    아니다, #290 AC). 우선순위는 이 순서다: 한 번이라도 통과했으면 이후
+    시도가 미통과여도 "passed"다(#289/#288과 같은 OR 규칙). 통과가 없고
+    아직 채점을 기다리는 시도가 있으면 "scoring" — 아직 뒤집힐 여지가
+    있다는 뜻이다. 전부 채점됐는데 하나도 통과가 없으면 "attempted_not_passed".
+    시도 자체가 없으면 "not_submitted"."""
+
+    if not submissions:
+        return "not_submitted"
+    if any(_is_score_passed(getattr(s, "classroom_score", None), required_item_ids) for s in submissions):
+        return "passed"
+    if any(getattr(s, "classroom_score", None) is None for s in submissions):
+        return "scoring"
+    return "attempted_not_passed"
+
+
+@router.get(
+    "/classes/{class_id}/roster-grid",
+    response={200: ClassroomRosterGridOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def get_roster_grid(request: HttpRequest, class_id: int):
+    """참여자 × 문제 격자(#290) — 「누가 어디서 막혔는지」. 강사 전용이다,
+    참여자 명단과 같은 이유로 남의 클래스는 404다. 달성률 행은 `_problem_pass_stats`를
+    그대로 재사용해 문제 중심 탭(`list_problems`)과 정확히 같은 값을 낸다(AC) —
+    계산을 두 번 쓰지 않는다."""
+
+    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    problems = list(class_obj.problems.prefetch_related("checklist_items").all())
+    members = list(class_obj.members.all())
+    active_member_ids = _active_member_ids(class_obj)
+
+    submissions = ClassroomSubmission.objects.filter(
+        problem__in=problems, member__in=members
+    ).select_related("classroom_score")
+    submissions_by_key: dict[tuple[int, int], list[ClassroomSubmission]] = {}
+    for submission in submissions:
+        submissions_by_key.setdefault((submission.problem_id, submission.member_id), []).append(submission)
+
+    required_ids_by_problem = {
+        problem.id: _required_checklist_item_ids(problem.checklist_items.all()) for problem in problems
+    }
+
+    problem_stats = []
+    for problem in problems:
+        passed_count, member_count = _problem_pass_stats(problem, active_member_ids)
+        problem_stats.append(
+            ClassroomProblemStatsOut(
+                id=problem.id,
+                title=problem.title,
+                passed_count=passed_count,
+                member_count=member_count,
+                pass_rate=(passed_count / member_count) if member_count else None,
+            )
+        )
+
+    member_rows = []
+    for member in members:
+        cells = [
+            ClassroomGridCellOut(
+                problem_id=problem.id,
+                status=_cell_status(
+                    submissions_by_key.get((problem.id, member.id), []),
+                    required_ids_by_problem[problem.id],
+                ),
+            )
+            for problem in problems
+        ]
+        member_rows.append(
+            ClassroomGridMemberOut(
+                id=member.id,
+                display_name=member.display_name,
+                is_instructor=member.user_id == class_obj.instructor_id,
+                expelled=member.expelled_at is not None,
+                cells=cells,
+            )
+        )
+
+    return 200, ClassroomRosterGridOut(problems=problem_stats, members=member_rows)
 
 
 # --- Problem -------------------------------------------------------------------

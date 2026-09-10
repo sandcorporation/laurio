@@ -824,6 +824,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/roster-grid": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Roster Grid
+         * @description 참여자 × 문제 격자(#290) — 「누가 어디서 막혔는지」. 강사 전용이다,
+         *     참여자 명단과 같은 이유로 남의 클래스는 404다. 달성률 행은 `_problem_pass_stats`를
+         *     그대로 재사용해 문제 중심 탭(`list_problems`)과 정확히 같은 값을 낸다(AC) —
+         *     계산을 두 번 쓰지 않는다.
+         */
+        get: operations["classroom_api_get_roster_grid"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/join/{join_code}": {
         parameters: {
             query?: never;
@@ -3882,6 +3905,26 @@ export interface components {
             /** Reasoning */
             reasoning: string;
         };
+        /** ClassroomGridCellOut */
+        ClassroomGridCellOut: {
+            /** Problem Id */
+            problem_id: number;
+            /** Status */
+            status: string;
+        };
+        /** ClassroomGridMemberOut */
+        ClassroomGridMemberOut: {
+            /** Cells */
+            cells: components["schemas"]["ClassroomGridCellOut"][];
+            /** Display Name */
+            display_name: string;
+            /** Expelled */
+            expelled: boolean;
+            /** Id */
+            id: number;
+            /** Is Instructor */
+            is_instructor: boolean;
+        };
         /**
          * ClassroomProblemListItemOut
          * @description 참여자의 문제 목록 한 줄(#288) — 통과/미통과가 한눈에 보이도록 문제
@@ -3931,11 +3974,37 @@ export interface components {
             /** Title */
             title: string;
         };
+        /**
+         * ClassroomProblemStatsOut
+         * @description 참여자 × 문제 격자의 열 머리와 달성률 행(#290) — 문제 중심 탭의
+         *     `ProblemOut`과 같은 `passed_count`·`member_count`·`pass_rate`를 그대로
+         *     옮긴다(같은 계산 함수를 재사용해 두 화면이 어긋나지 않는다, AC "달성률
+         *     행의 값이 문제 중심 탭의 값과 정확히 같다").
+         */
+        ClassroomProblemStatsOut: {
+            /** Id */
+            id: number;
+            /** Member Count */
+            member_count: number;
+            /** Pass Rate */
+            pass_rate?: number | null;
+            /** Passed Count */
+            passed_count: number;
+            /** Title */
+            title: string;
+        };
         /** ClassroomProblemSubmissionsOut */
         ClassroomProblemSubmissionsOut: {
             problem: components["schemas"]["ClassroomProblemMineOut"];
             /** Submissions */
             submissions: components["schemas"]["ClassroomSubmissionOut"][];
+        };
+        /** ClassroomRosterGridOut */
+        ClassroomRosterGridOut: {
+            /** Members */
+            members: components["schemas"]["ClassroomGridMemberOut"][];
+            /** Problems */
+            problems: components["schemas"]["ClassroomProblemStatsOut"][];
         };
         /**
          * ClassroomScoreOut
@@ -7352,6 +7421,37 @@ export interface operations {
             };
             /** @description Unprocessable Content */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_get_roster_grid: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassroomRosterGridOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

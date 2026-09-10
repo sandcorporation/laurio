@@ -206,6 +206,41 @@ class ClassroomProblemSubmissionsOut(Schema):
     submissions: list[ClassroomSubmissionOut]
 
 
+class ClassroomProblemStatsOut(Schema):
+    """참여자 × 문제 격자의 열 머리와 달성률 행(#290) — 문제 중심 탭의
+    `ProblemOut`과 같은 `passed_count`·`member_count`·`pass_rate`를 그대로
+    옮긴다(같은 계산 함수를 재사용해 두 화면이 어긋나지 않는다, AC "달성률
+    행의 값이 문제 중심 탭의 값과 정확히 같다")."""
+
+    id: int
+    title: str
+    passed_count: int
+    member_count: int
+    pass_rate: float | None = None
+
+
+class ClassroomGridCellOut(Schema):
+    problem_id: int
+    #: "passed" | "attempted_not_passed" | "scoring" | "not_submitted" —
+    #: 통과 이력을 그린다(최신 시도가 아니다, #290 AC). 우선순위는 이
+    #: 순서대로다: 한 번이라도 통과했으면 다른 시도의 결과와 무관하게
+    #: "passed"다.
+    status: str
+
+
+class ClassroomGridMemberOut(Schema):
+    id: int
+    display_name: str
+    is_instructor: bool
+    expelled: bool
+    cells: list[ClassroomGridCellOut]
+
+
+class ClassroomRosterGridOut(Schema):
+    problems: list[ClassroomProblemStatsOut]
+    members: list[ClassroomGridMemberOut]
+
+
 class ClassroomProblemListItemOut(Schema):
     """참여자의 문제 목록 한 줄(#288) — 통과/미통과가 한눈에 보이도록 문제
     상세보다 훨씬 좁다."""
