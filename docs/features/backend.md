@@ -191,6 +191,28 @@ ADR-0036). 업로드 자료의 값은 `submission:{공모전id}:{개발자id}:{�
 모양이다(공모전의 `submission:<contest_id>:<developer_user_id>:<slot>`과는 접두어로
 갈린다, `submissions.resolvers.SubmissionTargetStateResolver`).
 
+**제출 즉시 비동기로 채점된다**(#287) — `classroom-submission-scoring` 스캔(60초
+주기)이 `ClassroomScore`가 아직 없고 그 클래스에 키가 있는 시도를 찾아 강사 본인의
+키·그 문제의 모델로 친다. `classroom.ClassroomScore`·`ClassroomScoringAttempt`가
+`scoring.Score`·`ScoringAttempt`와 같은 규율(ADR-0006 「시도당 하나, 재채점 없음」)을
+따르는 강의실 전용 테이블이다 — `scoring`·`ledger`가 공모전 가족이라 그 모델을
+가리킬 수 없다(ADR-0037/0039). 채점 실패가 5회(마감이 없어 ADR-0031의 「마감 후
+6시간 유예」는 적용하지 않는다, 횟수만 본다)에 이르거나 영구 실패(예: 틀린 키의
+401)면 전체 미달 판정을 자동으로 남긴다 — 사유는 「고장」처럼 읽히지 않고
+`submissions.scoring_basis.PLATFORM_FAILURE_MODEL_VERSION`을 재사용해 판정
+성격을 남기되, 참가자 문구는 강의실 전용(이의제기가 없으므로 그 언급을 뺀다)이다.
+키 없는 클래스의 시도는 스캔 후보가 아니다 — 실패 이력을 남기지 않고 "아직
+시도하지 않은" 채로 있다가 강사가 키를 넣으면 다음 tick에 채점된다.
+
+**공모전 전용이던 어댑터 셋이 공유층으로 옮겨졌다**(#287) — 강의실이 채점하려면
+공모전 가족(`scoring`·`repositories`)을 부를 수 없어서다(ADR-0037). `core.
+llm_scoring`(#274)에 이어 `core.repository_adapters`(GitHub 저장소 clone·공개
+확인, 원래 `repositories.adapters`)와 `core.source_selection`(zip에서 채점
+대상 파일을 예산 안에서 선별, 원래 `scoring.source_selection`)이 옮겨갔다.
+옛 경로는 재노출 shim으로 남아 있다(`GITHUB_ADAPTER_MODE` 등 dotted path와
+`docker/*.env.example`을 건드리지 않기 위해서다, #274와 같은 판단) — 공모전
+채점·저장소 스캔 동작은 그대로다.
+
 **통과는 필수 항목을 전부 충족했다는 판정이다**(CONTEXT.md 「통과」) — 문제마다
 합격선을 따로 두지 않는다. 그래서 필수 항목이 하나도 없는 문제는 통과가 정의되지
 않아 `open`으로 전이할 수 없다. 이미 열린 문제도 강사가 언제든 체크리스트를 고칠 수
@@ -216,7 +238,7 @@ ADR-0036). 업로드 자료의 값은 `submission:{공모전id}:{개발자id}:{�
 심사 비교·공개 프로필이 그 URL을 자료 목록에 이미 실어 보낸다 — 화면이 별도로 발급받지
 않는다.
 
-## 스스로 도는 일 — 스캔 24개
+## 스스로 도는 일 — 스캔 25개
 
 **시간은 시임이 아니라 주입 가능한 의존성이다**(ADR-0003). 시각이 지났다고 상태가 저절로
 바뀌지 않는다 — 스캔이 조건부 UPDATE 로 옮긴다. 등록부가 곧 beat 스케줄이고, 전부 60초
@@ -225,7 +247,7 @@ ADR-0036). 업로드 자료의 값은 `submission:{공모전id}:{개발자id}:{�
 | 무엇을 | 스캔 |
 | --- | --- |
 | 상태 전이 | `contest-close` · `contest-judging-end` · `assignment-close` |
-| 채점 | `submission-scoring` · `repository-visibility` |
+| 채점 | `submission-scoring` · `repository-visibility` · `classroom-submission-scoring`(#287) |
 | 이미지 | `contest-image-optimization` |
 | 환불 | `payment-refund-request` · `payment-refund-reconcile` |
 | 배분·지급 | `distribution-create` · `distribution-share-payout` · `handover-release` · `payout-awaits-you` · `seller-registration-recovery` |

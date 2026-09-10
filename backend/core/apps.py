@@ -11,10 +11,13 @@ class CoreConfig(AppConfig):
         # 때문이다(Django 앱 로딩 순서 규칙).
         from . import transitions  # noqa: F401
 
-        # LLM 채점 어댑터 부팅 가드(#83, #274) — 원래 scoring 앱이 등록했다.
-        # core.llm_scoring으로 어댑터가 공유층에 옮겨오면서 검사도 함께 옮겨왔다.
+        # LLM 채점·GitHub 저장소 어댑터 부팅 가드(#83, #193, #274, #287) — 원래
+        # scoring·repositories 앱이 각각 등록했다. core.llm_scoring·
+        # core.repository_adapters로 어댑터가 공유층에 옮겨오면서 검사도 함께
+        # 옮겨왔다.
         from django.core.checks import register
 
         from . import checks
 
         register(checks.check_llm_adapter_mode)
+        register(checks.check_github_adapter_mode)

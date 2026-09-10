@@ -152,6 +152,21 @@ class ClassroomSubmissionIn(Schema):
     content_type: str | None = None
 
 
+class ClassroomChecklistVerdictOut(Schema):
+    checklist_item_id: int
+    is_met: bool
+    reasoning: str
+
+
+class ClassroomScoreOut(Schema):
+    """채점 스냅샷 하나(#287) — `classroom.models.ClassroomScore`를 그대로
+    비춘다. append-only라 이 값은 한 번 나오면 바뀌지 않는다."""
+
+    model_version: str
+    reasoning: list[ClassroomChecklistVerdictOut]
+    created_at: datetime
+
+
 class ClassroomSubmissionOut(Schema):
     id: int
     problem_id: int
@@ -163,6 +178,12 @@ class ClassroomSubmissionOut(Schema):
     #: 따른다(강의실 참여자는 DeveloperProfile이 없다, #286 AC).
     download_url: str | None = None
     created_at: datetime
+    #: "pending"(아직 채점되지 않았다) 또는 "scored"(채점이 끝났다) — 화면이
+    #: 「채점 중」을 구별하는 유일한 근거다(#287 AC). Score 유무만으로 정하므로
+    #: 키가 없어 채점을 시작조차 못 한 시도도 "pending"이다 — 그 이유는 화면이
+    #: 클래스의 `has_openai_key`를 함께 봐서 구별한다.
+    status: str
+    score: ClassroomScoreOut | None = None
 
 
 class ClassroomProblemSubmissionsOut(Schema):

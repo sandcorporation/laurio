@@ -395,30 +395,41 @@ def _parse_openai_scoring_response(
 
 
 class OpenAIScoringAdapter:
-    """OpenAI로 실제 채점하는 실물 어댑터 (#88, ADR-0006, ADR-0007, ADR-0014).
+    """OpenAI로 실제 채점하는 실물 어댑터 (#88, #287, ADR-0006, ADR-0007, ADR-0014).
 
     `LLM_ADAPTER_MODE=scoring.adapters.OpenAIScoringAdapter`로 켠다
-    (`core.adapters.resolve_adapter`). 자격증명은 환경변수
+    (`core.adapters.resolve_adapter`). **공모전 채점**의 자격증명은 환경변수
     `OPEN_AI_API_KEY`에서만 읽는다 — 저장소에는 들어가지 않는다. 모델명은
     `LLM_OPENAI_MODEL`(기본 `gpt-4o-mini`), temperature는
     `LLM_OPENAI_TEMPERATURE`(기본 0)로 배포 환경마다 바꿀 수 있다 — compose의
     `environment`에 실려 컨테이너까지 전달된다(#88 코드리뷰 지적 6, docker/
     compose.staging.yaml·compose.prod.yaml).
 
+    **강의실 채점은 `api_key` 인자로 강사 본인의 키를 직접 넘긴다**(#287) —
+    플랫폼이 대신 내지 않는다는 결정(CONTEXT.md 「Class」) 때문에 `resolve_adapter`가
+    부팅 시점에 한 번 고정하는 env 기반 자격증명을 쓸 수 없다. `classroom.scoring`이
+    `core.adapters.get_adapter()`를 거치지 않고 이 클래스를 직접, 매 채점마다
+    `Class.openai_api_key_encrypted`를 복호화해 생성한다 — env 폴백은 공모전
+    경로를 그대로 두기 위해 남긴다.
+
     생성자가 자격증명 없이는 인스턴스화되지 않는다 — 배포 환경에서
-    `LLM_ADAPTER_MODE`가 이 클래스를 가리키는데 키가 없으면
+    `LLM_ADAPTER_MODE`가 이 클래스를 가리키는데 env에 키가 없으면
     `core.adapters.check_adapter_mode`(#83)가 이 예외를 부팅 시점에 잡아 배포를
-    거부한다. 그래서 자격증명 부재가 첫 채점 요청에서야 500으로 드러나지 않는다.
+    거부한다. 그래서 자격증명 부재가 첫 채점 요청에서야 500으로 드러나지 않는다
+    (강의실 경로는 이 부팅 가드 대상이 아니다 — 키가 클래스마다 다르므로 부팅
+    시점에 고정할 수 있는 값이 아니다, `classroom.scoring`이 키 없음을 직접
+    다룬다).
     """
 
     def __init__(
         self,
         *,
+        api_key: str | None = None,
         model: str | None = None,
         temperature: float | None = None,
         timeout: float = _OPENAI_REQUEST_TIMEOUT_SECONDS,
     ) -> None:
-        api_key = os.environ.get("OPEN_AI_API_KEY") or ""
+        api_key = api_key if api_key is not None else (os.environ.get("OPEN_AI_API_KEY") or "")
         if not api_key:
             raise LLMAdapterError(
                 "OPEN_AI_API_KEY가 비어 있다 — 실물 OpenAI 채점 어댑터는 자격증명 없이 "

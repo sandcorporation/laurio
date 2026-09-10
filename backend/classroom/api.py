@@ -33,7 +33,15 @@ from storage.adapters import get_storage_adapter
 from storage.filenames import build_download_filename, safe_download_base_name
 from submissions.models import GITHUB_REPO_URL_PATTERN, Submission, SubmissionAsset
 
-from .models import ChecklistItem, Class, ClassMember, ClassroomSubmission, Problem, _generate_join_code
+from .models import (
+    ChecklistItem,
+    Class,
+    ClassMember,
+    ClassroomScore,
+    ClassroomSubmission,
+    Problem,
+    _generate_join_code,
+)
 from .schemas import (
     ChecklistItemIn,
     ChecklistItemOut,
@@ -42,8 +50,10 @@ from .schemas import (
     ClassIn,
     ClassOut,
     ClassPatchIn,
+    ClassroomChecklistVerdictOut,
     ClassroomProblemMineOut,
     ClassroomProblemSubmissionsOut,
+    ClassroomScoreOut,
     ClassroomSubmissionIn,
     ClassroomSubmissionOut,
     ErrorOut,
@@ -136,12 +146,28 @@ def _source_download_url(asset: SubmissionAsset, user) -> str:
     return presigned.url
 
 
+def _serialize_score(score: ClassroomScore) -> ClassroomScoreOut:
+    return ClassroomScoreOut(
+        model_version=score.model_version,
+        reasoning=[
+            ClassroomChecklistVerdictOut(
+                checklist_item_id=r["checklist_item_id"],
+                is_met=r["is_met"],
+                reasoning=r["reasoning"],
+            )
+            for r in score.reasoning
+        ],
+        created_at=score.created_at,
+    )
+
+
 def _serialize_classroom_submission(
     submission: ClassroomSubmission, *, asset: SubmissionAsset, user
 ) -> ClassroomSubmissionOut:
     download_url = (
         _source_download_url(asset, user) if asset.kind == SubmissionAsset.Kind.SOURCE else None
     )
+    score = getattr(submission, "classroom_score", None)
     return ClassroomSubmissionOut(
         id=submission.id,
         problem_id=submission.problem_id,
@@ -150,6 +176,8 @@ def _serialize_classroom_submission(
         value=asset.value,
         download_url=download_url,
         created_at=submission.created_at,
+        status="scored" if score is not None else "pending",
+        score=_serialize_score(score) if score is not None else None,
     )
 
 
@@ -535,6 +563,7 @@ def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
 
     submissions = (
         ClassroomSubmission.objects.filter(problem=problem, member=member)
+        .select_related("classroom_score")
         .prefetch_related("assets")
         .order_by("-attempt_number")
     )

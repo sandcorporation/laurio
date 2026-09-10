@@ -3851,6 +3851,15 @@ export interface components {
             /** Name */
             name?: string | null;
         };
+        /** ClassroomChecklistVerdictOut */
+        ClassroomChecklistVerdictOut: {
+            /** Checklist Item Id */
+            checklist_item_id: number;
+            /** Is Met */
+            is_met: boolean;
+            /** Reasoning */
+            reasoning: string;
+        };
         /**
          * ClassroomProblemMineOut
          * @description 참여자가 보는 문제 하나(#286) — 강사 전용 `ProblemOut`과 달리 `status`가
@@ -3886,6 +3895,22 @@ export interface components {
             /** Submissions */
             submissions: components["schemas"]["ClassroomSubmissionOut"][];
         };
+        /**
+         * ClassroomScoreOut
+         * @description 채점 스냅샷 하나(#287) — `classroom.models.ClassroomScore`를 그대로
+         *     비춘다. append-only라 이 값은 한 번 나오면 바뀌지 않는다.
+         */
+        ClassroomScoreOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Model Version */
+            model_version: string;
+            /** Reasoning */
+            reasoning: components["schemas"]["ClassroomChecklistVerdictOut"][];
+        };
         /** ClassroomSubmissionIn */
         ClassroomSubmissionIn: {
             /** Content Type */
@@ -3908,6 +3933,9 @@ export interface components {
             id: number;
             /** Problem Id */
             problem_id: number;
+            score?: components["schemas"]["ClassroomScoreOut"] | null;
+            /** Status */
+            status: string;
             /** Submission Format */
             submission_format: string;
             /** Value */

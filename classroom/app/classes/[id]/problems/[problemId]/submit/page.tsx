@@ -155,26 +155,49 @@ export default function ProblemSubmitPage() {
           <p data-testid="submissions-empty-state">아직 낸 시도가 없습니다.</p>
         ) : (
           <ol data-testid="submissions-list">
-            {submissions.map((submission) => (
-              <li key={submission.id} data-testid={`submission-row-${submission.id}`}>
-                <span data-testid={`submission-row-${submission.id}-attempt`}>
-                  {submission.attempt_number}번째 시도
-                </span>{" "}
-                ·{" "}
-                {submission.submission_format === "repository" ? (
-                  <a href={submission.value} target="_blank" rel="noreferrer">
-                    {submission.value}
-                  </a>
-                ) : submission.download_url ? (
-                  <a
-                    href={submission.download_url}
-                    data-testid={`submission-row-${submission.id}-download`}
-                  >
-                    다운로드
-                  </a>
-                ) : null}
-              </li>
-            ))}
+            {submissions.map((submission) => {
+              const checklistLabelById = new Map(
+                problem.checklist_items.map((item) => [item.id, item.label]),
+              );
+              return (
+                <li key={submission.id} data-testid={`submission-row-${submission.id}`}>
+                  <span data-testid={`submission-row-${submission.id}-attempt`}>
+                    {submission.attempt_number}번째 시도
+                  </span>{" "}
+                  ·{" "}
+                  {submission.submission_format === "repository" ? (
+                    <a href={submission.value} target="_blank" rel="noreferrer">
+                      {submission.value}
+                    </a>
+                  ) : submission.download_url ? (
+                    <a
+                      href={submission.download_url}
+                      data-testid={`submission-row-${submission.id}-download`}
+                    >
+                      다운로드
+                    </a>
+                  ) : null}{" "}
+                  ·{" "}
+                  {submission.status === "pending" ? (
+                    <span data-testid={`submission-row-${submission.id}-status`}>채점 중</span>
+                  ) : (
+                    <span data-testid={`submission-row-${submission.id}-status`}>채점 완료</span>
+                  )}
+                  {submission.status === "scored" && submission.score ? (
+                    <ul data-testid={`submission-row-${submission.id}-verdicts`}>
+                      {submission.score.reasoning.map((verdict) => (
+                        <li key={verdict.checklist_item_id}>
+                          {checklistLabelById.get(verdict.checklist_item_id) ?? "항목"} —{" "}
+                          {verdict.is_met ? "충족" : "미충족"}
+                          {": "}
+                          {verdict.reasoning}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </li>
+              );
+            })}
           </ol>
         )}
       </section>

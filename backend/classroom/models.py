@@ -195,3 +195,89 @@ class ChecklistItem(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"ChecklistItem(id={self.pk}, label={self.label!r})"
+
+
+class ClassroomScore(models.Model):
+    """`ClassroomSubmission` 하나에 대한 채점 스냅샷(#287) — `scoring.Score`와
+    같은 규율을 따르되(ADR-0006 「제출물당 하나, 재채점 없음」) **다른 테이블이다**.
+    `scoring`은 공모전 가족이라 강의실이 그 모델을 가리킬 수 없다(ADR-0037) —
+    스키마가 닮았어도 앱 경계가 공유를 막는다(ADR-0039).
+
+    `scoring.Score`가 상속하는 `ledger.AppendOnlyModel`도 같은 이유로 쓸 수
+    없다(`ledger`도 공모전 가족이다) — 그래서 `save()`를 직접 막는다. `ledger`의
+    QuerySet 단위 `update()`/`delete()` 차단까지는 두지 않는다: 이 모델을
+    가리키는 캐스케이드 삭제 경로가 `Class`→`Problem`→`ClassroomSubmission`
+    뿐이고, `submission`이 `on_delete=PROTECT`라 그 경로 자체가 막힌다
+    (`scoring.Score.submission`이 같은 이유로 PROTECT인 것과 같다) — 남는
+    위험은 이 모델 자신의 실수뿐이라 인스턴스 단위 가드로 충분하다.
+    """
+
+    # related_name이 "score"가 아니라 "classroom_score"다 — `ClassroomSubmission`이
+    # `submissions.Submission`을 다중 테이블 상속하고, 그 부모를 `scoring.Score`도
+    # `related_name="score"`로 가리켜(공모전 자식 쪽) 이름이 그대로면 Django가
+    # 역참조 이름 충돌(fields.E304/E305)로 부팅을 거부한다 — 두 Score가 같은
+    # 부모 테이블 계층을 가리키는 것이 원인이라, 다른 값을 주는 것 말고는 피할
+    # 방법이 없다.
+    submission = models.OneToOneField(
+        ClassroomSubmission, related_name="classroom_score", on_delete=models.PROTECT
+    )
+    #: 실제로 쓰인 LLM 모델 식별자. 채점이 실패 상한에 도달해 플랫폼이 자동으로
+    #: 미달 처리했을 때는 `submissions.scoring_basis.PLATFORM_FAILURE_MODEL_VERSION`
+    #: 이 들어간다(#287, ADR-0031과 같은 규율) — 강의실에는 마감이 없어 그
+    #: 기준(#222의 「마감 후 6시간」)이 성립하지 않으므로 실패 **횟수**만 본다
+    #: (`classroom.scoring.SCORING_FAILURE_LIMIT`).
+    model_version = models.CharField(max_length=200)
+    #: LLM에 실제로 보낸 프롬프트 전문 — 체크리스트와 소스를 포함한다.
+    prompt = models.TextField()
+    #: 체크리스트 항목별 판정 근거.
+    #: [{"checklist_item_id": int, "is_met": bool, "reasoning": str}, ...]
+    reasoning = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "ClassroomScore"
+        verbose_name_plural = "ClassroomScore"
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            raise ValueError(
+                "ClassroomScore는 append-only다(ADR-0006과 같은 규율) — 이미 저장된 "
+                "행은 다시 저장할 수 없다."
+            )
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("ClassroomScore는 append-only다 — 삭제할 수 없다.")
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ClassroomScore(submission={self.submission_id})"
+
+
+class ClassroomScoringAttempt(models.Model):
+    """실패한 채점 시도의 이력(#287) — `scoring.ScoringAttempt`와 같은 역할,
+    같은 이유로 다른 테이블이다. Score와 달리 append-only가 아니다 — 판정이
+    아니라 "언제, 왜 실패했는지"에 대한 운영 로그다.
+    """
+
+    # related_name이 "scoring_attempts"가 아니라 "classroom_scoring_attempts"다 —
+    # 위 `ClassroomScore.submission`과 같은 이유(공모전 자식의 `scoring.
+    # ScoringAttempt`가 이미 그 이름을 쓰고, 둘 다 결국 `submissions.Submission`
+    # 계층을 가리킨다).
+    submission = models.ForeignKey(
+        ClassroomSubmission, related_name="classroom_scoring_attempts", on_delete=models.CASCADE
+    )
+    attempted_at = models.DateTimeField(auto_now_add=True)
+    error = models.TextField()
+    #: 다시 시도해도 같은 결과가 나올 실패인가(`core.llm_scoring.
+    #: LLMAdapterPermanentError`와 같은 뜻). True면 유예 없이 바로 실패 상한에
+    #: 도달한 것으로 본다(ADR-0031과 같은 규율).
+    permanent = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["-attempted_at"]
+        verbose_name = "강의실 채점 실패 이력"
+        verbose_name_plural = "강의실 채점 실패 이력"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ClassroomScoringAttempt(submission={self.submission_id}, at={self.attempted_at})"
