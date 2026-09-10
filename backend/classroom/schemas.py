@@ -16,7 +16,12 @@ class ClassIn(Schema):
 class ClassOut(Schema):
     id: int
     name: str
+    join_code: str
     created_at: datetime
+
+
+class JoinLinkOut(Schema):
+    join_code: str
 
 
 class ChecklistItemIn(Schema):

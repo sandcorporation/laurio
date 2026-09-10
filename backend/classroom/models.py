@@ -11,8 +11,18 @@
 
 from __future__ import annotations
 
+import secrets
+
 from django.conf import settings
 from django.db import models
+
+
+def _generate_join_code() -> str:
+    """추측 불가능한 가입 코드(#279). `secrets.token_urlsafe(16)`은 22자라
+    URL 세그먼트 하나로 쓰기에 짧고, 링크 자체에는 클래스 이름 등 내용이
+    전혀 실리지 않는다 — 무작위 문자열뿐이다."""
+
+    return secrets.token_urlsafe(16)
 
 
 class Class(models.Model):
@@ -22,6 +32,10 @@ class Class(models.Model):
         settings.AUTH_USER_MODEL, related_name="classrooms", on_delete=models.CASCADE
     )
     name = models.CharField(max_length=200)
+    #: 가입 링크의 코드(#279). 다시 뽑으면 이 값이 새 무작위 문자열로
+    #: 바뀌어 이전 값은 어떤 클래스도 가리키지 않게 된다 — 그래서 별도
+    #: 이력 테이블이 필요 없다, 죽은 코드는 그냥 아무 행에도 없는 값이다.
+    join_code = models.CharField(max_length=32, unique=True, default=_generate_join_code)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

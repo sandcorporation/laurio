@@ -22,7 +22,7 @@ from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
 
-from .models import ChecklistItem, Class, Problem
+from .models import ChecklistItem, Class, Problem, _generate_join_code
 from .schemas import (
     ChecklistItemIn,
     ChecklistItemOut,
@@ -31,6 +31,7 @@ from .schemas import (
     ClassIn,
     ClassOut,
     ErrorOut,
+    JoinLinkOut,
     ProblemIn,
     ProblemOut,
     ProblemPatchIn,
@@ -43,7 +44,12 @@ _SUBMISSION_FORMATS = {choice for choice, _label in Problem.SubmissionFormat.cho
 
 
 def _serialize_class(class_obj: Class) -> ClassOut:
-    return ClassOut(id=class_obj.id, name=class_obj.name, created_at=class_obj.created_at)
+    return ClassOut(
+        id=class_obj.id,
+        name=class_obj.name,
+        join_code=class_obj.join_code,
+        created_at=class_obj.created_at,
+    )
 
 
 def _serialize_checklist_item(item: ChecklistItem) -> ChecklistItemOut:
@@ -101,6 +107,22 @@ def list_my_classes(request: HttpRequest):
 def get_class(request: HttpRequest, class_id: int):
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     return 200, _serialize_class(class_obj)
+
+
+@router.post(
+    "/classes/{class_id}/join-link/regenerate",
+    response={200: JoinLinkOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def regenerate_join_link(request: HttpRequest, class_id: int):
+    """가입 링크를 다시 뽑는다(#279). 새 코드로 덮어쓰므로 이전 코드는 그
+    순간부터 어떤 클래스도 가리키지 않는다 — 링크가 새어 나갔을 때 강사가
+    쓸 수 있는 유일한 조치다."""
+
+    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    class_obj.join_code = _generate_join_code()
+    class_obj.save(update_fields=["join_code"])
+    return 200, JoinLinkOut(join_code=class_obj.join_code)
 
 
 # --- Problem -------------------------------------------------------------------
