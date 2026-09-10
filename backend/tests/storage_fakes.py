@@ -1,4 +1,4 @@
-"""테스트 전용 TargetStateResolver.
+"""테스트 전용 TargetStateResolver · MaxUploadSizeResolver.
 
 storage 앱은 Submission/Contest 모델을 모른다(#8, #10 소관). 그래서 실제
 리졸버 대신, target_ref 문자열 자체에 상태를 인코딩해 해석하는 더블을 쓴다.
@@ -35,3 +35,20 @@ class FakeTargetStateResolver:
                 owner_id = None
 
         return TargetState(visibility=visibility, owner_id=owner_id)
+
+
+class FakeMaxUploadSizeResolver:
+    """target_ref의 마지막 세그먼트가 ``"cap<N>"`` 이면 N바이트 상한, 아니면
+    상한 없음(None) — #261. 실제 리졸버(`submissions.resolvers.
+    SubmissionMaxUploadSizeResolver`)는 슬롯(source/demo-video/build-asset)을
+    PlatformPolicy 필드에 매핑하지만, storage 앱은 그 형식을 몰라도 되므로
+    이 더블은 target_ref 문자열에 상한을 직접 인코딩한다."""
+
+    def resolve(self, target_ref: str) -> int | None:
+        last = target_ref.rsplit(":", 1)[-1]
+        if not last.startswith("cap"):
+            return None
+        try:
+            return int(last[len("cap") :])
+        except ValueError:
+            return None

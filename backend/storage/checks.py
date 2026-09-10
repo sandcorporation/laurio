@@ -1,7 +1,7 @@
 """부팅 시점 설정 검증.
 
-STORAGE_BACKEND·STORAGE_TARGET_RESOLVER·STORAGE_CONTENT_TYPE_RESOLVER(#241) 는
-dotted path(또는 별칭) 문자열이라
+STORAGE_BACKEND·STORAGE_TARGET_RESOLVER·STORAGE_CONTENT_TYPE_RESOLVER(#241)·
+STORAGE_MAX_UPLOAD_SIZE_RESOLVER(#261) 는 dotted path(또는 별칭) 문자열이라
 오탈자가 있어도 Python 임포트가 실제로 시도되기 전까지는 아무 신호가 없다.
 그대로 두면 첫 요청이 들어올 때 ImportError -> 500으로 처음 드러난다. `manage.py
 check`(CI가 이미 돌린다)와 `manage.py migrate`/`runserver` 기동 시 이 검사가 먼저
@@ -61,6 +61,21 @@ def check_storage_backend_is_importable(app_configs: Any, **kwargs: Any) -> list
                     hint="storage.policy.ContentTypeResolver 를 구현한 클래스의 dotted "
                     "path 여야 한다.",
                     id="storage.E003",
+                )
+            )
+
+    max_upload_size_resolver_path = getattr(settings, "STORAGE_MAX_UPLOAD_SIZE_RESOLVER", "")
+    if max_upload_size_resolver_path:
+        try:
+            import_string(max_upload_size_resolver_path)
+        except ImportError as exc:
+            errors.append(
+                Error(
+                    f"STORAGE_MAX_UPLOAD_SIZE_RESOLVER={max_upload_size_resolver_path!r} 를 "
+                    f"임포트할 수 없다 ({exc}).",
+                    hint="storage.policy.MaxUploadSizeResolver 를 구현한 클래스의 dotted "
+                    "path 여야 한다.",
+                    id="storage.E004",
                 )
             )
 

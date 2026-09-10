@@ -1186,6 +1186,41 @@ def test_resolver_wiring_grants_source_download_to_owner_only(client, category, 
     assert sponsor_download.status_code == 403
 
 
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "slot, policy_field",
+    [
+        ("source", "max_source_asset_bytes"),
+        ("demo-video", "max_demo_video_asset_bytes"),
+        ("build-asset", "max_build_asset_bytes"),
+    ],
+)
+def test_resolver_wiring_binds_upload_byte_cap_from_policy(
+    client, category, landing_type, slot, policy_field
+):
+    """`submissions.resolvers.SubmissionMaxUploadSizeResolver` 배선 자체가
+    살아있는지 — 소스·시연 영상·빌드 자산 각 슬롯의 업로드가 PlatformPolicy의
+    종류별 바이트 상한(#263)을 실제로 읽어 presigned POST로 전환되는지 —
+    확인한다(#261)."""
+    from policies.services import get_current_policy
+
+    _sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+
+    upload = client.post(
+        "/api/storage/uploads",
+        data={"target_ref": f"submission:{contest['id']}:{dev['user_id']}:{slot}"},
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+
+    assert upload.status_code == 200
+    body = upload.json()
+    expected_cap = getattr(get_current_policy(), policy_field)
+    assert body["method"] == "POST"
+    assert body["max_size_bytes"] == expected_cap
+
+
 # --- 다운로드 파일명 (#241) ---------------------------------------------------
 #
 # 확장자 없는 32자리 hex object_key가 그대로 파일명으로 떨어지던 결함(#241)의

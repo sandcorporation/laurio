@@ -27,6 +27,11 @@ BUILD_ASSET_SLOT 설명 참고). `handovers.models`를 함수 안에서 지역 �
 이유는 순환 임포트를 피하기 위해서다 — `handovers`가 이미 `submissions.models`를
 임포트하므로, 모듈 최상단에서 반대 방향으로 임포트하면 두 앱이 서로를 참조하게
 된다.
+
+**`SubmissionMaxUploadSizeResolver`(#261)도 별도 확장점이다.** target_ref의
+슬롯(소스·시연 영상·빌드 자산)마다 PlatformPolicy의 종류별 바이트 상한(#263)을
+매핑해 storage 앱에 돌려준다 — storage는 그 값을 그대로 `presign_upload`의
+`max_size_bytes`에 실어 presigned POST로 전환한다(ADR-0032/ADR-0035).
 """
 
 from __future__ import annotations
@@ -34,10 +39,11 @@ from __future__ import annotations
 from awards.services import sponsor_user_id_if_awarded
 from contests.models import Contest
 from core.clock import Clock
+from policies.scope import current_policy
 from storage.policy import TargetState, Visibility
 
 from .models import SubmissionAsset
-from .target_refs import BUILD_ASSET_SLOT, SOURCE_SLOT
+from .target_refs import BUILD_ASSET_SLOT, DEMO_VIDEO_SLOT, SOURCE_SLOT
 
 _DENY = TargetState(visibility=Visibility.PRIVATE, owner_id=None)
 
@@ -125,3 +131,43 @@ class SubmissionContentTypeResolver:
             .values_list("content_type", flat=True)
             .first()
         )
+
+
+# target_ref의 슬롯(마지막 세그먼트) -> PlatformPolicy의 종류별 바이트 상한 필드
+# (#261, #263). SOURCE_SLOT·BUILD_ASSET_SLOT·DEMO_VIDEO_SLOT 셋만 올라 있다 —
+# 스크린샷 종류(#264)와 URL 종류(demo_url·repository, storage를 거치지 않는다)는
+# 여기 없다.
+_MAX_BYTES_FIELD_BY_SLOT = {
+    SOURCE_SLOT: "max_source_asset_bytes",
+    DEMO_VIDEO_SLOT: "max_demo_video_asset_bytes",
+    BUILD_ASSET_SLOT: "max_build_asset_bytes",
+}
+
+
+class SubmissionMaxUploadSizeResolver:
+    """target_ref의 슬롯이 정해지면 PlatformPolicy의 종류별 바이트 상한을
+    돌려준다(#261) — `SubmissionTargetStateResolver`와 같은 파싱을 하지만
+    권한이 아니라 크기를 답한다는 점만 다르다.
+
+    형식을 벗어난 target_ref나 상한이 정의되지 않은 슬롯(데모 URL·저장소처럼
+    storage를 거치지 않는 종류가 실수로 여기 온 경우 포함)은 상한 없음(None)
+    으로 fail-safe한다 — `UnboundedMaxUploadSizeResolver`와 같은 방향이다.
+    업로드 자체의 인가는 `storage.policy.StorageAccessPolicy`가 별도로
+    fail-closed 하므로, 상한을 모른다고 여기서 거부할 이유는 없다.
+
+    `current_policy()`를 쓴다 — 이 리졸버는 `storage.api.request_upload`가
+    HTTP 요청 처리 중에만 부르고, 그 요청은 이미 `PolicyScopeMiddleware`가
+    스코프를 열어 둔 상태다(`policies.scope`).
+    """
+
+    def resolve(self, target_ref: str) -> int | None:
+        parts = target_ref.split(":")
+        if len(parts) != 4 or parts[0] != "submission":
+            return None
+
+        slot = parts[3]
+        field = _MAX_BYTES_FIELD_BY_SLOT.get(slot)
+        if field is None:
+            return None
+
+        return getattr(current_policy(), field)

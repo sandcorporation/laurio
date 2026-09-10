@@ -3,11 +3,19 @@
 // presigned 업로드 (ADR-0005, FE-09 #34).
 //
 // 발급 요청(POST /storage/uploads)은 BFF 프록시(FE-08, /api/backend/**)를
-// 거쳐 인증된 사용자로 인가되지만, 실제 PUT은 그 자리에서 받은 upload_url로
+// 거쳐 인증된 사용자로 인가되지만, 실제 바이트는 그 자리에서 받은 upload_url로
 // **스토리지에 직접** 나간다 — Next를 한 번도 거치지 않는다. 이 파일에서
 // fetch로 요청하는 대상이 둘로 갈리는 게 그 증거다: 발급은 상대 경로
 // "/api/backend/storage/uploads"(우리 오리진)로, 업로드는 백엔드가 돌려준
 // 절대 URL(스토리지 오리진)로 나간다.
+//
+// **method가 PUT일 수도 POST일 수도 있다(#261).** 이 슬롯(소스·시연 영상·
+// 빌드 자산)에 종류별 바이트 상한(#263)이 걸려 있으면 백엔드가 presigned
+// POST를 내려준다 — 크기가 서명된 정책 조건에 묶여 넘기면 스토리지 자신이
+// 거절한다(presigned PUT은 서명에 크기를 묶을 수단이 없다, ADR-0032/ADR-0035).
+// `max_size_bytes`가 함께 오면, 실제 바이트를 보내기 전에(발급 자체는 이미
+// 끝난 뒤) 파일 크기를 먼저 재본다 — 몇 GB를 다 올린 뒤 거절당하는 것은
+// 잔인하다. 막는 것은 서명이고 이 검사는 빨리 말해 주는 역할일 뿐이다.
 import { useCallback, useRef, useState } from "react";
 import { bffClient } from "@/lib/bff/client";
 
@@ -34,7 +42,18 @@ interface PresignedUpload {
   upload_url: string;
   method: string;
   headers: Record<string, string>;
+  // presigned POST(#261)의 서명된 정책 필드 — multipart/form-data 본문에
+  // "file"보다 먼저 실어야 한다. PUT이면 빈 객체다.
+  fields: Record<string, string>;
   expires_at: string;
+  // 이 슬롯에 실제로 걸린 바이트 상한. 없으면 null(상한 없음).
+  max_size_bytes: number | null;
+}
+
+function formatMegabytes(bytes: number): string {
+  const megabytes = bytes / (1024 * 1024);
+  const rounded = Math.round(megabytes * 10) / 10;
+  return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)}MB`;
 }
 
 async function requestPresignedUpload(
@@ -51,7 +70,16 @@ async function requestPresignedUpload(
   return result.data;
 }
 
-function putWithProgress(
+/** 파일 크기가 이 슬롯의 상한(있으면)을 넘는지 먼저 잰다 — 넘으면 실제 바이트를
+ * 보내지 않고 바로 실패시킨다(#261). 서버가 나중에 거절해도 안전하지만(막는 것은
+ * 서명이다), 몇 GB를 다 올린 뒤에야 아는 것은 잔인하다. */
+function rejectIfOversized(presigned: PresignedUpload, file: File): void {
+  if (presigned.max_size_bytes !== null && file.size > presigned.max_size_bytes) {
+    throw new Error(`파일이 너무 큽니다. 최대 ${formatMegabytes(presigned.max_size_bytes)}까지 업로드할 수 있습니다.`);
+  }
+}
+
+function sendToStorage(
   presigned: PresignedUpload,
   file: File,
   onProgress: (percent: number) => void,
@@ -61,9 +89,23 @@ function putWithProgress(
     // presigned.upload_url은 스토리지의 절대 URL이다 — XHR이 이 요청을 Next가
     // 아니라 그 오리진으로 직접 연다.
     xhr.open(presigned.method, presigned.upload_url);
-    for (const [key, value] of Object.entries(presigned.headers)) {
-      xhr.setRequestHeader(key, value);
+
+    let body: File | FormData = file;
+    if (presigned.method === "POST") {
+      // 서명된 필드가 파일보다 먼저 실려야 한다 — presigned POST 정책의 요구사항이다
+      // (lib/upload/use-contest-image-upload.ts와 같은 규칙).
+      const form = new FormData();
+      for (const [key, value] of Object.entries(presigned.fields)) {
+        form.append(key, value);
+      }
+      form.append("file", file);
+      body = form;
+    } else {
+      for (const [key, value] of Object.entries(presigned.headers)) {
+        xhr.setRequestHeader(key, value);
+      }
     }
+
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable) {
         onProgress(Math.round((event.loaded / event.total) * 100));
@@ -73,11 +115,11 @@ function putWithProgress(
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve();
       } else {
-        reject(new Error(`업로드가 실패했습니다 (${xhr.status}). 만료됐거나 네트워크 문제일 수 있습니다.`));
+        reject(new Error(`업로드가 실패했습니다 (${xhr.status}). 만료됐거나 형식·크기 제한을 확인해 주세요.`));
       }
     };
     xhr.onerror = () => reject(new Error("네트워크 오류로 업로드에 실패했습니다."));
-    xhr.send(file);
+    xhr.send(body);
   });
 }
 
@@ -108,17 +150,19 @@ export function usePresignedUpload(targetRef: string): UsePresignedUploadResult 
         contentType,
       });
       const presigned = await requestPresignedUpload(targetRef, contentType ?? undefined);
+      rejectIfOversized(presigned, file);
 
       setState((prev) => ({ ...prev, status: "uploading" }));
       try {
-        await putWithProgress(presigned, file, (percent) => {
+        await sendToStorage(presigned, file, (percent) => {
           setState((prev) => ({ ...prev, progress: percent }));
         });
       } catch (uploadError) {
         // 발급받은 URL이 만료됐을 수 있다(FE-09 인수조건) — 한 번 재발급받아
         // 다시 시도한다. 그래도 실패하면 진짜 실패로 본다.
         const reissued = await requestPresignedUpload(targetRef, contentType ?? undefined);
-        await putWithProgress(reissued, file, (percent) => {
+        rejectIfOversized(reissued, file);
+        await sendToStorage(reissued, file, (percent) => {
           setState((prev) => ({ ...prev, progress: percent }));
         }).catch((retryError: unknown) => {
           throw retryError instanceof Error ? retryError : uploadError;

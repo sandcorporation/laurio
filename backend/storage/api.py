@@ -14,6 +14,12 @@ content-type을 `SubmissionAsset`·`handovers.BuildAsset`에 남기는 것은 �
 쪽 책임이다(#241 결정). `STORAGE_CONTENT_TYPE_RESOLVER`가 그 값을 돌려주면
 `storage.filenames.build_download_filename`이 파일명을 만든다 — content-type을
 몰라도(리졸버가 None을 돌려줘도) 이름 자체는 항상 만든다.
+
+**업로드 바이트 상한(#261)도 같은 방식으로 위임한다.** 이 슬롯에 몇 바이트까지
+허용하는지는 storage 앱이 모른다 — `STORAGE_MAX_UPLOAD_SIZE_RESOLVER`가 그 값을
+돌려주면 그대로 `adapter.presign_upload`의 `max_size_bytes`에 실어, 상한이 있는
+슬롯은 presigned PUT 대신 POST로 발급된다(ADR-0032/ADR-0035 — PUT은 서명에
+크기를 묶을 수단이 없다). 리졸버가 None을 돌려주면(기본값) 지금까지처럼 PUT이다.
 """
 
 from __future__ import annotations
@@ -26,7 +32,12 @@ from ninja import Field, Router, Schema
 
 from storage.adapters import get_storage_adapter
 from storage.filenames import build_download_filename
-from storage.policy import StorageAccessDenied, StorageAccessPolicy, get_content_type_resolver
+from storage.policy import (
+    StorageAccessDenied,
+    StorageAccessPolicy,
+    get_content_type_resolver,
+    get_max_upload_size_resolver,
+)
 
 router = Router(tags=["storage"])
 
@@ -55,7 +66,16 @@ class UploadResponse(Schema):
     upload_url: str
     method: str
     headers: dict[str, str]
+    # 상한이 있는 업로드(#261)의 presigned POST가 실어야 하는 서명된 정책
+    # 필드 — multipart/form-data 본문에 "file"보다 먼저 실어야 한다. 상한이
+    # 없는(지금까지의) PUT 업로드는 빈 dict로 내려간다.
+    fields: dict[str, str] = Field(default_factory=dict)
     expires_at: str
+    # 이 슬롯에 실제로 적용된 바이트 상한(#261) — 없으면 None. 서명 조건에
+    # 이미 실린 값을 그대로 다시 알려줘, 브라우저가 실제 바이트를 보내기 전에
+    # (요청 자체는 이미 끝난 뒤) 파일 크기를 먼저 재보고 넘으면 업로드를 걸지
+    # 않을 수 있게 한다 — 몇 GB를 다 올린 뒤 거절당하는 것보다 낫다(ADR-0035).
+    max_size_bytes: int | None = None
 
 
 class DownloadRequest(Schema):
@@ -86,17 +106,21 @@ def request_upload(request, payload: UploadRequest) -> UploadResponse:
 
     adapter = get_storage_adapter()
     object_key = new_object_key(payload.target_ref)
+    max_size_bytes = get_max_upload_size_resolver().resolve(payload.target_ref)
     presigned = adapter.presign_upload(
         object_key,
         content_type=payload.content_type,
         expires_in=timedelta(seconds=settings.STORAGE_UPLOAD_URL_TTL_SECONDS),
+        max_size_bytes=max_size_bytes,
     )
     return UploadResponse(
         object_key=presigned.object_key,
         upload_url=presigned.url,
         method=presigned.method,
         headers=presigned.headers,
+        fields=presigned.fields,
         expires_at=presigned.expires_at.isoformat(),
+        max_size_bytes=max_size_bytes,
     )
 
 
