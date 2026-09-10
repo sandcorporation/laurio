@@ -685,7 +685,7 @@ Problem Statement 를 읽고 「어댑터 실제 구현은 스토리지 하나�
 
 ## CI 는 셀프호스티드 러너에서, 프로덕션 이미지로 돈다
 
-GitHub 호스티드 러너는 과금이 막혀 못 쓴다. 12개 잡 전부 `runs-on: [self-hosted, sub]` —
+GitHub 호스티드 러너는 과금이 막혀 못 쓴다. 13개 잡 전부 `runs-on: [self-hosted, sub]` —
 staging 배포 호스트와 **같은 머신**이다. 러너 컨테이너는 `--network host` 로 돌고 호스트
 docker 소켓을 물어 컨테이너를 바깥에 띄운다(DooD).
 
@@ -715,9 +715,9 @@ docker 소켓을 물어 컨테이너를 바깥에 띄운다(DooD).
 골라 쓰게 두고, 잡 안에서 `${{ job.services.postgres.ports['5432'] }}` 로 읽는다.
 
 실측(당시 9잡 전부 초록, 2026-09-05): 전체 **6분**. `adr-status`·`screen-language` 가 늘어
-11잡이 됐고, `frontend-e2e-classroom`(#277)이 늘어 지금은 12잡이다(강의실 e2e 실측은
-아직 없다 — CI 첫 실행이 잰다). e2e 운영자 4분 · 공개 3분 · `celery-broker` 2분 · `pytest`
-1분 · 나머지 일곱은 각 1분 미만.
+11잡이 됐고, `frontend-e2e-classroom`(#277)이 늘어 12잡, `classroom-deploy-guard`(#296)가
+늘어 지금은 13잡이다(강의실 e2e 실측은 아직 없다 — CI 첫 실행이 잰다). e2e 운영자 4분 ·
+공개 3분 · `celery-broker` 2분 · `pytest` 1분 · 나머지 여덟은 각 1분 미만.
 
 **`screen-language` 잡**(#267, #268)은 스텝 둘로 두 표면을 막는다. 첫 스텝
 (`scripts/check_screen_language.py`)은 공개 앱(`frontend/`)의 화면 문자열에
