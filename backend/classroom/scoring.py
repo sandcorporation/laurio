@@ -49,7 +49,7 @@ from core.repository_adapters import GitHubAdapterError, get_github_adapter
 from core.scans import ScanSpec
 from core.source_selection import select_source_files
 from notifications.models import NotificationType
-from notifications.services import create_notification
+from notifications.services import create_notification, notify_safely
 from storage.adapters import get_storage_adapter
 from submissions.models import SubmissionAsset
 from submissions.scoring_basis import PLATFORM_FAILURE_MODEL_VERSION
@@ -203,17 +203,59 @@ def _record_token_usage(class_obj: Class, total_tokens: int) -> None:
         )
 
 
+def _notify_submitter_of_score(submission: ClassroomSubmission, score: ClassroomScore, checklist_items: list[ChecklistItem]) -> None:
+    """이 시도를 낸 사람에게 채점이 끝났다는 사실을 알린다(#303) — 통과든
+    미통과든, 플랫폼 자동 미달이든 매번 정확히 한 번. `_finalize_platform_failure`
+    와 성공 경로(`score_classroom_submission_once`) 양쪽에서 `ClassroomScore`가
+    만들어지는 그 자리마다 부른다 — "채점이 끝난다"는 사실이 이 두 곳 말고는
+    성립하지 않는다.
+
+    통과 판정은 `classroom.api._is_score_passed`와 같은 규칙이다 — 필수 항목을
+    전부 충족했는가. 여기서 다시 계산하는 이유는 그 함수가 `(score,
+    required_item_ids)`를 받는데 이미 손에 쥔 `checklist_items`에서 바로
+    구할 수 있어, API 모듈을 끌어오는 의존을 늘리지 않기 위해서다.
+
+    강사에게는 가지 않는다 — 수신자는 언제나 `submission.member.user`고, 그
+    사람이 우연히 강사 본인(자기 클래스에 참여자로 들어온 경우)이어도 그건
+    "자기가 낸 것"이라 AC를 어기지 않는다.
+
+    `notify_safely`를 쓴다 — 알림 생성이 실패해도 채점 자체(위에서 이미 커밋된
+    `score`)는 그대로 끝나야 한다는 AC를 그 함수의 계약이 그대로 보장한다."""
+
+    required_ids = {item.id for item in checklist_items if item.required}
+    met_ids = {r["checklist_item_id"] for r in score.reasoning if r["is_met"]}
+    passed = bool(required_ids) and required_ids.issubset(met_ids)
+
+    problem = submission.problem
+    class_obj = problem.classroom
+    notify_safely(
+        recipient=submission.member.user,
+        notification_type=NotificationType.CLASSROOM_SUBMISSION_SCORED,
+        context={
+            "class_id": class_obj.id,
+            "class_name": class_obj.name,
+            "problem_id": problem.id,
+            "problem_title": problem.title,
+            "submission_id": submission.id,
+            "attempt_number": submission.attempt_number,
+            "passed": passed,
+        },
+    )
+
+
 def _finalize_platform_failure(submission: ClassroomSubmission, checklist_items: list[ChecklistItem]) -> ClassroomScore:
     reasoning = [
         {"checklist_item_id": item.id, "is_met": False, "reasoning": _PLATFORM_FAILURE_REASONING}
         for item in checklist_items
     ]
-    return ClassroomScore.objects.create(
+    score = ClassroomScore.objects.create(
         submission=submission,
         model_version=PLATFORM_FAILURE_MODEL_VERSION,
         prompt=_PLATFORM_FAILURE_REASONING,
         reasoning=reasoning,
     )
+    _notify_submitter_of_score(submission, score, checklist_items)
+    return score
 
 
 def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
@@ -316,6 +358,7 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
             prompt=prompt,
             reasoning=reasoning,
         )
+    _notify_submitter_of_score(submission, score, checklist_items)
     return {"submission_id": submission.id, "status": "scored", "score_id": score.id}
 
 

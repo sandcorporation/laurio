@@ -19,6 +19,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 
 from classroom.models import ClassroomScore, ClassroomScoringAttempt, ClassroomSubmission
+from notifications.models import Notification, NotificationType
 from storage.adapters.fake import FakeStorageAdapter
 
 CLASSES_URL = "/api/classroom/classes"
@@ -397,4 +398,171 @@ def test_source_not_yet_in_storage_retries_instead_of_failing(client, db, monkey
     assert ClassroomScore.objects.filter(submission_id=submitted["id"]).count() == 0
     assert ClassroomScoringAttempt.objects.filter(
         submission_id=submitted["id"], permanent=False
+    ).exists()
+
+
+# --- 채점 완료를 낸 사람에게 알린다 (#303) --------------------------------------------
+
+
+def _participant_user_id():
+    return get_user_model().objects.get(username="kakao:participant-1").id
+
+
+def _instructor_user_id():
+    return get_user_model().objects.get(username="kakao:instructor-1").id
+
+
+def test_scoring_completion_notifies_the_submitter_on_pass(client, db, monkeypatch):
+    ctx = _setup_submission(client)
+    monkeypatch.setattr(
+        "core.llm_scoring.requests.post",
+        lambda *a, **k: _FakeResponse(200, _openai_success_body(ctx["item_id"], is_met=True)),
+    )
+
+    _run_scan(client)
+
+    notification = Notification.objects.get(
+        notification_type=NotificationType.CLASSROOM_SUBMISSION_SCORED
+    )
+    assert notification.recipient_id == _participant_user_id()
+    assert notification.context["class_id"] == ctx["class_id"]
+    assert notification.context["problem_id"] == ctx["problem_id"]
+    assert notification.context["submission_id"] == ctx["submission_id"]
+    assert notification.context["attempt_number"] == 1
+    assert notification.context["passed"] is True
+
+
+def test_scoring_completion_notifies_the_submitter_on_fail(client, db, monkeypatch):
+    ctx = _setup_submission(client)
+    monkeypatch.setattr(
+        "core.llm_scoring.requests.post",
+        lambda *a, **k: _FakeResponse(200, _openai_success_body(ctx["item_id"], is_met=False)),
+    )
+
+    _run_scan(client)
+
+    notification = Notification.objects.get(
+        notification_type=NotificationType.CLASSROOM_SUBMISSION_SCORED
+    )
+    assert notification.context["passed"] is False
+
+
+def test_permanent_failure_finalization_also_notifies_the_submitter(client, db, monkeypatch):
+    """자동 미달(`_finalize_platform_failure`)로 채점이 끝난 경우도 "채점이
+    끝났다"이므로 침묵으로 남지 않는다(AC)."""
+
+    ctx = _setup_submission(client)
+    monkeypatch.setattr(
+        "core.llm_scoring.requests.post",
+        lambda *a, **k: _FakeResponse(401, {"error": {"message": "Incorrect API key"}}),
+    )
+
+    _run_scan(client)
+
+    notification = Notification.objects.get(
+        notification_type=NotificationType.CLASSROOM_SUBMISSION_SCORED
+    )
+    assert notification.recipient_id == _participant_user_id()
+    assert notification.context["passed"] is False
+
+
+def test_notification_is_never_sent_to_the_instructor(client, db, monkeypatch):
+    ctx = _setup_submission(client)
+    monkeypatch.setattr(
+        "core.llm_scoring.requests.post",
+        lambda *a, **k: _FakeResponse(200, _openai_success_body(ctx["item_id"], is_met=True)),
+    )
+
+    _run_scan(client)
+
+    assert not Notification.objects.filter(
+        notification_type=NotificationType.CLASSROOM_SUBMISSION_SCORED,
+        recipient_id=_instructor_user_id(),
+    ).exists()
+
+
+def test_notification_is_not_dispatched_to_any_channel(client, db, monkeypatch):
+    """#301과 같은 규칙 — 문자로 나가지 않는다."""
+
+    ctx = _setup_submission(client)
+    monkeypatch.setattr(
+        "core.llm_scoring.requests.post",
+        lambda *a, **k: _FakeResponse(200, _openai_success_body(ctx["item_id"], is_met=True)),
+    )
+
+    _run_scan(client)
+
+    notification = Notification.objects.get(
+        notification_type=NotificationType.CLASSROOM_SUBMISSION_SCORED
+    )
+    assert notification.status == Notification.Status.NOT_DISPATCHED
+    assert notification.dispatches.count() == 0
+
+
+def test_joining_a_class_creates_no_notification(client, db):
+    instructor = _login(client, uid="instructor-1")
+    class_id = _create_class(client, instructor["access"])
+    participant = _login(client, uid="participant-1")
+
+    _join(client, participant["access"], _join_code(client, instructor["access"], class_id))
+
+    assert not Notification.objects.filter(
+        notification_type=NotificationType.CLASSROOM_SUBMISSION_SCORED
+    ).exists()
+
+
+def test_each_attempt_gets_its_own_notification(client, db, monkeypatch):
+    ctx = _setup_submission(client)
+    monkeypatch.setattr(
+        "core.llm_scoring.requests.post",
+        lambda *a, **k: _FakeResponse(200, _openai_success_body(ctx["item_id"], is_met=True)),
+    )
+    _run_scan(client)
+
+    second = _submit_repository(
+        client,
+        ctx["participant"]["access"],
+        ctx["class_id"],
+        ctx["problem_id"],
+        "https://github.com/octocat/hello-world-again",
+    )
+    monkeypatch.setattr(
+        "core.llm_scoring.requests.post",
+        lambda *a, **k: _FakeResponse(200, _openai_success_body(ctx["item_id"], is_met=False)),
+    )
+    _run_scan(client)
+
+    notifications = Notification.objects.filter(
+        notification_type=NotificationType.CLASSROOM_SUBMISSION_SCORED
+    ).order_by("id")
+    assert notifications.count() == 2
+    by_submission = {n.context["submission_id"]: n for n in notifications}
+    assert by_submission[ctx["submission_id"]].context["attempt_number"] == 1
+    assert by_submission[second["id"]].context["attempt_number"] == 2
+    assert by_submission[ctx["submission_id"]].context["passed"] is True
+    assert by_submission[second["id"]].context["passed"] is False
+
+
+def test_notification_creation_failure_does_not_prevent_scoring(client, db, monkeypatch):
+    """AC: "알림 만들기가 실패해도 채점 자체는 그대로 끝난다." — 알림 쪽이
+    죽어도(`create_notification`이 예외로 죽는 극단적인 경우) `ClassroomScore`는
+    이미 커밋된 채로 남고, 스캔 결과도 정상 종결(`scored`)로 보고된다."""
+
+    ctx = _setup_submission(client)
+    monkeypatch.setattr(
+        "core.llm_scoring.requests.post",
+        lambda *a, **k: _FakeResponse(200, _openai_success_body(ctx["item_id"], is_met=True)),
+    )
+    monkeypatch.setattr(
+        "notifications.services.create_notification",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("notification backend is down")),
+    )
+
+    result = _run_scan(client)
+
+    assert result["count"] == 1
+    assert result["rows"][0]["status"] == "scored"
+    assert ClassroomScore.objects.filter(submission_id=ctx["submission_id"]).exists()
+    assert not Notification.objects.filter(
+        notification_type=NotificationType.CLASSROOM_SUBMISSION_SCORED
     ).exists()
