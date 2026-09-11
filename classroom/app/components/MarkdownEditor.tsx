@@ -58,31 +58,39 @@ export function MarkdownEditor({
     let cancelled = false;
     let editor: ToastEditor | null = null;
 
-    import("@toast-ui/editor").then(({ default: Editor }) => {
-      if (cancelled || !containerRef.current) return;
-      editor = new Editor({
-        el: containerRef.current,
-        height: "360px",
-        initialEditType: "markdown",
-        previewStyle: "vertical",
-        initialValue: lastKnownValueRef.current,
-        placeholder,
-        usageStatistics: false,
-        events: {
-          change: () => {
-            if (!editor) return;
-            const markdown = editor.getMarkdown();
-            lastKnownValueRef.current = markdown;
-            onChangeRef.current(markdown);
+    Promise.all([import("@toast-ui/editor"), import("@toast-ui/editor/dist/i18n/ko-kr")]).then(
+      ([{ default: Editor }]) => {
+        if (cancelled || !containerRef.current) return;
+        editor = new Editor({
+          el: containerRef.current,
+          height: "360px",
+          initialEditType: "markdown",
+          previewStyle: "vertical",
+          initialValue: lastKnownValueRef.current,
+          placeholder,
+          usageStatistics: false,
+          language: "ko-KR",
+          events: {
+            change: () => {
+              if (!editor) return;
+              const markdown = editor.getMarkdown();
+              lastKnownValueRef.current = markdown;
+              onChangeRef.current(markdown);
+            },
           },
-        },
-      });
-      editorRef.current = editor;
+        });
+        editorRef.current = editor;
 
-      const slots = editor.getEditorElements();
-      slots.mdEditor?.setAttribute("aria-label", label);
-      slots.wwEditor?.setAttribute("aria-label", label);
-    });
+        // `getEditorElements()`가 주는 mdEditor/wwEditor는 각 모드의 바깥
+        // 감싸개다 — 실제로 포커스를 받는 것은 그 안의 `.ProseMirror`
+        // 편집영역이라 거기에 접근성 이름을 직접 붙인다.
+        const slots = editor.getEditorElements();
+        for (const wrapper of [slots.mdEditor, slots.wwEditor]) {
+          const editable = wrapper?.querySelector<HTMLElement>(".ProseMirror") ?? wrapper;
+          editable?.setAttribute("aria-label", label);
+        }
+      },
+    );
 
     return () => {
       cancelled = true;
@@ -95,9 +103,16 @@ export function MarkdownEditor({
   }, []);
 
   useEffect(() => {
-    const editor = editorRef.current;
-    if (!editor || value === lastKnownValueRef.current) return;
+    // 에디터가 아직 만들어지는 중이어도(동적 import가 안 끝났어도) 여기서
+    // ref는 늘 최신 값으로 갱신한다 — 그래야 위 마운트 effect가 나중에
+    // `lastKnownValueRef.current`를 initialValue로 읽을 때 이 값을 본다.
+    // 편집 화면은 처음엔 `value=""`로 마운트됐다가(로딩 중) 비동기로 문제를
+    // 불러온 뒤에야 진짜 설명이 채워지므로, 두 비동기(에디터 생성 / 데이터
+    // 로딩) 중 어느 쪽이 먼저 끝나도 최종적으로 올바른 값이 반영돼야 한다.
+    const changed = value !== lastKnownValueRef.current;
     lastKnownValueRef.current = value;
+    const editor = editorRef.current;
+    if (!editor || !changed) return;
     editor.setMarkdown(value, false);
   }, [value]);
 

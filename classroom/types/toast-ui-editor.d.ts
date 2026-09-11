@@ -31,6 +31,7 @@ declare module "@toast-ui/editor" {
     initialEditType?: ToastUiEditorType;
     placeholder?: string;
     usageStatistics?: boolean;
+    language?: string;
     events?: ToastUiEditorEventMap;
   }
 
@@ -42,3 +43,7 @@ declare module "@toast-ui/editor" {
     destroy(): void;
   }
 }
+
+// 한국어 UI 로케일(#324) — import 하면 `Editor.setLanguage`를 부르는
+// 부작용만 있고 값을 내보내지 않는다.
+declare module "@toast-ui/editor/dist/i18n/ko-kr";
