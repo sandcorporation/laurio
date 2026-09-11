@@ -176,10 +176,14 @@ export default function JoinPage() {
           <div className="flex flex-col gap-3">
             <Note>
               <span data-testid="join-needs-login">
-                가입하려면 먼저 로그인해야 합니다. 로그인한 뒤 이 링크로 다시 돌아와 주세요.
+                가입하려면 먼저 로그인해야 합니다. 로그인하면 이 초대 링크로 자동으로 돌아옵니다.
               </span>
             </Note>
-            <Link href="/login" data-testid="join-login-link" className={`${buttonClass("primary")} w-full`}>
+            <Link
+              href={`/login?next=${encodeURIComponent(`/join/${code}`)}`}
+              data-testid="join-login-link"
+              className={`${buttonClass("primary")} w-full`}
+            >
               로그인하러 가기
             </Link>
           </div>

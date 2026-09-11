@@ -40,3 +40,22 @@ export function isSafeNextPath(next: string | null | undefined): next is string 
 export function resolveNextPath(next: string | null | undefined, fallback = "/console"): string {
   return isSafeNextPath(next) ? next : fallback;
 }
+
+// `next_origin`을 요청했는데(강의실 같은 형제 오리진에서 왔다는 뜻이다) 허용목록과
+// 대조하는 resolveSiblingOrigin(lib/auth/sibling-origins.ts)이 실패하면, 그 요청에
+// 딸려 온 `next`는 이 오리진 안에서는 의미가 없다(#334 코드리뷰 지적) — 형제 앱의
+// 경로(`/join/abc123` 등)일 수 있고, 그걸 이 오리진 안에서 그대로 리다이렉트하면
+// 여기 없는 경로라 404가 난다. 예전에는 강의실이 `next`를 항상 "/"로 고정해 보냈기
+// 때문에 이 경로가 없었다 — 강의실이 실제 목적지를 실어 보내기 시작하면서(#334)
+// 처음으로 생긴 위험이다.
+//
+// `next_origin`이 애초에 없었으면(형제 오리진에서 온 요청이 아닌 평범한 공개 앱
+// 로그인) `next`는 손대지 않는다 — 지금까지와 한 글자도 다르지 않다.
+export function withoutForeignNext(
+  next: string,
+  requestedNextOrigin: string | null | undefined,
+  returnOrigin: string | null,
+  fallback = "/console",
+): string {
+  return requestedNextOrigin && !returnOrigin ? fallback : next;
+}
