@@ -235,6 +235,81 @@ def test_expelled_member_cannot_submit_a_new_attempt(client, db):
     assert response.status_code == 403
 
 
+def test_expelled_member_can_still_read_their_past_submissions(client, db):
+    """티켓 #300 AC — 내보내진 사람도 지난 제출과 판정을 읽을 수 있다."""
+
+    instructor = _login(client, uid="instructor-1")
+    class_id = _create_class(client, instructor["access"])
+    problem_id = _create_open_problem(client, instructor["access"], class_id, "repository")
+    participant = _login(client, uid="participant-1")
+    _join(client, participant["access"], _join_code(client, instructor["access"], class_id))
+    _submit(client, participant["access"], class_id, problem_id, "https://github.com/octocat/hello")
+
+    members = client.get(f"{CLASSES_URL}/{class_id}/members", **_auth_header(instructor["access"]))
+    member_id = next(m["id"] for m in members.json() if not m["is_instructor"])
+    client.post(
+        f"{CLASSES_URL}/{class_id}/members/{member_id}/expel",
+        content_type="application/json",
+        **_auth_header(instructor["access"]),
+    )
+
+    mine = client.get(_mine_url(class_id, problem_id), **_auth_header(participant["access"]))
+
+    assert mine.status_code == 200
+    body = mine.json()
+    assert len(body["submissions"]) == 1
+    assert body["submissions"][0]["value"] == "https://github.com/octocat/hello"
+
+
+def test_expelled_members_problem_view_signals_why_they_cannot_submit(client, db):
+    """화면이 제출 수단을 감추고 이유를 말해 줄 신호(#300 AC)."""
+
+    instructor = _login(client, uid="instructor-1")
+    class_id = _create_class(client, instructor["access"])
+    problem_id = _create_open_problem(client, instructor["access"], class_id, "repository")
+    participant = _login(client, uid="participant-1")
+    _join(client, participant["access"], _join_code(client, instructor["access"], class_id))
+
+    mine_before = client.get(_mine_url(class_id, problem_id), **_auth_header(participant["access"]))
+    assert mine_before.json()["member_expelled"] is False
+
+    members = client.get(f"{CLASSES_URL}/{class_id}/members", **_auth_header(instructor["access"]))
+    member_id = next(m["id"] for m in members.json() if not m["is_instructor"])
+    client.post(
+        f"{CLASSES_URL}/{class_id}/members/{member_id}/expel",
+        content_type="application/json",
+        **_auth_header(instructor["access"]),
+    )
+
+    mine_after = client.get(_mine_url(class_id, problem_id), **_auth_header(participant["access"]))
+    assert mine_after.json()["member_expelled"] is True
+
+
+def test_expelled_member_still_sees_the_problem_list(client, db):
+    """티켓 #300 AC — 내보내진 사람도 문제 목록을 그대로 읽는다."""
+
+    instructor = _login(client, uid="instructor-1")
+    class_id = _create_class(client, instructor["access"])
+    _create_open_problem(client, instructor["access"], class_id, "repository")
+    participant = _login(client, uid="participant-1")
+    _join(client, participant["access"], _join_code(client, instructor["access"], class_id))
+
+    members = client.get(f"{CLASSES_URL}/{class_id}/members", **_auth_header(instructor["access"]))
+    member_id = next(m["id"] for m in members.json() if not m["is_instructor"])
+    client.post(
+        f"{CLASSES_URL}/{class_id}/members/{member_id}/expel",
+        content_type="application/json",
+        **_auth_header(instructor["access"]),
+    )
+
+    response = client.get(
+        f"{CLASSES_URL}/{class_id}/problems/mine", **_auth_header(participant["access"])
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+
+
 def test_draft_problem_cannot_be_submitted_to(client, db):
     instructor = _login(client, uid="instructor-1")
     class_id = _create_class(client, instructor["access"])

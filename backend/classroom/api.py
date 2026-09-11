@@ -520,20 +520,34 @@ def preview_join(request: HttpRequest, join_code: str):
     **보관된 클래스도 404로 숨기지 않는다**(#294) — 재발급으로 죽은 코드와
     달리, 보관은 "이 링크가 무효다"가 아니라 "이 수업이 끝났다"이다. 그
     차이가 화면에서 "고장"과 "끝났다"를 가르므로(AC), 미리보기는 그대로
-    보여주고 `archived`만 참으로 켠다 — 가입 폼을 접는 판단은 화면의 몫."""
+    보여주고 `archived`만 참으로 켠다 — 가입 폼을 접는 판단은 화면의 몫.
+
+    **로그인되어 있으면 이미 참여자인지도 함께 알려준다**(#300) — 이
+    엔드포인트는 `auth=None`이라 로그인하지 않은 방문자도 여전히 미리보기를
+    보지만, `JWTAuthenticationMiddleware`가 `request.auth_user`는 인증
+    요구와 무관하게 항상 채워 둔다(`accounts/middleware.py`) — 그 값이
+    있으면 멤버십을 확인할 수 있다. 다시 가입 링크를 연 사람이 이름 입력
+    폼을 또 보지 않게 하는 것이 이 신호의 목적이다."""
 
     class_obj = _get_class_by_join_code_or_404(join_code)
+    auth_user = getattr(request, "auth_user", None)
+    already_joined = (
+        auth_user is not None
+        and class_obj.members.filter(user_id=auth_user.id).exists()
+    )
     # `members.count()`는 강사 본인이 가입했으면 그 행도 센다 — CONTEXT.md
     # 「ClassMember」가 강사를 빼라고 정한 것은 **달성률**의 분모뿐이다(그
     # 계산은 아직 없는 티켓의 몫이다). 이 미리보기의 "참여자 수"는 그
     # 지표가 아니라 문자 그대로 "이 클래스에 누가 있는가"라 뺄 이유가
     # 없다.
     return 200, JoinPreviewOut(
+        class_id=class_obj.id,
         class_name=class_obj.name,
         instructor_display_name=class_obj.instructor_display_name or None,
         problem_count=class_obj.problems.count(),
         participant_count=class_obj.members.count(),
         archived=class_obj.archived_at is not None,
+        already_joined=already_joined,
     )
 
 
@@ -945,6 +959,10 @@ def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
             problem, passed=any(s.passed for s in serialized_submissions)
         ),
         submissions=serialized_submissions,
+        # 내보내진 사람도 지난 시도는 그대로 읽되(#300 AC), 화면이 제출
+        # 수단을 감추고 이유를 말해 줄 수 있도록 신호만 얹는다 — 막는
+        # 문 자체는 여전히 `create_classroom_submission`의 403이다.
+        member_expelled=member.expelled_at is not None,
     )
 
 

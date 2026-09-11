@@ -75,7 +75,7 @@ export default function ProblemSubmitPage() {
     );
   }
 
-  const { problem, submissions } = state.data;
+  const { problem, submissions, member_expelled: memberExpelled } = state.data;
 
   async function submitValue(value: string, contentType?: string | null) {
     setSubmitting(true);
@@ -246,7 +246,17 @@ export default function ProblemSubmitPage() {
           <Card>
             <CardHeader title="제출" />
             <div className="flex flex-col gap-3.5 p-4">
-              {problem.submission_format === "repository" ? (
+              {memberExpelled ? (
+                // 내보내진 사람에게는 제출 수단 자체를 보이지 않고, 왜
+                // 낼 수 없는지를 말해 준다(#300 AC) — 지난 시도는 위
+                // "내 시도" 카드에 그대로 남아 있다.
+                <ErrorNote>
+                  <span data-testid="member-expelled-note">
+                    이 클래스에서 내보내져 더 이상 새로 제출할 수 없습니다. 지난 시도와 판정은
+                    계속 볼 수 있습니다.
+                  </span>
+                </ErrorNote>
+              ) : problem.submission_format === "repository" ? (
                 <form onSubmit={handleRepositorySubmit} className="flex flex-col gap-3">
                   <div className="flex flex-col gap-1.5">
                     <label htmlFor="repository-url">
