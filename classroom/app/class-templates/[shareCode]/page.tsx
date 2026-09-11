@@ -5,7 +5,7 @@
 // 없어 만들지 않는다.
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import {
@@ -33,6 +33,11 @@ export default function ClassTemplatePreviewPage() {
   const [name, setName] = useState("");
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (state.status !== "ready" || name !== "") return;
+    setName(state.template.name);
+  }, [state, name]);
 
   const [takingDown, setTakingDown] = useState(false);
   const [takedownError, setTakedownError] = useState<string | null>(null);
@@ -196,6 +201,11 @@ export default function ClassTemplatePreviewPage() {
                   >
                     {importing ? "가져오는 중..." : "가져오기"}
                   </button>
+                  {name.trim() === "" ? (
+                    <p data-testid="class-template-import-name-hint" className="text-[12px] text-ink/45">
+                      새 클래스 이름을 입력하세요
+                    </p>
+                  ) : null}
                 </form>
                 {importError ? (
                   <ErrorNote>
