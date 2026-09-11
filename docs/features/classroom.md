@@ -43,6 +43,14 @@ Next.js + React. 강사·참여자가 쓰는 앱이다(ADR-0037) — 공모전 �
 내려주는 시도마다 `status`("pending"·"scored")가 있어 화면이 「채점 중」을
 구별한다.
 
+**배포되지 않은 환경(dev·CI)은 이 키로 실제 OpenAI에 나가지 않는다**(#340,
+ADR-0043) — `CLASSROOM_SCORING_ADAPTER_MODE`(기본값 `fake`)가 결정적인
+`FakeClassroomScoringAdapter`를 쓴다: 체크리스트 문구가 제출된 소스에 그대로
+등장하면 충족, 아니면 미달이다. "키가 있어야 채점 후보에 든다"는 규칙은
+그대로다 — 이 스위치는 "그 키로 실제로 네트워크에 나가는가"만 가른다.
+staging/production은 이 값이 fake이면 부팅 자체가 거부되고, 실제로는 강사 본인의
+키로 `OpenAIScoringAdapter`가 돈다 — 배포 환경의 원칙은 바뀌지 않는다.
+
 **강사는 클래스마다 채점 토큰 예산을 정할 수 있다**(#295, CONTEXT.md 「채점
 예산」) — 채점이 강사 본인의 키로 돌기 때문이다. 예산(`token_budget`)과 경고
 임계(`token_budget_warning_threshold_percent`, 예산 대비 백분율)는 「채점

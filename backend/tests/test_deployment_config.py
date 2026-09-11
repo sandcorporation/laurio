@@ -98,6 +98,10 @@ def _base_env(*, target: str, secret_key: str) -> dict[str, str]:
         "PAYOUT_ADAPTER_MODE": "tests.adapter_stubs.StubPayoutAdapter",
         "SELLER_ADAPTER_MODE": "tests.adapter_stubs.StubSellerAdapter",
         "LLM_ADAPTER_MODE": "tests.adapter_stubs.StubLLMScoringAdapter",
+        # #340: 강의실 채점은 이 값과 별개로 도는 어댑터를 고르지만(강사 본인의
+        # 키로 만든다, classroom/scoring.py) 같은 LLMScoringAdapter 계약이라
+        # Stub을 그대로 재사용한다.
+        "CLASSROOM_SCORING_ADAPTER_MODE": "tests.adapter_stubs.StubLLMScoringAdapter",
         "LLM_REQUIREMENT_CHAT_ADAPTER_MODE": "tests.adapter_stubs.StubRequirementChatAdapter",
         "GITHUB_ADAPTER_MODE": "tests.adapter_stubs.StubGitHubAdapter",
         # #89: notifications.adapters.RealAlimtalkAdapter/RealSmsAdapter/RealLmsAdapter는
@@ -187,6 +191,7 @@ _FAKE_ADAPTER_OVERRIDES = [
     ("PAYOUT_ADAPTER_MODE", "fake"),
     ("SELLER_ADAPTER_MODE", "fake"),
     ("LLM_ADAPTER_MODE", "fake"),
+    ("CLASSROOM_SCORING_ADAPTER_MODE", "fake"),
     ("LLM_REQUIREMENT_CHAT_ADAPTER_MODE", "fake"),
     ("GITHUB_ADAPTER_MODE", "fake"),
     ("NOTIFICATION_ALIMTALK_ADAPTER", "notifications.adapters.FakeAlimtalkAdapter"),
@@ -243,6 +248,7 @@ def test_development_target_still_boots_with_every_adapter_fake():
         "PAYMENT_ADAPTER_MODE": "fake",
         "PAYOUT_ADAPTER_MODE": "fake",
         "LLM_ADAPTER_MODE": "fake",
+        "CLASSROOM_SCORING_ADAPTER_MODE": "fake",
         "LLM_REQUIREMENT_CHAT_ADAPTER_MODE": "fake",
     }
     env.pop("LAURIO_DEPLOYMENT_TARGET", None)
@@ -287,6 +293,7 @@ def test_unknown_deployment_target_refuses_to_boot(bad_target):
 _FAKE_DOTTED_PATH_BYPASSES = [
     ("STORAGE_BACKEND", "storage.adapters.fake.FakeStorageAdapter"),
     ("LLM_ADAPTER_MODE", "scoring.adapters.FakeLLMScoringAdapter"),
+    ("CLASSROOM_SCORING_ADAPTER_MODE", "classroom.scoring.FakeClassroomScoringAdapter"),
     (
         "LLM_REQUIREMENT_CHAT_ADAPTER_MODE",
         "contests.requirement_chat.FakeRequirementChatAdapter",
@@ -339,6 +346,7 @@ _UNRESOLVABLE_ADAPTER_MODE_FIELDS = [
     "PAYOUT_ADAPTER_MODE",
     "SELLER_ADAPTER_MODE",
     "LLM_ADAPTER_MODE",
+    "CLASSROOM_SCORING_ADAPTER_MODE",
     "LLM_REQUIREMENT_CHAT_ADAPTER_MODE",
     "GITHUB_ADAPTER_MODE",
     # #89: 알림 채널 셋도 이제 같은 가드(core.adapters.check_adapter_mode)를 받는다 —

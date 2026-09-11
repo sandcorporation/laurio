@@ -14,12 +14,23 @@ import json
 import uuid
 from urllib.parse import quote as urlquote
 
+import pytest
 from django.conf import settings
+from django.test import override_settings
 
 from submissions.models import AssignmentSourceReading
 
 CLASSES_URL = "/api/classroom/classes"
 SCAN_URL = "/api/internal/scans/classroom-submission-scoring"
+
+
+@pytest.fixture(autouse=True)
+def _force_real_scoring_adapter():
+    # 이 파일은 core.llm_scoring.requests.post를 모킹해 OpenAIScoringAdapter
+    # 경로 자체를 검증한다 — CLASSROOM_SCORING_ADAPTER_MODE 기본값(fake)이
+    # 그 경로를 안 타므로 강제한다(#340, ADR-0043).
+    with override_settings(CLASSROOM_SCORING_ADAPTER_MODE="core.llm_scoring.OpenAIScoringAdapter"):
+        yield
 
 
 def _internal_headers() -> dict:
