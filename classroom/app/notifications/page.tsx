@@ -78,7 +78,7 @@ export default function NotificationsPage() {
 
   return (
     <PageShell>
-      <PageHeader eyebrow="강의실" title="알림" titleTestId="notifications-heading" />
+      <PageHeader eyebrow="클래스" title="알림" titleTestId="notifications-heading" />
 
       {load.status === "error" ? (
         <ErrorNote>

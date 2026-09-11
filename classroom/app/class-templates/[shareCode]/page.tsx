@@ -108,7 +108,7 @@ export default function ClassTemplatePreviewPage() {
   return (
     <PageShell>
       <PageHeader
-        eyebrow="강의실 · 클래스 템플릿"
+        eyebrow="클래스 템플릿"
         title={template.name}
         titleTestId="class-template-preview-heading"
         actions={

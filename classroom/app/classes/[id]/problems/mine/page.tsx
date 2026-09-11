@@ -51,7 +51,7 @@ export default function MyProblemsPage() {
   return (
     <PageShell>
       <PageHeader
-        eyebrow="강의실"
+        eyebrow="클래스"
         title="문제 목록"
         description={
           problems.length > 0 ? (

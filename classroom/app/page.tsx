@@ -63,7 +63,7 @@ export default function ClassroomHome() {
   return (
     <PageShell>
       <PageHeader
-        eyebrow="강의실"
+        eyebrow="클래스"
         title="내 클래스"
         titleTestId="classroom-home-heading"
         description={

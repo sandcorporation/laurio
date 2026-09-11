@@ -180,7 +180,7 @@ export default function ProblemSubmissionsPage() {
         )}
 
         <Note>
-          이 화면을 여는 것은 <b className="text-ink">어디에도 기록되지 않습니다.</b> 강의실에서
+          이 화면을 여는 것은 <b className="text-ink">어디에도 기록되지 않습니다.</b> 여기서
           열람 기록이 드러내는 것은 감시가 아니라 「한 번도 안 봤다」이기 때문입니다.
         </Note>
       </div>

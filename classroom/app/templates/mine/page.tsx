@@ -83,7 +83,7 @@ export default function MyTemplatesPage() {
   return (
     <PageShell>
       <PageHeader
-        eyebrow="강의실 · 템플릿"
+        eyebrow="클래스 · 템플릿"
         title="내가 올린 템플릿"
         titleTestId="my-templates-heading"
         actions={

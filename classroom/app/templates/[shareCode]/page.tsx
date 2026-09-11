@@ -133,7 +133,7 @@ export default function ProblemTemplatePreviewPage() {
   return (
     <PageShell>
       <PageHeader
-        eyebrow="강의실 · 템플릿"
+        eyebrow="클래스 · 템플릿"
         title={template.title}
         titleTestId="template-preview-heading"
         actions={

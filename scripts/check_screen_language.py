@@ -23,6 +23,14 @@
 `SCREEN-LANGUAGE-EXCEPTION: <이유>` 주석을 남긴다 — 이유가 없으면(빈 문자열)
 예외 자체가 실패한다. 표시 없는 예외는 「일부러 남긴 것」과 「그냥 걸린 것」을
 구별하지 못하게 만든다.
+
+**내부 어휘도 같은 방식으로 막는다**(#308). `CONTEXT.md`의 용어와 달리 이
+목록(`INTERNAL_VOCAB`)은 도메인 명사가 아니라 설계 논의에서만 쓰는
+낱말이다 — 「불변식」·「멱등」·「스냅샷」처럼 이미 한국어라 `_화면에서_` 대응이
+없고, 걸리면 그 낱말 자체를 사용자 말로 풀어 쓰라고 말한다. 「전이」는 목록에
+넣지 않았다 — "마감 전이라" 처럼 흔한 문법(전 + 조사 이)과 표기가 같아 그대로
+넣으면 정상적인 문장을 오탐한다. 그래서 실제로 쓰이는 합성어(`상태 전이`·
+`전이 그래프`)만 넣는다.
 """
 
 from __future__ import annotations
@@ -41,6 +49,10 @@ CONTEXT_MD = REPO_ROOT / "CONTEXT.md"
 # 읽는 화면이라 CONTEXT.md 어휘 규율이 그대로 적용된다. `classroom/components`는
 # 아직 없다 — 생기면 여기 더한다(frontend/components처럼).
 SCAN_DIRS = ["frontend/app", "frontend/components", "frontend/lib", "classroom/app", "classroom/lib"]
+
+# 설계 문서에서만 쓰는 낱말 — 도메인 명사가 아니라서 `CONTEXT.md`에 없다
+# (위 모듈 docstring의 「내부 어휘도 같은 방식으로 막는다」 참고, #308).
+INTERNAL_VOCAB = ["불변식", "멱등", "스냅샷", "상태 전이", "전이 그래프", "감사 추적"]
 
 TERM_HEADER_RE = re.compile(r"^\*\*([A-Za-z][A-Za-z0-9]*)\*\*:\s*$")
 SCREEN_NAME_RE = re.compile(r"^_화면에서_:\s*(.+)$")
@@ -74,6 +86,14 @@ class Term:
     name: str
     screen_name: str | None  # CONTEXT.md 의 `_화면에서_` 값. 없으면 None.
     pattern: re.Pattern[str]
+    internal_vocab: bool = False  # INTERNAL_VOCAB 에서 왔는가 — 메시지 문구가 다르다.
+
+
+def _term_pattern(name: str) -> re.Pattern[str]:
+    # 영문 한 글자짜리·소문자 시작 등은 애초에 TERM_HEADER_RE 가 거른다.
+    # 공백을 포함한 한국어 합성어(`상태 전이`)도 그대로 이스케이프되므로
+    # 안전하다.
+    return re.compile(rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])")
 
 
 def load_terms() -> list[Term]:
@@ -89,11 +109,7 @@ def load_terms() -> list[Term]:
     def flush() -> None:
         if current_name is None:
             return
-        # 영문 한 글자짜리·소문자 시작 등은 애초에 TERM_HEADER_RE 가 거른다.
-        pattern = re.compile(
-            rf"(?<![A-Za-z0-9_]){re.escape(current_name)}(?![A-Za-z0-9_])"
-        )
-        terms.append(Term(current_name, current_screen_name, pattern))
+        terms.append(Term(current_name, current_screen_name, _term_pattern(current_name)))
 
     for line in lines:
         header = TERM_HEADER_RE.match(line)
@@ -110,6 +126,10 @@ def load_terms() -> list[Term]:
     if not terms:
         print(f"::error::{CONTEXT_MD} 에서 `**Name**:` 형태의 용어를 하나도 못 읽었다.")
         sys.exit(1)
+
+    for word in INTERNAL_VOCAB:
+        terms.append(Term(word, None, _term_pattern(word), internal_vocab=True))
+
     return terms
 
 
@@ -187,15 +207,22 @@ def check_file(path: Path, terms: list[Term]) -> list[str]:
             continue
 
         for term in terms:
-            if term.pattern.search(line):
-                fix = (
-                    f"`{term.screen_name}` 로 바꿀 것"
-                    if term.screen_name
-                    else f"화면 문자열에서 영어 용어 `{term.name}` 를 한국어로 옮길 것"
-                )
+            if not term.pattern.search(line):
+                continue
+            if term.internal_vocab:
                 problems.append(
-                    f"{path}:{lineno}: 영어 도메인 용어 `{term.name}` 가 화면 문자열에 있다 — {fix}"
+                    f"{path}:{lineno}: 설계 문서에서만 쓰는 내부 낱말 `{term.name}` 가 화면 "
+                    f"문자열에 있다 — 무엇을 뜻하는지 사용자 말로 풀어 쓸 것."
                 )
+                continue
+            fix = (
+                f"`{term.screen_name}` 로 바꿀 것"
+                if term.screen_name
+                else f"화면 문자열에서 영어 용어 `{term.name}` 를 한국어로 옮길 것"
+            )
+            problems.append(
+                f"{path}:{lineno}: 영어 도메인 용어 `{term.name}` 가 화면 문자열에 있다 — {fix}"
+            )
 
         for pattern, label in ((ADR_REF_RE, "ADR 번호"), (ISSUE_REF_RE, "이슈 번호")):
             if pattern.search(line):

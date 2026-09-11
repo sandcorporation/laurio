@@ -27,7 +27,7 @@ export default function TemplatesPage() {
   return (
     <PageShell>
       <PageHeader
-        eyebrow="강의실 · 템플릿"
+        eyebrow="클래스 · 템플릿"
         title="공개된 템플릿"
         titleTestId="templates-heading"
         description="다른 강사가 공개한 문제나 클래스를 찾아 내 것으로 가져올 수 있습니다."

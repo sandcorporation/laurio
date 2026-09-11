@@ -356,6 +356,9 @@ jobs:
       - name: Public app screen strings stay in Korean
         run: python3 scripts/check_screen_language.py
 
+      - name: Internal-vocabulary gate is wired correctly (#308)
+        run: python3 scripts/test_check_screen_language.py
+
       - name: Backend error messages reaching the public app stay in Korean
         run: python3 scripts/check_backend_error_language.py
 

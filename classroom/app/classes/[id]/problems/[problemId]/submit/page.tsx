@@ -115,7 +115,7 @@ export default function ProblemSubmitPage() {
   return (
     <PageShell>
       <PageHeader
-        eyebrow="강의실 · 문제"
+        eyebrow="클래스 · 문제"
         title={problem.title}
         titleTestId="my-problem-title"
         actions={
