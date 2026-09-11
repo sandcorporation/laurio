@@ -35,9 +35,9 @@ export default function ClassTemplatePreviewPage() {
   const [importError, setImportError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (state.status !== "ready" || name !== "") return;
-    setName(state.template.name);
-  }, [state, name]);
+    if (state.status === "ready") setName(state.template.name);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
 
   const [takingDown, setTakingDown] = useState(false);
   const [takedownError, setTakedownError] = useState<string | null>(null);

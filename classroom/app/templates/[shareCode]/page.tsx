@@ -38,10 +38,11 @@ export default function ProblemTemplatePreviewPage() {
   const [importError, setImportError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (myClassesState.status !== "ready" || targetClassId !== "") return;
+    if (myClassesState.status !== "ready") return;
     const target = defaultCopyTarget(myClassesState.classes);
     if (target) setTargetClassId(String(target.id));
-  }, [myClassesState, targetClassId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myClassesState]);
 
   const [reportOpen, setReportOpen] = useState(false);
   const [reportReason, setReportReason] = useState("");
