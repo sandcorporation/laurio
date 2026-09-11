@@ -3,11 +3,11 @@
 // 클래스 상세 (#278/#279/#281/#282). 이름·만든 날짜에 이어 가입 링크·참여자
 // 명단으로 가는 문, 그리고 문제 목록을 순서대로 보여준다. 남의 클래스는
 // 백엔드가 404를 주므로 그대로 "찾을 수 없다"로 보여준다(존재를 알려주지
-// 않는다).
+// 않는다). 「클래스를 템플릿으로 공개」는 여기 살지 않는다 — 학기에 한 번
+// 할까 말까 한 일이라 매일 보는 이 화면 대신 「클래스 설정」으로 옮겼다(#323).
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
-import type { FormEvent } from "react";
 
 import {
   Badge,
@@ -15,15 +15,12 @@ import {
   CardHeader,
   EmptyState,
   ErrorNote,
-  FieldLabel,
-  INPUT_CLASS,
   Note,
   Num,
   PageHeader,
   PageShell,
   buttonClass,
 } from "@/app/components/ui";
-import { publishClassAsTemplate, type ClassTemplateRow } from "@/lib/class-templates/api";
 import { copyClass } from "@/lib/classes/api";
 import { useClass } from "@/lib/classes/use-class";
 import { formatAchievementRate } from "@/lib/problems/achievement";
@@ -99,84 +96,6 @@ function JoinLinkSection({
             <span data-testid="join-link-regenerate-error">다시 뽑지 못했습니다. 다시 시도해주세요.</span>
           </ErrorNote>
         ) : null}
-      </div>
-    </Card>
-  );
-}
-
-function ClassTemplatePublishSection() {
-  const [publisherDisplayName, setPublisherDisplayName] = useState("");
-  const [publishing, setPublishing] = useState(false);
-  const [publishError, setPublishError] = useState<string | null>(null);
-  const [publishedTemplate, setPublishedTemplate] = useState<ClassTemplateRow | null>(null);
-  const params = useParams<{ id: string }>();
-  const classId = Number(params.id);
-
-  async function handlePublish(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setPublishError(null);
-    setPublishing(true);
-    try {
-      const template = await publishClassAsTemplate(classId, publisherDisplayName.trim());
-      setPublishedTemplate(template);
-    } catch {
-      setPublishError("템플릿으로 공개하지 못했습니다. 잠시 후 다시 시도해주세요.");
-    } finally {
-      setPublishing(false);
-    }
-  }
-
-  return (
-    <Card>
-      <CardHeader title="클래스를 템플릿으로 공개" hint="문제와 순서까지 통째로 다른 강사에게 공유" />
-      <div className="flex flex-col gap-2.5 p-4">
-        {publishedTemplate ? (
-          <div className="flex flex-col gap-2">
-            <p data-testid="publish-class-template-done" className="text-[13px] leading-relaxed">
-              공개되었습니다. 아래 주소를 다른 강사에게 전달하세요.
-            </p>
-            <Link
-              href={`/class-templates/${publishedTemplate.share_code}`}
-              data-testid="publish-class-template-share-link"
-              className="break-all border border-rule bg-surface px-3 py-2 font-mono text-[12.5px] hover:underline"
-            >
-              /class-templates/{publishedTemplate.share_code}
-            </Link>
-          </div>
-        ) : (
-          <form onSubmit={handlePublish} className="flex flex-col gap-2.5">
-            <label htmlFor="publish-class-template-name">
-              <FieldLabel>공개할 때 보일 이름</FieldLabel>
-            </label>
-            <input
-              id="publish-class-template-name"
-              data-testid="publish-class-template-name-input"
-              value={publisherDisplayName}
-              onChange={(event) => setPublisherDisplayName(event.target.value)}
-              required
-              placeholder="계정 이름과 달라도 됩니다"
-              className={INPUT_CLASS}
-            />
-            <button
-              type="submit"
-              data-testid="publish-class-template-submit"
-              disabled={publishing || publisherDisplayName.trim() === ""}
-              className={buttonClass("secondary")}
-            >
-              {publishing ? "공개하는 중..." : "클래스를 템플릿으로 공개"}
-            </button>
-          </form>
-        )}
-        {publishError ? (
-          <ErrorNote>
-            <span data-testid="publish-class-template-error">{publishError}</span>
-          </ErrorNote>
-        ) : null}
-        <span className="text-[11.5px] leading-relaxed text-ink/45">
-          공개하는 순간 문제와 그 순서, 체크리스트까지 통째로 사본이 떠집니다 — 이후 이
-          클래스를 고치거나 지워도 템플릿은 그대로입니다. 참여자·제출물·판정·가입 코드·채점
-          키·채점 모델은 담기지 않습니다.
-        </span>
       </div>
     </Card>
   );
@@ -308,8 +227,8 @@ export default function ClassDetailPage() {
             <Link href={`/classes/${classId}/members`} data-testid="members-link" className={buttonClass()}>
               참여자 명단
             </Link>
-            <Link href={`/classes/${classId}/settings`} data-testid="scoring-settings-link" className={buttonClass()}>
-              채점 설정
+            <Link href={`/classes/${classId}/settings`} data-testid="class-settings-link" className={buttonClass()}>
+              클래스 설정
             </Link>
             {/* 보관된 클래스에서는 이것이 주 행동이다 — 지난 클래스를 복사해 다음
                 클래스를 여는 것이 이 제품의 흔한 쓰임이다
@@ -345,8 +264,6 @@ export default function ClassDetailPage() {
           regenerateError={classState.regenerateError}
           onRegenerate={regenerateJoinCode}
         />
-
-        <ClassTemplatePublishSection />
 
         {/* 클래스 상세의 두 탭(#290) — 「문제 중심」은 문제마다 달성률을 보여주고
             (#289), 「참여자별 현황」은 참여자 × 문제 격자로 누가 막혔는지 보여준다.

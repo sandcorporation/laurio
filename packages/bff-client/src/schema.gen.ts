@@ -1306,7 +1306,7 @@ export interface paths {
         };
         /**
          * List Scoring Models
-         * @description 「채점 설정」 화면이 선택지마다 컨텍스트 크기를 함께 보여주는 자리(#285).
+         * @description 「클래스 설정」 화면이 선택지마다 컨텍스트 크기를 함께 보여주는 자리(#285).
          */
         get: operations["classroom_api_list_scoring_models"];
         put?: never;

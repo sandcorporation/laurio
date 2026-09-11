@@ -445,7 +445,7 @@ def copy_class_view(request: HttpRequest, class_id: int):
 
 @router.get("/scoring-models", response={200: list[ScoringModelOut]}, auth=jwt_auth)
 def list_scoring_models(request: HttpRequest):
-    """「채점 설정」 화면이 선택지마다 컨텍스트 크기를 함께 보여주는 자리(#285)."""
+    """「클래스 설정」 화면이 선택지마다 컨텍스트 크기를 함께 보여주는 자리(#285)."""
 
     return 200, [
         ScoringModelOut(id=c.id, label=c.label, context_window=c.context_window)

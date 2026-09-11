@@ -1,8 +1,9 @@
 "use client";
 
-// 채점 설정 (#284/#285). 강사 본인의 채점 키를 넣고, 클래스 기본 채점
-// 모델을 고른다. 키는 저장 뒤 마스킹된 형태로만 보인다 — 평문은 다시
-// 보여주지 않는다.
+// 클래스 설정 (#284/#285/#323). 「채점 설정」이던 이름이 넓어졌다 — 강사 본인의
+// 채점 키를 넣고 클래스 기본 채점 모델을 고르는 일 말고도, 채점과 무관한 강사
+// 이름과(#299) 클래스를 템플릿으로 공개하는 일(#319)까지 이 화면 하나가 담는다.
+// 키는 저장 뒤 마스킹된 형태로만 보인다 — 평문은 다시 보여주지 않는다.
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -22,11 +23,133 @@ import {
   buttonClass,
 } from "@/app/components/ui";
 import { BackendError } from "@/lib/backend/client";
+import { publishClassAsTemplate, takedownClassTemplate, type ClassTemplateRow } from "@/lib/class-templates/api";
 import { setOpenAIKey, updateClass } from "@/lib/classes/api";
 import { useClass } from "@/lib/classes/use-class";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
 
-export default function ClassScoringSettingsPage() {
+function ClassTemplatePublishCard() {
+  const params = useParams<{ id: string }>();
+  const classId = Number(params.id);
+
+  const [publisherDisplayName, setPublisherDisplayName] = useState("");
+  const [publishing, setPublishing] = useState(false);
+  const [publishError, setPublishError] = useState<string | null>(null);
+  const [publishedTemplate, setPublishedTemplate] = useState<ClassTemplateRow | null>(null);
+
+  const [takingDown, setTakingDown] = useState(false);
+  const [takedownError, setTakedownError] = useState<string | null>(null);
+
+  async function handlePublish(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPublishError(null);
+    setPublishing(true);
+    try {
+      const template = await publishClassAsTemplate(classId, publisherDisplayName.trim());
+      setPublishedTemplate(template);
+    } catch {
+      setPublishError("템플릿으로 공개하지 못했습니다. 잠시 후 다시 시도해주세요.");
+    } finally {
+      setPublishing(false);
+    }
+  }
+
+  async function handleTakedown() {
+    if (!publishedTemplate) return;
+    setTakedownError(null);
+    setTakingDown(true);
+    try {
+      const template = await takedownClassTemplate(publishedTemplate.share_code);
+      setPublishedTemplate(template);
+    } catch {
+      setTakedownError("내리지 못했습니다. 잠시 후 다시 시도해주세요.");
+    } finally {
+      setTakingDown(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader title="클래스를 템플릿으로 공개" hint="문제와 순서까지 통째로 다른 강사에게 공유" />
+      <div className="flex flex-col gap-2.5 p-4">
+        {publishedTemplate ? (
+          <div className="flex flex-col gap-2">
+            {publishedTemplate.taken_down ? (
+              <p data-testid="publish-class-template-taken-down" className="flex items-center gap-2.5 text-[13px]">
+                <Badge tone="neutral">내려짐</Badge>
+                <span className="text-ink/60">더 이상 다른 강사가 가져갈 수 없습니다.</span>
+              </p>
+            ) : (
+              <>
+                <p data-testid="publish-class-template-done" className="text-[13px] leading-relaxed">
+                  공개되었습니다. 아래 주소를 다른 강사에게 전달하세요.
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Link
+                    href={`/class-templates/${publishedTemplate.share_code}`}
+                    data-testid="publish-class-template-share-link"
+                    className="min-w-0 flex-1 break-all border border-rule bg-surface px-3 py-2 font-mono text-[12.5px] hover:underline"
+                  >
+                    /class-templates/{publishedTemplate.share_code}
+                  </Link>
+                  <button
+                    type="button"
+                    data-testid="publish-class-template-takedown"
+                    onClick={handleTakedown}
+                    disabled={takingDown}
+                    className={buttonClass("danger", "sm")}
+                  >
+                    {takingDown ? "내리는 중..." : "내리기"}
+                  </button>
+                </div>
+              </>
+            )}
+            {takedownError ? (
+              <ErrorNote>
+                <span data-testid="publish-class-template-takedown-error">{takedownError}</span>
+              </ErrorNote>
+            ) : null}
+          </div>
+        ) : (
+          <form onSubmit={handlePublish} className="flex flex-col gap-2.5">
+            <label htmlFor="publish-class-template-name">
+              <FieldLabel>공개할 때 보일 이름</FieldLabel>
+            </label>
+            <input
+              id="publish-class-template-name"
+              data-testid="publish-class-template-name-input"
+              value={publisherDisplayName}
+              onChange={(event) => setPublisherDisplayName(event.target.value)}
+              required
+              placeholder="계정 이름과 달라도 됩니다"
+              className={INPUT_CLASS}
+            />
+            <button
+              type="submit"
+              data-testid="publish-class-template-submit"
+              disabled={publishing || publisherDisplayName.trim() === ""}
+              className={buttonClass("secondary")}
+            >
+              {publishing ? "공개하는 중..." : "클래스를 템플릿으로 공개"}
+            </button>
+          </form>
+        )}
+        {publishError ? (
+          <ErrorNote>
+            <span data-testid="publish-class-template-error">{publishError}</span>
+          </ErrorNote>
+        ) : null}
+        <span className="text-[11.5px] leading-relaxed text-ink/45">
+          공개하는 순간 문제와 그 순서, 체크리스트까지 통째로 사본이 떠집니다 — 이후 이
+          클래스를 고치거나 지워도 템플릿은 그대로입니다. 참여자·제출물·판정·가입 코드·채점
+          키·채점 모델은 담기지 않습니다.
+        </span>
+      </div>
+    </Card>
+  );
+}
+
+export default function ClassSettingsPage() {
   const params = useParams<{ id: string }>();
   const classId = Number(params.id);
   const { state, reload } = useClass(classId);
@@ -63,7 +186,7 @@ export default function ClassScoringSettingsPage() {
   if (state.status === "loading") {
     return (
       <PageShell>
-        <p data-testid="scoring-settings-loading" className="text-[13.5px] text-ink/45">불러오는 중...</p>
+        <p data-testid="class-settings-loading" className="text-[13.5px] text-ink/45">불러오는 중...</p>
       </PageShell>
     );
   }
@@ -71,7 +194,7 @@ export default function ClassScoringSettingsPage() {
   if (state.status === "notFound") {
     return (
       <PageShell>
-        <h1 data-testid="scoring-settings-not-found" className="text-[22px] font-semibold">클래스를 찾을 수 없습니다</h1>
+        <h1 data-testid="class-settings-not-found" className="text-[22px] font-semibold">클래스를 찾을 수 없습니다</h1>
       </PageShell>
     );
   }
@@ -80,7 +203,7 @@ export default function ClassScoringSettingsPage() {
     return (
       <PageShell>
         <ErrorNote>
-          <span data-testid="scoring-settings-error">클래스 정보를 불러오지 못했습니다.</span>
+          <span data-testid="class-settings-error">클래스 정보를 불러오지 못했습니다.</span>
         </ErrorNote>
       </PageShell>
     );
@@ -162,8 +285,8 @@ export default function ClassScoringSettingsPage() {
     <PageShell>
       <PageHeader
         eyebrow={classroom.name}
-        title="채점 설정"
-        description="채점은 강사 본인의 키로 돕니다 — 플랫폼이 대신 내지 않습니다."
+        title="클래스 설정"
+        description="강사 이름·채점 키와 모델·예산, 템플릿 공개까지 이 클래스의 설정을 여기서 관리합니다."
         actions={
           <Link href={`/classes/${classId}`} className={buttonClass()}>
             클래스로 돌아가기
@@ -416,6 +539,8 @@ export default function ClassScoringSettingsPage() {
             </Note>
           </div>
         </Card>
+
+        <ClassTemplatePublishCard />
       </div>
     </PageShell>
   );
