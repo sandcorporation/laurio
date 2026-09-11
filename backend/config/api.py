@@ -10,6 +10,7 @@ from appeals.api import router as appeals_router
 from awards.api import router as awards_router
 from classroom.api import router as classroom_router
 from classroom.template_api import router as classroom_template_router
+from classroom.template_operator_api import operator_router as classroom_template_operator_router
 from contests.api import router as contests_router
 from contests.assignment_api import router as assignments_router
 from contests.operator_api import operator_router as contests_operator_router
@@ -73,5 +74,6 @@ api.add_router("/operator", payouts_operator_router)
 api.add_router("/operator", policies_operator_router)
 api.add_router("/operator", contests_operator_router)
 api.add_router("/operator", verification_operator_router)
+api.add_router("/operator", classroom_template_operator_router)
 
 api.add_router("/storage", storage_router)

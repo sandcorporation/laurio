@@ -122,6 +122,16 @@ export default function OperatorHome() {
         </Link>
       </p>
 
+      {/* 신고된 템플릿 검토(#320)로 가는 진입점 — 정책·산출물 종류 화면과 같은
+          이유로 두 등급 모두에게 보인다. 「할 일」 큐 카드(#65/#66/#68 소관)와는
+          나란히 두지 않는다 — 그 셋은 이 스펙 밖의 결정이라(#65 주석 참고) 넷째
+          큐를 더하지 않는다. */}
+      <p>
+        <Link href="/problem-template-reports" data-testid="problem-template-reports-nav-link">
+          신고된 템플릿 검토
+        </Link>
+      </p>
+
       <section data-testid="operator-home-queues">
         <QueueCard
           testId="queue-appeals-pending"
