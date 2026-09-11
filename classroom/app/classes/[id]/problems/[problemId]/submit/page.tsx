@@ -16,7 +16,6 @@ import {
   ErrorNote,
   FieldLabel,
   INPUT_CLASS,
-  Note,
   Num,
   PageHeader,
   PageShell,
@@ -331,9 +330,6 @@ export default function ProblemSubmitPage() {
             </div>
           </Card>
 
-          <Note>
-            근거를 따로 연결하거나 자가 체크를 하지 않습니다 — 채점이 낸 소스에서 직접 판정합니다.
-          </Note>
         </div>
       </div>
     </PageShell>
