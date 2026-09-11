@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { establishClassroomSession } from "./lib/cross-app-session";
+import { classroomApi, establishClassroomSession } from "./lib/cross-app-session";
 
 // 강의실 — 공개된 템플릿을 목록에서 찾아 내 클래스로 가져온다 (#316/#318).
 //
@@ -20,10 +20,10 @@ test("강사가 다른 강사의 템플릿을 목록에서 찾아 자기 클래�
 
   // --- 준비: 공개자가 문제 하나를 만들고 템플릿으로 공개한다 -------------
   await establishClassroomSession(page, publisherSeed);
-  const api = page.context().request;
+  const api = classroomApi(page);
 
   const classResponse = await api.post("/api/backend/classroom/classes", {
-    data: { name: "공개용 클래스" },
+    data: { name: "공개용 클래스", instructor_display_name: "공유하는 강사" },
   });
   expect(classResponse.ok()).toBeTruthy();
   const classId = (await classResponse.json()).id as number;
@@ -50,8 +50,9 @@ test("강사가 다른 강사의 템플릿을 목록에서 찾아 자기 클래�
   await establishClassroomSession(page, importerSeed);
 
   const targetClassResponse = await api.post("/api/backend/classroom/classes", {
-    data: { name: "내 클래스" },
+    data: { name: "내 클래스", instructor_display_name: "가져오는 강사" },
   });
+  expect(targetClassResponse.ok()).toBeTruthy();
   const targetClassId = (await targetClassResponse.json()).id as number;
 
   await page.goto("/templates");
@@ -69,5 +70,8 @@ test("강사가 다른 강사의 템플릿을 목록에서 찾아 자기 클래�
 
   await expect(page).toHaveURL(new RegExp(`/classes/${targetClassId}/problems/\\d+$`));
   await expect(page.getByTestId("edit-problem-title-input")).toHaveValue(title);
-  await expect(page.getByTestId("checklist-items")).toContainText("테스트가 통과한다");
+  // 편집 화면은 라벨을 편집 칸(`<input defaultValue>`)으로 그린다 — 텍스트가 아니라 값이라
+  // `toContainText` 로는 안 보인다. 가져온 항목의 id 는 미리 알 수 없어 역할로 잡는다(같은
+  // 행의 「필수」는 체크박스라 textbox 에 섞이지 않는다).
+  await expect(page.getByTestId("checklist-items").getByRole("textbox")).toHaveValue("테스트가 통과한다");
 });

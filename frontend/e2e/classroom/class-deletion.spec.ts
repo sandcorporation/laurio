@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { establishClassroomSession } from "./lib/cross-app-session";
+import { classroomApi, establishClassroomSession } from "./lib/cross-app-session";
 
 // 강의실 — 제출이 없는 클래스를 강사가 지운다 (#330).
 //
@@ -18,7 +18,7 @@ test("제출이 없는 클래스는 이름을 다시 쳐야 지워지고, 지우
   const className = `삭제 테스트 클래스 ${Date.now()}`;
 
   await establishClassroomSession(page, seed);
-  const api = page.context().request;
+  const api = classroomApi(page);
 
   const classResponse = await api.post("/api/backend/classroom/classes", {
     data: { name: className, instructor_display_name: "강사" },
@@ -60,7 +60,7 @@ test("제출이 있는 클래스는 삭제 버튼 대신 보관 안내가 뜬다
   const className = `제출있음 테스트 클래스 ${Date.now()}`;
 
   await establishClassroomSession(page, seed);
-  const api = page.context().request;
+  const api = classroomApi(page);
 
   const classResponse = await api.post("/api/backend/classroom/classes", {
     data: { name: className, instructor_display_name: "강사" },

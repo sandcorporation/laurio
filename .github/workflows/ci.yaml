@@ -871,8 +871,13 @@ jobs:
           echo "LAURIO_MINIO_PORT=$port" >> "$GITHUB_ENV"
           echo "MinIO -> 127.0.0.1:$port"
 
+      # 공개 앱(frontend)도 띄운다. 강의실은 자기 로그인이 없어(ADR-0038) 인증 구역을
+      # 걷는 스펙이 공개 앱의 로그인 BFF 로 세션을 세운 뒤 그 쿠키를 강의실 오리진에
+      # 심는다(`frontend/e2e/classroom/lib/cross-app-session.ts`). 강의실만 띄우면 그
+      # 헬퍼가 `ECONNREFUSED 127.0.0.1:53000` 으로 죽는다 — #318 이 그 스펙을 더한 뒤
+      # 이 잡이 main 에서 여섯 번 연속 그렇게 빨갛게 났다(b249af7~3cd881d).
       - name: Build the images and bring up the stack
-        run: docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml up -d --build classroom
+        run: docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml up -d --build frontend classroom
 
       - name: Learn the host ports the kernel picked
         run: |
@@ -885,24 +890,31 @@ jobs:
             echo "$p"
           }
           api=$(read_port backend 8000)
+          pub=$(read_port frontend 3000)
           web=$(read_port classroom 3000)
           echo "LAURIO_API_PORT=$api" >> "$GITHUB_ENV"
+          echo "LAURIO_E2E_BASE_URL=http://127.0.0.1:$pub" >> "$GITHUB_ENV"
+          echo "FRONTEND_HEALTH_URL=http://127.0.0.1:$pub/healthz" >> "$GITHUB_ENV"
           echo "LAURIO_CLASSROOM_E2E_BASE_URL=http://127.0.0.1:$web" >> "$GITHUB_ENV"
           echo "CLASSROOM_HEALTH_URL=http://127.0.0.1:$web/healthz" >> "$GITHUB_ENV"
-          echo "backend -> 127.0.0.1:$api | classroom -> 127.0.0.1:$web"
+          echo "backend -> 127.0.0.1:$api | frontend -> 127.0.0.1:$pub | classroom -> 127.0.0.1:$web"
 
-      - name: Wait for the classroom app to answer
+      - name: Wait for the public and classroom apps to answer
         run: |
-          url="$CLASSROOM_HEALTH_URL"
-          for i in $(seq 1 60); do
-            if curl --fail --silent --show-error "$url" >/dev/null 2>&1; then
-              echo "classroom app 응답함 ($url, ${i}회째)"; exit 0
+          for url in "$FRONTEND_HEALTH_URL" "$CLASSROOM_HEALTH_URL"; do
+            ok=
+            for i in $(seq 1 60); do
+              if curl --fail --silent --show-error "$url" >/dev/null 2>&1; then
+                echo "응답함 ($url, ${i}회째)"; ok=1; break
+              fi
+              sleep 3
+            done
+            if [ -z "$ok" ]; then
+              echo "::error::$url 이 180초 안에 응답하지 않았다"
+              docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml logs --tail 100 || true
+              exit 1
             fi
-            sleep 3
           done
-          echo "::error::classroom app 이 180초 안에 응답하지 않았다 ($url)"
-          docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml logs --tail 100 || true
-          exit 1
 
       - name: Install Playwright browser
         working-directory: frontend

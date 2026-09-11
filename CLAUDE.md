@@ -457,12 +457,15 @@ docker/compose.dev.yaml up` 으로 세 앱이 다 뜬 스택을 띄운 뒤 `pnpm
 `pnpm --dir classroom typecheck` 는 스택 없이 돈다.
 
 **강의실은 자기 로그인을 갖지 않는다**(ADR-0038, #276) — 회원은 공개 앱과 공유한다.
-그래서 공개 앱·운영자 앱과 달리 강의실 e2e 스펙은 "로그인해서 인증 구역을 본다"를
-걷지 않는다: 부모 도메인 쿠키 공유는 dev(localhost, 포트로 앱을 가른다)에서 재현할
-수 없고, 실제 공유는 staging에서만 검증된다(#277). dev에서 강의실의 인증 구역을
-눈으로 확인하려면 공개 앱에 로그인해 받은 `laurio_access`/`laurio_refresh` 쿠키
-값을 강의실 오리진에 수동으로 심는다(Playwright의 `context.addCookies`) — 실제
-브라우저가 두 쿠키를 부모 도메인으로 공유하는 것을 로컬에서 흉내 내는 유일한 길이다.
+그래서 강의실 e2e 스펙은 강의실에서 로그인하지 않는다: 부모 도메인 쿠키 공유는
+dev(localhost, 포트로 앱을 가른다)에서 재현할 수 없고, 실제 공유는 staging에서만
+검증된다(#277). 강의실의 인증 구역을 걷는 스펙(과 dev에서 눈으로 확인할 때)은 공개
+앱에 로그인해 받은 `laurio_access`/`laurio_refresh` 쿠키 값을 강의실 오리진에 수동으로
+심는다(`frontend/e2e/classroom/lib/cross-app-session.ts`, Playwright의
+`context.addCookies`) — 실제 브라우저가 두 쿠키를 부모 도메인으로 공유하는 것을
+로컬에서 흉내 내는 유일한 길이다. **그래서 `frontend-e2e-classroom` CI 잡은 강의실만이
+아니라 공개 앱도 띄운다** — 빼면 그 헬퍼가 `ECONNREFUSED 127.0.0.1:53000` 으로 죽는다
+(#318 이 그 스펙을 더한 뒤 main 에서 여섯 번 연속 그렇게 빨갛게 났다).
 
 **운영자 앱은 인증의 모양이 다르다**(#63, ADR-0018/0019). 공개 앱은 쿠키의 JWT를
 `Authorization` 헤더로 바꿔 달지만, 운영자 앱은 Django 세션 쿠키
