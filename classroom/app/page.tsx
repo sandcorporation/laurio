@@ -53,15 +53,38 @@ function ClassList({
                 <Num>{new Date(classroom.created_at).toLocaleDateString("ko-KR")}</Num> 만듦
               </div>
             </div>
-            {/* 보관된 클래스의 주 행동은 복사해서 새로 여는 것이다 — 지난 클래스를
-                복사해 다음 클래스를 여는 것이 이 제품의 흔한 쓰임이기 때문이다
-                (docs/design/classroom/README.md). 복사 자체는 상세 화면이 한다. */}
-            <Link
-              href={`/classes/${classroom.id}`}
-              className={buttonClass(archived ? "primary" : "secondary", "sm")}
-            >
-              {archived ? "복사해서 새로 열기" : "열기"}
-            </Link>
+            {archived ? (
+              // 보관의 약속은 "새 가입·새 제출은 닫히고 읽기는 남는다"다(#294,
+              // CONTEXT.md 「Class」) — 첫 화면도 그 읽기를 가장 눈에 띄는
+              // 자리에 둔다(#331). 복사해서 새로 여는 것도 흔한 쓰임이라
+              // 여전히 할 수 있지만, 제목 링크만 아는 사람만 쓰는 부차 행동으로
+              // 내린다. 둘 다 같은 상세 화면으로 간다 — 복사 자체는 그 화면이
+              // 한다.
+              <div className="flex shrink-0 gap-2">
+                <Link
+                  href={`/classes/${classroom.id}`}
+                  data-testid={`classroom-row-${classroom.id}-view`}
+                  className={buttonClass("primary", "sm")}
+                >
+                  지난 기록 보기
+                </Link>
+                <Link
+                  href={`/classes/${classroom.id}`}
+                  data-testid={`classroom-row-${classroom.id}-copy`}
+                  className={buttonClass("secondary", "sm")}
+                >
+                  복사해서 새로 열기
+                </Link>
+              </div>
+            ) : (
+              <Link
+                href={`/classes/${classroom.id}`}
+                data-testid={`classroom-row-${classroom.id}-open`}
+                className={buttonClass("secondary", "sm")}
+              >
+                열기
+              </Link>
+            )}
           </li>
         ))}
       </ul>
