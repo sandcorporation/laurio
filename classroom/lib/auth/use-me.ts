@@ -12,34 +12,12 @@
 // **`username`을 화면에 그대로 그리면 안 된다.** 소셜 로그인 계정의 username 은
 // `kakao:5069350637` 같은 제공자 식별자다 — staging 에서 실제로 그 문자열이 헤더에
 // 떠 있었다. `accountLabel`이 그 판단을 한 곳에 둔다.
-import { useEffect, useState } from "react";
-
-import { backendJson } from "@/lib/backend/client";
-
+//
+// **조회 자체는 `./me-context`(`MeProvider`)가 한다(#322)** — 헤더의 종(#304)과
+// 계정 메뉴(#306)가 나란히 서면서 각자 `useState`+`useEffect`로 이 훅을 부르면
+// `GET /accounts/me`가 페이지 한 번 열 때 두 번 나갔다. 이 파일은 그 훅을 `useMe`
+// 라는 익숙한 이름으로 다시 내보내기만 한다 — 소비자 쪽 호출부는 하나도 안
+// 바뀐다.
 export { accountLabel } from "./account-label";
-
-type MeState =
-  | { status: "loading" }
-  | { status: "error" }
-  | { status: "ready"; userId: number; username: string; email: string };
-
-export function useMe() {
-  const [state, setState] = useState<MeState>({ status: "loading" });
-
-  useEffect(() => {
-    let cancelled = false;
-    backendJson<{ id: number; username: string; email: string }>("/accounts/me")
-      .then(({ id, username, email }) => {
-        if (!cancelled) setState({ status: "ready", userId: id, username, email: email ?? "" });
-      })
-      .catch(() => {
-        if (!cancelled) setState({ status: "error" });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return state;
-}
+export { useMeState as useMe, type MeState } from "./me-context";
 
