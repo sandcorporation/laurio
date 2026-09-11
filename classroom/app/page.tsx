@@ -164,6 +164,26 @@ export default function ClassroomHome() {
   // 않는다 — 이 서비스는 역할을 미리 정하지 않으므로(누구나 클래스를 열면
   // 그 순간 강사다, CONTEXT.md 「Class」) 그 행동 자체를 숨길 이유가 없다.
   const hasJoinedSection = joined.status === "ready" && joined.classes.length > 0;
+  // 참여자로만 속한 사람 — 강사로 연 클래스가 확실히 0건이고(조회 실패는
+  // 「모른다」이지 「없다」가 아니므로 제외한다) 참여 중인 클래스가 있다.
+  // 이때만 머리 문구가 참여자에게 말한다 — 강사만인 사람·둘 다인 사람은
+  // 스스로 강사이기도 하므로 기존 강사용 문구를 그대로 둔다(깨지지 않는다,
+  // #342).
+  const participantOnly = taught.status === "ready" && taught.classes.length === 0 && hasJoinedSection;
+  // 두 목록이 다 도착하기 전에는 어느 쪽으로도 단정하지 않는다 — description
+  // 을 비워 두면(undefined) 강사 문구가 잠깐 비쳤다 참여자 문구로 바뀌는
+  // 깜빡임이 없다(#342 AC).
+  const headerDescription = loading ? undefined : participantOnly ? (
+    <span data-testid="classroom-home-heading-note">
+      참여 중인 클래스에서 문제를 풀고 제출과 채점 결과를 확인하세요. 클래스를 새로 열면
+      직접 강사가 되어 문제를 낼 수도 있습니다.
+    </span>
+  ) : (
+    <span data-testid="classroom-home-heading-note">
+      문제를 내고 참여자의 제출을 채점하는 공간입니다. 지난 클래스를 복사하면 문제와
+      체크리스트를 그대로 가져와 새로 시작할 수 있습니다.
+    </span>
+  );
 
   return (
     <PageShell>
@@ -171,12 +191,7 @@ export default function ClassroomHome() {
         eyebrow="클래스"
         title="내 클래스"
         titleTestId="classroom-home-heading"
-        description={
-          <span data-testid="classroom-home-heading-note">
-            문제를 내고 참여자의 제출을 채점하는 공간입니다. 지난 클래스를 복사하면 문제와
-            체크리스트를 그대로 가져와 새로 시작할 수 있습니다.
-          </span>
-        }
+        description={headerDescription}
         actions={
           <>
             <Link
