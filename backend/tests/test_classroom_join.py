@@ -29,10 +29,12 @@ def _auth_header(access: str) -> dict:
     return {"HTTP_AUTHORIZATION": f"Bearer {access}"}
 
 
-def _create_class(client, access: str, name: str = "웹 스터디") -> dict:
+def _create_class(
+    client, access: str, name: str = "웹 스터디", instructor_display_name: str = "강사"
+) -> dict:
     response = client.post(
         CLASSES_URL,
-        data={"name": name},
+        data={"name": name, "instructor_display_name": instructor_display_name},
         content_type="application/json",
         **_auth_header(access),
     )
@@ -44,11 +46,13 @@ def _join_url(code: str) -> str:
     return f"/api/classroom/join/{code}"
 
 
-def test_join_preview_shows_class_name_instructor_problem_count_and_participant_count(
+def test_join_preview_shows_class_name_instructor_display_name_problem_count_and_participant_count(
     client, db
 ):
     instructor = _login(client, uid="instructor-1", email="teacher@example.com")
-    created = _create_class(client, instructor["access"], name="웹 스터디")
+    created = _create_class(
+        client, instructor["access"], name="웹 스터디", instructor_display_name="김강사"
+    )
     class_id = created["id"]
     client.post(
         f"{CLASSES_URL}/{class_id}/problems",
@@ -61,9 +65,38 @@ def test_join_preview_shows_class_name_instructor_problem_count_and_participant_
     assert response.status_code == 200
     body = response.json()
     assert body["class_name"] == "웹 스터디"
-    assert body["instructor_email"] == "teacher@example.com"
+    assert body["instructor_display_name"] == "김강사"
     assert body["problem_count"] == 1
     assert body["participant_count"] == 0
+
+
+def test_join_preview_never_leaks_the_instructors_email(client, db):
+    instructor = _login(client, uid="instructor-1", email="secret@example.com")
+    created = _create_class(client, instructor["access"])
+
+    response = client.get(_join_url(created["join_code"]))
+    body = response.json()
+    assert "instructor_email" not in body
+    assert "secret@example.com" not in response.content.decode()
+
+
+def test_join_preview_omits_instructor_display_name_when_blank(client, db):
+    """이 필드가 생기기 전에 만든 클래스(ORM으로 직접 만든, API 검증을 거치지
+    않은 행)는 빈 문자열이고, 미리보기는 그것을 `None`으로 내려 화면이 그 줄
+    자체를 생략하게 한다."""
+
+    from django.contrib.auth import get_user_model
+
+    from classroom.models import Class
+
+    instructor_user = get_user_model().objects.create_user(
+        username="instructor-blank", email="blank@example.com"
+    )
+    class_obj = Class.objects.create(instructor=instructor_user, name="예전 클래스")
+
+    response = client.get(_join_url(class_obj.join_code))
+    assert response.status_code == 200
+    assert response.json()["instructor_display_name"] is None
 
 
 def test_join_preview_requires_no_authentication(client, db):

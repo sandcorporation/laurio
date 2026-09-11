@@ -37,6 +37,17 @@ class Class(models.Model):
     )
     name = models.CharField(max_length=200)
 
+    #: 강사가 **이 클래스에서** 불릴 이름(#299) — `ClassMember.display_name`과
+    #: 같은 이유로 계정의 표시 이름과 독립이다(회사 수업과 스터디에서 다른
+    #: 이름을 쓸 수 있어야 한다). 가입 미리보기에서만 쓰인다: 참여자 명단·
+    #: 제출물에서 강사가 보이는 이름은 여전히 `ClassMember.display_name`이다
+    #: (강사 본인이 참여자로도 들어와 있을 때 이름이 둘로 갈리는 지점).
+    #: 새로 만드는 클래스는 API가 빈 문자열을 거부해 반드시 채워지지만, 이
+    #: 필드가 생기기 전에 만들어진 클래스는 마이그레이션이 값을 지어내지
+    #: 않아 빈 문자열로 남는다 — 그 경우 가입 미리보기는 이 줄 자체를
+    #: 생략한다.
+    instructor_display_name = models.CharField(max_length=100, blank=True, default="")
+
     #: 채점이 실제로 쓰는 강사 본인의 OpenAI 키(#284). `core.crypto.encrypt`로
     #: 암호화된 값만 여기 남는다 — 평문은 저장하지 않는다. 빈 문자열이면
     #: 키가 없다는 뜻이다.

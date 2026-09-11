@@ -98,6 +98,12 @@ export default function MembersPage() {
                     >
                       {member.display_name}
                     </span>
+                    <span
+                      data-testid={`member-row-${member.id}-joined-at`}
+                      className="shrink-0 text-[12px] text-ink/45"
+                    >
+                      {new Date(member.joined_at).toLocaleDateString("ko-KR")} 가입
+                    </span>
                     {member.is_instructor ? (
                       <span data-testid={`member-row-${member.id}-instructor-badge`}>
                         <Badge>강사 본인 · 집계 제외</Badge>

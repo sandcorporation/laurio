@@ -3979,6 +3979,8 @@ export interface components {
         };
         /** ClassIn */
         ClassIn: {
+            /** Instructor Display Name */
+            instructor_display_name: string;
             /** Name */
             name: string;
         };
@@ -4000,6 +4002,8 @@ export interface components {
             has_openai_key: boolean;
             /** Id */
             id: number;
+            /** Instructor Display Name */
+            instructor_display_name: string;
             /** Join Code */
             join_code: string;
             /** Name */
@@ -4024,6 +4028,8 @@ export interface components {
         ClassPatchIn: {
             /** Default Model */
             default_model?: string | null;
+            /** Instructor Display Name */
+            instructor_display_name?: string | null;
             /** Name */
             name?: string | null;
             /** Token Budget */
@@ -4857,8 +4863,8 @@ export interface components {
             archived: boolean;
             /** Class Name */
             class_name: string;
-            /** Instructor Email */
-            instructor_email: string;
+            /** Instructor Display Name */
+            instructor_display_name?: string | null;
             /** Participant Count */
             participant_count: number;
             /** Problem Count */

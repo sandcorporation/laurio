@@ -11,10 +11,16 @@ class ErrorOut(Schema):
 
 class ClassIn(Schema):
     name: str = Field(min_length=1, max_length=200)
+    #: 강사가 이 클래스에서 불릴 이름(#299) — 비워서 만들 수 없다. 가입
+    #: 미리보기에 강사 이메일 대신 뜬다.
+    instructor_display_name: str = Field(min_length=1, max_length=100)
 
 
 class ClassPatchIn(Schema):
     name: str | None = Field(default=None, min_length=1, max_length=200)
+    #: 클래스 설정에서 고친다(#299). 필드를 생략하면 바꾸지 않는다 — 기존
+    #: PATCH 관례 그대로다.
+    instructor_display_name: str | None = Field(default=None, min_length=1, max_length=100)
     default_model: str | None = None
     #: 채점 토큰 예산 상한(#295). 필드를 생략하면(`None`) 바꾸지 않는다 —
     #: 기존 PATCH 관례 그대로다. 이 API에는 "다시 무제한으로 되돌리는" 값이
@@ -27,6 +33,9 @@ class ClassPatchIn(Schema):
 class ClassOut(Schema):
     id: int
     name: str
+    #: 빈 문자열이면(#299) 이 필드가 생기기 전에 만들어진 클래스다 — 가입
+    #: 미리보기가 그 줄을 생략한다.
+    instructor_display_name: str
     join_code: str
     created_at: datetime
     default_model: str
@@ -128,7 +137,10 @@ class ProblemReorderIn(Schema):
 
 class JoinPreviewOut(Schema):
     class_name: str
-    instructor_email: str
+    #: 강사가 이 클래스에서 불릴 이름으로 정한 값(#299) — 강사 이메일은
+    #: 응답 어디에도 싣지 않는다. `None`이면(이 필드가 생기기 전에 만들어진
+    #: 클래스, 아직 강사가 정하지 않음) 화면이 이 줄 자체를 생략한다.
+    instructor_display_name: str | None = None
     problem_count: int
     participant_count: int
     #: 보관된 클래스인가(#294). 죽은 링크(404)와 달리 미리보기 자체는 계속

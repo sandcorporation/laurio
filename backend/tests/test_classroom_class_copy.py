@@ -34,7 +34,7 @@ def _auth_header(access: str) -> dict:
 def _create_class(client, access: str, name: str = "웹 스터디") -> int:
     response = client.post(
         CLASSES_URL,
-        data={"name": name},
+        data={"name": name, "instructor_display_name": "강사"},
         content_type="application/json",
         **_auth_header(access),
     )
@@ -172,6 +172,21 @@ def test_copy_is_independent_from_the_original(client, db):
     )
     assert original.json()["title"] == "1주차"
     assert original.json()["checklist_items"][0]["label"] == "테스트가 통과한다"
+
+
+def test_copied_class_carries_the_instructor_display_name(client, db):
+    pair = _login(client)
+    source_class_response = client.post(
+        CLASSES_URL,
+        data={"name": "1기", "instructor_display_name": "김강사"},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    source_class = source_class_response.json()["id"]
+
+    response = client.post(_copy_class_url(source_class), **_auth_header(pair["access"]))
+    assert response.status_code == 201
+    assert response.json()["instructor_display_name"] == "김강사"
 
 
 def test_copying_a_class_with_no_problems_works(client, db):

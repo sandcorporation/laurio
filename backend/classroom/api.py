@@ -104,6 +104,7 @@ def _serialize_class(class_obj: Class) -> ClassOut:
     return ClassOut(
         id=class_obj.id,
         name=class_obj.name,
+        instructor_display_name=class_obj.instructor_display_name,
         join_code=class_obj.join_code,
         created_at=class_obj.created_at,
         default_model=class_obj.default_model,
@@ -352,7 +353,11 @@ def _get_owned_problem_or_404(classroom_obj: Class, problem_id: int) -> Problem:
 
 @router.post("/classes", response={201: ClassOut}, auth=jwt_auth)
 def create_class(request: HttpRequest, payload: ClassIn):
-    class_obj = Class.objects.create(instructor_id=request.auth_user.id, name=payload.name)
+    class_obj = Class.objects.create(
+        instructor_id=request.auth_user.id,
+        name=payload.name,
+        instructor_display_name=payload.instructor_display_name,
+    )
     return 201, _serialize_class(class_obj)
 
 
@@ -383,6 +388,9 @@ def update_class(request: HttpRequest, class_id: int, payload: ClassPatchIn):
     if payload.name is not None:
         class_obj.name = payload.name
         update_fields.append("name")
+    if payload.instructor_display_name is not None:
+        class_obj.instructor_display_name = payload.instructor_display_name
+        update_fields.append("instructor_display_name")
     if payload.default_model is not None:
         class_obj.default_model = payload.default_model
         update_fields.append("default_model")
@@ -522,7 +530,7 @@ def preview_join(request: HttpRequest, join_code: str):
     # 없다.
     return 200, JoinPreviewOut(
         class_name=class_obj.name,
-        instructor_email=class_obj.instructor.email,
+        instructor_display_name=class_obj.instructor_display_name or None,
         problem_count=class_obj.problems.count(),
         participant_count=class_obj.members.count(),
         archived=class_obj.archived_at is not None,

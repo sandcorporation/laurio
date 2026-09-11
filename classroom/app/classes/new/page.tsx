@@ -20,6 +20,7 @@ import { createClass } from "@/lib/classes/api";
 export default function NewClassPage() {
   const router = useRouter();
   const [name, setName] = useState("");
+  const [instructorDisplayName, setInstructorDisplayName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -28,7 +29,7 @@ export default function NewClassPage() {
     setSubmitting(true);
     setError(null);
     try {
-      const created = await createClass(name.trim());
+      const created = await createClass(name.trim(), instructorDisplayName.trim());
       router.push(`/classes/${created.id}`);
     } catch {
       setError("클래스를 만들지 못했습니다. 잠시 후 다시 시도해주세요.");
@@ -61,11 +62,28 @@ export default function NewClassPage() {
               placeholder="예: 프론트엔드 입문 3기"
             />
           </div>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="class-instructor-display-name">
+              <FieldLabel>이 클래스에서 불릴 강사 이름</FieldLabel>
+            </label>
+            <input
+              id="class-instructor-display-name"
+              data-testid="new-class-instructor-display-name-input"
+              value={instructorDisplayName}
+              onChange={(event) => setInstructorDisplayName(event.target.value)}
+              required
+              className={INPUT_CLASS}
+              placeholder="예: 김강사"
+            />
+            <span className="text-[11.5px] leading-relaxed text-ink/45">
+              가입 미리보기에 이 이름으로 보입니다 — 계정 이름과 달라도 됩니다.
+            </span>
+          </div>
           <div>
             <button
               type="submit"
               data-testid="new-class-submit"
-              disabled={submitting || name.trim() === ""}
+              disabled={submitting || name.trim() === "" || instructorDisplayName.trim() === ""}
               className={buttonClass("primary")}
             >
               {submitting ? "만드는 중..." : "만들기"}

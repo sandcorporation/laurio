@@ -4,6 +4,9 @@ import { backendJson } from "@/lib/backend/client";
 export type ClassRow = {
   id: number;
   name: string;
+  // 강사가 이 클래스에서 불릴 이름(#299) — 가입 미리보기에만 쓰인다. 빈
+  // 문자열이면 이 필드가 생기기 전에 만들어진 클래스다.
+  instructor_display_name: string;
   join_code: string;
   created_at: string;
   default_model: string;
@@ -29,10 +32,10 @@ export function fetchClass(classId: number): Promise<ClassRow> {
   return backendJson<ClassRow>(`/classroom/classes/${classId}`);
 }
 
-export function createClass(name: string): Promise<ClassRow> {
+export function createClass(name: string, instructorDisplayName: string): Promise<ClassRow> {
   return backendJson<ClassRow>("/classroom/classes", {
     method: "POST",
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, instructor_display_name: instructorDisplayName }),
   });
 }
 
@@ -40,6 +43,7 @@ export function updateClass(
   classId: number,
   patch: Partial<{
     name: string;
+    instructor_display_name: string;
     default_model: string;
     token_budget: number;
     token_budget_warning_threshold_percent: number;

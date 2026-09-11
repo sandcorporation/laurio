@@ -48,11 +48,17 @@ def copy_class(class_obj: Class, instructor_id: int) -> Class:
 
     참여자·제출물·Score·달성률은 이 함수가 모르는 모델이라 자연히 따라오지
     않는다 — `ClassMember`·`Submission`이 아직 없다(#279~#281/#286~#290).
+
+    **`instructor_display_name`은 `name`과 같이 따라온다**(#299) — 다음
+    기수를 여는 것은 대개 같은 강사가 같은 맥락에서 계속 가르치는 것이라,
+    가입 미리보기에 다시 빈 줄이 뜨게 두지 않는다. 다른 이름을 쓰고
+    싶으면 클래스 설정에서 고치면 된다.
     """
 
     new_class = Class.objects.create(
         instructor_id=instructor_id,
         name=class_obj.name,
+        instructor_display_name=class_obj.instructor_display_name,
         default_model=class_obj.default_model,
     )
     for problem in class_obj.problems.order_by("order", "id"):

@@ -3,7 +3,10 @@ import { backendJson } from "@/lib/backend/client";
 
 export type JoinPreview = {
   class_name: string;
-  instructor_email: string;
+  // 강사가 이 클래스에서 불릴 이름으로 정한 값(#299) — 강사 이메일은 더
+  // 이상 여기 실리지 않는다. `null`이면(강사가 아직 정하지 않은 예전
+  // 클래스) 화면이 이 줄 자체를 생략한다.
+  instructor_display_name: string | null;
   problem_count: number;
   participant_count: number;
   // 보관된 클래스인가(#294) — 참이면 화면이 가입 폼 대신 "끝났다" 안내를

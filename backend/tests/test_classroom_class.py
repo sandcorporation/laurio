@@ -33,13 +33,14 @@ def test_instructor_creates_a_class_and_sees_it_in_my_classes(client, db):
 
     response = client.post(
         CLASSES_URL,
-        data={"name": "2026 하반기 웹 스터디"},
+        data={"name": "2026 하반기 웹 스터디", "instructor_display_name": "김강사"},
         content_type="application/json",
         **_auth_header(pair["access"]),
     )
     assert response.status_code == 201
     body = response.json()
     assert body["name"] == "2026 하반기 웹 스터디"
+    assert body["instructor_display_name"] == "김강사"
     assert "created_at" in body
 
     listing = client.get(CLASSES_URL, **_auth_header(pair["access"]))
@@ -54,7 +55,7 @@ def test_another_instructors_class_does_not_appear_in_my_classes(client, db):
 
     client.post(
         CLASSES_URL,
-        data={"name": "A의 클래스"},
+        data={"name": "A의 클래스", "instructor_display_name": "강사"},
         content_type="application/json",
         **_auth_header(a["access"]),
     )
@@ -70,7 +71,7 @@ def test_another_instructors_class_detail_is_not_found(client, db):
 
     created = client.post(
         CLASSES_URL,
-        data={"name": "A의 클래스"},
+        data={"name": "A의 클래스", "instructor_display_name": "강사"},
         content_type="application/json",
         **_auth_header(a["access"]),
     )
@@ -88,3 +89,55 @@ def test_class_requires_authentication(client, db):
 def test_class_points_directly_to_user_not_a_role_profile():
     field = Class._meta.get_field("instructor")
     assert field.related_model is get_user_model()
+
+
+def test_creating_a_class_without_instructor_display_name_is_rejected(client, db):
+    pair = _login(client, uid="instructor-1")
+
+    response = client.post(
+        CLASSES_URL,
+        data={"name": "이름 없는 강사"},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert response.status_code == 422
+
+
+def test_creating_a_class_with_a_blank_instructor_display_name_is_rejected(client, db):
+    pair = _login(client, uid="instructor-1")
+
+    response = client.post(
+        CLASSES_URL,
+        data={"name": "빈 이름", "instructor_display_name": ""},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert response.status_code == 422
+
+
+def test_existing_classes_have_a_blank_instructor_display_name(db):
+    """마이그레이션이 아무 값도 지어내지 않는다(#299 AC) — 이 필드가 생기기 전에
+    ORM으로 바로 만든 행(API 검증을 거치지 않는 경로)은 빈 문자열로 남는다."""
+
+    instructor = get_user_model().objects.create_user(username="instructor-x", email="x@example.com")
+    class_obj = Class.objects.create(instructor=instructor, name="예전 클래스")
+    assert class_obj.instructor_display_name == ""
+
+
+def test_instructor_updates_the_instructor_display_name_in_class_settings(client, db):
+    pair = _login(client, uid="instructor-1")
+    created = client.post(
+        CLASSES_URL,
+        data={"name": "웹 스터디", "instructor_display_name": "첫이름"},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    ).json()
+
+    response = client.patch(
+        f"{CLASSES_URL}/{created['id']}",
+        data={"instructor_display_name": "새이름"},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert response.status_code == 200
+    assert response.json()["instructor_display_name"] == "새이름"
