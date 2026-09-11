@@ -118,6 +118,7 @@ def _serialize_class(class_obj: Class) -> ClassOut:
         token_usage_total=class_obj.token_usage_total,
         token_budget_remaining=token_budget_remaining,
         token_budget_exhausted=class_obj.token_budget_exhausted(),
+        has_submissions=ClassroomSubmission.objects.filter(problem__classroom=class_obj).exists(),
     )
 
 
@@ -498,6 +499,28 @@ def unarchive_class(request: HttpRequest, class_id: int):
         class_obj.archived_at = None
         class_obj.save(update_fields=["archived_at"])
     return 200, _serialize_class(class_obj)
+
+
+@router.delete(
+    "/classes/{class_id}", response={204: None, 403: ErrorOut, 404: ErrorOut}, auth=jwt_auth
+)
+def delete_class(request: HttpRequest, class_id: int):
+    """실수로 만든 클래스를 없던 일로 한다(#330) — 보관과 다르다, 되돌릴 수 없다.
+
+    **제출이 하나라도 있으면 거절한다.** 그 사람이 낸 것과 그 판정은 참여자의
+    기록이지 강사가 지울 것이 아니다 — 그때는 보관이 맞는 답이다. 제출이 없으면
+    `ClassroomScore`도 없으므로(제출 없이 채점은 없다) `submission`의 PROTECT가
+    이 경로에서 막힐 일도 없다.
+
+    문제·체크리스트·참여자 가입은 `Class`에 걸린 CASCADE로 함께 지워진다. 이
+    클래스에서 공개한 템플릿(`ProblemTemplate`·`ClassTemplate`)은 `Class`를
+    가리키지 않는, 공개 시점에 뜬 사본이라 영향받지 않는다(#316·#319)."""
+
+    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    if ClassroomSubmission.objects.filter(problem__classroom=class_obj).exists():
+        raise HttpError(403, "제출이 있는 클래스는 지울 수 없습니다. 대신 보관해주세요.")
+    class_obj.delete()
+    return 204, None
 
 
 # --- Join (#280) -----------------------------------------------------------------

@@ -55,6 +55,10 @@ class ClassOut(Schema):
     #: 지금 채점이 예산 때문에 멈춰 있는가 — 강사 화면이 이 값 하나로
     #: "채점 정지 중" 배지를 낸다.
     token_budget_exhausted: bool = False
+    #: 이 클래스의 어느 문제에도 제출이 하나라도 있는가(#330). 삭제 가능
+    #: 여부를 화면이 문제·제출물 목록을 합쳐 스스로 셈하지 않도록 백엔드가
+    #: 판정해 내려준다 — `DELETE .../classes/{id}`도 같은 사실로 거절한다.
+    has_submissions: bool = False
 
 
 class OpenAIKeyIn(Schema):

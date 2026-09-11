@@ -634,7 +634,20 @@ export interface paths {
         get: operations["classroom_api_get_class"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Class
+         * @description 실수로 만든 클래스를 없던 일로 한다(#330) — 보관과 다르다, 되돌릴 수 없다.
+         *
+         *     **제출이 하나라도 있으면 거절한다.** 그 사람이 낸 것과 그 판정은 참여자의
+         *     기록이지 강사가 지울 것이 아니다 — 그때는 보관이 맞는 답이다. 제출이 없으면
+         *     `ClassroomScore`도 없으므로(제출 없이 채점은 없다) `submission`의 PROTECT가
+         *     이 경로에서 막힐 일도 없다.
+         *
+         *     문제·체크리스트·참여자 가입은 `Class`에 걸린 CASCADE로 함께 지워진다. 이
+         *     클래스에서 공개한 템플릿(`ProblemTemplate`·`ClassTemplate`)은 `Class`를
+         *     가리키지 않는, 공개 시점에 뜬 사본이라 영향받지 않는다(#316·#319).
+         */
+        delete: operations["classroom_api_delete_class"];
         options?: never;
         head?: never;
         /** Update Class */
@@ -4399,6 +4412,11 @@ export interface components {
             default_model: string;
             /** Has Openai Key */
             has_openai_key: boolean;
+            /**
+             * Has Submissions
+             * @default false
+             */
+            has_submissions: boolean;
             /** Id */
             id: number;
             /** Instructor Display Name */
@@ -7713,6 +7731,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClassOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_delete_class: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
                 };
             };
             /** @description Not Found */
