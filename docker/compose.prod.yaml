@@ -140,6 +140,10 @@ x-backend-env: &backend-env
   # — 채점과 같은 OPEN_AI_API_KEY를 공유하지만 설정 키는 별개다. 위와 같은
   # 이유로 값을 명시적으로 요구한다.
   LLM_ADAPTER_MODE: ${LLM_ADAPTER_MODE:?실제 LLM 채점 어댑터의 dotted path를 .env.prod 에 채워라 — scoring.adapters.OpenAIScoringAdapter(#88)}
+  # 강의실 채점(#287, #340)은 이 값과 별개다 — classroom.scoring이 강사 본인의
+  # 키로 어댑터를 직접 만들고, 이 설정은 그 경로가 fake를 쓸지 실물을 쓸지만
+  # 가른다(ADR-0043). staging의 x-backend-env 앵커와 같은 이유로 필수값이다.
+  CLASSROOM_SCORING_ADAPTER_MODE: ${CLASSROOM_SCORING_ADAPTER_MODE:?강의실 채점 어댑터의 dotted path를 .env.prod 에 채워라 — core.llm_scoring.OpenAIScoringAdapter(#340)}
   LLM_REQUIREMENT_CHAT_ADAPTER_MODE: ${LLM_REQUIREMENT_CHAT_ADAPTER_MODE:?실제 AI grill 어댑터의 dotted path를 .env.prod 에 채워라 — contests.requirement_chat.OpenAIRequirementChatAdapter(#55)}
   OPEN_AI_API_KEY: ${OPEN_AI_API_KEY:-}
   # scoring.adapters.OpenAIScoringAdapter가 읽는 선택 설정(#88 코드리뷰 지적 6)

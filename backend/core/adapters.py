@@ -53,7 +53,13 @@ def is_fake_adapter_binding(value: str) -> bool:
     return class_name.startswith("Fake")
 
 
-def resolve_adapter(*, mode: str, fake_factory: Callable[[], T], not_implemented_hint: str) -> T:
+def resolve_adapter(
+    *,
+    mode: str,
+    fake_factory: Callable[[], T],
+    not_implemented_hint: str,
+    factory_kwargs: dict | None = None,
+) -> T:
     """`mode`가 `"fake"`면 `fake_factory()`를, 아니면 dotted path를 import해 인스턴스화한다.
 
     dotted path가 가리키는 **모듈 자체가 없으면** "아직 구현되지 않았다"는
@@ -62,6 +68,12 @@ def resolve_adapter(*, mode: str, fake_factory: Callable[[], T], not_implemented
     "아직 구현되지 않았다"와 "이미 구현했는데 깨졌다"는 서로 다른 사실이고,
     후자를 전자의 메시지로 덮으면 실제 버그를 찾는 사람이 엉뚱한 곳(존재하지
     않는 걸 왜 구현하냐는 질문)을 보게 된다.
+
+    `factory_kwargs`는 non-fake 경로(`adapter_cls(**factory_kwargs)`)에만
+    쓰인다 — `fake_factory`는 언제나 인자 없이 부른다(#340 코드리뷰 지적:
+    강의실 채점처럼 실물 어댑터가 매 호출마다 다른 자격증명을 받아야 하는
+    호출자를 위한 것이지, fake 쪽까지 그 값을 받게 하려는 것이 아니다 —
+    기본값(`None`)이라 기존의 모든 zero-arg 호출자는 그대로다).
     """
 
     if mode == "fake":
@@ -89,7 +101,7 @@ def resolve_adapter(*, mode: str, fake_factory: Callable[[], T], not_implemented
     except AttributeError as exc:
         raise NotImplementedError(not_implemented_hint) from exc
 
-    return adapter_cls()
+    return adapter_cls(**(factory_kwargs or {}))
 
 
 def check_adapter_mode(*, setting_name: str, protocol: type) -> list[Error]:

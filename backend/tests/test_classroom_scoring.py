@@ -6,6 +6,12 @@
 않는다. 강사 본인의 키와 그 문제의 모델로 친다. 채점이 실패해도 무한히
 되돌지 않고 상한(5회) 뒤에는 그 사실이 판정으로 남는다. 키가 없거나
 틀렸을 때 참여자가 보는 것이 「고장」으로 읽히지 않는다.
+
+**이 파일은 `OpenAIScoringAdapter` 경로 자체를 검증한다**(HTTP 상태·응답
+모양별 분기) — 그래서 모든 테스트가 `CLASSROOM_SCORING_ADAPTER_MODE`를 그
+어댑터로 강제한다(#340, ADR-0043). 기본값(fake)이 되는 `FakeClassroomScoringAdapter`
+경로는 별도 파일(`test_classroom_scoring_fake_adapter.py`)이 덮는다 —
+"결정적이고 네트워크가 없다"는 이 파일의 관심사가 아니다.
 """
 
 from __future__ import annotations
@@ -15,8 +21,10 @@ import json
 import uuid
 import zipfile
 
+import pytest
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 
 from classroom.models import ClassroomScore, ClassroomScoringAttempt, ClassroomSubmission
 from notifications.models import Notification, NotificationType
@@ -24,6 +32,12 @@ from storage.adapters.fake import FakeStorageAdapter
 
 CLASSES_URL = "/api/classroom/classes"
 SCAN_URL = "/api/internal/scans/classroom-submission-scoring"
+
+
+@pytest.fixture(autouse=True)
+def _force_real_scoring_adapter():
+    with override_settings(CLASSROOM_SCORING_ADAPTER_MODE="core.llm_scoring.OpenAIScoringAdapter"):
+        yield
 
 
 def _internal_headers() -> dict:

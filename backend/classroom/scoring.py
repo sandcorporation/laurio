@@ -1,4 +1,4 @@
-"""강의실 채점 (#287, ADR-0006, ADR-0031, ADR-0037, ADR-0039).
+"""강의실 채점 (#287, #340, ADR-0006, ADR-0031, ADR-0037, ADR-0039, ADR-0043).
 
 **제출 즉시 비동기로 채점한다** — 마감이 없으니 "마감 직후 1회"(`scoring.
 services`, ADR-0006)가 성립하지 않는다. 대신 스캔(`CLASSROOM_SUBMISSION_SCORING_SCAN`)이
@@ -7,11 +7,19 @@ services`, ADR-0006)가 성립하지 않는다. 대신 스캔(`CLASSROOM_SUBMISS
 
 **강사 본인의 OpenAI 키로 돈다**(CONTEXT.md 「Class」) — 플랫폼의
 `LLM_ADAPTER_MODE`/`OPEN_AI_API_KEY`(공모전이 쓰는 값)를 거치지 않는다.
-`core.llm_scoring.get_adapter()`를 부르지 않고 `OpenAIScoringAdapter`를 매
-채점마다 그 클래스의 복호화된 키로 직접 생성한다(#287이 그 클래스의 `api_key`
-인자를 열었다). **키가 없는 클래스는 애초에 후보에 들지 않는다** — "시도했는데
-실패했다"가 아니라 "아직 시도하지 않았다"이므로 `ClassroomScoringAttempt`를
-남기지 않는다(`docs/features/classroom.md`의 "키가 없으면 채점되지 않는다").
+`core.llm_scoring.get_adapter()`를 부르지 않고, `_scoring_adapter()`가 그
+클래스의 복호화된 키로 매 채점마다 어댑터를 직접 만든다(#287이 그 클래스의
+`api_key` 인자를 열었다). **키가 없는 클래스는 애초에 후보에 들지 않는다** —
+"시도했는데 실패했다"가 아니라 "아직 시도하지 않았다"이므로
+`ClassroomScoringAttempt`를 남기지 않는다(`docs/features/classroom.md`의 "키가
+없으면 채점되지 않는다").
+
+**배포되지 않은 환경(dev·CI)은 네트워크로 나가지 않는다**(#340, ADR-0043) —
+`CLASSROOM_SCORING_ADAPTER_MODE`(기본값 `fake`)가 그 키로 실제
+`OpenAIScoringAdapter`를 부를지, 결정적인 `FakeClassroomScoringAdapter`를
+부를지만 가른다. "누구 키로 도는가"(강사 본인)는 이 스위치가 건드리지 않는다
+— 배포 환경은 이 값이 fake이면 부팅 자체가 거부된다(`config.settings`,
+`classroom.checks.check_classroom_scoring_adapter_mode`, #83과 같은 원칙).
 
 **채점은 반드시 끝난다**(ADR-0031과 같은 규율, `SCORING_FAILURE_LIMIT`) —
 강의실에는 마감이 없어 `scoring.services`의 "마감 후 6시간 유예"가 성립하지
@@ -33,17 +41,23 @@ from __future__ import annotations
 
 import logging
 
+from django.conf import settings
 from django.db import models, transaction
 from django.db.models import Count
 
+from core.adapters import resolve_adapter
 from core.clock import Clock
 from core.crypto import decrypt
 from core.llm_scoring import (
     LLMAdapterError,
     LLMAdapterPermanentError,
+    LLMScoringAdapter,
     OpenAIScoringAdapter,
     RequirementInput,
+    RequirementVerdict,
     ScoringInput,
+    ScoringOutput,
+    SourceFile,
 )
 from core.repository_adapters import GitHubAdapterError, get_github_adapter
 from core.scans import ScanSpec
@@ -76,6 +90,72 @@ _PLATFORM_FAILURE_REASONING = (
     "채점이 반복적으로 실패해 플랫폼이 자동으로 미달 처리했습니다. AI가 이 "
     "시도를 채점하지 않았습니다 — 다시 제출해 새 시도를 만들어 보세요."
 )
+
+
+class FakeClassroomScoringAdapter:
+    """dev/CI 전용, 네트워크 없이 결정적으로 강의실 채점을 흉내낸다(#340, ADR-0043).
+
+    `core.llm_scoring.FakeLLMScoringAdapter`를 그대로 재사용하지 않는 이유는
+    그 어댑터의 결정성이 "Evidence가 소스에서 확인되는가"에 있기 때문이다 —
+    강의실 `RequirementInput`은 `evidence`가 항상 빈 리스트다(`_requirement_inputs`
+    — 강의실에는 자가 응답도 근거 연결도 없다, ADR-0042). 그 어댑터로 그대로
+    돌리면 모든 체크리스트 항목이 언제나 미달로 나온다.
+
+    대신 체크리스트 항목의 문구(`RequirementInput.text`, 곧 `ChecklistItem.
+    label`)가 제출된 소스에 그대로 등장하는지를 본다 — "소스 자체가 유일한
+    근거"라는 모듈 docstring의 원칙과 같은 모양을, 강의실이 실제로 가진 텍스트
+    (자가 응답이 아니라 체크리스트 문구)로 흉내낸 것이다. `ScoringInput.
+    source_files`에서 읽는다 — `prompt`에는 체크리스트 문구 자체가 이미 나열돼
+    있어(`_build_prompt`) 거기서 찾으면 소스 내용과 무관하게 항상 참이 된다.
+    """
+
+    model_version = "fake-classroom-scoring-v1"
+
+    def score(self, scoring_input: ScoringInput) -> ScoringOutput:
+        haystack = "\n".join(f.content for f in scoring_input.source_files)
+        verdicts = []
+        for requirement in scoring_input.requirements:
+            needle = requirement.text.strip()
+            is_met = bool(needle) and needle in haystack
+            reasoning = (
+                "체크리스트 문구가 제출된 소스에서 그대로 확인되어 충족으로 판정했다."
+                if is_met
+                else "체크리스트 문구를 제출된 소스에서 찾지 못해 미달로 판정했다."
+            )
+            verdicts.append(
+                RequirementVerdict(
+                    requirement_id=requirement.requirement_id, is_met=is_met, reasoning=reasoning
+                )
+            )
+        return ScoringOutput(verdicts=verdicts, model_version=self.model_version)
+
+
+def _scoring_adapter(*, api_key: str, model: str) -> LLMScoringAdapter:
+    """실제 OpenAI 어댑터 또는 결정적 fake 어댑터를 고른다(#340, ADR-0043).
+
+    강사 본인의 키로 직접 어댑터를 만드는 원칙(모듈 docstring)은 바뀌지 않는다
+    — 이 함수가 가르는 것은 "누구 키로 도는가"가 아니라 "그 키로 실제로
+    네트워크에 나가는가"뿐이다. `CLASSROOM_SCORING_ADAPTER_MODE`가 fake면
+    (배포되지 않은 환경의 기본값) `api_key`·`model`을 그대로 무시하고
+    `FakeClassroomScoringAdapter`를 쓴다 — 배포 환경에서는 이 값이 fake일 수
+    없다(`config.settings`가 부팅 시점에 거부한다).
+
+    `core.adapters.resolve_adapter`(다른 6개 `*_ADAPTER_MODE`가 이미 쓰는 그
+    선택 로직)를 그대로 쓴다 — 손으로 `is_fake_adapter_binding`만 보고
+    `OpenAIScoringAdapter`를 하드코딩하면, 부팅 가드(`classroom.checks.
+    check_classroom_scoring_adapter_mode`)가 검증한 그 dotted path가 실제로는
+    쓰이지 않는 채로 조용히 무시된다(#340 코드리뷰 지적) — 검증한 값과 도는
+    값이 어긋난다."""
+
+    return resolve_adapter(
+        mode=settings.CLASSROOM_SCORING_ADAPTER_MODE,
+        fake_factory=FakeClassroomScoringAdapter,
+        not_implemented_hint=(
+            "CLASSROOM_SCORING_ADAPTER_MODE가 가리키는 dotted path를 import할 수 없다 — "
+            "실물 어댑터는 core.llm_scoring.OpenAIScoringAdapter다(#340, ADR-0043)."
+        ),
+        factory_kwargs={"api_key": api_key, "model": model},
+    )
 
 
 def _requirement_inputs(checklist_items: list[ChecklistItem]) -> list[RequirementInput]:
@@ -325,12 +405,24 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
         # 공유 dataclass를 건드리지 않으려고 problem.id로 채워 둔다.
         contest_id=problem.id,
         prompt=prompt,
-        source_files=[],
+        # OpenAIScoringAdapter는 이 필드를 읽지 않는다(prompt만 본다) — 채워 두는
+        # 이유는 FakeClassroomScoringAdapter가 소스 자체(체크리스트 문구가
+        # 나열된 prompt 전체가 아니라)만 검사 대상으로 삼기 위해서다(#340).
+        # `path`는 정체성 자리라 참가자가 붙인 자유 텍스트(`asset.label`)를
+        # 넣지 않는다(core.llm_scoring.SourceFile) — 그 문구는 `asset_label`이 쓰는 자리다.
+        source_files=[
+            SourceFile(
+                path=f"asset-{asset.id}",
+                content=source_text,
+                asset_id=asset.id,
+                asset_label=asset.label,
+            )
+        ],
         requirements=_requirement_inputs(checklist_items),
     )
 
     try:
-        adapter = OpenAIScoringAdapter(api_key=decrypt(raw_key), model=model)
+        adapter = _scoring_adapter(api_key=decrypt(raw_key), model=model)
         output = adapter.score(scoring_input)
     except LLMAdapterPermanentError as exc:
         ClassroomScoringAttempt.objects.create(submission=submission, error=str(exc)[:2000], permanent=True)

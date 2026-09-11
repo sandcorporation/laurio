@@ -799,6 +799,26 @@ if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(LLM_ADAPTER_MODE):
         "무효가 된다. staging/production 배포에서는 실제 LLM 어댑터를 반드시 설정해야 한다."
     )
 
+# --- 강의실 채점 어댑터 모드 (#340, ADR-0043) ---------------------------------------
+#
+# `classroom.scoring`은 강사 본인의 키로 `OpenAIScoringAdapter`를 직접 생성한다
+# (LLM_ADAPTER_MODE·get_adapter()를 거치지 않는다, `classroom/scoring.py` 모듈
+# docstring) — "누구 키로 도는가"는 이 설정이 건드리지 않는다. 이 설정이 가르는
+# 것은 "그 키로 실제로 네트워크에 나가는가" 하나뿐이다: 기본값 fake는 배포되지
+# 않은 환경(dev·CI)에서 네트워크 없이 결정적으로 강의실 채점을 끝낸다
+# (`classroom.scoring.FakeClassroomScoringAdapter`) — 가짜 키를 넣으면 실제
+# OpenAI로 나가고 진짜 키를 넣으면 돈이 나가던 문제(#340)를 없앤다. staging/
+# production은 이 값을 실제 어댑터의 dotted path로 반드시 설정해야 한다 — 강사
+# 본인의 키로 실물 OpenAI를 쓰는 배포 환경의 원칙은 이 설정으로 바뀌지 않는다.
+CLASSROOM_SCORING_ADAPTER_MODE = _env("CLASSROOM_SCORING_ADAPTER_MODE", "fake")
+if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(CLASSROOM_SCORING_ADAPTER_MODE):
+    raise ImproperlyConfigured(
+        f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 인데 "
+        "CLASSROOM_SCORING_ADAPTER_MODE 가 fake 다. 강의실 ClassroomScore가 실제 채점 "
+        "없이 만들어지면 참여자에게 통과·미통과가 보증 없이 내려간다. staging/production "
+        "배포에서는 실제 LLM 어댑터의 dotted path를 반드시 설정해야 한다."
+    )
+
 # 테스트가 override_settings로 특정 submission_id의 채점 실패를 흉내낼 때 쓴다
 # (NOTIFICATION_FAKE_RAISING_CHANNELS와 같은 원칙 — 어댑터가 예외로 죽는 경로를
 # 재현해 재시도 로직을 검증한다).

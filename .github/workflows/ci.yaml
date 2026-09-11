@@ -119,6 +119,9 @@ jobs:
       PAYMENT_ADAPTER_MODE: fake
       PAYOUT_ADAPTER_MODE: fake
       LLM_ADAPTER_MODE: fake
+      # #340: 강의실 채점의 어댑터 모드도 같은 원칙 — 기본값이 이미 fake이므로
+      # 없어도 같은 값이지만 명시적으로 남긴다.
+      CLASSROOM_SCORING_ADAPTER_MODE: fake
       LLM_REQUIREMENT_CHAT_ADAPTER_MODE: fake
 
     steps:
@@ -227,6 +230,9 @@ jobs:
       PAYOUT_ADAPTER_MODE: tests.adapter_stubs.StubPayoutAdapter
       SELLER_ADAPTER_MODE: tests.adapter_stubs.StubSellerAdapter
       LLM_ADAPTER_MODE: tests.adapter_stubs.StubLLMScoringAdapter
+      # #340: 강의실 채점(classroom/scoring.py)의 어댑터 모드 — LLM_ADAPTER_MODE와
+      # 별개의 설정 키라 여기도 명시하지 않으면 부팅 가드가 이 잡을 거부한다.
+      CLASSROOM_SCORING_ADAPTER_MODE: tests.adapter_stubs.StubLLMScoringAdapter
       LLM_REQUIREMENT_CHAT_ADAPTER_MODE: tests.adapter_stubs.StubRequirementChatAdapter
       # #193 — 일곱 번째 어댑터. 이 값이 빠져 있으면 부팅 가드가 거부해 이 잡이
       # 통째로 실패한다. 실제로 #193 머지에서 그랬다: 배포 파일 넷(compose 둘,
