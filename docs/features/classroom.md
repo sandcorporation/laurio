@@ -11,8 +11,13 @@ Next.js + React. 강사·참여자가 쓰는 앱이다(ADR-0037) — 공모전 �
 **"/login"을 뺀 전부가 인증 구역이다**(운영자 앱과 같은 이유 — 색인될 공개 표면이
 없다). 미들웨어가 쿠키의 존재만 보고, 유효성은 언제나 백엔드가 판정한다.
 
-**전부 클라이언트 컴포넌트다** — SSR을 요구받지 않는다(ADR-0015는 공개 표면에만 SSR을
-요구했다).
+**보이는 화면은 전부 클라이언트 컴포넌트다** — SSR을 요구받지 않는다(ADR-0015는 공개
+표면에만 SSR을 요구했다). 예외 둘은 색이 드러나지 않는 배선용 서버 컴포넌트다 —
+`/login`(공개 앱 로그인 주소를 짓는다, #297 후속)과 헤더 계정 메뉴의 서버 절반
+(`app/components/account-menu.tsx`, #306, 아래 「헤더 계정 메뉴」절) — 둘 다 배포
+설정(`LAURIO_WEB_ORIGIN`·`LAURIO_CLASSROOM_ORIGIN`)을 요청마다 다시 읽어야 해서
+`export const dynamic = "force-dynamic"`을 선언한다(그 값이 빌드 시점에 굳는 사고가
+실제로 났었다, `lib/rendering/runtime-config.test.ts`).
 
 **Class·Problem·체크리스트 화면은 강사 전용이다.** 참여자가 직접 여는 화면은
 `/classes/{id}/problems/mine`(문제 목록, #288)과
@@ -71,7 +76,27 @@ Next.js + React. 강사·참여자가 쓰는 앱이다(ADR-0037) — 공모전 �
 
 | BFF 라우트 | |
 | --- | --- |
-| `/api/backend/[...path]` | 백엔드 프록시 — 허용목록(`/api/classroom`·`/api/accounts`·`/api/storage`, #286)·Origin 검증·토큰 부착 |
+| `/api/backend/[...path]` | 백엔드 프록시 — 허용목록(`/api/classroom`·`/api/accounts`·`/api/storage`·`/api/notifications`, #286/#304)·Origin 검증·토큰 부착 |
+| `/api/auth/logout` | 로그아웃(#306) — 공개 앱(`frontend/app/api/auth/logout`)과 같은 계약. 이 앱 자신의 access·refresh를 백엔드에 블랙리스트로 올린 뒤 쿠키를 지운다. 부모 도메인 쿠키를 공유하므로(ADR-0038) 여기서 로그아웃하면 공개 앱 세션도 함께 풀린다. |
+
+## 헤더 계정 메뉴(#306)
+
+헤더 오른쪽에 알림 종과 나란히 산다. 로그인 여부는 `useMe()`(`GET /accounts/me`,
+#286과 같은 호출을 재사용한다)로 판정한다 — 확인 전에는 아무것도 단언하지 않고,
+실패(비로그인)면 메뉴 대신 `/login` 링크를 보여준다.
+
+로그인돼 있으면 버튼에 **지금 계정의 username**이 그대로 뜨고, 눌러 펼치면 넷이
+나온다:
+
+- **프로필·탈퇴**는 공개 앱의 그 화면(`/console/profile`·`/console/withdraw`)으로
+  나간다 — 회원을 공유하는 두 앱에 같은 개인정보 화면을 또 만들지 않는다.
+  이 앱의 오리진을 `from_origin` 쿼리로 실어 보내(`lib/auth/return-link.ts`),
+  공개 앱이 「강의실로 돌아가기」를 보여줄 수 있게 한다(#307) — 그 값이
+  진짜 우리 오리진인지는 받는 쪽(공개 앱의 `resolveSiblingOrigin`)이 판정한다.
+- **알림**은 이 앱 안의 `/notifications`로 이어진다(#304).
+- **로그아웃**은 위 `/api/auth/logout`을 부른 뒤 `/login`으로 보낸다.
+
+알림 종은 이 메뉴와 무관하게 늘 보인다 — 메뉴를 펼쳐도 종의 배지를 가리지 않는다.
 
 ---
 

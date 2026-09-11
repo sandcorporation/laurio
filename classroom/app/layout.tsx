@@ -4,9 +4,18 @@ import Link from "next/link";
 import localFont from "next/font/local";
 import type { ReactNode } from "react";
 
+import { AccountMenu } from "./components/account-menu";
 import { NotificationBell } from "./components/notification-bell";
 
 import "./globals.css";
+
+// **정적으로 구워지면 안 된다** (#297, lib/rendering/runtime-config.test.ts).
+// `AccountMenu`가 이 레이아웃 트리에서 `headers()`와 `LAURIO_WEB_ORIGIN`·
+// `LAURIO_CLASSROOM_ORIGIN`을 읽는다 — 그 값이 빌드 머신 것으로 박제되면
+// 배포된 강의실에서 계정 메뉴가 엉뚱한 오리진으로 사람을 보낸다(로그인 화면이
+// 이미 겪은 사고, app/login/page.tsx 참고). 이 앱은 애초에 정적 렌더링의
+// 이득이 없으므로(ADR-0015는 공개 표면에만 SSR을 요구했다) 손해가 없다.
+export const dynamic = "force-dynamic";
 
 // 서체는 공개 앱과 같다 (#298) — 두 서브도메인이 한 제품이므로 글꼴이 갈리면
 // 사람이 먼저 알아챈다. 파일도 `app/fonts/` 에 같은 것을 담는다(공유 패키지로
@@ -52,7 +61,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             >
               Laurio <span className="text-[15px] font-normal text-ink/45">강의실</span>
             </Link>
-            <NotificationBell />
+            <div className="flex items-center gap-2">
+              <NotificationBell />
+              <AccountMenu />
+            </div>
           </div>
         </header>
         {children}
