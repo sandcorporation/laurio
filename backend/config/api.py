@@ -9,6 +9,7 @@ from appeals.api import operator_router as appeals_operator_router
 from appeals.api import router as appeals_router
 from awards.api import router as awards_router
 from classroom.api import router as classroom_router
+from classroom.template_api import router as classroom_template_router
 from contests.api import router as contests_router
 from contests.assignment_api import router as assignments_router
 from contests.operator_api import operator_router as contests_operator_router
@@ -43,6 +44,7 @@ api.add_router("", appeals_router)
 api.add_router("/notifications", notifications_router)
 api.add_router("/ledger", ledger_router)
 api.add_router("/classroom", classroom_router)
+api.add_router("/classroom", classroom_template_router)
 
 
 @api.get("/health")

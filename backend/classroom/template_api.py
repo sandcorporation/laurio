@@ -1,0 +1,220 @@
+"""문제 템플릿 API (#316/#318/#320, #312).
+
+**공개 시점의 사본을 만든다.** `Problem`·`Class`를 가리키지 않으므로 원본을
+고치거나 지워도 템플릿은 그대로다(`services.publish_problem_as_template`
+docstring). 채점 모델은 애초에 템플릿에 필드가 없다.
+
+**로그인한 사람만 닿는다.** 강의실 앱은 로그인한 사람만 보는 것을 전제로
+지어져 있다(#312 Implementation Decisions) — `/join/{join_code}`의 GET과
+달리 미리보기도 `auth=jwt_auth`다.
+
+**라우트 등록 순서 규칙은 이 파일에도 적용된다**(`classroom/api.py` 상단
+docstring과 같은 이유) — `/problem-templates/mine`처럼 정적 세그먼트를 가진
+라우트는 `/problem-templates/{share_code}` 동적 라우트보다 먼저 등록한다.
+"""
+
+from __future__ import annotations
+
+from django.utils import timezone
+from ninja import Router
+from ninja.errors import HttpError
+from ninja.pagination import PageNumberPagination, paginate
+
+from accounts.middleware import jwt_auth
+
+from .api import _get_owned_class_or_404, _get_owned_problem_or_404, _serialize_problem
+from .models import ProblemTemplate, ProblemTemplateReport
+from .schemas import (
+    ErrorOut,
+    ImportTemplateIn,
+    ProblemOut,
+    ProblemTemplateChecklistItemOut,
+    ProblemTemplateListItemOut,
+    ProblemTemplateOut,
+    PublishTemplateIn,
+    ReportResultOut,
+    ReportTemplateIn,
+)
+from .services import import_problem_template, publish_problem_as_template
+
+router = Router(tags=["classroom", "templates"])
+
+
+def _serialize_template(template: ProblemTemplate, *, viewer_id: int | None = None) -> ProblemTemplateOut:
+    return ProblemTemplateOut(
+        id=template.id,
+        share_code=template.share_code,
+        title=template.title,
+        description=template.description,
+        submission_format=template.submission_format,
+        publisher_display_name=template.publisher_display_name,
+        created_at=template.created_at,
+        taken_down=template.taken_down_at is not None,
+        checklist_items=[
+            ProblemTemplateChecklistItemOut(label=i.label, required=i.required, order=i.order)
+            for i in template.checklist_items.all()
+        ],
+        is_mine=viewer_id is not None and template.published_by_id == viewer_id,
+    )
+
+
+def _get_visible_template_or_404(share_code: str) -> ProblemTemplate:
+    """내려진 템플릿은 링크로도 열리지 않는다(#320 AC) — 가져오기·신고처럼
+    「내려진 뒤에는 누구도 상호작용할 수 없다」가 성립해야 하는 엔드포인트가
+    쓴다. 미리보기(`get_problem_template`)는 올린 사람 본인에게는 예외를
+    두므로 이 함수를 쓰지 않는다."""
+
+    try:
+        return ProblemTemplate.objects.prefetch_related("checklist_items").get(
+            share_code=share_code, taken_down_at__isnull=True
+        )
+    except ProblemTemplate.DoesNotExist as exc:
+        raise HttpError(404, "이 템플릿은 더 이상 사용할 수 없습니다.") from exc
+
+
+def _get_template_by_share_code_or_404(share_code: str) -> ProblemTemplate:
+    try:
+        return ProblemTemplate.objects.prefetch_related("checklist_items").get(
+            share_code=share_code
+        )
+    except ProblemTemplate.DoesNotExist as exc:
+        raise HttpError(404, "이 템플릿은 더 이상 사용할 수 없습니다.") from exc
+
+
+@router.post(
+    "/classes/{class_id}/problems/{problem_id}/publish-template",
+    response={201: ProblemTemplateOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def publish_template(
+    request, class_id: int, problem_id: int, payload: PublishTemplateIn
+):
+    """자기 문제를 템플릿으로 공개한다(#316). 원본 소유권 검사는 강사 전용
+    엔드포인트와 같은 `_get_owned_class_or_404`/`_get_owned_problem_or_404`를
+    그대로 쓴다 — 남의 문제면 404다."""
+
+    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    problem = _get_owned_problem_or_404(class_obj, problem_id)
+
+    template = publish_problem_as_template(
+        problem,
+        published_by_id=request.auth_user.id,
+        publisher_display_name=payload.publisher_display_name,
+    )
+    return 201, _serialize_template(template, viewer_id=request.auth_user.id)
+
+
+@router.get(
+    "/problem-templates", response=list[ProblemTemplateListItemOut], auth=jwt_auth
+)
+@paginate(PageNumberPagination, page_size=20)
+def list_problem_templates(request, q: str | None = None, **kwargs):
+    """제목 검색 + 최신순뿐이다(#318 — 분류 체계를 만들지 않는다). 내려진
+    템플릿은 나오지 않는다."""
+
+    qs = ProblemTemplate.objects.filter(taken_down_at__isnull=True)
+    if q:
+        qs = qs.filter(title__icontains=q)
+    return qs
+
+
+@router.get(
+    "/problem-templates/mine", response=list[ProblemTemplateOut], auth=jwt_auth
+)
+def list_my_problem_templates(request):
+    """내가 올린 템플릿 전부(내린 것 포함) — 내리기 화면이 여기서 고른다.
+    정적 세그먼트라 `/{share_code}`보다 먼저 등록한다(파일 상단 docstring)."""
+
+    templates = ProblemTemplate.objects.filter(
+        published_by_id=request.auth_user.id
+    ).prefetch_related("checklist_items")
+    return [_serialize_template(t, viewer_id=request.auth_user.id) for t in templates]
+
+
+@router.get(
+    "/problem-templates/{share_code}",
+    response={200: ProblemTemplateOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def get_problem_template(request, share_code: str):
+    """가져오기 전 미리보기(#316 AC) — 제목·설명·체크리스트를 본다.
+
+    **올린 사람 본인에게는 내려간 뒤에도 보인다** — 그러지 않으면 「내리기」
+    버튼을 누른 직후 관리 화면 대신 「더 이상 사용할 수 없습니다」로 튕겨
+    자기 것을 확인할 길이 사라진다(`/problem-templates/mine`과 같은 예외,
+    코드리뷰 지적). 남에게는 그대로 404다."""
+
+    template = _get_template_by_share_code_or_404(share_code)
+    if template.taken_down_at is not None and template.published_by_id != request.auth_user.id:
+        raise HttpError(404, "이 템플릿은 더 이상 사용할 수 없습니다.")
+    return 200, _serialize_template(template, viewer_id=request.auth_user.id)
+
+
+@router.post(
+    "/problem-templates/{share_code}/import",
+    response={201: ProblemOut, 403: ErrorOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def import_template(request, share_code: str, payload: ImportTemplateIn):
+    """자기 클래스로 가져온다(#316) — 가져온 문제는 초안이고, 체크리스트는
+    순서 그대로 따라오며, 채점 모델은 대상 클래스의 기본값을 따른다.
+
+    **보관된 클래스로는 가져올 수 없다** — 보관은 새 가입·새 제출만 막는
+    것이 아니라 그 클래스에 새 내용이 생기는 길 전체를 닫는다는 뜻이다
+    (`join_class`·`create_classroom_submission`과 같은 403, `Class.
+    archived_at` docstring)."""
+
+    template = _get_visible_template_or_404(share_code)
+    target_class = _get_owned_class_or_404(payload.target_class_id, request.auth_user.id)
+    if target_class.archived_at is not None:
+        raise HttpError(403, "이 클래스는 보관되어 더 이상 가져올 수 없습니다.")
+
+    problem = import_problem_template(template, target_class)
+    return 201, _serialize_problem(problem, target_class)
+
+
+@router.post(
+    "/problem-templates/{share_code}/takedown",
+    response={200: ProblemTemplateOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def takedown_own_template(request, share_code: str):
+    """올린 사람이 자기 템플릿을 내린다(#316 AC) — 남의 템플릿은 404다(존재를
+    알려주지 않는다, 이 앱의 다른 소유권 검사와 같은 이유). 이미 가져간
+    사람의 것은 그대로다 — 사본이기 때문이다. 이미 내려간 템플릿을 다시
+    내려도 오류를 내지 않는다(멱등, `archive_class`와 같은 관용구)."""
+
+    try:
+        template = ProblemTemplate.objects.get(
+            share_code=share_code, published_by_id=request.auth_user.id
+        )
+    except ProblemTemplate.DoesNotExist as exc:
+        raise HttpError(404, "템플릿을 찾을 수 없습니다.") from exc
+
+    if template.taken_down_at is None:
+        template.taken_down_at = timezone.now()
+        template.save(update_fields=["taken_down_at"])
+    return 200, _serialize_template(template, viewer_id=request.auth_user.id)
+
+
+@router.post(
+    "/problem-templates/{share_code}/report",
+    response={201: ReportResultOut, 403: ErrorOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def report_template(request, share_code: str, payload: ReportTemplateIn):
+    """부적절한 템플릿을 신고한다(#320). 자기 템플릿은 신고 대상이 아니다 —
+    내리면 된다(AC). 같은 사람이 같은 템플릿을 여러 번 신고해도 한 건으로
+    센다 — 두 번째 신고는 첫 신고 행을 그대로 둔다(unique 제약, 모델
+    docstring 참고)."""
+
+    template = _get_visible_template_or_404(share_code)
+    if template.published_by_id == request.auth_user.id:
+        raise HttpError(403, "자기 템플릿은 신고할 수 없습니다. 내리려면 취소를 이용하세요.")
+
+    ProblemTemplateReport.objects.get_or_create(
+        template=template,
+        reporter_id=request.auth_user.id,
+        defaults={"reason": payload.reason},
+    )
+    return 201, ReportResultOut(reported=True)

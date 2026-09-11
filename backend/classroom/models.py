@@ -285,6 +285,125 @@ class ClassroomScore(models.Model):
         return f"ClassroomScore(submission={self.submission_id})"
 
 
+class ProblemTemplate(models.Model):
+    """문제 하나를 공개한 시점의 **사본**(#316, #312 Implementation Decisions
+    「템플릿 공유」). `Problem`·`Class`를 가리키지 않는다 — 원본을 고치거나
+    지워도 이 행은 바뀌지 않는다는 약속이 FK 부재로 구조에 박혀 있다(판·
+    갱신 알림·원본 연결은 Out of Scope).
+
+    **`model`을 담지 않는다.** 필드 자체가 없다 — 가져간 사람이 남이 고른
+    비싼 모델의 청구서를 자기 키로 받는 사고를 구조로 막는다(#316 AC).
+
+    `publisher_display_name`은 계정 표시 이름이 아니라 공개할 때 직접 적는
+    값이다 — 의도하지 않은 이름이 나가거나 탈퇴로 사라지는 것을 막는다.
+    """
+
+    published_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="problem_templates", on_delete=models.CASCADE
+    )
+    publisher_display_name = models.CharField(max_length=100)
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True, default="")
+    submission_format = models.CharField(max_length=20, choices=Problem.SubmissionFormat.choices)
+
+    #: 추측 불가능한 공유 코드 — 가입 링크와 같은 모양, 같은 생성기다(#316
+    #: Implementation Decisions "가입 링크와 같은 모양").
+    share_code = models.CharField(max_length=32, unique=True, default=_generate_join_code)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    #: 올린 사람의 자진 내림 또는 운영자의 판단으로 내려간 시각(#316/#320).
+    #: null이면 공개 중이다. 지우지 않고 이 값만 켜는 이유는 감사 기록(누가
+    #: 신고했고 운영자가 무엇을 판단했는지)이 대상 행을 잃지 않아야 하기
+    #: 때문이다 — `Class.archived_at`과 같은 관용구.
+    taken_down_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ProblemTemplate(id={self.pk}, title={self.title!r})"
+
+
+class ProblemTemplateChecklistItem(models.Model):
+    """공개 시점 체크리스트 사본 한 줄 — `ChecklistItem`과 같은 모양이지만
+    독립 테이블이다(`ProblemTemplate`이 `Problem`을 가리키지 않는 것과 같은
+    이유)."""
+
+    template = models.ForeignKey(
+        ProblemTemplate, related_name="checklist_items", on_delete=models.CASCADE
+    )
+    label = models.CharField(max_length=200)
+    required = models.BooleanField(default=True)
+    order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["order", "id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ProblemTemplateChecklistItem(id={self.pk}, label={self.label!r})"
+
+
+class ProblemTemplateReport(models.Model):
+    """부적절한 템플릿 신고 하나(#320). 자기 템플릿은 신고 대상이 아니다 —
+    그건 올린 사람이 직접 내리면 된다(API가 강제한다).
+
+    **같은 사람이 같은 템플릿을 여러 번 신고해도 한 건으로 센다**(AC) — 그
+    보장은 unique 제약이 진다, API는 두 번째 신고를 조용히 기존 행으로
+    합친다(`get_or_create`).
+    """
+
+    template = models.ForeignKey(ProblemTemplate, related_name="reports", on_delete=models.CASCADE)
+    reporter = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="problem_template_reports", on_delete=models.CASCADE
+    )
+    reason = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["template", "reporter"], name="unique_problem_template_report"
+            )
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ProblemTemplateReport(template={self.template_id}, reporter={self.reporter_id})"
+
+
+class ProblemTemplateModerationDecision(models.Model):
+    """신고된 템플릿에 대한 운영자의 판단(#320) — `appeals.AppealRuling`과
+    같은 이유로 신고와 분리된 감사 기록이다. 「내림」과 「기각」 둘 다 이
+    테이블에 남는다 — 기각도 판단이고, 판단이면 누가·언제·왜가 남아야
+    한다(AC).
+
+    두 FK 모두 PROTECT다 — `AppealRuling`과 같은 이유로, 대상이나 판단자
+    계정을 지우는 것만으로 「누가 왜 내렸는가」가 사라지면 안 된다.
+    """
+
+    class Decision(models.TextChoices):
+        TAKEDOWN = "takedown", "내림"
+        DISMISS = "dismiss", "기각"
+
+    template = models.ForeignKey(
+        ProblemTemplate, related_name="moderation_decisions", on_delete=models.PROTECT
+    )
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="problem_template_moderation_decisions",
+        on_delete=models.PROTECT,
+    )
+    decision = models.CharField(max_length=16, choices=Decision.choices)
+    note = models.TextField()
+    decided_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ["-decided_at"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ProblemTemplateModerationDecision(template={self.template_id}, decision={self.decision})"
+
+
 class ClassroomScoringAttempt(models.Model):
     """실패한 채점 시도의 이력(#287) — `scoring.ScoringAttempt`와 같은 역할,
     같은 이유로 다른 테이블이다. Score와 달리 append-only가 아니다 — 판정이
