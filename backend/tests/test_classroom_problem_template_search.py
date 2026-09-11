@@ -29,7 +29,7 @@ def _auth_header(access: str) -> dict:
 def _create_class(client, access: str, name: str = "웹 스터디") -> int:
     response = client.post(
         CLASSES_URL,
-        data={"name": name},
+        data={"name": name, "instructor_display_name": "김강사"},
         content_type="application/json",
         **_auth_header(access),
     )
