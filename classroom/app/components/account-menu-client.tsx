@@ -17,7 +17,7 @@
 import Link from "next/link";
 import { useState } from "react";
 
-import { useMe } from "@/lib/auth/use-me";
+import { accountLabel, useMe } from "@/lib/auth/use-me";
 
 export function AccountMenuClient({
   profileUrl,
@@ -60,7 +60,7 @@ export function AccountMenuClient({
         aria-expanded={open}
         className="border border-rule px-3 py-1.5 text-[13px] text-ink hover:border-ink"
       >
-        {me.username}
+        {accountLabel(me)}
       </button>
 
       {open && (
