@@ -17,6 +17,7 @@ import {
   PageShell,
   buttonClass,
 } from "@/app/components/ui";
+import { MarkdownEditor } from "@/app/components/MarkdownEditor";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
@@ -299,13 +300,11 @@ export default function EditProblemPage() {
                   <label htmlFor="problem-description">
                     <FieldLabel>설명</FieldLabel>
                   </label>
-                  <textarea
+                  <MarkdownEditor
                     id="problem-description"
-                    data-testid="edit-problem-description-input"
+                    testId="edit-problem-description-input"
                     value={description}
-                    onChange={(event) => setDescription(event.target.value)}
-                    rows={8}
-                    className={`${INPUT_CLASS} resize-y leading-relaxed`}
+                    onChange={setDescription}
                   />
                 </div>
 

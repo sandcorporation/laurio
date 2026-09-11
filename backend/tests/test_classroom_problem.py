@@ -101,6 +101,38 @@ def test_instructor_edits_title_description_and_format(client, db):
     assert body["submission_format"] == "repository"
 
 
+def test_description_round_trips_as_markdown_verbatim_and_unsanitized(client, db):
+    """설명이 마크다운으로 그려지려면(#313) 저장·응답 양쪽이 원문을 건드리지
+    않아야 한다 — 태그를 걷어내면 코드블록 안의 예시 HTML도 함께 사라진다
+    (ADR-0012 개정). 채점 LLM이 보는 값과 화면이 받는 값이 같다는 것도 이
+    라운드트립 하나로 같이 고정된다."""
+    pair = _login(client)
+    class_id = _create_class(client, pair["access"])
+
+    markdown = (
+        "# 제목\n\n**굵게** 그리고 `<b>escape 안 됨</b>` 코드.\n\n"
+        "```html\n<script>alert(1)</script>\n```\n\n"
+        "- 목록1\n- 목록2\n\n[링크](https://laurio.example)"
+    )
+
+    created = client.post(
+        f"{CLASSES_URL}/{class_id}/problems",
+        data={"title": "마크다운 문제", "description": markdown, "submission_format": "source"},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert created.status_code == 201
+    assert created.json()["description"] == markdown
+
+    problem_id = created.json()["id"]
+    fetched = client.get(
+        f"{CLASSES_URL}/{class_id}/problems/{problem_id}",
+        **_auth_header(pair["access"]),
+    )
+    assert fetched.status_code == 200
+    assert fetched.json()["description"] == markdown
+
+
 def test_problems_are_ordered_and_reorderable(client, db):
     pair = _login(client)
     class_id = _create_class(client, pair["access"])

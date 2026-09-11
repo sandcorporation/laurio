@@ -1,6 +1,6 @@
 # 세션은 localStorage의 JWT + 블랙리스트로 관리한다
 
-Status: Amended by ADR-0016 (2026-08-28 결정)
+Status: Amended by ADR-0016, ADR-0041 (2026-08-28 결정)
 
 SPA(frontend, admin)와 향후 모바일까지 붙이기 쉬운 구성을 우선해 JWT를 localStorage에 둔다. stateless JWT의 고질적 문제인 "탈취를 알아도 만료까지 못 막는다"는 서버측 블랙리스트로 해결한다.
 
@@ -19,3 +19,7 @@ HttpOnly 쿠키를 쓰면 토큰이 JS에 노출되지 않지만, 별도 도메�
 ---
 
 **Amended by ADR-0016** — 웹 프론트엔드는 토큰을 HttpOnly 쿠키에 두고 BFF로 프록시한다. Django의 Bearer 인증은 그대로이며, 모바일 경로는 이 ADR 그대로 유지된다.
+
+**Amended by ADR-0041** — Problem의 설명은 HTML을 저장하지 않고 렌더가 허용 목록 방식일
+때에 한해 sanitize 강제의 예외다. 다른 자유 서식 입력(Developer 프로필 자기소개 등)은
+그대로 sanitize를 강제받는다.
