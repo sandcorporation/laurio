@@ -11,6 +11,14 @@ export type ChecklistItemRow = {
   order: number;
 };
 
+// 이 문제를 원본으로 하는, 지금 살아 있는(내리지 않은) 문제 템플릿(#333) —
+// 없으면 `null`이다. 편집 화면이 새로고침 뒤에도 공개 상태를 정확히 가른다.
+export type PublishedProblemTemplateSummary = {
+  share_code: string;
+  publisher_display_name: string;
+  created_at: string;
+};
+
 export type ProblemRow = {
   id: number;
   classroom_id: number;
@@ -32,6 +40,7 @@ export type ProblemRow = {
   // passed_count / member_count. 분모가 0이면 null — "아직 없음"으로
   // 보여줘야 한다는 신호다(0%와 구별).
   pass_rate: number | null;
+  published_template: PublishedProblemTemplateSummary | null;
 };
 
 export function fetchProblems(classId: number): Promise<ProblemRow[]> {

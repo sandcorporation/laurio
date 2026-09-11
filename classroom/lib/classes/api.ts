@@ -1,6 +1,15 @@
 // Class 백엔드 호출 (#278/#279/#284/#285).
 import { backendJson } from "@/lib/backend/client";
 
+// 이 클래스를 원본으로 하는, 지금 살아 있는(내리지 않은) 클래스 템플릿
+// (#333) — 없으면 `null`이다. 클래스 설정 화면이 새로고침 뒤에도 공개 상태를
+// 정확히 가른다.
+export type PublishedClassTemplateSummary = {
+  share_code: string;
+  publisher_display_name: string;
+  created_at: string;
+};
+
 export type ClassRow = {
   id: number;
   name: string;
@@ -25,6 +34,7 @@ export type ClassRow = {
   // 이 클래스의 어느 문제에도 제출이 하나라도 있는가(#330) — 백엔드가
   // 판정해 내려준다. 참이면 삭제할 수 없고 보관만 된다.
   has_submissions: boolean;
+  published_template: PublishedClassTemplateSummary | null;
 };
 
 export function fetchMyClasses(): Promise<ClassRow[]> {

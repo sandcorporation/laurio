@@ -39,7 +39,9 @@ from .models import (
     ClassMember,
     ClassroomScore,
     ClassroomSubmission,
+    ClassTemplate,
     Problem,
+    ProblemTemplate,
     _generate_join_code,
 )
 from .schemas import (
@@ -77,6 +79,7 @@ from .schemas import (
     ProblemPatchIn,
     ProblemReorderIn,
     ProblemTemplateChecklistItemOut,
+    PublishedTemplateSummaryOut,
     ScoringModelOut,
 )
 from .scoring_models import SCORING_MODEL_CHOICES, is_valid_model
@@ -95,6 +98,24 @@ _KEY_MASK_PREFIX = "••••••••"
 
 def _mask_from_last4(last4: str) -> str:
     return f"{_KEY_MASK_PREFIX}{last4}"
+
+
+def _published_template_summary(template) -> PublishedTemplateSummaryOut | None:
+    if template is None:
+        return None
+    return PublishedTemplateSummaryOut(
+        share_code=template.share_code,
+        publisher_display_name=template.publisher_display_name,
+        created_at=template.created_at,
+    )
+
+
+def _live_class_template(class_obj: Class) -> ClassTemplate | None:
+    return class_obj.templates.filter(taken_down_at__isnull=True).first()
+
+
+def _live_problem_template(problem: Problem) -> ProblemTemplate | None:
+    return problem.templates.filter(taken_down_at__isnull=True).first()
 
 
 def _serialize_class(class_obj: Class) -> ClassOut:
@@ -120,6 +141,7 @@ def _serialize_class(class_obj: Class) -> ClassOut:
         token_budget_remaining=token_budget_remaining,
         token_budget_exhausted=class_obj.token_budget_exhausted(),
         has_submissions=ClassroomSubmission.objects.filter(problem__classroom=class_obj).exists(),
+        published_template=_published_template_summary(_live_class_template(class_obj)),
     )
 
 
@@ -191,6 +213,7 @@ def _serialize_problem(
         passed_count=passed_count,
         member_count=member_count,
         pass_rate=(passed_count / member_count) if member_count else None,
+        published_template=_published_template_summary(_live_problem_template(problem)),
     )
 
 

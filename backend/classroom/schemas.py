@@ -30,6 +30,16 @@ class ClassPatchIn(Schema):
     token_budget_warning_threshold_percent: int | None = Field(default=None, ge=1, le=100)
 
 
+class PublishedTemplateSummaryOut(Schema):
+    """이 클래스/문제를 원본으로 하는, 지금 살아 있는(내리지 않은) 템플릿
+    하나(#333) — 있으면 새로고침해도 공개 상태(공유 링크·「내리기」)가 이
+    자리에서 그대로 보인다. 없으면 `None`이라 화면이 공개 폼을 보여준다."""
+
+    share_code: str
+    publisher_display_name: str
+    created_at: datetime
+
+
 class ClassOut(Schema):
     id: int
     name: str
@@ -59,6 +69,10 @@ class ClassOut(Schema):
     #: 여부를 화면이 문제·제출물 목록을 합쳐 스스로 셈하지 않도록 백엔드가
     #: 판정해 내려준다 — `DELETE .../classes/{id}`도 같은 사실로 거절한다.
     has_submissions: bool = False
+    #: 이 클래스를 원본으로 하는, 지금 살아 있는 클래스 템플릿(#333). 없으면
+    #: `None`이다 — 클래스 설정 화면이 이 값으로 공개 폼과 공개된 상태를
+    #: 새로고침 뒤에도 정확히 가른다.
+    published_template: PublishedTemplateSummaryOut | None = None
 
 
 class OpenAIKeyIn(Schema):
@@ -167,6 +181,9 @@ class ProblemOut(Schema):
     #: `passed_count / member_count`. 분모가 0이면 `None`이다 — 화면이 그때
     #: "0%"가 아니라 "아직 없음"으로 말하도록 0.0과 구별한다(#289 AC).
     pass_rate: float | None = None
+    #: 이 문제를 원본으로 하는, 지금 살아 있는 문제 템플릿(#333) —
+    #: `ClassOut.published_template`과 같은 이유·같은 모양.
+    published_template: PublishedTemplateSummaryOut | None = None
 
 
 class ProblemReorderIn(Schema):

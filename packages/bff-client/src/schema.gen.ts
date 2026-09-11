@@ -1075,6 +1075,9 @@ export interface paths {
          * @description 자기 문제를 템플릿으로 공개한다(#316). 원본 소유권 검사는 강사 전용
          *     엔드포인트와 같은 `_get_owned_class_or_404`/`_get_owned_problem_or_404`를
          *     그대로 쓴다 — 남의 문제면 404다.
+         *
+         *     **같은 문제에 살아 있는 템플릿이 이미 있으면 새로 만들지 않는다**(#333
+         *     AC) — 그 템플릿을 200으로 그대로 돌려준다. 새로 만들었을 때만 201이다.
          */
         post: operations["classroom_template_api_publish_template"];
         delete?: never;
@@ -1133,6 +1136,9 @@ export interface paths {
          * @description 자기 클래스를 통째로 템플릿으로 공개한다(#319) — 문제들과 그 순서,
          *     각 문제의 체크리스트가 함께 담긴다. 소유권 검사는 문제 템플릿과 같은
          *     `_get_owned_class_or_404`를 그대로 쓴다 — 남의 클래스면 404다.
+         *
+         *     **같은 클래스에 살아 있는 템플릿이 이미 있으면 새로 만들지 않는다**(#333
+         *     AC) — `publish_template`과 같은 규율, 200/201로 새로 만들었는지를 구별한다.
          */
         post: operations["classroom_template_api_publish_class_template"];
         delete?: never;
@@ -4451,6 +4457,7 @@ export interface components {
             name: string;
             /** Openai Key Masked */
             openai_key_masked?: string | null;
+            published_template?: components["schemas"]["PublishedTemplateSummaryOut"] | null;
             /** Token Budget */
             token_budget?: number | null;
             /**
@@ -6224,6 +6231,7 @@ export interface components {
              * @default 0
              */
             passed_count: number;
+            published_template?: components["schemas"]["PublishedTemplateSummaryOut"] | null;
             /** Status */
             status: string;
             /** Submission Format */
@@ -6355,6 +6363,23 @@ export interface components {
         PublishTemplateIn: {
             /** Publisher Display Name */
             publisher_display_name: string;
+        };
+        /**
+         * PublishedTemplateSummaryOut
+         * @description 이 클래스/문제를 원본으로 하는, 지금 살아 있는(내리지 않은) 템플릿
+         *     하나(#333) — 있으면 새로고침해도 공개 상태(공유 링크·「내리기」)가 이
+         *     자리에서 그대로 보인다. 없으면 `None`이라 화면이 공개 폼을 보여준다.
+         */
+        PublishedTemplateSummaryOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Publisher Display Name */
+            publisher_display_name: string;
+            /** Share Code */
+            share_code: string;
         };
         /** QuoteIn */
         QuoteIn: {
@@ -8650,6 +8675,15 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemTemplateOut"];
+                };
+            };
             /** @description Created */
             201: {
                 headers: {
@@ -8771,6 +8805,15 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassTemplateOut"];
+                };
+            };
             /** @description Created */
             201: {
                 headers: {

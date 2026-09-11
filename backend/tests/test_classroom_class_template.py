@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from classroom.models import Class, Problem
+from classroom.models import Class, ClassTemplate, Problem
 
 CLASSES_URL = "/api/classroom/classes"
 CLASS_TEMPLATES_URL = "/api/classroom/class-templates"
@@ -380,3 +380,79 @@ def test_my_class_templates_lists_mine_including_taken_down(client, db):
     assert mine.status_code == 200
     assert len(mine.json()) == 1
     assert mine.json()[0]["taken_down"] is True
+
+
+# --- 원본을 기억한다 (#333) ---------------------------------------------------
+
+
+def test_publishing_the_same_class_twice_does_not_create_a_new_template(client, db):
+    pair = _login(client)
+    class_id = _create_class(client, pair["access"], "1학기 웹 스터디")
+    _create_problem(client, pair["access"], class_id)
+
+    first = _publish_class(client, pair["access"], class_id, "김강사")
+    assert first.status_code == 201, first.content
+    share_code = first.json()["share_code"]
+
+    second = _publish_class(client, pair["access"], class_id, "다른 이름으로")
+    assert second.status_code == 200, second.content
+    assert second.json()["share_code"] == share_code
+    assert second.json()["publisher_display_name"] == "김강사"
+
+    assert ClassTemplate.objects.filter(source_class_id=class_id).count() == 1
+
+
+def test_publishing_class_again_after_takedown_creates_a_new_template(client, db):
+    pair = _login(client)
+    class_id = _create_class(client, pair["access"])
+    _create_problem(client, pair["access"], class_id)
+
+    first = _publish_class(client, pair["access"], class_id)
+    first_share_code = first.json()["share_code"]
+    client.post(f"{CLASS_TEMPLATES_URL}/{first_share_code}/takedown", **_auth_header(pair["access"]))
+
+    second = _publish_class(client, pair["access"], class_id)
+    assert second.status_code == 201, second.content
+    assert second.json()["share_code"] != first_share_code
+
+    assert ClassTemplate.objects.filter(source_class_id=class_id).count() == 2
+
+
+def test_class_detail_shows_the_live_published_template_after_reload(client, db):
+    pair = _login(client)
+    class_id = _create_class(client, pair["access"])
+    _create_problem(client, pair["access"], class_id)
+
+    before = client.get(f"{CLASSES_URL}/{class_id}", **_auth_header(pair["access"])).json()
+    assert before["published_template"] is None
+
+    share_code = _publish_class(client, pair["access"], class_id, "김강사").json()["share_code"]
+
+    after = client.get(f"{CLASSES_URL}/{class_id}", **_auth_header(pair["access"])).json()
+    assert after["published_template"]["share_code"] == share_code
+    assert after["published_template"]["publisher_display_name"] == "김강사"
+
+
+def test_class_detail_published_template_is_null_again_after_takedown(client, db):
+    pair = _login(client)
+    class_id = _create_class(client, pair["access"])
+    _create_problem(client, pair["access"], class_id)
+    share_code = _publish_class(client, pair["access"], class_id).json()["share_code"]
+
+    client.post(f"{CLASS_TEMPLATES_URL}/{share_code}/takedown", **_auth_header(pair["access"]))
+
+    after = client.get(f"{CLASSES_URL}/{class_id}", **_auth_header(pair["access"])).json()
+    assert after["published_template"] is None
+
+
+def test_deleting_the_original_class_clears_the_weak_reference_but_keeps_the_template(client, db):
+    pair = _login(client)
+    class_id = _create_class(client, pair["access"], "1학기 웹 스터디")
+    _create_problem(client, pair["access"], class_id)
+    share_code = _publish_class(client, pair["access"], class_id).json()["share_code"]
+
+    Class.objects.get(id=class_id).delete()
+
+    template = ClassTemplate.objects.get(share_code=share_code)
+    assert template.source_class_id is None
+    assert template.name == "1학기 웹 스터디"

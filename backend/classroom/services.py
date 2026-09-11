@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+from django.db import IntegrityError, transaction
+
 from .models import (
     ChecklistItem,
     Class,
@@ -104,26 +106,48 @@ def copy_class(class_obj: Class, instructor_id: int) -> Class:
 
 def publish_problem_as_template(
     problem: Problem, *, published_by_id: int, publisher_display_name: str
-) -> ProblemTemplate:
-    """`problem`을 공개 시점의 사본으로 뜬다(#316). 원본 `Problem`·`Class`를
-    가리키지 않는다 — 만든 뒤에는 원본이 어떻게 바뀌든(고쳐지거나 지워지거나)
-    이 행은 그대로다. 채점 모델은 애초에 `ProblemTemplate`에 필드가 없어
-    따라올 길이 없다."""
+) -> tuple[ProblemTemplate, bool]:
+    """`problem`을 공개 시점의 사본으로 뜬다(#316). 사본의 필드(title 등)는
+    원본 `Problem`·`Class`를 가리키지 않는다 — 만든 뒤에는 원본이 어떻게
+    바뀌든(고쳐지거나 지워지거나) 이 행은 그대로다. 채점 모델은 애초에
+    `ProblemTemplate`에 필드가 없어 따라올 길이 없다.
 
-    template = ProblemTemplate.objects.create(
-        published_by_id=published_by_id,
-        publisher_display_name=publisher_display_name,
-        title=problem.title,
-        description=problem.description,
-        submission_format=problem.submission_format,
-    )
-    ProblemTemplateChecklistItem.objects.bulk_create(
-        ProblemTemplateChecklistItem(
-            template=template, label=item.label, required=item.required, order=item.order
-        )
-        for item in problem.checklist_items.all()
-    )
-    return template
+    **같은 문제에 살아 있는 템플릿이 이미 있으면 새로 만들지 않는다**(#333
+    AC) — 그 템플릿을 그대로 돌려준다. 반환값의 두 번째 항목이 거짓이면
+    새로 만들지 않았다는 뜻이다. 내려간 템플릿은 이 검사에 걸리지 않는다 —
+    「내린 뒤에는 다시 공개할 수 있다」가 새 사본을 허용해야 하기 때문이다."""
+
+    existing = ProblemTemplate.objects.filter(
+        source_problem=problem, taken_down_at__isnull=True
+    ).first()
+    if existing is not None:
+        return existing, False
+
+    try:
+        # 중첩 atomic(세이브포인트)으로 감싼다 — `payments.api.request_payment`와
+        # 같은 이유: IntegrityError가 나면 Postgres가 바깥 트랜잭션 전체를
+        # "aborted"로 만들어, 세이브포인트 없이는 그 뒤 재조회 쿼리도 막힌다.
+        with transaction.atomic():
+            template = ProblemTemplate.objects.create(
+                source_problem=problem,
+                published_by_id=published_by_id,
+                publisher_display_name=publisher_display_name,
+                title=problem.title,
+                description=problem.description,
+                submission_format=problem.submission_format,
+            )
+            ProblemTemplateChecklistItem.objects.bulk_create(
+                ProblemTemplateChecklistItem(
+                    template=template, label=item.label, required=item.required, order=item.order
+                )
+                for item in problem.checklist_items.all()
+            )
+    except IntegrityError:
+        # 위 존재 확인 뒤 동시에 다른 요청이 먼저 이겼다 —
+        # unique_live_problem_template_per_source가 막아준다. 이미 있는
+        # 살아 있는 템플릿을 그대로 돌려준다.
+        return ProblemTemplate.objects.get(source_problem=problem, taken_down_at__isnull=True), False
+    return template, True
 
 
 def import_problem_template(template: ProblemTemplate, target_class: Class) -> Problem:
@@ -149,33 +173,54 @@ def import_problem_template(template: ProblemTemplate, target_class: Class) -> P
 
 def publish_class_as_template(
     class_obj: Class, *, published_by_id: int, publisher_display_name: str
-) -> ClassTemplate:
+) -> tuple[ClassTemplate, bool]:
     """`class_obj`를 공개 시점의 사본으로 뜬다(#319) — 문제들과 그 순서, 각
-    문제의 체크리스트가 함께 담긴다. 원본 `Class`·`Problem`을 가리키지 않으니
-    이후 원본이 어떻게 바뀌든(고쳐지거나 지워지거나) 이 사본은 그대로다.
-    채점 모델은 애초에 `ClassTemplate`/`ClassTemplateProblem`에 필드가 없어
-    따라올 길이 없다."""
+    문제의 체크리스트가 함께 담긴다. 사본의 필드는 원본 `Class`·`Problem`을
+    가리키지 않으니 이후 원본이 어떻게 바뀌든(고쳐지거나 지워지거나) 이 사본은
+    그대로다. 채점 모델은 애초에 `ClassTemplate`/`ClassTemplateProblem`에
+    필드가 없어 따라올 길이 없다.
 
-    template = ClassTemplate.objects.create(
-        published_by_id=published_by_id,
-        publisher_display_name=publisher_display_name,
-        name=class_obj.name,
-    )
-    for problem in class_obj.problems.order_by("order", "id"):
-        template_problem = ClassTemplateProblem.objects.create(
-            template=template,
-            title=problem.title,
-            description=problem.description,
-            submission_format=problem.submission_format,
-            order=problem.order,
-        )
-        ClassTemplateProblemChecklistItem.objects.bulk_create(
-            ClassTemplateProblemChecklistItem(
-                problem=template_problem, label=item.label, required=item.required, order=item.order
+    **같은 클래스에 살아 있는 템플릿이 이미 있으면 새로 만들지 않는다**(#333
+    AC, `publish_problem_as_template`와 같은 규율) — 반환값의 두 번째 항목이
+    거짓이면 기존 템플릿을 그대로 돌려준 것이다."""
+
+    existing = ClassTemplate.objects.filter(
+        source_class=class_obj, taken_down_at__isnull=True
+    ).first()
+    if existing is not None:
+        return existing, False
+
+    try:
+        # `publish_problem_as_template`과 같은 세이브포인트 관용구.
+        with transaction.atomic():
+            template = ClassTemplate.objects.create(
+                source_class=class_obj,
+                published_by_id=published_by_id,
+                publisher_display_name=publisher_display_name,
+                name=class_obj.name,
             )
-            for item in problem.checklist_items.all()
-        )
-    return template
+            for problem in class_obj.problems.order_by("order", "id"):
+                template_problem = ClassTemplateProblem.objects.create(
+                    template=template,
+                    title=problem.title,
+                    description=problem.description,
+                    submission_format=problem.submission_format,
+                    order=problem.order,
+                )
+                ClassTemplateProblemChecklistItem.objects.bulk_create(
+                    ClassTemplateProblemChecklistItem(
+                        problem=template_problem,
+                        label=item.label,
+                        required=item.required,
+                        order=item.order,
+                    )
+                    for item in problem.checklist_items.all()
+                )
+    except IntegrityError:
+        # 위 존재 확인 뒤 동시에 다른 요청이 먼저 이겼다 —
+        # unique_live_class_template_per_source가 막아준다.
+        return ClassTemplate.objects.get(source_class=class_obj, taken_down_at__isnull=True), False
+    return template, True
 
 
 def import_class_template(template: ClassTemplate, *, instructor_id: int, name: str) -> Class:

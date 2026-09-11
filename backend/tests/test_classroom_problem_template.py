@@ -393,3 +393,89 @@ def test_taking_down_does_not_affect_already_imported_problems(client, db):
     )
     assert still_there.status_code == 200
     assert still_there.json()["title"] == "Todo API"
+
+
+# --- 원본을 기억한다 (#333) ---------------------------------------------------
+
+
+def test_publishing_the_same_problem_twice_does_not_create_a_new_template(client, db):
+    pair = _login(client)
+    class_id = _create_class(client, pair["access"])
+    problem_id = _create_problem(client, pair["access"], class_id, "Todo API")
+
+    first = _publish(client, pair["access"], class_id, problem_id, "김강사")
+    assert first.status_code == 201, first.content
+    share_code = first.json()["share_code"]
+
+    second = _publish(client, pair["access"], class_id, problem_id, "다른 이름으로")
+    assert second.status_code == 200, second.content
+    assert second.json()["share_code"] == share_code
+    assert second.json()["publisher_display_name"] == "김강사"
+
+    assert ProblemTemplate.objects.filter(source_problem_id=problem_id).count() == 1
+
+
+def test_publishing_again_after_takedown_creates_a_new_template(client, db):
+    pair = _login(client)
+    class_id = _create_class(client, pair["access"])
+    problem_id = _create_problem(client, pair["access"], class_id, "Todo API")
+
+    first = _publish(client, pair["access"], class_id, problem_id)
+    first_share_code = first.json()["share_code"]
+    client.post(f"{TEMPLATES_URL}/{first_share_code}/takedown", **_auth_header(pair["access"]))
+
+    second = _publish(client, pair["access"], class_id, problem_id)
+    assert second.status_code == 201, second.content
+    assert second.json()["share_code"] != first_share_code
+
+    assert ProblemTemplate.objects.filter(source_problem_id=problem_id).count() == 2
+
+
+def test_problem_detail_shows_the_live_published_template_after_reload(client, db):
+    pair = _login(client)
+    class_id = _create_class(client, pair["access"])
+    problem_id = _create_problem(client, pair["access"], class_id)
+
+    before = client.get(
+        f"{CLASSES_URL}/{class_id}/problems/{problem_id}", **_auth_header(pair["access"])
+    ).json()
+    assert before["published_template"] is None
+
+    share_code = _publish(client, pair["access"], class_id, problem_id, "김강사").json()["share_code"]
+
+    after = client.get(
+        f"{CLASSES_URL}/{class_id}/problems/{problem_id}", **_auth_header(pair["access"])
+    ).json()
+    assert after["published_template"]["share_code"] == share_code
+    assert after["published_template"]["publisher_display_name"] == "김강사"
+
+
+def test_problem_detail_published_template_is_null_again_after_takedown(client, db):
+    pair = _login(client)
+    class_id = _create_class(client, pair["access"])
+    problem_id = _create_problem(client, pair["access"], class_id)
+    share_code = _publish(client, pair["access"], class_id, problem_id).json()["share_code"]
+
+    client.post(f"{TEMPLATES_URL}/{share_code}/takedown", **_auth_header(pair["access"]))
+
+    after = client.get(
+        f"{CLASSES_URL}/{class_id}/problems/{problem_id}", **_auth_header(pair["access"])
+    ).json()
+    assert after["published_template"] is None
+
+
+def test_deleting_the_original_problem_clears_the_weak_reference_but_keeps_the_template(client, db):
+    pair = _login(client)
+    class_id = _create_class(client, pair["access"])
+    problem_id = _create_problem(client, pair["access"], class_id, "Todo API")
+    share_code = _publish(client, pair["access"], class_id, problem_id).json()["share_code"]
+
+    Problem.objects.get(id=problem_id).delete()
+
+    template = ProblemTemplate.objects.get(share_code=share_code)
+    assert template.source_problem_id is None
+    assert template.title == "Todo API"
+
+    preview = client.get(f"{TEMPLATES_URL}/{share_code}", **_auth_header(pair["access"]))
+    assert preview.status_code == 200
+    assert preview.json()["title"] == "Todo API"

@@ -25,7 +25,7 @@ import type { FormEvent } from "react";
 
 import { BackendError } from "@/lib/backend/client";
 import { useMyClasses } from "@/lib/classes/use-my-classes";
-import { publishProblemAsTemplate, type ProblemTemplateRow } from "@/lib/problem-templates/api";
+import { publishProblemAsTemplate, takedownProblemTemplate } from "@/lib/problem-templates/api";
 import {
   copyProblem,
   createChecklistItem,
@@ -38,6 +38,10 @@ import {
 } from "@/lib/problems/api";
 import { useProblem } from "@/lib/problems/use-problem";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
+
+// 화면이 실제로 그리는 값만 담는다(#333, 클래스 설정 화면의
+// `PublishedTemplateState`와 같은 이유) — 전체 템플릿 응답에서 이 둘만 쓴다.
+type PublishedTemplateState = { share_code: string; taken_down: boolean };
 
 export default function EditProblemPage() {
   const params = useParams<{ id: string; problemId: string }>();
@@ -68,7 +72,10 @@ export default function EditProblemPage() {
   const [publisherDisplayName, setPublisherDisplayName] = useState("");
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
-  const [publishedTemplate, setPublishedTemplate] = useState<ProblemTemplateRow | null>(null);
+  const [publishedTemplate, setPublishedTemplate] = useState<PublishedTemplateState | null>(null);
+
+  const [takingDown, setTakingDown] = useState(false);
+  const [takedownError, setTakedownError] = useState<string | null>(null);
 
   // 「작성」/「미리보기」 탭(#325) — 새 문제 화면과 같은 자리다.
   const [tab, setTab] = useState<"write" | "preview">("write");
@@ -79,6 +86,15 @@ export default function EditProblemPage() {
       setDescription(state.problem.description);
       setSubmissionFormat(state.problem.submission_format);
       setModel(state.problem.model);
+      // 새로고침해도 공개 상태(공유 링크·「내리기」)가 보이도록 서버가
+      // 내려준 「지금 살아 있는 템플릿」으로 맞춘다(#333) — 예전에는 이
+      // 상태가 화면 안에만 있어 새로고침하면 사라지고 폼이 다시 떠 같은
+      // 문제가 두 번 공개됐다.
+      setPublishedTemplate(
+        state.problem.published_template
+          ? { share_code: state.problem.published_template.share_code, taken_down: false }
+          : null,
+      );
     }
   }, [state]);
 
@@ -208,11 +224,25 @@ export default function EditProblemPage() {
     setPublishing(true);
     try {
       const template = await publishProblemAsTemplate(classId, problemId, publisherDisplayName.trim());
-      setPublishedTemplate(template);
+      setPublishedTemplate({ share_code: template.share_code, taken_down: template.taken_down });
     } catch {
       setPublishError("템플릿으로 공개하지 못했습니다. 잠시 후 다시 시도해주세요.");
     } finally {
       setPublishing(false);
+    }
+  }
+
+  async function handleTakedown() {
+    if (!publishedTemplate) return;
+    setTakedownError(null);
+    setTakingDown(true);
+    try {
+      const template = await takedownProblemTemplate(publishedTemplate.share_code);
+      setPublishedTemplate({ share_code: template.share_code, taken_down: template.taken_down });
+    } catch {
+      setTakedownError("내리지 못했습니다. 잠시 후 다시 시도해주세요.");
+    } finally {
+      setTakingDown(false);
     }
   }
 
@@ -619,16 +649,41 @@ export default function EditProblemPage() {
               <div className="flex flex-col gap-2.5 p-4">
                 {publishedTemplate ? (
                   <div className="flex flex-col gap-2">
-                    <p data-testid="publish-template-done" className="text-[13px] leading-relaxed">
-                      공개되었습니다. 아래 주소를 다른 강사에게 전달하세요.
-                    </p>
-                    <Link
-                      href={`/templates/${publishedTemplate.share_code}`}
-                      data-testid="publish-template-share-link"
-                      className="break-all border border-rule bg-surface px-3 py-2 font-mono text-[12.5px] hover:underline"
-                    >
-                      /templates/{publishedTemplate.share_code}
-                    </Link>
+                    {publishedTemplate.taken_down ? (
+                      <p data-testid="publish-template-taken-down" className="flex items-center gap-2.5 text-[13px]">
+                        <Badge tone="neutral">내려짐</Badge>
+                        <span className="text-ink/60">더 이상 다른 강사가 가져갈 수 없습니다.</span>
+                      </p>
+                    ) : (
+                      <>
+                        <p data-testid="publish-template-done" className="text-[13px] leading-relaxed">
+                          공개되었습니다. 아래 주소를 다른 강사에게 전달하세요.
+                        </p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Link
+                            href={`/templates/${publishedTemplate.share_code}`}
+                            data-testid="publish-template-share-link"
+                            className="min-w-0 flex-1 break-all border border-rule bg-surface px-3 py-2 font-mono text-[12.5px] hover:underline"
+                          >
+                            /templates/{publishedTemplate.share_code}
+                          </Link>
+                          <button
+                            type="button"
+                            data-testid="publish-template-takedown"
+                            onClick={handleTakedown}
+                            disabled={takingDown}
+                            className={buttonClass("danger", "sm")}
+                          >
+                            {takingDown ? "내리는 중..." : "내리기"}
+                          </button>
+                        </div>
+                      </>
+                    )}
+                    {takedownError ? (
+                      <ErrorNote>
+                        <span data-testid="publish-template-takedown-error">{takedownError}</span>
+                      </ErrorNote>
+                    ) : null}
                   </div>
                 ) : (
                   <form onSubmit={handlePublish} className="flex flex-col gap-2.5">

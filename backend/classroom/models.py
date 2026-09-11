@@ -298,9 +298,16 @@ class ClassroomScore(models.Model):
 
 class ProblemTemplate(models.Model):
     """문제 하나를 공개한 시점의 **사본**(#316, #312 Implementation Decisions
-    「템플릿 공유」). `Problem`·`Class`를 가리키지 않는다 — 원본을 고치거나
-    지워도 이 행은 바뀌지 않는다는 약속이 FK 부재로 구조에 박혀 있다(판·
-    갱신 알림·원본 연결은 Out of Scope).
+    「템플릿 공유」). 사본의 필드(title·description·...)는 `Problem`을 가리키지
+    않는다 — 원본을 고치거나 지워도 그 값은 바뀌지 않는다는 약속이 FK 부재로
+    구조에 박혀 있다(판·갱신 알림·원본 연결은 Out of Scope).
+
+    **`source_problem`은 예외다**(#333) — 원본을 가리키되 **약한** 참조다:
+    원본이 지워지면 `SET_NULL`로 이 칸만 비워지고 행 자체는 그대로다. 화면에
+    노출되지 않고 오직 "같은 원본에 살아 있는(내리지 않은) 템플릿이 이미
+    있는가"를 백엔드가 판단하는 데만 쓰인다(`Meta.constraints`). 이 필드가
+    생기기 전에 만들어진 템플릿은 계속 null로 남는다 — 마이그레이션이
+    백필하지 않는다.
 
     **`model`을 담지 않는다.** 필드 자체가 없다 — 가져간 사람이 남이 고른
     비싼 모델의 청구서를 자기 키로 받는 사고를 구조로 막는다(#316 AC).
@@ -311,6 +318,11 @@ class ProblemTemplate(models.Model):
 
     published_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, related_name="problem_templates", on_delete=models.CASCADE
+    )
+    #: 공개 시점의 원본(#333). 화면 문 하나만이 아니라 이 칸의 unique 제약이
+    #: 「같은 문제를 두 번 공개해도 새 템플릿이 안 생긴다」를 구조로 지킨다.
+    source_problem = models.ForeignKey(
+        Problem, related_name="templates", null=True, blank=True, on_delete=models.SET_NULL
     )
     publisher_display_name = models.CharField(max_length=100)
     title = models.CharField(max_length=200)
@@ -330,6 +342,17 @@ class ProblemTemplate(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        constraints = [
+            #: 원본 하나에 살아 있는(내리지 않은) 템플릿은 동시에 하나뿐이다
+            #: (#333 AC). `source_problem`이 null인 행(원본을 모르는 옛
+            #: 템플릿, 또는 원본이 지워져 비워진 행)은 이 제약 밖이다 — 여러
+            #: 개가 null이어도 걸리지 않는다.
+            models.UniqueConstraint(
+                fields=["source_problem"],
+                condition=models.Q(taken_down_at__isnull=True, source_problem__isnull=False),
+                name="unique_live_problem_template_per_source",
+            )
+        ]
 
     def __str__(self) -> str:  # pragma: no cover
         return f"ProblemTemplate(id={self.pk}, title={self.title!r})"
@@ -417,9 +440,14 @@ class ProblemTemplateModerationDecision(models.Model):
 
 class ClassTemplate(models.Model):
     """클래스 하나를 공개한 시점의 **사본**(#319, #312 Implementation Decisions
-    「템플릿 공유」) — `ProblemTemplate`과 같은 이유로 `Class`를 가리키지
-    않는다. 문제 사이의 순서도 커리큘럼의 일부라 `ClassTemplateProblem.order`로
-    함께 담는다.
+    「템플릿 공유」) — `ProblemTemplate`과 같은 이유로 사본의 필드는 `Class`를
+    가리키지 않는다. 문제 사이의 순서도 커리큘럼의 일부라
+    `ClassTemplateProblem.order`로 함께 담는다.
+
+    **`source_class`는 예외다**(#333) — `ProblemTemplate.source_problem`과
+    같은 이유·같은 모양의 약한 참조다: 원본이 지워지면 `SET_NULL`로 비워지고
+    행은 남는다. 「같은 클래스에 살아 있는 템플릿이 이미 있으면 두 번째 공개가
+    새로 만들지 않는다」를 이 칸의 unique 제약이 구조로 지킨다.
 
     **채점 모델을 담지 않는다** — `ProblemTemplate`과 같은 이유로 필드 자체가
     없다(가져간 사람이 남이 고른 모델의 청구서를 자기 키로 받는 사고를 구조로
@@ -429,6 +457,9 @@ class ClassTemplate(models.Model):
 
     published_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, related_name="class_templates", on_delete=models.CASCADE
+    )
+    source_class = models.ForeignKey(
+        Class, related_name="templates", null=True, blank=True, on_delete=models.SET_NULL
     )
     publisher_display_name = models.CharField(max_length=100)
     #: 공개 시점 클래스 이름의 사본 — 가져가는 사람이 자기 클래스 이름을
@@ -446,6 +477,14 @@ class ClassTemplate(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        constraints = [
+            #: `ProblemTemplate.Meta.constraints`와 같은 이유·같은 모양.
+            models.UniqueConstraint(
+                fields=["source_class"],
+                condition=models.Q(taken_down_at__isnull=True, source_class__isnull=False),
+                name="unique_live_class_template_per_source",
+            )
+        ]
 
     def __str__(self) -> str:  # pragma: no cover
         return f"ClassTemplate(id={self.pk}, name={self.name!r})"

@@ -93,7 +93,7 @@ def _get_template_by_share_code_or_404(share_code: str) -> ProblemTemplate:
 
 @router.post(
     "/classes/{class_id}/problems/{problem_id}/publish-template",
-    response={201: ProblemTemplateOut, 404: ErrorOut},
+    response={200: ProblemTemplateOut, 201: ProblemTemplateOut, 404: ErrorOut},
     auth=jwt_auth,
 )
 def publish_template(
@@ -101,17 +101,21 @@ def publish_template(
 ):
     """자기 문제를 템플릿으로 공개한다(#316). 원본 소유권 검사는 강사 전용
     엔드포인트와 같은 `_get_owned_class_or_404`/`_get_owned_problem_or_404`를
-    그대로 쓴다 — 남의 문제면 404다."""
+    그대로 쓴다 — 남의 문제면 404다.
+
+    **같은 문제에 살아 있는 템플릿이 이미 있으면 새로 만들지 않는다**(#333
+    AC) — 그 템플릿을 200으로 그대로 돌려준다. 새로 만들었을 때만 201이다."""
 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problem = _get_owned_problem_or_404(class_obj, problem_id)
 
-    template = publish_problem_as_template(
+    template, created = publish_problem_as_template(
         problem,
         published_by_id=request.auth_user.id,
         publisher_display_name=payload.publisher_display_name,
     )
-    return 201, _serialize_template(template, viewer_id=request.auth_user.id)
+    status = 201 if created else 200
+    return status, _serialize_template(template, viewer_id=request.auth_user.id)
 
 
 @router.get(
@@ -289,21 +293,25 @@ def _get_class_template_by_share_code_or_404(share_code: str) -> ClassTemplate:
 
 @router.post(
     "/classes/{class_id}/publish-template",
-    response={201: ClassTemplateOut, 404: ErrorOut},
+    response={200: ClassTemplateOut, 201: ClassTemplateOut, 404: ErrorOut},
     auth=jwt_auth,
 )
 def publish_class_template(request, class_id: int, payload: PublishTemplateIn):
     """자기 클래스를 통째로 템플릿으로 공개한다(#319) — 문제들과 그 순서,
     각 문제의 체크리스트가 함께 담긴다. 소유권 검사는 문제 템플릿과 같은
-    `_get_owned_class_or_404`를 그대로 쓴다 — 남의 클래스면 404다."""
+    `_get_owned_class_or_404`를 그대로 쓴다 — 남의 클래스면 404다.
+
+    **같은 클래스에 살아 있는 템플릿이 이미 있으면 새로 만들지 않는다**(#333
+    AC) — `publish_template`과 같은 규율, 200/201로 새로 만들었는지를 구별한다."""
 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
-    template = publish_class_as_template(
+    template, created = publish_class_as_template(
         class_obj,
         published_by_id=request.auth_user.id,
         publisher_display_name=payload.publisher_display_name,
     )
-    return 201, _serialize_class_template(template, viewer_id=request.auth_user.id)
+    status = 201 if created else 200
+    return status, _serialize_class_template(template, viewer_id=request.auth_user.id)
 
 
 @router.get(

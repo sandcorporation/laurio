@@ -23,22 +23,48 @@ import {
   buttonClass,
 } from "@/app/components/ui";
 import { BackendError } from "@/lib/backend/client";
-import { publishClassAsTemplate, takedownClassTemplate, type ClassTemplateRow } from "@/lib/class-templates/api";
-import { deleteClass, setOpenAIKey, updateClass, type ClassRow } from "@/lib/classes/api";
+import { publishClassAsTemplate, takedownClassTemplate } from "@/lib/class-templates/api";
+import {
+  deleteClass,
+  setOpenAIKey,
+  updateClass,
+  type ClassRow,
+  type PublishedClassTemplateSummary,
+} from "@/lib/classes/api";
 import { isDeleteConfirmationTyped } from "@/lib/classes/delete-confirmation";
 import { useClass } from "@/lib/classes/use-class";
 import { useMembers } from "@/lib/members/use-members";
 import { useProblems } from "@/lib/problems/use-problems";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
 
-function ClassTemplatePublishCard() {
-  const params = useParams<{ id: string }>();
-  const classId = Number(params.id);
+// 화면이 실제로 그리는 값만 담는다(#333) — `publishClassAsTemplate`/
+// `takedownClassTemplate`의 전체 응답에서 이 둘만 쓴다.
+type PublishedTemplateState = { share_code: string; taken_down: boolean };
 
+function _initialPublishState(
+  published: PublishedClassTemplateSummary | null,
+): PublishedTemplateState | null {
+  return published ? { share_code: published.share_code, taken_down: false } : null;
+}
+
+function ClassTemplatePublishCard({
+  classId,
+  initialPublishedTemplate,
+}: {
+  classId: number;
+  initialPublishedTemplate: PublishedClassTemplateSummary | null;
+}) {
   const [publisherDisplayName, setPublisherDisplayName] = useState("");
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
-  const [publishedTemplate, setPublishedTemplate] = useState<ClassTemplateRow | null>(null);
+  // 초기값은 서버가 새로고침 시점에 내려준 「지금 살아 있는 템플릿」이다
+  // (#333) — 이전에는 이 상태가 화면 안에만 있어 새로고침하면 사라지고
+  // 공개 폼이 다시 떠 같은 원본이 두 번 공개됐다. 마운트 이후의 흐름(공개·
+  // 내리기)은 여전히 그 응답으로만 갱신한다 — 부모가 다시 부를 때마다 이
+  // 초기값으로 되돌리지 않는다.
+  const [publishedTemplate, setPublishedTemplate] = useState<PublishedTemplateState | null>(() =>
+    _initialPublishState(initialPublishedTemplate),
+  );
 
   const [takingDown, setTakingDown] = useState(false);
   const [takedownError, setTakedownError] = useState<string | null>(null);
@@ -49,7 +75,7 @@ function ClassTemplatePublishCard() {
     setPublishing(true);
     try {
       const template = await publishClassAsTemplate(classId, publisherDisplayName.trim());
-      setPublishedTemplate(template);
+      setPublishedTemplate({ share_code: template.share_code, taken_down: template.taken_down });
     } catch {
       setPublishError("템플릿으로 공개하지 못했습니다. 잠시 후 다시 시도해주세요.");
     } finally {
@@ -63,7 +89,7 @@ function ClassTemplatePublishCard() {
     setTakingDown(true);
     try {
       const template = await takedownClassTemplate(publishedTemplate.share_code);
-      setPublishedTemplate(template);
+      setPublishedTemplate({ share_code: template.share_code, taken_down: template.taken_down });
     } catch {
       setTakedownError("내리지 못했습니다. 잠시 후 다시 시도해주세요.");
     } finally {
@@ -683,7 +709,10 @@ export default function ClassSettingsPage() {
         </Card>
         </div>
 
-        <ClassTemplatePublishCard />
+        <ClassTemplatePublishCard
+          classId={classId}
+          initialPublishedTemplate={classroom.published_template}
+        />
 
         <DeleteClassCard classId={classId} classroom={classroom} />
       </div>
