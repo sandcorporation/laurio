@@ -361,6 +361,11 @@ services:
       backend:
         condition: service_started
     environment:
+      # 로그인이 끝나고 강의실로 돌려보낼 때 대조하는 허용목록(#297 후속).
+      # 강의실 컨테이너가 읽는 것과 **같은 `.env` 줄**이다(LAURIO_OPERATOR_ORIGIN 과
+      # 같은 원칙) — 어긋나면 복귀가 조용히 안 되고 사람은 공개 앱에 남는다.
+      # 안전한 쪽으로 실패하지만 원인을 찾기 어려우니 한 줄로 맞춰 둔다.
+      LAURIO_CLASSROOM_ORIGIN: ${LAURIO_CLASSROOM_ORIGIN:?staging LAURIO_CLASSROOM_ORIGIN 을 .env.staging 에 설정하라 — 강의실 서비스와 같은 값이다}
       LAURIO_DEPLOYMENT_TARGET: staging
       # 컨테이너 안에서는 compose 네트워크 이름으로 backend에 붙는다(compose.dev.yaml
       # 과 같은 패턴) — 이 값이 비면 lib/api/client.ts 등이 127.0.0.1로 조용히

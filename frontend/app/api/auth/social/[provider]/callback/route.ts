@@ -18,13 +18,18 @@ import { OAUTH_PROVIDER_ADAPTERS } from "@/lib/auth/oauth-adapters";
 import { resolveNextPath } from "@/lib/auth/next-path";
 import { loginPathWithError, redirectToPath } from "@/lib/auth/redirect";
 import { clearOAuthRoundTripCookies, readOAuthRoundTripCookies } from "@/lib/auth/oauth-state";
+import { resolveSiblingOrigin } from "@/lib/auth/sibling-origins";
 import { loginWithSocialAccessToken } from "@/lib/auth/social-login";
 import { isSocialProvider } from "@/lib/auth/social-providers";
 
 export const dynamic = "force-dynamic";
 
-function redirectToLoginWithError(error: string, next: string): NextResponse {
-  const response = redirectToPath(loginPathWithError(error, next));
+function redirectToLoginWithError(
+  error: string,
+  next: string,
+  nextOrigin: string | null = null,
+): NextResponse {
+  const response = redirectToPath(loginPathWithError(error, next, nextOrigin));
   clearOAuthRoundTripCookies(response);
   return response;
 }
@@ -36,7 +41,11 @@ export async function GET(
   // origin은 뽑지 않는다 — 우리 화면으로 돌아가는 리다이렉트는 전부 상대 경로다
   // (lib/auth/redirect.ts가 그 이유를 적는다).
   const { searchParams } = new URL(request.url);
-  const { state: cookieState, next: cookieNext } = readOAuthRoundTripCookies(request);
+  const {
+    state: cookieState,
+    next: cookieNext,
+    returnOrigin: cookieReturnOrigin,
+  } = readOAuthRoundTripCookies(request);
   // next는 쿠키에 저장해 둔 값을 쓴다 — authorize가 이미 같은 오리진 경로로
   // 검증해 둔 값이고, 제공자를 거쳐 오는 쿼리 파라미터에 다시 실으면 그 값이
   // 왕복 중 조작될 여지를 새로 여는 것이라 그러지 않는다.
@@ -44,24 +53,24 @@ export async function GET(
 
   const { provider } = await context.params;
   if (!isSocialProvider(provider)) {
-    return redirectToLoginWithError("login_failed", next);
+    return redirectToLoginWithError("login_failed", next, resolveSiblingOrigin(cookieReturnOrigin));
   }
 
   // 사용자가 동의를 거부했거나 제공자가 오류를 돌려준 경우 — 빈 화면이 아니라
   // 로그인 화면으로 돌아가 이유를 보여준다.
   const providerError = searchParams.get("error");
   if (providerError) {
-    return redirectToLoginWithError("provider_denied", next);
+    return redirectToLoginWithError("provider_denied", next, resolveSiblingOrigin(cookieReturnOrigin));
   }
 
   const queryState = searchParams.get("state");
   if (!cookieState || !queryState || cookieState !== queryState) {
-    return redirectToLoginWithError("invalid_state", next);
+    return redirectToLoginWithError("invalid_state", next, resolveSiblingOrigin(cookieReturnOrigin));
   }
 
   const code = searchParams.get("code");
   if (!code) {
-    return redirectToLoginWithError("invalid_state", next);
+    return redirectToLoginWithError("invalid_state", next, resolveSiblingOrigin(cookieReturnOrigin));
   }
 
   const adapter = OAUTH_PROVIDER_ADAPTERS[provider];
@@ -70,7 +79,7 @@ export async function GET(
     // authorize가 이 상태면 애초에 제공자로 보내지 않았을 것이다 — 그래도 state
     // 쿠키를 훔쳐 이 라우트를 직접 두드리는 경로를 상정해 여기서도 같은 방식으로
     // 막는다(#96).
-    return redirectToLoginWithError("oauth_unconfigured", next);
+    return redirectToLoginWithError("oauth_unconfigured", next, resolveSiblingOrigin(cookieReturnOrigin));
   }
 
   // 제공자 교환·백엔드 로그인 호출 전체를 하나로 묶어서 잡는다(#95 코드리뷰
@@ -86,15 +95,27 @@ export async function GET(
     const accessToken = await adapter.exchangeCodeForToken(config, code);
     const result = await loginWithSocialAccessToken(provider, accessToken);
     if (!result.ok) {
-      return redirectToLoginWithError("login_failed", next);
+      return redirectToLoginWithError("login_failed", next, resolveSiblingOrigin(cookieReturnOrigin));
     }
 
-    const response = redirectToPath(next);
+    // 돌아갈 형제 오리진이 있으면 거기로 보낸다(#297 후속). 쿠키 값도 **다시**
+    // 허용목록과 대조한다 — 쿠키는 HttpOnly 지만, 설정이 바뀌어 더 이상 우리 것이
+    // 아닌 오리진이 남아 있을 수 있고 그때는 조용히 같은 오리진으로 떨어지는 편이
+    // 옳다. 세션 쿠키는 부모 도메인에 실리므로(ADR-0038) 도착한 쪽에서 그대로
+    // 로그인 상태다.
+    //
+    // 여기만 절대 URL 이다 — `NextResponse.redirect` 는 외부로 나갈 때만 쓴다는
+    // 규율(lib/auth/redirect.ts)의 그 "외부"가 형제 서브도메인이다. 우리 오리진
+    // 안에서 끝나는 경우는 지금까지처럼 상대 Location 이다.
+    const returnOrigin = resolveSiblingOrigin(cookieReturnOrigin);
+    const response = returnOrigin
+      ? NextResponse.redirect(new URL(next, returnOrigin))
+      : redirectToPath(next);
     setSessionCookies(response, result.pair);
     clearOAuthRoundTripCookies(response);
     return response;
   } catch (err) {
     console.error(`${provider} 로그인 콜백 처리 중 예외가 발생했다:`, err);
-    return redirectToLoginWithError("login_failed", next);
+    return redirectToLoginWithError("login_failed", next, resolveSiblingOrigin(cookieReturnOrigin));
   }
 }

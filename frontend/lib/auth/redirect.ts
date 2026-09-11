@@ -22,7 +22,16 @@ export function redirectToPath(path: string): NextResponse {
   return new NextResponse(null, { status: 307, headers: { Location: path } });
 }
 
-export function loginPathWithError(error: string, next: string): string {
+export function loginPathWithError(
+  error: string,
+  next: string,
+  nextOrigin: string | null = null,
+): string {
   const params = new URLSearchParams({ error, next });
+  // 실패해도 **돌아갈 곳을 잃지 않는다**(#297 후속). 이걸 빠뜨리면 강의실에서 온
+  // 사람이 한 번 실패한 뒤 다시 로그인에 성공해도 공개 앱에 남는다 — 브라우저로
+  // 걷다가 실제로 그 상태를 봤다(dev 는 카카오 자격증명이 없어 첫 시도가 늘
+  // oauth_unconfigured 로 돌아온다).
+  if (nextOrigin) params.set("next_origin", nextOrigin);
   return `/login?${params.toString()}`;
 }

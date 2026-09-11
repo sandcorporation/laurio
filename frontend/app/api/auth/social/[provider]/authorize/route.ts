@@ -16,6 +16,7 @@ import type { NextRequest } from "next/server";
 import { OAUTH_PROVIDER_ADAPTERS } from "@/lib/auth/oauth-adapters";
 import { resolveNextPath } from "@/lib/auth/next-path";
 import { generateOAuthState, setOAuthRoundTripCookies } from "@/lib/auth/oauth-state";
+import { resolveSiblingOrigin } from "@/lib/auth/sibling-origins";
 import { loginPathWithError, redirectToPath } from "@/lib/auth/redirect";
 import { isSocialProvider } from "@/lib/auth/social-providers";
 
@@ -31,10 +32,15 @@ export async function GET(
   // 오픈 리다이렉트 방어 — 같은 오리진 경로가 아니면 기본값으로 떨어진다
   // (lib/auth/next-path.ts의 isSafeNextPath).
   const next = resolveNextPath(searchParams.get("next"));
+  // 로그인이 끝나고 돌아갈 **형제 오리진**(#297 후속) — 강의실처럼 다른
+  // 서브도메인에서 온 사람을 원래 있던 곳으로 돌려보낸다. `next` 의 같은-오리진
+  // 검사는 그대로 두고, 오리진만 따로 **설정에 적힌 목록과 대조**한다. 목록에
+  // 없으면 null 이 되어 지금까지와 똑같이 이 오리진 안에서 끝난다.
+  const returnOrigin = resolveSiblingOrigin(searchParams.get("next_origin"));
 
   const { provider } = await context.params;
   if (!isSocialProvider(provider)) {
-    return redirectToPath(loginPathWithError("oauth_unconfigured", next));
+    return redirectToPath(loginPathWithError("oauth_unconfigured", next, returnOrigin));
   }
 
   const adapter = OAUTH_PROVIDER_ADAPTERS[provider];
@@ -48,13 +54,13 @@ export async function GET(
     // 배포 환경에서도 선택 사항이다(#189 — 사람이 OAuth 앱을 등록하기 전까지는
     // 버튼이 "준비 중"으로 남는다) — 그래서 이 분기는 세 제공자 모두에서 실제로
     // 관찰될 수 있다.
-    return redirectToPath(loginPathWithError("oauth_unconfigured", next));
+    return redirectToPath(loginPathWithError("oauth_unconfigured", next, returnOrigin));
   }
 
   const state = generateOAuthState();
   const authorizeUrl = adapter.buildAuthorizeUrl(config, state);
 
   const response = NextResponse.redirect(authorizeUrl);
-  setOAuthRoundTripCookies(response, state, next);
+  setOAuthRoundTripCookies(response, state, next, returnOrigin);
   return response;
 }

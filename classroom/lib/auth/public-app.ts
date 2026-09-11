@@ -10,3 +10,21 @@
 export function publicAppOrigin(): string {
   return process.env.LAURIO_WEB_ORIGIN || "http://127.0.0.1:53000";
 }
+
+/**
+ * 이 앱의 공개 오리진 — 로그인이 끝나고 **여기로 돌아오라**고 공개 앱에 알릴 때 쓴다
+ * (#297 후속).
+ *
+ * 배포 환경에서는 `LAURIO_CLASSROOM_ORIGIN` 이 보장된다(설정이 비면 부팅이
+ * 거부된다, instrumentation.ts). dev 는 그 값을 비워 두므로 요청의 Host 로
+ * 되돌린다 — 워크트리마다 포트가 달라(docker/dev-env.sh) 고정값을 쓸 수 없다.
+ *
+ * 이 값을 그대로 믿는 쪽은 아무도 없다: 공개 앱이 자기 허용목록과 대조해
+ * 통과한 것만 복귀 목적지로 쓴다(frontend/lib/auth/sibling-origins.ts).
+ */
+export function classroomOrigin(host: string | null, proto: string | null): string | null {
+  const configured = process.env.LAURIO_CLASSROOM_ORIGIN;
+  if (configured && configured.trim() !== "") return configured.trim();
+  if (!host) return null;
+  return `${proto === "https" ? "https" : "http"}://${host}`;
+}

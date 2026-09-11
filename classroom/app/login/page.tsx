@@ -7,8 +7,10 @@
 // 복귀를 구조적으로 막는다(오픈 리다이렉트 방지, 그 파일 상단 주석 참고). 그
 // 검사를 느슨하게 하지 않는다 — 대신 사람이 로그인 후 직접 이 화면으로 돌아오게
 // 안내한다.
+import { headers } from "next/headers";
+
 import { PageShell, buttonClass } from "@/app/components/ui";
-import { publicAppOrigin } from "@/lib/auth/public-app";
+import { classroomOrigin, publicAppOrigin } from "@/lib/auth/public-app";
 
 // **정적으로 구워지면 안 된다** (#297). 이 화면은 `searchParams`·`cookies`·`headers`
 // 를 하나도 읽지 않아 Next 가 기본으로 빌드 시점에 HTML 로 구워 버린다. 그러면
@@ -21,8 +23,22 @@ import { publicAppOrigin } from "@/lib/auth/public-app";
 // 결과를 잡는다.
 export const dynamic = "force-dynamic";
 
-export default function ClassroomLoginPage() {
-  const loginUrl = `${publicAppOrigin()}/login`;
+export default async function ClassroomLoginPage() {
+  // 로그인이 끝나면 **여기로 돌아온다**(#297 후속). 공개 앱은 `next_origin` 을 자기
+  // 허용목록과 대조해 통과한 것만 쓴다 — 임의 URL 로 튕길 수 있는 자리가 아니다
+  // (frontend/lib/auth/sibling-origins.ts). 목록에 없으면 지금까지처럼 공개 앱
+  // 안에서 끝나고, 사람은 아래 안내대로 직접 돌아온다.
+  const requestHeaders = await headers();
+  const origin = classroomOrigin(
+    requestHeaders.get("host"),
+    requestHeaders.get("x-forwarded-proto"),
+  );
+  const login = new URL("/login", publicAppOrigin());
+  if (origin) {
+    login.searchParams.set("next_origin", origin);
+    login.searchParams.set("next", "/");
+  }
+  const loginUrl = login.toString();
 
   return (
     <PageShell>

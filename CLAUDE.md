@@ -561,6 +561,22 @@ pnpm --dir frontend test:operator   # 운영자 앱만 (28건이던 시절 약 2
 pnpm --dir frontend test:classroom  # 강의실만 (6건, CI 첫 실행 1.7초)
 ```
 
+**로그인은 공개 앱 하나뿐이고, 끝나면 온 곳으로 돌려보낸다**(#297 후속). 강의실은
+자기 로그인이 없어(ADR-0038) 사람을 공개 앱으로 보내는데, `next` 는 **같은 오리진
+상대 경로만** 허용하므로(`frontend/lib/auth/next-path.ts`) 그것만으로는 돌아올 수
+없다 — 실제로 로그인한 사람이 공모전 콘솔에 버려졌다.
+
+**그 검사를 느슨하게 하지 않았다.** 대신 오리진을 나르는 자리를 따로 뒀다:
+`next_origin` 쿼리를 `frontend/lib/auth/sibling-origins.ts` 가 **설정에 적힌 우리
+오리진 목록**(`LAURIO_CLASSROOM_ORIGIN`)과 대조해 통과한 것만 OAuth 왕복 쿠키에
+싣고, 콜백이 거기로 돌려보낸다. 사용자 입력이 고르는 것은 「이 목록 중 어느
+것인가」뿐이다. 실패 경로(`oauth_unconfigured` 등)도 같은 값을 실어 보낸다 —
+안 그러면 한 번 실패한 사람이 다시 성공해도 공개 앱에 남는다.
+
+**`LAURIO_CLASSROOM_ORIGIN` 은 공개 앱과 강의실이 같은 `.env` 줄을 나눠 읽는
+값이다**(`LAURIO_OPERATOR_ORIGIN` 과 같은 원칙). 어긋나면 복귀가 조용히 안 되고
+사람은 공개 앱에 남는다 — fail-closed 라 보안 구멍은 아니지만 원인을 찾기 어렵다.
+
 **런타임 설정을 읽는 화면은 정적으로 구워지면 안 된다**(#297). Next 는 `searchParams`·
 `cookies`·`headers` 를 하나도 안 읽는 서버 컴포넌트를 **빌드 시점에 HTML 로 굽는다.**
 그 화면이 `process.env` 를 읽으면 **빌드 머신의 값**(대개 비어 있음)이 박제되고, 폴백이

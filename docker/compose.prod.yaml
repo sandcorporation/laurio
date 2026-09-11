@@ -325,6 +325,11 @@ services:
       backend:
         condition: service_started
     environment:
+      # 로그인이 끝나고 강의실로 돌려보낼 때 대조하는 허용목록(#297 후속).
+      # 강의실 컨테이너가 읽는 것과 **같은 `.env` 줄**이다(LAURIO_OPERATOR_ORIGIN 과
+      # 같은 원칙) — 어긋나면 복귀가 조용히 안 되고 사람은 공개 앱에 남는다.
+      # 안전한 쪽으로 실패하지만 원인을 찾기 어려우니 한 줄로 맞춰 둔다.
+      LAURIO_CLASSROOM_ORIGIN: ${LAURIO_CLASSROOM_ORIGIN:-}
       LAURIO_DEPLOYMENT_TARGET: production
       LAURIO_API_BASE_URL: http://backend:8000
       # frontend/lib/auth/origin.ts의 CSRF Origin 검증이 쓰는 값 — 비어 있으면

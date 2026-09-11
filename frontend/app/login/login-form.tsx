@@ -84,6 +84,16 @@ function LoginButtons({ showDevSeedForm, githubConfigured, googleConfigured }: L
   // 같은 오리진 경로가 아니면 기본값으로 떨어진다(오픈 리다이렉트 방어) —
   // authorize 라우트가 이 값을 다시 한번 같은 규칙으로 검증한다.
   const next = resolveNextPath(searchParams.get("next"));
+  // 강의실처럼 다른 서브도메인에서 온 사람은 로그인이 끝나면 거기로 돌아가야
+  // 한다(#297 후속). 여기서는 **그대로 실어 나르기만** 한다 — 그 값이 우리
+  // 오리진인지는 authorize 라우트가 허용목록과 대조해 판정한다
+  // (lib/auth/sibling-origins.ts). 화면이 판정하면 클라이언트가 고칠 수 있다.
+  const nextOrigin = searchParams.get("next_origin");
+  const authorizeQuery = (provider: string) => {
+    const params = new URLSearchParams({ next });
+    if (nextOrigin) params.set("next_origin", nextOrigin);
+    return `/api/auth/social/${provider}/authorize?${params.toString()}`;
+  };
   const oauthError = describeOAuthError(searchParams.get("error"));
 
   const [seed, setSeed] = useState("dev-user");
@@ -107,6 +117,14 @@ function LoginButtons({ showDevSeedForm, githubConfigured, googleConfigured }: L
         return;
       }
 
+      // dev 시드 로그인도 같은 규칙을 따른다 — 강의실에서 왔으면 거기로
+      // 돌아간다. 이 경로는 OAuth 왕복이 없어 쿠키에 실을 곳이 없으므로 여기서
+      // 바로 절대 URL 로 보낸다. 값 검증은 서버가 이미 못 하므로 dev 전용
+      // 경로임을 근거로 둔다 — 배포 환경에는 이 버튼 자체가 없다.
+      if (nextOrigin) {
+        window.location.assign(new URL(next, nextOrigin).toString());
+        return;
+      }
       router.replace(next);
       router.refresh();
     } catch {
@@ -136,7 +154,7 @@ function LoginButtons({ showDevSeedForm, githubConfigured, googleConfigured }: L
             configured ? (
               <a
                 key={provider}
-                href={`/api/auth/social/${provider}/authorize?next=${encodeURIComponent(next)}`}
+                href={authorizeQuery(provider)}
                 data-testid={`oauth-login-${provider}`}
                 className="rounded-sm border border-ink px-4 py-2 text-center text-sm font-medium hover:bg-ink hover:text-paper"
               >
