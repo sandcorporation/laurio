@@ -22,6 +22,7 @@ import {
   PageShell,
   buttonClass,
 } from "@/app/components/ui";
+import { ProblemDescription } from "@/app/components/ProblemDescription";
 import { BackendError } from "@/lib/backend/client";
 import { useMe } from "@/lib/auth/use-me";
 import { submitAttempt } from "@/lib/submissions/api";
@@ -117,7 +118,6 @@ export default function ProblemSubmitPage() {
         eyebrow="강의실 · 문제"
         title={problem.title}
         titleTestId="my-problem-title"
-        description={problem.description ? <span data-testid="my-problem-description">{problem.description}</span> : undefined}
         actions={
           <span data-testid="my-problem-passed-status">
             <Badge tone={problem.passed ? "verified" : "neutral"}>
@@ -129,6 +129,15 @@ export default function ProblemSubmitPage() {
 
       <div className="flex flex-col gap-5 lg:flex-row lg:items-start">
         <div className="flex min-w-0 flex-1 flex-col gap-5">
+          {problem.description.trim() === "" ? null : (
+            <Card>
+              <CardHeader title="설명" />
+              <div className="p-4" data-testid="my-problem-description">
+                <ProblemDescription markdown={problem.description} />
+              </div>
+            </Card>
+          )}
+
           <Card>
             <CardHeader title="체크리스트" hint={`필수 ${requiredCount}개를 전부 충족하면 통과`} />
             <ul data-testid="my-problem-checklist" className="divide-y divide-rule">

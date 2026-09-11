@@ -84,6 +84,11 @@ export default function NewProblemPage() {
               className={`${INPUT_CLASS} resize-y leading-relaxed`}
               placeholder="무엇을 만들어야 하는지, 그리고 무엇이 이 문제의 핵심인지."
             />
+            <span data-testid="problem-description-markdown-hint" className="text-[11.5px] leading-relaxed text-ink/45">
+              마크다운으로 쓸 수 있습니다 — 굵기·목록·코드블록·링크·이미지. 이미지는 바깥 주소만 되고,
+              그 서버는 누군가 열어봤다는 사실을 알 수 있습니다(어느 문제에서 봤는지는 알리지 않지만,
+              접속한 인터넷 주소까지 숨기지는 못합니다).
+            </span>
           </div>
 
           <fieldset className="flex flex-col gap-1.5">
