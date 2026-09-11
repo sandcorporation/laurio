@@ -288,7 +288,7 @@ function DeleteClassCard({ classId, classroom }: { classId: number; classroom: C
                 data-testid="delete-class-confirm"
                 onClick={handleDelete}
                 disabled={!isDeleteConfirmationTyped(classroom.name, typedName) || deleting}
-                className={buttonClass("danger", "sm")}
+                className={buttonClass("dangerFilled", "sm")}
               >
                 {deleting ? "지우는 중..." : "정말 삭제"}
               </button>

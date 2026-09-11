@@ -23,6 +23,7 @@ import { useParams } from "next/navigation";
 import { daysUntil, formatDday } from "@/lib/contest-format";
 import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
+import { dangerButtonClass } from "@/lib/ui";
 import {
   EVIDENCE_KINDS,
   type AwardOut,
@@ -445,7 +446,7 @@ function SubmissionColumnHeader({
               onClick={onAwardClick}
               disabled={isSaving}
               data-testid={`award-button-${submission.submission_id}`}
-              className="w-fit rounded-sm border border-ink px-3 py-1 text-xs hover:bg-ink hover:text-paper disabled:opacity-50"
+              className={`w-fit rounded-sm px-3 py-1 text-xs disabled:opacity-50 ${dangerButtonClass("outline")}`}
             >
               이 제출물 선정
             </button>

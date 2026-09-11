@@ -320,7 +320,7 @@ export default function ProblemTemplatePreviewPage() {
                       type="submit"
                       data-testid="template-report-submit"
                       disabled={reportSubmitting || reportReason.trim() === ""}
-                      className={buttonClass("danger")}
+                      className={buttonClass("secondary")}
                     >
                       {reportSubmitting ? "접수하는 중..." : "신고하기"}
                     </button>

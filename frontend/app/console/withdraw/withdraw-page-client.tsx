@@ -18,6 +18,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { useSession } from "@/lib/auth/use-session";
+import { dangerButtonClass } from "@/lib/ui";
 import {
   BLOCK_REASON_LABELS,
   executeWithdrawal,
@@ -141,7 +142,7 @@ export function WithdrawPageClient({ returnOrigin }: { returnOrigin: string | nu
                 onClick={handleWithdraw}
                 disabled={!acknowledged || submitting}
                 data-testid="withdraw-submit"
-                className="mt-4 rounded-sm border border-attention px-4 py-2 text-sm text-attention hover:bg-attention/10 disabled:opacity-50"
+                className={`mt-4 rounded-sm px-4 py-2 text-sm disabled:opacity-50 ${dangerButtonClass("filled")}`}
               >
                 {submitting ? "탈퇴 처리 중..." : "탈퇴한다"}
               </button>

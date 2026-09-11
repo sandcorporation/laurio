@@ -91,10 +91,14 @@ export function AccountMenuClient({
             >
               알림
             </Link>
+            {/* 되돌릴 수 없는 행위는 색으로 먼저 구별된다(#344) — 탈퇴는 주의색,
+                로그아웃은 보통이다(되돌릴 수 있다: 다시 로그인하면 그만이다).
+                이 메뉴는 이 앱에서 한 번만 그리므로 화면마다 반복될 위험이
+                없어 buttonClass를 거치지 않고 여기서 직접 정한다. */}
             <a
               href={withdrawUrl}
               data-testid="account-menu-withdraw-link"
-              className="border-t border-rule px-3 py-2 text-ink hover:bg-paper"
+              className="border-t border-rule px-3 py-2 text-attention hover:bg-paper"
             >
               탈퇴
             </a>
@@ -102,7 +106,7 @@ export function AccountMenuClient({
               type="button"
               onClick={handleLogout}
               data-testid="account-menu-logout"
-              className="border-t border-rule px-3 py-2 text-left text-attention hover:bg-paper"
+              className="border-t border-rule px-3 py-2 text-left text-ink hover:bg-paper"
             >
               로그아웃
             </button>

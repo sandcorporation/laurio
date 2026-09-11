@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 
 import { useSession } from "@/lib/auth/use-session";
 import { contestProductEnabled } from "@/lib/contest-switch";
+import { dangerButtonClass } from "@/lib/ui";
 
 export default function AppHome() {
   const session = useSession();
@@ -105,7 +106,7 @@ export default function AppHome() {
       <Link
         href="/console/withdraw"
         data-testid="app-home-withdraw-link"
-        className="w-fit rounded-sm border border-rule px-4 py-2 text-sm text-muted hover:border-ink"
+        className={`w-fit rounded-sm px-4 py-2 text-sm ${dangerButtonClass("outline")}`}
       >
         탈퇴
       </Link>

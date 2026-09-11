@@ -360,7 +360,7 @@ export default function NewProblemPage() {
                       type="button"
                       data-testid={`new-problem-checklist-item-${index}-delete`}
                       onClick={() => handleItemDelete(item.key)}
-                      className={buttonClass("danger", "sm")}
+                      className={buttonClass("secondary", "sm")}
                     >
                       삭제
                     </button>

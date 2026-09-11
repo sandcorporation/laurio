@@ -25,6 +25,10 @@ Next.js + React. 발주자·개발자·방문자가 쓰는 앱이다. 운영자�
 **우리 화면으로 돌아가는 리다이렉트는 상대 경로로 낸다.** 컨테이너 안의 Next 는 자기가 어떤
 공개 주소로 불렸는지 모른다. 절대 URL 은 외부로 나갈 때만 쓴다.
 
+**되돌릴 수 없는 행위는 색으로 구별된다**(#344, `lib/ui.ts` 의 `dangerButtonClass`) — 입구·
+한 번에 끝나는 버튼은 주의색 테두리, 확인을 거친 최종 실행은 주의색 채움, 되돌릴 수 있는
+것은 보통이다. 화면은 이 함수를 부를 뿐 `text-attention` 을 직접 적지 않는다.
+
 **공모전 제품 스위치**(`NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED`,
 `frontend/lib/contest-switch.ts`)가 꺼지면 헤더의 「공모전」·「공모전 개최」 진입점과
 `/console` 의 「내 공모전」 진입점이 빠지고, `/contests/**`·`/console/contests/**`

@@ -78,7 +78,7 @@ function JoinLinkSection({
             type="button"
             data-testid="join-link-regenerate"
             onClick={onRegenerate}
-            className={buttonClass("secondary", "sm")}
+            className={buttonClass("danger", "sm")}
           >
             다시 뽑기
           </button>

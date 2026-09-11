@@ -100,6 +100,10 @@ const BUTTON_TONE = {
   primary: "bg-ink text-paper hover:bg-ink/85",
   secondary: "border border-rule bg-surface text-ink hover:bg-paper",
   danger: "border border-attention bg-surface text-attention hover:bg-attention/5",
+  // 되돌릴 수 없는 행위 중, 확인을 이미 거친 최종 실행에만 쓴다(#344) — 입구·한
+  // 번에 끝나는 행위는 위 danger(테두리)를 쓴다. 공개 앱의 확정 버튼과 같은
+  // bg-attention/text-paper 조합이라 두 앱에서 「채움 = 최종 실행」이 같은 색으로 읽힌다.
+  dangerFilled: "bg-attention text-paper hover:bg-attention/85",
 } as const;
 
 export type ButtonTone = keyof typeof BUTTON_TONE;

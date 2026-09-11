@@ -22,6 +22,7 @@ import Link from "next/link";
 import { use, useState } from "react";
 
 import { useSession } from "@/lib/auth/use-session";
+import { dangerButtonClass } from "@/lib/ui";
 import { acceptHandover, useHandover, type Handover } from "@/lib/handovers/use-handover";
 import {
   buildAssetKindLabel,
@@ -212,7 +213,7 @@ function PendingAcceptance({
         <button
           type="button"
           onClick={onAcceptClick}
-          className="w-fit rounded bg-accent px-4 py-2 text-white disabled:opacity-50"
+          className={`w-fit rounded px-4 py-2 disabled:opacity-50 ${dangerButtonClass("outline")}`}
           data-testid="handover-accept-button"
         >
           인수 확인
