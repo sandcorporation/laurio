@@ -58,6 +58,10 @@ TRAILING_COMMENT_CLOSE_RE = re.compile(r"\s*\*/\s*\}?\s*$")
 COMMENT_REMAINDER_RE = re.compile(r"^[{}]*$")
 
 
+def _is_test(path: Path) -> bool:
+    return path.name.endswith((".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx"))
+
+
 def exception_reason(line: str) -> str | None:
     m = EXCEPTION_RE.search(line)
     if m is None:
@@ -212,8 +216,12 @@ def main() -> int:
         if not base.exists():
             print(f"::error::{base} 가 없다 — 경로가 바뀌었는가?")
             return 1
-        files.extend(sorted(base.rglob("*.tsx")))
-        files.extend(sorted(base.rglob("*.ts")))
+        # 테스트 파일은 화면이 아니다 — 거기서는 규칙을 설명하려고 ADR·이슈
+        # 번호를 그대로 쓰는 것이 옳다(그것이 그 테스트가 지키는 결정의 출처다).
+        # 백엔드 쪽 AST 게이트가 `tests/` 를 빼는 것과 같은 이유다
+        # (`backend/tests/ast_scan_support.py` 의 SKIPPED_PARTS).
+        files.extend(f for f in sorted(base.rglob("*.tsx")) if not _is_test(f))
+        files.extend(f for f in sorted(base.rglob("*.ts")) if not _is_test(f))
 
     if not files:
         print("::error::검사할 프론트엔드 파일을 하나도 못 찾았다.")

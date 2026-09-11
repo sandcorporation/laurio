@@ -1,11 +1,17 @@
-html,
+/*
+ * 강의실도 공개 앱과 같은 옷을 입는다 (#298). Tailwind v4 + `app/tokens.css` 의
+ * `@theme` 블록 — 공개 앱(`frontend/app/globals.css`)과 같은 구조다.
+ *
+ * **리터럴 hex 를 컴포넌트에 흩지 않는다.** 전부 `@theme` 가 만든 `bg-*`/`text-*`
+ * 유틸리티로 표현한다 — 브랜드가 정해지면 `tokens.css` 하나만 갈아끼우면 되도록.
+ * 그 규율이 성립하는지는 `lib/design/tokens.test.ts` 가 공개 앱의 토큰 파일과
+ * 바이트 단위로 대조해 지킨다.
+ */
+@import "tailwindcss";
+@import "./tokens.css";
+
 body {
-  margin: 0;
-  padding: 0;
-  font-family:
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    Roboto,
-    sans-serif;
+  @apply bg-paper text-ink font-sans;
 }
+
+/* 이 브랜드는 그림자를 쓰지 않는다 — 면과 면은 괘선(`border-rule`)으로 가른다. */

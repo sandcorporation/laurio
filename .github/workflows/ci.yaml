@@ -1419,6 +1419,7 @@ jobs:
             -e LAURIO_CLASSROOM_ORIGIN=https://classroom.laurio.example \
             -e LAURIO_API_BASE_URL=http://127.0.0.1:1 \
             -e LAURIO_SESSION_COOKIE_DOMAIN=.laurio.example \
+            -e LAURIO_WEB_ORIGIN=https://laurio.example \
             -p 3102:3000 \
             laurio-classroom-runner-ci
 
@@ -1439,6 +1440,25 @@ jobs:
             docker logs classroom-boot-ok
             exit 1
           fi
+
+      # 런타임 설정이 빌드에 박제되지 않는지 실제로 확인한다 (#297). 이 검사가
+      # 없어서 배포된 강의실의 로그인 링크가 `http://127.0.0.1:53000` 을 가리켰다 —
+      # 그 화면이 정적으로 구워져 **빌드 머신의** 환경(=비어 있음)을 읽었기 때문이다.
+      # dev 도 CI e2e 도 이것을 못 본다: 둘 다 LAURIO_WEB_ORIGIN 이 비어 있어 dev
+      # 폴백이 「맞는 답」이라 통과한다. 프로덕션 이미지에 배포 설정을 물린 여기서만
+      # 드러난다. (구조 쪽은 classroom/lib/rendering/runtime-config.test.ts 가 본다.)
+      - name: Runtime config is read at request time, not baked into the build
+        run: |
+          set -euo pipefail
+          html=$(curl -sS --max-time 10 http://127.0.0.1:3102/login)
+          echo "$html" | grep -q "https://laurio.example/login" \
+            || { echo "::error::/login 이 LAURIO_WEB_ORIGIN 을 안 읽는다 — 빌드 시점 값이 구워졌는가?"; echo "$html" | head -40; exit 1; }
+          if echo "$html" | grep -q "127\.0\.0\.1"; then
+            echo "::error::/login HTML 에 로컬호스트가 남아 있다 — dev 폴백이 박제됐다(#297)"
+            echo "$html" | grep -o "http://127[^\"']*" | head -5
+            exit 1
+          fi
+          echo "로그인 링크가 런타임 설정을 읽는다"
 
       - name: Tear down the boot-guard container
         if: always()

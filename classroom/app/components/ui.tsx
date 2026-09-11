@@ -1,0 +1,139 @@
+// 강의실 화면이 공유하는 조각 (#298).
+//
+// **시안(`docs/design/classroom/`)이 정한 규칙을 여기 한 번만 적는다** — 종이 위에
+// 뜬 면은 `surface`, 면과 면은 **괘선**으로 가르고 **그림자는 쓰지 않으며**, 모서리는
+// 각지다(토큰의 radius 가 0–2px). 화면마다 같은 유틸리티 문자열을 베끼면 한 곳을
+// 고칠 때 나머지가 남는다.
+//
+// 리터럴 hex 는 여기에도 없다 — 전부 `app/tokens.css` 의 `@theme` 가 만든
+// 유틸리티다(`bg-paper`·`text-ink`·`border-rule`·`text-attention`·`text-verified`).
+import type { ReactNode } from "react";
+
+/** 화면 한 장의 바깥 틀 — 폭과 여백을 여기서만 정한다. */
+export function PageShell({ children }: { children: ReactNode }) {
+  return <main className="mx-auto w-full max-w-[1200px] px-6 py-8">{children}</main>;
+}
+
+/** 화면 머리 — 눈썹(작은 위치 표시)·제목·한 줄 설명, 그리고 오른쪽 행동. */
+export function PageHeader({
+  eyebrow,
+  title,
+  titleTestId,
+  description,
+  actions,
+}: {
+  eyebrow?: string;
+  title: string;
+  /** 화면의 제목은 `h1` 하나여야 한다 — 테스트가 잡을 자리를 여기로 준다.
+   *  따로 `sr-only` 제목을 덧대면 h1 이 둘이 되어 읽는 순서가 무너진다
+   *  (브라우저로 걷다가 실제로 세 화면에서 그 상태를 봤다). */
+  titleTestId?: string;
+  description?: ReactNode;
+  actions?: ReactNode;
+}) {
+  return (
+    <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+      <div className="flex min-w-0 flex-col gap-1.5">
+        {eyebrow ? (
+          <div className="text-[11px] tracking-[0.08em] text-ink/45">{eyebrow}</div>
+        ) : null}
+        <h1 className="text-[22px] font-semibold tracking-[-0.01em]" data-testid={titleTestId}>
+          {title}
+        </h1>
+        {description ? (
+          <p className="text-[13px] leading-relaxed text-ink/60">{description}</p>
+        ) : null}
+      </div>
+      {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+    </div>
+  );
+}
+
+/** 종이 위에 뜬 면. 그림자가 아니라 괘선으로 뜬다. */
+export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
+  return <div className={`border border-rule bg-surface ${className}`}>{children}</div>;
+}
+
+export function CardHeader({ title, hint }: { title: string; hint?: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 border-b border-rule px-4 py-3">
+      <h2 className="text-[15px] font-semibold tracking-[-0.005em]">{title}</h2>
+      {hint ? <span className="text-[12.5px] text-ink/45">{hint}</span> : null}
+    </div>
+  );
+}
+
+/** 아직 아무것도 없을 때. 「0」이 아니라 「아직 없다」라고 말한다. */
+export function EmptyState({ children }: { children: ReactNode }) {
+  return <div className="px-4 py-10 text-center text-[13.5px] text-ink/45">{children}</div>;
+}
+
+const BUTTON_BASE =
+  "inline-flex items-center justify-center whitespace-nowrap text-[13.5px] " +
+  "transition-colors disabled:cursor-not-allowed disabled:opacity-45";
+const BUTTON_TONE = {
+  primary: "bg-ink text-paper hover:bg-ink/85",
+  secondary: "border border-rule bg-surface text-ink hover:bg-paper",
+  danger: "border border-attention bg-surface text-attention hover:bg-attention/5",
+} as const;
+
+export type ButtonTone = keyof typeof BUTTON_TONE;
+
+/** 버튼과 링크가 같은 모양을 내도록, 클래스만 돌려준다. */
+export function buttonClass(tone: ButtonTone = "secondary", size: "sm" | "md" = "md"): string {
+  const pad = size === "sm" ? "px-3 py-1.5 text-[12.5px]" : "px-4 py-2";
+  return `${BUTTON_BASE} ${BUTTON_TONE[tone]} ${pad}`;
+}
+
+/** 상태 표시. 셋뿐이다 — 이 브랜드의 액센트가 둘이기 때문이다. */
+export function Badge({
+  tone = "neutral",
+  children,
+}: {
+  tone?: "neutral" | "attention" | "verified";
+  children: ReactNode;
+}) {
+  const cls = {
+    neutral: "border-rule text-ink/60",
+    attention: "border-attention text-attention",
+    verified: "border-verified text-verified",
+  }[tone];
+  return (
+    <span className={`inline-block border px-2 py-0.5 text-[11px] leading-tight ${cls}`}>
+      {children}
+    </span>
+  );
+}
+
+/** 숫자는 등폭으로 — 자릿수가 흔들리면 표가 읽히지 않는다. */
+export function Num({ children, className = "" }: { children: ReactNode; className?: string }) {
+  return <span className={`font-mono ${className}`}>{children}</span>;
+}
+
+export function FieldLabel({ children }: { children: ReactNode }) {
+  return <span className="text-[12px] text-ink/60">{children}</span>;
+}
+
+export const INPUT_CLASS =
+  "w-full border border-rule bg-surface px-3 py-2 text-[13.5px] text-ink " +
+  "placeholder:text-ink/30 focus:border-ink focus:outline-none";
+
+/** 오류는 붉게, 그러나 배경을 채우지 않는다 — 이 브랜드는 면을 칠하지 않는다. */
+export function ErrorNote({ children }: { children: ReactNode }) {
+  return (
+    <p role="alert" className="text-[13px] leading-relaxed text-attention">
+      {children}
+    </p>
+  );
+}
+
+/** 설명·주의를 담는 띠. 괘선 하나로 본문과 구별한다. */
+export function Note({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "attention" }) {
+  const border = tone === "attention" ? "border-attention" : "border-rule";
+  const text = tone === "attention" ? "text-ink/75" : "text-ink/60";
+  return (
+    <div className={`border ${border} bg-surface px-4 py-3 text-[13px] leading-relaxed ${text}`}>
+      {children}
+    </div>
+  );
+}

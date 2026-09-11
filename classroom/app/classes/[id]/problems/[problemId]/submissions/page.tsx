@@ -9,6 +9,17 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
+import {
+  Badge,
+  Card,
+  EmptyState,
+  ErrorNote,
+  Note,
+  Num,
+  PageHeader,
+  PageShell,
+  buttonClass,
+} from "@/app/components/ui";
 import { useProblem } from "@/lib/problems/use-problem";
 import { useProblemSubmissions } from "@/lib/submissions/use-problem-submissions";
 
@@ -22,25 +33,29 @@ export default function ProblemSubmissionsPage() {
 
   if (state.status === "loading" || problemState.state.status === "loading") {
     return (
-      <main>
-        <p data-testid="problem-submissions-loading">불러오는 중...</p>
-      </main>
+      <PageShell>
+        <p data-testid="problem-submissions-loading" className="text-[13.5px] text-ink/45">불러오는 중...</p>
+      </PageShell>
     );
   }
 
   if (state.status === "notFound") {
     return (
-      <main>
-        <h1 data-testid="problem-submissions-not-found">문제를 찾을 수 없습니다</h1>
-      </main>
+      <PageShell>
+        <h1 data-testid="problem-submissions-not-found" className="text-[22px] font-semibold">
+          문제를 찾을 수 없습니다
+        </h1>
+      </PageShell>
     );
   }
 
   if (state.status === "error" || problemState.state.status === "error") {
     return (
-      <main>
-        <p data-testid="problem-submissions-error">제출 현황을 불러오지 못했습니다.</p>
-      </main>
+      <PageShell>
+        <ErrorNote>
+          <span data-testid="problem-submissions-error">제출 현황을 불러오지 못했습니다.</span>
+        </ErrorNote>
+      </PageShell>
     );
   }
 
@@ -52,67 +67,123 @@ export default function ProblemSubmissionsPage() {
   const problemTitle = problemState.state.status === "ready" ? problemState.state.problem.title : "";
 
   return (
-    <main>
-      <h1 data-testid="problem-submissions-heading">{problemTitle} · 제출 현황</h1>
-      <Link href={`/classes/${classId}/problems/${problemId}`} data-testid="back-to-problem-link">
-        문제 편집으로
-      </Link>
+    <PageShell>
+      <PageHeader
+        eyebrow="클래스 · 문제"
+        title={`${problemTitle} · 제출 현황`}
+        titleTestId="problem-submissions-heading"
+        description="시도마다 소스나 저장소를 열어 AI 판정과 함께 볼 수 있습니다."
+        actions={
+          <Link
+            href={`/classes/${classId}/problems/${problemId}`}
+            data-testid="back-to-problem-link"
+            className={buttonClass()}
+          >
+            문제 편집으로
+          </Link>
+        }
+      />
 
-      {state.submissions.length === 0 ? (
-        <p data-testid="problem-submissions-empty-state">아직 낸 시도가 없습니다.</p>
-      ) : (
-        <ol data-testid="problem-submissions-list">
-          {state.submissions.map((submission) => (
-            <li key={submission.id} data-testid={`instructor-submission-row-${submission.id}`}>
-              <span data-testid={`instructor-submission-row-${submission.id}-member`}>
-                {submission.member_display_name}
-              </span>{" "}
-              ·{" "}
-              <span data-testid={`instructor-submission-row-${submission.id}-attempt`}>
-                {submission.attempt_number}번째 시도
-              </span>{" "}
-              ·{" "}
-              {submission.submission_format === "repository" ? (
-                <a
-                  href={submission.value}
-                  target="_blank"
-                  rel="noreferrer"
-                  data-testid={`instructor-submission-row-${submission.id}-repository`}
+      <div className="flex flex-col gap-4">
+        {state.submissions.length === 0 ? (
+          <Card>
+            <EmptyState>
+              <span data-testid="problem-submissions-empty-state">아직 낸 시도가 없습니다.</span>
+            </EmptyState>
+          </Card>
+        ) : (
+          <Card>
+            <ol data-testid="problem-submissions-list" className="divide-y divide-rule">
+              {state.submissions.map((submission) => (
+                <li
+                  key={submission.id}
+                  data-testid={`instructor-submission-row-${submission.id}`}
+                  className="px-4 py-4"
                 >
-                  저장소 열기
-                </a>
-              ) : submission.download_url ? (
-                <a
-                  href={submission.download_url}
-                  data-testid={`instructor-submission-row-${submission.id}-download`}
-                >
-                  소스 다운로드
-                </a>
-              ) : null}{" "}
-              ·{" "}
-              {submission.status === "pending" ? (
-                <span data-testid={`instructor-submission-row-${submission.id}-status`}>채점 중</span>
-              ) : (
-                <span data-testid={`instructor-submission-row-${submission.id}-status`}>
-                  채점 완료 · {submission.passed ? "통과" : "미통과"}
-                </span>
-              )}
-              {submission.status === "scored" && submission.score ? (
-                <ul data-testid={`instructor-submission-row-${submission.id}-verdicts`}>
-                  {submission.score.reasoning.map((verdict) => (
-                    <li key={verdict.checklist_item_id}>
-                      {checklistLabelById.get(verdict.checklist_item_id) ?? "항목"} —{" "}
-                      {verdict.is_met ? "충족" : "미충족"}
-                      {": "}
-                      {verdict.reasoning}
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </li>
-          ))}
-        </ol>
-      )}
-    </main>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                    <span
+                      data-testid={`instructor-submission-row-${submission.id}-member`}
+                      className="text-[14px] font-medium"
+                    >
+                      {submission.member_display_name}
+                    </span>
+                    <span
+                      data-testid={`instructor-submission-row-${submission.id}-attempt`}
+                      className="text-[12px] text-ink/45"
+                    >
+                      <Num>{submission.attempt_number}</Num>번째 시도
+                    </span>
+
+                    {submission.status === "pending" ? (
+                      <span data-testid={`instructor-submission-row-${submission.id}-status`}>
+                        <Badge>채점 중</Badge>
+                      </span>
+                    ) : (
+                      <span data-testid={`instructor-submission-row-${submission.id}-status`}>
+                        <Badge tone={submission.passed ? "verified" : "attention"}>
+                          채점 완료 · {submission.passed ? "통과" : "미통과"}
+                        </Badge>
+                      </span>
+                    )}
+
+                    <span className="ml-auto shrink-0">
+                      {submission.submission_format === "repository" ? (
+                        <a
+                          href={submission.value}
+                          target="_blank"
+                          rel="noreferrer"
+                          data-testid={`instructor-submission-row-${submission.id}-repository`}
+                          className={buttonClass("secondary", "sm")}
+                        >
+                          저장소 열기
+                        </a>
+                      ) : submission.download_url ? (
+                        <a
+                          href={submission.download_url}
+                          data-testid={`instructor-submission-row-${submission.id}-download`}
+                          className={buttonClass("secondary", "sm")}
+                        >
+                          소스 다운로드
+                        </a>
+                      ) : null}
+                    </span>
+                  </div>
+
+                  {submission.status === "scored" && submission.score ? (
+                    <ul
+                      data-testid={`instructor-submission-row-${submission.id}-verdicts`}
+                      className="mt-3 flex flex-col gap-2 border-t border-rule pt-3"
+                    >
+                      {submission.score.reasoning.map((verdict) => (
+                        <li key={verdict.checklist_item_id} className="flex gap-2.5">
+                          <span
+                            aria-hidden
+                            className={`mt-1 h-[13px] w-[13px] shrink-0 border ${
+                              verdict.is_met ? "border-verified bg-verified" : "border-attention"
+                            }`}
+                          />
+                          <span className="text-[13px] leading-relaxed">
+                            <span className={verdict.is_met ? "" : "text-ink"}>
+                              {checklistLabelById.get(verdict.checklist_item_id) ?? "항목"}
+                            </span>{" "}
+                            <span className="text-ink/45">— {verdict.is_met ? "충족" : "미충족"}</span>
+                            <span className="block text-ink/60">{verdict.reasoning}</span>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </li>
+              ))}
+            </ol>
+          </Card>
+        )}
+
+        <Note>
+          이 화면을 여는 것은 <b className="text-ink">어디에도 기록되지 않습니다.</b> 강의실에서
+          열람 기록이 드러내는 것은 감시가 아니라 「한 번도 안 봤다」이기 때문입니다.
+        </Note>
+      </div>
+    </PageShell>
   );
 }

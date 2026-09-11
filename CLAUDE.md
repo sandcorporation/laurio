@@ -561,6 +561,26 @@ pnpm --dir frontend test:operator   # 운영자 앱만 (28건이던 시절 약 2
 pnpm --dir frontend test:classroom  # 강의실만 (6건, CI 첫 실행 1.7초)
 ```
 
+**런타임 설정을 읽는 화면은 정적으로 구워지면 안 된다**(#297). Next 는 `searchParams`·
+`cookies`·`headers` 를 하나도 안 읽는 서버 컴포넌트를 **빌드 시점에 HTML 로 굽는다.**
+그 화면이 `process.env` 를 읽으면 **빌드 머신의 값**(대개 비어 있음)이 박제되고, 폴백이
+있으면 그 폴백이 배포에 그대로 나간다. 강의실 로그인 링크가 실제로 그렇게
+`http://127.0.0.1:53000` 을 가리켰다(`x-nextjs-prerender: 1`, 1년 캐시).
+
+**세 게이트가 전부 못 본다**: dev 는 매 요청 렌더라 안 보이고, CI e2e 는 그 스택에서
+값이 비어 있어 **폴백이 「맞는 답」**이라 통과하고, deploy-guard 는 부팅 여부만 봤다.
+프로덕션 이미지에 배포 설정을 물려야만 드러난다. 그래서 두 곳에서 잡는다 —
+`classroom/lib/rendering/runtime-config.test.ts` 가 **구조**(런타임 환경변수에 닿는
+page/route 는 `export const dynamic = "force-dynamic"` 을 선언해야 한다)를,
+`classroom-deploy-guard` 잡이 **결과**(구운 이미지의 `/login` HTML 에 로컬호스트가
+없는가)를 본다.
+
+**강의실은 공개 앱과 같은 토큰·서체를 쓴다**(#298). `classroom/app/tokens.css` 는
+`frontend/app/tokens.css` 의 **복사본**이고 Pretendard 파일도 그렇다. 공유 패키지로
+빼지 않은 이유는 손으로 관리되는 목록 셋이 또 늘고 로컬 게이트가 그것을 못 보기
+때문이다(#166). 대신 `classroom/lib/design/tokens.test.ts` 가 두 파일이 한 글자라도
+갈리면 빨개진다 — 「복사했으니 언젠가 갈라진다」를 규율이 아니라 검사로 바꿨다.
+
 **`test:classroom` 만 `--pass-with-no-tests` 를 붙인다.** 세 스크립트는 2단계다 —
 `@exclusive` 아닌 것을 병렬로 돌리고, `@exclusive` 를 워커 하나로 다시 돈다. 그런데
 강의실에는 아직 `@exclusive` 스펙이 없어 둘째 명령이 「No tests found」로 **exit 1**

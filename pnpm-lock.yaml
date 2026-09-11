@@ -26,6 +26,9 @@ importers:
       '@laurio/route-audit':
         specifier: workspace:*
         version: link:../packages/route-audit
+      '@tailwindcss/postcss':
+        specifier: ^4.3.3
+        version: 4.3.3
       '@types/node':
         specifier: ^22.10.0
         version: 22.20.1
@@ -35,6 +38,9 @@ importers:
       '@types/react-dom':
         specifier: ^19.1.0
         version: 19.2.5(@types/react@19.2.18)
+      tailwindcss:
+        specifier: ^4.3.3
+        version: 4.3.3
       typescript:
         specifier: ^5.7.0
         version: 5.9.3

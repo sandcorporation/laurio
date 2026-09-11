@@ -1,11 +1,20 @@
 "use client";
 
-// 새 클래스 만들기 (#278). 이름만 받는다 — 초대 링크는 #279, 문제는 #282의
-// 자리다.
+// 새 클래스 만들기 (#278, 스타일 #298). 이름만 받는다 — 가입 링크는 만들면
+// 상세 화면에서 바로 나온다(#279).
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { FormEvent } from "react";
 
+import {
+  Card,
+  ErrorNote,
+  FieldLabel,
+  INPUT_CLASS,
+  PageHeader,
+  PageShell,
+  buttonClass,
+} from "@/app/components/ui";
 import { createClass } from "@/lib/classes/api";
 
 export default function NewClassPage() {
@@ -28,24 +37,47 @@ export default function NewClassPage() {
   }
 
   return (
-    <main>
-      <h1 data-testid="new-class-heading">새 클래스</h1>
+    <PageShell>
+      <PageHeader
+        eyebrow="내 클래스"
+        title="새 클래스"
+        titleTestId="new-class-heading"
+        description="만들고 나면 가입 링크가 바로 나옵니다. 그 링크를 받은 사람은 회원가입과 클래스 가입이 한 번에 끝납니다."
+      />
 
-      <form onSubmit={handleSubmit}>
-        <label htmlFor="class-name">클래스 이름</label>
-        <input
-          id="class-name"
-          data-testid="new-class-name-input"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          required
-        />
-        <button type="submit" data-testid="new-class-submit" disabled={submitting || name.trim() === ""}>
-          {submitting ? "만드는 중..." : "만들기"}
-        </button>
-      </form>
-
-      {error ? <p data-testid="new-class-error">{error}</p> : null}
-    </main>
+      <Card className="max-w-[560px] p-5">
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="class-name">
+              <FieldLabel>클래스 이름</FieldLabel>
+            </label>
+            <input
+              id="class-name"
+              data-testid="new-class-name-input"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              required
+              className={INPUT_CLASS}
+              placeholder="예: 프론트엔드 입문 3기"
+            />
+          </div>
+          <div>
+            <button
+              type="submit"
+              data-testid="new-class-submit"
+              disabled={submitting || name.trim() === ""}
+              className={buttonClass("primary")}
+            >
+              {submitting ? "만드는 중..." : "만들기"}
+            </button>
+          </div>
+          {error ? (
+            <ErrorNote>
+              <span data-testid="new-class-error">{error}</span>
+            </ErrorNote>
+          ) : null}
+        </form>
+      </Card>
+    </PageShell>
   );
 }

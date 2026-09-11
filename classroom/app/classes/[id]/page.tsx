@@ -8,6 +8,18 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 
+import {
+  Badge,
+  Card,
+  CardHeader,
+  EmptyState,
+  ErrorNote,
+  Note,
+  Num,
+  PageHeader,
+  PageShell,
+  buttonClass,
+} from "@/app/components/ui";
 import { copyClass } from "@/lib/classes/api";
 import { useClass } from "@/lib/classes/use-class";
 import { formatAchievementRate } from "@/lib/problems/achievement";
@@ -48,23 +60,43 @@ function JoinLinkSection({
   };
 
   return (
-    <section>
-      <h2>가입 링크</h2>
-      <p data-testid="join-link">{url}</p>
-      <button type="button" data-testid="join-link-copy" onClick={copy}>
-        복사
-      </button>
-      {copied ? <span data-testid="join-link-copied"> 복사됨</span> : null}
-      <p>
-        <button type="button" data-testid="join-link-regenerate" onClick={onRegenerate}>
-          다시 뽑기
-        </button>
-      </p>
-      <p>다시 뽑으면 이전 링크는 더 이상 이 클래스로 들어오지 못합니다.</p>
-      {regenerateError ? (
-        <p data-testid="join-link-regenerate-error">다시 뽑지 못했습니다. 다시 시도해주세요.</p>
-      ) : null}
-    </section>
+    <Card>
+      <CardHeader title="가입 링크" hint="이 링크로 들어오면 회원가입과 클래스 가입이 한 번에 끝납니다" />
+      <div className="flex flex-col gap-3 p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <p
+            data-testid="join-link"
+            className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap border border-rule bg-paper px-3 py-2 font-mono text-[13px]"
+          >
+            {url}
+          </p>
+          <button type="button" data-testid="join-link-copy" onClick={copy} className={buttonClass("secondary", "sm")}>
+            복사
+          </button>
+          <button
+            type="button"
+            data-testid="join-link-regenerate"
+            onClick={onRegenerate}
+            className={buttonClass("secondary", "sm")}
+          >
+            다시 뽑기
+          </button>
+          {copied ? (
+            <span data-testid="join-link-copied" className="text-[12px] text-verified">
+              복사됨
+            </span>
+          ) : null}
+        </div>
+        <p className="text-[11.5px] leading-relaxed text-ink/45">
+          다시 뽑으면 이전 링크는 더 이상 이 클래스로 들어오지 못합니다.
+        </p>
+        {regenerateError ? (
+          <ErrorNote>
+            <span data-testid="join-link-regenerate-error">다시 뽑지 못했습니다. 다시 시도해주세요.</span>
+          </ErrorNote>
+        ) : null}
+      </div>
+    </Card>
   );
 }
 
@@ -79,31 +111,45 @@ function ArchiveSection({
   onToggle: () => void;
 }) {
   return (
-    <section>
+    <div className="flex flex-col gap-2">
       {archived ? (
-        <>
-          <p data-testid="classroom-archived-banner">
-            이 클래스는 보관되어 끝났습니다 — 새 가입과 새 제출은 받지 않지만, 지난 문제·제출물·판정은
-            그대로 볼 수 있습니다.
-          </p>
-          <button type="button" data-testid="classroom-unarchive" onClick={onToggle}>
-            보관 되돌리기
-          </button>
-        </>
+        <Note tone="attention">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span data-testid="classroom-archived-banner" className="flex-1">
+              이 클래스는 보관되어 끝났습니다 — 새 가입과 새 제출은 받지 않지만, 지난 문제·제출물·판정은
+              그대로 볼 수 있습니다.
+            </span>
+            <button
+              type="button"
+              data-testid="classroom-unarchive"
+              onClick={onToggle}
+              className={buttonClass("secondary", "sm")}
+            >
+              보관 되돌리기
+            </button>
+          </div>
+        </Note>
       ) : (
-        <>
-          <p>수업이 끝나면 보관합니다 — 새 가입과 새 제출만 닫히고, 언제든 되돌릴 수 있습니다.</p>
-          <button type="button" data-testid="classroom-archive" onClick={onToggle}>
+        <div className="flex flex-wrap items-center justify-between gap-3 text-[12.5px] text-ink/45">
+          <span>수업이 끝나면 보관합니다 — 새 가입과 새 제출만 닫히고, 언제든 되돌릴 수 있습니다.</span>
+          <button
+            type="button"
+            data-testid="classroom-archive"
+            onClick={onToggle}
+            className={buttonClass("secondary", "sm")}
+          >
             보관하기
           </button>
-        </>
+        </div>
       )}
       {archiveError ? (
-        <p data-testid="classroom-archive-error">
-          {archived ? "되돌리지" : "보관하지"} 못했습니다. 다시 시도해주세요.
-        </p>
+        <ErrorNote>
+          <span data-testid="classroom-archive-error">
+            {archived ? "되돌리지" : "보관하지"} 못했습니다. 다시 시도해주세요.
+          </span>
+        </ErrorNote>
       ) : null}
-    </section>
+    </div>
   );
 }
 
@@ -131,151 +177,218 @@ export default function ClassDetailPage() {
 
   if (classState.status === "loading") {
     return (
-      <main>
-        <p data-testid="classroom-detail-loading">불러오는 중...</p>
-      </main>
+      <PageShell>
+        <p data-testid="classroom-detail-loading" className="text-[13.5px] text-ink/45">불러오는 중...</p>
+      </PageShell>
     );
   }
 
   if (classState.status === "notFound") {
     return (
-      <main>
-        <h1 data-testid="classroom-detail-not-found">클래스를 찾을 수 없습니다</h1>
-      </main>
+      <PageShell>
+        <h1 data-testid="classroom-detail-not-found" className="text-[22px] font-semibold">
+          클래스를 찾을 수 없습니다
+        </h1>
+      </PageShell>
     );
   }
 
   if (classState.status === "error") {
     return (
-      <main>
-        <p data-testid="classroom-detail-error">클래스 정보를 불러오지 못했습니다.</p>
-      </main>
+      <PageShell>
+        <ErrorNote>
+          <span data-testid="classroom-detail-error">클래스 정보를 불러오지 못했습니다.</span>
+        </ErrorNote>
+      </PageShell>
     );
   }
 
+  const classroom = classState.classroom;
+
   return (
-    <main>
-      <h1 data-testid="classroom-detail-heading">{classState.classroom.name}</h1>
-      <p data-testid="classroom-detail-status">
-        {classState.classroom.archived ? "보관됨" : "진행중"}
-      </p>
-      <p data-testid="classroom-detail-created-at">
-        {new Date(classState.classroom.created_at).toLocaleDateString("ko-KR")} 만듦
-      </p>
-      <p>
-        <Link href={`/classes/${classId}/settings`} data-testid="scoring-settings-link">
-          채점 설정
-        </Link>
-      </p>
-      <p>
-        <button type="button" data-testid="copy-class-button" onClick={handleCopyClass} disabled={copying}>
-          {copying ? "복사하는 중..." : "복사해서 새 기수 열기"}
-        </button>
-      </p>
-      {copyError ? <p data-testid="copy-class-error">{copyError}</p> : null}
-
-      <ArchiveSection
-        archived={classState.classroom.archived}
-        archiveError={classState.archiveError}
-        onToggle={() => setArchived(!classState.classroom.archived)}
-      />
-
-      <JoinLinkSection
-        joinCode={classState.classroom.join_code}
-        regenerateError={classState.regenerateError}
-        onRegenerate={regenerateJoinCode}
-      />
-
-      <p>
-        <Link href={`/classes/${classId}/members`} data-testid="members-link">
-          참여자 명단
-        </Link>
-      </p>
-
-      {/* 클래스 상세의 두 탭(#290) — 「문제 중심」은 문제마다 달성률을 보여주고
-          (#289), 「참여자별 현황」은 참여자 × 문제 격자로 누가 막혔는지 보여준다.
-          같은 사실을 두 번 셈하지 않도록 달성률 값은 둘 다 백엔드의 같은
-          계산에서 나온다(#290 AC). */}
-      <div role="tablist" aria-label="클래스 상세 탭">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "problems"}
-          data-testid="detail-tab-problems"
-          onClick={() => setTab("problems")}
-        >
-          문제 중심
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "grid"}
-          data-testid="detail-tab-grid"
-          onClick={() => setTab("grid")}
-        >
-          참여자별 현황
-        </button>
-      </div>
-
-      {tab === "problems" ? (
-        <>
-          <h2>문제</h2>
-          <p>
-            <Link href={`/classes/${classId}/problems/new`} data-testid="new-problem-link">
-              새 문제
+    <PageShell>
+      <PageHeader
+        eyebrow="내 클래스"
+        title={classroom.name}
+        titleTestId="classroom-detail-heading"
+        description={
+          <span data-testid="classroom-detail-created-at">
+            <Num>{new Date(classroom.created_at).toLocaleDateString("ko-KR")}</Num> 만듦
+          </span>
+        }
+        actions={
+          <>
+            <span data-testid="classroom-detail-status">
+              <Badge tone={classroom.archived ? "neutral" : "verified"}>
+                {classroom.archived ? "보관됨" : "진행중"}
+              </Badge>
+            </span>
+            <Link href={`/classes/${classId}/members`} data-testid="members-link" className={buttonClass()}>
+              참여자 명단
             </Link>
-          </p>
+            <Link href={`/classes/${classId}/settings`} data-testid="scoring-settings-link" className={buttonClass()}>
+              채점 설정
+            </Link>
+            {/* 보관된 클래스에서는 이것이 주 행동이다 — 지난 기수를 복사해 다음
+                기수를 여는 것이 이 제품의 흔한 쓰임이다
+                (docs/design/classroom/README.md). */}
+            <button
+              type="button"
+              data-testid="copy-class-button"
+              onClick={handleCopyClass}
+              disabled={copying}
+              className={buttonClass(classroom.archived ? "primary" : "secondary")}
+            >
+              {copying ? "복사하는 중..." : "복사해서 새 기수 열기"}
+            </button>
+          </>
+        }
+      />
 
-          {problemsState.status === "loading" ? (
-            <p data-testid="problems-loading">불러오는 중...</p>
-          ) : problemsState.status === "error" ? (
-            <p data-testid="problems-error">문제 목록을 불러오지 못했습니다.</p>
-          ) : problemsState.problems.length === 0 ? (
-            <p data-testid="problems-empty-state">아직 만든 문제가 없습니다.</p>
+      <div className="flex flex-col gap-5">
+        {copyError ? (
+          <ErrorNote>
+            <span data-testid="copy-class-error">{copyError}</span>
+          </ErrorNote>
+        ) : null}
+
+        <ArchiveSection
+          archived={classroom.archived}
+          archiveError={classState.archiveError}
+          onToggle={() => setArchived(!classroom.archived)}
+        />
+
+        <JoinLinkSection
+          joinCode={classroom.join_code}
+          regenerateError={classState.regenerateError}
+          onRegenerate={regenerateJoinCode}
+        />
+
+        {/* 클래스 상세의 두 탭(#290) — 「문제 중심」은 문제마다 달성률을 보여주고
+            (#289), 「참여자별 현황」은 참여자 × 문제 격자로 누가 막혔는지 보여준다.
+            같은 사실을 두 번 셈하지 않도록 달성률 값은 둘 다 백엔드의 같은
+            계산에서 나온다(#290 AC). */}
+        <div>
+          <div role="tablist" aria-label="클래스 상세 탭" className="flex items-end gap-0.5 border-b border-rule">
+            {(
+              [
+                ["problems", "문제 중심", "detail-tab-problems"],
+                ["grid", "참여자별 현황", "detail-tab-grid"],
+              ] as const
+            ).map(([key, label, testId]) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={tab === key}
+                data-testid={testId}
+                onClick={() => setTab(key)}
+                className={
+                  tab === key
+                    ? "-mb-px border border-rule border-b-surface bg-surface px-4 py-2 text-[13.5px] font-medium"
+                    : "px-4 py-2 text-[13.5px] text-ink/60 hover:text-ink"
+                }
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {tab === "problems" ? (
+            <Card className="border-t-0">
+              <div className="flex items-center justify-between gap-3 border-b border-rule px-4 py-3">
+                <h2 className="text-[15px] font-semibold">문제</h2>
+                <Link
+                  href={`/classes/${classId}/problems/new`}
+                  data-testid="new-problem-link"
+                  className={buttonClass("primary", "sm")}
+                >
+                  새 문제
+                </Link>
+              </div>
+
+              {problemsState.status === "loading" ? (
+                <p data-testid="problems-loading" className="px-4 py-6 text-[13px] text-ink/45">
+                  불러오는 중...
+                </p>
+              ) : problemsState.status === "error" ? (
+                <div className="p-4">
+                  <ErrorNote>
+                    <span data-testid="problems-error">문제 목록을 불러오지 못했습니다.</span>
+                  </ErrorNote>
+                </div>
+              ) : problemsState.problems.length === 0 ? (
+                <EmptyState>
+                  <span data-testid="problems-empty-state">아직 만든 문제가 없습니다.</span>
+                </EmptyState>
+              ) : (
+                <>
+                  {problemsState.reorderError ? (
+                    <div className="p-4 pb-0">
+                      <ErrorNote>
+                        <span data-testid="problems-reorder-error">
+                          순서를 바꾸지 못했습니다. 다시 시도해주세요.
+                        </span>
+                      </ErrorNote>
+                    </div>
+                  ) : null}
+                  <ol data-testid="problems-list" className="divide-y divide-rule">
+                    {problemsState.problems.map((problem, index) => (
+                      <li
+                        key={problem.id}
+                        data-testid={`problem-row-${problem.id}`}
+                        className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3.5"
+                      >
+                        <span className="w-5 shrink-0 font-mono text-[12px] text-ink/30">{index + 1}</span>
+                        <Link
+                          href={`/classes/${classId}/problems/${problem.id}`}
+                          data-testid={`problem-row-${problem.id}-link`}
+                          className="min-w-0 flex-1 text-[14px] hover:underline"
+                        >
+                          {problem.title}
+                        </Link>
+                        <span data-testid={`problem-row-${problem.id}-status`} className="shrink-0">
+                          <Badge tone={problem.status === "open" ? "verified" : "neutral"}>
+                            {STATUS_LABEL[problem.status]}
+                          </Badge>
+                        </span>
+                        <span
+                          data-testid={`problem-row-${problem.id}-achievement-rate`}
+                          className="w-[110px] shrink-0 text-right font-mono text-[13px] text-ink/60"
+                        >
+                          달성률 {formatAchievementRate(problem)}
+                        </span>
+                        <span className="flex shrink-0 gap-1">
+                          <button
+                            type="button"
+                            data-testid={`problem-row-${problem.id}-move-up`}
+                            disabled={index === 0}
+                            onClick={() => move(problem.id, "up")}
+                            className={buttonClass("secondary", "sm")}
+                          >
+                            위로
+                          </button>
+                          <button
+                            type="button"
+                            data-testid={`problem-row-${problem.id}-move-down`}
+                            disabled={index === problemsState.problems.length - 1}
+                            onClick={() => move(problem.id, "down")}
+                            className={buttonClass("secondary", "sm")}
+                          >
+                            아래로
+                          </button>
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                </>
+              )}
+            </Card>
           ) : (
-            <>
-              {problemsState.reorderError ? (
-                <p data-testid="problems-reorder-error">순서를 바꾸지 못했습니다. 다시 시도해주세요.</p>
-              ) : null}
-              <ol data-testid="problems-list">
-                {problemsState.problems.map((problem, index) => (
-                  <li key={problem.id} data-testid={`problem-row-${problem.id}`}>
-                    <Link
-                      href={`/classes/${classId}/problems/${problem.id}`}
-                      data-testid={`problem-row-${problem.id}-link`}
-                    >
-                      {problem.title}
-                    </Link>
-                    <span data-testid={`problem-row-${problem.id}-status`}> · {STATUS_LABEL[problem.status]}</span>
-                    <span data-testid={`problem-row-${problem.id}-achievement-rate`}>
-                      {" "}
-                      · 달성률 {formatAchievementRate(problem)}
-                    </span>
-                    <button
-                      type="button"
-                      data-testid={`problem-row-${problem.id}-move-up`}
-                      disabled={index === 0}
-                      onClick={() => move(problem.id, "up")}
-                    >
-                      위로
-                    </button>
-                    <button
-                      type="button"
-                      data-testid={`problem-row-${problem.id}-move-down`}
-                      disabled={index === problemsState.problems.length - 1}
-                      onClick={() => move(problem.id, "down")}
-                    >
-                      아래로
-                    </button>
-                  </li>
-                ))}
-              </ol>
-            </>
+            <RosterGridTab classId={classId} />
           )}
-        </>
-      ) : (
-        <RosterGridTab classId={classId} />
-      )}
-    </main>
+        </div>
+      </div>
+    </PageShell>
   );
 }

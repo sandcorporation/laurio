@@ -8,6 +8,19 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
+import {
+  Badge,
+  Card,
+  CardHeader,
+  ErrorNote,
+  FieldLabel,
+  INPUT_CLASS,
+  Note,
+  Num,
+  PageHeader,
+  PageShell,
+  buttonClass,
+} from "@/app/components/ui";
 import { BackendError } from "@/lib/backend/client";
 import { setOpenAIKey, updateClass } from "@/lib/classes/api";
 import { useClass } from "@/lib/classes/use-class";
@@ -44,25 +57,27 @@ export default function ClassScoringSettingsPage() {
 
   if (state.status === "loading") {
     return (
-      <main>
-        <p data-testid="scoring-settings-loading">불러오는 중...</p>
-      </main>
+      <PageShell>
+        <p data-testid="scoring-settings-loading" className="text-[13.5px] text-ink/45">불러오는 중...</p>
+      </PageShell>
     );
   }
 
   if (state.status === "notFound") {
     return (
-      <main>
-        <h1 data-testid="scoring-settings-not-found">클래스를 찾을 수 없습니다</h1>
-      </main>
+      <PageShell>
+        <h1 data-testid="scoring-settings-not-found" className="text-[22px] font-semibold">클래스를 찾을 수 없습니다</h1>
+      </PageShell>
     );
   }
 
   if (state.status === "error") {
     return (
-      <main>
-        <p data-testid="scoring-settings-error">클래스 정보를 불러오지 못했습니다.</p>
-      </main>
+      <PageShell>
+        <ErrorNote>
+          <span data-testid="scoring-settings-error">클래스 정보를 불러오지 못했습니다.</span>
+        </ErrorNote>
+      </PageShell>
     );
   }
 
@@ -125,126 +140,226 @@ export default function ClassScoringSettingsPage() {
   }
 
   return (
-    <main>
-      <p>
-        <Link href={`/classes/${classId}`}>{classroom.name}(으)로 돌아가기</Link>
-      </p>
-      <h1>채점 설정</h1>
+    <PageShell>
+      <PageHeader
+        eyebrow={classroom.name}
+        title="채점 설정"
+        description="채점은 강사 본인의 키로 돕니다 — 플랫폼이 대신 내지 않습니다."
+        actions={
+          <Link href={`/classes/${classId}`} className={buttonClass()}>
+            클래스로 돌아가기
+          </Link>
+        }
+      />
 
-      <section>
-        <h2>채점 키</h2>
-        {classroom.has_openai_key ? (
-          <p data-testid="openai-key-status">
-            설정됨 ({classroom.openai_key_masked})
-          </p>
-        ) : (
-          <p data-testid="openai-key-status">
-            아직 설정되지 않았습니다 — 키가 없으면 이 클래스의 제출은 채점되지 않습니다.
-          </p>
-        )}
+      <div className="flex max-w-[820px] flex-col gap-5">
+        <Card>
+          <CardHeader title="채점 키" hint="이 클래스의 채점에만 쓰입니다" />
+          <div className="flex flex-col gap-4 p-4">
+            {classroom.has_openai_key ? (
+              <p data-testid="openai-key-status" className="flex items-center gap-2.5 text-[13.5px]">
+                <Badge tone="verified">설정됨</Badge>
+                <span className="font-mono text-ink/60">{classroom.openai_key_masked}</span>
+              </p>
+            ) : (
+              <p data-testid="openai-key-status" className="flex flex-wrap items-center gap-2.5 text-[13.5px]">
+                <Badge tone="attention">없음</Badge>
+                <span className="text-ink/60">키가 없으면 이 클래스의 제출은 채점되지 않습니다.</span>
+              </p>
+            )}
 
-        <form onSubmit={handleKeySubmit}>
-          <label htmlFor="openai-api-key">새 채점 키</label>
-          <input
-            id="openai-api-key"
-            data-testid="openai-key-input"
-            type="password"
-            value={apiKey}
-            onChange={(event) => setApiKey(event.target.value)}
-            required
-          />
-          <button type="submit" data-testid="openai-key-submit" disabled={keySaving || apiKey.trim() === ""}>
-            {keySaving ? "저장하는 중..." : "저장"}
-          </button>
-        </form>
-        {keyError ? <p data-testid="openai-key-error">{keyError}</p> : null}
-      </section>
-
-      <section>
-        <h2>기본 채점 모델</h2>
-        <p>문제가 자기 모델을 따로 갖지 않으면 이 값을 씁니다.</p>
-
-        {modelsState.status === "loading" ? (
-          <p data-testid="scoring-models-loading">불러오는 중...</p>
-        ) : modelsState.status === "error" ? (
-          <p data-testid="scoring-models-error">모델 목록을 불러오지 못했습니다.</p>
-        ) : (
-          <form onSubmit={handleModelSubmit}>
-            <label htmlFor="class-default-model">기본 모델</label>
-            <select
-              id="class-default-model"
-              data-testid="class-default-model-select"
-              value={defaultModel}
-              onChange={(event) => setDefaultModel(event.target.value)}
-            >
-              {modelsState.models.map((model) => (
-                <option key={model.id} value={model.id} data-testid={`scoring-model-option-${model.id}`}>
-                  {model.label} · 컨텍스트 {model.context_window.toLocaleString("ko-KR")} 토큰
-                </option>
-              ))}
-            </select>
-            <button type="submit" data-testid="class-default-model-submit" disabled={modelSaving}>
-              {modelSaving ? "저장하는 중..." : "저장"}
-            </button>
-          </form>
-        )}
-        {modelError ? <p data-testid="class-default-model-error">{modelError}</p> : null}
-      </section>
-
-      <section>
-        <h2>채점 예산</h2>
-        <p>
-          이 클래스의 채점이 강사님의 채점 키로 쓰는 토큰에 상한을 둡니다 —
-          한도에 닿으면 새 채점이 멈추고, 제출은 그대로 쌓여 예산을 채우면
-          순서대로 이어서 채점됩니다.
-        </p>
-
-        {classroom.token_budget === null ? (
-          <p data-testid="token-budget-status">예산이 설정되지 않았습니다 — 채점 사용량에 상한이 없습니다.</p>
-        ) : (
-          <p data-testid="token-budget-status">
-            사용량 {classroom.token_usage_total.toLocaleString("ko-KR")} /{" "}
-            {classroom.token_budget.toLocaleString("ko-KR")} 토큰 · 남은 양{" "}
-            {(classroom.token_budget_remaining ?? 0).toLocaleString("ko-KR")} 토큰
-            {classroom.token_budget_exhausted ? (
-              <strong data-testid="token-budget-exhausted-badge"> · 채점 정지 중(예산 소진)</strong>
+            <form onSubmit={handleKeySubmit} className="flex flex-col gap-2.5">
+              <label htmlFor="openai-api-key">
+                <FieldLabel>새 채점 키</FieldLabel>
+              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  id="openai-api-key"
+                  data-testid="openai-key-input"
+                  type="password"
+                  value={apiKey}
+                  onChange={(event) => setApiKey(event.target.value)}
+                  required
+                  className={`${INPUT_CLASS} min-w-[240px] flex-1 font-mono`}
+                  placeholder="sk-..."
+                />
+                <button
+                  type="submit"
+                  data-testid="openai-key-submit"
+                  disabled={keySaving || apiKey.trim() === ""}
+                  className={buttonClass("primary")}
+                >
+                  {keySaving ? "저장하는 중..." : "저장"}
+                </button>
+              </div>
+              <span className="text-[11.5px] leading-relaxed text-ink/45">
+                저장 뒤에는 다시 볼 수 없습니다 — 화면에도 로그에도 남지 않고, 채점 요청을 보낼
+                때만 복호화됩니다. 참여자에게는 어떤 형태로도 보이지 않습니다.
+              </span>
+            </form>
+            {keyError ? (
+              <ErrorNote>
+                <span data-testid="openai-key-error">{keyError}</span>
+              </ErrorNote>
             ) : null}
-          </p>
-        )}
+          </div>
+        </Card>
 
-        <form onSubmit={handleBudgetSubmit}>
-          <label htmlFor="token-budget-input">예산 한도(토큰)</label>
-          <input
-            id="token-budget-input"
-            data-testid="token-budget-input"
-            type="number"
-            min={1}
-            step={1}
-            value={tokenBudget}
-            onChange={(event) => setTokenBudget(event.target.value)}
-            placeholder="예: 1000000"
-          />
-          <label htmlFor="token-budget-warning-threshold-input">경고 임계(%)</label>
-          <input
-            id="token-budget-warning-threshold-input"
-            data-testid="token-budget-warning-threshold-input"
-            type="number"
-            min={1}
-            max={100}
-            step={1}
-            value={warningThreshold}
-            onChange={(event) => setWarningThreshold(event.target.value)}
-          />
-          <button
-            type="submit"
-            data-testid="token-budget-submit"
-            disabled={budgetSaving || tokenBudget.trim() === ""}
-          >
-            {budgetSaving ? "저장하는 중..." : "저장"}
-          </button>
-        </form>
-        {budgetError ? <p data-testid="token-budget-error">{budgetError}</p> : null}
-      </section>
-    </main>
+        <Card>
+          <CardHeader title="기본 채점 모델" hint="문제가 자기 모델을 갖지 않으면 이 값을 씁니다" />
+          <div className="flex flex-col gap-3 p-4">
+            {modelsState.status === "loading" ? (
+              <p data-testid="scoring-models-loading" className="text-[13px] text-ink/45">
+                불러오는 중...
+              </p>
+            ) : modelsState.status === "error" ? (
+              <ErrorNote>
+                <span data-testid="scoring-models-error">모델 목록을 불러오지 못했습니다.</span>
+              </ErrorNote>
+            ) : (
+              <form onSubmit={handleModelSubmit} className="flex flex-col gap-2.5">
+                <label htmlFor="class-default-model">
+                  <FieldLabel>기본 모델</FieldLabel>
+                </label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    id="class-default-model"
+                    data-testid="class-default-model-select"
+                    value={defaultModel}
+                    onChange={(event) => setDefaultModel(event.target.value)}
+                    className={`${INPUT_CLASS} min-w-[280px] flex-1`}
+                  >
+                    {modelsState.models.map((model) => (
+                      <option key={model.id} value={model.id} data-testid={`scoring-model-option-${model.id}`}>
+                        {model.label} · 컨텍스트 {model.context_window.toLocaleString("ko-KR")} 토큰
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="submit"
+                    data-testid="class-default-model-submit"
+                    disabled={modelSaving}
+                    className={buttonClass("primary")}
+                  >
+                    {modelSaving ? "저장하는 중..." : "저장"}
+                  </button>
+                </div>
+                <span className="text-[11.5px] leading-relaxed text-ink/45">
+                  모델마다 한 번에 받을 수 있는 소스의 양이 다릅니다 — 긴 문제에 작은 모델을 고르면
+                  소스 뒷부분이 잘린 채 채점됩니다.
+                </span>
+              </form>
+            )}
+            {modelError ? (
+              <ErrorNote>
+                <span data-testid="class-default-model-error">{modelError}</span>
+              </ErrorNote>
+            ) : null}
+          </div>
+        </Card>
+
+        <Card>
+          <CardHeader title="채점 예산" hint="한도에 닿으면 채점만 멈추고 제출은 쌓입니다" />
+          <div className="flex flex-col gap-4 p-4">
+            {classroom.token_budget === null ? (
+              <p data-testid="token-budget-status" className="text-[13.5px] text-ink/60">
+                예산이 설정되지 않았습니다 — 채점 사용량에 상한이 없습니다.
+              </p>
+            ) : (
+              <div data-testid="token-budget-status" className="flex flex-col gap-2">
+                <div className="flex flex-wrap items-baseline justify-between gap-2 text-[13px]">
+                  <span className="text-ink/60">사용량</span>
+                  <span className="font-mono">
+                    {classroom.token_usage_total.toLocaleString("ko-KR")} /{" "}
+                    {classroom.token_budget.toLocaleString("ko-KR")} 토큰
+                  </span>
+                </div>
+                <div className="h-1.5 w-full border border-rule bg-paper">
+                  <div
+                    className={classroom.token_budget_exhausted ? "h-full bg-attention" : "h-full bg-ink"}
+                    style={{
+                      width: `${Math.min(
+                        100,
+                        Math.round((classroom.token_usage_total / classroom.token_budget) * 100),
+                      )}%`,
+                    }}
+                  />
+                </div>
+                <div className="flex flex-wrap items-center gap-2.5 text-[12.5px] text-ink/45">
+                  <span>
+                    남은 양{" "}
+                    <Num className="text-ink/60">
+                      {(classroom.token_budget_remaining ?? 0).toLocaleString("ko-KR")}
+                    </Num>{" "}
+                    토큰
+                  </span>
+                  {classroom.token_budget_exhausted ? (
+                    <strong data-testid="token-budget-exhausted-badge" className="font-normal">
+                      <Badge tone="attention">채점 정지 중 · 예산 소진</Badge>
+                    </strong>
+                  ) : null}
+                </div>
+              </div>
+            )}
+
+            <form onSubmit={handleBudgetSubmit} className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="flex min-w-[200px] flex-1 flex-col gap-1.5">
+                  <label htmlFor="token-budget-input">
+                    <FieldLabel>예산 한도(토큰)</FieldLabel>
+                  </label>
+                  <input
+                    id="token-budget-input"
+                    data-testid="token-budget-input"
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={tokenBudget}
+                    onChange={(event) => setTokenBudget(event.target.value)}
+                    placeholder="예: 1000000"
+                    className={`${INPUT_CLASS} font-mono`}
+                  />
+                </div>
+                <div className="flex w-[150px] flex-col gap-1.5">
+                  <label htmlFor="token-budget-warning-threshold-input">
+                    <FieldLabel>경고 임계(%)</FieldLabel>
+                  </label>
+                  <input
+                    id="token-budget-warning-threshold-input"
+                    data-testid="token-budget-warning-threshold-input"
+                    type="number"
+                    min={1}
+                    max={100}
+                    step={1}
+                    value={warningThreshold}
+                    onChange={(event) => setWarningThreshold(event.target.value)}
+                    className={`${INPUT_CLASS} font-mono`}
+                  />
+                </div>
+                <button
+                  type="submit"
+                  data-testid="token-budget-submit"
+                  disabled={budgetSaving || tokenBudget.trim() === ""}
+                  className={buttonClass("primary")}
+                >
+                  {budgetSaving ? "저장하는 중..." : "저장"}
+                </button>
+              </div>
+              {budgetError ? (
+                <ErrorNote>
+                  <span data-testid="token-budget-error">{budgetError}</span>
+                </ErrorNote>
+              ) : null}
+            </form>
+
+            <Note>
+              임계에 닿으면 <b className="text-ink">서비스 안 알림</b>으로 알립니다 — 메일이나 문자가
+              아니라 이 서비스에 들어오면 보이는 알림입니다. 한도에 닿아도 제출은 계속 쌓이고,
+              예산을 채우면 쌓인 시도부터 순서대로 이어서 채점됩니다.
+            </Note>
+          </div>
+        </Card>
+      </div>
+    </PageShell>
   );
 }
