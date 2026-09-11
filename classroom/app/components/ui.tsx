@@ -63,6 +63,19 @@ export function CardHeader({ title, hint }: { title: string; hint?: ReactNode })
   );
 }
 
+/** 카드 밖에 홀로 서는 섹션 머리글 — 제목만 `<h2>` 에 담고, 옆 텍스트(개수든
+ *  문장이든)는 형제 `<span>` 으로 둔다(#321). 화면 낭독기는 머리글 목록을 훑어
+ *  건너뛰는데, 부제 문장이 `<h2>` 안에 있으면 그 목록에 문장 하나가 머리글인 척
+ *  끼어들어 목록이 못 쓰게 된다 — `title` 만 읽히게 갈라 둔다. */
+export function SectionHeading({ title, hint }: { title: string; hint?: ReactNode }) {
+  return (
+    <div className="text-[15px] font-semibold">
+      <h2 className="inline">{title}</h2>
+      {hint ? <span className="font-normal text-ink/45"> {hint}</span> : null}
+    </div>
+  );
+}
+
 /** 아직 아무것도 없을 때. 「0」이 아니라 「아직 없다」라고 말한다. */
 export function EmptyState({ children }: { children: ReactNode }) {
   return <div className="px-4 py-10 text-center text-[13.5px] text-ink/45">{children}</div>;

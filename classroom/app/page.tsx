@@ -7,7 +7,16 @@
 // 같은 이유, ADR-0015) — 클라이언트 컴포넌트로 목록을 받아온다.
 import Link from "next/link";
 
-import { Card, EmptyState, ErrorNote, Num, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
+import {
+  Card,
+  EmptyState,
+  ErrorNote,
+  Num,
+  PageHeader,
+  PageShell,
+  SectionHeading,
+  buttonClass,
+} from "@/app/components/ui";
 import type { ClassRow } from "@/lib/classes/api";
 import { useMyClasses } from "@/lib/classes/use-my-classes";
 
@@ -116,9 +125,7 @@ export default function ClassroomHome() {
           return (
             <div className="flex flex-col gap-7">
               <section className="flex flex-col gap-2.5">
-                <h2 className="text-[15px] font-semibold">
-                  진행중 <span className="font-normal text-ink/45">{ongoing.length}</span>
-                </h2>
+                <SectionHeading title="진행중" hint={ongoing.length} />
                 {ongoing.length === 0 ? (
                   <Card>
                     <EmptyState>
@@ -133,12 +140,10 @@ export default function ClassroomHome() {
               </section>
 
               <section className="flex flex-col gap-2.5">
-                <h2 className="text-[15px] font-semibold">
-                  보관{" "}
-                  <span className="font-normal text-ink/45">
-                    새로 가입하거나 제출할 수는 없지만, 지난 기록은 그대로 볼 수 있습니다
-                  </span>
-                </h2>
+                <SectionHeading
+                  title="보관"
+                  hint="새로 가입하거나 제출할 수는 없지만, 지난 기록은 그대로 볼 수 있습니다"
+                />
                 {archived.length === 0 ? (
                   <Card>
                     <EmptyState>
