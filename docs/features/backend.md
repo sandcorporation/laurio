@@ -183,6 +183,13 @@ ADR-0036). 업로드 자료의 값은 `submission:{공모전id}:{개발자id}:{�
 | `POST .../problems/{id}/submissions` | 참여자가 소스 또는 저장소로 낸다 — 낼 때마다 새 시도가 쌓인다(#286) |
 | `POST .../problems/{id}/copy` | 문제를 자기 다른 클래스로 복사한다 — 체크리스트·채점 설정은 따라오고 제출물·시도·Score는 없다, 복사본은 언제나 초안이다(#292) |
 | `POST /api/classroom/classes/{id}/copy` | 클래스를 복사해 다음 기수를 연다 — 문제·체크리스트·채점 설정이 순서대로 따라오고 참여자·제출물·Score·OpenAI 키는 따라오지 않는다(#293) |
+| `POST .../problems/{id}/publish-template` | 문제를 공개 시점의 사본(템플릿)으로 뜬다 — 원본을 고치거나 지워도 바뀌지 않는다, 채점 모델은 담기지 않는다(#316) |
+| `GET /api/classroom/problem-templates` | 공개된 템플릿을 제목 검색·최신순으로 찾는다, 페이지네이션(#318) |
+| `GET .../problem-templates/mine` | 내가 올린 템플릿 전부(내려간 것 포함) — 내리기 화면이 여기서 고른다(#316) |
+| `GET .../problem-templates/{shareCode}` | 가져오기 전 미리보기 — 내려간 템플릿은 404(#316) |
+| `POST .../problem-templates/{shareCode}/import` | 자기 클래스로 가져온다 — 체크리스트는 순서대로 오고 채점 모델은 대상 클래스의 기본값을 따른다(#316) |
+| `POST .../problem-templates/{shareCode}/takedown` | 올린 사람이 자기 템플릿을 내린다 — 이미 가져간 사람의 것은 그대로다(#316) |
+| `POST .../problem-templates/{shareCode}/report` | 부적절한 템플릿을 신고한다 — 자기 것은 신고 대상이 아니고, 같은 사람의 중복 신고는 한 건으로 센다(#320) |
 
 **Class·Problem·체크리스트는 강사 전용이다.** 강사가 아닌 요청은 그 클래스가 아예
 없는 것처럼 404를 받는다 — 403이 아니다, 목록에도 상세에도 존재를 드러내지 않는다.

@@ -37,6 +37,17 @@ class Class(models.Model):
     )
     name = models.CharField(max_length=200)
 
+    #: 강사가 **이 클래스에서** 불릴 이름(#299) — `ClassMember.display_name`과
+    #: 같은 이유로 계정의 표시 이름과 독립이다(회사 수업과 스터디에서 다른
+    #: 이름을 쓸 수 있어야 한다). 가입 미리보기에서만 쓰인다: 참여자 명단·
+    #: 제출물에서 강사가 보이는 이름은 여전히 `ClassMember.display_name`이다
+    #: (강사 본인이 참여자로도 들어와 있을 때 이름이 둘로 갈리는 지점).
+    #: 새로 만드는 클래스는 API가 빈 문자열을 거부해 반드시 채워지지만, 이
+    #: 필드가 생기기 전에 만들어진 클래스는 마이그레이션이 값을 지어내지
+    #: 않아 빈 문자열로 남는다 — 그 경우 가입 미리보기는 이 줄 자체를
+    #: 생략한다.
+    instructor_display_name = models.CharField(max_length=100, blank=True, default="")
+
     #: 채점이 실제로 쓰는 강사 본인의 OpenAI 키(#284). `core.crypto.encrypt`로
     #: 암호화된 값만 여기 남는다 — 평문은 저장하지 않는다. 빈 문자열이면
     #: 키가 없다는 뜻이다.
@@ -283,6 +294,199 @@ class ClassroomScore(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"ClassroomScore(submission={self.submission_id})"
+
+
+class ProblemTemplate(models.Model):
+    """문제 하나를 공개한 시점의 **사본**(#316, #312 Implementation Decisions
+    「템플릿 공유」). `Problem`·`Class`를 가리키지 않는다 — 원본을 고치거나
+    지워도 이 행은 바뀌지 않는다는 약속이 FK 부재로 구조에 박혀 있다(판·
+    갱신 알림·원본 연결은 Out of Scope).
+
+    **`model`을 담지 않는다.** 필드 자체가 없다 — 가져간 사람이 남이 고른
+    비싼 모델의 청구서를 자기 키로 받는 사고를 구조로 막는다(#316 AC).
+
+    `publisher_display_name`은 계정 표시 이름이 아니라 공개할 때 직접 적는
+    값이다 — 의도하지 않은 이름이 나가거나 탈퇴로 사라지는 것을 막는다.
+    """
+
+    published_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="problem_templates", on_delete=models.CASCADE
+    )
+    publisher_display_name = models.CharField(max_length=100)
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True, default="")
+    submission_format = models.CharField(max_length=20, choices=Problem.SubmissionFormat.choices)
+
+    #: 추측 불가능한 공유 코드 — 가입 링크와 같은 모양, 같은 생성기다(#316
+    #: Implementation Decisions "가입 링크와 같은 모양").
+    share_code = models.CharField(max_length=32, unique=True, default=_generate_join_code)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    #: 올린 사람의 자진 내림 또는 운영자의 판단으로 내려간 시각(#316/#320).
+    #: null이면 공개 중이다. 지우지 않고 이 값만 켜는 이유는 감사 기록(누가
+    #: 신고했고 운영자가 무엇을 판단했는지)이 대상 행을 잃지 않아야 하기
+    #: 때문이다 — `Class.archived_at`과 같은 관용구.
+    taken_down_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ProblemTemplate(id={self.pk}, title={self.title!r})"
+
+
+class ProblemTemplateChecklistItem(models.Model):
+    """공개 시점 체크리스트 사본 한 줄 — `ChecklistItem`과 같은 모양이지만
+    독립 테이블이다(`ProblemTemplate`이 `Problem`을 가리키지 않는 것과 같은
+    이유)."""
+
+    template = models.ForeignKey(
+        ProblemTemplate, related_name="checklist_items", on_delete=models.CASCADE
+    )
+    label = models.CharField(max_length=200)
+    required = models.BooleanField(default=True)
+    order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["order", "id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ProblemTemplateChecklistItem(id={self.pk}, label={self.label!r})"
+
+
+class ProblemTemplateReport(models.Model):
+    """부적절한 템플릿 신고 하나(#320). 자기 템플릿은 신고 대상이 아니다 —
+    그건 올린 사람이 직접 내리면 된다(API가 강제한다).
+
+    **같은 사람이 같은 템플릿을 여러 번 신고해도 한 건으로 센다**(AC) — 그
+    보장은 unique 제약이 진다, API는 두 번째 신고를 조용히 기존 행으로
+    합친다(`get_or_create`).
+    """
+
+    template = models.ForeignKey(ProblemTemplate, related_name="reports", on_delete=models.CASCADE)
+    reporter = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="problem_template_reports", on_delete=models.CASCADE
+    )
+    reason = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["template", "reporter"], name="unique_problem_template_report"
+            )
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ProblemTemplateReport(template={self.template_id}, reporter={self.reporter_id})"
+
+
+class ProblemTemplateModerationDecision(models.Model):
+    """신고된 템플릿에 대한 운영자의 판단(#320) — `appeals.AppealRuling`과
+    같은 이유로 신고와 분리된 감사 기록이다. 「내림」과 「기각」 둘 다 이
+    테이블에 남는다 — 기각도 판단이고, 판단이면 누가·언제·왜가 남아야
+    한다(AC).
+
+    두 FK 모두 PROTECT다 — `AppealRuling`과 같은 이유로, 대상이나 판단자
+    계정을 지우는 것만으로 「누가 왜 내렸는가」가 사라지면 안 된다.
+    """
+
+    class Decision(models.TextChoices):
+        TAKEDOWN = "takedown", "내림"
+        DISMISS = "dismiss", "기각"
+
+    template = models.ForeignKey(
+        ProblemTemplate, related_name="moderation_decisions", on_delete=models.PROTECT
+    )
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="problem_template_moderation_decisions",
+        on_delete=models.PROTECT,
+    )
+    decision = models.CharField(max_length=16, choices=Decision.choices)
+    note = models.TextField()
+    decided_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ["-decided_at"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ProblemTemplateModerationDecision(template={self.template_id}, decision={self.decision})"
+
+
+class ClassTemplate(models.Model):
+    """클래스 하나를 공개한 시점의 **사본**(#319, #312 Implementation Decisions
+    「템플릿 공유」) — `ProblemTemplate`과 같은 이유로 `Class`를 가리키지
+    않는다. 문제 사이의 순서도 커리큘럼의 일부라 `ClassTemplateProblem.order`로
+    함께 담는다.
+
+    **채점 모델을 담지 않는다** — `ProblemTemplate`과 같은 이유로 필드 자체가
+    없다(가져간 사람이 남이 고른 모델의 청구서를 자기 키로 받는 사고를 구조로
+    막는다). 참여자·제출물·판정·가입 코드·OpenAI 키도 이 모델이 애초에 모르는
+    것들이다.
+    """
+
+    published_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="class_templates", on_delete=models.CASCADE
+    )
+    publisher_display_name = models.CharField(max_length=100)
+    #: 공개 시점 클래스 이름의 사본 — 가져가는 사람이 자기 클래스 이름을
+    #: 새로 정하므로(AC), 이 값은 미리보기에만 쓰인다.
+    name = models.CharField(max_length=200)
+
+    #: 추측 불가능한 공유 코드 — `ProblemTemplate.share_code`와 같은 모양,
+    #: 같은 생성기다.
+    share_code = models.CharField(max_length=32, unique=True, default=_generate_join_code)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    #: `ProblemTemplate.taken_down_at`과 같은 관용구 — 올린 사람의 자진 내림
+    #: 또는 운영자의 판단으로 내려간 시각. null이면 공개 중이다.
+    taken_down_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ClassTemplate(id={self.pk}, name={self.name!r})"
+
+
+class ClassTemplateProblem(models.Model):
+    """공개 시점 클래스 안 문제 하나의 사본 — `Problem`을 가리키지 않는다
+    (`ClassTemplate`이 `Class`를 가리키지 않는 것과 같은 이유). `order`가
+    클래스 안에서의 순서를 그대로 지킨다."""
+
+    template = models.ForeignKey(
+        ClassTemplate, related_name="problems", on_delete=models.CASCADE
+    )
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True, default="")
+    submission_format = models.CharField(max_length=20, choices=Problem.SubmissionFormat.choices)
+    order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["order", "id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ClassTemplateProblem(id={self.pk}, title={self.title!r})"
+
+
+class ClassTemplateProblemChecklistItem(models.Model):
+    """`ClassTemplateProblem` 하나의 체크리스트 사본 한 줄 —
+    `ProblemTemplateChecklistItem`과 같은 모양이지만 독립 테이블이다."""
+
+    problem = models.ForeignKey(
+        ClassTemplateProblem, related_name="checklist_items", on_delete=models.CASCADE
+    )
+    label = models.CharField(max_length=200)
+    required = models.BooleanField(default=True)
+    order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["order", "id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ClassTemplateProblemChecklistItem(id={self.pk}, label={self.label!r})"
 
 
 class ClassroomScoringAttempt(models.Model):

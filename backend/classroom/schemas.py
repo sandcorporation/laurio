@@ -11,10 +11,16 @@ class ErrorOut(Schema):
 
 class ClassIn(Schema):
     name: str = Field(min_length=1, max_length=200)
+    #: 강사가 이 클래스에서 불릴 이름(#299) — 비워서 만들 수 없다. 가입
+    #: 미리보기에 강사 이메일 대신 뜬다.
+    instructor_display_name: str = Field(min_length=1, max_length=100)
 
 
 class ClassPatchIn(Schema):
     name: str | None = Field(default=None, min_length=1, max_length=200)
+    #: 클래스 설정에서 고친다(#299). 필드를 생략하면 바꾸지 않는다 — 기존
+    #: PATCH 관례 그대로다.
+    instructor_display_name: str | None = Field(default=None, min_length=1, max_length=100)
     default_model: str | None = None
     #: 채점 토큰 예산 상한(#295). 필드를 생략하면(`None`) 바꾸지 않는다 —
     #: 기존 PATCH 관례 그대로다. 이 API에는 "다시 무제한으로 되돌리는" 값이
@@ -27,6 +33,9 @@ class ClassPatchIn(Schema):
 class ClassOut(Schema):
     id: int
     name: str
+    #: 빈 문자열이면(#299) 이 필드가 생기기 전에 만들어진 클래스다 — 가입
+    #: 미리보기가 그 줄을 생략한다.
+    instructor_display_name: str
     join_code: str
     created_at: datetime
     default_model: str
@@ -128,7 +137,10 @@ class ProblemReorderIn(Schema):
 
 class JoinPreviewOut(Schema):
     class_name: str
-    instructor_email: str
+    #: 강사가 이 클래스에서 불릴 이름으로 정한 값(#299) — 강사 이메일은
+    #: 응답 어디에도 싣지 않는다. `None`이면(이 필드가 생기기 전에 만들어진
+    #: 클래스, 아직 강사가 정하지 않음) 화면이 이 줄 자체를 생략한다.
+    instructor_display_name: str | None = None
     problem_count: int
     participant_count: int
     #: 보관된 클래스인가(#294). 죽은 링크(404)와 달리 미리보기 자체는 계속
@@ -300,3 +312,111 @@ class ClassroomProblemListItemOut(Schema):
     passed: bool
 class ProblemCopyIn(Schema):
     target_class_id: int
+
+
+# --- 템플릿 (#316/#318/#320) -----------------------------------------------------
+
+
+class PublishTemplateIn(Schema):
+    #: 계정 표시 이름을 끌어오지 않는다 — 공개할 때 직접 적는다(#316 AC).
+    publisher_display_name: str = Field(min_length=1, max_length=100)
+
+
+class ProblemTemplateChecklistItemOut(Schema):
+    label: str
+    required: bool
+    order: int
+
+
+class ProblemTemplateOut(Schema):
+    id: int
+    share_code: str
+    title: str
+    description: str
+    submission_format: str
+    publisher_display_name: str
+    created_at: datetime
+    taken_down: bool = False
+    checklist_items: list[ProblemTemplateChecklistItemOut] = []
+    #: 보는 사람이 올린 사람 본인인가 — 화면이 「신고」 대신 「내리기」를
+    #: 보여줄지 정하는 자리(#320 AC "자기 템플릿은 신고 대상이 아니다").
+    is_mine: bool = False
+
+
+class ProblemTemplateListItemOut(Schema):
+    """검색 목록 한 줄(#318 AC) — 제목·올린 사람·올린 날짜만."""
+
+    share_code: str
+    title: str
+    publisher_display_name: str
+    created_at: datetime
+
+
+class ImportTemplateIn(Schema):
+    target_class_id: int
+
+
+class ReportTemplateIn(Schema):
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class ReportResultOut(Schema):
+    reported: bool = True
+
+
+class ReportedTemplateOut(Schema):
+    """운영자 신고 목록 한 줄(#320 AC "내용·신고 사유·신고 수")."""
+
+    id: int
+    title: str
+    description: str
+    submission_format: str
+    publisher_display_name: str
+    report_count: int
+    report_reasons: list[str]
+    taken_down: bool
+
+
+class ModerationDecisionIn(Schema):
+    decision: str  # "takedown" | "dismiss" — appeals.schemas.AppealRulingIn과 같은 관용구
+    note: str = Field(min_length=1, max_length=2000)
+
+
+# --- 클래스 템플릿 (#319) -----------------------------------------------------
+
+
+class ClassTemplateProblemOut(Schema):
+    title: str
+    description: str
+    submission_format: str
+    order: int
+    checklist_items: list[ProblemTemplateChecklistItemOut] = []
+
+
+class ClassTemplateOut(Schema):
+    id: int
+    share_code: str
+    name: str
+    publisher_display_name: str
+    created_at: datetime
+    taken_down: bool = False
+    problems: list[ClassTemplateProblemOut] = []
+    #: 미리보기가 가져오기 전에 몇 개의 문제가 들어 있는지를 바로 말해주는
+    #: 자리(#319 AC) — `len(problems)`와 같은 값이다.
+    problem_count: int = 0
+    is_mine: bool = False
+
+
+class ClassTemplateListItemOut(Schema):
+    """검색 목록 한 줄 — `ProblemTemplateListItemOut`과 같은 모양이다."""
+
+    share_code: str
+    name: str
+    publisher_display_name: str
+    created_at: datetime
+
+
+class ImportClassTemplateIn(Schema):
+    #: 가져가는 사람이 새 클래스에 붙일 이름(#319 AC "이름을 정할 수 있다") —
+    #: 원본 이름을 그대로 쓰지 않는다.
+    name: str = Field(min_length=1, max_length=200)

@@ -121,13 +121,17 @@ export default function JoinPage() {
       <h1 data-testid="join-preview-heading" className="mt-1.5 text-[21px] font-semibold leading-snug">
         {info.class_name}
       </h1>
-      <p className="mt-2 text-[13px] text-ink/60">
-        <span data-testid="join-preview-instructor">강사 {info.instructor_email}</span>
-        {" · "}
+      <p className="mt-2 flex flex-wrap items-center gap-x-1.5 text-[13px] text-ink/60">
+        {info.instructor_display_name ? (
+          <>
+            <span data-testid="join-preview-instructor">강사 {info.instructor_display_name}</span>
+            <span aria-hidden>·</span>
+          </>
+        ) : null}
         <span data-testid="join-preview-problem-count">
           문제 <Num>{info.problem_count}</Num>개
         </span>
-        {" · "}
+        <span aria-hidden>·</span>
         <span data-testid="join-preview-participant-count">
           참여자 <Num>{info.participant_count}</Num>명
         </span>

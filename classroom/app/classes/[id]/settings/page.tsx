@@ -40,6 +40,10 @@ export default function ClassScoringSettingsPage() {
   const [modelSaving, setModelSaving] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
 
+  const [instructorDisplayName, setInstructorDisplayName] = useState("");
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
+
   const [tokenBudget, setTokenBudget] = useState("");
   const [warningThreshold, setWarningThreshold] = useState("");
   const [budgetSaving, setBudgetSaving] = useState(false);
@@ -48,6 +52,7 @@ export default function ClassScoringSettingsPage() {
   useEffect(() => {
     if (state.status === "ready") {
       setDefaultModel(state.classroom.default_model);
+      setInstructorDisplayName(state.classroom.instructor_display_name);
       setTokenBudget(
         state.classroom.token_budget === null ? "" : String(state.classroom.token_budget),
       );
@@ -95,6 +100,20 @@ export default function ClassScoringSettingsPage() {
       setKeyError(err instanceof BackendError ? err.message : "키를 저장하지 못했습니다.");
     } finally {
       setKeySaving(false);
+    }
+  }
+
+  async function handleNameSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setNameSaving(true);
+    setNameError(null);
+    try {
+      await updateClass(classId, { instructor_display_name: instructorDisplayName.trim() });
+      reload();
+    } catch (err) {
+      setNameError(err instanceof BackendError ? err.message : "강사 이름을 저장하지 못했습니다.");
+    } finally {
+      setNameSaving(false);
     }
   }
 
@@ -153,6 +172,44 @@ export default function ClassScoringSettingsPage() {
       />
 
       <div className="flex max-w-[820px] flex-col gap-5">
+        <Card>
+          <CardHeader title="강사 이름" hint="가입 미리보기에서 이 이름으로 보입니다" />
+          <div className="flex flex-col gap-3 p-4">
+            <form onSubmit={handleNameSubmit} className="flex flex-col gap-2.5">
+              <label htmlFor="class-instructor-display-name-input">
+                <FieldLabel>이 클래스에서 불릴 이름</FieldLabel>
+              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  id="class-instructor-display-name-input"
+                  data-testid="class-instructor-display-name-input"
+                  value={instructorDisplayName}
+                  onChange={(event) => setInstructorDisplayName(event.target.value)}
+                  required
+                  className={`${INPUT_CLASS} min-w-[240px] flex-1`}
+                />
+                <button
+                  type="submit"
+                  data-testid="class-instructor-display-name-submit"
+                  disabled={nameSaving || instructorDisplayName.trim() === ""}
+                  className={buttonClass("primary")}
+                >
+                  {nameSaving ? "저장하는 중..." : "저장"}
+                </button>
+              </div>
+              <span className="text-[11.5px] leading-relaxed text-ink/45">
+                참여자 명단과 제출물에 보이는 이름과는 별개입니다 — 그곳은 참여자 본인이 정한
+                이름을 그대로 씁니다.
+              </span>
+            </form>
+            {nameError ? (
+              <ErrorNote>
+                <span data-testid="class-instructor-display-name-error">{nameError}</span>
+              </ErrorNote>
+            ) : null}
+          </div>
+        </Card>
+
         <Card>
           <CardHeader title="채점 키" hint="이 클래스의 채점에만 쓰입니다" />
           <div className="flex flex-col gap-4 p-4">

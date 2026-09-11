@@ -23,6 +23,7 @@ import type { FormEvent } from "react";
 
 import { BackendError } from "@/lib/backend/client";
 import { useMyClasses } from "@/lib/classes/use-my-classes";
+import { publishProblemAsTemplate, type ProblemTemplateRow } from "@/lib/problem-templates/api";
 import {
   copyProblem,
   createChecklistItem,
@@ -61,6 +62,11 @@ export default function EditProblemPage() {
   const [targetClassId, setTargetClassId] = useState("");
   const [copying, setCopying] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
+
+  const [publisherDisplayName, setPublisherDisplayName] = useState("");
+  const [publishing, setPublishing] = useState(false);
+  const [publishError, setPublishError] = useState<string | null>(null);
+  const [publishedTemplate, setPublishedTemplate] = useState<ProblemTemplateRow | null>(null);
 
   useEffect(() => {
     if (state.status === "ready") {
@@ -188,6 +194,20 @@ export default function EditProblemPage() {
       setCopyError("문제를 복사하지 못했습니다. 잠시 후 다시 시도해주세요.");
     } finally {
       setCopying(false);
+    }
+  }
+
+  async function handlePublish(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPublishError(null);
+    setPublishing(true);
+    try {
+      const template = await publishProblemAsTemplate(classId, problemId, publisherDisplayName.trim());
+      setPublishedTemplate(template);
+    } catch {
+      setPublishError("템플릿으로 공개하지 못했습니다. 잠시 후 다시 시도해주세요.");
+    } finally {
+      setPublishing(false);
     }
   }
 
@@ -554,6 +574,58 @@ export default function EditProblemPage() {
                 <span className="text-[11.5px] leading-relaxed text-ink/45">
                   체크리스트와 채점 설정이 함께 옵니다. 제출물·점수는 따라오지 않고, 복사본은
                   대상 클래스에서 초안으로 들어옵니다.
+                </span>
+              </div>
+            </Card>
+
+            <Card>
+              <CardHeader title="템플릿으로 공개" hint="다른 강사에게 공유" />
+              <div className="flex flex-col gap-2.5 p-4">
+                {publishedTemplate ? (
+                  <div className="flex flex-col gap-2">
+                    <p data-testid="publish-template-done" className="text-[13px] leading-relaxed">
+                      공개되었습니다. 아래 주소를 다른 강사에게 전달하세요.
+                    </p>
+                    <Link
+                      href={`/templates/${publishedTemplate.share_code}`}
+                      data-testid="publish-template-share-link"
+                      className="break-all border border-rule bg-surface px-3 py-2 font-mono text-[12.5px] hover:underline"
+                    >
+                      /templates/{publishedTemplate.share_code}
+                    </Link>
+                  </div>
+                ) : (
+                  <form onSubmit={handlePublish} className="flex flex-col gap-2.5">
+                    <label htmlFor="publish-template-name">
+                      <FieldLabel>공개할 때 보일 이름</FieldLabel>
+                    </label>
+                    <input
+                      id="publish-template-name"
+                      data-testid="publish-template-name-input"
+                      value={publisherDisplayName}
+                      onChange={(event) => setPublisherDisplayName(event.target.value)}
+                      required
+                      placeholder="계정 이름과 달라도 됩니다"
+                      className={INPUT_CLASS}
+                    />
+                    <button
+                      type="submit"
+                      data-testid="publish-template-submit"
+                      disabled={publishing || publisherDisplayName.trim() === ""}
+                      className={buttonClass("secondary")}
+                    >
+                      {publishing ? "공개하는 중..." : "템플릿으로 공개"}
+                    </button>
+                  </form>
+                )}
+                {publishError ? (
+                  <ErrorNote>
+                    <span data-testid="publish-template-error">{publishError}</span>
+                  </ErrorNote>
+                ) : null}
+                <span className="text-[11.5px] leading-relaxed text-ink/45">
+                  공개하는 순간 사본이 떠집니다 — 이후 이 문제를 고치거나 클래스를 지워도
+                  템플릿은 그대로입니다. 채점 모델은 담기지 않습니다.
                 </span>
               </div>
             </Card>

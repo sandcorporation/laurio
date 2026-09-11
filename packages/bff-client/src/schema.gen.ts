@@ -869,6 +869,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/problems/{problem_id}/publish-template": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish Template
+         * @description 자기 문제를 템플릿으로 공개한다(#316). 원본 소유권 검사는 강사 전용
+         *     엔드포인트와 같은 `_get_owned_class_or_404`/`_get_owned_problem_or_404`를
+         *     그대로 쓴다 — 남의 문제면 404다.
+         */
+        post: operations["classroom_template_api_publish_template"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/problems/{problem_id}/submissions": {
         parameters: {
             query?: never;
@@ -983,6 +1005,145 @@ export interface paths {
          *     사실을 403으로 정직하게 답한다.
          */
         post: operations["classroom_api_join_class"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/problem-templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Problem Templates
+         * @description 제목 검색 + 최신순뿐이다(#318 — 분류 체계를 만들지 않는다). 내려진
+         *     템플릿은 나오지 않는다.
+         */
+        get: operations["classroom_template_api_list_problem_templates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/problem-templates/mine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List My Problem Templates
+         * @description 내가 올린 템플릿 전부(내린 것 포함) — 내리기 화면이 여기서 고른다.
+         *     정적 세그먼트라 `/{share_code}`보다 먼저 등록한다(파일 상단 docstring).
+         */
+        get: operations["classroom_template_api_list_my_problem_templates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/problem-templates/{share_code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Problem Template
+         * @description 가져오기 전 미리보기(#316 AC) — 제목·설명·체크리스트를 본다.
+         *
+         *     **올린 사람 본인에게는 내려간 뒤에도 보인다** — 그러지 않으면 「내리기」
+         *     버튼을 누른 직후 관리 화면 대신 「더 이상 사용할 수 없습니다」로 튕겨
+         *     자기 것을 확인할 길이 사라진다(`/problem-templates/mine`과 같은 예외,
+         *     코드리뷰 지적). 남에게는 그대로 404다.
+         */
+        get: operations["classroom_template_api_get_problem_template"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/problem-templates/{share_code}/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Template
+         * @description 자기 클래스로 가져온다(#316) — 가져온 문제는 초안이고, 체크리스트는
+         *     순서 그대로 따라오며, 채점 모델은 대상 클래스의 기본값을 따른다.
+         *
+         *     **보관된 클래스로는 가져올 수 없다** — 보관은 새 가입·새 제출만 막는
+         *     것이 아니라 그 클래스에 새 내용이 생기는 길 전체를 닫는다는 뜻이다
+         *     (`join_class`·`create_classroom_submission`과 같은 403, `Class.
+         *     archived_at` docstring).
+         */
+        post: operations["classroom_template_api_import_template"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/problem-templates/{share_code}/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report Template
+         * @description 부적절한 템플릿을 신고한다(#320). 자기 템플릿은 신고 대상이 아니다 —
+         *     내리면 된다(AC). 같은 사람이 같은 템플릿을 여러 번 신고해도 한 건으로
+         *     센다 — 두 번째 신고는 첫 신고 행을 그대로 둔다(unique 제약, 모델
+         *     docstring 참고).
+         */
+        post: operations["classroom_template_api_report_template"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/problem-templates/{share_code}/takedown": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Takedown Own Template
+         * @description 올린 사람이 자기 템플릿을 내린다(#316 AC) — 남의 템플릿은 404다(존재를
+         *     알려주지 않는다, 이 앱의 다른 소유권 검사와 같은 이유). 이미 가져간
+         *     사람의 것은 그대로다 — 사본이기 때문이다. 이미 내려간 템플릿을 다시
+         *     내려도 오류를 내지 않는다(멱등, `archive_class`와 같은 관용구).
+         */
+        post: operations["classroom_template_api_takedown_own_template"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2370,6 +2531,47 @@ export interface paths {
         put?: never;
         /** Deactivate Category Endpoint */
         post: operations["contests_operator_api_deactivate_category_endpoint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/classroom/problem-templates/reported": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Reported Templates
+         * @description 운영자가 확인할 신고 큐(#320 AC "내용·신고 사유·신고 수를 본다").
+         */
+        get: operations["classroom_template_operator_api_list_reported_templates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/classroom/problem-templates/{template_id}/moderate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Moderate Template
+         * @description 운영자가 내리거나(「takedown」) 신고를 기각한다(「dismiss」). 둘 다
+         *     이유를 반드시 남긴다 — 판단이면 누가·언제·왜가 남아야 한다(AC).
+         */
+        post: operations["classroom_template_operator_api_moderate_template"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3979,6 +4181,8 @@ export interface components {
         };
         /** ClassIn */
         ClassIn: {
+            /** Instructor Display Name */
+            instructor_display_name: string;
             /** Name */
             name: string;
         };
@@ -4000,6 +4204,8 @@ export interface components {
             has_openai_key: boolean;
             /** Id */
             id: number;
+            /** Instructor Display Name */
+            instructor_display_name: string;
             /** Join Code */
             join_code: string;
             /** Name */
@@ -4024,6 +4230,8 @@ export interface components {
         ClassPatchIn: {
             /** Default Model */
             default_model?: string | null;
+            /** Instructor Display Name */
+            instructor_display_name?: string | null;
             /** Name */
             name?: string | null;
             /** Token Budget */
@@ -4740,11 +4948,6 @@ export interface components {
         EntrySide: "debit" | "credit";
         /** ErrorOut */
         ErrorOut: {
-            /**
-             * Code
-             * @default error
-             */
-            code: string;
             /** Detail */
             detail: string;
         };
@@ -4821,6 +5024,11 @@ export interface components {
             /** Resident Registration Number */
             resident_registration_number: string;
         };
+        /** ImportTemplateIn */
+        ImportTemplateIn: {
+            /** Target Class Id */
+            target_class_id: number;
+        };
         /** InitiateJudgingExtensionIn */
         InitiateJudgingExtensionIn: Record<string, never>;
         /** InitiatePaymentIn */
@@ -4857,8 +5065,8 @@ export interface components {
             archived: boolean;
             /** Class Name */
             class_name: string;
-            /** Instructor Email */
-            instructor_email: string;
+            /** Instructor Display Name */
+            instructor_display_name?: string | null;
             /** Participant Count */
             participant_count: number;
             /** Problem Count */
@@ -4992,6 +5200,13 @@ export interface components {
              * Format: date-time
              */
             joined_at: string;
+        };
+        /** ModerationDecisionIn */
+        ModerationDecisionIn: {
+            /** Decision */
+            decision: string;
+            /** Note */
+            note: string;
         };
         /**
          * MyParticipationOut
@@ -5369,6 +5584,13 @@ export interface components {
             /** Items */
             items: components["schemas"]["ContestOut"][];
         };
+        /** PagedProblemTemplateListItemOut */
+        PagedProblemTemplateListItemOut: {
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["ProblemTemplateListItemOut"][];
+        };
         /** PagedRetainedIdentityOut */
         PagedRetainedIdentityOut: {
             /** Count */
@@ -5621,6 +5843,67 @@ export interface components {
             /** Problem Ids */
             problem_ids: number[];
         };
+        /** ProblemTemplateChecklistItemOut */
+        ProblemTemplateChecklistItemOut: {
+            /** Label */
+            label: string;
+            /** Order */
+            order: number;
+            /** Required */
+            required: boolean;
+        };
+        /**
+         * ProblemTemplateListItemOut
+         * @description 검색 목록 한 줄(#318 AC) — 제목·올린 사람·올린 날짜만.
+         */
+        ProblemTemplateListItemOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Publisher Display Name */
+            publisher_display_name: string;
+            /** Share Code */
+            share_code: string;
+            /** Title */
+            title: string;
+        };
+        /** ProblemTemplateOut */
+        ProblemTemplateOut: {
+            /**
+             * Checklist Items
+             * @default []
+             */
+            checklist_items: components["schemas"]["ProblemTemplateChecklistItemOut"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Description */
+            description: string;
+            /** Id */
+            id: number;
+            /**
+             * Is Mine
+             * @default false
+             */
+            is_mine: boolean;
+            /** Publisher Display Name */
+            publisher_display_name: string;
+            /** Share Code */
+            share_code: string;
+            /** Submission Format */
+            submission_format: string;
+            /**
+             * Taken Down
+             * @default false
+             */
+            taken_down: boolean;
+            /** Title */
+            title: string;
+        };
         /**
          * ProfileIn
          * @description 필드가 아예 안 왔으면(None) 손대지 않고, ""가 명시적으로 왔으면 비운다.
@@ -5664,6 +5947,11 @@ export interface components {
             /** Submission Id */
             submission_id: number;
         };
+        /** PublishTemplateIn */
+        PublishTemplateIn: {
+            /** Publisher Display Name */
+            publisher_display_name: string;
+        };
         /** QuoteIn */
         QuoteIn: {
             /** Deliverable Type Ids */
@@ -5680,6 +5968,41 @@ export interface components {
         RefreshIn: {
             /** Refresh */
             refresh: string;
+        };
+        /** ReportResultOut */
+        ReportResultOut: {
+            /**
+             * Reported
+             * @default true
+             */
+            reported: boolean;
+        };
+        /** ReportTemplateIn */
+        ReportTemplateIn: {
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * ReportedTemplateOut
+         * @description 운영자 신고 목록 한 줄(#320 AC "내용·신고 사유·신고 수").
+         */
+        ReportedTemplateOut: {
+            /** Description */
+            description: string;
+            /** Id */
+            id: number;
+            /** Publisher Display Name */
+            publisher_display_name: string;
+            /** Report Count */
+            report_count: number;
+            /** Report Reasons */
+            report_reasons: string[];
+            /** Submission Format */
+            submission_format: string;
+            /** Taken Down */
+            taken_down: boolean;
+            /** Title */
+            title: string;
         };
         /** RequirementChatMessageIn */
         RequirementChatMessageIn: {
@@ -7659,6 +7982,42 @@ export interface operations {
             };
         };
     };
+    classroom_template_api_publish_template: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+                problem_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublishTemplateIn"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemTemplateOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     classroom_api_list_problem_submissions: {
         parameters: {
             query?: never;
@@ -7882,6 +8241,200 @@ export interface operations {
             };
             /** @description Unprocessable Content */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_template_api_list_problem_templates: {
+        parameters: {
+            query?: {
+                q?: string | null;
+                page?: number;
+                page_size?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PagedProblemTemplateListItemOut"];
+                };
+            };
+        };
+    };
+    classroom_template_api_list_my_problem_templates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemTemplateOut"][];
+                };
+            };
+        };
+    };
+    classroom_template_api_get_problem_template: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                share_code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemTemplateOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_template_api_import_template: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                share_code: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportTemplateIn"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_template_api_report_template: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                share_code: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReportTemplateIn"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportResultOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_template_api_takedown_own_template: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                share_code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemTemplateOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9553,6 +10106,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_template_operator_api_list_reported_templates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportedTemplateOut"][];
+                };
+            };
+        };
+    };
+    classroom_template_operator_api_moderate_template: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                template_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModerationDecisionIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemTemplateOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
                 };
             };
         };

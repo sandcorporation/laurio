@@ -30,7 +30,7 @@ def _auth_header(access: str) -> dict:
 def _create_class(client, access: str, name: str = "웹 스터디") -> int:
     response = client.post(
         CLASSES_URL,
-        data={"name": name},
+        data={"name": name, "instructor_display_name": "강사"},
         content_type="application/json",
         **_auth_header(access),
     )
@@ -43,7 +43,7 @@ def test_class_is_issued_a_join_code_on_creation(client, db):
 
     response = client.post(
         CLASSES_URL,
-        data={"name": "웹 스터디"},
+        data={"name": "웹 스터디", "instructor_display_name": "강사"},
         content_type="application/json",
         **_auth_header(pair["access"]),
     )

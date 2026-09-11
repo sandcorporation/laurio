@@ -35,7 +35,7 @@ def _auth_header(access: str) -> dict:
 def _create_class(client, access: str, name: str = "웹 스터디") -> dict:
     response = client.post(
         CLASSES_URL,
-        data={"name": name},
+        data={"name": name, "instructor_display_name": "강사"},
         content_type="application/json",
         **_auth_header(access),
     )
@@ -71,6 +71,7 @@ def test_instructor_sees_participants_by_their_class_specific_name(client, db):
     assert body[0]["display_name"] == "참여자닉네임"
     assert body[0]["expelled"] is False
     assert body[0]["is_instructor"] is False
+    assert body[0]["joined_at"]
 
 
 def test_roster_distinguishes_the_instructor_when_they_join_their_own_class(client, db):
