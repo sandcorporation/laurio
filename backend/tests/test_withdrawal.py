@@ -16,6 +16,7 @@ from django.utils import timezone
 
 from accounts.models import DeveloperProfile, PhoneContact, SponsorProfile, Withdrawal
 from accounts.withdrawal import WithdrawalBlockReason
+from classroom.models import Class
 from contests.models import Category, Contest, DeliverableType
 from core.models import ClockOverride
 from payouts.models import Payout, Seller
@@ -25,6 +26,7 @@ WITHDRAWAL_URL = "/api/accounts/withdrawal"
 CONTESTS_URL = "/api/contests"
 PAYMENTS_URL = "/api/payments"
 PAYOUTS_URL = "/api/payouts"
+CLASSROOM_CLASSES_URL = "/api/classroom/classes"
 DORMANCY_SCAN_URL = "/api/internal/scans/identity-dormancy-purge"
 RETAINED_SCAN_URL = "/api/internal/scans/retained-identity-purge"
 
@@ -45,6 +47,26 @@ def _login(client, uid="wd-user", email=None):
 
 def _auth_header(access: str) -> dict:
     return {"HTTP_AUTHORIZATION": f"Bearer {access}"}
+
+
+def _create_class(client, access: str, name: str = "웹 스터디") -> dict:
+    response = client.post(
+        CLASSROOM_CLASSES_URL,
+        data={"name": name},
+        content_type="application/json",
+        **_auth_header(access),
+    )
+    assert response.status_code == 201
+    return response.json()
+
+
+def _archive_class(client, access: str, class_id: int) -> None:
+    response = client.post(
+        f"{CLASSROOM_CLASSES_URL}/{class_id}/archive",
+        content_type="application/json",
+        **_auth_header(access),
+    )
+    assert response.status_code == 200
 
 
 def _fake_token(name, birth_iso, ci, di=None, phone=None) -> str:
@@ -485,6 +507,89 @@ def test_developer_with_in_progress_payout_is_blocked(client, category, landing_
 
     response = client.post(WITHDRAWAL_URL, content_type="application/json", **header)
     assert response.status_code == 409
+
+
+@pytest.mark.django_db
+def test_instructor_with_an_unarchived_class_is_blocked(client):
+    """클래스를 연 강사는 그 클래스가 진행중인 동안 탈퇴할 수 없다 (#302). 신원이
+    사라지면 참여자들은 새 문제를 열어 줄 사람도 명단을 손볼 사람도 없는 클래스에
+    남는다."""
+
+    instructor = _login(client, uid="blocked-instructor")
+    header = _auth_header(instructor["access"])
+    _create_class(client, instructor["access"])
+
+    eligibility = client.get(WITHDRAWAL_URL, **header)
+    assert eligibility.status_code == 200
+    assert eligibility.json()["blocking_reasons"] == [
+        WithdrawalBlockReason.INSTRUCTOR_CLASS_IN_PROGRESS.value
+    ]
+
+    response = client.post(WITHDRAWAL_URL, content_type="application/json", **header)
+    assert response.status_code == 409
+    assert response.json()["blocking_reasons"] == [
+        WithdrawalBlockReason.INSTRUCTOR_CLASS_IN_PROGRESS.value
+    ]
+
+    from django.contrib.auth import get_user_model
+
+    user = get_user_model().objects.get(social_accounts__provider_uid="blocked-instructor")
+    assert user.is_active is True  # 거부된 요청은 아무것도 바꾸지 않는다.
+
+
+@pytest.mark.django_db
+def test_instructor_who_archived_every_class_can_withdraw(client):
+    """보관은 지우는 것이 아니라 닫는 것이다(CONTEXT.md 「Class」) — 진행중인 클래스를
+    전부 보관하면 그 순간부터 탈퇴가 막히지 않는다."""
+
+    instructor = _login(client, uid="archiving-instructor")
+    header = _auth_header(instructor["access"])
+    created = _create_class(client, instructor["access"])
+    _archive_class(client, instructor["access"], created["id"])
+
+    eligibility = client.get(WITHDRAWAL_URL, **header)
+    assert eligibility.json() == {"can_withdraw": True, "blocking_reasons": []}
+
+    response = client.post(WITHDRAWAL_URL, content_type="application/json", **header)
+    assert response.status_code == 200, response.content
+
+
+@pytest.mark.django_db
+def test_instructor_with_one_unarchived_class_among_several_is_still_blocked(client):
+    """클래스 하나를 보관해도 다른 클래스가 진행중이면 여전히 막힌다 — 판정은
+    「보관되지 않은 클래스가 하나라도 있는가」다."""
+
+    instructor = _login(client, uid="partial-archive-instructor")
+    header = _auth_header(instructor["access"])
+    archived = _create_class(client, instructor["access"], name="지난 기수")
+    _archive_class(client, instructor["access"], archived["id"])
+    _create_class(client, instructor["access"], name="이번 기수")
+
+    eligibility = client.get(WITHDRAWAL_URL, **header)
+    assert eligibility.json()["blocking_reasons"] == [
+        WithdrawalBlockReason.INSTRUCTOR_CLASS_IN_PROGRESS.value
+    ]
+
+
+@pytest.mark.django_db
+def test_participant_only_membership_does_not_block_withdrawal(client):
+    """클래스에 참여자로만 들어가 있는 사람은 막히지 않는다 — 강사인 클래스만
+    본다(#302 AC)."""
+
+    instructor = _login(client, uid="member-class-instructor")
+    created = _create_class(client, instructor["access"])
+    participant = _login(client, uid="member-only-participant")
+    join = client.post(
+        f"/api/classroom/join/{created['join_code']}",
+        data={"display_name": "참여자"},
+        content_type="application/json",
+        **_auth_header(participant["access"]),
+    )
+    assert join.status_code == 200, join.content
+
+    header = _auth_header(participant["access"])
+    eligibility = client.get(WITHDRAWAL_URL, **header)
+    assert eligibility.json() == {"can_withdraw": True, "blocking_reasons": []}
 
 
 @pytest.mark.django_db
