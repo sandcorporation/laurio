@@ -15,6 +15,7 @@
 // 가 묶는다. 정렬은 그 묶음 단위로 "안 읽은 것이 위, 그 안에서 최신순"이다
 // (AC) — 백엔드는 최신순으로만 주므로(공개 앱과 계약을 공유해 그 순서를
 // 바꾸지 않는다), "안 읽은 것을 위로"는 여기서 안정 정렬로 한 번 더 가른다.
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
 import { Card, EmptyState, ErrorNote, PageHeader, PageShell } from "@/app/components/ui";
@@ -22,11 +23,13 @@ import { fetchMyNotifications, markAllRead, type NotificationRow } from "@/lib/n
 import { describeNotification, formatDateTime } from "@/lib/notifications/format";
 import {
   groupCurrentlyPassed,
+  groupHref,
   groupNotifications,
   groupUnreadCount,
   sortGroupsUnreadFirst,
   type NotificationGroup,
 } from "@/lib/notifications/group";
+import { notificationHref } from "@/lib/notifications/link";
 import { broadcastNotificationsRead } from "@/lib/notifications/read-bus";
 
 type LoadState =
@@ -120,26 +123,31 @@ function NotificationGroupRow({ group }: { group: NotificationGroup }) {
   const currentlyPassed = groupCurrentlyPassed(group);
   const unreadCount = groupUnreadCount(group);
   const testKey = group.problemId ?? group.key;
+  const href = groupHref(group);
+  const headerText = `'${group.className ?? "클래스"}' 클래스 '${group.problemTitle ?? "문제"}' 문제 — 지금 상태 ${
+    currentlyPassed ? "통과" : "미통과"
+  } (시도 ${group.notifications.length}건)`;
+  const headerBody = (
+    <>
+      <p className="text-[13.5px] leading-relaxed">{headerText}</p>
+      <span className="font-mono text-[11.5px] text-ink/45">{formatDateTime(latest.created_at)}</span>
+    </>
+  );
 
   return (
     <li data-testid={`notification-group-${testKey}`} className="flex flex-col">
-      <button
-        type="button"
-        onClick={() => setExpanded((value) => !value)}
-        data-testid={`notification-group-toggle-${testKey}`}
-        aria-expanded={expanded}
-        className="flex w-full items-start justify-between gap-3 px-4 py-3.5 text-left hover:bg-paper"
-      >
-        <div className="flex min-w-0 flex-col gap-1">
-          <p className="text-[13.5px] leading-relaxed">
-            {`'${group.className ?? "클래스"}' 클래스 '${group.problemTitle ?? "문제"}' 문제 — 지금 상태 ${
-              currentlyPassed ? "통과" : "미통과"
-            } (시도 ${group.notifications.length}건)`}
-          </p>
-          <span className="font-mono text-[11.5px] text-ink/45">
-            {formatDateTime(latest.created_at)}
-          </span>
-        </div>
+      <div className="flex w-full items-start justify-between gap-3 px-4 py-3.5 hover:bg-paper">
+        {href ? (
+          <Link
+            href={href}
+            data-testid={`notification-group-link-${testKey}`}
+            className="flex min-w-0 flex-1 flex-col gap-1"
+          >
+            {headerBody}
+          </Link>
+        ) : (
+          <div className="flex min-w-0 flex-1 flex-col gap-1">{headerBody}</div>
+        )}
         <div className="flex shrink-0 items-center gap-2">
           {unreadCount > 0 && (
             <span
@@ -149,9 +157,17 @@ function NotificationGroupRow({ group }: { group: NotificationGroup }) {
               안 읽음 {unreadCount}
             </span>
           )}
-          <span className="text-[11.5px] text-ink/45">{expanded ? "접기" : "펼치기"}</span>
+          <button
+            type="button"
+            onClick={() => setExpanded((value) => !value)}
+            data-testid={`notification-group-toggle-${testKey}`}
+            aria-expanded={expanded}
+            className="text-[11.5px] text-ink/45 hover:text-ink hover:underline"
+          >
+            {expanded ? "접기" : "펼치기"}
+          </button>
         </div>
-      </button>
+      </div>
 
       {expanded && (
         <ul
@@ -169,13 +185,10 @@ function NotificationGroupRow({ group }: { group: NotificationGroup }) {
 
 function NotificationListRow({ notification }: { notification: NotificationRow }) {
   const wasUnread = notification.read_at === null;
+  const href = notificationHref(notification);
 
-  return (
-    <li
-      data-testid={`notification-row-${notification.id}`}
-      data-was-unread={wasUnread}
-      className="flex flex-col gap-1.5 px-4 py-3.5"
-    >
+  const body = (
+    <>
       <div className="flex items-start justify-between gap-3">
         <p className="text-[13.5px] leading-relaxed">{describeNotification(notification)}</p>
         {wasUnread && (
@@ -190,6 +203,26 @@ function NotificationListRow({ notification }: { notification: NotificationRow }
       <span className="font-mono text-[11.5px] text-ink/45">
         {formatDateTime(notification.created_at)}
       </span>
+    </>
+  );
+
+  return (
+    <li
+      data-testid={`notification-row-${notification.id}`}
+      data-was-unread={wasUnread}
+      className="flex flex-col"
+    >
+      {href ? (
+        <Link
+          href={href}
+          data-testid={`notification-row-${notification.id}-link`}
+          className="flex flex-col gap-1.5 px-4 py-3.5 hover:bg-paper"
+        >
+          {body}
+        </Link>
+      ) : (
+        <div className="flex flex-col gap-1.5 px-4 py-3.5">{body}</div>
+      )}
     </li>
   );
 }

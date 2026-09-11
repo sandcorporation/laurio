@@ -577,6 +577,9 @@ export default function ClassSettingsPage() {
           </div>
         </Card>
 
+        {/* `id`는 예산 경고 알림(#329)이 이 자리를 가리킬 때 쓰는 앵커다 —
+            `lib/notifications/link.ts`가 같은 이름을 짓는다. */}
+        <div id="token-budget" className="scroll-mt-4">
         <Card>
           <CardHeader title="채점 예산" hint="한도에 닿으면 채점만 멈추고 제출은 쌓입니다" />
           <div className="flex flex-col gap-4 p-4">
@@ -678,6 +681,7 @@ export default function ClassSettingsPage() {
             </Note>
           </div>
         </Card>
+        </div>
 
         <ClassTemplatePublishCard />
 
