@@ -18,6 +18,7 @@ import {
   buttonClass,
 } from "@/app/components/ui";
 import { MarkdownEditor } from "@/app/components/MarkdownEditor";
+import { ProblemParticipantView } from "@/app/components/ProblemParticipantView";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
@@ -68,6 +69,9 @@ export default function EditProblemPage() {
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [publishedTemplate, setPublishedTemplate] = useState<ProblemTemplateRow | null>(null);
+
+  // 「작성」/「미리보기」 탭(#325) — 새 문제 화면과 같은 자리다.
+  const [tab, setTab] = useState<"write" | "preview">("write");
 
   useEffect(() => {
     if (state.status === "ready") {
@@ -260,6 +264,39 @@ export default function EditProblemPage() {
       />
 
       <div className="flex flex-col gap-5">
+        <div
+          role="tablist"
+          aria-label="문제 편집 화면"
+          className="flex items-end gap-0.5 border-b border-rule"
+        >
+          {(
+            [
+              ["write", "작성", "edit-problem-tab-write"],
+              ["preview", "미리보기", "edit-problem-tab-preview"],
+            ] as const
+          ).map(([key, label, testId]) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={tab === key}
+              data-testid={testId}
+              onClick={() => setTab(key)}
+              className={
+                tab === key
+                  ? "-mb-px border border-rule border-b-surface bg-surface px-4 py-2 text-[13.5px] font-medium"
+                  : "px-4 py-2 text-[13.5px] text-ink/60 hover:text-ink"
+              }
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div
+          data-testid="edit-problem-write-panel"
+          className={tab === "write" ? "flex flex-col gap-5" : "hidden"}
+        >
         {problem.status === "open" ? (
           // 이미 열린 문제는 참여자가 이미 시도했을 수 있다. 체크리스트를 고쳐도
           // 지난 점수는 남고 달성률만 새 기준으로 다시 셈된다는 것을 미리
@@ -629,6 +666,36 @@ export default function EditProblemPage() {
                 </span>
               </div>
             </Card>
+          </div>
+        </div>
+        </div>
+
+        <div
+          data-testid="edit-problem-preview-panel"
+          className={tab === "preview" ? "flex max-w-[960px] flex-col gap-4" : "hidden"}
+        >
+          <div className="border border-rule bg-surface p-3 text-[12.5px] leading-relaxed text-ink/60">
+            <b className="font-medium text-ink">참여자가 보는 화면 그대로입니다.</b> 아직 저장하지
+            않은 내용도 지금 상태 그대로 비춥니다.
+          </div>
+          {problem.status !== "open" && !problem.checklist_items.some((item) => item.required) ? (
+            <Note tone="attention">
+              <span data-testid="edit-problem-preview-not-ready-notice">
+                필수 체크리스트 항목이 하나도 없어 아직 열 수 없는 상태입니다 — 이대로 열면 무엇을
+                「통과」로 볼지가 정해지지 않습니다.
+              </span>
+            </Note>
+          ) : null}
+          <div className="border border-rule bg-paper p-6">
+            <ProblemParticipantView
+              interactive={false}
+              headingLevel="h2"
+              title={title.trim() === "" ? "(제목 없음)" : title}
+              description={description}
+              checklistItems={problem.checklist_items}
+              submissionFormat={submissionFormat}
+              submissions={[]}
+            />
           </div>
         </div>
       </div>

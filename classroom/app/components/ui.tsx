@@ -7,6 +7,7 @@
 //
 // 리터럴 hex 는 여기에도 없다 — 전부 `app/tokens.css` 의 `@theme` 가 만든
 // 유틸리티다(`bg-paper`·`text-ink`·`border-rule`·`text-attention`·`text-verified`).
+import { createElement } from "react";
 import type { ReactNode } from "react";
 
 /** 화면 한 장의 바깥 틀 — 폭과 여백을 여기서만 정한다. */
@@ -21,6 +22,7 @@ export function PageHeader({
   titleTestId,
   description,
   actions,
+  headingLevel = "h1",
 }: {
   eyebrow?: string;
   title: string;
@@ -30,6 +32,11 @@ export function PageHeader({
   titleTestId?: string;
   description?: ReactNode;
   actions?: ReactNode;
+  /** 이 헤더가 화면의 `h1`이 아니라 다른 화면 안에 포갠 자리(예: 문제
+   *  만들기/편집의 「미리보기」 탭이 참여자 화면을 그대로 보여주는 자리,
+   *  #325)일 때 `"h2"`를 준다 — 그 화면의 진짜 `h1`이 따로 있으므로 여기서
+   *  또 `h1`을 내면 위 규칙이 깨진다. */
+  headingLevel?: "h1" | "h2";
 }) {
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
@@ -37,9 +44,11 @@ export function PageHeader({
         {eyebrow ? (
           <div className="text-[11px] tracking-[0.08em] text-ink/45">{eyebrow}</div>
         ) : null}
-        <h1 className="text-[22px] font-semibold tracking-[-0.01em]" data-testid={titleTestId}>
-          {title}
-        </h1>
+        {createElement(
+          headingLevel,
+          { className: "text-[22px] font-semibold tracking-[-0.01em]", "data-testid": titleTestId },
+          title,
+        )}
         {description ? (
           <p className="text-[13px] leading-relaxed text-ink/60">{description}</p>
         ) : null}
