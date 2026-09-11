@@ -262,14 +262,27 @@ SETTINGS = body(
         f'<span style="color:{DIM};">▾</span></div>' + btn("저장", small=True) + '</div>')
     + '</div>'
     + f'<div style="width:460px;flex-shrink:0;display:flex;flex-direction:column;gap:18px;">'
-    + setting_card("채점 예산", "한도에 닿으면 채점만 멈추고 제출은 쌓입니다",
+    + setting_card("채점 예산", "한도에 닿으면 채점만 멈추고 제출은 쌓습니다",
         f'<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:9px;">'
         f'<div style="font-size:12px;color:{MUTED};">사용량</div>'
-        f'<div style="font-family:{MONO};font-size:13px;color:{ATT};">1,740,000 / 2,000,000</div></div>'
+        f'<div style="font-family:{MONO};font-size:13px;color:{ATT};">1,740,000 / 2,000,000 토큰</div></div>'
         f'<div style="height:6px;background:{PAPER};border:1px solid {RULE};position:relative;">'
         f'<div style="position:absolute;left:0;top:0;bottom:0;width:87%;background:{ATT};"></div></div>'
-        f'<div style="font-size:11.5px;color:{DIM};margin-top:10px;line-height:1.6;">'
-        f'기준(80%)을 넘어 알림을 보냈습니다 — 메일이나 문자가 아니라 여기 들어오면 보이는 알림입니다.</div>')
+        f'<div style="font-size:11.5px;color:{DIM};margin-top:7px;">남은 양 260,000 토큰</div>'
+        f'<div style="display:flex;gap:10px;align-items:flex-end;margin-top:14px;">'
+        f'<div style="flex:1;display:flex;flex-direction:column;gap:6px;">'
+        f'<div style="font-size:12px;color:{MUTED};">예산 한도(토큰)</div>'
+        f'<div style="border:1px solid {RULE};background:{PAPER};padding:9px 12px;'
+        f'font-family:{MONO};font-size:13px;">2000000</div></div>'
+        f'<div style="width:130px;display:flex;flex-direction:column;gap:6px;">'
+        f'<div style="font-size:12px;color:{MUTED};">경고 기준(%)</div>'
+        f'<div style="border:1px solid {RULE};background:{PAPER};padding:9px 12px;'
+        f'font-family:{MONO};font-size:13px;">80</div></div>'
+        + btn("저장", small=True) + '</div>'
+        f'<div style="font-size:11.5px;color:{DIM};margin-top:11px;line-height:1.6;">'
+        f'기준에 닿으면 서비스 안 알림으로 알립니다 — 메일이나 문자가 아니라 여기 들어오면 보이는 '
+        f'알림입니다. 한도에 닿아도 제출은 계속 쌓이고, 예산을 채우면 쌓인 시도부터 순서대로 '
+        f'이어서 채점됩니다.</div>')
     + setting_card("템플릿으로 공개", "다른 강사가 가져다 쓸 수 있게",
         f'<div style="font-size:12px;color:{MUTED};margin-bottom:11px;line-height:1.65;">'
         f'매일 보는 클래스 화면이 아니라 여기 둡니다 — 학기에 한 번 할까 말까 한 일이 '
