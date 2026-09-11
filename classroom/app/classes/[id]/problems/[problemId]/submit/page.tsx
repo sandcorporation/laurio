@@ -87,7 +87,7 @@ export default function ProblemSubmitPage() {
     );
   }
 
-  const { problem, submissions, member_expelled: memberExpelled } = state.data;
+  const { problem, submissions, member_expelled: memberExpelled, archived } = state.data;
 
   async function submitValue(value: string, contentType?: string | null) {
     setSubmitting(true);
@@ -133,6 +133,7 @@ export default function ProblemSubmitPage() {
         submissionFormat={problem.submission_format}
         submissions={submissions}
         memberExpelled={memberExpelled}
+        archived={archived}
         repositoryUrl={repositoryUrl}
         onRepositoryUrlChange={setRepositoryUrl}
         onRepositorySubmit={handleRepositorySubmit}

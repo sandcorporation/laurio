@@ -66,6 +66,9 @@ export type ProblemSubmissions = {
   // 이 참여자가 강사에게 내보내졌는가(#300) — 참이면 화면이 제출 수단을
   // 숨기고 이유를 보여준다. 지난 시도는 그대로 `submissions`에 남는다.
   member_expelled: boolean;
+  // 이 클래스가 보관됐는가(#294, #338) — 참이면 화면이 제출 수단을 숨기고
+  // 수업이 끝났다는 이유를 보여준다. 지난 시도는 그대로 `submissions`에 남는다.
+  archived: boolean;
 };
 
 export function fetchMyProblem(classId: number, problemId: number): Promise<ProblemSubmissions> {
