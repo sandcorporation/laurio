@@ -73,9 +73,18 @@ export default function ClassroomHome() {
           </span>
         }
         actions={
-          <Link href="/classes/new" data-testid="classroom-new-class-link" className={buttonClass("primary")}>
-            새 클래스 열기
-          </Link>
+          <>
+            <Link
+              href="/templates"
+              data-testid="classroom-browse-templates-link"
+              className={buttonClass("secondary")}
+            >
+              템플릿 둘러보기
+            </Link>
+            <Link href="/classes/new" data-testid="classroom-new-class-link" className={buttonClass("primary")}>
+              새 클래스 열기
+            </Link>
+          </>
         }
       />
 
