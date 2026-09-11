@@ -353,7 +353,7 @@ cd backend && LAURIO_DB_PORT=55432 uv run python manage.py prune_e2e_junk
 `global-setup.ts` 의 순서가 그래서 그 순서다.
 
 **스위트는 기본으로 병렬 실행된다**(#104). `pyproject.toml` 의 `addopts` 가 `-n auto` 를
-준다 — 실측(이 머신, 당시 1192건 — 지금 1830건 통과·1건 skip. Assignment 가 #205~#212 로
+준다 — 실측(이 머신, 당시 1192건 — 지금 1985건 통과·1건 skip. Assignment 가 #205~#212 로
 1312건에서 1377건까지, staging 검증이 낳은 #214~#217 로 1388건까지, 저장소만으로
 제출하고 채점 시점에 박제하는 #218~#220 으로 1407건까지, 채점 상한과 화면 열한 개
 (#213·#221~#231)로 1463건까지, 종류 게이트(#232)로 1467건까지, 공모전 이미지
@@ -384,7 +384,8 @@ Contest 전이 그래프를 한 곳에 선언하고 선언 밖을 정적으로 �
 보내는 것(#300)으로, 문제 만들기 화면에서 체크리스트를 함께 받고 바로 여는
 것(#315)으로, 문제 하나를 템플릿으로 공개하고 가져오는 것과 그 신고·모더레이션
 (#316·#318·#320)으로, 클래스를 통째로 템플릿으로 공개하고 가져오는 것(#319)으로
-1931건까지
+1931건까지, 도달성 점검이 찾은 넷(#328~#331)으로 1959건까지, 강의실을 여섯 시선으로
+걸어 찾은 결함·보충 아홉(#333~#341)으로 1985건까지
 여기까지 늘었다) `-n 4` 84초 → `-n auto` 57초.
 직렬로 보려면 `-n 0`.
 
@@ -602,10 +603,10 @@ pnpm --dir frontend exec playwright test --project=public e2e/payout.spec.ts -g 
 **CI 가 돌리는 것 (참고용 수치).**
 
 ```bash
-pnpm --dir frontend test            # 전체 (102건이던 시절 약 1.8분 — 지금 124건)
-pnpm --dir frontend test:public     # 공개 앱만 (74건이던 시절 약 1.4분 — 지금 87건)
+pnpm --dir frontend test            # 전체 (102건이던 시절 약 1.8분 — 지금 130건)
+pnpm --dir frontend test:public     # 공개 앱만 (74건이던 시절 약 1.4분 — 지금 88건)
 pnpm --dir frontend test:operator   # 운영자 앱만 (28건이던 시절 약 25초 — 지금 32건)
-pnpm --dir frontend test:classroom  # 강의실만 (6건, CI 첫 실행 1.7초)
+pnpm --dir frontend test:classroom  # 강의실만 (6건이던 시절 CI 첫 실행 1.7초 — 지금 10건)
 ```
 
 **로그인은 공개 앱 하나뿐이고, 끝나면 온 곳으로 돌려보낸다**(#297 후속). 강의실은

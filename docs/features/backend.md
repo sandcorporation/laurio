@@ -408,7 +408,7 @@ CI의 `pytest` 잡이 매번 같은 텍스트를 재생성해 이 블록과 글�
 
 ## 바깥 세계
 
-**모든 외부 의존은 어댑터 뒤에 있다**(ADR-0007). 열 값이 바인딩을 고르고, **배포 환경에서
+**모든 외부 의존은 어댑터 뒤에 있다**(ADR-0007). 열한 값이 바인딩을 고르고, **배포 환경에서
 fake 이거나 임포트되지 않으면 부팅 자체를 거부한다** — 컨테이너가 뜬 채로 첫 요청에서야
 죽는 것보다 정직하게 못 뜨는 편이다.
 
@@ -418,6 +418,7 @@ fake 이거나 임포트되지 않으면 부팅 자체를 거부한다** — 컨
 | 결제 | `PAYMENT_ADAPTER_MODE` |
 | 지급·판매자 | `PAYOUT_ADAPTER_MODE` · `SELLER_ADAPTER_MODE` |
 | 채점 LLM | `LLM_ADAPTER_MODE` |
+| 강의실 채점(#340, ADR-0043 — 강사 본인의 키로 돈다, dev·CI 는 결정적 fake) | `CLASSROOM_SCORING_ADAPTER_MODE` |
 | 요구사항 대화 LLM | `LLM_REQUIREMENT_CHAT_ADAPTER_MODE` |
 | GitHub | `GITHUB_ADAPTER_MODE` |
 | 알림 3채널 | `NOTIFICATION_ALIMTALK_ADAPTER` · `_SMS_` · `_LMS_` |
