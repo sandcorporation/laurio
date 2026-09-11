@@ -1,6 +1,6 @@
 "use client";
 
-// 채점 모델 목록 상태 (#285). 「채점 설정」과 「문제 편집」이 함께 쓴다.
+// 채점 모델 목록 상태 (#285). 「클래스 설정」과 「문제 편집」이 함께 쓴다.
 import { useEffect, useState } from "react";
 
 import { fetchScoringModels, type ScoringModelRow } from "./api";
