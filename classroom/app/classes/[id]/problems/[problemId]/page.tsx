@@ -17,7 +17,7 @@ import {
   PageShell,
   buttonClass,
 } from "@/app/components/ui";
-import { ProblemDescription } from "@/app/components/ProblemDescription";
+import { MarkdownEditor } from "@/app/components/MarkdownEditor";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
@@ -280,22 +280,12 @@ export default function EditProblemPage() {
                   <label htmlFor="problem-description">
                     <FieldLabel>설명</FieldLabel>
                   </label>
-                  <textarea
+                  <MarkdownEditor
                     id="problem-description"
-                    data-testid="edit-problem-description-input"
+                    testId="edit-problem-description-input"
                     value={description}
-                    onChange={(event) => setDescription(event.target.value)}
-                    rows={8}
-                    className={`${INPUT_CLASS} resize-y leading-relaxed`}
+                    onChange={setDescription}
                   />
-                  <span
-                    data-testid="problem-description-markdown-hint"
-                    className="text-[11.5px] leading-relaxed text-ink/45"
-                  >
-                    마크다운으로 쓸 수 있습니다 — 굵기·목록·코드블록·링크·이미지. 이미지는 바깥 주소만
-                    되고, 그 서버는 누군가 열어봤다는 사실을 알 수 있습니다(어느 문제에서 봤는지는
-                    알리지 않지만, 접속한 인터넷 주소까지 숨기지는 못합니다).
-                  </span>
                 </div>
 
                 <fieldset className="flex flex-col gap-1.5">
@@ -347,23 +337,6 @@ export default function EditProblemPage() {
                   </ErrorNote>
                 ) : null}
               </form>
-            </Card>
-
-            <Card>
-              <CardHeader title="미리보기" hint="참여자가 보는 것과 같은 방식으로 그립니다" />
-              <div className="p-4">
-                {description.trim() === "" ? (
-                  <EmptyState>
-                    <span data-testid="problem-description-preview-empty">
-                      아직 설명이 없습니다.
-                    </span>
-                  </EmptyState>
-                ) : (
-                  <div data-testid="problem-description-preview">
-                    <ProblemDescription markdown={description} />
-                  </div>
-                )}
-              </div>
             </Card>
 
             <Card>

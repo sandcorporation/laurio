@@ -15,6 +15,7 @@ import {
   PageShell,
   buttonClass,
 } from "@/app/components/ui";
+import { MarkdownEditor } from "@/app/components/MarkdownEditor";
 import { createProblem, type SubmissionFormat } from "@/lib/problems/api";
 
 export default function NewProblemPage() {
@@ -54,7 +55,7 @@ export default function NewProblemPage() {
         description="마감이 없습니다. 참여자는 몇 번이든 다시 낼 수 있고, 낼 때마다 바로 채점됩니다. 체크리스트는 만든 뒤 문제 화면에서 붙입니다."
       />
 
-      <Card className="max-w-[720px] p-5">
+      <Card className="p-5">
         <form onSubmit={handleSubmit} className="flex flex-col gap-5">
           <div className="flex flex-col gap-1.5">
             <label htmlFor="problem-title">
@@ -66,7 +67,7 @@ export default function NewProblemPage() {
               value={title}
               onChange={(event) => setTitle(event.target.value)}
               required
-              className={INPUT_CLASS}
+              className={`${INPUT_CLASS} max-w-[720px]`}
               placeholder="예: fetch 로 목록 그리기"
             />
           </div>
@@ -75,20 +76,13 @@ export default function NewProblemPage() {
             <label htmlFor="problem-description">
               <FieldLabel>설명</FieldLabel>
             </label>
-            <textarea
+            <MarkdownEditor
               id="problem-description"
-              data-testid="new-problem-description-input"
+              testId="new-problem-description-input"
               value={description}
-              onChange={(event) => setDescription(event.target.value)}
-              rows={8}
-              className={`${INPUT_CLASS} resize-y leading-relaxed`}
+              onChange={setDescription}
               placeholder="무엇을 만들어야 하는지, 그리고 무엇이 이 문제의 핵심인지."
             />
-            <span data-testid="problem-description-markdown-hint" className="text-[11.5px] leading-relaxed text-ink/45">
-              마크다운으로 쓸 수 있습니다 — 굵기·목록·코드블록·링크·이미지. 이미지는 바깥 주소만 되고,
-              그 서버는 누군가 열어봤다는 사실을 알 수 있습니다(어느 문제에서 봤는지는 알리지 않지만,
-              접속한 인터넷 주소까지 숨기지는 못합니다).
-            </span>
           </div>
 
           <fieldset className="flex flex-col gap-1.5">
