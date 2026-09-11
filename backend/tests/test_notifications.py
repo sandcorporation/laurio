@@ -111,6 +111,70 @@ def test_list_types_exposes_transactional_and_promotional_flags(client):
 
 
 @pytest.mark.django_db
+def test_list_types_exposes_internal_only_flag(client):
+    """#301: 유형이 「밖으로 안 나감」 성질을 갖는지가 목록에 드러난다 — 클래스
+    예산 경고는 internal-only고, 기존 유형(예: 마감 임박)은 아니다."""
+
+    response = client.get(TYPES_URL, **_auth_headers())
+
+    by_value = {row["value"]: row for row in response.json()}
+    assert by_value[NotificationType.CLASSROOM_TOKEN_BUDGET_WARNING]["is_internal_only"] is True
+    assert by_value[NotificationType.DEADLINE_REMINDER]["is_internal_only"] is False
+
+
+@pytest.mark.django_db
+def test_internal_only_notification_is_not_dispatched_to_any_channel(client):
+    """#301: internal-only 유형은 만들어지는 즉시 NOT_DISPATCHED로 끝나고, 어떤
+    채널도 시도되지 않는다 — 채점 예산 경고가 그 대표 사례다."""
+
+    _freeze(datetime(2026, 1, 10, 14, 0, tzinfo=KST))
+    user = _make_user()
+
+    response = client.post(
+        CREATE_URL,
+        data={
+            "recipient_id": user.id,
+            "notification_type": NotificationType.CLASSROOM_TOKEN_BUDGET_WARNING,
+        },
+        content_type="application/json",
+        **_auth_headers(),
+    )
+
+    body = response.json()
+    assert body["status"] == Notification.Status.NOT_DISPATCHED
+    assert body["dispatches"] == []
+    # FAILED와 구별된다 — 시도했다가 전부 실패한 것이 아니라 애초에 시도하지 않았다.
+    assert body["status"] != Notification.Status.FAILED
+
+
+@pytest.mark.django_db
+def test_internal_only_notification_ignores_quiet_hours(client):
+    """#301 AC: "야간 연기 대상이 되지 않는다 — 보내지 않으므로 미룰 것도 없다."
+    자정에 만들어도 DEFERRED로 가지 않고 그 자리에서 NOT_DISPATCHED로 끝난다."""
+
+    _freeze(datetime(2026, 1, 10, 23, 30, tzinfo=KST))
+    user = _make_user()
+
+    response = client.post(
+        CREATE_URL,
+        data={
+            "recipient_id": user.id,
+            "notification_type": NotificationType.CLASSROOM_TOKEN_BUDGET_WARNING,
+        },
+        content_type="application/json",
+        **_auth_headers(),
+    )
+
+    body = response.json()
+    assert body["status"] == Notification.Status.NOT_DISPATCHED
+    assert body["scheduled_for"] is None
+
+    # 야간 큐 스캔을 돌려도 애초에 대상이 아니었으니 아무것도 처리되지 않는다.
+    rescan = _post_dispatch_due(client)
+    assert rescan.json()["count"] == 0
+
+
+@pytest.mark.django_db
 def test_transactional_notification_is_sent_immediately_outside_quiet_hours(client):
     _freeze(datetime(2026, 1, 10, 14, 0, tzinfo=KST))
     user = _make_user()

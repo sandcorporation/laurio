@@ -37,54 +37,85 @@ class NotificationType(models.TextChoices):
     CLASSROOM_TOKEN_BUDGET_WARNING = "classroom_token_budget_warning", "강의실 채점 예산 경고"
 
 
-# 유형별 거래성/광고성/야간유예 플래그. 광고성(is_promotional=True)은 옵트인 없이
-# 발송되지 않는다(ADR-0010). 거래성/광고성은 배타적이지 않게 둘 다 갖는 구조도
-# 가능하지만, 지금 정의된 유형들은 전부 어느 한쪽으로만 떨어진다.
+# 유형별 거래성/광고성/야간유예/외부발송 플래그. 광고성(is_promotional=True)은
+# 옵트인 없이 발송되지 않는다(ADR-0010). 거래성/광고성은 배타적이지 않게 둘 다
+# 갖는 구조도 가능하지만, 지금 정의된 유형들은 전부 어느 한쪽으로만 떨어진다.
 #
 # `is_quiet_hours_exempt`(#169, ADR-0010 개정)는 야간(21~08시) 전면 유예의 예외를
 # 여는 유일한 자리다 — 호출부(`create_notification` 을 부르는 자리)가 발송할 때마다
 # "이건 급하다"고 주장할 수 있게 하지 않는다. 예외를 받는 것은 `PAYOUT_AWAITS_YOU`
 # 하나뿐이다.
+#
+# `is_internal_only`(#301)는 이 유형이 **어느 채널로도 밖에 나가지 않는다**는
+# 성질을 고정한다 — 알림톡·SMS·LMS 어느 것도 시도하지 않고, 그래서 야간 연기
+# 대상도 되지 않는다(보낼 것 자체가 없으니 미룰 것도 없다). 만드는 쪽이 매번
+# "이건 안 보내도 된다"고 주장하는 게 아니라 유형이 그런 것이다 — 호출부에
+# 이 성질을 뒤집을 자리를 열어두지 않는다.
 NOTIFICATION_TYPE_FLAGS: dict[str, dict[str, bool]] = {
     NotificationType.DEADLINE_REMINDER: {
-        "is_transactional": True, "is_promotional": False, "is_quiet_hours_exempt": False,
+        "is_transactional": True,
+        "is_promotional": False,
+        "is_quiet_hours_exempt": False,
+        "is_internal_only": False,
     },
     NotificationType.JUDGING_PERIOD_ENDING_REMINDER: {
         "is_transactional": True,
         "is_promotional": False,
         "is_quiet_hours_exempt": False,
+        "is_internal_only": False,
     },
     NotificationType.DISTRIBUTION_FINAL_WARNING: {
         "is_transactional": True,
         "is_promotional": False,
         "is_quiet_hours_exempt": False,
+        "is_internal_only": False,
     },
     NotificationType.RESULT_NOTICE: {
-        "is_transactional": True, "is_promotional": False, "is_quiet_hours_exempt": False,
+        "is_transactional": True,
+        "is_promotional": False,
+        "is_quiet_hours_exempt": False,
+        "is_internal_only": False,
     },
     # 둘 다 거래성이다 — 참가자가 낸 것에 대한 처리 결과이지 광고가 아니므로
     # 옵트인이 필요 없다(ADR-0010).
     NotificationType.SCORING_COMPLETE: {
-        "is_transactional": True, "is_promotional": False, "is_quiet_hours_exempt": False,
+        "is_transactional": True,
+        "is_promotional": False,
+        "is_quiet_hours_exempt": False,
+        "is_internal_only": False,
     },
     NotificationType.APPEAL_RULED: {
-        "is_transactional": True, "is_promotional": False, "is_quiet_hours_exempt": False,
+        "is_transactional": True,
+        "is_promotional": False,
+        "is_quiet_hours_exempt": False,
+        "is_internal_only": False,
     },
     NotificationType.NEW_CONTEST_IN_CATEGORY: {
-        "is_transactional": False, "is_promotional": True, "is_quiet_hours_exempt": False,
+        "is_transactional": False,
+        "is_promotional": True,
+        "is_quiet_hours_exempt": False,
+        "is_internal_only": False,
     },
-    # 유일한 예외(#169, ADR-0010 개정) — 광고성 옵트인과 무관하게(거래성) 발송되고,
-    # 야간에도 즉시 나간다. ADR-0010 자신이 전면 차단을 "의도적 초과 준수"라 적었고
-    # 정보통신망법의 야간 제한은 광고성에만 걸리므로, 법적 요구를 낮추는 것이 아니라
-    # 스스로 얹은 여유분을 이 유형 하나에서만 거두는 것이다.
+    # 유일한 야간유예 예외(#169, ADR-0010 개정) — 광고성 옵트인과 무관하게(거래성)
+    # 발송되고, 야간에도 즉시 나간다. ADR-0010 자신이 전면 차단을 "의도적 초과
+    # 준수"라 적었고 정보통신망법의 야간 제한은 광고성에만 걸리므로, 법적 요구를
+    # 낮추는 것이 아니라 스스로 얹은 여유분을 이 유형 하나에서만 거두는 것이다.
     NotificationType.PAYOUT_AWAITS_YOU: {
-        "is_transactional": True, "is_promotional": False, "is_quiet_hours_exempt": True,
+        "is_transactional": True,
+        "is_promotional": False,
+        "is_quiet_hours_exempt": True,
+        "is_internal_only": False,
     },
-    # 강사 본인의 지출에 대한 경고다 — 거래성이고 옵트인이 필요 없다. 야간
-    # 유예 예외는 아니다: 급전을 다투는 지급과 달리, 다음 아침에 봐도 늦지
-    # 않는다(예산이 다 찼다는 사실 자체는 채점 정지 상태로 이미 보존된다).
+    # 강사 본인의 지출에 대한 경고다 — 거래성이고 옵트인이 필요 없다. **서비스
+    # 안에서만 보낸다**(#301) — 학습용 도구라 밤에 휴대폰이 울릴 일이 아니고,
+    # 예산이 찼다는 사실 자체는 채점 정지 상태로 이미 보존돼 다음 아침에 봐도
+    # 늦지 않는다. 강의실 알림은 전부 이 규칙 하나로 묶인다 — 만드는 쪽마다
+    # "이건 문자로 안 나가도 된다"고 따로 주장하지 않는다.
     NotificationType.CLASSROOM_TOKEN_BUDGET_WARNING: {
-        "is_transactional": True, "is_promotional": False, "is_quiet_hours_exempt": False,
+        "is_transactional": True,
+        "is_promotional": False,
+        "is_quiet_hours_exempt": False,
+        "is_internal_only": True,
     },
 }
 
@@ -125,6 +156,11 @@ class Notification(models.Model):
         SENT = "sent", "발송됨"
         FAILED = "failed", "발송 실패(전 채널 소진)"
         BLOCKED_NO_OPT_IN = "blocked_no_opt_in", "옵트인 없음으로 차단"
+        # 유형 자체가 `is_internal_only`인 알림의 종결 상태(#301) — 채널을
+        # 한 번도 시도하지 않았다는 뜻이다. `FAILED`(시도했지만 전부
+        # 실패했다)와 뜻이 다르므로 상태를 공유하지 않는다: 이 상태는
+        # `dispatches`가 항상 비어 있다.
+        NOT_DISPATCHED = "not_dispatched", "채널 미시도(서비스 내부 전용)"
 
     recipient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     notification_type = models.CharField(max_length=40, choices=NotificationType.choices)

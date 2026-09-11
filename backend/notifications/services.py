@@ -100,9 +100,27 @@ def create_notification(
     # 야간 전면 유예의 예외를 여는 유일한 자리(#169, ADR-0010 개정) — 호출부가 매번
     # "이건 급하다"고 주장하지 못하게, 이 유형 표만 본다.
     is_quiet_hours_exempt = flags["is_quiet_hours_exempt"]
+    # 이 유형이 애초에 어느 채널로도 나가지 않는다는 성질(#301) — 마찬가지로
+    # 호출부가 뒤집을 수 없다.
+    is_internal_only = flags["is_internal_only"]
     context = context or {}
 
     now = Clock.now()
+
+    if is_internal_only:
+        # 옵트인·야간 연기 판정 자체를 건너뛴다 — 그 둘은 "밖으로 내보낼지"를
+        # 가르는 판정인데 이 유형은 애초에 내보내지 않는다. `NOT_DISPATCHED`는
+        # `FAILED`(전 채널 시도 후 실패)와 달리 채널을 한 번도 건드리지 않았다는
+        # 뜻이라 `dispatches`가 항상 비어 있다.
+        return Notification.objects.create(
+            recipient=recipient,
+            notification_type=notification_type,
+            is_transactional=is_transactional,
+            is_promotional=is_promotional,
+            status=Notification.Status.NOT_DISPATCHED,
+            context=context,
+            created_at=now,
+        )
 
     if is_promotional and not _has_opt_in(recipient, notification_type):
         return Notification.objects.create(
