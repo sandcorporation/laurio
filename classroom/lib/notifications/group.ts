@@ -2,9 +2,12 @@
 // 채점 예산 경고)은 묶일 상대가 없으므로 언제나 자기 혼자만의 그룹이다 —
 // AC: "예산 경고처럼 문제에 딸리지 않은 알림은 접히지 않고 그대로 한 줄이다."
 //
-// **개별 읽음 처리는 여전히 없다**(AC) — 이 모듈은 보여주는 방식만 바꾼다.
-// `read_at`은 그룹을 계산하는 데만 쓰이고(안 읽은 개수), 그룹을 펼쳐도 항목
-// 하나만 골라 읽음 처리할 수단은 이 화면 어디에도 새로 생기지 않는다.
+// **묶음의 머리글을 누르면 그 안의 알림 전부가 읽음이 된다**(#345) — 머리글이
+// 그 문제의 지금 상태를 말하므로("3번째 시도 채점 결과"가 아니라 그 문제 전체),
+// 읽음도 그 단위로 묶인다. 펼친 개별 시도 줄은 각자 하나만 읽음이 된다. 이
+// 모듈은 그 묶음의 id 목록만 내주고(`groupUnreadIds`), 실제로 그 id들을 어느
+// 엔드포인트로 몇 번 보내 읽음 처리하는지는 화면(`app/notifications/page.tsx`)이
+// 정한다(백엔드 `POST /notifications/mark-read-many` 한 번으로 보낸다).
 import type { NotificationRow } from "./api";
 
 export type NotificationGroup = {
@@ -63,8 +66,18 @@ export function groupNotifications(items: NotificationRow[]): NotificationGroup[
   });
 }
 
+/** 그 그룹 안의 **안 읽은** 알림 id 전부 — 머리글 클릭이 한 번에 읽음
+ * 처리할 대상이다(#345). 이미 읽은 알림은 다시 부를 이유가 없다. */
+export function groupUnreadIds(group: NotificationGroup): number[] {
+  return group.notifications.filter((n) => n.read_at === null).map((n) => n.id);
+}
+
+// 배지 숫자(`groupUnreadCount`)와 읽음 처리 대상(`groupUnreadIds`)이 "안 읽음"을
+// 각자 정의하면 나중에 그 정의가 바뀔 때(예: 읽음과 별개인 dismissed_at이
+// 생기면) 하나만 고치고 다른 하나를 잊기 쉽다 — 개수는 그 id 목록의 길이로만
+// 정의해 둘이 항상 같은 것을 센다.
 export function groupUnreadCount(group: NotificationGroup): number {
-  return group.notifications.filter((n) => n.read_at === null).length;
+  return groupUnreadIds(group).length;
 }
 
 function groupHasUnread(group: NotificationGroup): boolean {

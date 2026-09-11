@@ -6,6 +6,7 @@ import {
   groupHref,
   groupNotifications,
   groupUnreadCount,
+  groupUnreadIds,
   sortGroupsUnreadFirst,
 } from "./group";
 
@@ -86,6 +87,17 @@ describe("groupHref", () => {
     ];
     const [group] = groupNotifications(items);
     expect(groupHref(group)).toBeNull();
+  });
+});
+
+describe("groupUnreadIds", () => {
+  it("안 읽은 알림 id만 낸다 — 읽은 것은 빠진다(#345, 머리글 클릭이 다시 부르지 않는다)", () => {
+    const items = [
+      row({ id: 2, context: { problem_id: 1 }, read_at: null }),
+      row({ id: 1, context: { problem_id: 1 }, read_at: "2026-09-01T00:00:00Z" }),
+    ];
+    const [group] = groupNotifications(items);
+    expect(groupUnreadIds(group)).toEqual([2]);
   });
 });
 

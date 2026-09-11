@@ -4,12 +4,15 @@
 // 화면에도 그대로 노출한다"가 지금까지 API(`GET /notifications/me`)까지만
 // 충족돼 있었다 — 이 화면이 그 나머지를 채운다.
 //
-// **목록을 여는 것 자체가 "다 읽었다"는 뜻이다.** 마운트되면 먼저
-// `GET /notifications/me`로 지금 안 읽은 것까지 포함한 최신 목록을 그대로
-// 받아 그린 뒤, `POST /notifications/mark-read`로 그 시점의 안 읽은 알림을
-// 전부 읽음 처리한다 — 순서가 중요하다: 마크부터 하면 화면에 그릴 원본
-// `read_at`(방금까지 안 읽었다는 사실, "새 알림" 표시에 쓴다)을 잃는다.
-// 마크가 성공하면 헤더 벨에게 `read-bus` 이벤트로 알려 배지를 즉시 지운다.
+// **목록을 여는 것만으로는 읽음이 되지 않는다**(#345, CONTEXT.md
+// 「Notification」: "목록을 열어 본 것만으로는 읽음이 아니다"). 이 화면의
+// 알림에는 이동할 링크가 없다(공개 앱 알림 유형 전부가 그렇다 — 강의실처럼
+// context가 화면 주소를 담고 있지 않다) — 그래서 안 읽은 줄마다 작은 「읽음」
+// 버튼을 두고, 위에 그 화면 것만 치우는 「모두 읽음」 버튼을 둔다. 각각
+// `POST /notifications/{id}/mark-read` · `POST /notifications/mark-read`를
+// 부르고, 성공하면 그 알림(들)의 `read_at`만 로컬 상태에서 갱신한다 — 목록을
+// 다시 불러오지 않는다("새 알림" 표시가 그 사이 사라지면 안 되므로). 성공
+// 즉시 헤더 벨에게 `read-bus` 이벤트로 알려 배지를 곧바로 줄인다.
 //
 // **페이지네이션은 `limit`/`offset`을 손으로 늘린다** — `usePagedList`(패키지
 // 공유 훅)는 커서 계약(`{items, count, next}`)을 전제하는데 이 엔드포인트는
@@ -17,7 +20,7 @@
 // 않는 한 맞지 않는다 — 새 화면 하나를 위해 기존 API 계약을 바꾸는 대신
 // 화면이 그 계약에 맞춘다.
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
@@ -42,10 +45,7 @@ export default function NotificationsPage() {
   const session = useSession();
   const [load, setLoad] = useState<LoadState>({ status: "loading" });
   const [loadingMore, setLoadingMore] = useState(false);
-  // 마운트당 정확히 한 번만 읽음 처리한다 — StrictMode의 이중 마운트나 재렌더로
-  // 두 번 불려도 부작용은 없지만(멱등, `marked_count`가 두 번째엔 0), 굳이 두
-  // 번 보낼 이유가 없다.
-  const markedRef = useRef(false);
+  const [markingAll, setMarkingAll] = useState(false);
 
   useEffect(() => {
     if (session.status !== "authenticated") return;
@@ -60,19 +60,47 @@ export default function NotificationsPage() {
           return;
         }
         setLoad({ status: "ready", items: res.data, hasMore: res.data.length === PAGE_SIZE });
-
-        if (!markedRef.current) {
-          markedRef.current = true;
-          void bffClient.post<MarkAllReadOut>("/api/backend/notifications/mark-read").then((markResult) => {
-            if (markResult.ok) broadcastNotificationsRead();
-          });
-        }
       });
 
     return () => {
       cancelled = true;
     };
   }, [session.status]);
+
+  function applyRead(updated: Map<number, string>) {
+    setLoad((current) => {
+      if (current.status !== "ready") return current;
+      return {
+        ...current,
+        items: current.items.map((n) =>
+          updated.has(n.id) ? { ...n, read_at: updated.get(n.id)! } : n,
+        ),
+      };
+    });
+  }
+
+  async function markOneRead(notificationId: number) {
+    const res = await bffClient.post<NotificationOut>(
+      `/api/backend/notifications/${notificationId}/mark-read`,
+    );
+    if (res.ok && res.data.read_at) {
+      applyRead(new Map([[notificationId, res.data.read_at]]));
+      broadcastNotificationsRead();
+    }
+  }
+
+  async function markAllRead() {
+    if (load.status !== "ready") return;
+    setMarkingAll(true);
+    const res = await bffClient.post<MarkAllReadOut>("/api/backend/notifications/mark-read");
+    if (res.ok) {
+      const now = new Date().toISOString();
+      const unreadIds = load.items.filter((n) => n.read_at === null).map((n) => n.id);
+      applyRead(new Map(unreadIds.map((id) => [id, now])));
+      broadcastNotificationsRead();
+    }
+    setMarkingAll(false);
+  }
 
   async function loadMore() {
     if (load.status !== "ready") return;
@@ -100,14 +128,29 @@ export default function NotificationsPage() {
     );
   }
 
+  const unreadCount = load.status === "ready" ? load.items.filter((n) => n.read_at === null).length : 0;
+
   return (
     <main className="mx-auto max-w-2xl p-10">
       <Link className="text-sm text-muted" href="/console" data-testid="notifications-back">
         ← 콘솔
       </Link>
-      <h1 className="mt-2 text-2xl font-semibold" data-testid="notifications-heading">
-        알림
-      </h1>
+      <div className="mt-2 flex items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold" data-testid="notifications-heading">
+          알림
+        </h1>
+        {unreadCount > 0 && (
+          <button
+            type="button"
+            onClick={markAllRead}
+            disabled={markingAll}
+            data-testid="notifications-mark-all-read"
+            className="rounded-sm border border-rule px-3 py-1.5 text-sm hover:border-ink disabled:opacity-50"
+          >
+            {markingAll ? "처리 중..." : "모두 읽음"}
+          </button>
+        )}
+      </div>
 
       {load.status === "error" ? (
         <p className="mt-6 text-attention" data-testid="notifications-load-error">
@@ -121,7 +164,11 @@ export default function NotificationsPage() {
         <>
           <ul className="mt-6 flex flex-col" data-testid="notifications-list">
             {load.items.map((notification) => (
-              <NotificationRow key={notification.id} notification={notification} />
+              <NotificationRow
+                key={notification.id}
+                notification={notification}
+                onMarkRead={() => markOneRead(notification.id)}
+              />
             ))}
           </ul>
 
@@ -142,7 +189,13 @@ export default function NotificationsPage() {
   );
 }
 
-function NotificationRow({ notification }: { notification: NotificationOut }) {
+function NotificationRow({
+  notification,
+  onMarkRead,
+}: {
+  notification: NotificationOut;
+  onMarkRead: () => void;
+}) {
   const wasUnread = notification.read_at === null;
 
   return (
@@ -155,12 +208,22 @@ function NotificationRow({ notification }: { notification: NotificationOut }) {
       <div className="flex items-start justify-between gap-3">
         <p className="text-sm leading-relaxed">{describeNotification(notification)}</p>
         {wasUnread && (
-          <span
-            data-testid={`notification-new-badge-${notification.id}`}
-            className="shrink-0 rounded-full bg-attention px-1.5 py-0.5 text-[10px] font-medium text-paper"
-          >
-            새 알림
-          </span>
+          <div className="flex shrink-0 items-center gap-2">
+            <span
+              data-testid={`notification-new-badge-${notification.id}`}
+              className="rounded-full bg-attention px-1.5 py-0.5 text-[10px] font-medium text-paper"
+            >
+              새 알림
+            </span>
+            <button
+              type="button"
+              onClick={onMarkRead}
+              data-testid={`notification-mark-read-${notification.id}`}
+              className="rounded-sm border border-rule px-2 py-0.5 text-xs hover:border-ink"
+            >
+              읽음
+            </button>
+          </div>
         )}
       </div>
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted">

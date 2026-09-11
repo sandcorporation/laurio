@@ -1,14 +1,17 @@
 "use client";
 
-// 알림 목록 화면(#304, #305) — 헤더 종에서 들어온다. 공개 앱
-// (frontend/app/console/notifications/page.tsx)과 같은 계약이다: 목록을 여는
-// 것 자체가 "다 읽었다"는 뜻이다. 마운트되면 먼저 `GET /notifications/me?
-// classroom_only=true`로 지금 안 읽은 것까지 포함한 최신 목록을 그대로 받아
-// 그린 뒤, `POST /notifications/mark-read?classroom_only=true`로 그 시점의
-// 안 읽은 **강의실** 알림만 읽음 처리한다 — 공모전 알림은 이 화면이 절대
-// 건드리지 않는다(백엔드 `classroom_only` 필터가 그 경계를 긋는다). 순서가
-// 중요하다: 마크부터 하면 화면에 그릴 원본 `read_at`("새 알림"·"안 읽음 N"
-// 표시에 쓴다)을 잃는다.
+// 알림 목록 화면(#304, #305) — 헤더 종에서 들어온다.
+//
+// **목록을 여는 것만으로는 읽음이 되지 않는다**(#345, CONTEXT.md
+// 「Notification」: "목록을 열어 본 것만으로는 읽음이 아니다"). 대신:
+//   - 링크가 있는 줄(대부분 — `notificationHref`가 context로 주소를 짓는다)은
+//     눌러 그 화면으로 이동하는 순간 그 알림이 읽음이 된다. 접힌 묶음의
+//     머리글은 그 안의 안 읽은 알림 **전부**를, 펼친 개별 시도 줄은 **그
+//     하나만** 읽음 처리한다(#329·#305와 같은 단위).
+//   - 링크가 없는 줄(옛 알림 등 context가 비어 목적지를 못 지은 경우)에는
+//     작은 「읽음」 버튼이 있다.
+//   - 위쪽 「모두 읽음」 버튼이 이 화면의(=강의실) 안 읽은 알림 전부를 치운다.
+// 셋 다 성공하면 헤더 종에 `read-bus` 이벤트로 알려 배지를 곧바로 줄인다.
 //
 // **같은 문제의 알림은 한 줄로 접힌다(#305)** — 한 문제를 붙들고 여러 번 다시
 // 낸 사람의 목록이 같은 문제 이야기로 도배되지 않게 `lib/notifications/group.ts`
@@ -16,17 +19,24 @@
 // (AC) — 백엔드는 최신순으로만 주므로(공개 앱과 계약을 공유해 그 순서를
 // 바꾸지 않는다), "안 읽은 것을 위로"는 여기서 안정 정렬로 한 번 더 가른다.
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Card, EmptyState, ErrorNote, PageHeader, PageShell } from "@/app/components/ui";
 import { useTeacherClassGate } from "@/lib/classes/use-teacher-class-gate";
-import { fetchMyNotifications, markAllRead, type NotificationRow } from "@/lib/notifications/api";
+import {
+  fetchMyNotifications,
+  markAllRead,
+  markManyRead,
+  markOneRead,
+  type NotificationRow,
+} from "@/lib/notifications/api";
 import { describeNotification, formatDateTime } from "@/lib/notifications/format";
 import {
   groupCurrentlyPassed,
   groupHref,
   groupNotifications,
   groupUnreadCount,
+  groupUnreadIds,
   sortGroupsUnreadFirst,
   type NotificationGroup,
 } from "@/lib/notifications/group";
@@ -40,13 +50,10 @@ type LoadState =
 
 export default function NotificationsPage() {
   const [load, setLoad] = useState<LoadState>({ status: "loading" });
+  const [markingAll, setMarkingAll] = useState(false);
   // 강사인 클래스가 있는가 — 채점 예산 경고는 강사에게만 오므로(#295) 빈
   // 상태 문구가 그것을 언급할지 여기 판정으로 가른다(#343).
   const teacherGate = useTeacherClassGate();
-  // 마운트당 정확히 한 번만 읽음 처리한다(공개 앱과 같은 이유 — StrictMode의
-  // 이중 마운트나 재렌더로 두 번 불려도 부작용은 없지만 굳이 두 번 보낼
-  // 이유가 없다).
-  const markedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -55,15 +62,6 @@ export default function NotificationsPage() {
       .then((items) => {
         if (cancelled) return;
         setLoad({ status: "ready", items });
-
-        if (!markedRef.current) {
-          markedRef.current = true;
-          void markAllRead()
-            .then(() => broadcastNotificationsRead())
-            .catch(() => {
-              // 읽음 처리 실패는 화면을 막지 않는다 — 다음에 다시 열면 재시도된다.
-            });
-        }
       })
       .catch(() => {
         if (!cancelled) setLoad({ status: "error" });
@@ -73,6 +71,58 @@ export default function NotificationsPage() {
       cancelled = true;
     };
   }, []);
+
+  function applyRead(ids: number[], readAt: string) {
+    if (ids.length === 0) return;
+    const idSet = new Set(ids);
+    setLoad((current) => {
+      if (current.status !== "ready") return current;
+      return {
+        ...current,
+        items: current.items.map((n) => (idSet.has(n.id) ? { ...n, read_at: readAt } : n)),
+      };
+    });
+  }
+
+  async function handleMarkOneRead(notificationId: number) {
+    try {
+      const updated = await markOneRead(notificationId);
+      if (updated.read_at) {
+        applyRead([updated.id], updated.read_at);
+        broadcastNotificationsRead();
+      }
+    } catch {
+      // 읽음 처리 실패는 이동을 막지 않는다 — 다음에 다시 눌러 재시도할 수 있다.
+    }
+  }
+
+  async function handleMarkGroupRead(ids: number[]) {
+    if (ids.length === 0) return;
+    try {
+      await markManyRead(ids);
+      applyRead(ids, new Date().toISOString());
+      broadcastNotificationsRead();
+    } catch {
+      // 읽음 처리 실패는 이동을 막지 않는다 — 다음에 다시 눌러 재시도할 수 있다.
+    }
+  }
+
+  async function handleMarkAllRead() {
+    setMarkingAll(true);
+    try {
+      await markAllRead();
+      if (load.status === "ready") {
+        const now = new Date().toISOString();
+        const unreadIds = load.items.filter((n) => n.read_at === null).map((n) => n.id);
+        applyRead(unreadIds, now);
+        broadcastNotificationsRead();
+      }
+    } catch {
+      // 실패해도 화면은 그대로 — 다시 눌러 재시도할 수 있다.
+    } finally {
+      setMarkingAll(false);
+    }
+  }
 
   if (load.status === "loading") {
     return (
@@ -84,9 +134,24 @@ export default function NotificationsPage() {
     );
   }
 
+  const unreadCount = load.status === "ready" ? load.items.filter((n) => n.read_at === null).length : 0;
+
   return (
     <PageShell>
-      <PageHeader eyebrow="클래스" title="알림" titleTestId="notifications-heading" />
+      <div className="flex items-center justify-between gap-3">
+        <PageHeader eyebrow="클래스" title="알림" titleTestId="notifications-heading" />
+        {unreadCount > 0 && (
+          <button
+            type="button"
+            onClick={handleMarkAllRead}
+            disabled={markingAll}
+            data-testid="notifications-mark-all-read"
+            className="border border-rule px-3 py-1.5 text-[13px] text-ink hover:border-ink disabled:opacity-50"
+          >
+            {markingAll ? "처리 중..." : "모두 읽음"}
+          </button>
+        )}
+      </div>
 
       {load.status === "error" ? (
         <ErrorNote>
@@ -117,7 +182,12 @@ export default function NotificationsPage() {
           className="flex flex-col divide-y divide-rule border border-rule bg-surface"
         >
           {sortGroupsUnreadFirst(groupNotifications(load.items)).map((group) => (
-            <NotificationGroupRow key={group.key} group={group} />
+            <NotificationGroupRow
+              key={group.key}
+              group={group}
+              onMarkOneRead={handleMarkOneRead}
+              onMarkGroupRead={handleMarkGroupRead}
+            />
           ))}
         </ul>
       )}
@@ -125,13 +195,38 @@ export default function NotificationsPage() {
   );
 }
 
-function NotificationGroupRow({ group }: { group: NotificationGroup }) {
+type MarkHandlers = {
+  onMarkOneRead: (notificationId: number) => void;
+  onMarkGroupRead: (notificationIds: number[]) => void;
+};
+
+// 링크 없는 안 읽은 줄에 다는 작은 「읽음」 버튼 — 묶음 머리글과 개별 시도 줄
+// 둘 다 같은 모양을 쓴다(#345 리뷰: 마크업이 갈라지면 스타일 수정이 한쪽만
+// 반영되기 쉽다는 지적).
+function MarkReadButton({ onClick, testId }: { onClick: () => void; testId: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid={testId}
+      className="border border-rule px-2 py-0.5 text-[11.5px] text-ink hover:border-ink"
+    >
+      읽음
+    </button>
+  );
+}
+
+function NotificationGroupRow({
+  group,
+  onMarkOneRead,
+  onMarkGroupRead,
+}: { group: NotificationGroup } & MarkHandlers) {
   const [expanded, setExpanded] = useState(false);
   // 크기 1인 그룹(문제에 딸리지 않은 알림 전부, 그리고 시도가 한 번뿐인 문제)은
   // 접을 게 없다 — 그대로 한 줄이다(AC: "예산 경고처럼 문제에 딸리지 않은
   // 알림은 접히지 않고 그대로 한 줄이다").
   if (group.notifications.length === 1) {
-    return <NotificationListRow notification={group.notifications[0]} />;
+    return <NotificationListRow notification={group.notifications[0]} onMarkOneRead={onMarkOneRead} />;
   }
 
   const latest = group.notifications[0];
@@ -148,6 +243,11 @@ function NotificationGroupRow({ group }: { group: NotificationGroup }) {
       <span className="font-mono text-[11.5px] text-ink/45">{formatDateTime(latest.created_at)}</span>
     </>
   );
+  // 머리글은 그 문제의 지금 상태를 말하므로, 읽음도 안 읽은 시도 전부를
+  // 한 번에 치운다(#345) — 펼친 시도 하나하나를 다시 누를 필요가 없다. 이미
+  // 다 읽은 그룹을 다시 눌러도 안전하지만(멱등), 쓸모없는 요청을 보낼 이유가
+  // 없어 안 읽은 것이 있을 때만 부른다.
+  const markGroupRead = unreadCount > 0 ? () => onMarkGroupRead(groupUnreadIds(group)) : undefined;
 
   return (
     <li data-testid={`notification-group-${testKey}`} className="flex flex-col">
@@ -155,6 +255,7 @@ function NotificationGroupRow({ group }: { group: NotificationGroup }) {
         {href ? (
           <Link
             href={href}
+            onClick={markGroupRead}
             data-testid={`notification-group-link-${testKey}`}
             className="flex min-w-0 flex-1 flex-col gap-1"
           >
@@ -165,12 +266,17 @@ function NotificationGroupRow({ group }: { group: NotificationGroup }) {
         )}
         <div className="flex shrink-0 items-center gap-2">
           {unreadCount > 0 && (
-            <span
-              data-testid={`notification-group-unread-${testKey}`}
-              className="bg-attention px-1.5 py-0.5 text-[10px] font-medium text-paper"
-            >
-              안 읽음 {unreadCount}
-            </span>
+            <>
+              <span
+                data-testid={`notification-group-unread-${testKey}`}
+                className="bg-attention px-1.5 py-0.5 text-[10px] font-medium text-paper"
+              >
+                안 읽음 {unreadCount}
+              </span>
+              {!href && markGroupRead && (
+                <MarkReadButton onClick={markGroupRead} testId={`notification-group-mark-read-${testKey}`} />
+              )}
+            </>
           )}
           <button
             type="button"
@@ -190,7 +296,7 @@ function NotificationGroupRow({ group }: { group: NotificationGroup }) {
           className="flex flex-col divide-y divide-rule border-t border-rule bg-paper/40"
         >
           {group.notifications.map((notification) => (
-            <NotificationListRow key={notification.id} notification={notification} />
+            <NotificationListRow key={notification.id} notification={notification} onMarkOneRead={onMarkOneRead} />
           ))}
         </ul>
       )}
@@ -198,7 +304,10 @@ function NotificationGroupRow({ group }: { group: NotificationGroup }) {
   );
 }
 
-function NotificationListRow({ notification }: { notification: NotificationRow }) {
+function NotificationListRow({
+  notification,
+  onMarkOneRead,
+}: { notification: NotificationRow } & Pick<MarkHandlers, "onMarkOneRead">) {
   const wasUnread = notification.read_at === null;
   const href = notificationHref(notification);
 
@@ -207,12 +316,20 @@ function NotificationListRow({ notification }: { notification: NotificationRow }
       <div className="flex items-start justify-between gap-3">
         <p className="text-[13.5px] leading-relaxed">{describeNotification(notification)}</p>
         {wasUnread && (
-          <span
-            data-testid={`notification-new-badge-${notification.id}`}
-            className="shrink-0 bg-attention px-1.5 py-0.5 text-[10px] font-medium text-paper"
-          >
-            새 알림
-          </span>
+          <div className="flex shrink-0 items-center gap-2">
+            <span
+              data-testid={`notification-new-badge-${notification.id}`}
+              className="bg-attention px-1.5 py-0.5 text-[10px] font-medium text-paper"
+            >
+              새 알림
+            </span>
+            {!href && (
+              <MarkReadButton
+                onClick={() => onMarkOneRead(notification.id)}
+                testId={`notification-mark-read-${notification.id}`}
+              />
+            )}
+          </div>
         )}
       </div>
       <span className="font-mono text-[11.5px] text-ink/45">
@@ -230,6 +347,7 @@ function NotificationListRow({ notification }: { notification: NotificationRow }
       {href ? (
         <Link
           href={href}
+          onClick={wasUnread ? () => onMarkOneRead(notification.id) : undefined}
           data-testid={`notification-row-${notification.id}-link`}
           className="flex flex-col gap-1.5 px-4 py-3.5 hover:bg-paper"
         >

@@ -255,7 +255,7 @@ llm_scoring`(#274)에 이어 `core.repository_adapters`(GitHub 저장소 clone·
 | | |
 | --- | --- |
 | `POST /api/storage/uploads` · `downloads` | presigned URL 발급 |
-| `GET /api/notifications/me` · `unread-count` · `POST mark-read` | 내 알림 |
+| `GET /api/notifications/me` · `unread-count` · `POST mark-read` · `POST {id}/mark-read` · `POST mark-read-many` | 내 알림 |
 
 **버킷이 둘이다**(ADR-0032) — 제출물이 사는 비공개 버킷과 공모전 이미지만 사는 익명 읽기
 버킷. 서버가 아니라 **버킷을 가른다**: 공개 읽기 정책이 버킷 단위라 이미지 쪽 설정을
@@ -385,6 +385,19 @@ CI의 `pytest` 잡이 매번 같은 텍스트를 재생성해 이 블록과 글�
 
 **도달 실패 사유는 청중을 가른다.** 운영자·도구에는 원문 그대로, 수신자에게는 전달 상태만
 보고 만든 문장이 간다 — 원문에는 내부 참조와 벤더 오류가 들어 있다.
+
+**공모전과 강의실 알림은 서로 섞이지 않는다**(#345). `/me`·`unread-count`·
+`mark-read` 셋이 공유하는 `classroom_only` 쿼리 하나가 경계를 긋는다 —
+`true`(강의실 앱이 언제나 붙인다)면 강의실 알림만, 기본값(`false`, 공개
+앱이 쓰는 값)이면 강의실 알림을 **뺀** 나머지만 세고·보이고·읽음 처리한다.
+**읽음은 당사자가 누르거나 「모두 읽음」으로 치운 사실이다** — 목록을 연
+것만으로는 읽음이 아니다(CONTEXT.md 「Notification」). 알림 하나를 지목하는
+`POST /{id}/mark-read`는 `recipient=request.auth_user`로만 조회해, 남의
+알림 id는 존재하지 않는 것처럼 404를 낸다 — 조건부 `UPDATE`(`read_at__isnull
+=True`인 행만)라 동시에 들어온 두 요청도 최초로 읽은 시각을 덮어쓰지 않는다.
+여러 개를 한 번에 지목하는 `POST /mark-read-many`(강의실 알림 묶음(#305)의
+머리글이 쓴다)는 `pk__in`을 같은 `recipient` 필터로 좁혀 갱신한다 — 남의
+id가 섞여 들어와도 에러 없이 그 행만 걸러진다.
 
 ## 정책 값
 

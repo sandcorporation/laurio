@@ -54,3 +54,26 @@ export function markAllRead(): Promise<MarkAllRead> {
     method: "POST",
   });
 }
+
+// 알림 하나를 지목해 읽음으로 표시한다(#345) — 링크를 눌러 그 화면으로 갈 때,
+// 또는 링크 없는 알림 줄의 「읽음」 버튼이 부른다. `classroom_only`가 필요
+// 없다 — 이 엔드포인트는 이미 그 사람 소유의 알림 id 하나만 다루므로(백엔드
+// `mark_one_read`가 `recipient=request.auth_user`로 조회한다), 어느 제품
+// 것인지는 id 자체가 이미 정해 준다.
+export function markOneRead(notificationId: number): Promise<NotificationRow> {
+  return backendJson<NotificationRow>(`/notifications/${notificationId}/mark-read`, {
+    method: "POST",
+  });
+}
+
+// 알림 여러 개를 한 번에 지목해 읽음으로 표시한다(#345) — 묶음(#305)의 머리글을
+// 누르면 그 문제의 안 읽은 시도 전부가 한 번에 읽음이 되어야 하는데, 그 개수만큼
+// `markOneRead`를 따로 부르면 시도가 쌓일수록 요청 수가 그만큼 는다. 이쪽도
+// `classroom_only`가 필요 없다 — id들 자체가 `recipient=request.auth_user`로
+// 좁혀진다(백엔드 `mark_many_read`).
+export function markManyRead(notificationIds: number[]): Promise<MarkAllRead> {
+  return backendJson<MarkAllRead>("/notifications/mark-read-many", {
+    method: "POST",
+    body: JSON.stringify({ notification_ids: notificationIds }),
+  });
+}
