@@ -21,6 +21,7 @@ import { Card, EmptyState, ErrorNote, PageHeader, PageShell } from "@/app/compon
 import { fetchMyNotifications, markAllRead, type NotificationRow } from "@/lib/notifications/api";
 import { describeNotification, formatDateTime } from "@/lib/notifications/format";
 import {
+  groupCurrentlyPassed,
   groupNotifications,
   groupUnreadCount,
   sortGroupsUnreadFirst,
@@ -87,7 +88,9 @@ export default function NotificationsPage() {
       ) : load.items.length === 0 ? (
         <Card>
           <EmptyState>
-            <span data-testid="notifications-empty">아직 알림이 없습니다.</span>
+            <span data-testid="notifications-empty">
+              아직 알림이 없습니다 — 제출이 채점되거나 채점 예산 경고가 생기면 여기 나타납니다.
+            </span>
           </EmptyState>
         </Card>
       ) : (
@@ -114,8 +117,7 @@ function NotificationGroupRow({ group }: { group: NotificationGroup }) {
   }
 
   const latest = group.notifications[0];
-  const latestContext = (latest.context ?? {}) as Record<string, unknown>;
-  const latestPassed = latestContext.passed === true;
+  const currentlyPassed = groupCurrentlyPassed(group);
   const unreadCount = groupUnreadCount(group);
   const testKey = group.problemId ?? group.key;
 
@@ -130,9 +132,9 @@ function NotificationGroupRow({ group }: { group: NotificationGroup }) {
       >
         <div className="flex min-w-0 flex-col gap-1">
           <p className="text-[13.5px] leading-relaxed">
-            {`'${group.problemTitle ?? "문제"}' 시도 ${group.notifications.length}건 — 최근 결과 ${
-              latestPassed ? "통과" : "미통과"
-            }`}
+            {`'${group.className ?? "클래스"}' 클래스 '${group.problemTitle ?? "문제"}' 문제 — 지금 상태 ${
+              currentlyPassed ? "통과" : "미통과"
+            } (시도 ${group.notifications.length}건)`}
           </p>
           <span className="font-mono text-[11.5px] text-ink/45">
             {formatDateTime(latest.created_at)}

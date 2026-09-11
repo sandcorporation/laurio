@@ -12,6 +12,7 @@ export type NotificationGroup = {
   /** `null`이면 문제에 딸리지 않은 알림(예산 경고 등) — 언제나 크기 1이다. */
   problemId: number | null;
   problemTitle: string | null;
+  className: string | null;
   /** 이미 원본 목록(백엔드가 최신순으로 준 것) 순서를 그대로 보존한다 — [0]이 최신. */
   notifications: NotificationRow[];
 };
@@ -53,6 +54,7 @@ export function groupNotifications(items: NotificationRow[]): NotificationGroup[
       key,
       problemId: typeof context.problem_id === "number" ? context.problem_id : null,
       problemTitle: typeof context.problem_title === "string" ? context.problem_title : null,
+      className: typeof context.class_name === "string" ? context.class_name : null,
       notifications,
     };
   });
@@ -64,6 +66,17 @@ export function groupUnreadCount(group: NotificationGroup): number {
 
 function groupHasUnread(group: NotificationGroup): boolean {
   return groupUnreadCount(group) > 0;
+}
+
+/** 그 문제의 **지금** 통과 상태 — 가장 최근 시도가 아니라 시도 전체에 대한
+ * OR이다(CONTEXT.md 「통과」: "최신 시도가 아니라 「결국 풀었는가」를 센다,
+ * 고쳐서 다시 내는 것이 학습의 정상적인 모양이기 때문"). 그래서 최근 시도가
+ * 미통과여도 그 전에 한 번이라도 통과했다면 이 그룹은 여전히 통과다. */
+export function groupCurrentlyPassed(group: NotificationGroup): boolean {
+  return group.notifications.some((n) => {
+    const context = (n.context ?? {}) as Record<string, unknown>;
+    return context.passed === true;
+  });
 }
 
 /** 안 읽은 것이 위, 그 안에서 최신순 — 정렬 규칙은 그대로다(AC). 안정 정렬이라
