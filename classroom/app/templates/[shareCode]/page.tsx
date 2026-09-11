@@ -21,6 +21,7 @@ import {
   buttonClass,
 } from "@/app/components/ui";
 import { BackendError } from "@/lib/backend/client";
+import { selectCopyTargets } from "@/lib/classes/copy-targets";
 import { useMyClasses } from "@/lib/classes/use-my-classes";
 import { importProblemTemplate, reportProblemTemplate, takedownProblemTemplate } from "@/lib/problem-templates/api";
 import { useTemplatePreview } from "@/lib/problem-templates/use-template-preview";
@@ -91,8 +92,10 @@ export default function ProblemTemplatePreviewPage() {
     try {
       const problem = await importProblemTemplate(shareCode, Number(targetClassId));
       router.push(`/classes/${problem.classroom_id}/problems/${problem.id}`);
-    } catch {
-      setImportError("가져오지 못했습니다. 잠시 후 다시 시도해주세요.");
+    } catch (err) {
+      setImportError(
+        err instanceof BackendError ? err.message : "가져오지 못했습니다. 잠시 후 다시 시도해주세요.",
+      );
     } finally {
       setImporting(false);
     }
@@ -191,41 +194,54 @@ export default function ProblemTemplatePreviewPage() {
               <CardHeader title="내 클래스로 가져오기" />
               <div className="flex flex-col gap-2.5 p-4">
                 {myClassesState.status === "ready" ? (
-                  myClassesState.classes.length === 0 ? (
-                    <p data-testid="template-import-no-target" className="text-[13px] text-ink/45">
-                      가져올 클래스가 없습니다. 먼저 클래스를 열어주세요.
-                    </p>
-                  ) : (
-                    <form onSubmit={handleImport} className="flex flex-col gap-2.5">
-                      <label htmlFor="template-import-target">
-                        <FieldLabel>대상 클래스</FieldLabel>
-                      </label>
-                      <select
-                        id="template-import-target"
-                        data-testid="template-import-target-select"
-                        value={targetClassId}
-                        onChange={(event) => setTargetClassId(event.target.value)}
-                        className={INPUT_CLASS}
-                      >
-                        <option value="" data-testid="template-import-target-option-empty">
-                          클래스를 선택하세요
-                        </option>
-                        {myClassesState.classes.map((c) => (
-                          <option key={c.id} value={c.id} data-testid={`template-import-target-option-${c.id}`}>
-                            {c.name}
+                  (() => {
+                    const selection = selectCopyTargets(myClassesState.classes);
+                    if (selection.kind === "no-classes") {
+                      return (
+                        <p data-testid="template-import-no-target" className="text-[13px] text-ink/45">
+                          가져올 클래스가 없습니다. 먼저 클래스를 열어주세요.
+                        </p>
+                      );
+                    }
+                    if (selection.kind === "all-archived") {
+                      return (
+                        <p data-testid="template-import-all-archived" className="text-[13px] text-ink/45">
+                          내 클래스가 모두 보관되어 있어 가져올 수 없습니다.
+                        </p>
+                      );
+                    }
+                    return (
+                      <form onSubmit={handleImport} className="flex flex-col gap-2.5">
+                        <label htmlFor="template-import-target">
+                          <FieldLabel>대상 클래스</FieldLabel>
+                        </label>
+                        <select
+                          id="template-import-target"
+                          data-testid="template-import-target-select"
+                          value={targetClassId}
+                          onChange={(event) => setTargetClassId(event.target.value)}
+                          className={INPUT_CLASS}
+                        >
+                          <option value="" data-testid="template-import-target-option-empty">
+                            클래스를 선택하세요
                           </option>
-                        ))}
-                      </select>
-                      <button
-                        type="submit"
-                        data-testid="template-import-submit"
-                        disabled={importing || targetClassId === ""}
-                        className={buttonClass("primary")}
-                      >
-                        {importing ? "가져오는 중..." : "가져오기"}
-                      </button>
-                    </form>
-                  )
+                          {selection.classes.map((c) => (
+                            <option key={c.id} value={c.id} data-testid={`template-import-target-option-${c.id}`}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="submit"
+                          data-testid="template-import-submit"
+                          disabled={importing || targetClassId === ""}
+                          className={buttonClass("primary")}
+                        >
+                          {importing ? "가져오는 중..." : "가져오기"}
+                        </button>
+                      </form>
+                    );
+                  })()
                 ) : (
                   <p data-testid="template-import-classes-loading" className="text-[13px] text-ink/45">
                     클래스 목록을 불러오는 중...
