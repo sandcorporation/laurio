@@ -18,10 +18,42 @@ import {
   PageShell,
   SectionHeading,
   buttonClass,
+  type ButtonTone,
 } from "@/app/components/ui";
 import type { ClassRow, JoinedClassRow } from "@/lib/classes/api";
 import { useMyClasses } from "@/lib/classes/use-my-classes";
 import { useJoinedClasses } from "@/lib/classes/use-joined-classes";
+
+// 「새 클래스 열기」·「템플릿 둘러보기」 — 머리(강사만인 사람·둘 다인 사람·아무
+// 데도 안 속한 사람)와 참여 중인 클래스 목록 뒤(참여자로만 속한 사람)에 각각
+// 다른 모양(tone·크기)으로 나온다(#342 후속). href·testid·문구를 두 곳에 따로
+// 적으면 라우트나 문구가 바뀔 때 한쪽만 고치고 지나가기 쉬워 여기 하나로 묶는다.
+function ClassActionLinks({
+  newClassTone,
+  size = "md",
+}: {
+  newClassTone: ButtonTone;
+  size?: "sm" | "md";
+}) {
+  return (
+    <>
+      <Link
+        href="/templates"
+        data-testid="classroom-browse-templates-link"
+        className={buttonClass("secondary", size)}
+      >
+        템플릿 둘러보기
+      </Link>
+      <Link
+        href="/classes/new"
+        data-testid="classroom-new-class-link"
+        className={buttonClass(newClassTone, size)}
+      >
+        새 클래스 열기
+      </Link>
+    </>
+  );
+}
 
 function ClassList({
   classes,
@@ -184,6 +216,16 @@ export default function ClassroomHome() {
       체크리스트를 그대로 가져와 새로 시작할 수 있습니다.
     </span>
   );
+  // 강사용 두 행동(새 클래스 열기·템플릿 둘러보기) — 참여자로만 속한 사람에게는
+  // 머리에 두지 않는다(#342 후속). 머리에 채움(primary) 버튼이 있으면 화면에
+  // 들어오자마자 가장 세게 읽히는 것이 강사의 행동이 되어, 문구만 바꾼 첫
+  // 커밋으로는 "강사용 버튼 둘이 먼저 선다"는 불만이 절반만 풀렸다. 명세(역할을
+  // 미리 정하지 않는다, CONTEXT.md 「Class」)는 버튼이 "보인다"까지만 요구하고
+  // "머리에서 채움 모양으로"까지는 요구하지 않으므로, 참여자로만 속한 사람에게는
+  // 참여 중인 클래스 목록 뒤로 내리고 보조(secondary) 모양으로 낮춘다 —
+  // 목록 행의 「열기」와 같은 무게로 두어 목록 자체가 화면의 주인공이 되게 한다.
+  const headerActions =
+    loading || participantOnly ? undefined : <ClassActionLinks newClassTone="primary" />;
 
   return (
     <PageShell>
@@ -192,20 +234,7 @@ export default function ClassroomHome() {
         title="내 클래스"
         titleTestId="classroom-home-heading"
         description={headerDescription}
-        actions={
-          <>
-            <Link
-              href="/templates"
-              data-testid="classroom-browse-templates-link"
-              className={buttonClass("secondary")}
-            >
-              템플릿 둘러보기
-            </Link>
-            <Link href="/classes/new" data-testid="classroom-new-class-link" className={buttonClass("primary")}>
-              새 클래스 열기
-            </Link>
-          </>
-        }
+        actions={headerActions}
       />
 
       {loading ? (
@@ -236,6 +265,19 @@ export default function ClassroomHome() {
               <SectionHeading title="참여 중인 클래스" hint={joined.classes.length} />
               <JoinedClassList classes={joined.classes} />
             </section>
+          ) : null}
+
+          {/* 참여자로만 속한 사람에게는 강사용 두 행동을 여기, 목록 뒤에
+              보조(secondary) 모양으로 둔다 — 머리에서 내린 것과 짝이다(위
+              headerActions 주석 참고). 「보인다」는 지키되 「가장 먼저·가장
+              세게」는 목록에 내준다. */}
+          {participantOnly ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-rule pt-5">
+              <p className="text-[13px] text-ink/60">직접 클래스를 열어 강사가 될 수도 있습니다.</p>
+              <div className="flex flex-wrap gap-2">
+                <ClassActionLinks newClassTone="secondary" size="sm" />
+              </div>
+            </div>
           ) : null}
 
           {taught.status === "error" ? (
