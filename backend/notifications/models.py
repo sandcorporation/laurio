@@ -42,6 +42,19 @@ class NotificationType(models.TextChoices):
     CLASSROOM_SUBMISSION_SCORED = "classroom_submission_scored", "강의실 제출 채점 완료"
 
 
+#: 강의실 제품이 만드는 알림 유형 전부(#304) — 클래스 알림 화면·종 배지가 이
+#: 집합만 센다. 공모전 마감·지급·이의 심판 등은 여기 들어가지 않는다. 지금은
+#: `is_internal_only`인 유형과 겹치지만(둘 다 클래스 알림이 전부다) 의도적으로
+#: 별개의 목록이다 — 하나는 "밖으로 나가는가"를, 하나는 "어느 제품 것인가"를
+#: 답한다. 나중에 강의실 알림 중 밖으로 나가는 것이 생겨도 이 목록만 늘리면 된다.
+CLASSROOM_NOTIFICATION_TYPES = frozenset(
+    {
+        NotificationType.CLASSROOM_TOKEN_BUDGET_WARNING,
+        NotificationType.CLASSROOM_SUBMISSION_SCORED,
+    }
+)
+
+
 # 유형별 거래성/광고성/야간유예/외부발송 플래그. 광고성(is_promotional=True)은
 # 옵트인 없이 발송되지 않는다(ADR-0010). 거래성/광고성은 배타적이지 않게 둘 다
 # 갖는 구조도 가능하지만, 지금 정의된 유형들은 전부 어느 한쪽으로만 떨어진다.

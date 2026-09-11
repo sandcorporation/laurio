@@ -4,6 +4,8 @@ import Link from "next/link";
 import localFont from "next/font/local";
 import type { ReactNode } from "react";
 
+import { NotificationBell } from "./components/notification-bell";
+
 import "./globals.css";
 
 // 서체는 공개 앱과 같다 (#298) — 두 서브도메인이 한 제품이므로 글꼴이 갈리면
@@ -42,7 +44,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="ko" className={`${pretendard.variable} ${ibmPlexMono.variable}`}>
       <body>
         <header className="border-b border-rule bg-surface">
-          <div className="mx-auto flex h-[72px] max-w-[1200px] items-center px-6">
+          <div className="mx-auto flex h-[72px] max-w-[1200px] items-center justify-between px-6">
             <Link
               href="/"
               data-testid="classroom-header-brand"
@@ -50,6 +52,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             >
               Laurio <span className="text-[15px] font-normal text-ink/45">강의실</span>
             </Link>
+            <NotificationBell />
           </div>
         </header>
         {children}

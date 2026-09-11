@@ -17,7 +17,7 @@ from accounts.middleware import jwt_auth
 from core.auth import InternalAuth
 from core.clock import Clock
 
-from .models import Notification, NotificationDispatch, NotificationType
+from .models import CLASSROOM_NOTIFICATION_TYPES, Notification, NotificationDispatch, NotificationType
 from .services import create_notification
 
 router = Router(tags=["internal", "notifications"], auth=InternalAuth())
@@ -159,6 +159,7 @@ def list_my_notifications(
     request,
     limit: int = NOTIFICATION_HISTORY_DEFAULT_LIMIT,
     offset: int = 0,
+    classroom_only: bool = False,
 ):
     """로그인한 사용자(Sponsor 포함) 자신에게 발송된 Notification 이력.
 
@@ -166,31 +167,43 @@ def list_my_notifications(
     요구하는 "연락받은 적 없다"는 항의에 대한 방어선이 이 화면이다(#19 AC). 최신순
     으로, `limit`/`offset`으로 페이지를 넘긴다 — `limit`은
     NOTIFICATION_HISTORY_MAX_LIMIT을 넘지 않게 잘라낸다(#19 리뷰 지적 5).
+
+    `classroom_only=true`면 강의실 알림(`CLASSROOM_NOTIFICATION_TYPES`)만
+    돌려준다(#304) — 강의실 화면이 이 값으로 부른다. 기본값(`False`)은 공개
+    앱이 지금까지 쓰던 것과 한 글자도 다르지 않다 — 강의실이 생기기 전 계약을
+    깨지 않는다.
     """
 
     limit = max(1, min(limit, NOTIFICATION_HISTORY_MAX_LIMIT))
     offset = max(0, offset)
 
-    notifications = (
-        Notification.objects.filter(recipient=request.auth_user)
-        .prefetch_related("dispatches")
-        .order_by("-created_at")[offset : offset + limit]
-    )
+    notifications = Notification.objects.filter(recipient=request.auth_user)
+    if classroom_only:
+        notifications = notifications.filter(notification_type__in=CLASSROOM_NOTIFICATION_TYPES)
+    notifications = notifications.prefetch_related("dispatches").order_by("-created_at")[
+        offset : offset + limit
+    ]
     return [_serialize(n, for_recipient=True) for n in notifications]
 
 
 @public_router.get("/unread-count", response=UnreadCountOut, auth=jwt_auth)
-def unread_count(request):
+def unread_count(request, classroom_only: bool = False):
     """헤더 벨의 배지 숫자(#230). 목록 전체를 가져오지 않고 개수만 센다 — 벨은
     목록 화면 밖에서도(다른 페이지를 보는 동안) 계속 나타나야 하므로 가벼워야
-    한다."""
+    한다.
 
-    count = Notification.objects.filter(recipient=request.auth_user, read_at__isnull=True).count()
-    return UnreadCountOut(count=count)
+    `classroom_only=true`면 강의실 알림만 센다(#304) — 강의실 종 배지가 공모전·
+    지급·이의 알림까지 섞어 세면 "자기 채점 결과를 그 안에서 찾아야" 하므로
+    (#304 What to build), 강의실 벨은 이 값을 준다."""
+
+    qs = Notification.objects.filter(recipient=request.auth_user, read_at__isnull=True)
+    if classroom_only:
+        qs = qs.filter(notification_type__in=CLASSROOM_NOTIFICATION_TYPES)
+    return UnreadCountOut(count=qs.count())
 
 
 @public_router.post("/mark-read", response=MarkAllReadOut, auth=jwt_auth)
-def mark_all_read(request):
+def mark_all_read(request, classroom_only: bool = False):
     """지금 안 읽은 알림을 전부 읽음으로 표시한다(#230 AC: "목록을 열면 그 시점의
     안 읽은 알림이 전부 읽음이 된다").
 
@@ -200,12 +213,17 @@ def mark_all_read(request):
     아예 없다 — 그런 파라미터가 있었다면 그 자체가 남의 알림 id를 넣어보는
     시도의 표면이 됐을 것이다.
 
+    `classroom_only=true`면 강의실 알림만 읽음 처리한다(#304) — 강의실 화면을
+    여는 것이 그 사람의 공모전·지급 알림까지 함께 읽음으로 만들면 안 된다
+    (두 제품이 계정을 공유하는 사람에게 생기는 부작용).
+
     발송 측 필드(`status`·`dispatches`)는 이 갱신이 전혀 건드리지 않는다 — 읽음
     처리가 발송 이력을 바꾸지 않는다는 AC가 그래서 구조적으로 성립한다."""
 
-    marked_count = Notification.objects.filter(
-        recipient=request.auth_user, read_at__isnull=True
-    ).update(read_at=Clock.now())
+    qs = Notification.objects.filter(recipient=request.auth_user, read_at__isnull=True)
+    if classroom_only:
+        qs = qs.filter(notification_type__in=CLASSROOM_NOTIFICATION_TYPES)
+    marked_count = qs.update(read_at=Clock.now())
     return MarkAllReadOut(marked_count=marked_count)
 
 
