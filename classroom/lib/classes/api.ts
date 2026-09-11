@@ -22,6 +22,9 @@ export type ClassRow = {
   token_budget_remaining: number | null;
   // 지금 채점이 예산 때문에 멈춰 있는가.
   token_budget_exhausted: boolean;
+  // 이 클래스의 어느 문제에도 제출이 하나라도 있는가(#330) — 백엔드가
+  // 판정해 내려준다. 참이면 삭제할 수 없고 보관만 된다.
+  has_submissions: boolean;
 };
 
 export function fetchMyClasses(): Promise<ClassRow[]> {
@@ -108,4 +111,10 @@ export function archiveClass(classId: number): Promise<ClassRow> {
 
 export function unarchiveClass(classId: number): Promise<ClassRow> {
   return backendJson<ClassRow>(`/classroom/classes/${classId}/unarchive`, { method: "POST" });
+}
+
+// 삭제 — 없던 일로 한다(#330). 보관과 달리 되돌릴 수 없다. 제출이 하나라도
+// 있으면 백엔드가 거절한다(403) — 그때는 보관을 쓴다.
+export function deleteClass(classId: number): Promise<void> {
+  return backendJson<void>(`/classroom/classes/${classId}`, { method: "DELETE" });
 }

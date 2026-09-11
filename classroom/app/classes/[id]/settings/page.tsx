@@ -5,7 +5,7 @@
 // 이름과(#299) 클래스를 템플릿으로 공개하는 일(#319)까지 이 화면 하나가 담는다.
 // 키는 저장 뒤 마스킹된 형태로만 보인다 — 평문은 다시 보여주지 않는다.
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
@@ -24,8 +24,11 @@ import {
 } from "@/app/components/ui";
 import { BackendError } from "@/lib/backend/client";
 import { publishClassAsTemplate, takedownClassTemplate, type ClassTemplateRow } from "@/lib/class-templates/api";
-import { setOpenAIKey, updateClass } from "@/lib/classes/api";
+import { deleteClass, setOpenAIKey, updateClass, type ClassRow } from "@/lib/classes/api";
+import { isDeleteConfirmationTyped } from "@/lib/classes/delete-confirmation";
 import { useClass } from "@/lib/classes/use-class";
+import { useMembers } from "@/lib/members/use-members";
+import { useProblems } from "@/lib/problems/use-problems";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
 
 function ClassTemplatePublishCard() {
@@ -144,6 +147,142 @@ function ClassTemplatePublishCard() {
           클래스를 고치거나 지워도 템플릿은 그대로입니다. 참여자·제출물·판정·가입 코드·채점
           키·채점 모델은 담기지 않습니다.
         </span>
+      </div>
+    </Card>
+  );
+}
+
+function DeleteClassCard({ classId, classroom }: { classId: number; classroom: ClassRow }) {
+  // 삭제 — 없던 일로 한다(#330). 보관과 달리 되돌릴 수 없다. 제출이 있으면
+  // 백엔드가 판정해 내려준 `has_submissions`를 그대로 믿는다 — 이 화면이 문제·
+  // 제출물 목록을 다시 합쳐 스스로 셈하지 않는다.
+  const router = useRouter();
+  const { state: problemsState } = useProblems(classId);
+  const { state: membersState } = useMembers(classId);
+
+  const [confirming, setConfirming] = useState(false);
+  const [typedName, setTypedName] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const previewReady = problemsState.status === "ready" && membersState.status === "ready";
+  const problemCount = problemsState.status === "ready" ? problemsState.problems.length : null;
+  const checklistItemCount =
+    problemsState.status === "ready"
+      ? problemsState.problems.reduce((sum, problem) => sum + problem.checklist_items.length, 0)
+      : null;
+  const memberCount = membersState.status === "ready" ? membersState.members.length : null;
+
+  function openConfirm() {
+    setError(null);
+    setTypedName("");
+    setConfirming(true);
+  }
+
+  function cancel() {
+    setConfirming(false);
+    setTypedName("");
+    setError(null);
+  }
+
+  async function handleDelete() {
+    setError(null);
+    setDeleting(true);
+    try {
+      await deleteClass(classId);
+      router.push("/");
+    } catch (err) {
+      setError(err instanceof BackendError ? err.message : "클래스를 지우지 못했습니다.");
+      setDeleting(false);
+    }
+  }
+
+  if (classroom.has_submissions) {
+    return (
+      <Card>
+        <CardHeader title="클래스 삭제" hint="되돌릴 수 없습니다" />
+        <div className="p-4">
+          <Note tone="attention">
+            <span data-testid="delete-class-blocked">
+              제출이 있어 지울 수 없습니다 — 참여자가 낸 제출과 판정은 그 사람의
+              기록이라 강사가 지울 수 없습니다. 수업이 끝났다면 클래스 상세에서
+              대신 보관해주세요.
+            </span>
+          </Note>
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader title="클래스 삭제" hint="제출이 없을 때만 가능합니다 — 되돌릴 수 없습니다" />
+      <div className="flex flex-col gap-3 p-4">
+        {!confirming ? (
+          <button
+            type="button"
+            data-testid="delete-class-open"
+            onClick={openConfirm}
+            disabled={!previewReady}
+            className={buttonClass("danger", "sm")}
+          >
+            {previewReady ? "클래스 삭제" : "불러오는 중..."}
+          </button>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <Note tone="attention">
+              <div className="flex flex-col gap-1">
+                <span data-testid="delete-class-warning">
+                  지우면 문제 {problemCount}개, 체크리스트 항목 {checklistItemCount}개,
+                  참여자 {memberCount}명의 가입이 모두 함께 사라지고 되돌릴 수 없습니다.
+                </span>
+                <span data-testid="delete-class-template-note">
+                  이 클래스에서 템플릿으로 공개한 것은 그 시점의 사본이라 영향받지
+                  않습니다.
+                </span>
+              </div>
+            </Note>
+            <label htmlFor="delete-class-confirm-input">
+              <FieldLabel>
+                계속하려면 클래스 이름 <b className="text-ink">{classroom.name}</b>을 그대로
+                입력하세요
+              </FieldLabel>
+            </label>
+            <input
+              id="delete-class-confirm-input"
+              data-testid="delete-class-confirm-input"
+              value={typedName}
+              onChange={(event) => setTypedName(event.target.value)}
+              className={INPUT_CLASS}
+              autoComplete="off"
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                data-testid="delete-class-confirm"
+                onClick={handleDelete}
+                disabled={!isDeleteConfirmationTyped(classroom.name, typedName) || deleting}
+                className={buttonClass("danger", "sm")}
+              >
+                {deleting ? "지우는 중..." : "정말 삭제"}
+              </button>
+              <button
+                type="button"
+                data-testid="delete-class-cancel"
+                onClick={cancel}
+                disabled={deleting}
+                className={buttonClass("secondary", "sm")}
+              >
+                취소
+              </button>
+            </div>
+          </div>
+        )}
+        {error ? (
+          <ErrorNote>
+            <span data-testid="delete-class-error">{error}</span>
+          </ErrorNote>
+        ) : null}
       </div>
     </Card>
   );
@@ -541,6 +680,8 @@ export default function ClassSettingsPage() {
         </Card>
 
         <ClassTemplatePublishCard />
+
+        <DeleteClassCard classId={classId} classroom={classroom} />
       </div>
     </PageShell>
   );

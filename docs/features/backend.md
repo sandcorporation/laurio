@@ -169,6 +169,7 @@ ADR-0036). 업로드 자료의 값은 `submission:{공모전id}:{개발자id}:{�
 | `GET /api/classroom/scoring-models` | 선택 가능한 채점 모델과 컨텍스트 크기(#285) |
 | `POST /api/classroom/classes/{id}/join-link/regenerate` | 가입 링크를 다시 뽑는다 — 이전 코드는 죽는다(#279) |
 | `POST .../archive`·`.../unarchive` | 클래스를 보관하고 되돌린다 — 지우지 않는다(#294) |
+| `DELETE /api/classroom/classes/{id}` | 클래스를 지운다 — 어느 문제에도 제출이 없을 때만, 되돌릴 수 없다(#330) |
 | `GET`·`POST /api/classroom/join/{code}` | 가입 링크 미리보기(인증 불필요)와 가입(#280) |
 | `GET /api/classroom/classes/{id}/members` | 참여자 명단 — 강사 전용(#281) |
 | `POST .../members/{id}/expel` | 참여자를 내보낸다 — 행은 지우지 않는다(#281) |
@@ -203,6 +204,13 @@ ADR-0036). 업로드 자료의 값은 `submission:{공모전id}:{개발자id}:{�
 주고(재발급으로 죽은 코드의 404와 다른 모양 — "링크가 없다"가 아니라 "수업이 끝났다"),
 `POST /join/{code}`와 `POST .../submissions`는 보관된 클래스면 403이다. 그 밖의 모든 읽기
 (상세·문제·명단·참여자의 목록과 제출물·판정)는 보관 여부와 무관하게 그대로 연다.
+
+**삭제는 보관과 다르다 — 지운다**(#330). 그 클래스의 어느 `ClassroomSubmission`도
+없을 때만 허용되고(있으면 403, `ClassOut.has_submissions`가 판정 결과를 미리
+내려준다 — 화면이 문제·제출물 목록을 다시 합쳐 셈하지 않는다), 있으면 그 제출과
+판정이 참여자의 기록이라 강사가 지울 수 없다. 문제·체크리스트·`ClassMember`는
+`Class`에 걸린 CASCADE로 함께 지워지고, `ProblemTemplate`·`ClassTemplate`은 애초에
+`Class`를 가리키지 않는 사본이라(#316/#319) 영향받지 않는다.
 
 **제출은 공모전 쪽(`submissions.Submission`)과 자료 모델을 공유한다**(ADR-0039).
 `classroom.ClassroomSubmission`이 그 강의실 자식이다 — `contests.ContestSubmission`과
