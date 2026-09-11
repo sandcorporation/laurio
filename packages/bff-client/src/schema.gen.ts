@@ -6321,7 +6321,7 @@ export interface components {
          * @description 탈퇴를 막는 사유. 응답에 실려 화면이 무엇을 끝내야 하는지 말하게 한다.
          * @enum {string}
          */
-        WithdrawalBlockReason: "sponsor_contest_in_progress" | "developer_payout_in_progress";
+        WithdrawalBlockReason: "sponsor_contest_in_progress" | "developer_payout_in_progress" | "instructor_class_in_progress";
         /**
          * WithdrawalEligibilityOut
          * @description 탈퇴 화면이 「막고 있는 것」을 그대로 보여줄 수 있게 하는 판정 결과.

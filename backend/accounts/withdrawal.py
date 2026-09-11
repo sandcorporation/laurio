@@ -54,6 +54,10 @@ class WithdrawalBlockReason(models.TextChoices):
         "developer_payout_in_progress",
         "지급이 끝나지 않은 Payout이 있어 탈퇴할 수 없습니다",
     )
+    INSTRUCTOR_CLASS_IN_PROGRESS = (
+        "instructor_class_in_progress",
+        "보관하지 않은 클래스가 있어 탈퇴할 수 없습니다",
+    )
 
 
 def _sponsor_has_contest_in_progress(sponsor_profile: SponsorProfile) -> bool:
@@ -84,6 +88,19 @@ def _developer_has_payout_in_progress(developer_profile: DeveloperProfile) -> bo
         ).values_list("status", flat=True)
     )
     return any(Payout.Status.BLOCKS_DEVELOPER_WITHDRAWAL(status) for status in statuses)
+
+
+def _instructor_has_class_in_progress(user) -> bool:
+    """강사(강의실의 Class.instructor)로 있는 클래스 중 보관되지 않은 것이 있는가
+    (#302). Sponsor/Developer 와 달리 강의실은 프로필을 두지 않고 계정(User)을
+    직접 가리킨다(ADR-0037, CONTEXT.md 「당사자」) — 그래서 여기는 profile 이 아니라
+    user 자체로 조회한다. 신원이 사라지면 참여자들이 새 문제를 열어 줄 사람도 명단을
+    손볼 사람도 없는 클래스에 남는다."""
+
+    # APP-BOUNDARY-EXCEPTION: 탈퇴 자격이 강의실 Class 의 보관 여부에 달려 있다 (#302)
+    from classroom.models import Class
+
+    return Class.objects.filter(instructor=user, archived_at__isnull=True).exists()
 
 
 def _transaction_basis(user) -> tuple[str, int] | None:
@@ -168,6 +185,9 @@ def blocking_reasons(user) -> list[WithdrawalBlockReason]:
     developer_profile = getattr(user, "developer_profile", None)
     if developer_profile is not None and _developer_has_payout_in_progress(developer_profile):
         reasons.append(WithdrawalBlockReason.DEVELOPER_PAYOUT_IN_PROGRESS)
+
+    if _instructor_has_class_in_progress(user):
+        reasons.append(WithdrawalBlockReason.INSTRUCTOR_CLASS_IN_PROGRESS)
 
     return reasons
 
