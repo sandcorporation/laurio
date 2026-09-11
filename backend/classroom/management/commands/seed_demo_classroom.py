@@ -24,6 +24,15 @@ QuerySet 경로는 막지 않기 때문이다.
 실제 오브젝트를 함께 써야 하고 그러지 않으면 화면이 없는 파일을 가리킨다
 (`seed_demo_contests` 가 fake 스토리지로 돌았을 때 겪은 것과 같은 실패다, #253).
 소스 형식 문제는 **제출 없이** 심어 「아직 아무도 안 냈다」 상태를 보여준다.
+
+**알림도 심는다**(#341). 채점을 실제로 돌리지 않으니 스캔(`classroom.scoring`)이
+알림을 만들 기회가 없고, 그러면 데모 계정으로 알림 화면(#304)을 열어도 늘 비어
+있다. 그래서 `ClassroomScore` 를 직접 만드는 그 자리마다 스캔이 부르는 바로 그
+알림 함수를 그대로 부른다(`classroom.scoring._notify_submitter_of_score` — 참여자에게
+채점 완료, `notifications.services.create_notification` — 강사에게 예산 경고). 문구·
+context 모양이 스캔이 실제로 만드는 것과 달라지면 화면의 링크(#329)가 끊기므로,
+새로 짓지 않고 그 함수를 재사용한다. 알림 걷기는 Score 걷기와 같은 class_ids 로
+닫혀 있다 — 실사용자의 알림에는 닿지 않는다.
 """
 
 from __future__ import annotations
@@ -33,6 +42,8 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
+from notifications.models import Notification, NotificationType
+from notifications.services import create_notification
 from submissions.models import Submission, SubmissionAsset
 
 from classroom.models import (
@@ -50,6 +61,7 @@ from classroom.models import (
     ProblemTemplateModerationDecision,
     ProblemTemplateReport,
 )
+from classroom.scoring import _notify_submitter_of_score
 
 DEMO_PREFIX = "[데모]"
 
@@ -93,6 +105,7 @@ class Command(BaseCommand):
 
         with transaction.atomic():
             summary = self._seed(instructor)
+        self._dispatch_notifications(summary)
         self._report(instructor, summary)
 
     # ------------------------------------------------------------------ 강사
@@ -119,11 +132,24 @@ class Command(BaseCommand):
     def _purge(self, instructor) -> int:
         qs = Class.objects.filter(instructor=instructor, name__startswith=DEMO_PREFIX)
         count = qs.count()
+        class_ids = list(qs.values_list("id", flat=True))
 
         # PROTECT 를 먼저 푼다 — 위 모듈 docstring 이 이 한 줄의 근거다.
         # 범위가 이 강사의 `[데모]` 클래스로 닫혀 있다는 것이 그 근거의 전부이므로,
         # 이 필터를 넓히지 마라.
         ClassroomScore.objects.filter(submission__problem__classroom__in=qs).delete()
+
+        # 알림도 같은 class_ids 로 닫혀 있다 — 이 시드가 만든 것이 아니면 어느
+        # notification_type 이든 context__class_id 가 이 목록에 들 수 없다(다른
+        # 강사·실사용자의 알림은 다른 Class.pk 를 가리킨다). 재시드가 「겹겹이
+        # 쌓이지 않는다」는 계약(CLAUDE.md)이 여기서 성립한다.
+        Notification.objects.filter(
+            notification_type__in=[
+                NotificationType.CLASSROOM_TOKEN_BUDGET_WARNING,
+                NotificationType.CLASSROOM_SUBMISSION_SCORED,
+            ],
+            context__class_id__in=class_ids,
+        ).delete()
 
         # 템플릿은 Class 를 가리키지 않는다(공개 시점 사본이다) — 따로 걷는다.
         # 신고와 심판도 템플릿을 PROTECT 로 가리키므로 같은 순서가 필요하다.
@@ -146,7 +172,15 @@ class Command(BaseCommand):
 
     def _seed(self, instructor) -> dict:
         now = timezone.now()
-        made = {"classes": [], "templates": []}
+        made = {
+            "classes": [],
+            "templates": [],
+            # 알림 발송은 여기 쌓아 뒀다가 트랜잭션이 커밋된 뒤 `_dispatch_notifications`
+            # 가 돌린다 — 이 메서드 자체는 `handle()` 의 `transaction.atomic()` 안에서
+            # 돈다(아래 `_dispatch_notifications` 독스트링 참고).
+            "score_jobs": [],
+            "budget_warning_jobs": [],
+        }
 
         # --- 클래스 1: 진행중, 제출과 채점이 쌓여 있다 -----------------------
         web = Class.objects.create(
@@ -198,15 +232,16 @@ class Command(BaseCommand):
         )
 
         # 이수민: 1주차 두 번 만에 통과, 2주차 미통과 한 번
-        self._attempts(p1, members[0], [False, True])
-        self._attempts(p2, members[0], [False])
+        self._attempts(p1, members[0], [False, True], made)
+        self._attempts(p2, members[0], [False], made)
         # 박지호: 1주차 한 번에 통과
-        self._attempts(p1, members[1], [True])
+        self._attempts(p1, members[1], [True], made)
         # 최은영: 1주차 세 번 냈지만 아직 미통과
-        self._attempts(p1, members[2], [False, False, False])
+        self._attempts(p1, members[2], [False, False, False], made)
         # 정다은(내보내진 사람): 1주차 한 번 내고 통과한 기록이 남아 있다
-        self._attempts(p1, members[3], [True])
+        self._attempts(p1, members[3], [True], made)
 
+        self._maybe_notify_budget_warning(web, made)
         made["classes"].append(web)
 
         # --- 클래스 2: 진행중, 아직 아무도 안 냈다 --------------------------
@@ -247,7 +282,7 @@ class Command(BaseCommand):
             Problem.Status.OPEN,
             [("자기소개가 있다", True), ("만든 것이 하나 이상 있다", True)],
         )
-        self._attempts(dp, done_members[0], [True])
+        self._attempts(dp, done_members[0], [True], made)
         made["classes"].append(done)
 
         # --- 공개된 템플릿 둘 -------------------------------------------------
@@ -327,8 +362,10 @@ class Command(BaseCommand):
             )
         return problem
 
-    def _attempts(self, problem, member, outcomes):
-        """`outcomes` 의 각 원소가 그 시도의 통과 여부다."""
+    def _attempts(self, problem, member, outcomes, made):
+        """`outcomes` 의 각 원소가 그 시도의 통과 여부다. 알림은 바로 보내지
+        않고 `made["score_jobs"]` 에 쌓는다 — `_dispatch_notifications` 독스트링
+        참고."""
         items = list(problem.checklist_items.all())
         for i, passed in enumerate(outcomes, start=1):
             submission = ClassroomSubmission.objects.create(
@@ -343,7 +380,7 @@ class Command(BaseCommand):
                 kind=SubmissionAsset.Kind.REPOSITORY,
                 value=_REPO,
             )
-            ClassroomScore.objects.create(
+            score = ClassroomScore.objects.create(
                 submission=submission,
                 model_version="gpt-4.1-mini (데모 시드가 심은 값 — 실제 채점이 아니다)",
                 prompt="(데모 시드는 채점을 돌리지 않는다)",
@@ -357,6 +394,62 @@ class Command(BaseCommand):
                     }
                     for item in items
                 ],
+            )
+            made["score_jobs"].append((submission, score, items))
+
+    def _maybe_notify_budget_warning(self, class_obj: Class, made) -> None:
+        """`classroom.scoring._record_token_usage` 가 예산 경고를 보내는 것과 같은
+        조건이다 — 그 함수는 실제 채점 뒤 토큰을 누적하며 판정하는데, 이 시드는
+        채점을 돌리지 않고 `token_usage_total` 을 미리 심으므로 여기서 한 번만
+        같은 조건을 확인한다(#341). 알림 자체는 바로 보내지 않고
+        `made["budget_warning_jobs"]` 에 쌓는다 — `_dispatch_notifications`
+        독스트링 참고. `token_budget_warning_sent_at` 을 채우는 것은 순수한
+        모델 저장이라 트랜잭션 안에서 해도 안전하다 — 미루는 것은 알림 발송
+        (`create_notification`) 뿐이다."""
+
+        if class_obj.token_budget is None:
+            return
+        if class_obj.token_budget_warning_sent_at is not None:
+            return
+        if (
+            class_obj.token_usage_total * 100
+            < class_obj.token_budget * class_obj.token_budget_warning_threshold_percent
+        ):
+            return
+
+        class_obj.token_budget_warning_sent_at = timezone.now()
+        class_obj.save(update_fields=["token_budget_warning_sent_at"])
+        made["budget_warning_jobs"].append(class_obj)
+
+    # ---------------------------------------------------------------- 알림
+
+    def _dispatch_notifications(self, made: dict) -> None:
+        """`_seed` 가 쌓아 둔 알림 job 을 실제로 만든다 — 반드시 `_seed` 를 감싼
+        `transaction.atomic()` 이 끝난(커밋된) **뒤**에 불러야 한다.
+
+        `_notify_submitter_of_score`·`create_notification` 은 실패해도 예외를
+        호출자에게 흘리지 않는다(`notifications.services.notify_safely`). 그런데
+        그 삼킴은 파이썬 레벨일 뿐이다 — 이 호출이 `transaction.atomic()` **안**에서
+        일어나면, 실패한 SQL 이 postgres 트랜잭션 자체를 이미 깨뜨린 채로 예외만
+        삼켜져, 바로 다음 쿼리가 그 트랜잭션과 전혀 무관한 이유로 죽는다(원인을
+        알 수 없는 오류로 보인다 — #341 코드리뷰 지적). 실제 스캔
+        (`classroom.scoring.score_classroom_submission_once`·`_finalize_platform_failure`)
+        도 이 두 알림 호출 모두 `transaction.atomic()` 밖에서 부른다 — 그 관례를
+        그대로 따라, `_seed` 안에서는 job 만 쌓고 여기서 트랜잭션 밖에 실제로
+        내보낸다."""
+
+        for submission, score, items in made["score_jobs"]:
+            _notify_submitter_of_score(submission, score, items)
+        for class_obj in made["budget_warning_jobs"]:
+            create_notification(
+                recipient=class_obj.instructor,
+                notification_type=NotificationType.CLASSROOM_TOKEN_BUDGET_WARNING,
+                context={
+                    "class_id": class_obj.id,
+                    "class_name": class_obj.name,
+                    "token_usage_total": class_obj.token_usage_total,
+                    "token_budget": class_obj.token_budget,
+                },
             )
 
     # ---------------------------------------------------------------- 보고

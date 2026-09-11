@@ -305,6 +305,11 @@ cd backend && LAURIO_DB_PORT=55432 \
 예산 경고 임계를 넘긴 상태, 공개된 문제·클래스 템플릿). 출력에 가입 링크와 템플릿
 공유 코드가 나온다.
 
+**알림도 심는다**(#341) — 강사에게 예산 경고, 참여자에게 시도마다 채점 완료.
+채점을 실제로 돌리지 않아 스캔이 알림을 만들 기회가 없었던 자리를, `ClassroomScore`
+를 만드는 그 자리마다 스캔(`classroom.scoring`)이 부르는 것과 같은 알림 함수를
+불러 채운다 — 문구·링크(#329)가 스캔이 실제로 만드는 것과 같은 모양이 된다.
+
 ```bash
 cd backend && LAURIO_DB_PORT=55432 uv run python manage.py seed_demo_classroom --email <계정>
 # staging 에서는
