@@ -91,11 +91,24 @@ def copy_class(class_obj: Class, instructor_id: int) -> Class:
     기수를 여는 것은 대개 같은 강사가 같은 맥락에서 계속 가르치는 것이라,
     가입 미리보기에 다시 빈 줄이 뜨게 두지 않는다. 다른 이름을 쓰고
     싶으면 클래스 설정에서 고치면 된다.
+
+    **이름은 원본 그대로 오지 않는다**(#339) — `" 사본"`을 붙인다. 「복사해서
+    새로 열기」는 클릭 한 번으로 바로 새 클래스 상세로 이동하는 흐름이라(AC)
+    이 자리에서 이름을 물어볼 수 없고, 원본과 같은 이름이면 목록과 문제
+    복사 대상 목록에서 두 줄이 똑같아 구별할 수 없었다. 다음 기수 번호
+    (「3기」→「4기」)까지 추측하지 않는 이유는 그 추측이 틀렸을 때 원본
+    이름이 그대로인 것보다 더 헷갈리기 때문이다 — 다른 이름을 쓰고 싶으면
+    클래스 설정에서 고친다. 붙인 결과가 `name` 필드 길이(200자)를 넘으면
+    원본 쪽을 줄인다 — 원본 이름이 198~200자여도 `DataError` 없이 복사되게
+    한다.
     """
 
+    suffix = " 사본"
+    max_length = Class._meta.get_field("name").max_length
+    base_name = class_obj.name[: max_length - len(suffix)]
     new_class = Class.objects.create(
         instructor_id=instructor_id,
-        name=class_obj.name,
+        name=f"{base_name}{suffix}",
         instructor_display_name=class_obj.instructor_display_name,
         default_model=class_obj.default_model,
     )

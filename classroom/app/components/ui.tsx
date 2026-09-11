@@ -53,7 +53,10 @@ export function PageHeader({
           <p className="text-[13px] leading-relaxed text-ink/60">{description}</p>
         ) : null}
       </div>
-      {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+      {/* actions 는 wrap 한다(#336) — 버튼이 넷까지 늘어난 화면(클래스 상세)에서
+          390px 폭이면 한 줄에 다 안 들어간다. shrink 대신 wrap 을 쓰는 이유는
+          버튼 텍스트가 whitespace-nowrap 이라 눌러 찌그러뜨릴 수 없어서다. */}
+      {actions ? <div className="flex flex-wrap items-center justify-end gap-2">{actions}</div> : null}
     </div>
   );
 }

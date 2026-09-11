@@ -6,7 +6,8 @@
 따라오지 않는다(`ClassMember`·`Submission`이 아직 없다, #279~#281/
 #286~#290). 복사본과 원본이 독립이다. OpenAI 키는 강사 본인의 결제
 수단이지 「채점 설정」이 아니므로 따라오지 않는다 — 애초에 저장 뒤에는
-평문을 다시 볼 방법이 없다(#284).
+평문을 다시 볼 방법이 없다(#284). 이름은 원본과 같지 않다(`" 사본"`을
+붙인다, #339) — 목록과 문제 복사 대상 목록에서 둘을 구별해야 한다.
 """
 
 from __future__ import annotations
@@ -84,7 +85,7 @@ def test_instructor_copies_a_class_with_problems_and_checklists_in_order(client,
     assert response.status_code == 201
     body = response.json()
     assert body["id"] != source_class
-    assert body["name"] == "1기"
+    assert body["name"] == "1기 사본"
 
     listing = client.get(f"{CLASSES_URL}/{body['id']}/problems", **_auth_header(pair["access"]))
     problems = listing.json()
@@ -189,13 +190,39 @@ def test_copied_class_carries_the_instructor_display_name(client, db):
     assert response.json()["instructor_display_name"] == "김강사"
 
 
+def test_copied_class_name_is_distinguishable_from_the_original(client, db):
+    pair = _login(client)
+    source_class = _create_class(client, pair["access"], "3기")
+
+    response = client.post(_copy_class_url(source_class), **_auth_header(pair["access"]))
+    assert response.status_code == 201
+    assert response.json()["name"] != "3기"
+
+    listing = client.get(CLASSES_URL, **_auth_header(pair["access"]))
+    names = [c["name"] for c in listing.json()]
+    assert names.count("3기") == 1
+
+
+def test_copying_a_class_with_a_name_at_the_length_limit_does_not_overflow(client, db):
+    pair = _login(client)
+    long_name = "가" * 200
+    source_class = _create_class(client, pair["access"], long_name)
+
+    response = client.post(_copy_class_url(source_class), **_auth_header(pair["access"]))
+    assert response.status_code == 201
+    body = response.json()
+    assert len(body["name"]) <= 200
+    assert body["name"].endswith(" 사본")
+    assert body["name"] != long_name
+
+
 def test_copying_a_class_with_no_problems_works(client, db):
     pair = _login(client)
     source_class = _create_class(client, pair["access"], "빈 클래스")
 
     response = client.post(_copy_class_url(source_class), **_auth_header(pair["access"]))
     assert response.status_code == 201
-    assert response.json()["name"] == "빈 클래스"
+    assert response.json()["name"] == "빈 클래스 사본"
 
     listing = client.get(
         f"{CLASSES_URL}/{response.json()['id']}/problems", **_auth_header(pair["access"])
