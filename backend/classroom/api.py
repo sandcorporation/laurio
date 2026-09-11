@@ -119,7 +119,7 @@ def _live_problem_template(problem: Problem) -> ProblemTemplate | None:
 
 
 def _serialize_class(class_obj: Class) -> ClassOut:
-    has_key = bool(class_obj.openai_api_key_encrypted)
+    has_key = class_obj.has_scoring_key()
     token_budget_remaining = (
         max(class_obj.token_budget - class_obj.token_usage_total, 0)
         if class_obj.token_budget is not None
@@ -280,6 +280,26 @@ def _serialize_score(score: ClassroomScore) -> ClassroomScoreOut:
     )
 
 
+def _pending_reason(score, class_obj: Class) -> str | None:
+    """아직 채점되지 않은 시도가 왜 멈춰 있는지(#295, #346) — 참여자·강사
+    화면 모두 이 값 하나를 읽어 다르게 그린다. 채점 키가 아예 없으면
+    예산과 무관하게 "no_api_key"다 — `Class.has_scoring_key()`로 판정한다,
+    `scoring.score_classroom_submission_once`가 채점 시점에 확인하는 것과
+    **같은 기준**이어야 한다(공백 문자열도 "없다"로 본다). 여기서 bare
+    truthiness를 따로 쓰면 그 기준이 어긋나 실제로는 채점되지 않는 시도가
+    "정상 대기"로 잘못 보일 수 있다. 키는 있는데 예산이 바닥났으면
+    "budget_exhausted"(#295)다. 둘 다 아니면 스캔이 정말 채점을 기다리는
+    중이라 `None`(평범한 "채점 중")이다."""
+
+    if score is not None:
+        return None
+    if not class_obj.has_scoring_key():
+        return "no_api_key"
+    if class_obj.token_budget_exhausted():
+        return "budget_exhausted"
+    return None
+
+
 def _serialize_classroom_submission(
     submission: ClassroomSubmission,
     *,
@@ -292,9 +312,7 @@ def _serialize_classroom_submission(
         _source_download_url(asset, user) if asset.kind == SubmissionAsset.Kind.SOURCE else None
     )
     score = getattr(submission, "classroom_score", None)
-    # 참여자가 스스로 어쩔 수 없는 다른 pending 사유(채점 키 없음 등)는
-    # 담지 않는다 — 예산 소진만 알린다(#295, 스키마 docstring과 같은 이유).
-    pending_reason = "budget_exhausted" if score is None and class_obj.token_budget_exhausted() else None
+    pending_reason = _pending_reason(score, class_obj)
     return ClassroomSubmissionOut(
         id=submission.id,
         problem_id=submission.problem_id,
@@ -332,7 +350,11 @@ def _instructor_source_download_url(
 
 
 def _serialize_instructor_submission(
-    submission: ClassroomSubmission, *, asset: SubmissionAsset, required_item_ids: set[int]
+    submission: ClassroomSubmission,
+    *,
+    asset: SubmissionAsset,
+    required_item_ids: set[int],
+    class_obj: Class,
 ) -> ClassroomInstructorSubmissionOut:
     download_url = (
         _instructor_source_download_url(
@@ -355,6 +377,7 @@ def _serialize_instructor_submission(
         status="scored" if score is not None else "pending",
         score=_serialize_score(score) if score is not None else None,
         passed=_is_score_passed(score, required_item_ids),
+        pending_reason=_pending_reason(score, class_obj),
     )
 
 
@@ -708,20 +731,24 @@ def expel_member(request: HttpRequest, class_id: int, member_id: int):
 # --- Roster grid (#290) -----------------------------------------------------------
 
 
-def _cell_status(submissions: list[ClassroomSubmission], required_item_ids: set[int]) -> str:
+def _cell_status(
+    submissions: list[ClassroomSubmission], required_item_ids: set[int], class_obj: Class
+) -> str:
     """이 참여자·이 문제 한 칸의 상태 — **통과 이력**을 그린다(최신 시도가
     아니다, #290 AC). 우선순위는 이 순서다: 한 번이라도 통과했으면 이후
     시도가 미통과여도 "passed"다(#289/#288과 같은 OR 규칙). 통과가 없고
-    아직 채점을 기다리는 시도가 있으면 "scoring" — 아직 뒤집힐 여지가
-    있다는 뜻이다. 전부 채점됐는데 하나도 통과가 없으면 "attempted_not_passed".
-    시도 자체가 없으면 "not_submitted"."""
+    아직 채점을 기다리는 시도가 있으면, 그 클래스에 채점 키가 아예 없을 때는
+    "no_api_key"(#346, 강사 본인이 넣기 전까지는 절대 안 바뀐다는 것을
+    구별해 보여준다) — 키가 있으면(예산 소진 포함) "scoring"(아직 뒤집힐
+    여지가 있다는 뜻이다). 전부 채점됐는데 하나도 통과가 없으면
+    "attempted_not_passed". 시도 자체가 없으면 "not_submitted"."""
 
     if not submissions:
         return "not_submitted"
     if any(_is_score_passed(getattr(s, "classroom_score", None), required_item_ids) for s in submissions):
         return "passed"
     if any(getattr(s, "classroom_score", None) is None for s in submissions):
-        return "scoring"
+        return "no_api_key" if not class_obj.has_scoring_key() else "scoring"
     return "attempted_not_passed"
 
 
@@ -773,6 +800,7 @@ def get_roster_grid(request: HttpRequest, class_id: int):
                 status=_cell_status(
                     submissions_by_key.get((problem.id, member.id), []),
                     required_ids_by_problem[problem.id],
+                    class_obj,
                 ),
             )
             for problem in problems
@@ -1215,7 +1243,10 @@ def list_problem_submissions(request: HttpRequest, class_id: int, problem_id: in
     return 200, [
         _serialize_instructor_submission(
             # `_mine`과 같은 이유로 리스트를 먼저 받아 prefetch 캐시를 쓴다.
-            s, asset=list(s.assets.all())[0], required_item_ids=required_item_ids
+            s,
+            asset=list(s.assets.all())[0],
+            required_item_ids=required_item_ids,
+            class_obj=class_obj,
         )
         for s in submissions
     ]

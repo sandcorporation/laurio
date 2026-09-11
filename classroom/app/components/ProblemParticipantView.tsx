@@ -167,9 +167,7 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
 
                       {submission.status === "pending" ? (
                         <span data-testid={`submission-row-${submission.id}-status`}>
-                          <Badge>
-                            {submission.pending_reason === "budget_exhausted" ? "채점 대기" : "채점 중"}
-                          </Badge>
+                          <Badge>{submission.pending_reason ? "채점 대기" : "채점 중"}</Badge>
                         </span>
                       ) : (
                         <span data-testid={`submission-row-${submission.id}-status`}>
@@ -206,6 +204,19 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
                         이 클래스의 채점 예산이 소진되어 잠시 멈췄습니다.{" "}
                         <b className="font-medium text-ink">제출은 저장됐으니 다시 낼 필요는 없습니다.</b>{" "}
                         예산이 채워지면 순서대로 이어서 채점됩니다.
+                      </p>
+                    ) : null}
+
+                    {submission.status === "pending" && submission.pending_reason === "no_api_key" ? (
+                      <p
+                        data-testid={`submission-row-${submission.id}-no-api-key-note`}
+                        className="mt-2.5 text-[12.5px] leading-relaxed text-ink/60"
+                      >
+                        강사가 아직 채점 키를 설정하지 않아 잠시 멈췄습니다.{" "}
+                        <b className="font-medium text-ink">
+                          당신의 잘못이 아니고, 다시 낼 필요도 없습니다.
+                        </b>{" "}
+                        강사가 채점 키를 넣으면 이어서 채점됩니다.
                       </p>
                     ) : null}
 

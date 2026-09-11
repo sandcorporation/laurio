@@ -4681,6 +4681,8 @@ export interface components {
              * @default false
              */
             passed: boolean;
+            /** Pending Reason */
+            pending_reason?: string | null;
             /** Problem Id */
             problem_id: number;
             score?: components["schemas"]["ClassroomScoreOut"] | null;

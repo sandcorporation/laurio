@@ -105,6 +105,16 @@ class Class(models.Model):
 
         return self.token_budget is not None and self.token_usage_total >= self.token_budget
 
+    def has_scoring_key(self) -> bool:
+        """이 클래스에 채점에 실제로 쓸 수 있는 키가 있는가(#346) — 공백만
+        있어도 없는 것으로 본다. `scoring.score_classroom_submission_once`가
+        채점 시점에 확인하는 것과 **정확히 같은 기준**이어야 한다 — 화면의
+        `pending_reason`·참여자별 현황 격자가 이 기준과 어긋나면, 실제로는
+        채점되지 않는 시도가 "정상적으로 채점을 기다리는 중"으로 잘못
+        보인다(bare truthiness는 공백 문자열도 "있다"로 본다)."""
+
+        return bool((self.openai_api_key_encrypted or "").strip())
+
 
 class Problem(models.Model):
     """Class 안의 문제 하나. Contest와 달리 **마감이 없다**(ADR-0039) — 이
