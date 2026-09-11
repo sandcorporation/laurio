@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# #272 — 생성 타입이 밀렸다는 것과 문서 검사 위반을 push 뒤 CI(6분)가 아니라
+# 커밋 시점(몇 초)에 잡는다. `core.hooksPath` 로 켠다(루트 package.json 의
+# postinstall). `git commit --no-verify` 로 넘어갈 수 있다 — 훅은 피드백을
+# 당기는 장치지 문이 아니다. CI 잡(`frontend-openapi-types`·`adr-status`·
+# `screen-language`)이 여전히 진짜 문이다.
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+fail=0
+
+for check in \
+  scripts/check_adr_status.py \
+  scripts/check_screen_language.py \
+  scripts/check_backend_error_language.py
+do
+  if ! python3 "$check"; then
+    fail=1
+  fi
+done
+
+if [ "$fail" -ne 0 ]; then
+  echo "pre-commit: 문서 검사가 실패했다 — 커밋을 거절한다." >&2
+  exit 1
+fi
+
+# backend/**/*.py 가 staged 일 때만 재생성한다 — 문서만 고친 커밋은 2.1초를 안 낸다.
+if git diff --cached --name-only | grep -qE '^backend/.*\.py$'; then
+  echo "pre-commit: backend 변경 감지 — API 타입을 재생성한다 (pnpm --dir frontend generate:api)."
+  if ! pnpm --dir frontend generate:api; then
+    echo "pre-commit: 'pnpm --dir frontend generate:api' 가 실패했다 — 커밋을 거절한다." >&2
+    exit 1
+  fi
+  git add packages/bff-client/src/schema.gen.ts
+fi
+
+exit 0
