@@ -213,6 +213,32 @@ def test_copying_to_a_nonexistent_class_is_404(client, db):
     assert response.status_code == 404
 
 
+def test_cannot_copy_into_an_archived_class(client, db):
+    """#326 AC "보관된 클래스에서는 가져올 수 없다" — 대상 클래스가
+    보관됐으면 복사(어느 방향에서 부르든 같은 엔드포인트다)는 403이다."""
+
+    pair = _login(client)
+    source_class = _create_class(client, pair["access"], "1기")
+    target_class = _create_class(client, pair["access"], "2기")
+    problem_id = _create_problem(client, pair["access"], source_class)
+
+    archived = client.post(
+        f"{CLASSES_URL}/{target_class}/archive",
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert archived.status_code == 200
+
+    response = client.post(
+        _copy_url(source_class, problem_id),
+        data={"target_class_id": target_class},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"]
+
+
 def test_copy_appends_after_existing_problems_in_the_target_class(client, db):
     pair = _login(client)
     source_class = _create_class(client, pair["access"], "1기")

@@ -1,0 +1,85 @@
+/*
+ * ToastUI 에디터(#324)를 이 브랜드 토큰에 맞춘다 — 각진 모서리·그림자 없음,
+ * 괘선·바탕·글자색은 app/tokens.css 의 CSS 변수를 그대로 쓴다(브랜드가
+ * 바뀌면 그 파일 하나만 고치면 되는 관용구를 여기서도 지킨다).
+ *
+ * 라이브러리가 링크·이미지 삽입 같은 팝업도 에디터 컨테이너(`el`) 안에
+ * 그려 넣는다 — `document.body`로 직접 붙는 것은 사용 통계 추적 픽셀뿐이고
+ * `usageStatistics: false`(MarkdownEditor.tsx)로 그마저 만들지 않는다. 그래서
+ * `.laurio-toastui-editor` 범위 안 전체 초기화만으로 놓치는 화면이 없다.
+ */
+.laurio-toastui-editor,
+.laurio-toastui-editor * {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+.laurio-toastui-editor {
+  border: 1px solid var(--color-rule);
+}
+
+.laurio-toastui-editor .toastui-editor-defaultUI {
+  border: none;
+  font-family: var(--font-sans);
+}
+
+.laurio-toastui-editor .toastui-editor-toolbar {
+  background-color: var(--color-surface);
+  border-bottom: 1px solid var(--color-rule);
+}
+
+.laurio-toastui-editor .toastui-editor-defaultUI-toolbar {
+  background-color: var(--color-surface);
+}
+
+.laurio-toastui-editor .toastui-editor-md-tab-container {
+  background-color: var(--color-surface);
+  border-bottom: 1px solid var(--color-rule);
+}
+
+.laurio-toastui-editor .toastui-editor-md-tab-container .tab-item,
+.laurio-toastui-editor .toastui-editor-mode-switch .tab-item {
+  background-color: var(--color-paper);
+  color: color-mix(in srgb, var(--color-ink) 60%, transparent);
+  border: 1px solid var(--color-rule);
+}
+
+.laurio-toastui-editor .toastui-editor-md-tab-container .tab-item.active,
+.laurio-toastui-editor .toastui-editor-mode-switch .tab-item.active {
+  background-color: var(--color-surface);
+  color: var(--color-ink);
+  font-weight: 500;
+}
+
+.laurio-toastui-editor .toastui-editor-mode-switch {
+  background-color: var(--color-surface);
+  border-top: 1px solid var(--color-rule);
+}
+
+.laurio-toastui-editor .toastui-editor-md-splitter {
+  background-color: var(--color-rule);
+}
+
+.laurio-toastui-editor .toastui-editor-contents,
+.laurio-toastui-editor .ProseMirror,
+.laurio-toastui-editor .CodeMirror {
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+.laurio-toastui-editor .toastui-editor-popup,
+.laurio-toastui-editor .toastui-editor-tooltip,
+.laurio-toastui-editor .toastui-editor-context-menu {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-rule);
+}
+
+.laurio-toastui-editor .toastui-editor-ok-button {
+  background-color: var(--color-ink);
+}
+
+.laurio-toastui-editor .toastui-editor-toolbar-icons:hover,
+.laurio-toastui-editor .toastui-editor-toolbar-icons.active {
+  background-color: var(--color-paper);
+  border: 1px solid var(--color-rule);
+}

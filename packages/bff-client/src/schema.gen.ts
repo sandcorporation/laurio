@@ -799,6 +799,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/problems/from-other-classes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Importable Problems
+         * @description 새 문제 화면의 「이미 있는 문제로 시작하기」, 「내 다른 클래스에서」
+         *     탭(#326) — 강사 본인이 **이 클래스를 뺀 나머지** 클래스에 가진 문제
+         *     전부다. 정적 세그먼트("from-other-classes")라 `/{problem_id}` 동적
+         *     라우트보다 먼저 등록한다(파일 상단 docstring과 같은 이유).
+         *
+         *     `class_id`는 그저 "뺄 클래스"를 정하고 그 클래스가 본인 것인지
+         *     확인하는 자리다 — 목록 자체는 다른 클래스들에서 온다. 원본 클래스가
+         *     보관됐어도 그대로 나온다: 보관은 **그 클래스**에 새 내용이 느는 길을
+         *     막는 것이지(`Class.archived_at` docstring), 거기 있던 문제를 다른
+         *     곳으로 복사해 가져오는 것과는 무관하다 — 읽기는 보관 뒤에도 남는다는
+         *     같은 원칙이다.
+         */
+        get: operations["classroom_api_list_importable_problems"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/problems/mine": {
         parameters: {
             query?: never;
@@ -933,9 +963,16 @@ export interface paths {
         put?: never;
         /**
          * Copy Problem
-         * @description 자기 문제를 자기 다른 클래스로 복사한다(#292). 원본·대상 둘 다 강사
-         *     본인 소유여야 한다 — 어느 쪽이 남의 것이어도 404다(존재를 알려주지
-         *     않는다, 이 파일의 다른 소유권 검사와 같은 이유).
+         * @description 자기 문제를 자기 다른 클래스로 복사한다(#292, #326의 「내 다른
+         *     클래스에서」 가져오기도 방향만 반대일 뿐 같은 엔드포인트를 부른다).
+         *     원본·대상 둘 다 강사 본인 소유여야 한다 — 어느 쪽이 남의 것이어도
+         *     404다(존재를 알려주지 않는다, 이 파일의 다른 소유권 검사와 같은
+         *     이유).
+         *
+         *     **대상 클래스가 보관됐으면 403이다**(#326 AC "보관된 클래스에서는
+         *     가져올 수 없다") — `problem_templates.import_template`이 이미 지키는
+         *     같은 규칙을 여기서도 지킨다: 보관은 그 클래스에 새 내용이 느는 길을
+         *     전부 닫는다는 뜻이라 복사도 예외가 아니다.
          */
         post: operations["classroom_api_copy_problem"];
         delete?: never;
@@ -5268,6 +5305,33 @@ export interface components {
             /** Target Class Id */
             target_class_id: number;
         };
+        /**
+         * ImportableProblemOut
+         * @description 새 문제 화면의 「이미 있는 문제로 시작하기」 시트, 「내 다른
+         *     클래스에서」 탭 한 줄(#326) — 강사 본인이 **다른** 클래스에 가진
+         *     문제다. 고르면 `POST /classes/{class_id}/problems/{problem_id}/copy`로
+         *     지금 클래스에 그대로 복사한다(`ProblemCopyIn`) — 새 엔드포인트가
+         *     아니라 #292의 그 복사를 반대 방향(받는 쪽)에서 부르는 것뿐이다.
+         */
+        ImportableProblemOut: {
+            /**
+             * Checklist Items
+             * @default []
+             */
+            checklist_items: components["schemas"]["ProblemTemplateChecklistItemOut"][];
+            /** Classroom Id */
+            classroom_id: number;
+            /** Classroom Name */
+            classroom_name: string;
+            /** Description */
+            description: string;
+            /** Id */
+            id: number;
+            /** Submission Format */
+            submission_format: string;
+            /** Title */
+            title: string;
+        };
         /** InitiateJudgingExtensionIn */
         InitiateJudgingExtensionIn: Record<string, never>;
         /** InitiatePaymentIn */
@@ -7985,6 +8049,37 @@ export interface operations {
             };
         };
     };
+    classroom_api_list_importable_problems: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportableProblemOut"][];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     classroom_api_list_my_problems: {
         parameters: {
             query?: never;
@@ -8309,6 +8404,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
                 };
             };
             /** @description Not Found */

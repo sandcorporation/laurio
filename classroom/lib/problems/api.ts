@@ -1,4 +1,4 @@
-// Problem·체크리스트 백엔드 호출 (#282/#283/#285).
+// Problem·체크리스트 백엔드 호출 (#282/#283/#285/#326).
 import { backendJson } from "@/lib/backend/client";
 
 export type SubmissionFormat = "source" | "repository";
@@ -99,6 +99,32 @@ export function copyProblem(
     method: "POST",
     body: JSON.stringify({ target_class_id: targetClassId }),
   });
+}
+
+// 새 문제 화면의 「이미 있는 문제로 시작하기」 시트, 「내 다른 클래스에서」
+// 탭(#326) — 강사 본인이 `classId`를 뺀 다른 클래스에 가진 문제 목록이다.
+// 고르면 위 `copyProblem`을 반대 방향(받는 쪽)에서 그대로 부른다 — 새
+// 가져오기 엔드포인트가 아니다.
+export type ImportableChecklistItem = {
+  label: string;
+  required: boolean;
+  order: number;
+};
+
+export type ImportableProblemRow = {
+  id: number;
+  classroom_id: number;
+  classroom_name: string;
+  title: string;
+  description: string;
+  submission_format: SubmissionFormat;
+  checklist_items: ImportableChecklistItem[];
+};
+
+export function fetchImportableProblems(classId: number): Promise<ImportableProblemRow[]> {
+  return backendJson<ImportableProblemRow[]>(
+    `/classroom/classes/${classId}/problems/from-other-classes`,
+  );
 }
 
 function checklistItemsPath(classId: number, problemId: number): string {
