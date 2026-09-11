@@ -143,8 +143,15 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
               </EmptyState>
             ) : (
               <ol data-testid="submissions-list" className="divide-y divide-rule">
+                {/* `id`는 채점 완료 알림(#329)이 특정 시도를 가리킬 때 쓰는
+                    앵커다 — `lib/notifications/link.ts`가 같은 이름을 짓는다. */}
                 {submissions.map((submission) => (
-                  <li key={submission.id} data-testid={`submission-row-${submission.id}`} className="px-4 py-4">
+                  <li
+                    key={submission.id}
+                    id={`submission-${submission.id}`}
+                    data-testid={`submission-row-${submission.id}`}
+                    className="scroll-mt-4 px-4 py-4"
+                  >
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                       <span
                         data-testid={`submission-row-${submission.id}-attempt`}

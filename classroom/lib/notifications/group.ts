@@ -11,6 +11,8 @@ export type NotificationGroup = {
   key: string;
   /** `null`이면 문제에 딸리지 않은 알림(예산 경고 등) — 언제나 크기 1이다. */
   problemId: number | null;
+  /** `groupHref`가 주소를 짓는 데 쓴다 — `problemId`와 같은 이유로 `null`일 수 있다. */
+  classId: number | null;
   problemTitle: string | null;
   className: string | null;
   /** 이미 원본 목록(백엔드가 최신순으로 준 것) 순서를 그대로 보존한다 — [0]이 최신. */
@@ -53,6 +55,7 @@ export function groupNotifications(items: NotificationRow[]): NotificationGroup[
     return {
       key,
       problemId: typeof context.problem_id === "number" ? context.problem_id : null,
+      classId: typeof context.class_id === "number" ? context.class_id : null,
       problemTitle: typeof context.problem_title === "string" ? context.problem_title : null,
       className: typeof context.class_name === "string" ? context.class_name : null,
       notifications,
@@ -83,4 +86,14 @@ export function groupCurrentlyPassed(group: NotificationGroup): boolean {
  * `groupNotifications`가 이미 만들어 둔(최신순) 상대 순서가 각 구간 안에서 유지된다. */
 export function sortGroupsUnreadFirst(groups: NotificationGroup[]): NotificationGroup[] {
   return [...groups].sort((a, b) => Number(!groupHasUnread(a)) - Number(!groupHasUnread(b)));
+}
+
+/** 접힌 묶음의 머리글을 누르면 갈 곳(#329) — 그 문제 화면 일반이다. 머리글은
+ * **그 문제의 지금 상태**(시도 전체에 대한 OR)를 말하지 특정 시도 하나를
+ * 말하지 않으므로 시도 앵커는 붙이지 않는다 — 펼친 개별 시도 줄은
+ * `notificationHref`로 각자 자기 시도를 가리킨다. 필요한 id가 없으면(문제에
+ * 딸리지 않은 알림은 애초에 크기 1이라 이 함수를 타지 않는다) `null`이다. */
+export function groupHref(group: NotificationGroup): string | null {
+  if (group.problemId === null || group.classId === null) return null;
+  return `/classes/${group.classId}/problems/${group.problemId}/submit`;
 }

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { NotificationRow } from "./api";
 import {
   groupCurrentlyPassed,
+  groupHref,
   groupNotifications,
   groupUnreadCount,
   sortGroupsUnreadFirst,
@@ -65,6 +66,26 @@ describe("groupCurrentlyPassed", () => {
     ];
     const [group] = groupNotifications(items);
     expect(groupCurrentlyPassed(group)).toBe(false);
+  });
+});
+
+describe("groupHref", () => {
+  it("문제로 묶인 그룹은 그 문제의 참여자 화면을 가리킨다", () => {
+    const items = [
+      row({ id: 2, context: { class_id: 7, problem_id: 1, problem_title: "문제 A" } }),
+      row({ id: 1, context: { class_id: 7, problem_id: 1, problem_title: "문제 A" } }),
+    ];
+    const [group] = groupNotifications(items);
+    expect(groupHref(group)).toBe("/classes/7/problems/1/submit");
+  });
+
+  it("클래스 id가 없으면 null이다", () => {
+    const items = [
+      row({ id: 2, context: { problem_id: 1 } }),
+      row({ id: 1, context: { problem_id: 1 } }),
+    ];
+    const [group] = groupNotifications(items);
+    expect(groupHref(group)).toBeNull();
   });
 });
 
