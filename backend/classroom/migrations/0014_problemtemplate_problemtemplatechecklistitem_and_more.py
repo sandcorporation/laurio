@@ -9,7 +9,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('classroom', '0012_class_token_budget_and_more'),
+        ('classroom', '0013_class_instructor_display_name'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
