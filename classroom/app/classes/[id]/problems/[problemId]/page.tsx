@@ -24,6 +24,7 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import { BackendError } from "@/lib/backend/client";
+import { selectCopyTargets } from "@/lib/classes/copy-targets";
 import { useMyClasses } from "@/lib/classes/use-my-classes";
 import { publishProblemAsTemplate, takedownProblemTemplate } from "@/lib/problem-templates/api";
 import {
@@ -211,8 +212,10 @@ export default function EditProblemPage() {
     try {
       const copy = await copyProblem(classId, problemId, Number(targetClassId));
       router.push(`/classes/${copy.classroom_id}/problems/${copy.id}`);
-    } catch {
-      setCopyError("문제를 복사하지 못했습니다. 잠시 후 다시 시도해주세요.");
+    } catch (err) {
+      setCopyError(
+        err instanceof BackendError ? err.message : "문제를 복사하지 못했습니다. 잠시 후 다시 시도해주세요.",
+      );
     } finally {
       setCopying(false);
     }
@@ -588,10 +591,18 @@ export default function EditProblemPage() {
                 {myClassesState.status === "ready" ? (
                   (() => {
                     const otherClasses = myClassesState.classes.filter((c) => c.id !== classId);
-                    if (otherClasses.length === 0) {
+                    const selection = selectCopyTargets(otherClasses);
+                    if (selection.kind === "no-classes") {
                       return (
                         <p data-testid="copy-problem-no-target" className="text-[13px] text-ink/45">
                           복사할 다른 클래스가 없습니다.
+                        </p>
+                      );
+                    }
+                    if (selection.kind === "all-archived") {
+                      return (
+                        <p data-testid="copy-problem-all-archived" className="text-[13px] text-ink/45">
+                          다른 클래스가 모두 보관되어 있어 복사할 수 없습니다.
                         </p>
                       );
                     }
@@ -610,7 +621,7 @@ export default function EditProblemPage() {
                           <option value="" data-testid="copy-problem-target-option-empty">
                             클래스를 선택하세요
                           </option>
-                          {otherClasses.map((c) => (
+                          {selection.classes.map((c) => (
                             <option key={c.id} value={c.id} data-testid={`copy-problem-target-option-${c.id}`}>
                               {c.name}
                             </option>
