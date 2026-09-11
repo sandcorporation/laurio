@@ -12,6 +12,7 @@ import {
   takedownClassTemplate,
   type ClassTemplateRow,
 } from "@/lib/class-templates/api";
+import { useTeacherClassGate } from "@/lib/classes/use-teacher-class-gate";
 import { fetchMyProblemTemplates, takedownProblemTemplate, type ProblemTemplateRow } from "@/lib/problem-templates/api";
 
 type Kind = "problem" | "class";
@@ -31,6 +32,11 @@ export default function MyTemplatesPage() {
 
   const [problemState, setProblemState] = useState<ProblemState>({ status: "loading" });
   const [classState, setClassState] = useState<ClassState>({ status: "loading" });
+
+  // 강사인 클래스가 있는가 — 강사인 클래스가 없으면 「문제 편집 화면」·
+  // 「클래스 상세 화면」은 존재하지 않는 화면이라 빈 상태 문구가 그리로
+  // 보내지 않는다(#343).
+  const teacherGate = useTeacherClassGate();
 
   const [takingDown, setTakingDown] = useState<string | null>(null);
   const [takedownError, setTakedownError] = useState<string | null>(null);
@@ -138,13 +144,37 @@ export default function MyTemplatesPage() {
             <span data-testid="my-problem-templates-error">템플릿 목록을 불러오지 못했습니다.</span>
           </ErrorNote>
         ) : problemState.templates.length === 0 ? (
-          <Card>
-            <EmptyState>
-              <span data-testid="my-problem-templates-empty-state">
-                아직 올린 템플릿이 없습니다. 문제 편집 화면에서 공개할 수 있습니다.
-              </span>
-            </EmptyState>
-          </Card>
+          // 판정이 끝나기 전에는 어느 쪽 문구로도 단정하지 않는다(#343, #332와
+          // 같은 규칙).
+          teacherGate.pending ? (
+            <p data-testid="my-problem-templates-empty-pending" className="text-[13.5px] text-ink/45">
+              불러오는 중...
+            </p>
+          ) : (
+            <Card>
+              <EmptyState>
+                {teacherGate.hasTaughtClasses ? (
+                  <span data-testid="my-problem-templates-empty-state">
+                    아직 올린 템플릿이 없습니다. 문제 편집 화면에서 공개할 수 있습니다.
+                  </span>
+                ) : (
+                  <div className="flex flex-col items-center gap-3">
+                    <span data-testid="my-problem-templates-empty-state">
+                      아직 올린 템플릿이 없습니다. 클래스를 열고 문제를 만들면 그 편집 화면에서
+                      공개할 수 있습니다.
+                    </span>
+                    <Link
+                      href="/classes/new"
+                      data-testid="my-problem-templates-empty-new-class-link"
+                      className={buttonClass("secondary", "sm")}
+                    >
+                      새 클래스 열기
+                    </Link>
+                  </div>
+                )}
+              </EmptyState>
+            </Card>
+          )
         ) : (
           <Card>
             <ul data-testid="my-problem-templates-list" className="divide-y divide-rule">
@@ -190,13 +220,35 @@ export default function MyTemplatesPage() {
           <span data-testid="my-class-templates-error">템플릿 목록을 불러오지 못했습니다.</span>
         </ErrorNote>
       ) : classState.templates.length === 0 ? (
-        <Card>
-          <EmptyState>
-            <span data-testid="my-class-templates-empty-state">
-              아직 올린 클래스 템플릿이 없습니다. 클래스 상세 화면에서 공개할 수 있습니다.
-            </span>
-          </EmptyState>
-        </Card>
+        teacherGate.pending ? (
+          <p data-testid="my-class-templates-empty-pending" className="text-[13.5px] text-ink/45">
+            불러오는 중...
+          </p>
+        ) : (
+          <Card>
+            <EmptyState>
+              {teacherGate.hasTaughtClasses ? (
+                <span data-testid="my-class-templates-empty-state">
+                  아직 올린 클래스 템플릿이 없습니다. 클래스 상세 화면에서 공개할 수 있습니다.
+                </span>
+              ) : (
+                <div className="flex flex-col items-center gap-3">
+                  <span data-testid="my-class-templates-empty-state">
+                    아직 올린 클래스 템플릿이 없습니다. 클래스를 열면 그 상세 화면에서 공개할 수
+                    있습니다.
+                  </span>
+                  <Link
+                    href="/classes/new"
+                    data-testid="my-class-templates-empty-new-class-link"
+                    className={buttonClass("secondary", "sm")}
+                  >
+                    새 클래스 열기
+                  </Link>
+                </div>
+              )}
+            </EmptyState>
+          </Card>
+        )
       ) : (
         <Card>
           <ul data-testid="my-class-templates-list" className="divide-y divide-rule">

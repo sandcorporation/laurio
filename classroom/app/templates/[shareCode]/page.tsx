@@ -198,9 +198,18 @@ export default function ProblemTemplatePreviewPage() {
                     const selection = selectCopyTargets(myClassesState.classes);
                     if (selection.kind === "no-classes") {
                       return (
-                        <p data-testid="template-import-no-target" className="text-[13px] text-ink/45">
-                          가져올 클래스가 없습니다. 먼저 클래스를 열어주세요.
-                        </p>
+                        <div className="flex flex-col items-start gap-2.5">
+                          <p data-testid="template-import-no-target" className="text-[13px] text-ink/45">
+                            가져올 클래스가 없습니다. 먼저 클래스를 열어주세요.
+                          </p>
+                          <Link
+                            href="/classes/new"
+                            data-testid="template-import-no-target-new-class-link"
+                            className={buttonClass("secondary", "sm")}
+                          >
+                            새 클래스 열기
+                          </Link>
+                        </div>
                       );
                     }
                     if (selection.kind === "all-archived") {
