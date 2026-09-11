@@ -697,23 +697,38 @@ def get_roster_grid(request: HttpRequest, class_id: int):
 
 @router.post(
     "/classes/{class_id}/problems",
-    response={201: ProblemOut, 404: ErrorOut, 422: ErrorOut},
+    response={201: ProblemOut, 404: ErrorOut, 400: ErrorOut, 422: ErrorOut},
     auth=jwt_auth,
 )
 def create_problem(request: HttpRequest, class_id: int, payload: ProblemIn):
+    """만들기 한 번이 문제와 체크리스트 항목을 함께 만든다(#315). `open`이
+    참이면 만든 직후 바로 연다 — 필수 항목이 하나도 없으면(`open_problem`과
+    같은 규칙) 문제 자체를 만들지 않고 거부한다("실패하면 문제도 안
+    생긴다")."""
+
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
 
     if payload.submission_format not in _SUBMISSION_FORMATS:
         raise HttpError(422, f"알 수 없는 제출 형식입니다: {payload.submission_format}")
 
-    next_order = class_obj.problems.count()
-    problem = Problem.objects.create(
-        classroom=class_obj,
-        title=payload.title,
-        description=payload.description,
-        submission_format=payload.submission_format,
-        order=next_order,
-    )
+    if payload.open and not any(item.required for item in payload.checklist_items):
+        raise HttpError(400, "필수 항목이 하나도 없는 문제는 열 수 없습니다.")
+
+    with transaction.atomic():
+        next_order = class_obj.problems.count()
+        problem = Problem.objects.create(
+            classroom=class_obj,
+            title=payload.title,
+            description=payload.description,
+            submission_format=payload.submission_format,
+            order=next_order,
+            status=Problem.Status.OPEN if payload.open else Problem.Status.DRAFT,
+        )
+        for index, item_in in enumerate(payload.checklist_items):
+            ChecklistItem.objects.create(
+                problem=problem, label=item_in.label, required=item_in.required, order=index
+            )
+
     return 201, _serialize_problem(problem, class_obj)
 
 

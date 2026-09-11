@@ -87,6 +87,14 @@ class ProblemIn(Schema):
     title: str = Field(min_length=1, max_length=200)
     description: str = ""
     submission_format: str
+    #: 만들기 화면에서 함께 적는 체크리스트 항목(#315) — 순서가 그대로
+    #: `ChecklistItem.order`가 된다. 비어 있으면 지금처럼 항목 없는 초안이
+    #: 생긴다.
+    checklist_items: list[ChecklistItemIn] = []
+    #: True면 만든 직후 바로 연다(「만들고 바로 열기」, #315). 필수 항목이
+    #: 하나도 없으면(열기 엔드포인트와 같은 규칙) 요청 전체가 거부되고
+    #: 문제도 생기지 않는다.
+    open: bool = False
 
 
 class ProblemPatchIn(Schema):

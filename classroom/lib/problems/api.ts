@@ -40,7 +40,18 @@ export function fetchProblems(classId: number): Promise<ProblemRow[]> {
 
 export function createProblem(
   classId: number,
-  input: { title: string; description: string; submission_format: SubmissionFormat },
+  input: {
+    title: string;
+    description: string;
+    submission_format: SubmissionFormat;
+    // 만들기 화면에서 함께 적는 체크리스트 항목(#315). 순서가 그대로
+    // 서버의 order가 된다.
+    checklist_items?: { label: string; required: boolean }[];
+    // true면 만든 직후 바로 연다("만들고 바로 열기"). 필수 항목이 하나도
+    // 없으면 서버가 400으로 거부하고 문제도 생기지 않는다 — 화면은 이
+    // 경우를 누르기 전에 이미 막아 둔다.
+    open?: boolean;
+  },
 ): Promise<ProblemRow> {
   return backendJson<ProblemRow>(`/classroom/classes/${classId}/problems`, {
     method: "POST",
