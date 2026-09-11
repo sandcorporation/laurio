@@ -203,12 +203,20 @@ export default function ClassroomHome() {
   // #342).
   const participantOnly = taught.status === "ready" && taught.classes.length === 0 && hasJoinedSection;
   // 두 목록이 다 도착하기 전에는 어느 쪽으로도 단정하지 않는다 — description
-  // 을 비워 두면(undefined) 강사 문구가 잠깐 비쳤다 참여자 문구로 바뀌는
-  // 깜빡임이 없다(#342 AC).
+  // 을 비워 두면(undefined) 강사 문구가 잠깐 비쳤다 다른 문구로 바뀌는
+  // 깜빡임이 없다(#342 AC). 아무 데도 안 속한 사람(nothingAtAll)에게도 강사
+  // 문구(「지난 클래스를 복사하면…」)는 뜻이 없다 — 복사할 지난 클래스도
+  // 가르친 적도 없다(#332). participantOnly 와 nothingAtAll 은 hasJoinedSection
+  // 유무로 갈려 겹치지 않는다.
   const headerDescription = loading ? undefined : participantOnly ? (
     <span data-testid="classroom-home-heading-note">
       참여 중인 클래스에서 문제를 풀고 제출과 채점 결과를 확인하세요. 클래스를 새로 열면
       직접 강사가 되어 문제를 낼 수도 있습니다.
+    </span>
+  ) : nothingAtAll ? (
+    <span data-testid="classroom-home-heading-note">
+      초대 링크를 받았다면 그 링크로 들어가 클래스에 참여할 수 있고, 새 클래스를 열어 직접
+      문제를 내고 채점할 수도 있습니다.
     </span>
   ) : (
     <span data-testid="classroom-home-heading-note">
@@ -224,6 +232,10 @@ export default function ClassroomHome() {
   // "머리에서 채움 모양으로"까지는 요구하지 않으므로, 참여자로만 속한 사람에게는
   // 참여 중인 클래스 목록 뒤로 내리고 보조(secondary) 모양으로 낮춘다 —
   // 목록 행의 「열기」와 같은 무게로 두어 목록 자체가 화면의 주인공이 되게 한다.
+  // 아무 데도 안 속한 사람(nothingAtAll)에게는 채움 모양 그대로 둔다(#332) —
+  // 참여자로만 속한 사람과 달리 이 자리를 두고 다툴 목록(참여 중인 클래스)이
+  // 없다. 초대 링크가 없다면 이 버튼이 이 화면에서 유일하게 갈 수 있는 곳이라,
+  // 내리면 오히려 막다른 화면이 된다.
   const headerActions =
     loading || participantOnly ? undefined : <ClassActionLinks newClassTone="primary" />;
 
@@ -242,12 +254,13 @@ export default function ClassroomHome() {
           불러오는 중...
         </p>
       ) : nothingAtAll ? (
+        // 「어떻게 시작하는가」는 이미 위 머리 문구(headerDescription)가
+        // 말한다(#332) — 여기서 같은 말을 또 하면 한 화면에 같은 안내가
+        // 두 번 있는 것이 되어, 정작 이 카드가 알려야 할 "지금 상태가
+        // 이렇다"는 사실이 묻힌다. 그래서 여기는 사실만 짧게 남긴다.
         <Card>
           <EmptyState>
-            <span data-testid="classroom-empty-state">
-              아직 가입하거나 연 클래스가 없습니다. 위 「새 클래스 열기」로 시작하거나, 초대
-              링크를 받았다면 그 링크로 들어가 보세요.
-            </span>
+            <span data-testid="classroom-empty-state">아직 가입하거나 연 클래스가 없습니다.</span>
           </EmptyState>
         </Card>
       ) : (
