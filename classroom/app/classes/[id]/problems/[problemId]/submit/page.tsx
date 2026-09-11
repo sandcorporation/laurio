@@ -8,11 +8,12 @@
 // 실제로 그리는 일은 `ProblemParticipantView`(#325)가 한다 — 문제 만들기/
 // 편집의 「미리보기」 탭이 **같은 조각**을 쓴다. 이 파일은 데이터를 불러오고
 // 제출 요청을 보내는 배선만 맡는다.
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 
-import { ErrorNote, PageShell } from "@/app/components/ui";
+import { ErrorNote, PageShell, buttonClass } from "@/app/components/ui";
 import { ProblemParticipantView } from "@/app/components/ProblemParticipantView";
 import { BackendError } from "@/lib/backend/client";
 import { useMe } from "@/lib/auth/use-me";
@@ -22,6 +23,23 @@ import { useSourceUpload } from "@/lib/submissions/use-source-upload";
 
 function sourceTargetRef(problemId: number, userId: number): string {
   return `classroom-submission:${problemId}:${userId}:source`;
+}
+
+// 문제 목록으로 돌아가는 길(#328) — 이 화면 전에는 브랜드를 눌러도(참여자에게
+// 빈 강사 홈으로 가거나) 브라우저 뒤로 가기뿐이었다. `/mine`은 강사 전용
+// 상세와 달리 참여자에게 실제로 존재하는 화면이라 안전하게 돌아갈 수 있다.
+function BackToMyProblems({ classId }: { classId: number }) {
+  return (
+    <p className="mb-4">
+      <Link
+        href={`/classes/${classId}/problems/mine`}
+        data-testid="my-problem-back-link"
+        className={buttonClass("secondary", "sm")}
+      >
+        문제 목록으로
+      </Link>
+    </p>
+  );
 }
 
 export default function ProblemSubmitPage() {
@@ -50,6 +68,7 @@ export default function ProblemSubmitPage() {
   if (state.status === "notFound") {
     return (
       <PageShell>
+        <BackToMyProblems classId={classId} />
         <h1 data-testid="my-problem-not-found" className="text-[22px] font-semibold">
           문제를 찾을 수 없습니다
         </h1>
@@ -60,6 +79,7 @@ export default function ProblemSubmitPage() {
   if (state.status === "error") {
     return (
       <PageShell>
+        <BackToMyProblems classId={classId} />
         <ErrorNote>
           <span data-testid="my-problem-error">문제 정보를 불러오지 못했습니다.</span>
         </ErrorNote>
@@ -102,6 +122,7 @@ export default function ProblemSubmitPage() {
 
   return (
     <PageShell>
+      <BackToMyProblems classId={classId} />
       <ProblemParticipantView
         interactive
         title={problem.title}

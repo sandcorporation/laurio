@@ -623,6 +623,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes/joined": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Joined Classes
+         * @description 「내 클래스」— 본인이 참여자로 들어간 것만(#328). 본인이 강사인
+         *     클래스는 강사 본인도 `ClassMember` 행을 가질 수 있지만(models.py
+         *     `ClassMember` docstring) 여기서는 뺀다 — 그 클래스는 이미
+         *     `list_my_classes`가 「연 것」으로 보여주므로, 여기까지 포함하면 첫
+         *     화면에 같은 클래스가 두 자리에 겹쳐 나온다.
+         */
+        get: operations["classroom_api_list_joined_classes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}": {
         parameters: {
             query?: never;
@@ -5391,6 +5415,36 @@ export interface components {
             /** Display Name */
             display_name: string;
         };
+        /**
+         * JoinedClassOut
+         * @description 「내가 참여자로 들어간 클래스」한 줄(#328) — 강사 전용 `ClassOut`과
+         *     달리 `join_code`·OpenAI 키·토큰 예산을 싣지 않는다: 그 값들은 강사만의
+         *     것이라 참여자가 자기 가입 목록을 볼 때 남의 클래스 관리 정보를 함께
+         *     받으면 안 된다.
+         */
+        JoinedClassOut: {
+            /**
+             * Archived
+             * @default false
+             */
+            archived: boolean;
+            /**
+             * Expelled
+             * @default false
+             */
+            expelled: boolean;
+            /** Id */
+            id: number;
+            /** Instructor Display Name */
+            instructor_display_name: string;
+            /**
+             * Joined At
+             * Format: date-time
+             */
+            joined_at: string;
+            /** Name */
+            name: string;
+        };
         /** JournalEntryIn */
         JournalEntryIn: {
             /**
@@ -7691,6 +7745,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClassOut"];
+                };
+            };
+        };
+    };
+    classroom_api_list_joined_classes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JoinedClassOut"][];
                 };
             };
         };

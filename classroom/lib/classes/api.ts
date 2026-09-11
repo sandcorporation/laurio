@@ -28,6 +28,27 @@ export function fetchMyClasses(): Promise<ClassRow[]> {
   return backendJson<ClassRow[]>("/classroom/classes");
 }
 
+// 「내가 참여자로 들어간 클래스」한 줄(#328) — 강사 전용 `ClassRow`와 달리
+// join_code·OpenAI 키·토큰 예산이 없다. 남의 클래스를 관리하는 정보가 아니라
+// "나는 이 클래스에 어떤 상태로 있는가"만 담는다.
+export type JoinedClassRow = {
+  id: number;
+  name: string;
+  instructor_display_name: string;
+  joined_at: string;
+  // 강사가 보관했는가(#294) — 참이어도 지난 기록은 그대로 읽힌다.
+  archived: boolean;
+  // 강사가 내보냈는가(#281) — 참이면 새 제출만 막히고, 지난 시도·판정은
+  // 그대로 읽힌다.
+  expelled: boolean;
+};
+
+// 본인이 강사인 클래스는 여기 나오지 않는다 — `fetchMyClasses`가 이미 그
+// 클래스를 「연 것」으로 보여준다(백엔드 `list_joined_classes` docstring).
+export function fetchJoinedClasses(): Promise<JoinedClassRow[]> {
+  return backendJson<JoinedClassRow[]>("/classroom/classes/joined");
+}
+
 export function fetchClass(classId: number): Promise<ClassRow> {
   return backendJson<ClassRow>(`/classroom/classes/${classId}`);
 }

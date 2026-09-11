@@ -61,6 +61,26 @@ class OpenAIKeyIn(Schema):
     api_key: str = Field(min_length=1, max_length=400)
 
 
+class JoinedClassOut(Schema):
+    """「내가 참여자로 들어간 클래스」한 줄(#328) — 강사 전용 `ClassOut`과
+    달리 `join_code`·OpenAI 키·토큰 예산을 싣지 않는다: 그 값들은 강사만의
+    것이라 참여자가 자기 가입 목록을 볼 때 남의 클래스 관리 정보를 함께
+    받으면 안 된다."""
+
+    id: int
+    name: str
+    #: 강사가 이 클래스에서 불릴 이름으로 정한 값(#299). 빈 문자열이면
+    #: `JoinPreviewOut`과 같은 이유로 생략 대상이다 — 화면이 판단한다.
+    instructor_display_name: str
+    joined_at: datetime
+    #: 보관된 클래스인가(#294) — 참이면 새 가입·새 제출은 닫혔지만 지난
+    #: 기록은 그대로 읽힌다.
+    archived: bool = False
+    #: 강사가 내보냈는가(#281) — 참이어도 행은 지워지지 않고 지난 시도·판정은
+    #: 그대로 읽힌다(`member_expelled`와 같은 신호, #300). 새 제출만 막힌다.
+    expelled: bool = False
+
+
 class ScoringModelOut(Schema):
     id: str
     label: str

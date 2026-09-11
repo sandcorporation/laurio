@@ -64,6 +64,7 @@ from .schemas import (
     ClassroomSubmissionOut,
     ErrorOut,
     ImportableProblemOut,
+    JoinedClassOut,
     JoinIn,
     JoinLinkOut,
     JoinPreviewOut,
@@ -369,6 +370,33 @@ def list_my_classes(request: HttpRequest):
 
     classes = Class.objects.filter(instructor_id=request.auth_user.id)
     return 200, [_serialize_class(c) for c in classes]
+
+
+@router.get("/classes/joined", response={200: list[JoinedClassOut]}, auth=jwt_auth)
+def list_joined_classes(request: HttpRequest):
+    """「내 클래스」— 본인이 참여자로 들어간 것만(#328). 본인이 강사인
+    클래스는 강사 본인도 `ClassMember` 행을 가질 수 있지만(models.py
+    `ClassMember` docstring) 여기서는 뺀다 — 그 클래스는 이미
+    `list_my_classes`가 「연 것」으로 보여주므로, 여기까지 포함하면 첫
+    화면에 같은 클래스가 두 자리에 겹쳐 나온다."""
+
+    memberships = (
+        ClassMember.objects.filter(user_id=request.auth_user.id)
+        .exclude(classroom__instructor_id=request.auth_user.id)
+        .select_related("classroom")
+        .order_by("-joined_at")
+    )
+    return 200, [
+        JoinedClassOut(
+            id=m.classroom.id,
+            name=m.classroom.name,
+            instructor_display_name=m.classroom.instructor_display_name,
+            joined_at=m.joined_at,
+            archived=m.classroom.archived_at is not None,
+            expelled=m.expelled_at is not None,
+        )
+        for m in memberships
+    ]
 
 
 @router.get("/classes/{class_id}", response={200: ClassOut, 404: ErrorOut}, auth=jwt_auth)
