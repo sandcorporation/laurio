@@ -271,76 +271,82 @@ function InteractiveSubmissionForm(
       {memberExpelled ? (
         // 내보내진 사람에게는 제출 수단 자체를 보이지 않고, 왜
         // 낼 수 없는지를 말해 준다(#300 AC) — 지난 시도는 위
-        // "내 시도" 카드에 그대로 남아 있다.
+        // "내 시도" 카드에 그대로 남아 있다. 「다시 낼 수 있다」 안내는 이
+        // 분기 밖에 있었다면 여기서도 그대로 떴을 것이다(#337) — 그래서
+        // 그 안내는 아래에서 실제로 낼 수 있는 분기 안에만 둔다.
         <ErrorNote>
           <span data-testid="member-expelled-note">
             이 클래스에서 내보내져 더 이상 새로 제출할 수 없습니다. 지난 시도와 판정은
             계속 볼 수 있습니다.
           </span>
         </ErrorNote>
-      ) : submissionFormat === "repository" ? (
-        <form onSubmit={onRepositorySubmit} className="flex flex-col gap-3">
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="repository-url">
-              <FieldLabel>GitHub 저장소 주소</FieldLabel>
-            </label>
-            <input
-              id="repository-url"
-              data-testid="repository-url-input"
-              type="url"
-              placeholder="https://github.com/owner/repo"
-              value={repositoryUrl}
-              onChange={(event) => onRepositoryUrlChange(event.target.value)}
-              required
-              className={`${INPUT_CLASS} font-mono`}
-            />
-          </div>
-          <button
-            type="submit"
-            data-testid="submit-repository"
-            disabled={submitting || repositoryUrl.trim() === ""}
-            className={`${buttonClass("primary")} w-full`}
-          >
-            {submitting ? "제출하는 중..." : "제출하기"}
-          </button>
-        </form>
       ) : (
-        <div className="flex flex-col gap-2">
-          <label htmlFor="source-file">
-            <FieldLabel>소스 파일</FieldLabel>
-          </label>
-          <input
-            id="source-file"
-            data-testid="source-file-input"
-            type="file"
-            onChange={onSourceFile}
-            disabled={submitting || uploadStatus === "uploading"}
-            className="w-full cursor-pointer border border-dashed border-rule bg-paper px-3 py-6 text-[13px] text-ink/60 file:mr-3 file:cursor-pointer file:border file:border-rule file:bg-surface file:px-3 file:py-1.5 file:text-[12.5px] file:text-ink disabled:cursor-not-allowed disabled:opacity-45"
-          />
-          {uploadStatus === "uploading" ? (
-            <p data-testid="source-upload-progress" className="text-[12.5px] text-ink/45">
-              업로드하는 중...
-            </p>
-          ) : null}
-          {uploadStatus === "error" ? (
+        <>
+          {submissionFormat === "repository" ? (
+            <form onSubmit={onRepositorySubmit} className="flex flex-col gap-3">
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="repository-url">
+                  <FieldLabel>GitHub 저장소 주소</FieldLabel>
+                </label>
+                <input
+                  id="repository-url"
+                  data-testid="repository-url-input"
+                  type="url"
+                  placeholder="https://github.com/owner/repo"
+                  value={repositoryUrl}
+                  onChange={(event) => onRepositoryUrlChange(event.target.value)}
+                  required
+                  className={`${INPUT_CLASS} font-mono`}
+                />
+              </div>
+              <button
+                type="submit"
+                data-testid="submit-repository"
+                disabled={submitting || repositoryUrl.trim() === ""}
+                className={`${buttonClass("primary")} w-full`}
+              >
+                {submitting ? "제출하는 중..." : "제출하기"}
+              </button>
+            </form>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <label htmlFor="source-file">
+                <FieldLabel>소스 파일</FieldLabel>
+              </label>
+              <input
+                id="source-file"
+                data-testid="source-file-input"
+                type="file"
+                onChange={onSourceFile}
+                disabled={submitting || uploadStatus === "uploading"}
+                className="w-full cursor-pointer border border-dashed border-rule bg-paper px-3 py-6 text-[13px] text-ink/60 file:mr-3 file:cursor-pointer file:border file:border-rule file:bg-surface file:px-3 file:py-1.5 file:text-[12.5px] file:text-ink disabled:cursor-not-allowed disabled:opacity-45"
+              />
+              {uploadStatus === "uploading" ? (
+                <p data-testid="source-upload-progress" className="text-[12.5px] text-ink/45">
+                  업로드하는 중...
+                </p>
+              ) : null}
+              {uploadStatus === "error" ? (
+                <ErrorNote>
+                  <span data-testid="source-upload-error">{uploadError}</span>
+                </ErrorNote>
+              ) : null}
+            </div>
+          )}
+
+          {submitError ? (
             <ErrorNote>
-              <span data-testid="source-upload-error">{uploadError}</span>
+              <span data-testid="submit-error">{submitError}</span>
             </ErrorNote>
           ) : null}
-        </div>
+
+          <p className="text-[11.5px] leading-relaxed text-ink/45">
+            내면 바로 채점이 시작되고, <b className="font-medium text-ink">끝나면 알림이 옵니다.</b>{" "}
+            한 번이라도 통과하면 계속 통과로 남으니, 안 되면 몇 번이든 고쳐서 다시 낼 수
+            있습니다.
+          </p>
+        </>
       )}
-
-      {submitError ? (
-        <ErrorNote>
-          <span data-testid="submit-error">{submitError}</span>
-        </ErrorNote>
-      ) : null}
-
-      <p className="text-[11.5px] leading-relaxed text-ink/45">
-        내면 바로 채점이 시작되고, <b className="font-medium text-ink">끝나면 알림이 옵니다.</b>{" "}
-        한 번이라도 통과하면 계속 통과로 남으니, 안 되면 몇 번이든 고쳐서 다시 낼 수
-        있습니다.
-      </p>
     </>
   );
 }
