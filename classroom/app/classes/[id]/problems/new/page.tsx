@@ -140,11 +140,10 @@ export default function NewProblemPage() {
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label htmlFor="problem-description">
-                <FieldLabel>설명</FieldLabel>
-              </label>
+              <FieldLabel>설명</FieldLabel>
               <MarkdownEditor
                 id="problem-description"
+                label="설명"
                 testId="new-problem-description-input"
                 value={description}
                 onChange={setDescription}
