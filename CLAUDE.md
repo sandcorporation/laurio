@@ -345,7 +345,7 @@ Contest 전이 그래프를 한 곳에 선언하고 선언 밖을 정적으로 �
 보내는 것(#300)으로, 문제 만들기 화면에서 체크리스트를 함께 받고 바로 여는
 것(#315)으로, 문제 하나를 템플릿으로 공개하고 가져오는 것과 그 신고·모더레이션
 (#316·#318·#320)으로, 클래스를 통째로 템플릿으로 공개하고 가져오는 것(#319)으로
-1919건까지
+1931건까지
 여기까지 늘었다) `-n 4` 84초 → `-n auto` 57초.
 직렬로 보려면 `-n 0`.
 
@@ -381,7 +381,7 @@ cd backend && LAURIO_DB_PORT=55432 uv run pytest
 - **공유층**(`accounts`·`core`·`policies`·`storage`·`notifications`·`submissions`,
   #270 이 마지막을 더했다)**이 기능 앱을 부르면 막히되, 같은 줄이나 바로 앞 줄의
   `APP-BOUNDARY-EXCEPTION: <이유>` 로 열린다** — **이유가 비면 표시 자체가
-  실패한다**(`scripts/check_screen_language.py` 와 같은 관용구). 지금 **28곳**이고
+  실패한다**(`scripts/check_screen_language.py` 와 같은 관용구). 지금 **39곳**이고
   대부분 순환을 끊으려 일부러 함수 안에 넣은 지연 import 라, 이 티켓은 지우지 않고
   사유를 적어 세어지게만 했다.
   `grep -rn "APP-BOUNDARY-EXCEPTION" backend/` 로 나오는 그 숫자가 경계의 건강
