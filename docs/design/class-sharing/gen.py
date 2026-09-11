@@ -109,6 +109,15 @@ NEWPROBLEM = body(
     + '</div>'
     + f'<div style="width:460px;flex-shrink:0;display:flex;flex-direction:column;gap:18px;">'
     + card(f'<div style="padding:14px 16px 12px;border-bottom:1px solid {RULE};">'
+           + sectiontitle("채점 모델") + '</div>'
+           f'<div style="padding:14px 16px;display:flex;flex-direction:column;gap:9px;">'
+           f'<div style="border:1px solid {RULE};background:{PAPER};padding:9px 12px;font-size:13px;'
+           f'display:flex;justify-content:space-between;"><span>클래스 기본값을 따릅니다</span>'
+           f'<span style="color:{DIM};">▾</span></div>'
+           f'<div style="font-size:11.5px;color:{DIM};line-height:1.6;">'
+           f'설명이 길면 컨텍스트가 작은 모델은 뒷부분이 잘린 채 채점됩니다 — 선택지마다 '
+           f'컨텍스트 크기가 함께 나옵니다.</div></div>')
+    + card(f'<div style="padding:14px 16px 12px;border-bottom:1px solid {RULE};">'
            + sectiontitle("체크리스트", "필수를 전부 충족하면 「통과」") + '</div>'
            + checkitem(1, "fetch 로 목록을 받아온다")
            + checkitem(2, "받아오는 동안의 화면이 있다")
