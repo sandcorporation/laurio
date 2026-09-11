@@ -312,3 +312,71 @@ class ClassroomProblemListItemOut(Schema):
     passed: bool
 class ProblemCopyIn(Schema):
     target_class_id: int
+
+
+# --- 템플릿 (#316/#318/#320) -----------------------------------------------------
+
+
+class PublishTemplateIn(Schema):
+    #: 계정 표시 이름을 끌어오지 않는다 — 공개할 때 직접 적는다(#316 AC).
+    publisher_display_name: str = Field(min_length=1, max_length=100)
+
+
+class ProblemTemplateChecklistItemOut(Schema):
+    label: str
+    required: bool
+    order: int
+
+
+class ProblemTemplateOut(Schema):
+    id: int
+    share_code: str
+    title: str
+    description: str
+    submission_format: str
+    publisher_display_name: str
+    created_at: datetime
+    taken_down: bool = False
+    checklist_items: list[ProblemTemplateChecklistItemOut] = []
+    #: 보는 사람이 올린 사람 본인인가 — 화면이 「신고」 대신 「내리기」를
+    #: 보여줄지 정하는 자리(#320 AC "자기 템플릿은 신고 대상이 아니다").
+    is_mine: bool = False
+
+
+class ProblemTemplateListItemOut(Schema):
+    """검색 목록 한 줄(#318 AC) — 제목·올린 사람·올린 날짜만."""
+
+    share_code: str
+    title: str
+    publisher_display_name: str
+    created_at: datetime
+
+
+class ImportTemplateIn(Schema):
+    target_class_id: int
+
+
+class ReportTemplateIn(Schema):
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class ReportResultOut(Schema):
+    reported: bool = True
+
+
+class ReportedTemplateOut(Schema):
+    """운영자 신고 목록 한 줄(#320 AC "내용·신고 사유·신고 수")."""
+
+    id: int
+    title: str
+    description: str
+    submission_format: str
+    publisher_display_name: str
+    report_count: int
+    report_reasons: list[str]
+    taken_down: bool
+
+
+class ModerationDecisionIn(Schema):
+    decision: str  # "takedown" | "dismiss" — appeals.schemas.AppealRulingIn과 같은 관용구
+    note: str = Field(min_length=1, max_length=2000)
