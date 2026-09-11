@@ -6107,6 +6107,11 @@ export interface components {
              */
             description: string;
             /**
+             * Model
+             * @default
+             */
+            model: string;
+            /**
              * Open
              * @default false
              */

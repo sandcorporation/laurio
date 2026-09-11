@@ -735,6 +735,11 @@ def create_problem(request: HttpRequest, class_id: int, payload: ProblemIn):
     if payload.submission_format not in _SUBMISSION_FORMATS:
         raise HttpError(422, f"알 수 없는 제출 형식입니다: {payload.submission_format}")
 
+    # 편집(`update_problem`)과 같은 규칙이다 — 두 자리가 갈리면 만들 때는
+    # 통과한 값이 고칠 때 거절되는 상태가 생긴다.
+    if payload.model and not is_valid_model(payload.model):
+        raise HttpError(422, f"알 수 없는 채점 모델입니다: {payload.model}")
+
     if payload.open and not any(item.required for item in payload.checklist_items):
         raise HttpError(400, "필수 항목이 하나도 없는 문제는 열 수 없습니다.")
 
@@ -745,6 +750,7 @@ def create_problem(request: HttpRequest, class_id: int, payload: ProblemIn):
             title=payload.title,
             description=payload.description,
             submission_format=payload.submission_format,
+            model=payload.model,
             order=next_order,
             status=Problem.Status.OPEN if payload.open else Problem.Status.DRAFT,
         )

@@ -1,6 +1,6 @@
 "use client";
 
-// 새 문제 (#282, #315). 제목·설명·제출 형식과 함께 체크리스트 항목을 그
+// 새 문제 (#282, #315, #327). 제목·설명·제출 형식·채점 모델과 함께 체크리스트 항목을 그
 // 자리에서 적는다 — 만들기 요청 하나가 문제와 항목을 함께 만든다. 항목이
 // 준비됐으면(필수 항목이 하나 이상) 그 자리에서 바로 열 수도 있다. 마감을
 // 넣을 자리는 애초에 없다.
@@ -25,6 +25,7 @@ import { ProblemParticipantView } from "@/app/components/ProblemParticipantView"
 import { TemplatePickerSheet } from "@/app/components/TemplatePickerSheet";
 import { BackendError } from "@/lib/backend/client";
 import { createProblem, type ProblemRow, type SubmissionFormat } from "@/lib/problems/api";
+import { useScoringModels } from "@/lib/scoring/use-scoring-models";
 
 type DraftChecklistItem = {
   key: number;
@@ -40,6 +41,9 @@ export default function NewProblemPage() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [submissionFormat, setSubmissionFormat] = useState<SubmissionFormat>("source");
+  // 빈 문자열이 「클래스 기본값을 따릅니다」다 — 편집 화면(#285)과 같은 값이다.
+  const [model, setModel] = useState("");
+  const modelsState = useScoringModels();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // 「작성」/「미리보기」 탭(#325) — 참여자 화면 전체를 보여주는 쪽은 그
@@ -105,6 +109,7 @@ export default function NewProblemPage() {
         title: title.trim(),
         description,
         submission_format: submissionFormat,
+        model,
         checklist_items: items.map((item) => ({ label: item.label, required: item.required })),
         open,
       });
@@ -134,7 +139,7 @@ export default function NewProblemPage() {
         eyebrow="클래스 · 문제"
         title="새 문제"
         titleTestId="new-problem-heading"
-        description="마감이 없습니다. 참여자는 몇 번이든 다시 낼 수 있고, 낼 때마다 바로 채점됩니다."
+        description="참여자는 몇 번이든 다시 낼 수 있고, 낼 때마다 바로 채점됩니다."
       />
 
       <div className="flex flex-col gap-5">
@@ -254,6 +259,45 @@ export default function NewProblemPage() {
               </span>
             </fieldset>
           </form>
+        </Card>
+
+        <Card>
+          <CardHeader title="채점 모델" />
+          <div className="flex flex-col gap-2.5 p-4">
+            <label htmlFor="new-problem-model" className="sr-only">
+              채점 모델
+            </label>
+            {modelsState.status === "ready" ? (
+              <select
+                id="new-problem-model"
+                data-testid="new-problem-model-select"
+                value={model}
+                onChange={(event) => setModel(event.target.value)}
+                className={INPUT_CLASS}
+              >
+                <option value="" data-testid="new-problem-model-option-inherit">
+                  클래스 기본값을 따릅니다
+                </option>
+                {modelsState.models.map((option) => (
+                  <option
+                    key={option.id}
+                    value={option.id}
+                    data-testid={`new-problem-model-option-${option.id}`}
+                  >
+                    {option.label} · 컨텍스트 {option.context_window.toLocaleString("ko-KR")} 토큰
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <p data-testid="new-problem-model-loading" className="text-[13px] text-ink/45">
+                모델 목록을 불러오는 중...
+              </p>
+            )}
+            <span className="text-[11.5px] leading-relaxed text-ink/45">
+              설명이 길면 컨텍스트가 작은 모델은 뒷부분이 잘린 채 채점됩니다 — 그래서 문제마다
+              다른 모델을 고를 수 있습니다.
+            </span>
+          </div>
         </Card>
 
         <Card>

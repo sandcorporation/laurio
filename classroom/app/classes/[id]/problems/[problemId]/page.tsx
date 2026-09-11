@@ -236,7 +236,6 @@ export default function EditProblemPage() {
         eyebrow="클래스 · 문제"
         title="문제 편집"
         titleTestId="edit-problem-heading"
-        description="마감이 없습니다. 이미 푼 사람이 있어도 언제든 고칠 수 있습니다."
         actions={
           <>
             <Badge tone={problem.status === "open" ? "verified" : "neutral"}>
