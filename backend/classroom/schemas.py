@@ -297,6 +297,10 @@ class ClassroomProblemSubmissionsOut(Schema):
     #: 제출 수단을 아예 숨기고 그 이유를 말해 준다 — 시도는 지우지 않으므로
     #: `submissions`는 그대로 채워진다.
     member_expelled: bool = False
+    #: 이 클래스가 보관됐는가(#294, #338). 참이면 화면이 제출 수단을 숨기고
+    #: 수업이 끝났다는 이유를 보여준다 — `member_expelled`와 같은 신호 자리.
+    #: 새 제출만 막힌다(`create_classroom_submission`의 403이 실제 문).
+    archived: bool = False
 
 
 class ClassroomProblemStatsOut(Schema):

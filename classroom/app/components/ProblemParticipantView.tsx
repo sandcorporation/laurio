@@ -39,6 +39,11 @@ export type ParticipantChecklistItem = {
 type InteractiveProps = {
   interactive: true;
   memberExpelled: boolean;
+  /** 클래스가 보관됐는가(#294, #338) — 참이면 내보내진 사람과 같은 모양으로
+   *  제출 수단을 숨기고 수업이 끝났다는 이유를 보여준다. 보관과 내보냄이
+   *  동시에 참이어도 보관 쪽 문구가 우선한다 — "수업 자체가 끝났다"가 더
+   *  근본적인 이유이고, 되돌리면(#294) 내보냄 여부만으로 다시 갈린다. */
+  archived: boolean;
   repositoryUrl: string;
   onRepositoryUrlChange: (value: string) => void;
   onRepositorySubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -255,6 +260,7 @@ function InteractiveSubmissionForm(
 ) {
   const {
     memberExpelled,
+    archived,
     repositoryUrl,
     onRepositoryUrlChange,
     onRepositorySubmit,
@@ -268,7 +274,18 @@ function InteractiveSubmissionForm(
 
   return (
     <>
-      {memberExpelled ? (
+      {archived ? (
+        // 보관된 클래스는 내보내진 사람과 같은 모양으로 제출 수단을 숨긴다
+        // (#294, #338 AC) — 지난 시도는 위 "내 시도" 카드에 그대로 남아
+        // 있다. 되돌리면(POST .../unarchive) 이 분기를 벗어나 폼이 다시
+        // 보인다.
+        <ErrorNote>
+          <span data-testid="class-archived-note">
+            이 클래스는 보관되어 새 제출을 받지 않습니다. 지난 시도와 판정은 계속 볼 수
+            있습니다.
+          </span>
+        </ErrorNote>
+      ) : memberExpelled ? (
         // 내보내진 사람에게는 제출 수단 자체를 보이지 않고, 왜
         // 낼 수 없는지를 말해 준다(#300 AC) — 지난 시도는 위
         // "내 시도" 카드에 그대로 남아 있다. 「다시 낼 수 있다」 안내는 이

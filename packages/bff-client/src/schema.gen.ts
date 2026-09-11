@@ -4685,6 +4685,11 @@ export interface components {
         /** ClassroomProblemSubmissionsOut */
         ClassroomProblemSubmissionsOut: {
             /**
+             * Archived
+             * @default false
+             */
+            archived: boolean;
+            /**
              * Member Expelled
              * @default false
              */

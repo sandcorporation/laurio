@@ -1081,6 +1081,9 @@ def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
         # 수단을 감추고 이유를 말해 줄 수 있도록 신호만 얹는다 — 막는
         # 문 자체는 여전히 `create_classroom_submission`의 403이다.
         member_expelled=member.expelled_at is not None,
+        # 보관된 클래스도 같은 이유로 신호만 얹는다(#294, #338) — 실제 문은
+        # 여전히 `create_classroom_submission`의 403이다.
+        archived=member.classroom.archived_at is not None,
     )
 
 
