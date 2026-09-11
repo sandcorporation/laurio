@@ -41,14 +41,14 @@ function ClassList({
                 <Num>{new Date(classroom.created_at).toLocaleDateString("ko-KR")}</Num> 만듦
               </div>
             </div>
-            {/* 보관된 클래스의 주 행동은 「복사해서 새 기수 열기」다 — 지난 기수를
-                복사해 다음 기수를 여는 것이 이 제품의 흔한 쓰임이기 때문이다
+            {/* 보관된 클래스의 주 행동은 복사해서 새로 여는 것이다 — 지난 클래스를
+                복사해 다음 클래스를 여는 것이 이 제품의 흔한 쓰임이기 때문이다
                 (docs/design/classroom/README.md). 복사 자체는 상세 화면이 한다. */}
             <Link
               href={`/classes/${classroom.id}`}
               className={buttonClass(archived ? "primary" : "secondary", "sm")}
             >
-              {archived ? "복사해서 새 기수 열기" : "열기"}
+              {archived ? "복사해서 새로 열기" : "열기"}
             </Link>
           </li>
         ))}
@@ -68,8 +68,8 @@ export default function ClassroomHome() {
         titleTestId="classroom-home-heading"
         description={
           <span data-testid="classroom-home-heading-note">
-            클래스마다 문제와 참여자가 따로 삽니다. 지난 기수를 복사하면 문제와 체크리스트가
-            그대로 따라옵니다.
+            문제를 내고 참여자의 제출을 채점하는 공간입니다. 지난 클래스를 복사하면 문제와
+            체크리스트를 그대로 가져와 새로 시작할 수 있습니다.
           </span>
         }
         actions={
@@ -101,7 +101,10 @@ export default function ClassroomHome() {
       ) : state.classes.length === 0 ? (
         <Card>
           <EmptyState>
-            <span data-testid="classroom-empty-state">아직 가입하거나 개설한 클래스가 없습니다.</span>
+            <span data-testid="classroom-empty-state">
+              아직 가입하거나 연 클래스가 없습니다. 위 「새 클래스 열기」로 시작하거나, 초대
+              링크를 받았다면 그 링크로 들어가 보세요.
+            </span>
           </EmptyState>
         </Card>
       ) : (
@@ -119,7 +122,9 @@ export default function ClassroomHome() {
                 {ongoing.length === 0 ? (
                   <Card>
                     <EmptyState>
-                      <span data-testid="classroom-ongoing-empty-state">진행중인 클래스가 없습니다.</span>
+                      <span data-testid="classroom-ongoing-empty-state">
+                        진행중인 클래스가 없습니다. 위 「새 클래스 열기」로 새로 시작해 보세요.
+                      </span>
                     </EmptyState>
                   </Card>
                 ) : (
@@ -131,13 +136,16 @@ export default function ClassroomHome() {
                 <h2 className="text-[15px] font-semibold">
                   보관{" "}
                   <span className="font-normal text-ink/45">
-                    새 가입과 새 제출은 닫혔고 읽기는 남습니다
+                    새로 가입하거나 제출할 수는 없지만, 지난 기록은 그대로 볼 수 있습니다
                   </span>
                 </h2>
                 {archived.length === 0 ? (
                   <Card>
                     <EmptyState>
-                      <span data-testid="classroom-archived-empty-state">보관된 클래스가 없습니다.</span>
+                      <span data-testid="classroom-archived-empty-state">
+                        보관된 클래스가 없습니다. 클래스를 다 쓰면 상세 화면에서 보관해 목록을
+                        정리할 수 있습니다.
+                      </span>
                     </EmptyState>
                   </Card>
                 ) : (

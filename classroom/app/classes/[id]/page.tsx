@@ -311,8 +311,8 @@ export default function ClassDetailPage() {
             <Link href={`/classes/${classId}/settings`} data-testid="scoring-settings-link" className={buttonClass()}>
               채점 설정
             </Link>
-            {/* 보관된 클래스에서는 이것이 주 행동이다 — 지난 기수를 복사해 다음
-                기수를 여는 것이 이 제품의 흔한 쓰임이다
+            {/* 보관된 클래스에서는 이것이 주 행동이다 — 지난 클래스를 복사해 다음
+                클래스를 여는 것이 이 제품의 흔한 쓰임이다
                 (docs/design/classroom/README.md). */}
             <button
               type="button"
@@ -321,7 +321,7 @@ export default function ClassDetailPage() {
               disabled={copying}
               className={buttonClass(classroom.archived ? "primary" : "secondary")}
             >
-              {copying ? "복사하는 중..." : "복사해서 새 기수 열기"}
+              {copying ? "복사하는 중..." : "복사해서 새로 열기"}
             </button>
           </>
         }
@@ -403,7 +403,9 @@ export default function ClassDetailPage() {
                 </div>
               ) : problemsState.problems.length === 0 ? (
                 <EmptyState>
-                  <span data-testid="problems-empty-state">아직 만든 문제가 없습니다.</span>
+                  <span data-testid="problems-empty-state">
+                    아직 만든 문제가 없습니다. 위 「새 문제」로 첫 문제를 내보세요.
+                  </span>
                 </EmptyState>
               ) : (
                 <>

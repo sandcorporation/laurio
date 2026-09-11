@@ -363,7 +363,9 @@ export default function EditProblemPage() {
               <CardHeader title="체크리스트" hint="필수를 전부 충족하면 「통과」" />
               {problem.checklist_items.length === 0 ? (
                 <EmptyState>
-                  <span data-testid="checklist-empty-state">아직 항목이 없습니다.</span>
+                  <span data-testid="checklist-empty-state">
+                    아직 항목이 없습니다. 아래에서 새 항목을 추가해 보세요.
+                  </span>
                 </EmptyState>
               ) : (
                 <ul data-testid="checklist-items" className="divide-y divide-rule">

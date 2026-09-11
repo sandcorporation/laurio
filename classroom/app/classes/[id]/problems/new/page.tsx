@@ -183,7 +183,8 @@ export default function NewProblemPage() {
                 </label>
               </div>
               <span className="text-[11.5px] leading-relaxed text-ink/45">
-                근거 연결도 자가 체크도 없습니다 — 채점이 소스에서 직접 판정합니다.
+                제출된 내용만 보고 채점합니다 — 참여자가 따로 근거를 적거나 스스로 체크할
+                필요는 없습니다.
               </span>
             </fieldset>
           </form>
@@ -197,7 +198,8 @@ export default function NewProblemPage() {
           {items.length === 0 ? (
             <EmptyState>
               <span data-testid="new-problem-checklist-empty-state">
-                아직 항목이 없습니다. 없이 만들면 초안으로 남아 나중에 이어 붙일 수 있습니다.
+                아직 항목이 없습니다. 항목 없이 만들면 초안으로 남아 나중에 이어서 추가할 수
+                있습니다.
               </span>
             </EmptyState>
           ) : (

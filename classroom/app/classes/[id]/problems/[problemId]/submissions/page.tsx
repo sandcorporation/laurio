@@ -88,7 +88,9 @@ export default function ProblemSubmissionsPage() {
         {state.submissions.length === 0 ? (
           <Card>
             <EmptyState>
-              <span data-testid="problem-submissions-empty-state">아직 낸 시도가 없습니다.</span>
+              <span data-testid="problem-submissions-empty-state">
+                아직 낸 시도가 없습니다. 참여자가 제출하면 여기에 나타납니다.
+              </span>
             </EmptyState>
           </Card>
         ) : (
@@ -180,8 +182,7 @@ export default function ProblemSubmissionsPage() {
         )}
 
         <Note>
-          이 화면을 여는 것은 <b className="text-ink">어디에도 기록되지 않습니다.</b> 여기서
-          열람 기록이 드러내는 것은 감시가 아니라 「한 번도 안 봤다」이기 때문입니다.
+          이 화면을 열어 봐도 <b className="text-ink">그 사실은 어디에도 남지 않습니다.</b>
         </Note>
       </div>
     </PageShell>

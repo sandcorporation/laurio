@@ -61,7 +61,7 @@ export default function MembersPage() {
         eyebrow="클래스"
         title="참여자 명단"
         titleTestId="members-heading"
-        description={`달성률의 분모가 되는 참여자는 ${counted}명입니다 — 강사 본인과 내보낸 사람은 빠집니다.`}
+        description={`달성률을 셀 때 세는 참여자는 ${counted}명입니다 — 강사 본인과 내보낸 사람은 빠집니다.`}
         actions={
           <Link href={`/classes/${classId}`} data-testid="members-back-link" className={buttonClass()}>
             클래스로 돌아가기
@@ -79,7 +79,9 @@ export default function MembersPage() {
         {state.members.length === 0 ? (
           <Card>
             <EmptyState>
-              <span data-testid="members-empty-state">아직 참여자가 없습니다.</span>
+              <span data-testid="members-empty-state">
+                아직 참여자가 없습니다. 클래스 상세의 가입 링크를 공유해 보세요.
+              </span>
             </EmptyState>
           </Card>
         ) : (
@@ -132,8 +134,8 @@ export default function MembersPage() {
         )}
 
         <Note>
-          내보내도 그 사람의 행과 제출물은 남습니다 — 지우면 지난 제출이 이름을 잃어 「누군가의
-          제출」이 됩니다. 내보낸 사람은 새로 제출할 수 없고 달성률의 분모에서도 빠집니다.
+          내보내도 이름과 지난 제출·판정은 그대로 남습니다. 다만 다시 가입하거나 제출할 수는
+          없고, 달성률을 셀 때도 빠집니다.
         </Note>
       </div>
     </PageShell>

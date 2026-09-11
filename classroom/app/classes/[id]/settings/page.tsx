@@ -140,7 +140,7 @@ export default function ClassScoringSettingsPage() {
       return;
     }
     if (!Number.isInteger(parsedThreshold) || parsedThreshold < 1 || parsedThreshold > 100) {
-      setBudgetError("경고 임계는 1~100 사이의 정수여야 합니다.");
+      setBudgetError("경고 기준은 1~100 사이의 정수여야 합니다.");
       return;
     }
     setBudgetSaving(true);
@@ -379,7 +379,7 @@ export default function ClassScoringSettingsPage() {
                 </div>
                 <div className="flex w-[150px] flex-col gap-1.5">
                   <label htmlFor="token-budget-warning-threshold-input">
-                    <FieldLabel>경고 임계(%)</FieldLabel>
+                    <FieldLabel>경고 기준(%)</FieldLabel>
                   </label>
                   <input
                     id="token-budget-warning-threshold-input"
@@ -410,7 +410,7 @@ export default function ClassScoringSettingsPage() {
             </form>
 
             <Note>
-              임계에 닿으면 <b className="text-ink">서비스 안 알림</b>으로 알립니다 — 메일이나 문자가
+              기준에 닿으면 <b className="text-ink">서비스 안 알림</b>으로 알립니다 — 메일이나 문자가
               아니라 이 서비스에 들어오면 보이는 알림입니다. 한도에 닿아도 제출은 계속 쌓이고,
               예산을 채우면 쌓인 시도부터 순서대로 이어서 채점됩니다.
             </Note>
