@@ -157,11 +157,19 @@ staging 은 실물 어댑터라 해당 없음), 배포 환경의 시계는 실�
 반드시 다른 서브도메인을 쓴다 — 같은 오리진을 공유하면 공개 앱이 뚫렸을 때
 운영자 세션 쿠키까지 노출될 길이 생긴다.
 
-**staging 배포는 `deploy.sh` 가 한다 — `Jenkinsfile` 이 아니다.** Jenkins 잡은
-Pipeline 이 아니라 **freestyle** 이고, 셸 스텝이 `sh ./deploy.sh staging` 하나뿐이라
-`Jenkinsfile` 은 읽히지 않는다. 이걸 모르고 Jenkinsfile 만 고쳤다가 빌드가
-`cannot open ./deploy.sh` 로 통째로 실패했다 — 지금은 `Jenkinsfile` 도 같은
-스크립트를 부르는 껍데기라 어느 쪽으로 돌려도 동작이 같다.
+**staging 배포는 `main` 에 push 하면 저절로 일어난다.** Jenkins 잡
+(`/var/jenkins_home/jobs/laurio`)은 **Pipeline** 이고(`<flow-definition>`,
+`scriptPath: Jenkinsfile`), 트리거가 `GitHubPushTrigger` — GitHub 웹훅이다.
+브랜치 지정은 `*/main` 이라 다른 브랜치를 밀어도 빌드가 돌지 않는다.
+
+**실제로 굽는 것은 `Jenkinsfile` 이 부르는 `deploy.sh` 다.** 예전에는 잡이
+freestyle 이었고 셸 스텝이 `sh ./deploy.sh staging` 하나뿐이라 `Jenkinsfile` 이
+읽히지 않았다 — 그때 이걸 모르고 Jenkinsfile 만 고쳤다가 빌드가
+`cannot open ./deploy.sh` 로 통째로 실패한 적이 있다. 지금은 Pipeline 으로
+바뀌어 `Jenkinsfile` 이 실제로 읽히지만, 그것이 같은 `deploy.sh` 를 부르므로
+**동작은 그때와 같다**. 이 문단은 「freestyle 이라 Jenkinsfile 은 읽히지 않는다」
+라고 적은 채로 낡아 있었다(실측 2026-09-11, 빌드 #132 로그의
+`[Pipeline] End of Pipeline` 과 `config.xml` 로 확인).
 
 `deploy.sh` 는 **바뀐 것만 다시 굽는다**. 기준점은 `.jenkins-staging-deployed`
 (gitignore, 빌드 디렉터리에 남는다 — 시크릿과 같은 전제). 그 파일이 없거나 그것이
@@ -290,6 +298,31 @@ cd backend && LAURIO_DB_PORT=55432 \
 데모 Contest 삭제가 `ProtectedError` 로 막히고, append-only 우회는 배포 환경에서
 거부된다(#240) — 즉 staging 에서는 재시드가 통째로 불가능하다. 시드가 스스로 「멱등하다」고
 적어 둔 계약이 그 지점에서 깨져 있다.
+
+**강의실 데모는 `seed_demo_classroom` 이 심는다 — 그리고 이쪽은 다시 심을 수 있다.**
+한 강사 계정에 화면의 갈래가 전부 보이는 한 벌을 만든다(진행중 클래스 둘·보관된 것
+하나, 초안과 열린 문제, 내보내진 참여자, 시도가 쌓인 제출과 통과·미통과가 섞인 채점,
+예산 경고 임계를 넘긴 상태, 공개된 문제·클래스 템플릿). 출력에 가입 링크와 템플릿
+공유 코드가 나온다.
+
+```bash
+cd backend && LAURIO_DB_PORT=55432 uv run python manage.py seed_demo_classroom --email <계정>
+# staging 에서는
+ssh sub 'docker exec laurio-staging-backend-1 python manage.py seed_demo_classroom --email <계정>'
+```
+
+**채점을 돌리지 않고 `ClassroomScore` 를 직접 만든다** — 데모를 심는 데 강사의 OpenAI
+키를 태울 이유가 없고, 통과·미통과를 의도대로 배치해야 화면의 모든 갈래가 보인다.
+같은 이유로 클래스에 키를 넣지 않는다. 제출은 **저장소 형식만** 심는다 — 소스 형식은
+값이 스토리지 object_key 라 실제 오브젝트를 함께 써야 하고, 그러지 않으면 화면이 없는
+파일을 가리킨다(#253 이 겪은 실패다).
+
+**재시드가 되는 이유는 `ClassroomScore` 를 먼저 걷기 때문이다.** 위 공모전과 똑같이
+`ClassroomScore.submission` 이 PROTECT 라 클래스를 그냥 지우면 막힌다. 이 명령은
+`[데모]` 로 시작하는 **그 강사의** 클래스에 달린 Score 만 QuerySet 으로 먼저 지운다
+(append-only 가드가 인스턴스 `delete()` 에만 걸려 있다). 범위가 그 접두어로 닫혀
+있다는 것이 이 우회의 근거 전부이므로 그 필터를 넓히면 근거가 사라진다 — 실데이터의
+Score 는 어떤 경로로도 닿지 않는다. `--purge-only` 로 걷어내기만 할 수도 있다.
 
 **e2e 가 남긴 것이 dev 화면을 덮으면 걷어낸다**(#183). Contest 는 스위트 시작에 저절로
 걷히지만(`global-setup.ts` 가 세 정리를 순서대로 부른다 — 실행 토큰별 큐, 네임스페이스별
