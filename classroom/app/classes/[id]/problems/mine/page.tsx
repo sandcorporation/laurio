@@ -56,8 +56,9 @@ export default function MyProblemsPage() {
         description={
           problems.length > 0 ? (
             <>
-              {problems.length}개 중 <span className="font-mono text-ink">{passed}</span>개 통과했습니다.
-              마감이 없으니 몇 번이든 다시 낼 수 있습니다.
+              {problems.length}개 중 <span className="font-mono text-ink">{passed}</span>개를
+              통과했습니다. 한 번이라도 통과하면 계속 통과로 남으니, 남은 문제는 몇 번이든
+              다시 내서 통과할 수 있습니다.
             </>
           ) : undefined
         }
@@ -66,7 +67,9 @@ export default function MyProblemsPage() {
       {problems.length === 0 ? (
         <Card>
           <EmptyState>
-            <span data-testid="my-problems-empty-state">아직 열린 문제가 없습니다.</span>
+            <span data-testid="my-problems-empty-state">
+              아직 열린 문제가 없습니다. 강사가 문제를 열면 여기에 나타납니다.
+            </span>
           </EmptyState>
         </Card>
       ) : (

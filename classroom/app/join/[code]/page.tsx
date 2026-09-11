@@ -158,6 +158,9 @@ export default function JoinPage() {
           참여자 <Num>{info.participant_count}</Num>명
         </span>
       </p>
+      <p className="mt-3 text-[13px] leading-relaxed text-ink/60">
+        문제를 풀어 코드나 저장소를 내면 곧바로 채점되는 클래스입니다.
+      </p>
 
       <div className="mt-6">
         {info.archived ? (
@@ -196,7 +199,8 @@ export default function JoinPage() {
                   className={INPUT_CLASS}
                 />
                 <span className="text-[11.5px] leading-relaxed text-ink/45">
-                  계정 이름과 달라도 됩니다 — 회사 수업과 스터디에서 다른 이름을 쓸 수 있습니다.
+                  강사에게 이 이름으로 보입니다. 계정 이름과 달라도 됩니다 —
+                  회사 수업이나 스터디에서 다른 이름을 쓸 수 있습니다.
                 </span>
               </div>
               <button
@@ -221,7 +225,7 @@ export default function JoinPage() {
       ) : null}
 
       <p className="mt-8 border-t border-rule pt-4 text-[11.5px] leading-relaxed text-ink/45">
-        가입과 동시에 이 클래스에 들어갑니다. 본인확인도 결제도 없습니다.
+        가입하면 바로 문제 목록이 열립니다 — 본인확인도 결제도 없습니다.
       </p>
     </Shell>
   );

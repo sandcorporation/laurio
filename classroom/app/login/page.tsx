@@ -47,7 +47,8 @@ export default async function ClassroomLoginPage() {
           로그인이 필요합니다
         </h1>
         <p className="mt-3 text-[13.5px] leading-relaxed text-ink/60" data-testid="classroom-login-guide">
-          클래스는 Laurio 계정을 그대로 씁니다. 아래에서 로그인한 뒤 이 화면으로 돌아와 주세요.
+          클래스는 별도 계정 없이 Laurio 로그인을 그대로 씁니다. 아래 버튼으로
+          로그인한 뒤 이 화면으로 돌아와 주세요.
         </p>
         <p className="mt-6">
           <a href={loginUrl} data-testid="classroom-login-link" className={buttonClass("primary")}>

@@ -324,9 +324,9 @@ export default function ProblemSubmitPage() {
               ) : null}
 
               <p className="text-[11.5px] leading-relaxed text-ink/45">
-                <b className="font-medium text-ink">마감이 없습니다.</b> 몇 번이든 다시 낼 수 있고,
-                낼 때마다 바로 채점이 시작됩니다. 한 번이라도 통과하면 통과로 셉니다 — 고치다 깨져도
-                사라지지 않습니다.
+                내면 바로 채점이 시작되고, <b className="font-medium text-ink">끝나면 알림이 옵니다.</b>{" "}
+                한 번이라도 통과하면 계속 통과로 남으니, 안 되면 몇 번이든 고쳐서 다시 낼 수
+                있습니다.
               </p>
             </div>
           </Card>
