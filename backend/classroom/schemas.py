@@ -380,3 +380,43 @@ class ReportedTemplateOut(Schema):
 class ModerationDecisionIn(Schema):
     decision: str  # "takedown" | "dismiss" — appeals.schemas.AppealRulingIn과 같은 관용구
     note: str = Field(min_length=1, max_length=2000)
+
+
+# --- 클래스 템플릿 (#319) -----------------------------------------------------
+
+
+class ClassTemplateProblemOut(Schema):
+    title: str
+    description: str
+    submission_format: str
+    order: int
+    checklist_items: list[ProblemTemplateChecklistItemOut] = []
+
+
+class ClassTemplateOut(Schema):
+    id: int
+    share_code: str
+    name: str
+    publisher_display_name: str
+    created_at: datetime
+    taken_down: bool = False
+    problems: list[ClassTemplateProblemOut] = []
+    #: 미리보기가 가져오기 전에 몇 개의 문제가 들어 있는지를 바로 말해주는
+    #: 자리(#319 AC) — `len(problems)`와 같은 값이다.
+    problem_count: int = 0
+    is_mine: bool = False
+
+
+class ClassTemplateListItemOut(Schema):
+    """검색 목록 한 줄 — `ProblemTemplateListItemOut`과 같은 모양이다."""
+
+    share_code: str
+    name: str
+    publisher_display_name: str
+    created_at: datetime
+
+
+class ImportClassTemplateIn(Schema):
+    #: 가져가는 사람이 새 클래스에 붙일 이름(#319 AC "이름을 정할 수 있다") —
+    #: 원본 이름을 그대로 쓰지 않는다.
+    name: str = Field(min_length=1, max_length=200)

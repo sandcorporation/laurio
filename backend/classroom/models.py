@@ -415,6 +415,80 @@ class ProblemTemplateModerationDecision(models.Model):
         return f"ProblemTemplateModerationDecision(template={self.template_id}, decision={self.decision})"
 
 
+class ClassTemplate(models.Model):
+    """클래스 하나를 공개한 시점의 **사본**(#319, #312 Implementation Decisions
+    「템플릿 공유」) — `ProblemTemplate`과 같은 이유로 `Class`를 가리키지
+    않는다. 문제 사이의 순서도 커리큘럼의 일부라 `ClassTemplateProblem.order`로
+    함께 담는다.
+
+    **채점 모델을 담지 않는다** — `ProblemTemplate`과 같은 이유로 필드 자체가
+    없다(가져간 사람이 남이 고른 모델의 청구서를 자기 키로 받는 사고를 구조로
+    막는다). 참여자·제출물·판정·가입 코드·OpenAI 키도 이 모델이 애초에 모르는
+    것들이다.
+    """
+
+    published_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="class_templates", on_delete=models.CASCADE
+    )
+    publisher_display_name = models.CharField(max_length=100)
+    #: 공개 시점 클래스 이름의 사본 — 가져가는 사람이 자기 클래스 이름을
+    #: 새로 정하므로(AC), 이 값은 미리보기에만 쓰인다.
+    name = models.CharField(max_length=200)
+
+    #: 추측 불가능한 공유 코드 — `ProblemTemplate.share_code`와 같은 모양,
+    #: 같은 생성기다.
+    share_code = models.CharField(max_length=32, unique=True, default=_generate_join_code)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    #: `ProblemTemplate.taken_down_at`과 같은 관용구 — 올린 사람의 자진 내림
+    #: 또는 운영자의 판단으로 내려간 시각. null이면 공개 중이다.
+    taken_down_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ClassTemplate(id={self.pk}, name={self.name!r})"
+
+
+class ClassTemplateProblem(models.Model):
+    """공개 시점 클래스 안 문제 하나의 사본 — `Problem`을 가리키지 않는다
+    (`ClassTemplate`이 `Class`를 가리키지 않는 것과 같은 이유). `order`가
+    클래스 안에서의 순서를 그대로 지킨다."""
+
+    template = models.ForeignKey(
+        ClassTemplate, related_name="problems", on_delete=models.CASCADE
+    )
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True, default="")
+    submission_format = models.CharField(max_length=20, choices=Problem.SubmissionFormat.choices)
+    order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["order", "id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ClassTemplateProblem(id={self.pk}, title={self.title!r})"
+
+
+class ClassTemplateProblemChecklistItem(models.Model):
+    """`ClassTemplateProblem` 하나의 체크리스트 사본 한 줄 —
+    `ProblemTemplateChecklistItem`과 같은 모양이지만 독립 테이블이다."""
+
+    problem = models.ForeignKey(
+        ClassTemplateProblem, related_name="checklist_items", on_delete=models.CASCADE
+    )
+    label = models.CharField(max_length=200)
+    required = models.BooleanField(default=True)
+    order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["order", "id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ClassTemplateProblemChecklistItem(id={self.pk}, label={self.label!r})"
+
+
 class ClassroomScoringAttempt(models.Model):
     """실패한 채점 시도의 이력(#287) — `scoring.ScoringAttempt`와 같은 역할,
     같은 이유로 다른 테이블이다. Score와 달리 append-only가 아니다 — 판정이
