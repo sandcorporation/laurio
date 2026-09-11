@@ -25,6 +25,13 @@ MARK_READ_URL = "/api/notifications/mark-read"
 CREATE_URL = "/api/internal/notifications"
 
 
+MARK_MANY_URL = "/api/notifications/mark-read-many"
+
+
+def _mark_one_url(notification_id: int) -> str:
+    return f"/api/notifications/{notification_id}/mark-read"
+
+
 def _internal_headers():
     return {"HTTP_X_INTERNAL_TOKEN": settings.INTERNAL_API_TOKEN}
 
@@ -258,3 +265,139 @@ def test_deferred_notification_is_still_visible_and_markable_as_read(client):
     me = client.get(ME_URL, **_auth_header(pair)).json()
     assert me[0]["status"] == Notification.Status.DEFERRED
     assert me[0]["read_at"] is not None
+
+
+@pytest.mark.django_db
+def test_mark_one_read_requires_auth(client):
+    response = client.post(_mark_one_url(1))
+    assert response.status_code == 401
+
+
+@pytest.mark.django_db
+def test_mark_one_read_marks_only_that_notification(client):
+    """AC: 링크 있는 알림을 누르면 그 알림만 읽음이 된다 — 나머지는 그대로다."""
+
+    pair = _login(client, "mark-one")
+    user_id = _user_id_from_me(client, pair)
+    first = _create_notification(client, recipient_id=user_id, notification_type=NotificationType.RESULT_NOTICE)
+    _create_notification(client, recipient_id=user_id, notification_type=NotificationType.SCORING_COMPLETE)
+
+    response = client.post(_mark_one_url(first["id"]), **_auth_header(pair))
+
+    assert response.status_code == 200
+    assert response.json()["id"] == first["id"]
+    assert response.json()["read_at"] is not None
+
+    assert client.get(UNREAD_COUNT_URL, **_auth_header(pair)).json()["count"] == 1
+    me = {row["id"]: row for row in client.get(ME_URL, **_auth_header(pair)).json()}
+    assert me[first["id"]]["read_at"] is not None
+    other_id = next(pk for pk in me if pk != first["id"])
+    assert me[other_id]["read_at"] is None
+
+
+@pytest.mark.django_db
+def test_mark_one_read_is_idempotent(client):
+    pair = _login(client, "mark-one-idempotent")
+    user_id = _user_id_from_me(client, pair)
+    created = _create_notification(client, recipient_id=user_id)
+
+    first_response = client.post(_mark_one_url(created["id"]), **_auth_header(pair)).json()
+    second_response = client.post(_mark_one_url(created["id"]), **_auth_header(pair)).json()
+
+    assert first_response["read_at"] == second_response["read_at"]
+
+
+@pytest.mark.django_db
+def test_mark_one_read_on_another_users_notification_is_404(client):
+    """AC: 남의 알림 id 는 존재하지 않는 것처럼 다룬다."""
+
+    victim = _login(client, "mark-one-victim")
+    victim_id = _user_id_from_me(client, victim)
+    created = _create_notification(client, recipient_id=victim_id)
+
+    attacker = _login(client, "mark-one-attacker")
+    response = client.post(_mark_one_url(created["id"]), **_auth_header(attacker))
+
+    assert response.status_code == 404
+    victim_me = client.get(ME_URL, **_auth_header(victim)).json()
+    assert victim_me[0]["read_at"] is None
+
+
+@pytest.mark.django_db
+def test_mark_one_read_on_nonexistent_notification_is_404(client):
+    pair = _login(client, "mark-one-missing")
+    response = client.post(_mark_one_url(999_999), **_auth_header(pair))
+    assert response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_mark_one_read_does_not_overwrite_an_earlier_read_at(client):
+    """동시 요청 경합 방어 — 조건부 UPDATE라 두 번째 호출은 첫 번째가 남긴
+    `read_at`을 덮어쓰지 않는다(#345 리뷰가 지적한 non-atomic 경합)."""
+
+    pair = _login(client, "mark-one-race")
+    user_id = _user_id_from_me(client, pair)
+    created = _create_notification(client, recipient_id=user_id)
+
+    first = client.post(_mark_one_url(created["id"]), **_auth_header(pair)).json()
+    second = client.post(_mark_one_url(created["id"]), **_auth_header(pair)).json()
+
+    assert first["read_at"] == second["read_at"]
+
+
+@pytest.mark.django_db
+def test_mark_many_read_requires_auth(client):
+    response = client.post(MARK_MANY_URL, data={"notification_ids": [1]}, content_type="application/json")
+    assert response.status_code == 401
+
+
+@pytest.mark.django_db
+def test_mark_many_read_marks_only_the_listed_ids(client):
+    """AC: 강의실 묶음 머리글을 누르면 그 문제의 안 읽은 시도 전부가 한 번에 읽음이 된다."""
+
+    pair = _login(client, "mark-many")
+    user_id = _user_id_from_me(client, pair)
+    first = _create_notification(client, recipient_id=user_id, notification_type=NotificationType.RESULT_NOTICE)
+    second = _create_notification(client, recipient_id=user_id, notification_type=NotificationType.SCORING_COMPLETE)
+    third = _create_notification(client, recipient_id=user_id, notification_type=NotificationType.APPEAL_RULED)
+
+    response = client.post(
+        MARK_MANY_URL,
+        data={"notification_ids": [first["id"], second["id"]]},
+        content_type="application/json",
+        **_auth_header(pair),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["marked_count"] == 2
+
+    me = {row["id"]: row for row in client.get(ME_URL, **_auth_header(pair)).json()}
+    assert me[first["id"]]["read_at"] is not None
+    assert me[second["id"]]["read_at"] is not None
+    assert me[third["id"]]["read_at"] is None
+
+
+@pytest.mark.django_db
+def test_mark_many_read_ignores_another_users_ids(client):
+    """AC: 남의 알림 id 는 존재하지 않는 것처럼 다룬다 — 섞여 들어와도 에러 없이 걸러진다."""
+
+    victim = _login(client, "mark-many-victim")
+    victim_id = _user_id_from_me(client, victim)
+    victim_notification = _create_notification(client, recipient_id=victim_id)
+
+    attacker = _login(client, "mark-many-attacker")
+    attacker_id = _user_id_from_me(client, attacker)
+    attacker_notification = _create_notification(client, recipient_id=attacker_id)
+
+    response = client.post(
+        MARK_MANY_URL,
+        data={"notification_ids": [victim_notification["id"], attacker_notification["id"]]},
+        content_type="application/json",
+        **_auth_header(attacker),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["marked_count"] == 1
+
+    victim_me = client.get(ME_URL, **_auth_header(victim)).json()
+    assert victim_me[0]["read_at"] is None

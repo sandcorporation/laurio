@@ -1,11 +1,12 @@
-"""강의실 알림 화면이 클래스 알림만 거른다 (#304).
+"""공모전과 강의실 알림이 서로 섞이지 않는다 (#304, #345).
 
 `/api/notifications/*`(#230)는 공개 앱과 강의실이 같은 엔드포인트를 나눠
 쓴다 — 계정이 공유되기 때문이다(ADR-0038). `classroom_only` 쿼리 하나로
 목록·안 읽은 개수·읽음 처리 셋 다 강의실 알림(`CLASSROOM_NOTIFICATION_TYPES`)
-만 보게 거를 수 있다. 기본값(`classroom_only` 생략)은 공개 앱이 지금까지
-써온 것과 한 글자도 다르지 않아야 한다 — 그건 `test_notifications.py`가
-이미 고정하고 있으므로, 이 파일은 강의실 쪽 필터링만 본다.
+만 보게 거를 수 있다. **기본값(`classroom_only` 생략, 공개 앱이 쓰는 값)은
+강의실 알림을 뺀 나머지다**(#345) — 예전에는 "전부"였지만, 공개 앱 종 배지가
+강의실 채점 결과까지 세는 것이 이 티켓이 고친 버그였다(CONTEXT.md
+「강의실 알림」: "공모전 쪽 화면은 그것을 세지도 보이지도 않는다").
 """
 
 from __future__ import annotations
@@ -60,15 +61,16 @@ def _make_participant_with_two_kinds_of_notification(client):
     return session, classroom_id, contest_id
 
 
-def test_me_without_scope_lists_every_notification_type(client, db):
-    """기본값은 공개 앱이 지금까지 보던 것과 같다 — 공모전 알림도 섞여 나온다."""
+def test_me_without_scope_excludes_classroom_notifications(client, db):
+    """기본값(공개 앱)은 강의실 알림을 뺀 나머지만 보여준다(#345)."""
 
     session, classroom_id, contest_id = _make_participant_with_two_kinds_of_notification(client)
 
     response = client.get(ME_URL, **_auth_header(session["access"]))
 
     ids = {row["id"] for row in response.json()}
-    assert ids == {classroom_id, contest_id}
+    assert ids == {contest_id}
+    assert classroom_id not in ids
 
 
 def test_me_with_classroom_only_lists_only_classroom_notifications(client, db):
@@ -81,12 +83,14 @@ def test_me_with_classroom_only_lists_only_classroom_notifications(client, db):
     assert contest_id not in ids
 
 
-def test_unread_count_without_scope_counts_every_type(client, db):
+def test_unread_count_without_scope_excludes_classroom_notifications(client, db):
+    """공개 앱 종 배지는 강의실 채점 결과로 울리지 않는다(#345)."""
+
     session, _classroom_id, _contest_id = _make_participant_with_two_kinds_of_notification(client)
 
     response = client.get(UNREAD_COUNT_URL, **_auth_header(session["access"]))
 
-    assert response.json()["count"] == 2
+    assert response.json()["count"] == 1
 
 
 def test_unread_count_with_classroom_only_counts_only_classroom_notifications(client, db):
@@ -124,8 +128,9 @@ def test_mark_read_with_classroom_only_leaves_other_types_unread(client, db):
     assert total_count == 1
 
 
-def test_mark_read_without_scope_still_marks_everything(client, db):
-    """기본 동작이 그대로다 — 강의실 필터가 생겼다고 공개 앱의 "전부 읽음"이 좁아지지 않는다."""
+def test_mark_read_without_scope_leaves_classroom_notifications_unread(client, db):
+    """공개 앱의 「모두 읽음」은 그 사람의 강의실 알림을 건드리지 않는다(#345,
+    반대 방향은 위 `test_mark_read_with_classroom_only_leaves_other_types_unread`)."""
 
     session, classroom_id, contest_id = _make_participant_with_two_kinds_of_notification(client)
 
@@ -133,6 +138,6 @@ def test_mark_read_without_scope_still_marks_everything(client, db):
         MARK_READ_URL, content_type="application/json", **_auth_header(session["access"])
     )
 
-    assert response.json()["marked_count"] == 2
-    assert Notification.objects.get(pk=classroom_id).read_at is not None
+    assert response.json()["marked_count"] == 1
+    assert Notification.objects.get(pk=classroom_id).read_at is None
     assert Notification.objects.get(pk=contest_id).read_at is not None

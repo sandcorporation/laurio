@@ -114,14 +114,24 @@ CTA 가 상태에 따라 갈린다 — 아직 안 낸 사람에게는 「제출�
 
 ## `/console/notifications` 알림
 
-내 알림을 페이지로 받아 쌓아 보여주고(「더 보기」), 들어오면 **모두 읽음** 처리한다. 헤더의
-벨에 붙는 안 읽은 개수와 짝이다.
+내 알림을 페이지로 받아 쌓아 보여준다(「더 보기」). **여는 것만으로는 읽음이 되지
+않는다**(#345, CONTEXT.md 「Notification」) — 이 화면의 알림 유형은 전부 이동할
+링크가 없으므로(강의실과 달리 context가 화면 주소를 담지 않는다), 안 읽은 줄마다
+작은 「읽음」 버튼이 있고 위에 그 화면 것만(강의실 알림은 애초에 여기 보이지
+않는다, 아래) 치우는 「모두 읽음」 버튼이 있다. 헤더의 벨에 붙는 안 읽은 개수와
+짝이다 — 읽음 처리 즉시 `read-bus` 이벤트로 벨에게 알려 배지를 곧바로 줄인다.
+
+**강의실 알림은 이 화면에 나타나지 않는다**(#345) — `GET /notifications/me`의
+기본값(이 화면이 쓰는 값)이 강의실 알림(`classroom_submission_scored`·
+`classroom_token_budget_warning`)을 뺀 나머지만 준다. 강의실은 자기 화면
+(`classroom/app/notifications`)에서 따로 센다.
 
 행마다 알림 내용과 **채널별 발송 이력**(채널·상태·시각)이 보인다 — 도달하지 않아도 배분이
 진행되므로(ADR-0009) 이력을 드러내는 것이 방어다. **실패 사유는 수신자용 문장**이다.
 운영자가 보는 원문에는 내부 참조와 벤더 오류가 들어 있어 그대로 내보내지 않는다.
 
-`GET /api/notifications/me` · `POST /api/notifications/mark-read`.
+`GET /api/notifications/me` · `POST /api/notifications/mark-read`(모두 읽음) ·
+`POST /api/notifications/{id}/mark-read`(개별 읽음, 남의 알림 id는 404).
 
 ## `/console/profile` 내 정보
 

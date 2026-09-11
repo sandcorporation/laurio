@@ -15,11 +15,13 @@
 // 자기 로그인 라우트가 없으므로(로그인은 공개 앱 것을 그대로 쓴다, docs/
 // features/classroom.md) 필요 없다.
 //
-// `/api/notifications`는 헤더 종·전용 화면이 쓴다(#304) — `/me`·`/unread-count`·
-// `/mark-read` 전부 `classroom_only=true`를 붙여 부른다(backend
-// `notifications/api.py`). 엔드포인트 자체가 언제나 `request.auth_user`로만
-// 걸러 응답하므로, 이 접두어를 여는 것 자체가 남의 알림에 닿는 길을 열지
-// 않는다 — 열려도 보이는 건 자기 계정의 알림뿐이다.
+// `/api/notifications`는 헤더 종·전용 화면이 쓴다(#304, #345) — `/me`·
+// `/unread-count`·`/mark-read`는 `classroom_only=true`를 붙여 부르고,
+// `/{id}/mark-read`(개별 읽음)는 그럴 필요가 없다(backend `notifications/
+// api.py`의 `mark_one_read`가 id 자체를 `recipient=request.auth_user`로만
+// 조회한다). 엔드포인트 전부 언제나 `request.auth_user`로만 걸러 응답하므로,
+// 이 접두어를 여는 것 자체가 남의 알림에 닿는 길을 열지 않는다 — 열려도
+// 보이는 건 자기 계정의 알림뿐이다.
 import { isAllowedPath } from "@laurio/bff-shared";
 
 export const BACKEND_PROXY_ALLOWLIST: readonly string[] = [

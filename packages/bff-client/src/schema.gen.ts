@@ -2463,23 +2463,57 @@ export interface paths {
         put?: never;
         /**
          * Mark All Read
-         * @description 지금 안 읽은 알림을 전부 읽음으로 표시한다(#230 AC: "목록을 열면 그 시점의
-         *     안 읽은 알림이 전부 읽음이 된다").
+         * @description 지금 안 읽은 알림을 「모두 읽음」으로 한꺼번에 표시한다 — 각 앱의 「모두
+         *     읽음」 버튼이 부른다(#345). 예전에는 목록 화면을 마운트하는 것만으로 이
+         *     엔드포인트가 자동으로 불렸지만, 그 계약은 이 티켓이 CONTEXT.md 「Notification」
+         *     ("목록을 열어 본 것만으로는 읽음이 아니다")에 맞춰 없앴다 — 지금은 이
+         *     버튼을 누른 사실만이 읽음의 근거다.
          *
          *     `recipient=request.auth_user`로만 골라 갱신한다 — 남의 알림은 이 계정으로
          *     어떤 요청을 보내도 이 WHERE 절 밖에 있어 손댈 수 없다(AC: "남의 알림은 어떤
          *     방법으로도 읽거나 읽음 처리할 수 없다"). 개별 알림 id를 받는 파라미터가
          *     아예 없다 — 그런 파라미터가 있었다면 그 자체가 남의 알림 id를 넣어보는
-         *     시도의 표면이 됐을 것이다.
+         *     시도의 표면이 됐을 것이다(개별 알림 하나를 지목하려면 아래
+         *     `mark_one_read`를 쓴다).
          *
          *     `classroom_only=true`면 강의실 알림만 읽음 처리한다(#304) — 강의실 화면을
          *     여는 것이 그 사람의 공모전·지급 알림까지 함께 읽음으로 만들면 안 된다
-         *     (두 제품이 계정을 공유하는 사람에게 생기는 부작용).
+         *     (두 제품이 계정을 공유하는 사람에게 생기는 부작용). 기본값(`False`)은
+         *     강의실 알림을 뺀 나머지만 치운다(#345) — 공개 앱의 「모두 읽음」이 그
+         *     사람의 강의실 알림까지 읽음으로 만들면 안 되는 것이 같은 이유로 반대
+         *     방향에도 적용된다.
          *
          *     발송 측 필드(`status`·`dispatches`)는 이 갱신이 전혀 건드리지 않는다 — 읽음
          *     처리가 발송 이력을 바꾸지 않는다는 AC가 그래서 구조적으로 성립한다.
          */
         post: operations["notifications_api_mark_all_read"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/mark-read-many": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark Many Read
+         * @description 알림 여러 개를 한 번에 지목해 읽음으로 표시한다(#345) — 강의실 묶음(#305)의
+         *     머리글을 누르면 그 문제의 안 읽은 시도 전부가 한 번에 읽음이 되어야 하는데,
+         *     시도마다 `mark_one_read`를 따로 부르면 문제 하나에 시도가 쌓일수록 요청 수가
+         *     그만큼 는다. `pk__in` 을 `recipient=request.auth_user` 로 좁혀서만 갱신한다 —
+         *     남의 알림 id 가 섞여 들어와도 그 행만 조용히 걸러진다(에러를 내지 않는다,
+         *     `mark_all_read`가 이미 받는 값이 `recipient` 로만 갇혀 있는 것과 같은 모양).
+         *     `NOTIFICATION_HISTORY_MAX_LIMIT`(위, 응답 상한)과 같은 이유로 요청 하나의
+         *     id 개수도 그 값으로 잘라낸다 — 무제한 입력을 그대로 쿼리에 넣지 않는다.
+         */
+        post: operations["notifications_api_mark_many_read"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2503,9 +2537,10 @@ export interface paths {
          *     NOTIFICATION_HISTORY_MAX_LIMIT을 넘지 않게 잘라낸다(#19 리뷰 지적 5).
          *
          *     `classroom_only=true`면 강의실 알림(`CLASSROOM_NOTIFICATION_TYPES`)만
-         *     돌려준다(#304) — 강의실 화면이 이 값으로 부른다. 기본값(`False`)은 공개
-         *     앱이 지금까지 쓰던 것과 한 글자도 다르지 않다 — 강의실이 생기기 전 계약을
-         *     깨지 않는다.
+         *     돌려준다(#304) — 강의실 화면이 이 값으로 부른다. 기본값(`False`)은 강의실
+         *     알림을 **뺀** 나머지다(#345) — 공개 앱은 강의실 알림을 세지도 보이지도
+         *     않는다(CONTEXT.md 「강의실 알림」). 두 앱이 계정을 공유해도 서로의 알림이
+         *     섞이지 않는 것은 이 분기 하나가 전부다.
          */
         get: operations["notifications_api_list_my_notifications"];
         put?: never;
@@ -2531,11 +2566,46 @@ export interface paths {
          *
          *     `classroom_only=true`면 강의실 알림만 센다(#304) — 강의실 종 배지가 공모전·
          *     지급·이의 알림까지 섞어 세면 "자기 채점 결과를 그 안에서 찾아야" 하므로
-         *     (#304 What to build), 강의실 벨은 이 값을 준다.
+         *     (#304 What to build), 강의실 벨은 이 값을 준다. 기본값(`False`)은 강의실
+         *     알림을 뺀 나머지만 센다(#345) — 공개 앱 종 배지는 강의실 채점 결과로
+         *     울리지 않는다.
          */
         get: operations["notifications_api_unread_count"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/{notification_id}/mark-read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark One Read
+         * @description 알림 하나를 지목해 읽음으로 표시한다(#345) — 링크가 있는 알림을 눌러 그
+         *     화면으로 갈 때, 또는 링크 없는 알림 줄의 「읽음」 버튼이 부른다.
+         *
+         *     `recipient=request.auth_user`로 먼저 좁혀 조회한다 — 남의 알림 id는
+         *     `get_object_or_404`가 곧바로 404로 답해, 존재 자체를 알려주지 않는다(AC:
+         *     "남의 알림 id는 존재하지 않는 것처럼 다룬다"). 강의실 묶음(#305)의 머리글처럼
+         *     알림 여러 개를 한 번에 읽음 처리해야 하는 자리는 아래 `mark_many_read`를 쓴다.
+         *
+         *     이미 읽은 알림에 다시 호출해도 에러가 아니다(멱등) — `read_at`을 덮어쓰지
+         *     않고 그대로 둔다(최초로 읽은 시각을 보존한다). **갱신 자체가 조건부
+         *     `UPDATE`다**(`read_at__isnull=True`인 행만) — 조회 후 파이썬에서 `if`로
+         *     가르면 동시에 들어온 두 요청이 둘 다 `None`을 보고 둘 다 쓸 수 있어, 나중에
+         *     커밋된 쪽의 시각이 "최초"를 덮어쓴다. DB가 조건을 다시 확인하는 조건부
+         *     `UPDATE`는 둘 중 하나만 실제로 행을 바꾼다.
+         */
+        post: operations["notifications_api_mark_one_read"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5565,6 +5635,11 @@ export interface components {
         MarkAllReadOut: {
             /** Marked Count */
             marked_count: number;
+        };
+        /** MarkManyReadIn */
+        MarkManyReadIn: {
+            /** Notification Ids */
+            notification_ids: number[];
         };
         /** MeOut */
         MeOut: {
@@ -10335,6 +10410,30 @@ export interface operations {
             };
         };
     };
+    notifications_api_mark_many_read: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MarkManyReadIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarkAllReadOut"];
+                };
+            };
+        };
+    };
     notifications_api_list_my_notifications: {
         parameters: {
             query?: {
@@ -10377,6 +10476,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UnreadCountOut"];
+                };
+            };
+        };
+    };
+    notifications_api_mark_one_read: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                notification_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationOut"];
                 };
             };
         };
