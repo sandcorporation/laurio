@@ -195,6 +195,121 @@ def test_joining_a_dead_link_is_404_with_a_reason(client, db):
     assert response.json()["detail"]
 
 
+def test_join_preview_reports_the_class_id(client, db):
+    instructor = _login(client, uid="instructor-1")
+    created = _create_class(client, instructor["access"])
+
+    response = client.get(_join_url(created["join_code"]))
+
+    assert response.json()["class_id"] == created["id"]
+
+
+def test_join_preview_for_an_anonymous_visitor_is_not_already_joined(client, db):
+    instructor = _login(client, uid="instructor-1")
+    created = _create_class(client, instructor["access"])
+
+    response = client.get(_join_url(created["join_code"]))
+
+    assert response.json()["already_joined"] is False
+
+
+def test_join_preview_for_a_logged_in_non_member_is_not_already_joined(client, db):
+    instructor = _login(client, uid="instructor-1")
+    created = _create_class(client, instructor["access"])
+    stranger = _login(client, uid="stranger-1")
+
+    response = client.get(
+        _join_url(created["join_code"]), **_auth_header(stranger["access"])
+    )
+
+    assert response.json()["already_joined"] is False
+
+
+def test_reopening_the_join_link_reports_already_joined_so_the_screen_skips_the_name_form(
+    client, db
+):
+    """티켓 #300 — 이미 가입한 사람이 링크를 다시 열면 이름 입력 폼이 아니라
+    문제 목록으로 곧장 보내야 한다. 그 판단의 근거가 이 신호다."""
+
+    instructor = _login(client, uid="instructor-1")
+    created = _create_class(client, instructor["access"])
+    participant = _login(client, uid="participant-1")
+    client.post(
+        _join_url(created["join_code"]),
+        data={"display_name": "참여자"},
+        content_type="application/json",
+        **_auth_header(participant["access"]),
+    )
+
+    response = client.get(
+        _join_url(created["join_code"]), **_auth_header(participant["access"])
+    )
+
+    assert response.json()["already_joined"] is True
+
+
+def test_an_expelled_member_still_reports_already_joined(client, db):
+    """내보내진 사람도 다시 링크를 열면 문제 목록으로 보낸다(#300 AC) —
+    가입 폼으로 돌아가지 않는다."""
+
+    instructor = _login(client, uid="instructor-1")
+    created = _create_class(client, instructor["access"])
+    participant = _login(client, uid="participant-1")
+    client.post(
+        _join_url(created["join_code"]),
+        data={"display_name": "참여자"},
+        content_type="application/json",
+        **_auth_header(participant["access"]),
+    )
+    member = ClassMember.objects.get(
+        classroom_id=created["id"], user__username__contains="participant-1"
+    )
+    client.post(
+        f"{CLASSES_URL}/{created['id']}/members/{member.id}/expel",
+        content_type="application/json",
+        **_auth_header(instructor["access"]),
+    )
+
+    response = client.get(
+        _join_url(created["join_code"]), **_auth_header(participant["access"])
+    )
+
+    assert response.json()["already_joined"] is True
+
+
+def test_reopening_the_join_link_does_not_re_admit_an_expelled_member(client, db):
+    """가입 링크를 다시 타도 내보낸 것이 무효가 되지 않는다(#300 AC)."""
+
+    instructor = _login(client, uid="instructor-1")
+    created = _create_class(client, instructor["access"])
+    participant = _login(client, uid="participant-1")
+    client.post(
+        _join_url(created["join_code"]),
+        data={"display_name": "참여자"},
+        content_type="application/json",
+        **_auth_header(participant["access"]),
+    )
+    member = ClassMember.objects.get(
+        classroom_id=created["id"], user__username__contains="participant-1"
+    )
+    client.post(
+        f"{CLASSES_URL}/{created['id']}/members/{member.id}/expel",
+        content_type="application/json",
+        **_auth_header(instructor["access"]),
+    )
+
+    response = client.post(
+        _join_url(created["join_code"]),
+        data={"display_name": "다시 왔어요"},
+        content_type="application/json",
+        **_auth_header(participant["access"]),
+    )
+
+    assert response.status_code == 200
+    member.refresh_from_db()
+    assert member.expelled_at is not None
+
+
 def test_join_model_points_directly_to_user_not_a_role_profile():
     from django.contrib.auth import get_user_model
 

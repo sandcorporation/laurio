@@ -8,8 +8,8 @@
 // 사람이 대개 폰에서 연다. 그래서 고정 너비를 두지 않고, 좁은 폭에서 한 칸으로
 // 흐르며 버튼이 가로 전체를 쓰는 레이아웃이다.
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import {
@@ -37,8 +37,18 @@ export default function JoinPage() {
   const params = useParams<{ code: string }>();
   const code = params.code;
   const preview = useJoinPreview(code);
+  const router = useRouter();
   const [displayName, setDisplayName] = useState("");
   const [submit, setSubmit] = useState<SubmitState>({ status: "idle" });
+
+  // 이미 가입한 사람(내보내진 사람 포함)이 링크를 다시 열면 이름 입력 폼이
+  // 아니라 곧장 문제 목록으로 보낸다(#300 AC) — 두 번째 가입 요청은 보내지
+  // 않는다, 이미 정한 이름과 내보낸 사실 둘 다 바뀌면 안 되기 때문이다.
+  useEffect(() => {
+    if (preview.status === "ready" && preview.preview.already_joined) {
+      router.replace(`/classes/${preview.preview.class_id}/problems/mine`);
+    }
+  }, [preview, router]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -89,6 +99,18 @@ export default function JoinPage() {
         <ErrorNote>
           <span data-testid="join-preview-error">클래스 정보를 불러오지 못했습니다.</span>
         </ErrorNote>
+      </Shell>
+    );
+  }
+
+  if (preview.preview.already_joined) {
+    // 위 useEffect가 이동을 시작한다 — 그 사이 이름 입력 폼이 잠깐이라도
+    // 보이면 안 되므로 여기서 렌더를 멈춘다.
+    return (
+      <Shell>
+        <p data-testid="join-already-joined" className="text-[13.5px] text-ink/45">
+          이미 참여한 클래스입니다. 문제 목록으로 이동합니다...
+        </p>
       </Shell>
     );
   }

@@ -63,6 +63,9 @@ export type ClassroomSubmissionRow = {
 export type ProblemSubmissions = {
   problem: ProblemMine;
   submissions: ClassroomSubmissionRow[];
+  // 이 참여자가 강사에게 내보내졌는가(#300) — 참이면 화면이 제출 수단을
+  // 숨기고 이유를 보여준다. 지난 시도는 그대로 `submissions`에 남는다.
+  member_expelled: boolean;
 };
 
 export function fetchMyProblem(classId: number, problemId: number): Promise<ProblemSubmissions> {

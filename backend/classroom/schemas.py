@@ -127,6 +127,10 @@ class ProblemReorderIn(Schema):
 
 
 class JoinPreviewOut(Schema):
+    #: 로그인한 사람이 곧장 문제 목록으로 이동할 때 쓸 id(#300). 가입 여부와
+    #: 무관하게 항상 채워진다 — 가입하면 어차피 `JoinResultOut.class_id`로
+    #: 같은 값을 다시 받으므로 숨길 이유가 없다.
+    class_id: int
     class_name: str
     instructor_email: str
     problem_count: int
@@ -135,6 +139,12 @@ class JoinPreviewOut(Schema):
     #: 보여준다 — "고장"이 아니라 "끝났다"로 읽혀야 하기 때문이다. 참이면
     #: 화면이 가입 폼 대신 안내문을 보여준다.
     archived: bool = False
+    #: 지금 로그인한 사람이 이미 이 클래스의 참여자인가(#300) — **내보내진
+    #: 사람도 참이다**, 행이 지워지지 않으므로(`ClassMember.expelled_at`
+    #: docstring). 로그인하지 않았으면 항상 거짓이다. 참이면 화면이 이름 입력
+    #: 폼을 건너뛰고 곧장 문제 목록으로 보낸다 — 이미 정한 이름은 바뀌지
+    #: 않고, 다시 가입되지도 않는다(가입 요청 자체를 보내지 않으므로).
+    already_joined: bool = False
 
 
 class JoinIn(Schema):
@@ -233,6 +243,10 @@ class ClassroomSubmissionOut(Schema):
 class ClassroomProblemSubmissionsOut(Schema):
     problem: ClassroomProblemMineOut
     submissions: list[ClassroomSubmissionOut]
+    #: 이 요청을 보낸 참여자가 강사에게 내보내졌는가(#300). 참이면 화면이
+    #: 제출 수단을 아예 숨기고 그 이유를 말해 준다 — 시도는 지우지 않으므로
+    #: `submissions`는 그대로 채워진다.
+    member_expelled: bool = False
 
 
 class ClassroomProblemStatsOut(Schema):
