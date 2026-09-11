@@ -22,8 +22,9 @@ import {
 } from "@/app/components/ui";
 import { MarkdownEditor } from "@/app/components/MarkdownEditor";
 import { ProblemParticipantView } from "@/app/components/ProblemParticipantView";
+import { TemplatePickerSheet } from "@/app/components/TemplatePickerSheet";
 import { BackendError } from "@/lib/backend/client";
-import { createProblem, type SubmissionFormat } from "@/lib/problems/api";
+import { createProblem, type ProblemRow, type SubmissionFormat } from "@/lib/problems/api";
 
 type DraftChecklistItem = {
   key: number;
@@ -45,6 +46,16 @@ export default function NewProblemPage() {
   // 자리에서 저장하지 않고 지금 상태를 그대로 비춘다(아래 렌더에서
   // `ProblemParticipantView`에 이 컴포넌트의 상태를 직접 넘긴다).
   const [tab, setTab] = useState<"write" | "preview">("write");
+
+  // 「이미 있는 문제로 시작하기」(#326) — 대상 클래스는 묻지 않는다, 지금
+  // 이 클래스(`classId`)로 곧장 들어온다. 시트가 스스로 가져오기까지 끝내고
+  // 나면 이 화면(빈 초안 폼)은 더 볼 일이 없다 — 가져온 문제의 편집
+  // 화면으로 곧장 보낸다.
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  function handleImported(problem: ProblemRow) {
+    router.push(`/classes/${classId}/problems/${problem.id}`);
+  }
 
   const nextKeyRef = useRef(0);
   const [items, setItems] = useState<DraftChecklistItem[]>([]);
@@ -127,6 +138,24 @@ export default function NewProblemPage() {
       />
 
       <div className="flex flex-col gap-5">
+        <div className="flex items-center justify-between gap-4 border border-rule bg-surface p-4">
+          <div>
+            <p className="text-[14px] font-semibold">이미 있는 문제로 시작하기</p>
+            <p className="mt-1 text-[12px] leading-relaxed text-ink/60">
+              다른 강사가 공개한 문제나 내가 지난 기수에 쓴 문제를 가져오면 체크리스트까지
+              따라옵니다 — 가져온 뒤 고칠 수 있습니다.
+            </p>
+          </div>
+          <button
+            type="button"
+            data-testid="open-template-picker"
+            onClick={() => setPickerOpen(true)}
+            className={buttonClass("secondary")}
+          >
+            템플릿에서 가져오기
+          </button>
+        </div>
+
         <div
           role="tablist"
           aria-label="새 문제 화면"
@@ -404,6 +433,14 @@ export default function NewProblemPage() {
           </ErrorNote>
         ) : null}
       </div>
+
+      {pickerOpen ? (
+        <TemplatePickerSheet
+          classId={classId}
+          onClose={() => setPickerOpen(false)}
+          onImported={handleImported}
+        />
+      ) : null}
     </PageShell>
   );
 }

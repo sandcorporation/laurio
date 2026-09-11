@@ -94,7 +94,22 @@ export function MarkdownEditor({
 
     return () => {
       cancelled = true;
-      editor?.destroy();
+      try {
+        // ToastUI 자신의 툴바가 리사이즈를 200ms 스로틀로 재배치한다
+        // (`Toolbar.prototype.addEvent`, 라이브러리 소스) — 언마운트로 이
+        // 컨테이너가 문서에서 빠지는 순간도 리사이즈라 그 트레일링
+        // 호출이 늦게 흐른다. `destroy()`가 이미 끝난 뒤(우리 쪽 정리는
+        // React 커밋 중 동기로 돈다) 그 지연 호출이 내부 컴포넌트에
+        // `setState`를 걸어 이미 없는 DOM 노드를 지우려다 NotFoundError를
+        // 던지는 것을 실제로 봤다(#326, 가져오기 → 편집 화면 전환에서
+        // 재현·dev 오버레이에만 뜨는 비차단 경고). 라이브러리 안쪽의
+        // ResizeObserver 콜백이라 우리 쪽에서 취소할 손잡이가 없다 — 이
+        // 컴포넌트는 통째로 버려지는 중이라 그 실패 자체는 무해하니
+        // 콘솔의 uncaught 예외로만 남지 않게 삼근다.
+        editor?.destroy();
+      } catch {
+        // 위 설명대로 — 이미 버려지는 트리라 여기서 할 일이 없다.
+      }
       editorRef.current = null;
     };
     // 마운트 한 번에 에디터 하나 — `label`·`placeholder`가 나중에 바뀌는

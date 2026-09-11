@@ -336,6 +336,22 @@ class ProblemCopyIn(Schema):
     target_class_id: int
 
 
+class ImportableProblemOut(Schema):
+    """새 문제 화면의 「이미 있는 문제로 시작하기」 시트, 「내 다른
+    클래스에서」 탭 한 줄(#326) — 강사 본인이 **다른** 클래스에 가진
+    문제다. 고르면 `POST /classes/{class_id}/problems/{problem_id}/copy`로
+    지금 클래스에 그대로 복사한다(`ProblemCopyIn`) — 새 엔드포인트가
+    아니라 #292의 그 복사를 반대 방향(받는 쪽)에서 부르는 것뿐이다."""
+
+    id: int
+    classroom_id: int
+    classroom_name: str
+    title: str
+    description: str
+    submission_format: str
+    checklist_items: list[ProblemTemplateChecklistItemOut] = []
+
+
 # --- 템플릿 (#316/#318/#320) -----------------------------------------------------
 
 
