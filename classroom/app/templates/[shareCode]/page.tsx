@@ -4,7 +4,7 @@
 // 이미 보장한다 — `/join/[code]`와 달리 needsLogin 분기가 없다.
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import {
@@ -21,7 +21,7 @@ import {
   buttonClass,
 } from "@/app/components/ui";
 import { BackendError } from "@/lib/backend/client";
-import { selectCopyTargets } from "@/lib/classes/copy-targets";
+import { defaultCopyTarget, selectCopyTargets } from "@/lib/classes/copy-targets";
 import { useMyClasses } from "@/lib/classes/use-my-classes";
 import { importProblemTemplate, reportProblemTemplate, takedownProblemTemplate } from "@/lib/problem-templates/api";
 import { useTemplatePreview } from "@/lib/problem-templates/use-template-preview";
@@ -36,6 +36,13 @@ export default function ProblemTemplatePreviewPage() {
   const [targetClassId, setTargetClassId] = useState("");
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (myClassesState.status !== "ready") return;
+    const target = defaultCopyTarget(myClassesState.classes);
+    if (target) setTargetClassId(String(target.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myClassesState]);
 
   const [reportOpen, setReportOpen] = useState(false);
   const [reportReason, setReportReason] = useState("");
@@ -248,6 +255,11 @@ export default function ProblemTemplatePreviewPage() {
                         >
                           {importing ? "가져오는 중..." : "가져오기"}
                         </button>
+                        {targetClassId === "" ? (
+                          <p data-testid="template-import-target-hint" className="text-[12px] text-ink/45">
+                            가져올 클래스를 먼저 고르세요
+                          </p>
+                        ) : null}
                       </form>
                     );
                   })()
