@@ -24,6 +24,7 @@ import {
 import { MissingScoringKeyNote } from "@/app/components/MissingScoringKeyNote";
 import { copyClass } from "@/lib/classes/api";
 import { joinLinkAvailability } from "@/lib/classes/join-link";
+import { shouldShowMissingScoringKeyBanner } from "@/lib/classes/missing-scoring-key-banner";
 import { useClass } from "@/lib/classes/use-class";
 import { formatAchievementRate } from "@/lib/problems/achievement";
 import { useProblems } from "@/lib/problems/use-problems";
@@ -288,15 +289,17 @@ export default function ClassDetailPage() {
             가장 이른 자리가 여기다(#347). 가입 링크를 공유하기 **전에** 보여야
             뜻이 있으므로 그 섹션보다 위에 놓는다. 「클래스 설정」의 경고 문구
             (그 화면 512번째 줄 근처)는 그대로 두고 이 배너는 설정으로 가는
-            길만 준다 — 같은 사실을 두 곳에 다른 말로 적지 않는다. */}
-        {classroom.has_openai_key ? null : (
+            길만 준다 — 같은 사실을 두 곳에 다른 말로 적지 않는다.
+            보관된 클래스는 새 제출을 안 받으므로 "제출해도 채점되지
+            않습니다"는 일어날 수 없는 일이다 — 뜨지 않는다(#352). */}
+        {shouldShowMissingScoringKeyBanner(classroom) ? (
           <MissingScoringKeyNote
             classId={classId}
             message="이 클래스에는 아직 채점 키가 없습니다 — 참여자가 제출해도 채점되지 않습니다."
             noteTestId="classroom-missing-api-key-banner"
             settingsLinkTestId="classroom-missing-api-key-settings-link"
           />
-        )}
+        ) : null}
 
         <JoinLinkSection
           joinCode={classroom.join_code}
