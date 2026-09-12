@@ -23,6 +23,7 @@ import {
 } from "@/app/components/ui";
 import { MissingScoringKeyNote } from "@/app/components/MissingScoringKeyNote";
 import { copyClass } from "@/lib/classes/api";
+import { joinLinkAvailability } from "@/lib/classes/join-link";
 import { useClass } from "@/lib/classes/use-class";
 import { formatAchievementRate } from "@/lib/problems/achievement";
 import { useProblems } from "@/lib/problems/use-problems";
@@ -41,10 +42,12 @@ function joinLinkUrl(joinCode: string): string {
 
 function JoinLinkSection({
   joinCode,
+  archived,
   regenerateError,
   onRegenerate,
 }: {
   joinCode: string;
+  archived: boolean;
   regenerateError: boolean;
   onRegenerate: () => void;
 }) {
@@ -60,6 +63,27 @@ function JoinLinkSection({
       setCopied(false);
     }
   };
+
+  if (joinLinkAvailability(archived) === "archived") {
+    // 보관된 클래스는 새 가입을 받지 않는다(docs/features/classroom.md
+    // 「보관」절) — 링크와 「다시 뽑기」를 그대로 두면 강사가 끝난 수업의
+    // 링크를 계속 돌릴 수 있다고 믿는다(#351). 지난 링크는 되돌리기 전까지
+    // 아무 쓸모가 없으므로 값 자체를 보여주지 않고 왜 못 쓰는지만 말한다
+    // — join/[code] 미리보기가 비참여자에게 하는 말과 같은 결로 맞춘다.
+    return (
+      <Card>
+        <CardHeader title="가입 링크" hint="이 링크로 들어오면 회원가입과 클래스 가입이 한 번에 끝납니다" />
+        <div className="p-4">
+          <Note>
+            <span data-testid="join-link-archived-note">
+              이 클래스는 보관되어 이 링크로 더 이상 들어올 수 없습니다. 다시 받으려면 보관을
+              먼저 되돌리세요.
+            </span>
+          </Note>
+        </div>
+      </Card>
+    );
+  }
 
   return (
     <Card>
@@ -276,6 +300,7 @@ export default function ClassDetailPage() {
 
         <JoinLinkSection
           joinCode={classroom.join_code}
+          archived={classroom.archived}
           regenerateError={classState.regenerateError}
           onRegenerate={regenerateJoinCode}
         />
