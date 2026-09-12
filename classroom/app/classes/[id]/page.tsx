@@ -64,15 +64,20 @@ function JoinLinkSection({
     }
   };
 
-  if (joinLinkAvailability(archived) === "archived") {
-    // 보관된 클래스는 새 가입을 받지 않는다(docs/features/classroom.md
-    // 「보관」절) — 링크와 「다시 뽑기」를 그대로 두면 강사가 끝난 수업의
-    // 링크를 계속 돌릴 수 있다고 믿는다(#351). 지난 링크는 되돌리기 전까지
-    // 아무 쓸모가 없으므로 값 자체를 보여주지 않고 왜 못 쓰는지만 말한다
-    // — join/[code] 미리보기가 비참여자에게 하는 말과 같은 결로 맞춘다.
-    return (
-      <Card>
-        <CardHeader title="가입 링크" hint="이 링크로 들어오면 회원가입과 클래스 가입이 한 번에 끝납니다" />
+  const isArchived = joinLinkAvailability(archived) === "archived";
+
+  return (
+    <Card>
+      {/* 보관되면 힌트도 함께 바꾼다 — "이 링크로 들어오면 ... 끝납니다"를
+          그대로 두고 바로 아래에 "더 이상 못 들어온다"를 적으면 카드 하나
+          안에서 스스로와 모순된다(#351 코드 리뷰가 잡은 것). */}
+      <CardHeader title="가입 링크" hint={isArchived ? undefined : "이 링크로 들어오면 회원가입과 클래스 가입이 한 번에 끝납니다"} />
+      {isArchived ? (
+        // 보관된 클래스는 새 가입을 받지 않는다(docs/features/classroom.md
+        // 「보관」절) — 링크와 「다시 뽑기」를 그대로 두면 강사가 끝난 수업의
+        // 링크를 계속 돌릴 수 있다고 믿는다(#351). 지난 링크는 되돌리기 전까지
+        // 아무 쓸모가 없으므로 값 자체를 보여주지 않고 왜 못 쓰는지만 말한다
+        // — join/[code] 미리보기가 비참여자에게 하는 말과 같은 결로 맞춘다.
         <div className="p-4">
           <Note>
             <span data-testid="join-link-archived-note">
@@ -81,47 +86,42 @@ function JoinLinkSection({
             </span>
           </Note>
         </div>
-      </Card>
-    );
-  }
-
-  return (
-    <Card>
-      <CardHeader title="가입 링크" hint="이 링크로 들어오면 회원가입과 클래스 가입이 한 번에 끝납니다" />
-      <div className="flex flex-col gap-3 p-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <p
-            data-testid="join-link"
-            className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap border border-rule bg-paper px-3 py-2 font-mono text-[13px]"
-          >
-            {url}
+      ) : (
+        <div className="flex flex-col gap-3 p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <p
+              data-testid="join-link"
+              className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap border border-rule bg-paper px-3 py-2 font-mono text-[13px]"
+            >
+              {url}
+            </p>
+            <button type="button" data-testid="join-link-copy" onClick={copy} className={buttonClass("secondary", "sm")}>
+              복사
+            </button>
+            <button
+              type="button"
+              data-testid="join-link-regenerate"
+              onClick={onRegenerate}
+              className={buttonClass("danger", "sm")}
+            >
+              다시 뽑기
+            </button>
+            {copied ? (
+              <span data-testid="join-link-copied" className="text-[12px] text-verified">
+                복사됨
+              </span>
+            ) : null}
+          </div>
+          <p className="text-[11.5px] leading-relaxed text-ink/45">
+            다시 뽑으면 이전 링크는 더 이상 이 클래스로 들어오지 못합니다.
           </p>
-          <button type="button" data-testid="join-link-copy" onClick={copy} className={buttonClass("secondary", "sm")}>
-            복사
-          </button>
-          <button
-            type="button"
-            data-testid="join-link-regenerate"
-            onClick={onRegenerate}
-            className={buttonClass("danger", "sm")}
-          >
-            다시 뽑기
-          </button>
-          {copied ? (
-            <span data-testid="join-link-copied" className="text-[12px] text-verified">
-              복사됨
-            </span>
+          {regenerateError ? (
+            <ErrorNote>
+              <span data-testid="join-link-regenerate-error">다시 뽑지 못했습니다. 다시 시도해주세요.</span>
+            </ErrorNote>
           ) : null}
         </div>
-        <p className="text-[11.5px] leading-relaxed text-ink/45">
-          다시 뽑으면 이전 링크는 더 이상 이 클래스로 들어오지 못합니다.
-        </p>
-        {regenerateError ? (
-          <ErrorNote>
-            <span data-testid="join-link-regenerate-error">다시 뽑지 못했습니다. 다시 시도해주세요.</span>
-          </ErrorNote>
-        ) : null}
-      </div>
+      )}
     </Card>
   );
 }

@@ -63,12 +63,16 @@ export function useClass(classId: number) {
   // 보관·되돌리기(#294) — 하나가 다른 하나를 대체한다: 되돌리기는 늘
   // `unarchiveClass`를 부르고, 보관은 늘 `archiveClass`를 부른다. 강사가
   // 연달아 눌러도(더블클릭 등) 백엔드가 멱등이라 마지막 응답이 이긴다.
+  //
+  // regenerateError는 여기서 초기화한다 — 보관하면 가입 링크 섹션이 그
+  // 오류를 숨기는데(#351), 초기화하지 않으면 되돌렸을 때 관계없는 옛
+  // 실패가 그대로 되살아난다(#351 코드 리뷰가 잡은 것).
   const setArchived = useCallback(
     async (archived: boolean) => {
       if (state.status !== "ready") return;
       try {
         const classroom = await (archived ? archiveClass(classId) : unarchiveClass(classId));
-        setState({ status: "ready", classroom, regenerateError: state.regenerateError, archiveError: false });
+        setState({ status: "ready", classroom, regenerateError: false, archiveError: false });
       } catch {
         setState({ ...state, archiveError: true });
       }
