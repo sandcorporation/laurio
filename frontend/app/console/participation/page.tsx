@@ -14,6 +14,7 @@
 import Link from "next/link";
 
 import { useSession } from "@/lib/auth/use-session";
+import { PARTICIPATION_EMPTY_MESSAGE } from "@/lib/participation/empty-state";
 import {
   NEXT_ACTION_LABELS,
   useMyParticipation,
@@ -49,8 +50,10 @@ export default function MyParticipationPage() {
           참가 현황을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.
         </p>
       ) : state.count === 0 ? (
+        // 공모전이 꺼진 환경(#271)에서는 이 화면을 여는 사람이 과제만 쓸 수
+        // 있다 — 종류를 말하면 가질 수 없는 개념으로 말하게 된다(#353).
         <p className="mt-6" data-testid="participation-empty">
-          아직 참가한 공모전이 없습니다.
+          {PARTICIPATION_EMPTY_MESSAGE}
         </p>
       ) : (
         <>
