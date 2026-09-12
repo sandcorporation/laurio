@@ -21,6 +21,7 @@ import {
   PageShell,
   buttonClass,
 } from "@/app/components/ui";
+import { MissingScoringKeyNote } from "@/app/components/MissingScoringKeyNote";
 import { copyClass } from "@/lib/classes/api";
 import { useClass } from "@/lib/classes/use-class";
 import { formatAchievementRate } from "@/lib/problems/achievement";
@@ -258,6 +259,20 @@ export default function ClassDetailPage() {
           archiveError={classState.archiveError}
           onToggle={() => setArchived(!classroom.archived)}
         />
+
+        {/* 새 클래스는 채점 키 없이 열린다(기본값) — 그 사실을 알릴 수 있는
+            가장 이른 자리가 여기다(#347). 가입 링크를 공유하기 **전에** 보여야
+            뜻이 있으므로 그 섹션보다 위에 놓는다. 「클래스 설정」의 경고 문구
+            (그 화면 512번째 줄 근처)는 그대로 두고 이 배너는 설정으로 가는
+            길만 준다 — 같은 사실을 두 곳에 다른 말로 적지 않는다. */}
+        {classroom.has_openai_key ? null : (
+          <MissingScoringKeyNote
+            classId={classId}
+            message="이 클래스에는 아직 채점 키가 없습니다 — 참여자가 제출해도 채점되지 않습니다."
+            noteTestId="classroom-missing-api-key-banner"
+            settingsLinkTestId="classroom-missing-api-key-settings-link"
+          />
+        )}
 
         <JoinLinkSection
           joinCode={classroom.join_code}

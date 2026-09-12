@@ -366,12 +366,15 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
         # 시도하지 않았다"는 사실 그대로, 「실패했다」가 아니다).
         return {"submission_id": submission.id, "status": "budget_exhausted"}
 
-    raw_key = (class_obj.openai_api_key_encrypted or "").strip()
-    if not raw_key:
+    if not class_obj.has_scoring_key():
         # 후보 쿼리(CLASSROOM_SUBMISSION_SCORING_SCAN)가 이미 키 있는 클래스만
         # 고르지만, tick 사이에 강사가 키를 지웠을 수 있다 — 그 경합에서도 시도로
         # 남기지 않고 조용히 건너뛴다("아직 시도하지 않았다"는 사실은 그대로다).
+        # `has_scoring_key()`가 API 화면의 `pending_reason`("no_api_key")과
+        # 정확히 같은 기준이라(#346), 여기서 건너뛰는 시도는 화면에서도 같은
+        # 사유로 보인다 — 둘이 어긋나면 "정상 대기"로 잘못 보이는 시도가 생긴다.
         return {"submission_id": submission.id, "status": "no_key"}
+    raw_key = (class_obj.openai_api_key_encrypted or "").strip()
 
     asset = submission.assets.get()
 

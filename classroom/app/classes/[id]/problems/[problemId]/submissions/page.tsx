@@ -20,6 +20,7 @@ import {
   PageShell,
   buttonClass,
 } from "@/app/components/ui";
+import { MissingScoringKeyNote } from "@/app/components/MissingScoringKeyNote";
 import { useProblem } from "@/lib/problems/use-problem";
 import { useProblemSubmissions } from "@/lib/submissions/use-problem-submissions";
 
@@ -65,6 +66,12 @@ export default function ProblemSubmissionsPage() {
       : [],
   );
   const problemTitle = problemState.state.status === "ready" ? problemState.state.problem.title : "";
+  // 이 화면은 「학생이 아직 안 냈다」와 「냈는데 강사 본인이 키를 안 넣어
+  // 멈췄다」를 헷갈리기 가장 쉬운 자리다(#346) — 시도가 하나라도 그 사유로
+  // 멈춰 있으면 목록 위에서 먼저 알리고 설정으로 가는 길을 준다.
+  const blockedByMissingKey = state.submissions.some(
+    (submission) => submission.pending_reason === "no_api_key",
+  );
 
   return (
     <PageShell>
@@ -85,6 +92,15 @@ export default function ProblemSubmissionsPage() {
       />
 
       <div className="flex flex-col gap-4">
+        {blockedByMissingKey ? (
+          <MissingScoringKeyNote
+            classId={classId}
+            message="이 클래스에 채점 키가 없어 일부 시도가 채점되지 않고 있습니다."
+            noteTestId="submissions-no-api-key-note"
+            settingsLinkTestId="submissions-no-api-key-settings-link"
+          />
+        ) : null}
+
         {state.submissions.length === 0 ? (
           <Card>
             <EmptyState>
@@ -118,7 +134,9 @@ export default function ProblemSubmissionsPage() {
 
                     {submission.status === "pending" ? (
                       <span data-testid={`instructor-submission-row-${submission.id}-status`}>
-                        <Badge>채점 중</Badge>
+                        <Badge tone={submission.pending_reason === "no_api_key" ? "attention" : "neutral"}>
+                          {submission.pending_reason ? "채점 대기" : "채점 중"}
+                        </Badge>
                       </span>
                     ) : (
                       <span data-testid={`instructor-submission-row-${submission.id}-status`}>

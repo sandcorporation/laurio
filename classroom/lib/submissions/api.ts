@@ -40,9 +40,10 @@ export type ClassroomScore = {
 // 「채점 중」을 구별하는 유일한 근거다(#287).
 export type SubmissionStatus = "pending" | "scored";
 
-// "budget_exhausted" 또는 `null`(#295). `status`가 "pending"이고 그 클래스의
-// 채점 예산이 바닥나 채점이 잠시 멈췄을 때만 채워진다.
-export type PendingReason = "budget_exhausted" | null;
+// "no_api_key"(#346) | "budget_exhausted"(#295) | `null`. `status`가
+// "pending"일 때만 채워진다 — 강사가 채점 키를 아직 넣지 않았으면 예산과
+// 무관하게 "no_api_key", 키는 있는데 예산이 바닥났으면 "budget_exhausted"다.
+export type PendingReason = "no_api_key" | "budget_exhausted" | null;
 
 export type ClassroomSubmissionRow = {
   id: number;
@@ -108,6 +109,10 @@ export type InstructorSubmissionRow = {
   status: SubmissionStatus;
   score: ClassroomScore | null;
   passed: boolean;
+  // 참여자용 `ClassroomSubmissionRow.pending_reason`과 같은 값·같은 이유
+  // (#346) — 강사도 "학생이 안 낸 것"과 "냈는데 강사 본인이 키를 안 넣어
+  // 멈춘 것"을 구별해야 한다.
+  pending_reason: PendingReason;
 };
 
 // 그 클래스의 강사만 200을 받는다 — 참여자나 남의 강사는 404다(#291 AC). 이
