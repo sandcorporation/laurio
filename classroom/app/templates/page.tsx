@@ -7,8 +7,14 @@
 // 「문제」·「클래스」 탭이 문제 하나짜리 템플릿과 클래스 통째 템플릿을
 // 구별한다(#319 AC "목록에서 구별된다") — 서로 다른 목록 엔드포인트·상세
 // 주소를 갖는 별개의 자원이라 한 목록에 섞지 않는다.
+//
+// `?kind=class` 로 열리면 「클래스」 탭이 초기 선택이다 — `/class-templates`
+// (목록 없는 주소, #350)가 여기로 보내는 사람을 원래 가려던 탭에 바로
+// 놓기 위해서다. `useSearchParams` 를 쓰는 자리라 `Suspense` 로 감싼다
+// (`app/login/login-form.tsx` 와 같은 규율).
 import Link from "next/link";
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 import { Card, EmptyState, ErrorNote, FieldLabel, INPUT_CLASS, Num, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
 import { useClassTemplates } from "@/lib/class-templates/use-class-templates";
@@ -16,8 +22,9 @@ import { useProblemTemplates } from "@/lib/problem-templates/use-problem-templat
 
 type Kind = "problem" | "class";
 
-export default function TemplatesPage() {
-  const [kind, setKind] = useState<Kind>("problem");
+function TemplatesPageInner() {
+  const searchParams = useSearchParams();
+  const [kind, setKind] = useState<Kind>(searchParams.get("kind") === "class" ? "class" : "problem");
   const [query, setQuery] = useState("");
   const [committedQuery, setCommittedQuery] = useState("");
 
@@ -114,6 +121,14 @@ export default function TemplatesPage() {
         />
       )}
     </PageShell>
+  );
+}
+
+export default function TemplatesPage() {
+  return (
+    <Suspense fallback={null}>
+      <TemplatesPageInner />
+    </Suspense>
   );
 }
 
