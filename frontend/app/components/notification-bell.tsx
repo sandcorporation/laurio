@@ -75,14 +75,14 @@ export function NotificationBell({ sessionState }: { sessionState: HeaderSession
     <Link
       href="/console/notifications"
       data-testid="header-notification-bell"
-      className="relative inline-flex items-center rounded-sm border border-rule px-3 py-1.5 text-sm hover:border-ink"
+      className="relative inline-flex items-center border border-rule px-3 py-1.5 text-[13px] text-ink hover:border-ink"
       aria-label={count > 0 ? `읽지 않은 알림 ${count}건` : "알림"}
     >
       알림
       {count > 0 && (
         <span
           data-testid="header-notification-badge"
-          className="ml-1.5 inline-flex min-w-[1.25rem] items-center justify-center bg-attention px-1 text-xs font-medium text-paper"
+          className="ml-1.5 inline-flex min-w-[1.25rem] items-center justify-center bg-attention px-1 text-[11px] font-medium text-paper"
         >
           {count > 99 ? "99+" : count}
         </span>
