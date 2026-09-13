@@ -39,8 +39,7 @@ fail-closed 라 구멍은 아니지만 원인을 찾기 어렵다.
 | `POST /api/verification/lookup-by-ci` | CI 로 조회 |
 
 **본인확인은 행위 시점에 요구한다**(ADR-0011) — 가입할 때가 아니라 개최·제출처럼 돈이나
-책임이 걸리는 순간이다. 성인만 통과한다. **과제는 예외다**(ADR-0029) — 제출자는 본인확인
-없이 InviteCode 로 제출한다.
+책임이 걸리는 순간이다. 성인만 통과한다.
 
 **신원은 파기되어도 계정은 남는다**(ADR-0025). 탈퇴는 신원 정보를 지우고 상태를
 `withdrawn` 으로 내리며, 2년 미이용 계정은 스캔이 `expired` 로 내린다 — 계정은 살아 있고
@@ -68,34 +67,20 @@ fail-closed 라 구멍은 아니지만 원인을 찾기 어렵다.
 | `GET`·`POST .../handover[/accept]` | 인수 |
 | `GET`·`POST .../payout` | 지급 |
 
-**Contest 는 하나의 엔티티다**(ADR-0001) — 공모전과 과제가 같은 표를 쓰고 `kind` 로
-갈린다(ADR-0033). `kind` 는 카테고리 표식이 아니라 일급 필드다.
+**Contest 는 하나의 엔티티다**(ADR-0001). 과제(Assignment)를 같은 표에 함께
+나르던 `kind` 필드(ADR-0033)는 과제가 접히며(#358, ADR-0044) 뜻을 잃었다 —
+스키마에는 아직 남아 있지만 새 값이 더 생기지 않는다.
 
 **공모전 제품 스위치**(`settings.CONTEST_PRODUCT_ENABLED`, `core.contest_switch`)가
 꺼지면 위 표의 `contests.api` 소관 표면(목록·상세·홈·개최·수정·재개최·견적·
 요구사항·AI grill·이미지·조회 기록·심사기간 연장)이 404 다. `GET
-/api/contests/categories`·`deliverable-types`(과제 개설 화면이 읽는다)와,
+/api/contests/categories`·`deliverable-types`(주소만으로는 다른 소관과 갈리지
+않아 예외로 열어 둔다)와,
 `award`·`handover`·`payout`·`metrics`·`submissions/compare`(각각 awards·
 handovers·payouts·submissions 앱 소관 — 이미 존재하는 공모전을 마무리하는
 표면이라 스위치와 무관하게 열려 있다)는 예외다. 기본은 켜짐이고 staging 배포만
 끈다(`CLAUDE.md` 「배포」). 닫히는 표면의 전체 목록은 `core.contest_switch` 모듈
 docstring 이 든다.
-
-### 과제
-
-| | |
-| --- | --- |
-| `POST /api/assignments` · `PATCH /api/assignments/{id}` | 개설·수정 |
-| `POST .../open` | 열기 — 이 순간 InviteCode 가 발급된다 |
-| `POST .../invite-code/reissue` | 코드 재발급(옛 코드는 죽고 기존 제출은 산다) |
-| `GET /api/assignments/invite/{code}` | 제출자가 코드로 여는 문 |
-| `GET /api/assignments/mine` · `/{id}` | 출제자의 목록·상세 |
-| `GET .../submissions` | 제출 목록 |
-| `POST .../submissions/{id}/source` | 소스 열람 — 열람은 기록된다 |
-| 이미지 4종 | 공모전과 같다 |
-
-**과제에는 상금도 결제도 심사도 이의도 인수도 배분도 없다**(ADR-0028). 마감되면 채점하고,
-그것으로 수명이 끝난다.
 
 ### 제출
 
@@ -108,7 +93,7 @@ docstring 이 든다.
 | `GET /api/submissions/{id}/score` | 내 점수 |
 | `GET`·`POST /api/submissions/{id}/appeal` | 이의 |
 | `GET`·`POST /api/submissions/{id}/build-assets` | 인수용 빌드 산출물 |
-| `GET .../source-readings` · `assignment-source-readings` | 내 소스를 누가 열람했는가 |
+| `GET .../source-readings` | 내 소스를 누가 열람했는가 |
 
 **제출물은 자료를 여럿 갖는다**(ADR-0027) — 소스·저장소·시연 영상·스크린샷·데모 URL(#264,
 ADR-0036). 업로드 자료의 값은 `submission:{공모전id}:{개발자id}:{슬롯}/…` 로 시작해야
@@ -277,7 +262,7 @@ llm_scoring`(#274)에 이어 `core.repository_adapters`(GitHub 저장소 clone·
 
 | 무엇을 | 스캔 |
 | --- | --- |
-| 상태 전이 | `contest-close` · `contest-judging-end` · `assignment-close` |
+| 상태 전이 | `contest-close` · `contest-judging-end` |
 | 채점 | `submission-scoring` · `repository-visibility` · `classroom-submission-scoring`(#287) |
 | 이미지 | `contest-image-optimization` |
 | 환불 | `payment-refund-request` · `payment-refund-reconcile` |
@@ -286,6 +271,11 @@ llm_scoring`(#274)에 이어 `core.repository_adapters`(GitHub 저장소 clone·
 | 개인정보 | `identity-dormancy-purge` · `retained-identity-purge` |
 | 자료 | `demo-video-retention-purge` |
 | 데모 | `scheduled-state-demo` |
+
+**`assignment-close`는 등록부에 없다**(#358, ADR-0044) — 과제 개설 API가 걷혀
+`DRAFT -> ASSIGNMENT_OPEN`으로 옮길 방법이 사라졌으므로, 그 스캔은 영원히 빈
+후보만 돈다. 간선 선언 자체는 `contests/transitions.py`에 남아 있다(모델 정리
+전까지 그래프의 self-consistency를 위해).
 
 `POST /api/internal/tick` 이 등록 순서로 전부 한 바퀴 돌고, `POST /api/internal/scans/{name}`
 이 하나만 돌린다. **tick 은 시간을 앞당기지 않는다** — 「이미 밀린 일을 beat 를 기다리지

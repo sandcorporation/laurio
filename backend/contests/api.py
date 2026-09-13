@@ -208,8 +208,9 @@ def list_deliverable_types(request: HttpRequest):
 def quote(request: HttpRequest, payload: QuoteIn):
     """선택한 DeliverableType들의 최소 제안 상금 합계를 등록 전에 보여준다.
 
-    과제에는 "상금미달" 개념이 없다(`contests.assignment_api` 모듈 docstring) —
-    이 견적은 공모전 전용이라 공모전 제품 스위치(#271)가 닫는다.
+    과제에는 "상금미달" 개념이 없었다(과제 라우터가 걷히기 전 `contests.
+    assignment_api` 모듈 docstring, #361로 사라졌다) — 이 견적은 공모전 전용이라
+    공모전 제품 스위치(#271)가 닫는다.
     """
 
     require_contest_product_enabled()
@@ -227,8 +228,8 @@ def create_contest(request: HttpRequest, payload: ContestCreateIn):
     Prize가 선택한 DeliverableType 최소 상금 합계에 미달해도 등록은 성공한다 —
     「상금미달」 배지만 선다. 플랫폼은 신호를 줄 뿐 금지하지 않는다.
 
-    공모전 제품 스위치(#271)가 꺼지면 새 공모전을 열 수 없다 — 과제는
-    `contests.assignment_api.create_assignment`가 별도로, 이 스위치와 무관하게 만든다.
+    공모전 제품 스위치(#271)가 꺼지면 새 공모전을 열 수 없다 — 과제 개설 자체가
+    과제 라우터와 함께 걷혔다(#361, 부모 #358).
     """
 
     require_contest_product_enabled()
@@ -450,8 +451,9 @@ def list_my_sponsored_contests(request: HttpRequest, after: str | None = None):
             # 공모전의 「다음 행동」을 보여주는 화면이고, `sponsor_next_action_for`는
             # PAYABLE·AWARDABLE·AWAITING_DISTRIBUTION 같은 공모전 전용 분류를
             # 판정에 쓴다. Assignment는 그 무엇도 해당하지 않으므로 섞이면 상금 0원짜리
-            # 행이 엉뚱한(때로는 틀린) 「다음 행동」 문구와 함께 나타난다. 자기 과제는
-            # `GET /api/assignments/mine`(contests.assignment_api)이 따로 보여준다.
+            # 행이 엉뚱한(때로는 틀린) 「다음 행동」 문구와 함께 나타난다. 과제 자신을
+            # 보여주던 `GET /api/assignments/mine`은 과제 라우터와 함께 걷혔다(#361)
+            # — 이 목록은 여전히 공모전만 남긴다(kind 필드는 아직 모델에 있다).
             Contest.objects.filter(sponsor=profile).exclude(kind=Contest.Kind.ASSIGNMENT),
             as_of=as_of,
             policy=policy,
@@ -541,9 +543,8 @@ def get_home_curation(request: HttpRequest):
 
 @router.get("/contests/{contest_id}", response=ContestOut, auth=None)
 def get_contest(request: HttpRequest, contest_id: int):
-    """공모전 제품 스위치(#271)가 꺼지면 이 상세도 닫는다 — 과제 상세는
-    `contests.assignment_api.get_my_assignment`/`get_assignment_by_invite_code`가
-    별도로 답한다."""
+    """공모전 제품 스위치(#271)가 꺼지면 이 상세도 닫는다 — 과제 상세를 따로
+    답하던 `contests.assignment_api`는 과제 라우터와 함께 걷혔다(#361)."""
 
     require_contest_product_enabled()
 
@@ -1049,13 +1050,15 @@ def _get_owned_draft_contest(request: HttpRequest, contest_id: int) -> Contest:
     `DRAFT`는 공모전과 Assignment가 공유한다(ADR-0028) — 아직 열리지 않은
     Assignment는 `status != DRAFT` 검사를 그대로 통과한다. 이 구멍을 실제로
     놓쳤었다: 자격만 있고 본인확인은 없는 Sponsor가 Assignment를 만든 뒤(DRAFT,
-    `POST /api/assignments`) 그 `id`로 이 엔드포인트를 거치는 `PATCH
+    당시 `POST /api/assignments`) 그 `id`로 이 엔드포인트를 거치는 `PATCH
     /api/contests/{id}`를 직접 치면 Prize·활성 Category를 그대로 받아들였고,
     이어서 `POST /api/payments`(`Contest.Status.PAYABLE`도 DRAFT 전부에 True라
     막지 않는다)로 결제까지 확정하면 본인확인 없이 만들어진 행이 상금 있는
     공개 Contest로 발행됐다 — Verification이 아예 없으므로 자전거래 차단의
-    근거(CI)조차 없는 상태였다(회귀 테스트:
-    test_unverified_assignment_owner_cannot_reach_paid_contest_edit_gate).
+    근거(CI)조차 없는 상태였다. 과제 라우터가 걷힌 뒤(#361)로는 HTTP로 그 행을
+    만들 길이 없지만, `kind` 필드가 아직 모델에 남아 있는 동안은 이 방어도 그대로
+    둔다(회귀 테스트: test_contest_update.py::
+    test_an_assignment_kind_draft_cannot_reach_the_paid_contest_edit_gate).
     """
 
     contest = _get_owned_contest(request, contest_id)
@@ -1262,10 +1265,10 @@ def delete_requirement(request: HttpRequest, contest_id: int, requirement_id: in
 #
 # 발급·등록·순서변경·제거의 실제 로직은 `contests.images`에 있다 — 이 라우터는
 # 자기 게이트(`_get_owned_draft_contest`: 소유자 + DRAFT + not is_assignment)로
-# 확인한 `Contest`를 그 함수들에 넘길 뿐이다. `contests.assignment_api`가 같은
-# 함수들을 자신의 게이트(`_get_owned_editable_assignment`)로 부른다(#236) — 「무엇을
-# 고칠 수 있는가」는 두 게이트가 각자 답하고 「어떻게 고치는가」는 이 모듈이
-# 한 번만 답한다.
+# 확인한 `Contest`를 그 함수들에 넘길 뿐이다. 과제 라우터(`contests.
+# assignment_api`)도 한때 같은 함수들을 자신의 게이트(`_get_owned_editable_
+# assignment`)로 불렀지만(#236) #361로 걷혔다 — 「무엇을 고칠 수 있는가」는
+# 게이트가 답하고 「어떻게 고치는가」는 이 모듈이 답한다는 경계는 그대로다.
 
 
 @router.post(

@@ -251,9 +251,9 @@ def _serialize_problem_mine(problem: Problem, *, passed: bool = False) -> Classr
 def _source_download_url(asset: SubmissionAsset, user) -> str:
     """소스 자료 하나의 presigned 다운로드 URL — 파일명은 제출자 본인의 User
     정보를 따른다(#286 AC). 강의실 참여자는 `accounts.DeveloperProfile`이
-    없으므로 `contests.assignment_api`처럼 `developer.display_name`을 쓸 수
-    없다 — 대신 `User.email`을 쓴다(`classroom.api.preview_join`이 강사를
-    가리킬 때 이미 같은 값을 쓰고 있다)."""
+    없으므로 공모전 제출 화면처럼 `developer.display_name`을 쓸 수 없다 —
+    대신 `User.email`을 쓴다(`classroom.api.preview_join`이 강사를 가리킬 때
+    이미 같은 값을 쓰고 있다)."""
 
     adapter = get_storage_adapter()
     base_name = safe_download_base_name(user.email)
@@ -335,9 +335,9 @@ def _instructor_source_download_url(
     `_source_download_url`과 달리 파일명이 `User.email`이 아니라 **그 클래스에서
     불릴 이름 + 시도 번호**로 조립된다. 강사 한 사람이 참여자 여러 명의, 그리고
     한 참여자의 여러 시도를 잇달아 내려받으므로 이메일 하나로는(같은 참여자의
-    다른 시도끼리) 구별되지 않는다 — `contests.assignment_api.
-    reveal_assignment_submission_source`가 제출자 이름 뒤에 순번을 붙이는 것과
-    같은 이유다."""
+    다른 시도끼리) 구별되지 않는다 — 과제 라우터가 걷히기 전 `contests.
+    assignment_api.reveal_assignment_submission_source`(#361로 사라졌다)가
+    제출자 이름 뒤에 순번을 붙이던 것과 같은 이유다."""
 
     adapter = get_storage_adapter()
     base_name = safe_download_base_name(f"{member.display_name}-{attempt_number}")

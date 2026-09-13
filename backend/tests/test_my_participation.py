@@ -617,21 +617,21 @@ def test_an_assignment_participation_row_carries_the_active_invite_code_to_get_b
     (`test_old_invite_code_dies_but_existing_submission_survives_reissue`).
     """
 
-    from tests.test_assignment_submissions import _create_and_open_assignment, _submit
+    from tests.assignment_orm_helpers import create_open_assignment
 
-    assignment = _create_and_open_assignment(
-        client, deliverable_type_ids=[landing_type.id], sponsor_uid="myp-asgn-sponsor"
+    # 과제 라우터(`contests.assignment_api`)가 걷혀(#361) kind=ASSIGNMENT Contest는
+    # 직접 조립한다 — 제출 자체는 여전히 `submissions.api`(공유 배관)의 몫이다.
+    assignment = create_open_assignment(
+        deliverable_types=[landing_type], sponsor_uid="myp-asgn-sponsor"
     )
     student = _login(client, "myp-asgn-student")
     student_user_id = client.get(
         "/api/accounts/me", **_auth_header(student["access"])
     ).json()["id"]
 
-    submitted = _submit(
-        client,
-        student["access"],
-        assignment["id"],
-        {
+    submitted = client.post(
+        f"/api/contests/{assignment['id']}/submissions",
+        data={
             "assets": [
                 {
                     "kind": "source",
@@ -640,6 +640,8 @@ def test_an_assignment_participation_row_carries_the_active_invite_code_to_get_b
             ],
             "invite_code": assignment["invite_code"],
         },
+        content_type="application/json",
+        **_auth_header(student["access"]),
     )
     assert submitted.status_code == 201, submitted.content
 

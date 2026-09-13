@@ -1,6 +1,6 @@
 # Contest.kind는 일급 필드다 — 과제 판정을 규율에서 구조로 (ADR-0028 개정)
 
-Status: Accepted (2026-09-08 결정)
+Status: Superseded by ADR-0044 (2026-09-13 결정)
 
 ADR-0028은 "Contest의 종류가 둘일 수 있다"를 새 테이블이 아니라 `Contest.Status` 값 둘로
 풀었다. 그런데 그 ADR은 "이 Contest가 어느 종류인가"라는, 더 근본적인 질문에는 답을

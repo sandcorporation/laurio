@@ -1701,51 +1701,19 @@ def test_resolver_wiring_keeps_assignment_demo_private_after_deadline(client, la
     사라졌다 — 위 `test_resolver_wiring_opens_demo_to_everyone_after_deadline`
     (진짜 콘테스트, 여전히 공개돼야 한다)과 짝을 이룬다."""
 
-    from django.core.management import call_command
+    from tests.assignment_orm_helpers import create_open_assignment
 
-    call_command("create_operator", "root-resolver-asgn", password="correct-horse-battery-resolver", superuser=True)
-    operator = client.__class__()
-    operator_login = operator.post(
-        "/api/operator/login",
-        data={"username": "root-resolver-asgn", "password": "correct-horse-battery-resolver"},
-        content_type="application/json",
-        HTTP_ORIGIN="http://testserver",
-    )
-    assert operator_login.status_code == 200, operator_login.content
-
-    sponsor_pair = _login(client, uid="asgn-resolver-sponsor")
-    sponsor_me = client.get("/api/accounts/me", **_auth_header(sponsor_pair["access"]))
-    grant = operator.post(
-        "/api/operator/assignment-permissions/grant",
-        data={"username": sponsor_me.json()["username"], "reason": "리졸버 검증"},
-        content_type="application/json",
-        HTTP_ORIGIN="http://testserver",
-    )
-    assert grant.status_code == 200, grant.content
-
+    # 과제 라우터(`contests.assignment_api`)가 걷혀(#361) 개설·자격 부여·열기가
+    # 전부 HTTP 밖 일이 됐다 — kind=ASSIGNMENT Contest를 직접 조립한다.
     deadline = timezone.now() + timedelta(hours=1)
-    created = client.post(
-        "/api/assignments",
-        data={
-            "title": "리졸버 검증용 과제",
-            "deliverable_type_ids": [landing_type.id],
-            "description": "",
-            "deadline_at": deadline.isoformat(),
-            "requirements": [],
-        },
-        content_type="application/json",
-        **_auth_header(sponsor_pair["access"]),
+    assignment = create_open_assignment(
+        deliverable_types=[landing_type],
+        sponsor_uid="asgn-resolver-sponsor",
+        requirements=[],
+        deadline_at=deadline,
     )
-    assert created.status_code == 201, created.content
-    assignment_id = created.json()["id"]
-
-    opened = client.post(
-        f"/api/assignments/{assignment_id}/open",
-        content_type="application/json",
-        **_auth_header(sponsor_pair["access"]),
-    )
-    assert opened.status_code == 200, opened.content
-    invite_code = opened.json()["invite_code"]
+    assignment_id = assignment["id"]
+    invite_code = assignment["invite_code"]
 
     student_pair = _login(client, uid="asgn-resolver-student")
     student_me = client.get("/api/accounts/me", **_auth_header(student_pair["access"]))
@@ -1794,7 +1762,7 @@ def test_resolver_wiring_keeps_assignment_demo_private_after_deadline(client, la
             "/api/storage/downloads",
             data={"target_ref": demo_target_ref, "object_key": demo_object_key},
             content_type="application/json",
-            **_auth_header(sponsor_pair["access"]),
+            **_auth_header(assignment["sponsor_access"]),
         ).status_code
         == 200
     )

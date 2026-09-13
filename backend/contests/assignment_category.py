@@ -38,12 +38,15 @@ def get_assignment_category() -> Category:
 
     **프로세스당 한 번만 조회한다**(`storage/adapters/s3.py`의 `lru_cache(maxsize=1)`와
     같은 관용구) — 이 행은 마이그레이션이 한 번 심고 나면 절대 바뀌지 않는다(이름을
-    바꿀 운영자 화면도, 지울 경로도 없다). `contests.assignment_api.create_assignment`가
-    새 Assignment를 만들 때마다 이 함수를 부르므로(#213 이전에는
-    `contests.models.Contest.is_assignment`도 인스턴스마다, 때로는 목록 한 화면에서
-    행마다 불렀다), 캐시가 없으면 매번 쿼리가 나간다. 이 행이 실제로 바뀌는 유일한
-    경로는 손으로 마이그레이션을 다시 쓰는 것뿐이고, 그런 변경은 어차피 프로세스
-    재시작을 동반한다.
+    바꿀 운영자 화면도, 지울 경로도 없다). 과제 라우터가 걷히기 전에는
+    `contests.assignment_api.create_assignment`가 새 Assignment를 만들 때마다 이
+    함수를 불렀다(#213 이전에는 `contests.models.Contest.is_assignment`도
+    인스턴스마다, 때로는 목록 한 화면에서 행마다 불렀다) — 그 라우터가 걷힌
+    지금(#361)은 `contests.category_services`·`contests.operator_api`(운영자
+    카테고리 화면이 이 예약 행을 잘못 건드리지 못하게 막는 자리)와 테스트만
+    이 함수를 부른다. 캐시가 없으면 그 자리들도 매번 쿼리가 나간다. 이 행이
+    실제로 바뀌는 유일한 경로는 손으로 마이그레이션을 다시 쓰는 것뿐이고, 그런
+    변경은 어차피 프로세스 재시작을 동반한다.
     """
 
     return Category.objects.get(name=ASSIGNMENT_CATEGORY_NAME)
