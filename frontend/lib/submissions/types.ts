@@ -42,11 +42,6 @@ export type CompletionDistributionOut = components["schemas"]["CompletionDistrib
 // 방문자 식별자는 이 타입에도 없다.
 export type ViewMetricsOut = components["schemas"]["ViewMetricsOut"];
 
-// Assignment 7(#211, ADR-0022/0028) — 출제자의 소스 펼침과 그 기록.
-export type SourceRevealAssetOut = components["schemas"]["SourceRevealAssetOut"];
-export type AssignmentSourceRevealOut = components["schemas"]["AssignmentSourceRevealOut"];
-export type AssignmentSourceReadingOut = components["schemas"]["AssignmentSourceReadingOut"];
-
 export const EVIDENCE_KINDS: { value: EvidenceIn["kind"]; label: string }[] = [
   { value: "video_timestamp", label: "영상 타임스탬프" },
   { value: "screenshot", label: "스크린샷" },

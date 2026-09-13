@@ -6,10 +6,15 @@
 // 백엔드(backend/config/api.py)의 라우터 마운트를 그대로 옮겨 적었다 — 새로
 // 발명하지 않는다:
 //
-//   accounts(""), verification(""), contests(""), assignments("", #207 ADR-0028),
+//   accounts(""), verification(""), contests(""),
 //   payments(""), submissions(""), awards(""), handovers(""), payouts(""),
 //   appeals(""), notifications("/notifications"), ledger("/ledger")
-//                                                        → 아래 10개 접두어로 노출
+//                                                        → 아래 9개 접두어로 노출
+//
+// `/api/assignments`는 더 이상 이 목록에 없다(#359, spec #358) — 공개 앱이
+// 과제 화면을 걷으면서 그 화면만 이 경로를 불렀다. 백엔드 라우터 자체는
+// 그대로다(이 티켓은 백엔드를 건드리지 않는다) — 아무도 부르지 않는
+// 상태로 남을 뿐이다.
 //
 //   core("/internal"), notifications("/internal/notifications"),
 //   scoring("/internal/scoring"), handovers("/internal/handovers"),
@@ -36,7 +41,6 @@ export const BACKEND_PROXY_ALLOWLIST: readonly string[] = [
   "/api/accounts",
   "/api/verification",
   "/api/contests",
-  "/api/assignments",
   "/api/payments",
   "/api/submissions",
   "/api/payouts",

@@ -327,8 +327,7 @@ export default function SubmitPage() {
   }, [hasScore, currentSubmission]);
 
   // 시계가 마감을 넘는 순간 제출물을 한 번 다시 불러와 `next_action`을
-  // 갱신한다(#247, #248) — 판정기는 여전히 서버 하나다(`useDeadlineRefetch`
-  // 참고, 과제 제출자 화면과 같은 훅을 쓴다).
+  // 갱신한다(#247, #248) — 판정기는 여전히 서버 하나다(`useDeadlineRefetch` 참고).
   //
   // `applySubmissionAssets`는 부르지 않는다 — 그 시점에 사용자가 폼에 입력해
   // 둔 것(아직 저장 전)을 서버 값으로 조용히 덮어쓰면 안 된다. 대신
