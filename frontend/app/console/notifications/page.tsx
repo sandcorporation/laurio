@@ -22,6 +22,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { Badge, EmptyState, ErrorNote, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
 import {
@@ -131,38 +132,41 @@ export default function NotificationsPage() {
   const unreadCount = load.status === "ready" ? load.items.filter((n) => n.read_at === null).length : 0;
 
   return (
-    <main className="mx-auto max-w-2xl p-10">
+    <PageShell>
       <Link className="text-sm text-ink/60" href="/console" data-testid="notifications-back">
         ← 콘솔
       </Link>
-      <div className="mt-2 flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold" data-testid="notifications-heading">
-          알림
-        </h1>
-        {unreadCount > 0 && (
-          <button
-            type="button"
-            onClick={markAllRead}
-            disabled={markingAll}
-            data-testid="notifications-mark-all-read"
-            className="rounded-sm border border-rule px-3 py-1.5 text-sm hover:border-ink disabled:opacity-50"
-          >
-            {markingAll ? "처리 중..." : "모두 읽음"}
-          </button>
-        )}
-      </div>
+      <PageHeader
+        title="알림"
+        titleTestId="notifications-heading"
+        actions={
+          unreadCount > 0 && (
+            <button
+              type="button"
+              onClick={markAllRead}
+              disabled={markingAll}
+              data-testid="notifications-mark-all-read"
+              className={buttonClass("secondary", "sm")}
+            >
+              {markingAll ? "처리 중..." : "모두 읽음"}
+            </button>
+          )
+        }
+      />
 
       {load.status === "error" ? (
-        <p className="mt-6 text-attention" data-testid="notifications-load-error">
-          알림을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.
-        </p>
+        <ErrorNote>
+          <span data-testid="notifications-load-error">
+            알림을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.
+          </span>
+        </ErrorNote>
       ) : load.items.length === 0 ? (
-        <p className="mt-6 text-sm text-ink/60" data-testid="notifications-empty">
-          아직 알림이 없습니다.
-        </p>
+        <EmptyState>
+          <span data-testid="notifications-empty">아직 알림이 없습니다.</span>
+        </EmptyState>
       ) : (
         <>
-          <ul className="mt-6 flex flex-col" data-testid="notifications-list">
+          <ul className="flex flex-col" data-testid="notifications-list">
             {load.items.map((notification) => (
               <NotificationRow
                 key={notification.id}
@@ -178,14 +182,14 @@ export default function NotificationsPage() {
               onClick={loadMore}
               disabled={loadingMore}
               data-testid="notifications-load-more"
-              className="mt-4 w-fit rounded-sm border border-rule px-4 py-2 text-sm hover:border-ink disabled:opacity-50"
+              className={`mt-4 ${buttonClass("secondary")}`}
             >
               {loadingMore ? "불러오는 중..." : "더 보기"}
             </button>
           )}
         </>
       )}
-    </main>
+    </PageShell>
   );
 }
 
@@ -209,17 +213,14 @@ function NotificationRow({
         <p className="text-sm leading-relaxed">{describeNotification(notification)}</p>
         {wasUnread && (
           <div className="flex shrink-0 items-center gap-2">
-            <span
-              data-testid={`notification-new-badge-${notification.id}`}
-              className="rounded-full bg-attention px-1.5 py-0.5 text-[10px] font-medium text-paper"
-            >
-              새 알림
-            </span>
+            <Badge tone="attention">
+              <span data-testid={`notification-new-badge-${notification.id}`}>새 알림</span>
+            </Badge>
             <button
               type="button"
               onClick={onMarkRead}
               data-testid={`notification-mark-read-${notification.id}`}
-              className="rounded-sm border border-rule px-2 py-0.5 text-xs hover:border-ink"
+              className={buttonClass("secondary", "sm")}
             >
               읽음
             </button>

@@ -17,6 +17,7 @@
 import Link from "next/link";
 import { use, useState } from "react";
 
+import { ErrorNote, INPUT_CLASS, Note, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
 import { useSession } from "@/lib/auth/use-session";
 import {
   requestPayout,
@@ -43,18 +44,16 @@ export default function PayoutPage({ params }: { params: Promise<{ contestId: st
   }
 
   return (
-    <main className="mx-auto max-w-3xl p-10">
+    <PageShell>
       <Link className="text-sm text-ink/60" href="/console/participation" data-testid="payout-back">
         ← 내 참가 현황
       </Link>
-      <h1 className="mt-2 text-2xl font-semibold" data-testid="payout-heading">
-        상금 지급
-      </h1>
+      <PageHeader title="상금 지급" titleTestId="payout-heading" />
 
       {state.status === "error" ? (
-        <p className="mt-6 text-attention" data-testid="payout-error">
-          지급 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.
-        </p>
+        <ErrorNote>
+          <span data-testid="payout-error">지급 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.</span>
+        </ErrorNote>
       ) : state.status === "none" ? (
         <RequestSection contestId={contestId} onRequested={reload} />
       ) : (
@@ -65,7 +64,7 @@ export default function PayoutPage({ params }: { params: Promise<{ contestId: st
           contestId={contestId}
         />
       )}
-    </main>
+    </PageShell>
   );
 }
 
@@ -98,7 +97,7 @@ function RequestSection({
       <p data-testid="payout-none">이 공모전에는 아직 지급 내역이 없습니다.</p>
       <SmsNotice />
       <button
-        className="mt-4 rounded bg-ink px-4 py-2 text-paper hover:bg-ink/85 disabled:opacity-50"
+        className={`mt-4 ${buttonClass("primary")}`}
         type="button"
         onClick={handleClick}
         disabled={pending}
@@ -107,9 +106,9 @@ function RequestSection({
         {pending ? "요청하는 중..." : "상금 지급 요청"}
       </button>
       {message ? (
-        <p className="mt-3 text-attention" data-testid="payout-request-error">
-          {message}
-        </p>
+        <ErrorNote>
+          <span data-testid="payout-request-error">{message}</span>
+        </ErrorNote>
       ) : null}
     </section>
   );
@@ -178,7 +177,7 @@ function PayoutDetail({
       ) : null}
 
       {payout.status === "confirmed_seller_pending" ? (
-        <section className="mt-6 rounded border border-rule p-4" data-testid="payout-waiting">
+        <section className="mt-6 border border-rule bg-surface p-4" data-testid="payout-waiting">
           {/* PENDING이면서 아직 연락처(전화번호·이메일)를 안 냈으면 하실 일이
               있다(#57 코드리뷰 지적 10, #168) — next_action_message가 "아래에서
               제출해주세요"라고 말하는데 폼이 없으면 그 지시를 따를 수 없다.
@@ -293,7 +292,7 @@ function RetryFailedPayout({
   return (
     <div className="mt-3" data-testid="payout-retry-failed">
       <button
-        className="mt-2 rounded border border-rule px-3 py-2 text-sm disabled:opacity-50"
+        className={`mt-2 ${buttonClass("secondary")}`}
         type="button"
         onClick={handleClick}
         disabled={pending}
@@ -302,9 +301,9 @@ function RetryFailedPayout({
         {pending ? "다시 요청하는 중..." : "다시 요청"}
       </button>
       {message ? (
-        <p className="mt-2 text-attention" data-testid="payout-retry-failed-error">
-          {message}
-        </p>
+        <ErrorNote>
+          <span data-testid="payout-retry-failed-error">{message}</span>
+        </ErrorNote>
       ) : null}
     </div>
   );
@@ -346,7 +345,7 @@ function SellerRetry({
         거절되면 운영자에게 문의해주세요.
       </p>
       <button
-        className="mt-2 rounded border border-rule px-3 py-2 text-sm disabled:opacity-50"
+        className={`mt-2 ${buttonClass("secondary")}`}
         type="button"
         onClick={handleClick}
         disabled={pending}
@@ -355,9 +354,9 @@ function SellerRetry({
         {pending ? "다시 시도하는 중..." : "다시 시도"}
       </button>
       {message ? (
-        <p className="mt-2 text-attention" data-testid="payout-seller-retry-error">
-          {message}
-        </p>
+        <ErrorNote>
+          <span data-testid="payout-seller-retry-error">{message}</span>
+        </ErrorNote>
       ) : null}
     </div>
   );
@@ -406,7 +405,7 @@ function SellerContactForm({
 
   return (
     <form
-      className="mt-4 flex flex-col gap-3 rounded border border-rule p-3"
+      className="mt-4 flex flex-col gap-3 border border-rule bg-surface p-3"
       onSubmit={handleSubmit}
       data-testid="payout-seller-contact-form"
     >
@@ -427,7 +426,7 @@ function SellerContactForm({
           </label>
           <input
             id="payout-seller-phone"
-            className="rounded border border-rule p-3"
+            className={INPUT_CLASS}
             type="tel"
             inputMode="numeric"
             autoComplete="tel"
@@ -447,7 +446,7 @@ function SellerContactForm({
           </label>
           <input
             id="payout-seller-email"
-            className="rounded border border-rule p-3"
+            className={INPUT_CLASS}
             type="email"
             autoComplete="email"
             value={email}
@@ -459,7 +458,7 @@ function SellerContactForm({
         </div>
       ) : null}
       <button
-        className="self-start rounded bg-ink px-4 py-2 text-paper hover:bg-ink/85 disabled:opacity-50"
+        className={`self-start ${buttonClass("primary")}`}
         type="submit"
         disabled={pending || !canSubmit}
         data-testid="payout-seller-contact-submit"
@@ -467,9 +466,9 @@ function SellerContactForm({
         {pending ? "제출하는 중..." : "제출"}
       </button>
       {message ? (
-        <p className="text-attention" data-testid="payout-seller-contact-error">
-          {message}
-        </p>
+        <ErrorNote>
+          <span data-testid="payout-seller-contact-error">{message}</span>
+        </ErrorNote>
       ) : null}
     </form>
   );
@@ -479,7 +478,7 @@ function AmountBreakdown({ payout }: { payout: Payout }) {
   const won = (amount: number) => `${amount.toLocaleString()}원`;
 
   return (
-    <section className="mt-6 rounded border border-rule p-4" data-testid="payout-amounts">
+    <section className="mt-6 border border-rule bg-surface p-4" data-testid="payout-amounts">
       {/* 상금 그대로가 들어오지 않는다는 사실을 **지급 전에** 본다. */}
       <dl className="flex flex-col gap-1 text-sm">
         <Row label="상금" value={won(payout.prize_amount)} testId="payout-amount-prize" />
@@ -519,10 +518,14 @@ function SmsNotice() {
     // 본인확인은 이미 끝났는데 지급대행사가 자기 인증 문자를 또 보낸다
     // (ADR-0020 — 결제·지급대행과 본인확인의 벤더가 갈려 있다). 예고 없이
     // 두 번째 문자가 오면 피싱으로 읽히고, 그러면 사람들은 무시한다.
-    <p className="mt-3 rounded border border-rule p-3 text-sm" data-testid="payout-sms-notice">
-      지급 절차 중에 지급대행사(토스페이먼츠)가 <strong>별도의 본인확인 문자</strong>를 보냅니다.
-      가입할 때 하신 본인확인과는 다른 절차이며, 정상입니다.
-    </p>
+    <div className="mt-3">
+      <Note>
+        <span data-testid="payout-sms-notice">
+          지급 절차 중에 지급대행사(토스페이먼츠)가 <strong>별도의 본인확인 문자</strong>를
+          보냅니다. 가입할 때 하신 본인확인과는 다른 절차이며, 정상입니다.
+        </span>
+      </Note>
+    </div>
   );
 }
 
@@ -559,7 +562,7 @@ function TaxIdentityForm({ payout, onSubmitted }: { payout: Payout; onSubmitted:
       </label>
       <input
         id="payout-rrn"
-        className="rounded border border-rule p-3"
+        className={INPUT_CLASS}
         // `password` 다 — 어깨너머로 읽히지 않고, 브라우저·확장이 자동완성
         // 목록에 남기지 않는다.
         type="password"
@@ -574,7 +577,7 @@ function TaxIdentityForm({ payout, onSubmitted }: { payout: Payout; onSubmitted:
       />
       <SmsNotice />
       <button
-        className="self-start rounded bg-ink px-4 py-2 text-paper hover:bg-ink/85 disabled:opacity-50"
+        className={`self-start ${buttonClass("primary")}`}
         type="submit"
         disabled={pending || value.length !== 13}
         data-testid="payout-identity-submit"
@@ -582,9 +585,9 @@ function TaxIdentityForm({ payout, onSubmitted }: { payout: Payout; onSubmitted:
         {pending ? "제출하는 중..." : "제출"}
       </button>
       {message ? (
-        <p className="text-attention" data-testid="payout-identity-error">
-          {message}
-        </p>
+        <ErrorNote>
+          <span data-testid="payout-identity-error">{message}</span>
+        </ErrorNote>
       ) : null}
     </form>
   );

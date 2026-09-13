@@ -21,8 +21,8 @@
 import Link from "next/link";
 import { use, useState } from "react";
 
+import { ErrorNote, PageShell, buttonClass } from "@/app/components/ui";
 import { useSession } from "@/lib/auth/use-session";
-import { dangerButtonClass } from "@/lib/ui";
 import { acceptHandover, useHandover, type Handover } from "@/lib/handovers/use-handover";
 import {
   buildAssetKindLabel,
@@ -74,7 +74,7 @@ export default function HandoverPage({ params }: { params: Promise<{ contestId: 
   }
 
   return (
-    <main className="mx-auto max-w-2xl p-10">
+    <PageShell>
       <Link className="text-sm text-ink/60" href="/console/contests" data-testid="handover-back">
         ← 내 공모전
       </Link>
@@ -106,15 +106,19 @@ export default function HandoverPage({ params }: { params: Promise<{ contestId: 
           이 공모전은 아직 선정되지 않아 인수 정보가 없습니다.
         </p>
       ) : state.status === "forbidden" ? (
-        <p className="mt-6 text-attention" role="alert" data-testid="handover-forbidden">
-          {state.message}
-        </p>
+        <div className="mt-6">
+          <ErrorNote>
+            <span data-testid="handover-forbidden">{state.message}</span>
+          </ErrorNote>
+        </div>
       ) : (
-        <p className="mt-6 text-attention" role="alert" data-testid="handover-error">
-          인수 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.
-        </p>
+        <div className="mt-6">
+          <ErrorNote>
+            <span data-testid="handover-error">인수 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.</span>
+          </ErrorNote>
+        </div>
       )}
-    </main>
+    </PageShell>
   );
 }
 
@@ -126,9 +130,13 @@ function BuildAssetsSection({ state }: { state: BuildAssetsState }) {
     // 자료가 없다고 믿고 확인 버튼을 누르게 된다(위 handover-error와 같은
     // 원칙). 조용히 섹션 자체를 지우지 않는다.
     return (
-      <p className="mt-8 text-sm text-attention" role="alert" data-testid="handover-build-assets-error">
-        빌드 자산 목록을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.
-      </p>
+      <div className="mt-8">
+        <ErrorNote>
+          <span data-testid="handover-build-assets-error">
+            빌드 자산 목록을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.
+          </span>
+        </ErrorNote>
+      </div>
     );
   }
 
@@ -144,10 +152,10 @@ function BuildAssetsSection({ state }: { state: BuildAssetsState }) {
           {state.assets.map((asset) => (
             <li
               key={asset.id}
-              className="rounded border border-rule p-3 text-sm"
+              className="border border-rule bg-surface p-3 text-sm"
               data-testid={`handover-build-asset-${asset.id}`}
             >
-              <span className="rounded-sm border border-rule px-2 py-0.5 text-xs">
+              <span className="border border-rule px-2 py-0.5 text-xs">
                 {buildAssetKindLabel(asset.kind)}
               </span>{" "}
               {asset.label || <span className="text-ink/60">(라벨 없음)</span>}
@@ -213,13 +221,13 @@ function PendingAcceptance({
         <button
           type="button"
           onClick={onAcceptClick}
-          className={`w-fit rounded px-4 py-2 disabled:opacity-50 ${dangerButtonClass("outline")}`}
+          className={buttonClass("danger")}
           data-testid="handover-accept-button"
         >
           인수 확인
         </button>
       ) : (
-        <div className="flex flex-col gap-2 rounded border border-attention p-4">
+        <div className="flex flex-col gap-2 border border-attention bg-surface p-4">
           <p data-testid="handover-accept-confirm-notice">
             정말 확인하시겠습니까? 예치금이 즉시 해제되며 되돌릴 수 없습니다.
           </p>
@@ -228,7 +236,7 @@ function PendingAcceptance({
               type="button"
               onClick={onConfirm}
               disabled={isSaving}
-              className="rounded border border-attention bg-attention px-3 py-2 text-sm text-paper disabled:opacity-50"
+              className={buttonClass("dangerFilled")}
               data-testid="handover-accept-confirm"
             >
               {isSaving ? "확인하는 중..." : "확인 — 예치금 해제"}
@@ -237,7 +245,7 @@ function PendingAcceptance({
               type="button"
               onClick={onCancel}
               disabled={isSaving}
-              className="rounded border border-rule px-3 py-2 text-sm hover:border-ink"
+              className={buttonClass("secondary")}
               data-testid="handover-accept-cancel"
             >
               취소
@@ -247,9 +255,9 @@ function PendingAcceptance({
       )}
 
       {accept.status === "error" ? (
-        <p role="alert" className="text-attention" data-testid="handover-accept-error">
-          {accept.message}
-        </p>
+        <ErrorNote>
+          <span data-testid="handover-accept-error">{accept.message}</span>
+        </ErrorNote>
       ) : null}
     </div>
   );

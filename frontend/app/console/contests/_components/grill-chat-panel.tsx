@@ -7,6 +7,7 @@
 // requirement-draft-panel의 체크리스트로 넘어간다.
 import { useState } from "react";
 
+import { ErrorNote, PageHeader, buttonClass } from "@/app/components/ui";
 import type { ChatProposal, ParsedChatTurn } from "@/lib/contests/chat-response";
 import { CHAT_MESSAGE_MAX_LENGTH } from "@/lib/contests/grill-types";
 
@@ -43,17 +44,18 @@ export function GrillChatPanel({
 
   return (
     <section className="flex flex-col gap-5 border-r border-rule p-8" data-testid="grill-chat-panel">
-      <div className="flex flex-col gap-2">
-        <p className="text-xs font-medium tracking-widest text-ink/60">AI와 함께 정리하기</p>
-        <h1 className="text-2xl font-semibold" data-testid="grill-heading">
-          무엇을 만들어야 하는지 같이 좁혀봅시다
-        </h1>
-        <p className="text-sm leading-relaxed text-ink/70">
-          여기서 만들어지는 체크리스트가 개발자의 자가 응답, 심사, AI 채점의{" "}
-          <strong className="font-semibold text-ink">공통 기준</strong>이 됩니다. 모호하게 적으면 심사 때
-          분쟁이 됩니다.
-        </p>
-      </div>
+      <PageHeader
+        eyebrow="AI와 함께 정리하기"
+        title="무엇을 만들어야 하는지 같이 좁혀봅시다"
+        titleTestId="grill-heading"
+        description={
+          <>
+            여기서 만들어지는 체크리스트가 개발자의 자가 응답, 심사, AI 채점의{" "}
+            <strong className="font-semibold text-ink">공통 기준</strong>이 됩니다. 모호하게 적으면 심사 때
+            분쟁이 됩니다.
+          </>
+        }
+      />
 
       <div className="flex flex-1 flex-col gap-4 overflow-y-auto" data-testid="grill-chat-history">
         {messages.length === 0 && (
@@ -111,7 +113,7 @@ export function GrillChatPanel({
                   type="button"
                   onClick={() => onAddProposal(proposal)}
                   data-testid={`grill-proposal-${index}-add`}
-                  className="shrink-0 border border-ink px-3 py-1 text-xs hover:bg-ink hover:text-paper"
+                  className={`shrink-0 ${buttonClass("secondary", "sm")}`}
                 >
                   체크리스트에 추가
                 </button>
@@ -122,9 +124,9 @@ export function GrillChatPanel({
       )}
 
       {chatError && (
-        <p role="alert" data-testid="grill-chat-error" className="text-sm text-attention">
-          {chatError}
-        </p>
+        <ErrorNote>
+          <span data-testid="grill-chat-error">{chatError}</span>
+        </ErrorNote>
       )}
 
       {turnLimitReached && (

@@ -13,6 +13,7 @@
 // 인증 구역이므로 SSR 하지 않는다(ADR-0015).
 import Link from "next/link";
 
+import { EmptyState, ErrorNote, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
 import { useSession } from "@/lib/auth/use-session";
 import {
   SPONSOR_ACTION_LABELS,
@@ -29,31 +30,31 @@ export default function MyContestsPage() {
   if (session.status === "unauthenticated") return null;
   if (session.status === "loading" || state.status === "loading") {
     return (
-      <main className="p-10">
+      <PageShell>
         <p data-testid="my-contests-loading">불러오는 중...</p>
-      </main>
+      </PageShell>
     );
   }
 
   return (
-    <main className="mx-auto max-w-3xl p-10">
-      <h1 className="text-2xl font-semibold" data-testid="my-contests-heading">
-        내 공모전
-      </h1>
+    <PageShell>
+      <PageHeader title="내 공모전" titleTestId="my-contests-heading" />
 
       {state.status === "error" ? (
         // 조회 실패와 0건은 반드시 다르게 보여야 한다 — 같아 보이면 조회가 죽은
         // 날 개최자는 자기 공모전이 사라졌다고 읽는다.
-        <p className="mt-6 text-attention" data-testid="my-contests-error">
-          공모전 목록을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.
-        </p>
+        <ErrorNote>
+          <span data-testid="my-contests-error">
+            공모전 목록을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.
+          </span>
+        </ErrorNote>
       ) : state.count === 0 ? (
-        <p className="mt-6" data-testid="my-contests-empty">
-          아직 연 공모전이 없습니다.
-        </p>
+        <EmptyState>
+          <span data-testid="my-contests-empty">아직 연 공모전이 없습니다.</span>
+        </EmptyState>
       ) : (
         <>
-          <ul className="mt-6 flex flex-col gap-3" data-testid="my-contests-list">
+          <ul className="flex flex-col gap-3" data-testid="my-contests-list">
             {state.rows.map((row) => (
               <SponsoredContestCard key={row.contest_id} row={row} />
             ))}
@@ -65,7 +66,7 @@ export default function MyContestsPage() {
               막으려던 결과가 그대로 일어난다. */}
           {state.hasMore ? (
             <button
-              className="mt-4 rounded border border-rule px-4 py-2 text-sm disabled:opacity-50"
+              className={`mt-4 ${buttonClass("secondary")}`}
               type="button"
               onClick={state.loadMore}
               disabled={state.loadingMore}
@@ -78,7 +79,7 @@ export default function MyContestsPage() {
           ) : null}
         </>
       )}
-    </main>
+    </PageShell>
   );
 }
 
@@ -87,7 +88,7 @@ function SponsoredContestCard({ row }: { row: SponsoredContestRow }) {
 
   return (
     <li
-      className="rounded border border-rule p-4"
+      className="border border-rule bg-surface p-4"
       data-testid={`my-contest-row-${row.contest_id}`}
       data-next-action={row.next_action}
     >

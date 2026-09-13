@@ -20,10 +20,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 
+import { ErrorNote, EmptyState, PageHeader, buttonClass } from "@/app/components/ui";
+import { badgeClass } from "@/lib/ui/classnames";
 import { daysUntil, formatDday } from "@/lib/contest-format";
 import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
-import { dangerButtonClass } from "@/lib/ui";
 import {
   EVIDENCE_KINDS,
   type AwardOut,
@@ -118,7 +119,7 @@ export default function JudgeComparisonPage() {
 
   if (session.status === "loading" || load.status === "loading") {
     return (
-      <main className="flex min-h-screen items-center justify-center p-10">
+      <main className="mx-auto max-w-6xl p-10">
         <p data-testid="compare-loading">불러오는 중...</p>
       </main>
     );
@@ -128,7 +129,7 @@ export default function JudgeComparisonPage() {
 
   if (load.status === "not-found") {
     return (
-      <main className="flex min-h-screen items-center justify-center p-10">
+      <main className="mx-auto max-w-6xl p-10">
         <p data-testid="compare-not-found">공모전을 찾을 수 없습니다.</p>
       </main>
     );
@@ -136,20 +137,20 @@ export default function JudgeComparisonPage() {
 
   if (load.status === "forbidden") {
     return (
-      <main className="flex min-h-screen items-center justify-center p-10">
-        <p role="alert" data-testid="compare-forbidden" className="text-attention">
-          {load.message}
-        </p>
+      <main className="mx-auto max-w-6xl p-10">
+        <ErrorNote>
+          <span data-testid="compare-forbidden">{load.message}</span>
+        </ErrorNote>
       </main>
     );
   }
 
   if (load.status === "error") {
     return (
-      <main className="flex min-h-screen items-center justify-center p-10">
-        <p role="alert" data-testid="compare-load-error">
-          {load.message}
-        </p>
+      <main className="mx-auto max-w-6xl p-10">
+        <ErrorNote>
+          <span data-testid="compare-load-error">{load.message}</span>
+        </ErrorNote>
       </main>
     );
   }
@@ -160,9 +161,7 @@ export default function JudgeComparisonPage() {
   return (
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-8 p-10">
       <div>
-        <h1 className="text-2xl font-semibold" data-testid="compare-contest-title">
-          {contest.title} — 심사 비교
-        </h1>
+        <PageHeader title={`${contest.title} — 심사 비교`} titleTestId="compare-contest-title" />
         {judgingEndsAt ? (
           <div className="mt-2 flex flex-col gap-1">
             <p className="font-mono text-sm" data-testid="judging-deadline">
@@ -189,7 +188,9 @@ export default function JudgeComparisonPage() {
       </p>
 
       {comparison.submissions.length === 0 ? (
-        <p data-testid="compare-empty">아직 제출물이 없습니다.</p>
+        <EmptyState>
+          <span data-testid="compare-empty">아직 제출물이 없습니다.</span>
+        </EmptyState>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[640px] border-collapse" data-testid="comparison-matrix">
@@ -230,9 +231,7 @@ export default function JudgeComparisonPage() {
                     >
                       <div className="flex items-center gap-2">
                         <span
-                          className={`rounded-sm border px-2 py-0.5 text-xs ${
-                            isRequired ? "border-attention text-attention" : "border-rule text-ink"
-                          }`}
+                          className={badgeClass(isRequired ? "attention" : "neutral")}
                           data-testid={`requirement-${requirement.requirement_id}-grade`}
                         >
                           {isRequired ? "필수" : "선택"}
@@ -295,9 +294,9 @@ export default function JudgeComparisonPage() {
         </p>
       )}
       {award.status === "error" && (
-        <p role="alert" data-testid="award-error" className="text-sm text-attention">
-          {award.message}
-        </p>
+        <ErrorNote>
+          <span data-testid="award-error">{award.message}</span>
+        </ErrorNote>
       )}
     </main>
   );
@@ -388,7 +387,7 @@ function SubmissionColumnHeader({
             <video
               controls
               preload="metadata"
-              className="w-40 rounded-sm border border-rule"
+              className="w-40 border border-rule"
               data-testid={`submission-${submission.submission_id}-demo-video-${asset.id}`}
             >
               <source src={asset.download_url!} />
@@ -403,7 +402,7 @@ function SubmissionColumnHeader({
             key={asset.id}
             src={asset.download_url!}
             alt={asset.label || "스크린샷"}
-            className="w-40 rounded-sm border border-rule"
+            className="w-40 border border-rule"
             data-testid={`submission-${submission.submission_id}-screenshot-${asset.id}`}
           />
         ))}
@@ -446,7 +445,7 @@ function SubmissionColumnHeader({
               onClick={onAwardClick}
               disabled={isSaving}
               data-testid={`award-button-${submission.submission_id}`}
-              className={`w-fit rounded-sm px-3 py-1 text-xs disabled:opacity-50 ${dangerButtonClass("outline")}`}
+              className={`w-fit ${buttonClass("danger", "sm")}`}
             >
               이 제출물 선정
             </button>
@@ -461,7 +460,7 @@ function SubmissionColumnHeader({
                   onClick={onConfirm}
                   disabled={isSaving}
                   data-testid={`award-confirm-${submission.submission_id}`}
-                  className="rounded-sm border border-attention bg-attention px-2 py-1 text-xs text-paper disabled:opacity-50"
+                  className={buttonClass("dangerFilled", "sm")}
                 >
                   {isSaving ? "선정 중..." : "확인 — 선정합니다"}
                 </button>
@@ -470,7 +469,7 @@ function SubmissionColumnHeader({
                   onClick={onCancel}
                   disabled={isSaving}
                   data-testid={`award-cancel-${submission.submission_id}`}
-                  className="rounded-sm border border-rule px-2 py-1 text-xs hover:border-ink"
+                  className={buttonClass("secondary", "sm")}
                 >
                   취소
                 </button>

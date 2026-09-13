@@ -14,6 +14,7 @@
 import Link from "next/link";
 import { use, useState } from "react";
 
+import { ErrorNote, INPUT_CLASS, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
 import { useSession } from "@/lib/auth/use-session";
 import {
   submitAppeal,
@@ -47,18 +48,16 @@ export default function AppealPage({ params }: { params: Promise<{ submissionId:
   }
 
   return (
-    <main className="mx-auto max-w-3xl p-10">
+    <PageShell>
       <Link className="text-sm text-ink/60" href="/console/participation" data-testid="appeal-back">
         ← 내 참가 현황
       </Link>
-      <h1 className="mt-2 text-2xl font-semibold" data-testid="appeal-heading">
-        채점 결과와 이의 제기
-      </h1>
+      <PageHeader title="채점 결과와 이의 제기" titleTestId="appeal-heading" />
 
       {state.status === "error" ? (
-        <p className="mt-6 text-attention" data-testid="appeal-error">
-          채점 결과를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.
-        </p>
+        <ErrorNote>
+          <span data-testid="appeal-error">채점 결과를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.</span>
+        </ErrorNote>
       ) : state.score === null ? (
         // 채점 전이다. 이의를 걸 대상이 아직 없다 — 실패가 아니라 순서다.
         <p className="mt-6" data-testid="appeal-not-scored">
@@ -82,7 +81,7 @@ export default function AppealPage({ params }: { params: Promise<{ submissionId:
           <ReadingsSection readings={state.readings} failed={state.readingsFailed} />
         </>
       )}
-    </main>
+    </PageShell>
   );
 }
 
@@ -113,7 +112,7 @@ function ScoreSection({ score }: { score: OwnScore }) {
 
       <ul className="mt-3 flex flex-col gap-2" data-testid="appeal-score-reasoning">
         {score.reasoning.map((item, index) => (
-          <li key={index} className="rounded border border-rule p-3 text-sm">
+          <li key={index} className="border border-rule bg-surface p-3 text-sm">
             {String(item.reasoning ?? "")}
           </li>
         ))}
@@ -124,7 +123,7 @@ function ScoreSection({ score }: { score: OwnScore }) {
 
 function ExistingAppeal({ appeal }: { appeal: Appeal }) {
   return (
-    <section className="mt-8 rounded border border-rule p-4" data-testid="appeal-existing">
+    <section className="mt-8 border border-rule bg-surface p-4" data-testid="appeal-existing">
       {/* 한 Submission 에 이의는 하나다 — 폼 대신 낸 것을 보여준다. */}
       <p className="font-semibold" data-testid="appeal-existing-status">
         {APPEAL_STATUS_LABELS[appeal.status] ?? appeal.status}
@@ -195,7 +194,7 @@ function AppealForm({
       </label>
       <textarea
         id="appeal-reason"
-        className="min-h-32 rounded border border-rule p-3"
+        className={`min-h-32 ${INPUT_CLASS}`}
         value={reason}
         onChange={(event) => setReason(event.target.value)}
         data-testid="appeal-reason"
@@ -203,7 +202,7 @@ function AppealForm({
         maxLength={4000}
       />
       <button
-        className="self-start rounded bg-ink px-4 py-2 text-paper hover:bg-ink/85 disabled:opacity-50"
+        className={`self-start ${buttonClass("primary")}`}
         type="submit"
         disabled={pending || reason.trim().length === 0}
         data-testid="appeal-submit"
@@ -211,9 +210,9 @@ function AppealForm({
         {pending ? "접수하는 중..." : "이의 제기"}
       </button>
       {message ? (
-        <p className="text-attention" data-testid="appeal-submit-error">
-          {message}
-        </p>
+        <ErrorNote>
+          <span data-testid="appeal-submit-error">{message}</span>
+        </ErrorNote>
       ) : null}
     </form>
   );
@@ -237,9 +236,11 @@ function ReadingsSection({
       {failed ? (
         // 열람 기록만 따로 실패할 수 있다. 그때 "0건"으로 보이면 "아무도 안
         // 봤다"는 거짓말이 된다 — 이 화면이 지키려는 약속이 정확히 그것이다.
-        <p className="mt-3 text-attention" data-testid="appeal-readings-error">
-          열람 기록을 불러오지 못했습니다. 「아무도 열지 않았다」는 뜻이 아닙니다.
-        </p>
+        <ErrorNote>
+          <span data-testid="appeal-readings-error">
+            열람 기록을 불러오지 못했습니다. 「아무도 열지 않았다」는 뜻이 아닙니다.
+          </span>
+        </ErrorNote>
       ) : readings.length === 0 ? (
         <p className="mt-3 text-sm" data-testid="appeal-readings-empty">
           아직 아무도 열어보지 않았습니다.

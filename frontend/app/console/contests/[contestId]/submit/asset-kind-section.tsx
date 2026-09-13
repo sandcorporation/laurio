@@ -10,6 +10,7 @@
 // 를 의도적으로 막는다(운영자 세션이 새는 길을 새로 만들지 않기 위해서다, #43).
 // 그래서 이 화면은 상한을 하드코딩해 미리 막는 대신 "추가"를 항상 허용하고,
 // 넘치면 서버가 저장 시점에 422 로 알리는 문구를 그대로 보여준다(submit-error).
+import { ErrorNote, INPUT_CLASS, buttonClass } from "@/app/components/ui";
 import { UploadField } from "@/components/upload/upload-field";
 
 export type AssetKind = "source" | "demo_video" | "screenshot" | "demo_url" | "repository";
@@ -190,7 +191,7 @@ export function AssetKindSection({
           onClick={addRow}
           disabled={disabled}
           data-testid={`${testIdPrefix}-add`}
-          className="w-fit rounded-sm border border-rule px-2 py-1 text-xs hover:border-ink disabled:opacity-50"
+          className={buttonClass("secondary", "sm")}
         >
           {addLabel}
         </button>
@@ -198,9 +199,11 @@ export function AssetKindSection({
       {helperText}
 
       {required && !hasFilledValue && (
-        <p role="alert" className="text-sm text-attention" data-testid={`${testIdPrefix}-missing-warning`}>
-          아직 없습니다 — 없으면 제출이 거부됩니다.
-        </p>
+        <ErrorNote>
+          <span data-testid={`${testIdPrefix}-missing-warning`}>
+            아직 없습니다 — 없으면 제출이 거부됩니다.
+          </span>
+        </ErrorNote>
       )}
       {!required && rows.length === 0 && (
         <p className="text-sm text-ink/60" data-testid={`${testIdPrefix}-empty`}>
@@ -218,7 +221,7 @@ export function AssetKindSection({
           return (
             <div
               key={row.key}
-              className="flex flex-col gap-2 rounded-md border border-rule p-3"
+              className="flex flex-col gap-2 border border-rule bg-surface p-3"
               data-testid={`${testIdPrefix}-${index}`}
             >
               <div className="flex items-center justify-between gap-2">
@@ -229,7 +232,7 @@ export function AssetKindSection({
                     onClick={() => moveRow(index, -1)}
                     disabled={disabled || index === 0}
                     data-testid={`${testIdPrefix}-${index}-move-up`}
-                    className="rounded-sm border border-rule px-2 py-0.5 text-xs hover:border-ink disabled:opacity-50"
+                    className={buttonClass("secondary", "sm")}
                   >
                     위로
                   </button>
@@ -238,7 +241,7 @@ export function AssetKindSection({
                     onClick={() => moveRow(index, 1)}
                     disabled={disabled || index === rows.length - 1}
                     data-testid={`${testIdPrefix}-${index}-move-down`}
-                    className="rounded-sm border border-rule px-2 py-0.5 text-xs hover:border-ink disabled:opacity-50"
+                    className={buttonClass("secondary", "sm")}
                   >
                     아래로
                   </button>
@@ -248,7 +251,7 @@ export function AssetKindSection({
                       onClick={() => removeRow(index)}
                       disabled={disabled}
                       data-testid={`${testIdPrefix}-${index}-remove`}
-                      className="rounded-sm border border-rule px-2 py-0.5 text-xs hover:border-ink disabled:opacity-50"
+                      className={buttonClass("secondary", "sm")}
                     >
                       삭제
                     </button>
@@ -259,7 +262,7 @@ export function AssetKindSection({
               <label className="flex flex-col gap-1 text-sm">
                 라벨
                 <input
-                  className="rounded-sm border border-rule bg-paper px-2 py-1"
+                  className={INPUT_CLASS}
                   value={row.label}
                   disabled={disabled}
                   placeholder="예: 모바일 앱 데모"
@@ -322,7 +325,7 @@ export function AssetKindSection({
                 <label className="flex flex-col gap-1 text-sm">
                   {kind === "repository" ? "저장소 URL" : "데모 URL"}
                   <input
-                    className="rounded-sm border border-rule bg-paper px-2 py-1"
+                    className={INPUT_CLASS}
                     value={row.value}
                     disabled={disabled}
                     placeholder={
@@ -358,7 +361,7 @@ export function AssetKindSection({
                 <label className="flex flex-col gap-1 text-sm">
                   테스트 계정
                   <input
-                    className="rounded-sm border border-rule bg-paper px-2 py-1"
+                    className={INPUT_CLASS}
                     value={row.testAccount}
                     disabled={disabled}
                     onChange={(event) => update(index, { testAccount: event.target.value })}

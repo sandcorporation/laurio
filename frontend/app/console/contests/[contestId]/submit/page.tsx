@@ -11,6 +11,7 @@ import { useParams } from "next/navigation";
 
 import type { components } from "@laurio/bff-client/schema";
 
+import { ErrorNote, PageHeader, PageShell, SectionHeading, buttonClass } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
 import { NEXT_ACTION_LABELS } from "@/lib/participation/use-my-participation";
@@ -657,9 +658,9 @@ export default function SubmitPage() {
   if (verification.status !== "verified" && !hasSubmission) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-4 p-10">
-        <p role="alert" data-testid="verification-required" className="text-attention">
-          본인확인을 완료해야 제출할 수 있습니다.
-        </p>
+        <ErrorNote>
+          <span data-testid="verification-required">본인확인을 완료해야 제출할 수 있습니다.</span>
+        </ErrorNote>
         <VerificationReason verification={verification} />
         <VerifyActions
           verification={verification}
@@ -679,23 +680,25 @@ export default function SubmitPage() {
   const screenshotTargetRef = userId ? `submission:${contestId}:${userId}:screenshot` : null;
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-8 p-10">
-      <div>
-        <h1 className="text-2xl font-semibold" data-testid="submit-contest-title">
-          {contest.title} — 제출
-        </h1>
-        {/* **상태 문구는 항상 같은 자리에 있다**(#247) — 마감 전(수정 가능)·채점
-            대기·심사 중·마감 뒤 어느 상태로 들어와도 이 한 줄이 "지금 무엇을
-            기다리는가/할 수 있는가"를 말한다. 아직 한 번도 제출하지 않았을 때는
-            보여줄 상태가 없으므로(제출물 자체가 없다) 남은 시간만 보여준다 —
-            이건 판정이 아니라 시계 표시다. */}
-        <p
-          className={`mt-2 font-mono text-sm ${canEdit ? "text-ink" : "text-attention"}`}
-          data-testid="submit-state-band"
-        >
-          {stateLabel ?? formatRemaining(deadlineAt! - now)}
-        </p>
-      </div>
+    <PageShell>
+      <div className="flex flex-col gap-8">
+      <PageHeader
+        title={`${contest.title} — 제출`}
+        titleTestId="submit-contest-title"
+        description={
+          // **상태 문구는 항상 같은 자리에 있다**(#247) — 마감 전(수정 가능)·채점
+          // 대기·심사 중·마감 뒤 어느 상태로 들어와도 이 한 줄이 "지금 무엇을
+          // 기다리는가/할 수 있는가"를 말한다. 아직 한 번도 제출하지 않았을 때는
+          // 보여줄 상태가 없으므로(제출물 자체가 없다) 남은 시간만 보여준다 —
+          // 이건 판정이 아니라 시계 표시다.
+          <span
+            className={`font-mono ${canEdit ? "text-ink" : "text-attention"}`}
+            data-testid="submit-state-band"
+          >
+            {stateLabel ?? formatRemaining(deadlineAt! - now)}
+          </span>
+        }
+      />
 
       {hasSubmission && !canEdit && (
         <div className="flex flex-col gap-3">
@@ -703,9 +706,9 @@ export default function SubmitPage() {
               같은 `stateLabel`(=`next_action`의 문구)만 쓴다 — 본인확인이
               필요한 경우 그 값 자체가 이미 "본인확인 필요"라, 이 알림과 위
               배너가 같은 렌더에서 서로 다른 말을 하는 일이 없다. */}
-          <p role="alert" data-testid="edit-locked-notice" className="text-sm text-attention">
-            지금은 제출물을 수정할 수 없습니다 — {stateLabel}
-          </p>
+          <ErrorNote>
+            <span data-testid="edit-locked-notice">지금은 제출물을 수정할 수 없습니다 — {stateLabel}</span>
+          </ErrorNote>
           {/* 신원 파기(EXPIRED)로 본인확인이 풀린 경우(#250, ADR-0025) — 아래
               내용은 그대로 읽히지만, 새로 내거나 고치려면 본인확인을 다시
               마쳐야 한다는 것과 그 길을 여기서 바로 준다. 조건은 `next_action`
@@ -713,7 +716,7 @@ export default function SubmitPage() {
               않는다. */}
           {nextAction === "needs_reverification" && (
             <div
-              className="flex flex-col items-start gap-2 rounded-md border border-rule p-3"
+              className="flex flex-col items-start gap-2 border border-rule bg-surface p-3"
               data-testid="resubmit-verification-notice"
             >
               <VerificationReason verification={verification} />
@@ -735,7 +738,7 @@ export default function SubmitPage() {
           완성도 {completion.percent}% — 체크리스트 증거 연결 {completion.linked}/{completion.total},
           권장 항목 {completion.optionalFilled}/3
         </p>
-        <div className="h-2 w-full rounded-sm border border-rule">
+        <div className="h-2 w-full border border-rule">
           <div className="h-full bg-verified" style={{ width: `${completion.percent}%` }} />
         </div>
       </section>
@@ -793,14 +796,12 @@ export default function SubmitPage() {
       />
 
       {showRepositoryOnlyWarning && (
-        <p
-          role="alert"
-          className="text-sm text-attention"
-          data-testid="repository-only-warning"
-        >
-          소스코드 없이 저장소만 냈습니다 — 마감까지 모든 저장소를 공개 상태로
-          두지 않으면 채점이 0%가 됩니다.
-        </p>
+        <ErrorNote>
+          <span data-testid="repository-only-warning">
+            소스코드 없이 저장소만 냈습니다 — 마감까지 모든 저장소를 공개 상태로
+            두지 않으면 채점이 0%가 됩니다.
+          </span>
+        </ErrorNote>
       )}
 
       <AssetKindSection
@@ -842,7 +843,7 @@ export default function SubmitPage() {
       />
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-semibold">요구사항 체크리스트</h2>
+        <SectionHeading title="요구사항 체크리스트" />
         <p className="text-xs text-ink/60" data-testid="evidence-asset-picker-notice">
           근거가 가리킬 수 있는 자료 목록은 마지막으로 저장된 자료 기준입니다 — 방금
           추가한 자료는 한 번 저장한 뒤에 근거로 연결할 수 있습니다. 소스코드를
@@ -873,7 +874,7 @@ export default function SubmitPage() {
             onClick={handleSubmit}
             disabled={saveState.status === "saving"}
             data-testid="submit-button"
-            className="w-fit rounded-sm border border-ink bg-ink px-6 py-2 text-sm text-paper disabled:opacity-50"
+            className={buttonClass("primary")}
           >
             {saveState.status === "saving"
               ? "저장 중..."
@@ -882,9 +883,9 @@ export default function SubmitPage() {
                 : "제출하기"}
           </button>
           {saveState.status === "error" && (
-            <p role="alert" data-testid="submit-error" className="text-sm text-attention">
-              {saveState.message}
-            </p>
+            <ErrorNote>
+              <span data-testid="submit-error">{saveState.message}</span>
+            </ErrorNote>
           )}
           {saveState.status === "done" && (
             <p data-testid="submit-success" className="text-sm text-verified">
@@ -906,7 +907,8 @@ export default function SubmitPage() {
       {hasSubmission && currentSubmission !== null && nextAction !== null && (
         <ScoreSection nextAction={nextAction} score={score} submissionId={currentSubmission.id} />
       )}
-    </main>
+      </div>
+    </PageShell>
   );
 }
 
@@ -940,7 +942,7 @@ function ScoreSection({
       className="flex flex-col gap-3 border-t border-rule pt-6"
       data-testid="submit-score-section"
     >
-      <h2 className="text-lg font-semibold">채점 결과</h2>
+      <SectionHeading title="채점 결과" />
 
       {nextAction === "can_edit_submission" || nextAction === "needs_reverification" ? (
         <p data-testid="submit-score-before-deadline" className="text-sm text-ink/70">
@@ -953,9 +955,9 @@ function ScoreSection({
       ) : score.status === "loading" ? (
         <p data-testid="submit-score-loading">불러오는 중...</p>
       ) : score.status === "error" ? (
-        <p role="alert" data-testid="submit-score-error" className="text-sm text-attention">
-          채점 결과를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.
-        </p>
+        <ErrorNote>
+          <span data-testid="submit-score-error">채점 결과를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.</span>
+        </ErrorNote>
       ) : score.status === "ready" ? (
         <>
           <ScoreSummary
@@ -1031,7 +1033,7 @@ function VerifyActions({
           onClick={onVerifyDev}
           disabled={verifying}
           data-testid="verify-now-dev"
-          className="rounded-sm border border-rule px-4 py-2 text-sm hover:border-ink disabled:opacity-50"
+          className={buttonClass("secondary")}
         >
           {verifying ? "확인 중..." : "지금 본인확인하기(dev)"}
         </button>
@@ -1042,15 +1044,15 @@ function VerifyActions({
           onClick={onVerifyLive}
           disabled={verifying}
           data-testid="verify-now-live"
-          className="rounded-sm border border-rule px-4 py-2 text-sm hover:border-ink disabled:opacity-50"
+          className={buttonClass("secondary")}
         >
           {verifying ? "확인 중..." : "실제 본인확인하기(PortOne)"}
         </button>
       )}
       {verifyError && (
-        <p role="alert" data-testid="verify-live-error" className="text-sm text-attention">
-          {verifyError}
-        </p>
+        <ErrorNote>
+          <span data-testid="verify-live-error">{verifyError}</span>
+        </ErrorNote>
       )}
     </>
   );

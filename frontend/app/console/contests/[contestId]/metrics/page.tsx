@@ -25,6 +25,8 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 
+import { EmptyState, ErrorNote, PageHeader, SectionHeading } from "@/app/components/ui";
+import { badgeClass } from "@/lib/ui/classnames";
 import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
 import type { ContestMetricsOut } from "@/lib/submissions/types";
@@ -79,7 +81,7 @@ export default function ContestMetricsPage() {
 
   if (session.status === "loading" || load.status === "loading") {
     return (
-      <main className="flex min-h-screen items-center justify-center p-10">
+      <main className="mx-auto max-w-4xl p-10">
         <p data-testid="metrics-loading">불러오는 중...</p>
       </main>
     );
@@ -89,7 +91,7 @@ export default function ContestMetricsPage() {
 
   if (load.status === "not-found") {
     return (
-      <main className="flex min-h-screen items-center justify-center p-10">
+      <main className="mx-auto max-w-4xl p-10">
         <p data-testid="metrics-not-found">공모전을 찾을 수 없습니다.</p>
       </main>
     );
@@ -97,20 +99,20 @@ export default function ContestMetricsPage() {
 
   if (load.status === "forbidden") {
     return (
-      <main className="flex min-h-screen items-center justify-center p-10">
-        <p role="alert" data-testid="metrics-forbidden" className="text-attention">
-          {load.message}
-        </p>
+      <main className="mx-auto max-w-4xl p-10">
+        <ErrorNote>
+          <span data-testid="metrics-forbidden">{load.message}</span>
+        </ErrorNote>
       </main>
     );
   }
 
   if (load.status === "error") {
     return (
-      <main className="flex min-h-screen items-center justify-center p-10">
-        <p role="alert" data-testid="metrics-load-error">
-          {load.message}
-        </p>
+      <main className="mx-auto max-w-4xl p-10">
+        <ErrorNote>
+          <span data-testid="metrics-load-error">{load.message}</span>
+        </ErrorNote>
       </main>
     );
   }
@@ -118,19 +120,20 @@ export default function ContestMetricsPage() {
   const { contest, metrics } = load;
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-4xl flex-col gap-8 p-10">
-      <div>
-        <h1 className="text-2xl font-semibold" data-testid="metrics-contest-title">
-          {contest.title} — 지표
-        </h1>
-        <p className="mt-1 text-sm text-ink/60">
-          참가작{" "}
-          <span data-testid="metrics-total-submission-count">
-            {metrics.total_submission_count}
-          </span>
-          건
-        </p>
-      </div>
+    <main className="mx-auto flex max-w-4xl flex-col gap-8 p-10">
+      <PageHeader
+        title={`${contest.title} — 지표`}
+        titleTestId="metrics-contest-title"
+        description={
+          <>
+            참가작{" "}
+            <span data-testid="metrics-total-submission-count">
+              {metrics.total_submission_count}
+            </span>
+            건
+          </>
+        }
+      />
 
       <ParticipationTrendSection metrics={metrics} />
       <RequirementFulfillmentSection metrics={metrics} />
@@ -143,14 +146,14 @@ export default function ContestMetricsPage() {
 function ParticipationTrendSection({ metrics }: { metrics: ContestMetricsOut }) {
   return (
     <section className="flex flex-col gap-3" data-testid="metrics-participation-trend">
-      <h2 className="text-lg font-semibold">참가 추이</h2>
+      <SectionHeading title="참가 추이" />
 
       {metrics.total_submission_count === 0 ? (
         // 0 과 「없음」은 다른 것이다 — 숫자는 응답이 그대로 싣고, 문구는 화면이
         // 만든다(#105 구현 결정).
-        <p className="text-sm text-ink/60" data-testid="metrics-participation-empty">
-          아직 참가작이 없습니다.
-        </p>
+        <EmptyState>
+          <span data-testid="metrics-participation-empty">아직 참가작이 없습니다.</span>
+        </EmptyState>
       ) : (
         <table className="w-full max-w-md border-collapse text-sm" data-testid="metrics-participation-table">
           <thead>
@@ -181,12 +184,12 @@ function RequirementFulfillmentSection({ metrics }: { metrics: ContestMetricsOut
   // 정보라 여기 developer_id·submission_id 는 없다.
   return (
     <section className="flex flex-col gap-3" data-testid="metrics-requirement-fulfillment">
-      <h2 className="text-lg font-semibold">요구사항별 충족 분포</h2>
+      <SectionHeading title="요구사항별 충족 분포" />
 
       {metrics.requirement_fulfillment.length === 0 ? (
-        <p className="text-sm text-ink/60" data-testid="metrics-requirement-fulfillment-empty">
-          아직 요구사항이 없습니다.
-        </p>
+        <EmptyState>
+          <span data-testid="metrics-requirement-fulfillment-empty">아직 요구사항이 없습니다.</span>
+        </EmptyState>
       ) : (
         <ul className="flex flex-col gap-2" data-testid="metrics-requirement-fulfillment-list">
           {metrics.requirement_fulfillment.map((row) => {
@@ -197,17 +200,15 @@ function RequirementFulfillmentSection({ metrics }: { metrics: ContestMetricsOut
             return (
               <li
                 key={row.requirement_id}
-                className={`rounded border p-3 text-sm ${
-                  noOneMet ? "border-attention bg-paper" : "border-rule"
+                className={`border p-3 text-sm ${
+                  noOneMet ? "border-attention bg-paper" : "border-rule bg-surface"
                 }`}
                 data-testid={`metrics-requirement-${row.requirement_id}`}
                 data-no-one-met={noOneMet ? "true" : "false"}
               >
                 <div className="flex items-center gap-2">
                   <span
-                    className={`rounded-sm border px-2 py-0.5 text-xs ${
-                      isRequired ? "border-attention text-attention" : "border-rule text-ink"
-                    }`}
+                    className={badgeClass(isRequired ? "attention" : "neutral")}
                     data-testid={`metrics-requirement-${row.requirement_id}-grade`}
                   >
                     {isRequired ? "필수" : "선택"}
@@ -238,12 +239,12 @@ function CompletionDistributionSection({ metrics }: { metrics: ContestMetricsOut
 
   return (
     <section className="flex flex-col gap-3" data-testid="metrics-completion-distribution">
-      <h2 className="text-lg font-semibold">제출 완성도 분포</h2>
+      <SectionHeading title="제출 완성도 분포" />
 
       {total === 0 ? (
-        <p className="text-sm text-ink/60" data-testid="metrics-completion-empty">
-          아직 참가작이 없습니다.
-        </p>
+        <EmptyState>
+          <span data-testid="metrics-completion-empty">아직 참가작이 없습니다.</span>
+        </EmptyState>
       ) : (
         <ul className="flex flex-col gap-1 text-sm" data-testid="metrics-completion-list">
           <li data-testid="metrics-completion-demo-video">
@@ -270,7 +271,7 @@ function ViewMetricsSection({ metrics }: { metrics: ContestMetricsOut }) {
 
   return (
     <section className="flex flex-col gap-3" data-testid="metrics-view">
-      <h2 className="text-lg font-semibold">조회수와 전환율</h2>
+      <SectionHeading title="조회수와 전환율" />
       <p className="text-sm text-ink/60">
         참가가 없을 때 그 이유가 "안 보여서"인지 "봤는데 안 내서"인지 여기서 구별한다.
       </p>

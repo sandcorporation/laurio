@@ -17,6 +17,7 @@
 // 재사용된다 — 화면마다 두 벌을 만들지 않는다.
 import { useRef, useState } from "react";
 
+import { ErrorNote } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";
 import {
   useContestImageUpload,
@@ -156,7 +157,7 @@ export function ContestImagePanel({
               <img
                 src={image.url}
                 alt=""
-                className="aspect-video w-full rounded-sm border border-rule object-cover"
+                className="aspect-video w-full border border-rule object-cover"
               />
               {editable && (
                 <div className="flex items-center justify-between gap-1 text-xs text-ink/60">
@@ -166,7 +167,7 @@ export function ContestImagePanel({
                       onClick={() => void handleReorder(image, -1)}
                       disabled={index === 0}
                       data-testid={`contest-image-${image.id}-up`}
-                      className="rounded-sm border border-rule px-1.5 py-0.5 disabled:opacity-50"
+                      className="border border-rule px-1.5 py-0.5 disabled:opacity-50"
                       aria-label="앞으로 이동"
                     >
                       ↑
@@ -176,7 +177,7 @@ export function ContestImagePanel({
                       onClick={() => void handleReorder(image, 1)}
                       disabled={index === sorted.length - 1}
                       data-testid={`contest-image-${image.id}-down`}
-                      className="rounded-sm border border-rule px-1.5 py-0.5 disabled:opacity-50"
+                      className="border border-rule px-1.5 py-0.5 disabled:opacity-50"
                       aria-label="뒤로 이동"
                     >
                       ↓
@@ -214,14 +215,14 @@ export function ContestImagePanel({
             </p>
           )}
           {state.error && (
-            <p role="alert" className="text-xs text-attention" data-testid="contest-image-upload-error">
-              {state.error}
-            </p>
+            <ErrorNote>
+              <span data-testid="contest-image-upload-error">{state.error}</span>
+            </ErrorNote>
           )}
           {actionError && (
-            <p role="alert" className="text-xs text-attention" data-testid="contest-image-action-error">
-              {actionError}
-            </p>
+            <ErrorNote>
+              <span data-testid="contest-image-action-error">{actionError}</span>
+            </ErrorNote>
           )}
         </div>
       )}

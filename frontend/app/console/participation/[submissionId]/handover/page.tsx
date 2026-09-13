@@ -17,6 +17,7 @@
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
 
+import { Badge, Card, EmptyState, ErrorNote, INPUT_CLASS, PageHeader, PageShell } from "@/app/components/ui";
 import { UploadField } from "@/components/upload/upload-field";
 import { useSession } from "@/lib/auth/use-session";
 import { bffClient } from "@/lib/bff/client";
@@ -95,7 +96,7 @@ export default function DeveloperBuildAssetsPage({
     userId !== null && contestId !== null ? `submission:${contestId}:${userId}:build-asset` : null;
 
   return (
-    <main className="mx-auto max-w-2xl p-10">
+    <PageShell>
       <Link
         className="text-sm text-ink/60"
         href="/console/participation"
@@ -103,25 +104,21 @@ export default function DeveloperBuildAssetsPage({
       >
         ← 내 참가 현황
       </Link>
-      <h1 className="mt-2 text-2xl font-semibold" data-testid="build-assets-heading">
-        인수 자료
-      </h1>
+      <PageHeader title="인수 자료" titleTestId="build-assets-heading" />
 
       {load.status === "not-found" ? (
-        <p className="mt-6" data-testid="build-assets-not-found">
-          제출물을 찾을 수 없습니다.
-        </p>
+        <p data-testid="build-assets-not-found">제출물을 찾을 수 없습니다.</p>
       ) : load.status === "forbidden" ? (
-        <p className="mt-6 text-attention" role="alert" data-testid="build-assets-forbidden">
-          {load.message}
-        </p>
+        <ErrorNote>
+          <span data-testid="build-assets-forbidden">{load.message}</span>
+        </ErrorNote>
       ) : load.status === "error" ? (
-        <p className="mt-6 text-attention" role="alert" data-testid="build-assets-error">
-          자료를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.
-        </p>
+        <ErrorNote>
+          <span data-testid="build-assets-error">자료를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.</span>
+        </ErrorNote>
       ) : (
         <>
-          <p className="mt-6 text-sm text-ink" data-testid="build-assets-optional-notice">
+          <p className="text-sm text-ink" data-testid="build-assets-optional-notice">
             빌드 설정·서명키·스토어 메타데이터·실행 문서 등 개최자의 인수에 도움이 될 자료를
             올릴 수 있습니다 — <strong>선택 사항입니다.</strong> 아무것도 올리지 않아도
             개최자는 인수를 확인할 수 있고 상금은 그대로 지급됩니다. 소스코드는 선정
@@ -129,14 +126,14 @@ export default function DeveloperBuildAssetsPage({
           </p>
 
           {targetRef ? (
-            <div className="mt-6 flex flex-col gap-3 rounded border border-rule p-4">
+            <Card className="mt-6 flex flex-col gap-3 p-4">
               <div className="flex flex-col gap-1">
                 <label className="text-sm" htmlFor="build-asset-kind">
                   종류
                 </label>
                 <select
                   id="build-asset-kind"
-                  className="rounded border border-rule p-2 text-sm"
+                  className={INPUT_CLASS}
                   value={kind}
                   onChange={(event) => setKind(event.target.value as BuildAssetKind)}
                   data-testid="build-asset-kind-select"
@@ -154,7 +151,7 @@ export default function DeveloperBuildAssetsPage({
                 </label>
                 <input
                   id="build-asset-label"
-                  className="rounded border border-rule p-2 text-sm"
+                  className={INPUT_CLASS}
                   type="text"
                   maxLength={200}
                   value={label}
@@ -171,11 +168,11 @@ export default function DeveloperBuildAssetsPage({
                 testId="build-asset-upload"
               />
               {saveError ? (
-                <p role="alert" className="text-attention" data-testid="build-asset-save-error">
-                  {saveError}
-                </p>
+                <ErrorNote>
+                  <span data-testid="build-asset-save-error">{saveError}</span>
+                </ErrorNote>
               ) : null}
-            </div>
+            </Card>
           ) : null}
 
           <section className="mt-8" data-testid="build-assets-own-list">
@@ -183,21 +180,19 @@ export default function DeveloperBuildAssetsPage({
             {assets.status === "loading" ? (
               <p className="mt-2 text-sm text-ink/60">불러오는 중...</p>
             ) : assets.status === "ready" && assets.assets.length === 0 ? (
-              <p className="mt-2 text-sm text-ink/60" data-testid="build-assets-empty">
-                아직 올린 자료가 없습니다.
-              </p>
+              <div className="mt-2">
+                <EmptyState>
+                  <span data-testid="build-assets-empty">아직 올린 자료가 없습니다.</span>
+                </EmptyState>
+              </div>
             ) : assets.status === "ready" ? (
               <ul className="mt-2 flex flex-col gap-2">
                 {assets.assets.map((asset) => (
-                  <li
-                    key={asset.id}
-                    className="rounded border border-rule p-3 text-sm"
-                    data-testid={`build-asset-${asset.id}`}
-                  >
-                    <span className="rounded-sm border border-rule px-2 py-0.5 text-xs">
-                      {buildAssetKindLabel(asset.kind)}
-                    </span>{" "}
-                    {asset.label || <span className="text-ink/60">(라벨 없음)</span>}
+                  <li key={asset.id} data-testid={`build-asset-${asset.id}`}>
+                    <Card className="p-3 text-sm">
+                      <Badge tone="neutral">{buildAssetKindLabel(asset.kind)}</Badge>{" "}
+                      {asset.label || <span className="text-ink/60">(라벨 없음)</span>}
+                    </Card>
                   </li>
                 ))}
               </ul>
@@ -207,6 +202,6 @@ export default function DeveloperBuildAssetsPage({
           </section>
         </>
       )}
-    </main>
+    </PageShell>
   );
 }

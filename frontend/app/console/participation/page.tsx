@@ -13,6 +13,7 @@
 // 렌더링 전에 /login 으로 돌린다.
 import Link from "next/link";
 
+import { Card, EmptyState, ErrorNote, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
 import { useSession } from "@/lib/auth/use-session";
 import { PARTICIPATION_EMPTY_MESSAGE } from "@/lib/participation/empty-state";
 import {
@@ -38,26 +39,26 @@ export default function MyParticipationPage() {
   }
 
   return (
-    <main className="mx-auto max-w-3xl p-10">
-      <h1 className="text-2xl font-semibold" data-testid="participation-heading">
-        내 참가 현황
-      </h1>
+    <PageShell>
+      <PageHeader title="내 참가 현황" titleTestId="participation-heading" />
 
       {state.status === "error" ? (
         // 조회 실패와 0건은 반드시 다르게 보여야 한다 — 같아 보이면 조회가 죽은
         // 날 아무도 눈치채지 못한 채 참가자가 자기 상금을 놓친다.
-        <p className="mt-6 text-attention" data-testid="participation-error">
-          참가 현황을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.
-        </p>
+        <ErrorNote>
+          <span data-testid="participation-error">
+            참가 현황을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.
+          </span>
+        </ErrorNote>
       ) : state.count === 0 ? (
         // 공모전이 꺼진 환경(#271)에서는 이 화면을 여는 사람이 과제만 쓸 수
         // 있다 — 종류를 말하면 가질 수 없는 개념으로 말하게 된다(#353).
-        <p className="mt-6" data-testid="participation-empty">
-          {PARTICIPATION_EMPTY_MESSAGE}
-        </p>
+        <EmptyState>
+          <span data-testid="participation-empty">{PARTICIPATION_EMPTY_MESSAGE}</span>
+        </EmptyState>
       ) : (
         <>
-          <ul className="mt-6 flex flex-col gap-3" data-testid="participation-list">
+          <ul className="flex flex-col gap-3" data-testid="participation-list">
             {state.rows.map((row) => (
               <ParticipationCard key={row.submission_id} row={row} />
             ))}
@@ -69,7 +70,7 @@ export default function MyParticipationPage() {
               그대로 일어난다. */}
           {state.hasMore ? (
             <button
-              className="mt-4 rounded border border-rule px-4 py-2 text-sm disabled:opacity-50"
+              className={`mt-4 ${buttonClass("secondary")}`}
               type="button"
               onClick={state.loadMore}
               disabled={state.loadingMore}
@@ -82,7 +83,7 @@ export default function MyParticipationPage() {
           ) : null}
         </>
       )}
-    </main>
+    </PageShell>
   );
 }
 
@@ -90,11 +91,8 @@ function ParticipationCard({ row }: { row: ParticipationRow }) {
   const label = NEXT_ACTION_LABELS[row.next_action];
 
   return (
-    <li
-      className="rounded border border-rule p-4"
-      data-testid={`participation-row-${row.submission_id}`}
-      data-next-action={row.next_action}
-    >
+    <li data-testid={`participation-row-${row.submission_id}`} data-next-action={row.next_action}>
+      <Card className="p-4">
       {/* 「다음 행동」이 제목보다 먼저 온다 — 이 화면에 온 이유가 그것이기 때문이다. */}
       <p
         className={label.mine ? "font-semibold text-attention" : "text-ink/60"}
@@ -190,6 +188,7 @@ function ParticipationCard({ row }: { row: ParticipationRow }) {
           인수 자료
         </Link>
       ) : null}
+      </Card>
     </li>
   );
 }

@@ -17,8 +17,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { ErrorNote, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
 import { useSession } from "@/lib/auth/use-session";
-import { dangerButtonClass } from "@/lib/ui";
 import {
   BLOCK_REASON_LABELS,
   executeWithdrawal,
@@ -65,7 +65,7 @@ export function WithdrawPageClient({ returnOrigin }: { returnOrigin: string | nu
   }
 
   return (
-    <main className="mx-auto max-w-2xl p-10">
+    <PageShell>
       <div className="flex items-center justify-between gap-3">
         <Link className="text-sm text-ink/60" href="/console" data-testid="withdraw-back">
           ← 콘솔
@@ -80,25 +80,23 @@ export function WithdrawPageClient({ returnOrigin }: { returnOrigin: string | nu
           </a>
         )}
       </div>
-      <h1 className="mt-2 text-2xl font-semibold" data-testid="withdraw-heading">
-        탈퇴
-      </h1>
+      <PageHeader title="탈퇴" titleTestId="withdraw-heading" />
 
       {done ? (
-        <p className="mt-6" data-testid="withdraw-done">
-          탈퇴가 완료되었습니다.
-        </p>
+        <p data-testid="withdraw-done">탈퇴가 완료되었습니다.</p>
       ) : eligibility.status === "error" ? (
-        <p className="mt-6 text-attention" data-testid="withdraw-load-error">
-          탈퇴 가능 여부를 확인하지 못했습니다. 잠시 후 다시 시도해주세요.
-        </p>
+        <ErrorNote>
+          <span data-testid="withdraw-load-error">
+            탈퇴 가능 여부를 확인하지 못했습니다. 잠시 후 다시 시도해주세요.
+          </span>
+        </ErrorNote>
       ) : (
         <>
           <WhatHappensSection />
 
           {!eligibility.eligibility.can_withdraw ? (
             <section
-              className="mt-6 rounded border border-attention p-4"
+              className="mt-6 border border-attention bg-surface p-4"
               data-testid="withdraw-blocked"
             >
               <p className="font-semibold text-attention">
@@ -132,9 +130,9 @@ export function WithdrawPageClient({ returnOrigin }: { returnOrigin: string | nu
               </label>
 
               {error ? (
-                <p className="mt-3 text-attention" data-testid="withdraw-error">
-                  {error}
-                </p>
+                <ErrorNote>
+                  <span data-testid="withdraw-error">{error}</span>
+                </ErrorNote>
               ) : null}
 
               <button
@@ -142,7 +140,7 @@ export function WithdrawPageClient({ returnOrigin }: { returnOrigin: string | nu
                 onClick={handleWithdraw}
                 disabled={!acknowledged || submitting}
                 data-testid="withdraw-submit"
-                className={`mt-4 rounded-sm px-4 py-2 text-sm disabled:opacity-50 ${dangerButtonClass("filled")}`}
+                className={`mt-4 ${buttonClass("dangerFilled")}`}
               >
                 {submitting ? "탈퇴 처리 중..." : "탈퇴한다"}
               </button>
@@ -150,7 +148,7 @@ export function WithdrawPageClient({ returnOrigin }: { returnOrigin: string | nu
           )}
         </>
       )}
-    </main>
+    </PageShell>
   );
 }
 
