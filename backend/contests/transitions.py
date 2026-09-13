@@ -247,8 +247,9 @@ def contest_transition_spec(name: str, *, extra_fields=None) -> TransitionSpec:
 # ---------------------------------------------------------------------------
 
 #: 생성(이 그래프 밖, 위 모듈 독스트링)이 실제로 만들어내는 상태 — `contests/api.py`의
-#: `create_contest`와 `contests/assignment_api.py`의 `create_assignment` 둘 다 지금
-#: `Contest.Status.DRAFT` 하나만 리터럴로 찍는다. 도달 불가능 검사(아래 그래프 검사
+#: `create_contest`(과제 라우터가 걷히기 전에는 `contests/assignment_api.py`의
+#: `create_assignment`도 있었다, #361)가 지금 `Contest.Status.DRAFT` 하나만
+#: 리터럴로 찍는다. 도달 불가능 검사(아래 그래프 검사
 #: 참고)가 "이 상태는 간선으로도 못 오고 생성으로도 못 온다"를 판정할 때 이 집합을
 #: 더한다 — 시드(`seed_e2e_contests`·`seed_demo_contests`)가 임의 상태를 변수로
 #: 찍는 것은 생성의 정의 자체가 아니라 테스트 픽스처의 특권이라 여기 넣지 않는다.
@@ -276,6 +277,21 @@ CREATION_STATES: frozenset[str] = frozenset({Contest.Status.DRAFT})
 TERMINAL_STATES: frozenset[str] = frozenset(
     {Contest.Status.AWARDED, Contest.Status.JUDGING_ENDED, Contest.Status.ASSIGNMENT_CLOSED}
 )
+
+#: 시간기반 전이인데 **의도적으로** 스캔 등록부에 없는 이름 (#361, 부모 #358).
+#:
+#: 과제 라우터(`contests.assignment_api`)가 걷히며 `contests/apps.py`가 더는
+#: "assignment-close" 스캔을 등록하지 않는다 — 그 스캔을 계속 등록해 두면 이제
+#: `Contest`를 `DRAFT -> ASSIGNMENT_OPEN`으로 옮길 방법 자체가 없으므로(그
+#: 유일한 문이던 `open_assignment`도 함께 걷혔다) 영원히 빈 후보만 도는 스캔이
+#: 된다(#358 user story 11 "도달할 수 없는 API와 영원히 빈 후보를 도는 스캔이
+#: 없기를 원한다"). 그렇다고 이 파일의 "assignment-close" 간선 자체를 지우면
+#: `Contest.Status.ASSIGNMENT_OPEN`/`ASSIGNMENT_CLOSED`가 도달 불가능·갇힌
+#: 상태가 된다 — 그 두 값은 `Contest.kind`와 함께 아직 모델에 남아 있다(스키마
+#: 정리는 다음 티켓의 몫, CLAUDE.md "호출부를 먼저, 스키마를 나중에"). 그래서
+#: 간선은 선언에 그대로 두고, 아래 검사에서만 이 이름을 봐 준다 — 이 예외는
+#: 그 모델·필드가 실제로 걷히는 날 이 상수와 함께 지운다.
+SCAN_EDGES_INTENTIONALLY_UNREGISTERED: frozenset[str] = frozenset({"assignment-close"})
 
 
 @dataclass(frozen=True)
@@ -331,7 +347,9 @@ def validate_contest_transition_graph(*, scan_registry) -> ContestGraphValidatio
     unregistered_scan_edges = frozenset(
         name
         for name, edge in CONTEST_TRANSITIONS.items()
-        if isinstance(edge, ScanContestTransition) and name not in scan_registry
+        if isinstance(edge, ScanContestTransition)
+        and name not in scan_registry
+        and name not in SCAN_EDGES_INTENTIONALLY_UNREGISTERED
     )
 
     non_terminal = set(Contest.Status) - TERMINAL_STATES

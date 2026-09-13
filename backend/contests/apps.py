@@ -85,13 +85,14 @@ class ContestsConfig(AppConfig):
             )
         )
 
-        register_scan(
-            transition_scan(
-                contest_transition_spec("assignment-close"),
-                name="assignment-close",
-                batch_size=500,
-            )
-        )
+        # "assignment-close" 스캔은 여기서 등록하지 않는다(#361) — 과제 라우터
+        # (`contests.assignment_api`)가 걷혀 DRAFT -> ASSIGNMENT_OPEN 으로 옮길
+        # 방법 자체가 없다. 그 스캔을 그대로 등록해 두면 영원히 빈 후보만 도는
+        # 스캔이 하나 남는다(#358 user story 11). 간선 선언(`contests.transitions`
+        # 의 "assignment-close")은 지우지 않는다 — `Contest.Status.ASSIGNMENT_OPEN`
+        # /`ASSIGNMENT_CLOSED`가 아직 모델에 남아 있어(다음 티켓의 몫) 그래프
+        # 자체는 그대로 self-consistent해야 한다. 자세한 사정은
+        # `contests.transitions`의 `SCAN_EDGES_INTENTIONALLY_UNREGISTERED` 독스트링.
 
         # ContestImage 최적화 — 썸네일·본문용 webp 파생본 (#235, ADR-0031/0032).
         from .image_optimization import CONTEST_IMAGE_OPTIMIZATION_SCAN

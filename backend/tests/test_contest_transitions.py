@@ -94,6 +94,22 @@ def test_scan_edges_and_action_edges_are_distinguished_by_type_not_a_flag():
         assert not hasattr(CONTEST_TRANSITIONS[name], "due_field")
 
 
+@pytest.mark.django_db
+def test_assignment_close_scan_is_declared_but_intentionally_not_registered():
+    """과제 라우터(`contests.assignment_api`)가 걷혀(#361) `DRAFT -> ASSIGNMENT_OPEN`
+    으로 옮길 문이 없다 — "assignment-close" 스캔을 계속 등록해 두면 영원히 빈
+    후보만 도는 스캔이 된다(#358 user story 11). 간선 선언은 남아 그래프가 여전히
+    self-consistent하지만(`ASSIGNMENT_OPEN`/`ASSIGNMENT_CLOSED`가 아직 모델에
+    있다), 실제 스캔 등록부(`core.scans.SCAN_REGISTRY`)에는 없다."""
+
+    from core.scans import SCAN_REGISTRY
+    from contests.transitions import SCAN_EDGES_INTENTIONALLY_UNREGISTERED
+
+    assert "assignment-close" in CONTEST_TRANSITIONS
+    assert "assignment-close" not in SCAN_REGISTRY
+    assert "assignment-close" in SCAN_EDGES_INTENTIONALLY_UNREGISTERED
+
+
 def test_an_undeclared_transition_name_is_loud_not_silently_false():
     """선언에 없는 이름으로는 애초에 시도조차 할 수 없다 — 조용히 통과하지 않는다."""
 

@@ -22,7 +22,9 @@
   `list_my_sponsored_contests`/`record_contest_view`).
   **`list_categories`/`list_deliverable_types`는 예외다** — `/contests/` 주소
   아래 살지만 과제 개설 화면이 읽는 공용 참조 데이터라 열어 둔다(주소만으로는 어느
-  제품의 것인지 갈리지 않는다).
+  제품의 것인지 갈리지 않는다). 과제 라우터가 걷힌 지금(#361)도 이 둘을 열어 두는
+  이유는 그대로다 — 주소만으로는 여전히 공모전 것인지 갈리지 않고, 이 스위치가
+  닫는 것은 어디까지나 **공모전** 표면이지 이 참조 데이터 자체가 아니다.
 - `payments.api`의 공모전 결제 — `initiate_payment`/`confirm_payment`. 웹훅
   (`receive_webhook`)은 닫지 않는다 — PG가 서버 대 서버로 부르는 자리라 존재를
   숨길 대상이 아니고, 이 스위치가 꺼진 뒤로는 `initiate_payment`가 막혀 있어 새
@@ -30,13 +32,17 @@
 
 **열어 두는 것 — 과제가 건드리지 않는 것만 닫는다는 원칙 그대로.**
 
-- `contests.assignment_api` 전부 — 별도 라우터(`/assignments/*`)라 이 스위치와
-  애초에 무관하다.
 - `submissions.api`의 `/contests/{contest_id}/submissions` 등 — 주소가
   `/contests/`로 시작하지만 `contests.api`가 아니라 `submissions` 앱 소유다.
   Contest·Assignment 제출을 함께 처리하므로 그대로 연다.
 - `contests.operator_api`(운영자 앱) — 사람만 보는 화면이고, 남은 공모전 데이터를
   마무리하려면 오히려 열려 있어야 한다.
+
+**과제 라우터 자체는 걷혔다(#361, 부모 #358)** — `contests.assignment_api`가
+사라졌으므로 "이 스위치와 무관하다"고 말할 표면도 함께 사라졌다. `Contest.kind`·
+`ASSIGNMENT_OPEN`/`ASSIGNMENT_CLOSED`·`InviteCode` 는 아직 모델에 남아 있고
+(스키마 정리는 다음 티켓), 공유 배관의 `is_assignment` 분기도 그대로다 — 이
+문단이 말하는 것은 그 갈래로 들어오는 **문**이 없어졌다는 사실뿐이다.
 
 **스캔 등록** — 각 앱의 `ScanSpec`이 `enabled=contest_product_enabled`를 준다
 (`core.scans.ScanSpec.enabled`). 꺼지면 그 스캔은 `/api/internal/tick`·
@@ -52,9 +58,11 @@
   채점) · `repository-visibility`(repositories, 저장소 가시성) · 알림 스캔들
   (notifications) · `identity-dormancy-purge`·`retained-identity-purge`(accounts,
   휴면·신원 파기) · `demo-video-retention-purge`(submissions, 두 종류 모두를
-  다룬다) · `contest-close`·`contest-judging-end`·`assignment-close`·Contest
-  이미지 최적화(contests — 전이 자체와 assignment-close는 돈을 옮기지 않고,
-  이미지 최적화는 두 종류의 참고 이미지를 함께 다룬다).
+  다룬다) · `contest-close`·`contest-judging-end`·Contest 이미지 최적화(contests
+  — 전이는 돈을 옮기지 않고, 이미지 최적화는 두 종류의 참고 이미지를 함께 다룬다).
+  `assignment-close`는 이 스위치와 무관하게(꺼짐과 무관하게) **등록부 자체에
+  없다**(#361) — 과제 라우터가 걷혀 그 스캔이 찾을 후보(`DRAFT -> ASSIGNMENT_OPEN`)
+  가 다시는 생기지 않으므로, 영원히 빈 채로 도는 스캔을 등록해 둘 이유가 없다.
 """
 
 from __future__ import annotations

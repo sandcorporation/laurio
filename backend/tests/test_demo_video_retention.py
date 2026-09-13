@@ -25,8 +25,6 @@ from datetime import timedelta
 
 import pytest
 from django.conf import settings
-from django.core.management import call_command
-from django.test import Client
 from django.utils import timezone
 
 from contests.models import Contest, DeliverableType
@@ -280,67 +278,21 @@ def test_retention_scan_recovers_when_the_file_was_already_deleted_but_not_yet_m
 
 
 # --- Assignment: 심사기간이 없어 마감(deadline_at) + 같은 유예를 쓴다 ------------------
-
-
-_OPERATOR_PASSWORD = "zzzz-unrelated-passphrase-8841"
-
-
-def _operator_client(username: str):
-    call_command("create_operator", username, password=_OPERATOR_PASSWORD, superuser=True)
-    operator = Client()
-    response = operator.post(
-        "/api/operator/login",
-        data={"username": username, "password": _OPERATOR_PASSWORD},
-        content_type="application/json",
-        HTTP_ORIGIN="http://testserver",
-    )
-    assert response.status_code == 200, response.content
-    return operator
+#
+# 과제 라우터(`contests.assignment_api`)가 걷혀(#361) `POST /api/assignments`·
+# `.../open`이 더 이상 없다 — 이 스캔이 다루는 kind=ASSIGNMENT Contest는
+# `tests.assignment_orm_helpers.create_open_assignment`로 직접 조립한다.
 
 
 def _create_and_open_assignment(client, *, deliverable_type_ids, sponsor_uid, deadline_at):
-    from tests.test_submissions import _login, _auth_header
+    from contests.models import DeliverableType
+    from tests.assignment_orm_helpers import create_open_assignment
 
-    root = _operator_client(f"root-{sponsor_uid}")
-    pair = _login(client, sponsor_uid)
-    username = client.get(
-        "/api/accounts/me", **_auth_header(pair["access"])
-    ).json()["username"]
-    grant = root.post(
-        "/api/operator/assignment-permissions/grant",
-        data={"username": username, "reason": "수업 개설 승인"},
-        content_type="application/json",
-        HTTP_ORIGIN="http://testserver",
+    deliverable_types = DeliverableType.objects.filter(id__in=deliverable_type_ids)
+    assignment = create_open_assignment(
+        deliverable_types=deliverable_types, sponsor_uid=sponsor_uid, deadline_at=deadline_at
     )
-    assert grant.status_code == 200, grant.content
-
-    created = client.post(
-        "/api/assignments",
-        data={
-            "title": f"{sponsor_uid}의 과제",
-            "deliverable_type_ids": deliverable_type_ids,
-            "description": "과제 설명",
-            "deadline_at": deadline_at.isoformat(),
-            "requirements": [{"text": "함수를 정의한다", "grade": "required"}],
-        },
-        content_type="application/json",
-        **_auth_header(pair["access"]),
-    )
-    assert created.status_code == 201, created.content
-    assignment_id = created.json()["id"]
-    requirement_id = created.json()["requirements"][0]["id"]
-
-    opened = client.post(
-        f"/api/assignments/{assignment_id}/open",
-        content_type="application/json",
-        **_auth_header(pair["access"]),
-    )
-    assert opened.status_code == 200, opened.content
-    return {
-        "id": assignment_id,
-        "invite_code": opened.json()["invite_code"],
-        "requirement_id": requirement_id,
-    }
+    return assignment
 
 
 @pytest.mark.django_db
@@ -388,8 +340,14 @@ def test_assignment_demo_video_uses_deadline_plus_grace_since_it_has_no_judging_
     ClockOverride.objects.update_or_create(
         pk=1, defaults={"overridden_at": deadline + timedelta(minutes=1)}
     )
-    close_resp = client.post("/api/internal/scans/assignment-close", **_internal_headers())
-    assert close_resp.status_code == 200
+    # "assignment-close" 스캔은 등록부에서 걷혔다(#361) — 그 스캔이 하던 조건부
+    # UPDATE 한 번을 선언된 이름으로 직접 부른다(`contests.transitions`, 스캔이든
+    # HTTP든 이 함수 하나로 수렴한다는 사실 자체가 #255의 요점이다).
+    from contests.transitions import claim_contest_transition
+    from core.clock import Clock
+
+    won = claim_contest_transition("assignment-close", assignment["id"], now=Clock.now())
+    assert won
     closed = Contest.objects.get(id=assignment["id"])
     assert closed.status == Contest.Status.ASSIGNMENT_CLOSED
     assert closed.judging_ends_at is None  # ADR-0028 — Assignment에는 심사기간이 없다.

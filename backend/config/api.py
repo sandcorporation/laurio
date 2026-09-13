@@ -1,9 +1,6 @@
 from ninja import NinjaAPI
 
 from accounts.api import router as accounts_router
-from accounts.assignment_permission_operator_api import (
-    operator_router as assignment_permission_operator_router,
-)
 from accounts.operator_api import router as operator_router
 from appeals.api import operator_router as appeals_operator_router
 from appeals.api import router as appeals_router
@@ -12,7 +9,6 @@ from classroom.api import router as classroom_router
 from classroom.template_api import router as classroom_template_router
 from classroom.template_operator_api import operator_router as classroom_template_operator_router
 from contests.api import router as contests_router
-from contests.assignment_api import router as assignments_router
 from contests.operator_api import operator_router as contests_operator_router
 from contests.submission_api import router as submissions_router
 from core.api import router as core_internal_router
@@ -35,7 +31,6 @@ api = NinjaAPI(title="Laurio API", version="0.1.0")
 api.add_router("", accounts_router)
 api.add_router("", verification_router)
 api.add_router("", contests_router)
-api.add_router("", assignments_router)
 api.add_router("", payments_router)
 api.add_router("", submissions_router)
 api.add_router("", awards_router)
@@ -68,7 +63,6 @@ def storage_access_denied(request, exc: StorageAccessDenied):
 # 이루어진다. 라우터 자체가 기본 거부이며 Origin 검증 미들웨어가 경로 접두어로
 # 걸려 있다.
 api.add_router("/operator", operator_router)
-api.add_router("/operator", assignment_permission_operator_router)
 api.add_router("/operator", appeals_operator_router)
 api.add_router("/operator", payouts_operator_router)
 api.add_router("/operator", policies_operator_router)

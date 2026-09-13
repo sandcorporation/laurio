@@ -20,7 +20,6 @@
   이 설계가 맞다는 증거다).
 - Award 전에는 Sponsor가 볼 수 없다(ADR-0014의 은닉이 그대로 성립한다).
 - 보관 저장이 실패하면 Score가 생기지 않고 다음 스캔이 다시 시도한다.
-- 과제에서 강사의 "소스 펼치기"가 보관본을 연다.
 
 시임은 언제나 HTTP다(CLAUDE.md).
 """
@@ -42,10 +41,6 @@ from storage.adapters.fake import FakeStorageAdapter
 from submissions.models import Submission, SubmissionAsset
 from contests.submission_target_refs import source_target_ref
 
-from tests.test_assignment_source_readings import (
-    _create_and_open_assignment,
-    _reveal as _reveal_assignment_source,
-)
 from tests.test_handover import _award
 from tests.test_source_readings import (
     _auth_header,
@@ -351,58 +346,3 @@ def test_archiving_failure_defers_scoring_and_retries_on_the_next_scan(
     assert SubmissionAsset.objects.filter(
         submission_id=submission["id"], created_by_platform=True
     ).exists()
-
-
-# --- Assignment: 강사의 "소스 펼치기"가 보관본을 연다 ---------------------------
-
-
-@pytest.mark.django_db
-def test_assignment_instructor_reveal_opens_the_archived_source(client, landing_type):
-    assignment = _create_and_open_assignment(
-        client, deliverable_type_ids=[landing_type.id], sponsor_uid="archive-sponsor-1"
-    )
-
-    from tests.test_assignment_source_readings import _auth_header as _asrc_auth_header
-    from tests.test_assignment_source_readings import _login as _asrc_login
-
-    student_pair = _asrc_login(client, "archive-student-1")
-    repo_url = _repository_url("public-org")
-    repo_marker = f"REPO_MARKER_{uuid.uuid4().hex}"
-
-    with override_settings(GITHUB_FAKE_REPO_FILES={repo_url: {"main.py": f"# {repo_marker}\n"}}):
-        response = client.post(
-            f"{CONTESTS_URL}/{assignment['id']}/submissions",
-            data={
-                "assets": [{"kind": "repository", "value": repo_url}],
-                "invite_code": assignment["invite_code"],
-            },
-            content_type="application/json",
-            **_asrc_auth_header(student_pair["access"]),
-        )
-        assert response.status_code == 201, response.content
-        submission = response.json()
-
-        _run_visibility_scan(client)
-
-        from core.models import ClockOverride
-
-        ClockOverride.objects.update_or_create(
-            pk=1, defaults={"overridden_at": timezone.now() + timedelta(days=8)}
-        )
-        close_resp = client.post(
-            "/api/internal/scans/assignment-close", **_internal_headers()
-        )
-        assert close_resp.status_code == 200, close_resp.content
-        score_resp = _run_scoring(client)
-
-    assert score_resp["rows"][0]["status"] == "scored"
-
-    reveal = _reveal_assignment_source(
-        client, assignment["sponsor_access"], assignment["id"], submission["id"]
-    )
-    assert reveal.status_code == 200, reveal.content
-    body = reveal.json()
-    kinds = {a["kind"] for a in body["assets"]}
-    assert kinds == {"source", "repository"}
-    source_entry = next(a for a in body["assets"] if a["kind"] == "source")
-    assert source_entry["url"]  # presigned 다운로드 URL — 박제본을 가리킨다.

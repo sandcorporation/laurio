@@ -1,13 +1,14 @@
-"""공모전 제품 스위치 (#271, ADR-0037) — staging 에서 공모전 표면을 내리고 과제는 남긴다.
+"""공모전 제품 스위치 (#271, ADR-0037) — staging 에서 공모전 표면을 내린다.
 
 좋은 테스트는 스위치의 구현(설정 값을 읽었는가)이 아니라 결과(꺼진 상태에서 공모전을
 개최할 수 있는가)를 본다 — `CLAUDE.md` "HTTP가 유일한 시임이다". 이 파일은 세 가지를
 확인한다.
 
 1. **꺼진 상태의 백엔드**: 닫기로 한 공모전 표면 하나하나가 404를 낸다.
-2. **꺼져도 열려 있어야 하는 것**: 과제 개설·초대·제출·채점·조회, 그리고 과제 화면이
-   읽는 공용 참조 데이터. 너무 많이 닫는 실수는 과제가 조용히 깨지는 모양으로 나타나므로
-   닫는 쪽과 같은 강도로 고정한다.
+2. **꺼져도 열려 있어야 하는 것**: 과제 개설 화면이 읽던 공용 참조 데이터. 너무 많이
+   닫는 실수는 조용히 깨지는 모양으로 나타나므로 닫는 쪽과 같은 강도로 고정한다.
+   (과제 라우터 자체는 #361 로 걷혔다 — 이 스위치와 무관하게 이제 존재하지 않으므로
+   "스위치와 무관하게 계속 도는가"를 확인할 대상이 아니다.)
 3. **스캔 등록**: 꺼진 상태에서 등록부에 공모전 전용 스캔이 없고 채점 스캔은 있는지.
 
 **켠 상태(기본값)의 회귀는 이 파일이 다시 확인하지 않는다** — 기존 1600여 건이 스위치를
@@ -21,13 +22,11 @@ from django.conf import settings
 from django.test import override_settings
 from django.utils import timezone
 
-from contests.assignment_category import get_assignment_category
-from contests.models import Category, Contest, DeliverableType, InviteCode
+from contests.models import Category, Contest, DeliverableType
 from payments.models import Payment
 
 CONTESTS_URL = "/api/contests"
 PAYMENTS_URL = "/api/payments"
-ASSIGNMENTS_URL = "/api/assignments"
 
 pytestmark = pytest.mark.django_db
 
@@ -247,104 +246,22 @@ def test_off_closes_confirm_payment(client, published_contest):
     assert response.status_code == 404
 
 
-# --- 2. 꺼져도 열려 있어야 하는 것 — 과제와 공용 참조 데이터 --------------------
+# --- 2. 꺼져도 열려 있어야 하는 것 — 과제 개설 화면의 공용 참조 데이터 --------------
 
 
 @OFF
 def test_off_keeps_assignment_reference_data_open(client, landing_type):
+    """`/contests/deliverable-types`·`/contests/categories`는 주소만 `/contests/`
+    아래일 뿐 과제 개설 화면이 읽는 공용 참조 데이터라 계속 200이다(`core.contest_
+    switch` 모듈 독스트링) — 과제 라우터 자체가 걷힌 뒤(#361)에도 이 예외의 근거
+    (주소만으로는 어느 제품의 것인지 갈리지 않는다)는 바뀌지 않는다."""
+
     response = client.get(f"{CONTESTS_URL}/deliverable-types")
     assert response.status_code == 200
     assert any(item["id"] == landing_type.id for item in response.json())
 
     category_response = client.get(f"{CONTESTS_URL}/categories")
     assert category_response.status_code == 200
-
-
-@OFF
-def test_off_keeps_full_assignment_lifecycle_working(client, landing_type):
-    """과제 개설·초대·제출·조회가 스위치와 무관하게 끝까지 돈다(#271 user story 4/10)."""
-
-    from django.core.management import call_command
-    from django.test import Client
-
-    root_password = "operator-pw-switch-9931"
-    call_command("create_operator", "root-switch", password=root_password, superuser=True)
-    operator_client = Client()
-    op_login = operator_client.post(
-        "/api/operator/login",
-        data={"username": "root-switch", "password": root_password},
-        content_type="application/json",
-        HTTP_ORIGIN="http://testserver",
-    )
-    assert op_login.status_code == 200, op_login.content
-
-    pair = _login(client, uid="teacher-switch-1")
-    me = client.get("/api/accounts/me", **_auth_header(pair["access"]))
-    username = me.json()["username"]
-
-    grant = operator_client.post(
-        "/api/operator/assignment-permissions/grant",
-        data={"username": username, "reason": "스위치 테스트"},
-        content_type="application/json",
-        HTTP_ORIGIN="http://testserver",
-    )
-    assert grant.status_code == 200, grant.content
-
-    headers = _auth_header(pair["access"])
-    create_response = client.post(
-        ASSIGNMENTS_URL,
-        data={
-            "title": "스위치 꺼진 동안의 과제",
-            "deliverable_type_ids": [landing_type.id],
-            "description": "설명",
-            "deadline_at": "2030-01-01T00:00:00Z",
-            "requirements": [{"text": "함수를 정의한다", "grade": "required"}],
-        },
-        content_type="application/json",
-        **headers,
-    )
-    assert create_response.status_code == 201, create_response.content
-    assignment_id = create_response.json()["id"]
-
-    open_response = client.post(f"{ASSIGNMENTS_URL}/{assignment_id}/open", **headers)
-    assert open_response.status_code == 200, open_response.content
-    invite_code = open_response.json()["invite_code"]
-    assert invite_code
-
-    mine_response = client.get(f"{ASSIGNMENTS_URL}/mine", **headers)
-    assert mine_response.status_code == 200
-    assert len(mine_response.json()) == 1
-
-    invite_response = client.get(f"{ASSIGNMENTS_URL}/invite/{invite_code}")
-    assert invite_response.status_code == 200
-
-    # 제출은 `submissions.api`(다른 앱)가 갖고 있다 — 주소가 `/contests/`로
-    # 시작해도 이 스위치와 무관하다(#271).
-    developer_pair = _login(client, uid="developer-switch-1")
-    developer_user_id = client.get(
-        "/api/accounts/me", **_auth_header(developer_pair["access"])
-    ).json()["id"]
-    import uuid as _uuid
-
-    submit_response = client.post(
-        f"{CONTESTS_URL}/{assignment_id}/submissions",
-        data={
-            "assets": [
-                {
-                    "kind": "source",
-                    "value": f"submission:{assignment_id}:{developer_user_id}:source/{_uuid.uuid4().hex}",
-                }
-            ],
-            "invite_code": invite_code,
-        },
-        content_type="application/json",
-        **_auth_header(developer_pair["access"]),
-    )
-    assert submit_response.status_code == 201, submit_response.content
-
-    submissions_response = client.get(f"{ASSIGNMENTS_URL}/{assignment_id}/submissions", **headers)
-    assert submissions_response.status_code == 200
-    assert len(submissions_response.json()) == 1
 
 
 # --- 3. 스캔 등록 — 공모전 전용 스캔은 등록부에서 사라지고 채점은 남는다 --------
@@ -365,7 +282,6 @@ SHARED_SCAN_NAMES = (
     "repository-visibility",
     "identity-dormancy-purge",
     "retained-identity-purge",
-    "assignment-close",
 )
 
 

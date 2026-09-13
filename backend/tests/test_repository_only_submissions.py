@@ -43,6 +43,7 @@ from tests.test_source_readings import (
     _auth_header,
     _close_contest,
     _internal_headers,
+    _login,
     _publish_contest,
     _run_scoring,
     _verified_user,
@@ -58,13 +59,14 @@ VISIBILITY_SCAN_URL = "/api/internal/scans/repository-visibility"
 
 @pytest.mark.django_db
 def test_assignment_submission_accepts_repository_only(client, landing_type):
-    from tests.test_assignment_scoring import _create_and_open_assignment, _login
+    from tests.assignment_orm_helpers import create_open_assignment
 
     deadline = timezone.now() + timedelta(hours=1)
-    assignment = _create_and_open_assignment(
-        client, deliverable_type_ids=[landing_type.id], sponsor_uid="teacher-1", deadline_at=deadline
+    assignment = create_open_assignment(
+        deliverable_types=[landing_type], sponsor_uid="teacher-1", deadline_at=deadline
     )
-    student = _login(client, "student-1")
+    # 학생은 본인확인이 없어도 된다 — Assignment는 그것을 요구하지 않는다(ADR-0028).
+    student = _login(client, uid="student-1")
 
     response = client.post(
         f"{CONTESTS_URL}/{assignment['id']}/submissions",

@@ -13,9 +13,9 @@ appeals_app`가 AST를 파싱해 그것을 고정한다. 이 모듈이 다루는
 재노출하면 `appeals`도 `submissions`만 알면 된다.
 
 `submissions.schemas.OwnScoreOut`(Developer용)·`appeals.schemas.
-ScoreSnapshotOut`(Operator용)·`contests.schemas.AssignmentSubmissionScoreOut`
-(과제 출제자용 — 과제에는 이의제기 자체가 없어 원문을 지킬 심판자가 없다)이 이
-모듈을 함께 쓴다.
+ScoreSnapshotOut`(Operator용)이 이 모듈을 함께 쓴다. 과제 출제자용
+`contests.schemas.AssignmentSubmissionScoreOut`도 한때 여기 얹혀 있었지만
+과제 라우터가 걷히며(#361) 함께 사라졌다.
 
 **청중을 구조로 가른다 — 저장된 문자열을 소독하지 않는다.** #244가 알림
 발송 실패 사유에 대해 세운 것과 같은 모양이다(`notifications.api.
@@ -100,7 +100,7 @@ _PARTICIPANT_FACING_REASONING: dict[ScoringBasis, str] = {
 
 
 def participant_facing_reasoning(*, model_version: str, reasoning: list[dict]) -> list[dict]:
-    """`OwnScoreOut.reasoning`(및 `AssignmentSubmissionScoreOut.reasoning`)이 낼 값.
+    """`OwnScoreOut.reasoning`이 낼 값.
 
     AI가 실제로 판정했으면 저장된 `reasoning`(Requirement별 근거)을 그대로
     낸다 — 감출 내부 정보가 없다. 자동 0% 둘만 새 문장으로 바꿔 **한 번만**

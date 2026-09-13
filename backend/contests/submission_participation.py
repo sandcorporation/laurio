@@ -274,10 +274,10 @@ def active_invite_code_for(contest) -> str | None:
 
     `contest.invite_codes.all()`을 쓴다 — `.filter(is_active=True)`로 새
     QuerySet을 만들면 호출부가 이미 채워 둔 prefetch 캐시를 쓰지 않고 행마다
-    새 쿼리를 낸다(`contests.assignment_api._active_invite_code`와 같은 이유로
-    같은 모양을 여기서도 지킨다 — `list_my_participation`이 `contest__invite_
-    codes`를 prefetch해 둔다). 활성 코드는 Contest 당 많아야 하나다
-    (`unique_active_invite_code_per_contest`).
+    새 쿼리를 낸다(과제 라우터가 걷히기 전 `contests.assignment_api.
+    _active_invite_code`와 같은 이유로 같은 모양을 여기서도 지킨다 —
+    `list_my_participation`이 `contest__invite_codes`를 prefetch해 둔다).
+    활성 코드는 Contest 당 많아야 하나다(`unique_active_invite_code_per_contest`).
     """
 
     if not contest.is_assignment:

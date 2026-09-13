@@ -72,27 +72,6 @@ E2E_SEED_REGISTRY: dict[str, SeedEntry] = {
         command="count_ledger_entries",
         options=frozenset({"contest_id"}),
     ),
-    # 과제 개최 자격 화면(#206) e2e 전용 — 자격을 줄 대상 Sponsor 계정. 옵션이
-    # 없다: (provider, provider_uid)가 고정이라 몇 번을 불러도 같은 사용자명을
-    # 돌려준다(get_or_create).
-    "assignment-permission-sponsor": SeedEntry(
-        command="seed_e2e_assignment_permission_sponsor",
-        options=frozenset(),
-    ),
-    # Assignment 3·4(#207/#208) e2e 전용 — 자격을 이미 받은 Sponsor 와 학생 계정.
-    # 옵션이 없다: 둘 다 고정된 (provider, provider_uid)라 몇 번을 불러도 같은
-    # 계정으로 귀결된다.
-    "assignment-sponsor-and-student": SeedEntry(
-        command="seed_e2e_assignment_sponsor_and_student",
-        options=frozenset(),
-    ),
-    # Assignment e2e(#210, #242) 전용 — 심지 않고 이미 연 과제 하나의 마감을 실제
-    # 시간이 아니라 과거로 옮긴다(`seed_e2e_expire_assignment_deadline.py` 참고).
-    # `assignment_id`가 필수인 이유: 이 명령은 이름이 아니라 id로 정확히 한 행만
-    # 건드려야 한다 — 전역 범위를 주면 다른 실행이 심은 과제까지 함께 마감된다.
-    "assignment-expire-deadline": SeedEntry(
-        command="seed_e2e_expire_assignment_deadline",
-        options=frozenset({"assignment_id"}),
-        required=frozenset({"assignment_id"}),
-    ),
+    # 과제 e2e 전용 시드 셋(개최 자격 대상 Sponsor·자격 보유 Sponsor+학생·마감 앞당기기)은
+    # 과제 라우터·화면이 걷히며(#361, 부모 #358) 함께 걷었다 — 심을 과제 자체가 없다.
 }
