@@ -75,7 +75,7 @@ export default function HandoverPage({ params }: { params: Promise<{ contestId: 
 
   return (
     <main className="mx-auto max-w-2xl p-10">
-      <Link className="text-sm text-muted" href="/console/contests" data-testid="handover-back">
+      <Link className="text-sm text-ink/60" href="/console/contests" data-testid="handover-back">
         ← 내 공모전
       </Link>
       <h1 className="mt-2 text-2xl font-semibold" data-testid="handover-heading">
@@ -133,10 +133,10 @@ function BuildAssetsSection({ state }: { state: BuildAssetsState }) {
   }
 
   return (
-    <section className="mt-8 border-t border-subtle pt-6" data-testid="handover-build-assets">
+    <section className="mt-8 border-t border-rule pt-6" data-testid="handover-build-assets">
       <h2 className="text-lg font-semibold">개발자가 올린 빌드 자산</h2>
       {state.assets.length === 0 ? (
-        <p className="mt-2 text-sm text-muted" data-testid="handover-build-assets-empty">
+        <p className="mt-2 text-sm text-ink/60" data-testid="handover-build-assets-empty">
           아직 올린 빌드 자산이 없습니다 — 없어도 인수 확인에는 영향이 없습니다.
         </p>
       ) : (
@@ -144,14 +144,14 @@ function BuildAssetsSection({ state }: { state: BuildAssetsState }) {
           {state.assets.map((asset) => (
             <li
               key={asset.id}
-              className="rounded border border-subtle p-3 text-sm"
+              className="rounded border border-rule p-3 text-sm"
               data-testid={`handover-build-asset-${asset.id}`}
             >
               <span className="rounded-sm border border-rule px-2 py-0.5 text-xs">
                 {buildAssetKindLabel(asset.kind)}
               </span>{" "}
-              {asset.label || <span className="text-muted">(라벨 없음)</span>}
-              <p className="mt-1 font-mono text-xs text-muted">{asset.object_key}</p>
+              {asset.label || <span className="text-ink/60">(라벨 없음)</span>}
+              <p className="mt-1 font-mono text-xs text-ink/60">{asset.object_key}</p>
             </li>
           ))}
         </ul>

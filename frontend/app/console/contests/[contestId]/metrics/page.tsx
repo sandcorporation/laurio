@@ -123,7 +123,7 @@ export default function ContestMetricsPage() {
         <h1 className="text-2xl font-semibold" data-testid="metrics-contest-title">
           {contest.title} — 지표
         </h1>
-        <p className="mt-1 text-sm text-muted">
+        <p className="mt-1 text-sm text-ink/60">
           참가작{" "}
           <span data-testid="metrics-total-submission-count">
             {metrics.total_submission_count}
@@ -148,7 +148,7 @@ function ParticipationTrendSection({ metrics }: { metrics: ContestMetricsOut }) 
       {metrics.total_submission_count === 0 ? (
         // 0 과 「없음」은 다른 것이다 — 숫자는 응답이 그대로 싣고, 문구는 화면이
         // 만든다(#105 구현 결정).
-        <p className="text-sm text-muted" data-testid="metrics-participation-empty">
+        <p className="text-sm text-ink/60" data-testid="metrics-participation-empty">
           아직 참가작이 없습니다.
         </p>
       ) : (
@@ -184,7 +184,7 @@ function RequirementFulfillmentSection({ metrics }: { metrics: ContestMetricsOut
       <h2 className="text-lg font-semibold">요구사항별 충족 분포</h2>
 
       {metrics.requirement_fulfillment.length === 0 ? (
-        <p className="text-sm text-muted" data-testid="metrics-requirement-fulfillment-empty">
+        <p className="text-sm text-ink/60" data-testid="metrics-requirement-fulfillment-empty">
           아직 요구사항이 없습니다.
         </p>
       ) : (
@@ -241,7 +241,7 @@ function CompletionDistributionSection({ metrics }: { metrics: ContestMetricsOut
       <h2 className="text-lg font-semibold">제출 완성도 분포</h2>
 
       {total === 0 ? (
-        <p className="text-sm text-muted" data-testid="metrics-completion-empty">
+        <p className="text-sm text-ink/60" data-testid="metrics-completion-empty">
           아직 참가작이 없습니다.
         </p>
       ) : (
@@ -271,19 +271,19 @@ function ViewMetricsSection({ metrics }: { metrics: ContestMetricsOut }) {
   return (
     <section className="flex flex-col gap-3" data-testid="metrics-view">
       <h2 className="text-lg font-semibold">조회수와 전환율</h2>
-      <p className="text-sm text-muted">
+      <p className="text-sm text-ink/60">
         참가가 없을 때 그 이유가 "안 보여서"인지 "봤는데 안 내서"인지 여기서 구별한다.
       </p>
 
       <div className="grid grid-cols-2 gap-6 text-sm">
         <div className="flex flex-col gap-1">
-          <span className="text-xs text-muted">조회수</span>
+          <span className="text-xs text-ink/60">조회수</span>
           <span className="font-mono text-2xl font-medium" data-testid="metrics-view-count">
             {view.view_count}
           </span>
         </div>
         <div className="flex flex-col gap-1">
-          <span className="text-xs text-muted">전환율</span>
+          <span className="text-xs text-ink/60">전환율</span>
           {/* 0 으로 나누지 않는다 — 조회가 없으면 전환율은 "0%" 가 아니라
               "아직 알 수 없음" 이다. 숫자와 문구가 다른 층에서 결정된다는 것이
               완성도 분포·참가 추이 섹션과 같은 원칙이다. */}
@@ -292,7 +292,7 @@ function ViewMetricsSection({ metrics }: { metrics: ContestMetricsOut }) {
               {(view.conversion_rate! * 100).toFixed(1)}%
             </span>
           ) : (
-            <span className="text-sm text-muted" data-testid="metrics-conversion-rate-empty">
+            <span className="text-sm text-ink/60" data-testid="metrics-conversion-rate-empty">
               아직 조회가 없어 전환율을 계산할 수 없습니다.
             </span>
           )}

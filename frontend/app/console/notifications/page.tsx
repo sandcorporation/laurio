@@ -132,7 +132,7 @@ export default function NotificationsPage() {
 
   return (
     <main className="mx-auto max-w-2xl p-10">
-      <Link className="text-sm text-muted" href="/console" data-testid="notifications-back">
+      <Link className="text-sm text-ink/60" href="/console" data-testid="notifications-back">
         ← 콘솔
       </Link>
       <div className="mt-2 flex items-center justify-between gap-3">
@@ -157,7 +157,7 @@ export default function NotificationsPage() {
           알림을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.
         </p>
       ) : load.items.length === 0 ? (
-        <p className="mt-6 text-sm text-muted" data-testid="notifications-empty">
+        <p className="mt-6 text-sm text-ink/60" data-testid="notifications-empty">
           아직 알림이 없습니다.
         </p>
       ) : (
@@ -226,14 +226,14 @@ function NotificationRow({
           </div>
         )}
       </div>
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+      <div className="flex flex-wrap items-center gap-2 text-xs text-ink/60">
         <span className="font-mono">{formatDateTime(notification.created_at)}</span>
         <span data-testid={`notification-status-${notification.id}`}>
           {STATUS_LABELS[notification.status] ?? notification.status}
         </span>
       </div>
       {notification.dispatches.length > 0 && (
-        <ul className="mt-1 flex flex-col gap-0.5 text-xs text-muted">
+        <ul className="mt-1 flex flex-col gap-0.5 text-xs text-ink/60">
           {notification.dispatches.map((dispatch) => (
             <li key={dispatch.id} data-testid={`notification-dispatch-${dispatch.id}`}>
               {CHANNEL_LABELS[dispatch.channel] ?? dispatch.channel} —{" "}

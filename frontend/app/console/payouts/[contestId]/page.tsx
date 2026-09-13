@@ -44,7 +44,7 @@ export default function PayoutPage({ params }: { params: Promise<{ contestId: st
 
   return (
     <main className="mx-auto max-w-3xl p-10">
-      <Link className="text-sm text-muted" href="/console/participation" data-testid="payout-back">
+      <Link className="text-sm text-ink/60" href="/console/participation" data-testid="payout-back">
         ← 내 참가 현황
       </Link>
       <h1 className="mt-2 text-2xl font-semibold" data-testid="payout-heading">
@@ -98,7 +98,7 @@ function RequestSection({
       <p data-testid="payout-none">이 공모전에는 아직 지급 내역이 없습니다.</p>
       <SmsNotice />
       <button
-        className="mt-4 rounded bg-accent px-4 py-2 text-white disabled:opacity-50"
+        className="mt-4 rounded bg-ink px-4 py-2 text-paper hover:bg-ink/85 disabled:opacity-50"
         type="button"
         onClick={handleClick}
         disabled={pending}
@@ -178,7 +178,7 @@ function PayoutDetail({
       ) : null}
 
       {payout.status === "confirmed_seller_pending" ? (
-        <section className="mt-6 rounded border border-subtle p-4" data-testid="payout-waiting">
+        <section className="mt-6 rounded border border-rule p-4" data-testid="payout-waiting">
           {/* PENDING이면서 아직 연락처(전화번호·이메일)를 안 냈으면 하실 일이
               있다(#57 코드리뷰 지적 10, #168) — next_action_message가 "아래에서
               제출해주세요"라고 말하는데 폼이 없으면 그 지시를 따를 수 없다.
@@ -237,7 +237,7 @@ function PayoutDetail({
           payout.seller_status !== "pending" &&
           payout.transfer_status !== "failed" &&
           payout.has_identity ? (
-            <p className="text-muted">
+            <p className="text-ink/60">
               지금은 기다리는 단계입니다 — 하실 일은 없습니다. 상금은 원장에 그대로 남아 있고,
               등록이 끝나면 자동으로 다음 단계로 넘어갑니다.
             </p>
@@ -293,7 +293,7 @@ function RetryFailedPayout({
   return (
     <div className="mt-3" data-testid="payout-retry-failed">
       <button
-        className="mt-2 rounded border border-subtle px-3 py-2 text-sm disabled:opacity-50"
+        className="mt-2 rounded border border-rule px-3 py-2 text-sm disabled:opacity-50"
         type="button"
         onClick={handleClick}
         disabled={pending}
@@ -346,7 +346,7 @@ function SellerRetry({
         거절되면 운영자에게 문의해주세요.
       </p>
       <button
-        className="mt-2 rounded border border-subtle px-3 py-2 text-sm disabled:opacity-50"
+        className="mt-2 rounded border border-rule px-3 py-2 text-sm disabled:opacity-50"
         type="button"
         onClick={handleClick}
         disabled={pending}
@@ -406,7 +406,7 @@ function SellerContactForm({
 
   return (
     <form
-      className="mt-4 flex flex-col gap-3 rounded border border-subtle p-3"
+      className="mt-4 flex flex-col gap-3 rounded border border-rule p-3"
       onSubmit={handleSubmit}
       data-testid="payout-seller-contact-form"
     >
@@ -427,7 +427,7 @@ function SellerContactForm({
           </label>
           <input
             id="payout-seller-phone"
-            className="rounded border border-subtle p-3"
+            className="rounded border border-rule p-3"
             type="tel"
             inputMode="numeric"
             autoComplete="tel"
@@ -447,7 +447,7 @@ function SellerContactForm({
           </label>
           <input
             id="payout-seller-email"
-            className="rounded border border-subtle p-3"
+            className="rounded border border-rule p-3"
             type="email"
             autoComplete="email"
             value={email}
@@ -459,7 +459,7 @@ function SellerContactForm({
         </div>
       ) : null}
       <button
-        className="self-start rounded bg-accent px-4 py-2 text-white disabled:opacity-50"
+        className="self-start rounded bg-ink px-4 py-2 text-paper hover:bg-ink/85 disabled:opacity-50"
         type="submit"
         disabled={pending || !canSubmit}
         data-testid="payout-seller-contact-submit"
@@ -479,7 +479,7 @@ function AmountBreakdown({ payout }: { payout: Payout }) {
   const won = (amount: number) => `${amount.toLocaleString()}원`;
 
   return (
-    <section className="mt-6 rounded border border-subtle p-4" data-testid="payout-amounts">
+    <section className="mt-6 rounded border border-rule p-4" data-testid="payout-amounts">
       {/* 상금 그대로가 들어오지 않는다는 사실을 **지급 전에** 본다. */}
       <dl className="flex flex-col gap-1 text-sm">
         <Row label="상금" value={won(payout.prize_amount)} testId="payout-amount-prize" />
@@ -494,10 +494,10 @@ function AmountBreakdown({ payout }: { payout: Payout }) {
           testId="payout-amount-withholding"
         />
       </dl>
-      <p className="mt-3 border-t border-subtle pt-3 text-lg font-semibold">
+      <p className="mt-3 border-t border-rule pt-3 text-lg font-semibold">
         실수령액 <span data-testid="payout-amount-net">{won(payout.net_amount)}</span>
       </p>
-      <p className="mt-2 text-xs text-muted">
+      <p className="mt-2 text-xs text-ink/60">
         수수료율과 원천징수율은 지급을 요청한 시점의 값으로 고정됩니다 — 이후 정책이 바뀌어도 이
         금액은 달라지지 않습니다.
       </p>
@@ -519,7 +519,7 @@ function SmsNotice() {
     // 본인확인은 이미 끝났는데 지급대행사가 자기 인증 문자를 또 보낸다
     // (ADR-0020 — 결제·지급대행과 본인확인의 벤더가 갈려 있다). 예고 없이
     // 두 번째 문자가 오면 피싱으로 읽히고, 그러면 사람들은 무시한다.
-    <p className="mt-3 rounded border border-subtle p-3 text-sm" data-testid="payout-sms-notice">
+    <p className="mt-3 rounded border border-rule p-3 text-sm" data-testid="payout-sms-notice">
       지급 절차 중에 지급대행사(토스페이먼츠)가 <strong>별도의 본인확인 문자</strong>를 보냅니다.
       가입할 때 하신 본인확인과는 다른 절차이며, 정상입니다.
     </p>
@@ -559,7 +559,7 @@ function TaxIdentityForm({ payout, onSubmitted }: { payout: Payout; onSubmitted:
       </label>
       <input
         id="payout-rrn"
-        className="rounded border border-subtle p-3"
+        className="rounded border border-rule p-3"
         // `password` 다 — 어깨너머로 읽히지 않고, 브라우저·확장이 자동완성
         // 목록에 남기지 않는다.
         type="password"
@@ -574,7 +574,7 @@ function TaxIdentityForm({ payout, onSubmitted }: { payout: Payout; onSubmitted:
       />
       <SmsNotice />
       <button
-        className="self-start rounded bg-accent px-4 py-2 text-white disabled:opacity-50"
+        className="self-start rounded bg-ink px-4 py-2 text-paper hover:bg-ink/85 disabled:opacity-50"
         type="submit"
         disabled={pending || value.length !== 13}
         data-testid="payout-identity-submit"

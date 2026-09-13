@@ -48,7 +48,7 @@ export default function AppealPage({ params }: { params: Promise<{ submissionId:
 
   return (
     <main className="mx-auto max-w-3xl p-10">
-      <Link className="text-sm text-muted" href="/console/participation" data-testid="appeal-back">
+      <Link className="text-sm text-ink/60" href="/console/participation" data-testid="appeal-back">
         ← 내 참가 현황
       </Link>
       <h1 className="mt-2 text-2xl font-semibold" data-testid="appeal-heading">
@@ -75,7 +75,7 @@ export default function AppealPage({ params }: { params: Promise<{ submissionId:
             // **폼이 없는 이유를 말한다.** 버튼이 그냥 없으면 "왜 없지"가
             // 남고, 사용자는 자기 잘못인지 고장인지 모른다. 낼 수 있는지는
             // 서버가 판정한다 — `create_appeal` 의 전제와 같은 함수다.
-            <p className="mt-8 text-muted" data-testid="appeal-closed">
+            <p className="mt-8 text-ink/60" data-testid="appeal-closed">
               이의 제기 기한(심사기간 종료)이 지나 더 이상 접수할 수 없습니다.
             </p>
           )}
@@ -97,7 +97,7 @@ function ScoreSection({ score }: { score: OwnScore }) {
           (`model_version`의 sentinel)을 그대로 보여주지 않는다(#251).
           `scoring_basis`로만 갈린다 — `submit-score-model`과 같은 함수
           (`modelLineOf`)를 써서 두 화면이 같은 사유를 말하게 한다. */}
-      <p className="text-sm text-muted" data-testid="appeal-score-model">
+      <p className="text-sm text-ink/60" data-testid="appeal-score-model">
         {modelLineOf(score)}
       </p>
 
@@ -113,7 +113,7 @@ function ScoreSection({ score }: { score: OwnScore }) {
 
       <ul className="mt-3 flex flex-col gap-2" data-testid="appeal-score-reasoning">
         {score.reasoning.map((item, index) => (
-          <li key={index} className="rounded border border-subtle p-3 text-sm">
+          <li key={index} className="rounded border border-rule p-3 text-sm">
             {String(item.reasoning ?? "")}
           </li>
         ))}
@@ -124,7 +124,7 @@ function ScoreSection({ score }: { score: OwnScore }) {
 
 function ExistingAppeal({ appeal }: { appeal: Appeal }) {
   return (
-    <section className="mt-8 rounded border border-subtle p-4" data-testid="appeal-existing">
+    <section className="mt-8 rounded border border-rule p-4" data-testid="appeal-existing">
       {/* 한 Submission 에 이의는 하나다 — 폼 대신 낸 것을 보여준다. */}
       <p className="font-semibold" data-testid="appeal-existing-status">
         {APPEAL_STATUS_LABELS[appeal.status] ?? appeal.status}
@@ -133,7 +133,7 @@ function ExistingAppeal({ appeal }: { appeal: Appeal }) {
         {appeal.reason}
       </p>
       {appeal.ruling_note ? (
-        <p className="mt-3 whitespace-pre-wrap text-sm text-muted" data-testid="appeal-existing-note">
+        <p className="mt-3 whitespace-pre-wrap text-sm text-ink/60" data-testid="appeal-existing-note">
           심판 의견: {appeal.ruling_note}
         </p>
       ) : null}
@@ -195,7 +195,7 @@ function AppealForm({
       </label>
       <textarea
         id="appeal-reason"
-        className="min-h-32 rounded border border-subtle p-3"
+        className="min-h-32 rounded border border-rule p-3"
         value={reason}
         onChange={(event) => setReason(event.target.value)}
         data-testid="appeal-reason"
@@ -203,7 +203,7 @@ function AppealForm({
         maxLength={4000}
       />
       <button
-        className="self-start rounded bg-accent px-4 py-2 text-white disabled:opacity-50"
+        className="self-start rounded bg-ink px-4 py-2 text-paper hover:bg-ink/85 disabled:opacity-50"
         type="submit"
         disabled={pending || reason.trim().length === 0}
         data-testid="appeal-submit"
@@ -227,9 +227,9 @@ function ReadingsSection({
   failed: boolean;
 }) {
   return (
-    <section className="mt-10 border-t border-subtle pt-6" data-testid="appeal-readings">
+    <section className="mt-10 border-t border-rule pt-6" data-testid="appeal-readings">
       <h2 className="font-semibold">내 소스 열람 기록</h2>
-      <p className="mt-1 text-sm text-muted">
+      <p className="mt-1 text-sm text-ink/60">
         운영자는 이의를 심판하기 위해 제출 소스를 열어볼 수 있고, 열 때마다 아래에 기록이
         남습니다. 누가 읽었는지는 공개하지 않습니다 — 언제 몇 번 열렸는지만 보여줍니다.
       </p>

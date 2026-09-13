@@ -79,12 +79,12 @@ export function ProfilePageClient({ returnOrigin }: { returnOrigin: string | nul
   return (
     <main className="mx-auto max-w-2xl p-10">
       <div className="flex items-center justify-between gap-3">
-        <Link className="text-sm text-muted" href="/console" data-testid="profile-back">
+        <Link className="text-sm text-ink/60" href="/console" data-testid="profile-back">
           ← 콘솔
         </Link>
         {returnOrigin && (
           <a
-            className="text-sm text-muted"
+            className="text-sm text-ink/60"
             href={returnOrigin}
             data-testid="profile-return-to-classroom"
           >
@@ -95,7 +95,7 @@ export function ProfilePageClient({ returnOrigin }: { returnOrigin: string | nul
       <h1 className="mt-2 text-2xl font-semibold" data-testid="profile-heading">
         내 정보
       </h1>
-      <p className="mt-2 text-sm text-muted">
+      <p className="mt-2 text-sm text-ink/60">
         표시 이름과 소개는 개최자·참가자 역할마다 따로 저장됩니다. 실명·생년월일·연락처 같은
         본인확인 정보는 여기서 다루지 않습니다.
       </p>
@@ -164,10 +164,10 @@ function RoleSection({ role }: { role: Role }) {
   return (
     <section className="mt-8 border-t border-rule pt-6" data-testid={`profile-${role}-section`}>
       <h2 className="text-lg font-semibold">{copy.title}</h2>
-      <p className="mt-1 text-sm text-muted">{copy.description}</p>
+      <p className="mt-1 text-sm text-ink/60">{copy.description}</p>
 
       {load.status === "loading" ? (
-        <p className="mt-4 text-sm text-muted" data-testid={`profile-${role}-loading`}>
+        <p className="mt-4 text-sm text-ink/60" data-testid={`profile-${role}-loading`}>
           불러오는 중...
         </p>
       ) : load.status === "error" ? (

@@ -67,12 +67,12 @@ export function WithdrawPageClient({ returnOrigin }: { returnOrigin: string | nu
   return (
     <main className="mx-auto max-w-2xl p-10">
       <div className="flex items-center justify-between gap-3">
-        <Link className="text-sm text-muted" href="/console" data-testid="withdraw-back">
+        <Link className="text-sm text-ink/60" href="/console" data-testid="withdraw-back">
           ← 콘솔
         </Link>
         {returnOrigin && (
           <a
-            className="text-sm text-muted"
+            className="text-sm text-ink/60"
             href={returnOrigin}
             data-testid="withdraw-return-to-classroom"
           >
@@ -159,7 +159,7 @@ function WhatHappensSection() {
     <section className="mt-6 flex flex-col gap-4" data-testid="withdraw-explanation">
       <div>
         <p className="font-semibold">사라지는 것</p>
-        <ul className="mt-1 list-disc pl-5 text-sm text-muted">
+        <ul className="mt-1 list-disc pl-5 text-sm text-ink/60">
           <li>실명·생년월일·CI·DI·전화번호(본인확인 정보)</li>
           <li>표시 이름과 소개</li>
           <li>공개 프로필 — 더 이상 검색되지 않습니다</li>
@@ -167,7 +167,7 @@ function WhatHappensSection() {
       </div>
       <div>
         <p className="font-semibold">남는 것</p>
-        <ul className="mt-1 list-disc pl-5 text-sm text-muted">
+        <ul className="mt-1 list-disc pl-5 text-sm text-ink/60">
           <li>참가한 공모전과 제출물 — 다만 이름 없이 남습니다</li>
           <li>결제·지급 원장 — 계약 상대방의 기록이라 법이 보존을 요구합니다</li>
         </ul>

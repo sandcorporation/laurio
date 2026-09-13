@@ -97,7 +97,7 @@ export default function DeveloperBuildAssetsPage({
   return (
     <main className="mx-auto max-w-2xl p-10">
       <Link
-        className="text-sm text-muted"
+        className="text-sm text-ink/60"
         href="/console/participation"
         data-testid="build-assets-back"
       >
@@ -129,14 +129,14 @@ export default function DeveloperBuildAssetsPage({
           </p>
 
           {targetRef ? (
-            <div className="mt-6 flex flex-col gap-3 rounded border border-subtle p-4">
+            <div className="mt-6 flex flex-col gap-3 rounded border border-rule p-4">
               <div className="flex flex-col gap-1">
                 <label className="text-sm" htmlFor="build-asset-kind">
                   종류
                 </label>
                 <select
                   id="build-asset-kind"
-                  className="rounded border border-subtle p-2 text-sm"
+                  className="rounded border border-rule p-2 text-sm"
                   value={kind}
                   onChange={(event) => setKind(event.target.value as BuildAssetKind)}
                   data-testid="build-asset-kind-select"
@@ -154,7 +154,7 @@ export default function DeveloperBuildAssetsPage({
                 </label>
                 <input
                   id="build-asset-label"
-                  className="rounded border border-subtle p-2 text-sm"
+                  className="rounded border border-rule p-2 text-sm"
                   type="text"
                   maxLength={200}
                   value={label}
@@ -181,9 +181,9 @@ export default function DeveloperBuildAssetsPage({
           <section className="mt-8" data-testid="build-assets-own-list">
             <h2 className="text-lg font-semibold">올린 자료</h2>
             {assets.status === "loading" ? (
-              <p className="mt-2 text-sm text-muted">불러오는 중...</p>
+              <p className="mt-2 text-sm text-ink/60">불러오는 중...</p>
             ) : assets.status === "ready" && assets.assets.length === 0 ? (
-              <p className="mt-2 text-sm text-muted" data-testid="build-assets-empty">
+              <p className="mt-2 text-sm text-ink/60" data-testid="build-assets-empty">
                 아직 올린 자료가 없습니다.
               </p>
             ) : assets.status === "ready" ? (
@@ -191,13 +191,13 @@ export default function DeveloperBuildAssetsPage({
                 {assets.assets.map((asset) => (
                   <li
                     key={asset.id}
-                    className="rounded border border-subtle p-3 text-sm"
+                    className="rounded border border-rule p-3 text-sm"
                     data-testid={`build-asset-${asset.id}`}
                   >
                     <span className="rounded-sm border border-rule px-2 py-0.5 text-xs">
                       {buildAssetKindLabel(asset.kind)}
                     </span>{" "}
-                    {asset.label || <span className="text-muted">(라벨 없음)</span>}
+                    {asset.label || <span className="text-ink/60">(라벨 없음)</span>}
                   </li>
                 ))}
               </ul>

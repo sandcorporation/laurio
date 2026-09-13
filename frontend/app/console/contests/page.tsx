@@ -65,7 +65,7 @@ export default function MyContestsPage() {
               막으려던 결과가 그대로 일어난다. */}
           {state.hasMore ? (
             <button
-              className="mt-4 rounded border border-subtle px-4 py-2 text-sm disabled:opacity-50"
+              className="mt-4 rounded border border-rule px-4 py-2 text-sm disabled:opacity-50"
               type="button"
               onClick={state.loadMore}
               disabled={state.loadingMore}
@@ -87,13 +87,13 @@ function SponsoredContestCard({ row }: { row: SponsoredContestRow }) {
 
   return (
     <li
-      className="rounded border border-subtle p-4"
+      className="rounded border border-rule p-4"
       data-testid={`my-contest-row-${row.contest_id}`}
       data-next-action={row.next_action}
     >
       {/* 「다음 행동」이 제목보다 먼저 온다 — 이 화면에 온 이유가 그것이다. */}
       <p
-        className={label.mine ? "font-semibold text-attention" : "text-muted"}
+        className={label.mine ? "font-semibold text-attention" : "text-ink/60"}
         data-testid={`my-contest-row-${row.contest_id}-next-action`}
       >
         {label.mine ? `내 차례 · ${label.text}` : label.text}
@@ -116,7 +116,7 @@ function SponsoredContestCard({ row }: { row: SponsoredContestRow }) {
         {row.title}
       </Link>
 
-      <p className="mt-1 text-sm text-muted">
+      <p className="mt-1 text-sm text-ink/60">
         상금 {row.prize.toLocaleString()}원 · 마감{" "}
         {new Date(row.deadline_at).toLocaleString("ko-KR")} · 제출{" "}
         <span data-testid={`my-contest-row-${row.contest_id}-submission-count`}>
