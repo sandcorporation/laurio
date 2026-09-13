@@ -38,15 +38,17 @@ export default async function Home() {
   // 백엔드의 `GET /api/contests/home`도 같은 스위치로 404를 내므로(단일 집행자
   // 원칙), 여기서 미리 갈리지 않으면 이 요청이 그대로 새고 홈 전체가 깨진
   // 화면으로 보인다.
+  //
+  // **그 자리에 아무것도 두지 않는다**(#359, spec #358). 과제가 걷히기 전에는
+  // "초대받은 과제만 이용할 수 있습니다"가 여기 있었다 — 과제 자체가 없어진
+  // 지금 그 문장은 거짓이다. 강의실로 보내는 안내도 두지 않는다: 공개 앱과
+  // 강의실은 로그인을 공유하지 않고(ADR-0038), 여기서 강의실을 안내하면 그
+  // 화면이 실제로 갖지 않은 관계를 지어내게 된다. 빈 화면이 합의된 답이다.
   if (!contestProductEnabled()) {
     return (
       <main className="flex min-h-screen flex-col gap-4 bg-paper p-10 text-ink">
         <header className="flex flex-col gap-2">
           <h1 className="text-3xl font-semibold">Laurio</h1>
-          <p className="text-sm text-ink/70">
-            지금은 초대받은 과제만 이용할 수 있습니다. 출제자에게 받은 초대 링크로
-            들어와 주세요.
-          </p>
         </header>
       </main>
     );

@@ -136,19 +136,12 @@ function ParticipationCard({ row }: { row: ParticipationRow }) {
           본인확인이 풀린 상태)은 본인확인이 먼저라고 말하고, 그 밖의 모든
           값(채점 대기부터 지급 완료까지)은 "내 제출물 보기"다.
 
-          Assignment 행은 URL이 다르다 — `invite_code`가 있으면(#245,
-          `MyParticipationOut.resolve_invite_code`) 본인확인을 요구하는
-          `/console/contests/{id}/submit` 대신 InviteCode로만 여는
-          `/assignments/{code}`로 보낸다 — 그 화면도 같은 `next_action`으로
-          마감 뒤 읽기 전용으로 서므로(`app/assignments/[code]/page.tsx`의
-          `canEdit`) 똑같이 모든 행에 걸 수 있다. */}
+          과제가 걷히면서(#359, spec #358) `invite_code`로 `/assignments/{code}`로
+          보내던 분기도 되돌렸다 — 그 화면이 없으니 모든 행이 공모전 제출
+          화면 하나로 간다. */}
       <Link
         className="mt-2 block text-sm underline"
-        href={
-          row.invite_code
-            ? `/assignments/${row.invite_code}`
-            : `/console/contests/${row.contest_id}/submit`
-        }
+        href={`/console/contests/${row.contest_id}/submit`}
         data-testid={`participation-row-${row.submission_id}-edit`}
       >
         {row.next_action === "can_edit_submission"

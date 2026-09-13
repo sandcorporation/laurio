@@ -71,16 +71,6 @@ export default function AppHome() {
           내 공모전
         </Link>
       )}
-      {/* 과제(Assignment) 진입점(#207, ADR-0028/0029). 상금 없는 과제는 자격을
-          받은 출제자가 여기서 만들고 연다 — 공모전과 나란히 두되 역할로 화면을
-          가르지 않는다(위 "내 공모전"과 같은 원칙). */}
-      <Link
-        href="/console/assignments"
-        data-testid="app-home-my-assignments-link"
-        className="w-fit rounded-sm border border-rule px-4 py-2 text-sm hover:border-ink"
-      >
-        내 과제
-      </Link>
       {/* 표시 이름·소개를 보고 고치는 화면으로 가는 진입점(#228). 콘솔에서
           찾아갈 수 있어야 한다는 것이 이 티켓의 AC다 — URL을 직접 쳐야만
           닿는 화면을 만들지 않는다("내 참가 현황"·"탈퇴" 링크와 같은 이유). */}
