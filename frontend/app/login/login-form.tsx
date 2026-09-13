@@ -34,8 +34,10 @@ import { Suspense, useState } from "react";
 import { normalizeDetail } from "@laurio/bff-client";
 import { useRouter, useSearchParams } from "next/navigation";
 
+import { Card, ErrorNote, INPUT_CLASS } from "@/app/components/ui";
 import { resolveNextPath } from "@/lib/auth/next-path";
 import type { SocialProvider } from "@/lib/auth/social-providers";
+import { buttonClass } from "@/lib/ui/classnames";
 
 const DEV_SEED_PROVIDERS = [
   { id: "kakao", label: "카카오로 로그인" },
@@ -143,11 +145,9 @@ function LoginButtons({ showDevSeedForm, githubConfigured, googleConfigured }: L
   ];
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-8 bg-paper p-10">
-      <div className="flex w-full max-w-sm flex-col gap-6 rounded-md border border-rule bg-surface p-8">
-        <div>
-          <h1 className="text-2xl font-semibold">로그인</h1>
-        </div>
+    <main className="flex min-h-screen flex-col items-center justify-center p-6">
+      <Card className="flex w-full max-w-sm flex-col gap-6 p-8">
+        <h1 className="text-2xl font-semibold">로그인</h1>
 
         <div className="flex flex-col gap-3">
           {oauthButtons.map(({ provider, label, configured }) =>
@@ -156,7 +156,7 @@ function LoginButtons({ showDevSeedForm, githubConfigured, googleConfigured }: L
                 key={provider}
                 href={authorizeQuery(provider)}
                 data-testid={`oauth-login-${provider}`}
-                className="rounded-sm border border-ink px-4 py-2 text-center text-sm font-medium hover:bg-ink hover:text-paper"
+                className={buttonClass("primary")}
               >
                 {label}
               </a>
@@ -167,7 +167,7 @@ function LoginButtons({ showDevSeedForm, githubConfigured, googleConfigured }: L
                 disabled
                 aria-disabled="true"
                 data-testid={`oauth-login-${provider}`}
-                className="cursor-not-allowed rounded-sm border border-rule px-4 py-2 text-sm text-ink/50"
+                className={buttonClass("secondary")}
               >
                 {label} (준비 중)
               </button>
@@ -175,11 +175,7 @@ function LoginButtons({ showDevSeedForm, githubConfigured, googleConfigured }: L
           )}
         </div>
 
-        {displayedError && (
-          <p role="alert" data-testid="login-error" className="text-sm text-attention">
-            {displayedError}
-          </p>
-        )}
+        {displayedError && <ErrorNote testId="login-error">{displayedError}</ErrorNote>}
 
         {showDevSeedForm && (
           <div className="flex flex-col gap-3 border-t border-rule pt-6" data-testid="dev-seed-login">
@@ -190,7 +186,7 @@ function LoginButtons({ showDevSeedForm, githubConfigured, googleConfigured }: L
             <label className="flex flex-col gap-1 text-sm">
               테스트 계정 식별자
               <input
-                className="rounded-sm border border-rule bg-paper px-2 py-1 font-mono"
+                className={INPUT_CLASS}
                 value={seed}
                 onChange={(event) => setSeed(event.target.value)}
                 data-testid="fake-login-seed"
@@ -205,7 +201,7 @@ function LoginButtons({ showDevSeedForm, githubConfigured, googleConfigured }: L
                   onClick={() => handleDevSeedLogin(provider.id)}
                   disabled={pending !== null}
                   data-testid={`login-${provider.id}`}
-                  className="rounded-sm border border-rule px-4 py-2 text-sm hover:border-ink disabled:opacity-50"
+                  className={buttonClass("secondary")}
                 >
                   {pending === provider.id ? "로그인 중..." : provider.label}
                 </button>
@@ -213,7 +209,7 @@ function LoginButtons({ showDevSeedForm, githubConfigured, googleConfigured }: L
             </div>
           </div>
         )}
-      </div>
+      </Card>
     </main>
   );
 }

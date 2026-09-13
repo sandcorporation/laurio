@@ -211,7 +211,7 @@ function NotificationRow({
           <div className="flex shrink-0 items-center gap-2">
             <span
               data-testid={`notification-new-badge-${notification.id}`}
-              className="rounded-full bg-attention px-1.5 py-0.5 text-[10px] font-medium text-paper"
+              className="bg-attention px-1.5 py-0.5 text-[10px] font-medium text-paper"
             >
               새 알림
             </span>

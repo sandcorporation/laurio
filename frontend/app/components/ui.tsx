@@ -116,9 +116,9 @@ export function FieldLabel({ children }: { children: ReactNode }) {
 }
 
 /** 오류는 붉게, 그러나 배경을 채우지 않는다 — 이 브랜드는 면을 칠하지 않는다. */
-export function ErrorNote({ children }: { children: ReactNode }) {
+export function ErrorNote({ children, testId }: { children: ReactNode; testId?: string }) {
   return (
-    <p role="alert" className="text-sm leading-relaxed text-attention">
+    <p role="alert" data-testid={testId} className="text-sm leading-relaxed text-attention">
       {children}
     </p>
   );

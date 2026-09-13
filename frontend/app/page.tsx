@@ -28,6 +28,7 @@ export const dynamic = "force-dynamic";
 
 import Link from "next/link";
 
+import { Badge, EmptyState, PageHeader, PageShell } from "@/app/components/ui";
 import { fetchHomeCuration, type Contest, type HomeCurationGroup } from "@/lib/api/contests";
 import { formatDday, formatPrize, formatSubmissionCount, isImminent } from "@/lib/contest-format";
 import { contestProductEnabled } from "@/lib/contest-switch";
@@ -46,41 +47,38 @@ export default async function Home() {
   // 화면이 실제로 갖지 않은 관계를 지어내게 된다. 빈 화면이 합의된 답이다.
   if (!contestProductEnabled()) {
     return (
-      <main className="flex min-h-screen flex-col gap-4 bg-paper p-10 text-ink">
-        <header className="flex flex-col gap-2">
-          <h1 className="text-3xl font-semibold">Laurio</h1>
-        </header>
-      </main>
+      <PageShell>
+        <PageHeader title="Laurio" />
+      </PageShell>
     );
   }
 
   const groups = await fetchHomeCuration();
 
   return (
-    <main className="flex min-h-screen flex-col gap-8 bg-paper p-10 text-ink">
-      <header className="flex flex-col gap-2">
-        <h1 className="text-3xl font-semibold">Laurio</h1>
-        <p className="text-sm text-ink/70">
-          발주자가 상금을 걸고 요구사항을 공개하면, 개발자들이 만들어 제출하는 공개 공모전
-          플랫폼입니다.
+    <PageShell>
+      <div className="flex flex-col gap-8">
+        <PageHeader
+          title="Laurio"
+          description="발주자가 상금을 걸고 요구사항을 공개하면, 개발자들이 만들어 제출하는 공개 공모전 플랫폼입니다."
+        />
+
+        {groups.map((group) => (
+          <HomeBucketSection key={group.bucket} group={group} />
+        ))}
+
+        {/* 「상금미달」이 참가를 막지 않는다는 도메인 규칙은 /contests(app/contests/page.tsx)와
+            같은 문구로 반복한다 — 액센트 색만으로는 이 규칙이 안 읽힌다. 홈은 하필 그
+            규칙을 가장 모를 첫 방문자가 보는 화면이라, 여기서 빠지면 안 된다. */}
+        <p className="flex items-start gap-2 border-t border-rule pt-4 text-xs leading-relaxed text-ink/60">
+          <span aria-hidden="true">ⓘ</span>
+          <span>
+            「상금미달」은 참가를 막지 않습니다. 선택한 요구형태의 최소 제안 상금 합계에 못
+            미친다는 표시일 뿐이며, 판단은 개발자의 몫입니다.
+          </span>
         </p>
-      </header>
-
-      {groups.map((group) => (
-        <HomeBucketSection key={group.bucket} group={group} />
-      ))}
-
-      {/* 「상금미달」이 참가를 막지 않는다는 도메인 규칙은 /contests(app/contests/page.tsx)와
-          같은 문구로 반복한다 — 액센트 색만으로는 이 규칙이 안 읽힌다. 홈은 하필 그
-          규칙을 가장 모를 첫 방문자가 보는 화면이라, 여기서 빠지면 안 된다. */}
-      <p className="flex items-start gap-2 border-t border-rule pt-4 text-xs leading-relaxed text-ink/60">
-        <span aria-hidden="true">ⓘ</span>
-        <span>
-          「상금미달」은 참가를 막지 않습니다. 선택한 요구형태의 최소 제안 상금 합계에 못
-          미친다는 표시일 뿐이며, 판단은 개발자의 몫입니다.
-        </span>
-      </p>
-    </main>
+      </div>
+    </PageShell>
   );
 }
 
@@ -101,12 +99,9 @@ function HomeBucketSection({ group }: { group: HomeCurationGroup }) {
       </div>
 
       {group.contests.length === 0 ? (
-        <p
-          data-testid={`home-bucket-${group.bucket}-empty`}
-          className="py-6 text-center text-sm text-ink/60"
-        >
-          {HOME_BUCKET_EMPTY_MESSAGES[group.bucket]}
-        </p>
+        <div data-testid={`home-bucket-${group.bucket}-empty`}>
+          <EmptyState>{HOME_BUCKET_EMPTY_MESSAGES[group.bucket]}</EmptyState>
+        </div>
       ) : (
         <ul data-testid={`home-bucket-${group.bucket}-list`} className="flex flex-col">
           {group.contests.map((contest) => (
@@ -131,7 +126,7 @@ function HomeContestRow({ contest }: { contest: Contest }) {
         <div className="flex min-w-0 flex-col gap-1">
           <div className="flex items-center gap-2">
             <span className="truncate text-[15px] font-medium">{contest.title}</span>
-            {contest.is_underfunded && <UnderfundedBadge />}
+            {contest.is_underfunded && <Badge tone="attention">상금미달</Badge>}
           </div>
           <span className="text-xs text-ink/60">{contest.category.name}</span>
           <span
@@ -154,13 +149,5 @@ function HomeContestRow({ contest }: { contest: Contest }) {
         </div>
       </Link>
     </li>
-  );
-}
-
-function UnderfundedBadge() {
-  return (
-    <span className="inline-flex items-center gap-1 border border-attention px-1.5 py-0.5 text-[10.5px] font-medium text-attention">
-      상금미달
-    </span>
   );
 }

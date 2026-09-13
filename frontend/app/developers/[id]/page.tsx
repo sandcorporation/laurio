@@ -17,6 +17,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
+import { EmptyState, PageHeader, PageShell, SectionHeading } from "@/app/components/ui";
 import { fetchDeveloperProfile, type PublicSubmission } from "@/lib/api/developers";
 
 type Params = { id: string };
@@ -67,34 +68,33 @@ export default async function DeveloperProfilePage({ params }: { params: Promise
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-8 bg-paper p-10 text-ink">
-      <header className="flex flex-col gap-3 border-b border-rule pb-6">
-        <span className="text-xs tracking-wide text-ink/60">개발자 프로필</span>
-        <h1 className="text-2xl font-semibold" data-testid="developer-display-name">
-          {profile.display_name}
-        </h1>
-        {profile.bio && (
-          <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink/80">{profile.bio}</p>
-        )}
-      </header>
+    <PageShell>
+      <div className="flex flex-col gap-8">
+        <div className="border-b border-rule pb-6">
+          <PageHeader eyebrow="개발자 프로필" title={profile.display_name} titleTestId="developer-display-name" />
+          {profile.bio && (
+            <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink/80">{profile.bio}</p>
+          )}
+        </div>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium">아카이브된 제출작</h2>
-        <p className="text-xs text-ink/60">
-          마감된 공모전에 낸 제출작만 보입니다. 소스코드는 저작권이 본인에게 남아 공개되지
-          않습니다.
-        </p>
-        {profile.submissions.length === 0 ? (
-          <p className="text-sm text-ink/60">마감된 공모전에 낸 제출작이 아직 없습니다.</p>
-        ) : (
-          <ul className="flex flex-col" data-testid="archived-submissions">
-            {profile.submissions.map((submission) => (
-              <ArchivedSubmissionRow key={submission.submission_id} submission={submission} />
-            ))}
-          </ul>
-        )}
-      </section>
-    </main>
+        <section className="flex flex-col gap-3">
+          <SectionHeading title="아카이브된 제출작" />
+          <p className="text-xs text-ink/60">
+            마감된 공모전에 낸 제출작만 보입니다. 소스코드는 저작권이 본인에게 남아 공개되지
+            않습니다.
+          </p>
+          {profile.submissions.length === 0 ? (
+            <EmptyState>마감된 공모전에 낸 제출작이 아직 없습니다.</EmptyState>
+          ) : (
+            <ul className="flex flex-col" data-testid="archived-submissions">
+              {profile.submissions.map((submission) => (
+                <ArchivedSubmissionRow key={submission.submission_id} submission={submission} />
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+    </PageShell>
   );
 }
 
