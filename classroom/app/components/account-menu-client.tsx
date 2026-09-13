@@ -19,6 +19,8 @@ import { useState } from "react";
 
 import { accountLabel, useMe } from "@/lib/auth/use-me";
 
+import { buttonClass } from "./ui";
+
 export function AccountMenuClient({
   profileUrl,
   withdrawUrl,
@@ -38,7 +40,7 @@ export function AccountMenuClient({
       <Link
         href="/login"
         data-testid="account-menu-login-link"
-        className="border border-rule px-3 py-1.5 text-[13px] text-ink hover:border-ink"
+        className={buttonClass("secondary", "sm")}
       >
         로그인
       </Link>

@@ -110,7 +110,9 @@ export type ButtonTone = keyof typeof BUTTON_TONE;
 
 /** 버튼과 링크가 같은 모양을 내도록, 클래스만 돌려준다. */
 export function buttonClass(tone: ButtonTone = "secondary", size: "sm" | "md" = "md"): string {
-  const pad = size === "sm" ? "px-3 py-1.5 text-[12.5px]" : "px-4 py-2";
+  // sm 은 공개 앱(`frontend/lib/ui/classnames.ts`)과 같은 값이다 — 헤더의 같은
+  // 버튼이 두 앱에서 크기가 갈렸었다.
+  const pad = size === "sm" ? "px-3 py-1.5 text-xs" : "px-4 py-2";
   return `${BUTTON_BASE} ${BUTTON_TONE[tone]} ${pad}`;
 }
 
