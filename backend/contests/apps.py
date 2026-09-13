@@ -10,9 +10,12 @@ class ContestsConfig(AppConfig):
         """마감 전이·심사기간 종료 전이를 core.scans 등록부에 스캔으로 등록한다
         (#11/#13, ADR-0003).
 
-        아래 세 규칙의 from_state/to_state/due_field 는 `contests.transitions` 가
-        선언한 전이 그래프에서 파생된다(#255) — 그 모듈이 이 세 자리를 포함한 Contest
-        상태 전이 전체가 사는 한 곳이다.
+        아래 두 규칙의 from_state/to_state/due_field 는 `contests.transitions` 가
+        선언한 전이 그래프에서 파생된다(#255) — 그 모듈이 이 두 자리를 포함한 Contest
+        상태 전이 전체가 사는 한 곳이다. **셋째 규칙(ASSIGNMENT_OPEN ->
+        ASSIGNMENT_CLOSED)은 더 이상 여기서 등록하지 않는다**(#361) — 아래 두
+        `register_scan` 호출 사이의 주석과 `contests.transitions.
+        SCAN_EDGES_INTENTIONALLY_UNREGISTERED`가 이유를 적는다.
 
         core.scans 등록부에 스캔으로 올라 beat 가 주기적으로, /tick 이 한 바퀴에 스캔한다(#137).
         `claim_transition` 이 이미 `WHERE id=? AND status='<이전상태>'` 형태의 단일
@@ -32,12 +35,11 @@ class ContestsConfig(AppConfig):
            않은 Contest 를 옮긴다(#13). Award된 Contest 는 이미 AWARDED 상태라 이
            규칙의 from_state(CLOSED) 조건에 애초에 걸리지 않는다 — Award가 이
            스케줄러 전이보다 먼저 일어나도, 늦게 일어나도 서로를 밟지 않는다.
-        3. ASSIGNMENT_OPEN -> ASSIGNMENT_CLOSED(#207, ADR-0028) — deadline_at 이
-           지나면 옮긴다. extra_fields 가 없다 — Assignment 에는 심사기간·Award·
-           Distribution 이 전혀 없으므로 judging_ends_at 을 채울 이유가 없다(계속
-           null 로 남는다). 채점 스캔(Contest.Status.SCOREABLE)이 이 상태를 집어
-           Score 를 남기는 것으로 수명이 끝난다 — CLOSED 로 가는 공모전 전이와
-           같은 뼈대를 쓰지만 다음 단계로 이어지는 전이가 없다는 점이 다르다.
+
+        (셋째 규칙이었던 ASSIGNMENT_OPEN -> ASSIGNMENT_CLOSED, #207/ADR-0028 —
+        과제 개설 API가 걷혀(#361) 이 상태에 새로 들어올 길이 없으므로 스캔으로
+        등록해 두면 영원히 빈 후보만 돈다. 간선 선언 자체는 `contests.transitions`
+        에 남아 있다.)
         """
 
         from django.core.checks import register
