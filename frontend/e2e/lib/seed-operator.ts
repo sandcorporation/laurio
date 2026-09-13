@@ -210,11 +210,3 @@ export async function ledgerEntryCount(contestId: number): Promise<number> {
   };
   return result.count;
 }
-
-/** 과제 개최 자격 화면(#206) e2e가 자격을 줄 대상으로 쓸 Sponsor 계정을
- * 멱등하게 만든다(backend/accounts/management/commands/
- * seed_e2e_assignment_permission_sponsor.py). 고정된 (provider, provider_uid)로
- * 귀결되므로 몇 번을 불러도 같은 사용자명을 돌려준다 — 옵션이 없다. */
-export async function seedE2eAssignmentPermissionSponsor(): Promise<{ username: string }> {
-  return (await runSeedCommand("assignment-permission-sponsor")) as { username: string };
-}
