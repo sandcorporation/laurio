@@ -123,8 +123,8 @@ def _notify_if_developer_turn(payout: Payout, as_of, ctx):
     return {"payout_id": payout.id, "hold_kind": hold.kind.value}
 
 
-# `enabled=contest_product_enabled`(#271) — Payout 은 상금이 있는 공모전 전용이다
-# (Assignment 에는 지급 자체가 없다). 공모전 제품 스위치가 꺼지면 이 스캔은
+# `enabled=contest_product_enabled`(#271) — Payout 은 상금이 있는 공모전
+# 전용이다. 공모전 제품 스위치가 꺼지면 이 스캔은
 # 등록부에서 사라진 것처럼 군다.
 PAYOUT_NOTIFICATION_SCANS = (
     ScanSpec(

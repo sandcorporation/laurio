@@ -5,7 +5,6 @@
 없다 — `tests/test_operator_deliverable_types.py`가 이미 고정한 규율(상위
 등급만·사유 필수·이력 남음·비활성화만 하고 지우지 않음)을 그대로 확인한다.
 
-이 스위트만의 핵심은 **예약된 Assignment Category**(#213, ADR-0033)다 — 그
 행은 이름을 고치거나 감추는 것 둘 다 막혀야 한다. `Contest.kind`가 생겨
 "이 Contest가 과제인가"의 판정 자체는 이 행이 바뀌어도 흔들리지 않지만, 그와
 별개로 화면이 실수로 이 행을 편집하는 것은 여전히 막아야 한다(모듈 설명은
@@ -16,7 +15,6 @@ import pytest
 from django.core.management import call_command
 from django.test import Client
 
-from contests.assignment_category import get_assignment_category
 from contests.models import Category, CategoryChange
 
 ORIGIN = "http://testserver"
@@ -81,19 +79,6 @@ def test_ordinary_operator_can_view_categories_including_inactive_ones():
     assert by_id[inactive.id]["is_active"] is False
 
 
-@pytest.mark.django_db
-def test_reserved_assignment_category_is_flagged_in_the_list():
-    reserved = get_assignment_category()
-    judge = _operator_client("judge-cat-reserved-flag")
-
-    response = judge.get(CATEGORIES_URL, HTTP_ORIGIN=ORIGIN)
-
-    assert response.status_code == 200, response.content
-    by_id = {row["id"]: row for row in response.json()}
-    assert by_id[reserved.id]["is_reserved"] is True
-
-
-# --- 생성: 상위 등급만, 이유가 필요하고, 즉시 공개 선택지에 나타난다 ---------
 
 
 @pytest.mark.django_db
@@ -104,7 +89,6 @@ def test_superuser_can_create_a_category_and_it_appears_in_public_list_immediate
 
     assert response.status_code == 201, response.content
     created_id = response.json()["id"]
-    assert response.json()["is_reserved"] is False
 
     public = Client().get(PUBLIC_CATEGORIES_URL)
     assert public.status_code == 200
@@ -221,24 +205,6 @@ def test_renaming_a_missing_category_is_404():
     assert response.status_code == 404, response.content
 
 
-@pytest.mark.django_db
-def test_reserved_assignment_category_cannot_be_renamed():
-    """#213이 kind를 도입해 판정 자체는 더 이상 이 행에 기대지 않지만, 화면이
-    실수로 이 행을 다른 산업·장르 이름으로 바꾸면 다음 Assignment가 그 이름의
-    Category를 노출하는 조용한 혼란이 생긴다 — 그래서 여전히 막는다."""
-
-    reserved = get_assignment_category()
-    original_name = reserved.name
-    root = _operator_client("root-cat-rename-reserved", superuser=True)
-
-    response = _rename(root, reserved.id, name="게임-cat231")
-
-    assert response.status_code == 422, response.content
-    reserved.refresh_from_db()
-    assert reserved.name == original_name
-
-
-# --- 감추기: 지우지 않는다, 기존 Contest는 그대로 동작한다 ------------------
 
 
 @pytest.mark.django_db
@@ -337,19 +303,6 @@ def test_deactivate_without_reason_is_rejected():
     assert category.is_active is True
 
 
-@pytest.mark.django_db
-def test_reserved_assignment_category_cannot_be_deactivated():
-    reserved = get_assignment_category()
-    root = _operator_client("root-cat-deactivate-reserved", superuser=True)
-
-    response = _deactivate(root, reserved.id, reason="실수로 감추기 시도")
-
-    assert response.status_code == 422, response.content
-    # 이미 is_active=False로 심어진 행이므로 통상적인 "이미 비활성" 409와
-    # 헷갈리지 않게, 예약 사유로 422를 낸다.
-
-
-# --- 이력: 일반 등급도 본다 -------------------------------------------------
 
 
 @pytest.mark.django_db

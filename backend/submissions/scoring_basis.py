@@ -13,9 +13,7 @@ appeals_app`가 AST를 파싱해 그것을 고정한다. 이 모듈이 다루는
 재노출하면 `appeals`도 `submissions`만 알면 된다.
 
 `submissions.schemas.OwnScoreOut`(Developer용)·`appeals.schemas.
-ScoreSnapshotOut`(Operator용)이 이 모듈을 함께 쓴다. 과제 출제자용
-`contests.schemas.AssignmentSubmissionScoreOut`도 한때 여기 얹혀 있었지만
-과제 라우터가 걷히며(#361) 함께 사라졌다.
+ScoreSnapshotOut`(Operator용)이 이 모듈을 함께 쓴다.
 
 **청중을 구조로 가른다 — 저장된 문자열을 소독하지 않는다.** #244가 알림
 발송 실패 사유에 대해 세운 것과 같은 모양이다(`notifications.api.

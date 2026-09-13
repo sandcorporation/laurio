@@ -135,10 +135,7 @@ function ParticipationCard({ row }: { row: ParticipationRow }) {
           때만 "수정하러"라고 말하고, `needs_reverification`(#250, 마감 전인데
           본인확인이 풀린 상태)은 본인확인이 먼저라고 말하고, 그 밖의 모든
           값(채점 대기부터 지급 완료까지)은 "내 제출물 보기"다.
-
-          과제가 걷히면서(#359, spec #358) `invite_code`로 `/assignments/{code}`로
-          보내던 분기도 되돌렸다 — 그 화면이 없으니 모든 행이 공모전 제출
-          화면 하나로 간다. */}
+ */}
       <Link
         className="mt-2 block text-sm underline"
         href={`/console/contests/${row.contest_id}/submit`}

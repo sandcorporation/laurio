@@ -12,10 +12,7 @@ class ContestsConfig(AppConfig):
 
         아래 두 규칙의 from_state/to_state/due_field 는 `contests.transitions` 가
         선언한 전이 그래프에서 파생된다(#255) — 그 모듈이 이 두 자리를 포함한 Contest
-        상태 전이 전체가 사는 한 곳이다. **셋째 규칙(ASSIGNMENT_OPEN ->
-        ASSIGNMENT_CLOSED)은 더 이상 여기서 등록하지 않는다**(#361) — 아래 두
-        `register_scan` 호출 사이의 주석과 `contests.transitions.
-        SCAN_EDGES_INTENTIONALLY_UNREGISTERED`가 이유를 적는다.
+        상태 전이 전체가 사는 한 곳이다.
 
         core.scans 등록부에 스캔으로 올라 beat 가 주기적으로, /tick 이 한 바퀴에 스캔한다(#137).
         `claim_transition` 이 이미 `WHERE id=? AND status='<이전상태>'` 형태의 단일
@@ -36,7 +33,7 @@ class ContestsConfig(AppConfig):
            규칙의 from_state(CLOSED) 조건에 애초에 걸리지 않는다 — Award가 이
            스케줄러 전이보다 먼저 일어나도, 늦게 일어나도 서로를 밟지 않는다.
 
-        (셋째 규칙이었던 ASSIGNMENT_OPEN -> ASSIGNMENT_CLOSED, #207/ADR-0028 —
+        (예전에 셋째 규칙이 있었다 —
         과제 개설 API가 걷혀(#361) 이 상태에 새로 들어올 길이 없으므로 스캔으로
         등록해 두면 영원히 빈 후보만 돈다. 간선 선언 자체는 `contests.transitions`
         에 남아 있다.)
@@ -86,15 +83,6 @@ class ContestsConfig(AppConfig):
                 batch_size=500,
             )
         )
-
-        # "assignment-close" 스캔은 여기서 등록하지 않는다(#361) — 과제 라우터
-        # (`contests.assignment_api`)가 걷혀 DRAFT -> ASSIGNMENT_OPEN 으로 옮길
-        # 방법 자체가 없다. 그 스캔을 그대로 등록해 두면 영원히 빈 후보만 도는
-        # 스캔이 하나 남는다(#358 user story 11). 간선 선언(`contests.transitions`
-        # 의 "assignment-close")은 지우지 않는다 — `Contest.Status.ASSIGNMENT_OPEN`
-        # /`ASSIGNMENT_CLOSED`가 아직 모델에 남아 있어(다음 티켓의 몫) 그래프
-        # 자체는 그대로 self-consistent해야 한다. 자세한 사정은
-        # `contests.transitions`의 `SCAN_EDGES_INTENTIONALLY_UNREGISTERED` 독스트링.
 
         # ContestImage 최적화 — 썸네일·본문용 webp 파생본 (#235, ADR-0031/0032).
         from .image_optimization import CONTEST_IMAGE_OPTIMIZATION_SCAN

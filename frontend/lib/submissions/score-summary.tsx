@@ -4,7 +4,6 @@ import Link from "next/link";
 // (app/console/contests/[contestId]/submit/page.tsx)이 쓴다(#210, #248, #251).
 // 백엔드는 `submissions.schemas.OwnScoreOut`이 같은 필드를 준다.
 //
-// **원래 `lib/assignments/`에 있었다(#248 프리팩터, 이제 걷힌 과제 화면
 // 둘도 같이 썼다 — #359, spec #358).** 과제 전용 자리에 있던 컴포넌트를
 // 공모전 제출 화면이 가져다 쓰려면 옮겨야 했다 — 과제 쪽이 먼저 생겼을
 // 뿐 이 컴포넌트 자체는 과제 개념에 의존하지 않는다.

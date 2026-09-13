@@ -302,46 +302,6 @@ def test_only_draft_can_be_updated_no_status_silently_passes(client, category, l
             )
 
 
-@pytest.mark.django_db
-def test_an_assignment_kind_draft_cannot_reach_the_paid_contest_edit_gate(client, landing_type):
-    """`_get_owned_draft_contest`는 `status == DRAFT`만으로 판정하지 않는다 —
-    `kind == ASSIGNMENT`도 함께 거부한다(#232 코드리뷰에서 실제로 회귀로 잡힌
-    사고). DRAFT는 공모전과 과제가 공유하므로(ADR-0028), status 비교 하나만으로는
-    자격만 있고 본인확인은 없는 Sponsor가 만든 kind=ASSIGNMENT 행이 이 공모전
-    전용 편집 표면(Prize·Category)을 그대로 통과해 결제까지 갈 수 있었다.
-
-    과제 라우터(`contests.assignment_api`)가 걷혀(#361) 그 행을 HTTP로 만들
-    방법 자체는 사라졌지만, `kind` 필드는 아직 모델에 남아 있고(다음 티켓의
-    몫) 이 게이트의 `is_assignment` 방어도 그대로다 — 방어선 자체가 무너지지
-    않았는지는 ORM으로 그 모양의 행을 직접 만들어 확인한다."""
-
-    from accounts.models import SponsorProfile
-    from contests.assignment_category import get_assignment_category
-
-    pair = _login(client, uid="asgn-edit-gate")
-    me = client.get("/api/accounts/me", **_auth_header(pair["access"]))
-    sponsor = SponsorProfile.objects.create(user_id=me.json()["id"])
-    assignment = Contest.objects.create(
-        sponsor=sponsor,
-        title="과제로 위장한 행",
-        category=get_assignment_category(),
-        kind=Contest.Kind.ASSIGNMENT,
-        prize=0,
-        deadline_at="2030-01-01T00:00:00Z",
-        status=Contest.Status.DRAFT,
-        required_minimum_prize=0,
-        is_underfunded=False,
-    )
-    assignment.deliverable_types.set([landing_type])
-
-    response = client.patch(
-        f"{CONTESTS_URL}/{assignment.id}",
-        data={"title": "과제를 공모전 편집 표면으로 밀어본다"},
-        content_type="application/json",
-        **_auth_header(pair["access"]),
-    )
-
-    assert response.status_code == 409, response.content
 
 
 @pytest.mark.django_db

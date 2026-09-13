@@ -246,15 +246,14 @@ def test_off_closes_confirm_payment(client, published_contest):
     assert response.status_code == 404
 
 
-# --- 2. 꺼져도 열려 있어야 하는 것 — 과제 개설 화면의 공용 참조 데이터 --------------
+# --- 2. 꺼져도 열려 있어야 하는 것 — 공용 참조 데이터 --------------------------
 
 
 @OFF
-def test_off_keeps_assignment_reference_data_open(client, landing_type):
+def test_off_keeps_shared_reference_data_open(client, landing_type):
     """`/contests/deliverable-types`·`/contests/categories`는 주소만 `/contests/`
-    아래일 뿐 과제 개설 화면이 읽는 공용 참조 데이터라 계속 200이다(`core.contest_
-    switch` 모듈 독스트링) — 과제 라우터 자체가 걷힌 뒤(#361)에도 이 예외의 근거
-    (주소만으로는 어느 제품의 것인지 갈리지 않는다)는 바뀌지 않는다."""
+    아래일 뿐 어느 제품의 것인지 주소만으로는 갈리지 않는 공용 참조 데이터라 계속
+    200이다(`core.contest_switch` 모듈 독스트링)."""
 
     response = client.get(f"{CONTESTS_URL}/deliverable-types")
     assert response.status_code == 200

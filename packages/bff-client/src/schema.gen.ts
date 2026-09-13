@@ -771,10 +771,9 @@ export interface paths {
          * @description 강사가 참여자들의 시도를 훑어본다(#291) — 소스 다운로드, 저장소 URL(이미
          *     `value`가 그 주소다), AI 판정과 근거가 한 번에 실린다.
          *
-         *     **이 요청은 어디에도 기록되지 않는다**(ADR-0040). Assignment의 Sponsor가
-         *     소스를 펼칠 때 `AssignmentSourceReading`을 남기는 것(#211, ADR-0022)과
-         *     갈리는 지점이다 — 강사가 보는 것은 지도 그 자체라 "몇 번 봤다"가 신호가
-         *     아니라 잡음이 된다. 그래서 이 엔드포인트는 어떤 모델도 만들지 않는다.
+         *     **이 요청은 어디에도 기록되지 않는다**(ADR-0040) — 강사가 보는 것은 지도
+         *     그 자체라 "몇 번 봤다"가 신호가 아니라 잡음이 된다. 그래서 이 엔드포인트는
+         *     어떤 모델도 만들지 않는다.
          *
          *     같은 경로에 있는 `POST`(참여자의 제출, 위 `create_classroom_submission`)와
          *     메서드로만 갈린다 — `/join/{join_code}`가 GET(누구나)·POST(로그인)로
@@ -1261,8 +1260,7 @@ export interface paths {
          *     키에 `id` 를 붙이는 이유도 운영자 지급 큐와 같다 — `created_at` 이 같은 두 행의
          *     순서를 DB 가 보장하지 않는다.
          *
-         *     공모전 제품 스위치(#271)가 꺼지면 이 목록도 닫는다 — 이 화면은 애초에
-         *     Assignment를 제외한다(아래 exclude(kind=Contest.Kind.ASSIGNMENT)).
+         *     공모전 제품 스위치(#271)가 꺼지면 이 목록도 닫는다.
          */
         get: operations["contests_api_list_my_sponsored_contests"];
         put?: never;
@@ -2955,7 +2953,7 @@ export interface paths {
          *     **PG 등록은 그 잠금 밖에서 한다**(#127) — 벤더가 느리면 그 Contest 의 모든 쓰기가
          *     같이 멈추고 DB 커넥션을 물고 있게 된다. 행 확보까지만 트랜잭션 안이다.
          *
-         *     공모전 제품 스위치(#271)가 꺼지면 이 결제도 닫는다 — 아래 `gates.payable()`이
+         *     공모전 제품 스위치(#271)가 꺼지면 이 결제도 닫는다 — 아래 상태 분류가
          *     이미 과제 결제를 막고 있으므로, 이 검사는 공모전 쪽 새 결제만 추가로 막는다.
          */
         post: operations["payments_api_initiate_payment"];
@@ -3293,14 +3291,6 @@ export interface paths {
          *
          *     마감 후에는 누구나(비로그인 포함) 조회할 수 있지만 소스는 여전히 소유자 본인에게만
          *     보인다 — ADR-0014.
-         *
-         *     **Assignment(ADR-0028, #208)는 마감 후에도 공개되지 않는다.** 공모전의 "마감 후
-         *     전면 공개"는 순수 콘테스트의 보상 구조(#105) — 탈락자에게도 포트폴리오로 남는다 —
-         *     를 위한 것인데, Assignment에는 그 구조 자체가 없다(상금·경쟁·Award가 없다).
-         *     오히려 Assignment는 InviteCode를 아는 사람만 본다는 약속이 마감 후에도 그대로
-         *     이어져야 한다(스펙 #197: "명단은 없다, 제출한 사람만 보인다" — 그 제출한
-         *     사람이란 본인과 그 과제의 Sponsor 뿐이다) — 그러지 않으면 `submission_id`를
-         *     순차로 훑는 것만으로 제출자의 제출 내용(소스 제외)이 인터넷에 새어 나간다.
          */
         get: operations["contests_submission_api_get_submission"];
         put?: never;
@@ -4999,8 +4989,6 @@ export interface components {
              * Format: date-time
              */
             deadline_at: string;
-            /** Invite Code */
-            invite_code?: string | null;
             next_action: components["schemas"]["NextAction"];
             /** Prize */
             prize: number;
@@ -5094,7 +5082,7 @@ export interface components {
          * @description Developer 가 지금 무엇을 해야 하는가 — 또는 무엇을 기다리는가.
          * @enum {string}
          */
-        NextAction: "awaiting_scoring" | "awaiting_judging" | "awaiting_appeal_ruling" | "awaiting_distribution" | "awaiting_handover_release" | "awaiting_seller_registration" | "can_edit_submission" | "needs_reverification" | "can_appeal" | "request_payout" | "submit_tax_identity" | "not_selected" | "payout_complete" | "assignment_scored" | "retry_transfer" | "awaiting_transfer_resolution";
+        NextAction: "awaiting_scoring" | "awaiting_judging" | "awaiting_appeal_ruling" | "awaiting_distribution" | "awaiting_handover_release" | "awaiting_seller_registration" | "can_edit_submission" | "needs_reverification" | "can_appeal" | "request_payout" | "submit_tax_identity" | "not_selected" | "payout_complete" | "retry_transfer" | "awaiting_transfer_resolution";
         /** NotificationOut */
         NotificationOut: {
             /** Context */
@@ -5141,8 +5129,6 @@ export interface components {
             id: number;
             /** Is Active */
             is_active: boolean;
-            /** Is Reserved */
-            is_reserved: boolean;
             /** Name */
             name: string;
         };
@@ -6270,8 +6256,6 @@ export interface components {
              * @default []
              */
             assets: components["schemas"]["SubmissionAssetIn"][];
-            /** Invite Code */
-            invite_code?: string | null;
             /**
              * Requirement Responses
              * @default []

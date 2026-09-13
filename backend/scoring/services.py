@@ -363,17 +363,7 @@ def _finalize_score(
     # 알림 실패가 채점을 되돌리면 안 된다. 이 함수는 절대 예외를 밖으로 던지지
     # 않는다는 계약을 갖고 있고(모듈 docstring), `_notify_scored` 가 그 계약을
     # 지킨다 — notifications 쪽의 `_safe_notify` 와 같은 규율이다.
-    #
-    # **Assignment(ADR-0028, #212)에는 이 통지가 없다.** 이 스캔은 `Contest.
-    # Status.SCOREABLE` 하나만 보고 과제도 그대로 집으므로(#210 — 그것이 채점의
-    # 요지다), 여기서 걸러주지 않으면 이 통지만 `SENDS_LIFECYCLE_NOTICES`
-    # 선언(#205/#207 — 마감 임박 등 *주기 스캔이 보내는* 리마인더 셋 전용이라
-    # 이 호출은 원래 그 선언을 지나가지 않는다)을 비켜간 채 새어 나간다.
-    # 본인확인 없는 제출자에게는 연락처가 없어(ADR-0029) 실패한 발송 기록이
-    # 채널마다 쌓이고, 과제에는 애초에 이의(Appeal) 자체가 없으니 이 통지의
-    # 내용("이의 창이 열렸다") 자체가 거짓이다.
-    if not submission.contest.is_assignment:
-        _notify_scored(submission)
+    _notify_scored(submission)
 
     return {"submission_id": submission.id, "status": "scored", "percentage": str(percentage)}
 

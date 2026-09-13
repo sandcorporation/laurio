@@ -68,8 +68,8 @@ fail-closed 라 구멍은 아니지만 원인을 찾기 어렵다.
 | `GET`·`POST .../payout` | 지급 |
 
 **Contest 는 하나의 엔티티다**(ADR-0001). 과제(Assignment)를 같은 표에 함께
-나르던 `kind` 필드(ADR-0033)는 과제가 접히며(#358, ADR-0044) 뜻을 잃었다 —
-스키마에는 아직 남아 있지만 새 값이 더 생기지 않는다.
+나르던 `kind` 필드(ADR-0033)는 과제가 접히며(#358, ADR-0044) 스키마에서도
+걷혔다.
 
 **공모전 제품 스위치**(`settings.CONTEST_PRODUCT_ENABLED`, `core.contest_switch`)가
 꺼지면 위 표의 `contests.api` 소관 표면(목록·상세·홈·개최·수정·재개최·견적·
@@ -104,11 +104,11 @@ ADR-0036). 업로드 자료의 값은 `submission:{공모전id}:{개발자id}:{�
 시점에 MIME 허용목록(png·jpeg·webp·gif, `ContestImage` 와 같다)이 이미지가 아닌 파일을
 거절한다.
 
-**「지금 무엇을 해야 하는가」는 서버가 판단한다.** `next_action` 하나가 **16개 값** 중
+**「지금 무엇을 해야 하는가」는 서버가 판단한다.** `next_action` 하나가 **15개 값** 중
 하나로 답한다 — 기다리는 것(채점 대기 · 심사 대기 · 이의 심판 대기 · 배분 대기 · 인수 확인
 대기 · 지급대행 등록 대기 · 지급 처리 확인 중), 네 차례인 것(제출물 수정 가능 · 이의 제기
 가능 · 재확인 필요 · 지급 요청 · 세무 신원 제출 · 실이체 재시도), 끝난 것(미선정 · 지급
-완료 · 과제 채점 완료). 값이 enum 이라 하나 늘면 생성된 TS 타입에도 늘고 `tsc --noEmit` 이
+완료). 값이 enum 이라 하나 늘면 생성된 TS 타입에도 늘고 `tsc --noEmit` 이
 프론트의 누락된 분기를 빌드타임에 잡는다.
 
 **「마감 대기」는 없다.** 예전에 있었고 지웠다 — 마감 전에는 기다리는 것 말고도 할 일이
@@ -128,8 +128,7 @@ ADR-0036). 업로드 자료의 값은 `submission:{공모전id}:{개발자id}:{�
 | `GET /api/ledger/contests/{id}/balance` · `entries` | 원장 |
 
 **공모전 제품 스위치가 꺼지면 `POST /api/payments`·`/{order}/confirm`이 404다**
-— 과제에는 결제가 없으므로 이미 그 검사(`contests.gates.payable`)가 막고 있었고,
-이 스위치는 공모전 쪽 새 결제까지 막는다. `/webhook`은 닫지 않는다(PG가 서버 대
+— 이 스위치가 공모전 쪽 새 결제를 막는다. `/webhook`은 닫지 않는다(PG가 서버 대
 서버로 부른다) — 새 REQUESTED Payment 자체가 안 생기므로 사실상 부를 일이
 없어진다. 지급·원장은 그대로 연다 — 이미 확정된 지급을 마무리하는 표면이다.
 
@@ -272,11 +271,6 @@ llm_scoring`(#274)에 이어 `core.repository_adapters`(GitHub 저장소 clone·
 | 자료 | `demo-video-retention-purge` |
 | 데모 | `scheduled-state-demo` |
 
-**`assignment-close`는 등록부에 없다**(#358, ADR-0044) — 과제 개설 API가 걷혀
-`DRAFT -> ASSIGNMENT_OPEN`으로 옮길 방법이 사라졌으므로, 그 스캔은 영원히 빈
-후보만 돈다. 간선 선언 자체는 `contests/transitions.py`에 남아 있다(모델 정리
-전까지 그래프의 self-consistency를 위해).
-
 `POST /api/internal/tick` 이 등록 순서로 전부 한 바퀴 돌고, `POST /api/internal/scans/{name}`
 이 하나만 돌린다. **tick 은 시간을 앞당기지 않는다** — 「이미 밀린 일을 beat 를 기다리지
 않고 즉시 처리한다」이다.
@@ -299,8 +293,8 @@ llm_scoring`(#274)에 이어 `core.repository_adapters`(GitHub 저장소 clone·
 한다.
 
 **시연 영상은 보존 기간 뒤 파일만 파기된다**(ADR-0035). `demo-video-retention-purge`가
-이의 창의 끝(`judging_ends_at`, 공모전) 또는 마감(`deadline_at`, Assignment — 심사기간이
-없다) + `demo_video_retention_grace_days`가 지난 시연 영상을 집어 **스토리지 오브젝트만**
+이의 창의 끝(`judging_ends_at`) + `demo_video_retention_grace_days`가 지난 시연
+영상을 집어 **스토리지 오브젝트만**
 지운다. 자료 행·라벨·그것을 가리키던 근거는 그대로 남는다 — Score는 불변인데(ADR-0006)
 판정의 근거만 없어지는 사고를 피한다. 소스는 이 스캔의 대상이 아니다. 파일이 사라진
 자료의 다운로드는 오류가 아니라 "보존 기간이 지났다"를 정상 응답으로 답한다.
@@ -314,11 +308,9 @@ llm_scoring`(#274)에 이어 `core.repository_adapters`(GitHub 저장소 clone·
 | `closed` | 마감 | 스캔(마감 시각 경과) — 이때 심사 종료 시각도 함께 찍힌다 |
 | `awarded` | 선정 완료 | 발주자의 선정 |
 | `judging_ended` | 심사기간 종료 | 스캔(아무도 선정하지 않은 채 심사 종료) |
-| `assignment_open` | 과제 진행중 | 출제자의 「열기」 — 스캔이 아니라 명시적 행위 |
-| `assignment_closed` | 과제 마감 | 스캔(마감 시각 경과) |
 
 **전이 그래프는 `contests/transitions.py` 한 곳에 선언되어 있다**(#255) — 위 표의
-「어떻게 들어오는가」열이 서술하는 여섯 간선이 그 선언의 `CONTEST_TRANSITIONS`다.
+「어떻게 들어오는가」열이 서술하는 네 간선이 그 선언의 `CONTEST_TRANSITIONS`다.
 그 밖에서 `Contest.status`를 바꾸는 코드는 태어날 수 없다(#256, AST 정적 스캔).
 아래 다이어그램은 그 선언에서 **자동으로 낸다** — 손으로 그리지 않는다:
 
@@ -326,10 +318,8 @@ llm_scoring`(#274)에 이어 `core.repository_adapters`(GitHub 저장소 clone·
 stateDiagram-v2
     published --> closed : contest-close
     closed --> judging_ended : contest-judging-end
-    assignment_open --> assignment_closed : assignment-close
     draft --> published : publish-on-payment
     closed --> awarded : award
-    draft --> assignment_open : open-assignment
     note right of closed : judging-extension (제자리 갱신, 상태 불변)
 ```
 
@@ -434,10 +424,10 @@ fake 이거나 임포트되지 않으면 부팅 자체를 거부한다** — 컨
 
 | 앱 | 모델 |
 | --- | --- |
-| `accounts` | SocialAccount · SponsorProfile · DeveloperProfile · PhoneContact · RefreshToken · BlacklistedToken · Withdrawal · AssignmentPermissionChange |
+| `accounts` | SocialAccount · SponsorProfile · DeveloperProfile · PhoneContact · RefreshToken · BlacklistedToken · Withdrawal |
 | `verification` | Verification · VerificationRequest · RetainedIdentity · IdentityReading |
-| `contests` | Contest · Category · DeliverableType · Requirement · ContestImage · InviteCode · RequirementChatMessage · JudgingExtensionPayment · ContestSubmission(#270, `submissions.Submission`의 공모전 자식) · 변경 이력 셋 |
-| `submissions`(공유층 — #270, ADR-0039) | Submission(부모) · SubmissionAsset · RequirementResponse · Evidence · AssignmentSourceReading |
+| `contests` | Contest · Category · DeliverableType · Requirement · ContestImage · RequirementChatMessage · JudgingExtensionPayment · ContestSubmission(#270, `submissions.Submission`의 공모전 자식) · 변경 이력 셋 |
+| `submissions`(공유층 — #270, ADR-0039) | Submission(부모) · SubmissionAsset · RequirementResponse · Evidence |
 | `scoring` | Score · ScoringAttempt |
 | `repositories` | RepositorySnapshot |
 | `awards` · `handovers` | Award · Handover · BuildAsset |

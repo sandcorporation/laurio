@@ -318,9 +318,8 @@ def _reconcile(payment, as_of, ctx):
 # 처리한다.
 #
 # `enabled=contest_product_enabled`(#271) — 공모전 제품 스위치가 꺼지면 이 둘은
-# 등록부에서 사라진 것처럼 군다. 환불은 상금이 있는 공모전에만 존재하므로
-# (Assignment 에는 Payment 자체가 없다) 이 스위치가 유일하게 지키려는 "돈이 실제
-# 결제 대행사로 나가는 경로" 그 자체다.
+# 등록부에서 사라진 것처럼 군다. 환불은 상금이 있는 공모전에만 존재하므로 이
+# 스위치가 유일하게 지키려는 "돈이 실제 결제 대행사로 나가는 경로" 그 자체다.
 REFUND_SCANS = (
     ScanSpec(
         name="payment-refund-request",

@@ -8,7 +8,7 @@
 claim_transition(Contest, ..., state_field="status", ...)` 를 손으로 직접 불러
 `contest-close` 간선(PUBLISHED→CLOSED)을 `judging_ends_at` 계산까지 포함해 재구현하고
 있었다. 다섯 자리를 세려고 작정하고 훑은 사람도 이미 하나(#255 본문의
-DRAFT→ASSIGNMENT_OPEN)를 놓쳤었다 — 같은 실수가 코드 리뷰 없이 반복되지 않으려면
+전이 하나)를 놓쳤었다 — 같은 실수가 코드 리뷰 없이 반복되지 않으려면
 독스트링 규율이 아니라 **테스트**가 막아야 한다(ADR-0033 의 종류 게이트가 같은 이유로
 독스트링 규율이 세 번 실패한 뒤 `tests/test_contest_kind_gates.py` 로 옮겨간 것과 같다 —
 이 파일도 그 파일과 같은 AST 정적 스캔 방식을 그대로 따르고, 스캔 대상 파일 목록도
@@ -60,8 +60,6 @@ bulk_create([Contest(status=...), ...])` 는 둘 다 이 스캔을 그대로 통
   들여다보지 않는 한(이 스캔은 파일 하나 안의 호출 하나만 본다) 추적할 수 없다.
 - `contest.status = X; contest.save()` — 어떤 변수가 실제로 Contest 인스턴스인지는 타입
   추론 없이 정적으로 알 수 없다. 이 저장소는 지금까지 Contest 에 이 패턴을 쓴 적이
-  없고(`contests/assignment_api.py` 의 `update_assignment` 이 오히려 `status` 를
-  `update_fields` 에서 일부러 뺀다 — 코드리뷰로 확인된 사고를 피하려고), 그래서 지금은
   잡지 않는다.
 - `cursor.execute("UPDATE contests_contest SET status = ...")` — raw SQL 은 애초에 이
   스캔의 대상이 아니다.

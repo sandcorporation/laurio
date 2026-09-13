@@ -16,7 +16,6 @@
 
 `/operator/categories`도 같은 다섯 모양(목록·생성·이력·이름 수정·감추기)을
 그대로 반복한다(#231) — Category에는 최소 제안 상금이 없는 대신 이름을 고칠
-수 있고, 예약된 Assignment Category(#213, ADR-0033)는 이름 수정·감추기 둘 다
 `contests.category_services`가 거부한다.
 
 라우터 기본값이 이미 거부(`OperatorAuth`)다. 변경 엔드포인트는 그 위에 상위
@@ -33,7 +32,6 @@ from ninja import Router, Schema
 
 from core.operator_auth import OperatorAuth, SuperuserOperatorAuth
 
-from .assignment_category import get_assignment_category
 from .category_services import (
     CategoryConflictError,
     CategoryValidationError,
@@ -202,7 +200,6 @@ def _serialize_category(category: Category) -> OperatorCategoryOut:
         id=category.id,
         name=category.name,
         is_active=category.is_active,
-        is_reserved=category.id == get_assignment_category().id,
     )
 
 

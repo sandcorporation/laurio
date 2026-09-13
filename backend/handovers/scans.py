@@ -34,7 +34,7 @@ def _release(handover, as_of, ctx):
 # 넘는 잔여분은 다음 실행이 마저 처리한다.
 #
 # `enabled=contest_product_enabled`(#271) — Handover 는 Award 하나에 정확히
-# 하나이고 Award 는 상금이 있는 공모전 전용이다(Assignment 에는 Award 가 없다).
+# 하나이고 Award 는 상금이 있는 공모전 전용이다.
 # 공모전 제품 스위치가 꺼지면 이 스캔은 등록부에서 사라진 것처럼 군다.
 HANDOVER_RELEASE_SCAN = ScanSpec(
     name="handover-release",

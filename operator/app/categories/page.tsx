@@ -73,7 +73,6 @@ export default function CategoriesPage() {
               <tr>
                 <th>이름</th>
                 <th>활성 여부</th>
-                <th>예약 여부</th>
                 <th>작업</th>
               </tr>
             </thead>

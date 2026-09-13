@@ -72,13 +72,6 @@ class NextAction(models.TextChoices):
     # --- 끝난 일 -------------------------------------------------------------
     NOT_SELECTED = "not_selected", "미선정"
     PAYOUT_COMPLETE = "payout_complete", "지급 완료"
-    # 과제(Assignment, ADR-0028)가 채점을 마친 뒤의 끝난 자리다(#248). 과제에는
-    # Award도 Distribution도 없어, 아래 `_payout_action`과 이의 판정을 모두
-    # 건너뛴 뒤 남는 이 함수의 기본 분기(`AWAITING_DISTRIBUTION`)로 떨어지면
-    # "상금 배분을 기다리는 중입니다"라는 거짓을 말하게 된다 — 그 기본 분기는
-    # 공모전만 염두에 두고 지어졌다.
-    ASSIGNMENT_SCORED = "assignment_scored", "채점 완료"
-
     # --- 다시 네 차례(실이체 재시도) -------------------------------------------
     # Seller 등록은 끝났는데(READY) 실제 이체 자체가 벤더 쪽에서 거절/미확정인
     # 경우다(#57 코드리뷰 지적 1/7, 3차) — Payout.status만 보면 두 대기가 다
@@ -125,14 +118,6 @@ def next_action_for(submission) -> str:
 
     if not hasattr(submission, "score"):
         return NextAction.AWAITING_SCORING
-
-    # 과제(ADR-0028)는 채점이 끝나면 더 볼 것도 기다릴 것도 없다 — 이의도
-    # Award도 Handover도 Distribution도 없다(#248). 아래로 그대로 흘려보내면
-    # `appeal_window_open`·`judging_window_open`이 둘 다 거짓인 채로(과제는
-    # 항상 그렇다) 이 함수의 기본 분기 `AWAITING_DISTRIBUTION`까지 떨어져
-    # "상금 배분을 기다리는 중"이라는, 과제에 없는 개념을 말하게 된다.
-    if contest.is_assignment:
-        return NextAction.ASSIGNMENT_SCORED
 
     # 채점이 끝났다 — 이의가 여기서 갈린다.
     appeal = getattr(submission, "appeal", None)
@@ -269,20 +254,3 @@ def _payout_action(submission):
     return _payout_actions()[hold.kind]
 
 
-def active_invite_code_for(contest) -> str | None:
-    """`contest`가 Assignment면 지금 활성인 InviteCode, 아니면 `None` (#245).
-
-    `contest.invite_codes.all()`을 쓴다 — `.filter(is_active=True)`로 새
-    QuerySet을 만들면 호출부가 이미 채워 둔 prefetch 캐시를 쓰지 않고 행마다
-    새 쿼리를 낸다(과제 라우터가 걷히기 전 `contests.assignment_api.
-    _active_invite_code`와 같은 이유로 같은 모양을 여기서도 지킨다 —
-    `list_my_participation`이 `contest__invite_codes`를 prefetch해 둔다).
-    활성 코드는 Contest 당 많아야 하나다(`unique_active_invite_code_per_contest`).
-    """
-
-    if not contest.is_assignment:
-        return None
-    for code in contest.invite_codes.all():
-        if code.is_active:
-            return code.code
-    return None

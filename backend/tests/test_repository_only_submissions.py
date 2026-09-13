@@ -53,37 +53,6 @@ CONTESTS_URL = "/api/contests"
 VISIBILITY_SCAN_URL = "/api/internal/scans/repository-visibility"
 
 
-# --- Assignment(ADR-0028)도 같은 규칙을 받는다(ADR-0030 "플랫폼 전체 규칙이고
-# 개최자가 고르지 않는다 … Assignment에도 같이 적용한다") -------------------------
-
-
-@pytest.mark.django_db
-def test_assignment_submission_accepts_repository_only(client, landing_type):
-    from tests.assignment_orm_helpers import create_open_assignment
-
-    deadline = timezone.now() + timedelta(hours=1)
-    assignment = create_open_assignment(
-        deliverable_types=[landing_type], sponsor_uid="teacher-1", deadline_at=deadline
-    )
-    # 학생은 본인확인이 없어도 된다 — Assignment는 그것을 요구하지 않는다(ADR-0028).
-    student = _login(client, uid="student-1")
-
-    response = client.post(
-        f"{CONTESTS_URL}/{assignment['id']}/submissions",
-        data={
-            "assets": [{"kind": "repository", "value": _repository_url("public-org")}],
-            "requirement_responses": [
-                {"requirement_id": assignment["requirement_id"], "is_met": True, "evidence": []}
-            ],
-            "invite_code": assignment["invite_code"],
-        },
-        content_type="application/json",
-        **_auth_header(student["access"]),
-    )
-
-    assert response.status_code == 201, response.content
-    assert response.json()["completion"]["repository_count"] == 1
-    assert response.json()["completion"]["source_count"] == 0
 
 
 @pytest.fixture

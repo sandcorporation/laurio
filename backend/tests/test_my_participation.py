@@ -114,8 +114,6 @@ def test_a_submission_before_the_deadline_can_still_be_edited(client, category, 
     (row,) = response.json()["items"]
     assert row["submission_id"] == seeded["submission_id"]
     assert row["next_action"] == "can_edit_submission"
-    # 공모전 참가 행이다 — Assignment로 돌아가는 InviteCode 는 여기 없다.
-    assert row["invite_code"] is None
 
     # 화면이 시킨 그대로 한다: 기존 자료·체크리스트를 그대로 실어 PUT한다.
     existing = client.get(
@@ -600,54 +598,3 @@ def test_my_participation_rejects_a_cursor_it_cannot_read(client, category, land
 
 
 # --- Assignment 도 같은 길로 돌아간다 (#245) --------------------------------------
-
-
-@pytest.mark.django_db
-def test_an_assignment_participation_row_carries_the_active_invite_code_to_get_back(
-    client, landing_type
-):
-    """Assignment 는 「내 참여」로 돌아가는 길의 모양이 다르다 (#245).
-
-    `/console/contests/{id}/submit`은 본인확인을 요구해 Assignment 제출을
-    받지 않는다(`submissions.api.create_submission`의 `SUBMISSION_REQUIRES_
-    VERIFICATION` 분기) — 학생이 돌아갈 화면은 InviteCode 로만 여는
-    `/assignments/{code}`이고, 그 URL을 조립하려면 코드가 있어야 한다. 이
-    값은 **지금 활성인** 코드를 낸다 — 재발급으로 학생이 처음 쓴 코드가
-    죽어도(#209) 새 코드로 계속 편집할 수 있다는 것이 이미 정해진 동작이다
-    (`test_old_invite_code_dies_but_existing_submission_survives_reissue`).
-    """
-
-    from tests.assignment_orm_helpers import create_open_assignment
-
-    # 과제 라우터(`contests.assignment_api`)가 걷혀(#361) kind=ASSIGNMENT Contest는
-    # 직접 조립한다 — 제출 자체는 여전히 `submissions.api`(공유 배관)의 몫이다.
-    assignment = create_open_assignment(
-        deliverable_types=[landing_type], sponsor_uid="myp-asgn-sponsor"
-    )
-    student = _login(client, "myp-asgn-student")
-    student_user_id = client.get(
-        "/api/accounts/me", **_auth_header(student["access"])
-    ).json()["id"]
-
-    submitted = client.post(
-        f"/api/contests/{assignment['id']}/submissions",
-        data={
-            "assets": [
-                {
-                    "kind": "source",
-                    "value": f"submission:{assignment['id']}:{student_user_id}:source/x",
-                }
-            ],
-            "invite_code": assignment["invite_code"],
-        },
-        content_type="application/json",
-        **_auth_header(student["access"]),
-    )
-    assert submitted.status_code == 201, submitted.content
-
-    response = client.get(MY_PARTICIPATION_URL, **_auth_header(student["access"]))
-
-    assert response.status_code == 200, response.content
-    (row,) = response.json()["items"]
-    assert row["next_action"] == "can_edit_submission"
-    assert row["invite_code"] == assignment["invite_code"]

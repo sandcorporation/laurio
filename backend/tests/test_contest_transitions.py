@@ -55,10 +55,8 @@ def test_the_five_scattered_spots_are_declared_as_exactly_these_six_edges():
     assert set(CONTEST_TRANSITIONS) == {
         "contest-close",
         "contest-judging-end",
-        "assignment-close",
         "publish-on-payment",
         "award",
-        "open-assignment",
     }
 
 
@@ -83,8 +81,8 @@ def test_scan_edges_and_action_edges_are_distinguished_by_type_not_a_flag():
     """스캔/행위 구분이 문자열 플래그가 아니라 타입이다 — 「스캔이면 due_field 가
     있다」가 조건문이 아니라 타입 자체로 성립하는지 확인한다."""
 
-    scan_names = {"contest-close", "contest-judging-end", "assignment-close"}
-    action_names = {"publish-on-payment", "award", "open-assignment"}
+    scan_names = {"contest-close", "contest-judging-end"}
+    action_names = {"publish-on-payment", "award"}
 
     for name in scan_names:
         assert isinstance(CONTEST_TRANSITIONS[name], ScanContestTransition)
@@ -94,20 +92,6 @@ def test_scan_edges_and_action_edges_are_distinguished_by_type_not_a_flag():
         assert not hasattr(CONTEST_TRANSITIONS[name], "due_field")
 
 
-@pytest.mark.django_db
-def test_assignment_close_scan_is_declared_but_intentionally_not_registered():
-    """과제 라우터(`contests.assignment_api`)가 걷혀(#361) `DRAFT -> ASSIGNMENT_OPEN`
-    으로 옮길 문이 없다 — "assignment-close" 스캔을 계속 등록해 두면 영원히 빈
-    후보만 도는 스캔이 된다(#358 user story 11). 간선 선언은 남아 그래프가 여전히
-    self-consistent하지만(`ASSIGNMENT_OPEN`/`ASSIGNMENT_CLOSED`가 아직 모델에
-    있다), 실제 스캔 등록부(`core.scans.SCAN_REGISTRY`)에는 없다."""
-
-    from core.scans import SCAN_REGISTRY
-    from contests.transitions import SCAN_EDGES_INTENTIONALLY_UNREGISTERED
-
-    assert "assignment-close" in CONTEST_TRANSITIONS
-    assert "assignment-close" not in SCAN_REGISTRY
-    assert "assignment-close" in SCAN_EDGES_INTENTIONALLY_UNREGISTERED
 
 
 def test_an_undeclared_transition_name_is_loud_not_silently_false():
@@ -123,7 +107,7 @@ def test_an_undeclared_in_place_update_name_is_loud_not_silently_false():
 
 
 def test_deriving_a_scan_spec_for_an_action_edge_is_rejected():
-    """「award」·「open-assignment」·「publish-on-payment」는 스캔이 아니라 명시적
+    """「award」·「publish-on-payment」는 스캔이 아니라 명시적
     행위다 — apps.py 가 실수로 이들을 스캔으로 등록하려 들면 여기서 막힌다."""
 
     with pytest.raises(ValueError):

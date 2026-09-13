@@ -62,63 +62,9 @@ class SponsorProfile(models.Model):
     bio = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    # AssignmentPermission(#206, ADR-0028/0029) — Operator가 이 Sponsor에게 Assignment
-    # (상금 없는 Contest)를 열 자격을 줬는가. 과제에는 결제가 없어 비용이 스스로
-    # 제어되지 않으므로, 결제가 서 있던 자리를 이 플래그가 대신한다. 부여·회수
-    # 사건은 AssignmentPermissionChange에 남는다 — 이 필드 자체는 "지금" 상태만
-    # 든다(PlatformPolicy가 값을, PolicyChange가 이력을 나눠 갖는 것과 같은 모양).
-    can_open_assignments = models.BooleanField(default=False)
 
     def __str__(self) -> str:  # pragma: no cover
         return f"Sponsor<{self.user_id}>"
-
-
-class AssignmentPermissionChange(models.Model):
-    """`SponsorProfile.can_open_assignments`에 대한 한 번의 변경 사건 — 누가·언제·
-    무엇을·왜 (#206, ADR-0029).
-
-    `contests.DeliverableTypeChange`·`policies.PolicyChange`와 같은 규율이다 —
-    과제를 열 자격은 결제가 사라진 자리를 대신하는 문이므로(ADR-0029), 그 문을
-    여닫는 것도 근거 없이 이루어지면 안 되는 판단이다. `action`으로 부여·회수
-    둘만 구별한다 — `DeliverableTypeChange`의 생성과 달리 `SponsorProfile` 자체는
-    이 변경으로 생기지 않는다(이미 있거나 이 사건과 같은 트랜잭션에서 지연
-    생성된다).
-
-    `sponsor_profile`은 PROTECT다 — 자격을 거둬도 `SponsorProfile` 행 자체는
-    지워지지 않으므로(탈퇴도 마찬가지, ADR-0025) 이 참조가 끊길 일은 정상 경로에
-    없지만, `PolicyChange.operator`·`AppealRuling.ruled_by`와 같은 원칙을 그대로
-    지킨다. `operator`도 PROTECT — 바꾼 계정을 지워도 감사 기록이 주인을 잃지
-    않는다.
-    """
-
-    class Action(models.TextChoices):
-        GRANTED = "granted", "부여"
-        REVOKED = "revoked", "회수"
-
-    sponsor_profile = models.ForeignKey(
-        SponsorProfile, related_name="assignment_permission_changes", on_delete=models.PROTECT
-    )
-    operator = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        related_name="assignment_permission_changes",
-        on_delete=models.PROTECT,
-    )
-    action = models.CharField(max_length=16, choices=Action.choices)
-    reason = models.TextField()
-    before = models.JSONField()
-    after = models.JSONField()
-    changed_at = models.DateTimeField()
-
-    class Meta:
-        verbose_name = "과제 개최 자격 변경 이력"
-        verbose_name_plural = "과제 개최 자격 변경 이력"
-        ordering = ["-changed_at", "-id"]
-
-    def __str__(self) -> str:  # pragma: no cover
-        return (
-            f"AssignmentPermissionChange({self.action}, "
-            f"sponsor_profile_id={self.sponsor_profile_id})"
-        )
 
 
 class DeveloperProfile(models.Model):

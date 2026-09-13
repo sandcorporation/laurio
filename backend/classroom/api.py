@@ -335,9 +335,7 @@ def _instructor_source_download_url(
     `_source_download_url`과 달리 파일명이 `User.email`이 아니라 **그 클래스에서
     불릴 이름 + 시도 번호**로 조립된다. 강사 한 사람이 참여자 여러 명의, 그리고
     한 참여자의 여러 시도를 잇달아 내려받으므로 이메일 하나로는(같은 참여자의
-    다른 시도끼리) 구별되지 않는다 — 과제 라우터가 걷히기 전 `contests.
-    assignment_api.reveal_assignment_submission_source`(#361로 사라졌다)가
-    제출자 이름 뒤에 순번을 붙이던 것과 같은 이유다."""
+    다른 시도끼리) 구별되지 않는다."""
 
     adapter = get_storage_adapter()
     base_name = safe_download_base_name(f"{member.display_name}-{attempt_number}")
@@ -1221,10 +1219,9 @@ def list_problem_submissions(request: HttpRequest, class_id: int, problem_id: in
     """강사가 참여자들의 시도를 훑어본다(#291) — 소스 다운로드, 저장소 URL(이미
     `value`가 그 주소다), AI 판정과 근거가 한 번에 실린다.
 
-    **이 요청은 어디에도 기록되지 않는다**(ADR-0040). Assignment의 Sponsor가
-    소스를 펼칠 때 `AssignmentSourceReading`을 남기는 것(#211, ADR-0022)과
-    갈리는 지점이다 — 강사가 보는 것은 지도 그 자체라 "몇 번 봤다"가 신호가
-    아니라 잡음이 된다. 그래서 이 엔드포인트는 어떤 모델도 만들지 않는다.
+    **이 요청은 어디에도 기록되지 않는다**(ADR-0040) — 강사가 보는 것은 지도
+    그 자체라 "몇 번 봤다"가 신호가 아니라 잡음이 된다. 그래서 이 엔드포인트는
+    어떤 모델도 만들지 않는다.
 
     같은 경로에 있는 `POST`(참여자의 제출, 위 `create_classroom_submission`)와
     메서드로만 갈린다 — `/join/{join_code}`가 GET(누구나)·POST(로그인)로

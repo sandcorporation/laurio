@@ -9,13 +9,9 @@ Score는 불변인데(ADR-0006) 판정의 근거만 없어진다. 그래서 이 
 인수 대상이고 이의 심판이 여는 대상이라 문제가 없는 곳을 건드리지 않는다
 (ADR-0022, ADR-0030).
 
-**시점은 둘로 갈리되 규칙은 하나다** — "끝난 시점 + 유예기간":
-
-- 공모전은 이의 창의 끝(`Contest.judging_ends_at`)이 그 시점이다. 심사기간이
-  아직 시작되지 않았으면(CLOSED 전이 전, null) 후보가 아니다.
-- Assignment(ADR-0028)에는 심사기간이 없다(`judging_ends_at`이 영원히 null) —
-  대신 마감(`Contest.deadline_at`)에 같은 유예기간을 건다.
-
+**시점은 "끝난 시점 + 유예기간"이다** — 이의 창의 끝
+(`Contest.judging_ends_at`)이 그 시점이고, 심사기간이 아직 시작되지
+않았으면(CLOSED 전이 전, null) 후보가 아니다.
 유예일수는 `PlatformPolicy.demo_video_retention_grace_days`(#263)에서 읽는다.
 
 **멱등하다.** 스토리지 오브젝트를 먼저 지우고(이미 없는 키를 지워도 조용히
@@ -42,14 +38,11 @@ from .models import Contest
 def demo_video_destroy_at(contest: Contest, grace_days: int):
     """이 Contest 소속 시연 영상이 파기되는 시각. 아직 정해지지 않았으면 `None`.
 
-    Assignment는 항상 정해진다(마감 시각이 개최 시점부터 있다). 공모전은
     `judging_ends_at`이 찍히기 전(CLOSED 전이 전)에는 아직 정해지지 않는다 —
     Sponsor의 유료 연장이 그 값을 밀 수 있는 동안은 확정이 아니다.
     """
 
     grace = timedelta(days=grace_days)
-    if contest.is_assignment:
-        return contest.deadline_at + grace
     if contest.judging_ends_at is None:
         return None
     return contest.judging_ends_at + grace
@@ -59,10 +52,6 @@ def _due_q(as_of, grace_days: int) -> Q:
     grace = timedelta(days=grace_days)
     cutoff = as_of - grace
     return Q(
-        submission__contestsubmission__contest__kind=Contest.Kind.ASSIGNMENT,
-        submission__contestsubmission__contest__deadline_at__lte=cutoff,
-    ) | Q(
-        submission__contestsubmission__contest__kind=Contest.Kind.CONTEST,
         submission__contestsubmission__contest__judging_ends_at__isnull=False,
         submission__contestsubmission__contest__judging_ends_at__lte=cutoff,
     )

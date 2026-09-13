@@ -211,8 +211,8 @@ class PlatformPolicy(models.Model):
     # 실행 문서 같은 작은 파일이 대상이라 소스보다도 상한이 낮다.
     max_build_asset_bytes = models.PositiveBigIntegerField(default=20 * 1024 * 1024)
 
-    # 시연 영상 파일을 파기하기까지의 유예일수 — 이의 창(`judging_ends_at`,
-    # 과제는 `assignment_closed`)이 닫힌 뒤 이만큼 지나야 스캔이 스토리지
+    # 시연 영상 파일을 파기하기까지의 유예일수 — 이의 창(`judging_ends_at`)이
+    # 닫힌 뒤 이만큼 지나야 스캔이 스토리지
     # 오브젝트를 지운다(ADR-0035). 0은 "창이 닫히자마자 지운다"는 뜻이라
     # 유효한 값이다 — 이의 심판이 끝나기 전에 지워지는 사고는 창이 닫혔다는
     # 것 자체가 막는다. 쓰는 곳은 #262.

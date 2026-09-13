@@ -119,9 +119,6 @@ class OperatorCategoryOut(Schema):
     id: int
     name: str
     is_active: bool
-    # 예약된 Assignment Category(#213, ADR-0033)인가 — 화면이 이 값 하나로 편집·감추기
-    # 버튼을 꺼서, "왜 이 행만 안 먹히지"를 백엔드 422 메시지에서 처음 알게 하지 않는다.
-    is_reserved: bool
 
 
 class CategoryCreateIn(Schema):

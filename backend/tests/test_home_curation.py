@@ -222,14 +222,7 @@ def test_every_public_status_lands_in_exactly_one_bucket(
         buckets = _buckets(client)
     all_bucketed_ids = [cid for contests in buckets.values() for cid in _ids(contests)]
 
-    # Assignment(#207, ADR-0028)는 DRAFT와 같은 이유로 어느 홈 묶음에도 없어야 한다 —
-    # HOME_AXIS가 둘 다 HIDDEN으로 답한다(공개 목록·상세·홈 큐레이션 어디에도 나오지 않는다,
-    # 스펙 #197 인수조건).
-    hidden_statuses = {
-        Contest.Status.DRAFT,
-        Contest.Status.ASSIGNMENT_OPEN,
-        Contest.Status.ASSIGNMENT_CLOSED,
-    }
+    hidden_statuses = {Contest.Status.DRAFT}
     for status, contest_id in contest_id_by_status.items():
         if status in hidden_statuses:
             assert contest_id not in all_bucketed_ids, f"{status} 는 어느 묶음에도 없어야 한다"

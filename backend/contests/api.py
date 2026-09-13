@@ -269,7 +269,6 @@ def create_contest(request: HttpRequest, payload: ContestCreateIn):
             sponsor=sponsor_profile,
             title=sanitize_free_text(payload.title),
             category=category,
-            kind=Contest.Kind.CONTEST,
             description=sanitize_free_text(payload.description),
             prize=payload.prize,
             deadline_at=payload.deadline_at,
@@ -422,8 +421,7 @@ def list_my_sponsored_contests(request: HttpRequest, after: str | None = None):
     키에 `id` 를 붙이는 이유도 운영자 지급 큐와 같다 — `created_at` 이 같은 두 행의
     순서를 DB 가 보장하지 않는다.
 
-    공모전 제품 스위치(#271)가 꺼지면 이 목록도 닫는다 — 이 화면은 애초에
-    Assignment를 제외한다(아래 exclude(kind=Contest.Kind.ASSIGNMENT)).
+    공모전 제품 스위치(#271)가 꺼지면 이 목록도 닫는다.
     """
 
     require_contest_product_enabled()
@@ -447,14 +445,7 @@ def list_my_sponsored_contests(request: HttpRequest, after: str | None = None):
 
     contests = (
         sponsored_contest_queryset(
-            # Assignment(ADR-0028, #207)는 이 목록에서 제외한다 — 여기는 상금
-            # 공모전의 「다음 행동」을 보여주는 화면이고, `sponsor_next_action_for`는
-            # PAYABLE·AWARDABLE·AWAITING_DISTRIBUTION 같은 공모전 전용 분류를
-            # 판정에 쓴다. Assignment는 그 무엇도 해당하지 않으므로 섞이면 상금 0원짜리
-            # 행이 엉뚱한(때로는 틀린) 「다음 행동」 문구와 함께 나타난다. 과제 자신을
-            # 보여주던 `GET /api/assignments/mine`은 과제 라우터와 함께 걷혔다(#361)
-            # — 이 목록은 여전히 공모전만 남긴다(kind 필드는 아직 모델에 있다).
-            Contest.objects.filter(sponsor=profile).exclude(kind=Contest.Kind.ASSIGNMENT),
+            Contest.objects.filter(sponsor=profile),
             as_of=as_of,
             policy=policy,
         )
@@ -817,7 +808,6 @@ def reopen_contest(request: HttpRequest, contest_id: int, payload: ContestReopen
             # `original`은 항상 공모전이다 — REOPENABLE은 REFUNDED Payment를
             # 요구하고(Assignment에는 결제 자체가 없다), 그래서 여기 도달하는
             # `original.kind`는 항상 CONTEST다. 그래도 손으로 못 박아 둔다(#213).
-            kind=Contest.Kind.CONTEST,
             description=original.description,
             prize=payload.prize,
             deadline_at=payload.deadline_at,
@@ -1037,33 +1027,15 @@ def _get_owned_draft_contest(request: HttpRequest, contest_id: int) -> Contest:
     뒤 체크리스트가 흔들리면 제출·심사·채점이 기준으로 삼는 대상 자체가 바뀌어
     버린다.
 
-    **`Contest.Status.EDITABLE`이 아니라 `status == DRAFT`를 직접 비교한다**(#207) —
-    EDITABLE은 Assignment(ADR-0028)가 들어오며 `ASSIGNMENT_OPEN`도 True로 답하게
-    됐는데, 이 게이트가 지키는 세 엔드포인트는 Prize·Category·AI grill 대화처럼
-    Assignment에 없는 개념을 다룬다. Assignment 편집은 `contests.assignment_api`가
-    별도 게이트(`_get_owned_editable_assignment`)로 갖는다 — 이 함수가 그대로
-    EDITABLE을 썼다면 열린 Assignment가 이 공모전 전용 표면으로 새어 들어와 Prize를
-    받는 사고가 났을 것이다(#207 코드리뷰에서 회귀로 잡혔다:
+    **`Contest.Status.EDITABLE`이 아니라 `status == DRAFT`를 직접 비교한다.**
+    이 게이트가 지키는 세 엔드포인트는 Prize·Category·AI grill 대화를 다루고,
+    그 전부가 결제 전 초안에서만 말이 된다(#207 코드리뷰 회귀:
     test_only_draft_can_be_updated_no_status_silently_passes).
-
-    **`contest.is_assignment`도 함께 거부한다 — status 비교 하나로는 부족하다.**
-    `DRAFT`는 공모전과 Assignment가 공유한다(ADR-0028) — 아직 열리지 않은
-    Assignment는 `status != DRAFT` 검사를 그대로 통과한다. 이 구멍을 실제로
-    놓쳤었다: 자격만 있고 본인확인은 없는 Sponsor가 Assignment를 만든 뒤(DRAFT,
-    당시 `POST /api/assignments`) 그 `id`로 이 엔드포인트를 거치는 `PATCH
-    /api/contests/{id}`를 직접 치면 Prize·활성 Category를 그대로 받아들였고,
-    이어서 `POST /api/payments`(`Contest.Status.PAYABLE`도 DRAFT 전부에 True라
-    막지 않는다)로 결제까지 확정하면 본인확인 없이 만들어진 행이 상금 있는
-    공개 Contest로 발행됐다 — Verification이 아예 없으므로 자전거래 차단의
-    근거(CI)조차 없는 상태였다. 과제 라우터가 걷힌 뒤(#361)로는 HTTP로 그 행을
-    만들 길이 없지만, `kind` 필드가 아직 모델에 남아 있는 동안은 이 방어도 그대로
-    둔다(회귀 테스트: test_contest_update.py::
-    test_an_assignment_kind_draft_cannot_reach_the_paid_contest_edit_gate).
     """
 
     contest = _get_owned_contest(request, contest_id)
 
-    if contest.status != Contest.Status.DRAFT or contest.is_assignment:
+    if contest.status != Contest.Status.DRAFT:
         raise HttpError(409, "공개된 공모전의 요구사항 체크리스트는 더 이상 수정할 수 없습니다.")
 
     return contest
@@ -1264,7 +1236,7 @@ def delete_requirement(request: HttpRequest, contest_id: int, requirement_id: in
 # --- ContestImage (#234/#236, ADR-0032) ---------------------------------------
 #
 # 발급·등록·순서변경·제거의 실제 로직은 `contests.images`에 있다 — 이 라우터는
-# 자기 게이트(`_get_owned_draft_contest`: 소유자 + DRAFT + not is_assignment)로
+# 자기 게이트(`_get_owned_draft_contest`: 소유자 + DRAFT)로
 # 확인한 `Contest`를 그 함수들에 넘길 뿐이다. 과제 라우터(`contests.
 # assignment_api`)도 한때 같은 함수들을 자신의 게이트(`_get_owned_editable_
 # assignment`)로 불렀지만(#236) #361로 걷혔다 — 「무엇을 고칠 수 있는가」는

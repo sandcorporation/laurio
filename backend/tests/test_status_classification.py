@@ -29,19 +29,17 @@ def test_every_contest_status_question_answers_for_every_value(name):
 
 
 def test_contest_status_sets_are_the_ones_the_call_sites_used_to_spell_out():
-    """ASSIGNMENT_OPEN·ASSIGNMENT_CLOSED(#207, ADR-0028)가 더해진 뒤의 집합 — 등록된 스캔
-    21개 중 19개가 이 표(스펙 #197)만으로 Assignment 를 비켜간다: 상금·결제·Award·Escrow·
-    Distribution·라이프사이클 알림·탈퇴 시 실명 보존 어디에도 Assignment 가 걸리지 않는다."""
+    """호출부가 예전에 손으로 적어 두던 집합들 — 값 하나가 끼어들면 이 단언이 먼저 깨진다."""
 
     assert S.PUBLICLY_VISIBLE.statuses == {S.PUBLISHED, S.CLOSED, S.AWARDED, S.JUDGING_ENDED}
-    assert S.SUBMITTABLE.statuses == {S.PUBLISHED, S.ASSIGNMENT_OPEN}
+    assert S.SUBMITTABLE.statuses == {S.PUBLISHED}
     assert S.SENDS_LIFECYCLE_NOTICES.statuses == {S.PUBLISHED}
-    assert S.SCOREABLE.statuses == {S.CLOSED, S.AWARDED, S.JUDGING_ENDED, S.ASSIGNMENT_CLOSED}
+    assert S.SCOREABLE.statuses == {S.CLOSED, S.AWARDED, S.JUDGING_ENDED}
     assert S.AWARDABLE.statuses == {S.CLOSED}
     assert S.JUDGING_EXTENDABLE.statuses == {S.CLOSED}
     assert S.REFUNDABLE.statuses == {S.CLOSED, S.JUDGING_ENDED}
     assert S.REOPENABLE.statuses == {S.CLOSED, S.JUDGING_ENDED}
-    assert S.EDITABLE.statuses == {S.DRAFT, S.ASSIGNMENT_OPEN}
+    assert S.EDITABLE.statuses == {S.DRAFT}
     assert S.PAYABLE.statuses == {S.DRAFT}
     assert S.BLOCKS_SPONSOR_WITHDRAWAL.statuses == {S.PUBLISHED, S.CLOSED}
     assert S.HAS_AWARD.statuses == {S.AWARDED}
@@ -50,12 +48,10 @@ def test_contest_status_sets_are_the_ones_the_call_sites_used_to_spell_out():
     assert S.HOME_AXIS.where(HomeStatusAxis.OPEN) == {S.PUBLISHED}
     assert S.HOME_AXIS.where(HomeStatusAxis.IN_JUDGING) == {S.CLOSED}
     assert S.HOME_AXIS.where(HomeStatusAxis.COMPLETED) == {S.AWARDED, S.JUDGING_ENDED}
-    assert S.HOME_AXIS.where(HomeStatusAxis.HIDDEN) == {S.DRAFT, S.ASSIGNMENT_OPEN, S.ASSIGNMENT_CLOSED}
-    # #208 코드리뷰 — 예전에 submissions.api 가 bare frozenset(ASSIGNMENT_STATUSES) 멤버십으로
-    # 손으로 갈랐던 두 질문을 Classification 으로 승격했다.
+    assert S.HOME_AXIS.where(HomeStatusAxis.HIDDEN) == {S.DRAFT}
     assert S.SUBMISSION_REQUIRES_VERIFICATION.statuses == {S.PUBLISHED, S.CLOSED, S.AWARDED, S.JUDGING_ENDED}
     assert S.OWN_SUBMISSION_VIEWABLE.statuses == {
-        S.PUBLISHED, S.CLOSED, S.AWARDED, S.JUDGING_ENDED, S.ASSIGNMENT_OPEN, S.ASSIGNMENT_CLOSED
+        S.PUBLISHED, S.CLOSED, S.AWARDED, S.JUDGING_ENDED
     }
 
 

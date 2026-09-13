@@ -27,7 +27,7 @@
 | 결제대금예치업 등록 없이 남의 돈을 보관할 수 없다 | 결제·지급대행을 토스에 위임, Laurio 는 원장으로 기록만 ([ADR-0004](../adr/0004-double-entry-ledger.md), [ADR-0008](../adr/0008-toss-handles-identity-laurio-handles-tax.md)) | `backend/payments/adapters_toss.py`, `backend/ledger/models.py` |
 | 기타소득 원천징수·지급명세서는 지급자가 진다 | 지급대행사가 대신하지 않음을 벤더에 확인, Laurio 가 뗀다 | `backend/payouts/services.py` `_compute_amounts`, `backend/policies/models.py` |
 | 미성년자의 법률행위는 취소될 수 있다 | 제출·개최는 만 19세 이상만 ([ADR-0011](../adr/0011-verification-at-action-time-and-adults-only.md)) | `backend/verification/models.py` `Status.UNDERAGE` |
-| 같은 법이 상금·IP 이전이 없는 곳에는 걸리지 않는다 | Assignment 는 본인확인 없이 열고 낸다 — 나이는 자기신고 ([ADR-0029](../adr/0029-assignments-do-not-require-verification.md)) | 과제 경로가 `_require_verification` 을 부르지 않는다 |
+| 같은 법이 상금·IP 이전이 없는 곳에는 걸리지 않는다 | 강의실은 본인확인 없이 열고 낸다 — 나이는 자기신고 ([ADR-0037](../adr/0037-classroom-is-a-bounded-context-not-a-service.md), [ADR-0044](../adr/0044-assignment-is-retired-classroom-replaces-it.md)) | `classroom/api.py` 가 본인확인을 한 번도 부르지 않는다 |
 | 불필요해진 개인정보는 지체 없이 파기 (개인정보 보호법 21조) | 탈퇴 = 신원 파기, 2년 무행위 = 신원만 파기 ([ADR-0025](../adr/0025-withdrawal-erases-identity-not-the-account.md)) | `backend/accounts/withdrawal.py`, `backend/accounts/dormancy.py` |
 | 거래 기록은 5년 보존 (전자상거래법 시행령) | 거래가 있던 사람의 실명·생년월일만 별도 테이블에 5년 | `backend/verification/models.py` `RETAINED_IDENTITY_RETENTION_PERIOD`, `RetainedIdentity` |
 | 광고성 정보는 사전 동의, 야간 전송 별도 동의 (정보통신망법) | 광고성만 옵트인, 21~08시는 거래성까지 연기 ([ADR-0010](../adr/0010-quiet-hours-defer-not-drop.md)) | `backend/notifications/models.py` `NotificationOptIn`, `is_promotional` |

@@ -78,7 +78,7 @@ from submissions.schemas import (
 from verification.models import Verification
 
 from .images import ALLOWED_CONTEST_IMAGE_CONTENT_TYPES
-from .models import Contest, ContestSubmission, InviteCode, Requirement
+from .models import Contest, ContestSubmission, Requirement
 from .submission_participation import next_action_for
 from .submission_retention import demo_video_destroy_at
 from .submission_schemas import (
@@ -124,31 +124,6 @@ def _require_verification(user) -> Verification:
     return verification
 
 
-def _require_invite_code_for_assignment(contest: Contest, invite_code: str | None) -> None:
-    """Assignment(ADR-0028)의 제출·수정에서 InviteCode 를 다시 확인한다(#208).
-
-    `_get_published_contest_or_404`가 이미 `contest_id`의 존재와 SUBMITTABLE(=
-    ASSIGNMENT_OPEN 포함)을 확인했지만, 그것만으로는 "InviteCode 를 모르는 사람은
-    제출할 수 없다"(스펙 #197 인수조건)가 성립하지 않는다 — `contest_id`는 순차
-    정수라 짐작으로 접근할 수 있다. InviteCode 는 추측 불가능하므로(#207,
-    `InviteCode._generate_invite_code`) 이 값을 아는 것 자체가 "초대받았다"의 증거다.
-
-    상금 공모전(PUBLISHED)에는 이 검사를 걸지 않는다 — 그 경로에는 애초에
-    InviteCode 라는 경계가 없다(호출부가 `Contest.Status.SUBMISSION_REQUIRES_
-    VERIFICATION`이 False로 답할 때만 이 함수를 부른다, #208 코드리뷰). 실제로
-    도달하는 값은 언제나 `ASSIGNMENT_OPEN` 뿐이다 — `_get_published_contest_or_404`
-    가 SUBMITTABLE(ASSIGNMENT_CLOSED 는 포함하지 않는다)을 먼저 걸러
-    `ASSIGNMENT_CLOSED` Contest 는 이 함수에 닿기 전에 이미 404 로 끝나기 때문이다.
-    그 전제가 바뀌어도(예: 마감 후에도 SUBMITTABLE 을 넓히는 변경) 이 함수는 여전히
-    옳게 동작한다 — 검사 자체가 status 를 가리지 않는다.
-    """
-
-    if not invite_code or not InviteCode.objects.filter(
-        contest=contest, code=invite_code, is_active=True
-    ).exists():
-        raise HttpError(403, "초대 코드가 없거나 올바르지 않아 제출할 수 없습니다.")
-
-
 def _get_published_contest_or_404(contest_id: int) -> Contest:
     # "제출 대상"이라고 쓴다 — 이 함수는 공모전·과제 양쪽 제출 경로가 함께
     # 쓰므로(create_submission/update_submission이 kind로 갈리기 전에 먼저
@@ -178,19 +153,6 @@ def _get_viewable_contest_or_404(contest_id: int) -> Contest:
     않고 deadline_at만 비교해 이 문제가 없었다(#12 리뷰 지적: 둘이 서로 다른
     기준을 쓰고 있었다) — 이 헬퍼로 그 기준에 맞춘다.
 
-    **ASSIGNMENT_OPEN·ASSIGNMENT_CLOSED도 통과한다(#208)** — `PUBLICLY_VISIBLE`은
-    둘 다 False지만(ADR-0028, Assignment는 공개 목록·상세에 절대 나오지 않는다),
-    이 헬퍼가 지키는 것은 "익명이 봐도 되는가"가 아니라 "존재를 감출 만큼 은밀한가"
-    다. `get_my_submission`은 `auth=jwt_auth`로 이미 로그인을 요구하고 본인
-    Submission으로만 필터하므로(InviteCode를 거쳐 실제로 제출한 사람만 결과를
-    받는다), 여기서 Assignment를 막으면 제출자가 마감 전까지 자기 제출을 고치려
-    되읽는 경로 자체가 막힌다 — PUBLICLY_VISIBLE을 그대로 썼다면 냈던 회귀다.
-
-    `Contest.Status.OWN_SUBMISSION_VIEWABLE`(#208 코드리뷰)이 이 정확한 질문에
-    답한다 — "PUBLICLY_VISIBLE 이거나 status 가 Assignment 집합에 있는가"를 이
-    호출부에서 매번 조합하는 대신, DRAFT 만 False 인 하나의 Classification 으로
-    묶었다. 새 status 가 생기면 `tests/test_status_classification.py`가 이 질문에도
-    답을 요구한다 — bare 멤버십 검사(`in ASSIGNMENT_STATUSES`)는 그 강제가 없었다.
     """
     try:
         contest = Contest.objects.select_related("sponsor").get(id=contest_id)
@@ -909,21 +871,8 @@ def create_submission(request: HttpRequest, contest_id: int, payload: Submission
     contest = _get_published_contest_or_404(contest_id)
     _reject_if_past_deadline(contest)
 
-    # Assignment(ADR-0028/0029, #208) — 본인확인·자전거래 검사를 부르지 않는다. 그
-    # 대신 InviteCode 를 반드시 확인한다(둘 다 스펙 #197 인수조건: "본인확인 없는
-    # 계정이 과제에 제출할 수 있다" + "InviteCode 를 모르는 사람은 제출할 수 없다").
-    # 마감 검사(위 `_reject_if_past_deadline`)는 두 종류 모두에게 그대로 선다.
-    #
-    # `Contest.Status.SUBMISSION_REQUIRES_VERIFICATION`(#208 코드리뷰)으로 답한다 —
-    # 예전에는 `contest.status in ASSIGNMENT_STATUSES`(bare frozenset 멤버십)로
-    # 갈랐는데, `core.classification`이 경고하는 바로 그 모양(호출부가 손으로 쓴
-    # 집합)이었다. Classification 은 일곱 값 전부에 답을 강제하므로 새 status 가
-    # 생겨도 이 분기가 조용히 틀리지 않는다.
-    if Contest.Status.SUBMISSION_REQUIRES_VERIFICATION(contest.status):
-        verification = _require_verification(request.auth_user)
-        _reject_self_dealing(contest, verification)
-    else:
-        _require_invite_code_for_assignment(contest, payload.invite_code)
+    verification = _require_verification(request.auth_user)
+    _reject_self_dealing(contest, verification)
 
     developer, _created = DeveloperProfile.objects.get_or_create(user=request.auth_user)
 
@@ -972,12 +921,8 @@ def update_submission(request: HttpRequest, contest_id: int, payload: Submission
     contest = _get_published_contest_or_404(contest_id)
     _reject_if_past_deadline(contest)
 
-    # Assignment 수정도 생성과 같은 게이트 — 위 create_submission 주석 참고.
-    if Contest.Status.SUBMISSION_REQUIRES_VERIFICATION(contest.status):
-        verification = _require_verification(request.auth_user)
-        _reject_self_dealing(contest, verification)
-    else:
-        _require_invite_code_for_assignment(contest, payload.invite_code)
+    verification = _require_verification(request.auth_user)
+    _reject_self_dealing(contest, verification)
 
     developer = DeveloperProfile.objects.filter(user=request.auth_user).first()
     submission = (
@@ -1082,10 +1027,7 @@ def list_my_participation(request: HttpRequest, after: str | None = None):
         return {"items": [], "count": 0, "next": None}
 
     # 「다음 행동」을 고르려면 Contest·Score·Award·Handover·Appeal 을 함께 본다.
-    # 행마다 새로 조회하면 참가가 쌓일수록 N+1 이 된다. `contest__invite_codes`도
-    # 함께 당긴다 — Assignment 행이 「내 참여」에서 자기 제출로 돌아가려면 지금
-    # 활성인 InviteCode가 있어야 하고(#245, `MyParticipationOut.resolve_invite_
-    # code`), 행마다 새로 조회하면 같은 N+1이 Assignment 쪽에서 재발한다.
+    # 행마다 새로 조회하면 참가가 쌓일수록 N+1 이 된다.
     # `developer__user__verification`도 같은 이유로 더한다(#250) — 이 목록의
     # 모든 행이 같은 Developer(`profile`)의 것이라 실제로는 값이 하나뿐이지만,
     # select_related 없이 `next_action_for`가 행마다 `submission.developer.user.
@@ -1095,7 +1037,6 @@ def list_my_participation(request: HttpRequest, after: str | None = None):
         .select_related(
             "contest", "score", "appeal", "contest__award__handover", "developer__user__verification"
         )
-        .prefetch_related("contest__invite_codes")
         .order_by("-created_at", "-id")
     )
 
@@ -1156,13 +1097,6 @@ def get_submission(request: HttpRequest, submission_id: int):
     마감 후에는 누구나(비로그인 포함) 조회할 수 있지만 소스는 여전히 소유자 본인에게만
     보인다 — ADR-0014.
 
-    **Assignment(ADR-0028, #208)는 마감 후에도 공개되지 않는다.** 공모전의 "마감 후
-    전면 공개"는 순수 콘테스트의 보상 구조(#105) — 탈락자에게도 포트폴리오로 남는다 —
-    를 위한 것인데, Assignment에는 그 구조 자체가 없다(상금·경쟁·Award가 없다).
-    오히려 Assignment는 InviteCode를 아는 사람만 본다는 약속이 마감 후에도 그대로
-    이어져야 한다(스펙 #197: "명단은 없다, 제출한 사람만 보인다" — 그 제출한
-    사람이란 본인과 그 과제의 Sponsor 뿐이다) — 그러지 않으면 `submission_id`를
-    순차로 훑는 것만으로 제출자의 제출 내용(소스 제외)이 인터넷에 새어 나간다.
     """
 
     try:
@@ -1187,14 +1121,10 @@ def get_submission(request: HttpRequest, submission_id: int):
     is_owner = auth_user is not None and submission.developer.user_id == auth_user.id
     is_sponsor = auth_user is not None and contest.sponsor.user_id == auth_user.id
     past_deadline = Clock.now() >= contest.deadline_at
-    # "이 Contest 가 어느 종류인가"는 status 가 아니라 kind(카테고리) 질문이다
-    # (#208 코드리뷰) — `Contest.is_assignment`가 그 유일한 판정처다.
-    publicly_readable_after_deadline = past_deadline and not contest.is_assignment
 
-    if not (is_owner or is_sponsor or publicly_readable_after_deadline):
+    if not (is_owner or is_sponsor or past_deadline):
         # 다른 Developer(혹은 비로그인)에게는 진행 중인 Submission의 존재 자체를
-        # 드러내지 않는다. Assignment는 마감 여부와 무관하게 이 분기를 통과하지
-        # 못한다 — 위 docstring 참고.
+        # 드러내지 않는다.
         raise HttpError(404, "제출물을 찾을 수 없습니다.")
 
     return 200, _serialize(

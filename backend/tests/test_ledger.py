@@ -409,7 +409,7 @@ def test_queryset_delete_is_blocked_at_the_manager_level():
 @pytest.mark.django_db
 def test_hard_delete_e2e_fixture_rows_refuses_in_a_deployed_environment():
     """`hard_delete_e2e_fixture_rows`(#240)는 e2e 시드 자신의 픽스처 정리 전용이고,
-    독스트링만으로는 규율이 지켜진다는 보장이 없다 — `Contest.is_assignment`가 같은
+    독스트링만으로는 규율이 지켜진다는 보장이 없다 — 같은 모양의 규율이
     모양의 독스트링 규율로 적어 뒀지만 #207에서 실제로 뚫려 ADR-0033이 남긴 교훈이다.
     이 테스트는 그 규율을 코드로 고정한다: 배포 환경으로 설정을 덮으면 이 함수 자신이
     거부해야 한다 — 어떤 관리 명령이 호출부가 되든(`seed_e2e_contests`에는 배포 거부

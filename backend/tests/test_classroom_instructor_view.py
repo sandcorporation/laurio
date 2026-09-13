@@ -4,7 +4,7 @@ ADR-0040, CONTEXT.md 「강의실」).
 핵심 대상: 강사가 참여자들의 시도를 훑어보고 소스를 내려받거나 저장소를 열고
 AI 판정과 근거를 함께 본다. 다운로드 파일명이 참여자 이름과 시도 번호를
 구별해 여러 사람 것을 받아도 서로 덮지 않는다. 그 클래스의 강사가 아니면
-열 수 없고, 이 열람 자체는 (Assignment의 `AssignmentSourceReading`과 달리)
+열 수 없고, 이 열람 자체는
 어디에도 기록되지 않는다.
 """
 
@@ -18,7 +18,6 @@ import pytest
 from django.conf import settings
 from django.test import override_settings
 
-from submissions.models import AssignmentSourceReading
 
 CLASSES_URL = "/api/classroom/classes"
 SCAN_URL = "/api/internal/scans/classroom-submission-scoring"
@@ -324,26 +323,3 @@ def test_only_the_classs_instructor_can_list_submissions(client, db):
 
     response = _list_submissions(client, participant["access"], class_id, problem["problem_id"])
     assert response.status_code == 404
-
-
-def test_viewing_submissions_records_nothing_unlike_assignments_source_reading(client, db):
-    """ADR-0040: Classroom은 Assignment(`AssignmentSourceReading`, ADR-0022)와
-    달리 열람 자체를 기록하지 않는다."""
-
-    instructor = _login(client, uid="instructor-1")
-    class_id = _create_class(client, instructor["access"])
-    problem = _create_open_problem(client, instructor["access"], class_id, submission_format="source")
-    participant = _login(client, uid="participant-1")
-    _join(client, participant["access"], _join_code(client, instructor["access"], class_id))
-    _submit_source(
-        client, participant["access"], class_id, problem["problem_id"],
-        _source_object_key(problem["problem_id"], _uid(client, participant)),
-    )
-
-    before = AssignmentSourceReading.objects.count()
-
-    for _ in range(3):
-        response = _list_submissions(client, instructor["access"], class_id, problem["problem_id"])
-        assert response.status_code == 200
-
-    assert AssignmentSourceReading.objects.count() == before

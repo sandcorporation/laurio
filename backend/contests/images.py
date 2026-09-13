@@ -6,12 +6,10 @@
 운영이고, 바이트 상한·MIME 허용목록은 이 코드가 스토리지에 무엇을 믿고
 맡길지를 정하는 값이라 배포로 바꾼다.
 
-**업로드 발급·등록·순서변경·제거는 `contests.api`(공모전)가 쓴다**(#236, spec
-#225 "규칙을 가르면 화면마다 설명할 문장이 늘어난다"). 과제 라우터
-(`contests.assignment_api`, `_get_owned_editable_assignment` 게이트)도 한때 같은
-넷을 이 모듈에서 가져다 썼지만 #361로 걷혔다 — 「어느 Contest 가 이미지를
+**업로드 발급·등록·순서변경·제거는 `contests.api`가 쓴다**(#236, spec #225
+"규칙을 가르면 화면마다 설명할 문장이 늘어난다") — 「어느 Contest 가 이미지를
 고칠 수 있는가」는 호출부의 게이트가 답하고, 「이미지를 어떻게 고치는가」는
-이 모듈이 답한다는 경계 자체는 그대로다.
+이 모듈이 답한다.
 """
 
 from __future__ import annotations
@@ -72,8 +70,8 @@ def request_upload_url(
     contest: Contest, payload: ContestImageUploadUrlIn
 ) -> ContestImageUploadUrlOut:
     """호출부가 이미 소유권·편집 가능 여부를 확인한 `contest`에 대해 presigned
-    POST를 발급한다 — 게이트는 호출부(`request_contest_image_upload_url` /
-    `request_assignment_image_upload_url`)의 몫이다."""
+    POST를 발급한다 — 게이트는 호출부(`request_contest_image_upload_url`)의
+    몫이다."""
 
     if payload.content_type not in ALLOWED_CONTEST_IMAGE_CONTENT_TYPES:
         raise HttpError(422, "이미지는 png/jpeg/webp/gif 형식만 올릴 수 있습니다.")

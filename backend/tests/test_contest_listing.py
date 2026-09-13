@@ -405,39 +405,3 @@ def test_pagination_count_matches_the_active_closed_filter(client, sponsor, game
 
     assert client.get("/api/contests").json()["count"] == 3
     assert client.get("/api/contests?closed=true").json()["count"] == 5
-
-
-@pytest.mark.django_db
-def test_assignments_never_appear_in_either_open_or_closed_list(client, sponsor):
-    """과제는 카테고리가 다르고(kind=ASSIGNMENT) 애초에 공개 목록 표면이 아니다
-    (ADR-0028) — closed 축을 더해도 이 배제는 흔들리면 안 된다."""
-
-    from contests.assignment_category import get_assignment_category
-
-    assignment_category = get_assignment_category()
-    open_assignment = Contest.objects.create(
-        sponsor=sponsor,
-        title="열린 과제",
-        category=assignment_category,
-        kind=Contest.Kind.ASSIGNMENT,
-        prize=0,
-        deadline_at=timezone.now() + timedelta(days=5),
-        status=Contest.Status.ASSIGNMENT_OPEN,
-    )
-    closed_assignment = Contest.objects.create(
-        sponsor=sponsor,
-        title="마감된 과제",
-        category=assignment_category,
-        kind=Contest.Kind.ASSIGNMENT,
-        prize=0,
-        deadline_at=timezone.now() - timedelta(days=1),
-        status=Contest.Status.ASSIGNMENT_CLOSED,
-    )
-
-    open_payload = client.get("/api/contests").json()
-    closed_payload = client.get("/api/contests?closed=true").json()
-
-    assert open_assignment.id not in _ids(open_payload)
-    assert open_assignment.id not in _ids(closed_payload)
-    assert closed_assignment.id not in _ids(open_payload)
-    assert closed_assignment.id not in _ids(closed_payload)

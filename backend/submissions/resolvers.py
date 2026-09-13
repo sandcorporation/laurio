@@ -103,17 +103,7 @@ class SubmissionTargetStateResolver:
         # 뜻이지 "누구나 업로드 가능"이라는 뜻이 아니다(#10 리뷰). 업로드 권한은
         # storage.policy.authorize_upload가 owner_id만으로 판단하므로, 마감이 지나도
         # 이 target_ref의 진짜 소유자가 누구인지는 계속 밝혀둔다.
-        #
-        # **Assignment(ADR-0028, #212)는 마감 후에도 전면 공개로 돌아서면 안 된다.**
-        # 이 판정은 원래 순수 콘테스트의 보상 구조(#105) — 탈락자에게도 포트폴리오로
-        # 남는다 — 를 위한 것인데, 과제에는 그 구조가 없다. 오히려 InviteCode를
-        # 아는 사람만 본다는 약속(스펙 #197)이 마감 후에도 그대로 이어져야 한다 —
-        # 그러지 않으면 이 슬롯만 `submissions.api.get_submission`이 이미 지키고
-        # 있는 경계(같은 파일의 "Assignment는 마감 여부와 무관하게 이 분기를
-        # 통과하지 못한다" 주석)를 비켜가며 조용히 공개된다. `contest_id`·
-        # `developer_id`는 평범한 정수라 target_ref 자체를 순회할 수 있다는 점도
-        # 같은 이유다.
-        if not contest.is_assignment and Clock.now() >= contest.deadline_at:
+        if Clock.now() >= contest.deadline_at:
             return TargetState(visibility=Visibility.PUBLIC, owner_id=developer_user_id)
 
         return TargetState(

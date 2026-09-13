@@ -25,7 +25,6 @@ from django.core.management import CommandError, call_command
 from django.utils import timezone
 
 from accounts.models import SponsorProfile
-from contests.assignment_category import ASSIGNMENT_CATEGORY_NAME
 from contests.models import Category, Contest, DeliverableType, DeliverableTypeChange
 from policies.models import PlatformPolicy, PolicyChange
 
@@ -66,12 +65,7 @@ def test_prunes_every_shape_of_e2e_name(db):
 
     assert result["categories_deleted"] == 2
     assert result["deliverable_types_deleted"] == 3
-    # "과제"(Assignment 전용 기준데이터, #207 마이그레이션 0013)도 살아남는다 — 이름이
-    # e2e 접두어가 아니므로 이 명령의 대상이 아니다(스펙 #197: "e2e 잔여물 청소 명령이
-    # 이 행을 지우지 않게 확인한다").
-    assert set(Category.objects.values_list("name", flat=True)) == {
-        real_category.name, ASSIGNMENT_CATEGORY_NAME
-    }
+    assert set(Category.objects.values_list("name", flat=True)) == {real_category.name}
     assert set(DeliverableType.objects.values_list("name", flat=True)) == {real_deliverable.name}
 
 
