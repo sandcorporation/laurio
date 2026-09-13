@@ -93,7 +93,7 @@ export function ScoreSummary({
       ) : (
         <ul className="flex flex-col gap-2" data-testid={`${testIdPrefix}-reasoning`}>
           {score.reasoning.map((item, index) => (
-            <li key={index} className="rounded border border-rule p-3 text-sm">
+            <li key={index} className="rounded-sm border border-rule p-3 text-sm">
               {reasoningTextOf(item)}
             </li>
           ))}

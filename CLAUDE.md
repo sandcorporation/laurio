@@ -651,6 +651,11 @@ page/route 는 `export const dynamic = "force-dynamic"` 을 선언해야 한다)
 빼지 않은 이유는 손으로 관리되는 목록 셋이 또 늘고 로컬 게이트가 그것을 못 보기
 때문이다(#166). 대신 `classroom/lib/design/tokens.test.ts` 가 두 파일이 한 글자라도
 갈리면 빨개진다 — 「복사했으니 언젠가 갈라진다」를 규율이 아니라 검사로 바꿨다.
+**토큰이 같아도 화면이 그 밖의 이름을 부르면 갈라진다** — 그래서
+`frontend/lib/ui/brand-guard.test.ts`(#370)가 두 앱의 소스를 텍스트로 훑어 정의된 적
+없는 색(`bg-accent` 등 — Tailwind 는 오류 없이 아무것도 안 만든다)과 토큰 반경을
+우회하는 모서리(맨 `rounded`·`rounded-full`)를 막는다. 새 CI 잡이 아니라 공개 앱의
+`test:unit` 에 얹혀 있다. 운영자 앱은 토큰 파일이 없어 대상이 아니다.
 
 **`test:classroom` 만 `--pass-with-no-tests` 를 붙인다.** 세 스크립트는 2단계다 —
 `@exclusive` 아닌 것을 병렬로 돌리고, `@exclusive` 를 워커 하나로 다시 돈다. 그런데
