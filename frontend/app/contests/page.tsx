@@ -13,6 +13,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { Badge, EmptyState, PageHeader } from "@/app/components/ui";
+import { buttonClass } from "@/lib/ui/classnames";
 import {
   CONTESTS_PAGE_SIZE,
   fetchContestCategories,
@@ -134,15 +136,20 @@ export default async function ContestsPage({
   }
 
   return (
-    <main className="flex min-h-screen flex-col gap-8 bg-paper p-10 text-ink">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold">공모전</h1>
-        <p className="text-sm text-ink/70">
-          {current.closed
+    // PageShell(공용 조각, app/components/ui.tsx)은 폭을 max-w-3xl(768px)로
+    // 고정한다 — 이 화면의 표는 열이 넷(공모전·요구형태·상금·마감)이라 그
+    // 폭에서는 공모전 열이 200px 아래로 눌려 제목이 대부분 잘린다. 대신 헤더
+    // (site-header.tsx)와 같은 폭(1200px)을 직접 준다 — PageHeader 는 그대로
+    // 공용 조각을 쓴다.
+    <main className="mx-auto flex w-full max-w-[1200px] flex-col gap-8 px-6 py-10">
+      <PageHeader
+        title="공모전"
+        description={
+          current.closed
             ? "마감된 공모전 목록입니다. 데모·영상은 공개돼 있지만 더 이상 참가할 수 없습니다."
-            : "발주자가 상금을 걸고 요구사항을 공개한, 지금 참가할 수 있는 공모전 목록입니다. 로그인 없이 볼 수 있습니다."}
-        </p>
-      </header>
+            : "발주자가 상금을 걸고 요구사항을 공개한, 지금 참가할 수 있는 공모전 목록입니다. 로그인 없이 볼 수 있습니다."
+        }
+      />
 
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-rule pb-4">
         <div className="flex items-baseline gap-3">
@@ -185,11 +192,7 @@ export default async function ContestsPage({
           href={buildHref(current, { closed: false })}
           aria-current={!current.closed ? "true" : undefined}
           data-testid="contests-filter-open"
-          className={
-            !current.closed
-              ? "border border-ink bg-ink px-3 py-1.5 text-sm text-paper"
-              : "border border-rule px-3 py-1.5 text-sm text-ink/70"
-          }
+          className={buttonClass(!current.closed ? "primary" : "secondary", "sm")}
         >
           참가 가능한 것
         </Link>
@@ -197,11 +200,7 @@ export default async function ContestsPage({
           href={buildHref(current, { closed: true })}
           aria-current={current.closed ? "true" : undefined}
           data-testid="contests-filter-closed"
-          className={
-            current.closed
-              ? "border border-ink bg-ink px-3 py-1.5 text-sm text-paper"
-              : "border border-rule px-3 py-1.5 text-sm text-ink/70"
-          }
+          className={buttonClass(current.closed ? "primary" : "secondary", "sm")}
         >
           마감된 것
         </Link>
@@ -282,11 +281,7 @@ function CategoryFilter({
       <Link
         href={buildHref(current, { category: undefined })}
         aria-current={current.category === undefined ? "true" : undefined}
-        className={
-          current.category === undefined
-            ? "border border-ink bg-ink px-3 py-1.5 text-sm text-paper"
-            : "border border-rule px-3 py-1.5 text-sm text-ink/70"
-        }
+        className={buttonClass(current.category === undefined ? "primary" : "secondary", "sm")}
       >
         전체
       </Link>
@@ -295,11 +290,7 @@ function CategoryFilter({
           key={category.id}
           href={buildHref(current, { category: category.id })}
           aria-current={current.category === category.id ? "true" : undefined}
-          className={
-            current.category === category.id
-              ? "border border-ink bg-ink px-3 py-1.5 text-sm text-paper"
-              : "border border-rule px-3 py-1.5 text-sm text-ink/70"
-          }
+          className={buttonClass(current.category === category.id ? "primary" : "secondary", "sm")}
         >
           {category.name}
         </Link>
@@ -320,11 +311,7 @@ function DeliverableTypeFilter({
       <Link
         href={buildHref(current, { deliverableType: undefined })}
         aria-current={current.deliverableType === undefined ? "true" : undefined}
-        className={
-          current.deliverableType === undefined
-            ? "border border-ink px-3 py-1.5 text-sm font-medium text-ink"
-            : "border border-rule px-3 py-1.5 text-sm text-ink/70"
-        }
+        className={buttonClass(current.deliverableType === undefined ? "primary" : "secondary", "sm")}
       >
         모든 요구형태
       </Link>
@@ -333,11 +320,10 @@ function DeliverableTypeFilter({
           key={deliverableType.id}
           href={buildHref(current, { deliverableType: deliverableType.id })}
           aria-current={current.deliverableType === deliverableType.id ? "true" : undefined}
-          className={
-            current.deliverableType === deliverableType.id
-              ? "border border-ink px-3 py-1.5 text-sm font-medium text-ink"
-              : "border border-rule px-3 py-1.5 text-sm text-ink/70"
-          }
+          className={buttonClass(
+            current.deliverableType === deliverableType.id ? "primary" : "secondary",
+            "sm",
+          )}
         >
           {deliverableType.name}
         </Link>
@@ -348,7 +334,7 @@ function DeliverableTypeFilter({
 
 function ContestTable({ contests }: { contests: Contest[] }) {
   if (contests.length === 0) {
-    return <p className="py-10 text-center text-sm text-ink/60">조건에 맞는 공모전이 없습니다.</p>;
+    return <EmptyState>조건에 맞는 공모전이 없습니다.</EmptyState>;
   }
 
   return (
@@ -378,15 +364,11 @@ function ContestRow({ contest }: { contest: Contest }) {
       <div className="flex min-w-0 flex-col gap-1.5">
         <div className="flex items-center gap-2">
           <span className="truncate text-[15.5px] font-medium">{contest.title}</span>
-          {contest.is_underfunded && <UnderfundedBadge />}
+          {contest.is_underfunded && <Badge tone="attention">상금미달</Badge>}
           {/* #227 인수조건 — 끝난 공모전이 목록에 나올 때는 끝났다는 것이 보인다.
               선정완료·심사종료도 마찬가지다(예전에는 "마감"만 배지가 있었다 —
               그때는 그 둘이 기본 목록에 아예 안 나와 드러나지 않았던 격차다). */}
-          {finishedStatusLabel(contest.status) && (
-            <span className="border border-rule px-1.5 py-0.5 text-[11px] text-ink/60">
-              {finishedStatusLabel(contest.status)}
-            </span>
-          )}
+          {finishedStatusLabel(contest.status) && <Badge>{finishedStatusLabel(contest.status)}</Badge>}
         </div>
         <div className="text-xs text-ink/60">
           {contest.category.name}
@@ -402,11 +384,9 @@ function ContestRow({ contest }: { contest: Contest }) {
           {formatSubmissionCount(contest.submission_count)}
         </div>
       </div>
-      <div className="flex flex-wrap gap-1.5 text-[11.5px] text-ink/70">
+      <div className="flex flex-wrap gap-1.5">
         {contest.deliverable_types.map((dt) => (
-          <span key={dt.id} className="border border-rule px-1.5 py-0.5">
-            {dt.name}
-          </span>
+          <Badge key={dt.id}>{dt.name}</Badge>
         ))}
       </div>
       <div
@@ -421,13 +401,5 @@ function ContestRow({ contest }: { contest: Contest }) {
         {formatDday(contest.deadline_at)}
       </div>
     </Link>
-  );
-}
-
-function UnderfundedBadge() {
-  return (
-    <span className="inline-flex items-center gap-1 border border-attention px-1.5 py-0.5 text-[10.5px] font-medium text-attention">
-      상금미달
-    </span>
   );
 }

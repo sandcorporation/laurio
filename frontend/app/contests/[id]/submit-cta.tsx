@@ -36,6 +36,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import { bffClient } from "@/lib/bff/client";
+import { buttonClass } from "@/lib/ui/classnames";
 import type { ContestDetail } from "@/lib/submissions/types";
 
 export function SubmitCta({ contestId }: { contestId: number }) {
@@ -59,11 +60,7 @@ export function SubmitCta({ contestId }: { contestId: number }) {
   if (state.isOwner) return null;
 
   return (
-    <Link
-      href={`/console/contests/${contestId}/submit`}
-      data-testid="submit-cta-link"
-      className="inline-flex w-fit items-center rounded-sm border border-ink bg-ink px-6 py-2.5 text-sm font-medium text-paper hover:bg-ink/90"
-    >
+    <Link href={`/console/contests/${contestId}/submit`} data-testid="submit-cta-link" className={buttonClass("primary")}>
       {state.hasOwnSubmission ? "제출물 수정하러 가기" : "제출하러 가기"}
     </Link>
   );

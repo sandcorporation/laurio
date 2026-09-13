@@ -25,6 +25,7 @@ import Link from "next/link";
 
 import { bffClient } from "@/lib/bff/client";
 import { formatDday } from "@/lib/contest-format";
+import { buttonClass } from "@/lib/ui/classnames";
 import type { ContestDetail } from "@/lib/submissions/types";
 
 type LoadState =
@@ -70,7 +71,7 @@ function renderBody(contest: ContestDetail) {
         <Link
           href={`/console/contests/${contest.id}/judge`}
           data-testid="judging-entry-link"
-          className="inline-flex w-fit items-center rounded-sm border border-ink bg-ink px-6 py-2.5 text-sm font-medium text-paper hover:bg-ink/90"
+          className={buttonClass("primary")}
         >
           심사하러 가기
         </Link>

@@ -13,6 +13,7 @@
 // 그대로 그린다.
 import Link from "next/link";
 
+import { buttonClass } from "@/lib/ui/classnames";
 import type { HeaderSessionState } from "@/lib/auth/header-session-state";
 
 export function SessionSlot({ sessionState }: { sessionState: HeaderSessionState }) {
@@ -26,22 +27,14 @@ export function SessionSlot({ sessionState }: { sessionState: HeaderSessionState
 
   if (sessionState.status === "authenticated") {
     return (
-      <Link
-        href="/console"
-        data-testid="header-console-link"
-        className="rounded-sm border border-rule px-3 py-1.5 text-sm hover:border-ink"
-      >
+      <Link href="/console" data-testid="header-console-link" className={buttonClass("secondary", "sm")}>
         내 콘솔
       </Link>
     );
   }
 
   return (
-    <Link
-      href="/login"
-      data-testid="header-login-link"
-      className="rounded-sm border border-rule px-3 py-1.5 text-sm hover:border-ink"
-    >
+    <Link href="/login" data-testid="header-login-link" className={buttonClass("secondary", "sm")}>
       로그인
     </Link>
   );

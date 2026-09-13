@@ -18,6 +18,7 @@
 // "공모전" 링크와 "공모전 개최" CTA.
 import Link from "next/link";
 
+import { buttonClass } from "@/lib/ui/classnames";
 import { contestProductEnabled } from "@/lib/contest-switch";
 
 import { HeaderSessionZone } from "./header-session-zone";
@@ -25,8 +26,12 @@ import { HeaderSessionZone } from "./header-session-zone";
 export function SiteHeader() {
   return (
     <header data-testid="site-header" className="border-b border-rule bg-surface">
-      <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-10">
-        <Link href="/" data-testid="header-brand" className="text-lg font-semibold text-ink">
+      <div className="mx-auto flex h-[72px] max-w-[1200px] flex-wrap items-center justify-between gap-3 px-6">
+        <Link
+          href="/"
+          data-testid="header-brand"
+          className="text-[21px] font-bold tracking-[-0.01em] text-ink"
+        >
           Laurio
         </Link>
 
@@ -43,7 +48,7 @@ export function SiteHeader() {
               <Link
                 href="/console/contests/new"
                 data-testid="header-cta-new-contest"
-                className="rounded-sm border border-ink px-3 py-1.5 font-medium text-ink hover:bg-ink hover:text-paper"
+                className={buttonClass("primary", "sm")}
               >
                 공모전 개최
               </Link>
