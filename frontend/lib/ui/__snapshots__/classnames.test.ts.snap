@@ -1,0 +1,15 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`badgeClass > attention 톤의 클래스를 고정한다 1`] = `"inline-block border px-2 py-0.5 text-xs leading-tight border-attention text-attention"`;
+
+exports[`badgeClass > neutral 톤의 클래스를 고정한다 1`] = `"inline-block border px-2 py-0.5 text-xs leading-tight border-rule text-ink/60"`;
+
+exports[`badgeClass > verified 톤의 클래스를 고정한다 1`] = `"inline-block border px-2 py-0.5 text-xs leading-tight border-verified text-verified"`;
+
+exports[`buttonClass > danger 톤의 클래스를 고정한다 1`] = `"inline-flex items-center justify-center whitespace-nowrap text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 border border-attention bg-surface text-attention hover:bg-attention/5 px-4 py-2"`;
+
+exports[`buttonClass > dangerFilled 톤의 클래스를 고정한다 1`] = `"inline-flex items-center justify-center whitespace-nowrap text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 bg-attention text-paper hover:bg-attention/85 px-4 py-2"`;
+
+exports[`buttonClass > primary 톤의 클래스를 고정한다 1`] = `"inline-flex items-center justify-center whitespace-nowrap text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 bg-ink text-paper hover:bg-ink/85 px-4 py-2"`;
+
+exports[`buttonClass > secondary 톤의 클래스를 고정한다 1`] = `"inline-flex items-center justify-center whitespace-nowrap text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 border border-rule bg-surface text-ink hover:bg-paper px-4 py-2"`;
