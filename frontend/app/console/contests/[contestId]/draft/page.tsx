@@ -24,6 +24,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
+import { ErrorNote, PageShell } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
 import {
@@ -344,16 +345,16 @@ export default function ContestDraftPage() {
   if (load.status === "error") {
     return (
       <main className="flex min-h-screen items-center justify-center p-10">
-        <p role="alert" data-testid="draft-load-error">
-          {load.message}
-        </p>
+        <ErrorNote>
+          <span data-testid="draft-load-error">{load.message}</span>
+        </ErrorNote>
       </main>
     );
   }
 
   if (load.status === "closed") {
     return (
-      <main className="mx-auto max-w-xl p-10">
+      <PageShell>
         <ContestStageStepper current="payment" />
         <h1 className="mt-4 text-2xl font-semibold" data-testid="draft-closed-heading">
           {load.contest.title}
@@ -368,7 +369,7 @@ export default function ContestDraftPage() {
         >
           공모전 보기
         </Link>
-      </main>
+      </PageShell>
     );
   }
 

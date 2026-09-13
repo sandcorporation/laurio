@@ -32,6 +32,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
+import { ErrorNote, INPUT_CLASS, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
 
@@ -77,14 +78,14 @@ export function ProfilePageClient({ returnOrigin }: { returnOrigin: string | nul
   }
 
   return (
-    <main className="mx-auto max-w-2xl p-10">
+    <PageShell>
       <div className="flex items-center justify-between gap-3">
-        <Link className="text-sm text-muted" href="/console" data-testid="profile-back">
+        <Link className="text-sm text-ink/60" href="/console" data-testid="profile-back">
           ← 콘솔
         </Link>
         {returnOrigin && (
           <a
-            className="text-sm text-muted"
+            className="text-sm text-ink/60"
             href={returnOrigin}
             data-testid="profile-return-to-classroom"
           >
@@ -92,17 +93,15 @@ export function ProfilePageClient({ returnOrigin }: { returnOrigin: string | nul
           </a>
         )}
       </div>
-      <h1 className="mt-2 text-2xl font-semibold" data-testid="profile-heading">
-        내 정보
-      </h1>
-      <p className="mt-2 text-sm text-muted">
-        표시 이름과 소개는 개최자·참가자 역할마다 따로 저장됩니다. 실명·생년월일·연락처 같은
-        본인확인 정보는 여기서 다루지 않습니다.
-      </p>
+      <PageHeader
+        title="내 정보"
+        titleTestId="profile-heading"
+        description="표시 이름과 소개는 개최자·참가자 역할마다 따로 저장됩니다. 실명·생년월일·연락처 같은 본인확인 정보는 여기서 다루지 않습니다."
+      />
 
       <RoleSection role="sponsor" />
       <RoleSection role="developer" />
-    </main>
+    </PageShell>
   );
 }
 
@@ -164,16 +163,20 @@ function RoleSection({ role }: { role: Role }) {
   return (
     <section className="mt-8 border-t border-rule pt-6" data-testid={`profile-${role}-section`}>
       <h2 className="text-lg font-semibold">{copy.title}</h2>
-      <p className="mt-1 text-sm text-muted">{copy.description}</p>
+      <p className="mt-1 text-sm text-ink/60">{copy.description}</p>
 
       {load.status === "loading" ? (
-        <p className="mt-4 text-sm text-muted" data-testid={`profile-${role}-loading`}>
+        <p className="mt-4 text-sm text-ink/60" data-testid={`profile-${role}-loading`}>
           불러오는 중...
         </p>
       ) : load.status === "error" ? (
-        <p className="mt-4 text-sm text-attention" data-testid={`profile-${role}-load-error`}>
-          불러오지 못했습니다. 잠시 후 다시 시도해주세요.
-        </p>
+        <div className="mt-4">
+          <ErrorNote>
+            <span data-testid={`profile-${role}-load-error`}>
+              불러오지 못했습니다. 잠시 후 다시 시도해주세요.
+            </span>
+          </ErrorNote>
+        </div>
       ) : (
         <>
           <label className="mt-4 flex flex-col gap-1 text-sm" htmlFor={`${role}-display-name`}>
@@ -185,7 +188,7 @@ function RoleSection({ role }: { role: Role }) {
               onChange={(event) => handleFieldChange(setDisplayName)(event.target.value)}
               maxLength={100}
               data-testid={`profile-${role}-display-name-input`}
-              className="rounded-sm border border-rule px-3 py-2"
+              className={INPUT_CLASS}
             />
           </label>
 
@@ -197,14 +200,16 @@ function RoleSection({ role }: { role: Role }) {
               onChange={(event) => handleFieldChange(setBio)(event.target.value)}
               rows={3}
               data-testid={`profile-${role}-bio-input`}
-              className="rounded-sm border border-rule px-3 py-2"
+              className={INPUT_CLASS}
             />
           </label>
 
           {save.status === "error" && (
-            <p className="mt-2 text-sm text-attention" data-testid={`profile-${role}-save-error`}>
-              {save.message}
-            </p>
+            <div className="mt-2">
+              <ErrorNote>
+                <span data-testid={`profile-${role}-save-error`}>{save.message}</span>
+              </ErrorNote>
+            </div>
           )}
 
           {save.status === "success" && (
@@ -218,7 +223,7 @@ function RoleSection({ role }: { role: Role }) {
             onClick={handleSave}
             disabled={save.status === "saving"}
             data-testid={`profile-${role}-save`}
-            className="mt-4 rounded-sm border border-ink bg-ink px-4 py-2 text-sm text-paper hover:bg-ink/90 disabled:opacity-50"
+            className={`mt-4 ${buttonClass("primary")}`}
           >
             {save.status === "saving" ? "저장 중..." : "저장"}
           </button>

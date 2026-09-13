@@ -10,6 +10,7 @@
 // 실존하는 Contest id와 로그인한 본인의 user id가 있어야 업로드 권한이 선다.
 import { useState } from "react";
 
+import { INPUT_CLASS, PageHeader, PageShell } from "@/app/components/ui";
 import { UploadField } from "@/components/upload/upload-field";
 import { useSession } from "@/lib/auth/use-session";
 
@@ -31,13 +32,13 @@ export default function UploadDemoPage() {
     : null;
 
   return (
-    <main className="flex min-h-screen flex-col gap-6 p-10">
-      <h1 className="text-2xl font-semibold">presigned 업로드 데모</h1>
+    <PageShell>
+      <PageHeader title="presigned 업로드 데모" />
 
       <label className="flex flex-col gap-1 text-sm">
         공모전 ID
         <input
-          className="w-40 rounded-sm border border-rule px-2 py-1 font-mono"
+          className={`w-40 ${INPUT_CLASS} font-mono`}
           value={contestId}
           onChange={(event) => setContestId(event.target.value)}
           data-testid="upload-demo-contest-id"
@@ -58,6 +59,6 @@ export default function UploadDemoPage() {
           {uploadedKey}
         </p>
       )}
-    </main>
+    </PageShell>
   );
 }

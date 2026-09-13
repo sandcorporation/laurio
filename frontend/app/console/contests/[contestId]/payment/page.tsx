@@ -31,6 +31,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
+import { ErrorNote, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
 import { formatPrize } from "@/lib/contest-format";
@@ -338,16 +339,16 @@ export default function ContestPaymentPage() {
   if (load.status === "error") {
     return (
       <main className="flex min-h-screen items-center justify-center p-10">
-        <p role="alert" data-testid="payment-load-error">
-          {load.message}
-        </p>
+        <ErrorNote>
+          <span data-testid="payment-load-error">{load.message}</span>
+        </ErrorNote>
       </main>
     );
   }
 
   if (load.status === "already-paid") {
     return (
-      <main className="mx-auto max-w-xl p-10">
+      <PageShell>
         <h1 className="text-2xl font-semibold" data-testid="payment-heading">
           {load.title}
         </h1>
@@ -357,7 +358,7 @@ export default function ContestPaymentPage() {
         <Link href="/console/contests" className="mt-4 inline-block text-sm underline">
           내 공모전으로 돌아가기
         </Link>
-      </main>
+      </PageShell>
     );
   }
 
@@ -365,7 +366,7 @@ export default function ContestPaymentPage() {
 
   if (confirm.status === "paid") {
     return (
-      <main className="mx-auto max-w-xl p-10">
+      <PageShell>
         <h1 className="text-2xl font-semibold" data-testid="payment-heading">
           {title}
         </h1>
@@ -379,12 +380,12 @@ export default function ContestPaymentPage() {
         >
           공모전 보기
         </Link>
-      </main>
+      </PageShell>
     );
   }
 
   return (
-    <main className="mx-auto max-w-xl p-10">
+    <PageShell>
       <ContestStageStepper current="payment" />
 
       {/* 결제 전까지는 무엇이든 고칠 수 있다(spec #110) — 결제 직전에 요구사항을
@@ -400,13 +401,15 @@ export default function ContestPaymentPage() {
         ← 요구사항으로 돌아가기
       </Link>
 
-      <h1 className="mt-4 text-2xl font-semibold" data-testid="payment-heading">
-        {title}
-      </h1>
-      <p className="mt-1 text-sm text-ink/60">결제가 끝나야 공모전이 공개됩니다.</p>
+      <PageHeader
+        title={title}
+        titleTestId="payment-heading"
+        description="결제가 끝나야 공모전이 공개됩니다."
+        headingLevel="h1"
+      />
 
       <dl
-        className="mt-6 flex flex-col gap-2 border border-rule p-4 text-sm"
+        className="flex flex-col gap-2 p-4 text-sm border border-rule bg-surface"
         data-testid="payment-summary"
       >
         <div className="flex items-center justify-between">
@@ -431,15 +434,8 @@ export default function ContestPaymentPage() {
 
       {confirm.status === "failed" ? (
         <div className="mt-4 flex flex-col items-start gap-2" data-testid="payment-failed">
-          <p role="alert" className="text-attention">
-            {confirm.message}
-          </p>
-          <button
-            type="button"
-            onClick={retry}
-            data-testid="payment-retry"
-            className="rounded border border-ink px-4 py-2 text-sm hover:bg-ink hover:text-paper"
-          >
+          <ErrorNote>{confirm.message}</ErrorNote>
+          <button type="button" onClick={retry} data-testid="payment-retry" className={buttonClass("secondary")}>
             다시 시도
           </button>
         </div>
@@ -450,7 +446,7 @@ export default function ContestPaymentPage() {
             type="button"
             onClick={retry}
             data-testid="payment-recheck"
-            className="rounded border border-ink px-4 py-2 text-sm hover:bg-ink hover:text-paper"
+            className={buttonClass("secondary")}
           >
             다시 확인하기
           </button>
@@ -461,7 +457,7 @@ export default function ContestPaymentPage() {
           onClick={() => void pay()}
           disabled={confirm.status === "confirming" || confirm.status === "opening_widget"}
           data-testid="payment-pay-button"
-          className="mt-6 w-full rounded border border-ink bg-ink px-4 py-2.5 text-sm text-paper disabled:opacity-50"
+          className={`mt-6 w-full ${buttonClass("primary")}`}
         >
           {confirm.status === "confirming"
             ? "결제 확인 중..."
@@ -470,6 +466,6 @@ export default function ContestPaymentPage() {
               : "결제하기"}
         </button>
       )}
-    </main>
+    </PageShell>
   );
 }

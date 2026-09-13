@@ -11,6 +11,7 @@
 // 않으면 데모가 둘일 때 AI 도 사람도 어느 것의 경로인지 알 수 없다. 이 화면이
 // 고를 수 있게 해 주는 목록은 **이미 저장된** 자료뿐이다(`assets` prop) — 이
 // 폼에서 방금 추가한 자료는 저장 전까지 id 가 없어 가리킬 대상 자체가 없다.
+import { Badge, ErrorNote, INPUT_CLASS, buttonClass } from "@/app/components/ui";
 import { ASSET_KIND_LABELS, EVIDENCE_KINDS, type EvidenceIn, type RequirementOut } from "@/lib/submissions/types";
 
 export interface RequirementFieldState {
@@ -68,19 +69,13 @@ export function RequirementField({
     <div
       data-testid={testId}
       data-unmet-warning={showUnmetWarning ? "true" : "false"}
-      className={`flex flex-col gap-3 rounded-md border p-4 ${
+      className={`flex flex-col gap-3 border p-4 ${
         showUnmetWarning ? "border-attention" : "border-rule"
       }`}
     >
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-center gap-2">
-          <span
-            className={`rounded-sm border px-2 py-0.5 text-xs ${
-              isRequired ? "border-attention text-attention" : "border-rule text-ink"
-            }`}
-          >
-            {isRequired ? "필수" : "선택"}
-          </span>
+          <Badge tone={isRequired ? "attention" : "neutral"}>{isRequired ? "필수" : "선택"}</Badge>
           <p className="text-sm">{requirement.text}</p>
         </div>
         <label className="flex shrink-0 items-center gap-1 text-sm">
@@ -96,13 +91,15 @@ export function RequirementField({
       </div>
 
       {showUnmetWarning && (
-        <p role="alert" className="text-sm text-attention" data-testid={`${testId}-unmet-warning`}>
-          증거가 연결되지 않았습니다 — 이대로 제출하면 이 필수 항목은 미달로 채점됩니다.
-        </p>
+        <ErrorNote>
+          <span data-testid={`${testId}-unmet-warning`}>
+            증거가 연결되지 않았습니다 — 이대로 제출하면 이 필수 항목은 미달로 채점됩니다.
+          </span>
+        </ErrorNote>
       )}
 
       <textarea
-        className="rounded-sm border border-rule bg-paper px-2 py-1 text-sm"
+        className={INPUT_CLASS}
         placeholder="설명(선택)"
         value={state.note}
         disabled={disabled}
@@ -118,7 +115,7 @@ export function RequirementField({
               disabled={disabled}
               onChange={(event) => updateEvidence(index, { kind: event.target.value })}
               data-testid={`${testId}-evidence-${index}-kind`}
-              className="rounded-sm border border-rule bg-paper px-2 py-1 text-sm"
+              className={INPUT_CLASS}
             >
               {EVIDENCE_KINDS.map((kind) => (
                 <option key={kind.value} value={kind.value}>
@@ -135,7 +132,7 @@ export function RequirementField({
                 })
               }
               data-testid={`${testId}-evidence-${index}-asset`}
-              className="rounded-sm border border-rule bg-paper px-2 py-1 text-sm"
+              className={INPUT_CLASS}
             >
               <option value="">어느 자료의 근거인지 (선택 안 함)</option>
               {assets.map((asset) => (
@@ -145,7 +142,7 @@ export function RequirementField({
               ))}
             </select>
             <input
-              className="flex-1 rounded-sm border border-rule bg-paper px-2 py-1 text-sm"
+              className={`flex-1 ${INPUT_CLASS}`}
               placeholder="예: 01:23, screenshots/1.png, /checkout, accounts/views.py 의 signup()"
               value={item.value}
               disabled={disabled}
@@ -157,7 +154,7 @@ export function RequirementField({
               disabled={disabled}
               onClick={() => removeEvidence(index)}
               data-testid={`${testId}-evidence-${index}-remove`}
-              className="rounded-sm border border-rule px-2 py-1 text-xs hover:border-ink"
+              className={buttonClass("secondary", "sm")}
             >
               삭제
             </button>
@@ -168,7 +165,7 @@ export function RequirementField({
           disabled={disabled}
           onClick={addEvidence}
           data-testid={`${testId}-add-evidence`}
-          className="w-fit rounded-sm border border-rule px-2 py-1 text-xs hover:border-ink"
+          className={buttonClass("secondary", "sm")}
         >
           + 증거 추가
         </button>

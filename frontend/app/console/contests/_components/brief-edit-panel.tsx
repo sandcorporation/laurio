@@ -10,6 +10,7 @@
 // 한다").
 import { useState } from "react";
 
+import { ErrorNote, INPUT_CLASS, buttonClass } from "@/app/components/ui";
 import { formatPrize } from "@/lib/contest-format";
 import type { Category, ContestDetail, DeliverableType } from "@/lib/contests/grill-types";
 
@@ -154,7 +155,7 @@ export function BriefEditPanel({
             type="button"
             onClick={startEditing}
             data-testid="draft-edit-brief-toggle"
-            className="border border-rule px-3 py-1.5 text-xs hover:border-ink"
+            className={buttonClass("secondary", "sm")}
           >
             수정
           </button>
@@ -191,7 +192,7 @@ export function BriefEditPanel({
               onChange={(event) => setForm((prev) => ({ ...prev, title: event.target.value }))}
               maxLength={200}
               data-testid="draft-edit-title"
-              className="border border-rule bg-paper px-3 py-2"
+              className={INPUT_CLASS}
             />
           </label>
 
@@ -206,7 +207,7 @@ export function BriefEditPanel({
                 }))
               }
               data-testid="draft-edit-category"
-              className="border border-rule bg-paper px-3 py-2"
+              className={INPUT_CLASS}
             >
               <option value="">선택해주세요</option>
               {categories.map((category) => (
@@ -247,7 +248,7 @@ export function BriefEditPanel({
               value={form.prize}
               onChange={(event) => setForm((prev) => ({ ...prev, prize: event.target.value }))}
               data-testid="draft-edit-prize"
-              className="border border-rule bg-paper px-3 py-2 font-mono"
+              className={`${INPUT_CLASS} font-mono`}
             />
           </label>
 
@@ -258,7 +259,7 @@ export function BriefEditPanel({
               value={form.deadlineAt}
               onChange={(event) => setForm((prev) => ({ ...prev, deadlineAt: event.target.value }))}
               data-testid="draft-edit-deadline"
-              className="border border-rule bg-paper px-3 py-2"
+              className={INPUT_CLASS}
             />
           </label>
 
@@ -269,14 +270,14 @@ export function BriefEditPanel({
               onChange={(event) => setForm((prev) => ({ ...prev, description: event.target.value }))}
               rows={3}
               data-testid="draft-edit-description"
-              className="border border-rule bg-paper px-3 py-2"
+              className={INPUT_CLASS}
             />
           </label>
 
           {(validationError || error) && (
-            <p role="alert" data-testid="draft-edit-error" className="text-sm text-attention">
-              {validationError || error}
-            </p>
+            <ErrorNote>
+              <span data-testid="draft-edit-error">{validationError || error}</span>
+            </ErrorNote>
           )}
 
           {/* 제출을 시도하기 전에도 왜 저장 버튼이 막혀 있는지 보인다 — 버튼만
@@ -294,7 +295,7 @@ export function BriefEditPanel({
               onClick={() => void submit()}
               disabled={saving || !!formInvalidReason}
               data-testid="draft-edit-save"
-              className="border border-ink bg-ink px-4 py-2 text-xs text-paper disabled:opacity-50"
+              className={buttonClass("primary", "sm")}
             >
               {saving ? "저장하는 중..." : "저장"}
             </button>
@@ -303,7 +304,7 @@ export function BriefEditPanel({
               onClick={cancelEditing}
               disabled={saving}
               data-testid="draft-edit-cancel"
-              className="border border-rule px-4 py-2 text-xs hover:border-ink disabled:opacity-50"
+              className={buttonClass("secondary", "sm")}
             >
               취소
             </button>

@@ -11,6 +11,7 @@
 import { useState } from "react";
 import Link from "next/link";
 
+import { ErrorNote, INPUT_CLASS, buttonClass } from "@/app/components/ui";
 import { formatPrize } from "@/lib/contest-format";
 import type { ContestDetail, RequirementGrade, RequirementOut } from "@/lib/contests/grill-types";
 import { REQUIREMENT_GRADES, REQUIREMENT_TEXT_MAX_LENGTH } from "@/lib/contests/grill-types";
@@ -59,14 +60,14 @@ function RequirementRow({
           maxLength={REQUIREMENT_TEXT_MAX_LENGTH}
           rows={2}
           data-testid={`requirement-row-${requirement.id}-edit-text`}
-          className="resize-none border border-rule bg-paper px-2 py-1 text-sm"
+          className={`resize-none ${INPUT_CLASS}`}
         />
         <div className="flex items-center gap-2">
           <select
             value={grade}
             onChange={(event) => setGrade(event.target.value as RequirementGrade)}
             data-testid={`requirement-row-${requirement.id}-edit-grade`}
-            className="border border-rule bg-paper px-2 py-1 text-xs"
+            className={INPUT_CLASS}
           >
             {REQUIREMENT_GRADES.map((g) => (
               <option key={g.value} value={g.value}>
@@ -79,7 +80,7 @@ function RequirementRow({
             disabled={busy || !text.trim()}
             onClick={() => void save()}
             data-testid={`requirement-row-${requirement.id}-save`}
-            className="border border-ink bg-ink px-3 py-1 text-xs text-paper disabled:opacity-50"
+            className={buttonClass("primary", "sm")}
           >
             저장
           </button>
@@ -91,7 +92,7 @@ function RequirementRow({
               setEditing(false);
             }}
             data-testid={`requirement-row-${requirement.id}-cancel`}
-            className="border border-rule px-3 py-1 text-xs hover:border-ink"
+            className={buttonClass("secondary", "sm")}
           >
             취소
           </button>
@@ -241,9 +242,11 @@ export function RequirementDraftPanel({
         </div>
 
         {requirementError && (
-          <p role="alert" data-testid="grill-requirement-error" className="px-7 pb-2 text-xs text-attention">
-            {requirementError}
-          </p>
+          <div className="px-7 pb-2">
+            <ErrorNote>
+              <span data-testid="grill-requirement-error">{requirementError}</span>
+            </ErrorNote>
+          </div>
         )}
 
         <div data-testid="grill-requirement-list">
@@ -273,14 +276,14 @@ export function RequirementDraftPanel({
                 rows={2}
                 placeholder="검증 가능한 요구사항을 적어주세요"
                 data-testid="grill-manual-add-text"
-                className="resize-none border border-rule bg-paper px-2 py-1 text-sm"
+                className={`resize-none ${INPUT_CLASS}`}
               />
               <div className="flex items-center gap-2">
                 <select
                   value={manualGrade}
                   onChange={(event) => setManualGrade(event.target.value as RequirementGrade)}
                   data-testid="grill-manual-add-grade"
-                  className="border border-rule bg-paper px-2 py-1 text-xs"
+                  className={INPUT_CLASS}
                 >
                   {REQUIREMENT_GRADES.map((g) => (
                     <option key={g.value} value={g.value}>
@@ -293,7 +296,7 @@ export function RequirementDraftPanel({
                   disabled={requirementBusy || !manualText.trim()}
                   onClick={() => void submitManual()}
                   data-testid="grill-manual-add-submit"
-                  className="border border-ink bg-ink px-3 py-1 text-xs text-paper disabled:opacity-50"
+                  className={buttonClass("primary", "sm")}
                 >
                   추가
                 </button>
@@ -304,7 +307,7 @@ export function RequirementDraftPanel({
                     setManualText("");
                   }}
                   data-testid="grill-manual-add-cancel"
-                  className="border border-rule px-3 py-1 text-xs hover:border-ink"
+                  className={buttonClass("secondary", "sm")}
                 >
                   취소
                 </button>

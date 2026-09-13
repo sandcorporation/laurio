@@ -16,6 +16,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { ErrorNote, INPUT_CLASS, PageShell, buttonClass } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
 import { formatPrize } from "@/lib/contest-format";
@@ -322,9 +323,9 @@ export default function NewContestGrillPage() {
 
   if (session.status === "loading" || load.status === "loading") {
     return (
-      <main className="flex min-h-screen items-center justify-center p-10">
+      <PageShell>
         <p data-testid="grill-loading">불러오는 중...</p>
-      </main>
+      </PageShell>
     );
   }
 
@@ -332,11 +333,11 @@ export default function NewContestGrillPage() {
 
   if (load.status === "error") {
     return (
-      <main className="flex min-h-screen items-center justify-center p-10">
-        <p role="alert" data-testid="grill-load-error">
-          {load.message}
-        </p>
-      </main>
+      <PageShell>
+        <ErrorNote>
+          <span data-testid="grill-load-error">{load.message}</span>
+        </ErrorNote>
+      </PageShell>
     );
   }
 
@@ -344,175 +345,181 @@ export default function NewContestGrillPage() {
 
   if (verification.status !== "verified") {
     return (
-      <main className="flex min-h-screen flex-col items-center justify-center gap-4 p-10">
-        <p role="alert" data-testid="grill-verification-required" className="text-attention">
-          본인확인을 완료해야 공모전을 개최할 수 있습니다.
-        </p>
-        <p className="text-sm text-ink" data-testid="grill-verification-reason">
-          {verification.status === "underage"
-            ? verification.reason || "만 19세 미만은 본인확인을 완료할 수 없습니다."
-            : "휴대폰 본인확인을 먼저 마쳐주세요."}
-        </p>
-        {verification.status !== "underage" && (
-          <button
-            type="button"
-            onClick={handleVerifyDev}
-            disabled={verifying}
-            data-testid="grill-verify-now-dev"
-            className="rounded-sm border border-rule px-4 py-2 text-sm hover:border-ink disabled:opacity-50"
-          >
-            {verifying ? "확인 중..." : "지금 본인확인하기(dev)"}
-          </button>
-        )}
-        {verification.status !== "underage" && portOneConfig && (
-          <button
-            type="button"
-            onClick={handleVerifyLive}
-            disabled={verifying}
-            data-testid="grill-verify-now-live"
-            className="rounded-sm border border-rule px-4 py-2 text-sm hover:border-ink disabled:opacity-50"
-          >
-            {verifying ? "확인 중..." : "실제 본인확인하기(PortOne)"}
-          </button>
-        )}
-        {verifyError && (
-          <p role="alert" data-testid="grill-verify-live-error" className="text-sm text-attention">
-            {verifyError}
+      <PageShell>
+        <div className="flex flex-col items-center gap-4">
+          <ErrorNote>
+            <span data-testid="grill-verification-required">
+              본인확인을 완료해야 공모전을 개최할 수 있습니다.
+            </span>
+          </ErrorNote>
+          <p className="text-sm text-ink" data-testid="grill-verification-reason">
+            {verification.status === "underage"
+              ? verification.reason || "만 19세 미만은 본인확인을 완료할 수 없습니다."
+              : "휴대폰 본인확인을 먼저 마쳐주세요."}
           </p>
-        )}
-      </main>
+          {verification.status !== "underage" && (
+            <button
+              type="button"
+              onClick={handleVerifyDev}
+              disabled={verifying}
+              data-testid="grill-verify-now-dev"
+              className={buttonClass("secondary")}
+            >
+              {verifying ? "확인 중..." : "지금 본인확인하기(dev)"}
+            </button>
+          )}
+          {verification.status !== "underage" && portOneConfig && (
+            <button
+              type="button"
+              onClick={handleVerifyLive}
+              disabled={verifying}
+              data-testid="grill-verify-now-live"
+              className={buttonClass("secondary")}
+            >
+              {verifying ? "확인 중..." : "실제 본인확인하기(PortOne)"}
+            </button>
+          )}
+          {verifyError && (
+            <ErrorNote>
+              <span data-testid="grill-verify-live-error">{verifyError}</span>
+            </ErrorNote>
+          )}
+        </div>
+      </PageShell>
     );
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-xl flex-col gap-6 p-10">
-      <div className="flex flex-col gap-3">
-        <ContestStageStepper current="brief" />
-        <div>
-          <p className="text-xs font-medium tracking-widest text-ink/60">공모전 개최</p>
-          <h1 className="text-2xl font-semibold" data-testid="grill-brief-heading">
-            기본 정보를 알려주세요
-          </h1>
-          <p className="mt-2 text-sm text-ink/70">
-            다음 단계에서 AI와 대화하며 요구사항 체크리스트를 함께 만듭니다.
-          </p>
+    <PageShell>
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-3">
+          <ContestStageStepper current="brief" />
+          <div>
+            <p className="text-xs font-medium tracking-widest text-ink/60">공모전 개최</p>
+            <h1 className="text-2xl font-semibold" data-testid="grill-brief-heading">
+              기본 정보를 알려주세요
+            </h1>
+            <p className="mt-2 text-sm text-ink/70">
+              다음 단계에서 AI와 대화하며 요구사항 체크리스트를 함께 만듭니다.
+            </p>
+          </div>
         </div>
-      </div>
 
-      <label className="flex flex-col gap-1 text-sm">
-        제목
-        <input
-          value={brief.title}
-          onChange={(event) => setBrief((prev) => ({ ...prev, title: event.target.value }))}
-          maxLength={200}
-          data-testid="grill-brief-title"
-          className="border border-rule bg-surface px-3 py-2"
-        />
-      </label>
+        <label className="flex flex-col gap-1 text-sm">
+          제목
+          <input
+            value={brief.title}
+            onChange={(event) => setBrief((prev) => ({ ...prev, title: event.target.value }))}
+            maxLength={200}
+            data-testid="grill-brief-title"
+            className={INPUT_CLASS}
+          />
+        </label>
 
-      <label className="flex flex-col gap-1 text-sm">
-        카테고리
-        <select
-          value={brief.categoryId}
-          onChange={(event) =>
-            setBrief((prev) => ({ ...prev, categoryId: event.target.value ? Number(event.target.value) : "" }))
-          }
-          data-testid="grill-brief-category"
-          className="border border-rule bg-surface px-3 py-2"
-        >
-          <option value="">선택해주세요</option>
-          {categories.map((category) => (
-            <option key={category.id} value={category.id}>
-              {category.name}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <fieldset className="flex flex-col gap-2 text-sm">
-        <legend className="mb-1">요구형태 · 복수 선택</legend>
-        {deliverableTypes.map((dt) => (
-          <label
-            key={dt.id}
-            className="flex items-center justify-between border border-rule px-3 py-2"
-            data-testid={`grill-brief-deliverable-type-${dt.id}`}
+        <label className="flex flex-col gap-1 text-sm">
+          카테고리
+          <select
+            value={brief.categoryId}
+            onChange={(event) =>
+              setBrief((prev) => ({ ...prev, categoryId: event.target.value ? Number(event.target.value) : "" }))
+            }
+            data-testid="grill-brief-category"
+            className={INPUT_CLASS}
           >
-            <span className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={brief.deliverableTypeIds.includes(dt.id)}
-                onChange={() => toggleDeliverableType(dt.id)}
-                data-testid={`grill-brief-deliverable-type-${dt.id}-checkbox`}
-              />
-              {dt.name}
+            <option value="">선택해주세요</option>
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <fieldset className="flex flex-col gap-2 text-sm">
+          <legend className="mb-1">요구형태 · 복수 선택</legend>
+          {deliverableTypes.map((dt) => (
+            <label
+              key={dt.id}
+              className="flex items-center justify-between border border-rule px-3 py-2"
+              data-testid={`grill-brief-deliverable-type-${dt.id}`}
+            >
+              <span className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={brief.deliverableTypeIds.includes(dt.id)}
+                  onChange={() => toggleDeliverableType(dt.id)}
+                  data-testid={`grill-brief-deliverable-type-${dt.id}-checkbox`}
+                />
+                {dt.name}
+              </span>
+              <span className="font-mono text-xs text-ink/60">{formatPrize(dt.minimum_prize)}</span>
+            </label>
+          ))}
+          <div className="flex items-center justify-between border-t border-rule pt-2 text-xs">
+            <span className="text-ink/60">최소 제안 상금 합계</span>
+            <span className="font-mono font-semibold" data-testid="grill-brief-quote-total">
+              {quoteTotal === null ? "-" : formatPrize(quoteTotal)}
             </span>
-            <span className="font-mono text-xs text-ink/60">{formatPrize(dt.minimum_prize)}</span>
-          </label>
-        ))}
-        <div className="flex items-center justify-between border-t border-rule pt-2 text-xs">
-          <span className="text-ink/60">최소 제안 상금 합계</span>
-          <span className="font-mono font-semibold" data-testid="grill-brief-quote-total">
-            {quoteTotal === null ? "-" : formatPrize(quoteTotal)}
-          </span>
-        </div>
-      </fieldset>
+          </div>
+        </fieldset>
 
-      <label className="flex flex-col gap-1 text-sm">
-        상금 (원)
-        <input
-          type="number"
-          min={1}
-          value={brief.prize}
-          onChange={(event) => setBrief((prev) => ({ ...prev, prize: event.target.value }))}
-          data-testid="grill-brief-prize"
-          className="border border-rule bg-surface px-3 py-2 font-mono"
-        />
-      </label>
+        <label className="flex flex-col gap-1 text-sm">
+          상금 (원)
+          <input
+            type="number"
+            min={1}
+            value={brief.prize}
+            onChange={(event) => setBrief((prev) => ({ ...prev, prize: event.target.value }))}
+            data-testid="grill-brief-prize"
+            className={`${INPUT_CLASS} font-mono`}
+          />
+        </label>
 
-      {previewUnderfunded && quoteTotal !== null && (
-        <p role="status" data-testid="grill-brief-underfunded-preview" className="text-xs text-attention">
-          최소 제안 상금 합계({formatPrize(quoteTotal)}원)보다 적습니다 — 등록하면 목록에 「상금미달」 배지가
-          붙지만, 그래도 개최할 수 있습니다.
-        </p>
-      )}
+        {previewUnderfunded && quoteTotal !== null && (
+          <p role="status" data-testid="grill-brief-underfunded-preview" className="text-xs text-attention">
+            최소 제안 상금 합계({formatPrize(quoteTotal)}원)보다 적습니다 — 등록하면 목록에 「상금미달」 배지가
+            붙지만, 그래도 개최할 수 있습니다.
+          </p>
+        )}
 
-      <label className="flex flex-col gap-1 text-sm">
-        마감 기한
-        <input
-          type="datetime-local"
-          value={brief.deadlineAt}
-          onChange={(event) => setBrief((prev) => ({ ...prev, deadlineAt: event.target.value }))}
-          data-testid="grill-brief-deadline"
-          className="border border-rule bg-surface px-3 py-2"
-        />
-      </label>
+        <label className="flex flex-col gap-1 text-sm">
+          마감 기한
+          <input
+            type="datetime-local"
+            value={brief.deadlineAt}
+            onChange={(event) => setBrief((prev) => ({ ...prev, deadlineAt: event.target.value }))}
+            data-testid="grill-brief-deadline"
+            className={INPUT_CLASS}
+          />
+        </label>
 
-      <label className="flex flex-col gap-1 text-sm">
-        설명 (선택)
-        <textarea
-          value={brief.description}
-          onChange={(event) => setBrief((prev) => ({ ...prev, description: event.target.value }))}
-          rows={3}
-          data-testid="grill-brief-description"
-          className="border border-rule bg-surface px-3 py-2"
-        />
-      </label>
+        <label className="flex flex-col gap-1 text-sm">
+          설명 (선택)
+          <textarea
+            value={brief.description}
+            onChange={(event) => setBrief((prev) => ({ ...prev, description: event.target.value }))}
+            rows={3}
+            data-testid="grill-brief-description"
+            className={INPUT_CLASS}
+          />
+        </label>
 
-      {createError && (
-        <p role="alert" data-testid="grill-brief-error" className="text-sm text-attention">
-          {createError}
-        </p>
-      )}
+        {createError && (
+          <ErrorNote>
+            <span data-testid="grill-brief-error">{createError}</span>
+          </ErrorNote>
+        )}
 
-      <button
-        type="button"
-        onClick={() => void handleCreateDraft()}
-        disabled={creating}
-        data-testid="grill-brief-submit"
-        className="w-fit border border-ink bg-ink px-6 py-2 text-sm text-paper disabled:opacity-50"
-      >
-        {creating ? "만드는 중..." : "AI와 대화 시작"}
-      </button>
-    </main>
+        <button
+          type="button"
+          onClick={() => void handleCreateDraft()}
+          disabled={creating}
+          data-testid="grill-brief-submit"
+          className={`w-fit ${buttonClass("primary")}`}
+        >
+          {creating ? "만드는 중..." : "AI와 대화 시작"}
+        </button>
+      </div>
+    </PageShell>
   );
 }
