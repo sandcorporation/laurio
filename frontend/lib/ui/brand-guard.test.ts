@@ -45,6 +45,15 @@ const TOKEN_RADII = new Set([
   "rounded-lg", "rounded-xl", "rounded-2xl", "rounded-3xl", "rounded-4xl",
 ]);
 
+/** 토큰 반경을 우회해도 되는 **유일한** 자리 — 알림 벨의 읽지 않은 수 배지.
+ *  숫자 하나를 담는 표식은 원이어야 「세어 볼 것」으로 읽힌다는 판단이다(2026-09-13,
+ *  사용자 결정). 그래서 브랜드의 각진 규칙에서 이 한 모양만 뺀다 — 예외를 파일
+ *  단위로 좁혀 두어, 다른 화면에 `rounded-full` 이 번지면 여전히 빨개진다. */
+const ROUND_BADGE_FILES = new Set([
+  "frontend/app/components/notification-bell.tsx",
+  "classroom/app/components/notification-bell.tsx",
+]);
+
 /** 색이 올 수 있는 접두어. 뒤가 늘 색은 아니라 `isNotAColor` 가 한 번 더 거른다. */
 const COLOR_PREFIXES = new Set([
   "bg", "text", "border", "ring", "divide", "outline",
@@ -138,6 +147,7 @@ function scan(): string[] {
     const rel = path.relative(REPO, file);
     for (const literal of stringLiterals(stripComments(fs.readFileSync(file, "utf8")))) {
       for (const raw of literal.split(/\s+/)) {
+        if (raw === "rounded-full" && ROUND_BADGE_FILES.has(rel)) continue;
         const why = raw && violationOf(raw);
         if (why) report.push(`  ${rel}: \`${raw}\` — ${why}`);
       }
@@ -174,6 +184,11 @@ describe("브랜드는 기계가 지킨다 (#370)", () => {
   it("템플릿 리터럴 보간식 속 변수 이름은 클래스가 아니다", () => {
     const source = "const s = `${Number.isInteger(rounded) ? rounded : 1}MB`;";
     expect(stringLiterals(source).flatMap((l) => l.split(/\s+/)).filter((t) => t && violationOf(t))).toEqual([]);
+  });
+
+  it("동그란 배지 예외는 알림 벨 두 파일에만 열려 있고, 그 파일들이 실제로 있다", () => {
+    for (const rel of ROUND_BADGE_FILES) expect(fs.existsSync(path.join(REPO, rel)), rel).toBe(true);
+    expect(ROUND_BADGE_FILES.size).toBe(2);
   });
 
   it("주석 속 낱말은 클래스가 아니다", () => {

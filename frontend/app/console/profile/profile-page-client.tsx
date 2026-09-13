@@ -101,6 +101,29 @@ export function ProfilePageClient({ returnOrigin }: { returnOrigin: string | nul
 
       <RoleSection role="sponsor" />
       <RoleSection role="developer" />
+
+      {/* 탈퇴 진입점은 여기 하나다(#100, ADR-0025). 예전에는 콘솔 현관과 강의실
+          「내 계정」 메뉴에도 있었는데, 매번 여는 메뉴 안에 되돌릴 수 없는 행위가
+          놓여 있으면 누를 때마다 사람을 흠칫하게 만든다 — 그래서 자기 정보를
+          다루러 일부러 들어온 이 화면의 맨 아래로 모았다. 강의실에서 건너왔으면
+          `from_origin` 을 그대로 넘겨 탈퇴 화면에서도 돌아갈 길을 잃지 않게 한다. */}
+      <section className="mt-10 border-t border-rule pt-6" data-testid="profile-withdraw-section">
+        <h2 className="text-base font-medium">탈퇴</h2>
+        <p className="mt-1 text-sm text-ink/60">
+          탈퇴하면 되돌릴 수 없습니다. 무엇이 지워지고 무엇이 남는지는 다음 화면에서 먼저 보여드립니다.
+        </p>
+        <Link
+          href={
+            returnOrigin
+              ? `/console/withdraw?from_origin=${encodeURIComponent(returnOrigin)}`
+              : "/console/withdraw"
+          }
+          data-testid="profile-withdraw-link"
+          className={`mt-3 w-fit ${buttonClass("danger")}`}
+        >
+          탈퇴하기
+        </Link>
+      </section>
     </PageShell>
   );
 }

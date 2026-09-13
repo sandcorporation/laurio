@@ -5,7 +5,7 @@
 import { headers } from "next/headers";
 
 import { classroomOrigin, publicAppOrigin } from "@/lib/auth/public-app";
-import { buildProfileUrl, buildWithdrawUrl } from "@/lib/auth/return-link";
+import { buildProfileUrl } from "@/lib/auth/return-link";
 
 import { AccountMenuClient } from "./account-menu-client";
 
@@ -26,7 +26,6 @@ export async function AccountMenu() {
   return (
     <AccountMenuClient
       profileUrl={buildProfileUrl(publicOrigin, safeOrigin)}
-      withdrawUrl={buildWithdrawUrl(publicOrigin, safeOrigin)}
     />
   );
 }

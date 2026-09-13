@@ -654,7 +654,8 @@ page/route 는 `export const dynamic = "force-dynamic"` 을 선언해야 한다)
 **토큰이 같아도 화면이 그 밖의 이름을 부르면 갈라진다** — 그래서
 `frontend/lib/ui/brand-guard.test.ts`(#370)가 두 앱의 소스를 텍스트로 훑어 정의된 적
 없는 색(`bg-accent` 등 — Tailwind 는 오류 없이 아무것도 안 만든다)과 토큰 반경을
-우회하는 모서리(맨 `rounded`·`rounded-full`)를 막는다. 새 CI 잡이 아니라 공개 앱의
+우회하는 모서리(맨 `rounded`·`rounded-full`)를 막는다 — 예외는 알림 벨의 읽지 않은 수
+배지 하나뿐이고(동그란 표식, 2026-09-13 결정) 그 목록이 검사 파일 안에 있다. 새 CI 잡이 아니라 공개 앱의
 `test:unit` 에 얹혀 있다. 운영자 앱은 토큰 파일이 없어 대상이 아니다.
 
 **`test:classroom` 만 `--pass-with-no-tests` 를 붙인다.** 세 스크립트는 2단계다 —

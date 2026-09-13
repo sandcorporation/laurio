@@ -27,7 +27,7 @@ export function NotificationBell() {
       {count > 0 && (
         <span
           data-testid="classroom-notification-badge"
-          className="ml-1.5 inline-flex min-w-[1.25rem] items-center justify-center bg-attention px-1 text-[11px] font-medium text-paper"
+          className="ml-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-attention px-1.5 text-[11px] leading-none font-medium text-paper"
         >
           {count > 99 ? "99+" : count}
         </span>
