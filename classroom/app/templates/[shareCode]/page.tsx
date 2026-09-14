@@ -26,6 +26,7 @@ import { useMyClasses } from "@/lib/classes/use-my-classes";
 import { importProblemTemplate, reportProblemTemplate, takedownProblemTemplate } from "@/lib/problem-templates/api";
 import { useTemplatePreview } from "@/lib/problem-templates/use-template-preview";
 import { formatSubmissionFormats } from "@/lib/problems/api";
+import { gradingGuidelineText, gradingStrictnessLabel } from "@/lib/problems/grading-guideline";
 
 export default function ProblemTemplatePreviewPage() {
   const params = useParams<{ shareCode: string }>();
@@ -172,6 +173,21 @@ export default function ProblemTemplatePreviewPage() {
 
           <Card>
             <CardHeader title="체크리스트" hint="필수를 전부 충족하면 「통과」" />
+            <div
+              data-testid="template-preview-grading-guideline"
+              className="flex flex-col gap-1 border-b border-rule px-4 py-3"
+            >
+              <div className="flex items-center gap-2">
+                <Badge>{gradingStrictnessLabel(template.grading_strictness)}</Badge>
+                <span className="text-[12px] font-medium text-ink/60">채점 지침</span>
+              </div>
+              <p
+                data-testid="template-preview-grading-guideline-text"
+                className="text-[12.5px] leading-relaxed text-ink/60"
+              >
+                {gradingGuidelineText(template.grading_strictness, template.grading_guideline_text)}
+              </p>
+            </div>
             {template.checklist_items.length === 0 ? (
               <EmptyState>
                 <span data-testid="template-preview-checklist-empty">아직 항목이 없습니다.</span>

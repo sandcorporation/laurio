@@ -24,6 +24,7 @@ import {
 import { importClassTemplate, takedownClassTemplate } from "@/lib/class-templates/api";
 import { useClassTemplatePreview } from "@/lib/class-templates/use-class-template-preview";
 import { formatSubmissionFormats } from "@/lib/problems/api";
+import { gradingGuidelineText, gradingStrictnessLabel } from "@/lib/problems/grading-guideline";
 
 export default function ClassTemplatePreviewPage() {
   const params = useParams<{ shareCode: string }>();
@@ -151,6 +152,15 @@ export default function ClassTemplatePreviewPage() {
                         className="shrink-0 text-[12px] text-ink/45"
                       >
                         {formatSubmissionFormats(problem.submission_formats)}
+                      </span>
+                    </div>
+                    <div
+                      data-testid={`class-template-preview-problem-${index}-grading-guideline`}
+                      className="mt-2 flex items-center gap-2 pl-8 text-[12px] text-ink/60"
+                    >
+                      <Badge>{gradingStrictnessLabel(problem.grading_strictness)}</Badge>
+                      <span>
+                        {gradingGuidelineText(problem.grading_strictness, problem.grading_guideline_text)}
                       </span>
                     </div>
                     {problem.checklist_items.length > 0 ? (

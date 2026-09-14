@@ -404,6 +404,17 @@ class ProblemTemplate(models.Model):
     #: `Problem.submission_formats`와 같은 이유·같은 모양(#373/#374) — 공개
     #: 시점에 원본이 허용하던 형식 목록을 그대로 사본에 담는다.
     submission_formats = models.JSONField(default=list)
+    #: `Problem.grading_strictness`/`grading_guideline_text`와 같은 이유·같은
+    #: 모양(#389) — 지침은 "무엇을 통과로 볼지"의 일부라 채점 모델과 달리
+    #: 공개 시점에 원본이 가진 값을 그대로 사본에 담는다.
+    grading_strictness = models.CharField(
+        max_length=10,
+        choices=Problem.GradingStrictness.choices,
+        default=DEFAULT_GRADING_STRICTNESS,
+    )
+    grading_guideline_text = models.CharField(
+        max_length=GRADING_GUIDELINE_TEXT_MAX_LENGTH, blank=True, default=""
+    )
 
     #: 추측 불가능한 공유 코드 — 가입 링크와 같은 모양, 같은 생성기다(#316
     #: Implementation Decisions "가입 링크와 같은 모양").
@@ -578,6 +589,16 @@ class ClassTemplateProblem(models.Model):
     description = models.TextField(blank=True, default="")
     #: `Problem.submission_formats`와 같은 이유·같은 모양(#373/#374).
     submission_formats = models.JSONField(default=list)
+    #: `Problem.grading_strictness`/`grading_guideline_text`와 같은 이유·같은
+    #: 모양(#389).
+    grading_strictness = models.CharField(
+        max_length=10,
+        choices=Problem.GradingStrictness.choices,
+        default=DEFAULT_GRADING_STRICTNESS,
+    )
+    grading_guideline_text = models.CharField(
+        max_length=GRADING_GUIDELINE_TEXT_MAX_LENGTH, blank=True, default=""
+    )
     order = models.PositiveIntegerField(default=0)
 
     class Meta:

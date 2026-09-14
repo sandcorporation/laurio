@@ -511,6 +511,11 @@ class ProblemTemplateOut(Schema):
     title: str
     description: str
     submission_formats: list[str]
+    #: 공개 시점 원본의 채점 지침(#389, CONTEXT.md 「채점 지침」) — 가져가기
+    #: 전에 어떤 기준으로 채점될지 미리 본다.
+    grading_strictness: str
+    #: grading_strictness가 "custom"일 때만 채워진다.
+    grading_guideline_text: str
     publisher_display_name: str
     created_at: datetime
     taken_down: bool = False
@@ -566,6 +571,9 @@ class ClassTemplateProblemOut(Schema):
     title: str
     description: str
     submission_formats: list[str]
+    #: `ProblemTemplateOut.grading_strictness`와 같은 이유·같은 모양(#389).
+    grading_strictness: str
+    grading_guideline_text: str
     order: int
     checklist_items: list[ProblemTemplateChecklistItemOut] = []
 
