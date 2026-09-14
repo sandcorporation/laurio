@@ -307,7 +307,7 @@ def test_expelled_member_still_sees_the_problem_list(client, db):
     )
 
     assert response.status_code == 200
-    assert len(response.json()) == 1
+    assert len(response.json()["problems"]) == 1
 
 
 def test_draft_problem_cannot_be_submitted_to(client, db):
