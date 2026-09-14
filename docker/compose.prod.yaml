@@ -321,7 +321,14 @@ services:
         condition: service_healthy
       backend:
         condition: service_started
-    environment: *backend-env
+    # 강의실 BFF 는 `http://events:8001` 로 중계하므로 Host 가 `events` 다 — backend 의
+    # 허용 목록(.env.prod 의 DJANGO_ALLOWED_HOSTS, 거기엔 `backend` 가 있다)만 받으면
+    # Django 가 모든 스트림 요청을 400(DisallowedHost)으로 돌려보낸다. staging 첫 배포에서
+    # 실제로 그렇게 막혀 화면이 폴링으로만 돌았다(#380 후속). 비밀 파일이 아니라 여기서
+    # 이 서비스의 호스트 이름만 덧붙인다 — 첫 항목은 그대로라 헬스 체크 규약도 그대로다.
+    environment:
+      <<: *backend-env
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:?prod DJANGO_ALLOWED_HOSTS 를 .env.prod 에 설정하라},events
     command: >
       sh -c "uvicorn config.asgi:application --host 0.0.0.0 --port 8001"
 
