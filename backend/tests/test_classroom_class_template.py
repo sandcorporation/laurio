@@ -201,6 +201,40 @@ def test_import_creates_a_new_class_with_a_chosen_name(client, db):
     assert labels_and_required == [("필수 항목", True), ("선택 항목", False)]
 
 
+def test_publish_and_import_preserve_each_problems_format_list(client, db):
+    """#374 AC — 클래스 템플릿 공개 → 가져오기가 각 문제의 형식 목록을
+    보존한다. 문제 하나는 형식 하나만, 다른 하나는 둘 다 열어 서로
+    뭉개지지 않는지 함께 본다."""
+
+    a = _login(client, uid="instructor-a")
+    b = _login(client, uid="instructor-b")
+    class_id = _create_class(client, a["access"], "원본 클래스")
+    p1 = _create_problem(client, a["access"], class_id, "1주차", "source")
+    both = client.post(
+        f"{CLASSES_URL}/{class_id}/problems",
+        data={"title": "2주차", "submission_formats": ["repository", "source"]},
+        content_type="application/json",
+        **_auth_header(a["access"]),
+    )
+    assert both.status_code == 201
+
+    published = _publish_class(client, a["access"], class_id)
+    published_problems = published.json()["problems"]
+    assert [p["submission_formats"] for p in published_problems] == [["source"], ["source", "repository"]]
+    share_code = published.json()["share_code"]
+
+    preview = client.get(f"{CLASS_TEMPLATES_URL}/{share_code}", **_auth_header(b["access"]))
+    preview_problems = preview.json()["problems"]
+    assert [p["submission_formats"] for p in preview_problems] == [["source"], ["source", "repository"]]
+
+    imported = _import_class(client, b["access"], share_code, "가져온 클래스")
+    assert imported.status_code == 201, imported.content
+    imported_problems = client.get(
+        f"{CLASSES_URL}/{imported.json()['id']}/problems", **_auth_header(b["access"])
+    ).json()
+    assert [p["submission_formats"] for p in imported_problems] == [["source"], ["source", "repository"]]
+
+
 def test_import_does_not_carry_the_scoring_model(client, db):
     a = _login(client, uid="instructor-a")
     b = _login(client, uid="instructor-b")

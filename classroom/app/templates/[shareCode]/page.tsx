@@ -25,6 +25,7 @@ import { defaultCopyTarget, selectCopyTargets } from "@/lib/classes/copy-targets
 import { useMyClasses } from "@/lib/classes/use-my-classes";
 import { importProblemTemplate, reportProblemTemplate, takedownProblemTemplate } from "@/lib/problem-templates/api";
 import { useTemplatePreview } from "@/lib/problem-templates/use-template-preview";
+import { formatSubmissionFormats } from "@/lib/problems/api";
 
 export default function ProblemTemplatePreviewPage() {
   const params = useParams<{ shareCode: string }>();
@@ -164,7 +165,7 @@ export default function ProblemTemplatePreviewPage() {
                 {template.description || "설명이 없습니다."}
               </p>
               <p data-testid="template-preview-format" className="mt-3 text-[12.5px] text-ink/60">
-                제출 형식: {template.submission_formats[0] === "source" ? "소스" : "저장소"}
+                제출 형식: {formatSubmissionFormats(template.submission_formats)}
               </p>
             </div>
           </Card>

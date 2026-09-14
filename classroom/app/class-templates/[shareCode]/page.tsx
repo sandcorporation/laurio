@@ -23,6 +23,7 @@ import {
 } from "@/app/components/ui";
 import { importClassTemplate, takedownClassTemplate } from "@/lib/class-templates/api";
 import { useClassTemplatePreview } from "@/lib/class-templates/use-class-template-preview";
+import { formatSubmissionFormats } from "@/lib/problems/api";
 
 export default function ClassTemplatePreviewPage() {
   const params = useParams<{ shareCode: string }>();
@@ -145,8 +146,11 @@ export default function ClassTemplatePreviewPage() {
                       <span data-testid={`class-template-preview-problem-${index}-title`} className="flex-1 text-[14px] font-medium">
                         {problem.title}
                       </span>
-                      <span className="shrink-0 text-[12px] text-ink/45">
-                        {problem.submission_formats[0] === "source" ? "소스" : "저장소"}
+                      <span
+                        data-testid={`class-template-preview-problem-${index}-formats`}
+                        className="shrink-0 text-[12px] text-ink/45"
+                      >
+                        {formatSubmissionFormats(problem.submission_formats)}
                       </span>
                     </div>
                     {problem.checklist_items.length > 0 ? (

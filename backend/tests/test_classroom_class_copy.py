@@ -95,6 +95,28 @@ def test_instructor_copies_a_class_with_problems_and_checklists_in_order(client,
     assert [i["label"] for i in problems[1]["checklist_items"]] == ["배포됐다"]
 
 
+def test_copy_preserves_each_problems_submission_format_list(client, db):
+    """#374 AC — 클래스 복사가 각 문제의 형식 목록을 보존한다."""
+
+    pair = _login(client)
+    source_class = _create_class(client, pair["access"], "1기")
+    p1 = _create_problem(client, pair["access"], source_class, "1주차", "source")
+    both = client.post(
+        f"{CLASSES_URL}/{source_class}/problems",
+        data={"title": "2주차", "submission_formats": ["repository", "source"]},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert both.status_code == 201
+
+    response = client.post(_copy_class_url(source_class), **_auth_header(pair["access"]))
+    assert response.status_code == 201
+
+    listing = client.get(f"{CLASSES_URL}/{response.json()['id']}/problems", **_auth_header(pair["access"]))
+    problems = listing.json()
+    assert [p["submission_formats"] for p in problems] == [["source"], ["source", "repository"]]
+
+
 def test_copied_problems_are_always_drafts_even_if_originals_were_open(client, db):
     pair = _login(client)
     source_class = _create_class(client, pair["access"])

@@ -4,6 +4,17 @@ import { backendJson } from "@/lib/backend/client";
 export type SubmissionFormat = "source" | "repository";
 export type ProblemStatus = "draft" | "open";
 
+const SUBMISSION_FORMAT_LABEL: Record<SubmissionFormat, string> = {
+  source: "zip 파일",
+  repository: "GitHub 저장소",
+};
+
+// 허용 형식 목록을 화면 문구로 — 템플릿 미리보기 등 목록 전체를 한 줄로
+// 보여줘야 하는 자리가 공유해서 쓴다(#374).
+export function formatSubmissionFormats(formats: SubmissionFormat[]): string {
+  return formats.map((f) => SUBMISSION_FORMAT_LABEL[f]).join(" · ");
+}
+
 export type ChecklistItemRow = {
   id: number;
   label: string;
