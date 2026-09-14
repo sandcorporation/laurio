@@ -360,7 +360,7 @@ export default function EditProblemPage() {
           <div className="flex min-w-0 flex-1 flex-col gap-5">
             <Card>
               <CardHeader title="문제" />
-              <form onSubmit={handleSubmit} className="flex flex-col gap-5 p-4">
+              <form id="edit-problem-form" onSubmit={handleSubmit} className="flex flex-col gap-5 p-4">
                 <div className="flex flex-col gap-1.5">
                   <label htmlFor="problem-title">
                     <FieldLabel>제목</FieldLabel>
@@ -426,27 +426,11 @@ export default function EditProblemPage() {
                   ) : null}
                 </fieldset>
 
-                <div>
-                  <button
-                    type="submit"
-                    data-testid="edit-problem-submit"
-                    disabled={saving || title.trim() === "" || submissionFormats.length === 0}
-                    className={buttonClass("primary")}
-                  >
-                    {saving ? "저장하는 중..." : "저장"}
-                  </button>
-                </div>
-
-                {error ? (
-                  <ErrorNote>
-                    <span data-testid="edit-problem-error-message">{error}</span>
-                  </ErrorNote>
-                ) : null}
               </form>
             </Card>
 
             <Card>
-              <CardHeader title="체크리스트" hint="필수를 전부 충족하면 「통과」" />
+              <CardHeader title="체크리스트" hint="필수를 전부 충족하면 「통과」 · 바뀔 때마다 바로 저장됩니다" />
               {problem.checklist_items.length === 0 ? (
                 <EmptyState>
                   <span data-testid="checklist-empty-state">
@@ -751,6 +735,29 @@ export default function EditProblemPage() {
             </Card>
           </div>
         </div>
+
+        {/* 저장은 화면 맨 아래 하나다 — 새 문제 화면(「만들기」)과 같은 자리. 예전엔
+            「문제」 카드 끝에 있어 체크리스트보다 위에 섰고, 그 버튼이 함께 저장하는
+            채점 모델은 체크리스트 아래 오른쪽 카드라 모델만 바꾸고 나가면 조용히
+            반영되지 않았다. 체크리스트는 여전히 항목마다 바로 저장된다(카드 머리에
+            적어 둔다) — 이 버튼은 제목·설명·제출 형식·채점 모델을 저장한다. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="submit"
+            form="edit-problem-form"
+            data-testid="edit-problem-submit"
+            disabled={saving || title.trim() === "" || submissionFormats.length === 0}
+            className={buttonClass("primary")}
+          >
+            {saving ? "저장하는 중..." : "저장"}
+          </button>
+        </div>
+
+        {error ? (
+          <ErrorNote>
+            <span data-testid="edit-problem-error-message">{error}</span>
+          </ErrorNote>
+        ) : null}
         </div>
 
         <div
