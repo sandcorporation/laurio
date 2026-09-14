@@ -9,7 +9,11 @@
 # **바뀐 것만 다시 굽고 바꿔 끼운다.** 그런데 「바뀐 것」과 「바꿔 끼울 것」이
 # 1:1 이 아니다 — 그 어긋남이 이 파일의 대부분이다.
 #
-#   backend/             -> backend + celery-worker + celery-beat  (같은 Dockerfile, 이미지는 셋)
+#   backend/             -> backend + celery-worker + celery-beat + events (같은
+#                                                                    Dockerfile, 이미지는 넷 —
+#                                                                    events 는 ASGI 로 강의실
+#                                                                    실시간 신호만 여는 별도
+#                                                                    프로세스다, ADR-0046, #380)
 #   frontend/            -> frontend
 #   operator/            -> operator
 #   classroom/           -> classroom                              (#276/#277, ADR-0037)
@@ -24,7 +28,9 @@
 #
 # **`backend` 만 바꿔 끼우는 것은 사고다.** celery-worker 와 beat 가 옛 코드로
 # 계속 돈다 — 그 둘이 마감 전이·채점·배분·지급을 실제로 진행시키는 주체다
-# (ADR-0003). 새 코드가 만든 마이그레이션 위에서 옛 워커가 도는 상태가 되고,
+# (ADR-0003). events 도 같은 이유로 함께 간다 — 옛 코드가 URLconf 를 바꾼
+# 최신 backend 와 다른 스키마·응답 모양을 돌려주면 강의실 스트림만 조용히
+# 어긋난다. 새 코드가 만든 마이그레이션 위에서 옛 워커가 도는 상태가 되고,
 # 그건 조용히 틀린다.
 #
 # 컨테이너가 없으면 변경 여부와 무관하게 굽는다 — 「없음」은 「최신」이 아니다.
@@ -161,7 +167,7 @@ missing() {
   [ -z "$($COMPOSE ps -q "$1" 2>/dev/null | head -1)" ]
 }
 
-for svc in backend celery-worker celery-beat; do
+for svc in backend celery-worker celery-beat events; do
   if missing "$svc"; then
     log "백엔드 계열 컨테이너 '$svc' 가 없다 — 굽는다."
     BUILD_BACKEND=true
@@ -209,10 +215,10 @@ plan() {
   if [ "$1" = true ]; then echo "다시 굽는다"; else echo "건너뛴다"; fi
 }
 echo "계획"
-echo "  backend(+celery-worker,+celery-beat) : $(plan "$BUILD_BACKEND")"
-echo "  frontend                             : $(plan "$BUILD_FRONTEND")"
-echo "  operator                             : $(plan "$BUILD_OPERATOR")"
-echo "  classroom                            : $(plan "$BUILD_CLASSROOM")"
+echo "  backend(+celery-worker,+celery-beat,+events) : $(plan "$BUILD_BACKEND")"
+echo "  frontend                                      : $(plan "$BUILD_FRONTEND")"
+echo "  operator                                      : $(plan "$BUILD_OPERATOR")"
+echo "  classroom                                     : $(plan "$BUILD_CLASSROOM")"
 
 if [ "$BUILD_BACKEND" = false ] && [ "$BUILD_FRONTEND" = false ] && [ "$BUILD_OPERATOR" = false ] && [ "$BUILD_CLASSROOM" = false ]; then
   log "바뀐 것이 없다. 배포할 것이 없다."
@@ -229,14 +235,15 @@ SERVICES=""
 
 # 첫 인자는 로그 이름이고, 나머지가 실제로 구울 서비스들이다.
 #
-# **backend·celery-worker·beat 는 같은 이미지가 아니다.** 셋 다 같은
+# **backend·celery-worker·beat·events 는 같은 이미지가 아니다.** 넷 다 같은
 # Dockerfile 을 가리키지만 compose 파일 어디에도 공유 `image:` 태그가 없어서,
-# compose 는 서비스 이름으로 이미지를 **셋** 만든다(laurio-staging-backend,
-# -celery-worker, -celery-beat). 그래서 `build backend` 는 하나만 굽고 워커
-# 둘은 옛 이미지에 남는다 — 뒤의 `up -d` 도 바뀐 게 없으니 그냥 Running 이라
-# 적고 지나간다. 배포는 초록으로 끝나는데 스캔만 옛 코드로 돈다.
-# 실제로 그렇게 한 번 나갔다(빌드 23). 같은 레이어를 쓰므로 둘째·셋째는
-# 캐시에 맞아 거의 시간이 들지 않는다.
+# compose 는 서비스 이름으로 이미지를 **넷** 만든다(laurio-staging-backend,
+# -celery-worker, -celery-beat, -events, #380). 그래서 `build backend` 는
+# 하나만 굽고 나머지 셋은 옛 이미지에 남는다 — 뒤의 `up -d` 도 바뀐 게 없으니
+# 그냥 Running 이라 적고 지나간다. 배포는 초록으로 끝나는데 스캔·강의실
+# 스트림만 옛 코드로 돈다. 실제로 그렇게 한 번 나갔다(빌드 23, 그때는
+# celery-worker/beat 둘뿐이었다). 같은 레이어를 쓰므로 둘째부터는 캐시에
+# 맞아 거의 시간이 들지 않는다.
 #
 # NEXT_PUBLIC_* 는 빌드타임에 인라인된다 — build args 는 compose 가
 # .env.<target> 에서 읽어 넘긴다(#85). 여기서 따로 줄 것이 없다.
@@ -249,7 +256,7 @@ start_build() {
   log "$label 빌드 시작"
 }
 
-if [ "$BUILD_BACKEND" = true ]; then start_build backend backend celery-worker celery-beat; fi
+if [ "$BUILD_BACKEND" = true ]; then start_build backend backend celery-worker celery-beat events; fi
 if [ "$BUILD_FRONTEND" = true ]; then start_build frontend frontend; fi
 if [ "$BUILD_OPERATOR" = true ]; then start_build operator operator; fi
 if [ "$BUILD_CLASSROOM" = true ]; then start_build classroom classroom; fi
@@ -286,14 +293,15 @@ fi
 $COMPOSE up -d db redis
 
 if [ "$BUILD_BACKEND" = true ]; then
-  # **셋을 함께 바꾼다.** backend 만 갈면 워커·beat 가 옛 코드로 남는데, 그
-  # 둘이 스캔으로 상태를 진행시키는 주체다.
+  # **넷을 함께 바꾼다.** backend 만 갈면 워커·beat·events 가 옛 코드로
+  # 남는다 — 앞의 둘은 스캔으로 상태를 진행시키는 주체고, events 는 강의실
+  # 실시간 신호를 여는 주체다(ADR-0046, #380).
   #
-  # backend 의 command 가 migrate 를 먼저 돌리므로, 워커·beat 는 그 뒤에
-  # 올린다 — 새 마이그레이션이 필요한 코드가 아직 없는 스키마 위에서 스캔을
-  # 돌리는 창을 만들지 않는다.
+  # backend 의 command 가 migrate 를 먼저 돌리므로, 나머지 셋은 그 뒤에
+  # 올린다 — 새 마이그레이션이 필요한 코드가 아직 없는 스키마 위에서 스캔·
+  # 스트림을 돌리는 창을 만들지 않는다.
   $COMPOSE up -d --no-deps backend
-  $COMPOSE up -d --no-deps celery-worker celery-beat
+  $COMPOSE up -d --no-deps celery-worker celery-beat events
 fi
 if [ "$BUILD_FRONTEND" = true ]; then $COMPOSE up -d --no-deps frontend; fi
 if [ "$BUILD_OPERATOR" = true ]; then $COMPOSE up -d --no-deps operator; fi
@@ -304,7 +312,7 @@ if [ "$BUILD_CLASSROOM" = true ]; then $COMPOSE up -d --no-deps classroom; fi
 # 부팅 거부는 이 저장소가 **의도한** 동작이다(#83, #96) — 어댑터 값이나 OAuth
 # 자격증명이 풀리지 않으면 컨테이너가 뜨지 않는다. 그러니 "떴다"를 실제로
 # 확인해야 하고, 죽었으면 로그를 남겨야 원인을 안다.
-for svc in backend celery-worker celery-beat frontend operator classroom; do
+for svc in backend celery-worker celery-beat events frontend operator classroom; do
   cid=$($COMPOSE ps -q "$svc" 2>/dev/null | head -1)
   if [ -z "$cid" ]; then
     echo "[$svc] 컨테이너가 없다"
@@ -343,6 +351,28 @@ if [ "$HEALTHY" != true ]; then
   exit 1
 fi
 log "backend 응답 확인"
+
+# 이벤트 서비스도 같은 식으로 확인한다(ADR-0046, #380) — URLconf 는 backend
+# 와 완전히 같은 코드이므로 `/api/health` 가 여기서도 그대로 선다(CLAUDE.md).
+# Host 헤더 규약도 backend 와 같다. 인증이 필요한 SSE 엔드포인트 자체를
+# 여기서 열어 보지는 않는다 — 프로세스가 요청을 받는지만 본다.
+EVENTS_HEALTHY=false
+i=0
+while [ "$i" -lt 30 ]; do
+  if $COMPOSE exec -T events python -c "import os,urllib.request,sys; host=(os.environ.get('DJANGO_ALLOWED_HOSTS') or '').split(',')[0].strip() or '127.0.0.1'; req=urllib.request.Request('http://127.0.0.1:8001/api/health', headers={'Host': host}); sys.exit(0 if urllib.request.urlopen(req, timeout=3).status==200 else 1)" 2>/dev/null; then
+    EVENTS_HEALTHY=true
+    break
+  fi
+  i=$((i + 1))
+  sleep 5
+done
+
+if [ "$EVENTS_HEALTHY" != true ]; then
+  echo "events 가 150초 안에 응답하지 않았다"
+  $COMPOSE logs --tail 120 events || true
+  exit 1
+fi
+log "events 응답 확인"
 
 # --------------------------------------------------- 배포 표식을 옮긴다
 

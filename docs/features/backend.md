@@ -408,7 +408,7 @@ id가 섞여 들어와도 에러 없이 그 행만 걸러진다.
 
 ## 바깥 세계
 
-**모든 외부 의존은 어댑터 뒤에 있다**(ADR-0007). 열한 값이 바인딩을 고르고, **배포 환경에서
+**모든 외부 의존은 어댑터 뒤에 있다**(ADR-0007). 열두 값이 바인딩을 고르고, **배포 환경에서
 fake 이거나 임포트되지 않으면 부팅 자체를 거부한다** — 컨테이너가 뜬 채로 첫 요청에서야
 죽는 것보다 정직하게 못 뜨는 편이다.
 
@@ -423,13 +423,7 @@ fake 이거나 임포트되지 않으면 부팅 자체를 거부한다** — 컨
 | GitHub | `GITHUB_ADAPTER_MODE` |
 | 알림 3채널 | `NOTIFICATION_ALIMTALK_ADAPTER` · `_SMS_` · `_LMS_` |
 | 스토리지 | `STORAGE_BACKEND` |
-
-**열둘째 값이 하나 더 있지만 아직 이 가드 밖이다** — 강의실 실시간 신호
-(#379, ADR-0046)를 나르는 `EVENT_BUS_ADAPTER_MODE`(기본값 fake, dev·CI 는
-`core.events_redis.RedisEventBus`)다. 배포 환경 부팅 거부는 staging/prod
-배포 티켓(#380)이 `.env.staging`/`.env.prod`에 실제 값을 채우는 것과 같은
-커밋에서 더한다 — 지금 걸면 그 값을 아직 모르는 staging 자동 배포가 다음
-push 에 부팅을 거부하며 죽는다(`backend/core/events.py` 모듈 docstring).
+| 강의실 실시간 신호(#380, ADR-0046 — 벤더 연동이 아니라 우리 자신의 Redis 위에서 도는 코드, dev·CI 는 결정적 fake) | `EVENT_BUS_ADAPTER_MODE` |
 
 **Django admin 은 없다**(ADR-0019). 모델 행을 직접 편집할 수 있는 한 감사 추적에 우회로가
 남는다.

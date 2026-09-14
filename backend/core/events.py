@@ -16,12 +16,12 @@ RedisEventBus`) 둘이고, `EVENT_BUS_ADAPTER_MODE` 설정이 고른다.
 종류는 강의실 앱이 정의한다(`classroom.events`) — 이 모듈은 공유층
 (`core`)에 있으므로 앱 경계 테스트(#269)가 강의실을 몰라야 한다.
 
-**배포 환경의 부팅 가드는 아직 없다.** 다른 `*_ADAPTER_MODE`(#83)는
-`IS_DEPLOYED_ENVIRONMENT`에서 fake 바인딩을 거부하지만, 이 값은 staging의
-`.env.staging`이 아직 모른다 — 지금 가드를 걸면 이 티켓이 main에 머지되는
-순간 staging 자동 배포(Jenkins 웹훅)가 부팅을 거부하며 죽는다. 그 가드는
-staging/prod 배포를 실제로 맡는 티켓(#380)이 `.env.staging`/`.env.prod`에
-값을 채우는 것과 같은 커밋에서 더한다.
+**배포 환경의 부팅 가드가 있다**(#380) — 다른 `*_ADAPTER_MODE`(#83)와 같은
+원칙으로 `IS_DEPLOYED_ENVIRONMENT`에서 fake 바인딩을 거부한다
+(`config/settings.py`)와 dotted path가 가리키는 값이 깨졌을 때를 잡는
+`core.checks.check_event_bus_adapter_mode`가 함께 선다. `.env.staging`/
+`.env.prod`가 `core.events_redis.RedisEventBus`를 채우는 것과 같은 커밋에서
+더해졌다.
 """
 
 from __future__ import annotations

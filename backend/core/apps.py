@@ -21,3 +21,4 @@ class CoreConfig(AppConfig):
 
         register(checks.check_llm_adapter_mode)
         register(checks.check_github_adapter_mode)
+        register(checks.check_event_bus_adapter_mode)
