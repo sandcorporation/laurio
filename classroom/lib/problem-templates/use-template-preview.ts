@@ -19,19 +19,21 @@ export function useTemplatePreview(shareCode: string) {
   const [state, setState] = useState<TemplatePreviewState>({ status: "loading" });
 
   function reload() {
-    setState({ status: "loading" });
     fetchProblemTemplate(shareCode)
       .then((template) => setState({ status: "ready", template }))
       .catch((error) => {
         if (error instanceof BackendError && error.status === 404) {
           setState({ status: "gone" });
         } else {
-          setState({ status: "error" });
+          setState((prev) => (prev.status === "ready" ? prev : { status: "error" }));
         }
       });
   }
 
   useEffect(() => {
+    // 보고 있는 대상이 바뀔 때만 화면을 비운다 — 다시 불러오기(`reload`)는 새 응답이
+    // 올 때까지 이미 그린 화면을 둔다(lib/rendering/refetch-keeps-screen.test.ts).
+    setState({ status: "loading" });
     reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shareCode]);
