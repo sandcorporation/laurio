@@ -31,6 +31,9 @@ class ClassPatchIn(Schema):
     #: PATCH 관례 그대로다.
     instructor_display_name: str | None = Field(default=None, min_length=1, max_length=100)
     default_model: str | None = None
+    #: 채점 모델이 추론 모델일 때만 뜻이 있는 기본 추론 강도(#402) —
+    #: "low"|"medium"|"high". 필드를 생략하면 바꾸지 않는다.
+    default_reasoning_effort: str | None = None
     #: 채점 토큰 예산 상한(#295). 필드를 생략하면(`None`) 바꾸지 않는다 —
     #: 기존 PATCH 관례 그대로다. 이 API에는 "다시 무제한으로 되돌리는" 값이
     #: 없다 — 그 요구가 아직 없어 짓지 않는다.
@@ -58,6 +61,13 @@ class ClassOut(Schema):
     join_code: str
     created_at: datetime
     default_model: str
+    #: `default_model`이 추론 모델(GPT-5 이후)인가(#402) — 화면이 이 값
+    #: 하나로 「추론 강도」 칸을 보일지 정한다(모델 목록 조회와 무관하게
+    #: 언제나 이 서버 값을 따른다, Testing Decisions 「프론트」).
+    default_model_is_reasoning: bool = False
+    #: 채점 모델이 추론 모델일 때만 뜻이 있는 기본 추론 강도(#402) —
+    #: "low"|"medium"|"high".
+    default_reasoning_effort: str
     has_openai_key: bool
     openai_key_masked: str | None = None
     #: 키가 있을 때만 뜻이 있다("verified"|"unverified"|"rejected") — 키가
@@ -114,7 +124,23 @@ class JoinedClassOut(Schema):
 class ScoringModelOut(Schema):
     id: str
     label: str
-    context_window: int
+    #: 토큰 단위 컨텍스트 윈도 — 모르는 모델은 `None`이다(#401 AC "크기
+    #: 미확인").
+    context_window: int | None = None
+    #: GPT-5 이후 세대인가(#402) — 화면이 이 값으로 「추론 강도」 칸을
+    #: 보일지 정한다.
+    is_reasoning_model: bool = False
+
+
+class ScoringModelCatalogOut(Schema):
+    """클래스 기준 채점 모델 선택지(#401) — 기존 전역 `GET
+    /classroom/scoring-models`를 대신한다. `source`가 "fallback"이면
+    `unavailable_reason`("no_api_key"|"fetch_failed")이 함께 실려 화면이
+    안내 한 줄을 보인다."""
+
+    models: list[ScoringModelOut]
+    source: str
+    unavailable_reason: str | None = None
 
 
 class JoinLinkOut(Schema):
@@ -157,6 +183,10 @@ class ProblemIn(Schema):
     #: 긴 설명을 쉽게 쓰게 되면서, 기본값(가장 작은 컨텍스트)으로 열린 뒤에야
     #: 고칠 수 있다는 것이 더 자주 물리게 됐다.
     model: str = ""
+    #: 이 문제만의 추론 강도(#402). 빈 문자열이면 클래스 기본값을 따른다 —
+    #: `model`과 같은 모양. 채점 모델이 추론 모델이 아니면 저장은 되어도
+    #: 채점에는 쓰이지 않는다.
+    reasoning_effort: str = ""
     #: 채점 지침 단계(#386, CONTEXT.md 「채점 지침」) —
     #: "strict"|"normal"|"lenient"|"custom" 중 하나. 기본은 "normal"이다.
     #: 모르는 값은 422다.
@@ -181,6 +211,10 @@ class ProblemPatchIn(Schema):
     #: 따르게 한다 — `None`(필드 생략)은 "바꾸지 않는다"는 기존 PATCH
     #: 관례 그대로다.
     model: str | None = None
+    #: 빈 문자열을 보내면 문제 자신의 추론 강도를 지우고 클래스 기본값을
+    #: 따르게 한다 — `model`과 같은 관례(#402). `None`(필드 생략)은
+    #: 바꾸지 않는다.
+    reasoning_effort: str | None = None
     #: 필드를 생략하면(`None`) 바꾸지 않는다. 보내면 `ProblemIn`과 같은
     #: 규칙(#386) — 모르는 값·빈 직접 입력 문장은 422다.
     grading_strictness: str | None = None
@@ -206,6 +240,21 @@ class ProblemOut(Schema):
     model: str
     #: 실제로 채점에 쓰일 값 — `model`이 비어 있으면 클래스의 `default_model`.
     effective_model: str
+    #: `effective_model`이 추론 모델(GPT-5 이후)인가(#402) — 화면이 이
+    #: 값으로 「추론 강도」 칸을 보일지 정한다.
+    effective_model_is_reasoning: bool = False
+    #: 이 문제 자신의 추론 강도(#402). 빈 문자열이면 클래스 기본값을
+    #: 따른다는 뜻이다 — `model`/`effective_model`과 같은 모양.
+    reasoning_effort: str = ""
+    #: 실제로 채점에 쓰일 추론 강도 — `reasoning_effort`가 비어 있으면
+    #: 클래스의 `default_reasoning_effort`. 채점 모델이 추론 모델이 아니면
+    #: 이 값은 채점에 쓰이지 않는다.
+    effective_reasoning_effort: str = ""
+    #: 벤더가 이 문제의 채점 모델을 그 클래스의 키로 거부했는가(#403) —
+    #: 참이면 어느 시도도 채점되지 않는다. 강사가 모델을 바꾸면(이 문제
+    #: 자신의 값이든 클래스 기본값이든, 이 문제가 그 값을 물려받는 한)
+    #: 다시 거짓으로 돌아온다.
+    scoring_model_rejected: bool = False
     #: 채점 지침 단계(#386) — "strict"|"normal"|"lenient"|"custom".
     grading_strictness: str
     #: `grading_strictness`가 "custom"일 때만 채워지고, 그 밖의 단계에서는
@@ -360,12 +409,16 @@ class ClassroomSubmissionOut(Schema):
     #: 이 시도 하나가 통과인가 — 채점된 필수 체크리스트 항목을 전부
     #: 충족했는가(#288). 미채점("pending")이면 항상 거짓이다.
     passed: bool = False
-    #: "no_api_key" | "budget_exhausted" | `None`. `status`가 "pending"일 때만
-    #: 채워진다 — 강사가 채점 키를 아직 설정하지 않았으면(#346) 예산과 무관하게
-    #: "no_api_key", 키는 있는데 예산이 바닥났으면(#295) "budget_exhausted"다.
-    #: 둘 다 참여자가 스스로 어쩔 수 없는 사유라 문구도 "당신 잘못이 아니고
-    #: 다시 낼 필요도 없다"는 같은 모양을 낸다 — 둘을 가르는 것은 강사가 무엇을
-    #: 해야 풀리는가(키를 넣는다/예산을 늘린다)뿐이다.
+    #: "no_api_key" | "budget_exhausted" | "model_rejected" | `None`. `status`가
+    #: "pending"일 때만 채워진다 — 강사가 채점 키를 아직 설정하지 않았으면
+    #: (#346) 예산과 무관하게 "no_api_key", 키는 있는데 예산이 바닥났으면
+    #: (#295) "budget_exhausted", 키는 멀쩡한데 이 문제의 채점 모델을 그
+    #: 키로 못 쓰면(#403) "model_rejected"다. 셋 다 참여자가 스스로 어쩔
+    #: 수 없는 사유라 문구도 "당신 잘못이 아니고 다시 낼 필요도 없다"는 같은
+    #: 모양을 낸다(참여자 화면은 "model_rejected"를 "no_api_key"와 같은
+    #: 안내로 보여준다 — #403 AC "참여자에게는 기존 「채점하지 못함」 안내를
+    #: 보인다") — 강사 화면만 셋을 다르게 말하며, 강사가 무엇을 해야
+    #: 풀리는가(키를 넣는다/예산을 늘린다/모델을 바꾼다)가 다를 뿐이다.
     pending_reason: str | None = None
 
 

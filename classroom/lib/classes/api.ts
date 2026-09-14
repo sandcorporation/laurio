@@ -19,6 +19,12 @@ export type ClassRow = {
   join_code: string;
   created_at: string;
   default_model: string;
+  // `default_model`이 추론 모델(GPT-5 이후)인가(#402) — 서버가 판정해
+  // 내려준다, 화면은 이 값으로만 「추론 강도」 칸을 보일지 정한다.
+  default_model_is_reasoning: boolean;
+  // 채점 모델이 추론 모델일 때만 뜻이 있는 기본 추론 강도(#402) —
+  // "low"|"medium"|"high".
+  default_reasoning_effort: string;
   has_openai_key: boolean;
   openai_key_masked: string | null;
   // 키가 있을 때만 뜻이 있다(#354, ADR-0045) — 없으면 `null`이다.
@@ -81,6 +87,7 @@ export function updateClass(
     name: string;
     instructor_display_name: string;
     default_model: string;
+    default_reasoning_effort: string;
     token_budget: number;
     token_budget_warning_threshold_percent: number;
   }>,

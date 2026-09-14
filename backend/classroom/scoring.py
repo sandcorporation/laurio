@@ -57,6 +57,7 @@ from core.crypto import decrypt
 from core.llm_scoring import (
     LLMAdapterAuthError,
     LLMAdapterError,
+    LLMAdapterModelRejectedError,
     LLMAdapterPermanentError,
     LLMKeyCheckStatus,
     LLMScoringAdapter,
@@ -85,13 +86,21 @@ from .models import (
     ClassroomScoringAttempt,
     ClassroomSubmission,
 )
-from .scoring_models import is_valid_model
+from .scoring_models import is_reasoning_model_id, matches_naming_rule
 
 logger = logging.getLogger(__name__)
 
 #: ADR-0031과 같은 개념(`scoring.services.SCORING_FAILURE_LIMIT`) — 강의실에는
 #: 마감이 없어 "마감 후 6시간 유예"가 성립하지 않으므로 횟수만 본다.
 SCORING_FAILURE_LIMIT = 5
+
+#: 강의실 채점 요청의 타임아웃(#402) — `core.llm_scoring`의 기본값(20초)은
+#: beat의 internal 엔드포인트 30초 제약에 맞춘 것인데(그 모듈 상단 상수
+#: 주석 참고), 강의실 채점은 Celery 워커 작업이라 그 제약과 무관하다(모듈
+#: docstring). 추론 모델(GPT-5 계열)은 응답이 더 느려 그 기본값으로는 정상
+#: 요청도 타임아웃으로 실패할 수 있다 — 추론 모델 여부와 무관하게 이 값
+#: 하나로 넉넉히 잡는다(모델마다 갈라 관리할 값이 아니다).
+_CLASSROOM_SCORING_REQUEST_TIMEOUT_SECONDS = 120
 
 #: 강의실 참가자에게 자동 미달을 설명하는 문구 — `submissions.scoring_basis`의
 #: 것을 그대로 쓰지 않는다(그쪽은 "이의를 제기할 수 있다"고 말하는데 강의실에는
@@ -147,15 +156,22 @@ class FakeClassroomScoringAdapter:
         return LLMKeyCheckStatus.VALID
 
 
-def _scoring_adapter(*, api_key: str, model: str) -> LLMScoringAdapter:
+def _scoring_adapter(
+    *, api_key: str, model: str, reasoning_effort: str | None = None
+) -> LLMScoringAdapter:
     """실제 OpenAI 어댑터 또는 결정적 fake 어댑터를 고른다(#340, ADR-0043).
 
     강사 본인의 키로 직접 어댑터를 만드는 원칙(모듈 docstring)은 바뀌지 않는다
     — 이 함수가 가르는 것은 "누구 키로 도는가"가 아니라 "그 키로 실제로
     네트워크에 나가는가"뿐이다. `CLASSROOM_SCORING_ADAPTER_MODE`가 fake면
-    (배포되지 않은 환경의 기본값) `api_key`·`model`을 그대로 무시하고
-    `FakeClassroomScoringAdapter`를 쓴다 — 배포 환경에서는 이 값이 fake일 수
+    (배포되지 않은 환경의 기본값) `api_key`·`model`·`reasoning_effort`를 그대로
+    무시하고 `FakeClassroomScoringAdapter`를 쓴다(`core.adapters.resolve_adapter`가
+    fake_factory를 언제나 인자 없이 부른다) — 배포 환경에서는 이 값이 fake일 수
     없다(`config.settings`가 부팅 시점에 거부한다).
+
+    `reasoning_effort`는 `None`이면 실물 어댑터도 기존 동작 그대로다
+    (`core.llm_scoring.OpenAIScoringAdapter` docstring) — 채점 모델이 추론
+    모델일 때만 호출부(`score_classroom_submission_once`)가 값을 채워 넘긴다.
 
     `core.adapters.resolve_adapter`(다른 6개 `*_ADAPTER_MODE`가 이미 쓰는 그
     선택 로직)를 그대로 쓴다 — 손으로 `is_fake_adapter_binding`만 보고
@@ -171,7 +187,12 @@ def _scoring_adapter(*, api_key: str, model: str) -> LLMScoringAdapter:
             "CLASSROOM_SCORING_ADAPTER_MODE가 가리키는 dotted path를 import할 수 없다 — "
             "실물 어댑터는 core.llm_scoring.OpenAIScoringAdapter다(#340, ADR-0043)."
         ),
-        factory_kwargs={"api_key": api_key, "model": model},
+        factory_kwargs={
+            "api_key": api_key,
+            "model": model,
+            "reasoning_effort": reasoning_effort,
+            "timeout": _CLASSROOM_SCORING_REQUEST_TIMEOUT_SECONDS,
+        },
     )
 
 
@@ -370,6 +391,20 @@ def _mark_scoring_key_rejected(class_obj: Class) -> None:
         )
 
 
+def _mark_scoring_model_rejected(problem) -> None:
+    """벤더가 이 Problem의 채점 모델을 그 클래스의 키로 거부했다(#403) —
+    `_mark_scoring_key_rejected`와 같은 자리지만 알림은 없다(#403 AC에
+    없다 — 강사는 시도·제출 현황 화면의 배너로 안다, 예산 경고·키 거부처럼
+    "새로 거부된 순간"을 세어 알릴 필요가 없는 조용한 상태 전이다). 이미
+    켜져 있어도 다시 쓴다 — 값이 최신 실패 시각으로 갱신되는 것 자체는
+    문제가 없고, 별도 잠금이 필요할 만큼 경합이 문제되는 값도 아니다(하나의
+    Problem을 여러 시도가 동시에 이 경로로 치더라도 결과는 같다: "지금
+    거부됐다")."""
+
+    problem.scoring_model_rejected_at = Clock.now()
+    problem.save(update_fields=["scoring_model_rejected_at"])
+
+
 def _notify_submitter_of_score(submission: ClassroomSubmission, score: ClassroomScore, checklist_items: list[ChecklistItem]) -> None:
     """이 시도를 낸 사람에게 채점이 끝났다는 사실을 알린다(#303, #379) — 통과든
     미통과든, 플랫폼 자동 미달이든 매번 정확히 한 번. `_finalize_platform_failure`
@@ -478,10 +513,10 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
         return {"submission_id": submission.id, "status": "repository_unreachable"}
 
     model = problem.model or class_obj.default_model
-    if not is_valid_model(model):
+    if not matches_naming_rule(model):
         # Problem.model·Class.default_model은 저장 시점에 검증되지만(classroom.api),
-        # 채점 시점의 SCORING_MODEL_CHOICES가 그 사이 좁혀졌을 수 있다 — 재시도로
-        # 나을 수 없는 설정 오류다.
+        # 채점 시점의 이름 규칙이 그 사이 좁혀졌을 수 있다 — 재시도로 나을 수
+        # 없는 설정 오류다.
         ClassroomScoringAttempt.objects.create(
             submission=submission, error=f"알 수 없는 채점 모델: {model!r}", permanent=True
         )
@@ -489,6 +524,15 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
             score = _finalize_platform_failure(submission, checklist_items)
             return {"submission_id": submission.id, "status": "cap_reached", "score_id": score.id}
         return {"submission_id": submission.id, "status": "failed_permanently"}
+
+    # 추론 모델(GPT-5 이후)일 때만 뜻이 있다(#402, CONTEXT.md 「추론 강도」) —
+    # 아니면 채점 호출은 지금처럼 temperature 0을 쓴다(`_scoring_adapter`에
+    # `None`을 넘긴다).
+    reasoning_effort = (
+        (problem.reasoning_effort or class_obj.default_reasoning_effort)
+        if is_reasoning_model_id(model)
+        else None
+    )
 
     prompt = _build_prompt(submission, checklist_items, source_text, asset_kind=asset.kind)
     scoring_input = ScoringInput(
@@ -515,7 +559,9 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
     )
 
     try:
-        adapter = _scoring_adapter(api_key=decrypt(raw_key), model=model)
+        adapter = _scoring_adapter(
+            api_key=decrypt(raw_key), model=model, reasoning_effort=reasoning_effort
+        )
         output = adapter.score(scoring_input)
     except LLMAdapterAuthError:
         # 강사의 계정 문제이지 이 제출물의 결함이 아니다(#355, ADR-0045) —
@@ -526,6 +572,17 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
         # 규율, 그래야 _scoring_cap_reached가 이 실패로 상한에 닿지 않는다).
         _mark_scoring_key_rejected(class_obj)
         return {"submission_id": submission.id, "status": "key_rejected"}
+    except LLMAdapterModelRejectedError:
+        # 키가 아니라 **이 모델**을 그 키로 못 쓴다(#403, CONTEXT.md 「채점
+        # 모델」) — 키 거부(#355)와 같은 규율이되 옮기는 상태가 다르다:
+        # Class.openai_api_key_status는 그대로 두고 이 Problem의
+        # scoring_model_rejected_at만 켠다. ClassroomScore도
+        # ClassroomScoringAttempt도 남기지 않는다 — key_rejected와 같은
+        # 이유로 "아직 시도하지 않았다"를 유지해야 _scoring_cap_reached가
+        # 이 실패로 상한에 닿지 않는다. 강사가 모델을 바꾸면(`classroom.api`)
+        # 이 값이 풀려 다음 시도부터 다시 채점 후보에 든다.
+        _mark_scoring_model_rejected(problem)
+        return {"submission_id": submission.id, "status": "model_rejected"}
     except LLMAdapterPermanentError as exc:
         ClassroomScoringAttempt.objects.create(submission=submission, error=str(exc)[:2000], permanent=True)
         if _scoring_cap_reached(submission):
@@ -558,17 +615,20 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
 
 def _pending_submissions(as_of, ctx):
     """아직 `ClassroomScore`가 없고, 그 클래스에 채점 키가 있고 그 키가
-    거부되지 않았고, 채점 예산이 바닥나지 않은 시도(#287, #295, #355).
+    거부되지 않았고, 그 문제의 채점 모델이 거부되지 않았고, 채점 예산이
+    바닥나지 않은 시도(#287, #295, #355, #403).
 
-    키 없는 클래스·키가 거부된 클래스·예산이 바닥난 클래스의 시도는 애초에
-    후보가 아니다 — "아직 시도하지 않았다"를 `ClassroomScoringAttempt` 이력
-    없이 유지한다(모듈 docstring). 강사가 새 키를 저장하면(#354의 검증
-    결과로 상태가 덮인다) 다음 tick부터 저절로 후보에 다시 들어온다 —
-    예산이 다시 찼을 때와 같은 원리로, 별도의 "재개" 신호가 필요 없다.
-    `scoring.services._pending_submissions`와 같은 이유로 시도 횟수 오름차순
-    정렬한다(한 번도 시도되지 않은 것이 재시도 중인 것보다 항상 앞선다,
-    ADR-0031) — 예산이 차서 쌓인 시도부터 다시 도는 것도 이 정렬 하나로
-    이미 "쌓인 순서대로"가 된다.
+    키 없는 클래스·키가 거부된 클래스·모델이 거부된 문제·예산이 바닥난
+    클래스의 시도는 애초에 후보가 아니다 — "아직 시도하지 않았다"를
+    `ClassroomScoringAttempt` 이력 없이 유지한다(모듈 docstring). 강사가 새
+    키를 저장하면(#354의 검증 결과로 상태가 덮인다) 또는 그 문제의 모델을
+    바꾸면(`classroom.api`가 `scoring_model_rejected_at`을 지운다) 다음
+    tick부터 저절로 후보에 다시 들어온다 — 예산이 다시 찼을 때와 같은
+    원리로, 별도의 "재개" 신호가 필요 없다. `scoring.services.
+    _pending_submissions`와 같은 이유로 시도 횟수 오름차순 정렬한다(한 번도
+    시도되지 않은 것이 재시도 중인 것보다 항상 앞선다, ADR-0031) — 예산이
+    차서 쌓인 시도부터 다시 도는 것도 이 정렬 하나로 이미 "쌓인 순서대로"가
+    된다.
     """
 
     attempt_count = (
@@ -585,6 +645,7 @@ def _pending_submissions(as_of, ctx):
         )
         .exclude(problem__classroom__openai_api_key_encrypted="")
         .exclude(problem__classroom__openai_api_key_status=Class.ScoringKeyStatus.REJECTED)
+        .exclude(problem__scoring_model_rejected_at__isnull=False)
         .exclude(
             models.Q(problem__classroom__token_budget__isnull=False)
             & models.Q(

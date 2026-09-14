@@ -234,16 +234,22 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
                       </p>
                     ) : null}
 
-                    {submission.status === "pending" && submission.pending_reason === "no_api_key" ? (
+                    {submission.status === "pending" &&
+                    (submission.pending_reason === "no_api_key" ||
+                      submission.pending_reason === "model_rejected") ? (
+                      // 키가 아예 없는 것과 거부된 것(#355), 채점 모델을 그
+                      // 키로 못 쓰는 것(#403)을 여기서는 구별하지 않는다 —
+                      // 셋 다 강사가 설정을 고쳐야 풀리는 사유라, 참여자에게는
+                      // 같은 안내를 보인다(#403 AC).
                       <p
                         data-testid={`submission-row-${submission.id}-no-api-key-note`}
                         className="mt-2.5 text-[12.5px] leading-relaxed text-ink/60"
                       >
-                        강사가 아직 채점 키를 설정하지 않아 잠시 멈췄습니다.{" "}
+                        강사의 채점 설정 문제로 잠시 멈췄습니다.{" "}
                         <b className="font-medium text-ink">
                           당신의 잘못이 아니고, 다시 낼 필요도 없습니다.
                         </b>{" "}
-                        강사가 채점 키를 넣으면 이어서 채점됩니다.
+                        강사가 설정을 고치면 이어서 채점됩니다.
                       </p>
                     ) : null}
 

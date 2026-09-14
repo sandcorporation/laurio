@@ -13,6 +13,7 @@ export function MissingScoringKeyNote({
   noteTestId,
   settingsLinkTestId,
   actionLabel = "클래스 설정에서 넣기",
+  settingsAnchor = "scoring-key",
 }: {
   classId: number;
   message: string;
@@ -23,6 +24,9 @@ export function MissingScoringKeyNote({
   /** 키가 아예 없을 때는 "넣기"가 맞지만, 있는데 거부됐을 때는 "바꾸기"다
    *  (#355) — 기본값은 예전 문구 그대로다. */
   actionLabel?: string;
+  /** 클래스 설정 화면의 어느 카드로 스크롤할지(`id` 속성) — 채점 키 문제는
+   *  "scoring-key"(기본값), 채점 모델 거부(#403)는 "scoring-model"이다. */
+  settingsAnchor?: string;
 }) {
   return (
     <Note tone="attention">
@@ -31,7 +35,7 @@ export function MissingScoringKeyNote({
           {message}
         </span>
         <Link
-          href={`/classes/${classId}/settings#scoring-key`}
+          href={`/classes/${classId}/settings#${settingsAnchor}`}
           data-testid={settingsLinkTestId}
           className={buttonClass("secondary", "sm")}
         >

@@ -141,6 +141,19 @@ class LLMAdapterAuthError(LLMAdapterPermanentError):
     상태를 "거부됨"으로 옮기고 그 클래스를 채점 후보에서 뺀다."""
 
 
+class LLMAdapterModelRejectedError(LLMAdapterPermanentError):
+    """벤더가 **모델**을 그 키로 쓸 수 없다고 거부했다(모델 없음·접근 불가,
+    #403) — `LLMAdapterAuthError`와 같은 자리(`LLMAdapterPermanentError`의
+    부분집합)이지만 사유가 다르다: 키 자체가 아니라 그 키로 이 모델에 닿을
+    권한이 없다는 뜻이라, 키 상태를 "거부됨"으로 옮기지 않는다(CONTEXT.md
+    「채점 모델」 "몰래 다른 모델로 대신 채점하지 않는다"). `scoring`(공모전)은
+    이 하위 클래스를 몰라도 된다 — `except LLMAdapterPermanentError`가 그대로
+    잡으므로 공모전 채점의 기존 동작은 바뀌지 않는다(ADR-0037의 경계).
+    `classroom.scoring`만 `except LLMAdapterModelRejectedError`를 먼저 잡아
+    그 Problem의 채점 모델을 "이 키로 쓸 수 없음"으로 남기고 채점 후보에서
+    뺀다."""
+
+
 class LLMKeyCheckStatus(str, Enum):
     """저장 시점에 벤더에게 키를 확인해 본 결과(#354) — `classroom.models.
     Class.ScoringKeyStatus`로 저장되는 값과는 어휘가 다르다(이쪽은 "이번
@@ -251,6 +264,17 @@ _OPENAI_PERMANENT_HTTP_STATUSES = frozenset(range(400, 500)) - {429, 401, 403}
 # 타입(`LLMAdapterAuthError`)으로 이뤄져야 한다.
 _OPENAI_AUTH_HTTP_STATUSES = frozenset({401, 403})
 
+# 벤더가 "그 모델을 이 키로 쓸 수 없다"고 거부한 상태(#403) — OpenAI 문서와
+# 실제 응답 모두 400·404가 섞여 있어(모델 오타·미지원은 400, 존재하지 않는
+# 모델은 404가 흔하다) 상태 코드 하나로는 못 가른다. `error.code`(벤더가
+# 자유 텍스트가 아니라 고정된 값만 쓰는 필드, ADR-0014와 같은 이유로
+# `error.message`는 예외 판정에 쓰지 않는다)가 "model_not_found"일 때만
+# `LLMAdapterModelRejectedError`로 올린다 — 이 코드 이름은 라이브 벤더
+# 호출로 재확인하지 않았다(#403 Further Notes, `test_scoring_openai_live.py`류의
+# 옵인 라이브 테스트가 있으면 그쪽에서 확인한다).
+_OPENAI_MODEL_REJECTION_HTTP_STATUSES = frozenset({400, 404})
+_OPENAI_MODEL_REJECTION_ERROR_CODES = frozenset({"model_not_found"})
+
 
 def _openai_verdict_response_schema() -> dict:
     """OpenAI Structured Outputs용 JSON 스키마.
@@ -286,24 +310,16 @@ def _openai_verdict_response_schema() -> dict:
     }
 
 
-def _describe_openai_http_error(response: Any, *, submission_id: int) -> str:
-    """벤더가 명시적으로 거부했을 때(4xx/5xx)의 예외 메시지를 만든다.
-
-    `error.message`는 벤더가 쓴 자유 텍스트다 — 유효성 검증 오류가 "우리가 보낸
-    값"을 그대로 인용해 설명하는 경우가 있어(예: 필드 값을 되풀이하는 문구),
-    우리 프롬프트·소스의 일부를 반사할 위험이 있다(#88 코드리뷰 지적 5). 그래서
-    이 메시지에는 절대 담지 않는다(ADR-0014) — 대신 상태코드와, 벤더가 고정된
-    값만 쓰는 `error.type`/`error.code`(자유 텍스트가 아니라 열거형 라벨)만
-    담는다.
+def _extract_openai_error_fields(response: Any) -> tuple[str, str]:
+    """벤더 오류 응답의 `error.type`·`error.code`(자유 텍스트가 아니라
+    벤더가 고정된 값만 쓰는 열거형 라벨)만 뽑는다 — `error.message`는 여기서
+    다루지 않는다(아래 `_describe_openai_http_error` docstring 참고).
 
     `error_body["error"]`가 dict라고 가정하지 않는다 — 프록시나 게이트웨이가
     `{"error": "Too Many Requests"}`처럼 문자열을 줄 수 있고, 그럴 때
-    `.get("message")`를 부르면 AttributeError가 이 함수 밖으로 새어나가
-    "모든 실패는 LLMAdapterError"라는 모듈 계약을 깬다(#88 코드리뷰 지적 4).
-    """
+    `.get("type")`을 부르면 AttributeError가 이 함수 밖으로 새어나가 "모든
+    실패는 LLMAdapterError"라는 모듈 계약을 깬다(#88 코드리뷰 지적 4)."""
 
-    error_type = ""
-    error_code = ""
     try:
         error_body = response.json()
     except ValueError:
@@ -313,6 +329,27 @@ def _describe_openai_http_error(response: Any, *, submission_id: int) -> str:
         if isinstance(error_field, dict):
             error_type = str(error_field.get("type") or "")[:100]
             error_code = str(error_field.get("code") or "")[:100]
+            return error_type, error_code
+    return "", ""
+
+
+def _describe_openai_http_error(
+    response: Any, *, submission_id: int, error_type: str = "", error_code: str = ""
+) -> str:
+    """벤더가 명시적으로 거부했을 때(4xx/5xx)의 예외 메시지를 만든다.
+
+    `error.message`는 벤더가 쓴 자유 텍스트다 — 유효성 검증 오류가 "우리가 보낸
+    값"을 그대로 인용해 설명하는 경우가 있어(예: 필드 값을 되풀이하는 문구),
+    우리 프롬프트·소스의 일부를 반사할 위험이 있다(#88 코드리뷰 지적 5). 그래서
+    이 메시지에는 절대 담지 않는다(ADR-0014) — 대신 상태코드와, 벤더가 고정된
+    값만 쓰는 `error.type`/`error.code`만 담는다. 호출자가 이미
+    `_extract_openai_error_fields`로 뽑아 뒀으면(`score`가 모델 거부 판정에
+    쓰려고 먼저 부른다) 다시 파싱하지 않게 그대로 받는다 — 생략하면 이 함수가
+    직접 뽑는다.
+    """
+
+    if not error_type and not error_code:
+        error_type, error_code = _extract_openai_error_fields(response)
     base = f"OpenAI 채점 호출이 실패했다(status={response.status_code}, submission={submission_id})"
     details = ", ".join(
         part
@@ -476,6 +513,13 @@ class OpenAIScoringAdapter:
         api_key: str | None = None,
         model: str | None = None,
         temperature: float | None = None,
+        #: 추론 모델(GPT-5 계열)의 판정 전 추론 강도(#402) — "low"|"medium"|
+        #: "high". **주지 않으면(`None`, 기본값) 지금 동작 그대로다**:
+        #: `temperature`를 보내고 이 값은 요청에 실리지 않는다. 공모전
+        #: (`scoring`)은 이 인자를 한 번도 주지 않으므로 공모전 채점은 이
+        #: 티켓으로 한 글자도 달라지지 않는다 — `classroom.scoring`만 채점
+        #: 모델이 추론 모델일 때 이 값을 넘긴다.
+        reasoning_effort: str | None = None,
         timeout: float = _OPENAI_REQUEST_TIMEOUT_SECONDS,
     ) -> None:
         api_key = api_key if api_key is not None else (os.environ.get("OPEN_AI_API_KEY") or "")
@@ -491,6 +535,7 @@ class OpenAIScoringAdapter:
         else:
             raw_temperature = os.environ.get("LLM_OPENAI_TEMPERATURE")
             self._temperature = float(raw_temperature) if raw_temperature else _OPENAI_DEFAULT_TEMPERATURE
+        self._reasoning_effort = reasoning_effort
         self._timeout = timeout
         # 부팅 가드(core.adapters.check_adapter_mode)의 isinstance(LLMScoringAdapter)
         # 검사가 요구하는 자리 — 실제 호출에 쓰인 모델 식별자는 매 score() 호출마다
@@ -503,7 +548,6 @@ class OpenAIScoringAdapter:
         requirement_ids = [r.requirement_id for r in scoring_input.requirements]
         payload = {
             "model": self._model,
-            "temperature": self._temperature,
             "messages": [
                 {"role": "system", "content": _OPENAI_SYSTEM_PROMPT},
                 {"role": "user", "content": scoring_input.prompt},
@@ -513,6 +557,12 @@ class OpenAIScoringAdapter:
                 "json_schema": _openai_verdict_response_schema(),
             },
         }
+        # 추론 모델은 temperature를 받지 않고 reasoning_effort를 받는다
+        # (#402) — 둘 다 요청에 함께 실으면 벤더가 temperature를 거부한다.
+        if self._reasoning_effort is not None:
+            payload["reasoning_effort"] = self._reasoning_effort
+        else:
+            payload["temperature"] = self._temperature
 
         try:
             response = requests.post(
@@ -531,9 +581,20 @@ class OpenAIScoringAdapter:
             ) from None
 
         if response.status_code != 200:
-            message = _describe_openai_http_error(response, submission_id=scoring_input.submission_id)
+            error_type, error_code = _extract_openai_error_fields(response)
+            message = _describe_openai_http_error(
+                response,
+                submission_id=scoring_input.submission_id,
+                error_type=error_type,
+                error_code=error_code,
+            )
             if response.status_code in _OPENAI_AUTH_HTTP_STATUSES:
                 raise LLMAdapterAuthError(message)
+            if (
+                response.status_code in _OPENAI_MODEL_REJECTION_HTTP_STATUSES
+                and error_code in _OPENAI_MODEL_REJECTION_ERROR_CODES
+            ):
+                raise LLMAdapterModelRejectedError(message)
             if response.status_code in _OPENAI_PERMANENT_HTTP_STATUSES:
                 raise LLMAdapterPermanentError(message)
             raise LLMAdapterError(message)
@@ -583,6 +644,41 @@ class OpenAIScoringAdapter:
         if response.status_code == 200:
             return LLMKeyCheckStatus.VALID
         return LLMKeyCheckStatus.UNVERIFIED
+
+
+def list_openai_models(api_key: str, *, timeout: float = _OPENAI_REQUEST_TIMEOUT_SECONDS) -> list[str] | None:
+    """이 키로 `/v1/models`를 조회해 모델 id 목록을 돌려준다(#401) —
+    `classroom.scoring_model_catalog`가 이 목록을 규칙으로 거른다
+    (`classroom.scoring_models.build_catalog`).
+
+    실패(네트워크 오류·타임아웃·거부·5xx·예상 밖의 응답 모양)는 전부 `None`
+    이다 — 호출자가 "키 없음"과 "조회 실패"를 이미 구별해 쥐고 있으므로,
+    이 함수는 그 둘을 가르지 않고 성공/실패만 말한다(`OpenAIScoringAdapter.
+    check_key`가 REJECTED/UNVERIFIED를 가르는 것과 다른 자리 — 이 함수는
+    모델 목록이 필요할 뿐 키 상태를 판정하지 않는다)."""
+
+    try:
+        response = requests.get(
+            _OPENAI_MODELS_URL,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=timeout,
+        )
+    except requests.RequestException:
+        return None
+
+    if response.status_code != 200:
+        return None
+
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+
+    data = body.get("data") if isinstance(body, dict) else None
+    if not isinstance(data, list):
+        return None
+
+    return [item["id"] for item in data if isinstance(item, dict) and isinstance(item.get("id"), str)]
 
 
 def get_adapter() -> LLMScoringAdapter:

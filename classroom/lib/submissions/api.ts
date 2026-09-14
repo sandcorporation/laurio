@@ -60,7 +60,7 @@ export type SubmissionStatus = "pending" | "scored";
 // "no_api_key"(#346) | "budget_exhausted"(#295) | `null`. `status`가
 // "pending"일 때만 채워진다 — 강사가 채점 키를 아직 넣지 않았으면 예산과
 // 무관하게 "no_api_key", 키는 있는데 예산이 바닥났으면 "budget_exhausted"다.
-export type PendingReason = "no_api_key" | "budget_exhausted" | null;
+export type PendingReason = "no_api_key" | "budget_exhausted" | "model_rejected" | null;
 
 export type ClassroomSubmissionRow = {
   id: number;

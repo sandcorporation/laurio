@@ -90,11 +90,13 @@ from .schemas import (
     ProblemReorderIn,
     ProblemTemplateChecklistItemOut,
     PublishedTemplateSummaryOut,
+    ScoringModelCatalogOut,
     ScoringModelOut,
 )
 from .events import publish_attempt_submitted
 from .scoring import check_scoring_key
-from .scoring_models import SCORING_MODEL_CHOICES, is_valid_model
+from .scoring_model_catalog import get_scoring_model_catalog
+from .scoring_models import is_fallback_model, is_reasoning_model_id, is_valid_reasoning_effort
 from .submission_target_refs import source_target_ref
 from .services import copy_class, copy_problem_to_class
 from .tasks import score_attempt
@@ -145,6 +147,40 @@ def _validate_grading_guideline(strictness: str, text: str) -> tuple[str, str]:
         return strictness, text
     return strictness, ""
 
+
+def _validate_scoring_model_choice(class_obj: Class, model_id: str, *, current_value: str) -> None:
+    """저장 시점에 이 모델이 그 클래스의 키로 실제로 쓸 수 있는지 검증한다
+    (#401 AC). 클래스 기본값·문제별 값 둘 다 이 함수 하나를 쓴다 — 두
+    자리가 갈리면 클래스에서는 통과한 값이 문제에서는 거절되는(또는 그
+    반대) 상태가 생긴다.
+
+    조회가 되면(`source == "live"`) 그 결과에 있어야만 받는다 — 이미 같은
+    값을 쓰고 있어도 예외를 두지 않는다(그 사이 키의 권한이 좁혀졌을 수
+    있다). 조회가 불가하면(`source == "fallback"`, 키 없음·거부·조회 실패)
+    기본 목록 안의 값이거나 지금 저장된 값과 같을 때만 받는다 — 오타는
+    막되, 멀쩡히 쓰던 값이 벤더 장애 한 번에 막히지 않는다(#401
+    Implementation Decisions)."""
+
+    catalog = get_scoring_model_catalog(class_obj)
+    if catalog.source == "live":
+        if any(choice.id == model_id for choice in catalog.models):
+            return
+        raise HttpError(422, f"이 키로 쓸 수 없는 채점 모델입니다: {model_id}")
+
+    if model_id == current_value or is_fallback_model(model_id):
+        return
+    raise HttpError(
+        422,
+        f"지금은 모델 목록을 확인할 수 없어 기본 목록의 모델이나 지금 쓰는 모델만 "
+        f"저장할 수 있습니다: {model_id}",
+    )
+
+
+def _validate_reasoning_effort(value: str) -> None:
+    if not is_valid_reasoning_effort(value):
+        raise HttpError(422, f"알 수 없는 추론 강도입니다: {value}")
+
+
 #: 마스킹은 복호화가 아니라 저장 시점에 남긴 마지막 네 자리로만 만든다 —
 #: `Class.openai_api_key_encrypted`를 다시 풀지 않는다(#284, 파일 상단 라우터
 #: docstring과 같은 이유: 복호화는 채점 요청을 보낼 때만 한다).
@@ -187,6 +223,8 @@ def _serialize_class(class_obj: Class) -> ClassOut:
         join_code=class_obj.join_code,
         created_at=class_obj.created_at,
         default_model=class_obj.default_model,
+        default_model_is_reasoning=is_reasoning_model_id(class_obj.default_model),
+        default_reasoning_effort=class_obj.default_reasoning_effort,
         has_openai_key=has_key,
         openai_key_masked=_mask_from_last4(class_obj.openai_api_key_last4) if has_key else None,
         openai_key_status=class_obj.openai_api_key_status if has_key else None,
@@ -255,6 +293,8 @@ def _serialize_problem(
     if active_member_ids is None:
         active_member_ids = _active_member_ids(class_obj)
     passed_count, member_count = _problem_pass_stats(problem, active_member_ids)
+    effective_model = problem.model or class_obj.default_model
+    effective_reasoning_effort = problem.reasoning_effort or class_obj.default_reasoning_effort
     return ProblemOut(
         id=problem.id,
         classroom_id=problem.classroom_id,
@@ -264,7 +304,11 @@ def _serialize_problem(
         status=problem.status,
         order=problem.order,
         model=problem.model,
-        effective_model=problem.model or class_obj.default_model,
+        effective_model=effective_model,
+        effective_model_is_reasoning=is_reasoning_model_id(effective_model),
+        reasoning_effort=problem.reasoning_effort,
+        effective_reasoning_effort=effective_reasoning_effort,
+        scoring_model_rejected=problem.scoring_model_rejected_at is not None,
         grading_strictness=problem.grading_strictness,
         grading_guideline_text=problem.grading_guideline_text,
         checklist_items=[_serialize_checklist_item(i) for i in problem.checklist_items.all()],
@@ -340,23 +384,28 @@ def _serialize_score(score: ClassroomScore) -> ClassroomScoreOut:
     )
 
 
-def _pending_reason(score, class_obj: Class) -> str | None:
-    """아직 채점되지 않은 시도가 왜 멈춰 있는지(#295, #346, #355) — 참여자·강사
-    화면 모두 이 값 하나를 읽어 다르게 그린다. 채점 키가 없거나 벤더가
-    거절했으면 예산과 무관하게 "no_api_key"다 — `Class.scoring_key_unusable()`로
-    판정한다, `scoring._pending_submissions`(스캔 후보)가 거르는 것과 **같은
-    기준**이어야 한다. 여기서 다른 기준을 쓰면 그 기준이 어긋나 실제로는
-    채점되지 않는 시도가 "정상 대기"로 잘못 보일 수 있다. **키가 거부된
-    것과 아예 없는 것을 참여자 화면에서는 구별하지 않는다**(#355 AC) — 강사의
-    계정 문제가 참여자에게 새어 나가지 않는다, 강사 전용 화면(설정·클래스
-    상세 배너)만 그 둘을 다르게 말한다. 키는 멀쩡한데 예산이 바닥났으면
-    "budget_exhausted"(#295)다. 셋 다 아니면 스캔이 정말 채점을 기다리는
+def _pending_reason(score, class_obj: Class, problem: Problem) -> str | None:
+    """아직 채점되지 않은 시도가 왜 멈춰 있는지(#295, #346, #355, #403) —
+    참여자·강사 화면 모두 이 값 하나를 읽어 다르게 그린다. 채점 키가 없거나
+    벤더가 거절했으면 예산·모델과 무관하게 "no_api_key"다 —
+    `Class.scoring_key_unusable()`로 판정한다, `scoring._pending_submissions`
+    (스캔 후보)가 거르는 것과 **같은 기준**이어야 한다. 여기서 다른 기준을
+    쓰면 그 기준이 어긋나 실제로는 채점되지 않는 시도가 "정상 대기"로 잘못
+    보일 수 있다. 키는 멀쩡한데 이 문제의 채점 모델을 그 키로 못 쓰면
+    "model_rejected"(#403)다. **키가 거부된 것과 아예 없는 것, 그리고 모델이
+    거부된 것을 참여자 화면에서는 구별하지 않는다**(#355 AC, #403 AC "참여자
+    에게는 기존 「채점하지 못함」 안내를 보인다") — 강사의 계정·설정 문제가
+    참여자에게 새어 나가지 않는다, 강사 전용 화면(설정·시도 목록·클래스
+    상세 배너)만 다르게 말한다. 키·모델 둘 다 멀쩡한데 예산이 바닥났으면
+    "budget_exhausted"(#295)다. 넷 다 아니면 스캔이 정말 채점을 기다리는
     중이라 `None`(평범한 "채점 중")이다."""
 
     if score is not None:
         return None
     if class_obj.scoring_key_unusable():
         return "no_api_key"
+    if problem.scoring_model_rejected_at is not None:
+        return "model_rejected"
     if class_obj.token_budget_exhausted():
         return "budget_exhausted"
     return None
@@ -369,12 +418,13 @@ def _serialize_classroom_submission(
     user,
     required_item_ids: set[int],
     class_obj: Class,
+    problem: Problem,
 ) -> ClassroomSubmissionOut:
     download_url = (
         _source_download_url(asset, user) if asset.kind == SubmissionAsset.Kind.SOURCE else None
     )
     score = getattr(submission, "classroom_score", None)
-    pending_reason = _pending_reason(score, class_obj)
+    pending_reason = _pending_reason(score, class_obj, problem)
     return ClassroomSubmissionOut(
         id=submission.id,
         problem_id=submission.problem_id,
@@ -415,6 +465,7 @@ def _serialize_instructor_submission(
     asset: SubmissionAsset,
     required_item_ids: set[int],
     class_obj: Class,
+    problem: Problem,
 ) -> ClassroomInstructorSubmissionOut:
     download_url = (
         _instructor_source_download_url(
@@ -437,7 +488,7 @@ def _serialize_instructor_submission(
         status="scored" if score is not None else "pending",
         score=_serialize_score(score) if score is not None else None,
         passed=_is_score_passed(score, required_item_ids),
-        pending_reason=_pending_reason(score, class_obj),
+        pending_reason=_pending_reason(score, class_obj, problem),
     )
 
 
@@ -518,8 +569,12 @@ def get_class(request: HttpRequest, class_id: int):
 def update_class(request: HttpRequest, class_id: int, payload: ClassPatchIn):
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
 
-    if payload.default_model is not None and not is_valid_model(payload.default_model):
-        raise HttpError(422, f"알 수 없는 채점 모델입니다: {payload.default_model}")
+    if payload.default_model is not None:
+        _validate_scoring_model_choice(
+            class_obj, payload.default_model, current_value=class_obj.default_model
+        )
+    if payload.default_reasoning_effort is not None:
+        _validate_reasoning_effort(payload.default_reasoning_effort)
 
     update_fields = []
     if payload.name is not None:
@@ -528,9 +583,18 @@ def update_class(request: HttpRequest, class_id: int, payload: ClassPatchIn):
     if payload.instructor_display_name is not None:
         class_obj.instructor_display_name = payload.instructor_display_name
         update_fields.append("instructor_display_name")
-    if payload.default_model is not None:
+    if payload.default_model is not None and payload.default_model != class_obj.default_model:
         class_obj.default_model = payload.default_model
         update_fields.append("default_model")
+        # 클래스 기본값을 물려받던 문제(자기 모델을 명시하지 않은 것)들은
+        # 새 모델로 다시 시도할 자격을 얻는다(#403 AC "모델을 바꾼 뒤 새
+        # 시도는 새 모델로 채점된다") — 이전 모델이 거부됐던 것이든 아니든,
+        # 값이 실제로 바뀌었으면 그 문제들의 "거부됨" 표시는 더 이상 지금
+        # 값을 설명하지 않는다.
+        class_obj.problems.filter(model="").update(scoring_model_rejected_at=None)
+    if payload.default_reasoning_effort is not None:
+        class_obj.default_reasoning_effort = payload.default_reasoning_effort
+        update_fields.append("default_reasoning_effort")
     if payload.token_budget is not None and payload.token_budget != class_obj.token_budget:
         class_obj.token_budget = payload.token_budget
         update_fields.append("token_budget")
@@ -598,14 +662,32 @@ def copy_class_view(request: HttpRequest, class_id: int):
     return 201, _serialize_class(new_class)
 
 
-@router.get("/scoring-models", response={200: list[ScoringModelOut]}, auth=jwt_auth)
-def list_scoring_models(request: HttpRequest):
-    """「클래스 설정」 화면이 선택지마다 컨텍스트 크기를 함께 보여주는 자리(#285)."""
+@router.get(
+    "/classes/{class_id}/scoring-models",
+    response={200: ScoringModelCatalogOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def list_class_scoring_models(request: HttpRequest, class_id: int):
+    """「클래스 설정」과 문제 만들기·편집이 선택지를 채우는 자리(#401) —
+    예전 전역 `GET /scoring-models`(#285)를 대신한다: 키가 클래스에 있으므로
+    "이 클래스의 키로 실제로 쓸 수 있는 모델"은 클래스 기준으로만 답할 수
+    있다. 남의 클래스는 404다(`_get_owned_class_or_404`와 같은 규율)."""
 
-    return 200, [
-        ScoringModelOut(id=c.id, label=c.label, context_window=c.context_window)
-        for c in SCORING_MODEL_CHOICES
-    ]
+    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    catalog = get_scoring_model_catalog(class_obj)
+    return 200, ScoringModelCatalogOut(
+        models=[
+            ScoringModelOut(
+                id=c.id,
+                label=c.label,
+                context_window=c.context_window,
+                is_reasoning_model=c.is_reasoning_model,
+            )
+            for c in catalog.models
+        ],
+        source=catalog.source,
+        unavailable_reason=catalog.unavailable_reason,
+    )
 
 
 @router.post(
@@ -961,8 +1043,10 @@ def create_problem(request: HttpRequest, class_id: int, payload: ProblemIn):
 
     # 편집(`update_problem`)과 같은 규칙이다 — 두 자리가 갈리면 만들 때는
     # 통과한 값이 고칠 때 거절되는 상태가 생긴다.
-    if payload.model and not is_valid_model(payload.model):
-        raise HttpError(422, f"알 수 없는 채점 모델입니다: {payload.model}")
+    if payload.model:
+        _validate_scoring_model_choice(class_obj, payload.model, current_value="")
+    if payload.reasoning_effort:
+        _validate_reasoning_effort(payload.reasoning_effort)
     grading_strictness, grading_guideline_text = _validate_grading_guideline(
         payload.grading_strictness, payload.grading_guideline_text
     )
@@ -978,6 +1062,7 @@ def create_problem(request: HttpRequest, class_id: int, payload: ProblemIn):
             description=payload.description,
             submission_formats=submission_formats,
             model=payload.model,
+            reasoning_effort=payload.reasoning_effort,
             grading_strictness=grading_strictness,
             grading_guideline_text=grading_guideline_text,
             order=next_order,
@@ -1155,8 +1240,10 @@ def update_problem(request: HttpRequest, class_id: int, problem_id: int, payload
         if payload.submission_formats is not None
         else None
     )
-    if payload.model and not is_valid_model(payload.model):
-        raise HttpError(422, f"알 수 없는 채점 모델입니다: {payload.model}")
+    if payload.model:
+        _validate_scoring_model_choice(class_obj, payload.model, current_value=problem.model)
+    if payload.reasoning_effort:
+        _validate_reasoning_effort(payload.reasoning_effort)
 
     # 두 칸 중 하나라도 보내면 둘 다 함께 검증한다 — "문장은 직접 입력일
     # 때만 비어 있지 않다"는 두 칸을 함께 봐야 판단할 수 있는 불변식이라,
@@ -1188,6 +1275,15 @@ def update_problem(request: HttpRequest, class_id: int, problem_id: int, payload
     if payload.model is not None:
         problem.model = payload.model
         update_fields.append("model")
+        # 강사가 이 문제의 채점 모델을 손댔으니 재시도할 자격을 준다(#403
+        # AC "모델을 바꾼 뒤 새 시도는 새 모델로 채점된다") — 같은 값을
+        # 다시 보내도 마찬가지다: "설정을 확인했다"는 사실 자체가 재시도
+        # 트리거다, 값이 실제로 달라졌는지는 따지지 않는다.
+        problem.scoring_model_rejected_at = None
+        update_fields.append("scoring_model_rejected_at")
+    if payload.reasoning_effort is not None:
+        problem.reasoning_effort = payload.reasoning_effort
+        update_fields.append("reasoning_effort")
     if grading_strictness is not None:
         problem.grading_strictness = grading_strictness
         problem.grading_guideline_text = grading_guideline_text
@@ -1279,6 +1375,7 @@ def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
             user=request.auth_user,
             required_item_ids=required_item_ids,
             class_obj=problem.classroom,
+            problem=problem,
         )
         for s in submissions
     ]
@@ -1405,6 +1502,7 @@ def create_classroom_submission(
         user=request.auth_user,
         required_item_ids=required_item_ids,
         class_obj=problem.classroom,
+        problem=problem,
     )
 
 
@@ -1442,6 +1540,7 @@ def list_problem_submissions(request: HttpRequest, class_id: int, problem_id: in
             asset=list(s.assets.all())[0],
             required_item_ids=required_item_ids,
             class_obj=class_obj,
+            problem=problem,
         )
         for s in submissions
     ]

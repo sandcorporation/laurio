@@ -19,7 +19,7 @@ from django.db import models
 from submissions.models import Submission
 
 from .grading_guidelines import DEFAULT_GRADING_STRICTNESS, GRADING_GUIDELINE_TEXT_MAX_LENGTH
-from .scoring_models import DEFAULT_SCORING_MODEL
+from .scoring_models import DEFAULT_REASONING_EFFORT, DEFAULT_SCORING_MODEL, REASONING_EFFORT_CHOICES
 
 
 def _generate_join_code() -> str:
@@ -75,10 +75,19 @@ class Class(models.Model):
         max_length=10, choices=ScoringKeyStatus.choices, default=ScoringKeyStatus.UNVERIFIED
     )
 
-    #: 이 클래스의 기본 채점 모델(#285). 문제가 자기 값을 갖지 않으면 이
-    #: 값을 쓴다 — `classroom.scoring_models.SCORING_MODEL_CHOICES`에 있는
-    #: id 중 하나다.
+    #: 이 클래스의 기본 채점 모델(#285, #401). 문제가 자기 값을 갖지 않으면
+    #: 이 값을 쓴다 — 그 클래스의 키로 실제로 쓸 수 있는 모델만 저장된다
+    #: (`classroom.scoring_model_catalog.get_scoring_model_catalog`로 검증).
     default_model = models.CharField(max_length=50, default=DEFAULT_SCORING_MODEL)
+
+    #: 추론 강도 세 단계(#402, CONTEXT.md 「추론 강도」) — 채점 모델이 추론
+    #: 모델(GPT-5 이후)일 때만 뜻이 있다. 문제가 자기 값을 갖지 않으면 이
+    #: 값을 쓴다 — `default_model`과 같은 모양. 값 자체는
+    #: `classroom.scoring_models.REASONING_EFFORT_CHOICES`(순수 함수 쪽)가
+    #: 정한다 — `ScoringKeyStatus`처럼 모델 안에 따로 열거하지 않는다.
+    default_reasoning_effort = models.CharField(
+        max_length=10, choices=REASONING_EFFORT_CHOICES, default=DEFAULT_REASONING_EFFORT
+    )
 
     #: 가입 링크의 코드(#279). 다시 뽑으면 이 값이 새 무작위 문자열로
     #: 바뀌어 이전 값은 어떤 클래스도 가리키지 않게 된다 — 그래서 별도
@@ -191,6 +200,25 @@ class Problem(models.Model):
     #: 근거는 이 필드가 아니라 그 채점(Score)이 그 시점에 남긴 값이 지킨다 —
     #: 여기를 바꿔도 이미 산출된 판정은 다시 계산되지 않는다.
     model = models.CharField(max_length=50, blank=True, default="")
+
+    #: 벤더가 이 문제의 채점 모델을 그 클래스의 키로 거부한 시각(#403,
+    #: CONTEXT.md 「채점 모델」 "그 시도는 채점하지 못한 것으로 남는다") —
+    #: null이면 정상이다. `Class.openai_api_key_status`(키 자체의 상태)와는
+    #: 다른 사유라 이 값은 Class가 아니라 Problem에 둔다: 문제마다 다른
+    #: 모델을 고를 수 있어(`model` 필드), 같은 클래스의 다른 문제는 멀쩡히
+    #: 채점될 수 있다. 강사가 이 문제의 모델을 바꾸거나(`model` 필드가
+    #: 실린 PATCH) 클래스 기본값을 바꿔 이 문제가 그 값을 물려받으면
+    #: (`classroom.api`) 다시 `None`으로 풀려 다음 시도부터 채점 후보에
+    #: 든다.
+    scoring_model_rejected_at = models.DateTimeField(null=True, blank=True, default=None)
+
+    #: 이 문제만의 추론 강도(#402). 빈 문자열이면 `classroom.
+    #: default_reasoning_effort`를 따른다 — `model`/`default_model`과 같은
+    #: 모양. 복사(`services.copy_problem_to_class`)·템플릿은 이 값을 옮기지
+    #: 않는다(CONTEXT.md 「추론 강도」 "비용 결정은 가져간 사람이 한다") —
+    #: `model`과 다른 지점: `copy_problem_to_class`는 `model`은 그대로
+    #: 복사하되 이 필드는 만지지 않아 새 행이 기본값("")으로 시작한다.
+    reasoning_effort = models.CharField(max_length=10, blank=True, default="")
 
     #: 채점 지침 단계(#386, CONTEXT.md 「채점 지침」) — 체크리스트 항목을
     #: 얼마나 글자 그대로 따질지. 기본은 「보통」이다: 「hello world 를

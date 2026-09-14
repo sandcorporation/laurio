@@ -40,6 +40,7 @@ import { useClass } from "@/lib/classes/use-class";
 import { useMembers } from "@/lib/members/use-members";
 import { useProblems } from "@/lib/problems/use-problems";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
+import { isSelectedModelReasoning, REASONING_EFFORT_OPTIONS } from "@/lib/scoring/reasoning";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
 
 // 화면이 실제로 그리는 값만 담는다(#333) — `publishClassAsTemplate`/
@@ -323,7 +324,7 @@ export default function ClassSettingsPage() {
   const params = useParams<{ id: string }>();
   const classId = Number(params.id);
   const { state, reload } = useClass(classId);
-  const modelsState = useScoringModels();
+  const { state: modelsState, reload: reloadModels } = useScoringModels(classId);
 
   const [apiKey, setApiKey] = useState("");
   const [keySaving, setKeySaving] = useState(false);
@@ -355,6 +356,7 @@ export default function ClassSettingsPage() {
   }, [apiKey]);
 
   const [defaultModel, setDefaultModel] = useState("");
+  const [defaultReasoningEffort, setDefaultReasoningEffort] = useState("low");
   const [modelSaving, setModelSaving] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
 
@@ -375,6 +377,7 @@ export default function ClassSettingsPage() {
   useEffect(() => {
     if (state.status === "ready") {
       setDefaultModel(state.classroom.default_model);
+      setDefaultReasoningEffort(state.classroom.default_reasoning_effort);
       setInstructorDisplayName(state.classroom.instructor_display_name);
       setTokenBudget(
         state.classroom.token_budget === null ? "" : String(state.classroom.token_budget),
@@ -419,6 +422,9 @@ export default function ClassSettingsPage() {
       await setOpenAIKey(classId, apiKey);
       setApiKey("");
       reload();
+      // 키가 바뀌면 그 키로 실제로 쓸 수 있는 모델이 달라진다(#401) — 이
+      // 화면을 떠나지 않아도 모델 선택지가 새 키 기준으로 바로 갱신된다.
+      reloadModels();
     } catch (err) {
       setKeyError(err instanceof BackendError ? err.message : "키를 저장하지 못했습니다.");
     } finally {
@@ -445,7 +451,10 @@ export default function ClassSettingsPage() {
     setModelSaving(true);
     setModelError(null);
     try {
-      await updateClass(classId, { default_model: defaultModel });
+      await updateClass(classId, {
+        default_model: defaultModel,
+        default_reasoning_effort: defaultReasoningEffort,
+      });
       reload();
     } catch (err) {
       setModelError(err instanceof BackendError ? err.message : "기본 모델을 저장하지 못했습니다.");
@@ -622,6 +631,7 @@ export default function ClassSettingsPage() {
           </Card>
         </div>
 
+        <div id="scoring-model" className="scroll-mt-4">
         <Card>
           <CardHeader title="기본 채점 모델" hint="문제가 자기 모델을 갖지 않으면 이 값을 씁니다" />
           <div className="flex flex-col gap-3 p-4">
@@ -635,6 +645,15 @@ export default function ClassSettingsPage() {
               </ErrorNote>
             ) : (
               <form onSubmit={handleModelSubmit} className="flex flex-col gap-2.5">
+                {modelsState.source === "fallback" ? (
+                  <Note>
+                    <span data-testid="scoring-models-unavailable-note">
+                      {modelsState.unavailableReason === "no_api_key"
+                        ? "키를 넣으면 이 키로 쓸 수 있는 모델을 보여드립니다 — 지금은 기본 목록입니다."
+                        : "지금은 모델 목록을 확인할 수 없어 기본 목록을 보여드립니다."}
+                    </span>
+                  </Note>
+                ) : null}
                 <label htmlFor="class-default-model">
                   <FieldLabel>기본 모델</FieldLabel>
                 </label>
@@ -648,7 +667,8 @@ export default function ClassSettingsPage() {
                   >
                     {modelsState.models.map((model) => (
                       <option key={model.id} value={model.id} data-testid={`scoring-model-option-${model.id}`}>
-                        {model.label} · 컨텍스트 {model.context_window.toLocaleString("ko-KR")} 토큰
+                        {model.label} · 컨텍스트{" "}
+                        {model.context_window ? `${model.context_window.toLocaleString("ko-KR")} 토큰` : "크기 미확인"}
                       </option>
                     ))}
                   </select>
@@ -665,6 +685,29 @@ export default function ClassSettingsPage() {
                   모델마다 한 번에 받을 수 있는 소스의 양이 다릅니다 — 긴 문제에 작은 모델을 고르면
                   소스 뒷부분이 잘린 채 채점됩니다.
                 </span>
+                {isSelectedModelReasoning(defaultModel, modelsState.models, defaultModel === classroom.default_model ? classroom.default_model_is_reasoning : false) ? (
+                  <div className="flex flex-col gap-1.5 border-t border-rule pt-3">
+                    <label htmlFor="class-default-reasoning-effort">
+                      <FieldLabel>기본 추론 강도</FieldLabel>
+                    </label>
+                    <select
+                      id="class-default-reasoning-effort"
+                      data-testid="class-default-reasoning-effort-select"
+                      value={defaultReasoningEffort}
+                      onChange={(event) => setDefaultReasoningEffort(event.target.value)}
+                      className={`${INPUT_CLASS} max-w-[200px]`}
+                    >
+                      {REASONING_EFFORT_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="text-[11.5px] leading-relaxed text-ink/45">
+                      높을수록 느리고 채점 예산을 더 씁니다.
+                    </span>
+                  </div>
+                ) : null}
               </form>
             )}
             {modelError ? (
@@ -674,6 +717,7 @@ export default function ClassSettingsPage() {
             ) : null}
           </div>
         </Card>
+        </div>
 
         {/* `id`는 예산 경고 알림(#329)이 이 자리를 가리킬 때 쓰는 앵커다 —
             `lib/notifications/link.ts`가 같은 이름을 짓는다. */}

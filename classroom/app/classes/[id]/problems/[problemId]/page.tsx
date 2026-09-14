@@ -45,6 +45,7 @@ import {
 } from "@/lib/problems/api";
 import { useProblem } from "@/lib/problems/use-problem";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
+import { isSelectedModelReasoning, REASONING_EFFORT_OPTIONS } from "@/lib/scoring/reasoning";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
 
 // 화면이 실제로 그리는 값만 담는다(#333, 클래스 설정 화면의
@@ -61,13 +62,14 @@ export default function EditProblemPage() {
   const router = useRouter();
 
   const { state, reload } = useProblem(classId, problemId);
-  const modelsState = useScoringModels();
+  const { state: modelsState } = useScoringModels(classId);
   const myClassesState = useMyClasses();
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [submissionFormats, setSubmissionFormats] = useState<SubmissionFormat[]>(["source"]);
   const [model, setModel] = useState("");
+  const [reasoningEffort, setReasoningEffort] = useState("");
   // 채점 지침(#386) — 불러온 문제 값으로 아래 effect가 채운다.
   const [gradingGuideline, setGradingGuideline] = useState<GradingGuidelineValue>({
     grading_strictness: "normal",
@@ -108,6 +110,7 @@ export default function EditProblemPage() {
       setDescription(state.problem.description);
       setSubmissionFormats(state.problem.submission_formats);
       setModel(state.problem.model);
+      setReasoningEffort(state.problem.reasoning_effort);
       setGradingGuideline({
         grading_strictness: state.problem.grading_strictness,
         grading_guideline_text: state.problem.grading_guideline_text,
@@ -159,6 +162,7 @@ export default function EditProblemPage() {
         description,
         submission_formats: submissionFormats,
         model,
+        reasoning_effort: reasoningEffort,
         grading_strictness: gradingGuideline.grading_strictness,
         grading_guideline_text: gradingGuideline.grading_guideline_text,
       });
@@ -574,26 +578,40 @@ export default function EditProblemPage() {
                   채점 모델
                 </label>
                 {modelsState.status === "ready" ? (
-                  <select
-                    id="problem-model"
-                    data-testid="edit-problem-model-select"
-                    value={model}
-                    onChange={(event) => setModel(event.target.value)}
-                    className={INPUT_CLASS}
-                  >
-                    <option value="" data-testid="edit-problem-model-option-inherit">
-                      클래스 기본값을 따릅니다
-                    </option>
-                    {modelsState.models.map((option) => (
-                      <option
-                        key={option.id}
-                        value={option.id}
-                        data-testid={`edit-problem-model-option-${option.id}`}
-                      >
-                        {option.label} · 컨텍스트 {option.context_window.toLocaleString("ko-KR")} 토큰
+                  <>
+                    {modelsState.source === "fallback" ? (
+                      <Note>
+                        <span data-testid="edit-problem-model-unavailable-note">
+                          {modelsState.unavailableReason === "no_api_key"
+                            ? "키를 넣으면 이 키로 쓸 수 있는 모델을 보여드립니다 — 지금은 기본 목록입니다."
+                            : "지금은 모델 목록을 확인할 수 없어 기본 목록을 보여드립니다."}
+                        </span>
+                      </Note>
+                    ) : null}
+                    <select
+                      id="problem-model"
+                      data-testid="edit-problem-model-select"
+                      value={model}
+                      onChange={(event) => setModel(event.target.value)}
+                      className={INPUT_CLASS}
+                    >
+                      <option value="" data-testid="edit-problem-model-option-inherit">
+                        클래스 기본값을 따릅니다
                       </option>
-                    ))}
-                  </select>
+                      {modelsState.models.map((option) => (
+                        <option
+                          key={option.id}
+                          value={option.id}
+                          data-testid={`edit-problem-model-option-${option.id}`}
+                        >
+                          {option.label} · 컨텍스트{" "}
+                          {option.context_window
+                            ? `${option.context_window.toLocaleString("ko-KR")} 토큰`
+                            : "크기 미확인"}
+                        </option>
+                      ))}
+                    </select>
+                  </>
                 ) : (
                   <p data-testid="edit-problem-model-loading" className="text-[13px] text-ink/45">
                     모델 목록을 불러오는 중...
@@ -608,6 +626,45 @@ export default function EditProblemPage() {
                   문제 설명이 길면 컨텍스트가 작은 모델은 뒷부분이 잘린 채 채점됩니다 — 그래서
                   문제마다 다른 모델을 고를 수 있습니다.
                 </span>
+                {modelsState.status === "ready" &&
+                isSelectedModelReasoning(
+                  model,
+                  modelsState.models,
+                  classState.status === "ready" ? classState.classroom.default_model_is_reasoning : false,
+                ) ? (
+                  <div className="flex flex-col gap-1.5 border-t border-rule pt-3">
+                    <label htmlFor="edit-problem-reasoning-effort">
+                      <FieldLabel>추론 강도</FieldLabel>
+                    </label>
+                    <select
+                      id="edit-problem-reasoning-effort"
+                      data-testid="edit-problem-reasoning-effort-select"
+                      value={reasoningEffort}
+                      onChange={(event) => setReasoningEffort(event.target.value)}
+                      className={`${INPUT_CLASS} max-w-[200px]`}
+                    >
+                      <option value="" data-testid="edit-problem-reasoning-effort-option-inherit">
+                        클래스 기본값을 따릅니다
+                      </option>
+                      {REASONING_EFFORT_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    {reasoningEffort === "" ? (
+                      <p
+                        data-testid="edit-problem-reasoning-effort-effective"
+                        className="text-[12.5px] text-ink/60"
+                      >
+                        실제로 적용될 추론 강도: {problem.effective_reasoning_effort}
+                      </p>
+                    ) : null}
+                    <span className="text-[11.5px] leading-relaxed text-ink/45">
+                      높을수록 느리고 채점 예산을 더 씁니다.
+                    </span>
+                  </div>
+                ) : null}
               </div>
             </Card>
 
