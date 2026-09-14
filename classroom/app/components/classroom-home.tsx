@@ -26,6 +26,7 @@ import {
 import type { ClassRow, JoinedClassRow } from "@/lib/classes/api";
 import { useMyClasses } from "@/lib/classes/use-my-classes";
 import { useJoinedClasses } from "@/lib/classes/use-joined-classes";
+import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 
 // 「새 클래스 열기」·「템플릿 둘러보기」 — 머리(강사만인 사람·둘 다인 사람·아무
 // 데도 안 속한 사람)와 참여 중인 클래스 목록 뒤(참여자로만 속한 사람)에 각각
@@ -184,6 +185,7 @@ function JoinedClassList({ classes }: { classes: JoinedClassRow[] }) {
 export default function ClassroomHome() {
   const taught = useMyClasses();
   const joined = useJoinedClasses();
+  useClassroomTabTitle({ screenName: "내 클래스" });
 
   const loading = taught.status === "loading" || joined.status === "loading";
   // 아무 데도 안 속한 사람 — 강사로 연 것도, 참여자로 들어간 것도 없다.
