@@ -19,3 +19,18 @@ export function parseThemePreference(value: string | undefined | null): ThemePre
 export function themeAttribute(preference: ThemePreference): "light" | "dark" | undefined {
   return preference === "system" ? undefined : preference;
 }
+
+/**
+ * 지금 실제로 적용 중인 테마 — #397 의 결정 순서(문서 루트의 명시적 표시가
+ * 있으면 그것, 없으면 운영체제)를 CSS(`tokens.css` 의 `light-dark()`/
+ * `color-scheme`)와 똑같이 따른다. 문제 설명 에디터(#399)가 Toast UI 자신의
+ * 다크 테마 클래스를 켤지 판단할 때 쓴다 — Toast UI 는 CSS 변수가 아니라
+ * `.toastui-editor-dark` 클래스로 다크를 켠다.
+ */
+export function resolveEffectiveTheme(
+  explicitAttribute: string | null | undefined,
+  systemPrefersDark: boolean,
+): "light" | "dark" {
+  if (explicitAttribute === "light" || explicitAttribute === "dark") return explicitAttribute;
+  return systemPrefersDark ? "dark" : "light";
+}

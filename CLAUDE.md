@@ -768,6 +768,20 @@ contrast.test.ts`가 두 테마 각각 여섯 조합(본문/바탕·본문/뜬 �
 공유가 재현되지 않는다** — 로그인 쿠키와 같은 제약이라 같은 오리진 안에서의
 유지만 확인했고, 교차 공유는 staging 확인 항목으로 남는다.
 
+**문제 설명 에디터(Toast UI, 강의실만)도 같은 표시를 따른다**(#399). 이
+라이브러리는 색을 CSS 변수가 아니라 `.toastui-editor-dark` 클래스로 켠다 —
+그래서 `classroom/app/components/MarkdownEditor.tsx`가
+`resolveEffectiveTheme`(`lib/theme/preference.ts`, #397 과 같은 순서)로 지금
+다크인지 판정해 그 클래스를 에디터 컨테이너에 직접 붙였다 뗀다. 문서 루트
+표시가 바뀌면 `lib/theme/theme-bus.ts`(알림 벨의 `read-bus.ts`와 같은
+window 커스텀 이벤트 방식)로, 운영체제 설정이 바뀌면 `matchMedia`로 다시
+판정한다. 색 자체(툴바·괘선·코드 블록·인용·표)는 여전히
+`toastui-editor-overrides.css`의 토큰 변수(`var(--color-*)`)가 정한다 — 이
+클래스는 라이브러리 안쪽(툴바 아이콘 스프라이트 등 클래스 없이는 못 바꾸는
+자리)만 건드린다. 참여자가 보는 문제 설명(`ProblemDescription.tsx`, 표는
+지원하지 않는다)은 처음부터 토큰 색만 썼으므로 이 티켓에서 고칠 것이
+없었다.
+
 **로고도 토큰·서체와 같은 방식으로 복사한다**(#392, #391 「커밋 노드 C」). 원본은
 `frontend/app/components/logo-mark.tsx`(SVG 심볼)와 그것을 그리는
 `frontend/app/icon.tsx`·`frontend/app/apple-icon.tsx`(Next 아이콘 파일 컨벤션)다.
