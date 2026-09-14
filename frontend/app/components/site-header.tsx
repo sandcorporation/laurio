@@ -20,10 +20,17 @@ import Link from "next/link";
 
 import { buttonClass } from "@/lib/ui/classnames";
 import { contestProductEnabled } from "@/lib/contest-switch";
+import { classroomAppOrigin } from "@/lib/auth/classroom-link";
 
 import { HeaderSessionZone } from "./header-session-zone";
 
 export function SiteHeader() {
+  // 계정 메뉴의 「클래스로 가기」가 가리킬 곳(#375, spec #371) — 서버 전용
+  // 환경변수라 여기(서버 컴포넌트)에서 읽어 클라이언트 자식에게 내려준다
+  // (lib/auth/classroom-link.ts). 이 값이 빌드 시점에 구워지지 않는 것은
+  // `app/layout.tsx`의 `force-dynamic`이 보장한다(#297).
+  const classroomUrl = classroomAppOrigin();
+
   return (
     <header data-testid="site-header" className="border-b border-rule bg-surface">
       <div className="mx-auto flex h-[72px] max-w-[1200px] flex-wrap items-center justify-between gap-3 px-6">
@@ -54,7 +61,7 @@ export function SiteHeader() {
               </Link>
             </>
           )}
-          <HeaderSessionZone />
+          <HeaderSessionZone classroomUrl={classroomUrl} />
         </nav>
       </div>
     </header>

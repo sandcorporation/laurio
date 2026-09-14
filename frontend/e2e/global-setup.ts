@@ -45,7 +45,10 @@ async function warmRoutes(): Promise<void> {
     `${publicBase}/`,
     `${publicBase}/contests`,
     `${publicBase}/login`,
-    `${publicBase}/console`,
+    // 콘솔 현관(`/console`)이 없어져(#375) 이제 그 경로는 미들웨어에서 즉시
+    // 홈으로 리다이렉트될 뿐 라우트를 컴파일하지 않는다 — 대신 실제로 컴파일이
+    // 필요한 인증 구역 화면 하나를 덥힌다.
+    `${publicBase}/console/participation`,
     `${publicBase}/dev-tokens`,
     `${operatorBase}/login`,
     `${operatorBase}/`,

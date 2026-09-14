@@ -29,6 +29,16 @@ import type { NextRequest } from "next/server";
 import { ACCESS_COOKIE, REFRESH_COOKIE } from "./lib/auth/cookies";
 
 export function middleware(request: NextRequest) {
+  // 콘솔 현관 제거(#375, spec #371) — `/console` 자체(하위 경로 없이 정확히
+  // 이 경로)는 세션 여부와 무관하게 홈으로 보낸다. 로그인 여부를 먼저 따지면
+  // 로그인 안 한 사람은 /login을 한 번 더 거쳐야 하는데, 그 화면은 어차피
+  // 로그인 뒤 홈으로 돌아오므로(next-path.ts 기본값 "/") 한 홉을 아낀다.
+  // `/console/**` 하위 화면(참가 현황·공모전·프로필 등)은 이 분기 밖이라
+  // 그대로 로그인 가드를 받는다.
+  if (request.nextUrl.pathname === "/console") {
+    return NextResponse.redirect(new URL("/", request.url));
+  }
+
   const hasAccess = request.cookies.has(ACCESS_COOKIE);
   const hasRefresh = request.cookies.has(REFRESH_COOKIE);
 

@@ -67,8 +67,8 @@ export function WithdrawPageClient({ returnOrigin }: { returnOrigin: string | nu
   return (
     <PageShell>
       <div className="flex items-center justify-between gap-3">
-        <Link className="text-sm text-ink/60" href="/console" data-testid="withdraw-back">
-          ← 콘솔
+        <Link className="text-sm text-ink/60" href="/" data-testid="withdraw-back">
+          ← 홈
         </Link>
         {returnOrigin && (
           <a

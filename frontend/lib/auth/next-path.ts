@@ -37,7 +37,7 @@ export function isSafeNextPath(next: string | null | undefined): next is string 
   return resolved.protocol === "http:" && resolved.host === "laurio-internal.invalid";
 }
 
-export function resolveNextPath(next: string | null | undefined, fallback = "/console"): string {
+export function resolveNextPath(next: string | null | undefined, fallback = "/"): string {
   return isSafeNextPath(next) ? next : fallback;
 }
 
@@ -55,7 +55,7 @@ export function withoutForeignNext(
   next: string,
   requestedNextOrigin: string | null | undefined,
   returnOrigin: string | null,
-  fallback = "/console",
+  fallback = "/",
 ): string {
   return requestedNextOrigin && !returnOrigin ? fallback : next;
 }

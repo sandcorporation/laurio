@@ -133,8 +133,8 @@ export default function NotificationsPage() {
 
   return (
     <PageShell>
-      <Link className="text-sm text-ink/60" href="/console" data-testid="notifications-back">
-        ← 콘솔
+      <Link className="text-sm text-ink/60" href="/" data-testid="notifications-back">
+        ← 홈
       </Link>
       <PageHeader
         title="알림"

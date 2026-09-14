@@ -46,6 +46,16 @@ export const metadata: Metadata = {
   description: "발주자가 상금을 걸고 요구사항을 공개하면, 개발자들이 만들어 제출하는 공개 공모전 플랫폼",
 };
 
+// **정적으로 구워지면 안 된다**(#297, #375, `lib/rendering/runtime-config.test.ts`).
+// 헤더의 `SiteHeader`가 이 레이아웃 트리에서 `LAURIO_CLASSROOM_ORIGIN`
+// (`lib/auth/classroom-link.ts`, 계정 메뉴의 「클래스로 가기」)을 읽는다 — 그
+// 값이 빌드 머신 것(=비어 있음)으로 박제되면 배포된 공개 앱의 헤더가 dev
+// 폴백(`http://127.0.0.1:53002`)으로 사람을 보낸다(강의실 로그인 화면이 이미
+// 겪은 사고, classroom/app/login/page.tsx 참고). 공개 다섯 화면은 이미 각자
+// 백엔드를 요청 시점에 호출하므로(`page.tsx`의 `fetchHomeCuration` 등) 이
+// 레이아웃을 통째로 동적으로 돌려도 잃는 것이 없다.
+export const dynamic = "force-dynamic";
+
 // 헤더는 모든 페이지에 서므로 여기서 딱 한 번 조립한다(#93, spec #92). 세션
 // 슬롯을 뺀 나머지는 서버 컴포넌트라 인증 구역(app/console/**)을 포함해 어느
 // 페이지가 이 레이아웃 아래 걸리든 렌더링 방식이 갈리지 않는다.

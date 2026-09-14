@@ -16,7 +16,15 @@ import Link from "next/link";
 import { buttonClass } from "@/lib/ui/classnames";
 import type { HeaderSessionState } from "@/lib/auth/header-session-state";
 
-export function SessionSlot({ sessionState }: { sessionState: HeaderSessionState }) {
+import { AccountMenu } from "./account-menu";
+
+export function SessionSlot({
+  sessionState,
+  classroomUrl,
+}: {
+  sessionState: HeaderSessionState;
+  classroomUrl: string;
+}) {
   // 로딩 중에는 아무 링크도 단언하지 않는다 — 자바스크립트가 없으면(ADR-0015
   // 검증 기법, seam.spec.ts) 이 자리에 영원히 머무르지만, 헤더의 나머지(브랜드·
   // 공모전·개최 CTA)는 서버에서 이미 렌더돼 있어 사이트가 걷는 데는 지장이
@@ -25,12 +33,10 @@ export function SessionSlot({ sessionState }: { sessionState: HeaderSessionState
     return <span data-testid="header-session-loading" aria-hidden="true" />;
   }
 
+  // 콘솔 현관(`/console`)이 없어지면서 「내 콘솔」 단일 링크 대신 드롭다운으로
+  // 바뀌었다(#375, spec #371) — 모양은 강의실 계정 메뉴와 같다.
   if (sessionState.status === "authenticated") {
-    return (
-      <Link href="/console" data-testid="header-console-link" className={buttonClass("secondary", "sm")}>
-        내 콘솔
-      </Link>
-    );
+    return <AccountMenu classroomUrl={classroomUrl} />;
   }
 
   return (
