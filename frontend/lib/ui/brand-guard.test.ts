@@ -125,6 +125,13 @@ function looksLikeUtility(token: string): boolean {
 /** 이 유틸리티가 브랜드를 벗어나면 그 이유, 아니면 null. */
 export function violationOf(raw: string): string | null {
   if (!looksLikeUtility(raw)) return null;
+
+  // 다크 값은 tokens.css 의 `light-dark()` 에만 둔다(#397) — 컴포넌트가
+  // `dark:` 변형을 쓰면 그 자리 하나가 토큰 밖에서 테마를 갈라 다시 흩어진다.
+  if (raw.split(":").slice(0, -1).includes("dark")) {
+    return "다크 값은 tokens.css 에서만 정한다 — 컴포넌트 밖에서 `dark:` 변형을 쓰지 않는다";
+  }
+
   const utility = raw.slice(raw.lastIndexOf(":") + 1); // hover:·sm:·group-hover: 를 벗긴다
 
   if (utility === "rounded" || utility.startsWith("rounded-")) {
@@ -168,9 +175,22 @@ describe("브랜드는 기계가 지킨다 (#370)", () => {
 
   it("검사 자체가 살아 있다 — 위반을 넣으면 실제로 잡는다", () => {
     // 초록인 것만으로는 「지킨다」와 「아무것도 안 본다」가 구별되지 않는다.
-    const caught = ["bg-accent", "text-white", "rounded-full", "rounded", "hover:border-subtle"]
-      .filter((t) => violationOf(t) !== null);
-    expect(caught).toEqual(["bg-accent", "text-white", "rounded-full", "rounded", "hover:border-subtle"]);
+    const caught = [
+      "bg-accent",
+      "text-white",
+      "rounded-full",
+      "rounded",
+      "hover:border-subtle",
+      "dark:text-paper",
+    ].filter((t) => violationOf(t) !== null);
+    expect(caught).toEqual([
+      "bg-accent",
+      "text-white",
+      "rounded-full",
+      "rounded",
+      "hover:border-subtle",
+      "dark:text-paper",
+    ]);
   });
 
   it("허용해야 할 것은 막지 않는다 — 크기·변·투명도·임의값·토큰 반경", () => {

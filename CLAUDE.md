@@ -736,6 +736,22 @@ page/route 는 `export const dynamic = "force-dynamic"` 을 선언해야 한다)
 배지 하나뿐이고(동그란 표식, 2026-09-13 결정) 그 목록이 검사 파일 안에 있다. 새 CI 잡이 아니라 공개 앱의
 `test:unit` 에 얹혀 있다. 운영자 앱은 토큰 파일이 없어 대상이 아니다.
 
+**다크 테마도 이 토큰 파일 하나에만 산다**(#397, spec #396 「따뜻한 먹」). 여섯
+색 각각이 `light-dark(라이트, 다크)`로 두 값을 갖고, 문서 루트(`<html>`)의
+`color-scheme`이 어느 쪽을 쓸지 정한다 — `:root`의 기본값은 `light dark`(운영체제
+설정을 그대로 따른다), `data-theme="light"`/`"dark"` 속성이 있으면(#398 토글이
+붙인다) `color-scheme`도 그 값으로 고정돼 운영체제 설정을 덮는다. 컴포넌트는
+`bg-paper`·`text-ink/60` 그대로 쓰고 테마별로 고치지 않는다 — 갈리는 자리가 이
+파일 하나이려면 그래야 한다. Tailwind 의 `dark:` 변형도 같은 순서(명시 표시
+우선, 없으면 시스템)를 따르게 `@custom-variant`로 재정의했지만, 실제로 그
+변형을 쓰는 컴포넌트는 없다 — `frontend/lib/ui/brand-guard.test.ts`가 토큰 파일
+밖의 `dark:` 를 막는다(로고의 옛 `dark:text-paper`가 다크 테마 없이 켜져 다크
+기기에서 로고 획이 사라지게 한 것이 계기다, #396). `frontend/lib/design/
+contrast.test.ts`가 두 테마 각각 여섯 조합(본문/바탕·본문/뜬 면·흐린 글자 60%/
+뜬 면·주 버튼 글자/바탕·통과 초록/뜬 면·주의 빨강/뜬 면)의 WCAG AA(4.5:1) 대비를
+`tokens.css`를 텍스트로 읽어 계산한다 — 색을 바꿔 대비가 모자라지면 이 테스트가
+빨개진다.
+
 **로고도 토큰·서체와 같은 방식으로 복사한다**(#392, #391 「커밋 노드 C」). 원본은
 `frontend/app/components/logo-mark.tsx`(SVG 심볼)와 그것을 그리는
 `frontend/app/icon.tsx`·`frontend/app/apple-icon.tsx`(Next 아이콘 파일 컨벤션)다.
