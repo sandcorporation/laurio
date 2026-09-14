@@ -44,6 +44,7 @@ import {
   type SubmissionFormat,
 } from "@/lib/problems/api";
 import { useProblem } from "@/lib/problems/use-problem";
+import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
 
 // 화면이 실제로 그리는 값만 담는다(#333, 클래스 설정 화면의
@@ -94,6 +95,12 @@ export default function EditProblemPage() {
 
   // 「작성」/「미리보기」 탭(#325) — 새 문제 화면과 같은 자리다.
   const [tab, setTab] = useState<"write" | "preview">("write");
+
+  useClassroomTabTitle({
+    screenName: "문제 편집",
+    className: classState.status === "ready" ? classState.classroom.name : undefined,
+    problemTitle: state.status === "ready" ? state.problem.title : undefined,
+  });
 
   useEffect(() => {
     if (state.status === "ready") {

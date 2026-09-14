@@ -31,6 +31,7 @@ import {
 import { useClass } from "@/lib/classes/use-class";
 import { formatAchievementRate } from "@/lib/problems/achievement";
 import { useProblems } from "@/lib/problems/use-problems";
+import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 
 import { RosterGridTab } from "./roster-grid-tab";
 
@@ -192,6 +193,11 @@ export default function ClassDetailPage() {
   const router = useRouter();
   const [copying, setCopying] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
+
+  useClassroomTabTitle({
+    screenName: "클래스 상세",
+    className: classState.status === "ready" ? classState.classroom.name : undefined,
+  });
 
   async function handleCopyClass() {
     setCopyError(null);
