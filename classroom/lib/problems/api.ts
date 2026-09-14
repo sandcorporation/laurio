@@ -65,7 +65,7 @@ export type ProblemRow = {
   passed_count: number;
   // 달성률의 분모.
   member_count: number;
-  // passed_count / member_count. 분모가 0이면 null — "아직 없음"으로
+  // passed_count / member_count. 분모가 0이면 null — 화면은 "—"(읽기 도구에는 "참여자 없음")로
   // 보여줘야 한다는 신호다(0%와 구별).
   pass_rate: number | null;
   published_template: PublishedProblemTemplateSummary | null;

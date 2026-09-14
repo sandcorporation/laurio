@@ -10,7 +10,7 @@
 // 열몇 개에 「시도했으나 미통과」를 글자로 채우면 읽히지 않는다. 글자는
 // `aria-label` 과 범례가 진다.
 import { Badge, Card, EmptyState, ErrorNote } from "@/app/components/ui";
-import { formatAchievementRate } from "@/lib/problems/achievement";
+import { describeAchievementRate, formatAchievementRate } from "@/lib/problems/achievement";
 import type { GridCellStatus } from "@/lib/roster-grid/api";
 import { useRosterGrid } from "@/lib/roster-grid/use-roster-grid";
 
@@ -180,6 +180,7 @@ export function RosterGridTab({ classId }: { classId: number }) {
                       key={problem.id}
                       className={`${CELL} font-mono font-semibold`}
                       data-testid={`roster-grid-achievement-${problem.id}`}
+                      aria-label={describeAchievementRate(problem)}
                     >
                       {formatAchievementRate(problem)}
                     </td>
