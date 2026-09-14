@@ -728,13 +728,23 @@ if not DEBUG and not INTERNAL_API_TOKEN:
 INTERNAL_API_BASE_URL = _env("INTERNAL_API_BASE_URL", "http://127.0.0.1:8000")
 
 # --- Celery (티켓 02, ADR-0003) -----------------------------------------------------
-#
-# 브로커는 아직 dev compose 에 없다. 설정만 여기 있고, 실제로 워커·beat 를 띄우는 것은
-# 이 티켓 범위 밖이다(공유 인프라에 새 컨테이너/포트를 추가하지 않는다).
 CELERY_BROKER_URL = _env("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")
 CELERY_RESULT_BACKEND = _env("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_ALWAYS_EAGER = _env_bool("CELERY_TASK_ALWAYS_EAGER", False)
+
+if _RUNNING_TESTS:
+    # #378부터 요청 처리 코드(강의실 제출)가 실제로 `.delay()`를 부른다 — 그
+    # 전까지는 beat 만 태스크를 보냈다. pytest 에는 Redis 가 없다(위 세션
+    # 캐시와 같은 전제, "테스트는 서로를 밟지 않는다"). `.delay()`가 그 사실과
+    # 부딪히지 않도록 브로커를 kombu 의 인메모리 트랜스포트로 바꾼다 — 발행은
+    # 성공하되(워커가 있는 것처럼 요청이 실패하지 않는다) 아무도 소비하지
+    # 않는다, dev·CI 가 워커 없이 도는 것과 정확히 같은 모양이다(#40). eager
+    # 로 바꾸지 않는 이유는 그러면 태스크가 요청 안에서 곧바로 실행돼 "제출은
+    # 동기로 채점하지 않는다"는 계약(`test_submitting_does_not_score_
+    # synchronously`)이 테스트 환경에서만 깨지기 때문이다.
+    CELERY_BROKER_URL = "memory://"
+    CELERY_RESULT_BACKEND = "cache+memory://"
 
 # --- Notification 어댑터 (티켓 17, ADR-0007 / ADR-0009) ------------------------------
 #

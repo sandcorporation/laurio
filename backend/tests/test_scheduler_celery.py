@@ -64,8 +64,8 @@ def test_every_scan_that_used_to_have_its_own_endpoint_is_registered():
 def test_run_scan_task_calls_the_scan_endpoint_with_the_internal_token():
     source = inspect.getsource(core_tasks.run_scan)
     assert "/api/internal/scans/" in source
-    assert "_call_internal" in source
-    helper = inspect.getsource(core_tasks._call_internal)
+    assert "call_internal" in source
+    helper = inspect.getsource(core_tasks.call_internal)
     assert "X-Internal-Token" in helper
     assert "INTERNAL_API_TOKEN" in helper
 
