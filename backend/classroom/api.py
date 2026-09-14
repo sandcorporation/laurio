@@ -32,6 +32,7 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
+from accounts.models import SocialAccount
 from core.crypto import encrypt
 from core.events import Event, get_event_bus
 from core.llm_scoring import LLMKeyCheckStatus
@@ -687,6 +688,15 @@ def preview_join(request: HttpRequest, join_code: str):
         auth_user is not None
         and class_obj.members.filter(user_id=auth_user.id).exists()
     )
+    # 제안 이름은 로그인한 사람에게만 싣는다(#390 AC) — 익명 방문자에게는
+    # 애초에 누구의 닉네임인지가 없다. 카카오만 닉네임을 채우므로(#189가
+    # GitHub·구글을 켤 때까지) 다른 제공자·미동의 사용자는 빈 문자열이 와
+    # `suggested_name`도 `None`으로 떨어진다.
+    suggested_name = None
+    if auth_user is not None:
+        social_account = SocialAccount.objects.filter(user_id=auth_user.id).first()
+        if social_account is not None and social_account.nickname:
+            suggested_name = social_account.nickname
     # `members.count()`는 강사 본인이 가입했으면 그 행도 센다 — CONTEXT.md
     # 「ClassMember」가 강사를 빼라고 정한 것은 **달성률**의 분모뿐이다(그
     # 계산은 아직 없는 티켓의 몫이다). 이 미리보기의 "참여자 수"는 그
@@ -700,6 +710,7 @@ def preview_join(request: HttpRequest, join_code: str):
         participant_count=class_obj.members.count(),
         archived=class_obj.archived_at is not None,
         already_joined=already_joined,
+        suggested_name=suggested_name,
     )
 
 

@@ -78,6 +78,13 @@ def social_login(request: HttpRequest, provider: str, payload: SocialLoginIn):
                 403,
                 "탈퇴한 계정입니다. 신원이 파기되어 다시 로그인할 수 없습니다.",
             )
+
+        # 닉네임은 로그인마다 최신값으로 갱신한다(#390) — 카카오에서 닉네임을
+        # 바꾼 뒤에도 옛 값이 기본값으로 남지 않게 하기 위해서다. 동의를
+        # 철회했으면 `profile.nickname`이 빈 문자열로 와 여기서도 비워진다.
+        if social_account.nickname != profile.nickname:
+            social_account.nickname = profile.nickname
+            social_account.save(update_fields=["nickname"])
     else:
         User = get_user_model()
         user = User(
@@ -91,6 +98,7 @@ def social_login(request: HttpRequest, provider: str, payload: SocialLoginIn):
             provider=profile.provider,
             provider_uid=profile.provider_uid,
             email=profile.email,
+            nickname=profile.nickname,
         )
 
     pair = issue_token_pair(user.id)

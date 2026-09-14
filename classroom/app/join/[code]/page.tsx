@@ -56,6 +56,16 @@ export default function JoinPage() {
     }
   }, [preview, router]);
 
+  // 이름 칸을 카카오 닉네임으로 미리 채운다(#390 AC) — 로그인한 요청에만
+  // 오는 값이라(비로그인·미동의·비카카오 제공자는 `null`) 그때만 채워진다.
+  // 아직 아무것도 입력하지 않았을 때만 채운다 — 사람이 고쳐 쓴 뒤에 이
+  // 효과가 다시 돌아 덮어쓰는 일이 없게 하기 위해서다.
+  useEffect(() => {
+    if (preview.status === "ready" && preview.preview.suggested_name) {
+      setDisplayName((current) => (current === "" ? preview.preview.suggested_name! : current));
+    }
+  }, [preview]);
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmit({ status: "submitting" });
