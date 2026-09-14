@@ -12,9 +12,13 @@
 
 from __future__ import annotations
 
+import logging
+
 from django.db import transaction
 
 from core.events import Event, get_event_bus
+
+logger = logging.getLogger(__name__)
 
 #: 그 시도의 `ClassroomScore`가 생겼다 — 정상 채점이든 실패 상한에 의한
 #: 플랫폼 자동 미달이든 매번 정확히 한 번(#379 AC). 그 시도를 낸 참여자에게만
@@ -62,4 +66,21 @@ def publish_attempt_scored(submission) -> None:
             "submission_id": submission.id,
         },
     )
-    transaction.on_commit(lambda: get_event_bus().publish(event))
+    transaction.on_commit(lambda: _publish_safely(event))
+
+
+def _publish_safely(event: Event) -> None:
+    """**발행 실패가 채점을 깨지 않는다** — 이 콜백은 커밋 뒤에 돌므로 Score 는 이미
+    저장됐다. 버스(Redis)가 죽어 예외가 튀면 스캔·즉시 채점의 행 처리가 그 시도를
+    실패로 기록할 수 있다. 신호는 빠르게 만드는 장치이지 진실의 출처가 아니므로
+    (ADR-0046) 경고로 남기고 넘어간다 — 화면은 폴링으로 맞춰진다."""
+
+    try:
+        get_event_bus().publish(event)
+    except Exception:  # noqa: BLE001 — 어떤 버스 오류든 화면이 폴링으로 맞춘다
+        logger.warning(
+            "강의실 신호를 발행하지 못했다 (kind=%s, recipient_id=%s)",
+            event.kind,
+            event.recipient_id,
+            exc_info=True,
+        )

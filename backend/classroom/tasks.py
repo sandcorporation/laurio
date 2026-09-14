@@ -16,7 +16,10 @@ from celery import shared_task
 from core.tasks import call_internal
 
 
-@shared_task(name="classroom.score_attempt")
+# **결과를 받지 않는다**(`ignore_result`, #378 후속) — 채점 결과는 ClassroomScore 로 남고
+# 아무도 AsyncResult 를 읽지 않는다. 결과를 받는 작업은 보낼 때 결과 백엔드(Redis)에 구독을
+# 거는데, Redis 가 없으면 그 재연결에 19초가 묶였다(실측) — 제출 요청이 그만큼 멈췄다.
+@shared_task(name="classroom.score_attempt", ignore_result=True)
 def score_attempt(submission_id: int) -> dict:
     """`ClassroomSubmission` 하나를 즉시 채점한다 — 내부 엔드포인트가 스캔과
     같은 후보 조건·같은 행 처리 함수를 쓰므로(`classroom.scoring.

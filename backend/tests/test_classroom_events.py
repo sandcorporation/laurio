@@ -289,3 +289,44 @@ def test_platform_failure_path_also_publishes_attempt_scored(
         assert len(events) == 1
         assert events[0].kind == "attempt-scored"
         assert events[0].payload["submission_id"] == submitted["id"]
+
+
+def test_a_failing_bus_does_not_break_scoring(client, db, monkeypatch, django_capture_on_commit_callbacks):
+    """발행은 커밋 뒤에 돈다 — 점수는 이미 저장됐다. 버스(Redis)가 죽어 발행이 예외를 내도
+    채점이 실패로 기록되거나 스캔이 깨지면 안 된다: 신호는 빠르게 만드는 장치이지 진실의
+    출처가 아니고, 화면은 폴링으로 맞춰진다(ADR-0046)."""
+
+    from classroom.models import ClassroomScore
+
+    def _down(self, event):
+        raise ConnectionError("event bus is down")
+
+    monkeypatch.setattr(FakeEventBus, "publish", _down)
+    ctx = _setup_open_problem_with_participant(client)
+    submitted = _submit_repository(
+        client,
+        ctx["participant"]["access"],
+        ctx["class_id"],
+        ctx["problem_id"],
+        "https://github.com/octocat/hello-world",
+    )
+
+    result = _run_scan(client, django_capture_on_commit_callbacks)
+
+    assert result["rows"][0]["status"] == "scored"
+    assert ClassroomScore.objects.filter(submission_id=submitted["id"]).exists()
+
+
+def test_fake_bus_does_not_grow_without_bound_when_nobody_subscribes(db):
+    """fake 버스는 테스트용이지만 배포 환경이 값을 모르는 동안(#380 전) staging 도 이것으로
+    뜬다 — 구독자가 없는 gunicorn·celery 프로세스에서 신호가 영원히 쌓이면 안 된다."""
+
+    from core.events import Event
+
+    bus = FakeEventBus()
+    for i in range(FakeEventBus.MAX_QUEUED_PER_RECIPIENT + 50):
+        bus.publish(Event(kind="attempt-scored", recipient_id=7, payload={"submission_id": i}))
+
+    queued = FakeEventBus._queues[7]
+    assert len(queued) == FakeEventBus.MAX_QUEUED_PER_RECIPIENT
+    assert queued[-1].payload == {"submission_id": FakeEventBus.MAX_QUEUED_PER_RECIPIENT + 49}

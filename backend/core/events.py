@@ -92,8 +92,15 @@ class FakeEventBus:
 
     _queues: dict[int, list[Event]] = {}
 
+    #: 받는 사람마다 쌓아 두는 상한 — 배포 환경이 버스 값을 모르는 동안(#380 전)
+    #: staging 도 이 fake 로 뜨는데, 구독자가 없는 gunicorn·celery 프로세스에서는
+    #: 아무도 비우지 않아 신호가 영원히 쌓인다. 오래된 것부터 버린다.
+    MAX_QUEUED_PER_RECIPIENT = 100
+
     def publish(self, event: Event) -> None:
-        FakeEventBus._queues.setdefault(event.recipient_id, []).append(event)
+        queue = FakeEventBus._queues.setdefault(event.recipient_id, [])
+        queue.append(event)
+        del queue[: -FakeEventBus.MAX_QUEUED_PER_RECIPIENT]
 
     def subscribe(self, recipient_id: int) -> _FakeSubscription:
         return _FakeSubscription(recipient_id)
