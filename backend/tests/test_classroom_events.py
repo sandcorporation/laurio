@@ -1,17 +1,20 @@
-"""강의실 채점이 fake 이벤트 버스에 `attempt-scored`를 발행한다 (#379, ADR-0046).
+"""강의실이 `attempt-submitted`·`attempt-scored`를 fake 이벤트 버스에 발행한다
+(#379·#383, ADR-0046).
 
-핵심 대상: `ClassroomScore`가 생기는 두 경로(정상 채점·실패 상한에 의한 플랫폼
-자동 미달) 모두에서 그 시도의 참여자에게만 신호가 간다 — 다른 참여자·내보내진
-참여자에게는 가지 않는다. 공모전 채점(`scoring` 앱)은 이 버스를 아예 모른다
-(import하지 않는다) — 앱 경계 테스트(`test_app_boundaries.py`)가 그 사실을
-구조로 지킨다.
+핵심 대상: 시도 제출·`ClassroomScore` 생성(정상 채점·실패 상한에 의한 플랫폼
+자동 미달) 모두에서 그 시도의 참여자와 그 클래스 강사에게 신호가 간다 — 다른
+참여자·다른 클래스 강사에게는 가지 않는다. `attempt-scored`는 참여자가
+내보내진 뒤라면 참여자에게는 가지 않되 강사에게는 그대로 간다(#383). 공모전
+채점(`scoring` 앱)은 이 버스를 아예 모른다(import하지 않는다) — 앱 경계
+테스트(`test_app_boundaries.py`)가 그 사실을 구조로 지킨다.
 
-**참여자 큐에는 `attempt-scored` 말고 다른 신호도 쌓인다**(#381) — 같은 채점
-완료 자리가 `CLASSROOM_SUBMISSION_SCORED` Notification도 만들고, 그것이
-`notification-changed`를 같은 수신자에게 낸다(`notifications.services.
-_publish_notification_changed_if_classroom`, 내보내진 참여자도 예외가 아니다 —
-그 알림 자체가 내보내짐과 무관하게 만들어지기 때문이다). 그래서 이 파일의
-단언은 큐 전체가 아니라 `kind == "attempt-scored"`로 걸러 본다.
+**참여자·강사 큐에는 `attempt-scored`·`attempt-submitted` 말고 다른 신호도
+쌓인다**(#381) — 같은 채점 완료 자리가 `CLASSROOM_SUBMISSION_SCORED`
+Notification도 만들고, 그것이 `notification-changed`를 같은 수신자에게 낸다
+(`notifications.services._publish_notification_changed_if_classroom`,
+내보내진 참여자도 예외가 아니다 — 그 알림 자체가 내보내짐과 무관하게
+만들어지기 때문이다). 그래서 이 파일의 단언은 큐 전체가 아니라 `kind`로
+걸러 본다.
 """
 
 from __future__ import annotations
@@ -154,11 +157,12 @@ def _setup_open_problem_with_participant(client, *, participant_uid: str = "part
     }
 
 
-def test_normal_scoring_publishes_attempt_scored_to_the_submitter_only(
+def test_normal_scoring_publishes_attempt_scored_to_the_submitter(
     client, db, django_capture_on_commit_callbacks
 ):
     """체크리스트 문구가 그대로 통과 판정이 나든 미통과가 나든(FakeClassroomScoringAdapter는
-    체크리스트 문구가 소스에 있는지만 본다) — 어느 쪽이든 채점이 끝나면 신호가 간다."""
+    체크리스트 문구가 소스에 있는지만 본다) — 어느 쪽이든 채점이 끝나면 신호가 간다.
+    강사도 같은 신호를 받는다(#383) — 그건 아래 별도 테스트가 확인한다."""
 
     ctx = _setup_open_problem_with_participant(client)
     submitted = _submit_repository(
@@ -207,10 +211,41 @@ def test_other_participants_do_not_receive_the_signal(
     assert FakeEventBus._queues.get(_user_id("other-participant"), []) == []
 
 
-def test_instructor_does_not_receive_the_signal(client, db, django_capture_on_commit_callbacks):
-    """#379 AC "그 참여자에게만" — 강사(제출한 사람이 아니면)도 받지 않는다."""
+def test_instructor_also_receives_attempt_scored(client, db, django_capture_on_commit_callbacks):
+    """#383 AC "attempt-scored 가 그 클래스 강사에게도 발행된다" — #379 시점의
+    "그 참여자에게만"을 이 티켓이 넓혔다."""
 
     ctx = _setup_open_problem_with_participant(client)
+    submitted = _submit_repository(
+        client,
+        ctx["participant"]["access"],
+        ctx["class_id"],
+        ctx["problem_id"],
+        "https://github.com/octocat/hello-world",
+    )
+    _run_scan(client, django_capture_on_commit_callbacks)
+
+    instructor_id = _user_id("instructor-1")
+    events = FakeEventBus._queues.get(instructor_id, [])
+    assert len(events) == 1
+    event = events[0]
+    assert event.kind == "attempt-scored"
+    assert event.recipient_id == instructor_id
+    assert event.payload == {
+        "class_id": ctx["class_id"],
+        "problem_id": ctx["problem_id"],
+        "submission_id": submitted["id"],
+    }
+
+
+def test_other_class_instructor_does_not_receive_attempt_scored(
+    client, db, django_capture_on_commit_callbacks
+):
+    """#383 AC "다른 클래스 강사에게는 어느 신호도 가지 않는다"."""
+
+    ctx = _setup_open_problem_with_participant(client)
+    other_instructor = _login(client, uid="other-instructor")
+    _create_class(client, other_instructor["access"], name="다른 클래스")
     _submit_repository(
         client,
         ctx["participant"]["access"],
@@ -220,7 +255,7 @@ def test_instructor_does_not_receive_the_signal(client, db, django_capture_on_co
     )
     _run_scan(client, django_capture_on_commit_callbacks)
 
-    assert FakeEventBus._queues.get(_user_id("instructor-1"), []) == []
+    assert FakeEventBus._queues.get(_user_id("other-instructor"), []) == []
 
 
 def test_expelled_participant_does_not_receive_the_signal(
@@ -251,8 +286,77 @@ def test_expelled_participant_does_not_receive_the_signal(
 
     _run_scan(client, django_capture_on_commit_callbacks)
 
-    events = FakeEventBus._queues.get(_user_id("participant-1"), [])
-    assert [e for e in events if e.kind == "attempt-scored"] == []
+    # 참여자 몫의 attempt-scored만 걸러진다 — 이 큐에는 notification-changed도
+    # 함께 쌓일 수 있다(#381, 위 docstring). 강사는 내보내진 뒤에도 그 시도의
+    # 채점 결과를 그대로 받는다(#383, 위 docstring "강사는 ... 항상 받는다").
+    participant_events = FakeEventBus._queues.get(_user_id("participant-1"), [])
+    assert [e for e in participant_events if e.kind == "attempt-scored"] == []
+    instructor_events = FakeEventBus._queues.get(_user_id("instructor-1"), [])
+    assert len(instructor_events) == 1
+    assert instructor_events[0].kind == "attempt-scored"
+
+
+def test_submission_publishes_attempt_submitted_to_the_submitter_and_the_instructor(
+    client, db, django_capture_on_commit_callbacks
+):
+    """#383 AC "강의실 제출이 커밋되면 attempt-submitted 가 그 참여자와 그
+    클래스 강사에게 발행된다" — 채점을 기다리지 않는다, 제출 자체가 신호다."""
+
+    ctx = _setup_open_problem_with_participant(client)
+    with django_capture_on_commit_callbacks(execute=True):
+        submitted = _submit_repository(
+            client,
+            ctx["participant"]["access"],
+            ctx["class_id"],
+            ctx["problem_id"],
+            "https://github.com/octocat/hello-world",
+        )
+
+    expected_payload = {
+        "class_id": ctx["class_id"],
+        "problem_id": ctx["problem_id"],
+        "submission_id": submitted["id"],
+    }
+
+    participant_id = _user_id("participant-1")
+    participant_events = FakeEventBus._queues.get(participant_id, [])
+    assert len(participant_events) == 1
+    assert participant_events[0].kind == "attempt-submitted"
+    assert participant_events[0].recipient_id == participant_id
+    assert participant_events[0].payload == expected_payload
+
+    instructor_id = _user_id("instructor-1")
+    instructor_events = FakeEventBus._queues.get(instructor_id, [])
+    assert len(instructor_events) == 1
+    assert instructor_events[0].kind == "attempt-submitted"
+    assert instructor_events[0].recipient_id == instructor_id
+    assert instructor_events[0].payload == expected_payload
+
+
+def test_attempt_submitted_does_not_reach_other_participants_or_other_class_instructor(
+    client, db, django_capture_on_commit_callbacks
+):
+    ctx = _setup_open_problem_with_participant(client)
+    other_participant = _login(client, uid="other-participant")
+    _join(
+        client,
+        other_participant["access"],
+        _join_code(client, ctx["instructor"]["access"], ctx["class_id"]),
+    )
+    other_instructor = _login(client, uid="other-instructor")
+    _create_class(client, other_instructor["access"], name="다른 클래스")
+
+    with django_capture_on_commit_callbacks(execute=True):
+        _submit_repository(
+            client,
+            ctx["participant"]["access"],
+            ctx["class_id"],
+            ctx["problem_id"],
+            "https://github.com/octocat/hello-world",
+        )
+
+    assert FakeEventBus._queues.get(_user_id("other-participant"), []) == []
+    assert FakeEventBus._queues.get(_user_id("other-instructor"), []) == []
 
 
 class _FakeResponse:

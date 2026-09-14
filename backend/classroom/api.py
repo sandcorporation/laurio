@@ -91,6 +91,7 @@ from .schemas import (
     PublishedTemplateSummaryOut,
     ScoringModelOut,
 )
+from .events import publish_attempt_submitted
 from .scoring import check_scoring_key
 from .scoring_models import SCORING_MODEL_CHOICES, is_valid_model
 from .submission_target_refs import source_target_ref
@@ -1321,6 +1322,11 @@ def create_classroom_submission(
         asset = SubmissionAsset.objects.create(
             submission=submission, kind=asset_kind, value=value, content_type=content_type
         )
+        # 이 시도가 생겼다는 신호를 그 참여자와 그 클래스 강사에게 낸다
+        # (#383, ADR-0046) — 강사 제출 현황이 새로고침 없이 새 시도를 보여줄
+        # 수 있게 한다. 커밋 뒤 발행 규율은 `publish_attempt_submitted`
+        # 안에 있다(아래 즉시 채점 큐잉과 같은 이유로 `on_commit`을 쓴다).
+        publish_attempt_submitted(submission)
         # 이 시도의 채점을 곧바로 큐에 넣는다(#378, ADR-0046) — 60초 스캔을
         # 기다리지 않는다. `on_commit`인 이유는 트랜잭션이 아직 커밋되지
         # 않았을 때 태스크가 먼저 돌면(워커가 있는 배포 환경에서는 그럴 수
