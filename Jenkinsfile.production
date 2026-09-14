@@ -1,9 +1,10 @@
-// production 배포 — **얇은 껍데기다.** staging 의 `Jenkinsfile` 과 같은 모양이다.
+// production 배포 — 단계는 보이게, 논리는 `deploy.sh` 에. staging 의 `Jenkinsfile` 과 같은
+// 단계를 갖는다 — 한쪽 단계를 바꾸면 다른 쪽도 같이 고친다(다른 것은 agent 라벨·대상·
+// 아래의 브랜치 검사뿐이다).
 //
-// 배포 논리는 여기가 아니라 `deploy.sh` 에 산다(`prod` 대상: docker/compose.prod.yaml,
-// docker/.env.prod, 배포 표식 .jenkins-prod-deployed). 무엇을 다시 굽고 무엇을 바꿔
-// 끼우는지, 왜 backend 만 갈면 안 되는지는 전부 그 파일의 주석에 있다 — 여기에 논리를
-// 두면 아무도 읽지 않는 두 번째 사본이 된다(staging Jenkinsfile 머리말의 빌드 #4).
+// 각 단계의 본문은 `deploy.sh prod <명령>` 한 줄이다(`prod` 대상: docker/compose.prod.yaml,
+// docker/.env.prod, 배포 표식 .jenkins-prod-deployed). 무엇을 다시 굽고 무엇을 바꿔 끼우는지,
+// 왜 backend 만 갈면 안 되는지는 전부 그 파일의 주석에 있다.
 //
 // **무엇이 이 잡을 부르는가.** `production` 브랜치다. 그 브랜치는 사람이 커밋하지 않고,
 // main 의 CI 가 초록으로 끝난 커밋만 `.github/workflows/promote-production.yaml` 이
@@ -13,12 +14,15 @@
 //
 // **어디서 도는가.** prod 스택이 떠 있는 Oracle A1 호스트다 — sub 의 Jenkins(staging 과 같은
 // 컨트롤러)에 붙은 인바운드 에이전트 `oracle` 이 거기서 돈다. 에이전트는 호스트의
-// `jenkins-desktop-agent` 컨테이너(root, 호스트 docker 소켓, docker compose·git 포함)이고,
-// 호스트의 `/var/jenkins_home/workspace` 가 컨테이너의 `/home/jenkins/agent/workspace` 로 붙어 있다.
-// 그래서 노드의 Remote root directory 는 **컨테이너 안 경로** `/home/jenkins/agent` 여야 하고,
-// 잡 이름은 `codemit` 이어야 워크스페이스가 호스트의 `/var/jenkins_home/workspace/codemit` 이 된다 —
-// 거기에 사람이 둔 `docker/.env.prod`(chmod 600)와 배포 표식이 있다. 컨트롤러에서 돌면 prod 가
-// 아니라 sub 호스트에 스택을 띄우므로 `built-in` 을 쓰지 않는다.
+// `jenkins-desktop-agent` 컨테이너(root, 호스트 docker 소켓, docker CLI·compose·buildx·git 포함 —
+// 이미지 정의는 호스트의 `/server/jenkins`)이고, 호스트의 `/var/jenkins_home/workspace` 가
+// 컨테이너의 `/home/jenkins/agent/workspace` 로 붙어 있다. 그래서 노드의 Remote root directory 는
+// **컨테이너 안 경로** `/home/jenkins/agent` 여야 하고, 잡 이름은 `codemit` 이어야 워크스페이스가
+// 호스트의 `/var/jenkins_home/workspace/codemit` 이 된다 — 거기에 사람이 둔 `docker/.env.prod`
+// (chmod 600)와 배포 표식이 있다. 컨트롤러에서 돌면 prod 가 아니라 sub 호스트에 스택을 띄우므로
+// `built-in` 을 쓰지 않는다.
+
+def deployTarget = 'prod'
 
 pipeline {
   agent { label 'oracle' }
@@ -44,9 +48,74 @@ pipeline {
       }
     }
 
-    stage('배포') {
+    stage('Preflight') {
       steps {
-        sh 'sh ./deploy.sh prod'
+        sh "sh ./deploy.sh ${deployTarget} preflight"
+      }
+    }
+
+    stage('변경 계획') {
+      steps {
+        sh "sh ./deploy.sh ${deployTarget} plan"
+        script {
+          // deploy.sh 가 남긴 `KEY=value` 줄을 읽어 뒤 단계의 when 에 쓴다.
+          readFile(".jenkins-${deployTarget}-plan").split('\n').each { line ->
+            def parts = line.split('=', 2)
+            if (parts.length == 2) { env."${parts[0].trim()}" = parts[1].trim() }
+          }
+        }
+      }
+    }
+
+    stage('빌드') {
+      when { expression { env.DEPLOY_ANY == 'true' } }
+      // 하나가 실패해도 나머지는 끝까지 굽는다 — 한 번에 실패 원인을 전부 본다.
+      // 어느 하나라도 실패하면 이 단계가 빨갛고 뒤의 교체·표식에는 닿지 않는다.
+      parallel {
+        stage('backend') {
+          when { expression { env.BUILD_BACKEND == 'true' } }
+          steps { sh "sh ./deploy.sh ${deployTarget} build backend" }
+        }
+        stage('frontend') {
+          when { expression { env.BUILD_FRONTEND == 'true' } }
+          steps { sh "sh ./deploy.sh ${deployTarget} build frontend" }
+        }
+        stage('operator') {
+          when { expression { env.BUILD_OPERATOR == 'true' } }
+          steps { sh "sh ./deploy.sh ${deployTarget} build operator" }
+        }
+        stage('classroom') {
+          when { expression { env.BUILD_CLASSROOM == 'true' } }
+          steps { sh "sh ./deploy.sh ${deployTarget} build classroom" }
+        }
+      }
+    }
+
+    stage('교체') {
+      when { expression { env.DEPLOY_ANY == 'true' } }
+      steps {
+        sh "sh ./deploy.sh ${deployTarget} up"
+      }
+    }
+
+    stage('확인') {
+      when { expression { env.DEPLOY_ANY == 'true' } }
+      stages {
+        stage('컨테이너') {
+          steps { sh "sh ./deploy.sh ${deployTarget} verify" }
+        }
+        stage('backend 응답') {
+          steps { sh "sh ./deploy.sh ${deployTarget} health backend" }
+        }
+        stage('events 응답') {
+          steps { sh "sh ./deploy.sh ${deployTarget} health events" }
+        }
+      }
+    }
+
+    stage('배포 표식') {
+      steps {
+        sh "sh ./deploy.sh ${deployTarget} mark"
       }
     }
   }
