@@ -328,6 +328,8 @@ def test_evidence_grounded_in_source_scores_required_requirement_as_met(
     assert score.percentage == Decimal("100.00")
     assert score.model_version == "fake-llm-v1"
     assert "MAGIC_MARKER_LOGIN" in score.prompt
+    # 근거는 참가자·심사 화면에 그대로 나간다 — 영어 소스를 읽은 모델이 영어로 쓰지 않게 지시한다.
+    assert "한국어" in score.prompt
     assert score.reasoning == [
         {
             "requirement_id": requirement_id,

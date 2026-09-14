@@ -253,6 +253,25 @@ def test_scan_scores_a_submission_with_a_key(client, db, monkeypatch):
     ]
 
 
+def test_scoring_asks_the_model_to_write_reasoning_in_korean(client, db, monkeypatch):
+    # 소스가 영어라 지시가 없으면 실물 모델이 근거를 영어로 쓴다 — 참여자 화면에
+    # 그대로 나가는 문장이다. 벤더로 나가는 요청 자체에 그 지시가 실렸는지 본다.
+    ctx = _setup_submission(client)
+    sent = []
+    monkeypatch.setattr(
+        "core.llm_scoring.requests.post",
+        lambda *a, **k: sent.append(k["json"])
+        or _FakeResponse(200, _openai_success_body(ctx["item_id"], is_met=True)),
+    )
+
+    _run_scan(client)
+
+    messages = {m["role"]: m["content"] for m in sent[0]["messages"]}
+    assert "한국어" in messages["user"]
+    assert "공모전" not in messages["system"]
+    assert "한국어" in ClassroomScore.objects.get(submission_id=ctx["submission_id"]).prompt
+
+
 def test_scan_skips_a_submission_whose_class_has_no_key(client, db, monkeypatch):
     called = []
     monkeypatch.setattr(
