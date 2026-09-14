@@ -21,7 +21,9 @@ import {
   buttonClass,
 } from "@/app/components/ui";
 import { MissingScoringKeyNote } from "@/app/components/MissingScoringKeyNote";
+import { useClass } from "@/lib/classes/use-class";
 import { useProblem } from "@/lib/problems/use-problem";
+import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { useProblemSubmissions } from "@/lib/submissions/use-problem-submissions";
 
 export default function ProblemSubmissionsPage() {
@@ -31,6 +33,13 @@ export default function ProblemSubmissionsPage() {
 
   const problemState = useProblem(classId, problemId);
   const { state } = useProblemSubmissions(classId, problemId);
+  const { state: classState } = useClass(classId);
+
+  useClassroomTabTitle({
+    screenName: "제출 현황",
+    className: classState.status === "ready" ? classState.classroom.name : undefined,
+    problemTitle: problemState.state.status === "ready" ? problemState.state.problem.title : undefined,
+  });
 
   if (state.status === "loading" || problemState.state.status === "loading") {
     return (

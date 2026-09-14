@@ -39,6 +39,7 @@ import {
 import { useClass } from "@/lib/classes/use-class";
 import { useMembers } from "@/lib/members/use-members";
 import { useProblems } from "@/lib/problems/use-problems";
+import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
 
 // 화면이 실제로 그리는 값만 담는다(#333) — `publishClassAsTemplate`/
@@ -365,6 +366,11 @@ export default function ClassSettingsPage() {
   const [warningThreshold, setWarningThreshold] = useState("");
   const [budgetSaving, setBudgetSaving] = useState(false);
   const [budgetError, setBudgetError] = useState<string | null>(null);
+
+  useClassroomTabTitle({
+    screenName: "클래스 설정",
+    className: state.status === "ready" ? state.classroom.name : undefined,
+  });
 
   useEffect(() => {
     if (state.status === "ready") {

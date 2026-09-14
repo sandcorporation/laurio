@@ -28,6 +28,7 @@ import {
   buttonClass,
 } from "@/app/components/ui";
 import { BackendError } from "@/lib/backend/client";
+import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { renameMyself } from "@/lib/submissions/api";
 import { useMyProblems } from "@/lib/submissions/use-my-problems";
 
@@ -143,6 +144,11 @@ export default function MyProblemsPage() {
   const params = useParams<{ id: string }>();
   const classId = Number(params.id);
   const { state, reload } = useMyProblems(classId);
+
+  useClassroomTabTitle({
+    screenName: "문제 목록",
+    className: state.status === "ready" ? state.className : undefined,
+  });
 
   if (state.status === "loading") {
     return (

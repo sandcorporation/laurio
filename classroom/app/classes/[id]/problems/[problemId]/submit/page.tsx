@@ -17,6 +17,7 @@ import { ErrorNote, PageShell, buttonClass } from "@/app/components/ui";
 import { ProblemParticipantView } from "@/app/components/ProblemParticipantView";
 import { BackendError } from "@/lib/backend/client";
 import { useMe } from "@/lib/auth/use-me";
+import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { submitAttempt } from "@/lib/submissions/api";
 import { useMyProblem } from "@/lib/submissions/use-my-problem";
 import { useSourceUpload } from "@/lib/submissions/use-source-upload";
@@ -56,6 +57,12 @@ export default function ProblemSubmitPage() {
   const targetRef =
     me.status === "ready" ? sourceTargetRef(problemId, me.userId) : null;
   const { state: uploadState, upload } = useSourceUpload(targetRef);
+
+  useClassroomTabTitle({
+    screenName: "문제 제출",
+    className: state.status === "ready" ? state.data.class_name : undefined,
+    problemTitle: state.status === "ready" ? state.data.problem.title : undefined,
+  });
 
   if (state.status === "loading") {
     return (
