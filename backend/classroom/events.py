@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+from django.db import transaction
+
 from core.events import Event, get_event_bus
 
 #: 그 시도의 `ClassroomScore`가 생겼다 — 정상 채점이든 실패 상한에 의한
@@ -28,26 +30,36 @@ def publish_attempt_scored(submission) -> None:
     User Story 9 "내보내진 참여자는 새 신호를 받지 않아도 괜찮다") — 지난
     시도는 기존 API로 여전히 읽히므로, 실시간 신호만 조용히 거른다.
 
-    **트랜잭션이 커밋된 뒤에 발행한다**(ADR-0046 결정) — 이 함수를 부르는
-    두 자리 모두 `ClassroomScore.objects.create(...)`가 이미 자신을 감싸던
-    원자 블록을 빠져나온(또는 애초에 감싸지 않은, `_finalize_platform_failure`)
-    뒤라, 호출 시점에는 그 행이 이미 커밋되어 있다 — `notify_safely`가 같은
-    자리에서 `transaction.on_commit` 없이도 이 규율을 지키는 것과 같은
-    이유다(요청 전체를 감싸는 바깥 트랜잭션이 없다, `ATOMIC_REQUESTS` 미설정)."""
+    **트랜잭션이 커밋된 뒤에 발행한다**(ADR-0046 결정) — `transaction.
+    on_commit`을 쓴다. `_score_one`(즉시 채점·스캔이 공유하는 행 처리,
+    #378)이 시도당 Score 하나를 지키는 잠금 때문에 `score_classroom_
+    submission_once` 호출 전체를 `transaction.atomic()`으로 감싸므로,
+    이 함수를 부르는 두 자리(성공 경로·`_finalize_platform_failure`) 모두
+    지금은 열린 트랜잭션 **안**이다 — 여기서 바로 발행하면 그 트랜잭션이
+    나중에 롤백돼도(#378 `_score_one`이 예외를 밖으로 던지지 않고 잡긴
+    하지만) 신호는 이미 나간 뒤가 된다. `on_commit`은 지금 열린 트랜잭션이
+    없으면 즉시 실행하므로(HTTP 시임으로 직접 두들기는 미래의 호출자에게도)
+    양쪽 다 안전하다.
+
+    **pytest가 이 콜백을 보려면 `django_capture_on_commit_callbacks(execute=
+    True)`로 감싸야 한다** — pytest-django는 테스트 전체를 하나의 바깥
+    트랜잭션(끝나면 롤백)으로 감싸서 돌리므로, 그 안에서 등록된
+    `on_commit` 콜백은 실제 커밋이 없으면 실행되지 않는다(테스트가 실제로
+    이 함수를 거치는 요청을 그 컨텍스트 매니저 밖에서만 부르면 발행 자체가
+    조용히 스킵된 것처럼 보인다 — 실패가 아니라 실행되지 않은 것이다)."""
 
     member = submission.member
     if member.expelled_at is not None:
         return
 
     problem = submission.problem
-    get_event_bus().publish(
-        Event(
-            kind=ATTEMPT_SCORED,
-            recipient_id=member.user_id,
-            payload={
-                "class_id": problem.classroom_id,
-                "problem_id": problem.id,
-                "submission_id": submission.id,
-            },
-        )
+    event = Event(
+        kind=ATTEMPT_SCORED,
+        recipient_id=member.user_id,
+        payload={
+            "class_id": problem.classroom_id,
+            "problem_id": problem.id,
+            "submission_id": submission.id,
+        },
     )
+    transaction.on_commit(lambda: get_event_bus().publish(event))

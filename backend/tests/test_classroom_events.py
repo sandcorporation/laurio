@@ -109,12 +109,20 @@ def _submit_repository(client, access: str, class_id: int, problem_id: int, url:
     return response.json()
 
 
-def _run_scan(client) -> dict:
+def _run_scan(client, capture) -> dict:
+    """`capture`는 `django_capture_on_commit_callbacks` 픽스처다 —
+    `classroom.events.publish_attempt_scored`가 `transaction.on_commit`으로
+    미루는 발행을, 실제 커밋이 없는 pytest 트랜잭션 안에서도 실행되게 한다
+    (그 함수의 docstring 참고)."""
+
     from django.conf import settings
 
-    response = client.post(
-        SCAN_URL, content_type="application/json", HTTP_X_INTERNAL_TOKEN=settings.INTERNAL_API_TOKEN
-    )
+    with capture(execute=True):
+        response = client.post(
+            SCAN_URL,
+            content_type="application/json",
+            HTTP_X_INTERNAL_TOKEN=settings.INTERNAL_API_TOKEN,
+        )
     assert response.status_code == 200, response.content
     return response.json()
 
@@ -139,7 +147,9 @@ def _setup_open_problem_with_participant(client, *, participant_uid: str = "part
     }
 
 
-def test_normal_scoring_publishes_attempt_scored_to_the_submitter_only(client, db):
+def test_normal_scoring_publishes_attempt_scored_to_the_submitter_only(
+    client, db, django_capture_on_commit_callbacks
+):
     """체크리스트 문구가 그대로 통과 판정이 나든 미통과가 나든(FakeClassroomScoringAdapter는
     체크리스트 문구가 소스에 있는지만 본다) — 어느 쪽이든 채점이 끝나면 신호가 간다."""
 
@@ -152,7 +162,7 @@ def test_normal_scoring_publishes_attempt_scored_to_the_submitter_only(client, d
         "https://github.com/octocat/hello-world",
     )
 
-    _run_scan(client)
+    _run_scan(client, django_capture_on_commit_callbacks)
 
     participant_id = _user_id("participant-1")
     events = FakeEventBus._queues.get(participant_id, [])
@@ -167,10 +177,14 @@ def test_normal_scoring_publishes_attempt_scored_to_the_submitter_only(client, d
     }
 
 
-def test_other_participants_do_not_receive_the_signal(client, db):
+def test_other_participants_do_not_receive_the_signal(
+    client, db, django_capture_on_commit_callbacks
+):
     ctx = _setup_open_problem_with_participant(client)
     other = _login(client, uid="other-participant")
-    _join(client, other["access"], _join_code(client, ctx["instructor"]["access"], ctx["class_id"]))
+    _join(
+        client, other["access"], _join_code(client, ctx["instructor"]["access"], ctx["class_id"])
+    )
 
     _submit_repository(
         client,
@@ -179,12 +193,12 @@ def test_other_participants_do_not_receive_the_signal(client, db):
         ctx["problem_id"],
         "https://github.com/octocat/hello-world",
     )
-    _run_scan(client)
+    _run_scan(client, django_capture_on_commit_callbacks)
 
     assert FakeEventBus._queues.get(_user_id("other-participant"), []) == []
 
 
-def test_instructor_does_not_receive_the_signal(client, db):
+def test_instructor_does_not_receive_the_signal(client, db, django_capture_on_commit_callbacks):
     """#379 AC "그 참여자에게만" — 강사(제출한 사람이 아니면)도 받지 않는다."""
 
     ctx = _setup_open_problem_with_participant(client)
@@ -195,12 +209,14 @@ def test_instructor_does_not_receive_the_signal(client, db):
         ctx["problem_id"],
         "https://github.com/octocat/hello-world",
     )
-    _run_scan(client)
+    _run_scan(client, django_capture_on_commit_callbacks)
 
     assert FakeEventBus._queues.get(_user_id("instructor-1"), []) == []
 
 
-def test_expelled_participant_does_not_receive_the_signal(client, db):
+def test_expelled_participant_does_not_receive_the_signal(
+    client, db, django_capture_on_commit_callbacks
+):
     ctx = _setup_open_problem_with_participant(client)
     _submit_repository(
         client,
@@ -224,7 +240,7 @@ def test_expelled_participant_does_not_receive_the_signal(client, db):
     )
     assert expel.status_code == 200
 
-    _run_scan(client)
+    _run_scan(client, django_capture_on_commit_callbacks)
 
     assert FakeEventBus._queues.get(_user_id("participant-1"), []) == []
 
@@ -238,7 +254,9 @@ class _FakeResponse:
         return self._json_data
 
 
-def test_platform_failure_path_also_publishes_attempt_scored(client, db, monkeypatch):
+def test_platform_failure_path_also_publishes_attempt_scored(
+    client, db, monkeypatch, django_capture_on_commit_callbacks
+):
     """실패 상한(`SCORING_FAILURE_LIMIT=5`)에 도달해 `_finalize_platform_failure`가
     직접 `ClassroomScore`를 만드는 경로도 같은 신호를 낸다(#379 AC "정상·실패
     상한")."""
@@ -264,7 +282,7 @@ def test_platform_failure_path_also_publishes_attempt_scored(client, db, monkeyp
         )
 
         for _ in range(5):
-            _run_scan(client)
+            _run_scan(client, django_capture_on_commit_callbacks)
 
         participant_id = _user_id("participant-2")
         events = FakeEventBus._queues.get(participant_id, [])

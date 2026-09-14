@@ -6,6 +6,7 @@ from appeals.api import operator_router as appeals_operator_router
 from appeals.api import router as appeals_router
 from awards.api import router as awards_router
 from classroom.api import router as classroom_router
+from classroom.internal_api import router as classroom_internal_router
 from classroom.template_api import router as classroom_template_router
 from classroom.template_operator_api import operator_router as classroom_template_operator_router
 from contests.api import router as contests_router
@@ -51,6 +52,7 @@ def health(request):
 api.add_router("/internal", core_internal_router)
 api.add_router("/internal/notifications", notifications_internal_router)
 api.add_router("/internal/scoring", scoring_internal_router)
+api.add_router("/internal/classroom", classroom_internal_router)
 
 
 @api.exception_handler(StorageAccessDenied)

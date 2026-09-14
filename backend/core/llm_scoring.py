@@ -220,7 +220,7 @@ _OPENAI_DEFAULT_MODEL = "gpt-4o-mini"
 _OPENAI_DEFAULT_TEMPERATURE = 0
 
 # celery-beat가 30초 타임아웃으로 이 앱의 internal 엔드포인트를 호출하고
-# (core.tasks._call_internal), gunicorn도 --timeout을 따로 안 줬으니 기본값인
+# (core.tasks.call_internal), gunicorn도 --timeout을 따로 안 줬으니 기본값인
 # 30초 만에 워커를 SIGKILL한다(#88 코드리뷰 지적 1). 이전 값(60초)은 단 하나의
 # 느린 호출로도 그 예산을 넘겼고, 워커가 SIGKILL되면 진행 중이던 요청은
 # ScoringAttempt를 남길 기회조차 없이 사라진다 — 다음 beat(60초 뒤)가 같은

@@ -1956,6 +1956,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/internal/classroom/attempts/{submission_id}/score": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Score Attempt
+         * @description 시도 하나를 채점한다 — 스캔이 행 하나를 처리하는 것과 같은 함수·같은
+         *     후보 조건이다(`classroom.scoring.score_classroom_attempt`). 조건 밖이거나
+         *     다른 경로가 이미 잠그고 있으면 200으로 그 사실만 돌려준다(#378 AC) — 존재
+         *     자체를 감추지 않는다, 이 표면은 내부 토큰 뒤에 있다.
+         */
+        post: operations["classroom_internal_api_score_attempt"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/internal/e2e/seed/{name}": {
         parameters: {
             query?: never;
@@ -9270,6 +9293,26 @@ export interface operations {
             query?: never;
             header?: never;
             path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    classroom_internal_api_score_attempt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                submission_id: number;
+            };
             cookie?: never;
         };
         requestBody?: never;
