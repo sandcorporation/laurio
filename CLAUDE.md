@@ -199,6 +199,13 @@ staging 은 실물 어댑터라 해당 없음), 배포 환경의 시계는 실�
 반드시 다른 서브도메인을 쓴다 — 같은 오리진을 공유하면 공개 앱이 뚫렸을 때
 운영자 세션 쿠키까지 노출될 길이 생긴다.
 
+**`production` 브랜치는 CI 를 통과한 `main` 커밋만 따라간다.** `main` 에 push 해 CI
+워크플로가 초록으로 끝나면 `.github/workflows/promote-production.yaml` 이 그 커밋으로
+`production` 을 **fast-forward** 한다 — 머지 커밋을 만들지 않으므로 `production` 은 언제나
+「CI 를 통과한 main 의 어느 커밋」 그 자체다. 늦게 끝난 옛 커밋의 CI 는 건너뛰고,
+`production` 이 `main` 에서 갈라져 있으면 밀어붙이지 않고 빨갛게 멈춘다. **`production` 에
+직접 커밋하지 않는다.** 지금 이 브랜치를 보고 배포하는 곳은 없다(prod 는 아직 배포 전이다).
+
 **staging 배포는 `main` 에 push 하면 저절로 일어난다.** Jenkins 잡
 (`/var/jenkins_home/jobs/laurio`)은 **Pipeline** 이고(`<flow-definition>`,
 `scriptPath: Jenkinsfile`), 트리거가 `GitHubPushTrigger` — GitHub 웹훅이다.

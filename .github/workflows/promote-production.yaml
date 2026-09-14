@@ -1,0 +1,57 @@
+name: Promote to production
+
+# **main 의 CI 가 초록으로 끝난 커밋만 production 브랜치로 간다.** production 은 언제나
+# 「CI 를 통과한 main 의 어느 커밋」 그 자체여야 하므로 머지 커밋을 만들지 않고
+# fast-forward 로만 앞당긴다 — production 에만 있는 커밋이 생기면 그것은 사고다.
+#
+# `workflow_run` 은 기본 브랜치(main)에 있는 이 파일로만 발동한다. 트리거는 CI 워크플로의
+# 이름(`name: CI`)을 가리키므로 그 이름을 바꾸면 이 파일도 함께 고친다.
+#
+# 순서가 뒤바뀐 실행을 견딘다: 새 커밋의 CI 가 먼저 끝나 production 이 이미 그보다 앞서
+# 있으면, 뒤늦게 끝난 옛 커밋의 실행은 아무것도 하지 않고 초록으로 끝난다. production 이
+# main 에서 갈라져 있으면(누가 production 에 직접 커밋했다) 밀어붙이지 않고 빨갛게 멈춘다.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: promote-production
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    # push 로 돈 main 의 CI 가 성공했을 때만 — PR 의 CI 는 main 에 들어간 코드가 아니다.
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: [self-hosted, sub]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fast-forward production to the green main commit
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -eu
+          git fetch origin main production
+          if ! git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "::error::$SHA 는 지금 main 에 없다 — 강제 push 로 사라진 커밋이면 promote 하지 않는다"
+            exit 1
+          fi
+          if git merge-base --is-ancestor "$SHA" origin/production; then
+            echo "production 이 이미 $SHA 를 포함한다 — 더 새로운 커밋이 먼저 올라갔다. 할 일 없음."
+            exit 0
+          fi
+          if ! git merge-base --is-ancestor origin/production "$SHA"; then
+            echo "::error::production 이 main 에서 갈라져 있다 — fast-forward 할 수 없다. production 에만 있는 커밋을 확인하라"
+            git log --oneline "$SHA..origin/production"
+            exit 1
+          fi
+          git push origin "$SHA:refs/heads/production"
+          echo "production -> $SHA"
