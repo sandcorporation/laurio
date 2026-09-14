@@ -476,6 +476,13 @@ class OpenAIScoringAdapter:
         api_key: str | None = None,
         model: str | None = None,
         temperature: float | None = None,
+        #: 추론 모델(GPT-5 계열)의 판정 전 추론 강도(#402) — "low"|"medium"|
+        #: "high". **주지 않으면(`None`, 기본값) 지금 동작 그대로다**:
+        #: `temperature`를 보내고 이 값은 요청에 실리지 않는다. 공모전
+        #: (`scoring`)은 이 인자를 한 번도 주지 않으므로 공모전 채점은 이
+        #: 티켓으로 한 글자도 달라지지 않는다 — `classroom.scoring`만 채점
+        #: 모델이 추론 모델일 때 이 값을 넘긴다.
+        reasoning_effort: str | None = None,
         timeout: float = _OPENAI_REQUEST_TIMEOUT_SECONDS,
     ) -> None:
         api_key = api_key if api_key is not None else (os.environ.get("OPEN_AI_API_KEY") or "")
@@ -491,6 +498,7 @@ class OpenAIScoringAdapter:
         else:
             raw_temperature = os.environ.get("LLM_OPENAI_TEMPERATURE")
             self._temperature = float(raw_temperature) if raw_temperature else _OPENAI_DEFAULT_TEMPERATURE
+        self._reasoning_effort = reasoning_effort
         self._timeout = timeout
         # 부팅 가드(core.adapters.check_adapter_mode)의 isinstance(LLMScoringAdapter)
         # 검사가 요구하는 자리 — 실제 호출에 쓰인 모델 식별자는 매 score() 호출마다
@@ -503,7 +511,6 @@ class OpenAIScoringAdapter:
         requirement_ids = [r.requirement_id for r in scoring_input.requirements]
         payload = {
             "model": self._model,
-            "temperature": self._temperature,
             "messages": [
                 {"role": "system", "content": _OPENAI_SYSTEM_PROMPT},
                 {"role": "user", "content": scoring_input.prompt},
@@ -513,6 +520,12 @@ class OpenAIScoringAdapter:
                 "json_schema": _openai_verdict_response_schema(),
             },
         }
+        # 추론 모델은 temperature를 받지 않고 reasoning_effort를 받는다
+        # (#402) — 둘 다 요청에 함께 실으면 벤더가 temperature를 거부한다.
+        if self._reasoning_effort is not None:
+            payload["reasoning_effort"] = self._reasoning_effort
+        else:
+            payload["temperature"] = self._temperature
 
         try:
             response = requests.post(

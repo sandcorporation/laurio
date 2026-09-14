@@ -31,6 +31,7 @@ import { TemplatePickerSheet } from "@/app/components/TemplatePickerSheet";
 import { BackendError } from "@/lib/backend/client";
 import { useClass } from "@/lib/classes/use-class";
 import { createProblem, type ProblemRow, type SubmissionFormat } from "@/lib/problems/api";
+import { isSelectedModelReasoning, REASONING_EFFORT_OPTIONS } from "@/lib/scoring/reasoning";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
 
 type DraftChecklistItem = {
@@ -54,6 +55,8 @@ export default function NewProblemPage() {
   const [submissionFormats, setSubmissionFormats] = useState<SubmissionFormat[]>(["source"]);
   // 빈 문자열이 「클래스 기본값을 따릅니다」다 — 편집 화면(#285)과 같은 값이다.
   const [model, setModel] = useState("");
+  // 빈 문자열이 「클래스 기본값을 따릅니다」다 — `model`과 같은 관례(#402).
+  const [reasoningEffort, setReasoningEffort] = useState("");
   const { state: modelsState } = useScoringModels(classId);
   // 채점 지침(#386) — 기본은 「보통」, 백엔드 기본값과 같다.
   const [gradingGuideline, setGradingGuideline] = useState<GradingGuidelineValue>({
@@ -133,6 +136,7 @@ export default function NewProblemPage() {
         description,
         submission_formats: submissionFormats,
         model,
+        reasoning_effort: reasoningEffort,
         grading_strictness: gradingGuideline.grading_strictness,
         grading_guideline_text: gradingGuideline.grading_guideline_text,
         checklist_items: items.map((item) => ({ label: item.label, required: item.required })),
@@ -337,6 +341,37 @@ export default function NewProblemPage() {
               설명이 길면 컨텍스트가 작은 모델은 뒷부분이 잘린 채 채점됩니다 — 그래서 문제마다
               다른 모델을 고를 수 있습니다.
             </span>
+            {modelsState.status === "ready" &&
+            isSelectedModelReasoning(
+              model,
+              modelsState.models,
+              classState.status === "ready" ? classState.classroom.default_model_is_reasoning : false,
+            ) ? (
+              <div className="flex flex-col gap-1.5 border-t border-rule pt-3">
+                <label htmlFor="new-problem-reasoning-effort">
+                  <FieldLabel>추론 강도</FieldLabel>
+                </label>
+                <select
+                  id="new-problem-reasoning-effort"
+                  data-testid="new-problem-reasoning-effort-select"
+                  value={reasoningEffort}
+                  onChange={(event) => setReasoningEffort(event.target.value)}
+                  className={`${INPUT_CLASS} max-w-[200px]`}
+                >
+                  <option value="" data-testid="new-problem-reasoning-effort-option-inherit">
+                    클래스 기본값을 따릅니다
+                  </option>
+                  {REASONING_EFFORT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-[11.5px] leading-relaxed text-ink/45">
+                  높을수록 느리고 채점 예산을 더 씁니다.
+                </span>
+              </div>
+            ) : null}
           </div>
         </Card>
 

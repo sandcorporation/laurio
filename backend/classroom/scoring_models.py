@@ -165,3 +165,18 @@ DEFAULT_SCORING_MODEL = "gpt-4.1-mini"
 
 def is_fallback_model(model_id: str) -> bool:
     return model_id in _FALLBACK_MODEL_IDS
+
+
+#: 추론 강도 세 단계(#402, CONTEXT.md 「추론 강도」) — Class 기본값·Problem
+#: 마다 바꾸는 값이 채점 모델과 같은 모양이다.
+REASONING_EFFORT_CHOICES: tuple[tuple[str, str], ...] = (
+    ("low", "낮음"),
+    ("medium", "보통"),
+    ("high", "높음"),
+)
+DEFAULT_REASONING_EFFORT = "low"
+_REASONING_EFFORT_VALUES = {value for value, _label in REASONING_EFFORT_CHOICES}
+
+
+def is_valid_reasoning_effort(value: str) -> bool:
+    return value in _REASONING_EFFORT_VALUES

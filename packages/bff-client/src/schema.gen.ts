@@ -3899,6 +3899,13 @@ export interface components {
             created_at: string;
             /** Default Model */
             default_model: string;
+            /**
+             * Default Model Is Reasoning
+             * @default false
+             */
+            default_model_is_reasoning: boolean;
+            /** Default Reasoning Effort */
+            default_reasoning_effort: string;
             /** Has Openai Key */
             has_openai_key: boolean;
             /**
@@ -3937,6 +3944,8 @@ export interface components {
         ClassPatchIn: {
             /** Default Model */
             default_model?: string | null;
+            /** Default Reasoning Effort */
+            default_reasoning_effort?: string | null;
             /** Instructor Display Name */
             instructor_display_name?: string | null;
             /** Name */
@@ -5717,6 +5726,11 @@ export interface components {
              * @default false
              */
             open: boolean;
+            /**
+             * Reasoning Effort
+             * @default
+             */
+            reasoning_effort: string;
             /** Submission Formats */
             submission_formats: string[];
             /** Title */
@@ -5735,6 +5749,16 @@ export interface components {
             description: string;
             /** Effective Model */
             effective_model: string;
+            /**
+             * Effective Model Is Reasoning
+             * @default false
+             */
+            effective_model_is_reasoning: boolean;
+            /**
+             * Effective Reasoning Effort
+             * @default
+             */
+            effective_reasoning_effort: string;
             /** Grading Guideline Text */
             grading_guideline_text: string;
             /** Grading Strictness */
@@ -5758,6 +5782,11 @@ export interface components {
              */
             passed_count: number;
             published_template?: components["schemas"]["PublishedTemplateSummaryOut"] | null;
+            /**
+             * Reasoning Effort
+             * @default
+             */
+            reasoning_effort: string;
             /** Status */
             status: string;
             /** Submission Formats */
@@ -5775,6 +5804,8 @@ export interface components {
             grading_strictness?: string | null;
             /** Model */
             model?: string | null;
+            /** Reasoning Effort */
+            reasoning_effort?: string | null;
             /** Submission Formats */
             submission_formats?: string[] | null;
             /** Title */

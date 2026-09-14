@@ -96,7 +96,7 @@ from .schemas import (
 from .events import publish_attempt_submitted
 from .scoring import check_scoring_key
 from .scoring_model_catalog import get_scoring_model_catalog
-from .scoring_models import is_fallback_model
+from .scoring_models import is_fallback_model, is_reasoning_model_id, is_valid_reasoning_effort
 from .submission_target_refs import source_target_ref
 from .services import copy_class, copy_problem_to_class
 from .tasks import score_attempt
@@ -176,6 +176,11 @@ def _validate_scoring_model_choice(class_obj: Class, model_id: str, *, current_v
     )
 
 
+def _validate_reasoning_effort(value: str) -> None:
+    if not is_valid_reasoning_effort(value):
+        raise HttpError(422, f"알 수 없는 추론 강도입니다: {value}")
+
+
 #: 마스킹은 복호화가 아니라 저장 시점에 남긴 마지막 네 자리로만 만든다 —
 #: `Class.openai_api_key_encrypted`를 다시 풀지 않는다(#284, 파일 상단 라우터
 #: docstring과 같은 이유: 복호화는 채점 요청을 보낼 때만 한다).
@@ -218,6 +223,8 @@ def _serialize_class(class_obj: Class) -> ClassOut:
         join_code=class_obj.join_code,
         created_at=class_obj.created_at,
         default_model=class_obj.default_model,
+        default_model_is_reasoning=is_reasoning_model_id(class_obj.default_model),
+        default_reasoning_effort=class_obj.default_reasoning_effort,
         has_openai_key=has_key,
         openai_key_masked=_mask_from_last4(class_obj.openai_api_key_last4) if has_key else None,
         openai_key_status=class_obj.openai_api_key_status if has_key else None,
@@ -286,6 +293,8 @@ def _serialize_problem(
     if active_member_ids is None:
         active_member_ids = _active_member_ids(class_obj)
     passed_count, member_count = _problem_pass_stats(problem, active_member_ids)
+    effective_model = problem.model or class_obj.default_model
+    effective_reasoning_effort = problem.reasoning_effort or class_obj.default_reasoning_effort
     return ProblemOut(
         id=problem.id,
         classroom_id=problem.classroom_id,
@@ -295,7 +304,10 @@ def _serialize_problem(
         status=problem.status,
         order=problem.order,
         model=problem.model,
-        effective_model=problem.model or class_obj.default_model,
+        effective_model=effective_model,
+        effective_model_is_reasoning=is_reasoning_model_id(effective_model),
+        reasoning_effort=problem.reasoning_effort,
+        effective_reasoning_effort=effective_reasoning_effort,
         grading_strictness=problem.grading_strictness,
         grading_guideline_text=problem.grading_guideline_text,
         checklist_items=[_serialize_checklist_item(i) for i in problem.checklist_items.all()],
@@ -553,6 +565,8 @@ def update_class(request: HttpRequest, class_id: int, payload: ClassPatchIn):
         _validate_scoring_model_choice(
             class_obj, payload.default_model, current_value=class_obj.default_model
         )
+    if payload.default_reasoning_effort is not None:
+        _validate_reasoning_effort(payload.default_reasoning_effort)
 
     update_fields = []
     if payload.name is not None:
@@ -564,6 +578,9 @@ def update_class(request: HttpRequest, class_id: int, payload: ClassPatchIn):
     if payload.default_model is not None:
         class_obj.default_model = payload.default_model
         update_fields.append("default_model")
+    if payload.default_reasoning_effort is not None:
+        class_obj.default_reasoning_effort = payload.default_reasoning_effort
+        update_fields.append("default_reasoning_effort")
     if payload.token_budget is not None and payload.token_budget != class_obj.token_budget:
         class_obj.token_budget = payload.token_budget
         update_fields.append("token_budget")
@@ -1014,6 +1031,8 @@ def create_problem(request: HttpRequest, class_id: int, payload: ProblemIn):
     # 통과한 값이 고칠 때 거절되는 상태가 생긴다.
     if payload.model:
         _validate_scoring_model_choice(class_obj, payload.model, current_value="")
+    if payload.reasoning_effort:
+        _validate_reasoning_effort(payload.reasoning_effort)
     grading_strictness, grading_guideline_text = _validate_grading_guideline(
         payload.grading_strictness, payload.grading_guideline_text
     )
@@ -1029,6 +1048,7 @@ def create_problem(request: HttpRequest, class_id: int, payload: ProblemIn):
             description=payload.description,
             submission_formats=submission_formats,
             model=payload.model,
+            reasoning_effort=payload.reasoning_effort,
             grading_strictness=grading_strictness,
             grading_guideline_text=grading_guideline_text,
             order=next_order,
@@ -1208,6 +1228,8 @@ def update_problem(request: HttpRequest, class_id: int, problem_id: int, payload
     )
     if payload.model:
         _validate_scoring_model_choice(class_obj, payload.model, current_value=problem.model)
+    if payload.reasoning_effort:
+        _validate_reasoning_effort(payload.reasoning_effort)
 
     # 두 칸 중 하나라도 보내면 둘 다 함께 검증한다 — "문장은 직접 입력일
     # 때만 비어 있지 않다"는 두 칸을 함께 봐야 판단할 수 있는 불변식이라,
@@ -1239,6 +1261,9 @@ def update_problem(request: HttpRequest, class_id: int, problem_id: int, payload
     if payload.model is not None:
         problem.model = payload.model
         update_fields.append("model")
+    if payload.reasoning_effort is not None:
+        problem.reasoning_effort = payload.reasoning_effort
+        update_fields.append("reasoning_effort")
     if grading_strictness is not None:
         problem.grading_strictness = grading_strictness
         problem.grading_guideline_text = grading_guideline_text

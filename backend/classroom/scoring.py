@@ -85,13 +85,21 @@ from .models import (
     ClassroomScoringAttempt,
     ClassroomSubmission,
 )
-from .scoring_models import matches_naming_rule
+from .scoring_models import is_reasoning_model_id, matches_naming_rule
 
 logger = logging.getLogger(__name__)
 
 #: ADR-0031과 같은 개념(`scoring.services.SCORING_FAILURE_LIMIT`) — 강의실에는
 #: 마감이 없어 "마감 후 6시간 유예"가 성립하지 않으므로 횟수만 본다.
 SCORING_FAILURE_LIMIT = 5
+
+#: 강의실 채점 요청의 타임아웃(#402) — `core.llm_scoring`의 기본값(20초)은
+#: beat의 internal 엔드포인트 30초 제약에 맞춘 것인데(그 모듈 상단 상수
+#: 주석 참고), 강의실 채점은 Celery 워커 작업이라 그 제약과 무관하다(모듈
+#: docstring). 추론 모델(GPT-5 계열)은 응답이 더 느려 그 기본값으로는 정상
+#: 요청도 타임아웃으로 실패할 수 있다 — 추론 모델 여부와 무관하게 이 값
+#: 하나로 넉넉히 잡는다(모델마다 갈라 관리할 값이 아니다).
+_CLASSROOM_SCORING_REQUEST_TIMEOUT_SECONDS = 120
 
 #: 강의실 참가자에게 자동 미달을 설명하는 문구 — `submissions.scoring_basis`의
 #: 것을 그대로 쓰지 않는다(그쪽은 "이의를 제기할 수 있다"고 말하는데 강의실에는
@@ -147,15 +155,22 @@ class FakeClassroomScoringAdapter:
         return LLMKeyCheckStatus.VALID
 
 
-def _scoring_adapter(*, api_key: str, model: str) -> LLMScoringAdapter:
+def _scoring_adapter(
+    *, api_key: str, model: str, reasoning_effort: str | None = None
+) -> LLMScoringAdapter:
     """실제 OpenAI 어댑터 또는 결정적 fake 어댑터를 고른다(#340, ADR-0043).
 
     강사 본인의 키로 직접 어댑터를 만드는 원칙(모듈 docstring)은 바뀌지 않는다
     — 이 함수가 가르는 것은 "누구 키로 도는가"가 아니라 "그 키로 실제로
     네트워크에 나가는가"뿐이다. `CLASSROOM_SCORING_ADAPTER_MODE`가 fake면
-    (배포되지 않은 환경의 기본값) `api_key`·`model`을 그대로 무시하고
-    `FakeClassroomScoringAdapter`를 쓴다 — 배포 환경에서는 이 값이 fake일 수
+    (배포되지 않은 환경의 기본값) `api_key`·`model`·`reasoning_effort`를 그대로
+    무시하고 `FakeClassroomScoringAdapter`를 쓴다(`core.adapters.resolve_adapter`가
+    fake_factory를 언제나 인자 없이 부른다) — 배포 환경에서는 이 값이 fake일 수
     없다(`config.settings`가 부팅 시점에 거부한다).
+
+    `reasoning_effort`는 `None`이면 실물 어댑터도 기존 동작 그대로다
+    (`core.llm_scoring.OpenAIScoringAdapter` docstring) — 채점 모델이 추론
+    모델일 때만 호출부(`score_classroom_submission_once`)가 값을 채워 넘긴다.
 
     `core.adapters.resolve_adapter`(다른 6개 `*_ADAPTER_MODE`가 이미 쓰는 그
     선택 로직)를 그대로 쓴다 — 손으로 `is_fake_adapter_binding`만 보고
@@ -171,7 +186,12 @@ def _scoring_adapter(*, api_key: str, model: str) -> LLMScoringAdapter:
             "CLASSROOM_SCORING_ADAPTER_MODE가 가리키는 dotted path를 import할 수 없다 — "
             "실물 어댑터는 core.llm_scoring.OpenAIScoringAdapter다(#340, ADR-0043)."
         ),
-        factory_kwargs={"api_key": api_key, "model": model},
+        factory_kwargs={
+            "api_key": api_key,
+            "model": model,
+            "reasoning_effort": reasoning_effort,
+            "timeout": _CLASSROOM_SCORING_REQUEST_TIMEOUT_SECONDS,
+        },
     )
 
 
@@ -490,6 +510,15 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
             return {"submission_id": submission.id, "status": "cap_reached", "score_id": score.id}
         return {"submission_id": submission.id, "status": "failed_permanently"}
 
+    # 추론 모델(GPT-5 이후)일 때만 뜻이 있다(#402, CONTEXT.md 「추론 강도」) —
+    # 아니면 채점 호출은 지금처럼 temperature 0을 쓴다(`_scoring_adapter`에
+    # `None`을 넘긴다).
+    reasoning_effort = (
+        (problem.reasoning_effort or class_obj.default_reasoning_effort)
+        if is_reasoning_model_id(model)
+        else None
+    )
+
     prompt = _build_prompt(submission, checklist_items, source_text, asset_kind=asset.kind)
     scoring_input = ScoringInput(
         submission_id=submission.id,
@@ -515,7 +544,9 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
     )
 
     try:
-        adapter = _scoring_adapter(api_key=decrypt(raw_key), model=model)
+        adapter = _scoring_adapter(
+            api_key=decrypt(raw_key), model=model, reasoning_effort=reasoning_effort
+        )
         output = adapter.score(scoring_input)
     except LLMAdapterAuthError:
         # 강사의 계정 문제이지 이 제출물의 결함이 아니다(#355, ADR-0045) —

@@ -40,6 +40,7 @@ import { useClass } from "@/lib/classes/use-class";
 import { useMembers } from "@/lib/members/use-members";
 import { useProblems } from "@/lib/problems/use-problems";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
+import { isSelectedModelReasoning, REASONING_EFFORT_OPTIONS } from "@/lib/scoring/reasoning";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
 
 // 화면이 실제로 그리는 값만 담는다(#333) — `publishClassAsTemplate`/
@@ -355,6 +356,7 @@ export default function ClassSettingsPage() {
   }, [apiKey]);
 
   const [defaultModel, setDefaultModel] = useState("");
+  const [defaultReasoningEffort, setDefaultReasoningEffort] = useState("low");
   const [modelSaving, setModelSaving] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
 
@@ -375,6 +377,7 @@ export default function ClassSettingsPage() {
   useEffect(() => {
     if (state.status === "ready") {
       setDefaultModel(state.classroom.default_model);
+      setDefaultReasoningEffort(state.classroom.default_reasoning_effort);
       setInstructorDisplayName(state.classroom.instructor_display_name);
       setTokenBudget(
         state.classroom.token_budget === null ? "" : String(state.classroom.token_budget),
@@ -448,7 +451,10 @@ export default function ClassSettingsPage() {
     setModelSaving(true);
     setModelError(null);
     try {
-      await updateClass(classId, { default_model: defaultModel });
+      await updateClass(classId, {
+        default_model: defaultModel,
+        default_reasoning_effort: defaultReasoningEffort,
+      });
       reload();
     } catch (err) {
       setModelError(err instanceof BackendError ? err.message : "기본 모델을 저장하지 못했습니다.");
@@ -678,6 +684,29 @@ export default function ClassSettingsPage() {
                   모델마다 한 번에 받을 수 있는 소스의 양이 다릅니다 — 긴 문제에 작은 모델을 고르면
                   소스 뒷부분이 잘린 채 채점됩니다.
                 </span>
+                {isSelectedModelReasoning(defaultModel, modelsState.models, defaultModel === classroom.default_model ? classroom.default_model_is_reasoning : false) ? (
+                  <div className="flex flex-col gap-1.5 border-t border-rule pt-3">
+                    <label htmlFor="class-default-reasoning-effort">
+                      <FieldLabel>기본 추론 강도</FieldLabel>
+                    </label>
+                    <select
+                      id="class-default-reasoning-effort"
+                      data-testid="class-default-reasoning-effort-select"
+                      value={defaultReasoningEffort}
+                      onChange={(event) => setDefaultReasoningEffort(event.target.value)}
+                      className={`${INPUT_CLASS} max-w-[200px]`}
+                    >
+                      {REASONING_EFFORT_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="text-[11.5px] leading-relaxed text-ink/45">
+                      높을수록 느리고 채점 예산을 더 씁니다.
+                    </span>
+                  </div>
+                ) : null}
               </form>
             )}
             {modelError ? (

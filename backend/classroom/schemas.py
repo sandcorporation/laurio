@@ -31,6 +31,9 @@ class ClassPatchIn(Schema):
     #: PATCH 관례 그대로다.
     instructor_display_name: str | None = Field(default=None, min_length=1, max_length=100)
     default_model: str | None = None
+    #: 채점 모델이 추론 모델일 때만 뜻이 있는 기본 추론 강도(#402) —
+    #: "low"|"medium"|"high". 필드를 생략하면 바꾸지 않는다.
+    default_reasoning_effort: str | None = None
     #: 채점 토큰 예산 상한(#295). 필드를 생략하면(`None`) 바꾸지 않는다 —
     #: 기존 PATCH 관례 그대로다. 이 API에는 "다시 무제한으로 되돌리는" 값이
     #: 없다 — 그 요구가 아직 없어 짓지 않는다.
@@ -58,6 +61,13 @@ class ClassOut(Schema):
     join_code: str
     created_at: datetime
     default_model: str
+    #: `default_model`이 추론 모델(GPT-5 이후)인가(#402) — 화면이 이 값
+    #: 하나로 「추론 강도」 칸을 보일지 정한다(모델 목록 조회와 무관하게
+    #: 언제나 이 서버 값을 따른다, Testing Decisions 「프론트」).
+    default_model_is_reasoning: bool = False
+    #: 채점 모델이 추론 모델일 때만 뜻이 있는 기본 추론 강도(#402) —
+    #: "low"|"medium"|"high".
+    default_reasoning_effort: str
     has_openai_key: bool
     openai_key_masked: str | None = None
     #: 키가 있을 때만 뜻이 있다("verified"|"unverified"|"rejected") — 키가
@@ -173,6 +183,10 @@ class ProblemIn(Schema):
     #: 긴 설명을 쉽게 쓰게 되면서, 기본값(가장 작은 컨텍스트)으로 열린 뒤에야
     #: 고칠 수 있다는 것이 더 자주 물리게 됐다.
     model: str = ""
+    #: 이 문제만의 추론 강도(#402). 빈 문자열이면 클래스 기본값을 따른다 —
+    #: `model`과 같은 모양. 채점 모델이 추론 모델이 아니면 저장은 되어도
+    #: 채점에는 쓰이지 않는다.
+    reasoning_effort: str = ""
     #: 채점 지침 단계(#386, CONTEXT.md 「채점 지침」) —
     #: "strict"|"normal"|"lenient"|"custom" 중 하나. 기본은 "normal"이다.
     #: 모르는 값은 422다.
@@ -197,6 +211,10 @@ class ProblemPatchIn(Schema):
     #: 따르게 한다 — `None`(필드 생략)은 "바꾸지 않는다"는 기존 PATCH
     #: 관례 그대로다.
     model: str | None = None
+    #: 빈 문자열을 보내면 문제 자신의 추론 강도를 지우고 클래스 기본값을
+    #: 따르게 한다 — `model`과 같은 관례(#402). `None`(필드 생략)은
+    #: 바꾸지 않는다.
+    reasoning_effort: str | None = None
     #: 필드를 생략하면(`None`) 바꾸지 않는다. 보내면 `ProblemIn`과 같은
     #: 규칙(#386) — 모르는 값·빈 직접 입력 문장은 422다.
     grading_strictness: str | None = None
@@ -222,6 +240,16 @@ class ProblemOut(Schema):
     model: str
     #: 실제로 채점에 쓰일 값 — `model`이 비어 있으면 클래스의 `default_model`.
     effective_model: str
+    #: `effective_model`이 추론 모델(GPT-5 이후)인가(#402) — 화면이 이
+    #: 값으로 「추론 강도」 칸을 보일지 정한다.
+    effective_model_is_reasoning: bool = False
+    #: 이 문제 자신의 추론 강도(#402). 빈 문자열이면 클래스 기본값을
+    #: 따른다는 뜻이다 — `model`/`effective_model`과 같은 모양.
+    reasoning_effort: str = ""
+    #: 실제로 채점에 쓰일 추론 강도 — `reasoning_effort`가 비어 있으면
+    #: 클래스의 `default_reasoning_effort`. 채점 모델이 추론 모델이 아니면
+    #: 이 값은 채점에 쓰이지 않는다.
+    effective_reasoning_effort: str = ""
     #: 채점 지침 단계(#386) — "strict"|"normal"|"lenient"|"custom".
     grading_strictness: str
     #: `grading_strictness`가 "custom"일 때만 채워지고, 그 밖의 단계에서는
