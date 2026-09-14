@@ -433,6 +433,21 @@ def test_mine_includes_the_problem_and_its_checklist(client, db):
     assert body["submissions"] == []
 
 
+def test_mine_names_the_class_so_the_screen_can_say_where_it_is(client, db):
+    # 참여자 화면의 눈썹이 「클래스 · 문제」 대신 그 클래스의 이름을 말한다(#372 후속) —
+    # 참여자는 강사용 클래스 상세를 부를 수 없으므로 이 응답이 이름을 싣는다.
+    instructor = _login(client, uid="instructor-1")
+    class_id = _create_class(client, instructor["access"], name="파이썬 기초반")
+    problem_id = _create_open_problem(client, instructor["access"], class_id, "repository")
+    participant = _login(client, uid="participant-1")
+    _join(client, participant["access"], _join_code(client, instructor["access"], class_id))
+
+    mine = client.get(_mine_url(class_id, problem_id), **_auth_header(participant["access"]))
+
+    assert mine.status_code == 200
+    assert mine.json()["class_name"] == "파이썬 기초반"
+
+
 def test_non_participant_gets_a_404_instead_of_the_problems_existence(client, db):
     instructor = _login(client, uid="instructor-1")
     class_id = _create_class(client, instructor["access"])

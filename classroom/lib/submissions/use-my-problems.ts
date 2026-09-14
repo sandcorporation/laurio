@@ -14,6 +14,8 @@ export type MyProblemsState =
   | { status: "error" }
   | {
       status: "ready";
+      // 눈썹이 말할 클래스 이름(#372 후속).
+      className: string;
       problems: ProblemListItem[];
       // 이름 편집 칸의 초기값과, 그 칸 자체를 숨길지 판단할 신호(#372) — 이
       // 클래스에서 지금 불리는 이름은 `list_my_problems`가 그대로 실어 준다,
@@ -32,6 +34,7 @@ export function useMyProblems(classId: number) {
       .then((response) =>
         setState({
           status: "ready",
+          className: response.class_name,
           problems: response.problems,
           memberDisplayName: response.member_display_name,
           memberExpelled: response.member_expelled,

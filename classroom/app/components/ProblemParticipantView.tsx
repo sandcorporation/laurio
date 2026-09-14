@@ -64,7 +64,9 @@ type ProblemParticipantViewProps = (InteractiveProps | PreviewProps) & {
    *  준다 — 실제 제출 라우트는 여기가 화면의 유일한 제목이라 기본값(`"h1"`)을
    *  그대로 쓴다. */
   headingLevel?: "h1" | "h2";
-  eyebrow?: string;
+  /** 그 문제가 속한 클래스의 이름(#372 후속) — 기본값을 두지 않는다. 미리보기도
+   *  참여자 화면과 같은 눈썹을 보여야 「참여자가 보는 화면 그대로」가 참이다. */
+  eyebrow: string;
   title: string;
   titleTestId?: string;
   /** `undefined`면 통과 배지를 아예 내지 않는다 — 미리보기는 아직 아무도
@@ -79,7 +81,7 @@ type ProblemParticipantViewProps = (InteractiveProps | PreviewProps) & {
 export function ProblemParticipantView(props: ProblemParticipantViewProps) {
   const {
     headingLevel = "h1",
-    eyebrow = "클래스 · 문제",
+    eyebrow,
     title,
     titleTestId,
     passed,

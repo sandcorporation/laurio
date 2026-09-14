@@ -328,6 +328,7 @@ def test_my_problems_response_includes_current_display_name_and_flags(client, db
 
     assert response.status_code == 200
     body = response.json()
+    assert body["class_name"] == "웹 스터디"
     assert body["member_display_name"] == "지금이름"
     assert body["member_expelled"] is False
     assert body["archived"] is False

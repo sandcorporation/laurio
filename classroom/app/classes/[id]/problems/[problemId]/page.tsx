@@ -25,6 +25,7 @@ import type { FormEvent } from "react";
 
 import { BackendError } from "@/lib/backend/client";
 import { selectCopyTargets } from "@/lib/classes/copy-targets";
+import { useClass } from "@/lib/classes/use-class";
 import { useMyClasses } from "@/lib/classes/use-my-classes";
 import { publishProblemAsTemplate, takedownProblemTemplate } from "@/lib/problem-templates/api";
 import {
@@ -47,6 +48,9 @@ type PublishedTemplateState = { share_code: string; taken_down: boolean };
 export default function EditProblemPage() {
   const params = useParams<{ id: string; problemId: string }>();
   const classId = Number(params.id);
+  // 미리보기 눈썹이 참여자 화면과 같이 클래스 이름을 말한다(#372 후속, 새 문제 화면과 같다).
+  const { state: classState } = useClass(classId);
+  const previewEyebrow = classState.status === "ready" ? classState.classroom.name : "";
   const problemId = Number(params.problemId);
   const router = useRouter();
 
@@ -769,6 +773,7 @@ export default function EditProblemPage() {
             <ProblemParticipantView
               interactive={false}
               headingLevel="h2"
+              eyebrow={previewEyebrow}
               title={title.trim() === "" ? "(제목 없음)" : title}
               description={description}
               checklistItems={problem.checklist_items}

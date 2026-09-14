@@ -333,6 +333,9 @@ class ClassroomSubmissionOut(Schema):
 
 
 class ClassroomProblemSubmissionsOut(Schema):
+    #: 이 문제가 속한 클래스의 이름(#372 후속) — `ClassroomMyProblemsOut.class_name`
+    #: 과 같은 이유로 싣는다.
+    class_name: str
     problem: ClassroomProblemMineOut
     submissions: list[ClassroomSubmissionOut]
     #: 이 요청을 보낸 참여자가 강사에게 내보내졌는가(#300). 참이면 화면이
@@ -423,6 +426,9 @@ class ClassroomMyProblemsOut(Schema):
     `member_display_name`은 참여자 본인의 이름 변경(`PATCH .../members/me`)
     직후 이 목록을 다시 불러오면 곧장 새 값을 반영한다 — 비정규화가 없다."""
 
+    #: 이 클래스의 이름(#372 후속) — 화면 눈썹이 「클래스」 대신 어느 클래스인지
+    #: 말한다. 참여자는 강사용 클래스 상세를 부를 수 없어 이 응답이 싣는다.
+    class_name: str
     member_display_name: str
     #: 내보내진 참여자인가(#300, #372 AC) — 참이면 화면이 이름 편집 칸을
     #: 내지 않는다. `get_my_problem`의 `member_expelled`와 같은 신호다.

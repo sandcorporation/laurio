@@ -1045,6 +1045,7 @@ def list_my_problems(request: HttpRequest, class_id: int):
             )
         )
     return 200, ClassroomMyProblemsOut(
+        class_name=member.classroom.name,
         member_display_name=member.display_name,
         member_expelled=member.expelled_at is not None,
         archived=member.classroom.archived_at is not None,
@@ -1186,6 +1187,7 @@ def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
         for s in submissions
     ]
     return 200, ClassroomProblemSubmissionsOut(
+        class_name=problem.classroom.name,
         # 문제 자체의 통과 여부는 시도 전체의 OR이다(#288 AC "한 번 통과하면
         # 유지된다") — 최신 시도만 보지 않는다.
         problem=_serialize_problem_mine(

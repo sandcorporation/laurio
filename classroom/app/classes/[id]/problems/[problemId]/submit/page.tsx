@@ -87,7 +87,13 @@ export default function ProblemSubmitPage() {
     );
   }
 
-  const { problem, submissions, member_expelled: memberExpelled, archived } = state.data;
+  const {
+    class_name: className,
+    problem,
+    submissions,
+    member_expelled: memberExpelled,
+    archived,
+  } = state.data;
 
   async function submitValue(
     submissionFormat: "source" | "repository",
@@ -133,6 +139,7 @@ export default function ProblemSubmitPage() {
       <BackToMyProblems classId={classId} />
       <ProblemParticipantView
         interactive
+        eyebrow={className}
         title={problem.title}
         titleTestId="my-problem-title"
         passed={problem.passed}

@@ -28,6 +28,8 @@ export type ProblemListItem = {
 // 이름과, 편집 칸을 숨길지 판단할 신호 둘을 함께 싣는다. `ProblemMine.passed`와
 // 달리 여기 이름은 클래스마다 따로다(ClassMember 기준).
 export type MyProblems = {
+  // 화면 눈썹이 말할 클래스 이름(#372 후속).
+  class_name: string;
   member_display_name: string;
   member_expelled: boolean;
   archived: boolean;
@@ -72,6 +74,8 @@ export type ClassroomSubmissionRow = {
 };
 
 export type ProblemSubmissions = {
+  // 화면 눈썹이 말할 클래스 이름(#372 후속).
+  class_name: string;
   problem: ProblemMine;
   submissions: ClassroomSubmissionRow[];
   // 이 참여자가 강사에게 내보내졌는가(#300) — 참이면 화면이 제출 수단을
