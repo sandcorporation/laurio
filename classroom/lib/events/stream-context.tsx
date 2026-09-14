@@ -28,7 +28,12 @@ import {
 
 import { useMeState } from "@/lib/auth/me-context";
 
-import { ATTEMPT_SCORED, type StreamConnectionState, type StreamEvent } from "./types";
+import {
+  ATTEMPT_SCORED,
+  NOTIFICATION_CHANGED,
+  type StreamConnectionState,
+  type StreamEvent,
+} from "./types";
 
 type Listener = (event: StreamEvent) => void;
 
@@ -43,7 +48,7 @@ const STREAM_URL = "/api/backend/classroom/events/stream";
 
 // 지금 백엔드가 내는 신호 종류 전부 — 새 종류가 생기면 여기 한 줄만 늘린다
 // (`EventSource`는 이름이 등록된 이벤트만 `addEventListener`로 받는다).
-const KNOWN_EVENT_KINDS = [ATTEMPT_SCORED];
+const KNOWN_EVENT_KINDS = [ATTEMPT_SCORED, NOTIFICATION_CHANGED];
 
 export function EventStreamProvider({ children }: { children: ReactNode }) {
   const me = useMeState();

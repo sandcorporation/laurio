@@ -2246,6 +2246,10 @@ export interface paths {
          *
          *     발송 측 필드(`status`·`dispatches`)는 이 갱신이 전혀 건드리지 않는다 — 읽음
          *     처리가 발송 이력을 바꾸지 않는다는 AC가 그래서 구조적으로 성립한다.
+         *
+         *     `classroom_only=true`이고 실제로 뭔가 읽음이 됐으면(`marked_count > 0`)
+         *     강의실 벨에 `notification-changed`를 낸다(#381) — 공개 앱의 「모두 읽음」
+         *     (`classroom_only` 생략)은 이 판정 자체를 타지 않아 신호를 내지 않는다.
          */
         post: operations["notifications_api_mark_all_read"];
         delete?: never;

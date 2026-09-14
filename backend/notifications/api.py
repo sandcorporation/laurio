@@ -242,11 +242,17 @@ def mark_all_read(request, classroom_only: bool = False):
     방향에도 적용된다.
 
     발송 측 필드(`status`·`dispatches`)는 이 갱신이 전혀 건드리지 않는다 — 읽음
-    처리가 발송 이력을 바꾸지 않는다는 AC가 그래서 구조적으로 성립한다."""
+    처리가 발송 이력을 바꾸지 않는다는 AC가 그래서 구조적으로 성립한다.
+
+    `classroom_only=true`이고 실제로 뭔가 읽음이 됐으면(`marked_count > 0`)
+    강의실 벨에 `notification-changed`를 낸다(#381) — 공개 앱의 「모두 읽음」
+    (`classroom_only` 생략)은 이 판정 자체를 타지 않아 신호를 내지 않는다."""
 
     qs = Notification.objects.filter(recipient=request.auth_user, read_at__isnull=True)
     qs = _scope_by_classroom(qs, classroom_only)
     marked_count = qs.update(read_at=Clock.now())
+    if classroom_only and marked_count:
+        _publish_classroom_notification_changed(request.auth_user.id)
     return MarkAllReadOut(marked_count=marked_count)
 
 
@@ -270,6 +276,8 @@ def mark_one_read(request, notification_id: int):
     notification = get_object_or_404(Notification, pk=notification_id, recipient=request.auth_user)
     Notification.objects.filter(pk=notification.pk, read_at__isnull=True).update(read_at=Clock.now())
     notification.refresh_from_db(fields=["read_at"])
+    if notification.notification_type in CLASSROOM_NOTIFICATION_TYPES:
+        _publish_classroom_notification_changed(request.auth_user.id)
     return _serialize(notification, for_recipient=True)
 
 
@@ -290,8 +298,30 @@ def mark_many_read(request, payload: MarkManyReadIn):
 
     ids = payload.notification_ids[:NOTIFICATION_HISTORY_MAX_LIMIT]
     qs = Notification.objects.filter(pk__in=ids, recipient=request.auth_user, read_at__isnull=True)
+    # 갱신 전에 판정한다 — `read_at`을 이미 채운 뒤에는 이 필터가 더 이상 그
+    # 갱신 대상 집합과 같은 행을 가리키지 않을 이유는 없지만(update가 유형을
+    # 바꾸지 않는다), 갱신 여부와 무관하게 "이 요청이 강의실 알림을 하나라도
+    # 지목했는가"만 물으면 되므로 순서가 결과를 바꾸지 않는다.
+    marked_ids_include_classroom = qs.filter(
+        notification_type__in=CLASSROOM_NOTIFICATION_TYPES
+    ).exists()
     marked_count = qs.update(read_at=Clock.now())
+    if marked_count and marked_ids_include_classroom:
+        _publish_classroom_notification_changed(request.auth_user.id)
     return MarkAllReadOut(marked_count=marked_count)
+
+
+def _publish_classroom_notification_changed(recipient_id: int) -> None:
+    """읽음 처리 세 엔드포인트(모두·하나·묶음)가 공유하는 발행 호출(#381,
+    ADR-0046) — "그 알림이 강의실 것인가"만 이 앱이 판정하고, 실제 신호 종류·
+    수신자 규칙은 그것을 정의한 `classroom.events`에 맡긴다
+    (`notifications.services._publish_notification_changed_if_classroom`과
+    같은 이유)."""
+
+    # APP-BOUNDARY-EXCEPTION: 강의실 알림 벨 실시간 갱신 신호(#381)가 강의실 앱이 정의한 이벤트 종류를 쓴다
+    from classroom.events import publish_notification_changed
+
+    publish_notification_changed(recipient_id=recipient_id)
 
 
 @router.get("/types/")
