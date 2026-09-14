@@ -42,7 +42,7 @@ def _create_class(client, access: str, name: str = "웹 스터디") -> int:
 def _create_problem(client, access: str, class_id: int, title: str = "1주차") -> int:
     response = client.post(
         f"{CLASSES_URL}/{class_id}/problems",
-        data={"title": title, "submission_format": "source"},
+        data={"title": title, "submission_formats": ["source"]},
         content_type="application/json",
         **_auth_header(access),
     )

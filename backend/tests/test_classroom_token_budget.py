@@ -71,7 +71,7 @@ def _set_key(client, access: str, class_id: int, key: str = "sk-test-instructor-
 def _create_open_problem(client, access: str, class_id: int, submission_format: str = "repository"):
     created = client.post(
         f"{CLASSES_URL}/{class_id}/problems",
-        data={"title": "1주차", "submission_format": submission_format},
+        data={"title": "1주차", "submission_formats": [submission_format]},
         content_type="application/json",
         **_auth_header(access),
     )
@@ -115,7 +115,7 @@ def _join(client, access: str, join_code: str, display_name: str = "참여자") 
 def _submit_repository(client, access: str, class_id: int, problem_id: int, url: str) -> dict:
     response = client.post(
         f"{CLASSES_URL}/{class_id}/problems/{problem_id}/submissions",
-        data={"value": url},
+        data={"value": url, "submission_format": "repository"},
         content_type="application/json",
         **_auth_header(access),
     )

@@ -3911,8 +3911,8 @@ export interface components {
             description: string;
             /** Order */
             order: number;
-            /** Submission Format */
-            submission_format: string;
+            /** Submission Formats */
+            submission_formats: string[];
             /** Title */
             title: string;
         };
@@ -3995,8 +3995,8 @@ export interface components {
             id: number;
             /** Passed */
             passed: boolean;
-            /** Submission Format */
-            submission_format: string;
+            /** Submission Formats */
+            submission_formats: string[];
             /** Title */
             title: string;
         };
@@ -4029,8 +4029,8 @@ export interface components {
              * @default false
              */
             passed: boolean;
-            /** Submission Format */
-            submission_format: string;
+            /** Submission Formats */
+            submission_formats: string[];
             /** Title */
             title: string;
         };
@@ -4096,6 +4096,8 @@ export interface components {
         ClassroomSubmissionIn: {
             /** Content Type */
             content_type?: string | null;
+            /** Submission Format */
+            submission_format: string;
             /** Value */
             value: string;
         };
@@ -4745,8 +4747,8 @@ export interface components {
             description: string;
             /** Id */
             id: number;
-            /** Submission Format */
-            submission_format: string;
+            /** Submission Formats */
+            submission_formats: string[];
             /** Title */
             title: string;
         };
@@ -5565,8 +5567,8 @@ export interface components {
              * @default false
              */
             open: boolean;
-            /** Submission Format */
-            submission_format: string;
+            /** Submission Formats */
+            submission_formats: string[];
             /** Title */
             title: string;
         };
@@ -5604,8 +5606,8 @@ export interface components {
             published_template?: components["schemas"]["PublishedTemplateSummaryOut"] | null;
             /** Status */
             status: string;
-            /** Submission Format */
-            submission_format: string;
+            /** Submission Formats */
+            submission_formats: string[];
             /** Title */
             title: string;
         };
@@ -5615,8 +5617,8 @@ export interface components {
             description?: string | null;
             /** Model */
             model?: string | null;
-            /** Submission Format */
-            submission_format?: string | null;
+            /** Submission Formats */
+            submission_formats?: string[] | null;
             /** Title */
             title?: string | null;
         };
@@ -5676,8 +5678,8 @@ export interface components {
             publisher_display_name: string;
             /** Share Code */
             share_code: string;
-            /** Submission Format */
-            submission_format: string;
+            /** Submission Formats */
+            submission_formats: string[];
             /**
              * Taken Down
              * @default false
@@ -5796,8 +5798,8 @@ export interface components {
             report_count: number;
             /** Report Reasons */
             report_reasons: string[];
-            /** Submission Format */
-            submission_format: string;
+            /** Submission Formats */
+            submission_formats: string[];
             /** Taken Down */
             taken_down: boolean;
             /** Title */

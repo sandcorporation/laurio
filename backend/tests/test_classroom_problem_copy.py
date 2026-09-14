@@ -45,7 +45,7 @@ def _create_problem(
 ) -> int:
     response = client.post(
         f"{CLASSES_URL}/{class_id}/problems",
-        data={"title": title, "description": "설명", "submission_format": submission_format},
+        data={"title": title, "description": "설명", "submission_formats": [submission_format]},
         content_type="application/json",
         **_auth_header(access),
     )
@@ -87,7 +87,7 @@ def test_instructor_copies_a_problem_to_another_own_class(client, db):
     assert body["classroom_id"] == target_class
     assert body["title"] == "1주차 — Todo API"
     assert body["description"] == "설명"
-    assert body["submission_format"] == "source"
+    assert body["submission_formats"] == ["source"]
     labels_and_required = [(i["label"], i["required"]) for i in body["checklist_items"]]
     assert labels_and_required == [("테스트가 통과한다", True), ("README가 있다", False)]
 

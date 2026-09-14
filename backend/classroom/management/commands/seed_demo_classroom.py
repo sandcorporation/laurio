@@ -201,7 +201,7 @@ class Command(BaseCommand):
             "1주차 — 할 일 목록 만들기",
             "할 일을 더하고 지우고 완료 표시할 수 있는 화면을 만드세요.\n\n"
             "저장은 브라우저 안에만 해도 됩니다. 디자인은 자유입니다.",
-            Problem.SubmissionFormat.REPOSITORY,
+            [Problem.SubmissionFormat.REPOSITORY],
             Problem.Status.OPEN,
             [
                 ("할 일을 추가할 수 있다", True),
@@ -214,7 +214,7 @@ class Command(BaseCommand):
             web,
             "2주차 — 검색과 거르기",
             "1주차에 만든 목록에 검색과 「완료만 보기」를 더하세요.",
-            Problem.SubmissionFormat.REPOSITORY,
+            [Problem.SubmissionFormat.REPOSITORY],
             Problem.Status.OPEN,
             [
                 ("제목으로 검색할 수 있다", True),
@@ -226,7 +226,7 @@ class Command(BaseCommand):
             web,
             "3주차 — 서버와 붙이기",
             "아직 쓰는 중입니다.",
-            Problem.SubmissionFormat.SOURCE,
+            [Problem.SubmissionFormat.SOURCE],
             Problem.Status.DRAFT,
             [("API 로 목록을 받아온다", True)],
         )
@@ -256,7 +256,7 @@ class Command(BaseCommand):
             "숫자 맞추기 게임",
             "1 부터 100 사이의 숫자를 맞추는 게임을 만드세요. "
             "너무 큼·너무 작음을 알려주고, 몇 번 만에 맞혔는지 보여주세요.",
-            Problem.SubmissionFormat.REPOSITORY,
+            [Problem.SubmissionFormat.REPOSITORY],
             Problem.Status.OPEN,
             [
                 ("무작위로 답을 고른다", True),
@@ -278,7 +278,7 @@ class Command(BaseCommand):
             done,
             "최종 과제 — 개인 포트폴리오",
             "자기소개와 만든 것들을 담은 한 페이지를 만드세요.",
-            Problem.SubmissionFormat.REPOSITORY,
+            [Problem.SubmissionFormat.REPOSITORY],
             Problem.Status.OPEN,
             [("자기소개가 있다", True), ("만든 것이 하나 이상 있다", True)],
         )
@@ -291,7 +291,7 @@ class Command(BaseCommand):
             publisher_display_name="김강사",
             title=f"{DEMO_PREFIX} 할 일 목록 만들기",
             description="첫 주차에 쓰기 좋은 문제입니다. 체크리스트까지 함께 갑니다.",
-            submission_format=Problem.SubmissionFormat.REPOSITORY,
+            submission_formats=[Problem.SubmissionFormat.REPOSITORY],
         )
         for order, (label, required) in enumerate(
             [("할 일을 추가할 수 있다", True), ("할 일을 지울 수 있다", True),
@@ -321,7 +321,7 @@ class Command(BaseCommand):
                 template=ct,
                 title=title,
                 description=desc,
-                submission_format=Problem.SubmissionFormat.REPOSITORY,
+                submission_formats=[Problem.SubmissionFormat.REPOSITORY],
                 order=order,
             )
             for i, (label, required) in enumerate(items):
@@ -347,12 +347,12 @@ class Command(BaseCommand):
             made.append(member)
         return made
 
-    def _problem(self, class_obj, title, description, fmt, status, items):
+    def _problem(self, class_obj, title, description, formats, status, items):
         problem = Problem.objects.create(
             classroom=class_obj,
             title=title,
             description=description,
-            submission_format=fmt,
+            submission_formats=formats,
             status=status,
             order=class_obj.problems.count(),
         )

@@ -48,7 +48,7 @@ def _create_problem(
 ) -> int:
     response = client.post(
         f"{CLASSES_URL}/{class_id}/problems",
-        data={"title": title, "description": "설명", "submission_format": submission_format},
+        data={"title": title, "description": "설명", "submission_formats": [submission_format]},
         content_type="application/json",
         **_auth_header(access),
     )

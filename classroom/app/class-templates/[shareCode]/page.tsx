@@ -146,7 +146,7 @@ export default function ClassTemplatePreviewPage() {
                         {problem.title}
                       </span>
                       <span className="shrink-0 text-[12px] text-ink/45">
-                        {problem.submission_format === "source" ? "소스" : "저장소"}
+                        {problem.submission_formats[0] === "source" ? "소스" : "저장소"}
                       </span>
                     </div>
                     {problem.checklist_items.length > 0 ? (

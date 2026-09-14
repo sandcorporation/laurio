@@ -56,7 +56,7 @@ def _serialize_template(template: ProblemTemplate, *, viewer_id: int | None = No
         share_code=template.share_code,
         title=template.title,
         description=template.description,
-        submission_format=template.submission_format,
+        submission_formats=template.submission_formats,
         publisher_display_name=template.publisher_display_name,
         created_at=template.created_at,
         taken_down=template.taken_down_at is not None,
@@ -256,7 +256,7 @@ def _serialize_class_template(template: ClassTemplate, *, viewer_id: int | None 
             ClassTemplateProblemOut(
                 title=p.title,
                 description=p.description,
-                submission_format=p.submission_format,
+                submission_formats=p.submission_formats,
                 order=p.order,
                 checklist_items=[
                     ProblemTemplateChecklistItemOut(label=i.label, required=i.required, order=i.order)

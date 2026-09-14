@@ -24,7 +24,8 @@ export type ProblemRow = {
   classroom_id: number;
   title: string;
   description: string;
-  submission_format: SubmissionFormat;
+  // 강사가 받기로 고른 형식들(#373) — 소스·저장소의 비어 있지 않은 부분집합.
+  submission_formats: SubmissionFormat[];
   status: ProblemStatus;
   order: number;
   // 문제 자신의 값. 빈 문자열이면 클래스 기본값을 따른다.
@@ -52,7 +53,8 @@ export function createProblem(
   input: {
     title: string;
     description: string;
-    submission_format: SubmissionFormat;
+    // 강사가 하나 이상 고른 형식(#373) — 빈 배열은 서버가 422로 거절한다.
+    submission_formats: SubmissionFormat[];
     // 만들기 화면에서 함께 적는 체크리스트 항목(#315). 순서가 그대로
     // 서버의 order가 된다.
     checklist_items?: { label: string; required: boolean }[];
@@ -77,7 +79,7 @@ export function updateProblem(
   patch: Partial<{
     title: string;
     description: string;
-    submission_format: SubmissionFormat;
+    submission_formats: SubmissionFormat[];
     model: string;
   }>,
 ): Promise<ProblemRow> {
@@ -129,7 +131,7 @@ export type ImportableProblemRow = {
   classroom_name: string;
   title: string;
   description: string;
-  submission_format: SubmissionFormat;
+  submission_formats: SubmissionFormat[];
   checklist_items: ImportableChecklistItem[];
 };
 

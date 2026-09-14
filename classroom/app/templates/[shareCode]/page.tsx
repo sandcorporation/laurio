@@ -164,7 +164,7 @@ export default function ProblemTemplatePreviewPage() {
                 {template.description || "설명이 없습니다."}
               </p>
               <p data-testid="template-preview-format" className="mt-3 text-[12.5px] text-ink/60">
-                제출 형식: {template.submission_format === "source" ? "소스" : "저장소"}
+                제출 형식: {template.submission_formats[0] === "source" ? "소스" : "저장소"}
               </p>
             </div>
           </Card>

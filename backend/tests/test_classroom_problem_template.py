@@ -46,7 +46,7 @@ def _create_problem(
 ) -> int:
     response = client.post(
         f"{CLASSES_URL}/{class_id}/problems",
-        data={"title": title, "description": "설명", "submission_format": submission_format},
+        data={"title": title, "description": "설명", "submission_formats": [submission_format]},
         content_type="application/json",
         **_auth_header(access),
     )
@@ -95,7 +95,7 @@ def test_instructor_publishes_a_problem_as_a_template(client, db):
     body = response.json()
     assert body["title"] == "Todo API"
     assert body["description"] == "설명"
-    assert body["submission_format"] == "source"
+    assert body["submission_formats"] == ["source"]
     assert body["publisher_display_name"] == "김강사"
     assert body["taken_down"] is False
     assert body["share_code"]
@@ -201,7 +201,7 @@ def test_import_creates_a_draft_problem_in_the_target_class(client, db):
     body = response.json()
     assert body["classroom_id"] == target_class
     assert body["title"] == "Todo API"
-    assert body["submission_format"] == "repository"
+    assert body["submission_formats"] == ["repository"]
     assert body["status"] == Problem.Status.DRAFT
     labels_and_required = [(i["label"], i["required"]) for i in body["checklist_items"]]
     assert labels_and_required == [("필수 항목", True), ("선택 항목", False)]

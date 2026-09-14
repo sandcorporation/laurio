@@ -14,7 +14,7 @@ export type ProblemTemplateRow = {
   share_code: string;
   title: string;
   description: string;
-  submission_format: SubmissionFormat;
+  submission_formats: SubmissionFormat[];
   publisher_display_name: string;
   created_at: string;
   taken_down: boolean;

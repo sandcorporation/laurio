@@ -51,7 +51,7 @@ def test_instructor_creates_a_problem_with_source_or_repository_format(client, d
         data={
             "title": "1주차 — Todo API",
             "description": "REST API를 만든다",
-            "submission_format": "source",
+            "submission_formats": ["source"],
         },
         content_type="application/json",
         **_auth_header(pair["access"]),
@@ -59,7 +59,7 @@ def test_instructor_creates_a_problem_with_source_or_repository_format(client, d
     assert response.status_code == 201
     body = response.json()
     assert body["title"] == "1주차 — Todo API"
-    assert body["submission_format"] == "source"
+    assert body["submission_formats"] == ["source"]
     assert body["status"] == Problem.Status.DRAFT
     assert "deadline_at" not in body
     assert "deadline" not in body
@@ -71,11 +71,66 @@ def test_unknown_submission_format_is_rejected(client, db):
 
     response = client.post(
         f"{CLASSES_URL}/{class_id}/problems",
-        data={"title": "1주차", "submission_format": "demo_url"},
+        data={"title": "1주차", "submission_formats": ["demo_url"]},
         content_type="application/json",
         **_auth_header(pair["access"]),
     )
     assert response.status_code == 422
+
+
+def test_empty_submission_formats_is_rejected(client, db):
+    """#373 AC — 빈 목록은 「제출할 방법이 없는 문제」라 만들 수 없다."""
+
+    pair = _login(client)
+    class_id = _create_class(client, pair["access"])
+
+    response = client.post(
+        f"{CLASSES_URL}/{class_id}/problems",
+        data={"title": "1주차", "submission_formats": []},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert response.status_code == 422
+
+
+def test_instructor_opens_a_problem_to_both_formats(client, db):
+    """#373 AC — zip·GitHub 둘 다 켠 문제를 만들 수 있다."""
+
+    pair = _login(client)
+    class_id = _create_class(client, pair["access"])
+
+    response = client.post(
+        f"{CLASSES_URL}/{class_id}/problems",
+        data={"title": "1주차", "submission_formats": ["repository", "source"]},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert response.status_code == 201
+    # 저장 순서는 입력 순서가 아니라 정해진 순서(소스·저장소)를 따른다 —
+    # 화면이 언제나 같은 순서로 체크박스를 그리게 한다.
+    assert response.json()["submission_formats"] == ["source", "repository"]
+
+
+def test_patching_a_problem_to_an_empty_format_list_is_rejected(client, db):
+    pair = _login(client)
+    class_id = _create_class(client, pair["access"])
+    created = client.post(
+        f"{CLASSES_URL}/{class_id}/problems",
+        data={"title": "1주차", "submission_formats": ["source"]},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    problem_id = created.json()["id"]
+
+    response = client.patch(
+        f"{CLASSES_URL}/{class_id}/problems/{problem_id}",
+        data={"submission_formats": []},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert response.status_code == 422
+    # 거절됐으니 원래 값이 그대로 남는다.
+    assert Problem.objects.get(id=problem_id).submission_formats == ["source"]
 
 
 def test_instructor_edits_title_description_and_format(client, db):
@@ -83,7 +138,7 @@ def test_instructor_edits_title_description_and_format(client, db):
     class_id = _create_class(client, pair["access"])
     created = client.post(
         f"{CLASSES_URL}/{class_id}/problems",
-        data={"title": "1주차", "submission_format": "source"},
+        data={"title": "1주차", "submission_formats": ["source"]},
         content_type="application/json",
         **_auth_header(pair["access"]),
     )
@@ -91,14 +146,14 @@ def test_instructor_edits_title_description_and_format(client, db):
 
     patched = client.patch(
         f"{CLASSES_URL}/{class_id}/problems/{problem_id}",
-        data={"title": "1주차 — 수정", "submission_format": "repository"},
+        data={"title": "1주차 — 수정", "submission_formats": ["repository"]},
         content_type="application/json",
         **_auth_header(pair["access"]),
     )
     assert patched.status_code == 200
     body = patched.json()
     assert body["title"] == "1주차 — 수정"
-    assert body["submission_format"] == "repository"
+    assert body["submission_formats"] == ["repository"]
 
 
 def test_description_round_trips_as_markdown_verbatim_and_unsanitized(client, db):
@@ -117,7 +172,7 @@ def test_description_round_trips_as_markdown_verbatim_and_unsanitized(client, db
 
     created = client.post(
         f"{CLASSES_URL}/{class_id}/problems",
-        data={"title": "마크다운 문제", "description": markdown, "submission_format": "source"},
+        data={"title": "마크다운 문제", "description": markdown, "submission_formats": ["source"]},
         content_type="application/json",
         **_auth_header(pair["access"]),
     )
@@ -141,7 +196,7 @@ def test_problems_are_ordered_and_reorderable(client, db):
     for title in ["1주차", "2주차", "3주차"]:
         created = client.post(
             f"{CLASSES_URL}/{class_id}/problems",
-            data={"title": title, "submission_format": "source"},
+            data={"title": title, "submission_formats": ["source"]},
             content_type="application/json",
             **_auth_header(pair["access"]),
         )
@@ -168,7 +223,7 @@ def test_reorder_rejects_a_mismatched_problem_set(client, db):
     class_id = _create_class(client, pair["access"])
     created = client.post(
         f"{CLASSES_URL}/{class_id}/problems",
-        data={"title": "1주차", "submission_format": "source"},
+        data={"title": "1주차", "submission_formats": ["source"]},
         content_type="application/json",
         **_auth_header(pair["access"]),
     )
@@ -191,7 +246,7 @@ def test_new_problems_default_to_draft_and_status_is_a_distinct_field(client, db
     class_id = _create_class(client, pair["access"])
     created = client.post(
         f"{CLASSES_URL}/{class_id}/problems",
-        data={"title": "1주차", "submission_format": "source"},
+        data={"title": "1주차", "submission_formats": ["source"]},
         content_type="application/json",
         **_auth_header(pair["access"]),
     )
@@ -207,7 +262,7 @@ def test_instructor_reads_a_single_problem(client, db):
     class_id = _create_class(client, pair["access"])
     created = client.post(
         f"{CLASSES_URL}/{class_id}/problems",
-        data={"title": "1주차", "description": "설명", "submission_format": "source"},
+        data={"title": "1주차", "description": "설명", "submission_formats": ["source"]},
         content_type="application/json",
         **_auth_header(pair["access"]),
     )
@@ -226,7 +281,7 @@ def test_a_non_instructor_cannot_see_another_classs_problems(client, db):
     class_id = _create_class(client, a["access"])
     client.post(
         f"{CLASSES_URL}/{class_id}/problems",
-        data={"title": "1주차", "submission_format": "source"},
+        data={"title": "1주차", "submission_formats": ["source"]},
         content_type="application/json",
         **_auth_header(a["access"]),
     )

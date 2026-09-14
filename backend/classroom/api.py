@@ -89,6 +89,26 @@ from .services import copy_class, copy_problem_to_class
 router = Router(tags=["classroom"])
 
 _SUBMISSION_FORMATS = {choice for choice, _label in Problem.SubmissionFormat.choices}
+#: 화면에 늘 같은 순서로 보이도록(체크박스 둘의 고정 순서), 저장 전에 이
+#: 순서로 정렬해 중복을 제거한다 — 입력 순서를 그대로 믿지 않는다.
+_SUBMISSION_FORMAT_ORDER = [choice for choice, _label in Problem.SubmissionFormat.choices]
+
+
+def _normalize_submission_formats(values: list[str]) -> list[str]:
+    unique = set(values)
+    return [f for f in _SUBMISSION_FORMAT_ORDER if f in unique]
+
+
+def _validate_submission_formats(values: list[str]) -> list[str]:
+    """빈 목록·모르는 값을 422로 거절한다(#373 AC) — 만들기·편집 두 자리가
+    같은 규칙을 쓴다."""
+
+    if not values:
+        raise HttpError(422, "제출 형식을 하나 이상 골라주세요.")
+    unknown = [v for v in values if v not in _SUBMISSION_FORMATS]
+    if unknown:
+        raise HttpError(422, f"알 수 없는 제출 형식입니다: {unknown[0]}")
+    return _normalize_submission_formats(values)
 
 #: 마스킹은 복호화가 아니라 저장 시점에 남긴 마지막 네 자리로만 만든다 —
 #: `Class.openai_api_key_encrypted`를 다시 풀지 않는다(#284, 파일 상단 라우터
@@ -204,7 +224,7 @@ def _serialize_problem(
         classroom_id=problem.classroom_id,
         title=problem.title,
         description=problem.description,
-        submission_format=problem.submission_format,
+        submission_formats=problem.submission_formats,
         status=problem.status,
         order=problem.order,
         model=problem.model,
@@ -242,7 +262,7 @@ def _serialize_problem_mine(problem: Problem, *, passed: bool = False) -> Classr
         classroom_id=problem.classroom_id,
         title=problem.title,
         description=problem.description,
-        submission_format=problem.submission_format,
+        submission_formats=problem.submission_formats,
         checklist_items=[_serialize_checklist_item(i) for i in problem.checklist_items.all()],
         passed=passed,
     )
@@ -832,8 +852,7 @@ def create_problem(request: HttpRequest, class_id: int, payload: ProblemIn):
 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
 
-    if payload.submission_format not in _SUBMISSION_FORMATS:
-        raise HttpError(422, f"알 수 없는 제출 형식입니다: {payload.submission_format}")
+    submission_formats = _validate_submission_formats(payload.submission_formats)
 
     # 편집(`update_problem`)과 같은 규칙이다 — 두 자리가 갈리면 만들 때는
     # 통과한 값이 고칠 때 거절되는 상태가 생긴다.
@@ -849,7 +868,7 @@ def create_problem(request: HttpRequest, class_id: int, payload: ProblemIn):
             classroom=class_obj,
             title=payload.title,
             description=payload.description,
-            submission_format=payload.submission_format,
+            submission_formats=submission_formats,
             model=payload.model,
             order=next_order,
             status=Problem.Status.OPEN if payload.open else Problem.Status.DRAFT,
@@ -937,7 +956,7 @@ def list_importable_problems(request: HttpRequest, class_id: int):
             classroom_name=p.classroom.name,
             title=p.title,
             description=p.description,
-            submission_format=p.submission_format,
+            submission_formats=p.submission_formats,
             checklist_items=[
                 ProblemTemplateChecklistItemOut(label=i.label, required=i.required, order=i.order)
                 for i in p.checklist_items.all()
@@ -982,7 +1001,7 @@ def list_my_problems(request: HttpRequest, class_id: int):
             ClassroomProblemListItemOut(
                 id=problem.id,
                 title=problem.title,
-                submission_format=problem.submission_format,
+                submission_formats=problem.submission_formats,
                 passed=passed,
             )
         )
@@ -1011,8 +1030,11 @@ def update_problem(request: HttpRequest, class_id: int, problem_id: int, payload
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problem = _get_owned_problem_or_404(class_obj, problem_id)
 
-    if payload.submission_format is not None and payload.submission_format not in _SUBMISSION_FORMATS:
-        raise HttpError(422, f"알 수 없는 제출 형식입니다: {payload.submission_format}")
+    submission_formats = (
+        _validate_submission_formats(payload.submission_formats)
+        if payload.submission_formats is not None
+        else None
+    )
     if payload.model and not is_valid_model(payload.model):
         raise HttpError(422, f"알 수 없는 채점 모델입니다: {payload.model}")
 
@@ -1023,9 +1045,9 @@ def update_problem(request: HttpRequest, class_id: int, problem_id: int, payload
     if payload.description is not None:
         problem.description = payload.description
         update_fields.append("description")
-    if payload.submission_format is not None:
-        problem.submission_format = payload.submission_format
-        update_fields.append("submission_format")
+    if submission_formats is not None:
+        problem.submission_formats = submission_formats
+        update_fields.append("submission_formats")
     if payload.model is not None:
         problem.model = payload.model
         update_fields.append("model")
@@ -1167,8 +1189,13 @@ def create_classroom_submission(
     if not value:
         raise HttpError(422, "제출 값을 입력해주세요.")
 
+    if payload.submission_format not in problem.submission_formats:
+        # 화면을 우회해도 서버가 거절한다(#373 AC) — 허용 목록 밖의 형식은
+        # 그 자체로 422다, 값의 모양이 맞고 틀리고와 무관하다.
+        raise HttpError(422, f"이 문제가 받지 않는 제출 형식입니다: {payload.submission_format}")
+
     content_type = ""
-    if problem.submission_format == Problem.SubmissionFormat.SOURCE:
+    if payload.submission_format == Problem.SubmissionFormat.SOURCE:
         expected_ref = source_target_ref(problem.id, request.auth_user.id)
         if not value.startswith(f"{expected_ref}/"):
             raise HttpError(422, "본인의 업로드 대상에 속하지 않는 소스입니다.")

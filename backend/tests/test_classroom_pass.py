@@ -73,7 +73,7 @@ def _create_open_problem_with_checklist(client, access: str, class_id: int, titl
 
     created = client.post(
         f"{CLASSES_URL}/{class_id}/problems",
-        data={"title": title, "submission_format": "repository"},
+        data={"title": title, "submission_formats": ["repository"]},
         content_type="application/json",
         **_auth_header(access),
     )
@@ -126,7 +126,7 @@ def _join(client, access: str, join_code: str, display_name: str = "참여자") 
 def _submit_repository(client, access: str, class_id: int, problem_id: int, url: str) -> dict:
     response = client.post(
         f"{CLASSES_URL}/{class_id}/problems/{problem_id}/submissions",
-        data={"value": url},
+        data={"value": url, "submission_format": "repository"},
         content_type="application/json",
         **_auth_header(access),
     )
@@ -298,7 +298,7 @@ def test_problem_list_shows_passed_status_at_a_glance(client, db, monkeypatch):
     # 아직 아무도 안 낸 두 번째 문제 — 미통과여야 한다.
     second_problem = client.post(
         f"{CLASSES_URL}/{ctx['class_id']}/problems",
-        data={"title": "2주차", "submission_format": "repository"},
+        data={"title": "2주차", "submission_formats": ["repository"]},
         content_type="application/json",
         **_auth_header(ctx["instructor"]["access"]),
     )
@@ -327,7 +327,7 @@ def test_draft_problems_are_excluded_from_the_participant_list(client, db, monke
     ctx = _setup(client)
     draft = client.post(
         f"{CLASSES_URL}/{ctx['class_id']}/problems",
-        data={"title": "초안 문제", "submission_format": "repository"},
+        data={"title": "초안 문제", "submission_formats": ["repository"]},
         content_type="application/json",
         **_auth_header(ctx["instructor"]["access"]),
     )

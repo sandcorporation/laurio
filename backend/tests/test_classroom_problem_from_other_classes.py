@@ -44,7 +44,7 @@ def _create_problem(
 ) -> int:
     response = client.post(
         f"{CLASSES_URL}/{class_id}/problems",
-        data={"title": title, "description": "설명", "submission_format": submission_format},
+        data={"title": title, "description": "설명", "submission_formats": [submission_format]},
         content_type="application/json",
         **_auth_header(access),
     )
@@ -84,7 +84,7 @@ def test_lists_problems_from_other_own_classes(client, db):
     assert row["classroom_name"] == "2기"
     assert row["title"] == "fetch로 목록 그리기"
     assert row["description"] == "설명"
-    assert row["submission_format"] == "source"
+    assert row["submission_formats"] == ["source"]
     labels_and_required = [(i["label"], i["required"]) for i in row["checklist_items"]]
     assert labels_and_required == [("테스트가 통과한다", True), ("README가 있다", False)]
 

@@ -61,7 +61,7 @@ def copy_problem_to_class(problem: Problem, target_class: Class) -> Problem:
         classroom=target_class,
         title=problem.title,
         description=problem.description,
-        submission_format=problem.submission_format,
+        submission_formats=problem.submission_formats,
         status=Problem.Status.DRAFT,
         order=target_class.problems.count(),
         model=problem.model,
@@ -147,7 +147,7 @@ def publish_problem_as_template(
                 publisher_display_name=publisher_display_name,
                 title=problem.title,
                 description=problem.description,
-                submission_format=problem.submission_format,
+                submission_formats=problem.submission_formats,
             )
             ProblemTemplateChecklistItem.objects.bulk_create(
                 ProblemTemplateChecklistItem(
@@ -173,7 +173,7 @@ def import_problem_template(template: ProblemTemplate, target_class: Class) -> P
         classroom=target_class,
         title=template.title,
         description=template.description,
-        submission_format=template.submission_format,
+        submission_formats=template.submission_formats,
         status=Problem.Status.DRAFT,
         order=target_class.problems.count(),
     )
@@ -217,7 +217,7 @@ def publish_class_as_template(
                     template=template,
                     title=problem.title,
                     description=problem.description,
-                    submission_format=problem.submission_format,
+                    submission_formats=problem.submission_formats,
                     order=problem.order,
                 )
                 ClassTemplateProblemChecklistItem.objects.bulk_create(
@@ -251,7 +251,7 @@ def import_class_template(template: ClassTemplate, *, instructor_id: int, name: 
             classroom=new_class,
             title=template_problem.title,
             description=template_problem.description,
-            submission_format=template_problem.submission_format,
+            submission_formats=template_problem.submission_formats,
             status=Problem.Status.DRAFT,
             order=template_problem.order,
         )
