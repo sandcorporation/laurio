@@ -1174,7 +1174,11 @@ def list_my_problems(request: HttpRequest, class_id: int):
 
     **지금 이름과 편집 칸을 숨길 신호도 함께 싣는다**(#372) — 이 화면
     위쪽의 인라인 이름 편집 칸이 그 값을 초기값으로 쓴다. `get_my_problem`이
-    `member_expelled`·`archived`를 싣는 것과 같은 이유다."""
+    `member_expelled`·`archived`를 싣는 것과 같은 이유다.
+
+    **한 번이라도 낸 숨긴 문제는 `hidden_problems`에 따로 실린다**(#406) —
+    열린 목록(`problems`)과 같은 방식으로 통과 여부를 계산하지만, 시도가
+    없는 숨긴 문제는 이 묶음에도 들지 않는다(#405 「존재 숨김」 규칙)."""
 
     member = _get_member_or_404(class_id, request.auth_user.id)
     problems = list(
@@ -1182,35 +1186,54 @@ def list_my_problems(request: HttpRequest, class_id: int):
         .prefetch_related("checklist_items")
         .order_by("order", "id")
     )
-    submissions = (
-        ClassroomSubmission.objects.filter(problem__in=problems, member=member)
-        .select_related("classroom_score")
+    # 강사가 숨겼지만(#405) 이 참여자가 한 번이라도 낸 문제들 — 아래
+    # 「숨겨진 문제」 묶음의 재료다(#406). 낸 적 없는 숨긴 문제는 이
+    # `id__in` 서브쿼리에 애초에 들지 않는다.
+    hidden_problems = list(
+        Problem.objects.filter(
+            classroom_id=class_id,
+            status=Problem.Status.HIDDEN,
+            id__in=ClassroomSubmission.objects.filter(member=member).values_list(
+                "problem_id", flat=True
+            ),
+        )
+        .prefetch_related("checklist_items")
+        .order_by("order", "id")
     )
+
+    all_problems = problems + hidden_problems
+    submissions = ClassroomSubmission.objects.filter(
+        problem__in=all_problems, member=member
+    ).select_related("classroom_score")
     submissions_by_problem: dict[int, list[ClassroomSubmission]] = {}
     for s in submissions:
         submissions_by_problem.setdefault(s.problem_id, []).append(s)
 
-    out = []
-    for problem in problems:
-        required_item_ids = _required_checklist_item_ids(problem.checklist_items.all())
-        passed = any(
-            _is_score_passed(getattr(s, "classroom_score", None), required_item_ids)
-            for s in submissions_by_problem.get(problem.id, [])
-        )
-        out.append(
-            ClassroomProblemListItemOut(
-                id=problem.id,
-                title=problem.title,
-                submission_formats=problem.submission_formats,
-                passed=passed,
+    def _list_items(problem_list: list[Problem]) -> list[ClassroomProblemListItemOut]:
+        items = []
+        for problem in problem_list:
+            required_item_ids = _required_checklist_item_ids(problem.checklist_items.all())
+            passed = any(
+                _is_score_passed(getattr(s, "classroom_score", None), required_item_ids)
+                for s in submissions_by_problem.get(problem.id, [])
             )
-        )
+            items.append(
+                ClassroomProblemListItemOut(
+                    id=problem.id,
+                    title=problem.title,
+                    submission_formats=problem.submission_formats,
+                    passed=passed,
+                )
+            )
+        return items
+
     return 200, ClassroomMyProblemsOut(
         class_name=member.classroom.name,
         member_display_name=member.display_name,
         member_expelled=member.expelled_at is not None,
         archived=member.classroom.archived_at is not None,
-        problems=out,
+        problems=_list_items(problems),
+        hidden_problems=_list_items(hidden_problems),
     )
 
 

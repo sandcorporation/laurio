@@ -29,8 +29,67 @@ import {
 } from "@/app/components/ui";
 import { BackendError } from "@/lib/backend/client";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
-import { renameMyself } from "@/lib/submissions/api";
+import { renameMyself, type ProblemListItem } from "@/lib/submissions/api";
 import { useMyProblems } from "@/lib/submissions/use-my-problems";
+
+function ProblemListRow({ classId, problem }: { classId: number; problem: ProblemListItem }) {
+  return (
+    <li
+      data-testid={`my-problem-row-${problem.id}`}
+      className="flex items-center justify-between gap-4 px-4 py-3.5"
+    >
+      <Link
+        href={`/classes/${classId}/problems/${problem.id}/submit`}
+        data-testid={`my-problem-row-${problem.id}-link`}
+        className="min-w-0 text-[14px] hover:underline"
+      >
+        {problem.title}
+      </Link>
+      <span data-testid={`my-problem-row-${problem.id}-status`} className="shrink-0">
+        <Badge tone={problem.passed ? "verified" : "neutral"}>{problem.passed ? "통과" : "미통과"}</Badge>
+      </span>
+    </li>
+  );
+}
+
+// 목록 아래 접힌 「숨겨진 문제」 섹션(#406) — 강사가 숨겼지만 한 번이라도
+// 낸 문제만 여기 있다. 해당 문제가 있을 때만 자리를 차지하고, 기본은
+// 접힌 채다 — 지금 풀 문제(위 목록)가 이 화면의 주인공이다.
+function HiddenProblemsSection({
+  classId,
+  hiddenProblems,
+}: {
+  classId: number;
+  hiddenProblems: ProblemListItem[];
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (hiddenProblems.length === 0) return null;
+
+  return (
+    <div className="mt-4 flex flex-col gap-2">
+      <button
+        type="button"
+        data-testid="hidden-problems-toggle"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((prev) => !prev)}
+        className="flex items-center gap-1.5 self-start text-[12.5px] text-ink/60 hover:text-ink"
+      >
+        <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>
+        숨겨진 문제 ({hiddenProblems.length})
+      </button>
+      {expanded ? (
+        <Card>
+          <ul data-testid="hidden-problems-list" className="divide-y divide-rule">
+            {hiddenProblems.map((problem) => (
+              <ProblemListRow key={problem.id} classId={classId} problem={problem} />
+            ))}
+          </ul>
+        </Card>
+      ) : null}
+    </div>
+  );
+}
 
 function MyDisplayName({
   classId,
@@ -180,7 +239,7 @@ export default function MyProblemsPage() {
     );
   }
 
-  const { className, problems, memberDisplayName, memberExpelled, archived } = state;
+  const { className, problems, hiddenProblems, memberDisplayName, memberExpelled, archived } = state;
   const passed = problems.filter((p) => p.passed).length;
 
   return (
@@ -221,28 +280,13 @@ export default function MyProblemsPage() {
         <Card>
           <ul data-testid="my-problems-list" className="divide-y divide-rule">
             {problems.map((problem) => (
-              <li
-                key={problem.id}
-                data-testid={`my-problem-row-${problem.id}`}
-                className="flex items-center justify-between gap-4 px-4 py-3.5"
-              >
-                <Link
-                  href={`/classes/${classId}/problems/${problem.id}/submit`}
-                  data-testid={`my-problem-row-${problem.id}-link`}
-                  className="min-w-0 text-[14px] hover:underline"
-                >
-                  {problem.title}
-                </Link>
-                <span data-testid={`my-problem-row-${problem.id}-status`} className="shrink-0">
-                  <Badge tone={problem.passed ? "verified" : "neutral"}>
-                    {problem.passed ? "통과" : "미통과"}
-                  </Badge>
-                </span>
-              </li>
+              <ProblemListRow key={problem.id} classId={classId} problem={problem} />
             ))}
           </ul>
         </Card>
       )}
+
+      <HiddenProblemsSection classId={classId} hiddenProblems={hiddenProblems} />
     </PageShell>
   );
 }

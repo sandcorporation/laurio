@@ -39,6 +39,10 @@ export type MyProblems = {
   member_expelled: boolean;
   archived: boolean;
   problems: ProblemListItem[];
+  // 강사가 숨겼지만(#405) 이 참여자가 한 번이라도 낸 문제들(#406) — 통과
+  // 여부와 함께 `problems`와 따로 온다. 낸 적 없는 숨긴 문제는 여기도
+  // 실리지 않는다.
+  hidden_problems: ProblemListItem[];
 };
 
 export type ChecklistVerdict = {

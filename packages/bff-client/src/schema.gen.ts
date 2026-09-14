@@ -592,6 +592,10 @@ export interface paths {
          *     **지금 이름과 편집 칸을 숨길 신호도 함께 싣는다**(#372) — 이 화면
          *     위쪽의 인라인 이름 편집 칸이 그 값을 초기값으로 쓴다. `get_my_problem`이
          *     `member_expelled`·`archived`를 싣는 것과 같은 이유다.
+         *
+         *     **한 번이라도 낸 숨긴 문제는 `hidden_problems`에 따로 실린다**(#406) —
+         *     열린 목록(`problems`)과 같은 방식으로 통과 여부를 계산하지만, 시도가
+         *     없는 숨긴 문제는 이 묶음에도 들지 않는다(#405 「존재 숨김」 규칙).
          */
         get: operations["classroom_api_list_my_problems"];
         put?: never;
@@ -4153,6 +4157,11 @@ export interface components {
             archived: boolean;
             /** Class Name */
             class_name: string;
+            /**
+             * Hidden Problems
+             * @default []
+             */
+            hidden_problems: components["schemas"]["ClassroomProblemListItemOut"][];
             /** Member Display Name */
             member_display_name: string;
             /** Member Expelled */

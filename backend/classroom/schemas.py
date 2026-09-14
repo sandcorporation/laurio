@@ -538,6 +538,11 @@ class ClassroomMyProblemsOut(Schema):
     #: 내지 않는다. `get_my_problem`의 `archived`와 같은 신호다.
     archived: bool
     problems: list[ClassroomProblemListItemOut]
+    #: 강사가 숨겼지만(#405) 이 참여자가 한 번이라도 낸 문제들 — 통과
+    #: 여부와 함께 `problems`와 따로 싣는다(#406). 낸 적 없는 숨긴 문제는
+    #: 여기도 `problems`도 싣지 않는다 — 존재 자체가 숨겨진다. 다시 열리면
+    #: 이 목록에서 빠지고 `problems`로 돌아간다.
+    hidden_problems: list[ClassroomProblemListItemOut] = []
 
 
 class ProblemCopyIn(Schema):

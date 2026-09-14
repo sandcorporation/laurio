@@ -26,6 +26,9 @@ export type MyProblemsState =
       // 눈썹이 말할 클래스 이름(#372 후속).
       className: string;
       problems: ProblemListItem[];
+      // 강사가 숨겼지만 이 참여자가 한 번이라도 낸 문제들(#406) — 목록
+      // 아래 접힌 「숨겨진 문제」 섹션이 쓴다.
+      hiddenProblems: ProblemListItem[];
       // 이름 편집 칸의 초기값과, 그 칸 자체를 숨길지 판단할 신호(#372) — 이
       // 클래스에서 지금 불리는 이름은 `list_my_problems`가 그대로 실어 준다,
       // 비정규화 없이 렌더될 때마다 서버 값을 다시 받는다.
@@ -51,6 +54,7 @@ export function useMyProblems(classId: number) {
           status: "ready",
           className: response.class_name,
           problems: response.problems,
+          hiddenProblems: response.hidden_problems,
           memberDisplayName: response.member_display_name,
           memberExpelled: response.member_expelled,
           archived: response.archived,
