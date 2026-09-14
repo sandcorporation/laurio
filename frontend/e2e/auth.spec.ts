@@ -25,11 +25,17 @@ async function loginViaApi(
   });
 }
 
+// 로그아웃은 콘솔 현관의 버튼이 아니라 헤더 계정 메뉴 안에 있다(#375, spec #371).
+async function logoutViaAccountMenu(page: import("@playwright/test").Page): Promise<void> {
+  await page.getByTestId("account-menu-trigger").click();
+  await page.getByTestId("account-menu-logout").click();
+}
+
 test.describe("미들웨어 가드 — 콘텐츠가 그려지기 전에 리다이렉트한다", () => {
-  test("세션 쿠키가 전혀 없으면 /console 요청 자체가 302/307로 /login을 가리킨다", async ({
+  test("세션 쿠키가 전혀 없으면 /console/participation 요청 자체가 302/307로 /login을 가리킨다", async ({
     request,
   }) => {
-    const res = await request.get("/console", { maxRedirects: 0 });
+    const res = await request.get("/console/participation", { maxRedirects: 0 });
     expect([302, 307]).toContain(res.status());
     expect(res.headers()["location"]).toContain("/login");
   });
@@ -38,12 +44,35 @@ test.describe("미들웨어 가드 — 콘텐츠가 그려지기 전에 리다�
     page,
   }) => {
     await page.context().clearCookies();
-    await page.goto("/console");
-    // 미들웨어가 /login으로 보냈으므로 최종 URL이 /console이 아니어야 하고,
-    // 로그인 이후 화면의 표식(app-home-protected-content)이 전혀 없어야 한다.
+    await page.goto("/console/participation");
+    // 미들웨어가 /login으로 보냈으므로 최종 URL이 /console/participation이
+    // 아니어야 하고, 로그인 이후 화면의 표식(participation-heading)이 전혀
+    // 없어야 한다.
     await expect(page).toHaveURL(/\/login/);
-    await expect(page.getByTestId("app-home-protected-content")).toHaveCount(0);
-    await expect(page.getByTestId("app-home-heading")).toHaveCount(0);
+    await expect(page.getByTestId("participation-heading")).toHaveCount(0);
+  });
+});
+
+test.describe("콘솔 현관 제거 — /console은 세션과 무관하게 홈으로 간다 (#375)", () => {
+  test("세션이 없으면 /console은 로그인을 거치지 않고 바로 홈으로 리다이렉트된다", async ({
+    request,
+  }) => {
+    const res = await request.get("/console", { maxRedirects: 0 });
+    expect([302, 307]).toContain(res.status());
+    expect(new URL(res.headers()["location"]!, "http://localhost.invalid").pathname).toBe("/");
+  });
+
+  test("로그인한 상태에서도 /console은 홈으로 리다이렉트된다 — 옛 주소를 즐겨찾기한 사람이 깨진 화면을 보지 않는다", async ({
+    page,
+  }) => {
+    await page.goto("/login");
+    await page.getByTestId("fake-login-seed").fill("bookmarked-console-user");
+    await page.getByTestId(`login-${FAKE_PROVIDER}`).click();
+    await expect(page.getByTestId("account-menu-trigger")).toBeVisible({ timeout: 15_000 });
+
+    await page.goto("/console");
+    await expect(page).toHaveURL("/");
+    await expect(page.getByTestId("site-header")).toBeVisible();
   });
 });
 
@@ -145,8 +174,10 @@ test.describe("소셜 로그인 → 세션 쿠키 → 보호된 화면", () => {
     await page.goto("/login");
     await page.getByTestId("fake-login-seed").fill("visible-check-user");
     await page.getByTestId(`login-${FAKE_PROVIDER}`).click();
-    await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
-    await expect(page.getByTestId("app-home-heading")).toBeVisible();
+    // 콘솔 현관이 없어져 로그인 기본 도착지가 홈이다(#375) — 헤더의 계정
+    // 메뉴가 로그인된 상태의 표식이다.
+    await expect(page).toHaveURL("/", { timeout: 15_000 });
+    await expect(page.getByTestId("account-menu-trigger")).toBeVisible();
 
     const jsVisibleCookies = await page.evaluate(() => document.cookie);
     expect(jsVisibleCookies).not.toContain("laurio_access");
@@ -161,24 +192,28 @@ test.describe("소셜 로그인 → 세션 쿠키 → 보호된 화면", () => {
     expect(refresh?.httpOnly).toBe(true);
   });
 
-  test("로그인하면 미들웨어가 /console 콘텐츠를 그대로 통과시킨다", async ({ page }) => {
+  test("로그인하면 미들웨어가 /console/participation 콘텐츠를 그대로 통과시킨다", async ({
+    page,
+  }) => {
     await page.goto("/login");
     await page.getByTestId("fake-login-seed").fill("console-visit-user");
     await page.getByTestId(`login-${FAKE_PROVIDER}`).click();
-    await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
-    await expect(page.getByTestId("app-home-protected-content")).toBeVisible();
-    await expect(page.getByTestId("app-home-heading")).toContainText("console-visit-user");
+    await expect(page).toHaveURL("/", { timeout: 15_000 });
+
+    await page.goto("/console/participation");
+    await expect(page).toHaveURL(/\/console\/participation/);
+    await expect(page.getByTestId("participation-heading")).toBeVisible();
   });
 });
 
 test.describe("로그아웃 — 쿠키 삭제 + 블랙리스트", () => {
-  test("로그아웃하면 쿠키가 지워지고 /console이 다시 막힌다", async ({ page }) => {
+  test("로그아웃하면 쿠키가 지워지고 /console/participation이 다시 막힌다", async ({ page }) => {
     await page.goto("/login");
     await page.getByTestId("fake-login-seed").fill("logout-user");
     await page.getByTestId(`login-${FAKE_PROVIDER}`).click();
-    await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
+    await expect(page).toHaveURL("/", { timeout: 15_000 });
 
-    await page.getByTestId("logout-button").click();
+    await logoutViaAccountMenu(page);
     await expect(page).toHaveURL(/\/login/);
 
     const cookies = await page.context().cookies();
@@ -186,7 +221,7 @@ test.describe("로그아웃 — 쿠키 삭제 + 블랙리스트", () => {
     expect(cookies.find((c) => c.name === "laurio_refresh")).toBeUndefined();
 
     // 미들웨어가 다시 막는지 새 탐색으로 확인한다.
-    await page.goto("/console");
+    await page.goto("/console/participation");
     await expect(page).toHaveURL(/\/login/);
   });
 
@@ -197,13 +232,13 @@ test.describe("로그아웃 — 쿠키 삭제 + 블랙리스트", () => {
     await page.goto("/login");
     await page.getByTestId("fake-login-seed").fill("blacklist-user");
     await page.getByTestId(`login-${FAKE_PROVIDER}`).click();
-    await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
+    await expect(page).toHaveURL("/", { timeout: 15_000 });
 
     const before = await page.context().cookies();
     const access = before.find((c) => c.name === "laurio_access")?.value;
     expect(access).toBeTruthy();
 
-    await page.getByTestId("logout-button").click();
+    await logoutViaAccountMenu(page);
     await expect(page).toHaveURL(/\/login/);
 
     // 브라우저가 이미 지운 그 액세스 토큰을 쿠키로 되살려 다시 실어 보낸다 —
@@ -229,7 +264,22 @@ test.describe("액세스 만료 시 리프레시가 조용히 처리된다", () 
     await page.goto("/login");
     await page.getByTestId("fake-login-seed").fill("refresh-user");
     await page.getByTestId(`login-${FAKE_PROVIDER}`).click();
-    await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
+    await expect(page).toHaveURL("/", { timeout: 15_000 });
+    // `/console/dev-upload-demo`로 간다 — `useSession()` 하나만 쓰고 그 밖의
+    // 데이터 조회가 없는 화면이다(옛 콘솔 현관과 같은 모양). `/console/
+    // participation`처럼 `useSession()`과 `usePagedList()`가 함께 401을 만나면
+    // 되살리기 단일 비행 하나를 두고 서로 다른 시점에 경합해, 먼저 회전된
+    // 리프레시 토큰을 나중 쪽이 다시 쓰려다 실패하는 것을 실제로 관찰했다 — 이
+    // 테스트가 겨냥하는 것은 리프레시 메커니즘 자체이지 그 경합이 아니다.
+    await page.goto("/console/dev-upload-demo");
+    await expect(page).toHaveURL(/\/console\/dev-upload-demo/);
+    // 세션이 멀쩡할 때 한 번 더 새로고침해 이 화면과 `/api/auth/session`을
+    // 미리 컴파일해 둔다 — `next dev`는 라우트를 요청받을 때 컴파일하므로,
+    // 그 컴파일이 아래에서 조작된 쿠키로 걸리는 재시도 창과 겹치면 서버 쪽
+    // 되살리기 단일 비행이 리셋돼(이 파일의 "동시에 여러 요청" 테스트 주석이
+    // 이미 겪은 것과 같은 종류) 코드 회귀와 구분되지 않는 실패를 낸다.
+    await page.reload();
+    await expect(page.getByTestId("upload-demo-contest-id")).toBeVisible();
 
     const cookies = await page.context().cookies();
     const refresh = cookies.find((c) => c.name === "laurio_refresh");
@@ -251,8 +301,8 @@ test.describe("액세스 만료 시 리프레시가 조용히 처리된다", () 
 
     // 화면이 끊기지 않는다 — 새로고침해도 여전히 로그인된 화면이 보여야 한다.
     await page.reload();
-    await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
-    await expect(page.getByTestId("app-home-protected-content")).toBeVisible();
+    await expect(page).toHaveURL(/\/console\/dev-upload-demo/, { timeout: 15_000 });
+    await expect(page.getByTestId("upload-demo-contest-id")).toBeVisible({ timeout: 15_000 });
 
     // 응답이 새 액세스 쿠키로 교체됐는지도 확인한다 — "not-a-real-jwt"가 아니다.
     const after = await page.context().cookies();
@@ -267,7 +317,7 @@ test.describe("액세스 만료 시 리프레시가 조용히 처리된다", () 
     await page.goto("/login");
     await page.getByTestId("fake-login-seed").fill("concurrent-refresh-user");
     await page.getByTestId(`login-${FAKE_PROVIDER}`).click();
-    await expect(page).toHaveURL(/\/console/, { timeout: 15_000 });
+    await expect(page).toHaveURL("/", { timeout: 15_000 });
 
     await page.context().addCookies([
       {

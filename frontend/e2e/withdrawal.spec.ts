@@ -35,5 +35,7 @@ test("탈퇴를 완료하면 로그인 화면으로 돌아가고, 그 계정으�
   await page.getByTestId("login-kakao").click();
 
   await expect(page.getByTestId("login-error")).toBeVisible();
-  await expect(page).not.toHaveURL(/\/console/);
+  // 실패했으므로 로그인 화면에 그대로 남아 있어야 한다 — 성공 시의 기본
+  // 도착지(홈 "/", #375)로도 옮겨가지 않는다.
+  await expect(page).toHaveURL(/\/login/);
 });

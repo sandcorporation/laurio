@@ -89,10 +89,10 @@ Score의 PROTECT 때문에 지울 수도 없고(아래 「테스트」 절의 �
   /api/contests/categories`·`deliverable-types`는 예외다 — 주소는 `/contests/`
   아래지만 주소만으로는 어느 제품의 것인지 갈리지 않는 공용 참조 데이터다.
   운영자 표면(`/api/operator/*`)은 이 스위치와 무관하게 그대로 연다.
-- **공개 앱이 감춘다.** 헤더의 「공모전」·「공모전 개최」, `/console`의 「내
-  공모전」, `/contests/**`·`/console/contests/**` 전체가 빠지거나 404다. 앱과
-  백엔드가 어긋나면 링크는 보이는데 앞이 404인 것이 고른 실패 모양이다
-  (`LAURIO_OPERATOR_ORIGIN`과 같은 종류의 어긋남).
+- **공개 앱이 감춘다.** 헤더의 「공모전」·「공모전 개최」, 헤더 계정 메뉴의
+  「내 공모전」(#375, 콘솔 현관은 없다), `/contests/**`·`/console/contests/**`
+  전체가 빠지거나 404다. 앱과 백엔드가 어긋나면 링크는 보이는데 앞이 404인
+  것이 고른 실패 모양이다(`LAURIO_OPERATOR_ORIGIN`과 같은 종류의 어긋남).
 - **공모전 전용 스캔이 등록부에서 사라진다.** 환불 둘·배분 둘·지급 관련 둘·인수인계
   (`payment-refund-request`·`payment-refund-reconcile`·`distribution-create`·
   `distribution-share-payout`·`payout-awaits-you`·`seller-registration-recovery`·
@@ -674,8 +674,8 @@ page/route 는 `export const dynamic = "force-dynamic"` 을 선언해야 한다)
 꺼낸다(이 커밋 이전). 화면 회귀가 실제로 문제가 되기 시작하면 그때 기준을 다시 연다.
 
 **스위트를 연달아 돌렸다면 `frontend` 컨테이너를 재시작한다.** `next dev` 의 메모리가 회차마다
-늘어(측정: 4.8GB → 6.3GB) 로그인 뒤 `/console` 이동이 5초를 넘기기 시작하고, 그러면 매 회차
-무작위로 한두 건이 `toHaveURL(/\/console/)` 타임아웃으로 붉어진다 — 코드 회귀와 구분되지 않는
+늘어(측정: 4.8GB → 6.3GB) 로그인 뒤 화면 이동이 5초를 넘기기 시작하고, 그러면 매 회차
+무작위로 한두 건이 로그인 헬퍼의 `toHaveURL` 타임아웃으로 붉어진다 — 코드 회귀와 구분되지 않는
 모양이다. `docker compose -f docker/compose.dev.yaml restart frontend` 한 번이면 그대로 초록으로
 돌아온다(로그인 헬퍼의 단언은 15초로 잡아 뒀지만 근본 원인은 이쪽이다).
 

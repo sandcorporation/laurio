@@ -93,13 +93,13 @@ describe("isSafeNextPath — 다섯 거부 종류(전수) + 구조적 판정의 
 
 describe("resolveNextPath — 어떤 입력에도 결과가 '/'로 시작한다", () => {
   test.each<[string | null | undefined, string | undefined, string]>([
-    [null, undefined, "/console"],
-    [undefined, undefined, "/console"],
-    ["", undefined, "/console"],
-    ["https://evil.example.test/steal", undefined, "/console"],
-    ["//evil.example.test", undefined, "/console"],
-    ["/\\evil.example.test", undefined, "/console"],
-    ["/\t/evil.example.test", undefined, "/console"],
+    [null, undefined, "/"],
+    [undefined, undefined, "/"],
+    ["", undefined, "/"],
+    ["https://evil.example.test/steal", undefined, "/"],
+    ["//evil.example.test", undefined, "/"],
+    ["/\\evil.example.test", undefined, "/"],
+    ["/\t/evil.example.test", undefined, "/"],
     ["/appeals", undefined, "/appeals"],
     ["https://evil.example.test", "/payouts", "/payouts"],
   ])("resolveNextPath(%j, %j) -> %j", (next, fallback, expected) => {
@@ -126,7 +126,7 @@ describe("withoutForeignNext — 형제 오리진 요청이 대조에 실패하�
   test("next_origin을 요청했는데 대조에 실패하면(returnOrigin이 null) 기본 경로로 떨어진다", () => {
     // next는 형제 앱(강의실)의 경로일 수 있다 — 이 오리진 안에서 그대로 쓰면
     // 존재하지 않는 경로라 404가 난다(#334 코드리뷰 지적).
-    expect(withoutForeignNext("/join/abc123", "http://evil.example.test", null)).toBe("/console");
+    expect(withoutForeignNext("/join/abc123", "http://evil.example.test", null)).toBe("/");
   });
 
   test("next_origin을 요청했는데 대조에 실패해도 fallback을 지정하면 그것을 쓴다", () => {

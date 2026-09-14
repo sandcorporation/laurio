@@ -24,7 +24,7 @@ import type { HeaderSessionState } from "@/lib/auth/header-session-state";
 import { NotificationBell } from "./notification-bell";
 import { SessionSlot } from "./session-slot";
 
-export function HeaderSessionZone() {
+export function HeaderSessionZone({ classroomUrl }: { classroomUrl: string }) {
   // 세션 슬롯이 예전에 그랬듯 `pathname`을 `refetchKey`로 준다 — 헤더는 루트
   // 레이아웃에 살아 페이지 이동에도 마운트가 유지되므로, 로그인·로그아웃
   // 직후의 이동에도 다시 확인해야 한다.
@@ -44,7 +44,7 @@ export function HeaderSessionZone() {
   return (
     <>
       <NotificationBell sessionState={sessionState} />
-      <SessionSlot sessionState={sessionState} />
+      <SessionSlot sessionState={sessionState} classroomUrl={classroomUrl} />
     </>
   );
 }

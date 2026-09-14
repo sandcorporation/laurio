@@ -176,13 +176,14 @@ test.describe("next 검증 — 오픈 리다이렉트 방어 (자격증명 유�
       const setCookie = res.headers()["set-cookie"] ?? "";
 
       if (location.includes("kauth.kakao.com")) {
-        // 설정됨 — next는 왕복 쿠키에 담긴다.
-        expect(setCookie, unsafeNext).toContain("laurio_oauth_next=%2Fconsole");
+        // 설정됨 — next는 왕복 쿠키에 담긴다. 안전하지 않은 next는 기본
+        // 도착지(홈 "/", #375)로 떨어지고, 인코딩되면 "%2F"다.
+        expect(setCookie, unsafeNext).toContain("laurio_oauth_next=%2F");
       } else {
         // 설정 안 됨(dev 기본) — next는 /login 리다이렉트의 쿼리에 담긴다.
         expect(location, unsafeNext).toContain("/login");
         const returned = new URL(location, "http://localhost.invalid").searchParams.get("next");
-        expect(returned, unsafeNext).toBe("/console");
+        expect(returned, unsafeNext).toBe("/");
       }
 
       for (const unsafe of ["evil.example.test", "javascript%3A", "javascript:"]) {
@@ -213,7 +214,7 @@ test.describe("next 검증 — 오픈 리다이렉트 방어 (자격증명 유�
     const location = res.headers()["location"] ?? "";
     expect(location).not.toContain("evil.example.test");
     const returnedNext = new URL(location, "http://localhost.invalid").searchParams.get("next");
-    expect(returnedNext).toBe("/console");
+    expect(returnedNext).toBe("/");
   });
 });
 

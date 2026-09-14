@@ -2,6 +2,10 @@
 // 공개 앱의 오리진을 알아야 짓는다. 로그인 화면(app/login/page.tsx)과 같은
 // 이유로 서버에서만 `headers()`·환경변수를 읽고, 상호작용(useMe·드롭다운)은
 // 클라이언트 컴포넌트에 넘긴다.
+//
+// 「공모전으로 가기」(#376, spec #371)도 같은 `publicOrigin` 을 그대로 쓴다 —
+// 프로필이 나가는 곳과 「공모전으로 가기」가 나가는 곳은 같은 앱(공개 앱)의
+// 같은 오리진이다.
 import { headers } from "next/headers";
 
 import { classroomOrigin, publicAppOrigin } from "@/lib/auth/public-app";
@@ -26,6 +30,7 @@ export async function AccountMenu() {
   return (
     <AccountMenuClient
       profileUrl={buildProfileUrl(publicOrigin, safeOrigin)}
+      publicAppUrl={publicOrigin}
     />
   );
 }
