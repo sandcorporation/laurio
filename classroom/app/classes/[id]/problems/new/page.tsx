@@ -20,6 +20,11 @@ import {
   PageShell,
   buttonClass,
 } from "@/app/components/ui";
+import {
+  GradingGuidelineEditor,
+  isGradingGuidelineValid,
+  type GradingGuidelineValue,
+} from "@/app/components/GradingGuidelineEditor";
 import { MarkdownEditor } from "@/app/components/MarkdownEditor";
 import { ProblemParticipantView } from "@/app/components/ProblemParticipantView";
 import { TemplatePickerSheet } from "@/app/components/TemplatePickerSheet";
@@ -50,6 +55,11 @@ export default function NewProblemPage() {
   // 빈 문자열이 「클래스 기본값을 따릅니다」다 — 편집 화면(#285)과 같은 값이다.
   const [model, setModel] = useState("");
   const modelsState = useScoringModels();
+  // 채점 지침(#386) — 기본은 「보통」, 백엔드 기본값과 같다.
+  const [gradingGuideline, setGradingGuideline] = useState<GradingGuidelineValue>({
+    grading_strictness: "normal",
+    grading_guideline_text: "",
+  });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // 「작성」/「미리보기」 탭(#325) — 참여자 화면 전체를 보여주는 쪽은 그
@@ -114,6 +124,7 @@ export default function NewProblemPage() {
 
   async function submitProblem(open: boolean) {
     if (title.trim() === "") return;
+    if (!isGradingGuidelineValid(gradingGuideline)) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -122,6 +133,8 @@ export default function NewProblemPage() {
         description,
         submission_formats: submissionFormats,
         model,
+        grading_strictness: gradingGuideline.grading_strictness,
+        grading_guideline_text: gradingGuideline.grading_guideline_text,
         checklist_items: items.map((item) => ({ label: item.label, required: item.required })),
         open,
       });
@@ -313,6 +326,12 @@ export default function NewProblemPage() {
           </div>
         </Card>
 
+        <GradingGuidelineEditor
+          value={gradingGuideline}
+          onChange={setGradingGuideline}
+          testIdPrefix="new-problem"
+        />
+
         <Card>
           <CardHeader
             title="체크리스트"
@@ -469,7 +488,12 @@ export default function NewProblemPage() {
             type="submit"
             form="new-problem-form"
             data-testid="new-problem-submit"
-            disabled={submitting || title.trim() === "" || submissionFormats.length === 0}
+            disabled={
+              submitting ||
+              title.trim() === "" ||
+              submissionFormats.length === 0 ||
+              !isGradingGuidelineValid(gradingGuideline)
+            }
             className={buttonClass("secondary")}
           >
             {submitting ? "만드는 중..." : "만들기"}
@@ -478,7 +502,11 @@ export default function NewProblemPage() {
             type="button"
             data-testid="new-problem-create-and-open-submit"
             disabled={
-              submitting || title.trim() === "" || !hasRequiredItem || submissionFormats.length === 0
+              submitting ||
+              title.trim() === "" ||
+              !hasRequiredItem ||
+              submissionFormats.length === 0 ||
+              !isGradingGuidelineValid(gradingGuideline)
             }
             onClick={handleCreateAndOpen}
             className={buttonClass("primary")}

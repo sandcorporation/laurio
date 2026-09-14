@@ -124,6 +124,26 @@ def _validate_submission_formats(values: list[str]) -> list[str]:
         raise HttpError(422, f"알 수 없는 제출 형식입니다: {unknown[0]}")
     return _normalize_submission_formats(values)
 
+
+_GRADING_STRICTNESS_VALUES = {choice for choice, _label in Problem.GradingStrictness.choices}
+
+
+def _validate_grading_guideline(strictness: str, text: str) -> tuple[str, str]:
+    """채점 지침 두 칸을 검증하고 저장할 모양으로 정규화한다(#386 AC) —
+    만들기·편집 두 자리가 같은 규칙을 쓴다(`_validate_submission_formats`와
+    같은 관용구). 알 수 없는 단계와 빈 직접 입력 문장은 422다. 직접 입력이
+    아니면 문장을 언제나 빈 문자열로 되돌린다 — "문장은 직접 입력일 때만
+    비어 있지 않다"(#385 Implementation Decisions)를 저장 시점에 구조로
+    지킨다."""
+
+    if strictness not in _GRADING_STRICTNESS_VALUES:
+        raise HttpError(422, f"알 수 없는 채점 지침입니다: {strictness}")
+    if strictness == Problem.GradingStrictness.CUSTOM:
+        if not text.strip():
+            raise HttpError(422, "직접 입력 채점 지침은 문장을 비울 수 없습니다.")
+        return strictness, text
+    return strictness, ""
+
 #: 마스킹은 복호화가 아니라 저장 시점에 남긴 마지막 네 자리로만 만든다 —
 #: `Class.openai_api_key_encrypted`를 다시 풀지 않는다(#284, 파일 상단 라우터
 #: docstring과 같은 이유: 복호화는 채점 요청을 보낼 때만 한다).
@@ -244,6 +264,8 @@ def _serialize_problem(
         order=problem.order,
         model=problem.model,
         effective_model=problem.model or class_obj.default_model,
+        grading_strictness=problem.grading_strictness,
+        grading_guideline_text=problem.grading_guideline_text,
         checklist_items=[_serialize_checklist_item(i) for i in problem.checklist_items.all()],
         passed_count=passed_count,
         member_count=member_count,
@@ -928,6 +950,9 @@ def create_problem(request: HttpRequest, class_id: int, payload: ProblemIn):
     # 통과한 값이 고칠 때 거절되는 상태가 생긴다.
     if payload.model and not is_valid_model(payload.model):
         raise HttpError(422, f"알 수 없는 채점 모델입니다: {payload.model}")
+    grading_strictness, grading_guideline_text = _validate_grading_guideline(
+        payload.grading_strictness, payload.grading_guideline_text
+    )
 
     if payload.open and not any(item.required for item in payload.checklist_items):
         raise HttpError(400, "필수 항목이 하나도 없는 문제는 열 수 없습니다.")
@@ -940,6 +965,8 @@ def create_problem(request: HttpRequest, class_id: int, payload: ProblemIn):
             description=payload.description,
             submission_formats=submission_formats,
             model=payload.model,
+            grading_strictness=grading_strictness,
+            grading_guideline_text=grading_guideline_text,
             order=next_order,
             status=Problem.Status.OPEN if payload.open else Problem.Status.DRAFT,
         )
@@ -1118,6 +1145,23 @@ def update_problem(request: HttpRequest, class_id: int, problem_id: int, payload
     if payload.model and not is_valid_model(payload.model):
         raise HttpError(422, f"알 수 없는 채점 모델입니다: {payload.model}")
 
+    # 두 칸 중 하나라도 보내면 둘 다 함께 검증한다 — "문장은 직접 입력일
+    # 때만 비어 있지 않다"는 두 칸을 함께 봐야 판단할 수 있는 불변식이라,
+    # 필드 하나만 따로 저장하면 어긋난 상태가 생길 수 있다(#386). 예를
+    # 들어 `grading_strictness="custom"`만 보내면 문장은 지금 저장된
+    # 값(비-CUSTOM이었다면 빈 문자열)을 그대로 검증에 쓴다.
+    grading_strictness = None
+    grading_guideline_text = None
+    if payload.grading_strictness is not None or payload.grading_guideline_text is not None:
+        grading_strictness, grading_guideline_text = _validate_grading_guideline(
+            payload.grading_strictness
+            if payload.grading_strictness is not None
+            else problem.grading_strictness,
+            payload.grading_guideline_text
+            if payload.grading_guideline_text is not None
+            else problem.grading_guideline_text,
+        )
+
     update_fields = []
     if payload.title is not None:
         problem.title = payload.title
@@ -1131,6 +1175,10 @@ def update_problem(request: HttpRequest, class_id: int, problem_id: int, payload
     if payload.model is not None:
         problem.model = payload.model
         update_fields.append("model")
+    if grading_strictness is not None:
+        problem.grading_strictness = grading_strictness
+        problem.grading_guideline_text = grading_guideline_text
+        update_fields.extend(["grading_strictness", "grading_guideline_text"])
     if update_fields:
         problem.save(update_fields=[*update_fields, "updated_at"])
     return 200, _serialize_problem(problem, class_obj)

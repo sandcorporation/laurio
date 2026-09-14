@@ -1,8 +1,10 @@
-// Problem·체크리스트 백엔드 호출 (#282/#283/#285/#326).
+// Problem·체크리스트 백엔드 호출 (#282/#283/#285/#326/#386).
 import { backendJson } from "@/lib/backend/client";
+import type { GradingStrictness } from "@/lib/problems/grading-guideline";
 
 export type SubmissionFormat = "source" | "repository";
 export type ProblemStatus = "draft" | "open";
+export type { GradingStrictness };
 
 const SUBMISSION_FORMAT_LABEL: Record<SubmissionFormat, string> = {
   source: "zip 파일",
@@ -43,6 +45,10 @@ export type ProblemRow = {
   model: string;
   // 실제로 채점에 쓰일 값.
   effective_model: string;
+  // 채점 지침 단계(#386, CONTEXT.md 「채점 지침」).
+  grading_strictness: GradingStrictness;
+  // grading_strictness가 "custom"일 때만 채워진다.
+  grading_guideline_text: string;
   checklist_items: ChecklistItemRow[];
   // 이 문제를 한 번이라도 통과한 참여자 수(#289) — 강사 본인·내보낸
   // 참여자는 빼고 센다.
@@ -72,6 +78,11 @@ export function createProblem(
     // 이 문제만의 채점 모델(#327). 빈 문자열이면 클래스 기본값을 따른다 —
     // 화면의 "클래스 기본값을 따릅니다"가 보내는 값이다.
     model?: string;
+    // 채점 지침 단계(#386). 생략하면 서버 기본값("normal")이 된다.
+    grading_strictness?: GradingStrictness;
+    // grading_strictness가 "custom"일 때의 문장 — 그 밖의 단계에서 보내도
+    // 서버가 무시하고 빈 문자열로 저장한다.
+    grading_guideline_text?: string;
     // true면 만든 직후 바로 연다("만들고 바로 열기"). 필수 항목이 하나도
     // 없으면 서버가 400으로 거부하고 문제도 생기지 않는다 — 화면은 이
     // 경우를 누르기 전에 이미 막아 둔다.
@@ -92,6 +103,8 @@ export function updateProblem(
     description: string;
     submission_formats: SubmissionFormat[];
     model: string;
+    grading_strictness: GradingStrictness;
+    grading_guideline_text: string;
   }>,
 ): Promise<ProblemRow> {
   return backendJson<ProblemRow>(`/classroom/classes/${classId}/problems/${problemId}`, {
