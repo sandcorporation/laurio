@@ -93,7 +93,9 @@ ADR-0043) — `CLASSROOM_SCORING_ADAPTER_MODE`(기본값 `fake`)가 결정적인
 등장하면 충족, 아니면 미달이다. "키가 있어야 채점 후보에 든다"는 규칙은
 그대로다 — 이 스위치는 "그 키로 실제로 네트워크에 나가는가"만 가른다.
 staging/production은 이 값이 fake이면 부팅 자체가 거부되고, 실제로는 강사 본인의
-키로 `OpenAIScoringAdapter`가 돈다 — 배포 환경의 원칙은 바뀌지 않는다.
+키로 `OpenAIScoringAdapter`가 돈다 — 배포 환경의 원칙은 바뀌지 않는다. dev·CI의
+모델 목록 조회(위 「채점 모델」 절)도 같은 스위치를 탄다 — 실제 `/v1/models` 대신
+고정된 id 목록(4o·4.1 계열과 gpt-5·gpt-5-mini)을 규칙으로 걸러 "live"로 돌려준다.
 
 **강사는 클래스마다 채점 토큰 예산을 정할 수 있다**(#295, CONTEXT.md 「채점
 예산」) — 채점이 강사 본인의 키로 돌기 때문이다. 예산(`token_budget`)과 경고
@@ -120,11 +122,22 @@ staging/production은 이 값이 fake이면 부팅 자체가 거부되고, 실�
 그 참여자의 시도 전체에 대한 **OR**이다 — 한 번 통과하면 나중에 다시 내서
 미통과가 나와도 유지된다.
 
-**모델은 클래스 기본값과 문제별 덮어쓰기로 나뉜다**(#285) — 모델마다 한 번에
-받을 수 있는 소스의 양(컨텍스트 크기)이 달라, 긴 문제에 작은 모델을 고르면
-소스 뒷부분이 잘린 채 채점된다. 문제의 `model`이 비어 있으면 클래스의
-`default_model`을 따르고, 그 합성값이 `effective_model`이다. `GET
-/api/classroom/scoring-models`가 선택지마다 컨텍스트 크기를 함께 내려준다.
+**모델은 클래스 기본값과 문제별 덮어쓰기로 나뉜다**(#285, #401) — 모델마다
+한 번에 받을 수 있는 소스의 양(컨텍스트 크기)이 달라, 긴 문제에 작은 모델을
+고르면 소스 뒷부분이 잘린 채 채점된다. 문제의 `model`이 비어 있으면 클래스의
+`default_model`을 따르고, 그 합성값이 `effective_model`이다. **선택지는
+그 클래스의 OpenAI 키로 실제로 쓸 수 있는 모델에서 온다**(CONTEXT.md 「채점
+모델」) — `GET /api/classroom/classes/{id}/scoring-models`(예전 전역
+`/scoring-models`를 대신한다)가 그 키로 벤더 모델 목록을 조회해 규칙에 맞는
+이름(`gpt-<버전>`·`-mini`·`-nano`, 날짜 스냅샷·`-pro`·`-codex`·오디오/이미지
+계열 등은 숨긴다)만 걸러 선택지·컨텍스트 크기(모르면 "크기 미확인")·추론
+모델 여부를 함께 내려준다. 같은 키의 결과는 분 단위로 캐시한다. 키가 없거나
+거부됐거나 조회가 실패하면 저장소의 작은 기본 목록(`source: "fallback"`)과
+이유(`unavailable_reason`: "no_api_key"|"fetch_failed")를 돌려준다 — 화면은
+「키를 넣으면 이 키로 쓸 수 있는 모델을 보여드립니다」 같은 안내를 보인다.
+저장은 그 조회 결과(캐시 포함)에 있는 값만 받는다 — 조회가 불가하면 기본
+목록 안의 값이거나 지금 저장된 값과 같을 때만 받는다. 새 클래스의 기본
+채점 모델은 GPT-4.1 mini다.
 
 | BFF 라우트 | |
 | --- | --- |
@@ -479,7 +492,7 @@ has_submissions`) 버튼 대신 왜 안 되는지와 보관을 안내하는 문�
 「내 클래스」로 돌아간다.
 
 `GET`·`PATCH /api/classroom/classes/{id}` · `PUT .../openai-key` ·
-`GET /api/classroom/scoring-models` · `POST .../classes/{id}/publish-template` ·
+`GET .../classes/{id}/scoring-models` · `POST .../classes/{id}/publish-template` ·
 `POST /api/classroom/class-templates/{shareCode}/takedown` ·
 `DELETE /api/classroom/classes/{id}`로 그린다.
 

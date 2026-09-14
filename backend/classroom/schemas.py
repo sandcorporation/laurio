@@ -114,7 +114,23 @@ class JoinedClassOut(Schema):
 class ScoringModelOut(Schema):
     id: str
     label: str
-    context_window: int
+    #: 토큰 단위 컨텍스트 윈도 — 모르는 모델은 `None`이다(#401 AC "크기
+    #: 미확인").
+    context_window: int | None = None
+    #: GPT-5 이후 세대인가(#402) — 화면이 이 값으로 「추론 강도」 칸을
+    #: 보일지 정한다.
+    is_reasoning_model: bool = False
+
+
+class ScoringModelCatalogOut(Schema):
+    """클래스 기준 채점 모델 선택지(#401) — 기존 전역 `GET
+    /classroom/scoring-models`를 대신한다. `source`가 "fallback"이면
+    `unavailable_reason`("no_api_key"|"fetch_failed")이 함께 실려 화면이
+    안내 한 줄을 보인다."""
+
+    models: list[ScoringModelOut]
+    source: str
+    unavailable_reason: str | None = None
 
 
 class JoinLinkOut(Schema):

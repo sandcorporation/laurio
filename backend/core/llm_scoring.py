@@ -585,6 +585,41 @@ class OpenAIScoringAdapter:
         return LLMKeyCheckStatus.UNVERIFIED
 
 
+def list_openai_models(api_key: str, *, timeout: float = _OPENAI_REQUEST_TIMEOUT_SECONDS) -> list[str] | None:
+    """이 키로 `/v1/models`를 조회해 모델 id 목록을 돌려준다(#401) —
+    `classroom.scoring_model_catalog`가 이 목록을 규칙으로 거른다
+    (`classroom.scoring_models.build_catalog`).
+
+    실패(네트워크 오류·타임아웃·거부·5xx·예상 밖의 응답 모양)는 전부 `None`
+    이다 — 호출자가 "키 없음"과 "조회 실패"를 이미 구별해 쥐고 있으므로,
+    이 함수는 그 둘을 가르지 않고 성공/실패만 말한다(`OpenAIScoringAdapter.
+    check_key`가 REJECTED/UNVERIFIED를 가르는 것과 다른 자리 — 이 함수는
+    모델 목록이 필요할 뿐 키 상태를 판정하지 않는다)."""
+
+    try:
+        response = requests.get(
+            _OPENAI_MODELS_URL,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=timeout,
+        )
+    except requests.RequestException:
+        return None
+
+    if response.status_code != 200:
+        return None
+
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+
+    data = body.get("data") if isinstance(body, dict) else None
+    if not isinstance(data, list):
+        return None
+
+    return [item["id"] for item in data if isinstance(item, dict) and isinstance(item.get("id"), str)]
+
+
 def get_adapter() -> LLMScoringAdapter:
     return resolve_adapter(
         mode=settings.LLM_ADAPTER_MODE,

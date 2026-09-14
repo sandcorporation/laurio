@@ -61,7 +61,7 @@ export default function EditProblemPage() {
   const router = useRouter();
 
   const { state, reload } = useProblem(classId, problemId);
-  const modelsState = useScoringModels();
+  const { state: modelsState } = useScoringModels(classId);
   const myClassesState = useMyClasses();
 
   const [title, setTitle] = useState("");
@@ -574,26 +574,40 @@ export default function EditProblemPage() {
                   채점 모델
                 </label>
                 {modelsState.status === "ready" ? (
-                  <select
-                    id="problem-model"
-                    data-testid="edit-problem-model-select"
-                    value={model}
-                    onChange={(event) => setModel(event.target.value)}
-                    className={INPUT_CLASS}
-                  >
-                    <option value="" data-testid="edit-problem-model-option-inherit">
-                      클래스 기본값을 따릅니다
-                    </option>
-                    {modelsState.models.map((option) => (
-                      <option
-                        key={option.id}
-                        value={option.id}
-                        data-testid={`edit-problem-model-option-${option.id}`}
-                      >
-                        {option.label} · 컨텍스트 {option.context_window.toLocaleString("ko-KR")} 토큰
+                  <>
+                    {modelsState.source === "fallback" ? (
+                      <Note>
+                        <span data-testid="edit-problem-model-unavailable-note">
+                          {modelsState.unavailableReason === "no_api_key"
+                            ? "키를 넣으면 이 키로 쓸 수 있는 모델을 보여드립니다 — 지금은 기본 목록입니다."
+                            : "지금은 모델 목록을 확인할 수 없어 기본 목록을 보여드립니다."}
+                        </span>
+                      </Note>
+                    ) : null}
+                    <select
+                      id="problem-model"
+                      data-testid="edit-problem-model-select"
+                      value={model}
+                      onChange={(event) => setModel(event.target.value)}
+                      className={INPUT_CLASS}
+                    >
+                      <option value="" data-testid="edit-problem-model-option-inherit">
+                        클래스 기본값을 따릅니다
                       </option>
-                    ))}
-                  </select>
+                      {modelsState.models.map((option) => (
+                        <option
+                          key={option.id}
+                          value={option.id}
+                          data-testid={`edit-problem-model-option-${option.id}`}
+                        >
+                          {option.label} · 컨텍스트{" "}
+                          {option.context_window
+                            ? `${option.context_window.toLocaleString("ko-KR")} 토큰`
+                            : "크기 미확인"}
+                        </option>
+                      ))}
+                    </select>
+                  </>
                 ) : (
                   <p data-testid="edit-problem-model-loading" className="text-[13px] text-ink/45">
                     모델 목록을 불러오는 중...

@@ -85,7 +85,7 @@ from .models import (
     ClassroomScoringAttempt,
     ClassroomSubmission,
 )
-from .scoring_models import is_valid_model
+from .scoring_models import matches_naming_rule
 
 logger = logging.getLogger(__name__)
 
@@ -478,10 +478,10 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
         return {"submission_id": submission.id, "status": "repository_unreachable"}
 
     model = problem.model or class_obj.default_model
-    if not is_valid_model(model):
+    if not matches_naming_rule(model):
         # Problem.model·Class.default_model은 저장 시점에 검증되지만(classroom.api),
-        # 채점 시점의 SCORING_MODEL_CHOICES가 그 사이 좁혀졌을 수 있다 — 재시도로
-        # 나을 수 없는 설정 오류다.
+        # 채점 시점의 이름 규칙이 그 사이 좁혀졌을 수 있다 — 재시도로 나을 수
+        # 없는 설정 오류다.
         ClassroomScoringAttempt.objects.create(
             submission=submission, error=f"알 수 없는 채점 모델: {model!r}", permanent=True
         )

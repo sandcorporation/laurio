@@ -75,9 +75,9 @@ class Class(models.Model):
         max_length=10, choices=ScoringKeyStatus.choices, default=ScoringKeyStatus.UNVERIFIED
     )
 
-    #: 이 클래스의 기본 채점 모델(#285). 문제가 자기 값을 갖지 않으면 이
-    #: 값을 쓴다 — `classroom.scoring_models.SCORING_MODEL_CHOICES`에 있는
-    #: id 중 하나다.
+    #: 이 클래스의 기본 채점 모델(#285, #401). 문제가 자기 값을 갖지 않으면
+    #: 이 값을 쓴다 — 그 클래스의 키로 실제로 쓸 수 있는 모델만 저장된다
+    #: (`classroom.scoring_model_catalog.get_scoring_model_catalog`로 검증).
     default_model = models.CharField(max_length=50, default=DEFAULT_SCORING_MODEL)
 
     #: 가입 링크의 코드(#279). 다시 뽑으면 이 값이 새 무작위 문자열로

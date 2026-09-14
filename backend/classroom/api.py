@@ -90,11 +90,13 @@ from .schemas import (
     ProblemReorderIn,
     ProblemTemplateChecklistItemOut,
     PublishedTemplateSummaryOut,
+    ScoringModelCatalogOut,
     ScoringModelOut,
 )
 from .events import publish_attempt_submitted
 from .scoring import check_scoring_key
-from .scoring_models import SCORING_MODEL_CHOICES, is_valid_model
+from .scoring_model_catalog import get_scoring_model_catalog
+from .scoring_models import is_fallback_model
 from .submission_target_refs import source_target_ref
 from .services import copy_class, copy_problem_to_class
 from .tasks import score_attempt
@@ -144,6 +146,35 @@ def _validate_grading_guideline(strictness: str, text: str) -> tuple[str, str]:
             raise HttpError(422, "직접 입력 채점 지침은 문장을 비울 수 없습니다.")
         return strictness, text
     return strictness, ""
+
+
+def _validate_scoring_model_choice(class_obj: Class, model_id: str, *, current_value: str) -> None:
+    """저장 시점에 이 모델이 그 클래스의 키로 실제로 쓸 수 있는지 검증한다
+    (#401 AC). 클래스 기본값·문제별 값 둘 다 이 함수 하나를 쓴다 — 두
+    자리가 갈리면 클래스에서는 통과한 값이 문제에서는 거절되는(또는 그
+    반대) 상태가 생긴다.
+
+    조회가 되면(`source == "live"`) 그 결과에 있어야만 받는다 — 이미 같은
+    값을 쓰고 있어도 예외를 두지 않는다(그 사이 키의 권한이 좁혀졌을 수
+    있다). 조회가 불가하면(`source == "fallback"`, 키 없음·거부·조회 실패)
+    기본 목록 안의 값이거나 지금 저장된 값과 같을 때만 받는다 — 오타는
+    막되, 멀쩡히 쓰던 값이 벤더 장애 한 번에 막히지 않는다(#401
+    Implementation Decisions)."""
+
+    catalog = get_scoring_model_catalog(class_obj)
+    if catalog.source == "live":
+        if any(choice.id == model_id for choice in catalog.models):
+            return
+        raise HttpError(422, f"이 키로 쓸 수 없는 채점 모델입니다: {model_id}")
+
+    if model_id == current_value or is_fallback_model(model_id):
+        return
+    raise HttpError(
+        422,
+        f"지금은 모델 목록을 확인할 수 없어 기본 목록의 모델이나 지금 쓰는 모델만 "
+        f"저장할 수 있습니다: {model_id}",
+    )
+
 
 #: 마스킹은 복호화가 아니라 저장 시점에 남긴 마지막 네 자리로만 만든다 —
 #: `Class.openai_api_key_encrypted`를 다시 풀지 않는다(#284, 파일 상단 라우터
@@ -518,8 +549,10 @@ def get_class(request: HttpRequest, class_id: int):
 def update_class(request: HttpRequest, class_id: int, payload: ClassPatchIn):
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
 
-    if payload.default_model is not None and not is_valid_model(payload.default_model):
-        raise HttpError(422, f"알 수 없는 채점 모델입니다: {payload.default_model}")
+    if payload.default_model is not None:
+        _validate_scoring_model_choice(
+            class_obj, payload.default_model, current_value=class_obj.default_model
+        )
 
     update_fields = []
     if payload.name is not None:
@@ -598,14 +631,32 @@ def copy_class_view(request: HttpRequest, class_id: int):
     return 201, _serialize_class(new_class)
 
 
-@router.get("/scoring-models", response={200: list[ScoringModelOut]}, auth=jwt_auth)
-def list_scoring_models(request: HttpRequest):
-    """「클래스 설정」 화면이 선택지마다 컨텍스트 크기를 함께 보여주는 자리(#285)."""
+@router.get(
+    "/classes/{class_id}/scoring-models",
+    response={200: ScoringModelCatalogOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def list_class_scoring_models(request: HttpRequest, class_id: int):
+    """「클래스 설정」과 문제 만들기·편집이 선택지를 채우는 자리(#401) —
+    예전 전역 `GET /scoring-models`(#285)를 대신한다: 키가 클래스에 있으므로
+    "이 클래스의 키로 실제로 쓸 수 있는 모델"은 클래스 기준으로만 답할 수
+    있다. 남의 클래스는 404다(`_get_owned_class_or_404`와 같은 규율)."""
 
-    return 200, [
-        ScoringModelOut(id=c.id, label=c.label, context_window=c.context_window)
-        for c in SCORING_MODEL_CHOICES
-    ]
+    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    catalog = get_scoring_model_catalog(class_obj)
+    return 200, ScoringModelCatalogOut(
+        models=[
+            ScoringModelOut(
+                id=c.id,
+                label=c.label,
+                context_window=c.context_window,
+                is_reasoning_model=c.is_reasoning_model,
+            )
+            for c in catalog.models
+        ],
+        source=catalog.source,
+        unavailable_reason=catalog.unavailable_reason,
+    )
 
 
 @router.post(
@@ -961,8 +1012,8 @@ def create_problem(request: HttpRequest, class_id: int, payload: ProblemIn):
 
     # 편집(`update_problem`)과 같은 규칙이다 — 두 자리가 갈리면 만들 때는
     # 통과한 값이 고칠 때 거절되는 상태가 생긴다.
-    if payload.model and not is_valid_model(payload.model):
-        raise HttpError(422, f"알 수 없는 채점 모델입니다: {payload.model}")
+    if payload.model:
+        _validate_scoring_model_choice(class_obj, payload.model, current_value="")
     grading_strictness, grading_guideline_text = _validate_grading_guideline(
         payload.grading_strictness, payload.grading_guideline_text
     )
@@ -1155,8 +1206,8 @@ def update_problem(request: HttpRequest, class_id: int, problem_id: int, payload
         if payload.submission_formats is not None
         else None
     )
-    if payload.model and not is_valid_model(payload.model):
-        raise HttpError(422, f"알 수 없는 채점 모델입니다: {payload.model}")
+    if payload.model:
+        _validate_scoring_model_choice(class_obj, payload.model, current_value=problem.model)
 
     # 두 칸 중 하나라도 보내면 둘 다 함께 검증한다 — "문장은 직접 입력일
     # 때만 비어 있지 않다"는 두 칸을 함께 봐야 판단할 수 있는 불변식이라,

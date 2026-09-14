@@ -883,6 +883,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/scoring-models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Class Scoring Models
+         * @description 「클래스 설정」과 문제 만들기·편집이 선택지를 채우는 자리(#401) —
+         *     예전 전역 `GET /scoring-models`(#285)를 대신한다: 키가 클래스에 있으므로
+         *     "이 클래스의 키로 실제로 쓸 수 있는 모델"은 클래스 기준으로만 답할 수
+         *     있다. 남의 클래스는 404다(`_get_owned_class_or_404`와 같은 규율).
+         */
+        get: operations["classroom_api_list_class_scoring_models"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/unarchive": {
         parameters: {
             query?: never;
@@ -1110,26 +1133,6 @@ export interface paths {
          *     내려도 오류를 내지 않는다(멱등, `archive_class`와 같은 관용구).
          */
         post: operations["classroom_template_api_takedown_own_template"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/classroom/scoring-models": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Scoring Models
-         * @description 「클래스 설정」 화면이 선택지마다 컨텍스트 크기를 함께 보여주는 자리(#285).
-         */
-        get: operations["classroom_api_list_scoring_models"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -6248,12 +6251,32 @@ export interface components {
          * @enum {string}
          */
         ScoringBasis: "ai_judged" | "no_scoring_input" | "platform_failure";
+        /**
+         * ScoringModelCatalogOut
+         * @description 클래스 기준 채점 모델 선택지(#401) — 기존 전역 `GET
+         *     /classroom/scoring-models`를 대신한다. `source`가 "fallback"이면
+         *     `unavailable_reason`("no_api_key"|"fetch_failed")이 함께 실려 화면이
+         *     안내 한 줄을 보인다.
+         */
+        ScoringModelCatalogOut: {
+            /** Models */
+            models: components["schemas"]["ScoringModelOut"][];
+            /** Source */
+            source: string;
+            /** Unavailable Reason */
+            unavailable_reason?: string | null;
+        };
         /** ScoringModelOut */
         ScoringModelOut: {
             /** Context Window */
-            context_window: number;
+            context_window?: number | null;
             /** Id */
             id: string;
+            /**
+             * Is Reasoning Model
+             * @default false
+             */
+            is_reasoning_model: boolean;
             /** Label */
             label: string;
         };
@@ -8125,6 +8148,37 @@ export interface operations {
             };
         };
     };
+    classroom_api_list_class_scoring_models: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScoringModelCatalogOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     classroom_api_unarchive_class: {
         parameters: {
             query?: never;
@@ -8448,26 +8502,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorOut"];
-                };
-            };
-        };
-    };
-    classroom_api_list_scoring_models: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ScoringModelOut"][];
                 };
             };
         };

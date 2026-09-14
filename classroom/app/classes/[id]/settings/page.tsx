@@ -323,7 +323,7 @@ export default function ClassSettingsPage() {
   const params = useParams<{ id: string }>();
   const classId = Number(params.id);
   const { state, reload } = useClass(classId);
-  const modelsState = useScoringModels();
+  const { state: modelsState, reload: reloadModels } = useScoringModels(classId);
 
   const [apiKey, setApiKey] = useState("");
   const [keySaving, setKeySaving] = useState(false);
@@ -419,6 +419,9 @@ export default function ClassSettingsPage() {
       await setOpenAIKey(classId, apiKey);
       setApiKey("");
       reload();
+      // 키가 바뀌면 그 키로 실제로 쓸 수 있는 모델이 달라진다(#401) — 이
+      // 화면을 떠나지 않아도 모델 선택지가 새 키 기준으로 바로 갱신된다.
+      reloadModels();
     } catch (err) {
       setKeyError(err instanceof BackendError ? err.message : "키를 저장하지 못했습니다.");
     } finally {
@@ -635,6 +638,15 @@ export default function ClassSettingsPage() {
               </ErrorNote>
             ) : (
               <form onSubmit={handleModelSubmit} className="flex flex-col gap-2.5">
+                {modelsState.source === "fallback" ? (
+                  <Note>
+                    <span data-testid="scoring-models-unavailable-note">
+                      {modelsState.unavailableReason === "no_api_key"
+                        ? "키를 넣으면 이 키로 쓸 수 있는 모델을 보여드립니다 — 지금은 기본 목록입니다."
+                        : "지금은 모델 목록을 확인할 수 없어 기본 목록을 보여드립니다."}
+                    </span>
+                  </Note>
+                ) : null}
                 <label htmlFor="class-default-model">
                   <FieldLabel>기본 모델</FieldLabel>
                 </label>
@@ -648,7 +660,8 @@ export default function ClassSettingsPage() {
                   >
                     {modelsState.models.map((model) => (
                       <option key={model.id} value={model.id} data-testid={`scoring-model-option-${model.id}`}>
-                        {model.label} · 컨텍스트 {model.context_window.toLocaleString("ko-KR")} 토큰
+                        {model.label} · 컨텍스트{" "}
+                        {model.context_window ? `${model.context_window.toLocaleString("ko-KR")} 토큰` : "크기 미확인"}
                       </option>
                     ))}
                   </select>
