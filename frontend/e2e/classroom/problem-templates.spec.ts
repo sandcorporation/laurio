@@ -29,7 +29,7 @@ test("강사가 다른 강사의 템플릿을 목록에서 찾아 자기 클래�
   const classId = (await classResponse.json()).id as number;
 
   const problemResponse = await api.post(`/api/backend/classroom/classes/${classId}/problems`, {
-    data: { title, description: "테스트가 통과해야 합니다.", submission_format: "source" },
+    data: { title, description: "테스트가 통과해야 합니다.", submission_formats: ["source"] },
   });
   expect(problemResponse.ok()).toBeTruthy();
   const problemId = (await problemResponse.json()).id as number;

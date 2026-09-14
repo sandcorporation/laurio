@@ -358,7 +358,7 @@ cd backend && LAURIO_DB_PORT=55432 uv run python manage.py prune_e2e_junk
 `global-setup.ts` 의 순서가 그래서 그 순서다.
 
 **스위트는 기본으로 병렬 실행된다**(#104). `pyproject.toml` 의 `addopts` 가 `-n auto` 를
-준다 — 실측(이 머신, 당시 1192건 — 지금 1885건 통과·1건 skip. Assignment 가 #205~#212 로
+준다 — 실측(이 머신, 당시 1192건 — 지금 1906건 통과·1건 skip(#371 의 #372~#376 을 합친 시점). Assignment 가 #205~#212 로
 1312건에서 1377건까지, staging 검증이 낳은 #214~#217 로 1388건까지, 저장소만으로
 제출하고 채점 시점에 박제하는 #218~#220 으로 1407건까지, 채점 상한과 화면 열한 개
 (#213·#221~#231)로 1463건까지, 종류 게이트(#232)로 1467건까지, 공모전 이미지
@@ -610,10 +610,10 @@ pnpm --dir frontend exec playwright test --project=public e2e/payout.spec.ts -g 
 **CI 가 돌리는 것 (참고용 수치).**
 
 ```bash
-pnpm --dir frontend test            # 전체 (102건이던 시절 약 1.8분 — 지금 130건)
-pnpm --dir frontend test:public     # 공개 앱만 (74건이던 시절 약 1.4분 — 지금 88건)
-pnpm --dir frontend test:operator   # 운영자 앱만 (28건이던 시절 약 25초 — 지금 32건)
-pnpm --dir frontend test:classroom  # 강의실만 (6건이던 시절 CI 첫 실행 1.7초 — 지금 10건)
+pnpm --dir frontend test            # 전체 (102건이던 시절 약 1.8분 — 지금 132건)
+pnpm --dir frontend test:public     # 공개 앱만 (74건이던 시절 약 1.4분 — 지금 89건)
+pnpm --dir frontend test:operator   # 운영자 앱만 (28건이던 시절 약 25초 — 지금 31건)
+pnpm --dir frontend test:classroom  # 강의실만 (6건이던 시절 CI 첫 실행 1.7초 — 지금 12건)
 ```
 
 **로그인은 공개 앱 하나뿐이고, 끝나면 온 곳으로 돌려보낸다**(#297 후속). 강의실은

@@ -27,7 +27,7 @@ test("제출이 없는 클래스는 이름을 다시 쳐야 지워지고, 지우
   const classId = (await classResponse.json()).id as number;
 
   const problemResponse = await api.post(`/api/backend/classroom/classes/${classId}/problems`, {
-    data: { title: "1주차", submission_format: "repository" },
+    data: { title: "1주차", submission_formats: ["repository"] },
   });
   expect(problemResponse.ok()).toBeTruthy();
   const problemId = (await problemResponse.json()).id as number;
@@ -70,7 +70,7 @@ test("제출이 있는 클래스는 삭제 버튼 대신 보관 안내가 뜬다
   const joinCode = (await joinCodeResponse.json()).join_code as string;
 
   const problemResponse = await api.post(`/api/backend/classroom/classes/${classId}/problems`, {
-    data: { title: "1주차", submission_format: "repository" },
+    data: { title: "1주차", submission_formats: ["repository"] },
   });
   const problemId = (await problemResponse.json()).id as number;
   await api.post(
@@ -84,7 +84,7 @@ test("제출이 있는 클래스는 삭제 버튼 대신 보관 안내가 뜬다
   await establishClassroomSession(page, `${seed}-participant`);
   await api.post(`/api/backend/classroom/join/${joinCode}`, { data: { display_name: "참여자" } });
   await api.post(`/api/backend/classroom/classes/${classId}/problems/${problemId}/submissions`, {
-    data: { value: "https://github.com/octocat/hello" },
+    data: { value: "https://github.com/octocat/hello", submission_format: "repository" },
   });
 
   // 강사 세션으로 되돌아와 삭제 카드가 거절 안내로 바뀌어 있는지 본다.

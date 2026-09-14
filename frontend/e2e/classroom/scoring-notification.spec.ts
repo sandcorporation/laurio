@@ -46,7 +46,7 @@ test("채점이 끝나면 알림이 오고, 그 알림을 누르면 그 시도�
   expect(keyResponse.ok()).toBeTruthy();
 
   const problemResponse = await api.post(`/api/backend/classroom/classes/${classId}/problems`, {
-    data: { title: "1주차", submission_format: "repository" },
+    data: { title: "1주차", submission_formats: ["repository"] },
   });
   expect(problemResponse.ok()).toBeTruthy();
   const problemId = (await problemResponse.json()).id as number;
@@ -76,7 +76,7 @@ test("채점이 끝나면 알림이 오고, 그 알림을 누르면 그 시도�
 
   const submitResponse = await api.post(
     `/api/backend/classroom/classes/${classId}/problems/${problemId}/submissions`,
-    { data: { value: repositoryUrl } },
+    { data: { value: repositoryUrl, submission_format: "repository" } },
   );
   expect(submitResponse.ok()).toBeTruthy();
   const submissionId = (await submitResponse.json()).id as number;
