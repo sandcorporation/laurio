@@ -203,9 +203,14 @@ ADR-0036). 업로드 자료의 값은 `submission:{공모전id}:{개발자id}:{�
 모양이다(공모전의 `submission:<contest_id>:<developer_user_id>:<slot>`과는 접두어로
 갈린다, `submissions.resolvers.SubmissionTargetStateResolver`).
 
-**제출 즉시 비동기로 채점된다**(#287) — `classroom-submission-scoring` 스캔(60초
-주기)이 `ClassroomScore`가 아직 없고 그 클래스에 키가 있는 시도를 찾아 강사 본인의
-키·그 문제의 모델로 친다. `classroom.ClassroomScore`·`ClassroomScoringAttempt`가
+**제출 즉시 비동기로 채점된다**(#287, #378, ADR-0046) — 제출이 커밋되면 그 시도
+하나를 채점하는 Celery 작업이 곧바로 큐에 들어가고, `classroom-submission-scoring`
+스캔(60초 주기, `ClassroomScore`가 아직 없고 그 클래스에 키가 있는 시도를 찾는다)이
+안전망으로 그대로 남아 유실·실패한 작업을 대신 줍는다. 둘 다 스캔이 행 하나를
+처리하는 것과 같은 함수·같은 후보 조건을 쓰고, 행을 잠가(ADR-0006) 겹쳐도
+Score가 둘 생기지 않는다. 워커가 없는 dev·CI(#40)는 즉시 작업이 돌지 않아 스캔을
+직접 불러야 진행된다 — 강사 본인의 키·그 문제의 모델로 친다는 사실은 그대로다.
+`classroom.ClassroomScore`·`ClassroomScoringAttempt`가
 `scoring.Score`·`ScoringAttempt`와 같은 규율(ADR-0006 「시도당 하나, 재채점 없음」)을
 따르는 강의실 전용 테이블이다 — `scoring`·`ledger`가 공모전 가족이라 그 모델을
 가리킬 수 없다(ADR-0037/0039). 채점 실패가 5회(마감이 없어 ADR-0031의 「마감 후

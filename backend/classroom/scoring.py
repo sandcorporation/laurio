@@ -578,11 +578,30 @@ def _pending_submissions(as_of, ctx):
 
 
 def _score_one(submission, as_of, ctx):
+    """스캔·즉시 채점(#378) 두 경로가 공유하는 행 하나 처리.
+
+    두 경로가 같은 시도를 동시에 집을 수 있어(스캔 tick 과 제출 직후 Celery
+    태스크가 겹치는 것이 정상적인 경합이다) 실제 채점(네트워크 호출 포함) 앞에
+    행을 잠근다 — `select_for_update(skip_locked=True)` 로, 다른 쪽이 이미
+    잡고 있으면 기다리지 않고 그 자리에서 `None`("이번엔 아무 일도 없었다")을
+    돌려준다. 잠금을 채점이 끝날 때까지(LLM 호출 포함) 들고 있는 이유는 락을
+    Score 생성 직전에만 걸면 두 경로가 그 사이에 나란히 벤더를 호출해 키 비용이
+    두 번 나갈 수 있기 때문이다(#377 AC14) — ADR-0006 이 지키는 "시도당 Score
+    하나"는 결국 이 잠금이 지킨다."""
+
     try:
-        return score_classroom_submission_once(submission)
+        with transaction.atomic():
+            locked = (
+                ClassroomSubmission.objects.select_for_update(skip_locked=True)
+                .filter(pk=submission.pk)
+                .first()
+            )
+            if locked is None:
+                return None
+            return score_classroom_submission_once(locked)
     except Exception as exc:  # noqa: BLE001 - 한 행의 실패가 나머지 배치를 막으면 안 된다.
         logger.exception(
-            "ClassroomSubmission(pk=%s) 채점 스캔 처리 중 예외, 다음 건으로 계속", submission.id
+            "ClassroomSubmission(pk=%s) 채점 처리 중 예외, 다음 건으로 계속", submission.id
         )
         is_permanent = isinstance(exc, LLMAdapterPermanentError)
         ClassroomScoringAttempt.objects.create(
@@ -598,3 +617,26 @@ CLASSROOM_SUBMISSION_SCORING_SCAN = ScanSpec(
     handle_row=_score_one,
     order_by=("attempt_count", "id"),
 )
+
+
+def score_classroom_attempt(submission_id: int) -> dict:
+    """즉시 채점 진입점(#378) — 내부 엔드포인트(`classroom.internal_api`)가
+    부른다. 스캔과 **같은 후보 조건**(`_pending_submissions`)·**같은 행 처리
+    함수**(`_score_one`, 잠금 포함)를 그대로 재사용한다 — 조건을 복제하지
+    않는다.
+
+    시도가 그 조건 밖이면(키 없음·거부·예산 정지·이미 채점됨) 시도로 남기지
+    않고 조용히 건너뛴다 — 스캔 tick 사이의 경합과 같은 이유다: 강사가 제출
+    직후 곧바로 키를 지웠거나, 스캔이 이미 채점을 끝냈을 수 있다."""
+
+    as_of = Clock.now()
+    ctx: dict = {}
+    try:
+        submission = _pending_submissions(as_of, ctx).get(pk=submission_id)
+    except ClassroomSubmission.DoesNotExist:
+        return {"submission_id": submission_id, "status": "not_a_candidate"}
+
+    result = _score_one(submission, as_of, ctx)
+    if result is None:
+        return {"submission_id": submission_id, "status": "locked_elsewhere"}
+    return result
