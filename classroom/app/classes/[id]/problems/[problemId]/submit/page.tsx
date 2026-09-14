@@ -145,6 +145,8 @@ export default function ProblemSubmitPage() {
         passed={problem.passed}
         description={problem.description}
         checklistItems={problem.checklist_items}
+        gradingStrictness={problem.grading_strictness}
+        gradingGuidelineCustomText={problem.grading_guideline_text}
         submissionFormats={problem.submission_formats}
         submissions={submissions}
         memberExpelled={memberExpelled}

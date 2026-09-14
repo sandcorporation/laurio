@@ -1,7 +1,7 @@
-// 문제 템플릿 백엔드 호출 (#316/#318/#320).
+// 문제 템플릿 백엔드 호출 (#316/#318/#320/#389).
 import { backendJson } from "@/lib/backend/client";
 
-import type { ProblemRow, SubmissionFormat } from "@/lib/problems/api";
+import type { GradingStrictness, ProblemRow, SubmissionFormat } from "@/lib/problems/api";
 
 export type TemplateChecklistItemRow = {
   label: string;
@@ -15,6 +15,9 @@ export type ProblemTemplateRow = {
   title: string;
   description: string;
   submission_formats: SubmissionFormat[];
+  // 공개 시점 원본의 채점 지침(#389, CONTEXT.md 「채점 지침」).
+  grading_strictness: GradingStrictness;
+  grading_guideline_text: string;
   publisher_display_name: string;
   created_at: string;
   taken_down: boolean;

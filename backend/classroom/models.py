@@ -18,6 +18,7 @@ from django.db import models
 
 from submissions.models import Submission
 
+from .grading_guidelines import DEFAULT_GRADING_STRICTNESS, GRADING_GUIDELINE_TEXT_MAX_LENGTH
 from .scoring_models import DEFAULT_SCORING_MODEL
 
 
@@ -159,6 +160,17 @@ class Problem(models.Model):
         DRAFT = "draft", "초안"
         OPEN = "open", "열림"
 
+    class GradingStrictness(models.TextChoices):
+        """채점 지침의 네 단계(#386, CONTEXT.md 「채점 지침」) — 세 단계는
+        `grading_guidelines.PRESET_GRADING_GUIDELINE_TEXT`에 정해 둔 문장을,
+        `CUSTOM`은 `grading_guideline_text`에 담긴 강사의 문장을 그대로
+        채점 프롬프트에 싣는다."""
+
+        STRICT = "strict", "엄격"
+        NORMAL = "normal", "보통"
+        LENIENT = "lenient", "관대"
+        CUSTOM = "custom", "직접 입력"
+
     classroom = models.ForeignKey(Class, related_name="problems", on_delete=models.CASCADE)
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True, default="")
@@ -179,6 +191,24 @@ class Problem(models.Model):
     #: 근거는 이 필드가 아니라 그 채점(Score)이 그 시점에 남긴 값이 지킨다 —
     #: 여기를 바꿔도 이미 산출된 판정은 다시 계산되지 않는다.
     model = models.CharField(max_length=50, blank=True, default="")
+
+    #: 채점 지침 단계(#386, CONTEXT.md 「채점 지침」) — 체크리스트 항목을
+    #: 얼마나 글자 그대로 따질지. 기본은 「보통」이다: 「hello world 를
+    #: 출력하라」에 `hello world!`를 낸 사람을 틀렸다고 하면 학습이 아니라
+    #: 받아쓰기가 된다. 지침을 바꿔도 이미 매긴 판정(`ClassroomScore`)은
+    #: append-only라 그대로 남는다(ADR-0006) — 새로 들어오는 시도부터
+    #: 새 지침을 탄다.
+    grading_strictness = models.CharField(
+        max_length=10,
+        choices=GradingStrictness.choices,
+        default=DEFAULT_GRADING_STRICTNESS,
+    )
+    #: `grading_strictness`가 `CUSTOM`일 때만 뜻이 있는 강사의 문장. 그 밖의
+    #: 단계에서는 API가 언제나 빈 문자열로 저장한다(#386 AC) — 두 칸이
+    #: 어긋난 상태(비-CUSTOM인데 문장이 남아 있는 것)를 구조로 막는다.
+    grading_guideline_text = models.CharField(
+        max_length=GRADING_GUIDELINE_TEXT_MAX_LENGTH, blank=True, default=""
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -374,6 +404,17 @@ class ProblemTemplate(models.Model):
     #: `Problem.submission_formats`와 같은 이유·같은 모양(#373/#374) — 공개
     #: 시점에 원본이 허용하던 형식 목록을 그대로 사본에 담는다.
     submission_formats = models.JSONField(default=list)
+    #: `Problem.grading_strictness`/`grading_guideline_text`와 같은 이유·같은
+    #: 모양(#389) — 지침은 "무엇을 통과로 볼지"의 일부라 채점 모델과 달리
+    #: 공개 시점에 원본이 가진 값을 그대로 사본에 담는다.
+    grading_strictness = models.CharField(
+        max_length=10,
+        choices=Problem.GradingStrictness.choices,
+        default=DEFAULT_GRADING_STRICTNESS,
+    )
+    grading_guideline_text = models.CharField(
+        max_length=GRADING_GUIDELINE_TEXT_MAX_LENGTH, blank=True, default=""
+    )
 
     #: 추측 불가능한 공유 코드 — 가입 링크와 같은 모양, 같은 생성기다(#316
     #: Implementation Decisions "가입 링크와 같은 모양").
@@ -548,6 +589,16 @@ class ClassTemplateProblem(models.Model):
     description = models.TextField(blank=True, default="")
     #: `Problem.submission_formats`와 같은 이유·같은 모양(#373/#374).
     submission_formats = models.JSONField(default=list)
+    #: `Problem.grading_strictness`/`grading_guideline_text`와 같은 이유·같은
+    #: 모양(#389).
+    grading_strictness = models.CharField(
+        max_length=10,
+        choices=Problem.GradingStrictness.choices,
+        default=DEFAULT_GRADING_STRICTNESS,
+    )
+    grading_guideline_text = models.CharField(
+        max_length=GRADING_GUIDELINE_TEXT_MAX_LENGTH, blank=True, default=""
+    )
     order = models.PositiveIntegerField(default=0)
 
     class Meta:

@@ -5,6 +5,8 @@ from typing import Annotated
 
 from ninja import Field, Schema
 
+from .grading_guidelines import GRADING_GUIDELINE_TEXT_MAX_LENGTH
+
 
 class ErrorOut(Schema):
     detail: str
@@ -155,6 +157,14 @@ class ProblemIn(Schema):
     #: 긴 설명을 쉽게 쓰게 되면서, 기본값(가장 작은 컨텍스트)으로 열린 뒤에야
     #: 고칠 수 있다는 것이 더 자주 물리게 됐다.
     model: str = ""
+    #: 채점 지침 단계(#386, CONTEXT.md 「채점 지침」) —
+    #: "strict"|"normal"|"lenient"|"custom" 중 하나. 기본은 "normal"이다.
+    #: 모르는 값은 422다.
+    grading_strictness: str = "normal"
+    #: `grading_strictness`가 "custom"일 때의 강사 문장. 그 밖의 단계에서
+    #: 보내도 API가 무시하고 빈 문자열로 저장한다 — 두 칸이 어긋난 상태를
+    #: 구조로 막는다.
+    grading_guideline_text: str = Field(default="", max_length=GRADING_GUIDELINE_TEXT_MAX_LENGTH)
     #: True면 만든 직후 바로 연다(「만들고 바로 열기」, #315). 필수 항목이
     #: 하나도 없으면(열기 엔드포인트와 같은 규칙) 요청 전체가 거부되고
     #: 문제도 생기지 않는다.
@@ -171,6 +181,15 @@ class ProblemPatchIn(Schema):
     #: 따르게 한다 — `None`(필드 생략)은 "바꾸지 않는다"는 기존 PATCH
     #: 관례 그대로다.
     model: str | None = None
+    #: 필드를 생략하면(`None`) 바꾸지 않는다. 보내면 `ProblemIn`과 같은
+    #: 규칙(#386) — 모르는 값·빈 직접 입력 문장은 422다.
+    grading_strictness: str | None = None
+    #: 필드를 생략하면(`None`) 바꾸지 않는다. `grading_strictness`가
+    #: (이번 요청이나 기존 값으로) "custom"이 아니게 되면 이 값은 저장
+    #: 시점에 빈 문자열로 덮인다.
+    grading_guideline_text: str | None = Field(
+        default=None, max_length=GRADING_GUIDELINE_TEXT_MAX_LENGTH
+    )
 
 
 class ProblemOut(Schema):
@@ -187,6 +206,11 @@ class ProblemOut(Schema):
     model: str
     #: 실제로 채점에 쓰일 값 — `model`이 비어 있으면 클래스의 `default_model`.
     effective_model: str
+    #: 채점 지침 단계(#386) — "strict"|"normal"|"lenient"|"custom".
+    grading_strictness: str
+    #: `grading_strictness`가 "custom"일 때만 채워지고, 그 밖의 단계에서는
+    #: 언제나 빈 문자열이다(저장 시점에 이미 그렇게 정규화된다).
+    grading_guideline_text: str
     checklist_items: list[ChecklistItemOut] = []
     #: 이 문제를 한 번이라도 통과한 참여자 수(#289, CONTEXT.md 「달성률」) —
     #: 강사 본인과 내보내진 참여자는 빼고 센다.
@@ -271,6 +295,11 @@ class ClassroomProblemMineOut(Schema):
     title: str
     description: str
     submission_formats: list[str]
+    #: 채점 지침 단계(#388, CONTEXT.md 「채점 지침」) — 참여자도 어떤 기준으로
+    #: 판정되는지 알고 제출해야 한다(#385 User Story 18).
+    grading_strictness: str
+    #: `grading_strictness`가 "custom"일 때만 채워진다.
+    grading_guideline_text: str
     checklist_items: list[ChecklistItemOut] = []
     #: 이 문제를 한 번이라도 통과한 적이 있는가(#288, CONTEXT.md 「통과」) —
     #: 최신 시도가 아니라 시도 전체에 대한 OR다. 한 번 통과하면 나중에 다시
@@ -482,6 +511,11 @@ class ProblemTemplateOut(Schema):
     title: str
     description: str
     submission_formats: list[str]
+    #: 공개 시점 원본의 채점 지침(#389, CONTEXT.md 「채점 지침」) — 가져가기
+    #: 전에 어떤 기준으로 채점될지 미리 본다.
+    grading_strictness: str
+    #: grading_strictness가 "custom"일 때만 채워진다.
+    grading_guideline_text: str
     publisher_display_name: str
     created_at: datetime
     taken_down: bool = False
@@ -537,6 +571,9 @@ class ClassTemplateProblemOut(Schema):
     title: str
     description: str
     submission_formats: list[str]
+    #: `ProblemTemplateOut.grading_strictness`와 같은 이유·같은 모양(#389).
+    grading_strictness: str
+    grading_guideline_text: str
     order: int
     checklist_items: list[ProblemTemplateChecklistItemOut] = []
 

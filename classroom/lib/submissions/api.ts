@@ -1,7 +1,7 @@
-// 참여자 제출 백엔드 호출 (#286/#287/#288). 강사 전용 `problems/api.ts`와
+// 참여자 제출 백엔드 호출 (#286/#287/#288/#388). 강사 전용 `problems/api.ts`와
 // 달리 여기는 참여자가 자기 시도만 보고 낸다.
 import { backendJson } from "@/lib/backend/client";
-import type { ChecklistItemRow, SubmissionFormat } from "@/lib/problems/api";
+import type { ChecklistItemRow, GradingStrictness, SubmissionFormat } from "@/lib/problems/api";
 
 export type ProblemMine = {
   id: number;
@@ -9,6 +9,11 @@ export type ProblemMine = {
   title: string;
   description: string;
   submission_formats: SubmissionFormat[];
+  // 채점 지침 단계(#388, CONTEXT.md 「채점 지침」) — 참여자가 어떤 기준으로
+  // 판정되는지 알고 제출하도록 문제 화면이 체크리스트 가까이 보여준다.
+  grading_strictness: GradingStrictness;
+  // grading_strictness가 "custom"일 때만 채워진다.
+  grading_guideline_text: string;
   checklist_items: ChecklistItemRow[];
   // 이 문제를 한 번이라도 통과한 적이 있는가(#288) — 최신 시도가 아니라
   // 시도 전체의 OR. 한 번 통과하면 나중에 미통과가 나와도 계속 참이다.

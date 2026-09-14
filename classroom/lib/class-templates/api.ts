@@ -5,12 +5,15 @@ import { backendJson } from "@/lib/backend/client";
 
 import type { ClassRow } from "@/lib/classes/api";
 import type { TemplateChecklistItemRow } from "@/lib/problem-templates/api";
-import type { SubmissionFormat } from "@/lib/problems/api";
+import type { GradingStrictness, SubmissionFormat } from "@/lib/problems/api";
 
 export type ClassTemplateProblemRow = {
   title: string;
   description: string;
   submission_formats: SubmissionFormat[];
+  // 공개 시점 원본의 채점 지침(#389, CONTEXT.md 「채점 지침」).
+  grading_strictness: GradingStrictness;
+  grading_guideline_text: string;
   order: number;
   checklist_items: TemplateChecklistItemRow[];
 };

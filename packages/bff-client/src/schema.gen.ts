@@ -4005,6 +4005,10 @@ export interface components {
             checklist_items: components["schemas"]["ProblemTemplateChecklistItemOut"][];
             /** Description */
             description: string;
+            /** Grading Guideline Text */
+            grading_guideline_text: string;
+            /** Grading Strictness */
+            grading_strictness: string;
             /** Order */
             order: number;
             /** Submission Formats */
@@ -4137,6 +4141,10 @@ export interface components {
             classroom_id: number;
             /** Description */
             description: string;
+            /** Grading Guideline Text */
+            grading_guideline_text: string;
+            /** Grading Strictness */
+            grading_strictness: string;
             /** Id */
             id: number;
             /**
@@ -5685,6 +5693,16 @@ export interface components {
              */
             description: string;
             /**
+             * Grading Guideline Text
+             * @default
+             */
+            grading_guideline_text: string;
+            /**
+             * Grading Strictness
+             * @default normal
+             */
+            grading_strictness: string;
+            /**
              * Model
              * @default
              */
@@ -5712,6 +5730,10 @@ export interface components {
             description: string;
             /** Effective Model */
             effective_model: string;
+            /** Grading Guideline Text */
+            grading_guideline_text: string;
+            /** Grading Strictness */
+            grading_strictness: string;
             /** Id */
             id: number;
             /**
@@ -5742,6 +5764,10 @@ export interface components {
         ProblemPatchIn: {
             /** Description */
             description?: string | null;
+            /** Grading Guideline Text */
+            grading_guideline_text?: string | null;
+            /** Grading Strictness */
+            grading_strictness?: string | null;
             /** Model */
             model?: string | null;
             /** Submission Formats */
@@ -5794,6 +5820,10 @@ export interface components {
             created_at: string;
             /** Description */
             description: string;
+            /** Grading Guideline Text */
+            grading_guideline_text: string;
+            /** Grading Strictness */
+            grading_strictness: string;
             /** Id */
             id: number;
             /**

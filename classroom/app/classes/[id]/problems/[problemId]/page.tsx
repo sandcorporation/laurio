@@ -17,6 +17,11 @@ import {
   PageShell,
   buttonClass,
 } from "@/app/components/ui";
+import {
+  GradingGuidelineEditor,
+  isGradingGuidelineValid,
+  type GradingGuidelineValue,
+} from "@/app/components/GradingGuidelineEditor";
 import { MarkdownEditor } from "@/app/components/MarkdownEditor";
 import { ProblemParticipantView } from "@/app/components/ProblemParticipantView";
 import { useParams, useRouter } from "next/navigation";
@@ -62,6 +67,11 @@ export default function EditProblemPage() {
   const [description, setDescription] = useState("");
   const [submissionFormats, setSubmissionFormats] = useState<SubmissionFormat[]>(["source"]);
   const [model, setModel] = useState("");
+  // 채점 지침(#386) — 불러온 문제 값으로 아래 effect가 채운다.
+  const [gradingGuideline, setGradingGuideline] = useState<GradingGuidelineValue>({
+    grading_strictness: "normal",
+    grading_guideline_text: "",
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -91,6 +101,10 @@ export default function EditProblemPage() {
       setDescription(state.problem.description);
       setSubmissionFormats(state.problem.submission_formats);
       setModel(state.problem.model);
+      setGradingGuideline({
+        grading_strictness: state.problem.grading_strictness,
+        grading_guideline_text: state.problem.grading_guideline_text,
+      });
       // 새로고침해도 공개 상태(공유 링크·「내리기」)가 보이도록 서버가
       // 내려준 「지금 살아 있는 템플릿」으로 맞춘다(#333) — 예전에는 이
       // 상태가 화면 안에만 있어 새로고침하면 사라지고 폼이 다시 떠 같은
@@ -129,6 +143,7 @@ export default function EditProblemPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!isGradingGuidelineValid(gradingGuideline)) return;
     setSaving(true);
     setError(null);
     try {
@@ -137,6 +152,8 @@ export default function EditProblemPage() {
         description,
         submission_formats: submissionFormats,
         model,
+        grading_strictness: gradingGuideline.grading_strictness,
+        grading_guideline_text: gradingGuideline.grading_guideline_text,
       });
       reload();
       router.push(`/classes/${classId}`);
@@ -587,6 +604,12 @@ export default function EditProblemPage() {
               </div>
             </Card>
 
+            <GradingGuidelineEditor
+              value={gradingGuideline}
+              onChange={setGradingGuideline}
+              testIdPrefix="edit-problem"
+            />
+
             <Card>
               <CardHeader title="다른 클래스로 복사" />
               <div className="flex flex-col gap-2.5 p-4">
@@ -746,7 +769,12 @@ export default function EditProblemPage() {
             type="submit"
             form="edit-problem-form"
             data-testid="edit-problem-submit"
-            disabled={saving || title.trim() === "" || submissionFormats.length === 0}
+            disabled={
+              saving ||
+              title.trim() === "" ||
+              submissionFormats.length === 0 ||
+              !isGradingGuidelineValid(gradingGuideline)
+            }
             className={buttonClass("primary")}
           >
             {saving ? "저장하는 중..." : "저장"}
@@ -784,6 +812,8 @@ export default function EditProblemPage() {
               title={title.trim() === "" ? "(제목 없음)" : title}
               description={description}
               checklistItems={problem.checklist_items}
+              gradingStrictness={gradingGuideline.grading_strictness}
+              gradingGuidelineCustomText={gradingGuideline.grading_guideline_text}
               submissionFormats={submissionFormats}
               submissions={[]}
             />

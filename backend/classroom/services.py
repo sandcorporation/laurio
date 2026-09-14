@@ -1,10 +1,14 @@
-"""문제·클래스 복사 (#292/#293, CONTEXT.md 「강의실」).
+"""문제·클래스 복사 (#292/#293/#389, CONTEXT.md 「강의실」).
 
-**복사는 언제나 문제와 체크리스트와 채점 설정(문제 자신의 `model`)만
-데려온다.** 제출물·시도·Score·참여자는 애초에 이 함수가 모르는
+**복사는 언제나 문제와 체크리스트와 채점 설정(문제 자신의 `model`)·채점
+지침(#389)만 데려온다.** 제출물·시도·Score·참여자는 애초에 이 함수가 모르는
 것들이다 — 원본에 그런 행이 있어도 이 함수가 참조하는 필드는 여기
 적힌 것뿐이라 자연히 따라오지 않는다. 복사본은 원본과 행이 다르므로
 한쪽을 고쳐도 다른 쪽이 바뀌지 않는다.
+
+**채점 지침은 채점 모델과 달리 템플릿에도 따라간다** — 지침은 "무엇을
+통과로 볼지"의 일부라, 옮기지 않으면 가져간 사람이 다른 기준으로 채점되는
+문제를 넘겨받는 셈이다(#385 Implementation Decisions).
 """
 
 from __future__ import annotations
@@ -65,6 +69,8 @@ def copy_problem_to_class(problem: Problem, target_class: Class) -> Problem:
         status=Problem.Status.DRAFT,
         order=target_class.problems.count(),
         model=problem.model,
+        grading_strictness=problem.grading_strictness,
+        grading_guideline_text=problem.grading_guideline_text,
     )
     ChecklistItem.objects.bulk_create(
         ChecklistItem(
@@ -148,6 +154,8 @@ def publish_problem_as_template(
                 title=problem.title,
                 description=problem.description,
                 submission_formats=problem.submission_formats,
+                grading_strictness=problem.grading_strictness,
+                grading_guideline_text=problem.grading_guideline_text,
             )
             ProblemTemplateChecklistItem.objects.bulk_create(
                 ProblemTemplateChecklistItem(
@@ -176,6 +184,8 @@ def import_problem_template(template: ProblemTemplate, target_class: Class) -> P
         submission_formats=template.submission_formats,
         status=Problem.Status.DRAFT,
         order=target_class.problems.count(),
+        grading_strictness=template.grading_strictness,
+        grading_guideline_text=template.grading_guideline_text,
     )
     ChecklistItem.objects.bulk_create(
         ChecklistItem(problem=problem, label=item.label, required=item.required, order=item.order)
@@ -218,6 +228,8 @@ def publish_class_as_template(
                     title=problem.title,
                     description=problem.description,
                     submission_formats=problem.submission_formats,
+                    grading_strictness=problem.grading_strictness,
+                    grading_guideline_text=problem.grading_guideline_text,
                     order=problem.order,
                 )
                 ClassTemplateProblemChecklistItem.objects.bulk_create(
@@ -254,6 +266,8 @@ def import_class_template(template: ClassTemplate, *, instructor_id: int, name: 
             submission_formats=template_problem.submission_formats,
             status=Problem.Status.DRAFT,
             order=template_problem.order,
+            grading_strictness=template_problem.grading_strictness,
+            grading_guideline_text=template_problem.grading_guideline_text,
         )
         ChecklistItem.objects.bulk_create(
             ChecklistItem(problem=problem, label=item.label, required=item.required, order=item.order)
