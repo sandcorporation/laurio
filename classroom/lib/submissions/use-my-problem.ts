@@ -14,7 +14,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { BackendError } from "@/lib/backend/client";
 import { useEventStream } from "@/lib/events/stream-context";
 import { decideStreamRefresh } from "@/lib/events/policy";
-import { ATTEMPT_SCORED, type StreamConnectionState } from "@/lib/events/types";
+import {
+  ATTEMPT_SCORED,
+  ATTEMPT_SUBMITTED,
+  type StreamConnectionState,
+} from "@/lib/events/types";
 
 import { fetchMyProblem, type ProblemSubmissions } from "./api";
 
@@ -51,11 +55,14 @@ export function useMyProblem(classId: number, problemId: number) {
     reload();
   }, [reload]);
 
-  // 이 문제의 attempt-scored만 반응한다 — 다른 문제·다른 클래스의 신호는
-  // 무시한다(각 화면은 자기와 관계있는 신호에만 반응한다, ADR-0046).
+  // 이 문제의 attempt-submitted·attempt-scored만 반응한다 — 다른 문제·다른
+  // 클래스의 신호는 무시한다(각 화면은 자기와 관계있는 신호에만 반응한다,
+  // ADR-0046). attempt-submitted를 더한 이유는 #383 AC "다른 탭에서 낸
+  // 시도가 나타난다" — 이 참여자가 다른 탭·기기에서 낸 시도도 새로고침
+  // 없이 이 목록에 보여야 한다.
   useEffect(() => {
     return subscribe((event) => {
-      if (event.kind !== ATTEMPT_SCORED) return;
+      if (event.kind !== ATTEMPT_SCORED && event.kind !== ATTEMPT_SUBMITTED) return;
       if (event.payload.class_id !== classId || event.payload.problem_id !== problemId) return;
       reload();
     });
