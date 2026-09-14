@@ -29,7 +29,7 @@ import {
   shouldShowRejectedScoringKeyBanner,
 } from "@/lib/classes/missing-scoring-key-banner";
 import { useClass } from "@/lib/classes/use-class";
-import { formatAchievementRate } from "@/lib/problems/achievement";
+import { describeAchievementRate, formatAchievementRate } from "@/lib/problems/achievement";
 import { useProblems } from "@/lib/problems/use-problems";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 
@@ -430,11 +430,20 @@ export default function ClassDetailPage() {
                             {STATUS_LABEL[problem.status]}
                           </Badge>
                         </span>
+                        {/* 라벨을 위, 값을 아래에 쌓는다 — 한 줄에 「달성률 100% · 12/12명」을
+                            넣으면 고정 폭 칸에서 줄이 밀렸다. 폭은 가장 긴 값이 들어가게 잡고
+                            값은 줄바꿈하지 않아 행마다 오른쪽 끝이 맞는다. */}
                         <span
                           data-testid={`problem-row-${problem.id}-achievement-rate`}
-                          className="w-[110px] shrink-0 text-right font-mono text-[13px] text-ink/60"
+                          aria-label={describeAchievementRate(problem)}
+                          className="flex w-[7.5rem] shrink-0 flex-col items-end leading-tight"
                         >
-                          달성률 {formatAchievementRate(problem)}
+                          <span aria-hidden="true" className="text-[11px] text-ink/45">
+                            달성률
+                          </span>
+                          <span aria-hidden="true" className="whitespace-nowrap font-mono text-[13px] text-ink/60">
+                            {formatAchievementRate(problem)}
+                          </span>
                         </span>
                         <span className="flex shrink-0 gap-1">
                           <button
