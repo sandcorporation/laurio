@@ -334,10 +334,16 @@ done
 # 배포가 실패한 것처럼 보인다(빌드 #5 가 실제로 그렇게 실패했다). 하드코딩 대신
 # ALLOWED_HOSTS 의 첫 항목을 쓴다 — 환경마다 다르고, 그 값이 곧 「이 배포가
 # 받아들이는 이름」이다.
+#
+# **`X-Forwarded-Proto: https` 도 붙인다.** prod 는 `SECURE_SSL_REDIRECT` 가 켜져 있어
+# 루프백 평문 요청에 301(https 로)을 돌려준다 — 앞단 TLS 프록시를 거친 요청이 아니기
+# 때문이다. 헬스 체크는 그 프록시를 거친 요청처럼 보여야 한다. prod 첫 배포(Oracle
+# 빌드 #8)가 gunicorn 이 멀쩡히 뜬 채 「150초 안에 응답하지 않았다」로 실패했다
+# (같은 요청에 이 헤더를 붙이면 200 이었다). staging 은 리다이렉트가 없어 무해하다.
 HEALTHY=false
 i=0
 while [ "$i" -lt 30 ]; do
-  if $COMPOSE exec -T backend python -c "import os,urllib.request,sys; host=(os.environ.get('DJANGO_ALLOWED_HOSTS') or '').split(',')[0].strip() or '127.0.0.1'; req=urllib.request.Request('http://127.0.0.1:8000/api/health', headers={'Host': host}); sys.exit(0 if urllib.request.urlopen(req, timeout=3).status==200 else 1)" 2>/dev/null; then
+  if $COMPOSE exec -T backend python -c "import os,urllib.request,sys; host=(os.environ.get('DJANGO_ALLOWED_HOSTS') or '').split(',')[0].strip() or '127.0.0.1'; req=urllib.request.Request('http://127.0.0.1:8000/api/health', headers={'Host': host, 'X-Forwarded-Proto': 'https'}); sys.exit(0 if urllib.request.urlopen(req, timeout=3).status==200 else 1)" 2>/dev/null; then
     HEALTHY=true
     break
   fi
@@ -359,7 +365,7 @@ log "backend 응답 확인"
 EVENTS_HEALTHY=false
 i=0
 while [ "$i" -lt 30 ]; do
-  if $COMPOSE exec -T events python -c "import os,urllib.request,sys; host=(os.environ.get('DJANGO_ALLOWED_HOSTS') or '').split(',')[0].strip() or '127.0.0.1'; req=urllib.request.Request('http://127.0.0.1:8001/api/health', headers={'Host': host}); sys.exit(0 if urllib.request.urlopen(req, timeout=3).status==200 else 1)" 2>/dev/null; then
+  if $COMPOSE exec -T events python -c "import os,urllib.request,sys; host=(os.environ.get('DJANGO_ALLOWED_HOSTS') or '').split(',')[0].strip() or '127.0.0.1'; req=urllib.request.Request('http://127.0.0.1:8001/api/health', headers={'Host': host, 'X-Forwarded-Proto': 'https'}); sys.exit(0 if urllib.request.urlopen(req, timeout=3).status==200 else 1)" 2>/dev/null; then
     EVENTS_HEALTHY=true
     break
   fi
