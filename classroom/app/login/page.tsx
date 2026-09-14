@@ -63,18 +63,10 @@ export default async function ClassroomLoginPage({
         <h1 className="text-[22px] font-semibold tracking-[-0.01em]" data-testid="classroom-login-heading">
           로그인이 필요합니다
         </h1>
-        <p className="mt-3 text-[13.5px] leading-relaxed text-ink/60" data-testid="classroom-login-guide">
-          클래스는 별도 계정 없이 Laurio 로그인을 그대로 씁니다. 아래 버튼으로
-          로그인하면 원래 보던 화면으로 자동으로 돌아옵니다.
-        </p>
         <p className="mt-6">
           <a href={loginUrl} data-testid="classroom-login-link" className={buttonClass("primary")}>
-            Laurio 로그인으로 이동
+            로그인
           </a>
-        </p>
-        <p className="mt-6 border-t border-rule pt-4 text-[11.5px] leading-relaxed text-ink/45">
-          로그인하면 같은 계정으로 공모전과 클래스를 모두 쓸 수 있습니다. 이미 로그인했는데도 이
-          화면이 보인다면 세션이 만료된 것입니다.
         </p>
       </div>
     </PageShell>
