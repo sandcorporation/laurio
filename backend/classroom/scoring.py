@@ -321,20 +321,31 @@ def _record_token_usage(class_obj: Class, total_tokens: int) -> None:
 
 def _mark_scoring_key_rejected(class_obj: Class) -> None:
     """벤더가 401·403으로 이 클래스의 채점 키를 거절했다(#355) — 상태를
-    「거부됨」으로 옮긴다. 이미 「거부됨」이면 아무것도 하지 않는다 — 같은
-    상태로 다시 쓰지 않는 것 자체가 "새로 거부된 순간"을 구별하는 유일한
-    신호다(#356이 이 신호에 얹어 강사에게 알린다).
+    「거부됨」으로 옮기고, **새로 거부된 순간에만**(#356) 강사에게 알린다.
+    이미 「거부됨」이면 상태도 알림도 건드리지 않는다 — 밀린 제출이 몇
+    건이든, 스캔이 몇 번을 돌든 상태 전이 한 번에 알림 하나다(#295의 예산
+    경고와 같은 규율). 강사가 새 키를 저장해 상태가 벗어났다가 그 키도
+    거절당하면, 그때는 다시 "새로 거부된 순간"이라 다시 알린다.
 
     `_record_token_usage`와 같은 이유로 `select_for_update`로 잠그고 다시
     읽는다 — 같은 tick 안에서 이 클래스의 시도 여러 개가 순서대로 이
     함수를 부를 수 있어, 잠그지 않으면 각자 손에 쥔 옛 값을 기준으로
     판단해 "새로 거부됨"을 여러 번 셀 수 있다."""
 
+    newly_rejected = False
     with transaction.atomic():
         locked = Class.objects.select_for_update().get(pk=class_obj.pk)
         if locked.openai_api_key_status != Class.ScoringKeyStatus.REJECTED:
             locked.openai_api_key_status = Class.ScoringKeyStatus.REJECTED
             locked.save(update_fields=["openai_api_key_status"])
+            newly_rejected = True
+
+    if newly_rejected:
+        notify_safely(
+            recipient=locked.instructor,
+            notification_type=NotificationType.CLASSROOM_SCORING_KEY_REJECTED,
+            context={"class_id": locked.id, "class_name": locked.name},
+        )
 
 
 def _notify_submitter_of_score(submission: ClassroomSubmission, score: ClassroomScore, checklist_items: list[ChecklistItem]) -> None:

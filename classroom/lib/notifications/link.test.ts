@@ -55,6 +55,22 @@ describe("notificationHref — classroom_token_budget_warning", () => {
   });
 });
 
+describe("notificationHref — classroom_scoring_key_rejected", () => {
+  it("그 클래스의 설정 화면 — 채점 키 자리까지 짓는다(#356, #329)", () => {
+    const href = notificationHref(
+      row({ notification_type: "classroom_scoring_key_rejected", context: { class_id: 7 } }),
+    );
+    expect(href).toBe("/classes/7/settings#scoring-key");
+  });
+
+  it("클래스 id가 없으면 링크를 짓지 않는다", () => {
+    const href = notificationHref(
+      row({ notification_type: "classroom_scoring_key_rejected", context: {} }),
+    );
+    expect(href).toBeNull();
+  });
+});
+
 describe("notificationHref — 알 수 없는 유형", () => {
   it("크래시 대신 null을 돌려준다", () => {
     expect(notificationHref(row({ notification_type: "unknown_type" }))).toBeNull();

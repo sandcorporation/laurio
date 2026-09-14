@@ -69,6 +69,18 @@ describe("describeNotification — classroom_token_budget_warning", () => {
   });
 });
 
+describe("describeNotification — classroom_scoring_key_rejected", () => {
+  it("무엇이 일어났고 무엇을 해야 하는지를 말한다(#356)", () => {
+    const text = describeNotification(
+      row({ notification_type: "classroom_scoring_key_rejected", context: { class_name: "알고리즘 1반" } }),
+    );
+    expect(text).toContain("알고리즘 1반");
+    expect(text).toContain("거부");
+    expect(text).toContain("클래스 설정");
+    expect(text).toContain("새 키");
+  });
+});
+
 describe("describeNotification — 알 수 없는 유형", () => {
   it("크래시 대신 일반 문구로 폴백한다", () => {
     const text = describeNotification(row({ notification_type: "unknown_type" }));
