@@ -4,8 +4,8 @@ import type { NextResponse } from "next/server";
 
 import { decodeJwtPayload } from "./jwt";
 
-export const ACCESS_COOKIE = "laurio_access";
-export const REFRESH_COOKIE = "laurio_refresh";
+export const ACCESS_COOKIE = "codemit_access";
+export const REFRESH_COOKIE = "codemit_refresh";
 
 export interface TokenPair {
   access: string;
@@ -14,22 +14,22 @@ export interface TokenPair {
 
 // staging/production만 Secure를 건다(ADR-0016 인수조건 "Secure(배포 환경)").
 // dev는 컨테이너 간 http로만 통신하므로 Secure를 걸면 쿠키가 아예 안 실린다.
-// backend/config/settings.py의 LAURIO_DEPLOYMENT_TARGET과 같은 이름·같은 값
+// backend/config/settings.py의 CODEMIT_DEPLOYMENT_TARGET과 같은 이름·같은 값
 // 규약을 따른다 — ticket FE-13(#38)이 frontend 서비스를 compose.staging/prod.yaml에
 // 추가할 때 이 값만 주입하면 된다.
 // #93 코드리뷰 — /dev-tokens(진단 화면, app/dev-tokens/page.tsx)가 같은 판정을
 // 재사용한다. 배포 환경인지 아닌지는 여기 이름·값 규약이 유일한 출처여야
 // 한다(로직이 두 곳에서 어긋나면 안 된다는 원칙 그대로).
 export function isDeployedEnvironment(): boolean {
-  const target = process.env.LAURIO_DEPLOYMENT_TARGET;
+  const target = process.env.CODEMIT_DEPLOYMENT_TARGET;
   return target === "staging" || target === "production";
 }
 
-// 부모 도메인(.laurio.…)으로 올려야 강의실 등 형제 서브도메인이 같은 로그인을
+// 부모 도메인(.codemit.…)으로 올려야 강의실 등 형제 서브도메인이 같은 로그인을
 // 공유한다(ADR-0038). dev(localhost)는 이 값을 비워 둔다 — domain을 주면 쿠키가
 // 아예 안 붙기 때문이다. staging/prod는 compose 파일이 이 값을 주입한다.
 function sessionCookieDomain(): string | undefined {
-  const domain = process.env.LAURIO_SESSION_COOKIE_DOMAIN;
+  const domain = process.env.CODEMIT_SESSION_COOKIE_DOMAIN;
   return domain ? domain : undefined;
 }
 

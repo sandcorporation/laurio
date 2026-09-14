@@ -20,7 +20,7 @@ import path from "node:path";
 const RUN_ID_FILE = path.resolve(__dirname, "../../.e2e-run-id");
 
 /** `global-setup.ts`가 스위트 시작 시 한 번 쓴 실행 토큰을 읽는다. 시드
- * 헬퍼(seed-operator.ts)가 백엔드 관리 명령에 `LAURIO_E2E_RUN_ID`로 실어
+ * 헬퍼(seed-operator.ts)가 백엔드 관리 명령에 `CODEMIT_E2E_RUN_ID`로 실어
  * 보낸다. */
 export function e2eRunId(): string {
   if (!fs.existsSync(RUN_ID_FILE)) {

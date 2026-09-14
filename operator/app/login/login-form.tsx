@@ -6,7 +6,7 @@
 // 없어 클라이언트 컴포넌트로 남긴다.
 import { Suspense, useState } from "react";
 
-import { normalizeDetail } from "@laurio/bff-client";
+import { normalizeDetail } from "@codemit/bff-client";
 import type { FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
@@ -55,7 +55,7 @@ function LoginFields() {
     <main>
       <div>
         <h1>운영자 로그인</h1>
-        <p>Laurio 운영자 전용입니다.</p>
+        <p>Codemit 운영자 전용입니다.</p>
       </div>
 
       <form onSubmit={handleSubmit}>

@@ -1,6 +1,6 @@
 // 헤더 계정 메뉴의 「클래스로 가기」 목적지(#375, spec #371). 이 값은
-// `LAURIO_CLASSROOM_ORIGIN`에서 온다 — 강의실 컨테이너가 자기 오리진을 알리는
-// 것과 **같은 `.env` 줄**이다(`LAURIO_OPERATOR_ORIGIN`과 같은 원칙,
+// `CODEMIT_CLASSROOM_ORIGIN`에서 온다 — 강의실 컨테이너가 자기 오리진을 알리는
+// 것과 **같은 `.env` 줄**이다(`CODEMIT_OPERATOR_ORIGIN`과 같은 원칙,
 // `sibling-origins.ts`가 반대 방향(형제 오리진 허용목록)으로 이미 읽는 값이다).
 //
 // **여기서는 검증하지 않는다.** `sibling-origins.ts`의 `resolveSiblingOrigin`은
@@ -18,5 +18,5 @@
 // `frontend/app/layout.tsx`의 `force-dynamic`, `lib/rendering/
 // runtime-config.test.ts`가 그 구조를 지킨다.
 export function classroomAppOrigin(): string {
-  return process.env.LAURIO_CLASSROOM_ORIGIN || "http://127.0.0.1:53002";
+  return process.env.CODEMIT_CLASSROOM_ORIGIN || "http://127.0.0.1:53002";
 }

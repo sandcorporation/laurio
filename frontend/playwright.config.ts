@@ -19,9 +19,9 @@ import { defineConfig, devices } from "@playwright/test";
 // 갖는다 — 허용목록의 내용이 앱마다 갈려 있다는 사실(ADR-0021)이 여기서도 같은
 // 모양으로 반복된다.
 
-const publicBaseURL = process.env.LAURIO_E2E_BASE_URL ?? "http://127.0.0.1:53000";
-const operatorBaseURL = process.env.LAURIO_OPERATOR_E2E_BASE_URL ?? "http://127.0.0.1:53001";
-const classroomBaseURL = process.env.LAURIO_CLASSROOM_E2E_BASE_URL ?? "http://127.0.0.1:53002";
+const publicBaseURL = process.env.CODEMIT_E2E_BASE_URL ?? "http://127.0.0.1:53000";
+const operatorBaseURL = process.env.CODEMIT_OPERATOR_E2E_BASE_URL ?? "http://127.0.0.1:53001";
+const classroomBaseURL = process.env.CODEMIT_CLASSROOM_E2E_BASE_URL ?? "http://127.0.0.1:53002";
 
 function workersFromEnv(value: string | undefined): number | string | undefined {
   if (value === undefined || value.trim() === "") return undefined;

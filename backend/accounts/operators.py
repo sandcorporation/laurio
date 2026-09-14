@@ -1,6 +1,6 @@
 """Operator 신원과 서로소 불변식 (#42, ADR-0018).
 
-`Operator` 는 Laurio 를 운영하며 `Appeal` 에 `Ruling` 을 내리는 당사자다. Sponsor·
+`Operator` 는 Codemit 를 운영하며 `Appeal` 에 `Ruling` 을 내리는 당사자다. Sponsor·
 Developer 와 **서로소**다 — 소셜 계정을 가진 계정은 Operator 가 될 수 없고,
 Operator 는 소셜 계정을 붙일 수 없다.
 

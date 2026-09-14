@@ -37,18 +37,18 @@ export async function generateMetadata({
   const profile = developerId === null ? null : await fetchDeveloperProfile(developerId);
 
   if (!profile) {
-    return { title: "개발자를 찾을 수 없습니다 — Laurio" };
+    return { title: "개발자를 찾을 수 없습니다 — Codemit" };
   }
 
   const description =
     profile.bio.trim().length > 0
       ? profile.bio
-      : `${profile.display_name}의 Laurio 참가 이력 — 아카이브된 제출작 ${profile.submissions.length}건`;
+      : `${profile.display_name}의 Codemit 참가 이력 — 아카이브된 제출작 ${profile.submissions.length}건`;
 
   // OG 이미지는 opengraph-image.tsx(같은 디렉터리)가 이 프로필 이름으로 매번
   // 새로 그려 자동으로 연결한다 — app/contests/[id]/page.tsx 와 같은 컨벤션.
   return {
-    title: `${profile.display_name} — Laurio 개발자 프로필`,
+    title: `${profile.display_name} — Codemit 개발자 프로필`,
     description,
     openGraph: {
       title: profile.display_name,

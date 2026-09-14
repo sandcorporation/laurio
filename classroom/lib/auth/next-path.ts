@@ -15,7 +15,7 @@
 // `next.startsWith(...)`을 바로 부르면 배열에는 그 메서드가 없어 런타임에
 // 터진다(코드리뷰 지적, 실제로 재현된다). 배열은 "어느 값이 진짜인지" 판단할
 // 근거가 없으므로 안전하지 않은 값으로 취급해 그대로 거부한다.
-const SAFE_NEXT_PATH_BASE = "http://laurio-classroom-internal.invalid";
+const SAFE_NEXT_PATH_BASE = "http://codemit-classroom-internal.invalid";
 
 export function isSafeNextPath(next: string | string[] | null | undefined): next is string {
   if (!next) return false;
@@ -29,7 +29,7 @@ export function isSafeNextPath(next: string | string[] | null | undefined): next
     return false;
   }
 
-  return resolved.protocol === "http:" && resolved.host === "laurio-classroom-internal.invalid";
+  return resolved.protocol === "http:" && resolved.host === "codemit-classroom-internal.invalid";
 }
 
 export function resolveNextPath(next: string | string[] | null | undefined, fallback = "/"): string {

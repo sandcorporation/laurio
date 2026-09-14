@@ -10,7 +10,7 @@
 //
 // 상태기계(cancelled 플래그·loading/error/ready)는 패키지의 `useBackendQuery` 가 소유한다(#146).
 
-import { useBackendQuery } from "@laurio/bff-client";
+import { useBackendQuery } from "@codemit/bff-client";
 
 import { bffClient } from "@/lib/bff/client";
 

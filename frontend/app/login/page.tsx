@@ -21,7 +21,7 @@ import LoginForm from "./login-form";
 // 실물 컨테이너로 재현했다). 이 컴포넌트에 동적 API 호출이 없으면 Next가
 // `next build` 시점에 한 번 렌더해 결과를 정적 HTML로 굳힌다 — 그러면
 // isDeployedEnvironment()가 런타임(배포 컨테이너)이 아니라 빌드 환경의
-// LAURIO_DEPLOYMENT_TARGET을 보고, 빌드 환경이 보통 그 값을 안 주므로
+// CODEMIT_DEPLOYMENT_TARGET을 보고, 빌드 환경이 보통 그 값을 안 주므로
 // showDevSeedForm이 true로 굳어 production 이미지에 dev 로그인 우회가 정적
 // 자산으로 그대로 실린다(실제로 `docker build --target runner` 산출물의
 // `/login` 라우트가 `○`(static)로 표시되고 이미지 안 login.html에

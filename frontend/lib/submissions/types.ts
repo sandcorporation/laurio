@@ -1,12 +1,12 @@
 // Submission 제출 폼(FE-10, #35)이 쓰는 타입은 손으로 다시 적지 않는다 —
-// @laurio/bff-client/schema(FE-03 #28, 패키지로 이사 #146)가 백엔드 OpenAPI 스키마 전체(공개+인증
+// @codemit/bff-client/schema(FE-03 #28, 패키지로 이사 #146)가 백엔드 OpenAPI 스키마 전체(공개+인증
 // 엔드포인트 모두)에서 이미 생성해뒀다. 여기서는 그 타입만 재노출한다 — 이
 // 파일이 실제로 백엔드를 부르지는 않는다(BFF 프록시를 거치는 raw fetch는
 // app/console/contests/[contestId]/submit/page.tsx에 있다). lib/api/client.ts의
 // backendClient(서버 전용, 공개 표면만)와 달리 이 타입들은 인증 구역
 // 클라이언트 컴포넌트에서 그대로 import해도 안전하다 — 타입은 런타임에
 // 아무 것도 하지 않는다.
-import type { components } from "@laurio/bff-client/schema";
+import type { components } from "@codemit/bff-client/schema";
 
 export type ContestDetail = components["schemas"]["ContestOut"];
 export type RequirementOut = components["schemas"]["RequirementOut"];

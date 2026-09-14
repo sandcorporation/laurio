@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { establishDeveloperSession, establishVerification } from "./lib/session";
 
-// 제출 폼 (FE-10, #35, ADR-0014). 이 화면이 Laurio에서 가장 고유한 지점이다.
+// 제출 폼 (FE-10, #35, ADR-0014). 이 화면이 Codemit에서 가장 고유한 지점이다.
 //
 // 지켜야 할 비대칭: 소스코드는 필수(플랫폼의 "강제하지 않고 배지로 신호한다"
 // 원칙에서 유일한 예외)이고, 시연 영상·데모 URL·테스트 계정은 비워도 제출이
@@ -185,13 +185,13 @@ test.describe("@exclusive 소스 필수 · Evidence 연결 · 완성도", () => 
     // 스캔이 채우기 전까지).
     await page.getByTestId("repository-asset-add").click();
     await page.getByTestId("repository-asset-0-label").fill("웹 저장소");
-    await page.getByTestId("repository-asset-0-value").fill("https://github.com/laurio/e2e-repo");
+    await page.getByTestId("repository-asset-0-value").fill("https://github.com/codemit/e2e-repo");
     await expect(page.getByTestId("repository-checking-badge")).toBeVisible();
 
     // 데모 URL 하나 — 라벨·테스트 계정까지 함께 저장돼야 한다.
     await page.getByTestId("demo-url-asset-add").click();
     await page.getByTestId("demo-url-asset-0-label").fill("모바일 데모");
-    await page.getByTestId("demo-url-asset-0-value").fill("https://demo.laurio.test/e2e");
+    await page.getByTestId("demo-url-asset-0-value").fill("https://demo.codemit.test/e2e");
     await page.getByTestId("demo-url-asset-0-test-account").fill("e2e/e2e1234");
 
     await page.getByTestId("submit-button").click();
@@ -208,11 +208,11 @@ test.describe("@exclusive 소스 필수 · Evidence 연결 · 완성도", () => 
     await expect(page.getByTestId("source-asset-2-value")).toHaveCount(0);
     await expect(page.getByTestId("repository-asset-0-label")).toHaveValue("웹 저장소");
     await expect(page.getByTestId("repository-asset-0-value")).toHaveValue(
-      "https://github.com/laurio/e2e-repo",
+      "https://github.com/codemit/e2e-repo",
     );
     await expect(page.getByTestId("demo-url-asset-0-label")).toHaveValue("모바일 데모");
     await expect(page.getByTestId("demo-url-asset-0-value")).toHaveValue(
-      "https://demo.laurio.test/e2e",
+      "https://demo.codemit.test/e2e",
     );
     await expect(page.getByTestId("demo-url-asset-0-test-account")).toHaveValue("e2e/e2e1234");
   });

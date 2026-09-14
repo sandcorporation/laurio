@@ -10,8 +10,8 @@
 // 0건·조회 실패·불러오는 중을 셋으로 구별한다 — "연 게 없다"와 "불러오지
 // 못했다"가 같아 보이면, 조회가 죽은 날 개최자는 자기 공모전이 사라졌다고
 // 읽는다.
-import { type PagedListState, usePagedList } from "@laurio/bff-client";
-import type { components } from "@laurio/bff-client/schema";
+import { type PagedListState, usePagedList } from "@codemit/bff-client";
+import type { components } from "@codemit/bff-client/schema";
 
 import { bffClient } from "@/lib/bff/client";
 

@@ -15,7 +15,7 @@ import { classroomApi, establishClassroomSession } from "./lib/cross-app-session
 // (docker/compose.dev.yaml).
 test("제출 화면을 연 채로 채점이 끝나면 새로고침 없이 「채점 완료」로 바뀐다", async ({ page }) => {
   const seed = `attempt-scored-stream-${test.info().workerIndex}-${Date.now()}`;
-  const marker = `laurio-e2e-marker-${test.info().workerIndex}-${Date.now()}`;
+  const marker = `codemit-e2e-marker-${test.info().workerIndex}-${Date.now()}`;
   const repositoryUrl = `https://github.com/octocat/${marker}`;
 
   await establishClassroomSession(page, seed);

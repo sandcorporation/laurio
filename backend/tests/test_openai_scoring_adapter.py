@@ -1,7 +1,7 @@
 """`scoring.adapters.OpenAIScoringAdapter` 단위 테스트 (#88, ADR-0006/0014).
 
 `tests/test_core_adapters.py`와 같은 예외 — 이 파일도 HTTP를 거치지 않는다.
-`OpenAIScoringAdapter`는 Laurio 자신의 API가 아니라 OpenAI 벤더 연동 파싱·검증
+`OpenAIScoringAdapter`는 Codemit 자신의 API가 아니라 OpenAI 벤더 연동 파싱·검증
 로직이다(어느 django-ninja 라우터에도 매여 있지 않다). 네트워크도 치지 않는다 —
 `requests.post`를 몽키패치해 벤더 응답을 흉내낸다. 실제 벤더를 치는 검증은
 `tests/test_live_adapters.py`류의 옵인 `@live_vendor` 테스트가 맡는다(이 티켓은
@@ -33,7 +33,7 @@ from scoring.adapters import (
 )
 from scoring.checks import check_llm_adapter_mode
 
-SECRET_SOURCE_MARKER = "__LAURIO_SUBMISSION_SOURCE_SECRET_MARKER__"
+SECRET_SOURCE_MARKER = "__CODEMIT_SUBMISSION_SOURCE_SECRET_MARKER__"
 
 
 class _FakeResponse:

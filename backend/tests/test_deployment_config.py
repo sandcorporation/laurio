@@ -9,7 +9,7 @@
 임포트 도중 불러오면 `AppRegistryNotReady`가 나기 때문이다 — 그건
 `except ImportError`로 잡히지 않는다). 두 갈래 다 같은 프로세스 안에서
 `override_settings`로는 재현할 수 없다(이미 임포트가 끝난 뒤라
-`LAURIO_DEPLOYMENT_TARGET` 분기를 다시 태울 방법이 없고, 체크 레지스트리도
+`CODEMIT_DEPLOYMENT_TARGET` 분기를 다시 태울 방법이 없고, 체크 레지스트리도
 매 프로세스에서 한 번만 구성된다). 그래서 `storage/checks.py`가 `manage.py
 check`(부팅 파이프라인 그 자체)로 검증되는 것과 같은 원칙을, 서브프로세스로
 `manage.py check`를 직접 실행해 종료 코드와 에러 메시지를 확인하는 방식으로
@@ -63,36 +63,36 @@ def _base_env(*, target: str, secret_key: str) -> dict[str, str]:
     return {
         "DJANGO_SECRET_KEY": secret_key,
         "DJANGO_DEBUG": "false",
-        "DJANGO_ALLOWED_HOSTS": "api.laurio.example",
-        "LAURIO_DEPLOYMENT_TARGET": target,
-        "POSTGRES_DB": "laurio",
-        "POSTGRES_USER": "laurio",
+        "DJANGO_ALLOWED_HOSTS": "api.codemit.example",
+        "CODEMIT_DEPLOYMENT_TARGET": target,
+        "POSTGRES_DB": "codemit",
+        "POSTGRES_USER": "codemit",
         "POSTGRES_PASSWORD": f"{target}-strong-password",
         "POSTGRES_HOST": "127.0.0.1",
         "POSTGRES_PORT": "55432",
         "INTERNAL_API_TOKEN": f"{target}-internal-token",
         # 운영자 앱 오리진(#43). 배포 환경에서 비면 부팅이 거부된다.
-        "LAURIO_OPERATOR_ORIGIN": f"https://operator.{target}.laurio.example",
+        "CODEMIT_OPERATOR_ORIGIN": f"https://operator.{target}.codemit.example",
         "JWT_SIGNING_KEY": f"{target}-jwt-signing-key",
         "PAYMENT_WEBHOOK_SECRET": f"{target}-payment-webhook-secret",
         "PAYOUT_WEBHOOK_SECRET": f"{target}-payout-webhook-secret",
         "VERIFICATION_ENCRYPTION_KEY": _FERNET_KEY,
         "STORAGE_BACKEND": "s3",
-        "STORAGE_BUCKET": f"laurio-{target}",
+        "STORAGE_BUCKET": f"codemit-{target}",
         "STORAGE_ENDPOINT_URL": "https://s3.amazonaws.com",
         "STORAGE_ACCESS_KEY": "dummy",
         "STORAGE_SECRET_KEY": "dummy",
         "STORAGE_REGION": "us-east-1",
         # 공개 이미지 버킷(#233, ADR-0032) — 비면 부팅이 거부된다(아래 전용 테스트).
-        "STORAGE_IMAGES_BUCKET": f"laurio-{target}-public-images",
-        "STORAGE_IMAGES_BASE_URL": f"https://images.{target}.laurio.example",
+        "STORAGE_IMAGES_BUCKET": f"codemit-{target}-public-images",
+        "STORAGE_IMAGES_BASE_URL": f"https://images.{target}.codemit.example",
         "SOCIAL_AUTH_MODE": "real",
         # 카카오 OAuth 앱 자격증명(#95/#96) — authorize・code→token 교환은
         # 프론트엔드 BFF가 지므로 이 프로세스는 실제로 쓰지 않지만, 부팅 가드
         # (config/settings.py)는 이 값들이 비어 있으면 거부한다.
         "KAKAO_REST_API_KEY": f"{target}-kakao-rest-api-key",
         "KAKAO_SECRET_KEY": f"{target}-kakao-secret-key",
-        "KAKAO_REDIRECT_URI": f"https://{target}.laurio.example/api/auth/social/kakao/callback",
+        "KAKAO_REDIRECT_URI": f"https://{target}.codemit.example/api/auth/social/kakao/callback",
         "VERIFICATION_ADAPTER_MODE": "tests.adapter_stubs.StubVerificationAdapter",
         "PAYMENT_ADAPTER_MODE": "tests.adapter_stubs.StubPGAdapter",
         "PAYOUT_ADAPTER_MODE": "tests.adapter_stubs.StubPayoutAdapter",
@@ -225,7 +225,7 @@ def test_deployed_environment_refuses_to_boot_with_a_fake_adapter(target, field,
 
 
 def test_development_target_still_boots_with_every_adapter_fake():
-    """LAURIO_DEPLOYMENT_TARGET 미설정(dev·CI)은 이 가드들의 대상이 아니어야 한다.
+    """CODEMIT_DEPLOYMENT_TARGET 미설정(dev·CI)은 이 가드들의 대상이 아니어야 한다.
 
     이 티켓이 IS_PRODUCTION_DEPLOYMENT를 IS_DEPLOYED_ENVIRONMENT로 넓히면서 CI의
     기존 비-production 잡(DEBUG=false, 모든 어댑터 fake)까지 걸리게 되면, CI 자체가
@@ -255,7 +255,7 @@ def test_development_target_still_boots_with_every_adapter_fake():
         "CLASSROOM_SCORING_ADAPTER_MODE": "fake",
         "LLM_REQUIREMENT_CHAT_ADAPTER_MODE": "fake",
     }
-    env.pop("LAURIO_DEPLOYMENT_TARGET", None)
+    env.pop("CODEMIT_DEPLOYMENT_TARGET", None)
 
     result = subprocess.run(
         [sys.executable, "manage.py", "check", "--fail-level", "WARNING"],
@@ -269,7 +269,7 @@ def test_development_target_still_boots_with_every_adapter_fake():
     assert result.returncode == 0, result.stderr
 
 
-# --- LAURIO_DEPLOYMENT_TARGET 자체의 유효성 (코디네이터 리뷰 지적) ------------------
+# --- CODEMIT_DEPLOYMENT_TARGET 자체의 유효성 (코디네이터 리뷰 지적) ------------------
 
 
 @pytest.mark.parametrize(
@@ -280,16 +280,16 @@ def test_unknown_deployment_target_refuses_to_boot(bad_target):
     (fake 어댑터 거부·SECRET_KEY 강도·DEBUG 거부·TLS 하드닝)를 무력화하면 안 된다 —
     허용된 세 값이 아니면 그 자리에서 바로 죽어야 한다."""
 
-    env = _production_env(LAURIO_DEPLOYMENT_TARGET=bad_target)
+    env = _production_env(CODEMIT_DEPLOYMENT_TARGET=bad_target)
 
     result = _run_check(env)
 
     assert result.returncode != 0, (
-        f"LAURIO_DEPLOYMENT_TARGET={bad_target!r} 가 조용히 통과했다 — 이 값이 "
+        f"CODEMIT_DEPLOYMENT_TARGET={bad_target!r} 가 조용히 통과했다 — 이 값이 "
         "'production'/'staging'과 매치하지 않으면 모든 배포 가드가 꺼진 채로 부팅된다."
     )
     assert "ImproperlyConfigured" in result.stderr
-    assert "LAURIO_DEPLOYMENT_TARGET" in result.stderr
+    assert "CODEMIT_DEPLOYMENT_TARGET" in result.stderr
 
 
 # --- "fake"라는 별칭 문자열만 피해 가는 dotted path 우회 (코디네이터 리뷰 지적) -----
@@ -396,7 +396,7 @@ def test_development_target_boots_with_an_unresolvable_adapter_value():
     (resolve_adapter가 그 시점에 NotImplementedError를 던진다 — 기존 동작 그대로)."""
 
     env = _base_env(target="development", secret_key=_STRONG_SECRET_KEY)
-    env["LAURIO_DEPLOYMENT_TARGET"] = "development"
+    env["CODEMIT_DEPLOYMENT_TARGET"] = "development"
     for field in _UNRESOLVABLE_ADAPTER_MODE_FIELDS:
         env[field] = "real"
 
@@ -609,7 +609,7 @@ def test_staging_toss_adapter_refuses_boot_without_any_toss_secret_key_env_var()
 # gunicorn은애초에 TLS 핸드셰이크를 할 수 없어 매 틱이 SSLError로 죽는다. 이건
 # subprocess 없이도 같은 프로세스에서 override_settings로 재현 가능하다 —
 # SECURE_SSL_REDIRECT/SECURE_REDIRECT_EXEMPT는 매 요청마다 SecurityMiddleware가
-# django.conf.settings에서 다시 읽는 일반 설정이지, LAURIO_DEPLOYMENT_TARGET처럼
+# django.conf.settings에서 다시 읽는 일반 설정이지, CODEMIT_DEPLOYMENT_TARGET처럼
 # import 시점에 한 번만 평가되는 값이 아니기 때문이다.
 
 
@@ -639,25 +639,25 @@ def test_deployed_environment_refuses_to_boot_without_an_operator_origin(target)
     https 오리진과 어긋나고, **로그인을 포함한 모든 변경 요청이 403** 이 된다.
     fail-closed 라 보안 구멍은 아니지만 운영이 통째로 죽는다.
 
-    프론트엔드가 LAURIO_WEB_ORIGIN 에 대해 이미 같은 실패를 겪고 같은 방식으로
+    프론트엔드가 CODEMIT_WEB_ORIGIN 에 대해 이미 같은 실패를 겪고 같은 방식으로
     막았다(frontend/instrumentation.ts).
     """
 
     env = (_production_env if target == "production" else _staging_env)()
-    env["LAURIO_OPERATOR_ORIGIN"] = ""
+    env["CODEMIT_OPERATOR_ORIGIN"] = ""
 
     result = _run_check(env)
 
     assert result.returncode != 0
-    assert "LAURIO_OPERATOR_ORIGIN" in result.stderr
+    assert "CODEMIT_OPERATOR_ORIGIN" in result.stderr
 
 
 def test_development_target_boots_without_an_operator_origin():
     """dev·CI 는 요청이 실제로 도착한 주소로 조립한다 — 강제하지 않는다."""
 
     env = _base_env(target="development", secret_key=_STRONG_SECRET_KEY)
-    env["LAURIO_DEPLOYMENT_TARGET"] = "development"
-    env["LAURIO_OPERATOR_ORIGIN"] = ""
+    env["CODEMIT_DEPLOYMENT_TARGET"] = "development"
+    env["CODEMIT_OPERATOR_ORIGIN"] = ""
 
     result = _run_check(env)
 
@@ -669,7 +669,7 @@ def test_development_target_boots_without_an_operator_origin():
 
 @pytest.mark.parametrize("target", ["staging", "production"])
 def test_deployed_environment_refuses_to_boot_without_a_storage_images_base_url(target):
-    """비면 컨테이너가 뜬 채 Contest 이미지 링크가 전부 깨진다 — LAURIO_OPERATOR_ORIGIN
+    """비면 컨테이너가 뜬 채 Contest 이미지 링크가 전부 깨진다 — CODEMIT_OPERATOR_ORIGIN
     과 같은 판단으로, 첫 요청에서야 드러나는 대신 정직하게 못 뜬다."""
 
     env = (_production_env if target == "production" else _staging_env)()
@@ -686,7 +686,7 @@ def test_development_target_boots_without_a_storage_images_base_url():
     스스로 기준 주소를 조립한다 — 강제하지 않는다."""
 
     env = _base_env(target="development", secret_key=_STRONG_SECRET_KEY)
-    env["LAURIO_DEPLOYMENT_TARGET"] = "development"
+    env["CODEMIT_DEPLOYMENT_TARGET"] = "development"
     env["STORAGE_IMAGES_BASE_URL"] = ""
 
     result = _run_check(env)
@@ -698,7 +698,7 @@ def test_development_target_boots_without_a_storage_images_base_url():
 #
 # authorize 리다이렉트・code→token 교환은 프론트엔드 BFF가 진다(#95) — 이
 # 프로세스는 이 값들을 실제로 쓰지 않는다. 그런데도 여기서 거부하는 이유는
-# LAURIO_OPERATOR_ORIGIN과 같다: 배포 스택이 "떴다/안 떴다"를 판정하는 신호를
+# CODEMIT_OPERATOR_ORIGIN과 같다: 배포 스택이 "떴다/안 떴다"를 판정하는 신호를
 # backend 컨테이너 하나로 모은다 — 값이 비면 카카오 로그인 버튼이 컨테이너가
 # 뜬 채로 항상 실패한다는 것을 배포 시점에 알게 한다(#83이 어댑터에 대해 닫은
 # 실패 모드와 같다).
@@ -726,7 +726,7 @@ def test_staging_boots_with_kakao_oauth_credentials():
     env = _staging_env(
         KAKAO_REST_API_KEY="staging-kakao-rest-api-key",
         KAKAO_SECRET_KEY="staging-kakao-secret-key",
-        KAKAO_REDIRECT_URI="https://staging.laurio.example/api/auth/social/kakao/callback",
+        KAKAO_REDIRECT_URI="https://staging.codemit.example/api/auth/social/kakao/callback",
     )
 
     result = _run_check(env)
@@ -740,7 +740,7 @@ def test_development_target_boots_without_kakao_oauth_credentials():
     문구로 돌아간다(#96, frontend/app/api/auth/social/kakao/authorize/route.ts)."""
 
     env = _base_env(target="development", secret_key=_STRONG_SECRET_KEY)
-    env["LAURIO_DEPLOYMENT_TARGET"] = "development"
+    env["CODEMIT_DEPLOYMENT_TARGET"] = "development"
     env["KAKAO_REST_API_KEY"] = ""
     env["KAKAO_SECRET_KEY"] = ""
     env["KAKAO_REDIRECT_URI"] = ""
@@ -827,7 +827,7 @@ def test_unhandled_errors_reach_stdout_so_docker_logs_shows_them():
         # 표식은 ASCII 로 둔다 — 이 줄은 서브프로세스의 콘솔 인코딩(Windows 는
         # cp949)으로 나가는데, 한글 표식을 쓰면 테스트가 제품이 아니라 로캘 때문에
         # 깨진다.
-        ".error('LAURIO_REQUEST_ERROR_MARKER')"
+        ".error('CODEMIT_REQUEST_ERROR_MARKER')"
     )
     result = subprocess.run(
         [sys.executable, "-c", program],
@@ -838,7 +838,7 @@ def test_unhandled_errors_reach_stdout_so_docker_logs_shows_them():
         timeout=60,
     )
 
-    assert "LAURIO_REQUEST_ERROR_MARKER" in (result.stdout + result.stderr), (
+    assert "CODEMIT_REQUEST_ERROR_MARKER" in (result.stdout + result.stderr), (
         "django.request 의 ERROR 가 프로세스 stdout/stderr 어디에도 나오지 않는다 — "
         "배포에서 500 이 docker logs 에 남지 않는다는 뜻이다. "
         f"stdout={result.stdout!r} stderr={result.stderr!r}"

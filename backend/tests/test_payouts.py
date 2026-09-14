@@ -252,7 +252,7 @@ def _operator_client(username="payouts-op-1", *, superuser=False):
     from django.core.management import call_command
     from django.test import Client
 
-    password = "Zx82!Laurio-Payouts-Secret"
+    password = "Zx82!Codemit-Payouts-Secret"
     call_command("create_operator", username, password=password, superuser=superuser)
     operator = Client()
     response = operator.post(
@@ -2098,7 +2098,7 @@ def test_toss_seller_webhook_advances_seller_pending_payout(client, category, la
     assert payout.status == Payout.Status.CONFIRMED_SELLER_PENDING
     developer_id = payout.handover.award.submission.contestsubmission.developer_id
     seller = Seller.objects.get(developer_id=developer_id)
-    ref_seller_id = f"laurio-developer-{developer_id}"
+    ref_seller_id = f"codemit-developer-{developer_id}"
 
     transmission_time = "2024-01-01T00:00:00+09:00"
     payload = json.dumps(
@@ -2373,7 +2373,7 @@ def test_seller_changed_webhook_ignores_out_of_order_regression(client, category
     developer_id = payout.handover.award.submission.contestsubmission.developer_id
     seller = Seller.objects.get(developer_id=developer_id)
     assert seller.status == Seller.Status.APPROVED
-    ref_seller_id = f"laurio-developer-{developer_id}"
+    ref_seller_id = f"codemit-developer-{developer_id}"
 
     transmission_time = "2024-01-01T00:00:00+09:00"
     stale_payload = json.dumps(
@@ -2425,7 +2425,7 @@ def test_seller_changed_webhook_unknown_status_422s_and_does_not_touch_seller(
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
     developer_id = payout.handover.award.submission.contestsubmission.developer_id
     seller = Seller.objects.get(developer_id=developer_id)
-    ref_seller_id = f"laurio-developer-{developer_id}"
+    ref_seller_id = f"codemit-developer-{developer_id}"
 
     transmission_time = "2024-01-01T00:00:00+09:00"
     payload = json.dumps(
@@ -2595,7 +2595,7 @@ def test_seller_changed_webhook_stale_event_cannot_resurrect_rejected(
     developer_id = payout.handover.award.submission.contestsubmission.developer_id
     seller = Seller.objects.get(developer_id=developer_id)
     assert seller.status == Seller.Status.REJECTED
-    ref_seller_id = f"laurio-developer-{developer_id}"
+    ref_seller_id = f"codemit-developer-{developer_id}"
 
     transmission_time = "2024-01-01T00:00:00+09:00"
     stale_payload = json.dumps(
@@ -2646,7 +2646,7 @@ def test_seller_changed_webhook_exact_duplicate_does_not_reprocess(
         payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
         developer_id = payout.handover.award.submission.contestsubmission.developer_id
         seller = Seller.objects.get(developer_id=developer_id)
-        ref_seller_id = f"laurio-developer-{developer_id}"
+        ref_seller_id = f"codemit-developer-{developer_id}"
 
         transmission_time = "2024-01-01T00:00:00+09:00"
         payload = json.dumps(
@@ -3686,7 +3686,7 @@ def test_toss_seller_webhook_falls_back_to_id_field_when_ref_seller_id_is_unreco
     client, category, landing_type
 ):
     """벤더 문서의 Seller 객체 필드는 `id` 다(#173, 웹 확인) — `sellerId` 는
-    없다. `refSellerId`(우리가 보낸 `laurio-developer-{id}`)로 찾는 기존
+    없다. `refSellerId`(우리가 보낸 `codemit-developer-{id}`)로 찾는 기존
     경로가 안 먹히면 `entityBody.id`(우리가 등록 시점에 저장해 둔
     `seller.seller_id`)로 폴백한다."""
 
@@ -3742,7 +3742,7 @@ def test_toss_seller_webhook_partially_approved_uses_policy_weekly_limit_not_ent
     payout = Payout.objects.get(idempotency_key=requested["idempotency_key"])
     developer_id = payout.handover.award.submission.contestsubmission.developer_id
     seller = Seller.objects.get(developer_id=developer_id)
-    ref_seller_id = f"laurio-developer-{developer_id}"
+    ref_seller_id = f"codemit-developer-{developer_id}"
 
     transmission_time = "2024-01-01T00:00:00+09:00"
     payload = json.dumps(
@@ -4382,7 +4382,7 @@ def test_toss_seller_webhook_answers_200_for_an_unknown_seller(client):
         {
             "eventType": "seller.changed",
             "entityBody": {
-                "refSellerId": "laurio-developer-99999999",
+                "refSellerId": "codemit-developer-99999999",
                 "id": "someone-elses-seller",
                 "status": "APPROVAL_REQUIRED",
             },
@@ -4460,7 +4460,7 @@ def test_toss_webhooks_still_reject_a_body_we_cannot_read(client):
 
     payload = json.dumps(
         # 이쪽은 봉투는 맞고 **상태 문자열**을 모르는 경우다 — 그것도 422 다.
-        {"eventType": "seller.changed", "entityBody": {"refSellerId": "laurio-developer-1", "status": "무슨상태"}}
+        {"eventType": "seller.changed", "entityBody": {"refSellerId": "codemit-developer-1", "status": "무슨상태"}}
     ).encode("utf-8")
     with override_settings(TOSS_API_SECURE_KEY=_TEST_TOSS_SECURE_KEY):
         resp = client.post(

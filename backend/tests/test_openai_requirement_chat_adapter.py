@@ -35,7 +35,7 @@ from contests.requirement_chat import (
     RequirementChatInput,
 )
 
-SECRET_MESSAGE_MARKER = "__LAURIO_SPONSOR_MESSAGE_SECRET_MARKER__"
+SECRET_MESSAGE_MARKER = "__CODEMIT_SPONSOR_MESSAGE_SECRET_MARKER__"
 
 
 class _FakeResponse:

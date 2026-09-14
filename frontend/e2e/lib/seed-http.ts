@@ -6,19 +6,19 @@
 //
 // **compose 프로젝트 이름과 무관하다는 성질은 그대로다.** 옛 주석이 `docker compose exec`
 // 를 피한 이유가 그것이었는데(프로젝트 이름이 실행 환경마다 다르다), 호스트에 포트로
-// 노출된 백엔드를 직접 치는 것도 같은 성질을 갖는다 — `LAURIO_API_BASE_URL` 하나만 본다.
+// 노출된 백엔드를 직접 치는 것도 같은 성질을 갖는다 — `CODEMIT_API_BASE_URL` 하나만 본다.
 //
 // 내부 토큰은 dev 에서 `DEBUG` 기본값이 있다(backend/config/settings.py). 배포 환경에서는
 // 이 표면 자체가 거부되므로(엔드포인트가 `IS_DEPLOYED_ENVIRONMENT` 를 먼저 본다) 토큰이
 // 새어도 실제 데이터를 심을 수는 없다.
 
-// **`LAURIO_API_PORT` 를 먼저 본다.** e2e 의 다른 직접 호출들(소스 열람 기록 세기,
+// **`CODEMIT_API_PORT` 를 먼저 본다.** e2e 의 다른 직접 호출들(소스 열람 기록 세기,
 // deliverable-types 스펙)이 그 변수를 쓰고 CLAUDE.md 의 포트 표도 그것으로 적혀 있다 —
 // 체인 전용 포트로 스택을 띄운 환경에서 여기만 58000 을 보면 **다른 체인의 스택**에
 // 시드를 심거나 globalSetup 이 통째로 연결 거부로 죽는다.
 function backendBaseUrl(): string {
-  if (process.env.LAURIO_API_BASE_URL) return process.env.LAURIO_API_BASE_URL;
-  return `http://127.0.0.1:${process.env.LAURIO_API_PORT ?? "58000"}`;
+  if (process.env.CODEMIT_API_BASE_URL) return process.env.CODEMIT_API_BASE_URL;
+  return `http://127.0.0.1:${process.env.CODEMIT_API_PORT ?? "58000"}`;
 }
 
 function internalToken(): string {

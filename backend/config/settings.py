@@ -1,4 +1,4 @@
-"""Laurio backend 설정.
+"""Codemit backend 설정.
 
 환경별 차이는 전부 환경변수로 주입한다. dev/staging/prod compose 분리는 티켓 22에서 다룬다.
 """
@@ -66,39 +66,39 @@ DEBUG = _env_bool("DJANGO_DEBUG", True)
 # "TLS·시크릿 강도처럼 production에만 해당하는 하드닝"과 "fake 금지처럼 배포된 모든
 # 환경에 해당하는 안전장치"는 서로 다른 질문이라 별도 플래그로 뗀다.
 _VALID_DEPLOYMENT_TARGETS = {"development", "staging", "production"}
-LAURIO_DEPLOYMENT_TARGET = _env("LAURIO_DEPLOYMENT_TARGET", "development")
+CODEMIT_DEPLOYMENT_TARGET = _env("CODEMIT_DEPLOYMENT_TARGET", "development")
 # 코디네이터 리뷰 지적: 이 값이 검증되지 않으면 "prod", "Production", 오타 하나가
 # 조용히 "development"로도, "staging"/"production" 어느 쪽으로도 매치하지 않는
 # 상태로 흘러 아래 모든 가드(fake 어댑터 거부·SECRET_KEY 강도·DEBUG 거부·TLS
 # 하드닝)를 통째로 무력화한다 — 이 티켓의 목적 자체가 "조용히 통과하는 대신 크게
 # 실패한다"이므로, 허용된 세 값이 아니면 그 자리에서 바로 죽는다.
-if LAURIO_DEPLOYMENT_TARGET not in _VALID_DEPLOYMENT_TARGETS:
+if CODEMIT_DEPLOYMENT_TARGET not in _VALID_DEPLOYMENT_TARGETS:
     raise ImproperlyConfigured(
-        f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 는 유효하지 않다. "
+        f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 는 유효하지 않다. "
         f"{sorted(_VALID_DEPLOYMENT_TARGETS)} 중 하나여야 한다 — 오타 하나가 이 값 아래의 "
         "모든 배포 가드(fake 어댑터 거부, SECRET_KEY 강도, DEBUG 거부, TLS 하드닝)를 "
         "전부 무력화하므로 미설정 기본값(development)으로 조용히 흘려보내지 않는다."
     )
-IS_PRODUCTION_DEPLOYMENT = LAURIO_DEPLOYMENT_TARGET == "production"
-IS_DEPLOYED_ENVIRONMENT = LAURIO_DEPLOYMENT_TARGET in {"staging", "production"}
+IS_PRODUCTION_DEPLOYMENT = CODEMIT_DEPLOYMENT_TARGET == "production"
+IS_DEPLOYED_ENVIRONMENT = CODEMIT_DEPLOYMENT_TARGET in {"staging", "production"}
 
 # 공모전 제품 스위치(#271) — 방향이 바뀌어 공모전은 나중을 위한 기능이 됐다(ADR-0037).
 # 코드도 데이터도 그대로 두고 표면만 닫는다. **기본값은 켜짐**이고, 이 값은
-# `LAURIO_DEPLOYMENT_TARGET`과 무관한 독립 값이다 — "배포 환경이면 끈다"로 묶으면
+# `CODEMIT_DEPLOYMENT_TARGET`과 무관한 독립 값이다 — "배포 환경이면 끈다"로 묶으면
 # 나중에 prod에서 다시 켤 때 그 판단 규칙 자체를 고쳐야 한다. staging만
 # `docker/compose.staging.yaml`이 이 환경변수의 기본값을 false로 겹쳐 쓴다(dev·CI는
 # 이 값을 건드리지 않으므로 여전히 켜진 채다). 꺼졌을 때 무엇이 닫히고 무엇이 열려
 # 있어야 하는지의 전체 목록은 `core.contest_switch` 모듈 docstring 하나에 모아
 # 둔다 — 다시 켜는 날 읽을 자리다.
-CONTEST_PRODUCT_ENABLED = _env_bool("LAURIO_CONTEST_PRODUCT_ENABLED", True)
+CONTEST_PRODUCT_ENABLED = _env_bool("CODEMIT_CONTEST_PRODUCT_ENABLED", True)
 
 # production인데 DEBUG=true로 뜨면 에러 페이지가 스택 트레이스·환경변수·SQL을 그대로
 # 노출한다(Django check --deploy의 security.W018과 같은 위협). DEBUG는 개별
-# 환경변수라 LAURIO_DEPLOYMENT_TARGET=production과 따로 놀 수 있으므로 여기서
+# 환경변수라 CODEMIT_DEPLOYMENT_TARGET=production과 따로 놀 수 있으므로 여기서
 # 조합을 직접 막는다.
 if IS_PRODUCTION_DEPLOYMENT and DEBUG:
     raise ImproperlyConfigured(
-        "LAURIO_DEPLOYMENT_TARGET=production 인데 DJANGO_DEBUG 가 true 다. 운영 배포에서는 "
+        "CODEMIT_DEPLOYMENT_TARGET=production 인데 DJANGO_DEBUG 가 true 다. 운영 배포에서는 "
         "반드시 DJANGO_DEBUG=false 로 띄워야 한다 — DEBUG=true는 에러 페이지에 스택 "
         "트레이스와 설정값을 그대로 노출한다."
     )
@@ -124,7 +124,7 @@ if IS_PRODUCTION_DEPLOYMENT and (
     len(SECRET_KEY) < 50 or len(set(SECRET_KEY)) < 5 or SECRET_KEY.startswith("django-insecure-")
 ):
     raise ImproperlyConfigured(
-        "LAURIO_DEPLOYMENT_TARGET=production 인데 DJANGO_SECRET_KEY 가 약하다(50자 미만, "
+        "CODEMIT_DEPLOYMENT_TARGET=production 인데 DJANGO_SECRET_KEY 가 약하다(50자 미만, "
         "고유 문자 5종 미만, 또는 django-insecure- 접두사). `python -c \"import secrets; "
         "print(secrets.token_urlsafe(64))\"` 등으로 새로 생성한 무작위 키를 주입해야 한다."
     )
@@ -213,9 +213,9 @@ ASGI_APPLICATION = "config.asgi.application"
 
 # 컨테이너 안에서는 compose 가 POSTGRES_* 를 전부 주입한다(HOST=db, PORT=5432).
 # 아래 기본값은 호스트에서 `uv run pytest` 를 돌릴 때만 쓰이므로, dev compose 가
-# 실제로 공개한 포트(LAURIO_DB_PORT)를 그대로 따라간다. 다른 프로젝트의 5432 에
+# 실제로 공개한 포트(CODEMIT_DB_PORT)를 그대로 따라간다. 다른 프로젝트의 5432 에
 # 잘못 붙는 사고를 막기 위함이다.
-_DEV_DB_PORT = _env("LAURIO_DB_PORT", "55432")
+_DEV_DB_PORT = _env("CODEMIT_DB_PORT", "55432")
 
 # --- 병렬 격리 (#104, 테스트 격리 개편) -------------------------------------------
 #
@@ -231,7 +231,7 @@ _CHECKOUT_TOKEN = hashlib.sha256(str(BASE_DIR.resolve()).encode("utf-8")).hexdig
 def _default_test_db_name() -> str:
     """이 체크아웃 전용 테스트 DB 이름. pytest-django 가 워커별로 `_gwN` 을 덧붙인다."""
 
-    return f"test_laurio_{_CHECKOUT_TOKEN}"
+    return f"test_codemit_{_CHECKOUT_TOKEN}"
 
 
 # **테스트에서는 세션 캐시가 프로세스 안에 산다.**
@@ -252,21 +252,21 @@ def _default_test_db_name() -> str:
 #
 # LocMem 은 프로세스별로 갈리므로 워커 격리도 체인 격리도 공짜이고, 위 둘이 함께 사라진다.
 # 실물 Redis 위의 세션 동작은 운영자 로그인 e2e 가 실물 스택으로 계속 덮는다.
-_RUNNING_TESTS = "pytest" in sys.modules or _env("LAURIO_TEST_CACHE", "") == "locmem"
+_RUNNING_TESTS = "pytest" in sys.modules or _env("CODEMIT_TEST_CACHE", "") == "locmem"
 
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": _env("POSTGRES_DB", "laurio"),
-        "USER": _env("POSTGRES_USER", "laurio"),
-        "PASSWORD": _env("POSTGRES_PASSWORD", "laurio"),
+        "NAME": _env("POSTGRES_DB", "codemit"),
+        "USER": _env("POSTGRES_USER", "codemit"),
+        "PASSWORD": _env("POSTGRES_PASSWORD", "codemit"),
         "HOST": _env("POSTGRES_HOST", "127.0.0.1"),
         "PORT": _env("POSTGRES_PORT", _DEV_DB_PORT),
         # 테스트 DB 이름을 환경에서 바꿀 수 있게 한다.
         #
         # 기본값은 Django 관례 그대로 `test_<NAME>` 이라 아무것도 안 바뀐다.
         # 필요한 것은 **동시에 도는 두 pytest 가 서로를 밟지 않는 것**이다 —
-        # 병렬 워크트리에서 체인 둘이 각자 pytest 를 돌리면 같은 `test_laurio`
+        # 병렬 워크트리에서 체인 둘이 각자 pytest 를 돌리면 같은 `test_codemit`
         # 를 두고 싸워 `DROP DATABASE ... is being accessed by other users` 로
         # 서로를 떨어뜨린다. 실제로 겪었고, 그때 나오는 실패는 코드 회귀와
         # 구분되지 않아 사람이 시간을 버린다.
@@ -274,7 +274,7 @@ DATABASES = {
         # **체크아웃 경로에서 자동으로 갈린다.** 손으로 주는 것을 잊으면 조용히 서로를
         # 떨어뜨리므로(위 설명) 기본값 자체를 경로에서 만든다. 명시적으로 주면 그 값이
         # 이긴다 — CI 처럼 경로가 매번 달라지는 곳에서 이름을 고정하고 싶을 때가 있다.
-        "TEST": {"NAME": _env("LAURIO_TEST_DB_NAME", "") or _default_test_db_name()},
+        "TEST": {"NAME": _env("CODEMIT_TEST_DB_NAME", "") or _default_test_db_name()},
     }
 }
 
@@ -285,7 +285,7 @@ DATABASES = {
 #
 # DB 인덱스를 1 로 둔다 — Celery 브로커가 0 을 쓰므로(compose 의 CELERY_BROKER_URL)
 # 같은 인스턴스를 공유하면서도 키가 섞이지 않는다.
-_DEV_REDIS_PORT = _env("LAURIO_REDIS_PORT", "16379")
+_DEV_REDIS_PORT = _env("CODEMIT_REDIS_PORT", "16379")
 # **동시에 두 pytest 를 돌린다면 이 값의 DB 인덱스를 서로 다르게 줘라.**
 #
 # `tests/conftest.py` 가 테스트마다 `caches["sessions"].clear()` 를 부르는데,
@@ -302,7 +302,7 @@ CACHES = {
         # 위 `_RUNNING_TESTS` 설명 참고. 별칭 이름과 사용법은 같으므로 호출부는 모른다.
         {
             "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-            "LOCATION": f"laurio-sessions-{_CHECKOUT_TOKEN}",
+            "LOCATION": f"codemit-sessions-{_CHECKOUT_TOKEN}",
         }
         if _RUNNING_TESTS
         else {
@@ -316,7 +316,7 @@ SESSION_ENGINE = "django.contrib.sessions.backends.cache"
 SESSION_CACHE_ALIAS = "sessions"
 # Operator 세션 전용 이름 — 참가자 세션이라는 개념 자체가 없으므로(참가자는 JWT 를
 # 쿠키에 담아 BFF 가 들고 있다, ADR-0016) 이 쿠키는 언제나 Operator 의 것이다.
-SESSION_COOKIE_NAME = "laurio_operator_session"
+SESSION_COOKIE_NAME = "codemit_operator_session"
 # Django 기본값과 같지만 명시한다 — 이 쿠키가 돈을 움직이는 권한을 들고 있어서,
 # 기본값이 조용히 바뀌는 것에 기대면 안 된다.
 SESSION_COOKIE_HTTPONLY = True
@@ -325,7 +325,7 @@ SESSION_COOKIE_SAMESITE = "Lax"
 # 운영자 앱의 오리진. 배포 환경에서는 명시적으로 준다 — Host 헤더 유도보다 강하고
 # 리버스 프록시 구성에 흔들리지 않는다. 비어 있으면 요청이 실제로 도착한 주소로
 # 조립한다(dev·테스트).
-OPERATOR_WEB_ORIGIN = _env("LAURIO_OPERATOR_ORIGIN", "")
+OPERATOR_WEB_ORIGIN = _env("CODEMIT_OPERATOR_ORIGIN", "")
 
 if IS_DEPLOYED_ENVIRONMENT and not OPERATOR_WEB_ORIGIN:
     # 비어 있으면 Host 헤더 유도로 떨어지는데, `SECURE_PROXY_SSL_HEADER` 는
@@ -333,11 +333,11 @@ if IS_DEPLOYED_ENVIRONMENT and not OPERATOR_WEB_ORIGIN:
     # 잡혀 브라우저가 보낸 https 오리진과 어긋나고, **로그인을 포함한 모든 변경
     # 요청이 403** 이 된다. fail-closed 라 보안 구멍은 아니지만 운영이 통째로 죽는다.
     #
-    # 프론트엔드가 LAURIO_WEB_ORIGIN 에 대해 이미 같은 실패를 겪고 같은 방식으로
+    # 프론트엔드가 CODEMIT_WEB_ORIGIN 에 대해 이미 같은 실패를 겪고 같은 방식으로
     # 막았다(frontend/instrumentation.ts) — 여기서 그 결을 맞춘다.
     raise ImproperlyConfigured(
-        f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET} 인데 "
-        "LAURIO_OPERATOR_ORIGIN 이 비어 있다. 배포 환경에서는 운영자 앱의 오리진을 "
+        f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET} 인데 "
+        "CODEMIT_OPERATOR_ORIGIN 이 비어 있다. 배포 환경에서는 운영자 앱의 오리진을 "
         "명시해야 한다 — Host 헤더 유도는 리버스 프록시 구성에 따라 어긋나고, "
         "그러면 운영자의 모든 변경 요청이 403 이 된다."
     )
@@ -351,19 +351,19 @@ STORAGE_BACKEND = _env("STORAGE_BACKEND", "fake")
 # DJANGO_SECRET_KEY 가드(위)와 같은 이유다. STORAGE_BACKEND 를 잊고 배포하면
 # FakeStorageAdapter가 200과 함께 https://fake-storage.test/... 를 돌려주고, 업로드도
 # 다운로드도 겉보기엔 성공한 채 파일만 소리 없이 사라진다. 실제 운영 배포에서는 아예
-# 못 뜨게 막는다 — DEBUG가 아니라 LAURIO_DEPLOYMENT_TARGET을 본다. staging도 대상이다
+# 못 뜨게 막는다 — DEBUG가 아니라 CODEMIT_DEPLOYMENT_TARGET을 본다. staging도 대상이다
 # (ADR-0007: staging은 S3/OCI에 실제로 붙어 연동 규약을 검증하는 자리다). CI는
 # DEBUG=false로 돌면서도 배포된 환경이 아니므로(위 설명) 이 가드에 걸리지 않고
 # fake로 테스트를 돌릴 수 있어야 한다.
 if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(STORAGE_BACKEND):
     raise ImproperlyConfigured(
-        f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 인데 STORAGE_BACKEND 가 "
+        f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 인데 STORAGE_BACKEND 가 "
         "fake 다. presigned URL이 200으로 발급되면서 파일이 소리 없이 유실된다. "
         "staging/production 배포에서는 STORAGE_BACKEND=s3 를 반드시 설정해야 한다."
     )
 
-STORAGE_BUCKET = _env("STORAGE_BUCKET", "laurio-dev")
-# 기본값은 호스트에서 직접 돌릴 때를 가정한다(LAURIO_MINIO_PORT). 컨테이너 안에서는
+STORAGE_BUCKET = _env("STORAGE_BUCKET", "codemit-dev")
+# 기본값은 호스트에서 직접 돌릴 때를 가정한다(CODEMIT_MINIO_PORT). 컨테이너 안에서는
 # compose가 STORAGE_ENDPOINT_URL=http://minio:9000 을 직접 주입한다.
 STORAGE_ENDPOINT_URL = _env("STORAGE_ENDPOINT_URL", "http://127.0.0.1:19000")
 # presigned URL은 브라우저가 직접 여는 주소라 STORAGE_ENDPOINT_URL과 다를 수 있다
@@ -397,19 +397,19 @@ STORAGE_REGION = _env("STORAGE_REGION", "us-east-1")
 # 그 값은 "공개 버킷"이 아니라 "브라우저가 presigned 요청을 쏘는 주소"라는
 # 뜻으로 이미 쓰이고 있다(비공개 버킷용). 같은 낱말을 새 값에 쓰면 두 의미가
 # 한 접두어를 나눠 갖게 된다.
-STORAGE_IMAGES_BUCKET = _env("STORAGE_IMAGES_BUCKET", "laurio-dev-public-images")
+STORAGE_IMAGES_BUCKET = _env("STORAGE_IMAGES_BUCKET", "codemit-dev-public-images")
 
 # 공개 이미지 버킷의 서명 없는 기준 주소. `storage.public.compose_public_image_url`
 # 이 `{이 값}/{object_key}` 로 조립해 API 응답에 싣는다 — presigned URL이 아니므로
 # 매 요청 같은 문자열이 나오고, CDN이 그대로 캐시한다(ADR-0032).
 #
-# DJANGO_SECRET_KEY·STORAGE_BACKEND·LAURIO_OPERATOR_ORIGIN 가드(위)와 같은 원칙 —
+# DJANGO_SECRET_KEY·STORAGE_BACKEND·CODEMIT_OPERATOR_ORIGIN 가드(위)와 같은 원칙 —
 # 배포 환경에서 비면 부팅을 거부한다. 컨테이너가 뜬 채 깨진 이미지 링크만 그리는
 # 것보다 정직하게 못 뜨는 편이 낫다.
 _storage_images_base_url_env = _env("STORAGE_IMAGES_BASE_URL", "")
 if IS_DEPLOYED_ENVIRONMENT and not _storage_images_base_url_env:
     raise ImproperlyConfigured(
-        f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 인데 "
+        f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 인데 "
         "STORAGE_IMAGES_BASE_URL 이 비어 있다. 배포 환경에서는 공개 이미지 버킷의 "
         "CDN 기준 주소를 명시해야 한다 — 비면 컨테이너가 뜬 채 이미지 링크가 전부 깨진다."
     )
@@ -522,20 +522,20 @@ REFRESH_TOKEN_TTL = timedelta(days=int(_env("REFRESH_TOKEN_TTL_DAYS", "14")))
 
 # 소셜 로그인 어댑터 (ADR-0007). STORAGE_BACKEND와 같은 원칙: 기본값은 DEBUG와
 # 무관하게 항상 fake다 — "어떤 구현체를 쓸지"와 "이게 진짜 운영 배포인지"는 다른
-# 질문이기 때문이다(위 LAURIO_DEPLOYMENT_TARGET 설명 참고). 실제 카카오·GitHub·구글
+# 질문이기 때문이다(위 CODEMIT_DEPLOYMENT_TARGET 설명 참고). 실제 카카오·GitHub·구글
 # API를 부르려면 SOCIAL_AUTH_MODE=real 을 명시해야 한다 — staging/production 배포(#23)가
 # 그렇게 한다.
 SOCIAL_AUTH_MODE = _env("SOCIAL_AUTH_MODE", "fake")
 if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(SOCIAL_AUTH_MODE):
     raise ImproperlyConfigured(
-        f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 인데 SOCIAL_AUTH_MODE 가 "
+        f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 인데 SOCIAL_AUTH_MODE 가 "
         "fake 다. staging/production 배포에서는 SOCIAL_AUTH_MODE=real 을 반드시 설정해야 한다."
     )
 
 # 카카오 OAuth 앱 자격증명 (#95/#96, spec #92). authorize 리다이렉트・code→token
 # 교환은 백엔드가 아니라 프론트엔드 BFF가 진다(#95) — 이 프로세스는 이 값들을
 # 실제로 쓰지 않는다. 그런데도 여기서 부팅 가드를 세우는 이유는
-# LAURIO_OPERATOR_ORIGIN(#43)과 같다: 배포 스택이 "떴다/안 떴다"를 판정하는
+# CODEMIT_OPERATOR_ORIGIN(#43)과 같다: 배포 스택이 "떴다/안 떴다"를 판정하는
 # 신호를 backend 컨테이너 하나로 모아 둬야, 운영자가 스택을 올릴 때 여러
 # 컨테이너의 로그를 각각 뒤지지 않고 이 컨테이너의 종료 코드 하나로 "OAuth 앱
 # 자격증명이 빠졌다"는 것을 즉시 알 수 있다(frontend/instrumentation.ts가 같은
@@ -562,7 +562,7 @@ if IS_DEPLOYED_ENVIRONMENT:
     ]
     if _missing_kakao_settings:
         raise ImproperlyConfigured(
-            f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 인데 다음 카카오 OAuth "
+            f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 인데 다음 카카오 OAuth "
             f"자격증명이 비어 있다: {', '.join(_missing_kakao_settings)}. authorize "
             "리다이렉트・code→token 교환은 프론트엔드 BFF가 지지만(#95), 이 값들이 없으면 "
             "로그인 버튼이 컨테이너가 뜬 채로 항상 실패한다."
@@ -607,7 +607,7 @@ LOGGING = {
 VERIFICATION_ADAPTER_MODE = _env("VERIFICATION_ADAPTER_MODE", "fake")
 if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(VERIFICATION_ADAPTER_MODE):
     raise ImproperlyConfigured(
-        f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 인데 "
+        f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 인데 "
         "VERIFICATION_ADAPTER_MODE 가 fake 다. staging/production 배포에서는 실제 "
         "본인확인 어댑터의 dotted path를 반드시 설정해야 한다."
     )
@@ -653,7 +653,7 @@ VERIFICATION_ENCRYPTION_KEY = _verification_key
 PAYMENT_ADAPTER_MODE = _env("PAYMENT_ADAPTER_MODE", "fake")
 if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(PAYMENT_ADAPTER_MODE):
     raise ImproperlyConfigured(
-        f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 인데 PAYMENT_ADAPTER_MODE 가 "
+        f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 인데 PAYMENT_ADAPTER_MODE 가 "
         "fake 다. staging/production 배포에서는 실제 PG 어댑터의 dotted path를 반드시 "
         "설정해야 한다."
     )
@@ -776,7 +776,7 @@ for _notification_setting_name, _notification_adapter_path in (
 ):
     if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(_notification_adapter_path):
         raise ImproperlyConfigured(
-            f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 인데 "
+            f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 인데 "
             f"{_notification_setting_name}={_notification_adapter_path!r} 가 Fake 구현체다. "
             "staging/production 배포에서는 실제 벤더 어댑터의 dotted path를 반드시 "
             "설정해야 한다."
@@ -811,7 +811,7 @@ ALIGO_SENDER_PHONE_NUMBER = _env("ALIGO_SENDER_PHONE_NUMBER", "")
 LLM_ADAPTER_MODE = _env("LLM_ADAPTER_MODE", "fake")
 if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(LLM_ADAPTER_MODE):
     raise ImproperlyConfigured(
-        f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 인데 LLM_ADAPTER_MODE 가 "
+        f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 인데 LLM_ADAPTER_MODE 가 "
         "fake 다. Score가 실제 채점 없이 만들어지면 Distribution 대상 판정이 통째로 "
         "무효가 된다. staging/production 배포에서는 실제 LLM 어댑터를 반드시 설정해야 한다."
     )
@@ -830,7 +830,7 @@ if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(LLM_ADAPTER_MODE):
 CLASSROOM_SCORING_ADAPTER_MODE = _env("CLASSROOM_SCORING_ADAPTER_MODE", "fake")
 if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(CLASSROOM_SCORING_ADAPTER_MODE):
     raise ImproperlyConfigured(
-        f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 인데 "
+        f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 인데 "
         "CLASSROOM_SCORING_ADAPTER_MODE 가 fake 다. 강의실 ClassroomScore가 실제 채점 "
         "없이 만들어지면 참여자에게 통과·미통과가 보증 없이 내려간다. staging/production "
         "배포에서는 실제 LLM 어댑터의 dotted path를 반드시 설정해야 한다."
@@ -854,7 +854,7 @@ LLM_FAKE_RAISING_SUBMISSION_IDS = [
 LLM_REQUIREMENT_CHAT_ADAPTER_MODE = _env("LLM_REQUIREMENT_CHAT_ADAPTER_MODE", "fake")
 if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(LLM_REQUIREMENT_CHAT_ADAPTER_MODE):
     raise ImproperlyConfigured(
-        f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 인데 "
+        f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 인데 "
         "LLM_REQUIREMENT_CHAT_ADAPTER_MODE 가 fake 다. staging/production 배포에서는 "
         "실제 LLM 어댑터를 반드시 설정해야 한다."
     )
@@ -875,7 +875,7 @@ LLM_REQUIREMENT_CHAT_FAKE_RAISING_CONTEST_IDS = [
 GITHUB_ADAPTER_MODE = _env("GITHUB_ADAPTER_MODE", "fake")
 if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(GITHUB_ADAPTER_MODE):
     raise ImproperlyConfigured(
-        f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 인데 GITHUB_ADAPTER_MODE 가 "
+        f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 인데 GITHUB_ADAPTER_MODE 가 "
         "fake 다. staging/production 배포에서는 실제 GitHub 어댑터의 dotted path를 "
         "반드시 설정해야 한다."
     )
@@ -903,7 +903,7 @@ GITHUB_FAKE_REPO_FILES: dict = {}
 EVENT_BUS_ADAPTER_MODE = _env("EVENT_BUS_ADAPTER_MODE", "fake")
 if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(EVENT_BUS_ADAPTER_MODE):
     raise ImproperlyConfigured(
-        f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 인데 EVENT_BUS_ADAPTER_MODE 가 "
+        f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 인데 EVENT_BUS_ADAPTER_MODE 가 "
         "fake 다. 강의실 화면이 실시간 신호를 받지 못해 조용히 폴링에만 의존하게 된다. "
         "staging/production 배포에서는 실제 이벤트 버스 어댑터(core.events_redis.RedisEventBus)의 "
         "dotted path를 반드시 설정해야 한다."
@@ -924,7 +924,7 @@ EVENT_BUS_REDIS_URL = _env("EVENT_BUS_REDIS_URL", f"redis://127.0.0.1:{_DEV_REDI
 PAYOUT_ADAPTER_MODE = _env("PAYOUT_ADAPTER_MODE", "fake")
 if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(PAYOUT_ADAPTER_MODE):
     raise ImproperlyConfigured(
-        f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 인데 PAYOUT_ADAPTER_MODE 가 "
+        f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 인데 PAYOUT_ADAPTER_MODE 가 "
         "fake 다. staging/production 배포에서는 실제 지급대행 어댑터의 dotted path를 "
         "반드시 설정해야 한다."
     )
@@ -958,7 +958,7 @@ PAYOUT_WEBHOOK_SECRET = _payout_webhook_secret
 SELLER_ADAPTER_MODE = _env("SELLER_ADAPTER_MODE", "fake")
 if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(SELLER_ADAPTER_MODE):
     raise ImproperlyConfigured(
-        f"LAURIO_DEPLOYMENT_TARGET={LAURIO_DEPLOYMENT_TARGET!r} 인데 SELLER_ADAPTER_MODE "
+        f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 인데 SELLER_ADAPTER_MODE "
         "가 fake 다. staging/production 배포에서는 실제 Seller 등록 어댑터의 dotted "
         "path를 반드시 설정해야 한다."
     )

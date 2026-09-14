@@ -35,7 +35,7 @@ export async function generateMetadata({
   const contest = contestId === null ? null : await fetchContest(contestId);
 
   if (!contest) {
-    return { title: "공모전을 찾을 수 없습니다 — Laurio" };
+    return { title: "공모전을 찾을 수 없습니다 — Codemit" };
   }
 
   const description =
@@ -47,7 +47,7 @@ export async function generateMetadata({
   // 이 Contest 제목으로 매번 새로 그려 자동으로 이 메타데이터에 연결한다 — 여기서
   // 수동으로 images 를 채우지 않는다.
   return {
-    title: `${contest.title} — Laurio`,
+    title: `${contest.title} — Codemit`,
     description,
     openGraph: {
       title: contest.title,

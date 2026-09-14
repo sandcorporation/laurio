@@ -10,8 +10,8 @@
 //
 // `BLOCK_REASON_LABELS`가 `Record<WithdrawalBlockReason, string>`인 이유도
 // 같다 — 값이 하나 늘면 `tsc --noEmit`이 이 파일에서 빌드타임에 잡는다.
-import { normalizeDetail, useBackendQuery } from "@laurio/bff-client";
-import type { components } from "@laurio/bff-client/schema";
+import { normalizeDetail, useBackendQuery } from "@codemit/bff-client";
+import type { components } from "@codemit/bff-client/schema";
 
 import { bffClient } from "@/lib/bff/client";
 

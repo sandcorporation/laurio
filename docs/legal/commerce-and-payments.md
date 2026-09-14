@@ -2,10 +2,10 @@
 
 > 법률 자문이 아니다. 근거와 확인 상태는 각 절에 적었다. 색인은 [README.md](README.md).
 
-## Laurio 는 통신판매중개자다
+## Codemit 는 통신판매중개자다
 
 Sponsor 가 Contest 를 열고 Developer 가 Submission 을 내며, 상금은 Sponsor 에게서
-Developer 에게로 간다. Laurio 는 그 사이에 서는 **통신판매중개자**이고, 그래서
+Developer 에게로 간다. Codemit 는 그 사이에 서는 **통신판매중개자**이고, 그래서
 전자상거래법이 요구하는 것이 셋이다([REQUEST.md](../../REQUEST.md) 「필요한 사업자
 요건」):
 
@@ -18,18 +18,18 @@ Developer 에게로 간다. Laurio 는 그 사이에 서는 **통신판매중개
 알림톡을 주채널로 쓰는 것([ADR-0009](../adr/0009-alimtalk-primary-and-distribution-proceeds-on-nondelivery.md))도
 사업자등록·카카오 채널 개설·템플릿 사전심사를 선행 조건으로 건다.
 
-## 상금은 Laurio 가 보관하지 않는다
+## 상금은 Codemit 가 보관하지 않는다
 
 「플랫폼에 상금을 비치한다」는 것은 법적으로 **남의 돈을 보관하는 행위**라
 결제대금예치업(전자금융업) 등록이 필요하고, 자본금 10억·전산 전문인력 5인·물적설비가
 요구된다. 2024년 전자금융거래법 개정으로 플랫폼의 정산대금 별도관리·예치 의무도
 강화됐다. 그래서 **자체 예치·정산 설계를 하지 않는다** — 결제와 지급을 PG·지급대행사에
-위임하고, Laurio 는 그 흐름을 원장으로 기록한다.
+위임하고, Codemit 는 그 흐름을 원장으로 기록한다.
 
 | 단계 | 누가 돈을 쥐는가 | 코드 |
 | --- | --- | --- |
 | Sponsor 결제 (상금 + 개최비) | 토스페이먼츠 | `backend/payments/adapters_toss.py` |
-| Award·Distribution 까지 | 토스 정산 계좌 — Laurio 원장에는 「발주자 예치금 → 개발자 미지급금」으로 기록 | `backend/ledger/models.py` `Account`, [ADR-0004](../adr/0004-double-entry-ledger.md) |
+| Award·Distribution 까지 | 토스 정산 계좌 — Codemit 원장에는 「발주자 예치금 → 개발자 미지급금」으로 기록 | `backend/ledger/models.py` `Account`, [ADR-0004](../adr/0004-double-entry-ledger.md) |
 | Developer 지급 | 토스 지급대행 (`sellerId` 로 이체) | `backend/payouts/`, [ADR-0008](../adr/0008-toss-handles-identity-laurio-handles-tax.md), [ADR-0020](../adr/0020-seller-registration-happens-after-payout-is-confirmed.md) |
 
 원장이 복식부기이고 append-only 인 것은 회계 취향이 아니라 이 구조의 결과다 — 돈을

@@ -10,7 +10,7 @@ importers:
 
   classroom:
     dependencies:
-      '@laurio/bff-shared':
+      '@codemit/bff-shared':
         specifier: workspace:*
         version: link:../packages/bff-shared
       '@toast-ui/editor':
@@ -29,7 +29,7 @@ importers:
         specifier: ^19.1.0
         version: 19.2.8(react@19.2.8)
     devDependencies:
-      '@laurio/route-audit':
+      '@codemit/route-audit':
         specifier: workspace:*
         version: link:../packages/route-audit
       '@tailwindcss/postcss':
@@ -56,10 +56,10 @@ importers:
 
   frontend:
     dependencies:
-      '@laurio/bff-client':
+      '@codemit/bff-client':
         specifier: workspace:*
         version: link:../packages/bff-client
-      '@laurio/bff-shared':
+      '@codemit/bff-shared':
         specifier: workspace:*
         version: link:../packages/bff-shared
       next:
@@ -75,7 +75,7 @@ importers:
         specifier: ^19.1.0
         version: 19.2.8(react@19.2.8)
     devDependencies:
-      '@laurio/route-audit':
+      '@codemit/route-audit':
         specifier: workspace:*
         version: link:../packages/route-audit
       '@playwright/test':
@@ -108,10 +108,10 @@ importers:
 
   operator:
     dependencies:
-      '@laurio/bff-client':
+      '@codemit/bff-client':
         specifier: workspace:*
         version: link:../packages/bff-client
-      '@laurio/bff-shared':
+      '@codemit/bff-shared':
         specifier: workspace:*
         version: link:../packages/bff-shared
       next:
@@ -124,7 +124,7 @@ importers:
         specifier: ^19.1.0
         version: 19.2.8(react@19.2.8)
     devDependencies:
-      '@laurio/route-audit':
+      '@codemit/route-audit':
         specifier: workspace:*
         version: link:../packages/route-audit
       '@types/node':

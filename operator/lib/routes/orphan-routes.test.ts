@@ -3,11 +3,11 @@
 // e2e·백엔드 테스트 둘 다 `page.goto(...)`/`request.get(...)`으로 URL을 직접 치므로
 // 원리적으로 이걸 못 본다.
 //
-// 스캐너와 스위트 본체는 `@laurio/route-audit`(공개 앱·운영자 앱 공유, #166 코드리뷰)에
+// 스캐너와 스위트 본체는 `@codemit/route-audit`(공개 앱·운영자 앱 공유, #166 코드리뷰)에
 // 있다 — 여기 남는 것은 어느 디렉터리를 훑는지(`appRoot`)와 이 앱의 허용목록뿐이다.
 import * as path from "node:path";
 
-import { defineOrphanRouteSuite } from "@laurio/route-audit";
+import { defineOrphanRouteSuite } from "@codemit/route-audit";
 
 import { ORPHAN_ALLOWLIST } from "./allowlist";
 

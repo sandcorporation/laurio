@@ -10,7 +10,7 @@
 // bff-shared`에 얹지 않은 이유는 그 패키지가 BFF 런타임(프록시 전달·Origin 검증)
 // 성격이 뚜렷해서다 — 빌드 시점 정적 분석 도구를 거기 섞으면 그 패키지의 경계가
 // 흐려진다. 대신 ADR-0021이 이미 세운 선례(`packages/bff-shared`·`packages/
-// bff-client`)를 그대로 따라 새 워크스페이스 패키지(`@laurio/route-audit`)를 둔다.
+// bff-client`)를 그대로 따라 새 워크스페이스 패키지(`@codemit/route-audit`)를 둔다.
 // 앱마다 남는 것은 두 가지뿐이다 — 어느 디렉터리를 훑는지(`orphan-suite.ts`의
 // `appRoot`), 그리고 그 앱의 허용목록(`lib/routes/allowlist.ts`).
 //

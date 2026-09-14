@@ -3,16 +3,16 @@
 #   docker compose -f docker/compose.dev.yaml up
 #
 # 공개 포트는 다른 프로젝트와 부딪히지 않도록 기본값을 비켜 잡았고 환경변수로 바꿀 수 있다.
-name: laurio-dev
+name: codemit-dev
 
 x-postgres-env: &default-postgres-env
-  POSTGRES_DB: laurio
-  POSTGRES_USER: laurio
-  POSTGRES_PASSWORD: laurio
+  POSTGRES_DB: codemit
+  POSTGRES_USER: codemit
+  POSTGRES_PASSWORD: codemit
 
 x-minio-env: &default-minio-env
-  MINIO_ROOT_USER: laurio
-  MINIO_ROOT_PASSWORD: laurio-secret
+  MINIO_ROOT_USER: codemit
+  MINIO_ROOT_PASSWORD: codemit-secret
 
 services:
   db:
@@ -21,15 +21,15 @@ services:
       <<: *default-postgres-env
     ports:
       # 로컬에서 uv run pytest 를 돌릴 때 붙을 수 있도록 노출한다.
-      - "${LAURIO_DB_PORT:-55432}:5432"
+      - "${CODEMIT_DB_PORT:-55432}:5432"
     volumes:
-      - laurio-dev-db:/var/lib/postgresql/data
+      - codemit-dev-db:/var/lib/postgresql/data
     healthcheck:
       # -h 를 반드시 준다. 없으면 유닉스 소켓으로 붙는데, postgres 엔트리포인트가
       # 초기화 중에 띄우는 임시 서버(listen_addresses='')도 그 소켓에 응답한다.
       # 그러면 TCP 가 아직 안 열린 상태에서 healthy 로 판정돼 backend 의 migrate 가
       # 첫 기동(빈 볼륨)에서 connection refused 로 죽는다.
-      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U laurio -d laurio"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U codemit -d codemit"]
       interval: 3s
       timeout: 3s
       retries: 20
@@ -47,9 +47,9 @@ services:
     ports:
       # 호스트에서 uv run pytest 를 돌릴 때 붙는다 — DB 와 같은 이유다.
       # 표준 6379 를 비켜 잡는 것도 같은 이유다(CLAUDE.md).
-      - "${LAURIO_REDIS_PORT:-16379}:6379"
+      - "${CODEMIT_REDIS_PORT:-16379}:6379"
     volumes:
-      - laurio-dev-redis:/data
+      - codemit-dev-redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 3s
@@ -58,9 +58,9 @@ services:
 
   # 스토리지 어댑터(ADR-0005, ADR-0007, ADR-0032)의 dev 바인딩. S3 호환 API라 앱은
   # STORAGE_BACKEND=s3 그대로 두고 엔드포인트만 여기를 가리킨다. 버킷은 이제 둘이다
-  # (#233) — laurio-dev(소스 등, private)와 laurio-dev-public-images(Contest 이미지,
-  # 익명 읽기). 아래 minio-init 이 익명 읽기를 거는 것은 laurio-dev-public-images
-  # **하나뿐**이다 — laurio-dev 를 public으로 만들거나 정책을 고치는 코드는 이 스택
+  # (#233) — codemit-dev(소스 등, private)와 codemit-dev-public-images(Contest 이미지,
+  # 익명 읽기). 아래 minio-init 이 익명 읽기를 거는 것은 codemit-dev-public-images
+  # **하나뿐**이다 — codemit-dev 를 public으로 만들거나 정책을 고치는 코드는 이 스택
   # 어디에도 없다.
   minio:
     image: minio/minio:latest
@@ -68,11 +68,11 @@ services:
       <<: *default-minio-env
     ports:
       # API. 호스트에서 직접 붙을 때(uv run manage.py 등)를 위해 노출한다.
-      - "${LAURIO_MINIO_PORT:-19000}:9000"
+      - "${CODEMIT_MINIO_PORT:-19000}:9000"
       # 콘솔. 9000/9001은 이 머신의 다른 프로젝트가 쓰고 있어 비켜 잡았다.
-      - "${LAURIO_MINIO_CONSOLE_PORT:-19001}:9001"
+      - "${CODEMIT_MINIO_CONSOLE_PORT:-19001}:9001"
     volumes:
-      - laurio-dev-minio:/data
+      - codemit-dev-minio:/data
     command: server /data --console-address ":9001"
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
@@ -82,12 +82,12 @@ services:
 
   # 버킷 둘을 한 번 만들고 종료하는 초기화 잡(#233, ADR-0032).
   #
-  # laurio-dev(소스 등)는 private 그대로 둔다 — `mc anonymous set` 같은 공개 전환
+  # codemit-dev(소스 등)는 private 그대로 둔다 — `mc anonymous set` 같은 공개 전환
   # 명령은 이 버킷에는 절대 넣지 않는다(ADR-0005).
   #
-  # laurio-dev-public-images(Contest 이미지)만 `mc anonymous set download`로
+  # codemit-dev-public-images(Contest 이미지)만 `mc anonymous set download`로
   # 익명 읽기를 건다 — 정책이 버킷 단위이므로 이미지 쪽 설정을 아무리 잘못 써도
-  # laurio-dev에는 닿지 못한다(ADR-0032 "가르는 것은 버킷이지 접두어가 아니다").
+  # codemit-dev에는 닿지 못한다(ADR-0032 "가르는 것은 버킷이지 접두어가 아니다").
   minio-init:
     image: minio/mc:latest
     depends_on:
@@ -97,9 +97,9 @@ services:
       <<: *default-minio-env
     entrypoint: >
       sh -c "mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD &&
-             mc mb --ignore-existing local/laurio-dev &&
-             mc mb --ignore-existing local/laurio-dev-public-images &&
-             mc anonymous set download local/laurio-dev-public-images"
+             mc mb --ignore-existing local/codemit-dev &&
+             mc mb --ignore-existing local/codemit-dev-public-images &&
+             mc anonymous set download local/codemit-dev-public-images"
     restart: "no"
 
   backend:
@@ -115,7 +115,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      # 이게 없으면 backend가 laurio-dev 버킷이 아직 없는 상태로 뜰 수 있고,
+      # 이게 없으면 backend가 codemit-dev 버킷이 아직 없는 상태로 뜰 수 있고,
       # 첫 업로드 PUT이 NoSuchBucket으로 실패한다.
       minio-init:
         condition: service_completed_successfully
@@ -142,16 +142,16 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       STORAGE_BACKEND: s3
-      STORAGE_BUCKET: laurio-dev
+      STORAGE_BUCKET: codemit-dev
       STORAGE_ENDPOINT_URL: http://minio:9000
       # presigned URL은 브라우저가 직접 여는 주소다(FE-09, #34) — 컨테이너 내부
       # DNS 이름 "minio:9000"은 브라우저(호스트)가 못 푼다. 호스트에 매핑된
-      # 포트(LAURIO_MINIO_PORT)로 별도로 준다. STORAGE_ENDPOINT_URL은 서버
+      # 포트(CODEMIT_MINIO_PORT)로 별도로 준다. STORAGE_ENDPOINT_URL은 서버
       # 프로세스 자신이 스토리지에 붙는 주소로 그대로 둔다(backend/config/
       # settings.py STORAGE_PUBLIC_ENDPOINT_URL 주석 참고).
-      STORAGE_PUBLIC_ENDPOINT_URL: http://127.0.0.1:${LAURIO_MINIO_PORT:-19000}
-      STORAGE_ACCESS_KEY: laurio
-      STORAGE_SECRET_KEY: laurio-secret
+      STORAGE_PUBLIC_ENDPOINT_URL: http://127.0.0.1:${CODEMIT_MINIO_PORT:-19000}
+      STORAGE_ACCESS_KEY: codemit
+      STORAGE_SECRET_KEY: codemit-secret
       STORAGE_REGION: us-east-1
       # 어댑터는 dev 에서 전부 Fake 가 기본이다(settings.py). 다만 벤더가 실제로
       # 쏘는 웹훅 본문 구조를 확인하려면(#97) 지급·셀러만 실물로 물려야 하는데,
@@ -171,7 +171,7 @@ services:
       EVENT_BUS_ADAPTER_MODE: core.events_redis.RedisEventBus
       EVENT_BUS_REDIS_URL: redis://redis:6379/2
     ports:
-      - "${LAURIO_API_PORT:-58000}:8000"
+      - "${CODEMIT_API_PORT:-58000}:8000"
     volumes:
       # 소스를 마운트해 코드 수정이 즉시 반영되게 한다. 가상환경은 /opt/venv 라 가려지지 않는다.
       - ../backend:/app
@@ -212,7 +212,7 @@ services:
       EVENT_BUS_ADAPTER_MODE: core.events_redis.RedisEventBus
       EVENT_BUS_REDIS_URL: redis://redis:6379/2
     ports:
-      - "${LAURIO_EVENTS_PORT:-58001}:8001"
+      - "${CODEMIT_EVENTS_PORT:-58001}:8001"
     volumes:
       - ../backend:/app
     command: >
@@ -300,13 +300,13 @@ services:
         condition: service_started
     environment:
       # 로그인이 끝나고 강의실로 돌려보낼 때 대조하는 허용목록(#297 후속).
-      # 강의실 컨테이너가 읽는 것과 **같은 `.env` 줄**이다(LAURIO_OPERATOR_ORIGIN 과
+      # 강의실 컨테이너가 읽는 것과 **같은 `.env` 줄**이다(CODEMIT_OPERATOR_ORIGIN 과
       # 같은 원칙) — 어긋나면 복귀가 조용히 안 되고 사람은 공개 앱에 남는다.
       # 안전한 쪽으로 실패하지만 원인을 찾기 어려우니 한 줄로 맞춰 둔다.
-      LAURIO_CLASSROOM_ORIGIN: ${LAURIO_CLASSROOM_ORIGIN:-}
+      CODEMIT_CLASSROOM_ORIGIN: ${CODEMIT_CLASSROOM_ORIGIN:-}
       # 컨테이너 안에서는 compose 네트워크 이름으로 백엔드에 붙는다. 호스트에서
       # `pnpm dev` 로 돌릴 때는 이 값이 없어 settings 의 기본값(127.0.0.1:58000)이 쓰인다.
-      LAURIO_API_BASE_URL: http://backend:8000
+      CODEMIT_API_BASE_URL: http://backend:8000
       # 카카오 OAuth 앱 자격증명(#95/#96) — **dev는 일부러 비워 둔다**(코드리뷰
       # 지적, 되돌림). 예전에 여기 더미 값을 채웠더니 dev에서 카카오 버튼을
       # 누르면 authorize가 실제로 그 더미 client_id로 카카오
@@ -323,7 +323,7 @@ services:
     ports:
       # 이 머신은 3000·5432·8000·9000·9001 을 다른 프로젝트가, 55432·58000·19000·19001 을
       # 이 프로젝트가 이미 쓴다. 그래서 비켜 잡았고 환경변수로 바꿀 수 있다.
-      - "${LAURIO_WEB_PORT:-53000}:3000"
+      - "${CODEMIT_WEB_PORT:-53000}:3000"
     volumes:
       # 저장소 전체를 마운트한다(운영자 앱 04 #62부터) — pnpm 워크스페이스의
       # 락파일·workspace 정의가 저장소 루트에 있고, frontend/가 그 워크스페이스
@@ -336,7 +336,7 @@ services:
       # 가야 한다. 이름이 있으면 하나만 버리고 나머지는 지킬 수 있다:
       #
       #   docker compose -f docker/compose.dev.yaml rm -sf frontend
-      #   docker volume rm laurio-dev_laurio-dev-web-next
+      #   docker volume rm codemit-dev_codemit-dev-web-next
       #   docker compose -f docker/compose.dev.yaml up -d frontend
       #
       # **이 컨테이너 안에서 `pnpm build` 를 돌리지 말 것.** 프로덕션 산출물이
@@ -347,12 +347,12 @@ services:
       # 워크스페이스 멤버마다 자기 node_modules(심볼릭 링크 모음)를 갖는다 —
       # 루트 것 하나만 가리면 frontend/·packages/* 밑에는 여전히 호스트
       # 바인드 마운트가 그대로 남아 옛(또는 없는) node_modules 가 노출된다.
-      - laurio-dev-web-node-modules:/app/node_modules
-      - laurio-dev-web-frontend-node-modules:/app/frontend/node_modules
-      - laurio-dev-web-shared-node-modules:/app/packages/bff-shared/node_modules
-      - laurio-dev-web-bff-client-node-modules:/app/packages/bff-client/node_modules
-      - laurio-dev-web-route-audit-node-modules:/app/packages/route-audit/node_modules
-      - laurio-dev-web-next:/app/frontend/.next
+      - codemit-dev-web-node-modules:/app/node_modules
+      - codemit-dev-web-frontend-node-modules:/app/frontend/node_modules
+      - codemit-dev-web-shared-node-modules:/app/packages/bff-shared/node_modules
+      - codemit-dev-web-bff-client-node-modules:/app/packages/bff-client/node_modules
+      - codemit-dev-web-route-audit-node-modules:/app/packages/route-audit/node_modules
+      - codemit-dev-web-next:/app/frontend/.next
       # node_modules 볼륨은 처음 만들어질 때 딱 한 번만 이미지 내용으로 채워진다
       # (도커의 명명된 볼륨 규칙). 그래서 이미 떠 있는 스택에 `pnpm add` 로 의존성을
       # 새로 추가하고 `up -d --build` 만 돌리면, 이미지는 새 패키지를 담고 있어도
@@ -362,7 +362,7 @@ services:
       # 가린다(실제로 겪었다). 그래서 backend 의 migrate 패턴처럼 컨테이너가 뜰
       # 때마다 lockfile 기준으로 스스로 수렴시킨다 — 볼륨이 비어 있든 오래됐든
       # 매번 같은 상태로 맞춰지므로 수동 볼륨 삭제가 필요 없다.
-      - laurio-dev-web-pnpm-store:/pnpm/store
+      - codemit-dev-web-pnpm-store:/pnpm/store
     # CI=true 는 install 에만 건다 — pnpm 이 낯선(이 시나리오에서는 옛) node_modules 를
     # 정리할 때 TTY 확인을 요구해(ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY) 실제로
     # 막혔다. 이 컨테이너는 TTY 없이 백그라운드로 뜬다. `pnpm dev` 자체에는 걸지
@@ -371,7 +371,7 @@ services:
     # install은 워크스페이스 루트(/app)에서, dev는 이 앱 디렉터리(이미지의
     # WORKDIR인 /app/frontend, frontend.Dockerfile 참고)에서 돈다.
     #
-    # **`--filter laurio-frontend...`를 반드시 쓴다**(코드리뷰 지적, 두 번 재현된
+    # **`--filter codemit-frontend...`를 반드시 쓴다**(코드리뷰 지적, 두 번 재현된
     # 사고). 필터 없는 평범한 `pnpm install`은 워크스페이스 전체(operator/까지)를
     # 설치한다 — 이 컨테이너는 `/app/operator/node_modules`를 볼륨으로 가리지
     # 않으므로, 그 설치가 호스트에 바인드 마운트된 `operator/node_modules`에
@@ -382,9 +382,9 @@ services:
     # 것으로 재현된다(호스트가 기대하는 Windows 바이너리가 컨테이너의 리눅스
     # 산출물로 조용히 덮인 것이다 — pnpm의 최신성 판정은 락파일 해시만 보지
     # 실제 바이너리 플랫폼은 보지 않는다). `--filter <패키지>...`는 그 패키지와
-    # 그 워크스페이스 의존성(laurio-frontend는 @laurio/bff-shared·@laurio/bff-client)만 설치 대상에
+    # 그 워크스페이스 의존성(codemit-frontend는 @codemit/bff-shared·@codemit/bff-client)만 설치 대상에
     # 넣는다 — operator/는 필터링 대상 밖이라 이 컨테이너가 그 디렉터리를 아예
-    # 건드리지 않는다(`pnpm install --filter laurio-frontend... --frozen-lockfile`
+    # 건드리지 않는다(`pnpm install --filter codemit-frontend... --frozen-lockfile`
     # 을 직접 돌려 "Scope: 3 of 5 workspace projects"로 확인했다 — bff-client 가 늘며 수도 늘었다). 두 컨테이너가
     # 서로의 node_modules를 볼륨으로 가리는 것보다 이 편이 근본적이다 — 애초에
     # 쓰지 않는 디렉터리를 아예 쓰지 않게 만든다.
@@ -396,7 +396,7 @@ services:
     # 막고, `--force`는 이 앱 자신의 디렉터리가 스스로 망가졌을 때의 복원력이다
     # — 서로 다른 문제를 막는다.
     command: >
-      sh -c "cd /app && CI=true pnpm install --filter laurio-frontend... --frozen-lockfile --force &&
+      sh -c "cd /app && CI=true pnpm install --filter codemit-frontend... --frozen-lockfile --force &&
              cd /app/frontend && pnpm dev"
 
   # 운영자 앱(#63, ADR-0019/0021) — 공개 앱과 다른 오리진으로 뜬다. 같은
@@ -411,27 +411,27 @@ services:
       backend:
         condition: service_started
     environment:
-      LAURIO_API_BASE_URL: http://backend:8000
+      CODEMIT_API_BASE_URL: http://backend:8000
       # dev에서는 비워 둔다 — backend/config/settings.py의 OPERATOR_WEB_ORIGIN도
       # dev에서는 비어 있고(IS_DEPLOYED_ENVIRONMENT가 아니라서 부팅 가드가 걸리지
       # 않는다), 양쪽 다 비어 있으면 둘 다 같은 값(Host 헤더로 유도한 도착지
       # 오리진)을 독립적으로 계산해 정확히 맞아떨어진다(lib/backend.ts의
       # operatorOrigin 주석 참고). 배포 환경(compose.staging/prod.yaml)에서는
-      # 백엔드의 LAURIO_OPERATOR_ORIGIN과 반드시 같은 값을 준다 — #70의 몫이다.
+      # 백엔드의 CODEMIT_OPERATOR_ORIGIN과 반드시 같은 값을 준다 — #70의 몫이다.
     ports:
       # 공개 앱(53000)과 겹치지 않는 새 포트. 이 머신에서 이미 쓰는 포트를
       # 피했다(디스패치 지침) — 기본값은 CLAUDE.md 포트 표와 같다.
-      - "${LAURIO_OPERATOR_WEB_PORT:-53001}:3000"
+      - "${CODEMIT_OPERATOR_WEB_PORT:-53001}:3000"
     volumes:
       - ..:/app
-      - laurio-dev-operator-node-modules:/app/node_modules
-      - laurio-dev-operator-app-node-modules:/app/operator/node_modules
-      - laurio-dev-operator-shared-node-modules:/app/packages/bff-shared/node_modules
-      - laurio-dev-operator-bff-client-node-modules:/app/packages/bff-client/node_modules
-      - laurio-dev-operator-route-audit-node-modules:/app/packages/route-audit/node_modules
-      - laurio-dev-operator-next:/app/operator/.next
-      - laurio-dev-operator-pnpm-store:/pnpm/store
-    # frontend 서비스 command 주석 참고 — `--filter laurio-operator...`가 이
+      - codemit-dev-operator-node-modules:/app/node_modules
+      - codemit-dev-operator-app-node-modules:/app/operator/node_modules
+      - codemit-dev-operator-shared-node-modules:/app/packages/bff-shared/node_modules
+      - codemit-dev-operator-bff-client-node-modules:/app/packages/bff-client/node_modules
+      - codemit-dev-operator-route-audit-node-modules:/app/packages/route-audit/node_modules
+      - codemit-dev-operator-next:/app/operator/.next
+      - codemit-dev-operator-pnpm-store:/pnpm/store
+    # frontend 서비스 command 주석 참고 — `--filter codemit-operator...`가 이
     # 컨테이너의 install이 frontend/node_modules를 건드리지 않게 막는다(이
     # 서비스가 그 디렉터리를 볼륨으로 가리지 않으므로, 필터 없이는 호스트에
     # 바인드 마운트된 frontend/node_modules에 리눅스 산출물을 그대로 쓴다 —
@@ -439,7 +439,7 @@ services:
     # node_modules 볼륨이 반쪽짜리 상태로 남아 있을 때의 복원력으로 별개로
     # 남긴다.
     command: >
-      sh -c "cd /app && CI=true pnpm install --filter laurio-operator... --frozen-lockfile --force &&
+      sh -c "cd /app && CI=true pnpm install --filter codemit-operator... --frozen-lockfile --force &&
              cd /app/operator && pnpm dev"
 
   # 강의실(#276, ADR-0037) — 공개 앱·운영자 앱과 다른 오리진으로 뜬다. 같은
@@ -455,63 +455,63 @@ services:
       events:
         condition: service_started
     environment:
-      LAURIO_API_BASE_URL: http://backend:8000
+      CODEMIT_API_BASE_URL: http://backend:8000
       # 실시간 신호 SSE(ADR-0046, #379)만 이 주소로 간다 — 나머지 API는 전부
       # 위 `backend`(동기 gunicorn/runserver)를 그대로 친다. 강의실 BFF가
       # `/api/classroom/events/stream` 경로 하나만 이쪽으로 갈라 보낸다
       # (`lib/proxy/forward.ts`).
-      LAURIO_EVENTS_BASE_URL: http://events:8001
-      # LAURIO_CLASSROOM_ORIGIN은 dev에서 비워 둔다 — 운영자 앱과 같은 이유
+      CODEMIT_EVENTS_BASE_URL: http://events:8001
+      # CODEMIT_CLASSROOM_ORIGIN은 dev에서 비워 둔다 — 운영자 앱과 같은 이유
       # (lib/auth/origin.ts가 Host 헤더로 유도한 오리진과 정확히 맞아떨어진다).
-      # LAURIO_SESSION_COOKIE_DOMAIN도 dev에서는 비운다(#273) — localhost는
+      # CODEMIT_SESSION_COOKIE_DOMAIN도 dev에서는 비운다(#273) — localhost는
       # 서브도메인이 아니라 포트로 앱을 가르므로 domain을 주면 쿠키가 아예 안
       # 붙는다.
       #
-      # LAURIO_WEB_ORIGIN은 이 앱 자신의 Origin 검증에는 쓰이지 않는다(그건
-      # LAURIO_CLASSROOM_ORIGIN 몫이다) — /login 화면이 "공개 앱으로 가서
+      # CODEMIT_WEB_ORIGIN은 이 앱 자신의 Origin 검증에는 쓰이지 않는다(그건
+      # CODEMIT_CLASSROOM_ORIGIN 몫이다) — /login 화면이 "공개 앱으로 가서
       # 로그인하라"는 링크를 지을 때만 읽는다(lib/auth/public-app.ts). 이 스택의
       # frontend 서비스가 실제로 뜨는 포트와 항상 같은 값이어야 하므로 하드코딩하지
       # 않고 그 서비스의 포트 변수를 그대로 참조한다 — 오프셋 워크트리
       # (docker/dev-env.sh)에서도 자동으로 맞는다.
-      LAURIO_WEB_ORIGIN: http://localhost:${LAURIO_WEB_PORT:-53000}
+      CODEMIT_WEB_ORIGIN: http://localhost:${CODEMIT_WEB_PORT:-53000}
     ports:
-      - "${LAURIO_CLASSROOM_WEB_PORT:-53002}:3000"
+      - "${CODEMIT_CLASSROOM_WEB_PORT:-53002}:3000"
     volumes:
       - ..:/app
-      - laurio-dev-classroom-node-modules:/app/node_modules
-      - laurio-dev-classroom-app-node-modules:/app/classroom/node_modules
-      - laurio-dev-classroom-shared-node-modules:/app/packages/bff-shared/node_modules
-      - laurio-dev-classroom-route-audit-node-modules:/app/packages/route-audit/node_modules
-      - laurio-dev-classroom-next:/app/classroom/.next
-      - laurio-dev-classroom-pnpm-store:/pnpm/store
-    # frontend·operator 서비스 command 주석 참고 — `--filter laurio-classroom...`가
+      - codemit-dev-classroom-node-modules:/app/node_modules
+      - codemit-dev-classroom-app-node-modules:/app/classroom/node_modules
+      - codemit-dev-classroom-shared-node-modules:/app/packages/bff-shared/node_modules
+      - codemit-dev-classroom-route-audit-node-modules:/app/packages/route-audit/node_modules
+      - codemit-dev-classroom-next:/app/classroom/.next
+      - codemit-dev-classroom-pnpm-store:/pnpm/store
+    # frontend·operator 서비스 command 주석 참고 — `--filter codemit-classroom...`가
     # 이 컨테이너의 install이 frontend/operator의 node_modules를 건드리지 않게
     # 막는다(이 서비스가 그 디렉터리들을 볼륨으로 가리지 않으므로).
     command: >
-      sh -c "cd /app && CI=true pnpm install --filter laurio-classroom... --frozen-lockfile --force &&
+      sh -c "cd /app && CI=true pnpm install --filter codemit-classroom... --frozen-lockfile --force &&
              cd /app/classroom && pnpm dev"
 
 volumes:
-  laurio-dev-redis:
-  laurio-dev-db:
-  laurio-dev-web-node-modules:
-  laurio-dev-web-frontend-node-modules:
-  laurio-dev-web-shared-node-modules:
-  laurio-dev-web-bff-client-node-modules:
-  laurio-dev-web-route-audit-node-modules:
-  laurio-dev-web-next:
-  laurio-dev-web-pnpm-store:
-  laurio-dev-operator-node-modules:
-  laurio-dev-operator-app-node-modules:
-  laurio-dev-operator-shared-node-modules:
-  laurio-dev-operator-bff-client-node-modules:
-  laurio-dev-operator-route-audit-node-modules:
-  laurio-dev-operator-next:
-  laurio-dev-operator-pnpm-store:
-  laurio-dev-classroom-node-modules:
-  laurio-dev-classroom-app-node-modules:
-  laurio-dev-classroom-shared-node-modules:
-  laurio-dev-classroom-route-audit-node-modules:
-  laurio-dev-classroom-next:
-  laurio-dev-classroom-pnpm-store:
-  laurio-dev-minio:
+  codemit-dev-redis:
+  codemit-dev-db:
+  codemit-dev-web-node-modules:
+  codemit-dev-web-frontend-node-modules:
+  codemit-dev-web-shared-node-modules:
+  codemit-dev-web-bff-client-node-modules:
+  codemit-dev-web-route-audit-node-modules:
+  codemit-dev-web-next:
+  codemit-dev-web-pnpm-store:
+  codemit-dev-operator-node-modules:
+  codemit-dev-operator-app-node-modules:
+  codemit-dev-operator-shared-node-modules:
+  codemit-dev-operator-bff-client-node-modules:
+  codemit-dev-operator-route-audit-node-modules:
+  codemit-dev-operator-next:
+  codemit-dev-operator-pnpm-store:
+  codemit-dev-classroom-node-modules:
+  codemit-dev-classroom-app-node-modules:
+  codemit-dev-classroom-shared-node-modules:
+  codemit-dev-classroom-route-audit-node-modules:
+  codemit-dev-classroom-next:
+  codemit-dev-classroom-pnpm-store:
+  codemit-dev-minio:

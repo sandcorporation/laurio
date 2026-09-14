@@ -8,7 +8,7 @@
 // 401을 낸다.
 import type { NextRequest } from "next/server";
 
-import { buildForwardHeaders, extractForwardBody, forwardRequest } from "@laurio/bff-shared";
+import { buildForwardHeaders, extractForwardBody, forwardRequest } from "@codemit/bff-shared";
 
 import { backendBaseUrl } from "@/lib/auth/backend";
 import { REFRESH_COOKIE, type TokenPair } from "@/lib/auth/cookies";

@@ -14,7 +14,7 @@
 pipeline {
   // 스택이 실제로 떠 있는 호스트 = Jenkins 컨트롤러다. `built-in` 은 컨트롤러가
   // **항상** 갖는 내장 라벨이라(Jenkins 2.307+) 사람이 노드 설정을 유지할 필요가
-  // 없다 — 커스텀 라벨(`laurio-staging`)로 뒀더니 노드에 그 라벨을 붙였는데도
+  // 없다 — 커스텀 라벨(`codemit-staging`)로 뒀더니 노드에 그 라벨을 붙였는데도
   // "There are no nodes with the label" 로 스케줄되지 않아 빌드가 통째로 멈췄다.
   //
   // `agent any` 로 두지 않는 이유: 이 컨트롤러에는 `desktop` 에이전트도 붙어

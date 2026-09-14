@@ -167,7 +167,7 @@ def test_description_round_trips_as_markdown_verbatim_and_unsanitized(client, db
     markdown = (
         "# 제목\n\n**굵게** 그리고 `<b>escape 안 됨</b>` 코드.\n\n"
         "```html\n<script>alert(1)</script>\n```\n\n"
-        "- 목록1\n- 목록2\n\n[링크](https://laurio.example)"
+        "- 목록1\n- 목록2\n\n[링크](https://codemit.example)"
     )
 
     created = client.post(

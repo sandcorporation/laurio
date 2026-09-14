@@ -3,7 +3,7 @@
 # 강의실(#276, ADR-0037) 이미지. docker/frontend.Dockerfile·docker/operator.Dockerfile과
 # 같은 세 스테이지 구조를 그대로 따른다 — 세 앱이 같은 워크스페이스 멤버라서 install
 # 레이어까지 동일하다. 차이는 어느 앱 디렉터리에서 build/dev를 도는지, 그리고 이
-# 앱은 @laurio/bff-client를 아직 쓰지 않는다는 것뿐이다(지금은 이 앱의 어떤 화면도
+# 앱은 @codemit/bff-client를 아직 쓰지 않는다는 것뿐이다(지금은 이 앱의 어떤 화면도
 # 백엔드 프록시를 실제로 타지 않는다 — lib/proxy/allowlist.ts가 비어 있다).
 
 FROM node:22-bookworm-slim AS base

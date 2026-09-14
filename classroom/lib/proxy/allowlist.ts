@@ -22,7 +22,7 @@
 // 조회한다). 엔드포인트 전부 언제나 `request.auth_user`로만 걸러 응답하므로,
 // 이 접두어를 여는 것 자체가 남의 알림에 닿는 길을 열지 않는다 — 열려도
 // 보이는 건 자기 계정의 알림뿐이다.
-import { isAllowedPath } from "@laurio/bff-shared";
+import { isAllowedPath } from "@codemit/bff-shared";
 
 export const BACKEND_PROXY_ALLOWLIST: readonly string[] = [
   "/api/classroom",

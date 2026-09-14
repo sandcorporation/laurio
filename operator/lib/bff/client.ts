@@ -6,7 +6,7 @@
 // 「조용한 갱신」이 없다 — 401 이면 그 자리에서 로그인으로 보낸다. `?next=` 를 붙여 로그인 뒤
 // 하던 자리로 돌아온다.
 
-import { createBffClient } from "@laurio/bff-client";
+import { createBffClient } from "@codemit/bff-client";
 
 function goToLogin(): void {
   if (typeof window === "undefined") return;

@@ -137,7 +137,7 @@ def _requirement_inputs(submission: ContestSubmission) -> list[RequirementInput]
 
 def _build_prompt(*, contest: Contest, requirements: list[RequirementInput], source_files) -> str:
     lines = [
-        "당신은 Laurio 공모전 제출물을 채점하는 심사 보조자입니다.",
+        "당신은 Codemit 공모전 제출물을 채점하는 심사 보조자입니다.",
         f"Contest: {contest.title}",
         "각 Requirement에 대해 (a) 연결된 Evidence가 주장을 뒷받침하는지, "
         "(b) 소스코드에 그 기능이 실재하는지를 함께 보고 충족 여부를 판단하세요. "

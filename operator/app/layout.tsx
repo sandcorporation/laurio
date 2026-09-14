@@ -7,7 +7,7 @@ import "./globals.css";
 // 셀프호스팅 같은 공개 표면 전용 장치가 없다. 이 앱의 유일한 독자는 로그인한
 // Operator다.
 export const metadata: Metadata = {
-  title: "Laurio Operator",
+  title: "Codemit Operator",
   robots: { index: false, follow: false },
 };
 

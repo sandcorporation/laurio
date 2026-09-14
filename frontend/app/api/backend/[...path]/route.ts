@@ -2,7 +2,7 @@
 //
 // 브라우저 → 이 라우트 핸들러 → Django로 흐른다. 파일은 하나지만 통과시킬 경로는
 // lib/proxy/allowlist.ts의 명시적 허용목록으로만 정해진다 — 기본은 거부다.
-import { sanitizeBackendPath } from "@laurio/bff-shared";
+import { sanitizeBackendPath } from "@codemit/bff-shared";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 

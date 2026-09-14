@@ -11,10 +11,10 @@
 
 | 시점 | 항목 | 누가 받는가 | 왜 | 코드 |
 | --- | --- | --- | --- | --- |
-| 가입 | 소셜 로그인 식별자 | Laurio | Authentication — 실명과 무관 | `backend/accounts/social.py`, [ADR-0013](../adr/0013-social-login-only.md) |
-| Submission 제출 · Contest 개최 | 실명·생년월일·CI·DI·전화번호 | 포트원 본인확인 → Laurio 저장 | 만 19세 확인, 자전거래 차단, 통지 | `backend/verification/models.py` `Verification`, [ADR-0011](../adr/0011-verification-at-action-time-and-adults-only.md) |
-| Payout 확정 | 주민등록번호 | Laurio | 지급명세서 ([tax.md](tax.md)) | `backend/payouts/models.py` `TaxIdentity` |
-| Payout 확정 후 Seller 등록 | 이름·이메일·전화번호·계좌, 본인인증·KYC | **토스가 직접** — Laurio 는 `sellerId` 만 | 지급대행사 자신의 의무 | [ADR-0020](../adr/0020-seller-registration-happens-after-payout-is-confirmed.md) |
+| 가입 | 소셜 로그인 식별자 | Codemit | Authentication — 실명과 무관 | `backend/accounts/social.py`, [ADR-0013](../adr/0013-social-login-only.md) |
+| Submission 제출 · Contest 개최 | 실명·생년월일·CI·DI·전화번호 | 포트원 본인확인 → Codemit 저장 | 만 19세 확인, 자전거래 차단, 통지 | `backend/verification/models.py` `Verification`, [ADR-0011](../adr/0011-verification-at-action-time-and-adults-only.md) |
+| Payout 확정 | 주민등록번호 | Codemit | 지급명세서 ([tax.md](tax.md)) | `backend/payouts/models.py` `TaxIdentity` |
+| Payout 확정 후 Seller 등록 | 이름·이메일·전화번호·계좌, 본인인증·KYC | **토스가 직접** — Codemit 는 `sellerId` 만 | 지급대행사 자신의 의무 | [ADR-0020](../adr/0020-seller-registration-happens-after-payout-is-confirmed.md) |
 
 CI 를 주지 않는 본인확인 수단(카카오 통합인증)은 본인확인으로 인정하지 않는다 —
 빈 CI 가 같은 해시로 뭉쳐 남남을 동일인으로 오차단한 사고가 있었다

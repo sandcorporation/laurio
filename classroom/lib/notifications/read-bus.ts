@@ -7,7 +7,7 @@
 // 커스텀 이벤트로 아주 얇게 잇는다. 종은 폴링으로도 결국 맞는 값에
 // 수렴하므로 이 이벤트가 없어도 틀리지 않는다 — 배지가 곧바로 사라지는
 // 체감을 위한 지름길일 뿐이다.
-const EVENT_NAME = "laurio-classroom:notifications-read";
+const EVENT_NAME = "codemit-classroom:notifications-read";
 
 export function broadcastNotificationsRead(): void {
   if (typeof window === "undefined") return;

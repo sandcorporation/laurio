@@ -31,7 +31,7 @@
 //    app/login/page.tsx가 서버에서 판정) 이 절 자체가 렌더되지 않는다 — 배포
 //    환경에 로그인 우회가 실려 나가는 것이 막는 값이다(#95).
 import { Suspense, useState } from "react";
-import { normalizeDetail } from "@laurio/bff-client";
+import { normalizeDetail } from "@codemit/bff-client";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { Card, ErrorNote, INPUT_CLASS } from "@/app/components/ui";

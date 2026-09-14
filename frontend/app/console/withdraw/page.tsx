@@ -5,7 +5,7 @@ import { resolveSiblingOrigin } from "@/lib/auth/sibling-origins";
 
 import { WithdrawPageClient } from "./withdraw-page-client";
 
-// `searchParams`를 읽어 이미 사실상 동적이지만, `LAURIO_CLASSROOM_ORIGIN`을
+// `searchParams`를 읽어 이미 사실상 동적이지만, `CODEMIT_CLASSROOM_ORIGIN`을
 // 읽는 진입점이라는 것을 구조 검사(`lib/rendering/runtime-config.test.ts`,
 // #297/#375)가 볼 수 있도록 명시한다.
 export const dynamic = "force-dynamic";

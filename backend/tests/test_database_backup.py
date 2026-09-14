@@ -67,7 +67,7 @@ def test_backup_uploads_a_custom_format_dump_to_the_private_bucket_and_records_i
     result = core_tasks.backup_database()
 
     assert result["status"] == "succeeded"
-    assert _private_keys() == ["db-backups/2026/09/15/laurio-20260915-020005.dump"]
+    assert _private_keys() == ["db-backups/2026/09/15/codemit-20260915-020005.dump"]
     assert FakeStorageAdapter._store[(Bucket.PRIVATE, _private_keys()[0])] == b"PGDMP-fake-dump"
     call = json.loads(fake_pg_dump.read_text().splitlines()[0])
     assert "--format=custom" in call["args"]
@@ -102,8 +102,8 @@ def test_backups_older_than_the_retention_are_deleted(db, fake_pg_dump, settings
     core_tasks.backup_database()
 
     assert _private_keys() == [
-        "db-backups/2026/09/10/laurio-20260910-020000.dump",
-        "db-backups/2026/09/16/laurio-20260916-020000.dump",
+        "db-backups/2026/09/10/codemit-20260910-020000.dump",
+        "db-backups/2026/09/16/codemit-20260916-020000.dump",
     ]
     old = DatabaseBackup.objects.get(object_key__contains="20260901")
     assert old.status == DatabaseBackup.Status.PRUNED

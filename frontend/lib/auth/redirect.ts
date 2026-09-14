@@ -10,7 +10,7 @@
 // X-Forwarded-* 설정도 필요 없다. 운영자 앱의 미들웨어가 이미 그렇게 동작해서
 // 같은 스테이징에서 멀쩡했다는 것이 이 선택의 근거다.
 //
-// `LAURIO_WEB_ORIGIN`을 읽는 방법도 있지만 그건 dev에 없는 값이라(배포에서만
+// `CODEMIT_WEB_ORIGIN`을 읽는 방법도 있지만 그건 dev에 없는 값이라(배포에서만
 // instrumentation.ts가 강제한다) 폴백이 필요하고, 그 폴백이 정확히 지금 깨진
 // 코드다 — 테스트가 dev에서 그 분기를 관찰할 수 없게 된다.
 import { NextResponse } from "next/server";

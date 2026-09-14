@@ -5,7 +5,7 @@
 // 평문 str 을 내보낸다) 표가 값을 강제하지는 못한다 — 그래서 조회 함수가 모르는 값을 만나면
 // 그 값을 그대로 보여준다(빈칸이나 크래시보다 낫다).
 
-import type { components } from "@laurio/bff-client/schema";
+import type { components } from "@codemit/bff-client/schema";
 
 export type AppealSummary = components["schemas"]["AppealOut"];
 export type AppealDetail = components["schemas"]["AppealDetailOut"];

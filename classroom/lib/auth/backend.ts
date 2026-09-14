@@ -1,7 +1,7 @@
 // 서버 전용. 이 앱이 Django를 부를 때 쓰는 베이스 URL이다 — 공개 앱·운영자 앱과
 // 같은 패턴(각 앱의 lib/auth/backend.ts 참고).
 export function backendBaseUrl(): string {
-  return process.env.LAURIO_API_BASE_URL ?? "http://127.0.0.1:58000";
+  return process.env.CODEMIT_API_BASE_URL ?? "http://127.0.0.1:58000";
 }
 
 // 실시간 신호 SSE 전용 베이스 URL(ADR-0046, #379) — 같은 backend 이미지를
@@ -11,5 +11,5 @@ export function backendBaseUrl(): string {
 // 강의실 BFF도 스트림 경로만 이쪽으로 보내야 그 분리가 실제로 뜻이 있다
 // (`lib/proxy/forward.ts`).
 export function eventsBaseUrl(): string {
-  return process.env.LAURIO_EVENTS_BASE_URL ?? "http://127.0.0.1:58001";
+  return process.env.CODEMIT_EVENTS_BASE_URL ?? "http://127.0.0.1:58001";
 }

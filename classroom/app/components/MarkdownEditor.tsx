@@ -137,7 +137,7 @@ export function MarkdownEditor({
         id={id}
         ref={containerRef}
         data-testid={testId}
-        className="laurio-toastui-editor"
+        className="codemit-toastui-editor"
       />
       {hint}
     </div>

@@ -237,7 +237,7 @@ SERVICES=""
 #
 # **backend·celery-worker·beat·events 는 같은 이미지가 아니다.** 넷 다 같은
 # Dockerfile 을 가리키지만 compose 파일 어디에도 공유 `image:` 태그가 없어서,
-# compose 는 서비스 이름으로 이미지를 **넷** 만든다(laurio-staging-backend,
+# compose 는 서비스 이름으로 이미지를 **넷** 만든다(codemit-staging-backend,
 # -celery-worker, -celery-beat, -events, #380). 그래서 `build backend` 는
 # 하나만 굽고 나머지 셋은 옛 이미지에 남는다 — 뒤의 `up -d` 도 바뀐 게 없으니
 # 그냥 Running 이라 적고 지나간다. 배포는 초록으로 끝나는데 스캔·강의실

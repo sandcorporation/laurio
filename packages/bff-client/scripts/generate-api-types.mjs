@@ -45,7 +45,7 @@ function run(command, args, options) {
   execFileSync(command, args, { stdio: "inherit", ...options });
 }
 
-const tmpDir = mkdtempSync(path.join(tmpdir(), "laurio-openapi-"));
+const tmpDir = mkdtempSync(path.join(tmpdir(), "codemit-openapi-"));
 const schemaJsonPath = path.join(tmpDir, "schema.json");
 
 try {

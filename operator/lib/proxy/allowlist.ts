@@ -1,4 +1,4 @@
-import { isAllowedPath } from "@laurio/bff-shared";
+import { isAllowedPath } from "@codemit/bff-shared";
 
 // 운영자 앱의 BFF 프록시 허용목록(#64, ADR-0021). 검사 로직은 공유 패키지 것을
 // 쓰지만(frontend/lib/proxy/allowlist.ts와 같은 방식) **목록의 내용은 이 파일

@@ -1,5 +1,5 @@
 {
-  "name": "laurio-frontend",
+  "name": "codemit-frontend",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -15,15 +15,15 @@
     "generate:api": "pnpm --dir ../packages/bff-client generate:api"
   },
   "dependencies": {
-    "@laurio/bff-client": "workspace:*",
-    "@laurio/bff-shared": "workspace:*",
+    "@codemit/bff-client": "workspace:*",
+    "@codemit/bff-shared": "workspace:*",
     "next": "^15.5.0",
     "openapi-fetch": "^0.13.8",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
-    "@laurio/route-audit": "workspace:*",
+    "@codemit/route-audit": "workspace:*",
     "@playwright/test": "^1.50.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^22.10.0",

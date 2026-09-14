@@ -316,7 +316,7 @@ class TossPGAdapter:
         try:
             response = requests.post(
                 f"{_BASE_URL}/v1/payments/{payment_key}/cancel",
-                json={"cancelReason": "Laurio 환불 정책에 따른 자동 환불", "cancelAmount": amount},
+                json={"cancelReason": "Codemit 환불 정책에 따른 자동 환불", "cancelAmount": amount},
                 headers=self._headers(),
                 timeout=_TIMEOUT_SECONDS,
             )

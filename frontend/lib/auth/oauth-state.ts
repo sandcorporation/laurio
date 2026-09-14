@@ -16,12 +16,12 @@ import { randomBytes } from "node:crypto";
 
 import { isDeployedEnvironment } from "./cookies";
 
-export const OAUTH_STATE_COOKIE = "laurio_oauth_state";
-export const OAUTH_NEXT_COOKIE = "laurio_oauth_next";
+export const OAUTH_STATE_COOKIE = "codemit_oauth_state";
+export const OAUTH_NEXT_COOKIE = "codemit_oauth_next";
 // 돌아갈 형제 오리진(#297 후속) — 강의실에서 온 사람은 로그인이 끝나면 거기로
 // 돌아가야 한다. 값은 authorize 가 **허용목록과 대조해 통과한 것만** 싣는다
 // (lib/auth/sibling-origins.ts). 없으면 지금까지처럼 같은 오리진 상대 경로로 간다.
-export const OAUTH_RETURN_ORIGIN_COOKIE = "laurio_oauth_return_origin";
+export const OAUTH_RETURN_ORIGIN_COOKIE = "codemit_oauth_return_origin";
 
 // 카카오 동의 화면에서 사람이 조작하는 시간이면 충분해야 하지만, 5분은 실제로
 // 짧았다(코드리뷰 지적) — 카카오 신규 가입이거나 그 화면에서 추가 인증(휴대폰

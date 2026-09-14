@@ -2,7 +2,7 @@
 // 어휘(운영자가 고칠 수 있는 필드와 그 문구)다: 이 목록은 응답 모양이 아니라 **이 화면이 편집을
 // 허용하는 범위**이고, 백엔드의 `UPDATABLE_FIELDS` 와 짝을 이룬다.
 
-import type { components } from "@laurio/bff-client/schema";
+import type { components } from "@codemit/bff-client/schema";
 
 export type PlatformPolicy = components["schemas"]["PolicyOut"];
 export type PolicyChangeEntry = components["schemas"]["PolicyChangeOut"];

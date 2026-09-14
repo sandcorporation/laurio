@@ -58,7 +58,7 @@
 # 이벤트 서비스(ADR-0046, #380): backend와 같은 이미지를 ASGI로 띄우는 별도
 # 서비스(events)가 하나 더 떠야 강의실이 새로고침 없이 화면을 갱신한다 —
 # 없어도 다른 기능은 모두 그대로 동작하고 강의실 화면만 폴링으로 물러난다.
-name: laurio-prod
+name: codemit-prod
 
 x-backend-env: &backend-env
   # --- 배포 타깃 ---
@@ -71,17 +71,17 @@ x-backend-env: &backend-env
   # SECURE_SSL_REDIRECT를 우회하고 secure 쿠키를 평문으로 받아낼 길을 원천적으로
   # 막는다). 관리형 오케스트레이터(ECS/OKE)로 옮기면 이 값 대신 그 앞단의 보안
   # 그룹/리스너 규칙이 같은 역할을 해야 한다.
-  LAURIO_DEPLOYMENT_TARGET: production
+  CODEMIT_DEPLOYMENT_TARGET: production
   DJANGO_DEBUG: "false"
   DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?prod DJANGO_SECRET_KEY 를 .env.prod 에 설정하라 — 50자 이상, 고유 문자 5종 이상}
   DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:?prod DJANGO_ALLOWED_HOSTS 를 .env.prod 에 설정하라}
 
   # 공모전 제품 스위치(#271, `core.contest_switch`) — 기본값은 켜짐(config/settings.py)
   # 이지만 prod 도 staging 처럼 이 기본을 꺼짐으로 겹쳐 쓴다: 먼저 여는 제품이 강의실이다
-  # (ADR-0037). `.env.prod` 에 `LAURIO_CONTEST_PRODUCT_ENABLED=true` 한 줄을 넣고
+  # (ADR-0037). `.env.prod` 에 `CODEMIT_CONTEST_PRODUCT_ENABLED=true` 한 줄을 넣고
   # backend·frontend 를 재배포하면(frontend 는 아래 build.args 가 같은 줄을 읽어 굽는다)
   # 다시 켜진다. 닫히는 표면 목록은 `backend/core/contest_switch.py` 모듈 docstring.
-  LAURIO_CONTEST_PRODUCT_ENABLED: ${LAURIO_CONTEST_PRODUCT_ENABLED:-false}
+  CODEMIT_CONTEST_PRODUCT_ENABLED: ${CODEMIT_CONTEST_PRODUCT_ENABLED:-false}
 
   POSTGRES_DB: ${POSTGRES_DB:?prod POSTGRES_DB 를 .env.prod 에 설정하라}
   POSTGRES_USER: ${POSTGRES_USER:?prod POSTGRES_USER 를 .env.prod 에 설정하라}
@@ -210,7 +210,7 @@ x-backend-env: &backend-env
   # Operator 세션(#43, ADR-0018) — 브로커와 같은 인스턴스, 다른 DB 인덱스.
   # 운영자 앱의 오리진(#43). 비면 부팅이 거부된다 — Host 헤더 유도는
   # 리버스 프록시 구성에 따라 어긋나 모든 변경 요청이 403 이 된다.
-  LAURIO_OPERATOR_ORIGIN: ${LAURIO_OPERATOR_ORIGIN:?LAURIO_OPERATOR_ORIGIN 을 설정해야 한다}
+  CODEMIT_OPERATOR_ORIGIN: ${CODEMIT_OPERATOR_ORIGIN:?CODEMIT_OPERATOR_ORIGIN 을 설정해야 한다}
   SESSION_REDIS_URL: redis://redis:6379/1
   CELERY_BROKER_URL: redis://redis:6379/0
   CELERY_RESULT_BACKEND: redis://redis:6379/0
@@ -231,7 +231,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:?prod POSTGRES_USER 를 .env.prod 에 설정하라}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?prod POSTGRES_PASSWORD 를 .env.prod 에 설정하라}
     volumes:
-      - laurio-prod-db:/var/lib/postgresql/data
+      - codemit-prod-db:/var/lib/postgresql/data
     healthcheck:
       test: [
           "CMD-SHELL",
@@ -248,7 +248,7 @@ services:
     # 스냅샷 창 안의 재시작이 조사 중인 운영자를 전부 튕긴다 — dev 와 같은 이유다.
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
-      - laurio-prod-redis:/data
+      - codemit-prod-redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 3s
@@ -274,7 +274,7 @@ services:
       # 떠 있는 TLS 종단 리버스 프록시(아직 이 저장소에는 없다 — 별도 티켓)만 접근할
       # 수 있게 막는다. 그 프록시가 없는 상태로 이 스택만 올리면 backend는 호스트
       # 자신에서만 curl로 확인할 수 있다 — 이게 의도된 동작이다.
-      - "127.0.0.1:${LAURIO_API_PORT:-8000}:8000"
+      - "127.0.0.1:${CODEMIT_API_PORT:-8000}:8000"
     command: >
       sh -c "python manage.py migrate --noinput &&
              python manage.py collectstatic --noinput &&
@@ -341,7 +341,7 @@ services:
 
   # 프론트엔드 BFF(ADR-0016, FE-13 #38). frontend.Dockerfile의 runner 스테이지 —
   # standalone 산출물을 `node server.js`로 그대로 돈다. instrumentation.ts가
-  # LAURIO_DEPLOYMENT_TARGET=production에서 LAURIO_WEB_ORIGIN·LAURIO_API_BASE_URL이
+  # CODEMIT_DEPLOYMENT_TARGET=production에서 CODEMIT_WEB_ORIGIN·CODEMIT_API_BASE_URL이
   # 비어 있으면 이 컨테이너를 그 자리에서 죽인다 — restart: unless-stopped라도
   # 값이 안 채워지면 재시작을 반복할 뿐 절대 뜨지 않는다(의도된 동작).
   frontend:
@@ -370,10 +370,10 @@ services:
         # 넣으면 그 등식이 깨져 번들은 비어 있는데 가드만 통과하는 사고가
         # 재현된다.
         NEXT_PUBLIC_TOSS_CLIENT_KEY: ${TOSS_LIVE_CLIENT_KEY:?토스 결제창 브라우저 SDK 클라이언트 키를 .env.prod 의 TOSS_LIVE_CLIENT_KEY 에 설정하라 — 빌드타임에 인라인되므로 부팅 후에는 되돌릴 수 없다}
-        # 공모전 제품 스위치(#271) — 위 backend 의 `LAURIO_CONTEST_PRODUCT_ENABLED` 와 **같은
+        # 공모전 제품 스위치(#271) — 위 backend 의 `CODEMIT_CONTEST_PRODUCT_ENABLED` 와 **같은
         # `.env.prod` 줄을 나눠 읽는다**(compose.staging.yaml 의 같은 자리와 같다). 빌드 인자라
         # 값을 바꾸면 이미지를 다시 굽어야 반영된다.
-        NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED: ${LAURIO_CONTEST_PRODUCT_ENABLED:-false}
+        NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED: ${CODEMIT_CONTEST_PRODUCT_ENABLED:-false}
     restart: unless-stopped
     depends_on:
       db:
@@ -384,20 +384,20 @@ services:
         condition: service_started
     environment:
       # 로그인이 끝나고 강의실로 돌려보낼 때 대조하는 허용목록(#297 후속).
-      # 강의실 컨테이너가 읽는 것과 **같은 `.env` 줄**이다(LAURIO_OPERATOR_ORIGIN 과
+      # 강의실 컨테이너가 읽는 것과 **같은 `.env` 줄**이다(CODEMIT_OPERATOR_ORIGIN 과
       # 같은 원칙) — 어긋나면 복귀가 조용히 안 되고 사람은 공개 앱에 남는다.
       # 안전한 쪽으로 실패하지만 원인을 찾기 어려우니 한 줄로 맞춰 둔다.
-      LAURIO_CLASSROOM_ORIGIN: ${LAURIO_CLASSROOM_ORIGIN:-}
-      LAURIO_DEPLOYMENT_TARGET: production
-      LAURIO_API_BASE_URL: http://backend:8000
+      CODEMIT_CLASSROOM_ORIGIN: ${CODEMIT_CLASSROOM_ORIGIN:-}
+      CODEMIT_DEPLOYMENT_TARGET: production
+      CODEMIT_API_BASE_URL: http://backend:8000
       # frontend/lib/auth/origin.ts의 CSRF Origin 검증이 쓰는 값 — 비어 있으면
       # instrumentation.ts가 부팅을 거부한다. staging의 값과 같은 값을 쓰지 않는다
       # (실제 운영 도메인이어야 한다). .env.prod에서 반드시 채운다.
-      LAURIO_WEB_ORIGIN: ${LAURIO_WEB_ORIGIN:?prod LAURIO_WEB_ORIGIN 를 .env.prod 에 설정하라}
+      CODEMIT_WEB_ORIGIN: ${CODEMIT_WEB_ORIGIN:?prod CODEMIT_WEB_ORIGIN 를 .env.prod 에 설정하라}
       # 세션 쿠키의 domain 속성(ADR-0038) — compose.staging.yaml과 같은
       # 이유·같은 구조다. staging과 같은 값을 쓰지 않는다(실제 운영 도메인의
       # 부모여야 한다).
-      LAURIO_SESSION_COOKIE_DOMAIN: ${LAURIO_SESSION_COOKIE_DOMAIN:?prod LAURIO_SESSION_COOKIE_DOMAIN 을 .env.prod 에 설정하라}
+      CODEMIT_SESSION_COOKIE_DOMAIN: ${CODEMIT_SESSION_COOKIE_DOMAIN:?prod CODEMIT_SESSION_COOKIE_DOMAIN 을 .env.prod 에 설정하라}
       # 카카오 OAuth 앱 자격증명(#95/#96) — staging의 frontend 서비스와 같은
       # 이유·같은 구조다(docker/compose.staging.yaml 참고). staging과 같은
       # 값을 쓰지 않는다 — 벤더 앱 자체가 다르고, redirect_uri는 실제 운영
@@ -420,14 +420,14 @@ services:
       # 티켓), 그 프록시가 없는 상태로 이 스택만 올리면 frontend는 호스트 자신
       # 에서만 curl로 확인할 수 있다 — 인터넷에 직접 노출하지 않는 것이 의도된
       # 동작이다.
-      - "127.0.0.1:${LAURIO_WEB_PORT:-3000}:3000"
+      - "127.0.0.1:${CODEMIT_WEB_PORT:-3000}:3000"
 
   # 운영자 앱 BFF(#70, ADR-0019/0021). operator.Dockerfile의 runner 스테이지 —
   # standalone 산출물을 `node server.js`로 그대로 돈다. operator/instrumentation.ts가
-  # LAURIO_DEPLOYMENT_TARGET=production에서 LAURIO_OPERATOR_ORIGIN·
-  # LAURIO_API_BASE_URL이 비어 있으면 이 컨테이너를 그 자리에서 죽인다.
+  # CODEMIT_DEPLOYMENT_TARGET=production에서 CODEMIT_OPERATOR_ORIGIN·
+  # CODEMIT_API_BASE_URL이 비어 있으면 이 컨테이너를 그 자리에서 죽인다.
   #
-  # **LAURIO_OPERATOR_ORIGIN을 위 x-backend-env 앵커의 backend가 요구하는 것과
+  # **CODEMIT_OPERATOR_ORIGIN을 위 x-backend-env 앵커의 backend가 요구하는 것과
   # 정확히 같은 환경변수에서 읽는다** — 두 서비스가 `.env.prod`의 같은 줄을
   # 나눠 읽으므로, 이 값이 서로 다른 곳에서 따로 채워져 어긋나는 사고 자체가
   # 구조적으로 불가능하다. 이 티켓의 핵심 위험(오리진 정합성)에 대한 compose
@@ -446,17 +446,17 @@ services:
       backend:
         condition: service_started
     environment:
-      LAURIO_DEPLOYMENT_TARGET: production
-      LAURIO_API_BASE_URL: http://backend:8000
+      CODEMIT_DEPLOYMENT_TARGET: production
+      CODEMIT_API_BASE_URL: http://backend:8000
       # backend의 OPERATOR_WEB_ORIGIN(위 x-backend-env)과 같은 변수, 같은 값 —
       # 실제 운영 도메인이어야 한다. staging의 값과 같은 값을 쓰지 않는다.
-      LAURIO_OPERATOR_ORIGIN: ${LAURIO_OPERATOR_ORIGIN:?LAURIO_OPERATOR_ORIGIN 을 설정해야 한다}
+      CODEMIT_OPERATOR_ORIGIN: ${CODEMIT_OPERATOR_ORIGIN:?CODEMIT_OPERATOR_ORIGIN 을 설정해야 한다}
     ports:
       # frontend·backend와 같은 이유로 127.0.0.1에만 publish한다 — 이 호스트
       # 앞단에 TLS 종단 리버스 프록시가 반드시 있어야 한다(별도 티켓). 그 프록시가
       # 없는 상태로 이 스택만 올리면 operator는 호스트 자신에서만 curl로 확인할
       # 수 있다 — 인터넷에 직접 노출하지 않는 것이 의도된 동작이다.
-      - "127.0.0.1:${LAURIO_OPERATOR_WEB_PORT:-3001}:3000"
+      - "127.0.0.1:${CODEMIT_OPERATOR_WEB_PORT:-3001}:3000"
 
   # 강의실 앱(#276/#277, ADR-0037). classroom.Dockerfile의 runner 스테이지 —
   # frontend·operator 서비스와 같은 산출물 모양이고 같은 부팅 가드 원칙을
@@ -477,25 +477,25 @@ services:
       events:
         condition: service_started
     environment:
-      LAURIO_DEPLOYMENT_TARGET: production
-      LAURIO_API_BASE_URL: http://backend:8000
+      CODEMIT_DEPLOYMENT_TARGET: production
+      CODEMIT_API_BASE_URL: http://backend:8000
       # 실시간 신호 SSE 전용 베이스 URL(ADR-0046, #380) — compose.staging.yaml의
       # classroom 서비스와 같은 이유·같은 구조다. 강의실 BFF가
       # `/api/classroom/events/stream` 경로 하나만 이쪽으로 갈라 보낸다.
-      LAURIO_EVENTS_BASE_URL: http://events:8001
+      CODEMIT_EVENTS_BASE_URL: http://events:8001
       # 이 앱 자신의 Origin 검증이 쓰는 값 — 실제 운영 도메인이어야 한다.
       # staging의 값과 같은 값을 쓰지 않는다.
-      LAURIO_CLASSROOM_ORIGIN: ${LAURIO_CLASSROOM_ORIGIN:?LAURIO_CLASSROOM_ORIGIN 을 설정해야 한다}
+      CODEMIT_CLASSROOM_ORIGIN: ${CODEMIT_CLASSROOM_ORIGIN:?CODEMIT_CLASSROOM_ORIGIN 을 설정해야 한다}
       # 「로그인이 필요합니다」 화면이 공개 앱 로그인으로 안내하는 링크를 지을
       # 때 읽는다 — frontend 서비스가 요구하는 것과 같은 변수, 같은 값.
-      LAURIO_WEB_ORIGIN: ${LAURIO_WEB_ORIGIN:?prod LAURIO_WEB_ORIGIN 를 .env.prod 에 설정하라}
+      CODEMIT_WEB_ORIGIN: ${CODEMIT_WEB_ORIGIN:?prod CODEMIT_WEB_ORIGIN 를 .env.prod 에 설정하라}
       # frontend 서비스가 요구하는 것과 같은 변수, 같은 값(ADR-0038).
-      LAURIO_SESSION_COOKIE_DOMAIN: ${LAURIO_SESSION_COOKIE_DOMAIN:?prod LAURIO_SESSION_COOKIE_DOMAIN 을 .env.prod 에 설정하라}
+      CODEMIT_SESSION_COOKIE_DOMAIN: ${CODEMIT_SESSION_COOKIE_DOMAIN:?prod CODEMIT_SESSION_COOKIE_DOMAIN 을 .env.prod 에 설정하라}
     ports:
       # frontend·operator와 같은 이유로 127.0.0.1에만 publish한다 — 이 호스트
       # 앞단에 TLS 종단 리버스 프록시가 반드시 있어야 한다.
-      - "127.0.0.1:${LAURIO_CLASSROOM_WEB_PORT:-3002}:3000"
+      - "127.0.0.1:${CODEMIT_CLASSROOM_WEB_PORT:-3002}:3000"
 
 volumes:
-  laurio-prod-db:
-  laurio-prod-redis:
+  codemit-prod-db:
+  codemit-prod-redis:

@@ -1,7 +1,7 @@
 // Category 관리가 쓰는 타입 (#231) — 응답 모양은 생성 타입 그대로다(#148).
 // deliverable-types/types.ts와 같은 관용구다.
 
-import type { components } from "@laurio/bff-client/schema";
+import type { components } from "@codemit/bff-client/schema";
 
 export type Category = components["schemas"]["OperatorCategoryOut"];
 export type CategoryChangeEntry = components["schemas"]["CategoryChangeOut"];

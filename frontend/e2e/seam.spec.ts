@@ -8,7 +8,7 @@ import { expect, test } from "@playwright/test";
 
 test("브라우저로 연 홈이 렌더링된다", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1, name: "Laurio" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Codemit" })).toBeVisible();
 });
 
 // 이 앱은 BFF 다(ADR-0016). 백엔드에 닿지 못하면 로그인부터 아무것도 되지 않으므로,
@@ -46,6 +46,6 @@ test.describe("자바스크립트 없이", () => {
 
   test("페이지 내용이 그대로 보인다", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("heading", { level: 1, name: "Laurio" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Codemit" })).toBeVisible();
   });
 });

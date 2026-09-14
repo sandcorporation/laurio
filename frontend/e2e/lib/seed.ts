@@ -6,7 +6,7 @@
 // 심는 것은 이미 떠 있는 백엔드다(#156) — 예전에는 `uv run manage.py` 서브프로세스라
 // 호출마다 Django 부팅 0.9초를 치렀다. `docker compose exec` 를 쓰지 않는다는 옛 규율은
 // 그대로 지켜진다(compose 프로젝트 이름이 실행 환경마다 다르다): 호스트에 포트로 노출된
-// 백엔드를 `LAURIO_API_BASE_URL` 로 직접 치므로 프로젝트 이름과 무관하다.
+// 백엔드를 `CODEMIT_API_BASE_URL` 로 직접 치므로 프로젝트 이름과 무관하다.
 import { runSeed } from "./seed-http";
 
 
@@ -98,7 +98,7 @@ export type SeededContests = {
 
 // dev compose 의 기본값(docker/compose.dev.yaml, config/settings.py)과 같다 —
 // 이 체인이 포트를 비켜 잡았다면(디스패치 지침) 테스트 실행 전에
-// `LAURIO_DB_PORT` 를 그 값으로 export 해야 한다.
+// `CODEMIT_DB_PORT` 를 그 값으로 export 해야 한다.
 
 export type SeedOptions = {
   /** 전용 Category 에 공개 Contest 를 이만큼 더 심는다(#39). 느리므로 필요한 스펙에서만 쓴다. */
@@ -127,12 +127,12 @@ function workerNamespace(): string {
     // globalSetup(테스트 밖)에서도 임포트되므로 최상단에서 test 를 끌어오면
     // 그쪽에서 터진다. 실제로 워커 안일 때만 읽는다.
     const { test } = require("@playwright/test") as typeof import("@playwright/test");
-    // **같은 머신에서 스위트를 둘 이상 동시에 돌린다면 `LAURIO_E2E_NAMESPACE` 를
+    // **같은 머신에서 스위트를 둘 이상 동시에 돌린다면 `CODEMIT_E2E_NAMESPACE` 를
     // 서로 다르게 줘라** — `parallelIndex` 는 한 실행 안에서만 유일해서, 두 실행이
     // 각자 `w0` 을 써 서로의 픽스처를 지운다. 병렬 워크트리에서 체인 둘이 각자
-    // e2e 를 돌리는 상황이 정확히 그것이다(`LAURIO_TEST_DB_NAME` 을 달리 주는
+    // e2e 를 돌리는 상황이 정확히 그것이다(`CODEMIT_TEST_DB_NAME` 을 달리 주는
     // 것과 같은 이유). 명령 쪽 검증이 소문자 영숫자만 받으므로 그 형태로 준다.
-    const scope = (process.env.LAURIO_E2E_NAMESPACE ?? "").replace(/[^a-z0-9]/g, "");
+    const scope = (process.env.CODEMIT_E2E_NAMESPACE ?? "").replace(/[^a-z0-9]/g, "");
     return `${scope}w${test.info().parallelIndex}`;
   } catch {
     return "";

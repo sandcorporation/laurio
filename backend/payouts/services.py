@@ -183,7 +183,7 @@ def _seller_registration_for(developer, existing: Seller | None):
         user_id=developer.user_id, status=Verification.Status.VERIFIED
     ).first()
     return SellerRegistration(
-        ref_seller_id=f"laurio-developer-{developer.id}",
+        ref_seller_id=f"codemit-developer-{developer.id}",
         name=verification.real_name if verification is not None else "",
         # 로그인 계정의 이메일이 아니라 Seller 자신의 이메일이다(#168) — 소셜
         # 로그인이 이메일을 안 줬으면(#49 유저스토리 12) 계정 이메일은 비어

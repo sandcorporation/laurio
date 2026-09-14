@@ -16,7 +16,7 @@ from django.conf import settings
 
 from .events import Event
 
-_CHANNEL_PREFIX = "laurio-events:"
+_CHANNEL_PREFIX = "codemit-events:"
 
 
 def _channel(recipient_id: int) -> str:

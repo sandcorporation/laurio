@@ -63,7 +63,7 @@ _SMS_BYTE_LIMIT = 90
 # LMS/MMS는 벤더가 제목을 요구한다(본문과 별개 필드) — 45바이트 이내의 고정
 # 문구를 쓴다. 실제 내용은 title이 아니라 msg에 전부 담기므로 이 값이 잘려도
 # 정보 손실이 없다.
-_DEFAULT_TITLE = "Laurio 알림"
+_DEFAULT_TITLE = "Codemit 알림"
 
 
 class AligoCredentialsError(ImproperlyConfigured):

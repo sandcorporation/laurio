@@ -39,8 +39,8 @@ const RUN_ID_FILE = path.resolve(__dirname, "../.e2e-run-id");
 // 않는다 — 컴파일만 시키면 되고, 실패해도(스택이 아직 안 떴거나 그 라우트가
 // 인증을 요구하거나) 그냥 넘어간다. 이 함수의 일은 테스트가 아니라 준비다.
 async function warmRoutes(): Promise<void> {
-  const publicBase = process.env.LAURIO_E2E_BASE_URL ?? "http://127.0.0.1:53000";
-  const operatorBase = process.env.LAURIO_OPERATOR_E2E_BASE_URL ?? "http://127.0.0.1:53001";
+  const publicBase = process.env.CODEMIT_E2E_BASE_URL ?? "http://127.0.0.1:53000";
+  const operatorBase = process.env.CODEMIT_OPERATOR_E2E_BASE_URL ?? "http://127.0.0.1:53001";
   const targets = [
     `${publicBase}/`,
     `${publicBase}/contests`,

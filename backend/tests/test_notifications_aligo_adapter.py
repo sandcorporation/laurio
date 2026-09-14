@@ -568,4 +568,4 @@ def test_other_notification_type_bodies_are_unaffected_by_the_new_branch():
         is_promotional=False,
         context={"contest_title": "테스트 대회"},
     )
-    assert render_message(notification) == "[Laurio] 제기하신 이의 심판이 완료됐습니다. laurio에서 결과를 확인하세요."
+    assert render_message(notification) == "[Codemit] 제기하신 이의 심판이 완료됐습니다. codemit에서 결과를 확인하세요."

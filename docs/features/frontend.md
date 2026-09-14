@@ -124,7 +124,7 @@ CTA 가 상태에 따라 갈린다 — 아직 안 낸 사람에게는 「제출�
 갈리는지」 참고 — `classroom.md`의 「헤더 계정 메뉴」).
 
 「클래스로 가기」 주소는 서버에서만 읽히는 강의실 오리진 설정
-(`LAURIO_CLASSROOM_ORIGIN`, `lib/auth/classroom-link.ts`)에서 온다 — 빌드
+(`CODEMIT_CLASSROOM_ORIGIN`, `lib/auth/classroom-link.ts`)에서 온다 — 빌드
 시점에 굳지 않도록 이 값을 읽는 헤더가 걸린 레이아웃 전체가 동적으로
 렌더된다(`app/layout.tsx`의 `force-dynamic`, `lib/rendering/
 runtime-config.test.ts`가 그 구조를 지킨다).

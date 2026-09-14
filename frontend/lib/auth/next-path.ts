@@ -19,7 +19,7 @@
 // 보고, 그 결과가 여전히 그 placeholder를 가리키는지(=다른 호스트로 새지
 // 않았는지)를 구조적으로 확인한다. 이러면 backslash·제어문자를 포함해 아직
 // 발견되지 않은 정규화 트릭까지 같은 검사 하나로 막는다.
-const SAFE_NEXT_PATH_BASE = "http://laurio-internal.invalid";
+const SAFE_NEXT_PATH_BASE = "http://codemit-internal.invalid";
 
 export function isSafeNextPath(next: string | null | undefined): next is string {
   if (!next) return false;
@@ -34,7 +34,7 @@ export function isSafeNextPath(next: string | null | undefined): next is string 
 
   // 파싱 결과가 placeholder 오리진을 벗어났다면(backslash가 "/"로 정규화돼
   // "//evil.example.com"이 되는 경우 등) next는 실제로 다른 호스트를 가리킨다.
-  return resolved.protocol === "http:" && resolved.host === "laurio-internal.invalid";
+  return resolved.protocol === "http:" && resolved.host === "codemit-internal.invalid";
 }
 
 export function resolveNextPath(next: string | null | undefined, fallback = "/"): string {

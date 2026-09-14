@@ -20,12 +20,12 @@ const MUTATING_METHODS = ["POST", "PUT", "PATCH", "DELETE"];
 describe("assertSameOrigin — 메서드 종류별 전수", () => {
   describe("읽기 전용 메서드는 Origin을 검사하지 않는다", () => {
     test.each(READONLY_METHODS)("%s는 Origin이 없어도 통과한다", (method) => {
-      expect(assertSameOrigin(request(method), "https://laurio.example")).toBeNull();
+      expect(assertSameOrigin(request(method), "https://codemit.example")).toBeNull();
     });
 
     test.each(READONLY_METHODS)("%s는 Origin이 틀려도 통과한다", (method) => {
       expect(
-        assertSameOrigin(request(method, { origin: "https://evil.example.test" }), "https://laurio.example"),
+        assertSameOrigin(request(method, { origin: "https://evil.example.test" }), "https://codemit.example"),
       ).toBeNull();
     });
   });
@@ -33,8 +33,8 @@ describe("assertSameOrigin — 메서드 종류별 전수", () => {
   describe("변경 요청 — configuredOrigin이 주어진 경우(배포 환경)", () => {
     test.each(MUTATING_METHODS)("%s: 설정된 오리진과 일치하면 통과한다", async (method) => {
       const result = assertSameOrigin(
-        request(method, { origin: "https://laurio.example" }),
-        "https://laurio.example",
+        request(method, { origin: "https://codemit.example" }),
+        "https://codemit.example",
       );
       expect(result).toBeNull();
     });
@@ -42,7 +42,7 @@ describe("assertSameOrigin — 메서드 종류별 전수", () => {
     test.each(MUTATING_METHODS)("%s: 설정된 오리진과 다르면 403으로 거부한다", async (method) => {
       const result = assertSameOrigin(
         request(method, { origin: "https://evil.example.test" }),
-        "https://laurio.example",
+        "https://codemit.example",
       );
       expect(result).not.toBeNull();
       expect(result?.status).toBe(403);
@@ -51,7 +51,7 @@ describe("assertSameOrigin — 메서드 종류별 전수", () => {
     test.each(MUTATING_METHODS)(
       "%s: Origin 헤더가 아예 없으면 fail-closed로 거부한다",
       async (method) => {
-        const result = assertSameOrigin(request(method), "https://laurio.example");
+        const result = assertSameOrigin(request(method), "https://codemit.example");
         expect(result).not.toBeNull();
         expect(result?.status).toBe(403);
         const body = (await result?.json()) as { detail: string };

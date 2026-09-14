@@ -39,7 +39,7 @@ export function SiteHeader() {
           data-testid="header-brand"
           className="text-[21px] font-bold tracking-[-0.01em] text-ink"
         >
-          Laurio
+          Codemit
         </Link>
 
         <nav aria-label="주 메뉴" className="flex flex-wrap items-center gap-3 text-sm">

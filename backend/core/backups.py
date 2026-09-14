@@ -11,7 +11,7 @@ HTTP 로 지킬 이유도 없다 — 같은 날 두 번째 실행은 `DatabaseBa
 **위치는 기존 비공개 버킷의 `db-backups/YYYY/MM/DD/`** — 이미 쓰는 스토리지 연결 그대로다.
 보존 기간(`DB_BACKUP_RETENTION_DAYS`)이 지난 백업은 기록된 키로 지운다.
 
-복원: `pg_restore --clean --if-exists --no-owner -d <db> laurio-YYYYMMDD-HHMMSS.dump`.
+복원: `pg_restore --clean --if-exists --no-owner -d <db> codemit-YYYYMMDD-HHMMSS.dump`.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ def run_database_backup() -> dict:
     ).exists():
         return {"status": "skipped", "reason": "already backed up today", "date": local.date().isoformat()}
 
-    object_key = f"{_PREFIX}/{local:%Y/%m/%d}/laurio-{local:%Y%m%d-%H%M%S}.dump"
+    object_key = f"{_PREFIX}/{local:%Y/%m/%d}/codemit-{local:%Y%m%d-%H%M%S}.dump"
     backup = DatabaseBackup.objects.create(started_at=now, backup_date=local.date(), object_key=object_key)
     try:
         dump = _dump()
@@ -70,7 +70,7 @@ def _dump() -> bytes:
     db = connections["default"].settings_dict
     env = {**os.environ, "PGPASSWORD": str(db.get("PASSWORD") or "")}
     with tempfile.TemporaryDirectory() as tmp:
-        out = Path(tmp) / "laurio.dump"
+        out = Path(tmp) / "codemit.dump"
         cmd = [
             settings.DB_BACKUP_PG_DUMP_COMMAND,
             "--format=custom",

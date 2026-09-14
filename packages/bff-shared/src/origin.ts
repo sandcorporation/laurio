@@ -3,8 +3,8 @@
 // 쿠키는 브라우저가 자동으로 실어 보내므로, Origin 검증이 빠지면 이 구조는
 // localStorage 토큰보다 나쁘다.
 //
-// 어떤 오리진이 "맞는" 오리진인지(예: LAURIO_WEB_ORIGIN vs
-// LAURIO_OPERATOR_ORIGIN)는 앱마다 다른 환경변수다 — 그래서 여기서는 env를
+// 어떤 오리진이 "맞는" 오리진인지(예: CODEMIT_WEB_ORIGIN vs
+// CODEMIT_OPERATOR_ORIGIN)는 앱마다 다른 환경변수다 — 그래서 여기서는 env를
 // 읽지 않는다. 호출부가 이미 정해진 값을 `configuredOrigin`으로 넘긴다.
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";

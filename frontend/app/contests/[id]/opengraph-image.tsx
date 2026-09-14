@@ -7,7 +7,7 @@ import { ImageResponse } from "next/og";
 
 import { fetchContest } from "@/lib/api/contests";
 
-export const alt = "Laurio 공모전";
+export const alt = "Codemit 공모전";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -16,7 +16,7 @@ export default async function ContestOpengraphImage({ params }: { params: Promis
   const contestId = Number(id);
   const contest = Number.isInteger(contestId) ? await fetchContest(contestId) : null;
 
-  const title = contest?.title ?? "Laurio";
+  const title = contest?.title ?? "Codemit";
   const subtitle = contest
     ? `상금 ${contest.prize.toLocaleString("ko-KR")}원`
     : "발주자가 상금을 걸고 요구사항을 공개하는 공개 공모전 플랫폼";
@@ -36,7 +36,7 @@ export default async function ContestOpengraphImage({ params }: { params: Promis
           fontFamily: "sans-serif",
         }}
       >
-        <div style={{ fontSize: 28, letterSpacing: 4, color: "#8B877D" }}>LAURIO</div>
+        <div style={{ fontSize: 28, letterSpacing: 4, color: "#8B877D" }}>CODEMIT</div>
         <div style={{ display: "flex", fontSize: 56, fontWeight: 700, marginTop: 24 }}>{title}</div>
         <div style={{ display: "flex", fontSize: 32, color: "#55524A", marginTop: 20 }}>{subtitle}</div>
       </div>

@@ -184,7 +184,7 @@ class NotificationOptIn(models.Model):
 
 
 class Notification(models.Model):
-    """Laurio 가 당사자에게 보내는 통지 한 건(CONTEXT.md).
+    """Codemit 가 당사자에게 보내는 통지 한 건(CONTEXT.md).
 
     도달 여부와 무관하게 발송 이력 자체가 통지의 증거다. 상태는 "발송 예정"과
     "발송됨"이 구분된 채 관리된다(ADR-0010): QUEUED 는 즉시 시도 대상, DEFERRED 는

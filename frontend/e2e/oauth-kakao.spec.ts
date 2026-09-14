@@ -71,7 +71,7 @@ test.describe("카카오 authorize — 자격증명이 없을 때(dev 기본)", 
     expect(location).toContain("error=oauth_unconfigured");
     // 설정 안 됨이면 state/next 쿠키도 발급하지 않는다 — 애초에 카카오로 가지
     // 않으므로 왕복을 지킬 이유가 없다.
-    expect(res.headers()["set-cookie"] ?? "").not.toContain("laurio_oauth_state=");
+    expect(res.headers()["set-cookie"] ?? "").not.toContain("codemit_oauth_state=");
   });
 });
 
@@ -100,7 +100,7 @@ test.describe("GitHub·구글 authorize — 자격증명이 없을 때(지금 �
       expect(location).not.toContain(AUTHORIZE_HOSTS[provider]);
       expect(location).toContain("/login");
       expect(location).toContain("error=oauth_unconfigured");
-      expect(res.headers()["set-cookie"] ?? "").not.toContain("laurio_oauth_state=");
+      expect(res.headers()["set-cookie"] ?? "").not.toContain("codemit_oauth_state=");
     });
   }
 });
@@ -138,9 +138,9 @@ test.describe("카카오 authorize — 자격증명이 있을 때", () => {
 
     // state가 HttpOnly 쿠키로도 발급됐다 — 콜백이 왕복을 검증할 수 있는 근거.
     const setCookie = res.headers()["set-cookie"] ?? "";
-    expect(setCookie).toContain("laurio_oauth_state=");
+    expect(setCookie).toContain("codemit_oauth_state=");
     expect(setCookie).toContain("HttpOnly");
-    expect(setCookie).toContain("laurio_oauth_next=");
+    expect(setCookie).toContain("codemit_oauth_next=");
   });
 });
 
@@ -178,7 +178,7 @@ test.describe("next 검증 — 오픈 리다이렉트 방어 (자격증명 유�
       if (location.includes("kauth.kakao.com")) {
         // 설정됨 — next는 왕복 쿠키에 담긴다. 안전하지 않은 next는 기본
         // 도착지(홈 "/", #375)로 떨어지고, 인코딩되면 "%2F"다.
-        expect(setCookie, unsafeNext).toContain("laurio_oauth_next=%2F");
+        expect(setCookie, unsafeNext).toContain("codemit_oauth_next=%2F");
       } else {
         // 설정 안 됨(dev 기본) — next는 /login 리다이렉트의 쿼리에 담긴다.
         expect(location, unsafeNext).toContain("/login");
@@ -206,7 +206,7 @@ test.describe("next 검증 — 오픈 리다이렉트 방어 (자격증명 유�
       {
         maxRedirects: 0,
         headers: {
-          cookie: `laurio_oauth_state=${forgedState}; laurio_oauth_next=${encodeURIComponent("/\\evil.example.test")}`,
+          cookie: `codemit_oauth_state=${forgedState}; codemit_oauth_next=${encodeURIComponent("/\\evil.example.test")}`,
         },
       },
     );
@@ -242,7 +242,7 @@ test.describe("카카오 콜백 — state 검증 (자격증명 유무와 무관�
       "/api/auth/social/kakao/callback?code=whatever&state=tampered-state",
       {
         maxRedirects: 0,
-        headers: { cookie: "laurio_oauth_state=real-state" },
+        headers: { cookie: "codemit_oauth_state=real-state" },
       },
     );
 
@@ -256,7 +256,7 @@ test.describe("카카오 콜백 — state 검증 (자격증명 유무와 무관�
   }) => {
     const res = await request.get("/api/auth/social/kakao/callback?error=access_denied&state=x", {
       maxRedirects: 0,
-      headers: { cookie: "laurio_oauth_state=x" },
+      headers: { cookie: "codemit_oauth_state=x" },
     });
 
     const location = res.headers()["location"]!;
@@ -267,7 +267,7 @@ test.describe("카카오 콜백 — state 검증 (자격증명 유무와 무관�
   test("code가 없으면(state는 일치해도) 거절한다", async ({ request }) => {
     const res = await request.get("/api/auth/social/kakao/callback?state=x", {
       maxRedirects: 0,
-      headers: { cookie: "laurio_oauth_state=x" },
+      headers: { cookie: "codemit_oauth_state=x" },
     });
 
     const location = res.headers()["location"]!;
@@ -316,7 +316,7 @@ test.describe("우리 화면으로 돌아가는 리다이렉트는 상대 경로
     // **그 복귀도 같은 헬퍼를 쓰므로** 절대 URL 여부는 여기서 관찰된다.
     const res = await request.get("/api/auth/social/kakao/callback?code=bogus&state=x", {
       maxRedirects: 0,
-      headers: { cookie: "laurio_oauth_state=x; laurio_oauth_next=%2Fconsole" },
+      headers: { cookie: "codemit_oauth_state=x; codemit_oauth_next=%2Fconsole" },
     });
 
     const location = res.headers()["location"] ?? "";

@@ -1,6 +1,6 @@
 // 런타임 설정을 읽는 화면은 빌드 시점에 구워지면 안 된다 (#297).
 //
-// **실제로 배포를 망가뜨렸다.** `app/login/page.tsx` 는 `LAURIO_WEB_ORIGIN` 을 읽어
+// **실제로 배포를 망가뜨렸다.** `app/login/page.tsx` 는 `CODEMIT_WEB_ORIGIN` 을 읽어
 // 공개 앱의 로그인 주소를 만드는데, `searchParams`·`cookies`·`headers` 를 하나도
 // 읽지 않아 Next 가 정적으로 판정했다. `next build` 시점에는 그 환경변수가 없으므로
 // **dev 폴백(`http://127.0.0.1:53000`)이 HTML 에 박제되어** 1년 캐시로 서빙됐다

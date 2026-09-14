@@ -16,7 +16,7 @@
 // 묻지 않는다 — 익명 방문자는 인증이 필요한 요청을 한 번도 만들지 않는다.
 import { usePathname } from "next/navigation";
 
-import { useBackendQuery } from "@laurio/bff-client";
+import { useBackendQuery } from "@codemit/bff-client";
 
 import { sessionOnlyClient } from "@/lib/bff/session-client";
 import type { HeaderSessionState } from "@/lib/auth/header-session-state";

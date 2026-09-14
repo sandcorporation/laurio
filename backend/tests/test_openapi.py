@@ -11,5 +11,5 @@ def test_openapi_schema_is_served(client):
     assert response.status_code == 200
 
     schema = response.json()
-    assert schema["info"]["title"] == "Laurio API"
+    assert schema["info"]["title"] == "Codemit API"
     assert "/api/health" in schema["paths"]

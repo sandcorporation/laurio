@@ -52,7 +52,7 @@ cd backend && uv run python manage.py export_openapi_schema | \
   python3 -c "import json,sys; s=json.load(sys.stdin); print(sum(len([m for m in o if m in ('get','post','put','patch','delete')]) for o in s['paths'].values()))"
 
 # 스캔 등록부
-cd backend && LAURIO_DB_PORT=55432 uv run python manage.py shell -c \
+cd backend && CODEMIT_DB_PORT=55432 uv run python manage.py shell -c \
   "from core.scans import SCAN_REGISTRY; print(len(SCAN_REGISTRY)); print(*SCAN_REGISTRY, sep='\n')"
 
 # 화면

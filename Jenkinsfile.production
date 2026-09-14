@@ -12,14 +12,14 @@
 // Jenkinsfile.production)은 저장소 밖의 Jenkins 에 사람이 만든다.
 //
 // **어디서 도는가.** prod 스택이 떠 있는 호스트다 — staging 컨트롤러(`sub`)가 아니다.
-// 그 호스트에 붙인 에이전트의 라벨이 `laurio-prod` 여야 하고, 그 에이전트의 워크스페이스에
+// 그 호스트에 붙인 에이전트의 라벨이 `codemit-prod` 여야 하고, 그 에이전트의 워크스페이스에
 // 사람이 `docker/.env.prod` 를 두고 chmod 600 한다(없으면 deploy.sh 가 preflight 에서
 // 멈춘다). staging 이 커스텀 라벨로 스케줄되지 않았던 것은 **컨트롤러 자신**에 라벨을
 // 붙였을 때의 일이다(staging Jenkinsfile 머리말) — 원격 에이전트는 라벨이 유일한 지정
 // 수단이다.
 
 pipeline {
-  agent { label 'laurio-prod' }
+  agent { label 'codemit-prod' }
 
   options {
     timestamps()

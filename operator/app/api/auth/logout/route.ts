@@ -4,7 +4,7 @@
 // 실은 Cookie 헤더 전체를 그대로 중계하지 않는다(#63 인수조건). 이 앱의 쿠키
 // 저장소에는 이 세션 쿠키 하나만 있어야 정상이지만, 그 사실에 기대지 않고
 // 코드로도 한 값만 골라 쓴다.
-import { assertSameOrigin } from "@laurio/bff-shared";
+import { assertSameOrigin } from "@codemit/bff-shared";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
@@ -15,7 +15,7 @@ import { backendBaseUrl, operatorOrigin } from "@/lib/backend";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const originDenied = assertSameOrigin(request, process.env.LAURIO_OPERATOR_ORIGIN);
+  const originDenied = assertSameOrigin(request, process.env.CODEMIT_OPERATOR_ORIGIN);
   if (originDenied) return originDenied;
 
   const sessionValue = request.cookies.get(SESSION_COOKIE_NAME)?.value;

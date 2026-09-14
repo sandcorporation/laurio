@@ -4,11 +4,11 @@
 // 없이 카테고리 목록을 내려준다. `Category` 는 `id`(number)·`name`(string) 두
 // 필드뿐이라 백엔드 스키마 변화를 눈으로 확인하기 좋은 최소 예시다.
 //
-// 반환 타입은 100% `@laurio/bff-client/schema` 에서 온다 — 여기서 직접 선언하지 않는다.
+// 반환 타입은 100% `@codemit/bff-client/schema` 에서 온다 — 여기서 직접 선언하지 않는다.
 // 백엔드가 필드를 지우거나 이름을 바꾸면 `res.data![0].그필드` 를 쓰는 곳마다
 // `tsc --noEmit` 이 즉시 실패한다(런타임이 아니라 빌드타임).
 import { backendClient } from "./client";
-import type { components } from "@laurio/bff-client/schema";
+import type { components } from "@codemit/bff-client/schema";
 
 export type Category = components["schemas"]["CategoryOut"];
 export type DeliverableType = components["schemas"]["DeliverableTypeOut"];

@@ -8,10 +8,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { configuredSiblingOrigins, resolveSiblingOrigin } from "./sibling-origins";
 
 const ORIGINAL = { ...process.env };
-const CLASSROOM = "https://classroom.laurio.example";
+const CLASSROOM = "https://classroom.codemit.example";
 
 beforeEach(() => {
-  process.env = { ...ORIGINAL, LAURIO_CLASSROOM_ORIGIN: CLASSROOM };
+  process.env = { ...ORIGINAL, CODEMIT_CLASSROOM_ORIGIN: CLASSROOM };
 });
 afterEach(() => {
   process.env = { ...ORIGINAL };
@@ -33,11 +33,11 @@ describe("설정된 우리 오리진만 통과한다", () => {
 
 describe("우리 것이 아니면 거절한다", () => {
   it.each([
-    ["접미어 트릭", "https://classroom.laurio.example.evil.test"],
-    ["authority 트릭", "https://classroom.laurio.example@evil.test"],
-    ["접두어만 같은 것", "https://classroom.laurio.exampleX"],
-    ["다른 스킴", "ftp://classroom.laurio.example"],
-    ["스킴 없는 것", "classroom.laurio.example"],
+    ["접미어 트릭", "https://classroom.codemit.example.evil.test"],
+    ["authority 트릭", "https://classroom.codemit.example@evil.test"],
+    ["접두어만 같은 것", "https://classroom.codemit.exampleX"],
+    ["다른 스킴", "ftp://classroom.codemit.example"],
+    ["스킴 없는 것", "classroom.codemit.example"],
     ["상대 경로", "/classes/1"],
     ["프로토콜 상대", "//evil.test"],
     ["빈 문자열", ""],
@@ -54,13 +54,13 @@ describe("우리 것이 아니면 거절한다", () => {
 
 describe("설정이 없으면 복귀 자체가 꺼진다 — 안전한 쪽으로 실패한다", () => {
   it("환경변수가 비면 목록이 비고 무엇도 통과하지 못한다", () => {
-    delete process.env.LAURIO_CLASSROOM_ORIGIN;
+    delete process.env.CODEMIT_CLASSROOM_ORIGIN;
     expect(configuredSiblingOrigins()).toEqual([]);
     expect(resolveSiblingOrigin(CLASSROOM)).toBeNull();
   });
 
   it("값이 URL 로 파싱되지 않으면 그 항목은 목록에 안 든다", () => {
-    process.env.LAURIO_CLASSROOM_ORIGIN = "not a url";
+    process.env.CODEMIT_CLASSROOM_ORIGIN = "not a url";
     expect(configuredSiblingOrigins()).toEqual([]);
   });
 });

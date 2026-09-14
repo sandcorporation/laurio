@@ -32,7 +32,7 @@ function parseFilter(value: string | null): BlockedOnFilter {
 // data-testid·className도 종류마다 갈린다.
 // 생성 타입의 `blocked_on` 은 `string` 이다(#148) — 모르는 값이 오면 그 값을 그대로 보여준다.
 const BLOCKED_ON_LABEL: Record<BlockedOnKind, string> = {
-  identity: "세무 신원 대기 — Laurio 처리 대기",
+  identity: "세무 신원 대기 — Codemit 처리 대기",
   seller: "Seller 등록 대기 — 지급대행사 처리 대기",
   // Seller 자체는 이미 READY인데 실이체(벤더 이체 API)만 실패/미확정인
   // 경우다(#57 코드리뷰 2차 지적 1) -- "Seller 등록 대기"라고 부르면 운영자가

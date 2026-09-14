@@ -1,14 +1,14 @@
 // Category 조회·생성·이름 수정·감추기 API 호출(#231) — 실패의 모양과 `detail`
-// 정규화는 `@laurio/bff-client`가 소유한다(#148, deliverable-types/actions.ts와
+// 정규화는 `@codemit/bff-client`가 소유한다(#148, deliverable-types/actions.ts와
 // 같은 계약).
 
-import type { ApiResult } from "@laurio/bff-client";
+import type { ApiResult } from "@codemit/bff-client";
 
 import { bffClient } from "@/lib/bff/client";
 
 import type { Category, CategoryChangeEntry } from "./types";
 
-export type { ApiFailure, ApiResult, ApiSuccess } from "@laurio/bff-client";
+export type { ApiFailure, ApiResult, ApiSuccess } from "@codemit/bff-client";
 
 export function fetchCategories(): Promise<ApiResult<Category[]>> {
   return bffClient.get<Category[]>("/api/backend/operator/categories");

@@ -1,7 +1,7 @@
 // FE-06(#31) — 개발자 공개 프로필. `GET /api/developers/{developer_id}/profile` 도
 // auth=None 공개 표면이다(ADR-0015) — contests.ts 와 같은 패턴을 그대로 따른다.
 //
-// 반환 타입 `DeveloperPublicProfileOut`/`PublicSubmissionOut` 은 @laurio/bff-client/schema 에서
+// 반환 타입 `DeveloperPublicProfileOut`/`PublicSubmissionOut` 은 @codemit/bff-client/schema 에서
 // 온다. 이 스키마 자체에 source_object_key·test_account 필드가 없다
 // (backend/submissions/schemas.py) — 백엔드가 애초에 그 값을 내려주지 않으므로,
 // 이 타입을 쓰는 한 프론트가 실수로 그 필드를 렌더링할 수조차 없다. 그래도
@@ -9,7 +9,7 @@
 // 않는다 — 이 페이지 자체가 서버 컴포넌트뿐이라 하이드레이션 페이로드가 생기지
 // 않는다(ADR-0015, "use client" 없음).
 import { backendClient } from "./client";
-import type { components } from "@laurio/bff-client/schema";
+import type { components } from "@codemit/bff-client/schema";
 
 export type DeveloperPublicProfile = components["schemas"]["DeveloperPublicProfileOut"];
 export type PublicSubmission = components["schemas"]["PublicSubmissionOut"];

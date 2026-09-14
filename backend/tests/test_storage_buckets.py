@@ -91,11 +91,11 @@ def test_read_object_without_bucket_still_defaults_to_private():
 
 
 def test_compose_public_image_url_appends_object_key_to_the_configured_base(settings):
-    settings.STORAGE_IMAGES_BASE_URL = "https://images.example.test/laurio-public-images"
+    settings.STORAGE_IMAGES_BASE_URL = "https://images.example.test/codemit-public-images"
 
     url = compose_public_image_url("contest-image:1/abc123")
 
-    assert url == "https://images.example.test/laurio-public-images/contest-image:1/abc123"
+    assert url == "https://images.example.test/codemit-public-images/contest-image:1/abc123"
 
 
 # --- content-type (#238) ------------------------------------------------------

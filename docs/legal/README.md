@@ -24,8 +24,8 @@
 
 | 법적 요구 | 우리가 정한 것 | 코드 |
 | --- | --- | --- |
-| 결제대금예치업 등록 없이 남의 돈을 보관할 수 없다 | 결제·지급대행을 토스에 위임, Laurio 는 원장으로 기록만 ([ADR-0004](../adr/0004-double-entry-ledger.md), [ADR-0008](../adr/0008-toss-handles-identity-laurio-handles-tax.md)) | `backend/payments/adapters_toss.py`, `backend/ledger/models.py` |
-| 기타소득 원천징수·지급명세서는 지급자가 진다 | 지급대행사가 대신하지 않음을 벤더에 확인, Laurio 가 뗀다 | `backend/payouts/services.py` `_compute_amounts`, `backend/policies/models.py` |
+| 결제대금예치업 등록 없이 남의 돈을 보관할 수 없다 | 결제·지급대행을 토스에 위임, Codemit 는 원장으로 기록만 ([ADR-0004](../adr/0004-double-entry-ledger.md), [ADR-0008](../adr/0008-toss-handles-identity-laurio-handles-tax.md)) | `backend/payments/adapters_toss.py`, `backend/ledger/models.py` |
+| 기타소득 원천징수·지급명세서는 지급자가 진다 | 지급대행사가 대신하지 않음을 벤더에 확인, Codemit 가 뗀다 | `backend/payouts/services.py` `_compute_amounts`, `backend/policies/models.py` |
 | 미성년자의 법률행위는 취소될 수 있다 | 제출·개최는 만 19세 이상만 ([ADR-0011](../adr/0011-verification-at-action-time-and-adults-only.md)) | `backend/verification/models.py` `Status.UNDERAGE` |
 | 같은 법이 상금·IP 이전이 없는 곳에는 걸리지 않는다 | 강의실은 본인확인 없이 열고 낸다 — 나이는 자기신고 ([ADR-0037](../adr/0037-classroom-is-a-bounded-context-not-a-service.md), [ADR-0044](../adr/0044-assignment-is-retired-classroom-replaces-it.md)) | `classroom/api.py` 가 본인확인을 한 번도 부르지 않는다 |
 | 불필요해진 개인정보는 지체 없이 파기 (개인정보 보호법 21조) | 탈퇴 = 신원 파기, 2년 무행위 = 신원만 파기 ([ADR-0025](../adr/0025-withdrawal-erases-identity-not-the-account.md)) | `backend/accounts/withdrawal.py`, `backend/accounts/dormancy.py` |
@@ -43,7 +43,7 @@
 | 2 | 구현된 토스 결제는 **에스크로 상품이 아니다.** REQUEST.md 는 PG 에스크로로 구매안전서비스 확인증을 충족한다고 봤다 — 통신판매업 신고 요건을 다시 봐야 한다 | commerce-and-payments | 확인 필요 |
 | 3 | Sponsor 가 개인 소비자일 때 「참가자가 한 명이라도 있으면 환불 없음」과 청약철회권의 관계 | commerce-and-payments | 확인 필요 |
 | 4 | 반복 참가 Developer 의 상금이 사업소득(3.3%)으로 재분류될 여지 | tax | 세무 검토 |
-| 5 | 지급명세서 생성·제출 기능이 없다 — 제출 주체가 Laurio 인 것은 확인됐다 | tax | 미구현 |
+| 5 | 지급명세서 생성·제출 기능이 없다 — 제출 주체가 Codemit 인 것은 확인됐다 | tax | 미구현 |
 | 6 | 플랫폼 수수료·개최비의 부가세·세금계산서·현금영수증 처리가 정해지지 않았다 | tax | 미정 |
 | 7 | 제출 소스가 AI 채점을 위해 OpenAI 로 나간다 — 국외 이전·위탁 고지 | personal-data | 고지 필요 |
 | 8 | 발주자의 「탈락작 마스킹 없는 공개」 동의를 코드가 기록하지 않는다 | contracts-and-ip | 미구현 |

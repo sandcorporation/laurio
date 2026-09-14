@@ -1,7 +1,7 @@
 """`repositories.adapters.GitHubAPIAdapter` 단위 테스트 (#193, ADR-0007).
 
 `tests/test_openai_scoring_adapter.py`와 같은 예외 — 이 파일도 HTTP를 거치지
-않는다. `GitHubAPIAdapter`는 Laurio 자신의 API가 아니라 GitHub 벤더 연동
+않는다. `GitHubAPIAdapter`는 Codemit 자신의 API가 아니라 GitHub 벤더 연동
 URL 조립·파싱 로직이다(어느 django-ninja 라우터에도 매여 있지 않다). 네트워크도
 치지 않는다 — `requests.get`을 몽키패치해 벤더 응답을 흉내낸다.
 """

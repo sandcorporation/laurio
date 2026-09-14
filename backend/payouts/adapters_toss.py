@@ -50,7 +50,7 @@ submit_seller_contact`). **이메일은 로그인 계정의 이메일이 아니�
 순서(#50, ADR-0020)는 Payout이 먼저 확정되고 *그 뒤에* Seller 등록이
 시작된다 — Payout이 처음 확정되는 순간에는 아직 `sellerId`가 없다. 그래서
 `TossPayoutAdapter.confirm()`은 두 갈래로 나뉜다: 이 Developer의 Seller가 아직
-지급 가능 상태(READY_STATUSES)가 아니면 벤더를 부르지 않고 "paid"(Laurio 내부
+지급 가능 상태(READY_STATUSES)가 아니면 벤더를 부르지 않고 "paid"(Codemit 내부
 확정 — 원장 분개 + Seller 등록 착수)만 돌려주고, 이미 지급 가능 상태면 그제서야
 실제로 벤더에 이체를 요청한다. `payouts.services._request_real_transfer_if_ready`가
 Seller가 나중에 준비되는 시점(재시도·`seller.changed` 웹훅)에 `confirm()`을
@@ -636,7 +636,7 @@ class TossSellerAdapter:
         # additional)의 Seller 객체 필드는 `id`·`refSellerId`·`businessType`·
         # `company`·`individual`·`status`·`account`·`metadata` 다 —
         # `sellerId` 는 없다. `refSellerId`로 폴백하지 않는다(코드리뷰 지적,
-        # #173 후속) — 그건 **우리가 보낸** 값(`laurio-developer-{id}`)이지
+        # #173 후속) — 그건 **우리가 보낸** 값(`codemit-developer-{id}`)이지
         # 벤더 식별자가 아니다. 실물 응답에 `sellerId`가 없어 그 폴백이
         # 조용히 우리 자신의 ref 를 벤더 식별자인 양 저장하면, 이후
         # `_query_seller_status`의 GET이 벤더가 모르는 문자열로 나가 영원히
@@ -664,7 +664,7 @@ class TossPayoutAdapter:
     """`PAYOUT_ADAPTER_MODE=payouts.adapters_toss.TossPayoutAdapter`로 켠다.
 
     `confirm()`의 두 갈래 동작은 모듈 독스트링의 "실이체 순서 문제" 절을 참고 —
-    Seller가 아직 지급 가능 상태가 아니면 벤더를 부르지 않고 "paid"(Laurio 내부
+    Seller가 아직 지급 가능 상태가 아니면 벤더를 부르지 않고 "paid"(Codemit 내부
     확정)만 돌려주고, 이미 준비돼 있으면 실제로 이체를 요청한다.
     """
 
@@ -698,7 +698,7 @@ class TossPayoutAdapter:
 
         if not request.seller_id:
             # 벤더 규약: sellerId 없이는 이체 API 가 없다(ADR-0020 순서 문제 — 지급 확정이
-            # Seller 등록보다 앞선다). 수취인이 아직 없는 요청은 HTTP 없이 「Laurio 내부
+            # Seller 등록보다 앞선다). 수취인이 아직 없는 요청은 HTTP 없이 「Codemit 내부
             # 확정」으로 받아들이고, Seller 가 READY 가 되는 순간 caller 가 새 요청으로 다시 온다.
             return VendorResult(status="paid")
         return self._request_real_payout(request)

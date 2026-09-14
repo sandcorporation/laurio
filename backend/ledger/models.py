@@ -97,7 +97,7 @@ def hard_delete_e2e_fixture_rows(queryset: "models.QuerySet") -> tuple[int, dict
     """
     if settings.IS_DEPLOYED_ENVIRONMENT:
         raise AppendOnlyError(
-            f"LAURIO_DEPLOYMENT_TARGET={settings.LAURIO_DEPLOYMENT_TARGET} 인데 "
+            f"CODEMIT_DEPLOYMENT_TARGET={settings.CODEMIT_DEPLOYMENT_TARGET} 인데 "
             "hard_delete_e2e_fixture_rows 가 호출됐다 — 이 함수는 e2e 시드 자신의 "
             "픽스처 정리 전용이라 배포 환경에서는 항상 거부된다. append-only 실데이터를 "
             "지우려는 시도로 취급한다."

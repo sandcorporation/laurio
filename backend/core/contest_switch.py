@@ -3,7 +3,7 @@
 방향이 바뀌었다 — 공모전은 나중을 위한 기능이고, 지금 사람을 모을 것은 강의실이다.
 `settings.CONTEST_PRODUCT_ENABLED` 하나로 갈린다. **기본값은 켜짐**이고, staging
 배포(`docker/compose.staging.yaml`)만 기본을 꺼짐으로 겹쳐 쓴다 —
-`LAURIO_DEPLOYMENT_TARGET`과는 무관한 독립 값이다(나중에 prod에서 다시 켤 때 그
+`CODEMIT_DEPLOYMENT_TARGET`과는 무관한 독립 값이다(나중에 prod에서 다시 켤 때 그
 판단 규칙 자체를 고칠 필요가 없게).
 
 지우는 것은 하나도 없다 — 코드도 테스트도 데이터도 그대로다. 닫는 것은 **표면**뿐이다.

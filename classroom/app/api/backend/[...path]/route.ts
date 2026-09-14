@@ -1,6 +1,6 @@
 // BFF 프록시 catch-all (ADR-0016, #276) — 공개 앱
 // (frontend/app/api/backend/[...path]/route.ts)과 같은 모양이다.
-import { sanitizeBackendPath } from "@laurio/bff-shared";
+import { sanitizeBackendPath } from "@codemit/bff-shared";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 

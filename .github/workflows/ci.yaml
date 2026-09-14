@@ -17,8 +17,8 @@ on:
 # **이 러너는 staging 스택과 같은 호스트에 있다.** 그래서 두 가지를 확인하고 붙였다:
 #
 # 1. **데이터는 섞이지 않는다.** compose 파일이 프로젝트 이름을 박아 둔다
-#    (`compose.dev.yaml` = `laurio-dev`, `compose.staging.yaml` = `laurio-staging`).
-#    아래 celery 잡의 `down -v` 는 `laurio-dev` 만 지우므로 staging 볼륨에 닿지 못한다.
+#    (`compose.dev.yaml` = `codemit-dev`, `compose.staging.yaml` = `codemit-staging`).
+#    아래 celery 잡의 `down -v` 는 `codemit-dev` 만 지우므로 staging 볼륨에 닿지 못한다.
 # 2. **포트가 겹치면 조용히 붙지 않고 죽는다.** dev 스택은 55432·58000·16379·19000·
 #    53000·53001 을, staging 은 8000·3000·3001 만 호스트에 낸다. 겹칠 일이 없지만,
 #    설령 겹쳐도 `docker compose up` 이 포트 바인딩 실패로 멈춘다 —
@@ -45,9 +45,9 @@ jobs:
       postgres:
         image: postgres:17-alpine
         env:
-          POSTGRES_DB: laurio
-          POSTGRES_USER: laurio
-          POSTGRES_PASSWORD: laurio
+          POSTGRES_DB: codemit
+          POSTGRES_USER: codemit
+          POSTGRES_PASSWORD: codemit
         ports:
           # **호스트 포트를 고정하지 않는다(#243).** 예전엔 `55532:5432` 로 고정했다 —
           # 표준 포트(5432)를 피하고(이 러너 호스트에서 5432 가 이미 점유돼 「Initialize
@@ -73,7 +73,7 @@ jobs:
           # `POSTGRES_PORT` 로 내려 준다.
           - 5432/tcp
         options: >-
-          --health-cmd "pg_isready -U laurio -d laurio"
+          --health-cmd "pg_isready -U codemit -d codemit"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
@@ -90,14 +90,14 @@ jobs:
       # 고정하지 않으므로(#243) 잡이 시작되는 시점엔 아직 그 값을 모른다. 아래
       # "Resolve dynamically assigned postgres port" 스텝이 `$GITHUB_ENV` 로
       # 내려 준 뒤에야 이후 스텝에서 쓸 수 있다.
-      POSTGRES_DB: laurio
-      POSTGRES_USER: laurio
-      POSTGRES_PASSWORD: laurio
+      POSTGRES_DB: codemit
+      POSTGRES_USER: codemit
+      POSTGRES_PASSWORD: codemit
       DJANGO_SECRET_KEY: ci-only-insecure-key
       DJANGO_DEBUG: "false"
       DJANGO_ALLOWED_HOSTS: "*"
       # DJANGO_DEBUG=false 인데 비어 있으면 config/settings.py 가 부팅을 거부하는
-      # 항목들. CI는 운영 배포가 아니지만(LAURIO_DEPLOYMENT_TARGET 미설정 =
+      # 항목들. CI는 운영 배포가 아니지만(CODEMIT_DEPLOYMENT_TARGET 미설정 =
       # "development"), DEBUG=false로 실행하는 이상 이 값들은 그대로 요구된다 —
       # 여기서 요구하는 건 "값이 비어 있지 않을 것"뿐이지 "진짜 운영 비밀일 것"이
       # 아니다.
@@ -151,7 +151,7 @@ jobs:
         working-directory: backend
         run: uv sync --locked
 
-      # --deploy 는 이 잡(LAURIO_DEPLOYMENT_TARGET 미설정 = "development")에는 켜지
+      # --deploy 는 이 잡(CODEMIT_DEPLOYMENT_TARGET 미설정 = "development")에는 켜지
       # 않는다 — HSTS·SSL 리다이렉트·secure 쿠키는 config/settings.py에서 production
       # 에만 켜지도록 설계했으므로(#23), 여기서 --deploy를 켜면 이 잡의 목적과 무관한
       # 경고가 매번 뜬다. production 구성이 실제로 --deploy를 통과하는지는 아래
@@ -179,16 +179,16 @@ jobs:
     runs-on: [self-hosted, sub]
 
     env:
-      LAURIO_DEPLOYMENT_TARGET: production
+      CODEMIT_DEPLOYMENT_TARGET: production
       DJANGO_DEBUG: "false"
       DJANGO_SECRET_KEY: "ci-deploy-check-only-Kx8f3Kq0mN2pR7tYcVbGhJkLdSaWeUiOaXzCvBnMqWeRtYuIoPaSdFgHjKlZxCvB"
-      DJANGO_ALLOWED_HOSTS: "api.laurio.example"
+      DJANGO_ALLOWED_HOSTS: "api.codemit.example"
       # #43: 배포 환경에서 비면 부팅을 거부한다 — 이 잡의 env가 그 가드를
       # 실제로 통과하는지도 함께 검증한다(코디네이터 리뷰 지적 — 이 값이 없어서
       # 이 잡은 어댑터 모드와 무관하게 이미 실패하고 있었다).
-      LAURIO_OPERATOR_ORIGIN: "https://operator.laurio.example"
-      POSTGRES_DB: laurio
-      POSTGRES_USER: laurio
+      CODEMIT_OPERATOR_ORIGIN: "https://operator.codemit.example"
+      POSTGRES_DB: codemit
+      POSTGRES_USER: codemit
       POSTGRES_PASSWORD: ci-deploy-check-only-password
       POSTGRES_HOST: 127.0.0.1
       POSTGRES_PORT: "5432"
@@ -198,7 +198,7 @@ jobs:
       PAYOUT_WEBHOOK_SECRET: ci-deploy-check-only-payout-webhook-secret
       VERIFICATION_ENCRYPTION_KEY: A0crfksMrBmbSY37jIyOwcPRFpK9rc_eIaNnL89lIfo=
       STORAGE_BACKEND: s3
-      STORAGE_BUCKET: laurio-prod
+      STORAGE_BUCKET: codemit-prod
       STORAGE_ENDPOINT_URL: https://s3.amazonaws.com
       STORAGE_ACCESS_KEY: ci-deploy-check-only-access-key
       STORAGE_SECRET_KEY: ci-deploy-check-only-secret-key
@@ -207,7 +207,7 @@ jobs:
       # config/settings.py 의 부팅 가드가 거부한다. 위 STORAGE_* 자격증명과 같은
       # 이유로 여기 있다: 이 잡이 검증하는 "배포 하드닝이 통과하는가"에 포함된다.
       # 실제로 이 주소를 치지는 않는다(backend 만 도는 잡이다).
-      STORAGE_IMAGES_BASE_URL: https://cdn.ci-deploy-check-only.invalid/laurio-prod-public-images
+      STORAGE_IMAGES_BASE_URL: https://cdn.ci-deploy-check-only.invalid/codemit-prod-public-images
       SOCIAL_AUTH_MODE: real
       # 카카오 OAuth 앱 자격증명(#95/#96) — authorize・code→token 교환은
       # frontend BFF가 지므로 이 잡(backend만 돈다)은 실제로 쓰지 않지만,
@@ -216,7 +216,7 @@ jobs:
       # 포함된다.
       KAKAO_REST_API_KEY: ci-deploy-check-only-kakao-rest-api-key
       KAKAO_SECRET_KEY: ci-deploy-check-only-kakao-secret-key
-      KAKAO_REDIRECT_URI: https://api.laurio.example/api/auth/social/kakao/callback
+      KAKAO_REDIRECT_URI: https://api.codemit.example/api/auth/social/kakao/callback
       # 실제 벤더 어댑터(#85 PortOne, #87 Toss, #57 Seller 등록, #88 OpenAI)는
       # 아직 구현되지 않았다(#23/#83 범위 밖) — 이 잡이 검증하려는 건 "배포
       # 하드닝이 통과하는가"이지 "어댑터가 실물인가"가 아니다. `core.adapters.
@@ -412,7 +412,7 @@ jobs:
 
     # **이 잡만의 스택으로 가른다.** 셀프호스티드 러너에서는 잡들이 같은 호스트를
     # 나눠 쓰는데, dev compose 를 띄우는 잡이 셋이라 기본값 그대로면 셋이 같은
-    # 프로젝트(`laurio-dev`)를 잡는다 — 동시에 돌면 서로의 컨테이너를 건드리고,
+    # 프로젝트(`codemit-dev`)를 잡는다 — 동시에 돌면 서로의 컨테이너를 건드리고,
     # celery 잡의 `down -v` 가 남의 스택을 지운다.
     #
     # **포트 슬롯은 더 이상 여기서 정하지 않는다**(#196). `compose.ci.yaml` 이
@@ -423,7 +423,7 @@ jobs:
       # 포트 슬롯이 없다 — 이 잡은 호스트 포트를 하나도 열지 않고(#194,
       # `compose.ci-internal-only.yaml`) e2e 도 돌리지 않는다. 프로젝트 이름만
       # 갈라 다른 잡의 컨테이너·볼륨과 섞이지 않게 한다.
-      COMPOSE_PROJECT_NAME: laurio-ci-celery
+      COMPOSE_PROJECT_NAME: codemit-ci-celery
 
     steps:
       - uses: actions/checkout@v4
@@ -511,7 +511,7 @@ jobs:
 
     # **이 잡만의 스택으로 가른다.** 셀프호스티드 러너에서는 잡들이 같은 호스트를
     # 나눠 쓰는데, dev compose 를 띄우는 잡이 셋이라 기본값 그대로면 셋이 같은
-    # 프로젝트(`laurio-dev`)를 잡는다 — 동시에 돌면 서로의 컨테이너를 건드리고,
+    # 프로젝트(`codemit-dev`)를 잡는다 — 동시에 돌면 서로의 컨테이너를 건드리고,
     # celery 잡의 `down -v` 가 남의 스택을 지운다.
     #
     # **포트 슬롯은 더 이상 여기서 정하지 않는다**(#196). `compose.ci.yaml` 이
@@ -519,7 +519,7 @@ jobs:
     # `$GITHUB_ENV` 에 넣는다 — 번호를 손으로 나눠 갖는 한 러너에 남은
     # `docker-proxy` 하나가 그 번호를 물고 있으면 잡이 통째로 죽었다(실측 두 번).
     env:
-      COMPOSE_PROJECT_NAME: laurio-ci-e2e-public
+      COMPOSE_PROJECT_NAME: codemit-ci-e2e-public
 
     steps:
       - uses: actions/checkout@v4
@@ -568,7 +568,7 @@ jobs:
       # dev 서버가 아니라 **실제로 배포되는 물건**을 검증하게 된다.
       # **두 단계로 띄운다**(#196). `compose.ci.yaml` 이 호스트 포트를 임의 포트로
       # 두므로 번호를 잡이 읽어야 하는데, **MinIO 만은 그 번호가 기동 시점에
-      # 필요하다** — `STORAGE_PUBLIC_ENDPOINT_URL` 이 `127.0.0.1:$LAURIO_MINIO_PORT`
+      # 필요하다** — `STORAGE_PUBLIC_ENDPOINT_URL` 이 `127.0.0.1:$CODEMIT_MINIO_PORT`
       # 로 backend 컨테이너에 주입되고, 업로드 e2e 에서 브라우저가 presigned URL 로
       # 그 주소에 직접 PUT 하기 때문이다. 띄운 뒤에 읽으면 늦다.
       #
@@ -586,14 +586,14 @@ jobs:
           if [ -z "$port" ]; then
             echo "::error::minio 의 호스트 포트를 읽지 못했다"; $C ps; exit 1
           fi
-          echo "LAURIO_MINIO_PORT=$port" >> "$GITHUB_ENV"
+          echo "CODEMIT_MINIO_PORT=$port" >> "$GITHUB_ENV"
           echo "MinIO -> 127.0.0.1:$port"
 
       - name: Build the images and bring up the stack
         run: docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml up -d --build frontend
 
       # 커널이 고른 번호를 읽어 뒤 스텝들에 넘긴다 — 헬스 체크의 URL,
-      # `frontend/e2e/lib/seed-http.ts` 가 보는 `LAURIO_API_PORT`, 그리고
+      # `frontend/e2e/lib/seed-http.ts` 가 보는 `CODEMIT_API_PORT`, 그리고
       # Playwright 의 baseURL 이 전부 여기서 나온다.
       - name: Learn the host ports the kernel picked
         run: |
@@ -608,8 +608,8 @@ jobs:
           }
           api=$(read_port backend 8000)
           web=$(read_port frontend 3000)
-          echo "LAURIO_API_PORT=$api" >> "$GITHUB_ENV"
-          echo "LAURIO_E2E_BASE_URL=http://127.0.0.1:$web" >> "$GITHUB_ENV"
+          echo "CODEMIT_API_PORT=$api" >> "$GITHUB_ENV"
+          echo "CODEMIT_E2E_BASE_URL=http://127.0.0.1:$web" >> "$GITHUB_ENV"
           echo "FRONTEND_HEALTH_URL=http://127.0.0.1:$web/healthz" >> "$GITHUB_ENV"
           echo "backend -> 127.0.0.1:$api | frontend -> 127.0.0.1:$web"
 
@@ -679,7 +679,7 @@ jobs:
 
     # **이 잡만의 스택으로 가른다.** 셀프호스티드 러너에서는 잡들이 같은 호스트를
     # 나눠 쓰는데, dev compose 를 띄우는 잡이 셋이라 기본값 그대로면 셋이 같은
-    # 프로젝트(`laurio-dev`)를 잡는다 — 동시에 돌면 서로의 컨테이너를 건드리고,
+    # 프로젝트(`codemit-dev`)를 잡는다 — 동시에 돌면 서로의 컨테이너를 건드리고,
     # celery 잡의 `down -v` 가 남의 스택을 지운다.
     #
     # **포트 슬롯은 더 이상 여기서 정하지 않는다**(#196). `compose.ci.yaml` 이
@@ -687,7 +687,7 @@ jobs:
     # `$GITHUB_ENV` 에 넣는다 — 번호를 손으로 나눠 갖는 한 러너에 남은
     # `docker-proxy` 하나가 그 번호를 물고 있으면 잡이 통째로 죽었다(실측 두 번).
     env:
-      COMPOSE_PROJECT_NAME: laurio-ci-e2e-operator
+      COMPOSE_PROJECT_NAME: codemit-ci-e2e-operator
 
     steps:
       - uses: actions/checkout@v4
@@ -736,7 +736,7 @@ jobs:
       # dev 서버가 아니라 **실제로 배포되는 물건**을 검증하게 된다.
       # **두 단계로 띄운다**(#196). `compose.ci.yaml` 이 호스트 포트를 임의 포트로
       # 두므로 번호를 잡이 읽어야 하는데, **MinIO 만은 그 번호가 기동 시점에
-      # 필요하다** — `STORAGE_PUBLIC_ENDPOINT_URL` 이 `127.0.0.1:$LAURIO_MINIO_PORT`
+      # 필요하다** — `STORAGE_PUBLIC_ENDPOINT_URL` 이 `127.0.0.1:$CODEMIT_MINIO_PORT`
       # 로 backend 컨테이너에 주입되고, 업로드 e2e 에서 브라우저가 presigned URL 로
       # 그 주소에 직접 PUT 하기 때문이다. 띄운 뒤에 읽으면 늦다.
       #
@@ -754,14 +754,14 @@ jobs:
           if [ -z "$port" ]; then
             echo "::error::minio 의 호스트 포트를 읽지 못했다"; $C ps; exit 1
           fi
-          echo "LAURIO_MINIO_PORT=$port" >> "$GITHUB_ENV"
+          echo "CODEMIT_MINIO_PORT=$port" >> "$GITHUB_ENV"
           echo "MinIO -> 127.0.0.1:$port"
 
       - name: Build the images and bring up the stack
         run: docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml up -d --build operator
 
       # 커널이 고른 번호를 읽어 뒤 스텝들에 넘긴다 — 헬스 체크의 URL,
-      # `frontend/e2e/lib/seed-http.ts` 가 보는 `LAURIO_API_PORT`, 그리고
+      # `frontend/e2e/lib/seed-http.ts` 가 보는 `CODEMIT_API_PORT`, 그리고
       # Playwright 의 baseURL 이 전부 여기서 나온다.
       - name: Learn the host ports the kernel picked
         run: |
@@ -776,8 +776,8 @@ jobs:
           }
           api=$(read_port backend 8000)
           web=$(read_port operator 3000)
-          echo "LAURIO_API_PORT=$api" >> "$GITHUB_ENV"
-          echo "LAURIO_OPERATOR_E2E_BASE_URL=http://127.0.0.1:$web" >> "$GITHUB_ENV"
+          echo "CODEMIT_API_PORT=$api" >> "$GITHUB_ENV"
+          echo "CODEMIT_OPERATOR_E2E_BASE_URL=http://127.0.0.1:$web" >> "$GITHUB_ENV"
           echo "OPERATOR_HEALTH_URL=http://127.0.0.1:$web/healthz" >> "$GITHUB_ENV"
           echo "backend -> 127.0.0.1:$api | operator -> 127.0.0.1:$web"
 
@@ -844,7 +844,7 @@ jobs:
 
     # frontend-e2e-operator와 같은 이유로 이 잡만의 스택·포트 슬롯을 가른다(#196).
     env:
-      COMPOSE_PROJECT_NAME: laurio-ci-e2e-classroom
+      COMPOSE_PROJECT_NAME: codemit-ci-e2e-classroom
 
     steps:
       - uses: actions/checkout@v4
@@ -877,7 +877,7 @@ jobs:
           if [ -z "$port" ]; then
             echo "::error::minio 의 호스트 포트를 읽지 못했다"; $C ps; exit 1
           fi
-          echo "LAURIO_MINIO_PORT=$port" >> "$GITHUB_ENV"
+          echo "CODEMIT_MINIO_PORT=$port" >> "$GITHUB_ENV"
           echo "MinIO -> 127.0.0.1:$port"
 
       # 공개 앱(frontend)도 띄운다. 강의실은 자기 로그인이 없어(ADR-0038) 인증 구역을
@@ -887,7 +887,7 @@ jobs:
       # 이 잡이 main 에서 여섯 번 연속 그렇게 빨갛게 났다(b249af7~3cd881d).
       #
       # **이벤트 서비스(`events`)도 함께 띄운다**(#379, ADR-0046) — 강의실 BFF가
-      # 실시간 신호 SSE 경로만 이 서비스로 보낸다(`LAURIO_EVENTS_BASE_URL`,
+      # 실시간 신호 SSE 경로만 이 서비스로 보낸다(`CODEMIT_EVENTS_BASE_URL`,
       # `classroom` 서비스가 이미 `depends_on`으로 걸어 뒀지만 이미지가 최신인지도
       # 확인하려고 명시적으로 적는다).
       - name: Build the images and bring up the stack
@@ -906,10 +906,10 @@ jobs:
           api=$(read_port backend 8000)
           pub=$(read_port frontend 3000)
           web=$(read_port classroom 3000)
-          echo "LAURIO_API_PORT=$api" >> "$GITHUB_ENV"
-          echo "LAURIO_E2E_BASE_URL=http://127.0.0.1:$pub" >> "$GITHUB_ENV"
+          echo "CODEMIT_API_PORT=$api" >> "$GITHUB_ENV"
+          echo "CODEMIT_E2E_BASE_URL=http://127.0.0.1:$pub" >> "$GITHUB_ENV"
           echo "FRONTEND_HEALTH_URL=http://127.0.0.1:$pub/healthz" >> "$GITHUB_ENV"
-          echo "LAURIO_CLASSROOM_E2E_BASE_URL=http://127.0.0.1:$web" >> "$GITHUB_ENV"
+          echo "CODEMIT_CLASSROOM_E2E_BASE_URL=http://127.0.0.1:$web" >> "$GITHUB_ENV"
           echo "CLASSROOM_HEALTH_URL=http://127.0.0.1:$web/healthz" >> "$GITHUB_ENV"
           echo "backend -> 127.0.0.1:$api | frontend -> 127.0.0.1:$pub | classroom -> 127.0.0.1:$web"
 
@@ -983,7 +983,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build the production frontend image (runner stage)
-        run: docker build -f docker/frontend.Dockerfile --target runner -t laurio-frontend-runner-ci .
+        run: docker build -f docker/frontend.Dockerfile --target runner -t codemit-frontend-runner-ci .
 
       # 이 레포가 이미 두 번 겪은 사고(CLAUDE.md 「이미 데인 곳」) — .dockerignore
       # 패턴이 파일에 적혀 있다는 것만으로는 증명이 아니다. 가짜 시크릿과 가짜
@@ -1004,8 +1004,8 @@ jobs:
           echo "OPENAI_API_KEY=sk-ci-guard-fake-secret-do-not-leak" > frontend/.env
           mkdir -p frontend/node_modules/.ci-guard-marker
           echo "host-node-modules-should-not-leak-into-image" > frontend/node_modules/.ci-guard-marker/marker.txt
-          docker build -f docker/frontend.Dockerfile --target builder -t laurio-frontend-builder-ci-guard .
-          docker run --rm --entrypoint sh laurio-frontend-builder-ci-guard -c '
+          docker build -f docker/frontend.Dockerfile --target builder -t codemit-frontend-builder-ci-guard .
+          docker run --rm --entrypoint sh codemit-frontend-builder-ci-guard -c '
             set -e
             if [ -f /app/frontend/.env ]; then
               echo "FOUND /app/frontend/.env — .dockerignore가 시크릿을 막지 못했다" >&2
@@ -1023,50 +1023,50 @@ jobs:
           '
           rm -f frontend/.env
           rm -rf frontend/node_modules/.ci-guard-marker
-          docker rmi laurio-frontend-builder-ci-guard
+          docker rmi codemit-frontend-builder-ci-guard
 
       - name: Refuses to boot in production with missing config (and actually exits — not just logs)
         run: |
           set +e
-          output=$(timeout 60 docker run --rm -e LAURIO_DEPLOYMENT_TARGET=production laurio-frontend-runner-ci 2>&1)
+          output=$(timeout 60 docker run --rm -e CODEMIT_DEPLOYMENT_TARGET=production codemit-frontend-runner-ci 2>&1)
           status=$?
           set -e
           echo "$output"
           if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
-            echo "::error::LAURIO_WEB_ORIGIN/LAURIO_API_BASE_URL 없이도 컨테이너가 죽지 않았다(status=$status) — 부팅 가드가 깨졌다"
+            echo "::error::CODEMIT_WEB_ORIGIN/CODEMIT_API_BASE_URL 없이도 컨테이너가 죽지 않았다(status=$status) — 부팅 가드가 깨졌다"
             exit 1
           fi
-          echo "$output" | grep -q "LAURIO_WEB_ORIGIN" || { echo "::error::에러 메시지에 원인(LAURIO_WEB_ORIGIN)이 안 남는다"; exit 1; }
-          echo "$output" | grep -q "LAURIO_API_BASE_URL" || { echo "::error::에러 메시지에 원인(LAURIO_API_BASE_URL)이 안 남는다"; exit 1; }
+          echo "$output" | grep -q "CODEMIT_WEB_ORIGIN" || { echo "::error::에러 메시지에 원인(CODEMIT_WEB_ORIGIN)이 안 남는다"; exit 1; }
+          echo "$output" | grep -q "CODEMIT_API_BASE_URL" || { echo "::error::에러 메시지에 원인(CODEMIT_API_BASE_URL)이 안 남는다"; exit 1; }
 
       - name: Refuses to boot in staging with only one required value missing
         run: |
           set +e
           output=$(timeout 60 docker run --rm \
-            -e LAURIO_DEPLOYMENT_TARGET=staging \
-            -e LAURIO_WEB_ORIGIN=https://staging.laurio.example \
-            laurio-frontend-runner-ci 2>&1)
+            -e CODEMIT_DEPLOYMENT_TARGET=staging \
+            -e CODEMIT_WEB_ORIGIN=https://staging.codemit.example \
+            codemit-frontend-runner-ci 2>&1)
           status=$?
           set -e
           echo "$output"
           if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
-            echo "::error::LAURIO_API_BASE_URL 없이도 staging 컨테이너가 죽지 않았다(status=$status)"
+            echo "::error::CODEMIT_API_BASE_URL 없이도 staging 컨테이너가 죽지 않았다(status=$status)"
             exit 1
           fi
-          echo "$output" | grep -q "LAURIO_API_BASE_URL" || { echo "::error::에러 메시지에 원인이 안 남는다"; exit 1; }
+          echo "$output" | grep -q "CODEMIT_API_BASE_URL" || { echo "::error::에러 메시지에 원인이 안 남는다"; exit 1; }
 
       # #95/#96 — 카카오 OAuth 앱 자격증명도 같은 부팅 가드 대상이다
-      # (instrumentation.ts REQUIRED_IN_DEPLOYED_ENVIRONMENTS). LAURIO_WEB_ORIGIN/
-      # LAURIO_API_BASE_URL은 채우고 카카오 자격증명만 비워 — 이 값들만으로도
+      # (instrumentation.ts REQUIRED_IN_DEPLOYED_ENVIRONMENTS). CODEMIT_WEB_ORIGIN/
+      # CODEMIT_API_BASE_URL은 채우고 카카오 자격증명만 비워 — 이 값들만으로도
       # 독립적으로 부팅이 거부되는지 확인한다.
       - name: Refuses to boot in production without kakao oauth credentials
         run: |
           set +e
           output=$(timeout 60 docker run --rm \
-            -e LAURIO_DEPLOYMENT_TARGET=production \
-            -e LAURIO_WEB_ORIGIN=https://laurio.example \
-            -e LAURIO_API_BASE_URL=http://127.0.0.1:1 \
-            laurio-frontend-runner-ci 2>&1)
+            -e CODEMIT_DEPLOYMENT_TARGET=production \
+            -e CODEMIT_WEB_ORIGIN=https://codemit.example \
+            -e CODEMIT_API_BASE_URL=http://127.0.0.1:1 \
+            codemit-frontend-runner-ci 2>&1)
           status=$?
           set -e
           echo "$output"
@@ -1080,19 +1080,19 @@ jobs:
 
       # #115 — 토스 결제창 클라이언트 키(NEXT_PUBLIC_TOSS_CLIENT_KEY)가 빌드타임에
       # 비어 있으면 배포 환경에서 부팅 자체를 거부하는지 확인한다. 다른 필수값은
-      # 전부 채워 이 값 하나만으로 독립적으로 죽는지를 본다. laurio-frontend-runner-ci
+      # 전부 채워 이 값 하나만으로 독립적으로 죽는지를 본다. codemit-frontend-runner-ci
       # 는 build.args 없이(빈 문자열로) 지었으므로 이 시나리오 그대로다.
       - name: Refuses to boot in production without a toss client key baked in
         run: |
           set +e
           output=$(timeout 60 docker run --rm \
-            -e LAURIO_DEPLOYMENT_TARGET=production \
-            -e LAURIO_WEB_ORIGIN=https://laurio.example \
-            -e LAURIO_API_BASE_URL=http://127.0.0.1:1 \
+            -e CODEMIT_DEPLOYMENT_TARGET=production \
+            -e CODEMIT_WEB_ORIGIN=https://codemit.example \
+            -e CODEMIT_API_BASE_URL=http://127.0.0.1:1 \
             -e KAKAO_REST_API_KEY=ci-guard-only-kakao-rest-api-key \
             -e KAKAO_SECRET_KEY=ci-guard-only-kakao-secret-key \
-            -e KAKAO_REDIRECT_URI=https://laurio.example/api/auth/social/kakao/callback \
-            laurio-frontend-runner-ci 2>&1)
+            -e KAKAO_REDIRECT_URI=https://codemit.example/api/auth/social/kakao/callback \
+            codemit-frontend-runner-ci 2>&1)
           status=$?
           set -e
           echo "$output"
@@ -1124,16 +1124,16 @@ jobs:
           set -euo pipefail
           docker rm -f frontend-boot-ok >/dev/null 2>&1 || true
           docker run -d --name frontend-boot-ok \
-            -e LAURIO_DEPLOYMENT_TARGET=production \
-            -e LAURIO_WEB_ORIGIN=https://laurio.example \
-            -e LAURIO_API_BASE_URL=http://127.0.0.1:1 \
-            -e LAURIO_SESSION_COOKIE_DOMAIN=.laurio.example \
+            -e CODEMIT_DEPLOYMENT_TARGET=production \
+            -e CODEMIT_WEB_ORIGIN=https://codemit.example \
+            -e CODEMIT_API_BASE_URL=http://127.0.0.1:1 \
+            -e CODEMIT_SESSION_COOKIE_DOMAIN=.codemit.example \
             -e KAKAO_REST_API_KEY=ci-guard-only-kakao-rest-api-key \
             -e KAKAO_SECRET_KEY=ci-guard-only-kakao-secret-key \
-            -e KAKAO_REDIRECT_URI=https://laurio.example/api/auth/social/kakao/callback \
+            -e KAKAO_REDIRECT_URI=https://codemit.example/api/auth/social/kakao/callback \
             -e NEXT_PUBLIC_TOSS_CLIENT_KEY=ci-guard-only-toss-client-key \
             -p 3100:3000 \
-            laurio-frontend-runner-ci
+            codemit-frontend-runner-ci
 
           # 백엔드가 없어 /healthz 는 503(degraded)이 정상이다 — 여기서 보는 건
           # "완전한 설정에서는 프론트가 죽지 않고 응답한다"는 것뿐이다. 연결
@@ -1175,12 +1175,12 @@ jobs:
           # 부르지 않고 곧바로 clearSessionCookies를 실어 응답한다 — 그래서 백엔드
           # 없이도 이 경로 하나로 쿠키 속성을 직접 관찰할 수 있다.
           set_cookie=$(curl -s -D - -o /dev/null -X POST http://127.0.0.1:3100/api/auth/logout \
-            -H "Origin: https://laurio.example")
+            -H "Origin: https://codemit.example")
           echo "$set_cookie"
-          echo "$set_cookie" | grep -qi "laurio_access=.*Secure" \
-            || { echo "::error::production인데 laurio_access 쿠키에 Secure가 없다"; exit 1; }
-          echo "$set_cookie" | grep -qi "laurio_refresh=.*Secure" \
-            || { echo "::error::production인데 laurio_refresh 쿠키에 Secure가 없다"; exit 1; }
+          echo "$set_cookie" | grep -qi "codemit_access=.*Secure" \
+            || { echo "::error::production인데 codemit_access 쿠키에 Secure가 없다"; exit 1; }
+          echo "$set_cookie" | grep -qi "codemit_refresh=.*Secure" \
+            || { echo "::error::production인데 codemit_refresh 쿠키에 Secure가 없다"; exit 1; }
 
 
       - name: Tear down the boot-guard container
@@ -1208,7 +1208,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build the production operator image (runner stage)
-        run: docker build -f docker/operator.Dockerfile --target runner -t laurio-operator-runner-ci .
+        run: docker build -f docker/operator.Dockerfile --target runner -t codemit-operator-runner-ci .
 
       # frontend-deploy-guard와 같은 이유 — .dockerignore가 시크릿과 호스트
       # node_modules를 실제로 막는지 이 앱에서도 직접 확인한다.
@@ -1227,8 +1227,8 @@ jobs:
           echo "OPENAI_API_KEY=sk-ci-guard-fake-secret-do-not-leak" > operator/.env
           mkdir -p operator/node_modules/.ci-guard-marker
           echo "host-node-modules-should-not-leak-into-image" > operator/node_modules/.ci-guard-marker/marker.txt
-          docker build -f docker/operator.Dockerfile --target builder -t laurio-operator-builder-ci-guard .
-          docker run --rm --entrypoint sh laurio-operator-builder-ci-guard -c '
+          docker build -f docker/operator.Dockerfile --target builder -t codemit-operator-builder-ci-guard .
+          docker run --rm --entrypoint sh codemit-operator-builder-ci-guard -c '
             set -e
             if [ -f /app/operator/.env ]; then
               echo "FOUND /app/operator/.env — .dockerignore가 시크릿을 막지 못했다" >&2
@@ -1246,37 +1246,37 @@ jobs:
           '
           rm -f operator/.env
           rm -rf operator/node_modules/.ci-guard-marker
-          docker rmi laurio-operator-builder-ci-guard
+          docker rmi codemit-operator-builder-ci-guard
 
       - name: Refuses to boot in production with missing config (and actually exits — not just logs)
         run: |
           set +e
-          output=$(timeout 60 docker run --rm -e LAURIO_DEPLOYMENT_TARGET=production laurio-operator-runner-ci 2>&1)
+          output=$(timeout 60 docker run --rm -e CODEMIT_DEPLOYMENT_TARGET=production codemit-operator-runner-ci 2>&1)
           status=$?
           set -e
           echo "$output"
           if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
-            echo "::error::LAURIO_OPERATOR_ORIGIN/LAURIO_API_BASE_URL 없이도 컨테이너가 죽지 않았다(status=$status) — 부팅 가드가 깨졌다"
+            echo "::error::CODEMIT_OPERATOR_ORIGIN/CODEMIT_API_BASE_URL 없이도 컨테이너가 죽지 않았다(status=$status) — 부팅 가드가 깨졌다"
             exit 1
           fi
-          echo "$output" | grep -q "LAURIO_OPERATOR_ORIGIN" || { echo "::error::에러 메시지에 원인(LAURIO_OPERATOR_ORIGIN)이 안 남는다"; exit 1; }
-          echo "$output" | grep -q "LAURIO_API_BASE_URL" || { echo "::error::에러 메시지에 원인(LAURIO_API_BASE_URL)이 안 남는다"; exit 1; }
+          echo "$output" | grep -q "CODEMIT_OPERATOR_ORIGIN" || { echo "::error::에러 메시지에 원인(CODEMIT_OPERATOR_ORIGIN)이 안 남는다"; exit 1; }
+          echo "$output" | grep -q "CODEMIT_API_BASE_URL" || { echo "::error::에러 메시지에 원인(CODEMIT_API_BASE_URL)이 안 남는다"; exit 1; }
 
       - name: Refuses to boot in staging with only one required value missing
         run: |
           set +e
           output=$(timeout 60 docker run --rm \
-            -e LAURIO_DEPLOYMENT_TARGET=staging \
-            -e LAURIO_OPERATOR_ORIGIN=https://operator.staging.laurio.example \
-            laurio-operator-runner-ci 2>&1)
+            -e CODEMIT_DEPLOYMENT_TARGET=staging \
+            -e CODEMIT_OPERATOR_ORIGIN=https://operator.staging.codemit.example \
+            codemit-operator-runner-ci 2>&1)
           status=$?
           set -e
           echo "$output"
           if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
-            echo "::error::LAURIO_API_BASE_URL 없이도 staging 컨테이너가 죽지 않았다(status=$status)"
+            echo "::error::CODEMIT_API_BASE_URL 없이도 staging 컨테이너가 죽지 않았다(status=$status)"
             exit 1
           fi
-          echo "$output" | grep -q "LAURIO_API_BASE_URL" || { echo "::error::에러 메시지에 원인이 안 남는다"; exit 1; }
+          echo "$output" | grep -q "CODEMIT_API_BASE_URL" || { echo "::error::에러 메시지에 원인이 안 남는다"; exit 1; }
 
       # **머신이 남는다 — 잡이 자기 뒤를 치워야 한다.** 호스티드 러너는 VM 이
       # 통째로 사라져 잔여물이 없지만, 셀프호스티드는 아니다. 앞선 실행이 이
@@ -1289,11 +1289,11 @@ jobs:
           set -euo pipefail
           docker rm -f operator-boot-ok >/dev/null 2>&1 || true
           docker run -d --name operator-boot-ok \
-            -e LAURIO_DEPLOYMENT_TARGET=production \
-            -e LAURIO_OPERATOR_ORIGIN=https://operator.laurio.example \
-            -e LAURIO_API_BASE_URL=http://127.0.0.1:1 \
+            -e CODEMIT_DEPLOYMENT_TARGET=production \
+            -e CODEMIT_OPERATOR_ORIGIN=https://operator.codemit.example \
+            -e CODEMIT_API_BASE_URL=http://127.0.0.1:1 \
             -p 3101:3000 \
-            laurio-operator-runner-ci
+            codemit-operator-runner-ci
 
           # 백엔드가 없어 /healthz 는 503(degraded)이 정상이다 — 여기서 보는 건
           # "완전한 설정에서는 운영자 앱이 죽지 않고 응답한다"는 것뿐이다. 연결
@@ -1331,10 +1331,10 @@ jobs:
           # 백엔드를 부르지 않고 곧바로 clearSessionCookie를 실어 응답한다 — 그래서
           # 백엔드 없이도 이 경로 하나로 쿠키 속성을 직접 관찰할 수 있다.
           set_cookie=$(curl -s -D - -o /dev/null -X POST http://127.0.0.1:3101/api/auth/logout \
-            -H "Origin: https://operator.laurio.example")
+            -H "Origin: https://operator.codemit.example")
           echo "$set_cookie"
-          echo "$set_cookie" | grep -qi "laurio_operator_session=.*Secure" \
-            || { echo "::error::production인데 laurio_operator_session 쿠키에 Secure가 없다"; exit 1; }
+          echo "$set_cookie" | grep -qi "codemit_operator_session=.*Secure" \
+            || { echo "::error::production인데 codemit_operator_session 쿠키에 Secure가 없다"; exit 1; }
 
 
       - name: Tear down the boot-guard container
@@ -1374,7 +1374,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build the production classroom image (runner stage)
-        run: docker build -f docker/classroom.Dockerfile --target runner -t laurio-classroom-runner-ci .
+        run: docker build -f docker/classroom.Dockerfile --target runner -t codemit-classroom-runner-ci .
 
       # frontend-deploy-guard와 같은 이유 — .dockerignore가 시크릿과 호스트
       # node_modules를 실제로 막는지 이 앱에서도 직접 확인한다.
@@ -1384,8 +1384,8 @@ jobs:
           echo "OPENAI_API_KEY=sk-ci-guard-fake-secret-do-not-leak" > classroom/.env
           mkdir -p classroom/node_modules/.ci-guard-marker
           echo "host-node-modules-should-not-leak-into-image" > classroom/node_modules/.ci-guard-marker/marker.txt
-          docker build -f docker/classroom.Dockerfile --target builder -t laurio-classroom-builder-ci-guard .
-          docker run --rm --entrypoint sh laurio-classroom-builder-ci-guard -c '
+          docker build -f docker/classroom.Dockerfile --target builder -t codemit-classroom-builder-ci-guard .
+          docker run --rm --entrypoint sh codemit-classroom-builder-ci-guard -c '
             set -e
             if [ -f /app/classroom/.env ]; then
               echo "FOUND /app/classroom/.env — .dockerignore가 시크릿을 막지 못했다" >&2
@@ -1403,12 +1403,12 @@ jobs:
           '
           rm -f classroom/.env
           rm -rf classroom/node_modules/.ci-guard-marker
-          docker rmi laurio-classroom-builder-ci-guard
+          docker rmi codemit-classroom-builder-ci-guard
 
       - name: Refuses to boot in production with missing config (and actually exits — not just logs)
         run: |
           set +e
-          output=$(timeout 60 docker run --rm -e LAURIO_DEPLOYMENT_TARGET=production laurio-classroom-runner-ci 2>&1)
+          output=$(timeout 60 docker run --rm -e CODEMIT_DEPLOYMENT_TARGET=production codemit-classroom-runner-ci 2>&1)
           status=$?
           set -e
           echo "$output"
@@ -1416,26 +1416,26 @@ jobs:
             echo "::error::필수 설정 없이도 컨테이너가 죽지 않았다(status=$status) — 부팅 가드가 깨졌다"
             exit 1
           fi
-          echo "$output" | grep -q "LAURIO_CLASSROOM_ORIGIN" || { echo "::error::에러 메시지에 원인(LAURIO_CLASSROOM_ORIGIN)이 안 남는다"; exit 1; }
-          echo "$output" | grep -q "LAURIO_API_BASE_URL" || { echo "::error::에러 메시지에 원인(LAURIO_API_BASE_URL)이 안 남는다"; exit 1; }
-          echo "$output" | grep -q "LAURIO_SESSION_COOKIE_DOMAIN" || { echo "::error::에러 메시지에 원인(LAURIO_SESSION_COOKIE_DOMAIN)이 안 남는다"; exit 1; }
+          echo "$output" | grep -q "CODEMIT_CLASSROOM_ORIGIN" || { echo "::error::에러 메시지에 원인(CODEMIT_CLASSROOM_ORIGIN)이 안 남는다"; exit 1; }
+          echo "$output" | grep -q "CODEMIT_API_BASE_URL" || { echo "::error::에러 메시지에 원인(CODEMIT_API_BASE_URL)이 안 남는다"; exit 1; }
+          echo "$output" | grep -q "CODEMIT_SESSION_COOKIE_DOMAIN" || { echo "::error::에러 메시지에 원인(CODEMIT_SESSION_COOKIE_DOMAIN)이 안 남는다"; exit 1; }
 
       - name: Refuses to boot in staging with only one required value missing
         run: |
           set +e
           output=$(timeout 60 docker run --rm \
-            -e LAURIO_DEPLOYMENT_TARGET=staging \
-            -e LAURIO_CLASSROOM_ORIGIN=https://classroom.staging.laurio.example \
-            laurio-classroom-runner-ci 2>&1)
+            -e CODEMIT_DEPLOYMENT_TARGET=staging \
+            -e CODEMIT_CLASSROOM_ORIGIN=https://classroom.staging.codemit.example \
+            codemit-classroom-runner-ci 2>&1)
           status=$?
           set -e
           echo "$output"
           if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
-            echo "::error::LAURIO_API_BASE_URL/LAURIO_SESSION_COOKIE_DOMAIN 없이도 staging 컨테이너가 죽지 않았다(status=$status)"
+            echo "::error::CODEMIT_API_BASE_URL/CODEMIT_SESSION_COOKIE_DOMAIN 없이도 staging 컨테이너가 죽지 않았다(status=$status)"
             exit 1
           fi
-          echo "$output" | grep -q "LAURIO_API_BASE_URL" || { echo "::error::에러 메시지에 원인(LAURIO_API_BASE_URL)이 안 남는다"; exit 1; }
-          echo "$output" | grep -q "LAURIO_SESSION_COOKIE_DOMAIN" || { echo "::error::에러 메시지에 원인(LAURIO_SESSION_COOKIE_DOMAIN)이 안 남는다"; exit 1; }
+          echo "$output" | grep -q "CODEMIT_API_BASE_URL" || { echo "::error::에러 메시지에 원인(CODEMIT_API_BASE_URL)이 안 남는다"; exit 1; }
+          echo "$output" | grep -q "CODEMIT_SESSION_COOKIE_DOMAIN" || { echo "::error::에러 메시지에 원인(CODEMIT_SESSION_COOKIE_DOMAIN)이 안 남는다"; exit 1; }
 
       # 머신이 남는다 — 잡이 자기 뒤를 치워야 한다(frontend-deploy-guard와 같은
       # 이유). 시작 전에 지우고(멱등), 끝나면 성공·실패 무관하게 지운다.
@@ -1444,13 +1444,13 @@ jobs:
           set -euo pipefail
           docker rm -f classroom-boot-ok >/dev/null 2>&1 || true
           docker run -d --name classroom-boot-ok \
-            -e LAURIO_DEPLOYMENT_TARGET=production \
-            -e LAURIO_CLASSROOM_ORIGIN=https://classroom.laurio.example \
-            -e LAURIO_API_BASE_URL=http://127.0.0.1:1 \
-            -e LAURIO_SESSION_COOKIE_DOMAIN=.laurio.example \
-            -e LAURIO_WEB_ORIGIN=https://laurio.example \
+            -e CODEMIT_DEPLOYMENT_TARGET=production \
+            -e CODEMIT_CLASSROOM_ORIGIN=https://classroom.codemit.example \
+            -e CODEMIT_API_BASE_URL=http://127.0.0.1:1 \
+            -e CODEMIT_SESSION_COOKIE_DOMAIN=.codemit.example \
+            -e CODEMIT_WEB_ORIGIN=https://codemit.example \
             -p 3102:3000 \
-            laurio-classroom-runner-ci
+            codemit-classroom-runner-ci
 
           # 백엔드가 없어 /healthz 는 503(degraded)이 정상이다 — 여기서 보는 건
           # "완전한 설정에서는 강의실이 죽지 않고 응답한다"는 것뿐이다. 연결
@@ -1473,15 +1473,15 @@ jobs:
       # 런타임 설정이 빌드에 박제되지 않는지 실제로 확인한다 (#297). 이 검사가
       # 없어서 배포된 강의실의 로그인 링크가 `http://127.0.0.1:53000` 을 가리켰다 —
       # 그 화면이 정적으로 구워져 **빌드 머신의** 환경(=비어 있음)을 읽었기 때문이다.
-      # dev 도 CI e2e 도 이것을 못 본다: 둘 다 LAURIO_WEB_ORIGIN 이 비어 있어 dev
+      # dev 도 CI e2e 도 이것을 못 본다: 둘 다 CODEMIT_WEB_ORIGIN 이 비어 있어 dev
       # 폴백이 「맞는 답」이라 통과한다. 프로덕션 이미지에 배포 설정을 물린 여기서만
       # 드러난다. (구조 쪽은 classroom/lib/rendering/runtime-config.test.ts 가 본다.)
       - name: Runtime config is read at request time, not baked into the build
         run: |
           set -euo pipefail
           html=$(curl -sS --max-time 10 http://127.0.0.1:3102/login)
-          echo "$html" | grep -q "https://laurio.example/login" \
-            || { echo "::error::/login 이 LAURIO_WEB_ORIGIN 을 안 읽는다 — 빌드 시점 값이 구워졌는가?"; echo "$html" | head -40; exit 1; }
+          echo "$html" | grep -q "https://codemit.example/login" \
+            || { echo "::error::/login 이 CODEMIT_WEB_ORIGIN 을 안 읽는다 — 빌드 시점 값이 구워졌는가?"; echo "$html" | head -40; exit 1; }
           if echo "$html" | grep -q "127\.0\.0\.1"; then
             echo "::error::/login HTML 에 로컬호스트가 남아 있다 — dev 폴백이 박제됐다(#297)"
             echo "$html" | grep -o "http://127[^\"']*" | head -5

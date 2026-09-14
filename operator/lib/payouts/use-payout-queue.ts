@@ -10,8 +10,8 @@
 // 없이도 **막혀 있는 것만** 돌려주므로(`blocked_q`) 「전체」가 그냥 무필터 조회다.
 //
 // 0건과 조회 실패를 구별한다 — operator/lib/home/use-queue-counts.ts와 같은 원칙.
-import { type PagedListState, usePagedList } from "@laurio/bff-client";
-import type { components } from "@laurio/bff-client/schema";
+import { type PagedListState, usePagedList } from "@codemit/bff-client";
+import type { components } from "@codemit/bff-client/schema";
 
 import { bffClient } from "@/lib/bff/client";
 

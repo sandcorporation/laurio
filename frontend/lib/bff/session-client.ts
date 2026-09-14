@@ -19,6 +19,6 @@
 // 재시도 없이 한 번의 요청으로 끝난다. `onUnauthorized`도 의미가 없다(호출부가
 // 항상 `unauthorizedIsAnswer: true`로 묻는다 — 익명 방문자가 정상이다) — 그래도
 // 인터페이스가 요구하므로 아무 일도 하지 않는 함수를 준다.
-import { createBffClient } from "@laurio/bff-client";
+import { createBffClient } from "@codemit/bff-client";
 
 export const sessionOnlyClient = createBffClient({ onUnauthorized: () => {} });
