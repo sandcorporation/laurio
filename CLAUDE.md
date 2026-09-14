@@ -205,9 +205,11 @@ staging 은 실물 어댑터라 해당 없음), 배포 환경의 시계는 실�
 「CI 를 통과한 main 의 어느 커밋」 그 자체다. 늦게 끝난 옛 커밋의 CI 는 건너뛰고,
 `production` 이 `main` 에서 갈라져 있으면 밀어붙이지 않고 빨갛게 멈춘다. **`production` 에
 직접 커밋하지 않는다.** prod 배포는 `Jenkinsfile.production` 이 맡는다 — `production` 브랜치
-빌드일 때만 `deploy.sh prod` 를 부르는 얇은 껍데기이고, prod 호스트에 붙인 `codemit-prod`
-라벨 에이전트에서 돈다. 그 잡(브랜치 `*/production`, scriptPath `Jenkinsfile.production`)과
-에이전트, 에이전트 워크스페이스의 `docker/.env.prod` 는 저장소 밖에서 사람이 만든다 — 아직 없다.
+빌드일 때만 `deploy.sh prod` 를 부르는 얇은 껍데기이고, prod(Oracle A1) 호스트의 Jenkins
+**컨트롤러 자신**에서 `built-in` 라벨로 돈다 — 기본 노드에 커스텀 라벨을 붙여도 배차되지 않았다.
+그 잡(`codemit`, 브랜치 `*/production`, scriptPath `Jenkinsfile.production`)과 워크스페이스의
+`docker/.env.prod`(chmod 600)는 저장소 밖에서 사람이 만들었다. 그 잡에는 아직 GitHub 웹훅이 들어오지
+않아 `production` 이 앞당겨져도 빌드가 저절로 돌지 않는다 — 지금은 수동으로 빌드한다.
 
 **staging 배포는 `main` 에 push 하면 저절로 일어난다.** Jenkins 잡
 (`/var/jenkins_home/jobs/laurio`)은 **Pipeline** 이고(`<flow-definition>`,
