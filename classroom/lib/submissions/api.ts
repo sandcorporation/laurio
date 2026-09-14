@@ -89,6 +89,10 @@ export type ProblemSubmissions = {
   // 이 클래스가 보관됐는가(#294, #338) — 참이면 화면이 제출 수단을 숨기고
   // 수업이 끝났다는 이유를 보여준다. 지난 시도는 그대로 `submissions`에 남는다.
   archived: boolean;
+  // 강사가 이 문제를 숨겼는가(#405) — 참이면 이 참여자는 한 번이라도 낸
+  // 적이 있다는 뜻이다(낸 적 없으면 이 응답 자체가 404). 화면이 제출 칸
+  // 대신 「강사가 숨긴 문제라 새로 낼 수 없습니다」를 보인다.
+  problem_hidden: boolean;
 };
 
 export function fetchMyProblem(classId: number, problemId: number): Promise<ProblemSubmissions> {

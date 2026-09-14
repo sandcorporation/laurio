@@ -46,6 +46,11 @@ type InteractiveProps = {
    *  동시에 참이어도 보관 쪽 문구가 우선한다 — "수업 자체가 끝났다"가 더
    *  근본적인 이유이고, 되돌리면(#294) 내보냄 여부만으로 다시 갈린다. */
   archived: boolean;
+  /** 강사가 이 문제를 숨겼는가(#405) — 참이면 제출 칸 대신 「강사가 숨긴
+   *  문제라 새로 낼 수 없습니다」를 보인다. `archived`·`memberExpelled`보다
+   *  더 좁은 사유라 그 둘 뒤에 확인한다 — 클래스가 끝났거나 참여자가
+   *  쫓겨난 것이 이 문제 하나만의 사정보다 더 근본적이다. */
+  problemHidden: boolean;
   repositoryUrl: string;
   onRepositoryUrlChange: (value: string) => void;
   onRepositorySubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -305,6 +310,7 @@ function InteractiveSubmissionForm(
   const {
     memberExpelled,
     archived,
+    problemHidden,
     repositoryUrl,
     onRepositoryUrlChange,
     onRepositorySubmit,
@@ -347,6 +353,15 @@ function InteractiveSubmissionForm(
           <span data-testid="member-expelled-note">
             이 클래스에서 내보내져 더 이상 새로 제출할 수 없습니다. 지난 시도와 판정은
             계속 볼 수 있습니다.
+          </span>
+        </ErrorNote>
+      ) : problemHidden ? (
+        // 강사가 이 문제를 숨겼다(#405) — 여기 닿았다는 것 자체가 이미 한
+        // 번은 냈다는 뜻이다(안 낸 참여자는 애초에 이 화면 자체가 404다).
+        // 지난 시도와 판정은 위 "내 시도" 카드에 그대로 남는다.
+        <ErrorNote>
+          <span data-testid="problem-hidden-note">
+            강사가 숨긴 문제라 새로 낼 수 없습니다. 지난 시도와 판정은 계속 볼 수 있습니다.
           </span>
         </ErrorNote>
       ) : needsFormatChoice ? (

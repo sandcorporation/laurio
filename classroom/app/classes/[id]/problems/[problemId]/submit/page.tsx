@@ -100,6 +100,7 @@ export default function ProblemSubmitPage() {
     submissions,
     member_expelled: memberExpelled,
     archived,
+    problem_hidden: problemHidden,
   } = state.data;
 
   async function submitValue(
@@ -158,6 +159,7 @@ export default function ProblemSubmitPage() {
         submissions={submissions}
         memberExpelled={memberExpelled}
         archived={archived}
+        problemHidden={problemHidden}
         repositoryUrl={repositoryUrl}
         onRepositoryUrlChange={setRepositoryUrl}
         onRepositorySubmit={handleRepositorySubmit}

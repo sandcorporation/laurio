@@ -19,6 +19,8 @@ export type GridCell = {
 export type GridProblemStats = {
   id: number;
   title: string;
+  // 초안·열림·숨김(#405) — 숨긴 문제도 격자에 남고 화면이 「숨김」 표시를 붙인다.
+  status: string;
   // 이 문제를 한 번이라도 통과한 참여자 수 — 문제 중심 탭(ProblemRow)의
   // 같은 이름 필드와 정확히 같은 값이다(#290 AC).
   passed_count: number;

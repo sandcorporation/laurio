@@ -335,7 +335,9 @@ class MemberRenameOut(Schema):
 
 class ClassroomProblemMineOut(Schema):
     """참여자가 보는 문제 하나(#286) — 강사 전용 `ProblemOut`과 달리 `status`가
-    없다(참여자는 열린 문제만 이 자리에 닿으므로 구별할 이유가 없다).
+    없다. 열린 문제와, 낸 적 있는 숨긴 문제 둘 다 이 자리에 닿지만(#405) 그
+    구별은 `ClassroomProblemSubmissionsOut.problem_hidden`이 대신 진다 — 이
+    조각 자체는 여전히 상태를 모른다.
 
     이름이 `Classroom` 접두어를 든다 — `contests.submission_schemas.
     ProblemOut`은 없지만 `SubmissionIn`·`SubmissionOut`은 있고, django-ninja가
@@ -436,6 +438,12 @@ class ClassroomProblemSubmissionsOut(Schema):
     #: 수업이 끝났다는 이유를 보여준다 — `member_expelled`와 같은 신호 자리.
     #: 새 제출만 막힌다(`create_classroom_submission`의 403이 실제 문).
     archived: bool = False
+    #: 강사가 이 문제를 숨겼는가(#405). 참이면 이 참여자는 한 번이라도 낸
+    #: 적이 있다는 뜻이다 — 낸 적 없으면 애초에 이 응답 자체가 404다
+    #: (`_get_visible_problem_for_participant_or_404`). 화면이 제출 칸
+    #: 대신 「강사가 숨긴 문제라 새로 낼 수 없습니다」를 보인다 — 실제 문은
+    #: 여전히 `create_classroom_submission`의 403이다.
+    problem_hidden: bool = False
 
 
 class ClassroomProblemStatsOut(Schema):
@@ -446,6 +454,9 @@ class ClassroomProblemStatsOut(Schema):
 
     id: int
     title: str
+    #: 초안·열림·숨김(#405) — 명단 격자에도 「숨김」 표시가 남아야 한다
+    #: (CONTEXT.md 「Problem」).
+    status: str
     passed_count: int
     member_count: int
     pass_rate: float | None = None

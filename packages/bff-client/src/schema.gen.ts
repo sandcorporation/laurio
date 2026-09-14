@@ -732,6 +732,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/problems/{problem_id}/hide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Hide Problem
+         * @description 열린 문제를 참여자에게서 거둔다(#405) — 제출 유무와 무관하다. 열림
+         *     →숨김만 허용한다: 초안은 애초에 참여자에게 보인 적이 없어 거둘 것이
+         *     없고, 이미 숨긴 문제를 다시 숨기는 것도 뜻이 없다.
+         */
+        post: operations["classroom_api_hide_problem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/problems/{problem_id}/mine": {
         parameters: {
             query?: never;
@@ -794,6 +816,28 @@ export interface paths {
          *     AC) — 그 템플릿을 200으로 그대로 돌려준다. 새로 만들었을 때만 201이다.
          */
         post: operations["classroom_template_api_publish_template"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/classes/{class_id}/problems/{problem_id}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reopen Problem
+         * @description 숨긴 문제를 되돌린다(#405) — 지난 시도·통과는 손대지 않고 상태만
+         *     되돌린다. `open_problem`과 같은 필수 항목 규칙을 다시 확인한다: 그
+         *     사이 강사가 체크리스트를 비웠으면 통과가 정의되지 않아 열 수 없다.
+         */
+        post: operations["classroom_api_reopen_problem"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4134,7 +4178,9 @@ export interface components {
         /**
          * ClassroomProblemMineOut
          * @description 참여자가 보는 문제 하나(#286) — 강사 전용 `ProblemOut`과 달리 `status`가
-         *     없다(참여자는 열린 문제만 이 자리에 닿으므로 구별할 이유가 없다).
+         *     없다. 열린 문제와, 낸 적 있는 숨긴 문제 둘 다 이 자리에 닿지만(#405) 그
+         *     구별은 `ClassroomProblemSubmissionsOut.problem_hidden`이 대신 진다 — 이
+         *     조각 자체는 여전히 상태를 모른다.
          *
          *     이름이 `Classroom` 접두어를 든다 — `contests.submission_schemas.
          *     ProblemOut`은 없지만 `SubmissionIn`·`SubmissionOut`은 있고, django-ninja가
@@ -4185,6 +4231,8 @@ export interface components {
             pass_rate?: number | null;
             /** Passed Count */
             passed_count: number;
+            /** Status */
+            status: string;
             /** Title */
             title: string;
         };
@@ -4203,6 +4251,11 @@ export interface components {
              */
             member_expelled: boolean;
             problem: components["schemas"]["ClassroomProblemMineOut"];
+            /**
+             * Problem Hidden
+             * @default false
+             */
+            problem_hidden: boolean;
             /** Submissions */
             submissions: components["schemas"]["ClassroomSubmissionOut"][];
         };
@@ -7905,6 +7958,47 @@ export interface operations {
             };
         };
     };
+    classroom_api_hide_problem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+                problem_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemOut"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     classroom_api_get_my_problem: {
         parameters: {
             query?: never;
@@ -8010,6 +8104,47 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemTemplateOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_reopen_problem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+                problem_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemOut"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
                 };
             };
             /** @description Not Found */

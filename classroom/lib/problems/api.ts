@@ -3,7 +3,7 @@ import { backendJson } from "@/lib/backend/client";
 import type { GradingStrictness } from "@/lib/problems/grading-guideline";
 
 export type SubmissionFormat = "source" | "repository";
-export type ProblemStatus = "draft" | "open";
+export type ProblemStatus = "draft" | "open" | "hidden";
 export type { GradingStrictness };
 
 const SUBMISSION_FORMAT_LABEL: Record<SubmissionFormat, string> = {
@@ -135,6 +135,22 @@ export function reorderProblems(classId: number, problemIds: number[]): Promise<
 
 export function openProblem(classId: number, problemId: number): Promise<ProblemRow> {
   return backendJson<ProblemRow>(`/classroom/classes/${classId}/problems/${problemId}/open`, {
+    method: "POST",
+  });
+}
+
+// 열린 문제를 참여자에게서 거둔다(#405) — 제출 유무와 무관하다. 이미 낸
+// 참여자는 그 문제를 읽기 전용으로 계속 보되 새로 낼 수는 없다.
+export function hideProblem(classId: number, problemId: number): Promise<ProblemRow> {
+  return backendJson<ProblemRow>(`/classroom/classes/${classId}/problems/${problemId}/hide`, {
+    method: "POST",
+  });
+}
+
+// 숨긴 문제를 되돌린다(#405) — `openProblem`과 같은 필수 항목 규칙을 다시
+// 따른다: 그 사이 체크리스트가 비었으면 서버가 400으로 거절한다.
+export function reopenProblem(classId: number, problemId: number): Promise<ProblemRow> {
+  return backendJson<ProblemRow>(`/classroom/classes/${classId}/problems/${problemId}/reopen`, {
     method: "POST",
   });
 }

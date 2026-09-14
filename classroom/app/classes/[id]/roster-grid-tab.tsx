@@ -118,6 +118,14 @@ export function RosterGridTab({ classId }: { classId: number }) {
                       data-testid={`roster-grid-header-problem-${problem.id}`}
                     >
                       {problem.title}
+                      {problem.status === "hidden" ? (
+                        <span
+                          data-testid={`roster-grid-header-problem-${problem.id}-hidden-badge`}
+                          className="ml-1.5 inline-block"
+                        >
+                          <Badge tone="attention">숨김</Badge>
+                        </span>
+                      ) : null}
                     </th>
                   ))}
                 </tr>

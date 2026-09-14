@@ -75,6 +75,10 @@ export default function ProblemSubmissionsPage() {
       : [],
   );
   const problemTitle = problemState.state.status === "ready" ? problemState.state.problem.title : "";
+  // 숨긴 문제도 제출 현황을 지금처럼 열어 볼 수 있다(#405) — 화면이
+  // 「숨김」 표시로 그 사실을 알린다(CONTEXT.md 「Problem」).
+  const problemHidden =
+    problemState.state.status === "ready" && problemState.state.problem.status === "hidden";
   // 이 화면은 「학생이 아직 안 냈다」와 「냈는데 강사 본인의 키 문제로
   // 멈췄다」를 헷갈리기 가장 쉬운 자리다(#346) — 시도가 하나라도 그 사유로
   // 멈춰 있으면 목록 위에서 먼저 알리고 설정으로 가는 길을 준다. 키가
@@ -99,13 +103,20 @@ export default function ProblemSubmissionsPage() {
         titleTestId="problem-submissions-heading"
         description="시도마다 소스나 저장소를 열어 AI 판정과 함께 볼 수 있습니다."
         actions={
-          <Link
-            href={`/classes/${classId}/problems/${problemId}`}
-            data-testid="back-to-problem-link"
-            className={buttonClass()}
-          >
-            문제 편집으로
-          </Link>
+          <>
+            {problemHidden ? (
+              <span data-testid="problem-submissions-hidden-badge">
+                <Badge tone="attention">숨김</Badge>
+              </span>
+            ) : null}
+            <Link
+              href={`/classes/${classId}/problems/${problemId}`}
+              data-testid="back-to-problem-link"
+              className={buttonClass()}
+            >
+              문제 편집으로
+            </Link>
+          </>
         }
       />
 
