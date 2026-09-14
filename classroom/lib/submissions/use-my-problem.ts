@@ -39,19 +39,21 @@ export function useMyProblem(classId: number, problemId: number) {
   const previousConnectionState = useRef<StreamConnectionState>(connectionState);
 
   const reload = useCallback(() => {
-    setState({ status: "loading" });
     fetchMyProblem(classId, problemId)
       .then((data) => setState({ status: "ready", data }))
       .catch((error: unknown) => {
         if (error instanceof BackendError && error.status === 404) {
           setState({ status: "notFound" });
         } else {
-          setState({ status: "error" });
+          setState((prev) => (prev.status === "ready" ? prev : { status: "error" }));
         }
       });
   }, [classId, problemId]);
 
   useEffect(() => {
+    // 보고 있는 대상이 바뀔 때만 화면을 비운다 — 다시 불러오기(`reload`)는 새 응답이
+    // 올 때까지 이미 그린 화면을 둔다(lib/rendering/refetch-keeps-screen.test.ts).
+    setState({ status: "loading" });
     reload();
   }, [reload]);
 

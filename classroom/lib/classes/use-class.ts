@@ -19,7 +19,6 @@ export function useClass(classId: number) {
 
   function load() {
     let cancelled = false;
-    setState({ status: "loading" });
     fetchClass(classId)
       .then((classroom) => {
         if (!cancelled) {
@@ -31,7 +30,7 @@ export function useClass(classId: number) {
         if (error instanceof BackendError && error.status === 404) {
           setState({ status: "notFound" });
         } else {
-          setState({ status: "error" });
+          setState((prev) => (prev.status === "ready" ? prev : { status: "error" }));
         }
       });
     return () => {
@@ -40,6 +39,9 @@ export function useClass(classId: number) {
   }
 
   useEffect(() => {
+    // 보고 있는 대상이 바뀔 때만 화면을 비운다 — 다시 불러오기(`reload`)는 새 응답이
+    // 올 때까지 이미 그린 화면을 둔다(lib/rendering/refetch-keeps-screen.test.ts).
+    setState({ status: "loading" });
     const cancel = load();
     return cancel;
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -16,13 +16,15 @@ export function useProblems(classId: number) {
   const [state, setState] = useState<ProblemsState>({ status: "loading" });
 
   const reload = useCallback(() => {
-    setState({ status: "loading" });
     fetchProblems(classId)
       .then((problems) => setState({ status: "ready", problems, reorderError: false }))
-      .catch(() => setState({ status: "error" }));
+      .catch(() => setState((prev) => (prev.status === "ready" ? prev : { status: "error" })));
   }, [classId]);
 
   useEffect(() => {
+    // 보고 있는 대상이 바뀔 때만 화면을 비운다 — 다시 불러오기(`reload`)는 새 응답이
+    // 올 때까지 이미 그린 화면을 둔다(lib/rendering/refetch-keeps-screen.test.ts).
+    setState({ status: "loading" });
     reload();
   }, [reload]);
 
