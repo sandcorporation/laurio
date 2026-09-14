@@ -134,7 +134,7 @@ def test_display_name_change_appears_in_past_submissions(client, db):
     class_id = _create_class(client, instructor["access"])
     problem = client.post(
         f"{CLASSES_URL}/{class_id}/problems",
-        data={"title": "1주차", "submission_format": "repository"},
+        data={"title": "1주차", "submission_formats": ["repository"]},
         content_type="application/json",
         **_auth_header(instructor["access"]),
     ).json()
@@ -155,7 +155,7 @@ def test_display_name_change_appears_in_past_submissions(client, db):
     _join(client, participant["access"], Class.objects.get(id=class_id).join_code, "옛이름")
     submitted = client.post(
         f"{CLASSES_URL}/{class_id}/problems/{problem['id']}/submissions",
-        data={"value": "https://github.com/laurio/example"},
+        data={"value": "https://github.com/laurio/example", "submission_format": "repository"},
         content_type="application/json",
         **_auth_header(participant["access"]),
     )
