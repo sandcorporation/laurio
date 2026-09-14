@@ -7,6 +7,14 @@
 내보내진 뒤라면 참여자에게는 가지 않되 강사에게는 그대로 간다(#383). 공모전
 채점(`scoring` 앱)은 이 버스를 아예 모른다(import하지 않는다) — 앱 경계
 테스트(`test_app_boundaries.py`)가 그 사실을 구조로 지킨다.
+
+**참여자·강사 큐에는 `attempt-scored`·`attempt-submitted` 말고 다른 신호도
+쌓인다**(#381) — 같은 채점 완료 자리가 `CLASSROOM_SUBMISSION_SCORED`
+Notification도 만들고, 그것이 `notification-changed`를 같은 수신자에게 낸다
+(`notifications.services._publish_notification_changed_if_classroom`,
+내보내진 참여자도 예외가 아니다 — 그 알림 자체가 내보내짐과 무관하게
+만들어지기 때문이다). 그래서 이 파일의 단언은 큐 전체가 아니라 `kind`로
+걸러 본다.
 """
 
 from __future__ import annotations
@@ -168,7 +176,9 @@ def test_normal_scoring_publishes_attempt_scored_to_the_submitter(
     _run_scan(client, django_capture_on_commit_callbacks)
 
     participant_id = _user_id("participant-1")
-    events = FakeEventBus._queues.get(participant_id, [])
+    events = [
+        e for e in FakeEventBus._queues.get(participant_id, []) if e.kind == "attempt-scored"
+    ]
     assert len(events) == 1
     event = events[0]
     assert event.kind == "attempt-scored"
@@ -276,9 +286,11 @@ def test_expelled_participant_does_not_receive_the_signal(
 
     _run_scan(client, django_capture_on_commit_callbacks)
 
-    assert FakeEventBus._queues.get(_user_id("participant-1"), []) == []
-    # 참여자 몫만 걸러진다 — 강사는 내보내진 뒤에도 그 시도의 채점 결과를
-    # 그대로 받는다(#383, 위 docstring "강사는 ... 항상 받는다").
+    # 참여자 몫의 attempt-scored만 걸러진다 — 이 큐에는 notification-changed도
+    # 함께 쌓일 수 있다(#381, 위 docstring). 강사는 내보내진 뒤에도 그 시도의
+    # 채점 결과를 그대로 받는다(#383, 위 docstring "강사는 ... 항상 받는다").
+    participant_events = FakeEventBus._queues.get(_user_id("participant-1"), [])
+    assert [e for e in participant_events if e.kind == "attempt-scored"] == []
     instructor_events = FakeEventBus._queues.get(_user_id("instructor-1"), [])
     assert len(instructor_events) == 1
     assert instructor_events[0].kind == "attempt-scored"
@@ -387,7 +399,9 @@ def test_platform_failure_path_also_publishes_attempt_scored(
             _run_scan(client, django_capture_on_commit_callbacks)
 
         participant_id = _user_id("participant-2")
-        events = FakeEventBus._queues.get(participant_id, [])
+        events = [
+            e for e in FakeEventBus._queues.get(participant_id, []) if e.kind == "attempt-scored"
+        ]
         assert len(events) == 1
         assert events[0].kind == "attempt-scored"
         assert events[0].payload["submission_id"] == submitted["id"]

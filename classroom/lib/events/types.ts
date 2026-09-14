@@ -22,6 +22,12 @@ export interface AttemptScoredPayload {
   submission_id: number;
 }
 
+/** 강의실 알림이 생기거나 읽음 상태가 바뀌었다(#381) — 그 알림을 받는
+ * 사람에게만 온다. payload는 비어 있다(ADR-0046 "신호는 식별자만 싣는다") —
+ * 벨은 무엇이 바뀌었는지 몰라도 되고, 신호를 받으면 안 읽은 개수를 다시
+ * 물어보기만 하면 된다. */
+export const NOTIFICATION_CHANGED = "notification-changed" as const;
+
 export interface StreamEvent {
   kind: string;
   payload: Record<string, unknown>;

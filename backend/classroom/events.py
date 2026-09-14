@@ -4,10 +4,10 @@
 신호 종류의 이름과 "누구에게 보낼지"는 발행하는 자리(이 앱)가 정한다(#269,
 앱 경계 테스트가 강의실을 몰라야 하는 방향과 같은 이유).
 
-`ATTEMPT_SUBMITTED`·`ATTEMPT_SCORED` 둘이다(#383). 이후 티켓(#381)이
-`notification-changed`를 더할 자리도 여기다 — 새 신호 종류를 추가하고 발행
-자리 하나를 더하는 것으로 끝나야, 버스·SSE 엔드포인트·BFF·프론트 훅을 매번
-다시 설계하지 않는다(디스패치 노트 "그 버스/스트림 훅을 그렇게 설계하라").
+`ATTEMPT_SUBMITTED`·`ATTEMPT_SCORED`·`NOTIFICATION_CHANGED` 셋이 여기 산다
+(#381·#383). 새 신호 종류를 추가하고 발행 자리 하나를 더하는 것으로 끝나야,
+버스·SSE 엔드포인트·BFF·프론트 훅을 매번 다시 설계하지 않는다(디스패치 노트
+"그 버스/스트림 훅을 그렇게 설계하라").
 """
 
 from __future__ import annotations
@@ -98,6 +98,31 @@ def publish_attempt_scored(submission) -> None:
     for recipient_id in recipient_ids:
         event = Event(kind=ATTEMPT_SCORED, recipient_id=recipient_id, payload=payload)
         transaction.on_commit(lambda event=event: _publish_safely(event))
+
+
+#: 강의실 알림(`notifications.models.CLASSROOM_NOTIFICATION_TYPES`)이 생기거나
+#: 읽음 상태가 바뀌었다(#381) — 그 알림을 받는 사람에게만 간다. 신호는 "뭔가
+#: 바뀌었으니 다시 물어봐라"는 식별자일 뿐이라 payload가 비어 있다(ADR-0046
+#: "신호는 식별자만 싣는다") — 무엇이 어떻게 바뀌었는지는 벨이 `GET
+#: /api/notifications/unread-count`로 다시 물어 안다.
+NOTIFICATION_CHANGED = "notification-changed"
+
+
+def publish_notification_changed(*, recipient_id: int) -> None:
+    """`notifications` 앱(공유층)이 강의실 알림을 만들거나 읽음 처리할 때 부른다.
+
+    호출부는 `notifications.services.create_notification`·`notifications.api`의
+    읽음 엔드포인트 셋(모두·하나·묶음)이다 — 그 알림이
+    `CLASSROOM_NOTIFICATION_TYPES`에 속할 때만 부르는 판단은 호출부(공유층)의
+    몫이다: 공모전 알림은 이 함수 자체를 부르지 않으므로 신호를 내지 않는다는
+    AC가 구조로 성립한다.
+
+    `publish_attempt_scored`와 같은 이유로 `transaction.on_commit`을 쓴다 —
+    읽음 처리의 조건부 `UPDATE`나 알림 생성이 롤백되면 신호도 나가지 않아야
+    한다."""
+
+    event = Event(kind=NOTIFICATION_CHANGED, recipient_id=recipient_id, payload={})
+    transaction.on_commit(lambda: _publish_safely(event))
 
 
 def _publish_safely(event: Event) -> None:

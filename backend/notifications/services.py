@@ -33,6 +33,7 @@ from core.transitions import claim_transition
 
 from .adapters import CHANNEL_FALLBACK_CHAIN, ChannelSendResult
 from .models import (
+    CLASSROOM_NOTIFICATION_TYPES,
     NOTIFICATION_TYPE_FLAGS,
     Notification,
     NotificationDispatch,
@@ -112,7 +113,7 @@ def create_notification(
         # 가르는 판정인데 이 유형은 애초에 내보내지 않는다. `NOT_DISPATCHED`는
         # `FAILED`(전 채널 시도 후 실패)와 달리 채널을 한 번도 건드리지 않았다는
         # 뜻이라 `dispatches`가 항상 비어 있다.
-        return Notification.objects.create(
+        notification = Notification.objects.create(
             recipient=recipient,
             notification_type=notification_type,
             is_transactional=is_transactional,
@@ -121,9 +122,8 @@ def create_notification(
             context=context,
             created_at=now,
         )
-
-    if is_promotional and not _has_opt_in(recipient, notification_type):
-        return Notification.objects.create(
+    elif is_promotional and not _has_opt_in(recipient, notification_type):
+        notification = Notification.objects.create(
             recipient=recipient,
             notification_type=notification_type,
             is_transactional=is_transactional,
@@ -132,8 +132,7 @@ def create_notification(
             context=context,
             created_at=now,
         )
-
-    if in_quiet_hours(now) and not is_quiet_hours_exempt:
+    elif in_quiet_hours(now) and not is_quiet_hours_exempt:
         notification = Notification.objects.create(
             recipient=recipient,
             notification_type=notification_type,
@@ -144,25 +143,47 @@ def create_notification(
             context=context,
             created_at=now,
         )
-        return notification
+    else:
+        notification = Notification.objects.create(
+            recipient=recipient,
+            notification_type=notification_type,
+            is_transactional=is_transactional,
+            is_promotional=is_promotional,
+            status=Notification.Status.QUEUED,
+            # 아래 _attempt_dispatch가 이 요청 안에서 곧바로 끝내지 못하고(어댑터가
+            # 예상 못 한 방식으로 죽는 등) 예외가 새 나가더라도, claimed_at을
+            # 남겨두면 이 행이 QUEUED에 갇힌 채 영원히 잊히지 않는다 — 야간 큐
+            # 스캐너가 나중에 STUCK_QUEUED_THRESHOLD를 넘긴 QUEUED도 함께 주워
+            # 재시도한다(#10 리뷰 지적).
+            claimed_at=now,
+            context=context,
+            created_at=now,
+        )
+        _attempt_dispatch(notification, now=now)
+        notification.refresh_from_db()
 
-    notification = Notification.objects.create(
-        recipient=recipient,
-        notification_type=notification_type,
-        is_transactional=is_transactional,
-        is_promotional=is_promotional,
-        status=Notification.Status.QUEUED,
-        # 아래 _attempt_dispatch가 이 요청 안에서 곧바로 끝내지 못하고(어댑터가
-        # 예상 못 한 방식으로 죽는 등) 예외가 새 나가더라도, claimed_at을 남겨두면
-        # 이 행이 QUEUED에 갇힌 채 영원히 잊히지 않는다 — 야간 큐 스캐너가 나중에
-        # STUCK_QUEUED_THRESHOLD를 넘긴 QUEUED도 함께 주워 재시도한다(#10 리뷰 지적).
-        claimed_at=now,
-        context=context,
-        created_at=now,
-    )
-    _attempt_dispatch(notification, now=now)
-    notification.refresh_from_db()
+    _publish_notification_changed_if_classroom(notification)
     return notification
+
+
+def _publish_notification_changed_if_classroom(notification: Notification) -> None:
+    """이 알림이 강의실 것이면(`CLASSROOM_NOTIFICATION_TYPES`) 벨이 새로고침 없이
+    맞춰지도록 신호를 낸다(#381, ADR-0046) — 공모전 알림은 이 판정에 걸리지
+    않아 신호를 내지 않는다(AC "공개 앱 알림은 신호를 내지 않는다").
+
+    네 경로(내부 전용·옵트인 차단·야간 연기·즉시 발송) 전부가 이 한 자리로
+    모이므로, 앞으로 분기가 늘어도 발행 자리를 또 늘릴 필요가 없다."""
+
+    if notification.notification_type not in CLASSROOM_NOTIFICATION_TYPES:
+        return
+
+    # "누구에게 어떤 신호를" 정하는 것은 언제나 발행 자리(classroom.events,
+    # ADR-0046)라 이 앱은 "강의실 알림인가" 판정만 하고 실제 발행은 그
+    # 모듈에 맡긴다.
+    # APP-BOUNDARY-EXCEPTION: 강의실 알림 벨 실시간 갱신 신호(#381)가 강의실 앱이 정의한 이벤트 종류를 쓴다
+    from classroom.events import publish_notification_changed
+
+    publish_notification_changed(recipient_id=notification.recipient_id)
 
 
 def notify_safely(*, recipient, notification_type: str, context: dict) -> None:
