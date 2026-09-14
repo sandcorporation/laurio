@@ -59,6 +59,7 @@ logo-mark.tsx`)과 Pretendard 워드마크 「Codemit」을 함께 쓴다. 탭 �
 | `/api/auth/session` | 지금 로그인 상태 |
 | `/api/auth/social/{provider}/authorize` · `login` · `callback` | 소셜 로그인 |
 | `/api/auth/logout` | 로그아웃 |
+| `/api/theme` | 테마 선택(시스템·라이트·다크) 쿠키 쓰기(#398) — 로그인과 무관, 인증을 요구하지 않는다 |
 
 ---
 

@@ -752,6 +752,22 @@ contrast.test.ts`가 두 테마 각각 여섯 조합(본문/바탕·본문/뜬 �
 `tokens.css`를 텍스트로 읽어 계산한다 — 색을 바꿔 대비가 모자라지면 이 테스트가
 빨개진다.
 
+**테마 토글은 헤더 알림 벨 옆의 쿠키 하나다**(#398, spec #396). 두 앱 헤더에
+같은 모양의 `ThemeToggle`(비로그인 방문자에게도 보인다, `AccountMenu`처럼
+세션을 확인하지 않는다)이 시스템·라이트·다크 세 상태를 고른다. 고른 값은
+`codemit_theme` 쿠키 하나에 담기고, **로그인 쿠키와 같은 도메인 판정
+함수**(`sessionCookieDomain`, `lib/auth/cookies.ts` — dev 는 빈 값(호스트
+쿠키), 배포는 부모 도메인)를 그대로 써서 공개 앱·강의실이 공유한다(ADR-0038과
+같은 원칙). 쓰기는 각 앱의 `app/api/theme/route.ts`(둘 다 `force-dynamic`,
+`assertSameOrigin`만 지키고 인증은 요구하지 않는다)가 하고, 두 앱의
+`app/layout.tsx`가 요청마다 이 쿠키를 읽어 문서 루트에 `data-theme`를 붙인
+채 그린다 — 그래서 다크를 고른 뒤 새로고침·새 탭에서도 라이트가 비치지
+않는다. 쿠키 해석(`parseThemePreference`)과 표시 결정(`themeAttribute`)은
+두 앱의 `lib/theme/preference.ts`에 같은 모양의 순수 함수로 복사돼 있다(토큰·
+쿠키 도우미와 같은 방식). **dev(localhost 포트 구분)에서는 교차 앱 쿠키
+공유가 재현되지 않는다** — 로그인 쿠키와 같은 제약이라 같은 오리진 안에서의
+유지만 확인했고, 교차 공유는 staging 확인 항목으로 남는다.
+
 **로고도 토큰·서체와 같은 방식으로 복사한다**(#392, #391 「커밋 노드 C」). 원본은
 `frontend/app/components/logo-mark.tsx`(SVG 심볼)와 그것을 그리는
 `frontend/app/icon.tsx`·`frontend/app/apple-icon.tsx`(Next 아이콘 파일 컨벤션)다.

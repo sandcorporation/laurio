@@ -21,11 +21,13 @@ import Link from "next/link";
 import { buttonClass } from "@/lib/ui/classnames";
 import { contestProductEnabled } from "@/lib/contest-switch";
 import { classroomAppOrigin } from "@/lib/auth/classroom-link";
+import type { ThemePreference } from "@/lib/theme/preference";
 
 import { HeaderSessionZone } from "./header-session-zone";
 import { LogoMark } from "./logo-mark";
+import { ThemeToggle } from "./theme-toggle";
 
-export function SiteHeader() {
+export function SiteHeader({ themePreference }: { themePreference: ThemePreference }) {
   // 계정 메뉴의 「클래스로 가기」가 가리킬 곳(#375, spec #371) — 서버 전용
   // 환경변수라 여기(서버 컴포넌트)에서 읽어 클라이언트 자식에게 내려준다
   // (lib/auth/classroom-link.ts). 이 값이 빌드 시점에 구워지지 않는 것은
@@ -63,6 +65,7 @@ export function SiteHeader() {
               </Link>
             </>
           )}
+          <ThemeToggle initialPreference={themePreference} />
           <HeaderSessionZone classroomUrl={classroomUrl} />
         </nav>
       </div>

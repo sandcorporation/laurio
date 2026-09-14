@@ -32,7 +32,11 @@ export function isDeployedEnvironment(): boolean {
 
 // dev는 이 값을 비워 둔다 — domain을 주면 localhost 쿠키가 아예 안 붙는다
 // (#273의 frontend/lib/auth/cookies.ts와 같은 계약).
-function sessionCookieDomain(): string | undefined {
+//
+// **테마 쿠키(#398, `app/api/theme/route.ts`)도 이 함수를 그대로 쓴다** — 로그인
+// 쿠키와 다른 도메인 규칙을 새로 만들면 두 쿠키가 다른 서브도메인 집합에만
+// 붙는 사고가 난다.
+export function sessionCookieDomain(): string | undefined {
   const domain = process.env.CODEMIT_SESSION_COOKIE_DOMAIN;
   return domain ? domain : undefined;
 }

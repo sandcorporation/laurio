@@ -130,6 +130,7 @@ staging/production은 이 값이 fake이면 부팅 자체가 거부되고, 실�
 | --- | --- |
 | `/api/backend/[...path]` | 백엔드 프록시 — 허용목록(`/api/classroom`·`/api/accounts`·`/api/storage`·`/api/notifications`, #286/#304)·Origin 검증·토큰 부착 |
 | `/api/auth/logout` | 로그아웃(#306) — 공개 앱(`frontend/app/api/auth/logout`)과 같은 계약. 이 앱 자신의 access·refresh를 백엔드에 블랙리스트로 올린 뒤 쿠키를 지운다. 부모 도메인 쿠키를 공유하므로(ADR-0038) 여기서 로그아웃하면 공개 앱 세션도 함께 풀린다. |
+| `/api/theme` | 테마 선택(시스템·라이트·다크) 쿠키 쓰기(#398) — 공개 앱과 같은 계약, 로그인과 무관하다 |
 
 ## 헤더 계정 메뉴(#306, #376)
 
