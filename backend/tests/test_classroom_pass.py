@@ -145,7 +145,7 @@ def _mine(client, access: str, class_id: int, problem_id: int) -> dict:
 def _my_problems(client, access: str, class_id: int) -> list:
     response = client.get(f"{CLASSES_URL}/{class_id}/problems/mine", **_auth_header(access))
     assert response.status_code == 200
-    return response.json()
+    return response.json()["problems"]
 
 
 class _FakeResponse:

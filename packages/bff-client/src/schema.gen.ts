@@ -440,6 +440,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/members/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Rename Myself
+         * @description 참여자 본인이 그 클래스에서 불릴 이름을 스스로 바꾼다(#372, CONTEXT.md
+         *     「ClassMember」) — 강사는 참여자의 이름을 바꿀 길이 없다: 이 엔드포인트는
+         *     요청자 자신의 행만 찾는다(`_get_member_or_404`, 참여자 제출과 같은
+         *     존재-숨김 규칙이라 강사 본인도 이 클래스의 참여자가 아니면 404다).
+         *     제출물·명단은 이 행을 그대로 가리키므로 비정규화 없이 새 이름이 즉시
+         *     따라간다.
+         *
+         *     내보내진 참여자와 보관된 클래스는 `create_classroom_submission`과 같은
+         *     이유로 403이다 — 화면이 이미 그 사실을 알려준 뒤라 존재를 숨길 필요가
+         *     없다. 검증 규칙(빈 이름·100자 초과)은 가입 때와 같은
+         *     `ClassMemberDisplayName`을 그대로 쓴다.
+         */
+        patch: operations["classroom_api_rename_myself"];
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/members/{member_id}/expel": {
         parameters: {
             query?: never;
@@ -551,6 +581,10 @@ export interface paths {
          * @description 참여자의 문제 목록(#288) — 통과/미통과가 한눈에 보인다. 정적
          *     세그먼트("mine")라 `/{problem_id}` 동적 라우트보다 먼저 등록한다(파일
          *     상단 docstring, `reorder_problems`와 같은 이유).
+         *
+         *     **지금 이름과 편집 칸을 숨길 신호도 함께 싣는다**(#372) — 이 화면
+         *     위쪽의 인라인 이름 편집 칸이 그 값을 초기값으로 쓴다. `get_my_problem`이
+         *     `member_expelled`·`archived`를 싣는 것과 같은 이유다.
          */
         get: operations["classroom_api_list_my_problems"];
         put?: never;
@@ -3986,6 +4020,23 @@ export interface components {
             value: string;
         };
         /**
+         * ClassroomMyProblemsOut
+         * @description 참여자의 문제 목록 응답(#372) — 그 화면 위쪽의 인라인 이름 편집 칸이
+         *     쓸 지금 이름과, 편집 칸 자체를 숨길지 판단할 신호 둘을 함께 싣는다.
+         *     `member_display_name`은 참여자 본인의 이름 변경(`PATCH .../members/me`)
+         *     직후 이 목록을 다시 불러오면 곧장 새 값을 반영한다 — 비정규화가 없다.
+         */
+        ClassroomMyProblemsOut: {
+            /** Archived */
+            archived: boolean;
+            /** Member Display Name */
+            member_display_name: string;
+            /** Member Expelled */
+            member_expelled: boolean;
+            /** Problems */
+            problems: components["schemas"]["ClassroomProblemListItemOut"][];
+        };
+        /**
          * ClassroomProblemListItemOut
          * @description 참여자의 문제 목록 한 줄(#288) — 통과/미통과가 한눈에 보이도록 문제
          *     상세보다 훨씬 좁다.
@@ -4965,6 +5016,16 @@ export interface components {
              * Format: date-time
              */
             joined_at: string;
+        };
+        /** MemberRenameIn */
+        MemberRenameIn: {
+            /** Display Name */
+            display_name: string;
+        };
+        /** MemberRenameOut */
+        MemberRenameOut: {
+            /** Display Name */
+            display_name: string;
         };
         /** ModerationDecisionIn */
         ModerationDecisionIn: {
@@ -7097,6 +7158,59 @@ export interface operations {
             };
         };
     };
+    classroom_api_rename_myself: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemberRenameIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberRenameOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     classroom_api_expel_member: {
         parameters: {
             query?: never;
@@ -7305,7 +7419,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ClassroomProblemListItemOut"][];
+                    "application/json": components["schemas"]["ClassroomMyProblemsOut"];
                 };
             };
             /** @description Not Found */

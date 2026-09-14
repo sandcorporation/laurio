@@ -24,6 +24,16 @@ export type ProblemListItem = {
   passed: boolean;
 };
 
+// 참여자의 문제 목록 응답(#372) — 그 화면 위쪽 인라인 이름 편집 칸이 쓸 지금
+// 이름과, 편집 칸을 숨길지 판단할 신호 둘을 함께 싣는다. `ProblemMine.passed`와
+// 달리 여기 이름은 클래스마다 따로다(ClassMember 기준).
+export type MyProblems = {
+  member_display_name: string;
+  member_expelled: boolean;
+  archived: boolean;
+  problems: ProblemListItem[];
+};
+
 export type ChecklistVerdict = {
   checklist_item_id: number;
   is_met: boolean;
@@ -78,8 +88,20 @@ export function fetchMyProblem(classId: number, problemId: number): Promise<Prob
   );
 }
 
-export function fetchMyProblems(classId: number): Promise<ProblemListItem[]> {
-  return backendJson<ProblemListItem[]>(`/classroom/classes/${classId}/problems/mine`);
+export function fetchMyProblems(classId: number): Promise<MyProblems> {
+  return backendJson<MyProblems>(`/classroom/classes/${classId}/problems/mine`);
+}
+
+// 참여자 본인이 그 클래스에서 불릴 이름을 스스로 바꾼다(#372) — 강사는 이
+// 엔드포인트에 닿지 못한다, 항상 요청자 자신의 행만 바뀐다.
+export function renameMyself(
+  classId: number,
+  displayName: string,
+): Promise<{ display_name: string }> {
+  return backendJson<{ display_name: string }>(`/classroom/classes/${classId}/members/me`, {
+    method: "PATCH",
+    body: JSON.stringify({ display_name: displayName }),
+  });
 }
 
 export function submitAttempt(

@@ -56,6 +56,7 @@ from .schemas import (
     ClassroomGridCellOut,
     ClassroomGridMemberOut,
     ClassroomInstructorSubmissionOut,
+    ClassroomMyProblemsOut,
     ClassroomProblemListItemOut,
     ClassroomProblemMineOut,
     ClassroomProblemStatsOut,
@@ -72,6 +73,8 @@ from .schemas import (
     JoinPreviewOut,
     JoinResultOut,
     MemberOut,
+    MemberRenameIn,
+    MemberRenameOut,
     OpenAIKeyIn,
     ProblemCopyIn,
     ProblemIn,
@@ -746,6 +749,38 @@ def expel_member(request: HttpRequest, class_id: int, member_id: int):
     return 200, _serialize_member(member, instructor_id=class_obj.instructor_id)
 
 
+@router.patch(
+    "/classes/{class_id}/members/me",
+    response={200: MemberRenameOut, 403: ErrorOut, 404: ErrorOut, 422: ErrorOut},
+    auth=jwt_auth,
+)
+def rename_myself(request: HttpRequest, class_id: int, payload: MemberRenameIn):
+    """참여자 본인이 그 클래스에서 불릴 이름을 스스로 바꾼다(#372, CONTEXT.md
+    「ClassMember」) — 강사는 참여자의 이름을 바꿀 길이 없다: 이 엔드포인트는
+    요청자 자신의 행만 찾는다(`_get_member_or_404`, 참여자 제출과 같은
+    존재-숨김 규칙이라 강사 본인도 이 클래스의 참여자가 아니면 404다).
+    제출물·명단은 이 행을 그대로 가리키므로 비정규화 없이 새 이름이 즉시
+    따라간다.
+
+    내보내진 참여자와 보관된 클래스는 `create_classroom_submission`과 같은
+    이유로 403이다 — 화면이 이미 그 사실을 알려준 뒤라 존재를 숨길 필요가
+    없다. 검증 규칙(빈 이름·100자 초과)은 가입 때와 같은
+    `ClassMemberDisplayName`을 그대로 쓴다."""
+
+    member = _get_member_or_404(class_id, request.auth_user.id)
+
+    if member.classroom.archived_at is not None:
+        raise HttpError(403, "이 클래스는 보관되어 이름을 바꿀 수 없습니다.")
+
+    if member.expelled_at is not None:
+        raise HttpError(403, "더 이상 이 클래스의 참여자가 아닙니다.")
+
+    member.display_name = payload.display_name
+    member.save(update_fields=["display_name"])
+
+    return 200, MemberRenameOut(display_name=member.display_name)
+
+
 # --- Roster grid (#290) -----------------------------------------------------------
 
 
@@ -968,13 +1003,17 @@ def list_importable_problems(request: HttpRequest, class_id: int):
 
 @router.get(
     "/classes/{class_id}/problems/mine",
-    response={200: list[ClassroomProblemListItemOut], 404: ErrorOut},
+    response={200: ClassroomMyProblemsOut, 404: ErrorOut},
     auth=jwt_auth,
 )
 def list_my_problems(request: HttpRequest, class_id: int):
     """참여자의 문제 목록(#288) — 통과/미통과가 한눈에 보인다. 정적
     세그먼트("mine")라 `/{problem_id}` 동적 라우트보다 먼저 등록한다(파일
-    상단 docstring, `reorder_problems`와 같은 이유)."""
+    상단 docstring, `reorder_problems`와 같은 이유).
+
+    **지금 이름과 편집 칸을 숨길 신호도 함께 싣는다**(#372) — 이 화면
+    위쪽의 인라인 이름 편집 칸이 그 값을 초기값으로 쓴다. `get_my_problem`이
+    `member_expelled`·`archived`를 싣는 것과 같은 이유다."""
 
     member = _get_member_or_404(class_id, request.auth_user.id)
     problems = list(
@@ -1005,7 +1044,12 @@ def list_my_problems(request: HttpRequest, class_id: int):
                 passed=passed,
             )
         )
-    return 200, out
+    return 200, ClassroomMyProblemsOut(
+        member_display_name=member.display_name,
+        member_expelled=member.expelled_at is not None,
+        archived=member.classroom.archived_at is not None,
+        problems=out,
+    )
 
 
 @router.get(

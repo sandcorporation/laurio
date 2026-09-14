@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Annotated
 
 from ninja import Field, Schema
 
 
 class ErrorOut(Schema):
     detail: str
+
+
+#: 참여자가 클래스에서 불릴 이름의 검증 규칙(#280) — 가입 때(`JoinIn`)와
+#: 나중에 스스로 바꿀 때(`MemberRenameIn`, #372) 둘 다 이 정의 하나를
+#: 쓴다, 규칙이 갈라지지 않도록.
+ClassMemberDisplayName = Annotated[str, Field(min_length=1, max_length=100)]
 
 
 class ClassIn(Schema):
@@ -220,7 +227,7 @@ class JoinPreviewOut(Schema):
 
 
 class JoinIn(Schema):
-    display_name: str = Field(min_length=1, max_length=100)
+    display_name: ClassMemberDisplayName
 
 
 class JoinResultOut(Schema):
@@ -235,6 +242,14 @@ class MemberOut(Schema):
     joined_at: datetime
     expelled: bool
     is_instructor: bool
+
+
+class MemberRenameIn(Schema):
+    display_name: ClassMemberDisplayName
+
+
+class MemberRenameOut(Schema):
+    display_name: str
 
 
 class ClassroomProblemMineOut(Schema):
@@ -400,6 +415,24 @@ class ClassroomProblemListItemOut(Schema):
     title: str
     submission_formats: list[str]
     passed: bool
+
+
+class ClassroomMyProblemsOut(Schema):
+    """참여자의 문제 목록 응답(#372) — 그 화면 위쪽의 인라인 이름 편집 칸이
+    쓸 지금 이름과, 편집 칸 자체를 숨길지 판단할 신호 둘을 함께 싣는다.
+    `member_display_name`은 참여자 본인의 이름 변경(`PATCH .../members/me`)
+    직후 이 목록을 다시 불러오면 곧장 새 값을 반영한다 — 비정규화가 없다."""
+
+    member_display_name: str
+    #: 내보내진 참여자인가(#300, #372 AC) — 참이면 화면이 이름 편집 칸을
+    #: 내지 않는다. `get_my_problem`의 `member_expelled`와 같은 신호다.
+    member_expelled: bool
+    #: 보관된 클래스인가(#294, #372 AC) — 참이면 화면이 이름 편집 칸을
+    #: 내지 않는다. `get_my_problem`의 `archived`와 같은 신호다.
+    archived: bool
+    problems: list[ClassroomProblemListItemOut]
+
+
 class ProblemCopyIn(Schema):
     target_class_id: int
 
