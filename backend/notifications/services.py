@@ -177,11 +177,8 @@ def _publish_notification_changed_if_classroom(notification: Notification) -> No
     if notification.notification_type not in CLASSROOM_NOTIFICATION_TYPES:
         return
 
-    # "누구에게 어떤 신호를" 정하는 것은 언제나 발행 자리(classroom.events,
-    # ADR-0046)라 이 앱은 "강의실 알림인가" 판정만 하고 실제 발행은 그
-    # 모듈에 맡긴다.
-    # APP-BOUNDARY-EXCEPTION: 강의실 알림 벨 실시간 갱신 신호(#381)가 강의실 앱이 정의한 이벤트 종류를 쓴다
-    from classroom.events import publish_notification_changed
+    # 신호 정의는 `notifications.realtime`(이 앱)에 있다 — 여기서는 "강의실 알림인가"만 판정한다.
+    from notifications.realtime import publish_notification_changed
 
     publish_notification_changed(recipient_id=notification.recipient_id)
 

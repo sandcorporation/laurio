@@ -26,8 +26,11 @@ staging/prod 배포를 실제로 맡는 티켓(#380)이 `.env.staging`/`.env.pro
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
+
+from django.db import transaction
 
 from django.conf import settings
 
@@ -115,3 +118,28 @@ def get_event_bus() -> EventBus:
             "실물 어댑터는 core.events_redis.RedisEventBus 다(ADR-0046)."
         ),
     )
+
+
+_logger = logging.getLogger(__name__)
+
+
+def publish_after_commit(event: Event) -> None:
+    """지금 열린 트랜잭션이 커밋된 뒤에 발행하고, **발행 실패는 경고로 남기고 넘어간다**
+    (ADR-0046). 커밋되지 않은 사실이 화면에 새지 않게 하고, 커밋 뒤에는 이미 저장된
+    것(Score·알림·읽음)을 버스 장애가 되돌리거나 실패로 보이게 하지 않는다 — 신호는
+    빠르게 만드는 장치이지 진실의 출처가 아니고, 화면은 폴링으로 맞춰진다. 열린
+    트랜잭션이 없으면 `on_commit` 이 곧바로 실행한다."""
+
+    transaction.on_commit(lambda: _publish_safely(event))
+
+
+def _publish_safely(event: Event) -> None:
+    try:
+        get_event_bus().publish(event)
+    except Exception:  # noqa: BLE001 — 어떤 버스 오류든 화면이 폴링으로 맞춘다
+        _logger.warning(
+            "신호를 발행하지 못했다 (kind=%s, recipient_id=%s)",
+            event.kind,
+            event.recipient_id,
+            exc_info=True,
+        )

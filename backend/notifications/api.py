@@ -314,12 +314,11 @@ def mark_many_read(request, payload: MarkManyReadIn):
 def _publish_classroom_notification_changed(recipient_id: int) -> None:
     """읽음 처리 세 엔드포인트(모두·하나·묶음)가 공유하는 발행 호출(#381,
     ADR-0046) — "그 알림이 강의실 것인가"만 이 앱이 판정하고, 실제 신호 종류·
-    수신자 규칙은 그것을 정의한 `classroom.events`에 맡긴다
+    수신자 규칙은 `notifications.realtime`이 정한다
     (`notifications.services._publish_notification_changed_if_classroom`과
     같은 이유)."""
 
-    # APP-BOUNDARY-EXCEPTION: 강의실 알림 벨 실시간 갱신 신호(#381)가 강의실 앱이 정의한 이벤트 종류를 쓴다
-    from classroom.events import publish_notification_changed
+    from notifications.realtime import publish_notification_changed
 
     publish_notification_changed(recipient_id=recipient_id)
 

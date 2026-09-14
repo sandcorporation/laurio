@@ -4,21 +4,16 @@
 신호 종류의 이름과 "누구에게 보낼지"는 발행하는 자리(이 앱)가 정한다(#269,
 앱 경계 테스트가 강의실을 몰라야 하는 방향과 같은 이유).
 
-`ATTEMPT_SUBMITTED`·`ATTEMPT_SCORED`·`NOTIFICATION_CHANGED` 셋이 여기 산다
-(#381·#383). 새 신호 종류를 추가하고 발행 자리 하나를 더하는 것으로 끝나야,
+`ATTEMPT_SUBMITTED`·`ATTEMPT_SCORED` 둘이 여기 산다(#379·#383). 알림 벨의
+`notification-changed`(#381)는 알림 앱(공유층)이 정의한다 — 알림을 만들고 읽음을
+바꾸는 자리가 거기라, 여기 두면 공유층이 기능 앱을 부르는 경계 예외가 생긴다. 새 신호 종류를 추가하고 발행 자리 하나를 더하는 것으로 끝나야,
 버스·SSE 엔드포인트·BFF·프론트 훅을 매번 다시 설계하지 않는다(디스패치 노트
 "그 버스/스트림 훅을 그렇게 설계하라").
 """
 
 from __future__ import annotations
 
-import logging
-
-from django.db import transaction
-
-from core.events import Event, get_event_bus
-
-logger = logging.getLogger(__name__)
+from core.events import Event, publish_after_commit
 
 #: 강의실 시도가 새로 생겼다(#383 AC). 그 시도를 낸 참여자와 그 클래스
 #: 강사에게 간다 — 다른 클래스 강사·다른 참여자에게는 가지 않는다.
@@ -41,7 +36,7 @@ def publish_attempt_submitted(submission) -> None:
     참여자의 것이므로 `publish_attempt_scored`처럼 `expelled_at`을 다시
     확인하지 않는다.
 
-    수신자 둘(참여자·강사)에 각각 발행한다 — 한쪽이 실패해도(`_publish_safely`가
+    수신자 둘(참여자·강사)에 각각 발행한다 — 한쪽이 실패해도(`publish_after_commit`이
     개별로 잡는다) 다른 쪽은 그대로 나간다."""
 
     member = submission.member
@@ -53,7 +48,7 @@ def publish_attempt_submitted(submission) -> None:
     }
     for recipient_id in {member.user_id, problem.classroom.instructor_id}:
         event = Event(kind=ATTEMPT_SUBMITTED, recipient_id=recipient_id, payload=payload)
-        transaction.on_commit(lambda event=event: _publish_safely(event))
+        publish_after_commit(event)
 
 
 def publish_attempt_scored(submission) -> None:
@@ -97,46 +92,4 @@ def publish_attempt_scored(submission) -> None:
         recipient_ids.add(member.user_id)
     for recipient_id in recipient_ids:
         event = Event(kind=ATTEMPT_SCORED, recipient_id=recipient_id, payload=payload)
-        transaction.on_commit(lambda event=event: _publish_safely(event))
-
-
-#: 강의실 알림(`notifications.models.CLASSROOM_NOTIFICATION_TYPES`)이 생기거나
-#: 읽음 상태가 바뀌었다(#381) — 그 알림을 받는 사람에게만 간다. 신호는 "뭔가
-#: 바뀌었으니 다시 물어봐라"는 식별자일 뿐이라 payload가 비어 있다(ADR-0046
-#: "신호는 식별자만 싣는다") — 무엇이 어떻게 바뀌었는지는 벨이 `GET
-#: /api/notifications/unread-count`로 다시 물어 안다.
-NOTIFICATION_CHANGED = "notification-changed"
-
-
-def publish_notification_changed(*, recipient_id: int) -> None:
-    """`notifications` 앱(공유층)이 강의실 알림을 만들거나 읽음 처리할 때 부른다.
-
-    호출부는 `notifications.services.create_notification`·`notifications.api`의
-    읽음 엔드포인트 셋(모두·하나·묶음)이다 — 그 알림이
-    `CLASSROOM_NOTIFICATION_TYPES`에 속할 때만 부르는 판단은 호출부(공유층)의
-    몫이다: 공모전 알림은 이 함수 자체를 부르지 않으므로 신호를 내지 않는다는
-    AC가 구조로 성립한다.
-
-    `publish_attempt_scored`와 같은 이유로 `transaction.on_commit`을 쓴다 —
-    읽음 처리의 조건부 `UPDATE`나 알림 생성이 롤백되면 신호도 나가지 않아야
-    한다."""
-
-    event = Event(kind=NOTIFICATION_CHANGED, recipient_id=recipient_id, payload={})
-    transaction.on_commit(lambda: _publish_safely(event))
-
-
-def _publish_safely(event: Event) -> None:
-    """**발행 실패가 채점을 깨지 않는다** — 이 콜백은 커밋 뒤에 돌므로 Score 는 이미
-    저장됐다. 버스(Redis)가 죽어 예외가 튀면 스캔·즉시 채점의 행 처리가 그 시도를
-    실패로 기록할 수 있다. 신호는 빠르게 만드는 장치이지 진실의 출처가 아니므로
-    (ADR-0046) 경고로 남기고 넘어간다 — 화면은 폴링으로 맞춰진다."""
-
-    try:
-        get_event_bus().publish(event)
-    except Exception:  # noqa: BLE001 — 어떤 버스 오류든 화면이 폴링으로 맞춘다
-        logger.warning(
-            "강의실 신호를 발행하지 못했다 (kind=%s, recipient_id=%s)",
-            event.kind,
-            event.recipient_id,
-            exc_info=True,
-        )
+        publish_after_commit(event)

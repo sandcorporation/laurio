@@ -6,10 +6,8 @@
 아니다"), 받는 사람만 정확히 지목한다. 공모전(공개 앱) 알림은 애초에 신호를
 내지 않는다 — `CLASSROOM_NOTIFICATION_TYPES` 밖의 유형은 이 버스를 아예 모른다.
 
-`notifications`는 공유층이고 `classroom`은 기능 앱이라(`tests/
-test_app_boundaries.py` 규칙 B) `classroom.events`를 부르는 자리마다
-APP-BOUNDARY-EXCEPTION 표시가 있다 — 이 파일은 그 결과(신호 발행)만 HTTP로
-확인한다.
+신호는 알림 앱(공유층)의 `notifications.realtime`이 정의한다 — 기능 앱을 부르지
+않으므로 경계 예외가 없다. 이 파일은 그 결과(신호 발행)만 HTTP로 확인한다.
 """
 
 from __future__ import annotations
