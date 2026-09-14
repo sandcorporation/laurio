@@ -736,6 +736,52 @@ page/route 는 `export const dynamic = "force-dynamic"` 을 선언해야 한다)
 배지 하나뿐이고(동그란 표식, 2026-09-13 결정) 그 목록이 검사 파일 안에 있다. 새 CI 잡이 아니라 공개 앱의
 `test:unit` 에 얹혀 있다. 운영자 앱은 토큰 파일이 없어 대상이 아니다.
 
+**다크 테마도 이 토큰 파일 하나에만 산다**(#397, spec #396 「따뜻한 먹」). 여섯
+색 각각이 `light-dark(라이트, 다크)`로 두 값을 갖고, 문서 루트(`<html>`)의
+`color-scheme`이 어느 쪽을 쓸지 정한다 — `:root`의 기본값은 `light dark`(운영체제
+설정을 그대로 따른다), `data-theme="light"`/`"dark"` 속성이 있으면(#398 토글이
+붙인다) `color-scheme`도 그 값으로 고정돼 운영체제 설정을 덮는다. 컴포넌트는
+`bg-paper`·`text-ink/60` 그대로 쓰고 테마별로 고치지 않는다 — 갈리는 자리가 이
+파일 하나이려면 그래야 한다. Tailwind 의 `dark:` 변형도 같은 순서(명시 표시
+우선, 없으면 시스템)를 따르게 `@custom-variant`로 재정의했지만, 실제로 그
+변형을 쓰는 컴포넌트는 없다 — `frontend/lib/ui/brand-guard.test.ts`가 토큰 파일
+밖의 `dark:` 를 막는다(로고의 옛 `dark:text-paper`가 다크 테마 없이 켜져 다크
+기기에서 로고 획이 사라지게 한 것이 계기다, #396). `frontend/lib/design/
+contrast.test.ts`가 두 테마 각각 여섯 조합(본문/바탕·본문/뜬 면·흐린 글자 60%/
+뜬 면·주 버튼 글자/바탕·통과 초록/뜬 면·주의 빨강/뜬 면)의 WCAG AA(4.5:1) 대비를
+`tokens.css`를 텍스트로 읽어 계산한다 — 색을 바꿔 대비가 모자라지면 이 테스트가
+빨개진다.
+
+**테마 토글은 헤더 알림 벨 옆의 쿠키 하나다**(#398, spec #396). 두 앱 헤더에
+같은 모양의 `ThemeToggle`(비로그인 방문자에게도 보인다, `AccountMenu`처럼
+세션을 확인하지 않는다)이 시스템·라이트·다크 세 상태를 고른다. 고른 값은
+`codemit_theme` 쿠키 하나에 담기고, **로그인 쿠키와 같은 도메인 판정
+함수**(`sessionCookieDomain`, `lib/auth/cookies.ts` — dev 는 빈 값(호스트
+쿠키), 배포는 부모 도메인)를 그대로 써서 공개 앱·강의실이 공유한다(ADR-0038과
+같은 원칙). 쓰기는 각 앱의 `app/api/theme/route.ts`(둘 다 `force-dynamic`,
+`assertSameOrigin`만 지키고 인증은 요구하지 않는다)가 하고, 두 앱의
+`app/layout.tsx`가 요청마다 이 쿠키를 읽어 문서 루트에 `data-theme`를 붙인
+채 그린다 — 그래서 다크를 고른 뒤 새로고침·새 탭에서도 라이트가 비치지
+않는다. 쿠키 해석(`parseThemePreference`)과 표시 결정(`themeAttribute`)은
+두 앱의 `lib/theme/preference.ts`에 같은 모양의 순수 함수로 복사돼 있다(토큰·
+쿠키 도우미와 같은 방식). **dev(localhost 포트 구분)에서는 교차 앱 쿠키
+공유가 재현되지 않는다** — 로그인 쿠키와 같은 제약이라 같은 오리진 안에서의
+유지만 확인했고, 교차 공유는 staging 확인 항목으로 남는다.
+
+**문제 설명 에디터(Toast UI, 강의실만)도 같은 표시를 따른다**(#399). 이
+라이브러리는 색을 CSS 변수가 아니라 `.toastui-editor-dark` 클래스로 켠다 —
+그래서 `classroom/app/components/MarkdownEditor.tsx`가
+`resolveEffectiveTheme`(`lib/theme/preference.ts`, #397 과 같은 순서)로 지금
+다크인지 판정해 그 클래스를 에디터 컨테이너에 직접 붙였다 뗀다. 문서 루트
+표시가 바뀌면 `lib/theme/theme-bus.ts`(알림 벨의 `read-bus.ts`와 같은
+window 커스텀 이벤트 방식)로, 운영체제 설정이 바뀌면 `matchMedia`로 다시
+판정한다. 색 자체(툴바·괘선·코드 블록·인용·표)는 여전히
+`toastui-editor-overrides.css`의 토큰 변수(`var(--color-*)`)가 정한다 — 이
+클래스는 라이브러리 안쪽(툴바 아이콘 스프라이트 등 클래스 없이는 못 바꾸는
+자리)만 건드린다. 참여자가 보는 문제 설명(`ProblemDescription.tsx`, 표는
+지원하지 않는다)은 처음부터 토큰 색만 썼으므로 이 티켓에서 고칠 것이
+없었다.
+
 **로고도 토큰·서체와 같은 방식으로 복사한다**(#392, #391 「커밋 노드 C」). 원본은
 `frontend/app/components/logo-mark.tsx`(SVG 심볼)와 그것을 그리는
 `frontend/app/icon.tsx`·`frontend/app/apple-icon.tsx`(Next 아이콘 파일 컨벤션)다.

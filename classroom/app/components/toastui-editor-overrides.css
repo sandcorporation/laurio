@@ -83,3 +83,56 @@
   background-color: var(--color-paper);
   border: 1px solid var(--color-rule);
 }
+
+/*
+ * 다크 테마(#399, spec #396). 라이브러리 기본값이 리터럴 흰색·회색을 곳곳에
+ * 박아 둬서, 다크에서 --color-ink(밝은 글자)가 그 흰 바탕 위에 그대로
+ * 얹히면 거의 안 보인다 — 특히 WYSIWYG 모드 바탕(`.toastui-editor-ww-container`)이
+ * `#fff` 고정이었다. 마크다운 모드는 자체 배경이 없어(투명) 이미 body의
+ * bg-paper를 그대로 비쳐 문제가 없었다.
+ */
+.codemit-toastui-editor .toastui-editor-ww-container {
+  background-color: var(--color-paper);
+}
+
+.codemit-toastui-editor .ProseMirror .placeholder {
+  color: color-mix(in srgb, var(--color-ink) 40%, transparent);
+}
+
+/* 코드 블록·인용·표 — 참여자 화면의 ProblemDescription(app/components/
+ * ProblemDescription.tsx)과 같은 색 규칙(bg-paper·border-rule)을 쓴다. */
+.codemit-toastui-editor .toastui-editor-contents blockquote,
+.codemit-toastui-editor .toastui-editor-contents blockquote p,
+.codemit-toastui-editor .toastui-editor-contents blockquote ul,
+.codemit-toastui-editor .toastui-editor-contents blockquote ol {
+  border-left-color: var(--color-rule);
+  color: color-mix(in srgb, var(--color-ink) 75%, transparent);
+}
+
+.codemit-toastui-editor .toastui-editor-contents pre {
+  background-color: var(--color-paper);
+  border: 1px solid var(--color-rule);
+}
+
+.codemit-toastui-editor .toastui-editor-contents code {
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+  border: 1px solid var(--color-rule);
+}
+
+.codemit-toastui-editor .toastui-editor-contents pre code {
+  background-color: transparent;
+  border: none;
+  color: inherit;
+}
+
+.codemit-toastui-editor .toastui-editor-contents table,
+.codemit-toastui-editor .toastui-editor-contents table th,
+.codemit-toastui-editor .toastui-editor-contents table td {
+  border-color: var(--color-rule);
+}
+
+.codemit-toastui-editor .toastui-editor-contents table th {
+  background-color: var(--color-ink);
+  color: var(--color-paper);
+}

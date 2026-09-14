@@ -18,11 +18,24 @@
 // 직접 다루는 라이브러리라 이 컴포넌트가 서버에서 먼저 렌더될 때(Next의
 // "use client" 컴포넌트도 최초 HTML은 서버가 만든다) import 시점에 죽을 수
 // 있다. `useEffect` 안에서만 불러오면 그 경로 자체가 없다.
+//
+// **다크는 Toast UI 자신의 `.toastui-editor-dark` 클래스가 켠다**(#399) —
+// 우리 토큰(`--color-*`)과 달리 CSS 변수로 자동으로 안 바뀐다(툴바 아이콘
+// 스프라이트를 다른 줄로 바꾸는 등 클래스가 있어야만 하는 규칙이 섞여 있다).
+// 그래서 `resolveEffectiveTheme`(#397 과 같은 순서)로 지금 다크인지 판정해
+// 컨테이너에 그 클래스를 직접 붙였다 뗀다 — 문서 루트 표시가 바뀌거나
+// (`theme-bus`) 운영체제 설정이 바뀌면(`matchMedia`) 다시 판정한다. 색 자체는
+// 여전히 `toastui-editor-overrides.css`의 토큰 변수가 정한다 — 이 클래스는
+// Toast UI 라이브러리 안쪽(아이콘 스프라이트 등)만 건드린다.
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import type ToastEditor from "@toast-ui/editor";
 
+import { resolveEffectiveTheme } from "@/lib/theme/preference";
+import { subscribeToThemeChange } from "@/lib/theme/theme-bus";
+
 import "@toast-ui/editor/dist/toastui-editor.css";
+import "@toast-ui/editor/dist/theme/toastui-editor-dark.css";
 import "./toastui-editor-overrides.css";
 
 export function MarkdownEditor({
@@ -130,6 +143,26 @@ export function MarkdownEditor({
     if (!editor || !changed) return;
     editor.setMarkdown(value, false);
   }, [value]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const applyDarkClass = () => {
+      const explicit = document.documentElement.getAttribute("data-theme");
+      const isDark = resolveEffectiveTheme(explicit, media.matches) === "dark";
+      container.classList.toggle("toastui-editor-dark", isDark);
+    };
+
+    applyDarkClass();
+    media.addEventListener("change", applyDarkClass);
+    const unsubscribe = subscribeToThemeChange(applyDarkClass);
+    return () => {
+      media.removeEventListener("change", applyDarkClass);
+      unsubscribe();
+    };
+  }, []);
 
   return (
     <div className="flex flex-col gap-1.5">

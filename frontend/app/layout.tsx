@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono } from "next/font/google";
+import { cookies } from "next/headers";
 import localFont from "next/font/local";
 import type { ReactNode } from "react";
 import "./globals.css";
 
 import { webAppOrigin } from "@/lib/seo/origin";
+import { THEME_COOKIE, parseThemePreference, themeAttribute } from "@/lib/theme/preference";
 
 import { SiteHeader } from "./components/site-header";
 
@@ -82,11 +84,24 @@ export const dynamic = "force-dynamic";
 // 헤더는 모든 페이지에 서므로 여기서 딱 한 번 조립한다(#93, spec #92). 세션
 // 슬롯을 뺀 나머지는 서버 컴포넌트라 인증 구역(app/console/**)을 포함해 어느
 // 페이지가 이 레이아웃 아래 걸리든 렌더링 방식이 갈리지 않는다.
-export default function RootLayout({ children }: { children: ReactNode }) {
+//
+// **테마 표시를 여기서 붙인다**(#398, spec #396). 요청마다 쿠키를 읽어 문서
+// 루트(`<html>`)에 `data-theme`를 붙인 채 그리므로, 다크를 고른 사람에게는
+// 첫 화면부터 다크 HTML 이 나가 라이트가 잠깐도 비치지 않는다(#397 의
+// `light-dark()`/`color-scheme` 규칙이 이 속성을 본다). 이 레이아웃은 이미
+// `force-dynamic`이라 쿠키 값이 빌드 시점에 박히지 않는다.
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  const cookieStore = await cookies();
+  const themePreference = parseThemePreference(cookieStore.get(THEME_COOKIE)?.value);
+
   return (
-    <html lang="ko" className={`${pretendard.variable} ${ibmPlexMono.variable}`}>
+    <html
+      lang="ko"
+      data-theme={themeAttribute(themePreference)}
+      className={`${pretendard.variable} ${ibmPlexMono.variable}`}
+    >
       <body>
-        <SiteHeader />
+        <SiteHeader themePreference={themePreference} />
         {children}
       </body>
     </html>

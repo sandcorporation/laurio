@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono } from "next/font/google";
+import { cookies } from "next/headers";
 import Link from "next/link";
 import localFont from "next/font/local";
 import type { ReactNode } from "react";
@@ -7,10 +8,12 @@ import type { ReactNode } from "react";
 import { MeProvider } from "@/lib/auth/me-context";
 import { EventStreamProvider } from "@/lib/events/stream-context";
 import { classroomAppOrigin } from "@/lib/seo/origin";
+import { THEME_COOKIE, parseThemePreference, themeAttribute } from "@/lib/theme/preference";
 
 import { AccountMenu } from "./components/account-menu";
 import { NotificationBell } from "./components/notification-bell";
 import { LogoMark } from "./components/logo-mark";
+import { ThemeToggle } from "./components/theme-toggle";
 
 import "./globals.css";
 
@@ -72,9 +75,21 @@ export const metadata: Metadata = {
 // ADR-0046) — `MeProvider` 안에 둔 이유는 세션이 확인되기 전에는 스트림을
 // 열지 않기 위해서다(`lib/events/stream-context.tsx`). 헤더든 `{children}`이든
 // 이 트리 아래 어디서나 `useEventStream()`으로 같은 연결을 나눠 구독한다.
-export default function RootLayout({ children }: { children: ReactNode }) {
+//
+// **테마 표시를 여기서 붙인다**(#398, spec #396) — 공개 앱의 `app/layout.tsx`와
+// 같은 이유·같은 모양이다. 요청마다 쿠키를 읽어 문서 루트에 `data-theme`를
+// 붙인 채 그리므로 다크를 고른 사람에게 라이트가 잠깐도 비치지 않는다. 이
+// 레이아웃은 이미 `force-dynamic`이라 쿠키 값이 빌드 시점에 박히지 않는다.
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  const cookieStore = await cookies();
+  const themePreference = parseThemePreference(cookieStore.get(THEME_COOKIE)?.value);
+
   return (
-    <html lang="ko" className={`${pretendard.variable} ${ibmPlexMono.variable}`}>
+    <html
+      lang="ko"
+      data-theme={themeAttribute(themePreference)}
+      className={`${pretendard.variable} ${ibmPlexMono.variable}`}
+    >
       <body>
         <MeProvider>
           <EventStreamProvider>
@@ -89,6 +104,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
                   Codemit <span className="text-[15px] font-normal text-ink/45">클래스</span>
                 </Link>
                 <div className="flex items-center gap-2">
+                  <ThemeToggle initialPreference={themePreference} />
                   <NotificationBell />
                   <AccountMenu />
                 </div>
