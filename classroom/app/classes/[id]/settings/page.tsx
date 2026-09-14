@@ -32,6 +32,10 @@ import {
   type PublishedClassTemplateSummary,
 } from "@/lib/classes/api";
 import { isDeleteConfirmationTyped } from "@/lib/classes/delete-confirmation";
+import {
+  checkOpenAIKeyFromBrowser,
+  type OpenAIKeyCheckResult,
+} from "@/lib/classes/openai-key-check";
 import { useClass } from "@/lib/classes/use-class";
 import { useMembers } from "@/lib/members/use-members";
 import { useProblems } from "@/lib/problems/use-problems";
@@ -323,6 +327,31 @@ export default function ClassSettingsPage() {
   const [apiKey, setApiKey] = useState("");
   const [keySaving, setKeySaving] = useState(false);
   const [keyError, setKeyError] = useState<string | null>(null);
+  // 저장 전에 브라우저가 직접 벤더에게 물어 미리 말한다(#357) — 문이
+  // 아니라 안내다, 저장 버튼은 이 값과 무관하게 항상 눌린다. 타자 한
+  // 글자마다 치지 않고 입력이 멎은 뒤 한 번만 친다.
+  const [liveKeyCheck, setLiveKeyCheck] = useState<OpenAIKeyCheckResult | "checking" | "idle">(
+    "idle",
+  );
+
+  useEffect(() => {
+    const trimmed = apiKey.trim();
+    if (trimmed === "") {
+      setLiveKeyCheck("idle");
+      return;
+    }
+    setLiveKeyCheck("checking");
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      checkOpenAIKeyFromBrowser(trimmed).then((result) => {
+        if (!cancelled) setLiveKeyCheck(result);
+      });
+    }, 600);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [apiKey]);
 
   const [defaultModel, setDefaultModel] = useState("");
   const [modelSaving, setModelSaving] = useState(false);
@@ -554,6 +583,25 @@ export default function ClassSettingsPage() {
                     {keySaving ? "저장하는 중..." : "저장"}
                   </button>
                 </div>
+                {/* 저장을 누르기 전에 브라우저가 먼저 말해준다(#357) — 문이
+                    아니라 안내다, 판정과 무관하게 위 저장 버튼은 항상 눌린다. */}
+                {liveKeyCheck === "checking" ? (
+                  <p data-testid="openai-key-live-check" className="text-[12px] text-ink/45">
+                    확인하는 중...
+                  </p>
+                ) : liveKeyCheck === "valid" ? (
+                  <p data-testid="openai-key-live-check">
+                    <Badge tone="verified">이 키를 쓸 수 있습니다</Badge>
+                  </p>
+                ) : liveKeyCheck === "invalid" ? (
+                  <p data-testid="openai-key-live-check">
+                    <Badge tone="attention">이 키는 쓸 수 없습니다</Badge>
+                  </p>
+                ) : liveKeyCheck === "unknown" ? (
+                  <p data-testid="openai-key-live-check">
+                    <Badge tone="neutral">지금은 확인할 수 없습니다</Badge>
+                  </p>
+                ) : null}
                 <span className="text-[11.5px] leading-relaxed text-ink/45">
                   저장 뒤에는 다시 볼 수 없습니다 — 화면에도 로그에도 남지 않고, 채점 요청을 보낼
                   때만 복호화됩니다. 참여자에게는 어떤 형태로도 보이지 않습니다.
