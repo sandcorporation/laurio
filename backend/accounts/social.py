@@ -25,6 +25,10 @@ class SocialProfile:
     provider: str
     provider_uid: str
     email: str
+    #: 제공자 프로필의 닉네임(#390) — 지금은 카카오만 채운다. GitHub·구글은
+    #: 이 필드를 읽지 않으므로 항상 빈 문자열이다(#189가 켤 때 같은 자리에
+    #: 더한다).
+    nickname: str = ""
 
 
 class SocialAdapter(Protocol):
@@ -51,7 +55,16 @@ class KakaoAdapter:
         if uid is None:
             raise SocialLoginError("kakao profile missing id")
         email = (data.get("kakao_account") or {}).get("email") or ""
-        return SocialProfile(provider="kakao", provider_uid=str(uid), email=email)
+        # 닉네임은 동의 항목이라 사용자가 제공에 동의했을 때만 온다(#390) —
+        # 최신 카카오 응답은 kakao_account.profile.nickname 이고, 구버전
+        # 응답이나 동의 범위가 다른 경우 properties.nickname 에 실려 올 수
+        # 있어 둘 다 본다. 둘 다 없으면 빈 문자열이다 — 이름 칸이 그냥
+        # 비어 직접 입력으로 떨어진다(#385 유저스토리 29).
+        kakao_account = data.get("kakao_account") or {}
+        profile = kakao_account.get("profile") or {}
+        properties = data.get("properties") or {}
+        nickname = profile.get("nickname") or properties.get("nickname") or ""
+        return SocialProfile(provider="kakao", provider_uid=str(uid), email=email, nickname=nickname)
 
 
 class GithubAdapter:

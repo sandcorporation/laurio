@@ -23,6 +23,7 @@ import {
   buttonClass,
 } from "@/app/components/ui";
 import { BackendError } from "@/lib/backend/client";
+import { useMe } from "@/lib/auth/use-me";
 import { joinClass } from "@/lib/join/api";
 import { useJoinPreview } from "@/lib/join/use-join-preview";
 
@@ -37,6 +38,11 @@ export default function JoinPage() {
   const params = useParams<{ code: string }>();
   const code = params.code;
   const preview = useJoinPreview(code);
+  // 로그인 여부를 이름 칸을 보여주기 전에 먼저 안다(#387) — 이미 트리 전체가
+  // 공유하는 `MeProvider` 조회를 그대로 쓴다(계정 메뉴·알림 종과 같은 신호,
+  // `me-context.tsx`). 이 앱에서 "error"는 대개 익명 방문자의 401이다 — 세션이
+  // 아예 없거나 만료된 쿠키나 결과가 같게 다뤄진다.
+  const me = useMe();
   const router = useRouter();
   const [displayName, setDisplayName] = useState("");
   const [submit, setSubmit] = useState<SubmitState>({ status: "idle" });
@@ -49,6 +55,16 @@ export default function JoinPage() {
       router.replace(`/classes/${preview.preview.class_id}/problems/mine`);
     }
   }, [preview, router]);
+
+  // 이름 칸을 카카오 닉네임으로 미리 채운다(#390 AC) — 로그인한 요청에만
+  // 오는 값이라(비로그인·미동의·비카카오 제공자는 `null`) 그때만 채워진다.
+  // 아직 아무것도 입력하지 않았을 때만 채운다 — 사람이 고쳐 쓴 뒤에 이
+  // 효과가 다시 돌아 덮어쓰는 일이 없게 하기 위해서다.
+  useEffect(() => {
+    if (preview.status === "ready" && preview.preview.suggested_name) {
+      setDisplayName((current) => (current === "" ? preview.preview.suggested_name! : current));
+    }
+  }, [preview]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -172,7 +188,11 @@ export default function JoinPage() {
               이 클래스는 보관되어 더 이상 가입할 수 없습니다. 지난 기록은 참여자에게 그대로 남습니다.
             </span>
           </Note>
-        ) : submit.status === "needsLogin" ? (
+        ) : submit.status === "needsLogin" || me.status === "error" ? (
+          // 로그인하지 않은 사람은 이름 칸을 아예 보지 않는다(#387 AC) — 적은
+          // 이름이 로그인 왕복 사이에 사라지는 일 자체가 없다. `submit.status
+          // === "needsLogin"`는 로그인된 채로 폼을 보다가 세션이 만료된
+          // 경우의 대비로 남는다(#385 Further Notes).
           <div className="flex flex-col gap-3">
             <Note>
               <span data-testid="join-needs-login">
@@ -187,6 +207,12 @@ export default function JoinPage() {
               로그인하러 가기
             </Link>
           </div>
+        ) : me.status === "loading" ? (
+          // `me`가 아직 로딩 중이면 이름 칸도 로그인 버튼도 보이지 않는다 —
+          // 둘 중 무엇을 보여줄지 아직 모른다.
+          <p data-testid="join-login-status-loading" className="text-[13.5px] text-ink/45">
+            확인하는 중...
+          </p>
         ) : (
           <Card className="p-4">
             <form onSubmit={handleSubmit} className="flex flex-col gap-3">

@@ -39,6 +39,12 @@ class SocialAccount(models.Model):
     provider = models.CharField(max_length=16, choices=Provider.choices)
     provider_uid = models.CharField(max_length=191)
     email = models.EmailField(blank=True)
+    #: 제공자 프로필의 닉네임(#390) — 지금은 카카오만 채운다(사용자가 제공에
+    #: 동의했을 때만 값이 온다). 가입 미리보기가 이 값을 제안 이름으로
+    #: 내려보내 이름 칸을 미리 채우는 데만 쓰인다 — 다른 사람에게 노출되는
+    #: 자리가 아니다(docs/legal/personal-data.md). 로그인마다 최신값으로
+    #: 갱신되고, 제공하지 않으면 빈 문자열로 남는다.
+    nickname = models.CharField(max_length=100, blank=True)
     connected_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

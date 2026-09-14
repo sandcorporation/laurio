@@ -251,6 +251,11 @@ class JoinPreviewOut(Schema):
     #: 폼을 건너뛰고 곧장 문제 목록으로 보낸다 — 이미 정한 이름은 바뀌지
     #: 않고, 다시 가입되지도 않는다(가입 요청 자체를 보내지 않으므로).
     already_joined: bool = False
+    #: 이름 칸 기본값으로 쓸 제안 이름(#390) — 로그인한 사람의 카카오
+    #: 닉네임이다. 로그인하지 않았거나 닉네임이 비어 있으면(동의하지 않음,
+    #: 카카오가 아닌 제공자) `None`이다 — 화면은 그때 이름 칸을 그냥 비워
+    #: 둔다.
+    suggested_name: str | None = None
 
 
 class JoinIn(Schema):

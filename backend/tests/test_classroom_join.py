@@ -9,6 +9,7 @@ CONTEXT.md 「강의실」, ADR-0037).
 
 from __future__ import annotations
 
+from accounts.models import SocialAccount
 from classroom.models import ClassMember
 
 CLASSES_URL = "/api/classroom/classes"
@@ -348,3 +349,47 @@ def test_join_model_points_directly_to_user_not_a_role_profile():
 
     field = ClassMember._meta.get_field("user")
     assert field.related_model is get_user_model()
+
+
+# --- 제안 이름 (#390) --------------------------------------------------------
+
+
+def test_join_preview_omits_suggested_name_for_an_anonymous_visitor(client, db):
+    instructor = _login(client, uid="instructor-1")
+    created = _create_class(client, instructor["access"])
+
+    response = client.get(_join_url(created["join_code"]))
+
+    assert response.json()["suggested_name"] is None
+
+
+def test_join_preview_omits_suggested_name_when_the_kakao_nickname_is_blank(client, db):
+    """FakeSocialAdapter로 로그인한 계정은 닉네임이 항상 빈 문자열이다 —
+    실제 카카오 응답 파싱은 `test_accounts_social_kakao_nickname.py`가 본다.
+    여기서는 그 빈 문자열이 미리보기에서 `None`으로 떨어지는지만 본다(동의하지
+    않은 사람도 이 모양을 본다, #385 유저스토리 29)."""
+
+    instructor = _login(client, uid="instructor-1")
+    created = _create_class(client, instructor["access"])
+    participant = _login(client, uid="participant-1")
+
+    response = client.get(
+        _join_url(created["join_code"]), **_auth_header(participant["access"])
+    )
+
+    assert response.json()["suggested_name"] is None
+
+
+def test_join_preview_includes_the_kakao_nickname_as_a_suggested_name(client, db):
+    instructor = _login(client, uid="instructor-1")
+    created = _create_class(client, instructor["access"])
+    participant = _login(client, uid="participant-1")
+    SocialAccount.objects.filter(
+        provider=SocialAccount.Provider.KAKAO, user__username__contains="participant-1"
+    ).update(nickname="반짝이는고양이")
+
+    response = client.get(
+        _join_url(created["join_code"]), **_auth_header(participant["access"])
+    )
+
+    assert response.json()["suggested_name"] == "반짝이는고양이"

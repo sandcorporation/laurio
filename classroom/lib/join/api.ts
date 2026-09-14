@@ -16,6 +16,10 @@ export type JoinPreview = {
   // 로그인한 사람이 이미 이 클래스의 참여자인가(#300) — 내보내진 사람도
   // 참이다. 참이면 화면이 이름 입력 폼을 건너뛰고 곧장 문제 목록으로 보낸다.
   already_joined: boolean;
+  // 이름 칸 기본값으로 쓸 제안 이름(#390) — 로그인한 사람의 카카오
+  // 닉네임이다. `null`이면(비로그인, 닉네임 미동의, 카카오가 아닌 제공자)
+  // 이름 칸을 빈 채로 둔다 — 직접 적어 가입할 수 있다.
+  suggested_name: string | null;
 };
 
 export type JoinResult = {

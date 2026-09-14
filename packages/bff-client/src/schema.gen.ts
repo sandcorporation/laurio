@@ -4926,6 +4926,8 @@ export interface components {
             participant_count: number;
             /** Problem Count */
             problem_count: number;
+            /** Suggested Name */
+            suggested_name?: string | null;
         };
         /** JoinResultOut */
         JoinResultOut: {
