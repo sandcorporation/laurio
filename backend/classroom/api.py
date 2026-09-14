@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from datetime import timedelta
 
 from django.conf import settings
@@ -91,6 +93,8 @@ from .scoring_models import SCORING_MODEL_CHOICES, is_valid_model
 from .submission_target_refs import source_target_ref
 from .services import copy_class, copy_problem_to_class
 from .tasks import score_attempt
+
+logger = logging.getLogger(__name__)
 
 router = Router(tags=["classroom"])
 
@@ -1231,6 +1235,23 @@ def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
     )
 
 
+def _enqueue_immediate_scoring(submission_id: int) -> None:
+    """시도 하나의 즉시 채점 작업을 큐에 넣는다(#378, ADR-0046). **발행이 실패해도
+    제출을 실패시키지 않는다** — 이 콜백은 트랜잭션이 커밋된 뒤에 돌므로 시도는 이미
+    저장됐고, 60초 스캔이 그 시도를 줍는다(안전망). 여기서 예외가 튀면 참여자는
+    저장된 시도에 500 을 받고 다시 내 시도가 중복된다 — 브로커(Redis)가 재시작 중이거나
+    호스트 runserver 의 기본 브로커 주소가 비어 있을 때 실제로 그렇게 된다."""
+
+    try:
+        score_attempt.delay(submission_id)
+    except Exception:  # noqa: BLE001 — 어떤 브로커 오류든 스캔이 대신 줍는다
+        logger.warning(
+            "강의실 즉시 채점 작업을 큐에 넣지 못했다 — 스캔이 줍는다 (submission_id=%s)",
+            submission_id,
+            exc_info=True,
+        )
+
+
 @router.post(
     "/classes/{class_id}/problems/{problem_id}/submissions",
     response={201: ClassroomSubmissionOut, 403: ErrorOut, 404: ErrorOut, 422: ErrorOut},
@@ -1303,7 +1324,7 @@ def create_classroom_submission(
         # 있다) 내부 엔드포인트가 아직 존재하지 않는 시도를 채점하려 들기
         # 때문이다. dev·CI는 워커가 없어 이 태스크가 실제로 돌지 않고
         # (#40), 큐에 쌓인 채 스캔이 안전망으로 대신 줍는다.
-        transaction.on_commit(lambda: score_attempt.delay(submission.id))
+        transaction.on_commit(lambda: _enqueue_immediate_scoring(submission.id))
 
     # 방금 만든 시도는 아직 채점되지 않아 required_item_ids와 무관하게
     # 언제나 passed=False다 — 그래도 시그니처를 맞추려고 지금 값을 구해 넘긴다.

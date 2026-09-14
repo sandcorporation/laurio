@@ -197,6 +197,36 @@ def test_submitting_enqueues_the_immediate_scoring_task(
     assert calls == [submitted["id"]]
 
 
+def test_submission_survives_when_the_broker_is_unreachable(
+    client, db, monkeypatch, django_capture_on_commit_callbacks
+):
+    """브로커에 닿지 못해도 제출은 성공한다 — 시도는 이미 커밋됐고 60초 스캔이 줍는다
+    (ADR-0046 「안전망」). 발행 실패가 커밋 뒤에 예외로 튀면 참여자는 500 을 받고 다시
+    내 시도가 중복된다(staging Redis 재시작, 호스트 runserver 의 기본 브로커 주소)."""
+
+    from kombu.exceptions import OperationalError
+
+    def _unreachable(submission_id):
+        raise OperationalError("Error 111 connecting to 127.0.0.1:6379. Connection refused.")
+
+    monkeypatch.setattr(classroom_tasks.score_attempt, "delay", _unreachable)
+
+    instructor = _login(client, uid="instructor-1")
+    class_id = _create_class(client, instructor["access"])
+    _set_key(client, instructor["access"], class_id)
+    problem_id, _item_id = _create_open_problem(client, instructor["access"], class_id, _PASSING_LABEL)
+    participant = _login(client, uid="participant-1")
+    _join(client, participant["access"], _join_code(client, instructor["access"], class_id))
+
+    with django_capture_on_commit_callbacks(execute=True):
+        submitted = _submit_repository(
+            client, participant["access"], class_id, problem_id, _PASSING_URL
+        )
+
+    mine = _mine(client, participant["access"], class_id, problem_id)
+    assert [s["id"] for s in mine["submissions"]] == [submitted["id"]]
+
+
 def test_submitting_does_not_score_synchronously_even_with_the_task_enqueued(
     client, db, monkeypatch, django_capture_on_commit_callbacks
 ):
