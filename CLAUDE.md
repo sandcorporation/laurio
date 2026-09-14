@@ -90,8 +90,8 @@ DB·Redis·MinIO·이벤트 서비스·세 앱(#276부터 강의실이, #379부�
 | | 파일 | `LAURIO_DEPLOYMENT_TARGET` | 어댑터 | TLS·secure 쿠키 하드닝 |
 | --- | --- | --- | --- | --- |
 | dev | `docker/compose.dev.yaml` | (미설정) | 전부 Fake (MinIO만 예외) | 없음 |
-| staging | `docker/compose.staging.yaml` | `staging` | 전부 real(토스 샌드박스, 실제 S3/OCI 등) | 없음 |
-| prod | `docker/compose.prod.yaml` | `production` | 전부 real(토스 실물) | 있음 |
+| staging | `docker/compose.staging.yaml` | `staging` | 전부 real(토스 샌드박스, 스토리지는 자체 MinIO 등) | 없음 |
+| prod | `docker/compose.prod.yaml` | `production` | 전부 real(토스 실물, 스토리지는 OCI Object Storage — 버킷 `codemit-prod`·`codemit-prod-public-images`) | 있음 |
 
 어댑터 바인딩표(ADR-0007)는 각 compose 파일 상단 주석에 있다. 시크릿은
 `docker/staging.env.example`/`docker/prod.env.example`을 복사해 `docker/.env.staging`/
@@ -118,7 +118,7 @@ DB·Redis·MinIO·이벤트 서비스·세 앱(#276부터 강의실이, #379부�
 **staging은 공모전이 꺼져 있다 — 고장이 아니라 껐다**(#271, ADR-0037). 방향이
 바뀌어 공모전은 나중을 위한 기능이 됐고, 지금 사람을 모을 것은 강의실이다.
 `LAURIO_CONTEST_PRODUCT_ENABLED`(기본값 켜짐, `LAURIO_DEPLOYMENT_TARGET`과 무관한
-독립 값)를 `docker/compose.staging.yaml`이 기본 `false`로 겹쳐 쓴다 — dev·CI는
+독립 값)를 `docker/compose.staging.yaml`이 기본 `false`로 겹쳐 쓴다(`docker/compose.prod.yaml`도 같다 — prod 도 강의실부터 연다) — dev·CI는
 건드리지 않으므로 지금과 똑같이 켜진 채다. 코드도 데이터도 하나도 지우지 않았다 —
 Score의 PROTECT 때문에 지울 수도 없고(아래 「테스트」 절의 「채점이 한 번 돈
 뒤에는」), 닫는 것은 표면뿐이다:
