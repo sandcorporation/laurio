@@ -882,8 +882,13 @@ jobs:
       # 심는다(`frontend/e2e/classroom/lib/cross-app-session.ts`). 강의실만 띄우면 그
       # 헬퍼가 `ECONNREFUSED 127.0.0.1:53000` 으로 죽는다 — #318 이 그 스펙을 더한 뒤
       # 이 잡이 main 에서 여섯 번 연속 그렇게 빨갛게 났다(b249af7~3cd881d).
+      #
+      # **이벤트 서비스(`events`)도 함께 띄운다**(#379, ADR-0046) — 강의실 BFF가
+      # 실시간 신호 SSE 경로만 이 서비스로 보낸다(`LAURIO_EVENTS_BASE_URL`,
+      # `classroom` 서비스가 이미 `depends_on`으로 걸어 뒀지만 이미지가 최신인지도
+      # 확인하려고 명시적으로 적는다).
       - name: Build the images and bring up the stack
-        run: docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml up -d --build frontend classroom
+        run: docker compose -f docker/compose.dev.yaml -f docker/compose.ci.yaml up -d --build frontend classroom events
 
       - name: Learn the host ports the kernel picked
         run: |

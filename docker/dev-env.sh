@@ -44,6 +44,7 @@ cat <<ENV
 export COMPOSE_PROJECT_NAME=laurio-dev$( [ "$offset" -eq 0 ] || printf '%s' "-$offset" )
 export LAURIO_DB_PORT=$(( 55432 + slot ))
 export LAURIO_API_PORT=$(( 58000 + slot ))
+export LAURIO_EVENTS_PORT=$(( 58001 + slot ))
 export LAURIO_REDIS_PORT=$(( 16379 + slot ))
 export LAURIO_MINIO_PORT=$(( 19000 + slot ))
 export LAURIO_MINIO_CONSOLE_PORT=$(( 19001 + slot ))

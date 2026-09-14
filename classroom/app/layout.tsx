@@ -5,6 +5,7 @@ import localFont from "next/font/local";
 import type { ReactNode } from "react";
 
 import { MeProvider } from "@/lib/auth/me-context";
+import { EventStreamProvider } from "@/lib/events/stream-context";
 
 import { AccountMenu } from "./components/account-menu";
 import { NotificationBell } from "./components/notification-bell";
@@ -57,27 +58,34 @@ export const metadata: Metadata = {
 // `AccountMenu`·`{children}`을 그대로 받을 수 있다 — Next가 문서로 보장하는
 // "서버 컴포넌트를 클라이언트 컴포넌트의 children으로 넘기기" 패턴이라 그
 // 아래 트리가 클라이언트 컴포넌트로 바뀌지는 않는다.
+//
+// **`EventStreamProvider`가 그 안에서 탭마다 스트림 하나를 연다**(#379,
+// ADR-0046) — `MeProvider` 안에 둔 이유는 세션이 확인되기 전에는 스트림을
+// 열지 않기 위해서다(`lib/events/stream-context.tsx`). 헤더든 `{children}`이든
+// 이 트리 아래 어디서나 `useEventStream()`으로 같은 연결을 나눠 구독한다.
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="ko" className={`${pretendard.variable} ${ibmPlexMono.variable}`}>
       <body>
         <MeProvider>
-          <header className="border-b border-rule bg-surface">
-            <div className="mx-auto flex h-[72px] max-w-[1200px] items-center justify-between px-6">
-              <Link
-                href="/"
-                data-testid="classroom-header-brand"
-                className="text-[21px] font-bold tracking-[-0.01em] text-ink"
-              >
-                Laurio <span className="text-[15px] font-normal text-ink/45">클래스</span>
-              </Link>
-              <div className="flex items-center gap-2">
-                <NotificationBell />
-                <AccountMenu />
+          <EventStreamProvider>
+            <header className="border-b border-rule bg-surface">
+              <div className="mx-auto flex h-[72px] max-w-[1200px] items-center justify-between px-6">
+                <Link
+                  href="/"
+                  data-testid="classroom-header-brand"
+                  className="text-[21px] font-bold tracking-[-0.01em] text-ink"
+                >
+                  Laurio <span className="text-[15px] font-normal text-ink/45">클래스</span>
+                </Link>
+                <div className="flex items-center gap-2">
+                  <NotificationBell />
+                  <AccountMenu />
+                </div>
               </div>
-            </div>
-          </header>
-          {children}
+            </header>
+            {children}
+          </EventStreamProvider>
         </MeProvider>
       </body>
     </html>

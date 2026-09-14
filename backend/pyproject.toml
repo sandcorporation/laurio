@@ -29,6 +29,12 @@ dependencies = [
     # 의존성이다(#235, ADR-0031/0032) — 이 저장소에 이미지 바이트를 다루는 코드가
     # 이전에는 없었다.
     "pillow>=12.3.0",
+    # 이벤트 서비스(ADR-0046, #379)를 ASGI로 띄우는 유일한 서버다 — 기존 API는
+    # 그대로 gunicorn(WSGI)이다. `config.asgi:application`은 이미 있던 파일을
+    # 그대로 쓴다(코드가 하나뿐이다) — 이 의존성은 그것을 "어떻게 띄우는가"만
+    # 더한다. `[standard]` extra가 `watchfiles`를 끌어와 dev compose의
+    # `--reload`가 `runserver`처럼 코드 수정에 반응한다.
+    "uvicorn[standard]>=0.34.0",
 ]
 
 [tool.uv]

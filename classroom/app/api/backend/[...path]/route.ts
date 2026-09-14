@@ -32,13 +32,28 @@ async function handle(request: NextRequest, path: string[]): Promise<NextRespons
   if (originDenied) return originDenied;
 
   const result = await forwardToBackend(request, backendPath);
+  const contentType = result.response.headers.get("content-type") ?? "application/json";
 
+  // 실시간 신호 SSE(ADR-0046)는 끝까지 모이지 않는 응답이다 — 아래
+  // `arrayBuffer()`로 버퍼링하면 연결이 끝날 때까지(=영원히) 아무것도
+  // 브라우저에 나가지 않는다. 이 콘텐츠 타입일 때만 본문을 그대로
+  // ReadableStream으로 중계한다 — 이 백엔드 라우트는 스트림 응답에 204 같은
+  // null-body 상태를 절대 내지 않으므로 두 분기가 겹치지 않는다.
+  const isEventStream = contentType.startsWith("text/event-stream");
   const isNullBodyStatus = NULL_BODY_STATUSES.has(result.response.status);
-  const responseBody = isNullBodyStatus ? null : await result.response.arrayBuffer();
+  const responseBody = isEventStream
+    ? result.response.body
+    : isNullBodyStatus
+      ? null
+      : await result.response.arrayBuffer();
+
   const response = new NextResponse(responseBody, {
     status: result.response.status,
     headers: {
-      "content-type": result.response.headers.get("content-type") ?? "application/json",
+      "content-type": contentType,
+      ...(isEventStream
+        ? { "cache-control": "no-cache", "x-accel-buffering": "no" }
+        : {}),
     },
   });
 

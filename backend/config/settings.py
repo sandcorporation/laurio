@@ -884,6 +884,20 @@ GITHUB_API_TOKEN = _env("GITHUB_API_TOKEN", "")
 # `repositories.adapters.FakeGitHubAdapter`의 기본 파일로 응답한다.
 GITHUB_FAKE_REPO_FILES: dict = {}
 
+# --- 이벤트 버스 (ADR-0046) ---------------------------------------------------------
+#
+# 강의실이 새로고침 없이 화면을 갱신하는 데 쓰는 실시간 신호(`core.events`).
+# 다른 `*_ADAPTER_MODE`와 같은 원칙으로 기본값은 항상 fake이지만, **배포 환경
+# 부팅 가드는 아직 걸지 않는다** — `.env.staging`/`.env.prod`가 이 값을 아직
+# 모르는 채로 이 티켓이 main에 머지되면, 가드를 걸었을 때 다음 자동 배포에서
+# staging이 부팅을 거부하며 죽는다. 그 가드는 staging/prod 배포 티켓(#380)이
+# 두 env 파일에 실제 값을 채우는 것과 같은 커밋에서 더한다(`core/events.py`
+# 모듈 docstring 참고).
+EVENT_BUS_ADAPTER_MODE = _env("EVENT_BUS_ADAPTER_MODE", "fake")
+# Operator 세션(DB 1)·Celery 브로커(DB 0)와 같은 Redis 인스턴스, 다른 DB
+# 인덱스(2) — 세 용도가 키를 섞지 않게 한다(SESSION_REDIS_URL 주석과 같은 이유).
+EVENT_BUS_REDIS_URL = _env("EVENT_BUS_REDIS_URL", f"redis://127.0.0.1:{_DEV_REDIS_PORT}/2")
+
 # --- Handover · Escrow 해제 (#14, ADR-0003/0004/0005/0014) --------------------------
 #
 # 인도 승인 기간은 더 이상 여기 없다(#78, ADR-0023) —

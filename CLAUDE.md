@@ -23,6 +23,18 @@ cd backend && uv run pytest                           # 테스트
 | 공개 앱(`frontend/`) | `53000` | 3000 | `LAURIO_WEB_PORT` |
 | 운영자 앱(`operator/`, #63) | `53001` | 3000 | `LAURIO_OPERATOR_WEB_PORT` |
 | 강의실 앱(`classroom/`, #276) | `53002` | 3000 | `LAURIO_CLASSROOM_WEB_PORT` |
+| 이벤트 서비스(`events`, #379, ADR-0046) | `58001` | 8001 | `LAURIO_EVENTS_PORT` |
+
+**이벤트 서비스는 `backend`와 같은 이미지를 ASGI로 띄우는 별도 프로세스다**
+(ADR-0046) — 강의실이 새로고침 없이 화면을 갱신하는 SSE 엔드포인트
+(`/api/classroom/events/stream`) 하나만 연다. 기존 API(`backend`)는 그대로
+동기 gunicorn/`runserver`다 — SSE 연결 하나가 그 워커 풀을 붙잡지 않게
+스트림만 갈랐다. 강의실 BFF는 이 경로만 `LAURIO_EVENTS_BASE_URL`
+(`classroom/lib/auth/backend.ts`)로 이 서비스에 보내고 나머지는 전부
+`backend`로 보낸다. 신호 자체는 `EVENT_BUS_ADAPTER_MODE`(dev·CI 기본값
+`core.events_redis.RedisEventBus`, pytest 기본값은 `fake`)가 고르는 Redis
+pub/sub 위에 산다 — Celery 브로커(DB 0)·Operator 세션(DB 1)과 같은 Redis
+인스턴스의 DB 2다.
 
 호스트에서 `uv run pytest`를 돌릴 때 붙는 DB 포트 기본값도 `LAURIO_DB_PORT`를 따라간다
 (`backend/config/settings.py`). 컨테이너 안에서는 compose가 `POSTGRES_*`를 직접 주입한다.
@@ -35,8 +47,8 @@ docker compose -f docker/compose.dev.yaml up -d
 ```
 
 `docker/dev-env.sh` 가 체크아웃 경로에서 compose 프로젝트 이름과 **모든 포트**를 파생한다 —
-DB·Redis·MinIO·세 앱(#276부터 강의실이 더해졌다)이 통째로 갈리므로 체인 둘이 서로의
-데이터를 보지 않는다. 예전에는
+DB·Redis·MinIO·이벤트 서비스·세 앱(#276부터 강의실이, #379부터 이벤트 서비스가 더해졌다)이
+통째로 갈리므로 체인 둘이 서로의 데이터를 보지 않는다. 예전에는
 스택 하나를 공유하고 시드 이름 접두어로 막았는데, 그 방식은 전역 건수나 단일 행(정책·시계)
 앞에서는 성립하지 않는다.
 
@@ -833,8 +845,8 @@ docker 소켓을 물어 컨테이너를 바깥에 띄운다(DooD).
 호스트 데몬 기준으로 풀려 `/app` 이 통째로 비고, backend 는 `can't open file '/app/manage.py'`
 로, 두 앱은 `Scope: all 0 workspace projects` 로 죽는다. 오버라이드가 하는 일은 셋뿐이다:
 
-- 네 서비스(backend·frontend·operator·classroom)의 `volumes` 를 `!reset []` — 마운트 없이
-  **이미지 안의 코드**로 돈다.
+- 다섯 서비스(backend·events·frontend·operator·classroom, #379)의 `volumes` 를 `!reset []` —
+  마운트 없이 **이미지 안의 코드**로 돈다.
 - 세 앱(frontend·operator·classroom, #277)의 빌드 `target` 을 `runner` 로 — dev 서버가
   아니라 **배포되는 그 이미지**를 친다.
 - 세 앱의 `command` 를 `!reset null` — 이미지의 `node server.js` 가 산다.
