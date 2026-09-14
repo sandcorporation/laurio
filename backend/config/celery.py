@@ -15,6 +15,7 @@ docker/compose.prod.yaml, #23). 이 모듈은 임포트 시점에 브로커에 �
 import os
 
 from celery import Celery
+from celery.schedules import crontab
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 
@@ -30,11 +31,20 @@ def sync_beat_schedule() -> dict:
 
     from core.scans import beat_schedule
 
-    app.conf.beat_schedule = beat_schedule()
+    app.conf.beat_schedule = {**beat_schedule(), **SCHEDULED_JOBS}
     return app.conf.beat_schedule
+
+
+#: 스캔이 아닌 정해진 시각의 작업 — **여기가 손으로 쓰는 유일한 자리다.** 스캔은 「밀린 행을
+#: 60초마다 줍는다」라 주기(초)로 충분하지만, 이것들은 벽시계 시각이 요구사항이다. 테스트
+#: (`tests/test_scheduler_celery.py`)가 스케줄 = 등록부 + 이 목록을 정확히 요구한다.
+SCHEDULED_JOBS = {
+    # 매일 새벽 2시(CELERY_TIMEZONE = Asia/Seoul) DB 를 오브젝트 스토리지로 백업한다.
+    "backup:database": {"task": "core.backup_database", "schedule": crontab(hour=2, minute=0)},
+}
 
 
 # 임포트 시점에는 비어 있다 — 이 모듈은 Django 앱 레지스트리가 준비되기 전(config 패키지
 # 임포트)에 읽히므로 등록부를 여기서 건드릴 수 없다. 각 앱의 ready() 가 `register_scan` 으로
 # 더할 때마다 위 함수가 스케줄을 다시 만든다 — beat 프로세스는 django.setup() 뒤에야 읽는다.
-app.conf.beat_schedule = {}
+app.conf.beat_schedule = dict(SCHEDULED_JOBS)

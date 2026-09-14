@@ -733,6 +733,13 @@ CELERY_RESULT_BACKEND = _env("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_ALWAYS_EAGER = _env_bool("CELERY_TASK_ALWAYS_EAGER", False)
 
+# --- DB 백업 (core.backups) ----------------------------------------------------------
+# 매일 새벽 2시 pg_dump 결과를 비공개 버킷 db-backups/ 에 올린다. pg_dump 는 서버와 같은
+# 메이저(17)여야 한다 — backend 이미지가 PGDG 에서 postgresql-client-17 을 설치한다.
+DB_BACKUP_PG_DUMP_COMMAND = _env("DB_BACKUP_PG_DUMP_COMMAND", "pg_dump")
+DB_BACKUP_RETENTION_DAYS = int(_env("DB_BACKUP_RETENTION_DAYS", "14"))
+DB_BACKUP_TIMEOUT_SECONDS = int(_env("DB_BACKUP_TIMEOUT_SECONDS", "1800"))
+
 if _RUNNING_TESTS:
     # #378부터 요청 처리 코드(강의실 제출)가 실제로 `.delay()`를 부른다 — 그
     # 전까지는 beat 만 태스크를 보냈다. pytest 에는 Redis 가 없다(위 세션

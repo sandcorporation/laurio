@@ -29,9 +29,12 @@ def test_every_registered_scan_has_a_beat_entry_that_calls_run_scan_with_its_nam
 
 
 def test_beat_schedule_is_exactly_the_registry():
-    """스케줄에 등록부 밖의 항목이 없다 — 손으로 쓴 항목은 하나도 없다."""
+    """스케줄에 등록부 밖의 항목이 없다 — 손으로 쓴 항목은 `SCHEDULED_JOBS`(벽시계 시각이
+    요구사항인 작업, 예: 새벽 2시 DB 백업) 한 자리뿐이다."""
 
-    assert set(celery_app.conf.beat_schedule) == {f"scan:{name}" for name in SCAN_REGISTRY}
+    from config.celery import SCHEDULED_JOBS
+
+    assert set(celery_app.conf.beat_schedule) == {f"scan:{name}" for name in SCAN_REGISTRY} | set(SCHEDULED_JOBS)
 
 
 def test_every_scan_that_used_to_have_its_own_endpoint_is_registered():
