@@ -52,6 +52,8 @@ node_modules/
 /.pnpm-store/
 .jenkins-staging-deployed
 .jenkins-prod-deployed
+.jenkins-staging-plan
+.jenkins-prod-plan
 
 # Playwright MCP 가 남기는 스냅샷·스크린샷·임시 스크립트. 토큰 같은 것이
 # 섞일 수 있는 자리라 절대 커밋하지 않는다.

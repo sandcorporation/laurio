@@ -205,9 +205,11 @@ staging 은 실물 어댑터라 해당 없음), 배포 환경의 시계는 실�
 「CI 를 통과한 main 의 어느 커밋」 그 자체다. 늦게 끝난 옛 커밋의 CI 는 건너뛰고,
 `production` 이 `main` 에서 갈라져 있으면 밀어붙이지 않고 빨갛게 멈춘다. **`production` 에
 직접 커밋하지 않는다.** prod 배포는 `Jenkinsfile.production` 이 맡는다 — `production` 브랜치
-빌드일 때만 `deploy.sh prod` 를 부르는 얇은 껍데기이고, **sub 의 Jenkins(staging 과 같은 컨트롤러)에
+빌드일 때만 `deploy.sh prod <명령>` 을 단계별로 부르는 얇은 껍데기이고, **sub 의 Jenkins(staging 과 같은 컨트롤러)에
 붙은 에이전트 `oracle`** 에서 돈다(라벨 `oracle`). 에이전트는 Oracle A1 호스트의 `jenkins-desktop-agent`
-컨테이너(root·호스트 docker 소켓)이고 호스트 `/var/jenkins_home/workspace` 가 컨테이너
+컨테이너(root·호스트 docker 소켓, 이미지 정의는 호스트 `/server/jenkins`)이고 **그 이미지에 buildx 가 있어야 한다** —
+없으면 Dockerfile 의 `RUN --mount` 에서 네 빌드가 전부 죽는다(2026-09-14 빌드 #4~#6, 지금은 `deploy.sh`
+preflight 가 먼저 멈춘다). 호스트 `/var/jenkins_home/workspace` 가 컨테이너
 `/home/jenkins/agent/workspace` 로 붙어 있어, 노드의 Remote root directory 는 컨테이너 경로
 `/home/jenkins/agent`, 잡 이름은 `codemit` 이어야 호스트의 `/var/jenkins_home/workspace/codemit` 에 둔
 `docker/.env.prod`(chmod 600)·배포 표식을 쓴다. 잡·노드·`.env.prod` 는 저장소 밖에서 사람이 만든다.
@@ -217,14 +219,14 @@ staging 은 실물 어댑터라 해당 없음), 배포 환경의 시계는 실�
 `scriptPath: Jenkinsfile`), 트리거가 `GitHubPushTrigger` — GitHub 웹훅이다.
 브랜치 지정은 `*/main` 이라 다른 브랜치를 밀어도 빌드가 돌지 않는다.
 
-**실제로 굽는 것은 `Jenkinsfile` 이 부르는 `deploy.sh` 다.** 예전에는 잡이
-freestyle 이었고 셸 스텝이 `sh ./deploy.sh staging` 하나뿐이라 `Jenkinsfile` 이
-읽히지 않았다 — 그때 이걸 모르고 Jenkinsfile 만 고쳤다가 빌드가
-`cannot open ./deploy.sh` 로 통째로 실패한 적이 있다. 지금은 Pipeline 으로
-바뀌어 `Jenkinsfile` 이 실제로 읽히지만, 그것이 같은 `deploy.sh` 를 부르므로
-**동작은 그때와 같다**. 이 문단은 「freestyle 이라 Jenkinsfile 은 읽히지 않는다」
-라고 적은 채로 낡아 있었다(실측 2026-09-11, 빌드 #132 로그의
-`[Pipeline] End of Pipeline` 과 `config.xml` 로 확인).
+**실제로 굽는 것은 `Jenkinsfile` 이 단계마다 부르는 `deploy.sh` 의 명령이다.** 두
+Jenkinsfile 이 「Preflight → 변경 계획 → 빌드(서비스별 병렬) → 교체 → 확인 → 배포 표식」을
+각각 한 단계로 보여주고, 단계 본문은 `sh ./deploy.sh <대상> <명령>` 한 줄이다 — `plan` 이
+`.jenkins-<대상>-plan` 에 `KEY=value` 로 적은 계획을 파이프라인이 읽어 빌드 단계의 `when` 을
+정한다. 논리는 여전히 `deploy.sh` 에만 있고, 사람이 손으로 돌릴 때는 `deploy.sh <대상>`
+(= `all`) 한 번이면 전부 돈다. 예전에는 한 단계로 통째로 불러 Jenkins 화면에 「배포」 하나만
+보였다. 더 예전에는 잡이 freestyle 이라 `Jenkinsfile` 이 읽히지 않았고, 그걸 모르고
+Jenkinsfile 만 고쳤다가 빌드가 `cannot open ./deploy.sh` 로 통째로 실패한 적이 있다.
 
 `deploy.sh` 는 **바뀐 것만 다시 굽는다**. 기준점은 `.jenkins-staging-deployed`
 (gitignore, 빌드 디렉터리에 남는다 — 시크릿과 같은 전제). 그 파일이 없거나 그것이
