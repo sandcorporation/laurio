@@ -18,17 +18,20 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 from datetime import timedelta
 
 from django.conf import settings
 from django.db import transaction
-from django.http import HttpRequest
+from django.http import HttpRequest, StreamingHttpResponse
 from django.utils import timezone
 from ninja import Router
 from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
 from core.crypto import encrypt
+from core.events import Event, get_event_bus
 from core.llm_scoring import LLMKeyCheckStatus
 from storage.adapters import get_storage_adapter
 from storage.filenames import build_download_filename, safe_download_base_name
@@ -1467,3 +1470,62 @@ def delete_checklist_item(request: HttpRequest, class_id: int, problem_id: int, 
     item = _get_owned_checklist_item_or_404(problem, item_id)
     item.delete()
     return 204, None
+
+
+# --- 실시간 신호 SSE (ADR-0046, #379) --------------------------------------------
+#
+# 이 엔드포인트는 배포 환경에서는 API 서버(동기 gunicorn)가 아니라 같은
+# backend 이미지를 ASGI 로 띄우는 별도 이벤트 서비스가 연다 — urls.py 는
+# 하나뿐이라(같은 코드) 어디서든 라우팅되지만, 실제로 이 경로를 여는 것은
+# 강의실 BFF 뿐이고 BFF 는 이벤트 서비스의 포트로만 이 요청을 보낸다.
+
+#: keep-alive 주석 사이의 최대 대기 — 프록시가 유휴 연결을 끊지 않게 한다
+#: (모듈 상단 참고 없음, ADR-0046 "주기적인 keep-alive 주석"). fake 버스는
+#: 이 값과 무관하게 즉시 돌아온다(`core.events.FakeEventBus`).
+_SSE_KEEPALIVE_SECONDS = 15.0
+
+
+def _format_sse_event(event: Event) -> bytes:
+    return f"event: {event.kind}\ndata: {json.dumps(event.payload)}\n\n".encode("utf-8")
+
+
+async def _stream_events_for(recipient_id: int):
+    """**반드시 async 제너레이터다.** 동기 제너레이터로 두면 Django의 ASGI
+    핸들러가 "StreamingHttpResponse must consume synchronous iterators in
+    order to serve them asynchronously" 경고와 함께 완전히 다른(뒤로
+    미뤄지는) 소비 경로를 타 실제로는 아무것도 실시간으로 나가지 않는다 —
+    dev 스택에서 실제 요청으로 직접 확인했다(연결은 200 으로 열리지만
+    keep-alive 조차 15초·20초 뒤에도 도착하지 않았다). `bus.subscribe`·
+    `poll`은 동기 계약(Redis 클라이언트가 동기다)이라 그대로 두고,
+    블로킹 호출만 `asyncio.to_thread`로 이벤트 루프 밖에서 돈다."""
+
+    bus = get_event_bus()
+    with bus.subscribe(recipient_id) as subscription:
+        while True:
+            events = await asyncio.to_thread(subscription.poll, timeout=_SSE_KEEPALIVE_SECONDS)
+            if not events:
+                yield b": keep-alive\n\n"
+                continue
+            for event in events:
+                yield _format_sse_event(event)
+
+
+@router.get("/events/stream", auth=jwt_auth)
+async def stream_events(request: HttpRequest):
+    """인증된 사용자 자신에게 온 신호만 흘린다(ADR-0046) — 다른 사용자의
+    신호는 이 함수에 닿지도 않는다(`core.events`가 recipient_id 로 이미
+    갈라 둔다). 인증 없는 요청은 `auth=jwt_auth`가 ninja 기본 401로 거절한다
+    — 이 함수 몸통까지 오지 않는다.
+
+    `StreamingHttpResponse`를 그대로 돌려준다 — django-ninja는 결과가 이미
+    `HttpResponseBase`면 응답 스키마 직렬화를 건너뛰고 그대로 내보낸다."""
+
+    response = StreamingHttpResponse(
+        _stream_events_for(request.auth_user.id), content_type="text/event-stream"
+    )
+    response["Cache-Control"] = "no-cache"
+    # nginx 류 리버스 프록시가 이 응답을 버퍼링하지 않게 하는 표준 신호다 —
+    # 저장소 밖의 TLS 종단 프록시가 실제로 이걸 지키는지는 사람의 바깥
+    # 작업이지만(CLAUDE.md), 애플리케이션 쪽에서 낼 수 있는 신호는 여기서 낸다.
+    response["X-Accel-Buffering"] = "no"
+    return response

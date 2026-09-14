@@ -76,6 +76,7 @@ from storage.adapters import get_storage_adapter
 from submissions.models import SubmissionAsset
 from submissions.scoring_basis import PLATFORM_FAILURE_MODEL_VERSION
 
+from .events import publish_attempt_scored
 from .models import (
     ChecklistItem,
     Class,
@@ -353,11 +354,13 @@ def _mark_scoring_key_rejected(class_obj: Class) -> None:
 
 
 def _notify_submitter_of_score(submission: ClassroomSubmission, score: ClassroomScore, checklist_items: list[ChecklistItem]) -> None:
-    """이 시도를 낸 사람에게 채점이 끝났다는 사실을 알린다(#303) — 통과든
+    """이 시도를 낸 사람에게 채점이 끝났다는 사실을 알린다(#303, #379) — 통과든
     미통과든, 플랫폼 자동 미달이든 매번 정확히 한 번. `_finalize_platform_failure`
     와 성공 경로(`score_classroom_submission_once`) 양쪽에서 `ClassroomScore`가
     만들어지는 그 자리마다 부른다 — "채점이 끝난다"는 사실이 이 두 곳 말고는
-    성립하지 않는다.
+    성립하지 않는다. 서비스 내부 알림(Notification, 벨·알림 화면용)과 실시간
+    신호(`attempt-scored`, 열어 둔 제출 화면용)를 같은 자리에서 함께 낸다 —
+    둘 다 "이 시도의 채점이 끝났다"는 같은 사실에서 갈라진다.
 
     통과 판정은 `classroom.api._is_score_passed`와 같은 규칙이다 — 필수 항목을
     전부 충족했는가. 여기서 다시 계산하는 이유는 그 함수가 `(score,
@@ -390,6 +393,7 @@ def _notify_submitter_of_score(submission: ClassroomSubmission, score: Classroom
             "passed": passed,
         },
     )
+    publish_attempt_scored(submission)
 
 
 def _finalize_platform_failure(submission: ClassroomSubmission, checklist_items: list[ChecklistItem]) -> ClassroomScore:

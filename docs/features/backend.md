@@ -419,6 +419,13 @@ fake 이거나 임포트되지 않으면 부팅 자체를 거부한다** — 컨
 | 알림 3채널 | `NOTIFICATION_ALIMTALK_ADAPTER` · `_SMS_` · `_LMS_` |
 | 스토리지 | `STORAGE_BACKEND` |
 
+**열둘째 값이 하나 더 있지만 아직 이 가드 밖이다** — 강의실 실시간 신호
+(#379, ADR-0046)를 나르는 `EVENT_BUS_ADAPTER_MODE`(기본값 fake, dev·CI 는
+`core.events_redis.RedisEventBus`)다. 배포 환경 부팅 거부는 staging/prod
+배포 티켓(#380)이 `.env.staging`/`.env.prod`에 실제 값을 채우는 것과 같은
+커밋에서 더한다 — 지금 걸면 그 값을 아직 모르는 staging 자동 배포가 다음
+push 에 부팅을 거부하며 죽는다(`backend/core/events.py` 모듈 docstring).
+
 **Django admin 은 없다**(ADR-0019). 모델 행을 직접 편집할 수 있는 한 감사 추적에 우회로가
 남는다.
 

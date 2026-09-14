@@ -152,6 +152,11 @@ services:
       # 셀러 등록 JWE 키이자 payout.changed/seller.changed 웹훅 서명 검증 키다.
       # 비어 있으면 웹훅이 와도 전부 401 이라 등록해 두고 아무것도 못 본다.
       TOSS_API_SECURE_KEY: ${TOSS_API_SECURE_KEY:-}
+      # 실시간 신호 버스(ADR-0046, #379) — 강의실 채점 스캔이 이 컨테이너
+      # 안에서 발행한다(`/api/internal/scans/{name}`이 이 backend 를 친다).
+      # Celery 브로커(DB 0)·Operator 세션(DB 1)과 같은 Redis, 다른 DB 인덱스.
+      EVENT_BUS_ADAPTER_MODE: core.events_redis.RedisEventBus
+      EVENT_BUS_REDIS_URL: redis://redis:6379/2
     ports:
       - "${LAURIO_API_PORT:-58000}:8000"
     volumes:
@@ -161,6 +166,44 @@ services:
       sh -c "python manage.py migrate --noinput &&
              python manage.py seed_dev_data &&
              python manage.py runserver 0.0.0.0:8000"
+
+  # 이벤트 서비스(ADR-0046, #379) — 같은 backend 이미지를 ASGI 로 띄우는
+  # 별도 프로세스다. 기존 API(`backend`)는 그대로 동기 gunicorn/runserver다 —
+  # SSE 연결 하나가 그 워커 풀을 붙잡지 않게, 스트림만 이 프로세스가 연다.
+  # URLconf 는 `backend` 와 완전히 같은 코드다(`config/urls.py`) — 실제로
+  # 열리는 것이 SSE 엔드포인트 하나뿐인 것은 강의실 BFF 가 이 서비스로 그
+  # 경로만 보내기 때문이지, 이 컨테이너가 다른 라우트를 몰라서가 아니다.
+  # `migrate`는 여기서 부르지 않는다 — `backend`가 이미 부르고(같은 DB), 두
+  # 컨테이너가 동시에 마이그레이션을 트는 경쟁을 만들 이유가 없다(celery-worker·
+  # celery-beat 도 같은 이유로 migrate를 부르지 않는다).
+  events:
+    build:
+      context: ..
+      dockerfile: docker/backend.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    environment:
+      <<: *default-postgres-env
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      DJANGO_DEBUG: "true"
+      DJANGO_SECRET_KEY: dev-only-insecure-key
+      DJANGO_ALLOWED_HOSTS: "*"
+      SESSION_REDIS_URL: redis://redis:6379/1
+      EVENT_BUS_ADAPTER_MODE: core.events_redis.RedisEventBus
+      EVENT_BUS_REDIS_URL: redis://redis:6379/2
+    ports:
+      - "${LAURIO_EVENTS_PORT:-58001}:8001"
+    volumes:
+      - ../backend:/app
+    command: >
+      sh -c "uvicorn config.asgi:application --host 0.0.0.0 --port 8001 --reload"
 
   # Celery worker·beat (#40). **기본 기동에서는 빠져 있다** — `profiles` 때문에
   # `docker compose up -d` 로는 뜨지 않고, 필요할 때만 다음처럼 켠다:
@@ -396,8 +439,15 @@ services:
     depends_on:
       backend:
         condition: service_started
+      events:
+        condition: service_started
     environment:
       LAURIO_API_BASE_URL: http://backend:8000
+      # 실시간 신호 SSE(ADR-0046, #379)만 이 주소로 간다 — 나머지 API는 전부
+      # 위 `backend`(동기 gunicorn/runserver)를 그대로 친다. 강의실 BFF가
+      # `/api/classroom/events/stream` 경로 하나만 이쪽으로 갈라 보낸다
+      # (`lib/proxy/forward.ts`).
+      LAURIO_EVENTS_BASE_URL: http://events:8001
       # LAURIO_CLASSROOM_ORIGIN은 dev에서 비워 둔다 — 운영자 앱과 같은 이유
       # (lib/auth/origin.ts가 Host 헤더로 유도한 오리진과 정확히 맞아떨어진다).
       # LAURIO_SESSION_COOKIE_DOMAIN도 dev에서는 비운다(#273) — localhost는

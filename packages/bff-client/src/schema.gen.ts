@@ -905,6 +905,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/events/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Events
+         * @description 인증된 사용자 자신에게 온 신호만 흘린다(ADR-0046) — 다른 사용자의
+         *     신호는 이 함수에 닿지도 않는다(`core.events`가 recipient_id 로 이미
+         *     갈라 둔다). 인증 없는 요청은 `auth=jwt_auth`가 ninja 기본 401로 거절한다
+         *     — 이 함수 몸통까지 오지 않는다.
+         *
+         *     `StreamingHttpResponse`를 그대로 돌려준다 — django-ninja는 결과가 이미
+         *     `HttpResponseBase`면 응답 스키마 직렬화를 건너뛰고 그대로 내보낸다.
+         */
+        get: operations["classroom_api_stream_events"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/join/{join_code}": {
         parameters: {
             query?: never;
@@ -8068,6 +8094,24 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ErrorOut"];
                 };
+            };
+        };
+    };
+    classroom_api_stream_events: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

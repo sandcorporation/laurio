@@ -7,7 +7,7 @@ import type { NextRequest } from "next/server";
 
 import { buildForwardHeaders, extractForwardBody, forwardRequest } from "@laurio/bff-shared";
 
-import { backendBaseUrl } from "@/lib/auth/backend";
+import { backendBaseUrl, eventsBaseUrl } from "@/lib/auth/backend";
 import { REFRESH_COOKIE, type TokenPair } from "@/lib/auth/cookies";
 import { isExpired } from "@/lib/auth/jwt";
 import { refreshTokenPair } from "@/lib/auth/refresh";
@@ -37,7 +37,10 @@ export async function forwardToBackend(
     shouldClearCookies = true;
   }
 
-  const url = `${backendBaseUrl()}${backendPath}${request.nextUrl.search}`;
+  // 실시간 신호 SSE(ADR-0046)만 이벤트 서비스로 간다 — 나머지 전부는 지금처럼
+  // 동기 API 서버로 간다.
+  const base = backendPath.startsWith("/api/classroom/events/") ? eventsBaseUrl() : backendBaseUrl();
+  const url = `${base}${backendPath}${request.nextUrl.search}`;
   const body = await extractForwardBody(request);
 
   let response = await forwardRequest(request.method, url, headers, body);

@@ -70,6 +70,15 @@ services:
     ports: !override
       - "8000"
 
+  # 이벤트 서비스(ADR-0046, #379) — `backend`와 같은 이유로 마운트를 걷는다.
+  # dev 의 `--reload`(uvicorn watchfiles)는 코드가 이미지에 구워진 CI 에서는
+  # 아무것도 안 바뀌니 무해하다 — command 자체를 다시 적지 않는다. 강의실
+  # e2e 잡만 이 서비스를 띄운다.
+  events:
+    volumes: !reset []
+    ports: !override
+      - "8001"
+
   frontend:
     build:
       target: runner

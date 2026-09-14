@@ -1,0 +1,110 @@
+"""실시간 신호 버스 (ADR-0046) — 「바뀌었다」는 사실만 실어 나르는 새 시임 하나.
+
+강의실이 제출·채점·알림 같은 사실을 새로고침 없이 화면에 전달하려면, 커밋 뒤에
+"이 수신자에게 이런 일이 있었다"를 알리는 자리가 필요하다. 다른 외부 의존성
+(스토리지·LLM·PG 등)과 같은 모양으로 갈아끼운다(ADR-0007) — 테스트용
+`FakeEventBus`(기록만 한다)와 배포·dev용 Redis pub/sub(`core.events_redis.
+RedisEventBus`) 둘이고, `EVENT_BUS_ADAPTER_MODE` 설정이 고른다.
+
+**신호는 식별자만 싣는다** — `kind`(무슨 일)·`recipient_id`(누구에게)·`payload`
+(대상 식별자들, 예: class_id·problem_id·submission_id). 화면은 신호를 받으면
+데이터를 신호에서 직접 읽지 않고 기존 API를 다시 부른다 — 스트림은 진실의
+출처가 아니다(ADR-0046 결과).
+
+**수신자는 발행하는 자리가 정한다** — 이 모듈은 "누구에게 갈지"를 판단하지
+않는다. 신호 종류(`kind`)의 이름도 이 모듈이 정하지 않는다: 강의실 전용
+종류는 강의실 앱이 정의한다(`classroom.events`) — 이 모듈은 공유층
+(`core`)에 있으므로 앱 경계 테스트(#269)가 강의실을 몰라야 한다.
+
+**배포 환경의 부팅 가드는 아직 없다.** 다른 `*_ADAPTER_MODE`(#83)는
+`IS_DEPLOYED_ENVIRONMENT`에서 fake 바인딩을 거부하지만, 이 값은 staging의
+`.env.staging`이 아직 모른다 — 지금 가드를 걸면 이 티켓이 main에 머지되는
+순간 staging 자동 배포(Jenkins 웹훅)가 부팅을 거부하며 죽는다. 그 가드는
+staging/prod 배포를 실제로 맡는 티켓(#380)이 `.env.staging`/`.env.prod`에
+값을 채우는 것과 같은 커밋에서 더한다.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Protocol, runtime_checkable
+
+from django.conf import settings
+
+from .adapters import resolve_adapter
+
+
+@dataclass(frozen=True)
+class Event:
+    kind: str
+    recipient_id: int
+    payload: dict
+
+
+@runtime_checkable
+class EventSubscription(Protocol):
+    """`EventBus.subscribe()`가 돌려주는 구독 하나 — 컨텍스트 매니저다.
+
+    `__exit__`에서 반드시 구독을 정리한다(AC "연결을 닫으면 구독이
+    정리된다") — Redis 어댑터는 여기서 `pubsub.close()`를 부른다."""
+
+    def poll(self, *, timeout: float) -> list[Event]: ...
+    def __enter__(self) -> "EventSubscription": ...
+    def __exit__(self, *exc_info) -> None: ...
+
+
+@runtime_checkable
+class EventBus(Protocol):
+    def publish(self, event: Event) -> None: ...
+    def subscribe(self, recipient_id: int) -> EventSubscription: ...
+
+
+class _FakeSubscription:
+    """fake 버스 전용 구독 — 실제로 기다리지 않는다. `poll`은 `timeout`과
+    무관하게 즉시 지금까지 쌓인 것만 비워 돌려준다. SSE 뷰가 이것으로
+    반복 호출해도(폴백 대기 없이) 무한 루프가 되지 않는 이유는 pytest가
+    `itertools.islice`로 정해진 횟수만 다음 값을 요청하기 때문이다."""
+
+    def __init__(self, recipient_id: int) -> None:
+        self._recipient_id = recipient_id
+
+    def poll(self, *, timeout: float) -> list[Event]:
+        queue = FakeEventBus._queues.get(self._recipient_id, [])
+        FakeEventBus._queues[self._recipient_id] = []
+        return queue
+
+    def __enter__(self) -> "_FakeSubscription":
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        return None
+
+
+class FakeEventBus:
+    """dev·테스트 전용, 네트워크 없이 결정적이다(ADR-0007과 같은 관용구).
+
+    `storage.adapters.fake.FakeStorageAdapter._store`와 같은 이유로 **클래스
+    레벨** 딕셔너리다 — `get_event_bus()`가 호출마다 새 인스턴스를 만들어도
+    (`resolve_adapter`의 `fake_factory`가 매번 새 `FakeEventBus()`를 부른다)
+    발행 요청과 구독 요청이 서로 다른 HTTP 요청(그래서 서로 다른 인스턴스)
+    이라 값을 공유해야 하기 때문이다. `tests/conftest.py`의 autouse
+    픽스처가 매 테스트 전후로 비운다."""
+
+    _queues: dict[int, list[Event]] = {}
+
+    def publish(self, event: Event) -> None:
+        FakeEventBus._queues.setdefault(event.recipient_id, []).append(event)
+
+    def subscribe(self, recipient_id: int) -> _FakeSubscription:
+        return _FakeSubscription(recipient_id)
+
+
+def get_event_bus() -> EventBus:
+    return resolve_adapter(
+        mode=getattr(settings, "EVENT_BUS_ADAPTER_MODE", "fake"),
+        fake_factory=FakeEventBus,
+        not_implemented_hint=(
+            "EVENT_BUS_ADAPTER_MODE 가 가리키는 dotted path를 import할 수 없다 — "
+            "실물 어댑터는 core.events_redis.RedisEventBus 다(ADR-0046)."
+        ),
+    )

@@ -16,6 +16,7 @@
 import pytest
 from django.core.cache import caches
 
+from core.events import FakeEventBus
 from payments.adapters import FakePGAdapter
 from storage.adapters.fake import FakeStorageAdapter
 
@@ -58,6 +59,17 @@ def _reset_fake_pg_adapter():
     FakePGAdapter._final_refund_status.clear()
     yield
     FakePGAdapter._final_refund_status.clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_fake_event_bus():
+    """`core.events.FakeEventBus._queues`도 클래스 레벨이라 위 둘과 같은 이유로
+    비운다 — 안 그러면 한 테스트가 발행한 신호가 같은 recipient_id를 재사용하는
+    (오토인크리먼트 PK라 흔하다) 다음 테스트의 큐에 남는다."""
+
+    FakeEventBus._queues.clear()
+    yield
+    FakeEventBus._queues.clear()
 
 
 @pytest.fixture(autouse=True)
