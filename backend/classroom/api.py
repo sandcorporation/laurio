@@ -29,6 +29,7 @@ from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
 from core.crypto import encrypt
+from core.llm_scoring import LLMKeyCheckStatus
 from storage.adapters import get_storage_adapter
 from storage.filenames import build_download_filename, safe_download_base_name
 from submissions.models import GITHUB_REPO_URL_PATTERN, Submission, SubmissionAsset
@@ -85,6 +86,7 @@ from .schemas import (
     PublishedTemplateSummaryOut,
     ScoringModelOut,
 )
+from .scoring import check_scoring_key
 from .scoring_models import SCORING_MODEL_CHOICES, is_valid_model
 from .submission_target_refs import source_target_ref
 from .services import copy_class, copy_problem_to_class
@@ -157,6 +159,7 @@ def _serialize_class(class_obj: Class) -> ClassOut:
         default_model=class_obj.default_model,
         has_openai_key=has_key,
         openai_key_masked=_mask_from_last4(class_obj.openai_api_key_last4) if has_key else None,
+        openai_key_status=class_obj.openai_api_key_status if has_key else None,
         archived=class_obj.archived_at is not None,
         token_budget=class_obj.token_budget,
         token_budget_warning_threshold_percent=class_obj.token_budget_warning_threshold_percent,
@@ -304,19 +307,21 @@ def _serialize_score(score: ClassroomScore) -> ClassroomScoreOut:
 
 
 def _pending_reason(score, class_obj: Class) -> str | None:
-    """아직 채점되지 않은 시도가 왜 멈춰 있는지(#295, #346) — 참여자·강사
-    화면 모두 이 값 하나를 읽어 다르게 그린다. 채점 키가 아예 없으면
-    예산과 무관하게 "no_api_key"다 — `Class.has_scoring_key()`로 판정한다,
-    `scoring.score_classroom_submission_once`가 채점 시점에 확인하는 것과
-    **같은 기준**이어야 한다(공백 문자열도 "없다"로 본다). 여기서 bare
-    truthiness를 따로 쓰면 그 기준이 어긋나 실제로는 채점되지 않는 시도가
-    "정상 대기"로 잘못 보일 수 있다. 키는 있는데 예산이 바닥났으면
-    "budget_exhausted"(#295)다. 둘 다 아니면 스캔이 정말 채점을 기다리는
+    """아직 채점되지 않은 시도가 왜 멈춰 있는지(#295, #346, #355) — 참여자·강사
+    화면 모두 이 값 하나를 읽어 다르게 그린다. 채점 키가 없거나 벤더가
+    거절했으면 예산과 무관하게 "no_api_key"다 — `Class.scoring_key_unusable()`로
+    판정한다, `scoring._pending_submissions`(스캔 후보)가 거르는 것과 **같은
+    기준**이어야 한다. 여기서 다른 기준을 쓰면 그 기준이 어긋나 실제로는
+    채점되지 않는 시도가 "정상 대기"로 잘못 보일 수 있다. **키가 거부된
+    것과 아예 없는 것을 참여자 화면에서는 구별하지 않는다**(#355 AC) — 강사의
+    계정 문제가 참여자에게 새어 나가지 않는다, 강사 전용 화면(설정·클래스
+    상세 배너)만 그 둘을 다르게 말한다. 키는 멀쩡한데 예산이 바닥났으면
+    "budget_exhausted"(#295)다. 셋 다 아니면 스캔이 정말 채점을 기다리는
     중이라 `None`(평범한 "채점 중")이다."""
 
     if score is not None:
         return None
-    if not class_obj.has_scoring_key():
+    if class_obj.scoring_key_unusable():
         return "no_api_key"
     if class_obj.token_budget_exhausted():
         return "budget_exhausted"
@@ -516,7 +521,14 @@ def update_class(request: HttpRequest, class_id: int, payload: ClassPatchIn):
 )
 def set_class_openai_key(request: HttpRequest, class_id: int, payload: OpenAIKeyIn):
     """참여자에게는 어떤 형태로도 보이지 않는다(#284) — 이 엔드포인트도 강사
-    본인 전용이다. 응답은 마스킹된 `ClassOut`뿐, 평문은 어디에도 싣지 않는다."""
+    본인 전용이다. 응답은 마스킹된 `ClassOut`뿐, 평문은 어디에도 싣지 않는다.
+
+    저장 전에 강의실 채점 어댑터를 통해 이 키를 벤더에게 한 번 확인한다
+    (#354, ADR-0045). 벤더가 명시적으로 거부했을 때(401·403)만 저장 자체를
+    거절한다 — DB의 기존 키는 그대로 남아 오타 하나가 멀쩡한 옛 키를 밀어내지
+    않는다. 벤더에 닿지 못했을 때(타임아웃·5xx·네트워크)는 저장은 성공하되
+    상태를 "미검증"으로 남긴다 — 막으려는 것은 오타이지 벤더의 그 순간
+    가용성이 아니다."""
 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
 
@@ -524,9 +536,20 @@ def set_class_openai_key(request: HttpRequest, class_id: int, payload: OpenAIKey
     if not raw_key:
         raise HttpError(422, "채점 키를 입력해주세요.")
 
+    check_result = check_scoring_key(api_key=raw_key)
+    if check_result == LLMKeyCheckStatus.REJECTED:
+        raise HttpError(422, "이 채점 키를 벤더가 거절했습니다 — 키를 다시 확인해 저장해주세요.")
+
     class_obj.openai_api_key_encrypted = encrypt(raw_key)
     class_obj.openai_api_key_last4 = raw_key[-4:]
-    class_obj.save(update_fields=["openai_api_key_encrypted", "openai_api_key_last4"])
+    class_obj.openai_api_key_status = (
+        Class.ScoringKeyStatus.VERIFIED
+        if check_result == LLMKeyCheckStatus.VALID
+        else Class.ScoringKeyStatus.UNVERIFIED
+    )
+    class_obj.save(
+        update_fields=["openai_api_key_encrypted", "openai_api_key_last4", "openai_api_key_status"]
+    )
     return 200, _serialize_class(class_obj)
 
 
@@ -790,18 +813,21 @@ def _cell_status(
     """이 참여자·이 문제 한 칸의 상태 — **통과 이력**을 그린다(최신 시도가
     아니다, #290 AC). 우선순위는 이 순서다: 한 번이라도 통과했으면 이후
     시도가 미통과여도 "passed"다(#289/#288과 같은 OR 규칙). 통과가 없고
-    아직 채점을 기다리는 시도가 있으면, 그 클래스에 채점 키가 아예 없을 때는
-    "no_api_key"(#346, 강사 본인이 넣기 전까지는 절대 안 바뀐다는 것을
-    구별해 보여준다) — 키가 있으면(예산 소진 포함) "scoring"(아직 뒤집힐
-    여지가 있다는 뜻이다). 전부 채점됐는데 하나도 통과가 없으면
-    "attempted_not_passed". 시도 자체가 없으면 "not_submitted"."""
+    아직 채점을 기다리는 시도가 있으면, 그 클래스의 키를 쓸 수 없을 때는
+    "no_api_key"(#346, 키가 아예 없든 #355로 거부됐든 강사 본인이 손대기
+    전까지는 절대 안 바뀐다는 것을 구별해 보여준다 — 이 격자는 강사 전용
+    화면이지만 참여자별 칸 하나하나까지 "거부됨"을 따로 말할 자리는 아니다,
+    강사는 클래스 상세 배너·설정 화면에서 이미 그 사실을 본다) — 키를 쓸 수
+    있으면(예산 소진 포함) "scoring"(아직 뒤집힐 여지가 있다는 뜻이다). 전부
+    채점됐는데 하나도 통과가 없으면 "attempted_not_passed". 시도 자체가
+    없으면 "not_submitted"."""
 
     if not submissions:
         return "not_submitted"
     if any(_is_score_passed(getattr(s, "classroom_score", None), required_item_ids) for s in submissions):
         return "passed"
     if any(getattr(s, "classroom_score", None) is None for s in submissions):
-        return "no_api_key" if not class_obj.has_scoring_key() else "scoring"
+        return "no_api_key" if class_obj.scoring_key_unusable() else "scoring"
     return "attempted_not_passed"
 
 

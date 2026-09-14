@@ -304,7 +304,12 @@ def test_score_is_created_exactly_once_even_if_scanned_twice(client, db, monkeyp
     assert ClassroomScore.objects.filter(submission_id=ctx["submission_id"]).count() == 1
 
 
-def test_wrong_key_finalizes_immediately_without_looking_broken(client, db, monkeypatch):
+def test_wrong_key_does_not_finalize_a_score_it_waits_for_a_new_key(client, db, monkeypatch):
+    """#355 이전에는 401이 즉시 전체 미달 `ClassroomScore`로 굳었다 — 강사의
+    오타 하나가 참여자에게 영구 0%가 되는 길이었다. 이제는 `ClassroomScore`를
+    만들지 않고, 그 클래스의 채점 키 상태만 "거부됨"으로 바꾼다(자세한
+    검증은 `test_classroom_scoring_key_rejection.py`)."""
+
     ctx = _setup_submission(client)
     monkeypatch.setattr(
         "core.llm_scoring.requests.post",
@@ -313,20 +318,34 @@ def test_wrong_key_finalizes_immediately_without_looking_broken(client, db, monk
 
     _run_scan(client)
 
-    score = ClassroomScore.objects.get(submission_id=ctx["submission_id"])
-    assert score.model_version != "gpt-4o-mini-2024-07-18"
+    assert not ClassroomScore.objects.filter(submission_id=ctx["submission_id"]).exists()
     mine = _mine(client, ctx["participant"]["access"], ctx["class_id"], ctx["problem_id"])
     submission_out = mine["submissions"][0]
-    assert submission_out["status"] == "scored"
-    reasoning_text = submission_out["score"]["reasoning"][0]["reasoning"]
-    # 「고장」으로 읽히지 않는다(#287 AC) — 스택트레이스·예외 타입·HTTP 상태
-    # 코드가 그대로 노출되지 않는다.
-    assert "Traceback" not in reasoning_text
-    assert "401" not in reasoning_text
-    assert "Exception" not in reasoning_text
-    # 그리고 다시 낼 수 있다는 사실을 알려준다 — 참여자가 다음에 뭘 할 수
-    # 있는지 안내한다.
-    assert "다시 제출" in reasoning_text
+    assert submission_out["status"] == "pending"
+    assert submission_out["pending_reason"] == "no_api_key"
+
+
+def test_non_auth_permanent_failure_still_finalizes_immediately(client, db, monkeypatch):
+    """#355이 건드리지 않은 경로를 고정한다 — 401·403 **밖의** 영구 실패
+    (여기서는 잘린 응답, finish_reason != "stop")는 지금과 똑같이 유예 없이
+    즉시 전체 미달로 끝난다."""
+
+    ctx = _setup_submission(client)
+    monkeypatch.setattr(
+        "core.llm_scoring.requests.post",
+        lambda *a, **k: _FakeResponse(
+            200,
+            {
+                "model": "gpt-4o-mini-2024-07-18",
+                "choices": [{"finish_reason": "length", "message": {"content": "{}"}}],
+            },
+        ),
+    )
+
+    _run_scan(client)
+
+    score = ClassroomScore.objects.get(submission_id=ctx["submission_id"])
+    assert score.model_version != "gpt-4o-mini-2024-07-18"
     assert ClassroomScoringAttempt.objects.filter(submission_id=ctx["submission_id"], permanent=True).exists()
 
 
@@ -485,12 +504,19 @@ def test_scoring_completion_notifies_the_submitter_on_fail(client, db, monkeypat
 
 def test_permanent_failure_finalization_also_notifies_the_submitter(client, db, monkeypatch):
     """자동 미달(`_finalize_platform_failure`)로 채점이 끝난 경우도 "채점이
-    끝났다"이므로 침묵으로 남지 않는다(AC)."""
+    끝났다"이므로 침묵으로 남지 않는다(AC). 401·403(#355 이후 다른 갈래를
+    타는 키 거부)이 아니라 잘린 응답으로 영구 실패를 흉내낸다."""
 
     ctx = _setup_submission(client)
     monkeypatch.setattr(
         "core.llm_scoring.requests.post",
-        lambda *a, **k: _FakeResponse(401, {"error": {"message": "Incorrect API key"}}),
+        lambda *a, **k: _FakeResponse(
+            200,
+            {
+                "model": "gpt-4o-mini-2024-07-18",
+                "choices": [{"finish_reason": "length", "message": {"content": "{}"}}],
+            },
+        ),
     )
 
     _run_scan(client)

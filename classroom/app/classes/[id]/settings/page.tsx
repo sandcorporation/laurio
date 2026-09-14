@@ -32,6 +32,10 @@ import {
   type PublishedClassTemplateSummary,
 } from "@/lib/classes/api";
 import { isDeleteConfirmationTyped } from "@/lib/classes/delete-confirmation";
+import {
+  checkOpenAIKeyFromBrowser,
+  type OpenAIKeyCheckResult,
+} from "@/lib/classes/openai-key-check";
 import { useClass } from "@/lib/classes/use-class";
 import { useMembers } from "@/lib/members/use-members";
 import { useProblems } from "@/lib/problems/use-problems";
@@ -323,6 +327,31 @@ export default function ClassSettingsPage() {
   const [apiKey, setApiKey] = useState("");
   const [keySaving, setKeySaving] = useState(false);
   const [keyError, setKeyError] = useState<string | null>(null);
+  // 저장 전에 브라우저가 직접 벤더에게 물어 미리 말한다(#357) — 문이
+  // 아니라 안내다, 저장 버튼은 이 값과 무관하게 항상 눌린다. 타자 한
+  // 글자마다 치지 않고 입력이 멎은 뒤 한 번만 친다.
+  const [liveKeyCheck, setLiveKeyCheck] = useState<OpenAIKeyCheckResult | "checking" | "idle">(
+    "idle",
+  );
+
+  useEffect(() => {
+    const trimmed = apiKey.trim();
+    if (trimmed === "") {
+      setLiveKeyCheck("idle");
+      return;
+    }
+    setLiveKeyCheck("checking");
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      checkOpenAIKeyFromBrowser(trimmed).then((result) => {
+        if (!cancelled) setLiveKeyCheck(result);
+      });
+    }, 600);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [apiKey]);
 
   const [defaultModel, setDefaultModel] = useState("");
   const [modelSaving, setModelSaving] = useState(false);
@@ -498,57 +527,94 @@ export default function ClassSettingsPage() {
           </div>
         </Card>
 
-        <Card>
-          <CardHeader title="채점 키" hint="이 클래스의 채점에만 쓰입니다" />
-          <div className="flex flex-col gap-4 p-4">
-            {classroom.has_openai_key ? (
-              <p data-testid="openai-key-status" className="flex items-center gap-2.5 text-[13.5px]">
-                <Badge tone="verified">설정됨</Badge>
-                <span className="font-mono text-ink/60">{classroom.openai_key_masked}</span>
-              </p>
-            ) : (
-              <p data-testid="openai-key-status" className="flex flex-wrap items-center gap-2.5 text-[13.5px]">
-                <Badge tone="attention">없음</Badge>
-                <span className="text-ink/60">키가 없으면 이 클래스의 제출은 채점되지 않습니다.</span>
-              </p>
-            )}
+        <div id="scoring-key" className="scroll-mt-4">
+          <Card>
+            <CardHeader title="채점 키" hint="이 클래스의 채점에만 쓰입니다" />
+            <div className="flex flex-col gap-4 p-4">
+              {!classroom.has_openai_key ? (
+                <p data-testid="openai-key-status" className="flex flex-wrap items-center gap-2.5 text-[13.5px]">
+                  <Badge tone="attention">없음</Badge>
+                  <span className="text-ink/60">키가 없으면 이 클래스의 제출은 채점되지 않습니다.</span>
+                </p>
+              ) : classroom.openai_key_status === "rejected" ? (
+                <p data-testid="openai-key-status" className="flex flex-wrap items-center gap-2.5 text-[13.5px]">
+                  <Badge tone="attention">거부됨</Badge>
+                  <span className="font-mono text-ink/60">{classroom.openai_key_masked}</span>
+                  <span className="text-ink/60">
+                    벤더가 이 키를 거절했습니다 — 새 키를 저장해야 채점이 다시 시작됩니다.
+                  </span>
+                </p>
+              ) : classroom.openai_key_status === "unverified" ? (
+                <p data-testid="openai-key-status" className="flex flex-wrap items-center gap-2.5 text-[13.5px]">
+                  <Badge tone="neutral">미검증</Badge>
+                  <span className="font-mono text-ink/60">{classroom.openai_key_masked}</span>
+                  <span className="text-ink/60">
+                    저장할 때 벤더에 닿지 못해 확인하지 못했습니다 — 채점 시도에서 다시 확인됩니다.
+                  </span>
+                </p>
+              ) : (
+                <p data-testid="openai-key-status" className="flex items-center gap-2.5 text-[13.5px]">
+                  <Badge tone="verified">확인함</Badge>
+                  <span className="font-mono text-ink/60">{classroom.openai_key_masked}</span>
+                </p>
+              )}
 
-            <form onSubmit={handleKeySubmit} className="flex flex-col gap-2.5">
-              <label htmlFor="openai-api-key">
-                <FieldLabel>새 채점 키</FieldLabel>
-              </label>
-              <div className="flex flex-wrap items-center gap-2">
-                <input
-                  id="openai-api-key"
-                  data-testid="openai-key-input"
-                  type="password"
-                  value={apiKey}
-                  onChange={(event) => setApiKey(event.target.value)}
-                  required
-                  className={`${INPUT_CLASS} min-w-[240px] flex-1 font-mono`}
-                  placeholder="sk-..."
-                />
-                <button
-                  type="submit"
-                  data-testid="openai-key-submit"
-                  disabled={keySaving || apiKey.trim() === ""}
-                  className={buttonClass("primary")}
-                >
-                  {keySaving ? "저장하는 중..." : "저장"}
-                </button>
-              </div>
-              <span className="text-[11.5px] leading-relaxed text-ink/45">
-                저장 뒤에는 다시 볼 수 없습니다 — 화면에도 로그에도 남지 않고, 채점 요청을 보낼
-                때만 복호화됩니다. 참여자에게는 어떤 형태로도 보이지 않습니다.
-              </span>
-            </form>
-            {keyError ? (
-              <ErrorNote>
-                <span data-testid="openai-key-error">{keyError}</span>
-              </ErrorNote>
-            ) : null}
-          </div>
-        </Card>
+              <form onSubmit={handleKeySubmit} className="flex flex-col gap-2.5">
+                <label htmlFor="openai-api-key">
+                  <FieldLabel>새 채점 키</FieldLabel>
+                </label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    id="openai-api-key"
+                    data-testid="openai-key-input"
+                    type="password"
+                    value={apiKey}
+                    onChange={(event) => setApiKey(event.target.value)}
+                    required
+                    className={`${INPUT_CLASS} min-w-[240px] flex-1 font-mono`}
+                    placeholder="sk-..."
+                  />
+                  <button
+                    type="submit"
+                    data-testid="openai-key-submit"
+                    disabled={keySaving || apiKey.trim() === ""}
+                    className={buttonClass("primary")}
+                  >
+                    {keySaving ? "저장하는 중..." : "저장"}
+                  </button>
+                </div>
+                {/* 저장을 누르기 전에 브라우저가 먼저 말해준다(#357) — 문이
+                    아니라 안내다, 판정과 무관하게 위 저장 버튼은 항상 눌린다. */}
+                {liveKeyCheck === "checking" ? (
+                  <p data-testid="openai-key-live-check" className="text-[12px] text-ink/45">
+                    확인하는 중...
+                  </p>
+                ) : liveKeyCheck === "valid" ? (
+                  <p data-testid="openai-key-live-check">
+                    <Badge tone="verified">이 키를 쓸 수 있습니다</Badge>
+                  </p>
+                ) : liveKeyCheck === "invalid" ? (
+                  <p data-testid="openai-key-live-check">
+                    <Badge tone="attention">이 키는 쓸 수 없습니다</Badge>
+                  </p>
+                ) : liveKeyCheck === "unknown" ? (
+                  <p data-testid="openai-key-live-check">
+                    <Badge tone="neutral">지금은 확인할 수 없습니다</Badge>
+                  </p>
+                ) : null}
+                <span className="text-[11.5px] leading-relaxed text-ink/45">
+                  저장 뒤에는 다시 볼 수 없습니다 — 화면에도 로그에도 남지 않고, 채점 요청을 보낼
+                  때만 복호화됩니다. 참여자에게는 어떤 형태로도 보이지 않습니다.
+                </span>
+              </form>
+              {keyError ? (
+                <ErrorNote>
+                  <span data-testid="openai-key-error">{keyError}</span>
+                </ErrorNote>
+              ) : null}
+            </div>
+          </Card>
+        </div>
 
         <Card>
           <CardHeader title="기본 채점 모델" hint="문제가 자기 모델을 갖지 않으면 이 값을 씁니다" />

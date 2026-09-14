@@ -12,6 +12,7 @@ export function MissingScoringKeyNote({
   message,
   noteTestId,
   settingsLinkTestId,
+  actionLabel = "클래스 설정에서 넣기",
 }: {
   classId: number;
   message: string;
@@ -19,6 +20,9 @@ export function MissingScoringKeyNote({
    *  붙인 것이 서로 다르다) 접두어 조립 대신 둘 다 호출부가 그대로 준다. */
   noteTestId: string;
   settingsLinkTestId: string;
+  /** 키가 아예 없을 때는 "넣기"가 맞지만, 있는데 거부됐을 때는 "바꾸기"다
+   *  (#355) — 기본값은 예전 문구 그대로다. */
+  actionLabel?: string;
 }) {
   return (
     <Note tone="attention">
@@ -27,11 +31,11 @@ export function MissingScoringKeyNote({
           {message}
         </span>
         <Link
-          href={`/classes/${classId}/settings`}
+          href={`/classes/${classId}/settings#scoring-key`}
           data-testid={settingsLinkTestId}
           className={buttonClass("secondary", "sm")}
         >
-          클래스 설정에서 넣기
+          {actionLabel}
         </Link>
       </div>
     </Note>

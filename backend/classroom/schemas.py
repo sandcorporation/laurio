@@ -58,6 +58,9 @@ class ClassOut(Schema):
     default_model: str
     has_openai_key: bool
     openai_key_masked: str | None = None
+    #: 키가 있을 때만 뜻이 있다("verified"|"unverified"|"rejected") — 키가
+    #: 없으면 `None`이다(#354). `Class.ScoringKeyStatus`의 값 그대로다.
+    openai_key_status: str | None = None
     #: 강사가 보관했는가(#294) — 참이면 새 가입·새 제출이 닫히고 읽기만
     #: 남는다. `archived_at`이 아니라 이 값을 내려주는 이유는 화면이 정확한
     #: 시각을 쓰지 않기 때문이다(진행중/보관 여부만 갈라 보이면 된다).

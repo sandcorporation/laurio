@@ -24,7 +24,10 @@ import {
 import { MissingScoringKeyNote } from "@/app/components/MissingScoringKeyNote";
 import { copyClass } from "@/lib/classes/api";
 import { joinLinkAvailability } from "@/lib/classes/join-link";
-import { shouldShowMissingScoringKeyBanner } from "@/lib/classes/missing-scoring-key-banner";
+import {
+  shouldShowMissingScoringKeyBanner,
+  shouldShowRejectedScoringKeyBanner,
+} from "@/lib/classes/missing-scoring-key-banner";
 import { useClass } from "@/lib/classes/use-class";
 import { formatAchievementRate } from "@/lib/problems/achievement";
 import { useProblems } from "@/lib/problems/use-problems";
@@ -298,6 +301,20 @@ export default function ClassDetailPage() {
             message="이 클래스에는 아직 채점 키가 없습니다 — 참여자가 제출해도 채점되지 않습니다."
             noteTestId="classroom-missing-api-key-banner"
             settingsLinkTestId="classroom-missing-api-key-settings-link"
+          />
+        ) : null}
+
+        {/* 키는 넣었지만 벤더가 거절한 경우(#355) — 「키 없음」과 사유가
+            다르므로 문구도 다르다: 처음 넣으라는 말이 아니라 갈아 끼우라는
+            말이다. 밀린 제출은 조용히 쌓여 강사가 새 키를 저장하면 이어서
+            채점된다. */}
+        {shouldShowRejectedScoringKeyBanner(classroom) ? (
+          <MissingScoringKeyNote
+            classId={classId}
+            message="이 클래스의 채점 키를 벤더가 거절했습니다 — 밀린 제출은 새 키를 저장해야 채점됩니다."
+            noteTestId="classroom-rejected-api-key-banner"
+            settingsLinkTestId="classroom-rejected-api-key-settings-link"
+            actionLabel="클래스 설정에서 바꾸기"
           />
         ) : null}
 

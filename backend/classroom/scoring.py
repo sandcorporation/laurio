@@ -21,16 +21,22 @@ services`, ADR-0006)가 성립하지 않는다. 대신 스캔(`CLASSROOM_SUBMISS
 — 배포 환경은 이 값이 fake이면 부팅 자체가 거부된다(`config.settings`,
 `classroom.checks.check_classroom_scoring_adapter_mode`, #83과 같은 원칙).
 
-**채점은 반드시 끝난다**(ADR-0031과 같은 규율, `SCORING_FAILURE_LIMIT`) —
-강의실에는 마감이 없어 `scoring.services`의 "마감 후 6시간 유예"가 성립하지
-않는다. 그래서 실패 **횟수**만 본다: 영구 실패(`LLMAdapterPermanentError`,
-예를 들어 틀린 키의 401)는 유예 없이 즉시, 그 밖의 실패는 `SCORING_FAILURE_LIMIT`
-회에 이르면 전체 미달(0%에 대응하는 "필수 항목 전부 미충족") `ClassroomScore`를
-직접 만든다 — `submissions.scoring_basis.PLATFORM_FAILURE_MODEL_VERSION`을
-그대로 재사용한다(공유층이라 강의실도 쓸 수 있다). 다만 참가자에게 보이는 문구는
+**채점은 반드시 끝난다 — 단, 키가 거부된 경우는 예외다**(ADR-0031과 같은
+규율에 ADR-0045가 예외를 하나 뚫었다). 강의실에는 마감이 없어 `scoring.
+services`의 "마감 후 6시간 유예"가 성립하지 않는다. 그래서 실패 **횟수**만
+본다: 영구 실패(`LLMAdapterPermanentError`, 예를 들어 컨텍스트 초과·잘린
+응답)는 유예 없이 즉시, 그 밖의 실패는 `SCORING_FAILURE_LIMIT`회에 이르면
+전체 미달(0%에 대응하는 "필수 항목 전부 미충족") `ClassroomScore`를 직접
+만든다 — `submissions.scoring_basis.PLATFORM_FAILURE_MODEL_VERSION`을 그대로
+재사용한다(공유층이라 강의실도 쓸 수 있다). 다만 참가자에게 보이는 문구는
 직접 쓴다 — 그 모듈의 `participant_facing_reasoning()`은 "이의를 제기할 수
 있다"고 말하는데 강의실에는 이의제기 자체가 없다(ADR-0037, 강의실은 Operator·
-Appeal을 모른다).
+Appeal을 모른다). **벤더가 키 자체를 거절했을 때(401·403,
+`LLMAdapterAuthError`)는 이 규율에서 빠진다**(#355, ADR-0045) — 강사의
+계정 문제를 참여자의 영구 0%로 만들지 않는다. `ClassroomScore`를 만들지
+않고, 그 클래스의 채점 키 상태를 "거부됨"으로 바꿔 스캔 후보에서 뺀다 —
+강사가 새 키를 저장할 때까지 그 제출물은 키가 없는 클래스의 것과 같은
+자리에서 기다린다.
 
 **저장소(repository) 형식은 GitHub에서 직접 읽는다** — 공개가 아니거나 clone이
 실패하면 소스와 같은 이유로 재시도 대상일 뿐이다(참가자 귀책·플랫폼 귀책을
@@ -49,8 +55,10 @@ from core.adapters import resolve_adapter
 from core.clock import Clock
 from core.crypto import decrypt
 from core.llm_scoring import (
+    LLMAdapterAuthError,
     LLMAdapterError,
     LLMAdapterPermanentError,
+    LLMKeyCheckStatus,
     LLMScoringAdapter,
     OpenAIScoringAdapter,
     RequirementInput,
@@ -129,6 +137,13 @@ class FakeClassroomScoringAdapter:
             )
         return ScoringOutput(verdicts=verdicts, model_version=self.model_version)
 
+    def check_key(self) -> LLMKeyCheckStatus:
+        """dev·CI에서는 저장하는 키가 무엇이든 항상 유효하다(#354 AC) — 그래야
+        가짜 키로 저장하는 기존 흐름이 그대로 돈다. 배포 환경에서는 이
+        어댑터 자체가 존재하지 않는다(부팅 가드, ADR-0043)."""
+
+        return LLMKeyCheckStatus.VALID
+
 
 def _scoring_adapter(*, api_key: str, model: str) -> LLMScoringAdapter:
     """실제 OpenAI 어댑터 또는 결정적 fake 어댑터를 고른다(#340, ADR-0043).
@@ -156,6 +171,18 @@ def _scoring_adapter(*, api_key: str, model: str) -> LLMScoringAdapter:
         ),
         factory_kwargs={"api_key": api_key, "model": model},
     )
+
+
+def check_scoring_key(*, api_key: str) -> LLMKeyCheckStatus:
+    """저장할 때 이 키가 살아 있는지 강의실 채점 어댑터를 통해 한 번 쳐 본다
+    (#354). `_scoring_adapter`와 정확히 같은 스위치(`CLASSROOM_SCORING_
+    ADAPTER_MODE`)를 타므로, dev·CI는 `FakeClassroomScoringAdapter`가 항상
+    유효하다고 답해 가짜 키 저장이 지금처럼 그대로 돌아간다. `model`은 이
+    확인에 쓰이지 않는다(OpenAI의 키 확인은 모델과 무관한 엔드포인트를
+    친다) — `_scoring_adapter`의 인자 모양만 맞추려고 빈 문자열을 넘긴다."""
+
+    adapter = _scoring_adapter(api_key=api_key, model="")
+    return adapter.check_key()
 
 
 def _requirement_inputs(checklist_items: list[ChecklistItem]) -> list[RequirementInput]:
@@ -293,6 +320,35 @@ def _record_token_usage(class_obj: Class, total_tokens: int) -> None:
                 "token_usage_total": locked.token_usage_total,
                 "token_budget": locked.token_budget,
             },
+        )
+
+
+def _mark_scoring_key_rejected(class_obj: Class) -> None:
+    """벤더가 401·403으로 이 클래스의 채점 키를 거절했다(#355) — 상태를
+    「거부됨」으로 옮기고, **새로 거부된 순간에만**(#356) 강사에게 알린다.
+    이미 「거부됨」이면 상태도 알림도 건드리지 않는다 — 밀린 제출이 몇
+    건이든, 스캔이 몇 번을 돌든 상태 전이 한 번에 알림 하나다(#295의 예산
+    경고와 같은 규율). 강사가 새 키를 저장해 상태가 벗어났다가 그 키도
+    거절당하면, 그때는 다시 "새로 거부된 순간"이라 다시 알린다.
+
+    `_record_token_usage`와 같은 이유로 `select_for_update`로 잠그고 다시
+    읽는다 — 같은 tick 안에서 이 클래스의 시도 여러 개가 순서대로 이
+    함수를 부를 수 있어, 잠그지 않으면 각자 손에 쥔 옛 값을 기준으로
+    판단해 "새로 거부됨"을 여러 번 셀 수 있다."""
+
+    newly_rejected = False
+    with transaction.atomic():
+        locked = Class.objects.select_for_update().get(pk=class_obj.pk)
+        if locked.openai_api_key_status != Class.ScoringKeyStatus.REJECTED:
+            locked.openai_api_key_status = Class.ScoringKeyStatus.REJECTED
+            locked.save(update_fields=["openai_api_key_status"])
+            newly_rejected = True
+
+    if newly_rejected:
+        notify_safely(
+            recipient=locked.instructor,
+            notification_type=NotificationType.CLASSROOM_SCORING_KEY_REJECTED,
+            context={"class_id": locked.id, "class_name": locked.name},
         )
 
 
@@ -440,6 +496,15 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
     try:
         adapter = _scoring_adapter(api_key=decrypt(raw_key), model=model)
         output = adapter.score(scoring_input)
+    except LLMAdapterAuthError:
+        # 강사의 계정 문제이지 이 제출물의 결함이 아니다(#355, ADR-0045) —
+        # ClassroomScore를 만들지 않는다. 키 상태가 "거부됨"으로 바뀌면
+        # _pending_submissions가 이 클래스를 후보에서 빼므로, 이 시도는
+        # "아직 시도하지 않았다"로 그대로 남아 강사가 새 키를 저장할 때까지
+        # 기다린다 — ClassroomScoringAttempt도 남기지 않는다(no_key와 같은
+        # 규율, 그래야 _scoring_cap_reached가 이 실패로 상한에 닿지 않는다).
+        _mark_scoring_key_rejected(class_obj)
+        return {"submission_id": submission.id, "status": "key_rejected"}
     except LLMAdapterPermanentError as exc:
         ClassroomScoringAttempt.objects.create(submission=submission, error=str(exc)[:2000], permanent=True)
         if _scoring_cap_reached(submission):
@@ -471,13 +536,14 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
 
 
 def _pending_submissions(as_of, ctx):
-    """아직 `ClassroomScore`가 없고, 그 클래스에 채점 키가 있고, 채점 예산이
-    바닥나지 않은 시도(#287, #295).
+    """아직 `ClassroomScore`가 없고, 그 클래스에 채점 키가 있고 그 키가
+    거부되지 않았고, 채점 예산이 바닥나지 않은 시도(#287, #295, #355).
 
-    키 없는 클래스·예산이 바닥난 클래스의 시도는 애초에 후보가 아니다 —
-    "아직 시도하지 않았다"를 `ClassroomScoringAttempt` 이력 없이 유지한다
-    (모듈 docstring). 예산이 다시 차면(강사가 `token_budget`을 늘리면) 다음
-    tick부터 저절로 후보에 다시 들어온다 — 별도의 "재개" 신호가 필요 없다.
+    키 없는 클래스·키가 거부된 클래스·예산이 바닥난 클래스의 시도는 애초에
+    후보가 아니다 — "아직 시도하지 않았다"를 `ClassroomScoringAttempt` 이력
+    없이 유지한다(모듈 docstring). 강사가 새 키를 저장하면(#354의 검증
+    결과로 상태가 덮인다) 다음 tick부터 저절로 후보에 다시 들어온다 —
+    예산이 다시 찼을 때와 같은 원리로, 별도의 "재개" 신호가 필요 없다.
     `scoring.services._pending_submissions`와 같은 이유로 시도 횟수 오름차순
     정렬한다(한 번도 시도되지 않은 것이 재시도 중인 것보다 항상 앞선다,
     ADR-0031) — 예산이 차서 쌓인 시도부터 다시 도는 것도 이 정렬 하나로
@@ -497,6 +563,7 @@ def _pending_submissions(as_of, ctx):
             classroom_score__isnull=True,
         )
         .exclude(problem__classroom__openai_api_key_encrypted="")
+        .exclude(problem__classroom__openai_api_key_status=Class.ScoringKeyStatus.REJECTED)
         .exclude(
             models.Q(problem__classroom__token_budget__isnull=False)
             & models.Q(

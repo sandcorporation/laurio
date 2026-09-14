@@ -40,6 +40,12 @@ class NotificationType(models.TextChoices):
     # 간다 — 강사에게는 자기가 낸 것이 아니면 가지 않는다(#301과 같은 이유로
     # `classroom.scoring`이 이 앱을 모른 채 이 유형 이름만 쓴다).
     CLASSROOM_SUBMISSION_SCORED = "classroom_submission_scored", "강의실 제출 채점 완료"
+    # 강의실 채점 키가 벤더에게 거절당했다(#355·#356, ADR-0045) — 그 클래스의
+    # 강사에게만 간다, 참여자에게는 절대 가지 않는다. 상태가 "거부됨"으로
+    # **바뀌는 그 순간**에만 한 번 간다(`classroom.scoring._mark_scoring_key_
+    # rejected`) — 밀린 제출이 몇 건이든, tick이 몇 번을 돌든 상태 전이 한
+    # 번에 하나다. 강사가 키를 고쳤다가 그 키도 거절당하면 그때 다시 간다.
+    CLASSROOM_SCORING_KEY_REJECTED = "classroom_scoring_key_rejected", "강의실 채점 키 거부"
 
 
 #: 강의실 제품이 만드는 알림 유형 전부(#304) — 클래스 알림 화면·종 배지가 이
@@ -51,6 +57,7 @@ CLASSROOM_NOTIFICATION_TYPES = frozenset(
     {
         NotificationType.CLASSROOM_TOKEN_BUDGET_WARNING,
         NotificationType.CLASSROOM_SUBMISSION_SCORED,
+        NotificationType.CLASSROOM_SCORING_KEY_REJECTED,
     }
 )
 
@@ -138,6 +145,15 @@ NOTIFICATION_TYPE_FLAGS: dict[str, dict[str, bool]] = {
     # 낸 사람 자신의 제출에 대한 처리 결과다 — 거래성이고 옵트인이 필요 없다.
     # 강의실 알림은 전부 서비스 안에서만이라는 같은 규칙을 받는다(#301, #303).
     NotificationType.CLASSROOM_SUBMISSION_SCORED: {
+        "is_transactional": True,
+        "is_promotional": False,
+        "is_quiet_hours_exempt": False,
+        "is_internal_only": True,
+    },
+    # 강사 본인의 계정 문제(키 거부)에 대한 경고다 — 거래성이고 옵트인이
+    # 필요 없다. 강의실 알림은 전부 서비스 안에서만이라는 같은 규칙을
+    # 받는다(#301, #356).
+    NotificationType.CLASSROOM_SCORING_KEY_REJECTED: {
         "is_transactional": True,
         "is_promotional": False,
         "is_quiet_hours_exempt": False,

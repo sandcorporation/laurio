@@ -20,6 +20,32 @@ from payments.adapters import FakePGAdapter
 from storage.adapters.fake import FakeStorageAdapter
 
 
+class _StubKeyCheckResponse:
+    def __init__(self, status_code: int = 200) -> None:
+        self.status_code = status_code
+
+    def json(self):  # pragma: no cover - check_key()는 본문을 읽지 않는다
+        return {}
+
+
+@pytest.fixture(autouse=True)
+def _default_openai_key_check_never_hits_the_network(monkeypatch):
+    """`PUT .../classes/{id}/openai-key`(#354)는 저장할 때마다 `core.llm_scoring.
+    requests.get`으로 벤더에게 실제로 묻는다. `CLASSROOM_SCORING_ADAPTER_MODE`를
+    실물 어댑터로 강제하는 테스트 파일이 여럿(#340, ADR-0043) 있고, 그 파일들은
+    채점(`requests.post`) 경로가 관심사라 키 확인까지 매번 monkeypatch하지
+    않는다 — 그 상태로 두면 가짜 키로 `_set_key()`를 부르는 순간 실제
+    api.openai.com에 네트워크 요청이 나간다(브라우저 걷기·CI에서 절대 있어선
+    안 되는 일이다).
+
+    기본값을 여기서 한 번 "확인함"으로 깔아 둔다 — 키 확인 자체를 검증하는
+    테스트(`test_classroom_scoring_key_status.py`)는 자기 테스트 안에서 같은
+    자리를 다시 monkeypatch해 이 기본값을 덮어쓴다(monkeypatch는 테스트당 같은
+    인스턴스라 나중 호출이 그대로 이긴다)."""
+
+    monkeypatch.setattr("core.llm_scoring.requests.get", lambda *a, **k: _StubKeyCheckResponse(200))
+
+
 @pytest.fixture(autouse=True)
 def _reset_fake_storage_adapter():
     FakeStorageAdapter._store.clear()
