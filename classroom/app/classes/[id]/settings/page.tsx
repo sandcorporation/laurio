@@ -631,6 +631,7 @@ export default function ClassSettingsPage() {
           </Card>
         </div>
 
+        <div id="scoring-model" className="scroll-mt-4">
         <Card>
           <CardHeader title="기본 채점 모델" hint="문제가 자기 모델을 갖지 않으면 이 값을 씁니다" />
           <div className="flex flex-col gap-3 p-4">
@@ -716,6 +717,7 @@ export default function ClassSettingsPage() {
             ) : null}
           </div>
         </Card>
+        </div>
 
         {/* `id`는 예산 경고 알림(#329)이 이 자리를 가리킬 때 쓰는 앵커다 —
             `lib/notifications/link.ts`가 같은 이름을 짓는다. */}

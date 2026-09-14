@@ -52,6 +52,9 @@ export type ProblemRow = {
   reasoning_effort: string;
   // 실제로 채점에 쓰일 추론 강도.
   effective_reasoning_effort: string;
+  // 벤더가 이 문제의 채점 모델을 그 클래스의 키로 거부했는가(#403) — 참이면
+  // 어느 시도도 채점되지 않는다.
+  scoring_model_rejected: boolean;
   // 채점 지침 단계(#386, CONTEXT.md 「채점 지침」).
   grading_strictness: GradingStrictness;
   // grading_strictness가 "custom"일 때만 채워진다.

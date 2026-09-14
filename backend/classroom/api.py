@@ -308,6 +308,7 @@ def _serialize_problem(
         effective_model_is_reasoning=is_reasoning_model_id(effective_model),
         reasoning_effort=problem.reasoning_effort,
         effective_reasoning_effort=effective_reasoning_effort,
+        scoring_model_rejected=problem.scoring_model_rejected_at is not None,
         grading_strictness=problem.grading_strictness,
         grading_guideline_text=problem.grading_guideline_text,
         checklist_items=[_serialize_checklist_item(i) for i in problem.checklist_items.all()],
@@ -383,23 +384,28 @@ def _serialize_score(score: ClassroomScore) -> ClassroomScoreOut:
     )
 
 
-def _pending_reason(score, class_obj: Class) -> str | None:
-    """아직 채점되지 않은 시도가 왜 멈춰 있는지(#295, #346, #355) — 참여자·강사
-    화면 모두 이 값 하나를 읽어 다르게 그린다. 채점 키가 없거나 벤더가
-    거절했으면 예산과 무관하게 "no_api_key"다 — `Class.scoring_key_unusable()`로
-    판정한다, `scoring._pending_submissions`(스캔 후보)가 거르는 것과 **같은
-    기준**이어야 한다. 여기서 다른 기준을 쓰면 그 기준이 어긋나 실제로는
-    채점되지 않는 시도가 "정상 대기"로 잘못 보일 수 있다. **키가 거부된
-    것과 아예 없는 것을 참여자 화면에서는 구별하지 않는다**(#355 AC) — 강사의
-    계정 문제가 참여자에게 새어 나가지 않는다, 강사 전용 화면(설정·클래스
-    상세 배너)만 그 둘을 다르게 말한다. 키는 멀쩡한데 예산이 바닥났으면
-    "budget_exhausted"(#295)다. 셋 다 아니면 스캔이 정말 채점을 기다리는
+def _pending_reason(score, class_obj: Class, problem: Problem) -> str | None:
+    """아직 채점되지 않은 시도가 왜 멈춰 있는지(#295, #346, #355, #403) —
+    참여자·강사 화면 모두 이 값 하나를 읽어 다르게 그린다. 채점 키가 없거나
+    벤더가 거절했으면 예산·모델과 무관하게 "no_api_key"다 —
+    `Class.scoring_key_unusable()`로 판정한다, `scoring._pending_submissions`
+    (스캔 후보)가 거르는 것과 **같은 기준**이어야 한다. 여기서 다른 기준을
+    쓰면 그 기준이 어긋나 실제로는 채점되지 않는 시도가 "정상 대기"로 잘못
+    보일 수 있다. 키는 멀쩡한데 이 문제의 채점 모델을 그 키로 못 쓰면
+    "model_rejected"(#403)다. **키가 거부된 것과 아예 없는 것, 그리고 모델이
+    거부된 것을 참여자 화면에서는 구별하지 않는다**(#355 AC, #403 AC "참여자
+    에게는 기존 「채점하지 못함」 안내를 보인다") — 강사의 계정·설정 문제가
+    참여자에게 새어 나가지 않는다, 강사 전용 화면(설정·시도 목록·클래스
+    상세 배너)만 다르게 말한다. 키·모델 둘 다 멀쩡한데 예산이 바닥났으면
+    "budget_exhausted"(#295)다. 넷 다 아니면 스캔이 정말 채점을 기다리는
     중이라 `None`(평범한 "채점 중")이다."""
 
     if score is not None:
         return None
     if class_obj.scoring_key_unusable():
         return "no_api_key"
+    if problem.scoring_model_rejected_at is not None:
+        return "model_rejected"
     if class_obj.token_budget_exhausted():
         return "budget_exhausted"
     return None
@@ -412,12 +418,13 @@ def _serialize_classroom_submission(
     user,
     required_item_ids: set[int],
     class_obj: Class,
+    problem: Problem,
 ) -> ClassroomSubmissionOut:
     download_url = (
         _source_download_url(asset, user) if asset.kind == SubmissionAsset.Kind.SOURCE else None
     )
     score = getattr(submission, "classroom_score", None)
-    pending_reason = _pending_reason(score, class_obj)
+    pending_reason = _pending_reason(score, class_obj, problem)
     return ClassroomSubmissionOut(
         id=submission.id,
         problem_id=submission.problem_id,
@@ -458,6 +465,7 @@ def _serialize_instructor_submission(
     asset: SubmissionAsset,
     required_item_ids: set[int],
     class_obj: Class,
+    problem: Problem,
 ) -> ClassroomInstructorSubmissionOut:
     download_url = (
         _instructor_source_download_url(
@@ -480,7 +488,7 @@ def _serialize_instructor_submission(
         status="scored" if score is not None else "pending",
         score=_serialize_score(score) if score is not None else None,
         passed=_is_score_passed(score, required_item_ids),
-        pending_reason=_pending_reason(score, class_obj),
+        pending_reason=_pending_reason(score, class_obj, problem),
     )
 
 
@@ -575,9 +583,15 @@ def update_class(request: HttpRequest, class_id: int, payload: ClassPatchIn):
     if payload.instructor_display_name is not None:
         class_obj.instructor_display_name = payload.instructor_display_name
         update_fields.append("instructor_display_name")
-    if payload.default_model is not None:
+    if payload.default_model is not None and payload.default_model != class_obj.default_model:
         class_obj.default_model = payload.default_model
         update_fields.append("default_model")
+        # 클래스 기본값을 물려받던 문제(자기 모델을 명시하지 않은 것)들은
+        # 새 모델로 다시 시도할 자격을 얻는다(#403 AC "모델을 바꾼 뒤 새
+        # 시도는 새 모델로 채점된다") — 이전 모델이 거부됐던 것이든 아니든,
+        # 값이 실제로 바뀌었으면 그 문제들의 "거부됨" 표시는 더 이상 지금
+        # 값을 설명하지 않는다.
+        class_obj.problems.filter(model="").update(scoring_model_rejected_at=None)
     if payload.default_reasoning_effort is not None:
         class_obj.default_reasoning_effort = payload.default_reasoning_effort
         update_fields.append("default_reasoning_effort")
@@ -1261,6 +1275,12 @@ def update_problem(request: HttpRequest, class_id: int, problem_id: int, payload
     if payload.model is not None:
         problem.model = payload.model
         update_fields.append("model")
+        # 강사가 이 문제의 채점 모델을 손댔으니 재시도할 자격을 준다(#403
+        # AC "모델을 바꾼 뒤 새 시도는 새 모델로 채점된다") — 같은 값을
+        # 다시 보내도 마찬가지다: "설정을 확인했다"는 사실 자체가 재시도
+        # 트리거다, 값이 실제로 달라졌는지는 따지지 않는다.
+        problem.scoring_model_rejected_at = None
+        update_fields.append("scoring_model_rejected_at")
     if payload.reasoning_effort is not None:
         problem.reasoning_effort = payload.reasoning_effort
         update_fields.append("reasoning_effort")
@@ -1355,6 +1375,7 @@ def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
             user=request.auth_user,
             required_item_ids=required_item_ids,
             class_obj=problem.classroom,
+            problem=problem,
         )
         for s in submissions
     ]
@@ -1481,6 +1502,7 @@ def create_classroom_submission(
         user=request.auth_user,
         required_item_ids=required_item_ids,
         class_obj=problem.classroom,
+        problem=problem,
     )
 
 
@@ -1518,6 +1540,7 @@ def list_problem_submissions(request: HttpRequest, class_id: int, problem_id: in
             asset=list(s.assets.all())[0],
             required_item_ids=required_item_ids,
             class_obj=class_obj,
+            problem=problem,
         )
         for s in submissions
     ]

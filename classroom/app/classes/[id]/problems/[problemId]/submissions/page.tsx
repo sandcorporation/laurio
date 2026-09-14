@@ -84,6 +84,12 @@ export default function ProblemSubmissionsPage() {
   const blockedByMissingKey = state.submissions.some(
     (submission) => submission.pending_reason === "no_api_key",
   );
+  // 키는 멀쩡한데 이 문제의 채점 모델을 그 키로 못 쓰는 경우(#403) — 키
+  // 문제와는 다른 사유이고 다음 행동도 다르다(채점 모델을 바꾼다), 그래서
+  // 따로 배너를 낸다.
+  const blockedByRejectedModel = state.submissions.some(
+    (submission) => submission.pending_reason === "model_rejected",
+  );
 
   return (
     <PageShell>
@@ -110,6 +116,17 @@ export default function ProblemSubmissionsPage() {
             message="이 클래스의 채점 키 문제로 일부 시도가 채점되지 않고 있습니다 — 클래스 설정에서 확인해주세요."
             noteTestId="submissions-no-api-key-note"
             settingsLinkTestId="submissions-no-api-key-settings-link"
+          />
+        ) : null}
+
+        {blockedByRejectedModel ? (
+          <MissingScoringKeyNote
+            classId={classId}
+            message="이 키로 쓸 수 없는 채점 모델입니다 — 채점 모델을 바꿔주세요."
+            noteTestId="submissions-model-rejected-note"
+            settingsLinkTestId="submissions-model-rejected-settings-link"
+            actionLabel="채점 모델 바꾸기"
+            settingsAnchor="scoring-model"
           />
         ) : null}
 
@@ -146,7 +163,14 @@ export default function ProblemSubmissionsPage() {
 
                     {submission.status === "pending" ? (
                       <span data-testid={`instructor-submission-row-${submission.id}-status`}>
-                        <Badge tone={submission.pending_reason === "no_api_key" ? "attention" : "neutral"}>
+                        <Badge
+                          tone={
+                            submission.pending_reason === "no_api_key" ||
+                            submission.pending_reason === "model_rejected"
+                              ? "attention"
+                              : "neutral"
+                          }
+                        >
                           {submission.pending_reason ? "채점 대기" : "채점 중"}
                         </Badge>
                       </span>

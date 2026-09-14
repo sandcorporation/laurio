@@ -201,6 +201,17 @@ class Problem(models.Model):
     #: 여기를 바꿔도 이미 산출된 판정은 다시 계산되지 않는다.
     model = models.CharField(max_length=50, blank=True, default="")
 
+    #: 벤더가 이 문제의 채점 모델을 그 클래스의 키로 거부한 시각(#403,
+    #: CONTEXT.md 「채점 모델」 "그 시도는 채점하지 못한 것으로 남는다") —
+    #: null이면 정상이다. `Class.openai_api_key_status`(키 자체의 상태)와는
+    #: 다른 사유라 이 값은 Class가 아니라 Problem에 둔다: 문제마다 다른
+    #: 모델을 고를 수 있어(`model` 필드), 같은 클래스의 다른 문제는 멀쩡히
+    #: 채점될 수 있다. 강사가 이 문제의 모델을 바꾸거나(`model` 필드가
+    #: 실린 PATCH) 클래스 기본값을 바꿔 이 문제가 그 값을 물려받으면
+    #: (`classroom.api`) 다시 `None`으로 풀려 다음 시도부터 채점 후보에
+    #: 든다.
+    scoring_model_rejected_at = models.DateTimeField(null=True, blank=True, default=None)
+
     #: 이 문제만의 추론 강도(#402). 빈 문자열이면 `classroom.
     #: default_reasoning_effort`를 따른다 — `model`/`default_model`과 같은
     #: 모양. 복사(`services.copy_problem_to_class`)·템플릿은 이 값을 옮기지

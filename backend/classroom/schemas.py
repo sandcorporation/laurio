@@ -250,6 +250,11 @@ class ProblemOut(Schema):
     #: 클래스의 `default_reasoning_effort`. 채점 모델이 추론 모델이 아니면
     #: 이 값은 채점에 쓰이지 않는다.
     effective_reasoning_effort: str = ""
+    #: 벤더가 이 문제의 채점 모델을 그 클래스의 키로 거부했는가(#403) —
+    #: 참이면 어느 시도도 채점되지 않는다. 강사가 모델을 바꾸면(이 문제
+    #: 자신의 값이든 클래스 기본값이든, 이 문제가 그 값을 물려받는 한)
+    #: 다시 거짓으로 돌아온다.
+    scoring_model_rejected: bool = False
     #: 채점 지침 단계(#386) — "strict"|"normal"|"lenient"|"custom".
     grading_strictness: str
     #: `grading_strictness`가 "custom"일 때만 채워지고, 그 밖의 단계에서는
@@ -404,12 +409,16 @@ class ClassroomSubmissionOut(Schema):
     #: 이 시도 하나가 통과인가 — 채점된 필수 체크리스트 항목을 전부
     #: 충족했는가(#288). 미채점("pending")이면 항상 거짓이다.
     passed: bool = False
-    #: "no_api_key" | "budget_exhausted" | `None`. `status`가 "pending"일 때만
-    #: 채워진다 — 강사가 채점 키를 아직 설정하지 않았으면(#346) 예산과 무관하게
-    #: "no_api_key", 키는 있는데 예산이 바닥났으면(#295) "budget_exhausted"다.
-    #: 둘 다 참여자가 스스로 어쩔 수 없는 사유라 문구도 "당신 잘못이 아니고
-    #: 다시 낼 필요도 없다"는 같은 모양을 낸다 — 둘을 가르는 것은 강사가 무엇을
-    #: 해야 풀리는가(키를 넣는다/예산을 늘린다)뿐이다.
+    #: "no_api_key" | "budget_exhausted" | "model_rejected" | `None`. `status`가
+    #: "pending"일 때만 채워진다 — 강사가 채점 키를 아직 설정하지 않았으면
+    #: (#346) 예산과 무관하게 "no_api_key", 키는 있는데 예산이 바닥났으면
+    #: (#295) "budget_exhausted", 키는 멀쩡한데 이 문제의 채점 모델을 그
+    #: 키로 못 쓰면(#403) "model_rejected"다. 셋 다 참여자가 스스로 어쩔
+    #: 수 없는 사유라 문구도 "당신 잘못이 아니고 다시 낼 필요도 없다"는 같은
+    #: 모양을 낸다(참여자 화면은 "model_rejected"를 "no_api_key"와 같은
+    #: 안내로 보여준다 — #403 AC "참여자에게는 기존 「채점하지 못함」 안내를
+    #: 보인다") — 강사 화면만 셋을 다르게 말하며, 강사가 무엇을 해야
+    #: 풀리는가(키를 넣는다/예산을 늘린다/모델을 바꾼다)가 다를 뿐이다.
     pending_reason: str | None = None
 
 

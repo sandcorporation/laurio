@@ -5787,6 +5787,11 @@ export interface components {
              * @default
              */
             reasoning_effort: string;
+            /**
+             * Scoring Model Rejected
+             * @default false
+             */
+            scoring_model_rejected: boolean;
             /** Status */
             status: string;
             /** Submission Formats */

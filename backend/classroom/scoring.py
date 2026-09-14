@@ -57,6 +57,7 @@ from core.crypto import decrypt
 from core.llm_scoring import (
     LLMAdapterAuthError,
     LLMAdapterError,
+    LLMAdapterModelRejectedError,
     LLMAdapterPermanentError,
     LLMKeyCheckStatus,
     LLMScoringAdapter,
@@ -390,6 +391,20 @@ def _mark_scoring_key_rejected(class_obj: Class) -> None:
         )
 
 
+def _mark_scoring_model_rejected(problem) -> None:
+    """벤더가 이 Problem의 채점 모델을 그 클래스의 키로 거부했다(#403) —
+    `_mark_scoring_key_rejected`와 같은 자리지만 알림은 없다(#403 AC에
+    없다 — 강사는 시도·제출 현황 화면의 배너로 안다, 예산 경고·키 거부처럼
+    "새로 거부된 순간"을 세어 알릴 필요가 없는 조용한 상태 전이다). 이미
+    켜져 있어도 다시 쓴다 — 값이 최신 실패 시각으로 갱신되는 것 자체는
+    문제가 없고, 별도 잠금이 필요할 만큼 경합이 문제되는 값도 아니다(하나의
+    Problem을 여러 시도가 동시에 이 경로로 치더라도 결과는 같다: "지금
+    거부됐다")."""
+
+    problem.scoring_model_rejected_at = Clock.now()
+    problem.save(update_fields=["scoring_model_rejected_at"])
+
+
 def _notify_submitter_of_score(submission: ClassroomSubmission, score: ClassroomScore, checklist_items: list[ChecklistItem]) -> None:
     """이 시도를 낸 사람에게 채점이 끝났다는 사실을 알린다(#303, #379) — 통과든
     미통과든, 플랫폼 자동 미달이든 매번 정확히 한 번. `_finalize_platform_failure`
@@ -557,6 +572,17 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
         # 규율, 그래야 _scoring_cap_reached가 이 실패로 상한에 닿지 않는다).
         _mark_scoring_key_rejected(class_obj)
         return {"submission_id": submission.id, "status": "key_rejected"}
+    except LLMAdapterModelRejectedError:
+        # 키가 아니라 **이 모델**을 그 키로 못 쓴다(#403, CONTEXT.md 「채점
+        # 모델」) — 키 거부(#355)와 같은 규율이되 옮기는 상태가 다르다:
+        # Class.openai_api_key_status는 그대로 두고 이 Problem의
+        # scoring_model_rejected_at만 켠다. ClassroomScore도
+        # ClassroomScoringAttempt도 남기지 않는다 — key_rejected와 같은
+        # 이유로 "아직 시도하지 않았다"를 유지해야 _scoring_cap_reached가
+        # 이 실패로 상한에 닿지 않는다. 강사가 모델을 바꾸면(`classroom.api`)
+        # 이 값이 풀려 다음 시도부터 다시 채점 후보에 든다.
+        _mark_scoring_model_rejected(problem)
+        return {"submission_id": submission.id, "status": "model_rejected"}
     except LLMAdapterPermanentError as exc:
         ClassroomScoringAttempt.objects.create(submission=submission, error=str(exc)[:2000], permanent=True)
         if _scoring_cap_reached(submission):
@@ -589,17 +615,20 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
 
 def _pending_submissions(as_of, ctx):
     """아직 `ClassroomScore`가 없고, 그 클래스에 채점 키가 있고 그 키가
-    거부되지 않았고, 채점 예산이 바닥나지 않은 시도(#287, #295, #355).
+    거부되지 않았고, 그 문제의 채점 모델이 거부되지 않았고, 채점 예산이
+    바닥나지 않은 시도(#287, #295, #355, #403).
 
-    키 없는 클래스·키가 거부된 클래스·예산이 바닥난 클래스의 시도는 애초에
-    후보가 아니다 — "아직 시도하지 않았다"를 `ClassroomScoringAttempt` 이력
-    없이 유지한다(모듈 docstring). 강사가 새 키를 저장하면(#354의 검증
-    결과로 상태가 덮인다) 다음 tick부터 저절로 후보에 다시 들어온다 —
-    예산이 다시 찼을 때와 같은 원리로, 별도의 "재개" 신호가 필요 없다.
-    `scoring.services._pending_submissions`와 같은 이유로 시도 횟수 오름차순
-    정렬한다(한 번도 시도되지 않은 것이 재시도 중인 것보다 항상 앞선다,
-    ADR-0031) — 예산이 차서 쌓인 시도부터 다시 도는 것도 이 정렬 하나로
-    이미 "쌓인 순서대로"가 된다.
+    키 없는 클래스·키가 거부된 클래스·모델이 거부된 문제·예산이 바닥난
+    클래스의 시도는 애초에 후보가 아니다 — "아직 시도하지 않았다"를
+    `ClassroomScoringAttempt` 이력 없이 유지한다(모듈 docstring). 강사가 새
+    키를 저장하면(#354의 검증 결과로 상태가 덮인다) 또는 그 문제의 모델을
+    바꾸면(`classroom.api`가 `scoring_model_rejected_at`을 지운다) 다음
+    tick부터 저절로 후보에 다시 들어온다 — 예산이 다시 찼을 때와 같은
+    원리로, 별도의 "재개" 신호가 필요 없다. `scoring.services.
+    _pending_submissions`와 같은 이유로 시도 횟수 오름차순 정렬한다(한 번도
+    시도되지 않은 것이 재시도 중인 것보다 항상 앞선다, ADR-0031) — 예산이
+    차서 쌓인 시도부터 다시 도는 것도 이 정렬 하나로 이미 "쌓인 순서대로"가
+    된다.
     """
 
     attempt_count = (
@@ -616,6 +645,7 @@ def _pending_submissions(as_of, ctx):
         )
         .exclude(problem__classroom__openai_api_key_encrypted="")
         .exclude(problem__classroom__openai_api_key_status=Class.ScoringKeyStatus.REJECTED)
+        .exclude(problem__scoring_model_rejected_at__isnull=False)
         .exclude(
             models.Q(problem__classroom__token_budget__isnull=False)
             & models.Q(

@@ -354,6 +354,60 @@ def test_401_status_raises_permanent_error(monkeypatch):
         adapter.score(_scoring_input(requirement_ids=[10]))
 
 
+# --- 모델 거부(#403) — error.code로만 판정한다 -------------------------------------
+
+
+@pytest.mark.parametrize("status_code", [404, 400])
+def test_model_not_found_error_code_raises_model_rejected_error(monkeypatch, status_code):
+    from core.llm_scoring import LLMAdapterModelRejectedError
+
+    error_body = {"error": {"message": "The model does not exist", "code": "model_not_found"}}
+    monkeypatch.setattr(
+        "scoring.adapters.requests.post", lambda *a, **k: _FakeResponse(status_code, error_body)
+    )
+
+    adapter = OpenAIScoringAdapter()
+    with pytest.raises(LLMAdapterModelRejectedError) as exc_info:
+        adapter.score(_scoring_input(requirement_ids=[10]))
+
+    # 여전히 LLMAdapterPermanentError의 부분집합이다 — 공모전이
+    # `except LLMAdapterPermanentError`로 그대로 잡을 수 있다(회귀 없음).
+    assert isinstance(exc_info.value, LLMAdapterPermanentError)
+
+
+def test_a_400_without_the_model_not_found_code_does_not_raise_model_rejected_error(monkeypatch):
+    """같은 400이어도 `error.code`가 다르면(예: 컨텍스트 초과) 모델 거부가
+    아니다 — 사유 구분이 상태 코드가 아니라 벤더가 준 고정 라벨 하나에만
+    의존해야 오분류가 없다."""
+
+    from core.llm_scoring import LLMAdapterModelRejectedError
+
+    error_body = {"error": {"message": "context length exceeded", "code": "context_length_exceeded"}}
+    monkeypatch.setattr("scoring.adapters.requests.post", lambda *a, **k: _FakeResponse(400, error_body))
+
+    adapter = OpenAIScoringAdapter()
+    with pytest.raises(LLMAdapterPermanentError) as exc_info:
+        adapter.score(_scoring_input(requirement_ids=[10]))
+
+    assert not isinstance(exc_info.value, LLMAdapterModelRejectedError)
+
+
+def test_401_does_not_raise_model_rejected_error(monkeypatch):
+    """키 거부(401)는 모델 거부가 아니다 — `LLMAdapterAuthError`로 남아야
+    `classroom.scoring`이 키 상태를 옮기는 그 경로를 그대로 탄다."""
+
+    from core.llm_scoring import LLMAdapterAuthError, LLMAdapterModelRejectedError
+
+    error_body = {"error": {"message": "invalid api key", "code": "invalid_api_key"}}
+    monkeypatch.setattr("scoring.adapters.requests.post", lambda *a, **k: _FakeResponse(401, error_body))
+
+    adapter = OpenAIScoringAdapter()
+    with pytest.raises(LLMAdapterAuthError) as exc_info:
+        adapter.score(_scoring_input(requirement_ids=[10]))
+
+    assert not isinstance(exc_info.value, LLMAdapterModelRejectedError)
+
+
 def test_500_status_does_not_raise_permanent_error(monkeypatch):
     error_body = {"error": {"message": "internal error", "type": "server_error"}}
 
