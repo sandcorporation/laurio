@@ -36,6 +36,12 @@ Next.js + React. 발주자·개발자·방문자가 쓰는 앱이다. 운영자�
 (`core.contest_switch`), 이 앱은
 진입점을 감출 뿐이다. 기본은 켜짐이고 staging 배포만 끈다(`CLAUDE.md` 「배포」).
 
+**헤더·탭에 로고가 있다**(#392, #391 「커밋 노드 C」). 헤더는 심볼(`app/components/
+logo-mark.tsx`)과 Pretendard 워드마크 「Codemit」을 함께 쓴다. 탭 파비콘·홈 화면 추가
+아이콘(`app/icon.tsx`·`app/apple-icon.tsx`)은 잉크 타일에 종이색 획·통과 초록 노드다.
+강의실이 같은 세 파일을 복사본으로 두고 갈라지면 `classroom/lib/design/logo-mark.test.ts`가
+잡는다(토큰·서체와 같은 방식, CLAUDE.md 「프론트엔드」).
+
 **과제(Assignment)는 이 앱에도 백엔드에도 없다**(spec #358 — 과제를 접고 그
 쓰임을 클래스가 맡는다). 화면·전용 모듈·프록시 허용목록 항목(#359), 백엔드
 라우터(#361), 그리고 모델·필드·상태까지(#363) 차례로 걷혔다. 개념은 CONTEXT.md

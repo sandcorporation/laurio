@@ -23,6 +23,7 @@ import { contestProductEnabled } from "@/lib/contest-switch";
 import { classroomAppOrigin } from "@/lib/auth/classroom-link";
 
 import { HeaderSessionZone } from "./header-session-zone";
+import { LogoMark } from "./logo-mark";
 
 export function SiteHeader() {
   // 계정 메뉴의 「클래스로 가기」가 가리킬 곳(#375, spec #371) — 서버 전용
@@ -37,8 +38,9 @@ export function SiteHeader() {
         <Link
           href="/"
           data-testid="header-brand"
-          className="text-[21px] font-bold tracking-[-0.01em] text-ink"
+          className="flex items-center gap-2 text-[21px] font-bold tracking-[-0.01em] text-ink"
         >
+          <LogoMark className="h-6 w-6" />
           Codemit
         </Link>
 
