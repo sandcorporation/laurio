@@ -40,3 +40,13 @@ def run_scan(name: str) -> dict:
     이름과 함께 등록한다(#137). 등록부 밖의 이름은 엔드포인트가 404 로 거부한다."""
 
     return call_internal(f"/api/internal/scans/{name}")
+
+
+@shared_task(name="core.backup_database", ignore_result=True)
+def backup_database() -> dict:
+    """매일 새벽 2시(서울) DB 를 오브젝트 스토리지로 백업한다 — `core.backups` 참고. 스캔과 달리
+    내부 HTTP 를 거치지 않고 워커 안에서 직접 돈다(30초 타임아웃을 넘길 수 있는 작업이다)."""
+
+    from core.backups import run_database_backup
+
+    return run_database_backup()

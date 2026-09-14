@@ -276,6 +276,14 @@ llm_scoring`(#274)에 이어 `core.repository_adapters`(GitHub 저장소 clone·
 | 자료 | `demo-video-retention-purge` |
 | 데모 | `scheduled-state-demo` |
 
+**스캔이 아닌 정해진 시각의 작업이 하나 있다 — 매일 새벽 2시(서울) DB 백업.** beat 가
+`core.backup_database` 를 부르고, 워커가 `pg_dump --format=custom` 결과를 기존 비공개 버킷의
+`db-backups/YYYY/MM/DD/laurio-YYYYMMDD-HHMMSS.dump` 에 올린다. 스캔과 달리 내부 HTTP 를 거치지
+않고 워커 안에서 직접 돈다(30초 타임아웃을 넘길 수 있다). 같은 날 두 번째 실행은 건너뛰고,
+실패한 날은 다음 실행이 다시 시도한다. 보존 기간(`DB_BACKUP_RETENTION_DAYS`, 기본 14일)이 지난
+백업은 기록된 키로 지운다. 이력은 `DatabaseBackup` 행이다. tick 이나 `/scans/{name}` 으로는 돌지
+않는다.
+
 `POST /api/internal/tick` 이 등록 순서로 전부 한 바퀴 돌고, `POST /api/internal/scans/{name}`
 이 하나만 돌린다. **tick 은 시간을 앞당기지 않는다** — 「이미 밀린 일을 beat 를 기다리지
 않고 즉시 처리한다」이다.

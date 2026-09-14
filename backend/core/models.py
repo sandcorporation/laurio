@@ -50,3 +50,31 @@ class ScheduledStateDemo(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover - admin 편의용
         return f"ScheduledStateDemo({self.pk}, {self.state})"
+
+
+class DatabaseBackup(models.Model):
+    """DB 를 오브젝트 스토리지로 백업한 기록 — 매일 새벽 2시(`core.backups`).
+
+    이력이 DB 에 있는 이유: 보존 기간이 지난 백업을 지울 때 스토리지를 목록 조회하지 않고
+    이 행의 키로 지운다(OCI Object Storage 무료 한도가 요청 수로 걸린다). 「오늘 이미
+    했다」 판정도 이 행으로 한다. 백업 파일에는 이 테이블 자신도 들어간다 — 복원하면 그 시점의
+    이력이 돌아온다.
+    """
+
+    class Status(models.TextChoices):
+        RUNNING = "running", "진행 중"
+        SUCCEEDED = "succeeded", "성공"
+        FAILED = "failed", "실패"
+        PRUNED = "pruned", "보존 기간이 지나 삭제됨"
+
+    started_at = models.DateTimeField()
+    finished_at = models.DateTimeField(null=True, blank=True)
+    #: 백업이 속한 서울 기준 날짜 — 하루에 성공한 백업은 하나다.
+    backup_date = models.DateField(db_index=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.RUNNING)
+    object_key = models.CharField(max_length=255, blank=True)
+    size_bytes = models.BigIntegerField(null=True, blank=True)
+    error = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-started_at"]

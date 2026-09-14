@@ -300,6 +300,18 @@ cd backend && uv run python manage.py shell      # ORM 으로 조회
 docker compose -f docker/compose.dev.yaml exec db psql -U laurio -d laurio
 ```
 
+**DB 는 매일 새벽 2시(서울) 오브젝트 스토리지로 백업된다.** beat 의 `backup:database` 가
+워커에서 `pg_dump --format=custom` 을 돌려 비공개 버킷 `db-backups/YYYY/MM/DD/` 에 올리고,
+14일(`DB_BACKUP_RETENTION_DAYS`)이 지난 것은 지운다(`core/backups.py`). 스캔 등록부 밖에서
+**손으로 쓰는 beat 항목은 `config/celery.py` 의 `SCHEDULED_JOBS` 한 자리뿐이다.** DB 가
+`postgres:17` 이라 pg_dump 도 17 이어야 해서 backend 이미지가 PGDG 에서 `postgresql-client-17` 을
+설치한다 — 서버 메이저를 올리면 이 줄도 같이 올린다. **Celery 가 없는 dev 기본 스택에서는 돌지
+않는다.** 복원은 이렇게 한다:
+
+```bash
+pg_restore --clean --if-exists --no-owner -h <host> -U laurio -d laurio laurio-YYYYMMDD-HHMMSS.dump
+```
+
 첫 Operator 는 관리 명령으로 만든다 — 계정 관리 화면이 없기 때문이다.
 `createsuperuser` 는 쓰지 않는다(Operator 와 참가자가 서로소라는 불변식을 모른다):
 
@@ -419,7 +431,7 @@ cd backend && LAURIO_DB_PORT=55432 uv run python manage.py prune_e2e_junk
 `global-setup.ts` 의 순서가 그래서 그 순서다.
 
 **스위트는 기본으로 병렬 실행된다**(#104). `pyproject.toml` 의 `addopts` 가 `-n auto` 를
-준다 — 실측(이 머신, 당시 1192건 — 지금 1975건 통과·1건 skip(S3 체크섬 설정을 합친 시점). Assignment 가 #205~#212 로
+준다 — 실측(이 머신, 당시 1192건 — 지금 1980건 통과·1건 skip(DB 백업을 합친 시점). Assignment 가 #205~#212 로
 1312건에서 1377건까지, staging 검증이 낳은 #214~#217 로 1388건까지, 저장소만으로
 제출하고 채점 시점에 박제하는 #218~#220 으로 1407건까지, 채점 상한과 화면 열한 개
 (#213·#221~#231)로 1463건까지, 종류 게이트(#232)로 1467건까지, 공모전 이미지
