@@ -38,6 +38,7 @@ import { RosterGridTab } from "./roster-grid-tab";
 const STATUS_LABEL: Record<string, string> = {
   draft: "초안",
   open: "열림",
+  hidden: "숨김",
 };
 
 function joinLinkUrl(joinCode: string): string {
@@ -417,7 +418,15 @@ export default function ClassDetailPage() {
                           {problem.title}
                         </Link>
                         <span data-testid={`problem-row-${problem.id}-status`} className="shrink-0">
-                          <Badge tone={problem.status === "open" ? "verified" : "neutral"}>
+                          <Badge
+                            tone={
+                              problem.status === "open"
+                                ? "verified"
+                                : problem.status === "hidden"
+                                  ? "attention"
+                                  : "neutral"
+                            }
+                          >
                             {STATUS_LABEL[problem.status]}
                           </Badge>
                         </span>

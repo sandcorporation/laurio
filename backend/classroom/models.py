@@ -157,8 +157,11 @@ class Problem(models.Model):
     """Class 안의 문제 하나. Contest와 달리 **마감이 없다**(ADR-0039) — 이
     모델에는 마감 필드가 아예 없다. 제출 형식은 소스 또는 저장소뿐이다.
 
-    `status`(초안/열림)는 여기서 이미 구별되고, 참여자가 실제로 열린 것만
-    보게 거르는 표면은 `ClassMember`(#280) 위에 선다.
+    `status`(초안/열림/숨김, #405)는 여기서 이미 구별되고, 참여자가 실제로
+    무엇을 보게 거르는 표면은 `ClassMember`(#280) 위에 선다 — 열린 문제는
+    목록에, 숨긴 문제는 낸 적 있는 사람에게만 읽기 전용으로 남는다
+    (CONTEXT.md 「Problem」). 숨김에서 초안으로 가는 길은 없다 — 이미 낸
+    사람의 기록을 강사가 거둘 수 없기 때문이다.
     """
 
     class SubmissionFormat(models.TextChoices):
@@ -168,6 +171,7 @@ class Problem(models.Model):
     class Status(models.TextChoices):
         DRAFT = "draft", "초안"
         OPEN = "open", "열림"
+        HIDDEN = "hidden", "숨김"
 
     class GradingStrictness(models.TextChoices):
         """채점 지침의 네 단계(#386, CONTEXT.md 「채점 지침」) — 세 단계는

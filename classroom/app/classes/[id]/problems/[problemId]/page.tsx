@@ -37,7 +37,9 @@ import {
   copyProblem,
   createChecklistItem,
   deleteChecklistItem,
+  hideProblem,
   openProblem,
+  reopenProblem,
   reorderChecklistItems,
   updateChecklistItem,
   updateProblem,
@@ -51,6 +53,12 @@ import { useScoringModels } from "@/lib/scoring/use-scoring-models";
 // 화면이 실제로 그리는 값만 담는다(#333, 클래스 설정 화면의
 // `PublishedTemplateState`와 같은 이유) — 전체 템플릿 응답에서 이 둘만 쓴다.
 type PublishedTemplateState = { share_code: string; taken_down: boolean };
+
+const STATUS_LABEL: Record<string, string> = {
+  draft: "초안",
+  open: "열림",
+  hidden: "숨김",
+};
 
 export default function EditProblemPage() {
   const params = useParams<{ id: string; problemId: string }>();
@@ -82,6 +90,12 @@ export default function EditProblemPage() {
   const [newItemRequired, setNewItemRequired] = useState(true);
   const [checklistError, setChecklistError] = useState<string | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
+  // 「숨기기」는 한 번 더 확인을 받는다(#405 AC) — 이미 낸 참여자가 어떻게
+  // 되는지 알고 누르게 하기 위해서다. 다른 버튼들과 달리 클릭 한 번으로
+  // 바로 실행하지 않는다.
+  const [confirmingHide, setConfirmingHide] = useState(false);
+  const [hideError, setHideError] = useState<string | null>(null);
+  const [reopenError, setReopenError] = useState<string | null>(null);
 
   const [targetClassId, setTargetClassId] = useState("");
   const [copying, setCopying] = useState(false);
@@ -301,6 +315,35 @@ export default function EditProblemPage() {
     }
   }
 
+  async function handleHide() {
+    setHideError(null);
+    try {
+      await hideProblem(classId, problemId);
+      setConfirmingHide(false);
+      reload();
+    } catch (err) {
+      if (err instanceof BackendError) {
+        setHideError(err.message);
+      } else {
+        setHideError("문제를 숨기지 못했습니다. 잠시 후 다시 시도해주세요.");
+      }
+    }
+  }
+
+  async function handleReopen() {
+    setReopenError(null);
+    try {
+      await reopenProblem(classId, problemId);
+      reload();
+    } catch (err) {
+      if (err instanceof BackendError) {
+        setReopenError(err.message);
+      } else {
+        setReopenError("문제를 다시 열지 못했습니다. 잠시 후 다시 시도해주세요.");
+      }
+    }
+  }
+
   return (
     <PageShell>
       <PageHeader
@@ -309,8 +352,16 @@ export default function EditProblemPage() {
         titleTestId="edit-problem-heading"
         actions={
           <>
-            <Badge tone={problem.status === "open" ? "verified" : "neutral"}>
-              {problem.status === "open" ? "열림" : "초안"}
+            <Badge
+              tone={
+                problem.status === "open"
+                  ? "verified"
+                  : problem.status === "hidden"
+                    ? "attention"
+                    : "neutral"
+              }
+            >
+              {STATUS_LABEL[problem.status]}
             </Badge>
             <Link
               href={`/classes/${classId}/problems/${problemId}/submissions`}
@@ -319,7 +370,7 @@ export default function EditProblemPage() {
             >
               제출 현황 보기
             </Link>
-            {problem.status === "open" ? null : (
+            {problem.status === "draft" ? (
               <button
                 type="button"
                 data-testid="open-problem-button"
@@ -327,6 +378,24 @@ export default function EditProblemPage() {
                 className={buttonClass("primary")}
               >
                 문제 열기
+              </button>
+            ) : problem.status === "open" ? (
+              <button
+                type="button"
+                data-testid="hide-problem-button"
+                onClick={() => setConfirmingHide(true)}
+                className={buttonClass("danger")}
+              >
+                숨기기
+              </button>
+            ) : (
+              <button
+                type="button"
+                data-testid="reopen-problem-button"
+                onClick={handleReopen}
+                className={buttonClass("primary")}
+              >
+                다시 열기
               </button>
             )}
           </>
@@ -378,9 +447,62 @@ export default function EditProblemPage() {
             </span>
           </Note>
         ) : null}
+        {problem.status === "hidden" ? (
+          // 숨긴 문제는 낸 적 있는 참여자에게 읽기 전용으로만 남는다(#405,
+          // CONTEXT.md 「Problem」) — 강사가 편집·미리보기·제출 현황은
+          // 지금처럼 그대로 쓸 수 있다는 것을 알린다.
+          <Note tone="attention">
+            <span data-testid="edit-problem-hidden-notice">
+              숨긴 문제입니다. 참여자 목록에서 빠졌고 새로 낼 수 없지만, 이미 낸 참여자는 자기
+              시도와 판정을 계속 봅니다.
+            </span>
+          </Note>
+        ) : null}
         {openError ? (
           <ErrorNote>
             <span data-testid="open-problem-error">{openError}</span>
+          </ErrorNote>
+        ) : null}
+        {confirmingHide ? (
+          // 숨기기 전 한 번 더 확인한다(#405 AC "결과를 알고 숨기기 위해서다").
+          <Note tone="attention">
+            <div className="flex flex-col gap-2.5">
+              <span data-testid="hide-problem-confirm-notice">
+                숨기면 참여자 목록에서 빠지고 새로 낼 수 없습니다. 이미 낸 참여자는 자기 시도와
+                판정을 계속 볼 수 있습니다. 숨기시겠습니까?
+              </span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  data-testid="hide-problem-confirm"
+                  onClick={handleHide}
+                  className={buttonClass("danger", "sm")}
+                >
+                  숨기기
+                </button>
+                <button
+                  type="button"
+                  data-testid="hide-problem-cancel"
+                  onClick={() => {
+                    setConfirmingHide(false);
+                    setHideError(null);
+                  }}
+                  className={buttonClass("secondary", "sm")}
+                >
+                  취소
+                </button>
+              </div>
+            </div>
+          </Note>
+        ) : null}
+        {hideError ? (
+          <ErrorNote>
+            <span data-testid="hide-problem-error">{hideError}</span>
+          </ErrorNote>
+        ) : null}
+        {reopenError ? (
+          <ErrorNote>
+            <span data-testid="reopen-problem-error">{reopenError}</span>
           </ErrorNote>
         ) : null}
 

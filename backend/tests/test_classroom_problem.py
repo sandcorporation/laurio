@@ -254,7 +254,7 @@ def test_new_problems_default_to_draft_and_status_is_a_distinct_field(client, db
 
     stored = Problem.objects.get(id=created.json()["id"])
     assert stored.status == Problem.Status.DRAFT
-    assert {choice for choice, _label in Problem.Status.choices} == {"draft", "open"}
+    assert {choice for choice, _label in Problem.Status.choices} == {"draft", "open", "hidden"}
 
 
 def test_instructor_reads_a_single_problem(client, db):
