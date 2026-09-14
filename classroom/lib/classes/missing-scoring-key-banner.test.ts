@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { shouldShowMissingScoringKeyBanner } from "./missing-scoring-key-banner";
+import {
+  shouldShowMissingScoringKeyBanner,
+  shouldShowRejectedScoringKeyBanner,
+} from "./missing-scoring-key-banner";
 
 describe("shouldShowMissingScoringKeyBanner", () => {
   it("진행중 · 키 없음 — 뜬다", () => {
@@ -17,5 +20,47 @@ describe("shouldShowMissingScoringKeyBanner", () => {
 
   it("보관됨 · 키 있음 — 안 뜬다", () => {
     expect(shouldShowMissingScoringKeyBanner({ archived: true, has_openai_key: true })).toBe(false);
+  });
+});
+
+describe("shouldShowRejectedScoringKeyBanner", () => {
+  it("진행중 · 키 거부됨 — 뜬다(#355)", () => {
+    expect(
+      shouldShowRejectedScoringKeyBanner({
+        archived: false,
+        has_openai_key: true,
+        openai_key_status: "rejected",
+      }),
+    ).toBe(true);
+  });
+
+  it("진행중 · 키 확인함 — 안 뜬다", () => {
+    expect(
+      shouldShowRejectedScoringKeyBanner({
+        archived: false,
+        has_openai_key: true,
+        openai_key_status: "verified",
+      }),
+    ).toBe(false);
+  });
+
+  it("진행중 · 키 없음 — 거부 배너는 안 뜬다(「없음」 배너의 몫이다)", () => {
+    expect(
+      shouldShowRejectedScoringKeyBanner({
+        archived: false,
+        has_openai_key: false,
+        openai_key_status: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("보관됨 · 키 거부됨 — 새 제출을 안 받으니 안 뜬다", () => {
+    expect(
+      shouldShowRejectedScoringKeyBanner({
+        archived: true,
+        has_openai_key: true,
+        openai_key_status: "rejected",
+      }),
+    ).toBe(false);
   });
 });

@@ -66,9 +66,12 @@ export default function ProblemSubmissionsPage() {
       : [],
   );
   const problemTitle = problemState.state.status === "ready" ? problemState.state.problem.title : "";
-  // 이 화면은 「학생이 아직 안 냈다」와 「냈는데 강사 본인이 키를 안 넣어
+  // 이 화면은 「학생이 아직 안 냈다」와 「냈는데 강사 본인의 키 문제로
   // 멈췄다」를 헷갈리기 가장 쉬운 자리다(#346) — 시도가 하나라도 그 사유로
-  // 멈춰 있으면 목록 위에서 먼저 알리고 설정으로 가는 길을 준다.
+  // 멈춰 있으면 목록 위에서 먼저 알리고 설정으로 가는 길을 준다. 키가
+  // 아예 없는지 벤더가 거절했는지(#355)는 여기서 갈라 말하지 않는다 —
+  // 이 화면은 문제별 제출 목록만 쥐고 있어 클래스의 키 상태를 따로 묻지
+  // 않는다, 어느 쪽이든 "설정에서 확인해야 한다"는 다음 행동은 같다.
   const blockedByMissingKey = state.submissions.some(
     (submission) => submission.pending_reason === "no_api_key",
   );
@@ -95,7 +98,7 @@ export default function ProblemSubmissionsPage() {
         {blockedByMissingKey ? (
           <MissingScoringKeyNote
             classId={classId}
-            message="이 클래스에 채점 키가 없어 일부 시도가 채점되지 않고 있습니다."
+            message="이 클래스의 채점 키 문제로 일부 시도가 채점되지 않고 있습니다 — 클래스 설정에서 확인해주세요."
             noteTestId="submissions-no-api-key-note"
             settingsLinkTestId="submissions-no-api-key-settings-link"
           />

@@ -7,3 +7,14 @@ export function shouldShowMissingScoringKeyBanner(classroom: {
 }): boolean {
   return !classroom.archived && !classroom.has_openai_key;
 }
+
+// 키는 있는데 벤더가 거절한 상태(#355) — 「키 없음」과는 다른 배너를 띄운다.
+// 강사가 뭘 해야 하는지가 다르다: 없음은 처음 넣어야 하고, 거부됨은 이미
+// 넣은 키를 갈아야 한다.
+export function shouldShowRejectedScoringKeyBanner(classroom: {
+  archived: boolean;
+  has_openai_key: boolean;
+  openai_key_status: "verified" | "unverified" | "rejected" | null;
+}): boolean {
+  return !classroom.archived && classroom.has_openai_key && classroom.openai_key_status === "rejected";
+}

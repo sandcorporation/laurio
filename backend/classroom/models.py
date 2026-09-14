@@ -132,6 +132,16 @@ class Class(models.Model):
 
         return bool((self.openai_api_key_encrypted or "").strip())
 
+    def scoring_key_unusable(self) -> bool:
+        """지금 이 클래스의 채점이 키 때문에 멈춰 있는가(#355) — 키가 아예
+        없거나(`has_scoring_key()`가 거짓) 벤더가 거절해 "거부됨" 상태다.
+        `classroom.scoring._pending_submissions`(스캔 후보)가 거르는 것과
+        `classroom.api._pending_reason`/`_cell_status`(화면)가 참여자에게
+        같은 사유로 묶어 보여주는 것, 둘 다 이 기준 하나를 따라야 어긋나지
+        않는다."""
+
+        return not self.has_scoring_key() or self.openai_api_key_status == self.ScoringKeyStatus.REJECTED
+
 
 class Problem(models.Model):
     """Class 안의 문제 하나. Contest와 달리 **마감이 없다**(ADR-0039) — 이
