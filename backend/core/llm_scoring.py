@@ -36,6 +36,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, Protocol, runtime_checkable
 
 import requests
@@ -130,6 +131,28 @@ class LLMAdapterPermanentError(LLMAdapterError):
     """
 
 
+class LLMAdapterAuthError(LLMAdapterPermanentError):
+    """벤더가 자격증명 자체를 거부했다(401·403, #354·#355) — `LLMAdapterPermanentError`의
+    부분집합이지만, "재시도해도 안 된다"를 넘어 "이 키를 갈아야 한다"는 사실이
+    구조적으로 구별돼야 하는 자리에서만 쓴다. `scoring`(공모전)은 이 하위
+    클래스를 몰라도 된다 — `except LLMAdapterPermanentError`가 그대로 잡으므로
+    공모전 채점의 기존 동작은 한 글자도 바뀌지 않는다(ADR-0037의 경계, #355
+    AC). `classroom.scoring`만 `except LLMAdapterAuthError`를 먼저 잡아 키
+    상태를 "거부됨"으로 옮기고 그 클래스를 채점 후보에서 뺀다."""
+
+
+class LLMKeyCheckStatus(str, Enum):
+    """저장 시점에 벤더에게 키를 확인해 본 결과(#354) — `classroom.models.
+    Class.ScoringKeyStatus`로 저장되는 값과는 어휘가 다르다(이쪽은 "이번
+    확인이 어떻게 끝났는가", 저쪽은 "지금 이 클래스가 어느 상태인가"). 둘을
+    같은 Enum으로 합치지 않는 이유는 저장값에는 이 결과가 아예 없는 경우
+    (키가 없는 클래스)가 있어 뜻이 다르기 때문이다."""
+
+    VALID = "valid"
+    REJECTED = "rejected"
+    UNVERIFIED = "unverified"
+
+
 @runtime_checkable
 class LLMScoringAdapter(Protocol):
     model_version: str
@@ -190,6 +213,9 @@ class FakeLLMScoringAdapter:
 
 
 _OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
+#: 키 확인 전용(#354) — 채점 요청과 달리 모델·프롬프트가 필요 없는 가장 값싼
+#: 인증 확인 엔드포인트다.
+_OPENAI_MODELS_URL = "https://api.openai.com/v1/models"
 _OPENAI_DEFAULT_MODEL = "gpt-4o-mini"
 _OPENAI_DEFAULT_TEMPERATURE = 0
 
@@ -208,10 +234,18 @@ _OPENAI_SYSTEM_PROMPT = (
 )
 
 # 재시도해도 같은 결과가 나오는 HTTP 상태 — 우리 쪽 요청 자체가 잘못됐다는
-# 뜻이다(모델명 오타로 인한 400, 잘못된 자격증명으로 인한 401/403 등). 429(요금
-# 한도)는 4xx여도 시간이 지나면 풀리므로 제외한다 — 무제한 재시도 대상인 5xx·
-# 네트워크 오류와 같은 취급이다(#88 코드리뷰 지적 2).
-_OPENAI_PERMANENT_HTTP_STATUSES = frozenset(range(400, 500)) - {429}
+# 뜻이다(모델명 오타로 인한 400 등). 429(요금 한도)는 4xx여도 시간이 지나면
+# 풀리므로 제외한다 — 무제한 재시도 대상인 5xx·네트워크 오류와 같은 취급이다
+# (#88 코드리뷰 지적 2). 401·403(자격증명 자체의 거부)은 여기 포함되지
+# 않는다 — `_OPENAI_AUTH_HTTP_STATUSES`가 따로 갈라 `LLMAdapterAuthError`로
+# 던진다(#354·#355, 아래 참고).
+_OPENAI_PERMANENT_HTTP_STATUSES = frozenset(range(400, 500)) - {429, 401, 403}
+
+# 벤더가 자격증명 자체를 거부한 HTTP 상태(#354·#355) — `classroom.scoring`이
+# "재시도해도 안 되는 실패" 중에서도 "이 키를 갈아야 하는 실패"만 골라 채점
+# 키 상태를 "거부됨"으로 옮기려면, 그 판정이 예외 메시지 문자열 파싱이 아니라
+# 타입(`LLMAdapterAuthError`)으로 이뤄져야 한다.
+_OPENAI_AUTH_HTTP_STATUSES = frozenset({401, 403})
 
 
 def _openai_verdict_response_schema() -> dict:
@@ -494,6 +528,8 @@ class OpenAIScoringAdapter:
 
         if response.status_code != 200:
             message = _describe_openai_http_error(response, submission_id=scoring_input.submission_id)
+            if response.status_code in _OPENAI_AUTH_HTTP_STATUSES:
+                raise LLMAdapterAuthError(message)
             if response.status_code in _OPENAI_PERMANENT_HTTP_STATUSES:
                 raise LLMAdapterPermanentError(message)
             raise LLMAdapterError(message)
@@ -518,6 +554,31 @@ class OpenAIScoringAdapter:
                 f"OpenAI 응답을 파싱하는 중 예상치 못한 오류가 났다({type(exc).__name__}, "
                 f"submission={scoring_input.submission_id})."
             ) from None
+
+    def check_key(self) -> LLMKeyCheckStatus:
+        """저장 시점에 이 키가 실제로 쓸 수 있는지 벤더에게 한 번 묻는다(#354).
+
+        채점 호출(`/chat/completions`)이 아니라 모델 목록 조회(`/models`)를
+        친다 — 프롬프트도 토큰도 쓰지 않는 가장 값싼 인증 확인이다. 401·403은
+        키가 틀렸다는 확실한 신호(`REJECTED`)이고, 그 밖의 모든 실패(타임아웃·
+        네트워크 오류·5xx·예상 밖의 상태)는 "확인하지 못했다"(`UNVERIFIED`)로
+        묶는다 — 여기서 막으려는 것은 오타이지 벤더의 그 순간 가용성이 아니다.
+        """
+
+        try:
+            response = requests.get(
+                _OPENAI_MODELS_URL,
+                headers={"Authorization": f"Bearer {self._api_key}"},
+                timeout=self._timeout,
+            )
+        except requests.RequestException:
+            return LLMKeyCheckStatus.UNVERIFIED
+
+        if response.status_code in _OPENAI_AUTH_HTTP_STATUSES:
+            return LLMKeyCheckStatus.REJECTED
+        if response.status_code == 200:
+            return LLMKeyCheckStatus.VALID
+        return LLMKeyCheckStatus.UNVERIFIED
 
 
 def get_adapter() -> LLMScoringAdapter:

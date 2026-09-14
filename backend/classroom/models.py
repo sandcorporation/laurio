@@ -30,6 +30,15 @@ def _generate_join_code() -> str:
 
 
 class Class(models.Model):
+    class ScoringKeyStatus(models.TextChoices):
+        """채점 키가 저장 시점에 벤더에게 확인된 결과(#354, ADR-0045). 키가
+        아예 없는 클래스에는 이 값이 뜻이 없다 — `has_scoring_key()`가 그
+        판정을 그대로 맡는다."""
+
+        VERIFIED = "verified", "확인함"
+        UNVERIFIED = "unverified", "미검증"
+        REJECTED = "rejected", "거부됨"
+
     #: 이 클래스를 연 강사. `accounts.SponsorProfile`이 아니라 `User`를 바로
     #: 가리킨다 — 프로필을 쓰지 않기로 한 것 자체가 ADR-0037의 합의다.
     instructor = models.ForeignKey(
@@ -56,6 +65,14 @@ class Class(models.Model):
     #: 한다**는 규율(#284) 때문에, 화면에 보여줄 마스킹은 암호문을 다시 풀지
     #: 않고 저장 시점에 평문에서 떼어 둔 이 값으로만 만든다.
     openai_api_key_last4 = models.CharField(max_length=4, blank=True, default="")
+    #: 이 키가 지금 어느 상태인가(#354, ADR-0045) — 저장할 때 벤더에게 실제로
+    #: 확인한 결과다. 키가 없는 클래스에는 뜻이 없다(`has_scoring_key()`가
+    #: "키 없음"을 따로 판정한다). `REJECTED`가 되면 채점 스캔이 이 클래스를
+    #: 후보에서 뺀다(#355) — 새 키를 저장해 통과하거나 미검증으로 저장되면
+    #: 이 값이 덮여 다시 후보에 든다.
+    openai_api_key_status = models.CharField(
+        max_length=10, choices=ScoringKeyStatus.choices, default=ScoringKeyStatus.UNVERIFIED
+    )
 
     #: 이 클래스의 기본 채점 모델(#285). 문제가 자기 값을 갖지 않으면 이
     #: 값을 쓴다 — `classroom.scoring_models.SCORING_MODEL_CHOICES`에 있는

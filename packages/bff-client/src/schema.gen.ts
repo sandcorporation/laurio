@@ -503,6 +503,13 @@ export interface paths {
          * Set Class Openai Key
          * @description 참여자에게는 어떤 형태로도 보이지 않는다(#284) — 이 엔드포인트도 강사
          *     본인 전용이다. 응답은 마스킹된 `ClassOut`뿐, 평문은 어디에도 싣지 않는다.
+         *
+         *     저장 전에 강의실 채점 어댑터를 통해 이 키를 벤더에게 한 번 확인한다
+         *     (#354, ADR-0045). 벤더가 명시적으로 거부했을 때(401·403)만 저장 자체를
+         *     거절한다 — DB의 기존 키는 그대로 남아 오타 하나가 멀쩡한 옛 키를 밀어내지
+         *     않는다. 벤더에 닿지 못했을 때(타임아웃·5xx·네트워크)는 저장은 성공하되
+         *     상태를 "미검증"으로 남긴다 — 막으려는 것은 오타이지 벤더의 그 순간
+         *     가용성이 아니다.
          */
         put: operations["classroom_api_set_class_openai_key"];
         post?: never;
@@ -3853,6 +3860,8 @@ export interface components {
             name: string;
             /** Openai Key Masked */
             openai_key_masked?: string | null;
+            /** Openai Key Status */
+            openai_key_status?: string | null;
             published_template?: components["schemas"]["PublishedTemplateSummaryOut"] | null;
             /** Token Budget */
             token_budget?: number | null;

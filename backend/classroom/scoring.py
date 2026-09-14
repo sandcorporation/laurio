@@ -49,8 +49,10 @@ from core.adapters import resolve_adapter
 from core.clock import Clock
 from core.crypto import decrypt
 from core.llm_scoring import (
+    LLMAdapterAuthError,
     LLMAdapterError,
     LLMAdapterPermanentError,
+    LLMKeyCheckStatus,
     LLMScoringAdapter,
     OpenAIScoringAdapter,
     RequirementInput,
@@ -129,6 +131,13 @@ class FakeClassroomScoringAdapter:
             )
         return ScoringOutput(verdicts=verdicts, model_version=self.model_version)
 
+    def check_key(self) -> LLMKeyCheckStatus:
+        """dev·CI에서는 저장하는 키가 무엇이든 항상 유효하다(#354 AC) — 그래야
+        가짜 키로 저장하는 기존 흐름이 그대로 돈다. 배포 환경에서는 이
+        어댑터 자체가 존재하지 않는다(부팅 가드, ADR-0043)."""
+
+        return LLMKeyCheckStatus.VALID
+
 
 def _scoring_adapter(*, api_key: str, model: str) -> LLMScoringAdapter:
     """실제 OpenAI 어댑터 또는 결정적 fake 어댑터를 고른다(#340, ADR-0043).
@@ -156,6 +165,18 @@ def _scoring_adapter(*, api_key: str, model: str) -> LLMScoringAdapter:
         ),
         factory_kwargs={"api_key": api_key, "model": model},
     )
+
+
+def check_scoring_key(*, api_key: str) -> LLMKeyCheckStatus:
+    """저장할 때 이 키가 살아 있는지 강의실 채점 어댑터를 통해 한 번 쳐 본다
+    (#354). `_scoring_adapter`와 정확히 같은 스위치(`CLASSROOM_SCORING_
+    ADAPTER_MODE`)를 타므로, dev·CI는 `FakeClassroomScoringAdapter`가 항상
+    유효하다고 답해 가짜 키 저장이 지금처럼 그대로 돌아간다. `model`은 이
+    확인에 쓰이지 않는다(OpenAI의 키 확인은 모델과 무관한 엔드포인트를
+    친다) — `_scoring_adapter`의 인자 모양만 맞추려고 빈 문자열을 넘긴다."""
+
+    adapter = _scoring_adapter(api_key=api_key, model="")
+    return adapter.check_key()
 
 
 def _requirement_inputs(checklist_items: list[ChecklistItem]) -> list[RequirementInput]:

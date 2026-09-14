@@ -21,6 +21,8 @@ export type ClassRow = {
   default_model: string;
   has_openai_key: boolean;
   openai_key_masked: string | null;
+  // 키가 있을 때만 뜻이 있다(#354, ADR-0045) — 없으면 `null`이다.
+  openai_key_status: "verified" | "unverified" | "rejected" | null;
   // 강사가 보관했는가(#294) — 참이면 새 가입·새 제출이 닫히고 읽기만 남는다.
   archived: boolean;
   // `null`이면 무제한(#295) — 강사가 아직 예산을 정하지 않았다는 뜻이다.

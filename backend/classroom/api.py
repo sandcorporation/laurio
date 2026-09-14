@@ -29,6 +29,7 @@ from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
 from core.crypto import encrypt
+from core.llm_scoring import LLMKeyCheckStatus
 from storage.adapters import get_storage_adapter
 from storage.filenames import build_download_filename, safe_download_base_name
 from submissions.models import GITHUB_REPO_URL_PATTERN, Submission, SubmissionAsset
@@ -85,6 +86,7 @@ from .schemas import (
     PublishedTemplateSummaryOut,
     ScoringModelOut,
 )
+from .scoring import check_scoring_key
 from .scoring_models import SCORING_MODEL_CHOICES, is_valid_model
 from .submission_target_refs import source_target_ref
 from .services import copy_class, copy_problem_to_class
@@ -157,6 +159,7 @@ def _serialize_class(class_obj: Class) -> ClassOut:
         default_model=class_obj.default_model,
         has_openai_key=has_key,
         openai_key_masked=_mask_from_last4(class_obj.openai_api_key_last4) if has_key else None,
+        openai_key_status=class_obj.openai_api_key_status if has_key else None,
         archived=class_obj.archived_at is not None,
         token_budget=class_obj.token_budget,
         token_budget_warning_threshold_percent=class_obj.token_budget_warning_threshold_percent,
@@ -516,7 +519,14 @@ def update_class(request: HttpRequest, class_id: int, payload: ClassPatchIn):
 )
 def set_class_openai_key(request: HttpRequest, class_id: int, payload: OpenAIKeyIn):
     """참여자에게는 어떤 형태로도 보이지 않는다(#284) — 이 엔드포인트도 강사
-    본인 전용이다. 응답은 마스킹된 `ClassOut`뿐, 평문은 어디에도 싣지 않는다."""
+    본인 전용이다. 응답은 마스킹된 `ClassOut`뿐, 평문은 어디에도 싣지 않는다.
+
+    저장 전에 강의실 채점 어댑터를 통해 이 키를 벤더에게 한 번 확인한다
+    (#354, ADR-0045). 벤더가 명시적으로 거부했을 때(401·403)만 저장 자체를
+    거절한다 — DB의 기존 키는 그대로 남아 오타 하나가 멀쩡한 옛 키를 밀어내지
+    않는다. 벤더에 닿지 못했을 때(타임아웃·5xx·네트워크)는 저장은 성공하되
+    상태를 "미검증"으로 남긴다 — 막으려는 것은 오타이지 벤더의 그 순간
+    가용성이 아니다."""
 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
 
@@ -524,9 +534,20 @@ def set_class_openai_key(request: HttpRequest, class_id: int, payload: OpenAIKey
     if not raw_key:
         raise HttpError(422, "채점 키를 입력해주세요.")
 
+    check_result = check_scoring_key(api_key=raw_key)
+    if check_result == LLMKeyCheckStatus.REJECTED:
+        raise HttpError(422, "이 채점 키를 벤더가 거절했습니다 — 키를 다시 확인해 저장해주세요.")
+
     class_obj.openai_api_key_encrypted = encrypt(raw_key)
     class_obj.openai_api_key_last4 = raw_key[-4:]
-    class_obj.save(update_fields=["openai_api_key_encrypted", "openai_api_key_last4"])
+    class_obj.openai_api_key_status = (
+        Class.ScoringKeyStatus.VERIFIED
+        if check_result == LLMKeyCheckStatus.VALID
+        else Class.ScoringKeyStatus.UNVERIFIED
+    )
+    class_obj.save(
+        update_fields=["openai_api_key_encrypted", "openai_api_key_last4", "openai_api_key_status"]
+    )
     return 200, _serialize_class(class_obj)
 
 
