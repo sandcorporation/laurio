@@ -58,6 +58,32 @@ logo-mark.tsx`)과 Pretendard 워드마크 「Codemit」을 함께 쓴다. 탭 �
 
 # 공개 화면 — 로그인 없이
 
+## 검색 노출 — `/robots.txt`·`/sitemap.xml`(#394)
+
+**공모전 제품 스위치(ADR-0037)를 요청 시점에 읽어 정한다** — 판정은
+`lib/seo/discoverability.ts`의 순수 함수(`decideRobots`·`decideSitemap`) 하나가
+하고, 두 라우트(Next 파일 컨벤션)는 그 함수를 부르기만 한다. 둘 다
+`CODEMIT_WEB_ORIGIN`(`lib/seo/origin.ts`)을 읽으므로 정적으로 구워지면 안 된다
+(#297).
+
+- **스위치가 꺼지면** `robots.txt`가 전체 수집을 막고(`Disallow: /`), sitemap 은
+  빈 목록이다 — 빈 홈이 「공모전 플랫폼」으로 검색 결과에 뜨지 않는다.
+- **켜지면** `robots.txt`가 `/console`·`/login`만 막고 나머지를 허용하며,
+  sitemap 에 홈·공모전 목록·공개 상태(초안 제외)의 공모전 상세가 실린다 —
+  마감된 것도 계속 공개이므로(ADR-0014) 참가 가능·마감 둘 다 모은다.
+  **개발자 프로필은 아직 sitemap 에 없다** — id 를 모아 나열하는 공개 백엔드
+  표면이 없고, 그건 이 티켓의 범위 밖이라(#394 Testing Decisions) 새로 만들지
+  않았다. 이미 아는 주소가 색인되는 것(canonical·OG)은 아래 절 그대로 된다.
+
+**루트 메타데이터**(`app/layout.tsx`)가 `metadataBase`(`CODEMIT_WEB_ORIGIN`)·
+제목 템플릿(`%s · Codemit`)·기본 OG·트위터 카드를 준다 — 설명은 공모전만
+말한다. 기본 OG 이미지는 `app/opengraph-image.tsx`가 로고와 함께 그린다.
+공모전 상세·개발자 프로필은 각자의 `opengraph-image.tsx`로 이 기본을 덮는다
+(기존 그대로, 워드마크 자리에만 로고가 붙었다).
+
+아래 공개 화면 넷은 각자 **canonical**을 선언한다 — 쿼리가 붙은 주소가 따로
+색인되지 않게 하기 위해서다.
+
 ## `/` 홈
 
 큐레이션된 공모전을 **버킷별로** 보여준다. 버킷마다 제목·목록·「전체 보기」가 있고, 비어

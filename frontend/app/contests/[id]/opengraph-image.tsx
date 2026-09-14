@@ -36,7 +36,18 @@ export default async function ContestOpengraphImage({ params }: { params: Promis
           fontFamily: "sans-serif",
         }}
       >
-        <div style={{ fontSize: 28, letterSpacing: 4, color: "#8B877D" }}>CODEMIT</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+            <path
+              d="M23.07 8.93 A10 10 0 1 0 23.07 23.07"
+              stroke="#8B877D"
+              strokeWidth={3.6}
+              strokeLinecap="round"
+            />
+            <circle cx="23.07" cy="23.07" r="3.9" fill="#2e6a4c" />
+          </svg>
+          <div style={{ fontSize: 28, letterSpacing: 4, color: "#8B877D" }}>CODEMIT</div>
+        </div>
         <div style={{ display: "flex", fontSize: 56, fontWeight: 700, marginTop: 24 }}>{title}</div>
         <div style={{ display: "flex", fontSize: 32, color: "#55524A", marginTop: 20 }}>{subtitle}</div>
       </div>

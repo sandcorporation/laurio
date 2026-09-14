@@ -35,7 +35,7 @@ export async function generateMetadata({
   const contest = contestId === null ? null : await fetchContest(contestId);
 
   if (!contest) {
-    return { title: "공모전을 찾을 수 없습니다 — Codemit" };
+    return { title: "공모전을 찾을 수 없습니다" };
   }
 
   const description =
@@ -46,9 +46,13 @@ export async function generateMetadata({
   // OG 이미지는 `opengraph-image.tsx`(Next 파일 컨벤션, app/contests/[id]/ 아래)가
   // 이 Contest 제목으로 매번 새로 그려 자동으로 이 메타데이터에 연결한다 — 여기서
   // 수동으로 images 를 채우지 않는다.
+  //
+  // title 은 이 Contest 제목만 준다 — 루트 레이아웃의 템플릿("%s · Codemit",
+  // #394)이 뒤에 서비스 이름을 붙인다.
   return {
-    title: `${contest.title} — Codemit`,
+    title: contest.title,
     description,
+    alternates: { canonical: `/contests/${contest.id}` },
     openGraph: {
       title: contest.title,
       description,

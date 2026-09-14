@@ -26,6 +26,12 @@
 // `cache: "no-store"` 만으로는 부족했다. 명시적으로 표시한다.
 export const dynamic = "force-dynamic";
 
+// canonical(#394) — 쿼리가 붙은 주소(있다면)가 따로 색인되지 않게 이 경로
+// 자체를 정식 주소로 선언한다. 제목은 없다 — 루트 레이아웃의 `default`
+// ("Codemit")를 그대로 쓴다(`app/layout.tsx`의 title 템플릿 주석 참고).
+export const metadata: Metadata = { alternates: { canonical: "/" } };
+
+import type { Metadata } from "next";
 import Link from "next/link";
 
 import { Badge, EmptyState, PageHeader, PageShell } from "@/app/components/ui";
