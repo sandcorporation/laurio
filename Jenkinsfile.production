@@ -11,15 +11,14 @@
 // 트리거는 staging 과 같은 GitHub 웹훅(GitHubPushTrigger)을 쓴다. 잡 설정(scriptPath:
 // Jenkinsfile.production)은 저장소 밖의 Jenkins 에 사람이 만든다.
 //
-// **어디서 도는가.** prod 스택이 떠 있는 호스트다 — staging 컨트롤러(`sub`)가 아니다.
-// 그 호스트에 붙인 에이전트의 라벨이 `codemit-prod` 여야 하고, 그 에이전트의 워크스페이스에
-// 사람이 `docker/.env.prod` 를 두고 chmod 600 한다(없으면 deploy.sh 가 preflight 에서
-// 멈춘다). staging 이 커스텀 라벨로 스케줄되지 않았던 것은 **컨트롤러 자신**에 라벨을
-// 붙였을 때의 일이다(staging Jenkinsfile 머리말) — 원격 에이전트는 라벨이 유일한 지정
-// 수단이다.
+// **어디서 도는가.** prod 스택이 떠 있는 Oracle A1 호스트이고, 거기 Jenkins 는 **컨트롤러 자신**이다
+// (별도 에이전트가 없다). 그래서 staging 과 같이 컨트롤러가 항상 갖는 내장 라벨 `built-in` 을 쓴다
+// (Jenkins 2.307+). 커스텀 라벨(`codemit-prod`)을 기본 노드에 붙였는데도 "‘Jenkins’ doesn’t have
+// label" 로 배차되지 않았다 — staging Jenkinsfile 머리말이 적은 것과 같은 실패다. 워크스페이스의
+// `docker/.env.prod` 는 사람이 두고 chmod 600 한다(없으면 deploy.sh 가 preflight 에서 멈춘다).
 
 pipeline {
-  agent { label 'codemit-prod' }
+  agent { label 'built-in' }
 
   options {
     timestamps()
