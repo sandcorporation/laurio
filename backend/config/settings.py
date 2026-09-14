@@ -168,6 +168,10 @@ MIDDLEWARE = [
     # CSP 헤더가 모든 응답에 실제로 붙는다(ADR-0012 — 세 보완책 중 하나라도 빠지면
     # 무효).
     "accounts.middleware.ContentSecurityPolicyMiddleware",
+    # compose 내부 서비스 이름(backend·events)으로 들어온 BFF·스트림 중계 요청을 TLS 프록시를 거친
+    # 요청처럼 다룬다 — 없으면 prod 의 SSL 리다이렉트가 그 요청마다 301 을 내 카카오 로그인이
+    # 막혔다(core/internal_hosts.py). SecurityMiddleware 보다 앞이어야 한다.
+    "core.internal_hosts.InternalServiceHostMiddleware",
     "django.middleware.security.SecurityMiddleware",
     # SecurityMiddleware 바로 다음(whitenoise 공식 권장 위치). 원래는 admin 의
     # CSS/JS 를 서빙하려고 넣었는데 admin 을 내렸으므로(#46, ADR-0019) 지금 이
@@ -1022,3 +1026,7 @@ if IS_PRODUCTION_DEPLOYMENT:
     # 보호된다 — accounts.tokens.py 등 브라우저가 부르는 공개 API와는 다른 신뢰
     # 경계다)는 SSL 리다이렉트 대상에서 뺀다.
     SECURE_REDIRECT_EXEMPT = [r"^api/internal/"]
+
+#: compose 네트워크 안에서만 풀리는 서비스 이름 — 이 이름으로 들어온 요청은 TLS 프록시를 거친
+#: 것으로 친다(core.internal_hosts). 공개 도메인은 여기 넣지 않는다.
+INTERNAL_SERVICE_HOSTS = ("backend", "events")
