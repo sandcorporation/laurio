@@ -70,7 +70,7 @@ def _set_key(client, access: str, class_id: int, key: str = "sk-test-instructor-
 def _create_problem(client, access: str, class_id: int, title: str = "1주차") -> int:
     created = client.post(
         f"{CLASSES_URL}/{class_id}/problems",
-        data={"title": title, "submission_format": "repository"},
+        data={"title": title, "submission_formats": ["repository"]},
         content_type="application/json",
         **_auth_header(access),
     )
@@ -139,7 +139,7 @@ def _members(client, access: str, class_id: int) -> list:
 def _submit_repository(client, access: str, class_id: int, problem_id: int, url: str) -> dict:
     response = client.post(
         f"{CLASSES_URL}/{class_id}/problems/{problem_id}/submissions",
-        data={"value": url},
+        data={"value": url, "submission_format": "repository"},
         content_type="application/json",
         **_auth_header(access),
     )

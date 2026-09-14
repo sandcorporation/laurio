@@ -89,11 +89,19 @@ export default function ProblemSubmitPage() {
 
   const { problem, submissions, member_expelled: memberExpelled, archived } = state.data;
 
-  async function submitValue(value: string, contentType?: string | null) {
+  async function submitValue(
+    submissionFormat: "source" | "repository",
+    value: string,
+    contentType?: string | null,
+  ) {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      await submitAttempt(classId, problemId, { value, content_type: contentType });
+      await submitAttempt(classId, problemId, {
+        submission_format: submissionFormat,
+        value,
+        content_type: contentType,
+      });
       setRepositoryUrl("");
       reload();
     } catch (err) {
@@ -105,7 +113,7 @@ export default function ProblemSubmitPage() {
 
   async function handleRepositorySubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await submitValue(repositoryUrl.trim());
+    await submitValue("repository", repositoryUrl.trim());
   }
 
   async function handleSourceFile(event: ChangeEvent<HTMLInputElement>) {
@@ -114,7 +122,7 @@ export default function ProblemSubmitPage() {
     if (!file) return;
     try {
       const uploaded = await upload(file);
-      await submitValue(uploaded.objectKey, uploaded.contentType);
+      await submitValue("source", uploaded.objectKey, uploaded.contentType);
     } catch {
       // useSourceUpload가 이미 uploadState.error에 이유를 남긴다.
     }
@@ -130,7 +138,7 @@ export default function ProblemSubmitPage() {
         passed={problem.passed}
         description={problem.description}
         checklistItems={problem.checklist_items}
-        submissionFormat={problem.submission_format}
+        submissionFormats={problem.submission_formats}
         submissions={submissions}
         memberExpelled={memberExpelled}
         archived={archived}

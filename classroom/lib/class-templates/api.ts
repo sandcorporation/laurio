@@ -10,7 +10,7 @@ import type { SubmissionFormat } from "@/lib/problems/api";
 export type ClassTemplateProblemRow = {
   title: string;
   description: string;
-  submission_format: SubmissionFormat;
+  submission_formats: SubmissionFormat[];
   order: number;
   checklist_items: TemplateChecklistItemRow[];
 };

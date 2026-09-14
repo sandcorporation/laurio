@@ -47,7 +47,7 @@ def _create_problem(client, access: str, class_id: int, **overrides):
     payload = {
         "title": "3주차 — 서버와 붙이기",
         "description": "긴 설명",
-        "submission_format": "source",
+        "submission_formats": ["source"],
     }
     payload.update(overrides)
     return client.post(

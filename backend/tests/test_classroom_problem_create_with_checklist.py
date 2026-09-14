@@ -47,7 +47,7 @@ def test_creating_a_problem_with_checklist_items_creates_both_in_one_request(cli
         f"{CLASSES_URL}/{class_id}/problems",
         data={
             "title": "1주차 — Todo API",
-            "submission_format": "source",
+            "submission_formats": ["source"],
             "checklist_items": [
                 {"label": "테스트가 통과한다", "required": True},
                 {"label": "README가 있다", "required": False},
@@ -75,7 +75,7 @@ def test_creating_a_problem_without_checklist_items_still_creates_an_empty_draft
 
     response = client.post(
         f"{CLASSES_URL}/{class_id}/problems",
-        data={"title": "1주차", "submission_format": "source"},
+        data={"title": "1주차", "submission_formats": ["source"]},
         content_type="application/json",
         **_auth_header(pair["access"]),
     )
@@ -93,7 +93,7 @@ def test_create_and_open_opens_immediately_when_a_required_item_is_included(clie
         f"{CLASSES_URL}/{class_id}/problems",
         data={
             "title": "1주차",
-            "submission_format": "source",
+            "submission_formats": ["source"],
             "checklist_items": [{"label": "테스트가 통과한다", "required": True}],
             "open": True,
         },
@@ -116,7 +116,7 @@ def test_create_and_open_is_rejected_without_a_required_item_and_creates_nothing
         f"{CLASSES_URL}/{class_id}/problems",
         data={
             "title": "1주차",
-            "submission_format": "source",
+            "submission_formats": ["source"],
             "checklist_items": [{"label": "README가 있다", "required": False}],
             "open": True,
         },
@@ -134,7 +134,7 @@ def test_create_and_open_is_rejected_with_no_checklist_items_at_all(client, db):
 
     response = client.post(
         f"{CLASSES_URL}/{class_id}/problems",
-        data={"title": "1주차", "submission_format": "source", "open": True},
+        data={"title": "1주차", "submission_formats": ["source"], "open": True},
         content_type="application/json",
         **_auth_header(pair["access"]),
     )
@@ -150,7 +150,7 @@ def test_create_without_open_flag_defaults_to_draft_even_with_a_required_item(cl
         f"{CLASSES_URL}/{class_id}/problems",
         data={
             "title": "1주차",
-            "submission_format": "source",
+            "submission_formats": ["source"],
             "checklist_items": [{"label": "테스트가 통과한다", "required": True}],
         },
         content_type="application/json",
@@ -171,7 +171,7 @@ def test_an_invalid_checklist_item_rejects_the_whole_request_and_creates_no_prob
         f"{CLASSES_URL}/{class_id}/problems",
         data={
             "title": "1주차",
-            "submission_format": "source",
+            "submission_formats": ["source"],
             "checklist_items": [{"label": "", "required": True}],
         },
         content_type="application/json",
@@ -192,7 +192,7 @@ def test_a_draft_created_with_a_required_item_can_still_be_opened_later(client, 
         f"{CLASSES_URL}/{class_id}/problems",
         data={
             "title": "1주차",
-            "submission_format": "source",
+            "submission_formats": ["source"],
             "checklist_items": [{"label": "테스트가 통과한다", "required": True}],
         },
         content_type="application/json",

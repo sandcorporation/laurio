@@ -43,7 +43,7 @@ def _create_open_problem(
 ) -> int:
     created = client.post(
         f"{CLASSES_URL}/{class_id}/problems",
-        data={"title": "1주차", "submission_format": submission_format},
+        data={"title": "1주차", "submission_formats": [submission_format]},
         content_type="application/json",
         **_auth_header(access),
     )
@@ -225,7 +225,7 @@ def test_existing_member_cannot_submit_to_an_archived_class(client, db):
 
     response = client.post(
         f"{CLASSES_URL}/{created['id']}/problems/{problem_id}/submissions",
-        data={"value": "https://github.com/octocat/hello"},
+        data={"value": "https://github.com/octocat/hello", "submission_format": "repository"},
         content_type="application/json",
         **_auth_header(participant["access"]),
     )
@@ -241,7 +241,7 @@ def test_archived_classs_past_problems_and_members_are_still_readable(client, db
     _join(client, participant["access"], created["join_code"])
     client.post(
         f"{CLASSES_URL}/{created['id']}/problems/{problem_id}/submissions",
-        data={"value": "https://github.com/octocat/hello"},
+        data={"value": "https://github.com/octocat/hello", "submission_format": "repository"},
         content_type="application/json",
         **_auth_header(participant["access"]),
     )

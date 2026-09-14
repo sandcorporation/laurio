@@ -77,7 +77,7 @@ def _create_open_problem(
 ) -> dict:
     created = client.post(
         f"{CLASSES_URL}/{class_id}/problems",
-        data={"title": title, "submission_format": submission_format},
+        data={"title": title, "submission_formats": [submission_format]},
         content_type="application/json",
         **_auth_header(access),
     )
@@ -121,7 +121,7 @@ def _join(client, access: str, join_code: str, display_name: str = "참여자") 
 def _submit_repository(client, access: str, class_id: int, problem_id: int, url: str) -> dict:
     response = client.post(
         f"{CLASSES_URL}/{class_id}/problems/{problem_id}/submissions",
-        data={"value": url},
+        data={"value": url, "submission_format": "repository"},
         content_type="application/json",
         **_auth_header(access),
     )
@@ -136,7 +136,7 @@ def _source_object_key(problem_id: int, user_id: int) -> str:
 def _submit_source(client, access: str, class_id: int, problem_id: int, object_key: str, content_type: str = "application/zip") -> dict:
     response = client.post(
         f"{CLASSES_URL}/{class_id}/problems/{problem_id}/submissions",
-        data={"value": object_key, "content_type": content_type},
+        data={"value": object_key, "content_type": content_type, "submission_format": "source"},
         content_type="application/json",
         **_auth_header(access),
     )

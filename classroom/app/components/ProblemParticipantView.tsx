@@ -12,6 +12,7 @@
 // 입력은 눌러도 아무 일도 하지 않고(`disabled`), 시도 목록은 항상 빈 채로
 // 그려진다(미리보기에는 참여자 신원이 없어 「내 시도」가 애초에 존재하지
 // 않는다 — 실제로 제출된 적 없는 초안이므로 빈 목록이 사실과도 맞는다).
+import { useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 
 import {
@@ -71,7 +72,7 @@ type ProblemParticipantViewProps = (InteractiveProps | PreviewProps) & {
   passed?: boolean;
   description: string;
   checklistItems: ParticipantChecklistItem[];
-  submissionFormat: SubmissionFormat;
+  submissionFormats: SubmissionFormat[];
   submissions: ClassroomSubmissionRow[];
 };
 
@@ -84,7 +85,7 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
     passed,
     description,
     checklistItems,
-    submissionFormat,
+    submissionFormats,
     submissions,
   } = props;
 
@@ -254,9 +255,9 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
             <CardHeader title="제출" />
             <div className="flex flex-col gap-3.5 p-4">
               {props.interactive ? (
-                <InteractiveSubmissionForm {...props} submissionFormat={submissionFormat} />
+                <InteractiveSubmissionForm {...props} submissionFormats={submissionFormats} />
               ) : (
-                <PreviewSubmissionForm submissionFormat={submissionFormat} />
+                <PreviewSubmissionForm submissionFormats={submissionFormats} />
               )}
             </div>
           </Card>
@@ -267,7 +268,7 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
 }
 
 function InteractiveSubmissionForm(
-  props: InteractiveProps & { submissionFormat: SubmissionFormat },
+  props: InteractiveProps & { submissionFormats: SubmissionFormat[] },
 ) {
   const {
     memberExpelled,
@@ -280,8 +281,16 @@ function InteractiveSubmissionForm(
     submitError,
     uploadStatus,
     uploadError,
-    submissionFormat,
+    submissionFormats,
   } = props;
+
+  // 둘 다 열린 문제는 형식 선택을 먼저 보인다(#373 AC) — 하나만 열린
+  // 문제는 고르는 단계 없이 그 형식의 입력만 보인다.
+  const [chosenFormat, setChosenFormat] = useState<SubmissionFormat | null>(
+    submissionFormats.length === 1 ? submissionFormats[0] : null,
+  );
+  const resolvedFormat = chosenFormat ?? submissionFormats[0];
+  const needsFormatChoice = submissionFormats.length > 1 && chosenFormat === null;
 
   return (
     <>
@@ -308,9 +317,42 @@ function InteractiveSubmissionForm(
             계속 볼 수 있습니다.
           </span>
         </ErrorNote>
+      ) : needsFormatChoice ? (
+        <div data-testid="submission-format-picker" className="flex flex-col gap-2.5">
+          <FieldLabel>낼 형식을 고르세요</FieldLabel>
+          <div className="flex flex-col gap-2">
+            <button
+              type="button"
+              data-testid="submission-format-option-source"
+              onClick={() => setChosenFormat("source")}
+              className={buttonClass("secondary")}
+            >
+              zip 파일
+            </button>
+            <button
+              type="button"
+              data-testid="submission-format-option-repository"
+              onClick={() => setChosenFormat("repository")}
+              className={buttonClass("secondary")}
+            >
+              GitHub 저장소
+            </button>
+          </div>
+        </div>
       ) : (
         <>
-          {submissionFormat === "repository" ? (
+          {submissionFormats.length > 1 ? (
+            <button
+              type="button"
+              data-testid="submission-format-change"
+              onClick={() => setChosenFormat(null)}
+              className="self-start text-[12px] text-ink/45 hover:underline"
+            >
+              다른 형식으로 내기
+            </button>
+          ) : null}
+
+          {resolvedFormat === "repository" ? (
             <form onSubmit={onRepositorySubmit} className="flex flex-col gap-3">
               <div className="flex flex-col gap-1.5">
                 <label htmlFor="repository-url">
@@ -382,7 +424,40 @@ function InteractiveSubmissionForm(
 /** 미리보기 전용 — 참여자가 볼 제출 칸의 **모양**만 보여준다. 입력은
  *  `disabled`라 아무 값도 못 받고, 누를 버튼 자체가 없다(#325 AC "미리보기에서는
  *  실제로 제출되지 않는다"). */
-function PreviewSubmissionForm({ submissionFormat }: { submissionFormat: SubmissionFormat }) {
+function PreviewSubmissionForm({ submissionFormats }: { submissionFormats: SubmissionFormat[] }) {
+  if (submissionFormats.length === 0) {
+    return (
+      <p data-testid="preview-submission-no-format-notice" className="text-[12.5px] text-ink/45">
+        아직 제출 형식을 고르지 않았습니다.
+      </p>
+    );
+  }
+
+  if (submissionFormats.length > 1) {
+    return (
+      <>
+        <div data-testid="submission-format-picker" className="flex flex-col gap-2.5">
+          <FieldLabel>낼 형식을 고르세요</FieldLabel>
+          <div className="flex flex-col gap-2">
+            <button type="button" disabled className={`${buttonClass("secondary")} opacity-60`}>
+              zip 파일
+            </button>
+            <button type="button" disabled className={`${buttonClass("secondary")} opacity-60`}>
+              GitHub 저장소
+            </button>
+          </div>
+        </div>
+        <p
+          className="text-[11.5px] leading-relaxed text-ink/45"
+          data-testid="preview-submission-disabled-note"
+        >
+          미리보기입니다 — 여기서는 실제로 제출되지 않습니다.
+        </p>
+      </>
+    );
+  }
+
+  const submissionFormat = submissionFormats[0];
   return (
     <>
       {submissionFormat === "repository" ? (

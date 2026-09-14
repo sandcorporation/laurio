@@ -40,7 +40,8 @@ export default function NewProblemPage() {
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [submissionFormat, setSubmissionFormat] = useState<SubmissionFormat>("source");
+  // 체크박스 둘(#373) — 최소 하나는 켜져 있어야 저장할 수 있다.
+  const [submissionFormats, setSubmissionFormats] = useState<SubmissionFormat[]>(["source"]);
   // 빈 문자열이 「클래스 기본값을 따릅니다」다 — 편집 화면(#285)과 같은 값이다.
   const [model, setModel] = useState("");
   const modelsState = useScoringModels();
@@ -67,6 +68,12 @@ export default function NewProblemPage() {
   const [newItemRequired, setNewItemRequired] = useState(true);
 
   const hasRequiredItem = items.some((item) => item.required);
+
+  function toggleSubmissionFormat(format: SubmissionFormat, checked: boolean) {
+    setSubmissionFormats((prev) =>
+      checked ? [...prev, format].filter((f, i, arr) => arr.indexOf(f) === i) : prev.filter((f) => f !== format),
+    );
+  }
 
   function handleAddItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -108,7 +115,7 @@ export default function NewProblemPage() {
       const created = await createProblem(classId, {
         title: title.trim(),
         description,
-        submission_format: submissionFormat,
+        submission_formats: submissionFormats,
         model,
         checklist_items: items.map((item) => ({ label: item.label, required: item.required })),
         open,
@@ -230,33 +237,34 @@ export default function NewProblemPage() {
               <div className="flex flex-col gap-2 pt-1">
                 <label className="flex items-center gap-2.5 text-[13.5px]">
                   <input
-                    type="radio"
-                    name="submission_format"
-                    value="source"
-                    checked={submissionFormat === "source"}
-                    onChange={() => setSubmissionFormat("source")}
+                    type="checkbox"
+                    checked={submissionFormats.includes("source")}
+                    onChange={(event) => toggleSubmissionFormat("source", event.target.checked)}
                     data-testid="new-problem-format-source"
                     className="accent-ink"
                   />
-                  소스
+                  zip 파일
                 </label>
                 <label className="flex items-center gap-2.5 text-[13.5px]">
                   <input
-                    type="radio"
-                    name="submission_format"
-                    value="repository"
-                    checked={submissionFormat === "repository"}
-                    onChange={() => setSubmissionFormat("repository")}
+                    type="checkbox"
+                    checked={submissionFormats.includes("repository")}
+                    onChange={(event) => toggleSubmissionFormat("repository", event.target.checked)}
                     data-testid="new-problem-format-repository"
                     className="accent-ink"
                   />
-                  저장소
+                  GitHub 저장소
                 </label>
               </div>
               <span className="text-[11.5px] leading-relaxed text-ink/45">
                 제출된 내용만 보고 채점합니다 — 참여자가 따로 근거를 적거나 스스로 체크할
-                필요는 없습니다.
+                필요는 없습니다. 둘 다 고르면 참여자는 낼 때마다 그중 하나를 고릅니다.
               </span>
+              {submissionFormats.length === 0 ? (
+                <span data-testid="new-problem-format-empty-notice" className="text-[11.5px] text-attention">
+                  하나 이상 골라야 합니다.
+                </span>
+              ) : null}
             </fieldset>
           </form>
         </Card>
@@ -434,7 +442,7 @@ export default function NewProblemPage() {
                 label: item.label,
                 required: item.required,
               }))}
-              submissionFormat={submissionFormat}
+              submissionFormats={submissionFormats}
               submissions={[]}
             />
           </div>
@@ -455,7 +463,7 @@ export default function NewProblemPage() {
             type="submit"
             form="new-problem-form"
             data-testid="new-problem-submit"
-            disabled={submitting || title.trim() === ""}
+            disabled={submitting || title.trim() === "" || submissionFormats.length === 0}
             className={buttonClass("secondary")}
           >
             {submitting ? "만드는 중..." : "만들기"}
@@ -463,7 +471,9 @@ export default function NewProblemPage() {
           <button
             type="button"
             data-testid="new-problem-create-and-open-submit"
-            disabled={submitting || title.trim() === "" || !hasRequiredItem}
+            disabled={
+              submitting || title.trim() === "" || !hasRequiredItem || submissionFormats.length === 0
+            }
             onClick={handleCreateAndOpen}
             className={buttonClass("primary")}
           >

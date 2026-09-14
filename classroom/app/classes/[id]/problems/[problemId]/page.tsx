@@ -56,7 +56,7 @@ export default function EditProblemPage() {
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [submissionFormat, setSubmissionFormat] = useState<SubmissionFormat>("source");
+  const [submissionFormats, setSubmissionFormats] = useState<SubmissionFormat[]>(["source"]);
   const [model, setModel] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,7 +85,7 @@ export default function EditProblemPage() {
     if (state.status === "ready") {
       setTitle(state.problem.title);
       setDescription(state.problem.description);
-      setSubmissionFormat(state.problem.submission_format);
+      setSubmissionFormats(state.problem.submission_formats);
       setModel(state.problem.model);
       // 새로고침해도 공개 상태(공유 링크·「내리기」)가 보이도록 서버가
       // 내려준 「지금 살아 있는 템플릿」으로 맞춘다(#333) — 예전에는 이
@@ -117,6 +117,12 @@ export default function EditProblemPage() {
 
   const { problem } = state;
 
+  function toggleSubmissionFormat(format: SubmissionFormat, checked: boolean) {
+    setSubmissionFormats((prev) =>
+      checked ? [...prev, format].filter((f, i, arr) => arr.indexOf(f) === i) : prev.filter((f) => f !== format),
+    );
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
@@ -125,7 +131,7 @@ export default function EditProblemPage() {
       await updateProblem(classId, problemId, {
         title: title.trim(),
         description,
-        submission_format: submissionFormat,
+        submission_formats: submissionFormats,
         model,
       });
       reload();
@@ -383,36 +389,44 @@ export default function EditProblemPage() {
                   <div className="flex flex-col gap-2 pt-1">
                     <label className="flex items-center gap-2.5 text-[13.5px]">
                       <input
-                        type="radio"
-                        name="submission_format"
-                        value="source"
-                        checked={submissionFormat === "source"}
-                        onChange={() => setSubmissionFormat("source")}
+                        type="checkbox"
+                        checked={submissionFormats.includes("source")}
+                        onChange={(event) => toggleSubmissionFormat("source", event.target.checked)}
                         data-testid="edit-problem-format-source"
                         className="accent-ink"
                       />
-                      소스
+                      zip 파일
                     </label>
                     <label className="flex items-center gap-2.5 text-[13.5px]">
                       <input
-                        type="radio"
-                        name="submission_format"
-                        value="repository"
-                        checked={submissionFormat === "repository"}
-                        onChange={() => setSubmissionFormat("repository")}
+                        type="checkbox"
+                        checked={submissionFormats.includes("repository")}
+                        onChange={(event) => toggleSubmissionFormat("repository", event.target.checked)}
                         data-testid="edit-problem-format-repository"
                         className="accent-ink"
                       />
-                      저장소
+                      GitHub 저장소
                     </label>
                   </div>
+                  <span className="text-[11.5px] leading-relaxed text-ink/45">
+                    둘 다 고르면 참여자는 낼 때마다 그중 하나를 고릅니다. 형식을 꺼도 그
+                    형식으로 이미 낸 시도와 점수는 그대로 남습니다.
+                  </span>
+                  {submissionFormats.length === 0 ? (
+                    <span
+                      data-testid="edit-problem-format-empty-notice"
+                      className="text-[11.5px] text-attention"
+                    >
+                      하나 이상 골라야 합니다.
+                    </span>
+                  ) : null}
                 </fieldset>
 
                 <div>
                   <button
                     type="submit"
                     data-testid="edit-problem-submit"
-                    disabled={saving || title.trim() === ""}
+                    disabled={saving || title.trim() === "" || submissionFormats.length === 0}
                     className={buttonClass("primary")}
                   >
                     {saving ? "저장하는 중..." : "저장"}
@@ -758,7 +772,7 @@ export default function EditProblemPage() {
               title={title.trim() === "" ? "(제목 없음)" : title}
               description={description}
               checklistItems={problem.checklist_items}
-              submissionFormat={submissionFormat}
+              submissionFormats={submissionFormats}
               submissions={[]}
             />
           </div>

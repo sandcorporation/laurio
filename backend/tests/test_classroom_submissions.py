@@ -48,11 +48,12 @@ def _create_class(client, access: str, name: str = "웹 스터디") -> int:
 
 
 def _create_open_problem(
-    client, access: str, class_id: int, submission_format: str = "repository"
+    client, access: str, class_id: int, submission_formats: list[str] | str = "repository"
 ) -> int:
+    formats = [submission_formats] if isinstance(submission_formats, str) else submission_formats
     created = client.post(
         f"{CLASSES_URL}/{class_id}/problems",
-        data={"title": "1주차", "submission_format": submission_format},
+        data={"title": "1주차", "submission_formats": formats},
         content_type="application/json",
         **_auth_header(access),
     )
@@ -103,10 +104,18 @@ def _source_object_key(problem_id: int, user_id: int) -> str:
     return f"classroom-submission:{problem_id}:{user_id}:source/{uuid.uuid4().hex}"
 
 
-def _submit(client, access: str, class_id: int, problem_id: int, value: str, **extra):
+def _submit(
+    client,
+    access: str,
+    class_id: int,
+    problem_id: int,
+    value: str,
+    submission_format: str = "repository",
+    **extra,
+):
     return client.post(
         _submissions_url(class_id, problem_id),
-        data={"value": value, **extra},
+        data={"value": value, "submission_format": submission_format, **extra},
         content_type="application/json",
         **_auth_header(access),
     )
@@ -160,7 +169,9 @@ def test_source_submission_uses_the_shared_submission_asset_model(client, db):
     _join(client, participant["access"], _join_code(client, instructor["access"], class_id))
     object_key = _source_object_key(problem_id, participant["user_id"])
 
-    response = _submit(client, participant["access"], class_id, problem_id, object_key)
+    response = _submit(
+        client, participant["access"], class_id, problem_id, object_key, submission_format="source"
+    )
 
     assert response.status_code == 201, response.content
     submission = ClassroomSubmission.objects.get(id=response.json()["id"])
@@ -180,7 +191,9 @@ def test_source_object_key_must_belong_to_callers_own_target_ref(client, db):
     _join(client, other["access"], _join_code(client, instructor["access"], class_id))
     stolen_key = _source_object_key(problem_id, other["user_id"])
 
-    response = _submit(client, participant["access"], class_id, problem_id, stolen_key)
+    response = _submit(
+        client, participant["access"], class_id, problem_id, stolen_key, submission_format="source"
+    )
 
     assert response.status_code == 422
     assert ClassroomSubmission.objects.count() == 0
@@ -196,6 +209,59 @@ def test_repository_value_must_be_a_github_url(client, db):
     response = _submit(client, participant["access"], class_id, problem_id, "not-a-url")
 
     assert response.status_code == 422
+
+
+def test_a_format_the_problem_does_not_allow_is_rejected_even_if_it_is_a_valid_value(client, db):
+    """#373 AC — 화면을 우회해도 서버가 거절한다. 소스만 여는 문제에 저장소를
+    골라 내면, 그 값 자체는 멀쩡한 GitHub URL이라도 422다."""
+
+    instructor = _login(client, uid="instructor-1")
+    class_id = _create_class(client, instructor["access"])
+    problem_id = _create_open_problem(client, instructor["access"], class_id, "source")
+    participant = _login(client, uid="participant-1")
+    _join(client, participant["access"], _join_code(client, instructor["access"], class_id))
+
+    response = _submit(
+        client,
+        participant["access"],
+        class_id,
+        problem_id,
+        "https://github.com/octocat/hello",
+        submission_format="repository",
+    )
+
+    assert response.status_code == 422
+    assert ClassroomSubmission.objects.count() == 0
+
+
+def test_a_problem_open_to_both_formats_accepts_either_on_different_attempts(client, db):
+    """#373 AC — 둘 다 열린 문제에서 참여자는 시도마다 그중 하나를 골라 낸다."""
+
+    instructor = _login(client, uid="instructor-1")
+    class_id = _create_class(client, instructor["access"])
+    problem_id = _create_open_problem(
+        client, instructor["access"], class_id, ["source", "repository"]
+    )
+    participant = _login(client, uid="participant-1")
+    _join(client, participant["access"], _join_code(client, instructor["access"], class_id))
+    object_key = _source_object_key(problem_id, participant["user_id"])
+
+    source_attempt = _submit(
+        client, participant["access"], class_id, problem_id, object_key, submission_format="source"
+    )
+    repository_attempt = _submit(
+        client,
+        participant["access"],
+        class_id,
+        problem_id,
+        "https://github.com/octocat/hello",
+        submission_format="repository",
+    )
+
+    assert source_attempt.status_code == 201, source_attempt.content
+    assert repository_attempt.status_code == 201, repository_attempt.content
+    assert source_attempt.json()["submission_format"] == "source"
+    assert repository_attempt.json()["submission_format"] == "repository"
 
 
 def test_non_participant_cannot_submit(client, db):
@@ -315,7 +381,7 @@ def test_draft_problem_cannot_be_submitted_to(client, db):
     class_id = _create_class(client, instructor["access"])
     created = client.post(
         f"{CLASSES_URL}/{class_id}/problems",
-        data={"title": "초안", "submission_format": "repository"},
+        data={"title": "초안", "submission_formats": ["repository"]},
         content_type="application/json",
         **_auth_header(instructor["access"]),
     )
@@ -394,6 +460,7 @@ def test_download_filename_is_derived_from_the_submitters_user_email_not_a_devel
         class_id,
         problem_id,
         object_key,
+        submission_format="source",
         content_type="application/zip",
     )
 

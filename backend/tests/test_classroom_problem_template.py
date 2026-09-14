@@ -46,7 +46,7 @@ def _create_problem(
 ) -> int:
     response = client.post(
         f"{CLASSES_URL}/{class_id}/problems",
-        data={"title": title, "description": "설명", "submission_format": submission_format},
+        data={"title": title, "description": "설명", "submission_formats": [submission_format]},
         content_type="application/json",
         **_auth_header(access),
     )
@@ -95,7 +95,7 @@ def test_instructor_publishes_a_problem_as_a_template(client, db):
     body = response.json()
     assert body["title"] == "Todo API"
     assert body["description"] == "설명"
-    assert body["submission_format"] == "source"
+    assert body["submission_formats"] == ["source"]
     assert body["publisher_display_name"] == "김강사"
     assert body["taken_down"] is False
     assert body["share_code"]
@@ -201,10 +201,39 @@ def test_import_creates_a_draft_problem_in_the_target_class(client, db):
     body = response.json()
     assert body["classroom_id"] == target_class
     assert body["title"] == "Todo API"
-    assert body["submission_format"] == "repository"
+    assert body["submission_formats"] == ["repository"]
     assert body["status"] == Problem.Status.DRAFT
     labels_and_required = [(i["label"], i["required"]) for i in body["checklist_items"]]
     assert labels_and_required == [("필수 항목", True), ("선택 항목", False)]
+
+
+def test_publish_and_import_preserve_a_problem_open_to_both_formats(client, db):
+    """#374 AC — 둘 다 열린 문제를 템플릿으로 공개하고 가져와도 두 형식이
+    모두 그대로 남는다(형식 하나로 뭉개지지 않는다)."""
+
+    a = _login(client, uid="instructor-a")
+    b = _login(client, uid="instructor-b")
+    class_id = _create_class(client, a["access"])
+    created = client.post(
+        f"{CLASSES_URL}/{class_id}/problems",
+        data={"title": "Todo API", "submission_formats": ["repository", "source"]},
+        content_type="application/json",
+        **_auth_header(a["access"]),
+    )
+    assert created.status_code == 201
+    problem_id = created.json()["id"]
+
+    published = _publish(client, a["access"], class_id, problem_id, "김강사")
+    assert published.json()["submission_formats"] == ["source", "repository"]
+    share_code = published.json()["share_code"]
+
+    preview = client.get(f"{TEMPLATES_URL}/{share_code}", **_auth_header(b["access"]))
+    assert preview.json()["submission_formats"] == ["source", "repository"]
+
+    target_class = _create_class(client, b["access"], "내 클래스")
+    imported = _import(client, b["access"], share_code, target_class)
+    assert imported.status_code == 201, imported.content
+    assert imported.json()["submission_formats"] == ["source", "repository"]
 
 
 def test_import_does_not_carry_the_scoring_model(client, db):

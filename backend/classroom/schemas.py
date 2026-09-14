@@ -133,7 +133,8 @@ class ChecklistReorderIn(Schema):
 class ProblemIn(Schema):
     title: str = Field(min_length=1, max_length=200)
     description: str = ""
-    submission_format: str
+    #: 강사가 하나 이상 고른 형식(#373) — 빈 목록·모르는 값은 422다.
+    submission_formats: list[str]
     #: 만들기 화면에서 함께 적는 체크리스트 항목(#315) — 순서가 그대로
     #: `ChecklistItem.order`가 된다. 비어 있으면 지금처럼 항목 없는 초안이
     #: 생긴다.
@@ -153,7 +154,9 @@ class ProblemIn(Schema):
 class ProblemPatchIn(Schema):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = None
-    submission_format: str | None = None
+    #: 필드를 생략하면(`None`) 바꾸지 않는다 — 기존 PATCH 관례 그대로다.
+    #: 보내면 빈 목록·모르는 값은 422다(#373).
+    submission_formats: list[str] | None = None
     #: 빈 문자열을 보내면 문제 자신의 모델을 지우고 클래스 기본값을
     #: 따르게 한다 — `None`(필드 생략)은 "바꾸지 않는다"는 기존 PATCH
     #: 관례 그대로다.
@@ -165,7 +168,9 @@ class ProblemOut(Schema):
     classroom_id: int
     title: str
     description: str
-    submission_format: str
+    #: 강사가 받기로 고른 형식들(#373) — 소스·저장소의 비어 있지 않은
+    #: 부분집합.
+    submission_formats: list[str]
     status: str
     order: int
     #: 이 문제 자신의 값. 빈 문자열이면 클래스 기본값을 따른다는 뜻이다.
@@ -247,7 +252,7 @@ class ClassroomProblemMineOut(Schema):
     classroom_id: int
     title: str
     description: str
-    submission_format: str
+    submission_formats: list[str]
     checklist_items: list[ChecklistItemOut] = []
     #: 이 문제를 한 번이라도 통과한 적이 있는가(#288, CONTEXT.md 「통과」) —
     #: 최신 시도가 아니라 시도 전체에 대한 OR다. 한 번 통과하면 나중에 다시
@@ -256,9 +261,12 @@ class ClassroomProblemMineOut(Schema):
 
 
 class ClassroomSubmissionIn(Schema):
+    #: 이 시도에서 고른 형식(#373) — 문제의 허용 목록에 있어야 한다, 없으면
+    #: 422다. 문제가 형식을 하나만 열어 뒀어도 화면이 그 값을 그대로 보낸다
+    #: — 참여자가 고르는 단계가 없을 뿐 페이로드는 항상 명시한다.
+    submission_format: str
     #: `submission_format`이 소스면 storage가 발급한 object_key, 저장소면
-    #: GitHub URL — 종류는 Problem이 이미 정해 두었으므로 페이로드에 다시
-    #: 싣지 않는다(공모전의 다중 자료 배열과 다른 점).
+    #: GitHub URL.
     value: str = Field(min_length=1, max_length=2000)
     #: 업로드 발급 시 받은 content-type(#241과 같은 이유) — 소스가 아니면
     #: 무시한다. 다운로드 파일명의 확장자를 유도한다.
@@ -390,7 +398,7 @@ class ClassroomProblemListItemOut(Schema):
 
     id: int
     title: str
-    submission_format: str
+    submission_formats: list[str]
     passed: bool
 class ProblemCopyIn(Schema):
     target_class_id: int
@@ -408,7 +416,7 @@ class ImportableProblemOut(Schema):
     classroom_name: str
     title: str
     description: str
-    submission_format: str
+    submission_formats: list[str]
     checklist_items: list[ProblemTemplateChecklistItemOut] = []
 
 
@@ -431,7 +439,7 @@ class ProblemTemplateOut(Schema):
     share_code: str
     title: str
     description: str
-    submission_format: str
+    submission_formats: list[str]
     publisher_display_name: str
     created_at: datetime
     taken_down: bool = False
@@ -468,7 +476,7 @@ class ReportedTemplateOut(Schema):
     id: int
     title: str
     description: str
-    submission_format: str
+    submission_formats: list[str]
     publisher_display_name: str
     report_count: int
     report_reasons: list[str]
@@ -486,7 +494,7 @@ class ModerationDecisionIn(Schema):
 class ClassTemplateProblemOut(Schema):
     title: str
     description: str
-    submission_format: str
+    submission_formats: list[str]
     order: int
     checklist_items: list[ProblemTemplateChecklistItemOut] = []
 

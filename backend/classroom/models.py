@@ -135,7 +135,14 @@ class Problem(models.Model):
     classroom = models.ForeignKey(Class, related_name="problems", on_delete=models.CASCADE)
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True, default="")
-    submission_format = models.CharField(max_length=20, choices=SubmissionFormat.choices)
+    #: 강사가 받기로 고른 형식들 — 소스·저장소의 비어 있지 않은 부분집합
+    #: (#373, ADR-0042). 예전 단일 `submission_format`을 대체한다 — 빈 목록은
+    #: API가 422로 거절해 여기 저장되지 않는다. 둘 다 켜진 문제에서 참여자는
+    #: 시도마다 그중 하나를 골라 낸다(`ClassroomSubmissionIn.submission_format`)
+    #: — 시도 하나에 자료는 하나다(Out of Scope). 마이그레이션(0003)이 옛
+    #: 단일 값을 원소 하나짜리 목록으로 옮겼다 — squash 이후 첫 데이터
+    #: 마이그레이션이라 되돌리기 동작도 함께 있다.
+    submission_formats = models.JSONField(default=list)
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.DRAFT)
     #: 클래스 상세에서의 노출 순서. 생성 순서가 아니라 강사가 직접 재배열한다.
     order = models.PositiveIntegerField(default=0)
@@ -337,7 +344,9 @@ class ProblemTemplate(models.Model):
     publisher_display_name = models.CharField(max_length=100)
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True, default="")
-    submission_format = models.CharField(max_length=20, choices=Problem.SubmissionFormat.choices)
+    #: `Problem.submission_formats`와 같은 이유·같은 모양(#373/#374) — 공개
+    #: 시점에 원본이 허용하던 형식 목록을 그대로 사본에 담는다.
+    submission_formats = models.JSONField(default=list)
 
     #: 추측 불가능한 공유 코드 — 가입 링크와 같은 모양, 같은 생성기다(#316
     #: Implementation Decisions "가입 링크와 같은 모양").
@@ -510,7 +519,8 @@ class ClassTemplateProblem(models.Model):
     )
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True, default="")
-    submission_format = models.CharField(max_length=20, choices=Problem.SubmissionFormat.choices)
+    #: `Problem.submission_formats`와 같은 이유·같은 모양(#373/#374).
+    submission_formats = models.JSONField(default=list)
     order = models.PositiveIntegerField(default=0)
 
     class Meta:

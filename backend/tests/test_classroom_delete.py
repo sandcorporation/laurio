@@ -46,7 +46,7 @@ def _create_open_problem(
 ) -> int:
     created = client.post(
         f"{CLASSES_URL}/{class_id}/problems",
-        data={"title": "1주차", "submission_format": submission_format},
+        data={"title": "1주차", "submission_formats": [submission_format]},
         content_type="application/json",
         **_auth_header(access),
     )
@@ -81,7 +81,7 @@ def _join(client, access: str, join_code: str, display_name: str = "참여자") 
 def _submit(client, access: str, class_id: int, problem_id: int) -> dict:
     response = client.post(
         f"{CLASSES_URL}/{class_id}/problems/{problem_id}/submissions",
-        data={"value": "https://github.com/octocat/hello"},
+        data={"value": "https://github.com/octocat/hello", "submission_format": "repository"},
         content_type="application/json",
         **_auth_header(access),
     )

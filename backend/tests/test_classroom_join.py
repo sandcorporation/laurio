@@ -56,7 +56,7 @@ def test_join_preview_shows_class_name_instructor_display_name_problem_count_and
     class_id = created["id"]
     client.post(
         f"{CLASSES_URL}/{class_id}/problems",
-        data={"title": "1주차", "submission_format": "source"},
+        data={"title": "1주차", "submission_formats": ["source"]},
         content_type="application/json",
         **_auth_header(instructor["access"]),
     )

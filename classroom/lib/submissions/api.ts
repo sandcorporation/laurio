@@ -8,7 +8,7 @@ export type ProblemMine = {
   classroom_id: number;
   title: string;
   description: string;
-  submission_format: SubmissionFormat;
+  submission_formats: SubmissionFormat[];
   checklist_items: ChecklistItemRow[];
   // 이 문제를 한 번이라도 통과한 적이 있는가(#288) — 최신 시도가 아니라
   // 시도 전체의 OR. 한 번 통과하면 나중에 미통과가 나와도 계속 참이다.
@@ -20,7 +20,7 @@ export type ProblemMine = {
 export type ProblemListItem = {
   id: number;
   title: string;
-  submission_format: SubmissionFormat;
+  submission_formats: SubmissionFormat[];
   passed: boolean;
 };
 
@@ -85,7 +85,9 @@ export function fetchMyProblems(classId: number): Promise<ProblemListItem[]> {
 export function submitAttempt(
   classId: number,
   problemId: number,
-  input: { value: string; content_type?: string | null },
+  // 이 시도에서 고른 형식(#373) — 문제가 형식을 하나만 열어 뒀어도 화면이
+  // 그 값을 그대로 싣는다, 서버는 문제의 허용 목록 밖이면 거절한다.
+  input: { submission_format: SubmissionFormat; value: string; content_type?: string | null },
 ): Promise<ClassroomSubmissionRow> {
   return backendJson<ClassroomSubmissionRow>(
     `/classroom/classes/${classId}/problems/${problemId}/submissions`,

@@ -45,7 +45,7 @@ def _create_problem(
 ) -> int:
     response = client.post(
         f"{CLASSES_URL}/{class_id}/problems",
-        data={"title": title, "description": "설명", "submission_format": submission_format},
+        data={"title": title, "description": "설명", "submission_formats": [submission_format]},
         content_type="application/json",
         **_auth_header(access),
     )
@@ -87,9 +87,35 @@ def test_instructor_copies_a_problem_to_another_own_class(client, db):
     assert body["classroom_id"] == target_class
     assert body["title"] == "1주차 — Todo API"
     assert body["description"] == "설명"
-    assert body["submission_format"] == "source"
+    assert body["submission_formats"] == ["source"]
     labels_and_required = [(i["label"], i["required"]) for i in body["checklist_items"]]
     assert labels_and_required == [("테스트가 통과한다", True), ("README가 있다", False)]
+
+
+def test_copy_preserves_a_problem_open_to_both_formats(client, db):
+    """#374 AC — 문제 복사가 형식 목록을 보존한다(둘 다 열린 문제도 뭉개지지
+    않는다)."""
+
+    pair = _login(client)
+    source_class = _create_class(client, pair["access"], "1기")
+    target_class = _create_class(client, pair["access"], "2기")
+    created = client.post(
+        f"{CLASSES_URL}/{source_class}/problems",
+        data={"title": "형식 둘", "submission_formats": ["repository", "source"]},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert created.status_code == 201
+    problem_id = created.json()["id"]
+
+    response = client.post(
+        _copy_url(source_class, problem_id),
+        data={"target_class_id": target_class},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert response.status_code == 201
+    assert response.json()["submission_formats"] == ["source", "repository"]
 
 
 def test_copy_always_lands_as_a_draft_even_if_the_original_is_open(client, db):

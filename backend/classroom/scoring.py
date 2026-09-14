@@ -176,7 +176,13 @@ def _requirement_inputs(checklist_items: list[ChecklistItem]) -> list[Requiremen
     ]
 
 
-def _build_prompt(submission: ClassroomSubmission, checklist_items: list[ChecklistItem], source_text: str) -> str:
+def _build_prompt(
+    submission: ClassroomSubmission,
+    checklist_items: list[ChecklistItem],
+    source_text: str,
+    *,
+    asset_kind: str,
+) -> str:
     problem = submission.problem
     lines = [
         f"문제 제목: {problem.title}",
@@ -195,7 +201,10 @@ def _build_prompt(submission: ClassroomSubmission, checklist_items: list[Checkli
         grade = "필수" if item.required else "선택"
         lines.append(f"- requirement_id={item.id} ({grade}): {item.label}")
     lines.append("")
-    lines.append(f"제출 형식: {problem.submission_format}")
+    # 문제가 아니라 **이 시도가 실제로 낸** 자료의 형식을 적는다(#373 AC) —
+    # 둘 다 열린 문제에서는 문제의 값(목록)이 프롬프트 한 줄로 뭉개지지
+    # 않는다.
+    lines.append(f"제출 형식: {asset_kind}")
     lines.append("제출된 소스:")
     lines.append(source_text if source_text.strip() else "(제출된 소스에서 읽을 수 있는 텍스트가 없습니다)")
     return "\n".join(lines)
@@ -400,7 +409,7 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
             return {"submission_id": submission.id, "status": "cap_reached", "score_id": score.id}
         return {"submission_id": submission.id, "status": "failed_permanently"}
 
-    prompt = _build_prompt(submission, checklist_items, source_text)
+    prompt = _build_prompt(submission, checklist_items, source_text, asset_kind=asset.kind)
     scoring_input = ScoringInput(
         submission_id=submission.id,
         # ScoringInput.contest_id는 공모전 전용 필드지만 core.llm_scoring이
