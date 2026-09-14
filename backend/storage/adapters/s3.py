@@ -48,7 +48,17 @@ def _build_client(
         aws_access_key_id=access_key or None,
         aws_secret_access_key=secret_key or None,
         region_name=region,
-        config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+        # **체크섬은 필요할 때만 계산한다.** boto3 1.36~ 는 업로드에 요청 체크섬을 기본으로
+        # 붙이고 바디를 aws-chunked 로 보내는데, OCI Object Storage 의 S3 호환 API 는 그것을
+        # `NotImplemented: AWS chunked encoding not supported` 로 거절한다(실험 버킷 실측,
+        # 2026-09-14). MinIO 는 받아 줘서 dev·staging 에서는 보이지 않는다 — 환경변수
+        # (AWS_REQUEST_CHECKSUM_CALCULATION)로 두면 배포에서 빠뜨리기 쉬워 여기 박는다.
+        config=Config(
+            signature_version="s3v4",
+            s3={"addressing_style": "path"},
+            request_checksum_calculation="when_required",
+            response_checksum_validation="when_required",
+        ),
     )
 
 
