@@ -21,6 +21,7 @@ from django.core.checks import Error
 
 from core.adapters import check_adapter_mode
 
+from .events import EventBus
 from .llm_scoring import LLMScoringAdapter
 from .repository_adapters import GitHubAdapter
 
@@ -31,3 +32,16 @@ def check_llm_adapter_mode(app_configs: Any, **kwargs: Any) -> list[Error]:
 
 def check_github_adapter_mode(app_configs: Any, **kwargs: Any) -> list[Error]:
     return check_adapter_mode(setting_name="GITHUB_ADAPTER_MODE", protocol=GitHubAdapter)
+
+
+def check_event_bus_adapter_mode(app_configs: Any, **kwargs: Any) -> list[Error]:
+    """이벤트 버스 부팅 가드 (#380, ADR-0046) — LLM·GitHub 어댑터와 같은 원칙.
+
+    `EVENT_BUS_ADAPTER_MODE`가 배포 환경에서 "fake"도 아니고 실제로 쓸 수도
+    없으면(임포트 실패·인스턴스화 실패·`EventBus` 계약 불충족) 부팅을
+    거부한다. "fake" 자체를 거부하는 것은 `config/settings.py`가 모듈 임포트
+    시점에 이미 한다 — 이 검사는 dotted path가 **가리키는 값**이 깨졌을 때를
+    잡는다.
+    """
+
+    return check_adapter_mode(setting_name="EVENT_BUS_ADAPTER_MODE", protocol=EventBus)

@@ -35,13 +35,15 @@
 #   알림 채널  : Fake*Adapter           -> 실제 카카오 알림톡/SMS·LMS 벤더(dotted path로
 #               지정, 아직 미구현 — .env.prod에서 반드시 채워야 하는 이유가 이것이다.
 #               구현되지 않은 클래스 이름을 여기 하드코딩하지 않는다)
+#   이벤트 버스 : FakeEventBus          -> core.events_redis.RedisEventBus(ADR-0046,
+#               #380 — 강의실 실시간 신호. 이미 구현돼 있다)
 # config/settings.py의 IS_DEPLOYED_ENVIRONMENT 가드가 이 중 하나라도 fake로 남으면
 # (dotted path가 가리키는 클래스명이 Fake로 시작해도 마찬가지다) 부팅 자체를 거부한다 —
 # staging과 동일한 가드지만, production은 추가로 IS_PRODUCTION_DEPLOYMENT 하드닝
 # (HSTS·SSL 리다이렉트·secure 쿠키·강한 SECRET_KEY, `manage.py check --deploy`가 검증)
 # 도 함께 켜진다. VERIFICATION_ADAPTER_MODE·PAYMENT_ADAPTER_MODE·PAYOUT_ADAPTER_MODE·
 # SELLER_ADAPTER_MODE·LLM_ADAPTER_MODE·LLM_REQUIREMENT_CHAT_ADAPTER_MODE·
-# GITHUB_ADAPTER_MODE(#193)는 그 값이
+# GITHUB_ADAPTER_MODE(#193)·EVENT_BUS_ADAPTER_MODE(#380)는 그 값이
 # "fake"도 아니고 실제로 쓸 수도 없으면(임포트·인스턴스화·계약 충족 중 하나라도
 # 실패하면) 역시 부팅을 거부한다(#83, core.adapters.check_adapter_mode —
 # django.core.checks로 등록되어 django.setup() 이후에만 평가된다). 그래서 실물
@@ -52,6 +54,10 @@
 # 함께 떠야 한다 — compose.staging.yaml과 같은 이유(core/tasks.py, config/celery.py
 # 참고). 이 셋이 없으면 Distribution/환불/Handover/알림/채점의 시간 기반 전이가
 # 배포 직후부터 조용히 멈춘다(코디네이터 리뷰 지적).
+#
+# 이벤트 서비스(ADR-0046, #380): backend와 같은 이미지를 ASGI로 띄우는 별도
+# 서비스(events)가 하나 더 떠야 강의실이 새로고침 없이 화면을 갱신한다 —
+# 없어도 다른 기능은 모두 그대로 동작하고 강의실 화면만 폴링으로 물러난다.
 name: laurio-prod
 
 x-backend-env: &backend-env
@@ -202,6 +208,14 @@ x-backend-env: &backend-env
   CELERY_BROKER_URL: redis://redis:6379/0
   CELERY_RESULT_BACKEND: redis://redis:6379/0
 
+  # --- 이벤트 버스 (ADR-0046, #380) ---
+  # 강의실 실시간 신호. staging의 x-backend-env 앵커와 같은 이유·같은 구조다
+  # (compose.staging.yaml 참고) — fake로 남으면 부팅이 거부된다. 실물
+  # 어댑터는 staging과 같은 값이다(벤더가 아니라 우리 자신의 Redis 위에서
+  # 도는 코드라 환경별로 다른 자격증명이 필요 없다).
+  EVENT_BUS_ADAPTER_MODE: ${EVENT_BUS_ADAPTER_MODE:?이벤트 버스 어댑터의 dotted path를 .env.prod 에 채워라 — core.events_redis.RedisEventBus(ADR-0046)}
+  EVENT_BUS_REDIS_URL: redis://redis:6379/2
+
 services:
   db:
     image: postgres:17-alpine
@@ -288,6 +302,28 @@ services:
         condition: service_started
     environment: *backend-env
     command: celery -A config beat --loglevel info
+
+  # 이벤트 서비스(ADR-0046, #380) — 같은 backend 이미지를 ASGI로 띄우는 별도
+  # 프로세스다(compose.staging.yaml의 events 서비스와 같은 설계·같은 이유).
+  # 기존 API(`backend`)는 그대로 동기 gunicorn이다. 이 프로세스는 강의실
+  # BFF만 내부 네트워크로 부른다 — backend와 달리 리버스 프록시가 직접
+  # 앞에 설 이유가 없으므로 ports: 를 열지 않는다(호스트에도, 127.0.0.1
+  # 에도 publish하지 않는다 — compose 네트워크 안에서만 닿는다).
+  events:
+    build:
+      context: ..
+      dockerfile: docker/backend.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    environment: *backend-env
+    command: >
+      sh -c "uvicorn config.asgi:application --host 0.0.0.0 --port 8001"
 
   # 프론트엔드 BFF(ADR-0016, FE-13 #38). frontend.Dockerfile의 runner 스테이지 —
   # standalone 산출물을 `node server.js`로 그대로 돈다. instrumentation.ts가
@@ -420,9 +456,15 @@ services:
         condition: service_healthy
       backend:
         condition: service_started
+      events:
+        condition: service_started
     environment:
       LAURIO_DEPLOYMENT_TARGET: production
       LAURIO_API_BASE_URL: http://backend:8000
+      # 실시간 신호 SSE 전용 베이스 URL(ADR-0046, #380) — compose.staging.yaml의
+      # classroom 서비스와 같은 이유·같은 구조다. 강의실 BFF가
+      # `/api/classroom/events/stream` 경로 하나만 이쪽으로 갈라 보낸다.
+      LAURIO_EVENTS_BASE_URL: http://events:8001
       # 이 앱 자신의 Origin 검증이 쓰는 값 — 실제 운영 도메인이어야 한다.
       # staging의 값과 같은 값을 쓰지 않는다.
       LAURIO_CLASSROOM_ORIGIN: ${LAURIO_CLASSROOM_ORIGIN:?LAURIO_CLASSROOM_ORIGIN 을 설정해야 한다}

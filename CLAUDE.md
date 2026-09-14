@@ -36,6 +36,32 @@ cd backend && uv run pytest                           # 테스트
 pub/sub 위에 산다 — Celery 브로커(DB 0)·Operator 세션(DB 1)과 같은 Redis
 인스턴스의 DB 2다.
 
+**staging·prod 배포에도 이 서비스가 있다**(#380). `docker/compose.staging.yaml`·
+`docker/compose.prod.yaml`이 각각 `events` 서비스를 backend·celery-worker·
+celery-beat와 같은 `x-backend-env`(STORAGE_*·PAYMENT_* 등 이 프로세스가 실제로
+쓰지 않는 값도 포함 — URLconf·settings.py가 backend와 완전히 같은 코드라서다)로
+띄운다. `EVENT_BUS_ADAPTER_MODE`가 fake로 남으면 다른 `*_ADAPTER_MODE`와 같은
+원칙으로 부팅 자체를 거부한다(`config/settings.py`의 `IS_DEPLOYED_ENVIRONMENT`
+가드 + `core.checks.check_event_bus_adapter_mode`, #83과 같은 두 갈래) — 두 env
+예시 파일이 실물 값(`core.events_redis.RedisEventBus`)을 채워 둔다.
+`deploy.sh`는 `backend/` 변경에 이 서비스를 backend·celery-worker·celery-beat와
+함께 다시 굽고(넷이 이미지 넷이다 — 하나만 갈면 나머지가 옛 이미지에 남는 것은
+celery 둘과 같은 함정이다), 같은 방식(Host 헤더를 붙인 `/api/health`)으로 헬스
+체크한다.
+
+**저장소 밖의 TLS 리버스 프록시는 이 스트림을 버퍼링하면 안 된다.** SSE는 응답을
+끊지 않고 계속 흘려보내는데, 프록시가 응답을 통째로 모았다가 한 번에 내보내면
+(nginx의 `proxy_buffering` 기본값이 그렇다) 화면이 신호를 몇 초~몇 분 늦게
+받거나 연결이 곧바로 끊긴 것처럼 보인다 — 코드가 아니라 그 앞단 설정의 문제라
+이 저장소 안에서는 재현도 수정도 안 된다. `classroom.laurio.honeycombpizza.link`를
+서빙하는 프록시가 `/api/backend/classroom/events/stream` 경로(또는 그 도메인
+전체)에 대해 버퍼링을 끄고, 유휴 연결을 짧게 끊지 않도록 타임아웃도 넉넉히
+잡아야 한다 — storage.honeycombpizza.link의 버킷 생성과 같은 종류의 저장소 밖
+수작업이다(위 「staging 은 떠 있다」의 TLS 종단 프록시 문단 참고). 설정을
+잊으면 강의실 실시간 갱신이 "가끔 늦게 온다" 또는 "아예 안 온다"로 보이고,
+화면은 스트림이 끊기거나 막히면 폴링으로 물러나도록 설계돼 있어 기능 자체가
+멈추지는 않는다(ADR-0046 결과 — "신호는 진실의 출처가 아니다").
+
 호스트에서 `uv run pytest`를 돌릴 때 붙는 DB 포트 기본값도 `LAURIO_DB_PORT`를 따라간다
 (`backend/config/settings.py`). 컨테이너 안에서는 compose가 `POSTGRES_*`를 직접 주입한다.
 
@@ -85,7 +111,9 @@ DB·Redis·MinIO·이벤트 서비스·세 앱(#276부터 강의실이, #379부�
 `TossPGAdapter`(#87) · `TossPayoutAdapter`·`TossSellerAdapter`(#57) ·
 `OpenAIScoringAdapter`(#88) · `OpenAIRequirementChatAdapter` ·
 `GitHubAPIAdapter`(#193) · 알림 3채널(`AligoAlimtalkAdapter`·`AligoSmsAdapter`·
-`AligoLmsAdapter`). 각 dotted path 는 `docker/staging.env.example` 에 그대로 적혀 있다.
+`AligoLmsAdapter`) · `RedisEventBus`(#380, ADR-0046 — 벤더 연동이 아니라 우리
+자신의 Redis 위에서 도는 코드라 다른 일곱과 달리 "아직 미구현"인 적이 없었다).
+각 dotted path 는 `docker/staging.env.example` 에 그대로 적혀 있다.
 
 **staging은 공모전이 꺼져 있다 — 고장이 아니라 껐다**(#271, ADR-0037). 방향이
 바뀌어 공모전은 나중을 위한 기능이 됐고, 지금 사람을 모을 것은 강의실이다.
@@ -121,11 +149,12 @@ Score의 PROTECT 때문에 지울 수도 없고(아래 「테스트」 절의 �
 
 **그래도 가드는 그대로다.** `core.adapters.check_adapter_mode`(`django.core.checks` 로
 등록되어 `django.setup()` 이후 `manage.py migrate`/`check`/`runserver` 부팅 파이프라인에서
-평가된다, #83)가 **열한 값**(`VERIFICATION_ADAPTER_MODE`·`PAYMENT_ADAPTER_MODE`·
+평가된다, #83)가 **열두 값**(`VERIFICATION_ADAPTER_MODE`·`PAYMENT_ADAPTER_MODE`·
 `PAYOUT_ADAPTER_MODE`·`SELLER_ADAPTER_MODE`·`LLM_ADAPTER_MODE`·
 `CLASSROOM_SCORING_ADAPTER_MODE`(#340, ADR-0043 — 강의실 채점 전용, `LLM_ADAPTER_MODE`와
 별개다)·`LLM_REQUIREMENT_CHAT_ADAPTER_MODE`·`GITHUB_ADAPTER_MODE`(#193)·
-`NOTIFICATION_ALIMTALK_ADAPTER`·`NOTIFICATION_SMS_ADAPTER`·`NOTIFICATION_LMS_ADAPTER`)이
+`NOTIFICATION_ALIMTALK_ADAPTER`·`NOTIFICATION_SMS_ADAPTER`·`NOTIFICATION_LMS_ADAPTER`·
+`EVENT_BUS_ADAPTER_MODE`(#380, ADR-0046 — 강의실 실시간 신호)이
 배포 환경에서 fake 이거나 임포트되지 않으면 부팅 자체를 거부한다 — 컨테이너가 뜬 채로 첫 요청에서야 죽는 것보다 정직하게 못 뜨는 편이다.
 
 `config/settings.py`의 `IS_DEPLOYED_ENVIRONMENT`(staging+production)가 fake 어댑터
@@ -187,19 +216,29 @@ freestyle 이었고 셸 스텝이 `sh ./deploy.sh staging` 하나뿐이라 `Jenk
 `deploy.sh` 는 **바뀐 것만 다시 굽는다**. 기준점은 `.jenkins-staging-deployed`
 (gitignore, 빌드 디렉터리에 남는다 — 시크릿과 같은 전제). 그 파일이 없거나 그것이
 가리키는 커밋이 저장소에 없으면 전부 굽는다. 경로 → 서비스 팬아웃은 1:1 이 아니다:
-`backend/` 는 **backend + celery-worker + celery-beat** 를 함께 갈고(셋은 같은
-Dockerfile 을 쓰지만 공유 `image:` 태그가 없어 **이미지가 셋**이다 — `build backend`
-만 하면 워커 둘은 옛 이미지에 남고, `up -d` 는 바뀐 게 없으니 Running 이라 적고
-지나가 배포가 초록으로 끝난 채 스캔만 옛 코드로 돈다),
+`backend/` 는 **backend + celery-worker + celery-beat + events**(#380, ADR-0046)를
+함께 갈고(넷은 같은 Dockerfile 을 쓰지만 공유 `image:` 태그가 없어 **이미지가
+넷**이다 — `build backend` 만 하면 나머지 셋은 옛 이미지에 남고, `up -d` 는 바뀐
+게 없으니 Running 이라 적고 지나가 배포가 초록으로 끝난 채 스캔·강의실 실시간
+신호만 옛 코드로 돈다),
 `packages/bff-shared/` 와 `pnpm-lock.yaml` 은 **frontend + operator + classroom**(#277)을
 함께 간다 — `packages/bff-client/` 는 아직 **frontend + operator** 뿐이다(강의실은 이
 패키지를 쓰지 않는다, 위 「프론트엔드」절 참고). 없는 컨테이너는 변경 여부와 무관하게
 굽는다 — 「없음」은 「최신」이 아니다.
 
+**이벤트 서비스가 없어도 배포는 실패로 끝나지 않는다 — 다만 헬스 체크는 있다.**
+`events` 는 `backend`·`celery-worker`·`celery-beat` 와 같은 무게로 굽고 바꿔
+끼우지만, 그 프로세스가 죽으면 강의실 화면만 폴링으로 물러난다(ADR-0046 결과 —
+스트림은 진실의 출처가 아니다). 그래도 `deploy.sh` 는 다른 서비스와 똑같이
+`/api/health` 로 응답을 확인한다 — 옛 코드가 조용히 계속 도는 것과, 프로세스가
+아예 죽어 있는 것은 다른 문제이고 후자는 배포 실패로 다뤄야 하기 때문이다.
+
 **헬스 체크는 Host 헤더를 붙여야 한다.** 루프백으로 치면 Host 가 `127.0.0.1` 이
 되는데 그건 `ALLOWED_HOSTS` 에 없어 Django 가 400 을 낸다 — gunicorn 이 멀쩡히
 떠 있어도 배포가 실패로 끝난다(빌드 #5 가 세 이미지를 다 굽고 다섯 컨테이너를 다
-띄운 뒤 그렇게 죽었다). 스크립트는 `DJANGO_ALLOWED_HOSTS` 의 첫 항목을 쓴다.
+띄운 뒤 그렇게 죽었다). 스크립트는 `DJANGO_ALLOWED_HOSTS` 의 첫 항목을 쓴다 —
+`events` 의 `/api/health` 확인도 같은 규약을 따른다(URLconf 가 `backend` 와
+완전히 같은 코드다).
 
 **Jenkins 는 staging 배포 호스트에 있다 — 개발 머신이 아니다.** 아래 `docker exec
 jenkins` 와 `/server/jenkins/...` 는 그 호스트에서만 유효하다(개발 머신에서 치면

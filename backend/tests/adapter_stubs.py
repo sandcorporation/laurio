@@ -130,3 +130,13 @@ class StubLmsChannelAdapter:
 
     def send(self, *, recipient, notification):
         raise NotImplementedError("배포 가드 검증 전용 stub — 실제로 호출되면 안 된다.")
+
+
+class StubEventBus:
+    """`core.events.EventBus` 계약을 구조적으로 만족한다(#380)."""
+
+    def publish(self, event):
+        raise NotImplementedError("배포 가드 검증 전용 stub — 실제로 호출되면 안 된다.")
+
+    def subscribe(self, recipient_id: int):
+        raise NotImplementedError("배포 가드 검증 전용 stub — 실제로 호출되면 안 된다.")
