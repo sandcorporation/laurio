@@ -12,23 +12,11 @@ import { expect, test } from "@playwright/test";
 // 보는 것은 이 앱 혼자 완결되는 계약뿐이다 — 쿠키가 없으면 막힌다는 것.
 
 test.describe("미들웨어 가드 — 콘텐츠가 그려지기 전에 리다이렉트한다", () => {
-  test("세션 쿠키가 전혀 없으면 / 요청 자체가 302/307로 /login을 가리킨다", async ({
-    request,
-  }) => {
-    const res = await request.get("/", { maxRedirects: 0 });
-    expect([302, 307]).toContain(res.status());
-    expect(res.headers()["location"]).toContain("/login");
-  });
-
-  test("리다이렉트를 따라가도 보호된 콘텐츠는 응답 본문에 한 조각도 없다", async ({
-    page,
-  }) => {
-    await page.context().clearCookies();
-    await page.goto("/");
-    await expect(page).toHaveURL(/\/login/);
-    await expect(page.getByTestId("classroom-home-heading")).toHaveCount(0);
-    await expect(page.getByTestId("classroom-empty-state")).toHaveCount(0);
-  });
+  // **루트("/")는 더 이상 여기서 검증하지 않는다**(#395) — 세션 쿠키가 없어도
+  // /login으로 튕기지 않고 랜딩을 SSR 한다. 그 계약은
+  // `frontend/e2e/classroom/landing.spec.ts`가 전담한다(JS 끔 SSR·쿠키 분기·
+  // robots·sitemap·아이콘). 예전에는 이 자리에 "/ 는 쿠키가 없으면 /login으로
+  // 튕긴다"는 두 스펙이 있었다 — 루트가 가드 예외가 되며 거짓이 됐다.
 
   test("아직 화면이 없는 경로도 가드된다 — 화이트리스트가 아니라 예외 목록이다", async ({
     request,

@@ -37,7 +37,7 @@ export async function generateMetadata({
   const profile = developerId === null ? null : await fetchDeveloperProfile(developerId);
 
   if (!profile) {
-    return { title: "개발자를 찾을 수 없습니다 — Codemit" };
+    return { title: "개발자를 찾을 수 없습니다" };
   }
 
   const description =
@@ -47,9 +47,13 @@ export async function generateMetadata({
 
   // OG 이미지는 opengraph-image.tsx(같은 디렉터리)가 이 프로필 이름으로 매번
   // 새로 그려 자동으로 연결한다 — app/contests/[id]/page.tsx 와 같은 컨벤션.
+  //
+  // title 은 "이름 개발자 프로필"까지만 준다 — 루트 레이아웃의 템플릿
+  // ("%s · Codemit", #394)이 뒤에 서비스 이름을 붙인다.
   return {
-    title: `${profile.display_name} — Codemit 개발자 프로필`,
+    title: `${profile.display_name} 개발자 프로필`,
     description,
+    alternates: { canonical: `/developers/${developerId}` },
     openGraph: {
       title: profile.display_name,
       description,

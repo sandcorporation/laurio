@@ -4,6 +4,8 @@ import localFont from "next/font/local";
 import type { ReactNode } from "react";
 import "./globals.css";
 
+import { webAppOrigin } from "@/lib/seo/origin";
+
 import { SiteHeader } from "./components/site-header";
 
 // 본문 서체는 Pretendard, 등폭은 IBM Plex Mono 다.
@@ -41,9 +43,30 @@ const ibmPlexMono = IBM_Plex_Mono({
   display: "swap",
 });
 
+// **기준 주소(metadataBase)와 기본 OG·트위터 카드**(#394, #391 Implementation
+// Decisions 「공개 앱 메타데이터·SEO」). 설명은 공모전만 말한다 — 이 앱은
+// 공모전 이야기만 한다(`app/page.tsx` 「빈 화면이 합의된 답이다」와 같은 원칙).
+// 기본 OG 이미지는 `app/opengraph-image.tsx`(Next 파일 컨벤션)가 로고와 함께
+// 그린다 — 공모전 상세·개발자 프로필은 각자의 `opengraph-image.tsx`로 이 기본을
+// 덮는다.
+//
+// **제목 템플릿**(`%s · Codemit`)은 자식 페이지가 문자열 하나만 주는 제목에
+// 적용된다 — 홈처럼 제목을 아예 안 주는 페이지는 `default`("Codemit")를 그대로
+// 쓴다.
 export const metadata: Metadata = {
-  title: "Codemit",
+  metadataBase: new URL(webAppOrigin()),
+  title: { default: "Codemit", template: "%s · Codemit" },
   description: "발주자가 상금을 걸고 요구사항을 공개하면, 개발자들이 만들어 제출하는 공개 공모전 플랫폼",
+  openGraph: {
+    title: "Codemit",
+    description: "발주자가 상금을 걸고 요구사항을 공개하면, 개발자들이 만들어 제출하는 공개 공모전 플랫폼",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Codemit",
+    description: "발주자가 상금을 걸고 요구사항을 공개하면, 개발자들이 만들어 제출하는 공개 공모전 플랫폼",
+  },
 };
 
 // **정적으로 구워지면 안 된다**(#297, #375, `lib/rendering/runtime-config.test.ts`).

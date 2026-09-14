@@ -24,7 +24,10 @@ import { describe, expect, it } from "vitest";
 
 const APP_ROOT = path.resolve(__dirname, "..", "..");
 const SCAN_DIRS = ["app", "lib"];
-const ENTRY_BASENAMES = ["page.tsx", "route.ts", "layout.tsx"];
+// robots.ts·sitemap.ts(#395)도 Next 파일 컨벤션 진입점이다 — 둘 다
+// `CODEMIT_CLASSROOM_ORIGIN`(`lib/seo/origin.ts`)을 읽으므로 대상에 넣지
+// 않으면 이 검사가 그 두 라우트를 조용히 지나친다.
+const ENTRY_BASENAMES = ["page.tsx", "route.ts", "layout.tsx", "robots.ts", "sitemap.ts"];
 
 /** `process.env.X` — 단, NEXT_PUBLIC_ 은 빌드 시점 주입이 계약이므로 뺀다. */
 const RUNTIME_ENV = /process\.env\.(?!NEXT_PUBLIC_)([A-Z0-9_]+)/g;

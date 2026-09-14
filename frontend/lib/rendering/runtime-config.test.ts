@@ -26,7 +26,10 @@ import { describe, expect, it } from "vitest";
 
 const APP_ROOT = path.resolve(__dirname, "..", "..");
 const SCAN_DIRS = ["app", "lib"];
-const ENTRY_BASENAMES = ["page.tsx", "route.ts", "layout.tsx"];
+// robots.ts·sitemap.ts(#394)도 Next 파일 컨벤션 진입점이다 — 둘 다
+// `CODEMIT_WEB_ORIGIN`(`lib/seo/origin.ts`)을 읽으므로 대상에 넣지 않으면 이
+// 검사가 그 두 라우트를 조용히 지나친다.
+const ENTRY_BASENAMES = ["page.tsx", "route.ts", "layout.tsx", "robots.ts", "sitemap.ts"];
 
 /** 이 티켓이 헤더 경로에 새로 얹은 런타임 설정 — 대상 목록이 늘면 여기에
  * 추가한다. `NEXT_PUBLIC_*`는 대상이 아니다(빌드 시점 번들 주입이 계약,

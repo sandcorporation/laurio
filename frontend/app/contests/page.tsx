@@ -10,6 +10,7 @@
 // 수 있는 수를 넘는 순간 뒤쪽이 목록에서 **조용히 사라졌다**(예외도 빈 화면도
 // 아니다). 링크 클릭은 여전히 전부 진짜 내비게이션이라 "서버가 렌더링한다"는
 // 인수조건은 그대로다.
+import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -32,6 +33,10 @@ import {
   formatSubmissionCount,
   isImminent,
 } from "@/lib/contest-format";
+
+// canonical(#394) — 필터·정렬·페이지 쿼리가 무엇이든 이 경로 하나로
+// 정식 주소를 고정한다. 쿼리별로 따로 색인되지 않게 하기 위해서다.
+export const metadata: Metadata = { title: "공모전", alternates: { canonical: "/contests" } };
 
 type SearchParams = { [key: string]: string | string[] | undefined };
 

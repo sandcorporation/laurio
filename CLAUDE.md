@@ -734,6 +734,15 @@ page/route 는 `export const dynamic = "force-dynamic"` 을 선언해야 한다)
 배지 하나뿐이고(동그란 표식, 2026-09-13 결정) 그 목록이 검사 파일 안에 있다. 새 CI 잡이 아니라 공개 앱의
 `test:unit` 에 얹혀 있다. 운영자 앱은 토큰 파일이 없어 대상이 아니다.
 
+**로고도 토큰·서체와 같은 방식으로 복사한다**(#392, #391 「커밋 노드 C」). 원본은
+`frontend/app/components/logo-mark.tsx`(SVG 심볼)와 그것을 그리는
+`frontend/app/icon.tsx`·`frontend/app/apple-icon.tsx`(Next 아이콘 파일 컨벤션)다.
+`classroom/app/`의 같은 세 파일은 복사본이고, `classroom/lib/design/logo-mark.test.ts`가
+한 글자라도 갈리면 빨개진다. 운영자 앱은 아이콘만 있고(주의색 타일 — 탭에서 다른 두
+앱과 구별하기 위해서다) 헤더 로고도 이 비교도 없다. **강의실 가드의 matcher 는 아이콘
+경로(`/icon`·`/apple-icon`)도 인증 구역에서 뺀다**(`classroom/middleware.ts`) — 안 그러면
+비로그인 탭이 아이콘을 요청할 때마다 `/login`으로 튕긴다.
+
 **`test:classroom` 만 `--pass-with-no-tests` 를 붙인다.** 세 스크립트는 2단계다 —
 `@exclusive` 아닌 것을 병렬로 돌리고, `@exclusive` 를 워커 하나로 다시 돈다. 그런데
 강의실에는 아직 `@exclusive` 스펙이 없어 둘째 명령이 「No tests found」로 **exit 1**
