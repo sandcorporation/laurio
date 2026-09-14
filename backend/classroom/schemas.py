@@ -295,6 +295,11 @@ class ClassroomProblemMineOut(Schema):
     title: str
     description: str
     submission_formats: list[str]
+    #: 채점 지침 단계(#388, CONTEXT.md 「채점 지침」) — 참여자도 어떤 기준으로
+    #: 판정되는지 알고 제출해야 한다(#385 User Story 18).
+    grading_strictness: str
+    #: `grading_strictness`가 "custom"일 때만 채워진다.
+    grading_guideline_text: str
     checklist_items: list[ChecklistItemOut] = []
     #: 이 문제를 한 번이라도 통과한 적이 있는가(#288, CONTEXT.md 「통과」) —
     #: 최신 시도가 아니라 시도 전체에 대한 OR다. 한 번 통과하면 나중에 다시

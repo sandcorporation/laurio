@@ -300,6 +300,8 @@ def _serialize_problem_mine(problem: Problem, *, passed: bool = False) -> Classr
         title=problem.title,
         description=problem.description,
         submission_formats=problem.submission_formats,
+        grading_strictness=problem.grading_strictness,
+        grading_guideline_text=problem.grading_guideline_text,
         checklist_items=[_serialize_checklist_item(i) for i in problem.checklist_items.all()],
         passed=passed,
     )

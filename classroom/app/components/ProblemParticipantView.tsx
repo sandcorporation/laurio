@@ -29,7 +29,8 @@ import {
 import { ProblemDescription } from "@/app/components/ProblemDescription";
 import type { UploadStatus } from "@/lib/submissions/use-source-upload";
 import type { ClassroomSubmissionRow } from "@/lib/submissions/api";
-import type { SubmissionFormat } from "@/lib/problems/api";
+import type { GradingStrictness, SubmissionFormat } from "@/lib/problems/api";
+import { gradingGuidelineText, gradingStrictnessLabel } from "@/lib/problems/grading-guideline";
 
 export type ParticipantChecklistItem = {
   id: number;
@@ -74,6 +75,12 @@ type ProblemParticipantViewProps = (InteractiveProps | PreviewProps) & {
   passed?: boolean;
   description: string;
   checklistItems: ParticipantChecklistItem[];
+  /** 채점 지침 단계(#388, CONTEXT.md 「채점 지침」) — 참여자가 어떤 기준으로
+   *  판정되는지 알고 제출하도록 체크리스트 가까이 보여준다. */
+  gradingStrictness: GradingStrictness;
+  /** `gradingStrictness`가 "custom"일 때의 강사 문장 — 그 밖의 단계에서는
+   *  쓰이지 않는다(단계→화면 문장 함수가 저장소 문장을 대신 쓴다). */
+  gradingGuidelineCustomText: string;
   submissionFormats: SubmissionFormat[];
   submissions: ClassroomSubmissionRow[];
 };
@@ -87,6 +94,8 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
     passed,
     description,
     checklistItems,
+    gradingStrictness,
+    gradingGuidelineCustomText,
     submissionFormats,
     submissions,
   } = props;
@@ -125,6 +134,21 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
 
           <Card>
             <CardHeader title="체크리스트" hint={`필수 ${requiredCount}개를 전부 충족하면 통과`} />
+            <div
+              data-testid="my-problem-grading-guideline"
+              className="flex flex-col gap-1 border-b border-rule px-4 py-3"
+            >
+              <div className="flex items-center gap-2">
+                <Badge>{gradingStrictnessLabel(gradingStrictness)}</Badge>
+                <span className="text-[12px] font-medium text-ink/60">채점 지침</span>
+              </div>
+              <p
+                data-testid="my-problem-grading-guideline-text"
+                className="text-[12.5px] leading-relaxed text-ink/60"
+              >
+                {gradingGuidelineText(gradingStrictness, gradingGuidelineCustomText)}
+              </p>
+            </div>
             <ul data-testid="my-problem-checklist" className="divide-y divide-rule">
               {checklistItems.map((item) => (
                 <li

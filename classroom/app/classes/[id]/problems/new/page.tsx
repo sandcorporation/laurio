@@ -467,6 +467,8 @@ export default function NewProblemPage() {
                 label: item.label,
                 required: item.required,
               }))}
+              gradingStrictness={gradingGuideline.grading_strictness}
+              gradingGuidelineCustomText={gradingGuideline.grading_guideline_text}
               submissionFormats={submissionFormats}
               submissions={[]}
             />

@@ -812,6 +812,8 @@ export default function EditProblemPage() {
               title={title.trim() === "" ? "(제목 없음)" : title}
               description={description}
               checklistItems={problem.checklist_items}
+              gradingStrictness={gradingGuideline.grading_strictness}
+              gradingGuidelineCustomText={gradingGuideline.grading_guideline_text}
               submissionFormats={submissionFormats}
               submissions={[]}
             />
