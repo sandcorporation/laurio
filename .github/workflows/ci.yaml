@@ -239,6 +239,9 @@ jobs:
       # env.example 둘)은 갱신됐는데 이 잡의 env 만 빠졌고, 체인의 로컬 게이트
       # (pytest·typecheck)는 이 잡을 돌리지 않아 볼 수 없었다.
       GITHUB_ADAPTER_MODE: tests.adapter_stubs.StubGitHubAdapter
+      # #380 — 이벤트 버스도 배포 부팅 가드 대상이 됐다. #193 과 똑같이 스텁(StubEventBus)은
+      # 저장소에 들어갔는데 이 잡의 env 만 빠져 main 에서 이 잡이 빨갛게 났다(8ffa788).
+      EVENT_BUS_ADAPTER_MODE: tests.adapter_stubs.StubEventBus
       # #89: RealAlimtalkAdapter/RealSmsAdapter/RealLmsAdapter는 저장소에 없는
       # 클래스였다 — 그 사실이 부팅 가드 없이는 드러나지 않았다. 실물 벤더
       # 어댑터(#51, notifications.adapters_aligo)는 이제 존재하지만, 이 잡은
