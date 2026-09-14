@@ -24,6 +24,7 @@ import { MarkdownEditor } from "@/app/components/MarkdownEditor";
 import { ProblemParticipantView } from "@/app/components/ProblemParticipantView";
 import { TemplatePickerSheet } from "@/app/components/TemplatePickerSheet";
 import { BackendError } from "@/lib/backend/client";
+import { useClass } from "@/lib/classes/use-class";
 import { createProblem, type ProblemRow, type SubmissionFormat } from "@/lib/problems/api";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
 
@@ -36,6 +37,10 @@ type DraftChecklistItem = {
 export default function NewProblemPage() {
   const params = useParams<{ id: string }>();
   const classId = Number(params.id);
+  // 미리보기 눈썹이 참여자 화면과 같이 클래스 이름을 말한다(#372 후속). 불러오는 중에는
+  // 비워 둔다 — 「클래스」 같은 자리표시를 잠깐 보였다 바꾸면 깜빡임만 는다.
+  const { state: classState } = useClass(classId);
+  const previewEyebrow = classState.status === "ready" ? classState.classroom.name : "";
   const router = useRouter();
 
   const [title, setTitle] = useState("");
@@ -435,6 +440,7 @@ export default function NewProblemPage() {
             <ProblemParticipantView
               interactive={false}
               headingLevel="h2"
+              eyebrow={previewEyebrow}
               title={title.trim() === "" ? "(제목 없음)" : title}
               description={description}
               checklistItems={items.map((item) => ({

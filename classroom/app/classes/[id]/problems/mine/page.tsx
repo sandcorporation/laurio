@@ -5,11 +5,13 @@
 // 클래스가 아예 없는 것처럼 404를 받으므로, 참여자 표면은 여기와
 // problems/[problemId]/submit 뿐이다.
 //
-// **이 클래스에서 불릴 이름을 이 화면 위쪽에서 인라인으로 바꾼다**(#372) —
-// 따로 설정 화면을 두지 않는다, 가입할 때 한 번 정한 이름을 나중에 고칠
-// 유일한 자리가 여기다. 내보내진 참여자·보관된 클래스는 편집 칸 자체를
-// 내지 않는다 — 강사가 문제를 열지 못하게 하는 것과 같은 신호
-// (`memberExpelled`·`archived`)를 그대로 쓴다.
+// **이 클래스에서 불릴 이름을 이 화면 헤더 오른쪽에서 그 자리에서 바꾼다**(#372,
+// 자리는 #372 후속) — 따로 설정 화면을 두지 않는다, 가입할 때 한 번 정한 이름을
+// 나중에 고칠 유일한 자리가 여기다. 처음엔 목록 위의 카드였는데, 가끔 쓰는
+// 설정이 이 화면의 주인공인 목록과 같은 무게로 서 있었다. 눈썹은 클래스 이름이다
+// — 이름이 클래스마다 따로라는 사실은 어느 클래스인지가 옆에 있어야 뜻이 통한다.
+// 내보내진 참여자·보관된 클래스는 이름만 보이고 「바꾸기」가 없다 — 강사가 문제를
+// 열지 못하게 하는 것과 같은 신호(`memberExpelled`·`archived`)를 그대로 쓴다.
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -20,7 +22,6 @@ import {
   Card,
   EmptyState,
   ErrorNote,
-  FieldLabel,
   INPUT_CLASS,
   PageHeader,
   PageShell,
@@ -30,13 +31,16 @@ import { BackendError } from "@/lib/backend/client";
 import { renameMyself } from "@/lib/submissions/api";
 import { useMyProblems } from "@/lib/submissions/use-my-problems";
 
-function MyDisplayNameCard({
+function MyDisplayName({
   classId,
   displayName,
+  editable,
   onRenamed,
 }: {
   classId: number;
   displayName: string;
+  /** 내보내진 참여자·보관된 클래스면 거짓 — 이름은 보이되 「바꾸기」가 없다. */
+  editable: boolean;
   onRenamed: () => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -73,65 +77,65 @@ function MyDisplayNameCard({
   }
 
   return (
-    <Card className="mb-5">
-      <div className="flex flex-col gap-2.5 p-4">
-        {editing ? (
-          <form onSubmit={handleSubmit} className="flex flex-col gap-2.5">
-            <label htmlFor="my-display-name-input">
-              <FieldLabel>이 클래스에서 불릴 이름</FieldLabel>
-            </label>
-            <div className="flex flex-wrap items-center gap-2">
-              <input
-                id="my-display-name-input"
-                data-testid="my-display-name-input"
-                value={nameInput}
-                onChange={(event) => setNameInput(event.target.value)}
-                required
-                maxLength={100}
-                className={`${INPUT_CLASS} min-w-[200px] flex-1`}
-              />
-              <button
-                type="submit"
-                data-testid="my-display-name-submit"
-                disabled={saving || nameInput.trim() === ""}
-                className={buttonClass("primary", "sm")}
-              >
-                {saving ? "저장하는 중..." : "저장"}
-              </button>
+    <div className="flex flex-col items-end gap-1">
+      {editing ? (
+        <form onSubmit={handleSubmit} className="flex flex-wrap items-center justify-end gap-2">
+          <input
+            id="my-display-name-input"
+            data-testid="my-display-name-input"
+            aria-label="이 클래스에서 불릴 이름"
+            value={nameInput}
+            onChange={(event) => setNameInput(event.target.value)}
+            required
+            maxLength={100}
+            autoFocus
+            className={`${INPUT_CLASS} w-[200px]`}
+          />
+          <button
+            type="submit"
+            data-testid="my-display-name-submit"
+            disabled={saving || nameInput.trim() === ""}
+            className={buttonClass("primary", "sm")}
+          >
+            {saving ? "저장하는 중..." : "저장"}
+          </button>
+          <button
+            type="button"
+            data-testid="my-display-name-cancel"
+            onClick={cancel}
+            disabled={saving}
+            className={buttonClass("secondary", "sm")}
+          >
+            취소
+          </button>
+        </form>
+      ) : (
+        <p className="text-[13px] text-ink/60">
+          내 이름{" "}
+          <b data-testid="my-display-name" className="font-medium text-ink">
+            {displayName}
+          </b>
+          {editable ? (
+            <>
+              <span aria-hidden="true"> · </span>
               <button
                 type="button"
-                data-testid="my-display-name-cancel"
-                onClick={cancel}
-                disabled={saving}
-                className={buttonClass("secondary", "sm")}
+                data-testid="my-display-name-edit"
+                onClick={() => setEditing(true)}
+                className="text-ink/60 underline underline-offset-2 hover:text-ink"
               >
-                취소
+                바꾸기
               </button>
-            </div>
-          </form>
-        ) : (
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-[13.5px]">
-              이 클래스에서 <b data-testid="my-display-name" className="text-ink">{displayName}</b>
-              (으)로 불립니다.
-            </p>
-            <button
-              type="button"
-              data-testid="my-display-name-edit"
-              onClick={() => setEditing(true)}
-              className={buttonClass("secondary", "sm")}
-            >
-              이름 바꾸기
-            </button>
-          </div>
-        )}
-        {error ? (
-          <ErrorNote>
-            <span data-testid="my-display-name-error">{error}</span>
-          </ErrorNote>
-        ) : null}
-      </div>
-    </Card>
+            </>
+          ) : null}
+        </p>
+      )}
+      {error ? (
+        <span data-testid="my-display-name-error" className="text-[12px] text-attention">
+          {error}
+        </span>
+      ) : null}
+    </div>
   );
 }
 
@@ -170,13 +174,13 @@ export default function MyProblemsPage() {
     );
   }
 
-  const { problems, memberDisplayName, memberExpelled, archived } = state;
+  const { className, problems, memberDisplayName, memberExpelled, archived } = state;
   const passed = problems.filter((p) => p.passed).length;
 
   return (
     <PageShell>
       <PageHeader
-        eyebrow="클래스"
+        eyebrow={className}
         title="문제 목록"
         description={
           problems.length > 0 ? (
@@ -187,13 +191,17 @@ export default function MyProblemsPage() {
             </>
           ) : undefined
         }
+        actions={
+          // 내보내진 참여자·보관된 클래스는 이름만 보이고 「바꾸기」가 없다(#372 AC) —
+          // 어차피 서버가 403으로 거절할 요청을 화면에서 미리 막는다.
+          <MyDisplayName
+            classId={classId}
+            displayName={memberDisplayName}
+            editable={!memberExpelled && !archived}
+            onRenamed={reload}
+          />
+        }
       />
-
-      {/* 내보내진 참여자·보관된 클래스는 편집 칸을 아예 내지 않는다(#372 AC) —
-          어차피 서버가 403으로 거절할 요청을 화면에서 미리 막는다. */}
-      {memberExpelled || archived ? null : (
-        <MyDisplayNameCard classId={classId} displayName={memberDisplayName} onRenamed={reload} />
-      )}
 
       {problems.length === 0 ? (
         <Card>

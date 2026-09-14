@@ -4029,6 +4029,8 @@ export interface components {
         ClassroomMyProblemsOut: {
             /** Archived */
             archived: boolean;
+            /** Class Name */
+            class_name: string;
             /** Member Display Name */
             member_display_name: string;
             /** Member Expelled */
@@ -4111,6 +4113,8 @@ export interface components {
              * @default false
              */
             archived: boolean;
+            /** Class Name */
+            class_name: string;
             /**
              * Member Expelled
              * @default false
