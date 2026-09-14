@@ -26,7 +26,7 @@ import { classroomApi, establishClassroomSession } from "./lib/cross-app-session
 
 test("채점이 끝나면 알림이 오고, 그 알림을 누르면 그 시도로 간다", async ({ page }) => {
   const seed = `scoring-notification-${test.info().workerIndex}-${Date.now()}`;
-  const marker = `laurio-e2e-marker-${test.info().workerIndex}-${Date.now()}`;
+  const marker = `codemit-e2e-marker-${test.info().workerIndex}-${Date.now()}`;
   const repositoryUrl = `https://github.com/octocat/${marker}`;
 
   await establishClassroomSession(page, seed);

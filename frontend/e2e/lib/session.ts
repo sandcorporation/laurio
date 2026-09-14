@@ -28,11 +28,11 @@ import type { Page } from "@playwright/test";
 // 그러면 세션을 세우는 모든 호출이 403 이 된다. 체인 전용 포트를 env 로 주는 환경이
 // 정확히 이 경우다.
 export function publicOrigin(): string {
-  return new URL(process.env.LAURIO_E2E_BASE_URL ?? "http://127.0.0.1:53000").origin;
+  return new URL(process.env.CODEMIT_E2E_BASE_URL ?? "http://127.0.0.1:53000").origin;
 }
 
 function operatorOrigin(): string {
-  return new URL(process.env.LAURIO_OPERATOR_E2E_BASE_URL ?? "http://127.0.0.1:53001").origin;
+  return new URL(process.env.CODEMIT_OPERATOR_E2E_BASE_URL ?? "http://127.0.0.1:53001").origin;
 }
 
 /** 공개 앱: dev seed 로그인(`SOCIAL_AUTH_MODE=fake`)을 화면 없이 통과한다.

@@ -1,5 +1,5 @@
 {
-  "name": "laurio-operator",
+  "name": "codemit-operator",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -11,14 +11,14 @@
     "test": "pnpm run test:unit"
   },
   "dependencies": {
-    "@laurio/bff-client": "workspace:*",
-    "@laurio/bff-shared": "workspace:*",
+    "@codemit/bff-client": "workspace:*",
+    "@codemit/bff-shared": "workspace:*",
     "next": "^15.5.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
-    "@laurio/route-audit": "workspace:*",
+    "@codemit/route-audit": "workspace:*",
     "@types/node": "^22.10.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",

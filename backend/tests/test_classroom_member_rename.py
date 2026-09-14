@@ -155,7 +155,7 @@ def test_display_name_change_appears_in_past_submissions(client, db):
     _join(client, participant["access"], Class.objects.get(id=class_id).join_code, "옛이름")
     submitted = client.post(
         f"{CLASSES_URL}/{class_id}/problems/{problem['id']}/submissions",
-        data={"value": "https://github.com/laurio/example", "submission_format": "repository"},
+        data={"value": "https://github.com/codemit/example", "submission_format": "repository"},
         content_type="application/json",
         **_auth_header(participant["access"]),
     )

@@ -4,7 +4,7 @@
 // Authorization 헤더 대신 세션 쿠키를 이름으로 골라 Cookie 헤더에 싣고, 백엔드가
 // 기대하는 Origin을 나가는 요청에 직접 얹는다(lib/backend.ts의 operatorOrigin —
 // 이 BFF는 서버 대 서버 호출이라 브라우저처럼 Origin이 자동으로 실리지 않는다).
-import { buildForwardHeaders, extractForwardBody, forwardRequest } from "@laurio/bff-shared";
+import { buildForwardHeaders, extractForwardBody, forwardRequest } from "@codemit/bff-shared";
 import type { NextRequest } from "next/server";
 
 import { SESSION_COOKIE_NAME } from "@/lib/auth/cookies";

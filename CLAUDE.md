@@ -1,4 +1,4 @@
-# Laurio
+# Codemit
 
 ## 개발 환경
 
@@ -17,19 +17,19 @@ cd backend && uv run pytest                           # 테스트
 
 | | 호스트 | 컨테이너 | 환경변수 |
 | --- | --- | --- | --- |
-| PostgreSQL | `55432` | 5432 | `LAURIO_DB_PORT` |
-| backend | `58000` | 8000 | `LAURIO_API_PORT` |
-| Redis | `16379` | 6379 | `LAURIO_REDIS_PORT` |
-| 공개 앱(`frontend/`) | `53000` | 3000 | `LAURIO_WEB_PORT` |
-| 운영자 앱(`operator/`, #63) | `53001` | 3000 | `LAURIO_OPERATOR_WEB_PORT` |
-| 강의실 앱(`classroom/`, #276) | `53002` | 3000 | `LAURIO_CLASSROOM_WEB_PORT` |
-| 이벤트 서비스(`events`, #379, ADR-0046) | `58001` | 8001 | `LAURIO_EVENTS_PORT` |
+| PostgreSQL | `55432` | 5432 | `CODEMIT_DB_PORT` |
+| backend | `58000` | 8000 | `CODEMIT_API_PORT` |
+| Redis | `16379` | 6379 | `CODEMIT_REDIS_PORT` |
+| 공개 앱(`frontend/`) | `53000` | 3000 | `CODEMIT_WEB_PORT` |
+| 운영자 앱(`operator/`, #63) | `53001` | 3000 | `CODEMIT_OPERATOR_WEB_PORT` |
+| 강의실 앱(`classroom/`, #276) | `53002` | 3000 | `CODEMIT_CLASSROOM_WEB_PORT` |
+| 이벤트 서비스(`events`, #379, ADR-0046) | `58001` | 8001 | `CODEMIT_EVENTS_PORT` |
 
 **이벤트 서비스는 `backend`와 같은 이미지를 ASGI로 띄우는 별도 프로세스다**
 (ADR-0046) — 강의실이 새로고침 없이 화면을 갱신하는 SSE 엔드포인트
 (`/api/classroom/events/stream`) 하나만 연다. 기존 API(`backend`)는 그대로
 동기 gunicorn/`runserver`다 — SSE 연결 하나가 그 워커 풀을 붙잡지 않게
-스트림만 갈랐다. 강의실 BFF는 이 경로만 `LAURIO_EVENTS_BASE_URL`
+스트림만 갈랐다. 강의실 BFF는 이 경로만 `CODEMIT_EVENTS_BASE_URL`
 (`classroom/lib/auth/backend.ts`)로 이 서비스에 보내고 나머지는 전부
 `backend`로 보낸다. 신호 자체는 `EVENT_BUS_ADAPTER_MODE`(dev·CI 기본값
 `core.events_redis.RedisEventBus`, pytest 기본값은 `fake`)가 고르는 Redis
@@ -62,7 +62,7 @@ celery 둘과 같은 함정이다), 같은 방식(Host 헤더를 붙인 `/api/he
 화면은 스트림이 끊기거나 막히면 폴링으로 물러나도록 설계돼 있어 기능 자체가
 멈추지는 않는다(ADR-0046 결과 — "신호는 진실의 출처가 아니다").
 
-호스트에서 `uv run pytest`를 돌릴 때 붙는 DB 포트 기본값도 `LAURIO_DB_PORT`를 따라간다
+호스트에서 `uv run pytest`를 돌릴 때 붙는 DB 포트 기본값도 `CODEMIT_DB_PORT`를 따라간다
 (`backend/config/settings.py`). 컨테이너 안에서는 compose가 `POSTGRES_*`를 직접 주입한다.
 
 **워크트리는 스택을 통째로 따로 띄운다.**
@@ -87,7 +87,7 @@ DB·Redis·MinIO·이벤트 서비스·세 앱(#276부터 강의실이, #379부�
 
 세 compose 파일이 분리되어 있다 — 시크릿·어댑터 바인딩이 환경을 넘어 섞이지 않는다:
 
-| | 파일 | `LAURIO_DEPLOYMENT_TARGET` | 어댑터 | TLS·secure 쿠키 하드닝 |
+| | 파일 | `CODEMIT_DEPLOYMENT_TARGET` | 어댑터 | TLS·secure 쿠키 하드닝 |
 | --- | --- | --- | --- | --- |
 | dev | `docker/compose.dev.yaml` | (미설정) | 전부 Fake (MinIO만 예외) | 없음 |
 | staging | `docker/compose.staging.yaml` | `staging` | 전부 real(토스 샌드박스, 스토리지는 자체 MinIO 등) | 없음 |
@@ -100,11 +100,11 @@ DB·Redis·MinIO·이벤트 서비스·세 앱(#276부터 강의실이, #379부�
 **staging 은 떠 있다** — `https://laurio.honeycombpizza.link`(공개 앱),
 `operator.laurio.honeycombpizza.link`(운영자 앱), `storage.honeycombpizza.link`(브라우저가
 직접 PUT 하는 MinIO), `classroom.laurio.honeycombpizza.link`(강의실 앱, #277 —
-`docker/compose.staging.yaml`의 `classroom` 서비스는 `${LAURIO_CLASSROOM_WEB_PORT:-3002}`에
+`docker/compose.staging.yaml`의 `classroom` 서비스는 `${CODEMIT_CLASSROOM_WEB_PORT:-3002}`에
 평문 HTTP로만 듣는다, 그 앞단에 이 도메인을 그 포트로 넘겨주는 TLS 종단 리버스 프록시가
 저장소 밖의 수작업으로 있어야 실제로 열린다 — storage.honeycombpizza.link의 버킷 생성과
 같은 종류의 바깥 작업이다). **그 MinIO 안에 버킷이 둘이다**(#233, ADR-0032) — 제출물이 사는
-비공개 버킷과, 공모전 이미지만 사는 **익명 읽기 버킷**(`laurio-staging-public-images`)이다.
+비공개 버킷과, 공모전 이미지만 사는 **익명 읽기 버킷**(`codemit-staging-public-images`)이다.
 서버가 아니라 버킷을 가른다: 공개 읽기 정책이 버킷 단위라 이미지 쪽 설정을 잘못해도
 소스에 닿지 못한다. 버킷 생성·정책·CORS 는 이 저장소 밖의 수작업이다. 어댑터가 전부
 실물 구현이다: `PortOneV2VerificationAdapter`(#85) ·
@@ -117,7 +117,7 @@ DB·Redis·MinIO·이벤트 서비스·세 앱(#276부터 강의실이, #379부�
 
 **staging은 공모전이 꺼져 있다 — 고장이 아니라 껐다**(#271, ADR-0037). 방향이
 바뀌어 공모전은 나중을 위한 기능이 됐고, 지금 사람을 모을 것은 강의실이다.
-`LAURIO_CONTEST_PRODUCT_ENABLED`(기본값 켜짐, `LAURIO_DEPLOYMENT_TARGET`과 무관한
+`CODEMIT_CONTEST_PRODUCT_ENABLED`(기본값 켜짐, `CODEMIT_DEPLOYMENT_TARGET`과 무관한
 독립 값)를 `docker/compose.staging.yaml`이 기본 `false`로 겹쳐 쓴다(`docker/compose.prod.yaml`도 같다 — prod 도 강의실부터 연다) — dev·CI는
 건드리지 않으므로 지금과 똑같이 켜진 채다. 코드도 데이터도 하나도 지우지 않았다 —
 Score의 PROTECT 때문에 지울 수도 없고(아래 「테스트」 절의 「채점이 한 번 돈
@@ -132,7 +132,7 @@ Score의 PROTECT 때문에 지울 수도 없고(아래 「테스트」 절의 �
 - **공개 앱이 감춘다.** 헤더의 「공모전」·「공모전 개최」, 헤더 계정 메뉴의
   「내 공모전」(#375, 콘솔 현관은 없다), `/contests/**`·`/console/contests/**`
   전체가 빠지거나 404다. 앱과 백엔드가 어긋나면 링크는 보이는데 앞이 404인
-  것이 고른 실패 모양이다(`LAURIO_OPERATOR_ORIGIN`과 같은 종류의 어긋남).
+  것이 고른 실패 모양이다(`CODEMIT_OPERATOR_ORIGIN`과 같은 종류의 어긋남).
 - **공모전 전용 스캔이 등록부에서 사라진다.** 환불 둘·배분 둘·지급 관련 둘·인수인계
   (`payment-refund-request`·`payment-refund-reconcile`·`distribution-create`·
   `distribution-share-payout`·`payout-awaits-you`·`seller-registration-recovery`·
@@ -141,7 +141,7 @@ Score의 PROTECT 때문에 지울 수도 없고(아래 「테스트」 절의 �
 
 **한 곳에 모은 목록**은 `backend/core/contest_switch.py` 모듈 docstring이다 —
 다시 켤 때 읽을 자리. **되돌리는 법**: `.env.staging`에
-`LAURIO_CONTEST_PRODUCT_ENABLED=true` 한 줄을 추가하고 backend와 frontend를
+`CODEMIT_CONTEST_PRODUCT_ENABLED=true` 한 줄을 추가하고 backend와 frontend를
 재배포한다(frontend는 빌드 인자로 굽으므로 재빌드가 필요하다,
 `docker/frontend.Dockerfile`). ADR을 새로 쓰지 않는다 — 되돌리기가 환경변수 한
 줄이라 「되돌리기 어렵다」에 해당하지 않는다(방향 전환 자체의 근거는 ADR-0037에
@@ -186,12 +186,12 @@ staging 은 실물 어댑터라 해당 없음), 배포 환경의 시계는 실�
 **운영자 앱(`operator/`)도 두 compose 파일에 뜬다**(#70). 공개 앱(`frontend`)과
 같은 3스테이지 이미지(`docker/operator.Dockerfile` — dev/builder/runner)를 쓰고,
 배포 compose는 `target: runner`를 명시적으로 고른다. 필수 설정은
-`LAURIO_OPERATOR_ORIGIN`과 `LAURIO_API_BASE_URL`— 배포 환경에서 둘 중 하나라도
+`CODEMIT_OPERATOR_ORIGIN`과 `CODEMIT_API_BASE_URL`— 배포 환경에서 둘 중 하나라도
 비면 `operator/instrumentation.ts`가 첫 요청을 받기 전에 `process.exit(1)`로
 프로세스를 끊는다(`throw`만으로는 Next가 그 에러를 삼켜 컨테이너가 Up인 채로
 이유 없는 500만 낸다는 게 공개 앱 쪽에서 이미 확인된 사실이다).
 
-**`LAURIO_OPERATOR_ORIGIN`은 백엔드와 운영자 앱이 같은 `.env.staging`/`.env.prod`
+**`CODEMIT_OPERATOR_ORIGIN`은 백엔드와 운영자 앱이 같은 `.env.staging`/`.env.prod`
 줄 하나를 나눠 읽는 값이다** — 백엔드의 `OperatorOriginMiddleware`가 기대하는
 오리진과 운영자 앱이 나가는 요청에 붙이는 오리진이 어긋나면 로그인을 포함한
 모든 운영자 변경 요청이 조용히 403이 된다(fail-closed라 보안 구멍은 아니지만
@@ -205,7 +205,7 @@ staging 은 실물 어댑터라 해당 없음), 배포 환경의 시계는 실�
 「CI 를 통과한 main 의 어느 커밋」 그 자체다. 늦게 끝난 옛 커밋의 CI 는 건너뛰고,
 `production` 이 `main` 에서 갈라져 있으면 밀어붙이지 않고 빨갛게 멈춘다. **`production` 에
 직접 커밋하지 않는다.** prod 배포는 `Jenkinsfile.production` 이 맡는다 — `production` 브랜치
-빌드일 때만 `deploy.sh prod` 를 부르는 얇은 껍데기이고, prod 호스트에 붙인 `laurio-prod`
+빌드일 때만 `deploy.sh prod` 를 부르는 얇은 껍데기이고, prod 호스트에 붙인 `codemit-prod`
 라벨 에이전트에서 돈다. 그 잡(브랜치 `*/production`, scriptPath `Jenkinsfile.production`)과
 에이전트, 에이전트 워크스페이스의 `docker/.env.prod` 는 저장소 밖에서 사람이 만든다 — 아직 없다.
 
@@ -297,7 +297,7 @@ docker compose -f docker/compose.dev.yaml --profile celery up -d
 
 ```bash
 cd backend && uv run python manage.py shell      # ORM 으로 조회
-docker compose -f docker/compose.dev.yaml exec db psql -U laurio -d laurio
+docker compose -f docker/compose.dev.yaml exec db psql -U codemit -d codemit
 ```
 
 **DB 는 매일 새벽 2시(서울) 오브젝트 스토리지로 백업된다.** beat 의 `backup:database` 가
@@ -309,7 +309,7 @@ docker compose -f docker/compose.dev.yaml exec db psql -U laurio -d laurio
 않는다.** 복원은 이렇게 한다:
 
 ```bash
-pg_restore --clean --if-exists --no-owner -h <host> -U laurio -d laurio laurio-YYYYMMDD-HHMMSS.dump
+pg_restore --clean --if-exists --no-owner -h <host> -U codemit -d codemit codemit-YYYYMMDD-HHMMSS.dump
 ```
 
 첫 Operator 는 관리 명령으로 만든다 — 계정 관리 화면이 없기 때문이다.
@@ -339,7 +339,7 @@ docker/compose.dev.yaml exec backend uv run pytest`(또는 컨테이너 안 셸�
 쳐야 하기 때문 — FE-09, #34). 항상 호스트에서 돌린다:
 
 ```bash
-cd backend && LAURIO_DB_PORT=55432 uv run pytest   # 포트는 쓰는 스택에 맞춰 바꾼다
+cd backend && CODEMIT_DB_PORT=55432 uv run pytest   # 포트는 쓰는 스택에 맞춰 바꾼다
 ```
 
 dev compose의 `db` 서비스는 호스트 포트로 이미 노출돼 있으므로 호스트의 `uv run
@@ -354,7 +354,7 @@ backend 는 `STORAGE_BACKEND=s3` 로 MinIO 를 물고 있어, 채점 스캔이 �
 쫓았다.
 
 ```bash
-cd backend && LAURIO_DB_PORT=55432 uv run python manage.py seed_e2e_operator_appeal
+cd backend && CODEMIT_DB_PORT=55432 uv run python manage.py seed_e2e_operator_appeal
 ```
 
 **`seed_demo_contests` 는 반대다 — 스토리지를 실물로 물려 돌린다**(#253). 이 시드는
@@ -365,11 +365,11 @@ cd backend && LAURIO_DB_PORT=55432 uv run python manage.py seed_e2e_operator_app
 돌린다:
 
 ```bash
-cd backend && LAURIO_DB_PORT=55432 \
-  STORAGE_BACKEND=s3 STORAGE_BUCKET=laurio-dev \
+cd backend && CODEMIT_DB_PORT=55432 \
+  STORAGE_BACKEND=s3 STORAGE_BUCKET=codemit-dev \
   STORAGE_ENDPOINT_URL=http://127.0.0.1:19000 \
   STORAGE_PUBLIC_ENDPOINT_URL=http://127.0.0.1:19000 \
-  STORAGE_ACCESS_KEY=laurio STORAGE_SECRET_KEY=laurio-secret STORAGE_REGION=us-east-1 \
+  STORAGE_ACCESS_KEY=codemit STORAGE_SECRET_KEY=codemit-secret STORAGE_REGION=us-east-1 \
   uv run python manage.py seed_demo_contests
 ```
 
@@ -390,9 +390,9 @@ cd backend && LAURIO_DB_PORT=55432 \
 불러 채운다 — 문구·링크(#329)가 스캔이 실제로 만드는 것과 같은 모양이 된다.
 
 ```bash
-cd backend && LAURIO_DB_PORT=55432 uv run python manage.py seed_demo_classroom --email <계정>
+cd backend && CODEMIT_DB_PORT=55432 uv run python manage.py seed_demo_classroom --email <계정>
 # staging 에서는
-ssh sub 'docker exec laurio-staging-backend-1 python manage.py seed_demo_classroom --email <계정>'
+ssh sub 'docker exec codemit-staging-backend-1 python manage.py seed_demo_classroom --email <계정>'
 ```
 
 **채점을 돌리지 않고 `ClassroomScore` 를 직접 만든다** — 데모를 심는 데 강사의 OpenAI
@@ -413,7 +413,7 @@ Score 는 어떤 경로로도 닿지 않는다. `--purge-only` 로 걷어내기�
 Contest, 그리고 기준데이터), 스위트를 한동안 안 돌렸다면 손으로 한 번 부른다:
 
 ```bash
-cd backend && LAURIO_DB_PORT=55432 uv run python manage.py prune_e2e_junk
+cd backend && CODEMIT_DB_PORT=55432 uv run python manage.py prune_e2e_junk
 ```
 
 이름이 `e2e`·`[e2e` 로 시작하는 Category·DeliverableType 을 지우고 플랫폼 정책을 기준값
@@ -471,13 +471,13 @@ Contest 전이 그래프를 한 곳에 선언하고 선언 밖을 정적으로 �
 
 **테스트는 서로를 밟지 않는다 — 손으로 갈라 줄 것이 없다.**
 
-예전에는 체인마다 `LAURIO_TEST_DB_NAME` 과 `SESSION_REDIS_URL` 의 인덱스를 손으로 달리
+예전에는 체인마다 `CODEMIT_TEST_DB_NAME` 과 `SESSION_REDIS_URL` 의 인덱스를 손으로 달리
 줘야 했고, 잊으면 조용히 서로를 떨어뜨렸다(`DROP DATABASE ... is being accessed`, 그리고
 남의 로그인 세션이 통째로 지워져 나오는 401 무더기 — 둘 다 코드 회귀와 구분되지 않는다).
 지금은 둘 다 자동이다:
 
 - **테스트 DB 이름**이 체크아웃 경로에서 파생된다(`config/settings.py` 의
-  `_default_test_db_name`). `LAURIO_TEST_DB_NAME` 을 주면 그 값이 이긴다.
+  `_default_test_db_name`). `CODEMIT_TEST_DB_NAME` 을 주면 그 값이 이긴다.
 - **세션 캐시가 테스트에서는 LocMem 이다**(같은 파일의 `_RUNNING_TESTS`). 프로세스별로
   갈리므로 워커 격리도 체인 격리도 공짜다.
 
@@ -488,7 +488,7 @@ ADR-0018 은 **운영**에서 세션이 Redis 에 산다고 정한 것이고, �
 
 ```bash
 docker compose -f docker/compose.dev.yaml up -d db   # pytest 에 필요한 것은 이것뿐이다
-cd backend && LAURIO_DB_PORT=55432 uv run pytest
+cd backend && CODEMIT_DB_PORT=55432 uv run pytest
 ```
 
 **앱 경계는 테스트가 지킨다**(#269, ADR-0037). `tests/test_app_boundaries.py` 가 백엔드
@@ -538,8 +538,8 @@ docker/compose.dev.yaml up` 으로 세 앱이 다 뜬 스택을 띄운 뒤 `pnpm
 로 Playwright 가 프로젝트 셋으로 세 앱을 한 번에 친다(공개 앱 스펙은
 `frontend/e2e/*.spec.ts`, 운영자 앱 스펙은 `frontend/e2e/operator/*.spec.ts`, 강의실
 스펙은 `frontend/e2e/classroom/*.spec.ts` — `playwright.config.ts` 가 프로젝트마다 다른
-`testDir`·`baseURL` 을 준다). `LAURIO_E2E_BASE_URL`/`LAURIO_OPERATOR_E2E_BASE_URL`/
-`LAURIO_CLASSROOM_E2E_BASE_URL` 로 각 프로젝트의 `baseURL` 을 바꿀 수 있다(기본값은 위
+`testDir`·`baseURL` 을 준다). `CODEMIT_E2E_BASE_URL`/`CODEMIT_OPERATOR_E2E_BASE_URL`/
+`CODEMIT_CLASSROOM_E2E_BASE_URL` 로 각 프로젝트의 `baseURL` 을 바꿀 수 있다(기본값은 위
 포트 표와 같다). `pnpm --dir frontend typecheck`/`pnpm --dir operator typecheck`/
 `pnpm --dir classroom typecheck` 는 스택 없이 돈다.
 
@@ -547,7 +547,7 @@ docker/compose.dev.yaml up` 으로 세 앱이 다 뜬 스택을 띄운 뒤 `pnpm
 그래서 강의실 e2e 스펙은 강의실에서 로그인하지 않는다: 부모 도메인 쿠키 공유는
 dev(localhost, 포트로 앱을 가른다)에서 재현할 수 없고, 실제 공유는 staging에서만
 검증된다(#277). 강의실의 인증 구역을 걷는 스펙(과 dev에서 눈으로 확인할 때)은 공개
-앱에 로그인해 받은 `laurio_access`/`laurio_refresh` 쿠키 값을 강의실 오리진에 수동으로
+앱에 로그인해 받은 `codemit_access`/`codemit_refresh` 쿠키 값을 강의실 오리진에 수동으로
 심는다(`frontend/e2e/classroom/lib/cross-app-session.ts`, Playwright의
 `context.addCookies`) — 실제 브라우저가 두 쿠키를 부모 도메인으로 공유하는 것을
 로컬에서 흉내 내는 유일한 길이다. **그래서 `frontend-e2e-classroom` CI 잡은 강의실만이
@@ -556,7 +556,7 @@ dev(localhost, 포트로 앱을 가른다)에서 재현할 수 없고, 실제 �
 
 **운영자 앱은 인증의 모양이 다르다**(#63, ADR-0018/0019). 공개 앱은 쿠키의 JWT를
 `Authorization` 헤더로 바꿔 달지만, 운영자 앱은 Django 세션 쿠키
-(`laurio_operator_session`, `backend/config/settings.py`)를 이름으로만 골라
+(`codemit_operator_session`, `backend/config/settings.py`)를 이름으로만 골라
 중계한다 — 브라우저의 Cookie 헤더를 통째로 넘기지 않는다. e2e 가 로그인할
 Operator 계정은 `backend/accounts/management/commands/seed_e2e_operator.py`
 (멱등)로 만든다 — 사람이 쓰는 `create_operator` 부트스트랩 명령과 달리 반복
@@ -570,10 +570,10 @@ Operator 계정은 `backend/accounts/management/commands/seed_e2e_operator.py`
 
 ```bash
 cd <worktree>/backend
-LAURIO_DB_PORT=55432 STORAGE_BACKEND=s3 uv run python manage.py runserver 0.0.0.0:58101 &
+CODEMIT_DB_PORT=55432 STORAGE_BACKEND=s3 uv run python manage.py runserver 0.0.0.0:58101 &
 cd ../frontend
-LAURIO_API_BASE_URL=http://127.0.0.1:58101 pnpm exec next dev -p 53201 &
-LAURIO_E2E_BASE_URL=http://127.0.0.1:53201 LAURIO_E2E_NAMESPACE=c2 pnpm exec playwright test --project=public
+CODEMIT_API_BASE_URL=http://127.0.0.1:58101 pnpm exec next dev -p 53201 &
+CODEMIT_E2E_BASE_URL=http://127.0.0.1:53201 CODEMIT_E2E_NAMESPACE=c2 pnpm exec playwright test --project=public
 kill %1 %2
 ```
 
@@ -591,8 +591,8 @@ kill %1 %2
 
 ```bash
 cd <worktree>/frontend
-LAURIO_API_BASE_URL=http://127.0.0.1:58000 pnpm exec next dev -p 53100 &
-LAURIO_E2E_BASE_URL=http://127.0.0.1:53100 pnpm exec playwright test --project=public
+CODEMIT_API_BASE_URL=http://127.0.0.1:58000 pnpm exec next dev -p 53100 &
+CODEMIT_E2E_BASE_URL=http://127.0.0.1:53100 pnpm exec playwright test --project=public
 kill %1
 ```
 
@@ -673,7 +673,7 @@ ADR-0017 은 프론트에만 있는 위험을 셋으로 못 박았다. 여기 �
 **이번엔 전부 이 머신에서 다시 쟀다** — 옛 표의 e2e 수치는 이전 머신(WSL) 것이었다.
 
 ```bash
-cd backend && LAURIO_DB_PORT=<포트> uv run pytest tests/test_payouts.py -q
+cd backend && CODEMIT_DB_PORT=<포트> uv run pytest tests/test_payouts.py -q
 pnpm --dir frontend exec playwright test --project=public e2e/payout.spec.ts -g "상금 그대로가"
 ```
 
@@ -696,13 +696,13 @@ pnpm --dir frontend test:classroom  # 강의실만 (6건이던 시절 CI 첫 실
 
 **그 검사를 느슨하게 하지 않았다.** 대신 오리진을 나르는 자리를 따로 뒀다:
 `next_origin` 쿼리를 `frontend/lib/auth/sibling-origins.ts` 가 **설정에 적힌 우리
-오리진 목록**(`LAURIO_CLASSROOM_ORIGIN`)과 대조해 통과한 것만 OAuth 왕복 쿠키에
+오리진 목록**(`CODEMIT_CLASSROOM_ORIGIN`)과 대조해 통과한 것만 OAuth 왕복 쿠키에
 싣고, 콜백이 거기로 돌려보낸다. 사용자 입력이 고르는 것은 「이 목록 중 어느
 것인가」뿐이다. 실패 경로(`oauth_unconfigured` 등)도 같은 값을 실어 보낸다 —
 안 그러면 한 번 실패한 사람이 다시 성공해도 공개 앱에 남는다.
 
-**`LAURIO_CLASSROOM_ORIGIN` 은 공개 앱과 강의실이 같은 `.env` 줄을 나눠 읽는
-값이다**(`LAURIO_OPERATOR_ORIGIN` 과 같은 원칙). 어긋나면 복귀가 조용히 안 되고
+**`CODEMIT_CLASSROOM_ORIGIN` 은 공개 앱과 강의실이 같은 `.env` 줄을 나눠 읽는
+값이다**(`CODEMIT_OPERATOR_ORIGIN` 과 같은 원칙). 어긋나면 복귀가 조용히 안 되고
 사람은 공개 앱에 남는다 — fail-closed 라 보안 구멍은 아니지만 원인을 찾기 어렵다.
 
 **런타임 설정을 읽는 화면은 정적으로 구워지면 안 된다**(#297). Next 는 `searchParams`·
@@ -775,12 +775,12 @@ VM 을 24GB 로 올린 뒤에야 4워커가 성립했다 — 그때 실측이 �
 `pnpm-workspace.yaml` 은 글롭이라 저절로 잡지만, 그 아래 셋은 멤버를 하나씩 적어 둔다 —
 `docker/frontend.Dockerfile`·`docker/operator.Dockerfile`·`docker/classroom.Dockerfile`(#276)의
 COPY(각각 base·dev·builder 셋)와 `docker/compose.dev.yaml` 의 **멤버별 `node_modules` 이름
-있는 볼륨**(세 서비스 × 볼륨 선언 — 다만 강의실은 아직 `@laurio/bff-client` 를 쓰지 않으므로
+있는 볼륨**(세 서비스 × 볼륨 선언 — 다만 강의실은 아직 `@codemit/bff-client` 를 쓰지 않으므로
 그 패키지의 볼륨만 없다). **로컬 게이트는 셋 다 보지 않는다** — `typecheck` 는 호스트의 node_modules 를
 쓰고, e2e 는 로컬에서 돌리지 않기 때문이다. #166 이 `packages/route-audit` 를 더하면서
 정확히 이걸 빠뜨려 CI 가 4잡 빨갛게 났고, 증상이 둘로 갈려 원인이 하나로 안 보였다:
 
-- **deploy-guard 둘** — 프로덕션 이미지의 builder 가 `Cannot find module '@laurio/route-audit'`
+- **deploy-guard 둘** — 프로덕션 이미지의 builder 가 `Cannot find module '@codemit/route-audit'`
   로 죽는다. 앱 소스(`lib/routes/allowlist.ts`)가 그 패키지의 타입을 쓰는데 Dockerfile 이
   패키지를 복사하지 않았다. runner 스테이지는 `.next/standalone` 만 가져가므로 실행
   이미지에는 안 들어간다 — 그래도 builder 에는 있어야 한다.

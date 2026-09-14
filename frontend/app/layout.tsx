@@ -42,12 +42,12 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Laurio",
+  title: "Codemit",
   description: "발주자가 상금을 걸고 요구사항을 공개하면, 개발자들이 만들어 제출하는 공개 공모전 플랫폼",
 };
 
 // **정적으로 구워지면 안 된다**(#297, #375, `lib/rendering/runtime-config.test.ts`).
-// 헤더의 `SiteHeader`가 이 레이아웃 트리에서 `LAURIO_CLASSROOM_ORIGIN`
+// 헤더의 `SiteHeader`가 이 레이아웃 트리에서 `CODEMIT_CLASSROOM_ORIGIN`
 // (`lib/auth/classroom-link.ts`, 계정 메뉴의 「클래스로 가기」)을 읽는다 — 그
 // 값이 빌드 머신 것(=비어 있음)으로 박제되면 배포된 공개 앱의 헤더가 dev
 // 폴백(`http://127.0.0.1:53002`)으로 사람을 보낸다(강의실 로그인 화면이 이미

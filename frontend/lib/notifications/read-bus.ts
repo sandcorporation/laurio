@@ -11,7 +11,7 @@
 // 어차피 경로 이동·주기적 폴링으로도 다시 읽으므로(그 자체로 최종적으로는
 // 맞는 값에 수렴한다) 이 이벤트가 없어도 틀리지 않는다 — 이건 "같은 탭 안에서
 // 배지가 곧바로 사라지는" 체감을 위한 지름길일 뿐이다.
-const EVENT_NAME = "laurio:notifications-read";
+const EVENT_NAME = "codemit:notifications-read";
 
 export function broadcastNotificationsRead(): void {
   if (typeof window === "undefined") return;

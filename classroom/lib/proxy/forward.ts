@@ -5,7 +5,7 @@
 // classroom 엔드포인트가 허용목록에 추가되는 순간 바로 쓰인다.
 import type { NextRequest } from "next/server";
 
-import { buildForwardHeaders, extractForwardBody, forwardRequest } from "@laurio/bff-shared";
+import { buildForwardHeaders, extractForwardBody, forwardRequest } from "@codemit/bff-shared";
 
 import { backendBaseUrl, eventsBaseUrl } from "@/lib/auth/backend";
 import { REFRESH_COOKIE, type TokenPair } from "@/lib/auth/cookies";

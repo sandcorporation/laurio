@@ -102,7 +102,7 @@ test.describe("Origin 검증 — CSRF 방어의 성립 조건 (ADR-0016)", () =>
 });
 
 test.describe("쿠키 Secure — 배포 여부에 따라 갈린다 (ADR-0016, FE-13 #38)", () => {
-  // lib/auth/cookies.ts의 isDeployedEnvironment()는 LAURIO_DEPLOYMENT_TARGET이
+  // lib/auth/cookies.ts의 isDeployedEnvironment()는 CODEMIT_DEPLOYMENT_TARGET이
   // "staging"|"production"일 때만 Secure를 켠다. 이 dev 스택(compose.dev.yaml)은
   // 그 값을 절대 설정하지 않으므로 — 컨테이너 간 http로만 통신하고 Secure를 걸면
   // 쿠키가 아예 안 실린다 — 여기서는 항상 꺼져 있어야 한다.
@@ -112,7 +112,7 @@ test.describe("쿠키 Secure — 배포 여부에 따라 갈린다 (ADR-0016, FE
   // .github/workflows/ci.yaml의 frontend-deploy-guard 잡이 실제 프로덕션
   // 이미지를 프로덕션 환경변수로 띄워 별도로 증명한다. 이 테스트는 그 짝 —
   // "dev에서는 꺼져 있다"만 이 시임 안에서 확인한다.
-  test("dev(LAURIO_DEPLOYMENT_TARGET 미설정)에서는 Secure가 붙지 않는다", async ({
+  test("dev(CODEMIT_DEPLOYMENT_TARGET 미설정)에서는 Secure가 붙지 않는다", async ({
     request,
     baseURL,
   }) => {
@@ -121,16 +121,16 @@ test.describe("쿠키 Secure — 배포 여부에 따라 갈린다 (ADR-0016, FE
     });
     expect(res.status()).toBe(200);
     const setCookie = (res.headers()["set-cookie"] ?? "").toLowerCase();
-    expect(setCookie).toContain("laurio_access");
+    expect(setCookie).toContain("codemit_access");
     expect(setCookie).not.toContain("secure");
   });
 
   // 부모 도메인 쿠키(ADR-0038, #273)도 같은 이유로 dev에서는 꺼져 있어야 한다 —
-  // LAURIO_SESSION_COOKIE_DOMAIN을 dev compose는 절대 설정하지 않으므로(로컬은
+  // CODEMIT_SESSION_COOKIE_DOMAIN을 dev compose는 절대 설정하지 않으므로(로컬은
   // 서브도메인이 아니라 포트로 앱을 가른다), domain 속성이 아예 없어야 한다.
   // "staging/prod에서는 domain이 붙는다"는 반대쪽 절반은 위 Secure와 같은 이유로
   // 여기서 증명할 수 없다 — lib/auth/cookies.test.ts(vitest)가 그 절반을 덮는다.
-  test("dev(LAURIO_SESSION_COOKIE_DOMAIN 미설정)에서는 쿠키에 domain이 붙지 않는다", async ({
+  test("dev(CODEMIT_SESSION_COOKIE_DOMAIN 미설정)에서는 쿠키에 domain이 붙지 않는다", async ({
     request,
     baseURL,
   }) => {
@@ -139,7 +139,7 @@ test.describe("쿠키 Secure — 배포 여부에 따라 갈린다 (ADR-0016, FE
     });
     expect(res.status()).toBe(200);
     const setCookie = (res.headers()["set-cookie"] ?? "").toLowerCase();
-    expect(setCookie).toContain("laurio_access");
+    expect(setCookie).toContain("codemit_access");
     expect(setCookie).not.toContain("domain=");
   });
 });
@@ -156,8 +156,8 @@ test.describe("소셜 로그인 → 세션 쿠키 → 보호된 화면", () => {
       });
       expect(res.status(), `${provider} 로그인`).toBe(200);
       const setCookie = res.headers()["set-cookie"] ?? "";
-      expect(setCookie).toContain("laurio_access");
-      expect(setCookie).toContain("laurio_refresh");
+      expect(setCookie).toContain("codemit_access");
+      expect(setCookie).toContain("codemit_refresh");
       expect(setCookie.toLowerCase()).toContain("httponly");
     }
   });
@@ -180,14 +180,14 @@ test.describe("소셜 로그인 → 세션 쿠키 → 보호된 화면", () => {
     await expect(page.getByTestId("account-menu-trigger")).toBeVisible();
 
     const jsVisibleCookies = await page.evaluate(() => document.cookie);
-    expect(jsVisibleCookies).not.toContain("laurio_access");
-    expect(jsVisibleCookies).not.toContain("laurio_refresh");
+    expect(jsVisibleCookies).not.toContain("codemit_access");
+    expect(jsVisibleCookies).not.toContain("codemit_refresh");
 
     // context.cookies()는 브라우저 JS가 아니라 테스트 하네스(CDP)가 보는 것이다 —
     // 여기서는 실제로 HttpOnly가 걸려 있는지를 확인한다.
     const cookies = await page.context().cookies();
-    const access = cookies.find((c) => c.name === "laurio_access");
-    const refresh = cookies.find((c) => c.name === "laurio_refresh");
+    const access = cookies.find((c) => c.name === "codemit_access");
+    const refresh = cookies.find((c) => c.name === "codemit_refresh");
     expect(access?.httpOnly).toBe(true);
     expect(refresh?.httpOnly).toBe(true);
   });
@@ -217,8 +217,8 @@ test.describe("로그아웃 — 쿠키 삭제 + 블랙리스트", () => {
     await expect(page).toHaveURL(/\/login/);
 
     const cookies = await page.context().cookies();
-    expect(cookies.find((c) => c.name === "laurio_access")).toBeUndefined();
-    expect(cookies.find((c) => c.name === "laurio_refresh")).toBeUndefined();
+    expect(cookies.find((c) => c.name === "codemit_access")).toBeUndefined();
+    expect(cookies.find((c) => c.name === "codemit_refresh")).toBeUndefined();
 
     // 미들웨어가 다시 막는지 새 탐색으로 확인한다.
     await page.goto("/console/participation");
@@ -235,7 +235,7 @@ test.describe("로그아웃 — 쿠키 삭제 + 블랙리스트", () => {
     await expect(page).toHaveURL("/", { timeout: 15_000 });
 
     const before = await page.context().cookies();
-    const access = before.find((c) => c.name === "laurio_access")?.value;
+    const access = before.find((c) => c.name === "codemit_access")?.value;
     expect(access).toBeTruthy();
 
     await logoutViaAccountMenu(page);
@@ -246,7 +246,7 @@ test.describe("로그아웃 — 쿠키 삭제 + 블랙리스트", () => {
     // 않는다: 프록시(FE-08, /api/backend/**)를 통해서만 확인한다. 서명·만료는
     // 아직 유효한 토큰이므로, 이 요청이 401이라면 그건 블랙리스트 때문이다.
     await page.context().addCookies([
-      { name: "laurio_access", value: access!, url: baseURL, httpOnly: true, sameSite: "Lax" },
+      { name: "codemit_access", value: access!, url: baseURL, httpOnly: true, sameSite: "Lax" },
     ]);
     const status = await page.evaluate(async () => {
       const res = await fetch("/api/backend/accounts/me", { cache: "no-store" });
@@ -282,7 +282,7 @@ test.describe("액세스 만료 시 리프레시가 조용히 처리된다", () 
     await expect(page.getByTestId("upload-demo-contest-id")).toBeVisible();
 
     const cookies = await page.context().cookies();
-    const refresh = cookies.find((c) => c.name === "laurio_refresh");
+    const refresh = cookies.find((c) => c.name === "codemit_refresh");
     expect(refresh).toBeTruthy();
 
     // 액세스 쿠키를 "만료된 것처럼" 만든다 — 프론트는 서명 검증을 하지 않고
@@ -291,7 +291,7 @@ test.describe("액세스 만료 시 리프레시가 조용히 처리된다", () 
     // 값 그대로 둔다 — 실제 백엔드 리프레시 엔드포인트가 진짜로 회전시킨다.
     await page.context().addCookies([
       {
-        name: "laurio_access",
+        name: "codemit_access",
         value: "not-a-real-jwt",
         url: baseURL,
         httpOnly: true,
@@ -306,7 +306,7 @@ test.describe("액세스 만료 시 리프레시가 조용히 처리된다", () 
 
     // 응답이 새 액세스 쿠키로 교체됐는지도 확인한다 — "not-a-real-jwt"가 아니다.
     const after = await page.context().cookies();
-    const rotatedAccess = after.find((c) => c.name === "laurio_access");
+    const rotatedAccess = after.find((c) => c.name === "codemit_access");
     expect(rotatedAccess?.value).not.toBe("not-a-real-jwt");
   });
 
@@ -321,7 +321,7 @@ test.describe("액세스 만료 시 리프레시가 조용히 처리된다", () 
 
     await page.context().addCookies([
       {
-        name: "laurio_access",
+        name: "codemit_access",
         value: "not-a-real-jwt",
         url: baseURL,
         httpOnly: true,

@@ -90,7 +90,7 @@ DEADLINE_OFFSET = timedelta(hours=1)
 # 똑같이 재현되는 결함이었다.
 #
 # 그래서 시간 대신 **실행 하나를 식별하는 토큰**을 쓴다.
-# `LAURIO_E2E_RUN_ID`(frontend/e2e/global-setup.ts가 스위트 시작 시 한 번
+# `CODEMIT_E2E_RUN_ID`(frontend/e2e/global-setup.ts가 스위트 시작 시 한 번
 # 발급해 모든 시드 호출에 실어 보낸다)를 Contest 제목에 새겨, "이번 실행이
 # 심은 것"만 자기 것으로 인식한다 — 그 외의 가족-접두어 Contest는 전부
 # (얼마나 오래됐든) 다른 실행이 남긴 것이므로 정리 대상이다. 같은 실행
@@ -106,11 +106,11 @@ _FALLBACK_RUN_ID = uuid.uuid4().hex[:8]
 # 프로세스에 있을 리 없다** — 서브프로세스를 띄우던 시절에는 환경변수가 곧 전달 수단이었다.
 # ContextVar 인 것은 요청마다 갈려야 하기 때문이다(모듈 전역이면 동시 요청이 서로의 값을
 # 덮는다).
-_RUN_ID_OVERRIDE: ContextVar[str | None] = ContextVar("laurio_e2e_run_id", default=None)
+_RUN_ID_OVERRIDE: ContextVar[str | None] = ContextVar("codemit_e2e_run_id", default=None)
 
 
 def _run_id() -> str:
-    return _RUN_ID_OVERRIDE.get() or os.environ.get("LAURIO_E2E_RUN_ID") or _FALLBACK_RUN_ID
+    return _RUN_ID_OVERRIDE.get() or os.environ.get("CODEMIT_E2E_RUN_ID") or _FALLBACK_RUN_ID
 
 
 def _own_title_prefix() -> str:
@@ -167,7 +167,7 @@ def _clear_stale_seed_contests() -> int:
     """자기 가족-접두어(TITLE_PREFIX)의 Contest 중 **이번 실행이 심지 않은
     것**을 정리한다 — 위 `_own_title_prefix` 설명 참고. 나이가 아니라 실행
     토큰으로 가른다: `_own_title_prefix()`로 시작하지 않으면(=이번
-    `LAURIO_E2E_RUN_ID`가 아니면) 얼마나 최근에 만들어졌든 다른 실행이 남긴
+    `CODEMIT_E2E_RUN_ID`가 아니면) 얼마나 최근에 만들어졌든 다른 실행이 남긴
     것이므로 지운다. 삭제 범위는 항상 TITLE_PREFIX 가족으로만 좁힌다: 다른
     시드(seed_dev_data, seed_e2e_contests.py)나 실제 데이터, 그리고 이
     명령을 모르는 다른 체인의 e2e 데이터는 절대 건드리지 않는다 —
@@ -502,7 +502,7 @@ def _refuse_in_deployed_environment(command_name: str = "seed_e2e_operator_queue
     # config/settings.py의 다른 배포 가드들과 같은 판정 기준이다.
     if settings.IS_DEPLOYED_ENVIRONMENT:
         raise CommandError(
-            f"LAURIO_DEPLOYMENT_TARGET={settings.LAURIO_DEPLOYMENT_TARGET} 인데 "
+            f"CODEMIT_DEPLOYMENT_TARGET={settings.CODEMIT_DEPLOYMENT_TARGET} 인데 "
             # **이름을 인자로 받는다.** 이 헬퍼는 세 명령이 함께 쓰는데, 메시지가
             # 자기 이름을 하드코딩하고 있어서 `prune_e2e_junk` 를 staging 에서 친
             # 사람에게 「seed_e2e_operator_queues 가 거부됐다」고 말했다 — HTTP
@@ -531,7 +531,7 @@ class Command(BaseCommand):
             "--run-id",
             default=None,
             help=(
-                "이번 실행을 가리키는 토큰. 안 주면 예전처럼 LAURIO_E2E_RUN_ID 환경변수를 "
+                "이번 실행을 가리키는 토큰. 안 주면 예전처럼 CODEMIT_E2E_RUN_ID 환경변수를 "
                 "읽는다 — HTTP 로 부를 때는(#156) 부르는 쪽의 환경변수가 이 프로세스에 없으므로 "
                 "이 인자로 실어 보낸다."
             ),
@@ -540,7 +540,7 @@ class Command(BaseCommand):
             "--prune-other-runs",
             action="store_true",
             help=(
-                "심지 않고 다른 실행(다른 LAURIO_E2E_RUN_ID)이 남긴 own-prefix "
+                "심지 않고 다른 실행(다른 CODEMIT_E2E_RUN_ID)이 남긴 own-prefix "
                 "Contest만 정리한다(다른 옵션과 함께 쓰지 않는다). frontend/e2e/"
                 "global-setup.ts가 스위트 시작 시 딱 한 번 부른다 — 이 명령을 처음 "
                 "실제로 부르는 시점(대개 operator 프로젝트의 첫 테스트)까지 기다리면, "

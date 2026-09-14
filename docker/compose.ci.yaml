@@ -43,7 +43,7 @@ services:
   minio:
     # **콘솔(9001)은 CI 에서 아무도 안 연다** — 사람이 브라우저로 보는 관리 UI 다.
     # API(9000)는 남긴다: 업로드 e2e 에서 브라우저가 presigned URL 로 직접 PUT 하고,
-    # 그 URL 은 `STORAGE_PUBLIC_ENDPOINT_URL`(=127.0.0.1:${LAURIO_MINIO_PORT})을
+    # 그 URL 은 `STORAGE_PUBLIC_ENDPOINT_URL`(=127.0.0.1:${CODEMIT_MINIO_PORT})을
     # 가리킨다.
     #
     # **호스트 포트를 커널이 고른다**(#196) — 번호를 적지 않으면 임의 포트다.

@@ -118,7 +118,7 @@ window.TossPayments = function(clientKey) {
     payment: function(opts) {
       return {
         requestPayment: function(params) {
-          window.__laurioTossRequestPayment = {
+          window.__codemitTossRequestPayment = {
             clientKey: clientKey,
             customerKey: opts.customerKey,
             params: params,

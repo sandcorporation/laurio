@@ -14,7 +14,7 @@
   `core.transitions.claim_transition`으로 좁힌 지금은 이 Contest만 옮겨야
   한다.
 - `seed_e2e_operator_queues._clear_stale_seed_contests`: **다른 실행**(다른
-  `LAURIO_E2E_RUN_ID`)의 own-prefix Contest만 지워야 한다 — 무관한 Contest,
+  `CODEMIT_E2E_RUN_ID`)의 own-prefix Contest만 지워야 한다 — 무관한 Contest,
   그리고 **이번 실행**(같은 run id)의 own-prefix Contest는 손대면 안 된다.
   코드리뷰가 실제로 재현한 회귀: 예전에는 벽시계 1시간 컷오프였는데, 그
   기준은 "연속 두 번 실행"을 구별하지 못해 두 실행의 Contest가 모두 살아남아
@@ -89,7 +89,7 @@ def test_seed_e2e_operator_is_idempotent_for_an_operator_it_already_made():
 
 @pytest.mark.django_db
 def test_seed_e2e_operator_refuses_to_run_in_a_deployed_environment():
-    with override_settings(IS_DEPLOYED_ENVIRONMENT=True, LAURIO_DEPLOYMENT_TARGET="staging"):
+    with override_settings(IS_DEPLOYED_ENVIRONMENT=True, CODEMIT_DEPLOYMENT_TARGET="staging"):
         with pytest.raises(CommandError):
             call_command("seed_e2e_operator", username="seed-e2e-op-deployed-guard")
 
@@ -101,14 +101,14 @@ def test_seed_e2e_operator_refuses_to_run_in_a_deployed_environment():
 
 @pytest.mark.django_db
 def test_seed_e2e_operator_queues_refuses_to_run_in_a_deployed_environment():
-    with override_settings(IS_DEPLOYED_ENVIRONMENT=True, LAURIO_DEPLOYMENT_TARGET="production"):
+    with override_settings(IS_DEPLOYED_ENVIRONMENT=True, CODEMIT_DEPLOYMENT_TARGET="production"):
         with pytest.raises(CommandError):
             call_command("seed_e2e_operator_queues", only="appeal")
 
 
 @pytest.mark.django_db
 def test_seed_e2e_operator_queues_clear_refuses_to_run_in_a_deployed_environment():
-    with override_settings(IS_DEPLOYED_ENVIRONMENT=True, LAURIO_DEPLOYMENT_TARGET="production"):
+    with override_settings(IS_DEPLOYED_ENVIRONMENT=True, CODEMIT_DEPLOYMENT_TARGET="production"):
         with pytest.raises(CommandError):
             call_command("seed_e2e_operator_queues", clear=True)
 
@@ -300,11 +300,11 @@ def _make_own_prefix_contest_with_award(uid: str, *, run_id: str, age=timedelta(
 def test_clear_stale_seed_contests_removes_a_different_runs_own_prefix_data_only(monkeypatch):
     """#66/#70 코드리뷰 지적 — 정렬 오염의 진짜 원인은 축적이었다(마감을
     미루는 것도, 벽시계 컷오프도 답이 아니었다). **다른 실행**(다른
-    `LAURIO_E2E_RUN_ID`)의 own-prefix Contest는 방금 만들어졌어도(나이와
+    `CODEMIT_E2E_RUN_ID`)의 own-prefix Contest는 방금 만들어졌어도(나이와
     무관하게) 지워지고, 무관한 Contest와 이번 실행이 방금 만든 own-prefix
     Contest는 그대로 남아야 한다."""
 
-    monkeypatch.setenv("LAURIO_E2E_RUN_ID", "run-current")
+    monkeypatch.setenv("CODEMIT_E2E_RUN_ID", "run-current")
 
     foreign_run = _make_own_prefix_contest_with_award("cleanup-1", run_id="run-other")
     unrelated_contest, _unrelated_submission = _make_unrelated_published_contest_with_submission(
@@ -336,7 +336,7 @@ def test_clear_stale_seed_contests_preserves_the_current_runs_data_even_if_old(m
     무관해졌다는 것을 직접 증명한다: created_at을 30일 전으로 돌려도 현재
     run id와 같은 태그가 붙어 있으면 지워지지 않아야 한다."""
 
-    monkeypatch.setenv("LAURIO_E2E_RUN_ID", "run-current")
+    monkeypatch.setenv("CODEMIT_E2E_RUN_ID", "run-current")
 
     own_but_old = _make_own_prefix_contest_with_award(
         "cleanup-2", run_id="run-current", age=timedelta(days=30)
@@ -356,7 +356,7 @@ def test_running_the_seed_twice_in_a_row_does_not_push_a_fresh_own_prefix_contes
     하나를 남기고, 그 직후 두 번째 호출이 그것까지 지워버리면 축적 정리
     자체가 정렬 문제를 다시 만든다 — 그런 일이 없는지 직접 센다."""
 
-    monkeypatch.setenv("LAURIO_E2E_RUN_ID", "run-same")
+    monkeypatch.setenv("CODEMIT_E2E_RUN_ID", "run-same")
 
     from accounts.management.commands.seed_e2e_operator_queues import TITLE_PREFIX
 

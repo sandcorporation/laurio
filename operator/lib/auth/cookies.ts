@@ -8,12 +8,12 @@ import type { NextResponse } from "next/server";
 // Django의 세션 미들웨어가 그 이름으로만 세션을 찾는다. 이름이 어긋나면 로그인은
 // 성공한 것처럼 응답하고도 다음 요청부터 전부 익명으로 처리된다 — 그 실패가
 // 조용하다.
-export const SESSION_COOKIE_NAME = "laurio_operator_session";
+export const SESSION_COOKIE_NAME = "codemit_operator_session";
 
 // staging/production만 Secure를 건다 — frontend/lib/auth/cookies.ts와 같은 이유
 // (dev는 컨테이너 간 http로만 통신하므로 Secure를 걸면 쿠키가 아예 안 실린다).
 function isDeployedEnvironment(): boolean {
-  const target = process.env.LAURIO_DEPLOYMENT_TARGET;
+  const target = process.env.CODEMIT_DEPLOYMENT_TARGET;
   return target === "staging" || target === "production";
 }
 

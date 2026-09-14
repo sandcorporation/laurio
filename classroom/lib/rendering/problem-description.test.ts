@@ -82,14 +82,14 @@ describe("허용 목록을 통과하는 서식", () => {
   });
 
   it("http/https 링크와 이미지를 통과시킨다", () => {
-    const tree = parseProblemDescription("[문서](https://laurio.example/doc) 그리고 ![그림](http://laurio.example/a.png)");
+    const tree = parseProblemDescription("[문서](https://codemit.example/doc) 그리고 ![그림](http://codemit.example/a.png)");
     const paragraph = tree[0] as Extract<DescriptionBlock, { type: "paragraph" }>;
     expect(paragraph.children[0]).toEqual({
       type: "link",
-      href: "https://laurio.example/doc",
+      href: "https://codemit.example/doc",
       children: [{ type: "text", value: "문서" }],
     });
-    expect(paragraph.children[2]).toEqual({ type: "image", src: "http://laurio.example/a.png", alt: "그림" });
+    expect(paragraph.children[2]).toEqual({ type: "image", src: "http://codemit.example/a.png", alt: "그림" });
   });
 
   it("표는 그려지지 않는다 — 깨지지 않고 그 자리만 빈다", () => {

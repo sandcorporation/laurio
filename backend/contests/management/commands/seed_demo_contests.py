@@ -562,7 +562,7 @@ class Command(BaseCommand):
         SubmissionAsset.objects.create(
             submission=submission,
             kind=SubmissionAsset.Kind.DEMO_URL,
-            value=f"https://demo.laurio.invalid/{contest.pk}/{rank}",
+            value=f"https://demo.codemit.invalid/{contest.pk}/{rank}",
             # **링크 텍스트가 곧 이 라벨이다**(#253) — 화면은 `label || "데모 보기"`
             # 로 그린다. `.invalid` 는 예약 TLD라 절대 열리지 않는데(그게 의도다 —
             # 실재하는 남의 사이트를 가리키는 것보다 정직하다), 「데모 보기」라고만

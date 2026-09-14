@@ -5,7 +5,7 @@
 // bff-shared) 것을 쓴다. 다른 것은 두 가지뿐이다: 이 앱의 허용목록 내용
 // (lib/proxy/allowlist.ts, 운영자 표면 하나)과, 세션 쿠키를 중계하는 전달
 // 방식(lib/proxy/forward.ts).
-import { assertSameOrigin, sanitizeBackendPath } from "@laurio/bff-shared";
+import { assertSameOrigin, sanitizeBackendPath } from "@codemit/bff-shared";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
@@ -26,7 +26,7 @@ async function handle(request: NextRequest, path: string[]): Promise<NextRespons
     return NextResponse.json(NOT_ALLOWED_RESPONSE, { status: 404 });
   }
 
-  const originDenied = assertSameOrigin(request, process.env.LAURIO_OPERATOR_ORIGIN);
+  const originDenied = assertSameOrigin(request, process.env.CODEMIT_OPERATOR_ORIGIN);
   if (originDenied) return originDenied;
 
   const response = await forwardToBackend(request, backendPath);

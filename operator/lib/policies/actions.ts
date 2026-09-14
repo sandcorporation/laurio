@@ -1,4 +1,4 @@
-// 정책 조회·변경 API 호출(#77) — 실패의 모양과 `detail` 정규화는 `@laurio/bff-client` 가
+// 정책 조회·변경 API 호출(#77) — 실패의 모양과 `detail` 정규화는 `@codemit/bff-client` 가
 // 소유한다(#148).
 //
 // 예전에는 이 파일과 operators·deliverable-types 의 actions 가 `ApiResult`·`normalizeDetail`·
@@ -7,13 +7,13 @@
 // "Objects are not valid as a React child" 로 화면 전체를 죽인다(#69 에서 실제로 겪었다).
 // 이제 그 방어는 패키지 한 곳에 있고 공개 앱도 같은 것을 쓴다.
 
-import type { ApiResult } from "@laurio/bff-client";
+import type { ApiResult } from "@codemit/bff-client";
 
 import { bffClient } from "@/lib/bff/client";
 
 import type { PlatformPolicy, PolicyChangeEntry, PolicyField } from "./types";
 
-export type { ApiFailure, ApiResult, ApiSuccess } from "@laurio/bff-client";
+export type { ApiFailure, ApiResult, ApiSuccess } from "@codemit/bff-client";
 
 export function fetchPolicy(): Promise<ApiResult<PlatformPolicy>> {
   return bffClient.get<PlatformPolicy>("/api/backend/operator/policy");

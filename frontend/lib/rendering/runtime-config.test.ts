@@ -4,13 +4,13 @@
 // runtime-config.test.ts`, `classroom/app/login/page.tsx`) — `searchParams`·
 // `cookies`·`headers`를 하나도 읽지 않는 화면은 Next가 빌드 시점에 정적으로
 // 굽고, 그러면 `process.env`를 읽는 함수가 **빌드 머신의** 값(=비어 있음)을
-// 읽어 dev 폴백이 HTML에 박제된다. 공개 앱은 헤더의 계정 메뉴가 `LAURIO_
+// 읽어 dev 폴백이 HTML에 박제된다. 공개 앱은 헤더의 계정 메뉴가 `CODEMIT_
 // CLASSROOM_ORIGIN`을 그렇게 읽는다(#375, `lib/auth/classroom-link.ts`) —
 // 강의실과 같은 실패가 여기서도 가능해진 순간부터 같은 검사가 필요해졌다.
 //
 // **강의실판을 그대로 옮기지 않는다.** 강의실은 모든 화면이 인증 구역이라
 // "런타임 환경변수를 읽으면 예외 없이 force-dynamic"이 성립하지만, 공개 앱은
-// `LAURIO_API_BASE_URL`(`lib/api/client.ts`)을 다섯 공개 화면 전부가 이미
+// `CODEMIT_API_BASE_URL`(`lib/api/client.ts`)을 다섯 공개 화면 전부가 이미
 // 읽는다 — 그 화면들은 백엔드 fetch 자체가 매 요청 데이터를 필요로 해
 // 이미 사실상 동적이고(ADR-0015는 서버 렌더링을 요구할 뿐 빌드 시점 정적
 // 프리렌더를 요구하지 않는다), 이 티켓의 범위도 아니다. 그래서 이 파일은
@@ -31,7 +31,7 @@ const ENTRY_BASENAMES = ["page.tsx", "route.ts", "layout.tsx"];
 /** 이 티켓이 헤더 경로에 새로 얹은 런타임 설정 — 대상 목록이 늘면 여기에
  * 추가한다. `NEXT_PUBLIC_*`는 대상이 아니다(빌드 시점 번들 주입이 계약,
  * `lib/contest-switch.ts`). */
-const WATCHED_RUNTIME_ENV = ["LAURIO_CLASSROOM_ORIGIN"];
+const WATCHED_RUNTIME_ENV = ["CODEMIT_CLASSROOM_ORIGIN"];
 const RUNTIME_ENV = new RegExp(`process\\.env\\.(${WATCHED_RUNTIME_ENV.join("|")})`, "g");
 const FORCE_DYNAMIC = /export\s+const\s+dynamic\s*=\s*["']force-dynamic["']/;
 const IMPORT_FROM = /(?:^|\n)\s*import[^"']*["']([^"']+)["']/g;

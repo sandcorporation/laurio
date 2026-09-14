@@ -48,7 +48,7 @@ export default async function Home() {
   if (!contestProductEnabled()) {
     return (
       <PageShell>
-        <PageHeader title="Laurio" />
+        <PageHeader title="Codemit" />
       </PageShell>
     );
   }
@@ -59,7 +59,7 @@ export default async function Home() {
     <PageShell>
       <div className="flex flex-col gap-8">
         <PageHeader
-          title="Laurio"
+          title="Codemit"
           description="발주자가 상금을 걸고 요구사항을 공개하면, 개발자들이 만들어 제출하는 공개 공모전 플랫폼입니다."
         />
 

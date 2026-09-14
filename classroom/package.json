@@ -1,5 +1,5 @@
 {
-  "name": "laurio-classroom",
+  "name": "codemit-classroom",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -11,7 +11,7 @@
     "test": "pnpm run test:unit"
   },
   "dependencies": {
-    "@laurio/bff-shared": "workspace:*",
+    "@codemit/bff-shared": "workspace:*",
     "@toast-ui/editor": "^3.2.2",
     "marked": "^18.0.12",
     "next": "^15.5.0",
@@ -19,7 +19,7 @@
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
-    "@laurio/route-audit": "workspace:*",
+    "@codemit/route-audit": "workspace:*",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^22.10.0",
     "@types/react": "^19.1.0",

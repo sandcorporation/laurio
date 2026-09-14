@@ -8,13 +8,13 @@
 // 새 우회가 나온다. 대신 **설정에 적힌 우리 오리진만** 따로 받는다 — 사용자 입력이
 // 고르는 것은 「이 목록 중 어느 것인가」뿐이고, 목록 자체는 배포 설정이다.
 //
-// 값은 `LAURIO_CLASSROOM_ORIGIN` 에서 온다 — 강의실 컨테이너가 읽는 것과 **같은
-// `.env` 줄**이다(`LAURIO_OPERATOR_ORIGIN` 과 같은 원칙). 어긋나면 복귀가 조용히
+// 값은 `CODEMIT_CLASSROOM_ORIGIN` 에서 온다 — 강의실 컨테이너가 읽는 것과 **같은
+// `.env` 줄**이다(`CODEMIT_OPERATOR_ORIGIN` 과 같은 원칙). 어긋나면 복귀가 조용히
 // 안 되고 사람은 공개 앱에 남는다 — 안전한 쪽으로 실패한다.
 
 /** 설정된 형제 오리진 전부. 비어 있으면(dev 기본) 복귀 자체가 꺼진다. */
 export function configuredSiblingOrigins(): string[] {
-  return [process.env.LAURIO_CLASSROOM_ORIGIN]
+  return [process.env.CODEMIT_CLASSROOM_ORIGIN]
     .filter((v): v is string => typeof v === "string" && v.trim() !== "")
     .map(normalizeOrigin)
     .filter((v): v is string => v !== null);
@@ -35,8 +35,8 @@ function normalizeOrigin(value: string): string | null {
  * 후보가 설정된 형제 오리진 **그 자체**일 때만 돌려준다.
  *
  * 접두어 비교가 아니라 파싱한 `origin` 끼리의 완전 일치다 —
- * `https://classroom.laurio.kr.evil.test` 같은 접미어 트릭과
- * `https://classroom.laurio.kr@evil.test` 같은 authority 트릭을 둘 다 막는다.
+ * `https://classroom.codemit.kr.evil.test` 같은 접미어 트릭과
+ * `https://classroom.codemit.kr@evil.test` 같은 authority 트릭을 둘 다 막는다.
  */
 export function resolveSiblingOrigin(candidate: string | null | undefined): string | null {
   if (!candidate) return null;

@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 const BACKEND_PROBE_TIMEOUT_MS = 3000;
 
 function backendBaseUrl(): string {
-  return process.env.LAURIO_API_BASE_URL ?? "http://127.0.0.1:58000";
+  return process.env.CODEMIT_API_BASE_URL ?? "http://127.0.0.1:58000";
 }
 
 async function probeBackend(): Promise<"ok" | "unreachable"> {

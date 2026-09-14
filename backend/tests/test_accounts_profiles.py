@@ -38,7 +38,7 @@ def test_sponsor_profile_is_created_lazily(client):
 
     response = client.post(
         "/api/accounts/sponsor-profile",
-        data={"display_name": "라우리오 스폰서", "bio": "우리는 상금을 겁니다"},
+        data={"display_name": "코드밋 스폰서", "bio": "우리는 상금을 겁니다"},
         content_type="application/json",
         **_auth_header(pair["access"]),
     )

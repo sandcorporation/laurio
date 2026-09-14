@@ -1,7 +1,7 @@
 // 강의실 알림 백엔드 호출 (#304). 공유 엔드포인트(`/api/notifications/*`,
 // backend `notifications/api.py`)를 공개 앱과 나눠 쓰되, `classroom_only=true`를
 // 언제나 붙인다 — 목록도, 안 읽은 개수도, 읽음 처리도 강의실 알림
-// (`CLASSROOM_NOTIFICATION_TYPES`)만 본다. 이 앱은 아직 `@laurio/bff-client`를
+// (`CLASSROOM_NOTIFICATION_TYPES`)만 본다. 이 앱은 아직 `@codemit/bff-client`를
 // 쓰지 않으므로(`lib/backend/client.ts`) 타입도 여기서 손으로 적는다 —
 // `lib/submissions/api.ts`와 같은 패턴이다.
 import { backendJson } from "@/lib/backend/client";

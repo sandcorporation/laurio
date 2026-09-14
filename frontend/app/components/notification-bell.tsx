@@ -34,7 +34,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect } from "react";
 
-import { useBackendQuery } from "@laurio/bff-client";
+import { useBackendQuery } from "@codemit/bff-client";
 
 import { bffClient } from "@/lib/bff/client";
 import type { HeaderSessionState } from "@/lib/auth/header-session-state";

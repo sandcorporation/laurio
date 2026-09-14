@@ -421,7 +421,7 @@ def test_hard_delete_e2e_fixture_rows_refuses_in_a_deployed_environment():
 
     entry = JournalEntry.objects.create(contest_id=uuid.uuid4(), memo="배포 가드 확인용")
 
-    with override_settings(IS_DEPLOYED_ENVIRONMENT=True, LAURIO_DEPLOYMENT_TARGET="staging"):
+    with override_settings(IS_DEPLOYED_ENVIRONMENT=True, CODEMIT_DEPLOYMENT_TARGET="staging"):
         with pytest.raises(AppendOnlyError):
             hard_delete_e2e_fixture_rows(JournalEntry.objects.filter(pk=entry.pk))
 

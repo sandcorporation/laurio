@@ -177,7 +177,7 @@ export async function seedE2eOperatorAppeal(
 }
 
 function backendApiPort(): string {
-  return process.env.LAURIO_API_PORT ?? "58000";
+  return process.env.CODEMIT_API_PORT ?? "58000";
 }
 
 /** Developer 본인의 소스 열람 기록 수를 백엔드에서 직접 센다(`GET

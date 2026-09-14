@@ -12,8 +12,8 @@
 // 자기가 낸 적 없는 이의를 봤다고 믿게 된다.
 import { useCallback, useEffect, useState } from "react";
 
-import type { ApiResult } from "@laurio/bff-client";
-import type { components } from "@laurio/bff-client/schema";
+import type { ApiResult } from "@codemit/bff-client";
+import type { components } from "@codemit/bff-client/schema";
 
 import { bffClient } from "@/lib/bff/client";
 

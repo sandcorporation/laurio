@@ -49,7 +49,7 @@ def test_openai_scoring_adapter_returns_a_verdict_for_every_requirement():
         submission_id=1,
         contest_id=1,
         prompt=(
-            "당신은 Laurio 공모전 제출물을 채점하는 심사 보조자입니다. 각 Requirement에"
+            "당신은 Codemit 공모전 제출물을 채점하는 심사 보조자입니다. 각 Requirement에"
             " 대해 연결된 Evidence와 소스코드를 근거로 충족 여부를 판단하세요.\n\n"
             "## Requirements\n"
             "- [required] #1: 로그인 화면에 이메일/비밀번호 입력 필드가 있어야 한다\n"

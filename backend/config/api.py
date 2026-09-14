@@ -27,7 +27,7 @@ from storage.policy import StorageAccessDenied
 from verification.api import router as verification_router
 from verification.operator_api import operator_router as verification_operator_router
 
-api = NinjaAPI(title="Laurio API", version="0.1.0")
+api = NinjaAPI(title="Codemit API", version="0.1.0")
 
 api.add_router("", accounts_router)
 api.add_router("", verification_router)

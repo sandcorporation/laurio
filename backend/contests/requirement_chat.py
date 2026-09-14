@@ -303,7 +303,7 @@ def build_chat_prompt(chat_input: RequirementChatInput, *, include_history: bool
     """
 
     lines = [
-        "당신은 Laurio 공모전 Sponsor가 검증 가능한 Requirement 체크리스트를 만들도록",
+        "당신은 Codemit 공모전 Sponsor가 검증 가능한 Requirement 체크리스트를 만들도록",
         "돕는 대화형 보조자입니다. Sponsor는 무엇을 적어야 할지 모르는 상태에서 시작할",
         "수 있습니다 — 막연하면 질문으로 구체화하고, 구체적이면 검증 가능한 체크리스트",
         "항목으로 정리해 제안하세요. 각 항목에는 필수(required) 또는 선택(optional)",
@@ -366,7 +366,7 @@ _OPENAI_DEFAULT_TEMPERATURE = 0.7
 # 안에서 프롬프트 구성·DB 조회 오버헤드까지 끝나야 한다.
 _OPENAI_REQUEST_TIMEOUT_SECONDS = 20
 _OPENAI_SYSTEM_PROMPT = (
-    "당신은 Laurio 공모전 Sponsor의 AI grill 대화를 돕는 보조자입니다. 응답은 반드시 "
+    "당신은 Codemit 공모전 Sponsor의 AI grill 대화를 돕는 보조자입니다. 응답은 반드시 "
     "지정된 JSON 스키마를 따라야 합니다 — reply(사용자에게 보여줄 대화문)와 "
     "proposed_requirements(이번 턴에 제안하는 체크리스트 후보 배열, 없으면 빈 배열) "
     "두 필드를 모두 포함하세요."

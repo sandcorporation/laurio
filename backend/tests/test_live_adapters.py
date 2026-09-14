@@ -60,7 +60,7 @@ def test_toss_payment_adapter_queries_are_server_only_and_shape_stable():
     with override_settings(TOSS_API_SECRET_KEY=secret_key, TOSS_API_VERSION="2022-11-16"):
         adapter = TossPGAdapter()
 
-        unknown_order_id = f"laurio-live-test-{uuid.uuid4()}"
+        unknown_order_id = f"codemit-live-test-{uuid.uuid4()}"
         assert adapter.query_status(order_id=unknown_order_id) == "pending"
         assert adapter.query_refund_status(order_id=unknown_order_id) == "pending"
 
@@ -133,12 +133,12 @@ def test_toss_seller_registration_encrypts_with_the_real_vendor_and_gets_a_recog
     secret_key = require_live_credential("TOSS_API_SECRET_KEY")
     secure_key = require_live_credential("TOSS_API_SECURE_KEY")
 
-    ref_seller_id = f"laurio-live-test-{_uuid.uuid4()}"
+    ref_seller_id = f"codemit-live-test-{_uuid.uuid4()}"
     body = {
         "refSellerId": ref_seller_id,
         "businessType": "INDIVIDUAL",
         "individual": {
-            "name": "라우리오테스트",
+            "name": "코드밋테스트",
             "email": f"{ref_seller_id}@example.com",
             "phone": "01000000000",
         },

@@ -1,5 +1,5 @@
 // 세션 쿠키의 domain 속성이 배포 환경별로 갈리는지 확인한다 (ADR-0038, #273).
-// LAURIO_SESSION_COOKIE_DOMAIN이 설정되면 그 값을 쓰고, 비어 있으면(dev) domain을
+// CODEMIT_SESSION_COOKIE_DOMAIN이 설정되면 그 값을 쓰고, 비어 있으면(dev) domain을
 // 아예 주지 않는다 — dev는 localhost라 domain을 주면 쿠키가 붙지 않기 때문이다.
 import { NextResponse } from "next/server";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
@@ -23,8 +23,8 @@ function fakeJwt(expSecondsFromNow: number): string {
 }
 
 describe("setSessionCookies — domain 속성", () => {
-  test("LAURIO_SESSION_COOKIE_DOMAIN이 비어 있으면(dev) domain을 주지 않는다", () => {
-    delete process.env.LAURIO_SESSION_COOKIE_DOMAIN;
+  test("CODEMIT_SESSION_COOKIE_DOMAIN이 비어 있으면(dev) domain을 주지 않는다", () => {
+    delete process.env.CODEMIT_SESSION_COOKIE_DOMAIN;
     const response = new NextResponse();
 
     setSessionCookies(response, { access: fakeJwt(300), refresh: fakeJwt(1209600) });
@@ -35,8 +35,8 @@ describe("setSessionCookies — domain 속성", () => {
     expect(refresh?.domain).toBeUndefined();
   });
 
-  test("LAURIO_SESSION_COOKIE_DOMAIN이 설정되면(staging/prod) 부모 도메인을 domain으로 쓴다", () => {
-    process.env.LAURIO_SESSION_COOKIE_DOMAIN = ".laurio.honeycombpizza.link";
+  test("CODEMIT_SESSION_COOKIE_DOMAIN이 설정되면(staging/prod) 부모 도메인을 domain으로 쓴다", () => {
+    process.env.CODEMIT_SESSION_COOKIE_DOMAIN = ".laurio.honeycombpizza.link";
     const response = new NextResponse();
 
     setSessionCookies(response, { access: fakeJwt(300), refresh: fakeJwt(1209600) });
@@ -48,7 +48,7 @@ describe("setSessionCookies — domain 속성", () => {
   });
 
   test("httpOnly는 domain 설정 여부와 무관하게 그대로다", () => {
-    process.env.LAURIO_SESSION_COOKIE_DOMAIN = ".laurio.honeycombpizza.link";
+    process.env.CODEMIT_SESSION_COOKIE_DOMAIN = ".laurio.honeycombpizza.link";
     const response = new NextResponse();
 
     setSessionCookies(response, { access: fakeJwt(300), refresh: fakeJwt(1209600) });
@@ -61,8 +61,8 @@ describe("setSessionCookies — domain 속성", () => {
 describe("clearSessionCookies — domain 속성이 setSessionCookies와 일치한다", () => {
   // 로그아웃 시 지우는 쿠키의 domain이 로그인 때 설정한 domain과 다르면 브라우저가
   // 다른 쿠키로 취급해 실제로는 지워지지 않는다.
-  test("LAURIO_SESSION_COOKIE_DOMAIN이 설정되면 삭제 쿠키도 같은 domain을 쓴다", () => {
-    process.env.LAURIO_SESSION_COOKIE_DOMAIN = ".laurio.honeycombpizza.link";
+  test("CODEMIT_SESSION_COOKIE_DOMAIN이 설정되면 삭제 쿠키도 같은 domain을 쓴다", () => {
+    process.env.CODEMIT_SESSION_COOKIE_DOMAIN = ".laurio.honeycombpizza.link";
     const response = new NextResponse();
 
     clearSessionCookies(response);

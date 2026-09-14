@@ -35,7 +35,7 @@ export function describeNotification(notification: NotificationOut): string {
       return `관심 카테고리에 새 공모전 '${contestTitle}'이(가) 등록됐습니다.`;
     case "payout_awaits_you": {
       const message = typeof context.message === "string" ? context.message : "";
-      return message || "지급 절차에 확인이 필요합니다 — laurio에서 확인해주세요.";
+      return message || "지급 절차에 확인이 필요합니다 — codemit에서 확인해주세요.";
     }
     // 강의실 알림 둘(#301, #303)은 여기 나타나지 않는다 — 백엔드 `GET
     // /notifications/me`의 기본값(공개 앱이 쓰는 값)이 그 유형들을 아예

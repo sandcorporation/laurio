@@ -81,7 +81,7 @@ def e2e_seed(request, name: str):
     if settings.IS_DEPLOYED_ENVIRONMENT:
         raise HttpError(
             403,
-            f"LAURIO_DEPLOYMENT_TARGET={settings.LAURIO_DEPLOYMENT_TARGET} 에서는 "
+            f"CODEMIT_DEPLOYMENT_TARGET={settings.CODEMIT_DEPLOYMENT_TARGET} 에서는 "
             "e2e 시드를 심을 수 없습니다 — 실제 데이터를 만들거나 지웁니다.",
         )
 

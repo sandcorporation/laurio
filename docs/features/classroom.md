@@ -15,7 +15,7 @@ Next.js + React. 강사·참여자가 쓰는 앱이다(ADR-0037) — 공모전 �
 표면에만 SSR을 요구했다). 예외 둘은 색이 드러나지 않는 배선용 서버 컴포넌트다 —
 `/login`(공개 앱 로그인 주소를 짓는다, #297 후속)과 헤더 계정 메뉴의 서버 절반
 (`app/components/account-menu.tsx`, #306, 아래 「헤더 계정 메뉴」절) — 둘 다 배포
-설정(`LAURIO_WEB_ORIGIN`·`LAURIO_CLASSROOM_ORIGIN`)을 요청마다 다시 읽어야 해서
+설정(`CODEMIT_WEB_ORIGIN`·`CODEMIT_CLASSROOM_ORIGIN`)을 요청마다 다시 읽어야 해서
 `export const dynamic = "force-dynamic"`을 선언한다(그 값이 빌드 시점에 굳는 사고가
 실제로 났었다, `lib/rendering/runtime-config.test.ts`).
 

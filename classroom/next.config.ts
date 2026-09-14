@@ -9,7 +9,7 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   output: "standalone",
   outputFileTracingRoot: path.join(__dirname, ".."),
-  transpilePackages: ["@laurio/bff-shared", "@laurio/bff-client"],
+  transpilePackages: ["@codemit/bff-shared", "@codemit/bff-client"],
   reactStrictMode: true,
   webpack: (config, { dev }) => {
     // 운영자 앱과 같은 이유 — dev 컨테이너가 소스를 바인드 마운트로 받는데,

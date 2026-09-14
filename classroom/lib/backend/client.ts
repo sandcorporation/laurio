@@ -1,4 +1,4 @@
-// 백엔드 fetch 공통 래퍼 (#278). 이 앱은 아직 `@laurio/bff-client`를 쓰지
+// 백엔드 fetch 공통 래퍼 (#278). 이 앱은 아직 `@codemit/bff-client`를 쓰지
 // 않는다(docker/classroom.Dockerfile 주석 참고) — Class·Problem·체크리스트뿐인
 // 지금 범위에는 얇은 fetch 래퍼로 충분하고, 프록시(app/api/backend/[...path]/
 // route.ts)가 인증 헤더 첨부·리프레시를 이미 처리한다.

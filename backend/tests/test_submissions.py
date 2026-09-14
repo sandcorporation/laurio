@@ -1694,7 +1694,7 @@ def test_resolver_wiring_opens_demo_to_everyone_after_deadline(client, category,
 
 
 def _repo_url(name: str) -> str:
-    return f"https://github.com/laurio-test/{name}"
+    return f"https://github.com/codemit-test/{name}"
 
 
 @pytest.mark.django_db

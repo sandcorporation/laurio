@@ -1,7 +1,7 @@
 [project]
-name = "laurio-backend"
+name = "codemit-backend"
 version = "0.1.0"
-description = "Laurio — 공개 공모전 플랫폼 backend"
+description = "Codemit — 공개 공모전 플랫폼 backend"
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "bleach>=6.4.0",

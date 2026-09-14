@@ -609,7 +609,7 @@ def receive_toss_seller_webhook(request: HttpRequest):
 
     ref_seller_id = entity_body.get("refSellerId") or ""
     # 벤더 문서의 Seller 객체 필드는 `id` 다 — `sellerId` 는 없다(#173, 웹
-    # 확인). `refSellerId` 로 찾는(우리가 등록 시 보낸 `laurio-developer-{id}`)
+    # 확인). `refSellerId` 로 찾는(우리가 등록 시 보낸 `codemit-developer-{id}`)
     # 기존 경로는 그대로 두고, 폴백만 고친다.
     seller_id = entity_body.get("id") or ""
     vendor_status = entity_body.get("status")
@@ -621,8 +621,8 @@ def receive_toss_seller_webhook(request: HttpRequest):
         raise HttpError(422, f"알 수 없는 status 입니다: {vendor_status!r}")
 
     seller = None
-    if ref_seller_id.startswith("laurio-developer-"):
-        developer_id_str = ref_seller_id.removeprefix("laurio-developer-")
+    if ref_seller_id.startswith("codemit-developer-"):
+        developer_id_str = ref_seller_id.removeprefix("codemit-developer-")
         if developer_id_str.isdigit():
             seller = Seller.objects.filter(developer_id=int(developer_id_str)).first()
     if seller is None and seller_id:

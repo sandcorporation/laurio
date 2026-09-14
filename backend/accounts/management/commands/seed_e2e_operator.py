@@ -42,7 +42,7 @@ class Command(BaseCommand):
         # 자격증명의 Operator 계정이 생긴다(코드리뷰 지적). dev·CI에서만 돈다.
         if settings.IS_DEPLOYED_ENVIRONMENT:
             raise CommandError(
-                f"LAURIO_DEPLOYMENT_TARGET={settings.LAURIO_DEPLOYMENT_TARGET} 인데 "
+                f"CODEMIT_DEPLOYMENT_TARGET={settings.CODEMIT_DEPLOYMENT_TARGET} 인데 "
                 "이 명령을 실행하려 했다 — seed_e2e_operator 는 e2e 전용이라 배포 "
                 "환경에서 실행할 수 없다(고정된 기본 비밀번호를 쓴다)."
             )

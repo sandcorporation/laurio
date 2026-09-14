@@ -33,7 +33,7 @@ class _Holder:
         self.policy: PlatformPolicy | None = None
 
 
-_holder: ContextVar[_Holder | None] = ContextVar("laurio_policy_scope", default=None)
+_holder: ContextVar[_Holder | None] = ContextVar("codemit_policy_scope", default=None)
 
 
 @contextmanager

@@ -75,7 +75,7 @@ class PayoutStatus(models.TextChoices):
     CONFIRMED_IDENTITY_PENDING = "confirmed_identity_pending", "지급 확정 · 신원 대기"
     # 지급이 확정됐지만 이 Developer의 Seller(지급대행사 수취인) 등록이 아직
     # 끝나지 않은 상태(ADR-0020). CONFIRMED_IDENTITY_PENDING과는 다른 것을
-    # 기다린다 — 이건 주민등록번호(Laurio의 세무)가 아니라 지급대행사의
+    # 기다린다 — 이건 주민등록번호(Codemit의 세무)가 아니라 지급대행사의
     # 수취인 등록을 기다린다. 한도 초과·심사 지연도 여기 머문다 — 실패가
     # 아니므로 금액은 그대로 원장에 개발자 미지급금으로 남는다.
     CONFIRMED_SELLER_PENDING = "confirmed_seller_pending", "지급 확정 · Seller 대기"
@@ -126,7 +126,7 @@ class Payout(models.Model):
     class TransferStatus(models.TextChoices):
         """실제 벤더 이체(토스 실물 어댑터가 부르는 `POST /v2/payouts`)의 진행
         상태 — `status`(두 대기가 풀렸는가)와는 다른 축이다(코드리뷰 지적 1/4/8,
-        #57). `status`가 "Laurio가 내부적으로(원장상) 확정했는가"를 답하는
+        #57). `status`가 "Codemit가 내부적으로(원장상) 확정했는가"를 답하는
         반면, 이 필드는 "그 확정된 금액이 실제로 벤더에게 이체 요청됐고 그
         결과가 무엇인가"를 답한다. 둘을 하나로 뭉치면 "Seller가 막 준비됐는데
         실이체가 벤더 쪽 한도로 거절된" 경우를 표현할 자리가 없어, 확정

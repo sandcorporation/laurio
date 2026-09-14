@@ -203,7 +203,7 @@ from payouts.adapters import SellerRegistration
 
 def _reg(**overrides):
     base = dict(
-        ref_seller_id="laurio-developer-7",
+        ref_seller_id="codemit-developer-7",
         name="홍길동",
         email="dev@example.com",
         phone="01099998888",
@@ -243,7 +243,7 @@ def test_register_sends_jwe_encrypted_body_with_individual_fields():
         with patch("payouts.adapters_toss.requests.post") as mock_post:
             mock_post.return_value = _encrypted_response(
                 200,
-                {"refSellerId": "laurio-developer-7", "id": "seller-abc", "status": "APPROVAL_REQUIRED"},
+                {"refSellerId": "codemit-developer-7", "id": "seller-abc", "status": "APPROVAL_REQUIRED"},
             )
             result = adapter.register(_reg())
     assert result.status == "approval_required"
@@ -252,7 +252,7 @@ def test_register_sends_jwe_encrypted_body_with_individual_fields():
     _, kwargs = mock_post.call_args
     assert kwargs["headers"]["TossPayments-api-security-mode"] == "ENCRYPTION"
     sent_body = jwe_decrypt(kwargs["data"], secure_key_hex=_SECURE_KEY_HEX)
-    assert sent_body["refSellerId"] == "laurio-developer-7"
+    assert sent_body["refSellerId"] == "codemit-developer-7"
     assert sent_body["businessType"] == "INDIVIDUAL"
     assert sent_body["individual"] == {"name": "홍길동", "email": "dev@example.com", "phone": "01099998888"}
 
@@ -263,7 +263,7 @@ def test_register_does_not_fall_back_to_our_own_ref_seller_id_as_vendor_id():
     `individual`·`status`·`account`·`metadata` 다 — `sellerId` 는 없다
     (코드리뷰 지적, #173 후속). 예전에는 `body.get("sellerId") or
     body.get("refSellerId")`로 읽어, 실물 응답에 `sellerId`가 없으니
-    **우리가 보낸** `refSellerId`(`laurio-developer-{id}`)를 벤더 식별자인
+    **우리가 보낸** `refSellerId`(`codemit-developer-{id}`)를 벤더 식별자인
     양 저장했다 — 그 값으로 이후 `GET /v2/sellers/{seller_id}`를 치면
     벤더가 모르는 문자열이라 영원히 404다. `id` 필드가 없으면(벤더가 이
     응답에 그 필드를 안 줬거나 우리 가정이 또 틀렸으면) 조용히 잘못된
@@ -273,11 +273,11 @@ def test_register_does_not_fall_back_to_our_own_ref_seller_id_as_vendor_id():
         adapter = TossSellerAdapter()
         with patch("payouts.adapters_toss.requests.post") as mock_post:
             mock_post.return_value = _encrypted_response(
-                200, {"refSellerId": "laurio-developer-7", "status": "APPROVAL_REQUIRED"}
+                200, {"refSellerId": "codemit-developer-7", "status": "APPROVAL_REQUIRED"}
             )
             result = adapter.register(_reg())
     assert result.status == "approval_required"
-    assert result.seller_id == ""  # "laurio-developer-7" 로 잘못 채워지지 않는다
+    assert result.seller_id == ""  # "codemit-developer-7" 로 잘못 채워지지 않는다
 
 
 def test_register_posts_to_v2_sellers_not_v1():

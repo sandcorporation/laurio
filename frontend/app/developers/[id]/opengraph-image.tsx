@@ -6,7 +6,7 @@ import { ImageResponse } from "next/og";
 
 import { fetchDeveloperProfile } from "@/lib/api/developers";
 
-export const alt = "Laurio 개발자 프로필";
+export const alt = "Codemit 개발자 프로필";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -19,7 +19,7 @@ export default async function DeveloperOpengraphImage({
   const developerId = Number(id);
   const profile = Number.isInteger(developerId) ? await fetchDeveloperProfile(developerId) : null;
 
-  const title = profile?.display_name ?? "Laurio";
+  const title = profile?.display_name ?? "Codemit";
   const subtitle = profile
     ? `아카이브된 제출작 ${profile.submissions.length}건`
     : "발주자가 상금을 걸고 요구사항을 공개하는 공개 공모전 플랫폼";
@@ -39,7 +39,7 @@ export default async function DeveloperOpengraphImage({
           fontFamily: "sans-serif",
         }}
       >
-        <div style={{ fontSize: 28, letterSpacing: 4, color: "#8B877D" }}>LAURIO · 개발자 프로필</div>
+        <div style={{ fontSize: 28, letterSpacing: 4, color: "#8B877D" }}>CODEMIT · 개발자 프로필</div>
         <div style={{ display: "flex", fontSize: 56, fontWeight: 700, marginTop: 24 }}>{title}</div>
         <div style={{ display: "flex", fontSize: 32, color: "#55524A", marginTop: 20 }}>{subtitle}</div>
       </div>

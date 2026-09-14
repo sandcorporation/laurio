@@ -11,8 +11,8 @@
 //
 // 호출의 모양(상태기계·401·`detail` 파싱·폴백 문구)은 패키지가 소유한다(#146).
 
-import { type ApiResult, useBackendQuery } from "@laurio/bff-client";
-import type { components } from "@laurio/bff-client/schema";
+import { type ApiResult, useBackendQuery } from "@codemit/bff-client";
+import type { components } from "@codemit/bff-client/schema";
 
 import { bffClient } from "@/lib/bff/client";
 

@@ -72,7 +72,7 @@ def test_deployed_environment_refuses_to_seed(client):
     HTTP 로 열면서 그 구멍이 표면이 되므로 입구에서도 막는다.
     """
 
-    with override_settings(IS_DEPLOYED_ENVIRONMENT=True, LAURIO_DEPLOYMENT_TARGET="staging"):
+    with override_settings(IS_DEPLOYED_ENVIRONMENT=True, CODEMIT_DEPLOYMENT_TARGET="staging"):
         resp = _post(client, "contests")
     assert resp.status_code == 403, resp.content
 

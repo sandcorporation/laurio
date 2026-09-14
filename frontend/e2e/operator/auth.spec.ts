@@ -119,12 +119,12 @@ test.describe("세션 쿠키(ADR-0016/0019)", () => {
     await expect(page.getByTestId("operator-home-heading")).toBeVisible();
 
     const cookies = await page.context().cookies();
-    const sessionCookie = cookies.find((cookie) => cookie.name === "laurio_operator_session");
+    const sessionCookie = cookies.find((cookie) => cookie.name === "codemit_operator_session");
     expect(sessionCookie).toBeDefined();
     expect(sessionCookie?.httpOnly).toBe(true);
 
     const visibleToJs = await page.evaluate(() => document.cookie);
-    expect(visibleToJs).not.toContain("laurio_operator_session");
+    expect(visibleToJs).not.toContain("codemit_operator_session");
   });
 
   test("로그아웃하면 쿠키가 사라지고 보호된 화면에 다시 못 들어간다", async ({ page }) => {
@@ -140,7 +140,7 @@ test.describe("세션 쿠키(ADR-0016/0019)", () => {
     await expect(page).toHaveURL(/\/login/);
 
     const cookies = await page.context().cookies();
-    expect(cookies.find((cookie) => cookie.name === "laurio_operator_session")).toBeUndefined();
+    expect(cookies.find((cookie) => cookie.name === "codemit_operator_session")).toBeUndefined();
 
     await page.goto("/");
     await expect(page).toHaveURL(/\/login/);
@@ -176,7 +176,7 @@ test.describe("세션 쿠키(ADR-0016/0019)", () => {
     // 실제 세션 쿠키도 그대로 살아 있다 — 화면만이 아니라 실제로도 로그인
     // 상태다.
     const cookies = await page.context().cookies();
-    expect(cookies.find((cookie) => cookie.name === "laurio_operator_session")).toBeDefined();
+    expect(cookies.find((cookie) => cookie.name === "codemit_operator_session")).toBeDefined();
   });
 
   test("브라우저의 쿠키 헤더를 통째로 중계하지 않는다 — 무관한 쿠키가 섞여도 정상 응답한다", async ({

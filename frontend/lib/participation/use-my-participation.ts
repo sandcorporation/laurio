@@ -16,8 +16,8 @@
 // 0건·조회 실패·불러오는 중을 셋으로 구별한다(운영자 앱의 큐 훅과 같은 원칙) —
 // "참가한 게 없다" 와 "불러오지 못했다" 가 같아 보이면, 조회가 죽은 날 아무도
 // 눈치채지 못한 채 참가자가 자기 상금을 놓친다.
-import { type PagedListState, usePagedList } from "@laurio/bff-client";
-import type { components } from "@laurio/bff-client/schema";
+import { type PagedListState, usePagedList } from "@codemit/bff-client";
+import type { components } from "@codemit/bff-client/schema";
 
 import { bffClient } from "@/lib/bff/client";
 

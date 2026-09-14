@@ -15,8 +15,8 @@
 // 행위다(Award가 「되돌릴 수 없습니다」 확인 단계를 두는 것과 같은 무게, #13).
 // 확인됐다고 먼저 그려 놓고 서버가 거절하면 사용자는 자기가 하지 않은 확인을
 // 봤다고 믿게 된다 — 서버 응답을 받은 뒤에만 상태를 바꾼다.
-import { useBackendQuery } from "@laurio/bff-client";
-import type { components } from "@laurio/bff-client/schema";
+import { useBackendQuery } from "@codemit/bff-client";
+import type { components } from "@codemit/bff-client/schema";
 
 import { bffClient } from "@/lib/bff/client";
 

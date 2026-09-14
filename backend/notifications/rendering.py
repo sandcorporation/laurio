@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from .models import Notification, NotificationType
 
-_BRAND_PREFIX = "[Laurio]"
+_BRAND_PREFIX = "[Codemit]"
 
 
 def render_message(notification: Notification) -> str:
@@ -35,7 +35,7 @@ def render_message(notification: Notification) -> str:
     if notification_type == NotificationType.JUDGING_PERIOD_ENDING_REMINDER:
         return (
             f"{_BRAND_PREFIX} 주최하신 '{contest_title}' Contest의 심사기간 종료가 "
-            "임박했습니다. laurio에서 Award 처리를 완료해 주세요."
+            "임박했습니다. codemit에서 Award 처리를 완료해 주세요."
         )
 
     if notification_type == NotificationType.DISTRIBUTION_FINAL_WARNING:
@@ -44,7 +44,7 @@ def render_message(notification: Notification) -> str:
         return (
             f"{_BRAND_PREFIX} 주최하신 '{contest_title}' Contest, Award가 없으면 "
             f"{due_at} 이후 상금 {amount:,}원 전액이 참가자 전원에게 자동으로 균등 "
-            "배분되며 이후에는 환불되지 않습니다. 지금 laurio에서 Award를 확정해 "
+            "배분되며 이후에는 환불되지 않습니다. 지금 codemit에서 Award를 확정해 "
             "주세요 — 상금을 잃지 않으시려면 지금 바로 확인하시기 바랍니다."
         )
 
@@ -53,18 +53,18 @@ def render_message(notification: Notification) -> str:
             amount = context.get("amount") or 0
             return (
                 f"{_BRAND_PREFIX} 참가하신 '{contest_title}' Contest의 상금 배분 "
-                f"{amount:,}원이 확정되었습니다. laurio에서 확인하세요."
+                f"{amount:,}원이 확정되었습니다. codemit에서 확인하세요."
             )
-        return f"{_BRAND_PREFIX} 참가하신 '{contest_title}' Contest에서 수상하셨습니다! laurio에서 확인하세요."
+        return f"{_BRAND_PREFIX} 참가하신 '{contest_title}' Contest에서 수상하셨습니다! codemit에서 확인하세요."
 
     if notification_type == NotificationType.SCORING_COMPLETE:
         return (
             f"{_BRAND_PREFIX} 제출하신 '{contest_title}' Contest 채점이 완료됐습니다. "
-            "이의제기 기간이 시작됩니다 — laurio에서 확인하세요."
+            "이의제기 기간이 시작됩니다 — codemit에서 확인하세요."
         )
 
     if notification_type == NotificationType.APPEAL_RULED:
-        return f"{_BRAND_PREFIX} 제기하신 이의 심판이 완료됐습니다. laurio에서 결과를 확인하세요."
+        return f"{_BRAND_PREFIX} 제기하신 이의 심판이 완료됐습니다. codemit에서 결과를 확인하세요."
 
     if notification_type == NotificationType.NEW_CONTEST_IN_CATEGORY:
         return f"{_BRAND_PREFIX} 관심 카테고리에 새 Contest '{contest_title}'가 등록됐습니다."
@@ -86,7 +86,7 @@ def render_message(notification: Notification) -> str:
         class_name = context.get("class_name", "")
         return (
             f"{_BRAND_PREFIX} '{class_name}' 클래스의 채점 예산이 경고 임계를 "
-            "넘었습니다. laurio에서 사용량을 확인해 주세요."
+            "넘었습니다. codemit에서 사용량을 확인해 주세요."
         )
 
-    return f"{_BRAND_PREFIX} 새 알림이 있습니다. laurio에서 확인하세요."
+    return f"{_BRAND_PREFIX} 새 알림이 있습니다. codemit에서 확인하세요."

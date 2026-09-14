@@ -1,5 +1,5 @@
 {
-  "name": "@laurio/bff-shared",
+  "name": "@codemit/bff-shared",
   "version": "0.0.0",
   "private": true,
   "description": "BFF 검사 기계 공유 패키지 (ADR-0021) — 경로 순회 방어·Origin 검증·허용목록 검사 함수·백엔드 전달 기계. 허용목록의 내용(경로 문자열)은 여기 두지 않는다 — 각 앱이 자기 것을 갖는다.",

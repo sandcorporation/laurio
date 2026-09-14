@@ -42,7 +42,7 @@ def test_a_freshly_generated_id_is_accepted_by_the_real_vendor():
     """서버가 실제로 발급하는 형태의 identityVerificationId를 실제 벤더에 그대로
     쳐서, 길이·형식이 거부되지 않는다는 것을 확인한다(#85 코드리뷰 지적 1).
 
-    `laurio-iv-` + `secrets.token_urlsafe(24)`는 42자로 포트원 V2의 40자
+    `codemit-iv-` + `secrets.token_urlsafe(24)`는 42자로 포트원 V2의 40자
     상한을 넘어 실제 벤더를 칠 때만(= 이 라이브 테스트가 아니면 아무 테스트도
     걸리지 않는 자리에서만) 깨졌었다 — dev의 Fake 경로에는 벤더의 길이 제한이
     없어 기본 스위트로는 잡을 수 없는 결함이었다.

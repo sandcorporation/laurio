@@ -1,6 +1,6 @@
 "use client";
 
-// 제출 폼 (FE-10, #35, ADR-0014). Laurio에서 가장 고유한 화면이다.
+// 제출 폼 (FE-10, #35, ADR-0014). Codemit에서 가장 고유한 화면이다.
 //
 // 지켜야 할 비대칭: 소스코드는 필수(플랫폼의 "강제하지 않고 배지로 신호한다"
 // 원칙의 유일한 예외 — ADR-0014)이고, 시연 영상·데모 URL·테스트 계정은 비워도
@@ -9,7 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
-import type { components } from "@laurio/bff-client/schema";
+import type { components } from "@codemit/bff-client/schema";
 
 import { ErrorNote, PageHeader, PageShell, SectionHeading, buttonClass } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";

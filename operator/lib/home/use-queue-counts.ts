@@ -15,7 +15,7 @@
 // 그 숫자는 「전체」가 아니라 「첫 페이지」가 되어 **조용히 20에서 멈춘다**.
 import { useEffect, useState } from "react";
 
-import type { components } from "@laurio/bff-client/schema";
+import type { components } from "@codemit/bff-client/schema";
 
 import { bffClient } from "@/lib/bff/client";
 

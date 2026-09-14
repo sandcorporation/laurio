@@ -24,8 +24,8 @@ function fakeJwt(expSecondsFromNow: number): string {
 }
 
 describe("setSessionCookies — domain 속성이 공개 앱과 같다", () => {
-  test("LAURIO_SESSION_COOKIE_DOMAIN이 비어 있으면(dev) domain을 주지 않는다", () => {
-    delete process.env.LAURIO_SESSION_COOKIE_DOMAIN;
+  test("CODEMIT_SESSION_COOKIE_DOMAIN이 비어 있으면(dev) domain을 주지 않는다", () => {
+    delete process.env.CODEMIT_SESSION_COOKIE_DOMAIN;
     const response = new NextResponse();
 
     setSessionCookies(response, { access: fakeJwt(300), refresh: fakeJwt(1209600) });
@@ -34,8 +34,8 @@ describe("setSessionCookies — domain 속성이 공개 앱과 같다", () => {
     expect(response.cookies.get(REFRESH_COOKIE)?.domain).toBeUndefined();
   });
 
-  test("LAURIO_SESSION_COOKIE_DOMAIN이 설정되면 부모 도메인을 domain으로 쓴다", () => {
-    process.env.LAURIO_SESSION_COOKIE_DOMAIN = ".laurio.honeycombpizza.link";
+  test("CODEMIT_SESSION_COOKIE_DOMAIN이 설정되면 부모 도메인을 domain으로 쓴다", () => {
+    process.env.CODEMIT_SESSION_COOKIE_DOMAIN = ".laurio.honeycombpizza.link";
     const response = new NextResponse();
 
     setSessionCookies(response, { access: fakeJwt(300), refresh: fakeJwt(1209600) });
@@ -47,7 +47,7 @@ describe("setSessionCookies — domain 속성이 공개 앱과 같다", () => {
 
 describe("clearSessionCookies", () => {
   test("domain이 설정되면 삭제 쿠키도 같은 domain을 쓴다", () => {
-    process.env.LAURIO_SESSION_COOKIE_DOMAIN = ".laurio.honeycombpizza.link";
+    process.env.CODEMIT_SESSION_COOKIE_DOMAIN = ".laurio.honeycombpizza.link";
     const response = new NextResponse();
 
     clearSessionCookies(response);

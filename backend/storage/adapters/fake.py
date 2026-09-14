@@ -31,10 +31,10 @@ from .base import DEFAULT_CONTENT_TYPE, Bucket, PresignedDownload, PresignedUplo
 
 
 class FakeStorageAdapter:
-    base_url = "https://fake-storage.test/laurio-dev"
+    base_url = "https://fake-storage.test/codemit-dev"
     # 실제 dev/staging/prod 버킷 이름(`config/settings.py` 기본값)의 명명 규칙을
     # 그대로 흉내낸다 — "public"과 "images"가 둘 다 들어간다(ADR-0032).
-    images_base_url = "https://fake-storage.test/laurio-dev-public-images"
+    images_base_url = "https://fake-storage.test/codemit-dev-public-images"
 
     # 클래스 레벨(인스턴스 아님) — get_storage_adapter()가 호출마다 새 인스턴스를
     # 만들기 때문에, 한 요청(업로드 시뮬레이션)에서 쓴 바이트가 다른 요청(채점 스캔)

@@ -9,8 +9,8 @@
 // Developer 전용 화면에서 쓴다 — 백엔드 자체가 그렇게 나눠 인가한다
 // (`handovers.api`: 업로드는 본인 Submission만, 조회는 본인 또는 그 Contest의
 // Sponsor).
-import { useBackendQuery } from "@laurio/bff-client";
-import type { components } from "@laurio/bff-client/schema";
+import { useBackendQuery } from "@codemit/bff-client";
+import type { components } from "@codemit/bff-client/schema";
 
 import { bffClient } from "@/lib/bff/client";
 

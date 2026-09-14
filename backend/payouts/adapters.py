@@ -63,7 +63,7 @@ class TransferRequest:
     idempotency_key: str
     amount: int
     # Seller 의 지급대행사 식별자. 비어 있으면 아직 수취인이 없다 — 벤더는 이체를 받을 수 없고
-    # (sellerId 없이는 이체 API 가 없다), 이 요청은 「Laurio 내부 확정」이 된다.
+    # (sellerId 없이는 이체 API 가 없다), 이 요청은 「Codemit 내부 확정」이 된다.
     seller_id: str
     # 벤더에 보내는 참조 — `{idempotency_key}-{transfer_attempt}`. 재시도마다 달라야 한다
     # (같은 값을 재사용하면 벤더가 예전 FAILED 응답을 그대로 재생한다).

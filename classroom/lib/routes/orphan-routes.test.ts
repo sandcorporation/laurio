@@ -2,7 +2,7 @@
 // (frontend/lib/routes/orphan-routes.test.ts)·운영자 앱과 같은 스위트를 부른다.
 import * as path from "node:path";
 
-import { defineOrphanRouteSuite } from "@laurio/route-audit";
+import { defineOrphanRouteSuite } from "@codemit/route-audit";
 
 import { ORPHAN_ALLOWLIST } from "./allowlist";
 

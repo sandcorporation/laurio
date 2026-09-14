@@ -6,7 +6,7 @@
 // 만들지 않는다 — 링크의 목적지로만 남겨 둔다.
 import { useState } from "react";
 
-import { normalizeDetail } from "@laurio/bff-client";
+import { normalizeDetail } from "@codemit/bff-client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 

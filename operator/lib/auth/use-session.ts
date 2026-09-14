@@ -7,7 +7,7 @@
 // `/api/auth/session` 을 부른다. Django 세션에는 공개 앱의 JWT 리프레시 같은 "조용히 갱신"이
 // 없다 — 401이면 클라이언트가 그 자리에서 로그인으로 보낸다(`lib/bff/client.ts`, #148).
 
-import { useBackendQuery } from "@laurio/bff-client";
+import { useBackendQuery } from "@codemit/bff-client";
 
 import { bffClient } from "@/lib/bff/client";
 

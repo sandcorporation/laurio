@@ -1,6 +1,6 @@
 """접수되지 않은 Seller 등록의 자력 회복 스캔 (#178).
 
-**문제.** Developer 가 연락처를 냈고 Laurio 가 토스에 등록을 시도했는데 토스가
+**문제.** Developer 가 연락처를 냈고 Codemit 가 토스에 등록을 시도했는데 토스가
 5xx 를 냈다 — 우리 코드는 그것을 옳게 다룬다(예외를 흡수하고 Seller 상태를
 보존하고 원장 분개를 건드리지 않는다, `payouts.services.ensure_seller_registered`).
 그런데 그 다음이 없었다: `Seller` 는 `PENDING` 이고 `seller_id` 는 빈 값인데,

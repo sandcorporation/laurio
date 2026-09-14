@@ -63,23 +63,23 @@
 # 서비스(events)가 하나 더 떠야 강의실이 새로고침 없이 화면을 갱신한다 —
 # 없어도 다른 기능은 모두 그대로 동작하고 강의실 화면만 폴링으로 물러난다
 # (ADR-0046 결과, "신호는 진실의 출처가 아니다").
-name: laurio-staging
+name: codemit-staging
 
 x-backend-env: &backend-env
   # --- 배포 타깃(config/settings.py의 IS_DEPLOYED_ENVIRONMENT/IS_PRODUCTION_DEPLOYMENT
   # 가드가 이 값을 본다) ---
-  LAURIO_DEPLOYMENT_TARGET: staging
+  CODEMIT_DEPLOYMENT_TARGET: staging
   DJANGO_DEBUG: "false"
   DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?staging DJANGO_SECRET_KEY 를 .env.staging 에 설정하라}
   DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:?staging DJANGO_ALLOWED_HOSTS 를 .env.staging 에 설정하라}
 
   # 공모전 제품 스위치(#271, `core.contest_switch`) — 기본값은 켜짐(config/settings.py)
-  # 이지만 staging만 이 기본을 꺼짐으로 겹쳐 쓴다. `LAURIO_DEPLOYMENT_TARGET`과는
-  # 무관한 독립 값이다 — `.env.staging`에 `LAURIO_CONTEST_PRODUCT_ENABLED=true`
+  # 이지만 staging만 이 기본을 꺼짐으로 겹쳐 쓴다. `CODEMIT_DEPLOYMENT_TARGET`과는
+  # 무관한 독립 값이다 — `.env.staging`에 `CODEMIT_CONTEST_PRODUCT_ENABLED=true`
   # 한 줄만 추가하면(그리고 아래 frontend build.args도 같은 값을 읽으므로
   # frontend 재빌드까지 함께) 다시 켜진다. 닫히는 표면 전체 목록은
   # `backend/core/contest_switch.py` 모듈 docstring에 있다.
-  LAURIO_CONTEST_PRODUCT_ENABLED: ${LAURIO_CONTEST_PRODUCT_ENABLED:-false}
+  CODEMIT_CONTEST_PRODUCT_ENABLED: ${CODEMIT_CONTEST_PRODUCT_ENABLED:-false}
 
   POSTGRES_DB: ${POSTGRES_DB:?staging POSTGRES_DB 를 .env.staging 에 설정하라}
   POSTGRES_USER: ${POSTGRES_USER:?staging POSTGRES_USER 를 .env.staging 에 설정하라}
@@ -111,7 +111,7 @@ x-backend-env: &backend-env
   # frontend 서비스(BFF)가 지므로 이 값들을 실제로 쓰는 건 backend가 아니라
   # frontend다(아래 frontend 서비스의 environment도 같은 .env.staging 줄을
   # 나눠 읽는다). 그런데도 여기서 요구하는 이유는 배포 스택의 "떴다/안 떴다"
-  # 신호를 backend 컨테이너 하나로 모으기 위해서다(LAURIO_OPERATOR_ORIGIN과
+  # 신호를 backend 컨테이너 하나로 모으기 위해서다(CODEMIT_OPERATOR_ORIGIN과
   # 같은 원칙) — 비면 core.settings의 부팅 가드가 거부한다.
   KAKAO_REST_API_KEY: ${KAKAO_REST_API_KEY:?staging KAKAO_REST_API_KEY 를 .env.staging 에 설정하라}
   KAKAO_SECRET_KEY: ${KAKAO_SECRET_KEY:?staging KAKAO_SECRET_KEY 를 .env.staging 에 설정하라}
@@ -230,7 +230,7 @@ x-backend-env: &backend-env
   # Operator 세션(#43, ADR-0018) — 브로커와 같은 인스턴스, 다른 DB 인덱스.
   # 운영자 앱의 오리진(#43). 비면 부팅이 거부된다 — Host 헤더 유도는
   # 리버스 프록시 구성에 따라 어긋나 모든 변경 요청이 403 이 된다.
-  LAURIO_OPERATOR_ORIGIN: ${LAURIO_OPERATOR_ORIGIN:?LAURIO_OPERATOR_ORIGIN 을 설정해야 한다}
+  CODEMIT_OPERATOR_ORIGIN: ${CODEMIT_OPERATOR_ORIGIN:?CODEMIT_OPERATOR_ORIGIN 을 설정해야 한다}
   SESSION_REDIS_URL: redis://redis:6379/1
   CELERY_BROKER_URL: redis://redis:6379/0
   CELERY_RESULT_BACKEND: redis://redis:6379/0
@@ -252,7 +252,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:?staging POSTGRES_USER 를 .env.staging 에 설정하라}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?staging POSTGRES_PASSWORD 를 .env.staging 에 설정하라}
     volumes:
-      - laurio-staging-db:/var/lib/postgresql/data
+      - codemit-staging-db:/var/lib/postgresql/data
     healthcheck:
       # compose.dev.yaml과 같은 이유로 -h 를 명시한다 — 초기화 중 유닉스 소켓 임시
       # 서버에 healthy로 오판되는 걸 막는다.
@@ -271,7 +271,7 @@ services:
     # 스냅샷 창 안의 재시작이 조사 중인 운영자를 전부 튕긴다 — dev 와 같은 이유다.
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
-      - laurio-staging-redis:/data
+      - codemit-staging-redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 3s
@@ -291,7 +291,7 @@ services:
         condition: service_healthy
     environment: *backend-env
     ports:
-      - "${LAURIO_API_PORT:-8000}:8000"
+      - "${CODEMIT_API_PORT:-8000}:8000"
     command: >
       sh -c "python manage.py migrate --noinput &&
              python manage.py collectstatic --noinput &&
@@ -366,8 +366,8 @@ services:
 
   # 프론트엔드 BFF(ADR-0016, FE-13 #38). frontend.Dockerfile의 runner 스테이지 —
   # 소스 바인드 마운트도 `next dev`도 없다, standalone 산출물을 `node server.js`로
-  # 그대로 돈다. instrumentation.ts가 LAURIO_DEPLOYMENT_TARGET=staging에서
-  # LAURIO_WEB_ORIGIN·LAURIO_API_BASE_URL이 비어 있으면 이 컨테이너를 그 자리에서
+  # 그대로 돈다. instrumentation.ts가 CODEMIT_DEPLOYMENT_TARGET=staging에서
+  # CODEMIT_WEB_ORIGIN·CODEMIT_API_BASE_URL이 비어 있으면 이 컨테이너를 그 자리에서
   # 죽인다 — restart: unless-stopped라도 값이 안 채워지면 재시작을 반복할 뿐 절대
   # 뜨지 않는다(의도된 동작).
   frontend:
@@ -404,38 +404,38 @@ services:
         # 채로 배포가 초록불을 받는 사고가 생긴다. 이게 바로 이 티켓이 막으려는
         # 사고의 재현이다.
         NEXT_PUBLIC_TOSS_CLIENT_KEY: ${TOSS_SANDBOX_CLIENT_KEY:?토스 결제창 브라우저 SDK 클라이언트 키를 .env.staging 의 TOSS_SANDBOX_CLIENT_KEY 에 설정하라 — 빌드타임에 인라인되므로 부팅 후에는 되돌릴 수 없다}
-        # 공모전 제품 스위치(#271) — 위 backend의 `LAURIO_CONTEST_PRODUCT_ENABLED`와
-        # **같은 `.env.staging` 줄을 나눠 읽는다**(`LAURIO_OPERATOR_ORIGIN`과 같은
+        # 공모전 제품 스위치(#271) — 위 backend의 `CODEMIT_CONTEST_PRODUCT_ENABLED`와
+        # **같은 `.env.staging` 줄을 나눠 읽는다**(`CODEMIT_OPERATOR_ORIGIN`과 같은
         # 원칙 — 둘이 어긋나면 링크는 보이는데 API가 404인 상태가 된다, 다만 이
         # 방향의 어긋남은 앱만 열려 있어도 백엔드가 닫혀 있으니 안전하다). 빌드
         # 인자라 값을 바꾸면 이미지를 다시 굽어야 반영된다(NEXT_PUBLIC_TOSS_CLIENT_KEY
         # 와 같은 제약).
-        NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED: ${LAURIO_CONTEST_PRODUCT_ENABLED:-false}
+        NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED: ${CODEMIT_CONTEST_PRODUCT_ENABLED:-false}
     restart: unless-stopped
     depends_on:
       backend:
         condition: service_started
     environment:
       # 로그인이 끝나고 강의실로 돌려보낼 때 대조하는 허용목록(#297 후속).
-      # 강의실 컨테이너가 읽는 것과 **같은 `.env` 줄**이다(LAURIO_OPERATOR_ORIGIN 과
+      # 강의실 컨테이너가 읽는 것과 **같은 `.env` 줄**이다(CODEMIT_OPERATOR_ORIGIN 과
       # 같은 원칙) — 어긋나면 복귀가 조용히 안 되고 사람은 공개 앱에 남는다.
       # 안전한 쪽으로 실패하지만 원인을 찾기 어려우니 한 줄로 맞춰 둔다.
-      LAURIO_CLASSROOM_ORIGIN: ${LAURIO_CLASSROOM_ORIGIN:?staging LAURIO_CLASSROOM_ORIGIN 을 .env.staging 에 설정하라 — 강의실 서비스와 같은 값이다}
-      LAURIO_DEPLOYMENT_TARGET: staging
+      CODEMIT_CLASSROOM_ORIGIN: ${CODEMIT_CLASSROOM_ORIGIN:?staging CODEMIT_CLASSROOM_ORIGIN 을 .env.staging 에 설정하라 — 강의실 서비스와 같은 값이다}
+      CODEMIT_DEPLOYMENT_TARGET: staging
       # 컨테이너 안에서는 compose 네트워크 이름으로 backend에 붙는다(compose.dev.yaml
       # 과 같은 패턴) — 이 값이 비면 lib/api/client.ts 등이 127.0.0.1로 조용히
       # 폴백하는 것을 instrumentation.ts가 부팅 시점에 막는다.
-      LAURIO_API_BASE_URL: http://backend:8000
+      CODEMIT_API_BASE_URL: http://backend:8000
       # frontend/lib/auth/origin.ts의 CSRF Origin 검증이 쓰는 값 — 비어 있으면
       # instrumentation.ts가 부팅을 거부한다. .env.staging에서 반드시 채운다.
-      LAURIO_WEB_ORIGIN: ${LAURIO_WEB_ORIGIN:?staging LAURIO_WEB_ORIGIN 를 .env.staging 에 설정하라}
+      CODEMIT_WEB_ORIGIN: ${CODEMIT_WEB_ORIGIN:?staging CODEMIT_WEB_ORIGIN 를 .env.staging 에 설정하라}
       # 세션 쿠키의 domain 속성(ADR-0038) — 부모 도메인(.laurio.honeycombpizza.link)을
       # 주면 laurio.honeycombpizza.link에서 로그인한 쿠키가 강의실 등 형제
       # 서브도메인(classroom.laurio.honeycombpizza.link)에도 실린다.
       # frontend/lib/auth/cookies.ts가 비어 있으면(로컬 dev) domain을 아예 주지
       # 않으므로 여기서 빠뜨리면 staging에서도 조용히 호스트 전용으로 남는다 —
       # 그래서 다른 필수값과 같이 부팅을 거부하게 한다.
-      LAURIO_SESSION_COOKIE_DOMAIN: ${LAURIO_SESSION_COOKIE_DOMAIN:?staging LAURIO_SESSION_COOKIE_DOMAIN 을 .env.staging 에 설정하라 — 예컨대 .laurio.honeycombpizza.link}
+      CODEMIT_SESSION_COOKIE_DOMAIN: ${CODEMIT_SESSION_COOKIE_DOMAIN:?staging CODEMIT_SESSION_COOKIE_DOMAIN 을 .env.staging 에 설정하라 — 예컨대 .laurio.honeycombpizza.link}
       # 카카오 OAuth 앱 자격증명(#95/#96) — authorize 리다이렉트・code→token
       # 교환을 이 서비스(BFF)가 직접 한다(frontend/lib/auth/kakao.ts). backend의
       # x-backend-env 앵커와 같은 .env.staging 줄을 나눠 읽는다 — 두 서비스가
@@ -463,10 +463,10 @@ services:
       # INTERNAL_API_PORT 노출과 같은 이유다. prod처럼 127.0.0.1로 좁히지
       # 않는다.
       #
-      # **이 컨테이너 자신은 평문 HTTP로만 듣는다.** LAURIO_WEB_ORIGIN이
+      # **이 컨테이너 자신은 평문 HTTP로만 듣는다.** CODEMIT_WEB_ORIGIN이
       # https://laurio.honeycombpizza.link이고 이 앱의 세션 쿠키가 staging에서도
       # Secure를 거는 이상(lib/auth/cookies.ts의 isDeployedEnvironment),
-      # `http://<서브호스트 IP>:${LAURIO_WEB_PORT}`를 브라우저로 직접 열면
+      # `http://<서브호스트 IP>:${CODEMIT_WEB_PORT}`를 브라우저로 직접 열면
       # Origin이 어긋나 로그인이 403이 되거나(운 좋게 통과해도) Secure 쿠키가
       # 저장되지 않아 로그인 화면으로 무한히 돌아온다(#70 코드리뷰 지적) —
       # storage.honeycombpizza.link(MinIO, 이 파일이 관리하지 않는다)와 같은
@@ -474,14 +474,14 @@ services:
       # 넘겨주는 TLS 종단 리버스 프록시가 **반드시** 있어야 한다. "운영자·QA가
       # 브라우저로 들어간다"는 그 도메인을 통해서다 — 이 포트로 직접 들어가는
       # 것이 아니다.
-      - "${LAURIO_WEB_PORT:-3000}:3000"
+      - "${CODEMIT_WEB_PORT:-3000}:3000"
 
   # 운영자 앱 BFF(#70, ADR-0019/0021). operator.Dockerfile의 runner 스테이지 —
   # frontend 서비스와 같은 산출물 모양(standalone, `node server.js`)이고 같은
-  # 부팅 가드 원칙을 따른다(operator/instrumentation.ts) — LAURIO_OPERATOR_ORIGIN·
-  # LAURIO_API_BASE_URL이 비어 있으면 이 컨테이너를 그 자리에서 죽인다.
+  # 부팅 가드 원칙을 따른다(operator/instrumentation.ts) — CODEMIT_OPERATOR_ORIGIN·
+  # CODEMIT_API_BASE_URL이 비어 있으면 이 컨테이너를 그 자리에서 죽인다.
   #
-  # **LAURIO_OPERATOR_ORIGIN을 위 x-backend-env 앵커의 backend가 요구하는 것과
+  # **CODEMIT_OPERATOR_ORIGIN을 위 x-backend-env 앵커의 backend가 요구하는 것과
   # 정확히 같은 환경변수에서 읽는다.** 두 서비스가 `.env.staging`의 같은 줄을
   # 그대로 나눠 읽으므로, 이 값이 서로 다른 곳에서 따로 채워져 어긋나는 사고
   # 자체가 구조적으로 불가능하다 — 이 티켓의 핵심 위험(오리진 정합성)에 대한
@@ -497,30 +497,30 @@ services:
       backend:
         condition: service_started
     environment:
-      LAURIO_DEPLOYMENT_TARGET: staging
-      LAURIO_API_BASE_URL: http://backend:8000
+      CODEMIT_DEPLOYMENT_TARGET: staging
+      CODEMIT_API_BASE_URL: http://backend:8000
       # backend의 OPERATOR_WEB_ORIGIN(위 x-backend-env)과 같은 변수, 같은 값.
-      LAURIO_OPERATOR_ORIGIN: ${LAURIO_OPERATOR_ORIGIN:?LAURIO_OPERATOR_ORIGIN 을 설정해야 한다}
+      CODEMIT_OPERATOR_ORIGIN: ${CODEMIT_OPERATOR_ORIGIN:?CODEMIT_OPERATOR_ORIGIN 을 설정해야 한다}
     ports:
-      # 공개 앱(LAURIO_WEB_PORT)과 겹치지 않는 별도 포트 — frontend 서비스와
+      # 공개 앱(CODEMIT_WEB_PORT)과 겹치지 않는 별도 포트 — frontend 서비스와
       # 같은 이유로 127.0.0.1로 좁히지 않는다.
       #
       # **이 컨테이너 자신은 평문 HTTP로만 듣는다 — frontend 서비스의 ports:
       # 주석과 정확히 같은 이유, 같은 결론이다**(#70 코드리뷰 지적).
-      # LAURIO_OPERATOR_ORIGIN이 https이고 이 앱의 세션 쿠키도 staging에서
+      # CODEMIT_OPERATOR_ORIGIN이 https이고 이 앱의 세션 쿠키도 staging에서
       # Secure를 거는 이상(operator/lib/auth/cookies.ts), 이 평문 포트를 IP로
       # 직접 열면 Origin 불일치로 로그인이 403이 되거나 Secure 쿠키가 저장되지
       # 않아 /login으로 무한히 돌아온다. 운영자·QA는 이 포트가 아니라
-      # LAURIO_OPERATOR_ORIGIN이 가리키는 도메인(예:
+      # CODEMIT_OPERATOR_ORIGIN이 가리키는 도메인(예:
       # operator.laurio.honeycombpizza.link)으로 들어간다 — 이 호스트 앞단에
       # 그 도메인을 이 포트로 넘겨주는 TLS 종단 리버스 프록시가 반드시 있어야
       # 한다.
-      - "${LAURIO_OPERATOR_WEB_PORT:-3001}:3000"
+      - "${CODEMIT_OPERATOR_WEB_PORT:-3001}:3000"
 
   # 강의실 앱(#276/#277, ADR-0037). classroom.Dockerfile의 runner 스테이지 —
   # frontend·operator 서비스와 같은 산출물 모양(standalone, `node server.js`)이고
   # 같은 부팅 가드 원칙을 따른다(classroom/instrumentation.ts) —
-  # LAURIO_CLASSROOM_ORIGIN·LAURIO_API_BASE_URL·LAURIO_SESSION_COOKIE_DOMAIN이
+  # CODEMIT_CLASSROOM_ORIGIN·CODEMIT_API_BASE_URL·CODEMIT_SESSION_COOKIE_DOMAIN이
   # 비어 있으면 이 컨테이너를 그 자리에서 죽인다.
   classroom:
     build:
@@ -534,8 +534,8 @@ services:
       events:
         condition: service_started
     environment:
-      LAURIO_DEPLOYMENT_TARGET: staging
-      LAURIO_API_BASE_URL: http://backend:8000
+      CODEMIT_DEPLOYMENT_TARGET: staging
+      CODEMIT_API_BASE_URL: http://backend:8000
       # 실시간 신호 SSE 전용 베이스 URL(ADR-0046, #380) — 나머지 API는 전부
       # 위 backend(동기 gunicorn)를 그대로 친다. 강의실 BFF가
       # `/api/classroom/events/stream` 경로 하나만 이쪽으로 갈라 보낸다
@@ -544,29 +544,29 @@ services:
       # 폴백한다 — 부팅은 막지 않는다(스트림이 없어도 화면은 폴링으로
       # 물러난다, ADR-0046 결과), 그래도 실제로 뜨지 않으면 스트림
       # 연결 자체가 항상 실패하므로 compose 네트워크 이름으로 명시한다.
-      LAURIO_EVENTS_BASE_URL: http://events:8001
+      CODEMIT_EVENTS_BASE_URL: http://events:8001
       # 이 앱 자신의 Origin 검증이 쓰는 값 — frontend·operator와 같은 원칙으로
       # 자기 서브도메인을 요구한다(공개 앱·운영자 앱과 다른 서브도메인이어야
       # 한다, 셋 다 ADR-0016의 같은 이유).
-      LAURIO_CLASSROOM_ORIGIN: ${LAURIO_CLASSROOM_ORIGIN:?LAURIO_CLASSROOM_ORIGIN 을 설정해야 한다}
+      CODEMIT_CLASSROOM_ORIGIN: ${CODEMIT_CLASSROOM_ORIGIN:?CODEMIT_CLASSROOM_ORIGIN 을 설정해야 한다}
       # 「로그인이 필요합니다」 화면이 공개 앱 로그인으로 안내하는 링크를 지을
       # 때 읽는다(classroom/lib/auth/public-app.ts) — frontend 서비스가 요구하는
-      # LAURIO_WEB_ORIGIN과 같은 변수, 같은 값이다.
-      LAURIO_WEB_ORIGIN: ${LAURIO_WEB_ORIGIN:?staging LAURIO_WEB_ORIGIN 를 .env.staging 에 설정하라}
+      # CODEMIT_WEB_ORIGIN과 같은 변수, 같은 값이다.
+      CODEMIT_WEB_ORIGIN: ${CODEMIT_WEB_ORIGIN:?staging CODEMIT_WEB_ORIGIN 를 .env.staging 에 설정하라}
       # frontend 서비스가 요구하는 것과 같은 변수, 같은 값(ADR-0038) — 공개 앱이
       # 심은 세션 쿠키가 이 서브도메인에도 실려야 「한 번 로그인하면 두 제품이
       # 다 열린다」가 staging에서 실제로 성립한다.
-      LAURIO_SESSION_COOKIE_DOMAIN: ${LAURIO_SESSION_COOKIE_DOMAIN:?staging LAURIO_SESSION_COOKIE_DOMAIN 을 .env.staging 에 설정하라 — 예컨대 .laurio.honeycombpizza.link}
+      CODEMIT_SESSION_COOKIE_DOMAIN: ${CODEMIT_SESSION_COOKIE_DOMAIN:?staging CODEMIT_SESSION_COOKIE_DOMAIN 을 .env.staging 에 설정하라 — 예컨대 .laurio.honeycombpizza.link}
     ports:
       # 공개 앱·운영자 앱과 겹치지 않는 별도 포트 — 같은 이유로 127.0.0.1로
       # 좁히지 않는다. **이 컨테이너 자신도 평문 HTTP로만 듣는다** — frontend·
       # operator 서비스의 ports: 주석과 같은 이유, 같은 결론이다. 강의실·QA는
-      # 이 포트가 아니라 LAURIO_CLASSROOM_ORIGIN이 가리키는 도메인(예:
+      # 이 포트가 아니라 CODEMIT_CLASSROOM_ORIGIN이 가리키는 도메인(예:
       # classroom.laurio.honeycombpizza.link)으로 들어간다 — 이 호스트 앞단에
       # 그 도메인을 이 포트로 넘겨주는 TLS 종단 리버스 프록시가 반드시 있어야
       # 한다.
-      - "${LAURIO_CLASSROOM_WEB_PORT:-3002}:3000"
+      - "${CODEMIT_CLASSROOM_WEB_PORT:-3002}:3000"
 
 volumes:
-  laurio-staging-db:
-  laurio-staging-redis:
+  codemit-staging-db:
+  codemit-staging-redis:

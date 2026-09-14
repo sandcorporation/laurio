@@ -5,7 +5,7 @@
 // 비어 있으면 첫 요청을 받기 전에 부팅 자체를 거부한다 — "설정이 비어 있는
 // 채로 조용히 뜬다"는 실패 모드를 애초에 없앤다.
 //
-// LAURIO_WEB_ORIGIN이 그 대상이다. lib/auth/origin.ts의 assertSameOrigin은
+// CODEMIT_WEB_ORIGIN이 그 대상이다. lib/auth/origin.ts의 assertSameOrigin은
 // 이 값이 없으면 요청의 Host 헤더로 오리진을 유도하는 폴백을 쓰는데, 그
 // 폴백은 dev(리버스 프록시 없이 컨테이너 포트를 직접 노출)에는 맞지만
 // 배포 환경에서 TLS 종단 리버스 프록시가 X-Forwarded-Proto를 빠뜨리면
@@ -20,18 +20,18 @@
 // 그대로 죽는다 — backend의 `${VAR:?...}` compose 가드, JWT_SIGNING_KEY
 // 부팅 가드와 같은 "설정이 없으면 뜨지 않는다" 규율을 그대로 반복한다.
 //
-// docker/staging.env.example, docker/prod.env.example에 LAURIO_WEB_ORIGIN
+// docker/staging.env.example, docker/prod.env.example에 CODEMIT_WEB_ORIGIN
 // 항목을 함께 추가해뒀다 — FE-13(#38)이 compose.staging.yaml/compose.prod.yaml에
-// frontend 서비스를 붙이며 LAURIO_DEPLOYMENT_TARGET을 주입하는 순간부터 이
+// frontend 서비스를 붙이며 CODEMIT_DEPLOYMENT_TARGET을 주입하는 순간부터 이
 // 가드가 즉시 작동한다.
 //
-// FE-13(#38) 추가 — LAURIO_API_BASE_URL도 같은 이유로 여기 합류한다.
+// FE-13(#38) 추가 — CODEMIT_API_BASE_URL도 같은 이유로 여기 합류한다.
 // lib/api/client.ts·lib/auth/backend.ts·app/healthz/route.ts 셋 다
-// `process.env.LAURIO_API_BASE_URL ?? "http://127.0.0.1:58000"` 폴백을 쓴다.
+// `process.env.CODEMIT_API_BASE_URL ?? "http://127.0.0.1:58000"` 폴백을 쓴다.
 // dev(compose 네트워크 안에서 backend 호스트명이 항상 해석된다)에는 그 폴백이
 // 무해하지만, 배포 환경에서 이 값이 빠지면 프론트가 자기 자신의 루프백으로
 // 로그인·조회·제출 요청을 쏘려 하며 전부 연결 거부로 조용히 죽는다 — 502가
-// 아니라 "이유를 알 수 없는 500/타임아웃"으로 보인다. LAURIO_WEB_ORIGIN과 같은
+// 아니라 "이유를 알 수 없는 500/타임아웃"으로 보인다. CODEMIT_WEB_ORIGIN과 같은
 // 자리에서 같은 원칙으로 막는다: 값이 비어 있으면 첫 요청 전에 부팅을 거부한다.
 //
 // 두 검사를 한 번에 모아 던진다 — 이 파일이 "배포 환경 필수 설정"의 유일한
@@ -39,14 +39,14 @@
 // 여기 배열에 추가한다.
 const REQUIRED_IN_DEPLOYED_ENVIRONMENTS: Array<{ name: string; reason: string }> = [
   {
-    name: "LAURIO_WEB_ORIGIN",
+    name: "CODEMIT_WEB_ORIGIN",
     reason:
       "배포 환경에서는 Origin 검증(lib/auth/origin.ts)이 Host 헤더 유도가 아니라 " +
       "이 값에 의존해야 한다 — 리버스 프록시가 X-Forwarded-Proto를 빠뜨리면 모든 " +
       "변경 요청이 403이 되는 사고를 부팅 시점에 막는다.",
   },
   {
-    name: "LAURIO_API_BASE_URL",
+    name: "CODEMIT_API_BASE_URL",
     reason:
       "이 값이 비어 있으면 lib/api/client.ts·lib/auth/backend.ts·app/healthz/route.ts가 " +
       "모두 127.0.0.1:58000(자기 자신)으로 조용히 폴백해 로그인·조회·제출이 전부 " +
@@ -56,7 +56,7 @@ const REQUIRED_IN_DEPLOYED_ENVIRONMENTS: Array<{ name: string; reason: string }>
   // 교환을 이 BFF가 직접 하므로(lib/auth/kakao.ts) 이 세 값을 실제로 읽는
   // 프로세스는 backend가 아니라 여기다. backend/config/settings.py가 같은
   // 이름의 값을 배포 환경에서 한 번 더 요구하는 것도 같은 이유다
-  // (LAURIO_OPERATOR_ORIGIN을 backend·operator 양쪽이 각자 요구하는 것과 같은
+  // (CODEMIT_OPERATOR_ORIGIN을 backend·operator 양쪽이 각자 요구하는 것과 같은
   // 원칙) — 두 쪽 다 잊혀야만 "로그인 버튼이 컨테이너가 뜬 채로 항상 실패한다"는
   // 사고가 난다.
   {
@@ -133,7 +133,7 @@ const REQUIRED_IN_DEPLOYED_ENVIRONMENTS: Array<{ name: string; reason: string }>
   // 서브도메인이 로그인을 공유하지 못하는 채로 조용히 뜬다 — 기능 결함이지
   // 500은 아니라서 다른 가드보다 늦게 발견될 위험이 크다.
   {
-    name: "LAURIO_SESSION_COOKIE_DOMAIN",
+    name: "CODEMIT_SESSION_COOKIE_DOMAIN",
     reason:
       "부모 도메인(예: .laurio.honeycombpizza.link)을 주지 않으면 " +
       "lib/auth/cookies.ts의 setSessionCookies가 dev와 동일하게 domain을 " +
@@ -146,7 +146,7 @@ const REQUIRED_IN_DEPLOYED_ENVIRONMENTS: Array<{ name: string; reason: string }>
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
 
-  const target = process.env.LAURIO_DEPLOYMENT_TARGET;
+  const target = process.env.CODEMIT_DEPLOYMENT_TARGET;
   const isDeployed = target === "staging" || target === "production";
   if (!isDeployed) return;
 
@@ -154,7 +154,7 @@ export async function register(): Promise<void> {
   if (missing.length === 0) return;
 
   const detail = missing.map(({ name, reason }) => `- ${name}: ${reason}`).join("\n");
-  const message = `LAURIO_DEPLOYMENT_TARGET=${target} 인데 다음 필수 설정이 비어 있다:\n${detail}`;
+  const message = `CODEMIT_DEPLOYMENT_TARGET=${target} 인데 다음 필수 설정이 비어 있다:\n${detail}`;
 
   // FE-13(#38) 발견: `throw` 만으로는 부팅이 실패하지 않는다 — standalone
   // 산출물의 `node server.js`(compose.staging/prod.yaml이 실제로 도는 그 실행
