@@ -10,6 +10,16 @@ import { decodeJwtPayload } from "./jwt";
 export const ACCESS_COOKIE = "codemit_access";
 export const REFRESH_COOKIE = "codemit_refresh";
 
+/**
+ * 로그인 쿠키(access 또는 refresh)가 하나라도 있는가 — "존재"만 본다,
+ * 유효성은 언제나 백엔드 몫이다(이 파일 상단 주석과 같은 원칙). 가드
+ * (`middleware.ts`)와 루트 분기 판정(`lib/landing/decide-root-view.ts`,
+ * #395)이 같은 함수를 써서 같은 기준으로 갈린다.
+ */
+export function hasSessionCookie(cookies: { has(name: string): boolean }): boolean {
+  return cookies.has(ACCESS_COOKIE) || cookies.has(REFRESH_COOKIE);
+}
+
 export interface TokenPair {
   access: string;
   refresh: string;

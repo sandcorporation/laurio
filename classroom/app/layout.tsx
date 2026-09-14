@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 
 import { MeProvider } from "@/lib/auth/me-context";
 import { EventStreamProvider } from "@/lib/events/stream-context";
+import { classroomAppOrigin } from "@/lib/seo/origin";
 
 import { AccountMenu } from "./components/account-menu";
 import { NotificationBell } from "./components/notification-bell";
@@ -42,9 +43,16 @@ const ibmPlexMono = IBM_Plex_Mono({
   display: "swap",
 });
 
-// 색인 대상이 아니다(ADR-0015·ADR-0021/0037과 같은 원칙 — 운영자 앱
-// operator/app/layout.tsx 참고). 이 앱의 독자는 로그인한 참여자·강사뿐이다.
+// **기본은 색인 대상이 아니다**(ADR-0015·ADR-0021/0037과 같은 원칙 — 운영자
+// 앱 operator/app/layout.tsx 참고). 이 앱의 독자는 대부분 로그인한 참여자·
+// 강사다. **유일한 예외는 랜딩이다**(#395, `app/page.tsx`) — 비로그인
+// 요청으로 루트를 열면 그 파일의 `generateMetadata`가 `robots: { index: true
+// }`로 이 기본값을 덮는다.
+//
+// `metadataBase`는 강의실 자신의 오리진이다(#395) — 랜딩의 OG 이미지·
+// canonical 같은 상대 경로가 이 값을 기준으로 절대 URL 이 된다.
 export const metadata: Metadata = {
+  metadataBase: new URL(classroomAppOrigin()),
   title: "Codemit 클래스",
   robots: { index: false, follow: false },
 };
