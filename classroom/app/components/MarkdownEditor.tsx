@@ -76,7 +76,11 @@ export function MarkdownEditor({
         if (cancelled || !containerRef.current) return;
         editor = new Editor({
           el: containerRef.current,
-          height: "360px",
+          // 쓰는 만큼 늘어난다(2026-09-15) — 고정 360px 이면 긴 설명을 좁은 창 안에서
+          // 스크롤하며 써야 했다. 비어 있을 때도 쓸 자리가 보이도록 최소 높이는
+          // 예전 고정값 그대로 둔다.
+          height: "auto",
+          minHeight: "360px",
           initialEditType: "markdown",
           previewStyle: "vertical",
           initialValue: lastKnownValueRef.current,
