@@ -1,6 +1,6 @@
 # 문제 설명은 sanitize 하지 않는다 — 대신 렌더가 허용 목록이어야 한다 (ADR-0012 개정)
 
-Status: Accepted (2026-09-11 결정)
+Status: Amended by ADR-0047 (2026-09-11 결정)
 
 ADR-0012는 JWT를 localStorage에 두는 대가로 보완책 셋을 한 묶음으로 걸었고, 그중 하나가
 "사용자 입력 서식의 sanitize를 강제한다"다 — 하나라도 빠지면 결정 전체가 무효라고 못
