@@ -228,8 +228,14 @@ def _parse_python_isolated(text: str, *, timeout: float) -> dict | None:
 #: `tree_sitter_language_pack`이 그 자리에서 그때그때 부른다).
 _TREE_SITTER_PARSE_SCRIPT = (
     "import json, sys\n"
-    "from tree_sitter_language_pack import get_parser\n"
+    "from tree_sitter_language_pack import downloaded_languages, get_parser\n"
     "language = sys.argv[1]\n"
+    # 문법이 미리 받아져 있지 않으면 여기서 멈춘다 — `get_parser` 는 없는 문법을
+    # 그 자리에서 인터넷으로 내려받으려 하고, 그러면 채점이 네트워크에 기대고 시간
+    # 제한에 걸린다. 멈추면 호출부가 None 을 받아 그 파일을 AI 판정으로 넘긴다.
+    "if language not in downloaded_languages():\n"
+    "    print(json.dumps({'unavailable': True}))\n"
+    "    sys.exit(3)\n"
     "src = sys.stdin.buffer.read()\n"
     "parser = get_parser(language)\n"
     "tree = parser.parse(src)\n"
@@ -248,6 +254,32 @@ _TREE_SITTER_PARSE_SCRIPT = (
     "    line = (error_node.start_point[0] + 1) if error_node is not None else None\n"
     "    print(json.dumps({'error': True, 'line': line, 'message': '구문 오류'}))\n"
 )
+
+
+#: 이미지를 굽거나 CI 를 준비할 때 미리 받아 두는 문법 — 채점 중에는 내려받지 않는다.
+TREE_SITTER_LANGUAGES: tuple[str, ...] = tuple(sorted(set(TREE_SITTER_LANGUAGE_BY_EXTENSION.values())))
+
+
+def prefetch_tree_sitter_grammars() -> list[str]:
+    """`TREE_SITTER_LANGUAGES` 의 문법을 캐시(`XDG_CACHE_HOME` 기준)에 받아 둔다.
+
+    **tree-sitter-language-pack 은 문법을 설치 때가 아니라 처음 쓸 때 인터넷에서
+    받는다**(2026-09-15 확인). 그대로 두면 새 컨테이너의 첫 채점이 GitHub 에서 문법을
+    받느라 파싱 시간 제한에 걸리고, CI 처럼 캐시가 없는 곳에서는 판정이 통째로
+    어긋났다. 그래서 백엔드 이미지를 구울 때(docker/backend.Dockerfile)와 CI 테스트
+    전에 이 함수로 받아 두고, 채점 중에는 받지 않는다(`_TREE_SITTER_PARSE_SCRIPT`)."""
+
+    from tree_sitter_language_pack import downloaded_languages, get_parser
+
+    # `download()` 는 캐시가 빈 곳에서 개수만 돌려주고 실제로 받지 않았다(1.20.0, 새
+    # 컨테이너에서 확인) — `get_parser()` 는 문법 묶음을 받아 캐시에 둔다. 그래서
+    # 언어마다 파서를 한 번 만들어 받게 하고, 아래에서 캐시에 실제로 있는지 확인한다.
+    for language in TREE_SITTER_LANGUAGES:
+        get_parser(language)
+    missing = sorted(set(TREE_SITTER_LANGUAGES) - set(downloaded_languages()))
+    if missing:
+        raise RuntimeError(f"tree-sitter 문법을 받지 못했다: {', '.join(missing)}")
+    return list(TREE_SITTER_LANGUAGES)
 
 
 def _parse_tree_sitter_isolated(text: str, *, language: str, timeout: float) -> dict | None:

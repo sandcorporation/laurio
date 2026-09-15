@@ -311,3 +311,37 @@ def test_language_without_a_parser_can_be_judged_as_a_syntax_error(client, db, m
     assert score["syntax_check"]["judged_by"] == "ai"
     # 기본 항목이 필수라 통과하지 못한다 — 다른 항목이 충족이어도 마찬가지다.
     assert mine["submissions"][0]["passed"] is False
+
+
+def test_grammar_not_prefetched_falls_back_to_ai_without_downloading(client, db, monkeypatch, tmp_path):
+    """문법이 캐시에 없으면 채점 중에 내려받지 않고 그 파일을 AI 판정으로 넘긴다(#409
+    후속) — 새 컨테이너·CI 에서 첫 채점이 GitHub 에 기대 시간 제한에 걸리던 것을 막는다."""
+
+    # 비어 있는 캐시를 가리키게 한다 — 격리된 파싱 서브프로세스가 이 환경을 물려받는다.
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    files = {"app.js": _JS_VALID}
+    ctx = _setup(client, files=files)
+    sent = []
+
+    def _respond(url, *, headers, json, timeout):
+        sent.append(json)
+        return _FakeResponse(
+            200,
+            _openai_success_body(
+                [
+                    {"requirement_id": ctx["item_id"], "is_met": True, "reasoning": "충족"},
+                    {"requirement_id": -1, "is_met": True, "reasoning": "구문 오류가 없습니다."},
+                ]
+            ),
+        )
+
+    monkeypatch.setattr("core.llm_scoring.requests.post", _respond)
+
+    _run_scan_with_files(client, files)
+
+    assert len(sent) == 1
+    assert "requirement_id=-1" in sent[0]["messages"][1]["content"]
+    mine = _mine(client, ctx["participant"]["access"], ctx["class_id"], ctx["problem_id"])
+    assert mine["submissions"][0]["score"]["syntax_check"]["judged_by"] == "ai"
+    # 캐시가 비어 있던 자리에 문법을 받아 오지 않았다.
+    assert not any(tmp_path.rglob("*.so"))

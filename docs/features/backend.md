@@ -245,8 +245,12 @@ tree-sitter 문법으로 제출 아카이브의 코드 파일 전부를 실행 �
 없음) — 채점 지침과 무관한 별도 requirement로 판정을 받는다. 판정은
 `ClassroomScore.syntax_check_result`에 강사 항목(`reasoning`)과 별도로
 append-only 저장되고, 통과·달성률 계산이 이 항목을 필수로 포함한다.
-tree-sitter 문법은 `tree-sitter-language-pack`(사전 빌드된 wheel)으로 받는다 —
-backend·celery·events가 같은 Dockerfile을 쓰므로 이미지가 약 12MB 커졌다.
+tree-sitter 문법은 `tree-sitter-language-pack`으로 쓴다. **이 패키지는 문법을 설치 때가
+아니라 처음 쓸 때 인터넷에서 받으므로, 백엔드 이미지를 구울 때 `manage.py
+prefetch_syntax_grammars`로 여덟 언어 문법을 미리 넣는다**(`XDG_CACHE_HOME=/opt/codemit-cache`,
+CI 테스트 잡도 테스트 전에 같은 명령을 부른다). 채점 중에는 문법을 내려받지 않는다 — 문법이
+캐시에 없는 언어의 파일은 AI 판정으로 넘어간다. backend·celery·events가 같은 Dockerfile을
+쓰므로 이미지가 함께 커졌다(문법 포함 약 692MB).
 
 **공모전 전용이던 어댑터 셋이 공유층으로 옮겨졌다**(#287) — 강의실이 채점하려면
 공모전 가족(`scoring`·`repositories`)을 부를 수 없어서다(ADR-0037). `core.
