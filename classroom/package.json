@@ -13,17 +13,27 @@
   "dependencies": {
     "@codemit/bff-shared": "workspace:*",
     "@toast-ui/editor": "^3.2.2",
+    "hast-util-to-jsx-runtime": "^2.3.6",
     "marked": "^18.0.12",
     "next": "^15.5.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "rehype-sanitize": "^6.0.0",
+    "remark-breaks": "^4.0.0",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "remark-rehype": "^11.1.2",
+    "unified": "^11.0.5",
+    "unist-util-visit": "^5.1.0"
   },
   "devDependencies": {
     "@codemit/route-audit": "workspace:*",
     "@tailwindcss/postcss": "^4.3.3",
+    "@types/hast": "^3.0.5",
     "@types/node": "^22.10.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
+    "hast-util-to-html": "^9.0.5",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.7.0",
     "vitest": "^5.0.0"
