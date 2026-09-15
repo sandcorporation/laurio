@@ -159,6 +159,8 @@ def test_history_lists_sender_and_read_state(client, db):
     assert len(rows) == 1
     assert rows[0]["notification_id"] == sent["notification_id"]
     assert rows[0]["sent_by"] == "notice-op-6"
+    # 운영자가 번호가 아니라 누구에게 보냈는지 알아볼 수 있어야 한다.
+    assert rows[0]["recipient_email"] == "recipient-6@example.com"
     assert rows[0]["read_at"] is None
 
     mark_read = client.post(

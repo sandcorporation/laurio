@@ -114,6 +114,8 @@ class SendOperatorNoticeIn(Schema):
 class OperatorNoticeOut(Schema):
     notification_id: int
     recipient_id: int
+    # 이력 표가 번호가 아니라 사람으로 보이게 — 운영자는 검색 때 이미 이메일을 본다.
+    recipient_email: str
     title: str
     body: str
     sent_by: str
@@ -127,6 +129,7 @@ def _serialize_operator_notice(notice: OperatorNotice) -> OperatorNoticeOut:
     return OperatorNoticeOut(
         notification_id=notification.pk,
         recipient_id=notification.recipient_id,
+        recipient_email=notification.recipient.email,
         title=notice.title,
         body=notice.body,
         sent_by=notice.sent_by.username,
@@ -172,7 +175,7 @@ def list_operator_notices(request, limit: int = 50, offset: int = 0):
     limit = max(1, min(limit, _HISTORY_MAX_LIMIT))
     offset = max(0, offset)
     notices = (
-        OperatorNotice.objects.select_related("notification", "sent_by")
+        OperatorNotice.objects.select_related("notification__recipient", "sent_by")
         .order_by("-notification__created_at")[offset : offset + limit]
     )
     return [_serialize_operator_notice(notice) for notice in notices]

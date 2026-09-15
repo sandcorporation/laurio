@@ -5709,6 +5709,8 @@ export interface components {
             notification_id: number;
             /** Read At */
             read_at: string | null;
+            /** Recipient Email */
+            recipient_email: string;
             /** Recipient Id */
             recipient_id: number;
             /** Sent By */

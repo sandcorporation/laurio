@@ -43,7 +43,7 @@ export function OperatorNoticeHistoryTable({ notices }: { notices: OperatorNotic
         <tbody>
           {notices.map((notice) => (
             <tr key={notice.notification_id} data-testid={`operator-notice-row-${notice.notification_id}`}>
-              <td>#{notice.recipient_id}</td>
+              <td>{notice.recipient_email}</td>
               <td>{notice.title}</td>
               <td>{notice.sent_by}</td>
               <td>{new Date(notice.created_at).toLocaleString("ko-KR")}</td>
