@@ -126,8 +126,11 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
         }
       />
 
-      <div className="flex flex-col gap-5 lg:flex-row lg:items-start">
-        <div className="flex min-w-0 flex-1 flex-col gap-5">
+      {/* 한 열로 쌓는다(2026-09-15) — 예전에는 오른쪽 380px 열에 제출 카드를 따로 뒀는데,
+          설명·체크리스트를 읽고 → 내고 → 결과를 보는 흐름이 좌우로 갈라졌다. 순서는
+          설명 → 체크리스트 → 제출 → 내 시도다: 시도가 쌓여도 제출 칸이 밀려나지 않는다. */}
+      <div className="flex flex-col gap-5">
+        <div className="flex min-w-0 flex-col gap-5">
           {description.trim() === "" ? null : (
             <Card>
               <CardHeader title="설명" />
@@ -170,6 +173,17 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
                 </li>
               ))}
             </ul>
+          </Card>
+
+          <Card>
+            <CardHeader title="제출" />
+            <div className="flex flex-col gap-3.5 p-4">
+              {props.interactive ? (
+                <InteractiveSubmissionForm {...props} submissionFormats={submissionFormats} />
+              ) : (
+                <PreviewSubmissionForm submissionFormats={submissionFormats} />
+              )}
+            </div>
           </Card>
 
           <Card>
@@ -287,18 +301,6 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
           </Card>
         </div>
 
-        <div className="flex w-full shrink-0 flex-col gap-4 lg:w-[380px]">
-          <Card>
-            <CardHeader title="제출" />
-            <div className="flex flex-col gap-3.5 p-4">
-              {props.interactive ? (
-                <InteractiveSubmissionForm {...props} submissionFormats={submissionFormats} />
-              ) : (
-                <PreviewSubmissionForm submissionFormats={submissionFormats} />
-              )}
-            </div>
-          </Card>
-        </div>
       </div>
     </div>
   );
