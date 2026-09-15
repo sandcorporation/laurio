@@ -345,7 +345,7 @@ export default function EditProblemPage() {
   }
 
   return (
-    <PageShell wide>
+    <PageShell>
       <PageHeader
         eyebrow="클래스 · 문제"
         title="문제 편집"
@@ -506,12 +506,13 @@ export default function EditProblemPage() {
           </ErrorNote>
         ) : null}
 
-        {/* 넓은 화면(1640px~)에서만 두 열이다 — 왼쪽 문제·체크리스트는 새 문제 화면과
-            같은 폭을 쓰고, 채점 모델·채점 지침·복사·템플릿 공개는 넓어진 틀의 오른쪽
-            380px 열이 스크롤을 따라온다. 그보다 좁으면 한 열로 쌓아 설명 에디터가 페이지
-            폭을 다 쓴다 — 예전에는 1024px 부터 이 열이 본문 안을 차지해 에디터가 약
-            750px 로 좁았다(2026-09-15). */}
-        <div className="flex flex-col gap-5 min-[1640px]:flex-row min-[1640px]:items-start">
+        {/* 본문 폭은 다른 화면과 같다(1200px 틀). 화면이 충분히 넓으면(1840px~) 채점 모델·
+            채점 지침·다른 클래스로 복사·템플릿으로 공개 카드를 **틀 바깥** 오른쪽 여백에
+            300px 열로 걸고 스크롤을 따라오게 한다 — 그러면 설명 에디터가 틀 폭을 다 쓴다.
+            그보다 좁으면 한 열로 쌓여 그 카드들이 체크리스트 아래로 내려간다.
+            (2026-09-15: 1024px 부터 380px 열이 틀 안을 차지해 에디터가 약 750px 로 좁았고,
+            틀을 1600px 로 넓혀 보았으나 이 화면만 폭이 달라 어색했다.) */}
+        <div className="relative flex flex-col gap-5">
           <div className="flex min-w-0 flex-1 flex-col gap-5">
             <Card>
               <CardHeader title="문제" />
@@ -697,9 +698,13 @@ export default function EditProblemPage() {
             </Card>
           </div>
 
+          {/* 1840px~: 화면에 고정해 늘 보인다. 틀(1200px)의 본문 오른쪽 끝(50%+576px)에서
+              24px 떨어진 자리부터 300px — 본문 줄 안의 sticky 는 카드 넷의 높이가 줄 높이와
+              비슷해 따라올 여지가 없었다. 화면보다 길면 열 안에서 스크롤한다. */}
+          <div>
           <div
             data-testid="edit-problem-side-rail"
-            className="flex w-full shrink-0 flex-col gap-5 min-[1640px]:sticky min-[1640px]:top-6 min-[1640px]:max-h-[calc(100vh-3rem)] min-[1640px]:w-[380px] min-[1640px]:overflow-y-auto"
+            className="flex w-full flex-col gap-5 min-[1840px]:fixed min-[1840px]:top-24 min-[1840px]:left-[calc(50%+600px)] min-[1840px]:max-h-[calc(100vh-7.5rem)] min-[1840px]:w-[300px] min-[1840px]:overflow-y-auto"
           >
             <Card>
               <CardHeader title="채점 모델" />
@@ -950,6 +955,7 @@ export default function EditProblemPage() {
                 </span>
               </div>
             </Card>
+          </div>
           </div>
         </div>
 
