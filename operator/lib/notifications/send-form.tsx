@@ -13,9 +13,13 @@ import type { Recipient } from "./types";
 type Step = "search" | "compose" | "confirm";
 
 export function SendOperatorNoticeForm({
+  initialRecipient = null,
   onSent,
   onSessionExpired,
 }: {
+  // 무료 공모전 수상자 옆 「운영팀 알림 보내기」가 채워 보낸 받는 사람(#420) —
+  // 있으면 검색을 건너뛰고 바로 작성 단계에서 시작한다.
+  initialRecipient?: Recipient | null;
   onSent: () => void;
   onSessionExpired: () => void;
 }) {
@@ -23,12 +27,12 @@ export function SendOperatorNoticeForm({
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [results, setResults] = useState<Recipient[]>([]);
-  const [selected, setSelected] = useState<Recipient | null>(null);
+  const [selected, setSelected] = useState<Recipient | null>(initialRecipient);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [imageObjectKey, setImageObjectKey] = useState<string | null>(null);
   const [imageFileName, setImageFileName] = useState<string | null>(null);
-  const [step, setStep] = useState<Step>("search");
+  const [step, setStep] = useState<Step>(initialRecipient ? "compose" : "search");
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const { state: imageUploadState, upload: uploadImage } = useOperatorNoticeImageUpload();

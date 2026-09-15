@@ -56,6 +56,7 @@ from .hosting_permission_services import (
 from .models import (
     Category,
     CategoryChange,
+    Contest,
     DeliverableType,
     DeliverableTypeChange,
     HostingPermission,
@@ -74,6 +75,8 @@ from .schemas import (
     HostingPermissionChangeOut,
     OperatorCategoryOut,
     OperatorDeliverableTypeOut,
+    OperatorFreeContestOut,
+    OperatorFreeContestWinnerOut,
     SetHostingPermissionIn,
 )
 
@@ -421,3 +424,42 @@ def set_hosting_permission_endpoint(
         nickname=_nickname_for(user),
         is_granted=permission.is_granted,
     )
+
+
+# --- 무료 공모전 목록 (#420) --------------------------------------------------
+#
+# `GET /operator/contests/free` — 상태·마감·수상 여부·수상자. 수상자 옆의
+# 「운영팀 알림 보내기」가 이 응답의 `winner`를 그대로 받는 사람으로 채운다
+# (notifications.operator_api의 `RecipientOut`과 같은 필드 모양). 유료
+# 공모전은 `is_free=True` 필터로 아예 섞이지 않는다 — 상금·본인확인·환불 같은
+# 유료 전용 필드가 없는 목록이라 구별 플래그를 더하는 대신 필터로 뺐다.
+
+
+def _serialize_free_contest(contest: Contest) -> OperatorFreeContestOut:
+    award = getattr(contest, "award", None)
+    winner = None
+    if award is not None:
+        winner_user = award.submission.user
+        winner = OperatorFreeContestWinnerOut(
+            user_id=winner_user.id,
+            email=winner_user.email,
+            nickname=_nickname_for(winner_user),
+        )
+    return OperatorFreeContestOut(
+        id=contest.id,
+        title=contest.title,
+        status=contest.status,
+        deadline_at=contest.deadline_at,
+        judging_ends_at=contest.judging_ends_at,
+        winner=winner,
+    )
+
+
+@operator_router.get("/contests/free", response={200: list[OperatorFreeContestOut]})
+def list_free_contests(request: HttpRequest):
+    contests = (
+        Contest.objects.filter(is_free=True)
+        .select_related("award__submission__user")
+        .order_by("-created_at")
+    )
+    return 200, [_serialize_free_contest(contest) for contest in contests]
