@@ -5489,6 +5489,11 @@ export interface components {
              * Format: date-time
              */
             deadline_at: string;
+            /**
+             * Is Free
+             * @default false
+             */
+            is_free: boolean;
             next_action: components["schemas"]["NextAction"];
             /** Prize */
             prize: number;
@@ -5582,7 +5587,7 @@ export interface components {
          * @description Developer 가 지금 무엇을 해야 하는가 — 또는 무엇을 기다리는가.
          * @enum {string}
          */
-        NextAction: "awaiting_scoring" | "awaiting_judging" | "awaiting_appeal_ruling" | "awaiting_distribution" | "awaiting_handover_release" | "awaiting_seller_registration" | "can_edit_submission" | "needs_reverification" | "can_appeal" | "request_payout" | "submit_tax_identity" | "not_selected" | "payout_complete" | "retry_transfer" | "awaiting_transfer_resolution";
+        NextAction: "awaiting_scoring" | "awaiting_judging" | "awaiting_appeal_ruling" | "awaiting_distribution" | "awaiting_handover_release" | "awaiting_seller_registration" | "can_edit_submission" | "needs_reverification" | "can_appeal" | "request_payout" | "submit_tax_identity" | "not_selected" | "payout_complete" | "awarded" | "retry_transfer" | "awaiting_transfer_resolution";
         /** NotificationOut */
         NotificationOut: {
             /** Context */
@@ -5814,6 +5819,11 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /**
+             * Is Free
+             * @default false
+             */
+            is_free: boolean;
             /** Model Version */
             model_version: string;
             /** Percentage */
@@ -6772,7 +6782,7 @@ export interface components {
          * @description Sponsor 가 이 공모전에 대해 지금 무엇을 해야 하는가 — 또는 무엇을 기다리는가.
          * @enum {string}
          */
-        SponsorNextAction: "pay_to_publish" | "judge_and_award" | "accept_handover" | "awaiting_submissions" | "awaiting_scoring" | "awaiting_appeal_ruling" | "awaiting_distribution" | "awaiting_payout" | "no_submissions" | "contest_complete";
+        SponsorNextAction: "pay_to_publish" | "publish_free_draft" | "judge_and_award" | "accept_handover" | "awaiting_submissions" | "awaiting_scoring" | "awaiting_appeal_ruling" | "awaiting_distribution" | "awaiting_payout" | "no_submissions" | "contest_complete";
         /**
          * SubmissionAssetIn
          * @description 제출 페이로드가 담는 자료 하나 (#190).

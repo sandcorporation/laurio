@@ -14,6 +14,9 @@
   이 엔드포인트는 Score를 전혀 조회하지 않는다.
 - Award는 지식재산권 이전을 기록할 뿐, 소스 접근 권한을 여는 것(Handover, #14)이나
   Escrow 해제(#14/#15)는 하지 않는다.
+- **무료 공모전(#417, ADR-0048)은 Award만 만들고 Handover는 만들지 않는다** — Escrow
+  해제·지급 자체가 없다. 수상자 알림(`notify_award_result`)은 유료·무료 구분 없이
+  똑같이 보낸다.
 """
 
 from __future__ import annotations
@@ -93,11 +96,21 @@ def award_submission(request: HttpRequest, contest_id: int, payload: AwardIn):
         # 행의 존재 자체가 아니라 `awards.Award`의 존재로 판정되므로(
         # `submissions.resolvers`) 이미 이 시점에 열려 있다. 이 행은 그 뒤의
         # 인수 확인·빌드 자산·Escrow 해제 흐름이 딸릴 자리를 만들 뿐이다.
-        Handover.objects.create(
-            award=award,
-            release_deadline_at=now
-            + timedelta(days=current_policy().handover_acceptance_period_days),
-        )
+        #
+        # **무료 공모전(#417, ADR-0048)은 이 행을 만들지 않는다.** Escrow 해제·
+        # 지급이 없으므로 인수 확인 자체가 뜻이 없다 — 소스 접근은 이미 위
+        # `submissions.resolvers`의 원칙대로 Award 존재만으로 열려 있으니
+        # Handover가 없어도 아무것도 잃지 않는다. 이 행이 없으면
+        # `payouts.api.request_payout`/`handovers.api.accept_handover`가
+        # 자연스럽게 404("아직 선정되지 않아 인수 정보가 없습니다")로 거절한다
+        # — 무료 공모전에 지급·인수인계 절차가 없다는 사실을 별도 분기 없이
+        # 그대로 드러낸다.
+        if not contest.is_free:
+            Handover.objects.create(
+                award=award,
+                release_deadline_at=now
+                + timedelta(days=current_policy().handover_acceptance_period_days),
+            )
 
     # 트랜잭션이 커밋된 뒤에만 알린다 — notify_award_result는 내부에서 모든 예외를
     # 삼키므로(#19 AC, ADR-0009) 이 응답이 알림 실패로 막히는 일은 없다.

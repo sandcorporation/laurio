@@ -89,6 +89,10 @@ export const NEXT_ACTION_LABELS: Record<NextAction, NextActionLabel> = {
     payoutStage: true,
   },
   not_selected: { text: "선정되지 않았습니다", mine: false, payoutStage: false },
+  // 무료 공모전 전용(#417, ADR-0048) — 수상은 했지만 Handover·지급 절차 자체가
+  // 없다. `payoutStage`를 false로 두는 것이 이 값의 요점이다 — 지급·인수 자료
+  // 링크(아래 `payoutStage` 분기)가 뜨지 않아야 없는 절차를 안내하지 않는다.
+  awarded: { text: "수상했습니다", mine: false, payoutStage: false },
   // 끝난 뒤에도 내역을 다시 볼 수 있어야 한다 — 얼마가 떼였는지 확인할 곳이
   // 여기밖에 없다.
   payout_complete: { text: "지급이 완료되었습니다", mine: false, payoutStage: true },

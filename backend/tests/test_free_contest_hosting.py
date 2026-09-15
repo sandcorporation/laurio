@@ -459,6 +459,33 @@ def test_creating_free_contest_requires_a_deliverable_type(client, category, lan
     assert response.status_code == 422, response.content
 
 
+# --- 「내 공모전」의 다음 행동 — 무료 draft 는 결제가 아니라 공개를 가리킨다
+# (#415 회귀, #417 을 걷다가 발견) ---------------------------------------------
+
+
+def test_sponsor_next_action_for_a_free_draft_points_to_publishing_not_payment(
+    client, category, landing_type
+):
+    """`Contest.Status.PAYABLE`은 "DRAFT 인가"만 묻는다 — 무료 draft 도 걸린다.
+    구분하지 않으면 「내 공모전」이 존재하지 않는 결제 화면으로 링크를 건다."""
+
+    user = _hosted_user(client, "free-host-sponsor-action")
+    root = _operator_client("root-free-host-sponsor-action")
+    _grant(root, user["user_id"])
+
+    draft = client.post(
+        f"{CONTESTS_URL}/free",
+        data=_free_brief(category, landing_type),
+        content_type="application/json",
+        **_auth_header(user["access"]),
+    ).json()
+
+    response = client.get("/api/contests/mine", **_auth_header(user["access"]))
+    assert response.status_code == 200, response.content
+    (row,) = [item for item in response.json()["items"] if item["contest_id"] == draft["id"]]
+    assert row["next_action"] == "publish_free_draft"
+
+
 # --- 스위치: 유료가 꺼져도 무료 개최·공개는 그대로 열린다 (#413/#415) ---------
 
 

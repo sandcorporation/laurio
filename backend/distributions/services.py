@@ -218,12 +218,19 @@ def distribution_due_q(as_of, policy) -> Q:
 
     조건을 세 벌로 쓰면 언젠가 갈라지고, 그러면 개최자 화면은 보류라는데 이의
     큐는 아니라고 하는 날이 온다.
+
+    **`is_free=False`도 조건이다(#417, ADR-0048).** 무료 공모전은 상금·Escrow가
+    없으므로 「무응답 N일」이 지나도 배분할 돈 자체가 없다 — 심사 기간 안에
+    수상하지 않으면 그대로 수상 없이 끝난 상태로 남는다(더 옮겨 갈 다음 단계가
+    없다). 이 조건이 없으면 무료 공모전도 스캔 후보에 올라 `Distribution`(과
+    그 이하 `Payout`)을 만들려 시도하게 된다.
     """
 
     return Q(
         status__in=Contest.Status.AWAITING_DISTRIBUTION.statuses,
         judging_ends_at__lte=as_of - timedelta(days=policy.distribution_wait_days),
         distribution__isnull=True,
+        is_free=False,
     )
 
 

@@ -156,6 +156,18 @@ ADR-0036). 업로드 자료의 값은 `submission:{공모전id}:{개발자id}:{�
 **지급대행 등록은 지급 확정 뒤에 일어난다**(ADR-0020) — 순서가 반대면 아직 받을지도 모르는
 사람에게 판매자 등록을 요구하게 된다. 신원은 토스가, 세무는 Codemit 가 맡는다(ADR-0008).
 
+**무료 공모전은 이 절 전체를 건드리지 않는다**(#417, ADR-0048). `awards.api.
+award_submission`이 무료 공모전이면 `Award`만 만들고 `Handover`를 만들지 않는다 —
+Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover[/accept]`·
+`POST/GET .../payout`이 그 공모전에 대해 자연스럽게 404다("이 공모전은 아직
+선정되지 않아 인수 정보가 없습니다" — Handover 행이 없다는 사실 그대로다).
+심사기간이 무응답으로 끝나도 `distributions.services.distribution_due_q`가
+`is_free=False`를 조건에 넣어 `Distribution`을 만들지 않는다 — 나눠 줄 돈이
+없다. 이의제기(`POST /submissions/{id}/appeal`)도 무료 공모전이면 404다.
+유료 심사기간 연장(`.../extend-judging-period`)도 유료 스위치가 켜져 있어도
+무료 공모전 자신에 대해서는 409다. 수상자 알림(`notify_award_result`)만은
+유료·무료 구분 없이 그대로 보낸다.
+
 ### 강의실
 
 `/api/classroom` 아래다(ADR-0037) — 공모전 가족과는 앱 경계가 양방향으로 막혀 있다

@@ -2,7 +2,8 @@
 
 - `POST /submissions/{submission_id}/appeal` — Developer 본인이 자신의 Score에
   이의를 제기한다. Score가 아직 없으면(채점 전) 거부한다 — 이의는 판정이 이미
-  나온 것에 대한 것이다.
+  나온 것에 대한 것이다. **무료 공모전(#417, ADR-0048)은 거절한다** — 돈이
+  걸리지 않으므로 정정할 지급도, 배분을 막을 이유도 없다.
 - `GET /submissions/{submission_id}/appeal` — Developer 본인이 자신의 이의제기
   상태·심판 결과를 조회한다.
 - `GET /submissions/{submission_id}/source-readings` — Developer 본인이 자기
@@ -108,6 +109,12 @@ def _get_owned_submission(request: HttpRequest, submission_id: int) -> ContestSu
 )
 def create_appeal(request: HttpRequest, submission_id: int, payload: AppealCreateIn):
     submission = _get_owned_submission(request, submission_id)
+
+    if submission.contest.is_free:
+        # 무료 공모전에는 이의제기 절차 자체가 없다(#417, ADR-0048) — 돈이
+        # 걸리지 않으므로 정정할 지급 금액도, 배분을 막을 근거도 없다. 화면이
+        # 이 버튼을 아예 감추는 것과 별개로(사고 예방) 여기서도 거절한다(방어).
+        raise HttpError(404, "무료 공모전에는 이의제기 절차가 없습니다.")
 
     if not hasattr(submission, "score"):
         raise HttpError(409, "아직 채점되지 않은 제출물은 이의제기할 수 없습니다.")

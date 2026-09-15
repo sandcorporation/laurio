@@ -72,6 +72,10 @@ class NextAction(models.TextChoices):
     # --- 끝난 일 -------------------------------------------------------------
     NOT_SELECTED = "not_selected", "미선정"
     PAYOUT_COMPLETE = "payout_complete", "지급 완료"
+    # 무료 공모전(#417, ADR-0048) 전용 — 수상은 했지만 Handover·지급 절차 자체가
+    # 없어 더 기다리거나 할 일이 없다. 유료 경로의 `AWAITING_HANDOVER_RELEASE`
+    # 부터 `PAYOUT_COMPLETE`까지가 이 값 하나로 줄어든다.
+    AWARDED = "awarded", "선정됨"
     # --- 다시 네 차례(실이체 재시도) -------------------------------------------
     # Seller 등록은 끝났는데(READY) 실제 이체 자체가 벤더 쪽에서 거절/미확정인
     # 경우다(#57 코드리뷰 지적 1/7, 3차) — Payout.status만 보면 두 대기가 다
@@ -138,8 +142,11 @@ def next_action_for(submission) -> str:
 
     # 아직 돈이 걸린 단계에 닿지 않았다 — 이의를 낼 수 있는지 본다. 조건은
     # `appeals.api.create_appeal` 의 전제와 같다: 채점이 끝났고(위에서 확인),
-    # 아직 이의가 없고, 기한(심사기간 종료) 안이다.
-    if appeal is None and contest.appeal_window_open(now):
+    # 아직 이의가 없고, 기한(심사기간 종료) 안이다. **무료 공모전은 여기서도
+    # 제외한다**(#417, ADR-0048) — `appeals.api.create_appeal`이 `contest.
+    # is_free`를 보고 404로 거절하므로, 조건을 두 벌로 쓰지 않으려면 여기도
+    # 같은 예외를 져야 한다.
+    if not contest.is_free and appeal is None and contest.appeal_window_open(now):
         return NextAction.CAN_APPEAL
 
     if _is_awarded_to_someone_else(submission):
@@ -147,6 +154,13 @@ def next_action_for(submission) -> str:
 
     if contest.judging_window_open(now):
         return NextAction.AWAITING_JUDGING
+
+    # 무료 공모전은 여기서 배분으로 넘어가지 않는다(#417) — 상금·Escrow가
+    # 없으므로 「무응답 N일」이 지나도 나눠 줄 돈이 없다. 심사 기간 안에
+    # 수상하지 않았다는 것은 곧 「수상 없이 끝났다」이고, 참가자 전원에게
+    # 그 사실은 같다(아무도 선정되지 않았다).
+    if contest.is_free:
+        return NextAction.NOT_SELECTED
 
     return NextAction.AWAITING_DISTRIBUTION
 
@@ -223,6 +237,10 @@ def _payout_action(submission):
     if award is not None:
         if award.submission_id != submission.id:
             return None
+        if submission.contest.is_free:
+            # 무료 공모전(#417)은 Handover 자체가 없다 — Escrow 해제·지급
+            # 절차 없이 수상으로 끝난다.
+            return NextAction.AWARDED
         handover = getattr(award, "handover", None)
         if handover is None:
             return None

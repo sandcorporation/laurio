@@ -68,6 +68,13 @@ export default function AppealPage({ params }: { params: Promise<{ submissionId:
           <ScoreSection score={state.score} />
           {state.appeal ? (
             <ExistingAppeal appeal={state.appeal} />
+          ) : state.score.is_free ? (
+            // 무료 공모전(#417, ADR-0048)에는 이의제기 절차 자체가 없다 —
+            // 「기한이 지났다」(아래 appeal-closed 분기)와는 다른 사실이라
+            // 다른 문구로 말한다.
+            <p className="mt-8 text-ink/60" data-testid="appeal-not-available-free">
+              무료 공모전에는 이의제기 절차가 없습니다.
+            </p>
           ) : state.score.can_appeal ? (
             <AppealForm submissionId={submissionId} onSubmitted={reload} />
           ) : (

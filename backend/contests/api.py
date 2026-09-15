@@ -1010,6 +1010,13 @@ _ACTIVE_EXTENSION_PAYMENT_STATUSES = [JudgingExtensionPayment.Status.REQUESTED]
 
 
 def _reject_if_judging_period_is_not_extendable(contest: Contest) -> None:
+    if contest.is_free:
+        # 무료 공모전에는 유료 심사기간 연장이 없다(#417, ADR-0048) — 유료
+        # 스위치(#413)가 켜진 dev·CI에서도 무료 공모전 자신은 이 경로를 쓸 수
+        # 없어야 한다. 스위치는 "이 기능이 배포에 있는가"만 보고, 이 검사는
+        # "이 Contest 에 그 기능이 뜻이 있는가"를 본다 — 둘은 다른 질문이다.
+        raise HttpError(409, "무료 공모전은 심사기간을 유료로 연장할 수 없습니다.")
+
     if not Contest.Status.JUDGING_EXTENDABLE(contest.status):
         raise HttpError(409, "지금은 심사기간을 연장할 수 있는 상태가 아닙니다.")
 
