@@ -10,14 +10,9 @@
 import { createElement } from "react";
 import type { ReactNode } from "react";
 
-/** 화면 한 장의 바깥 틀 — 폭과 여백을 여기서만 정한다.
- *
- *  `wide` 는 넓은 화면에서만 틀을 1600px 까지 넓힌다 — 본문은 여느 화면과 같은 폭을
- *  쓰고 넓어진 만큼을 오른쪽 보조 열이 가져간다(문제 편집, 2026-09-15). 헤더는 1200px
- *  그대로라 그 폭 이상에서는 이 화면 본문이 헤더보다 넓게 펼쳐진다. */
-export function PageShell({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
-  const width = wide ? "max-w-[1200px] min-[1640px]:max-w-[1600px]" : "max-w-[1200px]";
-  return <main className={`mx-auto w-full ${width} px-6 py-8`}>{children}</main>;
+/** 화면 한 장의 바깥 틀 — 폭과 여백을 여기서만 정한다. */
+export function PageShell({ children }: { children: ReactNode }) {
+  return <main className="mx-auto w-full max-w-[1200px] px-6 py-8">{children}</main>;
 }
 
 /** 화면 머리 — 눈썹(작은 위치 표시)·제목·한 줄 설명, 그리고 오른쪽 행동. */
