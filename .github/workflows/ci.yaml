@@ -160,6 +160,13 @@ jobs:
         working-directory: backend
         run: uv run python manage.py check --fail-level WARNING
 
+      # 문법 검사(#409) 테스트가 쓰는 tree-sitter 문법을 먼저 받는다 — 채점 코드는 문법을
+      # 내려받지 않으므로(없으면 AI 판정으로 넘김) 캐시가 빈 러너에서는 파서 판정 테스트가
+      # 어긋난다. 이미지에서는 docker/backend.Dockerfile 이 같은 명령을 부른다.
+      - name: Prefetch tree-sitter grammars
+        working-directory: backend
+        run: uv run python manage.py prefetch_syntax_grammars --skip-checks
+
       - name: Run tests
         working-directory: backend
         run: uv run pytest
