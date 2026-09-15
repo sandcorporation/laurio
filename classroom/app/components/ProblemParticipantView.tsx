@@ -43,6 +43,13 @@ export type ParticipantChecklistItem = {
 // syntax_check_enabled`) 여기서 하드코딩한다.
 const SYNTAX_CHECK_LABEL = "소스에 문법 오류가 없다";
 
+// 판정 주체 표시(#409 AC "화면 근거에 파서 판정과 AI 판정이 구별되어
+// 보인다") — 파서 판정은 신뢰도가 높고(파이썬 표준 파서·tree-sitter), AI
+// 판정은 파서가 없는 언어이거나 크기·시간 제한에 걸렸을 때만 쓰인다.
+export function judgedByLabel(judgedBy: "parser" | "ai"): string {
+  return judgedBy === "parser" ? "파서 판정" : "AI 판정";
+}
+
 type InteractiveProps = {
   interactive: true;
   memberExpelled: boolean;
@@ -314,7 +321,13 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
                               }`}
                             />
                             <span className="text-[13px] leading-relaxed">
-                              <Badge>기본</Badge> {SYNTAX_CHECK_LABEL}
+                              <Badge>기본</Badge>{" "}
+                              <span
+                                data-testid={`submission-row-${submission.id}-syntax-check-judged-by`}
+                              >
+                                <Badge tone="neutral">{judgedByLabel(submission.score.syntax_check.judged_by)}</Badge>
+                              </span>{" "}
+                              {SYNTAX_CHECK_LABEL}
                               <span className="text-ink/45">
                                 {" "}
                                 — {submission.score.syntax_check.is_met ? "충족" : "미충족"}

@@ -87,7 +87,13 @@ from .models import (
     ClassroomSubmission,
 )
 from .scoring_models import is_reasoning_model_id, matches_naming_rule
-from .syntax_check import build_verdict, check_python_syntax
+from .syntax_check import (
+    SYNTAX_CHECK_ITEM_ID,
+    SyntaxCheckFile,
+    build_ai_verdict,
+    build_parser_verdict,
+    run_parser_syntax_check,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -227,12 +233,22 @@ def _requirement_inputs(checklist_items: list[ChecklistItem]) -> list[Requiremen
     ]
 
 
+#: 문법 검사 기본 항목을 AI에게 물을 때 쓰는 요구사항 문구(#409) — 강사가
+#: 만든 체크리스트 항목과 나란히 requirement_id로 판정을 받되, 그 자체가
+#: 무엇을 묻는지는 이 고정 문구로 정해진다(강사가 바꿀 수 없다).
+SYNTAX_CHECK_AI_REQUIREMENT_TEXT = (
+    "아래 「문법 검사 대상 파일」에 나열된 파일들이 프로그램으로서 구문 오류 없이 "
+    "읽히는가(실행 여부가 아니라 구문만 본다)"
+)
+
+
 def _build_prompt(
     submission: ClassroomSubmission,
     checklist_items: list[ChecklistItem],
     source_text: str,
     *,
     asset_kind: str,
+    syntax_check_unresolved: list[SyntaxCheckFile] = (),
 ) -> str:
     problem = submission.problem
     guideline_text = effective_grading_guideline_text(
@@ -271,6 +287,16 @@ def _build_prompt(
     for item in checklist_items:
         grade = "필수" if item.required else "선택"
         lines.append(f"- requirement_id={item.id} ({grade}): {item.label}")
+    if syntax_check_unresolved:
+        # 문법 검사 기본 항목(#409) — 파서가 판정하지 못한 파일만 AI에게
+        # 묻는다(파서가 이미 오류를 찾았으면 이 자리 자체가 생기지 않는다,
+        # `classroom.scoring.score_classroom_submission_once`). 채점
+        # 지침(위)과 무관하게, 오직 구문이 올바른가만 본다 — 요구의 뜻을
+        # 달성했는가를 묻는 다른 항목들과는 판정 기준 자체가 다르다.
+        lines.append(
+            f"- requirement_id={SYNTAX_CHECK_ITEM_ID} (필수, 채점 지침과 무관): "
+            f"{SYNTAX_CHECK_AI_REQUIREMENT_TEXT}"
+        )
     lines.append("")
     # 문제가 아니라 **이 시도가 실제로 낸** 자료의 형식을 적는다(#373 AC) —
     # 둘 다 열린 문제에서는 문제의 값(목록)이 프롬프트 한 줄로 뭉개지지
@@ -278,6 +304,15 @@ def _build_prompt(
     lines.append(f"제출 형식: {asset_kind}")
     lines.append("제출된 소스:")
     lines.append(source_text if source_text.strip() else "(제출된 소스에서 읽을 수 있는 텍스트가 없습니다)")
+    if syntax_check_unresolved:
+        lines.append("")
+        lines.append(
+            f"문법 검사 대상 파일 — requirement_id={SYNTAX_CHECK_ITEM_ID}는 오직 아래 "
+            "파일들만 보고 판정하세요(위 「제출된 소스」의 다른 파일은 이 항목과 무관합니다):"
+        )
+        for f in syntax_check_unresolved:
+            lines.append(f"# {f.path}")
+            lines.append(f.content if f.content.strip() else "(빈 파일)")
     return "\n".join(lines)
 
 
@@ -527,12 +562,21 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
 
     source_text = _source_text_for(raw_source, asset)
 
-    # 문법 검사 기본 항목(#408) — 파서만 쓰고 토큰·벤더 요청과 무관하다.
-    # 강사가 이 문제에서 꺼 두면(#410) 아예 판정하지 않는다(`None`으로
-    # 남아 "이 시도에는 그 항목이 없다"는 뜻이 된다).
-    syntax_check_result = (
-        build_verdict(check_python_syntax(raw_source)) if problem.syntax_check_enabled else None
-    )
+    # 문법 검사 기본 항목(#408/#409) — 강사가 이 문제에서 꺼 두면(#410) 아예
+    # 판정하지 않는다(`None`으로 남아 "이 시도에는 그 항목이 없다"는 뜻이
+    # 된다). 켜져 있으면 파서가 먼저 본다 — 오류를 찾았거나(`has_error`)
+    # 판정 못한 파일이 하나도 없으면 그 자리에서 끝난다(파서 판정은 토큰을
+    # 쓰지 않는다). 판정 못한 파일이 남았을 때만 그 파일들을 AI에게 묻는다
+    # (`syntax_check_unresolved`) — 채점 요청을 보낸 뒤 그 응답에서
+    # requirement_id로 마저 채운다(추가 벤더 호출을 만들지 않는다, #409).
+    syntax_check_result: dict | None = None
+    syntax_check_unresolved: list[SyntaxCheckFile] = []
+    if problem.syntax_check_enabled:
+        parser_outcome = run_parser_syntax_check(raw_source)
+        if parser_outcome.has_error or not parser_outcome.unresolved:
+            syntax_check_result = build_parser_verdict(parser_outcome)
+        else:
+            syntax_check_unresolved = parser_outcome.unresolved
 
     model = problem.model or class_obj.default_model
     if not matches_naming_rule(model):
@@ -556,7 +600,49 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
         else None
     )
 
-    prompt = _build_prompt(submission, checklist_items, source_text, asset_kind=asset.kind)
+    prompt = _build_prompt(
+        submission,
+        checklist_items,
+        source_text,
+        asset_kind=asset.kind,
+        syntax_check_unresolved=syntax_check_unresolved,
+    )
+    requirements = _requirement_inputs(checklist_items)
+    # 문법 검사 대상 파일도 소스 목록에 얹는다(#409) — OpenAIScoringAdapter는
+    # prompt만 읽어 실제 벤더 요청에는 영향이 없지만(모듈 docstring),
+    # FakeClassroomScoringAdapter는 `source_files`에서 haystack을 만들어
+    # dev·CI에서도 이 항목을 결정적으로 흉내낼 수 있게 한다.
+    source_files = [
+        SourceFile(
+            path=f"asset-{asset.id}",
+            content=source_text,
+            asset_id=asset.id,
+            asset_label=asset.label,
+        )
+    ]
+    if syntax_check_unresolved:
+        # 파서가 없거나 제한에 걸려 AI에게 넘긴 파일만 딱 그만큼 추가한다 —
+        # 프롬프트(`_build_prompt`)가 이 항목을 그 파일들로만 판정하라고
+        # 이미 못박았으므로, 벤더로 나가는 실제 정보와도 맞아떨어진다.
+        requirements = [
+            *requirements,
+            RequirementInput(
+                requirement_id=SYNTAX_CHECK_ITEM_ID,
+                text=SYNTAX_CHECK_AI_REQUIREMENT_TEXT,
+                grade="필수",
+                self_reported_met=False,
+                evidence=[],
+            ),
+        ]
+        source_files = [
+            *source_files,
+            *[
+                SourceFile(
+                    path=f.path, content=f.content, asset_id=asset.id, asset_label=asset.label
+                )
+                for f in syntax_check_unresolved
+            ],
+        ]
     scoring_input = ScoringInput(
         submission_id=submission.id,
         # ScoringInput.contest_id는 공모전 전용 필드지만 core.llm_scoring이
@@ -569,15 +655,8 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
         # 나열된 prompt 전체가 아니라)만 검사 대상으로 삼기 위해서다(#340).
         # `path`는 정체성 자리라 참가자가 붙인 자유 텍스트(`asset.label`)를
         # 넣지 않는다(core.llm_scoring.SourceFile) — 그 문구는 `asset_label`이 쓰는 자리다.
-        source_files=[
-            SourceFile(
-                path=f"asset-{asset.id}",
-                content=source_text,
-                asset_id=asset.id,
-                asset_label=asset.label,
-            )
-        ],
-        requirements=_requirement_inputs(checklist_items),
+        source_files=source_files,
+        requirements=requirements,
     )
 
     try:
@@ -623,7 +702,15 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
     reasoning = [
         {"checklist_item_id": v.requirement_id, "is_met": v.is_met, "reasoning": v.reasoning}
         for v in output.verdicts
+        if v.requirement_id != SYNTAX_CHECK_ITEM_ID
     ]
+    if syntax_check_unresolved:
+        # 파서가 판정하지 못한 파일이 있어 AI에게 물었다(#409) — 그 판정을
+        # 강사 항목(reasoning)과 섞지 않고 syntax_check_result로 따로 뽑는다.
+        # OpenAIScoringAdapter는 요청에 실린 모든 requirement_id의 판정이
+        # 없으면 예외를 던지므로(그 클래스 docstring) 여기 반드시 있다.
+        ai_verdict = next(v for v in output.verdicts if v.requirement_id == SYNTAX_CHECK_ITEM_ID)
+        syntax_check_result = build_ai_verdict(is_met=ai_verdict.is_met, reasoning=ai_verdict.reasoning)
     with transaction.atomic():
         score = ClassroomScore.objects.create(
             submission=submission,

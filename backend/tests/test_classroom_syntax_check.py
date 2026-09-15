@@ -210,7 +210,7 @@ def test_valid_python_source_satisfies_the_base_item(client, db):
     score = mine["submissions"][0]["score"]
     assert score["syntax_check"] == {
         "is_met": True,
-        "reasoning": "파이썬 표준 파서로 구문 오류가 발견되지 않았습니다.",
+        "reasoning": "파서가 구문 오류를 발견하지 못했습니다.",
         "judged_by": "parser",
         "findings": [],
     }
@@ -311,12 +311,19 @@ def test_source_submission_is_checked_from_the_uploaded_archive(client, db):
 
 def test_oversized_python_file_does_not_hang_or_crash_the_worker(client, db):
     """크기 상한을 넘는 파일이 있어도 스캔은 정상적으로 끝난다(#407 AC) —
-    이 티켓(#408)에서는 판정하지 못한 파일이 기본 항목에 영향을 주지 않는다
-    (오류로 세지 않는다)."""
+    파서가 판정하지 못한 파일은 AI 판정으로 넘어간다(#409 AC "크기 초과·파서
+    실패 파일도 AI 판정으로 넘어간다"), 워커가 멈추거나 죽지 않는다."""
 
+    from classroom.scoring import SYNTAX_CHECK_AI_REQUIREMENT_TEXT
     from classroom.syntax_check import MAX_SYNTAX_CHECK_FILE_BYTES
 
-    huge_source = "x = 1\n" * (MAX_SYNTAX_CHECK_FILE_BYTES // 6 + 100)
+    # FakeClassroomScoringAdapter는 항목의 문구가 소스에 그대로 등장하는지로
+    # 판정한다 — AI에게 넘어간 기본 항목도 같은 규칙이라, 그 문구를 파일에
+    # 심어 결정적으로 충족을 흉내낸다.
+    # 마커는 파일 앞쪽에 둔다 — 크기 상한을 넘는 파일은 그 상한까지만 잘려
+    # AI에게 전달되므로(zip bomb 방어), 끝에 두면 잘려 나가 보이지 않는다.
+    huge_source = f"# {SYNTAX_CHECK_AI_REQUIREMENT_TEXT}\n"
+    huge_source += "x = 1\n" * (MAX_SYNTAX_CHECK_FILE_BYTES // 6 + 100)
     files = {"huge.py": huge_source}
     ctx = _setup_submission(client, files=files)
 
@@ -324,7 +331,10 @@ def test_oversized_python_file_does_not_hang_or_crash_the_worker(client, db):
 
     assert result["count"] == 1
     mine = _mine(client, ctx["participant"]["access"], ctx["class_id"], ctx["problem_id"])
-    assert mine["submissions"][0]["score"]["syntax_check"]["is_met"] is True
+    syntax_check = mine["submissions"][0]["score"]["syntax_check"]
+    assert syntax_check["judged_by"] == "ai"
+    assert syntax_check["is_met"] is True
+    assert syntax_check["findings"] == []
 
 
 def test_achievement_reflects_the_base_item(client, db):

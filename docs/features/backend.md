@@ -233,6 +233,21 @@ Score가 둘 생기지 않는다. 워커가 없는 dev·CI(#40)는 즉시 작업
 판정은 바뀌지 않는다**(ADR-0006) — `ClassroomScore`가 append-only라 새로
 들어오는 시도부터만 새 지침을 탄다.
 
+**채점마다 문법 검사 기본 항목도 함께 판정된다**(#408/#409, CONTEXT.md 「문법
+검사」, `classroom.syntax_check`) — `Problem.syntax_check_enabled`(기본 켜짐)가
+켜진 문제라면, 파이썬은 표준 파서로, JS·TS·Java·Go·C/C++·Kotlin·Ruby는
+tree-sitter 문법으로 제출 아카이브의 코드 파일 전부를 실행 없이 확인한다.
+파싱은 파일마다 격리된 서브프로세스에서 시간(5초)·크기(500KB) 제한을 걸고
+돈다 — 깊은 중첩·거대 입력이 채점 워커를 멈추거나 죽이지 않는다. 파서가
+오류를 찾았거나 판정 못한 파일이 없으면 그 자리에서 끝나 토큰·벤더 요청을
+쓰지 않는다. 파서가 없는 언어나 크기·시간 제한에 걸린 파일이 남으면 그
+파일들만 콕 집어 **기존 채점 요청 안에서** AI에게 묻는다(추가 벤더 호출
+없음) — 채점 지침과 무관한 별도 requirement로 판정을 받는다. 판정은
+`ClassroomScore.syntax_check_result`에 강사 항목(`reasoning`)과 별도로
+append-only 저장되고, 통과·달성률 계산이 이 항목을 필수로 포함한다.
+tree-sitter 문법은 `tree-sitter-language-pack`(사전 빌드된 wheel)으로 받는다 —
+backend·celery·events가 같은 Dockerfile을 쓰므로 이미지가 약 12MB 커졌다.
+
 **공모전 전용이던 어댑터 셋이 공유층으로 옮겨졌다**(#287) — 강의실이 채점하려면
 공모전 가족(`scoring`·`repositories`)을 부를 수 없어서다(ADR-0037). `core.
 llm_scoring`(#274)에 이어 `core.repository_adapters`(GitHub 저장소 clone·공개

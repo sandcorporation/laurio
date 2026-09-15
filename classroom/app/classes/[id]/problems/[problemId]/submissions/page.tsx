@@ -21,6 +21,7 @@ import {
   buttonClass,
 } from "@/app/components/ui";
 import { MissingScoringKeyNote } from "@/app/components/MissingScoringKeyNote";
+import { judgedByLabel } from "@/app/components/ProblemParticipantView";
 import { useClass } from "@/lib/classes/use-class";
 import { useProblem } from "@/lib/problems/use-problem";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
@@ -235,7 +236,9 @@ export default function ProblemSubmissionsPage() {
                             }`}
                           />
                           <span className="text-[13px] leading-relaxed">
-                            <Badge>기본</Badge> 소스에 문법 오류가 없다
+                            <Badge>기본</Badge>{" "}
+                            <Badge tone="neutral">{judgedByLabel(submission.score.syntax_check.judged_by)}</Badge>{" "}
+                            소스에 문법 오류가 없다
                             <span className="text-ink/45">
                               {" "}
                               — {submission.score.syntax_check.is_met ? "충족" : "미충족"}
