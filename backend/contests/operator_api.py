@@ -27,6 +27,7 @@ Category도 같은 무게로 다룬다(공개 목록의 분류 축이고 Contest
 
 from __future__ import annotations
 
+from django.contrib.auth import get_user_model
 from django.http import HttpRequest
 from ninja import Router, Schema
 
@@ -46,7 +47,20 @@ from .deliverable_type_services import (
     deactivate_deliverable_type,
     update_minimum_prize,
 )
-from .models import Category, CategoryChange, DeliverableType, DeliverableTypeChange
+from .hosting_permission_services import (
+    HostingPermissionConflictError,
+    HostingPermissionValidationError,
+    search_accounts,
+    set_hosting_permission,
+)
+from .models import (
+    Category,
+    CategoryChange,
+    DeliverableType,
+    DeliverableTypeChange,
+    HostingPermission,
+    HostingPermissionChange,
+)
 from .schemas import (
     CategoryChangeOut,
     CategoryCreateIn,
@@ -56,8 +70,11 @@ from .schemas import (
     DeliverableTypeChangeOut,
     DeliverableTypeCreateIn,
     DeliverableTypeUpdateIn,
+    HostingPermissionAccountOut,
+    HostingPermissionChangeOut,
     OperatorCategoryOut,
     OperatorDeliverableTypeOut,
+    SetHostingPermissionIn,
 )
 
 operator_router = Router(tags=["operator", "contests"], auth=OperatorAuth())
@@ -297,3 +314,110 @@ def deactivate_category_endpoint(
         return 409, {"detail": str(exc), "code": "already_inactive"}
 
     return 200, _serialize_category(updated)
+
+
+# --- 무료 공모전 개최 권한 (#414, ADR-0048) -----------------------------------
+#
+# - `GET /operator/hosting-permissions/search?q=` — 이메일·닉네임으로 계정을
+#   찾는다. 일반 등급도 조회할 수 있다(위 DeliverableType/Category 조회와 같은
+#   규율).
+# - `GET /operator/hosting-permissions` — 지금 권한이 있는 계정 목록.
+# - `GET /operator/hosting-permissions/changes` — 변경 이력.
+# - `POST /operator/hosting-permissions/{user_id}` — 켜기/끄기(사유 필수). 상위
+#   등급만 — DeliverableType 값을 바꾸는 것과 같은 무게의 판단이다(누가 상금 없이
+#   공모전을 열 수 있는지를 정한다).
+#
+# **정적 경로(`search`·`changes`)를 동적 `{user_id}`보다 먼저 등록한다** — 위
+# `/deliverable-types/changes` 주석과 같은 이유(django-ninja가 `{user_id}`를
+# 별도 정수 컨버터 없이 매치시킨다).
+
+
+def _nickname_for(user) -> str:
+    account = user.social_accounts.exclude(nickname="").order_by("id").first()
+    return account.nickname if account is not None else ""
+
+
+def _serialize_account(user) -> HostingPermissionAccountOut:
+    permission = getattr(user, "hosting_permission", None)
+    return HostingPermissionAccountOut(
+        user_id=user.id,
+        email=user.email,
+        nickname=_nickname_for(user),
+        is_granted=permission.is_granted if permission is not None else False,
+    )
+
+
+def _serialize_hosting_permission_change(change: HostingPermissionChange) -> HostingPermissionChangeOut:
+    return HostingPermissionChangeOut(
+        id=change.id,
+        user_id=change.user_id,
+        user_email=change.user.email,
+        operator_username=change.operator.username,
+        action=change.action,
+        reason=change.reason,
+        changed_at=change.changed_at,
+    )
+
+
+@operator_router.get(
+    "/hosting-permissions/search", response={200: list[HostingPermissionAccountOut]}
+)
+def search_hosting_permission_accounts(request: HttpRequest, q: str = ""):
+    return 200, [_serialize_account(user) for user in search_accounts(q)]
+
+
+@operator_router.get(
+    "/hosting-permissions/changes", response={200: list[HostingPermissionChangeOut]}
+)
+def list_hosting_permission_changes(request: HttpRequest):
+    changes = HostingPermissionChange.objects.select_related("operator", "user").order_by(
+        "-changed_at", "-id"
+    )[:200]
+    return 200, [_serialize_hosting_permission_change(change) for change in changes]
+
+
+@operator_router.get("/hosting-permissions", response={200: list[HostingPermissionAccountOut]})
+def list_hosting_permission_accounts(request: HttpRequest):
+    granted = (
+        HostingPermission.objects.filter(is_granted=True)
+        .select_related("user")
+        .order_by("user__email", "user_id")
+    )
+    return 200, [
+        HostingPermissionAccountOut(
+            user_id=permission.user_id,
+            email=permission.user.email,
+            nickname=_nickname_for(permission.user),
+            is_granted=True,
+        )
+        for permission in granted
+    ]
+
+
+@operator_router.post(
+    "/hosting-permissions/{user_id}",
+    response={200: HostingPermissionAccountOut, 404: OperatorErrorOut, 409: OperatorErrorOut, 422: OperatorErrorOut},
+    auth=_SUPERUSER,
+)
+def set_hosting_permission_endpoint(
+    request: HttpRequest, user_id: int, payload: SetHostingPermissionIn
+):
+    user = get_user_model().objects.filter(id=user_id).first()
+    if user is None:
+        return 404, {"detail": "계정을 찾을 수 없습니다.", "code": "not_found"}
+
+    try:
+        permission = set_hosting_permission(
+            user=user, operator=request.auth, granted=payload.granted, reason=payload.reason
+        )
+    except HostingPermissionValidationError as exc:
+        return 422, {"detail": str(exc), "code": "invalid"}
+    except HostingPermissionConflictError as exc:
+        return 409, {"detail": str(exc), "code": "unchanged"}
+
+    return 200, HostingPermissionAccountOut(
+        user_id=user.id,
+        email=user.email,
+        nickname=_nickname_for(user),
+        is_granted=permission.is_granted,
+    )

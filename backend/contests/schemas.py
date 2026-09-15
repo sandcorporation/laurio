@@ -146,6 +146,34 @@ class CategoryChangeOut(Schema):
     changed_at: datetime
 
 
+# --- 무료 공모전 개최 권한 (#414, ADR-0048) ---------------------------------
+
+
+class HostingPermissionAccountOut(Schema):
+    """계정 검색 결과 한 줄 — 지금 개최 권한이 있는지까지 함께 보여준다(운영자가
+    검색 결과에서 바로 켜고 끌 대상을 고를 수 있어야 한다)."""
+
+    user_id: int
+    email: str
+    nickname: str
+    is_granted: bool
+
+
+class SetHostingPermissionIn(Schema):
+    granted: bool
+    reason: str
+
+
+class HostingPermissionChangeOut(Schema):
+    id: int
+    user_id: int
+    user_email: str
+    operator_username: str
+    action: str
+    reason: str
+    changed_at: datetime
+
+
 class QuoteIn(Schema):
     deliverable_type_ids: list[int]
 

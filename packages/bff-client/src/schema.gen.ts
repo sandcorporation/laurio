@@ -2707,6 +2707,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operator/hosting-permissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Hosting Permission Accounts */
+        get: operations["contests_operator_api_list_hosting_permission_accounts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/hosting-permissions/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Hosting Permission Changes */
+        get: operations["contests_operator_api_list_hosting_permission_changes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/hosting-permissions/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search Hosting Permission Accounts */
+        get: operations["contests_operator_api_search_hosting_permission_accounts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/hosting-permissions/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set Hosting Permission Endpoint */
+        post: operations["contests_operator_api_set_hosting_permission_endpoint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/operator/login": {
         parameters: {
             query?: never;
@@ -4954,6 +5022,41 @@ export interface components {
             /** Contests */
             contests: components["schemas"]["ContestOut"][];
         };
+        /**
+         * HostingPermissionAccountOut
+         * @description 계정 검색 결과 한 줄 — 지금 개최 권한이 있는지까지 함께 보여준다(운영자가
+         *     검색 결과에서 바로 켜고 끌 대상을 고를 수 있어야 한다).
+         */
+        HostingPermissionAccountOut: {
+            /** Email */
+            email: string;
+            /** Is Granted */
+            is_granted: boolean;
+            /** Nickname */
+            nickname: string;
+            /** User Id */
+            user_id: number;
+        };
+        /** HostingPermissionChangeOut */
+        HostingPermissionChangeOut: {
+            /** Action */
+            action: string;
+            /**
+             * Changed At
+             * Format: date-time
+             */
+            changed_at: string;
+            /** Id */
+            id: number;
+            /** Operator Username */
+            operator_username: string;
+            /** Reason */
+            reason: string;
+            /** User Email */
+            user_email: string;
+            /** User Id */
+            user_id: number;
+        };
         /** IdentitySubmitIn */
         IdentitySubmitIn: {
             /** Resident Registration Number */
@@ -6491,6 +6594,13 @@ export interface components {
             seller_id: string;
             /** Status */
             status: string;
+        };
+        /** SetHostingPermissionIn */
+        SetHostingPermissionIn: {
+            /** Granted */
+            granted: boolean;
+            /** Reason */
+            reason: string;
         };
         /** SocialLoginIn */
         SocialLoginIn: {
@@ -10538,6 +10648,121 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OperatorDeliverableTypeOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+        };
+    };
+    contests_operator_api_list_hosting_permission_accounts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostingPermissionAccountOut"][];
+                };
+            };
+        };
+    };
+    contests_operator_api_list_hosting_permission_changes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostingPermissionChangeOut"][];
+                };
+            };
+        };
+    };
+    contests_operator_api_search_hosting_permission_accounts: {
+        parameters: {
+            query?: {
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostingPermissionAccountOut"][];
+                };
+            };
+        };
+    };
+    contests_operator_api_set_hosting_permission_endpoint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetHostingPermissionIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostingPermissionAccountOut"];
                 };
             };
             /** @description Not Found */

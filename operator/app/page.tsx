@@ -122,6 +122,15 @@ export default function OperatorHome() {
         </Link>
       </p>
 
+      {/* 무료 공모전 개최 권한 관리(#414, ADR-0048)로 가는 진입점 — 정책·산출물
+          종류 화면과 같은 이유로 두 등급 모두에게 보인다(조회는 일반 등급도
+          된다, 켜고 끄는 것만 상위 등급). */}
+      <p>
+        <Link href="/hosting-permissions" data-testid="hosting-permissions-nav-link">
+          무료 공모전 개최 권한
+        </Link>
+      </p>
+
       <section data-testid="operator-home-queues">
         <QueueCard
           testId="queue-appeals-pending"
