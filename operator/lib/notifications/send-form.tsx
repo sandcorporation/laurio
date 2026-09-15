@@ -1,0 +1,187 @@
+"use client";
+
+// 「운영팀 알림」 작성 화면(#418) — 검색 → 작성 → 확인 → 보내기. 한 번에 한 사람에게만
+// 보낸다(CONTEXT.md 「운영자 알림」 User Story 10) — 그래서 받는 사람을 고르고 나면
+// 검색창이 사라지고 그 한 사람만 남는다.
+import { useState } from "react";
+import type { FormEvent } from "react";
+
+import { searchRecipients, sendOperatorNotice } from "./actions";
+import type { Recipient } from "./types";
+
+type Step = "search" | "compose" | "confirm";
+
+export function SendOperatorNoticeForm({
+  onSent,
+  onSessionExpired,
+}: {
+  onSent: () => void;
+  onSessionExpired: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [results, setResults] = useState<Recipient[]>([]);
+  const [selected, setSelected] = useState<Recipient | null>(null);
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [step, setStep] = useState<Step>("search");
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+
+  async function handleSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSearchError(null);
+    setSearching(true);
+    const result = await searchRecipients(query);
+    setSearching(false);
+
+    if (!result.ok) {
+      if (result.code === "unauthorized") {
+        onSessionExpired();
+        return;
+      }
+      setSearchError(result.detail);
+      return;
+    }
+    setResults(result.data);
+  }
+
+  function selectRecipient(recipient: Recipient) {
+    setSelected(recipient);
+    setResults([]);
+    setStep("compose");
+  }
+
+  function resetToSearch() {
+    setSelected(null);
+    setTitle("");
+    setBody("");
+    setStep("search");
+  }
+
+  function handleConfirm(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setStep("confirm");
+  }
+
+  async function handleSend() {
+    if (!selected) return;
+    setSendError(null);
+    setSending(true);
+    const result = await sendOperatorNotice({ recipientId: selected.id, title, body });
+    setSending(false);
+
+    if (!result.ok) {
+      if (result.code === "unauthorized") {
+        onSessionExpired();
+        return;
+      }
+      setSendError(result.detail);
+      return;
+    }
+
+    resetToSearch();
+    onSent();
+  }
+
+  return (
+    <section data-testid="send-operator-notice-section">
+      <h2>운영팀 알림 보내기</h2>
+
+      {step === "search" && (
+        <form onSubmit={handleSearch} data-testid="operator-notice-search-form">
+          <label>
+            받는 사람 검색(이메일 또는 이름)
+            <input
+              data-testid="operator-notice-search-query"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </label>
+          <button type="submit" data-testid="operator-notice-search-submit" disabled={searching}>
+            {searching ? "검색 중..." : "검색"}
+          </button>
+          {searchError && (
+            <p role="alert" data-testid="operator-notice-search-error">
+              {searchError}
+            </p>
+          )}
+          {results.length > 0 && (
+            <ul data-testid="operator-notice-search-results">
+              {results.map((recipient) => (
+                <li key={recipient.id}>
+                  {recipient.display_name} ({recipient.email})
+                  <button
+                    type="button"
+                    data-testid={`operator-notice-select-${recipient.id}`}
+                    onClick={() => selectRecipient(recipient)}
+                  >
+                    선택
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </form>
+      )}
+
+      {step === "compose" && selected && (
+        <form onSubmit={handleConfirm} data-testid="operator-notice-compose-form">
+          <p data-testid="operator-notice-selected-recipient">
+            받는 사람: {selected.display_name} ({selected.email})
+          </p>
+          <button type="button" data-testid="operator-notice-change-recipient" onClick={resetToSearch}>
+            다른 사람 선택
+          </button>
+          <label>
+            제목
+            <input
+              data-testid="operator-notice-title"
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+            />
+          </label>
+          <label>
+            본문
+            <textarea
+              data-testid="operator-notice-body"
+              value={body}
+              onChange={(event) => setBody(event.target.value)}
+            />
+          </label>
+          <button type="submit" data-testid="operator-notice-review" disabled={title.trim() === ""}>
+            확인
+          </button>
+        </form>
+      )}
+
+      {step === "confirm" && selected && (
+        <div data-testid="operator-notice-confirm">
+          <p>다음 내용으로 보냅니다 — 보낸 뒤에는 고칠 수 없습니다.</p>
+          <p data-testid="operator-notice-confirm-recipient">
+            받는 사람: {selected.display_name} ({selected.email})
+          </p>
+          <p data-testid="operator-notice-confirm-title">제목: {title}</p>
+          {body && <p data-testid="operator-notice-confirm-body">본문: {body}</p>}
+          <button type="button" data-testid="operator-notice-back-to-compose" onClick={() => setStep("compose")}>
+            수정
+          </button>
+          <button
+            type="button"
+            data-testid="operator-notice-send"
+            onClick={handleSend}
+            disabled={sending}
+          >
+            {sending ? "보내는 중..." : "보내기"}
+          </button>
+          {sendError && (
+            <p role="alert" data-testid="operator-notice-send-error">
+              {sendError}
+            </p>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}

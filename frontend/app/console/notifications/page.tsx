@@ -201,6 +201,9 @@ function NotificationRow({
   onMarkRead: () => void;
 }) {
   const wasUnread = notification.read_at === null;
+  const [open, setOpen] = useState(false);
+  // 운영팀 알림(#418)만 본문을 담는다 — 다른 유형은 목록 줄 하나가 전부다.
+  const hasBody = notification.notification_type === "operator_notice";
 
   return (
     <li
@@ -210,7 +213,19 @@ function NotificationRow({
       className="flex flex-col gap-1.5 border-b border-rule py-4"
     >
       <div className="flex items-start justify-between gap-3">
-        <p className="text-sm leading-relaxed">{describeNotification(notification)}</p>
+        <p className="text-sm leading-relaxed">
+          {describeNotification(notification)}
+          {hasBody && (
+            <button
+              type="button"
+              onClick={() => setOpen((current) => !current)}
+              data-testid={`notification-toggle-body-${notification.id}`}
+              className="ml-2 text-xs text-ink/60 underline"
+            >
+              {open ? "접기" : "열어보기"}
+            </button>
+          )}
+        </p>
         {wasUnread && (
           <div className="flex shrink-0 items-center gap-2">
             <Badge tone="attention">
@@ -227,6 +242,14 @@ function NotificationRow({
           </div>
         )}
       </div>
+      {hasBody && open && notification.body && (
+        <p
+          className="whitespace-pre-wrap text-sm text-ink/80"
+          data-testid={`notification-body-${notification.id}`}
+        >
+          {notification.body}
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-2 text-xs text-ink/60">
         <span className="font-mono">{formatDateTime(notification.created_at)}</span>
         <span data-testid={`notification-status-${notification.id}`}>

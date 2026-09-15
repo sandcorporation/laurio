@@ -37,6 +37,8 @@ export function describeNotification(notification: NotificationOut): string {
       const message = typeof context.message === "string" ? context.message : "";
       return message || "지급 절차에 확인이 필요합니다 — codemit에서 확인해주세요.";
     }
+    case "operator_notice":
+      return notification.title ? `운영팀 알림: ${notification.title}` : "운영팀 알림이 도착했습니다.";
     // 강의실 알림 둘(#301, #303)은 여기 나타나지 않는다 — 백엔드 `GET
     // /notifications/me`의 기본값(공개 앱이 쓰는 값)이 그 유형들을 아예
     // 빼고 준다(#345, `backend/notifications/api.py`의 `_scope_by_classroom`).
@@ -52,9 +54,11 @@ export const STATUS_LABELS: Record<string, string> = {
   sent: "발송됨",
   failed: "발송 실패(전 채널 소진)",
   blocked_no_opt_in: "옵트인 없음으로 차단",
-  // `not_dispatched`(강의실 알림 전용 종결 상태, #301)는 여기 없다 — 그
-  // 유형들이 이 목록에 도달하지 않으므로(위 `describeNotification` 주석,
-  // #345) 이 화면에서는 이 상태값 자체를 만날 일이 없다.
+  // 강의실 알림(#301)과 운영팀 알림(#418) 둘 다 internal-only라 이 상태로
+  // 끝난다 — 강의실 유형은 이 목록에 도달하지 않지만(#345), 운영팀 알림은
+  // 도달하므로(공모전 쪽 알림이라 CLASSROOM_NOTIFICATION_TYPES에 없다) 여기
+  // 라벨이 있어야 화면에 원문 상태값이 그대로 노출되지 않는다.
+  not_dispatched: "앱 안에서만 전달됨",
 };
 
 export const CHANNEL_LABELS: Record<string, string> = {

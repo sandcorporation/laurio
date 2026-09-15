@@ -17,7 +17,12 @@ from accounts.middleware import jwt_auth
 from core.auth import InternalAuth
 from core.clock import Clock
 
-from .models import CLASSROOM_NOTIFICATION_TYPES, Notification, NotificationDispatch, NotificationType
+from .models import (
+    CLASSROOM_NOTIFICATION_TYPES,
+    Notification,
+    NotificationDispatch,
+    NotificationType,
+)
 from .services import create_notification
 
 router = Router(tags=["internal", "notifications"], auth=InternalAuth())
@@ -72,6 +77,14 @@ class NotificationOut(Schema):
     # 수신자의 열람 여부(#230) — 발송 측 `status`와 독립인 축이다(위 `Notification.
     # read_at` 필드 독스트링). `null`이면 아직 안 읽었다는 뜻이다.
     read_at: str | None
+    # 운영팀 알림(#418) 전용 — 그 외 유형은 전부 `null`/`False`다. `context`에
+    # 두지 않는 이유는 `notifications.models.OperatorNotice`의 독스트링과 같다.
+    # `has_image`만 있고 이미지 자체(object_key·서명 주소)는 여기 없다(#419
+    # AC "목록 응답에는 이미지 유무만 싣는다") — 이미지는 열 때 별도 요청으로
+    # 받는다.
+    title: str | None = None
+    body: str | None = None
+    has_image: bool = False
 
 
 class UnreadCountOut(Schema):
@@ -122,6 +135,18 @@ def _scope_by_classroom(qs, classroom_only: bool):
     return qs.exclude(notification_type__in=CLASSROOM_NOTIFICATION_TYPES)
 
 
+def _operator_notice_fields(notification: Notification) -> dict:
+    """운영팀 알림(#418)의 제목·본문·이미지 유무 — 그 외 유형은 전부 기본값.
+
+    이미지(#419)가 아직 없던 시절에는 `has_image`가 항상 `False`다.
+    """
+
+    notice = getattr(notification, "operator_notice", None)
+    if notice is None:
+        return {"title": None, "body": None, "has_image": False}
+    return {"title": notice.title, "body": notice.body, "has_image": False}
+
+
 def _serialize(notification: Notification, *, for_recipient: bool = False) -> dict:
     """`for_recipient=True`면 `public_router`(수신자 본인)용 — 채널별 시도
     시각·결과(ADR-0009가 요구하는 이력)는 그대로 두고 `failure_reason`만
@@ -152,6 +177,7 @@ def _serialize(notification: Notification, *, for_recipient: bool = False) -> di
             for d in notification.dispatches.all()
         ],
         "read_at": notification.read_at.isoformat() if notification.read_at else None,
+        **_operator_notice_fields(notification),
     }
 
 
@@ -196,9 +222,9 @@ def list_my_notifications(
 
     notifications = Notification.objects.filter(recipient=request.auth_user)
     notifications = _scope_by_classroom(notifications, classroom_only)
-    notifications = notifications.prefetch_related("dispatches").order_by("-created_at")[
-        offset : offset + limit
-    ]
+    notifications = notifications.select_related("operator_notice").prefetch_related(
+        "dispatches"
+    ).order_by("-created_at")[offset : offset + limit]
     return [_serialize(n, for_recipient=True) for n in notifications]
 
 

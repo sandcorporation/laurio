@@ -46,6 +46,13 @@ class NotificationType(models.TextChoices):
     # rejected`) — 밀린 제출이 몇 건이든, tick이 몇 번을 돌든 상태 전이 한
     # 번에 하나다. 강사가 키를 고쳤다가 그 키도 거절당하면 그때 다시 간다.
     CLASSROOM_SCORING_KEY_REJECTED = "classroom_scoring_key_rejected", "강의실 채점 키 거부"
+    # Operator 가 한 사용자에게 직접 보내는 알림이다(#418, CONTEXT.md 「운영자
+    # 알림」) — 무료 공모전 수상자에게 개최자 보상(기프티콘 등)을 전하는 것이
+    # 첫 쓰임이다. 제목·본문·(선택) 이미지는 이 앱의 `OperatorNotice`가 담고,
+    # 이 유형 자체는 어휘만 정의한다(다른 강의실 유형과 같은 분리 원칙). 앱
+    # 안에서만 보이고 문자 채널로 나가지 않으며(`is_internal_only`), 강의실
+    # 알림이 아니라 `CLASSROOM_NOTIFICATION_TYPES`에 넣지 않는다.
+    OPERATOR_NOTICE = "operator_notice", "운영팀 알림"
 
 
 #: 강의실 제품이 만드는 알림 유형 전부(#304) — 클래스 알림 화면·종 배지가 이
@@ -154,6 +161,17 @@ NOTIFICATION_TYPE_FLAGS: dict[str, dict[str, bool]] = {
     # 필요 없다. 강의실 알림은 전부 서비스 안에서만이라는 같은 규칙을
     # 받는다(#301, #356).
     NotificationType.CLASSROOM_SCORING_KEY_REJECTED: {
+        "is_transactional": True,
+        "is_promotional": False,
+        "is_quiet_hours_exempt": False,
+        "is_internal_only": True,
+    },
+    # Operator 가 사람 하나에게 보내는 거래성 알림이다(#418) — 전화번호가 없는
+    # 사람(본인확인을 하지 않은 사람)에게도 닿아야 하므로 애초에 문자 채널을
+    # 시도하지 않는다(`is_internal_only`). 광고성이 아니므로 옵트인이 필요
+    # 없고, 야간에도 앱 안에서는 바로 보인다(발송 자체가 없으니 미룰 것도
+    # 없다 — 다른 internal_only 유형과 같은 이유).
+    NotificationType.OPERATOR_NOTICE: {
         "is_transactional": True,
         "is_promotional": False,
         "is_quiet_hours_exempt": False,
@@ -312,3 +330,37 @@ class NotificationDispatch(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover - admin 편의용
         return f"NotificationDispatch({self.notification_id}, {self.channel}, {self.status})"
+
+
+class OperatorNotice(models.Model):
+    """`NotificationType.OPERATOR_NOTICE` 한 건의 제목·본문·보낸 운영자(#418).
+
+    이 값들을 `Notification.context`(다른 유형들이 문구 렌더링에 쓰는 자리)에
+    두지 않는 이유는 하나다 — `context`는 그대로 수신자 앱에 노출되는데,
+    `APPEAL_RULED`가 심판자 이름을 담지 않는 것과 같은 이유로 **보낸 운영자
+    신원은 참가자에게 보이면 안 된다.** 그래서 신원이 필요한 값(`sent_by`)은
+    별도 테이블에 두고, `notifications.api._serialize`가 제목·본문·이미지
+    유무만 골라 수신자 응답에 얹는다.
+
+    보낸 뒤 고치거나 지울 API 가 없다(append-only) — 잘못 보냈으면 새 알림으로
+    바로잡는다(CONTEXT.md 「운영자 알림」).
+    """
+
+    notification = models.OneToOneField(
+        Notification, on_delete=models.CASCADE, related_name="operator_notice"
+    )
+    title = models.CharField(max_length=200)
+    body = models.TextField(blank=True)
+    # PROTECT — Operator 계정이 지워져도(비활성화는 삭제가 아니지만) 이 이력에서
+    # "누가 보냈는가"가 사라지면 안 된다. `policies.models.PolicyChange.operator`와
+    # 같은 감사 규율(ADR-0023).
+    sent_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+
+    class Meta:
+        verbose_name = "운영팀 알림"
+        verbose_name_plural = "운영팀 알림"
+
+    def __str__(self) -> str:  # pragma: no cover - admin 편의용
+        return f"OperatorNotice({self.notification_id}, {self.title!r})"

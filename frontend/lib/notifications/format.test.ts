@@ -34,12 +34,27 @@ describe("describeNotification", () => {
     expect(text).toContain("알고리즘 공모전");
     expect(text).toContain("채점이 완료됐습니다");
   });
+
+  it("운영팀 알림은 제목을 그대로 보여준다(#418)", () => {
+    const text = describeNotification(
+      row({ notification_type: "operator_notice", title: "기프티콘을 보내드립니다" }),
+    );
+    expect(text).toContain("운영팀 알림");
+    expect(text).toContain("기프티콘을 보내드립니다");
+  });
+
+  it("제목이 없는 운영팀 알림도 뭉개지지 않는다", () => {
+    const text = describeNotification(row({ notification_type: "operator_notice", title: null }));
+    expect(text).toBe("운영팀 알림이 도착했습니다.");
+  });
 });
 
 describe("STATUS_LABELS", () => {
-  // #345 — 강의실 전용 상태값("not_dispatched")은 이 목록에 없다. 그 유형이
-  // 애초에 이 화면에 도달하지 않으므로 문구도 필요 없다.
-  it("강의실 전용 상태값이 없다", () => {
-    expect(STATUS_LABELS.not_dispatched).toBeUndefined();
+  // #418 — 운영팀 알림도 internal-only라 `not_dispatched`로 끝나고, 강의실
+  // 유형과 달리 이 화면에 실제로 도달한다(공모전 쪽 알림이라 강의실
+  // 목록에서는 빠지지만 공개 앱 목록에는 남는다) — 그래서 원문 상태값이
+  // 그대로 노출되지 않게 라벨이 있어야 한다.
+  it("운영팀 알림의 상태값에 사람이 읽는 라벨이 있다", () => {
+    expect(STATUS_LABELS.not_dispatched).toBe("앱 안에서만 전달됨");
   });
 });
