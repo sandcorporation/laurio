@@ -976,7 +976,7 @@ export default function EditProblemPage() {
 
         <div
           data-testid="edit-problem-preview-panel"
-          className={tab === "preview" ? "flex max-w-[960px] flex-col gap-4" : "hidden"}
+          className={tab === "preview" ? "flex w-full flex-col gap-4" : "hidden"}
         >
           <div className="border border-rule bg-surface p-3 text-[12.5px] leading-relaxed text-ink/60">
             <b className="font-medium text-ink">참여자가 보는 화면 그대로입니다.</b> 아직 저장하지
