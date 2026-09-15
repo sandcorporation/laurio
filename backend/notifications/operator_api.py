@@ -1,20 +1,22 @@
-"""운영팀 알림 — 운영자 API (#418, CONTEXT.md 「운영자 알림」).
+"""운영팀 알림 — 운영자 API (#418/#419, CONTEXT.md 「운영자 알림」).
 
 이 라우터는 기본이 거부다 — `accounts.operator_api.router`와 같은 이유로
-`OperatorAuth`가 라우터 전체에 걸려 있다. 세 엔드포인트가 화면의 「검색 →
-작성 → 확인 → 보내기, 그리고 이력」을 지원한다: 계정 검색, 보내기, 발송
-이력 목록.
+`OperatorAuth`가 라우터 전체에 걸려 있다. 화면의 「검색 → 작성(이미지 포함) →
+확인 → 보내기, 그리고 이력」을 지원한다: 계정 검색, 이미지 업로드 주소 발급,
+보내기, 발송 이력 목록, 보낸 운영자 자신의 이미지 다시 보기.
 """
 
 from __future__ import annotations
 
 from django.contrib.auth import get_user_model
 from django.db.models import Q
+from django.shortcuts import get_object_or_404
 from ninja import Field, Router, Schema
 from ninja.errors import HttpError
 
 from core.operator_auth import OperatorAuth
 
+from . import operator_notice_images
 from .models import OperatorNotice
 from .operator_notices import send_operator_notice
 
@@ -71,10 +73,42 @@ def search_recipients(request, q: str = ""):
     return [RecipientOut(id=u.id, email=u.email, display_name=_display_name(u)) for u in users]
 
 
+class ImageUploadUrlOut(Schema):
+    object_key: str
+    upload_url: str
+    method: str
+    fields: dict[str, str] = Field(default_factory=dict)
+    expires_at: str
+
+
+class ImageUploadUrlIn(Schema):
+    content_type: str
+
+
+@operator_router.post(
+    "/notifications/operator-notices/image-upload-url", response=ImageUploadUrlOut
+)
+def request_image_upload_url(request, payload: ImageUploadUrlIn):
+    """받는 사람·제목을 정하기 전에도 부를 수 있다 — 작성 화면이 이미지부터
+    올린다(#419). 형식이 맞지 않으면 422(`operator_notice_images.
+    request_upload_url`)."""
+
+    presigned = operator_notice_images.request_upload_url(request.auth.id, payload.content_type)
+    return ImageUploadUrlOut(
+        object_key=presigned.object_key,
+        upload_url=presigned.url,
+        method=presigned.method,
+        fields=presigned.fields,
+        expires_at=presigned.expires_at.isoformat(),
+    )
+
+
 class SendOperatorNoticeIn(Schema):
     recipient_id: int
     title: str = Field(min_length=1, max_length=200)
     body: str = ""
+    # presigned POST로 실제 바이트가 이미 올라간 뒤의 object_key(선택, #419).
+    image_object_key: str = ""
 
 
 class OperatorNoticeOut(Schema):
@@ -98,7 +132,7 @@ def _serialize_operator_notice(notice: OperatorNotice) -> OperatorNoticeOut:
         sent_by=notice.sent_by.username,
         created_at=notification.created_at.isoformat(),
         read_at=notification.read_at.isoformat() if notification.read_at else None,
-        has_image=False,
+        has_image=bool(notice.image_object_key),
     )
 
 
@@ -107,14 +141,25 @@ def send_notice(request, payload: SendOperatorNoticeIn):
     """제목·본문을 받는 사람 한 명에게 보낸다. 받는 사람이 없으면 422다(AC) —
     존재하지 않는 계정으로 보내려는 요청 자체가 틀린 입력이라, 자원을 못
     찾았다는 404가 아니라 입력 검증 실패로 답한다. 빈 제목은 스키마의
-    `Field(min_length=1)`이 같은 422로 걸러낸다."""
+    `Field(min_length=1)`이 같은 422로 걸러낸다.
+
+    `image_object_key`가 이 요청을 보낸 운영자의 업로드 응답에서 나온 것이
+    아니면 422다(#419) — 남의 업로드 키를 추측해 붙이는 경로를 막는다."""
 
     recipient = get_user_model().objects.filter(pk=payload.recipient_id, is_staff=False).first()
     if recipient is None:
         raise HttpError(422, "받는 사람을 찾을 수 없습니다.")
 
+    image_object_key = payload.image_object_key
+    if image_object_key:
+        operator_notice_images.assert_owned_by(image_object_key, request.auth.id)
+
     notification = send_operator_notice(
-        sender=request.auth, recipient=recipient, title=payload.title, body=payload.body
+        sender=request.auth,
+        recipient=recipient,
+        title=payload.title,
+        body=payload.body,
+        image_object_key=image_object_key,
     )
     return _serialize_operator_notice(notification.operator_notice)
 
@@ -131,3 +176,28 @@ def list_operator_notices(request, limit: int = 50, offset: int = 0):
         .order_by("-notification__created_at")[offset : offset + limit]
     )
     return [_serialize_operator_notice(notice) for notice in notices]
+
+
+class ImageDownloadOut(Schema):
+    download_url: str
+    expires_at: str
+
+
+@operator_router.get(
+    "/notifications/operator-notices/{int:notification_id}/image-download",
+    response=ImageDownloadOut,
+)
+def download_operator_notice_image_as_sender(request, notification_id: int):
+    """이력에서 보낸 이미지를 다시 연다(#419 User Story 8) — **보낸 운영자
+    본인**만 열 수 있다, 다른 운영자는 404다(존재 자체를 알려주지 않는다)."""
+
+    notice = get_object_or_404(
+        OperatorNotice, notification_id=notification_id, sent_by=request.auth
+    )
+    if not notice.image_object_key:
+        raise HttpError(404, "이미지가 없습니다.")
+
+    presigned = operator_notice_images.request_download_url(notice.image_object_key)
+    return ImageDownloadOut(
+        download_url=presigned.url, expires_at=presigned.expires_at.isoformat()
+    )

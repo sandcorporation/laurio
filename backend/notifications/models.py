@@ -357,6 +357,12 @@ class OperatorNotice(models.Model):
     sent_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
     )
+    # 이미지 한 장(선택, #419) — **비공개 버킷**의 객체 키만 담는다. 공개
+    # 주소를 저장하지 않는다(ADR-0032의 공개 이미지 버킷과 다른 버킷, 공모전
+    # 이미지와 달리 기프티콘 바코드처럼 주소만으로 새면 안 되는 값이라서다).
+    # 다운로드 주소는 받는 사람·보낸 운영자에게만 열 때마다 짧게 발급한다
+    # (`notifications.operator_api`·`notifications.api`).
+    image_object_key = models.CharField(max_length=255, blank=True)
 
     class Meta:
         verbose_name = "운영팀 알림"

@@ -19,6 +19,7 @@ export interface SendOperatorNoticeInput {
   recipientId: number;
   title: string;
   body: string;
+  imageObjectKey?: string;
 }
 
 export function sendOperatorNotice(
@@ -28,9 +29,23 @@ export function sendOperatorNotice(
     recipient_id: input.recipientId,
     title: input.title,
     body: input.body,
+    image_object_key: input.imageObjectKey ?? "",
   });
 }
 
 export function fetchOperatorNotices(): Promise<ApiResult<OperatorNotice[]>> {
   return bffClient.get<OperatorNotice[]>("/api/backend/operator/notifications/operator-notices");
+}
+
+interface ImageDownloadResponse {
+  download_url: string;
+  expires_at: string;
+}
+
+export function fetchOperatorNoticeImageUrl(
+  notificationId: number,
+): Promise<ApiResult<ImageDownloadResponse>> {
+  return bffClient.get<ImageDownloadResponse>(
+    `/api/backend/operator/notifications/operator-notices/${notificationId}/image-download`,
+  );
 }

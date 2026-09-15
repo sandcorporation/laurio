@@ -12,11 +12,13 @@ core 의 내부 틱 엔드포인트와 같은 `InternalAuth` 를 쓴다 — 둘 
 from django.contrib.auth import get_user_model
 from django.shortcuts import get_object_or_404
 from ninja import Router, Schema
+from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
 from core.auth import InternalAuth
 from core.clock import Clock
 
+from . import operator_notice_images
 from .models import (
     CLASSROOM_NOTIFICATION_TYPES,
     Notification,
@@ -136,15 +138,21 @@ def _scope_by_classroom(qs, classroom_only: bool):
 
 
 def _operator_notice_fields(notification: Notification) -> dict:
-    """운영팀 알림(#418)의 제목·본문·이미지 유무 — 그 외 유형은 전부 기본값.
+    """운영팀 알림(#418/#419)의 제목·본문·이미지 유무 — 그 외 유형은 전부 기본값.
 
-    이미지(#419)가 아직 없던 시절에는 `has_image`가 항상 `False`다.
+    이미지 객체 키 자체는 여기 없다 — 목록 응답에는 유무만 싣고(#419 AC),
+    실제 다운로드 주소는 `POST /notifications/{id}/image-download`로 열 때마다
+    따로 받는다.
     """
 
     notice = getattr(notification, "operator_notice", None)
     if notice is None:
         return {"title": None, "body": None, "has_image": False}
-    return {"title": notice.title, "body": notice.body, "has_image": False}
+    return {
+        "title": notice.title,
+        "body": notice.body,
+        "has_image": bool(notice.image_object_key),
+    }
 
 
 def _serialize(notification: Notification, *, for_recipient: bool = False) -> dict:
@@ -335,6 +343,31 @@ def mark_many_read(request, payload: MarkManyReadIn):
     if marked_count and marked_ids_include_classroom:
         _publish_classroom_notification_changed(request.auth_user.id)
     return MarkAllReadOut(marked_count=marked_count)
+
+
+class ImageDownloadOut(Schema):
+    download_url: str
+    expires_at: str
+
+
+@public_router.post(
+    "/{int:notification_id}/image-download", response=ImageDownloadOut, auth=jwt_auth
+)
+def download_operator_notice_image(request, notification_id: int):
+    """운영팀 알림에 첨부된 이미지를 연다(#419) — **받는 사람 본인**만.
+    남의 알림 id는 `mark_one_read`와 같은 이유로 존재하지 않는 것처럼 404다.
+    발급 주소는 짧게(분 단위) 유효하고, 목록 응답에는 절대 싣지 않는다(위
+    `NotificationOut.has_image` 독스트링)."""
+
+    notification = get_object_or_404(Notification, pk=notification_id, recipient=request.auth_user)
+    notice = getattr(notification, "operator_notice", None)
+    if notice is None or not notice.image_object_key:
+        raise HttpError(404, "이미지가 없습니다.")
+
+    presigned = operator_notice_images.request_download_url(notice.image_object_key)
+    return ImageDownloadOut(
+        download_url=presigned.url, expires_at=presigned.expires_at.isoformat()
+    )
 
 
 def _publish_classroom_notification_changed(recipient_id: int) -> None:
