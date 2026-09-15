@@ -87,7 +87,7 @@ def _free_brief(category, deliverable_type, *, title="무료 공모전", deadlin
         "deliverable_type_ids": [deliverable_type.id],
         "description": "테스트용 무료 공모전입니다.",
         "deadline_at": deadline_at.isoformat(),
-        "requirements": [],
+        "requirements": [{"text": "할 일을 추가·완료할 수 있다", "grade": "required"}],
     }
 
 
@@ -124,6 +124,29 @@ def test_own_hosting_permission_reflects_grant(client, category, landing_type):
 
     assert response.status_code == 200, response.content
     assert response.json()["is_granted"] is True
+
+
+def test_free_contest_without_requirements_cannot_be_published(client, category, landing_type):
+    """체크리스트가 없으면 채점이 볼 기준이 없다 — 무료 공모전도 요구사항을 하나
+    이상 적어야 공개된다(2026-09-15 걷기에서 0개로 공개되던 것을 막았다)."""
+
+    user = _hosted_user(client, "free-host-empty-req")
+    root = _operator_client("root-free-host-empty-req")
+    _grant(root, user["user_id"])
+
+    brief = _free_brief(category, landing_type)
+    brief["requirements"] = []
+    draft = client.post(
+        f"{CONTESTS_URL}/free", data=brief, content_type="application/json", **_auth_header(user["access"])
+    ).json()
+
+    publish_resp = client.post(
+        f"{CONTESTS_URL}/{draft['id']}/publish",
+        content_type="application/json",
+        **_auth_header(user["access"]),
+    )
+    assert publish_resp.status_code == 422, publish_resp.content
+    assert client.get(f"{CONTESTS_URL}/{draft['id']}", **_auth_header(user["access"])).json()["status"] == "draft"
 
 
 def test_own_hosting_permission_requires_login(client):
@@ -199,7 +222,7 @@ def test_paid_contest_is_not_flagged_free(client, category, landing_type):
             "deliverable_type_ids": [landing_type.id],
             "prize": 1_000_000,
             "deadline_at": (timezone.now() + timedelta(days=7)).isoformat(),
-            "requirements": [],
+            "requirements": [{"text": "할 일을 추가·완료할 수 있다", "grade": "required"}],
         },
         content_type="application/json",
         **_auth_header(user["access"]),
@@ -353,7 +376,7 @@ def test_cannot_publish_a_paid_draft_through_the_free_endpoint(client, category,
             "deliverable_type_ids": [landing_type.id],
             "prize": 1_000_000,
             "deadline_at": (timezone.now() + timedelta(days=7)).isoformat(),
-            "requirements": [],
+            "requirements": [{"text": "할 일을 추가·완료할 수 있다", "grade": "required"}],
         },
         content_type="application/json",
         **_auth_header(user["access"]),

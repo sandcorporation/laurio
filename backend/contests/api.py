@@ -429,6 +429,11 @@ def publish_free_contest(request: HttpRequest, contest_id: int):
 
     _require_hosting_permission(request.auth_user)
 
+    # 체크리스트가 없으면 채점이 볼 기준이 없다 — 유료 경로는 결제 전에 요구사항
+    # 단계를 거치지만 이 경로는 버튼 하나라 여기서 막는다.
+    if not contest.requirements.exists():
+        raise HttpError(422, "요구사항을 하나 이상 적어야 공개할 수 있습니다.")
+
     transitioned = claim_contest_transition("publish-free", contest.pk)
     if not transitioned:
         # 동시에 들어온 다른 요청이 먼저 이겼다 — 정상 경로에서는 도달하지

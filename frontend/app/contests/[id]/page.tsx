@@ -215,7 +215,8 @@ export default async function ContestDetailPage({ params }: { params: Promise<Pa
 
         {contest.description && (
           <section className="flex flex-col gap-2 border-b border-rule pb-6">
-            <h2 className="text-sm font-medium">요구사항</h2>
+            {/* 무료 공모전의 설명 칸은 개최 폼에서 「설명 · 보상 안내」로 받는다 — 같은 이름으로 보인다. */}
+            <h2 className="text-sm font-medium">{contest.is_free ? "설명 · 보상 안내" : "요구사항"}</h2>
             <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink/80">
               {contest.description}
             </p>

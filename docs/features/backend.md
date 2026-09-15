@@ -58,7 +58,7 @@ fail-closed 라 구멍은 아니지만 원인을 찾기 어렵다.
 | `POST /api/contests/quote` | 개최 견적(유료) |
 | `GET /api/contests/free/hosting-permission` | 내 무료 공모전 개최 권한(#415) |
 | `POST /api/contests/free` | 무료 개최(#415) — 본인확인·결제 없이, 개최 권한만 |
-| `POST /api/contests/{id}/publish` | 무료 공모전 공개(#415) — 결제 대신 개최 권한이 연다 |
+| `POST /api/contests/{id}/publish` | 무료 공모전 공개(#415) — 결제 대신 개최 권한이 연다, 요구사항이 없으면 422 |
 | `GET /api/contests/mine` | 내가 연 것 |
 | `POST`·`PATCH`·`DELETE .../requirements[/{id}]` | 요구사항 |
 | `.../requirement-chat/messages` | 요구사항을 LLM 과 함께 다듬는다 |

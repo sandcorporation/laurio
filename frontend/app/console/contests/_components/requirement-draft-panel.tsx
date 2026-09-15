@@ -344,7 +344,9 @@ export function RequirementDraftPanel({
               className="text-center text-xs leading-relaxed text-ink/50"
               data-testid="grill-free-publish-notice"
             >
-              본인확인·결제 없이 바로 공개됩니다
+              {requirements.length === 0
+                ? "요구사항을 하나 이상 적어야 공개할 수 있습니다"
+                : "본인확인·결제 없이 바로 공개됩니다"}
             </p>
             {publishError && (
               <ErrorNote>
@@ -354,7 +356,7 @@ export function RequirementDraftPanel({
             <button
               type="button"
               onClick={() => void onPublish?.()}
-              disabled={publishing || !onPublish}
+              disabled={publishing || !onPublish || requirements.length === 0}
               data-testid="grill-publish-free-contest"
               className={`mt-1 ${buttonClass("primary", "sm")}`}
             >
