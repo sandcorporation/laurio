@@ -8,11 +8,95 @@
 // Tailwind 의 기본 초기화가 제목·목록의 브라우저 기본 모양을 지우므로 태그마다 크기와
 // 간격을 여기서 다시 준다 — 예전에는 제목에 굵기만 줘서 모든 제목이 본문과 같은
 // 크기였다(2026-09-15).
-import type { ComponentPropsWithoutRef } from "react";
+import type { Element } from "hast";
+import { createContext, useContext, useEffect, useRef, useState, type ComponentPropsWithoutRef, type KeyboardEvent } from "react";
 import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 import { toJsxRuntime, type Components } from "hast-util-to-jsx-runtime";
 
+import { codeTextOf, copyToClipboard } from "@/lib/rendering/code-copy";
 import { parseProblemDescription } from "@/lib/rendering/problem-description";
+
+// 코드블록(`pre > code`) 안의 code 는 pre 가 복사 버튼을 맡는다 — 언어 표시가 없는
+// 코드블록은 className 으로 인라인 코드와 가를 수 없어 이 문맥으로 가른다.
+const InsideCodeBlock = createContext(false);
+
+type CopyState = "idle" | "copied" | "failed";
+
+/** 누르면 복사하고 2초 동안 결과를 보인 뒤 원래대로 돌아간다. */
+function useCopy(text: string) {
+  const [state, setState] = useState<CopyState>("idle");
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+  async function copy() {
+    const ok = await copyToClipboard(text);
+    setState(ok ? "copied" : "failed");
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setState("idle"), 2000);
+  }
+  return { state, copy };
+}
+
+type WithNode<T extends "pre" | "code"> = ComponentPropsWithoutRef<T> & { node?: Element };
+
+function CodeBlock({ node, ...props }: WithNode<"pre">) {
+  const { state, copy } = useCopy(node ? codeTextOf(node) : "");
+  return (
+    <div className="relative my-2">
+      <button
+        type="button"
+        onClick={() => void copy()}
+        data-testid="code-block-copy"
+        className="absolute top-1.5 right-1.5 border border-rule bg-surface px-2 py-0.5 text-[11.5px] text-ink/70 hover:text-ink"
+      >
+        {state === "copied" ? "복사됨" : state === "failed" ? "복사 실패" : "복사"}
+      </button>
+      <InsideCodeBlock.Provider value={true}>
+        <pre
+          {...props}
+          className="overflow-x-auto border border-rule bg-paper px-3 pt-9 pb-3 font-mono text-[12.5px] leading-relaxed [&>code]:border-0 [&>code]:bg-transparent [&>code]:p-0"
+        />
+      </InsideCodeBlock.Provider>
+    </div>
+  );
+}
+
+function Code({ node, className, ...props }: WithNode<"code">) {
+  const insideBlock = useContext(InsideCodeBlock);
+  const text = node ? codeTextOf(node) : "";
+  const { state, copy } = useCopy(text);
+  if (insideBlock) return <code {...props} className={className} />;
+  function onKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      void copy();
+    }
+  }
+  return (
+    <span className="relative inline-block">
+      <code
+        {...props}
+        role="button"
+        tabIndex={0}
+        title="눌러서 복사"
+        aria-label={`${text} 복사`}
+        onClick={() => void copy()}
+        onKeyDown={onKeyDown}
+        data-testid="inline-code-copy"
+        className="cursor-pointer border border-rule bg-paper px-1 py-0.5 font-mono text-[0.9em] hover:border-ink/40"
+      />
+      {state !== "idle" && (
+        <span
+          role="status"
+          className="pointer-events-none absolute bottom-full left-0 mb-1 whitespace-nowrap border border-rule bg-surface px-1.5 py-0.5 text-[11px] text-ink/70"
+        >
+          {state === "copied" ? "복사됨" : "복사 실패"}
+        </span>
+      )}
+    </span>
+  );
+}
 
 const COMPONENTS: Partial<Components> = {
   h2: (props: ComponentPropsWithoutRef<"h2">) => (
@@ -33,19 +117,9 @@ const COMPONENTS: Partial<Components> = {
   p: (props: ComponentPropsWithoutRef<"p">) => <p {...props} className="my-1.5 leading-relaxed first:mt-0" />,
   strong: (props: ComponentPropsWithoutRef<"strong">) => <strong {...props} className="font-semibold" />,
   del: (props: ComponentPropsWithoutRef<"del">) => <del {...props} className="text-ink/55" />,
-  code: ({ className, ...props }: ComponentPropsWithoutRef<"code">) =>
-    // 코드블록 안(`pre > code`)은 pre 가 모양을 맡는다 — 인라인 코드만 테두리를 준다.
-    className?.startsWith("language-") ? (
-      <code {...props} className={className} />
-    ) : (
-      <code {...props} className="border border-rule bg-paper px-1 py-0.5 font-mono text-[0.9em]" />
-    ),
-  pre: (props: ComponentPropsWithoutRef<"pre">) => (
-    <pre
-      {...props}
-      className="my-2 overflow-x-auto border border-rule bg-paper p-3 font-mono text-[12.5px] leading-relaxed [&>code]:border-0 [&>code]:bg-transparent [&>code]:p-0"
-    />
-  ),
+  // 코드블록은 오른쪽 위 「복사」 버튼, 인라인 코드는 눌러서 복사한다(2026-09-15).
+  code: Code,
+  pre: CodeBlock,
   blockquote: (props: ComponentPropsWithoutRef<"blockquote">) => (
     <blockquote {...props} className="my-2 border-l-2 border-rule pl-3 text-ink/75" />
   ),
@@ -110,7 +184,7 @@ export function ProblemDescription({ markdown }: { markdown: string }) {
   if (tree.children.length === 0) return null;
   return (
     <div className="text-[13.5px] text-ink">
-      {toJsxRuntime(tree, { Fragment, jsx, jsxs, components: COMPONENTS })}
+      {toJsxRuntime(tree, { Fragment, jsx, jsxs, components: COMPONENTS, passNode: true })}
     </div>
   );
 }
