@@ -188,6 +188,18 @@ export default function ProblemTemplatePreviewPage() {
                 {gradingGuidelineText(template.grading_strictness, template.grading_guideline_text)}
               </p>
             </div>
+            {template.syntax_check_enabled ? (
+              <div
+                data-testid="template-preview-syntax-check"
+                className="flex items-center gap-3 border-b border-rule px-4 py-3 text-[13.5px]"
+              >
+                <span className="flex-1">소스에 문법 오류가 없다</span>
+                <span className="flex shrink-0 gap-1.5">
+                  <Badge>기본</Badge>
+                  <Badge tone="attention">필수</Badge>
+                </span>
+              </div>
+            ) : null}
             {template.checklist_items.length === 0 ? (
               <EmptyState>
                 <span data-testid="template-preview-checklist-empty">아직 항목이 없습니다.</span>

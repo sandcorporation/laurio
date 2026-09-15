@@ -9,6 +9,7 @@ import { useRef, useState } from "react";
 import type { FormEvent } from "react";
 
 import {
+  Badge,
   Card,
   CardHeader,
   EmptyState,
@@ -84,6 +85,8 @@ export default function NewProblemPage() {
   const [items, setItems] = useState<DraftChecklistItem[]>([]);
   const [newItemLabel, setNewItemLabel] = useState("");
   const [newItemRequired, setNewItemRequired] = useState(true);
+  // 문법 검사 기본 항목의 켜짐 여부(#410) — 기본은 켜짐이다.
+  const [syntaxCheckEnabled, setSyntaxCheckEnabled] = useState(true);
 
   const hasRequiredItem = items.some((item) => item.required);
 
@@ -140,6 +143,7 @@ export default function NewProblemPage() {
         grading_strictness: gradingGuideline.grading_strictness,
         grading_guideline_text: gradingGuideline.grading_guideline_text,
         checklist_items: items.map((item) => ({ label: item.label, required: item.required })),
+        syntax_check_enabled: syntaxCheckEnabled,
         open,
       });
       router.push(`/classes/${classId}/problems/${created.id}`);
@@ -388,6 +392,29 @@ export default function NewProblemPage() {
             title="체크리스트"
             hint="채점이 항목마다 소스를 읽어 판정합니다 — 필수를 전부 충족하면 「통과」"
           />
+          <div
+            data-testid="syntax-check-toggle-row"
+            className="flex flex-wrap items-center justify-between gap-3 border-b border-rule bg-surface px-4 py-3"
+          >
+            <div className="flex flex-col gap-0.5">
+              <span className="flex items-center gap-1.5 text-[13px] font-medium">
+                <Badge>기본</Badge> 소스에 문법 오류가 없다
+              </span>
+              <span className="text-[12px] text-ink/45">
+                의사코드처럼 실행되는 코드가 아닌 문제라면 끄세요.
+              </span>
+            </div>
+            <label className="flex shrink-0 items-center gap-1.5 text-[12.5px]">
+              <input
+                type="checkbox"
+                data-testid="syntax-check-enabled-input"
+                checked={syntaxCheckEnabled}
+                onChange={(event) => setSyntaxCheckEnabled(event.target.checked)}
+                className="accent-attention"
+              />
+              켜짐
+            </label>
+          </div>
           {items.length === 0 ? (
             <EmptyState>
               <span data-testid="new-problem-checklist-empty-state">
@@ -518,9 +545,7 @@ export default function NewProblemPage() {
                 label: item.label,
                 required: item.required,
               }))}
-              // 만들기 화면은 아직 이 기본 항목을 끄는 입력이 없다(#410) —
-              // 새 문제는 언제나 켜진 채로 만들어진다(서버 기본값).
-              syntaxCheckEnabled
+              syntaxCheckEnabled={syntaxCheckEnabled}
               gradingStrictness={gradingGuideline.grading_strictness}
               gradingGuidelineCustomText={gradingGuideline.grading_guideline_text}
               submissionFormats={submissionFormats}

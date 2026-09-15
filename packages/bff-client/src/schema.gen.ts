@@ -4073,6 +4073,11 @@ export interface components {
             order: number;
             /** Submission Formats */
             submission_formats: string[];
+            /**
+             * Syntax Check Enabled
+             * @default true
+             */
+            syntax_check_enabled: boolean;
             /** Title */
             title: string;
         };
@@ -4986,6 +4991,11 @@ export interface components {
             id: number;
             /** Submission Formats */
             submission_formats: string[];
+            /**
+             * Syntax Check Enabled
+             * @default true
+             */
+            syntax_check_enabled: boolean;
             /** Title */
             title: string;
         };
@@ -5833,6 +5843,11 @@ export interface components {
             reasoning_effort: string;
             /** Submission Formats */
             submission_formats: string[];
+            /**
+             * Syntax Check Enabled
+             * @default true
+             */
+            syntax_check_enabled: boolean;
             /** Title */
             title: string;
         };
@@ -5918,6 +5933,8 @@ export interface components {
             reasoning_effort?: string | null;
             /** Submission Formats */
             submission_formats?: string[] | null;
+            /** Syntax Check Enabled */
+            syntax_check_enabled?: boolean | null;
             /** Title */
             title?: string | null;
         };
@@ -5983,6 +6000,11 @@ export interface components {
             share_code: string;
             /** Submission Formats */
             submission_formats: string[];
+            /**
+             * Syntax Check Enabled
+             * @default true
+             */
+            syntax_check_enabled: boolean;
             /**
              * Taken Down
              * @default false

@@ -59,6 +59,7 @@ def _serialize_template(template: ProblemTemplate) -> ProblemTemplateOut:
         submission_formats=template.submission_formats,
         grading_strictness=template.grading_strictness,
         grading_guideline_text=template.grading_guideline_text,
+        syntax_check_enabled=template.syntax_check_enabled,
         publisher_display_name=template.publisher_display_name,
         created_at=template.created_at,
         taken_down=template.taken_down_at is not None,

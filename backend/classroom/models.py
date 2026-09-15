@@ -464,6 +464,9 @@ class ProblemTemplate(models.Model):
     grading_guideline_text = models.CharField(
         max_length=GRADING_GUIDELINE_TEXT_MAX_LENGTH, blank=True, default=""
     )
+    #: `Problem.syntax_check_enabled`와 같은 이유·같은 모양(#410) — 문법 검사도
+    #: 채점 지침처럼 "무엇을 통과로 볼지"의 일부라 공개 시점 값을 그대로 담는다.
+    syntax_check_enabled = models.BooleanField(default=True)
 
     #: 추측 불가능한 공유 코드 — 가입 링크와 같은 모양, 같은 생성기다(#316
     #: Implementation Decisions "가입 링크와 같은 모양").
@@ -648,6 +651,8 @@ class ClassTemplateProblem(models.Model):
     grading_guideline_text = models.CharField(
         max_length=GRADING_GUIDELINE_TEXT_MAX_LENGTH, blank=True, default=""
     )
+    #: `Problem.syntax_check_enabled`와 같은 이유·같은 모양(#410).
+    syntax_check_enabled = models.BooleanField(default=True)
     order = models.PositiveIntegerField(default=0)
 
     class Meta:

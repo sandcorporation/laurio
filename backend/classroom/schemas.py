@@ -195,6 +195,10 @@ class ProblemIn(Schema):
     #: 보내도 API가 무시하고 빈 문자열로 저장한다 — 두 칸이 어긋난 상태를
     #: 구조로 막는다.
     grading_guideline_text: str = Field(default="", max_length=GRADING_GUIDELINE_TEXT_MAX_LENGTH)
+    #: 문법 검사 기본 항목 「소스에 문법 오류가 없다」의 켜짐 여부(#410,
+    #: CONTEXT.md 「문법 검사」). 기본은 켜짐이다 — 의사코드처럼 실행되는
+    #: 코드가 아닌 문제라면 강사가 끌 수 있다.
+    syntax_check_enabled: bool = True
     #: True면 만든 직후 바로 연다(「만들고 바로 열기」, #315). 필수 항목이
     #: 하나도 없으면(열기 엔드포인트와 같은 규칙) 요청 전체가 거부되고
     #: 문제도 생기지 않는다.
@@ -224,6 +228,9 @@ class ProblemPatchIn(Schema):
     grading_guideline_text: str | None = Field(
         default=None, max_length=GRADING_GUIDELINE_TEXT_MAX_LENGTH
     )
+    #: 필드를 생략하면(`None`) 바꾸지 않는다. 보내면 그 값으로 켜고 끈다
+    #: (#410) — 켜고 꺼도 이미 매긴 판정은 바뀌지 않는다(ADR-0006).
+    syntax_check_enabled: bool | None = None
 
 
 class ProblemOut(Schema):
@@ -592,6 +599,8 @@ class ImportableProblemOut(Schema):
     title: str
     description: str
     submission_formats: list[str]
+    #: 문법 검사 기본 항목의 켜짐 여부(#410) — 복사하면 그대로 옮겨간다.
+    syntax_check_enabled: bool = True
     checklist_items: list[ProblemTemplateChecklistItemOut] = []
 
 
@@ -620,6 +629,10 @@ class ProblemTemplateOut(Schema):
     grading_strictness: str
     #: grading_strictness가 "custom"일 때만 채워진다.
     grading_guideline_text: str
+    #: 문법 검사 기본 항목의 공개 시점 켜짐 여부(#410) — 가져가기 전에
+    #: 미리보기가 이 값을 보여준다(#410 AC "템플릿 미리보기에 켜짐 여부가
+    #: 보인다").
+    syntax_check_enabled: bool = True
     publisher_display_name: str
     created_at: datetime
     taken_down: bool = False
@@ -678,6 +691,8 @@ class ClassTemplateProblemOut(Schema):
     #: `ProblemTemplateOut.grading_strictness`와 같은 이유·같은 모양(#389).
     grading_strictness: str
     grading_guideline_text: str
+    #: `ProblemTemplateOut.syntax_check_enabled`와 같은 이유·같은 모양(#410).
+    syntax_check_enabled: bool = True
     order: int
     checklist_items: list[ProblemTemplateChecklistItemOut] = []
 

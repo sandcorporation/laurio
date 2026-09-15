@@ -1105,6 +1105,7 @@ def create_problem(request: HttpRequest, class_id: int, payload: ProblemIn):
             reasoning_effort=payload.reasoning_effort,
             grading_strictness=grading_strictness,
             grading_guideline_text=grading_guideline_text,
+            syntax_check_enabled=payload.syntax_check_enabled,
             order=next_order,
             status=Problem.Status.OPEN if payload.open else Problem.Status.DRAFT,
         )
@@ -1192,6 +1193,7 @@ def list_importable_problems(request: HttpRequest, class_id: int):
             title=p.title,
             description=p.description,
             submission_formats=p.submission_formats,
+            syntax_check_enabled=p.syntax_check_enabled,
             checklist_items=[
                 ProblemTemplateChecklistItemOut(label=i.label, required=i.required, order=i.order)
                 for i in p.checklist_items.all()
@@ -1355,6 +1357,9 @@ def update_problem(request: HttpRequest, class_id: int, problem_id: int, payload
         problem.grading_strictness = grading_strictness
         problem.grading_guideline_text = grading_guideline_text
         update_fields.extend(["grading_strictness", "grading_guideline_text"])
+    if payload.syntax_check_enabled is not None:
+        problem.syntax_check_enabled = payload.syntax_check_enabled
+        update_fields.append("syntax_check_enabled")
     if update_fields:
         problem.save(update_fields=[*update_fields, "updated_at"])
     return 200, _serialize_problem(problem, class_obj)
