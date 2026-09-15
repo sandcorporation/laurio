@@ -72,6 +72,8 @@ from .schemas import (
     ClassroomScoreOut,
     ClassroomSubmissionIn,
     ClassroomSubmissionOut,
+    ClassroomSyntaxCheckFindingOut,
+    ClassroomSyntaxCheckOut,
     ErrorOut,
     ImportableProblemOut,
     JoinedClassOut,
@@ -281,7 +283,7 @@ def _problem_pass_stats(problem: Problem, active_member_ids: set[int]) -> tuple[
         if submission.member_id in passed_member_ids:
             continue
         score = getattr(submission, "classroom_score", None)
-        if _is_score_passed(score, required_item_ids):
+        if _is_score_passed(score, required_item_ids, syntax_check_enabled=problem.syntax_check_enabled):
             passed_member_ids.add(submission.member_id)
 
     return len(passed_member_ids), member_count
@@ -311,6 +313,7 @@ def _serialize_problem(
         scoring_model_rejected=problem.scoring_model_rejected_at is not None,
         grading_strictness=problem.grading_strictness,
         grading_guideline_text=problem.grading_guideline_text,
+        syntax_check_enabled=problem.syntax_check_enabled,
         checklist_items=[_serialize_checklist_item(i) for i in problem.checklist_items.all()],
         passed_count=passed_count,
         member_count=member_count,
@@ -319,21 +322,30 @@ def _serialize_problem(
     )
 
 
-def _is_score_passed(score: ClassroomScore | None, required_item_ids: set[int]) -> bool:
+def _is_score_passed(
+    score: ClassroomScore | None, required_item_ids: set[int], *, syntax_check_enabled: bool = True
+) -> bool:
     """이 채점 하나가 통과인가(#288, CONTEXT.md 「통과」) — 필수 항목을
-    **전부** 충족했는가. 선택 항목은 판정에 관여하지 않는다(AC).
+    **전부** 충족했는가. 선택 항목은 판정에 관여하지 않는다(AC). 문법 검사
+    기본 항목(#408)이 켜진 문제라면 그 항목도 필수로 함께 본다.
 
-    **항상 지금의 체크리스트 기준으로 다시 셈한다** — 저장된 판정(`score.
-    reasoning`)은 append-only라 바뀌지 않지만, `required_item_ids`는 호출부가
-    매번 최신 `ChecklistItem.required`에서 새로 구해 넘긴다. 강사가 채점 뒤에
-    체크리스트를 고치면(#283이 허용한다) 지난 판정에 없는 항목은 "충족 확인
-    안 됨"으로 본다 — Problem 모델 docstring의 "달성률만 새 기준으로 다시
-    셈된다"가 뜻하는 바로 그 재계산이다.
+    **항상 지금의 체크리스트·문제 설정 기준으로 다시 셈한다** — 저장된
+    판정(`score.reasoning`/`score.syntax_check_result`)은 append-only라
+    바뀌지 않지만, `required_item_ids`·`syntax_check_enabled`는 호출부가
+    매번 최신 `ChecklistItem.required`/`Problem.syntax_check_enabled`에서
+    새로 구해 넘긴다. 강사가 채점 뒤에 체크리스트를 고치거나(#283이
+    허용한다) 기본 항목을 껐다 켰다 해도(#410) 지난 판정 자체는 바뀌지
+    않고 이 재계산만 새 기준을 탄다 — Problem 모델 docstring의 "달성률만
+    새 기준으로 다시 셈된다"가 뜻하는 바로 그 재계산이다.
 
     미채점("pending", `score is None`)이면 항상 거짓이다 — 아직 판정이 없다."""
 
     if score is None or not required_item_ids:
         return False
+    if syntax_check_enabled:
+        syntax_result = score.syntax_check_result
+        if not syntax_result or not syntax_result.get("is_met"):
+            return False
     met_ids = {r["checklist_item_id"] for r in score.reasoning if r["is_met"]}
     return required_item_ids.issubset(met_ids)
 
@@ -347,6 +359,7 @@ def _serialize_problem_mine(problem: Problem, *, passed: bool = False) -> Classr
         submission_formats=problem.submission_formats,
         grading_strictness=problem.grading_strictness,
         grading_guideline_text=problem.grading_guideline_text,
+        syntax_check_enabled=problem.syntax_check_enabled,
         checklist_items=[_serialize_checklist_item(i) for i in problem.checklist_items.all()],
         passed=passed,
     )
@@ -369,6 +382,20 @@ def _source_download_url(asset: SubmissionAsset, user) -> str:
     return presigned.url
 
 
+def _serialize_syntax_check(result: dict | None) -> ClassroomSyntaxCheckOut | None:
+    if result is None:
+        return None
+    return ClassroomSyntaxCheckOut(
+        is_met=result["is_met"],
+        reasoning=result["reasoning"],
+        judged_by=result["judged_by"],
+        findings=[
+            ClassroomSyntaxCheckFindingOut(path=f["path"], line=f.get("line"), message=f["message"])
+            for f in result.get("findings", [])
+        ],
+    )
+
+
 def _serialize_score(score: ClassroomScore) -> ClassroomScoreOut:
     return ClassroomScoreOut(
         model_version=score.model_version,
@@ -380,6 +407,7 @@ def _serialize_score(score: ClassroomScore) -> ClassroomScoreOut:
             )
             for r in score.reasoning
         ],
+        syntax_check=_serialize_syntax_check(score.syntax_check_result),
         created_at=score.created_at,
     )
 
@@ -435,7 +463,7 @@ def _serialize_classroom_submission(
         created_at=submission.created_at,
         status="scored" if score is not None else "pending",
         score=_serialize_score(score) if score is not None else None,
-        passed=_is_score_passed(score, required_item_ids),
+        passed=_is_score_passed(score, required_item_ids, syntax_check_enabled=problem.syntax_check_enabled),
         pending_reason=pending_reason,
     )
 
@@ -487,7 +515,7 @@ def _serialize_instructor_submission(
         created_at=submission.created_at,
         status="scored" if score is not None else "pending",
         score=_serialize_score(score) if score is not None else None,
-        passed=_is_score_passed(score, required_item_ids),
+        passed=_is_score_passed(score, required_item_ids, syntax_check_enabled=problem.syntax_check_enabled),
         pending_reason=_pending_reason(score, class_obj, problem),
     )
 
@@ -934,7 +962,11 @@ def rename_myself(request: HttpRequest, class_id: int, payload: MemberRenameIn):
 
 
 def _cell_status(
-    submissions: list[ClassroomSubmission], required_item_ids: set[int], class_obj: Class
+    submissions: list[ClassroomSubmission],
+    required_item_ids: set[int],
+    class_obj: Class,
+    *,
+    syntax_check_enabled: bool = True,
 ) -> str:
     """이 참여자·이 문제 한 칸의 상태 — **통과 이력**을 그린다(최신 시도가
     아니다, #290 AC). 우선순위는 이 순서다: 한 번이라도 통과했으면 이후
@@ -950,7 +982,12 @@ def _cell_status(
 
     if not submissions:
         return "not_submitted"
-    if any(_is_score_passed(getattr(s, "classroom_score", None), required_item_ids) for s in submissions):
+    if any(
+        _is_score_passed(
+            getattr(s, "classroom_score", None), required_item_ids, syntax_check_enabled=syntax_check_enabled
+        )
+        for s in submissions
+    ):
         return "passed"
     if any(getattr(s, "classroom_score", None) is None for s in submissions):
         return "no_api_key" if class_obj.scoring_key_unusable() else "scoring"
@@ -983,6 +1020,7 @@ def get_roster_grid(request: HttpRequest, class_id: int):
     required_ids_by_problem = {
         problem.id: _required_checklist_item_ids(problem.checklist_items.all()) for problem in problems
     }
+    syntax_check_enabled_by_problem = {problem.id: problem.syntax_check_enabled for problem in problems}
 
     problem_stats = []
     for problem in problems:
@@ -1007,6 +1045,7 @@ def get_roster_grid(request: HttpRequest, class_id: int):
                     submissions_by_key.get((problem.id, member.id), []),
                     required_ids_by_problem[problem.id],
                     class_obj,
+                    syntax_check_enabled=syntax_check_enabled_by_problem[problem.id],
                 ),
             )
             for problem in problems
@@ -1214,7 +1253,11 @@ def list_my_problems(request: HttpRequest, class_id: int):
         for problem in problem_list:
             required_item_ids = _required_checklist_item_ids(problem.checklist_items.all())
             passed = any(
-                _is_score_passed(getattr(s, "classroom_score", None), required_item_ids)
+                _is_score_passed(
+                    getattr(s, "classroom_score", None),
+                    required_item_ids,
+                    syntax_check_enabled=problem.syntax_check_enabled,
+                )
                 for s in submissions_by_problem.get(problem.id, [])
             )
             items.append(

@@ -221,6 +221,41 @@ export default function ProblemSubmissionsPage() {
                       data-testid={`instructor-submission-row-${submission.id}-verdicts`}
                       className="mt-3 flex flex-col gap-2 border-t border-rule pt-3"
                     >
+                      {submission.score.syntax_check ? (
+                        <li
+                          data-testid={`instructor-submission-row-${submission.id}-syntax-check`}
+                          className="flex gap-2.5"
+                        >
+                          <span
+                            aria-hidden
+                            className={`mt-1 h-[13px] w-[13px] shrink-0 border ${
+                              submission.score.syntax_check.is_met
+                                ? "border-verified bg-verified"
+                                : "border-attention"
+                            }`}
+                          />
+                          <span className="text-[13px] leading-relaxed">
+                            <Badge>기본</Badge> 소스에 문법 오류가 없다
+                            <span className="text-ink/45">
+                              {" "}
+                              — {submission.score.syntax_check.is_met ? "충족" : "미충족"}
+                            </span>
+                            <span className="block text-ink/60">
+                              {submission.score.syntax_check.reasoning}
+                            </span>
+                            {submission.score.syntax_check.findings.map((finding, index) => (
+                              <span
+                                key={index}
+                                data-testid={`instructor-submission-row-${submission.id}-syntax-check-finding-${index}`}
+                                className="block font-mono text-[12px] text-ink/60"
+                              >
+                                {finding.path}
+                                {finding.line !== null ? `:${finding.line}` : ""} — {finding.message}
+                              </span>
+                            ))}
+                          </span>
+                        </li>
+                      ) : null}
                       {submission.score.reasoning.map((verdict) => (
                         <li key={verdict.checklist_item_id} className="flex gap-2.5">
                           <span

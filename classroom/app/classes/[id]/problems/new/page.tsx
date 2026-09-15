@@ -518,6 +518,9 @@ export default function NewProblemPage() {
                 label: item.label,
                 required: item.required,
               }))}
+              // 만들기 화면은 아직 이 기본 항목을 끄는 입력이 없다(#410) —
+              // 새 문제는 언제나 켜진 채로 만들어진다(서버 기본값).
+              syntaxCheckEnabled
               gradingStrictness={gradingGuideline.grading_strictness}
               gradingGuidelineCustomText={gradingGuideline.grading_guideline_text}
               submissionFormats={submissionFormats}

@@ -87,6 +87,7 @@ from .models import (
     ClassroomSubmission,
 )
 from .scoring_models import is_reasoning_model_id, matches_naming_rule
+from .syntax_check import build_verdict, check_python_syntax
 
 logger = logging.getLogger(__name__)
 
@@ -285,20 +286,26 @@ class _SourceNotReady(Exception):
     "source_not_found"와 같은 뜻). 재시도 대상이지 영구 실패가 아니다."""
 
 
-def _source_text_for(submission: ClassroomSubmission, asset: SubmissionAsset) -> str:
-    """LLM 프롬프트에 실을 소스 텍스트. 소스는 스토리지에서, 저장소는 GitHub에서
-    직접 읽는다 — 둘 다 `core.source_selection.select_source_files`로 같은
-    예산·선별 규율을 받는다(ADR-0027과 같은 정신, 저장소도 소스와 같은 취급)."""
+def _read_raw_source(submission: ClassroomSubmission, asset: SubmissionAsset) -> bytes:
+    """이 시도의 원본 바이트 그대로 — 소스는 스토리지에서, 저장소는 GitHub에서
+    직접 읽는다. LLM 프롬프트용 선별(`_source_text_for`, 예산 안에서 잘린다)과
+    문법 검사(`classroom.syntax_check`, 파일마다 전체 내용이 필요하다 — 잘리면
+    거짓 구문 오류가 생긴다, #408)가 이 원본을 함께 쓴다."""
 
     if asset.kind == SubmissionAsset.Kind.SOURCE:
         raw = get_storage_adapter().read_object(asset.value)
         if raw is None:
             raise _SourceNotReady("소스 오브젝트를 아직 스토리지에서 찾을 수 없다.")
-    else:
-        github = get_github_adapter()
-        if not github.check_public(asset.value):
-            raise _SourceNotReady("저장소가 공개가 아니거나 아직 확인되지 않았다.")
-        raw = github.clone(asset.value).zip_bytes
+        return raw
+    github = get_github_adapter()
+    if not github.check_public(asset.value):
+        raise _SourceNotReady("저장소가 공개가 아니거나 아직 확인되지 않았다.")
+    return github.clone(asset.value).zip_bytes
+
+
+def _source_text_for(raw: bytes, asset: SubmissionAsset) -> str:
+    """LLM 프롬프트에 실을 소스 텍스트 — `core.source_selection.select_source_files`로
+    같은 예산·선별 규율을 받는다(ADR-0027과 같은 정신, 저장소도 소스와 같은 취급)."""
 
     files = select_source_files([(asset.id, asset.label, raw)])
     return "\n\n".join(f"# {f.path}\n{f.content}" for f in files)
@@ -426,11 +433,17 @@ def _notify_submitter_of_score(submission: ClassroomSubmission, score: Classroom
     `notify_safely`를 쓴다 — 알림 생성이 실패해도 채점 자체(위에서 이미 커밋된
     `score`)는 그대로 끝나야 한다는 AC를 그 함수의 계약이 그대로 보장한다."""
 
+    problem = submission.problem
     required_ids = {item.id for item in checklist_items if item.required}
     met_ids = {r["checklist_item_id"] for r in score.reasoning if r["is_met"]}
-    passed = bool(required_ids) and required_ids.issubset(met_ids)
+    # 문법 검사 기본 항목(#408)도 필수로 포함해 셈한다 — `classroom.api.
+    # _is_score_passed`와 정확히 같은 규칙(그 함수 docstring)이다.
+    syntax_ok = (
+        not problem.syntax_check_enabled
+        or bool(score.syntax_check_result and score.syntax_check_result.get("is_met"))
+    )
+    passed = bool(required_ids) and required_ids.issubset(met_ids) and syntax_ok
 
-    problem = submission.problem
     class_obj = problem.classroom
     notify_safely(
         recipient=submission.member.user,
@@ -504,13 +517,22 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
     asset = submission.assets.get()
 
     try:
-        source_text = _source_text_for(submission, asset)
+        raw_source = _read_raw_source(submission, asset)
     except _SourceNotReady as exc:
         ClassroomScoringAttempt.objects.create(submission=submission, error=str(exc))
         return {"submission_id": submission.id, "status": "source_not_ready"}
     except GitHubAdapterError as exc:
         ClassroomScoringAttempt.objects.create(submission=submission, error=str(exc)[:2000])
         return {"submission_id": submission.id, "status": "repository_unreachable"}
+
+    source_text = _source_text_for(raw_source, asset)
+
+    # 문법 검사 기본 항목(#408) — 파서만 쓰고 토큰·벤더 요청과 무관하다.
+    # 강사가 이 문제에서 꺼 두면(#410) 아예 판정하지 않는다(`None`으로
+    # 남아 "이 시도에는 그 항목이 없다"는 뜻이 된다).
+    syntax_check_result = (
+        build_verdict(check_python_syntax(raw_source)) if problem.syntax_check_enabled else None
+    )
 
     model = problem.model or class_obj.default_model
     if not matches_naming_rule(model):
@@ -608,6 +630,7 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
             model_version=output.model_version,
             prompt=prompt,
             reasoning=reasoning,
+            syntax_check_result=syntax_check_result,
         )
     _notify_submitter_of_score(submission, score, checklist_items)
     return {"submission_id": submission.id, "status": "scored", "score_id": score.id}

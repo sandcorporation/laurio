@@ -59,6 +59,9 @@ export type ProblemRow = {
   grading_strictness: GradingStrictness;
   // grading_strictness가 "custom"일 때만 채워진다.
   grading_guideline_text: string;
+  // 문법 검사 기본 항목 「소스에 문법 오류가 없다」의 켜짐 여부(#408,
+  // CONTEXT.md 「문법 검사」). 기본은 켜짐이고, 강사는 끌 수만 있다(#410).
+  syntax_check_enabled: boolean;
   checklist_items: ChecklistItemRow[];
   // 이 문제를 한 번이라도 통과한 참여자 수(#289) — 강사 본인·내보낸
   // 참여자는 빼고 센다.

@@ -260,6 +260,9 @@ class ProblemOut(Schema):
     #: `grading_strictness`가 "custom"일 때만 채워지고, 그 밖의 단계에서는
     #: 언제나 빈 문자열이다(저장 시점에 이미 그렇게 정규화된다).
     grading_guideline_text: str
+    #: 문법 검사 기본 항목 「소스에 문법 오류가 없다」의 켜짐 여부(#408,
+    #: CONTEXT.md 「문법 검사」). 기본은 켜짐이고, 강사는 끌 수만 있다(#410).
+    syntax_check_enabled: bool = True
     checklist_items: list[ChecklistItemOut] = []
     #: 이 문제를 한 번이라도 통과한 참여자 수(#289, CONTEXT.md 「달성률」) —
     #: 강사 본인과 내보내진 참여자는 빼고 센다.
@@ -356,6 +359,9 @@ class ClassroomProblemMineOut(Schema):
     grading_strictness: str
     #: `grading_strictness`가 "custom"일 때만 채워진다.
     grading_guideline_text: str
+    #: 문법 검사 기본 항목의 켜짐 여부(#408) — 참이면 참여자 화면이 체크리스트
+    #: 맨 앞에 「소스에 문법 오류가 없다」와 「기본」 표시를 둔다.
+    syntax_check_enabled: bool = True
     checklist_items: list[ChecklistItemOut] = []
     #: 이 문제를 한 번이라도 통과한 적이 있는가(#288, CONTEXT.md 「통과」) —
     #: 최신 시도가 아니라 시도 전체에 대한 OR다. 한 번 통과하면 나중에 다시
@@ -382,12 +388,36 @@ class ClassroomChecklistVerdictOut(Schema):
     reasoning: str
 
 
+class ClassroomSyntaxCheckFindingOut(Schema):
+    """파서가 실제로 찾은 구문 오류 하나(#408) — 어느 파일 몇 번째 줄에서
+    무슨 오류인지."""
+
+    path: str
+    line: int | None = None
+    message: str
+
+
+class ClassroomSyntaxCheckOut(Schema):
+    """문법 검사 기본 항목의 판정 하나(#408, CONTEXT.md 「문법 검사」) —
+    `ClassroomScore.syntax_check_result`를 그대로 비춘다. append-only라 이
+    값도 한 번 나오면 바뀌지 않는다."""
+
+    is_met: bool
+    reasoning: str
+    #: "parser" | "ai" — 파서가 판정했는지 AI가 판정했는지(#409).
+    judged_by: str
+    findings: list[ClassroomSyntaxCheckFindingOut] = []
+
+
 class ClassroomScoreOut(Schema):
     """채점 스냅샷 하나(#287) — `classroom.models.ClassroomScore`를 그대로
     비춘다. append-only라 이 값은 한 번 나오면 바뀌지 않는다."""
 
     model_version: str
     reasoning: list[ClassroomChecklistVerdictOut]
+    #: 문법 검사 기본 항목의 판정(#408) — 채점 시점에 그 문제의 기본 항목이
+    #: 꺼져 있었으면 `None`이다.
+    syntax_check: ClassroomSyntaxCheckOut | None = None
     created_at: datetime
 
 

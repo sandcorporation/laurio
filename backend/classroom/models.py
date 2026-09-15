@@ -242,6 +242,14 @@ class Problem(models.Model):
         max_length=GRADING_GUIDELINE_TEXT_MAX_LENGTH, blank=True, default=""
     )
 
+    #: 문법 검사 기본 항목 「소스에 문법 오류가 없다」의 켜짐 여부(#408,
+    #: CONTEXT.md 「문법 검사」). 체크리스트 행(`ChecklistItem`)으로 저장하지
+    #: 않는다 — 강사가 문구·필수 여부를 바꿀 수 없는 플랫폼 고정 항목이라
+    #: 켜고 끄는 값 하나면 충분하다. 기본은 켜짐이고, 마이그레이션으로
+    #: 기존 문제도 켜짐이다(#408 AC). 의사코드처럼 실행되는 코드가 아닌
+    #: 문제에서는 강사가 끌 수 있다(#410).
+    syntax_check_enabled = models.BooleanField(default=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -380,6 +388,15 @@ class ClassroomScore(models.Model):
     #: 체크리스트 항목별 판정 근거.
     #: [{"checklist_item_id": int, "is_met": bool, "reasoning": str}, ...]
     reasoning = models.JSONField()
+    #: 문법 검사 기본 항목의 판정 스냅샷(#408) — 강사 항목(`reasoning`)과
+    #: 구별되는 별도 칸이다: 체크리스트 행이 아니고, 판정 주체(파서/AI)가
+    #: 강사 항목에는 없는 개념이라 같은 리스트에 섞지 않는다. 채점 시점에
+    #: `problem.syntax_check_enabled`가 꺼져 있었으면 `None`이다. 켜져
+    #: 있었으면 `{"is_met": bool, "reasoning": str, "judged_by":
+    #: "parser"|"ai", "findings": [{"path": str, "line": int|None,
+    #: "message": str}, ...]}` 모양이다(`classroom.syntax_check.build_verdict`).
+    #: append-only라 이 값도 한 번 저장되면 바뀌지 않는다(ADR-0006).
+    syntax_check_result = models.JSONField(null=True, blank=True, default=None)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
