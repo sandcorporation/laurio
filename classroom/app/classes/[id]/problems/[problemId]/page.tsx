@@ -345,7 +345,7 @@ export default function EditProblemPage() {
   }
 
   return (
-    <PageShell>
+    <PageShell wide>
       <PageHeader
         eyebrow="클래스 · 문제"
         title="문제 편집"
@@ -506,7 +506,12 @@ export default function EditProblemPage() {
           </ErrorNote>
         ) : null}
 
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-start">
+        {/* 넓은 화면(1640px~)에서만 두 열이다 — 왼쪽 문제·체크리스트는 새 문제 화면과
+            같은 폭을 쓰고, 채점 모델·채점 지침·복사·템플릿 공개는 넓어진 틀의 오른쪽
+            380px 열이 스크롤을 따라온다. 그보다 좁으면 한 열로 쌓아 설명 에디터가 페이지
+            폭을 다 쓴다 — 예전에는 1024px 부터 이 열이 본문 안을 차지해 에디터가 약
+            750px 로 좁았다(2026-09-15). */}
+        <div className="flex flex-col gap-5 min-[1640px]:flex-row min-[1640px]:items-start">
           <div className="flex min-w-0 flex-1 flex-col gap-5">
             <Card>
               <CardHeader title="문제" />
@@ -692,7 +697,10 @@ export default function EditProblemPage() {
             </Card>
           </div>
 
-          <div className="flex w-full shrink-0 flex-col gap-5 lg:w-[380px]">
+          <div
+            data-testid="edit-problem-side-rail"
+            className="flex w-full shrink-0 flex-col gap-5 min-[1640px]:sticky min-[1640px]:top-6 min-[1640px]:max-h-[calc(100vh-3rem)] min-[1640px]:w-[380px] min-[1640px]:overflow-y-auto"
+          >
             <Card>
               <CardHeader title="채점 모델" />
               <div className="flex flex-col gap-2.5 p-4">
