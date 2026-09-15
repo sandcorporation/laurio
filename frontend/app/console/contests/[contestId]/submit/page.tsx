@@ -163,6 +163,11 @@ export default function SubmitPage() {
   const [unlinkedEvidenceCount, setUnlinkedEvidenceCount] = useState(0);
   const [verifying, setVerifying] = useState(false);
   const [verifyError, setVerifyError] = useState<string | null>(null);
+  // 무료 공모전 전용(#416, ADR-0048) — 「수상작의 소스는 개최자가 볼 수
+  // 있습니다」 동의 체크박스. 이미 동의한 적이 있으면(수정 화면 재방문)
+  // 체크된 채로 시작한다 — 제출마다 다시 확인하는 것이지 처음부터 매번
+  // 비워 두는 것이 아니다.
+  const [sourceAccessConsent, setSourceAccessConsent] = useState(false);
   const [score, setScore] = useState<ScoreState>({ status: "idle" });
   const portOneConfig = useMemo(() => getPortOneBrowserConfig(), []);
 
@@ -221,8 +226,14 @@ export default function SubmitPage() {
       // 두 상태에서는 조회해 봐야 항상 404 — 낼 게 없어 아래에서 어차피 전체
       // 화면을 본인확인 안내로 막을 상태에, 처음 방문할 때마다(가장 흔한
       // 경로 — 누구나 여기서 시작한다) 헛수고인 요청을 하나 더 보내지 않는다.
+      // 무료 공모전(#416, ADR-0048)은 본인확인 자체를 요구하지 않는다 — 그
+      // 계정에 Verification 행이 아예 없어도(`unverified`) 이미 제출했을 수
+      // 있으므로, 무료 공모전이면 이 조회를 건너뛰지 않는다.
       let submission: SubmissionOut | null = null;
-      if (verification.data.status !== "unverified" && verification.data.status !== "underage") {
+      if (
+        contest.data.is_free ||
+        (verification.data.status !== "unverified" && verification.data.status !== "underage")
+      ) {
         // 404 는 실패가 아니다 — 「아직 안 냈다」는 정상적인 사실이다.
         const existing = await bffClient.get<SubmissionOut>(
           `/api/backend/contests/${contestId}/submissions/me`,
@@ -256,6 +267,7 @@ export default function SubmitPage() {
         };
       }
       setRequirementStates(initialStates);
+      setSourceAccessConsent(submission?.source_access_consent_at != null);
       setLoad({ status: "ready", contest: contest.data, verification: verification.data, submission });
     }
 
@@ -491,6 +503,16 @@ export default function SubmitPage() {
       });
       return;
     }
+    // 무료 공모전(#416) — 동의 없이는 서버가 어차피 422로 거절하지만, 폼
+    // 단계에서 먼저 막아 헛된 왕복을 줄인다(화면이 감추는 것과 서버가
+    // 거절하는 것은 둘 다 필요하다는 이 저장소의 규율).
+    if (load.contest.is_free && !sourceAccessConsent) {
+      setSaveState({
+        status: "error",
+        message: "수상작의 소스는 개최자가 볼 수 있습니다 — 동의해야 제출할 수 있습니다.",
+      });
+      return;
+    }
 
     setSaveState({ status: "saving" });
     // 직전 저장의 알림은 여기서 지운다 — 안 그러면 이번 저장이 아무 것도 풀지
@@ -533,6 +555,9 @@ export default function SubmitPage() {
 
     const payload: SubmissionIn = {
       assets,
+      // 유료 공모전은 이 필드를 서버가 무시한다 — 그래도 무조건 함께 보낸다
+      // (무료·유료 갈래를 페이로드 구성 단계에서 나누지 않는다).
+      source_access_consent: load.contest.is_free && sourceAccessConsent,
       requirement_responses: load.contest.requirements.map((r) => {
         const state = requirementStates[r.id];
         return {
@@ -655,7 +680,7 @@ export default function SubmitPage() {
   // 탈퇴 계정은 `User.is_active`가 꺼져 로그인 자체가 막힌다(ADR-0025) — 그래도
   // 값 자체는 `underage`와 다르지 않게 다룬다: 재확인 버튼은 감추고 이유만
   // 보여준다(`VerificationReason`).
-  if (verification.status !== "verified" && !hasSubmission) {
+  if (!contest.is_free && verification.status !== "verified" && !hasSubmission) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-4 p-10">
         <ErrorNote>
@@ -869,6 +894,23 @@ export default function SubmitPage() {
 
       {canEdit && (
         <div className="flex flex-col gap-2">
+          {contest.is_free && (
+            <label
+              className="flex items-start gap-2 border border-rule bg-surface px-3 py-2.5 text-sm"
+              data-testid="source-access-consent-label"
+            >
+              <input
+                type="checkbox"
+                checked={sourceAccessConsent}
+                onChange={(event) => setSourceAccessConsent(event.target.checked)}
+                data-testid="source-access-consent-checkbox"
+              />
+              <span>
+                수상작의 소스는 개최자가 볼 수 있습니다 — 이 문장에 동의해야 제출할 수
+                있습니다.
+              </span>
+            </label>
+          )}
           <button
             type="button"
             onClick={handleSubmit}

@@ -35,6 +35,10 @@ class ErrorOut(Schema):
 class SubmissionIn(Schema):
     assets: list[SubmissionAssetIn] = []
     requirement_responses: list[RequirementResponseIn] = []
+    # 무료 공모전 전용(#416, ADR-0048) — 「수상작의 소스는 개최자가 볼 수
+    # 있습니다」에 동의했는가. 유료 공모전 제출에는 아무 뜻이 없다(백엔드가
+    # 무시한다) — 본인확인이 그 자리를 대신하기 때문이다.
+    source_access_consent: bool = False
 
 
 class SubmissionOut(Schema):
@@ -58,6 +62,8 @@ class SubmissionOut(Schema):
     # False면 항상 null이다(남의 제출을 볼 수 있는 Sponsor·마감 후 공개 열람
     # 경로에는 노출하지 않는다).
     next_action: NextAction | None = None
+    # 무료 공모전 소스 열람 동의 시각(#416) — 유료 공모전이면 항상 null이다.
+    source_access_consent_at: datetime | None = None
 
 
 class MyParticipationOut(Schema):
@@ -80,6 +86,9 @@ class MyParticipationOut(Schema):
     # 타입이 `next_action: string` 으로 나오는 것을 보고 고쳤다).
     next_action: NextAction
     submitted_at: datetime
+    # 무료 공모전인가(#417, ADR-0048) — 화면이 이의제기·지급 링크를 감추는
+    # 근거다. 이의제기·지급은 무료 공모전에 절차 자체가 없다.
+    is_free: bool = False
 
     @staticmethod
     def resolve_submission_id(obj) -> int:
@@ -92,6 +101,10 @@ class MyParticipationOut(Schema):
     @staticmethod
     def resolve_prize(obj) -> int:
         return obj.contest.prize
+
+    @staticmethod
+    def resolve_is_free(obj) -> bool:
+        return obj.contest.is_free
 
     @staticmethod
     def resolve_deadline_at(obj):
@@ -251,6 +264,9 @@ class OwnScoreOut(Schema):
     # 나온다 — 조건을 두 벌로 쓰면 언젠가 갈라지고, 그때 화면은 이의를 권해놓고
     # API 가 거절한다.
     can_appeal: bool = False
+    # 무료 공모전인가(#417, ADR-0048) — `can_appeal`이 false인 이유가 「기한이
+    # 지났다」인지 「애초에 이의제기 절차가 없다」인지 화면이 갈라 말하는 근거다.
+    is_free: bool = False
     # 채점에 실제로 쓰인 자산 목록 (#191). 소스가 여럿이 되면서 "무엇을 보고
     # 채점했는가"가 이의 창의 전제 중 하나가 됐다.
     scored_assets: list[ScoredAssetOut] = []
@@ -279,7 +295,17 @@ class OwnScoreOut(Schema):
         submission = obj.submission
         if getattr(submission, "appeal", None) is not None:
             return False
-        return submission.contestsubmission.contest.appeal_window_open(Clock.now())
+        contest = submission.contestsubmission.contest
+        if contest.is_free:
+            # 무료 공모전에는 이의제기 절차 자체가 없다(#417, ADR-0048) —
+            # `appeals.api.create_appeal`이 같은 이유로 404를 낸다. 조건을
+            # 두 벌로 쓰지 않는다.
+            return False
+        return contest.appeal_window_open(Clock.now())
+
+    @staticmethod
+    def resolve_is_free(obj) -> bool:
+        return obj.submission.contestsubmission.contest.is_free
 
     @staticmethod
     def resolve_percentage(obj) -> str:

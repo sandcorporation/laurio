@@ -9,19 +9,22 @@
 // 슬롯)이다. 세부는 이미 `/console` 이 나눈다.
 //
 // 개최 CTA 는 로그인 여부와 무관하게 항상 보인다 — `/console/contests/new`
-// 로 바로 링크한다. 로그인하지 않은 사람이 눌러도 미들웨어(middleware.ts)가
-// `/login?next=...` 로 보낸다. "무엇이 필요한지 미리 보는 것"이 목적이므로 이
-// 리다이렉트는 결함이 아니다.
+// (유료)·`/console/contests/new-free`(무료, #415) 로 바로 링크한다. 로그인하지
+// 않은 사람이 눌러도 미들웨어(middleware.ts)가 `/login?next=...` 로 보낸다.
+// "무엇이 필요한지 미리 보는 것"이 목적이므로 이 리다이렉트는 결함이 아니다.
 //
-// **공모전 제품 스위치(#271)가 꺼지면 이 둘을 뺀다.** 앱은 진입점을 감출 뿐이고
-// (백엔드가 유일한 집행자다), 이 헤더가 정확히 그 진입점 둘을 쥐고 있다 —
-// "공모전" 링크와 "공모전 개최" CTA.
+// **공모전 제품 스위치(#271)가 꺼지면 셋을 뺀다.** 앱은 진입점을 감출 뿐이고
+// (백엔드가 유일한 집행자다), 이 헤더가 정확히 그 진입점을 쥐고 있다 —
+// "공모전" 링크와 개최 CTA 둘(유료·무료).
 //
-// **개최 CTA 는 유료 스위치도 함께 본다**(#413). 무료 개최(#415)가 생기기 전까지
-// `/console/contests/new`는 본인확인·견적·결제로 이어지는 유료 개최 흐름
-// 하나뿐이라, 유료 스위치가 꺼지면 이 CTA 도 함께 뺀다 — 안 그러면 누르는
-// 순간 견적·개최 API 가 404 를 내는 막다른 링크가 된다. "공모전" 목록 링크는
-// 유료와 무관하므로 공모전 스위치만 본다.
+// **유료 개최 CTA 만 유료 스위치도 함께 본다**(#413). `/console/contests/new`
+// 는 본인확인·견적·결제로 이어지는 유료 개최 흐름이라, 유료 스위치가 꺼지면
+// 이 CTA 만 빠진다 — 안 그러면 누르는 순간 견적·개최 API 가 404 를 내는 막다른
+// 링크가 된다. **무료 개최 CTA(`/console/contests/new-free`, #415)는 유료
+// 스위치와 무관하게 공모전 스위치만 본다** — 개최 권한(운영자가 계정별로 켠다)
+// 이 결제를 대신하므로 유료 결제 흐름이 닫혀 있어도 열려 있어야 한다(staging·
+// prod 의 기본값이 정확히 이 조합이다, ADR-0048). "공모전" 목록 링크는 둘 다와
+// 무관하므로 공모전 스위치만 본다.
 import Link from "next/link";
 
 import { buttonClass } from "@/lib/ui/classnames";
@@ -71,6 +74,13 @@ export function SiteHeader({ themePreference }: { themePreference: ThemePreferen
                   공모전 개최
                 </Link>
               )}
+              <Link
+                href="/console/contests/new-free"
+                data-testid="header-cta-new-free-contest"
+                className={buttonClass("secondary", "sm")}
+              >
+                무료 공모전 개최
+              </Link>
             </>
           )}
           <ThemeToggle initialPreference={themePreference} />

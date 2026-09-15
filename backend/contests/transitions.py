@@ -118,6 +118,14 @@ CONTEST_TRANSITIONS: dict[str, ContestTransition] = {
         from_state=Contest.Status.DRAFT,
         to_state=Contest.Status.PUBLISHED,
     ),
+    # 무료 공모전의 공개 전이 (#415, ADR-0048) — 결제 대신 개최 권한
+    # (`contests.hosting_permission_services`)이 문을 연다. `contests.api.
+    # publish_free_contest`가 유일한 호출부다.
+    "publish-free": ActionContestTransition(
+        name="publish-free",
+        from_state=Contest.Status.DRAFT,
+        to_state=Contest.Status.PUBLISHED,
+    ),
     "award": ActionContestTransition(
         name="award",
         from_state=Contest.Status.CLOSED,

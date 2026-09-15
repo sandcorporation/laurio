@@ -53,6 +53,18 @@ export const SPONSOR_ACTION_LABELS: Record<SponsorNextAction, SponsorActionLabel
     canPay: true,
     canAcceptHandover: false,
   },
+  // 무료 공모전 전용(#415/#417, ADR-0048) — draft를 공개하는 행위가 결제가
+  // 아니라 `/console/contests/{id}/draft`의 공개 버튼이다. `canPay`를 두지
+  // 않는다 — 결제 화면(`/payment`) 자체가 이 공모전에는 없는 흐름이라, 링크를
+  // 걸면 없는 화면으로 보낸다. 제목 링크(아래 `SponsoredContestCard`)가 이미
+  // draft 화면으로 보내므로 별도 CTA가 없어도 갈 곳이 없지 않다.
+  publish_free_draft: {
+    text: "공개해야 목록에 뜹니다",
+    mine: true,
+    canJudge: false,
+    canPay: false,
+    canAcceptHandover: false,
+  },
   // 이 화면의 핵심. 지금 고르지 않으면 심사기간이 지나 무응답 배분으로 넘어간다.
   judge_and_award: {
     text: "제출물을 심사하고 선정하세요",

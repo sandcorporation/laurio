@@ -39,7 +39,9 @@ fail-closed 라 구멍은 아니지만 원인을 찾기 어렵다.
 | `POST /api/verification/lookup-by-ci` | CI 로 조회 |
 
 **본인확인은 행위 시점에 요구한다**(ADR-0011) — 가입할 때가 아니라 개최·제출처럼 돈이나
-책임이 걸리는 순간이다. 성인만 통과한다.
+책임이 걸리는 순간이다. 성인만 통과한다. **무료 공모전(#415/#416, ADR-0048)은 예외다** —
+개최에는 개최 권한이, 제출에는 소스 열람 동의(`source_access_consent`)가 그 자리를
+대신한다. 돈이 걸리지 않으므로 본인확인 자체가 없다.
 
 **신원은 파기되어도 계정은 남는다**(ADR-0025). 탈퇴는 신원 정보를 지우고 상태를
 `withdrawn` 으로 내리며, 2년 미이용 계정은 스캔이 `expired` 로 내린다 — 계정은 살아 있고
@@ -52,8 +54,11 @@ fail-closed 라 구멍은 아니지만 원인을 찾기 어렵다.
 | `GET /api/contests` | 공개 목록 — 참가 가능한 것이 기본, `closed=1` 로 마감된 것 |
 | `GET /api/contests/home` | 홈 큐레이션 |
 | `GET /api/contests/{id}` | 상세 — 로그인 없이 열린다 |
-| `POST /api/contests` · `PATCH /api/contests/{id}` | 개최·초안 수정 |
-| `POST /api/contests/quote` | 개최 견적 |
+| `POST /api/contests` · `PATCH /api/contests/{id}` | 개최(유료)·초안 수정 |
+| `POST /api/contests/quote` | 개최 견적(유료) |
+| `GET /api/contests/free/hosting-permission` | 내 무료 공모전 개최 권한(#415) |
+| `POST /api/contests/free` | 무료 개최(#415) — 본인확인·결제 없이, 개최 권한만 |
+| `POST /api/contests/{id}/publish` | 무료 공모전 공개(#415) — 결제 대신 개최 권한이 연다 |
 | `GET /api/contests/mine` | 내가 연 것 |
 | `POST`·`PATCH`·`DELETE .../requirements[/{id}]` | 요구사항 |
 | `.../requirement-chat/messages` | 요구사항을 LLM 과 함께 다듬는다 |
@@ -74,10 +79,12 @@ fail-closed 라 구멍은 아니지만 원인을 찾기 어렵다.
 **공모전 제품 스위치는 「공모전 / 유료 공모전」 둘이다**(`settings.
 CONTEST_PRODUCT_ENABLED`·`PAID_CONTEST_PRODUCT_ENABLED`, `core.contest_switch`,
 ADR-0048). 공모전 스위치가 꺼지면 위 표의 `contests.api` 소관 표면 전체(목록·
-상세·홈·수정·요구사항·AI grill·이미지·조회 기록과, 아래 유료 스위치가 닫는 것
-전부)가 404다. 유료 스위치만(공모전은 켜진 채) 꺼지면 견적·본인확인이 필요한
-개최·재개최·심사기간 연장이 404다 — 무료 개최(#415)가 생기기 전까지는 개최·
-재개최 자체가 전부 이 유료 경로다. `GET /api/contests/categories`·
+상세·홈·수정·요구사항·AI grill·이미지·조회 기록·무료 개최·공개와, 아래 유료
+스위치가 닫는 것 전부)가 404다. 유료 스위치만(공모전은 켜진 채) 꺼지면
+견적·본인확인이 필요한 개최·재개최·심사기간 연장이 404다 — 무료 개최
+(`POST /api/contests/free`)·공개(`POST /api/contests/{id}/publish`, #415)는
+공모전 스위치만 보므로 유료 스위치가 꺼져도 그대로 열려 있다. `GET
+/api/contests/categories`·
 `deliverable-types`(주소만으로는 다른 소관과 갈리지 않아 예외로 열어 둔다)와,
 `award`·`handover`·`payout`·`metrics`·`submissions/compare`(각각 awards·
 handovers·payouts·submissions 앱 소관 — 이미 존재하는 공모전을 마무리하는
@@ -97,6 +104,13 @@ staging·prod 배포만 유료 스위치를 끈다(`CLAUDE.md` 「배포」). �
 | `GET`·`POST /api/submissions/{id}/appeal` | 이의 |
 | `GET`·`POST /api/submissions/{id}/build-assets` | 인수용 빌드 산출물 |
 | `GET .../source-readings` | 내 소스를 누가 열람했는가 |
+
+**무료 공모전 제출은 본인확인 대신 소스 열람 동의를 요구한다**(#416, ADR-0048).
+`contest.is_free`면 `POST`·`PUT .../submissions[/me]`가 본인확인·자전거래 검사를
+건너뛰고 대신 `SubmissionIn.source_access_consent`를 확인한다 — 없으면(또는
+false면) 422다. 동의마다 `ContestSubmission.source_access_consent_at`(제출·
+수정 때마다 다시 찍는다)을 남기고 `SubmissionOut`에 그대로 싣는다. 유료
+공모전은 이 필드를 무시한다(그 대신 본인확인이 있다).
 
 **제출물은 자료를 여럿 갖는다**(ADR-0027) — 소스·저장소·시연 영상·스크린샷·데모 URL(#264,
 ADR-0036). 업로드 자료의 값은 `submission:{공모전id}:{개발자id}:{슬롯}/…` 로 시작해야
@@ -141,6 +155,18 @@ ADR-0036). 업로드 자료의 값은 `submission:{공모전id}:{개발자id}:{�
 
 **지급대행 등록은 지급 확정 뒤에 일어난다**(ADR-0020) — 순서가 반대면 아직 받을지도 모르는
 사람에게 판매자 등록을 요구하게 된다. 신원은 토스가, 세무는 Codemit 가 맡는다(ADR-0008).
+
+**무료 공모전은 이 절 전체를 건드리지 않는다**(#417, ADR-0048). `awards.api.
+award_submission`이 무료 공모전이면 `Award`만 만들고 `Handover`를 만들지 않는다 —
+Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover[/accept]`·
+`POST/GET .../payout`이 그 공모전에 대해 자연스럽게 404다("이 공모전은 아직
+선정되지 않아 인수 정보가 없습니다" — Handover 행이 없다는 사실 그대로다).
+심사기간이 무응답으로 끝나도 `distributions.services.distribution_due_q`가
+`is_free=False`를 조건에 넣어 `Distribution`을 만들지 않는다 — 나눠 줄 돈이
+없다. 이의제기(`POST /submissions/{id}/appeal`)도 무료 공모전이면 404다.
+유료 심사기간 연장(`.../extend-judging-period`)도 유료 스위치가 켜져 있어도
+무료 공모전 자신에 대해서는 409다. 수상자 알림(`notify_award_result`)만은
+유료·무료 구분 없이 그대로 보낸다.
 
 ### 강의실
 
@@ -352,21 +378,24 @@ llm_scoring`(#274)에 이어 `core.repository_adapters`(GitHub 저장소 clone·
 | 상태 | 무엇인가 | 어떻게 들어오는가 |
 | --- | --- | --- |
 | `draft` | 초안 | 개최 |
-| `published` | 공개 | 결제 확인 |
+| `published` | 공개 | 결제 확인(유료) 또는 개최 권한(무료, #415) |
 | `closed` | 마감 | 스캔(마감 시각 경과) — 이때 심사 종료 시각도 함께 찍힌다 |
 | `awarded` | 선정 완료 | 발주자의 선정 |
 | `judging_ended` | 심사기간 종료 | 스캔(아무도 선정하지 않은 채 심사 종료) |
 
 **전이 그래프는 `contests/transitions.py` 한 곳에 선언되어 있다**(#255) — 위 표의
-「어떻게 들어오는가」열이 서술하는 네 간선이 그 선언의 `CONTEST_TRANSITIONS`다.
-그 밖에서 `Contest.status`를 바꾸는 코드는 태어날 수 없다(#256, AST 정적 스캔).
-아래 다이어그램은 그 선언에서 **자동으로 낸다** — 손으로 그리지 않는다:
+「어떻게 들어오는가」열이 서술하는 다섯 간선이 그 선언의 `CONTEST_TRANSITIONS`다
+(`draft -> published`가 결제(`publish-on-payment`)와 개최 권한(`publish-free`,
+#415) 둘로 갈린다). 그 밖에서 `Contest.status`를 바꾸는 코드는 태어날 수
+없다(#256, AST 정적 스캔). 아래 다이어그램은 그 선언에서 **자동으로 낸다** —
+손으로 그리지 않는다:
 
 ```mermaid
 stateDiagram-v2
     published --> closed : contest-close
     closed --> judging_ended : contest-judging-end
     draft --> published : publish-on-payment
+    draft --> published : publish-free
     closed --> awarded : award
     note right of closed : judging-extension (제자리 갱신, 상태 불변)
 ```

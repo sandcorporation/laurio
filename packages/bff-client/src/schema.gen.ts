@@ -1259,8 +1259,9 @@ export interface paths {
          *     Prize가 선택한 DeliverableType 최소 상금 합계에 미달해도 등록은 성공한다 —
          *     「상금미달」 배지만 선다. 플랫폼은 신호를 줄 뿐 금지하지 않는다.
          *
-         *     본인확인을 요구하는 **유료** 개최다 — 무료 개최(#415)가 생기기 전까지는 이
-         *     엔드포인트가 유일한 개최 경로이므로 유료 공모전 스위치(#413)가 닫는다. 과제
+         *     본인확인을 요구하는 **유료** 개최다 — 유료 공모전 스위치(#413)가 닫는다.
+         *     무료 개최는 `create_free_contest`(`POST /contests/free`, #415)가 별도로
+         *     연다 — 본인확인 대신 개최 권한을 요구하고 Prize를 받지 않는다. 과제
          *     개설 자체는 과제 라우터와 함께 걷혔다(#361, 부모 #358).
          */
         post: operations["contests_api_create_contest"];
@@ -1296,6 +1297,61 @@ export interface paths {
         };
         /** List Deliverable Types */
         get: operations["contests_api_list_deliverable_types"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/contests/free": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Free Contest
+         * @description 개최 권한이 있는 사용자가 본인확인·결제 없이 무료 공모전 초안을 만든다
+         *     (#415, ADR-0048).
+         *
+         *     `create_contest`(유료)와 갈리는 지점 셋: 본인확인을 요구하지 않고,
+         *     Verification 대신 `HostingPermission`을 확인하며, Prize를 받지 않는다
+         *     — 무료 공모전은 상금·최소 제안 상금·상금미달 판정 자체가 없으므로
+         *     `prize`·`required_minimum_prize`는 0, `is_underfunded`는 늘 False로
+         *     만든다.
+         *
+         *     공모전 스위치(#271)만 본다 — 유료 스위치(#413)와 무관하게 열려 있다.
+         */
+        post: operations["contests_api_create_free_contest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/contests/free/hosting-permission": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Own Hosting Permission
+         * @description 로그인한 사용자 본인의 개최 권한 (#415, user story 13). 공개 앱의 무료
+         *     공모전 만들기 화면이 폼을 그리기 전에 이 값을 먼저 확인해, 권한이 없으면
+         *     폼 대신 안내를 보인다 — 헛걸음 방지다. `POST /contests/free`가 실제
+         *     집행자이고, 이 엔드포인트는 화면이 미리 묻는 자리일 뿐이다.
+         *
+         *     **`/contests/{contest_id}`보다 먼저 등록해야 한다** — `/contests/mine`과
+         *     같은 이유(위 `list_my_sponsored_contests` 참고).
+         */
+        get: operations["contests_api_get_own_hosting_permission"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1454,6 +1510,10 @@ export interface paths {
          *     구조적으로 무효가 되지 않고, 그것을 쓴 사람이 Sponsor 자신이다(spec #110
          *     Implementation Decisions). 이 엔드포인트는 `Requirement`를 전혀 건드리지
          *     않는다 — 화면이 "요구형태를 바꿨다"는 사실을 스스로 안내한다.
+         *
+         *     **무료 공모전은 `prize`를 받지 않는다(#415, ADR-0048).** 상금·결제·Escrow가
+         *     아예 없는 공모전이라 바꿀 대상 자체가 없다 — 화면이 이 필드를 아예 감추는
+         *     것과 별개로(사고 예방), 여기서도 거절한다(방어).
          */
         patch: operations["contests_api_update_draft_contest"];
         trace?: never;
@@ -1717,6 +1777,37 @@ export interface paths {
         put?: never;
         /** Request Payout */
         post: operations["payouts_api_request_payout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/contests/{contest_id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish Free Contest
+         * @description 개최 권한이 있는 Sponsor가 무료 공모전 초안을 결제 없이 공개한다
+         *     (#415, ADR-0048).
+         *
+         *     유료 경로의 `publish-on-payment`(결제 확인이 부르는 훅, `payments.models.
+         *     Payment.on_paid`)와 짝이다 — 이쪽은 사람이 직접 부르는 행위 엔드포인트이고,
+         *     문을 여는 조건이 결제 완료가 아니라 **지금 이 순간의** 개최 권한이다.
+         *     권한을 만든 뒤 회수당했다면 이 draft는 새로 공개할 수 없다(#414 — 이미
+         *     공개된 Contest는 영향받지 않지만, 아직 draft인 것은 새 규칙을 그대로
+         *     적용받는다).
+         *
+         *     소유자·DRAFT 게이트는 `_get_owned_draft_contest`가 진다(404/409) — 공모전
+         *     스위치도 그 안에서 이미 확인된다.
+         */
+        post: operations["contests_api_publish_free_contest"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4862,6 +4953,11 @@ export interface components {
              */
             images: components["schemas"]["ContestImageOut"][];
             /**
+             * Is Free
+             * @default false
+             */
+            is_free: boolean;
+            /**
              * Is Owner
              * @default false
              */
@@ -5092,6 +5188,35 @@ export interface components {
             /** Value */
             value: string;
         };
+        /**
+         * FreeContestCreateIn
+         * @description 무료 공모전 초안 생성 입력 (#415, ADR-0048) — `ContestCreateIn`과 달리
+         *     `prize`가 없다: 무료 공모전은 상금·결제·Escrow가 없으므로 애초에 받지
+         *     않는다(0을 받아 무시하는 것이 아니라 필드 자체가 없다).
+         */
+        FreeContestCreateIn: {
+            /** Category Id */
+            category_id: number;
+            /**
+             * Deadline At
+             * Format: date-time
+             */
+            deadline_at: string;
+            /** Deliverable Type Ids */
+            deliverable_type_ids: number[];
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Requirements
+             * @default []
+             */
+            requirements: components["schemas"]["RequirementIn"][];
+            /** Title */
+            title: string;
+        };
         /** HandoverOut */
         HandoverOut: {
             /** Award Id */
@@ -5176,6 +5301,15 @@ export interface components {
             user_email: string;
             /** User Id */
             user_id: number;
+        };
+        /**
+         * HostingPermissionSelfOut
+         * @description 로그인한 사용자 본인의 개최 권한 상태 (#415) — 공개 앱의 무료 공모전
+         *     만들기 화면이 진입 전에 확인한다(권한이 없으면 안내를 보인다).
+         */
+        HostingPermissionSelfOut: {
+            /** Is Granted */
+            is_granted: boolean;
         };
         /** IdentitySubmitIn */
         IdentitySubmitIn: {
@@ -5502,6 +5636,11 @@ export interface components {
              * Format: date-time
              */
             deadline_at: string;
+            /**
+             * Is Free
+             * @default false
+             */
+            is_free: boolean;
             next_action: components["schemas"]["NextAction"];
             /** Prize */
             prize: number;
@@ -5595,7 +5734,7 @@ export interface components {
          * @description Developer 가 지금 무엇을 해야 하는가 — 또는 무엇을 기다리는가.
          * @enum {string}
          */
-        NextAction: "awaiting_scoring" | "awaiting_judging" | "awaiting_appeal_ruling" | "awaiting_distribution" | "awaiting_handover_release" | "awaiting_seller_registration" | "can_edit_submission" | "needs_reverification" | "can_appeal" | "request_payout" | "submit_tax_identity" | "not_selected" | "payout_complete" | "retry_transfer" | "awaiting_transfer_resolution";
+        NextAction: "awaiting_scoring" | "awaiting_judging" | "awaiting_appeal_ruling" | "awaiting_distribution" | "awaiting_handover_release" | "awaiting_seller_registration" | "can_edit_submission" | "needs_reverification" | "can_appeal" | "request_payout" | "submit_tax_identity" | "not_selected" | "payout_complete" | "awarded" | "retry_transfer" | "awaiting_transfer_resolution";
         /** NotificationOut */
         NotificationOut: {
             /** Body */
@@ -5860,6 +5999,11 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /**
+             * Is Free
+             * @default false
+             */
+            is_free: boolean;
             /** Model Version */
             model_version: string;
             /** Percentage */
@@ -6844,7 +6988,7 @@ export interface components {
          * @description Sponsor 가 이 공모전에 대해 지금 무엇을 해야 하는가 — 또는 무엇을 기다리는가.
          * @enum {string}
          */
-        SponsorNextAction: "pay_to_publish" | "judge_and_award" | "accept_handover" | "awaiting_submissions" | "awaiting_scoring" | "awaiting_appeal_ruling" | "awaiting_distribution" | "awaiting_payout" | "no_submissions" | "contest_complete";
+        SponsorNextAction: "pay_to_publish" | "publish_free_draft" | "judge_and_award" | "accept_handover" | "awaiting_submissions" | "awaiting_scoring" | "awaiting_appeal_ruling" | "awaiting_distribution" | "awaiting_payout" | "no_submissions" | "contest_complete";
         /**
          * SubmissionAssetIn
          * @description 제출 페이로드가 담는 자료 하나 (#190).
@@ -6926,6 +7070,11 @@ export interface components {
              * @default []
              */
             requirement_responses: components["schemas"]["RequirementResponseIn"][];
+            /**
+             * Source Access Consent
+             * @default false
+             */
+            source_access_consent: boolean;
         };
         /** SubmissionOut */
         SubmissionOut: {
@@ -6948,6 +7097,8 @@ export interface components {
             next_action?: components["schemas"]["NextAction"] | null;
             /** Requirement Responses */
             requirement_responses: components["schemas"]["RequirementResponseOut"][];
+            /** Source Access Consent At */
+            source_access_consent_at?: string | null;
             /**
              * Updated At
              * Format: date-time
@@ -9160,6 +9311,50 @@ export interface operations {
             };
         };
     };
+    contests_api_create_free_contest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FreeContestCreateIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContestOut"];
+                };
+            };
+        };
+    };
+    contests_api_get_own_hosting_permission: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostingPermissionSelfOut"];
+                };
+            };
+        };
+    };
     contests_api_get_home_curation: {
         parameters: {
             query?: never;
@@ -9631,6 +9826,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    contests_api_publish_free_contest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contest_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContestOut"];
                 };
             };
         };

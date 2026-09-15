@@ -34,6 +34,11 @@ class SponsorNextAction(models.TextChoices):
     # 결제해야 공개된다. 초안인 채로 두면 아무 일도 일어나지 않는데, 그 사실을
     # 말해 주는 곳이 지금까지 없었다.
     PAY_TO_PUBLISH = "pay_to_publish", "결제 필요"
+    # 무료 공모전(#415/#417, ADR-0048) 전용 — 결제가 아니라 `POST /contests/
+    # {id}/publish`(개최 권한만 있으면 된다)로 문을 연다. `PAY_TO_PUBLISH`와
+    # 같은 자리(draft인 채로 두면 아무 일도 안 일어난다)지만 가리키는 행위가
+    # 다르다 — 하나로 합치면 화면이 없는 결제 화면으로 링크를 건다.
+    PUBLISH_FREE_DRAFT = "publish_free_draft", "공개 필요"
     # **이 화면의 핵심.** 심사기간이 남아 있다 — 지금 고르지 않으면 심사기간이
     # 지나 무응답 배분으로 넘어가고, 개최자는 고를 수 있었던 결과를 고르지 못한
     # 채 끝난다.
@@ -131,6 +136,10 @@ def sponsor_next_action_for(contest, *, now) -> str:
     from contests.models import Contest
 
     if Contest.Status.PAYABLE(contest.status):
+        # `PAYABLE`은 "아직 DRAFT다"를 묻지 결제 여부를 묻지 않는다(#415) —
+        # 무료 공모전의 draft도 여기 걸리므로 여기서 갈라야 한다.
+        if contest.is_free:
+            return SponsorNextAction.PUBLISH_FREE_DRAFT
         return SponsorNextAction.PAY_TO_PUBLISH
 
     if Contest.Status.SUBMITTABLE(contest.status) and now < contest.deadline_at:
@@ -177,10 +186,21 @@ def sponsor_next_action_for(contest, *, now) -> str:
     if contest.has_pending_appeal and contest.is_distribution_due:
         return SponsorNextAction.AWAITING_APPEAL_RULING
 
+    # 무료 공모전은 여기서 배분으로 넘어가지 않는다(#417, ADR-0048) — 상금·
+    # Escrow가 없으므로 나눠 줄 돈이 없다. 심사 기간 안에 아무도 선정하지
+    # 않았다는 것은 그대로 끝난 상태다.
+    if contest.is_free:
+        return SponsorNextAction.CONTEST_COMPLETE
+
     return SponsorNextAction.AWAITING_DISTRIBUTION
 
 
 def _awarded_action(contest, award) -> str:
+    if contest.is_free:
+        # 무료 공모전은 Handover 자체가 없다(#417) — Escrow 해제·지급 절차가
+        # 없으므로 선정되는 순간 개최자가 할 일이 끝난다.
+        return SponsorNextAction.CONTEST_COMPLETE
+
     from handovers.models import Handover
 
     handover = getattr(award, "handover", None)

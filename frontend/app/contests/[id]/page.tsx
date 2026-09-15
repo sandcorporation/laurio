@@ -89,28 +89,49 @@ export default async function ContestDetailPage({ params }: { params: Promise<Pa
             ) : undefined
           }
           actions={
-            contest.status === "closed" || contest.is_underfunded ? (
+            contest.is_free || contest.status === "closed" || contest.is_underfunded ? (
               <>
+                {contest.is_free && <Badge tone="verified">무료 공모전</Badge>}
                 {contest.status === "closed" && <Badge>마감된 공모전 — 데모·영상 공개</Badge>}
-                {contest.is_underfunded && <Badge tone="attention">상금미달</Badge>}
+                {!contest.is_free && contest.is_underfunded && (
+                  <Badge tone="attention">상금미달</Badge>
+                )}
               </>
             ) : undefined
           }
         />
 
+        {contest.is_free && (
+          <p
+            className="border border-rule bg-surface px-4 py-3 text-sm leading-relaxed text-ink/80"
+            data-testid="free-contest-source-access-notice"
+          >
+            무료 공모전입니다 — 상금 없이 열리며, 개최자가 설명에 적은 보상은 플랫폼이
+            보증하지 않습니다. 수상작의 소스는 개최자가 볼 수 있습니다.
+          </p>
+        )}
+
         <section className="grid grid-cols-3 gap-6 border-b border-rule pb-6">
           <div className="flex flex-col gap-1">
             <span className="text-xs tracking-wide text-ink/60">상금</span>
-            <span
-              className={`font-mono text-2xl font-medium ${contest.is_underfunded ? "text-attention" : ""}`}
-            >
-              {formatPrize(contest.prize)}원
-            </span>
-            {contest.is_underfunded && (
-              <span className="text-xs text-ink/60">
-                최소 제안 상금 합계 {formatPrize(contest.required_minimum_prize)}원에 미달합니다.
-                참가를 막지는 않습니다.
+            {contest.is_free ? (
+              <span className="font-mono text-2xl font-medium" data-testid="free-contest-prize-label">
+                무료
               </span>
+            ) : (
+              <>
+                <span
+                  className={`font-mono text-2xl font-medium ${contest.is_underfunded ? "text-attention" : ""}`}
+                >
+                  {formatPrize(contest.prize)}원
+                </span>
+                {contest.is_underfunded && (
+                  <span className="text-xs text-ink/60">
+                    최소 제안 상금 합계 {formatPrize(contest.required_minimum_prize)}원에 미달합니다.
+                    참가를 막지는 않습니다.
+                  </span>
+                )}
+              </>
             )}
           </div>
           <div className="flex flex-col gap-1">

@@ -267,6 +267,14 @@ class Contest(models.Model):
     deadline_at = models.DateTimeField()
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
 
+    # 무료 공모전인가 (#415, ADR-0048) — 돈을 다루지 않는다. 결제·본인확인
+    # 없이 개최 권한(`HostingPermission`)만으로 공개하고(`publish-free`
+    # 전이, contests/transitions.py), 마감 뒤 Award는 만들되 Handover·
+    # Escrow 해제·Distribution은 만들지 않는다(#417). `prize`는 무료
+    # 공모전에서 항상 0이고 `required_minimum_prize`/`is_underfunded`도
+    # 항상 0/False다 — 상금 개념 자체가 없다.
+    is_free = models.BooleanField(default=False)
+
     # 심사기간 종료 시각 (#13, ADR-0003). CLOSED 전이가 일어나는 조건부 UPDATE 안에서
     # deadline_at + PlatformPolicy.judging_period_days(#78/ADR-0023)로 함께
     # 채워진다. 유료 연장은 이 컬럼만
@@ -934,6 +942,13 @@ class ContestSubmission(Submission):
     developer = models.ForeignKey(
         "accounts.DeveloperProfile", related_name="submissions", on_delete=models.CASCADE
     )
+
+    # 무료 공모전 전용 동의 시각 (#416, ADR-0048) — 「수상작의 소스는 개최자가
+    # 볼 수 있습니다」에 언제 동의했는지. 무료 공모전이 아니면 항상 null이다 —
+    # 유료 공모전은 본인확인이 그 자리를 대신한다. `contests.submission_api.
+    # create_submission`/`update_submission`이 무료 공모전 제출마다 이 값을
+    # 다시 찍는다(제출·수정 둘 다 동의를 다시 확인한다).
+    source_access_consent_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         constraints = [

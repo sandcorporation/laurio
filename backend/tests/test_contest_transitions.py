@@ -50,12 +50,16 @@ def test_the_five_scattered_spots_are_declared_as_exactly_these_six_edges():
     apps.py 가 스캔 셋을 등록하므로 한 자리가 셋을 낳는다. (일곱 번째 **호출부**
     `seed_e2e_operator_queues.py` 도 있었지만 새 간선이 아니라 이미 있는
     「contest-close」를 손으로 다시 부르던 것이었다 — #255 코드리뷰가 잡아 지금은
-    그 자리도 이 표를 그대로 쓴다.)"""
+    그 자리도 이 표를 그대로 쓴다.)
+
+    무료 공모전의 공개 전이 「publish-free」(#415, ADR-0048)가 일곱 번째로 더해졌다
+    — 결제 대신 개최 권한이 여는, `draft -> published`로 가는 두 번째 간선이다."""
 
     assert set(CONTEST_TRANSITIONS) == {
         "contest-close",
         "contest-judging-end",
         "publish-on-payment",
+        "publish-free",
         "award",
     }
 

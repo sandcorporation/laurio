@@ -369,7 +369,8 @@ function ContestRow({ contest }: { contest: Contest }) {
       <div className="flex min-w-0 flex-col gap-1.5">
         <div className="flex items-center gap-2">
           <span className="truncate text-[15.5px] font-medium">{contest.title}</span>
-          {contest.is_underfunded && <Badge tone="attention">상금미달</Badge>}
+          {contest.is_free && <Badge tone="verified">무료 공모전</Badge>}
+          {!contest.is_free && contest.is_underfunded && <Badge tone="attention">상금미달</Badge>}
           {/* #227 인수조건 — 끝난 공모전이 목록에 나올 때는 끝났다는 것이 보인다.
               선정완료·심사종료도 마찬가지다(예전에는 "마감"만 배지가 있었다 —
               그때는 그 둘이 기본 목록에 아예 안 나와 드러나지 않았던 격차다). */}
@@ -377,7 +378,7 @@ function ContestRow({ contest }: { contest: Contest }) {
         </div>
         <div className="text-xs text-ink/60">
           {contest.category.name}
-          {contest.is_underfunded && (
+          {!contest.is_free && contest.is_underfunded && (
             <> · 최소 제안 {formatPrize(contest.required_minimum_prize)}원</>
           )}
         </div>
@@ -395,9 +396,11 @@ function ContestRow({ contest }: { contest: Contest }) {
         ))}
       </div>
       <div
-        className={`text-right font-mono text-base font-medium ${contest.is_underfunded ? "text-attention" : ""}`}
+        className={`text-right font-mono text-base font-medium ${
+          !contest.is_free && contest.is_underfunded ? "text-attention" : ""
+        }`}
       >
-        {formatPrize(contest.prize)}
+        {contest.is_free ? "무료" : formatPrize(contest.prize)}
       </div>
       <div
         data-testid="deadline"

@@ -17,11 +17,13 @@ export function contestProductEnabled(): boolean {
   return process.env.NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED !== "false";
 }
 
-// 유료 공모전 스위치(#413) — 무료 개최(#415)가 생기기 전까지는 공모전 개최
-// 자체가 전부 이 스위치 아래다(본인확인·견적·결제). `contestProductEnabled()`와
-// 마찬가지로 백엔드가 아니라 이 값을 먼저 본다 — 백엔드가 꺼져 있어도(공모전
-// 스위치 자체가 꺼진 경우) 이 값은 `true`로 남을 수 있으므로, 화면은 항상 두
-// 값을 함께 읽는다(`contestProductEnabled() && paidContestProductEnabled()`).
+// 유료 공모전 스위치(#413) — 본인확인·견적·결제로 이어지는 **유료** 개최
+// 흐름만 이 스위치 아래다. 무료 개최(`/console/contests/new-free`, #415)는
+// 개최 권한이 결제를 대신하므로 이 값과 무관하게 열려 있다.
+// `contestProductEnabled()`와 마찬가지로 백엔드가 아니라 이 값을 먼저 본다 —
+// 백엔드가 꺼져 있어도(공모전 스위치 자체가 꺼진 경우) 이 값은 `true`로 남을
+// 수 있으므로, 유료 흐름을 감추는 화면은 항상 두 값을 함께 읽는다
+// (`contestProductEnabled() && paidContestProductEnabled()`).
 export function paidContestProductEnabled(): boolean {
   return process.env.NEXT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED !== "false";
 }

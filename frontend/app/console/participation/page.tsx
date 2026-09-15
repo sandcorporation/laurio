@@ -148,7 +148,10 @@ function ParticipationCard({ row }: { row: ParticipationRow }) {
 
       {/* **모든 행에 건다.** 「채점됐을 때만」으로 좁히면 서버가 이미 내린 판정을
           화면이 다시 파생하는 것이고, 이의가 기각된 사람은 자기 점수를 다시 볼
-          길이 없어진다. 채점 전이면 그 화면이 "아직 채점되지 않았다"고 말한다. */}
+          길이 없어진다. 채점 전이면 그 화면이 "아직 채점되지 않았다"고 말한다.
+          무료 공모전(#417)도 이 링크는 그대로 둔다 — 채점 결과는 여전히 보고
+          싶어 한다(spec #417 user story 24); 이의제기 버튼만 그 화면이
+          `contest.is_free`로 감춘다(없는 절차라 #417 user story 28). */}
       <Link
         className="mt-2 inline-block text-sm underline"
         href={`/console/participation/${row.submission_id}/appeal`}

@@ -164,6 +164,13 @@ class SetHostingPermissionIn(Schema):
     reason: str
 
 
+class HostingPermissionSelfOut(Schema):
+    """로그인한 사용자 본인의 개최 권한 상태 (#415) — 공개 앱의 무료 공모전
+    만들기 화면이 진입 전에 확인한다(권한이 없으면 안내를 보인다)."""
+
+    is_granted: bool
+
+
 class HostingPermissionChangeOut(Schema):
     id: int
     user_id: int
@@ -248,6 +255,19 @@ class ContestCreateIn(Schema):
     requirements: list[RequirementIn] = []
 
 
+class FreeContestCreateIn(Schema):
+    """무료 공모전 초안 생성 입력 (#415, ADR-0048) — `ContestCreateIn`과 달리
+    `prize`가 없다: 무료 공모전은 상금·결제·Escrow가 없으므로 애초에 받지
+    않는다(0을 받아 무시하는 것이 아니라 필드 자체가 없다)."""
+
+    title: str = Field(max_length=200)
+    category_id: int
+    deliverable_type_ids: list[int]
+    description: str = ""
+    deadline_at: datetime
+    requirements: list[RequirementIn] = []
+
+
 class ContestUpdateIn(Schema):
     """DRAFT Contest를 고치는 요청 (#113, 부모 #110).
 
@@ -279,6 +299,9 @@ class ContestOut(Schema):
     status: str
     required_minimum_prize: int
     is_underfunded: bool
+    # 무료 공모전인가(#415, ADR-0048) — 참이면 상금·결제·Escrow가 없다. 화면은
+    # 이 값으로 「무료 공모전」 표시를 붙이고 상금 관련 표시를 감춘다.
+    is_free: bool = False
     requirements: list[RequirementOut]
     # Sponsor가 붙인 참고 이미지 (#234, ADR-0032) — 순서대로 온다. 빈 목록이면
     # 화면이 "이미지가 없는 게 의도됐다"로 그린다(spec #225 user story 15).

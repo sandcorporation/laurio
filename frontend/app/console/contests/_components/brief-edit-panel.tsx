@@ -18,7 +18,9 @@ export type BriefEditPatch = {
   title: string;
   category_id: number;
   deliverable_type_ids: number[];
-  prize: number;
+  // 무료 공모전(#415, ADR-0048)은 상금 자체가 없다 — `prize`를 아예 보내지
+  // 않는다(백엔드도 무료 공모전에 `prize`가 실리면 422로 거절한다).
+  prize?: number;
   deadline_at: string;
   description: string;
 };
@@ -105,7 +107,7 @@ export function BriefEditPanel({
   const formInvalidReason =
     form.categoryId === ""
       ? "카테고리를 선택해주세요."
-      : !Number.isFinite(prizeNumber) || prizeNumber <= 0
+      : !contest.is_free && (!Number.isFinite(prizeNumber) || prizeNumber <= 0)
         ? "상금은 0보다 큰 금액이어야 합니다."
         : form.deliverableTypeIds.length === 0
           ? "요구형태를 하나 이상 선택해주세요."
@@ -132,7 +134,7 @@ export function BriefEditPanel({
       title: form.title.trim(),
       category_id: form.categoryId,
       deliverable_type_ids: form.deliverableTypeIds,
-      prize: prizeNumber,
+      ...(contest.is_free ? {} : { prize: prizeNumber }),
       deadline_at: new Date(form.deadlineAt).toISOString(),
       description: form.description,
     });
@@ -240,17 +242,19 @@ export function BriefEditPanel({
             ))}
           </fieldset>
 
-          <label className="flex flex-col gap-1 text-sm">
-            상금 (원)
-            <input
-              type="number"
-              min={1}
-              value={form.prize}
-              onChange={(event) => setForm((prev) => ({ ...prev, prize: event.target.value }))}
-              data-testid="draft-edit-prize"
-              className={`${INPUT_CLASS} font-mono`}
-            />
-          </label>
+          {!contest.is_free && (
+            <label className="flex flex-col gap-1 text-sm">
+              상금 (원)
+              <input
+                type="number"
+                min={1}
+                value={form.prize}
+                onChange={(event) => setForm((prev) => ({ ...prev, prize: event.target.value }))}
+                data-testid="draft-edit-prize"
+                className={`${INPUT_CLASS} font-mono`}
+              />
+            </label>
+          )}
 
           <label className="flex flex-col gap-1 text-sm">
             마감 기한
