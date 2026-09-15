@@ -2488,6 +2488,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/notifications/{notification_id}/image-download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Download Operator Notice Image
+         * @description 운영팀 알림에 첨부된 이미지를 연다(#419) — **받는 사람 본인**만.
+         *     남의 알림 id는 `mark_one_read`와 같은 이유로 존재하지 않는 것처럼 404다.
+         *     발급 주소는 짧게(분 단위) 유효하고, 목록 응답에는 절대 싣지 않는다(위
+         *     `NotificationOut.has_image` 독스트링).
+         */
+        post: operations["notifications_api_download_operator_notice_image"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/notifications/{notification_id}/mark-read": {
         parameters: {
             query?: never;
@@ -2918,6 +2941,103 @@ export interface paths {
         };
         /** Operator Me */
         get: operations["accounts_operator_api_operator_me"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/notifications/operator-notices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Operator Notices
+         * @description 발송 이력 — 받는 사람·보낸 운영자·시각·읽음 여부. 최신순이고 수정·삭제
+         *     엔드포인트는 없다(append-only).
+         */
+        get: operations["notifications_operator_api_list_operator_notices"];
+        put?: never;
+        /**
+         * Send Notice
+         * @description 제목·본문을 받는 사람 한 명에게 보낸다. 받는 사람이 없으면 422다(AC) —
+         *     존재하지 않는 계정으로 보내려는 요청 자체가 틀린 입력이라, 자원을 못
+         *     찾았다는 404가 아니라 입력 검증 실패로 답한다. 빈 제목은 스키마의
+         *     `Field(min_length=1)`이 같은 422로 걸러낸다.
+         *
+         *     `image_object_key`가 이 요청을 보낸 운영자의 업로드 응답에서 나온 것이
+         *     아니면 422다(#419) — 남의 업로드 키를 추측해 붙이는 경로를 막는다.
+         */
+        post: operations["notifications_operator_api_send_notice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/notifications/operator-notices/image-upload-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request Image Upload Url
+         * @description 받는 사람·제목을 정하기 전에도 부를 수 있다 — 작성 화면이 이미지부터
+         *     올린다(#419). 형식이 맞지 않으면 422(`operator_notice_images.
+         *     request_upload_url`).
+         */
+        post: operations["notifications_operator_api_request_image_upload_url"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/notifications/operator-notices/recipients": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Recipients
+         * @description 이메일이나 닉네임으로 받는 사람 계정을 찾는다.
+         *
+         *     Operator(`is_staff=True`) 계정은 애초에 검색 대상이 아니다 — 참가자와
+         *     서로소인 신원이다(ADR-0018).
+         */
+        get: operations["notifications_operator_api_search_recipients"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/notifications/operator-notices/{notification_id}/image-download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Operator Notice Image As Sender
+         * @description 이력에서 보낸 이미지를 다시 연다(#419 User Story 8) — **보낸 운영자
+         *     본인**만 열 수 있다, 다른 운영자는 404다(존재 자체를 알려주지 않는다).
+         */
+        get: operations["notifications_operator_api_download_operator_notice_image_as_sender"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5196,6 +5316,33 @@ export interface components {
             /** Resident Registration Number */
             resident_registration_number: string;
         };
+        /** ImageDownloadOut */
+        ImageDownloadOut: {
+            /** Download Url */
+            download_url: string;
+            /** Expires At */
+            expires_at: string;
+        };
+        /** ImageUploadUrlIn */
+        ImageUploadUrlIn: {
+            /** Content Type */
+            content_type: string;
+        };
+        /** ImageUploadUrlOut */
+        ImageUploadUrlOut: {
+            /** Expires At */
+            expires_at: string;
+            /** Fields */
+            fields?: {
+                [key: string]: string;
+            };
+            /** Method */
+            method: string;
+            /** Object Key */
+            object_key: string;
+            /** Upload Url */
+            upload_url: string;
+        };
         /** ImportClassTemplateIn */
         ImportClassTemplateIn: {
             /** Name */
@@ -5590,6 +5737,8 @@ export interface components {
         NextAction: "awaiting_scoring" | "awaiting_judging" | "awaiting_appeal_ruling" | "awaiting_distribution" | "awaiting_handover_release" | "awaiting_seller_registration" | "can_edit_submission" | "needs_reverification" | "can_appeal" | "request_payout" | "submit_tax_identity" | "not_selected" | "payout_complete" | "awarded" | "retry_transfer" | "awaiting_transfer_resolution";
         /** NotificationOut */
         NotificationOut: {
+            /** Body */
+            body?: string | null;
             /** Context */
             context: {
                 [key: string]: unknown;
@@ -5598,6 +5747,11 @@ export interface components {
             created_at: string;
             /** Dispatches */
             dispatches: components["schemas"]["DispatchOut"][];
+            /**
+             * Has Image
+             * @default false
+             */
+            has_image: boolean;
             /** Id */
             id: number;
             /** Is Promotional */
@@ -5612,6 +5766,8 @@ export interface components {
             scheduled_for: string | null;
             /** Status */
             status: string;
+            /** Title */
+            title?: string | null;
         };
         /**
          * NotificationType
@@ -5622,7 +5778,7 @@ export interface components {
          *     해둔다. User Story 80~89 에 나오는 유형 중 최소 집합을 담았다.
          * @enum {string}
          */
-        NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "scoring_complete" | "appeal_ruled" | "new_contest_in_category" | "payout_awaits_you" | "classroom_token_budget_warning" | "classroom_submission_scored" | "classroom_scoring_key_rejected";
+        NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "scoring_complete" | "appeal_ruled" | "new_contest_in_category" | "payout_awaits_you" | "classroom_token_budget_warning" | "classroom_submission_scored" | "classroom_scoring_key_rejected" | "operator_notice";
         /** OpenAIKeyIn */
         OpenAIKeyIn: {
             /** Api Key */
@@ -5676,6 +5832,30 @@ export interface components {
             password: string;
             /** Username */
             username: string;
+        };
+        /** OperatorNoticeOut */
+        OperatorNoticeOut: {
+            /** Body */
+            body: string;
+            /** Created At */
+            created_at: string;
+            /**
+             * Has Image
+             * @default false
+             */
+            has_image: boolean;
+            /** Notification Id */
+            notification_id: number;
+            /** Read At */
+            read_at: string | null;
+            /** Recipient Email */
+            recipient_email: string;
+            /** Recipient Id */
+            recipient_id: number;
+            /** Sent By */
+            sent_by: string;
+            /** Title */
+            title: string;
         };
         /** OperatorOut */
         OperatorOut: {
@@ -6339,6 +6519,15 @@ export interface components {
             /** Minimum Total */
             minimum_total: number;
         };
+        /** RecipientOut */
+        RecipientOut: {
+            /** Display Name */
+            display_name: string;
+            /** Email */
+            email: string;
+            /** Id */
+            id: number;
+        };
         /** RefreshIn */
         RefreshIn: {
             /** Refresh */
@@ -6738,6 +6927,23 @@ export interface components {
             seller_id: string;
             /** Status */
             status: string;
+        };
+        /** SendOperatorNoticeIn */
+        SendOperatorNoticeIn: {
+            /**
+             * Body
+             * @default
+             */
+            body: string;
+            /**
+             * Image Object Key
+             * @default
+             */
+            image_object_key: string;
+            /** Recipient Id */
+            recipient_id: number;
+            /** Title */
+            title: string;
         };
         /** SetHostingPermissionIn */
         SetHostingPermissionIn: {
@@ -10306,6 +10512,28 @@ export interface operations {
             };
         };
     };
+    notifications_api_download_operator_notice_image: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                notification_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImageDownloadOut"];
+                };
+            };
+        };
+    };
     notifications_api_mark_one_read: {
         parameters: {
             query?: never;
@@ -11082,6 +11310,121 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OperatorOut"];
+                };
+            };
+        };
+    };
+    notifications_operator_api_list_operator_notices: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorNoticeOut"][];
+                };
+            };
+        };
+    };
+    notifications_operator_api_send_notice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SendOperatorNoticeIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorNoticeOut"];
+                };
+            };
+        };
+    };
+    notifications_operator_api_request_image_upload_url: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImageUploadUrlIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImageUploadUrlOut"];
+                };
+            };
+        };
+    };
+    notifications_operator_api_search_recipients: {
+        parameters: {
+            query?: {
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipientOut"][];
+                };
+            };
+        };
+    };
+    notifications_operator_api_download_operator_notice_image_as_sender: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                notification_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImageDownloadOut"];
                 };
             };
         };

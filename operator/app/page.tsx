@@ -131,6 +131,16 @@ export default function OperatorHome() {
         </Link>
       </p>
 
+      {/* 운영팀 알림(#418)으로 가는 진입점 — 위 화면들과 같은 이유로 두 등급
+          모두에게 보인다(보내기 자체에 등급 게이트가 없다, OperatorAuth면
+          충분하다). 「할 일」 큐 카드(#65/#66/#68 소관)와는 나란히 두지
+          않는다 — 대기열이 아니라 그때그때 하는 판단이다. */}
+      <p>
+        <Link href="/notifications" data-testid="operator-notifications-nav-link">
+          운영팀 알림
+        </Link>
+      </p>
+
       <section data-testid="operator-home-queues">
         <QueueCard
           testId="queue-appeals-pending"

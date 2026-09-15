@@ -193,6 +193,8 @@ export default function NotificationsPage() {
   );
 }
 
+type ImageDownloadOut = { download_url: string; expires_at: string };
+
 function NotificationRow({
   notification,
   onMarkRead,
@@ -201,6 +203,32 @@ function NotificationRow({
   onMarkRead: () => void;
 }) {
   const wasUnread = notification.read_at === null;
+  const [open, setOpen] = useState(false);
+  // 운영팀 알림(#418)만 본문을 담는다 — 다른 유형은 목록 줄 하나가 전부다.
+  const hasBody = notification.notification_type === "operator_notice";
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const [loadingImage, setLoadingImage] = useState(false);
+
+  async function toggleOpen() {
+    const next = !open;
+    setOpen(next);
+    // 첨부 이미지(#419)는 열 때마다 짧게 유효한 주소를 새로 받는다 — 목록
+    // 응답에는 유무만 있고 서명 주소가 없다.
+    if (next && notification.has_image && imageUrl === null && !loadingImage) {
+      setLoadingImage(true);
+      setImageError(null);
+      const res = await bffClient.post<ImageDownloadOut>(
+        `/api/backend/notifications/${notification.id}/image-download`,
+      );
+      setLoadingImage(false);
+      if (res.ok) {
+        setImageUrl(res.data.download_url);
+      } else {
+        setImageError(res.detail);
+      }
+    }
+  }
 
   return (
     <li
@@ -210,7 +238,19 @@ function NotificationRow({
       className="flex flex-col gap-1.5 border-b border-rule py-4"
     >
       <div className="flex items-start justify-between gap-3">
-        <p className="text-sm leading-relaxed">{describeNotification(notification)}</p>
+        <p className="text-sm leading-relaxed">
+          {describeNotification(notification)}
+          {hasBody && (
+            <button
+              type="button"
+              onClick={toggleOpen}
+              data-testid={`notification-toggle-body-${notification.id}`}
+              className="ml-2 text-xs text-ink/60 underline"
+            >
+              {open ? "접기" : "열어보기"}
+            </button>
+          )}
+        </p>
         {wasUnread && (
           <div className="flex shrink-0 items-center gap-2">
             <Badge tone="attention">
@@ -227,6 +267,48 @@ function NotificationRow({
           </div>
         )}
       </div>
+      {hasBody && open && notification.body && (
+        <p
+          className="whitespace-pre-wrap text-sm text-ink/80"
+          data-testid={`notification-body-${notification.id}`}
+        >
+          {notification.body}
+        </p>
+      )}
+      {hasBody && open && notification.has_image && (
+        <div className="flex flex-col gap-1.5">
+          {loadingImage && (
+            <p data-testid={`notification-image-loading-${notification.id}`}>
+              이미지를 불러오는 중...
+            </p>
+          )}
+          {imageError && (
+            <ErrorNote>
+              <span data-testid={`notification-image-error-${notification.id}`}>{imageError}</span>
+            </ErrorNote>
+          )}
+          {imageUrl && (
+            <>
+              {/* eslint-disable-next-line @next/next/no-img-element -- 짧게 유효한 서명 주소라 next/image 최적화 캐시에 올릴 수 없다 */}
+              <img
+                src={imageUrl}
+                alt="첨부 이미지"
+                className="max-w-xs"
+                data-testid={`notification-image-${notification.id}`}
+              />
+              <a
+                href={imageUrl}
+                target="_blank"
+                rel="noreferrer"
+                data-testid={`notification-image-open-${notification.id}`}
+                className="text-xs text-ink/60 underline"
+              >
+                크게 보기
+              </a>
+            </>
+          )}
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2 text-xs text-ink/60">
         <span className="font-mono">{formatDateTime(notification.created_at)}</span>
         <span data-testid={`notification-status-${notification.id}`}>
