@@ -221,7 +221,9 @@ export default function NewProblemPage() {
 
         <div
           data-testid="new-problem-write-panel"
-          className={tab === "write" ? "flex max-w-[720px] flex-col gap-5" : "hidden"}
+          // 폭을 묶지 않는다 — 설명 에디터가 720px 에 갇혀 쓰기 불편했다(2026-09-15).
+          // 페이지 폭(PageShell)을 그대로 써서 미리보기 탭(제출 칸까지)보다 좁지 않다.
+          className={tab === "write" ? "flex w-full flex-col gap-5" : "hidden"}
         >
         <Card>
           <form id="new-problem-form" onSubmit={handleSubmit} className="flex flex-col gap-5 p-5">
