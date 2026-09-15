@@ -39,7 +39,9 @@ fail-closed 라 구멍은 아니지만 원인을 찾기 어렵다.
 | `POST /api/verification/lookup-by-ci` | CI 로 조회 |
 
 **본인확인은 행위 시점에 요구한다**(ADR-0011) — 가입할 때가 아니라 개최·제출처럼 돈이나
-책임이 걸리는 순간이다. 성인만 통과한다.
+책임이 걸리는 순간이다. 성인만 통과한다. **무료 공모전(#415/#416, ADR-0048)은 예외다** —
+개최에는 개최 권한이, 제출에는 소스 열람 동의(`source_access_consent`)가 그 자리를
+대신한다. 돈이 걸리지 않으므로 본인확인 자체가 없다.
 
 **신원은 파기되어도 계정은 남는다**(ADR-0025). 탈퇴는 신원 정보를 지우고 상태를
 `withdrawn` 으로 내리며, 2년 미이용 계정은 스캔이 `expired` 로 내린다 — 계정은 살아 있고
@@ -102,6 +104,13 @@ staging·prod 배포만 유료 스위치를 끈다(`CLAUDE.md` 「배포」). �
 | `GET`·`POST /api/submissions/{id}/appeal` | 이의 |
 | `GET`·`POST /api/submissions/{id}/build-assets` | 인수용 빌드 산출물 |
 | `GET .../source-readings` | 내 소스를 누가 열람했는가 |
+
+**무료 공모전 제출은 본인확인 대신 소스 열람 동의를 요구한다**(#416, ADR-0048).
+`contest.is_free`면 `POST`·`PUT .../submissions[/me]`가 본인확인·자전거래 검사를
+건너뛰고 대신 `SubmissionIn.source_access_consent`를 확인한다 — 없으면(또는
+false면) 422다. 동의마다 `ContestSubmission.source_access_consent_at`(제출·
+수정 때마다 다시 찍는다)을 남기고 `SubmissionOut`에 그대로 싣는다. 유료
+공모전은 이 필드를 무시한다(그 대신 본인확인이 있다).
 
 **제출물은 자료를 여럿 갖는다**(ADR-0027) — 소스·저장소·시연 영상·스크린샷·데모 URL(#264,
 ADR-0036). 업로드 자료의 값은 `submission:{공모전id}:{개발자id}:{슬롯}/…` 로 시작해야

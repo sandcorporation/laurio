@@ -10,8 +10,12 @@
   Score를 남긴다(`scoring.services`) — Score 자체가 없어지지는 않는다.
 - `Verification`을 마치지 않았거나(또는 만 19세 미만이라 VERIFIED에 도달하지 못했거나)
   마감이 지났으면 제출·수정 모두 거부한다. "마감"은 Contest 상태 전이(#11)를 기다리지
-  않고 `deadline_at`과 `core.clock.Clock.now()`를 직접 비교한다.
-- Contest의 Sponsor와 같은 CI를 가진 사람은 제출할 수 없다(자전거래 차단).
+  않고 `deadline_at`과 `core.clock.Clock.now()`를 직접 비교한다. **무료 공모전
+  (`contest.is_free`, #416, ADR-0048)은 예외다** — 본인확인을 요구하지 않는 대신
+  「수상작의 소스는 개최자가 볼 수 있습니다」에 대한 동의(`source_access_consent`)를
+  요구한다. 동의가 없으면 422다.
+- Contest의 Sponsor와 같은 CI를 가진 사람은 제출할 수 없다(자전거래 차단) — 무료
+  공모전은 본인확인 자체가 없어 CI가 없으므로 이 검사도 함께 건너뛴다.
 - 소스는 어떤 API 응답에서도 소유자 본인 외에는 절대 나오지 않는다 — Award 자체는
   #13(`awards` 앱)이 만들었지만, 그 이후 Sponsor에게 소스 접근 권한을 여는 것
   (Handover)은 #14 소관이라 여기 새 분기가 필요할 뿐, 지금은 그 분기가 없다
@@ -122,6 +126,41 @@ def _require_verification(user) -> Verification:
             "휴대폰 본인확인을 먼저 마쳐주세요.",
         )
     return verification
+
+
+def _require_verification_unless_free(contest: Contest, user) -> Verification | None:
+    """무료 공모전은 제출에 본인확인을 요구하지 않는다(#416, ADR-0048) —
+    개최 권한이 개최를 걸러 주듯, 제출에는 애초에 그 문이 없다. 유료
+    공모전은 그대로 `_require_verification`을 거친다(그리고 그 결과가
+    자전거래 검사의 입력이 된다).
+
+    반환값이 `None`이면 무료 공모전이라 검사를 건너뛴 것이지 실패가 아니다
+    — 호출부는 `None`이면 `_reject_self_dealing`도 함께 건너뛴다(무료
+    공모전은 본인확인 CI가 아예 없어 그 검사 자체가 성립하지 않는다).
+    """
+
+    if contest.is_free:
+        return None
+    return _require_verification(user)
+
+
+def _resolve_source_access_consent(contest: Contest, payload: SubmissionIn):
+    """무료 공모전 제출의 소스 열람 동의를 확인하고 동의 시각을 낸다(#416).
+
+    동의가 없으면 422다 — 이 문장 하나가 무료 공모전에서 본인확인이 서던
+    자리(「알고 참가한다」는 사실 확인)를 대신한다. 유료 공모전은 이 필드를
+    보지 않는다(`payload.source_access_consent`가 와도 무시한다) — 본인확인이
+    이미 그 역할을 한다.
+    """
+
+    if not contest.is_free:
+        return None
+    if not payload.source_access_consent:
+        raise HttpError(
+            422,
+            "수상작의 소스는 개최자가 볼 수 있습니다 — 동의해야 제출할 수 있습니다.",
+        )
+    return Clock.now()
 
 
 def _get_published_contest_or_404(contest_id: int) -> Contest:
@@ -858,6 +897,7 @@ def _serialize(
         completion=completion,
         created_at=submission.created_at,
         updated_at=submission.updated_at,
+        source_access_consent_at=submission.source_access_consent_at,
     )
 
 
@@ -871,8 +911,10 @@ def create_submission(request: HttpRequest, contest_id: int, payload: Submission
     contest = _get_published_contest_or_404(contest_id)
     _reject_if_past_deadline(contest)
 
-    verification = _require_verification(request.auth_user)
-    _reject_self_dealing(contest, verification)
+    verification = _require_verification_unless_free(contest, request.auth_user)
+    if verification is not None:
+        _reject_self_dealing(contest, verification)
+    consent_at = _resolve_source_access_consent(contest, payload)
 
     developer, _created = DeveloperProfile.objects.get_or_create(user=request.auth_user)
 
@@ -900,6 +942,7 @@ def create_submission(request: HttpRequest, contest_id: int, payload: Submission
                 product=Submission.Product.CONTEST,
                 contest=contest,
                 developer=developer,
+                source_access_consent_at=consent_at,
             )
             removed = _merge_assets(submission, cleaned_assets)
             _replace_requirement_responses(
@@ -921,8 +964,10 @@ def update_submission(request: HttpRequest, contest_id: int, payload: Submission
     contest = _get_published_contest_or_404(contest_id)
     _reject_if_past_deadline(contest)
 
-    verification = _require_verification(request.auth_user)
-    _reject_self_dealing(contest, verification)
+    verification = _require_verification_unless_free(contest, request.auth_user)
+    if verification is not None:
+        _reject_self_dealing(contest, verification)
+    consent_at = _resolve_source_access_consent(contest, payload)
 
     developer = DeveloperProfile.objects.filter(user=request.auth_user).first()
     submission = (
@@ -945,7 +990,14 @@ def update_submission(request: HttpRequest, contest_id: int, payload: Submission
         removed = _merge_assets(submission, cleaned_assets)
         # `updated_at`(auto_now)이 자료만 바뀐 수정에도 움직이게 한다 — 안 그러면
         # "마지막으로 손댄 때"가 체크리스트를 고친 때만 가리킨다.
-        submission.save(update_fields=["updated_at"])
+        update_fields = ["updated_at"]
+        if consent_at is not None:
+            # 무료 공모전은 수정마다 동의를 다시 확인하고 시각을 새로 찍는다
+            # (#416) — 유료 공모전은 `consent_at`이 항상 None이라 이 컬럼을
+            # 건드리지 않는다.
+            submission.source_access_consent_at = consent_at
+            update_fields.append("source_access_consent_at")
+        submission.save(update_fields=update_fields)
         _replace_requirement_responses(
             submission, contest, payload.requirement_responses, removed_asset_ids=removed
         )

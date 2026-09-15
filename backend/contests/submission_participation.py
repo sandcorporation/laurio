@@ -110,9 +110,17 @@ def next_action_for(submission) -> str:
     # VERIFICATION`)를 재사용한다 — 두 벌로 쓰면 이 모듈의 docstring이
     # 경계하는 바로 그 사고가 난다.
     if now < contest.deadline_at:
-        if Contest.Status.SUBMISSION_REQUIRES_VERIFICATION(
-            contest.status
-        ) and not _owner_identity_is_verified(submission):
+        # 무료 공모전(#416, ADR-0048)은 본인확인 자체를 요구하지 않는다 —
+        # `contests.submission_api._require_verification_unless_free`와 같은
+        # 예외를 여기서도 지켜야 한다. 지키지 않으면 본인확인을 한 적 없는
+        # 무료 공모전 제출자가 마감 전인데도 NEEDS_REVERIFICATION을 받는다
+        # (본인확인이 verified가 아니므로) — 화면은 "본인확인이 필요하다"고
+        # 말하는데 서버는 애초에 본인확인 없이 이미 받아 준 제출이다.
+        if (
+            not contest.is_free
+            and Contest.Status.SUBMISSION_REQUIRES_VERIFICATION(contest.status)
+            and not _owner_identity_is_verified(submission)
+        ):
             return NextAction.NEEDS_REVERIFICATION
         return NextAction.CAN_EDIT_SUBMISSION
 

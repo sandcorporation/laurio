@@ -35,6 +35,10 @@ class ErrorOut(Schema):
 class SubmissionIn(Schema):
     assets: list[SubmissionAssetIn] = []
     requirement_responses: list[RequirementResponseIn] = []
+    # 무료 공모전 전용(#416, ADR-0048) — 「수상작의 소스는 개최자가 볼 수
+    # 있습니다」에 동의했는가. 유료 공모전 제출에는 아무 뜻이 없다(백엔드가
+    # 무시한다) — 본인확인이 그 자리를 대신하기 때문이다.
+    source_access_consent: bool = False
 
 
 class SubmissionOut(Schema):
@@ -58,6 +62,8 @@ class SubmissionOut(Schema):
     # False면 항상 null이다(남의 제출을 볼 수 있는 Sponsor·마감 후 공개 열람
     # 경로에는 노출하지 않는다).
     next_action: NextAction | None = None
+    # 무료 공모전 소스 열람 동의 시각(#416) — 유료 공모전이면 항상 null이다.
+    source_access_consent_at: datetime | None = None
 
 
 class MyParticipationOut(Schema):

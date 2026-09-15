@@ -6854,6 +6854,11 @@ export interface components {
              * @default []
              */
             requirement_responses: components["schemas"]["RequirementResponseIn"][];
+            /**
+             * Source Access Consent
+             * @default false
+             */
+            source_access_consent: boolean;
         };
         /** SubmissionOut */
         SubmissionOut: {
@@ -6876,6 +6881,8 @@ export interface components {
             next_action?: components["schemas"]["NextAction"] | null;
             /** Requirement Responses */
             requirement_responses: components["schemas"]["RequirementResponseOut"][];
+            /** Source Access Consent At */
+            source_access_consent_at?: string | null;
             /**
              * Updated At
              * Format: date-time

@@ -943,6 +943,13 @@ class ContestSubmission(Submission):
         "accounts.DeveloperProfile", related_name="submissions", on_delete=models.CASCADE
     )
 
+    # 무료 공모전 전용 동의 시각 (#416, ADR-0048) — 「수상작의 소스는 개최자가
+    # 볼 수 있습니다」에 언제 동의했는지. 무료 공모전이 아니면 항상 null이다 —
+    # 유료 공모전은 본인확인이 그 자리를 대신한다. `contests.submission_api.
+    # create_submission`/`update_submission`이 무료 공모전 제출마다 이 값을
+    # 다시 찍는다(제출·수정 둘 다 동의를 다시 확인한다).
+    source_access_consent_at = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         constraints = [
             # 한 Developer가 한 Contest에 낼 수 있는 Submission은 하나뿐이다. 두 번째
