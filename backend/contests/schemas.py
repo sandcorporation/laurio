@@ -181,6 +181,28 @@ class HostingPermissionChangeOut(Schema):
     changed_at: datetime
 
 
+class OperatorFreeContestWinnerOut(Schema):
+    """무료 공모전 목록 한 줄의 수상자 — 「운영팀 알림 보내기」가 그대로 받는
+    사람으로 채워 쓰는 값 모양이다(#418 `RecipientOut`과 같은 필드)."""
+
+    user_id: int
+    email: str
+    nickname: str
+
+
+class OperatorFreeContestOut(Schema):
+    """운영자 앱 무료 공모전 목록 한 줄 (#420) — 상태·마감·수상 여부. Award가
+    없으면(아직 심사 중이거나, 심사 기간 안에 고르지 않고 끝났으면) `winner`가
+    비어 있다."""
+
+    id: int
+    title: str
+    status: str
+    deadline_at: datetime
+    judging_ends_at: datetime | None
+    winner: OperatorFreeContestWinnerOut | None
+
+
 class QuoteIn(Schema):
     deliverable_type_ids: list[int]
 

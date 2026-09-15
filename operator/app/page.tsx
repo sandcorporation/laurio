@@ -141,6 +141,16 @@ export default function OperatorHome() {
         </Link>
       </p>
 
+      {/* 무료 공모전 목록(#420)으로 가는 진입점 — 위 화면들과 같은 이유로 두
+          등급 모두에게 보인다(조회 전용 화면이라 등급 분기 자체가 없다).
+          수상자 옆의 「운영팀 알림 보내기」가 바로 위 링크의 작성 화면으로
+          이어진다. */}
+      <p>
+        <Link href="/contests/free" data-testid="free-contests-nav-link">
+          무료 공모전
+        </Link>
+      </p>
+
       <section data-testid="operator-home-queues">
         <QueueCard
           testId="queue-appeals-pending"

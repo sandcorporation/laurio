@@ -2752,6 +2752,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operator/contests/free": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Free Contests */
+        get: operations["contests_operator_api_list_free_contests"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/operator/deliverable-types": {
         parameters: {
             query?: never;
@@ -5825,6 +5842,41 @@ export interface components {
             code: string;
             /** Detail */
             detail: string;
+        };
+        /**
+         * OperatorFreeContestOut
+         * @description 운영자 앱 무료 공모전 목록 한 줄 (#420) — 상태·마감·수상 여부. Award가
+         *     없으면(아직 심사 중이거나, 심사 기간 안에 고르지 않고 끝났으면) `winner`가
+         *     비어 있다.
+         */
+        OperatorFreeContestOut: {
+            /**
+             * Deadline At
+             * Format: date-time
+             */
+            deadline_at: string;
+            /** Id */
+            id: number;
+            /** Judging Ends At */
+            judging_ends_at: string | null;
+            /** Status */
+            status: string;
+            /** Title */
+            title: string;
+            winner: components["schemas"]["OperatorFreeContestWinnerOut"] | null;
+        };
+        /**
+         * OperatorFreeContestWinnerOut
+         * @description 무료 공모전 목록 한 줄의 수상자 — 「운영팀 알림 보내기」가 그대로 받는
+         *     사람으로 채워 쓰는 값 모양이다(#418 `RecipientOut`과 같은 필드).
+         */
+        OperatorFreeContestWinnerOut: {
+            /** Email */
+            email: string;
+            /** Nickname */
+            nickname: string;
+            /** User Id */
+            user_id: number;
         };
         /** OperatorLoginIn */
         OperatorLoginIn: {
@@ -10941,6 +10993,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    contests_operator_api_list_free_contests: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorFreeContestOut"][];
                 };
             };
         };
