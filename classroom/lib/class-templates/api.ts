@@ -14,6 +14,8 @@ export type ClassTemplateProblemRow = {
   // 공개 시점 원본의 채점 지침(#389, CONTEXT.md 「채점 지침」).
   grading_strictness: GradingStrictness;
   grading_guideline_text: string;
+  // 문법 검사 기본 항목의 공개 시점 켜짐 여부(#410).
+  syntax_check_enabled: boolean;
   order: number;
   checklist_items: TemplateChecklistItemRow[];
 };

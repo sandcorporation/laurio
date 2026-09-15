@@ -87,6 +87,13 @@ from .models import (
     ClassroomSubmission,
 )
 from .scoring_models import is_reasoning_model_id, matches_naming_rule
+from .syntax_check import (
+    SYNTAX_CHECK_ITEM_ID,
+    SyntaxCheckFile,
+    build_ai_verdict,
+    build_parser_verdict,
+    run_parser_syntax_check,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -226,12 +233,22 @@ def _requirement_inputs(checklist_items: list[ChecklistItem]) -> list[Requiremen
     ]
 
 
+#: 문법 검사 기본 항목을 AI에게 물을 때 쓰는 요구사항 문구(#409) — 강사가
+#: 만든 체크리스트 항목과 나란히 requirement_id로 판정을 받되, 그 자체가
+#: 무엇을 묻는지는 이 고정 문구로 정해진다(강사가 바꿀 수 없다).
+SYNTAX_CHECK_AI_REQUIREMENT_TEXT = (
+    "아래 「문법 검사 대상 파일」에 나열된 파일들이 프로그램으로서 구문 오류 없이 "
+    "읽히는가(실행 여부가 아니라 구문만 본다)"
+)
+
+
 def _build_prompt(
     submission: ClassroomSubmission,
     checklist_items: list[ChecklistItem],
     source_text: str,
     *,
     asset_kind: str,
+    syntax_check_unresolved: list[SyntaxCheckFile] = (),
 ) -> str:
     problem = submission.problem
     guideline_text = effective_grading_guideline_text(
@@ -270,6 +287,16 @@ def _build_prompt(
     for item in checklist_items:
         grade = "필수" if item.required else "선택"
         lines.append(f"- requirement_id={item.id} ({grade}): {item.label}")
+    if syntax_check_unresolved:
+        # 문법 검사 기본 항목(#409) — 파서가 판정하지 못한 파일만 AI에게
+        # 묻는다(파서가 이미 오류를 찾았으면 이 자리 자체가 생기지 않는다,
+        # `classroom.scoring.score_classroom_submission_once`). 채점
+        # 지침(위)과 무관하게, 오직 구문이 올바른가만 본다 — 요구의 뜻을
+        # 달성했는가를 묻는 다른 항목들과는 판정 기준 자체가 다르다.
+        lines.append(
+            f"- requirement_id={SYNTAX_CHECK_ITEM_ID} (필수, 채점 지침과 무관): "
+            f"{SYNTAX_CHECK_AI_REQUIREMENT_TEXT}"
+        )
     lines.append("")
     # 문제가 아니라 **이 시도가 실제로 낸** 자료의 형식을 적는다(#373 AC) —
     # 둘 다 열린 문제에서는 문제의 값(목록)이 프롬프트 한 줄로 뭉개지지
@@ -277,6 +304,15 @@ def _build_prompt(
     lines.append(f"제출 형식: {asset_kind}")
     lines.append("제출된 소스:")
     lines.append(source_text if source_text.strip() else "(제출된 소스에서 읽을 수 있는 텍스트가 없습니다)")
+    if syntax_check_unresolved:
+        lines.append("")
+        lines.append(
+            f"문법 검사 대상 파일 — requirement_id={SYNTAX_CHECK_ITEM_ID}는 오직 아래 "
+            "파일들만 보고 판정하세요(위 「제출된 소스」의 다른 파일은 이 항목과 무관합니다):"
+        )
+        for f in syntax_check_unresolved:
+            lines.append(f"# {f.path}")
+            lines.append(f.content if f.content.strip() else "(빈 파일)")
     return "\n".join(lines)
 
 
@@ -285,20 +321,26 @@ class _SourceNotReady(Exception):
     "source_not_found"와 같은 뜻). 재시도 대상이지 영구 실패가 아니다."""
 
 
-def _source_text_for(submission: ClassroomSubmission, asset: SubmissionAsset) -> str:
-    """LLM 프롬프트에 실을 소스 텍스트. 소스는 스토리지에서, 저장소는 GitHub에서
-    직접 읽는다 — 둘 다 `core.source_selection.select_source_files`로 같은
-    예산·선별 규율을 받는다(ADR-0027과 같은 정신, 저장소도 소스와 같은 취급)."""
+def _read_raw_source(submission: ClassroomSubmission, asset: SubmissionAsset) -> bytes:
+    """이 시도의 원본 바이트 그대로 — 소스는 스토리지에서, 저장소는 GitHub에서
+    직접 읽는다. LLM 프롬프트용 선별(`_source_text_for`, 예산 안에서 잘린다)과
+    문법 검사(`classroom.syntax_check`, 파일마다 전체 내용이 필요하다 — 잘리면
+    거짓 구문 오류가 생긴다, #408)가 이 원본을 함께 쓴다."""
 
     if asset.kind == SubmissionAsset.Kind.SOURCE:
         raw = get_storage_adapter().read_object(asset.value)
         if raw is None:
             raise _SourceNotReady("소스 오브젝트를 아직 스토리지에서 찾을 수 없다.")
-    else:
-        github = get_github_adapter()
-        if not github.check_public(asset.value):
-            raise _SourceNotReady("저장소가 공개가 아니거나 아직 확인되지 않았다.")
-        raw = github.clone(asset.value).zip_bytes
+        return raw
+    github = get_github_adapter()
+    if not github.check_public(asset.value):
+        raise _SourceNotReady("저장소가 공개가 아니거나 아직 확인되지 않았다.")
+    return github.clone(asset.value).zip_bytes
+
+
+def _source_text_for(raw: bytes, asset: SubmissionAsset) -> str:
+    """LLM 프롬프트에 실을 소스 텍스트 — `core.source_selection.select_source_files`로
+    같은 예산·선별 규율을 받는다(ADR-0027과 같은 정신, 저장소도 소스와 같은 취급)."""
 
     files = select_source_files([(asset.id, asset.label, raw)])
     return "\n\n".join(f"# {f.path}\n{f.content}" for f in files)
@@ -426,11 +468,17 @@ def _notify_submitter_of_score(submission: ClassroomSubmission, score: Classroom
     `notify_safely`를 쓴다 — 알림 생성이 실패해도 채점 자체(위에서 이미 커밋된
     `score`)는 그대로 끝나야 한다는 AC를 그 함수의 계약이 그대로 보장한다."""
 
+    problem = submission.problem
     required_ids = {item.id for item in checklist_items if item.required}
     met_ids = {r["checklist_item_id"] for r in score.reasoning if r["is_met"]}
-    passed = bool(required_ids) and required_ids.issubset(met_ids)
+    # 문법 검사 기본 항목(#408)도 필수로 포함해 셈한다 — `classroom.api.
+    # _is_score_passed`와 정확히 같은 규칙(그 함수 docstring)이다.
+    syntax_ok = (
+        not problem.syntax_check_enabled
+        or bool(score.syntax_check_result and score.syntax_check_result.get("is_met"))
+    )
+    passed = bool(required_ids) and required_ids.issubset(met_ids) and syntax_ok
 
-    problem = submission.problem
     class_obj = problem.classroom
     notify_safely(
         recipient=submission.member.user,
@@ -504,13 +552,31 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
     asset = submission.assets.get()
 
     try:
-        source_text = _source_text_for(submission, asset)
+        raw_source = _read_raw_source(submission, asset)
     except _SourceNotReady as exc:
         ClassroomScoringAttempt.objects.create(submission=submission, error=str(exc))
         return {"submission_id": submission.id, "status": "source_not_ready"}
     except GitHubAdapterError as exc:
         ClassroomScoringAttempt.objects.create(submission=submission, error=str(exc)[:2000])
         return {"submission_id": submission.id, "status": "repository_unreachable"}
+
+    source_text = _source_text_for(raw_source, asset)
+
+    # 문법 검사 기본 항목(#408/#409) — 강사가 이 문제에서 꺼 두면(#410) 아예
+    # 판정하지 않는다(`None`으로 남아 "이 시도에는 그 항목이 없다"는 뜻이
+    # 된다). 켜져 있으면 파서가 먼저 본다 — 오류를 찾았거나(`has_error`)
+    # 판정 못한 파일이 하나도 없으면 그 자리에서 끝난다(파서 판정은 토큰을
+    # 쓰지 않는다). 판정 못한 파일이 남았을 때만 그 파일들을 AI에게 묻는다
+    # (`syntax_check_unresolved`) — 채점 요청을 보낸 뒤 그 응답에서
+    # requirement_id로 마저 채운다(추가 벤더 호출을 만들지 않는다, #409).
+    syntax_check_result: dict | None = None
+    syntax_check_unresolved: list[SyntaxCheckFile] = []
+    if problem.syntax_check_enabled:
+        parser_outcome = run_parser_syntax_check(raw_source)
+        if parser_outcome.has_error or not parser_outcome.unresolved:
+            syntax_check_result = build_parser_verdict(parser_outcome)
+        else:
+            syntax_check_unresolved = parser_outcome.unresolved
 
     model = problem.model or class_obj.default_model
     if not matches_naming_rule(model):
@@ -534,7 +600,49 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
         else None
     )
 
-    prompt = _build_prompt(submission, checklist_items, source_text, asset_kind=asset.kind)
+    prompt = _build_prompt(
+        submission,
+        checklist_items,
+        source_text,
+        asset_kind=asset.kind,
+        syntax_check_unresolved=syntax_check_unresolved,
+    )
+    requirements = _requirement_inputs(checklist_items)
+    # 문법 검사 대상 파일도 소스 목록에 얹는다(#409) — OpenAIScoringAdapter는
+    # prompt만 읽어 실제 벤더 요청에는 영향이 없지만(모듈 docstring),
+    # FakeClassroomScoringAdapter는 `source_files`에서 haystack을 만들어
+    # dev·CI에서도 이 항목을 결정적으로 흉내낼 수 있게 한다.
+    source_files = [
+        SourceFile(
+            path=f"asset-{asset.id}",
+            content=source_text,
+            asset_id=asset.id,
+            asset_label=asset.label,
+        )
+    ]
+    if syntax_check_unresolved:
+        # 파서가 없거나 제한에 걸려 AI에게 넘긴 파일만 딱 그만큼 추가한다 —
+        # 프롬프트(`_build_prompt`)가 이 항목을 그 파일들로만 판정하라고
+        # 이미 못박았으므로, 벤더로 나가는 실제 정보와도 맞아떨어진다.
+        requirements = [
+            *requirements,
+            RequirementInput(
+                requirement_id=SYNTAX_CHECK_ITEM_ID,
+                text=SYNTAX_CHECK_AI_REQUIREMENT_TEXT,
+                grade="필수",
+                self_reported_met=False,
+                evidence=[],
+            ),
+        ]
+        source_files = [
+            *source_files,
+            *[
+                SourceFile(
+                    path=f.path, content=f.content, asset_id=asset.id, asset_label=asset.label
+                )
+                for f in syntax_check_unresolved
+            ],
+        ]
     scoring_input = ScoringInput(
         submission_id=submission.id,
         # ScoringInput.contest_id는 공모전 전용 필드지만 core.llm_scoring이
@@ -547,15 +655,8 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
         # 나열된 prompt 전체가 아니라)만 검사 대상으로 삼기 위해서다(#340).
         # `path`는 정체성 자리라 참가자가 붙인 자유 텍스트(`asset.label`)를
         # 넣지 않는다(core.llm_scoring.SourceFile) — 그 문구는 `asset_label`이 쓰는 자리다.
-        source_files=[
-            SourceFile(
-                path=f"asset-{asset.id}",
-                content=source_text,
-                asset_id=asset.id,
-                asset_label=asset.label,
-            )
-        ],
-        requirements=_requirement_inputs(checklist_items),
+        source_files=source_files,
+        requirements=requirements,
     )
 
     try:
@@ -601,13 +702,22 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
     reasoning = [
         {"checklist_item_id": v.requirement_id, "is_met": v.is_met, "reasoning": v.reasoning}
         for v in output.verdicts
+        if v.requirement_id != SYNTAX_CHECK_ITEM_ID
     ]
+    if syntax_check_unresolved:
+        # 파서가 판정하지 못한 파일이 있어 AI에게 물었다(#409) — 그 판정을
+        # 강사 항목(reasoning)과 섞지 않고 syntax_check_result로 따로 뽑는다.
+        # OpenAIScoringAdapter는 요청에 실린 모든 requirement_id의 판정이
+        # 없으면 예외를 던지므로(그 클래스 docstring) 여기 반드시 있다.
+        ai_verdict = next(v for v in output.verdicts if v.requirement_id == SYNTAX_CHECK_ITEM_ID)
+        syntax_check_result = build_ai_verdict(is_met=ai_verdict.is_met, reasoning=ai_verdict.reasoning)
     with transaction.atomic():
         score = ClassroomScore.objects.create(
             submission=submission,
             model_version=output.model_version,
             prompt=prompt,
             reasoning=reasoning,
+            syntax_check_result=syntax_check_result,
         )
     _notify_submitter_of_score(submission, score, checklist_items)
     return {"submission_id": submission.id, "status": "scored", "score_id": score.id}

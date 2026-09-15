@@ -4073,6 +4073,11 @@ export interface components {
             order: number;
             /** Submission Formats */
             submission_formats: string[];
+            /**
+             * Syntax Check Enabled
+             * @default true
+             */
+            syntax_check_enabled: boolean;
             /** Title */
             title: string;
         };
@@ -4221,6 +4226,11 @@ export interface components {
             passed: boolean;
             /** Submission Formats */
             submission_formats: string[];
+            /**
+             * Syntax Check Enabled
+             * @default true
+             */
+            syntax_check_enabled: boolean;
             /** Title */
             title: string;
         };
@@ -4290,6 +4300,7 @@ export interface components {
             model_version: string;
             /** Reasoning */
             reasoning: components["schemas"]["ClassroomChecklistVerdictOut"][];
+            syntax_check?: components["schemas"]["ClassroomSyntaxCheckOut"] | null;
         };
         /** ClassroomSubmissionIn */
         ClassroomSubmissionIn: {
@@ -4329,6 +4340,38 @@ export interface components {
             submission_format: string;
             /** Value */
             value: string;
+        };
+        /**
+         * ClassroomSyntaxCheckFindingOut
+         * @description 파서가 실제로 찾은 구문 오류 하나(#408) — 어느 파일 몇 번째 줄에서
+         *     무슨 오류인지.
+         */
+        ClassroomSyntaxCheckFindingOut: {
+            /** Line */
+            line?: number | null;
+            /** Message */
+            message: string;
+            /** Path */
+            path: string;
+        };
+        /**
+         * ClassroomSyntaxCheckOut
+         * @description 문법 검사 기본 항목의 판정 하나(#408, CONTEXT.md 「문법 검사」) —
+         *     `ClassroomScore.syntax_check_result`를 그대로 비춘다. append-only라 이
+         *     값도 한 번 나오면 바뀌지 않는다.
+         */
+        ClassroomSyntaxCheckOut: {
+            /**
+             * Findings
+             * @default []
+             */
+            findings: components["schemas"]["ClassroomSyntaxCheckFindingOut"][];
+            /** Is Met */
+            is_met: boolean;
+            /** Judged By */
+            judged_by: string;
+            /** Reasoning */
+            reasoning: string;
         };
         /** ComparisonEntryOut */
         ComparisonEntryOut: {
@@ -4948,6 +4991,11 @@ export interface components {
             id: number;
             /** Submission Formats */
             submission_formats: string[];
+            /**
+             * Syntax Check Enabled
+             * @default true
+             */
+            syntax_check_enabled: boolean;
             /** Title */
             title: string;
         };
@@ -5795,6 +5843,11 @@ export interface components {
             reasoning_effort: string;
             /** Submission Formats */
             submission_formats: string[];
+            /**
+             * Syntax Check Enabled
+             * @default true
+             */
+            syntax_check_enabled: boolean;
             /** Title */
             title: string;
         };
@@ -5858,6 +5911,11 @@ export interface components {
             status: string;
             /** Submission Formats */
             submission_formats: string[];
+            /**
+             * Syntax Check Enabled
+             * @default true
+             */
+            syntax_check_enabled: boolean;
             /** Title */
             title: string;
         };
@@ -5875,6 +5933,8 @@ export interface components {
             reasoning_effort?: string | null;
             /** Submission Formats */
             submission_formats?: string[] | null;
+            /** Syntax Check Enabled */
+            syntax_check_enabled?: boolean | null;
             /** Title */
             title?: string | null;
         };
@@ -5940,6 +6000,11 @@ export interface components {
             share_code: string;
             /** Submission Formats */
             submission_formats: string[];
+            /**
+             * Syntax Check Enabled
+             * @default true
+             */
+            syntax_check_enabled: boolean;
             /**
              * Taken Down
              * @default false

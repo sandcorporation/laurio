@@ -38,6 +38,18 @@ export type ParticipantChecklistItem = {
   required: boolean;
 };
 
+// 문법 검사 기본 항목의 고정 문구(#408, CONTEXT.md 「문법 검사」) — 강사가
+// 바꿀 수 없다. 체크리스트 행으로 저장하지 않으므로(백엔드 `Problem.
+// syntax_check_enabled`) 여기서 하드코딩한다.
+const SYNTAX_CHECK_LABEL = "소스에 문법 오류가 없다";
+
+// 판정 주체 표시(#409 AC "화면 근거에 파서 판정과 AI 판정이 구별되어
+// 보인다") — 파서 판정은 신뢰도가 높고(파이썬 표준 파서·tree-sitter), AI
+// 판정은 파서가 없는 언어이거나 크기·시간 제한에 걸렸을 때만 쓰인다.
+export function judgedByLabel(judgedBy: "parser" | "ai"): string {
+  return judgedBy === "parser" ? "파서 판정" : "AI 판정";
+}
+
 type InteractiveProps = {
   interactive: true;
   memberExpelled: boolean;
@@ -80,6 +92,9 @@ type ProblemParticipantViewProps = (InteractiveProps | PreviewProps) & {
   passed?: boolean;
   description: string;
   checklistItems: ParticipantChecklistItem[];
+  /** 문법 검사 기본 항목의 켜짐 여부(#408) — 참이면 체크리스트 맨 앞에
+   *  「소스에 문법 오류가 없다」와 「기본」 표시를 둔다. */
+  syntaxCheckEnabled: boolean;
   /** 채점 지침 단계(#388, CONTEXT.md 「채점 지침」) — 참여자가 어떤 기준으로
    *  판정되는지 알고 제출하도록 체크리스트 가까이 보여준다. */
   gradingStrictness: GradingStrictness;
@@ -99,6 +114,7 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
     passed,
     description,
     checklistItems,
+    syntaxCheckEnabled,
     gradingStrictness,
     gradingGuidelineCustomText,
     submissionFormats,
@@ -106,7 +122,9 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
   } = props;
 
   const checklistLabelById = new Map(checklistItems.map((item) => [item.id, item.label]));
-  const requiredCount = checklistItems.filter((item) => item.required).length;
+  // 문법 검사 기본 항목(#408)도 필수라 힌트 숫자에 함께 셈한다.
+  const requiredCount =
+    checklistItems.filter((item) => item.required).length + (syntaxCheckEnabled ? 1 : 0);
 
   return (
     <div className="flex flex-col gap-5">
@@ -158,6 +176,18 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
               </p>
             </div>
             <ul data-testid="my-problem-checklist" className="divide-y divide-rule">
+              {syntaxCheckEnabled ? (
+                <li
+                  data-testid="checklist-item-syntax-check"
+                  className="flex items-start gap-3 px-4 py-3 text-[13.5px] leading-relaxed"
+                >
+                  <span className="flex-1">{SYNTAX_CHECK_LABEL}</span>
+                  <span className="flex shrink-0 gap-1.5">
+                    <Badge>기본</Badge>
+                    <Badge tone="attention">필수</Badge>
+                  </span>
+                </li>
+              ) : null}
               {checklistItems.map((item) => (
                 <li
                   key={item.id}
@@ -277,6 +307,47 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
                         data-testid={`submission-row-${submission.id}-verdicts`}
                         className="mt-3 flex flex-col gap-2 border-t border-rule pt-3"
                       >
+                        {submission.score.syntax_check ? (
+                          <li
+                            data-testid={`submission-row-${submission.id}-syntax-check`}
+                            className="flex gap-2.5"
+                          >
+                            <span
+                              aria-hidden
+                              className={`mt-1 h-[13px] w-[13px] shrink-0 border ${
+                                submission.score.syntax_check.is_met
+                                  ? "border-verified bg-verified"
+                                  : "border-attention"
+                              }`}
+                            />
+                            <span className="text-[13px] leading-relaxed">
+                              <Badge>기본</Badge>{" "}
+                              <span
+                                data-testid={`submission-row-${submission.id}-syntax-check-judged-by`}
+                              >
+                                <Badge tone="neutral">{judgedByLabel(submission.score.syntax_check.judged_by)}</Badge>
+                              </span>{" "}
+                              {SYNTAX_CHECK_LABEL}
+                              <span className="text-ink/45">
+                                {" "}
+                                — {submission.score.syntax_check.is_met ? "충족" : "미충족"}
+                              </span>
+                              <span className="block text-ink/60">
+                                {submission.score.syntax_check.reasoning}
+                              </span>
+                              {submission.score.syntax_check.findings.map((finding, index) => (
+                                <span
+                                  key={index}
+                                  data-testid={`submission-row-${submission.id}-syntax-check-finding-${index}`}
+                                  className="block font-mono text-[12px] text-ink/60"
+                                >
+                                  {finding.path}
+                                  {finding.line !== null ? `:${finding.line}` : ""} — {finding.message}
+                                </span>
+                              ))}
+                            </span>
+                          </li>
+                        ) : null}
                         {submission.score.reasoning.map((verdict) => (
                           <li key={verdict.checklist_item_id} className="flex gap-2.5">
                             <span

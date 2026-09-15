@@ -59,6 +59,9 @@ export type ProblemRow = {
   grading_strictness: GradingStrictness;
   // grading_strictness가 "custom"일 때만 채워진다.
   grading_guideline_text: string;
+  // 문법 검사 기본 항목 「소스에 문법 오류가 없다」의 켜짐 여부(#408,
+  // CONTEXT.md 「문법 검사」). 기본은 켜짐이고, 강사는 끌 수만 있다(#410).
+  syntax_check_enabled: boolean;
   checklist_items: ChecklistItemRow[];
   // 이 문제를 한 번이라도 통과한 참여자 수(#289) — 강사 본인·내보낸
   // 참여자는 빼고 센다.
@@ -95,6 +98,8 @@ export function createProblem(
     // grading_strictness가 "custom"일 때의 문장 — 그 밖의 단계에서 보내도
     // 서버가 무시하고 빈 문자열로 저장한다.
     grading_guideline_text?: string;
+    // 문법 검사 기본 항목의 켜짐 여부(#410). 생략하면 서버 기본값(켜짐)이 된다.
+    syntax_check_enabled?: boolean;
     // true면 만든 직후 바로 연다("만들고 바로 열기"). 필수 항목이 하나도
     // 없으면 서버가 400으로 거부하고 문제도 생기지 않는다 — 화면은 이
     // 경우를 누르기 전에 이미 막아 둔다.
@@ -118,6 +123,7 @@ export function updateProblem(
     reasoning_effort: string;
     grading_strictness: GradingStrictness;
     grading_guideline_text: string;
+    syntax_check_enabled: boolean;
   }>,
 ): Promise<ProblemRow> {
   return backendJson<ProblemRow>(`/classroom/classes/${classId}/problems/${problemId}`, {
@@ -185,6 +191,8 @@ export type ImportableProblemRow = {
   title: string;
   description: string;
   submission_formats: SubmissionFormat[];
+  // 문법 검사 기본 항목의 켜짐 여부(#410) — 복사하면 그대로 옮겨간다.
+  syntax_check_enabled: boolean;
   checklist_items: ImportableChecklistItem[];
 };
 

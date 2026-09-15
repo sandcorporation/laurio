@@ -18,6 +18,9 @@ export type ProblemTemplateRow = {
   // 공개 시점 원본의 채점 지침(#389, CONTEXT.md 「채점 지침」).
   grading_strictness: GradingStrictness;
   grading_guideline_text: string;
+  // 문법 검사 기본 항목의 공개 시점 켜짐 여부(#410) — 가져가기 전에
+  // 미리보기가 이 값을 보여준다.
+  syntax_check_enabled: boolean;
   publisher_display_name: string;
   created_at: string;
   taken_down: boolean;

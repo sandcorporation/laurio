@@ -14,6 +14,9 @@ export type ProblemMine = {
   grading_strictness: GradingStrictness;
   // grading_strictness가 "custom"일 때만 채워진다.
   grading_guideline_text: string;
+  // 문법 검사 기본 항목의 켜짐 여부(#408) — 참이면 화면이 체크리스트 맨
+  // 앞에 「소스에 문법 오류가 없다」와 「기본」 표시를 둔다.
+  syntax_check_enabled: boolean;
   checklist_items: ChecklistItemRow[];
   // 이 문제를 한 번이라도 통과한 적이 있는가(#288) — 최신 시도가 아니라
   // 시도 전체의 OR. 한 번 통과하면 나중에 미통과가 나와도 계속 참이다.
@@ -51,9 +54,28 @@ export type ChecklistVerdict = {
   reasoning: string;
 };
 
+// 파서가 실제로 찾은 구문 오류 하나(#408) — 어느 파일 몇 번째 줄에서 무슨
+// 오류인지.
+export type SyntaxCheckFinding = {
+  path: string;
+  line: number | null;
+  message: string;
+};
+
+// 문법 검사 기본 항목의 판정 하나(#408, CONTEXT.md 「문법 검사」).
+export type SyntaxCheckVerdict = {
+  is_met: boolean;
+  reasoning: string;
+  // "parser" | "ai" — 파서가 판정했는지 AI가 판정했는지(#409).
+  judged_by: "parser" | "ai";
+  findings: SyntaxCheckFinding[];
+};
+
 export type ClassroomScore = {
   model_version: string;
   reasoning: ChecklistVerdict[];
+  // 채점 시점에 그 문제의 기본 항목이 꺼져 있었으면 `null`이다(#408).
+  syntax_check: SyntaxCheckVerdict | null;
   created_at: string;
 };
 

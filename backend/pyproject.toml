@@ -35,6 +35,15 @@ dependencies = [
     # 더한다. `[standard]` extra가 `watchfiles`를 끌어와 dev compose의
     # `--reload`가 `runserver`처럼 코드 수정에 반응한다.
     "uvicorn[standard]>=0.34.0",
+    # 강의실 문법 검사 기본 항목(#408/#409, CONTEXT.md 「문법 검사」)이 파이썬
+    # 밖 주요 언어(JS·TS·Java·Go·C/C++·Kotlin·Ruby)의 구문 오류를 실행 없이
+    # 확인하는 데 쓴다 — `classroom.syntax_check`만 부른다. backend·celery·
+    # events가 같은 Dockerfile이라 셋 다 이 패키지를 받는다. 미리 빌드된
+    # 문법(wheel)을 담은 `tree-sitter-language-pack`을 쓰는 이유는 grammar마다
+    # 별도 패키지·C 컴파일러를 이미지에 두지 않기 위해서다(backend 이미지가
+    # 약 12MB 커진다, #409).
+    "tree-sitter>=0.26.0",
+    "tree-sitter-language-pack>=1.20.0",
 ]
 
 [tool.uv]

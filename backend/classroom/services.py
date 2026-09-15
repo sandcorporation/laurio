@@ -9,6 +9,10 @@
 **채점 지침은 채점 모델과 달리 템플릿에도 따라간다** — 지침은 "무엇을
 통과로 볼지"의 일부라, 옮기지 않으면 가져간 사람이 다른 기준으로 채점되는
 문제를 넘겨받는 셈이다(#385 Implementation Decisions).
+
+**문법 검사 기본 항목의 켜짐 여부도 채점 지침과 같은 이유로 따라간다**
+(#410, CONTEXT.md 「문법 검사」) — "무엇을 통과로 볼지"의 일부이지, 채점
+모델처럼 가져간 사람의 청구서에 영향을 주는 값이 아니다.
 """
 
 from __future__ import annotations
@@ -71,6 +75,7 @@ def copy_problem_to_class(problem: Problem, target_class: Class) -> Problem:
         model=problem.model,
         grading_strictness=problem.grading_strictness,
         grading_guideline_text=problem.grading_guideline_text,
+        syntax_check_enabled=problem.syntax_check_enabled,
     )
     ChecklistItem.objects.bulk_create(
         ChecklistItem(
@@ -156,6 +161,7 @@ def publish_problem_as_template(
                 submission_formats=problem.submission_formats,
                 grading_strictness=problem.grading_strictness,
                 grading_guideline_text=problem.grading_guideline_text,
+                syntax_check_enabled=problem.syntax_check_enabled,
             )
             ProblemTemplateChecklistItem.objects.bulk_create(
                 ProblemTemplateChecklistItem(
@@ -186,6 +192,7 @@ def import_problem_template(template: ProblemTemplate, target_class: Class) -> P
         order=target_class.problems.count(),
         grading_strictness=template.grading_strictness,
         grading_guideline_text=template.grading_guideline_text,
+        syntax_check_enabled=template.syntax_check_enabled,
     )
     ChecklistItem.objects.bulk_create(
         ChecklistItem(problem=problem, label=item.label, required=item.required, order=item.order)
@@ -230,6 +237,7 @@ def publish_class_as_template(
                     submission_formats=problem.submission_formats,
                     grading_strictness=problem.grading_strictness,
                     grading_guideline_text=problem.grading_guideline_text,
+                    syntax_check_enabled=problem.syntax_check_enabled,
                     order=problem.order,
                 )
                 ClassTemplateProblemChecklistItem.objects.bulk_create(
@@ -268,6 +276,7 @@ def import_class_template(template: ClassTemplate, *, instructor_id: int, name: 
             order=template_problem.order,
             grading_strictness=template_problem.grading_strictness,
             grading_guideline_text=template_problem.grading_guideline_text,
+            syntax_check_enabled=template_problem.syntax_check_enabled,
         )
         ChecklistItem.objects.bulk_create(
             ChecklistItem(problem=problem, label=item.label, required=item.required, order=item.order)

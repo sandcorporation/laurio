@@ -235,6 +235,16 @@ export default function EditProblemPage() {
     }
   }
 
+  async function handleSyntaxCheckToggle(enabled: boolean) {
+    setChecklistError(null);
+    try {
+      await updateProblem(classId, problemId, { syntax_check_enabled: enabled });
+      reload();
+    } catch {
+      setChecklistError("설정을 저장하지 못했습니다. 잠시 후 다시 시도해주세요.");
+    }
+  }
+
   async function handleItemMove(itemId: number, direction: "up" | "down") {
     const items = problem.checklist_items;
     const index = items.findIndex((i) => i.id === itemId);
@@ -587,6 +597,29 @@ export default function EditProblemPage() {
 
             <Card>
               <CardHeader title="체크리스트" hint="필수를 전부 충족하면 「통과」 · 바뀔 때마다 바로 저장됩니다" />
+              <div
+                data-testid="syntax-check-toggle-row"
+                className="flex flex-wrap items-center justify-between gap-3 border-b border-rule bg-surface px-4 py-3"
+              >
+                <div className="flex flex-col gap-0.5">
+                  <span className="flex items-center gap-1.5 text-[13px] font-medium">
+                    <Badge>기본</Badge> 소스에 문법 오류가 없다
+                  </span>
+                  <span className="text-[12px] text-ink/45">
+                    의사코드처럼 실행되는 코드가 아닌 문제라면 끄세요.
+                  </span>
+                </div>
+                <label className="flex shrink-0 items-center gap-1.5 text-[12.5px]">
+                  <input
+                    type="checkbox"
+                    data-testid="syntax-check-enabled-input"
+                    checked={problem.syntax_check_enabled}
+                    onChange={(event) => handleSyntaxCheckToggle(event.target.checked)}
+                    className="accent-attention"
+                  />
+                  켜짐
+                </label>
+              </div>
               {problem.checklist_items.length === 0 ? (
                 <EmptyState>
                   <span data-testid="checklist-empty-state">
@@ -1012,6 +1045,7 @@ export default function EditProblemPage() {
               title={title.trim() === "" ? "(제목 없음)" : title}
               description={description}
               checklistItems={problem.checklist_items}
+              syntaxCheckEnabled={problem.syntax_check_enabled}
               gradingStrictness={gradingGuideline.grading_strictness}
               gradingGuidelineCustomText={gradingGuideline.grading_guideline_text}
               submissionFormats={submissionFormats}
