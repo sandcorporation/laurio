@@ -28,11 +28,12 @@ staging·prod 배포(`docker/compose.staging.yaml`/`docker/compose.prod.yaml`)�
 - `contests.api`의 전부 — 공모전 목록·상세·홈 큐레이션·내가 개최한 목록·조회수
   기록(`list_contests`/`get_contest`/`get_home_curation`/`list_my_sponsored_
   contests`/`record_contest_view`), Contest 수정(`update_draft_contest`), 요구사항
-  AI grill 대화, Requirement CRUD, 공모전 이미지 CRUD. 그리고 **유료 스위치가 닫는
-  것 전부**(아래) — 공모전 스위치가 꺼지면 유료 경로도 당연히 함께 닫힌다.
-  **`list_categories`/`list_deliverable_types`는 예외다** — `/contests/` 주소
-  아래 살지만 주소만으로는 어느 제품의 것인지 갈리지 않는 공용 참조 데이터라 열어
-  둔다.
+  AI grill 대화, Requirement CRUD, 공모전 이미지 CRUD, 무료 개최·공개(`create_
+  free_contest`/`publish_free_contest`/`get_own_hosting_permission`, #415).
+  그리고 **유료 스위치가 닫는 것 전부**(아래) — 공모전 스위치가 꺼지면 유료
+  경로도 당연히 함께 닫힌다. **`list_categories`/`list_deliverable_types`는
+  예외다** — `/contests/` 주소 아래 살지만 주소만으로는 어느 제품의 것인지
+  갈리지 않는 공용 참조 데이터라 열어 둔다.
 
 **열어 두는 것 — 과제가 건드리지 않는 것만 닫는다는 원칙 그대로.**
 
@@ -46,9 +47,11 @@ staging·prod 배포(`docker/compose.staging.yaml`/`docker/compose.prod.yaml`)�
 백엔드(`require_paid_contest_product_enabled()`가 404를 낸다 — 위와 같은 이유):
 
 - `contests.api`의 견적(`quote`), 본인확인이 필요한 유료 개최·재개최
-  (`create_contest`/`reopen_contest` — 무료 개최는 아직 없으므로 지금은 이 둘이
-  유일한 개최 경로다, #415가 무료 개최를 더할 때까지), 유료 심사기간 연장
+  (`create_contest`/`reopen_contest`), 유료 심사기간 연장
   (`initiate_judging_period_extension`/`confirm_judging_period_extension`).
+  무료 개최·공개(`create_free_contest`/`publish_free_contest`, #415)는 이
+  스위치가 꺼져도 열려 있다 — 위 「그대로 등록됨」 목록과 같은 이유로 공모전
+  스위치만 본다.
 - `payments.api`의 공모전 결제 — `initiate_payment`/`confirm_payment`. 웹훅
   (`receive_webhook`)은 닫지 않는다 — PG가 서버 대 서버로 부르는 자리라 존재를
   숨길 대상이 아니고, 유료 스위치가 꺼진 뒤로는 `initiate_payment`가 막혀 있어 새

@@ -32,14 +32,16 @@ Next.js + React. 발주자·개발자·방문자가 쓰는 앱이다. 운영자�
 **공모전 제품 스위치는 「공모전 / 유료 공모전」 둘이다**
 (`NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED`·`NEXT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED`,
 `frontend/lib/contest-switch.ts`, ADR-0048). 공모전 스위치가 꺼지면 헤더의
-「공모전」·「공모전 개최」 진입점과 헤더 계정 메뉴의 「내 공모전」 진입점(#375)이
-빠지고, `/contests/**`·`/console/contests/**` 전체가 없는 페이지(404)를 낸다.
-유료 스위치만(공모전은 켜진 채) 꺼지면 「공모전」 링크는 남고 「공모전 개최」
-CTA만 빠진다 — 무료 개최(#415)가 생기기 전까지는 그 CTA가 가리키는
-`/console/contests/new`가 전부 본인확인·견적·결제로 이어지는 유료 흐름이기
-때문이다(#413). 진짜 문은 백엔드다(`core.contest_switch`), 이 앱은 진입점을
-감출 뿐이다. 기본은 둘 다 켜짐이고 staging·prod 배포만 유료 스위치를 끈다
-(`CLAUDE.md` 「배포」).
+「공모전」·「공모전 개최」·「무료 공모전 개최」(#415) 진입점과 헤더 계정 메뉴의
+「내 공모전」 진입점(#375)이 빠지고, `/contests/**`·`/console/contests/**`
+전체가 없는 페이지(404)를 낸다. 유료 스위치만(공모전은 켜진 채) 꺼지면
+「공모전」 링크와 「무료 공모전 개최」 CTA는 남고 「공모전 개최」(유료) CTA만
+빠진다 — 그 CTA가 가리키는 `/console/contests/new`가 전부 본인확인·견적·결제로
+이어지는 유료 흐름이기 때문이다(#413). 「무료 공모전 개최」가 가리키는
+`/console/contests/new-free`는 결제 대신 개최 권한(운영자가 계정별로 켠다)을
+보므로 유료 스위치와 무관하게 열려 있다. 진짜 문은 백엔드다(`core.contest_
+switch`), 이 앱은 진입점을 감출 뿐이다. 기본은 둘 다 켜짐이고 staging·prod
+배포만 유료 스위치를 끈다(`CLAUDE.md` 「배포」).
 
 **헤더·탭에 로고가 있다**(#392, #391 「커밋 노드 C」). 헤더는 심볼(`app/components/
 logo-mark.tsx`)과 Pretendard 워드마크 「Codemit」을 함께 쓴다. 탭 파비콘·홈 화면 추가

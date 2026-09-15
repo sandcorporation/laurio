@@ -51,10 +51,12 @@ from .models import (
     ContestSubmission,
     DeliverableType,
     HomeStatusAxis,
+    HostingPermission,
     JudgingExtensionPayment,
     Requirement,
     RequirementChatMessage,
 )
+from .transitions import claim_contest_transition
 from .requirement_chat import (
     ChatTurn,
     ExistingRequirement,
@@ -81,7 +83,9 @@ from .schemas import (
     ContestReopenIn,
     ContestUpdateIn,
     DeliverableTypeOut,
+    FreeContestCreateIn,
     HomeCurationGroupOut,
+    HostingPermissionSelfOut,
     InitiateJudgingExtensionIn,
     JudgingExtensionPaymentOut,
     QuoteIn,
@@ -154,6 +158,7 @@ def _serialize_contest(contest: Contest, auth_user: object | None = None) -> Con
         status=contest.status,
         required_minimum_prize=contest.required_minimum_prize,
         is_underfunded=contest.is_underfunded,
+        is_free=contest.is_free,
         requirements=[
             RequirementOut(id=r.id, text=r.text, grade=r.grade, order=r.order)
             for r in contest.requirements.all()
@@ -231,8 +236,9 @@ def create_contest(request: HttpRequest, payload: ContestCreateIn):
     Prize가 선택한 DeliverableType 최소 상금 합계에 미달해도 등록은 성공한다 —
     「상금미달」 배지만 선다. 플랫폼은 신호를 줄 뿐 금지하지 않는다.
 
-    본인확인을 요구하는 **유료** 개최다 — 무료 개최(#415)가 생기기 전까지는 이
-    엔드포인트가 유일한 개최 경로이므로 유료 공모전 스위치(#413)가 닫는다. 과제
+    본인확인을 요구하는 **유료** 개최다 — 유료 공모전 스위치(#413)가 닫는다.
+    무료 개최는 `create_free_contest`(`POST /contests/free`, #415)가 별도로
+    연다 — 본인확인 대신 개최 권한을 요구하고 Prize를 받지 않는다. 과제
     개설 자체는 과제 라우터와 함께 걷혔다(#361, 부모 #358).
     """
 
@@ -297,6 +303,139 @@ def create_contest(request: HttpRequest, payload: ContestCreateIn):
     contest.refresh_from_db()
     # 방금 만든 행이라 Submission이 있을 수 없다 — annotate 대신 직접 0을 채운다
     # (_serialize_contest 참고).
+    contest.submission_count = 0
+    return _serialize_contest(contest)
+
+
+# --- 무료 공모전 개최 (#415, ADR-0048) ---------------------------------------
+
+
+def _require_hosting_permission(user) -> None:
+    """개최 권한(`HostingPermission`)이 지금 켜져 있는지 확인한다 — 결제가
+    유료 개최를 걸러 주는 자리를 대신한다. 행이 아예 없는 계정은 권한이 없는
+    것과 같다(`contests.models.HostingPermission` 독스트링)."""
+
+    permission = HostingPermission.objects.filter(user=user).first()
+    if permission is None or not permission.is_granted:
+        raise HttpError(403, "무료 공모전 개최 권한이 없습니다.")
+
+
+@router.get(
+    "/contests/free/hosting-permission", response=HostingPermissionSelfOut, auth=jwt_auth
+)
+def get_own_hosting_permission(request: HttpRequest):
+    """로그인한 사용자 본인의 개최 권한 (#415, user story 13). 공개 앱의 무료
+    공모전 만들기 화면이 폼을 그리기 전에 이 값을 먼저 확인해, 권한이 없으면
+    폼 대신 안내를 보인다 — 헛걸음 방지다. `POST /contests/free`가 실제
+    집행자이고, 이 엔드포인트는 화면이 미리 묻는 자리일 뿐이다.
+
+    **`/contests/{contest_id}`보다 먼저 등록해야 한다** — `/contests/mine`과
+    같은 이유(위 `list_my_sponsored_contests` 참고).
+    """
+
+    permission = HostingPermission.objects.filter(user=request.auth_user).first()
+    return HostingPermissionSelfOut(is_granted=bool(permission and permission.is_granted))
+
+
+@router.post("/contests/free", response=ContestOut, auth=jwt_auth)
+def create_free_contest(request: HttpRequest, payload: FreeContestCreateIn):
+    """개최 권한이 있는 사용자가 본인확인·결제 없이 무료 공모전 초안을 만든다
+    (#415, ADR-0048).
+
+    `create_contest`(유료)와 갈리는 지점 셋: 본인확인을 요구하지 않고,
+    Verification 대신 `HostingPermission`을 확인하며, Prize를 받지 않는다
+    — 무료 공모전은 상금·최소 제안 상금·상금미달 판정 자체가 없으므로
+    `prize`·`required_minimum_prize`는 0, `is_underfunded`는 늘 False로
+    만든다.
+
+    공모전 스위치(#271)만 본다 — 유료 스위치(#413)와 무관하게 열려 있다.
+    """
+
+    require_contest_product_enabled()
+    _require_hosting_permission(request.auth_user)
+
+    if not payload.deliverable_type_ids:
+        raise HttpError(422, "산출물 종류를 하나 이상 선택해야 합니다.")
+
+    try:
+        category = Category.objects.get(id=payload.category_id, is_active=True)
+    except Category.DoesNotExist as exc:
+        raise HttpError(422, "존재하지 않는 카테고리입니다.") from exc
+
+    deliverable_types = list(
+        DeliverableType.objects.filter(id__in=payload.deliverable_type_ids, is_active=True)
+    )
+    if len(deliverable_types) != len(set(payload.deliverable_type_ids)):
+        raise HttpError(422, "존재하지 않는 산출물 종류가 포함되어 있습니다.")
+
+    for requirement in payload.requirements:
+        if requirement.grade not in _VALID_GRADES:
+            raise HttpError(422, "요구사항 등급은 필수 또는 선택 중 하나여야 합니다.")
+
+    sponsor_profile, _created = SponsorProfile.objects.get_or_create(user=request.auth_user)
+
+    with transaction.atomic():
+        contest = Contest.objects.create(
+            sponsor=sponsor_profile,
+            title=sanitize_free_text(payload.title),
+            category=category,
+            description=sanitize_free_text(payload.description),
+            prize=0,
+            deadline_at=payload.deadline_at,
+            status=Contest.Status.DRAFT,
+            is_free=True,
+            required_minimum_prize=0,
+            is_underfunded=False,
+        )
+        contest.deliverable_types.set(deliverable_types)
+
+        Requirement.objects.bulk_create(
+            [
+                Requirement(
+                    contest=contest,
+                    text=sanitize_free_text(r.text),
+                    grade=r.grade,
+                    order=index,
+                )
+                for index, r in enumerate(payload.requirements)
+            ]
+        )
+
+    contest.refresh_from_db()
+    contest.submission_count = 0
+    return _serialize_contest(contest)
+
+
+@router.post("/contests/{contest_id}/publish", response=ContestOut, auth=jwt_auth)
+def publish_free_contest(request: HttpRequest, contest_id: int):
+    """개최 권한이 있는 Sponsor가 무료 공모전 초안을 결제 없이 공개한다
+    (#415, ADR-0048).
+
+    유료 경로의 `publish-on-payment`(결제 확인이 부르는 훅, `payments.models.
+    Payment.on_paid`)와 짝이다 — 이쪽은 사람이 직접 부르는 행위 엔드포인트이고,
+    문을 여는 조건이 결제 완료가 아니라 **지금 이 순간의** 개최 권한이다.
+    권한을 만든 뒤 회수당했다면 이 draft는 새로 공개할 수 없다(#414 — 이미
+    공개된 Contest는 영향받지 않지만, 아직 draft인 것은 새 규칙을 그대로
+    적용받는다).
+
+    소유자·DRAFT 게이트는 `_get_owned_draft_contest`가 진다(404/409) — 공모전
+    스위치도 그 안에서 이미 확인된다.
+    """
+
+    contest = _get_owned_draft_contest(request, contest_id)
+
+    if not contest.is_free:
+        raise HttpError(409, "무료 공모전만 이 방법으로 공개할 수 있습니다.")
+
+    _require_hosting_permission(request.auth_user)
+
+    transitioned = claim_contest_transition("publish-free", contest.pk)
+    if not transitioned:
+        # 동시에 들어온 다른 요청이 먼저 이겼다 — 정상 경로에서는 도달하지
+        # 않아야 한다(_get_owned_draft_contest가 이미 DRAFT를 확인했다).
+        raise HttpError(409, "이미 공개되었거나 공개할 수 없는 상태입니다.")
+
+    contest.refresh_from_db()
     contest.submission_count = 0
     return _serialize_contest(contest)
 
@@ -600,9 +739,16 @@ def update_draft_contest(request: HttpRequest, contest_id: int, payload: Contest
     구조적으로 무효가 되지 않고, 그것을 쓴 사람이 Sponsor 자신이다(spec #110
     Implementation Decisions). 이 엔드포인트는 `Requirement`를 전혀 건드리지
     않는다 — 화면이 "요구형태를 바꿨다"는 사실을 스스로 안내한다.
+
+    **무료 공모전은 `prize`를 받지 않는다(#415, ADR-0048).** 상금·결제·Escrow가
+    아예 없는 공모전이라 바꿀 대상 자체가 없다 — 화면이 이 필드를 아예 감추는
+    것과 별개로(사고 예방), 여기서도 거절한다(방어).
     """
 
     contest = _get_owned_draft_contest(request, contest_id)
+
+    if contest.is_free and payload.prize is not None:
+        raise HttpError(422, "무료 공모전은 상금을 설정할 수 없습니다.")
 
     with transaction.atomic():
         if payload.title is not None:
@@ -640,7 +786,10 @@ def update_draft_contest(request: HttpRequest, contest_id: int, payload: Contest
         if payload.prize is not None:
             contest.prize = payload.prize
 
-        if deliverable_types_changed or payload.prize is not None:
+        if not contest.is_free and (deliverable_types_changed or payload.prize is not None):
+            # 무료 공모전은 상금 개념 자체가 없다(#415) — `prize`는 위에서 이미
+            # 거절했고, 요구형태가 바뀌어도 `required_minimum_prize`·
+            # `is_underfunded`는 항상 0/False로 남는다(생성 때와 같은 값).
             # 지금 붙어 있는 deliverable_types를 있는 그대로 합산한다 —
             # `_minimum_total`(생성/재개최가 "새로 고를 수 있는 것"을 거를 때
             # 쓰는 is_active=True 필터)을 여기 그대로 쓰면, 운영자가 그 사이

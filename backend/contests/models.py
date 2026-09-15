@@ -267,6 +267,14 @@ class Contest(models.Model):
     deadline_at = models.DateTimeField()
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
 
+    # 무료 공모전인가 (#415, ADR-0048) — 돈을 다루지 않는다. 결제·본인확인
+    # 없이 개최 권한(`HostingPermission`)만으로 공개하고(`publish-free`
+    # 전이, contests/transitions.py), 마감 뒤 Award는 만들되 Handover·
+    # Escrow 해제·Distribution은 만들지 않는다(#417). `prize`는 무료
+    # 공모전에서 항상 0이고 `required_minimum_prize`/`is_underfunded`도
+    # 항상 0/False다 — 상금 개념 자체가 없다.
+    is_free = models.BooleanField(default=False)
+
     # 심사기간 종료 시각 (#13, ADR-0003). CLOSED 전이가 일어나는 조건부 UPDATE 안에서
     # deadline_at + PlatformPolicy.judging_period_days(#78/ADR-0023)로 함께
     # 채워진다. 유료 연장은 이 컬럼만

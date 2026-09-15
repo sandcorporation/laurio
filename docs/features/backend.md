@@ -52,8 +52,11 @@ fail-closed 라 구멍은 아니지만 원인을 찾기 어렵다.
 | `GET /api/contests` | 공개 목록 — 참가 가능한 것이 기본, `closed=1` 로 마감된 것 |
 | `GET /api/contests/home` | 홈 큐레이션 |
 | `GET /api/contests/{id}` | 상세 — 로그인 없이 열린다 |
-| `POST /api/contests` · `PATCH /api/contests/{id}` | 개최·초안 수정 |
-| `POST /api/contests/quote` | 개최 견적 |
+| `POST /api/contests` · `PATCH /api/contests/{id}` | 개최(유료)·초안 수정 |
+| `POST /api/contests/quote` | 개최 견적(유료) |
+| `GET /api/contests/free/hosting-permission` | 내 무료 공모전 개최 권한(#415) |
+| `POST /api/contests/free` | 무료 개최(#415) — 본인확인·결제 없이, 개최 권한만 |
+| `POST /api/contests/{id}/publish` | 무료 공모전 공개(#415) — 결제 대신 개최 권한이 연다 |
 | `GET /api/contests/mine` | 내가 연 것 |
 | `POST`·`PATCH`·`DELETE .../requirements[/{id}]` | 요구사항 |
 | `.../requirement-chat/messages` | 요구사항을 LLM 과 함께 다듬는다 |
@@ -74,10 +77,12 @@ fail-closed 라 구멍은 아니지만 원인을 찾기 어렵다.
 **공모전 제품 스위치는 「공모전 / 유료 공모전」 둘이다**(`settings.
 CONTEST_PRODUCT_ENABLED`·`PAID_CONTEST_PRODUCT_ENABLED`, `core.contest_switch`,
 ADR-0048). 공모전 스위치가 꺼지면 위 표의 `contests.api` 소관 표면 전체(목록·
-상세·홈·수정·요구사항·AI grill·이미지·조회 기록과, 아래 유료 스위치가 닫는 것
-전부)가 404다. 유료 스위치만(공모전은 켜진 채) 꺼지면 견적·본인확인이 필요한
-개최·재개최·심사기간 연장이 404다 — 무료 개최(#415)가 생기기 전까지는 개최·
-재개최 자체가 전부 이 유료 경로다. `GET /api/contests/categories`·
+상세·홈·수정·요구사항·AI grill·이미지·조회 기록·무료 개최·공개와, 아래 유료
+스위치가 닫는 것 전부)가 404다. 유료 스위치만(공모전은 켜진 채) 꺼지면
+견적·본인확인이 필요한 개최·재개최·심사기간 연장이 404다 — 무료 개최
+(`POST /api/contests/free`)·공개(`POST /api/contests/{id}/publish`, #415)는
+공모전 스위치만 보므로 유료 스위치가 꺼져도 그대로 열려 있다. `GET
+/api/contests/categories`·
 `deliverable-types`(주소만으로는 다른 소관과 갈리지 않아 예외로 열어 둔다)와,
 `award`·`handover`·`payout`·`metrics`·`submissions/compare`(각각 awards·
 handovers·payouts·submissions 앱 소관 — 이미 존재하는 공모전을 마무리하는
@@ -352,21 +357,24 @@ llm_scoring`(#274)에 이어 `core.repository_adapters`(GitHub 저장소 clone·
 | 상태 | 무엇인가 | 어떻게 들어오는가 |
 | --- | --- | --- |
 | `draft` | 초안 | 개최 |
-| `published` | 공개 | 결제 확인 |
+| `published` | 공개 | 결제 확인(유료) 또는 개최 권한(무료, #415) |
 | `closed` | 마감 | 스캔(마감 시각 경과) — 이때 심사 종료 시각도 함께 찍힌다 |
 | `awarded` | 선정 완료 | 발주자의 선정 |
 | `judging_ended` | 심사기간 종료 | 스캔(아무도 선정하지 않은 채 심사 종료) |
 
 **전이 그래프는 `contests/transitions.py` 한 곳에 선언되어 있다**(#255) — 위 표의
-「어떻게 들어오는가」열이 서술하는 네 간선이 그 선언의 `CONTEST_TRANSITIONS`다.
-그 밖에서 `Contest.status`를 바꾸는 코드는 태어날 수 없다(#256, AST 정적 스캔).
-아래 다이어그램은 그 선언에서 **자동으로 낸다** — 손으로 그리지 않는다:
+「어떻게 들어오는가」열이 서술하는 다섯 간선이 그 선언의 `CONTEST_TRANSITIONS`다
+(`draft -> published`가 결제(`publish-on-payment`)와 개최 권한(`publish-free`,
+#415) 둘로 갈린다). 그 밖에서 `Contest.status`를 바꾸는 코드는 태어날 수
+없다(#256, AST 정적 스캔). 아래 다이어그램은 그 선언에서 **자동으로 낸다** —
+손으로 그리지 않는다:
 
 ```mermaid
 stateDiagram-v2
     published --> closed : contest-close
     closed --> judging_ended : contest-judging-end
     draft --> published : publish-on-payment
+    draft --> published : publish-free
     closed --> awarded : award
     note right of closed : judging-extension (제자리 갱신, 상태 불변)
 ```

@@ -24,6 +24,12 @@ export interface RequirementDraftPanelProps {
   onAdd: (text: string, grade: RequirementGrade) => Promise<void>;
   onUpdate: (id: number, patch: { text?: string; grade?: RequirementGrade }) => Promise<boolean>;
   onDelete: (id: number) => Promise<void>;
+  // 무료 공모전(#415, ADR-0048) 전용 — `contest.is_free`가 true일 때만 쓰인다.
+  // 결제 안내·링크 대신 이 자리에 공개 버튼을 그린다(본인확인·결제 없이
+  // 개최 권한만으로 공개한다).
+  onPublish?: () => Promise<void>;
+  publishing?: boolean;
+  publishError?: string | null;
 }
 
 function RequirementRow({
@@ -148,6 +154,9 @@ export function RequirementDraftPanel({
   onAdd,
   onUpdate,
   onDelete,
+  onPublish,
+  publishing = false,
+  publishError = null,
 }: RequirementDraftPanelProps) {
   const [manualOpen, setManualOpen] = useState(false);
   const [manualText, setManualText] = useState("");
@@ -203,34 +212,36 @@ export function RequirementDraftPanel({
           </div>
         </div>
 
-        <div className="flex flex-col gap-2">
-          <p className="text-[11px] tracking-wide text-ink/50">상금</p>
-          <div
-            className={`flex items-center justify-between border px-3 py-2.5 ${
-              contest.is_underfunded ? "border-attention" : "border-rule"
-            }`}
-          >
-            <span className="font-mono text-lg font-semibold" data-testid="grill-draft-prize">
-              {formatPrize(contest.prize)}
-            </span>
-            <span className="text-xs text-ink/50">원</span>
-          </div>
-          {contest.is_underfunded && (
-            <p
-              role="status"
-              data-testid="grill-underfunded-badge"
-              className="flex items-start gap-2 text-xs leading-relaxed text-attention"
+        {!contest.is_free && (
+          <div className="flex flex-col gap-2">
+            <p className="text-[11px] tracking-wide text-ink/50">상금</p>
+            <div
+              className={`flex items-center justify-between border px-3 py-2.5 ${
+                contest.is_underfunded ? "border-attention" : "border-rule"
+              }`}
             >
-              <span>
-                합계보다{" "}
-                <strong className="font-mono font-semibold">
-                  {formatPrize(contest.required_minimum_prize - contest.prize)}
-                </strong>
-                원 적어 목록에 「상금미달」 배지가 붙습니다. 그래도 개최할 수 있습니다.
+              <span className="font-mono text-lg font-semibold" data-testid="grill-draft-prize">
+                {formatPrize(contest.prize)}
               </span>
-            </p>
-          )}
-        </div>
+              <span className="text-xs text-ink/50">원</span>
+            </div>
+            {contest.is_underfunded && (
+              <p
+                role="status"
+                data-testid="grill-underfunded-badge"
+                className="flex items-start gap-2 text-xs leading-relaxed text-attention"
+              >
+                <span>
+                  합계보다{" "}
+                  <strong className="font-mono font-semibold">
+                    {formatPrize(contest.required_minimum_prize - contest.prize)}
+                  </strong>
+                  원 적어 목록에 「상금미달」 배지가 붙습니다. 그래도 개최할 수 있습니다.
+                </span>
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex flex-1 flex-col overflow-y-auto">
@@ -327,18 +338,48 @@ export function RequirementDraftPanel({
       </div>
 
       <div className="flex flex-col gap-2 border-t border-rule px-7 py-5">
-        <p className="text-center text-xs leading-relaxed text-ink/50" data-testid="grill-payment-required-notice">
-          결제가 끝나야 공모전이 공개됩니다
-        </p>
-        {/* URL을 직접 쳐야만 결제로 닿는 경로가 되지 않도록(#86), 초안을 만든
-            바로 그 자리에서 결제 화면으로 이어간다. */}
-        <Link
-          href={`/console/contests/${contest.id}/payment`}
-          data-testid="grill-go-to-payment"
-          className="mt-1 block text-center text-xs font-semibold underline"
-        >
-          결제하러 가기
-        </Link>
+        {contest.is_free ? (
+          <>
+            <p
+              className="text-center text-xs leading-relaxed text-ink/50"
+              data-testid="grill-free-publish-notice"
+            >
+              본인확인·결제 없이 바로 공개됩니다
+            </p>
+            {publishError && (
+              <ErrorNote>
+                <span data-testid="grill-free-publish-error">{publishError}</span>
+              </ErrorNote>
+            )}
+            <button
+              type="button"
+              onClick={() => void onPublish?.()}
+              disabled={publishing || !onPublish}
+              data-testid="grill-publish-free-contest"
+              className={`mt-1 ${buttonClass("primary", "sm")}`}
+            >
+              {publishing ? "공개하는 중..." : "공개하기"}
+            </button>
+          </>
+        ) : (
+          <>
+            <p
+              className="text-center text-xs leading-relaxed text-ink/50"
+              data-testid="grill-payment-required-notice"
+            >
+              결제가 끝나야 공모전이 공개됩니다
+            </p>
+            {/* URL을 직접 쳐야만 결제로 닿는 경로가 되지 않도록(#86), 초안을 만든
+                바로 그 자리에서 결제 화면으로 이어간다. */}
+            <Link
+              href={`/console/contests/${contest.id}/payment`}
+              data-testid="grill-go-to-payment"
+              className="mt-1 block text-center text-xs font-semibold underline"
+            >
+              결제하러 가기
+            </Link>
+          </>
+        )}
       </div>
     </aside>
   );

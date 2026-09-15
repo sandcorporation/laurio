@@ -90,6 +90,10 @@ export default function ContestDraftPage() {
   const [briefError, setBriefError] = useState<string | null>(null);
   const [deliverableTypesChangedNotice, setDeliverableTypesChangedNotice] = useState(false);
 
+  // 무료 공모전 공개 (#415, ADR-0048) — 결제 대신 이 화면에서 곧바로 부른다.
+  const [publishing, setPublishing] = useState(false);
+  const [publishError, setPublishError] = useState<string | null>(null);
+
   useEffect(() => {
     if (session.status !== "authenticated") return;
     let cancelled = false;
@@ -308,6 +312,34 @@ export default function ContestDraftPage() {
     }
   }
 
+  /** 무료 공모전 공개(#415) — 본인확인·결제 없이 개최 권한만으로 `draft ->
+   * published`를 옮긴다. 성공하면 이 화면이 더 이상 편집을 허용하지 않는
+   * `closed` 상태로 다시 그려지도록 응답을 그대로 반영한다(payment/page.tsx의
+   * 결제 확인 성공 경로와 같은 모양). */
+  async function handlePublish() {
+    setPublishError(null);
+    setPublishing(true);
+    try {
+      const response = await bffClient.post<ContestDetail>(
+        `/api/backend/contests/${contestId}/publish`,
+        {},
+      );
+      if (!response.ok) {
+        setPublishError(response.detail);
+        return;
+      }
+      if (response.data === undefined) {
+        setPublishError("공개 응답을 해석하지 못했습니다. 새로고침해 확인해 주세요.");
+        return;
+      }
+      setLoad({ status: "closed", contest: response.data });
+    } catch {
+      setPublishError("연결에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setPublishing(false);
+    }
+  }
+
   async function handleDeleteRequirement(id: number) {
     setRequirementError(null);
     try {
@@ -355,12 +387,14 @@ export default function ContestDraftPage() {
   if (load.status === "closed") {
     return (
       <PageShell>
-        <ContestStageStepper current="payment" />
+        <ContestStageStepper current="payment" variant={load.contest.is_free ? "free" : "paid"} />
         <h1 className="mt-4 text-2xl font-semibold" data-testid="draft-closed-heading">
           {load.contest.title}
         </h1>
         <p className="mt-6" data-testid="draft-closed">
-          이미 결제가 완료되어 공개된 공모전입니다. 더 이상 브리프나 요구사항을 수정할 수 없습니다.
+          {load.contest.is_free
+            ? "이미 공개된 무료 공모전입니다. 더 이상 브리프나 요구사항을 수정할 수 없습니다."
+            : "이미 결제가 완료되어 공개된 공모전입니다. 더 이상 브리프나 요구사항을 수정할 수 없습니다."}
         </p>
         <Link
           href={`/contests/${contestId}`}
@@ -379,7 +413,7 @@ export default function ContestDraftPage() {
   return (
     <main className="flex min-h-screen flex-col" data-testid="draft-phase-b">
       <div className="border-b border-rule px-8 py-3">
-        <ContestStageStepper current="requirements" />
+        <ContestStageStepper current="requirements" variant={contest.is_free ? "free" : "paid"} />
       </div>
       <BriefEditPanel
         contest={contest}
@@ -415,6 +449,9 @@ export default function ContestDraftPage() {
           onAdd={(text, grade) => handleAddRequirement(text, grade)}
           onUpdate={handleUpdateRequirement}
           onDelete={handleDeleteRequirement}
+          onPublish={handlePublish}
+          publishing={publishing}
+          publishError={publishError}
         />
       </div>
     </main>
