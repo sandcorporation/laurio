@@ -82,15 +82,25 @@ if CODEMIT_DEPLOYMENT_TARGET not in _VALID_DEPLOYMENT_TARGETS:
 IS_PRODUCTION_DEPLOYMENT = CODEMIT_DEPLOYMENT_TARGET == "production"
 IS_DEPLOYED_ENVIRONMENT = CODEMIT_DEPLOYMENT_TARGET in {"staging", "production"}
 
-# 공모전 제품 스위치(#271) — 방향이 바뀌어 공모전은 나중을 위한 기능이 됐다(ADR-0037).
-# 코드도 데이터도 그대로 두고 표면만 닫는다. **기본값은 켜짐**이고, 이 값은
+# 공모전 제품 스위치(#271/#413) — 방향이 바뀌어 공모전은 나중을 위한 기능이
+# 됐다가(ADR-0037), 돈을 다루지 않는 무료 공모전로 다시 열렸다(ADR-0048). 코드도
+# 데이터도 그대로 두고 표면만 닫는다. **기본값은 켜짐**이고, 이 값은
 # `CODEMIT_DEPLOYMENT_TARGET`과 무관한 독립 값이다 — "배포 환경이면 끈다"로 묶으면
-# 나중에 prod에서 다시 켤 때 그 판단 규칙 자체를 고쳐야 한다. staging만
-# `docker/compose.staging.yaml`이 이 환경변수의 기본값을 false로 겹쳐 쓴다(dev·CI는
-# 이 값을 건드리지 않으므로 여전히 켜진 채다). 꺼졌을 때 무엇이 닫히고 무엇이 열려
-# 있어야 하는지의 전체 목록은 `core.contest_switch` 모듈 docstring 하나에 모아
-# 둔다 — 다시 켜는 날 읽을 자리다.
+# 나중에 prod에서 다시 켤 때 그 판단 규칙 자체를 고쳐야 한다. dev·CI는 이 값을
+# 건드리지 않으므로 여전히 켜진 채다. 꺼졌을 때 무엇이 닫히고 무엇이 열려 있어야
+# 하는지의 전체 목록은 `core.contest_switch` 모듈 docstring 하나에 모아 둔다 —
+# 다시 켜는 날 읽을 자리다.
 CONTEST_PRODUCT_ENABLED = _env_bool("CODEMIT_CONTEST_PRODUCT_ENABLED", True)
+
+# 유료 공모전 스위치(#413, ADR-0048) — 위 공모전 스위치가 표면 전체를 가르는
+# 스위치라면, 이 값은 그 안에서 돈이 실제로 오가는 경로(견적·결제·본인확인이
+# 필요한 유료 개최·유료 심사기간 연장·환불·배분·지급·인수인계 스캔)만 가른다.
+# `core.contest_switch.paid_contest_product_enabled()`가 위 CONTEST_PRODUCT_ENABLED
+# 와 AND로 묶는다 — 공모전 스위치가 꺼지면 이 값과 무관하게 유료도 함께 꺼진다.
+# **기본값은 켜짐**이고, `docker/compose.staging.yaml`·`docker/compose.prod.yaml`
+# 만 이 환경변수의 기본값을 false로 겹쳐 쓴다(dev·CI는 건드리지 않으므로 여전히
+# 켜진 채다 — 기존 유료 공모전 테스트가 계속 초록이어야 한다).
+PAID_CONTEST_PRODUCT_ENABLED = _env_bool("CODEMIT_PAID_CONTEST_PRODUCT_ENABLED", True)
 
 # production인데 DEBUG=true로 뜨면 에러 페이지가 스택 트레이스·환경변수·SQL을 그대로
 # 노출한다(Django check --deploy의 security.W018과 같은 위협). DEBUG는 개별

@@ -70,10 +70,14 @@ ENV NEXT_PUBLIC_PORTONE_CHANNEL_KEY=${NEXT_PUBLIC_PORTONE_CHANNEL_KEY}
 ARG NEXT_PUBLIC_TOSS_CLIENT_KEY=""
 ENV NEXT_PUBLIC_TOSS_CLIENT_KEY=${NEXT_PUBLIC_TOSS_CLIENT_KEY}
 # 공모전 제품 스위치(#271, `frontend/lib/contest-switch.ts`) — 기본값 "true"라
-# ARG를 안 주는 dev/CI 빌드는 지금과 똑같이 공모전이 보인다. staging만
-# compose.staging.yaml이 이 build.args를 "false"로 겹쳐 준다.
+# ARG를 안 주는 dev/CI 빌드는 지금과 똑같이 공모전이 보인다. staging·prod는
+# compose 파일이 이 build.args를 겹쳐 준다.
 ARG NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED="true"
 ENV NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED=${NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED}
+# 유료 공모전 스위치(#413) — 위와 같은 이유로 기본값 "true", staging·prod만
+# compose 파일이 "false"로 겹쳐 쓴다(ADR-0048: 공모전 켜짐·유료 꺼짐).
+ARG NEXT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED="true"
+ENV NEXT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED=${NEXT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED}
 RUN pnpm build
 
 # ---- runner: staging/prod가 실제로 쓰는 얇은 이미지 (compose.staging.yaml/
@@ -116,6 +120,10 @@ ENV NEXT_PUBLIC_TOSS_CLIENT_KEY=${NEXT_PUBLIC_TOSS_CLIENT_KEY}
 # NEXT_PUBLIC_TOSS_CLIENT_KEY 와 같은 자리를 지킨다.
 ARG NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED="true"
 ENV NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED=${NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED}
+
+# 유료 공모전 스위치(#413) — 위와 같은 이유로 같은 자리를 지킨다.
+ARG NEXT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED="true"
+ENV NEXT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED=${NEXT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED}
 
 WORKDIR /app
 

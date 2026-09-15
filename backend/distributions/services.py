@@ -37,7 +37,7 @@ from django.db import transaction
 from appeals.models import Appeal
 from contests.models import Contest, ContestSubmission
 from core.clock import Clock
-from core.contest_switch import contest_product_enabled
+from core.contest_switch import paid_contest_product_enabled
 from ledger.models import Account, EntrySide
 from ledger.services import LineInput, post_journal_entry
 from notifications.lifecycle import notify_distribution_shares
@@ -318,20 +318,20 @@ def _attempt_payout(share, as_of, ctx):
 # 배치 50은 뼈대 기본값 그대로다 — 무제한 스캔은 백로그가 쌓였을 때 이 요청 자체를 타임아웃으로
 # 몰아넣는다.
 #
-# `enabled=contest_product_enabled`(#271) — Distribution 은 상금이 있는 공모전
-# 전용이다(무응답 1/N 배분). 공모전 제품 스위치가 꺼지면 이 둘은 등록부에서 사라진
-# 것처럼 군다.
+# `enabled=paid_contest_product_enabled`(#413) — Distribution 은 상금이 있는
+# 유료 공모전 전용이다(무응답 1/N 배분). 유료 공모전 스위치가 꺼지면 이 둘은
+# 등록부에서 사라진 것처럼 군다.
 DISTRIBUTION_SCANS = (
     ScanSpec(
         name="distribution-create",
         candidates=_due_contests,
         handle_row=_create_distribution,
-        enabled=contest_product_enabled,
+        enabled=paid_contest_product_enabled,
     ),
     ScanSpec(
         name="distribution-share-payout",
         candidates=_pending_shares,
         handle_row=_attempt_payout,
-        enabled=contest_product_enabled,
+        enabled=paid_contest_product_enabled,
     ),
 )

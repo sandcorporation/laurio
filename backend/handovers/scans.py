@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from core.contest_switch import contest_product_enabled
+from core.contest_switch import paid_contest_product_enabled
 from core.scans import ScanSpec
 
 from .models import Handover
@@ -33,7 +33,7 @@ def _release(handover, as_of, ctx):
 # 이 스캔은 Escrow 를 해제하므로 타임아웃 중간에 끊기는 게 장식적인 문제가 아니다 — 배치를
 # 넘는 잔여분은 다음 실행이 마저 처리한다.
 #
-# `enabled=contest_product_enabled`(#271) — Handover 는 Award 하나에 정확히
+# `enabled=paid_contest_product_enabled`(#413) — Handover 는 Award 하나에 정확히
 # 하나이고 Award 는 상금이 있는 공모전 전용이다.
 # 공모전 제품 스위치가 꺼지면 이 스캔은 등록부에서 사라진 것처럼 군다.
 HANDOVER_RELEASE_SCAN = ScanSpec(
@@ -41,5 +41,5 @@ HANDOVER_RELEASE_SCAN = ScanSpec(
     candidates=_due_handovers,
     handle_row=_release,
     batch_size=50,
-    enabled=contest_product_enabled,
+    enabled=paid_contest_product_enabled,
 )

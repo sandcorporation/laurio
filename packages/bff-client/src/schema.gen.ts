@@ -1259,8 +1259,9 @@ export interface paths {
          *     Prize가 선택한 DeliverableType 최소 상금 합계에 미달해도 등록은 성공한다 —
          *     「상금미달」 배지만 선다. 플랫폼은 신호를 줄 뿐 금지하지 않는다.
          *
-         *     공모전 제품 스위치(#271)가 꺼지면 새 공모전을 열 수 없다 — 과제 개설 자체가
-         *     과제 라우터와 함께 걷혔다(#361, 부모 #358).
+         *     본인확인을 요구하는 **유료** 개최다 — 무료 개최(#415)가 생기기 전까지는 이
+         *     엔드포인트가 유일한 개최 경로이므로 유료 공모전 스위치(#413)가 닫는다. 과제
+         *     개설 자체는 과제 라우터와 함께 걷혔다(#361, 부모 #358).
          */
         post: operations["contests_api_create_contest"];
         delete?: never;
@@ -1403,8 +1404,8 @@ export interface paths {
          * @description 선택한 DeliverableType들의 최소 제안 상금 합계를 등록 전에 보여준다.
          *
          *     과제에는 "상금미달" 개념이 없었다(과제 라우터가 걷히기 전 `contests.
-         *     assignment_api` 모듈 docstring, #361로 사라졌다) — 이 견적은 공모전 전용이라
-         *     공모전 제품 스위치(#271)가 닫는다.
+         *     assignment_api` 모듈 docstring, #361로 사라졌다) — 이 견적은 유료 공모전
+         *     전용이라 유료 공모전 스위치(#413)가 닫는다.
          */
         post: operations["contests_api_quote"];
         delete?: never;
@@ -1501,8 +1502,8 @@ export interface paths {
          *     **PG 호출은 그 잠금 밖에서 한다**(#126) — 벤더가 느리면 그 Contest 의 모든 쓰기가
          *     같이 멈추고 DB 커넥션을 물고 있게 된다. 행 생성까지만 트랜잭션 안이다.
          *
-         *     공모전 제품 스위치(#271)가 꺼지면 이 결제도 닫는다 — 과제에는 심사기간
-         *     자체가 없다(ADR-0028).
+         *     유료 공모전 스위치(#413)가 꺼지면 이 결제도 닫는다 — 과제에는 심사기간
+         *     자체가 없다(ADR-0028), 무료 공모전에는 유료 심사기간 연장이 없다(ADR-0048).
          */
         post: operations["contests_api_initiate_judging_period_extension"];
         delete?: never;
@@ -1528,7 +1529,7 @@ export interface paths {
          *     로 확정하며, 그 재확인마저 실패하면 미확정으로 남긴다(#87 지적 4, #125). 벤더의
          *     명시적 거절은 502 다.
          *
-         *     공모전 제품 스위치(#271)가 꺼지면 이 확인도 닫는다 — 스위치가 꺼진 뒤로는
+         *     유료 공모전 스위치(#413)가 꺼지면 이 확인도 닫는다 — 스위치가 꺼진 뒤로는
          *     `initiate_judging_period_extension`이 막혀 있어 새 진행 중 결제가 생기지 않는다.
          */
         post: operations["contests_api_confirm_judging_period_extension"];
@@ -1770,7 +1771,8 @@ export interface paths {
          *     살아남고, 이미 은퇴한 `DeliverableType`의 낡은 최소 상금이 상금미달 배지
          *     계산에 계속 쓰인다.
          *
-         *     공모전 제품 스위치(#271)가 꺼지면 재개최도 새 개최와 같이 막는다.
+         *     본인확인을 요구하고 REFUNDED Payment(유료 결제의 흔적)를 전제하는 **유료**
+         *     경로라, 새 개최와 같이 유료 공모전 스위치(#413)가 막는다.
          */
         post: operations["contests_api_reopen_contest"];
         delete?: never;
@@ -3098,7 +3100,7 @@ export interface paths {
          *     **PG 등록은 그 잠금 밖에서 한다**(#127) — 벤더가 느리면 그 Contest 의 모든 쓰기가
          *     같이 멈추고 DB 커넥션을 물고 있게 된다. 행 확보까지만 트랜잭션 안이다.
          *
-         *     공모전 제품 스위치(#271)가 꺼지면 이 결제도 닫는다 — 아래 상태 분류가
+         *     유료 공모전 스위치(#413)가 꺼지면 이 결제도 닫는다 — 아래 상태 분류가
          *     이미 과제 결제를 막고 있으므로, 이 검사는 공모전 쪽 새 결제만 추가로 막는다.
          */
         post: operations["payments_api_initiate_payment"];
@@ -3152,7 +3154,7 @@ export interface paths {
          *     거절은 502 다. 이미 다른 경로(웹훅 등)로 확정돼 있으면 벤더를 부르지 않고 현재 상태를
          *     돌려준다.
          *
-         *     공모전 제품 스위치(#271)가 꺼지면 이 확인도 닫는다 — 스위치가 꺼진 뒤로는
+         *     유료 공모전 스위치(#413)가 꺼지면 이 확인도 닫는다 — 스위치가 꺼진 뒤로는
          *     `initiate_payment`가 막혀 있어 새 REQUESTED Payment가 생기지 않는다.
          */
         post: operations["payments_api_confirm_payment"];

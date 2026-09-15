@@ -57,9 +57,9 @@ class ScanSpec:
     interval_seconds: float = DEFAULT_INTERVAL_SECONDS
     # 후보 QuerySet 에 뼈대가 거는 정렬 — 기본 id. 예외적으로 due 시각 순이 필요한 스캔이 준다.
     order_by: tuple[str, ...] = ("id",)
-    # 이 스캔이 지금 도는가 — None 이면 항상 돈다(대다수). #271: 공모전 제품 스위치가
-    # 꺼지면 공모전 전용 스캔(환불·배분·지급·인수인계)이 `core.contest_switch.
-    # contest_product_enabled`를 여기 꽂아 스스로를 숨긴다. 등록(`register_scan`)
+    # 이 스캔이 지금 도는가 — None 이면 항상 돈다(대다수). #413: 유료 공모전
+    # 스위치가 꺼지면 유료 전용 스캔(환불·배분·지급·인수인계)이 `core.contest_switch.
+    # paid_contest_product_enabled`를 여기 꽂아 스스로를 숨긴다. 등록(`register_scan`)
     # 자체는 앱 시작 시 그대로 해 두고, `is_scan_active`가 호출마다 이 콜백을 다시
     # 평가한다 — 재기동 없이 설정이 곧바로 반영되고(override_settings로 테스트하기
     # 위한 목적도 있다), tick·beat·`/scans/{name}` 직접 호출이 전부 같은 문을 본다.
