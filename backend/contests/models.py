@@ -149,6 +149,66 @@ class DeliverableTypeChange(models.Model):
         return f"DeliverableTypeChange({self.action}, deliverable_type_id={self.deliverable_type_id})"
 
 
+class HostingPermission(models.Model):
+    """계정별 「무료 공모전 개최 권한」의 지금 상태 (#414, ADR-0048, CONTEXT.md
+    「개최 권한」).
+
+    유료 공모전에서는 결제가 개최를 걸러 준다 — 무료 공모전에는 그 문이 없으므로
+    Operator가 계정별로 이 값을 켜고 끈다(예전 AssignmentPermission과 같은
+    판단, ADR-0048 참고). 계정마다 최대 한 행이고 **지금 값**만 갖는다 — 「누가·
+    언제·왜 바꿨는가」는 append-only인 `HostingPermissionChange`가 따로 남긴다
+    (`PolicyChange`·`DeliverableTypeChange`와 같은 분리 — 현재값과 이력을 같은
+    행에 두면 이력에 UPDATE가 생긴다).
+
+    행이 아예 없는 계정은 권한이 없는 것과 같다 — `create`가 아니라 `get_or_
+    create`로 다룬다(`hosting_permission_services.set_hosting_permission`).
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, related_name="hosting_permission", on_delete=models.CASCADE
+    )
+    is_granted = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"HostingPermission<{self.user_id}>({'on' if self.is_granted else 'off'})"
+
+
+class HostingPermissionChange(models.Model):
+    """`HostingPermission`에 대한 한 번의 변경 사건 — 누가·언제·누구를·왜 (#414,
+    ADR-0023).
+
+    `DeliverableTypeChange`·`CategoryChange`와 같은 규율이다 — 부여·회수 둘 다
+    사유가 필수다. `user`는 권한이 바뀐 그 계정, `operator`는 바꾼 운영자다.
+    둘 다 PROTECT — 계정이 지워져도(탈퇴는 `is_active=False`일 뿐 행 삭제가
+    아니다, ADR-0025) 감사 기록이 주인을 잃지 않는다.
+    """
+
+    class Action(models.TextChoices):
+        GRANTED = "granted", "부여"
+        REVOKED = "revoked", "회수"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="hosting_permission_changes", on_delete=models.PROTECT
+    )
+    operator = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="hosting_permission_changes_made",
+        on_delete=models.PROTECT,
+    )
+    action = models.CharField(max_length=16, choices=Action.choices)
+    reason = models.TextField()
+    changed_at = models.DateTimeField()
+
+    class Meta:
+        verbose_name = "개최 권한 변경 이력"
+        verbose_name_plural = "개최 권한 변경 이력"
+        ordering = ["-changed_at", "-id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"HostingPermissionChange({self.action}, user_id={self.user_id})"
+
+
 class ContestQuerySet(models.QuerySet):
     """Contest 의 시간 창을 필터로 묻는 짝 (#143, #124). 파이썬 술어(`Contest.judging_window_open`
     등)와 이름이 같고 뜻이 같아야 한다 — 둘의 일치는 tests/test_contest_windows.py 가 경계값

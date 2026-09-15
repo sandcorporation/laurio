@@ -115,37 +115,53 @@ DB·Redis·MinIO·이벤트 서비스·세 앱(#276부터 강의실이, #379부�
 자신의 Redis 위에서 도는 코드라 다른 일곱과 달리 "아직 미구현"인 적이 없었다).
 각 dotted path 는 `docker/staging.env.example` 에 그대로 적혀 있다.
 
-**staging은 공모전이 꺼져 있다 — 고장이 아니라 껐다**(#271, ADR-0037). 방향이
-바뀌어 공모전은 나중을 위한 기능이 됐고, 지금 사람을 모을 것은 강의실이다.
-`CODEMIT_CONTEST_PRODUCT_ENABLED`(기본값 켜짐, `CODEMIT_DEPLOYMENT_TARGET`과 무관한
-독립 값)를 `docker/compose.staging.yaml`이 기본 `false`로 겹쳐 쓴다(`docker/compose.prod.yaml`도 같다 — prod 도 강의실부터 연다) — dev·CI는
-건드리지 않으므로 지금과 똑같이 켜진 채다. 코드도 데이터도 하나도 지우지 않았다 —
-Score의 PROTECT 때문에 지울 수도 없고(아래 「테스트」 절의 「채점이 한 번 돈
-뒤에는」), 닫는 것은 표면뿐이다:
+**staging·prod는 공모전 켜짐·유료 공모전 꺼짐이다**(#271/#413, ADR-0037을
+ADR-0048이 amend). 처음에는 공모전을 통째로 껐지만(방향이 강의실로 틀어져서),
+이제 돈을 다루지 않는 **무료 공모전**만 다시 열었다 — 결제·본인확인·환불·배분·
+지급·인수인계 같은 유료 경로는 여전히 운영하지 않는다. 그래서 스위치가 둘이다:
 
-- **백엔드가 거절한다(진짜 문).** 공모전 개최·수정·재개·견적, 요구사항 AI grill,
-  공모전 이미지, 목록·상세·홈 큐레이션·내가 개최한 목록·조회수 기록, 공모전 결제·
-  심사기간 연장 결제가 404다(403이 아니다 — 존재를 알려주지 않는다). `GET
-  /api/contests/categories`·`deliverable-types`는 예외다 — 주소는 `/contests/`
-  아래지만 주소만으로는 어느 제품의 것인지 갈리지 않는 공용 참조 데이터다.
-  운영자 표면(`/api/operator/*`)은 이 스위치와 무관하게 그대로 연다.
-- **공개 앱이 감춘다.** 헤더의 「공모전」·「공모전 개최」, 헤더 계정 메뉴의
-  「내 공모전」(#375, 콘솔 현관은 없다), `/contests/**`·`/console/contests/**`
-  전체가 빠지거나 404다. 앱과 백엔드가 어긋나면 링크는 보이는데 앞이 404인
-  것이 고른 실패 모양이다(`CODEMIT_OPERATOR_ORIGIN`과 같은 종류의 어긋남).
-- **공모전 전용 스캔이 등록부에서 사라진다.** 환불 둘·배분 둘·지급 관련 둘·인수인계
-  (`payment-refund-request`·`payment-refund-reconcile`·`distribution-create`·
-  `distribution-share-payout`·`payout-awaits-you`·`seller-registration-recovery`·
-  `handover-release`) — `/api/internal/tick`·`/scans/{name}`·beat 스케줄 어디에도
-  안 나온다. 채점·저장소 가시성·알림·휴면·신원 파기·상태 전이는 그대로 돈다.
+- **공모전** — `CODEMIT_CONTEST_PRODUCT_ENABLED`(기본값 켜짐, `CODEMIT_DEPLOYMENT_
+  TARGET`과 무관한 독립 값). staging·prod도 이제 기본 켜짐이다(dev·CI는 원래부터
+  켜진 채).
+- **유료 공모전** — `CODEMIT_PAID_CONTEST_PRODUCT_ENABLED`(같은 원칙의 독립 값).
+  `docker/compose.staging.yaml`·`docker/compose.prod.yaml`만 기본을 `false`로
+  겹쳐 쓴다 — dev·CI는 건드리지 않으므로 둘 다 켜진 채다(기존 유료 공모전
+  테스트가 계속 초록인 이유).
+
+코드도 데이터도 하나도 지우지 않았다 — Score의 PROTECT 때문에 지울 수도 없고(아래
+「테스트」 절의 「채점이 한 번 돈 뒤에는」), 닫는 것은 표면뿐이다:
+
+- **백엔드가 거절한다(진짜 문).** 공모전 스위치가 꺼지면 목록·상세·홈 큐레이션·
+  내가 개최한 목록·조회수 기록, Contest 수정, 요구사항 AI grill, 공모전 이미지가
+  전부 404다(403이 아니다 — 존재를 알려주지 않는다). 유료 공모전 스위치만 꺼지면
+  (공모전은 켜진 채) 추가로 견적, 본인확인이 필요한 유료 개최·재개최, 유료
+  심사기간 연장, 공모전 결제가 404다 — 무료 개최(#415)가 생기기 전까지는 개최·
+  재개최 자체가 전부 이 유료 경로라 스위치 하나만 꺼도 새 공모전을 열 수 없다.
+  `GET /api/contests/categories`·`deliverable-types`는 예외다 — 주소는
+  `/contests/` 아래지만 주소만으로는 어느 제품의 것인지 갈리지 않는 공용 참조
+  데이터다. 운영자 표면(`/api/operator/*`)은 두 스위치와 무관하게 그대로 연다.
+- **공개 앱이 감춘다.** 공모전 스위치가 꺼지면 헤더의 「공모전」·「공모전 개최」,
+  헤더 계정 메뉴의 「내 공모전」(#375, 콘솔 현관은 없다), `/contests/**`·
+  `/console/contests/**` 전체가 빠지거나 404다. 유료 공모전 스위치만 꺼지면
+  「공모전」 링크는 남고 「공모전 개최」 CTA만 빠진다 — 무료 개최가 없는 지금은
+  그 CTA가 가리키는 `/console/contests/new`가 전부 유료(본인확인·견적·결제) 흐름
+  이기 때문이다. 앱과 백엔드가 어긋나면 링크는 보이는데 앞이 404인 것이 고른
+  실패 모양이다(`CODEMIT_OPERATOR_ORIGIN`과 같은 종류의 어긋남).
+- **유료 전용 스캔이 등록부에서 사라진다.** 유료 공모전 스위치가 꺼지면 환불
+  둘·배분 둘·지급 관련 둘·인수인계(`payment-refund-request`·`payment-refund-
+  reconcile`·`distribution-create`·`distribution-share-payout`·`payout-awaits-
+  you`·`seller-registration-recovery`·`handover-release`) — `/api/internal/tick`·
+  `/scans/{name}`·beat 스케줄 어디에도 안 나온다. 채점·저장소 가시성·알림·휴면·
+  신원 파기·**Contest 상태 전이**(`contest-close`·`contest-judging-end` — 무료
+  공모전도 마감·심사종료·수상을 거친다)는 공모전 스위치만 보고 그대로 돈다.
 
 **한 곳에 모은 목록**은 `backend/core/contest_switch.py` 모듈 docstring이다 —
-다시 켤 때 읽을 자리. **되돌리는 법**: `.env.staging`에
-`CODEMIT_CONTEST_PRODUCT_ENABLED=true` 한 줄을 추가하고 backend와 frontend를
+다시 켤 때 읽을 자리. **되돌리는 법**: `.env.staging`/`.env.prod`에
+`CODEMIT_PAID_CONTEST_PRODUCT_ENABLED=true` 한 줄을 추가하고 backend와 frontend를
 재배포한다(frontend는 빌드 인자로 굽으므로 재빌드가 필요하다,
 `docker/frontend.Dockerfile`). ADR을 새로 쓰지 않는다 — 되돌리기가 환경변수 한
-줄이라 「되돌리기 어렵다」에 해당하지 않는다(방향 전환 자체의 근거는 ADR-0037에
-있다).
+줄이라 「되돌리기 어렵다」에 해당하지 않는다(방향 전환 자체의 근거는 ADR-0037·
+ADR-0048에 있다).
 
 **그래도 가드는 그대로다.** `core.adapters.check_adapter_mode`(`django.core.checks` 로
 등록되어 `django.setup()` 이후 `manage.py migrate`/`check`/`runserver` 부팅 파이프라인에서
@@ -295,8 +311,9 @@ docker compose -f docker/compose.dev.yaml --profile celery up -d
 `AppealRuling` 을 그 화면에서 고칠 수 있는 한 감사 추적에 우회로가 남는다.
 
 사람이 판단하는 행위는 `/api/operator/*` 로만 한다. 그 API 에는 이제 화면이 있다
-(`operator/`, #63) — 이의 심판·지급·정책·산출물 종류·카테고리(#231)·운영자
-계정이 각각 한 화면씩이다. 화면이 없는 조작만 운영자가 HTTP 로 직접 친다.
+(`operator/`, #63) — 이의 심판·지급·정책·산출물 종류·카테고리(#231)·무료 공모전
+개최 권한(#414, ADR-0048)·운영자 계정이 각각 한 화면씩이다. 화면이 없는 조작만
+운영자가 HTTP 로 직접 친다.
 
 개발 중 데이터를 훑던 수단도 함께 사라졌다. 대신 이렇게 한다:
 

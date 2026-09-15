@@ -71,16 +71,19 @@ fail-closed 라 구멍은 아니지만 원인을 찾기 어렵다.
 나르던 `kind` 필드(ADR-0033)는 과제가 접히며(#358, ADR-0044) 스키마에서도
 걷혔다.
 
-**공모전 제품 스위치**(`settings.CONTEST_PRODUCT_ENABLED`, `core.contest_switch`)가
-꺼지면 위 표의 `contests.api` 소관 표면(목록·상세·홈·개최·수정·재개최·견적·
-요구사항·AI grill·이미지·조회 기록·심사기간 연장)이 404 다. `GET
-/api/contests/categories`·`deliverable-types`(주소만으로는 다른 소관과 갈리지
-않아 예외로 열어 둔다)와,
+**공모전 제품 스위치는 「공모전 / 유료 공모전」 둘이다**(`settings.
+CONTEST_PRODUCT_ENABLED`·`PAID_CONTEST_PRODUCT_ENABLED`, `core.contest_switch`,
+ADR-0048). 공모전 스위치가 꺼지면 위 표의 `contests.api` 소관 표면 전체(목록·
+상세·홈·수정·요구사항·AI grill·이미지·조회 기록과, 아래 유료 스위치가 닫는 것
+전부)가 404다. 유료 스위치만(공모전은 켜진 채) 꺼지면 견적·본인확인이 필요한
+개최·재개최·심사기간 연장이 404다 — 무료 개최(#415)가 생기기 전까지는 개최·
+재개최 자체가 전부 이 유료 경로다. `GET /api/contests/categories`·
+`deliverable-types`(주소만으로는 다른 소관과 갈리지 않아 예외로 열어 둔다)와,
 `award`·`handover`·`payout`·`metrics`·`submissions/compare`(각각 awards·
 handovers·payouts·submissions 앱 소관 — 이미 존재하는 공모전을 마무리하는
-표면이라 스위치와 무관하게 열려 있다)는 예외다. 기본은 켜짐이고 staging 배포만
-끈다(`CLAUDE.md` 「배포」). 닫히는 표면의 전체 목록은 `core.contest_switch` 모듈
-docstring 이 든다.
+표면이라 두 스위치와 무관하게 열려 있다)는 예외다. 기본은 둘 다 켜짐이고
+staging·prod 배포만 유료 스위치를 끈다(`CLAUDE.md` 「배포」). 닫히는 표면의
+전체 목록은 `core.contest_switch` 모듈 docstring 이 든다.
 
 ### 제출
 
@@ -127,7 +130,7 @@ ADR-0036). 업로드 자료의 값은 `submission:{공모전id}:{개발자id}:{�
 | `POST /api/payouts/webhook[/toss|/toss-seller]` | 웹훅 |
 | `GET /api/ledger/contests/{id}/balance` · `entries` | 원장 |
 
-**공모전 제품 스위치가 꺼지면 `POST /api/payments`·`/{order}/confirm`이 404다**
+**유료 공모전 스위치가 꺼지면 `POST /api/payments`·`/{order}/confirm`이 404다**
 — 이 스위치가 공모전 쪽 새 결제를 막는다. `/webhook`은 닫지 않는다(PG가 서버 대
 서버로 부른다) — 새 REQUESTED Payment 자체가 안 생기므로 사실상 부를 일이
 없어진다. 지급·원장은 그대로 연다 — 이미 확정된 지급을 마무리하는 표면이다.
@@ -319,12 +322,13 @@ llm_scoring`(#274)에 이어 `core.repository_adapters`(GitHub 저장소 clone·
 이 하나만 돌린다. **tick 은 시간을 앞당기지 않는다** — 「이미 밀린 일을 beat 를 기다리지
 않고 즉시 처리한다」이다.
 
-**공모전 제품 스위치가 꺼지면 환불·배분·지급 다섯 개(`payment-refund-request`·
+**유료 공모전 스위치가 꺼지면 환불·배분·지급 일곱 개(`payment-refund-request`·
 `payment-refund-reconcile`·`distribution-create`·`distribution-share-payout`·
 `handover-release`·`payout-awaits-you`·`seller-registration-recovery` — 상금이
-있는 공모전 전용이다)가 등록부에서 사라진 것처럼 군다** — tick·beat 스케줄·
+있는 유료 공모전 전용이다)가 등록부에서 사라진 것처럼 군다** — tick·beat 스케줄·
 `/scans/{name}` 직접 호출 어디에도 안 나온다. 채점·이미지·저장소 가시성·개인정보·
-알림·상태 전이는 그대로 돈다(`core.contest_switch` 모듈 docstring).
+알림·**Contest 상태 전이**(`contest-close`·`contest-judging-end` — 무료 공모전도
+거친다)는 공모전 스위치만 보고 그대로 돈다(`core.contest_switch` 모듈 docstring).
 
 **채점은 반드시 끝난다**(ADR-0031). 실패가 5회에 이르고 **동시에** 마감 후 6시간이 지나면
 0% 로 확정한다. 영구 실패는 유예를 기다리지 않고 즉시 끝난다.

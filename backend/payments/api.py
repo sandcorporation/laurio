@@ -25,7 +25,7 @@ from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
 from contests.models import Contest
-from core.contest_switch import require_contest_product_enabled
+from core.contest_switch import require_paid_contest_product_enabled
 from verification.models import Verification
 
 from .adapters import PGError, checkout_flow_for_current_mode, get_adapter
@@ -83,11 +83,11 @@ def initiate_payment(request: HttpRequest, payload: InitiatePaymentIn):
     **PG 등록은 그 잠금 밖에서 한다**(#127) — 벤더가 느리면 그 Contest 의 모든 쓰기가
     같이 멈추고 DB 커넥션을 물고 있게 된다. 행 확보까지만 트랜잭션 안이다.
 
-    공모전 제품 스위치(#271)가 꺼지면 이 결제도 닫는다 — 아래 상태 분류가
+    유료 공모전 스위치(#413)가 꺼지면 이 결제도 닫는다 — 아래 상태 분류가
     이미 과제 결제를 막고 있으므로, 이 검사는 공모전 쪽 새 결제만 추가로 막는다.
     """
 
-    require_contest_product_enabled()
+    require_paid_contest_product_enabled()
 
     from policies.scope import current_policy
 
@@ -176,11 +176,11 @@ def confirm_payment(request: HttpRequest, order_id: UUID, payload: ConfirmPaymen
     거절은 502 다. 이미 다른 경로(웹훅 등)로 확정돼 있으면 벤더를 부르지 않고 현재 상태를
     돌려준다.
 
-    공모전 제품 스위치(#271)가 꺼지면 이 확인도 닫는다 — 스위치가 꺼진 뒤로는
+    유료 공모전 스위치(#413)가 꺼지면 이 확인도 닫는다 — 스위치가 꺼진 뒤로는
     `initiate_payment`가 막혀 있어 새 REQUESTED Payment가 생기지 않는다.
     """
 
-    require_contest_product_enabled()
+    require_paid_contest_product_enabled()
 
     charge_qs = Payment.objects.select_related("contest__sponsor")
     try:

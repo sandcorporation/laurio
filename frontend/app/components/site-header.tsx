@@ -16,10 +16,16 @@
 // **공모전 제품 스위치(#271)가 꺼지면 이 둘을 뺀다.** 앱은 진입점을 감출 뿐이고
 // (백엔드가 유일한 집행자다), 이 헤더가 정확히 그 진입점 둘을 쥐고 있다 —
 // "공모전" 링크와 "공모전 개최" CTA.
+//
+// **개최 CTA 는 유료 스위치도 함께 본다**(#413). 무료 개최(#415)가 생기기 전까지
+// `/console/contests/new`는 본인확인·견적·결제로 이어지는 유료 개최 흐름
+// 하나뿐이라, 유료 스위치가 꺼지면 이 CTA 도 함께 뺀다 — 안 그러면 누르는
+// 순간 견적·개최 API 가 404 를 내는 막다른 링크가 된다. "공모전" 목록 링크는
+// 유료와 무관하므로 공모전 스위치만 본다.
 import Link from "next/link";
 
 import { buttonClass } from "@/lib/ui/classnames";
-import { contestProductEnabled } from "@/lib/contest-switch";
+import { contestProductEnabled, paidContestProductEnabled } from "@/lib/contest-switch";
 import { classroomAppOrigin } from "@/lib/auth/classroom-link";
 import type { ThemePreference } from "@/lib/theme/preference";
 
@@ -56,13 +62,15 @@ export function SiteHeader({ themePreference }: { themePreference: ThemePreferen
               >
                 공모전
               </Link>
-              <Link
-                href="/console/contests/new"
-                data-testid="header-cta-new-contest"
-                className={buttonClass("primary", "sm")}
-              >
-                공모전 개최
-              </Link>
+              {paidContestProductEnabled() && (
+                <Link
+                  href="/console/contests/new"
+                  data-testid="header-cta-new-contest"
+                  className={buttonClass("primary", "sm")}
+                >
+                  공모전 개최
+                </Link>
+              )}
             </>
           )}
           <ThemeToggle initialPreference={themePreference} />
