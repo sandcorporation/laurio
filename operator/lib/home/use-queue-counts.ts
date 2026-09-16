@@ -19,8 +19,14 @@ import type { components } from "@codemit/bff-client/schema";
 
 import { bffClient } from "@/lib/bff/client";
 
+import { oldestPendingDays } from "./oldest-pending";
+
 export interface QueueCounts {
   pendingAppeals: number;
+  // 홈 표(#427)의 「가장 오래 밀린 것」 — 이의 목록을 이미 받아오는 김에 계산한다.
+  // 0건이면 잴 대상이 없으므로 null이다(빈 것과 「모른다」를 구별하는 이 파일의
+  // 원칙을 그대로 따른다).
+  oldestPendingAppealDays: number | null;
   identityPendingPayouts: number;
   sellerPendingPayouts: number;
   // "transfer"(#57 코드리뷰 2차 지적 1) -- Seller는 이미 READY인데 실이체
@@ -35,11 +41,17 @@ export type QueueCountsState =
   | { status: "error" };
 
 type PayoutCounts = components["schemas"]["OperatorPayoutCountsOut"];
+type AppealSummary = components["schemas"]["AppealOut"];
 
-async function countFrom(path: string): Promise<number | null> {
-  const result = await bffClient.get<unknown>(path);
+interface PendingAppealsSummary {
+  count: number;
+  oldestDays: number | null;
+}
+
+async function pendingAppealsSummary(): Promise<PendingAppealsSummary | null> {
+  const result = await bffClient.get<AppealSummary[]>("/api/backend/operator/appeals?status=pending");
   if (!result.ok) return null;
-  return Array.isArray(result.data) ? result.data.length : null;
+  return { count: result.data.length, oldestDays: oldestPendingDays(result.data.map((a) => a.created_at)) };
 }
 
 async function payoutCounts(): Promise<PayoutCounts | null> {
@@ -59,19 +71,17 @@ export function useQueueCounts(enabled: boolean): QueueCountsState {
     // 401(세션 만료)이면 클라이언트가 로그인으로 보낸다(#148) — 여기서는 「값을 모른다」로만
     // 남는다. 0건과 조회 실패를 반드시 구별한다: 0은 "성공했고 값이 0"이고, 실패는 "값을
     // 모른다"이다 — 둘을 하나로 뭉치면 조회가 죽은 날 아무도 눈치채지 못한 채 이의가 쌓인다.
-    void Promise.all([
-      countFrom("/api/backend/operator/appeals?status=pending"),
-      payoutCounts(),
-    ]).then(([pendingAppeals, payouts]) => {
+    void Promise.all([pendingAppealsSummary(), payoutCounts()]).then(([appeals, payouts]) => {
       if (cancelled) return;
-      if (pendingAppeals === null || payouts === null) {
+      if (appeals === null || payouts === null) {
         setState({ status: "error" });
         return;
       }
       setState({
         status: "loaded",
         counts: {
-          pendingAppeals,
+          pendingAppeals: appeals.count,
+          oldestPendingAppealDays: appeals.oldestDays,
           identityPendingPayouts: payouts.identity,
           sellerPendingPayouts: payouts.seller,
           transferPendingPayouts: payouts.transfer,

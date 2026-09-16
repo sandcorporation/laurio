@@ -1,129 +1,19 @@
 /*
- * 운영자 앱도 공개 앱과 같은 옷을 입는다(#422, 부모 #421). Tailwind v4 +
+ * 운영자 앱도 공개 앱과 같은 옷을 입는다(#422~#427, 부모 #421). Tailwind v4 +
  * `app/tokens.css` 의 `@theme` 블록 — 공개 앱(`frontend/app/globals.css`)·
  * 강의실(`classroom/app/globals.css`)과 같은 구조다.
  *
- * **리터럴 hex 를 컴포넌트에 흩지 않는다.** 새로 옮기는 화면(골간·지급 큐)은
- * `@theme` 가 만든 `bg-*`/`text-*` 유틸리티만 쓴다 — `frontend/lib/ui/
- * brand-guard.test.ts` 가 이 앱도 대상에 넣어 지킨다.
+ * **리터럴 hex 를 컴포넌트에 흩지 않는다.** 화면은 `@theme` 가 만든
+ * `bg-*`/`text-*` 유틸리티만 쓴다 — `frontend/lib/ui/brand-guard.test.ts` 가
+ * 이 앱도 대상에 넣어 지킨다. **열둘 전부 옮겼다**(#427 이 마지막 둘 — 「할 일」
+ * 홈·로그인 — 과 오류 화면을 옮기며 이 파일의 옛 요소 스킨을 지웠다) — 그래서
+ * 여기 남는 것은 `@theme` 임포트와 바탕색 한 줄뿐이다. 유일한 예외는
+ * `app/global-error.tsx` 다 — 레이아웃이 죽으면 이 파일도 함께 못 불러오므로
+ * 그 화면만 인라인 스타일로 같은 색을 직접 적는다.
  */
 @import "tailwindcss";
 @import "./tokens.css";
 
 body {
   @apply bg-paper text-ink font-sans;
-}
-
-/*
- * **아직 옮기지 않은 화면은 둘이다** — 「할 일」 홈과 로그인(#421 「화면을 옮기는
- * 순서」의 마지막 단계, #427). 표가 있는 화면과 상세·폼은 #422~#426 이 모두 골간으로
- * 옮겼다. 남은 둘은 여전히 이 아래 요소 스킨에 기댄다 — Tailwind 의 preflight 가 그
- * 화면의 기본 위계(제목 굵기·목록 들여쓰기)를 지우므로, 옮기기 전까지 최소한의
- * 위계만 되살린다.
- */
-h1 {
-  font-size: 1.4rem;
-  font-weight: 700;
-}
-h2 {
-  font-size: 1.15rem;
-  font-weight: 600;
-}
-ul,
-ol {
-  padding-left: 1.4rem;
-}
-
-main {
-  max-width: 640px;
-  margin: 0 auto;
-  padding: 2.5rem 1.5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-}
-
-label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  font-size: 0.9rem;
-}
-
-/* 이 화면들은 유틸리티가 아니라 요소 스킨으로 칠해져 있다 — 그래서 **여기 없는
- * 요소는 아무 것도 입지 않는다.** `input` 만 적혀 있던 동안 `select` 는 테두리조차
- * 없이 맨 위젯으로 떠 있었다(이의 목록의 상태 필터). 폼 컨트롤 셋을 한 셀렉터로
- * 묶어 그 함정을 닫는다 — 다음에 `textarea` 를 놓는 사람도 같은 자리에 빠지지
- * 않는다.
- *
- * **`main` 아래로 좁힌다**(#422). 옮기지 않은 화면 둘(홈·로그인)은 `<main>` 을
- * 최상위로 쓴다 — 골간으로 옮긴 화면은 `<main>` 을 쓰지 않으므로 이 스킨이 새 유틸리티
- * 클래스와 부딪히지 않는다. */
-main input,
-main select,
-main textarea {
-  border: 1px solid #cfcfcb;
-  border-radius: 4px;
-  padding: 0.5rem 0.6rem;
-  font-size: 1rem;
-  font-family: inherit;
-}
-
-/* 고르는 컨트롤은 누를 수 있어 보여야 한다 — 버튼과 같은 이유다. */
-main select:not(:disabled) {
-  cursor: pointer;
-}
-
-main button {
-  border: 1px solid #1a1a1a;
-  border-radius: 4px;
-  background: #1a1a1a;
-  color: #fff;
-  padding: 0.6rem 1rem;
-  font-size: 0.95rem;
-  cursor: pointer;
-  width: fit-content;
-}
-
-main button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-main [role="alert"] {
-  color: #b3261e;
-  font-size: 0.9rem;
-}
-
-/* 「할 일」 홈의 큐 카드(#65) — 카드 전체가 링크다. */
-[data-testid="operator-home-queues"] {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-[data-testid="operator-home-queues"] a {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  border: 1px solid #cfcfcb;
-  border-radius: 6px;
-  padding: 1rem 1.25rem;
-  text-decoration: none;
-  color: inherit;
-  background: #fff;
-}
-
-[data-testid="operator-home-queues"] a:hover {
-  border-color: #1a1a1a;
-}
-
-[data-testid$="-count"] {
-  font-weight: 600;
-  font-size: 1.1rem;
-}
-
-[data-testid$="-empty"] {
-  color: #6b6b66;
 }

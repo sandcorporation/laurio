@@ -1,22 +1,96 @@
 "use client";
 
-// 「할 일」 홈(#65). 운영자가 이 앱을 여는 이유는 단 하나 — 자기를 기다리는 것이
-// 무엇인지 알기 위해서다. 세 큐의 건수를 보여주고, 각 건수에서 그 목록으로 바로
-// 간다. 목록 화면 자체(이의 심판 #66, 지급 큐 #68)는 다른 티켓의 몫이라 여기서는
-// 만들지 않는다 — 링크의 목적지로만 남겨 둔다.
+// 「할 일」 홈(#65, 골간으로 옮긴다 — #427, 부모 #421). 운영자가 이 앱을 여는
+// 이유는 단 하나 — 자기를 기다리는 것이 무엇인지 알기 위해서다. 시안
+// (`docs/design/operator/Home.dc.html`)의 두 조각만 옮긴다: 세 큐를 건수·
+// 「가장 오래 밀린 것」과 함께 한 표로 보여주는 것, 그리고 그 아래 최근 변경
+// 이력 표. 화면 열둘을 오가는 옛 링크 목록은 왼쪽 내비(`nav-groups.ts`)가
+// 이미 대신하므로 다시 만들지 않는다 — 단 하나(`policy-nav-link`)만 남긴다,
+// 기존 e2e(policy.spec.ts)가 홈에서 그 testid로 정책 화면에 들어가기 때문이다.
 import { useState } from "react";
 
 import { normalizeDetail } from "@codemit/bff-client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import { QueueCard } from "@/lib/home/queue-card";
-import { useQueueCounts } from "@/lib/home/use-queue-counts";
+import { Badge } from "@/app/components/badge";
+import { PageHeader } from "@/app/components/page-header";
+import { Panel } from "@/app/components/panel";
 import { useSession } from "@/lib/auth/use-session";
+import { appealsDetail, payoutsDetail } from "@/lib/home/queue-row-detail";
+import { useQueueCounts } from "@/lib/home/use-queue-counts";
+import { useRecentChanges } from "@/lib/home/use-recent-changes";
+import { useReportedTemplatesCount } from "@/lib/home/use-reported-templates-count";
+
+interface TodoRow {
+  testId: string;
+  label: string;
+  href: string;
+  count: number | null;
+  loading: boolean;
+  error: boolean;
+  detail: string | null;
+}
+
+const COL = {
+  label: "w-[240px]",
+  count: "w-[64px]",
+  action: "w-[64px]",
+};
+
+function TodoTableHead() {
+  return (
+    <div className="flex items-center gap-3.5 border-b border-rule px-4 py-2.5 text-[11px] tracking-[0.06em] text-ink/30">
+      <div className={`${COL.label} shrink-0`}>큐</div>
+      <div className={`${COL.count} shrink-0`}>건수</div>
+      <div className="min-w-0 flex-1" />
+      <div className={`${COL.action} shrink-0`} />
+    </div>
+  );
+}
+
+function TodoRowView({ row, index }: { row: TodoRow; index: number }) {
+  return (
+    <Link
+      href={row.href}
+      data-testid={row.testId}
+      className={`flex items-center gap-3.5 border-b border-rule px-4 py-2.5 text-[13px] last:border-b-0 ${
+        index % 2 === 1 ? "bg-ink/[2%]" : ""
+      }`}
+    >
+      <div className={`${COL.label} shrink-0 truncate`}>{row.label}</div>
+      <div className={`${COL.count} shrink-0`}>
+        {row.loading && <span data-testid={`${row.testId}-loading`}>...</span>}
+        {row.error && (
+          <span role="alert" data-testid={`${row.testId}-error`} className="text-attention">
+            !
+          </span>
+        )}
+        {!row.loading && !row.error && row.count === 0 && (
+          <span data-testid={`${row.testId}-empty`} className="text-ink/45">
+            0
+          </span>
+        )}
+        {!row.loading && !row.error && row.count !== null && row.count > 0 && (
+          <span data-testid={`${row.testId}-count`} className="font-mono text-[14px] font-semibold">
+            {row.count}
+          </span>
+        )}
+      </div>
+      <div className="min-w-0 flex-1 truncate text-[12.5px] text-ink/62">{row.detail}</div>
+      <div className={`${COL.action} shrink-0`}>
+        <Badge tone="neutral">보기</Badge>
+      </div>
+    </Link>
+  );
+}
 
 export default function OperatorHome() {
   const session = useSession();
-  const counts = useQueueCounts(session.status === "authenticated");
+  const enabled = session.status === "authenticated";
+  const counts = useQueueCounts(enabled);
+  const reportedTemplates = useReportedTemplatesCount(enabled);
+  const recentChanges = useRecentChanges(enabled);
   const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState<string | null>(null);
@@ -48,9 +122,9 @@ export default function OperatorHome() {
 
   if (session.status === "loading") {
     return (
-      <main>
+      <div className="p-8">
         <p data-testid="session-loading">불러오는 중...</p>
-      </main>
+      </div>
     );
   }
 
@@ -60,136 +134,151 @@ export default function OperatorHome() {
     return null;
   }
 
+  const rows: TodoRow[] = [
+    {
+      testId: "queue-appeals-pending",
+      label: "심판 대기 중인 이의",
+      href: "/appeals?status=pending",
+      count: counts.status === "loaded" ? counts.counts.pendingAppeals : null,
+      loading: counts.status === "loading",
+      error: counts.status === "error",
+      detail:
+        counts.status === "loaded"
+          ? appealsDetail(counts.counts.pendingAppeals, counts.counts.oldestPendingAppealDays)
+          : null,
+    },
+    {
+      testId: "queue-payouts-blocked",
+      label: "지급 대기",
+      href: "/payouts",
+      count:
+        counts.status === "loaded"
+          ? counts.counts.identityPendingPayouts +
+            counts.counts.sellerPendingPayouts +
+            counts.counts.transferPendingPayouts
+          : null,
+      loading: counts.status === "loading",
+      error: counts.status === "error",
+      detail:
+        counts.status === "loaded"
+          ? payoutsDetail(
+              counts.counts.identityPendingPayouts,
+              counts.counts.sellerPendingPayouts,
+              counts.counts.transferPendingPayouts,
+            )
+          : null,
+    },
+    {
+      testId: "queue-reported-templates",
+      label: "신고된 템플릿",
+      href: "/problem-template-reports",
+      count: reportedTemplates.status === "loaded" ? reportedTemplates.count : null,
+      loading: reportedTemplates.status === "loading",
+      error: reportedTemplates.status === "error",
+      detail: "검토하면 목록에서 사라진다",
+    },
+  ];
+
   return (
-    <main>
-      <h1 data-testid="operator-home-heading">환영합니다, {session.user.username}</h1>
-      <p data-testid="operator-home-grade">
-        {session.user.is_superuser ? "상위 등급 (계정 관리 가능)" : "일반 등급"}
-      </p>
-      <p data-testid="operator-home-protected-content">이 화면은 로그인해야만 보입니다.</p>
+    <>
+      <PageHeader
+        crumb="운영자 · 할 일"
+        title={`환영합니다, ${session.user.username}`}
+        titleTestId="operator-home-heading"
+        description="사람이 판단할 일만 모인다 — 스캔이 도는 일은 여기 오지 않는다."
+        actions={
+          <button
+            type="button"
+            data-testid="logout-button"
+            onClick={handleLogout}
+            disabled={loggingOut}
+            className="border border-rule bg-surface px-2.5 py-1 text-[11.5px] text-ink/62 hover:border-ink hover:text-ink disabled:opacity-50"
+          >
+            {loggingOut ? "로그아웃 중..." : "로그아웃"}
+          </button>
+        }
+      />
+      <div className="flex flex-1 flex-col gap-[18px] p-8">
+        <div className="flex items-center gap-2 text-[12.5px] text-ink/62">
+          <span data-testid="operator-home-grade">
+            {session.user.is_superuser ? "상위 등급" : "일반 등급"}
+          </span>
+          {/* AC(auth.spec.ts)가 인증 뒤 이 요소가 여전히 있는지를 기준으로 삼는다 —
+              내용을 화면에 크게 말할 이유가 없어 화면 낭독기용으로만 남긴다. */}
+          <span data-testid="operator-home-protected-content" className="sr-only">
+            이 화면은 로그인해야만 보입니다.
+          </span>
+        </div>
 
-      {/* Operator 계정 관리(#69)로 가는 유일한 진입점 — 상위 등급에게만 보인다.
-          URL을 직접 쳐야만 들어갈 수 있던 것을 코드리뷰가 지적했다. 일반
-          Operator에게는 애초에 링크를 주지 않는다(눌러도 403이 화면에서
-          "등급이 필요하다"고 말하긴 하지만, 갈 수 없는 곳으로 가는 링크를
-          먼저 보여줄 이유가 없다) — 세 큐 카드(#65/#66/#68 소관)는 건드리지
-          않는다. */}
-      {session.user.is_superuser && (
-        <p>
-          <Link href="/operators" data-testid="operators-nav-link">
-            Operator 계정 관리
-          </Link>
-        </p>
-      )}
+        {logoutError && (
+          <p role="alert" data-testid="logout-error" className="text-[12.5px] text-attention">
+            {logoutError}
+          </p>
+        )}
 
-      {/* 정책 화면(#77)으로 가는 진입점 — 계정 관리와 달리 등급을 가리지
-          않는다. 조회는 일반 등급도 되므로(#76) 이 링크는 두 등급 모두에게
-          보인다 — 편집 가능 여부는 화면 안에서 갈린다. 「할 일」 큐 카드
-          (#65/#66/#68 소관)와는 나란히 두지 않는다 — 정책은 처리해야 할
-          대기열이 아니다. */}
-      <p>
-        <Link href="/policy" data-testid="policy-nav-link">
-          플랫폼 정책
-        </Link>
-      </p>
+        <div data-testid="operator-home-queues" className="border border-rule bg-surface">
+          <TodoTableHead />
+          {rows.map((row, i) => (
+            <TodoRowView key={row.testId} row={row} index={i} />
+          ))}
+        </div>
 
-      {/* 산출물 종류 관리(#80)로 가는 진입점 — 정책 화면과 같은 이유로 두
-          등급 모두에게 보인다. 최소 제안 상금도 "상금미달" 배지 판정에
-          쓰이는 정책값과 같은 무게의 판단이라 정책 화면의 관용구를 그대로
-          따른다(#77). */}
-      <p>
-        <Link href="/deliverable-types" data-testid="deliverable-types-nav-link">
-          산출물 종류 관리
-        </Link>
-      </p>
-
-      {/* Category 관리(#231)로 가는 진입점 — 산출물 종류 화면과 같은 이유로 두
-          등급 모두에게 보인다. 정책값이 없다는 차이가 있을 뿐 공개 목록의
-          분류 축이고 Contest가 참조를 붙든다는 무게는 같다(#231). */}
-      <p>
-        <Link href="/categories" data-testid="categories-nav-link">
-          카테고리 관리
-        </Link>
-      </p>
-
-      {/* 신고된 템플릿 검토(#320)로 가는 진입점 — 정책·산출물 종류 화면과 같은
-          이유로 두 등급 모두에게 보인다. 「할 일」 큐 카드(#65/#66/#68 소관)와는
-          나란히 두지 않는다 — 그 셋은 이 스펙 밖의 결정이라(#65 주석 참고) 넷째
-          큐를 더하지 않는다. */}
-      <p>
-        <Link href="/problem-template-reports" data-testid="problem-template-reports-nav-link">
-          신고된 템플릿 검토
-        </Link>
-      </p>
-
-      {/* 무료 공모전 개최 권한 관리(#414, ADR-0048)로 가는 진입점 — 정책·산출물
-          종류 화면과 같은 이유로 두 등급 모두에게 보인다(조회는 일반 등급도
-          된다, 켜고 끄는 것만 상위 등급). */}
-      <p>
-        <Link href="/hosting-permissions" data-testid="hosting-permissions-nav-link">
-          무료 공모전 개최 권한
-        </Link>
-      </p>
-
-      {/* 운영팀 알림(#418)으로 가는 진입점 — 위 화면들과 같은 이유로 두 등급
-          모두에게 보인다(보내기 자체에 등급 게이트가 없다, OperatorAuth면
-          충분하다). 「할 일」 큐 카드(#65/#66/#68 소관)와는 나란히 두지
-          않는다 — 대기열이 아니라 그때그때 하는 판단이다. */}
-      <p>
-        <Link href="/notifications" data-testid="operator-notifications-nav-link">
-          운영팀 알림
-        </Link>
-      </p>
-
-      {/* 무료 공모전 목록(#420)으로 가는 진입점 — 위 화면들과 같은 이유로 두
-          등급 모두에게 보인다(조회 전용 화면이라 등급 분기 자체가 없다).
-          수상자 옆의 「운영팀 알림 보내기」가 바로 위 링크의 작성 화면으로
-          이어진다. */}
-      <p>
-        <Link href="/contests/free" data-testid="free-contests-nav-link">
-          무료 공모전
-        </Link>
-      </p>
-
-      <section data-testid="operator-home-queues">
-        <QueueCard
-          testId="queue-appeals-pending"
-          label="심판 대기 중인 이의"
-          href="/appeals?status=pending"
-          state={counts}
-          pick={(c) => c.pendingAppeals}
-        />
-        <QueueCard
-          testId="queue-payouts-identity"
-          label="신원 대기 중인 지급"
-          href="/payouts?blocked_on=identity"
-          state={counts}
-          pick={(c) => c.identityPendingPayouts}
-        />
-        <QueueCard
-          testId="queue-payouts-seller"
-          label="Seller 대기 중인 지급"
-          href="/payouts?blocked_on=seller"
-          state={counts}
-          pick={(c) => c.sellerPendingPayouts}
-        />
-        <QueueCard
-          testId="queue-payouts-transfer"
-          label="실이체 대기 중인 지급"
-          href="/payouts?blocked_on=transfer"
-          state={counts}
-          pick={(c) => c.transferPendingPayouts}
-        />
-      </section>
-
-      <button type="button" data-testid="logout-button" onClick={handleLogout} disabled={loggingOut}>
-        {loggingOut ? "로그아웃 중..." : "로그아웃"}
-      </button>
-      {logoutError && (
-        <p role="alert" data-testid="logout-error">
-          {logoutError}
-        </p>
-      )}
-    </main>
+        <Panel
+          title="최근 변경 이력"
+          meta="바꾼 사람과 시각이 남는다 — 지울 수 없다"
+          actions={
+            <Link
+              href="/policy"
+              data-testid="policy-nav-link"
+              className="text-[12px] text-ink/62 hover:text-ink"
+            >
+              플랫폼 정책 화면
+            </Link>
+          }
+        >
+          {recentChanges.status === "loading" && (
+            <p data-testid="recent-changes-loading" className="px-4 py-3.5 text-[13px] text-ink/62">
+              불러오는 중...
+            </p>
+          )}
+          {recentChanges.status === "error" && (
+            <p role="alert" data-testid="recent-changes-error" className="px-4 py-3.5 text-[13px] text-attention">
+              불러오지 못했습니다.
+            </p>
+          )}
+          {recentChanges.status === "loaded" && recentChanges.changes.length === 0 && (
+            <p data-testid="recent-changes-empty" className="px-4 py-3.5 text-[13px] text-ink/62">
+              아직 변경 이력이 없습니다.
+            </p>
+          )}
+          {recentChanges.status === "loaded" && recentChanges.changes.length > 0 && (
+            <div data-testid="recent-changes-table">
+              <div className="flex gap-3.5 border-b border-rule px-4 py-2.5 text-[11px] tracking-[0.06em] text-ink/30">
+                <div className="w-[110px] shrink-0">무엇</div>
+                <div className="min-w-0 flex-1">무슨 값이 어떻게</div>
+                <div className="w-[110px] shrink-0">누가</div>
+                <div className="w-[130px] shrink-0">언제</div>
+              </div>
+              {recentChanges.changes.map((change, i) => (
+                <div
+                  key={change.key}
+                  data-testid={`recent-changes-row-${change.key}`}
+                  className={`flex gap-3.5 border-b border-rule px-4 py-2.5 text-[13px] last:border-b-0 ${
+                    i % 2 === 1 ? "bg-ink/[2%]" : ""
+                  }`}
+                >
+                  <div className="w-[110px] shrink-0 truncate">{change.what}</div>
+                  <div className="min-w-0 flex-1 truncate">{change.summary}</div>
+                  <div className="w-[110px] shrink-0 truncate font-mono">{change.operatorUsername}</div>
+                  <div className="w-[130px] shrink-0 truncate font-mono text-ink/62">
+                    {new Date(change.changedAt).toLocaleString("ko-KR")}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+      </div>
+    </>
   );
 }

@@ -1,9 +1,15 @@
 "use client";
 
-// 운영자 로그인 화면(#63, ADR-0018/0019). 공개 앱과 다른 지점: 소셜 버튼이
-// 아니라 아이디·비밀번호 폼이다(Operator는 서로소 불변식 때문에 소셜 계정을
-// 가질 수 없다). 색인 대상이 아니므로(ADR-0021) 서버 컴포넌트로 둘 이유가
-// 없어 클라이언트 컴포넌트로 남긴다.
+// 운영자 로그인 화면(#63, ADR-0018/0019, 골간으로 옮긴다 — #427 부모 #421).
+// 공개 앱과 다른 지점: 소셜 버튼이 아니라 아이디·비밀번호 폼이다(Operator는
+// 서로소 불변식 때문에 소셜 계정을 가질 수 없다). 색인 대상이 아니므로
+// (ADR-0021) 서버 컴포넌트로 둘 이유가 없어 클라이언트 컴포넌트로 남긴다.
+//
+// 왼쪽 내비를 두르지 않는 유일한 화면이다(`app-shell.tsx`의 `NO_SHELL_PATHS`)
+// — 로그인 전이라 보일 계정·큐 배지가 없다. 그래서 다른 골간 화면과 달리 화면
+// 전체를 `bg-paper`로 채우고 가운데 카드 하나로 마무리한다 — 같은 토큰(테두리는
+// `border-rule`, 입력은 `create-operator-form.tsx`와 같은 모양)이되 골간 자체는
+// 이 화면에만 있는 자리다.
 import { Suspense, useState } from "react";
 
 import { normalizeDetail } from "@codemit/bff-client";
@@ -52,43 +58,52 @@ function LoginFields() {
   }
 
   return (
-    <main>
-      <div>
-        <h1>운영자 로그인</h1>
-        <p>Codemit 운영자 전용입니다.</p>
+    <div className="flex min-h-screen items-center justify-center bg-paper p-6">
+      <div className="flex w-full max-w-sm flex-col gap-6 border border-rule bg-surface p-8">
+        <div>
+          <h1 className="text-[19px] font-semibold tracking-[-0.01em]">운영자 로그인</h1>
+          <p className="mt-1.5 text-[12.5px] text-ink/62">Codemit 운영자 전용입니다.</p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="flex flex-col gap-3.5">
+          <label className="flex flex-col gap-1 text-[12.5px] text-ink/62">
+            아이디
+            <input
+              data-testid="login-username"
+              value={username}
+              autoComplete="username"
+              onChange={(event) => setUsername(event.target.value)}
+              className="border border-rule bg-paper px-2.5 py-1.5 text-[13px] text-ink"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-[12.5px] text-ink/62">
+            비밀번호
+            <input
+              data-testid="login-password"
+              type="password"
+              value={password}
+              autoComplete="current-password"
+              onChange={(event) => setPassword(event.target.value)}
+              className="border border-rule bg-paper px-2.5 py-1.5 text-[13px] text-ink"
+            />
+          </label>
+          <button
+            type="submit"
+            data-testid="login-submit"
+            disabled={pending}
+            className="mt-1.5 w-fit border border-ink bg-ink px-3 py-1.5 text-[12.5px] text-paper disabled:opacity-50"
+          >
+            {pending ? "로그인 중..." : "로그인"}
+          </button>
+        </form>
+
+        {error && (
+          <p role="alert" data-testid="login-error" className="text-[12px] text-attention">
+            {error}
+          </p>
+        )}
       </div>
-
-      <form onSubmit={handleSubmit}>
-        <label>
-          아이디
-          <input
-            data-testid="login-username"
-            value={username}
-            autoComplete="username"
-            onChange={(event) => setUsername(event.target.value)}
-          />
-        </label>
-        <label>
-          비밀번호
-          <input
-            data-testid="login-password"
-            type="password"
-            value={password}
-            autoComplete="current-password"
-            onChange={(event) => setPassword(event.target.value)}
-          />
-        </label>
-        <button type="submit" data-testid="login-submit" disabled={pending}>
-          {pending ? "로그인 중..." : "로그인"}
-        </button>
-      </form>
-
-      {error && (
-        <p role="alert" data-testid="login-error">
-          {error}
-        </p>
-      )}
-    </main>
+    </div>
   );
 }
 

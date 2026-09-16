@@ -5,9 +5,9 @@
 // 그린다 — 화면마다 흩어 놓지 않는다(spec #421 Implementation Decisions
 // 「골간」).
 //
-// 지금 보는 화면은 `usePathname()` 으로 판정한다. 열둘 중 아직 옮기지 않은
-// 화면도 전부 이 내비 아래 있으므로(누르면 옛 화면이 그대로 떠도 된다), 어느
-// 화면에서든 다른 화면으로 바로 간다(user story 1) — 홈으로 되돌아가지 않는다.
+// 지금 보는 화면은 `usePathname()` 으로 판정한다. 열둘 전부(#427 이 마지막
+// 둘 — 홈·로그인 — 을 옮겼다) 골간을 쓰므로, 어느 화면에서든 다른 화면으로
+// 바로 간다(user story 1) — 홈으로 되돌아가지 않는다.
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
