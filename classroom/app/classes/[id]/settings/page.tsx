@@ -42,16 +42,7 @@ import { useProblems } from "@/lib/problems/use-problems";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { isSelectedModelReasoning, REASONING_EFFORT_OPTIONS } from "@/lib/scoring/reasoning";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
-
-// 화면이 실제로 그리는 값만 담는다(#333) — `publishClassAsTemplate`/
-// `takedownClassTemplate`의 전체 응답에서 이 둘만 쓴다.
-type PublishedTemplateState = { share_code: string; taken_down: boolean };
-
-function _initialPublishState(
-  published: PublishedClassTemplateSummary | null,
-): PublishedTemplateState | null {
-  return published ? { share_code: published.share_code, taken_down: false } : null;
-}
+import { liveTemplateFrom, type LiveTemplate } from "@/lib/problem-templates/live-state";
 
 function ClassTemplatePublishCard({
   classId,
@@ -68,9 +59,15 @@ function ClassTemplatePublishCard({
   // 공개 폼이 다시 떠 같은 원본이 두 번 공개됐다. 마운트 이후의 흐름(공개·
   // 내리기)은 여전히 그 응답으로만 갱신한다 — 부모가 다시 부를 때마다 이
   // 초기값으로 되돌리지 않는다.
-  const [publishedTemplate, setPublishedTemplate] = useState<PublishedTemplateState | null>(() =>
-    _initialPublishState(initialPublishedTemplate),
+  //
+  // **판단은 `liveTemplateFrom` 한 곳에 있다**(2026-09-16) — 내려간 템플릿을
+  // 살아 있는 것으로 세는 바람에, 내린 뒤 새로고침해야 다시 공개할 수 있었다.
+  // 문제 화면이 같은 버그를 갖고 있었고 같은 함수로 함께 고쳤다.
+  const [liveTemplate, setLiveTemplate] = useState<LiveTemplate>(() =>
+    liveTemplateFrom(initialPublishedTemplate),
   );
+  // 「방금 내렸다」는 이 카드 안의 일이라 따로 든다 — 공개 폼을 막지 않는다.
+  const [justTakenDown, setJustTakenDown] = useState(false);
 
   const [takingDown, setTakingDown] = useState(false);
   const [takedownError, setTakedownError] = useState<string | null>(null);
@@ -81,7 +78,8 @@ function ClassTemplatePublishCard({
     setPublishing(true);
     try {
       const template = await publishClassAsTemplate(classId, publisherDisplayName.trim());
-      setPublishedTemplate({ share_code: template.share_code, taken_down: template.taken_down });
+      setLiveTemplate(liveTemplateFrom(template));
+      setJustTakenDown(false);
     } catch {
       setPublishError("템플릿으로 공개하지 못했습니다. 잠시 후 다시 시도해주세요.");
     } finally {
@@ -90,12 +88,13 @@ function ClassTemplatePublishCard({
   }
 
   async function handleTakedown() {
-    if (!publishedTemplate) return;
+    if (!liveTemplate) return;
     setTakedownError(null);
     setTakingDown(true);
     try {
-      const template = await takedownClassTemplate(publishedTemplate.share_code);
-      setPublishedTemplate({ share_code: template.share_code, taken_down: template.taken_down });
+      const template = await takedownClassTemplate(liveTemplate.shareCode);
+      setLiveTemplate(liveTemplateFrom(template));
+      setJustTakenDown(true);
     } catch {
       setTakedownError("내리지 못했습니다. 잠시 후 다시 시도해주세요.");
     } finally {
@@ -107,38 +106,29 @@ function ClassTemplatePublishCard({
     <Card>
       <CardHeader title="클래스를 템플릿으로 공개" hint="문제와 순서까지 통째로 다른 강사에게 공유" />
       <div className="flex flex-col gap-2.5 p-4">
-        {publishedTemplate ? (
+        {liveTemplate ? (
           <div className="flex flex-col gap-2">
-            {publishedTemplate.taken_down ? (
-              <p data-testid="publish-class-template-taken-down" className="flex items-center gap-2.5 text-[13px]">
-                <Badge tone="neutral">내려짐</Badge>
-                <span className="text-ink/60">더 이상 다른 강사가 가져갈 수 없습니다.</span>
-              </p>
-            ) : (
-              <>
-                <p data-testid="publish-class-template-done" className="text-[13px] leading-relaxed">
-                  공개되었습니다. 아래 주소를 다른 강사에게 전달하세요.
-                </p>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Link
-                    href={`/class-templates/${publishedTemplate.share_code}`}
-                    data-testid="publish-class-template-share-link"
-                    className="min-w-0 flex-1 break-all border border-rule bg-surface px-3 py-2 font-mono text-[12.5px] hover:underline"
-                  >
-                    /class-templates/{publishedTemplate.share_code}
-                  </Link>
-                  <button
-                    type="button"
-                    data-testid="publish-class-template-takedown"
-                    onClick={handleTakedown}
-                    disabled={takingDown}
-                    className={buttonClass("danger", "sm")}
-                  >
-                    {takingDown ? "내리는 중..." : "내리기"}
-                  </button>
-                </div>
-              </>
-            )}
+            <p data-testid="publish-class-template-done" className="text-[13px] leading-relaxed">
+              공개되었습니다. 아래 주소를 다른 강사에게 전달하세요.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Link
+                href={`/class-templates/${liveTemplate.shareCode}`}
+                data-testid="publish-class-template-share-link"
+                className="min-w-0 flex-1 break-all border border-rule bg-surface px-3 py-2 font-mono text-[12.5px] hover:underline"
+              >
+                /class-templates/{liveTemplate.shareCode}
+              </Link>
+              <button
+                type="button"
+                data-testid="publish-class-template-takedown"
+                onClick={handleTakedown}
+                disabled={takingDown}
+                className={buttonClass("danger", "sm")}
+              >
+                {takingDown ? "내리는 중..." : "내리기"}
+              </button>
+            </div>
             {takedownError ? (
               <ErrorNote>
                 <span data-testid="publish-class-template-takedown-error">{takedownError}</span>
@@ -146,6 +136,20 @@ function ClassTemplatePublishCard({
             ) : null}
           </div>
         ) : (
+          <>
+            {justTakenDown ? (
+              <p data-testid="publish-class-template-taken-down" className="flex items-center gap-2.5 text-[13px]">
+                <Badge tone="neutral">내려짐</Badge>
+                <span className="text-ink/60">
+                  더 이상 다른 강사가 가져갈 수 없습니다. 다시 공개하면 새 주소가 나옵니다.
+                </span>
+              </p>
+            ) : null}
+            {takedownError ? (
+              <ErrorNote>
+                <span data-testid="publish-class-template-takedown-error">{takedownError}</span>
+              </ErrorNote>
+            ) : null}
           <form onSubmit={handlePublish} className="flex flex-col gap-2.5">
             <label htmlFor="publish-class-template-name">
               <FieldLabel>공개할 때 보일 이름</FieldLabel>
@@ -168,6 +172,7 @@ function ClassTemplatePublishCard({
               {publishing ? "공개하는 중..." : "클래스를 템플릿으로 공개"}
             </button>
           </form>
+          </>
         )}
         {publishError ? (
           <ErrorNote>

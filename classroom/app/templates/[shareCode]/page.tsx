@@ -7,6 +7,8 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
+import { MarkdownView } from "@codemit/markdown";
+
 import {
   Badge,
   Card,
@@ -162,9 +164,21 @@ export default function ProblemTemplatePreviewPage() {
                 {template.publisher_display_name} 올림 ·{" "}
                 {new Date(template.created_at).toLocaleDateString("ko-KR")}
               </p>
-              <p data-testid="template-preview-description" className="whitespace-pre-wrap text-[13.5px] leading-relaxed">
-                {template.description || "설명이 없습니다."}
-              </p>
+              {/* 참여자 화면·문제 편집의 미리보기와 **같은 렌더러**다(2026-09-16,
+                  `@codemit/markdown`) — 여기만 `whitespace-pre-wrap` 한 덩이로 남아 있어
+                  `##` 과 표가 글자로 보였다. 가져오기 전에 「이 문제가 실제로 어떻게
+                  보이나」를 확인하는 자리이므로 복사·파일로 저장 버튼까지 그대로 준다
+                  (#325 의 「미리보기는 미리보기여야 한다」와 같은 논리).
+                  `MarkdownView` 는 설명이 비면 아무것도 그리지 않으므로(null) 그
+                  자리에 쓰던 문구를 그대로 유지한다 — 「설명이 없다」와 「불러오기가
+                  덜 됐다」가 구별돼야 한다. */}
+              <div data-testid="template-preview-description">
+                {template.description.trim() === "" ? (
+                  <p className="text-[13.5px] leading-relaxed">설명이 없습니다.</p>
+                ) : (
+                  <MarkdownView markdown={template.description} fileBaseName={template.title} />
+                )}
+              </div>
               <p data-testid="template-preview-format" className="mt-3 text-[12.5px] text-ink/60">
                 제출 형식: {formatSubmissionFormats(template.submission_formats)}
               </p>

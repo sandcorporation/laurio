@@ -49,10 +49,8 @@ import { useProblem } from "@/lib/problems/use-problem";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { isSelectedModelReasoning, REASONING_EFFORT_OPTIONS } from "@/lib/scoring/reasoning";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
+import { liveTemplateFrom, type LiveTemplate } from "@/lib/problem-templates/live-state";
 
-// 화면이 실제로 그리는 값만 담는다(#333, 클래스 설정 화면의
-// `PublishedTemplateState`와 같은 이유) — 전체 템플릿 응답에서 이 둘만 쓴다.
-type PublishedTemplateState = { share_code: string; taken_down: boolean };
 
 const STATUS_LABEL: Record<string, string> = {
   draft: "초안",
@@ -104,7 +102,12 @@ export default function EditProblemPage() {
   const [publisherDisplayName, setPublisherDisplayName] = useState("");
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
-  const [publishedTemplate, setPublishedTemplate] = useState<PublishedTemplateState | null>(null);
+  // 지금 가져갈 수 있는 템플릿(없으면 null → 공개 폼이 뜬다). 서버가 진실의
+  // 출처이고, 공개·내리기 응답도 같은 함수로 읽는다.
+  const [liveTemplate, setLiveTemplate] = useState<LiveTemplate>(null);
+  // 「방금 내렸다」는 이 화면 안의 일이라 따로 든다 — 위 상태를 서버에서 다시
+  // 받아와도 이 안내가 지워지지 않아야 한다.
+  const [justTakenDown, setJustTakenDown] = useState(false);
 
   const [takingDown, setTakingDown] = useState(false);
   const [takedownError, setTakedownError] = useState<string | null>(null);
@@ -133,11 +136,7 @@ export default function EditProblemPage() {
       // 내려준 「지금 살아 있는 템플릿」으로 맞춘다(#333) — 예전에는 이
       // 상태가 화면 안에만 있어 새로고침하면 사라지고 폼이 다시 떠 같은
       // 문제가 두 번 공개됐다.
-      setPublishedTemplate(
-        state.problem.published_template
-          ? { share_code: state.problem.published_template.share_code, taken_down: false }
-          : null,
-      );
+      setLiveTemplate(liveTemplateFrom(state.problem.published_template));
     }
   }, [state]);
 
@@ -289,7 +288,9 @@ export default function EditProblemPage() {
     setPublishing(true);
     try {
       const template = await publishProblemAsTemplate(classId, problemId, publisherDisplayName.trim());
-      setPublishedTemplate({ share_code: template.share_code, taken_down: template.taken_down });
+      setLiveTemplate(liveTemplateFrom(template));
+      setJustTakenDown(false);
+      reload();
     } catch {
       setPublishError("템플릿으로 공개하지 못했습니다. 잠시 후 다시 시도해주세요.");
     } finally {
@@ -298,12 +299,17 @@ export default function EditProblemPage() {
   }
 
   async function handleTakedown() {
-    if (!publishedTemplate) return;
+    if (!liveTemplate) return;
     setTakedownError(null);
     setTakingDown(true);
     try {
-      const template = await takedownProblemTemplate(publishedTemplate.share_code);
-      setPublishedTemplate({ share_code: template.share_code, taken_down: template.taken_down });
+      // 내리면 **살아 있는 템플릿이 없어진다** — 그래서 공개 폼이 곧바로 돌아오고
+      // 새로고침 없이 다시 공개할 수 있다(2026-09-16 에 고친 버그). 다른 열 개
+      // 핸들러와 같이 `reload()` 로 서버 값도 맞춘다.
+      const template = await takedownProblemTemplate(liveTemplate.shareCode);
+      setLiveTemplate(liveTemplateFrom(template));
+      setJustTakenDown(true);
+      reload();
     } catch {
       setTakedownError("내리지 못했습니다. 잠시 후 다시 시도해주세요.");
     } finally {
@@ -915,38 +921,35 @@ export default function EditProblemPage() {
             <Card>
               <CardHeader title="템플릿으로 공개" hint="다른 강사에게 공유" />
               <div className="flex flex-col gap-2.5 p-4">
-                {publishedTemplate ? (
+                {/* **내려간 템플릿은 「있다」가 아니다**(2026-09-16). 예전에는 내린
+                    뒤에도 이 자리에 「내려짐」만 남고 공개 폼이 끝까지 돌아오지 않아,
+                    새로고침해야 다시 공개할 수 있었다 — 서버는 내린 뒤 재공개를
+                    허용하는데 화면만 막고 있었다. 그 판단은 이제
+                    `lib/problem-templates/live-state.ts` 한 곳에 있고, 「방금
+                    내렸다」는 폼을 막지 않는 안내로 따로 뜬다. */}
+                {liveTemplate ? (
                   <div className="flex flex-col gap-2">
-                    {publishedTemplate.taken_down ? (
-                      <p data-testid="publish-template-taken-down" className="flex items-center gap-2.5 text-[13px]">
-                        <Badge tone="neutral">내려짐</Badge>
-                        <span className="text-ink/60">더 이상 다른 강사가 가져갈 수 없습니다.</span>
-                      </p>
-                    ) : (
-                      <>
-                        <p data-testid="publish-template-done" className="text-[13px] leading-relaxed">
-                          공개되었습니다. 아래 주소를 다른 강사에게 전달하세요.
-                        </p>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Link
-                            href={`/templates/${publishedTemplate.share_code}`}
-                            data-testid="publish-template-share-link"
-                            className="min-w-0 flex-1 break-all border border-rule bg-surface px-3 py-2 font-mono text-[12.5px] hover:underline"
-                          >
-                            /templates/{publishedTemplate.share_code}
-                          </Link>
-                          <button
-                            type="button"
-                            data-testid="publish-template-takedown"
-                            onClick={handleTakedown}
-                            disabled={takingDown}
-                            className={buttonClass("danger", "sm")}
-                          >
-                            {takingDown ? "내리는 중..." : "내리기"}
-                          </button>
-                        </div>
-                      </>
-                    )}
+                    <p data-testid="publish-template-done" className="text-[13px] leading-relaxed">
+                      공개되었습니다. 아래 주소를 다른 강사에게 전달하세요.
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Link
+                        href={`/templates/${liveTemplate.shareCode}`}
+                        data-testid="publish-template-share-link"
+                        className="min-w-0 flex-1 break-all border border-rule bg-surface px-3 py-2 font-mono text-[12.5px] hover:underline"
+                      >
+                        /templates/{liveTemplate.shareCode}
+                      </Link>
+                      <button
+                        type="button"
+                        data-testid="publish-template-takedown"
+                        onClick={handleTakedown}
+                        disabled={takingDown}
+                        className={buttonClass("danger", "sm")}
+                      >
+                        {takingDown ? "내리는 중..." : "내리기"}
+                      </button>
+                    </div>
                     {takedownError ? (
                       <ErrorNote>
                         <span data-testid="publish-template-takedown-error">{takedownError}</span>
@@ -954,6 +957,20 @@ export default function EditProblemPage() {
                     ) : null}
                   </div>
                 ) : (
+                  <>
+                    {justTakenDown ? (
+                      <p data-testid="publish-template-taken-down" className="flex items-center gap-2.5 text-[13px]">
+                        <Badge tone="neutral">내려짐</Badge>
+                        <span className="text-ink/60">
+                          더 이상 다른 강사가 가져갈 수 없습니다. 다시 공개하면 새 주소가 나옵니다.
+                        </span>
+                      </p>
+                    ) : null}
+                    {takedownError ? (
+                      <ErrorNote>
+                        <span data-testid="publish-template-takedown-error">{takedownError}</span>
+                      </ErrorNote>
+                    ) : null}
                   <form onSubmit={handlePublish} className="flex flex-col gap-2.5">
                     <label htmlFor="publish-template-name">
                       <FieldLabel>공개할 때 보일 이름</FieldLabel>
@@ -976,6 +993,7 @@ export default function EditProblemPage() {
                       {publishing ? "공개하는 중..." : "템플릿으로 공개"}
                     </button>
                   </form>
+                  </>
                 )}
                 {publishError ? (
                   <ErrorNote>
