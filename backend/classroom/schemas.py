@@ -282,6 +282,13 @@ class ProblemOut(Schema):
     #: 이 문제를 원본으로 하는, 지금 살아 있는 문제 템플릿(#333) —
     #: `ClassOut.published_template`과 같은 이유·같은 모양.
     published_template: PublishedTemplateSummaryOut | None = None
+    #: 이 문제를 지금 지울 수 있는가(#430/#431, ADR-0050) — 화면은 시도를
+    #: 세지 않고 이 칸만 본다(`ClassOut.has_submissions`와 같은 관용구,
+    #: 반대 극성: 저쪽은 "있으면 막는다", 이쪽은 "없으면 연다"). 기본값은
+    #: 거짓이다(fail-closed) — `_serialize_problem`이 언제나 실제 판정값을
+    #: 명시하지만, 혹시 다른 생성 경로가 이 칸을 빠뜨려도 삭제 버튼이
+    #: 함부로 뜨지 않는 쪽으로 넘어진다.
+    deletable: bool = False
 
 
 class ProblemReorderIn(Schema):
@@ -481,6 +488,16 @@ class ClassroomProblemSubmissionsOut(Schema):
     #: 대신 「강사가 숨긴 문제라 새로 낼 수 없습니다」를 보인다 — 실제 문은
     #: 여전히 `create_classroom_submission`의 403이다.
     problem_hidden: bool = False
+    #: 이 요청을 보낸 사람이 그 클래스의 강사인가(#429) — 참이면 화면이 띠를
+    #: 띄우고 제출을 잠근다. 화면은 「내가 강사인가」를 따로 계산하지 않고
+    #: 이 칸 하나만 본다(#429 Implementation Decisions "역할은 화면이
+    #: 짐작하지 않는다").
+    viewing_as_instructor: bool = False
+    #: `viewing_as_instructor`가 참일 때만 채워지는 문제 상태("draft"|"open"|
+    #: "hidden") — 띠가 몇 줄을 더 말할지 이 값으로 정한다. 참여자 시점에는
+    #: 언제나 `None`이다(참여자에게는 상태 구분이 필요 없다는 것이 이미
+    #: `ClassroomProblemMineOut`의 설계다).
+    instructor_problem_status: str | None = None
 
 
 class ClassroomProblemStatsOut(Schema):

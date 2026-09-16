@@ -25,6 +25,7 @@ import {
   ErrorNote,
   FieldLabel,
   INPUT_CLASS,
+  Note,
   PageHeader,
   buttonClass,
 } from "@/app/components/ui";
@@ -104,7 +105,43 @@ type ProblemParticipantViewProps = (InteractiveProps | PreviewProps) & {
   gradingGuidelineCustomText: string;
   submissionFormats: SubmissionFormat[];
   submissions: ClassroomSubmissionRow[];
+  /** 강사가 「학생 화면으로」를 눌러 이 화면을 열었는가(#429) — 참이면 맨 위에
+   *  「강사로 보고 있습니다」 띠가 뜬다. 미리보기(`interactive={false}`)는
+   *  이 값을 쓰지 않는다 — 미리보기는 애초에 참여자도 강사도 아닌, 아직
+   *  아무도 아닌 화면이다. */
+  viewingAsInstructor?: boolean;
+  /** `viewingAsInstructor`가 참일 때만 뜻이 있다 — 띠가 몇 줄을 더 말할지
+   *  정한다(초안·숨김이면 한 줄 더, 열림이면 띠 한 줄뿐). */
+  instructorProblemStatus?: "draft" | "open" | "hidden" | null;
 };
+
+/** 강사가 학생 화면을 열었을 때의 안내 문구(#429) — 기본 한 줄에 상태별로
+ *  한 줄을 더한다. 판정 로직이 아니라 문구 조립이라 별도 순수 함수 시임을
+ *  두지 않는다(#429 Testing Decisions). */
+function InstructorViewingBanner({
+  status,
+}: {
+  status: "draft" | "open" | "hidden" | null | undefined;
+}) {
+  return (
+    <Note tone="attention">
+      <div className="flex flex-col gap-1">
+        <span data-testid="instructor-viewing-banner">
+          강사로 보고 있습니다 — 제출은 되지 않습니다.
+        </span>
+        {status === "draft" ? (
+          <span data-testid="instructor-viewing-banner-draft">
+            아직 초안이니 학생에게는 이 화면이 보이지 않습니다.
+          </span>
+        ) : status === "hidden" ? (
+          <span data-testid="instructor-viewing-banner-hidden">
+            숨긴 문제입니다 — 이미 낸 학생만 봅니다.
+          </span>
+        ) : null}
+      </div>
+    </Note>
+  );
+}
 
 export function ProblemParticipantView(props: ProblemParticipantViewProps) {
   const {
@@ -120,6 +157,8 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
     gradingGuidelineCustomText,
     submissionFormats,
     submissions,
+    viewingAsInstructor,
+    instructorProblemStatus,
   } = props;
 
   const checklistLabelById = new Map(checklistItems.map((item) => [item.id, item.label]));
@@ -129,6 +168,7 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
 
   return (
     <div className="flex flex-col gap-5">
+      {viewingAsInstructor ? <InstructorViewingBanner status={instructorProblemStatus} /> : null}
       <PageHeader
         headingLevel={headingLevel}
         eyebrow={eyebrow}

@@ -361,11 +361,16 @@ class ClassroomScore(models.Model):
 
     `scoring.Score`가 상속하는 `ledger.AppendOnlyModel`도 같은 이유로 쓸 수
     없다(`ledger`도 공모전 가족이다) — 그래서 `save()`를 직접 막는다. `ledger`의
-    QuerySet 단위 `update()`/`delete()` 차단까지는 두지 않는다: 이 모델을
-    가리키는 캐스케이드 삭제 경로가 `Class`→`Problem`→`ClassroomSubmission`
-    뿐이고, `submission`이 `on_delete=PROTECT`라 그 경로 자체가 막힌다
-    (`scoring.Score.submission`이 같은 이유로 PROTECT인 것과 같다) — 남는
-    위험은 이 모델 자신의 실수뿐이라 인스턴스 단위 가드로 충분하다.
+    QuerySet 단위 `update()`/`delete()` 차단까지는 두지 않는다.
+
+    **채점 결과가 지워지는 경로는 정확히 하나, ADR-0050이 연다.** 강사가 자기
+    문제를 지우면서 그 문제 × 강사 자신의 시도에 달린 채점만 `classroom.api.
+    delete_problem`이 QuerySet `delete()`로 먼저 걷는다 — `submission`이
+    `on_delete=PROTECT`라 그러지 않으면 `Class`→`Problem`→`ClassroomSubmission`
+    캐스케이드가 `ProtectedError`로 막힌다. 그 필터(「그 문제 × 강사 자신」)가
+    이 우회의 근거 전부이므로 넓히지 않는다 — 참여자의 시도에 달린 채점은 어떤
+    경로로도 지워지지 않는다. 남는 위험은 이 모델 자신의 실수뿐이라 인스턴스
+    단위 가드로 충분하다.
     """
 
     # related_name이 "score"가 아니라 "classroom_score"다 — `ClassroomSubmission`이

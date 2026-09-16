@@ -289,8 +289,52 @@ def _problem_pass_stats(problem: Problem, active_member_ids: set[int]) -> tuple[
     return len(passed_member_ids), member_count
 
 
+def _problem_ids_blocking_deletion(class_obj: Class) -> set[int]:
+    """강사 자신이 아닌 누군가의 시도가 하나라도 달린 문제 id 집합(#431,
+    ADR-0050) — **내보낸 참여자의 시도도 포함한다**(`member__expelled_at`을
+    보지 않는다, ADR-0050의 경계: 내보내면 지울 수 있게 되는 우회를 막는다).
+    목록 화면(`list_problems`/`reorder_problems`)이 문제마다 따로 질의하지
+    않도록 클래스 전체를 한 번에 묻는다 — `_active_member_ids`와 같은 배치
+    관용구다."""
+
+    return set(
+        ClassroomSubmission.objects.filter(problem__classroom=class_obj)
+        .exclude(member__user_id=class_obj.instructor_id)
+        .values_list("problem_id", flat=True)
+    )
+
+
+def _problem_deletable(
+    problem: Problem, class_obj: Class, *, blocking_problem_ids: set[int] | None = None
+) -> bool:
+    """이 문제를 지금 지울 수 있는가(#430/#431, ADR-0050) — 강사 자신이 아닌
+    누군가의 시도가 하나도 없을 때 참이다.
+
+    강사 판정은 `member__user_id == class_obj.instructor_id`로 한다 — 「그
+    시도가 어느 멤버십의 것인가」가 아니라 「그 시도를 낸 사람이 강사
+    자신인가」로 좁게 본다(#431 Further Notes가 정한 더 좁은 쪽). 두 판정은
+    `unique_classroom_member` 제약(클래스 하나에 유저 하나당 멤버십 하나) 아래
+    에서 같은 답을 내지만, 달성률 분모(`_active_member_ids`)와는 **의도적으로
+    필터를 공유하지 않는다** — 그쪽은 내보낸 사람을 빼고 「지금 배우는 사람이
+    몇인가」를 세고, 이쪽은 내보낸 사람도 포함해 「지워도 되는 기록인가」를
+    묻는다. 같은 필터를 썼다면 내보낸 참여자의 시도가 조용히 안 걸렸을
+    것이다."""
+
+    if blocking_problem_ids is not None:
+        return problem.id not in blocking_problem_ids
+    return not (
+        ClassroomSubmission.objects.filter(problem=problem)
+        .exclude(member__user_id=class_obj.instructor_id)
+        .exists()
+    )
+
+
 def _serialize_problem(
-    problem: Problem, class_obj: Class, *, active_member_ids: set[int] | None = None
+    problem: Problem,
+    class_obj: Class,
+    *,
+    active_member_ids: set[int] | None = None,
+    blocking_problem_ids: set[int] | None = None,
 ) -> ProblemOut:
     if active_member_ids is None:
         active_member_ids = _active_member_ids(class_obj)
@@ -319,6 +363,7 @@ def _serialize_problem(
         member_count=member_count,
         pass_rate=(passed_count / member_count) if member_count else None,
         published_template=_published_template_summary(_live_problem_template(problem)),
+        deletable=_problem_deletable(problem, class_obj, blocking_problem_ids=blocking_problem_ids),
     )
 
 
@@ -1126,7 +1171,13 @@ def list_problems(request: HttpRequest, class_id: int):
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problems = class_obj.problems.prefetch_related("checklist_items").all()
     active_member_ids = _active_member_ids(class_obj)
-    return 200, [_serialize_problem(p, class_obj, active_member_ids=active_member_ids) for p in problems]
+    blocking_problem_ids = _problem_ids_blocking_deletion(class_obj)
+    return 200, [
+        _serialize_problem(
+            p, class_obj, active_member_ids=active_member_ids, blocking_problem_ids=blocking_problem_ids
+        )
+        for p in problems
+    ]
 
 
 @router.post(
@@ -1155,7 +1206,13 @@ def reorder_problems(request: HttpRequest, class_id: int, payload: ProblemReorde
 
     ordered = sorted(problems.values(), key=lambda p: p.order)
     active_member_ids = _active_member_ids(class_obj)
-    return 200, [_serialize_problem(p, class_obj, active_member_ids=active_member_ids) for p in ordered]
+    blocking_problem_ids = _problem_ids_blocking_deletion(class_obj)
+    return 200, [
+        _serialize_problem(
+            p, class_obj, active_member_ids=active_member_ids, blocking_problem_ids=blocking_problem_ids
+        )
+        for p in ordered
+    ]
 
 
 @router.get(
@@ -1365,6 +1422,43 @@ def update_problem(request: HttpRequest, class_id: int, problem_id: int, payload
     return 200, _serialize_problem(problem, class_obj)
 
 
+@router.delete(
+    "/classes/{class_id}/problems/{problem_id}",
+    response={204: None, 403: ErrorOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def delete_problem(request: HttpRequest, class_id: int, problem_id: int):
+    """아무도 내지 않은 문제, 또는 강사 자신만 내본 문제를 없던 일로 한다
+    (#430/#431, ADR-0050) — 클래스 삭제(위 `delete_class`)와 같은 절차·같은
+    판정 모양이다. **참여자의 시도가 하나라도 있으면 거절한다**(내보낸
+    참여자의 시도도 「남은 시도」다, `_problem_deletable`). 그 조건을 만족하면
+    강사 자신의 시도에 달린 채점을 QuerySet `delete()`로 먼저 걷는다 — 걷어내는
+    범위는 「그 문제 × 강사 자신」으로 닫혀 있고, 그 필터가 이 우회의 근거
+    전부다(넓히지 않는다). 강사 자신의 시도가 없으면(#430의 원래 경우, 시도가
+    0) 이 삭제는 아무 행도 지우지 않는 no-op이다.
+
+    체크리스트 항목·시도(`ClassroomSubmission`)는 `Problem`에 걸린 CASCADE로
+    함께 지워진다. 이 문제를 공개한 템플릿(`ProblemTemplate`)은 이 문제를
+    가리키지 않는, 공개 시점에 뜬 사본이라 영향받지 않는다(#316). 삭제된
+    문제를 가리키는 채점 완료 알림은 그대로 남는다(ADR-0050 결과 — 알림을
+    함께 지우면 알림이 append-only가 아니게 된다). 공모전의 `Score`·원장에는
+    닿지 않는다(강의실과 공모전은 서로 다른 앱 경계, ADR-0037/0039)."""
+
+    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    problem = _get_owned_problem_or_404(class_obj, problem_id)
+    if not _problem_deletable(problem, class_obj):
+        raise HttpError(403, "지울 수 없습니다 — 대신 숨겨주세요.")
+    # 채점을 걷는 것과 문제를 지우는 것, 둘이 한 트랜잭션이어야 한다 — 둘로
+    # 쪼개진 채 죽으면(#431이 채점 걷기를 더하며 새로 생긴 위험) 채점만 사라지고
+    # 문제·시도는 남는 어중간한 상태가 생긴다.
+    with transaction.atomic():
+        ClassroomScore.objects.filter(
+            submission__problem=problem, submission__member__user_id=class_obj.instructor_id
+        ).delete()
+        problem.delete()
+    return 204, None
+
+
 @router.post(
     "/classes/{class_id}/problems/{problem_id}/open",
     response={200: ProblemOut, 404: ErrorOut, 400: ErrorOut},
@@ -1485,7 +1579,30 @@ def _get_visible_problem_for_participant_or_404(
 def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
     """참여자가 보는 문제 하나 — 체크리스트와 본인의 시도 목록(#286). 남의
     시도는 애초에 이 질의에 없다(`member=member` 필터) — "남의 제출물을 볼 수
-    없다"는 AC를 별도 권한 검사가 아니라 쿼리 모양으로 지킨다."""
+    없다"는 AC를 별도 권한 검사가 아니라 쿼리 모양으로 지킨다.
+
+    **그 클래스의 강사가 부르면 달리 대한다**(#429) — 참여자가 실제로 걷는
+    이 주소 그대로 「학생 화면으로」가 연다. 상태(초안·열림·숨김)와 무관하게
+    문제를 내려주고, 시도 목록은 언제나 빈 배열이다(강사는 참여자가 아니다 —
+    Implementation Decisions "강사를 자기 클래스 참여자로 넣지 않은 이유").
+    강사 판정은 `instructor_id`만 본다 — 그 강사가 가입 링크로 이 클래스의
+    `ClassMember`이기도 해도 이 분기가 항상 이긴다, 참여자 규칙은 한 글자도
+    바뀌지 않는다는 약속을 지키려면 두 신원이 섞이면 안 된다."""
+
+    instructor_class = Class.objects.filter(id=class_id, instructor_id=request.auth_user.id).first()
+    if instructor_class is not None:
+        class_obj = instructor_class
+        problem = _get_owned_problem_or_404(class_obj, problem_id)
+        return 200, ClassroomProblemSubmissionsOut(
+            class_name=class_obj.name,
+            problem=_serialize_problem_mine(problem, passed=False),
+            submissions=[],
+            member_expelled=False,
+            archived=class_obj.archived_at is not None,
+            problem_hidden=False,
+            viewing_as_instructor=True,
+            instructor_problem_status=problem.status,
+        )
 
     member = _get_member_or_404(class_id, request.auth_user.id)
     problem = _get_visible_problem_for_participant_or_404(class_id, problem_id, member)
