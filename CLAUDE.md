@@ -911,6 +911,16 @@ docker build -f docker/frontend.Dockerfile --target runner -t x .   # deploy-gua
 docker build -f docker/operator.Dockerfile --target runner -t y .
 ```
 
+**standalone 산출물에는 `public/` 이 들어가지 않는다 — Dockerfile 이 따로 옮긴다.**
+`docker/frontend.Dockerfile` 의 runner 스테이지가 `COPY … /app/frontend/public` 한
+줄로 옮기고, 그 줄이 없으면 `/kakao/...` 같은 정적 자산이 **배포에서만** 404 가
+된다(2026-09-16, 카카오 로그인 버튼 이미지가 prod 에서 그렇게 깨졌다). dev 는 소스를
+그대로 서빙하고 부팅 가드는 `/healthz` 만 보므로 세 게이트가 전부 못 본다 — 그래서
+`frontend-deploy-guard` 잡이 구운 이미지에서 그 파일과 `/_next/image` 최적화 주소가
+둘 다 200 인지 직접 확인한다(#297 의 「구운 이미지에만 드러나는 실패」와 같은 종류).
+`operator/`·`classroom/` 에는 아직 `public/` 이 없다 — 생기면 같은 줄을 그 Dockerfile
+에도 더한다.
+
 **API 타입은 손으로 쓰지 않는다.** `packages/bff-client/src/schema.gen.ts` 는
 `pnpm --dir frontend generate:api`(`packages/bff-client/scripts/generate-api-types.mjs`)가
 백엔드의 OpenAPI 스키마에서 생성해 커밋한 산출물이다. 이 명령은 **스택이 필요

@@ -141,9 +141,12 @@ WORKDIR /app
 RUN groupadd --system --gid 1001 nodejs \
     && useradd --system --uid 1001 --gid nodejs nextjs
 
-# public/ 은 아직 이 저장소에 없다(정적 자산이 생기면 `COPY --from=builder
-# /app/frontend/public ./frontend/public` 을 여기 추가한다 — 없는 디렉터리를
-# COPY하면 빌드 자체가 실패하므로 지금은 넣지 않는다).
+# public/ 을 옮긴다(2026-09-16). standalone 산출물에는 public/ 이 **들어가지
+# 않는다** — Next 가 그렇게 만든다. 그래서 이 줄이 없으면 `/kakao/...` 같은 정적
+# 자산이 배포에서만 404 가 되고, 그 실패는 로컬·CI 어디에도 보이지 않는다
+# (dev 는 소스를 그대로 서빙하고, deploy-guard 는 /login 의 HTML 만 본다).
+# 실제로 카카오 로그인 버튼 이미지가 prod 에서 깨져 이 줄을 더했다.
+COPY --from=builder --chown=nextjs:nodejs /app/frontend/public ./frontend/public
 #
 # standalone 산출물이 워크스페이스 구조를 그대로 담고 있으므로(위 builder
 # 스테이지 주석), 통째로 옮기면 "frontend/server.js"·루트 node_modules가 함께
