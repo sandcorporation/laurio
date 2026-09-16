@@ -57,37 +57,49 @@ export function CreateTypeForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} data-testid="create-deliverable-type-form">
-      <h2>새 산출물 종류 만들기</h2>
-      <label>
+    <form
+      onSubmit={handleSubmit}
+      data-testid="create-deliverable-type-form"
+      className="flex flex-col gap-3 border border-rule bg-surface p-5"
+    >
+      <h2 className="text-[15px] font-semibold tracking-[-0.01em]">새 산출물 종류 만들기</h2>
+      <label className="flex flex-col gap-1.5 text-[13px] text-ink/62">
         이름
         <input
           data-testid="create-deliverable-type-name"
           value={name}
           onChange={(event) => setName(event.target.value)}
+          className="border border-rule bg-paper px-2.5 py-1.5 text-[13px] text-ink"
         />
       </label>
-      <label>
+      <label className="flex flex-col gap-1.5 text-[13px] text-ink/62">
         최소 제안 상금(원)
         <input
           data-testid="create-deliverable-type-minimum-prize"
           value={minimumPrize}
           onChange={(event) => setMinimumPrize(event.target.value)}
+          className="border border-rule bg-paper px-2.5 py-1.5 font-mono text-[13px] text-ink"
         />
       </label>
-      <label>
+      <label className="flex flex-col gap-1.5 text-[13px] text-ink/62">
         이유
         <input
           data-testid="create-deliverable-type-reason"
           value={reason}
           onChange={(event) => setReason(event.target.value)}
+          className="border border-rule bg-paper px-2.5 py-1.5 text-[13px] text-ink"
         />
       </label>
-      <button type="submit" data-testid="create-deliverable-type-submit" disabled={pending}>
+      <button
+        type="submit"
+        data-testid="create-deliverable-type-submit"
+        disabled={pending}
+        className="w-fit border border-ink bg-ink px-3.5 py-1.5 text-[13px] text-paper disabled:opacity-50"
+      >
         {pending ? "생성 중..." : "종류 생성"}
       </button>
       {error && (
-        <p role="alert" data-testid="create-deliverable-type-error">
+        <p role="alert" data-testid="create-deliverable-type-error" className="text-[12.5px] text-attention">
           {error}
         </p>
       )}

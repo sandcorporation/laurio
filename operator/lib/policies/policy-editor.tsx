@@ -121,43 +121,50 @@ export function PolicyEditor({
   }
 
   return (
-    <form onSubmit={handleSubmit} data-testid="policy-editor-form">
-      <h2>정책값 바꾸기</h2>
-      <table>
-        <tbody>
-          {POLICY_FIELDS.map((field) => (
-            <tr key={field}>
-              <td>
-                <label htmlFor={`policy-input-${field}`}>{POLICY_FIELD_LABELS[field]}</label>
-              </td>
-              <td>
-                <input
-                  id={`policy-input-${field}`}
-                  data-testid={`policy-input-${field}`}
-                  value={inputs[field]}
-                  onChange={(event) => handleChange(field, event.target.value)}
-                />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <form
+      onSubmit={handleSubmit}
+      data-testid="policy-editor-form"
+      className="flex flex-col gap-4 border border-rule bg-surface p-5"
+    >
+      <h2 className="text-[15px] font-semibold tracking-[-0.01em]">정책값 바꾸기</h2>
+      <div className="flex flex-col gap-2">
+        {POLICY_FIELDS.map((field) => (
+          <div key={field} className="flex items-center justify-between gap-4">
+            <label htmlFor={`policy-input-${field}`} className="text-[13px] text-ink/62">
+              {POLICY_FIELD_LABELS[field]}
+            </label>
+            <input
+              id={`policy-input-${field}`}
+              data-testid={`policy-input-${field}`}
+              value={inputs[field]}
+              onChange={(event) => handleChange(field, event.target.value)}
+              className="w-[180px] border border-rule bg-paper px-2.5 py-1.5 text-right font-mono text-[13px] text-ink"
+            />
+          </div>
+        ))}
+      </div>
 
-      <label>
+      <label className="flex flex-col gap-1.5 text-[13px] text-ink/62">
         변경 이유
         <textarea
           data-testid="policy-reason-input"
           value={reason}
           onChange={(event) => setReason(event.target.value)}
+          className="border border-rule bg-paper px-2.5 py-1.5 text-[13px] text-ink"
         />
       </label>
 
-      <button type="submit" data-testid="policy-save-button" disabled={pending}>
+      <button
+        type="submit"
+        data-testid="policy-save-button"
+        disabled={pending}
+        className="w-fit border border-ink bg-ink px-3.5 py-1.5 text-[13px] text-paper disabled:opacity-50"
+      >
         {pending ? "저장 중..." : "저장"}
       </button>
 
       {error && (
-        <p role="alert" data-testid="policy-save-error">
+        <p role="alert" data-testid="policy-save-error" className="text-[12.5px] text-attention">
           {error}
         </p>
       )}

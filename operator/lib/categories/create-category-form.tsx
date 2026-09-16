@@ -42,29 +42,40 @@ export function CreateCategoryForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} data-testid="create-category-form">
-      <h2>새 카테고리 만들기</h2>
-      <label>
+    <form
+      onSubmit={handleSubmit}
+      data-testid="create-category-form"
+      className="flex flex-col gap-3 border border-rule bg-surface p-5"
+    >
+      <h2 className="text-[15px] font-semibold tracking-[-0.01em]">새 카테고리 만들기</h2>
+      <label className="flex flex-col gap-1.5 text-[13px] text-ink/62">
         이름
         <input
           data-testid="create-category-name"
           value={name}
           onChange={(event) => setName(event.target.value)}
+          className="border border-rule bg-paper px-2.5 py-1.5 text-[13px] text-ink"
         />
       </label>
-      <label>
+      <label className="flex flex-col gap-1.5 text-[13px] text-ink/62">
         이유
         <input
           data-testid="create-category-reason"
           value={reason}
           onChange={(event) => setReason(event.target.value)}
+          className="border border-rule bg-paper px-2.5 py-1.5 text-[13px] text-ink"
         />
       </label>
-      <button type="submit" data-testid="create-category-submit" disabled={pending}>
+      <button
+        type="submit"
+        data-testid="create-category-submit"
+        disabled={pending}
+        className="w-fit border border-ink bg-ink px-3.5 py-1.5 text-[13px] text-paper disabled:opacity-50"
+      >
         {pending ? "생성 중..." : "카테고리 생성"}
       </button>
       {error && (
-        <p role="alert" data-testid="create-category-error">
+        <p role="alert" data-testid="create-category-error" className="text-[12.5px] text-attention">
           {error}
         </p>
       )}
