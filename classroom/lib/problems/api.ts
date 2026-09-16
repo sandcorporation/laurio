@@ -164,9 +164,9 @@ export function reopenProblem(classId: number, problemId: number): Promise<Probl
   });
 }
 
-// 아무도 내지 않은 문제를 없던 일로 한다(#430) — 시도가 하나라도 있으면
-// 백엔드가 403으로 거절한다. 강사 자신만 내본 문제까지 지울 수 있게 넓히는
-// 일은 #431(ADR-0050)의 몫이다.
+// 아무도 내지 않은 문제, 또는 강사 자신만 내본 문제를 없던 일로 한다
+// (#430/#431, ADR-0050) — 참여자의 시도(내보낸 사람 포함)가 남아 있으면
+// 백엔드가 403으로 거절한다.
 export function deleteProblem(classId: number, problemId: number): Promise<void> {
   return backendJson<void>(`/classroom/classes/${classId}/problems/${problemId}`, {
     method: "DELETE",
