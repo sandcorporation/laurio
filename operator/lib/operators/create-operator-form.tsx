@@ -45,41 +45,54 @@ export function CreateOperatorForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} data-testid="create-operator-form">
-      <h2>새 Operator 만들기</h2>
-      <label>
-        아이디
-        <input
-          data-testid="create-operator-username"
-          value={username}
-          autoComplete="off"
-          onChange={(event) => setUsername(event.target.value)}
-        />
-      </label>
-      <label>
-        비밀번호
-        <input
-          data-testid="create-operator-password"
-          type="password"
-          value={password}
-          autoComplete="new-password"
-          onChange={(event) => setPassword(event.target.value)}
-        />
-      </label>
-      <label>
-        상위 등급(계정 관리 가능)
+    <form
+      onSubmit={handleSubmit}
+      data-testid="create-operator-form"
+      className="flex flex-col gap-3 border border-rule bg-surface p-4"
+    >
+      <h2 className="text-[13px] font-semibold">새 Operator 만들기</h2>
+      <div className="flex flex-wrap gap-3">
+        <label className="flex flex-1 min-w-[160px] flex-col gap-1 text-[12.5px] text-ink/62">
+          아이디
+          <input
+            data-testid="create-operator-username"
+            value={username}
+            autoComplete="off"
+            onChange={(event) => setUsername(event.target.value)}
+            className="border border-rule bg-paper px-2.5 py-1.5 text-[13px] text-ink"
+          />
+        </label>
+        <label className="flex flex-1 min-w-[160px] flex-col gap-1 text-[12.5px] text-ink/62">
+          비밀번호
+          <input
+            data-testid="create-operator-password"
+            type="password"
+            value={password}
+            autoComplete="new-password"
+            onChange={(event) => setPassword(event.target.value)}
+            className="border border-rule bg-paper px-2.5 py-1.5 text-[13px] text-ink"
+          />
+        </label>
+      </div>
+      <label className="flex items-center gap-2 text-[12.5px] text-ink/62">
         <input
           data-testid="create-operator-superuser"
           type="checkbox"
           checked={isSuperuser}
           onChange={(event) => setIsSuperuser(event.target.checked)}
         />
+        상위 등급(계정 관리 가능)
       </label>
-      <button type="submit" data-testid="create-operator-submit" disabled={pending}>
+      <button
+        type="submit"
+        data-testid="create-operator-submit"
+        disabled={pending}
+        className="w-fit border border-ink bg-ink px-3 py-1.5 text-[12.5px] text-paper disabled:opacity-50"
+      >
         {pending ? "생성 중..." : "Operator 생성"}
       </button>
       {error && (
-        <p role="alert" data-testid="create-operator-error">
+        <p role="alert" data-testid="create-operator-error" className="text-[12px] text-attention">
           {error}
         </p>
       )}

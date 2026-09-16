@@ -50,42 +50,52 @@ export function ModerationForm({
   const submitting = state.status === "submitting";
 
   return (
-    <form data-testid={`moderation-form-${templateId}`} onSubmit={(event) => event.preventDefault()}>
-      <label>
+    <form
+      data-testid={`moderation-form-${templateId}`}
+      onSubmit={(event) => event.preventDefault()}
+      className="flex flex-col gap-2 border-t border-rule pt-2.5"
+    >
+      <label className="flex flex-col gap-1 text-[12.5px] text-ink/62">
         이유
         <textarea
           data-testid={`moderation-note-${templateId}`}
           value={note}
           onChange={(event) => setNote(event.target.value)}
           disabled={submitting}
+          rows={2}
+          className="border border-rule bg-paper px-2.5 py-1.5 text-[13px] text-ink disabled:opacity-50"
         />
       </label>
 
-      <button
-        type="button"
-        data-testid={`moderation-takedown-${templateId}`}
-        onClick={() => submit("takedown")}
-        disabled={submitting}
-      >
-        내리기
-      </button>
-      <button
-        type="button"
-        data-testid={`moderation-dismiss-${templateId}`}
-        onClick={() => submit("dismiss")}
-        disabled={submitting}
-      >
-        기각
-      </button>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          data-testid={`moderation-takedown-${templateId}`}
+          onClick={() => submit("takedown")}
+          disabled={submitting}
+          className="border border-rule bg-surface px-2.5 py-1 text-[12px] text-ink disabled:opacity-50"
+        >
+          내리기
+        </button>
+        <button
+          type="button"
+          data-testid={`moderation-dismiss-${templateId}`}
+          onClick={() => submit("dismiss")}
+          disabled={submitting}
+          className="border border-rule bg-surface px-2.5 py-1 text-[12px] text-ink disabled:opacity-50"
+        >
+          기각
+        </button>
+      </div>
 
       {state.status === "redirecting" && (
-        <p data-testid={`moderation-redirecting-${templateId}`}>
+        <p data-testid={`moderation-redirecting-${templateId}`} className="text-[12px] text-ink/62">
           세션이 만료되어 로그인 화면으로 이동합니다...
         </p>
       )}
 
       {state.status === "error" && (
-        <p role="alert" data-testid={`moderation-error-${templateId}`}>
+        <p role="alert" data-testid={`moderation-error-${templateId}`} className="text-[12px] text-attention">
           {state.message}
         </p>
       )}

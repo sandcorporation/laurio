@@ -13,15 +13,25 @@
 // 경고하는 것과 같은 원칙 — 구조/서버가 막는 것을 규칙으로 한 번 더 막지 않는다).
 import { useState } from "react";
 
+import { Badge } from "@/app/components/badge";
+
 import { deactivateOperator, reactivateOperator } from "./actions";
 import type { OperatorAccount } from "./types";
 
+const COL = {
+  grade: "w-[96px]",
+  active: "w-[80px]",
+  action: "w-[160px]",
+};
+
 export function OperatorRow({
   operator,
+  zebra,
   onChanged,
   onSessionExpired,
 }: {
   operator: OperatorAccount;
+  zebra: boolean;
   onChanged: () => void;
   onSessionExpired: () => void;
 }) {
@@ -63,36 +73,51 @@ export function OperatorRow({
   const rowTestId = `operator-row-${operator.id}`;
 
   return (
-    <tr data-testid={rowTestId}>
-      <td data-testid={`${rowTestId}-username`}>{operator.username}</td>
-      <td data-testid={`${rowTestId}-grade`}>{operator.is_superuser ? "상위 등급" : "일반 등급"}</td>
-      <td data-testid={`${rowTestId}-active`}>{operator.is_active ? "활성" : "비활성"}</td>
-      <td>
-        {operator.is_active ? (
-          <button
-            type="button"
-            data-testid={`${rowTestId}-deactivate`}
-            onClick={handleDeactivate}
-            disabled={pending}
-          >
-            {pending ? "처리 중..." : "비활성화"}
-          </button>
-        ) : (
-          <button
-            type="button"
-            data-testid={`${rowTestId}-reactivate`}
-            onClick={handleReactivate}
-            disabled={pending}
-          >
-            {pending ? "처리 중..." : "재활성화"}
-          </button>
-        )}
-        {error && (
-          <p role="alert" data-testid={`${rowTestId}-action-error`}>
-            {error}
-          </p>
-        )}
-      </td>
-    </tr>
+    <div
+      data-testid={rowTestId}
+      className={`flex items-center gap-3.5 border-b border-rule px-4 py-2.5 text-[13px] ${
+        zebra ? "bg-ink/[2%]" : ""
+      }`}
+    >
+      <div className="min-w-0 flex-1 truncate" data-testid={`${rowTestId}-username`}>
+        {operator.username}
+      </div>
+      <div className={`${COL.grade} shrink-0 truncate text-[12.5px] text-ink/62`} data-testid={`${rowTestId}-grade`}>
+        {operator.is_superuser ? "상위 등급" : "일반 등급"}
+      </div>
+      <div className={`${COL.active} shrink-0`}>
+        <Badge testId={`${rowTestId}-active`}>{operator.is_active ? "활성" : "비활성"}</Badge>
+      </div>
+      <div className={`${COL.action} shrink-0`}>
+        <span className="flex flex-col gap-1">
+          {operator.is_active ? (
+            <button
+              type="button"
+              data-testid={`${rowTestId}-deactivate`}
+              onClick={handleDeactivate}
+              disabled={pending}
+              className="w-fit border border-rule bg-surface px-2.5 py-1 text-[12px] text-ink disabled:opacity-50"
+            >
+              {pending ? "처리 중..." : "비활성화"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              data-testid={`${rowTestId}-reactivate`}
+              onClick={handleReactivate}
+              disabled={pending}
+              className="w-fit border border-rule bg-surface px-2.5 py-1 text-[12px] text-ink disabled:opacity-50"
+            >
+              {pending ? "처리 중..." : "재활성화"}
+            </button>
+          )}
+          {error && (
+            <p role="alert" data-testid={`${rowTestId}-action-error`} className="text-[11px] text-attention">
+              {error}
+            </p>
+          )}
+        </span>
+      </div>
+    </div>
   );
 }
