@@ -24,3 +24,31 @@ export const APPEAL_STATUS_LABELS: Record<AppealStatus, string> = {
 export function appealStatusLabel(status: string): string {
   return APPEAL_STATUS_LABELS[status as AppealStatus] ?? status;
 }
+
+// `ScoreSnapshotOut.reasoning` 은 생성 타입에서 `{ [key: string]: unknown }[]` 로
+// 나온다(#423) — ninja 스키마가 `list[dict]` 로만 선언했기 때문이다
+// (backend/appeals/schemas.py). 실제 값은 `backend/scoring/services.py` 가 채우는
+// `{requirement_id, is_met, reasoning}` 꼴이지만 그 계약이 타입에 없으므로, 여기서
+// 방어적으로 읽는다 — `frontend/lib/submissions/score-summary.tsx` 의
+// `reasoningTextOf` 와 같은 자리.
+//
+// **Requirement 의 설명 문구는 여기 없다.** `reasoning` 항목은 `requirement_id` 만
+// 갖고 텍스트를 담지 않는다 — 텍스트를 보여주려면 새 API 가 필요한데 이 티켓은
+// 백엔드를 건드리지 않는다(#423 scope). 그래서 화면은 그 식별자로만 체크리스트
+// 행을 가리킨다.
+export interface ReasoningItem {
+  requirementId: number | null;
+  isMet: boolean | null;
+  reasoning: string;
+}
+
+export function parseReasoningItem(item: unknown): ReasoningItem {
+  if (!item || typeof item !== "object") {
+    return { requirementId: null, isMet: null, reasoning: "" };
+  }
+  const record = item as Record<string, unknown>;
+  const requirementId = typeof record.requirement_id === "number" ? record.requirement_id : null;
+  const isMet = typeof record.is_met === "boolean" ? record.is_met : null;
+  const reasoning = typeof record.reasoning === "string" ? record.reasoning : "";
+  return { requirementId, isMet, reasoning };
+}

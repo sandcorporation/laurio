@@ -116,20 +116,23 @@ export function RulingForm({
   const submitting = state.status === "submitting";
 
   return (
-    <form data-testid="ruling-form" onSubmit={(event) => event.preventDefault()}>
-      <h2>심판</h2>
-
-      <label>
-        이유
+    <form
+      data-testid="ruling-form"
+      onSubmit={(event) => event.preventDefault()}
+      className="flex flex-col gap-3.5 p-4"
+    >
+      <label className="flex flex-col gap-1.5 text-[11.5px] text-ink/45">
+        이유 (필수 — 제출자에게 그대로 보입니다. 심판자 이름은 보이지 않습니다)
         <textarea
           data-testid="ruling-note"
           value={note}
           onChange={(event) => setNote(event.target.value)}
           disabled={submitting}
+          className="min-h-20 border border-rule bg-paper p-2.5 text-[13px] text-ink"
         />
       </label>
 
-      <label>
+      <label className="flex flex-col gap-1.5 text-[11.5px] text-ink/45">
         정정 금액 (인용 시 필수 — 원 단위)
         <input
           type="number"
@@ -137,32 +140,46 @@ export function RulingForm({
           value={correctionAmount}
           onChange={(event) => setCorrectionAmount(event.target.value)}
           disabled={submitting}
+          className="border border-rule bg-paper p-2.5 text-[13px] text-ink"
         />
       </label>
 
-      <button
-        type="button"
-        data-testid="ruling-uphold-button"
-        onClick={() => submit("uphold")}
-        disabled={submitting}
-      >
-        인용
-      </button>
-      <button
-        type="button"
-        data-testid="ruling-reject-button"
-        onClick={() => submit("reject")}
-        disabled={submitting}
-      >
-        기각
-      </button>
+      {/* 누르기 전에 먼저 말한다(#423 AC) — 되돌릴 수 없다는 것도, 사유가
+          필수라는 것도 실패 응답을 받고서야 아는 것이 아니라 여기서 먼저 안다. */}
+      <p className="text-[12px] leading-relaxed text-attention">
+        심판 확정은 되돌릴 수 없습니다 — 원장에 정정 분개가 남고 인용이면 그 자리에서
+        지급 금액이 바뀝니다.
+      </p>
+
+      <div className="flex gap-2">
+        <button
+          type="button"
+          data-testid="ruling-uphold-button"
+          onClick={() => submit("uphold")}
+          disabled={submitting}
+          className="bg-ink px-4 py-2 text-[13.5px] font-medium text-paper disabled:opacity-50"
+        >
+          인용 — 심판 확정
+        </button>
+        <button
+          type="button"
+          data-testid="ruling-reject-button"
+          onClick={() => submit("reject")}
+          disabled={submitting}
+          className="border border-rule bg-surface px-4 py-2 text-[13.5px] text-ink disabled:opacity-50"
+        >
+          기각 — 심판 확정
+        </button>
+      </div>
 
       {state.status === "redirecting" && (
-        <p data-testid="ruling-redirecting">세션이 만료되어 로그인 화면으로 이동합니다...</p>
+        <p data-testid="ruling-redirecting" className="text-[12.5px] text-ink/62">
+          세션이 만료되어 로그인 화면으로 이동합니다...
+        </p>
       )}
 
       {state.status === "error" && (
-        <p role="alert" data-testid="ruling-error">
+        <p role="alert" data-testid="ruling-error" className="text-[12.5px] text-attention">
           {state.message}
         </p>
       )}
