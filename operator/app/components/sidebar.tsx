@@ -33,11 +33,13 @@ export function Sidebar({ themePreference }: { themePreference: ThemePreference 
       data-testid="operator-sidebar"
       className="flex w-[208px] shrink-0 flex-col border-r border-rule bg-paper"
     >
-      <div className="flex h-[60px] items-center justify-between border-b border-rule px-4">
-        <span className="text-base font-bold tracking-[-0.01em]">
+      {/* 브랜드는 이 좁은 칸(208px)을 혼자 쓴다 — 테마 토글을 옆에 두니 「Codemit
+          운영자」가 두 줄로 깨졌다(2026-09-16 스크린샷). 토글은 아래 계정 줄 옆으로
+          내렸다. */}
+      <div className="flex h-[60px] items-center border-b border-rule px-4">
+        <span className="text-base font-bold tracking-[-0.01em] whitespace-nowrap">
           Codemit<span className="ml-1.5 text-xs text-attention">운영자</span>
         </span>
-        <ThemeToggle initialPreference={themePreference} />
       </div>
 
       <nav aria-label="운영자 내비게이션" className="flex flex-col gap-4 py-4">
@@ -78,7 +80,7 @@ export function Sidebar({ themePreference }: { themePreference: ThemePreference 
         ))}
       </nav>
 
-      <div className="mt-auto border-t border-rule px-4 py-3.5 text-xs text-ink/62">
+      <div className="mt-auto flex flex-col gap-2.5 border-t border-rule px-4 py-3.5 text-xs text-ink/62">
         {session.status === "authenticated" ? (
           <span data-testid="sidebar-account">
             {session.user.username} · {session.user.is_superuser ? "상위 등급" : "일반 등급"}
@@ -86,6 +88,7 @@ export function Sidebar({ themePreference }: { themePreference: ThemePreference 
         ) : (
           <span data-testid="sidebar-account">불러오는 중...</span>
         )}
+        <ThemeToggle initialPreference={themePreference} />
       </div>
     </aside>
   );
