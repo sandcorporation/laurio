@@ -1037,6 +1037,13 @@ if IS_PRODUCTION_DEPLOYMENT:
     # 경계다)는 SSL 리다이렉트 대상에서 뺀다.
     SECURE_REDIRECT_EXEMPT = [r"^api/internal/"]
 
+# --- 오류 수집 (GlitchTip, 2026-09-16) ------------------------------------
+# `SENTRY_DSN` 이 있을 때만 켜진다 — dev·CI 는 주지 않으므로 꺼진 채로 돈다.
+# 무엇을 보내지 않는지는 core/observability.py 의 모듈 docstring 이 들고 있다.
+from core.observability import configure_sentry  # noqa: E402
+
+SENTRY_ENABLED = configure_sentry()
+
 #: compose 네트워크 안에서만 풀리는 서비스 이름 — 이 이름으로 들어온 요청은 TLS 프록시를 거친
 #: 것으로 친다(core.internal_hosts). 공개 도메인은 여기 넣지 않는다.
 INTERNAL_SERVICE_HOSTS = ("backend", "events")

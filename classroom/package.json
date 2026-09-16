@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@codemit/bff-shared": "workspace:*",
+    "@sentry/nextjs": "^10.74.0",
     "@toast-ui/editor": "^3.2.2",
     "hast-util-to-jsx-runtime": "^2.3.6",
     "marked": "^18.0.12",

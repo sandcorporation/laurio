@@ -17,6 +17,9 @@ dependencies = [
     # 붙지 못한다(#40). Operator 세션도 같은 패키지를 쓴다(#43).
     "celery[redis]>=5.4",
     "requests>=2.32",
+    # 오류를 자체 GlitchTip 으로 보낸다(core/observability.py) — DSN 이 없으면 꺼진
+    # 채로 돌므로 dev·CI 는 네트워크를 치지 않는다.
+    "sentry-sdk>=2.30",
     # staging/prod 배포용 WSGI 서버(#23). `manage.py runserver`는 Django 자신이 문서화한
     # 대로 개발 전용이라 dev compose에서만 쓴다.
     "gunicorn>=23.0.0",

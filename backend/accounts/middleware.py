@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from django.contrib.auth import get_user_model
 
+from core.observability import set_sentry_user_id  # APP-BOUNDARY-EXCEPTION: 공유층 core 의 오류 수집 도우미다
+
 from .tokens import TokenError, decode_token
 
 
@@ -43,6 +45,10 @@ class JWTAuthenticationMiddleware:
                 request.auth_user = User.objects.filter(
                     pk=int(payload["sub"]), is_active=True
                 ).first()
+
+        # 오류가 나면 누구에게 났는지 알아야 한다 — 다만 내부 id 하나만 붙인다
+        # (이메일·이름은 보내지 않는다, core/observability.py).
+        set_sentry_user_id(request.auth_user.pk if request.auth_user else None)
 
         return self.get_response(request)
 

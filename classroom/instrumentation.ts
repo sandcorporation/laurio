@@ -1,6 +1,10 @@
 // 부팅 시점 설정 가드 (ADR-0016/0019/0037과 같은 원칙, #276/#277). 공개 앱·
 // 운영자 앱의 instrumentation.ts와 같은 모양이다 — 배포 환경(staging/production)
 // 에서 필수 설정이 비어 있으면 첫 요청을 받기 전에 부팅 자체를 거부한다.
+import * as Sentry from "@sentry/nextjs";
+
+import { buildSentryOptions } from "@/lib/observability/sentry-options";
+
 const REQUIRED_IN_DEPLOYED_ENVIRONMENTS: Array<{ name: string; reason: string }> = [
   {
     name: "CODEMIT_CLASSROOM_ORIGIN",
@@ -24,8 +28,25 @@ const REQUIRED_IN_DEPLOYED_ENVIRONMENTS: Array<{ name: string; reason: string }>
   },
 ];
 
+// 서버(Node 런타임)에서 난 오류도 같은 프로젝트로 보낸다(2026-09-16) — 아래 부팅
+// 가드와 한 파일에 있는 이유는 Next 가 register() 를 서버 시작에 한 번 부르는 자리가
+// 여기뿐이기 때문이다. `onRequestError` 는 서버 컴포넌트·라우트 핸들러에서 난
+// 오류를 Next 가 직접 넘겨주는 훅이다.
+function startSentry(): void {
+  const options = buildSentryOptions({
+    NEXT_PUBLIC_SENTRY_DSN: process.env.NEXT_PUBLIC_SENTRY_DSN,
+    NEXT_PUBLIC_SENTRY_ENVIRONMENT: process.env.NEXT_PUBLIC_SENTRY_ENVIRONMENT,
+    NEXT_PUBLIC_SENTRY_RELEASE: process.env.NEXT_PUBLIC_SENTRY_RELEASE,
+  });
+  if (options) Sentry.init(options);
+}
+
+export const onRequestError = Sentry.captureRequestError;
+
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
+
+  startSentry();
 
   const target = process.env.CODEMIT_DEPLOYMENT_TARGET;
   const isDeployed = target === "staging" || target === "production";

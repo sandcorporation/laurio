@@ -17,6 +17,8 @@ from django.conf import settings
 from django.http import JsonResponse
 from ninja.errors import HttpError
 
+from .observability import set_sentry_user_id
+
 # 세션 쿠키로 인증하는 표면들. 쿠키는 브라우저가 자동으로 실어 보내므로 이들의
 # 변경 요청은 전부 Origin 검증을 거쳐야 한다(ADR-0016 의 성립 조건).
 #
@@ -97,6 +99,9 @@ class OperatorAuth:
             return None
         if not user.is_staff:
             raise HttpError(403, "Operator 권한이 필요합니다.")
+        # 운영자 화면에서 난 오류도 누구에게 났는지 알아야 한다 — JWT 경로
+        # (accounts.middleware)와 같이 내부 id 하나만 붙인다.
+        set_sentry_user_id(user.pk)
         return user
 
 

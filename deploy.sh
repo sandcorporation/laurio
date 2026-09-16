@@ -65,6 +65,12 @@ COMPOSE_FILE="docker/compose.${TARGET}.yaml"
 ENV_FILE="docker/.env.${TARGET}"
 COMPOSE="docker compose -f ${COMPOSE_FILE} --env-file ${ENV_FILE}"
 
+# 오류가 어느 커밋에서 났는지 — 오류 수집기(GlitchTip)의 release 태그가 된다
+# (2026-09-16). compose 가 backend 의 환경변수와 세 앱의 빌드 인자로 함께 넘긴다.
+# 여기서 정하는 이유: 굽는 커밋과 표시되는 커밋이 언제나 같아야 한다.
+SENTRY_RELEASE="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+export SENTRY_RELEASE
+
 # 「직전에 무엇을 배포했나」. `.env.<target>` 과 같은 자리에 둔다 — 빌드
 # 디렉터리가 유지된다는 전제이고, 그 전제는 이미 시크릿이 쓰고 있다.
 #

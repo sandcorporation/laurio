@@ -344,6 +344,42 @@ pg_restore --clean --if-exists --no-owner -h <host> -U codemit -d codemit codemi
 cd backend && uv run python manage.py create_operator <아이디> --superuser
 ```
 
+**오류는 자체 GlitchTip 으로 모인다**(2026-09-16). 예전에는 백엔드 로그가 컨테이너
+stdout 에만 남고 세 앱에는 오류를 받을 자리조차 없어(`error.tsx` 도 없었다), 배포된
+5xx 가 아무도 모르는 채로 며칠 났다. 지금은 Sentry SDK 로 보내는데 받는 쪽이
+sentry.io 가 아니라 **우리가 띄운 GlitchTip**
+(`https://glitchtip.honeycombpizza.link`, 저장소 밖에서 사람이 띄웠다)이다 — 수업
+제출물·이름·이메일을 다루는 서버라 오류 본문이 바깥 업체로 나가지 않는 편이 낫다.
+프로젝트는 **앱마다 하나**(backend·frontend·operator·classroom)고 DSN 도 그만큼 있다.
+
+- **DSN 이 없으면 꺼진 채로 돈다** — dev·CI 는 주지 않는다. 그래서 테스트가 네트워크를
+  치지 않고, 잊고 배포해도 부팅은 막히지 않는다(오류 수집이 없어도 서비스는 돌아야
+  한다). `SENTRY_DSN_BACKEND`·`SENTRY_DSN_FRONTEND`·`SENTRY_DSN_OPERATOR`·
+  `SENTRY_DSN_CLASSROOM` 을 `.env.staging`/`.env.prod` 가 채운다(두 env 예시 파일에
+  자리가 있다). 세 앱의 값은 `NEXT_PUBLIC_*` 로 **브라우저 번들에 굳으므로** 바꾸면
+  이미지를 다시 굽는다 — `NEXT_PUBLIC_TOSS_CLIENT_KEY` 와 같은 제약이고, 서버 쪽
+  초기화가 읽을 런타임 ENV 도 같은 `.env` 줄에서 온다(둘이 갈리면 브라우저와 서버가
+  다른 곳에 보고한다).
+- **백엔드 이미지 하나로 도는 다섯 프로세스 전부가 켜진다** — `settings.py` 가 부르는
+  `core.observability.configure_sentry()` 한 줄이라 gunicorn·events(ASGI)·celery
+  worker·beat·관리 명령이 모두 같은 설정을 받는다.
+- **보내지 않는 것**: 세션 리플레이와 성능 추적을 켜지 않았다(GlitchTip 은 리플레이를
+  아예 받지 못하고, 리플레이는 화면을 통째로 녹화해 개인정보가 함께 나간다). 사용자
+  식별은 **내부 id 하나**뿐이고(`accounts.middleware`·`core.operator_auth` 가 붙인다)
+  이메일·IP·요청 본문·쿠키는 보내지 않는다. **의도한 4xx 도 보내지 않는다** — 422·404·
+  403 은 우리가 일부러 내는 응답이라, 그걸 다 보내면 진짜 5xx 가 소음에 묻힌다
+  (`core.observability.drop_expected_error`, `backend/tests/test_observability.py` 가
+  그 규칙을 고정한다).
+- **어느 커밋에서 났는지는 `deploy.sh` 가 붙인다** — 배포하는 커밋 SHA 를
+  `SENTRY_RELEASE` 로 내보내고 compose 가 백엔드 환경변수와 세 앱 빌드 인자로 넘긴다.
+  소스맵은 올리지 않는다(프론트 스택은 압축된 이름으로 보인다).
+- **닿는지 확인하는 법**: 설정이 틀려도 조용히 아무 일도 안 일어나는 것이 오류 수집의
+  기본 실패 모양이라, 배포 뒤 한 번 쏴 보고 GlitchTip 에서 눈으로 본다.
+
+```bash
+ssh sub 'docker exec codemit-staging-backend-1 python manage.py sentry_smoke'
+```
+
 ## 테스트
 
 운영에서 Operator 세션은 실제 Redis 에 산다(#43, ADR-0018). **다만 테스트는 그렇지

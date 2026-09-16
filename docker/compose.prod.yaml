@@ -75,6 +75,11 @@ x-backend-env: &backend-env
   DJANGO_DEBUG: "false"
   DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?prod DJANGO_SECRET_KEY 를 .env.prod 에 설정하라 — 50자 이상, 고유 문자 5종 이상}
   DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:?prod DJANGO_ALLOWED_HOSTS 를 .env.prod 에 설정하라}
+  # --- 오류 수집 (GlitchTip, 2026-09-16) ---
+  # DSN 이 없으면 SDK 가 꺼진 채로 돈다(core/observability.py) — 그래서 `:-` 다.
+  # 릴리스는 deploy.sh 가 배포하는 커밋 SHA 를 넘긴다.
+  SENTRY_DSN: ${SENTRY_DSN_BACKEND:-}
+  SENTRY_RELEASE: ${SENTRY_RELEASE:-}
 
   # 공모전 제품 스위치 — 「공모전 / 유료 공모전」 둘 (#271/#413, `core.contest_switch`,
   # ADR-0048). 기본값은 둘 다 켜짐(config/settings.py)이지만, prod 도 staging 처럼
@@ -355,6 +360,11 @@ services:
       # staging과 같은 이유(compose.staging.yaml 참고, #85 코드리뷰 지적 2·7) —
       # NEXT_PUBLIC_*는 빌드타임에 인라인되므로 build.args로만 전달할 수 있다.
       args:
+        # 오류 수집(GlitchTip, 2026-09-16) — 앱마다 다른 프로젝트(DSN)를 쓴다.
+        # `NEXT_PUBLIC_*` 이라 브라우저 번들에 굳으므로 DSN 을 바꾸면 다시 굽는다.
+        NEXT_PUBLIC_SENTRY_DSN: ${SENTRY_DSN_FRONTEND:-}
+        NEXT_PUBLIC_SENTRY_ENVIRONMENT: production
+        NEXT_PUBLIC_SENTRY_RELEASE: ${SENTRY_RELEASE:-}
         NEXT_PUBLIC_PORTONE_STORE_ID: ${PORT_ONE_V2_STORE_ID:?}
         NEXT_PUBLIC_PORTONE_CHANNEL_KEY: ${KG_INICIS_CHANNEL_KEY:?}
         # 토스 결제창 브라우저 SDK가 쓰는 공개 키(#112) — TOSS_LIVE_SECRET_KEY와
@@ -388,6 +398,11 @@ services:
       backend:
         condition: service_started
     environment:
+      # 서버(Node)에서 난 오류도 같은 프로젝트로 보낸다 — 빌드 인자와 **같은 줄을
+      # 나눠 읽는다**(값이 갈리면 브라우저와 서버가 다른 곳에 보고한다).
+      NEXT_PUBLIC_SENTRY_DSN: ${SENTRY_DSN_FRONTEND:-}
+      NEXT_PUBLIC_SENTRY_ENVIRONMENT: production
+      NEXT_PUBLIC_SENTRY_RELEASE: ${SENTRY_RELEASE:-}
       # 로그인이 끝나고 강의실로 돌려보낼 때 대조하는 허용목록(#297 후속).
       # 강의실 컨테이너가 읽는 것과 **같은 `.env` 줄**이다(CODEMIT_OPERATOR_ORIGIN 과
       # 같은 원칙) — 어긋나면 복귀가 조용히 안 되고 사람은 공개 앱에 남는다.
@@ -442,6 +457,12 @@ services:
       context: ..
       dockerfile: docker/operator.Dockerfile
       target: runner
+      args:
+        # 오류 수집(GlitchTip, 2026-09-16) — 앱마다 다른 프로젝트(DSN)를 쓴다.
+        # `NEXT_PUBLIC_*` 이라 브라우저 번들에 굳으므로 DSN 을 바꾸면 다시 굽는다.
+        NEXT_PUBLIC_SENTRY_DSN: ${SENTRY_DSN_OPERATOR:-}
+        NEXT_PUBLIC_SENTRY_ENVIRONMENT: production
+        NEXT_PUBLIC_SENTRY_RELEASE: ${SENTRY_RELEASE:-}
     restart: unless-stopped
     depends_on:
       db:
@@ -451,6 +472,11 @@ services:
       backend:
         condition: service_started
     environment:
+      # 서버(Node)에서 난 오류도 같은 프로젝트로 보낸다 — 빌드 인자와 **같은 줄을
+      # 나눠 읽는다**(값이 갈리면 브라우저와 서버가 다른 곳에 보고한다).
+      NEXT_PUBLIC_SENTRY_DSN: ${SENTRY_DSN_OPERATOR:-}
+      NEXT_PUBLIC_SENTRY_ENVIRONMENT: production
+      NEXT_PUBLIC_SENTRY_RELEASE: ${SENTRY_RELEASE:-}
       CODEMIT_DEPLOYMENT_TARGET: production
       CODEMIT_API_BASE_URL: http://backend:8000
       # backend의 OPERATOR_WEB_ORIGIN(위 x-backend-env)과 같은 변수, 같은 값 —
@@ -471,6 +497,12 @@ services:
       context: ..
       dockerfile: docker/classroom.Dockerfile
       target: runner
+      args:
+        # 오류 수집(GlitchTip, 2026-09-16) — 앱마다 다른 프로젝트(DSN)를 쓴다.
+        # `NEXT_PUBLIC_*` 이라 브라우저 번들에 굳으므로 DSN 을 바꾸면 다시 굽는다.
+        NEXT_PUBLIC_SENTRY_DSN: ${SENTRY_DSN_CLASSROOM:-}
+        NEXT_PUBLIC_SENTRY_ENVIRONMENT: production
+        NEXT_PUBLIC_SENTRY_RELEASE: ${SENTRY_RELEASE:-}
     restart: unless-stopped
     depends_on:
       db:
@@ -482,6 +514,11 @@ services:
       events:
         condition: service_started
     environment:
+      # 서버(Node)에서 난 오류도 같은 프로젝트로 보낸다 — 빌드 인자와 **같은 줄을
+      # 나눠 읽는다**(값이 갈리면 브라우저와 서버가 다른 곳에 보고한다).
+      NEXT_PUBLIC_SENTRY_DSN: ${SENTRY_DSN_CLASSROOM:-}
+      NEXT_PUBLIC_SENTRY_ENVIRONMENT: production
+      NEXT_PUBLIC_SENTRY_RELEASE: ${SENTRY_RELEASE:-}
       CODEMIT_DEPLOYMENT_TARGET: production
       CODEMIT_API_BASE_URL: http://backend:8000
       # 실시간 신호 SSE 전용 베이스 URL(ADR-0046, #380) — compose.staging.yaml의
