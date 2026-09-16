@@ -9,6 +9,8 @@ import { useCallback, useState } from "react";
 
 import { bffClient } from "@/lib/bff/client";
 
+import { validateImageFile } from "./image-constraints";
+
 interface UploadUrlResponse {
   object_key: string;
   upload_url: string;
@@ -68,6 +70,15 @@ export function useOperatorNoticeImageUpload(): UseOperatorNoticeImageUploadResu
   const [state, setState] = useState<ImageUploadState>({ status: "idle", error: null });
 
   const upload = useCallback(async (file: File): Promise<string> => {
+    // **올리기 전에 먼저 본다**(#424 AC) — 서버 presigned POST 정책도 같은
+    // 제한을 강제하지만, 그건 업로드가 실패한 뒤에야 안다. 여기서 걸러진
+    // 파일은 네트워크를 타지 않는다.
+    const validationError = validateImageFile(file);
+    if (validationError) {
+      setState({ status: "error", error: validationError });
+      throw new Error(validationError);
+    }
+
     setState({ status: "requesting", error: null });
     try {
       const presigned = await requestUploadUrl(file.type || "application/octet-stream");
