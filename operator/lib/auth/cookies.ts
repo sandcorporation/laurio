@@ -12,9 +12,24 @@ export const SESSION_COOKIE_NAME = "codemit_operator_session";
 
 // staging/production만 Secure를 건다 — frontend/lib/auth/cookies.ts와 같은 이유
 // (dev는 컨테이너 간 http로만 통신하므로 Secure를 걸면 쿠키가 아예 안 실린다).
-function isDeployedEnvironment(): boolean {
+//
+// **테마 쿠키(#422, `app/api/theme/route.ts`)도 이 함수를 그대로 쓴다** — 공개
+// 앱·강의실과 같은 원칙(frontend/lib/auth/cookies.ts 상단 주석)이다.
+export function isDeployedEnvironment(): boolean {
   const target = process.env.CODEMIT_DEPLOYMENT_TARGET;
   return target === "staging" || target === "production";
+}
+
+// **운영자 자신의 세션 쿠키는 이 도메인을 쓰지 않는다** — Django 세션은 이
+// 서브도메인에서만 살고(ADR-0018/0019), 로그인·로그아웃(위 `cookieAttributes`)이
+// 그것을 증명한다. 이 함수가 있는 이유는 오직 **테마 쿠키**(#398/#422) 때문이다 —
+// 공개 앱·강의실·운영자 셋이 시스템·라이트·다크 선택을 한 쿠키로 나눠 읽으려면
+// 세 앱이 같은 부모 도메인 판정을 써야 한다(`CODEMIT_SESSION_COOKIE_DOMAIN`,
+// frontend/lib/auth/cookies.ts와 정확히 같은 환경변수). dev(localhost)는 이 값을
+// 비워 둔다 — domain을 주면 쿠키가 아예 안 붙기 때문이다.
+export function sessionCookieDomain(): string | undefined {
+  const domain = process.env.CODEMIT_SESSION_COOKIE_DOMAIN;
+  return domain ? domain : undefined;
 }
 
 function cookieAttributes() {
