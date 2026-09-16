@@ -72,6 +72,9 @@ export type ProblemRow = {
   // 보여줘야 한다는 신호다(0%와 구별).
   pass_rate: number | null;
   published_template: PublishedProblemTemplateSummary | null;
+  // 이 문제를 지금 지울 수 있는가(#430/#431, ADR-0050) — 화면은 시도를 세지
+  // 않고 이 칸만 본다(`ClassRow.has_submissions`와 같은 관용구, 반대 극성).
+  deletable: boolean;
 };
 
 export function fetchProblems(classId: number): Promise<ProblemRow[]> {
@@ -158,6 +161,15 @@ export function hideProblem(classId: number, problemId: number): Promise<Problem
 export function reopenProblem(classId: number, problemId: number): Promise<ProblemRow> {
   return backendJson<ProblemRow>(`/classroom/classes/${classId}/problems/${problemId}/reopen`, {
     method: "POST",
+  });
+}
+
+// 아무도 내지 않은 문제를 없던 일로 한다(#430) — 시도가 하나라도 있으면
+// 백엔드가 403으로 거절한다. 강사 자신만 내본 문제까지 지울 수 있게 넓히는
+// 일은 #431(ADR-0050)의 몫이다.
+export function deleteProblem(classId: number, problemId: number): Promise<void> {
+  return backendJson<void>(`/classroom/classes/${classId}/problems/${problemId}`, {
+    method: "DELETE",
   });
 }
 

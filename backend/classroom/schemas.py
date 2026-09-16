@@ -282,6 +282,13 @@ class ProblemOut(Schema):
     #: 이 문제를 원본으로 하는, 지금 살아 있는 문제 템플릿(#333) —
     #: `ClassOut.published_template`과 같은 이유·같은 모양.
     published_template: PublishedTemplateSummaryOut | None = None
+    #: 이 문제를 지금 지울 수 있는가(#430/#431, ADR-0050) — 화면은 시도를
+    #: 세지 않고 이 칸만 본다(`ClassOut.has_submissions`와 같은 관용구,
+    #: 반대 극성: 저쪽은 "있으면 막는다", 이쪽은 "없으면 연다"). 기본값은
+    #: 거짓이다(fail-closed) — `_serialize_problem`이 언제나 실제 판정값을
+    #: 명시하지만, 혹시 다른 생성 경로가 이 칸을 빠뜨려도 삭제 버튼이
+    #: 함부로 뜨지 않는 쪽으로 넘어진다.
+    deletable: bool = False
 
 
 class ProblemReorderIn(Schema):

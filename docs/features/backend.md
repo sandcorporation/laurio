@@ -209,6 +209,7 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 | `PATCH .../problems/{id}` | 제목·설명·제출 형식·채점 모델·추론 강도(#402)·채점 지침(#386)을 고친다 |
 | `POST .../problems/reorder` | 클래스 상세의 문제 순서를 바꾼다 |
 | `POST .../problems/{id}/open` | 초안을 연다 — 필수 체크리스트 항목이 없으면 400 |
+| `DELETE .../problems/{id}` | 문제를 지운다 — 참여자의 시도가 하나도 없을 때만, 되돌릴 수 없다(#430) |
 | `POST`·`PATCH`·`DELETE .../checklist-items[/{id}]` | 체크리스트 항목을 더하고 고치고 지운다 |
 | `POST .../checklist-items/reorder` | 체크리스트 순서를 바꾼다 |
 | `GET .../problems/mine` | 참여자의 문제 목록 — 문제마다 통과 여부(#288) |

@@ -289,6 +289,14 @@ def _problem_pass_stats(problem: Problem, active_member_ids: set[int]) -> tuple[
     return len(passed_member_ids), member_count
 
 
+def _problem_deletable(problem: Problem) -> bool:
+    """이 문제를 지금 지울 수 있는가(#430) — 시도가 하나도 없을 때만 참이다.
+    강사 자신의 시도만 있는 문제까지 지울 수 있게 넓히는 일은 다음
+    티켓(#431, ADR-0050)의 몫이다."""
+
+    return not ClassroomSubmission.objects.filter(problem=problem).exists()
+
+
 def _serialize_problem(
     problem: Problem, class_obj: Class, *, active_member_ids: set[int] | None = None
 ) -> ProblemOut:
@@ -319,6 +327,7 @@ def _serialize_problem(
         member_count=member_count,
         pass_rate=(passed_count / member_count) if member_count else None,
         published_template=_published_template_summary(_live_problem_template(problem)),
+        deletable=_problem_deletable(problem),
     )
 
 
@@ -1363,6 +1372,30 @@ def update_problem(request: HttpRequest, class_id: int, problem_id: int, payload
     if update_fields:
         problem.save(update_fields=[*update_fields, "updated_at"])
     return 200, _serialize_problem(problem, class_obj)
+
+
+@router.delete(
+    "/classes/{class_id}/problems/{problem_id}",
+    response={204: None, 403: ErrorOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def delete_problem(request: HttpRequest, class_id: int, problem_id: int):
+    """아무도 내지 않은 문제를 없던 일로 한다(#430) — 클래스 삭제(위
+    `delete_class`)와 같은 절차·같은 판정 모양이다. **시도가 하나라도 있으면
+    거절한다.** 시도가 0이면 채점도 없으므로 `ClassroomScore`의 PROTECT를
+    애초에 만나지 않는다 — 강사 자신의 시도까지 지우는 일은 #431(ADR-0050)의
+    몫이다.
+
+    체크리스트 항목은 `Problem`에 걸린 CASCADE로 함께 지워진다. 이 문제를
+    공개한 템플릿(`ProblemTemplate`)은 이 문제를 가리키지 않는, 공개 시점에
+    뜬 사본이라 영향받지 않는다(#316)."""
+
+    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    problem = _get_owned_problem_or_404(class_obj, problem_id)
+    if not _problem_deletable(problem):
+        raise HttpError(403, "지울 수 없습니다 — 대신 숨겨주세요.")
+    problem.delete()
+    return 204, None
 
 
 @router.post(

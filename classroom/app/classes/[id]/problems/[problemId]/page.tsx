@@ -30,6 +30,7 @@ import type { FormEvent } from "react";
 
 import { BackendError } from "@/lib/backend/client";
 import { selectCopyTargets } from "@/lib/classes/copy-targets";
+import { isDeleteConfirmationTyped } from "@/lib/classes/delete-confirmation";
 import { useClass } from "@/lib/classes/use-class";
 import { useMyClasses } from "@/lib/classes/use-my-classes";
 import { publishProblemAsTemplate, takedownProblemTemplate } from "@/lib/problem-templates/api";
@@ -37,12 +38,14 @@ import {
   copyProblem,
   createChecklistItem,
   deleteChecklistItem,
+  deleteProblem,
   hideProblem,
   openProblem,
   reopenProblem,
   reorderChecklistItems,
   updateChecklistItem,
   updateProblem,
+  type ProblemRow,
   type SubmissionFormat,
 } from "@/lib/problems/api";
 import { useProblem } from "@/lib/problems/use-problem";
@@ -57,6 +60,132 @@ const STATUS_LABEL: Record<string, string> = {
   open: "열림",
   hidden: "숨김",
 };
+
+function DeleteProblemCard({
+  classId,
+  problemId,
+  problem,
+}: {
+  classId: number;
+  problemId: number;
+  problem: ProblemRow;
+}) {
+  // 삭제 — 없던 일로 한다(#430/#431, ADR-0050). 클래스 삭제(설정 화면의
+  // `DeleteClassCard`)와 같은 절차다: 지워질 것을 먼저 말하고 제목을 다시
+  // 입력해야 열린다. 백엔드가 판정해 내려준 `problem.deletable`을 그대로
+  // 믿는다 — 이 화면이 시도를 다시 세지 않는다.
+  const router = useRouter();
+  const [confirming, setConfirming] = useState(false);
+  const [typedTitle, setTypedTitle] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function openConfirm() {
+    setError(null);
+    setTypedTitle("");
+    setConfirming(true);
+  }
+
+  function cancel() {
+    setConfirming(false);
+    setTypedTitle("");
+    setError(null);
+  }
+
+  async function handleDelete() {
+    setError(null);
+    setDeleting(true);
+    try {
+      await deleteProblem(classId, problemId);
+      router.push(`/classes/${classId}`);
+    } catch (err) {
+      setError(err instanceof BackendError ? err.message : "문제를 지우지 못했습니다.");
+      setDeleting(false);
+    }
+  }
+
+  if (!problem.deletable) {
+    return (
+      <Card>
+        <CardHeader title="문제 삭제" hint="되돌릴 수 없습니다" />
+        <div className="p-4">
+          <Note tone="attention">
+            <span data-testid="delete-problem-blocked">
+              시도가 있어 지울 수 없습니다 — 참여자가 낸 시도와 판정은 그 사람의 기록이라
+              강사가 지울 수 없습니다. 대신 숨겨주세요.
+            </span>
+          </Note>
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader title="문제 삭제" hint="시도가 없을 때만 가능합니다 — 되돌릴 수 없습니다" />
+      <div className="flex flex-col gap-3 p-4">
+        {!confirming ? (
+          <button
+            type="button"
+            data-testid="delete-problem-open"
+            onClick={openConfirm}
+            className={buttonClass("danger", "sm")}
+          >
+            문제 삭제
+          </button>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <Note tone="attention">
+              <span data-testid="delete-problem-warning">
+                지우면 체크리스트 항목 {problem.checklist_items.length}개가 함께 사라지고
+                되돌릴 수 없습니다.
+              </span>
+            </Note>
+            <label htmlFor="delete-problem-confirm-input">
+              <FieldLabel>
+                계속하려면 문제 제목 <b className="text-ink">{problem.title}</b>을 그대로
+                입력하세요
+              </FieldLabel>
+            </label>
+            <input
+              id="delete-problem-confirm-input"
+              data-testid="delete-problem-confirm-input"
+              value={typedTitle}
+              onChange={(event) => setTypedTitle(event.target.value)}
+              className={INPUT_CLASS}
+              autoComplete="off"
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                data-testid="delete-problem-confirm"
+                onClick={handleDelete}
+                disabled={!isDeleteConfirmationTyped(problem.title, typedTitle) || deleting}
+                className={buttonClass("dangerFilled", "sm")}
+              >
+                {deleting ? "지우는 중..." : "정말 삭제"}
+              </button>
+              <button
+                type="button"
+                data-testid="delete-problem-cancel"
+                onClick={cancel}
+                disabled={deleting}
+                className={buttonClass("secondary", "sm")}
+              >
+                취소
+              </button>
+            </div>
+          </div>
+        )}
+        {error ? (
+          <ErrorNote>
+            <span data-testid="delete-problem-error">{error}</span>
+          </ErrorNote>
+        ) : null}
+      </div>
+    </Card>
+  );
+}
 
 export default function EditProblemPage() {
   const params = useParams<{ id: string; problemId: string }>();
@@ -1016,6 +1145,8 @@ export default function EditProblemPage() {
                 </span>
               </div>
             </Card>
+
+            <DeleteProblemCard classId={classId} problemId={problemId} problem={problem} />
           </div>
           </div>
         </div>
