@@ -9,6 +9,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 import { SESSION_COOKIE_NAME, clearSessionCookie } from "@/lib/auth/cookies";
+import { sessionOutcomeFor } from "@/lib/auth/session-outcome";
 import { safeJson } from "@/lib/auth/http";
 import { backendBaseUrl } from "@/lib/backend";
 
@@ -27,11 +28,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   });
 
   const body = await safeJson(backendRes);
-  const response = NextResponse.json(body ?? { detail: "세션을 확인할 수 없습니다." }, {
-    status: backendRes.status,
-  });
+  // 403(「Operator 권한이 필요합니다」)도 여기서는 401 이다 — 이유는
+  // `lib/auth/session-outcome.ts` 가 들고 있다(옛 흰 화면의 원인).
+  const outcome = sessionOutcomeFor(backendRes.status);
+  const payload = outcome.detail
+    ? { detail: outcome.detail }
+    : (body ?? { detail: "세션을 확인할 수 없습니다." });
+  const response = NextResponse.json(payload, { status: outcome.status });
 
-  if (backendRes.status === 401) clearSessionCookie(response);
+  if (outcome.clearCookie) clearSessionCookie(response);
 
   return response;
 }
