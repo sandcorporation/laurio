@@ -9,12 +9,20 @@
 // 간격을 여기서 다시 준다 — 예전에는 제목에 굵기만 줘서 모든 제목이 본문과 같은
 // 크기였다(2026-09-15).
 import type { Element } from "hast";
-import { createContext, useContext, useEffect, useRef, useState, type ComponentPropsWithoutRef, type KeyboardEvent } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef, type KeyboardEvent } from "react";
 import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 import { toJsxRuntime, type Components } from "hast-util-to-jsx-runtime";
 
 import { codeTextOf, copyToClipboard } from "@/lib/rendering/code-copy";
+import { downloadNameFor } from "@/lib/rendering/code-files";
 import { parseProblemDescription } from "@/lib/rendering/problem-description";
+
+// 문제 제목 — 파일로 받을 때 이름의 몸통이 된다(`lib/rendering/code-files.ts`).
+const FileBaseName = createContext("");
+//: 코드블록의 순번(1부터) — 같은 설명에 블록이 여럿일 때 파일 이름이 겹치지 않게
+//: 한다. 트리를 미리 한 번 훑어 `pre` 노드마다 번호를 매겨 둔다(렌더 순서에
+//: 기대지 않는다 — React 가 언제 무엇을 그리든 같은 번호가 나와야 한다).
+const CodeBlockNumbers = createContext<Map<Element, number>>(new Map());
 
 // 코드블록(`pre > code`) 안의 code 는 pre 가 복사 버튼을 맡는다 — 언어 표시가 없는
 // 코드블록은 className 으로 인라인 코드와 가를 수 없어 이 문맥으로 가른다.
@@ -40,18 +48,64 @@ function useCopy(text: string) {
 
 type WithNode<T extends "pre" | "code"> = ComponentPropsWithoutRef<T> & { node?: Element };
 
+/** 이 코드블록의 언어(`language-…` 클래스)와 강사가 적은 파일 이름. */
+function codeInfoOf(node: Element | undefined): { language: string; meta: string } {
+  const code = node?.children.find(
+    (child): child is Element => child.type === "element" && child.tagName === "code",
+  );
+  const classNames = code?.properties?.className;
+  const list = Array.isArray(classNames) ? classNames.map(String) : [];
+  const language = list.find((name) => name.startsWith("language-"))?.slice("language-".length) ?? "";
+  const meta = typeof code?.properties?.dataFilename === "string" ? code.properties.dataFilename : "";
+  return { language, meta };
+}
+
 function CodeBlock({ node, ...props }: WithNode<"pre">) {
-  const { state, copy } = useCopy(node ? codeTextOf(node) : "");
+  const text = node ? codeTextOf(node) : "";
+  const { state, copy } = useCopy(text);
+  const title = useContext(FileBaseName);
+  const numbers = useContext(CodeBlockNumbers);
+  const index = (node && numbers.get(node)) ?? 1;
+  const { language, meta } = codeInfoOf(node);
+  const fileName = downloadNameFor({ language, meta, title, index });
+
+  // 파일로 받기 — 블록 글자를 그대로 파일 하나로 내린다. 서버를 거치지 않는다.
+  function download() {
+    if (!fileName) return;
+    const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    // 다음 순간에 거둔다 — 브라우저가 내려받기를 시작할 틈을 준다.
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   return (
     <div className="relative my-2">
-      <button
-        type="button"
-        onClick={() => void copy()}
-        data-testid="code-block-copy"
-        className="absolute top-1.5 right-1.5 border border-rule bg-surface px-2 py-0.5 text-[11.5px] text-ink/70 hover:text-ink"
-      >
-        {state === "copied" ? "복사됨" : state === "failed" ? "복사 실패" : "복사"}
-      </button>
+      <div className="absolute top-1.5 right-1.5 flex gap-1">
+        {fileName && (
+          <button
+            type="button"
+            onClick={download}
+            data-testid="code-block-download"
+            title={`${fileName} 으로 저장`}
+            className="border border-rule bg-surface px-2 py-0.5 text-[11.5px] text-ink/70 hover:text-ink"
+          >
+            파일로 저장
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => void copy()}
+          data-testid="code-block-copy"
+          className="border border-rule bg-surface px-2 py-0.5 text-[11.5px] text-ink/70 hover:text-ink"
+        >
+          {state === "copied" ? "복사됨" : state === "failed" ? "복사 실패" : "복사"}
+        </button>
+      </div>
       <InsideCodeBlock.Provider value={true}>
         <pre
           {...props}
@@ -178,13 +232,32 @@ const COMPONENTS: Partial<Components> = {
   ),
 };
 
-/** 문제 설명 마크다운을 그린다. 빈 설명이면 아무것도 그리지 않는다. */
-export function ProblemDescription({ markdown }: { markdown: string }) {
-  const tree = parseProblemDescription(markdown ?? "");
+/**
+ * 문제 설명 마크다운을 그린다. 빈 설명이면 아무것도 그리지 않는다.
+ *
+ * `title` 은 코드블록을 **파일로 받을 때** 이름의 몸통이 된다(강사가 정보 줄에 이름을
+ * 적었으면 그것이 이긴다). 넘기지 않으면 `code-1.py` 처럼 떨어진다.
+ */
+export function ProblemDescription({ markdown, title = "" }: { markdown: string; title?: string }) {
+  const tree = useMemo(() => parseProblemDescription(markdown ?? ""), [markdown]);
+  const numbers = useMemo(() => {
+    const map = new Map<Element, number>();
+    let next = 1;
+    const walk = (node: { type: string; tagName?: string; children?: unknown[] }) => {
+      if (node.type === "element" && node.tagName === "pre") map.set(node as Element, next++);
+      for (const child of (node.children ?? []) as (typeof node)[]) walk(child);
+    };
+    walk(tree);
+    return map;
+  }, [tree]);
   if (tree.children.length === 0) return null;
   return (
-    <div className="text-[13.5px] text-ink">
-      {toJsxRuntime(tree, { Fragment, jsx, jsxs, components: COMPONENTS, passNode: true })}
-    </div>
+    <FileBaseName.Provider value={title}>
+      <CodeBlockNumbers.Provider value={numbers}>
+        <div className="text-[13.5px] text-ink">
+          {toJsxRuntime(tree, { Fragment, jsx, jsxs, components: COMPONENTS, passNode: true })}
+        </div>
+      </CodeBlockNumbers.Provider>
+    </FileBaseName.Provider>
   );
 }

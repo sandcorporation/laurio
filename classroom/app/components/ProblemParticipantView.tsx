@@ -153,7 +153,7 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
             <Card>
               <CardHeader title="설명" />
               <div className="p-4" data-testid="my-problem-description">
-                <ProblemDescription markdown={description} />
+                <ProblemDescription markdown={description} title={title} />
               </div>
             </Card>
           )}

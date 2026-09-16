@@ -47,9 +47,35 @@ describe("허용 목록을 통과하는 서식", () => {
 
   it("코드블록이 언어와 원문 그대로의 코드를 보존한다 — 안의 HTML 은 글자다", () => {
     const out = html("```js\nconsole.log('<b>안 굵음</b>')\n```");
-    expect(out).toContain('<code class="language-js">');
+    expect(out).toContain("language-js");
     expect(out).toContain("&#x3C;b>안 굵음&#x3C;/b>");
     expect(out).not.toContain("<b>");
+  });
+
+  it("코드블록에 색을 입힌다 — 색칠은 허용 목록 뒤에 돌아 원문 HTML 을 되살리지 않는다", () => {
+    const out = html("```python\nprint('<script>')\n```");
+    // 하이라이터가 얹는 것은 span 과 hljs-* 클래스뿐이다.
+    expect(out).toContain('class="hljs-string"');
+    expect(out).toContain("&#x3C;script>");
+    expect(out).not.toContain("<script>");
+  });
+
+  it("정보 줄에 적은 파일 이름을 남긴다 — 파일로 저장할 때 쓴다", () => {
+    expect(html("```text map3-terrain.txt\n####\n```")).toContain('data-filename="map3-terrain.txt"');
+    expect(html("```csv movies.csv\nid,title\n```")).toContain('data-filename="movies.csv"');
+  });
+
+  it("경로를 타는 파일 이름은 트리에 남지 않는다", () => {
+    const out = html("```text ../../etc/passwd\n####\n```");
+    expect(out).not.toContain("data-filename");
+    expect(out).not.toContain("passwd");
+  });
+
+  it("모르는 언어는 색도 파일 이름도 붙지 않는다", () => {
+    const out = html("```브레인퍽\n+++\n```");
+    expect(out).not.toContain("hljs-");
+    expect(out).not.toContain("data-filename");
+    expect(out).toContain("+++");
   });
 
   it("인용과 수평선을 그린다", () => {

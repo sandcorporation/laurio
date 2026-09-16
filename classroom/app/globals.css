@@ -15,3 +15,67 @@ body {
 }
 
 /* 이 브랜드는 그림자를 쓰지 않는다 — 면과 면은 괘선(`border-rule`)으로 가른다. */
+
+/* 코드블록 하이라이팅(2026-09-16, rehype-highlight). 색은 이 브랜드의 여섯 토큰
+ * 안에서만 고른다 — highlight.js 테마를 그대로 들여오면 정의된 적 없는 색이 화면에
+ * 들어와 토큰 하나만 갈아끼우면 되는 규율이 깨진다. 여기서 쓰는 것은 잉크의 농도
+ * 셋과 통과 초록·주의 빨강뿐이고, 두 테마 모두 그 토큰이 `light-dark()` 로 갈린다.
+ *
+ * 클래스 이름은 하이라이터가 붙이는 것이라(우리 소스에 문자열로 없다) 브랜드 검사의
+ * 대상이 아니다 — 그 대신 이 파일이 색의 유일한 출처다. */
+.hljs-comment,
+.hljs-quote {
+  color: color-mix(in srgb, var(--color-ink) 45%, transparent);
+  font-style: italic;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-doctag,
+.hljs-meta .hljs-keyword {
+  color: var(--color-attention);
+}
+
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-attribute,
+.hljs-meta .hljs-string {
+  color: var(--color-verified);
+}
+
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-type,
+.hljs-built_in,
+.hljs-class .hljs-title {
+  color: color-mix(in srgb, var(--color-ink) 75%, transparent);
+}
+
+.hljs-title,
+.hljs-section,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-attr {
+  color: var(--color-ink);
+  font-weight: 600;
+}
+
+.hljs-deletion {
+  color: var(--color-attention);
+  text-decoration: line-through;
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+
+.hljs-strong {
+  font-weight: 700;
+}

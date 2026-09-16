@@ -376,7 +376,7 @@ export function TemplatePickerSheet({
                     <p className="text-[12.5px] text-ink/45">설명이 없습니다.</p>
                   ) : (
                     <div data-testid="template-picker-preview-description">
-                      <ProblemDescription markdown={candidate.description} />
+                      <ProblemDescription markdown={candidate.description} title={candidate.title} />
                     </div>
                   )}
                 </div>

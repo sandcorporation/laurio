@@ -15,6 +15,7 @@
 // 표·취소선·체크박스 목록을 강사가 쓰는 에디터(Toast UI)와 맞추려면 그 목록을
 // 계속 손으로 늘려야 했다(2026-09-15). 지금은 그 목록이 아래 스키마 한 곳에 있다.
 import type { Element, Root } from "hast";
+import rehypeHighlight from "rehype-highlight";
 import rehypeSanitize, { defaultSchema, type Options as SanitizeSchema } from "rehype-sanitize";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
@@ -47,7 +48,13 @@ const SCHEMA: SanitizeSchema = {
     li: [["className", "task-list-item"]],
     ul: [["className", "contains-task-list"]],
     ol: [["className", "contains-task-list"]],
-    code: [["className", /^language-[\w-]+$/]],
+    code: [
+      ["className", /^language-[\w-]+$/],
+      // 코드블록 정보 줄에 적은 파일 이름(```text map1.txt) — 아래 `keepCodeMeta`
+      // 가 실어 온다. 저장 버튼이 이 값을 쓰고, 쓸 수 없는 모양은
+      // `lib/rendering/code-files.ts` 가 한 번 더 거른다.
+      ["dataFilename", /^[A-Za-z0-9가-힣][A-Za-z0-9가-힣._-]{0,59}$/],
+    ],
     th: ["align"],
     td: ["align"],
   },
@@ -58,6 +65,32 @@ const SCHEMA: SanitizeSchema = {
   clobberPrefix: "",
   required: { input: { type: "checkbox", disabled: true } },
 };
+
+/**
+ * 코드블록 정보 줄의 **파일 이름**을 트리에 남긴다(2026-09-16).
+ *
+ * ```` ```text map3-terrain.txt ```` 에서 `map3-terrain.txt` 는 mdast 의 `meta` 인데
+ * `remark-rehype` 는 그것을 버린다(언어만 `language-…` 클래스로 옮긴다). 파일로 받는
+ * 버튼이 그 이름을 써야 하므로 여기서 `data-filename` 으로 옮겨 둔다 — 값의 모양은
+ * 위 허용 목록 스키마가 검사하고, 화면도 한 번 더 검사한다.
+ */
+function keepCodeMeta() {
+  return (tree: Root, file: { data: Record<string, unknown> }) => {
+    const metas = (file.data.codeMeta as string[]) ?? [];
+    let index = 0;
+    visit(tree, "element", (node: Element) => {
+      if (node.tagName !== "code") return;
+      const meta = metas[index];
+      const classNames = node.properties?.className;
+      const isBlock = Array.isArray(classNames)
+        ? classNames.some((name) => String(name).startsWith("language-"))
+        : false;
+      if (!isBlock) return;
+      index += 1;
+      if (meta) node.properties = { ...node.properties, dataFilename: meta };
+    });
+  };
+}
 
 /** `# 제목` 을 h2 로 — 설명의 제목 단계를 한 칸씩 내린다(h6 에서 멈춘다). */
 function shiftHeadings() {
@@ -91,14 +124,32 @@ function dropDeadImages() {
   };
 }
 
+/** mdast 의 코드블록 `meta` 를 순서대로 모아 둔다 — hast 로 옮겨지지 않기 때문이다. */
+function collectCodeMeta() {
+  return (tree: unknown, file: { data: Record<string, unknown> }) => {
+    const metas: string[] = [];
+    visit(tree as never, "code", (node: { meta?: string | null }) => {
+      metas.push((node.meta ?? "").trim());
+    });
+    file.data.codeMeta = metas;
+  };
+}
+
 const processor = unified()
   .use(remarkParse)
   .use(remarkGfm)
   // 한 줄 바꿈도 줄바꿈으로 — 예전 순수 텍스트 설명이 줄 단위로 적혀 있다.
   .use(remarkBreaks)
+  .use(collectCodeMeta)
   .use(remarkRehype)
   .use(shiftHeadings)
+  .use(keepCodeMeta)
   .use(rehypeSanitize, SCHEMA)
+  // **하이라이팅은 허용 목록 뒤에 돈다**(2026-09-16). 이 플러그인은 걸러진 코드
+  // **글자**만 토큰으로 쪼개 `<span class="hljs-…">` 을 얹으므로, 원문의 HTML 이
+  // 되살아날 길이 없다 — 순서를 뒤집으면 스키마가 그 span 들을 다시 걷어낸다.
+  // 모르는 언어는 그대로 둔다(`ignoreMissing`).
+  .use(rehypeHighlight, { detect: false, ignoreMissing: true })
   .use(unwrapDeadLinks)
   .use(dropDeadImages);
 
