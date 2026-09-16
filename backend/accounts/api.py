@@ -11,6 +11,7 @@ from django.http import HttpRequest
 from ninja import Router
 from ninja.errors import HttpError
 
+from .identity import attach_social_account, decide_email, find_linkable_user, refresh_social_account
 from .middleware import jwt_auth
 from .operators import OperatorInvariantError, assert_can_use_social_login
 from .models import DeveloperProfile, SocialAccount, SponsorProfile
@@ -79,27 +80,30 @@ def social_login(request: HttpRequest, provider: str, payload: SocialLoginIn):
                 "탈퇴한 계정입니다. 신원이 파기되어 다시 로그인할 수 없습니다.",
             )
 
-        # 닉네임은 로그인마다 최신값으로 갱신한다(#390) — 카카오에서 닉네임을
-        # 바꾼 뒤에도 옛 값이 기본값으로 남지 않게 하기 위해서다. 동의를
-        # 철회했으면 `profile.nickname`이 빈 문자열로 와 여기서도 비워진다.
-        if social_account.nickname != profile.nickname:
-            social_account.nickname = profile.nickname
-            social_account.save(update_fields=["nickname"])
+        # 닉네임·이메일·이메일 인증 여부를 로그인마다 최신값으로 갱신한다
+        # (#390, 2026-09-16 ADR-0049) — 카카오에서 값을 바꾼 뒤에도 옛 값이
+        # 남지 않게 하기 위해서다. 동의를 철회했으면 빈 문자열로 와 비워진다.
+        # 규칙은 `accounts/identity.py` 가 소유한다.
+        refresh_social_account(social_account, profile)
     else:
-        User = get_user_model()
-        user = User(
-            username=_username_for(profile.provider, profile.provider_uid),
-            email=profile.email,
-        )
-        user.set_unusable_password()
-        user.save()
-        SocialAccount.objects.create(
-            user=user,
-            provider=profile.provider,
-            provider_uid=profile.provider_uid,
-            email=profile.email,
-            nickname=profile.nickname,
-        )
+        # **인증된 이메일이 같으면 기존 계정에 붙인다**(계정 연결, ADR-0049) —
+        # 인증되지 않았거나 걸리는 계정이 하나가 아니면 새 계정을 만든다.
+        linked_user = find_linkable_user(profile)
+        if linked_user is not None:
+            try:
+                assert_can_use_social_login(linked_user)
+            except OperatorInvariantError as exc:
+                raise HttpError(403, str(exc)) from exc
+            user = linked_user
+        else:
+            User = get_user_model()
+            user = User(
+                username=_username_for(profile.provider, profile.provider_uid),
+                email=decide_email(profile, for_user_id=None).email,
+            )
+            user.set_unusable_password()
+            user.save()
+        attach_social_account(user, profile, linked=linked_user is not None)
 
     pair = issue_token_pair(user.id)
     return TokenPairOut(access=pair.access, refresh=pair.refresh)

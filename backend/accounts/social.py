@@ -29,6 +29,11 @@ class SocialProfile:
     #: 이 필드를 읽지 않으므로 항상 빈 문자열이다(#189가 켤 때 같은 자리에
     #: 더한다).
     nickname: str = ""
+    #: **제공자가 이 이메일을 인증했다고 말했는가**(2026-09-16). 계정 연결이
+    #: 이 값에만 기댄다 — 인증되지 않은 이메일로 계정을 묶으면 남의 이메일을
+    #: 적어 그 사람의 계정에 들어가는 길이 열린다. 값이 없으면 False 다
+    #: ("모른다"와 "인증 안 됨"을 가르지 않는다 — 둘 다 묶지 않는다).
+    email_verified: bool = False
 
 
 class SocialAdapter(Protocol):
@@ -64,7 +69,21 @@ class KakaoAdapter:
         profile = kakao_account.get("profile") or {}
         properties = data.get("properties") or {}
         nickname = profile.get("nickname") or properties.get("nickname") or ""
-        return SocialProfile(provider="kakao", provider_uid=str(uid), email=email, nickname=nickname)
+        # 카카오는 이메일 인증·유효 여부를 따로 내려준다 — 둘 다 참일 때만
+        # 인증된 이메일로 본다(`is_email_valid` 는 그 주소가 살아 있는가,
+        # `is_email_verified` 는 카카오가 소유를 확인했는가다).
+        email_verified = bool(
+            email
+            and kakao_account.get("is_email_valid")
+            and kakao_account.get("is_email_verified")
+        )
+        return SocialProfile(
+            provider="kakao",
+            provider_uid=str(uid),
+            email=email,
+            nickname=nickname,
+            email_verified=email_verified,
+        )
 
 
 class GithubAdapter:
@@ -76,6 +95,9 @@ class GithubAdapter:
         if uid is None:
             raise SocialLoginError("github profile missing id")
         email = data.get("email") or ""
+        # `/user` 응답은 인증 여부를 말하지 않는다 — 확인된 이메일 목록은
+        # `/user/emails`(별도 스코프)에 있다. 그것을 읽기 전까지는 인증되지
+        # 않은 것으로 다룬다(#189 가 이 제공자를 열 때 같은 자리에서 더한다).
         return SocialProfile(provider="github", provider_uid=str(uid), email=email)
 
 
@@ -88,7 +110,13 @@ class GoogleAdapter:
         if uid is None:
             raise SocialLoginError("google profile missing sub")
         email = data.get("email") or ""
-        return SocialProfile(provider="google", provider_uid=str(uid), email=email)
+        # 구글 userinfo 는 `email_verified` 를 함께 준다.
+        return SocialProfile(
+            provider="google",
+            provider_uid=str(uid),
+            email=email,
+            email_verified=bool(email and data.get("email_verified")),
+        )
 
 
 class FakeSocialAdapter:
@@ -96,6 +124,10 @@ class FakeSocialAdapter:
 
     형식: ``"<provider_uid>:<email>"``. 프로필 조회 대신 문자열을 그대로 신뢰하므로
     실제 제공자와의 계약을 검증하진 않는다 — 그건 이 어댑터의 목적이 아니다.
+
+    **이메일은 인증된 것으로 본다**(2026-09-16). 계정 연결이 인증 여부에만
+    기대므로 dev·테스트에서 그 경로를 걸어 볼 수 있어야 한다. 인증되지 않은
+    이메일을 흉내 내려면 토큰 끝에 ``:unverified`` 를 붙인다.
     """
 
     def __init__(self, provider: str) -> None:
@@ -107,7 +139,16 @@ class FakeSocialAdapter:
         uid, email = access_token.split(":", 1)
         if not uid:
             raise SocialLoginError("fake token missing uid")
-        return SocialProfile(provider=self._provider, provider_uid=uid, email=email)
+        email_verified = True
+        if email.endswith(":unverified"):
+            email = email[: -len(":unverified")]
+            email_verified = False
+        return SocialProfile(
+            provider=self._provider,
+            provider_uid=uid,
+            email=email,
+            email_verified=bool(email) and email_verified,
+        )
 
 
 _REAL_ADAPTERS: dict[str, SocialAdapter] = {

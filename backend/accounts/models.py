@@ -45,6 +45,11 @@ class SocialAccount(models.Model):
     #: 자리가 아니다(docs/legal/personal-data.md). 로그인마다 최신값으로
     #: 갱신되고, 제공하지 않으면 빈 문자열로 남는다.
     nickname = models.CharField(max_length=100, blank=True)
+    #: 이 제공자가 위 `email` 을 **인증했다고 말했는가**(2026-09-16, ADR-0049).
+    #: 계정 연결이 이 값에만 기댄다 — 인증되지 않은 이메일로 계정을 묶으면 남의
+    #: 이메일을 적어 그 계정에 들어가는 길이 열린다. 제공자별 사실이므로 `User`
+    #: 가 아니라 이 행에 산다. 로그인마다 최신값으로 갱신된다.
+    email_verified = models.BooleanField(default=False)
     connected_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -56,6 +61,49 @@ class SocialAccount(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover - admin display only
         return f"{self.provider}:{self.provider_uid}"
+
+    def erase_identity(self) -> None:
+        """탈퇴가 이 행에서 지우는 것(ADR-0025, 2026-09-16).
+
+        `provider`·`provider_uid` 는 **남긴다** — 그 조합이 「이 소셜 계정으로는
+        다시 로그인할 수 없다」를 집행하는 자리다. 지우면 같은 카카오 계정으로
+        새로 가입할 수 있게 되어 되돌릴 수 없다던 결정이 무효가 된다. 이메일과
+        닉네임은 앞으로 쓸 일이 없는 개인정보라 비운다.
+        """
+
+        self.email = ""
+        self.nickname = ""
+        self.email_verified = False
+        self.save(update_fields=["email", "nickname", "email_verified"])
+
+
+class AccountLink(models.Model):
+    """한 계정에 다른 제공자의 소셜 계정이 **언제·무엇을 근거로** 붙었는가
+    (2026-09-16, ADR-0049 — CONTEXT.md 「계정 연결」).
+
+    계정 병합은 되돌리기 어렵다 — 나중에 「왜 이 둘이 한 계정인가」를 물었을 때
+    답할 자리가 필요하다(운영자 변경 이력과 같은 원칙, ADR-0023). 소셜 계정 행이
+    생긴 사실만으로는 「인증된 이메일이 같아서 자동으로 붙었다」와 「처음부터 이
+    계정으로 가입했다」를 가릴 수 없다.
+
+    append-only 다 — 고치거나 지우는 경로를 두지 않는다.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="account_links", on_delete=models.CASCADE
+    )
+    social_account = models.OneToOneField(
+        SocialAccount, related_name="link_record", on_delete=models.CASCADE
+    )
+    #: 묶는 근거가 된 인증된 이메일. 탈퇴 파기 대상이다(`erase_identity` 와 같은 이유).
+    matched_email = models.EmailField(blank=True)
+    linked_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ["-linked_at"]
+
+    def __str__(self) -> str:  # pragma: no cover - admin display only
+        return f"link:{self.user_id}:{self.social_account_id}"
 
 
 class SponsorProfile(models.Model):

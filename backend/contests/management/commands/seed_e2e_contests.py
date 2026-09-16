@@ -542,9 +542,13 @@ class Command(BaseCommand):
         ).delete()
 
     def _seed_sponsor(self) -> SponsorProfile:
+        # 이메일도 네임스페이스를 따른다(2026-09-16, ADR-0049) — 비어 있지 않은
+        # 계정 이메일은 유일해서, 고정 주소로 두면 두 번째 네임스페이스의 시드가
+        # 유일 제약에 걸려 죽는다(아래 두 시드가 이미 쓰던 방식과 같게 맞췄다).
+        username = self._account("e2e-seed-sponsor")
         user = get_user_model().objects.create_user(
-            username=self._account("e2e-seed-sponsor"),
-            email="e2e-seed-sponsor@example.invalid",
+            username=username,
+            email=f"{username}@example.invalid",
         )
         user.set_unusable_password()
         user.save(update_fields=["password"])

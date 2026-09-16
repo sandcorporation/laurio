@@ -278,7 +278,18 @@ def execute_withdrawal(user) -> Withdrawal:
         if seller is not None:
             seller.erase_contact()
 
+    # 계정 이메일과 소셜 닉네임도 목적을 다한 개인정보다(2026-09-16, ADR-0049)
+    # — 이메일이 운영자 화면의 검색·이력에 보이는 단서가 됐으므로, 프로필 표시
+    # 이름·판매자 연락처와 같은 규칙으로 함께 비운다. `provider`·`provider_uid`
+    # 는 남긴다 — 그 조합이 「이 소셜 계정으로는 다시 로그인할 수 없다」를
+    # 집행하는 자리다(ADR-0025). 연결 이력(`AccountLink`)의 근거 이메일도 같이
+    # 비운다 — 이력 행 자체는 append-only 라 남는다.
+    for social_account in user.social_accounts.all():
+        social_account.erase_identity()
+    user.account_links.update(matched_email="")
+
+    user.email = ""
     user.is_active = False
-    user.save(update_fields=["is_active"])
+    user.save(update_fields=["email", "is_active"])
 
     return Withdrawal.objects.create(user=user, withdrawn_at=now)

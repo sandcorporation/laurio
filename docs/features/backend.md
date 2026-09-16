@@ -34,6 +34,24 @@ fail-closed 라 구멍은 아니지만 원인을 찾기 어렵다.
 | `GET /api/accounts/me` | 나 |
 | `POST /api/accounts/developer-profile` · `sponsor-profile` | 역할 프로필을 만든다(멱등) |
 | `GET`·`POST /api/accounts/withdrawal` | 탈퇴 가능 여부와 탈퇴 실행 |
+
+**계정을 가리키는 것은 소셜 계정 `(제공자, 제공자 식별자)` 하나다**(ADR-0049,
+CONTEXT.md 「소셜 계정」). 이메일은 로그인에서 사람을 찾는 데 쓰지 않는다 — 없을
+수도 있고 주인이 바뀔 수도 있다. 대신 **로그인마다** 이메일과 「제공자가 인증했다고
+말했는가」를 최신값으로 갱신한다(닉네임과 같은 자리). 그 이메일이 하는 일은 둘이다:
+
+- **사람을 찾고 보이는 단서** — 운영자 표면(운영팀 알림의 계정 검색·발송 이력)에서만
+  보인다. 참가자·강사 화면에는 나오지 않는다.
+- **계정 연결** — 제공자가 **인증한** 이메일이 같으면 새 소셜 계정을 기존 계정에 붙여
+  어느 쪽으로 로그인해도 같은 사람이 된다. 인증되지 않았거나 걸리는 계정이 하나가
+  아니면 묶지 않는다. 묶인 사실은 `AccountLink`(append-only)에 언제·어떤 이메일을
+  근거로 붙었는지 남는다.
+
+**비어 있지 않은 계정 이메일은 유일하다**(부분 유일 인덱스). 다른 계정이 이미 그
+이메일을 쓰고 있고 연결 조건도 아니면 **이메일 칸을 비운 채 로그인은 그대로 된다** —
+이메일이 없다고 로그인을 막지 않는다는 것이 유일 제약보다 앞선다. **탈퇴는 이메일·
+닉네임도 파기한다**(ADR-0025 의 같은 선) — 제공자 식별자는 남겨 같은 소셜 계정으로
+다시 로그인하는 길을 계속 막는다.
 | `POST /api/verification/start` · `verify` | 본인확인 시작·확정 |
 | `GET /api/verification/me` | 내 본인확인 상태 |
 | `POST /api/verification/lookup-by-ci` | CI 로 조회 |
@@ -535,7 +553,7 @@ fake 이거나 임포트되지 않으면 부팅 자체를 거부한다** — 컨
 
 | 앱 | 모델 |
 | --- | --- |
-| `accounts` | SocialAccount · SponsorProfile · DeveloperProfile · PhoneContact · RefreshToken · BlacklistedToken · Withdrawal |
+| `accounts` | SocialAccount · AccountLink · SponsorProfile · DeveloperProfile · PhoneContact · RefreshToken · BlacklistedToken · Withdrawal |
 | `verification` | Verification · VerificationRequest · RetainedIdentity · IdentityReading |
 | `contests` | Contest · Category · DeliverableType · Requirement · ContestImage · RequirementChatMessage · JudgingExtensionPayment · ContestSubmission(#270, `submissions.Submission`의 공모전 자식) · 변경 이력 셋 |
 | `submissions`(공유층 — #270, ADR-0039) | Submission(부모) · SubmissionAsset · RequirementResponse · Evidence |
