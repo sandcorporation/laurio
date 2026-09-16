@@ -29,11 +29,16 @@ function sourceTargetRef(problemId: number, userId: number): string {
 // 문제 목록으로 돌아가는 길(#328) — 이 화면 전에는 브랜드를 눌러도(참여자에게
 // 빈 강사 홈으로 가거나) 브라우저 뒤로 가기뿐이었다. `/mine`은 강사 전용
 // 상세와 달리 참여자에게 실제로 존재하는 화면이라 안전하게 돌아갈 수 있다.
-function BackToMyProblems({ classId }: { classId: number }) {
+//
+// **강사가 「학생 화면으로」 연 경우에는 그 주소가 강사에게 없다**(#429) —
+// `/problems/mine`은 `ClassMember`를 요구하는데 강사는 보통 그 클래스의
+// 참여자가 아니라 이 링크를 눌러도 404로 되돌아온다. 그래서 `href`를 받는
+// 자리를 열어 두고, 강사가 보고 있을 때는 문제 편집 화면으로 돌려보낸다.
+function BackToMyProblems({ classId, href }: { classId: number; href?: string }) {
   return (
     <p className="mb-4">
       <Link
-        href={`/classes/${classId}/problems/mine`}
+        href={href ?? `/classes/${classId}/problems/mine`}
         data-testid="my-problem-back-link"
         className={buttonClass("secondary", "sm")}
       >
@@ -101,6 +106,8 @@ export default function ProblemSubmitPage() {
     member_expelled: memberExpelled,
     archived,
     problem_hidden: problemHidden,
+    viewing_as_instructor: viewingAsInstructor,
+    instructor_problem_status: instructorProblemStatus,
   } = state.data;
 
   async function submitValue(
@@ -127,13 +134,17 @@ export default function ProblemSubmitPage() {
 
   async function handleRepositorySubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // 강사가 「학생 화면으로」 연 화면이다 — 제출 칸은 보이되 눌러도 아무
+    // 일도 일어나지 않는다(#429). 백엔드도 강사(비참여자)의 제출을 404로
+    // 거절하므로 이 잠금은 헛걸음을 줄이는 것일 뿐 유일한 문이 아니다.
+    if (viewingAsInstructor) return;
     await submitValue("repository", repositoryUrl.trim());
   }
 
   async function handleSourceFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
-    if (!file) return;
+    if (!file || viewingAsInstructor) return;
     try {
       const uploaded = await upload(file);
       await submitValue("source", uploaded.objectKey, uploaded.contentType);
@@ -144,13 +155,18 @@ export default function ProblemSubmitPage() {
 
   return (
     <PageShell>
-      <BackToMyProblems classId={classId} />
+      <BackToMyProblems
+        classId={classId}
+        href={viewingAsInstructor ? `/classes/${classId}` : undefined}
+      />
       <ProblemParticipantView
         interactive
         eyebrow={className}
         title={problem.title}
         titleTestId="my-problem-title"
-        passed={problem.passed}
+        // 강사 시점에는 시도가 애초에 없어 「통과」/「미통과」 어느 쪽도
+        // 사실이 아니다 — 미리보기와 같은 이유로 배지 자체를 내지 않는다.
+        passed={viewingAsInstructor ? undefined : problem.passed}
         description={problem.description}
         checklistItems={problem.checklist_items}
         syntaxCheckEnabled={problem.syntax_check_enabled}
@@ -158,6 +174,8 @@ export default function ProblemSubmitPage() {
         gradingGuidelineCustomText={problem.grading_guideline_text}
         submissionFormats={problem.submission_formats}
         submissions={submissions}
+        viewingAsInstructor={viewingAsInstructor}
+        instructorProblemStatus={instructorProblemStatus}
         memberExpelled={memberExpelled}
         archived={archived}
         problemHidden={problemHidden}

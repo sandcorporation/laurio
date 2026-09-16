@@ -644,7 +644,25 @@ export interface paths {
         get: operations["classroom_api_get_problem"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Problem
+         * @description 아무도 내지 않은 문제, 또는 강사 자신만 내본 문제를 없던 일로 한다
+         *     (#430/#431, ADR-0050) — 클래스 삭제(위 `delete_class`)와 같은 절차·같은
+         *     판정 모양이다. **참여자의 시도가 하나라도 있으면 거절한다**(내보낸
+         *     참여자의 시도도 「남은 시도」다, `_problem_deletable`). 그 조건을 만족하면
+         *     강사 자신의 시도에 달린 채점을 QuerySet `delete()`로 먼저 걷는다 — 걷어내는
+         *     범위는 「그 문제 × 강사 자신」으로 닫혀 있고, 그 필터가 이 우회의 근거
+         *     전부다(넓히지 않는다). 강사 자신의 시도가 없으면(#430의 원래 경우, 시도가
+         *     0) 이 삭제는 아무 행도 지우지 않는 no-op이다.
+         *
+         *     체크리스트 항목·시도(`ClassroomSubmission`)는 `Problem`에 걸린 CASCADE로
+         *     함께 지워진다. 이 문제를 공개한 템플릿(`ProblemTemplate`)은 이 문제를
+         *     가리키지 않는, 공개 시점에 뜬 사본이라 영향받지 않는다(#316). 삭제된
+         *     문제를 가리키는 채점 완료 알림은 그대로 남는다(ADR-0050 결과 — 알림을
+         *     함께 지우면 알림이 append-only가 아니게 된다). 공모전의 `Score`·원장에는
+         *     닿지 않는다(강의실과 공모전은 서로 다른 앱 경계, ADR-0037/0039).
+         */
+        delete: operations["classroom_api_delete_problem"];
         options?: never;
         head?: never;
         /** Update Problem */
@@ -770,6 +788,14 @@ export interface paths {
          * @description 참여자가 보는 문제 하나 — 체크리스트와 본인의 시도 목록(#286). 남의
          *     시도는 애초에 이 질의에 없다(`member=member` 필터) — "남의 제출물을 볼 수
          *     없다"는 AC를 별도 권한 검사가 아니라 쿼리 모양으로 지킨다.
+         *
+         *     **그 클래스의 강사가 부르면 달리 대한다**(#429) — 참여자가 실제로 걷는
+         *     이 주소 그대로 「학생 화면으로」가 연다. 상태(초안·열림·숨김)와 무관하게
+         *     문제를 내려주고, 시도 목록은 언제나 빈 배열이다(강사는 참여자가 아니다 —
+         *     Implementation Decisions "강사를 자기 클래스 참여자로 넣지 않은 이유").
+         *     강사 판정은 `instructor_id`만 본다 — 그 강사가 가입 링크로 이 클래스의
+         *     `ClassMember`이기도 해도 이 분기가 항상 이긴다, 참여자 규칙은 한 글자도
+         *     바뀌지 않는다는 약속을 지키려면 두 신원이 섞이면 안 된다.
          */
         get: operations["classroom_api_get_my_problem"];
         put?: never;
@@ -4562,6 +4588,8 @@ export interface components {
             archived: boolean;
             /** Class Name */
             class_name: string;
+            /** Instructor Problem Status */
+            instructor_problem_status?: string | null;
             /**
              * Member Expelled
              * @default false
@@ -4575,6 +4603,11 @@ export interface components {
             problem_hidden: boolean;
             /** Submissions */
             submissions: components["schemas"]["ClassroomSubmissionOut"][];
+            /**
+             * Viewing As Instructor
+             * @default false
+             */
+            viewing_as_instructor: boolean;
         };
         /** ClassroomRosterGridOut */
         ClassroomRosterGridOut: {
@@ -6341,6 +6374,11 @@ export interface components {
             checklist_items: components["schemas"]["ChecklistItemOut"][];
             /** Classroom Id */
             classroom_id: number;
+            /**
+             * Deletable
+             * @default true
+             */
+            deletable: boolean;
             /** Description */
             description: string;
             /** Effective Model */
@@ -8301,6 +8339,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_delete_problem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+                problem_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
                 };
             };
             /** @description Not Found */

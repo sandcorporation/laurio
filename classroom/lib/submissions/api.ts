@@ -119,6 +119,13 @@ export type ProblemSubmissions = {
   // 적이 있다는 뜻이다(낸 적 없으면 이 응답 자체가 404). 화면이 제출 칸
   // 대신 「강사가 숨긴 문제라 새로 낼 수 없습니다」를 보인다.
   problem_hidden: boolean;
+  // 이 요청을 보낸 사람이 그 클래스의 강사인가(#429) — 참이면 화면이 띠를
+  // 띄우고 제출을 잠근다. 화면은 이 칸만 보고 판단한다(역할을 스스로
+  // 계산하지 않는다).
+  viewing_as_instructor: boolean;
+  // `viewing_as_instructor`가 참일 때만 채워지는 문제 상태 — 띠가 몇 줄을
+  // 더 말할지 이 값으로 정한다. 참여자 시점에는 언제나 null이다.
+  instructor_problem_status: "draft" | "open" | "hidden" | null;
 };
 
 export function fetchMyProblem(classId: number, problemId: number): Promise<ProblemSubmissions> {

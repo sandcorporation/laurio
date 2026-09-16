@@ -1485,7 +1485,30 @@ def _get_visible_problem_for_participant_or_404(
 def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
     """참여자가 보는 문제 하나 — 체크리스트와 본인의 시도 목록(#286). 남의
     시도는 애초에 이 질의에 없다(`member=member` 필터) — "남의 제출물을 볼 수
-    없다"는 AC를 별도 권한 검사가 아니라 쿼리 모양으로 지킨다."""
+    없다"는 AC를 별도 권한 검사가 아니라 쿼리 모양으로 지킨다.
+
+    **그 클래스의 강사가 부르면 달리 대한다**(#429) — 참여자가 실제로 걷는
+    이 주소 그대로 「학생 화면으로」가 연다. 상태(초안·열림·숨김)와 무관하게
+    문제를 내려주고, 시도 목록은 언제나 빈 배열이다(강사는 참여자가 아니다 —
+    Implementation Decisions "강사를 자기 클래스 참여자로 넣지 않은 이유").
+    강사 판정은 `instructor_id`만 본다 — 그 강사가 가입 링크로 이 클래스의
+    `ClassMember`이기도 해도 이 분기가 항상 이긴다, 참여자 규칙은 한 글자도
+    바뀌지 않는다는 약속을 지키려면 두 신원이 섞이면 안 된다."""
+
+    instructor_class = Class.objects.filter(id=class_id, instructor_id=request.auth_user.id).first()
+    if instructor_class is not None:
+        class_obj = instructor_class
+        problem = _get_owned_problem_or_404(class_obj, problem_id)
+        return 200, ClassroomProblemSubmissionsOut(
+            class_name=class_obj.name,
+            problem=_serialize_problem_mine(problem, passed=False),
+            submissions=[],
+            member_expelled=False,
+            archived=class_obj.archived_at is not None,
+            problem_hidden=False,
+            viewing_as_instructor=True,
+            instructor_problem_status=problem.status,
+        )
 
     member = _get_member_or_404(class_id, request.auth_user.id)
     problem = _get_visible_problem_for_participant_or_404(class_id, problem_id, member)

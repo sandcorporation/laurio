@@ -386,6 +386,16 @@ export default function EditProblemPage() {
             >
               제출 현황 보기
             </Link>
+            {/* 참여자가 실제로 걷는 그 주소를 그대로 연다(#429) — 상태와
+                무관하게 항상 보인다. 편집 화면 안의 「미리보기」 탭과 달리
+                주소·새로고침·뒤로 가기가 참여자와 같다. */}
+            <Link
+              href={`/classes/${classId}/problems/${problemId}/submit`}
+              data-testid="view-as-student-link"
+              className={buttonClass()}
+            >
+              학생 화면으로
+            </Link>
             {problem.status === "draft" ? (
               <button
                 type="button"
