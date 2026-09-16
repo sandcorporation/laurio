@@ -61,17 +61,45 @@ test("@exclusive 설명의 마크다운이 서버 렌더링된 HTML 에서 태�
 
   // `## 알림 앱 리디자인` → h3(설명의 제목 단계는 한 칸 내려간다) — 마크다운 기호가
   // 글자로 남아 있으면 이 단언이 떨어진다.
-  expect(html).not.toContain("## 알림 앱 리디자인");
-  expect(html).toMatch(/<h3[^>]*>알림 앱 리디자인<\/h3>/);
+  //
+  // **문서 전체가 아니라 `<body>` 안만 본다.** `<head>` 에는 `<meta
+  // name="description">` 이 있고 그 값은 설명에서 뽑은 **글자만 남은 요약**이라
+  // 마크다운 기호가 없어야 맞지만, 처음에 문서 전체로 단언했다가 그 태그가 원문을
+  // 그대로 싣고 있어 CI 가 빨개졌다 — 단언이 과했던 것이 아니라 메타 태그가 실제로
+  // 틀렸고, 그것은 아래에서 따로 본다.
+  const body = html.slice(html.indexOf("<body"));
+  expect(body).not.toContain("## 알림 앱 리디자인");
+  expect(body).toMatch(/<h3[^>]*>알림 앱 리디자인<\/h3>/);
   // 목록·인라인 코드·코드블록이 각각 태그가 됐다.
-  expect(html).toMatch(/<li[^>]*>다크모드가 있어야 합니다<\/li>/);
-  expect(html).toContain("pnpm dev");
-  expect(html).toMatch(/<pre[^>]*>/);
+  expect(body).toMatch(/<li[^>]*>다크모드가 있어야 합니다<\/li>/);
+  expect(body).toContain("pnpm dev");
+  expect(body).toMatch(/<pre[^>]*>/);
   // 하이라이팅은 허용 목록 **뒤에** 돈다 — 그 결과 span 이 서버 HTML 에 있다.
-  expect(html).toContain("hljs-");
+  expect(body).toContain("hljs-");
   // 코드블록의 버튼(클라이언트 섬)도 최초 HTML 에 함께 그려진다 — 섬이 본문을
   // 클라이언트로 끌고 가지 않았다는 증거다.
-  expect(html).toContain("code-block-download");
+  expect(body).toContain("code-block-download");
+});
+
+// 검색 결과와 링크 미리보기에 마크다운 기호가 새지 않는다(2026-09-16). 설명이
+// 마크다운이 된 뒤 `<meta name="description">` 이 원문을 그대로 실어 `## 알림 앱
+// 리디자인` 이 그 값에 들어갔다 — 화면에는 안 보이지만 구글 결과와 카카오톡 링크
+// 미리보기에는 보인다. 이 자리를 남기는 이유: 설명 렌더링을 고칠 때 본문만 보고
+// head 를 잊는 것이 정확히 이 실패의 모양이다.
+test("@exclusive 메타 설명에는 마크다운 기호가 없다 — 글자만 남은 요약이다", async ({
+  request,
+}) => {
+  const res = await request.get(`/contests/${seeded.funded.id}`);
+  const html = await res.text();
+  const head = html.slice(0, html.indexOf("<body"));
+
+  const metaDescription = /<meta name="description" content="([^"]*)"/.exec(head)?.[1];
+  expect(metaDescription).toBeTruthy();
+  expect(metaDescription).not.toContain("##");
+  expect(metaDescription).not.toContain("```");
+  expect(metaDescription).not.toContain("|");
+  // 글자는 남는다 — 기호만 걷어낸 것이지 값을 비운 것이 아니다.
+  expect(metaDescription).toContain("알림 앱 리디자인");
 });
 
 // PS-01 (#106, spec #105) — 참가작 수가 상세에도 보이고, 백엔드가 낸 값과

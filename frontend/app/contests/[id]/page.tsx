@@ -10,7 +10,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
-import { MarkdownView } from "@codemit/markdown";
+import { MarkdownView, plainTextSummary } from "@codemit/markdown";
 
 import { Badge, PageHeader, PageShell } from "@/app/components/ui";
 import { fetchContest, type ContestImage, type Requirement } from "@/lib/api/contests";
@@ -40,9 +40,13 @@ export async function generateMetadata({
     return { title: "공모전을 찾을 수 없습니다" };
   }
 
+  // 설명은 마크다운이므로(2026-09-16) **글자만 뽑아** 싣는다 — 원문을 그대로 실으면
+  // 검색 결과와 링크 미리보기에 `## 제목`·`| 표 |`·백틱이 나온다. 160자는 검색
+  // 엔진이 대개 그 앞까지만 보여주는 길이다.
+  const summary = plainTextSummary(contest.description, 160);
   const description =
-    contest.description.trim().length > 0
-      ? contest.description
+    summary.length > 0
+      ? summary
       : `상금 ${formatPrize(contest.prize)}원 · 마감 ${formatDday(contest.deadline_at)}`;
 
   // OG 이미지는 `opengraph-image.tsx`(Next 파일 컨벤션, app/contests/[id]/ 아래)가

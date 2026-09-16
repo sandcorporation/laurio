@@ -10,5 +10,6 @@
 // `@codemit/markdown/client` 에 있고 `MarkdownView` 가 알아서 쓴다.
 export { MarkdownView } from "./view";
 export { parseDescription } from "./parse";
+export { plainTextSummary } from "./summary";
 export { codeTextOf } from "./code-copy";
 export { downloadNameFor, extensionFor } from "./code-files";
