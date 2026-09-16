@@ -22,9 +22,12 @@ from .operator_notices import send_operator_notice
 
 operator_router = Router(tags=["operator", "notifications"], auth=OperatorAuth())
 
-# 검색어가 너무 짧으면 계정 전체를 훑는 것과 다를 바 없다 — 실수로 빈 문자열이나
-# 한 글자를 보내는 요청이 테이블 전체를 스캔하지 않게 최소 길이를 둔다.
-_MIN_QUERY_LENGTH = 2
+# 빈 검색어는 계정 전체를 훑는 것과 다를 바 없어 막는다. 다만 **한 글자는 받는다**
+# (2026-09-16) — 예전에는 두 글자 이상만 받았는데, 카카오 닉네임이 한 글자인
+# 참가자는 그러면 어떤 질의로도 찾을 수 없었다(prod 에서 실제로 그랬다: 이메일은
+# 카카오가 주지 않아 빈 문자열이고, 닉네임이 「식」한 글자였다). 결과가 아래
+# `_MAX_SEARCH_RESULTS` 로 잘리므로 한 글자라도 응답이 커지지 않는다.
+_MIN_QUERY_LENGTH = 1
 _MAX_SEARCH_RESULTS = 20
 # 이력 목록 한 번이 돌려줄 수 있는 최대 건수 — `notifications.api.
 # NOTIFICATION_HISTORY_MAX_LIMIT`과 같은 이유(무제한 응답을 만들지 않는다).

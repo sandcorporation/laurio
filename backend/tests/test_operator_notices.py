@@ -142,6 +142,34 @@ def test_anonymous_request_is_rejected(client, db):
     assert response.status_code in (401, 403)
 
 
+def test_one_letter_nickname_can_be_searched(client, db):
+    """한 글자 닉네임도 찾을 수 있다(2026-09-16).
+
+    카카오 로그인은 이메일을 주지 않아 계정 이메일이 빈 문자열인 경우가 있고,
+    그러면 닉네임이 유일한 단서다 — 예전에는 두 글자 이상만 받아 한 글자
+    닉네임인 참가자에게 알림을 보낼 길이 아예 없었다(prod 에서 실제로 그랬다).
+    """
+
+    session = _login_recipient(client, uid="one-letter")
+    user = get_user_model().objects.get(email="one-letter@example.com")
+    user.email = ""
+    user.save(update_fields=["email"])
+    social = user.social_accounts.first()
+    social.nickname = "식"
+    social.save(update_fields=["nickname"])
+    assert session["access"]
+
+    operator = _operator_client(username="notice-op-one-letter")
+
+    found = operator.get(RECIPIENTS_URL + "?q=식")
+    assert found.status_code == 200, found.content
+    assert [row["id"] for row in found.json()] == [user.id]
+
+    # 빈 검색어는 여전히 계정 전체를 돌려주지 않는다.
+    assert operator.get(RECIPIENTS_URL + "?q=").json() == []
+    assert operator.get(RECIPIENTS_URL + "?q=   ").json() == []
+
+
 def test_history_lists_sender_and_read_state(client, db):
     session = _login_recipient(client, uid="recipient-6")
     recipient_id = get_user_model().objects.get(email="recipient-6@example.com").id
