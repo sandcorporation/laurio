@@ -32,6 +32,7 @@
 //    환경에 로그인 우회가 실려 나가는 것이 막는 값이다(#95).
 import { Suspense, useState } from "react";
 import { normalizeDetail } from "@codemit/bff-client";
+import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { Card, ErrorNote, INPUT_CLASS } from "@/app/components/ui";
@@ -39,11 +40,21 @@ import { resolveNextPath } from "@/lib/auth/next-path";
 import type { SocialProvider } from "@/lib/auth/social-providers";
 import { buttonClass } from "@/lib/ui/classnames";
 
+// dev 시드 버튼은 제공자 로그인 버튼이 아니다(가짜 어댑터로 바로 세션을 만든다) —
+// 그래서 제공자 이름만 적고 그들의 버튼 문구를 쓰지 않는다. 특히 카카오는 허용
+// 문구가 정해져 있어(아래 KAKAO_LABEL) 그 문구를 dev 우회에 붙이지 않는다.
 const DEV_SEED_PROVIDERS = [
-  { id: "kakao", label: "카카오로 로그인" },
-  { id: "github", label: "GitHub으로 로그인" },
-  { id: "google", label: "Google로 로그인" },
+  { id: "kakao", label: "카카오 계정으로 시드 로그인" },
+  { id: "github", label: "GitHub 계정으로 시드 로그인" },
+  { id: "google", label: "Google 계정으로 시드 로그인" },
 ] as const;
+
+// 카카오 로그인 디자인 가이드가 허용하는 완성형 레이블. 「카카오로 로그인」처럼
+// 바꿔 쓰지 않는다(허용 목록은 「카카오 로그인」·「로그인」과 영문 두 개뿐이다).
+const KAKAO_LABEL = "카카오 로그인";
+// 공식 버튼 이미지의 원본 크기는 600×90 이고, 여기서는 정확히 1/2 로 줄여 그린다 —
+// 비율을 바꾸지 않는다(가이드: 심볼·레이블 비율 유지, 자간·글자 크기 변경 금지).
+const KAKAO_BUTTON = { src: "/kakao/kakao_login_large_wide.png", width: 300, height: 45 };
 
 type DevSeedProviderId = (typeof DEV_SEED_PROVIDERS)[number]["id"];
 
@@ -138,8 +149,8 @@ function LoginButtons({ showDevSeedForm, githubConfigured, googleConfigured }: L
 
   const displayedError = devSeedError ?? oauthError;
 
+  // 카카오는 공식 버튼 이미지를 그대로 쓰므로(아래) 이 목록에 넣지 않는다.
   const oauthButtons: OAuthButtonSpec[] = [
-    { provider: "kakao", label: "카카오로 로그인", configured: true },
     { provider: "github", label: "GitHub으로 로그인", configured: githubConfigured },
     { provider: "google", label: "Google로 로그인", configured: googleConfigured },
   ];
@@ -149,14 +160,33 @@ function LoginButtons({ showDevSeedForm, githubConfigured, googleConfigured }: L
       <Card className="flex w-full max-w-sm flex-col gap-6 p-8">
         <h1 className="text-2xl font-semibold">로그인</h1>
 
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col items-stretch gap-3">
+          {/* 카카오 로그인 버튼은 카카오가 배포하는 공식 이미지 그대로다
+              (public/kakao/README.md — 심볼을 우리가 그리면 가이드의 「형태·비율·
+              색상 변경 금지」에 걸린다). 그래서 이 버튼만 우리 버튼 모양·색을
+              쓰지 않는다. 높이는 공식 크기인 45px 이고, 아래 두 버튼도 같은
+              높이로 맞춰 어느 제공자도 더 강조되지 않게 한다. */}
+          <a
+            href={authorizeQuery("kakao")}
+            data-testid="oauth-login-kakao"
+            aria-label={KAKAO_LABEL}
+            className="mx-auto block"
+          >
+            <Image
+              src={KAKAO_BUTTON.src}
+              alt={KAKAO_LABEL}
+              width={KAKAO_BUTTON.width}
+              height={KAKAO_BUTTON.height}
+              priority
+            />
+          </a>
           {oauthButtons.map(({ provider, label, configured }) =>
             configured ? (
               <a
                 key={provider}
                 href={authorizeQuery(provider)}
                 data-testid={`oauth-login-${provider}`}
-                className={buttonClass("primary")}
+                className={`${buttonClass("primary")} h-[45px]`}
               >
                 {label}
               </a>
@@ -167,7 +197,7 @@ function LoginButtons({ showDevSeedForm, githubConfigured, googleConfigured }: L
                 disabled
                 aria-disabled="true"
                 data-testid={`oauth-login-${provider}`}
-                className={buttonClass("secondary")}
+                className={`${buttonClass("secondary")} h-[45px]`}
               >
                 {label} (준비 중)
               </button>
