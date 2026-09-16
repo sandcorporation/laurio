@@ -25,7 +25,16 @@ type RevealState =
   | { status: "revealed"; prompt: string }
   | { status: "error"; message: string };
 
-export function SourceReveal({ appealId }: { appealId: number }) {
+export function SourceReveal({
+  appealId,
+  onRevealed,
+}: {
+  appealId: number;
+  /** 펼침이 성공한 순간을 부모에게 알린다(#423) — 이의 상세의 감사 추적 카드가
+   * "지금 이 세션에서 누가 언제 열어봤는지" 를 실제로 일어난 사건으로 쌓기
+   * 위해서다. 호출하지 않아도 이 컴포넌트의 동작은 그대로다. */
+  onRevealed?: () => void;
+}) {
   const [state, setState] = useState<RevealState>({ status: "collapsed" });
 
   async function reveal() {
@@ -37,6 +46,7 @@ export function SourceReveal({ appealId }: { appealId: number }) {
 
     if (result.ok) {
       setState({ status: "revealed", prompt: result.data.prompt });
+      onRevealed?.();
       return;
     }
     if (result.code === "unauthorized") {
@@ -53,37 +63,47 @@ export function SourceReveal({ appealId }: { appealId: number }) {
   }
 
   return (
-    <section data-testid="appeal-source-section">
-      <h2>제출 소스</h2>
-      <p data-testid="appeal-source-warning">
-        펼치면 이 열람이 기록되고, Developer가 자기 Submission의 열람 기록에서 그
-        시각을 확인할 수 있습니다. 심판에 정말 필요할 때만 펼치세요.
-      </p>
-
-      {state.status !== "revealed" && state.status !== "redirecting" && (
-        <button
-          type="button"
-          data-testid="appeal-source-reveal-button"
-          onClick={reveal}
-          disabled={state.status === "revealing"}
-        >
-          {state.status === "revealing" ? "펼치는 중..." : "소스 펼치기"}
-        </button>
-      )}
-
-      {state.status === "redirecting" && (
-        <p data-testid="appeal-source-redirecting">세션이 만료되어 로그인 화면으로 이동합니다...</p>
-      )}
-
-      {state.status === "error" && (
-        <p role="alert" data-testid="appeal-source-error">
-          {state.message}
+    <section data-testid="appeal-source-section" className="border-t border-rule">
+      <div className="border-b border-rule px-4 py-3 text-[14px] font-semibold">AI 채점 원문</div>
+      <div className="flex flex-col gap-3 p-4">
+        <p data-testid="appeal-source-warning" className="text-[12px] leading-relaxed text-ink/45">
+          펼치면 이 열람이 기록되고, Developer가 자기 Submission의 열람 기록에서 그
+          시각을 확인할 수 있습니다. 심판에 정말 필요할 때만 펼치세요.
         </p>
-      )}
 
-      {state.status === "revealed" && (
-        <pre data-testid="appeal-source-content">{state.prompt}</pre>
-      )}
+        {state.status !== "revealed" && state.status !== "redirecting" && (
+          <button
+            type="button"
+            data-testid="appeal-source-reveal-button"
+            onClick={reveal}
+            disabled={state.status === "revealing"}
+            className="w-fit border border-rule bg-surface px-3 py-1.5 text-[12.5px] text-ink disabled:opacity-50"
+          >
+            {state.status === "revealing" ? "펼치는 중..." : "소스 펼치기"}
+          </button>
+        )}
+
+        {state.status === "redirecting" && (
+          <p data-testid="appeal-source-redirecting" className="text-[12.5px] text-ink/62">
+            세션이 만료되어 로그인 화면으로 이동합니다...
+          </p>
+        )}
+
+        {state.status === "error" && (
+          <p role="alert" data-testid="appeal-source-error" className="text-[12.5px] text-attention">
+            {state.message}
+          </p>
+        )}
+
+        {state.status === "revealed" && (
+          <pre
+            data-testid="appeal-source-content"
+            className="max-h-80 overflow-auto border border-rule bg-paper p-3 text-[12px] whitespace-pre-wrap"
+          >
+            {state.prompt}
+          </pre>
+        )}
+      </div>
     </section>
   );
 }
