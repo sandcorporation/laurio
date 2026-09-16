@@ -1098,7 +1098,7 @@ export default function EditProblemPage() {
                 ) : (
                   <>
                     {justTakenDown ? (
-                      <p data-testid="publish-template-taken-down" className="flex items-center gap-2.5 text-[13px]">
+                      <p data-testid="publish-template-taken-down" className="flex items-start gap-2 text-[13px]">
                         <Badge tone="neutral">내려짐</Badge>
                         <span className="text-ink/60">
                           더 이상 다른 강사가 가져갈 수 없습니다. 다시 공개하면 새 주소가 나옵니다.

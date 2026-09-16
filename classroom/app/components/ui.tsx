@@ -130,7 +130,13 @@ export function Badge({
     verified: "border-verified text-verified",
   }[tone];
   return (
-    <span className={`inline-block border px-2 py-0.5 text-[11px] leading-tight ${cls}`}>
+    // `shrink-0 whitespace-nowrap` — 배지는 flex 안에서 눌리면 안 된다(2026-09-16).
+    // 좁은 칸(문제 편집 오른쪽 300px 카드)에서 「내려짐」이 한 글자씩 세로로 쪼개져
+    // 나왔다: `inline-block` 은 flex 자식으로서 min-content 까지 줄어들고, 그 폭이
+    // 한 글자다. 라벨은 짧은 낱말이므로 줄바꿈할 이유가 애초에 없다.
+    <span
+      className={`inline-block shrink-0 border px-2 py-0.5 text-[11px] leading-tight whitespace-nowrap ${cls}`}
+    >
       {children}
     </span>
   );

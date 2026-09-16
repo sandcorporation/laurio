@@ -51,8 +51,13 @@ const BADGE_TONE: Record<BadgeTone, string> = {
 };
 
 /** 상태 표시. 셋뿐이다 — 이 브랜드의 액센트가 둘이기 때문이다. */
+// `shrink-0 whitespace-nowrap` — 배지는 flex 안에서 눌리면 안 된다(2026-09-16).
+// 강의실의 같은 배지가 좁은 칸에서 「내려짐」을 한 글자씩 세로로 쪼개 냈다:
+// `inline-block` 은 flex 자식으로서 min-content(= 한 글자)까지 줄어든다. 여기도
+// 같은 구멍이었고, 공개 상세의 「마감된 공모전 — 데모·영상 공개」가 좁은 화면의
+// 머리말 줄에서 같은 모양이 될 자리였다. 라벨은 짧은 낱말이라 줄바꿈할 이유가 없다.
 export function badgeClass(tone: BadgeTone = "neutral"): string {
-  return `inline-block border px-2 py-0.5 text-xs leading-tight ${BADGE_TONE[tone]}`;
+  return `inline-block shrink-0 border px-2 py-0.5 text-xs leading-tight whitespace-nowrap ${BADGE_TONE[tone]}`;
 }
 
 export const INPUT_CLASS =
