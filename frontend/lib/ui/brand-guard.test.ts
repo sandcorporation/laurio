@@ -15,8 +15,11 @@
 // 이 러너는 react·next 임포트를 거부하지만 파일 읽기는 막지 않으므로 소스를
 // **텍스트로** 훑는다.
 //
-// **운영자 앱은 대상이 아니다** — `app/tokens.css` 가 없고 유틸리티 클래스를
-// 쓰지 않는다. 그 앱이 이 브랜드를 입는 날 아래 경로에 더한다.
+// **운영자 앱도 대상이다**(#422, 부모 #421) — `operator/app/tokens.css` 가
+// 생기고 골간·지급 큐가 유틸리티 클래스를 쓰기 시작했다. 아직 옮기지 않은
+// 화면 여덟(정책·카테고리·산출물 종류·운영자 계정·개최 권한·무료 공모전·
+// 템플릿 신고·로그인)은 여전히 요소 스킨(`operator/app/globals.css`)이라
+// 유틸리티 클래스가 없고, 이 검사가 훑어도 걸릴 것이 없다.
 //
 // **무엇을 읽는가.** 클래스는 세 모양으로 조립된다 — 정적 속성, 템플릿 리터럴
 // 안의 조건식(`${ok ? "bg-verified" : "bg-attention"}`), 그리고
@@ -32,9 +35,14 @@ import { describe, expect, it } from "vitest";
 
 const FRONTEND = path.resolve(__dirname, "..", "..");
 const REPO = path.resolve(FRONTEND, "..");
-const SCANNED_DIRS = ["frontend/app", "frontend/lib", "classroom/app", "classroom/lib"].map((d) =>
-  path.join(REPO, d),
-);
+const SCANNED_DIRS = [
+  "frontend/app",
+  "frontend/lib",
+  "classroom/app",
+  "classroom/lib",
+  "operator/app",
+  "operator/lib",
+].map((d) => path.join(REPO, d));
 
 /** 이 브랜드의 색은 정확히 여섯이다(`app/tokens.css` 의 `@theme`). */
 const DEFINED_COLORS = new Set(["ink", "paper", "surface", "rule", "attention", "verified"]);
