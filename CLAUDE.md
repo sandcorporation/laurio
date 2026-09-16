@@ -269,10 +269,10 @@ Jenkinsfile 만 고쳤다가 빌드가 `cannot open ./deploy.sh` 로 통째로 �
 넷**이다 — `build backend` 만 하면 나머지 셋은 옛 이미지에 남고, `up -d` 는 바뀐
 게 없으니 Running 이라 적고 지나가 배포가 초록으로 끝난 채 스캔·강의실 실시간
 신호만 옛 코드로 돈다),
-`packages/bff-shared/` 와 `pnpm-lock.yaml` 은 **frontend + operator + classroom**(#277)을
-함께 간다 — `packages/bff-client/` 는 아직 **frontend + operator** 뿐이다(강의실은 이
-패키지를 쓰지 않는다, 위 「프론트엔드」절 참고). 없는 컨테이너는 변경 여부와 무관하게
-굽는다 — 「없음」은 「최신」이 아니다.
+`packages/` **아래 무엇이든** 과 `pnpm-lock.yaml`·`pnpm-workspace.yaml`·루트
+`package.json` 은 **frontend + operator + classroom**(#277)을 함께 간다 — 어느 앱이 어느
+패키지를 쓰는지로 가르지 않는다(`deploy.sh` 의 경로 규칙 하나다). 없는 컨테이너는
+변경 여부와 무관하게 굽는다 — 「없음」은 「최신」이 아니다.
 
 **이벤트 서비스가 없어도 배포는 실패로 끝나지 않는다 — 다만 헬스 체크는 있다.**
 `events` 는 `backend`·`celery-worker`·`celery-beat` 와 같은 무게로 굽고 바꿔
@@ -598,13 +598,17 @@ LocMem 으로 바뀌면서 그 경로 자체가 사라졌다.
 
 Next.js + React. 저장소 루트가 pnpm 워크스페이스다(운영자 앱 04 #62, ADR-0021) —
 락파일은 루트의 `pnpm-lock.yaml` 하나뿐이고, 공개 앱(`frontend/`, 위치·패키지 이름
-변경 없음)·운영자 앱(`operator/`)·강의실 앱(`classroom/`, #276)·공유 BFF 패키지 둘이
+변경 없음)·운영자 앱(`operator/`)·강의실 앱(`classroom/`, #276)·공유 패키지 셋이
 그 멤버다 — `packages/bff-shared`(서버 쪽: 경로 순회 방어·Origin 검증·허용목록 검사
-함수·백엔드 전달 기계. 허용목록의 **내용**은 앱마다 자기 파일에 남는다)와
+함수·백엔드 전달 기계. 허용목록의 **내용**은 앱마다 자기 파일에 남는다),
 `packages/bff-client`(브라우저 쪽, #146: 인증 구역 호출의 클라이언트·`ApiResult`·
 `normalizeDetail`·`useBackendQuery`/`usePagedList`·생성 타입 `schema.gen.ts` — 강의실은
 아직 이 패키지를 쓰지 않는다, 백엔드 프록시 허용목록이 비어 있어 화면이 아직 그 클라이언트를
-쓸 일이 없다). 명령은 그대로다 — 워크스페이스가 생겨도 `pnpm --dir <앱>` 호출법은
+쓸 일이 없다), 그리고 `packages/markdown`(설명 마크다운 렌더러, ADR-0047 — 2026-09-16
+에 강의실에서 옮겼다: 강의실의 문제 설명과 공개 앱의 공모전 설명이 **같은 허용 목록
+스키마와 같은 화면 조각**을 쓴다. 본문은 서버 컴포넌트가 그리고 복사·파일로 저장 버튼만
+클라이언트 조각이라 공개 표면의 SSR 이 깨지지 않는다, ADR-0015). 테스트 전용
+`packages/route-audit`(#166)도 멤버지만 화면 코드는 아니다. 명령은 그대로다 — 워크스페이스가 생겨도 `pnpm --dir <앱>` 호출법은
 바뀌지 않는다.
 
 테스트 시임은 **앱마다 하나**다(ADR-0021, ADR-0017 개정) — 앱이 셋(#276부터 강의실이
@@ -800,11 +804,18 @@ page/route 는 `export const dynamic = "force-dynamic"` 을 선언해야 한다)
 때문이다(#166). 대신 `classroom/lib/design/tokens.test.ts` 가 두 파일이 한 글자라도
 갈리면 빨개진다 — 「복사했으니 언젠가 갈라진다」를 규율이 아니라 검사로 바꿨다.
 **토큰이 같아도 화면이 그 밖의 이름을 부르면 갈라진다** — 그래서
-`frontend/lib/ui/brand-guard.test.ts`(#370)가 두 앱의 소스를 텍스트로 훑어 정의된 적
+`frontend/lib/ui/brand-guard.test.ts`(#370)가 세 앱과 `packages/markdown/src`(2026-09-16
+— 두 앱의 설명 화면이 그 패키지로 옮겨 갔다)의 소스를 텍스트로 훑어 정의된 적
 없는 색(`bg-accent` 등 — Tailwind 는 오류 없이 아무것도 안 만든다)과 토큰 반경을
 우회하는 모서리(맨 `rounded`·`rounded-full`)를 막는다 — 예외는 알림 벨의 읽지 않은 수
 배지 하나뿐이고(동그란 표식, 2026-09-13 결정) 그 목록이 검사 파일 안에 있다. 새 CI 잡이 아니라 공개 앱의
-`test:unit` 에 얹혀 있다. 운영자 앱은 토큰 파일이 없어 대상이 아니다.
+`test:unit` 에 얹혀 있다. 운영자 앱은 토큰 파일이 없어 사본 대조의 대상이 아니다.
+
+**그 순수 함수 잡(`frontend-pure-unit-tests`)이 이제 다섯을 돈다** —
+`packages/bff-shared`·`packages/markdown`·공개 앱·운영자 앱·강의실. 뒤의 둘이
+2026-09-16 에 늘었다: 강의실의 `test:unit` 은 **CI 에서 한 번도 돌지 않고 있었고**
+(그래서 위 토큰·로고 사본 대조와 런타임 설정 구조 검사가 실제로는 아무 문도 아니었다),
+마크다운 허용 목록 검사도 강의실 안에 있던 동안 같은 처지였다.
 
 **다크 테마도 이 토큰 파일 하나에만 산다**(#397, spec #396 「따뜻한 먹」). 여섯
 색 각각이 `light-dark(라이트, 다크)`로 두 값을 갖고, 문서 루트(`<html>`)의
@@ -900,14 +911,14 @@ VM 을 24GB 로 올린 뒤에야 4워커가 성립했다 — 그때 실측이 �
 (카카오 authorize 등). dev 에서는 `request.url` 이 우연히 맞아 이 버그가 보이지
 않는다 — e2e 가 Location 이 `/` 로 시작하는지를 직접 단언하는 이유다.
 
-**워크스페이스 패키지를 새로 더하면 손으로 관리되는 목록 셋을 같이 고쳐야 한다.**
-`pnpm-workspace.yaml` 은 글롭이라 저절로 잡지만, 그 아래 셋은 멤버를 하나씩 적어 둔다 —
+**워크스페이스 패키지를 새로 더하면 손으로 관리되는 목록들을 같이 고쳐야 한다.**
+`pnpm-workspace.yaml` 은 글롭이라 저절로 잡지만, 그 아래는 멤버를 하나씩 적어 둔다 —
 `docker/frontend.Dockerfile`·`docker/operator.Dockerfile`·`docker/classroom.Dockerfile`(#276)의
 COPY(각각 base·dev·builder 셋)와 `docker/compose.dev.yaml` 의 **멤버별 `node_modules` 이름
-있는 볼륨**(세 서비스 × 볼륨 선언 — 다만 강의실은 아직 `@codemit/bff-client` 를 쓰지 않으므로
-그 패키지의 볼륨만 없다). **로컬 게이트는 셋 다 보지 않는다** — `typecheck` 는 호스트의 node_modules 를
-쓰고, e2e 는 로컬에서 돌리지 않기 때문이다. #166 이 `packages/route-audit` 를 더하면서
-정확히 이걸 빠뜨려 CI 가 4잡 빨갛게 났고, 증상이 둘로 갈려 원인이 하나로 안 보였다:
+있는 볼륨**(그 패키지를 쓰는 서비스마다 하나 + 볼륨 선언). **로컬 게이트는 둘 다 보지
+않는다** — `typecheck` 는 호스트의 node_modules 를 쓰고, e2e 는 로컬에서 돌리지 않기
+때문이다. #166 이 `packages/route-audit` 를 더하면서 정확히 이걸 빠뜨려 CI 가 4잡 빨갛게
+났고, 증상이 둘로 갈려 원인이 하나로 안 보였다:
 
 - **deploy-guard 둘** — 프로덕션 이미지의 builder 가 `Cannot find module '@codemit/route-audit'`
   로 죽는다. 앱 소스(`lib/routes/allowlist.ts`)가 그 패키지의 타입을 쓰는데 Dockerfile 이
@@ -917,6 +928,15 @@ COPY(각각 base·dev·builder 셋)와 `docker/compose.dev.yaml` 의 **멤버별
   node_modules/.bin/tsc` 로 죽는다. 볼륨이 없으면 바인드 마운트가 그대로 남아, 컨테이너의
   `pnpm install` 이 **호스트 경로에 root 로** 쓴다. compose 의 그 볼륨 목록 옆 주석이 경고하는
   바로 그 상황이다.
+
+**화면을 그리는 패키지라면 둘이 더 있다**(2026-09-16, `packages/markdown`):
+각 `next.config.ts` 의 `transpilePackages`(빌드되지 않는 소스 패키지라 앱 코드처럼
+컴파일돼야 한다)와 **Tailwind 의 스캔 경로**. 뒤쪽이 조용한 쪽이다 — Tailwind v4 는
+`node_modules` 를 건너뛰므로 패키지가 부르는 유틸리티(`mt-5`·`list-disc`·`pt-9`)가
+**오류 없이 아예 만들어지지 않는다**. 실제로 한 번 그렇게 났다: 제목이 전부 본문
+크기, 목록에 글머리 점 없음, 코드블록 여백이 없어 버튼이 코드 위로 겹침. 그래서
+`packages/markdown/markdown.css` 가 `@source "./src"` 로 자기 소스를 등록하고 두 앱의
+`globals.css` 가 그 파일을 `@import` 한다 — 앱마다 경로를 적지 않는다.
 
 재현은 CI 와 같은 명령으로 로컬에서 된다(스택 없이 몇 분):
 

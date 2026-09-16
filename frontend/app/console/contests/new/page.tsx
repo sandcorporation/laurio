@@ -16,6 +16,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { DescriptionField } from "@/app/components/description-field";
 import { ErrorNote, INPUT_CLASS, PageShell, buttonClass } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
@@ -493,16 +494,13 @@ export default function NewContestGrillPage() {
           />
         </label>
 
-        <label className="flex flex-col gap-1 text-sm">
-          설명 (선택)
-          <textarea
-            value={brief.description}
-            onChange={(event) => setBrief((prev) => ({ ...prev, description: event.target.value }))}
-            rows={3}
-            data-testid="grill-brief-description"
-            className={INPUT_CLASS}
-          />
-        </label>
+        <DescriptionField
+          label="설명 (선택)"
+          value={brief.description}
+          onChange={(next) => setBrief((prev) => ({ ...prev, description: next }))}
+          title={brief.title}
+          testId="grill-brief-description"
+        />
 
         {createError && (
           <ErrorNote>

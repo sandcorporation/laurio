@@ -10,6 +10,8 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
+import { MarkdownView } from "@codemit/markdown";
+
 import { Badge, PageHeader, PageShell } from "@/app/components/ui";
 import { fetchContest, type ContestImage, type Requirement } from "@/lib/api/contests";
 import { formatDday, formatPrize, formatSubmissionCount, isImminent } from "@/lib/contest-format";
@@ -217,9 +219,19 @@ export default async function ContestDetailPage({ params }: { params: Promise<Pa
           <section className="flex flex-col gap-2 border-b border-rule pb-6">
             {/* 무료 공모전의 설명 칸은 개최 폼에서 「설명 · 보상 안내」로 받는다 — 같은 이름으로 보인다. */}
             <h2 className="text-sm font-medium">{contest.is_free ? "설명 · 보상 안내" : "요구사항"}</h2>
-            <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink/80">
-              {contest.description}
-            </p>
+            {/* 마크다운으로 그린다(2026-09-16) — 개최자가 제목·목록·표·코드블록으로
+                적은 설명이 예전에는 `whitespace-pre-wrap` 한 덩이로 나와 `##` 과 `|`
+                가 글자로 보였다. 강의실의 문제 설명과 **같은 렌더러**다
+                (`@codemit/markdown`, ADR-0047) — 허용 목록 스키마가 한 벌이어야
+                한쪽만 조여지는 일이 없다.
+
+                **본문은 서버가 그린다.** 이 파일에는 `"use client"` 가 없고
+                `MarkdownView` 도 서버 컴포넌트다 — 공개 표면이므로 색인되어야 한다
+                (ADR-0015, CLAUDE.md 「남길 것」1번). 코드블록의 복사·파일로 저장
+                버튼만 그 안에서 작은 클라이언트 섬으로 내려간다. */}
+            <div data-testid="contest-description">
+              <MarkdownView markdown={contest.description} fileBaseName={contest.title} />
+            </div>
           </section>
         )}
 

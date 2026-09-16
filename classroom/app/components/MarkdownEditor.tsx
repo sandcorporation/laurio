@@ -8,7 +8,7 @@
 // 방식이다」)가 무너진다.
 //
 // **이 안의 미리보기는 ToastUI 것이다 — 참여자에게 보여줄 때 쓰는
-// `ProblemDescription`(허용 목록 렌더러, lib/rendering/problem-description.ts)과
+// `MarkdownView`(허용 목록 렌더러, `@codemit/markdown`)와
 // 다른 길이다.** 글 쓰는 본인만 보는 자리라 여기서는 허용된다(#324 body) — 표
 // 등 우리 렌더러가 그리지 않는 서식을 ToastUI는 그릴 수 있어 둘이 어긋날 수
 // 있다는 뜻이기도 하다. 참여자가 실제로 볼 화면 그대로는 문제 만들기/편집의

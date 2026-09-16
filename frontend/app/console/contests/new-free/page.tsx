@@ -18,6 +18,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { DescriptionField } from "@/app/components/description-field";
 import { ErrorNote, INPUT_CLASS, PageShell, buttonClass } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
@@ -272,17 +273,14 @@ export default function NewFreeContestBriefPage() {
           />
         </label>
 
-        <label className="flex flex-col gap-1 text-sm">
-          설명 · 보상 안내(선택)
-          <textarea
-            value={brief.description}
-            onChange={(event) => setBrief((prev) => ({ ...prev, description: event.target.value }))}
-            rows={3}
-            placeholder="우승자에게 드리는 보상이 있다면 여기 적어주세요(예: 기프티콘)."
-            data-testid="free-brief-description"
-            className={INPUT_CLASS}
-          />
-        </label>
+        <DescriptionField
+          label="설명 · 보상 안내(선택)"
+          value={brief.description}
+          onChange={(next) => setBrief((prev) => ({ ...prev, description: next }))}
+          title={brief.title}
+          placeholder="우승자에게 드리는 보상이 있다면 여기 적어주세요(예: 기프티콘)."
+          testId="free-brief-description"
+        />
 
         {createError && (
           <ErrorNote>

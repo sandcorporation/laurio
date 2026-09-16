@@ -45,6 +45,35 @@ test("@exclusive 요구사항과 Requirement 체크리스트가 서버 렌더링
   }
 });
 
+// 설명이 마크다운으로 그려진다(2026-09-16, `@codemit/markdown` — 강의실의 문제
+// 설명과 같은 렌더러, ADR-0047). **그 렌더러가 클라이언트 컴포넌트를 품고
+// 있으므로**(코드블록의 복사·파일로 저장 버튼) 이 자리가 조용히 클라이언트
+// 렌더링으로 넘어갈 수 있다 — 넘어가면 설명 본문이 서버 HTML 에서 통째로
+// 사라지고 색인이 죽는다(ADR-0015). 위 「"use client" 가 없다」 검사는 이 파일만
+// 보므로 패키지 쪽 회귀를 못 본다.
+//
+// 그래서 **결과**를 본다: JS 없이 받은 HTML 에 마크다운이 만든 태그가 있는가.
+// 기대값은 시드가 심은 그 문자열이다(`seed_e2e_contests.py` 의 funded 설명).
+test("@exclusive 설명의 마크다운이 서버 렌더링된 HTML 에서 태그로 나온다", async ({ request }) => {
+  const res = await request.get(`/contests/${seeded.funded.id}`);
+  expect(res.status()).toBe(200);
+  const html = await res.text();
+
+  // `## 알림 앱 리디자인` → h3(설명의 제목 단계는 한 칸 내려간다) — 마크다운 기호가
+  // 글자로 남아 있으면 이 단언이 떨어진다.
+  expect(html).not.toContain("## 알림 앱 리디자인");
+  expect(html).toMatch(/<h3[^>]*>알림 앱 리디자인<\/h3>/);
+  // 목록·인라인 코드·코드블록이 각각 태그가 됐다.
+  expect(html).toMatch(/<li[^>]*>다크모드가 있어야 합니다<\/li>/);
+  expect(html).toContain("pnpm dev");
+  expect(html).toMatch(/<pre[^>]*>/);
+  // 하이라이팅은 허용 목록 **뒤에** 돈다 — 그 결과 span 이 서버 HTML 에 있다.
+  expect(html).toContain("hljs-");
+  // 코드블록의 버튼(클라이언트 섬)도 최초 HTML 에 함께 그려진다 — 섬이 본문을
+  // 클라이언트로 끌고 가지 않았다는 증거다.
+  expect(html).toContain("code-block-download");
+});
+
 // PS-01 (#106, spec #105) — 참가작 수가 상세에도 보이고, 백엔드가 낸 값과
 // 일치한다. seed_e2e_contests.py 가 실제로 심은 뒤 다시 세어 돌려준 값
 // (seeded.funded.submission_count)을 그대로 기대값으로 쓴다 — 화면은 다시

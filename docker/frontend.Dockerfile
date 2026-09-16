@@ -17,6 +17,10 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY frontend/package.json ./frontend/package.json
 COPY packages/bff-shared/package.json ./packages/bff-shared/package.json
 COPY packages/bff-client/package.json ./packages/bff-client/package.json
+# 마크다운 렌더러(#313, 2026-09-16 에 강의실에서 패키지로 옮겼다) — 공개 앱의 공모전
+# 설명과 강의실의 문제 설명이 같은 것을 쓴다. `app/globals.css` 가 이 패키지의
+# `highlight.css` 를 `@import` 하므로 빠지면 스타일 빌드가 통째로 죽는다.
+COPY packages/markdown/package.json ./packages/markdown/package.json
 # route-audit 는 테스트 전용 정적 분석 도구지만(#166) 여기 빠지면 안 된다 —
 # 각 앱의 `lib/routes/allowlist.ts` 가 그 타입을 쓰므로 builder 의 타입 검사가
 # 통째로 깨진다. runner 스테이지는 `.next/standalone` 만 가져가므로 실행
@@ -32,6 +36,7 @@ FROM base AS dev
 COPY frontend/ ./frontend/
 COPY packages/bff-shared/ ./packages/bff-shared/
 COPY packages/bff-client/ ./packages/bff-client/
+COPY packages/markdown/ ./packages/markdown/
 COPY packages/route-audit/ ./packages/route-audit/
 WORKDIR /app/frontend
 EXPOSE 3000
@@ -47,6 +52,7 @@ FROM base AS builder
 COPY frontend/ ./frontend/
 COPY packages/bff-shared/ ./packages/bff-shared/
 COPY packages/bff-client/ ./packages/bff-client/
+COPY packages/markdown/ ./packages/markdown/
 COPY packages/route-audit/ ./packages/route-audit/
 WORKDIR /app/frontend
 # NEXT_PUBLIC_*는 브라우저에서 도는 코드에 빌드타임에 인라인된다 — 런타임

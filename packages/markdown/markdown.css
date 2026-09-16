@@ -1,0 +1,72 @@
+/*
+ * 이 렌더러가 CSS 에서 필요한 것 전부. 두 앱의 `globals.css` 가 `tokens.css` 뒤에
+ * 이 파일 하나를 `@import` 한다.
+ *
+ * **1. 패키지 소스를 Tailwind 의 스캔 대상에 넣는다.** Tailwind v4 는 CSS 가 있는
+ * 프로젝트 아래만 훑고 `node_modules` 는 건너뛴다 — 워크스페이스 심볼릭 링크를 타고
+ * 들어오는 이 패키지도 그 건너뛰는 쪽이다. 등록하지 않으면 `view.tsx` 가 부르는
+ * `mt-5`·`list-disc`·`pt-9` 같은 유틸리티가 **아예 만들어지지 않는다** — 오류 없이
+ * 제목 크기·글머리 점·코드블록 여백만 사라져서, 실제로 한 번 그렇게 났다(2026-09-16
+ * 스크린샷: 모든 제목이 본문 크기, 목록에 점 없음, 버튼이 코드 위로 겹침).
+ * 경로는 **이 파일 기준**이므로 두 앱이 같은 한 줄을 공유한다.
+ *
+ * **2. 코드블록 하이라이팅 색.**
+ */
+@source "./src";
+
+.hljs-comment,
+.hljs-quote {
+  color: color-mix(in srgb, var(--color-ink) 45%, transparent);
+  font-style: italic;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-doctag,
+.hljs-meta .hljs-keyword {
+  color: var(--color-attention);
+}
+
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-attribute,
+.hljs-meta .hljs-string {
+  color: var(--color-verified);
+}
+
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-type,
+.hljs-built_in,
+.hljs-class .hljs-title {
+  color: color-mix(in srgb, var(--color-ink) 75%, transparent);
+}
+
+.hljs-title,
+.hljs-section,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-attr {
+  color: var(--color-ink);
+  font-weight: 600;
+}
+
+.hljs-deletion {
+  color: var(--color-attention);
+  text-decoration: line-through;
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+
+.hljs-strong {
+  font-weight: 700;
+}

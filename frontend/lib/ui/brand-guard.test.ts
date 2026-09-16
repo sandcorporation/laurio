@@ -43,6 +43,10 @@ const SCANNED_DIRS = [
   "classroom/lib",
   "operator/app",
   "operator/lib",
+  // 공유 마크다운 렌더러(2026-09-16) — 공모전 설명과 문제 설명을 **이 패키지가**
+  // 그리므로 화면 클래스의 절반이 여기로 옮겨 왔다. 빠뜨리면 브랜드 검사의 구멍이
+  // 앱이 아니라 패키지에 생긴다.
+  "packages/markdown/src",
 ].map((d) => path.join(REPO, d));
 
 /** 이 브랜드의 색은 정확히 여섯이다(`app/tokens.css` 의 `@theme`). */

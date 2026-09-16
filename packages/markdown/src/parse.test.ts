@@ -4,9 +4,9 @@
 import { toHtml } from "hast-util-to-html";
 import { describe, expect, it } from "vitest";
 
-import { parseProblemDescription } from "./problem-description";
+import { parseDescription } from "./parse";
 
-const html = (markdown: string) => toHtml(parseProblemDescription(markdown));
+const html = (markdown: string) => toHtml(parseDescription(markdown));
 
 describe("허용 목록을 통과하는 서식", () => {
   it("제목은 한 단계씩 내려 h2 부터 쓴다 — 화면의 h1 은 문제 제목 하나다", () => {
@@ -97,8 +97,8 @@ describe("허용 목록을 통과하는 서식", () => {
   });
 
   it("빈 설명은 빈 트리를 낸다", () => {
-    expect(parseProblemDescription("")).toEqual({ type: "root", children: [] });
-    expect(parseProblemDescription("   \n ")).toEqual({ type: "root", children: [] });
+    expect(parseDescription("")).toEqual({ type: "root", children: [] });
+    expect(parseDescription("   \n ")).toEqual({ type: "root", children: [] });
   });
 });
 

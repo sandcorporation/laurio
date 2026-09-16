@@ -10,6 +10,7 @@
 // 한다").
 import { useState } from "react";
 
+import { DescriptionField } from "@/app/components/description-field";
 import { ErrorNote, INPUT_CLASS, buttonClass } from "@/app/components/ui";
 import { formatPrize } from "@/lib/contest-format";
 import type { Category, ContestDetail, DeliverableType } from "@/lib/contests/grill-types";
@@ -267,16 +268,13 @@ export function BriefEditPanel({
             />
           </label>
 
-          <label className="flex flex-col gap-1 text-sm">
-            설명 (선택)
-            <textarea
-              value={form.description}
-              onChange={(event) => setForm((prev) => ({ ...prev, description: event.target.value }))}
-              rows={3}
-              data-testid="draft-edit-description"
-              className={INPUT_CLASS}
-            />
-          </label>
+          <DescriptionField
+            label="설명 (선택)"
+            value={form.description}
+            onChange={(next) => setForm((prev) => ({ ...prev, description: next }))}
+            title={form.title}
+            testId="draft-edit-description"
+          />
 
           {(validationError || error) && (
             <ErrorNote>

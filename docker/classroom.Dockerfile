@@ -17,6 +17,10 @@ WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY classroom/package.json ./classroom/package.json
 COPY packages/bff-shared/package.json ./packages/bff-shared/package.json
+# 마크다운 렌더러(#313, 2026-09-16 에 강의실에서 패키지로 옮겼다) — 공개 앱의 공모전
+# 설명과 강의실의 문제 설명이 같은 것을 쓴다. `app/globals.css` 가 이 패키지의
+# `highlight.css` 를 `@import` 하므로 빠지면 스타일 빌드가 통째로 죽는다.
+COPY packages/markdown/package.json ./packages/markdown/package.json
 # route-audit는 테스트 전용 정적 분석 도구지만(#166) 여기 빠지면 안 된다 —
 # lib/routes/allowlist.ts가 그 타입을 쓰므로 builder의 타입 검사가 통째로 깨진다.
 # runner 스테이지는 `.next/standalone`만 가져가므로 실행 이미지에는 들어가지 않는다.
@@ -29,6 +33,7 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 FROM base AS dev
 COPY classroom/ ./classroom/
 COPY packages/bff-shared/ ./packages/bff-shared/
+COPY packages/markdown/ ./packages/markdown/
 COPY packages/route-audit/ ./packages/route-audit/
 WORKDIR /app/classroom
 EXPOSE 3000
@@ -38,6 +43,7 @@ CMD ["pnpm", "dev"]
 FROM base AS builder
 COPY classroom/ ./classroom/
 COPY packages/bff-shared/ ./packages/bff-shared/
+COPY packages/markdown/ ./packages/markdown/
 COPY packages/route-audit/ ./packages/route-audit/
 WORKDIR /app/classroom
 # 오류 수집(GlitchTip, 2026-09-16) — `NEXT_PUBLIC_*` 이라 브라우저 번들에

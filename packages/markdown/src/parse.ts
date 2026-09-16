@@ -1,5 +1,8 @@
-// 문제 설명 마크다운을 안전하게 그릴 수 있는 트리로 바꾸는 순수 함수다(#313,
+// 설명 마크다운을 안전하게 그릴 수 있는 트리로 바꾸는 순수 함수다(#313,
 // ADR-0012 개정 → ADR-0041, 렌더러 교체 ADR-0047).
+//
+// **강의실의 문제 설명과 공개 앱의 공모전 설명이 이 한 벌을 나눠 쓴다** — 2026-09-16
+// 에 강의실에서 이 패키지로 옮겼다. 허용 목록이 두 벌이 되면 한쪽만 조여지는 날이 온다.
 //
 // **저장되는 값은 언제나 마크다운 원문이다** — 백엔드는 그 값을 sanitize 하지
 // 않는다(태그를 걷어내면 코드블록 안의 예시 HTML 이 함께 사라진다). 안전은
@@ -8,7 +11,7 @@
 // **허용 목록 방식이다** — remark(+GFM)로 원문을 문법 트리로 만들고, 원문 속
 // raw HTML 은 HTML 트리로 옮기지 않으며(`remark-rehype` 의 기본값), 마지막에
 // `rehype-sanitize` 의 **허용 목록 스키마**가 태그·속성·주소 스킴을 한 번 더
-// 거른다. 결과는 HTML 문자열이 아니라 트리이고, 화면(`ProblemDescription`)은
+// 거른다. 결과는 HTML 문자열이 아니라 트리이고, 화면(`view.tsx` 의 `MarkdownView`)은
 // 그 트리를 React 요소로 옮길 뿐 dangerouslySetInnerHTML 을 쓰지 않는다.
 //
 // 예전에는 `marked` 렉서 토큰을 손으로 허용 목록 타입으로 옮겼는데, 제목 크기·
@@ -52,7 +55,7 @@ const SCHEMA: SanitizeSchema = {
       ["className", /^language-[\w-]+$/],
       // 코드블록 정보 줄에 적은 파일 이름(```text map1.txt) — 아래 `keepCodeMeta`
       // 가 실어 온다. 저장 버튼이 이 값을 쓰고, 쓸 수 없는 모양은
-      // `lib/rendering/code-files.ts` 가 한 번 더 거른다.
+      // `code-files.ts` 가 한 번 더 거른다.
       ["dataFilename", /^[A-Za-z0-9가-힣][A-Za-z0-9가-힣._-]{0,59}$/],
     ],
     th: ["align"],
@@ -154,7 +157,7 @@ const processor = unified()
   .use(dropDeadImages);
 
 /** 마크다운 원문 → 걸러진 HTML 트리(hast). 빈 설명이면 자식이 없는 트리다. */
-export function parseProblemDescription(markdown: string): Root {
+export function parseDescription(markdown: string): Root {
   const source = markdown ?? "";
   if (source.trim() === "") return { type: "root", children: [] };
   return processor.runSync(processor.parse(source)) as Root;

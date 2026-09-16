@@ -14,8 +14,9 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
+import { MarkdownView } from "@codemit/markdown";
+
 import { Badge, EmptyState, ErrorNote, INPUT_CLASS, buttonClass } from "@/app/components/ui";
-import { ProblemDescription } from "@/app/components/ProblemDescription";
 import { BackendError } from "@/lib/backend/client";
 import {
   fetchMyProblemTemplates,
@@ -376,7 +377,7 @@ export function TemplatePickerSheet({
                     <p className="text-[12.5px] text-ink/45">설명이 없습니다.</p>
                   ) : (
                     <div data-testid="template-picker-preview-description">
-                      <ProblemDescription markdown={candidate.description} title={candidate.title} />
+                      <MarkdownView markdown={candidate.description} fileBaseName={candidate.title} />
                     </div>
                   )}
                 </div>

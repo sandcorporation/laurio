@@ -173,7 +173,17 @@ class Command(BaseCommand):
             title=f"{self.prefix}알림 앱 리디자인",
             category=category_lifestyle,
             deliverable_types=[web_service],
-            description="기존 알림 앱의 UI 를 다시 그리는 공모전입니다.",
+            # **설명은 마크다운으로 그려진다**(2026-09-16, `@codemit/markdown`) — 그래서
+            # 시드도 마크다운으로 심는다. 제목·목록·인라인 코드·코드블록을 한 줄씩
+            # 넣어 두면, 공개 상세가 **서버에서** 그 태그를 만들었는지를 e2e 가 JS 없이
+            # 확인할 수 있다(ADR-0015, CLAUDE.md 「남길 것」1번).
+            description=(
+                "## 알림 앱 리디자인\n\n"
+                "기존 알림 앱의 UI 를 다시 그리는 공모전입니다.\n\n"
+                "- 다크모드가 있어야 합니다\n\n"
+                "실행은 `pnpm dev` 한 줄입니다.\n\n"
+                "```ts config.ts\nexport const theme = \"dark\";\n```\n"
+            ),
             prize=3_000_000,
             deadline_at=now + timedelta(days=10),
             status=Contest.Status.PUBLISHED,

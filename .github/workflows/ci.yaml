@@ -399,12 +399,26 @@ jobs:
         working-directory: packages/bff-shared
         run: pnpm run test
 
+      # 마크다운 렌더러의 허용 목록·파일 이름 계산(2026-09-16 에 강의실에서 패키지로
+      # 옮겼다). 강의실에 있던 동안 이 세 파일은 **CI 에서 한 번도 돌지 않았다** —
+      # 이 잡이 세 군데(bff-shared·frontend·operator)만 불렀고 강의실은 빠져 있었다.
+      # 옮기면서 그 구멍을 같이 막는다.
+      - name: Shared markdown renderer — allow-list·file names
+        working-directory: packages/markdown
+        run: pnpm run test
+
       - name: Public app — pure modules
         working-directory: frontend
         run: pnpm run test:unit
 
       - name: Operator app — pure modules
         working-directory: operator
+        run: pnpm run test:unit
+
+      # 강의실도 같은 이유로 여기 든다 — 토큰·로고 사본 대조(#298·#392)와
+      # 런타임 설정 구조 검사(#297)가 이 잡 밖에서는 아무도 돌리지 않았다.
+      - name: Classroom app — pure modules
+        working-directory: classroom
         run: pnpm run test:unit
 
   # 프론트엔드 e2e. ADR-0017 — 시임은 **실행 중인 Next 앱 하나**이므로, 모킹하지 않고

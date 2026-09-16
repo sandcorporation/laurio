@@ -4,7 +4,7 @@ import type { Element } from "hast";
 import { describe, expect, it } from "vitest";
 
 import { codeTextOf } from "./code-copy";
-import { parseProblemDescription } from "./problem-description";
+import { parseDescription } from "./parse";
 
 function firstElement(markdown: string, tagName: string): Element {
   const found: Element[] = [];
@@ -12,7 +12,7 @@ function firstElement(markdown: string, tagName: string): Element {
     if (node.type === "element" && node.tagName === tagName) found.push(node as Element);
     for (const child of (node.children ?? []) as (typeof node)[]) walk(child);
   };
-  walk(parseProblemDescription(markdown));
+  walk(parseDescription(markdown));
   if (!found[0]) throw new Error(`${tagName} 없음`);
   return found[0];
 }

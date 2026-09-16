@@ -15,6 +15,8 @@
 import { useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 
+import { MarkdownView } from "@codemit/markdown";
+
 import {
   Badge,
   Card,
@@ -26,7 +28,6 @@ import {
   PageHeader,
   buttonClass,
 } from "@/app/components/ui";
-import { ProblemDescription } from "@/app/components/ProblemDescription";
 import type { UploadStatus } from "@/lib/submissions/use-source-upload";
 import type { ClassroomSubmissionRow } from "@/lib/submissions/api";
 import type { GradingStrictness, SubmissionFormat } from "@/lib/problems/api";
@@ -153,7 +154,7 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
             <Card>
               <CardHeader title="설명" />
               <div className="p-4" data-testid="my-problem-description">
-                <ProblemDescription markdown={description} title={title} />
+                <MarkdownView markdown={description} fileBaseName={title} />
               </div>
             </Card>
           )}

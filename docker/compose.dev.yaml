@@ -351,6 +351,7 @@ services:
       - codemit-dev-web-frontend-node-modules:/app/frontend/node_modules
       - codemit-dev-web-shared-node-modules:/app/packages/bff-shared/node_modules
       - codemit-dev-web-bff-client-node-modules:/app/packages/bff-client/node_modules
+      - codemit-dev-web-markdown-node-modules:/app/packages/markdown/node_modules
       - codemit-dev-web-route-audit-node-modules:/app/packages/route-audit/node_modules
       - codemit-dev-web-next:/app/frontend/.next
       # node_modules 볼륨은 처음 만들어질 때 딱 한 번만 이미지 내용으로 채워진다
@@ -481,6 +482,7 @@ services:
       - codemit-dev-classroom-node-modules:/app/node_modules
       - codemit-dev-classroom-app-node-modules:/app/classroom/node_modules
       - codemit-dev-classroom-shared-node-modules:/app/packages/bff-shared/node_modules
+      - codemit-dev-classroom-markdown-node-modules:/app/packages/markdown/node_modules
       - codemit-dev-classroom-route-audit-node-modules:/app/packages/route-audit/node_modules
       - codemit-dev-classroom-next:/app/classroom/.next
       - codemit-dev-classroom-pnpm-store:/pnpm/store
@@ -498,6 +500,7 @@ volumes:
   codemit-dev-web-frontend-node-modules:
   codemit-dev-web-shared-node-modules:
   codemit-dev-web-bff-client-node-modules:
+  codemit-dev-web-markdown-node-modules:
   codemit-dev-web-route-audit-node-modules:
   codemit-dev-web-next:
   codemit-dev-web-pnpm-store:
@@ -511,6 +514,7 @@ volumes:
   codemit-dev-classroom-node-modules:
   codemit-dev-classroom-app-node-modules:
   codemit-dev-classroom-shared-node-modules:
+  codemit-dev-classroom-markdown-node-modules:
   codemit-dev-classroom-route-audit-node-modules:
   codemit-dev-classroom-next:
   codemit-dev-classroom-pnpm-store:
