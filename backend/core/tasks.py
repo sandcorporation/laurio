@@ -34,7 +34,21 @@ def call_internal(path: str) -> dict:
     return response.json()
 
 
-@shared_task(name="core.run_scan")
+# **배포 중에는 backend 가 잠깐 없다 — 그때의 연결 실패는 사고가 아니다**
+# (2026-09-16). `deploy.sh` 가 backend 컨테이너를 바꿔 끼우는 몇 초 동안 beat 는
+# 계속 돌아, 그 순간의 tick 이 `Connection refused` 로 죽는다(오류 수집기를 붙인
+# 첫날 실제로 3건 올라왔다 — `notification-dispatch-deferred`). 스캔은 「두 번
+# 쏴도 한 번만 통과한다」가 보장돼 있으므로(ADR-0003, 위 docstring) 다시 쏘는
+# 것이 안전하다. 그래서 연결·타임아웃 실패만 몇 번 물러서서 재시도하고, 그래도
+# 안 되면 예외를 그대로 낸다 — 실패를 삼키지 않는다는 원칙은 그대로다.
+@shared_task(
+    name="core.run_scan",
+    autoretry_for=(requests.ConnectionError, requests.Timeout),
+    retry_backoff=2,
+    retry_backoff_max=30,
+    retry_jitter=True,
+    max_retries=3,
+)
 def run_scan(name: str) -> dict:
     """등록부(`core.scans.SCAN_REGISTRY`)의 스캔 하나 — beat 스케줄이 스캔마다 이 태스크를
     이름과 함께 등록한다(#137). 등록부 밖의 이름은 엔드포인트가 404 로 거부한다."""

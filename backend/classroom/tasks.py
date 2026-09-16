@@ -11,6 +11,7 @@
 실제로 그 안전망보다 먼저 채점을 시작한다.
 """
 
+import requests
 from celery import shared_task
 
 from core.tasks import call_internal
@@ -19,7 +20,18 @@ from core.tasks import call_internal
 # **결과를 받지 않는다**(`ignore_result`, #378 후속) — 채점 결과는 ClassroomScore 로 남고
 # 아무도 AsyncResult 를 읽지 않는다. 결과를 받는 작업은 보낼 때 결과 백엔드(Redis)에 구독을
 # 거는데, Redis 가 없으면 그 재연결에 19초가 묶였다(실측) — 제출 요청이 그만큼 멈췄다.
-@shared_task(name="classroom.score_attempt", ignore_result=True)
+# 연결·타임아웃 실패에 재시도하는 이유는 `core.tasks.run_scan` 과 같다(배포 중
+# backend 가 잠깐 없다) — 이 엔드포인트도 같은 후보 조건을 다시 보므로 두 번
+# 불러도 한 번만 채점한다. 끝까지 실패하면 60초 안전망 스캔이 그 시도를 줍는다.
+@shared_task(
+    name="classroom.score_attempt",
+    ignore_result=True,
+    autoretry_for=(requests.ConnectionError, requests.Timeout),
+    retry_backoff=2,
+    retry_backoff_max=30,
+    retry_jitter=True,
+    max_retries=3,
+)
 def score_attempt(submission_id: int) -> dict:
     """`ClassroomSubmission` 하나를 즉시 채점한다 — 내부 엔드포인트가 스캔과
     같은 후보 조건·같은 행 처리 함수를 쓰므로(`classroom.scoring.

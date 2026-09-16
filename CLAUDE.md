@@ -62,6 +62,20 @@ celery 둘과 같은 함정이다), 같은 방식(Host 헤더를 붙인 `/api/he
 화면은 스트림이 끊기거나 막히면 폴링으로 물러나도록 설계돼 있어 기능 자체가
 멈추지는 않는다(ADR-0046 결과 — "신호는 진실의 출처가 아니다").
 
+**이벤트 서비스의 ASGI 진입점이 lifespan 을 직접 받는다**(2026-09-16,
+`backend/config/asgi.py`). Django 의 ASGI 핸들러는 HTTP 가 아닌 scope 를 보면
+`ValueError: ... not lifespan.` 을 던지고, uvicorn 은 그 기능만 끄고 계속 뜬다 —
+서비스는 정상인데 **부팅마다 오류 하나가 남는다**. 오류 수집기를 붙이자마자 그
+예외가 staging 백엔드 프로젝트의 최다 이슈가 됐다(6건). 기동 명령에
+`--lifespan off` 를 붙이는 대안은 compose 세 곳에 같은 말을 적어야 해서 버렸다.
+
+**배포 중 몇 초는 backend 가 없다 — beat 의 tick 이 그때 죽는다.** `deploy.sh` 가
+backend 컨테이너를 바꿔 끼우는 사이 `core.run_scan`·`classroom.score_attempt` 의
+내부 HTTP 호출이 `Connection refused` 로 실패했다(수집기를 붙인 첫날 3건). 스캔은
+두 번 쏴도 한 번만 통과하므로(ADR-0003) 두 태스크가 **연결·타임아웃 실패만** 몇 번
+물러서서 재시도한다 — 2xx 가 아닌 응답(서버가 대답은 했다)은 재시도하지 않고 그대로
+실패로 남긴다.
+
 호스트에서 `uv run pytest`를 돌릴 때 붙는 DB 포트 기본값도 `CODEMIT_DB_PORT`를 따라간다
 (`backend/config/settings.py`). 컨테이너 안에서는 compose가 `POSTGRES_*`를 직접 주입한다.
 
@@ -492,7 +506,7 @@ cd backend && CODEMIT_DB_PORT=55432 uv run python manage.py prune_e2e_junk
 `global-setup.ts` 의 순서가 그래서 그 순서다.
 
 **스위트는 기본으로 병렬 실행된다**(#104). `pyproject.toml` 의 `addopts` 가 `-n auto` 를
-준다 — 실측(이 머신, 당시 1192건 — 지금 2220건 통과·10건 skip(이메일 식별 규칙 ADR-0049 를 합친 시점). Assignment 가 #205~#212 로
+준다 — 실측(이 머신, 당시 1192건 — 지금 2222건 통과·10건 skip(수집기가 잡은 오류 둘을 고친 시점). Assignment 가 #205~#212 로
 1312건에서 1377건까지, staging 검증이 낳은 #214~#217 로 1388건까지, 저장소만으로
 제출하고 채점 시점에 박제하는 #218~#220 으로 1407건까지, 채점 상한과 화면 열한 개
 (#213·#221~#231)로 1463건까지, 종류 게이트(#232)로 1467건까지, 공모전 이미지
