@@ -24,6 +24,7 @@ cd backend && uv run pytest                           # 테스트
 | 운영자 앱(`operator/`, #63) | `53001` | 3000 | `CODEMIT_OPERATOR_WEB_PORT` |
 | 강의실 앱(`classroom/`, #276) | `53002` | 3000 | `CODEMIT_CLASSROOM_WEB_PORT` |
 | 이벤트 서비스(`events`, #379, ADR-0046) | `58001` | 8001 | `CODEMIT_EVENTS_PORT` |
+| 검색 엔진(`search`, dev `search` 프로필, #450) | `19200` | 9200 | `CODEMIT_SEARCH_PORT` |
 
 **이벤트 서비스는 `backend`와 같은 이미지를 ASGI로 띄우는 별도 프로세스다**
 (ADR-0046) — 강의실이 새로고침 없이 화면을 갱신하는 SSE 엔드포인트
@@ -126,7 +127,10 @@ DB·Redis·MinIO·이벤트 서비스·세 앱(#276부터 강의실이, #379부�
 `OpenAIScoringAdapter`(#88) · `OpenAIRequirementChatAdapter` ·
 `GitHubAPIAdapter`(#193) · 알림 3채널(`AligoAlimtalkAdapter`·`AligoSmsAdapter`·
 `AligoLmsAdapter`) · `RedisEventBus`(#380, ADR-0046 — 벤더 연동이 아니라 우리
-자신의 Redis 위에서 도는 코드라 다른 일곱과 달리 "아직 미구현"인 적이 없었다).
+자신의 Redis 위에서 도는 코드라 다른 일곱과 달리 "아직 미구현"인 적이 없었다) ·
+`OpenSearchContestSearch`(#450/#451, 부모 #444 스펙 — `RedisEventBus`와 같은
+이유로 벤더가 아니라 compose 가 직접 띄우는 `search` 서비스 위에서 도는 코드,
+접속 주소는 `OPENSEARCH_URL=http://search:9200`).
 각 dotted path 는 `docker/staging.env.example` 에 그대로 적혀 있다.
 
 **staging·prod는 공모전 켜짐·유료 공모전 꺼짐이다**(#271/#413, ADR-0037을
@@ -183,12 +187,14 @@ ADR-0048에 있다).
 
 **그래도 가드는 그대로다.** `core.adapters.check_adapter_mode`(`django.core.checks` 로
 등록되어 `django.setup()` 이후 `manage.py migrate`/`check`/`runserver` 부팅 파이프라인에서
-평가된다, #83)가 **열두 값**(`VERIFICATION_ADAPTER_MODE`·`PAYMENT_ADAPTER_MODE`·
+평가된다, #83)가 **열세 값**(`VERIFICATION_ADAPTER_MODE`·`PAYMENT_ADAPTER_MODE`·
 `PAYOUT_ADAPTER_MODE`·`SELLER_ADAPTER_MODE`·`LLM_ADAPTER_MODE`·
 `CLASSROOM_SCORING_ADAPTER_MODE`(#340, ADR-0043 — 강의실 채점 전용, `LLM_ADAPTER_MODE`와
 별개다)·`LLM_REQUIREMENT_CHAT_ADAPTER_MODE`·`GITHUB_ADAPTER_MODE`(#193)·
 `NOTIFICATION_ALIMTALK_ADAPTER`·`NOTIFICATION_SMS_ADAPTER`·`NOTIFICATION_LMS_ADAPTER`·
-`EVENT_BUS_ADAPTER_MODE`(#380, ADR-0046 — 강의실 실시간 신호)이
+`EVENT_BUS_ADAPTER_MODE`(#380, ADR-0046 — 강의실 실시간 신호)·
+`SEARCH_ADAPTER_MODE`(#451, 부모 #444 스펙 — 공모전 검색, 실물은
+`contests.search_opensearch.OpenSearchContestSearch`)이
 배포 환경에서 fake 이거나 임포트되지 않으면 부팅 자체를 거부한다 — 컨테이너가 뜬 채로 첫 요청에서야 죽는 것보다 정직하게 못 뜨는 편이다.
 
 `config/settings.py`의 `IS_DEPLOYED_ENVIRONMENT`(staging+production)가 fake 어댑터
@@ -253,23 +259,24 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
 
 **이미지는 CI 가 굽는다 — staging·prod 서버는 받기만 한다**(2026-09-17). 예전에는 CI 가
 구운 이미지는 테스트에만 쓰고 버렸고, 배포는 각 서버가 다시 구웠다 — prod(oracle)는
-배포마다 제 CPU 로 Next 빌드 셋을 돌렸다. 지금은 main 의 CI 가 커밋마다 네 이미지를
+배포마다 제 CPU 로 Next 빌드 셋을 돌렸다. 지금은 main 의 CI 가 커밋마다 다섯 이미지를
 ghcr(`ghcr.io/sandcorporation/codemit-*`, 비공개)에 올린다:
 
 | 잡 | 러너 | 태그 |
 | --- | --- | --- |
-| `images-staging` | **mac** — amd64 는 Docker Desktop 의 에뮬레이션 | `codemit-backend:<sha>-amd64`, 세 앱 `:<sha>-staging` |
-| `images-prod` | **mac** — arm64 제 속도 | `codemit-backend:<sha>-arm64`, 세 앱 `:<sha>-prod` |
+| `images-staging` | **mac** — amd64 는 Docker Desktop 의 에뮬레이션 | `codemit-backend:<sha>-amd64`, 세 앱 `:<sha>-staging`, `codemit-search:<sha>-amd64`(#450/#451) |
+| `images-prod` | **mac** — arm64 제 속도 | `codemit-backend:<sha>-arm64`, 세 앱 `:<sha>-prod`, `codemit-search:<sha>-arm64`(#450/#451) |
 
 mac 러너는 Apple Silicon 의 Docker Desktop 위 러너 컨테이너(Linux/ARM64, 라벨 `mac-arm`)다.
-잡은 서비스마다 하나(matrix, staging 4 + prod 4)라 mac 러너 수(3)만큼 동시에 굽는다.
+잡은 서비스마다 하나(matrix, staging 5 + prod 5)라 mac 러너 수(3)만큼 동시에 굽는다.
 **둘 다 mac 인 이유는 sub 의 디스크다**(2026-09-17) — sub 는 테스트 잡과 staging 스택이
 캐시 없는 SATA SSD(86% 참) 하나를 나눠 쓰는데, 빌드를 얹자 CPU·메모리는 남는데 디스크
 대기가 14~84% 로 치솟았다. **mac 이 없을 때의 비상구는 저장소 변수 `IMAGE_BUILDER=sub`**
 다 — 두 잡이 sub 로 옮겨 가 arm64 는 QEMU 로(느리게) 굽는다. 줄 서 있던 실행은 변수를 바꾼
 뒤 다시 돌리고, mac 이 돌아오면 변수를 지운다.
 
-- **backend 는 환경을 가리지 않아 아키텍처로만 가른다.** 세 앱은 `NEXT_PUBLIC_*` 가 굳으므로
+- **backend·search 는 환경을 가리지 않아 아키텍처로만 가른다**(#450/#451 — search 는
+  Next 앱이 아니라 `NEXT_PUBLIC_*` 처럼 굳는 값이 없다). 세 앱은 `NEXT_PUBLIC_*` 가 굳으므로
   환경마다 따로 굽는다 — 그 값의 원본은 서버 env 가 아니라 **저장소 변수 `STAGING_*`·
   `PROD_*`** 다(조직이 free 요금제라 비공개 저장소의 environment 기능을 못 써 접두어로
   가른다). 값을 바꾸면 CI 를 다시 돌려야 이미지에 반영된다.
@@ -305,7 +312,7 @@ Jenkinsfile 이 「(staging 은 대상 확인 →) Preflight → 변경 계획 �
 Jenkinsfile 만 고쳤다가 빌드가 `cannot open ./deploy.sh` 로 통째로 실패한 적이 있다.
 
 `deploy.sh` 는 **바뀐 것만 바꿔 끼운다** — 이미지 태그가 커밋마다 달라서 계획 없이 `up` 하면
-바뀌지 않은 서비스까지 전부 다시 뜨기 때문이다(CI 는 매 커밋 네 이미지를 다 올리므로 어느
+바뀌지 않은 서비스까지 전부 다시 뜨기 때문이다(CI 는 매 커밋 다섯 이미지를 다 올리므로 어느
 서비스든 받을 이미지는 있다). 기준점은 `.jenkins-staging-deployed`
 (gitignore, 빌드 디렉터리에 남는다 — 시크릿과 같은 전제). 그 파일이 없거나 그것이
 가리키는 커밋이 저장소에 없으면 전부 바꿔 끼운다. 경로 → 서비스 팬아웃은 1:1 이 아니다:
@@ -315,8 +322,10 @@ Jenkinsfile 만 고쳤다가 빌드가 `cannot open ./deploy.sh` 로 통째로 �
 끝난 채 스캔·강의실 실시간 신호만 옛 코드로 돌았다),
 `packages/` **아래 무엇이든** 과 `pnpm-lock.yaml`·`pnpm-workspace.yaml`·루트
 `package.json` 은 **frontend + operator + classroom**(#277)을 함께 간다 — 어느 앱이 어느
-패키지를 쓰는지로 가르지 않는다(`deploy.sh` 의 경로 규칙 하나다). 없는 컨테이너는
-변경 여부와 무관하게 받아서 띄운다 — 「없음」은 「최신」이 아니다.
+패키지를 쓰는지로 가르지 않는다(`deploy.sh` 의 경로 규칙 하나다). `docker/search.Dockerfile`
+은 **search**(#450/#451) 하나만 간다 — backend 코드와 무관하게 nori 플러그인을 넣은
+OpenSearch 이미지 자체만 바뀐다. 없는 컨테이너는 변경 여부와 무관하게 받아서 띄운다 —
+「없음」은 「최신」이 아니다.
 
 **이벤트 서비스가 없어도 배포는 실패로 끝나지 않는다 — 다만 헬스 체크는 있다.**
 `events` 는 `backend`·`celery-worker`·`celery-beat` 와 같은 무게로 받고 바꿔
@@ -324,6 +333,17 @@ Jenkinsfile 만 고쳤다가 빌드가 `cannot open ./deploy.sh` 로 통째로 �
 스트림은 진실의 출처가 아니다). 그래도 `deploy.sh` 는 다른 서비스와 똑같이
 `/api/health` 로 응답을 확인한다 — 옛 코드가 조용히 계속 도는 것과, 프로세스가
 아예 죽어 있는 것은 다른 문제이고 후자는 배포 실패로 다뤄야 하기 때문이다.
+
+**검색이 없어도 배포는 실패로 끝나지 않는다 — 다만 헬스 체크는 있다**(#450/#451,
+부모 #444 스펙과 같은 원칙). `backend`·`celery-worker`·`celery-beat`·`events`
+넷은 `search` 를 시작 순서로만 기다린다(compose의 `depends_on: service_started`
+— 헬스가 아니다) — 검색이 죽어 있어도 그 넷은 뜨고, 목록 API 는 DB 검색으로
+물러난다(`contests.search.search_contests`). 그래도 `deploy.sh health search`
+는 OpenSearch 자신의 클러스터 헬스 엔드포인트로 응답을 확인한다 — 옛 색인이
+조용히 계속 도는 것과 프로세스가 아예 죽어 있는 것은 다른 문제다. 검색이나
+backend 를 바꿔 끼운 뒤에는 `deploy.sh reindex`(`manage.py
+rebuild_contest_search_index`)가 전체 재색인을 한 번 강제한다 — 매일 도는
+`contest-search-reindex` 스캔의 하루 제한을 기다리지 않는다.
 
 **헬스 체크는 Host 헤더를 붙여야 한다.** 루프백으로 치면 Host 가 `127.0.0.1` 이
 되는데 그건 `ALLOWED_HOSTS` 에 없어 Django 가 400 을 낸다 — gunicorn 이 멀쩡히
@@ -364,6 +384,27 @@ docker compose -f docker/compose.dev.yaml up -d
 ```bash
 docker compose -f docker/compose.dev.yaml --profile celery up -d
 ```
+
+**공모전 검색의 실물 어댑터(OpenSearch, #450, 부모 #444 스펙)도 dev 기본 기동에
+없다.** `SEARCH_ADAPTER_MODE` 기본값은 fake(DB 포함 검색, `contests.search.
+FakeContestSearchAdapter`)라 실물 없이도 `/api/contests?q=...`가 그대로 돈다 —
+`search` 프로필은 실물 어댑터(nori 한국어 분석기, `docker/search.Dockerfile`)를
+직접 확인하고 싶을 때만 켠다:
+
+```bash
+docker compose -f docker/compose.dev.yaml --profile search up -d
+SEARCH_ADAPTER_MODE=contests.search_opensearch.OpenSearchContestSearch \
+  OPENSEARCH_URL=http://127.0.0.1:${CODEMIT_SEARCH_PORT:-19200} \
+  uv run python manage.py rebuild_contest_search_index
+```
+
+단일 노드·JVM 힙 1GB·컨테이너 메모리 한도 2GB(`mem_limit`)이고 보안 플러그인은
+끈다. **호스트의 `vm.max_map_count`가 262144 이상이어야 뜬다**(OpenSearch
+공식 권장값, 커널 전역이라 컨테이너 안에서 올릴 수 없다) — `sysctl
+vm.max_map_count`로 먼저 확인한다. `tests/test_contest_search_opensearch_live.py`
+(`@live_vendor`, `OPENSEARCH_URL`이 있을 때만 돈다, CI는 건너뛴다)가 이 실물
+어댑터를 실제로 친다 — 한국어 조사가 달라도 찾아지는지, 제목 가중이 설명보다
+높은지, 재색인(`rebuild`) 중에도 검색이 끊기지 않는지(별칭 원자적 교체) 확인한다.
 
 ## 운영
 

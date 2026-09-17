@@ -17,6 +17,7 @@ from datetime import timedelta
 from django.conf import settings
 from django.db import models
 from django.db.models import Q
+from django.utils import timezone
 
 from core.classification import Classification
 from core.clock import Clock
@@ -970,3 +971,38 @@ class ContestSubmission(Submission):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"ContestSubmission(contest={self.contest_id}, developer={self.developer_id})"
+
+
+class ContestSearchReindexState(models.Model):
+    """전체 재색인 스캔(`contest-search-reindex`, #450)이 마지막으로 언제 돌았는지
+    기억하는 단일 행.
+
+    `core.scans.ScanSpec`은 "후보 행마다 조건부 UPDATE로 정확히 한 번 처리한다"는
+    idempotency를 전제한다(ADR-0003) — 그런데 전체 재색인은 "언제나 할 일이
+    있다"에 가까워, 이 마커 없이 tick·beat가 반복 호출하면 매번 다시 돈다. 그러면
+    `/api/internal/tick`을 두 번 쏘면 스캔 결과 행 수가 두 배가 되는(다른 스캔은
+    깨끗이 0으로 수렴하는) 비대칭이 생긴다(`tests/test_scheduler_tick.py`가 이미
+    고정한 "tick 두 번 = 같은 결과" 계약). `contests.search_scan`이
+    `last_reindexed_at`이 하루보다 최근이면 후보에서 빼고, `claim_transition`과
+    같은 조건부 UPDATE로 이 행을 먼저 "찜한" 뒤에만 `rebuild()`를 부른다.
+
+    **이 필드는 일부러 주입 가능한 `core.clock.Clock`이 아니라 실제 벽시계
+    (`django.utils.timezone.now`)로 찍는다** — ADR-0003("시간은 주입 가능한
+    의존성이다")의 명시적 예외다. 이 저장소의 다른 모든 시간 기반 테스트가
+    `ClockOverride`로 몇 주씩 시계를 앞당기며 tick을 반복 호출하는데, 이 재색인
+    "하루 주기"가 그 주입된 시계를 따라가면 검색과 무관한 테스트가 며칠을
+    건너뛸 때마다 이 스캔이 덩달아 끼어들어 `rows` 개수를 흔든다. 실제
+    OpenSearch 재색인 비용은 시뮬레이션 시간이 아니라 진짜 경과 시간에 매여
+    있으므로, `core.backup_database`(스캔 등록부 밖에서 실제 Celery beat
+    크론에 매인, 마찬가지로 주입된 시계를 보지 않는 작업)와 같은 원칙을 쓴다.
+
+    사람이 즉시 전체를 다시 만들고 싶을 때는 이 마커를 보지 않는
+    `manage.py rebuild_contest_search_index`를 쓴다 — 이 스캔은 "매일" 주기
+    전용이고, 즉시 재색인은 별도 진입점이다(`contests/search_scan.py` 모듈
+    docstring).
+    """
+
+    last_reindexed_at = models.DateTimeField(default=timezone.now)
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ContestSearchReindexState(last_reindexed_at={self.last_reindexed_at})"

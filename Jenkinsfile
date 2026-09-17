@@ -118,6 +118,10 @@ pipeline {
           when { expression { env.BUILD_CLASSROOM == 'true' } }
           steps { sh "sh ./deploy.sh ${deployTarget} image classroom" }
         }
+        stage('search') {
+          when { expression { env.BUILD_SEARCH == 'true' } }
+          steps { sh "sh ./deploy.sh ${deployTarget} image search" }
+        }
       }
     }
 
@@ -139,6 +143,15 @@ pipeline {
         }
         stage('events 응답') {
           steps { sh "sh ./deploy.sh ${deployTarget} health events" }
+        }
+        stage('search 응답') {
+          steps { sh "sh ./deploy.sh ${deployTarget} health search" }
+        }
+        stage('검색 재색인') {
+          // 검색이나 backend 를 바꿨을 때만 — 스캔의 하루 제한을 보지 않고
+          // 즉시 맞춘다(deploy.sh reindex, 부모 #444 스펙).
+          when { expression { env.BUILD_SEARCH == 'true' || env.BUILD_BACKEND == 'true' } }
+          steps { sh "sh ./deploy.sh ${deployTarget} reindex" }
         }
       }
     }

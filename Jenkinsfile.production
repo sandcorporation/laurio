@@ -94,6 +94,10 @@ pipeline {
           when { expression { env.BUILD_CLASSROOM == 'true' } }
           steps { sh "sh ./deploy.sh ${deployTarget} image classroom" }
         }
+        stage('search') {
+          when { expression { env.BUILD_SEARCH == 'true' } }
+          steps { sh "sh ./deploy.sh ${deployTarget} image search" }
+        }
       }
     }
 
@@ -115,6 +119,13 @@ pipeline {
         }
         stage('events 응답') {
           steps { sh "sh ./deploy.sh ${deployTarget} health events" }
+        }
+        stage('search 응답') {
+          steps { sh "sh ./deploy.sh ${deployTarget} health search" }
+        }
+        stage('검색 재색인') {
+          when { expression { env.BUILD_SEARCH == 'true' || env.BUILD_BACKEND == 'true' } }
+          steps { sh "sh ./deploy.sh ${deployTarget} reindex" }
         }
       }
     }

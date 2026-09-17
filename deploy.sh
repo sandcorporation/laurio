@@ -13,13 +13,14 @@
 #
 #   preflight           env 파일과 compose 설정을 확인한다
 #   plan                무엇을 바꿔 끼울지 정해 계획 파일(.jenkins-<대상>-plan)에 적는다
-#   image <서비스>       backend|frontend|operator|classroom 하나의 이미지를 준비한다
+#   image <서비스>       backend|frontend|operator|classroom|search 하나의 이미지를 준비한다
 #                       (아래 이미지 출처에 따라 pull 또는 build)
 #   pull <서비스>        ghcr 에서 그 커밋의 이미지를 받는다
 #   build <서비스>       이 호스트에서 직접 굽는다(비상용)
 #   up                  계획대로 인프라를 세우고 새 이미지로 바꿔 끼운다
 #   verify              컨테이너가 running 인지 본다
-#   health <서비스>      backend|events 가 요청을 실제로 받는지 본다
+#   health <서비스>      backend|events|search 가 요청을 실제로 받는지 본다
+#   reindex             공모전 검색을 전체 재색인한다(검색·backend 를 바꾼 뒤)
 #   mark                배포 표식을 지금 커밋으로 옮긴다
 #   all (기본값)         위를 순서대로 전부 — 사람이 손으로 배포할 때
 #
@@ -54,7 +55,15 @@
 #   classroom/           -> classroom                              (#276/#277, ADR-0037)
 #   packages/            -> frontend + operator + classroom        (워크스페이스 패키지를 함께 쓴다)
 #   pnpm-lock.yaml       -> frontend + operator + classroom
+#   docker/search.Dockerfile -> search                              (#450/#451, 부모 #444 스펙 —
+#                                                                    nori 플러그인을 넣은 OpenSearch,
+#                                                                    backend 코드와 무관하게 갈린다)
 #   docker/*.Dockerfile / compose.<target>.yaml -> 그 파일이 짓는 것 전부
+#
+# **검색이나 backend 를 바꾼 뒤에는 전체 재색인을 한 번 돌린다**(부모 #444 스펙) —
+# `reindex` 명령이 `manage.py rebuild_contest_search_index`를 부른다. 스캔
+# 등록부의 `contest-search-reindex`는 하루에 한 번만 실제로 도는 안전망이라
+# (`contests/search_scan.py`) 배포 직후에는 이 즉시 명령으로 따로 맞춘다.
 #
 # **`backend` 만 바꿔 끼우는 것은 사고다.** celery-worker 와 beat 가 옛 코드로
 # 계속 돈다 — 그 둘이 마감 전이·채점·배분·지급을 실제로 진행시키는 주체다
@@ -127,8 +136,8 @@ log() { echo "[deploy:${TARGET}] $*"; }
 compose_services() {
   case "$1" in
     backend) echo "backend celery-worker celery-beat events" ;;
-    frontend|operator|classroom) echo "$1" ;;
-    *) echo "알 수 없는 빌드 대상: $1 (backend|frontend|operator|classroom)" >&2; return 2 ;;
+    frontend|operator|classroom|search) echo "$1" ;;
+    *) echo "알 수 없는 빌드 대상: $1 (backend|frontend|operator|classroom|search)" >&2; return 2 ;;
   esac
 }
 
@@ -226,12 +235,14 @@ cmd_plan() {
   BUILD_FRONTEND=false
   BUILD_OPERATOR=false
   BUILD_CLASSROOM=false
+  BUILD_SEARCH=false
 
   if [ "$EVERYTHING" = true ]; then
     BUILD_BACKEND=true
     BUILD_FRONTEND=true
     BUILD_OPERATOR=true
     BUILD_CLASSROOM=true
+    BUILD_SEARCH=true
   else
     # 한 경로가 여러 서비스를 건드린다. 그 팬아웃이 이 스크립트의 전부다.
     if touched '^(backend/|docker/backend\.Dockerfile$)'; then
@@ -253,6 +264,12 @@ cmd_plan() {
       BUILD_CLASSROOM=true
     fi
 
+    # nori 플러그인을 넣은 OpenSearch(#450/#451) — backend 코드와 무관하게
+    # 이 Dockerfile 하나로만 갈린다.
+    if touched '^docker/search\.Dockerfile$'; then
+      BUILD_SEARCH=true
+    fi
+
     # compose 파일 자체가 바뀌면 어느 서비스의 환경이 바뀌었는지 알 수 없다.
     # 전부 다시 세운다.
     if touched "^docker/compose\.${TARGET}\.yaml\$"; then
@@ -261,6 +278,7 @@ cmd_plan() {
       BUILD_FRONTEND=true
       BUILD_OPERATOR=true
       BUILD_CLASSROOM=true
+      BUILD_SEARCH=true
     fi
   fi
 
@@ -288,6 +306,10 @@ cmd_plan() {
   if missing classroom; then
     log "classroom 컨테이너가 없다 — 굽는다."
     BUILD_CLASSROOM=true
+  fi
+  if missing search; then
+    log "search 컨테이너가 없다 — 굽는다."
+    BUILD_SEARCH=true
   fi
 
   # NEXT_PUBLIC_TOSS_CLIENT_KEY 회전 감지 (#112 코드리뷰 지적 3). 이 값은
@@ -326,10 +348,11 @@ cmd_plan() {
     BUILD_FRONTEND=false
     BUILD_OPERATOR=false
     BUILD_CLASSROOM=false
+    BUILD_SEARCH=false
   fi
 
   ANY=false
-  if [ "$BUILD_BACKEND" = true ] || [ "$BUILD_FRONTEND" = true ] || [ "$BUILD_OPERATOR" = true ] || [ "$BUILD_CLASSROOM" = true ]; then
+  if [ "$BUILD_BACKEND" = true ] || [ "$BUILD_FRONTEND" = true ] || [ "$BUILD_OPERATOR" = true ] || [ "$BUILD_CLASSROOM" = true ] || [ "$BUILD_SEARCH" = true ]; then
     ANY=true
   fi
 
@@ -341,6 +364,7 @@ cmd_plan() {
     echo "BUILD_FRONTEND=$BUILD_FRONTEND"
     echo "BUILD_OPERATOR=$BUILD_OPERATOR"
     echo "BUILD_CLASSROOM=$BUILD_CLASSROOM"
+    echo "BUILD_SEARCH=$BUILD_SEARCH"
     echo "PLANNED_COMMIT=$($GIT rev-parse HEAD)"
   } > "$PLAN_FILE"
 
@@ -352,6 +376,7 @@ cmd_plan() {
   echo "  frontend                                      : $(plan_word "$BUILD_FRONTEND")"
   echo "  operator                                      : $(plan_word "$BUILD_OPERATOR")"
   echo "  classroom                                     : $(plan_word "$BUILD_CLASSROOM")"
+  echo "  search                                        : $(plan_word "$BUILD_SEARCH")"
   if [ "$ANY" = false ]; then
     log "바뀐 것이 없다. 배포할 것이 없다."
   fi
@@ -413,12 +438,13 @@ build_planned_in_background() {
   BUILD_LOGS=$(mktemp -d)
   PIDS=""
   LABELS=""
-  for label in backend frontend operator classroom; do
+  for label in backend frontend operator classroom search; do
     case "$label" in
       backend) wanted=$BUILD_BACKEND ;;
       frontend) wanted=$BUILD_FRONTEND ;;
       operator) wanted=$BUILD_OPERATOR ;;
       classroom) wanted=$BUILD_CLASSROOM ;;
+      search) wanted=$BUILD_SEARCH ;;
     esac
     [ "$wanted" = true ] || continue
     cmd_image "$label" > "${BUILD_LOGS}/${label}.log" 2>&1 &
@@ -464,6 +490,15 @@ cmd_up() {
   $COMPOSE up -d db redis
   # 아래 up 은 전부 $UP_FLAGS(registry 면 --no-build)를 붙인다.
 
+  if [ "$BUILD_SEARCH" = true ]; then
+    # backend·celery-worker·celery-beat·events보다 먼저 올린다 — 그 넷의
+    # compose depends_on이 search를 "시작 순서"로만 기다린다(헬스는 아니다,
+    # compose.staging/prod.yaml 주석 참고). 검색이 죽어도 backend는 뜬다
+    # (DB 검색으로 물러난다) — 여기서 헬스를 기다리지 않는다.
+    # shellcheck disable=SC2086
+    $COMPOSE up -d --no-deps $UP_FLAGS search
+  fi
+
   if [ "$BUILD_BACKEND" = true ]; then
     # **넷을 함께 바꾼다.** backend 만 갈면 워커·beat·events 가 옛 코드로
     # 남는다 — 앞의 둘은 스캔으로 상태를 진행시키는 주체고, events 는 강의실
@@ -492,7 +527,7 @@ cmd_verify() {
   # 부팅 거부는 이 저장소가 **의도한** 동작이다(#83, #96) — 어댑터 값이나 OAuth
   # 자격증명이 풀리지 않으면 컨테이너가 뜨지 않는다. 그러니 "떴다"를 실제로
   # 확인해야 하고, 죽었으면 로그를 남겨야 원인을 안다.
-  for svc in backend celery-worker celery-beat events frontend operator classroom; do
+  for svc in backend celery-worker celery-beat events frontend operator classroom search; do
     cid=$($COMPOSE ps -q "$svc" 2>/dev/null | head -1)
     if [ -z "$cid" ]; then
       echo "[$svc] 컨테이너가 없다"
@@ -526,17 +561,29 @@ cmd_verify() {
 # events 도 같은 식으로 확인한다(ADR-0046, #380) — URLconf 는 backend 와 완전히
 # 같은 코드이므로 `/api/health` 가 여기서도 그대로 선다(CLAUDE.md). 인증이 필요한
 # SSE 엔드포인트 자체를 열어 보지는 않는다 — 프로세스가 요청을 받는지만 본다.
+#
+# **search 는 Django 가 아니다**(#450/#451) — Host 헤더도 `/api/health` 도 없다.
+# OpenSearch 자신의 클러스터 헬스 엔드포인트를 컨테이너 안에서 직접 친다(dev
+# `search` 프로필의 healthcheck와 같은 것).
 cmd_health() {
   case "$1" in
-    backend) port=8000 ;;
-    events) port=8001 ;;
-    *) echo "알 수 없는 헬스 체크 대상: $1 (backend|events)"; exit 2 ;;
+    backend|events|search) ;;
+    *) echo "알 수 없는 헬스 체크 대상: $1 (backend|events|search)"; exit 2 ;;
   esac
   i=0
   while [ "$i" -lt 30 ]; do
-    if $COMPOSE exec -T "$1" python -c "import os,urllib.request,sys; host=(os.environ.get('DJANGO_ALLOWED_HOSTS') or '').split(',')[0].strip() or '127.0.0.1'; req=urllib.request.Request('http://127.0.0.1:${port}/api/health', headers={'Host': host, 'X-Forwarded-Proto': 'https'}); sys.exit(0 if urllib.request.urlopen(req, timeout=3).status==200 else 1)" 2>/dev/null; then
-      log "$1 응답 확인"
-      return 0
+    if [ "$1" = search ]; then
+      if $COMPOSE exec -T search curl -sf http://127.0.0.1:9200/_cluster/health >/dev/null 2>&1; then
+        log "$1 응답 확인"
+        return 0
+      fi
+    else
+      port=8000
+      [ "$1" = events ] && port=8001
+      if $COMPOSE exec -T "$1" python -c "import os,urllib.request,sys; host=(os.environ.get('DJANGO_ALLOWED_HOSTS') or '').split(',')[0].strip() or '127.0.0.1'; req=urllib.request.Request('http://127.0.0.1:${port}/api/health', headers={'Host': host, 'X-Forwarded-Proto': 'https'}); sys.exit(0 if urllib.request.urlopen(req, timeout=3).status==200 else 1)" 2>/dev/null; then
+        log "$1 응답 확인"
+        return 0
+      fi
     fi
     i=$((i + 1))
     sleep 5
@@ -544,6 +591,20 @@ cmd_health() {
   echo "$1 가 150초 안에 응답하지 않았다"
   $COMPOSE logs --tail 120 "$1" || true
   exit 1
+}
+
+# ------------------------------------------------------------ 검색 재색인
+
+# 검색이나 backend 를 바꿔 끼운 뒤 부른다(부모 #444 스펙 "다시 띄운 뒤에는 전체
+# 재색인을 한 번 돌린다"). 스캔 등록부의 `contest-search-reindex`는 실제
+# 벽시계로 하루에 한 번만 도는 안전망이라(`contests/search_scan.py`, 반복
+# 배포마다 매번 다시 도는 것을 막는 장치다) 배포 직후 즉시 맞추려면 그
+# 하루 제한을 보지 않는 관리 명령을 직접 부른다.
+cmd_reindex_search() {
+  log "검색 전체 재색인"
+  if ! $COMPOSE exec -T backend python manage.py rebuild_contest_search_index; then
+    echo "검색 전체 재색인이 실패했다 — 배포는 계속한다(다음 배포나 사람이 다시 돌려야 한다)."
+  fi
 }
 
 # --------------------------------------------------- 배포 표식을 옮긴다
@@ -575,7 +636,7 @@ case "$COMMAND" in
   preflight) cmd_preflight ;;
   plan) cmd_plan ;;
   image|pull|build)
-    [ -n "$ARG" ] || { echo "$COMMAND 에는 서비스가 필요하다 (backend|frontend|operator|classroom)"; exit 2; }
+    [ -n "$ARG" ] || { echo "$COMMAND 에는 서비스가 필요하다 (backend|frontend|operator|classroom|search)"; exit 2; }
     compose_services "$ARG" >/dev/null
     case "$COMMAND" in
       image) cmd_image "$ARG" ;;
@@ -586,9 +647,10 @@ case "$COMMAND" in
   up) cmd_up ;;
   verify) cmd_verify ;;
   health)
-    [ -n "$ARG" ] || { echo "health 에는 서비스가 필요하다 (backend|events)"; exit 2; }
+    [ -n "$ARG" ] || { echo "health 에는 서비스가 필요하다 (backend|events|search)"; exit 2; }
     cmd_health "$ARG"
     ;;
+  reindex) cmd_reindex_search ;;
   mark) cmd_mark ;;
   all)
     cmd_preflight
@@ -600,11 +662,15 @@ case "$COMMAND" in
       cmd_verify
       cmd_health backend
       cmd_health events
+      cmd_health search
+      if [ "$BUILD_SEARCH" = true ] || [ "$BUILD_BACKEND" = true ]; then
+        cmd_reindex_search
+      fi
     fi
     cmd_mark
     ;;
   *)
-    echo "알 수 없는 명령: $COMMAND (preflight|plan|image|pull|build|up|verify|health|mark|all)"
+    echo "알 수 없는 명령: $COMMAND (preflight|plan|image|pull|build|up|verify|health|reindex|mark|all)"
     exit 2
     ;;
 esac

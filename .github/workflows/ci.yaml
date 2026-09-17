@@ -249,6 +249,9 @@ jobs:
       # #380 — 이벤트 버스도 배포 부팅 가드 대상이 됐다. #193 과 똑같이 스텁(StubEventBus)은
       # 저장소에 들어갔는데 이 잡의 env 만 빠져 main 에서 이 잡이 빨갛게 났다(8ffa788).
       EVENT_BUS_ADAPTER_MODE: tests.adapter_stubs.StubEventBus
+      # #450/#451 — 검색 어댑터도 배포 부팅 가드 대상이 됐다. #193·#380 과 같은
+      # 이유로 이 잡의 env 에도 채운다 — 빠지면 이 잡이 빨갛게 난다.
+      SEARCH_ADAPTER_MODE: tests.adapter_stubs.StubContestSearchAdapter
       # #89: RealAlimtalkAdapter/RealSmsAdapter/RealLmsAdapter는 저장소에 없는
       # 클래스였다 — 그 사실이 부팅 가드 없이는 드러나지 않았다. 실물 벤더
       # 어댑터(#51, notifications.adapters_aligo)는 이제 존재하지만, 이 잡은
@@ -1572,6 +1575,10 @@ jobs:
           - { service: frontend, dsn: FRONTEND, tag: staging, target: runner, paths: 'frontend packages package.json pnpm-workspace.yaml pnpm-lock.yaml docker/frontend.Dockerfile' }
           - { service: operator, dsn: OPERATOR, tag: staging, target: runner, paths: 'operator packages package.json pnpm-workspace.yaml pnpm-lock.yaml docker/operator.Dockerfile' }
           - { service: classroom, dsn: CLASSROOM, tag: staging, target: runner, paths: 'classroom packages package.json pnpm-workspace.yaml pnpm-lock.yaml docker/classroom.Dockerfile' }
+          # nori 플러그인을 넣은 OpenSearch(#450/#451, 부모 #444 스펙). backend와
+          # 같은 원칙으로 아키텍처로만 가른다 — 환경별로 굳는 값이 없다(Next
+          # 앱이 아니다). 소스는 이 Dockerfile 하나뿐이다.
+          - { service: search, dsn: SEARCH, tag: amd64, target: '', paths: 'docker/search.Dockerfile' }
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1651,6 +1658,7 @@ jobs:
           - { service: frontend, dsn: FRONTEND, tag: prod, target: runner, paths: 'frontend packages package.json pnpm-workspace.yaml pnpm-lock.yaml docker/frontend.Dockerfile' }
           - { service: operator, dsn: OPERATOR, tag: prod, target: runner, paths: 'operator packages package.json pnpm-workspace.yaml pnpm-lock.yaml docker/operator.Dockerfile' }
           - { service: classroom, dsn: CLASSROOM, tag: prod, target: runner, paths: 'classroom packages package.json pnpm-workspace.yaml pnpm-lock.yaml docker/classroom.Dockerfile' }
+          - { service: search, dsn: SEARCH, tag: arm64, target: '', paths: 'docker/search.Dockerfile' }
     steps:
       - uses: actions/checkout@v4
         with:

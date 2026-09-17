@@ -47,6 +47,8 @@ class ContestsConfig(AppConfig):
         # 관심사지만, 이 앱의 ready()가 이미 지연 임포트 원칙(모델을 여기서
         # 불러오는 이유)을 지키고 있으므로 같은 자리에 등록한다.
         register(checks.check_llm_requirement_chat_adapter_mode)
+        # SEARCH_ADAPTER_MODE 부팅 가드(#451) — 같은 자리, 같은 이유.
+        register(checks.check_search_adapter_mode)
 
         from datetime import timedelta
 
@@ -100,3 +102,35 @@ class ContestsConfig(AppConfig):
         from .view_flush import CONTEST_VIEW_FLUSH_SCAN
 
         register_scan(CONTEST_VIEW_FLUSH_SCAN)
+
+        # 공모전 검색 전체 재색인 스캔(#450, 부모 #444 스펙) — 단건 색인은
+        # 아래 신호 수신자가 저장·변경마다 큐에 넣지만, 이 스캔이 매일 전체를
+        # 다시 맞추는 안전망이다.
+        from .search_scan import CONTEST_SEARCH_REINDEX_SCAN
+
+        register_scan(CONTEST_SEARCH_REINDEX_SCAN)
+
+        # 공모전 검색 색인 맞추기(#450) — Contest 저장·요구형태 변경·개최자
+        # 표시 이름 변경마다 그 공모전(들)을 다시 색인 큐에 넣는다
+        # (`contests/indexing.py` 모듈 docstring 참고).
+        from django.db.models.signals import m2m_changed, post_save
+
+        from . import indexing
+        from .models import Contest
+
+        post_save.connect(
+            indexing.contest_saved, sender=Contest, dispatch_uid="contests.indexing.contest_saved"
+        )
+        m2m_changed.connect(
+            indexing.contest_deliverable_types_changed,
+            sender=Contest.deliverable_types.through,
+            dispatch_uid="contests.indexing.deliverable_types_changed",
+        )
+
+        from accounts.models import SponsorProfile
+
+        post_save.connect(
+            indexing.sponsor_display_name_saved,
+            sender=SponsorProfile,
+            dispatch_uid="contests.indexing.sponsor_display_name_saved",
+        )

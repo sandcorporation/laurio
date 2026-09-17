@@ -140,3 +140,16 @@ class StubEventBus:
 
     def subscribe(self, recipient_id: int):
         raise NotImplementedError("배포 가드 검증 전용 stub — 실제로 호출되면 안 된다.")
+
+
+class StubContestSearchAdapter:
+    """`contests.search.ContestSearchAdapter` 계약을 구조적으로 만족한다(#451)."""
+
+    def search(self, *, query: str, category: int | None = None, deliverable_type: int | None = None):
+        raise NotImplementedError("배포 가드 검증 전용 stub — 실제로 호출되면 안 된다.")
+
+    def index_or_remove(self, contest_id: int) -> None:
+        raise NotImplementedError("배포 가드 검증 전용 stub — 실제로 호출되면 안 된다.")
+
+    def rebuild(self) -> None:
+        raise NotImplementedError("배포 가드 검증 전용 stub — 실제로 호출되면 안 된다.")
