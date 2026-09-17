@@ -12,215 +12,54 @@
 어댑터로 강제한다(#340, ADR-0043). 기본값(fake)이 되는 `FakeClassroomScoringAdapter`
 경로는 별도 파일(`test_classroom_scoring_fake_adapter.py`)이 덮는다 —
 "결정적이고 네트워크가 없다"는 이 파일의 관심사가 아니다.
+
+**공용 시나리오 빌더(#433) 위로 옮겼다** — `tests/classroom_scenarios.py` 참고.
 """
 
 from __future__ import annotations
 
-import io
-import json
-import uuid
-import zipfile
-
 import pytest
-from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.test import override_settings
 
 from classroom.models import ClassroomScore, ClassroomScoringAttempt, ClassroomSubmission
 from notifications.models import Notification, NotificationType
-from storage.adapters.fake import FakeStorageAdapter
-
-CLASSES_URL = "/api/classroom/classes"
-SCAN_URL = "/api/internal/scans/classroom-submission-scoring"
+from tests.classroom_scenarios import (
+    create_class,
+    create_open_problem,
+    force_real_scoring_adapter,
+    join_class,
+    login,
+    mine,
+    respond_with_key_rejection,
+    respond_with_permanent_failure,
+    respond_with_transient_failure,
+    respond_with_verdict,
+    run_scan,
+    submit_repository,
+    submit_source,
+    user_id,
+)
 
 
 @pytest.fixture(autouse=True)
 def _force_real_scoring_adapter():
-    with override_settings(CLASSROOM_SCORING_ADAPTER_MODE="core.llm_scoring.OpenAIScoringAdapter"):
+    with force_real_scoring_adapter():
         yield
 
 
-def _internal_headers() -> dict:
-    return {"HTTP_X_INTERNAL_TOKEN": settings.INTERNAL_API_TOKEN}
-
-
-def _login(client, uid="instructor-1", email=None):
-    email = email or f"{uid}@example.com"
-    response = client.post(
-        "/api/auth/social/kakao/login",
-        data={"access_token": f"{uid}:{email}"},
-        content_type="application/json",
-    )
-    assert response.status_code == 200
-    return response.json()
-
-
-def _auth_header(access: str) -> dict:
-    return {"HTTP_AUTHORIZATION": f"Bearer {access}"}
-
-
-def _create_class(client, access: str, name: str = "웹 스터디") -> int:
-    response = client.post(
-        CLASSES_URL,
-        data={"name": name, "instructor_display_name": "강사"},
-        content_type="application/json",
-        **_auth_header(access),
-    )
-    assert response.status_code == 201
-    return response.json()["id"]
-
-
-def _set_key(client, access: str, class_id: int, key: str = "sk-test-instructor-key") -> None:
-    response = client.put(
-        f"{CLASSES_URL}/{class_id}/openai-key",
-        data={"api_key": key},
-        content_type="application/json",
-        **_auth_header(access),
-    )
-    assert response.status_code == 200
-
-
-def _create_open_problem(client, access: str, class_id: int, submission_format: str = "repository") -> int:
-    created = client.post(
-        f"{CLASSES_URL}/{class_id}/problems",
-        data={"title": "1주차", "submission_formats": [submission_format]},
-        content_type="application/json",
-        **_auth_header(access),
-    )
-    assert created.status_code == 201
-    problem_id = created.json()["id"]
-
-    checklist = client.post(
-        f"{CLASSES_URL}/{class_id}/problems/{problem_id}/checklist-items",
-        data={"label": "테스트가 있다", "required": True},
-        content_type="application/json",
-        **_auth_header(access),
-    )
-    assert checklist.status_code == 201
-    item_id = checklist.json()["id"]
-
-    opened = client.post(
-        f"{CLASSES_URL}/{class_id}/problems/{problem_id}/open",
-        content_type="application/json",
-        **_auth_header(access),
-    )
-    assert opened.status_code == 200
-    return problem_id, item_id
-
-
-def _join_code(client, access: str, class_id: int) -> str:
-    detail = client.get(f"{CLASSES_URL}/{class_id}", **_auth_header(access))
-    assert detail.status_code == 200
-    return detail.json()["join_code"]
-
-
-def _join(client, access: str, join_code: str, display_name: str = "참여자") -> None:
-    response = client.post(
-        f"/api/classroom/join/{join_code}",
-        data={"display_name": display_name},
-        content_type="application/json",
-        **_auth_header(access),
-    )
-    assert response.status_code == 200
-
-
-def _submit_repository(client, access: str, class_id: int, problem_id: int, url: str) -> dict:
-    response = client.post(
-        f"{CLASSES_URL}/{class_id}/problems/{problem_id}/submissions",
-        data={"value": url, "submission_format": "repository"},
-        content_type="application/json",
-        **_auth_header(access),
-    )
-    assert response.status_code == 201, response.content
-    return response.json()
-
-
-def _zip_bytes(files: dict[str, str]) -> bytes:
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as zf:
-        for path, content in files.items():
-            zf.writestr(path, content)
-    return buf.getvalue()
-
-
-def _submit_source(client, access: str, class_id: int, problem_id: int, object_key: str) -> dict:
-    response = client.post(
-        f"{CLASSES_URL}/{class_id}/problems/{problem_id}/submissions",
-        data={"value": object_key, "content_type": "application/zip", "submission_format": "source"},
-        content_type="application/json",
-        **_auth_header(access),
-    )
-    assert response.status_code == 201, response.content
-    return response.json()
-
-
-def _mine(client, access: str, class_id: int, problem_id: int) -> dict:
-    response = client.get(
-        f"{CLASSES_URL}/{class_id}/problems/{problem_id}/mine", **_auth_header(access)
-    )
-    assert response.status_code == 200
-    return response.json()
-
-
-class _FakeResponse:
-    def __init__(self, status_code: int, json_data) -> None:
-        self.status_code = status_code
-        self._json_data = json_data
-        self.text = json.dumps(json_data) if json_data is not None else ""
-
-    def json(self):
-        if self._json_data is None:
-            raise ValueError("no json body")
-        return self._json_data
-
-
-def _openai_success_body(item_id: int, *, is_met: bool) -> dict:
-    return {
-        "model": "gpt-4o-mini-2024-07-18",
-        "choices": [
-            {
-                "finish_reason": "stop",
-                "message": {
-                    "content": json.dumps(
-                        {
-                            "verdicts": [
-                                {
-                                    "requirement_id": item_id,
-                                    "is_met": is_met,
-                                    "reasoning": "판정 근거",
-                                }
-                            ]
-                        }
-                    )
-                },
-            }
-        ],
-    }
-
-
-def _run_scan(client) -> dict:
-    response = client.post(SCAN_URL, content_type="application/json", **_internal_headers())
-    assert response.status_code == 200, response.content
-    return response.json()
-
-
 def _setup_submission(client, *, submission_format="repository", with_key=True):
-    instructor = _login(client, uid="instructor-1")
-    class_id = _create_class(client, instructor["access"])
-    if with_key:
-        _set_key(client, instructor["access"], class_id)
-    problem_id, item_id = _create_open_problem(client, instructor["access"], class_id, submission_format)
-    participant = _login(client, uid="participant-1")
-    _join(client, participant["access"], _join_code(client, instructor["access"], class_id))
-    submitted = _submit_repository(
-        client, participant["access"], class_id, problem_id, "https://github.com/octocat/hello-world"
-    )
+    instructor = login(client, uid="instructor-1")
+    class_id = create_class(client, instructor["access"], with_key=with_key)
+    problem = create_open_problem(client, instructor["access"], class_id, submission_formats=[submission_format])
+    participant = login(client, uid="participant-1")
+    join_class(client, participant["access"], class_id, instructor_access=instructor["access"])
+    submitted = submit_repository(client, participant["access"], class_id, problem.id)
     return {
         "instructor": instructor,
         "participant": participant,
         "class_id": class_id,
-        "problem_id": problem_id,
-        "item_id": item_id,
+        "problem_id": problem.id,
+        "item_id": problem.item_id,
         "submission_id": submitted["id"],
     }
 
@@ -228,25 +67,22 @@ def _setup_submission(client, *, submission_format="repository", with_key=True):
 def test_submitting_does_not_score_synchronously(client, db):
     ctx = _setup_submission(client)
 
-    mine = _mine(client, ctx["participant"]["access"], ctx["class_id"], ctx["problem_id"])
+    mine_out = mine(client, ctx["participant"]["access"], ctx["class_id"], ctx["problem_id"])
 
-    assert mine["submissions"][0]["status"] == "pending"
+    assert mine_out["submissions"][0]["status"] == "pending"
     assert ClassroomScore.objects.count() == 0
 
 
 def test_scan_scores_a_submission_with_a_key(client, db, monkeypatch):
     ctx = _setup_submission(client)
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: _FakeResponse(200, _openai_success_body(ctx["item_id"], is_met=True)),
-    )
+    respond_with_verdict(monkeypatch, ctx["item_id"], is_met=True)
 
-    result = _run_scan(client)
+    result = run_scan(client)
 
     assert result["count"] == 1
     assert ClassroomScore.objects.filter(submission_id=ctx["submission_id"]).exists()
-    mine = _mine(client, ctx["participant"]["access"], ctx["class_id"], ctx["problem_id"])
-    submission_out = mine["submissions"][0]
+    mine_out = mine(client, ctx["participant"]["access"], ctx["class_id"], ctx["problem_id"])
+    submission_out = mine_out["submissions"][0]
     assert submission_out["status"] == "scored"
     assert submission_out["score"]["reasoning"] == [
         {"checklist_item_id": ctx["item_id"], "is_met": True, "reasoning": "판정 근거"}
@@ -257,14 +93,10 @@ def test_scoring_asks_the_model_to_write_reasoning_in_korean(client, db, monkeyp
     # 소스가 영어라 지시가 없으면 실물 모델이 근거를 영어로 쓴다 — 참여자 화면에
     # 그대로 나가는 문장이다. 벤더로 나가는 요청 자체에 그 지시가 실렸는지 본다.
     ctx = _setup_submission(client)
-    sent = []
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: sent.append(k["json"])
-        or _FakeResponse(200, _openai_success_body(ctx["item_id"], is_met=True)),
-    )
+    sent: list = []
+    respond_with_verdict(monkeypatch, ctx["item_id"], is_met=True, capture=sent)
 
-    _run_scan(client)
+    run_scan(client)
 
     messages = {m["role"]: m["content"] for m in sent[0]["messages"]}
     assert "한국어" in messages["user"]
@@ -273,32 +105,26 @@ def test_scoring_asks_the_model_to_write_reasoning_in_korean(client, db, monkeyp
 
 
 def test_scan_skips_a_submission_whose_class_has_no_key(client, db, monkeypatch):
-    called = []
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: called.append(1) or _FakeResponse(200, {}),
-    )
+    called: list = []
+    respond_with_verdict(monkeypatch, 0, capture=called)
     ctx = _setup_submission(client, with_key=False)
 
-    result = _run_scan(client)
+    result = run_scan(client)
 
     assert result["count"] == 0
     assert not called
     assert ClassroomScore.objects.count() == 0
     assert ClassroomScoringAttempt.objects.count() == 0
-    mine = _mine(client, ctx["participant"]["access"], ctx["class_id"], ctx["problem_id"])
-    assert mine["submissions"][0]["status"] == "pending"
+    mine_out = mine(client, ctx["participant"]["access"], ctx["class_id"], ctx["problem_id"])
+    assert mine_out["submissions"][0]["status"] == "pending"
 
 
 def test_score_is_created_exactly_once_even_if_scanned_twice(client, db, monkeypatch):
     ctx = _setup_submission(client)
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: _FakeResponse(200, _openai_success_body(ctx["item_id"], is_met=True)),
-    )
+    respond_with_verdict(monkeypatch, ctx["item_id"], is_met=True)
 
-    _run_scan(client)
-    second = _run_scan(client)
+    run_scan(client)
+    second = run_scan(client)
 
     assert second["count"] == 0
     assert ClassroomScore.objects.filter(submission_id=ctx["submission_id"]).count() == 1
@@ -311,16 +137,13 @@ def test_wrong_key_does_not_finalize_a_score_it_waits_for_a_new_key(client, db, 
     검증은 `test_classroom_scoring_key_rejection.py`)."""
 
     ctx = _setup_submission(client)
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: _FakeResponse(401, {"error": {"message": "Incorrect API key"}}),
-    )
+    respond_with_key_rejection(monkeypatch, status_code=401, message="Incorrect API key")
 
-    _run_scan(client)
+    run_scan(client)
 
     assert not ClassroomScore.objects.filter(submission_id=ctx["submission_id"]).exists()
-    mine = _mine(client, ctx["participant"]["access"], ctx["class_id"], ctx["problem_id"])
-    submission_out = mine["submissions"][0]
+    mine_out = mine(client, ctx["participant"]["access"], ctx["class_id"], ctx["problem_id"])
+    submission_out = mine_out["submissions"][0]
     assert submission_out["status"] == "pending"
     assert submission_out["pending_reason"] == "no_api_key"
 
@@ -331,18 +154,9 @@ def test_non_auth_permanent_failure_still_finalizes_immediately(client, db, monk
     즉시 전체 미달로 끝난다."""
 
     ctx = _setup_submission(client)
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: _FakeResponse(
-            200,
-            {
-                "model": "gpt-4o-mini-2024-07-18",
-                "choices": [{"finish_reason": "length", "message": {"content": "{}"}}],
-            },
-        ),
-    )
+    respond_with_permanent_failure(monkeypatch)
 
-    _run_scan(client)
+    run_scan(client)
 
     score = ClassroomScore.objects.get(submission_id=ctx["submission_id"])
     assert score.model_version != "gpt-4o-mini-2024-07-18"
@@ -355,12 +169,9 @@ def test_transient_failures_retry_up_to_the_cap_then_finalize(client, db, monkey
     for _ in range(4):
         ClassroomScoringAttempt.objects.create(submission=submission, error="네트워크 순단", permanent=False)
 
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: _FakeResponse(500, {"error": {"message": "internal error"}}),
-    )
+    respond_with_transient_failure(monkeypatch, status_code=500, message="internal error")
 
-    _run_scan(client)
+    run_scan(client)
 
     assert ClassroomScoringAttempt.objects.filter(submission=submission).count() == 5
     score = ClassroomScore.objects.get(submission=submission)
@@ -369,82 +180,72 @@ def test_transient_failures_retry_up_to_the_cap_then_finalize(client, db, monkey
 
 def test_repository_submission_is_scored_from_the_cloned_source(client, db, monkeypatch):
     ctx = _setup_submission(client, submission_format="repository")
-    captured_prompts = []
+    captured_prompts: list = []
+    respond_with_verdict(monkeypatch, ctx["item_id"], is_met=True, capture=captured_prompts)
 
-    def _capture(url, *, headers, json, timeout):
-        captured_prompts.append(json["messages"][1]["content"])
-        return _FakeResponse(200, _openai_success_body(ctx["item_id"], is_met=True))
-
-    monkeypatch.setattr("core.llm_scoring.requests.post", _capture)
-
-    _run_scan(client)
+    run_scan(client)
 
     assert len(captured_prompts) == 1
-    assert "app.py" in captured_prompts[0]
+    assert "app.py" in captured_prompts[0]["messages"][1]["content"]
 
 
 def test_score_appears_in_the_scan_result_rows(client, db, monkeypatch):
     ctx = _setup_submission(client)
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: _FakeResponse(200, _openai_success_body(ctx["item_id"], is_met=True)),
-    )
+    respond_with_verdict(monkeypatch, ctx["item_id"], is_met=True)
 
-    result = _run_scan(client)
+    result = run_scan(client)
 
     assert result["rows"][0]["status"] == "scored"
     assert result["rows"][0]["submission_id"] == ctx["submission_id"]
 
 
 def test_source_submission_is_scored_from_the_uploaded_object(client, db, monkeypatch):
-    instructor = _login(client, uid="instructor-1")
-    class_id = _create_class(client, instructor["access"])
-    _set_key(client, instructor["access"], class_id)
-    problem_id, item_id = _create_open_problem(client, instructor["access"], class_id, "source")
-    participant = _login(client, uid="participant-1")
-    _join(client, participant["access"], _join_code(client, instructor["access"], class_id))
-    participant_user_id = get_user_model().objects.get(username="kakao:participant-1").id
+    instructor = login(client, uid="instructor-1")
+    class_id = create_class(client, instructor["access"])
+    problem = create_open_problem(client, instructor["access"], class_id, submission_formats=["source"])
+    participant = login(client, uid="participant-1")
+    join_class(client, participant["access"], class_id, instructor_access=instructor["access"])
+    submitted = submit_source(
+        client,
+        participant["access"],
+        class_id,
+        problem.id,
+        participant_user_id=user_id("participant-1"),
+        files={"main.py": "SOURCE_MARKER\n"},
+    )
 
-    object_key = f"classroom-submission:{problem_id}:{participant_user_id}:source/{uuid.uuid4().hex}"
-    FakeStorageAdapter().write_object(object_key, _zip_bytes({"main.py": "SOURCE_MARKER\n"}))
-    submitted = _submit_source(client, participant["access"], class_id, problem_id, object_key)
+    captured_prompts: list = []
+    respond_with_verdict(monkeypatch, problem.item_id, is_met=True, capture=captured_prompts)
 
-    captured_prompts = []
-
-    def _capture(url, *, headers, json, timeout):
-        captured_prompts.append(json["messages"][1]["content"])
-        return _FakeResponse(200, _openai_success_body(item_id, is_met=True))
-
-    monkeypatch.setattr("core.llm_scoring.requests.post", _capture)
-
-    result = _run_scan(client)
+    result = run_scan(client)
 
     assert result["count"] == 1
-    assert "SOURCE_MARKER" in captured_prompts[0]
+    assert "SOURCE_MARKER" in captured_prompts[0]["messages"][1]["content"]
     score = ClassroomScore.objects.get(submission_id=submitted["id"])
-    assert score.reasoning == [{"checklist_item_id": item_id, "is_met": True, "reasoning": "판정 근거"}]
+    assert score.reasoning == [{"checklist_item_id": problem.item_id, "is_met": True, "reasoning": "판정 근거"}]
 
 
 def test_source_not_yet_in_storage_retries_instead_of_failing(client, db, monkeypatch):
-    instructor = _login(client, uid="instructor-1")
-    class_id = _create_class(client, instructor["access"])
-    _set_key(client, instructor["access"], class_id)
-    problem_id, item_id = _create_open_problem(client, instructor["access"], class_id, "source")
-    participant = _login(client, uid="participant-1")
-    _join(client, participant["access"], _join_code(client, instructor["access"], class_id))
-    participant_user_id = get_user_model().objects.get(username="kakao:participant-1").id
+    instructor = login(client, uid="instructor-1")
+    class_id = create_class(client, instructor["access"])
+    problem = create_open_problem(client, instructor["access"], class_id, submission_formats=["source"])
+    participant = login(client, uid="participant-1")
+    join_class(client, participant["access"], class_id, instructor_access=instructor["access"])
 
     # 스토리지에 아직 쓰지 않은 object_key — 업로드가 지연된 상황을 흉내낸다.
-    object_key = f"classroom-submission:{problem_id}:{participant_user_id}:source/{uuid.uuid4().hex}"
-    submitted = _submit_source(client, participant["access"], class_id, problem_id, object_key)
-
-    called = []
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: called.append(1) or _FakeResponse(200, _openai_success_body(item_id, is_met=True)),
+    submitted = submit_source(
+        client,
+        participant["access"],
+        class_id,
+        problem.id,
+        participant_user_id=user_id("participant-1"),
+        write_to_storage=False,
     )
 
-    result = _run_scan(client)
+    called: list = []
+    respond_with_verdict(monkeypatch, problem.item_id, is_met=True, capture=called)
+
+    result = run_scan(client)
 
     # 후보로는 집혔지만("아직" 상태를 남기는 것도 처리다) LLM은 부르지 않는다 —
     # 소스가 없는 채로 채점을 시도해 점수를 만들면 안 된다.
@@ -469,12 +270,9 @@ def _instructor_user_id():
 
 def test_scoring_completion_notifies_the_submitter_on_pass(client, db, monkeypatch):
     ctx = _setup_submission(client)
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: _FakeResponse(200, _openai_success_body(ctx["item_id"], is_met=True)),
-    )
+    respond_with_verdict(monkeypatch, ctx["item_id"], is_met=True)
 
-    _run_scan(client)
+    run_scan(client)
 
     notification = Notification.objects.get(
         notification_type=NotificationType.CLASSROOM_SUBMISSION_SCORED
@@ -489,12 +287,9 @@ def test_scoring_completion_notifies_the_submitter_on_pass(client, db, monkeypat
 
 def test_scoring_completion_notifies_the_submitter_on_fail(client, db, monkeypatch):
     ctx = _setup_submission(client)
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: _FakeResponse(200, _openai_success_body(ctx["item_id"], is_met=False)),
-    )
+    respond_with_verdict(monkeypatch, ctx["item_id"], is_met=False)
 
-    _run_scan(client)
+    run_scan(client)
 
     notification = Notification.objects.get(
         notification_type=NotificationType.CLASSROOM_SUBMISSION_SCORED
@@ -508,18 +303,9 @@ def test_permanent_failure_finalization_also_notifies_the_submitter(client, db, 
     타는 키 거부)이 아니라 잘린 응답으로 영구 실패를 흉내낸다."""
 
     ctx = _setup_submission(client)
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: _FakeResponse(
-            200,
-            {
-                "model": "gpt-4o-mini-2024-07-18",
-                "choices": [{"finish_reason": "length", "message": {"content": "{}"}}],
-            },
-        ),
-    )
+    respond_with_permanent_failure(monkeypatch)
 
-    _run_scan(client)
+    run_scan(client)
 
     notification = Notification.objects.get(
         notification_type=NotificationType.CLASSROOM_SUBMISSION_SCORED
@@ -530,12 +316,9 @@ def test_permanent_failure_finalization_also_notifies_the_submitter(client, db, 
 
 def test_notification_is_never_sent_to_the_instructor(client, db, monkeypatch):
     ctx = _setup_submission(client)
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: _FakeResponse(200, _openai_success_body(ctx["item_id"], is_met=True)),
-    )
+    respond_with_verdict(monkeypatch, ctx["item_id"], is_met=True)
 
-    _run_scan(client)
+    run_scan(client)
 
     assert not Notification.objects.filter(
         notification_type=NotificationType.CLASSROOM_SUBMISSION_SCORED,
@@ -547,12 +330,9 @@ def test_notification_is_not_dispatched_to_any_channel(client, db, monkeypatch):
     """#301과 같은 규칙 — 문자로 나가지 않는다."""
 
     ctx = _setup_submission(client)
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: _FakeResponse(200, _openai_success_body(ctx["item_id"], is_met=True)),
-    )
+    respond_with_verdict(monkeypatch, ctx["item_id"], is_met=True)
 
-    _run_scan(client)
+    run_scan(client)
 
     notification = Notification.objects.get(
         notification_type=NotificationType.CLASSROOM_SUBMISSION_SCORED
@@ -562,11 +342,11 @@ def test_notification_is_not_dispatched_to_any_channel(client, db, monkeypatch):
 
 
 def test_joining_a_class_creates_no_notification(client, db):
-    instructor = _login(client, uid="instructor-1")
-    class_id = _create_class(client, instructor["access"])
-    participant = _login(client, uid="participant-1")
+    instructor = login(client, uid="instructor-1")
+    class_id = create_class(client, instructor["access"])
+    participant = login(client, uid="participant-1")
 
-    _join(client, participant["access"], _join_code(client, instructor["access"], class_id))
+    join_class(client, participant["access"], class_id, instructor_access=instructor["access"])
 
     assert not Notification.objects.filter(
         notification_type=NotificationType.CLASSROOM_SUBMISSION_SCORED
@@ -575,24 +355,18 @@ def test_joining_a_class_creates_no_notification(client, db):
 
 def test_each_attempt_gets_its_own_notification(client, db, monkeypatch):
     ctx = _setup_submission(client)
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: _FakeResponse(200, _openai_success_body(ctx["item_id"], is_met=True)),
-    )
-    _run_scan(client)
+    respond_with_verdict(monkeypatch, ctx["item_id"], is_met=True)
+    run_scan(client)
 
-    second = _submit_repository(
+    second = submit_repository(
         client,
         ctx["participant"]["access"],
         ctx["class_id"],
         ctx["problem_id"],
         "https://github.com/octocat/hello-world-again",
     )
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: _FakeResponse(200, _openai_success_body(ctx["item_id"], is_met=False)),
-    )
-    _run_scan(client)
+    respond_with_verdict(monkeypatch, ctx["item_id"], is_met=False)
+    run_scan(client)
 
     notifications = Notification.objects.filter(
         notification_type=NotificationType.CLASSROOM_SUBMISSION_SCORED
@@ -611,16 +385,13 @@ def test_notification_creation_failure_does_not_prevent_scoring(client, db, monk
     이미 커밋된 채로 남고, 스캔 결과도 정상 종결(`scored`)로 보고된다."""
 
     ctx = _setup_submission(client)
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: _FakeResponse(200, _openai_success_body(ctx["item_id"], is_met=True)),
-    )
+    respond_with_verdict(monkeypatch, ctx["item_id"], is_met=True)
     monkeypatch.setattr(
         "notifications.services.create_notification",
         lambda **kwargs: (_ for _ in ()).throw(RuntimeError("notification backend is down")),
     )
 
-    result = _run_scan(client)
+    result = run_scan(client)
 
     assert result["count"] == 1
     assert result["rows"][0]["status"] == "scored"
