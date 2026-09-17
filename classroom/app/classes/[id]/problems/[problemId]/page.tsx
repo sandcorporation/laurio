@@ -17,22 +17,19 @@ import {
   PageShell,
   buttonClass,
 } from "@/app/components/ui";
-import {
-  GradingGuidelineEditor,
-  isGradingGuidelineValid,
-  type GradingGuidelineValue,
-} from "@/app/components/GradingGuidelineEditor";
+import { isGradingGuidelineValid, type GradingGuidelineValue } from "@/app/components/GradingGuidelineEditor";
 import { MarkdownEditor } from "@/app/components/MarkdownEditor";
 import { ProblemParticipantView } from "@/app/components/ProblemParticipantView";
+import { ProblemSettingsForm } from "@/app/components/ProblemSettingsForm";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
-import { BackendError } from "@/lib/backend/client";
 import { selectCopyTargets } from "@/lib/classes/copy-targets";
 import { isDeleteConfirmationTyped } from "@/lib/classes/delete-confirmation";
 import { useClass } from "@/lib/classes/use-class";
 import { useMyClasses } from "@/lib/classes/use-my-classes";
+import { useMutationRequest } from "@/lib/mutations/use-mutation-request";
 import { publishProblemAsTemplate, takedownProblemTemplate } from "@/lib/problem-templates/api";
 import {
   copyProblem,
@@ -51,7 +48,6 @@ import {
 } from "@/lib/problems/api";
 import { useProblem } from "@/lib/problems/use-problem";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
-import { isSelectedModelReasoning, REASONING_EFFORT_OPTIONS } from "@/lib/scoring/reasoning";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
 import { liveTemplateFrom, type LiveTemplate } from "@/lib/problem-templates/live-state";
 
@@ -89,11 +85,10 @@ function DeleteProblemCard({
   const router = useRouter();
   const [confirming, setConfirming] = useState(false);
   const [typedTitle, setTypedTitle] = useState("");
-  const [deleting, setDeleting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const deleteMutation = useMutationRequest();
 
   function openConfirm() {
-    setError(null);
+    deleteMutation.setError(null);
     setTypedTitle("");
     setConfirming(true);
   }
@@ -101,19 +96,14 @@ function DeleteProblemCard({
   function cancel() {
     setConfirming(false);
     setTypedTitle("");
-    setError(null);
+    deleteMutation.setError(null);
   }
 
-  async function handleDelete() {
-    setError(null);
-    setDeleting(true);
-    try {
-      await deleteProblem(classId, problemId);
-      router.push(`/classes/${classId}`);
-    } catch (err) {
-      setError(err instanceof BackendError ? err.message : "문제를 지우지 못했습니다.");
-      setDeleting(false);
-    }
+  function handleDelete() {
+    void deleteMutation.run(() => deleteProblem(classId, problemId), {
+      fallbackMessage: "문제를 지우지 못했습니다.",
+      onSuccess: () => router.push(`/classes/${classId}`),
+    });
   }
 
   if (isArchived) {
@@ -190,16 +180,16 @@ function DeleteProblemCard({
                 type="button"
                 data-testid="delete-problem-confirm"
                 onClick={handleDelete}
-                disabled={!isDeleteConfirmationTyped(problem.title, typedTitle) || deleting}
+                disabled={!isDeleteConfirmationTyped(problem.title, typedTitle) || deleteMutation.pending}
                 className={buttonClass("dangerFilled", "sm")}
               >
-                {deleting ? "지우는 중..." : "정말 삭제"}
+                {deleteMutation.pending ? "지우는 중..." : "정말 삭제"}
               </button>
               <button
                 type="button"
                 data-testid="delete-problem-cancel"
                 onClick={cancel}
-                disabled={deleting}
+                disabled={deleteMutation.pending}
                 className={buttonClass("secondary", "sm")}
               >
                 취소
@@ -207,9 +197,9 @@ function DeleteProblemCard({
             </div>
           </div>
         )}
-        {error ? (
+        {deleteMutation.error ? (
           <ErrorNote>
-            <span data-testid="delete-problem-error">{error}</span>
+            <span data-testid="delete-problem-error">{deleteMutation.error}</span>
           </ErrorNote>
         ) : null}
       </div>
@@ -240,31 +230,32 @@ export default function EditProblemPage() {
     grading_strictness: "normal",
     grading_guideline_text: "",
   });
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  // 「이 모델로 다시 시도」(#437) — 본문 저장(saving/error)과 별개 상태다,
-  // 모델 칸 옆의 작은 버튼 하나가 이 요청만 보낸다.
-  const [retryingModel, setRetryingModel] = useState(false);
-  const [retryModelError, setRetryModelError] = useState<string | null>(null);
+  // 본문 저장(제목·설명·제출 형식·채점 모델·추론 강도·채점 지침) — 공용
+  // 변경 도우미(#442)를 거친다. 오류·불러오는 중 표시가 자리마다 갈려
+  // 아래 나머지 변경도 각자 자기 훅 인스턴스를 든다.
+  const mainSave = useMutationRequest();
+  // 「이 모델로 다시 시도」(#437) — 본문 저장과 별개 상태다, 모델 칸 옆의
+  // 작은 버튼 하나가 이 요청만 보낸다.
+  const retryModelMutation = useMutationRequest();
 
   const [newItemLabel, setNewItemLabel] = useState("");
   const [newItemRequired, setNewItemRequired] = useState(true);
-  const [checklistError, setChecklistError] = useState<string | null>(null);
-  const [openError, setOpenError] = useState<string | null>(null);
+  // 체크리스트 조작(추가·항목 저장·필수 토글·삭제·순서 바꾸기·문법 검사
+  // 켬끔)은 오류 표시 자리(`checklist-error`)를 공유해 한 훅으로 묶는다.
+  const checklistMutation = useMutationRequest();
+  const openMutation = useMutationRequest();
   // 「숨기기」는 한 번 더 확인을 받는다(#405 AC) — 이미 낸 참여자가 어떻게
   // 되는지 알고 누르게 하기 위해서다. 다른 버튼들과 달리 클릭 한 번으로
   // 바로 실행하지 않는다.
   const [confirmingHide, setConfirmingHide] = useState(false);
-  const [hideError, setHideError] = useState<string | null>(null);
-  const [reopenError, setReopenError] = useState<string | null>(null);
+  const hideMutation = useMutationRequest();
+  const reopenMutation = useMutationRequest();
 
   const [targetClassId, setTargetClassId] = useState("");
-  const [copying, setCopying] = useState(false);
-  const [copyError, setCopyError] = useState<string | null>(null);
+  const copyMutation = useMutationRequest();
 
   const [publisherDisplayName, setPublisherDisplayName] = useState("");
-  const [publishing, setPublishing] = useState(false);
-  const [publishError, setPublishError] = useState<string | null>(null);
+  const publishMutation = useMutationRequest();
   // 지금 가져갈 수 있는 템플릿(없으면 null → 공개 폼이 뜬다). 서버가 진실의
   // 출처이고, 공개·내리기 응답도 같은 함수로 읽는다.
   const [liveTemplate, setLiveTemplate] = useState<LiveTemplate>(null);
@@ -272,8 +263,7 @@ export default function EditProblemPage() {
   // 받아와도 이 안내가 지워지지 않아야 한다.
   const [justTakenDown, setJustTakenDown] = useState(false);
 
-  const [takingDown, setTakingDown] = useState(false);
-  const [takedownError, setTakedownError] = useState<string | null>(null);
+  const takedownMutation = useMutationRequest();
 
   // 「작성」/「미리보기」 탭(#325) — 새 문제 화면과 같은 자리다.
   const [tab, setTab] = useState<"write" | "preview">("write");
@@ -337,119 +327,92 @@ export default function EditProblemPage() {
     );
   }
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!isGradingGuidelineValid(gradingGuideline)) return;
-    setSaving(true);
-    setError(null);
-    try {
-      await updateProblem(classId, problemId, {
-        title: title.trim(),
-        description,
-        submission_formats: submissionFormats,
-        // 모델 값을 불러온 값과 다를 때만 보낸다(#437) — 백엔드는 이 필드가
-        // 오면 값이 같아도 「모델 거부」 표시를 푼다(#403 AC), 그래서 제목
-        // 만 고쳐 저장해도 매번 이 필드를 함께 보내면 거부 표시가 강사가
-        // 손대지 않았는데도 풀려 버린다. 거부된 모델로 새 시도가 헛되이
-        // 다시 채점되는 것을 막는다. 같은 모델로 다시 시도하려면 모델
-        // 칸의 「이 모델로 다시 시도」(`handleRetryModel`)를 쓴다.
-        ...(model !== problem.model ? { model } : {}),
-        reasoning_effort: reasoningEffort,
-        grading_strictness: gradingGuideline.grading_strictness,
-        grading_guideline_text: gradingGuideline.grading_guideline_text,
-      });
-      reload();
-      router.push(`/classes/${classId}`);
-    } catch {
-      setError("문제를 저장하지 못했습니다. 잠시 후 다시 시도해주세요.");
-    } finally {
-      setSaving(false);
-    }
+    void mainSave.run(
+      () =>
+        updateProblem(classId, problemId, {
+          title: title.trim(),
+          description,
+          submission_formats: submissionFormats,
+          // 모델 값을 불러온 값과 다를 때만 보낸다(#437) — 백엔드는 이 필드가
+          // 오면 값이 같아도 「모델 거부」 표시를 푼다(#403 AC), 그래서 제목
+          // 만 고쳐 저장해도 매번 이 필드를 함께 보내면 거부 표시가 강사가
+          // 손대지 않았는데도 풀려 버린다. 거부된 모델로 새 시도가 헛되이
+          // 다시 채점되는 것을 막는다. 같은 모델로 다시 시도하려면 모델
+          // 칸의 「이 모델로 다시 시도」(`handleRetryModel`)를 쓴다.
+          ...(model !== problem.model ? { model } : {}),
+          reasoning_effort: reasoningEffort,
+          grading_strictness: gradingGuideline.grading_strictness,
+          grading_guideline_text: gradingGuideline.grading_guideline_text,
+        }),
+      {
+        fallbackMessage: "문제를 저장하지 못했습니다. 잠시 후 다시 시도해주세요.",
+        reload,
+        onSuccess: () => router.push(`/classes/${classId}`),
+      },
+    );
   }
 
-  async function handleRetryModel() {
+  function handleRetryModel() {
     // 벤더 쪽 문제가 풀렸다고 강사가 판단하면 모델을 바꾸지 않고도 거부
     // 표시를 풀 수 있다(#437) — 모델 필드만 보낸다(지금 저장된 값 그대로,
     // 편집 중인 선택값과 무관하다).
-    setRetryingModel(true);
-    setRetryModelError(null);
-    try {
-      await updateProblem(classId, problemId, { model: problem.model });
-      reload();
-    } catch {
-      setRetryModelError("다시 시도하지 못했습니다. 잠시 후 다시 시도해주세요.");
-    } finally {
-      setRetryingModel(false);
-    }
+    void retryModelMutation.run(() => updateProblem(classId, problemId, { model: problem.model }), {
+      fallbackMessage: "다시 시도하지 못했습니다. 잠시 후 다시 시도해주세요.",
+      reload,
+    });
   }
 
-  async function handleAddItem(event: FormEvent<HTMLFormElement>) {
+  function handleAddItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setChecklistError(null);
-    try {
-      await createChecklistItem(classId, problemId, {
-        label: newItemLabel.trim(),
-        required: newItemRequired,
-      });
-      setNewItemLabel("");
-      setNewItemRequired(true);
-      reload();
-    } catch {
-      setChecklistError("항목을 추가하지 못했습니다. 잠시 후 다시 시도해주세요.");
-    }
+    void checklistMutation.run(
+      () => createChecklistItem(classId, problemId, { label: newItemLabel.trim(), required: newItemRequired }),
+      {
+        fallbackMessage: "항목을 추가하지 못했습니다. 잠시 후 다시 시도해주세요.",
+        reload,
+        onSuccess: () => {
+          setNewItemLabel("");
+          setNewItemRequired(true);
+        },
+      },
+    );
   }
 
-  async function handleItemLabelSave(itemId: number, label: string) {
-    setChecklistError(null);
-    try {
-      await updateChecklistItem(classId, problemId, itemId, { label });
-      reload();
-    } catch (err) {
-      setChecklistError(
-        err instanceof BackendError ? err.message : "항목을 저장하지 못했습니다. 잠시 후 다시 시도해주세요.",
-      );
-    }
+  function handleItemLabelSave(itemId: number, label: string) {
+    void checklistMutation.run(() => updateChecklistItem(classId, problemId, itemId, { label }), {
+      fallbackMessage: "항목을 저장하지 못했습니다. 잠시 후 다시 시도해주세요.",
+      reload,
+    });
   }
 
-  async function handleItemRequiredToggle(itemId: number, required: boolean) {
-    setChecklistError(null);
-    try {
-      await updateChecklistItem(classId, problemId, itemId, { required });
-      reload();
-    } catch (err) {
-      // 열린·숨긴 문제의 마지막 필수 항목을 필수 해제하면 422가 온다(#440)
-      // — 그 문구를 그대로 보여준다, 화면이 다시 판단하지 않는다.
-      setChecklistError(
-        err instanceof BackendError ? err.message : "항목을 저장하지 못했습니다. 잠시 후 다시 시도해주세요.",
-      );
-    }
+  function handleItemRequiredToggle(itemId: number, required: boolean) {
+    // 열린·숨긴 문제의 마지막 필수 항목을 필수 해제하면 422가 온다(#440) —
+    // 그 문구를 그대로 보여준다, 화면이 다시 판단하지 않는다.
+    void checklistMutation.run(() => updateChecklistItem(classId, problemId, itemId, { required }), {
+      fallbackMessage: "항목을 저장하지 못했습니다. 잠시 후 다시 시도해주세요.",
+      reload,
+    });
   }
 
-  async function handleItemDelete(itemId: number) {
-    setChecklistError(null);
-    try {
-      await deleteChecklistItem(classId, problemId, itemId);
-      reload();
-    } catch (err) {
-      // 열린·숨긴 문제의 마지막 필수 항목 삭제도 422다(#440) — 그 문구를
-      // 그대로 보여준다.
-      setChecklistError(
-        err instanceof BackendError ? err.message : "항목을 지우지 못했습니다. 잠시 후 다시 시도해주세요.",
-      );
-    }
+  function handleItemDelete(itemId: number) {
+    // 열린·숨긴 문제의 마지막 필수 항목 삭제도 422다(#440) — 그 문구를
+    // 그대로 보여준다.
+    void checklistMutation.run(() => deleteChecklistItem(classId, problemId, itemId), {
+      fallbackMessage: "항목을 지우지 못했습니다. 잠시 후 다시 시도해주세요.",
+      reload,
+    });
   }
 
-  async function handleSyntaxCheckToggle(enabled: boolean) {
-    setChecklistError(null);
-    try {
-      await updateProblem(classId, problemId, { syntax_check_enabled: enabled });
-      reload();
-    } catch {
-      setChecklistError("설정을 저장하지 못했습니다. 잠시 후 다시 시도해주세요.");
-    }
+  function handleSyntaxCheckToggle(enabled: boolean) {
+    void checklistMutation.run(() => updateProblem(classId, problemId, { syntax_check_enabled: enabled }), {
+      fallbackMessage: "설정을 저장하지 못했습니다. 잠시 후 다시 시도해주세요.",
+      reload,
+    });
   }
 
-  async function handleItemMove(itemId: number, direction: "up" | "down") {
+  function handleItemMove(itemId: number, direction: "up" | "down") {
     const items = problem.checklist_items;
     const index = items.findIndex((i) => i.id === itemId);
     const swapWith = direction === "up" ? index - 1 : index + 1;
@@ -458,111 +421,75 @@ export default function EditProblemPage() {
     const reordered = [...items];
     [reordered[index], reordered[swapWith]] = [reordered[swapWith], reordered[index]];
 
-    setChecklistError(null);
-    try {
-      await reorderChecklistItems(
-        classId,
-        problemId,
-        reordered.map((i) => i.id),
-      );
-      reload();
-    } catch {
-      setChecklistError("순서를 바꾸지 못했습니다. 다시 시도해주세요.");
-    }
+    void checklistMutation.run(
+      () =>
+        reorderChecklistItems(
+          classId,
+          problemId,
+          reordered.map((i) => i.id),
+        ),
+      {
+        fallbackMessage: "순서를 바꾸지 못했습니다. 다시 시도해주세요.",
+        reload,
+      },
+    );
   }
 
-  async function handleCopy(event: FormEvent<HTMLFormElement>) {
+  function handleCopy(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setCopyError(null);
-    setCopying(true);
-    try {
-      const copy = await copyProblem(classId, problemId, Number(targetClassId));
-      router.push(`/classes/${copy.classroom_id}/problems/${copy.id}`);
-    } catch (err) {
-      setCopyError(
-        err instanceof BackendError ? err.message : "문제를 복사하지 못했습니다. 잠시 후 다시 시도해주세요.",
-      );
-    } finally {
-      setCopying(false);
-    }
+    void copyMutation.run(() => copyProblem(classId, problemId, Number(targetClassId)), {
+      fallbackMessage: "문제를 복사하지 못했습니다. 잠시 후 다시 시도해주세요.",
+      onSuccess: (copy) => router.push(`/classes/${copy.classroom_id}/problems/${copy.id}`),
+    });
   }
 
-  async function handlePublish(event: FormEvent<HTMLFormElement>) {
+  function handlePublish(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setPublishError(null);
-    setPublishing(true);
-    try {
-      const template = await publishProblemAsTemplate(classId, problemId, publisherDisplayName.trim());
-      setLiveTemplate(liveTemplateFrom(template));
-      setJustTakenDown(false);
-      reload();
-    } catch {
-      setPublishError("템플릿으로 공개하지 못했습니다. 잠시 후 다시 시도해주세요.");
-    } finally {
-      setPublishing(false);
-    }
+    void publishMutation.run(() => publishProblemAsTemplate(classId, problemId, publisherDisplayName.trim()), {
+      fallbackMessage: "템플릿으로 공개하지 못했습니다. 잠시 후 다시 시도해주세요.",
+      reload,
+      onSuccess: (template) => {
+        setLiveTemplate(liveTemplateFrom(template));
+        setJustTakenDown(false);
+      },
+    });
   }
 
-  async function handleTakedown() {
+  function handleTakedown() {
     if (!liveTemplate) return;
-    setTakedownError(null);
-    setTakingDown(true);
-    try {
-      // 내리면 **살아 있는 템플릿이 없어진다** — 그래서 공개 폼이 곧바로 돌아오고
-      // 새로고침 없이 다시 공개할 수 있다(2026-09-16 에 고친 버그). 다른 열 개
-      // 핸들러와 같이 `reload()` 로 서버 값도 맞춘다.
-      const template = await takedownProblemTemplate(liveTemplate.shareCode);
-      setLiveTemplate(liveTemplateFrom(template));
-      setJustTakenDown(true);
-      reload();
-    } catch {
-      setTakedownError("내리지 못했습니다. 잠시 후 다시 시도해주세요.");
-    } finally {
-      setTakingDown(false);
-    }
+    // 내리면 **살아 있는 템플릿이 없어진다** — 그래서 공개 폼이 곧바로 돌아오고
+    // 새로고침 없이 다시 공개할 수 있다(2026-09-16 에 고친 버그). 다른 핸들러와
+    // 같이 `reload()` 로 서버 값도 맞춘다.
+    void takedownMutation.run(() => takedownProblemTemplate(liveTemplate.shareCode), {
+      fallbackMessage: "내리지 못했습니다. 잠시 후 다시 시도해주세요.",
+      reload,
+      onSuccess: (template) => {
+        setLiveTemplate(liveTemplateFrom(template));
+        setJustTakenDown(true);
+      },
+    });
   }
 
-  async function handleOpen() {
-    setOpenError(null);
-    try {
-      await openProblem(classId, problemId);
-      reload();
-    } catch (err) {
-      if (err instanceof BackendError) {
-        setOpenError(err.message);
-      } else {
-        setOpenError("문제를 열지 못했습니다. 잠시 후 다시 시도해주세요.");
-      }
-    }
+  function handleOpen() {
+    void openMutation.run(() => openProblem(classId, problemId), {
+      fallbackMessage: "문제를 열지 못했습니다. 잠시 후 다시 시도해주세요.",
+      reload,
+    });
   }
 
-  async function handleHide() {
-    setHideError(null);
-    try {
-      await hideProblem(classId, problemId);
-      setConfirmingHide(false);
-      reload();
-    } catch (err) {
-      if (err instanceof BackendError) {
-        setHideError(err.message);
-      } else {
-        setHideError("문제를 숨기지 못했습니다. 잠시 후 다시 시도해주세요.");
-      }
-    }
+  function handleHide() {
+    void hideMutation.run(() => hideProblem(classId, problemId), {
+      fallbackMessage: "문제를 숨기지 못했습니다. 잠시 후 다시 시도해주세요.",
+      reload,
+      onSuccess: () => setConfirmingHide(false),
+    });
   }
 
-  async function handleReopen() {
-    setReopenError(null);
-    try {
-      await reopenProblem(classId, problemId);
-      reload();
-    } catch (err) {
-      if (err instanceof BackendError) {
-        setReopenError(err.message);
-      } else {
-        setReopenError("문제를 다시 열지 못했습니다. 잠시 후 다시 시도해주세요.");
-      }
-    }
+  function handleReopen() {
+    void reopenMutation.run(() => reopenProblem(classId, problemId), {
+      fallbackMessage: "문제를 다시 열지 못했습니다. 잠시 후 다시 시도해주세요.",
+      reload,
+    });
   }
 
   return (
@@ -701,9 +628,9 @@ export default function EditProblemPage() {
             </span>
           </Note>
         ) : null}
-        {openError ? (
+        {openMutation.error ? (
           <ErrorNote>
-            <span data-testid="open-problem-error">{openError}</span>
+            <span data-testid="open-problem-error">{openMutation.error}</span>
           </ErrorNote>
         ) : null}
         {confirmingHide ? (
@@ -728,7 +655,7 @@ export default function EditProblemPage() {
                   data-testid="hide-problem-cancel"
                   onClick={() => {
                     setConfirmingHide(false);
-                    setHideError(null);
+                    hideMutation.setError(null);
                   }}
                   className={buttonClass("secondary", "sm")}
                 >
@@ -738,20 +665,20 @@ export default function EditProblemPage() {
             </div>
           </Note>
         ) : null}
-        {hideError ? (
+        {hideMutation.error ? (
           <ErrorNote>
-            <span data-testid="hide-problem-error">{hideError}</span>
+            <span data-testid="hide-problem-error">{hideMutation.error}</span>
           </ErrorNote>
         ) : null}
-        {reopenError ? (
+        {reopenMutation.error ? (
           <ErrorNote>
-            <span data-testid="reopen-problem-error">{reopenError}</span>
+            <span data-testid="reopen-problem-error">{reopenMutation.error}</span>
           </ErrorNote>
         ) : null}
 
-        {/* 본문 폭은 다른 화면과 같다(1200px 틀). 화면이 충분히 넓으면(1840px~) 채점 모델·
-            채점 지침·다른 클래스로 복사·템플릿으로 공개 카드를 **틀 바깥** 오른쪽 여백에
-            300px 열로 걸고 스크롤을 따라오게 한다 — 그러면 설명 에디터가 틀 폭을 다 쓴다.
+        {/* 본문 폭은 다른 화면과 같다(1200px 틀). 화면이 충분히 넓으면(1840px~) 제출 형식·
+            채점 모델·채점 지침·다른 클래스로 복사·템플릿으로 공개 카드를 **틀 바깥** 오른쪽
+            여백에 300px 열로 걸고 스크롤을 따라오게 한다 — 그러면 설명 에디터가 틀 폭을 다 쓴다.
             그보다 좁으면 한 열로 쌓여 그 카드들이 체크리스트 아래로 내려간다.
             (2026-09-15: 1024px 부터 380px 열이 틀 안을 차지해 에디터가 약 750px 로 좁았고,
             틀을 1600px 로 넓혀 보았으나 이 화면만 폭이 달라 어색했다.) */}
@@ -784,47 +711,6 @@ export default function EditProblemPage() {
                     onChange={setDescription}
                   />
                 </div>
-
-                <fieldset className="flex flex-col gap-1.5">
-                  <legend>
-                    <FieldLabel>제출 형식</FieldLabel>
-                  </legend>
-                  <div className="flex flex-col gap-2 pt-1">
-                    <label className="flex items-center gap-2.5 text-[13.5px]">
-                      <input
-                        type="checkbox"
-                        checked={submissionFormats.includes("source")}
-                        onChange={(event) => toggleSubmissionFormat("source", event.target.checked)}
-                        data-testid="edit-problem-format-source"
-                        className="accent-ink"
-                      />
-                      zip 파일
-                    </label>
-                    <label className="flex items-center gap-2.5 text-[13.5px]">
-                      <input
-                        type="checkbox"
-                        checked={submissionFormats.includes("repository")}
-                        onChange={(event) => toggleSubmissionFormat("repository", event.target.checked)}
-                        data-testid="edit-problem-format-repository"
-                        className="accent-ink"
-                      />
-                      GitHub 저장소
-                    </label>
-                  </div>
-                  <span className="text-[11.5px] leading-relaxed text-ink/45">
-                    둘 다 고르면 참여자는 낼 때마다 그중 하나를 고릅니다. 형식을 꺼도 그
-                    형식으로 이미 낸 시도와 점수는 그대로 남습니다.
-                  </span>
-                  {submissionFormats.length === 0 ? (
-                    <span
-                      data-testid="edit-problem-format-empty-notice"
-                      className="text-[11.5px] text-attention"
-                    >
-                      하나 이상 골라야 합니다.
-                    </span>
-                  ) : null}
-                </fieldset>
-
               </form>
             </Card>
 
@@ -967,10 +853,10 @@ export default function EditProblemPage() {
                 </button>
               </form>
 
-              {checklistError ? (
+              {checklistMutation.error ? (
                 <div className="border-t border-rule p-4">
                   <ErrorNote>
-                    <span data-testid="checklist-error">{checklistError}</span>
+                    <span data-testid="checklist-error">{checklistMutation.error}</span>
                   </ErrorNote>
                 </div>
               ) : null}
@@ -985,131 +871,32 @@ export default function EditProblemPage() {
             data-testid="edit-problem-side-rail"
             className="flex w-full flex-col gap-5 min-[1840px]:fixed min-[1840px]:top-24 min-[1840px]:left-[calc(50%+600px)] min-[1840px]:max-h-[calc(100vh-7.5rem)] min-[1840px]:w-[300px] min-[1840px]:overflow-y-auto"
           >
-            <Card>
-              <CardHeader title="채점 모델" />
-              <div className="flex flex-col gap-2.5 p-4">
-                {problem.scoring_model_rejected ? (
-                  <Note tone="attention">
-                    <div data-testid="edit-problem-model-rejected-note" className="flex flex-col gap-2">
-                      <div className="flex items-center gap-2">
-                        <Badge tone="attention">모델 거부</Badge>
-                        <span>이 키로 이 모델을 쓸 수 없어 시도가 채점되지 않습니다.</span>
-                      </div>
-                      <button
-                        type="button"
-                        data-testid="edit-problem-model-retry-button"
-                        disabled={retryingModel}
-                        onClick={handleRetryModel}
-                        className={`${buttonClass("secondary", "sm")} self-start`}
-                      >
-                        {retryingModel ? "다시 시도하는 중..." : "이 모델로 다시 시도"}
-                      </button>
-                      {retryModelError ? (
-                        <ErrorNote>
-                          <span data-testid="edit-problem-model-retry-error">{retryModelError}</span>
-                        </ErrorNote>
-                      ) : null}
-                    </div>
-                  </Note>
-                ) : null}
-                <label htmlFor="problem-model" className="sr-only">
-                  채점 모델
-                </label>
-                {modelsState.status === "ready" ? (
-                  <>
-                    {modelsState.source === "fallback" ? (
-                      <Note>
-                        <span data-testid="edit-problem-model-unavailable-note">
-                          {modelsState.unavailableReason === "no_api_key"
-                            ? "키를 넣으면 이 키로 쓸 수 있는 모델을 보여드립니다 — 지금은 기본 목록입니다."
-                            : "지금은 모델 목록을 확인할 수 없어 기본 목록을 보여드립니다."}
-                        </span>
-                      </Note>
-                    ) : null}
-                    <select
-                      id="problem-model"
-                      data-testid="edit-problem-model-select"
-                      value={model}
-                      onChange={(event) => setModel(event.target.value)}
-                      className={INPUT_CLASS}
-                    >
-                      <option value="" data-testid="edit-problem-model-option-inherit">
-                        클래스 기본값을 따릅니다
-                      </option>
-                      {modelsState.models.map((option) => (
-                        <option
-                          key={option.id}
-                          value={option.id}
-                          data-testid={`edit-problem-model-option-${option.id}`}
-                        >
-                          {option.label} · 컨텍스트{" "}
-                          {option.context_window
-                            ? `${option.context_window.toLocaleString("ko-KR")} 토큰`
-                            : "크기 미확인"}
-                        </option>
-                      ))}
-                    </select>
-                  </>
-                ) : (
-                  <p data-testid="edit-problem-model-loading" className="text-[13px] text-ink/45">
-                    모델 목록을 불러오는 중...
-                  </p>
-                )}
-                {model === "" ? (
-                  <p data-testid="edit-problem-model-effective" className="text-[12.5px] text-ink/60">
-                    실제로 쓰일 모델: <span className="font-mono">{problem.effective_model}</span>
-                  </p>
-                ) : null}
-                <span className="text-[11.5px] leading-relaxed text-ink/45">
-                  문제 설명이 길면 컨텍스트가 작은 모델은 뒷부분이 잘린 채 채점됩니다 — 그래서
-                  문제마다 다른 모델을 고를 수 있습니다.
-                </span>
-                {modelsState.status === "ready" &&
-                isSelectedModelReasoning(
-                  model,
-                  modelsState.models,
-                  classState.status === "ready" ? classState.classroom.default_model_is_reasoning : false,
-                ) ? (
-                  <div className="flex flex-col gap-1.5 border-t border-rule pt-3">
-                    <label htmlFor="edit-problem-reasoning-effort">
-                      <FieldLabel>추론 강도</FieldLabel>
-                    </label>
-                    <select
-                      id="edit-problem-reasoning-effort"
-                      data-testid="edit-problem-reasoning-effort-select"
-                      value={reasoningEffort}
-                      onChange={(event) => setReasoningEffort(event.target.value)}
-                      className={`${INPUT_CLASS} max-w-[200px]`}
-                    >
-                      <option value="" data-testid="edit-problem-reasoning-effort-option-inherit">
-                        클래스 기본값을 따릅니다
-                      </option>
-                      {REASONING_EFFORT_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                    {reasoningEffort === "" ? (
-                      <p
-                        data-testid="edit-problem-reasoning-effort-effective"
-                        className="text-[12.5px] text-ink/60"
-                      >
-                        실제로 적용될 추론 강도: {problem.effective_reasoning_effort}
-                      </p>
-                    ) : null}
-                    <span className="text-[11.5px] leading-relaxed text-ink/45">
-                      높을수록 느리고 채점 예산을 더 씁니다.
-                    </span>
-                  </div>
-                ) : null}
-              </div>
-            </Card>
-
-            <GradingGuidelineEditor
-              value={gradingGuideline}
-              onChange={setGradingGuideline}
+            <ProblemSettingsForm
+              mode="edit"
               testIdPrefix="edit-problem"
+              submissionFormats={submissionFormats}
+              onToggleSubmissionFormat={toggleSubmissionFormat}
+              model={model}
+              onModelChange={setModel}
+              modelsState={modelsState}
+              effectiveModel={problem.effective_model}
+              modelRejection={
+                problem.scoring_model_rejected
+                  ? {
+                      retrying: retryModelMutation.pending,
+                      error: retryModelMutation.error,
+                      onRetry: handleRetryModel,
+                    }
+                  : undefined
+              }
+              reasoningEffort={reasoningEffort}
+              onReasoningEffortChange={setReasoningEffort}
+              effectiveReasoningEffort={problem.effective_reasoning_effort}
+              defaultModelIsReasoning={
+                classState.status === "ready" ? classState.classroom.default_model_is_reasoning : false
+              }
+              gradingGuideline={gradingGuideline}
+              onGradingGuidelineChange={setGradingGuideline}
             />
 
             <Card>
@@ -1157,10 +944,10 @@ export default function EditProblemPage() {
                         <button
                           type="submit"
                           data-testid="copy-problem-submit"
-                          disabled={copying || targetClassId === ""}
+                          disabled={copyMutation.pending || targetClassId === ""}
                           className={buttonClass("secondary")}
                         >
-                          {copying ? "복사하는 중..." : "복사"}
+                          {copyMutation.pending ? "복사하는 중..." : "복사"}
                         </button>
                       </form>
                     );
@@ -1170,9 +957,9 @@ export default function EditProblemPage() {
                     클래스 목록을 불러오는 중...
                   </p>
                 )}
-                {copyError ? (
+                {copyMutation.error ? (
                   <ErrorNote>
-                    <span data-testid="copy-problem-error">{copyError}</span>
+                    <span data-testid="copy-problem-error">{copyMutation.error}</span>
                   </ErrorNote>
                 ) : null}
                 <span className="text-[11.5px] leading-relaxed text-ink/45">
@@ -1208,15 +995,15 @@ export default function EditProblemPage() {
                         type="button"
                         data-testid="publish-template-takedown"
                         onClick={handleTakedown}
-                        disabled={takingDown}
+                        disabled={takedownMutation.pending}
                         className={buttonClass("danger", "sm")}
                       >
-                        {takingDown ? "내리는 중..." : "내리기"}
+                        {takedownMutation.pending ? "내리는 중..." : "내리기"}
                       </button>
                     </div>
-                    {takedownError ? (
+                    {takedownMutation.error ? (
                       <ErrorNote>
-                        <span data-testid="publish-template-takedown-error">{takedownError}</span>
+                        <span data-testid="publish-template-takedown-error">{takedownMutation.error}</span>
                       </ErrorNote>
                     ) : null}
                   </div>
@@ -1230,9 +1017,9 @@ export default function EditProblemPage() {
                         </span>
                       </p>
                     ) : null}
-                    {takedownError ? (
+                    {takedownMutation.error ? (
                       <ErrorNote>
-                        <span data-testid="publish-template-takedown-error">{takedownError}</span>
+                        <span data-testid="publish-template-takedown-error">{takedownMutation.error}</span>
                       </ErrorNote>
                     ) : null}
                   <form onSubmit={handlePublish} className="flex flex-col gap-2.5">
@@ -1251,17 +1038,17 @@ export default function EditProblemPage() {
                     <button
                       type="submit"
                       data-testid="publish-template-submit"
-                      disabled={publishing || publisherDisplayName.trim() === ""}
+                      disabled={publishMutation.pending || publisherDisplayName.trim() === ""}
                       className={buttonClass("secondary")}
                     >
-                      {publishing ? "공개하는 중..." : "템플릿으로 공개"}
+                      {publishMutation.pending ? "공개하는 중..." : "템플릿으로 공개"}
                     </button>
                   </form>
                   </>
                 )}
-                {publishError ? (
+                {publishMutation.error ? (
                   <ErrorNote>
-                    <span data-testid="publish-template-error">{publishError}</span>
+                    <span data-testid="publish-template-error">{publishMutation.error}</span>
                   </ErrorNote>
                 ) : null}
                 <span className="text-[11.5px] leading-relaxed text-ink/45">
@@ -1298,20 +1085,20 @@ export default function EditProblemPage() {
             data-testid="edit-problem-submit"
             disabled={
               isArchived ||
-              saving ||
+              mainSave.pending ||
               title.trim() === "" ||
               submissionFormats.length === 0 ||
               !isGradingGuidelineValid(gradingGuideline)
             }
             className={buttonClass("primary")}
           >
-            {saving ? "저장하는 중..." : "저장"}
+            {mainSave.pending ? "저장하는 중..." : "저장"}
           </button>
         </div>
 
-        {error ? (
+        {mainSave.error ? (
           <ErrorNote>
-            <span data-testid="edit-problem-error-message">{error}</span>
+            <span data-testid="edit-problem-error-message">{mainSave.error}</span>
           </ErrorNote>
         ) : null}
         </div>
