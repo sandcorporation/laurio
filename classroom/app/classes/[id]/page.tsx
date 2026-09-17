@@ -150,8 +150,8 @@ function ArchiveSection({
         <Note tone="attention">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span data-testid="classroom-archived-banner" className="flex-1">
-              이 클래스는 보관되어 끝났습니다 — 새 가입과 새 제출은 받지 않지만, 지난 문제·제출물·판정은
-              그대로 볼 수 있습니다.
+              이 클래스는 보관되어 끝났습니다 — 읽기 전용이라 가입·제출과 문제 수정은 막히지만, 지난
+              문제·제출물·판정은 그대로 볼 수 있습니다. 고치려면 보관을 되돌리세요.
             </span>
             <button
               type="button"
@@ -165,7 +165,7 @@ function ArchiveSection({
         </Note>
       ) : (
         <div className="flex flex-wrap items-center justify-between gap-3 text-[12.5px] text-ink/45">
-          <span>수업이 끝나면 보관합니다 — 새 가입과 새 제출만 닫히고, 언제든 되돌릴 수 있습니다.</span>
+          <span>수업이 끝나면 보관합니다 — 클래스가 읽기 전용이 되고(가입·제출·문제 수정이 닫힘), 언제든 되돌릴 수 있습니다.</span>
           <button
             type="button"
             data-testid="classroom-archive"
