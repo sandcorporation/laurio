@@ -128,6 +128,28 @@ def test_an_empty_key_is_rejected(client, db):
     assert response.status_code == 422
 
 
+def test_a_key_with_surrounding_whitespace_is_stored_trimmed(client, db):
+    """앞뒤 공백은 지운 값으로 저장된다(#435) — 붙여넣기가 흔히 남기는
+    실수라, 저장된 값에 공백이 섞이면 채점 요청에 그대로 실려 벤더가
+    거절할 수 있다."""
+
+    from core.crypto import decrypt
+
+    pair = _login(client)
+    class_id = _create_class(client, pair["access"])
+
+    response = client.put(
+        _key_url(class_id),
+        data={"api_key": "  sk-test-abcd1234wxyz  "},
+        content_type="application/json",
+        **_auth_header(pair["access"]),
+    )
+    assert response.status_code == 200
+
+    class_obj = Class.objects.get(id=class_id)
+    assert decrypt(class_obj.openai_api_key_encrypted) == "sk-test-abcd1234wxyz"
+
+
 def test_a_non_instructor_cannot_set_another_classs_key(client, db):
     owner = _login(client, uid="owner")
     class_id = _create_class(client, owner["access"])
