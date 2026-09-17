@@ -1537,24 +1537,39 @@ jobs:
     # ── 배포 이미지(2026-09-17) ──────────────────────────────────────────────
     #
     # **staging·prod 서버는 이미지를 굽지 않고 여기서 올린 것을 받는다**(deploy.sh 머리 주석).
+    #
+    # **두 이미지 잡 모두 mac 러너에서 돈다**(2026-09-17). sub 는 테스트 잡과 staging 스택이
+    # 같은 SATA SSD 를 나눠 쓰는데, 빌드를 얹으니 CPU·메모리는 남는데 디스크 대기가 14~84% 로
+    # 치솟았다. mac(Apple Silicon)은 prod 의 arm64 를 제 속도로, staging 의 amd64 는
+    # Docker Desktop 의 에뮬레이션으로 굽는다. **mac 이 없을 때의 비상구는 저장소 변수
+    # `IMAGE_BUILDER=sub`** 다 — 두 잡이 sub 로 옮겨 가 amd64 는 제 속도로, arm64 는 QEMU 로
+    # (느리게) 굽는다. 줄 서 있던 실행은 변수를 바꾼 뒤 다시 돌린다. 자동 전환은 두지 않았다:
+    # 러너 생존을 조회하려면 조직 관리자 토큰을 CI 에 넣어야 한다.
     # 커밋마다 네 이미지를 ghcr 에 올린다 — 태그의 sha 가 곧 배포 스크립트가 체크아웃한
     # 커밋이다. 바뀌지 않은 서비스는 레지스트리 캐시(codemit-buildcache)에 맞아 금방 끝난다.
     #
-    # backend 는 환경을 가리지 않아 아키텍처만 가른다(`-amd64` = staging 호스트 sub).
+    # backend 는 환경을 가리지 않아 아키텍처만 가른다(`-amd64` = staging 호스트 sub 의 것).
     # 세 앱은 NEXT_PUBLIC_* 가 빌드 때 굳으므로 환경마다 따로 굽는다(`-staging`). 그 값은
     # 서버 env 파일이 아니라 저장소 변수 STAGING_* 에 있다 — 조직이 free 요금제라 비공개
     # 저장소의 environment 기능을 못 쓴다. 값을 바꾸면 이 잡이 다시 돌아야 반영된다.
     #
-    # 테스트 잡과 **나란히** 돈다 — 배포(deploy-staging)가 테스트를 기다리므로 빨간
-    # 커밋의 이미지는 올라가도 배포되지 않는다.
+    # 테스트 잡과 **나란히** 돈다(러너가 다르다) — 배포(deploy-staging)가 테스트를 기다리므로
+    # 빨간 커밋의 이미지는 올라가도 배포되지 않는다.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: [self-hosted, sub]
-    timeout-minutes: 90
+    runs-on: ${{ fromJSON(vars.IMAGE_BUILDER == 'sub' && '["self-hosted", "sub"]' || '["self-hosted", "ARM64", "mac-arm"]') }}
+    timeout-minutes: 120
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v4
+
+      # 비상구(sub)에서만 arm64 에뮬레이터를 등록한다. mac 은 Docker Desktop 이 amd64 를
+      # 이미 에뮬레이션하므로(Rosetta) 여기서 QEMU 를 깔면 그 더 빠른 쪽을 덮어쓴다.
+      - uses: docker/setup-qemu-action@v3
+        if: vars.IMAGE_BUILDER == 'sub'
+        with:
+          platforms: arm64
 
       - uses: docker/setup-buildx-action@v3
 
@@ -1637,24 +1652,31 @@ jobs:
             NEXT_PUBLIC_SENTRY_RELEASE=${{ github.sha }}
 
   images-prod:
-    # prod(oracle, arm64) 이미지는 **mac 러너**가 굽는다 — Apple Silicon 의 Docker Desktop 위에
+    # prod(oracle, arm64) 이미지도 **mac 러너**가 굽는다(위 images-staging 주석의 비상구가 같다) —
+    # Apple Silicon 의 Docker Desktop 위에
     # sub 와 같은 `myoung34/github-runner` 컨테이너(조직 범위, Linux/ARM64, 라벨 `mac-arm`,
     # Docker Desktop 의 docker.sock 마운트)로 뜬다. mac-arm 라벨이 곧 「그 mac」이다 —
     # 러너가 조직 범위라 ARM64 만으로 고르면 다른 ARM 러너로 갈 수 있다. oracle 은
-    # prod 서버라 빌드가 서비스를 느리게 만들고, sub 에서 에뮬레이션으로 구우면 몇 배 느리다.
+    # prod 서버라 빌드가 서비스를 느리게 만들어 후보에서 뺐다.
     #
     # **mac 이 꺼져 있으면 이 잡이 줄을 서고, 그동안 CI 가 끝나지 않으므로 production 승격도
-    # 기다린다**(promote-production 은 CI 전체의 성공을 본다) — 의도한 동작이다. staging 은
-    # 이 잡을 기다리지 않는다. GitHub 는 러너를 못 찾은 잡을 24시간 뒤 실패로 끝낸다.
-    #
+    # 기다린다**(promote-production 은 CI 전체의 성공을 본다). GitHub 는 러너를 못 찾은 잡을
+    # 24시간 뒤 실패로 끝낸다 — 그 전에 IMAGE_BUILDER=sub 로 옮기고 다시 돌린다.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: [self-hosted, ARM64, mac-arm]
-    timeout-minutes: 90
+    runs-on: ${{ fromJSON(vars.IMAGE_BUILDER == 'sub' && '["self-hosted", "sub"]' || '["self-hosted", "ARM64", "mac-arm"]') }}
+    timeout-minutes: 120
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v4
+
+      # 비상구(sub)에서만 arm64 에뮬레이터를 등록한다. mac 은 Docker Desktop 이 amd64 를
+      # 이미 에뮬레이션하므로(Rosetta) 여기서 QEMU 를 깔면 그 더 빠른 쪽을 덮어쓴다.
+      - uses: docker/setup-qemu-action@v3
+        if: vars.IMAGE_BUILDER == 'sub'
+        with:
+          platforms: arm64
 
       - uses: docker/setup-buildx-action@v3
 
@@ -1740,7 +1762,8 @@ jobs:
     # 이미지가 올라가고 **나머지 잡이 전부 초록**이면 sub 의 Jenkins staging 잡(laurio)을
     # 이 커밋으로 부른다(Jenkinsfile 의 DEPLOY_SHA). 러너와 Jenkins 가 같은 호스트라
     # JENKINS_URL 은 루프백이다. 값은 scripts/ghcr-setup-wizard.sh 6단계가 넣는다.
-    # images-prod 는 기다리지 않는다 — mac 이 꺼져 있어도 staging 은 나간다.
+    # images-prod 는 기다리지 않는다. 다만 images-staging 도 mac 에서 돌므로, mac 이 꺼져
+    # 있으면 staging 도 기다린다 — 그때는 IMAGE_BUILDER=sub 로 옮긴다.
     needs:
       - test
       - deploy-check

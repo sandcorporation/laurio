@@ -234,8 +234,10 @@ pause "계속하려면 Enter"
 
 # ── 2 ─────────────────────────────────────────────────────────────────────
 stage "mac: Docker Desktop 상시 가동"
-say "arm64(prod) 이미지는 mac 의 러너 컨테이너가 굽습니다. mac 이 잠들면 prod 승격이 기다립니다."
+say "staging(amd64)·prod(arm64) 이미지를 모두 mac 의 러너 컨테이너가 굽습니다."
+say "mac 이 잠들면 staging 배포와 prod 승격이 기다립니다(비상구: 저장소 변수 IMAGE_BUILDER=sub)."
 step "Docker Desktop → Settings → General → 'Start Docker Desktop when you sign in to your computer' 켜기 → Apply"
+step "같은 화면의 'Use Rosetta for x86_64/amd64 emulation on Apple Silicon' 켜기 — staging(amd64) 빌드가 빨라집니다"
 step "Docker Desktop → Settings → Resources 에서 메모리를 넉넉히(권장 8GB 이상 — Next 빌드가 무겁습니다)"
 step "mac 터미널에서 전원 연결 중 잠자기 끄기:"
 note "    sudo pmset -c sleep 0 disksleep 0 && pmset -g | grep -E ' sleep|disksleep'"

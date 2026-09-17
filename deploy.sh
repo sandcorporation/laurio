@@ -24,8 +24,8 @@
 #   all (기본값)         위를 순서대로 전부 — 사람이 손으로 배포할 때
 #
 # **이미지는 CI 가 굽고, 여기서는 받는다**(2026-09-17). main 에 push 하면 CI 가
-# 커밋마다 네 이미지를 ghcr 에 올린다 — backend 는 `<sha>-amd64`(sub 러너)·`<sha>-arm64`
-# (mac 러너), 세 앱은 NEXT_PUBLIC_* 가 굳으므로 `<sha>-staging`·`<sha>-prod` 다. compose
+# 커밋마다 네 이미지를 ghcr 에 올린다(둘 다 mac 러너가 굽는다, 비상시 sub) — backend 는
+# `<sha>-amd64`·`<sha>-arm64`, 세 앱은 NEXT_PUBLIC_* 가 굳으므로 `<sha>-staging`·`<sha>-prod` 다. compose
 # 파일의 `image:` 가 그 이름을 가리키고, 태그의 <sha> 는 여기서 체크아웃한 커밋이다
 # (`CODEMIT_IMAGE_TAG`). 그래서 staging 은 sub 가, prod 는 oracle 이 더 이상 굽지 않는다
 # — oracle 은 prod 서버라 빌드가 서비스 속도를 갉아먹었다.
