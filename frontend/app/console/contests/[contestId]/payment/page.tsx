@@ -31,7 +31,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
-import { ErrorNote, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
+import { ErrorNote, INPUT_CLASS, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
 import { formatPrize } from "@/lib/contest-format";
@@ -52,6 +52,9 @@ type ContestMeta = {
   id: number;
   title: string;
   status: string;
+  // 개최자의 공개용 표시 이름(#447) — 비어 있으면 null이다. 결제를 시작하기
+  // 전에 이 값이 있어야 한다(POST /payments가 없으면 422로 거절한다).
+  sponsor_display_name: string | null;
 };
 
 type LoadState =
@@ -62,6 +65,9 @@ type LoadState =
   // 번 청구하지 않는다는 것을 이 상태 자체가 보장한다 — 여기서는 애초에
   // 결제 요청을 다시 만들지 않는다.
   | { status: "already-paid"; title: string }
+  // 표시 이름이 비어 있다(#447) — 결제를 시작하기 전에 이 화면에서 곧바로
+  // 채운다. 채우면 그 자리에서 결제 시작으로 이어간다.
+  | { status: "needs-display-name"; title: string }
   | { status: "ready"; title: string; payment: PaymentOut };
 
 type ConfirmState =
@@ -97,6 +103,11 @@ export default function ContestPaymentPage() {
   const [confirm, setConfirm] = useState<ConfirmState>({ status: "idle" });
   const [reloadTick, setReloadTick] = useState(0);
 
+  // 표시 이름 인라인 입력(#447) — "needs-display-name" 상태에서만 쓰인다.
+  const [displayNameInput, setDisplayNameInput] = useState("");
+  const [savingDisplayName, setSavingDisplayName] = useState(false);
+  const [displayNameError, setDisplayNameError] = useState<string | null>(null);
+
   useEffect(() => {
     if (session.status !== "authenticated") return;
     let cancelled = false;
@@ -114,6 +125,12 @@ export default function ContestPaymentPage() {
         // 이미 결제되어 공개된(또는 그 뒤로 넘어간) Contest다 — 새 결제 요청을 만들 이유가
         // 없다. 여기서 걸러야 initiate_payment의 409를 화면이 매번 대신 겪지 않는다.
         return setLoad({ status: "already-paid", title: contest.data.title });
+      }
+
+      if (!contest.data.sponsor_display_name) {
+        // 표시 이름이 없으면 결제를 시작해도 422로 거절된다(#447) — 그 요청을
+        // 보내기 전에 이 화면에서 곧바로 채우게 한다.
+        return setLoad({ status: "needs-display-name", title: contest.data.title });
       }
 
       // draft다 — 결제를 시작(또는 이미 진행 중인 활성 결제를 그대로 이어받아) 금액을
@@ -319,6 +336,34 @@ export default function ContestPaymentPage() {
     setReloadTick((tick) => tick + 1);
   }
 
+  /** 표시 이름을 저장하고(#447, 기존 프로필 저장 API) 곧바로 결제 시작으로
+   * 이어간다 — 저장 성공 응답을 기다렸다가 로드를 처음부터 다시 돈다(retry와
+   * 같은 모양). 여기서 직접 결제를 시작하지 않는 이유는 로드 이펙트가 이미
+   * "draft면 결제를 시작한다"는 판단을 하나의 자리에서 하고 있어서다 —
+   * 두 벌로 쓰면 언젠가 갈라진다. */
+  async function saveDisplayNameAndContinue() {
+    const trimmed = displayNameInput.trim();
+    if (!trimmed) return;
+    setDisplayNameError(null);
+    setSavingDisplayName(true);
+    try {
+      const response = await bffClient.post<{ display_name: string }>(
+        "/api/backend/accounts/sponsor-profile",
+        { display_name: trimmed },
+      );
+      if (!response.ok) {
+        setDisplayNameError(response.detail);
+        return;
+      }
+      setLoad({ status: "loading" });
+      setReloadTick((tick) => tick + 1);
+    } catch {
+      setDisplayNameError("연결에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setSavingDisplayName(false);
+    }
+  }
+
   if (session.status === "unauthenticated") return null;
   if (session.status === "loading" || load.status === "loading") {
     return (
@@ -358,6 +403,47 @@ export default function ContestPaymentPage() {
         <Link href="/console/contests" className="mt-4 inline-block text-sm underline">
           내 공모전으로 돌아가기
         </Link>
+      </PageShell>
+    );
+  }
+
+  if (load.status === "needs-display-name") {
+    return (
+      <PageShell>
+        <PageHeader
+          title={load.title}
+          titleTestId="payment-heading"
+          description="참가자에게 보일 개최자 표시 이름을 먼저 등록해야 결제를 시작할 수 있습니다."
+          headingLevel="h1"
+        />
+        <label className="mt-4 flex flex-col gap-1 text-sm" htmlFor="payment-sponsor-display-name">
+          개최자 표시 이름
+          <input
+            id="payment-sponsor-display-name"
+            type="text"
+            value={displayNameInput}
+            onChange={(event) => setDisplayNameInput(event.target.value)}
+            maxLength={100}
+            data-testid="payment-sponsor-display-name-input"
+            className={INPUT_CLASS}
+          />
+        </label>
+        {displayNameError && (
+          <div className="mt-2">
+            <ErrorNote>
+              <span data-testid="payment-sponsor-display-name-error">{displayNameError}</span>
+            </ErrorNote>
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => void saveDisplayNameAndContinue()}
+          disabled={savingDisplayName || !displayNameInput.trim()}
+          data-testid="payment-sponsor-display-name-save"
+          className={`mt-4 ${buttonClass("primary")}`}
+        >
+          {savingDisplayName ? "저장하는 중..." : "저장하고 계속하기"}
+        </button>
       </PageShell>
     );
   }

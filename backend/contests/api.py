@@ -15,13 +15,15 @@ import logging
 from uuid import UUID
 
 from django.db import IntegrityError, transaction
-from django.db.models import Count, DateTimeField, Q, QuerySet, Sum, Value
+from django.db.models import Count, DateTimeField, F, Q, QuerySet, Sum, Value
+from django.db.models.functions import NullIf
 from django.http import HttpRequest
 from ninja import Query, Router
 from ninja.errors import HttpError
 from ninja.pagination import PageNumberPagination, paginate
 
 from accounts.middleware import jwt_auth
+from accounts.sponsor_display import require_sponsor_display_name
 from contests.curation import HomeCurationBucket, home_bucket_for, home_bucket_queryset
 from contests.images import (
     create_image as create_contest_image_for,
@@ -173,6 +175,7 @@ def _serialize_contest(contest: Contest, auth_user: object | None = None) -> Con
         submission_count=contest.submission_count,
         is_owner=is_owner,
         has_own_submission=has_own_submission,
+        sponsor_display_name=contest.sponsor.display_name or None,
     )
 
 
@@ -434,6 +437,10 @@ def publish_free_contest(request: HttpRequest, contest_id: int):
     if not contest.requirements.exists():
         raise HttpError(422, "요구사항을 하나 이상 적어야 공개할 수 있습니다.")
 
+    # 참가자에게 개최자가 익명으로 보이지 않도록, 공개 직전에 표시 이름을
+    # 확인한다(#447) — 초안 상태에서는 요구하지 않는다.
+    require_sponsor_display_name(contest.sponsor)
+
     transitioned = claim_contest_transition("publish-free", contest.pk)
     if not transitioned:
         # 동시에 들어온 다른 요청이 먼저 이겼다 — 정상 경로에서는 도달하지
@@ -540,6 +547,12 @@ def list_contests(request: HttpRequest, filters: Query[ContestListFilters]):
         # 조인으로 부풀려지는 것을 막는다 — 필터가 없을 때도 안전하고 비용도
         # 무시할 만하다.
         .annotate(submission_count=Count("submissions", distinct=True))
+        # 개최자의 공개용 표시 이름(#447) — 이 엔드포인트는 ninja가 QuerySet을
+        # 직접 ContestOut으로 옮기므로(_serialize_contest를 거치지 않는다),
+        # `contest.sponsor.display_name`을 파이썬에서 읽는 대신 SQL 단계에서
+        # 같은 이름의 애노테이션으로 만들어 둬야 필드가 채워진다. `NullIf`가
+        # 빈 문자열을 null로 바꾼다 — 스키마 계약("비어 있으면 null")과 같다.
+        .annotate(sponsor_display_name=NullIf(F("sponsor__display_name"), Value("")))
     )
 
 

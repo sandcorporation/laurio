@@ -122,6 +122,15 @@ def _publish_contest(
 ) -> dict:
     import uuid
 
+    # 표시 이름이 없으면 결제 시작이 422로 막힌다(#447).
+    profile_resp = client.post(
+        "/api/accounts/sponsor-profile",
+        data={"display_name": f"{sponsor['uid']} 개최자"},
+        content_type="application/json",
+        **_auth_header(sponsor["access"]),
+    )
+    assert profile_resp.status_code == 200, profile_resp.content
+
     response = client.post(
         CONTESTS_URL,
         data={

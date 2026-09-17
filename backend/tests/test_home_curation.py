@@ -99,6 +99,22 @@ def test_published_far_from_deadline_is_ongoing(client, sponsor, category, deliv
 
 
 @pytest.mark.django_db
+def test_ongoing_bucket_carries_sponsor_display_name(client, sponsor, category, deliverable_type):
+    """랜딩 큐레이션 응답에도 개최자의 공개용 표시 이름이 실린다(#447)."""
+
+    contest = _make_contest(
+        sponsor, category, deliverable_type,
+        status=Contest.Status.PUBLISHED,
+        deadline_at=timezone.now() + timedelta(days=HOME_IMMINENT_DEADLINE_DAYS + 5),
+    )
+
+    buckets = _buckets(client)
+    ongoing_by_id = {c["id"]: c for c in buckets[HomeCurationBucket.ONGOING]}
+
+    assert ongoing_by_id[contest.id]["sponsor_display_name"] == sponsor.display_name
+
+
+@pytest.mark.django_db
 def test_published_near_deadline_is_imminent_not_ongoing(
     client, sponsor, category, deliverable_type
 ):

@@ -57,6 +57,15 @@ def _hosted_user(client, uid: str) -> dict:
     from django.contrib.auth import get_user_model
 
     user = get_user_model().objects.get(email=f"{uid}@example.com")
+    # 표시 이름이 없으면 공개(무료)·결제 시작(유료)이 422로 막힌다(#447) —
+    # 이 파일은 개최자·참가자 양쪽에 이 헬퍼를 함께 쓰므로 항상 채워 둔다.
+    profile_resp = client.post(
+        "/api/accounts/sponsor-profile",
+        data={"display_name": f"{uid} 개최자"},
+        content_type="application/json",
+        **{"HTTP_AUTHORIZATION": f"Bearer {pair['access']}"},
+    )
+    assert profile_resp.status_code == 200, profile_resp.content
     return {"access": pair["access"], "user_id": user.id}
 
 

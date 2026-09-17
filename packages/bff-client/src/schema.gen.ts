@@ -5023,6 +5023,8 @@ export interface components {
             requirements: components["schemas"]["RequirementOut"][];
             /** Source Contest Id */
             source_contest_id?: number | null;
+            /** Sponsor Display Name */
+            sponsor_display_name?: string | null;
             /** Status */
             status: string;
             /** Submission Count */

@@ -76,7 +76,7 @@ CONTEXT.md 「소셜 계정」). 이메일은 로그인에서 사람을 찾는 �
 | `POST /api/contests/quote` | 개최 견적(유료) |
 | `GET /api/contests/free/hosting-permission` | 내 무료 공모전 개최 권한(#415) |
 | `POST /api/contests/free` | 무료 개최(#415) — 본인확인·결제 없이, 개최 권한만 |
-| `POST /api/contests/{id}/publish` | 무료 공모전 공개(#415) — 결제 대신 개최 권한이 연다, 요구사항이 없으면 422 |
+| `POST /api/contests/{id}/publish` | 무료 공모전 공개(#415) — 결제 대신 개최 권한이 연다, 요구사항이 없거나 개최자 표시 이름이 없으면 422(#447) |
 | `GET /api/contests/mine` | 내가 연 것 |
 | `POST`·`PATCH`·`DELETE .../requirements[/{id}]` | 요구사항 |
 | `.../requirement-chat/messages` | 요구사항을 LLM 과 함께 다듬는다 |
@@ -166,6 +166,11 @@ ADR-0036). 업로드 자료의 값은 `submission:{공모전id}:{개발자id}:{�
 — 이 스위치가 공모전 쪽 새 결제를 막는다. `/webhook`은 닫지 않는다(PG가 서버 대
 서버로 부른다) — 새 REQUESTED Payment 자체가 안 생기므로 사실상 부를 일이
 없어진다. 지급·원장은 그대로 연다 — 이미 확정된 지급을 마무리하는 표면이다.
+
+**`POST /api/payments`도 개최자 표시 이름이 없으면 422다**(#447) — 결제로
+공개되는 경로라 PG 등록 전에 여기서 막는다. 무료 공개와 같은 조건
+(`accounts.sponsor_display.require_sponsor_display_name`)이고, 초안
+생성·수정에는 요구하지 않는다.
 
 **복식부기 원장이 진실이다**(ADR-0004). 계정은 다섯이다 — 발주자 예치금 · 개발자 미지급금 ·
 플랫폼 수수료 수익 · 원천징수 예수금 · PG 수수료 비용. 분개는 **append-only** 이고, 배포

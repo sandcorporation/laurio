@@ -95,6 +95,26 @@ export async function establishVerification(page: Page, seed: string): Promise<v
       `본인확인을 통과시키지 못했다(seed=${seed}, ${response.status()}): ${(await response.text()).slice(0, 300)}`,
     );
   }
+
+  // 이 헬퍼는 이 스위트 안에서 언제나 유료 공모전을 개최할 Sponsor를 준비하는
+  // 데만 쓰인다(payment*.spec.ts·contest-images.spec.ts·submit.spec.ts) —
+  // 표시 이름이 없으면 결제 시작이 422로 막히므로(#447) 여기서 함께 채운다.
+  await setSponsorDisplayName(page, `${seed} 개최자`);
+}
+
+/** 표시 이름이 없으면 공개(무료)·결제 시작(유료)이 422로 막힌다(#447) — 화면을
+ * 걷지 않고 기존 프로필 저장 API로 미리 채운다. */
+export async function setSponsorDisplayName(page: Page, displayName: string): Promise<void> {
+  const response = await page.context().request.post("/api/backend/accounts/sponsor-profile", {
+    data: { display_name: displayName },
+    headers: { origin: publicOrigin() },
+    maxRetries: 2,
+  });
+  if (!response.ok()) {
+    throw new Error(
+      `개최자 표시 이름을 채우지 못했다(${response.status()}): ${(await response.text()).slice(0, 300)}`,
+    );
+  }
 }
 
 /** 운영자 앱: 아이디·비밀번호 로그인을 화면 없이 통과한다.

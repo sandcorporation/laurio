@@ -371,6 +371,12 @@ class ContestOut(Schema):
     # (이 필드가 이미 하는 조회를 화면에서 다시 하면 익명 방문자에게는 401을
     # 낳는 별도 인증 필요 호출이 하나 더 생긴다).
     has_own_submission: bool = False
+    # 개최자의 공개용 표시 이름 (#447) — 비어 있으면 null이다. 실명·이메일은
+    # 어떤 경우에도 여기 싣지 않는다(SponsorProfile.display_name만 읽는다,
+    # `contests.api._serialize_contest`). 공개 목록(list_contests)·랜딩
+    # 큐레이션(get_home_curation)이 인증 없이도 이 스키마를 그대로 쓰므로
+    # 익명 방문자도 이 필드를 받는다 — 그래서 공개해도 되는 값만 담는다.
+    sponsor_display_name: str | None = None
 
 
 class HomeCurationGroupOut(Schema):

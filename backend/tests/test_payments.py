@@ -78,11 +78,38 @@ def landing_type(db):
     return DeliverableType.objects.create(name="랜딩·원페이지", minimum_prize=500_000)
 
 
-def _draft_contest(client, *, uid="sponsor-1", ci="sponsor-ci-1", prize=1_000_000, category=None, deliverable_type=None):
-    """검증된 Sponsor로 로그인해 draft Contest를 하나 만들고 (access token, contest dict)를 돌려준다."""
+def _set_sponsor_display_name(client, access: str, name: str) -> None:
+    response = client.post(
+        "/api/accounts/sponsor-profile",
+        data={"display_name": name},
+        content_type="application/json",
+        **_auth_header(access),
+    )
+    assert response.status_code == 200, response.content
+
+
+def _draft_contest(
+    client,
+    *,
+    uid="sponsor-1",
+    ci="sponsor-ci-1",
+    prize=1_000_000,
+    category=None,
+    deliverable_type=None,
+    display_name: str | None = "__default__",
+):
+    """검증된 Sponsor로 로그인해 draft Contest를 하나 만들고 (access token, contest dict)를 돌려준다.
+
+    별다른 지시가 없으면 표시 이름도 함께 채운다(#447 — 표시 이름이 없으면
+    결제 시작이 422로 막힌다). 그 확인 자체를 테스트하려면 `display_name=None`
+    으로 비워 둔다 — 초안 생성 자체는 이름 없이도 된다는 것도 함께 증명한다.
+    """
 
     pair = _login(client, uid=uid, email=f"{uid}@example.com")
     _verify(client, pair["access"], ci=ci)
+    if display_name is not None:
+        name = f"{uid} 개최자" if display_name == "__default__" else display_name
+        _set_sponsor_display_name(client, pair["access"], name)
 
     response = client.post(
         CONTESTS_URL,
@@ -168,6 +195,45 @@ def test_unauthenticated_cannot_initiate_payment(client, category, landing_type)
     )
 
     assert response.status_code == 401
+
+
+@pytest.mark.django_db
+def test_draft_creation_does_not_require_sponsor_display_name(client, category, landing_type):
+    """초안 생성 자체는 표시 이름 없이도 된다(#447) — 요구는 결제를 시작할 때다."""
+
+    access, contest = _draft_contest(
+        client, category=category, deliverable_type=landing_type, display_name=None
+    )
+    assert contest["status"] == "draft"
+
+
+@pytest.mark.django_db
+def test_initiating_payment_without_sponsor_display_name_is_rejected(client, category, landing_type):
+    """개최자 표시 이름이 비어 있으면 결제 시작이 422로 거절된다(#447) — 이름을
+    채우면 같은 draft로 다시 시도해 성공한다."""
+
+    access, contest = _draft_contest(
+        client, category=category, deliverable_type=landing_type, display_name=None
+    )
+
+    response = client.post(
+        PAYMENTS_URL,
+        data={"contest_id": contest["id"]},
+        content_type="application/json",
+        **_auth_header(access),
+    )
+    assert response.status_code == 422, response.content
+    assert Payment.objects.filter(contest_id=contest["id"]).count() == 0
+
+    _set_sponsor_display_name(client, access, "결제 개최자")
+
+    retry = client.post(
+        PAYMENTS_URL,
+        data={"contest_id": contest["id"]},
+        content_type="application/json",
+        **_auth_header(access),
+    )
+    assert retry.status_code == 201, retry.content
 
 
 @pytest.mark.django_db
