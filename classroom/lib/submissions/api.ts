@@ -104,27 +104,22 @@ export type ClassroomSubmissionRow = {
   pending_reason: PendingReason;
 };
 
+// 참여자가 지금 새로 낼 수 없는 이유 하나, 낼 수 있으면 `null`(#439). 우선순위는
+// 보관 → 내보냄 → 숨김이고, "viewing_as_instructor"(강사가 학생 화면으로 보는
+// 중)는 그 셋과 겹치지 않는 별도 판정이다. 백엔드가 이미 우선순위를 정해
+// 하나만 내려주므로 화면은 이 값을 다시 계산하지 않는다
+// (`classroom.participation.participant_submit_blocked_reason`).
+export type SubmitBlockedReason = "archived" | "expelled" | "hidden" | "viewing_as_instructor" | null;
+
 export type ProblemSubmissions = {
   // 화면 눈썹이 말할 클래스 이름(#372 후속).
   class_name: string;
   problem: ProblemMine;
   submissions: ClassroomSubmissionRow[];
-  // 이 참여자가 강사에게 내보내졌는가(#300) — 참이면 화면이 제출 수단을
-  // 숨기고 이유를 보여준다. 지난 시도는 그대로 `submissions`에 남는다.
-  member_expelled: boolean;
-  // 이 클래스가 보관됐는가(#294, #338) — 참이면 화면이 제출 수단을 숨기고
-  // 수업이 끝났다는 이유를 보여준다. 지난 시도는 그대로 `submissions`에 남는다.
-  archived: boolean;
-  // 강사가 이 문제를 숨겼는가(#405) — 참이면 이 참여자는 한 번이라도 낸
-  // 적이 있다는 뜻이다(낸 적 없으면 이 응답 자체가 404). 화면이 제출 칸
-  // 대신 「강사가 숨긴 문제라 새로 낼 수 없습니다」를 보인다.
-  problem_hidden: boolean;
-  // 이 요청을 보낸 사람이 그 클래스의 강사인가(#429) — 참이면 화면이 띠를
-  // 띄우고 제출을 잠근다. 화면은 이 칸만 보고 판단한다(역할을 스스로
-  // 계산하지 않는다).
-  viewing_as_instructor: boolean;
-  // `viewing_as_instructor`가 참일 때만 채워지는 문제 상태 — 띠가 몇 줄을
-  // 더 말할지 이 값으로 정한다. 참여자 시점에는 언제나 null이다.
+  submit_blocked_reason: SubmitBlockedReason;
+  // `submit_blocked_reason`이 "viewing_as_instructor"일 때만 채워지는 문제
+  // 상태 — 띠가 몇 줄을 더 말할지 이 값으로 정한다. 참여자 시점에는 언제나
+  // null이다.
   instructor_problem_status: "draft" | "open" | "hidden" | null;
 };
 

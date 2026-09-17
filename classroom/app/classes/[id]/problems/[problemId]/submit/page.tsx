@@ -103,12 +103,10 @@ export default function ProblemSubmitPage() {
     class_name: className,
     problem,
     submissions,
-    member_expelled: memberExpelled,
-    archived,
-    problem_hidden: problemHidden,
-    viewing_as_instructor: viewingAsInstructor,
+    submit_blocked_reason: submitBlockedReason,
     instructor_problem_status: instructorProblemStatus,
   } = state.data;
+  const viewingAsInstructor = submitBlockedReason === "viewing_as_instructor";
 
   async function submitValue(
     submissionFormat: "source" | "repository",
@@ -176,9 +174,7 @@ export default function ProblemSubmitPage() {
         submissions={submissions}
         viewingAsInstructor={viewingAsInstructor}
         instructorProblemStatus={instructorProblemStatus}
-        memberExpelled={memberExpelled}
-        archived={archived}
-        problemHidden={problemHidden}
+        submitBlockedReason={submitBlockedReason}
         repositoryUrl={repositoryUrl}
         onRepositoryUrlChange={setRepositoryUrl}
         onRepositorySubmit={handleRepositorySubmit}

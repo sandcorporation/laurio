@@ -24,6 +24,7 @@ from accounts.middleware import jwt_auth
 
 from .api import _get_owned_class_or_404, _get_owned_problem_or_404, _serialize_class, _serialize_problem
 from .models import ClassTemplate, ProblemTemplate, ProblemTemplateReport
+from .participation import assert_class_mutable
 from .schemas import (
     ClassOut,
     ClassTemplateListItemOut,
@@ -176,15 +177,14 @@ def import_template(request, share_code: str, payload: ImportTemplateIn):
     """자기 클래스로 가져온다(#316) — 가져온 문제는 초안이고, 체크리스트는
     순서 그대로 따라오며, 채점 모델은 대상 클래스의 기본값을 따른다.
 
-    **보관된 클래스로는 가져올 수 없다** — 보관은 새 가입·새 제출만 막는
-    것이 아니라 그 클래스에 새 내용이 생기는 길 전체를 닫는다는 뜻이다
-    (`join_class`·`create_classroom_submission`과 같은 403, `Class.
-    archived_at` docstring)."""
+    **보관된 클래스로는 가져올 수 없다**(#438) — 보관은 읽기 전용이라는
+    뜻이고, 가져오기는 그 클래스에 새 내용을 만드는 일이다
+    (`classroom.participation.assert_class_mutable`, `Class.archived_at`
+    docstring)."""
 
     template = _get_visible_template_or_404(share_code)
     target_class = _get_owned_class_or_404(payload.target_class_id, request.auth_user.id)
-    if target_class.archived_at is not None:
-        raise HttpError(403, "이 클래스는 보관되어 더 이상 가져올 수 없습니다.")
+    assert_class_mutable(target_class)
 
     problem = import_problem_template(template, target_class)
     return 201, _serialize_problem(problem, target_class)

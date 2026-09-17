@@ -103,7 +103,7 @@ def test_instructor_can_open_draft_problem_and_sees_empty_submissions(client, db
     response = client.get(_mine_url(created["id"], problem_id), **_auth_header(instructor["access"]))
     assert response.status_code == 200
     body = response.json()
-    assert body["viewing_as_instructor"] is True
+    assert body["submit_blocked_reason"] == "viewing_as_instructor"
     assert body["instructor_problem_status"] == "draft"
     assert body["submissions"] == []
 
@@ -118,7 +118,7 @@ def test_instructor_can_open_open_problem_and_sees_empty_submissions(client, db)
     response = client.get(_mine_url(created["id"], problem_id), **_auth_header(instructor["access"]))
     assert response.status_code == 200
     body = response.json()
-    assert body["viewing_as_instructor"] is True
+    assert body["submit_blocked_reason"] == "viewing_as_instructor"
     assert body["instructor_problem_status"] == "open"
     assert body["submissions"] == []
 
@@ -134,7 +134,7 @@ def test_instructor_can_open_hidden_problem_and_sees_empty_submissions(client, d
     response = client.get(_mine_url(created["id"], problem_id), **_auth_header(instructor["access"]))
     assert response.status_code == 200
     body = response.json()
-    assert body["viewing_as_instructor"] is True
+    assert body["submit_blocked_reason"] == "viewing_as_instructor"
     assert body["instructor_problem_status"] == "hidden"
     assert body["submissions"] == []
 
@@ -160,7 +160,7 @@ def test_instructors_own_attempts_never_appear_in_the_instructor_view(client, db
     response = client.get(_mine_url(created["id"], problem_id), **_auth_header(instructor["access"]))
     assert response.status_code == 200
     body = response.json()
-    assert body["viewing_as_instructor"] is True
+    assert body["submit_blocked_reason"] == "viewing_as_instructor"
     assert body["submissions"] == []
 
 
@@ -204,7 +204,7 @@ def test_participant_view_still_reports_not_viewing_as_instructor(client, db):
     response = client.get(_mine_url(created["id"], problem_id), **_auth_header(participant["access"]))
     assert response.status_code == 200
     body = response.json()
-    assert body["viewing_as_instructor"] is False
+    assert body["submit_blocked_reason"] is None
     assert body["instructor_problem_status"] is None
 
 

@@ -166,6 +166,22 @@ export default function NewProblemPage() {
     void submitProblem(true);
   }
 
+  if (classState.status === "ready" && classState.classroom.archived) {
+    // 클래스 상세는 이 화면으로 가는 링크 자체를 감추지만(#438), 주소를 직접
+    // 열면 여기까지 온다 — 서버도 같은 요청을 403으로 거절하므로 폼을 아예
+    // 보여주지 않고 이유만 말한다.
+    return (
+      <PageShell>
+        <PageHeader eyebrow="클래스 · 문제" title="새 문제" titleTestId="new-problem-heading" />
+        <Note tone="attention">
+          <span data-testid="new-problem-archived-note">
+            이 클래스는 보관되어 새 문제를 만들 수 없습니다 — 보관을 되돌린 뒤에 할 수 있습니다.
+          </span>
+        </Note>
+      </PageShell>
+    );
+  }
+
   return (
     <PageShell>
       <PageHeader

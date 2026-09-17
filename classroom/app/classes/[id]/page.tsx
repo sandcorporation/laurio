@@ -375,13 +375,23 @@ export default function ClassDetailPage() {
             <Card className="border-t-0">
               <div className="flex items-center justify-between gap-3 border-b border-rule px-4 py-3">
                 <h2 className="text-[15px] font-semibold">문제</h2>
-                <Link
-                  href={`/classes/${classId}/problems/new`}
-                  data-testid="new-problem-link"
-                  className={buttonClass("primary", "sm")}
-                >
-                  새 문제
-                </Link>
+                {classroom.archived ? (
+                  <span
+                    data-testid="new-problem-blocked"
+                    title="이 클래스는 보관되어 새 문제를 만들 수 없습니다."
+                    className={`${buttonClass("primary", "sm")} cursor-not-allowed opacity-50`}
+                  >
+                    새 문제
+                  </span>
+                ) : (
+                  <Link
+                    href={`/classes/${classId}/problems/new`}
+                    data-testid="new-problem-link"
+                    className={buttonClass("primary", "sm")}
+                  >
+                    새 문제
+                  </Link>
+                )}
               </div>
 
               {problemsState.status === "loading" ? (
@@ -454,11 +464,18 @@ export default function ClassDetailPage() {
                             {formatAchievementRate(problem)}
                           </span>
                         </span>
-                        <span className="flex shrink-0 gap-1">
+                        <span
+                          className="flex shrink-0 gap-1"
+                          title={
+                            classroom.archived
+                              ? "이 클래스는 보관되어 순서를 바꿀 수 없습니다."
+                              : undefined
+                          }
+                        >
                           <button
                             type="button"
                             data-testid={`problem-row-${problem.id}-move-up`}
-                            disabled={index === 0}
+                            disabled={classroom.archived || index === 0}
                             onClick={() => move(problem.id, "up")}
                             className={buttonClass("secondary", "sm")}
                           >
@@ -467,7 +484,7 @@ export default function ClassDetailPage() {
                           <button
                             type="button"
                             data-testid={`problem-row-${problem.id}-move-down`}
-                            disabled={index === problemsState.problems.length - 1}
+                            disabled={classroom.archived || index === problemsState.problems.length - 1}
                             onClick={() => move(problem.id, "down")}
                             className={buttonClass("secondary", "sm")}
                           >
