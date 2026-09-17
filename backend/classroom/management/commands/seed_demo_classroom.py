@@ -397,7 +397,7 @@ class Command(BaseCommand):
                 # 문법 검사 기본 항목(#408) — 이 시드는 실제 파싱을 돌리지
                 # 않으므로(채점 자체를 돌리지 않는다), 원하는 통과 여부와
                 # 같은 값으로 지어낸다. `problem.syntax_check_enabled`가
-                # 기본으로 켜져 있어 이 값이 없으면 `_is_score_passed`가
+                # 기본으로 켜져 있어 이 값이 없으면 `Problem.is_score_passed`가
                 # 필수 항목을 다 채웠어도 미통과로 본다 — 데모의 "통과" 시도가
                 # 실제로 통과로 보이려면 이 칸도 함께 채워야 한다.
                 syntax_check_result={
