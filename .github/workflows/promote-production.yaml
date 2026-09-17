@@ -17,8 +17,14 @@ on:
     types: [completed]
     branches: [main]
 
+# **push 는 GITHUB_TOKEN 이 아니라 저장소 배포 키(SSH)로 한다**(2026-09-17). GitHub 는 Actions
+# 토큰으로 `.github/workflows/` 를 바꾼 커밋을 push 하는 것을 막는다(`refusing to allow a
+# GitHub App to create or update workflow ... without workflows permission`) — 이미지 잡을
+# 더한 커밋(46b5b2c)의 승격이 그렇게 막혔고, 워크플로를 고치는 커밋마다 그럴 것이었다.
+# 배포 키(쓰기, secret PROMOTE_DEPLOY_KEY)는 이 저장소 하나에만 닿고 그 제한을 받지 않는다.
+# 그래서 토큰에는 쓰기 권한이 필요 없다.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: promote-production
@@ -33,6 +39,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ssh-key: ${{ secrets.PROMOTE_DEPLOY_KEY }}
 
       - name: Fast-forward production to the green main commit
         env:
