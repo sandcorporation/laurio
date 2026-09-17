@@ -335,7 +335,7 @@ def test_a_participant_who_submitted_still_reaches_the_hidden_problem_read_only(
     assert response.status_code == 200
     body = response.json()
     assert len(body["submissions"]) == 1
-    assert body["problem_hidden"] is True
+    assert body["submit_blocked_reason"] == "hidden"
 
 
 def test_a_participant_who_never_submitted_gets_a_404_for_the_hidden_problem(client, db):

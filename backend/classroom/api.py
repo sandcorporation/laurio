@@ -96,7 +96,16 @@ from .schemas import (
     ScoringModelOut,
 )
 from .events import publish_attempt_submitted
-from .participation import assert_class_mutable
+from .participation import (
+    SUBMIT_BLOCKED_ARCHIVED,
+    SUBMIT_BLOCKED_EXPELLED,
+    SUBMIT_BLOCKED_HIDDEN,
+    SUBMIT_BLOCKED_VIEWING_AS_INSTRUCTOR,
+    assert_class_mutable,
+    participant_membership_blocked_reason,
+    participant_submit_blocked_reason,
+    visible_problems_queryset,
+)
 from .scoring import check_scoring_key
 from .scoring_model_catalog import get_scoring_model_catalog
 from .scoring_models import is_fallback_model, is_reasoning_model_id, is_valid_reasoning_effort
@@ -992,10 +1001,10 @@ def rename_myself(request: HttpRequest, class_id: int, payload: MemberRenameIn):
 
     member = _get_member_or_404(class_id, request.auth_user.id)
 
-    if member.classroom.archived_at is not None:
+    reason = participant_membership_blocked_reason(member.classroom, member)
+    if reason == SUBMIT_BLOCKED_ARCHIVED:
         raise HttpError(403, "이 클래스는 보관되어 이름을 바꿀 수 없습니다.")
-
-    if member.expelled_at is not None:
+    if reason == SUBMIT_BLOCKED_EXPELLED:
         raise HttpError(403, "더 이상 이 클래스의 참여자가 아닙니다.")
 
     member.display_name = payload.display_name
@@ -1274,33 +1283,27 @@ def list_my_problems(request: HttpRequest, class_id: int):
     상단 docstring, `reorder_problems`와 같은 이유).
 
     **지금 이름과 편집 칸을 숨길 신호도 함께 싣는다**(#372) — 이 화면
-    위쪽의 인라인 이름 편집 칸이 그 값을 초기값으로 쓴다. `get_my_problem`이
-    `member_expelled`·`archived`를 싣는 것과 같은 이유다.
+    위쪽의 인라인 이름 편집 칸이 그 값을 초기값으로 쓴다(`get_my_problem`이
+    `submit_blocked_reason`으로 같은 종류의 신호를 싣는 것과 같은 이유,
+    #439).
 
     **한 번이라도 낸 숨긴 문제는 `hidden_problems`에 따로 실린다**(#406) —
     열린 목록(`problems`)과 같은 방식으로 통과 여부를 계산하지만, 시도가
-    없는 숨긴 문제는 이 묶음에도 들지 않는다(#405 「존재 숨김」 규칙)."""
+    없는 숨긴 문제는 이 묶음에도 들지 않는다(#405 「존재 숨김」 규칙).
+
+    **이 목록과 문제 상세가 같은 존재 판정을 쓴다**(#439 AC "내 문제 목록에
+    보이는 문제와 상세로 열 수 있는 문제가 언제나 같다") —
+    `classroom.participation.visible_problems_queryset`이 열림·숨김 두
+    묶음을 한 질의로 내려주고, 여기서는 상태로만 갈라 둘로 쪼갠다."""
 
     member = _get_member_or_404(class_id, request.auth_user.id)
-    problems = list(
-        Problem.objects.filter(classroom_id=class_id, status=Problem.Status.OPEN)
+    visible = list(
+        visible_problems_queryset(class_id, member)
         .prefetch_related("checklist_items")
         .order_by("order", "id")
     )
-    # 강사가 숨겼지만(#405) 이 참여자가 한 번이라도 낸 문제들 — 아래
-    # 「숨겨진 문제」 묶음의 재료다(#406). 낸 적 없는 숨긴 문제는 이
-    # `id__in` 서브쿼리에 애초에 들지 않는다.
-    hidden_problems = list(
-        Problem.objects.filter(
-            classroom_id=class_id,
-            status=Problem.Status.HIDDEN,
-            id__in=ClassroomSubmission.objects.filter(member=member).values_list(
-                "problem_id", flat=True
-            ),
-        )
-        .prefetch_related("checklist_items")
-        .order_by("order", "id")
-    )
+    problems = [p for p in visible if p.status == Problem.Status.OPEN]
+    hidden_problems = [p for p in visible if p.status == Problem.Status.HIDDEN]
 
     all_problems = problems + hidden_problems
     submissions = ClassroomSubmission.objects.filter(
@@ -1556,27 +1559,21 @@ def _get_visible_problem_for_participant_or_404(
     문제만 존재한다(#405) — 초안과, 낸 적 없는 숨긴 문제는 강사만 본다
     (Problem docstring, CONTEXT.md 「Problem」). 남의 클래스와 같은 이유로
     404다 — 숨김은 존재를 숨기는 게 아니라 낸 사람에게는 계속 보인다는
-    점이 다를 뿐, 그 밖에는 같은 "존재 숨김" 규칙을 따른다."""
+    점이 다를 뿐, 그 밖에는 같은 "존재 숨김" 규칙을 따른다.
+
+    `classroom.participation.visible_problems_queryset`을 그대로 쓴다 —
+    `list_my_problems`가 목록을 거르는 것과 같은 질의라야 「목록에 보이는
+    문제와 상세로 열 수 있는 문제가 언제나 같다」(#439 AC)가 성립한다."""
 
     try:
-        problem = (
-            Problem.objects.select_related("classroom")
+        return (
+            visible_problems_queryset(class_id, member)
+            .select_related("classroom")
             .prefetch_related("checklist_items")
-            .get(
-                id=problem_id,
-                classroom_id=class_id,
-                status__in=[Problem.Status.OPEN, Problem.Status.HIDDEN],
-            )
+            .get(id=problem_id)
         )
     except Problem.DoesNotExist as exc:
         raise HttpError(404, "문제를 찾을 수 없습니다.") from exc
-
-    if problem.status == Problem.Status.HIDDEN and not ClassroomSubmission.objects.filter(
-        problem=problem, member=member
-    ).exists():
-        raise HttpError(404, "문제를 찾을 수 없습니다.") from None
-
-    return problem
 
 
 @router.get(
@@ -1605,10 +1602,9 @@ def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
             class_name=class_obj.name,
             problem=_serialize_problem_mine(problem, passed=False),
             submissions=[],
-            member_expelled=False,
-            archived=class_obj.archived_at is not None,
-            problem_hidden=False,
-            viewing_as_instructor=True,
+            # 강사는 참여자가 아니다 — 보관·내보냄·숨김 판정 밖의 별도
+            # 사유다(#439, `classroom.participation` docstring).
+            submit_blocked_reason=SUBMIT_BLOCKED_VIEWING_AS_INSTRUCTOR,
             instructor_problem_status=problem.status,
         )
 
@@ -1645,17 +1641,10 @@ def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
         ),
         submissions=serialized_submissions,
         # 내보내진 사람도 지난 시도는 그대로 읽되(#300 AC), 화면이 제출
-        # 수단을 감추고 이유를 말해 줄 수 있도록 신호만 얹는다 — 막는
-        # 문 자체는 여전히 `create_classroom_submission`의 403이다.
-        member_expelled=member.expelled_at is not None,
-        # 보관된 클래스도 같은 이유로 신호만 얹는다(#294, #338) — 실제 문은
-        # 여전히 `create_classroom_submission`의 403이다.
-        archived=member.classroom.archived_at is not None,
-        # 강사가 숨긴 문제인가(#405) — 참이면 화면이 제출 칸 대신 안내를
-        # 보인다. 여기 닿았다는 것 자체가 이미 이 참여자가 한 번은 낸
-        # 적이 있다는 뜻이다(`_get_visible_problem_for_participant_or_404`).
-        # 실제 문은 여전히 `create_classroom_submission`의 403이다.
-        problem_hidden=problem.status == Problem.Status.HIDDEN,
+        # 수단을 감추고 이유를 말해 줄 수 있도록 이유 하나만 얹는다(#439,
+        # 우선순위는 보관 → 내보냄 → 숨김) — 막는 문 자체는 여전히
+        # `create_classroom_submission`의 403이다.
+        submit_blocked_reason=participant_submit_blocked_reason(member.classroom, member, problem),
     )
 
 
@@ -1691,19 +1680,21 @@ def create_classroom_submission(
     member = _get_member_or_404(class_id, request.auth_user.id)
     problem = _get_visible_problem_for_participant_or_404(class_id, problem_id, member)
 
-    if member.classroom.archived_at is not None:
+    # 낼 수 있는가는 참여 정책 모듈이 한 곳에서 답한다(#439) — 우선순위는
+    # 보관 → 내보냄 → 숨김이고, 화면의 `submit_blocked_reason`과 여기 문이
+    # 같은 기준이어야 어긋나지 않는다.
+    blocked_reason = participant_submit_blocked_reason(member.classroom, member, problem)
+    if blocked_reason == SUBMIT_BLOCKED_ARCHIVED:
         # #294 AC "보관된 클래스에는 새 제출을 낼 수 없다" — 지난 시도는
         # 그대로 읽히므로(`get_my_problem`) 이 엔드포인트만 막는다.
         raise HttpError(403, "이 클래스는 보관되어 새 제출을 받지 않습니다.")
-
-    if member.expelled_at is not None:
+    if blocked_reason == SUBMIT_BLOCKED_EXPELLED:
         # ClassMember.expelled_at의 docstring이 이 엔드포인트를 지목해 둔
         # 자리다 — 행은 지우지 않되 새 제출만 막는다. 강사가 이미 그 사실을
         # 아는 사람에게는 404(존재 자체를 숨김)보다 403(권한이 없다는 것을
         # 안다)이 더 정직하다.
         raise HttpError(403, "더 이상 이 클래스의 참여자가 아닙니다.")
-
-    if problem.status == Problem.Status.HIDDEN:
+    if blocked_reason == SUBMIT_BLOCKED_HIDDEN:
         # 강사가 거둔 문제다(#405) — 낸 적 있는 사람만 여기 닿는다
         # (`_get_visible_problem_for_participant_or_404`), 그래도 새로
         # 낼 수는 없다. 다시 열면(`reopen_problem`) 이 분기를 벗어난다.

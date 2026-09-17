@@ -590,12 +590,18 @@ export interface paths {
          *     상단 docstring, `reorder_problems`와 같은 이유).
          *
          *     **지금 이름과 편집 칸을 숨길 신호도 함께 싣는다**(#372) — 이 화면
-         *     위쪽의 인라인 이름 편집 칸이 그 값을 초기값으로 쓴다. `get_my_problem`이
-         *     `member_expelled`·`archived`를 싣는 것과 같은 이유다.
+         *     위쪽의 인라인 이름 편집 칸이 그 값을 초기값으로 쓴다(`get_my_problem`이
+         *     `submit_blocked_reason`으로 같은 종류의 신호를 싣는 것과 같은 이유,
+         *     #439).
          *
          *     **한 번이라도 낸 숨긴 문제는 `hidden_problems`에 따로 실린다**(#406) —
          *     열린 목록(`problems`)과 같은 방식으로 통과 여부를 계산하지만, 시도가
          *     없는 숨긴 문제는 이 묶음에도 들지 않는다(#405 「존재 숨김」 규칙).
+         *
+         *     **이 목록과 문제 상세가 같은 존재 판정을 쓴다**(#439 AC "내 문제 목록에
+         *     보이는 문제와 상세로 열 수 있는 문제가 언제나 같다") —
+         *     `classroom.participation.visible_problems_queryset`이 열림·숨김 두
+         *     묶음을 한 질의로 내려주고, 여기서는 상태로만 갈라 둘로 쪼갠다.
          */
         get: operations["classroom_api_list_my_problems"];
         put?: never;
@@ -4517,8 +4523,8 @@ export interface components {
          * ClassroomProblemMineOut
          * @description 참여자가 보는 문제 하나(#286) — 강사 전용 `ProblemOut`과 달리 `status`가
          *     없다. 열린 문제와, 낸 적 있는 숨긴 문제 둘 다 이 자리에 닿지만(#405) 그
-         *     구별은 `ClassroomProblemSubmissionsOut.problem_hidden`이 대신 진다 — 이
-         *     조각 자체는 여전히 상태를 모른다.
+         *     구별은 `ClassroomProblemSubmissionsOut.submit_blocked_reason`(#439)이
+         *     대신 진다 — 이 조각 자체는 여전히 상태를 모른다.
          *
          *     이름이 `Classroom` 접두어를 든다 — `contests.submission_schemas.
          *     ProblemOut`은 없지만 `SubmissionIn`·`SubmissionOut`은 있고, django-ninja가
@@ -4581,33 +4587,15 @@ export interface components {
         };
         /** ClassroomProblemSubmissionsOut */
         ClassroomProblemSubmissionsOut: {
-            /**
-             * Archived
-             * @default false
-             */
-            archived: boolean;
             /** Class Name */
             class_name: string;
             /** Instructor Problem Status */
             instructor_problem_status?: string | null;
-            /**
-             * Member Expelled
-             * @default false
-             */
-            member_expelled: boolean;
             problem: components["schemas"]["ClassroomProblemMineOut"];
-            /**
-             * Problem Hidden
-             * @default false
-             */
-            problem_hidden: boolean;
             /** Submissions */
             submissions: components["schemas"]["ClassroomSubmissionOut"][];
-            /**
-             * Viewing As Instructor
-             * @default false
-             */
-            viewing_as_instructor: boolean;
+            /** Submit Blocked Reason */
+            submit_blocked_reason?: string | null;
         };
         /** ClassroomRosterGridOut */
         ClassroomRosterGridOut: {
