@@ -743,9 +743,9 @@ export interface paths {
          *     이유).
          *
          *     **대상 클래스가 보관됐으면 403이다**(#326 AC "보관된 클래스에서는
-         *     가져올 수 없다") — `problem_templates.import_template`이 이미 지키는
-         *     같은 규칙을 여기서도 지킨다: 보관은 그 클래스에 새 내용이 느는 길을
-         *     전부 닫는다는 뜻이라 복사도 예외가 아니다.
+         *     가져올 수 없다", #438) — `classroom.participation.assert_class_mutable`이
+         *     `problem_templates.import_template`과 같은 규칙을 여기서도 지킨다: 보관은
+         *     읽기 전용이라는 뜻이라 복사도 예외가 아니다.
          */
         post: operations["classroom_api_copy_problem"];
         delete?: never;
@@ -1155,10 +1155,10 @@ export interface paths {
          * @description 자기 클래스로 가져온다(#316) — 가져온 문제는 초안이고, 체크리스트는
          *     순서 그대로 따라오며, 채점 모델은 대상 클래스의 기본값을 따른다.
          *
-         *     **보관된 클래스로는 가져올 수 없다** — 보관은 새 가입·새 제출만 막는
-         *     것이 아니라 그 클래스에 새 내용이 생기는 길 전체를 닫는다는 뜻이다
-         *     (`join_class`·`create_classroom_submission`과 같은 403, `Class.
-         *     archived_at` docstring).
+         *     **보관된 클래스로는 가져올 수 없다**(#438) — 보관은 읽기 전용이라는
+         *     뜻이고, 가져오기는 그 클래스에 새 내용을 만드는 일이다
+         *     (`classroom.participation.assert_class_mutable`, `Class.archived_at`
+         *     docstring).
          */
         post: operations["classroom_template_api_import_template"];
         delete?: never;

@@ -96,6 +96,7 @@ from .schemas import (
     ScoringModelOut,
 )
 from .events import publish_attempt_submitted
+from .participation import assert_class_mutable
 from .scoring import check_scoring_key
 from .scoring_model_catalog import get_scoring_model_catalog
 from .scoring_models import is_fallback_model, is_reasoning_model_id, is_valid_reasoning_effort
@@ -1123,6 +1124,7 @@ def create_problem(request: HttpRequest, class_id: int, payload: ProblemIn):
     생긴다")."""
 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    assert_class_mutable(class_obj)
 
     submission_formats = _validate_submission_formats(payload.submission_formats)
 
@@ -1193,6 +1195,7 @@ def reorder_problems(request: HttpRequest, class_id: int, payload: ProblemReorde
     세그먼트 전부 → 동적 `{problem_id}` 전부."""
 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    assert_class_mutable(class_obj)
     problems = {p.id: p for p in class_obj.problems.all()}
 
     if set(payload.problem_ids) != set(problems):
@@ -1360,6 +1363,7 @@ def get_problem(request: HttpRequest, class_id: int, problem_id: int):
 def update_problem(request: HttpRequest, class_id: int, problem_id: int, payload: ProblemPatchIn):
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problem = _get_owned_problem_or_404(class_obj, problem_id)
+    assert_class_mutable(class_obj)
 
     submission_formats = (
         _validate_submission_formats(payload.submission_formats)
@@ -1446,6 +1450,7 @@ def delete_problem(request: HttpRequest, class_id: int, problem_id: int):
 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problem = _get_owned_problem_or_404(class_obj, problem_id)
+    assert_class_mutable(class_obj)
     if not _problem_deletable(problem, class_obj):
         raise HttpError(403, "지울 수 없습니다 — 대신 숨겨주세요.")
     # 채점을 걷는 것과 문제를 지우는 것, 둘이 한 트랜잭션이어야 한다 — 둘로
@@ -1470,6 +1475,7 @@ def open_problem(request: HttpRequest, class_id: int, problem_id: int):
 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problem = _get_owned_problem_or_404(class_obj, problem_id)
+    assert_class_mutable(class_obj)
 
     if not problem.checklist_items.filter(required=True).exists():
         raise HttpError(400, "필수 항목이 하나도 없는 문제는 열 수 없습니다.")
@@ -1491,6 +1497,7 @@ def hide_problem(request: HttpRequest, class_id: int, problem_id: int):
 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problem = _get_owned_problem_or_404(class_obj, problem_id)
+    assert_class_mutable(class_obj)
 
     if problem.status != Problem.Status.OPEN:
         raise HttpError(400, "열린 문제만 숨길 수 있습니다.")
@@ -1512,6 +1519,7 @@ def reopen_problem(request: HttpRequest, class_id: int, problem_id: int):
 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problem = _get_owned_problem_or_404(class_obj, problem_id)
+    assert_class_mutable(class_obj)
 
     if problem.status != Problem.Status.HIDDEN:
         raise HttpError(400, "숨긴 문제만 다시 열 수 있습니다.")
@@ -1817,15 +1825,14 @@ def copy_problem(request: HttpRequest, class_id: int, problem_id: int, payload: 
     이유).
 
     **대상 클래스가 보관됐으면 403이다**(#326 AC "보관된 클래스에서는
-    가져올 수 없다") — `problem_templates.import_template`이 이미 지키는
-    같은 규칙을 여기서도 지킨다: 보관은 그 클래스에 새 내용이 느는 길을
-    전부 닫는다는 뜻이라 복사도 예외가 아니다."""
+    가져올 수 없다", #438) — `classroom.participation.assert_class_mutable`이
+    `problem_templates.import_template`과 같은 규칙을 여기서도 지킨다: 보관은
+    읽기 전용이라는 뜻이라 복사도 예외가 아니다."""
 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problem = _get_owned_problem_or_404(class_obj, problem_id)
     target_class = _get_owned_class_or_404(payload.target_class_id, request.auth_user.id)
-    if target_class.archived_at is not None:
-        raise HttpError(403, "이 클래스는 보관되어 더 이상 가져올 수 없습니다.")
+    assert_class_mutable(target_class)
 
     copy = copy_problem_to_class(problem, target_class)
     return 201, _serialize_problem(copy, target_class)
@@ -1851,6 +1858,7 @@ def create_checklist_item(
 ):
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problem = _get_owned_problem_or_404(class_obj, problem_id)
+    assert_class_mutable(class_obj)
 
     next_order = problem.checklist_items.count()
     item = ChecklistItem.objects.create(
@@ -1872,6 +1880,7 @@ def reorder_checklist_items(
 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problem = _get_owned_problem_or_404(class_obj, problem_id)
+    assert_class_mutable(class_obj)
     items = {i.id: i for i in problem.checklist_items.all()}
 
     if set(payload.item_ids) != set(items):
@@ -1901,6 +1910,7 @@ def update_checklist_item(
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problem = _get_owned_problem_or_404(class_obj, problem_id)
     item = _get_owned_checklist_item_or_404(problem, item_id)
+    assert_class_mutable(class_obj)
 
     update_fields = []
     if payload.label is not None:
@@ -1923,6 +1933,7 @@ def delete_checklist_item(request: HttpRequest, class_id: int, problem_id: int, 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problem = _get_owned_problem_or_404(class_obj, problem_id)
     item = _get_owned_checklist_item_or_404(problem, item_id)
+    assert_class_mutable(class_obj)
     item.delete()
     return 204, None
 

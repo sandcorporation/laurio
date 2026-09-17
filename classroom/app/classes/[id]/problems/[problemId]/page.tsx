@@ -65,10 +65,12 @@ function DeleteProblemCard({
   classId,
   problemId,
   problem,
+  isArchived,
 }: {
   classId: number;
   problemId: number;
   problem: ProblemRow;
+  isArchived: boolean;
 }) {
   // 삭제 — 없던 일로 한다(#430/#431, ADR-0050). 클래스 삭제(설정 화면의
   // `DeleteClassCard`)와 같은 절차다: 지워질 것을 먼저 말하고 제목을 다시
@@ -102,6 +104,24 @@ function DeleteProblemCard({
       setError(err instanceof BackendError ? err.message : "문제를 지우지 못했습니다.");
       setDeleting(false);
     }
+  }
+
+  if (isArchived) {
+    // 보관한 클래스에서는 삭제 버튼 자체를 감춘다(#438) — 되돌린 뒤에
+    // 하라고 안내한다: 보관이 실제로 삭제도 막으므로, 안 되는 이유를
+    // 먼저 알려야 되돌리러 갈지 판단할 수 있다.
+    return (
+      <Card>
+        <CardHeader title="문제 삭제" hint="되돌릴 수 없습니다" />
+        <div className="p-4">
+          <Note tone="attention">
+            <span data-testid="delete-problem-archived">
+              이 클래스는 보관되어 문제를 지울 수 없습니다 — 보관을 되돌린 뒤에 할 수 있습니다.
+            </span>
+          </Note>
+        </div>
+      </Card>
+    );
   }
 
   if (!problem.deletable) {
@@ -286,6 +306,12 @@ export default function EditProblemPage() {
   }
 
   const { problem } = state;
+  // 보관된 클래스는 읽기 전용이다(#438) — 이 화면의 모든 변경 버튼이 이
+  // 값 하나로 갈린다. 서버도 같은 요청을 403으로 거절하므로(`classroom.
+  // participation.assert_class_mutable`), 이 disable 은 편의일 뿐 문 자체는
+  // 여전히 백엔드다.
+  const isArchived = classState.status === "ready" && classState.classroom.archived;
+  const archivedReason = "이 클래스는 보관되어 바꿀 수 없습니다.";
 
   function toggleSubmissionFormat(format: SubmissionFormat, checked: boolean) {
     setSubmissionFormats((prev) =>
@@ -525,7 +551,15 @@ export default function EditProblemPage() {
             >
               학생 화면으로
             </Link>
-            {problem.status === "draft" ? (
+            {isArchived ? (
+              <span
+                data-testid="problem-transition-archived"
+                title={archivedReason}
+                className={`${buttonClass()} cursor-not-allowed opacity-50`}
+              >
+                {archivedReason}
+              </span>
+            ) : problem.status === "draft" ? (
               <button
                 type="button"
                 data-testid="open-problem-button"
@@ -742,6 +776,13 @@ export default function EditProblemPage() {
 
             <Card>
               <CardHeader title="체크리스트" hint="필수를 전부 충족하면 「통과」 · 바뀔 때마다 바로 저장됩니다" />
+              {isArchived ? (
+                <div className="border-b border-rule bg-surface px-4 py-3">
+                  <Note tone="attention">
+                    <span data-testid="checklist-archived-note">{archivedReason}</span>
+                  </Note>
+                </div>
+              ) : null}
               <div
                 data-testid="syntax-check-toggle-row"
                 className="flex flex-wrap items-center justify-between gap-3 border-b border-rule bg-surface px-4 py-3"
@@ -759,6 +800,7 @@ export default function EditProblemPage() {
                     type="checkbox"
                     data-testid="syntax-check-enabled-input"
                     checked={problem.syntax_check_enabled}
+                    disabled={isArchived}
                     onChange={(event) => handleSyntaxCheckToggle(event.target.checked)}
                     className="accent-attention"
                   />
@@ -783,6 +825,7 @@ export default function EditProblemPage() {
                       <input
                         data-testid={`checklist-item-${item.id}-label-input`}
                         defaultValue={item.label}
+                        disabled={isArchived}
                         onBlur={(event) => {
                           if (event.target.value.trim() !== "" && event.target.value !== item.label) {
                             handleItemLabelSave(item.id, event.target.value.trim());
@@ -795,6 +838,7 @@ export default function EditProblemPage() {
                           type="checkbox"
                           data-testid={`checklist-item-${item.id}-required-input`}
                           checked={item.required}
+                          disabled={isArchived}
                           onChange={(event) => handleItemRequiredToggle(item.id, event.target.checked)}
                           className="accent-attention"
                         />
@@ -804,7 +848,7 @@ export default function EditProblemPage() {
                         <button
                           type="button"
                           data-testid={`checklist-item-${item.id}-move-up`}
-                          disabled={index === 0}
+                          disabled={isArchived || index === 0}
                           onClick={() => handleItemMove(item.id, "up")}
                           className={buttonClass("secondary", "sm")}
                         >
@@ -813,7 +857,7 @@ export default function EditProblemPage() {
                         <button
                           type="button"
                           data-testid={`checklist-item-${item.id}-move-down`}
-                          disabled={index === problem.checklist_items.length - 1}
+                          disabled={isArchived || index === problem.checklist_items.length - 1}
                           onClick={() => handleItemMove(item.id, "down")}
                           className={buttonClass("secondary", "sm")}
                         >
@@ -822,6 +866,7 @@ export default function EditProblemPage() {
                         <button
                           type="button"
                           data-testid={`checklist-item-${item.id}-delete`}
+                          disabled={isArchived}
                           onClick={() => handleItemDelete(item.id)}
                           className={buttonClass("danger", "sm")}
                         >
@@ -843,6 +888,7 @@ export default function EditProblemPage() {
                   value={newItemLabel}
                   onChange={(event) => setNewItemLabel(event.target.value)}
                   required
+                  disabled={isArchived}
                   placeholder="새 항목 — 채점이 이 문장으로 판정합니다"
                   className={`${INPUT_CLASS} min-w-[220px] flex-1`}
                 />
@@ -851,6 +897,7 @@ export default function EditProblemPage() {
                     type="checkbox"
                     data-testid="new-checklist-item-required-input"
                     checked={newItemRequired}
+                    disabled={isArchived}
                     onChange={(event) => setNewItemRequired(event.target.checked)}
                     className="accent-attention"
                   />
@@ -859,7 +906,7 @@ export default function EditProblemPage() {
                 <button
                   type="submit"
                   data-testid="new-checklist-item-submit"
-                  disabled={newItemLabel.trim() === ""}
+                  disabled={isArchived || newItemLabel.trim() === ""}
                   className={buttonClass("primary", "sm")}
                 >
                   추가
@@ -1146,7 +1193,12 @@ export default function EditProblemPage() {
               </div>
             </Card>
 
-            <DeleteProblemCard classId={classId} problemId={problemId} problem={problem} />
+            <DeleteProblemCard
+              classId={classId}
+              problemId={problemId}
+              problem={problem}
+              isArchived={isArchived}
+            />
           </div>
           </div>
         </div>
@@ -1156,12 +1208,18 @@ export default function EditProblemPage() {
             채점 모델은 체크리스트 아래 오른쪽 카드라 모델만 바꾸고 나가면 조용히
             반영되지 않았다. 체크리스트는 여전히 항목마다 바로 저장된다(카드 머리에
             적어 둔다) — 이 버튼은 제목·설명·제출 형식·채점 모델을 저장한다. */}
+        {isArchived ? (
+          <Note tone="attention">
+            <span data-testid="edit-problem-archived-note">{archivedReason}</span>
+          </Note>
+        ) : null}
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="submit"
             form="edit-problem-form"
             data-testid="edit-problem-submit"
             disabled={
+              isArchived ||
               saving ||
               title.trim() === "" ||
               submissionFormats.length === 0 ||

@@ -1,13 +1,20 @@
-"""보관 — 수업이 끝나면 닫되 읽기는 남긴다 (#294, CONTEXT.md 「Class」, ADR-0037).
+"""보관 — 읽기 전용이 된다 (#294, 뜻은 #438이 넓혔다, CONTEXT.md 「Class」, ADR-0037).
 
-핵심 대상: 강사가 클래스를 보관하고 되돌릴 수 있고, 보관된 클래스는 새 가입과
-새 제출만 닫힌다 — 지난 문제·제출물·판정은 그대로 읽힌다. 「내 클래스」에서
-진행중과 보관이 갈려 보이도록 `archived`가 각 행에 실린다.
+핵심 대상: 강사가 클래스를 보관하고 되돌릴 수 있고, 보관된 클래스는 새 가입·새
+제출과 문제·체크리스트를 만들거나 바꾸는 모든 것이 닫힌다 — 지난 문제·제출물·
+판정은 그대로 읽힌다. 「내 클래스」에서 진행중과 보관이 갈려 보이도록 `archived`가
+각 행에 실린다.
 """
 
 from __future__ import annotations
 
 from classroom.models import Class
+from tests.classroom_scenarios import (
+    archive_class,
+    create_class,
+    create_open_problem,
+    login,
+)
 
 CLASSES_URL = "/api/classroom/classes"
 
@@ -275,3 +282,214 @@ def test_archived_classs_past_problems_and_members_are_still_readable(client, db
     )
     assert my_problem.status_code == 200
     assert len(my_problem.json()["submissions"]) == 1
+
+
+# --- 보관 = 읽기 전용: 문제·체크리스트를 만들거나 바꾸는 모든 것이 막힌다 (#438) --
+
+
+def test_creating_a_problem_in_an_archived_class_is_rejected(client, db):
+    instructor = login(client)
+    class_id = create_class(client, instructor["access"])
+    archive_class(client, instructor["access"], class_id)
+
+    response = client.post(
+        f"{CLASSES_URL}/{class_id}/problems",
+        data={"title": "새 문제", "submission_formats": ["repository"]},
+        content_type="application/json",
+        **_auth_header(instructor["access"]),
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"]
+
+
+def test_updating_a_problem_in_an_archived_class_is_rejected(client, db):
+    instructor = login(client)
+    class_id = create_class(client, instructor["access"])
+    problem = create_open_problem(client, instructor["access"], class_id)
+    archive_class(client, instructor["access"], class_id)
+
+    response = client.patch(
+        f"{CLASSES_URL}/{class_id}/problems/{problem.id}",
+        data={"title": "고친 제목"},
+        content_type="application/json",
+        **_auth_header(instructor["access"]),
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"]
+
+
+def test_deleting_a_problem_in_an_archived_class_is_rejected(client, db):
+    instructor = login(client)
+    class_id = create_class(client, instructor["access"])
+    problem = create_open_problem(client, instructor["access"], class_id)
+    archive_class(client, instructor["access"], class_id)
+
+    response = client.delete(
+        f"{CLASSES_URL}/{class_id}/problems/{problem.id}",
+        **_auth_header(instructor["access"]),
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"]
+
+
+def test_hiding_a_problem_in_an_archived_class_is_rejected(client, db):
+    instructor = login(client)
+    class_id = create_class(client, instructor["access"])
+    problem = create_open_problem(client, instructor["access"], class_id)
+    archive_class(client, instructor["access"], class_id)
+
+    response = client.post(
+        f"{CLASSES_URL}/{class_id}/problems/{problem.id}/hide",
+        content_type="application/json",
+        **_auth_header(instructor["access"]),
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"]
+
+
+def test_reopening_a_problem_in_an_archived_class_is_rejected(client, db):
+    instructor = login(client)
+    class_id = create_class(client, instructor["access"])
+    problem = create_open_problem(client, instructor["access"], class_id)
+    hidden = client.post(
+        f"{CLASSES_URL}/{class_id}/problems/{problem.id}/hide",
+        content_type="application/json",
+        **_auth_header(instructor["access"]),
+    )
+    assert hidden.status_code == 200
+    archive_class(client, instructor["access"], class_id)
+
+    response = client.post(
+        f"{CLASSES_URL}/{class_id}/problems/{problem.id}/reopen",
+        content_type="application/json",
+        **_auth_header(instructor["access"]),
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"]
+
+
+def test_opening_a_draft_problem_in_an_archived_class_is_rejected(client, db):
+    instructor = login(client)
+    class_id = create_class(client, instructor["access"])
+    problem = create_open_problem(client, instructor["access"], class_id, open=False)
+    archive_class(client, instructor["access"], class_id)
+
+    response = client.post(
+        f"{CLASSES_URL}/{class_id}/problems/{problem.id}/open",
+        content_type="application/json",
+        **_auth_header(instructor["access"]),
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"]
+
+
+def test_reordering_problems_in_an_archived_class_is_rejected(client, db):
+    instructor = login(client)
+    class_id = create_class(client, instructor["access"])
+    first = create_open_problem(client, instructor["access"], class_id, title="1주차")
+    second = create_open_problem(client, instructor["access"], class_id, title="2주차")
+    archive_class(client, instructor["access"], class_id)
+
+    response = client.post(
+        f"{CLASSES_URL}/{class_id}/problems/reorder",
+        data={"problem_ids": [second.id, first.id]},
+        content_type="application/json",
+        **_auth_header(instructor["access"]),
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"]
+
+
+def test_creating_a_checklist_item_in_an_archived_class_is_rejected(client, db):
+    instructor = login(client)
+    class_id = create_class(client, instructor["access"])
+    problem = create_open_problem(client, instructor["access"], class_id)
+    archive_class(client, instructor["access"], class_id)
+
+    response = client.post(
+        f"{CLASSES_URL}/{class_id}/problems/{problem.id}/checklist-items",
+        data={"label": "새 항목", "required": True},
+        content_type="application/json",
+        **_auth_header(instructor["access"]),
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"]
+
+
+def test_updating_a_checklist_item_in_an_archived_class_is_rejected(client, db):
+    instructor = login(client)
+    class_id = create_class(client, instructor["access"])
+    problem = create_open_problem(client, instructor["access"], class_id)
+    archive_class(client, instructor["access"], class_id)
+
+    response = client.patch(
+        f"{CLASSES_URL}/{class_id}/problems/{problem.id}/checklist-items/{problem.item_id}",
+        data={"label": "고친 항목"},
+        content_type="application/json",
+        **_auth_header(instructor["access"]),
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"]
+
+
+def test_deleting_a_checklist_item_in_an_archived_class_is_rejected(client, db):
+    instructor = login(client)
+    class_id = create_class(client, instructor["access"])
+    problem = create_open_problem(client, instructor["access"], class_id)
+    archive_class(client, instructor["access"], class_id)
+
+    response = client.delete(
+        f"{CLASSES_URL}/{class_id}/problems/{problem.id}/checklist-items/{problem.item_id}",
+        **_auth_header(instructor["access"]),
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"]
+
+
+def test_reordering_checklist_items_in_an_archived_class_is_rejected(client, db):
+    instructor = login(client)
+    class_id = create_class(client, instructor["access"])
+    problem = create_open_problem(
+        client, instructor["access"], class_id, required_labels=["항목1", "항목2"]
+    )
+    archive_class(client, instructor["access"], class_id)
+
+    response = client.post(
+        f"{CLASSES_URL}/{class_id}/problems/{problem.id}/checklist-items/reorder",
+        data={"item_ids": list(reversed(problem.item_ids))},
+        content_type="application/json",
+        **_auth_header(instructor["access"]),
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"]
+
+
+# --- 보관 = 읽기 전용이지만 열려 있는 것은 그대로 열려 있다 (#438) -----------
+
+
+def test_class_settings_can_still_be_patched_while_archived(client, db):
+    instructor = login(client)
+    class_id = create_class(client, instructor["access"])
+    archive_class(client, instructor["access"], class_id)
+
+    response = client.patch(
+        f"{CLASSES_URL}/{class_id}",
+        data={"name": "새 이름"},
+        content_type="application/json",
+        **_auth_header(instructor["access"]),
+    )
+    assert response.status_code == 200
+    assert response.json()["name"] == "새 이름"
+
+
+def test_class_can_still_be_deleted_while_archived(client, db):
+    instructor = login(client)
+    class_id = create_class(client, instructor["access"])
+    archive_class(client, instructor["access"], class_id)
+
+    response = client.delete(
+        f"{CLASSES_URL}/{class_id}",
+        **_auth_header(instructor["access"]),
+    )
+    assert response.status_code == 204
+    assert not Class.objects.filter(id=class_id).exists()
