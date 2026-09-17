@@ -94,6 +94,10 @@ export default function ContestDraftPage() {
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
 
+  // 개최자 표시 이름(#447) — 비어 있으면 공개가 422로 막힌다.
+  const [savingSponsorDisplayName, setSavingSponsorDisplayName] = useState(false);
+  const [sponsorDisplayNameError, setSponsorDisplayNameError] = useState<string | null>(null);
+
   useEffect(() => {
     if (session.status !== "authenticated") return;
     let cancelled = false;
@@ -340,6 +344,35 @@ export default function ContestDraftPage() {
     }
   }
 
+  /** 개최자 표시 이름을 저장한다(#447, 기존 프로필 저장 API) — 성공하면 이
+   * 화면이 들고 있는 Contest에도 즉시 반영해, 다시 불러오지 않고도 공개
+   * 버튼이 바로 풀리게 한다. */
+  async function handleSaveSponsorDisplayName(name: string): Promise<boolean> {
+    if (load.status !== "ready") return false;
+    setSponsorDisplayNameError(null);
+    setSavingSponsorDisplayName(true);
+    try {
+      const response = await bffClient.post<{ display_name: string }>(
+        "/api/backend/accounts/sponsor-profile",
+        { display_name: name },
+      );
+      if (!response.ok) {
+        setSponsorDisplayNameError(response.detail);
+        return false;
+      }
+      setLoad({
+        status: "ready",
+        contest: { ...load.contest, sponsor_display_name: response.data.display_name || null },
+      });
+      return true;
+    } catch {
+      setSponsorDisplayNameError("연결에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+      return false;
+    } finally {
+      setSavingSponsorDisplayName(false);
+    }
+  }
+
   async function handleDeleteRequirement(id: number) {
     setRequirementError(null);
     try {
@@ -452,6 +485,9 @@ export default function ContestDraftPage() {
           onPublish={handlePublish}
           publishing={publishing}
           publishError={publishError}
+          onSaveSponsorDisplayName={handleSaveSponsorDisplayName}
+          savingSponsorDisplayName={savingSponsorDisplayName}
+          sponsorDisplayNameError={sponsorDisplayNameError}
         />
       </div>
     </main>

@@ -30,6 +30,67 @@ export interface RequirementDraftPanelProps {
   onPublish?: () => Promise<void>;
   publishing?: boolean;
   publishError?: string | null;
+  // 개최자 표시 이름(#447) — 비어 있으면 공개(무료)·결제 시작(유료)이 422로
+  // 거절되므로, 공개 버튼 앞에서 그 자리에 채우게 한다. 저장은 기존 프로필
+  // 저장 API(`POST /accounts/sponsor-profile`)를 그대로 쓴다.
+  onSaveSponsorDisplayName?: (name: string) => Promise<boolean>;
+  savingSponsorDisplayName?: boolean;
+  sponsorDisplayNameError?: string | null;
+}
+
+function SponsorDisplayNameGate({
+  displayName,
+  onSave,
+  saving,
+  error,
+}: {
+  displayName: string | null;
+  onSave?: (name: string) => Promise<boolean>;
+  saving?: boolean;
+  error?: string | null;
+}) {
+  const [input, setInput] = useState("");
+
+  if (displayName) {
+    return (
+      <p className="text-xs text-ink/60" data-testid="grill-sponsor-display-name">
+        개최자 표시 이름 · <span className="font-medium text-ink">{displayName}</span>
+      </p>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2" data-testid="grill-sponsor-display-name-gate">
+      <p className="text-xs leading-relaxed text-ink/60">
+        공개하려면 참가자에게 보일 개최자 표시 이름이 필요합니다.
+      </p>
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={input}
+          onChange={(event) => setInput(event.target.value)}
+          maxLength={100}
+          placeholder="개최자 표시 이름"
+          data-testid="grill-sponsor-display-name-input"
+          className={`flex-1 ${INPUT_CLASS}`}
+        />
+        <button
+          type="button"
+          disabled={saving || !input.trim() || !onSave}
+          onClick={() => void onSave?.(input.trim())}
+          data-testid="grill-sponsor-display-name-save"
+          className={buttonClass("secondary", "sm")}
+        >
+          {saving ? "저장 중..." : "저장"}
+        </button>
+      </div>
+      {error && (
+        <ErrorNote>
+          <span data-testid="grill-sponsor-display-name-error">{error}</span>
+        </ErrorNote>
+      )}
+    </div>
+  );
 }
 
 function RequirementRow({
@@ -157,6 +218,9 @@ export function RequirementDraftPanel({
   onPublish,
   publishing = false,
   publishError = null,
+  onSaveSponsorDisplayName,
+  savingSponsorDisplayName = false,
+  sponsorDisplayNameError = null,
 }: RequirementDraftPanelProps) {
   const [manualOpen, setManualOpen] = useState(false);
   const [manualText, setManualText] = useState("");
@@ -338,6 +402,12 @@ export function RequirementDraftPanel({
       </div>
 
       <div className="flex flex-col gap-2 border-t border-rule px-7 py-5">
+        <SponsorDisplayNameGate
+          displayName={contest.sponsor_display_name ?? null}
+          onSave={onSaveSponsorDisplayName}
+          saving={savingSponsorDisplayName}
+          error={sponsorDisplayNameError}
+        />
         {contest.is_free ? (
           <>
             <p
@@ -346,7 +416,9 @@ export function RequirementDraftPanel({
             >
               {requirements.length === 0
                 ? "요구사항을 하나 이상 적어야 공개할 수 있습니다"
-                : "본인확인·결제 없이 바로 공개됩니다"}
+                : !contest.sponsor_display_name
+                  ? "개최자 표시 이름을 먼저 등록해야 공개할 수 있습니다"
+                  : "본인확인·결제 없이 바로 공개됩니다"}
             </p>
             {publishError && (
               <ErrorNote>
@@ -356,7 +428,9 @@ export function RequirementDraftPanel({
             <button
               type="button"
               onClick={() => void onPublish?.()}
-              disabled={publishing || !onPublish || requirements.length === 0}
+              disabled={
+                publishing || !onPublish || requirements.length === 0 || !contest.sponsor_display_name
+              }
               data-testid="grill-publish-free-contest"
               className={`mt-1 ${buttonClass("primary", "sm")}`}
             >

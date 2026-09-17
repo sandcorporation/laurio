@@ -91,11 +91,24 @@ def _free_brief(category, deliverable_type, *, title="무료 공모전", deadlin
     }
 
 
-def _hosted_user(client, uid: str, *, email=None) -> dict:
+def _hosted_user(client, uid: str, *, email=None, display_name: str | None = "__default__") -> dict:
+    """로그인한 사용자를 만들고, 별다른 지시가 없으면 표시 이름도 채워 둔다
+    (#447 — 표시 이름이 없으면 공개가 422로 막힌다). 그 확인 자체를 테스트하려면
+    `display_name=None`으로 비워 둔 채 로그인만 한다."""
+
     pair = _login(client, uid=uid, email=email)
     from django.contrib.auth import get_user_model
 
     user = get_user_model().objects.get(email=email or f"{uid}@example.com")
+    name = f"{uid} 개최자" if display_name == "__default__" else display_name
+    if name:
+        profile_resp = client.post(
+            "/api/accounts/sponsor-profile",
+            data={"display_name": name},
+            content_type="application/json",
+            **_auth_header(pair["access"]),
+        )
+        assert profile_resp.status_code == 200, profile_resp.content
     return {"access": pair["access"], "user_id": user.id}
 
 
@@ -147,6 +160,49 @@ def test_free_contest_without_requirements_cannot_be_published(client, category,
     )
     assert publish_resp.status_code == 422, publish_resp.content
     assert client.get(f"{CONTESTS_URL}/{draft['id']}", **_auth_header(user["access"])).json()["status"] == "draft"
+
+
+def test_free_contest_without_sponsor_display_name_cannot_be_published(client, category, landing_type):
+    """개최자 표시 이름이 비어 있으면 무료 공개도 422로 거절된다(#447) — 초안
+    생성 자체는 이름 없이도 된다."""
+
+    user = _hosted_user(client, "free-host-no-name", display_name=None)
+    root = _operator_client("root-free-host-no-name")
+    _grant(root, user["user_id"])
+
+    draft = client.post(
+        f"{CONTESTS_URL}/free",
+        data=_free_brief(category, landing_type),
+        content_type="application/json",
+        **_auth_header(user["access"]),
+    )
+    assert draft.status_code == 200, draft.content
+    draft = draft.json()
+
+    publish_resp = client.post(
+        f"{CONTESTS_URL}/{draft['id']}/publish",
+        content_type="application/json",
+        **_auth_header(user["access"]),
+    )
+    assert publish_resp.status_code == 422, publish_resp.content
+    assert client.get(f"{CONTESTS_URL}/{draft['id']}", **_auth_header(user["access"])).json()["status"] == "draft"
+
+    # 그 자리에서 표시 이름을 채우면 같은 draft가 공개된다.
+    name_resp = client.post(
+        "/api/accounts/sponsor-profile",
+        data={"display_name": "무명 개최자"},
+        content_type="application/json",
+        **_auth_header(user["access"]),
+    )
+    assert name_resp.status_code == 200, name_resp.content
+
+    retry_resp = client.post(
+        f"{CONTESTS_URL}/{draft['id']}/publish",
+        content_type="application/json",
+        **_auth_header(user["access"]),
+    )
+    assert retry_resp.status_code == 200, retry_resp.content
+    assert retry_resp.json()["status"] == "published"
 
 
 def test_own_hosting_permission_requires_login(client):

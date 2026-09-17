@@ -112,6 +112,14 @@ def _publish_contest(
     prize=900_000,
 ) -> tuple[dict, dict]:
     sponsor = _verified_user(client, sponsor_uid, sponsor_ci)
+    # 표시 이름이 없으면 결제 시작이 422로 막힌다(#447).
+    profile_resp = client.post(
+        "/api/accounts/sponsor-profile",
+        data={"display_name": f"{sponsor_uid} 개최자"},
+        content_type="application/json",
+        **_auth_header(sponsor["access"]),
+    )
+    assert profile_resp.status_code == 200, profile_resp.content
     deadline_at = deadline_at or (timezone.now() + timedelta(hours=1))
 
     response = client.post(

@@ -405,3 +405,34 @@ def test_pagination_count_matches_the_active_closed_filter(client, sponsor, game
 
     assert client.get("/api/contests").json()["count"] == 3
     assert client.get("/api/contests?closed=true").json()["count"] == 5
+
+
+@pytest.mark.django_db
+def test_list_carries_sponsor_display_name_and_never_real_identity(client, games, web):
+    """공개 목록은 개최자의 공개용 표시 이름만 싣는다(#447) — 비어 있으면
+    null이고, 실명·이메일은 어떤 경우에도 실리지 않는다."""
+
+    named_user = get_user_model().objects.create_user(
+        username="listing-sponsor-named", email="listing-sponsor-named@example.invalid"
+    )
+    named_sponsor = SponsorProfile.objects.create(user=named_user, display_name="이름 있는 개최자")
+    named = _publish(named_sponsor, games, [web], title="이름 있는 공모전", prize=1_000_000, days=3)
+
+    anonymous_user = get_user_model().objects.create_user(
+        username="listing-sponsor-anonymous", email="listing-sponsor-anonymous@example.invalid"
+    )
+    anonymous_sponsor = SponsorProfile.objects.create(user=anonymous_user, display_name="")
+    anonymous = _publish(
+        anonymous_sponsor, games, [web], title="이름 없는 공모전", prize=1_000_000, days=4
+    )
+
+    payload = client.get("/api/contests").json()
+    by_id = {c["id"]: c for c in payload["items"]}
+
+    assert by_id[named.id]["sponsor_display_name"] == "이름 있는 개최자"
+    assert by_id[anonymous.id]["sponsor_display_name"] is None
+
+    for item in payload["items"]:
+        serialized = str(item)
+        assert "listing-sponsor-named" not in serialized
+        assert "example.invalid" not in serialized

@@ -24,6 +24,7 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
+from accounts.sponsor_display import require_sponsor_display_name
 from contests.models import Contest
 from core.contest_switch import require_paid_contest_product_enabled
 from verification.models import Verification
@@ -121,6 +122,11 @@ def initiate_payment(request: HttpRequest, payload: InitiatePaymentIn):
 
         if not Contest.Status.PAYABLE(contest.status):
             raise HttpError(409, "이미 결제가 완료되어 공개된 공모전입니다.")
+
+        # 참가자에게 개최자가 익명으로 보이지 않도록, 결제를 시작하기 전에
+        # 표시 이름을 확인한다(#447) — 여기서 막아야 PG 등록 전에 거절되어
+        # 헛된 결제 시도가 생기지 않는다.
+        require_sponsor_display_name(contest.sponsor)
 
         # 이미 진행 중이거나 완료된 결제가 있으면 새로 만들지 않고 그대로 돌려준다 —
         # 중복 클릭·재요청이 새 주문을 계속 만들어내지 않게 하는 멱등성이다.
