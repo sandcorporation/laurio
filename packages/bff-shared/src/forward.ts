@@ -34,11 +34,39 @@ export function forwardRequest(
   return fetch(url, { method, headers, body, cache: "no-store" });
 }
 
+/**
+ * 이 요청을 보낸 브라우저의 주소. 앞단 TLS 프록시(npmplus)가 자기가 본 접속
+ * 주소로 채우는 `X-Real-IP` 를 먼저 믿고, 없으면 `X-Forwarded-For` 의 **마지막**
+ * 항목(바로 앞 프록시가 덧붙인 것)을 쓴다 — 첫 항목은 브라우저가 직접 적어 보낼
+ * 수 있다. 알 수 없으면 null.
+ */
+function clientAddress(request: NextRequest): string | null {
+  const realIp = request.headers.get("x-real-ip")?.trim();
+  if (realIp) return realIp;
+  const forwarded = request.headers.get("x-forwarded-for");
+  if (!forwarded) return null;
+  const hops = forwarded
+    .split(",")
+    .map((hop) => hop.trim())
+    .filter(Boolean);
+  return hops.at(-1) ?? null;
+}
+
 /** 들어온 요청의 content-type을 그대로 실어 보낼 새 Headers를 만든다. 인증
- * 헤더는 호출부가 이어서 얹는다. */
+ * 헤더는 호출부가 이어서 얹는다.
+ *
+ * **방문자 주소와 User-Agent 도 싣는다**(2026-09-17). 백엔드의 조회 집계
+ * (`contests.view_tracking`)가 비로그인 방문자를 그 둘로 가르는데, 싣지 않으면
+ * 백엔드에는 모든 방문이 「앱 컨테이너 주소 + Node 의 User-Agent」 하나로 보여
+ * 비로그인 조회가 하루 전부 합쳐 1건으로 뭉쳤다. 주소는 믿을 수 있는 값 하나만
+ * `X-Forwarded-For` 로 넘긴다(백엔드는 그 첫 항목을 읽는다). */
 export function buildForwardHeaders(request: NextRequest): Headers {
   const headers = new Headers();
   const contentType = request.headers.get("content-type");
   if (contentType) headers.set("content-type", contentType);
+  const address = clientAddress(request);
+  if (address) headers.set("x-forwarded-for", address);
+  const userAgent = request.headers.get("user-agent");
+  if (userAgent) headers.set("user-agent", userAgent);
   return headers;
 }
