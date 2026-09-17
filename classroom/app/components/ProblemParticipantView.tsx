@@ -12,7 +12,8 @@
 // 입력은 눌러도 아무 일도 하지 않고(`disabled`), 시도 목록은 항상 빈 채로
 // 그려진다(미리보기에는 참여자 신원이 없어 「내 시도」가 애초에 존재하지
 // 않는다 — 실제로 제출된 적 없는 초안이므로 빈 목록이 사실과도 맞는다).
-import { useState } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
+import { useEffect, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 
 import { MarkdownView } from "@codemit/markdown";
@@ -31,6 +32,7 @@ import {
 } from "@/app/components/ui";
 import type { UploadStatus } from "@/lib/submissions/use-source-upload";
 import type { ClassroomSubmissionRow } from "@/lib/submissions/api";
+import { attemptIdFromHash, splitAttempts } from "@/lib/submissions/attempt-fold";
 import type { GradingStrictness, SubmissionFormat } from "@/lib/problems/api";
 import { gradingGuidelineText, gradingStrictnessLabel } from "@/lib/problems/grading-guideline";
 
@@ -162,6 +164,26 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
   } = props;
 
   const checklistLabelById = new Map(checklistItems.map((item) => [item.id, item.label]));
+  const { latest, older } = splitAttempts(submissions);
+  const [olderOpen, setOlderOpen] = useState(false);
+
+  // 알림 링크(`#submission-{id}`)가 접힌 지난 시도를 가리키면 펼치고 그 줄로
+  // 옮긴다 — 접힌 줄은 그려지지 않아 브라우저가 앵커를 찾지 못한다. 시도
+  // 목록은 늦게 도착하므로 목록이 바뀔 때마다 다시 본다.
+  const olderIds = older.map((submission) => submission.id).join(",");
+  useEffect(() => {
+    function openForHash() {
+      const targetId = attemptIdFromHash(window.location.hash);
+      if (targetId === null || !olderIds.split(",").includes(String(targetId))) return;
+      setOlderOpen(true);
+      requestAnimationFrame(() => {
+        document.getElementById(`submission-${targetId}`)?.scrollIntoView({ block: "start" });
+      });
+    }
+    openForHash();
+    window.addEventListener("hashchange", openForHash);
+    return () => window.removeEventListener("hashchange", openForHash);
+  }, [olderIds]);
   // 문법 검사 기본 항목(#408)도 필수라 힌트 숫자에 함께 셈한다.
   const requiredCount =
     checklistItems.filter((item) => item.required).length + (syntaxCheckEnabled ? 1 : 0);
@@ -264,157 +286,196 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
                 <span data-testid="submissions-empty-state">아직 낸 시도가 없습니다.</span>
               </EmptyState>
             ) : (
-              <ol data-testid="submissions-list" className="divide-y divide-rule">
-                {/* `id`는 채점 완료 알림(#329)이 특정 시도를 가리킬 때 쓰는
-                    앵커다 — `lib/notifications/link.ts`가 같은 이름을 짓는다. */}
-                {submissions.map((submission) => (
-                  <li
-                    key={submission.id}
-                    id={`submission-${submission.id}`}
-                    data-testid={`submission-row-${submission.id}`}
-                    className="scroll-mt-4 px-4 py-4"
+              <>
+                <ol data-testid="submissions-list" className="divide-y divide-rule">
+                  {latest ? (
+                    <SubmissionRow submission={latest} checklistLabelById={checklistLabelById} />
+                  ) : null}
+                  {olderOpen
+                    ? older.map((submission) => (
+                        <SubmissionRow
+                          key={submission.id}
+                          submission={submission}
+                          checklistLabelById={checklistLabelById}
+                        />
+                      ))
+                    : null}
+                </ol>
+                {older.length > 0 ? (
+                  <button
+                    type="button"
+                    data-testid="submissions-older-toggle"
+                    aria-expanded={olderOpen}
+                    onClick={() => setOlderOpen((open) => !open)}
+                    className="flex w-full items-center gap-1.5 border-t border-rule px-4 py-2.5 text-left text-[12.5px] text-ink/60 hover:bg-paper"
                   >
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                      <span
-                        data-testid={`submission-row-${submission.id}-attempt`}
-                        className="font-mono text-[12.5px] text-ink/45"
-                      >
-                        시도 {submission.attempt_number}
-                      </span>
-
-                      {submission.status === "pending" ? (
-                        <span data-testid={`submission-row-${submission.id}-status`}>
-                          <Badge>{submission.pending_reason ? "채점 대기" : "채점 중"}</Badge>
-                        </span>
-                      ) : (
-                        <span data-testid={`submission-row-${submission.id}-status`}>
-                          <Badge tone={submission.passed ? "verified" : "attention"}>
-                            채점 완료 · {submission.passed ? "통과" : "미통과"}
-                          </Badge>
-                        </span>
-                      )}
-
-                      <span className="ml-auto shrink-0 text-[12.5px]">
-                        {submission.submission_format === "repository" ? (
-                          <a
-                            href={submission.value}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-attention hover:underline"
-                          >
-                            {submission.value}
-                          </a>
-                        ) : submission.download_url ? (
-                          <a
-                            href={submission.download_url}
-                            data-testid={`submission-row-${submission.id}-download`}
-                            className="text-attention hover:underline"
-                          >
-                            다운로드
-                          </a>
-                        ) : null}
-                      </span>
-                    </div>
-
-                    {submission.status === "pending" && submission.pending_reason === "budget_exhausted" ? (
-                      <p className="mt-2.5 text-[12.5px] leading-relaxed text-ink/60">
-                        이 클래스의 채점 예산이 소진되어 잠시 멈췄습니다.{" "}
-                        <b className="font-medium text-ink">제출은 저장됐으니 다시 낼 필요는 없습니다.</b>{" "}
-                        예산이 채워지면 순서대로 이어서 채점됩니다.
-                      </p>
-                    ) : null}
-
-                    {submission.status === "pending" &&
-                    (submission.pending_reason === "no_api_key" ||
-                      submission.pending_reason === "model_rejected") ? (
-                      // 키가 아예 없는 것과 거부된 것(#355), 채점 모델을 그
-                      // 키로 못 쓰는 것(#403)을 여기서는 구별하지 않는다 —
-                      // 셋 다 강사가 설정을 고쳐야 풀리는 사유라, 참여자에게는
-                      // 같은 안내를 보인다(#403 AC).
-                      <p
-                        data-testid={`submission-row-${submission.id}-no-api-key-note`}
-                        className="mt-2.5 text-[12.5px] leading-relaxed text-ink/60"
-                      >
-                        강사의 채점 설정 문제로 잠시 멈췄습니다.{" "}
-                        <b className="font-medium text-ink">
-                          당신의 잘못이 아니고, 다시 낼 필요도 없습니다.
-                        </b>{" "}
-                        강사가 설정을 고치면 이어서 채점됩니다.
-                      </p>
-                    ) : null}
-
-                    {submission.status === "scored" && submission.score ? (
-                      <ul
-                        data-testid={`submission-row-${submission.id}-verdicts`}
-                        className="mt-3 flex flex-col gap-2 border-t border-rule pt-3"
-                      >
-                        {submission.score.syntax_check ? (
-                          <li
-                            data-testid={`submission-row-${submission.id}-syntax-check`}
-                            className="flex gap-2.5"
-                          >
-                            <span
-                              aria-hidden
-                              className={`mt-1 h-[13px] w-[13px] shrink-0 border ${
-                                submission.score.syntax_check.is_met
-                                  ? "border-verified bg-verified"
-                                  : "border-attention"
-                              }`}
-                            />
-                            <span className="text-[13px] leading-relaxed">
-                              <Badge>기본</Badge>{" "}
-                              <span
-                                data-testid={`submission-row-${submission.id}-syntax-check-judged-by`}
-                              >
-                                <Badge tone="neutral">{judgedByLabel(submission.score.syntax_check.judged_by)}</Badge>
-                              </span>{" "}
-                              {SYNTAX_CHECK_LABEL}
-                              <span className="text-ink/45">
-                                {" "}
-                                — {submission.score.syntax_check.is_met ? "충족" : "미충족"}
-                              </span>
-                              <span className="block text-ink/60">
-                                {submission.score.syntax_check.reasoning}
-                              </span>
-                              {submission.score.syntax_check.findings.map((finding, index) => (
-                                <span
-                                  key={index}
-                                  data-testid={`submission-row-${submission.id}-syntax-check-finding-${index}`}
-                                  className="block font-mono text-[12px] text-ink/60"
-                                >
-                                  {finding.path}
-                                  {finding.line !== null ? `:${finding.line}` : ""} — {finding.message}
-                                </span>
-                              ))}
-                            </span>
-                          </li>
-                        ) : null}
-                        {submission.score.reasoning.map((verdict) => (
-                          <li key={verdict.checklist_item_id} className="flex gap-2.5">
-                            <span
-                              aria-hidden
-                              className={`mt-1 h-[13px] w-[13px] shrink-0 border ${
-                                verdict.is_met ? "border-verified bg-verified" : "border-attention"
-                              }`}
-                            />
-                            <span className="text-[13px] leading-relaxed">
-                              {checklistLabelById.get(verdict.checklist_item_id) ?? "항목"}
-                              <span className="text-ink/45"> — {verdict.is_met ? "충족" : "미충족"}</span>
-                              <span className="block text-ink/60">{verdict.reasoning}</span>
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
-                  </li>
-                ))}
-              </ol>
+                    {olderOpen ? (
+                      <ChevronDown aria-hidden="true" size={14} />
+                    ) : (
+                      <ChevronRight aria-hidden="true" size={14} />
+                    )}
+                    {olderOpen ? "지난 시도 접기" : `지난 시도 ${older.length}개 보기`}
+                  </button>
+                ) : null}
+              </>
             )}
           </Card>
         </div>
 
       </div>
     </div>
+  );
+}
+
+/** 「내 시도」의 한 줄 — 최근 시도와 펼친 지난 시도가 같은 모양이다. */
+function SubmissionRow({
+  submission,
+  checklistLabelById,
+}: {
+  submission: ClassroomSubmissionRow;
+  checklistLabelById: Map<number, string>;
+}) {
+  // `id`는 채점 완료 알림(#329)이 특정 시도를 가리킬 때 쓰는 앵커다 —
+  // `lib/notifications/link.ts`가 같은 이름을 짓는다.
+  return (
+    <li
+      id={`submission-${submission.id}`}
+      data-testid={`submission-row-${submission.id}`}
+      className="scroll-mt-4 px-4 py-4"
+    >
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span
+          data-testid={`submission-row-${submission.id}-attempt`}
+          className="font-mono text-[12.5px] text-ink/45"
+        >
+          시도 {submission.attempt_number}
+        </span>
+
+        {submission.status === "pending" ? (
+          <span data-testid={`submission-row-${submission.id}-status`}>
+            <Badge>{submission.pending_reason ? "채점 대기" : "채점 중"}</Badge>
+          </span>
+        ) : (
+          <span data-testid={`submission-row-${submission.id}-status`}>
+            <Badge tone={submission.passed ? "verified" : "attention"}>
+              채점 완료 · {submission.passed ? "통과" : "미통과"}
+            </Badge>
+          </span>
+        )}
+
+        <span className="ml-auto shrink-0 text-[12.5px]">
+          {submission.submission_format === "repository" ? (
+            <a
+              href={submission.value}
+              target="_blank"
+              rel="noreferrer"
+              className="text-attention hover:underline"
+            >
+              {submission.value}
+            </a>
+          ) : submission.download_url ? (
+            <a
+              href={submission.download_url}
+              data-testid={`submission-row-${submission.id}-download`}
+              className="text-attention hover:underline"
+            >
+              다운로드
+            </a>
+          ) : null}
+        </span>
+      </div>
+
+      {submission.status === "pending" && submission.pending_reason === "budget_exhausted" ? (
+        <p className="mt-2.5 text-[12.5px] leading-relaxed text-ink/60">
+          이 클래스의 채점 예산이 소진되어 잠시 멈췄습니다.{" "}
+          <b className="font-medium text-ink">제출은 저장됐으니 다시 낼 필요는 없습니다.</b>{" "}
+          예산이 채워지면 순서대로 이어서 채점됩니다.
+        </p>
+      ) : null}
+
+      {submission.status === "pending" &&
+      (submission.pending_reason === "no_api_key" ||
+        submission.pending_reason === "model_rejected") ? (
+        // 키가 아예 없는 것과 거부된 것(#355), 채점 모델을 그
+        // 키로 못 쓰는 것(#403)을 여기서는 구별하지 않는다 —
+        // 셋 다 강사가 설정을 고쳐야 풀리는 사유라, 참여자에게는
+        // 같은 안내를 보인다(#403 AC).
+        <p
+          data-testid={`submission-row-${submission.id}-no-api-key-note`}
+          className="mt-2.5 text-[12.5px] leading-relaxed text-ink/60"
+        >
+          강사의 채점 설정 문제로 잠시 멈췄습니다.{" "}
+          <b className="font-medium text-ink">
+            당신의 잘못이 아니고, 다시 낼 필요도 없습니다.
+          </b>{" "}
+          강사가 설정을 고치면 이어서 채점됩니다.
+        </p>
+      ) : null}
+
+      {submission.status === "scored" && submission.score ? (
+        <ul
+          data-testid={`submission-row-${submission.id}-verdicts`}
+          className="mt-3 flex flex-col gap-2 border-t border-rule pt-3"
+        >
+          {submission.score.syntax_check ? (
+            <li
+              data-testid={`submission-row-${submission.id}-syntax-check`}
+              className="flex gap-2.5"
+            >
+              <span
+                aria-hidden
+                className={`mt-1 h-[13px] w-[13px] shrink-0 border ${
+                  submission.score.syntax_check.is_met
+                    ? "border-verified bg-verified"
+                    : "border-attention"
+                }`}
+              />
+              <span className="text-[13px] leading-relaxed">
+                <Badge>기본</Badge>{" "}
+                <span
+                  data-testid={`submission-row-${submission.id}-syntax-check-judged-by`}
+                >
+                  <Badge tone="neutral">{judgedByLabel(submission.score.syntax_check.judged_by)}</Badge>
+                </span>{" "}
+                {SYNTAX_CHECK_LABEL}
+                <span className="text-ink/45">
+                  {" "}
+                  — {submission.score.syntax_check.is_met ? "충족" : "미충족"}
+                </span>
+                <span className="block text-ink/60">
+                  {submission.score.syntax_check.reasoning}
+                </span>
+                {submission.score.syntax_check.findings.map((finding, index) => (
+                  <span
+                    key={index}
+                    data-testid={`submission-row-${submission.id}-syntax-check-finding-${index}`}
+                    className="block font-mono text-[12px] text-ink/60"
+                  >
+                    {finding.path}
+                    {finding.line !== null ? `:${finding.line}` : ""} — {finding.message}
+                  </span>
+                ))}
+              </span>
+            </li>
+          ) : null}
+          {submission.score.reasoning.map((verdict) => (
+            <li key={verdict.checklist_item_id} className="flex gap-2.5">
+              <span
+                aria-hidden
+                className={`mt-1 h-[13px] w-[13px] shrink-0 border ${
+                  verdict.is_met ? "border-verified bg-verified" : "border-attention"
+                }`}
+              />
+              <span className="text-[13px] leading-relaxed">
+                {checklistLabelById.get(verdict.checklist_item_id) ?? "항목"}
+                <span className="text-ink/45"> — {verdict.is_met ? "충족" : "미충족"}</span>
+                <span className="block text-ink/60">{verdict.reasoning}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </li>
   );
 }
 

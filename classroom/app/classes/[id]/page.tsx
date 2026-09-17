@@ -5,6 +5,7 @@
 // 백엔드가 404를 주므로 그대로 "찾을 수 없다"로 보여준다(존재를 알려주지
 // 않는다). 「클래스를 템플릿으로 공개」는 여기 살지 않는다 — 학기에 한 번
 // 할까 말까 한 일이라 매일 보는 이 화면 대신 「클래스 설정」으로 옮겼다(#323).
+import { Settings } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
@@ -20,6 +21,7 @@ import {
   PageHeader,
   PageShell,
   buttonClass,
+  iconButtonClass,
 } from "@/app/components/ui";
 import { MissingScoringKeyNote } from "@/app/components/MissingScoringKeyNote";
 import { copyClass } from "@/lib/classes/api";
@@ -263,9 +265,6 @@ export default function ClassDetailPage() {
             <Link href={`/classes/${classId}/members`} data-testid="members-link" className={buttonClass()}>
               참여자 명단
             </Link>
-            <Link href={`/classes/${classId}/settings`} data-testid="class-settings-link" className={buttonClass()}>
-              클래스 설정
-            </Link>
             {/* 보관된 클래스에서는 이것이 주 행동이다 — 지난 클래스를 복사해 다음
                 클래스를 여는 것이 이 제품의 흔한 쓰임이다
                 (docs/design/classroom/README.md). */}
@@ -278,6 +277,16 @@ export default function ClassDetailPage() {
             >
               {copying ? "복사하는 중..." : "복사해서 새로 열기"}
             </button>
+            {/* 설정은 가끔 여는 곳이라 글자 대신 톱니바퀴 하나로 맨 끝에 둔다. */}
+            <Link
+              href={`/classes/${classId}/settings`}
+              data-testid="class-settings-link"
+              aria-label="클래스 설정"
+              title="클래스 설정"
+              className={iconButtonClass()}
+            >
+              <Settings aria-hidden="true" size={20} strokeWidth={1.75} />
+            </Link>
           </>
         }
       />
