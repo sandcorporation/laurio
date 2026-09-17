@@ -1537,16 +1537,19 @@ jobs:
     # ── 배포 이미지(2026-09-17) ──────────────────────────────────────────────
     #
     # **staging·prod 서버는 이미지를 굽지 않고 여기서 올린 것을 받는다**(deploy.sh 머리 주석).
+    # 커밋마다 네 이미지를 ghcr 에 올린다 — 태그의 sha 가 곧 배포 스크립트가 체크아웃한 커밋이다.
+    # 바뀌지 않은 서비스는 레지스트리 캐시(codemit-buildcache)에 맞아 금방 끝난다.
     #
-    # **두 이미지 잡 모두 mac 러너에서 돈다**(2026-09-17). sub 는 테스트 잡과 staging 스택이
-    # 같은 SATA SSD 를 나눠 쓰는데, 빌드를 얹으니 CPU·메모리는 남는데 디스크 대기가 14~84% 로
-    # 치솟았다. mac(Apple Silicon)은 prod 의 arm64 를 제 속도로, staging 의 amd64 는
-    # Docker Desktop 의 에뮬레이션으로 굽는다. **mac 이 없을 때의 비상구는 저장소 변수
-    # `IMAGE_BUILDER=sub`** 다 — 두 잡이 sub 로 옮겨 가 amd64 는 제 속도로, arm64 는 QEMU 로
-    # (느리게) 굽는다. 줄 서 있던 실행은 변수를 바꾼 뒤 다시 돌린다. 자동 전환은 두지 않았다:
-    # 러너 생존을 조회하려면 조직 관리자 토큰을 CI 에 넣어야 한다.
-    # 커밋마다 네 이미지를 ghcr 에 올린다 — 태그의 sha 가 곧 배포 스크립트가 체크아웃한
-    # 커밋이다. 바뀌지 않은 서비스는 레지스트리 캐시(codemit-buildcache)에 맞아 금방 끝난다.
+    # **서비스마다 한 잡(matrix)이다** — 한 잡에서 넷을 차례로 굽던 때는 앱 셋이 줄을 섰다.
+    # 동시에 도는 수는 러너 수(mac 3대)가 정한다.
+    #
+    # **두 이미지 잡 모두 mac 러너에서 돈다**. sub 는 테스트 잡과 staging 스택이 같은 SATA SSD 를
+    # 나눠 쓰는데, 빌드를 얹으니 CPU·메모리는 남는데 디스크 대기가 14~84% 로 치솟았다.
+    # mac(Apple Silicon)은 prod 의 arm64 를 제 속도로, staging 의 amd64 는 Docker Desktop 의
+    # 에뮬레이션으로 굽는다. **mac 이 없을 때의 비상구는 저장소 변수 `IMAGE_BUILDER=sub`** 다 —
+    # 두 잡이 sub 로 옮겨 가 amd64 는 제 속도로, arm64 는 QEMU 로(느리게) 굽는다. 줄 서 있던
+    # 실행은 변수를 바꾼 뒤 다시 돌린다. 자동 전환은 두지 않았다: 러너 생존을 조회하려면 조직
+    # 관리자 토큰을 CI 에 넣어야 한다.
     #
     # backend 는 환경을 가리지 않아 아키텍처만 가른다(`-amd64` = staging 호스트 sub 의 것).
     # 세 앱은 NEXT_PUBLIC_* 가 빌드 때 굳으므로 환경마다 따로 굽는다(`-staging`). 그 값은
@@ -1557,12 +1560,23 @@ jobs:
     # 빨간 커밋의 이미지는 올라가도 배포되지 않는다.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ${{ fromJSON(vars.IMAGE_BUILDER == 'sub' && '["self-hosted", "sub"]' || '["self-hosted", "ARM64", "mac-arm"]') }}
-    timeout-minutes: 120
+    timeout-minutes: 60
     permissions:
       contents: read
       packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { service: backend, dsn: BACKEND, tag: amd64, target: '', paths: 'backend docker/backend.Dockerfile' }
+          - { service: frontend, dsn: FRONTEND, tag: staging, target: runner, paths: 'frontend packages package.json pnpm-workspace.yaml pnpm-lock.yaml docker/frontend.Dockerfile' }
+          - { service: operator, dsn: OPERATOR, tag: staging, target: runner, paths: 'operator packages package.json pnpm-workspace.yaml pnpm-lock.yaml docker/operator.Dockerfile' }
+          - { service: classroom, dsn: CLASSROOM, tag: staging, target: runner, paths: 'classroom packages package.json pnpm-workspace.yaml pnpm-lock.yaml docker/classroom.Dockerfile' }
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 아래 「앱 코드의 버전」이 경로별 마지막 커밋을 찾으려면 이력이 있어야 한다(8MB 남짓).
+          fetch-depth: 0
 
       # 비상구(sub)에서만 arm64 에뮬레이터를 등록한다. mac 은 Docker Desktop 이 amd64 를
       # 이미 에뮬레이션하므로(Rosetta) 여기서 QEMU 를 깔면 그 더 빠른 쪽을 덮어쓴다.
@@ -1579,84 +1593,45 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: backend (amd64)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/backend.Dockerfile
-          platforms: linux/amd64
-          push: true
-          provenance: false
-          tags: ghcr.io/sandcorporation/codemit-backend:${{ github.sha }}-amd64
-          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
-          cache-from: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:backend-amd64
-          cache-to: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:backend-amd64,mode=max
+      # **앱의 release 는 HEAD 가 아니라 「그 이미지에 들어가는 코드를 마지막으로 바꾼 커밋」이다.**
+      # NEXT_PUBLIC_SENTRY_RELEASE 는 `pnpm build` 바로 앞에서 ENV 로 굳으므로, 커밋마다 달라지면
+      # 앱 코드가 그대로여도 Next 빌드가 캐시를 못 쓰고 처음부터 돈다(워크플로만 고친 커밋에서
+      # 앱마다 1.5~2.5분). 이 값이면 코드가 같을 때 캐시에 맞고, 오류 수집기의 release 도 그 코드의
+      # 실제 버전을 가리킨다. 이미지 **태그**는 여전히 HEAD sha 다(deploy.sh 가 그 이름으로 받는다).
+      - name: 앱 코드의 버전
+        id: code
+        run: echo "sha=$(git log -1 --format=%H -- ${{ matrix.paths }})" >> "$GITHUB_OUTPUT"
 
-      - name: frontend (staging, amd64)
+      - name: ${{ matrix.service }} (${{ matrix.tag }})
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: docker/frontend.Dockerfile
-          target: runner
+          file: docker/${{ matrix.service }}.Dockerfile
+          target: ${{ matrix.target }}
           platforms: linux/amd64
           push: true
           provenance: false
-          tags: ghcr.io/sandcorporation/codemit-frontend:${{ github.sha }}-staging
+          tags: ghcr.io/sandcorporation/codemit-${{ matrix.service }}:${{ github.sha }}-${{ matrix.tag }}
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
-          cache-from: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:frontend-staging
-          cache-to: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:frontend-staging,mode=max
+          cache-from: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:${{ matrix.service }}-${{ matrix.tag }}
+          cache-to: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:${{ matrix.service }}-${{ matrix.tag }},mode=max
+          # backend 는 이 값들을 쓰지 않는다(쓰이지 않은 인자라는 경고만 남는다). SENTRY_DSN 은
+          # 앱마다 다른 프로젝트라 서비스 이름으로 변수를 고른다.
           build-args: |
             NEXT_PUBLIC_PORTONE_STORE_ID=${{ vars.STAGING_PORT_ONE_V2_STORE_ID }}
             NEXT_PUBLIC_PORTONE_CHANNEL_KEY=${{ vars.STAGING_KG_INICIS_CHANNEL_KEY }}
             NEXT_PUBLIC_TOSS_CLIENT_KEY=${{ vars.STAGING_TOSS_CLIENT_KEY }}
             NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED=${{ vars.STAGING_CODEMIT_CONTEST_PRODUCT_ENABLED }}
             NEXT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED=${{ vars.STAGING_CODEMIT_PAID_CONTEST_PRODUCT_ENABLED }}
-            NEXT_PUBLIC_SENTRY_DSN=${{ vars.STAGING_SENTRY_DSN_FRONTEND }}
+            NEXT_PUBLIC_SENTRY_DSN=${{ vars[format('STAGING_SENTRY_DSN_{0}', matrix.dsn)] }}
             NEXT_PUBLIC_SENTRY_ENVIRONMENT=staging
-            NEXT_PUBLIC_SENTRY_RELEASE=${{ github.sha }}
-
-      - name: operator (staging, amd64)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/operator.Dockerfile
-          target: runner
-          platforms: linux/amd64
-          push: true
-          provenance: false
-          tags: ghcr.io/sandcorporation/codemit-operator:${{ github.sha }}-staging
-          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
-          cache-from: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:operator-staging
-          cache-to: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:operator-staging,mode=max
-          build-args: |
-            NEXT_PUBLIC_SENTRY_DSN=${{ vars.STAGING_SENTRY_DSN_OPERATOR }}
-            NEXT_PUBLIC_SENTRY_ENVIRONMENT=staging
-            NEXT_PUBLIC_SENTRY_RELEASE=${{ github.sha }}
-
-      - name: classroom (staging, amd64)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/classroom.Dockerfile
-          target: runner
-          platforms: linux/amd64
-          push: true
-          provenance: false
-          tags: ghcr.io/sandcorporation/codemit-classroom:${{ github.sha }}-staging
-          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
-          cache-from: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:classroom-staging
-          cache-to: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:classroom-staging,mode=max
-          build-args: |
-            NEXT_PUBLIC_SENTRY_DSN=${{ vars.STAGING_SENTRY_DSN_CLASSROOM }}
-            NEXT_PUBLIC_SENTRY_ENVIRONMENT=staging
-            NEXT_PUBLIC_SENTRY_RELEASE=${{ github.sha }}
+            NEXT_PUBLIC_SENTRY_RELEASE=${{ steps.code.outputs.sha }}
 
   images-prod:
-    # prod(oracle, arm64) 이미지도 **mac 러너**가 굽는다(위 images-staging 주석의 비상구가 같다) —
-    # Apple Silicon 의 Docker Desktop 위에
-    # sub 와 같은 `myoung34/github-runner` 컨테이너(조직 범위, Linux/ARM64, 라벨 `mac-arm`,
-    # Docker Desktop 의 docker.sock 마운트)로 뜬다. mac-arm 라벨이 곧 「그 mac」이다 —
-    # 러너가 조직 범위라 ARM64 만으로 고르면 다른 ARM 러너로 갈 수 있다. oracle 은
+    # prod(oracle, arm64) 이미지 — 구조는 images-staging 과 같다(주석도 거기). mac 러너는 Apple
+    # Silicon 의 Docker Desktop 위에 sub 와 같은 `myoung34/github-runner` 컨테이너(조직 범위,
+    # Linux/ARM64, 라벨 `mac-arm`, Docker Desktop 의 docker.sock 마운트)로 뜬다. mac-arm 라벨이 곧
+    # 「그 mac」이다 — 러너가 조직 범위라 ARM64 만으로 고르면 다른 ARM 러너로 갈 수 있다. oracle 은
     # prod 서버라 빌드가 서비스를 느리게 만들어 후보에서 뺐다.
     #
     # **mac 이 꺼져 있으면 이 잡이 줄을 서고, 그동안 CI 가 끝나지 않으므로 production 승격도
@@ -1664,12 +1639,23 @@ jobs:
     # 24시간 뒤 실패로 끝낸다 — 그 전에 IMAGE_BUILDER=sub 로 옮기고 다시 돌린다.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ${{ fromJSON(vars.IMAGE_BUILDER == 'sub' && '["self-hosted", "sub"]' || '["self-hosted", "ARM64", "mac-arm"]') }}
-    timeout-minutes: 120
+    timeout-minutes: 60
     permissions:
       contents: read
       packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { service: backend, dsn: BACKEND, tag: arm64, target: '', paths: 'backend docker/backend.Dockerfile' }
+          - { service: frontend, dsn: FRONTEND, tag: prod, target: runner, paths: 'frontend packages package.json pnpm-workspace.yaml pnpm-lock.yaml docker/frontend.Dockerfile' }
+          - { service: operator, dsn: OPERATOR, tag: prod, target: runner, paths: 'operator packages package.json pnpm-workspace.yaml pnpm-lock.yaml docker/operator.Dockerfile' }
+          - { service: classroom, dsn: CLASSROOM, tag: prod, target: runner, paths: 'classroom packages package.json pnpm-workspace.yaml pnpm-lock.yaml docker/classroom.Dockerfile' }
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 아래 「앱 코드의 버전」이 경로별 마지막 커밋을 찾으려면 이력이 있어야 한다(8MB 남짓).
+          fetch-depth: 0
 
       # 비상구(sub)에서만 arm64 에뮬레이터를 등록한다. mac 은 Docker Desktop 이 amd64 를
       # 이미 에뮬레이션하므로(Rosetta) 여기서 QEMU 를 깔면 그 더 빠른 쪽을 덮어쓴다.
@@ -1686,77 +1672,39 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: backend (arm64)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/backend.Dockerfile
-          platforms: linux/arm64
-          push: true
-          provenance: false
-          tags: ghcr.io/sandcorporation/codemit-backend:${{ github.sha }}-arm64
-          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
-          cache-from: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:backend-arm64
-          cache-to: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:backend-arm64,mode=max
+      # **앱의 release 는 HEAD 가 아니라 「그 이미지에 들어가는 코드를 마지막으로 바꾼 커밋」이다.**
+      # NEXT_PUBLIC_SENTRY_RELEASE 는 `pnpm build` 바로 앞에서 ENV 로 굳으므로, 커밋마다 달라지면
+      # 앱 코드가 그대로여도 Next 빌드가 캐시를 못 쓰고 처음부터 돈다(워크플로만 고친 커밋에서
+      # 앱마다 1.5~2.5분). 이 값이면 코드가 같을 때 캐시에 맞고, 오류 수집기의 release 도 그 코드의
+      # 실제 버전을 가리킨다. 이미지 **태그**는 여전히 HEAD sha 다(deploy.sh 가 그 이름으로 받는다).
+      - name: 앱 코드의 버전
+        id: code
+        run: echo "sha=$(git log -1 --format=%H -- ${{ matrix.paths }})" >> "$GITHUB_OUTPUT"
 
-      - name: frontend (prod, arm64)
+      - name: ${{ matrix.service }} (${{ matrix.tag }})
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: docker/frontend.Dockerfile
-          target: runner
+          file: docker/${{ matrix.service }}.Dockerfile
+          target: ${{ matrix.target }}
           platforms: linux/arm64
           push: true
           provenance: false
-          tags: ghcr.io/sandcorporation/codemit-frontend:${{ github.sha }}-prod
+          tags: ghcr.io/sandcorporation/codemit-${{ matrix.service }}:${{ github.sha }}-${{ matrix.tag }}
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
-          cache-from: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:frontend-prod
-          cache-to: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:frontend-prod,mode=max
+          cache-from: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:${{ matrix.service }}-${{ matrix.tag }}
+          cache-to: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:${{ matrix.service }}-${{ matrix.tag }},mode=max
+          # backend 는 이 값들을 쓰지 않는다(쓰이지 않은 인자라는 경고만 남는다). SENTRY_DSN 은
+          # 앱마다 다른 프로젝트라 서비스 이름으로 변수를 고른다.
           build-args: |
             NEXT_PUBLIC_PORTONE_STORE_ID=${{ vars.PROD_PORT_ONE_V2_STORE_ID }}
             NEXT_PUBLIC_PORTONE_CHANNEL_KEY=${{ vars.PROD_KG_INICIS_CHANNEL_KEY }}
             NEXT_PUBLIC_TOSS_CLIENT_KEY=${{ vars.PROD_TOSS_CLIENT_KEY }}
             NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED=${{ vars.PROD_CODEMIT_CONTEST_PRODUCT_ENABLED }}
             NEXT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED=${{ vars.PROD_CODEMIT_PAID_CONTEST_PRODUCT_ENABLED }}
-            NEXT_PUBLIC_SENTRY_DSN=${{ vars.PROD_SENTRY_DSN_FRONTEND }}
+            NEXT_PUBLIC_SENTRY_DSN=${{ vars[format('PROD_SENTRY_DSN_{0}', matrix.dsn)] }}
             NEXT_PUBLIC_SENTRY_ENVIRONMENT=production
-            NEXT_PUBLIC_SENTRY_RELEASE=${{ github.sha }}
-
-      - name: operator (prod, arm64)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/operator.Dockerfile
-          target: runner
-          platforms: linux/arm64
-          push: true
-          provenance: false
-          tags: ghcr.io/sandcorporation/codemit-operator:${{ github.sha }}-prod
-          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
-          cache-from: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:operator-prod
-          cache-to: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:operator-prod,mode=max
-          build-args: |
-            NEXT_PUBLIC_SENTRY_DSN=${{ vars.PROD_SENTRY_DSN_OPERATOR }}
-            NEXT_PUBLIC_SENTRY_ENVIRONMENT=production
-            NEXT_PUBLIC_SENTRY_RELEASE=${{ github.sha }}
-
-      - name: classroom (prod, arm64)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/classroom.Dockerfile
-          target: runner
-          platforms: linux/arm64
-          push: true
-          provenance: false
-          tags: ghcr.io/sandcorporation/codemit-classroom:${{ github.sha }}-prod
-          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
-          cache-from: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:classroom-prod
-          cache-to: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:classroom-prod,mode=max
-          build-args: |
-            NEXT_PUBLIC_SENTRY_DSN=${{ vars.PROD_SENTRY_DSN_CLASSROOM }}
-            NEXT_PUBLIC_SENTRY_ENVIRONMENT=production
-            NEXT_PUBLIC_SENTRY_RELEASE=${{ github.sha }}
+            NEXT_PUBLIC_SENTRY_RELEASE=${{ steps.code.outputs.sha }}
 
   deploy-staging:
     # 이미지가 올라가고 **나머지 잡이 전부 초록**이면 sub 의 Jenkins staging 잡(laurio)을
