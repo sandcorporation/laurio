@@ -10,7 +10,15 @@
 // `Jenkinsfile.production` 도 같은 단계를 갖는다 — 한쪽 단계를 바꾸면 다른 쪽도 같이
 // 고친다(다른 것은 agent 라벨·대상·prod 의 브랜치 검사뿐이다).
 //
-// **잡은 Pipeline 이다**(`scriptPath: Jenkinsfile`, 트리거는 GitHub 웹훅, 브랜치 `*/main`).
+// **잡은 Pipeline 이다**(`scriptPath: Jenkinsfile`, 브랜치 `*/main`).
+//
+// **무엇이 이 잡을 부르는가**(2026-09-17). CI 다 — main 의 CI 가 staging 이미지를 ghcr 에
+// 올리고 나머지 잡이 전부 초록이면 `deploy-staging` 잡이 `buildWithParameters` 로
+// DEPLOY_SHA 를 채워 부른다. 그 커밋을 정확히 배포하려고 워크스페이스를 그 커밋으로
+// 되돌린다. 예전 트리거인 GitHub 웹훅은 이미지가 올라가기 **전에** 이 잡을 부르므로,
+// 웹훅으로 불린 빌드(DEPLOY_SHA 없음)는 아무것도 하지 않고 끝난다 — 잡 설정에서
+// 웹훅 트리거를 꺼도 되고 켜 둬도 해가 없다. 사람이 파라미터를 비우고 누르면 main 의
+// 끝을 배포한다(그 커밋의 이미지가 ghcr 에 있어야 한다).
 
 def deployTarget = 'staging'
 
@@ -24,6 +32,17 @@ pipeline {
   // 붙어 있는데 거기엔 staging 스택도 `docker/.env.staging` 도 없다.
   agent { label 'built-in' }
 
+  // 이미지는 CI 가 굽고 ghcr 에서 받는다(2026-09-17, deploy.sh 머리 주석). ghcr·CI 가
+  // 막혔을 때는 사람이 호스트에서 `DEPLOY_IMAGE_SOURCE=build sh ./deploy.sh <대상>` 으로 굽는다.
+  environment {
+    DEPLOY_IMAGE_SOURCE = 'registry'
+  }
+
+  parameters {
+    string(name: 'DEPLOY_SHA', defaultValue: '', trim: true,
+           description: 'CI 가 채운다 — 이 커밋(40자리)의 이미지로 배포한다. 비우면 main 의 끝.')
+  }
+
   options {
     timestamps()
     disableConcurrentBuilds()          // 같은 호스트의 같은 스택을 두 빌드가 밟지 않게
@@ -31,13 +50,41 @@ pipeline {
   }
 
   stages {
+    stage('대상 확인') {
+      steps {
+        script {
+          def sha = params.DEPLOY_SHA ?: ''
+          if (!sha && !currentBuild.getBuildCauses('com.cloudbees.jenkins.GitHubPushCause').isEmpty()) {
+            env.SKIP_DEPLOY = 'true'
+            currentBuild.description = 'GitHub push — CI 가 이미지를 올린 뒤 다시 부른다'
+            echo 'GitHub 웹훅으로 불렸다 — 이 커밋의 이미지가 아직 없을 수 있어 배포하지 않는다.'
+            return
+          }
+          if (sha) {
+            if (!(sha ==~ /[0-9a-f]{40}/)) {
+              error("DEPLOY_SHA 는 40자리 커밋 해시여야 한다: '${sha}'")
+            }
+            // 빌드 시작 때 체크아웃한 main 의 끝이 그 커밋을 품고 있어야 한다 — main 에
+            // 없는 커밋(강제 push 로 사라진 것 등)은 배포하지 않는다. fetch 는 하지 않는다:
+            // 잡의 체크아웃만 자격증명을 갖는다.
+            sh "git -c safe.directory=\"\$PWD\" merge-base --is-ancestor ${sha} HEAD"
+            sh "git -c safe.directory=\"\$PWD\" checkout --quiet --detach ${sha}"
+            currentBuild.description = sha.take(12)
+          }
+        }
+        sh 'git -c safe.directory="$PWD" log -1 --oneline'
+      }
+    }
+
     stage('Preflight') {
+      when { expression { env.SKIP_DEPLOY != 'true' } }
       steps {
         sh "sh ./deploy.sh ${deployTarget} preflight"
       }
     }
 
     stage('변경 계획') {
+      when { expression { env.SKIP_DEPLOY != 'true' } }
       steps {
         sh "sh ./deploy.sh ${deployTarget} plan"
         script {
@@ -50,26 +97,26 @@ pipeline {
       }
     }
 
-    stage('빌드') {
+    stage('이미지') {
       when { expression { env.DEPLOY_ANY == 'true' } }
       // 하나가 실패해도 나머지는 끝까지 굽는다 — 한 번에 실패 원인을 전부 본다.
       // 어느 하나라도 실패하면 이 단계가 빨갛고 뒤의 교체·표식에는 닿지 않는다.
       parallel {
         stage('backend') {
           when { expression { env.BUILD_BACKEND == 'true' } }
-          steps { sh "sh ./deploy.sh ${deployTarget} build backend" }
+          steps { sh "sh ./deploy.sh ${deployTarget} image backend" }
         }
         stage('frontend') {
           when { expression { env.BUILD_FRONTEND == 'true' } }
-          steps { sh "sh ./deploy.sh ${deployTarget} build frontend" }
+          steps { sh "sh ./deploy.sh ${deployTarget} image frontend" }
         }
         stage('operator') {
           when { expression { env.BUILD_OPERATOR == 'true' } }
-          steps { sh "sh ./deploy.sh ${deployTarget} build operator" }
+          steps { sh "sh ./deploy.sh ${deployTarget} image operator" }
         }
         stage('classroom') {
           when { expression { env.BUILD_CLASSROOM == 'true' } }
-          steps { sh "sh ./deploy.sh ${deployTarget} build classroom" }
+          steps { sh "sh ./deploy.sh ${deployTarget} image classroom" }
         }
       }
     }
@@ -97,6 +144,7 @@ pipeline {
     }
 
     stage('배포 표식') {
+      when { expression { env.SKIP_DEPLOY != 'true' } }
       steps {
         sh "sh ./deploy.sh ${deployTarget} mark"
       }

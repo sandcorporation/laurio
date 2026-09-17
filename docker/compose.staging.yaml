@@ -288,6 +288,12 @@ services:
     restart: unless-stopped
 
   backend:
+    # **이미지는 CI 가 굽고 여기서는 받기만 한다**(2026-09-17). amd64 태그는 이 호스트의
+    # 아키텍처다 — staging(sub)은 amd64, prod(oracle)는 arm64. backend·celery-worker·
+    # celery-beat·events 넷이 **같은 이미지 이름**을 쓴다 — 예전에는 공유 태그가 없어
+    # compose 가 이미지를 넷 만들었고, 하나만 갈면 나머지가 옛 코드로 남았다.
+    # `build:` 은 비상용 로컬 빌드(`DEPLOY_IMAGE_SOURCE=build`)를 위해 남긴다.
+    image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-backend:${CODEMIT_IMAGE_TAG:-local}-amd64
     build:
       context: ..
       dockerfile: docker/backend.Dockerfile
@@ -306,6 +312,7 @@ services:
              gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3"
 
   celery-worker:
+    image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-backend:${CODEMIT_IMAGE_TAG:-local}-amd64
     build:
       context: ..
       dockerfile: docker/backend.Dockerfile
@@ -323,6 +330,7 @@ services:
     command: celery -A config worker --loglevel info
 
   celery-beat:
+    image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-backend:${CODEMIT_IMAGE_TAG:-local}-amd64
     build:
       context: ..
       dockerfile: docker/backend.Dockerfile
@@ -350,6 +358,7 @@ services:
   # worker·beat가 스캔용 어댑터를 안 쓰면서도 같은 환경을 받는 것과 같은
   # 이유). `migrate`는 여기서 부르지 않는다 — backend가 이미 부른다(같은 DB).
   events:
+    image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-backend:${CODEMIT_IMAGE_TAG:-local}-amd64
     build:
       context: ..
       dockerfile: docker/backend.Dockerfile
@@ -379,6 +388,9 @@ services:
   # 죽인다 — restart: unless-stopped라도 값이 안 채워지면 재시작을 반복할 뿐 절대
   # 뜨지 않는다(의도된 동작).
   frontend:
+    # `-staging` — NEXT_PUBLIC_* 가 빌드 때 굳으므로 앱 이미지는 환경마다 따로다.
+    # CI 가 저장소 변수 STAGING_* 로 굽는다(아래 build args 는 비상용 로컬 빌드용).
+    image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-frontend:${CODEMIT_IMAGE_TAG:-local}-staging
     build:
       context: ..
       dockerfile: docker/frontend.Dockerfile
@@ -508,6 +520,7 @@ services:
   # compose 수준의 방어다. e2e(frontend/e2e/operator/proxy.spec.ts)가 런타임에서
   # 같은 사실을 한 번 더 증명한다.
   operator:
+    image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-operator:${CODEMIT_IMAGE_TAG:-local}-staging
     build:
       context: ..
       dockerfile: docker/operator.Dockerfile
@@ -554,6 +567,7 @@ services:
   # CODEMIT_CLASSROOM_ORIGIN·CODEMIT_API_BASE_URL·CODEMIT_SESSION_COOKIE_DOMAIN이
   # 비어 있으면 이 컨테이너를 그 자리에서 죽인다.
   classroom:
+    image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-classroom:${CODEMIT_IMAGE_TAG:-local}-staging
     build:
       context: ..
       dockerfile: docker/classroom.Dockerfile
