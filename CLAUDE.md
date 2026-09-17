@@ -262,6 +262,7 @@ ghcr(`ghcr.io/sandcorporation/codemit-*`, 비공개)에 올린다:
 | `images-prod` | **mac** — arm64 제 속도 | `codemit-backend:<sha>-arm64`, 세 앱 `:<sha>-prod` |
 
 mac 러너는 Apple Silicon 의 Docker Desktop 위 러너 컨테이너(Linux/ARM64, 라벨 `mac-arm`)다.
+잡은 서비스마다 하나(matrix, staging 4 + prod 4)라 mac 러너 수(3)만큼 동시에 굽는다.
 **둘 다 mac 인 이유는 sub 의 디스크다**(2026-09-17) — sub 는 테스트 잡과 staging 스택이
 캐시 없는 SATA SSD(86% 참) 하나를 나눠 쓰는데, 빌드를 얹자 CPU·메모리는 남는데 디스크
 대기가 14~84% 로 치솟았다. **mac 이 없을 때의 비상구는 저장소 변수 `IMAGE_BUILDER=sub`**
@@ -429,8 +430,9 @@ sentry.io 가 아니라 **우리가 띄운 GlitchTip**
   (`core.observability.drop_expected_error`, `backend/tests/test_observability.py` 가
   그 규칙을 고정한다).
 - **어느 커밋에서 났는지가 release 태그다** — `deploy.sh` 가 배포하는 커밋 SHA 를
-  `SENTRY_RELEASE` 로 내보내 compose 가 백엔드 환경변수로 넘기고, 세 앱은 CI 가 같은
-  SHA(`github.sha`)를 빌드 인자로 굽는다(이미지 태그의 sha 와 같은 값이다).
+  `SENTRY_RELEASE` 로 내보내 compose 가 백엔드 환경변수로 넘기고, 세 앱은 CI 가 **그 앱
+  이미지에 들어가는 코드를 마지막으로 바꾼 커밋**을 빌드 인자로 굽는다(HEAD 로 구우면 커밋마다
+  Next 빌드 캐시가 깨졌다 — 이미지 태그는 여전히 HEAD sha 다).
   소스맵은 올리지 않는다(프론트 스택은 압축된 이름으로 보인다).
 - **닿는지 확인하는 법**: 설정이 틀려도 조용히 아무 일도 안 일어나는 것이 오류 수집의
   기본 실패 모양이라, 배포 뒤 한 번 쏴 보고 GlitchTip 에서 눈으로 본다.
