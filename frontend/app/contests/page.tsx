@@ -28,10 +28,10 @@ import {
 } from "@/lib/api/contests";
 import {
   finishedStatusLabel,
-  formatDday,
   formatPrize,
   formatSubmissionCount,
-  isImminent,
+  remainingTimeIsImminent,
+  remainingTimeLabel,
 } from "@/lib/contest-format";
 
 // canonical(#394) — 필터·정렬·페이지 쿼리가 무엇이든 이 경로 하나로
@@ -358,7 +358,7 @@ function ContestTable({ contests }: { contests: Contest[] }) {
 }
 
 function ContestRow({ contest }: { contest: Contest }) {
-  const imminent = isImminent(contest.deadline_at);
+  const imminent = remainingTimeIsImminent(contest.deadline_at);
 
   return (
     <Link
@@ -406,7 +406,7 @@ function ContestRow({ contest }: { contest: Contest }) {
         data-testid="deadline"
         className={`text-right font-mono text-sm ${imminent ? "font-semibold text-attention" : "text-ink/70"}`}
       >
-        {formatDday(contest.deadline_at)}
+        {remainingTimeLabel(contest.deadline_at)}
       </div>
     </Link>
   );

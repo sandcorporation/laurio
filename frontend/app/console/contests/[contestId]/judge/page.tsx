@@ -22,7 +22,7 @@ import { useParams } from "next/navigation";
 
 import { ErrorNote, EmptyState, PageHeader, buttonClass } from "@/app/components/ui";
 import { badgeClass } from "@/lib/ui/classnames";
-import { daysUntil, formatDday } from "@/lib/contest-format";
+import { remainingTime, remainingTimeLabel } from "@/lib/contest-format";
 import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
 import {
@@ -98,8 +98,8 @@ export default function JudgeComparisonPage() {
   }, [session.status, contestId]);
 
   const judgingEndsAt = load.status === "ready" ? load.contest.judging_ends_at : null;
-  const judgingDaysLeft = useMemo(
-    () => (judgingEndsAt ? daysUntil(judgingEndsAt, now) : null),
+  const judgingEnded = useMemo(
+    () => (judgingEndsAt ? remainingTime(judgingEndsAt, now).status === "closed" : null),
     [judgingEndsAt, now],
   );
 
@@ -165,8 +165,8 @@ export default function JudgeComparisonPage() {
         {judgingEndsAt ? (
           <div className="mt-2 flex flex-col gap-1">
             <p className="font-mono text-sm" data-testid="judging-deadline">
-              심사 마감까지 {formatDday(judgingEndsAt, now)}
-              {judgingDaysLeft !== null && judgingDaysLeft < 0 ? " (심사기간 종료)" : ""}
+              심사 마감까지 {remainingTimeLabel(judgingEndsAt, now)}
+              {judgingEnded ? " (심사기간 종료)" : ""}
             </p>
             <p className="text-sm text-ink" data-testid="judging-consequence-notice">
               심사기간 안에 선정하지 않으면, 그 이후 14일이 지나는 시점에 필수

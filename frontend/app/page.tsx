@@ -36,7 +36,12 @@ import Link from "next/link";
 
 import { Badge, EmptyState, PageHeader, PageShell } from "@/app/components/ui";
 import { fetchHomeCuration, type Contest, type HomeCurationGroup } from "@/lib/api/contests";
-import { formatDday, formatPrize, formatSubmissionCount, isImminent } from "@/lib/contest-format";
+import {
+  formatPrize,
+  formatSubmissionCount,
+  remainingTimeIsImminent,
+  remainingTimeLabel,
+} from "@/lib/contest-format";
 import { contestProductEnabled } from "@/lib/contest-switch";
 import { HOME_BUCKET_EMPTY_MESSAGES, HOME_BUCKET_LABELS } from "@/lib/home-curation";
 
@@ -120,7 +125,7 @@ function HomeBucketSection({ group }: { group: HomeCurationGroup }) {
 }
 
 function HomeContestRow({ contest }: { contest: Contest }) {
-  const imminent = isImminent(contest.deadline_at);
+  const imminent = remainingTimeIsImminent(contest.deadline_at);
 
   return (
     <li>
@@ -151,7 +156,7 @@ function HomeContestRow({ contest }: { contest: Contest }) {
         <div
           className={`text-right font-mono text-sm ${imminent ? "font-semibold text-attention" : "text-ink/70"}`}
         >
-          {formatDday(contest.deadline_at)}
+          {remainingTimeLabel(contest.deadline_at)}
         </div>
       </Link>
     </li>

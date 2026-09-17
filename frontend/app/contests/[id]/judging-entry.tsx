@@ -24,7 +24,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import { bffClient } from "@/lib/bff/client";
-import { formatDday } from "@/lib/contest-format";
+import { remainingTimeLabel } from "@/lib/contest-format";
 import { buttonClass } from "@/lib/ui/classnames";
 import type { ContestDetail } from "@/lib/submissions/types";
 
@@ -77,7 +77,7 @@ function renderBody(contest: ContestDetail) {
         </Link>
         {contest.judging_ends_at && (
           <span data-testid="judging-entry-remaining" className="font-mono text-xs text-ink/60">
-            심사기간 종료까지 {formatDday(contest.judging_ends_at)}
+            심사기간 종료까지 {remainingTimeLabel(contest.judging_ends_at)}
           </span>
         )}
       </>

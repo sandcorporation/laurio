@@ -14,7 +14,13 @@ import { MarkdownView, plainTextSummary } from "@codemit/markdown";
 
 import { Badge, PageHeader, PageShell } from "@/app/components/ui";
 import { fetchContest, type ContestImage, type Requirement } from "@/lib/api/contests";
-import { formatDday, formatPrize, formatSubmissionCount, isImminent } from "@/lib/contest-format";
+import {
+  formatDeadlineSeoul,
+  formatPrize,
+  formatSubmissionCount,
+  remainingTimeIsImminent,
+  remainingTimeLabel,
+} from "@/lib/contest-format";
 
 import { SponsorJudgingEntry } from "./judging-entry";
 import { SubmitCta } from "./submit-cta";
@@ -47,7 +53,7 @@ export async function generateMetadata({
   const description =
     summary.length > 0
       ? summary
-      : `상금 ${formatPrize(contest.prize)}원 · 마감 ${formatDday(contest.deadline_at)}`;
+      : `상금 ${formatPrize(contest.prize)}원 · 마감 ${remainingTimeLabel(contest.deadline_at)}`;
 
   // OG 이미지는 `opengraph-image.tsx`(Next 파일 컨벤션, app/contests/[id]/ 아래)가
   // 이 Contest 제목으로 매번 새로 그려 자동으로 이 메타데이터에 연결한다 — 여기서
@@ -76,7 +82,7 @@ export default async function ContestDetailPage({ params }: { params: Promise<Pa
     notFound();
   }
 
-  const imminent = isImminent(contest.deadline_at);
+  const imminent = remainingTimeIsImminent(contest.deadline_at);
 
   return (
     <PageShell>
@@ -146,10 +152,10 @@ export default async function ContestDetailPage({ params }: { params: Promise<Pa
               data-testid="deadline"
               className={`font-mono text-2xl font-medium ${imminent ? "text-attention" : ""}`}
             >
-              {formatDday(contest.deadline_at)}
+              {remainingTimeLabel(contest.deadline_at)}
             </span>
             <span className="font-mono text-xs text-ink/60">
-              {new Date(contest.deadline_at).toLocaleString("ko-KR")}
+              {formatDeadlineSeoul(contest.deadline_at)}
             </span>
           </div>
           <div className="flex flex-col gap-1">

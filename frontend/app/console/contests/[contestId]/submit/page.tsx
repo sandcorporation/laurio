@@ -14,6 +14,7 @@ import type { components } from "@codemit/bff-client/schema";
 import { ErrorNote, PageHeader, PageShell, SectionHeading, buttonClass } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
+import { formatSubmitCountdown } from "@/lib/contest-format";
 import { NEXT_ACTION_LABELS } from "@/lib/participation/use-my-participation";
 import { ScoreSummary } from "@/lib/submissions/score-summary";
 import { ASSET_KIND_LABELS } from "@/lib/submissions/types";
@@ -123,18 +124,6 @@ type ScoreState =
   | { status: "loading" }
   | { status: "error" }
   | { status: "ready"; data: OwnScore };
-
-function formatRemaining(ms: number): string {
-  if (ms <= 0) return "마감";
-  const totalSeconds = Math.floor(ms / 1000);
-  const days = Math.floor(totalSeconds / 86400);
-  const hours = Math.floor((totalSeconds % 86400) / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  if (days > 0) return `D-${days} (${hours}시간 ${minutes}분 남음)`;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)} 남음`;
-}
 
 export default function SubmitPage() {
   const params = useParams<{ contestId: string }>();
@@ -720,7 +709,7 @@ export default function SubmitPage() {
             className={`font-mono ${canEdit ? "text-ink" : "text-attention"}`}
             data-testid="submit-state-band"
           >
-            {stateLabel ?? formatRemaining(deadlineAt! - now)}
+            {stateLabel ?? formatSubmitCountdown(contest.deadline_at, new Date(now))}
           </span>
         }
       />
