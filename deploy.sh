@@ -12,23 +12,39 @@
 # #4~#6 — 에이전트에 buildx 가 없어 네 빌드가 전부 같은 줄에서 죽었다).
 #
 #   preflight           env 파일과 compose 설정을 확인한다
-#   plan                무엇을 다시 굽는지 정해 계획 파일(.jenkins-<대상>-plan)에 적는다
-#   build <서비스>       backend|frontend|operator|classroom 하나를 굽는다
+#   plan                무엇을 바꿔 끼울지 정해 계획 파일(.jenkins-<대상>-plan)에 적는다
+#   image <서비스>       backend|frontend|operator|classroom 하나의 이미지를 준비한다
+#                       (아래 이미지 출처에 따라 pull 또는 build)
+#   pull <서비스>        ghcr 에서 그 커밋의 이미지를 받는다
+#   build <서비스>       이 호스트에서 직접 굽는다(비상용)
 #   up                  계획대로 인프라를 세우고 새 이미지로 바꿔 끼운다
 #   verify              컨테이너가 running 인지 본다
 #   health <서비스>      backend|events 가 요청을 실제로 받는지 본다
 #   mark                배포 표식을 지금 커밋으로 옮긴다
 #   all (기본값)         위를 순서대로 전부 — 사람이 손으로 배포할 때
 #
+# **이미지는 CI 가 굽고, 여기서는 받는다**(2026-09-17). main 에 push 하면 CI 가
+# 커밋마다 네 이미지를 ghcr 에 올린다 — backend 는 `<sha>-amd64`(sub 러너)·`<sha>-arm64`
+# (mac 러너), 세 앱은 NEXT_PUBLIC_* 가 굳으므로 `<sha>-staging`·`<sha>-prod` 다. compose
+# 파일의 `image:` 가 그 이름을 가리키고, 태그의 <sha> 는 여기서 체크아웃한 커밋이다
+# (`CODEMIT_IMAGE_TAG`). 그래서 staging 은 sub 가, prod 는 oracle 이 더 이상 굽지 않는다
+# — oracle 은 prod 서버라 빌드가 서비스 속도를 갉아먹었다.
+#
+# 이미지 출처는 `DEPLOY_IMAGE_SOURCE` 가 고른다: `registry`(기본값, 파이프라인) 또는
+# `build`(CI·ghcr 가 막혔을 때 사람이 손으로 — 예전 방식 그대로 이 호스트에서 굽는다).
+# registry 는 env 파일의 `GHCR_USER`·`GHCR_READ_TOKEN`(read:packages PAT)으로 배포마다
+# 로그인한다 — oracle 의 에이전트 컨테이너는 /root/.docker 를 볼륨으로 붙이지 않아
+# 한 번 해 둔 로그인이 컨테이너를 다시 만들면 사라진다.
+#
 # **논리는 여전히 이 파일에 산다.** 파이프라인에 논리를 두면 아무도 읽지 않는 두 번째
 # 사본이 되고, 실제로 그렇게 한 번 어긋나 배포가 통째로 실패했다(staging 빌드 #4:
 # `cannot open ./deploy.sh`). 단계는 명령을 부르기만 한다.
 #
-# **바뀐 것만 다시 굽고 바꿔 끼운다.** 그런데 「바뀐 것」과 「바꿔 끼울 것」이
+# **바뀐 것만 바꿔 끼운다.** 이미지 태그가 커밋마다 달라지므로 계획 없이 `up` 하면
+# 바뀌지 않은 서비스까지 전부 다시 뜬다. 그런데 「바뀐 것」과 「바꿔 끼울 것」이
 # 1:1 이 아니다 — 그 어긋남이 이 파일의 대부분이다.
 #
-#   backend/             -> backend + celery-worker + celery-beat + events (같은
-#                                                                    Dockerfile, 이미지는 넷 —
+#   backend/             -> backend + celery-worker + celery-beat + events (이미지 하나 —
 #                                                                    events 는 ASGI 로 강의실
 #                                                                    실시간 신호만 여는 별도
 #                                                                    프로세스다, ADR-0046, #380)
@@ -68,8 +84,22 @@ COMPOSE="docker compose -f ${COMPOSE_FILE} --env-file ${ENV_FILE}"
 # 오류가 어느 커밋에서 났는지 — 오류 수집기(GlitchTip)의 release 태그가 된다
 # (2026-09-16). compose 가 backend 의 환경변수와 세 앱의 빌드 인자로 함께 넘긴다.
 # 여기서 정하는 이유: 굽는 커밋과 표시되는 커밋이 언제나 같아야 한다.
-SENTRY_RELEASE="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+SENTRY_RELEASE="$(git -c safe.directory="$PWD" rev-parse HEAD 2>/dev/null || echo unknown)"
 export SENTRY_RELEASE
+
+# compose 의 `image:` 태그 — CI 가 이 커밋으로 올린 이미지를 가리킨다.
+CODEMIT_IMAGE_TAG="$SENTRY_RELEASE"
+export CODEMIT_IMAGE_TAG
+
+IMAGE_SOURCE="${DEPLOY_IMAGE_SOURCE:-registry}"
+case "$IMAGE_SOURCE" in
+  registry|build) ;;
+  *) echo "알 수 없는 DEPLOY_IMAGE_SOURCE: $IMAGE_SOURCE (registry|build)"; exit 2 ;;
+esac
+# registry 에서 받을 때는 절대 굽지 않는다 — 이미지가 없으면 compose 가 조용히
+# 이 호스트에서 굽기 시작하는 대신 멈춰야 한다(oracle 을 빌드로 느리게 만들지 않는다).
+UP_FLAGS=""
+if [ "$IMAGE_SOURCE" = registry ]; then UP_FLAGS="--no-build"; fi
 
 # 「직전에 무엇을 배포했나」. `.env.<target>` 과 같은 자리에 둔다 — 빌드
 # 디렉터리가 유지된다는 전제이고, 그 전제는 이미 시크릿이 쓰고 있다.
@@ -92,7 +122,13 @@ GIT="git -c safe.directory=$PWD"
 
 log() { echo "[deploy:${TARGET}] $*"; }
 
-# 서비스 이름 → compose 서비스들. backend 는 넷을 함께 굽는다(아래 build 의 주석).
+# env 파일에서 값 하나를 읽는다(파일을 통째로 source 하지 않는다 — 셸이 해석하면
+# 안 되는 값이 섞여 있다).
+env_value() {
+  grep -E "^$1=" "$ENV_FILE" | tail -1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//'
+}
+
+# 서비스 이름 → compose 서비스들. backend 는 넷을 함께 받는다(아래 build 의 주석).
 compose_services() {
   case "$1" in
     backend) echo "backend celery-worker celery-beat events" ;;
@@ -119,11 +155,23 @@ cmd_preflight() {
   # 빌드 로그 한가운데 묻혀 네 서비스가 전부 같은 이유로 실패한 것처럼 보인다.
   # prod 에이전트(Oracle 호스트의 jenkins-desktop-agent)가 실제로 그랬다
   # (2026-09-14 빌드 #4~#6). 굽기 전에 이유를 한 줄로 말하고 멈춘다.
-  if ! docker buildx version >/dev/null 2>&1; then
+  if [ "$IMAGE_SOURCE" = build ] && ! docker buildx version >/dev/null 2>&1; then
     echo "이 에이전트의 docker CLI 에 buildx 플러그인이 없다."
     echo "Dockerfile 의 RUN --mount(BuildKit 전용)를 구울 수 없다 — 에이전트 이미지에 docker-buildx 를 넣어라."
     exit 1
   fi
+
+  # registry 는 pull 토큰이 있어야 한다 — 없으면 pull 단계에서 「denied」 한 줄로
+  # 죽어 원인이 흐려진다.
+  if [ "$IMAGE_SOURCE" = registry ]; then
+    if [ -z "$(env_value GHCR_USER)" ] || [ -z "$(env_value GHCR_READ_TOKEN)" ]; then
+      echo "$ENV_FILE 에 GHCR_USER·GHCR_READ_TOKEN 이 없다 — ghcr 에서 이미지를 받을 수 없다."
+      echo "read:packages 권한의 classic PAT 를 넣어라(scripts/ghcr-setup-wizard.sh 5단계)."
+      echo "급하면 DEPLOY_IMAGE_SOURCE=build 로 이 호스트에서 굽는다."
+      exit 1
+    fi
+  fi
+  log "이미지 출처: $IMAGE_SOURCE (태그 $(echo "$CODEMIT_IMAGE_TAG" | cut -c1-12))"
 
   # compose 가 필수값을 전부 만족하는지 먼저 본다. 여기서 걸리는 것이 컨테이너를
   # 굽고 나서 부팅에 실패하는 것보다 싸다.
@@ -152,6 +200,16 @@ cmd_plan() {
 
   CHANGED_FILE=$(mktemp)
   trap 'rm -f "$CHANGED_FILE"' EXIT
+
+  # **이미 더 새 커밋이 배포돼 있으면 아무것도 하지 않는다.** staging 은 CI 가 커밋마다
+  # 이 잡을 부르므로, 늦게 끝난 옛 커밋의 실행이 새 배포를 되돌릴 수 있다.
+  STALE=false
+  head_sha=$($GIT rev-parse HEAD)
+  if [ -n "$PREVIOUS" ] && [ "$PREVIOUS" != "$head_sha" ] \
+     && $GIT merge-base --is-ancestor "$head_sha" "$PREVIOUS" 2>/dev/null; then
+    STALE=true
+    log "이 커밋($(echo "$head_sha" | cut -c1-12))보다 새 커밋($(echo "$PREVIOUS" | cut -c1-12))이 이미 배포돼 있다 — 건너뛴다."
+  fi
 
   EVERYTHING=false
   if [ -n "$PREVIOUS" ]; then
@@ -254,9 +312,23 @@ cmd_plan() {
     BAKED_TOSS_KEY=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$FRONTEND_CID" 2>/dev/null \
       | grep '^NEXT_PUBLIC_TOSS_CLIENT_KEY=' | cut -d= -f2-)
     if [ "$BAKED_TOSS_KEY" != "$CURRENT_TOSS_KEY" ]; then
-      log "NEXT_PUBLIC_TOSS_CLIENT_KEY 가 .env.${TARGET} 과 어긋난다(떠 있는 컨테이너가 구운 값과 다르다) — frontend 를 다시 굽는다."
-      BUILD_FRONTEND=true
+      if [ "$IMAGE_SOURCE" = build ]; then
+        log "NEXT_PUBLIC_TOSS_CLIENT_KEY 가 .env.${TARGET} 과 어긋난다(떠 있는 컨테이너가 구운 값과 다르다) — frontend 를 다시 굽는다."
+        BUILD_FRONTEND=true
+      else
+        # registry 이미지의 값은 CI 가 저장소 변수(STAGING_/PROD_TOSS_CLIENT_KEY)로
+        # 굽는다 — 여기서 다시 받아도 고쳐지지 않는다. 어긋남만 크게 알린다.
+        log "경고: 떠 있는 frontend 가 구운 NEXT_PUBLIC_TOSS_CLIENT_KEY 가 .env.${TARGET} 의 ${TOSS_KEY_VAR} 와 다르다."
+        log "      저장소 변수 $(echo "$TARGET" | tr a-z A-Z)_TOSS_CLIENT_KEY 를 고치고 CI 를 다시 돌려야 한다."
+      fi
     fi
+  fi
+
+  if [ "$STALE" = true ]; then
+    BUILD_BACKEND=false
+    BUILD_FRONTEND=false
+    BUILD_OPERATOR=false
+    BUILD_CLASSROOM=false
   fi
 
   ANY=false
@@ -276,7 +348,7 @@ cmd_plan() {
   } > "$PLAN_FILE"
 
   plan_word() {
-    if [ "$1" = true ]; then echo "다시 굽는다"; else echo "건너뛴다"; fi
+    if [ "$1" = true ]; then echo "바꿔 끼운다"; else echo "건너뛴다"; fi
   }
   echo "계획"
   echo "  backend(+celery-worker,+celery-beat,+events) : $(plan_word "$BUILD_BACKEND")"
@@ -306,29 +378,48 @@ load_plan() {
 
 # ------------------------------------------------------------------ 굽는다
 
-# **backend·celery-worker·beat·events 는 같은 이미지가 아니다.** 넷 다 같은
-# Dockerfile 을 가리키지만 compose 파일 어디에도 공유 `image:` 태그가 없어서,
-# compose 는 서비스 이름으로 이미지를 **넷** 만든다(codemit-staging-backend,
-# -celery-worker, -celery-beat, -events, #380). 그래서 `build backend` 는
-# 하나만 굽고 나머지 셋은 옛 이미지에 남는다 — 뒤의 `up -d` 도 바뀐 게 없으니
-# 그냥 Running 이라 적고 지나간다. 배포는 초록으로 끝나는데 스캔·강의실
-# 스트림만 옛 코드로 돈다. 실제로 그렇게 한 번 나갔다(빌드 23, 그때는
-# celery-worker/beat 둘뿐이었다). 같은 레이어를 쓰므로 둘째부터는 캐시에
-# 맞아 거의 시간이 들지 않는다.
+# **backend·celery-worker·beat·events 는 같은 이미지다**(2026-09-17). 예전에는 compose
+# 파일에 공유 `image:` 태그가 없어 compose 가 서비스 이름으로 이미지를 **넷** 만들었고,
+# `build backend` 만 하면 나머지 셋이 옛 이미지에 남았다 — 배포는 초록으로 끝나는데
+# 스캔·강의실 스트림만 옛 코드로 돌았다(빌드 23). 지금은 넷이 한 이름을 가리키므로
+# 로컬로 구울 때도 backend 하나만 구우면 된다.
 #
-# NEXT_PUBLIC_* 는 빌드타임에 인라인된다 — build args 는 compose 가
-# .env.<target> 에서 읽어 넘긴다(#85). 여기서 따로 줄 것이 없다.
+# NEXT_PUBLIC_* 는 빌드타임에 인라인된다 — 로컬로 구울 때의 build args 는 compose 가
+# .env.<target> 에서 읽어 넘긴다(#85). CI 는 같은 값을 저장소 변수에서 읽는다.
 cmd_build() {
+  compose_services "$1" >/dev/null
+  log "$1 빌드 (이 호스트에서)"
+  $COMPOSE build "$1"
+}
+
+ghcr_login() {
+  # 토큰은 표준입력으로만 넘긴다 — 명령줄에 두면 ps 와 Jenkins 로그에 남는다.
+  env_value GHCR_READ_TOKEN | docker login ghcr.io -u "$(env_value GHCR_USER)" --password-stdin >/dev/null
+}
+
+cmd_pull() {
   services=$(compose_services "$1")
-  log "$1 빌드 ($services)"
+  [ "${GHCR_LOGGED_IN:-}" = 1 ] || ghcr_login
+  log "$1 받기 ($services, 태그 $(echo "$CODEMIT_IMAGE_TAG" | cut -c1-12))"
+  # 넷이 같은 이미지라 실제 다운로드는 한 번이다.
   # shellcheck disable=SC2086
-  $COMPOSE build $services
+  if ! $COMPOSE pull $services; then
+    echo "ghcr 에 이 커밋($CODEMIT_IMAGE_TAG)의 $1 이미지가 없거나 받을 수 없다."
+    echo "CI 의 이미지 잡이 끝났는지(prod 는 mac 러너) 확인하라. 급하면 DEPLOY_IMAGE_SOURCE=build."
+    exit 1
+  fi
+}
+
+cmd_image() {
+  if [ "$IMAGE_SOURCE" = registry ]; then cmd_pull "$1"; else cmd_build "$1"; fi
 }
 
 # 사람이 `all` 로 돌릴 때는 계획된 것을 동시에 굽는다 — 순차보다 빌드가 절반
 # 가까이 짧다. 출력이 뒤섞이지 않도록 서비스별 로그로 받아 뒤에 순서대로 쏟는다.
 # (파이프라인은 이 대신 서비스마다 병렬 단계를 두고 `build <서비스>` 를 부른다.)
 build_planned_in_background() {
+  # 네 받기가 동시에 로그인하지 않도록 한 번만 한다.
+  if [ "$IMAGE_SOURCE" = registry ]; then ghcr_login; GHCR_LOGGED_IN=1; fi
   BUILD_LOGS=$(mktemp -d)
   PIDS=""
   LABELS=""
@@ -340,10 +431,10 @@ build_planned_in_background() {
       classroom) wanted=$BUILD_CLASSROOM ;;
     esac
     [ "$wanted" = true ] || continue
-    cmd_build "$label" > "${BUILD_LOGS}/${label}.log" 2>&1 &
+    cmd_image "$label" > "${BUILD_LOGS}/${label}.log" 2>&1 &
     PIDS="$PIDS $!:$label"
     LABELS="$LABELS $label"
-    log "$label 빌드 시작"
+    log "$label 이미지 준비 시작"
   done
 
   FAILED=""
@@ -364,7 +455,7 @@ build_planned_in_background() {
   rm -rf "$BUILD_LOGS"
 
   if [ -n "$FAILED" ]; then
-    echo "빌드 실패:$FAILED — 배포 표식은 옮기지 않았다."
+    echo "이미지 준비 실패:$FAILED — 배포 표식은 옮기지 않았다."
     exit 1
   fi
 }
@@ -381,6 +472,7 @@ cmd_up() {
   # 인프라는 항상 떠 있어야 한다(idempotent — 이미 떠 있으면 아무 일도 일어나지
   # 않는다).
   $COMPOSE up -d db redis
+  # 아래 up 은 전부 $UP_FLAGS(registry 면 --no-build)를 붙인다.
 
   if [ "$BUILD_BACKEND" = true ]; then
     # **넷을 함께 바꾼다.** backend 만 갈면 워커·beat·events 가 옛 코드로
@@ -390,12 +482,17 @@ cmd_up() {
     # backend 의 command 가 migrate 를 먼저 돌리므로, 나머지 셋은 그 뒤에
     # 올린다 — 새 마이그레이션이 필요한 코드가 아직 없는 스키마 위에서 스캔·
     # 스트림을 돌리는 창을 만들지 않는다.
-    $COMPOSE up -d --no-deps backend
-    $COMPOSE up -d --no-deps celery-worker celery-beat events
+    # shellcheck disable=SC2086
+    $COMPOSE up -d --no-deps $UP_FLAGS backend
+    # shellcheck disable=SC2086
+    $COMPOSE up -d --no-deps $UP_FLAGS celery-worker celery-beat events
   fi
-  if [ "$BUILD_FRONTEND" = true ]; then $COMPOSE up -d --no-deps frontend; fi
-  if [ "$BUILD_OPERATOR" = true ]; then $COMPOSE up -d --no-deps operator; fi
-  if [ "$BUILD_CLASSROOM" = true ]; then $COMPOSE up -d --no-deps classroom; fi
+  # shellcheck disable=SC2086
+  if [ "$BUILD_FRONTEND" = true ]; then $COMPOSE up -d --no-deps $UP_FLAGS frontend; fi
+  # shellcheck disable=SC2086
+  if [ "$BUILD_OPERATOR" = true ]; then $COMPOSE up -d --no-deps $UP_FLAGS operator; fi
+  # shellcheck disable=SC2086
+  if [ "$BUILD_CLASSROOM" = true ]; then $COMPOSE up -d --no-deps $UP_FLAGS classroom; fi
   log "바꿔 끼웠다"
 }
 
@@ -465,7 +562,19 @@ cmd_mark() {
   # 다음 빌드의 「직전 배포」 기준점. **확인이 끝난 뒤에만** 옮긴다 — 실패한
   # 배포를 기준으로 삼으면 그 사이 변경이 다음 빌드에서 통째로 누락된다.
   # 파이프라인에서는 앞 단계가 하나라도 실패하면 이 단계에 닿지 않는다.
-  $GIT rev-parse HEAD > "$DEPLOYED"
+  #
+  # **뒤로 옮기지 않는다.** 늦게 끝난 옛 커밋의 실행(plan 이 STALE 로 건너뛴 것)이
+  # 표식을 옛 커밋으로 되돌리면 다음 배포의 변경 범위가 부풀고 순서 판단도 틀린다.
+  head_sha=$($GIT rev-parse HEAD)
+  if [ -f "$DEPLOYED" ]; then
+    previous=$(cat "$DEPLOYED")
+    if [ "$previous" != "$head_sha" ] && $GIT merge-base --is-ancestor "$head_sha" "$previous" 2>/dev/null; then
+      rm -f "$PLAN_FILE"
+      log "배포 표식은 그대로 둔다 — 더 새 커밋($(echo "$previous" | cut -c1-12))이다."
+      return 0
+    fi
+  fi
+  echo "$head_sha" > "$DEPLOYED"
   rm -f "$PLAN_FILE"
   log "배포 표식: $(cat "$DEPLOYED")"
 }
@@ -475,10 +584,14 @@ cmd_mark() {
 case "$COMMAND" in
   preflight) cmd_preflight ;;
   plan) cmd_plan ;;
-  build)
-    [ -n "$ARG" ] || { echo "build 에는 서비스가 필요하다 (backend|frontend|operator|classroom)"; exit 2; }
+  image|pull|build)
+    [ -n "$ARG" ] || { echo "$COMMAND 에는 서비스가 필요하다 (backend|frontend|operator|classroom)"; exit 2; }
     compose_services "$ARG" >/dev/null
-    cmd_build "$ARG"
+    case "$COMMAND" in
+      image) cmd_image "$ARG" ;;
+      pull) cmd_pull "$ARG" ;;
+      build) cmd_build "$ARG" ;;
+    esac
     ;;
   up) cmd_up ;;
   verify) cmd_verify ;;
@@ -501,7 +614,7 @@ case "$COMMAND" in
     cmd_mark
     ;;
   *)
-    echo "알 수 없는 명령: $COMMAND (preflight|plan|build|up|verify|health|mark|all)"
+    echo "알 수 없는 명령: $COMMAND (preflight|plan|image|pull|build|up|verify|health|mark|all)"
     exit 2
     ;;
 esac

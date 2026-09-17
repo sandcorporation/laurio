@@ -27,6 +27,12 @@ def deployTarget = 'prod'
 pipeline {
   agent { label 'oracle' }
 
+  // 이미지는 CI 가 굽고 ghcr 에서 받는다(2026-09-17, deploy.sh 머리 주석). ghcr·CI 가
+  // 막혔을 때는 사람이 호스트에서 `DEPLOY_IMAGE_SOURCE=build sh ./deploy.sh <대상>` 으로 굽는다.
+  environment {
+    DEPLOY_IMAGE_SOURCE = 'registry'
+  }
+
   options {
     timestamps()
     disableConcurrentBuilds()          // 같은 호스트의 같은 스택을 두 빌드가 밟지 않게
@@ -67,26 +73,26 @@ pipeline {
       }
     }
 
-    stage('빌드') {
+    stage('이미지') {
       when { expression { env.DEPLOY_ANY == 'true' } }
       // 하나가 실패해도 나머지는 끝까지 굽는다 — 한 번에 실패 원인을 전부 본다.
       // 어느 하나라도 실패하면 이 단계가 빨갛고 뒤의 교체·표식에는 닿지 않는다.
       parallel {
         stage('backend') {
           when { expression { env.BUILD_BACKEND == 'true' } }
-          steps { sh "sh ./deploy.sh ${deployTarget} build backend" }
+          steps { sh "sh ./deploy.sh ${deployTarget} image backend" }
         }
         stage('frontend') {
           when { expression { env.BUILD_FRONTEND == 'true' } }
-          steps { sh "sh ./deploy.sh ${deployTarget} build frontend" }
+          steps { sh "sh ./deploy.sh ${deployTarget} image frontend" }
         }
         stage('operator') {
           when { expression { env.BUILD_OPERATOR == 'true' } }
-          steps { sh "sh ./deploy.sh ${deployTarget} build operator" }
+          steps { sh "sh ./deploy.sh ${deployTarget} image operator" }
         }
         stage('classroom') {
           when { expression { env.BUILD_CLASSROOM == 'true' } }
-          steps { sh "sh ./deploy.sh ${deployTarget} build classroom" }
+          steps { sh "sh ./deploy.sh ${deployTarget} image classroom" }
         }
       }
     }

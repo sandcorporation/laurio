@@ -1532,3 +1532,248 @@ jobs:
       - name: Dump container state on failure
         if: failure()
         run: docker ps -a
+
+  images-staging:
+    # ── 배포 이미지(2026-09-17) ──────────────────────────────────────────────
+    #
+    # **staging·prod 서버는 이미지를 굽지 않고 여기서 올린 것을 받는다**(deploy.sh 머리 주석).
+    # 커밋마다 네 이미지를 ghcr 에 올린다 — 태그의 sha 가 곧 배포 스크립트가 체크아웃한
+    # 커밋이다. 바뀌지 않은 서비스는 레지스트리 캐시(codemit-buildcache)에 맞아 금방 끝난다.
+    #
+    # backend 는 환경을 가리지 않아 아키텍처만 가른다(`-amd64` = staging 호스트 sub).
+    # 세 앱은 NEXT_PUBLIC_* 가 빌드 때 굳으므로 환경마다 따로 굽는다(`-staging`). 그 값은
+    # 서버 env 파일이 아니라 저장소 변수 STAGING_* 에 있다 — 조직이 free 요금제라 비공개
+    # 저장소의 environment 기능을 못 쓴다. 값을 바꾸면 이 잡이 다시 돌아야 반영된다.
+    #
+    # 테스트 잡과 **나란히** 돈다 — 배포(deploy-staging)가 테스트를 기다리므로 빨간
+    # 커밋의 이미지는 올라가도 배포되지 않는다.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, sub]
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: backend (amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/backend.Dockerfile
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: ghcr.io/sandcorporation/codemit-backend:${{ github.sha }}-amd64
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:backend-amd64
+          cache-to: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:backend-amd64,mode=max
+
+      - name: frontend (staging, amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/frontend.Dockerfile
+          target: runner
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: ghcr.io/sandcorporation/codemit-frontend:${{ github.sha }}-staging
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:frontend-staging
+          cache-to: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:frontend-staging,mode=max
+          build-args: |
+            NEXT_PUBLIC_PORTONE_STORE_ID=${{ vars.STAGING_PORT_ONE_V2_STORE_ID }}
+            NEXT_PUBLIC_PORTONE_CHANNEL_KEY=${{ vars.STAGING_KG_INICIS_CHANNEL_KEY }}
+            NEXT_PUBLIC_TOSS_CLIENT_KEY=${{ vars.STAGING_TOSS_CLIENT_KEY }}
+            NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED=${{ vars.STAGING_CODEMIT_CONTEST_PRODUCT_ENABLED }}
+            NEXT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED=${{ vars.STAGING_CODEMIT_PAID_CONTEST_PRODUCT_ENABLED }}
+            NEXT_PUBLIC_SENTRY_DSN=${{ vars.STAGING_SENTRY_DSN_FRONTEND }}
+            NEXT_PUBLIC_SENTRY_ENVIRONMENT=staging
+            NEXT_PUBLIC_SENTRY_RELEASE=${{ github.sha }}
+
+      - name: operator (staging, amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/operator.Dockerfile
+          target: runner
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: ghcr.io/sandcorporation/codemit-operator:${{ github.sha }}-staging
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:operator-staging
+          cache-to: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:operator-staging,mode=max
+          build-args: |
+            NEXT_PUBLIC_SENTRY_DSN=${{ vars.STAGING_SENTRY_DSN_OPERATOR }}
+            NEXT_PUBLIC_SENTRY_ENVIRONMENT=staging
+            NEXT_PUBLIC_SENTRY_RELEASE=${{ github.sha }}
+
+      - name: classroom (staging, amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/classroom.Dockerfile
+          target: runner
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: ghcr.io/sandcorporation/codemit-classroom:${{ github.sha }}-staging
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:classroom-staging
+          cache-to: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:classroom-staging,mode=max
+          build-args: |
+            NEXT_PUBLIC_SENTRY_DSN=${{ vars.STAGING_SENTRY_DSN_CLASSROOM }}
+            NEXT_PUBLIC_SENTRY_ENVIRONMENT=staging
+            NEXT_PUBLIC_SENTRY_RELEASE=${{ github.sha }}
+
+  images-prod:
+    # prod(oracle, arm64) 이미지는 **mac 러너**(Apple Silicon, Docker Desktop)가 굽는다 — oracle 은
+    # prod 서버라 빌드가 서비스를 느리게 만들고, sub 에서 에뮬레이션으로 구우면 몇 배 느리다.
+    #
+    # **mac 이 꺼져 있으면 이 잡이 줄을 서고, 그동안 CI 가 끝나지 않으므로 production 승격도
+    # 기다린다**(promote-production 은 CI 전체의 성공을 본다) — 의도한 동작이다. staging 은
+    # 이 잡을 기다리지 않는다. GitHub 는 러너를 못 찾은 잡을 24시간 뒤 실패로 끝낸다.
+    #
+    # macOS 러너는 잡을 컨테이너 안에서 돌리지 못한다(`container:`·`services:` 불가) — 여기는
+    # docker CLI 로 buildx 를 부르기만 하므로 해당 없다.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, macOS, ARM64, mac-arm]
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: backend (arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/backend.Dockerfile
+          platforms: linux/arm64
+          push: true
+          provenance: false
+          tags: ghcr.io/sandcorporation/codemit-backend:${{ github.sha }}-arm64
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:backend-arm64
+          cache-to: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:backend-arm64,mode=max
+
+      - name: frontend (prod, arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/frontend.Dockerfile
+          target: runner
+          platforms: linux/arm64
+          push: true
+          provenance: false
+          tags: ghcr.io/sandcorporation/codemit-frontend:${{ github.sha }}-prod
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:frontend-prod
+          cache-to: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:frontend-prod,mode=max
+          build-args: |
+            NEXT_PUBLIC_PORTONE_STORE_ID=${{ vars.PROD_PORT_ONE_V2_STORE_ID }}
+            NEXT_PUBLIC_PORTONE_CHANNEL_KEY=${{ vars.PROD_KG_INICIS_CHANNEL_KEY }}
+            NEXT_PUBLIC_TOSS_CLIENT_KEY=${{ vars.PROD_TOSS_CLIENT_KEY }}
+            NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED=${{ vars.PROD_CODEMIT_CONTEST_PRODUCT_ENABLED }}
+            NEXT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED=${{ vars.PROD_CODEMIT_PAID_CONTEST_PRODUCT_ENABLED }}
+            NEXT_PUBLIC_SENTRY_DSN=${{ vars.PROD_SENTRY_DSN_FRONTEND }}
+            NEXT_PUBLIC_SENTRY_ENVIRONMENT=production
+            NEXT_PUBLIC_SENTRY_RELEASE=${{ github.sha }}
+
+      - name: operator (prod, arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/operator.Dockerfile
+          target: runner
+          platforms: linux/arm64
+          push: true
+          provenance: false
+          tags: ghcr.io/sandcorporation/codemit-operator:${{ github.sha }}-prod
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:operator-prod
+          cache-to: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:operator-prod,mode=max
+          build-args: |
+            NEXT_PUBLIC_SENTRY_DSN=${{ vars.PROD_SENTRY_DSN_OPERATOR }}
+            NEXT_PUBLIC_SENTRY_ENVIRONMENT=production
+            NEXT_PUBLIC_SENTRY_RELEASE=${{ github.sha }}
+
+      - name: classroom (prod, arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/classroom.Dockerfile
+          target: runner
+          platforms: linux/arm64
+          push: true
+          provenance: false
+          tags: ghcr.io/sandcorporation/codemit-classroom:${{ github.sha }}-prod
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:classroom-prod
+          cache-to: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:classroom-prod,mode=max
+          build-args: |
+            NEXT_PUBLIC_SENTRY_DSN=${{ vars.PROD_SENTRY_DSN_CLASSROOM }}
+            NEXT_PUBLIC_SENTRY_ENVIRONMENT=production
+            NEXT_PUBLIC_SENTRY_RELEASE=${{ github.sha }}
+
+  deploy-staging:
+    # 이미지가 올라가고 **나머지 잡이 전부 초록**이면 sub 의 Jenkins staging 잡(laurio)을
+    # 이 커밋으로 부른다(Jenkinsfile 의 DEPLOY_SHA). 러너와 Jenkins 가 같은 호스트라
+    # JENKINS_URL 은 루프백이다. 값은 scripts/ghcr-setup-wizard.sh 6단계가 넣는다.
+    # images-prod 는 기다리지 않는다 — mac 이 꺼져 있어도 staging 은 나간다.
+    needs:
+      - test
+      - deploy-check
+      - frontend-openapi-types
+      - adr-status
+      - screen-language
+      - frontend-pure-unit-tests
+      - celery-broker
+      - frontend-e2e-public
+      - frontend-e2e-operator
+      - frontend-e2e-classroom
+      - frontend-deploy-guard
+      - operator-deploy-guard
+      - classroom-deploy-guard
+      - images-staging
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, sub]
+    timeout-minutes: 5
+    steps:
+      - name: Jenkins staging 잡을 이 커밋으로 부른다
+        env:
+          JENKINS_URL: ${{ vars.JENKINS_URL }}
+          JENKINS_USER: ${{ vars.JENKINS_USER }}
+          JENKINS_API_TOKEN: ${{ secrets.JENKINS_API_TOKEN }}
+        run: |
+          set -eu
+          # 자격증명은 표준입력(curl -K -)으로만 넘긴다 — 명령줄에 두면 호스트의 ps 에 보인다.
+          code=$(printf 'user = "%s:%s"\n' "$JENKINS_USER" "$JENKINS_API_TOKEN" \
+            | curl -sS -K - -o /tmp/jenkins-trigger.out -w '%{http_code}' -X POST \
+                --data-urlencode "DEPLOY_SHA=${GITHUB_SHA}" \
+                "${JENKINS_URL%/}/job/laurio/buildWithParameters")
+          if [ "$code" != "201" ]; then
+            echo "::error::Jenkins 가 ${code} 로 답했다 — 잡 파라미터(DEPLOY_SHA)·사용자 권한·토큰을 확인하라"
+            cat /tmp/jenkins-trigger.out || true
+            exit 1
+          fi
+          echo "staging 배포를 불렀다: ${GITHUB_SHA}"

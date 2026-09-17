@@ -45,9 +45,9 @@ celery-beat와 같은 `x-backend-env`(STORAGE_*·PAYMENT_* 등 이 프로세스�
 가드 + `core.checks.check_event_bus_adapter_mode`, #83과 같은 두 갈래) — 두 env
 예시 파일이 실물 값(`core.events_redis.RedisEventBus`)을 채워 둔다.
 `deploy.sh`는 `backend/` 변경에 이 서비스를 backend·celery-worker·celery-beat와
-함께 다시 굽고(넷이 이미지 넷이다 — 하나만 갈면 나머지가 옛 이미지에 남는 것은
-celery 둘과 같은 함정이다), 같은 방식(Host 헤더를 붙인 `/api/health`)으로 헬스
-체크한다.
+함께 바꿔 끼우고(넷이 **같은 이미지**를 쓴다, 2026-09-17 — 그 전에는 이미지가 넷이라
+하나만 갈면 나머지가 옛 이미지에 남았다), 같은 방식(Host 헤더를 붙인 `/api/health`)으로
+헬스 체크한다.
 
 **저장소 밖의 TLS 리버스 프록시는 이 스트림을 버퍼링하면 안 된다.** SSE는 응답을
 끊지 않고 계속 흘려보내는데, 프록시가 응답을 통째로 모았다가 한 번에 내보내면
@@ -174,9 +174,10 @@ ADR-0048이 amend). 처음에는 공모전을 통째로 껐지만(방향이 강�
 
 **한 곳에 모은 목록**은 `backend/core/contest_switch.py` 모듈 docstring이다 —
 다시 켤 때 읽을 자리. **되돌리는 법**: `.env.staging`/`.env.prod`에
-`CODEMIT_PAID_CONTEST_PRODUCT_ENABLED=true` 한 줄을 추가하고 backend와 frontend를
-재배포한다(frontend는 빌드 인자로 굽으므로 재빌드가 필요하다,
-`docker/frontend.Dockerfile`). ADR을 새로 쓰지 않는다 — 되돌리기가 환경변수 한
+`CODEMIT_PAID_CONTEST_PRODUCT_ENABLED=true` 한 줄을 추가하고, **저장소 변수**
+`STAGING_`/`PROD_CODEMIT_PAID_CONTEST_PRODUCT_ENABLED` 도 `true` 로 바꾼 뒤 CI 를 다시
+돌려 배포한다 — frontend 는 그 값을 빌드 인자로 굽고, 굽는 곳이 CI 라 원본이 저장소
+변수다(아래 「이미지는 CI 가 굽는다」, `docker/frontend.Dockerfile`). ADR을 새로 쓰지 않는다 — 되돌리기가 환경변수 한
 줄이라 「되돌리기 어렵다」에 해당하지 않는다(방향 전환 자체의 근거는 ADR-0037·
 ADR-0048에 있다).
 
@@ -240,42 +241,74 @@ staging 은 실물 어댑터라 해당 없음), 배포 환경의 시계는 실�
 직접 커밋하지 않는다.** prod 배포는 `Jenkinsfile.production` 이 맡는다 — `production` 브랜치
 빌드일 때만 `deploy.sh prod <명령>` 을 단계별로 부르는 얇은 껍데기이고, **sub 의 Jenkins(staging 과 같은 컨트롤러)에
 붙은 에이전트 `oracle`** 에서 돈다(라벨 `oracle`). 에이전트는 Oracle A1 호스트의 `jenkins-desktop-agent`
-컨테이너(root·호스트 docker 소켓, 이미지 정의는 호스트 `/server/jenkins`)이고 **그 이미지에 buildx 가 있어야 한다** —
-없으면 Dockerfile 의 `RUN --mount` 에서 네 빌드가 전부 죽는다(2026-09-14 빌드 #4~#6, 지금은 `deploy.sh`
-preflight 가 먼저 멈춘다). 호스트 `/var/jenkins_home/workspace` 가 컨테이너
+컨테이너(root·호스트 docker 소켓, 이미지 정의는 호스트 `/server/jenkins`)이고, 이제 **이미지를 굽지
+않고 ghcr 에서 받기만 한다**(아래). 비상용 로컬 빌드(`DEPLOY_IMAGE_SOURCE=build`)를 쓸 때만 그 이미지에
+buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 네 빌드가 전부 죽었다(2026-09-14 빌드
+#4~#6, 지금은 `deploy.sh` preflight 가 먼저 멈춘다). 호스트 `/var/jenkins_home/workspace` 가 컨테이너
 `/home/jenkins/agent/workspace` 로 붙어 있어, 노드의 Remote root directory 는 컨테이너 경로
 `/home/jenkins/agent`, 잡 이름은 `codemit` 이어야 호스트의 `/var/jenkins_home/workspace/codemit` 에 둔
 `docker/.env.prod`(chmod 600)·배포 표식을 쓴다. 잡·노드·`.env.prod` 는 저장소 밖에서 사람이 만든다.
 
-**staging 배포는 `main` 에 push 하면 저절로 일어난다.** Jenkins 잡
-(`/var/jenkins_home/jobs/laurio`)은 **Pipeline** 이고(`<flow-definition>`,
-`scriptPath: Jenkinsfile`), 트리거가 `GitHubPushTrigger` — GitHub 웹훅이다.
-브랜치 지정은 `*/main` 이라 다른 브랜치를 밀어도 빌드가 돌지 않는다.
+**이미지는 CI 가 굽는다 — staging·prod 서버는 받기만 한다**(2026-09-17). 예전에는 CI 가
+구운 이미지는 테스트에만 쓰고 버렸고, 배포는 각 서버가 다시 구웠다 — prod(oracle)는
+배포마다 제 CPU 로 Next 빌드 셋을 돌렸다. 지금은 main 의 CI 가 커밋마다 네 이미지를
+ghcr(`ghcr.io/sandcorporation/codemit-*`, 비공개)에 올린다:
+
+| 잡 | 러너 | 태그 |
+| --- | --- | --- |
+| `images-staging` | sub (amd64) | `codemit-backend:<sha>-amd64`, 세 앱 `:<sha>-staging` |
+| `images-prod` | **mac** (Apple Silicon, Docker Desktop, 라벨 `mac-arm`) | `codemit-backend:<sha>-arm64`, 세 앱 `:<sha>-prod` |
+
+- **backend 는 환경을 가리지 않아 아키텍처로만 가른다.** 세 앱은 `NEXT_PUBLIC_*` 가 굳으므로
+  환경마다 따로 굽는다 — 그 값의 원본은 서버 env 가 아니라 **저장소 변수 `STAGING_*`·
+  `PROD_*`** 다(조직이 free 요금제라 비공개 저장소의 environment 기능을 못 써 접두어로
+  가른다). 값을 바꾸면 CI 를 다시 돌려야 이미지에 반영된다.
+- **mac 이 꺼져 있으면 `images-prod` 가 줄을 서고, CI 가 끝나지 않으니 production 승격도
+  기다린다** — 의도한 동작이다(oracle 에서 굽거나 sub 에서 에뮬레이션으로 굽는 대안을
+  버렸다). staging 은 mac 을 기다리지 않는다.
+- **서버는 배포마다 env 의 `GHCR_USER`·`GHCR_READ_TOKEN`(read:packages classic PAT)으로
+  로그인한다** — oracle 에이전트 컨테이너는 `/root/.docker` 가 볼륨이 아니라 한 번 해 둔
+  로그인이 컨테이너를 다시 만들면 사라진다. ghcr 는 git SSH 키로 인증할 수 없다.
+- 사람 작업(mac 러너·PAT·Jenkins 토큰·저장소 변수)은 `scripts/ghcr-setup-wizard.sh` 가
+  단계별로 안내한다. ghcr·CI 가 막혔을 때의 비상구는 서버에서
+  `DEPLOY_IMAGE_SOURCE=build sh ./deploy.sh <대상>` — 예전처럼 그 자리에서 굽는다.
+
+**staging 배포는 CI 가 부른다.** Jenkins 잡(`/var/jenkins_home/jobs/laurio`)은 **Pipeline**
+이고(`<flow-definition>`, `scriptPath: Jenkinsfile`), 브랜치 지정은 `*/main` 이다. main 의
+CI 에서 `images-staging` 과 나머지 잡이 전부 초록이면 `deploy-staging` 잡이
+`buildWithParameters` 로 **`DEPLOY_SHA`** 를 채워 부르고(러너와 Jenkins 가 같은 호스트라
+`vars.JENKINS_URL` 은 루프백), 파이프라인은 워크스페이스를 그 커밋으로 되돌려 배포한다 —
+빨간 커밋은 staging 에도 가지 않는다. 예전 트리거인 GitHub 웹훅(`GitHubPushTrigger`)은
+이미지가 올라가기 **전에** 잡을 부르므로, 웹훅으로 불린 빌드는 아무것도 하지 않고
+끝난다(켜 둬도 해가 없다). 늦게 도착한 옛 커밋의 호출은 `deploy.sh plan` 이 「더 새 커밋이
+이미 배포돼 있다」로 건너뛰고, 배포 표식도 뒤로 옮기지 않는다.
 
 **실제로 굽는 것은 `Jenkinsfile` 이 단계마다 부르는 `deploy.sh` 의 명령이다.** 두
-Jenkinsfile 이 「Preflight → 변경 계획 → 빌드(서비스별 병렬) → 교체 → 확인 → 배포 표식」을
+Jenkinsfile 이 「(staging 은 대상 확인 →) Preflight → 변경 계획 → 이미지(서비스별 병렬 pull) →
+교체 → 확인 → 배포 표식」을
 각각 한 단계로 보여주고, 단계 본문은 `sh ./deploy.sh <대상> <명령>` 한 줄이다 — `plan` 이
-`.jenkins-<대상>-plan` 에 `KEY=value` 로 적은 계획을 파이프라인이 읽어 빌드 단계의 `when` 을
+`.jenkins-<대상>-plan` 에 `KEY=value` 로 적은 계획을 파이프라인이 읽어 이미지 단계의 `when` 을
 정한다. 논리는 여전히 `deploy.sh` 에만 있고, 사람이 손으로 돌릴 때는 `deploy.sh <대상>`
 (= `all`) 한 번이면 전부 돈다. 예전에는 한 단계로 통째로 불러 Jenkins 화면에 「배포」 하나만
 보였다. 더 예전에는 잡이 freestyle 이라 `Jenkinsfile` 이 읽히지 않았고, 그걸 모르고
 Jenkinsfile 만 고쳤다가 빌드가 `cannot open ./deploy.sh` 로 통째로 실패한 적이 있다.
 
-`deploy.sh` 는 **바뀐 것만 다시 굽는다**. 기준점은 `.jenkins-staging-deployed`
+`deploy.sh` 는 **바뀐 것만 바꿔 끼운다** — 이미지 태그가 커밋마다 달라서 계획 없이 `up` 하면
+바뀌지 않은 서비스까지 전부 다시 뜨기 때문이다(CI 는 매 커밋 네 이미지를 다 올리므로 어느
+서비스든 받을 이미지는 있다). 기준점은 `.jenkins-staging-deployed`
 (gitignore, 빌드 디렉터리에 남는다 — 시크릿과 같은 전제). 그 파일이 없거나 그것이
-가리키는 커밋이 저장소에 없으면 전부 굽는다. 경로 → 서비스 팬아웃은 1:1 이 아니다:
+가리키는 커밋이 저장소에 없으면 전부 바꿔 끼운다. 경로 → 서비스 팬아웃은 1:1 이 아니다:
 `backend/` 는 **backend + celery-worker + celery-beat + events**(#380, ADR-0046)를
-함께 갈고(넷은 같은 Dockerfile 을 쓰지만 공유 `image:` 태그가 없어 **이미지가
-넷**이다 — `build backend` 만 하면 나머지 셋은 옛 이미지에 남고, `up -d` 는 바뀐
-게 없으니 Running 이라 적고 지나가 배포가 초록으로 끝난 채 스캔·강의실 실시간
-신호만 옛 코드로 돈다),
+함께 간다(넷이 한 이미지 이름을 쓴다, 2026-09-17 — 예전에는 공유 `image:` 태그가 없어
+**이미지가 넷**이었고, `build backend` 만 하면 나머지 셋이 옛 이미지에 남아 배포가 초록으로
+끝난 채 스캔·강의실 실시간 신호만 옛 코드로 돌았다),
 `packages/` **아래 무엇이든** 과 `pnpm-lock.yaml`·`pnpm-workspace.yaml`·루트
 `package.json` 은 **frontend + operator + classroom**(#277)을 함께 간다 — 어느 앱이 어느
 패키지를 쓰는지로 가르지 않는다(`deploy.sh` 의 경로 규칙 하나다). 없는 컨테이너는
-변경 여부와 무관하게 굽는다 — 「없음」은 「최신」이 아니다.
+변경 여부와 무관하게 받아서 띄운다 — 「없음」은 「최신」이 아니다.
 
 **이벤트 서비스가 없어도 배포는 실패로 끝나지 않는다 — 다만 헬스 체크는 있다.**
-`events` 는 `backend`·`celery-worker`·`celery-beat` 와 같은 무게로 굽고 바꿔
+`events` 는 `backend`·`celery-worker`·`celery-beat` 와 같은 무게로 받고 바꿔
 끼우지만, 그 프로세스가 죽으면 강의실 화면만 폴링으로 물러난다(ADR-0046 결과 —
 스트림은 진실의 출처가 아니다). 그래도 `deploy.sh` 는 다른 서비스와 똑같이
 `/api/health` 로 응답을 확인한다 — 옛 코드가 조용히 계속 도는 것과, 프로세스가
@@ -371,8 +404,9 @@ sentry.io 가 아니라 **우리가 띄운 GlitchTip**
   한다). `SENTRY_DSN_BACKEND`·`SENTRY_DSN_FRONTEND`·`SENTRY_DSN_OPERATOR`·
   `SENTRY_DSN_CLASSROOM` 을 `.env.staging`/`.env.prod` 가 채운다(두 env 예시 파일에
   자리가 있다). 세 앱의 값은 `NEXT_PUBLIC_*` 로 **브라우저 번들에 굳으므로** 바꾸면
-  이미지를 다시 굽는다 — `NEXT_PUBLIC_TOSS_CLIENT_KEY` 와 같은 제약이고, 서버 쪽
-  초기화가 읽을 런타임 ENV 도 같은 `.env` 줄에서 온다(둘이 갈리면 브라우저와 서버가
+  이미지를 다시 굽는다 — `NEXT_PUBLIC_TOSS_CLIENT_KEY` 와 같은 제약이다. **브라우저 쪽
+  값은 CI 가 저장소 변수 `STAGING_`/`PROD_SENTRY_DSN_<앱>` 으로 굽고, 서버 쪽 초기화가
+  읽을 런타임 ENV 는 `.env` 줄에서 온다** — 둘을 같이 바꾼다(갈리면 브라우저와 서버가
   다른 곳에 보고한다).
 - **백엔드 이미지 하나로 도는 다섯 프로세스 전부가 켜진다** — `settings.py` 가 부르는
   `core.observability.configure_sentry()` 한 줄이라 gunicorn·events(ASGI)·celery
@@ -384,8 +418,9 @@ sentry.io 가 아니라 **우리가 띄운 GlitchTip**
   403 은 우리가 일부러 내는 응답이라, 그걸 다 보내면 진짜 5xx 가 소음에 묻힌다
   (`core.observability.drop_expected_error`, `backend/tests/test_observability.py` 가
   그 규칙을 고정한다).
-- **어느 커밋에서 났는지는 `deploy.sh` 가 붙인다** — 배포하는 커밋 SHA 를
-  `SENTRY_RELEASE` 로 내보내고 compose 가 백엔드 환경변수와 세 앱 빌드 인자로 넘긴다.
+- **어느 커밋에서 났는지가 release 태그다** — `deploy.sh` 가 배포하는 커밋 SHA 를
+  `SENTRY_RELEASE` 로 내보내 compose 가 백엔드 환경변수로 넘기고, 세 앱은 CI 가 같은
+  SHA(`github.sha`)를 빌드 인자로 굽는다(이미지 태그의 sha 와 같은 값이다).
   소스맵은 올리지 않는다(프론트 스택은 압축된 이름으로 보인다).
 - **닿는지 확인하는 법**: 설정이 틀려도 조용히 아무 일도 안 일어나는 것이 오류 수집의
   기본 실패 모양이라, 배포 뒤 한 번 쏴 보고 GlitchTip 에서 눈으로 본다.
@@ -1056,8 +1091,10 @@ Problem Statement 를 읽고 「어댑터 실제 구현은 스토리지 하나�
 
 ## CI 는 셀프호스티드 러너에서, 프로덕션 이미지로 돈다
 
-GitHub 호스티드 러너는 과금이 막혀 못 쓴다. 13개 잡 전부 `runs-on: [self-hosted, sub]` —
-staging 배포 호스트와 **같은 머신**이다. 러너 컨테이너는 `--network host` 로 돌고 호스트
+GitHub 호스티드 러너는 과금이 막혀 못 쓴다. 16개 잡 중 15개가 `runs-on: [self-hosted, sub]` —
+staging 배포 호스트와 **같은 머신**이다. 나머지 하나(`images-prod`)만 mac 러너
+(`[self-hosted, macOS, ARM64, mac-arm]`)에서 prod 용 arm64 이미지를 굽는다(위 「이미지는 CI 가
+굽는다」). 러너 컨테이너는 `--network host` 로 돌고 호스트
 docker 소켓을 물어 컨테이너를 바깥에 띄운다(DooD).
 
 **CI 는 `docker/compose.ci.yaml` 을 dev compose 위에 겹쳐 쓴다 — 지우면 CI 가 깨진다.**
@@ -1087,7 +1124,8 @@ docker 소켓을 물어 컨테이너를 바깥에 띄운다(DooD).
 
 실측(당시 9잡 전부 초록, 2026-09-05): 전체 **6분**. `adr-status`·`screen-language` 가 늘어
 11잡이 됐고, `frontend-e2e-classroom`(#277)이 늘어 12잡, `classroom-deploy-guard`(#296)가
-늘어 지금은 13잡이다(강의실 e2e 실측은 아직 없다 — CI 첫 실행이 잰다). e2e 운영자 4분 ·
+늘어 13잡, 배포 이미지 둘과 staging 호출(`images-staging`·`images-prod`·`deploy-staging`,
+2026-09-17)이 늘어 지금은 16잡이다(강의실 e2e·이미지 잡 실측은 아직 없다 — CI 첫 실행이 잰다). e2e 운영자 4분 ·
 공개 3분 · `celery-broker` 2분 · `pytest` 1분 · 나머지 여덟은 각 1분 미만.
 
 **`screen-language` 잡**(#267, #268)은 스텝 둘로 두 표면을 막는다. 첫 스텝
