@@ -15,7 +15,7 @@ import logging
 from uuid import UUID
 
 from django.db import IntegrityError, transaction
-from django.db.models import Count, DateTimeField, Q, QuerySet, Sum, Value
+from django.db.models import Case, Count, DateTimeField, Q, QuerySet, Sum, Value, When
 from django.http import HttpRequest
 from ninja import Query, Router
 from ninja.errors import HttpError
@@ -29,6 +29,7 @@ from contests.images import (
     reorder_image as reorder_contest_image_for,
     request_upload_url as request_contest_image_upload_url_for,
 )
+from contests.search import get_search_adapter
 from contests.sponsorship import sponsored_contest_queryset
 from accounts.models import SponsorProfile
 from accounts.sanitize import sanitize_free_text
@@ -499,6 +500,15 @@ def list_contests(request: HttpRequest, filters: Query[ContestListFilters]):
     `category`/`deliverable_type`도 int가 아니면 422다. 존재하지 않는 id는 오류가
     아니라 빈 목록이다(필터는 "그런 게 있느냐"가 아니라 "그것으로 좁혀라"이다).
 
+    **`q`(#449)는 상태·카테고리·요구형태 필터에 AND로 더 얹는 조건이다** — 검색
+    모듈(`contests.search`)이 이미 `Contest.Status.PUBLICLY_VISIBLE`로 초안을
+    빼고 돌려주지만, 여기서도 위에서 고른 `visible_statuses`(참가 가능/마감)로
+    한 번 더 좁힌다. 그래서 초안은 두 겹으로 막혀 있고, `closed` 축과 검색어를
+    같이 걸어도(예: 마감된 것 중에서 검색) 서로 간섭하지 않는다. `sort`를
+    명시하지 않았는데 `q`가 있으면 관련도순이 기본이다 — 검색어 없이 관련도순을
+    요청하면(사용자가 직접 `sort=relevance`를 줬는데 `q`가 비었을 때) 관련도라는
+    개념 자체가 성립하지 않으므로 조용히 마감임박순으로 대신한다.
+
     공모전 제품 스위치(#271)가 꺼지면 이 목록도 닫는다 — 과제는 명단을 두지 않으므로
     (ADR-0028) 대응하는 공개 목록이 애초에 없다.
     """
@@ -523,7 +533,27 @@ def list_contests(request: HttpRequest, filters: Query[ContestListFilters]):
     if filters.deliverable_type is not None:
         queryset = queryset.filter(deliverable_types__id=filters.deliverable_type)
 
-    if filters.sort is ContestSort.PRIZE:
+    # `q`가 있고 `sort`를 명시하지 않았으면 관련도순이 기본이다(부모 #444 스펙).
+    effective_sort = filters.sort
+    if effective_sort is None:
+        effective_sort = ContestSort.RELEVANCE if filters.q else ContestSort.DEADLINE
+
+    matched_ids: list[int] | None = None
+    if filters.q:
+        matched_ids = get_search_adapter().search(
+            query=filters.q,
+            category=filters.category,
+            deliverable_type=filters.deliverable_type,
+        )
+        queryset = queryset.filter(id__in=matched_ids)
+
+    if effective_sort is ContestSort.RELEVANCE and matched_ids:
+        # 검색 모듈이 이미 관련도순으로 돌려준 id 순서를 그대로 지킨다 — DB가
+        # `id__in`의 결과를 그 순서로 돌려줄 이유가 없으므로 위치를 Case로 못박는다.
+        ordering: tuple = (
+            Case(*[When(pk=pk, then=position) for position, pk in enumerate(matched_ids)]),
+        )
+    elif effective_sort is ContestSort.PRIZE:
         ordering = ("-prize", "id")
     elif filters.closed:
         ordering = ("-deadline_at", "-id")

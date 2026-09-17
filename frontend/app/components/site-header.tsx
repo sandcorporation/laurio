@@ -33,6 +33,7 @@ import { contestProductEnabled, paidContestProductEnabled } from "@/lib/contest-
 import { classroomAppOrigin } from "@/lib/auth/classroom-link";
 import type { ThemePreference } from "@/lib/theme/preference";
 
+import { HeaderSearch } from "./header-search";
 import { HeaderSessionZone } from "./header-session-zone";
 import { LogoMark } from "./logo-mark";
 import { ThemeToggle } from "./theme-toggle";
@@ -75,6 +76,7 @@ export function SiteHeader({ themePreference }: { themePreference: ThemePreferen
                   공모전 개최
                 </Link>
               )}
+              <HeaderSearch />
             </>
           )}
           <HeaderSessionZone
