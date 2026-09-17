@@ -1290,6 +1290,15 @@ export interface paths {
          *     `category`/`deliverable_type`도 int가 아니면 422다. 존재하지 않는 id는 오류가
          *     아니라 빈 목록이다(필터는 "그런 게 있느냐"가 아니라 "그것으로 좁혀라"이다).
          *
+         *     **`q`(#449)는 상태·카테고리·요구형태 필터에 AND로 더 얹는 조건이다** — 검색
+         *     모듈(`contests.search`)이 이미 `Contest.Status.PUBLICLY_VISIBLE`로 초안을
+         *     빼고 돌려주지만, 여기서도 위에서 고른 `visible_statuses`(참가 가능/마감)로
+         *     한 번 더 좁힌다. 그래서 초안은 두 겹으로 막혀 있고, `closed` 축과 검색어를
+         *     같이 걸어도(예: 마감된 것 중에서 검색) 서로 간섭하지 않는다. `sort`를
+         *     명시하지 않았는데 `q`가 있으면 관련도순이 기본이다 — 검색어 없이 관련도순을
+         *     요청하면(사용자가 직접 `sort=relevance`를 줬는데 `q`가 비었을 때) 관련도라는
+         *     개념 자체가 성립하지 않으므로 조용히 마감임박순으로 대신한다.
+         *
          *     공모전 제품 스위치(#271)가 꺼지면 이 목록도 닫는다 — 과제는 명단을 두지 않으므로
          *     (ADR-0028) 대응하는 공개 목록이 애초에 없다.
          */
@@ -4929,7 +4938,7 @@ export interface components {
         };
         /**
          * ContestListFilters
-         * @description `GET /api/contests` 의 필터·정렬 쿼리 (#39).
+         * @description `GET /api/contests` 의 필터·정렬 쿼리 (#39, `q`는 #449).
          *
          *     api.py 가 아니라 여기 두는 이유가 있다 — api.py 는 `from __future__ import
          *     annotations` 를 쓰기 때문에, 엔드포인트 함수 시그니처에 Enum 을 직접 적으면
@@ -4949,6 +4958,14 @@ export interface components {
          *     마감됨). 기본값 `False`가 "지금 참가할 수 있는 것"이다 — 예전 기본값(전부
          *     보여주고 마감 오름차순 정렬)은 마감된 Contest가 정의상 항상 과거라 첫 페이지
          *     위쪽을 가장 오래전에 끝난 것들로 채웠다.
+         *
+         *     `q`(#449)가 있으면 `contests.search`의 검색 모듈이 돌려준 id 순서로 좁힌다.
+         *     `sort`는 명시하지 않으면(`None`) **`q`가 있는가에 따라 기본값이 갈린다** —
+         *     검색어가 있으면 관련도순, 없으면 마감임박순이다(부모 #444 스펙 "검색어가 있고
+         *     정렬이 지정되지 않으면 관련도순이다"). 그래서 `sort` 자체의 기본값은 `None`이지
+         *     `ContestSort.DEADLINE`이 아니다 — pydantic 기본값은 "클라이언트가 안 줬다"를
+         *     구분하지 못하므로, 그 구분이 필요한 이 갈래는 `api.py`가 `None`을 보고 직접
+         *     판단한다.
          */
         ContestListFilters: {
             /** Category */
@@ -4960,8 +4977,9 @@ export interface components {
             closed: boolean;
             /** Deliverable Type */
             deliverable_type?: number | null;
-            /** @default deadline */
-            sort: "deadline" | "prize";
+            /** Q */
+            q?: string | null;
+            sort?: components["schemas"]["ContestSort"] | null;
         };
         /** ContestMetricsOut */
         ContestMetricsOut: {
@@ -5066,7 +5084,7 @@ export interface components {
          *     (frontend/app/contests/page.tsx).
          * @enum {string}
          */
-        ContestSort: "deadline" | "prize";
+        ContestSort: "deadline" | "prize" | "relevance";
         /**
          * ContestUpdateIn
          * @description DRAFT Contest를 고치는 요청 (#113, 부모 #110).
@@ -9403,9 +9421,10 @@ export interface operations {
     contests_api_list_contests: {
         parameters: {
             query?: {
+                q?: string | null;
                 category?: number | null;
                 deliverable_type?: number | null;
-                sort?: "deadline" | "prize";
+                sort?: components["schemas"]["ContestSort"] | null;
                 closed?: boolean;
                 page?: number;
                 page_size?: number | null;

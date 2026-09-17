@@ -34,8 +34,13 @@ export type HomeCurationGroup = components["schemas"]["HomeCurationGroupOut"];
 export const CONTESTS_PAGE_SIZE = 20;
 
 export type ContestListQuery = {
+  /** 헤더 검색창·`/contests` 검색어(#449). 비어 있으면 검색을 걸지 않는다. */
+  q?: string;
   category?: number;
   deliverableType?: number;
+  /** 명시하지 않으면(`undefined`) 백엔드가 `q` 유무로 기본값을 고른다 — `q`가
+   *  있으면 관련도순, 없으면 마감임박순(#449). 여기서 `"deadline"`으로
+   *  미리 채우면 그 구분이 사라진다. */
   sort?: ContestSort;
   /** #227 — 기본(false/undefined)은 지금 참가할 수 있는 것만, true면 마감된 것만. */
   closed?: boolean;
@@ -60,9 +65,10 @@ export async function fetchContests(query: ContestListQuery = {}): Promise<Conte
   const res = await backendClient.GET("/api/contests", {
     params: {
       query: {
+        q: query.q,
         category: query.category,
         deliverable_type: query.deliverableType,
-        sort: query.sort ?? "deadline",
+        sort: query.sort,
         closed: query.closed ?? false,
         page,
         page_size: CONTESTS_PAGE_SIZE,

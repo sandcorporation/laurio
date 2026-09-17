@@ -16,6 +16,7 @@
 import pytest
 from django.core.cache import caches
 
+from contests.search import FakeContestSearchAdapter
 from contests.view_flush_store import InMemoryChangedContestsStore
 from core.events import FakeEventBus
 from payments.adapters import FakePGAdapter
@@ -84,6 +85,17 @@ def _reset_changed_contests_store():
     InMemoryChangedContestsStore._ids.clear()
     yield
     InMemoryChangedContestsStore._ids.clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_fake_search_adapter():
+    """`contests.search.FakeContestSearchAdapter._indexed`도 클래스 레벨이라
+    위와 같은 이유로 비운다 — 안 그러면 한 테스트가 색인한 contest_id가(오토인크리먼트
+    PK라 흔하다) 다음 테스트의 색인 기록에 남는다."""
+
+    FakeContestSearchAdapter._indexed.clear()
+    yield
+    FakeContestSearchAdapter._indexed.clear()
 
 
 @pytest.fixture(autouse=True)

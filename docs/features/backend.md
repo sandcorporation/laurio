@@ -69,7 +69,7 @@ CONTEXT.md 「소셜 계정」). 이메일은 로그인에서 사람을 찾는 �
 
 | | |
 | --- | --- |
-| `GET /api/contests` | 공개 목록 — 참가 가능한 것이 기본, `closed=1` 로 마감된 것 |
+| `GET /api/contests` | 공개 목록 — 참가 가능한 것이 기본, `closed=1` 로 마감된 것, `q` 로 검색(#449) |
 | `GET /api/contests/home` | 홈 큐레이션 |
 | `GET /api/contests/{id}` | 상세 — 로그인 없이 열린다 |
 | `POST /api/contests` · `PATCH /api/contests/{id}` | 개최(유료)·초안 수정 |
@@ -571,6 +571,13 @@ fake 이거나 임포트되지 않으면 부팅 자체를 거부한다** — 컨
 | 알림 3채널 | `NOTIFICATION_ALIMTALK_ADAPTER` · `_SMS_` · `_LMS_` |
 | 스토리지 | `STORAGE_BACKEND` |
 | 강의실 실시간 신호(#380, ADR-0046 — 벤더 연동이 아니라 우리 자신의 Redis 위에서 도는 코드, dev·CI 는 결정적 fake) | `EVENT_BUS_ADAPTER_MODE` |
+
+**공모전 검색(#449, 부모 #444 스펙)은 이 열둘과 다르다** — `SEARCH_ADAPTER_MODE`가
+어댑터를 고르지만(dev·CI·pytest 기본값 `fake`, `contests.search.FakeContestSearchAdapter`,
+DB 포함 검색), **아직 배포 부팅 가드가 없다.** 실물 어댑터(dotted path
+`contests.search_opensearch.OpenSearchContestSearch`, 접속 주소 `OPENSEARCH_URL`)가
+없는 지금 가드를 걸면 staging 이 이 커밋만으로 부팅을 거부하기 때문이다 — 실물 어댑터와
+가드는 같은 커밋에서 함께 켠다(#451, #450 이 어댑터를 만든다).
 
 **Django admin 은 없다**(ADR-0019). 모델 행을 직접 편집할 수 있는 한 감사 추적에 우회로가
 남는다.

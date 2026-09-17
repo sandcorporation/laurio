@@ -21,10 +21,13 @@ class ContestSort(str, Enum):
 
     DEADLINE = "deadline"
     PRIZE = "prize"
+    # 검색어(q)가 있을 때의 기본 정렬(#449, 부모 #444 스펙) — 검색 모듈
+    # (`contests.search`)이 돌려준 id 순서 그대로다.
+    RELEVANCE = "relevance"
 
 
 class ContestListFilters(Schema):
-    """`GET /api/contests` 의 필터·정렬 쿼리 (#39).
+    """`GET /api/contests` 의 필터·정렬 쿼리 (#39, `q`는 #449).
 
     api.py 가 아니라 여기 두는 이유가 있다 — api.py 는 `from __future__ import
     annotations` 를 쓰기 때문에, 엔드포인트 함수 시그니처에 Enum 을 직접 적으면
@@ -44,11 +47,20 @@ class ContestListFilters(Schema):
     마감됨). 기본값 `False`가 "지금 참가할 수 있는 것"이다 — 예전 기본값(전부
     보여주고 마감 오름차순 정렬)은 마감된 Contest가 정의상 항상 과거라 첫 페이지
     위쪽을 가장 오래전에 끝난 것들로 채웠다.
+
+    `q`(#449)가 있으면 `contests.search`의 검색 모듈이 돌려준 id 순서로 좁힌다.
+    `sort`는 명시하지 않으면(`None`) **`q`가 있는가에 따라 기본값이 갈린다** —
+    검색어가 있으면 관련도순, 없으면 마감임박순이다(부모 #444 스펙 "검색어가 있고
+    정렬이 지정되지 않으면 관련도순이다"). 그래서 `sort` 자체의 기본값은 `None`이지
+    `ContestSort.DEADLINE`이 아니다 — pydantic 기본값은 "클라이언트가 안 줬다"를
+    구분하지 못하므로, 그 구분이 필요한 이 갈래는 `api.py`가 `None`을 보고 직접
+    판단한다.
     """
 
+    q: str | None = None
     category: int | None = None
     deliverable_type: int | None = None
-    sort: ContestSort = ContestSort.DEADLINE
+    sort: ContestSort | None = None
     closed: bool = False
 
 

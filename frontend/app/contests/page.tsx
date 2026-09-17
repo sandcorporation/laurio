@@ -41,9 +41,14 @@ export const metadata: Metadata = { title: "공모전", alternates: { canonical:
 type SearchParams = { [key: string]: string | string[] | undefined };
 
 type Current = {
+  /** 헤더 검색창·손으로 친 `?q=`(#449). 빈 문자열은 "검색 없음"과 같다. */
+  q?: string;
   category?: number;
   deliverableType?: number;
-  sort: ContestSort;
+  // `undefined`는 "사용자가 정렬을 명시하지 않았다"다 — 백엔드가 `q` 유무로
+  // 기본값(관련도순/마감임박순)을 고른다(#449). `buildHref`/`fetchContests`
+  // 양쪽 다 이 구분을 그대로 살려 보낸다.
+  sort?: ContestSort;
   // #227 — 기본은 지금 참가할 수 있는 것만(false), 켜면(true) 마감된 것만.
   closed: boolean;
   page: number;
@@ -59,9 +64,21 @@ function parseId(value: string | string[] | undefined): number | undefined {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
-function parseSort(value: string | string[] | undefined): ContestSort {
+// `undefined`를 돌려주는 값이 있다는 것이 핵심이다 — "명시하지 않았다"를 백엔드가
+// `q` 유무로 기본값을 고르게 그대로 넘긴다(#449). 알 수 없는 값도 같은 "명시하지
+// 않음"으로 떨어진다(#39 관용구 — 안전한 기본값).
+function parseSort(value: string | string[] | undefined): ContestSort | undefined {
   const raw = Array.isArray(value) ? value[0] : value;
-  return raw === "prize" ? "prize" : "deadline";
+  if (raw === "prize" || raw === "deadline") return raw;
+  return undefined;
+}
+
+// 빈 문자열은 검색 없음과 같다 — `?q=` 로 손으로 지운 링크가 "검색어 빈칸"으로
+// 남지 않게 한다.
+function parseQ(value: string | string[] | undefined): string | undefined {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const trimmed = raw?.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 // 손으로 친 값이 뭐든 "꺼짐"이 안전한 기본값이다(#39 관용구를 그대로 따른다) —
@@ -92,6 +109,7 @@ function parsePage(value: string | string[] | undefined): number {
 // 공모전이 없습니다" 가 뜬다 — 실제로는 있는데 없다고 말하는 화면이다.
 function buildHref(current: Current, overrides: Partial<Current>): string {
   const resetsPage =
+    "q" in overrides ||
     "category" in overrides ||
     "deliverableType" in overrides ||
     "sort" in overrides ||
@@ -99,10 +117,11 @@ function buildHref(current: Current, overrides: Partial<Current>): string {
   const next = { ...current, ...(resetsPage ? { page: 1 } : {}), ...overrides };
 
   const params = new URLSearchParams();
+  if (next.q !== undefined) params.set("q", next.q);
   if (next.category !== undefined) params.set("category", String(next.category));
   if (next.deliverableType !== undefined)
     params.set("deliverableType", String(next.deliverableType));
-  if (next.sort !== "deadline") params.set("sort", next.sort);
+  if (next.sort !== undefined) params.set("sort", next.sort);
   if (next.closed) params.set("closed", "1");
   if (next.page > 1) params.set("page", String(next.page));
 
@@ -117,12 +136,16 @@ export default async function ContestsPage({
 }) {
   const sp = await searchParams;
   const current: Current = {
+    q: parseQ(sp.q),
     category: parseId(sp.category),
     deliverableType: parseId(sp.deliverableType),
     sort: parseSort(sp.sort),
     closed: parseClosed(sp.closed),
     page: parsePage(sp.page),
   };
+  // 화면 표시(정렬 링크의 aria-current)용 — 백엔드에 실제로 보내는 `current.sort`는
+  // `undefined`로 그대로 둔다("명시하지 않음"을 백엔드가 판단하게 넘긴다, #449).
+  const effectiveSort: ContestSort = current.sort ?? (current.q ? "relevance" : "deadline");
 
   const [page, categories, deliverableTypes] = await Promise.all([
     fetchContests(current),
@@ -150,9 +173,11 @@ export default async function ContestsPage({
       <PageHeader
         title="공모전"
         description={
-          current.closed
-            ? "마감된 공모전 목록입니다. 데모·영상은 공개돼 있지만 더 이상 참가할 수 없습니다."
-            : "발주자가 상금을 걸고 요구사항을 공개한, 지금 참가할 수 있는 공모전 목록입니다. 로그인 없이 볼 수 있습니다."
+          current.q
+            ? `"${current.q}" 검색 결과입니다.`
+            : current.closed
+              ? "마감된 공모전 목록입니다. 데모·영상은 공개돼 있지만 더 이상 참가할 수 없습니다."
+              : "발주자가 상금을 걸고 요구사항을 공개한, 지금 참가할 수 있는 공모전 목록입니다. 로그인 없이 볼 수 있습니다."
         }
       />
 
@@ -168,8 +193,8 @@ export default async function ContestsPage({
         <nav aria-label="정렬" className="flex items-center gap-4 text-sm">
           <Link
             href={buildHref(current, { sort: "deadline" })}
-            aria-current={current.sort === "deadline" ? "true" : undefined}
-            className={current.sort === "deadline" ? "font-medium text-ink" : "text-ink/60"}
+            aria-current={effectiveSort === "deadline" ? "true" : undefined}
+            className={effectiveSort === "deadline" ? "font-medium text-ink" : "text-ink/60"}
           >
             {/* #227 — deadline 정렬의 방향이 closed 축에 따라 뒤집힌다(참가 가능은
                 마감임박순 오름차순, 마감된 것은 최근 마감순 내림차순 — 백엔드
@@ -180,8 +205,8 @@ export default async function ContestsPage({
           </Link>
           <Link
             href={buildHref(current, { sort: "prize" })}
-            aria-current={current.sort === "prize" ? "true" : undefined}
-            className={current.sort === "prize" ? "font-medium text-ink" : "text-ink/60"}
+            aria-current={effectiveSort === "prize" ? "true" : undefined}
+            className={effectiveSort === "prize" ? "font-medium text-ink" : "text-ink/60"}
           >
             상금순
           </Link>
