@@ -1637,17 +1637,18 @@ jobs:
             NEXT_PUBLIC_SENTRY_RELEASE=${{ github.sha }}
 
   images-prod:
-    # prod(oracle, arm64) 이미지는 **mac 러너**(Apple Silicon, Docker Desktop)가 굽는다 — oracle 은
+    # prod(oracle, arm64) 이미지는 **mac 러너**가 굽는다 — Apple Silicon 의 Docker Desktop 위에
+    # sub 와 같은 `myoung34/github-runner` 컨테이너(조직 범위, Linux/ARM64, 라벨 `mac-arm`,
+    # Docker Desktop 의 docker.sock 마운트)로 뜬다. mac-arm 라벨이 곧 「그 mac」이다 —
+    # 러너가 조직 범위라 ARM64 만으로 고르면 다른 ARM 러너로 갈 수 있다. oracle 은
     # prod 서버라 빌드가 서비스를 느리게 만들고, sub 에서 에뮬레이션으로 구우면 몇 배 느리다.
     #
     # **mac 이 꺼져 있으면 이 잡이 줄을 서고, 그동안 CI 가 끝나지 않으므로 production 승격도
     # 기다린다**(promote-production 은 CI 전체의 성공을 본다) — 의도한 동작이다. staging 은
     # 이 잡을 기다리지 않는다. GitHub 는 러너를 못 찾은 잡을 24시간 뒤 실패로 끝낸다.
     #
-    # macOS 러너는 잡을 컨테이너 안에서 돌리지 못한다(`container:`·`services:` 불가) — 여기는
-    # docker CLI 로 buildx 를 부르기만 하므로 해당 없다.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: [self-hosted, macOS, ARM64, mac-arm]
+    runs-on: [self-hosted, ARM64, mac-arm]
     timeout-minutes: 90
     permissions:
       contents: read

@@ -257,7 +257,7 @@ ghcr(`ghcr.io/sandcorporation/codemit-*`, 비공개)에 올린다:
 | 잡 | 러너 | 태그 |
 | --- | --- | --- |
 | `images-staging` | sub (amd64) | `codemit-backend:<sha>-amd64`, 세 앱 `:<sha>-staging` |
-| `images-prod` | **mac** (Apple Silicon, Docker Desktop, 라벨 `mac-arm`) | `codemit-backend:<sha>-arm64`, 세 앱 `:<sha>-prod` |
+| `images-prod` | **mac** (Apple Silicon 의 Docker Desktop 위 러너 컨테이너, Linux/ARM64, 라벨 `mac-arm`) | `codemit-backend:<sha>-arm64`, 세 앱 `:<sha>-prod` |
 
 - **backend 는 환경을 가리지 않아 아키텍처로만 가른다.** 세 앱은 `NEXT_PUBLIC_*` 가 굳으므로
   환경마다 따로 굽는다 — 그 값의 원본은 서버 env 가 아니라 **저장소 변수 `STAGING_*`·
@@ -1093,7 +1093,7 @@ Problem Statement 를 읽고 「어댑터 실제 구현은 스토리지 하나�
 
 GitHub 호스티드 러너는 과금이 막혀 못 쓴다. 16개 잡 중 15개가 `runs-on: [self-hosted, sub]` —
 staging 배포 호스트와 **같은 머신**이다. 나머지 하나(`images-prod`)만 mac 러너
-(`[self-hosted, macOS, ARM64, mac-arm]`)에서 prod 용 arm64 이미지를 굽는다(위 「이미지는 CI 가
+(`[self-hosted, ARM64, mac-arm]` — sub 와 같은 `myoung34/github-runner` 컨테이너, 조직 범위)에서 prod 용 arm64 이미지를 굽는다(위 「이미지는 CI 가
 굽는다」). 러너 컨테이너는 `--network host` 로 돌고 호스트
 docker 소켓을 물어 컨테이너를 바깥에 띄운다(DooD).
 

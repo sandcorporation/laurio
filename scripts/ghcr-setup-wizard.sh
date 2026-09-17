@@ -247,44 +247,26 @@ pause "계속하려면 Enter"
 
 # ── 2 ─────────────────────────────────────────────────────────────────────
 stage "mac: Docker Desktop 상시 가동"
-say "arm64(prod) 이미지는 mac 에서 굽습니다. mac 이 잠들면 prod 승격이 기다립니다."
+say "arm64(prod) 이미지는 mac 의 러너 컨테이너가 굽습니다. mac 이 잠들면 prod 승격이 기다립니다."
 step "Docker Desktop → Settings → General → 'Start Docker Desktop when you sign in to your computer' 켜기 → Apply"
-step "Docker Desktop → Settings → Resources 에서 CPU·메모리를 넉넉히(권장 메모리 8GB 이상 — Next 빌드 두 개가 겹칩니다)"
+step "Docker Desktop → Settings → Resources 에서 메모리를 넉넉히(권장 8GB 이상 — Next 빌드가 무겁습니다)"
 step "mac 터미널에서 전원 연결 중 잠자기 끄기:"
 note "    sudo pmset -c sleep 0 disksleep 0 && pmset -g | grep -E ' sleep|disksleep'"
-step "시스템 설정 → 사용자 및 그룹 → 자동 로그인을 이 계정으로 (재부팅 뒤에도 러너가 뜨려면 로그인 세션이 필요합니다)"
-step "mac 터미널에서 확인: docker info --format '{{.Architecture}}' → aarch64, docker buildx version 이 나오면 됩니다"
+step "시스템 설정 → 사용자 및 그룹 → 자동 로그인을 이 계정으로 (Docker Desktop 은 로그인해야 뜹니다)"
 pause "mac 에서 끝냈으면 Enter"
 
 # ── 3 ─────────────────────────────────────────────────────────────────────
-stage "mac: GitHub Actions 러너 설치"
-RUNNER_VERSION=$(gh api repos/actions/runner/releases/latest --jq '.tag_name | ltrimstr("v")')
-REG_TOKEN=$(gh api -X POST "repos/$REPO/actions/runners/registration-token" --jq .token)
-say "등록 토큰은 1시간 동안만 유효합니다. mac 터미널에 아래를 그대로 붙여 넣으세요:"
-printf '\n%s' "$DIM"
-cat <<EOF
-    mkdir -p ~/actions-runner-codemit && cd ~/actions-runner-codemit
-    curl -fsSL -o runner.tar.gz https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-osx-arm64-${RUNNER_VERSION}.tar.gz
-    tar xzf runner.tar.gz && rm runner.tar.gz
-    ./config.sh --unattended --url https://github.com/${REPO} --token ${REG_TOKEN} \\
-      --name mac-arm --labels mac-arm --work _work --replace
-    ./svc.sh install && ./svc.sh start && ./svc.sh status
-EOF
-printf '%s\n' "$RESET"
-note "기본 라벨 self-hosted·macOS·ARM64 는 저절로 붙고, mac-arm 을 더합니다."
-note "config.sh 를 돌리는 셸에서 'which docker' 가 나와야 합니다 — 러너 서비스가 그 PATH 를 기억합니다."
-pause "mac 에서 svc.sh status 가 started 로 나오면 Enter"
-for _ in 1 2 3 4 5 6; do
-  RUNNER_STATE=$(gh api "repos/$REPO/actions/runners" --jq '.runners[] | select(.name=="mac-arm") | "\(.status) \([.labels[].name]|join(","))"' 2>/dev/null || true)
-  [[ "$RUNNER_STATE" == online* ]] && break
-  note "러너가 아직 online 이 아닙니다 — 10초 뒤 다시 봅니다 (${RUNNER_STATE:-등록 안 됨})"; sleep 10
-done
-if [[ "$RUNNER_STATE" == online* ]]; then
-  printf '  %s✓ mac-arm%s %s\n' "$GREEN" "$RESET" "$RUNNER_STATE"
-else
-  SKIPPED+=("mac 러너가 online 이 아님 — mac 에서 ./svc.sh status 확인"); warn "러너를 확인하지 못했습니다"
+stage "mac: 러너 컨테이너 확인"
+say "러너는 sub 와 같은 myoung34/github-runner 컨테이너(조직 범위)로 띄웁니다. mac 의 compose 에서 확인하세요:"
+step "LABELS 에 mac-arm 이 있다 — CI 의 images-prod 가 runs-on: [self-hosted, ARM64, mac-arm] 으로 고릅니다"
+step "volumes 에 /var/run/docker.sock:/var/run/docker.sock 이 있다 — 없으면 buildx 로 굽지 못합니다"
+step "restart: unless-stopped — Docker Desktop 이 다시 뜰 때 러너도 함께 뜹니다"
+step "RUNNER_NAME_PREFIX 를 mac-arm 처럼 sub 와 다른 이름으로 (지금은 sub-arm-builder 라 목록에서 헷갈립니다)"
+open_url "https://github.com/organizations/sandcorporation/settings/actions/runners"
+step "조직 러너 목록에서 mac 러너가 'Linux ARM64 mac-arm' 라벨로 Idle 인지 봅니다"
+if ! confirm "mac 러너가 mac-arm 라벨로 Idle 인가요?"; then
+  SKIPPED+=("mac 러너(mac-arm) 확인")
 fi
-pause "계속하려면 Enter"
 
 # ── 4 ─────────────────────────────────────────────────────────────────────
 stage "ghcr pull 토큰 발급"
