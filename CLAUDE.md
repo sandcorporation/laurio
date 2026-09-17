@@ -266,9 +266,11 @@ ghcr(`ghcr.io/sandcorporation/codemit-*`, 비공개)에 올린다:
 - **mac 이 꺼져 있으면 `images-prod` 가 줄을 서고, CI 가 끝나지 않으니 production 승격도
   기다린다** — 의도한 동작이다(oracle 에서 굽거나 sub 에서 에뮬레이션으로 굽는 대안을
   버렸다). staging 은 mac 을 기다리지 않는다.
-- **서버는 배포마다 env 의 `GHCR_USER`·`GHCR_READ_TOKEN`(read:packages classic PAT)으로
-  로그인한다** — oracle 에이전트 컨테이너는 `/root/.docker` 가 볼륨이 아니라 한 번 해 둔
-  로그인이 컨테이너를 다시 만들면 사라진다. ghcr 는 git SSH 키로 인증할 수 없다.
+- **서버는 배포 에이전트 컨테이너에 한 번 저장해 둔 ghcr 로그인으로 받는다**(read:packages
+  classic PAT). 두 컨테이너(sub 의 `jenkins`, oracle 의 `jenkins-desktop-agent`) 모두
+  `/root/.docker` 가 named volume 이라 컨테이너를 다시 만들어도 남는다(oracle 은 2026-09-17
+  에 `jenkins_docker` 를 붙였다). 로그인이 없으면 `deploy.sh preflight` 가 멈추고, PAT 가
+  만료되면 pull 에서 멈춘다. ghcr 는 git SSH 키로 인증할 수 없다.
 - 사람 작업(mac 러너·PAT·Jenkins 토큰·저장소 변수)은 `scripts/ghcr-setup-wizard.sh` 가
   단계별로 안내한다. ghcr·CI 가 막혔을 때의 비상구는 서버에서
   `DEPLOY_IMAGE_SOURCE=build sh ./deploy.sh <대상>` — 예전처럼 그 자리에서 굽는다.

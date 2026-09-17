@@ -203,19 +203,6 @@ _ssh_noise='post-quantum|store now|upgraded'
 on_sub()    { ssh sub 'bash -s' 2> >(grep -vE "$_ssh_noise" >&2); }
 on_oracle() { ssh sub 'timeout 120 ssh -o BatchMode=yes oracle "bash -s"' 2> >(grep -vE "$_ssh_noise" >&2); }
 
-# upsert_remote_script FILE KEY VALUE — 원격에서 돌릴 upsert 조각(sudo).
-# 파일을 옮기지 않고 제자리에 덮어쓴다 — oracle 은 SELinux 라 /tmp 에서 mv 한
-# 파일은 라벨이 바뀌어 컨테이너가 못 읽을 수 있고, 소유자·권한도 그대로 남는다.
-upsert_remote_script() {
-  printf 'f=%q; k=%q; v=%q\n' "$1" "$2" "$3"
-  cat <<'EOS'
-tmp=$(sudo mktemp)
-sudo sh -c "grep -vE '^${k}=' '$f' > '$tmp' || true"
-printf '%s=%s\n' "$k" "$v" | sudo tee -a "$tmp" >/dev/null
-sudo sh -c "cat '$tmp' > '$f'"; sudo rm -f "$tmp"
-EOS
-}
-
 # set_repo_var NAME VALUE — 저장소 변수(비밀 아님). environment 기능은 free 조직의
 # 비공개 저장소에서 쓸 수 없어 접두어(STAGING_/PROD_)로 환경을 가른다.
 set_repo_var() {
@@ -281,33 +268,24 @@ note "토큰 주인: ${GHCR_USER} (sandcorporation 패키지를 읽을 수 있�
 ask_secret GHCR_READ_TOKEN "토큰을 붙여 넣으세요 (ghp_...):"
 [[ "$GHCR_READ_TOKEN" == ghp_* ]] || warn "classic PAT 는 보통 ghp_ 로 시작합니다 — 다시 확인하세요"
 write_env GHCR_USER "$GHCR_USER"
-write_env GHCR_READ_TOKEN "$GHCR_READ_TOKEN"
+write_env GHCR_READ_TOKEN "$GHCR_READ_TOKEN"   # 다시 돌릴 때의 기본값(저장소 밖, 600)
 
 # ── 5 ─────────────────────────────────────────────────────────────────────
-stage "pull 토큰을 두 서버 env 에 기록"
-say "deploy.sh 가 배포 때마다 이 값으로 docker login 합니다."
-note "oracle 의 에이전트 컨테이너는 /root/.docker 를 볼륨으로 붙이지 않아, 한 번 로그인해 두는 방식은 컨테이너를 다시 만들면 사라집니다."
-if confirm "두 서버의 env 파일을 백업(.bak-ghcr-날짜)한 뒤 GHCR_USER·GHCR_READ_TOKEN 을 기록할까요?"; then
-  day=$(date +%F)
-  { printf 'sudo cp -p %q %q\n' "$STAGING_ENV" "$STAGING_ENV.bak-ghcr-$day"
-    upsert_remote_script "$STAGING_ENV" GHCR_USER "$GHCR_USER"
-    upsert_remote_script "$STAGING_ENV" GHCR_READ_TOKEN "$GHCR_READ_TOKEN"
-    printf 'echo "  ✓ sub: $(sudo grep -c "^GHCR_" %q) 줄"\n' "$STAGING_ENV"
-  } | on_sub
-  { printf 'sudo cp -p %q %q\n' "$PROD_ENV" "$PROD_ENV.bak-ghcr-$day"
-    upsert_remote_script "$PROD_ENV" GHCR_USER "$GHCR_USER"
-    upsert_remote_script "$PROD_ENV" GHCR_READ_TOKEN "$GHCR_READ_TOKEN"
-    printf 'echo "  ✓ oracle: $(sudo grep -c "^GHCR_" %q) 줄"\n' "$PROD_ENV"
-  } | on_oracle
-  say "배포 에이전트 컨테이너 안에서 로그인을 시험합니다(임시 설정 디렉터리 — 흔적을 남기지 않음):"
-  login_test() {
-    printf 'printf %%s %q | docker exec -i %q sh -c %q\n' "$GHCR_READ_TOKEN" "$1" \
-      "d=\$(mktemp -d); r=0; DOCKER_CONFIG=\$d docker login ghcr.io -u $GHCR_USER --password-stdin >/dev/null || r=1; rm -rf \$d; [ \$r = 0 ] && echo '  ✓ $1: ghcr 로그인 성공'; exit \$r"
+stage "두 배포 에이전트에 ghcr 로그인 저장"
+say "sub 의 jenkins, oracle 의 jenkins-desktop-agent 컨테이너 안에서 한 번 로그인해 둡니다."
+note "두 컨테이너 모두 /root/.docker 가 named volume 이라 컨테이너를 다시 만들어도 로그인이 남습니다."
+note "deploy.sh 는 배포 때 이 로그인으로 받고, 없으면 preflight 에서 멈춥니다."
+if confirm "두 컨테이너에서 ${GHCR_USER} 로 ghcr.io 에 로그인할까요?"; then
+  # 토큰은 원격 스크립트 본문(표준입력)으로만 넘어가고, 컨테이너 안에서도 --password-stdin 이다.
+  login_in() {
+    printf 'printf %%s %q | docker exec -i %q docker login ghcr.io -u %q --password-stdin >/dev/null && docker exec %q sh -c %q && echo %q\n' \
+      "$GHCR_READ_TOKEN" "$1" "$GHCR_USER" "$1" 'grep -q "\"ghcr.io\"" /root/.docker/config.json' "  ✓ $1: ghcr 로그인이 /root/.docker 에 저장됐다"
   }
-  login_test jenkins | on_sub || SKIPPED+=("sub jenkins 컨테이너의 ghcr 로그인 시험 실패")
-  login_test jenkins-desktop-agent | on_oracle || SKIPPED+=("oracle 에이전트 컨테이너의 ghcr 로그인 시험 실패")
+  login_in jenkins | on_sub || { warn "sub jenkins 컨테이너에서 로그인하지 못했습니다"; SKIPPED+=("sub jenkins ghcr 로그인"); }
+  login_in jenkins-desktop-agent | on_oracle || { warn "oracle 에이전트 컨테이너에서 로그인하지 못했습니다"; SKIPPED+=("oracle 에이전트 ghcr 로그인"); }
+  warn "docker 가 토큰을 /root/.docker/config.json 에 평문(base64)으로 저장합니다 — 두 볼륨을 백업할 때 그 사실을 기억하세요."
 else
-  SKIPPED+=("두 서버 env 에 GHCR_USER·GHCR_READ_TOKEN 기록")
+  SKIPPED+=("두 에이전트의 ghcr 로그인")
 fi
 pause "계속하려면 Enter"
 

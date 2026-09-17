@@ -32,9 +32,10 @@
 #
 # 이미지 출처는 `DEPLOY_IMAGE_SOURCE` 가 고른다: `registry`(기본값, 파이프라인) 또는
 # `build`(CI·ghcr 가 막혔을 때 사람이 손으로 — 예전 방식 그대로 이 호스트에서 굽는다).
-# registry 는 env 파일의 `GHCR_USER`·`GHCR_READ_TOKEN`(read:packages PAT)으로 배포마다
-# 로그인한다 — oracle 의 에이전트 컨테이너는 /root/.docker 를 볼륨으로 붙이지 않아
-# 한 번 해 둔 로그인이 컨테이너를 다시 만들면 사라진다.
+# registry 는 이 에이전트에 **미리 저장해 둔 ghcr 로그인**(read:packages PAT)을 쓴다 —
+# 두 에이전트 컨테이너(sub 의 jenkins, oracle 의 jenkins-desktop-agent) 모두 /root/.docker 가
+# named volume 이라 컨테이너를 다시 만들어도 남는다(oracle 은 2026-09-17 에 붙였다).
+# 로그인은 scripts/ghcr-setup-wizard.sh 가 한 번 해 둔다. 토큰은 저장소에도 env 에도 없다.
 #
 # **논리는 여전히 이 파일에 산다.** 파이프라인에 논리를 두면 아무도 읽지 않는 두 번째
 # 사본이 되고, 실제로 그렇게 한 번 어긋나 배포가 통째로 실패했다(staging 빌드 #4:
@@ -122,12 +123,6 @@ GIT="git -c safe.directory=$PWD"
 
 log() { echo "[deploy:${TARGET}] $*"; }
 
-# env 파일에서 값 하나를 읽는다(파일을 통째로 source 하지 않는다 — 셸이 해석하면
-# 안 되는 값이 섞여 있다).
-env_value() {
-  grep -E "^$1=" "$ENV_FILE" | tail -1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//'
-}
-
 # 서비스 이름 → compose 서비스들. backend 는 넷을 함께 받는다(아래 build 의 주석).
 compose_services() {
   case "$1" in
@@ -161,12 +156,14 @@ cmd_preflight() {
     exit 1
   fi
 
-  # registry 는 pull 토큰이 있어야 한다 — 없으면 pull 단계에서 「denied」 한 줄로
-  # 죽어 원인이 흐려진다.
+  # registry 는 ghcr 로그인이 저장돼 있어야 한다 — 없으면 pull 단계에서 「denied」 한 줄로
+  # 죽어 원인이 흐려진다. 로그인 여부만 보고 토큰이 살아 있는지는 pull 이 말한다.
   if [ "$IMAGE_SOURCE" = registry ]; then
-    if [ -z "$(env_value GHCR_USER)" ] || [ -z "$(env_value GHCR_READ_TOKEN)" ]; then
-      echo "$ENV_FILE 에 GHCR_USER·GHCR_READ_TOKEN 이 없다 — ghcr 에서 이미지를 받을 수 없다."
-      echo "read:packages 권한의 classic PAT 를 넣어라(scripts/ghcr-setup-wizard.sh 5단계)."
+    docker_config="${DOCKER_CONFIG:-$HOME/.docker}/config.json"
+    if ! grep -q '"ghcr.io"' "$docker_config" 2>/dev/null; then
+      echo "이 에이전트에 ghcr.io 로그인이 없다($docker_config) — ghcr 에서 이미지를 받을 수 없다."
+      echo "read:packages 권한의 classic PAT 로 한 번 로그인해 둔다(scripts/ghcr-setup-wizard.sh 5단계):"
+      echo "  docker login ghcr.io -u <GitHub 아이디> --password-stdin"
       echo "급하면 DEPLOY_IMAGE_SOURCE=build 로 이 호스트에서 굽는다."
       exit 1
     fi
@@ -392,20 +389,15 @@ cmd_build() {
   $COMPOSE build "$1"
 }
 
-ghcr_login() {
-  # 토큰은 표준입력으로만 넘긴다 — 명령줄에 두면 ps 와 Jenkins 로그에 남는다.
-  env_value GHCR_READ_TOKEN | docker login ghcr.io -u "$(env_value GHCR_USER)" --password-stdin >/dev/null
-}
-
 cmd_pull() {
   services=$(compose_services "$1")
-  [ "${GHCR_LOGGED_IN:-}" = 1 ] || ghcr_login
   log "$1 받기 ($services, 태그 $(echo "$CODEMIT_IMAGE_TAG" | cut -c1-12))"
   # 넷이 같은 이미지라 실제 다운로드는 한 번이다.
   # shellcheck disable=SC2086
   if ! $COMPOSE pull $services; then
     echo "ghcr 에 이 커밋($CODEMIT_IMAGE_TAG)의 $1 이미지가 없거나 받을 수 없다."
-    echo "CI 의 이미지 잡이 끝났는지(prod 는 mac 러너) 확인하라. 급하면 DEPLOY_IMAGE_SOURCE=build."
+    echo "CI 의 이미지 잡이 끝났는지(prod 는 mac 러너), 저장해 둔 PAT 가 만료되지 않았는지 확인하라."
+    echo "급하면 DEPLOY_IMAGE_SOURCE=build."
     exit 1
   fi
 }
@@ -418,8 +410,6 @@ cmd_image() {
 # 가까이 짧다. 출력이 뒤섞이지 않도록 서비스별 로그로 받아 뒤에 순서대로 쏟는다.
 # (파이프라인은 이 대신 서비스마다 병렬 단계를 두고 `build <서비스>` 를 부른다.)
 build_planned_in_background() {
-  # 네 받기가 동시에 로그인하지 않도록 한 번만 한다.
-  if [ "$IMAGE_SOURCE" = registry ]; then ghcr_login; GHCR_LOGGED_IN=1; fi
   BUILD_LOGS=$(mktemp -d)
   PIDS=""
   LABELS=""
