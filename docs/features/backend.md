@@ -208,9 +208,9 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 | `POST`·`GET /api/classroom/classes/{id}/problems[/{id}]` | 문제를 만들고 고친다 — 마감 필드가 없다, 채점 지침(#386)도 함께 받는다 |
 | `PATCH .../problems/{id}` | 제목·설명·제출 형식·채점 모델·추론 강도(#402)·채점 지침(#386)을 고친다 |
 | `POST .../problems/reorder` | 클래스 상세의 문제 순서를 바꾼다 |
-| `POST .../problems/{id}/open` | 초안을 연다 — 필수 체크리스트 항목이 없으면 400 |
+| `POST .../problems/{id}/open`·`.../hide`·`.../reopen` | 초안→열림→숨김→열림 전이(#440, `classroom.problem_transitions`) — 표에 없는 상태에서 부르면 400, 열림·숨김으로 가는 전이는 필수 체크리스트 항목이 없으면 400 |
 | `DELETE .../problems/{id}` | 문제를 지운다 — 참여자의 시도(내보낸 사람 포함)가 없을 때만, 강사 자신의 시도만 있으면 그 채점도 함께 지운다, 되돌릴 수 없다(#430/#431, ADR-0050) |
-| `POST`·`PATCH`·`DELETE .../checklist-items[/{id}]` | 체크리스트 항목을 더하고 고치고 지운다 |
+| `POST`·`PATCH`·`DELETE .../checklist-items[/{id}]` | 체크리스트 항목을 더하고 고치고 지운다 — 열린·숨긴 문제의 마지막 필수 항목을 삭제·필수 해제하면 422(#440, 초안은 예외) |
 | `POST .../checklist-items/reorder` | 체크리스트 순서를 바꾼다 |
 | `GET .../problems/mine` | 참여자의 문제 목록 — 문제마다 통과 여부(#288) |
 | `GET .../problems/{id}/mine` | 참여자가 보는 문제 하나 + 본인의 시도 목록(#286) |
@@ -323,6 +323,19 @@ llm_scoring`(#274)에 이어 `core.repository_adapters`(GitHub 저장소 clone·
 지난 채점(`ClassroomScore.reasoning`)에 없는 항목(채점 뒤 새로 생긴 체크리스트
 항목)은 "충족 확인 안 됨"으로 본다. 문제 하나의 통과 여부는 그 참여자의 시도
 전체에 대한 OR이다 — 한 번 통과하면 나중에 미통과가 나와도 유지된다.
+
+**Problem 상태 전이는 표 하나가 정한다**(#440, `classroom.problem_transitions`,
+`contests.transitions`(#255)와 같은 모양이되 Problem에는 시간 기반 스캔 전이가
+없어 그 무게를 옮기지 않는다). 간선은 셋뿐이다 — 초안→열림, 열림→숨김,
+숨김→열림. 열림으로 가는 두 간선(초안→열림, 숨김→열림)은 필수 체크리스트
+항목이 하나 이상이어야 하고, 표에 없는 간선(예: 열린 문제에 다시 `open`)은
+400이다. **불변식도 하나 있다** — 열린·숨긴 문제는 필수 항목을 하나 이상
+유지해야 한다, 그래서 마지막 필수 항목의 삭제·필수 해제는 422다(초안은
+예외, 그래서 필수 항목이 하나도 없는 열린·숨긴 문제는 API로 만들 수 없다).
+강사용 `ProblemOut.available_transitions`가 지금 상태에서 나갈 수 있는
+전이(지금 그래프에서는 언제나 하나)와 막힌 이유("archived"|
+"no_required_item")를 실어, 수정 화면은 이 값으로 버튼을 그리고 화면 안의
+전이 계산을 갖지 않는다.
 
 ### 스토리지와 알림
 

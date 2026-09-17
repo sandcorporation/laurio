@@ -723,11 +723,21 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Delete Checklist Item */
+        /**
+         * Delete Checklist Item
+         * @description 열린·숨긴 문제의 마지막 필수 항목은 지울 수 없다(#440) —
+         *     `assert_required_item_floor`와 같은 이유, `update_checklist_item`과
+         *     같은 규율(초안은 예외).
+         */
         delete: operations["classroom_api_delete_checklist_item"];
         options?: never;
         head?: never;
-        /** Update Checklist Item */
+        /**
+         * Update Checklist Item
+         * @description 열린·숨긴 문제는 필수 항목을 하나 이상 유지해야 한다(#440) — 마지막
+         *     필수 항목을 필수 해제하면 422로 거절한다(초안은 예외, `classroom.
+         *     problem_transitions.assert_required_item_floor`).
+         */
         patch: operations["classroom_api_update_checklist_item"];
         trace?: never;
     };
@@ -824,7 +834,8 @@ export interface paths {
         /**
          * Open Problem
          * @description 초안을 연다. 필수 체크리스트 항목이 하나도 없으면 통과가 정의되지
-         *     않아 막는다(#283 AC).
+         *     않아 막는다(#283 AC). 전이 표(`classroom.problem_transitions`, #440)가
+         *     「초안에서만」과 「필수 항목이 있어야」 두 조건을 함께 정한다.
          */
         post: operations["classroom_api_open_problem"];
         delete?: never;
@@ -6356,6 +6367,11 @@ export interface components {
         /** ProblemOut */
         ProblemOut: {
             /**
+             * Available Transitions
+             * @default []
+             */
+            available_transitions: components["schemas"]["ProblemTransitionOut"][];
+            /**
              * Checklist Items
              * @default []
              */
@@ -6519,6 +6535,21 @@ export interface components {
             taken_down: boolean;
             /** Title */
             title: string;
+        };
+        /**
+         * ProblemTransitionOut
+         * @description 전이 표(`classroom.problem_transitions`) 한 줄(#440) — 강사용 문제
+         *     응답이 「지금 상태에서 나갈 수 있는 전이」를 이 모양으로 싣는다. 지금
+         *     그래프는 상태마다 나가는 간선이 하나뿐이라 `ProblemOut.
+         *     available_transitions`는 언제나 원소 하나짜리 목록이다.
+         */
+        ProblemTransitionOut: {
+            /** Blocked Reason */
+            blocked_reason?: string | null;
+            /** Name */
+            name: string;
+            /** To State */
+            to_state: string;
         };
         /**
          * ProfileIn
@@ -8534,6 +8565,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorOut"];
                 };
             };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
         };
     };
     classroom_api_update_checklist_item: {
@@ -8564,6 +8604,15 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

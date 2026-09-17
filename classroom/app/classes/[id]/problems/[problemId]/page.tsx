@@ -46,6 +46,7 @@ import {
   updateChecklistItem,
   updateProblem,
   type ProblemRow,
+  type ProblemTransitionBlockedReason,
   type SubmissionFormat,
 } from "@/lib/problems/api";
 import { useProblem } from "@/lib/problems/use-problem";
@@ -60,6 +61,15 @@ const STATUS_LABEL: Record<string, string> = {
   open: "열림",
   hidden: "숨김",
 };
+
+// 전이가 막힌 이유를 버튼 자리에 그대로 보일 문장으로 바꾼다(#440 AC) —
+// 순수 함수라 화면 밖에 둔다. "archived"는 클래스 상세·체크리스트가 이미
+// 쓰는 문구와 같은 문장이다(같은 뜻은 같은 말로).
+function transitionBlockedReasonText(reason: Exclude<ProblemTransitionBlockedReason, null>): string {
+  return reason === "archived"
+    ? "이 클래스는 보관되어 바꿀 수 없습니다."
+    : "필수 항목을 하나 이상 추가해야 열 수 있습니다.";
+}
 
 function DeleteProblemCard({
   classId,
@@ -312,6 +322,10 @@ export default function EditProblemPage() {
   // 여전히 백엔드다.
   const isArchived = classState.status === "ready" && classState.classroom.archived;
   const archivedReason = "이 클래스는 보관되어 바꿀 수 없습니다.";
+  // 지금 상태에서 나갈 수 있는 전이 — 그래프가 상태마다 간선을 하나만
+  // 두므로(#440) 배열의 유일한 원소만 본다. 문제가 끝 상태를 갖지 않는
+  // 이상(지금은 없다) 언제나 하나다.
+  const transition = problem.available_transitions[0];
 
   function toggleSubmissionFormat(format: SubmissionFormat, checked: boolean) {
     setSubmissionFormats((prev) =>
@@ -364,8 +378,10 @@ export default function EditProblemPage() {
     try {
       await updateChecklistItem(classId, problemId, itemId, { label });
       reload();
-    } catch {
-      setChecklistError("항목을 저장하지 못했습니다. 잠시 후 다시 시도해주세요.");
+    } catch (err) {
+      setChecklistError(
+        err instanceof BackendError ? err.message : "항목을 저장하지 못했습니다. 잠시 후 다시 시도해주세요.",
+      );
     }
   }
 
@@ -374,8 +390,12 @@ export default function EditProblemPage() {
     try {
       await updateChecklistItem(classId, problemId, itemId, { required });
       reload();
-    } catch {
-      setChecklistError("항목을 저장하지 못했습니다. 잠시 후 다시 시도해주세요.");
+    } catch (err) {
+      // 열린·숨긴 문제의 마지막 필수 항목을 필수 해제하면 422가 온다(#440)
+      // — 그 문구를 그대로 보여준다, 화면이 다시 판단하지 않는다.
+      setChecklistError(
+        err instanceof BackendError ? err.message : "항목을 저장하지 못했습니다. 잠시 후 다시 시도해주세요.",
+      );
     }
   }
 
@@ -384,8 +404,12 @@ export default function EditProblemPage() {
     try {
       await deleteChecklistItem(classId, problemId, itemId);
       reload();
-    } catch {
-      setChecklistError("항목을 지우지 못했습니다. 잠시 후 다시 시도해주세요.");
+    } catch (err) {
+      // 열린·숨긴 문제의 마지막 필수 항목 삭제도 422다(#440) — 그 문구를
+      // 그대로 보여준다.
+      setChecklistError(
+        err instanceof BackendError ? err.message : "항목을 지우지 못했습니다. 잠시 후 다시 시도해주세요.",
+      );
     }
   }
 
@@ -551,15 +575,19 @@ export default function EditProblemPage() {
             >
               학생 화면으로
             </Link>
-            {isArchived ? (
+            {/* 서버가 준 전이 표(#440, `problem.available_transitions`)가
+                버튼을 그린다 — 화면은 상태별로 다시 계산하지 않는다. 지금
+                그래프는 상태마다 나가는 간선이 하나뿐이라 배열의 첫 번째
+                (유일한) 원소만 본다. */}
+            {transition?.blocked_reason ? (
               <span
-                data-testid="problem-transition-archived"
-                title={archivedReason}
+                data-testid={`problem-transition-blocked-${transition.name}`}
+                title={transitionBlockedReasonText(transition.blocked_reason)}
                 className={`${buttonClass()} cursor-not-allowed opacity-50`}
               >
-                {archivedReason}
+                {transitionBlockedReasonText(transition.blocked_reason)}
               </span>
-            ) : problem.status === "draft" ? (
+            ) : transition?.name === "open" ? (
               <button
                 type="button"
                 data-testid="open-problem-button"
@@ -568,7 +596,7 @@ export default function EditProblemPage() {
               >
                 문제 열기
               </button>
-            ) : problem.status === "open" ? (
+            ) : transition?.name === "hide" ? (
               <button
                 type="button"
                 data-testid="hide-problem-button"
@@ -577,7 +605,7 @@ export default function EditProblemPage() {
               >
                 숨기기
               </button>
-            ) : (
+            ) : transition?.name === "reopen" ? (
               <button
                 type="button"
                 data-testid="reopen-problem-button"
@@ -586,7 +614,7 @@ export default function EditProblemPage() {
               >
                 다시 열기
               </button>
-            )}
+            ) : null}
           </>
         }
       />

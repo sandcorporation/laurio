@@ -233,6 +233,21 @@ class ProblemPatchIn(Schema):
     syntax_check_enabled: bool | None = None
 
 
+class ProblemTransitionOut(Schema):
+    """전이 표(`classroom.problem_transitions`) 한 줄(#440) — 강사용 문제
+    응답이 「지금 상태에서 나갈 수 있는 전이」를 이 모양으로 싣는다. 지금
+    그래프는 상태마다 나가는 간선이 하나뿐이라 `ProblemOut.
+    available_transitions`는 언제나 원소 하나짜리 목록이다."""
+
+    #: "open" | "hide" | "reopen".
+    name: str
+    #: 이 전이가 성공하면 도달하는 상태.
+    to_state: str
+    #: `None`이면 지금 바로 부를 수 있다. 아니면 "archived"(클래스가
+    #: 보관됨) | "no_required_item"(필수 체크리스트 항목이 하나도 없음).
+    blocked_reason: str | None = None
+
+
 class ProblemOut(Schema):
     id: int
     classroom_id: int
@@ -289,6 +304,11 @@ class ProblemOut(Schema):
     #: 명시하지만, 혹시 다른 생성 경로가 이 칸을 빠뜨려도 삭제 버튼이
     #: 함부로 뜨지 않는 쪽으로 넘어진다.
     deletable: bool = False
+    #: 지금 상태에서 나갈 수 있는 전이와 각자 막힌 이유(#440,
+    #: `classroom.problem_transitions.available_transitions`) — 수정
+    #: 화면은 이 목록으로 열기·숨기기·다시 열기 버튼을 그리고, 화면 안에서
+    #: 상태별 버튼을 다시 계산하지 않는다.
+    available_transitions: list[ProblemTransitionOut] = []
 
 
 class ProblemReorderIn(Schema):

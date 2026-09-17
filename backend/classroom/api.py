@@ -91,6 +91,7 @@ from .schemas import (
     ProblemPatchIn,
     ProblemReorderIn,
     ProblemTemplateChecklistItemOut,
+    ProblemTransitionOut,
     PublishedTemplateSummaryOut,
     ScoringModelCatalogOut,
     ScoringModelOut,
@@ -105,6 +106,12 @@ from .participation import (
     participant_membership_blocked_reason,
     participant_submit_blocked_reason,
     visible_problems_queryset,
+)
+from .problem_transitions import (
+    assert_has_required_item,
+    assert_required_item_floor,
+    assert_transition_from_state,
+    available_transitions,
 )
 from .scoring import check_scoring_key
 from .scoring_model_catalog import get_scoring_model_catalog
@@ -374,6 +381,10 @@ def _serialize_problem(
         pass_rate=(passed_count / member_count) if member_count else None,
         published_template=_published_template_summary(_live_problem_template(problem)),
         deletable=_problem_deletable(problem, class_obj, blocking_problem_ids=blocking_problem_ids),
+        available_transitions=[
+            ProblemTransitionOut(name=t.name, to_state=t.to_state, blocked_reason=t.blocked_reason)
+            for t in available_transitions(problem, class_obj)
+        ],
     )
 
 
@@ -1474,14 +1485,15 @@ def delete_problem(request: HttpRequest, class_id: int, problem_id: int):
 )
 def open_problem(request: HttpRequest, class_id: int, problem_id: int):
     """초안을 연다. 필수 체크리스트 항목이 하나도 없으면 통과가 정의되지
-    않아 막는다(#283 AC)."""
+    않아 막는다(#283 AC). 전이 표(`classroom.problem_transitions`, #440)가
+    「초안에서만」과 「필수 항목이 있어야」 두 조건을 함께 정한다."""
 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problem = _get_owned_problem_or_404(class_obj, problem_id)
     assert_class_mutable(class_obj)
 
-    if not problem.checklist_items.filter(required=True).exists():
-        raise HttpError(400, "필수 항목이 하나도 없는 문제는 열 수 없습니다.")
+    assert_transition_from_state("open", problem, wrong_state_message="초안만 열 수 있습니다.")
+    assert_has_required_item(problem, message="필수 항목이 하나도 없는 문제는 열 수 없습니다.")
 
     problem.status = Problem.Status.OPEN
     problem.save(update_fields=["status", "updated_at"])
@@ -1502,8 +1514,7 @@ def hide_problem(request: HttpRequest, class_id: int, problem_id: int):
     problem = _get_owned_problem_or_404(class_obj, problem_id)
     assert_class_mutable(class_obj)
 
-    if problem.status != Problem.Status.OPEN:
-        raise HttpError(400, "열린 문제만 숨길 수 있습니다.")
+    assert_transition_from_state("hide", problem, wrong_state_message="열린 문제만 숨길 수 있습니다.")
 
     problem.status = Problem.Status.HIDDEN
     problem.save(update_fields=["status", "updated_at"])
@@ -1524,10 +1535,8 @@ def reopen_problem(request: HttpRequest, class_id: int, problem_id: int):
     problem = _get_owned_problem_or_404(class_obj, problem_id)
     assert_class_mutable(class_obj)
 
-    if problem.status != Problem.Status.HIDDEN:
-        raise HttpError(400, "숨긴 문제만 다시 열 수 있습니다.")
-    if not problem.checklist_items.filter(required=True).exists():
-        raise HttpError(400, "필수 항목이 하나도 없는 문제는 열 수 없습니다.")
+    assert_transition_from_state("reopen", problem, wrong_state_message="숨긴 문제만 다시 열 수 있습니다.")
+    assert_has_required_item(problem, message="필수 항목이 하나도 없는 문제는 열 수 없습니다.")
 
     problem.status = Problem.Status.OPEN
     problem.save(update_fields=["status", "updated_at"])
@@ -1888,7 +1897,7 @@ def reorder_checklist_items(
 
 @router.patch(
     "/classes/{class_id}/problems/{problem_id}/checklist-items/{item_id}",
-    response={200: ChecklistItemOut, 404: ErrorOut},
+    response={200: ChecklistItemOut, 404: ErrorOut, 422: ErrorOut},
     auth=jwt_auth,
 )
 def update_checklist_item(
@@ -1898,10 +1907,18 @@ def update_checklist_item(
     item_id: int,
     payload: ChecklistItemPatchIn,
 ):
+    """열린·숨긴 문제는 필수 항목을 하나 이상 유지해야 한다(#440) — 마지막
+    필수 항목을 필수 해제하면 422로 거절한다(초안은 예외, `classroom.
+    problem_transitions.assert_required_item_floor`)."""
+
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problem = _get_owned_problem_or_404(class_obj, problem_id)
     item = _get_owned_checklist_item_or_404(problem, item_id)
     assert_class_mutable(class_obj)
+
+    if payload.required is False and item.required:
+        remaining = problem.checklist_items.filter(required=True).exclude(id=item.id).count()
+        assert_required_item_floor(problem, remaining_required_count=remaining)
 
     update_fields = []
     if payload.label is not None:
@@ -1917,14 +1934,23 @@ def update_checklist_item(
 
 @router.delete(
     "/classes/{class_id}/problems/{problem_id}/checklist-items/{item_id}",
-    response={204: None, 404: ErrorOut},
+    response={204: None, 404: ErrorOut, 422: ErrorOut},
     auth=jwt_auth,
 )
 def delete_checklist_item(request: HttpRequest, class_id: int, problem_id: int, item_id: int):
+    """열린·숨긴 문제의 마지막 필수 항목은 지울 수 없다(#440) —
+    `assert_required_item_floor`와 같은 이유, `update_checklist_item`과
+    같은 규율(초안은 예외)."""
+
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problem = _get_owned_problem_or_404(class_obj, problem_id)
     item = _get_owned_checklist_item_or_404(problem, item_id)
     assert_class_mutable(class_obj)
+
+    if item.required:
+        remaining = problem.checklist_items.filter(required=True).exclude(id=item.id).count()
+        assert_required_item_floor(problem, remaining_required_count=remaining)
+
     item.delete()
     return 204, None
 

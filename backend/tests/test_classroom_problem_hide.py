@@ -176,23 +176,33 @@ def test_instructor_reopens_a_hidden_problem(client, db):
 
 
 def test_reopening_without_required_items_is_400(client, db):
-    """다시 열기도 열기와 같은 필수 항목 규칙을 따른다(#405 AC)."""
+    """다시 열기도 열기와 같은 필수 항목 규칙을 따른다(#405 AC) — 지금은
+    숨긴 문제의 마지막 필수 항목 삭제 자체가 전이 표(#440)로 422 거절되므로,
+    「필수 항목을 다 지운 숨긴 문제」는 API로 만들 수 없다. 그래도 이 규칙이
+    사라지지 않았다는 것을 문제 상세의 `available_transitions`로 확인한다."""
 
     instructor = _login(client, uid="instructor-1")
     class_id = _create_class(client, instructor["access"])
     problem_id, item_id = _create_open_problem(client, instructor["access"], class_id)
     _hide(client, instructor["access"], class_id, problem_id)
-    # 필수 항목을 없앤다 — 다시 열 수 없어야 한다.
+
+    # 필수 항목을 없애려는 시도 자체가 거절된다(#440) — 예전에는 여기서
+    # 204가 나고, 그 사이 상태에서 다시 열기가 400으로 막혔었다.
     delete = client.delete(
         f"{CLASSES_URL}/{class_id}/problems/{problem_id}/checklist-items/{item_id}",
         **_auth_header(instructor["access"]),
     )
-    assert delete.status_code == 204
+    assert delete.status_code == 422
+    assert Problem.objects.get(id=problem_id).status == Problem.Status.HIDDEN
+
+    detail = client.get(
+        f"{CLASSES_URL}/{class_id}/problems/{problem_id}", **_auth_header(instructor["access"])
+    )
+    transitions = detail.json()["available_transitions"]
+    assert transitions == [{"name": "reopen", "to_state": "open", "blocked_reason": None}]
 
     response = _reopen(client, instructor["access"], class_id, problem_id)
-
-    assert response.status_code == 400
-    assert Problem.objects.get(id=problem_id).status == Problem.Status.HIDDEN
+    assert response.status_code == 200
 
 
 def test_hiding_a_draft_problem_is_rejected(client, db):
