@@ -164,11 +164,15 @@ pipeline {
     }
 
     // 옛 커밋의 ghcr 이미지·오래된 빌드 캐시를 지운다(deploy.sh prune). 실패해도
-    // 배포를 실패로 만들지 않는다 — 명령 자신이 언제나 0 으로 끝난다.
+    // 배포를 실패로 만들지 않는다 — 명령 자신도 언제나 0 으로 끝나지만, 여기서도
+    // 실패를 삼킨다. **이 파일과 deploy.sh 가 다른 커밋에서 온다**(staging 잡은
+    // 파이프라인을 main 의 최신에서 읽고 deploy.sh 는 DEPLOY_SHA 를 체크아웃해
+    // 쓴다) — prune 이 생기기 전 커밋을 배포한 빌드가 「알 수 없는 명령」으로
+    // 빨갛게 끝났다(2026-09-17, 교체·확인·표식은 다 끝난 뒤였다).
     stage('정리') {
       when { expression { env.SKIP_DEPLOY != 'true' } }
       steps {
-        sh "sh ./deploy.sh ${deployTarget} prune"
+        sh "sh ./deploy.sh ${deployTarget} prune || echo '정리를 건너뛴다 — 배포 결과와 무관하다'"
       }
     }
   }
