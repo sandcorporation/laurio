@@ -1,8 +1,10 @@
 "use client";
 
 // 클래스 설정 (#284/#285/#323). 「채점 설정」이던 이름이 넓어졌다 — 강사 본인의
-// 채점 키를 넣고 클래스 기본 채점 모델을 고르는 일 말고도, 채점과 무관한 강사
-// 이름과(#299) 클래스를 템플릿으로 공개하는 일(#319)까지 이 화면 하나가 담는다.
+// 채점 키를 넣고 클래스 기본 채점 모델을 고르는 일 말고도, 채점과 무관한 이름들
+// (클래스 이름·강사 이름 #299)과 클래스를 템플릿으로 공개하는 일(#319)까지 이
+// 화면 하나가 담는다. 카드는 「이름」 → 「채점」(키·기본 모델·예산 세 구획) →
+// 템플릿 공개 → 삭제 순이다.
 // 키는 저장 뒤 마스킹된 형태로만 보인다 — 평문은 다시 보여주지 않는다.
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
@@ -13,6 +15,7 @@ import {
   Badge,
   Card,
   CardHeader,
+  CardSection,
   ErrorNote,
   FieldLabel,
   INPUT_CLASS,
@@ -32,6 +35,7 @@ import {
   type PublishedClassTemplateSummary,
 } from "@/lib/classes/api";
 import { isDeleteConfirmationTyped } from "@/lib/classes/delete-confirmation";
+import { classNamesPatch } from "@/lib/classes/name-patch";
 import {
   checkOpenAIKeyFromBrowser,
   type OpenAIKeyCheckResult,
@@ -365,6 +369,7 @@ export default function ClassSettingsPage() {
   const [modelSaving, setModelSaving] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
 
+  const [classNameDraft, setClassNameDraft] = useState("");
   const [instructorDisplayName, setInstructorDisplayName] = useState("");
   const [nameSaving, setNameSaving] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
@@ -383,6 +388,7 @@ export default function ClassSettingsPage() {
     if (state.status === "ready") {
       setDefaultModel(state.classroom.default_model);
       setDefaultReasoningEffort(state.classroom.default_reasoning_effort);
+      setClassNameDraft(state.classroom.name);
       setInstructorDisplayName(state.classroom.instructor_display_name);
       setTokenBudget(
         state.classroom.token_budget === null ? "" : String(state.classroom.token_budget),
@@ -418,6 +424,10 @@ export default function ClassSettingsPage() {
   }
 
   const { classroom } = state;
+  const namesPatch = classNamesPatch(
+    { name: classroom.name, instructorDisplayName: classroom.instructor_display_name },
+    { name: classNameDraft, instructorDisplayName },
+  );
 
   async function handleKeySubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -442,10 +452,10 @@ export default function ClassSettingsPage() {
     setNameSaving(true);
     setNameError(null);
     try {
-      await updateClass(classId, { instructor_display_name: instructorDisplayName.trim() });
+      if (namesPatch !== null) await updateClass(classId, namesPatch);
       reload();
     } catch (err) {
-      setNameError(err instanceof BackendError ? err.message : "강사 이름을 저장하지 못했습니다.");
+      setNameError(err instanceof BackendError ? err.message : "이름을 저장하지 못했습니다.");
     } finally {
       setNameSaving(false);
     }
@@ -500,7 +510,7 @@ export default function ClassSettingsPage() {
       <PageHeader
         eyebrow={classroom.name}
         title="클래스 설정"
-        description="강사 이름·채점 키와 모델·예산, 템플릿 공개까지 이 클래스의 설정을 여기서 관리합니다."
+        description="클래스·강사 이름, 채점 키와 모델·예산, 템플릿 공개까지 이 클래스의 설정을 여기서 관리합니다."
         actions={
           <Link href={`/classes/${classId}`} className={buttonClass()}>
             클래스로 돌아가기
@@ -508,36 +518,53 @@ export default function ClassSettingsPage() {
         }
       />
 
-      <div className="flex max-w-[820px] flex-col gap-5">
+      <div className="flex flex-col gap-5">
         <Card>
-          <CardHeader title="강사 이름" hint="가입 미리보기에서 이 이름으로 보입니다" />
+          <CardHeader title="이름" hint="참여자 화면과 가입 미리보기에 이 이름들이 보입니다" />
           <div className="flex flex-col gap-3 p-4">
-            <form onSubmit={handleNameSubmit} className="flex flex-col gap-2.5">
-              <label htmlFor="class-instructor-display-name-input">
-                <FieldLabel>이 클래스에서 불릴 이름</FieldLabel>
-              </label>
-              <div className="flex flex-wrap items-center gap-2">
+            <form onSubmit={handleNameSubmit} className="flex flex-col gap-3">
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="class-name-input">
+                  <FieldLabel>클래스 이름</FieldLabel>
+                </label>
+                <input
+                  id="class-name-input"
+                  data-testid="class-name-input"
+                  value={classNameDraft}
+                  onChange={(event) => setClassNameDraft(event.target.value)}
+                  required
+                  maxLength={200}
+                  className={INPUT_CLASS}
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="class-instructor-display-name-input">
+                  <FieldLabel>이 클래스에서 불릴 강사 이름</FieldLabel>
+                </label>
                 <input
                   id="class-instructor-display-name-input"
                   data-testid="class-instructor-display-name-input"
                   value={instructorDisplayName}
                   onChange={(event) => setInstructorDisplayName(event.target.value)}
                   required
-                  className={`${INPUT_CLASS} min-w-[240px] flex-1`}
+                  maxLength={100}
+                  className={INPUT_CLASS}
                 />
+                <span className="text-[11.5px] leading-relaxed text-ink/45">
+                  참여자 명단과 제출물에 보이는 이름과는 별개입니다 — 그곳은 참여자 본인이 정한
+                  이름을 그대로 씁니다.
+                </span>
+              </div>
+              <div className="flex justify-end">
                 <button
                   type="submit"
                   data-testid="class-instructor-display-name-submit"
-                  disabled={nameSaving || instructorDisplayName.trim() === ""}
+                  disabled={nameSaving || namesPatch === null}
                   className={buttonClass("primary")}
                 >
                   {nameSaving ? "저장하는 중..." : "저장"}
                 </button>
               </div>
-              <span className="text-[11.5px] leading-relaxed text-ink/45">
-                참여자 명단과 제출물에 보이는 이름과는 별개입니다 — 그곳은 참여자 본인이 정한
-                이름을 그대로 씁니다.
-              </span>
             </form>
             {nameError ? (
               <ErrorNote>
@@ -547,288 +574,284 @@ export default function ClassSettingsPage() {
           </div>
         </Card>
 
-        <div id="scoring-key" className="scroll-mt-4">
-          <Card>
-            <CardHeader title="채점 키" hint="이 클래스의 채점에만 쓰입니다" />
-            <div className="flex flex-col gap-4 p-4">
-              {!classroom.has_openai_key ? (
-                <p data-testid="openai-key-status" className="flex flex-wrap items-center gap-2.5 text-[13.5px]">
-                  <Badge tone="attention">없음</Badge>
-                  <span className="text-ink/60">키가 없으면 이 클래스의 제출은 채점되지 않습니다.</span>
-                </p>
-              ) : classroom.openai_key_status === "rejected" ? (
-                <p data-testid="openai-key-status" className="flex flex-wrap items-center gap-2.5 text-[13.5px]">
-                  <Badge tone="attention">거부됨</Badge>
-                  <span className="font-mono text-ink/60">{classroom.openai_key_masked}</span>
-                  <span className="text-ink/60">
-                    벤더가 이 키를 거절했습니다 — 새 키를 저장해야 채점이 다시 시작됩니다.
-                  </span>
-                </p>
-              ) : classroom.openai_key_status === "unverified" ? (
-                <p data-testid="openai-key-status" className="flex flex-wrap items-center gap-2.5 text-[13.5px]">
-                  <Badge tone="neutral">미검증</Badge>
-                  <span className="font-mono text-ink/60">{classroom.openai_key_masked}</span>
-                  <span className="text-ink/60">
-                    저장할 때 벤더에 닿지 못해 확인하지 못했습니다 — 채점 시도에서 다시 확인됩니다.
-                  </span>
-                </p>
-              ) : (
-                <p data-testid="openai-key-status" className="flex items-center gap-2.5 text-[13.5px]">
-                  <Badge tone="verified">확인함</Badge>
-                  <span className="font-mono text-ink/60">{classroom.openai_key_masked}</span>
-                </p>
-              )}
-
-              <form onSubmit={handleKeySubmit} className="flex flex-col gap-2.5">
-                <label htmlFor="openai-api-key">
-                  <FieldLabel>새 채점 키</FieldLabel>
-                </label>
-                <div className="flex flex-wrap items-center gap-2">
-                  <input
-                    id="openai-api-key"
-                    data-testid="openai-key-input"
-                    type="password"
-                    value={apiKey}
-                    onChange={(event) => setApiKey(event.target.value)}
-                    required
-                    className={`${INPUT_CLASS} min-w-[240px] flex-1 font-mono`}
-                    placeholder="sk-..."
-                  />
-                  <button
-                    type="submit"
-                    data-testid="openai-key-submit"
-                    disabled={keySaving || apiKey.trim() === ""}
-                    className={buttonClass("primary")}
-                  >
-                    {keySaving ? "저장하는 중..." : "저장"}
-                  </button>
-                </div>
-                {/* 저장을 누르기 전에 브라우저가 먼저 말해준다(#357) — 문이
-                    아니라 안내다, 판정과 무관하게 위 저장 버튼은 항상 눌린다. */}
-                {liveKeyCheck === "checking" ? (
-                  <p data-testid="openai-key-live-check" className="text-[12px] text-ink/45">
-                    확인하는 중...
-                  </p>
-                ) : liveKeyCheck === "valid" ? (
-                  <p data-testid="openai-key-live-check">
-                    <Badge tone="verified">이 키를 쓸 수 있습니다</Badge>
-                  </p>
-                ) : liveKeyCheck === "invalid" ? (
-                  <p data-testid="openai-key-live-check">
-                    <Badge tone="attention">이 키는 쓸 수 없습니다</Badge>
-                  </p>
-                ) : liveKeyCheck === "unknown" ? (
-                  <p data-testid="openai-key-live-check">
-                    <Badge tone="neutral">지금은 확인할 수 없습니다</Badge>
-                  </p>
-                ) : null}
-                <span className="text-[11.5px] leading-relaxed text-ink/45">
-                  저장 뒤에는 다시 볼 수 없습니다 — 화면에도 로그에도 남지 않고, 채점 요청을 보낼
-                  때만 복호화됩니다. 참여자에게는 어떤 형태로도 보이지 않습니다.
-                </span>
-              </form>
-              {keyError ? (
-                <ErrorNote>
-                  <span data-testid="openai-key-error">{keyError}</span>
-                </ErrorNote>
-              ) : null}
-            </div>
-          </Card>
-        </div>
-
-        <div id="scoring-model" className="scroll-mt-4">
         <Card>
-          <CardHeader title="기본 채점 모델" hint="문제가 자기 모델을 갖지 않으면 이 값을 씁니다" />
-          <div className="flex flex-col gap-3 p-4">
-            {modelsState.status === "loading" ? (
-              <p data-testid="scoring-models-loading" className="text-[13px] text-ink/45">
-                불러오는 중...
-              </p>
-            ) : modelsState.status === "error" ? (
-              <ErrorNote>
-                <span data-testid="scoring-models-error">모델 목록을 불러오지 못했습니다.</span>
-              </ErrorNote>
-            ) : (
-              <form onSubmit={handleModelSubmit} className="flex flex-col gap-2.5">
-                {modelsState.source === "fallback" ? (
-                  <Note>
-                    <span data-testid="scoring-models-unavailable-note">
-                      {modelsState.unavailableReason === "no_api_key"
-                        ? "키를 넣으면 이 키로 쓸 수 있는 모델을 보여드립니다 — 지금은 기본 목록입니다."
-                        : "지금은 모델 목록을 확인할 수 없어 기본 목록을 보여드립니다."}
+          <CardHeader title="채점" hint="누구의 키로, 어떤 모델로, 얼마까지 채점할지" />
+          <div className="divide-y divide-rule">
+            <CardSection id="scoring-key" title="채점 키" hint="이 클래스의 채점에만 쓰입니다">
+              <div className="flex flex-col gap-4 p-4">
+                {!classroom.has_openai_key ? (
+                  <p data-testid="openai-key-status" className="flex flex-wrap items-center gap-2.5 text-[13.5px]">
+                    <Badge tone="attention">없음</Badge>
+                    <span className="text-ink/60">키가 없으면 이 클래스의 제출은 채점되지 않습니다.</span>
+                  </p>
+                ) : classroom.openai_key_status === "rejected" ? (
+                  <p data-testid="openai-key-status" className="flex flex-wrap items-center gap-2.5 text-[13.5px]">
+                    <Badge tone="attention">거부됨</Badge>
+                    <span className="font-mono text-ink/60">{classroom.openai_key_masked}</span>
+                    <span className="text-ink/60">
+                      벤더가 이 키를 거절했습니다 — 새 키를 저장해야 채점이 다시 시작됩니다.
                     </span>
-                  </Note>
-                ) : null}
-                <label htmlFor="class-default-model">
-                  <FieldLabel>기본 모델</FieldLabel>
-                </label>
-                <div className="flex flex-wrap items-center gap-2">
-                  <select
-                    id="class-default-model"
-                    data-testid="class-default-model-select"
-                    value={defaultModel}
-                    onChange={(event) => setDefaultModel(event.target.value)}
-                    className={`${INPUT_CLASS} min-w-[280px] flex-1`}
-                  >
-                    {modelsState.models.map((model) => (
-                      <option key={model.id} value={model.id} data-testid={`scoring-model-option-${model.id}`}>
-                        {model.label} · 컨텍스트{" "}
-                        {model.context_window ? `${model.context_window.toLocaleString("ko-KR")} 토큰` : "크기 미확인"}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="submit"
-                    data-testid="class-default-model-submit"
-                    disabled={modelSaving}
-                    className={buttonClass("primary")}
-                  >
-                    {modelSaving ? "저장하는 중..." : "저장"}
-                  </button>
-                </div>
-                <span className="text-[11.5px] leading-relaxed text-ink/45">
-                  모델마다 한 번에 받을 수 있는 소스의 양이 다릅니다 — 긴 문제에 작은 모델을 고르면
-                  소스 뒷부분이 잘린 채 채점됩니다.
-                </span>
-                {isSelectedModelReasoning(defaultModel, modelsState.models, defaultModel === classroom.default_model ? classroom.default_model_is_reasoning : false) ? (
-                  <div className="flex flex-col gap-1.5 border-t border-rule pt-3">
-                    <label htmlFor="class-default-reasoning-effort">
-                      <FieldLabel>기본 추론 강도</FieldLabel>
-                    </label>
-                    <select
-                      id="class-default-reasoning-effort"
-                      data-testid="class-default-reasoning-effort-select"
-                      value={defaultReasoningEffort}
-                      onChange={(event) => setDefaultReasoningEffort(event.target.value)}
-                      className={`${INPUT_CLASS} max-w-[200px]`}
+                  </p>
+                ) : classroom.openai_key_status === "unverified" ? (
+                  <p data-testid="openai-key-status" className="flex flex-wrap items-center gap-2.5 text-[13.5px]">
+                    <Badge tone="neutral">미검증</Badge>
+                    <span className="font-mono text-ink/60">{classroom.openai_key_masked}</span>
+                    <span className="text-ink/60">
+                      저장할 때 벤더에 닿지 못해 확인하지 못했습니다 — 채점 시도에서 다시 확인됩니다.
+                    </span>
+                  </p>
+                ) : (
+                  <p data-testid="openai-key-status" className="flex items-center gap-2.5 text-[13.5px]">
+                    <Badge tone="verified">확인함</Badge>
+                    <span className="font-mono text-ink/60">{classroom.openai_key_masked}</span>
+                  </p>
+                )}
+
+                <form onSubmit={handleKeySubmit} className="flex flex-col gap-2.5">
+                  <label htmlFor="openai-api-key">
+                    <FieldLabel>새 채점 키</FieldLabel>
+                  </label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      id="openai-api-key"
+                      data-testid="openai-key-input"
+                      type="password"
+                      value={apiKey}
+                      onChange={(event) => setApiKey(event.target.value)}
+                      required
+                      className={`${INPUT_CLASS} min-w-[240px] flex-1 font-mono`}
+                      placeholder="sk-..."
+                    />
+                    <button
+                      type="submit"
+                      data-testid="openai-key-submit"
+                      disabled={keySaving || apiKey.trim() === ""}
+                      className={buttonClass("primary")}
                     >
-                      {REASONING_EFFORT_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                    <span className="text-[11.5px] leading-relaxed text-ink/45">
-                      높을수록 느리고 채점 예산을 더 씁니다.
-                    </span>
+                      {keySaving ? "저장하는 중..." : "저장"}
+                    </button>
                   </div>
-                ) : null}
-              </form>
-            )}
-            {modelError ? (
-              <ErrorNote>
-                <span data-testid="class-default-model-error">{modelError}</span>
-              </ErrorNote>
-            ) : null}
-          </div>
-        </Card>
-        </div>
-
-        {/* `id`는 예산 경고 알림(#329)이 이 자리를 가리킬 때 쓰는 앵커다 —
-            `lib/notifications/link.ts`가 같은 이름을 짓는다. */}
-        <div id="token-budget" className="scroll-mt-4">
-        <Card>
-          <CardHeader title="채점 예산" hint="한도에 닿으면 채점만 멈추고 제출은 쌓입니다" />
-          <div className="flex flex-col gap-4 p-4">
-            {classroom.token_budget === null ? (
-              <p data-testid="token-budget-status" className="text-[13.5px] text-ink/60">
-                예산이 설정되지 않았습니다 — 채점 사용량에 상한이 없습니다.
-              </p>
-            ) : (
-              <div data-testid="token-budget-status" className="flex flex-col gap-2">
-                <div className="flex flex-wrap items-baseline justify-between gap-2 text-[13px]">
-                  <span className="text-ink/60">사용량</span>
-                  <span className="font-mono">
-                    {classroom.token_usage_total.toLocaleString("ko-KR")} /{" "}
-                    {classroom.token_budget.toLocaleString("ko-KR")} 토큰
-                  </span>
-                </div>
-                <div className="h-1.5 w-full border border-rule bg-paper">
-                  <div
-                    className={classroom.token_budget_exhausted ? "h-full bg-attention" : "h-full bg-ink"}
-                    style={{
-                      width: `${Math.min(
-                        100,
-                        Math.round((classroom.token_usage_total / classroom.token_budget) * 100),
-                      )}%`,
-                    }}
-                  />
-                </div>
-                <div className="flex flex-wrap items-center gap-2.5 text-[12.5px] text-ink/45">
-                  <span>
-                    남은 양{" "}
-                    <Num className="text-ink/60">
-                      {(classroom.token_budget_remaining ?? 0).toLocaleString("ko-KR")}
-                    </Num>{" "}
-                    토큰
-                  </span>
-                  {classroom.token_budget_exhausted ? (
-                    <strong data-testid="token-budget-exhausted-badge" className="font-normal">
-                      <Badge tone="attention">채점 정지 중 · 예산 소진</Badge>
-                    </strong>
+                  {/* 저장을 누르기 전에 브라우저가 먼저 말해준다(#357) — 문이
+                      아니라 안내다, 판정과 무관하게 위 저장 버튼은 항상 눌린다. */}
+                  {liveKeyCheck === "checking" ? (
+                    <p data-testid="openai-key-live-check" className="text-[12px] text-ink/45">
+                      확인하는 중...
+                    </p>
+                  ) : liveKeyCheck === "valid" ? (
+                    <p data-testid="openai-key-live-check">
+                      <Badge tone="verified">이 키를 쓸 수 있습니다</Badge>
+                    </p>
+                  ) : liveKeyCheck === "invalid" ? (
+                    <p data-testid="openai-key-live-check">
+                      <Badge tone="attention">이 키는 쓸 수 없습니다</Badge>
+                    </p>
+                  ) : liveKeyCheck === "unknown" ? (
+                    <p data-testid="openai-key-live-check">
+                      <Badge tone="neutral">지금은 확인할 수 없습니다</Badge>
+                    </p>
                   ) : null}
-                </div>
+                  <span className="text-[11.5px] leading-relaxed text-ink/45">
+                    저장 뒤에는 다시 볼 수 없습니다 — 화면에도 로그에도 남지 않고, 채점 요청을 보낼
+                    때만 복호화됩니다. 참여자에게는 어떤 형태로도 보이지 않습니다.
+                  </span>
+                </form>
+                {keyError ? (
+                  <ErrorNote>
+                    <span data-testid="openai-key-error">{keyError}</span>
+                  </ErrorNote>
+                ) : null}
               </div>
-            )}
+            </CardSection>
 
-            <form onSubmit={handleBudgetSubmit} className="flex flex-col gap-3">
-              <div className="flex flex-wrap items-end gap-3">
-                <div className="flex min-w-[200px] flex-1 flex-col gap-1.5">
-                  <label htmlFor="token-budget-input">
-                    <FieldLabel>예산 한도(토큰)</FieldLabel>
-                  </label>
-                  <input
-                    id="token-budget-input"
-                    data-testid="token-budget-input"
-                    type="number"
-                    min={1}
-                    step={1}
-                    value={tokenBudget}
-                    onChange={(event) => setTokenBudget(event.target.value)}
-                    placeholder="예: 1000000"
-                    className={`${INPUT_CLASS} font-mono`}
-                  />
-                </div>
-                <div className="flex w-[150px] flex-col gap-1.5">
-                  <label htmlFor="token-budget-warning-threshold-input">
-                    <FieldLabel>경고 기준(%)</FieldLabel>
-                  </label>
-                  <input
-                    id="token-budget-warning-threshold-input"
-                    data-testid="token-budget-warning-threshold-input"
-                    type="number"
-                    min={1}
-                    max={100}
-                    step={1}
-                    value={warningThreshold}
-                    onChange={(event) => setWarningThreshold(event.target.value)}
-                    className={`${INPUT_CLASS} font-mono`}
-                  />
-                </div>
-                <button
-                  type="submit"
-                  data-testid="token-budget-submit"
-                  disabled={budgetSaving || tokenBudget.trim() === ""}
-                  className={buttonClass("primary")}
-                >
-                  {budgetSaving ? "저장하는 중..." : "저장"}
-                </button>
+            <CardSection id="scoring-model" title="기본 채점 모델" hint="문제가 자기 모델을 갖지 않으면 이 값을 씁니다">
+              <div className="flex flex-col gap-3 p-4">
+                {modelsState.status === "loading" ? (
+                  <p data-testid="scoring-models-loading" className="text-[13px] text-ink/45">
+                    불러오는 중...
+                  </p>
+                ) : modelsState.status === "error" ? (
+                  <ErrorNote>
+                    <span data-testid="scoring-models-error">모델 목록을 불러오지 못했습니다.</span>
+                  </ErrorNote>
+                ) : (
+                  <form onSubmit={handleModelSubmit} className="flex flex-col gap-2.5">
+                    {modelsState.source === "fallback" ? (
+                      <Note>
+                        <span data-testid="scoring-models-unavailable-note">
+                          {modelsState.unavailableReason === "no_api_key"
+                            ? "키를 넣으면 이 키로 쓸 수 있는 모델을 보여드립니다 — 지금은 기본 목록입니다."
+                            : "지금은 모델 목록을 확인할 수 없어 기본 목록을 보여드립니다."}
+                        </span>
+                      </Note>
+                    ) : null}
+                    <label htmlFor="class-default-model">
+                      <FieldLabel>기본 모델</FieldLabel>
+                    </label>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <select
+                        id="class-default-model"
+                        data-testid="class-default-model-select"
+                        value={defaultModel}
+                        onChange={(event) => setDefaultModel(event.target.value)}
+                        className={`${INPUT_CLASS} min-w-[280px] flex-1`}
+                      >
+                        {modelsState.models.map((model) => (
+                          <option key={model.id} value={model.id} data-testid={`scoring-model-option-${model.id}`}>
+                            {model.label} · 컨텍스트{" "}
+                            {model.context_window ? `${model.context_window.toLocaleString("ko-KR")} 토큰` : "크기 미확인"}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="submit"
+                        data-testid="class-default-model-submit"
+                        disabled={modelSaving}
+                        className={buttonClass("primary")}
+                      >
+                        {modelSaving ? "저장하는 중..." : "저장"}
+                      </button>
+                    </div>
+                    <span className="text-[11.5px] leading-relaxed text-ink/45">
+                      모델마다 한 번에 받을 수 있는 소스의 양이 다릅니다 — 긴 문제에 작은 모델을 고르면
+                      소스 뒷부분이 잘린 채 채점됩니다.
+                    </span>
+                    {isSelectedModelReasoning(defaultModel, modelsState.models, defaultModel === classroom.default_model ? classroom.default_model_is_reasoning : false) ? (
+                      <div className="flex flex-col gap-1.5 border-t border-rule pt-3">
+                        <label htmlFor="class-default-reasoning-effort">
+                          <FieldLabel>기본 추론 강도</FieldLabel>
+                        </label>
+                        <select
+                          id="class-default-reasoning-effort"
+                          data-testid="class-default-reasoning-effort-select"
+                          value={defaultReasoningEffort}
+                          onChange={(event) => setDefaultReasoningEffort(event.target.value)}
+                          className={`${INPUT_CLASS} max-w-[200px]`}
+                        >
+                          {REASONING_EFFORT_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                        <span className="text-[11.5px] leading-relaxed text-ink/45">
+                          높을수록 느리고 채점 예산을 더 씁니다.
+                        </span>
+                      </div>
+                    ) : null}
+                  </form>
+                )}
+                {modelError ? (
+                  <ErrorNote>
+                    <span data-testid="class-default-model-error">{modelError}</span>
+                  </ErrorNote>
+                ) : null}
               </div>
-              {budgetError ? (
-                <ErrorNote>
-                  <span data-testid="token-budget-error">{budgetError}</span>
-                </ErrorNote>
-              ) : null}
-            </form>
+            </CardSection>
 
-            <Note>
-              기준에 닿으면 <b className="text-ink">서비스 안 알림</b>으로 알립니다 — 메일이나 문자가
-              아니라 이 서비스에 들어오면 보이는 알림입니다. 한도에 닿아도 제출은 계속 쌓이고,
-              예산을 채우면 쌓인 시도부터 순서대로 이어서 채점됩니다.
-            </Note>
+            {/* `id`는 예산 경고 알림(#329)이 이 자리를 가리킬 때 쓰는 앵커다 —
+                `lib/notifications/link.ts`가 같은 이름을 짓는다. */}
+            <CardSection id="token-budget" title="채점 예산" hint="한도에 닿으면 채점만 멈추고 제출은 쌓입니다">
+              <div className="flex flex-col gap-4 p-4">
+                {classroom.token_budget === null ? (
+                  <p data-testid="token-budget-status" className="text-[13.5px] text-ink/60">
+                    예산이 설정되지 않았습니다 — 채점 사용량에 상한이 없습니다.
+                  </p>
+                ) : (
+                  <div data-testid="token-budget-status" className="flex flex-col gap-2">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2 text-[13px]">
+                      <span className="text-ink/60">사용량</span>
+                      <span className="font-mono">
+                        {classroom.token_usage_total.toLocaleString("ko-KR")} /{" "}
+                        {classroom.token_budget.toLocaleString("ko-KR")} 토큰
+                      </span>
+                    </div>
+                    <div className="h-1.5 w-full border border-rule bg-paper">
+                      <div
+                        className={classroom.token_budget_exhausted ? "h-full bg-attention" : "h-full bg-ink"}
+                        style={{
+                          width: `${Math.min(
+                            100,
+                            Math.round((classroom.token_usage_total / classroom.token_budget) * 100),
+                          )}%`,
+                        }}
+                      />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2.5 text-[12.5px] text-ink/45">
+                      <span>
+                        남은 양{" "}
+                        <Num className="text-ink/60">
+                          {(classroom.token_budget_remaining ?? 0).toLocaleString("ko-KR")}
+                        </Num>{" "}
+                        토큰
+                      </span>
+                      {classroom.token_budget_exhausted ? (
+                        <strong data-testid="token-budget-exhausted-badge" className="font-normal">
+                          <Badge tone="attention">채점 정지 중 · 예산 소진</Badge>
+                        </strong>
+                      ) : null}
+                    </div>
+                  </div>
+                )}
+
+                <form onSubmit={handleBudgetSubmit} className="flex flex-col gap-3">
+                  <div className="flex flex-wrap items-end gap-3">
+                    <div className="flex min-w-[200px] flex-1 flex-col gap-1.5">
+                      <label htmlFor="token-budget-input">
+                        <FieldLabel>예산 한도(토큰)</FieldLabel>
+                      </label>
+                      <input
+                        id="token-budget-input"
+                        data-testid="token-budget-input"
+                        type="number"
+                        min={1}
+                        step={1}
+                        value={tokenBudget}
+                        onChange={(event) => setTokenBudget(event.target.value)}
+                        placeholder="예: 1000000"
+                        className={`${INPUT_CLASS} font-mono`}
+                      />
+                    </div>
+                    <div className="flex w-[150px] flex-col gap-1.5">
+                      <label htmlFor="token-budget-warning-threshold-input">
+                        <FieldLabel>경고 기준(%)</FieldLabel>
+                      </label>
+                      <input
+                        id="token-budget-warning-threshold-input"
+                        data-testid="token-budget-warning-threshold-input"
+                        type="number"
+                        min={1}
+                        max={100}
+                        step={1}
+                        value={warningThreshold}
+                        onChange={(event) => setWarningThreshold(event.target.value)}
+                        className={`${INPUT_CLASS} font-mono`}
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      data-testid="token-budget-submit"
+                      disabled={budgetSaving || tokenBudget.trim() === ""}
+                      className={buttonClass("primary")}
+                    >
+                      {budgetSaving ? "저장하는 중..." : "저장"}
+                    </button>
+                  </div>
+                  {budgetError ? (
+                    <ErrorNote>
+                      <span data-testid="token-budget-error">{budgetError}</span>
+                    </ErrorNote>
+                  ) : null}
+                </form>
+
+                <Note>
+                  기준에 닿으면 <b className="text-ink">서비스 안 알림</b>으로 알립니다 — 메일이나 문자가
+                  아니라 이 서비스에 들어오면 보이는 알림입니다. 한도에 닿아도 제출은 계속 쌓이고,
+                  예산을 채우면 쌓인 시도부터 순서대로 이어서 채점됩니다.
+                </Note>
+              </div>
+            </CardSection>
           </div>
         </Card>
-        </div>
 
         <ClassTemplatePublishCard
           classId={classId}

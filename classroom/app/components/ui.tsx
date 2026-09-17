@@ -75,6 +75,31 @@ export function CardHeader({ title, hint }: { title: string; hint?: ReactNode })
   );
 }
 
+/** 카드 하나 안의 구획 — 머리글이 카드 머리(`<h2>`)보다 한 단계 아래(`<h3>`)다.
+ *  구획끼리의 괘선은 감싸는 쪽이 `divide-y` 로 긋는다. `id` 는 알림·배너가
+ *  이 자리로 스크롤할 때 쓰는 앵커다. */
+export function CardSection({
+  id,
+  title,
+  hint,
+  children,
+}: {
+  id?: string;
+  title: string;
+  hint?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section id={id} className="scroll-mt-4">
+      <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 px-4 pt-4">
+        <h3 className="text-[13.5px] font-semibold">{title}</h3>
+        {hint ? <span className="text-[12px] text-ink/45">{hint}</span> : null}
+      </div>
+      {children}
+    </section>
+  );
+}
+
 /** 카드 밖에 홀로 서는 섹션 머리글 — 제목만 `<h2>` 에 담고, 옆 텍스트(개수든
  *  문장이든)는 형제 `<span>` 으로 둔다(#321). 화면 낭독기는 머리글 목록을 훑어
  *  건너뛰는데, 부제 문장이 `<h2>` 안에 있으면 그 목록에 문장 하나가 머리글인 척
@@ -114,6 +139,12 @@ export function buttonClass(tone: ButtonTone = "secondary", size: "sm" | "md" = 
   // 버튼이 두 앱에서 크기가 갈렸었다.
   const pad = size === "sm" ? "px-3 py-1.5 text-xs" : "px-4 py-2";
   return `${BUTTON_BASE} ${BUTTON_TONE[tone]} ${pad}`;
+}
+
+/** 아이콘 하나만 든 정사각형 버튼 — 글자 버튼(md)과 같은 높이다. 뜻은 화면에
+ *  글자로 보이지 않으므로 부르는 쪽이 `aria-label`·`title`을 반드시 준다. */
+export function iconButtonClass(tone: ButtonTone = "secondary"): string {
+  return `${BUTTON_BASE} ${BUTTON_TONE[tone]} p-2`;
 }
 
 /** 상태 표시. 셋뿐이다 — 이 브랜드의 액센트가 둘이기 때문이다. */
