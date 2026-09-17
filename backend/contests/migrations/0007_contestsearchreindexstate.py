@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('contests', '0005_contest_submission_source_access_consent'),
+        ('contests', '0006_contest_view_count'),
     ]
 
     operations = [

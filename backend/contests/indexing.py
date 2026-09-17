@@ -13,7 +13,7 @@ Contest·그 카테고리·요구형태·개최자 표시 이름이 바뀌면 �
 모델이고 이 파일은 기능 앱(contests)에 있으므로, 참조 방향은 앱 경계 테스트가
 허용하는 쪽이다(`tests/test_app_boundaries.py` — 기능 앱이 공유층을 부르는
 것은 막히지 않는다. 반대 방향, 공유층이 기능 앱을 부르는 것만
-`APP-BOUNDARY-EXCEPTION`을 요구한다).
+경계 예외 표시를 요구한다).
 """
 
 from __future__ import annotations
