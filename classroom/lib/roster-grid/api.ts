@@ -1,13 +1,15 @@
 // 참여자 × 문제 격자 백엔드 호출 (#290).
 import { backendJson } from "@/lib/backend/client";
 
-// "no_api_key"(#346)는 그 클래스에 채점 키가 아예 없어 미채점 시도가 애초에
-// 채점 후보에도 못 드는 경우다 — 강사가 키를 넣기 전까지는 절대 바뀌지
-// 않는다는 점에서 정말 채점을 기다리는 "scoring"과 다르다.
+// "needs_setup"(#434, 예전 "no_api_key")은 그 클래스에 채점 키가 아예
+// 없거나 거부됐거나, 이 문제의 채점 모델이 거부돼(#403) 미채점 시도가
+// 애초에 채점 후보에도 못 드는 경우다 — 강사가 직접 손대기 전까지는 절대
+// 바뀌지 않는다는 점에서 정말 채점을 기다리는 "scoring"(예산 소진 포함)과
+// 다르다.
 export type GridCellStatus =
   | "passed"
   | "attempted_not_passed"
-  | "no_api_key"
+  | "needs_setup"
   | "scoring"
   | "not_submitted";
 

@@ -95,6 +95,7 @@ from .schemas import (
     ScoringModelCatalogOut,
     ScoringModelOut,
 )
+from . import pending_scoring
 from .events import publish_attempt_submitted
 from .scoring import check_scoring_key
 from .scoring_model_catalog import get_scoring_model_catalog
@@ -458,30 +459,18 @@ def _serialize_score(score: ClassroomScore) -> ClassroomScoreOut:
 
 
 def _pending_reason(score, class_obj: Class, problem: Problem) -> str | None:
-    """아직 채점되지 않은 시도가 왜 멈춰 있는지(#295, #346, #355, #403) —
-    참여자·강사 화면 모두 이 값 하나를 읽어 다르게 그린다. 채점 키가 없거나
-    벤더가 거절했으면 예산·모델과 무관하게 "no_api_key"다 —
-    `Class.scoring_key_unusable()`로 판정한다, `scoring._pending_submissions`
-    (스캔 후보)가 거르는 것과 **같은 기준**이어야 한다. 여기서 다른 기준을
-    쓰면 그 기준이 어긋나 실제로는 채점되지 않는 시도가 "정상 대기"로 잘못
-    보일 수 있다. 키는 멀쩡한데 이 문제의 채점 모델을 그 키로 못 쓰면
-    "model_rejected"(#403)다. **키가 거부된 것과 아예 없는 것, 그리고 모델이
-    거부된 것을 참여자 화면에서는 구별하지 않는다**(#355 AC, #403 AC "참여자
-    에게는 기존 「채점하지 못함」 안내를 보인다") — 강사의 계정·설정 문제가
-    참여자에게 새어 나가지 않는다, 강사 전용 화면(설정·시도 목록·클래스
-    상세 배너)만 다르게 말한다. 키·모델 둘 다 멀쩡한데 예산이 바닥났으면
-    "budget_exhausted"(#295)다. 넷 다 아니면 스캔이 정말 채점을 기다리는
-    중이라 `None`(평범한 "채점 중")이다."""
+    """아직 채점되지 않은 시도가 왜 멈춰 있는지(#295, #346, #355, #403, #434) —
+    참여자·강사 화면 모두 이 값 하나를 읽어 다르게 그린다.
+    `classroom.pending_scoring.pending_reason`에 그대로 맡긴다 — 스캔 후보
+    (`scoring.pending_submissions`)가 거르는 것과 **같은 기준**이어야 한다는
+    불변식이 이제 그 모듈 하나에 산다. 셋이 겹치면 키(없음·거부) → 모델
+    거부 → 예산 소진 순서로 하나만 말한다. **키가 거부된 것과 아예 없는
+    것, 그리고 모델이 거부된 것을 참여자 화면에서는 구별하지 않는다**
+    (#355 AC, #403 AC "참여자에게는 기존 「채점하지 못함」 안내를 보인다")
+    — 강사의 계정·설정 문제가 참여자에게 새어 나가지 않는다, 강사 전용
+    화면(설정·시도 목록·클래스 상세 배너)만 다르게 말한다."""
 
-    if score is not None:
-        return None
-    if class_obj.scoring_key_unusable():
-        return "no_api_key"
-    if problem.scoring_model_rejected_at is not None:
-        return "model_rejected"
-    if class_obj.token_budget_exhausted():
-        return "budget_exhausted"
-    return None
+    return pending_scoring.pending_reason(score, class_obj, problem)
 
 
 def _serialize_classroom_submission(
@@ -1010,20 +999,22 @@ def _cell_status(
     submissions: list[ClassroomSubmission],
     required_item_ids: set[int],
     class_obj: Class,
+    problem: Problem,
     *,
     syntax_check_enabled: bool = True,
 ) -> str:
     """이 참여자·이 문제 한 칸의 상태 — **통과 이력**을 그린다(최신 시도가
     아니다, #290 AC). 우선순위는 이 순서다: 한 번이라도 통과했으면 이후
     시도가 미통과여도 "passed"다(#289/#288과 같은 OR 규칙). 통과가 없고
-    아직 채점을 기다리는 시도가 있으면, 그 클래스의 키를 쓸 수 없을 때는
-    "no_api_key"(#346, 키가 아예 없든 #355로 거부됐든 강사 본인이 손대기
-    전까지는 절대 안 바뀐다는 것을 구별해 보여준다 — 이 격자는 강사 전용
-    화면이지만 참여자별 칸 하나하나까지 "거부됨"을 따로 말할 자리는 아니다,
-    강사는 클래스 상세 배너·설정 화면에서 이미 그 사실을 본다) — 키를 쓸 수
-    있으면(예산 소진 포함) "scoring"(아직 뒤집힐 여지가 있다는 뜻이다). 전부
-    채점됐는데 하나도 통과가 없으면 "attempted_not_passed". 시도 자체가
-    없으면 "not_submitted"."""
+    아직 채점을 기다리는 시도가 있으면, `pending_scoring.needs_setup`이
+    참이면 "needs_setup"(#346·#403, 키가 아예 없거나 #355로 거부됐거나
+    이 문제의 모델이 거부됐다 — 셋 다 강사 본인이 손대기 전까지는 절대
+    안 바뀐다는 것을 하나로 묶어 보여준다, #434 — 이 격자는 강사 전용
+    화면이지만 참여자별 칸 하나하나까지 세 사유를 따로 말할 자리는 아니다,
+    강사는 클래스 상세 배너·설정 화면·문제별 제출 현황에서 이미 그 사실을
+    본다) — 아니면(예산 소진뿐이면) "scoring"(예산을 채우면 저절로 풀려
+    아직 뒤집힐 여지가 있다는 뜻이다). 전부 채점됐는데 하나도 통과가 없으면
+    "attempted_not_passed". 시도 자체가 없으면 "not_submitted"."""
 
     if not submissions:
         return "not_submitted"
@@ -1035,7 +1026,7 @@ def _cell_status(
     ):
         return "passed"
     if any(getattr(s, "classroom_score", None) is None for s in submissions):
-        return "no_api_key" if class_obj.scoring_key_unusable() else "scoring"
+        return "needs_setup" if pending_scoring.needs_setup(class_obj, problem) else "scoring"
     return "attempted_not_passed"
 
 
@@ -1090,6 +1081,7 @@ def get_roster_grid(request: HttpRequest, class_id: int):
                     submissions_by_key.get((problem.id, member.id), []),
                     required_ids_by_problem[problem.id],
                     class_obj,
+                    problem,
                     syntax_check_enabled=syntax_check_enabled_by_problem[problem.id],
                 ),
             )

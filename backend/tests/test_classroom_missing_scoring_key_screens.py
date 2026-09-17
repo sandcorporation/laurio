@@ -76,14 +76,17 @@ def test_instructor_submission_list_shows_no_api_key_reason(client, db):
     assert rows[0]["pending_reason"] == "no_api_key"
 
 
-def test_roster_grid_cell_shows_no_api_key_status(client, db):
+def test_roster_grid_cell_shows_needs_setup_status(client, db):
+    """격자 칸은 "no_api_key"가 아니라 넓어진 "needs_setup"이다(#434) — 모델
+    거부도 같은 값으로 묶인다(`tests/test_classroom_pending_scoring.py`)."""
+
     ctx = _setup_submission_without_key(client)
 
     grid = roster_grid(client, ctx["instructor"]["access"], ctx["class_id"])
 
     member = next(m for m in grid["members"] if not m["is_instructor"])
     cell = next(c for c in member["cells"] if c["problem_id"] == ctx["problem_id"])
-    assert cell["status"] == "no_api_key"
+    assert cell["status"] == "needs_setup"
 
 
 def test_no_api_key_takes_priority_over_budget_exhausted(client, db):

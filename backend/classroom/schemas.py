@@ -455,14 +455,16 @@ class ClassroomSubmissionOut(Schema):
     #: 이 시도 하나가 통과인가 — 채점된 필수 체크리스트 항목을 전부
     #: 충족했는가(#288). 미채점("pending")이면 항상 거짓이다.
     passed: bool = False
-    #: "no_api_key" | "budget_exhausted" | "model_rejected" | `None`. `status`가
-    #: "pending"일 때만 채워진다 — 강사가 채점 키를 아직 설정하지 않았으면
-    #: (#346) 예산과 무관하게 "no_api_key", 키는 있는데 예산이 바닥났으면
-    #: (#295) "budget_exhausted", 키는 멀쩡한데 이 문제의 채점 모델을 그
-    #: 키로 못 쓰면(#403) "model_rejected"다. 셋 다 참여자가 스스로 어쩔
-    #: 수 없는 사유라 문구도 "당신 잘못이 아니고 다시 낼 필요도 없다"는 같은
-    #: 모양을 낸다(참여자 화면은 "model_rejected"를 "no_api_key"와 같은
-    #: 안내로 보여준다 — #403 AC "참여자에게는 기존 「채점하지 못함」 안내를
+    #: "no_api_key" | "budget_exhausted" | "model_rejected" | `None` —
+    #: `classroom.pending_scoring.pending_reason`이 이 우선순위(키 → 모델 →
+    #: 예산)로 정한다(#434). `status`가 "pending"일 때만 채워진다 — 강사가
+    #: 채점 키를 아직 설정하지 않았으면(#346) 예산과 무관하게 "no_api_key",
+    #: 키는 멀쩡한데 이 문제의 채점 모델을 그 키로 못 쓰면(#403)
+    #: "model_rejected", 키·모델 둘 다 멀쩡한데 예산이 바닥났으면(#295)
+    #: "budget_exhausted"다. 셋 다 참여자가 스스로 어쩔 수 없는 사유라
+    #: 문구도 "당신 잘못이 아니고 다시 낼 필요도 없다"는 같은 모양을 낸다
+    #: (참여자 화면은 "model_rejected"를 "no_api_key"와 같은 안내로
+    #: 보여준다 — #403 AC "참여자에게는 기존 「채점하지 못함」 안내를
     #: 보인다") — 강사 화면만 셋을 다르게 말하며, 강사가 무엇을 해야
     #: 풀리는가(키를 넣는다/예산을 늘린다/모델을 바꾼다)가 다를 뿐이다.
     pending_reason: str | None = None
@@ -518,13 +520,15 @@ class ClassroomProblemStatsOut(Schema):
 
 class ClassroomGridCellOut(Schema):
     problem_id: int
-    #: "passed" | "attempted_not_passed" | "no_api_key" | "scoring" |
+    #: "passed" | "attempted_not_passed" | "needs_setup" | "scoring" |
     #: "not_submitted" — 통과 이력을 그린다(최신 시도가 아니다, #290 AC).
     #: 우선순위는 이 순서대로다: 한 번이라도 통과했으면 다른 시도의 결과와
-    #: 무관하게 "passed"다. "no_api_key"는 그 클래스에 채점 키가 아예 없어
-    #: 미채점 시도가 애초에 후보에도 못 드는 경우다(#346) — "scoring"(정말
-    #: 채점을 기다리는 중)과 다르게, 이 셀은 강사가 채점 키를 넣기 전까지는
-    #: 절대 바뀌지 않는다.
+    #: 무관하게 "passed"다. "needs_setup"(#434)은 그 클래스에 채점 키가
+    #: 아예 없거나 거부됐거나(#346, #355), 이 문제의 채점 모델이 거부돼
+    #: (#403) 미채점 시도가 애초에 후보에도 못 드는 경우다 —
+    #: "scoring"(정말 채점을 기다리는 중, 예산 소진 포함)과 다르게, 이
+    #: 셀은 강사가 직접 손대기 전까지는 절대 바뀌지 않는다
+    #: (`classroom.pending_scoring.needs_setup`).
     status: str
 
 
