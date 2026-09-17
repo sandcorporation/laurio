@@ -95,3 +95,35 @@ class ContestsConfig(AppConfig):
         from .submission_retention import DEMO_VIDEO_RETENTION_PURGE_SCAN
 
         register_scan(DEMO_VIDEO_RETENTION_PURGE_SCAN)
+
+        # 공모전 검색 전체 재색인 스캔(#450, 부모 #444 스펙) — 단건 색인은
+        # 아래 신호 수신자가 저장·변경마다 큐에 넣지만, 이 스캔이 매일 전체를
+        # 다시 맞추는 안전망이다.
+        from .search_scan import CONTEST_SEARCH_REINDEX_SCAN
+
+        register_scan(CONTEST_SEARCH_REINDEX_SCAN)
+
+        # 공모전 검색 색인 맞추기(#450) — Contest 저장·요구형태 변경·개최자
+        # 표시 이름 변경마다 그 공모전(들)을 다시 색인 큐에 넣는다
+        # (`contests/indexing.py` 모듈 docstring 참고).
+        from django.db.models.signals import m2m_changed, post_save
+
+        from . import indexing
+        from .models import Contest
+
+        post_save.connect(
+            indexing.contest_saved, sender=Contest, dispatch_uid="contests.indexing.contest_saved"
+        )
+        m2m_changed.connect(
+            indexing.contest_deliverable_types_changed,
+            sender=Contest.deliverable_types.through,
+            dispatch_uid="contests.indexing.deliverable_types_changed",
+        )
+
+        from accounts.models import SponsorProfile
+
+        post_save.connect(
+            indexing.sponsor_display_name_saved,
+            sender=SponsorProfile,
+            dispatch_uid="contests.indexing.sponsor_display_name_saved",
+        )

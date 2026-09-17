@@ -356,11 +356,11 @@ llm_scoring`(#274)에 이어 `core.repository_adapters`(GitHub 저장소 clone·
 심사 비교·공개 프로필이 그 URL을 자료 목록에 이미 실어 보낸다 — 화면이 별도로 발급받지
 않는다.
 
-## 스스로 도는 일 — 스캔 25개
+## 스스로 도는 일 — 스캔 26개
 
 **시간은 시임이 아니라 주입 가능한 의존성이다**(ADR-0003). 시각이 지났다고 상태가 저절로
-바뀌지 않는다 — 스캔이 조건부 UPDATE 로 옮긴다. 등록부가 곧 beat 스케줄이고, 전부 60초
-주기다.
+바뀌지 않는다 — 스캔이 조건부 UPDATE 로 옮긴다. 등록부가 곧 beat 스케줄이고, 대부분 60초
+주기다 — 유일한 예외는 검색 전체 재색인(하루 주기, 아래).
 
 | 무엇을 | 스캔 |
 | --- | --- |
@@ -372,6 +372,7 @@ llm_scoring`(#274)에 이어 `core.repository_adapters`(GitHub 저장소 clone·
 | 알림 | `notification-dispatch-deferred` · `notification-reclaim-stuck` · `deadline-reminder` · `judging-end-reminder` · `distribution-final-warning` · `award-result-notice-recovery` · `distribution-result-notice-recovery` |
 | 개인정보 | `identity-dormancy-purge` · `retained-identity-purge` |
 | 자료 | `demo-video-retention-purge` |
+| 검색 | `contest-search-reindex`(#450 — 하루 주기, 다른 스캔과 다르다. 저장·변경 시점의 단건 색인은 스캔이 아니라 Celery 태스크 `contests.index_contest`가 맡는다, 아래 「바깥 세계」) |
 | 데모 | `scheduled-state-demo` |
 
 **스캔이 아닌 정해진 시각의 작업이 하나 있다 — 매일 새벽 2시(서울) DB 백업.** beat 가
@@ -566,12 +567,21 @@ fake 이거나 임포트되지 않으면 부팅 자체를 거부한다** — 컨
 | 스토리지 | `STORAGE_BACKEND` |
 | 강의실 실시간 신호(#380, ADR-0046 — 벤더 연동이 아니라 우리 자신의 Redis 위에서 도는 코드, dev·CI 는 결정적 fake) | `EVENT_BUS_ADAPTER_MODE` |
 
-**공모전 검색(#449, 부모 #444 스펙)은 이 열둘과 다르다** — `SEARCH_ADAPTER_MODE`가
+**공모전 검색(#449/#450, 부모 #444 스펙)은 이 열둘과 다르다** — `SEARCH_ADAPTER_MODE`가
 어댑터를 고르지만(dev·CI·pytest 기본값 `fake`, `contests.search.FakeContestSearchAdapter`,
 DB 포함 검색), **아직 배포 부팅 가드가 없다.** 실물 어댑터(dotted path
-`contests.search_opensearch.OpenSearchContestSearch`, 접속 주소 `OPENSEARCH_URL`)가
-없는 지금 가드를 걸면 staging 이 이 커밋만으로 부팅을 거부하기 때문이다 — 실물 어댑터와
-가드는 같은 커밋에서 함께 켠다(#451, #450 이 어댑터를 만든다).
+`contests.search_opensearch.OpenSearchContestSearch`, 접속 주소 `OPENSEARCH_URL`,
+#450이 만들었다 — nori 분석기, 판(backing index) + 별칭으로 끊김 없는 전체
+재색인, 연결 실패·시간 초과 시 DB 검색으로 물러남)는 있지만, 가드를 걸면
+staging이 이 커밋만으로 부팅을 거부하기 때문이다 — 가드는 #451이 켠다(같은
+커밋에서 staging·prod 배포도 함께 간다).
+
+**색인은 두 경로로 맞는다.** 저장·변경(Contest 저장, 요구형태 M2M 변경,
+`SponsorProfile.display_name` 변경)마다 Celery 태스크 `contests.index_contest`가
+트랜잭션 커밋 뒤 그 공모전 하나만 다시 색인한다(dev·CI는 워커가 없어 큐에
+쌓이기만 한다, #40) — 안전망으로 스캔 `contest-search-reindex`가 매일 전체를
+다시 만든다(위 「스스로 도는 일」). `manage.py rebuild_contest_search_index`로
+사람이 직접 한 번 돌릴 수도 있다.
 
 **Django admin 은 없다**(ADR-0019). 모델 행을 직접 편집할 수 있는 한 감사 추적에 우회로가
 남는다.

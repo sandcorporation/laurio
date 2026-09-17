@@ -96,6 +96,26 @@ def configure_sentry() -> bool:
     return True
 
 
+def capture_handled_exception(exc: BaseException, **tags: str) -> None:
+    """이미 처리했지만(500으로 튀지 않는다) 운영자가 알아야 할 예외를 보낸다.
+
+    `drop_expected_error`(`before_send`)는 **처리되지 않은** 예외·5xx만 거르는
+    판정이라, 여기처럼 코드가 이미 잡아서 물러난(fallback) 경로에는 적용되지
+    않는다 — `capture_exception`을 직접 부르지 않으면 이런 실패는 GlitchTip에
+    영영 남지 않는다(검색 엔진이 죽어 DB 검색으로 물러난 사실을 아무도 모르게
+    되는 것이 `contests.search.search_contests`가 이 함수를 쓰는 이유다, #450).
+
+    `set_sentry_user_id`와 같은 이유로 SDK가 꺼져 있으면(DSN 없는 dev·CI)
+    무해하게 지나간다.
+    """
+
+    try:
+        import sentry_sdk
+    except ModuleNotFoundError:  # pragma: no cover - 의존성은 항상 설치된다
+        return
+    sentry_sdk.capture_exception(exc, tags=tags or None)
+
+
 def set_sentry_user_id(user_id: int | str | None) -> None:
     """이 요청의 사용자를 내부 id 하나로만 표시한다. SDK 가 꺼져 있으면 무해하다."""
 

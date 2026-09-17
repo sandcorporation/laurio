@@ -47,6 +47,11 @@ dependencies = [
     # 약 12MB 커진다, #409).
     "tree-sitter>=0.26.0",
     "tree-sitter-language-pack>=1.20.0",
+    # 공모전 검색 실물 어댑터(#450, `contests/search_opensearch.py`)의 유일한
+    # 벤더 클라이언트다. fake 어댑터(`contests.search.FakeContestSearchAdapter`)는
+    # 이 패키지 없이 DB만으로 돌아가므로 dev·CI 는 이 의존성을 네트워크로 쓰지
+    # 않는다 — 실물 OpenSearch에 붙을 때만 TCP 를 연다.
+    "opensearch-py>=2.8.0",
 ]
 
 [tool.uv]

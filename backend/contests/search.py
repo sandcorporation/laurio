@@ -1,12 +1,27 @@
-"""공모전 검색 모듈 — 어댑터 방식 (#449, 부모 #444 스펙, ADR-0007).
+"""공모전 검색 모듈 — 어댑터 방식 (#449/#450, 부모 #444 스펙, ADR-0007).
 
 검색을 다른 외부 연동(스토리지·LLM·이벤트 버스)과 같은 모양으로 갈아끼운다 —
-`SEARCH_ADAPTER_MODE` 설정이 어댑터를 고른다. **이 티켓은 fake(DB 포함 검색)만
-만든다** — 실물 어댑터(dotted path `contests.search_opensearch.
-OpenSearchContestSearch`, 접속 주소는 `OPENSEARCH_URL`)·커밋 후 색인 태스크·매일
-재색인 스캔은 #450이 만들고, 배포 부팅 가드는 #451이 켠다(설정 이름은 코디네이터가
-2026-09-17에 고정했다 — staging·prod `.env`가 이미 이 이름을 쓴다, `config/settings.py`
-주석 참고).
+`SEARCH_ADAPTER_MODE` 설정이 어댑터를 고른다. #449는 fake(DB 포함 검색)만
+만들었다 — 실물 어댑터(dotted path `contests.search_opensearch.
+OpenSearchContestSearch`, 접속 주소는 `OPENSEARCH_URL`, #450이 만든다)·커밋 후
+색인 태스크(`contests.tasks.index_contest`)·매일 재색인 스캔(`contest-search-
+reindex`)은 이 파일이 아니라 각각 `contests/search_opensearch.py`·
+`contests/tasks.py`·`contests/apps.py`에 산다. 배포 부팅 가드는 #451이 켠다
+(설정 이름은 코디네이터가 2026-09-17에 고정했다 — staging·prod `.env`가 이미 이
+이름을 쓴다, `config/settings.py` 주석 참고).
+
+**물러나기(#450, 부모 스펙 "실물 어댑터가 연결 실패·시간 초과로 실패하면...")도
+여기 산다.** `search_contests()`가 `get_search_adapter().search(...)`를 감싼다 —
+실물 어댑터가 연결 실패·시간 초과를 겪으면 `ContestSearchUnavailable`을 던지고,
+이 함수가 그것을 잡아 DB 포함 검색(제목·설명만, fake의 전체 가중치와 다르다)으로
+답하며 오류 수집기(`core.observability.capture_handled_exception`)에 남긴다.
+`contests.api.list_contests`는 `get_search_adapter().search(...)`를 직접 부르지
+않고 이 함수를 거친다 — 그래야 실물 어댑터의 장애가 목록 API를 그대로 죽이지
+않는다. fake 어댑터로 이 경로를 테스트할 때는 `get_search_adapter`가 돌려주는
+인스턴스의 `search`를 몽키패치해 `ContestSearchUnavailable`을 직접 던지게
+한다 — fake 자체에는 장애를 흉내내는 별도 설정을 두지 않는다(다른
+`*_FAKE_RAISING_*` 설정들과 달리, 이 실패는 네트워크 계층의 일이지 이
+모듈이 표현할 시나리오가 아니다).
 
 인터페이스는 셋이다 — 실물 어댑터가 목록 API를 건드리지 않고 그대로 슬롯인할
 수 있도록 여기서 고정한다:
@@ -39,6 +54,16 @@ from django.conf import settings
 from core.adapters import resolve_adapter
 
 from .models import Contest
+
+
+class ContestSearchUnavailable(Exception):
+    """실물 검색 어댑터가 연결 실패·시간 초과로 응답하지 못했다 (#450).
+
+    `contests.search_opensearch.OpenSearchContestSearch`가 이 예외를 던지고,
+    `search_contests()`가 잡아 DB 포함 검색으로 물러난다. fake 어댑터는 이
+    예외를 스스로 던지지 않는다 — 테스트가 필요하면 `get_search_adapter`가
+    돌려주는 인스턴스의 `search`를 몽키패치해 직접 던진다.
+    """
 
 
 @runtime_checkable
@@ -150,3 +175,58 @@ def get_search_adapter() -> ContestSearchAdapter:
             "#450이 만든다."
         ),
     )
+
+
+def _fallback_score(contest: Contest, needle: str) -> int:
+    """물러나기 전용 — 제목·설명만 본다(부모 스펙 "DB 포함 검색(제목·설명)").
+
+    카테고리·요구형태·개최자 이름까지 보는 `_score()`(fake의 전체 가중치)와
+    다르다 — 물러나기는 검색 엔진이 죽었을 때의 최소한의 안전망이지, fake
+    어댑터가 흉내내는 정상 경로가 아니다.
+    """
+
+    score = 0
+    if needle in contest.title.lower():
+        score += _WEIGHT_TITLE
+    if needle in contest.description.lower():
+        score += _WEIGHT_DESCRIPTION
+    return score
+
+
+def _db_fallback_search(
+    *, query: str, category: int | None, deliverable_type: int | None
+) -> list[int]:
+    needle = query.strip().lower()
+    if not needle:
+        return []
+
+    queryset = Contest.objects.filter(status__in=Contest.Status.PUBLICLY_VISIBLE.statuses)
+    if category is not None:
+        queryset = queryset.filter(category_id=category)
+    if deliverable_type is not None:
+        queryset = queryset.filter(deliverable_types__id=deliverable_type)
+
+    scored = ((contest.id, _fallback_score(contest, needle)) for contest in queryset)
+    matched = [(contest_id, score) for contest_id, score in scored if score > 0]
+    matched.sort(key=lambda pair: (-pair[1], pair[0]))
+    return [contest_id for contest_id, _score_value in matched]
+
+
+def search_contests(
+    *,
+    query: str,
+    category: int | None = None,
+    deliverable_type: int | None = None,
+) -> list[int]:
+    """목록 API가 실제로 부르는 진입점(#450) — 어댑터를 고르고, 죽어 있으면 DB로
+    물러난다. 모듈 docstring 「물러나기」 참고."""
+
+    try:
+        return get_search_adapter().search(
+            query=query, category=category, deliverable_type=deliverable_type
+        )
+    except ContestSearchUnavailable as exc:
+        from core.observability import capture_handled_exception
+
+        capture_handled_exception(exc, component="contest_search_fallback")
+        return _db_fallback_search(query=query, category=category, deliverable_type=deliverable_type)

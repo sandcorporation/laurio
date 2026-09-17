@@ -1001,6 +1001,13 @@ if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(SELLER_ADAPTER_MODE):
 # #450 이 없는 상태로 staging 에 나가지 않도록 통합은 셋을 함께 머지한다.
 SEARCH_ADAPTER_MODE = _env("SEARCH_ADAPTER_MODE", "fake")
 
+# 실물 어댑터(`contests.search_opensearch.OpenSearchContestSearch`, #450)의 접속
+# 주소다. staging·prod는 `http://search:9200`(compose 서비스 이름 `search`,
+# #451이 그 서비스를 띄운다). dev `search` 프로필(docker/compose.dev.yaml)은
+# 호스트 포트로도 내므로 컨테이너 밖(pytest 없는 수동 확인·live 테스트)에서는
+# `CODEMIT_SEARCH_PORT`로 붙는다 — 기본값은 컴포즈 내부망 주소다.
+OPENSEARCH_URL = _env("OPENSEARCH_URL", "http://127.0.0.1:9200")
+
 # --- Distribution (#16, ADR-0003/0004/0006) -------------------------------------------
 #
 # 배분 대기 기간은 더 이상 여기 없다(#78, ADR-0023) —

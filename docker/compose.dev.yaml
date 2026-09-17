@@ -102,6 +102,54 @@ services:
              mc anonymous set download local/codemit-dev-public-images"
     restart: "no"
 
+  # 공모전 검색 실물 어댑터(`contests.search_opensearch.OpenSearchContestSearch`,
+  # #450, 부모 #444 스펙)가 붙는 OpenSearch. **기본 기동에 없다** — celery와 같은
+  # 이유로 프로필 뒤에 둔다(부모 스펙 "필요할 때 dev compose 프로필로 실물 검색
+  # 엔진을 켜 보고 싶다"):
+  #
+  #   docker compose -f docker/compose.dev.yaml --profile search up -d
+  #
+  # 단일 노드·JVM 힙 1GB·컨테이너 메모리 한도 2GB(`mem_limit`)다. 보안 플러그인은
+  # `DISABLE_SECURITY_PLUGIN`으로 끈다(dev는 인증 없이 붙는다 — staging·prod도
+  # 같은 값이다, #451). **호스트 포트를 낸다** — staging·prod(#451, 내부망
+  # 전용)와 다른 점이다: live 테스트(`tests/test_contest_search_opensearch_live.py`)와
+  # `rebuild_contest_search_index` 관리 명령이 컨테이너 밖(호스트 uv run)에서
+  # 붙어야 db·redis·minio와 같은 이유다.
+  #
+  # OpenSearch는 호스트의 `vm.max_map_count >= 262144`를 요구한다(공식 권장값) —
+  # 이 값은 커널 전역이라 compose가 컨테이너 안에서 올릴 수 없다(권한 없는
+  # 컨테이너의 sysctl 쓰기는 거부된다). 모자라면 컨테이너가 부팅 로그에 남기고
+  # 죽는다 — `sysctl vm.max_map_count`로 먼저 확인한다.
+  search:
+    profiles: ["search"]
+    build:
+      context: ..
+      dockerfile: docker/search.Dockerfile
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms1g -Xmx1g"
+    mem_limit: 2g
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - "${CODEMIT_SEARCH_PORT:-19200}:9200"
+    volumes:
+      # 색인은 DB에서 언제든 다시 만들 수 있다(부모 스펙) — 그래도 매번
+      # 재색인하지 않도록 이름 있는 볼륨은 남긴다. 지우고 싶으면 `down -v`
+      # (또는 `--profile search down -v`)로 다른 볼륨과 함께 걷는다.
+      - codemit-dev-search:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:9200/_cluster/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
   backend:
     build:
       context: ..
@@ -519,3 +567,4 @@ volumes:
   codemit-dev-classroom-next:
   codemit-dev-classroom-pnpm-store:
   codemit-dev-minio:
+  codemit-dev-search:

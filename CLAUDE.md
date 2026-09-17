@@ -24,6 +24,7 @@ cd backend && uv run pytest                           # 테스트
 | 운영자 앱(`operator/`, #63) | `53001` | 3000 | `CODEMIT_OPERATOR_WEB_PORT` |
 | 강의실 앱(`classroom/`, #276) | `53002` | 3000 | `CODEMIT_CLASSROOM_WEB_PORT` |
 | 이벤트 서비스(`events`, #379, ADR-0046) | `58001` | 8001 | `CODEMIT_EVENTS_PORT` |
+| 검색 엔진(`search`, dev `search` 프로필, #450) | `19200` | 9200 | `CODEMIT_SEARCH_PORT` |
 
 **이벤트 서비스는 `backend`와 같은 이미지를 ASGI로 띄우는 별도 프로세스다**
 (ADR-0046) — 강의실이 새로고침 없이 화면을 갱신하는 SSE 엔드포인트
@@ -364,6 +365,27 @@ docker compose -f docker/compose.dev.yaml up -d
 ```bash
 docker compose -f docker/compose.dev.yaml --profile celery up -d
 ```
+
+**공모전 검색의 실물 어댑터(OpenSearch, #450, 부모 #444 스펙)도 dev 기본 기동에
+없다.** `SEARCH_ADAPTER_MODE` 기본값은 fake(DB 포함 검색, `contests.search.
+FakeContestSearchAdapter`)라 실물 없이도 `/api/contests?q=...`가 그대로 돈다 —
+`search` 프로필은 실물 어댑터(nori 한국어 분석기, `docker/search.Dockerfile`)를
+직접 확인하고 싶을 때만 켠다:
+
+```bash
+docker compose -f docker/compose.dev.yaml --profile search up -d
+SEARCH_ADAPTER_MODE=contests.search_opensearch.OpenSearchContestSearch \
+  OPENSEARCH_URL=http://127.0.0.1:${CODEMIT_SEARCH_PORT:-19200} \
+  uv run python manage.py rebuild_contest_search_index
+```
+
+단일 노드·JVM 힙 1GB·컨테이너 메모리 한도 2GB(`mem_limit`)이고 보안 플러그인은
+끈다. **호스트의 `vm.max_map_count`가 262144 이상이어야 뜬다**(OpenSearch
+공식 권장값, 커널 전역이라 컨테이너 안에서 올릴 수 없다) — `sysctl
+vm.max_map_count`로 먼저 확인한다. `tests/test_contest_search_opensearch_live.py`
+(`@live_vendor`, `OPENSEARCH_URL`이 있을 때만 돈다, CI는 건너뛴다)가 이 실물
+어댑터를 실제로 친다 — 한국어 조사가 달라도 찾아지는지, 제목 가중이 설명보다
+높은지, 재색인(`rebuild`) 중에도 검색이 끊기지 않는지(별칭 원자적 교체) 확인한다.
 
 ## 운영
 

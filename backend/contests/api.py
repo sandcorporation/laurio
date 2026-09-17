@@ -29,7 +29,7 @@ from contests.images import (
     reorder_image as reorder_contest_image_for,
     request_upload_url as request_contest_image_upload_url_for,
 )
-from contests.search import get_search_adapter
+from contests.search import search_contests
 from contests.sponsorship import sponsored_contest_queryset
 from accounts.models import SponsorProfile
 from accounts.sanitize import sanitize_free_text
@@ -540,7 +540,7 @@ def list_contests(request: HttpRequest, filters: Query[ContestListFilters]):
 
     matched_ids: list[int] | None = None
     if filters.q:
-        matched_ids = get_search_adapter().search(
+        matched_ids = search_contests(
             query=filters.q,
             category=filters.category,
             deliverable_type=filters.deliverable_type,
