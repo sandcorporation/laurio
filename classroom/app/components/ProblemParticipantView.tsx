@@ -31,7 +31,7 @@ import {
   buttonClass,
 } from "@/app/components/ui";
 import type { UploadStatus } from "@/lib/submissions/use-source-upload";
-import type { ClassroomSubmissionRow } from "@/lib/submissions/api";
+import type { ClassroomSubmissionRow, SubmitBlockedReason } from "@/lib/submissions/api";
 import { attemptIdFromHash, splitAttempts } from "@/lib/submissions/attempt-fold";
 import type { GradingStrictness, SubmissionFormat } from "@/lib/problems/api";
 import { gradingGuidelineText, gradingStrictnessLabel } from "@/lib/problems/grading-guideline";
@@ -56,17 +56,12 @@ export function judgedByLabel(judgedBy: "parser" | "ai"): string {
 
 type InteractiveProps = {
   interactive: true;
-  memberExpelled: boolean;
-  /** 클래스가 보관됐는가(#294, #338) — 참이면 내보내진 사람과 같은 모양으로
-   *  제출 수단을 숨기고 수업이 끝났다는 이유를 보여준다. 보관과 내보냄이
-   *  동시에 참이어도 보관 쪽 문구가 우선한다 — "수업 자체가 끝났다"가 더
-   *  근본적인 이유이고, 되돌리면(#294) 내보냄 여부만으로 다시 갈린다. */
-  archived: boolean;
-  /** 강사가 이 문제를 숨겼는가(#405) — 참이면 제출 칸 대신 「강사가 숨긴
-   *  문제라 새로 낼 수 없습니다」를 보인다. `archived`·`memberExpelled`보다
-   *  더 좁은 사유라 그 둘 뒤에 확인한다 — 클래스가 끝났거나 참여자가
-   *  쫓겨난 것이 이 문제 하나만의 사정보다 더 근본적이다. */
-  problemHidden: boolean;
+  /** 지금 새로 낼 수 없는 이유 하나, 낼 수 있으면 `null`(#439) — 우선순위
+   *  (보관 → 내보냄 → 숨김)는 백엔드가 이미 정해서 내려주므로 여기서 다시
+   *  계산하지 않는다. "viewing_as_instructor"는 이 폼이 신경 쓰지 않는다 —
+   *  강사가 학생 화면으로 보는 경우는 위 `InstructorViewingBanner`가 이미
+   *  알리고, 실제 제출은 호출부의 핸들러가 따로 막는다. */
+  submitBlockedReason: SubmitBlockedReason;
   repositoryUrl: string;
   onRepositoryUrlChange: (value: string) => void;
   onRepositorySubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -483,9 +478,7 @@ function InteractiveSubmissionForm(
   props: InteractiveProps & { submissionFormats: SubmissionFormat[] },
 ) {
   const {
-    memberExpelled,
-    archived,
-    problemHidden,
+    submitBlockedReason,
     repositoryUrl,
     onRepositoryUrlChange,
     onRepositorySubmit,
@@ -507,18 +500,19 @@ function InteractiveSubmissionForm(
 
   return (
     <>
-      {archived ? (
+      {submitBlockedReason === "archived" ? (
         // 보관된 클래스는 내보내진 사람과 같은 모양으로 제출 수단을 숨긴다
         // (#294, #338 AC) — 지난 시도는 위 "내 시도" 카드에 그대로 남아
         // 있다. 되돌리면(POST .../unarchive) 이 분기를 벗어나 폼이 다시
-        // 보인다.
+        // 보인다. 백엔드가 이미 보관 → 내보냄 → 숨김 순서로 이유를 하나만
+        // 정해 주므로(#439) 여기서는 그 값을 그대로 분기한다.
         <ErrorNote>
           <span data-testid="class-archived-note">
             이 클래스는 보관되어 새 제출을 받지 않습니다. 지난 시도와 판정은 계속 볼 수
             있습니다.
           </span>
         </ErrorNote>
-      ) : memberExpelled ? (
+      ) : submitBlockedReason === "expelled" ? (
         // 내보내진 사람에게는 제출 수단 자체를 보이지 않고, 왜
         // 낼 수 없는지를 말해 준다(#300 AC) — 지난 시도는 위
         // "내 시도" 카드에 그대로 남아 있다. 「다시 낼 수 있다」 안내는 이
@@ -530,7 +524,7 @@ function InteractiveSubmissionForm(
             계속 볼 수 있습니다.
           </span>
         </ErrorNote>
-      ) : problemHidden ? (
+      ) : submitBlockedReason === "hidden" ? (
         // 강사가 이 문제를 숨겼다(#405) — 여기 닿았다는 것 자체가 이미 한
         // 번은 냈다는 뜻이다(안 낸 참여자는 애초에 이 화면 자체가 404다).
         // 지난 시도와 판정은 위 "내 시도" 카드에 그대로 남는다.

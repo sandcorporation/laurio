@@ -45,8 +45,10 @@ from django.conf import settings
 
 # APP-BOUNDARY-EXCEPTION: 공모전 모양(contest_id를 품는다) target_ref를 판정하려면 Award 존재 여부를 봐야 한다(ADR-0039)
 from awards.services import sponsor_user_id_if_awarded
-# APP-BOUNDARY-EXCEPTION: 강의실 모양(problem_id를 품는다) target_ref를 판정하려면 그 Problem이 실제로 있는지 확인해야 한다(#286, ADR-0039)
-from classroom.models import Problem as ClassroomProblem
+# APP-BOUNDARY-EXCEPTION: 강의실 모양(problem_id를 품는다) target_ref를 판정하려면 그 Problem이 실제로 있는지, 그 참여자가 지금 낼 수 있는지 확인해야 한다(#286, #439, ADR-0039)
+from classroom.models import ClassMember, Problem as ClassroomProblem
+# APP-BOUNDARY-EXCEPTION: 위와 같은 이유 — 낼 수 있는가(보관·내보냄·숨김)를 여기서 다시 판정하지 않고 참여 정책 모듈에 묻는다(#439)
+from classroom.participation import can_submit
 # APP-BOUNDARY-EXCEPTION: 위 awards와 같은 이유 — Award 존재 여부로 Handover 가시성을 판정하려면 지금은 Contest를 직접 조회해야 한다
 from contests.models import Contest
 from core.clock import Clock
@@ -118,7 +120,13 @@ class SubmissionTargetStateResolver:
         `SOURCE_SLOT` 뿐이라 시연 영상·스크린샷·빌드 자산 분기가 아예 없다.
         Problem 존재를 확인하는 이유는 공모전 분기의 `Contest.objects.filter(...)`와
         같다 — 형식만 맞고 가리키는 대상이 없는 target_ref는 소유자 없는
-        private로 fail-closed한다."""
+        private로 fail-closed한다.
+
+        **낼 수 있는 사람만 업로드 주소를 받는다**(#439) — Problem이 있어도
+        그 사람이 지금 이 클래스·문제에 새로 낼 수 없으면(보관·내보냄·숨김,
+        `classroom.participation.can_submit`) 같은 이유로 fail-closed한다.
+        참여자가 아니면(`ClassMember` 행이 없으면, 강사가 학생 화면으로
+        보는 경우를 포함) 애초에 판정할 자격이 없어 역시 거절한다."""
 
         _, problem_id_raw, user_id_raw, slot = parts
         if slot != SOURCE_SLOT:
@@ -130,7 +138,12 @@ class SubmissionTargetStateResolver:
         except ValueError:
             return _DENY
 
-        if not ClassroomProblem.objects.filter(id=problem_id).exists():
+        problem = ClassroomProblem.objects.select_related("classroom").filter(id=problem_id).first()
+        if problem is None:
+            return _DENY
+
+        member = ClassMember.objects.filter(classroom=problem.classroom, user_id=user_id).first()
+        if member is None or not can_submit(problem.classroom, member, problem):
             return _DENY
 
         return TargetState(visibility=Visibility.PRIVATE, owner_id=user_id)

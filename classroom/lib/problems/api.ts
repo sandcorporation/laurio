@@ -24,6 +24,18 @@ export type ChecklistItemRow = {
   order: number;
 };
 
+// 전이 표(`classroom.problem_transitions`) 한 줄(#440) — 지금 이 문제 상태에서
+// 나갈 수 있는 전이 하나와 막힌 이유. `blocked_reason`이 `null`이면 지금 바로
+// 부를 수 있다. 지금 그래프는 상태마다 나가는 간선이 하나뿐이라
+// `ProblemRow.available_transitions`는 언제나 원소 하나짜리 배열이다.
+export type ProblemTransitionName = "open" | "hide" | "reopen";
+export type ProblemTransitionBlockedReason = "archived" | "no_required_item" | null;
+export type ProblemTransitionRow = {
+  name: ProblemTransitionName;
+  to_state: ProblemStatus;
+  blocked_reason: ProblemTransitionBlockedReason;
+};
+
 // 이 문제를 원본으로 하는, 지금 살아 있는(내리지 않은) 문제 템플릿(#333) —
 // 없으면 `null`이다. 편집 화면이 새로고침 뒤에도 공개 상태를 정확히 가른다.
 export type PublishedProblemTemplateSummary = {
@@ -75,6 +87,10 @@ export type ProblemRow = {
   // 이 문제를 지금 지울 수 있는가(#430/#431, ADR-0050) — 화면은 시도를 세지
   // 않고 이 칸만 본다(`ClassRow.has_submissions`와 같은 관용구, 반대 극성).
   deletable: boolean;
+  // 지금 상태에서 나갈 수 있는 전이와 각자 막힌 이유(#440) — 수정 화면은
+  // 이 배열로 열기·숨기기·다시 열기 버튼을 그리고, 화면 안에서 상태별
+  // 버튼을 다시 계산하지 않는다.
+  available_transitions: ProblemTransitionRow[];
 };
 
 export function fetchProblems(classId: number): Promise<ProblemRow[]> {

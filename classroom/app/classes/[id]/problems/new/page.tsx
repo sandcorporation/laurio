@@ -21,18 +21,14 @@ import {
   PageShell,
   buttonClass,
 } from "@/app/components/ui";
-import {
-  GradingGuidelineEditor,
-  isGradingGuidelineValid,
-  type GradingGuidelineValue,
-} from "@/app/components/GradingGuidelineEditor";
+import { isGradingGuidelineValid, type GradingGuidelineValue } from "@/app/components/GradingGuidelineEditor";
 import { MarkdownEditor } from "@/app/components/MarkdownEditor";
 import { ProblemParticipantView } from "@/app/components/ProblemParticipantView";
+import { ProblemSettingsForm } from "@/app/components/ProblemSettingsForm";
 import { TemplatePickerSheet } from "@/app/components/TemplatePickerSheet";
 import { BackendError } from "@/lib/backend/client";
 import { useClass } from "@/lib/classes/use-class";
 import { createProblem, type ProblemRow, type SubmissionFormat } from "@/lib/problems/api";
-import { isSelectedModelReasoning, REASONING_EFFORT_OPTIONS } from "@/lib/scoring/reasoning";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
 
 type DraftChecklistItem = {
@@ -166,6 +162,22 @@ export default function NewProblemPage() {
     void submitProblem(true);
   }
 
+  if (classState.status === "ready" && classState.classroom.archived) {
+    // 클래스 상세는 이 화면으로 가는 링크 자체를 감추지만(#438), 주소를 직접
+    // 열면 여기까지 온다 — 서버도 같은 요청을 403으로 거절하므로 폼을 아예
+    // 보여주지 않고 이유만 말한다.
+    return (
+      <PageShell>
+        <PageHeader eyebrow="클래스 · 문제" title="새 문제" titleTestId="new-problem-heading" />
+        <Note tone="attention">
+          <span data-testid="new-problem-archived-note">
+            이 클래스는 보관되어 새 문제를 만들 수 없습니다 — 보관을 되돌린 뒤에 할 수 있습니다.
+          </span>
+        </Note>
+      </PageShell>
+    );
+  }
+
   return (
     <PageShell>
       <PageHeader
@@ -257,134 +269,24 @@ export default function NewProblemPage() {
                 placeholder="무엇을 만들어야 하는지, 그리고 무엇이 이 문제의 핵심인지."
               />
             </div>
-
-            <fieldset className="flex flex-col gap-1.5">
-              <legend>
-                <FieldLabel>제출 형식</FieldLabel>
-              </legend>
-              <div className="flex flex-col gap-2 pt-1">
-                <label className="flex items-center gap-2.5 text-[13.5px]">
-                  <input
-                    type="checkbox"
-                    checked={submissionFormats.includes("source")}
-                    onChange={(event) => toggleSubmissionFormat("source", event.target.checked)}
-                    data-testid="new-problem-format-source"
-                    className="accent-ink"
-                  />
-                  zip 파일
-                </label>
-                <label className="flex items-center gap-2.5 text-[13.5px]">
-                  <input
-                    type="checkbox"
-                    checked={submissionFormats.includes("repository")}
-                    onChange={(event) => toggleSubmissionFormat("repository", event.target.checked)}
-                    data-testid="new-problem-format-repository"
-                    className="accent-ink"
-                  />
-                  GitHub 저장소
-                </label>
-              </div>
-              <span className="text-[11.5px] leading-relaxed text-ink/45">
-                제출된 내용만 보고 채점합니다 — 참여자가 따로 근거를 적거나 스스로 체크할
-                필요는 없습니다. 둘 다 고르면 참여자는 낼 때마다 그중 하나를 고릅니다.
-              </span>
-              {submissionFormats.length === 0 ? (
-                <span data-testid="new-problem-format-empty-notice" className="text-[11.5px] text-attention">
-                  하나 이상 골라야 합니다.
-                </span>
-              ) : null}
-            </fieldset>
           </form>
         </Card>
 
-        <Card>
-          <CardHeader title="채점 모델" />
-          <div className="flex flex-col gap-2.5 p-4">
-            <label htmlFor="new-problem-model" className="sr-only">
-              채점 모델
-            </label>
-            {modelsState.status === "ready" ? (
-              <>
-                {modelsState.source === "fallback" ? (
-                  <Note>
-                    <span data-testid="new-problem-model-unavailable-note">
-                      {modelsState.unavailableReason === "no_api_key"
-                        ? "키를 넣으면 이 키로 쓸 수 있는 모델을 보여드립니다 — 지금은 기본 목록입니다."
-                        : "지금은 모델 목록을 확인할 수 없어 기본 목록을 보여드립니다."}
-                    </span>
-                  </Note>
-                ) : null}
-                <select
-                  id="new-problem-model"
-                  data-testid="new-problem-model-select"
-                  value={model}
-                  onChange={(event) => setModel(event.target.value)}
-                  className={INPUT_CLASS}
-                >
-                  <option value="" data-testid="new-problem-model-option-inherit">
-                    클래스 기본값을 따릅니다
-                  </option>
-                  {modelsState.models.map((option) => (
-                    <option
-                      key={option.id}
-                      value={option.id}
-                      data-testid={`new-problem-model-option-${option.id}`}
-                    >
-                      {option.label} · 컨텍스트{" "}
-                      {option.context_window
-                        ? `${option.context_window.toLocaleString("ko-KR")} 토큰`
-                        : "크기 미확인"}
-                    </option>
-                  ))}
-                </select>
-              </>
-            ) : (
-              <p data-testid="new-problem-model-loading" className="text-[13px] text-ink/45">
-                모델 목록을 불러오는 중...
-              </p>
-            )}
-            <span className="text-[11.5px] leading-relaxed text-ink/45">
-              설명이 길면 컨텍스트가 작은 모델은 뒷부분이 잘린 채 채점됩니다 — 그래서 문제마다
-              다른 모델을 고를 수 있습니다.
-            </span>
-            {modelsState.status === "ready" &&
-            isSelectedModelReasoning(
-              model,
-              modelsState.models,
-              classState.status === "ready" ? classState.classroom.default_model_is_reasoning : false,
-            ) ? (
-              <div className="flex flex-col gap-1.5 border-t border-rule pt-3">
-                <label htmlFor="new-problem-reasoning-effort">
-                  <FieldLabel>추론 강도</FieldLabel>
-                </label>
-                <select
-                  id="new-problem-reasoning-effort"
-                  data-testid="new-problem-reasoning-effort-select"
-                  value={reasoningEffort}
-                  onChange={(event) => setReasoningEffort(event.target.value)}
-                  className={`${INPUT_CLASS} max-w-[200px]`}
-                >
-                  <option value="" data-testid="new-problem-reasoning-effort-option-inherit">
-                    클래스 기본값을 따릅니다
-                  </option>
-                  {REASONING_EFFORT_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-                <span className="text-[11.5px] leading-relaxed text-ink/45">
-                  높을수록 느리고 채점 예산을 더 씁니다.
-                </span>
-              </div>
-            ) : null}
-          </div>
-        </Card>
-
-        <GradingGuidelineEditor
-          value={gradingGuideline}
-          onChange={setGradingGuideline}
+        <ProblemSettingsForm
+          mode="create"
           testIdPrefix="new-problem"
+          submissionFormats={submissionFormats}
+          onToggleSubmissionFormat={toggleSubmissionFormat}
+          model={model}
+          onModelChange={setModel}
+          modelsState={modelsState}
+          reasoningEffort={reasoningEffort}
+          onReasoningEffortChange={setReasoningEffort}
+          defaultModelIsReasoning={
+            classState.status === "ready" ? classState.classroom.default_model_is_reasoning : false
+          }
+          gradingGuideline={gradingGuideline}
+          onGradingGuidelineChange={setGradingGuideline}
         />
 
         <Card>

@@ -233,6 +233,21 @@ class ProblemPatchIn(Schema):
     syntax_check_enabled: bool | None = None
 
 
+class ProblemTransitionOut(Schema):
+    """전이 표(`classroom.problem_transitions`) 한 줄(#440) — 강사용 문제
+    응답이 「지금 상태에서 나갈 수 있는 전이」를 이 모양으로 싣는다. 지금
+    그래프는 상태마다 나가는 간선이 하나뿐이라 `ProblemOut.
+    available_transitions`는 언제나 원소 하나짜리 목록이다."""
+
+    #: "open" | "hide" | "reopen".
+    name: str
+    #: 이 전이가 성공하면 도달하는 상태.
+    to_state: str
+    #: `None`이면 지금 바로 부를 수 있다. 아니면 "archived"(클래스가
+    #: 보관됨) | "no_required_item"(필수 체크리스트 항목이 하나도 없음).
+    blocked_reason: str | None = None
+
+
 class ProblemOut(Schema):
     id: int
     classroom_id: int
@@ -289,6 +304,11 @@ class ProblemOut(Schema):
     #: 명시하지만, 혹시 다른 생성 경로가 이 칸을 빠뜨려도 삭제 버튼이
     #: 함부로 뜨지 않는 쪽으로 넘어진다.
     deletable: bool = False
+    #: 지금 상태에서 나갈 수 있는 전이와 각자 막힌 이유(#440,
+    #: `classroom.problem_transitions.available_transitions`) — 수정
+    #: 화면은 이 목록으로 열기·숨기기·다시 열기 버튼을 그리고, 화면 안에서
+    #: 상태별 버튼을 다시 계산하지 않는다.
+    available_transitions: list[ProblemTransitionOut] = []
 
 
 class ProblemReorderIn(Schema):
@@ -353,8 +373,8 @@ class MemberRenameOut(Schema):
 class ClassroomProblemMineOut(Schema):
     """참여자가 보는 문제 하나(#286) — 강사 전용 `ProblemOut`과 달리 `status`가
     없다. 열린 문제와, 낸 적 있는 숨긴 문제 둘 다 이 자리에 닿지만(#405) 그
-    구별은 `ClassroomProblemSubmissionsOut.problem_hidden`이 대신 진다 — 이
-    조각 자체는 여전히 상태를 모른다.
+    구별은 `ClassroomProblemSubmissionsOut.submit_blocked_reason`(#439)이
+    대신 진다 — 이 조각 자체는 여전히 상태를 모른다.
 
     이름이 `Classroom` 접두어를 든다 — `contests.submission_schemas.
     ProblemOut`은 없지만 `SubmissionIn`·`SubmissionOut`은 있고, django-ninja가
@@ -476,29 +496,21 @@ class ClassroomProblemSubmissionsOut(Schema):
     class_name: str
     problem: ClassroomProblemMineOut
     submissions: list[ClassroomSubmissionOut]
-    #: 이 요청을 보낸 참여자가 강사에게 내보내졌는가(#300). 참이면 화면이
-    #: 제출 수단을 아예 숨기고 그 이유를 말해 준다 — 시도는 지우지 않으므로
-    #: `submissions`는 그대로 채워진다.
-    member_expelled: bool = False
-    #: 이 클래스가 보관됐는가(#294, #338). 참이면 화면이 제출 수단을 숨기고
-    #: 수업이 끝났다는 이유를 보여준다 — `member_expelled`와 같은 신호 자리.
-    #: 새 제출만 막힌다(`create_classroom_submission`의 403이 실제 문).
-    archived: bool = False
-    #: 강사가 이 문제를 숨겼는가(#405). 참이면 이 참여자는 한 번이라도 낸
-    #: 적이 있다는 뜻이다 — 낸 적 없으면 애초에 이 응답 자체가 404다
-    #: (`_get_visible_problem_for_participant_or_404`). 화면이 제출 칸
-    #: 대신 「강사가 숨긴 문제라 새로 낼 수 없습니다」를 보인다 — 실제 문은
-    #: 여전히 `create_classroom_submission`의 403이다.
-    problem_hidden: bool = False
-    #: 이 요청을 보낸 사람이 그 클래스의 강사인가(#429) — 참이면 화면이 띠를
-    #: 띄우고 제출을 잠근다. 화면은 「내가 강사인가」를 따로 계산하지 않고
-    #: 이 칸 하나만 본다(#429 Implementation Decisions "역할은 화면이
-    #: 짐작하지 않는다").
-    viewing_as_instructor: bool = False
-    #: `viewing_as_instructor`가 참일 때만 채워지는 문제 상태("draft"|"open"|
-    #: "hidden") — 띠가 몇 줄을 더 말할지 이 값으로 정한다. 참여자 시점에는
-    #: 언제나 `None`이다(참여자에게는 상태 구분이 필요 없다는 것이 이미
-    #: `ClassroomProblemMineOut`의 설계다).
+    #: 이 요청을 보낸 사람이 지금 새로 낼 수 없는 이유 하나, 낼 수 있으면
+    #: `None`(#439). "archived"(클래스가 보관됨) | "expelled"(내보내짐) |
+    #: "hidden"(강사가 이 문제를 숨김) | "viewing_as_instructor"(강사가 학생
+    #: 화면으로 보는 중) 중 하나다 — 우선순위는 보관 → 내보냄 → 숨김이고
+    #: (`classroom.participation.participant_submit_blocked_reason`), 강사
+    #: 보기는 그 셋과 겹치지 않는 별도 판정이다. 예전의 네 불리언
+    #: (`member_expelled`·`archived`·`problem_hidden`·`viewing_as_instructor`)을
+    #: 이 값 하나로 합쳤다 — 화면이 우선순위를 다시 계산하지 않는다. 지난
+    #: 시도는 이 값과 무관하게 `submissions`에 그대로 남는다 — 막히는 것은
+    #: 새 제출뿐이다.
+    submit_blocked_reason: str | None = None
+    #: `submit_blocked_reason`이 "viewing_as_instructor"일 때만 채워지는 문제
+    #: 상태("draft"|"open"|"hidden") — 띠가 몇 줄을 더 말할지 이 값으로
+    #: 정한다. 참여자 시점에는 언제나 `None`이다(참여자에게는 상태 구분이
+    #: 필요 없다는 것이 이미 `ClassroomProblemMineOut`의 설계다).
     instructor_problem_status: str | None = None
 
 

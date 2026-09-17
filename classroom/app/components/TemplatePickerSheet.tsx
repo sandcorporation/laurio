@@ -6,7 +6,8 @@
 // (같은 엔드포인트, 내려간 것은 걸러 보여준다 — 내려간 템플릿은 본인도 더
 // 못 가져온다, `template_api.import_template`), 내 다른 클래스에서(#326이
 // 새로 낸 `from-other-classes`, 방향만 반대인 #292의 그 복사를 그대로
-// 부른다).
+// 부른다). 세 탭과 고른 항목의 상세(공개 탭만) 모두 공용 불러오기 도우미
+// `useLoadable`(#443)을 쓴다 — 탭을 오가도 매번 최신으로 다시 불러온다.
 //
 // **채점 모델은 따라오지 않는다** — 세 경로 모두 백엔드가 이미 그렇게
 // 만든다(`services.import_problem_template`/`copy_problem_to_class`). 여기서는
@@ -23,27 +24,10 @@ import {
   fetchProblemTemplate,
   fetchProblemTemplates,
   importProblemTemplate,
-  type ProblemTemplateListItem,
-  type ProblemTemplateRow,
 } from "@/lib/problem-templates/api";
-import { copyProblem, fetchImportableProblems, type ImportableProblemRow, type ProblemRow } from "@/lib/problems/api";
-
-type PickerTab = "public" | "mine" | "other-classes";
-
-/** 세 탭이 서로 다른 자원이라 목록 항목의 모양이 갈린다 — 미리보기·가져오기가
- *  쓸 수 있게 이 컴포넌트 안에서만 공통 모양으로 좁혀 쓴다. */
-type Candidate = {
-  key: string;
-  title: string;
-  meta: string;
-  description: string | null;
-  checklistItems: { label: string; required: boolean }[] | null;
-  runImport: () => Promise<ProblemRow>;
-};
-
-function formatDate(value: string): string {
-  return new Date(value).toLocaleDateString("ko-KR");
-}
+import { formatPickerDate, selectPickerCandidate, type PickerTab } from "@/lib/problem-templates/picker-selection";
+import { copyProblem, fetchImportableProblems, type ProblemRow } from "@/lib/problems/api";
+import { useLoadable, type LoadableState } from "@/lib/rendering/use-loadable";
 
 export function TemplatePickerSheet({
   classId,
@@ -70,69 +54,42 @@ export function TemplatePickerSheet({
   // --- 공개된 문제 ---------------------------------------------------------
   const [publicQuery, setPublicQuery] = useState("");
   const [publicCommittedQuery, setPublicCommittedQuery] = useState("");
-  const [publicState, setPublicState] = useState<
-    { status: "idle" | "loading" | "error" } | { status: "ready"; items: ProblemTemplateListItem[] }
-  >({ status: "idle" });
-
-  useEffect(() => {
-    if (tab !== "public") return;
-    let cancelled = false;
-    setPublicState({ status: "loading" });
-    fetchProblemTemplates({ q: publicCommittedQuery || undefined })
-      .then((result) => {
-        if (!cancelled) setPublicState({ status: "ready", items: result.items });
-      })
-      .catch(() => {
-        if (!cancelled) setPublicState({ status: "error" });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [tab, publicCommittedQuery]);
+  const publicState = useLoadable(
+    tab === "public",
+    () => fetchProblemTemplates({ q: publicCommittedQuery || undefined }).then((result) => result.items),
+    [publicCommittedQuery],
+  );
+  const selectedPublicItem =
+    tab === "public" && publicState.status === "ready"
+      ? (publicState.data.find((i) => `public:${i.share_code}` === selectedKey) ?? null)
+      : null;
 
   // --- 내가 올린 것 ---------------------------------------------------------
-  const [mineState, setMineState] = useState<
-    { status: "idle" | "loading" | "error" } | { status: "ready"; items: ProblemTemplateRow[] }
-  >({ status: "idle" });
-
-  useEffect(() => {
-    if (tab !== "mine" || mineState.status !== "idle") return;
-    setMineState({ status: "loading" });
-    fetchMyProblemTemplates()
-      .then((items) => setMineState({ status: "ready", items: items.filter((t) => !t.taken_down) }))
-      .catch(() => setMineState({ status: "error" }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab]);
+  const mineState = useLoadable(
+    tab === "mine",
+    () => fetchMyProblemTemplates().then((items) => items.filter((t) => !t.taken_down)),
+    [],
+  );
+  const selectedMineItem =
+    tab === "mine" && mineState.status === "ready"
+      ? (mineState.data.find((i) => `mine:${i.share_code}` === selectedKey) ?? null)
+      : null;
 
   // --- 내 다른 클래스에서 ----------------------------------------------------
-  const [otherState, setOtherState] = useState<
-    { status: "idle" | "loading" | "error" } | { status: "ready"; items: ImportableProblemRow[] }
-  >({ status: "idle" });
-
-  useEffect(() => {
-    if (tab !== "other-classes" || otherState.status !== "idle") return;
-    setOtherState({ status: "loading" });
-    fetchImportableProblems(classId)
-      .then((items) => setOtherState({ status: "ready", items }))
-      .catch(() => setOtherState({ status: "error" }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, classId]);
+  const otherState = useLoadable(tab === "other-classes", () => fetchImportableProblems(classId), [classId]);
+  const selectedOtherItem =
+    tab === "other-classes" && otherState.status === "ready"
+      ? (otherState.data.find((i) => `other:${i.id}` === selectedKey) ?? null)
+      : null;
 
   // 공개 템플릿은 목록에 설명·체크리스트가 없다 — 고른 항목의 상세를
-  // 그때그때 따로 불러온다(내가 올린 것/내 다른 클래스에서는 목록 자체에
-  // 이미 다 있다).
-  const [publicDetail, setPublicDetail] = useState<
-    { shareCode: string; status: "loading" } | { shareCode: string; status: "ready"; template: ProblemTemplateRow } | null
-  >(null);
-
-  function selectPublic(item: ProblemTemplateListItem) {
-    setSelectedKey(`public:${item.share_code}`);
-    setImportError(null);
-    setPublicDetail({ shareCode: item.share_code, status: "loading" });
-    fetchProblemTemplate(item.share_code)
-      .then((template) => setPublicDetail({ shareCode: item.share_code, status: "ready", template }))
-      .catch(() => setPublicDetail(null));
-  }
+  // 선택 자체에 반응해(`useLoadable`의 deps) 따로 불러온다(내가 올린
+  // 것/내 다른 클래스에서는 목록 자체에 이미 다 있다).
+  const publicDetailState = useLoadable(
+    selectedPublicItem !== null,
+    () => fetchProblemTemplate(selectedPublicItem!.share_code),
+    [selectedPublicItem?.share_code],
+  );
 
   function switchTab(next: PickerTab) {
     setTab(next);
@@ -140,58 +97,33 @@ export function TemplatePickerSheet({
     setImportError(null);
   }
 
-  function buildCandidate(): Candidate | null {
-    if (tab === "public") {
-      if (!selectedKey || publicState.status !== "ready") return null;
-      const item = publicState.items.find((i) => `public:${i.share_code}` === selectedKey);
-      if (!item) return null;
-      const detail =
-        publicDetail && publicDetail.shareCode === item.share_code && publicDetail.status === "ready"
-          ? publicDetail.template
-          : null;
-      return {
-        key: selectedKey,
-        title: item.title,
-        meta: `${item.publisher_display_name} · ${formatDate(item.created_at)} 공개`,
-        description: detail?.description ?? null,
-        checklistItems: detail?.checklist_items ?? null,
-        runImport: () => importProblemTemplate(item.share_code, classId),
-      };
-    }
-    if (tab === "mine") {
-      if (!selectedKey || mineState.status !== "ready") return null;
-      const item = mineState.items.find((i) => `mine:${i.share_code}` === selectedKey);
-      if (!item) return null;
-      return {
-        key: selectedKey,
-        title: item.title,
-        meta: `${formatDate(item.created_at)} 공개`,
-        description: item.description,
-        checklistItems: item.checklist_items,
-        runImport: () => importProblemTemplate(item.share_code, classId),
-      };
-    }
-    if (!selectedKey || otherState.status !== "ready") return null;
-    const item = otherState.items.find((i) => `other:${i.id}` === selectedKey);
-    if (!item) return null;
-    return {
-      key: selectedKey,
-      title: item.title,
-      meta: item.classroom_name,
-      description: item.description,
-      checklistItems: item.checklist_items,
-      runImport: () => copyProblem(item.classroom_id, item.id, classId),
-    };
+  function selectItem(key: string) {
+    setSelectedKey(key);
+    setImportError(null);
   }
 
-  const candidate = buildCandidate();
+  const preview = selectPickerCandidate({
+    tab,
+    selectedKey,
+    publicItems: publicState.status === "ready" ? publicState.data : null,
+    publicDetail: publicDetailState.status === "ready" ? publicDetailState.data : null,
+    mineItems: mineState.status === "ready" ? mineState.data : null,
+    otherItems: otherState.status === "ready" ? otherState.data : null,
+  });
 
   async function handleImport() {
-    if (!candidate) return;
+    if (!preview) return;
     setImporting(true);
     setImportError(null);
     try {
-      const problem = await candidate.runImport();
+      const problem = selectedPublicItem
+        ? await importProblemTemplate(selectedPublicItem.share_code, classId)
+        : selectedMineItem
+          ? await importProblemTemplate(selectedMineItem.share_code, classId)
+          : selectedOtherItem
+            ? await copyProblem(selectedOtherItem.classroom_id, selectedOtherItem.id, classId)
+            : null;
+      if (!problem) return;
       onImported(problem);
     } catch (err) {
       setImportError(err instanceof BackendError ? err.message : "가져오지 못했습니다. 잠시 후 다시 시도해주세요.");
@@ -283,8 +215,8 @@ export function TemplatePickerSheet({
           <div className="min-h-0 flex-1 overflow-y-auto border-b border-rule lg:w-1/2 lg:border-b-0 lg:border-r">
             {tab === "public" ? (
               <PickerList
-                status={publicState.status}
-                isEmpty={publicState.status === "ready" && publicState.items.length === 0}
+                state={publicState}
+                isEmpty={publicState.status === "ready" && publicState.data.length === 0}
                 emptyMessage={
                   publicCommittedQuery
                     ? "검색 결과가 없습니다. 다른 제목으로 찾아보세요."
@@ -292,50 +224,47 @@ export function TemplatePickerSheet({
                 }
               >
                 {publicState.status === "ready"
-                  ? publicState.items.map((item) => (
+                  ? publicState.data.map((item) => (
                       <PickerRow
                         key={item.share_code}
                         name="template-picker-selection"
                         testId={`template-picker-row-public-${item.share_code}`}
                         selected={selectedKey === `public:${item.share_code}`}
                         title={item.title}
-                        meta={`${item.publisher_display_name} · ${formatDate(item.created_at)} 공개`}
-                        onSelect={() => selectPublic(item)}
+                        meta={`${item.publisher_display_name} · ${formatPickerDate(item.created_at)} 공개`}
+                        onSelect={() => selectItem(`public:${item.share_code}`)}
                       />
                     ))
                   : null}
               </PickerList>
             ) : tab === "mine" ? (
               <PickerList
-                status={mineState.status}
-                isEmpty={mineState.status === "ready" && mineState.items.length === 0}
+                state={mineState}
+                isEmpty={mineState.status === "ready" && mineState.data.length === 0}
                 emptyMessage="아직 공개한 템플릿이 없습니다."
               >
                 {mineState.status === "ready"
-                  ? mineState.items.map((item) => (
+                  ? mineState.data.map((item) => (
                       <PickerRow
                         key={item.share_code}
                         name="template-picker-selection"
                         testId={`template-picker-row-mine-${item.share_code}`}
                         selected={selectedKey === `mine:${item.share_code}`}
                         title={item.title}
-                        meta={`${formatDate(item.created_at)} 공개`}
-                        onSelect={() => {
-                          setSelectedKey(`mine:${item.share_code}`);
-                          setImportError(null);
-                        }}
+                        meta={`${formatPickerDate(item.created_at)} 공개`}
+                        onSelect={() => selectItem(`mine:${item.share_code}`)}
                       />
                     ))
                   : null}
               </PickerList>
             ) : (
               <PickerList
-                status={otherState.status}
-                isEmpty={otherState.status === "ready" && otherState.items.length === 0}
+                state={otherState}
+                isEmpty={otherState.status === "ready" && otherState.data.length === 0}
                 emptyMessage="다른 클래스에 가진 문제가 없습니다."
               >
                 {otherState.status === "ready"
-                  ? otherState.items.map((item) => (
+                  ? otherState.data.map((item) => (
                       <PickerRow
                         key={item.id}
                         name="template-picker-selection"
@@ -343,10 +272,7 @@ export function TemplatePickerSheet({
                         selected={selectedKey === `other:${item.id}`}
                         title={item.title}
                         meta={item.classroom_name}
-                        onSelect={() => {
-                          setSelectedKey(`other:${item.id}`);
-                          setImportError(null);
-                        }}
+                        onSelect={() => selectItem(`other:${item.id}`)}
                       />
                     ))
                   : null}
@@ -355,7 +281,7 @@ export function TemplatePickerSheet({
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto p-5 lg:w-1/2">
-            {!candidate ? (
+            {!preview ? (
               <EmptyState>
                 <span data-testid="template-picker-preview-empty">
                   왼쪽에서 문제를 고르면 여기에 설명과 체크리스트가 보입니다.
@@ -365,29 +291,29 @@ export function TemplatePickerSheet({
               <div className="flex flex-col gap-4" data-testid="template-picker-preview">
                 <div>
                   <h3 className="text-[15px] font-semibold" data-testid="template-picker-preview-title">
-                    {candidate.title}
+                    {preview.title}
                   </h3>
-                  <p className="mt-1 text-[12px] text-ink/45">{candidate.meta}</p>
+                  <p className="mt-1 text-[12px] text-ink/45">{preview.meta}</p>
                 </div>
                 <div>
                   <p className="mb-1.5 text-[12px] text-ink/60">설명</p>
-                  {candidate.description === null ? (
+                  {preview.description === null ? (
                     <p className="text-[12.5px] text-ink/45">불러오는 중...</p>
-                  ) : candidate.description.trim() === "" ? (
+                  ) : preview.description.trim() === "" ? (
                     <p className="text-[12.5px] text-ink/45">설명이 없습니다.</p>
                   ) : (
                     <div data-testid="template-picker-preview-description">
-                      <MarkdownView markdown={candidate.description} fileBaseName={candidate.title} />
+                      <MarkdownView markdown={preview.description} fileBaseName={preview.title} />
                     </div>
                   )}
                 </div>
                 <div>
                   <p className="mb-1.5 text-[12px] text-ink/60">체크리스트</p>
-                  {candidate.checklistItems === null ? null : candidate.checklistItems.length === 0 ? (
+                  {preview.checklistItems === null ? null : preview.checklistItems.length === 0 ? (
                     <p className="text-[12.5px] text-ink/45">아직 항목이 없습니다.</p>
                   ) : (
                     <ul data-testid="template-picker-preview-checklist" className="divide-y divide-rule border border-rule">
-                      {candidate.checklistItems.map((item, index) => (
+                      {preview.checklistItems.map((item, index) => (
                         <li key={index} className="flex items-center gap-2 px-3 py-2 text-[12.5px]">
                           <span className="flex-1">{item.label}</span>
                           {item.required ? <Badge tone="attention">필수</Badge> : <Badge tone="neutral">선택</Badge>}
@@ -416,7 +342,7 @@ export function TemplatePickerSheet({
             <button
               type="button"
               data-testid="template-picker-import-submit"
-              disabled={!candidate || importing}
+              disabled={!preview || importing}
               onClick={handleImport}
               className={buttonClass("primary")}
             >
@@ -429,21 +355,23 @@ export function TemplatePickerSheet({
   );
 }
 
-function PickerList({
-  status,
+/** 세 탭이 공용 불러오기 도우미(`useLoadable`)의 상태를 같은 방식으로
+ *  보여준다 — 불러오는 중/오류/빈 목록/목록. */
+function PickerList<T>({
+  state,
   emptyMessage,
   isEmpty,
   children,
 }: {
-  status: "idle" | "loading" | "error" | "ready";
+  state: LoadableState<T>;
   emptyMessage: string;
   isEmpty: boolean;
   children: ReactNode;
 }) {
-  if (status === "idle" || status === "loading") {
+  if (state.status === "idle" || state.status === "loading") {
     return <p className="p-5 text-[13px] text-ink/45">불러오는 중...</p>;
   }
-  if (status === "error") {
+  if (state.status === "error") {
     return (
       <div className="p-5">
         <ErrorNote>

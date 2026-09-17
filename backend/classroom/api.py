@@ -91,12 +91,29 @@ from .schemas import (
     ProblemPatchIn,
     ProblemReorderIn,
     ProblemTemplateChecklistItemOut,
+    ProblemTransitionOut,
     PublishedTemplateSummaryOut,
     ScoringModelCatalogOut,
     ScoringModelOut,
 )
 from . import pending_scoring
 from .events import publish_attempt_submitted
+from .participation import (
+    SUBMIT_BLOCKED_ARCHIVED,
+    SUBMIT_BLOCKED_EXPELLED,
+    SUBMIT_BLOCKED_HIDDEN,
+    SUBMIT_BLOCKED_VIEWING_AS_INSTRUCTOR,
+    assert_class_mutable,
+    participant_membership_blocked_reason,
+    participant_submit_blocked_reason,
+    visible_problems_queryset,
+)
+from .problem_transitions import (
+    assert_has_required_item,
+    assert_required_item_floor,
+    assert_transition_from_state,
+    available_transitions,
+)
 from .scoring import check_scoring_key
 from .scoring_model_catalog import get_scoring_model_catalog
 from .scoring_models import is_fallback_model, is_reasoning_model_id, is_valid_reasoning_effort
@@ -362,6 +379,10 @@ def _serialize_problem(
         pass_rate=(passed_count / member_count) if member_count else None,
         published_template=_published_template_summary(_live_problem_template(problem)),
         deletable=_problem_deletable(problem, class_obj, blocking_problem_ids=blocking_problem_ids),
+        available_transitions=[
+            ProblemTransitionOut(name=t.name, to_state=t.to_state, blocked_reason=t.blocked_reason)
+            for t in available_transitions(problem, class_obj)
+        ],
     )
 
 
@@ -949,10 +970,10 @@ def rename_myself(request: HttpRequest, class_id: int, payload: MemberRenameIn):
 
     member = _get_member_or_404(class_id, request.auth_user.id)
 
-    if member.classroom.archived_at is not None:
+    reason = participant_membership_blocked_reason(member.classroom, member)
+    if reason == SUBMIT_BLOCKED_ARCHIVED:
         raise HttpError(403, "이 클래스는 보관되어 이름을 바꿀 수 없습니다.")
-
-    if member.expelled_at is not None:
+    if reason == SUBMIT_BLOCKED_EXPELLED:
         raise HttpError(403, "더 이상 이 클래스의 참여자가 아닙니다.")
 
     member.display_name = payload.display_name
@@ -1074,6 +1095,7 @@ def create_problem(request: HttpRequest, class_id: int, payload: ProblemIn):
     생긴다")."""
 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    assert_class_mutable(class_obj)
 
     submission_formats = _validate_submission_formats(payload.submission_formats)
 
@@ -1144,6 +1166,7 @@ def reorder_problems(request: HttpRequest, class_id: int, payload: ProblemReorde
     세그먼트 전부 → 동적 `{problem_id}` 전부."""
 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    assert_class_mutable(class_obj)
     problems = {p.id: p for p in class_obj.problems.all()}
 
     if set(payload.problem_ids) != set(problems):
@@ -1222,33 +1245,27 @@ def list_my_problems(request: HttpRequest, class_id: int):
     상단 docstring, `reorder_problems`와 같은 이유).
 
     **지금 이름과 편집 칸을 숨길 신호도 함께 싣는다**(#372) — 이 화면
-    위쪽의 인라인 이름 편집 칸이 그 값을 초기값으로 쓴다. `get_my_problem`이
-    `member_expelled`·`archived`를 싣는 것과 같은 이유다.
+    위쪽의 인라인 이름 편집 칸이 그 값을 초기값으로 쓴다(`get_my_problem`이
+    `submit_blocked_reason`으로 같은 종류의 신호를 싣는 것과 같은 이유,
+    #439).
 
     **한 번이라도 낸 숨긴 문제는 `hidden_problems`에 따로 실린다**(#406) —
     열린 목록(`problems`)과 같은 방식으로 통과 여부를 계산하지만, 시도가
-    없는 숨긴 문제는 이 묶음에도 들지 않는다(#405 「존재 숨김」 규칙)."""
+    없는 숨긴 문제는 이 묶음에도 들지 않는다(#405 「존재 숨김」 규칙).
+
+    **이 목록과 문제 상세가 같은 존재 판정을 쓴다**(#439 AC "내 문제 목록에
+    보이는 문제와 상세로 열 수 있는 문제가 언제나 같다") —
+    `classroom.participation.visible_problems_queryset`이 열림·숨김 두
+    묶음을 한 질의로 내려주고, 여기서는 상태로만 갈라 둘로 쪼갠다."""
 
     member = _get_member_or_404(class_id, request.auth_user.id)
-    problems = list(
-        Problem.objects.filter(classroom_id=class_id, status=Problem.Status.OPEN)
+    visible = list(
+        visible_problems_queryset(class_id, member)
         .prefetch_related("checklist_items")
         .order_by("order", "id")
     )
-    # 강사가 숨겼지만(#405) 이 참여자가 한 번이라도 낸 문제들 — 아래
-    # 「숨겨진 문제」 묶음의 재료다(#406). 낸 적 없는 숨긴 문제는 이
-    # `id__in` 서브쿼리에 애초에 들지 않는다.
-    hidden_problems = list(
-        Problem.objects.filter(
-            classroom_id=class_id,
-            status=Problem.Status.HIDDEN,
-            id__in=ClassroomSubmission.objects.filter(member=member).values_list(
-                "problem_id", flat=True
-            ),
-        )
-        .prefetch_related("checklist_items")
-        .order_by("order", "id")
-    )
+    problems = [p for p in visible if p.status == Problem.Status.OPEN]
+    hidden_problems = [p for p in visible if p.status == Problem.Status.HIDDEN]
 
     all_problems = problems + hidden_problems
     submissions = ClassroomSubmission.objects.filter(
@@ -1306,6 +1323,7 @@ def get_problem(request: HttpRequest, class_id: int, problem_id: int):
 def update_problem(request: HttpRequest, class_id: int, problem_id: int, payload: ProblemPatchIn):
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problem = _get_owned_problem_or_404(class_obj, problem_id)
+    assert_class_mutable(class_obj)
 
     submission_formats = (
         _validate_submission_formats(payload.submission_formats)
@@ -1392,6 +1410,7 @@ def delete_problem(request: HttpRequest, class_id: int, problem_id: int):
 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problem = _get_owned_problem_or_404(class_obj, problem_id)
+    assert_class_mutable(class_obj)
     if not _problem_deletable(problem, class_obj):
         raise HttpError(403, "지울 수 없습니다 — 대신 숨겨주세요.")
     # 채점을 걷는 것과 문제를 지우는 것, 둘이 한 트랜잭션이어야 한다 — 둘로
@@ -1412,13 +1431,15 @@ def delete_problem(request: HttpRequest, class_id: int, problem_id: int):
 )
 def open_problem(request: HttpRequest, class_id: int, problem_id: int):
     """초안을 연다. 필수 체크리스트 항목이 하나도 없으면 통과가 정의되지
-    않아 막는다(#283 AC)."""
+    않아 막는다(#283 AC). 전이 표(`classroom.problem_transitions`, #440)가
+    「초안에서만」과 「필수 항목이 있어야」 두 조건을 함께 정한다."""
 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problem = _get_owned_problem_or_404(class_obj, problem_id)
+    assert_class_mutable(class_obj)
 
-    if not problem.checklist_items.filter(required=True).exists():
-        raise HttpError(400, "필수 항목이 하나도 없는 문제는 열 수 없습니다.")
+    assert_transition_from_state("open", problem, wrong_state_message="초안만 열 수 있습니다.")
+    assert_has_required_item(problem, message="필수 항목이 하나도 없는 문제는 열 수 없습니다.")
 
     problem.status = Problem.Status.OPEN
     problem.save(update_fields=["status", "updated_at"])
@@ -1437,9 +1458,9 @@ def hide_problem(request: HttpRequest, class_id: int, problem_id: int):
 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problem = _get_owned_problem_or_404(class_obj, problem_id)
+    assert_class_mutable(class_obj)
 
-    if problem.status != Problem.Status.OPEN:
-        raise HttpError(400, "열린 문제만 숨길 수 있습니다.")
+    assert_transition_from_state("hide", problem, wrong_state_message="열린 문제만 숨길 수 있습니다.")
 
     problem.status = Problem.Status.HIDDEN
     problem.save(update_fields=["status", "updated_at"])
@@ -1458,11 +1479,10 @@ def reopen_problem(request: HttpRequest, class_id: int, problem_id: int):
 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problem = _get_owned_problem_or_404(class_obj, problem_id)
+    assert_class_mutable(class_obj)
 
-    if problem.status != Problem.Status.HIDDEN:
-        raise HttpError(400, "숨긴 문제만 다시 열 수 있습니다.")
-    if not problem.checklist_items.filter(required=True).exists():
-        raise HttpError(400, "필수 항목이 하나도 없는 문제는 열 수 없습니다.")
+    assert_transition_from_state("reopen", problem, wrong_state_message="숨긴 문제만 다시 열 수 있습니다.")
+    assert_has_required_item(problem, message="필수 항목이 하나도 없는 문제는 열 수 없습니다.")
 
     problem.status = Problem.Status.OPEN
     problem.save(update_fields=["status", "updated_at"])
@@ -1494,27 +1514,21 @@ def _get_visible_problem_for_participant_or_404(
     문제만 존재한다(#405) — 초안과, 낸 적 없는 숨긴 문제는 강사만 본다
     (Problem docstring, CONTEXT.md 「Problem」). 남의 클래스와 같은 이유로
     404다 — 숨김은 존재를 숨기는 게 아니라 낸 사람에게는 계속 보인다는
-    점이 다를 뿐, 그 밖에는 같은 "존재 숨김" 규칙을 따른다."""
+    점이 다를 뿐, 그 밖에는 같은 "존재 숨김" 규칙을 따른다.
+
+    `classroom.participation.visible_problems_queryset`을 그대로 쓴다 —
+    `list_my_problems`가 목록을 거르는 것과 같은 질의라야 「목록에 보이는
+    문제와 상세로 열 수 있는 문제가 언제나 같다」(#439 AC)가 성립한다."""
 
     try:
-        problem = (
-            Problem.objects.select_related("classroom")
+        return (
+            visible_problems_queryset(class_id, member)
+            .select_related("classroom")
             .prefetch_related("checklist_items")
-            .get(
-                id=problem_id,
-                classroom_id=class_id,
-                status__in=[Problem.Status.OPEN, Problem.Status.HIDDEN],
-            )
+            .get(id=problem_id)
         )
     except Problem.DoesNotExist as exc:
         raise HttpError(404, "문제를 찾을 수 없습니다.") from exc
-
-    if problem.status == Problem.Status.HIDDEN and not ClassroomSubmission.objects.filter(
-        problem=problem, member=member
-    ).exists():
-        raise HttpError(404, "문제를 찾을 수 없습니다.") from None
-
-    return problem
 
 
 @router.get(
@@ -1543,10 +1557,9 @@ def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
             class_name=class_obj.name,
             problem=_serialize_problem_mine(problem, passed=False),
             submissions=[],
-            member_expelled=False,
-            archived=class_obj.archived_at is not None,
-            problem_hidden=False,
-            viewing_as_instructor=True,
+            # 강사는 참여자가 아니다 — 보관·내보냄·숨김 판정 밖의 별도
+            # 사유다(#439, `classroom.participation` docstring).
+            submit_blocked_reason=SUBMIT_BLOCKED_VIEWING_AS_INSTRUCTOR,
             instructor_problem_status=problem.status,
         )
 
@@ -1583,17 +1596,10 @@ def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
         ),
         submissions=serialized_submissions,
         # 내보내진 사람도 지난 시도는 그대로 읽되(#300 AC), 화면이 제출
-        # 수단을 감추고 이유를 말해 줄 수 있도록 신호만 얹는다 — 막는
-        # 문 자체는 여전히 `create_classroom_submission`의 403이다.
-        member_expelled=member.expelled_at is not None,
-        # 보관된 클래스도 같은 이유로 신호만 얹는다(#294, #338) — 실제 문은
-        # 여전히 `create_classroom_submission`의 403이다.
-        archived=member.classroom.archived_at is not None,
-        # 강사가 숨긴 문제인가(#405) — 참이면 화면이 제출 칸 대신 안내를
-        # 보인다. 여기 닿았다는 것 자체가 이미 이 참여자가 한 번은 낸
-        # 적이 있다는 뜻이다(`_get_visible_problem_for_participant_or_404`).
-        # 실제 문은 여전히 `create_classroom_submission`의 403이다.
-        problem_hidden=problem.status == Problem.Status.HIDDEN,
+        # 수단을 감추고 이유를 말해 줄 수 있도록 이유 하나만 얹는다(#439,
+        # 우선순위는 보관 → 내보냄 → 숨김) — 막는 문 자체는 여전히
+        # `create_classroom_submission`의 403이다.
+        submit_blocked_reason=participant_submit_blocked_reason(member.classroom, member, problem),
     )
 
 
@@ -1629,19 +1635,21 @@ def create_classroom_submission(
     member = _get_member_or_404(class_id, request.auth_user.id)
     problem = _get_visible_problem_for_participant_or_404(class_id, problem_id, member)
 
-    if member.classroom.archived_at is not None:
+    # 낼 수 있는가는 참여 정책 모듈이 한 곳에서 답한다(#439) — 우선순위는
+    # 보관 → 내보냄 → 숨김이고, 화면의 `submit_blocked_reason`과 여기 문이
+    # 같은 기준이어야 어긋나지 않는다.
+    blocked_reason = participant_submit_blocked_reason(member.classroom, member, problem)
+    if blocked_reason == SUBMIT_BLOCKED_ARCHIVED:
         # #294 AC "보관된 클래스에는 새 제출을 낼 수 없다" — 지난 시도는
         # 그대로 읽히므로(`get_my_problem`) 이 엔드포인트만 막는다.
         raise HttpError(403, "이 클래스는 보관되어 새 제출을 받지 않습니다.")
-
-    if member.expelled_at is not None:
+    if blocked_reason == SUBMIT_BLOCKED_EXPELLED:
         # ClassMember.expelled_at의 docstring이 이 엔드포인트를 지목해 둔
         # 자리다 — 행은 지우지 않되 새 제출만 막는다. 강사가 이미 그 사실을
         # 아는 사람에게는 404(존재 자체를 숨김)보다 403(권한이 없다는 것을
         # 안다)이 더 정직하다.
         raise HttpError(403, "더 이상 이 클래스의 참여자가 아닙니다.")
-
-    if problem.status == Problem.Status.HIDDEN:
+    if blocked_reason == SUBMIT_BLOCKED_HIDDEN:
         # 강사가 거둔 문제다(#405) — 낸 적 있는 사람만 여기 닿는다
         # (`_get_visible_problem_for_participant_or_404`), 그래도 새로
         # 낼 수는 없다. 다시 열면(`reopen_problem`) 이 분기를 벗어난다.
@@ -1761,15 +1769,14 @@ def copy_problem(request: HttpRequest, class_id: int, problem_id: int, payload: 
     이유).
 
     **대상 클래스가 보관됐으면 403이다**(#326 AC "보관된 클래스에서는
-    가져올 수 없다") — `problem_templates.import_template`이 이미 지키는
-    같은 규칙을 여기서도 지킨다: 보관은 그 클래스에 새 내용이 느는 길을
-    전부 닫는다는 뜻이라 복사도 예외가 아니다."""
+    가져올 수 없다", #438) — `classroom.participation.assert_class_mutable`이
+    `problem_templates.import_template`과 같은 규칙을 여기서도 지킨다: 보관은
+    읽기 전용이라는 뜻이라 복사도 예외가 아니다."""
 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problem = _get_owned_problem_or_404(class_obj, problem_id)
     target_class = _get_owned_class_or_404(payload.target_class_id, request.auth_user.id)
-    if target_class.archived_at is not None:
-        raise HttpError(403, "이 클래스는 보관되어 더 이상 가져올 수 없습니다.")
+    assert_class_mutable(target_class)
 
     copy = copy_problem_to_class(problem, target_class)
     return 201, _serialize_problem(copy, target_class)
@@ -1795,6 +1802,7 @@ def create_checklist_item(
 ):
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problem = _get_owned_problem_or_404(class_obj, problem_id)
+    assert_class_mutable(class_obj)
 
     next_order = problem.checklist_items.count()
     item = ChecklistItem.objects.create(
@@ -1816,6 +1824,7 @@ def reorder_checklist_items(
 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problem = _get_owned_problem_or_404(class_obj, problem_id)
+    assert_class_mutable(class_obj)
     items = {i.id: i for i in problem.checklist_items.all()}
 
     if set(payload.item_ids) != set(items):
@@ -1832,7 +1841,7 @@ def reorder_checklist_items(
 
 @router.patch(
     "/classes/{class_id}/problems/{problem_id}/checklist-items/{item_id}",
-    response={200: ChecklistItemOut, 404: ErrorOut},
+    response={200: ChecklistItemOut, 404: ErrorOut, 422: ErrorOut},
     auth=jwt_auth,
 )
 def update_checklist_item(
@@ -1842,9 +1851,18 @@ def update_checklist_item(
     item_id: int,
     payload: ChecklistItemPatchIn,
 ):
+    """열린·숨긴 문제는 필수 항목을 하나 이상 유지해야 한다(#440) — 마지막
+    필수 항목을 필수 해제하면 422로 거절한다(초안은 예외, `classroom.
+    problem_transitions.assert_required_item_floor`)."""
+
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problem = _get_owned_problem_or_404(class_obj, problem_id)
     item = _get_owned_checklist_item_or_404(problem, item_id)
+    assert_class_mutable(class_obj)
+
+    if payload.required is False and item.required:
+        remaining = problem.checklist_items.filter(required=True).exclude(id=item.id).count()
+        assert_required_item_floor(problem, remaining_required_count=remaining)
 
     update_fields = []
     if payload.label is not None:
@@ -1860,13 +1878,23 @@ def update_checklist_item(
 
 @router.delete(
     "/classes/{class_id}/problems/{problem_id}/checklist-items/{item_id}",
-    response={204: None, 404: ErrorOut},
+    response={204: None, 404: ErrorOut, 422: ErrorOut},
     auth=jwt_auth,
 )
 def delete_checklist_item(request: HttpRequest, class_id: int, problem_id: int, item_id: int):
+    """열린·숨긴 문제의 마지막 필수 항목은 지울 수 없다(#440) —
+    `assert_required_item_floor`와 같은 이유, `update_checklist_item`과
+    같은 규율(초안은 예외)."""
+
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problem = _get_owned_problem_or_404(class_obj, problem_id)
     item = _get_owned_checklist_item_or_404(problem, item_id)
+    assert_class_mutable(class_obj)
+
+    if item.required:
+        remaining = problem.checklist_items.filter(required=True).exclude(id=item.id).count()
+        assert_required_item_floor(problem, remaining_required_count=remaining)
+
     item.delete()
     return 204, None
 

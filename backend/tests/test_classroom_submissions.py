@@ -337,7 +337,7 @@ def test_expelled_members_problem_view_signals_why_they_cannot_submit(client, db
     _join(client, participant["access"], _join_code(client, instructor["access"], class_id))
 
     mine_before = client.get(_mine_url(class_id, problem_id), **_auth_header(participant["access"]))
-    assert mine_before.json()["member_expelled"] is False
+    assert mine_before.json()["submit_blocked_reason"] is None
 
     members = client.get(f"{CLASSES_URL}/{class_id}/members", **_auth_header(instructor["access"]))
     member_id = next(m["id"] for m in members.json() if not m["is_instructor"])
@@ -348,7 +348,7 @@ def test_expelled_members_problem_view_signals_why_they_cannot_submit(client, db
     )
 
     mine_after = client.get(_mine_url(class_id, problem_id), **_auth_header(participant["access"]))
-    assert mine_after.json()["member_expelled"] is True
+    assert mine_after.json()["submit_blocked_reason"] == "expelled"
 
 
 def test_expelled_member_still_sees_the_problem_list(client, db):

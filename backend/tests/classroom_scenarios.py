@@ -123,6 +123,26 @@ def patch_class(client, access: str, class_id: int, payload: dict) -> dict:
     return response.json()
 
 
+def archive_class(client, access: str, class_id: int) -> dict:
+    response = client.post(
+        f"{CLASSES_URL}/{class_id}/archive",
+        content_type="application/json",
+        **auth_header(access),
+    )
+    assert response.status_code == 200, response.content
+    return response.json()
+
+
+def unarchive_class(client, access: str, class_id: int) -> dict:
+    response = client.post(
+        f"{CLASSES_URL}/{class_id}/unarchive",
+        content_type="application/json",
+        **auth_header(access),
+    )
+    assert response.status_code == 200, response.content
+    return response.json()
+
+
 def join_code(client, access: str, class_id: int) -> str:
     return get_class(client, access, class_id)["join_code"]
 

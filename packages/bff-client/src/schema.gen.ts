@@ -590,12 +590,18 @@ export interface paths {
          *     상단 docstring, `reorder_problems`와 같은 이유).
          *
          *     **지금 이름과 편집 칸을 숨길 신호도 함께 싣는다**(#372) — 이 화면
-         *     위쪽의 인라인 이름 편집 칸이 그 값을 초기값으로 쓴다. `get_my_problem`이
-         *     `member_expelled`·`archived`를 싣는 것과 같은 이유다.
+         *     위쪽의 인라인 이름 편집 칸이 그 값을 초기값으로 쓴다(`get_my_problem`이
+         *     `submit_blocked_reason`으로 같은 종류의 신호를 싣는 것과 같은 이유,
+         *     #439).
          *
          *     **한 번이라도 낸 숨긴 문제는 `hidden_problems`에 따로 실린다**(#406) —
          *     열린 목록(`problems`)과 같은 방식으로 통과 여부를 계산하지만, 시도가
          *     없는 숨긴 문제는 이 묶음에도 들지 않는다(#405 「존재 숨김」 규칙).
+         *
+         *     **이 목록과 문제 상세가 같은 존재 판정을 쓴다**(#439 AC "내 문제 목록에
+         *     보이는 문제와 상세로 열 수 있는 문제가 언제나 같다") —
+         *     `classroom.participation.visible_problems_queryset`이 열림·숨김 두
+         *     묶음을 한 질의로 내려주고, 여기서는 상태로만 갈라 둘로 쪼갠다.
          */
         get: operations["classroom_api_list_my_problems"];
         put?: never;
@@ -717,11 +723,21 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Delete Checklist Item */
+        /**
+         * Delete Checklist Item
+         * @description 열린·숨긴 문제의 마지막 필수 항목은 지울 수 없다(#440) —
+         *     `assert_required_item_floor`와 같은 이유, `update_checklist_item`과
+         *     같은 규율(초안은 예외).
+         */
         delete: operations["classroom_api_delete_checklist_item"];
         options?: never;
         head?: never;
-        /** Update Checklist Item */
+        /**
+         * Update Checklist Item
+         * @description 열린·숨긴 문제는 필수 항목을 하나 이상 유지해야 한다(#440) — 마지막
+         *     필수 항목을 필수 해제하면 422로 거절한다(초안은 예외, `classroom.
+         *     problem_transitions.assert_required_item_floor`).
+         */
         patch: operations["classroom_api_update_checklist_item"];
         trace?: never;
     };
@@ -743,9 +759,9 @@ export interface paths {
          *     이유).
          *
          *     **대상 클래스가 보관됐으면 403이다**(#326 AC "보관된 클래스에서는
-         *     가져올 수 없다") — `problem_templates.import_template`이 이미 지키는
-         *     같은 규칙을 여기서도 지킨다: 보관은 그 클래스에 새 내용이 느는 길을
-         *     전부 닫는다는 뜻이라 복사도 예외가 아니다.
+         *     가져올 수 없다", #438) — `classroom.participation.assert_class_mutable`이
+         *     `problem_templates.import_template`과 같은 규칙을 여기서도 지킨다: 보관은
+         *     읽기 전용이라는 뜻이라 복사도 예외가 아니다.
          */
         post: operations["classroom_api_copy_problem"];
         delete?: never;
@@ -818,7 +834,8 @@ export interface paths {
         /**
          * Open Problem
          * @description 초안을 연다. 필수 체크리스트 항목이 하나도 없으면 통과가 정의되지
-         *     않아 막는다(#283 AC).
+         *     않아 막는다(#283 AC). 전이 표(`classroom.problem_transitions`, #440)가
+         *     「초안에서만」과 「필수 항목이 있어야」 두 조건을 함께 정한다.
          */
         post: operations["classroom_api_open_problem"];
         delete?: never;
@@ -1155,10 +1172,10 @@ export interface paths {
          * @description 자기 클래스로 가져온다(#316) — 가져온 문제는 초안이고, 체크리스트는
          *     순서 그대로 따라오며, 채점 모델은 대상 클래스의 기본값을 따른다.
          *
-         *     **보관된 클래스로는 가져올 수 없다** — 보관은 새 가입·새 제출만 막는
-         *     것이 아니라 그 클래스에 새 내용이 생기는 길 전체를 닫는다는 뜻이다
-         *     (`join_class`·`create_classroom_submission`과 같은 403, `Class.
-         *     archived_at` docstring).
+         *     **보관된 클래스로는 가져올 수 없다**(#438) — 보관은 읽기 전용이라는
+         *     뜻이고, 가져오기는 그 클래스에 새 내용을 만드는 일이다
+         *     (`classroom.participation.assert_class_mutable`, `Class.archived_at`
+         *     docstring).
          */
         post: operations["classroom_template_api_import_template"];
         delete?: never;
@@ -4517,8 +4534,8 @@ export interface components {
          * ClassroomProblemMineOut
          * @description 참여자가 보는 문제 하나(#286) — 강사 전용 `ProblemOut`과 달리 `status`가
          *     없다. 열린 문제와, 낸 적 있는 숨긴 문제 둘 다 이 자리에 닿지만(#405) 그
-         *     구별은 `ClassroomProblemSubmissionsOut.problem_hidden`이 대신 진다 — 이
-         *     조각 자체는 여전히 상태를 모른다.
+         *     구별은 `ClassroomProblemSubmissionsOut.submit_blocked_reason`(#439)이
+         *     대신 진다 — 이 조각 자체는 여전히 상태를 모른다.
          *
          *     이름이 `Classroom` 접두어를 든다 — `contests.submission_schemas.
          *     ProblemOut`은 없지만 `SubmissionIn`·`SubmissionOut`은 있고, django-ninja가
@@ -4581,33 +4598,15 @@ export interface components {
         };
         /** ClassroomProblemSubmissionsOut */
         ClassroomProblemSubmissionsOut: {
-            /**
-             * Archived
-             * @default false
-             */
-            archived: boolean;
             /** Class Name */
             class_name: string;
             /** Instructor Problem Status */
             instructor_problem_status?: string | null;
-            /**
-             * Member Expelled
-             * @default false
-             */
-            member_expelled: boolean;
             problem: components["schemas"]["ClassroomProblemMineOut"];
-            /**
-             * Problem Hidden
-             * @default false
-             */
-            problem_hidden: boolean;
             /** Submissions */
             submissions: components["schemas"]["ClassroomSubmissionOut"][];
-            /**
-             * Viewing As Instructor
-             * @default false
-             */
-            viewing_as_instructor: boolean;
+            /** Submit Blocked Reason */
+            submit_blocked_reason?: string | null;
         };
         /** ClassroomRosterGridOut */
         ClassroomRosterGridOut: {
@@ -6368,6 +6367,11 @@ export interface components {
         /** ProblemOut */
         ProblemOut: {
             /**
+             * Available Transitions
+             * @default []
+             */
+            available_transitions: components["schemas"]["ProblemTransitionOut"][];
+            /**
              * Checklist Items
              * @default []
              */
@@ -6531,6 +6535,21 @@ export interface components {
             taken_down: boolean;
             /** Title */
             title: string;
+        };
+        /**
+         * ProblemTransitionOut
+         * @description 전이 표(`classroom.problem_transitions`) 한 줄(#440) — 강사용 문제
+         *     응답이 「지금 상태에서 나갈 수 있는 전이」를 이 모양으로 싣는다. 지금
+         *     그래프는 상태마다 나가는 간선이 하나뿐이라 `ProblemOut.
+         *     available_transitions`는 언제나 원소 하나짜리 목록이다.
+         */
+        ProblemTransitionOut: {
+            /** Blocked Reason */
+            blocked_reason?: string | null;
+            /** Name */
+            name: string;
+            /** To State */
+            to_state: string;
         };
         /**
          * ProfileIn
@@ -8546,6 +8565,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorOut"];
                 };
             };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
         };
     };
     classroom_api_update_checklist_item: {
@@ -8576,6 +8604,15 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
