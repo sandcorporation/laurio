@@ -47,7 +47,10 @@ export function SiteHeader({ themePreference }: { themePreference: ThemePreferen
 
   return (
     <header data-testid="site-header" className="border-b border-rule bg-surface">
-      <div className="mx-auto flex h-[72px] max-w-[1200px] flex-wrap items-center justify-between gap-3 px-6">
+      {/* 높이를 고정하지 않는다(#444 통합) — 좁은 화면에서 메뉴가 줄을 바꾸면 고정 높이
+          밖으로 넘쳐 본문 제목을 덮었다(검색 아이콘이 더해진 뒤 390px 에서 「로그인」이
+          셋째 줄로 밀렸다). 최소 높이만 두고 줄이 늘면 헤더가 함께 자란다. */}
+      <div className="mx-auto flex min-h-[72px] max-w-[1200px] flex-wrap items-center justify-between gap-3 px-6 py-3">
         <Link
           href="/"
           data-testid="header-brand"
