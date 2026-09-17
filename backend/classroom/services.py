@@ -13,9 +13,20 @@
 **문법 검사 기본 항목의 켜짐 여부도 채점 지침과 같은 이유로 따라간다**
 (#410, CONTEXT.md 「문법 검사」) — "무엇을 통과로 볼지"의 일부이지, 채점
 모델처럼 가져간 사람의 청구서에 영향을 주는 값이 아니다.
+
+**어느 필드가 어느 경로로 옮겨지는지는 `PROBLEM_FIELD_TRANSFER_TABLE` 한
+곳에 적혀 있다**(#441, 부모 #432 「복사·템플릿 필드 표」). 이 파일의 여섯
+함수(`copy_problem_to_class`·`copy_class`·`publish_problem_as_template`·
+`import_problem_template`·`publish_class_as_template`·
+`import_class_template`)는 모두 그 표에서 뽑은 필드만 옮기고, 대상이
+달라지는 자리(classroom·status·order)만 직접 정한다. `Problem`에 필드를
+더하고 표에 적지 않으면 `tests/test_classroom_problem_field_transfer_table.py`
+의 구조 검사가 실패한다.
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass
 
 from django.db import IntegrityError, transaction
 
@@ -29,6 +40,90 @@ from .models import (
     ProblemTemplate,
     ProblemTemplateChecklistItem,
 )
+
+
+@dataclass(frozen=True)
+class ProblemFieldTransferRule:
+    """`Problem`의 구체 필드 하나가 여섯 경로에서 옮겨지는지 적어 두는 규칙 한
+    줄(#441, 부모 #385/#432 Implementation Decisions 「복사·템플릿 필드 표」).
+
+    `copies`는 문제 복사(`copy_problem_to_class`)·클래스 복사(`copy_class`,
+    안에서 앞의 함수를 부른다)에서 옮기는가, `templates`는 문제·클래스
+    템플릿의 공개·가져오기 네 경로에서 옮기는가다. 둘 다 거짓이면 그 필드는
+    여섯 경로 어디서도 원본 값을 그대로 옮기지 않는다는 뜻이다 — 새 행은
+    자기만의 값(기본값 또는 호출하는 쪽이 직접 정하는 값)으로 시작한다."""
+
+    field: str
+    copies: bool
+    templates: bool
+    note: str = ""
+
+
+#: `test_classroom_problem_field_transfer_table.py`의 구조 검사가 `Problem`의
+#: 구체 필드(`Problem._meta.get_fields()`에서 `concrete`인 것) 전부가 여기 한
+#: 줄씩 있는지를 확인한다 — 표에 적지 않은 새 필드가 생기면 그 테스트가
+#: 빨개진다. 옮기는 규칙은 지금까지의 동작 그대로다: 채점 모델은 복사
+#: 때만, 추론 강도는 어디서도, 나머지 설정(형식·채점 지침·문법 검사)은
+#: 모두 옮긴다.
+PROBLEM_FIELD_TRANSFER_TABLE: tuple[ProblemFieldTransferRule, ...] = (
+    ProblemFieldTransferRule("id", copies=False, templates=False, note="식별자 — 새 행은 새 pk를 받는다"),
+    ProblemFieldTransferRule(
+        "classroom", copies=False, templates=False, note="대상 클래스는 호출하는 쪽이 직접 정한다"
+    ),
+    ProblemFieldTransferRule("title", copies=True, templates=True),
+    ProblemFieldTransferRule("description", copies=True, templates=True),
+    ProblemFieldTransferRule("submission_formats", copies=True, templates=True),
+    ProblemFieldTransferRule(
+        "status", copies=False, templates=False, note="복사본·가져온 문제는 언제나 초안으로 시작한다"
+    ),
+    ProblemFieldTransferRule(
+        "order", copies=False, templates=False, note="대상 클래스 안에서 경로마다 새로 매겨진다"
+    ),
+    ProblemFieldTransferRule(
+        "model", copies=True, templates=False, note="복사 때만 — 템플릿은 청구서 결정을 가져간 사람에게 둔다"
+    ),
+    ProblemFieldTransferRule(
+        "scoring_model_rejected_at",
+        copies=False,
+        templates=False,
+        note="벤더 거부 시각 — 새 문제는 아직 거부된 적이 없다",
+    ),
+    ProblemFieldTransferRule(
+        "reasoning_effort",
+        copies=False,
+        templates=False,
+        note="비용 결정은 가져간 사람이 한다 — 어디서도 옮기지 않는다",
+    ),
+    ProblemFieldTransferRule("grading_strictness", copies=True, templates=True),
+    ProblemFieldTransferRule("grading_guideline_text", copies=True, templates=True),
+    ProblemFieldTransferRule("syntax_check_enabled", copies=True, templates=True),
+    ProblemFieldTransferRule("created_at", copies=False, templates=False, note="시각 — auto_now_add"),
+    ProblemFieldTransferRule("updated_at", copies=False, templates=False, note="시각 — auto_now"),
+)
+
+
+def _problem_copy_fields(source) -> dict:
+    """`PROBLEM_FIELD_TRANSFER_TABLE`에서 복사 때 옮기는 필드만 `source`에서
+    읽어 담는다 — 문제 복사·클래스 복사가 함께 쓴다."""
+
+    return {
+        rule.field: getattr(source, rule.field)
+        for rule in PROBLEM_FIELD_TRANSFER_TABLE
+        if rule.copies
+    }
+
+
+def _problem_template_fields(source) -> dict:
+    """`PROBLEM_FIELD_TRANSFER_TABLE`에서 템플릿 공개·가져오기 때 옮기는
+    필드만 읽어 담는다. `source`는 `Problem`이거나(공개) `ProblemTemplate`·
+    `ClassTemplateProblem`(가져오기)이다 — 셋 다 표에 적힌 필드 이름을
+    그대로 공유한다."""
+
+    return {
+        rule.field: getattr(source, rule.field)
+        for rule in PROBLEM_FIELD_TRANSFER_TABLE
+        if rule.templates
+    }
 
 
 def pending_reported_templates() -> list[ProblemTemplate]:
@@ -67,15 +162,9 @@ def copy_problem_to_class(problem: Problem, target_class: Class) -> Problem:
 
     copy = Problem.objects.create(
         classroom=target_class,
-        title=problem.title,
-        description=problem.description,
-        submission_formats=problem.submission_formats,
         status=Problem.Status.DRAFT,
         order=target_class.problems.count(),
-        model=problem.model,
-        grading_strictness=problem.grading_strictness,
-        grading_guideline_text=problem.grading_guideline_text,
-        syntax_check_enabled=problem.syntax_check_enabled,
+        **_problem_copy_fields(problem),
     )
     ChecklistItem.objects.bulk_create(
         ChecklistItem(
@@ -156,12 +245,7 @@ def publish_problem_as_template(
                 source_problem=problem,
                 published_by_id=published_by_id,
                 publisher_display_name=publisher_display_name,
-                title=problem.title,
-                description=problem.description,
-                submission_formats=problem.submission_formats,
-                grading_strictness=problem.grading_strictness,
-                grading_guideline_text=problem.grading_guideline_text,
-                syntax_check_enabled=problem.syntax_check_enabled,
+                **_problem_template_fields(problem),
             )
             ProblemTemplateChecklistItem.objects.bulk_create(
                 ProblemTemplateChecklistItem(
@@ -185,14 +269,9 @@ def import_problem_template(template: ProblemTemplate, target_class: Class) -> P
 
     problem = Problem.objects.create(
         classroom=target_class,
-        title=template.title,
-        description=template.description,
-        submission_formats=template.submission_formats,
         status=Problem.Status.DRAFT,
         order=target_class.problems.count(),
-        grading_strictness=template.grading_strictness,
-        grading_guideline_text=template.grading_guideline_text,
-        syntax_check_enabled=template.syntax_check_enabled,
+        **_problem_template_fields(template),
     )
     ChecklistItem.objects.bulk_create(
         ChecklistItem(problem=problem, label=item.label, required=item.required, order=item.order)
@@ -232,13 +311,8 @@ def publish_class_as_template(
             for problem in class_obj.problems.order_by("order", "id"):
                 template_problem = ClassTemplateProblem.objects.create(
                     template=template,
-                    title=problem.title,
-                    description=problem.description,
-                    submission_formats=problem.submission_formats,
-                    grading_strictness=problem.grading_strictness,
-                    grading_guideline_text=problem.grading_guideline_text,
-                    syntax_check_enabled=problem.syntax_check_enabled,
                     order=problem.order,
+                    **_problem_template_fields(problem),
                 )
                 ClassTemplateProblemChecklistItem.objects.bulk_create(
                     ClassTemplateProblemChecklistItem(
@@ -269,14 +343,9 @@ def import_class_template(template: ClassTemplate, *, instructor_id: int, name: 
     for template_problem in template.problems.order_by("order", "id"):
         problem = Problem.objects.create(
             classroom=new_class,
-            title=template_problem.title,
-            description=template_problem.description,
-            submission_formats=template_problem.submission_formats,
             status=Problem.Status.DRAFT,
             order=template_problem.order,
-            grading_strictness=template_problem.grading_strictness,
-            grading_guideline_text=template_problem.grading_guideline_text,
-            syntax_check_enabled=template_problem.syntax_check_enabled,
+            **_problem_template_fields(template_problem),
         )
         ChecklistItem.objects.bulk_create(
             ChecklistItem(problem=problem, label=item.label, required=item.required, order=item.order)
