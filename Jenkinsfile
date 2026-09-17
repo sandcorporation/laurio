@@ -162,6 +162,15 @@ pipeline {
         sh "sh ./deploy.sh ${deployTarget} mark"
       }
     }
+
+    // 옛 커밋의 ghcr 이미지·오래된 빌드 캐시를 지운다(deploy.sh prune). 실패해도
+    // 배포를 실패로 만들지 않는다 — 명령 자신이 언제나 0 으로 끝난다.
+    stage('정리') {
+      when { expression { env.SKIP_DEPLOY != 'true' } }
+      steps {
+        sh "sh ./deploy.sh ${deployTarget} prune"
+      }
+    }
   }
 
   post {

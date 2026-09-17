@@ -630,6 +630,43 @@ cmd_mark() {
   log "배포 표식: $(cat "$DEPLOYED")"
 }
 
+# ------------------------------------------- 쓰이지 않는 이미지·캐시를 지운다
+
+# 배포가 끝나면 이 호스트의 도커 디스크를 비운다(2026-09-17). 커밋마다 ghcr 에서
+# 새 태그를 받으니 옛 커밋의 이미지가 그대로 쌓이고(서비스 다섯 × 배포 수), oracle 에는
+# ghcr 로 옮기기 전 이 호스트에서 굽던 빌드 캐시가 남아 있었다(정리 전 실측: sub 이미지
+# 78GB·빌드 캐시 107GB, oracle 이미지 76GB·빌드 캐시 47GB).
+#
+# - **이 저장소의 ghcr 이미지 중 이번 커밋 것이 아닌 것**을 지운다. 돌고 있는 컨테이너가
+#   쓰는 이미지(이번 배포에서 바뀌지 않아 옛 태그로 도는 서비스)는 도커가 거절하므로
+#   남는다 — 그 거절을 삼킨다. 되돌릴 때는 ghcr 에서 다시 받으면 된다.
+# - 태그를 잃은 이미지와 **사흘(72h) 넘게 안 쓴 빌드 캐시**를 지운다. registry 모드에서는
+#   이 호스트가 굽지 않지만, sub 는 CI 테스트 잡이 같은 데몬에서 굽고 비상구
+#   (`DEPLOY_IMAGE_SOURCE=build`)도 있어 최근 캐시는 남긴다.
+#
+# 정리는 배포의 일부가 아니다 — 무엇이 실패해도 배포를 실패로 만들지 않는다. 다른
+# 프로젝트의 이미지는 건드리지 않는다(`image prune -a` 를 쓰지 않는 이유).
+cmd_prune() {
+  repo="${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}"
+  log "쓰이지 않는 이미지·빌드 캐시 정리 (남기는 태그 $(echo "$CODEMIT_IMAGE_TAG" | cut -c1-12))"
+  removed=0
+  kept=0
+  for ref in $(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null \
+      | grep "^${repo}/codemit-" | grep -v "^${repo}/codemit-buildcache:" \
+      | grep -v ":${CODEMIT_IMAGE_TAG}-"); do
+    if docker rmi "$ref" >/dev/null 2>&1; then
+      removed=$((removed + 1))
+    else
+      kept=$((kept + 1))
+    fi
+  done
+  log "옛 커밋 이미지: ${removed}개 지움, ${kept}개는 컨테이너가 쓰는 중이라 남김"
+  docker image prune -f >/dev/null 2>&1 || true
+  docker builder prune -f --filter until=72h 2>/dev/null | tail -1 || true
+  docker system df 2>/dev/null || true
+  return 0
+}
+
 # ------------------------------------------------------------------ 진입점
 
 case "$COMMAND" in
@@ -652,6 +689,7 @@ case "$COMMAND" in
     ;;
   reindex) cmd_reindex_search ;;
   mark) cmd_mark ;;
+  prune) cmd_prune ;;
   all)
     cmd_preflight
     cmd_plan
@@ -668,9 +706,10 @@ case "$COMMAND" in
       fi
     fi
     cmd_mark
+    cmd_prune
     ;;
   *)
-    echo "알 수 없는 명령: $COMMAND (preflight|plan|image|pull|build|up|verify|health|reindex|mark|all)"
+    echo "알 수 없는 명령: $COMMAND (preflight|plan|image|pull|build|up|verify|health|reindex|mark|prune|all)"
     exit 2
     ;;
 esac

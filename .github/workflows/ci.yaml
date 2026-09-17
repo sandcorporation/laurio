@@ -1634,6 +1634,20 @@ jobs:
             NEXT_PUBLIC_SENTRY_ENVIRONMENT=staging
             NEXT_PUBLIC_SENTRY_RELEASE=${{ steps.code.outputs.sha }}
 
+      # **빌드가 끝나면 이 러너 호스트의 도커 디스크를 비운다**(2026-09-17). 이 잡의 캐시는
+      # 레지스트리(codemit-buildcache)에 있고, 굽는 데 쓴 buildx 빌더(docker-container)는
+      # setup-buildx-action 의 뒷정리가 상태 볼륨째 지운다 — 호스트에 남는 것은 데몬의 기본
+      # 빌더 캐시와 태그를 잃은 이미지뿐이다. `--builder default` 를 박는 이유: 이 잡에서는
+      # setup-buildx 가 자기 빌더를 기본으로 골라 둬서, 그냥 `docker builder prune` 을 부르면
+      # 곧 지워질 그 빌더만 비운다. 하루(24h) 안에 쓰인 캐시는 남긴다 — 같은 호스트에서 도는
+      # 다른 잡(비상구 sub 에서는 테스트 잡의 compose 빌드)이 그 캐시를 쓴다. 쓰는 중인
+      # 캐시·이미지는 도커가 스스로 건너뛰고, 정리 실패가 빌드 결과를 뒤집지 않게 삼킨다.
+      - name: 쓰이지 않는 이미지·빌드 캐시 정리
+        if: always()
+        run: |
+          docker image prune -f || true
+          docker buildx prune --builder default -f --filter until=24h || true
+
   images-prod:
     # prod(oracle, arm64) 이미지 — 구조는 images-staging 과 같다(주석도 거기). mac 러너는 Apple
     # Silicon 의 Docker Desktop 위에 sub 와 같은 `myoung34/github-runner` 컨테이너(조직 범위,
@@ -1713,6 +1727,47 @@ jobs:
             NEXT_PUBLIC_SENTRY_DSN=${{ vars[format('PROD_SENTRY_DSN_{0}', matrix.dsn)] }}
             NEXT_PUBLIC_SENTRY_ENVIRONMENT=production
             NEXT_PUBLIC_SENTRY_RELEASE=${{ steps.code.outputs.sha }}
+
+      # **빌드가 끝나면 이 러너 호스트의 도커 디스크를 비운다**(2026-09-17). 이 잡의 캐시는
+      # 레지스트리(codemit-buildcache)에 있고, 굽는 데 쓴 buildx 빌더(docker-container)는
+      # setup-buildx-action 의 뒷정리가 상태 볼륨째 지운다 — 호스트에 남는 것은 데몬의 기본
+      # 빌더 캐시와 태그를 잃은 이미지뿐이다. `--builder default` 를 박는 이유: 이 잡에서는
+      # setup-buildx 가 자기 빌더를 기본으로 골라 둬서, 그냥 `docker builder prune` 을 부르면
+      # 곧 지워질 그 빌더만 비운다. 하루(24h) 안에 쓰인 캐시는 남긴다 — 같은 호스트에서 도는
+      # 다른 잡(비상구 sub 에서는 테스트 잡의 compose 빌드)이 그 캐시를 쓴다. 쓰는 중인
+      # 캐시·이미지는 도커가 스스로 건너뛰고, 정리 실패가 빌드 결과를 뒤집지 않게 삼킨다.
+      - name: 쓰이지 않는 이미지·빌드 캐시 정리
+        if: always()
+        run: |
+          docker image prune -f || true
+          docker buildx prune --builder default -f --filter until=24h || true
+
+  sub-docker-cleanup:
+    # **sub 에서 이미지를 굽는 잡들이 끝나면 호스트의 도커 디스크를 비운다**(2026-09-17).
+    # compose 로 이미지를 굽는 잡(celery-broker·e2e 셋·deploy-guard 셋)이 커밋마다 같은
+    # 이름(`codemit-ci-*:latest` 등)으로 다시 구워, 옛 이미지는 태그를 잃은 채 남고 빌드
+    # 캐시는 계속 쌓인다 — 정리 전 실측이 빌드 캐시 107GB·이미지 78GB, 루트 디스크 86% 였다.
+    # 러너 세 대가 같은 호스트 데몬(docker.sock)을 쓰므로 잡 하나가 한 번 비우면 된다.
+    # 하루(24h) 안에 쓰인 캐시는 남긴다 — 다음 커밋의 빌드가 그 캐시로 빨라진다. 동시에 도는
+    # 다른 실행이 쓰는 캐시·이미지는 도커가 건너뛴다. 결과와 무관하게 돈다(`always()`).
+    needs:
+      - celery-broker
+      - frontend-e2e-public
+      - frontend-e2e-operator
+      - frontend-e2e-classroom
+      - frontend-deploy-guard
+      - operator-deploy-guard
+      - classroom-deploy-guard
+    if: always()
+    runs-on: [self-hosted, sub]
+    timeout-minutes: 15
+    steps:
+      - name: 쓰이지 않는 이미지·빌드 캐시 정리
+        run: |
+          docker system df || true
+          docker image prune -f || true
+          docker builder prune -f --filter until=24h || true
+          docker system df || true
 
   deploy-staging:
     # 이미지가 올라가고 **나머지 잡이 전부 초록**이면 sub 의 Jenkins staging 잡(laurio)을
