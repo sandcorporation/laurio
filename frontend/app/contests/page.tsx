@@ -14,7 +14,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { Badge, EmptyState, PageHeader } from "@/app/components/ui";
+import { ContestCard, ContestCardGrid } from "@/app/components/contest-card";
+import { EmptyState, PageHeader } from "@/app/components/ui";
 import { buttonClass } from "@/lib/ui/classnames";
 import {
   CONTESTS_PAGE_SIZE,
@@ -26,13 +27,6 @@ import {
   type ContestSort,
   type DeliverableType,
 } from "@/lib/api/contests";
-import {
-  finishedStatusLabel,
-  formatPrize,
-  formatSubmissionCount,
-  remainingTimeIsImminent,
-  remainingTimeLabel,
-} from "@/lib/contest-format";
 
 // canonical(#394) — 필터·정렬·페이지 쿼리가 무엇이든 이 경로 하나로
 // 정식 주소를 고정한다. 쿼리별로 따로 색인되지 않게 하기 위해서다.
@@ -239,7 +233,7 @@ export default async function ContestsPage({
       <CategoryFilter categories={categories} current={current} />
       <DeliverableTypeFilter deliverableTypes={deliverableTypes} current={current} />
 
-      <ContestTable contests={page.items} />
+      <ContestGrid contests={page.items} />
 
       <Pagination current={current} page={page} />
 
@@ -362,77 +356,18 @@ function DeliverableTypeFilter({
   );
 }
 
-function ContestTable({ contests }: { contests: Contest[] }) {
+// 랜딩(app/page.tsx)과 같은 카드 조각을 쓴다(#448 인수조건) — 예전의 표 모양
+// 줄·헤더 행(공모전/요구형태/상금/마감 네 칸)은 여기서 걷어냈다.
+function ContestGrid({ contests }: { contests: Contest[] }) {
   if (contests.length === 0) {
     return <EmptyState>조건에 맞는 공모전이 없습니다.</EmptyState>;
   }
 
   return (
-    <div className="flex flex-col">
-      <div className="grid grid-cols-[minmax(0,1fr)_210px_150px_88px] gap-6 border-b border-ink px-1 pb-2.5 text-[11px] font-medium tracking-wide text-ink/60">
-        <div>공모전</div>
-        <div>요구형태</div>
-        <div className="text-right">상금</div>
-        <div className="text-right">마감</div>
-      </div>
+    <ContestCardGrid>
       {contests.map((contest) => (
-        <ContestRow key={contest.id} contest={contest} />
+        <ContestCard key={contest.id} contest={contest} />
       ))}
-    </div>
-  );
-}
-
-function ContestRow({ contest }: { contest: Contest }) {
-  const imminent = remainingTimeIsImminent(contest.deadline_at);
-
-  return (
-    <Link
-      href={`/contests/${contest.id}`}
-      data-contest-row={contest.id}
-      className="grid grid-cols-[minmax(0,1fr)_210px_150px_88px] items-center gap-6 border-b border-rule px-1 py-5 hover:bg-surface"
-    >
-      <div className="flex min-w-0 flex-col gap-1.5">
-        <div className="flex items-center gap-2">
-          <span className="truncate text-[15.5px] font-medium">{contest.title}</span>
-          {contest.is_free && <Badge tone="verified">무료 공모전</Badge>}
-          {!contest.is_free && contest.is_underfunded && <Badge tone="attention">상금미달</Badge>}
-          {/* #227 인수조건 — 끝난 공모전이 목록에 나올 때는 끝났다는 것이 보인다.
-              선정완료·심사종료도 마찬가지다(예전에는 "마감"만 배지가 있었다 —
-              그때는 그 둘이 기본 목록에 아예 안 나와 드러나지 않았던 격차다). */}
-          {finishedStatusLabel(contest.status) && <Badge>{finishedStatusLabel(contest.status)}</Badge>}
-        </div>
-        <div className="text-xs text-ink/60">
-          {contest.category.name}
-          {!contest.is_free && contest.is_underfunded && (
-            <> · 최소 제안 {formatPrize(contest.required_minimum_prize)}원</>
-          )}
-        </div>
-        <div
-          data-testid="submission-count"
-          data-submission-count={contest.submission_count}
-          className="text-xs text-ink/60"
-        >
-          {formatSubmissionCount(contest.submission_count)}
-        </div>
-      </div>
-      <div className="flex flex-wrap gap-1.5">
-        {contest.deliverable_types.map((dt) => (
-          <Badge key={dt.id}>{dt.name}</Badge>
-        ))}
-      </div>
-      <div
-        className={`text-right font-mono text-base font-medium ${
-          !contest.is_free && contest.is_underfunded ? "text-attention" : ""
-        }`}
-      >
-        {contest.is_free ? "무료" : formatPrize(contest.prize)}
-      </div>
-      <div
-        data-testid="deadline"
-        className={`text-right font-mono text-sm ${imminent ? "font-semibold text-attention" : "text-ink/70"}`}
-      >
-        {remainingTimeLabel(contest.deadline_at)}
-      </div>
-    </Link>
+    </ContestCardGrid>
   );
 }

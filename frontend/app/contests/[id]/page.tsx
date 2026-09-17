@@ -123,7 +123,12 @@ export default async function ContestDetailPage({ params }: { params: Promise<Pa
           </p>
         )}
 
-        <section className="grid grid-cols-3 gap-6 border-b border-rule pb-6">
+        {/* 코디네이터 메모(#448 후속) — 세 칸이 390px 에서 겹쳤다: 상금 칸의
+            `text-2xl font-mono`가 약 98px 칸(3열 균등폭에서 gap-6 을 뺀 값)보다
+            넓어, 'D-5' 같은 짧은 값에서도 재현됐다. `sm` 아래는 한 열로 접어
+            칸마다 전체 폭을 쓰게 한다 — 카드 작업(#448)과 같은 종류의 모바일
+            넘침이다. */}
+        <section className="grid grid-cols-1 gap-4 border-b border-rule pb-6 sm:grid-cols-3 sm:gap-6">
           <div className="flex flex-col gap-1">
             <span className="text-xs tracking-wide text-ink/60">상금</span>
             {contest.is_free ? (

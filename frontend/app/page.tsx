@@ -34,14 +34,9 @@ export const metadata: Metadata = { alternates: { canonical: "/" } };
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import { Badge, EmptyState, PageHeader, PageShell } from "@/app/components/ui";
-import { fetchHomeCuration, type Contest, type HomeCurationGroup } from "@/lib/api/contests";
-import {
-  formatPrize,
-  formatSubmissionCount,
-  remainingTimeIsImminent,
-  remainingTimeLabel,
-} from "@/lib/contest-format";
+import { ContestCard, ContestCardGrid } from "@/app/components/contest-card";
+import { EmptyState, PageHeader } from "@/app/components/ui";
+import { fetchHomeCuration, type HomeCurationGroup } from "@/lib/api/contests";
 import { contestProductEnabled } from "@/lib/contest-switch";
 import { HOME_BUCKET_EMPTY_MESSAGES, HOME_BUCKET_LABELS } from "@/lib/home-curation";
 
@@ -58,38 +53,40 @@ export default async function Home() {
   // 화면이 실제로 갖지 않은 관계를 지어내게 된다. 빈 화면이 합의된 답이다.
   if (!contestProductEnabled()) {
     return (
-      <PageShell>
+      <main className="mx-auto w-full max-w-[1200px] px-6 py-10">
         <PageHeader title="Codemit" />
-      </PageShell>
+      </main>
     );
   }
 
   const groups = await fetchHomeCuration();
 
   return (
-    <PageShell>
-      <div className="flex flex-col gap-8">
-        <PageHeader
-          title="Codemit"
-          description="발주자가 상금을 걸고 요구사항을 공개하면, 개발자들이 만들어 제출하는 공개 공모전 플랫폼입니다."
-        />
+    // `/contests`(app/contests/page.tsx)와 같은 폭(1200px, 헤더와도 같다) —
+    // 가로형 카드(#448)가 옛 PageShell 의 max-w-3xl(768px) 안에서는 썸네일
+    // 옆 칸이 좁아져 상금·마감 줄이 서로 겹쳤다. 같은 카드 조각을 쓰는 두
+    // 화면이 같은 폭을 쓰지 않을 이유가 없다.
+    <main className="mx-auto flex w-full max-w-[1200px] flex-col gap-8 px-6 py-10">
+      <PageHeader
+        title="Codemit"
+        description="발주자가 상금을 걸고 요구사항을 공개하면, 개발자들이 만들어 제출하는 공개 공모전 플랫폼입니다."
+      />
 
-        {groups.map((group) => (
-          <HomeBucketSection key={group.bucket} group={group} />
-        ))}
+      {groups.map((group) => (
+        <HomeBucketSection key={group.bucket} group={group} />
+      ))}
 
-        {/* 「상금미달」이 참가를 막지 않는다는 도메인 규칙은 /contests(app/contests/page.tsx)와
-            같은 문구로 반복한다 — 액센트 색만으로는 이 규칙이 안 읽힌다. 홈은 하필 그
-            규칙을 가장 모를 첫 방문자가 보는 화면이라, 여기서 빠지면 안 된다. */}
-        <p className="flex items-start gap-2 border-t border-rule pt-4 text-xs leading-relaxed text-ink/60">
-          <span aria-hidden="true">ⓘ</span>
-          <span>
-            「상금미달」은 참가를 막지 않습니다. 선택한 요구형태의 최소 제안 상금 합계에 못
-            미친다는 표시일 뿐이며, 판단은 개발자의 몫입니다.
-          </span>
-        </p>
-      </div>
-    </PageShell>
+      {/* 「상금미달」이 참가를 막지 않는다는 도메인 규칙은 /contests(app/contests/page.tsx)와
+          같은 문구로 반복한다 — 액센트 색만으로는 이 규칙이 안 읽힌다. 홈은 하필 그
+          규칙을 가장 모를 첫 방문자가 보는 화면이라, 여기서 빠지면 안 된다. */}
+      <p className="flex items-start gap-2 border-t border-rule pt-4 text-xs leading-relaxed text-ink/60">
+        <span aria-hidden="true">ⓘ</span>
+        <span>
+          「상금미달」은 참가를 막지 않습니다. 선택한 요구형태의 최소 제안 상금 합계에 못
+          미친다는 표시일 뿐이며, 판단은 개발자의 몫입니다.
+        </span>
+      </p>
+    </main>
   );
 }
 
@@ -114,51 +111,17 @@ function HomeBucketSection({ group }: { group: HomeCurationGroup }) {
           <EmptyState>{HOME_BUCKET_EMPTY_MESSAGES[group.bucket]}</EmptyState>
         </div>
       ) : (
-        <ul data-testid={`home-bucket-${group.bucket}-list`} className="flex flex-col">
-          {group.contests.map((contest) => (
-            <HomeContestRow key={contest.id} contest={contest} />
-          ))}
-        </ul>
+        // 랜딩과 `/contests`가 같은 카드 조각을 쓴다(#448 인수조건) — 이 묶음도
+        // `/contests`(app/contests/page.tsx)와 같은 `ContestCard`/`ContestCardGrid`를
+        // 그대로 가져다 쓴다.
+        <div data-testid={`home-bucket-${group.bucket}-list`}>
+          <ContestCardGrid>
+            {group.contests.map((contest) => (
+              <ContestCard key={contest.id} contest={contest} />
+            ))}
+          </ContestCardGrid>
+        </div>
       )}
     </section>
-  );
-}
-
-function HomeContestRow({ contest }: { contest: Contest }) {
-  const imminent = remainingTimeIsImminent(contest.deadline_at);
-
-  return (
-    <li>
-      <Link
-        href={`/contests/${contest.id}`}
-        data-contest-row={contest.id}
-        className="grid grid-cols-[minmax(0,1fr)_150px_88px] items-center gap-6 border-b border-rule px-1 py-4 hover:bg-surface"
-      >
-        <div className="flex min-w-0 flex-col gap-1">
-          <div className="flex items-center gap-2">
-            <span className="truncate text-[15px] font-medium">{contest.title}</span>
-            {contest.is_underfunded && <Badge tone="attention">상금미달</Badge>}
-          </div>
-          <span className="text-xs text-ink/60">{contest.category.name}</span>
-          <span
-            data-testid="submission-count"
-            data-submission-count={contest.submission_count}
-            className="text-xs text-ink/60"
-          >
-            {formatSubmissionCount(contest.submission_count)}
-          </span>
-        </div>
-        <div
-          className={`text-right font-mono text-sm font-medium ${contest.is_underfunded ? "text-attention" : ""}`}
-        >
-          {formatPrize(contest.prize)}
-        </div>
-        <div
-          className={`text-right font-mono text-sm ${imminent ? "font-semibold text-attention" : "text-ink/70"}`}
-        >
-          {remainingTimeLabel(contest.deadline_at)}
-        </div>
-      </Link>
-    </li>
   );
 }
