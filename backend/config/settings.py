@@ -987,10 +987,18 @@ if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(SELLER_ADAPTER_MODE):
 # 다른 `*_ADAPTER_MODE`와 같은 원칙으로 기본값은 항상 fake다 — pytest·CI·dev는
 # `contests.search.FakeContestSearchAdapter`(DB 포함 검색)로 네트워크 없이 돈다.
 #
+# **설정 이름은 코디네이터가 2026-09-17에 고정했다**(#449 코멘트) — staging·prod의
+# `.env`가 이미 이 이름과 값을 쓴다. 실물은 dotted path
+# `contests.search_opensearch.OpenSearchContestSearch`(모듈
+# `contests/search_opensearch.py`, #450이 만든다)이고, 그 어댑터의 접속 주소는
+# 별도 설정 `OPENSEARCH_URL`이다(staging·prod 는 `http://search:9200`) — 이 설정은
+# #450이 더한다.
+#
 # **여기서는 아직 배포 부팅 가드를 걸지 않는다** — 다른 `*_ADAPTER_MODE`는 이 자리에서
 # `IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(...)`를 바로 거부하지만, 실물
 # OpenSearch 어댑터가 아직 없는 지금 그 가드를 켜면 staging이 이 커밋만으로 부팅을
-# 거부한다. 실물 어댑터와 그 가드는 같은 커밋에서 함께 켠다(#451).
+# 거부한다. 실물 어댑터와 그 가드는 같은 커밋에서 함께 켠다(#451) — #449 만 배포되고
+# #450 이 없는 상태로 staging 에 나가지 않도록 통합은 셋을 함께 머지한다.
 SEARCH_ADAPTER_MODE = _env("SEARCH_ADAPTER_MODE", "fake")
 
 # --- Distribution (#16, ADR-0003/0004/0006) -------------------------------------------

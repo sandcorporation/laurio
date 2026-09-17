@@ -2,8 +2,11 @@
 
 검색을 다른 외부 연동(스토리지·LLM·이벤트 버스)과 같은 모양으로 갈아끼운다 —
 `SEARCH_ADAPTER_MODE` 설정이 어댑터를 고른다. **이 티켓은 fake(DB 포함 검색)만
-만든다** — 실물 OpenSearch 어댑터·커밋 후 색인 태스크·매일 재색인 스캔은 #450이
-만들고, 배포 부팅 가드는 #451이 켠다(`config/settings.py`의 주석 참고).
+만든다** — 실물 어댑터(dotted path `contests.search_opensearch.
+OpenSearchContestSearch`, 접속 주소는 `OPENSEARCH_URL`)·커밋 후 색인 태스크·매일
+재색인 스캔은 #450이 만들고, 배포 부팅 가드는 #451이 켠다(설정 이름은 코디네이터가
+2026-09-17에 고정했다 — staging·prod `.env`가 이미 이 이름을 쓴다, `config/settings.py`
+주석 참고).
 
 인터페이스는 셋이다 — 실물 어댑터가 목록 API를 건드리지 않고 그대로 슬롯인할
 수 있도록 여기서 고정한다:
@@ -143,6 +146,7 @@ def get_search_adapter() -> ContestSearchAdapter:
         fake_factory=FakeContestSearchAdapter,
         not_implemented_hint=(
             "SEARCH_ADAPTER_MODE 가 가리키는 dotted path를 import할 수 없다 — "
-            "실물 어댑터(OpenSearch)는 #450이 만든다."
+            "실물 어댑터(contests.search_opensearch.OpenSearchContestSearch)는 "
+            "#450이 만든다."
         ),
     )
