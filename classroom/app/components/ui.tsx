@@ -184,7 +184,9 @@ export function FieldLabel({ children }: { children: ReactNode }) {
 
 export const INPUT_CLASS =
   "w-full border border-rule bg-surface px-3 py-2 text-[13.5px] text-ink " +
-  "placeholder:text-ink/30 focus:border-ink focus:outline-none";
+  "placeholder:text-ink/30 focus:border-ink focus:outline-none " +
+  // 막힌 칸이 편집할 수 있는 칸처럼 보이지 않게(보관된 클래스의 문제 편집, #438).
+  "disabled:cursor-not-allowed disabled:bg-paper disabled:text-ink/60";
 
 /** 오류는 붉게, 그러나 배경을 채우지 않는다 — 이 브랜드는 면을 칠하지 않는다. */
 export function ErrorNote({ children }: { children: ReactNode }) {

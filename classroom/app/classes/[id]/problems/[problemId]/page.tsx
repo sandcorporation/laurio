@@ -2,6 +2,7 @@
 
 // 문제 편집 (#282/#283/#285). 제목·설명·제출 형식·채점 모델에 이어
 // 체크리스트(필수·선택 항목과 순서)를 여기서 관리하고, 초안을 연다.
+import { MarkdownView } from "@codemit/markdown";
 import Link from "next/link";
 
 import {
@@ -697,19 +698,35 @@ export default function EditProblemPage() {
                     value={title}
                     onChange={(event) => setTitle(event.target.value)}
                     required
+                    disabled={isArchived}
                     className={INPUT_CLASS}
                   />
                 </div>
 
                 <div className="flex flex-col gap-1.5">
                   <FieldLabel>설명</FieldLabel>
-                  <MarkdownEditor
-                    id="problem-description"
-                    label="설명"
-                    testId="edit-problem-description-input"
-                    value={description}
-                    onChange={setDescription}
-                  />
+                  {isArchived ? (
+                    // 보관된 클래스는 읽기 전용이다(#438) — Toast UI 에디터에는 읽기
+                    // 전용 모드가 없어, 참여자가 보는 것과 같은 렌더러로 보여준다.
+                    <div
+                      data-testid="edit-problem-description-readonly"
+                      className="border border-rule bg-paper px-4 py-3"
+                    >
+                      {description.trim() === "" ? (
+                        <p className="text-[13px] text-ink/45">설명이 없습니다.</p>
+                      ) : (
+                        <MarkdownView markdown={description} fileBaseName={title} />
+                      )}
+                    </div>
+                  ) : (
+                    <MarkdownEditor
+                      id="problem-description"
+                      label="설명"
+                      testId="edit-problem-description-input"
+                      value={description}
+                      onChange={setDescription}
+                    />
+                  )}
                 </div>
               </form>
             </Card>
@@ -896,6 +913,7 @@ export default function EditProblemPage() {
                 classState.status === "ready" ? classState.classroom.default_model_is_reasoning : false
               }
               gradingGuideline={gradingGuideline}
+              disabled={isArchived}
               onGradingGuidelineChange={setGradingGuideline}
             />
 

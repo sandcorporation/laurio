@@ -53,6 +53,7 @@ export function ProblemSettingsForm({
   defaultModelIsReasoning,
   gradingGuideline,
   onGradingGuidelineChange,
+  disabled = false,
 }: {
   mode: "create" | "edit";
   testIdPrefix: string;
@@ -72,9 +73,16 @@ export function ProblemSettingsForm({
   defaultModelIsReasoning: boolean;
   gradingGuideline: GradingGuidelineValue;
   onGradingGuidelineChange: (value: GradingGuidelineValue) => void;
+  /** 보관된 클래스의 수정 화면(#438) — 모든 입력과 재시도 버튼을 잠근다.
+   *  `<fieldset disabled>` 하나가 안의 입력·선택·버튼을 전부 막는다. */
+  disabled?: boolean;
 }) {
   return (
-    <>
+    <fieldset
+      disabled={disabled}
+      data-testid={`${testIdPrefix}-settings-fieldset`}
+      className="contents"
+    >
       <Card>
         <CardHeader title="제출 형식" />
         <div className="flex flex-col gap-1.5 p-4">
@@ -235,6 +243,6 @@ export function ProblemSettingsForm({
         onChange={onGradingGuidelineChange}
         testIdPrefix={testIdPrefix}
       />
-    </>
+    </fieldset>
   );
 }
