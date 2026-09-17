@@ -116,19 +116,23 @@ type ProblemParticipantViewProps = (InteractiveProps | PreviewProps) & {
  *  한 줄을 더한다. 판정 로직이 아니라 문구 조립이라 별도 순수 함수 시임을
  *  두지 않는다(#429 Testing Decisions).
  *
- *  **열린 문제에서는 강사도 낸다**(2026-09-17) — 그래서 첫 줄이 상태에 따라
- *  갈린다. 예전의 「제출은 되지 않습니다」를 열린 문제에도 그대로 두면 화면이
- *  거짓말을 한다(제출 칸은 실제로 동작한다). */
+ *  **강사는 상태와 무관하게 낸다**(2026-09-17) — 그래서 첫 줄이 「지금 낼 수
+ *  있는가」에 따라 갈린다(잠기는 것은 보관된 클래스뿐이다). 예전의 「제출은
+ *  되지 않습니다」를 그대로 두면 화면이 거짓말을 한다 — 제출 칸이 실제로
+ *  동작한다. 아래 두 줄(초안·숨김)은 그대로다: 낼 수 있다는 것과, 학생에게
+ *  아직 보이지 않는다는 것은 서로 다른 사실이다. */
 function InstructorViewingBanner({
   status,
+  canSubmit,
 }: {
   status: "draft" | "open" | "hidden" | null | undefined;
+  canSubmit: boolean;
 }) {
   return (
     <Note tone="attention">
       <div className="flex flex-col gap-1">
         <span data-testid="instructor-viewing-banner">
-          {status === "open"
+          {canSubmit
             ? "강사로 보고 있습니다 — 직접 내 볼 수 있고, 학생 명단에는 들어가지 않습니다."
             : "강사로 보고 있습니다 — 제출은 되지 않습니다."}
         </span>
@@ -191,7 +195,12 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
 
   return (
     <div className="flex flex-col gap-5">
-      {viewingAsInstructor ? <InstructorViewingBanner status={instructorProblemStatus} /> : null}
+      {viewingAsInstructor ? (
+        <InstructorViewingBanner
+          status={instructorProblemStatus}
+          canSubmit={props.interactive ? props.submitBlockedReason === null : false}
+        />
+      ) : null}
       <PageHeader
         headingLevel={headingLevel}
         eyebrow={eyebrow}

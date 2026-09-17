@@ -269,7 +269,7 @@ def test_a_participant_cannot_upload_to_a_hidden_problem(client, db):
 
 
 def test_the_instructor_gets_an_upload_url_for_an_open_problem(client, db):
-    """강사도 열린 문제에는 낸다(2026-09-17, #429 개정) — 참여자 행이 아직
+    """강사는 자기 문제에 낸다(2026-09-17, #429 개정) — 참여자 행이 아직
     없어도(첫 제출이 그때 만든다) 소스 업로드 주소를 받는다. 안 그러면 소스
     형식 문제에만 강사가 못 내는 비대칭이 생긴다."""
 
@@ -287,8 +287,9 @@ def test_the_instructor_gets_an_upload_url_for_an_open_problem(client, db):
     assert response.status_code == 200, response.content
 
 
-def test_the_instructor_does_not_get_an_upload_url_for_a_draft_problem(client, db):
-    """열린 문제만이다 — 초안은 참여자에게 보이지 않는 상태라 업로드도 없다."""
+def test_the_instructor_gets_an_upload_url_for_a_draft_problem(client, db):
+    """초안에서도 받는다(2026-09-17) — 강사에게는 상태가 문이 아니다. 참여자는
+    애초에 초안을 보지 못한다(위 테스트들)."""
 
     instructor = login(client, uid="instructor-1")
     class_id = create_class(client, instructor["access"])
@@ -301,7 +302,7 @@ def test_the_instructor_does_not_get_an_upload_url_for_a_draft_problem(client, d
         instructor["access"],
         _source_target_ref(problem.id, user_id("instructor-1")),
     )
-    assert response.status_code == 403
+    assert response.status_code == 200, response.content
 
 
 def test_a_non_member_does_not_get_an_upload_url(client, db):

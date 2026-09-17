@@ -127,9 +127,10 @@ class SubmissionTargetStateResolver:
         `classroom.participation.can_submit`) 같은 이유로 fail-closed한다.
         참여자가 아니면(`ClassMember` 행이 없으면) 애초에 판정할 자격이 없어
         역시 거절한다 — **다만 그 클래스의 강사는 예외다**(2026-09-17, #429
-        개정): 강사도 열린 문제에는 내므로, 참여자 행이 아직 없어도(첫 제출이
-        그때 만든다) 열린 문제면 업로드 주소를 받는다. 안 그러면 소스 형식
-        문제에만 강사가 못 내는 비대칭이 생긴다."""
+        개정): 강사는 상태(초안·열림·숨김)와 무관하게 자기 문제를 내 보므로,
+        참여자 행이 아직 없어도(첫 제출이 그때 만든다) 업로드 주소를 받는다.
+        보관된 클래스만 막는다. 안 그러면 소스 형식 문제에만 강사가 못 내는
+        비대칭이 생긴다."""
 
         _, problem_id_raw, user_id_raw, slot = parts
         if slot != SOURCE_SLOT:
@@ -145,14 +146,19 @@ class SubmissionTargetStateResolver:
         if problem is None:
             return _DENY
 
-        member = ClassMember.objects.filter(classroom=problem.classroom, user_id=user_id).first()
-        if member is None:
-            if problem.classroom.instructor_id != user_id or not instructor_can_submit(
-                problem.classroom, problem
-            ):
+        if problem.classroom.instructor_id == user_id:
+            # 강사는 참여자 행이 있든 없든 강사 기준으로 본다(2026-09-17) —
+            # 상태(초안·열림·숨김)는 보지 않고 보관만 막는다. 행이 있다고
+            # 참여자 규칙(숨김 403)에 걸리면 같은 사람이 같은 문제에 대해
+            # 어제와 오늘 다른 답을 받는다.
+            if not instructor_can_submit(problem.classroom, problem):
                 return _DENY
-        elif not can_submit(problem.classroom, member, problem):
-            return _DENY
+        else:
+            member = ClassMember.objects.filter(
+                classroom=problem.classroom, user_id=user_id
+            ).first()
+            if member is None or not can_submit(problem.classroom, member, problem):
+                return _DENY
 
         return TargetState(visibility=Visibility.PRIVATE, owner_id=user_id)
 

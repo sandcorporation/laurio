@@ -103,7 +103,8 @@ def test_instructor_can_open_draft_problem_and_sees_empty_submissions(client, db
     response = client.get(_mine_url(created["id"], problem_id), **_auth_header(instructor["access"]))
     assert response.status_code == 200
     body = response.json()
-    assert body["submit_blocked_reason"] == "viewing_as_instructor"
+    # 초안 상태에서도 강사는 낼 수 있다(2026-09-17) — 잠금은 보관뿐이다.
+    assert body["submit_blocked_reason"] is None
     assert body["viewing_as_instructor"] is True
     assert body["instructor_problem_status"] == "draft"
     assert body["submissions"] == []
@@ -138,7 +139,8 @@ def test_instructor_can_open_hidden_problem_and_sees_empty_submissions(client, d
     response = client.get(_mine_url(created["id"], problem_id), **_auth_header(instructor["access"]))
     assert response.status_code == 200
     body = response.json()
-    assert body["submit_blocked_reason"] == "viewing_as_instructor"
+    # 숨김 상태에서도 강사는 낼 수 있다(2026-09-17) — 잠금은 보관뿐이다.
+    assert body["submit_blocked_reason"] is None
     assert body["viewing_as_instructor"] is True
     assert body["instructor_problem_status"] == "hidden"
     assert body["submissions"] == []
@@ -255,8 +257,9 @@ def test_instructor_can_submit_to_an_open_problem_without_joining(client, db):
     assert [m["is_instructor"] for m in members.json()] == [True]
 
 
-def test_instructor_cannot_submit_to_a_draft_problem(client, db):
-    """열린 문제만이다 — 초안은 참여자에게 보이지 않는 상태라 같은 404다."""
+def test_instructor_can_submit_to_a_draft_problem(client, db):
+    """초안에도 낸다(2026-09-17) — 문제를 만들며 한 번 내 보는 것이 정상
+    절차다(#431이 이미 그 전제 위에 서 있다). 참여자에게는 여전히 404다."""
 
     instructor = _login(client)
     created = _create_class(client, instructor["access"])
@@ -268,12 +271,22 @@ def test_instructor_cannot_submit_to_a_draft_problem(client, db):
         content_type="application/json",
         **_auth_header(instructor["access"]),
     )
-    assert response.status_code == 404
+    assert response.status_code == 201, response.content
+
+    participant = _login(client, uid="participant-1")
+    _join(client, participant["access"], created["join_code"])
+    blocked = client.post(
+        f"{CLASSES_URL}/{created['id']}/problems/{problem_id}/submissions",
+        data={"value": "https://github.com/octocat/hello", "submission_format": "repository"},
+        content_type="application/json",
+        **_auth_header(participant["access"]),
+    )
+    assert blocked.status_code == 404
 
 
-def test_instructor_cannot_submit_to_a_hidden_problem(client, db):
-    """강사가 거둔 문제에는 강사 자신도 새로 내지 못한다 — 낸 적이 있어
-    문제는 보이되(참여자와 같은 규칙) 새 제출만 403이다."""
+def test_instructor_can_submit_to_a_hidden_problem(client, db):
+    """강사가 거둔 문제에도 강사 자신은 낸다(2026-09-17) — 참여자는 낸 적이
+    있어야 문제가 보이고, 그래도 새 제출은 403이다."""
 
     instructor = _login(client)
     created = _create_class(client, instructor["access"])
@@ -295,7 +308,7 @@ def test_instructor_cannot_submit_to_a_hidden_problem(client, db):
         content_type="application/json",
         **_auth_header(instructor["access"]),
     )
-    assert response.status_code == 403
+    assert response.status_code == 201, response.content
 
 
 def test_a_stranger_still_gets_404_when_submitting(client, db):

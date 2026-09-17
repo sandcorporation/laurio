@@ -88,11 +88,16 @@ def instructor_can_submit(class_obj: Class, problem: Problem) -> bool:
 
     참여자 판정과 갈라 두는 이유: 강사에게는 「내보냄」이 없고, 참여자 행이 아직
     없을 수도 있다(첫 제출이 그 자리에서 만든다 — `classroom.api.
-    _get_submitting_member_or_404`). 볼 수 있는 상태는 참여자보다 넓지만(초안도
-    본다) **낼 수 있는 상태는 참여자와 같다** — 열린 문제, 보관되지 않은
-    클래스뿐이다."""
+    _get_submitting_member_or_404`).
 
-    return class_obj.archived_at is None and problem.status == Problem.Status.OPEN
+    **상태는 보지 않는다**(2026-09-17) — 초안·열림·숨김 어디서든 강사는 자기
+    문제를 내 본다(문제를 만들며 시험해 보는 것이 정상 절차다, #431이 이미 그
+    전제 위에 서 있다). 막는 것은 **보관된 클래스** 하나뿐이다 — 보관은 읽기
+    전용이라는 뜻이고(CONTEXT.md 「클래스」, #294/#438), 그 규칙은 강사에게도
+    같다. 참여자 규칙은 한 글자도 바뀌지 않는다: 초안은 404, 숨김은 403이다."""
+
+    del problem  # 상태를 보지 않는다 — 인자는 호출부의 읽기 흐름을 위해 남긴다
+    return class_obj.archived_at is None
 
 
 def can_submit(class_obj: Class, member: ClassMember, problem: Problem) -> bool:

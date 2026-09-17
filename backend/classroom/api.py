@@ -104,6 +104,7 @@ from .participation import (
     SUBMIT_BLOCKED_HIDDEN,
     SUBMIT_BLOCKED_VIEWING_AS_INSTRUCTOR,
     assert_class_mutable,
+    instructor_can_submit,
     participant_membership_blocked_reason,
     participant_submit_blocked_reason,
     visible_problems_queryset,
@@ -1598,16 +1599,12 @@ def _serialize_own_submissions(problem, member, user, checklist_items) -> list:
 
 def _instructor_submit_blocked_reason(class_obj: Class, problem: Problem) -> str | None:
     """강사가 자기 클래스의 이 문제에 지금 낼 수 없는 이유 하나(2026-09-17,
-    #429 개정) — 열린 문제에는 낼 수 있으므로 `None`이다. 보관된 클래스는
-    참여자와 같은 이유로 막고(읽기 전용), 초안·숨김은 참여자에게 애초에 보이지
-    않는 상태라 「강사가 보는 중」이 그 자리를 대신한다 — 화면의 띠가 그 상태를
-    이미 설명하고 있어 새 문구를 만들지 않는다."""
+    #429 개정) — 초안·열림·숨김 어디서든 낼 수 있으므로 보통은 `None`이다.
+    막는 것은 보관된 클래스 하나뿐이다(읽기 전용, CONTEXT.md 「클래스」) —
+    참여자와 같은 이유·같은 문구다. 판정 자체는
+    `classroom.participation.instructor_can_submit`이 한 곳에서 한다."""
 
-    if class_obj.archived_at is not None:
-        return SUBMIT_BLOCKED_ARCHIVED
-    if problem.status != Problem.Status.OPEN:
-        return SUBMIT_BLOCKED_VIEWING_AS_INSTRUCTOR
-    return None
+    return None if instructor_can_submit(class_obj, problem) else SUBMIT_BLOCKED_ARCHIVED
 
 
 @router.get(
@@ -1711,7 +1708,19 @@ def create_classroom_submission(
     (ADR-0039, CONTEXT.md 「Problem」). 근거 연결도 자가 체크도 없다: 소스
     또는 저장소 값 하나만 받는다."""
 
-    member = _get_submitting_member_or_404(class_id, request.auth_user.id)
+    # **강사와 참여자는 다른 문을 지난다**(2026-09-17, #429 개정). 강사는 자기
+    # 문제를 상태와 무관하게 내 볼 수 있고(초안·열림·숨김), 참여자에게는 그
+    # 상태들이 각각 404·403이다 — 그래서 문제를 찾는 질의부터 갈린다.
+    instructor_class = Class.objects.filter(id=class_id, instructor_id=request.auth_user.id).first()
+    if instructor_class is not None:
+        problem = _get_owned_problem_or_404(instructor_class, problem_id)
+        blocked_reason = _instructor_submit_blocked_reason(instructor_class, problem)
+        if blocked_reason == SUBMIT_BLOCKED_ARCHIVED:
+            raise HttpError(403, "이 클래스는 보관되어 새 제출을 받지 않습니다.")
+        member = _get_submitting_member_or_404(class_id, request.auth_user.id)
+        return _create_submission_row(request, problem, member, payload)
+
+    member = _get_member_or_404(class_id, request.auth_user.id)
     problem = _get_visible_problem_for_participant_or_404(class_id, problem_id, member)
 
     # 낼 수 있는가는 참여 정책 모듈이 한 곳에서 답한다(#439) — 우선순위는
@@ -1733,6 +1742,14 @@ def create_classroom_submission(
         # (`_get_visible_problem_for_participant_or_404`), 그래도 새로
         # 낼 수는 없다. 다시 열면(`reopen_problem`) 이 분기를 벗어난다.
         raise HttpError(403, "강사가 숨긴 문제라 새로 낼 수 없습니다.")
+
+    return _create_submission_row(request, problem, member, payload)
+
+
+def _create_submission_row(request: HttpRequest, problem, member, payload):
+    """값을 검증하고 시도 하나를 만든다 — 참여자와 강사(2026-09-17)가 같은
+    코드를 지난다. 「낼 수 있는가」는 호출부가 이미 서로 다른 기준으로
+    판정했다(참여자는 보관·내보냄·숨김, 강사는 보관 하나)."""
 
     value = payload.value.strip()
     if not value:
