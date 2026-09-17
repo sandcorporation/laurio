@@ -458,10 +458,11 @@ def _notify_submitter_of_score(submission: ClassroomSubmission, score: Classroom
     신호(`attempt-scored`, 열어 둔 제출 화면용)를 같은 자리에서 함께 낸다 —
     둘 다 "이 시도의 채점이 끝났다"는 같은 사실에서 갈라진다.
 
-    통과 판정은 `classroom.api._is_score_passed`와 같은 규칙이다 — 필수 항목을
-    전부 충족했는가. 여기서 다시 계산하는 이유는 그 함수가 `(score,
-    required_item_ids)`를 받는데 이미 손에 쥔 `checklist_items`에서 바로
-    구할 수 있어, API 모듈을 끌어오는 의존을 늘리지 않기 위해서다.
+    통과 판정은 `Problem.is_score_passed`(#436)에 그대로 맡긴다 — 예전에는
+    그 규칙이 `classroom.api._is_score_passed`에 있어 순환 import를 피해
+    이 자리에 손으로 베껴 뒀다. 모델 메서드로 옮긴 뒤에는 베낄 이유가
+    없어졌다 — 이미 손에 쥔 `checklist_items`를 그대로 넘겨 질의를 늘리지
+    않는다.
 
     강사에게는 가지 않는다 — 수신자는 언제나 `submission.member.user`고, 그
     사람이 우연히 강사 본인(자기 클래스에 참여자로 들어온 경우)이어도 그건
@@ -471,15 +472,7 @@ def _notify_submitter_of_score(submission: ClassroomSubmission, score: Classroom
     `score`)는 그대로 끝나야 한다는 AC를 그 함수의 계약이 그대로 보장한다."""
 
     problem = submission.problem
-    required_ids = {item.id for item in checklist_items if item.required}
-    met_ids = {r["checklist_item_id"] for r in score.reasoning if r["is_met"]}
-    # 문법 검사 기본 항목(#408)도 필수로 포함해 셈한다 — `classroom.api.
-    # _is_score_passed`와 정확히 같은 규칙(그 함수 docstring)이다.
-    syntax_ok = (
-        not problem.syntax_check_enabled
-        or bool(score.syntax_check_result and score.syntax_check_result.get("is_met"))
-    )
-    passed = bool(required_ids) and required_ids.issubset(met_ids) and syntax_ok
+    passed = problem.is_score_passed(score, checklist_items=checklist_items)
 
     class_obj = problem.classroom
     notify_safely(
@@ -539,8 +532,8 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
     # 순서(키 → 모델 → 예산, `pending_scoring.blocking_reason`)다 — 어긋나면
     # 화면이 "채점할 수 있다"고 말하는 시도를 스캔이 건너뛰거나 그 반대가
     # 될 수 있다(#434).
-    class_obj = Class.objects.get(pk=class_obj.pk)
-    problem = Problem.objects.get(pk=problem.pk)
+    problem = Problem.objects.select_related("classroom").get(pk=problem.pk)
+    class_obj = problem.classroom
     reason = pending_scoring.blocking_reason(class_obj, problem)
     if reason == pending_scoring.NO_API_KEY:
         # 시도로 남기지 않고 조용히 건너뛴다("아직 시도하지 않았다"는 사실
@@ -584,7 +577,7 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
         else:
             syntax_check_unresolved = parser_outcome.unresolved
 
-    model = problem.model or class_obj.default_model
+    model = problem.effective_model()
     if not matches_naming_rule(model):
         # Problem.model·Class.default_model은 저장 시점에 검증되지만(classroom.api),
         # 채점 시점의 이름 규칙이 그 사이 좁혀졌을 수 있다 — 재시도로 나을 수
@@ -600,11 +593,7 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
     # 추론 모델(GPT-5 이후)일 때만 뜻이 있다(#402, CONTEXT.md 「추론 강도」) —
     # 아니면 채점 호출은 지금처럼 temperature 0을 쓴다(`_scoring_adapter`에
     # `None`을 넘긴다).
-    reasoning_effort = (
-        (problem.reasoning_effort or class_obj.default_reasoning_effort)
-        if is_reasoning_model_id(model)
-        else None
-    )
+    reasoning_effort = problem.effective_reasoning_effort() if is_reasoning_model_id(model) else None
 
     prompt = _build_prompt(
         submission,
