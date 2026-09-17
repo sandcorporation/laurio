@@ -550,7 +550,7 @@ id가 섞여 들어와도 에러 없이 그 행만 걸러진다.
 
 ## 바깥 세계
 
-**모든 외부 의존은 어댑터 뒤에 있다**(ADR-0007). 열두 값이 바인딩을 고르고, **배포 환경에서
+**모든 외부 의존은 어댑터 뒤에 있다**(ADR-0007). 열세 값이 바인딩을 고르고, **배포 환경에서
 fake 이거나 임포트되지 않으면 부팅 자체를 거부한다** — 컨테이너가 뜬 채로 첫 요청에서야
 죽는 것보다 정직하게 못 뜨는 편이다.
 
@@ -566,15 +566,7 @@ fake 이거나 임포트되지 않으면 부팅 자체를 거부한다** — 컨
 | 알림 3채널 | `NOTIFICATION_ALIMTALK_ADAPTER` · `_SMS_` · `_LMS_` |
 | 스토리지 | `STORAGE_BACKEND` |
 | 강의실 실시간 신호(#380, ADR-0046 — 벤더 연동이 아니라 우리 자신의 Redis 위에서 도는 코드, dev·CI 는 결정적 fake) | `EVENT_BUS_ADAPTER_MODE` |
-
-**공모전 검색(#449/#450, 부모 #444 스펙)은 이 열둘과 다르다** — `SEARCH_ADAPTER_MODE`가
-어댑터를 고르지만(dev·CI·pytest 기본값 `fake`, `contests.search.FakeContestSearchAdapter`,
-DB 포함 검색), **아직 배포 부팅 가드가 없다.** 실물 어댑터(dotted path
-`contests.search_opensearch.OpenSearchContestSearch`, 접속 주소 `OPENSEARCH_URL`,
-#450이 만들었다 — nori 분석기, 판(backing index) + 별칭으로 끊김 없는 전체
-재색인, 연결 실패·시간 초과 시 DB 검색으로 물러남)는 있지만, 가드를 걸면
-staging이 이 커밋만으로 부팅을 거부하기 때문이다 — 가드는 #451이 켠다(같은
-커밋에서 staging·prod 배포도 함께 간다).
+| 공모전 검색(#450/#451, 부모 #444 스펙 — nori 분석기, 판(backing index) + 별칭으로 끊김 없는 전체 재색인, 연결 실패·시간 초과 시 DB 검색으로 물러남, dev·CI 는 결정적 fake) | `SEARCH_ADAPTER_MODE` |
 
 **색인은 두 경로로 맞는다.** 저장·변경(Contest 저장, 요구형태 M2M 변경,
 `SponsorProfile.display_name` 변경)마다 Celery 태스크 `contests.index_contest`가

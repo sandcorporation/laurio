@@ -994,12 +994,19 @@ if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(SELLER_ADAPTER_MODE):
 # 별도 설정 `OPENSEARCH_URL`이다(staging·prod 는 `http://search:9200`) — 이 설정은
 # #450이 더한다.
 #
-# **여기서는 아직 배포 부팅 가드를 걸지 않는다** — 다른 `*_ADAPTER_MODE`는 이 자리에서
-# `IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(...)`를 바로 거부하지만, 실물
-# OpenSearch 어댑터가 아직 없는 지금 그 가드를 켜면 staging이 이 커밋만으로 부팅을
-# 거부한다. 실물 어댑터와 그 가드는 같은 커밋에서 함께 켠다(#451) — #449 만 배포되고
-# #450 이 없는 상태로 staging 에 나가지 않도록 통합은 셋을 함께 머지한다.
+# 실물 어댑터가 이제 있다(#450, `contests.search_opensearch.
+# OpenSearchContestSearch`) — 다른 `*_ADAPTER_MODE`와 같은 원칙으로 배포
+# 환경에서 fake로 남으면 부팅을 거부한다(#451). 임포트 가능 여부·계약 충족
+# 여부는 `core.adapters.check_adapter_mode`가 `django.core.checks`로 등록되어
+# 따로 확인한다(`contests/checks.py`의 `check_search_adapter_mode`) — 아래는
+# "fake" 별칭 자체만 여기서 즉시 막는다(다른 어댑터들과 같은 두 갈래).
 SEARCH_ADAPTER_MODE = _env("SEARCH_ADAPTER_MODE", "fake")
+if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(SEARCH_ADAPTER_MODE):
+    raise ImproperlyConfigured(
+        f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 인데 SEARCH_ADAPTER_MODE 가 "
+        "fake 다. staging/production 배포에서는 실제 검색 어댑터의 dotted path"
+        "(contests.search_opensearch.OpenSearchContestSearch)를 반드시 설정해야 한다."
+    )
 
 # 실물 어댑터(`contests.search_opensearch.OpenSearchContestSearch`, #450)의 접속
 # 주소다. staging·prod는 `http://search:9200`(compose 서비스 이름 `search`,

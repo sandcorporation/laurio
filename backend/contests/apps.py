@@ -47,6 +47,8 @@ class ContestsConfig(AppConfig):
         # 관심사지만, 이 앱의 ready()가 이미 지연 임포트 원칙(모델을 여기서
         # 불러오는 이유)을 지키고 있으므로 같은 자리에 등록한다.
         register(checks.check_llm_requirement_chat_adapter_mode)
+        # SEARCH_ADAPTER_MODE 부팅 가드(#451) — 같은 자리, 같은 이유.
+        register(checks.check_search_adapter_mode)
 
         from datetime import timedelta
 

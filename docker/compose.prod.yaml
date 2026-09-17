@@ -231,6 +231,14 @@ x-backend-env: &backend-env
   EVENT_BUS_ADAPTER_MODE: ${EVENT_BUS_ADAPTER_MODE:?이벤트 버스 어댑터의 dotted path를 .env.prod 에 채워라 — core.events_redis.RedisEventBus(ADR-0046)}
   EVENT_BUS_REDIS_URL: redis://redis:6379/2
 
+  # --- 공모전 검색 (#450/#451, 부모 #444 스펙, ADR-0007) ---
+  # staging의 x-backend-env 앵커와 같은 이유·같은 구조다(compose.staging.yaml
+  # 참고) — 값이 없어도 부팅이 막히지 않도록 컴포즈 레벨 기본값을 실물
+  # dotted path로 준다(#451 AC "첫 배포에서 막히지 않게"). `.env.prod`가 이
+  # 값을 몰라도 검색 서비스가 뜨는 한 실물로 돈다.
+  SEARCH_ADAPTER_MODE: ${SEARCH_ADAPTER_MODE:-contests.search_opensearch.OpenSearchContestSearch}
+  OPENSEARCH_URL: ${OPENSEARCH_URL:-http://search:9200}
+
 services:
   db:
     image: postgres:17-alpine
@@ -264,6 +272,36 @@ services:
       retries: 20
     restart: unless-stopped
 
+  # 공모전 검색 실물 어댑터(#450/#451, 부모 #444 스펙)가 붙는 OpenSearch.
+  # staging과 같은 원칙·같은 구조다(compose.staging.yaml 참고) — arm64
+  # 태그(이 호스트=oracle의 아키텍처), 단일 노드·JVM 힙 1GB·컨테이너 메모리
+  # 한도 2GB, 보안 플러그인 끔, 호스트 포트를 내지 않는다.
+  search:
+    image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-search:${CODEMIT_IMAGE_TAG:-local}-arm64
+    build:
+      context: ..
+      dockerfile: docker/search.Dockerfile
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms1g -Xmx1g"
+    mem_limit: 2g
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - codemit-prod-search:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:9200/_cluster/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
   backend:
     # **이미지는 CI 가 굽고 여기서는 받기만 한다**(2026-09-17). arm64 태그는 이 호스트의
     # 아키텍처다 — staging(sub)은 amd64, prod(oracle)는 arm64. backend·celery-worker·
@@ -280,6 +318,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      # 헬스가 아니라 시작 순서만이다(staging과 같은 이유) — 검색이 죽어도
+      # backend는 떠야 한다(DB 검색으로 물러난다).
+      search:
+        condition: service_started
     environment: *backend-env
     ports:
       # 코디네이터 리뷰 지적: 0.0.0.0으로 publish하면 SECURE_PROXY_SSL_HEADER가
@@ -307,6 +349,8 @@ services:
         condition: service_healthy
       backend:
         condition: service_started
+      search:
+        condition: service_started
     environment: *backend-env
     command: celery -A config worker --loglevel info
 
@@ -322,6 +366,8 @@ services:
       redis:
         condition: service_healthy
       backend:
+        condition: service_started
+      search:
         condition: service_started
     environment: *backend-env
     command: celery -A config beat --loglevel info
@@ -344,6 +390,8 @@ services:
       redis:
         condition: service_healthy
       backend:
+        condition: service_started
+      search:
         condition: service_started
     # 강의실 BFF 는 `http://events:8001` 로 중계하므로 Host 가 `events` 다 — backend 의
     # 허용 목록(.env.prod 의 DJANGO_ALLOWED_HOSTS, 거기엔 `backend` 가 있다)만 받으면
@@ -555,3 +603,4 @@ services:
 volumes:
   codemit-prod-db:
   codemit-prod-redis:
+  codemit-prod-search:
