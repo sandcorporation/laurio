@@ -95,3 +95,8 @@ class ContestsConfig(AppConfig):
         from .submission_retention import DEMO_VIDEO_RETENTION_PURGE_SCAN
 
         register_scan(DEMO_VIDEO_RETENTION_PURGE_SCAN)
+
+        # 조회수 옮기기 — 바뀐 공모전만 Redis에서 DB로 (#446, spec #444).
+        from .view_flush import CONTEST_VIEW_FLUSH_SCAN
+
+        register_scan(CONTEST_VIEW_FLUSH_SCAN)

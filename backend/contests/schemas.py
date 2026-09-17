@@ -353,6 +353,14 @@ class ContestOut(Schema):
     # 채워 넣은(`create_contest`/`reopen_contest`) `Contest.submission_count`
     # 에서 온다 — 화면과 마찬가지로 이 스키마도 따로 세지 않는다.
     submission_count: int
+    # 누적 조회수(#446, spec #444) — `Contest.view_count`(DB)를 그대로 싣는다.
+    # `contests.view_tracking`이 Redis로 실시간 집계하는 값과 최대 10분 차이가
+    # 날 수 있다(`contests.view_flush` 옮기기 스캔 주기) — 개최자 지표 화면
+    # (`ViewMetricsOut.view_count`)도 같은 DB 값을 읽으므로 두 화면이 서로
+    # 다른 숫자를 보이지 않는다. #109 시절에는 조회수가 Sponsor 전용이라 이
+    # 스키마(공개 목록·상세·홈 큐레이션이 함께 쓴다)에 없었다 — 지금은
+    # 공개 카드에도 보이는 값이라 여기 있다.
+    view_count: int = 0
     # 이 응답을 받은 사람이 이 Contest의 Sponsor 본인인가 (#164). `SubmissionOut.
     # is_owner`(submissions/schemas.py)와 같은 패턴 — 공개 상세는 인증 없이도
     # 응답하므로 익명·타인에게는 항상 False다. 값의 정확도를 보장하는 것은

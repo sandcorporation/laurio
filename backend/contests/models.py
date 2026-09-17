@@ -300,6 +300,14 @@ class Contest(models.Model):
     required_minimum_prize = models.PositiveIntegerField(default=0)
     is_underfunded = models.BooleanField(default=False)
 
+    # 누적 조회수 (#446, spec #444, `CONTEXT.md`의 ContestView). 이 칸 자체는
+    # 요청마다 갱신되지 않는다 — Redis가 실시간으로 세고(`contests.view_tracking`),
+    # 바뀐 공모전만 `contest-view-flush` 스캔이 10분마다 이리로 옮긴다
+    # (`contests.view_flush`). 그래서 개최자 지표 화면·공개 목록·큐레이션이
+    # 이 칸을 읽으면 서로 항상 같은 숫자를 보고(최대 10분 늦음), 서버 재시작·
+    # 캐시 비움 뒤에도 0으로 돌아가지 않는다.
+    view_count = models.PositiveIntegerField(default=0)
+
     # 알림 연결 (#19, ADR-0009/0010): 이 Contest에 대해 각 라이프사이클 알림을 이미
     # 보냈는지 표시한다. null이면 아직 안 보냈다는 뜻이고, 값이 차면 그 시각에
     # (조건부 UPDATE로) 정확히 한 번만 보냈다는 뜻이다 — 스캔이 몇 번 겹쳐 돌아도

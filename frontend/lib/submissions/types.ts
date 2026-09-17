@@ -38,8 +38,8 @@ export type ContestMetricsOut = components["schemas"]["ContestMetricsOut"];
 export type DailyParticipationOut = components["schemas"]["DailyParticipationOut"];
 export type RequirementFulfillmentOut = components["schemas"]["RequirementFulfillmentOut"];
 export type CompletionDistributionOut = components["schemas"]["CompletionDistributionOut"];
-// #109, 부모 #105 — 조회수·전환율. `view_count`는 캐시에서 온 집계 하나뿐이고
-// 방문자 식별자는 이 타입에도 없다.
+// #109, 부모 #105 — 조회수·전환율. `view_count`는 Contest.view_count(DB, #446)
+// 하나뿐이고 방문자 식별자는 이 타입에도 없다.
 export type ViewMetricsOut = components["schemas"]["ViewMetricsOut"];
 
 export const EVIDENCE_KINDS: { value: EvidenceIn["kind"]; label: string }[] = [

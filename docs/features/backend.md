@@ -356,17 +356,18 @@ llm_scoring`(#274)에 이어 `core.repository_adapters`(GitHub 저장소 clone·
 심사 비교·공개 프로필이 그 URL을 자료 목록에 이미 실어 보낸다 — 화면이 별도로 발급받지
 않는다.
 
-## 스스로 도는 일 — 스캔 25개
+## 스스로 도는 일 — 스캔 26개
 
 **시간은 시임이 아니라 주입 가능한 의존성이다**(ADR-0003). 시각이 지났다고 상태가 저절로
-바뀌지 않는다 — 스캔이 조건부 UPDATE 로 옮긴다. 등록부가 곧 beat 스케줄이고, 전부 60초
-주기다.
+바뀌지 않는다 — 스캔이 조건부 UPDATE 로 옮긴다. 등록부가 곧 beat 스케줄이고, 대부분 60초
+주기다 — 예외는 조회수 옮기기(10분, 아래).
 
 | 무엇을 | 스캔 |
 | --- | --- |
 | 상태 전이 | `contest-close` · `contest-judging-end` |
 | 채점 | `submission-scoring` · `repository-visibility` · `classroom-submission-scoring`(#287) |
 | 이미지 | `contest-image-optimization` |
+| 조회수 | `contest-view-flush`(10분 주기, #446) — 바뀐 공모전만 Redis 에서 `Contest.view_count`(DB) 로 옮긴다 |
 | 환불 | `payment-refund-request` · `payment-refund-reconcile` |
 | 배분·지급 | `distribution-create` · `distribution-share-payout` · `handover-release` · `payout-awaits-you` · `seller-registration-recovery` |
 | 알림 | `notification-dispatch-deferred` · `notification-reclaim-stuck` · `deadline-reminder` · `judging-end-reminder` · `distribution-final-warning` · `award-result-notice-recovery` · `distribution-result-notice-recovery` |

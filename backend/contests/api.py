@@ -171,6 +171,7 @@ def _serialize_contest(contest: Contest, auth_user: object | None = None) -> Con
         created_at=contest.created_at,
         judging_ends_at=contest.judging_ends_at,
         submission_count=contest.submission_count,
+        view_count=contest.view_count,
         is_owner=is_owner,
         has_own_submission=has_own_submission,
     )
@@ -846,8 +847,12 @@ def record_contest_view(request: HttpRequest, contest_id: int):
     전부 한다 — 이 함수는 대상 Contest가 공개된 것인지만 `get_contest`와
     같은 기준으로 확인한다.
 
-    응답에 조회수를 싣지 않는다 — 조회수는 Sponsor 전용이고, 공개 표면
-    어디에도 실리지 않는다는 것이 #109의 인수조건이다.
+    이 응답 자체에는 조회수를 싣지 않는다 — 이 엔드포인트는 "봤다"는 사건을
+    받을 뿐이고, 그 사건이 반영된 숫자는 목록·큐레이션·지표 화면이 각자
+    `Contest.view_count`(DB)를 읽어 보여준다(#446). #109 시절에는 조회수가
+    Sponsor 전용이라 공개 표면 어디에도 실리지 않았지만, 지금은 공개 목록·
+    랜딩 큐레이션 응답(`ContestOut.view_count`)이 그 숫자를 그대로 싣는다 —
+    바뀐 것은 "누가 보는가"이지 이 엔드포인트의 응답 모양이 아니다.
 
     공모전 제품 스위치(#271)가 꺼지면 이 기록도 닫는다.
     """

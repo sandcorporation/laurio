@@ -401,9 +401,12 @@ class CompletionDistributionOut(Schema):
 class ViewMetricsOut(Schema):
     """조회수와 전환율 — 「본 사람 대비 낸 사람」(#109, 부모 #105).
 
-    `view_count`는 `contests.view_tracking.get_view_count`가 캐시에서 읽은
-    값이다 — 관계형 DB의 Contest 행이 아니다(공개 상세는 트래픽이 가장
-    많은 화면이라 조회마다 그 행을 갱신하면 경합이 생긴다). 이 스키마에도
+    `view_count`는 `Contest.view_count`(DB)다(#446) — 조회 자체는 여전히
+    `contests.view_tracking`이 Redis에서 실시간으로 세지만(공개 상세는
+    트래픽이 가장 많은 화면이라 조회마다 Contest 행을 갱신하면 경합이
+    생긴다), 이 값은 `contests.view_flush` 옮기기 스캔이 10분마다 옮겨
+    놓은 값이다 — 공개 목록·랜딩 큐레이션이 읽는 값과 같아서, 개최자가
+    지표 화면과 공개 카드에서 다른 숫자를 보지 않는다. 이 스키마에도
     개별 방문자를 가리키는 필드는 없다 — Contest 전체의 조회수 하나뿐이다.
 
     `conversion_rate`는 `total_submission_count / view_count`다. 조회가

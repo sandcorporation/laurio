@@ -16,6 +16,7 @@
 import pytest
 from django.core.cache import caches
 
+from contests.view_flush_store import InMemoryChangedContestsStore
 from core.events import FakeEventBus
 from payments.adapters import FakePGAdapter
 from storage.adapters.fake import FakeStorageAdapter
@@ -70,6 +71,19 @@ def _reset_fake_event_bus():
     FakeEventBus._queues.clear()
     yield
     FakeEventBus._queues.clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_changed_contests_store():
+    """`InMemoryChangedContestsStore._ids`도 클래스 레벨이다(#446) — 조회를
+    기록하는 요청과 옮기기 스캔을 부르는 요청이 서로 다른 인스턴스라도 같은
+    「바뀐 공모전」 집합을 봐야 해서 `FakeEventBus._queues`와 같은 이유로
+    그렇게 설계했다. 비우지 않으면 한 테스트가 남긴 id가 다음 테스트의
+    "바뀐 것이 없다" 단언을 깬다."""
+
+    InMemoryChangedContestsStore._ids.clear()
+    yield
+    InMemoryChangedContestsStore._ids.clear()
 
 
 @pytest.fixture(autouse=True)
