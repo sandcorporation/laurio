@@ -77,6 +77,7 @@ from storage.adapters import get_storage_adapter
 from submissions.models import SubmissionAsset
 from submissions.scoring_basis import PLATFORM_FAILURE_MODEL_VERSION
 
+from . import pending_scoring
 from .events import publish_attempt_scored
 from .grading_guidelines import effective_grading_guideline_text
 from .models import (
@@ -85,6 +86,7 @@ from .models import (
     ClassroomScore,
     ClassroomScoringAttempt,
     ClassroomSubmission,
+    Problem,
 )
 from .scoring_models import is_reasoning_model_id, matches_naming_rule
 from .syntax_check import (
@@ -456,10 +458,11 @@ def _notify_submitter_of_score(submission: ClassroomSubmission, score: Classroom
     신호(`attempt-scored`, 열어 둔 제출 화면용)를 같은 자리에서 함께 낸다 —
     둘 다 "이 시도의 채점이 끝났다"는 같은 사실에서 갈라진다.
 
-    통과 판정은 `classroom.api._is_score_passed`와 같은 규칙이다 — 필수 항목을
-    전부 충족했는가. 여기서 다시 계산하는 이유는 그 함수가 `(score,
-    required_item_ids)`를 받는데 이미 손에 쥔 `checklist_items`에서 바로
-    구할 수 있어, API 모듈을 끌어오는 의존을 늘리지 않기 위해서다.
+    통과 판정은 `Problem.is_score_passed`(#436)에 그대로 맡긴다 — 예전에는
+    그 규칙이 `classroom.api._is_score_passed`에 있어 순환 import를 피해
+    이 자리에 손으로 베껴 뒀다. 모델 메서드로 옮긴 뒤에는 베낄 이유가
+    없어졌다 — 이미 손에 쥔 `checklist_items`를 그대로 넘겨 질의를 늘리지
+    않는다.
 
     강사에게는 가지 않는다 — 수신자는 언제나 `submission.member.user`고, 그
     사람이 우연히 강사 본인(자기 클래스에 참여자로 들어온 경우)이어도 그건
@@ -469,15 +472,7 @@ def _notify_submitter_of_score(submission: ClassroomSubmission, score: Classroom
     `score`)는 그대로 끝나야 한다는 AC를 그 함수의 계약이 그대로 보장한다."""
 
     problem = submission.problem
-    required_ids = {item.id for item in checklist_items if item.required}
-    met_ids = {r["checklist_item_id"] for r in score.reasoning if r["is_met"]}
-    # 문법 검사 기본 항목(#408)도 필수로 포함해 셈한다 — `classroom.api.
-    # _is_score_passed`와 정확히 같은 규칙(그 함수 docstring)이다.
-    syntax_ok = (
-        not problem.syntax_check_enabled
-        or bool(score.syntax_check_result and score.syntax_check_result.get("is_met"))
-    )
-    passed = bool(required_ids) and required_ids.issubset(met_ids) and syntax_ok
+    passed = problem.is_score_passed(score, checklist_items=checklist_items)
 
     class_obj = problem.classroom
     notify_safely(
@@ -529,24 +524,28 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
         score = _finalize_platform_failure(submission, checklist_items)
         return {"submission_id": submission.id, "status": "cap_reached", "score_id": score.id}
 
-    # 후보 쿼리(_pending_submissions)가 이미 예산이 남은 클래스만 고르지만,
-    # 같은 배치 안에서 앞선 행이 방금 이 클래스의 예산을 다 써버렸을 수 있다
-    # — `problem.classroom`은 배치를 만들 때 한 번 읽은 값이라 그 갱신을
-    # 못 본다. 다시 읽어 확인한다(#295).
-    class_obj = Class.objects.get(pk=class_obj.pk)
-    if class_obj.token_budget_exhausted():
-        # no_key와 같은 규율 — 시도로 남기지 않고 조용히 건너뛴다("아직
-        # 시도하지 않았다"는 사실 그대로, 「실패했다」가 아니다).
-        return {"submission_id": submission.id, "status": "budget_exhausted"}
-
-    if not class_obj.has_scoring_key():
-        # 후보 쿼리(CLASSROOM_SUBMISSION_SCORING_SCAN)가 이미 키 있는 클래스만
-        # 고르지만, tick 사이에 강사가 키를 지웠을 수 있다 — 그 경합에서도 시도로
-        # 남기지 않고 조용히 건너뛴다("아직 시도하지 않았다"는 사실은 그대로다).
-        # `has_scoring_key()`가 API 화면의 `pending_reason`("no_api_key")과
-        # 정확히 같은 기준이라(#346), 여기서 건너뛰는 시도는 화면에서도 같은
-        # 사유로 보인다 — 둘이 어긋나면 "정상 대기"로 잘못 보이는 시도가 생긴다.
+    # 후보 쿼리(pending_scoring.pending_submissions)가 이미 이 셋을 걸러
+    # 고르지만, 같은 배치 안에서 앞선 행이 방금 이 클래스의 예산을 다
+    # 써버렸거나(#295) 이 문제의 모델을 방금 거부당했을 수 있다(#403) —
+    # `class_obj`·`problem`은 배치를 만들 때 한 번 읽은 값이라 그 갱신을
+    # 못 본다. 다시 읽어 확인한다. 순서는 화면의 `pending_reason`과 같은
+    # 순서(키 → 모델 → 예산, `pending_scoring.blocking_reason`)다 — 어긋나면
+    # 화면이 "채점할 수 있다"고 말하는 시도를 스캔이 건너뛰거나 그 반대가
+    # 될 수 있다(#434).
+    problem = Problem.objects.select_related("classroom").get(pk=problem.pk)
+    class_obj = problem.classroom
+    reason = pending_scoring.blocking_reason(class_obj, problem)
+    if reason == pending_scoring.NO_API_KEY:
+        # 시도로 남기지 않고 조용히 건너뛴다("아직 시도하지 않았다"는 사실
+        # 그대로, 「실패했다」가 아니다) — 화면의 `pending_reason`과 같은
+        # 기준(`has_scoring_key`)이라 여기서 건너뛰는 시도는 화면에서도 같은
+        # 사유로 보인다.
         return {"submission_id": submission.id, "status": "no_key"}
+    if reason == pending_scoring.MODEL_REJECTED:
+        return {"submission_id": submission.id, "status": "model_rejected"}
+    if reason == pending_scoring.BUDGET_EXHAUSTED:
+        # no_key와 같은 규율 — 시도로 남기지 않고 조용히 건너뛴다.
+        return {"submission_id": submission.id, "status": "budget_exhausted"}
     raw_key = (class_obj.openai_api_key_encrypted or "").strip()
 
     asset = submission.assets.get()
@@ -578,7 +577,7 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
         else:
             syntax_check_unresolved = parser_outcome.unresolved
 
-    model = problem.model or class_obj.default_model
+    model = problem.effective_model()
     if not matches_naming_rule(model):
         # Problem.model·Class.default_model은 저장 시점에 검증되지만(classroom.api),
         # 채점 시점의 이름 규칙이 그 사이 좁혀졌을 수 있다 — 재시도로 나을 수
@@ -594,11 +593,7 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
     # 추론 모델(GPT-5 이후)일 때만 뜻이 있다(#402, CONTEXT.md 「추론 강도」) —
     # 아니면 채점 호출은 지금처럼 temperature 0을 쓴다(`_scoring_adapter`에
     # `None`을 넘긴다).
-    reasoning_effort = (
-        (problem.reasoning_effort or class_obj.default_reasoning_effort)
-        if is_reasoning_model_id(model)
-        else None
-    )
+    reasoning_effort = problem.effective_reasoning_effort() if is_reasoning_model_id(model) else None
 
     prompt = _build_prompt(
         submission,
@@ -724,49 +719,12 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
 
 
 def _pending_submissions(as_of, ctx):
-    """아직 `ClassroomScore`가 없고, 그 클래스에 채점 키가 있고 그 키가
-    거부되지 않았고, 그 문제의 채점 모델이 거부되지 않았고, 채점 예산이
-    바닥나지 않은 시도(#287, #295, #355, #403).
+    """스캔 후보 — `classroom.pending_scoring.pending_submissions`(#434)를
+    그대로 쓴다. 조건을 여기 복제하지 않는다: 후보 쿼리가 거르는 조건과
+    채점 직전 확인·화면의 `pending_reason`이 같은 자리(그 모듈)에서 나와야
+    셋이 어긋나지 않는다."""
 
-    키 없는 클래스·키가 거부된 클래스·모델이 거부된 문제·예산이 바닥난
-    클래스의 시도는 애초에 후보가 아니다 — "아직 시도하지 않았다"를
-    `ClassroomScoringAttempt` 이력 없이 유지한다(모듈 docstring). 강사가 새
-    키를 저장하면(#354의 검증 결과로 상태가 덮인다) 또는 그 문제의 모델을
-    바꾸면(`classroom.api`가 `scoring_model_rejected_at`을 지운다) 다음
-    tick부터 저절로 후보에 다시 들어온다 — 예산이 다시 찼을 때와 같은
-    원리로, 별도의 "재개" 신호가 필요 없다. `scoring.services.
-    _pending_submissions`와 같은 이유로 시도 횟수 오름차순 정렬한다(한 번도
-    시도되지 않은 것이 재시도 중인 것보다 항상 앞선다, ADR-0031) — 예산이
-    차서 쌓인 시도부터 다시 도는 것도 이 정렬 하나로 이미 "쌓인 순서대로"가
-    된다.
-    """
-
-    attempt_count = (
-        ClassroomScoringAttempt.objects.filter(submission=models.OuterRef("pk"))
-        .order_by()
-        .values("submission")
-        .annotate(count=Count("id"))
-        .values("count")
-    )
-
-    return (
-        ClassroomSubmission.objects.filter(
-            classroom_score__isnull=True,
-        )
-        .exclude(problem__classroom__openai_api_key_encrypted="")
-        .exclude(problem__classroom__openai_api_key_status=Class.ScoringKeyStatus.REJECTED)
-        .exclude(problem__scoring_model_rejected_at__isnull=False)
-        .exclude(
-            models.Q(problem__classroom__token_budget__isnull=False)
-            & models.Q(
-                problem__classroom__token_usage_total__gte=models.F(
-                    "problem__classroom__token_budget"
-                )
-            )
-        )
-        .annotate(attempt_count=models.functions.Coalesce(models.Subquery(attempt_count), 0))
-        .select_related("problem", "problem__classroom", "member")
-    )
+    return pending_scoring.pending_submissions(as_of, ctx)
 
 
 def _score_one(submission, as_of, ctx):

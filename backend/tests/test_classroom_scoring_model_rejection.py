@@ -405,3 +405,66 @@ def test_changing_the_class_default_model_resumes_problems_that_inherit_it(clien
     result = _run_scan(client)
     assert result["count"] == 1
     assert ClassroomScore.objects.filter(submission_id=submission_id).exists()
+
+
+def test_editing_the_title_without_the_model_field_keeps_the_rejection(client, db, monkeypatch):
+    """제목만 고쳐 저장해도(#437) 화면이 모델 필드를 보내지 않으면 거부
+    표시가 그대로 남는다 — 거부된 모델로 새 시도가 헛되이 다시 채점되지
+    않는다."""
+
+    ctx = _setup_submission(client)
+    monkeypatch.setattr(
+        "core.llm_scoring.requests.post", lambda *a, **k: _FakeResponse(404, _model_rejected_body())
+    )
+    _run_scan(client)
+    assert Problem.objects.get(id=ctx["problem_id"]).scoring_model_rejected_at is not None
+
+    patched = client.patch(
+        f"{CLASSES_URL}/{ctx['class_id']}/problems/{ctx['problem_id']}",
+        data={"title": "1주차 (고침)"},
+        content_type="application/json",
+        **_auth_header(ctx["instructor"]["access"]),
+    )
+    assert patched.status_code == 200
+    assert patched.json()["scoring_model_rejected"] is True
+    assert Problem.objects.get(id=ctx["problem_id"]).scoring_model_rejected_at is not None
+
+    called = []
+    monkeypatch.setattr(
+        "core.llm_scoring.requests.post", lambda *a, **k: called.append(1) or _FakeResponse(200, {})
+    )
+    result = _run_scan(client)
+    assert result["count"] == 0
+    assert not called
+
+
+def test_resending_the_same_model_clears_the_rejection(client, db, monkeypatch):
+    """같은 모델 값을 다시 보내면(#437 「이 모델로 다시 시도」) 값이 실제로
+    달라지지 않았어도 거부 표시가 풀린다 — "설정을 확인했다"는 사실 자체가
+    재시도 트리거다(기존 #403 규칙, 화면이 이 요청을 쓰는 경로가 새로
+    생겼을 뿐이다)."""
+
+    ctx = _setup_submission(client, model="gpt-5-mini")
+    monkeypatch.setattr(
+        "core.llm_scoring.requests.post", lambda *a, **k: _FakeResponse(404, _model_rejected_body())
+    )
+    _run_scan(client)
+    assert Problem.objects.get(id=ctx["problem_id"]).scoring_model_rejected_at is not None
+
+    patched = client.patch(
+        f"{CLASSES_URL}/{ctx['class_id']}/problems/{ctx['problem_id']}",
+        data={"model": "gpt-5-mini"},
+        content_type="application/json",
+        **_auth_header(ctx["instructor"]["access"]),
+    )
+    assert patched.status_code == 200
+    assert patched.json()["scoring_model_rejected"] is False
+    assert Problem.objects.get(id=ctx["problem_id"]).scoring_model_rejected_at is None
+
+    monkeypatch.setattr(
+        "core.llm_scoring.requests.post",
+        lambda *a, **k: _FakeResponse(200, _openai_success_body(ctx["item_id"])),
+    )
+    result = _run_scan(client)
+    assert result["count"] == 1
+    assert ClassroomScore.objects.filter(submission_id=ctx["submission_id"]).exists()

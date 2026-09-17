@@ -145,10 +145,9 @@ class Class(models.Model):
     def scoring_key_unusable(self) -> bool:
         """지금 이 클래스의 채점이 키 때문에 멈춰 있는가(#355) — 키가 아예
         없거나(`has_scoring_key()`가 거짓) 벤더가 거절해 "거부됨" 상태다.
-        `classroom.scoring._pending_submissions`(스캔 후보)가 거르는 것과
-        `classroom.api._pending_reason`/`_cell_status`(화면)가 참여자에게
-        같은 사유로 묶어 보여주는 것, 둘 다 이 기준 하나를 따라야 어긋나지
-        않는다."""
+        `classroom.pending_scoring`(#434)의 스캔 후보 쿼리·채점 직전 확인·
+        화면의 `pending_reason`·격자 칸 상태가 모두 이 기준 하나를 따라야
+        어긋나지 않는다."""
 
         return not self.has_scoring_key() or self.openai_api_key_status == self.ScoringKeyStatus.REJECTED
 
@@ -258,6 +257,64 @@ class Problem(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"Problem(id={self.pk}, title={self.title!r})"
+
+    def effective_model(self) -> str:
+        """실제 채점에 쓰이는 모델(#402, CONTEXT.md 「채점 모델」, #436) — 이
+        문제가 자기 값(`model`)을 갖지 않으면 클래스 기본값을 따른다.
+        `classroom.api`(문제 응답)와 `classroom.scoring`(채점 호출)이 예전에
+        각자 `problem.model or classroom.default_model`을 다시 적던 것을
+        이 메서드 하나로 모은다 — 둘이 어긋나면 화면이 말하는 모델과 실제로
+        채점에 쓰인 모델이 갈릴 수 있었다."""
+
+        return self.model or self.classroom.default_model
+
+    def effective_reasoning_effort(self) -> str:
+        """`effective_model`과 같은 자리(#402, #436). 추론 모델이 아닌 채점
+        모델에는 이 값이 뜻이 없지만, 그 판단(`is_reasoning_model_id`)은
+        부르는 쪽의 몫으로 남긴다 — 이 메서드는 "이 문제가 쓸 추론 강도
+        값이 무엇인가"만 답한다."""
+
+        return self.reasoning_effort or self.classroom.default_reasoning_effort
+
+    def is_score_passed(self, score, checklist_items=None) -> bool:
+        """이 채점 하나가 이 문제에서 **통과**인가(#288, CONTEXT.md 「통과」,
+        #436) — 필수 항목을 전부 충족했는가. 선택 항목은 판정에 관여하지
+        않는다. 이 문제 자신의 문법 검사 설정(`syntax_check_enabled`)을
+        직접 읽으므로, 부르는 쪽이 그 값을 따로 넘길 필요가 없다 — 예전에는
+        `classroom.api._is_score_passed`가 그 값을 인자로 받았고,
+        `classroom.scoring`의 채점 완료 알림은 순환 import를 피해 이 규칙을
+        손으로 베꼈다.
+
+        **항상 지금의 체크리스트·문제 설정 기준으로 다시 셈한다** — 저장된
+        판정(`score.reasoning`/`score.syntax_check_result`)은 append-only라
+        바뀌지 않지만, 필수 항목 여부는 매번 최신 `ChecklistItem.required`
+        에서 새로 구한다. 강사가 채점 뒤에 체크리스트를 고치거나(#283이
+        허용한다) 기본 항목을 껐다 켰다 해도(#410) 지난 판정 자체는 바뀌지
+        않고 이 재계산만 새 기준을 탄다 — 이 모델 docstring의 "달성률만
+        새 기준으로 다시 셈된다"가 뜻하는 바로 그 재계산이다.
+
+        `checklist_items`를 주면(이미 불러온 목록) 다시 질의하지 않는다 —
+        목록·격자처럼 문제 하나를 여러 시도·여러 참여자에 걸쳐 반복해서
+        묻는 자리가 그때마다 체크리스트를 다시 불러오지 않게 하기 위해서다
+        (#436 AC "문제 수만큼 질의가 늘지 않는다"). 생략하면
+        `self.checklist_items.all()`을 쓴다 — 이미 `prefetch_related`로
+        불러왔으면 그 캐시를 그대로 쓴다.
+
+        미채점("pending", `score is None`)이면 항상 거짓이다 — 아직 판정이
+        없다."""
+
+        if score is None:
+            return False
+        items = self.checklist_items.all() if checklist_items is None else checklist_items
+        required_item_ids = {item.id for item in items if item.required}
+        if not required_item_ids:
+            return False
+        if self.syntax_check_enabled:
+            syntax_result = score.syntax_check_result
+            if not syntax_result or not syntax_result.get("is_met"):
+                return False
+        met_ids = {r["checklist_item_id"] for r in score.reasoning if r["is_met"]}
+        return required_item_ids.issubset(met_ids)
 
 
 class ClassMember(models.Model):

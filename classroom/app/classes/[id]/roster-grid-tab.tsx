@@ -17,7 +17,7 @@ import { useRosterGrid } from "@/lib/roster-grid/use-roster-grid";
 const STATUS_LABEL: Record<GridCellStatus, string> = {
   passed: "통과",
   attempted_not_passed: "시도했으나 미통과",
-  no_api_key: "채점 키 필요",
+  needs_setup: "설정 필요",
   scoring: "채점 중",
   not_submitted: "미제출",
 };
@@ -27,9 +27,10 @@ function StatusMark({ status }: { status: GridCellStatus }) {
   if (status === "passed") return <span className="mx-auto block h-[15px] w-[15px] bg-verified" />;
   if (status === "attempted_not_passed")
     return <span className="mx-auto block h-[15px] w-[15px] border border-attention" />;
-  if (status === "no_api_key")
-    // 「채점 키 필요」는 강사가 키를 넣기 전까지 절대 바뀌지 않는다(#346) —
-    // 「채점 중」의 빗금과 달리 속이 빈 주의색 테두리로 "멈춰 있다"를 그린다.
+  if (status === "needs_setup")
+    // 「설정 필요」는 강사가 키를 넣거나 모델을 바꾸기 전까지 절대 바뀌지
+    // 않는다(#346, #403, #434) — 「채점 중」의 빗금과 달리 속이 빈 주의색
+    // 테두리로 "멈춰 있다"를 그린다.
     return <span className="mx-auto block h-[15px] w-[15px] border border-attention border-dashed" />;
   if (status === "scoring")
     // 「채점 중」은 채워지지도 비지도 않은 중간 상태 — 빗금으로 그 사이를 표현한다.

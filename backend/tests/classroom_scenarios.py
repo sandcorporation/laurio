@@ -298,6 +298,21 @@ def mine(client, access: str, class_id: int, problem_id: int) -> dict:
     return response.json()
 
 
+def my_problems(client, access: str, class_id: int) -> dict:
+    """참여자의 문제 목록(#288) — 문제 하나의 제출 목록(`mine`)과 다른
+    엔드포인트다(`/problems/mine` vs `/problems/{id}/mine`)."""
+
+    response = client.get(f"{CLASSES_URL}/{class_id}/problems/mine", **auth_header(access))
+    assert response.status_code == 200, response.content
+    return response.json()
+
+
+def list_problems(client, access: str, class_id: int) -> list:
+    response = client.get(f"{CLASSES_URL}/{class_id}/problems", **auth_header(access))
+    assert response.status_code == 200, response.content
+    return response.json()
+
+
 def instructor_submissions(client, access: str, class_id: int, problem_id: int) -> list:
     response = client.get(
         f"{CLASSES_URL}/{class_id}/problems/{problem_id}/submissions", **auth_header(access)

@@ -212,6 +212,10 @@ export default function EditProblemPage() {
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 「이 모델로 다시 시도」(#437) — 본문 저장(saving/error)과 별개 상태다,
+  // 모델 칸 옆의 작은 버튼 하나가 이 요청만 보낸다.
+  const [retryingModel, setRetryingModel] = useState(false);
+  const [retryModelError, setRetryModelError] = useState<string | null>(null);
 
   const [newItemLabel, setNewItemLabel] = useState("");
   const [newItemRequired, setNewItemRequired] = useState(true);
@@ -303,7 +307,13 @@ export default function EditProblemPage() {
         title: title.trim(),
         description,
         submission_formats: submissionFormats,
-        model,
+        // 모델 값을 불러온 값과 다를 때만 보낸다(#437) — 백엔드는 이 필드가
+        // 오면 값이 같아도 「모델 거부」 표시를 푼다(#403 AC), 그래서 제목
+        // 만 고쳐 저장해도 매번 이 필드를 함께 보내면 거부 표시가 강사가
+        // 손대지 않았는데도 풀려 버린다. 거부된 모델로 새 시도가 헛되이
+        // 다시 채점되는 것을 막는다. 같은 모델로 다시 시도하려면 모델
+        // 칸의 「이 모델로 다시 시도」(`handleRetryModel`)를 쓴다.
+        ...(model !== problem.model ? { model } : {}),
         reasoning_effort: reasoningEffort,
         grading_strictness: gradingGuideline.grading_strictness,
         grading_guideline_text: gradingGuideline.grading_guideline_text,
@@ -314,6 +324,22 @@ export default function EditProblemPage() {
       setError("문제를 저장하지 못했습니다. 잠시 후 다시 시도해주세요.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleRetryModel() {
+    // 벤더 쪽 문제가 풀렸다고 강사가 판단하면 모델을 바꾸지 않고도 거부
+    // 표시를 풀 수 있다(#437) — 모델 필드만 보낸다(지금 저장된 값 그대로,
+    // 편집 중인 선택값과 무관하다).
+    setRetryingModel(true);
+    setRetryModelError(null);
+    try {
+      await updateProblem(classId, problemId, { model: problem.model });
+      reload();
+    } catch {
+      setRetryModelError("다시 시도하지 못했습니다. 잠시 후 다시 시도해주세요.");
+    } finally {
+      setRetryingModel(false);
     }
   }
 
@@ -887,6 +913,30 @@ export default function EditProblemPage() {
             <Card>
               <CardHeader title="채점 모델" />
               <div className="flex flex-col gap-2.5 p-4">
+                {problem.scoring_model_rejected ? (
+                  <Note tone="attention">
+                    <div data-testid="edit-problem-model-rejected-note" className="flex flex-col gap-2">
+                      <div className="flex items-center gap-2">
+                        <Badge tone="attention">모델 거부</Badge>
+                        <span>이 키로 이 모델을 쓸 수 없어 시도가 채점되지 않습니다.</span>
+                      </div>
+                      <button
+                        type="button"
+                        data-testid="edit-problem-model-retry-button"
+                        disabled={retryingModel}
+                        onClick={handleRetryModel}
+                        className={`${buttonClass("secondary", "sm")} self-start`}
+                      >
+                        {retryingModel ? "다시 시도하는 중..." : "이 모델로 다시 시도"}
+                      </button>
+                      {retryModelError ? (
+                        <ErrorNote>
+                          <span data-testid="edit-problem-model-retry-error">{retryModelError}</span>
+                        </ErrorNote>
+                      ) : null}
+                    </div>
+                  </Note>
+                ) : null}
                 <label htmlFor="problem-model" className="sr-only">
                   채점 모델
                 </label>

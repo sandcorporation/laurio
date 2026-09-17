@@ -95,6 +95,7 @@ from .schemas import (
     ScoringModelCatalogOut,
     ScoringModelOut,
 )
+from . import pending_scoring
 from .events import publish_attempt_submitted
 from .scoring import check_scoring_key
 from .scoring_model_catalog import get_scoring_model_catalog
@@ -245,10 +246,6 @@ def _serialize_checklist_item(item: ChecklistItem) -> ChecklistItemOut:
     return ChecklistItemOut(id=item.id, label=item.label, required=item.required, order=item.order)
 
 
-def _required_checklist_item_ids(checklist_items) -> set[int]:
-    return {item.id for item in checklist_items if item.required}
-
-
 def _active_member_ids(class_obj: Class) -> set[int]:
     """달성률의 분모를 이루는 참여자 id — 강사 본인과 내보내진 사람은 뺀다
     (#289, CONTEXT.md 「달성률」)."""
@@ -263,15 +260,16 @@ def _active_member_ids(class_obj: Class) -> set[int]:
 def _problem_pass_stats(problem: Problem, active_member_ids: set[int]) -> tuple[int, int]:
     """(passed_count, member_count) — 분모는 `active_member_ids`의 크기,
     분자는 그중 이 문제를 한 번이라도 통과한 사람 수다(#289). 매번 지금의
-    체크리스트 기준으로 다시 셈한다 — `_is_score_passed`가 그렇게 되어
-    있어 여기서는 최신 `required_item_ids`만 넘기면 된다."""
+    체크리스트 기준으로 다시 셈한다 — `Problem.is_score_passed`(#436)가
+    그렇게 되어 있어 여기서는 한 번 불러온 체크리스트만 그대로 넘기면
+    된다."""
 
     member_count = len(active_member_ids)
     if not active_member_ids:
         return 0, 0
 
-    required_item_ids = _required_checklist_item_ids(problem.checklist_items.all())
-    if not required_item_ids:
+    checklist_items = list(problem.checklist_items.all())
+    if not any(item.required for item in checklist_items):
         return 0, member_count
 
     submissions = ClassroomSubmission.objects.filter(
@@ -283,7 +281,7 @@ def _problem_pass_stats(problem: Problem, active_member_ids: set[int]) -> tuple[
         if submission.member_id in passed_member_ids:
             continue
         score = getattr(submission, "classroom_score", None)
-        if _is_score_passed(score, required_item_ids, syntax_check_enabled=problem.syntax_check_enabled):
+        if problem.is_score_passed(score, checklist_items=checklist_items):
             passed_member_ids.add(submission.member_id)
 
     return len(passed_member_ids), member_count
@@ -339,8 +337,8 @@ def _serialize_problem(
     if active_member_ids is None:
         active_member_ids = _active_member_ids(class_obj)
     passed_count, member_count = _problem_pass_stats(problem, active_member_ids)
-    effective_model = problem.model or class_obj.default_model
-    effective_reasoning_effort = problem.reasoning_effort or class_obj.default_reasoning_effort
+    effective_model = problem.effective_model()
+    effective_reasoning_effort = problem.effective_reasoning_effort()
     return ProblemOut(
         id=problem.id,
         classroom_id=problem.classroom_id,
@@ -365,34 +363,6 @@ def _serialize_problem(
         published_template=_published_template_summary(_live_problem_template(problem)),
         deletable=_problem_deletable(problem, class_obj, blocking_problem_ids=blocking_problem_ids),
     )
-
-
-def _is_score_passed(
-    score: ClassroomScore | None, required_item_ids: set[int], *, syntax_check_enabled: bool = True
-) -> bool:
-    """이 채점 하나가 통과인가(#288, CONTEXT.md 「통과」) — 필수 항목을
-    **전부** 충족했는가. 선택 항목은 판정에 관여하지 않는다(AC). 문법 검사
-    기본 항목(#408)이 켜진 문제라면 그 항목도 필수로 함께 본다.
-
-    **항상 지금의 체크리스트·문제 설정 기준으로 다시 셈한다** — 저장된
-    판정(`score.reasoning`/`score.syntax_check_result`)은 append-only라
-    바뀌지 않지만, `required_item_ids`·`syntax_check_enabled`는 호출부가
-    매번 최신 `ChecklistItem.required`/`Problem.syntax_check_enabled`에서
-    새로 구해 넘긴다. 강사가 채점 뒤에 체크리스트를 고치거나(#283이
-    허용한다) 기본 항목을 껐다 켰다 해도(#410) 지난 판정 자체는 바뀌지
-    않고 이 재계산만 새 기준을 탄다 — Problem 모델 docstring의 "달성률만
-    새 기준으로 다시 셈된다"가 뜻하는 바로 그 재계산이다.
-
-    미채점("pending", `score is None`)이면 항상 거짓이다 — 아직 판정이 없다."""
-
-    if score is None or not required_item_ids:
-        return False
-    if syntax_check_enabled:
-        syntax_result = score.syntax_check_result
-        if not syntax_result or not syntax_result.get("is_met"):
-            return False
-    met_ids = {r["checklist_item_id"] for r in score.reasoning if r["is_met"]}
-    return required_item_ids.issubset(met_ids)
 
 
 def _serialize_problem_mine(problem: Problem, *, passed: bool = False) -> ClassroomProblemMineOut:
@@ -458,30 +428,18 @@ def _serialize_score(score: ClassroomScore) -> ClassroomScoreOut:
 
 
 def _pending_reason(score, class_obj: Class, problem: Problem) -> str | None:
-    """아직 채점되지 않은 시도가 왜 멈춰 있는지(#295, #346, #355, #403) —
-    참여자·강사 화면 모두 이 값 하나를 읽어 다르게 그린다. 채점 키가 없거나
-    벤더가 거절했으면 예산·모델과 무관하게 "no_api_key"다 —
-    `Class.scoring_key_unusable()`로 판정한다, `scoring._pending_submissions`
-    (스캔 후보)가 거르는 것과 **같은 기준**이어야 한다. 여기서 다른 기준을
-    쓰면 그 기준이 어긋나 실제로는 채점되지 않는 시도가 "정상 대기"로 잘못
-    보일 수 있다. 키는 멀쩡한데 이 문제의 채점 모델을 그 키로 못 쓰면
-    "model_rejected"(#403)다. **키가 거부된 것과 아예 없는 것, 그리고 모델이
-    거부된 것을 참여자 화면에서는 구별하지 않는다**(#355 AC, #403 AC "참여자
-    에게는 기존 「채점하지 못함」 안내를 보인다") — 강사의 계정·설정 문제가
-    참여자에게 새어 나가지 않는다, 강사 전용 화면(설정·시도 목록·클래스
-    상세 배너)만 다르게 말한다. 키·모델 둘 다 멀쩡한데 예산이 바닥났으면
-    "budget_exhausted"(#295)다. 넷 다 아니면 스캔이 정말 채점을 기다리는
-    중이라 `None`(평범한 "채점 중")이다."""
+    """아직 채점되지 않은 시도가 왜 멈춰 있는지(#295, #346, #355, #403, #434) —
+    참여자·강사 화면 모두 이 값 하나를 읽어 다르게 그린다.
+    `classroom.pending_scoring.pending_reason`에 그대로 맡긴다 — 스캔 후보
+    (`scoring.pending_submissions`)가 거르는 것과 **같은 기준**이어야 한다는
+    불변식이 이제 그 모듈 하나에 산다. 셋이 겹치면 키(없음·거부) → 모델
+    거부 → 예산 소진 순서로 하나만 말한다. **키가 거부된 것과 아예 없는
+    것, 그리고 모델이 거부된 것을 참여자 화면에서는 구별하지 않는다**
+    (#355 AC, #403 AC "참여자에게는 기존 「채점하지 못함」 안내를 보인다")
+    — 강사의 계정·설정 문제가 참여자에게 새어 나가지 않는다, 강사 전용
+    화면(설정·시도 목록·클래스 상세 배너)만 다르게 말한다."""
 
-    if score is not None:
-        return None
-    if class_obj.scoring_key_unusable():
-        return "no_api_key"
-    if problem.scoring_model_rejected_at is not None:
-        return "model_rejected"
-    if class_obj.token_budget_exhausted():
-        return "budget_exhausted"
-    return None
+    return pending_scoring.pending_reason(score, class_obj, problem)
 
 
 def _serialize_classroom_submission(
@@ -489,9 +447,9 @@ def _serialize_classroom_submission(
     *,
     asset: SubmissionAsset,
     user,
-    required_item_ids: set[int],
     class_obj: Class,
     problem: Problem,
+    checklist_items=None,
 ) -> ClassroomSubmissionOut:
     download_url = (
         _source_download_url(asset, user) if asset.kind == SubmissionAsset.Kind.SOURCE else None
@@ -508,7 +466,7 @@ def _serialize_classroom_submission(
         created_at=submission.created_at,
         status="scored" if score is not None else "pending",
         score=_serialize_score(score) if score is not None else None,
-        passed=_is_score_passed(score, required_item_ids, syntax_check_enabled=problem.syntax_check_enabled),
+        passed=problem.is_score_passed(score, checklist_items=checklist_items),
         pending_reason=pending_reason,
     )
 
@@ -536,9 +494,9 @@ def _serialize_instructor_submission(
     submission: ClassroomSubmission,
     *,
     asset: SubmissionAsset,
-    required_item_ids: set[int],
     class_obj: Class,
     problem: Problem,
+    checklist_items=None,
 ) -> ClassroomInstructorSubmissionOut:
     download_url = (
         _instructor_source_download_url(
@@ -560,7 +518,7 @@ def _serialize_instructor_submission(
         created_at=submission.created_at,
         status="scored" if score is not None else "pending",
         score=_serialize_score(score) if score is not None else None,
-        passed=_is_score_passed(score, required_item_ids, syntax_check_enabled=problem.syntax_check_enabled),
+        passed=problem.is_score_passed(score, checklist_items=checklist_items),
         pending_reason=_pending_reason(score, class_obj, problem),
     )
 
@@ -1008,34 +966,33 @@ def rename_myself(request: HttpRequest, class_id: int, payload: MemberRenameIn):
 
 def _cell_status(
     submissions: list[ClassroomSubmission],
-    required_item_ids: set[int],
     class_obj: Class,
-    *,
-    syntax_check_enabled: bool = True,
+    problem: Problem,
 ) -> str:
     """이 참여자·이 문제 한 칸의 상태 — **통과 이력**을 그린다(최신 시도가
     아니다, #290 AC). 우선순위는 이 순서다: 한 번이라도 통과했으면 이후
     시도가 미통과여도 "passed"다(#289/#288과 같은 OR 규칙). 통과가 없고
-    아직 채점을 기다리는 시도가 있으면, 그 클래스의 키를 쓸 수 없을 때는
-    "no_api_key"(#346, 키가 아예 없든 #355로 거부됐든 강사 본인이 손대기
-    전까지는 절대 안 바뀐다는 것을 구별해 보여준다 — 이 격자는 강사 전용
-    화면이지만 참여자별 칸 하나하나까지 "거부됨"을 따로 말할 자리는 아니다,
-    강사는 클래스 상세 배너·설정 화면에서 이미 그 사실을 본다) — 키를 쓸 수
-    있으면(예산 소진 포함) "scoring"(아직 뒤집힐 여지가 있다는 뜻이다). 전부
-    채점됐는데 하나도 통과가 없으면 "attempted_not_passed". 시도 자체가
-    없으면 "not_submitted"."""
+    아직 채점을 기다리는 시도가 있으면, `pending_scoring.needs_setup`이
+    참이면 "needs_setup"(#346·#403, 키가 아예 없거나 #355로 거부됐거나
+    이 문제의 모델이 거부됐다 — 셋 다 강사 본인이 손대기 전까지는 절대
+    안 바뀐다는 것을 하나로 묶어 보여준다, #434 — 이 격자는 강사 전용
+    화면이지만 참여자별 칸 하나하나까지 세 사유를 따로 말할 자리는 아니다,
+    강사는 클래스 상세 배너·설정 화면·문제별 제출 현황에서 이미 그 사실을
+    본다) — 아니면(예산 소진뿐이면) "scoring"(예산을 채우면 저절로 풀려
+    아직 뒤집힐 여지가 있다는 뜻이다). 전부 채점됐는데 하나도 통과가 없으면
+    "attempted_not_passed". 시도 자체가 없으면 "not_submitted".
+
+    통과 판정은 `Problem.is_score_passed`(#436)에 맡긴다 — 필수 항목·문법
+    검사 설정을 이 함수가 다시 받지 않는다. `problem.checklist_items`가
+    이미 `prefetch_related`로 불려 있어(호출부인 `get_roster_grid`) 문제
+    수만큼 질의가 늘지 않는다."""
 
     if not submissions:
         return "not_submitted"
-    if any(
-        _is_score_passed(
-            getattr(s, "classroom_score", None), required_item_ids, syntax_check_enabled=syntax_check_enabled
-        )
-        for s in submissions
-    ):
+    if any(problem.is_score_passed(getattr(s, "classroom_score", None)) for s in submissions):
         return "passed"
     if any(getattr(s, "classroom_score", None) is None for s in submissions):
-        return "no_api_key" if class_obj.scoring_key_unusable() else "scoring"
+        return "needs_setup" if pending_scoring.needs_setup(class_obj, problem) else "scoring"
     return "attempted_not_passed"
 
 
@@ -1062,11 +1019,6 @@ def get_roster_grid(request: HttpRequest, class_id: int):
     for submission in submissions:
         submissions_by_key.setdefault((submission.problem_id, submission.member_id), []).append(submission)
 
-    required_ids_by_problem = {
-        problem.id: _required_checklist_item_ids(problem.checklist_items.all()) for problem in problems
-    }
-    syntax_check_enabled_by_problem = {problem.id: problem.syntax_check_enabled for problem in problems}
-
     problem_stats = []
     for problem in problems:
         passed_count, member_count = _problem_pass_stats(problem, active_member_ids)
@@ -1088,9 +1040,8 @@ def get_roster_grid(request: HttpRequest, class_id: int):
                 problem_id=problem.id,
                 status=_cell_status(
                     submissions_by_key.get((problem.id, member.id), []),
-                    required_ids_by_problem[problem.id],
                     class_obj,
-                    syntax_check_enabled=syntax_check_enabled_by_problem[problem.id],
+                    problem,
                 ),
             )
             for problem in problems
@@ -1310,13 +1261,8 @@ def list_my_problems(request: HttpRequest, class_id: int):
     def _list_items(problem_list: list[Problem]) -> list[ClassroomProblemListItemOut]:
         items = []
         for problem in problem_list:
-            required_item_ids = _required_checklist_item_ids(problem.checklist_items.all())
             passed = any(
-                _is_score_passed(
-                    getattr(s, "classroom_score", None),
-                    required_item_ids,
-                    syntax_check_enabled=problem.syntax_check_enabled,
-                )
+                problem.is_score_passed(getattr(s, "classroom_score", None))
                 for s in submissions_by_problem.get(problem.id, [])
             )
             items.append(
@@ -1606,7 +1552,7 @@ def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
 
     member = _get_member_or_404(class_id, request.auth_user.id)
     problem = _get_visible_problem_for_participant_or_404(class_id, problem_id, member)
-    required_item_ids = _required_checklist_item_ids(problem.checklist_items.all())
+    checklist_items = list(problem.checklist_items.all())
 
     submissions = (
         ClassroomSubmission.objects.filter(problem=problem, member=member)
@@ -1622,9 +1568,9 @@ def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
             s,
             asset=list(s.assets.all())[0],
             user=request.auth_user,
-            required_item_ids=required_item_ids,
             class_obj=problem.classroom,
             problem=problem,
+            checklist_items=checklist_items,
         )
         for s in submissions
     ]
@@ -1753,14 +1699,12 @@ def create_classroom_submission(
         # (#40), 큐에 쌓인 채 스캔이 안전망으로 대신 줍는다.
         transaction.on_commit(lambda: _enqueue_immediate_scoring(submission.id))
 
-    # 방금 만든 시도는 아직 채점되지 않아 required_item_ids와 무관하게
-    # 언제나 passed=False다 — 그래도 시그니처를 맞추려고 지금 값을 구해 넘긴다.
-    required_item_ids = _required_checklist_item_ids(problem.checklist_items.all())
+    # 방금 만든 시도는 아직 채점되지 않아 언제나 passed=False다
+    # (`Problem.is_score_passed`가 `score is None`을 바로 거짓으로 본다).
     return 201, _serialize_classroom_submission(
         submission,
         asset=asset,
         user=request.auth_user,
-        required_item_ids=required_item_ids,
         class_obj=problem.classroom,
         problem=problem,
     )
@@ -1785,7 +1729,7 @@ def list_problem_submissions(request: HttpRequest, class_id: int, problem_id: in
 
     class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
     problem = _get_owned_problem_or_404(class_obj, problem_id)
-    required_item_ids = _required_checklist_item_ids(problem.checklist_items.all())
+    checklist_items = list(problem.checklist_items.all())
 
     submissions = (
         ClassroomSubmission.objects.filter(problem=problem)
@@ -1798,9 +1742,9 @@ def list_problem_submissions(request: HttpRequest, class_id: int, problem_id: in
             # `_mine`과 같은 이유로 리스트를 먼저 받아 prefetch 캐시를 쓴다.
             s,
             asset=list(s.assets.all())[0],
-            required_item_ids=required_item_ids,
             class_obj=class_obj,
             problem=problem,
+            checklist_items=checklist_items,
         )
         for s in submissions
     ]
