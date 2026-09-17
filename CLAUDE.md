@@ -256,16 +256,22 @@ ghcr(`ghcr.io/sandcorporation/codemit-*`, 비공개)에 올린다:
 
 | 잡 | 러너 | 태그 |
 | --- | --- | --- |
-| `images-staging` | sub (amd64) | `codemit-backend:<sha>-amd64`, 세 앱 `:<sha>-staging` |
-| `images-prod` | **mac** (Apple Silicon 의 Docker Desktop 위 러너 컨테이너, Linux/ARM64, 라벨 `mac-arm`) | `codemit-backend:<sha>-arm64`, 세 앱 `:<sha>-prod` |
+| `images-staging` | **mac** — amd64 는 Docker Desktop 의 에뮬레이션 | `codemit-backend:<sha>-amd64`, 세 앱 `:<sha>-staging` |
+| `images-prod` | **mac** — arm64 제 속도 | `codemit-backend:<sha>-arm64`, 세 앱 `:<sha>-prod` |
+
+mac 러너는 Apple Silicon 의 Docker Desktop 위 러너 컨테이너(Linux/ARM64, 라벨 `mac-arm`)다.
+**둘 다 mac 인 이유는 sub 의 디스크다**(2026-09-17) — sub 는 테스트 잡과 staging 스택이
+캐시 없는 SATA SSD(86% 참) 하나를 나눠 쓰는데, 빌드를 얹자 CPU·메모리는 남는데 디스크
+대기가 14~84% 로 치솟았다. **mac 이 없을 때의 비상구는 저장소 변수 `IMAGE_BUILDER=sub`**
+다 — 두 잡이 sub 로 옮겨 가 arm64 는 QEMU 로(느리게) 굽는다. 줄 서 있던 실행은 변수를 바꾼
+뒤 다시 돌리고, mac 이 돌아오면 변수를 지운다.
 
 - **backend 는 환경을 가리지 않아 아키텍처로만 가른다.** 세 앱은 `NEXT_PUBLIC_*` 가 굳으므로
   환경마다 따로 굽는다 — 그 값의 원본은 서버 env 가 아니라 **저장소 변수 `STAGING_*`·
   `PROD_*`** 다(조직이 free 요금제라 비공개 저장소의 environment 기능을 못 써 접두어로
   가른다). 값을 바꾸면 CI 를 다시 돌려야 이미지에 반영된다.
-- **mac 이 꺼져 있으면 `images-prod` 가 줄을 서고, CI 가 끝나지 않으니 production 승격도
-  기다린다** — 의도한 동작이다(oracle 에서 굽거나 sub 에서 에뮬레이션으로 굽는 대안을
-  버렸다). staging 은 mac 을 기다리지 않는다.
+- **mac 이 꺼져 있으면 두 이미지 잡이 줄을 서고, staging 배포와 production 승격이 함께
+  기다린다** — 위 비상구로 옮긴다. oracle 에서 굽는 대안은 prod 서버를 느리게 해서 버렸다.
 - **서버는 배포 에이전트 컨테이너에 한 번 저장해 둔 ghcr 로그인으로 받는다**(read:packages
   classic PAT). 두 컨테이너(sub 의 `jenkins`, oracle 의 `jenkins-desktop-agent`) 모두
   `/root/.docker` 가 named volume 이라 컨테이너를 다시 만들어도 남는다(oracle 은 2026-09-17
@@ -1093,10 +1099,10 @@ Problem Statement 를 읽고 「어댑터 실제 구현은 스토리지 하나�
 
 ## CI 는 셀프호스티드 러너에서, 프로덕션 이미지로 돈다
 
-GitHub 호스티드 러너는 과금이 막혀 못 쓴다. 16개 잡 중 15개가 `runs-on: [self-hosted, sub]` —
-staging 배포 호스트와 **같은 머신**이다. 나머지 하나(`images-prod`)만 mac 러너
-(`[self-hosted, ARM64, mac-arm]` — sub 와 같은 `myoung34/github-runner` 컨테이너, 조직 범위)에서 prod 용 arm64 이미지를 굽는다(위 「이미지는 CI 가
-굽는다」). 러너 컨테이너는 `--network host` 로 돌고 호스트
+GitHub 호스티드 러너는 과금이 막혀 못 쓴다. 16개 잡 중 14개가 `runs-on: [self-hosted, sub]` —
+staging 배포 호스트와 **같은 머신**이다. 나머지 둘(`images-staging`·`images-prod`)은 mac 러너
+(`[self-hosted, ARM64, mac-arm]` — sub 와 같은 `myoung34/github-runner` 컨테이너, 조직 범위)에서
+배포 이미지를 굽는다(위 「이미지는 CI 가 굽는다」, 비상구 `IMAGE_BUILDER=sub`). 러너 컨테이너는 `--network host` 로 돌고 호스트
 docker 소켓을 물어 컨테이너를 바깥에 띄운다(DooD).
 
 **CI 는 `docker/compose.ci.yaml` 을 dev compose 위에 겹쳐 쓴다 — 지우면 CI 가 깨진다.**
