@@ -467,6 +467,7 @@ def test_metrics_response_never_mentions_score_or_developer_identity(
 
 CONTEST_DETAIL_URL = "/api/contests/{contest_id}"
 VIEWS_URL = "/api/contests/{contest_id}/views"
+FLUSH_VIEWS_URL = "/api/internal/scans/contest-view-flush"
 
 
 def _record_view(client, contest_id: int, *, access: str | None = None, **extra):
@@ -475,7 +476,20 @@ def _record_view(client, contest_id: int, *, access: str | None = None, **extra)
     return client.post(VIEWS_URL.format(contest_id=contest_id), **headers)
 
 
+def _flush_views(client) -> dict:
+    """조회수 옮기기 스캔을 한 번 돌린다(#446) — 지표 화면·공개 목록·큐레이션은
+    Redis 를 직접 읽지 않고 이 스캔이 옮긴 `Contest.view_count`(DB)를 읽으므로,
+    조회를 기록한 뒤 그 값을 확인하려면 먼저 이 스캔을 거쳐야 한다."""
+
+    from django.conf import settings
+
+    response = client.post(FLUSH_VIEWS_URL, HTTP_X_INTERNAL_TOKEN=settings.INTERNAL_API_TOKEN)
+    assert response.status_code == 200, response.content
+    return response.json()
+
+
 def _view_metrics(client, access: str, contest_id: int) -> dict:
+    _flush_views(client)
     response = _metrics(client, access, contest_id)
     assert response.status_code == 200, response.content
     return response.json()["view_metrics"]
@@ -647,27 +661,34 @@ def test_conversion_rate_matches_submission_count_over_view_count(
 
 
 @pytest.mark.django_db
-def test_view_metrics_are_absent_from_public_surfaces(client, category, landing_type):
-    """조회수는 Sponsor 에게만 보인다 — 공개 표면 어디에도 실리지 않는다는
-    것을 **없는지**로 단언한다."""
+def test_view_count_is_public_but_view_metrics_and_conversion_rate_are_not(
+    client, category, landing_type
+):
+    """#446 — 누적 조회수(`view_count`)는 이제 공개 목록·상세 응답에도 실린다
+    (`ContestOut`을 세 엔드포인트가 함께 쓴다). 다만 「본 사람 대비 낸 사람」을
+    해석하는 `view_metrics`(전환율 포함, Sponsor 전용 집계)는 여전히 공개 표면
+    어디에도 없다 — 공개되는 것은 DB 값 하나뿐이다."""
 
     sponsor, contest = _publish_contest(client, category=category, deliverable_type=landing_type)
     dev = _verified_user(client, "dev-view-public-leak", "ci-view-public-leak")
     _record_view(client, contest["id"], access=dev["access"])
+    _flush_views(client)
 
     detail_response = client.get(CONTEST_DETAIL_URL.format(contest_id=contest["id"]))
     assert detail_response.status_code == 200
-    detail_raw = detail_response.content.decode("utf-8").lower()
-    assert "view_count" not in detail_raw
-    assert "view_metrics" not in detail_raw
-    assert "conversion_rate" not in detail_raw
+    detail_body = detail_response.json()
+    assert detail_body["view_count"] == 1
+    assert "view_metrics" not in detail_body
+    assert "conversion_rate" not in detail_body
 
     list_response = client.get(CONTESTS_URL)
     assert list_response.status_code == 200
-    list_raw = list_response.content.decode("utf-8").lower()
-    assert "view_count" not in list_raw
-    assert "view_metrics" not in list_raw
-    assert "conversion_rate" not in list_raw
+    listed = next(
+        item for item in list_response.json()["items"] if item["id"] == contest["id"]
+    )
+    assert listed["view_count"] == 1
+    assert "view_metrics" not in listed
+    assert "conversion_rate" not in listed
 
 
 @pytest.mark.django_db
@@ -689,6 +710,7 @@ def test_view_metrics_response_carries_no_visitor_identifying_value(
     assert view_response.status_code == 200
     assert "marker-user-agent-should-not-leak" not in view_response.content.decode("utf-8")
 
+    _flush_views(client)
     metrics_response = _metrics(client, sponsor["access"], contest["id"])
     assert metrics_response.status_code == 200
     metrics_raw = metrics_response.content.decode("utf-8")

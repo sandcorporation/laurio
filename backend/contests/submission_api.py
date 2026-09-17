@@ -105,7 +105,6 @@ from .submission_schemas import (
     ViewMetricsOut,
 )
 from .submission_target_refs import target_ref_for_asset_kind
-from .view_tracking import get_view_count
 
 logger = logging.getLogger(__name__)
 
@@ -1475,9 +1474,12 @@ def get_contest_metrics(request: HttpRequest, contest_id: int):
 
     # #109 — 조회수와 전환율. 쓰기는 `contests.view_tracking`이 캐시에서
     # 이미 해 뒀다 — 이 함수는 읽기만 한다(Score를 조회하지 않는 것과 같은
-    # 이유로, 새 쓰기 경로를 여기 만들지 않는다). 조회가 0이면 0으로
-    # 나누지 않고 None을 낸다.
-    view_count = get_view_count(contest.id)
+    # 이유로, 새 쓰기 경로를 여기 만들지 않는다). **읽는 값은 캐시가 아니라
+    # `contest.view_count`(DB)다(#446)** — 공개 목록·큐레이션과 같은 값을
+    # 읽어야 개최자가 자기 지표 화면과 공개 카드에서 같은 숫자를 본다(최대
+    # 10분 늦음, `contests.view_flush`). 조회가 0이면 0으로 나누지 않고
+    # None을 낸다.
+    view_count = contest.view_count
     conversion_rate = (
         total_submission_count / view_count if view_count > 0 else None
     )

@@ -2079,8 +2079,12 @@ export interface paths {
          *     전부 한다 — 이 함수는 대상 Contest가 공개된 것인지만 `get_contest`와
          *     같은 기준으로 확인한다.
          *
-         *     응답에 조회수를 싣지 않는다 — 조회수는 Sponsor 전용이고, 공개 표면
-         *     어디에도 실리지 않는다는 것이 #109의 인수조건이다.
+         *     이 응답 자체에는 조회수를 싣지 않는다 — 이 엔드포인트는 "봤다"는 사건을
+         *     받을 뿐이고, 그 사건이 반영된 숫자는 목록·큐레이션·지표 화면이 각자
+         *     `Contest.view_count`(DB)를 읽어 보여준다(#446). #109 시절에는 조회수가
+         *     Sponsor 전용이라 공개 표면 어디에도 실리지 않았지만, 지금은 공개 목록·
+         *     랜딩 큐레이션 응답(`ContestOut.view_count`)이 그 숫자를 그대로 싣는다 —
+         *     바뀐 것은 "누가 보는가"이지 이 엔드포인트의 응답 모양이 아니다.
          *
          *     공모전 제품 스위치(#271)가 꺼지면 이 기록도 닫는다.
          */
@@ -5029,6 +5033,11 @@ export interface components {
             submission_count: number;
             /** Title */
             title: string;
+            /**
+             * View Count
+             * @default 0
+             */
+            view_count: number;
         };
         /**
          * ContestReopenIn
@@ -7304,9 +7313,12 @@ export interface components {
          * ViewMetricsOut
          * @description 조회수와 전환율 — 「본 사람 대비 낸 사람」(#109, 부모 #105).
          *
-         *     `view_count`는 `contests.view_tracking.get_view_count`가 캐시에서 읽은
-         *     값이다 — 관계형 DB의 Contest 행이 아니다(공개 상세는 트래픽이 가장
-         *     많은 화면이라 조회마다 그 행을 갱신하면 경합이 생긴다). 이 스키마에도
+         *     `view_count`는 `Contest.view_count`(DB)다(#446) — 조회 자체는 여전히
+         *     `contests.view_tracking`이 Redis에서 실시간으로 세지만(공개 상세는
+         *     트래픽이 가장 많은 화면이라 조회마다 Contest 행을 갱신하면 경합이
+         *     생긴다), 이 값은 `contests.view_flush` 옮기기 스캔이 10분마다 옮겨
+         *     놓은 값이다 — 공개 목록·랜딩 큐레이션이 읽는 값과 같아서, 개최자가
+         *     지표 화면과 공개 카드에서 다른 숫자를 보지 않는다. 이 스키마에도
          *     개별 방문자를 가리키는 필드는 없다 — Contest 전체의 조회수 하나뿐이다.
          *
          *     `conversion_rate`는 `total_submission_count / view_count`다. 조회가

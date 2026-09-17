@@ -263,9 +263,10 @@ function CompletionDistributionSection({ metrics }: { metrics: ContestMetricsOut
 }
 
 function ViewMetricsSection({ metrics }: { metrics: ContestMetricsOut }) {
-  // 「본 사람 대비 낸 사람」(#109, 부모 #105). `view_count`는 캐시에서 올라온
-  // 집계 하나뿐이고(관계형 Contest 행이 아니다), 이 화면은 그 숫자와 전환율을
-  // 받아 그리기만 한다 — 방문자를 가리키는 값은 응답에도 이 화면에도 없다.
+  // 「본 사람 대비 낸 사람」(#109, 부모 #105). `view_count`는 Contest.view_count
+  // (DB, #446) 하나뿐이고 — 공개 목록·큐레이션 카드와 같은 값이라 최대 10분
+  // 늦을 수 있다 — 이 화면은 그 숫자와 전환율을 받아 그리기만 한다. 방문자를
+  // 가리키는 값은 응답에도 이 화면에도 없다.
   const { view_metrics: view } = metrics;
   const hasViews = view.view_count > 0;
 
