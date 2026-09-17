@@ -807,11 +807,17 @@ export interface paths {
          *
          *     **그 클래스의 강사가 부르면 달리 대한다**(#429) — 참여자가 실제로 걷는
          *     이 주소 그대로 「학생 화면으로」가 연다. 상태(초안·열림·숨김)와 무관하게
-         *     문제를 내려주고, 시도 목록은 언제나 빈 배열이다(강사는 참여자가 아니다 —
-         *     Implementation Decisions "강사를 자기 클래스 참여자로 넣지 않은 이유").
-         *     강사 판정은 `instructor_id`만 본다 — 그 강사가 가입 링크로 이 클래스의
-         *     `ClassMember`이기도 해도 이 분기가 항상 이긴다, 참여자 규칙은 한 글자도
-         *     바뀌지 않는다는 약속을 지키려면 두 신원이 섞이면 안 된다.
+         *     문제를 내려준다. 강사 판정은 `instructor_id`만 본다.
+         *
+         *     **열린 문제에는 강사도 낸다**(2026-09-17, #429 개정). 예전에는 이 분기가
+         *     시도 목록을 언제나 빈 배열로 주고 제출을 막힌 것으로 표시해, 강사가 자기
+         *     문제를 직접 내 볼 길이 화면에 없었다 — 가입 링크로 자기 클래스 참여자가
+         *     되어 있어도 그랬다. 이제 **자기 시도는 그대로 보이고**(남의 시도는 여전히
+         *     이 질의에 없다), 문제가 열려 있고 클래스가 보관되지 않았으면 제출 잠금이
+         *     풀린다. 「강사가 보는 중」은 `viewing_as_instructor`가 따로 말한다 —
+         *     초안·숨김처럼 참여자라면 못 낼 상태에서는 그 사유가 여전히 잠금을 건다.
+         *     명단·달성률·토큰 예산이 강사를 세지 않는 것은 그대로다(#290 — 강사 행은
+         *     격자에 표시만 되고 집계에서 빠진다).
          */
         get: operations["classroom_api_get_my_problem"];
         put?: never;
@@ -4620,6 +4626,11 @@ export interface components {
             submissions: components["schemas"]["ClassroomSubmissionOut"][];
             /** Submit Blocked Reason */
             submit_blocked_reason?: string | null;
+            /**
+             * Viewing As Instructor
+             * @default false
+             */
+            viewing_as_instructor: boolean;
         };
         /** ClassroomRosterGridOut */
         ClassroomRosterGridOut: {

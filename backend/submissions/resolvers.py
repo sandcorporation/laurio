@@ -48,7 +48,7 @@ from awards.services import sponsor_user_id_if_awarded
 # APP-BOUNDARY-EXCEPTION: 강의실 모양(problem_id를 품는다) target_ref를 판정하려면 그 Problem이 실제로 있는지, 그 참여자가 지금 낼 수 있는지 확인해야 한다(#286, #439, ADR-0039)
 from classroom.models import ClassMember, Problem as ClassroomProblem
 # APP-BOUNDARY-EXCEPTION: 위와 같은 이유 — 낼 수 있는가(보관·내보냄·숨김)를 여기서 다시 판정하지 않고 참여 정책 모듈에 묻는다(#439)
-from classroom.participation import can_submit
+from classroom.participation import can_submit, instructor_can_submit
 # APP-BOUNDARY-EXCEPTION: 위 awards와 같은 이유 — Award 존재 여부로 Handover 가시성을 판정하려면 지금은 Contest를 직접 조회해야 한다
 from contests.models import Contest
 from core.clock import Clock
@@ -125,8 +125,11 @@ class SubmissionTargetStateResolver:
         **낼 수 있는 사람만 업로드 주소를 받는다**(#439) — Problem이 있어도
         그 사람이 지금 이 클래스·문제에 새로 낼 수 없으면(보관·내보냄·숨김,
         `classroom.participation.can_submit`) 같은 이유로 fail-closed한다.
-        참여자가 아니면(`ClassMember` 행이 없으면, 강사가 학생 화면으로
-        보는 경우를 포함) 애초에 판정할 자격이 없어 역시 거절한다."""
+        참여자가 아니면(`ClassMember` 행이 없으면) 애초에 판정할 자격이 없어
+        역시 거절한다 — **다만 그 클래스의 강사는 예외다**(2026-09-17, #429
+        개정): 강사도 열린 문제에는 내므로, 참여자 행이 아직 없어도(첫 제출이
+        그때 만든다) 열린 문제면 업로드 주소를 받는다. 안 그러면 소스 형식
+        문제에만 강사가 못 내는 비대칭이 생긴다."""
 
         _, problem_id_raw, user_id_raw, slot = parts
         if slot != SOURCE_SLOT:
@@ -143,7 +146,12 @@ class SubmissionTargetStateResolver:
             return _DENY
 
         member = ClassMember.objects.filter(classroom=problem.classroom, user_id=user_id).first()
-        if member is None or not can_submit(problem.classroom, member, problem):
+        if member is None:
+            if problem.classroom.instructor_id != user_id or not instructor_can_submit(
+                problem.classroom, problem
+            ):
+                return _DENY
+        elif not can_submit(problem.classroom, member, problem):
             return _DENY
 
         return TargetState(visibility=Visibility.PRIVATE, owner_id=user_id)

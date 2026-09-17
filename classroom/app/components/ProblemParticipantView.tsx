@@ -114,7 +114,11 @@ type ProblemParticipantViewProps = (InteractiveProps | PreviewProps) & {
 
 /** 강사가 학생 화면을 열었을 때의 안내 문구(#429) — 기본 한 줄에 상태별로
  *  한 줄을 더한다. 판정 로직이 아니라 문구 조립이라 별도 순수 함수 시임을
- *  두지 않는다(#429 Testing Decisions). */
+ *  두지 않는다(#429 Testing Decisions).
+ *
+ *  **열린 문제에서는 강사도 낸다**(2026-09-17) — 그래서 첫 줄이 상태에 따라
+ *  갈린다. 예전의 「제출은 되지 않습니다」를 열린 문제에도 그대로 두면 화면이
+ *  거짓말을 한다(제출 칸은 실제로 동작한다). */
 function InstructorViewingBanner({
   status,
 }: {
@@ -124,7 +128,9 @@ function InstructorViewingBanner({
     <Note tone="attention">
       <div className="flex flex-col gap-1">
         <span data-testid="instructor-viewing-banner">
-          강사로 보고 있습니다 — 제출은 되지 않습니다.
+          {status === "open"
+            ? "강사로 보고 있습니다 — 직접 내 볼 수 있고, 학생 명단에는 들어가지 않습니다."
+            : "강사로 보고 있습니다 — 제출은 되지 않습니다."}
         </span>
         {status === "draft" ? (
           <span data-testid="instructor-viewing-banner-draft">

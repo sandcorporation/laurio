@@ -512,6 +512,12 @@ class ClassroomProblemSubmissionsOut(Schema):
     #: 정한다. 참여자 시점에는 언제나 `None`이다(참여자에게는 상태 구분이
     #: 필요 없다는 것이 이미 `ClassroomProblemMineOut`의 설계다).
     instructor_problem_status: str | None = None
+    #: 이 화면을 그 클래스의 **강사가** 열었는가(2026-09-17, #429 개정).
+    #: 예전에는 `submit_blocked_reason == "viewing_as_instructor"` 하나가 「강사가
+    #: 보는 중」과 「그래서 낼 수 없다」를 함께 뜻했는데, 열린 문제에는 강사도
+    #: 낼 수 있게 되면서 둘이 갈렸다 — 띠(「학생 화면으로 보고 있다」)는 이
+    #: 값으로, 제출 잠금은 `submit_blocked_reason`으로 정한다.
+    viewing_as_instructor: bool = False
 
 
 class ClassroomProblemStatsOut(Schema):

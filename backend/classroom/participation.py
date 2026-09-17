@@ -83,6 +83,18 @@ def participant_submit_blocked_reason(
     return None
 
 
+def instructor_can_submit(class_obj: Class, problem: Problem) -> bool:
+    """그 클래스의 **강사**가 지금 이 문제에 낼 수 있는가(2026-09-17, #429 개정).
+
+    참여자 판정과 갈라 두는 이유: 강사에게는 「내보냄」이 없고, 참여자 행이 아직
+    없을 수도 있다(첫 제출이 그 자리에서 만든다 — `classroom.api.
+    _get_submitting_member_or_404`). 볼 수 있는 상태는 참여자보다 넓지만(초안도
+    본다) **낼 수 있는 상태는 참여자와 같다** — 열린 문제, 보관되지 않은
+    클래스뿐이다."""
+
+    return class_obj.archived_at is None and problem.status == Problem.Status.OPEN
+
+
 def can_submit(class_obj: Class, member: ClassMember, problem: Problem) -> bool:
     return participant_submit_blocked_reason(class_obj, member, problem) is None
 

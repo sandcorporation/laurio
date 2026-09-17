@@ -105,8 +105,12 @@ export default function ProblemSubmitPage() {
     submissions,
     submit_blocked_reason: submitBlockedReason,
     instructor_problem_status: instructorProblemStatus,
+    viewing_as_instructor: viewingAsInstructor,
   } = state.data;
-  const viewingAsInstructor = submitBlockedReason === "viewing_as_instructor";
+  // 강사가 보는 중이라고 해서 못 내는 것은 아니다(2026-09-17) — 열린 문제면
+  // 백엔드가 `submit_blocked_reason`을 비워 내려주고, 그때는 참여자와 같은
+  // 제출 경로를 그대로 쓴다. 잠기는 것은 초안·숨김·보관뿐이다.
+  const submitLocked = submitBlockedReason !== null;
 
   async function submitValue(
     submissionFormat: "source" | "repository",
@@ -132,17 +136,17 @@ export default function ProblemSubmitPage() {
 
   async function handleRepositorySubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    // 강사가 「학생 화면으로」 연 화면이다 — 제출 칸은 보이되 눌러도 아무
-    // 일도 일어나지 않는다(#429). 백엔드도 강사(비참여자)의 제출을 404로
-    // 거절하므로 이 잠금은 헛걸음을 줄이는 것일 뿐 유일한 문이 아니다.
-    if (viewingAsInstructor) return;
+    // 낼 수 없는 상태(초안·숨김·보관)에서는 눌러도 아무 일도 일어나지
+    // 않는다 — 백엔드도 같은 이유로 거절하므로 이 잠금은 헛걸음을 줄이는
+    // 것일 뿐 유일한 문이 아니다.
+    if (submitLocked) return;
     await submitValue("repository", repositoryUrl.trim());
   }
 
   async function handleSourceFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
-    if (!file || viewingAsInstructor) return;
+    if (!file || submitLocked) return;
     try {
       const uploaded = await upload(file);
       await submitValue("source", uploaded.objectKey, uploaded.contentType);
@@ -162,9 +166,10 @@ export default function ProblemSubmitPage() {
         eyebrow={className}
         title={problem.title}
         titleTestId="my-problem-title"
-        // 강사 시점에는 시도가 애초에 없어 「통과」/「미통과」 어느 쪽도
-        // 사실이 아니다 — 미리보기와 같은 이유로 배지 자체를 내지 않는다.
-        passed={viewingAsInstructor ? undefined : problem.passed}
+        // 강사가 아직 한 번도 안 냈으면 「통과」/「미통과」 어느 쪽도 사실이
+        // 아니다 — 미리보기와 같은 이유로 배지 자체를 내지 않는다. 내 본
+        // 뒤에는 참여자와 똑같이 자기 결과를 본다.
+        passed={viewingAsInstructor && submissions.length === 0 ? undefined : problem.passed}
         description={problem.description}
         checklistItems={problem.checklist_items}
         syntaxCheckEnabled={problem.syntax_check_enabled}

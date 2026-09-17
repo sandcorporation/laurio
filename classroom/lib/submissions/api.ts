@@ -117,10 +117,15 @@ export type ProblemSubmissions = {
   problem: ProblemMine;
   submissions: ClassroomSubmissionRow[];
   submit_blocked_reason: SubmitBlockedReason;
-  // `submit_blocked_reason`이 "viewing_as_instructor"일 때만 채워지는 문제
-  // 상태 — 띠가 몇 줄을 더 말할지 이 값으로 정한다. 참여자 시점에는 언제나
-  // null이다.
+  // 강사가 볼 때만 채워지는 문제 상태 — 띠가 몇 줄을 더 말할지 이 값으로
+  // 정한다. 참여자 시점에는 언제나 null이다.
   instructor_problem_status: "draft" | "open" | "hidden" | null;
+  // 이 화면을 그 클래스의 강사가 열었는가(2026-09-17). 예전에는
+  // `submit_blocked_reason === "viewing_as_instructor"` 하나가 「강사가 보는
+  // 중」과 「그래서 못 낸다」를 함께 뜻했는데, 열린 문제에는 강사도 낼 수
+  // 있게 되면서 둘이 갈렸다 — 띠는 이 값으로, 제출 잠금은
+  // `submit_blocked_reason`으로 정한다.
+  viewing_as_instructor: boolean;
 };
 
 export function fetchMyProblem(classId: number, problemId: number): Promise<ProblemSubmissions> {

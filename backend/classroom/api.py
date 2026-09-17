@@ -1507,6 +1507,42 @@ def _get_member_or_404(class_id: int, user_id: int) -> ClassMember:
         raise HttpError(404, "문제를 찾을 수 없습니다.") from exc
 
 
+def _get_submitting_member_or_404(class_id: int, user_id: int) -> ClassMember:
+    """제출하는 사람의 참여자 행 — 없으면 404다(`_get_member_or_404`와 같은
+    존재-숨김 규칙).
+
+    **다만 그 클래스의 강사 본인은 여기서 행을 만들어 준다**(2026-09-17, #429
+    개정). 강사도 열린 문제에는 낼 수 있어야 하는데, 제출물·명단·채점이 모두
+    참여자 행을 가리키므로 행이 필요하다 — 예전에는 강사가 **가입 링크로 자기
+    클래스에 들어간 적이 있을 때만** 그 행이 있었고, 그래서 자기 문제를 내
+    보려면 링크를 스스로 열어야 했다(그 사실을 아는 사람이 없었다). 이름은
+    클래스에 이미 적어 둔 강사 이름을 그대로 쓴다.
+
+    보관된 클래스에서는 행을 만들지 않는다 — 읽기 전용이라 어차피 제출이
+    403이고, 없던 행을 남기지 않는 편이 정직하다."""
+
+    try:
+        return ClassMember.objects.select_related("classroom").get(
+            classroom_id=class_id, user_id=user_id
+        )
+    except ClassMember.DoesNotExist:
+        pass
+
+    class_obj = Class.objects.filter(id=class_id, instructor_id=user_id).first()
+    if class_obj is None:
+        raise HttpError(404, "문제를 찾을 수 없습니다.")
+    if class_obj.archived_at is not None:
+        raise HttpError(403, "이 클래스는 보관되어 새 제출을 받지 않습니다.")
+
+    member, _created = ClassMember.objects.get_or_create(
+        classroom=class_obj,
+        user_id=user_id,
+        defaults={"display_name": class_obj.instructor_display_name or "강사"},
+    )
+    member.classroom = class_obj
+    return member
+
+
 def _get_visible_problem_for_participant_or_404(
     class_id: int, problem_id: int, member: ClassMember
 ) -> Problem:
@@ -1531,6 +1567,49 @@ def _get_visible_problem_for_participant_or_404(
         raise HttpError(404, "문제를 찾을 수 없습니다.") from exc
 
 
+def _serialize_own_submissions(problem, member, user, checklist_items) -> list:
+    """이 사람 자신의 시도만 최신 순으로 — 남의 시도는 질의에 애초에 없다
+    (`member=member`). 참여자와 강사(#429 개정)가 같은 함수를 쓴다: 강사가 아직
+    참여자 행이 없으면(`member is None`) 낸 적이 없다는 뜻이라 빈 목록이다."""
+
+    if member is None:
+        return []
+    submissions = (
+        ClassroomSubmission.objects.filter(problem=problem, member=member)
+        .select_related("classroom_score")
+        .prefetch_related("assets")
+        .order_by("-attempt_number")
+    )
+    return [
+        # `s.assets.all()[0]`이 아니라 리스트로 먼저 받는다 — 그래야
+        # `prefetch_related("assets")`가 채워 둔 캐시를 쓴다. `.get()`은
+        # 매니저를 거쳐 매번 새 질의를 날려 그 prefetch를 헛수고로 만든다.
+        _serialize_classroom_submission(
+            s,
+            asset=list(s.assets.all())[0],
+            user=user,
+            class_obj=problem.classroom,
+            problem=problem,
+            checklist_items=checklist_items,
+        )
+        for s in submissions
+    ]
+
+
+def _instructor_submit_blocked_reason(class_obj: Class, problem: Problem) -> str | None:
+    """강사가 자기 클래스의 이 문제에 지금 낼 수 없는 이유 하나(2026-09-17,
+    #429 개정) — 열린 문제에는 낼 수 있으므로 `None`이다. 보관된 클래스는
+    참여자와 같은 이유로 막고(읽기 전용), 초안·숨김은 참여자에게 애초에 보이지
+    않는 상태라 「강사가 보는 중」이 그 자리를 대신한다 — 화면의 띠가 그 상태를
+    이미 설명하고 있어 새 문구를 만들지 않는다."""
+
+    if class_obj.archived_at is not None:
+        return SUBMIT_BLOCKED_ARCHIVED
+    if problem.status != Problem.Status.OPEN:
+        return SUBMIT_BLOCKED_VIEWING_AS_INSTRUCTOR
+    return None
+
+
 @router.get(
     "/classes/{class_id}/problems/{problem_id}/mine",
     response={200: ClassroomProblemSubmissionsOut, 404: ErrorOut},
@@ -1543,50 +1622,50 @@ def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
 
     **그 클래스의 강사가 부르면 달리 대한다**(#429) — 참여자가 실제로 걷는
     이 주소 그대로 「학생 화면으로」가 연다. 상태(초안·열림·숨김)와 무관하게
-    문제를 내려주고, 시도 목록은 언제나 빈 배열이다(강사는 참여자가 아니다 —
-    Implementation Decisions "강사를 자기 클래스 참여자로 넣지 않은 이유").
-    강사 판정은 `instructor_id`만 본다 — 그 강사가 가입 링크로 이 클래스의
-    `ClassMember`이기도 해도 이 분기가 항상 이긴다, 참여자 규칙은 한 글자도
-    바뀌지 않는다는 약속을 지키려면 두 신원이 섞이면 안 된다."""
+    문제를 내려준다. 강사 판정은 `instructor_id`만 본다.
+
+    **열린 문제에는 강사도 낸다**(2026-09-17, #429 개정). 예전에는 이 분기가
+    시도 목록을 언제나 빈 배열로 주고 제출을 막힌 것으로 표시해, 강사가 자기
+    문제를 직접 내 볼 길이 화면에 없었다 — 가입 링크로 자기 클래스 참여자가
+    되어 있어도 그랬다. 이제 **자기 시도는 그대로 보이고**(남의 시도는 여전히
+    이 질의에 없다), 문제가 열려 있고 클래스가 보관되지 않았으면 제출 잠금이
+    풀린다. 「강사가 보는 중」은 `viewing_as_instructor`가 따로 말한다 —
+    초안·숨김처럼 참여자라면 못 낼 상태에서는 그 사유가 여전히 잠금을 건다.
+    명단·달성률·토큰 예산이 강사를 세지 않는 것은 그대로다(#290 — 강사 행은
+    격자에 표시만 되고 집계에서 빠진다)."""
 
     instructor_class = Class.objects.filter(id=class_id, instructor_id=request.auth_user.id).first()
     if instructor_class is not None:
         class_obj = instructor_class
         problem = _get_owned_problem_or_404(class_obj, problem_id)
+        member = ClassMember.objects.filter(
+            classroom=class_obj, user_id=request.auth_user.id
+        ).first()
+        checklist_items = list(problem.checklist_items.all())
+        submissions = _serialize_own_submissions(
+            problem, member, request.auth_user, checklist_items
+        )
         return 200, ClassroomProblemSubmissionsOut(
             class_name=class_obj.name,
-            problem=_serialize_problem_mine(problem, passed=False),
-            submissions=[],
-            # 강사는 참여자가 아니다 — 보관·내보냄·숨김 판정 밖의 별도
-            # 사유다(#439, `classroom.participation` docstring).
-            submit_blocked_reason=SUBMIT_BLOCKED_VIEWING_AS_INSTRUCTOR,
+            problem=_serialize_problem_mine(
+                problem, passed=any(s.passed for s in submissions)
+            ),
+            submissions=submissions,
+            # 낼 수 있는 상태가 아니면 그 이유를 말한다 — 보관이 먼저다
+            # (참여자와 같은 우선순위), 초안·숨김은 참여자에게 애초에 보이지
+            # 않는 상태라 「강사가 보는 중」이 그 자리를 대신한다.
+            submit_blocked_reason=_instructor_submit_blocked_reason(class_obj, problem),
             instructor_problem_status=problem.status,
+            viewing_as_instructor=True,
         )
 
     member = _get_member_or_404(class_id, request.auth_user.id)
     problem = _get_visible_problem_for_participant_or_404(class_id, problem_id, member)
     checklist_items = list(problem.checklist_items.all())
 
-    submissions = (
-        ClassroomSubmission.objects.filter(problem=problem, member=member)
-        .select_related("classroom_score")
-        .prefetch_related("assets")
-        .order_by("-attempt_number")
+    serialized_submissions = _serialize_own_submissions(
+        problem, member, request.auth_user, checklist_items
     )
-    serialized_submissions = [
-        # `s.assets.all()[0]`이 아니라 리스트로 먼저 받는다 — 그래야
-        # `prefetch_related("assets")`가 채워 둔 캐시를 쓴다. `.get()`은
-        # 매니저를 거쳐 매번 새 질의를 날려 그 prefetch를 헛수고로 만든다.
-        _serialize_classroom_submission(
-            s,
-            asset=list(s.assets.all())[0],
-            user=request.auth_user,
-            class_obj=problem.classroom,
-            problem=problem,
-            checklist_items=checklist_items,
-        )
-        for s in submissions
-    ]
     return 200, ClassroomProblemSubmissionsOut(
         class_name=problem.classroom.name,
         # 문제 자체의 통과 여부는 시도 전체의 OR이다(#288 AC "한 번 통과하면
@@ -1632,7 +1711,7 @@ def create_classroom_submission(
     (ADR-0039, CONTEXT.md 「Problem」). 근거 연결도 자가 체크도 없다: 소스
     또는 저장소 값 하나만 받는다."""
 
-    member = _get_member_or_404(class_id, request.auth_user.id)
+    member = _get_submitting_member_or_404(class_id, request.auth_user.id)
     problem = _get_visible_problem_for_participant_or_404(class_id, problem_id, member)
 
     # 낼 수 있는가는 참여 정책 모듈이 한 곳에서 답한다(#439) — 우선순위는

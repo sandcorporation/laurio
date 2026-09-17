@@ -147,14 +147,20 @@ def test_archived_wins_over_expelled_and_hidden(client, db):
     assert response.json()["submit_blocked_reason"] == "archived"
 
 
-def test_instructor_viewing_as_student_reports_viewing_as_instructor(client, db):
+def test_instructor_viewing_an_open_problem_is_marked_but_not_blocked(client, db):
+    """강사가 학생 화면으로 열린 문제를 보면 「강사가 보는 중」은 표시되되
+    제출은 막히지 않는다(2026-09-17, #429 개정) — 두 뜻이 한 값에 묶여 있던
+    것을 갈랐다."""
+
     instructor = login(client, uid="instructor-1")
     class_id = create_class(client, instructor["access"])
     problem = create_open_problem(client, instructor["access"], class_id)
 
     response = client.get(_mine_url(class_id, problem.id), **auth_header(instructor["access"]))
     assert response.status_code == 200
-    assert response.json()["submit_blocked_reason"] == "viewing_as_instructor"
+    body = response.json()
+    assert body["viewing_as_instructor"] is True
+    assert body["submit_blocked_reason"] is None
 
 
 # --- 목록과 상세가 언제나 같다 ------------------------------------------------
@@ -262,9 +268,44 @@ def test_a_participant_cannot_upload_to_a_hidden_problem(client, db):
     assert response.status_code == 403
 
 
+def test_the_instructor_gets_an_upload_url_for_an_open_problem(client, db):
+    """강사도 열린 문제에는 낸다(2026-09-17, #429 개정) — 참여자 행이 아직
+    없어도(첫 제출이 그때 만든다) 소스 업로드 주소를 받는다. 안 그러면 소스
+    형식 문제에만 강사가 못 내는 비대칭이 생긴다."""
+
+    instructor = login(client, uid="instructor-1")
+    class_id = create_class(client, instructor["access"])
+    problem = create_open_problem(
+        client, instructor["access"], class_id, submission_formats=["source"]
+    )
+
+    response = _request_upload(
+        client,
+        instructor["access"],
+        _source_target_ref(problem.id, user_id("instructor-1")),
+    )
+    assert response.status_code == 200, response.content
+
+
+def test_the_instructor_does_not_get_an_upload_url_for_a_draft_problem(client, db):
+    """열린 문제만이다 — 초안은 참여자에게 보이지 않는 상태라 업로드도 없다."""
+
+    instructor = login(client, uid="instructor-1")
+    class_id = create_class(client, instructor["access"])
+    problem = create_open_problem(
+        client, instructor["access"], class_id, submission_formats=["source"], open=False
+    )
+
+    response = _request_upload(
+        client,
+        instructor["access"],
+        _source_target_ref(problem.id, user_id("instructor-1")),
+    )
+    assert response.status_code == 403
+
+
 def test_a_non_member_does_not_get_an_upload_url(client, db):
-    """진짜 참여자가 아니면(가입하지 않은 사람, 강사 본인 포함) 판정할 자격이
-    없어 거절한다."""
+    """진짜 참여자도 그 클래스의 강사도 아니면 판정할 자격이 없어 거절한다."""
 
     instructor = login(client, uid="instructor-1")
     class_id = create_class(client, instructor["access"])
