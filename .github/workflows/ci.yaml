@@ -381,6 +381,41 @@ jobs:
       - name: Backend error messages reaching the public app stay in Korean
         run: python3 scripts/check_backend_error_language.py
 
+  # 자동 진단(`.claude/skills/glitchtip-triage/`)이 고친 오류를 GlitchTip 에서
+  # 닫는다 — 커밋 메시지의 `GlitchTip: <id>` 줄 하나를 읽는다. **세션이 직접
+  # 닫지 않는 이유**가 이 잡의 존재 이유다: 「고친 것 같다」와 「고쳤다」를 가르는
+  # 것은 CI 이고, 그래서 진단 세션에는 읽기 전용 토큰만 준다.
+  #
+  # `main` push 에서만 돈다(PR 에서는 아직 고쳐진 것이 아니다). `needs: test` 로
+  # 백엔드 테스트가 초록일 때만 표시한다 — 그 앞의 다른 잡까지 기다리게 하지는
+  # 않는다(표시가 조금 늦는 것과 영원히 안 나는 것은 다르고, 여기서 막고 싶은
+  # 것은 뒤쪽이다). 스크립트는 어떤 실패에도 exit 0 한다: 이미 머지된 수정을
+  # 되돌릴 수는 없고, 표시 실패는 배포를 세울 일이 아니다(이유는 그 파일에).
+  glitchtip-resolve:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: test
+    runs-on: [self-hosted, sub]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 커밋 메시지를 읽으려면 이 push 의 범위가 다 있어야 한다. 얕은
+          # 체크아웃(기본값 depth 1)에서는 `before..sha` 가 성립하지 않는다.
+          fetch-depth: 0
+
+      - name: Errors fixed by this push are closed in GlitchTip
+        env:
+          GLITCHTIP_TOKEN_FOR_AUTOMATION: ${{ secrets.GLITCHTIP_TOKEN_FOR_AUTOMATION }}
+        run: |
+          # 첫 push 나 force push 면 `before` 가 0000… 이다 — 그때는 HEAD 커밋
+          # 하나만 본다(없는 범위를 물어보면 git 이 죽는다).
+          BASE="${{ github.event.before }}"
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            BASE="${{ github.sha }}~1"
+          fi
+          python3 scripts/glitchtip_resolve.py "$BASE" "${{ github.sha }}"
+
   frontend-pure-unit-tests:
     runs-on: [self-hosted, sub]
 

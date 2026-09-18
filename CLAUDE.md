@@ -540,6 +540,37 @@ sentry.io 가 아니라 **우리가 띄운 GlitchTip**
 ssh sub 'docker exec codemit-staging-backend-1 python manage.py sentry_smoke'
 ```
 
+**그 오류를 에이전트가 집어 진단한다**(2026-09-18). Orca automation 「GlitchTip prod 오류
+진단」이 매분 `scripts/glitchtip_pick.py` 를 precheck 로 돌려 **prod 의 미해결·미클레임
+오류 하나**를 고르고, 집힌 것이 있을 때만 이 머신에 세션을 띄운다(워크트리는 실행마다
+새로, `origin/main` 기준). 세션이 따르는 절차는 `.claude/skills/glitchtip-triage/` 다 —
+재현 루프를 먼저 만들고, **재현되지 않으면 고치지 않고 멈춘다**.
+
+- **고르는 쪽과 판단하는 쪽을 가른다.** 이슈 제목·스택트레이스는 공개 DSN 으로 누구나
+  넣을 수 있는 값이다. 무엇을 집을지와 GlitchTip 쓰기는 스크립트가 끝내고, 세션에는
+  읽기 전용 토큰(`GLITCHTIP_TOKEN`)만 준다 — 인젝션된 텍스트가 GlitchTip 을 조종할 길이
+  없다. 쓰기 토큰은 `GLITCHTIP_TOKEN_FOR_AUTOMATION`(스코프 `event:write` 하나, 루트
+  `.env`)이고 `project:read` 를 **일부러 안 줬다** — 알림 규칙 조회가 Discord 웹훅 URL 을
+  평문으로 돌려준다(실측: 403).
+- **「손 댔다」는 GlitchTip 코멘트다.** 이슈 목록 응답의 `numComments` 가 그 값이라 목록
+  API 한 번으로 갈리고, 사람이 같은 사실을 GlitchTip 화면에서 본다. 새 상태 상자를 만들지
+  않았다.
+- **동시 하나는 잠금 파일이 지킨다**(`~/.codemit/glitchtip-lock`). 세션이 끝낼 때 지우고,
+  죽었으면 45분에 저절로 풀린다. `orca automations runs` 의 status 값을 보지 않는 이유는
+  그 문자열 목록이 어디에도 문서화돼 있지 않아서다 — 추측하면 가드가 **항상 통과하고도
+  조용하다**.
+- **환경 판정은 집합이다.** 같은 예외가 staging·prod 에서 함께 나면 GlitchTip 이 이슈
+  하나로 묶고 태그에 두 값을 다 담는다(실측: issue 1). 「첫 값이 production 인가」로 보면
+  순서에 따라 prod 오류가 조용히 빠진다.
+- **해결 표시는 CI 가 한다.** 세션은 커밋 메시지 마지막 줄에 `GlitchTip: <id>` 를 적고
+  push 만 하고, 그 줄을 읽어 이슈를 resolved 로 돌리는 것은 `main` 의 CI 다 — 「고친 것
+  같다」와 「고쳤다」를 가르는 자리다.
+- **무엇이 집힐지 눈으로 보려면** 필터를 풀어 dry-run 한다(클레임도 잠금도 남기지 않는다):
+
+```bash
+scripts/glitchtip_pick.py --dry-run --any-status --any-environment
+```
+
 ## 테스트
 
 운영에서 Operator 세션은 실제 Redis 에 산다(#43, ADR-0018). **다만 테스트는 그렇지
@@ -1218,7 +1249,7 @@ Problem Statement 를 읽고 「어댑터 실제 구현은 스토리지 하나�
 
 ## CI 는 셀프호스티드 러너에서, 프로덕션 이미지로 돈다
 
-GitHub 호스티드 러너는 과금이 막혀 못 쓴다. 16개 잡 중 14개가 `runs-on: [self-hosted, sub]` —
+GitHub 호스티드 러너는 과금이 막혀 못 쓴다. 18개 잡 중 16개가 `runs-on: [self-hosted, sub]` —
 staging 배포 호스트와 **같은 머신**이다. 나머지 둘(`images-staging`·`images-prod`)은 mac 러너
 (`[self-hosted, ARM64, mac-arm]` — sub 와 같은 `myoung34/github-runner` 컨테이너, 조직 범위)에서
 배포 이미지를 굽는다(위 「이미지는 CI 가 굽는다」, 비상구 `IMAGE_BUILDER=sub`). 러너 컨테이너는 `--network host` 로 돌고 호스트
@@ -1260,7 +1291,8 @@ docker 소켓을 물어 컨테이너를 바깥에 띄운다(DooD).
 실측(당시 9잡 전부 초록, 2026-09-05): 전체 **6분**. `adr-status`·`screen-language` 가 늘어
 11잡이 됐고, `frontend-e2e-classroom`(#277)이 늘어 12잡, `classroom-deploy-guard`(#296)가
 늘어 13잡, 배포 이미지 둘과 staging 호출(`images-staging`·`images-prod`·`deploy-staging`,
-2026-09-17)이 늘어 16잡, 도커 디스크 정리(`sub-docker-cleanup`, 같은 날)가 늘어 지금은 17잡이다(강의실 e2e·이미지 잡 실측은 아직 없다 — CI 첫 실행이 잰다). e2e 운영자 4분 ·
+2026-09-17)이 늘어 16잡, 도커 디스크 정리(`sub-docker-cleanup`, 같은 날)가 늘어 17잡,
+GlitchTip 해결 표시(`glitchtip-resolve`, 2026-09-18)가 늘어 지금은 18잡이다(강의실 e2e·이미지 잡 실측은 아직 없다 — CI 첫 실행이 잰다). e2e 운영자 4분 ·
 공개 3분 · `celery-broker` 2분 · `pytest` 1분 · 나머지 여덟은 각 1분 미만.
 
 **`screen-language` 잡**(#267, #268)은 스텝 둘로 두 표면을 막는다. 첫 스텝
