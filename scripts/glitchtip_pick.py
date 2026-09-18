@@ -171,8 +171,22 @@ def _a_session_holds_the_lock(lock_path: pathlib.Path, ttl_minutes: float) -> bo
     return False
 
 
-def _sweep_merged_automation_worktrees() -> list[str]:
+def _sweep_merged_automation_worktrees(min_idle_minutes: float) -> list[str]:
     """머지가 끝난 자동 진단 워크트리를 걷는다 — 실행마다 하나씩 쌓이기 때문이다.
+
+    **이 함수는 한 번 도는 세션을 죽였다**(티켓 #459, 2026-09-18). 첫 판은 「팁이
+    `origin/main` 의 조상이면 머지됐다」로만 판정했는데, **막 만들어져 아직 커밋이 없는
+    분기는 팁이 곧 `origin/main`** 이라 그 판정을 그대로 통과했다. 그리고 청소가 잠금
+    확인보다 먼저 돌아서, 진단 중인 세션이 첫 커밋 전에 다음 분 precheck 에 워크트리째
+    치워졌다(`Working directory ... was deleted`). 재현에 1분 넘게 걸리는 세션은 사실상
+    전부 걸리는 결함이었다. 지금은 문이 둘이다:
+
+    1. **잠금이 살아 있으면 이 함수를 아예 부르지 않는다**(`main` 이 잠금 확인 뒤로
+       옮겼다) — 도는 세션의 워크트리에는 손이 닿지 않는다.
+    2. **팁이 `origin/main` 과 같은 분기는 「아무것도 안 했다」로 보고 건드리지
+       않는다** — 잠금이 어떤 이유로 없더라도(TTL 만료 직후 등) 방금 만들어진
+       워크트리가 살아남는다. 다만 그러면 재현 실패로 커밋 없이 끝난 워크트리가
+       영원히 남으므로, **`min_idle_minutes` 보다 오래 손대지 않은 것만** 걷는다.
 
     automation 은 `--workspace-mode new-per-run` 이라 세션이 뜨는 실행마다 워크트리와
     브랜치(`auto-<이름>-run-<n>-<시각>`)를 하나 만들고, **끝나도 치우지 않는다.** 그
@@ -206,25 +220,46 @@ def _sweep_merged_automation_worktrees() -> list[str]:
         if listing.returncode != 0:
             return swept
 
+        main_tip = git("rev-parse", "origin/main").stdout.strip()
+        if not main_tip:
+            return swept
+
         path = None
         for line in listing.stdout.splitlines():
             if line.startswith("worktree "):
                 path = line[len("worktree ") :]
-            elif line.startswith("branch refs/heads/") and path:
-                branch = line[len("branch refs/heads/") :]
-                if branch.startswith("auto-"):
-                    merged = git("merge-base", "--is-ancestor", branch, "origin/main")
-                    if merged.returncode == 0:
-                        removed = git("worktree", "remove", "--force", path)
-                        if removed.returncode == 0:
-                            git("branch", "-D", branch)
-                            swept.append(branch)
-                        else:
-                            print(
-                                f"워크트리 {path} 를 걷지 못했다: {removed.stderr.strip()[:160]}",
-                                file=sys.stderr,
-                            )
-                path = None
+                continue
+            if not (line.startswith("branch refs/heads/") and path):
+                continue
+
+            branch = line[len("branch refs/heads/") :]
+            here, path = path, None
+            if not branch.startswith("auto-"):
+                continue
+
+            # 머지되지 않았으면 남긴다 — 게이트에 걸려 사람에게 넘긴 분기가 그 모양이다.
+            if git("merge-base", "--is-ancestor", branch, "origin/main").returncode != 0:
+                continue
+
+            # 팁이 origin/main 이면 **아직 아무것도 커밋하지 않은** 것이다. 도는 세션의
+            # 워크트리가 정확히 이 모양이라, 손대기 전에 충분히 식었는지 본다.
+            if git("rev-parse", branch).stdout.strip() == main_tip:
+                try:
+                    idle = (time.time() - pathlib.Path(here).stat().st_mtime) / 60
+                except OSError:
+                    continue
+                if idle < min_idle_minutes:
+                    continue
+
+            removed = git("worktree", "remove", "--force", here)
+            if removed.returncode == 0:
+                git("branch", "-D", branch)
+                swept.append(branch)
+            else:
+                print(
+                    f"워크트리 {here} 를 걷지 못했다: {removed.stderr.strip()[:160]}",
+                    file=sys.stderr,
+                )
     except (OSError, subprocess.TimeoutExpired) as exc:
         print(f"워크트리 청소를 건너뛴다: {exc}", file=sys.stderr)
     return swept
@@ -304,15 +339,18 @@ def main() -> int:
         print("GLITCHTIP_TOKEN_FOR_AUTOMATION 이 없다 — .env 나 환경변수에 넣어야 한다", file=sys.stderr)
         return 2
 
-    if not args.dry_run and not args.no_tidy:
-        swept = _sweep_merged_automation_worktrees()
-        if swept:
-            print(f"머지된 워크트리 {len(swept)}건을 걷었다: {', '.join(swept)}", file=sys.stderr)
-
     holds_lock = not args.skip_lock and not args.dry_run
     if holds_lock and _a_session_holds_the_lock(lock_path, args.lock_ttl_minutes):
         print(f"진단 세션이 이미 돌고 있다({lock_path}) — 이번 분은 건너뛴다", file=sys.stderr)
         return 1
+
+    # **청소는 잠금 확인을 통과한 뒤에만 한다**(티켓 #459). 위에서 `return 1` 했다면
+    # 세션이 돌고 있다는 뜻이고, 그 세션의 워크트리를 우리가 지우면 작업이 통째로
+    # 사라진다 — 실제로 한 번 그렇게 죽였다.
+    if not args.dry_run and not args.no_tidy:
+        swept = _sweep_merged_automation_worktrees(args.lock_ttl_minutes)
+        if swept:
+            print(f"머지된 워크트리 {len(swept)}건을 걷었다: {', '.join(swept)}", file=sys.stderr)
 
     try:
         issue = _pick(args)
