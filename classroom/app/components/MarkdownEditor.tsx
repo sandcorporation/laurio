@@ -27,7 +27,7 @@
 // (`theme-bus`) 운영체제 설정이 바뀌면(`matchMedia`) 다시 판정한다. 색 자체는
 // 여전히 `toastui-editor-overrides.css`의 토큰 변수가 정한다 — 이 클래스는
 // Toast UI 라이브러리 안쪽(아이콘 스프라이트 등)만 건드린다.
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import type ToastEditor from "@toast-ui/editor";
 
@@ -67,7 +67,10 @@ export function MarkdownEditor({
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
-  useEffect(() => {
+  // **`useLayoutEffect` 인 이유는 정리 쪽이다**(GlitchTip 오류 26) — 아래 정리
+  // 주석과 `lib/editor/markdown-editor-teardown.test.ts` 를 본다. 몸통은 동적
+  // import 를 걸기만 하므로 커밋을 붙잡지 않는다.
+  useLayoutEffect(() => {
     let cancelled = false;
     let editor: ToastEditor | null = null;
 
@@ -113,16 +116,15 @@ export function MarkdownEditor({
       cancelled = true;
       try {
         // ToastUI 자신의 툴바가 리사이즈를 200ms 스로틀로 재배치한다
-        // (`Toolbar.prototype.addEvent`, 라이브러리 소스) — 언마운트로 이
-        // 컨테이너가 문서에서 빠지는 순간도 리사이즈라 그 트레일링
-        // 호출이 늦게 흐른다. `destroy()`가 이미 끝난 뒤(우리 쪽 정리는
-        // React 커밋 중 동기로 돈다) 그 지연 호출이 내부 컴포넌트에
-        // `setState`를 걸어 이미 없는 DOM 노드를 지우려다 NotFoundError를
-        // 던지는 것을 실제로 봤다(#326, 가져오기 → 편집 화면 전환에서
-        // 재현·dev 오버레이에만 뜨는 비차단 경고). 라이브러리 안쪽의
-        // ResizeObserver 콜백이라 우리 쪽에서 취소할 손잡이가 없다 — 이
-        // 컴포넌트는 통째로 버려지는 중이라 그 실패 자체는 무해하니
-        // 콘솔의 uncaught 예외로만 남지 않게 삼근다.
+        // (`Toolbar.prototype.addEvent`, 라이브러리 소스) — 컨테이너가 문서에서
+        // 빠지는 순간도 리사이즈라, 옵저버가 살아 있는 채로 떼이면 트레일링
+        // 호출이 `setTimeout` 으로 예약되고 `destroy()` 뒤에 흘러 이미 없는
+        // DOM 노드를 지우려다 NotFoundError 를 던진다(#326 에서 처음 봤고,
+        // prod 에서 문제 화면 → 제출 화면 이동마다 uncaught 로 났다 — GlitchTip
+        // 오류 26). 그 타이머는 라이브러리 안쪽이라 이 `try` 로는 못 잡는다.
+        // 그래서 이 정리를 `useLayoutEffect` 에 둔다 — React 가 호스트 노드를
+        // 떼어 내기 **전에** 돌아, `destroy()` 가 옵저버를 먼저 끊는다.
+        // (`useEffect` 정리는 떼어 낸 **뒤에** 돌아 이미 늦다.)
         editor?.destroy();
       } catch {
         // 위 설명대로 — 이미 버려지는 트리라 여기서 할 일이 없다.
