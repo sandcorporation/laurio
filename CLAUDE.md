@@ -538,7 +538,15 @@ sentry.io 가 아니라 **우리가 띄운 GlitchTip**
 - **보내지 않는 것**: 세션 리플레이와 성능 추적을 켜지 않았다(GlitchTip 은 리플레이를
   아예 받지 못하고, 리플레이는 화면을 통째로 녹화해 개인정보가 함께 나간다). 사용자
   식별은 **내부 id 하나**뿐이고(`accounts.middleware`·`core.operator_auth` 가 붙인다)
-  이메일·IP·요청 본문·쿠키는 보내지 않는다. **의도한 4xx 도 보내지 않는다** — 422·404·
+  이메일·IP·요청 본문·쿠키는 보내지 않는다. **세 앱에서는 그 약속을 `sendDefaultPii:
+  false` 가 지키지 못했다**(#460, 2026-09-18) — 서버 쪽 `onRequestError` 경로로 올라온
+  이벤트에는 요청이 그대로 붙어 `codemit_access`·`codemit_refresh` JWT 가 **평문으로**
+  나갔다(refresh 수명 14일이라 그 값 하나로 로그인이 된다). 지금은
+  `lib/observability/sentry-options.ts` 의 `beforeSend`(`scrubSensitiveRequestData`)가
+  쿠키·요청 본문을 지우고 **헤더는 이름을 아는 것만 남긴다** — 새 헤더의 기본값이
+  「보낸다」이면 다음 누출이 조용히 또 생기기 때문이다. 세 앱의 여섯 진입점이 전부
+  `buildSentryOptions` 를 지나므로 그 한 자리가 서버·브라우저 양쪽을 덮고, 두 앱의
+  `sentry-options.test.ts` 가 그 동작을 고정한다(운영자 앱은 테스트 파일이 없다). **의도한 4xx 도 보내지 않는다** — 422·404·
   403 은 우리가 일부러 내는 응답이라, 그걸 다 보내면 진짜 5xx 가 소음에 묻힌다
   (`core.observability.drop_expected_error`, `backend/tests/test_observability.py` 가
   그 규칙을 고정한다).
