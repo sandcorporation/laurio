@@ -418,6 +418,32 @@ jobs:
   # 일부러 넓은 창을 매번 훑지 않는다: GlitchTip 은 해결된 오류가 재발하면 스스로
   # 미해결로 되돌리는데, 옛 커밋의 줄을 매 push 마다 다시 읽으면 그렇게 되살아난
   # 오류를 계속 해결로 덮어 **재발을 숨긴다**. 놓치는 것보다 나쁘다.
+  # **push 직후 GlitchTip 에 「수정이 들어갔다」를 적는다 — `needs` 가 없다.**
+  # 해결 표시는 `needs: test` 뒤에 오므로 push 와 GlitchTip 사이에 5~10분이 있다
+  # (실측: 커밋 05:03:19 → 표시 05:11:06). 그 사이 화면은 **「아직 안 닫혔다」와
+  # 「배선이 고장났다」를 구별해 주지 않는다** — 실제로 그 질문을 받았다(2026-09-18).
+  # 이 잡은 그 갈림을 화면에 적기만 하고 상태는 건드리지 않는다: 닫는 판정은 여전히
+  # 아래 `glitchtip-resolve` 의 것이다.
+  glitchtip-ack:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: [self-hosted, sub]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: This push carries a fix — say so in GlitchTip
+        env:
+          GLITCHTIP_TOKEN_FOR_AUTOMATION: ${{ secrets.GLITCHTIP_TOKEN_FOR_AUTOMATION }}
+        run: |
+          BASE="${{ github.event.before }}"
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            BASE="${{ github.sha }}~1"
+          fi
+          python3 scripts/glitchtip_resolve.py --ack "$BASE" "${{ github.sha }}"
+
   glitchtip-resolve:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     needs: test

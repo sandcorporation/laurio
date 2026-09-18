@@ -606,7 +606,13 @@ ssh sub 'docker exec codemit-staging-backend-1 python manage.py sentry_smoke'
   한국어라 바뀌면 조용히 샌다. 목록은 `DELIBERATE_EXCEPTION_TYPES` 한 자리다.
 - **해결 표시는 CI 가 한다.** 세션은 커밋 메시지 마지막 줄에 `GlitchTip: <id>` 를 적고
   push 만 하고, 그 줄을 읽어 이슈를 resolved 로 돌리는 것은 `main` 의 CI 다 — 「고친 것
-  같다」와 「고쳤다」를 가르는 자리다.
+  같다」와 「고쳤다」를 가르는 자리다. **그래서 push 와 표시 사이에 5~10분이 있다**
+  (실측: 커밋 05:03:19 → 표시 05:11:06 — `needs: test` 가 백엔드 전체 테스트를
+  기다린다). 그 사이 화면은 「아직 안 닫혔다」와 「배선이 고장났다」를 구별해 주지
+  않으므로, `needs` 없이 push 직후 도는 `glitchtip-ack` 잡이 **코멘트로 그것만**
+  적는다(상태는 건드리지 않는다). 그 코멘트도 클레임으로 세어지므로, 사람이 손으로
+  `GlitchTip:` 줄을 적은 오류는 그때부터 자동 진단이 집지 않는다 — 사람이 보고 있다는
+  뜻이라 받아들인 대가다.
 - **배경 세션은 「지금」을 말하는 문서를 고칠 수 없다.** 평소 티켓이라면 「티켓을 닫는
   기준」이 `CLAUDE.md`·`CONTEXT.md`·`docs/features/` 를 같은 커밋에서 고치라고 하는데,
   아무도 보고 있지 않은 세션에는 그 규칙을 적용하지 않는다 — 그 셋(과 `docs/adr/`)이
@@ -1324,7 +1330,7 @@ Problem Statement 를 읽고 「어댑터 실제 구현은 스토리지 하나�
 
 ## CI 는 셀프호스티드 러너에서, 프로덕션 이미지로 돈다
 
-GitHub 호스티드 러너는 과금이 막혀 못 쓴다. 18개 잡 중 16개가 `runs-on: [self-hosted, sub]` —
+GitHub 호스티드 러너는 과금이 막혀 못 쓴다. 19개 잡 중 17개가 `runs-on: [self-hosted, sub]` —
 staging 배포 호스트와 **같은 머신**이다. 나머지 둘(`images-staging`·`images-prod`)은 mac 러너
 (`[self-hosted, ARM64, mac-arm]` — sub 와 같은 `myoung34/github-runner` 컨테이너, 조직 범위)에서
 배포 이미지를 굽는다(위 「이미지는 CI 가 굽는다」, 비상구 `IMAGE_BUILDER=sub`). 러너 컨테이너는 `--network host` 로 돌고 호스트
@@ -1367,7 +1373,7 @@ docker 소켓을 물어 컨테이너를 바깥에 띄운다(DooD).
 11잡이 됐고, `frontend-e2e-classroom`(#277)이 늘어 12잡, `classroom-deploy-guard`(#296)가
 늘어 13잡, 배포 이미지 둘과 staging 호출(`images-staging`·`images-prod`·`deploy-staging`,
 2026-09-17)이 늘어 16잡, 도커 디스크 정리(`sub-docker-cleanup`, 같은 날)가 늘어 17잡,
-GlitchTip 해결 표시(`glitchtip-resolve`, 2026-09-18)가 늘어 지금은 18잡이다(강의실 e2e·이미지 잡 실측은 아직 없다 — CI 첫 실행이 잰다). e2e 운영자 4분 ·
+GlitchTip 해결 표시와 그 예고(`glitchtip-resolve`·`glitchtip-ack`, 2026-09-18)가 늘어 지금은 19잡이다(강의실 e2e·이미지 잡 실측은 아직 없다 — CI 첫 실행이 잰다). e2e 운영자 4분 ·
 공개 3분 · `celery-broker` 2분 · `pytest` 1분 · 나머지 여덟은 각 1분 미만.
 
 **`screen-language` 잡**(#267, #268)은 스텝 둘로 두 표면을 막는다. 첫 스텝

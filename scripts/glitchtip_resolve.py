@@ -51,6 +51,9 @@ GLITCHTIP_URL = os.environ.get("GLITCHTIP_URL", "https://glitchtip.honeycombpizz
 #: 남는데 클레임 때문에 다시 집히지도 않는다.
 TRAILER = re.compile(r"^[ \t]*GlitchTip:[ \t]*(\d+)[ \t]*$", re.MULTILINE | re.IGNORECASE)
 
+#: 표시 코멘트의 첫 줄 — 사람이 GlitchTip 에서 「기다리는 중」임을 알 수 있게.
+ACK_PREFIX = "[자동 진단]"
+
 TIMEOUT_SECONDS = 20
 
 
@@ -72,11 +75,11 @@ def _issue_ids(base: str, head: str) -> list[str]:
     return seen
 
 
-def _resolve(issue_id: str, token: str) -> tuple[int, str]:
+def _call(path: str, token: str, *, method: str, body: dict) -> tuple[int, str]:
     request = urllib.request.Request(
-        f"{GLITCHTIP_URL}/api/0/issues/{issue_id}/",
-        data=json.dumps({"status": "resolved"}).encode("utf-8"),
-        method="PUT",
+        f"{GLITCHTIP_URL}/api/0/{path}",
+        data=json.dumps(body).encode("utf-8"),
+        method=method,
     )
     request.add_header("Authorization", f"Bearer {token}")
     request.add_header("Content-Type", "application/json")
@@ -89,11 +92,43 @@ def _resolve(issue_id: str, token: str) -> tuple[int, str]:
         return 0, str(exc)
 
 
+def _resolve(issue_id: str, token: str) -> tuple[int, str]:
+    return _call(f"issues/{issue_id}/", token, method="PUT", body={"status": "resolved"})
+
+
+def _acknowledge(issue_id: str, token: str, sha: str) -> tuple[int, str]:
+    """「수정을 push 했다 — CI 를 기다리는 중」을 코멘트로 남긴다.
+
+    **왜 필요한가.** 해결 표시는 `needs: test` 뒤에 오므로 push 와 GlitchTip 사이에
+    5~10분이 있다(실측: 커밋 05:03 → 표시 05:11). 그 사이 화면은 **「아직 안 닫혔다」와
+    「배선이 고장났다」를 구별해 주지 않는다** — 실제로 그 질문을 받았다(2026-09-18).
+    이 코멘트가 그 갈림을 화면에 적는다.
+
+    **부작용을 알고 쓴다.** 코멘트가 곧 클레임이라(`glitchtip_pick.py` 의 「판정은
+    내용이 아니라 개수다」), 이 표시가 달린 오류는 나중에 재발해도 자동 진단이 집지
+    않는다. 자동 진단이 고친 오류는 이미 클레임돼 있으니 달라지는 것이 없고, **사람이
+    손으로 `GlitchTip:` 줄을 적은 경우에만** 새로 그 상태가 된다 — 그 오류는 사람이
+    보고 있다는 뜻이므로 받아들일 만한 대가로 봤다.
+    """
+
+    text = (
+        f"{ACK_PREFIX} 이 오류를 고친 수정이 `main` 에 들어갔습니다(커밋 `{sha[:12]}`). "
+        "CI 가 초록으로 끝나면 이 오류가 해결로 표시됩니다 — 그때까지는 열린 채로 있는 "
+        "것이 정상입니다."
+    )
+    return _call(f"issues/{issue_id}/comments/", token, method="POST", body={"data": {"text": text}})
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("base", help="이 커밋 다음부터 본다")
     parser.add_argument("head", help="이 커밋까지 본다")
-    parser.add_argument("--dry-run", action="store_true", help="표시하지 않고 무엇을 표시할지만 적는다")
+    parser.add_argument("--dry-run", action="store_true", help="쓰지 않고 무엇을 할지만 적는다")
+    parser.add_argument(
+        "--ack",
+        action="store_true",
+        help="해결 표시 대신 「수정을 push 했다」 코멘트만 남긴다 (CI 의 이른 잡이 쓴다)",
+    )
     args = parser.parse_args()
 
     issue_ids = _issue_ids(args.base, args.head)
@@ -101,7 +136,8 @@ def main() -> int:
         print("GlitchTip: 줄을 가진 커밋이 없다 — 표시할 것이 없다")
         return 0
 
-    print(f"표시할 이슈: {', '.join(issue_ids)}")
+    verb = "표시" if not args.ack else "알림"
+    print(f"{verb}할 이슈: {', '.join(issue_ids)}")
 
     token = os.environ.get("GLITCHTIP_TOKEN_FOR_AUTOMATION", "").strip()
     if not token:
@@ -113,20 +149,25 @@ def main() -> int:
     failures = 0
     for issue_id in issue_ids:
         if args.dry_run:
-            print(f"  (드라이런) 이슈 {issue_id} → resolved")
+            print(f"  (드라이런) 이슈 {issue_id} → {'코멘트' if args.ack else 'resolved'}")
             continue
-        status, detail = _resolve(issue_id, token)
-        if status == 200:
-            print(f"  이슈 {issue_id} → resolved")
+        if args.ack:
+            status, detail = _acknowledge(issue_id, token, args.head)
+            ok, done = 201, "수정 push 됨을 적었다"
+        else:
+            status, detail = _resolve(issue_id, token)
+            ok, done = 200, "resolved"
+        if status == ok:
+            print(f"  이슈 {issue_id} → {done}")
         else:
             # **잡을 실패시키지 않는다**(아래 return 0). 이미 머지된 수정을 되돌릴
             # 수는 없고, 표시가 안 된 것은 다음 사람이 GlitchTip 에서 본다 —
             # 배포 파이프라인을 세울 일이 아니다.
-            print(f"  이슈 {issue_id} 표시 실패: {status} {detail}", file=sys.stderr)
+            print(f"  이슈 {issue_id} 쓰기 실패: {status} {detail}", file=sys.stderr)
             failures += 1
 
     if failures:
-        print(f"{failures}건을 표시하지 못했다 — GlitchTip 에서 손으로 닫는다", file=sys.stderr)
+        print(f"{failures}건을 쓰지 못했다 — GlitchTip 에서 눈으로 확인한다", file=sys.stderr)
     return 0
 
 
