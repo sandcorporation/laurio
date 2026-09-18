@@ -564,7 +564,12 @@ ssh sub 'docker exec codemit-staging-backend-1 python manage.py sentry_smoke'
   일을 curl 로 한다.
 - **「손 댔다」는 GlitchTip 코멘트다.** 이슈 목록 응답의 `numComments` 가 그 값이라 목록
   API 한 번으로 갈리고, 사람이 같은 사실을 GlitchTip 화면에서 본다. 새 상태 상자를 만들지
-  않았다.
+  않았다. **판정은 내용이 아니라 개수다** — 쓰기 토큰으로는 코멘트를 달 수만 있고 읽을
+  수 없다(`GET issues/{id}/comments/` 가 `Permission denied`, 실측). 그래서 **코멘트가
+  하나라도 있으면 집지 않는다**: 사람이 메모를 달아 둔 오류를 자동화가 가져가지 않는 것이
+  오히려 맞다. 대가는 무심코 단 코멘트가 그 오류를 영구히 빼는 것이고, 되돌리려면 사람이
+  화면에서 지워야 한다(`event:admin` 이 필요하고 이 토큰에는 일부러 없다 — 실제로 한 번
+  그렇게 막혔다).
 - **동시 하나는 잠금 파일이 지킨다**(`~/.codemit/glitchtip-lock`). 세션이 끝낼 때 지우고,
   죽었으면 45분에 저절로 풀린다. `orca automations runs` 의 status 값을 보지 않는 이유는
   그 문자열 목록이 어디에도 문서화돼 있지 않아서다 — 추측하면 가드가 **항상 통과하고도
