@@ -1,15 +1,33 @@
 import io
 import json
+import zlib
 
 from django.conf import settings
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.db import connection, transaction
 from ninja import Router
 from ninja.errors import HttpError
 
 from .auth import InternalAuth
 from .e2e_seeds import E2E_SEED_REGISTRY
 from .scans import is_scan_active, run_all, run_scan
+
+#: 자발 잠금의 첫 인자 — 이 저장소가 쓰는 다른 자발 잠금과 섞이지 않게 고정한다
+#: (지금은 이 하나뿐이지만, 같은 키 공간을 나눠 쓰면 무관한 둘이 서로를 막는다).
+_SEED_LOCK_NAMESPACE = 0x5EED
+
+
+def _seed_lock_key(name: str) -> int:
+    """시드 이름을 자발 잠금의 32비트 키로 바꾼다 — 이름이 다르면 서로 막지 않는다.
+
+    `zlib.crc32` 를 쓰는 이유는 안정성이다: `hash()` 는 프로세스마다 시드가 달라
+    (`PYTHONHASHSEED`) 같은 이름이 워커마다 다른 키가 되고, 그러면 줄이 서지 않는다.
+    부호 있는 32비트로 옮기는 것은 Postgres 의 `pg_advisory_xact_lock(int, int)` 가
+    그 범위를 받기 때문이다.
+    """
+
+    return zlib.crc32(name.encode("utf-8")) - 2**31
 
 router = Router(tags=["internal"])
 
@@ -99,7 +117,27 @@ def e2e_seed(request, name: str):
 
     out = io.StringIO()
     try:
-        call_command(entry.command, stdout=out, **options)
+        # **시드 하나는 한 번에 하나만 돈다**(2026-09-18, CI #242).
+        #
+        # Playwright 는 이 시드를 스펙 파일마다 `beforeAll` 에서 부르고
+        # `fullyParallel` 로 워커 여럿을 쓴다 — 스위트 시작 직후 여러 워커가
+        # 동시에 첫 시드를 치는 창이 열린다. 그런데 시드들은 「기존 e2e 데이터를
+        # 지우고 다시 만든다」 구조라 **순차로만** 멱등하다: 둘이 같이 지우고 같이
+        # 넣으면 한쪽이 유일 제약에 걸려 죽는다(실측 2026-09-18: 동시 2번이면
+        # 3/3 으로 한쪽이 `auth_user_username_key` 위반).
+        #
+        # 호출부(`seed_e2e_contests` 등)를 하나씩 고치지 않고 **입구에서** 줄을
+        # 세우는 이유: 같은 경쟁이 시드마다 다른 제약으로 되살아난다(스폰서·심사
+        # 스폰서·개발자·기준데이터가 모두 같은 「지우고 넣기」 모양이다). 여기
+        # 한 곳이면 지금 것과 앞으로 더할 것이 함께 닫힌다.
+        #
+        # **트랜잭션 잠금이라 스스로 풀린다** — 요청이 어떻게 끝나든(예외 포함)
+        # 커밋·롤백과 함께 놓인다. 시드 하나가 실측 0.25초라 워커 여섯이 줄을
+        # 서도 최악 1.5초이고, 호출부의 하한은 30초다.
+        with transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT pg_advisory_xact_lock(%s, %s)", [_SEED_LOCK_NAMESPACE, _seed_lock_key(name)])
+            call_command(entry.command, stdout=out, **options)
     except CommandError as exc:
         # 명령의 거부(배포 환경·잘못된 네임스페이스 등)는 500 이 아니라 4xx 다 —
         # 호출부가 「내가 잘못 불렀다」와 「서버가 깨졌다」를 구별할 수 있어야 한다.

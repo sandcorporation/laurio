@@ -12,8 +12,6 @@ from __future__ import annotations
 import asyncio
 import json
 
-from django.db import connection
-
 from core.events import Event, FakeEventBus
 
 STREAM_URL = "/api/classroom/events/stream"

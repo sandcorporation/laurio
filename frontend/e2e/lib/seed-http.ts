@@ -44,7 +44,11 @@ export async function runSeed(name: string, options: Record<string, unknown> = {
 
   const text = await response.text();
   if (!response.ok) {
-    throw new Error(`e2e 시드(${name})가 ${response.status} 로 실패했다: ${text.slice(0, 400)}`);
+    // **4000자까지 싣는다**(2026-09-18, CI #242). 400자였을 때 역추적의 머리만
+    // 남고 정작 원인 줄(psycopg 예외 클래스와 `DETAIL:`)이 잘려 나갔다 — 그 실패는
+    // 로그에 남은 것만으로는 끝내 진단할 수 없었다. 이 본문은 내부 토큰 뒤의
+    // 표면이고 배포 환경에서는 아예 거부되므로 길게 실어도 잃을 것이 없다.
+    throw new Error(`e2e 시드(${name})가 ${response.status} 로 실패했다: ${text.slice(0, 4000)}`);
   }
   try {
     return JSON.parse(text);

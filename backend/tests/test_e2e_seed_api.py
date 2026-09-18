@@ -180,3 +180,48 @@ def test_the_junk_prune_is_reachable_by_the_name_global_setup_uses(client):
         "skipped",
         "policy_reset",
     }
+
+
+def test_two_callers_seeding_at_once_both_succeed(transactional_db):
+    """**시드는 동시에 불려도 죽지 않는다**(2026-09-18, CI #242).
+
+    Playwright 는 이 시드를 스펙 파일마다 `beforeAll` 에서 부르고
+    `fullyParallel` 로 워커 여럿을 쓴다 — 스위트 시작 직후 여러 워커가 동시에
+    첫 시드를 치는 창이 열린다. 그런데 `seed_e2e_contests` 는 「기존 e2e
+    데이터를 지우고 다시 만든다」 구조라 순차로만 멱등했다: 둘이 같이 지우고
+    같이 넣으면 한쪽이 유일 제약에 걸려 죽는다(`auth_user_username_key`,
+    `Key (username)=(e2e-seed-sponsor)`).
+
+    실측으로 동시 2번이면 3/3 로 한쪽이 500 이었다. CI #242 의 `frontend-e2e-
+    public` 이 그렇게 빨갛게 났고, 그때 남은 오류는 `seed-http.ts` 의 400자
+    자르기에 잘려 원인 줄이 유실됐다.
+
+    **스레드로 치는 이유**: Django 는 연결을 스레드마다 연다 — 같은 스레드에서
+    두 번 부르면 순차 호출이라 이 경쟁이 재현되지 않는다.
+    """
+
+    import threading
+
+    from django.db import connections
+    from django.test import Client
+
+    results: list[int] = []
+    lock = threading.Lock()
+
+    def seed_once() -> None:
+        try:
+            response = _post(Client(), "contests")
+            with lock:
+                results.append(response.status_code)
+        finally:
+            # 스레드가 연 연결은 스레드가 닫는다 — 안 닫으면 테스트 DB 정리가
+            # 「누가 접속 중이다」로 막힌다.
+            connections.close_all()
+
+    threads = [threading.Thread(target=seed_once) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+
+    assert results == [200, 200], f"동시 시드가 죽었다: {results}"
