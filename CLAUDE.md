@@ -260,16 +260,16 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
 
 **이미지는 CI 가 굽는다 — staging·prod 서버는 받기만 한다**(2026-09-17). 예전에는 CI 가
 구운 이미지는 테스트에만 쓰고 버렸고, 배포는 각 서버가 다시 구웠다 — prod(oracle)는
-배포마다 제 CPU 로 Next 빌드 셋을 돌렸다. 지금은 main 의 CI 가 커밋마다 다섯 이미지를
+배포마다 제 CPU 로 Next 빌드 셋을 돌렸다. 지금은 main 의 CI 가 커밋마다 여섯 이미지를
 ghcr(`ghcr.io/sandcorporation/codemit-*`, 비공개)에 올린다:
 
 | 잡 | 러너 | 태그 |
 | --- | --- | --- |
-| `images-staging` | **mac** — amd64 는 Docker Desktop 의 에뮬레이션 | `codemit-backend:<sha>-amd64`, 세 앱 `:<sha>-staging`, `codemit-search:<sha>-amd64`(#450/#451) |
-| `images-prod` | **mac** — arm64 제 속도 | `codemit-backend:<sha>-arm64`, 세 앱 `:<sha>-prod`, `codemit-search:<sha>-arm64`(#450/#451) |
+| `images-staging` | **mac** — amd64 는 Docker Desktop 의 에뮬레이션 | `codemit-backend:<sha>-amd64`, 세 앱 `:<sha>-staging`, `codemit-search:<sha>-amd64`(#450/#451), `codemit-pgbouncer:<sha>-amd64`(#453/#458) |
+| `images-prod` | **mac** — arm64 제 속도 | `codemit-backend:<sha>-arm64`, 세 앱 `:<sha>-prod`, `codemit-search:<sha>-arm64`(#450/#451), `codemit-pgbouncer:<sha>-arm64`(#453/#458) |
 
 mac 러너는 Apple Silicon 의 Docker Desktop 위 러너 컨테이너(Linux/ARM64, 라벨 `mac-arm`)다.
-잡은 서비스마다 하나(matrix, staging 5 + prod 5)라 mac 러너 수(3)만큼 동시에 굽는다.
+잡은 서비스마다 하나(matrix, staging 6 + prod 6)라 mac 러너 수(3)만큼 동시에 굽는다.
 **둘 다 mac 인 이유는 sub 의 디스크다**(2026-09-17) — sub 는 테스트 잡과 staging 스택이
 캐시 없는 SATA SSD(86% 참) 하나를 나눠 쓰는데, 빌드를 얹자 CPU·메모리는 남는데 디스크
 대기가 14~84% 로 치솟았다. **mac 이 없을 때의 비상구는 저장소 변수 `IMAGE_BUILDER=sub`**
@@ -321,7 +321,7 @@ ghcr 에서 새 태그를 받으니 옛 커밋 이미지가 쌓이고, oracle �
 끝나 배포를 실패로 만들지 않는다. 되돌리기는 ghcr 에서 다시 받는다.
 
 `deploy.sh` 는 **바뀐 것만 바꿔 끼운다** — 이미지 태그가 커밋마다 달라서 계획 없이 `up` 하면
-바뀌지 않은 서비스까지 전부 다시 뜨기 때문이다(CI 는 매 커밋 다섯 이미지를 다 올리므로 어느
+바뀌지 않은 서비스까지 전부 다시 뜨기 때문이다(CI 는 매 커밋 여섯 이미지를 다 올리므로 어느
 서비스든 받을 이미지는 있다). 기준점은 `.jenkins-staging-deployed`
 (gitignore, 빌드 디렉터리에 남는다 — 시크릿과 같은 전제). 그 파일이 없거나 그것이
 가리키는 커밋이 저장소에 없으면 전부 바꿔 끼운다. 경로 → 서비스 팬아웃은 1:1 이 아니다:
@@ -333,8 +333,9 @@ ghcr 에서 새 태그를 받으니 옛 커밋 이미지가 쌓이고, oracle �
 `package.json` 은 **frontend + operator + classroom**(#277)을 함께 간다 — 어느 앱이 어느
 패키지를 쓰는지로 가르지 않는다(`deploy.sh` 의 경로 규칙 하나다). `docker/search.Dockerfile`
 은 **search**(#450/#451) 하나만 간다 — backend 코드와 무관하게 nori 플러그인을 넣은
-OpenSearch 이미지 자체만 바뀐다. 없는 컨테이너는 변경 여부와 무관하게 받아서 띄운다 —
-「없음」은 「최신」이 아니다.
+OpenSearch 이미지 자체만 바뀐다. `docker/pgbouncer.Dockerfile`·`docker/pgbouncer/`
+는 **pgbouncer**(#453/#458) 하나만 간다 — 연결 풀러 이미지 자체만 바뀐다. 없는
+컨테이너는 변경 여부와 무관하게 받아서 띄운다 — 「없음」은 「최신」이 아니다.
 
 **이벤트 서비스가 없어도 배포는 실패로 끝나지 않는다 — 다만 헬스 체크는 있다.**
 `events` 는 `backend`·`celery-worker`·`celery-beat` 와 같은 무게로 받고 바꿔
@@ -353,6 +354,24 @@ OpenSearch 이미지 자체만 바뀐다. 없는 컨테이너는 변경 여부�
 backend 를 바꿔 끼운 뒤에는 `deploy.sh reindex`(`manage.py
 rebuild_contest_search_index`)가 전체 재색인을 한 번 강제한다 — 매일 도는
 `contest-search-reindex` 스캔의 하루 제한을 기다리지 않는다.
+
+**연결 풀러(pgbouncer)가 죽으면 검색·이벤트 서비스와 반대로 배포가 실패로
+끝난다 — 그리고 그래야 맞다**(#453/#458). `backend`·`celery-worker`·
+`celery-beat`·`events` 넷은 이제 DB 를 직접 가리키지 않고 `pgbouncer` 를
+가리킨다(`POSTGRES_HOST=pgbouncer`) — search 처럼 시작 순서만 기다리는
+`service_started` 가 아니라 `db` 와 같은 `service_healthy` 로 그 넷의
+`depends_on` 에 걸려 있다. **DB(`db`) 자신은 살아 있어도 풀러가 죽어 있으면
+그 넷은 애초에 뜨지 못한다** — 이 넷이 실제로 여는 것은 DB 연결이 아니라
+풀러 연결이기 때문이다. `deploy.sh health backend`(그리고 `events`)가
+평소처럼 `/api/health` 로 확인하는 것이 곧 풀러가 붙어 있다는 확인이다
+(#453 사용자 스토리 13) — 그 경로 자체가 DB 까지 왕복해야 200 을 낸다.
+풀 모드는 트랜잭션이고, 그 제약(서버측 커서가 깨지는 것)을 dev pgbouncer
+프로필로 실제로 재현해 확인한 결과는 위 「Postgres 앞 연결 풀러」 절과
+`config/settings.py`의 `DISABLE_SERVER_SIDE_CURSORS` 주석에 있다 — staging·
+prod compose 는 그 환경변수(`CODEMIT_DB_DISABLE_SERVER_SIDE_CURSORS=true`)를
+기본으로 켠다. **되돌리는 법**: 네 프로세스의 `POSTGRES_HOST`를 다시 `db`로
+(그리고 위 환경변수를 다시 `false`로) 돌리면 앱이 DB를 직접 가리키던
+이전 상태로 즉시 돌아간다 — 풀러 컨테이너 자체를 지울 필요는 없다.
 
 **헬스 체크는 Host 헤더를 붙여야 한다.** 루프백으로 치면 Host 가 `127.0.0.1` 이
 되는데 그건 `ALLOWED_HOSTS` 에 없어 Django 가 400 을 낸다 — gunicorn 이 멀쩡히

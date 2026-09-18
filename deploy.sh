@@ -13,23 +13,23 @@
 #
 #   preflight           env 파일과 compose 설정을 확인한다
 #   plan                무엇을 바꿔 끼울지 정해 계획 파일(.jenkins-<대상>-plan)에 적는다
-#   image <서비스>       backend|frontend|operator|classroom|search 하나의 이미지를 준비한다
+#   image <서비스>       backend|frontend|operator|classroom|search|pgbouncer 하나의 이미지를 준비한다
 #                       (아래 이미지 출처에 따라 pull 또는 build)
 #   pull <서비스>        ghcr 에서 그 커밋의 이미지를 받는다
 #   build <서비스>       이 호스트에서 직접 굽는다(비상용)
 #   up                  계획대로 인프라를 세우고 새 이미지로 바꿔 끼운다
 #   verify              컨테이너가 running 인지 본다
-#   health <서비스>      backend|events|search 가 요청을 실제로 받는지 본다
+#   health <서비스>      backend|events|search|pgbouncer 가 요청을 실제로 받는지 본다
 #   reindex             공모전 검색을 전체 재색인한다(검색·backend 를 바꾼 뒤)
 #   mark                배포 표식을 지금 커밋으로 옮긴다
 #   all (기본값)         위를 순서대로 전부 — 사람이 손으로 배포할 때
 #
 # **이미지는 CI 가 굽고, 여기서는 받는다**(2026-09-17). main 에 push 하면 CI 가
-# 커밋마다 네 이미지를 ghcr 에 올린다(둘 다 mac 러너가 굽는다, 비상시 sub) — backend 는
-# `<sha>-amd64`·`<sha>-arm64`, 세 앱은 NEXT_PUBLIC_* 가 굳으므로 `<sha>-staging`·`<sha>-prod` 다. compose
-# 파일의 `image:` 가 그 이름을 가리키고, 태그의 <sha> 는 여기서 체크아웃한 커밋이다
-# (`CODEMIT_IMAGE_TAG`). 그래서 staging 은 sub 가, prod 는 oracle 이 더 이상 굽지 않는다
-# — oracle 은 prod 서버라 빌드가 서비스 속도를 갉아먹었다.
+# 커밋마다 여섯 이미지를 ghcr 에 올린다(둘 다 mac 러너가 굽는다, 비상시 sub) — backend·
+# search·pgbouncer 는 `<sha>-amd64`·`<sha>-arm64`, 세 앱은 NEXT_PUBLIC_* 가 굳으므로
+# `<sha>-staging`·`<sha>-prod` 다. compose 파일의 `image:` 가 그 이름을 가리키고, 태그의
+# <sha> 는 여기서 체크아웃한 커밋이다(`CODEMIT_IMAGE_TAG`). 그래서 staging 은 sub 가, prod 는
+# oracle 이 더 이상 굽지 않는다 — oracle 은 prod 서버라 빌드가 서비스 속도를 갉아먹었다.
 #
 # 이미지 출처는 `DEPLOY_IMAGE_SOURCE` 가 고른다: `registry`(기본값, 파이프라인) 또는
 # `build`(CI·ghcr 가 막혔을 때 사람이 손으로 — 예전 방식 그대로 이 호스트에서 굽는다).
@@ -58,6 +58,8 @@
 #   docker/search.Dockerfile -> search                              (#450/#451, 부모 #444 스펙 —
 #                                                                    nori 플러그인을 넣은 OpenSearch,
 #                                                                    backend 코드와 무관하게 갈린다)
+#   docker/pgbouncer.Dockerfile, docker/pgbouncer/ -> pgbouncer      (#453/#458 — 연결 풀러
+#                                                                    이미지 자체만 바뀐다)
 #   docker/*.Dockerfile / compose.<target>.yaml -> 그 파일이 짓는 것 전부
 #
 # **검색이나 backend 를 바꾼 뒤에는 전체 재색인을 한 번 돌린다**(부모 #444 스펙) —
@@ -71,6 +73,15 @@
 # 최신 backend 와 다른 스키마·응답 모양을 돌려주면 강의실 스트림만 조용히
 # 어긋난다. 새 코드가 만든 마이그레이션 위에서 옛 워커가 도는 상태가 되고,
 # 그건 조용히 틀린다.
+#
+# **pgbouncer(연결 풀러, #453/#458)는 search 와 반대로 필수 경로다.** search 가
+# 죽어도 backend 넷은 뜨고(DB 검색으로 물러난다), pgbouncer 가 죽으면 그 넷은
+# 애초에 DB(정확히는 풀러)에 붙지 못해 뜨지 않는다 — 그래서 backend 넷의
+# `depends_on` 은 pgbouncer 를 `db` 와 같은 `service_healthy` 로 기다린다(search 는
+# `service_started` 뿐이다). 되돌리는 법: 네 프로세스의 `POSTGRES_HOST` 를 다시
+# `db` 로 돌리면(그리고 `CODEMIT_DB_DISABLE_SERVER_SIDE_CURSORS` 를 `false` 로)
+# 앱이 DB 를 직접 가리키던 이전 상태로 즉시 돌아간다 — 풀러 컨테이너 자체를
+# 지울 필요는 없다.
 #
 # 컨테이너가 없으면 변경 여부와 무관하게 굽는다 — 「없음」은 「최신」이 아니다.
 
@@ -136,8 +147,8 @@ log() { echo "[deploy:${TARGET}] $*"; }
 compose_services() {
   case "$1" in
     backend) echo "backend celery-worker celery-beat events" ;;
-    frontend|operator|classroom|search) echo "$1" ;;
-    *) echo "알 수 없는 빌드 대상: $1 (backend|frontend|operator|classroom|search)" >&2; return 2 ;;
+    frontend|operator|classroom|search|pgbouncer) echo "$1" ;;
+    *) echo "알 수 없는 빌드 대상: $1 (backend|frontend|operator|classroom|search|pgbouncer)" >&2; return 2 ;;
   esac
 }
 
@@ -236,6 +247,7 @@ cmd_plan() {
   BUILD_OPERATOR=false
   BUILD_CLASSROOM=false
   BUILD_SEARCH=false
+  BUILD_PGBOUNCER=false
 
   if [ "$EVERYTHING" = true ]; then
     BUILD_BACKEND=true
@@ -243,6 +255,7 @@ cmd_plan() {
     BUILD_OPERATOR=true
     BUILD_CLASSROOM=true
     BUILD_SEARCH=true
+    BUILD_PGBOUNCER=true
   else
     # 한 경로가 여러 서비스를 건드린다. 그 팬아웃이 이 스크립트의 전부다.
     if touched '^(backend/|docker/backend\.Dockerfile$)'; then
@@ -270,6 +283,12 @@ cmd_plan() {
       BUILD_SEARCH=true
     fi
 
+    # 연결 풀러(pgbouncer, #453/#458) — backend 코드와 무관하게 이 Dockerfile과
+    # 그 entrypoint 스크립트로만 갈린다(search와 같은 원칙).
+    if touched '^docker/pgbouncer\.Dockerfile$|^docker/pgbouncer/'; then
+      BUILD_PGBOUNCER=true
+    fi
+
     # compose 파일 자체가 바뀌면 어느 서비스의 환경이 바뀌었는지 알 수 없다.
     # 전부 다시 세운다.
     if touched "^docker/compose\.${TARGET}\.yaml\$"; then
@@ -279,6 +298,7 @@ cmd_plan() {
       BUILD_OPERATOR=true
       BUILD_CLASSROOM=true
       BUILD_SEARCH=true
+      BUILD_PGBOUNCER=true
     fi
   fi
 
@@ -310,6 +330,10 @@ cmd_plan() {
   if missing search; then
     log "search 컨테이너가 없다 — 굽는다."
     BUILD_SEARCH=true
+  fi
+  if missing pgbouncer; then
+    log "pgbouncer 컨테이너가 없다 — 굽는다."
+    BUILD_PGBOUNCER=true
   fi
 
   # NEXT_PUBLIC_TOSS_CLIENT_KEY 회전 감지 (#112 코드리뷰 지적 3). 이 값은
@@ -349,10 +373,11 @@ cmd_plan() {
     BUILD_OPERATOR=false
     BUILD_CLASSROOM=false
     BUILD_SEARCH=false
+    BUILD_PGBOUNCER=false
   fi
 
   ANY=false
-  if [ "$BUILD_BACKEND" = true ] || [ "$BUILD_FRONTEND" = true ] || [ "$BUILD_OPERATOR" = true ] || [ "$BUILD_CLASSROOM" = true ] || [ "$BUILD_SEARCH" = true ]; then
+  if [ "$BUILD_BACKEND" = true ] || [ "$BUILD_FRONTEND" = true ] || [ "$BUILD_OPERATOR" = true ] || [ "$BUILD_CLASSROOM" = true ] || [ "$BUILD_SEARCH" = true ] || [ "$BUILD_PGBOUNCER" = true ]; then
     ANY=true
   fi
 
@@ -365,6 +390,7 @@ cmd_plan() {
     echo "BUILD_OPERATOR=$BUILD_OPERATOR"
     echo "BUILD_CLASSROOM=$BUILD_CLASSROOM"
     echo "BUILD_SEARCH=$BUILD_SEARCH"
+    echo "BUILD_PGBOUNCER=$BUILD_PGBOUNCER"
     echo "PLANNED_COMMIT=$($GIT rev-parse HEAD)"
   } > "$PLAN_FILE"
 
@@ -377,6 +403,7 @@ cmd_plan() {
   echo "  operator                                      : $(plan_word "$BUILD_OPERATOR")"
   echo "  classroom                                     : $(plan_word "$BUILD_CLASSROOM")"
   echo "  search                                        : $(plan_word "$BUILD_SEARCH")"
+  echo "  pgbouncer                                     : $(plan_word "$BUILD_PGBOUNCER")"
   if [ "$ANY" = false ]; then
     log "바뀐 것이 없다. 배포할 것이 없다."
   fi
@@ -438,13 +465,14 @@ build_planned_in_background() {
   BUILD_LOGS=$(mktemp -d)
   PIDS=""
   LABELS=""
-  for label in backend frontend operator classroom search; do
+  for label in backend frontend operator classroom search pgbouncer; do
     case "$label" in
       backend) wanted=$BUILD_BACKEND ;;
       frontend) wanted=$BUILD_FRONTEND ;;
       operator) wanted=$BUILD_OPERATOR ;;
       classroom) wanted=$BUILD_CLASSROOM ;;
       search) wanted=$BUILD_SEARCH ;;
+      pgbouncer) wanted=$BUILD_PGBOUNCER ;;
     esac
     [ "$wanted" = true ] || continue
     cmd_image "$label" > "${BUILD_LOGS}/${label}.log" 2>&1 &
@@ -490,6 +518,16 @@ cmd_up() {
   $COMPOSE up -d db redis
   # 아래 up 은 전부 $UP_FLAGS(registry 면 --no-build)를 붙인다.
 
+  if [ "$BUILD_PGBOUNCER" = true ]; then
+    # backend·celery-worker·celery-beat·events 넷보다 먼저 올린다 — 그 넷의
+    # compose depends_on이 이 서비스를 `service_healthy`로 기다린다(search와
+    # 반대로 이 서비스가 죽으면 그 넷은 애초에 뜨지 못한다, 위 헤더 주석
+    # "pgbouncer는 필수 경로다"). 실제로 붙었는지는 아래 backend 그룹을 올린
+    # 뒤 `cmd_health pgbouncer`가 확인한다.
+    # shellcheck disable=SC2086
+    $COMPOSE up -d --no-deps $UP_FLAGS pgbouncer
+  fi
+
   if [ "$BUILD_SEARCH" = true ]; then
     # backend·celery-worker·celery-beat·events보다 먼저 올린다 — 그 넷의
     # compose depends_on이 search를 "시작 순서"로만 기다린다(헬스는 아니다,
@@ -527,7 +565,7 @@ cmd_verify() {
   # 부팅 거부는 이 저장소가 **의도한** 동작이다(#83, #96) — 어댑터 값이나 OAuth
   # 자격증명이 풀리지 않으면 컨테이너가 뜨지 않는다. 그러니 "떴다"를 실제로
   # 확인해야 하고, 죽었으면 로그를 남겨야 원인을 안다.
-  for svc in backend celery-worker celery-beat events frontend operator classroom search; do
+  for svc in backend celery-worker celery-beat events frontend operator classroom search pgbouncer; do
     cid=$($COMPOSE ps -q "$svc" 2>/dev/null | head -1)
     if [ -z "$cid" ]; then
       echo "[$svc] 컨테이너가 없다"
@@ -565,15 +603,28 @@ cmd_verify() {
 # **search 는 Django 가 아니다**(#450/#451) — Host 헤더도 `/api/health` 도 없다.
 # OpenSearch 자신의 클러스터 헬스 엔드포인트를 컨테이너 안에서 직접 친다(dev
 # `search` 프로필의 healthcheck와 같은 것).
+#
+# **pgbouncer도 Django가 아니다**(#453/#458) — Postgres 와이어 프로토콜만
+# 말하므로 `/api/health`가 없다. dev pgbouncer 프로필의 healthcheck와 같은
+# TCP 확인(`nc -z`)을 컨테이너 안에서 직접 친다. 이 확인이 통과했다고 그
+# 뒤의 실제 DB까지 붙는다는 보장은 아니다(포트만 듣고 있어도 통과한다) —
+# 그건 `cmd_health backend`(그 자신이 DB 를 거쳐야 200 을 낸다)가 대신 본다.
+# 그래도 이 확인은 「포트조차 안 듣는다」는 가장 흔한 실패(컨테이너가 아예
+# 죽었다)를 backend 보다 먼저, 더 빨리 잡는다.
 cmd_health() {
   case "$1" in
-    backend|events|search) ;;
-    *) echo "알 수 없는 헬스 체크 대상: $1 (backend|events|search)"; exit 2 ;;
+    backend|events|search|pgbouncer) ;;
+    *) echo "알 수 없는 헬스 체크 대상: $1 (backend|events|search|pgbouncer)"; exit 2 ;;
   esac
   i=0
   while [ "$i" -lt 30 ]; do
     if [ "$1" = search ]; then
       if $COMPOSE exec -T search curl -sf http://127.0.0.1:9200/_cluster/health >/dev/null 2>&1; then
+        log "$1 응답 확인"
+        return 0
+      fi
+    elif [ "$1" = pgbouncer ]; then
+      if $COMPOSE exec -T pgbouncer nc -z 127.0.0.1 6432 >/dev/null 2>&1; then
         log "$1 응답 확인"
         return 0
       fi
@@ -673,7 +724,7 @@ case "$COMMAND" in
   preflight) cmd_preflight ;;
   plan) cmd_plan ;;
   image|pull|build)
-    [ -n "$ARG" ] || { echo "$COMMAND 에는 서비스가 필요하다 (backend|frontend|operator|classroom|search)"; exit 2; }
+    [ -n "$ARG" ] || { echo "$COMMAND 에는 서비스가 필요하다 (backend|frontend|operator|classroom|search|pgbouncer)"; exit 2; }
     compose_services "$ARG" >/dev/null
     case "$COMMAND" in
       image) cmd_image "$ARG" ;;
@@ -684,7 +735,7 @@ case "$COMMAND" in
   up) cmd_up ;;
   verify) cmd_verify ;;
   health)
-    [ -n "$ARG" ] || { echo "health 에는 서비스가 필요하다 (backend|events|search)"; exit 2; }
+    [ -n "$ARG" ] || { echo "health 에는 서비스가 필요하다 (backend|events|search|pgbouncer)"; exit 2; }
     cmd_health "$ARG"
     ;;
   reindex) cmd_reindex_search ;;
@@ -698,6 +749,9 @@ case "$COMMAND" in
       build_planned_in_background
       cmd_up
       cmd_verify
+      # pgbouncer 먼저 — backend·events 는 그 뒤(정확히는 DB)까지 붙어야
+      # 응답하므로, 포트조차 안 듣는 가장 흔한 실패를 여기서 먼저 잡는다.
+      cmd_health pgbouncer
       cmd_health backend
       cmd_health events
       cmd_health search

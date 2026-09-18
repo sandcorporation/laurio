@@ -1579,6 +1579,10 @@ jobs:
           # 같은 원칙으로 아키텍처로만 가른다 — 환경별로 굳는 값이 없다(Next
           # 앱이 아니다). 소스는 이 Dockerfile 하나뿐이다.
           - { service: search, dsn: SEARCH, tag: amd64, target: '', paths: 'docker/search.Dockerfile' }
+          # 연결 풀러(pgbouncer, #453/#457/#458). backend·search 와 같은 원칙으로
+          # 아키텍처로만 가른다 — 환경별로 굳는 값이 없다(Next 앱이 아니다).
+          # 소스는 Dockerfile 과 그 entrypoint 스크립트 하나뿐이다.
+          - { service: pgbouncer, dsn: PGBOUNCER, tag: amd64, target: '', paths: 'docker/pgbouncer.Dockerfile docker/pgbouncer' }
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1622,8 +1626,9 @@ jobs:
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
           cache-from: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:${{ matrix.service }}-${{ matrix.tag }}
           cache-to: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:${{ matrix.service }}-${{ matrix.tag }},mode=max
-          # backend 는 이 값들을 쓰지 않는다(쓰이지 않은 인자라는 경고만 남는다). SENTRY_DSN 은
-          # 앱마다 다른 프로젝트라 서비스 이름으로 변수를 고른다.
+          # backend·search·pgbouncer 는 이 값들을 쓰지 않는다(쓰이지 않은 인자라는
+          # 경고만 남는다). SENTRY_DSN 은 앱마다 다른 프로젝트라 서비스 이름으로
+          # 변수를 고른다.
           build-args: |
             NEXT_PUBLIC_PORTONE_STORE_ID=${{ vars.STAGING_PORT_ONE_V2_STORE_ID }}
             NEXT_PUBLIC_PORTONE_CHANNEL_KEY=${{ vars.STAGING_KG_INICIS_CHANNEL_KEY }}
@@ -1673,6 +1678,7 @@ jobs:
           - { service: operator, dsn: OPERATOR, tag: prod, target: runner, paths: 'operator packages package.json pnpm-workspace.yaml pnpm-lock.yaml docker/operator.Dockerfile' }
           - { service: classroom, dsn: CLASSROOM, tag: prod, target: runner, paths: 'classroom packages package.json pnpm-workspace.yaml pnpm-lock.yaml docker/classroom.Dockerfile' }
           - { service: search, dsn: SEARCH, tag: arm64, target: '', paths: 'docker/search.Dockerfile' }
+          - { service: pgbouncer, dsn: PGBOUNCER, tag: arm64, target: '', paths: 'docker/pgbouncer.Dockerfile docker/pgbouncer' }
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1716,8 +1722,9 @@ jobs:
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
           cache-from: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:${{ matrix.service }}-${{ matrix.tag }}
           cache-to: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:${{ matrix.service }}-${{ matrix.tag }},mode=max
-          # backend 는 이 값들을 쓰지 않는다(쓰이지 않은 인자라는 경고만 남는다). SENTRY_DSN 은
-          # 앱마다 다른 프로젝트라 서비스 이름으로 변수를 고른다.
+          # backend·search·pgbouncer 는 이 값들을 쓰지 않는다(쓰이지 않은 인자라는
+          # 경고만 남는다). SENTRY_DSN 은 앱마다 다른 프로젝트라 서비스 이름으로
+          # 변수를 고른다.
           build-args: |
             NEXT_PUBLIC_PORTONE_STORE_ID=${{ vars.PROD_PORT_ONE_V2_STORE_ID }}
             NEXT_PUBLIC_PORTONE_CHANNEL_KEY=${{ vars.PROD_KG_INICIS_CHANNEL_KEY }}
