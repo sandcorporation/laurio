@@ -70,6 +70,18 @@ TARGET_ENVIRONMENT = "production"
 #: 클레임 코멘트의 첫 줄 — 사람이 GlitchTip 에서 보고 「자동화가 집었다」를 알 수 있게.
 CLAIM_PREFIX = "[자동 진단]"
 
+#: **우리가 일부러 던지는 예외** — 진단할 것이 없다. 이것을 집으면 세션 하나가 「사고가
+#: 아니다」라고 스스로 적힌 예외를 재현하려 애쓴다.
+#:
+#: `SentrySmokeError` 는 `manage.py sentry_smoke` 가 「오류 수집이 실제로 닿는가」를 확인
+#: 하려고 던지는 것이다(`CLAUDE.md` 의 「닿는지 확인하는 법」) — 배포 뒤 사람이 손으로
+#: 쏘고 GlitchTip 화면에서 눈으로 본다. 즉 **그 오류가 도착한 것이 곧 성공**이고, 그걸
+#: 고치려 드는 것은 정확히 거꾸로다.
+#:
+#: 필터는 `metadata.type`(정확히 예외 클래스 이름이다)으로 본다 — 제목 문자열로 보면
+#: 메시지가 바뀔 때 조용히 새고, 그 메시지는 한국어라 더 잘 바뀐다.
+DELIBERATE_EXCEPTION_TYPES = frozenset({"SentrySmokeError"})
+
 TIMEOUT_SECONDS = 20
 
 
@@ -189,6 +201,9 @@ def _pick(args: argparse.Namespace) -> dict | None:
         raise RuntimeError(f"이슈 목록을 받지 못했다: {status} {str(issues)[:200]}")
 
     for issue in issues:
+        # 우리가 일부러 던지는 예외는 진단 대상이 아니다.
+        if (issue.get("metadata") or {}).get("type") in DELIBERATE_EXCEPTION_TYPES:
+            continue
         # 이미 손 댄 것은 건너뛴다 — 클레임이 곧 이 값이다.
         if not args.any_claimed and int(issue.get("numComments") or 0) > 0:
             continue

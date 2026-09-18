@@ -572,6 +572,11 @@ ssh sub 'docker exec codemit-staging-backend-1 python manage.py sentry_smoke'
 - **환경 판정은 집합이다.** 같은 예외가 staging·prod 에서 함께 나면 GlitchTip 이 이슈
   하나로 묶고 태그에 두 값을 다 담는다(실측: issue 1). 「첫 값이 production 인가」로 보면
   순서에 따라 prod 오류가 조용히 빠진다.
+- **우리가 일부러 던지는 예외는 집지 않는다.** `SentrySmokeError`(`manage.py
+  sentry_smoke`)가 도착한 것은 **오류 수집이 닿는다는 성공 신호**다 — 그걸 집으면 세션
+  하나가 「사고가 아니다」라고 스스로 적힌 예외를 재현하려 애쓴다. 판정은
+  `metadata.type`(예외 클래스 이름)으로 한다, 제목 문자열이 아니다 — 그 메시지는
+  한국어라 바뀌면 조용히 샌다. 목록은 `DELIBERATE_EXCEPTION_TYPES` 한 자리다.
 - **해결 표시는 CI 가 한다.** 세션은 커밋 메시지 마지막 줄에 `GlitchTip: <id>` 를 적고
   push 만 하고, 그 줄을 읽어 이슈를 resolved 로 돌리는 것은 `main` 의 CI 다 — 「고친 것
   같다」와 「고쳤다」를 가르는 자리다.
