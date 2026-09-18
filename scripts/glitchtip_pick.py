@@ -65,6 +65,7 @@ import json
 import os
 import pathlib
 import re
+import subprocess
 import sys
 import time
 import urllib.error
@@ -170,6 +171,65 @@ def _a_session_holds_the_lock(lock_path: pathlib.Path, ttl_minutes: float) -> bo
     return False
 
 
+def _sweep_merged_automation_worktrees() -> list[str]:
+    """머지가 끝난 자동 진단 워크트리를 걷는다 — 실행마다 하나씩 쌓이기 때문이다.
+
+    automation 은 `--workspace-mode new-per-run` 이라 세션이 뜨는 실행마다 워크트리와
+    브랜치(`auto-<이름>-run-<n>-<시각>`)를 하나 만들고, **끝나도 치우지 않는다.** 그
+    안에 `node_modules`·`.venv` 가 각각 들어서므로 몇 건만 쌓여도 이 머신(사람도 같이
+    쓴다)의 디스크를 먹는다.
+
+    **매분 도는 것이 이 precheck 하나뿐이라 청소도 여기서 한다.** 별 cron 을 더하는
+    것보다 낫다 — 청소할 것이 있는 시점과 이것이 도는 시점이 정확히 같다.
+
+    **머지된 것만 걷는다.** 브랜치 팁이 `origin/main` 의 조상이면 그 안의 작업은 이미
+    `main` 에 있다. 조상이 아니면 그대로 둔다 — 게이트에 걸려 사람에게 넘긴 분기
+    (스킬의 「사람을 부르는 자리」)가 정확히 그 모양이고, 그건 사람이 이어받을 것이다.
+
+    **무엇이 실패해도 진단을 멈추지 않는다.** 청소가 안 된 것과 오류를 못 집는 것은
+    다른 문제다. 실제로 이 저장소에서 `git worktree remove` 가 root 소유
+    `.pnpm-store` 때문에 `Permission denied` 로 실패한 적이 있다(2026-09-18) — 그때는
+    이름만 알리고 지나간다.
+    """
+
+    def git(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["git", "-C", str(_repo_root()), *args],
+            capture_output=True,
+            text=True,
+            timeout=TIMEOUT_SECONDS,
+        )
+
+    swept: list[str] = []
+    try:
+        listing = git("worktree", "list", "--porcelain")
+        if listing.returncode != 0:
+            return swept
+
+        path = None
+        for line in listing.stdout.splitlines():
+            if line.startswith("worktree "):
+                path = line[len("worktree ") :]
+            elif line.startswith("branch refs/heads/") and path:
+                branch = line[len("branch refs/heads/") :]
+                if branch.startswith("auto-"):
+                    merged = git("merge-base", "--is-ancestor", branch, "origin/main")
+                    if merged.returncode == 0:
+                        removed = git("worktree", "remove", "--force", path)
+                        if removed.returncode == 0:
+                            git("branch", "-D", branch)
+                            swept.append(branch)
+                        else:
+                            print(
+                                f"워크트리 {path} 를 걷지 못했다: {removed.stderr.strip()[:160]}",
+                                file=sys.stderr,
+                            )
+                path = None
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print(f"워크트리 청소를 건너뛴다: {exc}", file=sys.stderr)
+    return swept
+
+
 def _environments_of(issue: dict) -> set[str]:
     """이 이슈가 **어느 환경들에서** 났는가.
 
@@ -233,6 +293,7 @@ def main() -> int:
     parser.add_argument("--lock-file", default="~/.codemit/glitchtip-lock", help="동시 실행 잠금 파일")
     parser.add_argument("--lock-ttl-minutes", type=float, default=45.0, help="잠금이 저절로 풀리는 시간")
     parser.add_argument("--skip-lock", action="store_true", help="잠금을 보지도 걸지도 않는다")
+    parser.add_argument("--no-tidy", action="store_true", help="머지된 자동 워크트리를 걷지 않는다")
     args = parser.parse_args()
 
     lock_path = pathlib.Path(args.lock_file).expanduser()
@@ -242,6 +303,11 @@ def main() -> int:
     if not _TOKEN:
         print("GLITCHTIP_TOKEN_FOR_AUTOMATION 이 없다 — .env 나 환경변수에 넣어야 한다", file=sys.stderr)
         return 2
+
+    if not args.dry_run and not args.no_tidy:
+        swept = _sweep_merged_automation_worktrees()
+        if swept:
+            print(f"머지된 워크트리 {len(swept)}건을 걷었다: {', '.join(swept)}", file=sys.stderr)
 
     holds_lock = not args.skip_lock and not args.dry_run
     if holds_lock and _a_session_holds_the_lock(lock_path, args.lock_ttl_minutes):

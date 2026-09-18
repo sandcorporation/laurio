@@ -598,7 +598,14 @@ ssh sub 'docker exec codemit-staging-backend-1 python manage.py sentry_smoke'
   이다, 실측) `CODEMIT_UNATTENDED=1` 이면 그 네 경로가 staged 된 커밋을 거절한다.
   `--no-verify` 로 넘어가므로 벽이 아니라 감속방턱이다 — 인젝션에 대한 벽은 읽기 전용
   토큰과 경로 울타리이고, 이 검사가 잡는 것은 **정직한 생각없는 수정**이다.
-- **무엇이 집힐지 눈으로 보려면** 필터를 풀어 dry-run 한다(클레임도 잠금도 남기지 않는다):
+- **precheck 가 청소도 한다.** automation 은 세션이 뜨는 실행마다 워크트리와 브랜치
+  (`auto-<이름>-run-<n>-<시각>`)를 만들고 끝나도 치우지 않는다 — 안에 `node_modules`·
+  `.venv` 가 각각 들어서므로 몇 건만 쌓여도 이 머신의 디스크를 먹는다. 매분 도는 것이
+  precheck 하나뿐이라 그것이 **`origin/main` 에 머지된 `auto-*` 워크트리만** 걷는다.
+  머지 안 된 것은 남긴다 — 게이트에 걸려 사람에게 넘긴 분기가 정확히 그 모양이다.
+  사람 워크트리(`chain-*`·`int-*`)는 접두어가 달라 대상이 아니다. `--no-tidy` 로 끈다.
+- **무엇이 집힐지 눈으로 보려면** 필터를 풀어 dry-run 한다(클레임도 잠금도 남기지 않고,
+  청소도 하지 않는다):
 
 ```bash
 scripts/glitchtip_pick.py --dry-run --any-status --any-environment
