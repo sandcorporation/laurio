@@ -132,14 +132,16 @@ def test_stream_keeps_flowing_when_releasing_the_connection_fails(client, db, mo
 def test_stream_ends_when_its_maximum_lifetime_has_passed(client, db, monkeypatch):
     """스트림은 영원히 살지 않는다 — 수명을 넘기면 스스로 끝난다(2026-09-18).
 
-    **왜 상한이 필요한가.** 이 요청은 끝나야 DB 연결을 놓는다(Django 는 요청
-    단위로 연결을 연다). 그런데 브라우저가 떠나도 앞단(강의실 BFF)이 위쪽
-    요청을 끊지 못하면 이 요청은 영원히 끝나지 않고 그 연결도 영원히 묶인다 —
-    prod 에서 이벤트 서비스가 유휴 연결 100개를 쥐어 Postgres 가 `too many
-    clients already`로 **모든** 요청을 거절했다(공개 앱 500, celery 포함).
-    BFF 쪽은 따로 고쳤고(브라우저가 끊으면 위쪽도 끊는다), 이 상한은 그 길이
-    또 새더라도 스스로 회복하게 하는 두 번째 문이다. 브라우저의 `EventSource`는
-    끊기면 자동으로 다시 연결하므로 사용자에게는 보이지 않는다."""
+    **왜 상한이 필요한가.** 브라우저가 떠나도 앞단(강의실 BFF)이 위쪽 요청을
+    끊지 못하면 이 요청은 영원히 끝나지 않는다 — prod 에서 이벤트 서비스가
+    유휴 연결 100개를 쥐어 Postgres 가 `too many clients already`로 **모든**
+    요청을 거절했다(공개 앱 500, celery 포함). BFF 쪽은 따로 고쳤고(브라우저가
+    끊으면 위쪽도 끊는다), 이 상한은 그 길이 또 새더라도 스스로 회복하게 하는
+    두 번째 문이다. **DB 연결은 더 이상 이 상한에 기대지 않는다(#454)** —
+    스트림 시작 시점에 바로 놓으므로, 요청이 끝나지 않아도 연결은 묶이지
+    않는다. 그래도 끝나지 않는 요청 자체가 asyncio 태스크·소켓을 쥐므로 상한은
+    남긴다. 브라우저의 `EventSource`는 끊기면 자동으로 다시 연결하므로
+    사용자에게는 보이지 않는다."""
 
     monkeypatch.setattr("classroom.api._SSE_MAX_LIFETIME_SECONDS", 0.0)
     user = _login(client, "stream-lifetime")

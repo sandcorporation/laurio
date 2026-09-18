@@ -46,14 +46,17 @@ class Event:
 
 @runtime_checkable
 class EventSubscription(Protocol):
-    """`EventBus.subscribe()`가 돌려주는 구독 하나 — 컨텍스트 매니저다.
+    """`EventBus.subscribe()`가 돌려주는 구독 하나 — **비동기** 컨텍스트
+    매니저다(#456). 폴링이 스레드를 쓰지 않으려면 대기 자체가 이벤트 루프
+    위에서 논블로킹으로 일어나야 하고, 그러려면 `poll`이 코루틴이어야 한다
+    — 스트림 하나가 스레드 하나를 붙잡지 않는다.
 
-    `__exit__`에서 반드시 구독을 정리한다(AC "연결을 닫으면 구독이
-    정리된다") — Redis 어댑터는 여기서 `pubsub.close()`를 부른다."""
+    `__aexit__`에서 반드시 구독을 정리한다(AC "연결을 닫으면 구독이
+    정리된다") — Redis 어댑터는 여기서 pubsub을 unsubscribe·close한다."""
 
-    def poll(self, *, timeout: float) -> list[Event]: ...
-    def __enter__(self) -> "EventSubscription": ...
-    def __exit__(self, *exc_info) -> None: ...
+    async def poll(self, *, timeout: float) -> list[Event]: ...
+    async def __aenter__(self) -> "EventSubscription": ...
+    async def __aexit__(self, *exc_info) -> None: ...
 
 
 @runtime_checkable
@@ -71,15 +74,15 @@ class _FakeSubscription:
     def __init__(self, recipient_id: int) -> None:
         self._recipient_id = recipient_id
 
-    def poll(self, *, timeout: float) -> list[Event]:
+    async def poll(self, *, timeout: float) -> list[Event]:
         queue = FakeEventBus._queues.get(self._recipient_id, [])
         FakeEventBus._queues[self._recipient_id] = []
         return queue
 
-    def __enter__(self) -> "_FakeSubscription":
+    async def __aenter__(self) -> "_FakeSubscription":
         return self
 
-    def __exit__(self, *exc_info) -> None:
+    async def __aexit__(self, *exc_info) -> None:
         return None
 
 

@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import time
@@ -2012,13 +2011,18 @@ _SSE_KEEPALIVE_SECONDS = 15.0
 #: 스트림 하나의 최대 수명(2026-09-18) — 넘기면 스스로 끝내고, 브라우저의
 #: `EventSource`가 곧바로 다시 연결한다(사용자에게는 보이지 않는다).
 #:
-#: **왜 상한을 두는가.** 이 요청은 끝나야 DB 연결을 놓는다(Django 는 요청
-#: 단위로 연결을 연다). 브라우저가 떠나도 앞단이 위쪽 요청을 끊지 못하면 그
-#: 요청은 영원히 끝나지 않고 연결도 그만큼 묶인다 — 2026-09-18 prod 에서
-#: 이벤트 서비스가 유휴 연결 100개를 쥐어 Postgres 가 `too many clients
-#: already`로 **모든** 요청을 거절했다(공개 앱 500, celery 포함). 앞단(강의실
-#: BFF)이 이제 브라우저의 끊김을 위로 전하지만(`classroom/lib/proxy/
-#: forward.ts`), 그 길이 또 새더라도 이 상한이 스스로 회복시킨다.
+#: **왜 상한을 두는가.** 브라우저가 떠나도 앞단이 위쪽 요청을 끊지 못하면
+#: 이 요청은 영원히 끝나지 않는다 — 2026-09-18 prod 에서 이벤트 서비스가
+#: 유휴 연결 100개를 쥐어 Postgres 가 `too many clients already`로 **모든**
+#: 요청을 거절했다(공개 앱 500, celery 포함). 앞단(강의실 BFF)이 이제
+#: 브라우저의 끊김을 위로 전하지만(`classroom/lib/proxy/forward.ts`), 그
+#: 길이 또 새더라도 이 상한이 스스로 회복시킨다.
+#:
+#: **DB 연결은 더 이상 이 상한에 기대지 않는다(#454).** 스트림이 시작되면
+#: 그 자리에서 바로 연결을 놓으므로(`_release_db_connection_for_stream`),
+#: 이 요청이 끝나지 않아도 DB 연결은 묶이지 않는다. 그래도 상한을 남기는
+#: 이유는 끝나지 않는 요청 자체가 여전히 asyncio 태스크·소켓·(#456 전에는)
+#: 스레드 풀 한 자리를 쥐기 때문이다 — 그 자원들도 무한정 쌓이면 안 된다.
 #:
 #: 30분인 이유: 실시간 신호가 그만큼 끊겨도 화면은 폴링으로 물러나 있고
 #: (ADR-0046 "신호는 진실의 출처가 아니다"), 재연결 한 번의 비용은 요청
@@ -2050,9 +2054,13 @@ async def _stream_events_for(recipient_id: int):
     order to serve them asynchronously" 경고와 함께 완전히 다른(뒤로
     미뤄지는) 소비 경로를 타 실제로는 아무것도 실시간으로 나가지 않는다 —
     dev 스택에서 실제 요청으로 직접 확인했다(연결은 200 으로 열리지만
-    keep-alive 조차 15초·20초 뒤에도 도착하지 않았다). `bus.subscribe`·
-    `poll`은 동기 계약(Redis 클라이언트가 동기다)이라 그대로 두고,
-    블로킹 호출만 `asyncio.to_thread`로 이벤트 루프 밖에서 돈다.
+    keep-alive 조차 15초·20초 뒤에도 도착하지 않았다).
+
+    **`bus.subscribe`·`poll`은 비동기 계약이다(#456).** 실물 어댑터
+    (`core.events_redis.RedisEventBus`)는 `redis.asyncio`로 폴링해 스레드를
+    쓰지 않는다 — 스트림 하나가 이벤트 서비스의 스레드 풀(기본 8개) 한
+    자리를 붙잡지 않으므로, 동시 시청자가 그 수를 넘어도 신호가 늦지 않는다
+    (2026-09-18 이전에는 9번째 시청자부터 최대 15초씩 늦었다).
 
     **DB 연결을 놓은 뒤에 구독한다(#454).** `bus.subscribe`·`poll`은 Redis만
     쓰고 DB를 건드리지 않으므로, 인증에서 연 연결을 여기서 놓아도 스트림
@@ -2066,9 +2074,9 @@ async def _stream_events_for(recipient_id: int):
 
     bus = get_event_bus()
     deadline = time.monotonic() + _SSE_MAX_LIFETIME_SECONDS
-    with bus.subscribe(recipient_id) as subscription:
+    async with bus.subscribe(recipient_id) as subscription:
         while time.monotonic() < deadline:
-            events = await asyncio.to_thread(subscription.poll, timeout=_SSE_KEEPALIVE_SECONDS)
+            events = await subscription.poll(timeout=_SSE_KEEPALIVE_SECONDS)
             if not events:
                 yield b": keep-alive\n\n"
                 continue
