@@ -25,8 +25,9 @@ import time
 
 from datetime import timedelta
 
+from asgiref.sync import sync_to_async
 from django.conf import settings
-from django.db import transaction
+from django.db import connections, transaction
 from django.http import HttpRequest, StreamingHttpResponse
 from django.utils import timezone
 from ninja import Router
@@ -2029,6 +2030,20 @@ def _format_sse_event(event: Event) -> bytes:
     return f"event: {event.kind}\ndata: {json.dumps(event.payload)}\n\n".encode("utf-8")
 
 
+def _release_db_connection_for_stream() -> None:
+    """인증 미들웨어가 연 이 요청의 DB 연결을 놓는다(#454).
+
+    ASGI 요청 하나는 `ThreadSensitiveContext` 하나를 쓰고(Django), 그 안의
+    동기 코드(인증 미들웨어의 `User.objects.filter`)는 이 요청 전용의 실제
+    스레드 하나에서 돈다 — DB 연결은 `thread_critical` 스토리지라 그 스레드에
+    묶인다. 스트림은 그 뒤로 DB 를 한 번도 쓰지 않으므로, 여기서 그 스레드의
+    연결을 닫아 두지 않으면 Django 는 요청이 완전히 끝날 때(스트림이 최대
+    30분 흐른 뒤)까지 연결을 쥔 채로 둔다 — 동시 시청자 수만큼 DB 연결이
+    쌓이는 원인이었다(2026-09-18 prod 장애)."""
+
+    connections.close_all()
+
+
 async def _stream_events_for(recipient_id: int):
     """**반드시 async 제너레이터다.** 동기 제너레이터로 두면 Django의 ASGI
     핸들러가 "StreamingHttpResponse must consume synchronous iterators in
@@ -2037,7 +2052,17 @@ async def _stream_events_for(recipient_id: int):
     dev 스택에서 실제 요청으로 직접 확인했다(연결은 200 으로 열리지만
     keep-alive 조차 15초·20초 뒤에도 도착하지 않았다). `bus.subscribe`·
     `poll`은 동기 계약(Redis 클라이언트가 동기다)이라 그대로 두고,
-    블로킹 호출만 `asyncio.to_thread`로 이벤트 루프 밖에서 돈다."""
+    블로킹 호출만 `asyncio.to_thread`로 이벤트 루프 밖에서 돈다.
+
+    **DB 연결을 놓은 뒤에 구독한다(#454).** `bus.subscribe`·`poll`은 Redis만
+    쓰고 DB를 건드리지 않으므로, 인증에서 연 연결을 여기서 놓아도 스트림
+    동작은 그대로다. 놓기가 실패해도(스레드 경계·테스트 트랜잭션 등) 삼키고
+    계속한다 — 연결 하나를 못 놓는 것보다 신호가 끊기는 쪽이 나쁘다."""
+
+    try:
+        await sync_to_async(_release_db_connection_for_stream, thread_sensitive=True)()
+    except Exception:  # noqa: BLE001 — 놓기 실패가 신호 흐름을 막으면 안 된다
+        logger.warning("스트림 시작 시 DB 연결을 놓지 못했다", exc_info=True)
 
     bus = get_event_bus()
     deadline = time.monotonic() + _SSE_MAX_LIFETIME_SECONDS

@@ -94,6 +94,41 @@ def test_stream_sends_keep_alive_comments_when_nothing_is_queued(client, db):
     assert b"event:" not in body
 
 
+def test_stream_releases_db_connection_before_polling(client, db, monkeypatch):
+    """스트림이 시작되면 인증에서 연 DB 연결을 놓는다(#454) — 동시 시청자 한
+    명이 DB 연결 하나를 영원히 쥐는 것을 막는 자리다."""
+
+    released = []
+    monkeypatch.setattr(
+        "classroom.api._release_db_connection_for_stream",
+        lambda: released.append(True),
+    )
+    user = _login(client, "release-viewer")
+
+    response = client.get(STREAM_URL, **_auth_header(user["access"]))
+    assert response.status_code == 200
+
+    _read_chunks(response, 1)
+    assert released == [True]
+
+
+def test_stream_keeps_flowing_when_releasing_the_connection_fails(client, db, monkeypatch):
+    """연결 놓기가 실패해도 신호는 그대로 흐른다(#454) — 연결 하나를 못 놓는
+    것보다 실시간 신호가 끊기는 쪽이 나쁘다."""
+
+    def _boom():
+        raise RuntimeError("놓을 수 없는 연결")
+
+    monkeypatch.setattr("classroom.api._release_db_connection_for_stream", _boom)
+    user = _login(client, "release-failure-viewer")
+
+    response = client.get(STREAM_URL, **_auth_header(user["access"]))
+    assert response.status_code == 200
+
+    body = _read_chunks(response, 2)
+    assert b"keep-alive" in body
+
+
 def test_stream_ends_when_its_maximum_lifetime_has_passed(client, db, monkeypatch):
     """스트림은 영원히 살지 않는다 — 수명을 넘기면 스스로 끝난다(2026-09-18).
 
