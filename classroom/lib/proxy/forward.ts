@@ -12,6 +12,7 @@ import { REFRESH_COOKIE, type TokenPair } from "@/lib/auth/cookies";
 import { isExpired } from "@/lib/auth/jwt";
 import { refreshTokenPair } from "@/lib/auth/refresh";
 import { resolveAccessToken } from "@/lib/auth/session";
+import { retryWhileConnectionRefused } from "@/lib/proxy/connect-retry";
 
 export interface ForwardResult {
   response: Response;
@@ -46,8 +47,14 @@ export async function forwardToBackend(
   // 브라우저가 끊으면 위쪽 요청도 끊는다(2026-09-18) — 끝나지 않는 응답(SSE,
   // ADR-0046)이 이 앱에만 있어서 여기만 신호를 넘긴다. 없으면 탭을 닫거나
   // 새로고침할 때마다 이벤트 서비스에 끝나지 않는 요청이 하나씩 쌓이고, 그
-  // 요청이 쥔 DB 연결도 함께 쌓인다(prod 에서 100개까지 갔다).
-  let response = await forwardRequest(request.method, url, headers, body, request.signal);
+  // 요청이 쥔 DB 연결도 함께 쌓인다(prod 에서 100개까지 갔다). 배포 중 위쪽이
+  // 잠깐 없어 연결이 거부되면 몇 초 물러서서 다시 보낸다(`connect-retry.ts`).
+  const send = () =>
+    retryWhileConnectionRefused(
+      () => forwardRequest(request.method, url, headers, body, request.signal),
+      { signal: request.signal },
+    );
+  let response = await send();
 
   if (response.status === 401 && resolution.status === "authenticated" && !refreshedPair) {
     const refreshCookie = request.cookies.get(REFRESH_COOKIE)?.value;
@@ -55,7 +62,7 @@ export async function forwardToBackend(
       try {
         const pair = await refreshTokenPair(refreshCookie);
         headers.set("authorization", `Bearer ${pair.access}`);
-        response = await forwardRequest(request.method, url, headers, body, request.signal);
+        response = await send();
         refreshedPair = pair;
       } catch {
         shouldClearCookies = true;
