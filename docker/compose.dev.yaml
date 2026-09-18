@@ -150,6 +150,39 @@ services:
       timeout: 5s
       retries: 30
 
+  # Postgres 앞 연결 풀러(pgbouncer, #453/#457) — **기본 기동에 없다**, search 와
+  # 같은 관용구로 프로필 뒤에 둔다:
+  #
+  #   docker compose -f docker/compose.dev.yaml --profile pgbouncer up -d
+  #
+  # dev 의 backend·events·celery 는 이 서비스가 떠 있어도 기본으로는 여전히
+  # `db` 를 직접 가리킨다(POSTGRES_HOST=db, 위 backend/events 환경) — 이
+  # 서비스는 "풀러 뒤에서 무엇이 되고 안 되는가"를 확인하는 자리이지, dev 의
+  # 기본 접속 경로를 바꾸는 것이 아니다(#457 범위, 배포는 #458). 트랜잭션
+  # 모드에서 확인해야 하는 것(서버측 커서 등)은
+  # `tests/test_pgbouncer_live.py`(`@live_vendor`, `CODEMIT_PGBOUNCER_PORT` 가
+  # 있을 때만 돈다)가 실제로 마이그레이션·읽기·쓰기를 이 서비스를 거쳐 확인한다.
+  pgbouncer:
+    profiles: ["pgbouncer"]
+    build:
+      context: ..
+      dockerfile: docker/pgbouncer.Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      <<: *default-postgres-env
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      PGBOUNCER_POOL_MODE: transaction
+    ports:
+      - "${CODEMIT_PGBOUNCER_PORT:-16432}:6432"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "6432"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
   backend:
     build:
       context: ..

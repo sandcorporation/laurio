@@ -25,6 +25,7 @@ cd backend && uv run pytest                           # 테스트
 | 강의실 앱(`classroom/`, #276) | `53002` | 3000 | `CODEMIT_CLASSROOM_WEB_PORT` |
 | 이벤트 서비스(`events`, #379, ADR-0046) | `58001` | 8001 | `CODEMIT_EVENTS_PORT` |
 | 검색 엔진(`search`, dev `search` 프로필, #450) | `19200` | 9200 | `CODEMIT_SEARCH_PORT` |
+| 연결 풀러(`pgbouncer`, dev `pgbouncer` 프로필, #453/#457) | `16432` | 6432 | `CODEMIT_PGBOUNCER_PORT` |
 
 **이벤트 서비스는 `backend`와 같은 이미지를 ASGI로 띄우는 별도 프로세스다**
 (ADR-0046) — 강의실이 새로고침 없이 화면을 갱신하는 SSE 엔드포인트
@@ -413,6 +414,36 @@ vm.max_map_count`로 먼저 확인한다. `tests/test_contest_search_opensearch_
 (`@live_vendor`, `OPENSEARCH_URL`이 있을 때만 돈다, CI는 건너뛴다)가 이 실물
 어댑터를 실제로 친다 — 한국어 조사가 달라도 찾아지는지, 제목 가중이 설명보다
 높은지, 재색인(`rebuild`) 중에도 검색이 끊기지 않는지(별칭 원자적 교체) 확인한다.
+
+**Postgres 앞 연결 풀러(pgbouncer, #453/#457)도 dev 기본 기동에 없다** — search 와
+같은 관용구로 프로필 뒤에 둔다. dev 의 backend·celery·events 는 이 프로필을 켜도
+기본으로는 여전히 `db` 를 직접 가리킨다(POSTGRES_HOST=db) — 이 프로필은 "풀러
+뒤에서 Django 가 무엇이 되고 안 되는가"를 직접 확인하는 자리이지, dev 의 기본
+접속 경로를 바꾸는 것이 아니다(배포에 실제로 앞에 두는 것은 #458 의 몫이다):
+
+```bash
+docker compose -f docker/compose.dev.yaml --profile pgbouncer up -d
+```
+
+**풀 모드는 트랜잭션이다**(`docker/pgbouncer/docker-entrypoint.sh` — `[databases]`
+는 `*` 와일드카드라 요청한 dbname 을 그대로 실제 Postgres 로 넘긴다, 인증은
+`auth_type = plain` 이고 뒷단 자격증명은 `POSTGRES_USER`/`POSTGRES_PASSWORD`
+그대로다). 트랜잭션 모드에서 실제로 재현해 확인한 것 — **서버측(named)
+커서가 깨진다**: `QuerySet.iterator()` 를 그대로 돌리면 트랜잭션이 끝나는
+순간 커서가 물려 있던 물리 연결이 다른 클라이언트에게 넘어가
+`ProgrammingError: portal "_django_curs_..." does not exist` 로 죽는다.
+`config/settings.py` 의 `DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"]`
+(환경변수 `CODEMIT_DB_DISABLE_SERVER_SIDE_CURSORS`, dev 기본은 풀러가 없으므로
+`false`)를 `true` 로 켜면 같은 코드가 통과한다 — 켠 채로도 재현해 확인했다.
+준비된 문장(prepared statement)은 Django 가 psycopg3 백엔드에서 이미 기본으로
+끄고 있어(연결 풀러 호환을 위해서라고 Django 자신의 주석이 밝힌다) 따로 손댈
+것이 없다. `server_reset_query_always = 1`(entrypoint 의 `DISCARD ALL`)은
+pgbouncer 문서가 트랜잭션 모드의 표준값으로 권하는 것을 그대로 따른 것이고
+(임시 테이블·세션 SET 이 다음 클라이언트에 새는 것을 막는다), 직접 재현해
+확인한 것은 위 커서 하나뿐이다. `tests/test_pgbouncer_live.py`
+(`@live_vendor`, `CODEMIT_PGBOUNCER_PORT` 가 있을 때만 돈다, CI 는 건너뛴다)가
+이 풀러를 거쳐 실제로 마이그레이션(일회용 DB 를 새로 만들어 처음부터
+DDL 을 낸다)·쓰기·읽기가 되는 것을 확인한다.
 
 ## 운영
 

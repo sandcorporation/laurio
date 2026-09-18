@@ -289,6 +289,23 @@ DATABASES = {
         # 떨어뜨리므로(위 설명) 기본값 자체를 경로에서 만든다. 명시적으로 주면 그 값이
         # 이긴다 — CI 처럼 경로가 매번 달라지는 곳에서 이름을 고정하고 싶을 때가 있다.
         "TEST": {"NAME": _env("CODEMIT_TEST_DB_NAME", "") or _default_test_db_name()},
+        # 연결 풀러(pgbouncer)를 트랜잭션 모드로 앞에 두면 서버측(named) 커서가
+        # 깨진다 — dev pgbouncer 프로필로 직접 재현해 확인했다(#457):
+        # `QuerySet.iterator()`(WITH HOLD 커서를 연다)를 이 값 없이 풀러 뒤에서
+        # 돌리면 `ProgrammingError: portal "_django_curs_..." does not exist`
+        # 로 죽는다 — 커서를 연 트랜잭션이 끝나는 순간 그 물리 연결이 다른
+        # 클라이언트에게 넘어가 버려서다. 이 값을 True 로 켜면 같은 코드가
+        # 그대로 통과한다(같은 재현으로 확인). dev 기본은 풀러 없이 직접 DB 에
+        # 붙으므로 그대로 False(Django 기본값)다 — 풀러 프로필
+        # (`--profile pgbouncer`)이나 staging·prod compose 가
+        # `CODEMIT_DB_DISABLE_SERVER_SIDE_CURSORS=true`로 켠다. 준비된 문장
+        # (prepared statement)은 이미 Django 가 psycopg3 백엔드에서 기본으로
+        # 끈다(django/db/backends/postgresql/base.py 의 `prepare_threshold=None`
+        # 주석 "Disable prepared statements by default to keep connection
+        # poolers working") — 여기서 따로 손댈 것이 없다.
+        "DISABLE_SERVER_SIDE_CURSORS": _env_bool(
+            "CODEMIT_DB_DISABLE_SERVER_SIDE_CURSORS", False
+        ),
     }
 }
 
