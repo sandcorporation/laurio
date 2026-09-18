@@ -24,14 +24,21 @@ export async function extractForwardBody(request: NextRequest): Promise<ArrayBuf
  * 이미 읽어 둔 바디로 `url`에 `fetch`한다. `headers`는 호출부가 이미 인증·
  * content-type을 채운 것을 그대로 쓴다 — 이 함수는 무엇을 헤더에 실을지 모른다
  * (그건 앱마다 다른 인증의 몫이다).
+ *
+ * `signal`을 주면 그대로 넘긴다 — 브라우저가 연결을 끊었을 때 **위쪽 요청도
+ * 끊기게** 하는 신호다(2026-09-18). 끝나지 않는 응답(SSE)에서 이것이 없으면
+ * 브라우저가 떠난 뒤에도 백엔드 요청이 영원히 살아 있고, 그 요청이 쥔 DB
+ * 연결도 영원히 묶인다 — prod 에서 이벤트 서비스가 유휴 연결 100개를 쥐어
+ * Postgres 가 `too many clients already`로 **모든** 요청을 거절했다.
  */
 export function forwardRequest(
   method: string,
   url: string,
   headers: Headers,
   body: ArrayBuffer | undefined,
+  signal?: AbortSignal,
 ): Promise<Response> {
-  return fetch(url, { method, headers, body, cache: "no-store" });
+  return fetch(url, { method, headers, body, cache: "no-store", ...(signal ? { signal } : {}) });
 }
 
 /**

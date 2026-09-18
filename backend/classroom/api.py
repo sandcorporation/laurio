@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 
 from datetime import timedelta
 
@@ -2007,6 +2008,22 @@ def delete_checklist_item(request: HttpRequest, class_id: int, problem_id: int, 
 #: 이 값과 무관하게 즉시 돌아온다(`core.events.FakeEventBus`).
 _SSE_KEEPALIVE_SECONDS = 15.0
 
+#: 스트림 하나의 최대 수명(2026-09-18) — 넘기면 스스로 끝내고, 브라우저의
+#: `EventSource`가 곧바로 다시 연결한다(사용자에게는 보이지 않는다).
+#:
+#: **왜 상한을 두는가.** 이 요청은 끝나야 DB 연결을 놓는다(Django 는 요청
+#: 단위로 연결을 연다). 브라우저가 떠나도 앞단이 위쪽 요청을 끊지 못하면 그
+#: 요청은 영원히 끝나지 않고 연결도 그만큼 묶인다 — 2026-09-18 prod 에서
+#: 이벤트 서비스가 유휴 연결 100개를 쥐어 Postgres 가 `too many clients
+#: already`로 **모든** 요청을 거절했다(공개 앱 500, celery 포함). 앞단(강의실
+#: BFF)이 이제 브라우저의 끊김을 위로 전하지만(`classroom/lib/proxy/
+#: forward.ts`), 그 길이 또 새더라도 이 상한이 스스로 회복시킨다.
+#:
+#: 30분인 이유: 실시간 신호가 그만큼 끊겨도 화면은 폴링으로 물러나 있고
+#: (ADR-0046 "신호는 진실의 출처가 아니다"), 재연결 한 번의 비용은 요청
+#: 하나다. 더 짧게 잡으면 재연결이 잦아 그 비용이 커진다.
+_SSE_MAX_LIFETIME_SECONDS = 30 * 60.0
+
 
 def _format_sse_event(event: Event) -> bytes:
     return f"event: {event.kind}\ndata: {json.dumps(event.payload)}\n\n".encode("utf-8")
@@ -2023,8 +2040,9 @@ async def _stream_events_for(recipient_id: int):
     블로킹 호출만 `asyncio.to_thread`로 이벤트 루프 밖에서 돈다."""
 
     bus = get_event_bus()
+    deadline = time.monotonic() + _SSE_MAX_LIFETIME_SECONDS
     with bus.subscribe(recipient_id) as subscription:
-        while True:
+        while time.monotonic() < deadline:
             events = await asyncio.to_thread(subscription.poll, timeout=_SSE_KEEPALIVE_SECONDS)
             if not events:
                 yield b": keep-alive\n\n"

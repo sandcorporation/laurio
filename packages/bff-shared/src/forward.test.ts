@@ -12,7 +12,7 @@
 import { NextRequest } from "next/server";
 import { describe, expect, test } from "vitest";
 
-import { buildForwardHeaders } from "./forward";
+import { buildForwardHeaders, forwardRequest } from "./forward";
 
 function request(headers: Record<string, string>): NextRequest {
   return new NextRequest("http://127.0.0.1:53000/api/backend/contests/1/views", {
@@ -49,5 +49,42 @@ describe("buildForwardHeaders — 방문자 주소", () => {
   test("content-type 은 지금처럼 넘긴다", () => {
     const headers = buildForwardHeaders(request({ "content-type": "application/json" }));
     expect(headers.get("content-type")).toBe("application/json");
+  });
+});
+
+// 브라우저가 연결을 끊으면 **위쪽 요청도 끊어야 한다**(2026-09-18). SSE 는
+// 끝나지 않는 응답이라, 이 신호가 없으면 브라우저가 떠난 뒤에도 백엔드 요청이
+// 영원히 살아 있다 — prod 에서 이벤트 서비스가 그렇게 DB 연결 100개를 유휴로
+// 쥐어 Postgres 가 `too many clients already`로 모든 요청을 거절했다.
+describe("forwardRequest — 끊김 전달", () => {
+  test("주어진 AbortSignal 을 그대로 fetch 에 넘긴다", async () => {
+    const calls: RequestInit[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      calls.push(init);
+      return new Response("ok");
+    }) as typeof fetch;
+    try {
+      const controller = new AbortController();
+      await forwardRequest("GET", "http://backend/api/x", new Headers(), undefined, controller.signal);
+      expect(calls[0]?.signal).toBe(controller.signal);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  test("신호를 주지 않으면 지금처럼 그냥 보낸다", async () => {
+    const calls: RequestInit[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      calls.push(init);
+      return new Response("ok");
+    }) as typeof fetch;
+    try {
+      await forwardRequest("GET", "http://backend/api/x", new Headers(), undefined);
+      expect(calls[0]?.signal).toBeUndefined();
+    } finally {
+      globalThis.fetch = original;
+    }
   });
 });

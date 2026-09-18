@@ -12,6 +12,8 @@ from __future__ import annotations
 import asyncio
 import json
 
+from django.db import connection
+
 from core.events import Event, FakeEventBus
 
 STREAM_URL = "/api/classroom/events/stream"
@@ -92,3 +94,35 @@ def test_stream_sends_keep_alive_comments_when_nothing_is_queued(client, db):
     body = _read_chunks(response, 2)
     assert b"keep-alive" in body
     assert b"event:" not in body
+
+
+def test_stream_ends_when_its_maximum_lifetime_has_passed(client, db, monkeypatch):
+    """스트림은 영원히 살지 않는다 — 수명을 넘기면 스스로 끝난다(2026-09-18).
+
+    **왜 상한이 필요한가.** 이 요청은 끝나야 DB 연결을 놓는다(Django 는 요청
+    단위로 연결을 연다). 그런데 브라우저가 떠나도 앞단(강의실 BFF)이 위쪽
+    요청을 끊지 못하면 이 요청은 영원히 끝나지 않고 그 연결도 영원히 묶인다 —
+    prod 에서 이벤트 서비스가 유휴 연결 100개를 쥐어 Postgres 가 `too many
+    clients already`로 **모든** 요청을 거절했다(공개 앱 500, celery 포함).
+    BFF 쪽은 따로 고쳤고(브라우저가 끊으면 위쪽도 끊는다), 이 상한은 그 길이
+    또 새더라도 스스로 회복하게 하는 두 번째 문이다. 브라우저의 `EventSource`는
+    끊기면 자동으로 다시 연결하므로 사용자에게는 보이지 않는다."""
+
+    monkeypatch.setattr("classroom.api._SSE_MAX_LIFETIME_SECONDS", 0.0)
+    user = _login(client, "stream-lifetime")
+
+    response = client.get(STREAM_URL, **_auth_header(user["access"]))
+    assert response.status_code == 200
+
+    async def drain() -> int:
+        chunks = 0
+        async for _chunk in response.streaming_content:
+            chunks += 1
+            if chunks > 50:  # 상한이 없으면 여기서 멈춰 실패를 알린다
+                break
+        return chunks
+
+    # 수명이 지난 스트림은 한 조각도 더 내보내지 않고 끝난다 — 끝난다는 것이
+    # 이 테스트의 단언이고(무한 루프면 위 break 가 51 을 돌려준다), 0 은 그
+    # 상한이 루프 **앞**에서 걸린다는 뜻이다.
+    assert asyncio.run(drain()) == 0
