@@ -309,6 +309,23 @@ DATABASES = {
     }
 }
 
+# **연결 사용률을 재는 전용 별칭**(#455/#458) — 「상한에 얼마나 가까운가」는 DB
+# 자신에게 물어야 한다. 배포에서는 앱의 "default" 연결이 연결 풀러를 거치므로
+# 그 길로 물으면 풀러가 흡수한 뒤의 수가 나온다(2026-09-18 장애를 일으킨 숫자는
+# 풀러 뒤의 서버 연결 수였다). 그래서 이 별칭만 풀러를 건너뛴다 — 접속 주소
+# 둘(`DB_MONITOR_HOST`/`DB_MONITOR_PORT`)만 다르고 나머지는 "default"와 같다.
+# 주지 않으면 "default"와 같은 곳을 보므로 dev·CI 는 지금과 똑같이 돈다.
+#
+# **테스트 DB 를 하나 더 만들지 않는다** — 같은 DB 를 다른 길로 볼 뿐이라
+# `TEST["MIRROR"]`로 "default"의 거울임을 선언한다(Django 테스트 러너가 이
+# 별칭에 대해 DB 를 따로 만들지 않고 "default"를 그대로 쓴다).
+DATABASES["monitor"] = {
+    **DATABASES["default"],
+    "HOST": _env("DB_MONITOR_HOST", DATABASES["default"]["HOST"]),
+    "PORT": _env("DB_MONITOR_PORT", str(DATABASES["default"]["PORT"])),
+    "TEST": {**DATABASES["default"]["TEST"], "MIRROR": "default"},
+}
+
 # Operator 세션 (#43, ADR-0018). 세션 레코드를 지우는 것이 곧 즉시 무효화이므로
 # 별도의 토큰 블랙리스트를 두지 않는다 — 돈을 움직이는 권한은 즉시 빼앗을 수 있어야
 # 한다. 아래 기본값은 호스트에서 `uv run pytest` 를 돌릴 때만 쓰이고, 컨테이너

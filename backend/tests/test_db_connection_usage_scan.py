@@ -148,3 +148,22 @@ def test_scan_is_registered_and_reachable_via_tick(client, monkeypatch):
     assert response.status_code == 200
     assert "db-connection-usage" in response.json()["scans"]
     assert response.json()["scans"]["db-connection-usage"]["count"] == 0
+
+
+def test_the_monitor_alias_skips_the_connection_pooler(settings):
+    """배포에서는 이 스캔이 **연결 풀러를 건너뛰고 DB 자체**를 본다(#458).
+
+    앱의 "default" 연결은 풀러가 흡수한 뒤의 것이라 서버의 실제 연결 수를
+    보여주지 못한다 — 풀러가 앞에 서 있어도 「상한에 얼마나 가까운가」는 DB
+    자신에게 물어야 한다(2026-09-18 장애가 바로 그 숫자였다). 그래서 풀러를
+    건너뛰는 별칭 `monitor`가 언제나 있고, 배포는 그 별칭의 접속 주소만
+    DB 로 준다.
+
+    **테스트 DB 를 하나 더 만들지 않는다** — 같은 DB 를 다른 길로 볼 뿐이라
+    `TEST["MIRROR"]`로 "default"의 거울임을 선언한다."""
+
+    monitor = settings.DATABASES["monitor"]
+    default = settings.DATABASES["default"]
+
+    assert monitor["NAME"] == default["NAME"]
+    assert monitor["TEST"]["MIRROR"] == "default"
