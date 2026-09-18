@@ -548,10 +548,20 @@ ssh sub 'docker exec codemit-staging-backend-1 python manage.py sentry_smoke'
 
 - **고르는 쪽과 판단하는 쪽을 가른다.** 이슈 제목·스택트레이스는 공개 DSN 으로 누구나
   넣을 수 있는 값이다. 무엇을 집을지와 GlitchTip 쓰기는 스크립트가 끝내고, 세션에는
-  읽기 전용 토큰(`GLITCHTIP_TOKEN`)만 준다 — 인젝션된 텍스트가 GlitchTip 을 조종할 길이
-  없다. 쓰기 토큰은 `GLITCHTIP_TOKEN_FOR_AUTOMATION`(스코프 `event:write` 하나, 루트
-  `.env`)이고 `project:read` 를 **일부러 안 줬다** — 알림 규칙 조회가 Discord 웹훅 URL 을
-  평문으로 돌려준다(실측: 403).
+  읽기 전용 토큰(`GLITCHTIP_TOKEN`)만 준다 — 인젝션된 텍스트가 이슈 상태를 바꾸거나
+  코멘트를 남길 길이 없다. 쓰기 토큰은 `GLITCHTIP_TOKEN_FOR_AUTOMATION`(스코프
+  `event:write` 하나, 루트 `.env`)이고 `project:read` 를 **일부러 안 줬다**.
+- **다만 읽기 토큰은 한 자리를 흘린다.** `list_alerts`(REST 로는
+  `/projects/{org}/{project}/alerts/`)가 **Discord 웹훅 URL 을 평문으로 돌려준다** —
+  읽기 토큰으로는 열리고 쓰기 토큰으로는 403 이다(둘 다 실측, 2026-09-18). 스코프를 더
+  가른 토큰을 만들지 않고, 스킬의 「하지 않는 것」이 그 경로를 명시적으로 금지하는 쪽을
+  골랐다(세션이 쓰는 경로는 `issues/{id}` 아래 셋뿐이다). 토큰을 더 쪼개려면 `event:read`
+  만 가진 세 번째 토큰을 GlitchTip 화면에서 만들어 `GLITCHTIP_TOKEN` 을 그것으로 바꾼다.
+- **읽기 토큰은 `~/.claude/settings.json` 의 `env` 에 있다**(저장소 밖, chmod 600) — 그래야
+  automation 이 띄우는 세션에도 붙는다. 셸 프로필에 두면 비대화형 셸에서 안 읽힌다.
+  `.mcp.json` 은 그 값을 `${GLITCHTIP_TOKEN}` 으로 **참조만** 한다(GlitchTip 6.2.6 의 내장
+  MCP, 도구 17개) — 그래서 그 파일은 커밋돼도 비밀이 없다. MCP 가 안 붙어도 세션은 같은
+  일을 curl 로 한다.
 - **「손 댔다」는 GlitchTip 코멘트다.** 이슈 목록 응답의 `numComments` 가 그 값이라 목록
   API 한 번으로 갈리고, 사람이 같은 사실을 GlitchTip 화면에서 본다. 새 상태 상자를 만들지
   않았다.
