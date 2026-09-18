@@ -312,6 +312,23 @@ Jenkinsfile 이 「(staging 은 대상 확인 →) Preflight → 변경 계획 �
 보였다. 더 예전에는 잡이 freestyle 이라 `Jenkinsfile` 이 읽히지 않았고, 그걸 모르고
 Jenkinsfile 만 고쳤다가 빌드가 `cannot open ./deploy.sh` 로 통째로 실패한 적이 있다.
 
+**빌드가 끝나면 디스코드로 결과가 간다**(2026-09-18). 두 Jenkinsfile 의 `post { always }`
+가 성공·실패·중단을 가리지 않고 한 줄을 보낸다 — 대상(staging/prod)·결과·빌드 번호·커밋
+12자·소요 시간·빌드 주소다. 배포는 사람이 화면을 보고 있지 않을 때 도는 일이라 끝났다는
+사실이 사람에게 닿는 자리가 없었고, 실패는 더 그랬다(2026-09-17 staging 배포가 정리
+단계에서 빨갛게 끝난 것을 한참 뒤에 알았다).
+
+**웹훅 주소는 저장소에 없다** — Jenkins 자격증명(Secret text) `discord-deploy-webhook`
+이 들고 있고 파이프라인은 이름으로만 부른다. 그 값을 아는 사람은 그 채널에 아무 말이나
+올릴 수 있어서 커밋에 남기지 않는다. **알림이 실패해도 빌드 결과는 그대로다** —
+`catchError` 와 `|| true` 가 그것을 보장하므로, 자격증명이 없는 Jenkins 에서도 배포는
+그대로 돈다.
+
+**「다른 프로젝트가 빌드된 뒤에」 트리거도 Pipeline 에서 된다** — `triggers { upstream(...) }`
+를 Jenkinsfile 에 적으면 된다. 다만 지금은 쓰지 않는다: staging 은 CI 가 모든 잡이 초록일
+때 원격으로 부르고, prod 는 승격된 커밋이 `production` 에 올라갈 때 도므로 두 잡이 서로
+다른 커밋을 다룬다 — 「staging 뒤에 prod」로 이으면 오히려 어긋난다.
+
 **배포 끝에 호스트의 도커 디스크를 비운다**(`deploy.sh <대상> prune`, 2026-09-17). 커밋마다
 ghcr 에서 새 태그를 받으니 옛 커밋 이미지가 쌓이고, oracle 에는 ghcr 이전에 굽던 빌드 캐시가
 남아 있었다(정리 전 sub 이미지 78GB·빌드 캐시 107GB·루트 86%, oracle 이미지 76GB·캐시 47GB).
