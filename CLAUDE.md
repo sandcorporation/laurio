@@ -640,6 +640,21 @@ ssh sub 'docker exec codemit-staging-backend-1 python manage.py sentry_smoke'
   워크트리가 영원히 남지 않게), **(3)** 머지 안 된 것은 그대로 남긴다 — 게이트에 걸려
   사람에게 넘긴 분기가 정확히 그 모양이다.
   사람 워크트리(`chain-*`·`int-*`)는 접두어가 달라 대상이 아니다. `--no-tidy` 로 끈다.
+- **GlitchTip 을 눈으로 읽을 때는 `scripts/glitchtip_get.py` 를 쓴다 — `curl` 로 치지
+  않는다.** GlitchTip 의 오류 응답은 `{"detail": "Permission denied"}`·`{"detail":
+  "Not Found"}` 라서, 그대로 파싱해 필드를 찾으면 **빈 값이 나오고 그것을 「값이 없다」로
+  읽게 된다.** 이 저장소에서 실제로 세 번 그렇게 잘못 읽었다(코멘트가 비어 있다 → 실은
+  권한 거부, 쿠키가 사라졌다 → 실은 이슈가 삭제됨). 이 도구는 **2xx 가 아니면 필드를
+  보여주지 않고 상태와 본문만 적고 죽는다** — 「값이 없다」와 「물어볼 수 없었다」가 같은
+  모양으로 나오지 않는다. 자격증명 자리(`cookies`·`data`·`cookie` 헤더)는 값을 찍지
+  않고 **있다는 사실만** 알린다. 읽기 전용 토큰만 쓰고 알림 규칙 경로는 지원하지 않는다.
+
+```bash
+scripts/glitchtip_get.py issues            # 미해결 목록 (--all 로 해결된 것까지)
+scripts/glitchtip_get.py event 60          # 최신 이벤트 요약 (--raw 로 전문)
+scripts/glitchtip_get.py tags 60           # 환경·release
+```
+
 - **무엇이 집힐지 눈으로 보려면** 필터를 풀어 dry-run 한다(클레임도 잠금도 남기지 않고,
   청소도 하지 않는다):
 
