@@ -7,6 +7,7 @@ import type { NextRequest } from "next/server";
 import { clearSessionCookies, setSessionCookies } from "@/lib/auth/cookies";
 import { assertSameOrigin } from "@/lib/auth/origin";
 import { isAllowedBackendPath } from "@/lib/proxy/allowlist";
+import { endQuietlyOnUpstreamError } from "@/lib/proxy/event-stream";
 import { forwardToBackend } from "@/lib/proxy/forward";
 
 export const dynamic = "force-dynamic";
@@ -38,11 +39,13 @@ async function handle(request: NextRequest, path: string[]): Promise<NextRespons
   // `arrayBuffer()`로 버퍼링하면 연결이 끝날 때까지(=영원히) 아무것도
   // 브라우저에 나가지 않는다. 이 콘텐츠 타입일 때만 본문을 그대로
   // ReadableStream으로 중계한다 — 이 백엔드 라우트는 스트림 응답에 204 같은
-  // null-body 상태를 절대 내지 않으므로 두 분기가 겹치지 않는다.
+  // null-body 상태를 절대 내지 않으므로 두 분기가 겹치지 않는다. 배포 중
+  // 이벤트 서비스가 끊는 것은 오류가 아니라 스트림의 끝으로 넘긴다
+  // (`lib/proxy/event-stream.ts`).
   const isEventStream = contentType.startsWith("text/event-stream");
   const isNullBodyStatus = NULL_BODY_STATUSES.has(result.response.status);
   const responseBody = isEventStream
-    ? result.response.body
+    ? result.response.body && endQuietlyOnUpstreamError(result.response.body)
     : isNullBodyStatus
       ? null
       : await result.response.arrayBuffer();
