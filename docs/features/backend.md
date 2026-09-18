@@ -361,7 +361,7 @@ llm_scoring`(#274)에 이어 `core.repository_adapters`(GitHub 저장소 clone·
 심사 비교·공개 프로필이 그 URL을 자료 목록에 이미 실어 보낸다 — 화면이 별도로 발급받지
 않는다.
 
-## 스스로 도는 일 — 스캔 26개
+## 스스로 도는 일 — 스캔 27개
 
 **시간은 시임이 아니라 주입 가능한 의존성이다**(ADR-0003). 시각이 지났다고 상태가 저절로
 바뀌지 않는다 — 스캔이 조건부 UPDATE 로 옮긴다. 등록부가 곧 beat 스케줄이고, 대부분 60초
@@ -379,6 +379,7 @@ llm_scoring`(#274)에 이어 `core.repository_adapters`(GitHub 저장소 clone·
 | 개인정보 | `identity-dormancy-purge` · `retained-identity-purge` |
 | 자료 | `demo-video-retention-purge` |
 | 검색 | `contest-search-reindex`(#450 — 하루 주기, 다른 스캔과 다르다. 저장·변경 시점의 단건 색인은 스캔이 아니라 Celery 태스크 `contests.index_contest`가 맡는다, 아래 「바깥 세계」) |
+| 관측 | `db-connection-usage`(#455 — DB 연결 사용률이 임계(기본 80%)를 넘으면 오류 수집기로 보낸다. 넘은 상태가 이어지는 동안은 간격(기본 15분)에 한 번만 보낸다 — 둘 다 환경변수로 조절한다, `core.db_connection_scan`) |
 | 데모 | `scheduled-state-demo` |
 
 **스캔이 아닌 정해진 시각의 작업이 하나 있다 — 매일 새벽 2시(서울) DB 백업.** beat 가
