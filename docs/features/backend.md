@@ -572,7 +572,7 @@ fake 이거나 임포트되지 않으면 부팅 자체를 거부한다** — 컨
 | 알림 3채널 | `NOTIFICATION_ALIMTALK_ADAPTER` · `_SMS_` · `_LMS_` |
 | 스토리지 | `STORAGE_BACKEND` |
 | 강의실 실시간 신호(#380, ADR-0046 — 벤더 연동이 아니라 우리 자신의 Redis 위에서 도는 코드, dev·CI 는 결정적 fake) | `EVENT_BUS_ADAPTER_MODE` |
-| 공모전 검색(#450/#451, 부모 #444 스펙 — nori 분석기, 판(backing index) + 별칭으로 끊김 없는 전체 재색인, 연결 실패·시간 초과 시 DB 검색으로 물러남, dev·CI 는 결정적 fake) | `SEARCH_ADAPTER_MODE` |
+| 공모전 검색 — **OpenSearch**(#450/#451, 부모 #444 스펙 — nori 한국어 분석기, 판(backing index) + 별칭으로 끊김 없는 전체 재색인, 연결 실패·시간 초과 시 DB 검색으로 물러남, dev·CI 는 결정적 fake) | `SEARCH_ADAPTER_MODE` |
 
 **색인은 두 경로로 맞는다.** 저장·변경(Contest 저장, 요구형태 M2M 변경,
 `SponsorProfile.display_name` 변경)마다 Celery 태스크 `contests.index_contest`가
