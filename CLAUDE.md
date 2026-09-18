@@ -575,6 +575,19 @@ ssh sub 'docker exec codemit-staging-backend-1 python manage.py sentry_smoke'
 - **해결 표시는 CI 가 한다.** 세션은 커밋 메시지 마지막 줄에 `GlitchTip: <id>` 를 적고
   push 만 하고, 그 줄을 읽어 이슈를 resolved 로 돌리는 것은 `main` 의 CI 다 — 「고친 것
   같다」와 「고쳤다」를 가르는 자리다.
+- **배경 세션은 「지금」을 말하는 문서를 고칠 수 없다.** 평소 티켓이라면 「티켓을 닫는
+  기준」이 `CLAUDE.md`·`CONTEXT.md`·`docs/features/` 를 같은 커밋에서 고치라고 하는데,
+  아무도 보고 있지 않은 세션에는 그 규칙을 적용하지 않는다 — 그 셋(과 `docs/adr/`)이
+  틀렸을 때 대신 참을 말해 줄 것이 저장소에 없다. 그런 변경이 필요하면 세션은 **코드만
+  분기에 push 하고 `ready-for-human` 티켓**으로 넘긴다(고칠 문장의 초안은 티켓 본문에
+  적는다 — 적는 것은 되고 커밋하는 것은 안 된다). 재현하지 못한 오류도 `needs-info`
+  티켓을 연다 — 클레임 때문에 다시 집히지 않으므로 티켓이 그 진단이 사람에게 닿는
+  유일한 길이다.
+- **그 게이트를 `.githooks/pre-commit` 이 기계로도 막는다.** 브랜치가 `auto-` 로
+  시작하거나(Orca automation 이 실행마다 만드는 브랜치가 `auto-<이름>-run-<n>-<시각>`
+  이다, 실측) `CODEMIT_UNATTENDED=1` 이면 그 네 경로가 staged 된 커밋을 거절한다.
+  `--no-verify` 로 넘어가므로 벽이 아니라 감속방턱이다 — 인젝션에 대한 벽은 읽기 전용
+  토큰과 경로 울타리이고, 이 검사가 잡는 것은 **정직한 생각없는 수정**이다.
 - **무엇이 집힐지 눈으로 보려면** 필터를 풀어 dry-run 한다(클레임도 잠금도 남기지 않는다):
 
 ```bash
@@ -1180,7 +1193,12 @@ export_openapi_schema.py`)로 스키마를 뽑은 뒤 `openapi-typescript` 로 �
 `core.hooksPath` 가 **상대 경로**라 워크트리마다 자기 디렉터리 기준으로
 풀리므로 워크트리는 손댈 것 없이 공짜로 따라온다.
 
-훅이 매 커밋 하는 일 둘:
+훅이 매 커밋 하는 일 셋:
+
+- **배경 진단 세션이면**(브랜치가 `auto-` 로 시작하거나 `CODEMIT_UNATTENDED=1`)
+  `CLAUDE.md`·`CONTEXT.md`·`docs/features/`·`docs/adr/` 가 staged 된 커밋을 **거절한다**
+  (2026-09-18) — 위 「그 오류를 에이전트가 집어 진단한다」의 게이트다. 사람이 쓰는
+  브랜치(`main`·`chain-*`·`int-*`)는 영향을 받지 않는다.
 
 - `backend/**/*.py` 가 **staged 일 때만** `pnpm --dir frontend generate:api`
   를 돌려 `packages/bff-client/src/schema.gen.ts` 를 재생성하고, 바뀌었으면

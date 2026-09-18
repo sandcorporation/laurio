@@ -9,6 +9,35 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+# **배경 진단 세션은 「지금」을 말하는 문서를 고칠 수 없다**(2026-09-18).
+# `.claude/skills/glitchtip-triage/` 를 따르는 세션은 아무도 보고 있지 않은 채
+# `main` 에 push 한다 — 그 세션이 CLAUDE.md·CONTEXT.md·docs/features·docs/adr 를
+# 고치면, 이 저장소에서 「지금」을 말하는 유일한 문서들이 사람의 판단 없이 바뀐다.
+# 그런 변경은 사람에게 넘긴다(스킬의 「사람을 부르는 자리」).
+#
+# **판정은 둘 중 하나로 걸린다 — 둘 다 세션이 스스로 끄기 어렵다:**
+#  1. 브랜치 이름이 `auto-` 로 시작한다. Orca automation 이 실행마다 만드는
+#     워크트리의 브랜치가 `auto-<이름>-run-<n>-<시각>` 이다(실측 2026-09-18).
+#     사람은 그 이름을 쓰지 않는다.
+#  2. `CODEMIT_UNATTENDED=1`. 앞의 것이 규칙이 바뀌어 안 맞을 때를 위한 둘째 신호다.
+#
+# **이것은 벽이 아니라 감속방턱이다** — `--no-verify` 로 넘어간다(이 훅의 다른
+# 검사와 같다). 인젝션된 텍스트에 대한 벽은 읽기 전용 토큰과 경로 울타리이고,
+# 이 검사가 잡는 것은 **정직한 생각없는 수정**이다.
+guarded_docs_regex='^(CLAUDE\.md|CONTEXT\.md|docs/features/|docs/adr/)'
+current_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')"
+
+if [ "${CODEMIT_UNATTENDED:-}" = "1" ] || case "$current_branch" in auto-*) true ;; *) false ;; esac; then
+  if staged_docs="$(git diff --cached --name-only | grep -E "$guarded_docs_regex" || true)" && [ -n "$staged_docs" ]; then
+    echo "pre-commit: 배경 세션은 「지금」을 말하는 문서를 고칠 수 없다 — 커밋을 거절한다." >&2
+    echo "  걸린 파일:" >&2
+    echo "$staged_docs" | sed 's/^/    /' >&2
+    echo "  이 변경은 사람의 판단이 필요하다. 스킬의 「사람을 부르는 자리」를 따른다 —" >&2
+    echo "  코드만 분기에 남기고 push 한 뒤, ready-for-human 이슈로 넘긴다." >&2
+    exit 1
+  fi
+fi
+
 fail=0
 
 for check in \
