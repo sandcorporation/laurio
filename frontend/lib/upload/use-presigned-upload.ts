@@ -16,6 +16,7 @@
 // `max_size_bytes`가 함께 오면, 실제 바이트를 보내기 전에(발급 자체는 이미
 // 끝난 뒤) 파일 크기를 먼저 재본다 — 몇 GB를 다 올린 뒤 거절당하는 것은
 // 잔인하다. 막는 것은 서명이고 이 검사는 빨리 말해 주는 역할일 뿐이다.
+import * as Sentry from "@sentry/nextjs";
 import { useCallback, useRef, useState } from "react";
 import { bffClient } from "@/lib/bff/client";
 
@@ -195,12 +196,24 @@ export function usePresignedUpload(targetRef: string): UsePresignedUploadResult 
       try {
         return await attempt(file);
       } catch (error) {
+        // **여기서만 오류 수집기에 보낸다**(2026-09-18). 바이트는 우리 서버를
+        // 거치지 않고 스토리지로 직접 가므로 이 실패는 백엔드 로그 어디에도
+        // 남지 않는다 — prod 에서 업로드가 실패했는데 수집기에 아무 기록이
+        // 없어 「그때 무슨 일이 있었나」를 물어볼 자리가 없었다. 재시도가
+        // 성공한 경우는 여기 닿지 않으므로 소음이 되지 않는다.
+        Sentry.captureException(error, {
+          tags: {
+            upload_target_ref: targetRef,
+            upload_file_bytes: String(file.size),
+            upload_failure: "final",
+          },
+        });
         const message = error instanceof Error ? error.message : "업로드에 실패했습니다.";
         setState({ status: "error", progress: 0, error: message, objectKey: null, contentType: null });
         throw error;
       }
     },
-    [attempt],
+    [attempt, targetRef],
   );
 
   const retry = useCallback((): Promise<UploadResult> => {
