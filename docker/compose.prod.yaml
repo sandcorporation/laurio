@@ -452,6 +452,16 @@ services:
       DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:?prod DJANGO_ALLOWED_HOSTS 를 .env.prod 에 설정하라},events
     command: >
       sh -c "uvicorn config.asgi:application --host 0.0.0.0 --port 8001"
+    # **열 수 있는 파일 개수를 올린다**(2026-09-18). SSE 스트림 하나가 소켓 1 +
+    # Redis 구독 1 = 서술자 2개를 쓰는데, 컨테이너 기본 soft 한도가 1024 라
+    # 동시 시청자 **약 500명**에서 `Too many open files` 로 막혔다 — staging 에서
+    # 1500개를 붙여 실제로 그 지점을 쟀다(505개 성공, 나머지 500 오류). CPU·메모리는
+    # 그때도 거의 놀고 있었으므로 이것은 자원이 아니라 한도의 문제다. hard 한도는
+    # 이미 524288 이라 soft 만 올린다 — 검색 서비스가 쓰는 것과 같은 값이다.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
 
   # 프론트엔드 BFF(ADR-0016, FE-13 #38). frontend.Dockerfile의 runner 스테이지 —
   # standalone 산출물을 `node server.js`로 그대로 돈다. instrumentation.ts가
@@ -615,6 +625,14 @@ services:
         NEXT_PUBLIC_SENTRY_ENVIRONMENT: production
         NEXT_PUBLIC_SENTRY_RELEASE: ${SENTRY_RELEASE:-}
     restart: unless-stopped
+    # **열 수 있는 파일 개수를 올린다**(2026-09-18, 이벤트 서비스와 같은 이유).
+    # 강의실 실시간 신호는 이 앱이 중계하므로 스트림 하나가 브라우저 쪽 소켓 1 +
+    # 이벤트 서비스로 나가는 소켓 1 = 서술자 2개를 쓴다 — 기본 soft 한도 1024 는
+    # 동시 시청자 약 500명에서 막힌다.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     depends_on:
       db:
         condition: service_healthy
