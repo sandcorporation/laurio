@@ -754,6 +754,22 @@ DB_BACKUP_PG_DUMP_COMMAND = _env("DB_BACKUP_PG_DUMP_COMMAND", "pg_dump")
 DB_BACKUP_RETENTION_DAYS = int(_env("DB_BACKUP_RETENTION_DAYS", "14"))
 DB_BACKUP_TIMEOUT_SECONDS = int(_env("DB_BACKUP_TIMEOUT_SECONDS", "1800"))
 
+# --- DB 연결 사용률 경고 (core.db_connection_scan, #455/#453) ------------------------
+# 2026-09-18 prod 장애("too many clients already")의 재발 방지 — 한도에 가까워지면
+# 사람이 500 을 보기 전에 오류 수집기로 먼저 알린다.
+#
+# 어느 DB 별칭을 볼지도 설정이다: 지금은 "default"(dev·CI·지금의 staging·prod가 보는
+# 그 Postgres) 하나뿐이지만, 연결 풀러(pgbouncer)가 앞에 서면(#458) 앱이 보는
+# "default" 연결은 풀러가 흡수한 뒤의 것이라 실제 서버 연결 수를 보여주지 않는다 —
+# 그때는 풀러를 건너뛰는 별도 DATABASES 별칭을 추가하고 이 값만 그 이름으로 바꾸면
+# 된다. 이 스캔의 코드는 바뀌지 않는다(스코프 밖 — #457/#458이 풀러 자체를 놓는다).
+DB_CONNECTION_MONITOR_ALIAS = _env("DB_CONNECTION_MONITOR_ALIAS", "default")
+# 사용률(사용 중 연결 ÷ 상한)이 이 값 이상이면 경고를 보낸다.
+DB_CONNECTION_ALERT_THRESHOLD = float(_env("DB_CONNECTION_ALERT_THRESHOLD", "0.8"))
+# 임계를 넘은 상태가 이어지는 동안 같은 경고를 다시 보내기까지 최소 간격 — 스캔 자기
+# 주기(기본 60초)보다 길어야 "1분마다 쏟아진다"는 문제가 사라진다.
+DB_CONNECTION_ALERT_INTERVAL_SECONDS = int(_env("DB_CONNECTION_ALERT_INTERVAL_SECONDS", "900"))
+
 if _RUNNING_TESTS:
     # #378부터 요청 처리 코드(강의실 제출)가 실제로 `.delay()`를 부른다 — 그
     # 전까지는 beat 만 태스크를 보냈다. pytest 에는 Redis 가 없다(위 세션

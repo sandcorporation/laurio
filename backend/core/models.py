@@ -78,3 +78,20 @@ class DatabaseBackup(models.Model):
 
     class Meta:
         ordering = ["-started_at"]
+
+
+class DbConnectionAlertState(models.Model):
+    """「DB 연결 사용률」 경고 스캔(`core.db_connection_scan`, #455)이 마지막으로
+    언제 오류 수집기로 보냈는지 기억하는 단일 행(pk=1) — 없으면 만들어서 쓴다.
+
+    `contests.models.ContestSearchReindexState`와 같은 역할이지만 기본값이
+    다르다: 그쪽은 새 행을 "방금 찜됐다"로 보아 곧바로 다시 돌지 않게 하지만,
+    여기서는 `last_alerted_at`이 비어 있는 것이 "한 번도 보낸 적 없다"는 뜻이라
+    첫 번째 임계 초과는 간격을 기다리지 않고 곧바로 보낸다 — 사람이 500을 보기
+    전에 알아야 한다는 요구가 "아직 안 심었으니 봐준다"보다 앞선다.
+    """
+
+    last_alerted_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"DbConnectionAlertState(last_alerted_at={self.last_alerted_at})"
