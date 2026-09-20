@@ -9,21 +9,17 @@
 // **새 제출과 채점 결과가 새로고침 없이 나타난다**(#383, ADR-0046). 이
 // 문제의 `attempt-submitted`(새 시도가 생겼다)·`attempt-scored`(그 시도의
 // 채점이 끝났다) 둘 다 받으면 다시 불러온다 — 신호 안의 데이터를 직접
-// 그리지 않고 기존 API를 다시 부른다. 스트림이 끊기면 「채점 중」 시도가
-// 있는 동안만 `use-my-problem.ts`와 같은 간격으로 폴링으로 물러나고, 다시
-// 연결되면 한 번 재조회한다.
-import { useCallback, useEffect, useMemo, useRef } from "react";
+// 그리지 않고 기존 API를 다시 부른다. 배선 자체는 `useRealtimeRefresh`
+// (#467) 하나가 진다 — 「채점 중」 시도가 있는 동안만(`waiting`)
+// `use-my-problem.ts`와 같은 간격으로 폴링으로 물러나고, 다시 연결되면 한
+// 번 재조회한다.
+import { useCallback, useMemo } from "react";
 
 import { useBackendQuery } from "@codemit/bff-client";
 
 import { bffClient } from "@/lib/bff/client";
-import { useEventStream } from "@/lib/events/stream-context";
-import { decideStreamRefresh } from "@/lib/events/policy";
-import {
-  ATTEMPT_SCORED,
-  ATTEMPT_SUBMITTED,
-  type StreamConnectionState,
-} from "@/lib/events/types";
+import { useRealtimeRefresh } from "@/lib/events/use-realtime-refresh";
+import { ATTEMPT_SCORED, ATTEMPT_SUBMITTED, type StreamEvent } from "@/lib/events/types";
 
 import type { InstructorSubmissionRow } from "./api";
 
@@ -50,41 +46,22 @@ export function useProblemSubmissions(classId: number, problemId: number) {
     refetch();
   }, [refetch]);
 
-  const { connectionState, subscribe } = useEventStream();
-  const previousConnectionState = useRef<StreamConnectionState>(connectionState);
-
-  // 이 문제의 attempt-submitted·attempt-scored만 반응한다 — 다른 문제·다른
-  // 클래스의 신호는 무시한다(각 화면은 자기와 관계있는 신호에만 반응한다,
-  // ADR-0046).
-  useEffect(() => {
-    return subscribe((event) => {
-      if (event.kind !== ATTEMPT_SUBMITTED && event.kind !== ATTEMPT_SCORED) return;
-      if (event.payload.class_id !== classId || event.payload.problem_id !== problemId) return;
-      reload();
-    });
-  }, [subscribe, reload, classId, problemId]);
-
-  useEffect(() => {
-    const decision = decideStreamRefresh(
-      previousConnectionState.current,
-      connectionState,
-      FALLBACK_POLL_MS,
-    );
-    previousConnectionState.current = connectionState;
-    if (decision.refetchNow) reload();
-  }, [connectionState, reload]);
-
   const hasPendingAttempt =
     queryState.status === "ready" &&
     queryState.data !== NOT_FOUND &&
     queryState.data.some((s) => s.status === "pending");
 
-  useEffect(() => {
-    if (connectionState === "open") return; // 연결됨: 폴링 없음.
-    if (!hasPendingAttempt) return; // 기다릴 것이 없으면 이 화면은 조용히 있는다.
-    const timer = setInterval(reload, FALLBACK_POLL_MS);
-    return () => clearInterval(timer);
-  }, [connectionState, hasPendingAttempt, reload]);
+  // 이 문제의 attempt-submitted·attempt-scored만 반응한다 — 다른 문제·다른
+  // 클래스의 신호는 무시한다(각 화면은 자기와 관계있는 신호에만 반응한다,
+  // ADR-0046).
+  const matches = useCallback(
+    (event: StreamEvent) =>
+      (event.kind === ATTEMPT_SUBMITTED || event.kind === ATTEMPT_SCORED) &&
+      event.payload.class_id === classId &&
+      event.payload.problem_id === problemId,
+    [classId, problemId],
+  );
+  useRealtimeRefresh({ matches, waiting: hasPendingAttempt, fallbackPollMs: FALLBACK_POLL_MS, reload });
 
   // useMemo 없이 매 렌더 새 객체를 만들면 이 값을 effect 의존성으로 쓰는
   // 호출부가 폭주할 수 있다(#462 코드 리뷰).
