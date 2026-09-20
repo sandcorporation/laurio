@@ -1607,11 +1607,17 @@ jobs:
         run: |
           set -euo pipefail
           html=$(curl -sS --max-time 10 http://127.0.0.1:3102/login)
-          echo "$html" | grep -q "https://codemit.example/login" \
-            || { echo "::error::/login 이 CODEMIT_WEB_ORIGIN 을 안 읽는다 — 빌드 시점 값이 구워졌는가?"; echo "$html" | head -40; exit 1; }
-          if echo "$html" | grep -q "127\.0\.0\.1"; then
+          # **파이프로 찾지 않는다**(2026-09-20). 예전에는 `echo "$html" | grep -q …`
+          # 였는데, `grep -q` 는 첫 일치에서 곧바로 끝나므로 HTML 이 파이프 버퍼(64KB)
+          # 보다 커지면 아직 쓰고 있던 `echo` 가 SIGPIPE 로 죽고, `pipefail` 이 그것을
+          # 파이프라인 실패로 읽어 **찾았는데도 빨개진다**. 실제로 그렇게 났다(#472 가
+          # 바닥글을 더해 HTML 이 그 문턱을 넘은 날) — 원인이 「값이 안 박혔다」로
+          # 보여서 진단이 한 번 어긋났다. bash 패턴 매칭에는 파이프가 없다.
+          [[ "$html" == *"https://codemit.example/login"* ]] \
+            || { echo "::error::/login 이 CODEMIT_WEB_ORIGIN 을 안 읽는다 — 빌드 시점 값이 구워졌는가?"; printf '%s' "$html" | head -c 4000; exit 1; }
+          if [[ "$html" == *"127.0.0.1"* ]]; then
             echo "::error::/login HTML 에 로컬호스트가 남아 있다 — dev 폴백이 박제됐다(#297)"
-            echo "$html" | grep -o "http://127[^\"']*" | head -5
+            printf '%s' "$html" | grep -o "http://127[^\"']*" | head -5 || true
             exit 1
           fi
           echo "로그인 링크가 런타임 설정을 읽는다"

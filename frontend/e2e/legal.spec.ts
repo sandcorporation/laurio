@@ -28,7 +28,15 @@ test.describe("이 두 페이지에 \"use client\" 가 없다", () => {
   for (const file of ["privacy", "terms"]) {
     test(file, () => {
       const source = fs.readFileSync(path.join(__dirname, `../app/${file}/page.tsx`), "utf-8");
-      expect(source).not.toContain('"use client"');
+      // **지시어인 줄만 본다.** 처음에는 파일 전체에서 문자열을 찾았는데, 그러면
+      // 「이 파일에는 "use client" 를 붙이지 않는다」고 적어 둔 **주석이 자기
+      // 자신을 걸어** 빨개진다(실제로 CI 에서 그렇게 났다). 지시어는 줄 하나가
+      // 통째로 그 문자열인 형태로만 유효하므로 그 모양만 찾는다.
+      const directives = source
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => /^["']use client["'];?$/.test(line));
+      expect(directives).toEqual([]);
     });
   }
 });
