@@ -3,7 +3,7 @@ import type { AddressInfo } from "node:net";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { retryWhileConnectionRefused } from "./connect-retry";
+import { DEFAULT_DELAYS_MS, retryWhileConnectionRefused } from "./connect-retry";
 
 // 배포가 backend 컨테이너를 바꿔 끼우는 몇 초의 모양 — 그 포트에서 아무도 듣지
 // 않다가 잠시 뒤 새 컨테이너가 듣기 시작한다(2026-09-18, GlitchTip 60).
@@ -44,6 +44,28 @@ describe("retryWhileConnectionRefused", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ count: 0 });
+  });
+
+  // GlitchTip 64 (2026-09-20) — 첫 예산 3.75초는 실제 틈보다 짧아 같은 예외가
+  // 같은 모양으로 다시 올라왔다(문제 목록 4건). prod 에서 잰 틈의 하한이 5.4초라
+  // 그보다 긴 6초로 둔다. 기본 예산을 그 아래로 줄이면 이 테스트가 빨개진다 —
+  // 그때 이 오류가 prod 로 돌아온다는 뜻이다.
+  it("기본 예산이 6초짜리 틈을 덮는다 — 배포 중 backend 가 그만큼 늦게 돌아와도 응답을 받아낸다", async () => {
+    const port = await freePort();
+    listenLater(port, 6000);
+
+    const response = await retryWhileConnectionRefused(() =>
+      fetch(`http://127.0.0.1:${port}/api/classroom/classes/3/problems/mine`),
+    );
+
+    expect(response.status).toBe(200);
+  }, 30_000);
+
+  // 틈의 길이를 정하는 것은 backend 컨테이너의 기동 명령(migrate → collectstatic
+  // → gunicorn)이다 — 그래서 예산도 beat 의 `run_scan` 과 같은 자릿수여야 한다.
+  it("기본 예산이 run_scan 과 같은 자릿수다", () => {
+    const total = DEFAULT_DELAYS_MS.reduce((sum, delay) => sum + delay, 0);
+    expect(total).toBeGreaterThanOrEqual(14_000);
   });
 
   it("끝내 돌아오지 않으면 원래 예외를 그대로 낸다 — 실패를 삼키지 않는다", async () => {
