@@ -31,7 +31,7 @@
 | 불필요해진 개인정보는 지체 없이 파기 (개인정보 보호법 21조) | 탈퇴 = 신원 파기, 2년 무행위 = 신원만 파기 ([ADR-0025](../adr/0025-withdrawal-erases-identity-not-the-account.md)) | `backend/accounts/withdrawal.py`, `backend/accounts/dormancy.py` |
 | 거래 기록은 5년 보존 (전자상거래법 시행령) | 거래가 있던 사람의 실명·생년월일만 별도 테이블에 5년 | `backend/verification/models.py` `RETAINED_IDENTITY_RETENTION_PERIOD`, `RetainedIdentity` |
 | 광고성 정보는 사전 동의, 야간 전송 별도 동의 (정보통신망법) | 광고성만 옵트인, 21~08시는 거래성까지 연기 ([ADR-0010](../adr/0010-quiet-hours-defer-not-drop.md)) | `backend/notifications/models.py` `NotificationOptIn`, `is_promotional` |
-| 통신판매중개자 표시·고지 의무 | 필요하다고 적어 두었을 뿐 화면·약관은 아직 없다 | — |
+| 통신판매중개자 표시·고지 의무 | 약관·방침 화면은 열었다(#472) — 통신판매중개자 표시 자체는 사업자 등록이 끝나고 유료 공모전을 열 때 채운다 | `frontend/app/terms` 8절 |
 
 ## 열린 항목 종합
 
@@ -39,7 +39,7 @@
 
 | # | 항목 | 문서 | 성격 |
 | --- | --- | --- | --- |
-| 1 | **약관·개인정보처리방침·통신판매중개자 고지 화면이 저장소에 없다.** 여러 ADR 이 "약관 항목"이라 지목한 조항들이 갈 곳이 없다 | contracts-and-ip | 미구현 |
+| 1 | ~~약관·개인정보처리방침·통신판매중개자 고지 화면이 저장소에 없다.~~ **#472 로 닫혔다** — `frontend/app/privacy`·`frontend/app/terms`가 공개 앱·강의실 둘 다에서 로그인 없이 열린다(강의실은 자기 사본을 두지 않고 공개 앱으로 링크한다). **남은 것은 사업자 정보(상호·사업자등록번호·대표자·주소)와 통신판매중개자 표시뿐이다** — 사업자 등록(열린 항목 2)이 저장소 밖의 사람 작업으로 아직 끝나지 않아, 있지도 않은 사업자를 있는 것처럼 적을 수 없다. 두 화면의 소스에 `BUSINESS-INFO-PLACEHOLDER` 주석으로 그 자리를 표시해 두었다 — 사업자 등록이 끝나고 유료 공모전 스위치(`CODEMIT_PAID_CONTEST_PRODUCT_ENABLED`)를 켜는 작업이 그 자리와, 유료 전용 조항(환불·배분·지급·인수인계)을 함께 채운다 | contracts-and-ip, personal-data | 부분 구현 — 사업자 정보만 남음 |
 | 2 | 구현된 토스 결제는 **에스크로 상품이 아니다.** REQUEST.md 는 PG 에스크로로 구매안전서비스 확인증을 충족한다고 봤다 — 통신판매업 신고 요건을 다시 봐야 한다 | commerce-and-payments | 확인 필요 |
 | 3 | Sponsor 가 개인 소비자일 때 「참가자가 한 명이라도 있으면 환불 없음」과 청약철회권의 관계 | commerce-and-payments | 확인 필요 |
 | 4 | 반복 참가 Developer 의 상금이 사업소득(3.3%)으로 재분류될 여지 | tax | 세무 검토 |

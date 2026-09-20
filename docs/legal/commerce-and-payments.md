@@ -56,10 +56,18 @@ Prize 는 Payout 또는 환불로만 빠져나가고, 참가자가 한 명이라
 ## 자전거래와 카드 현금화
 
 Sponsor 가 지인을 참가시켜 선정하고 상금을 회수하는 자전거래는 본인확인의 CI 로
-동일인이면 **제출 단계에서 차단**한다(`backend/submissions/api.py`,
-[ADR-0011](../adr/0011-verification-at-action-time-and-adults-only.md)). 이 약속은
-본인확인 수단이 실제로 CI 를 줄 때만 성립하므로 CI 없는 수단은 본인확인으로
+동일인이면 **제출 단계에서 차단**한다(`backend/contests/submission_participation.py`,
+#472 확인 — 예전 문서는 `backend/submissions/api.py`를 가리켰는데 그 파일에는
+라우터가 없다, [ADR-0011](../adr/0011-verification-at-action-time-and-adults-only.md)).
+이 약속은 본인확인 수단이 실제로 CI 를 줄 때만 성립하므로 CI 없는 수단은 본인확인으로
 인정하지 않는다([ADR-0024](../adr/0024-verification-methods-must-provide-ci.md)).
+
+**이 차단은 지금 무료 공모전에는 서지 않는다(#472 확인).**
+`_require_verification_unless_free`(`backend/contests/submission_api.py`)가
+무료 공모전이면 본인확인 자체를 건너뛰고, 그 결과 CI 가 없어 동일인 판정도
+함께 건너뛴다(ADR-0048) — 지금 유료 공모전 스위치가 꺼져 있으므로 이 문단이
+막는 경로는 아직 아무 공모전에도 없다. 자전거래·카드 현금화 금지는 그동안
+약관상의 의무로만 선다([contracts-and-ip.md](contracts-and-ip.md) 15행).
 
 REQUEST.md 「부정행위」가 남긴 경고: 수수료는 이득 목적의 자전거래는 막지만 **카드
 현금화에서는 억제력이 아니라 서비스 가격**이고, 그때 플랫폼에 남는 것은 손실이
@@ -87,5 +95,6 @@ REQUEST.md 「부정행위」가 남긴 경고: 수수료는 이득 목적의 �
    전자상거래법 17조 청약철회와의 관계를 확인해야 한다. 참가자가 생기는 순간을
    「재화의 공급이 개시된 때」로 볼 수 있는지가 핵심이다.
 
-통신판매중개자 고지 화면·약관 부재는 [contracts-and-ip.md](contracts-and-ip.md) 의
-열린 항목 1 이다.
+약관 화면은 이제 있지만(#472) 통신판매중개자 고지는 사업자 등록이 끝나야 채울 수
+있다 — [contracts-and-ip.md](contracts-and-ip.md)의 열린 항목 1, 그리고
+[README.md](README.md)의 열린 항목 1이 같은 자리를 가리킨다.

@@ -11,11 +11,23 @@
 
 | 시점 | 항목 | 누가 받는가 | 왜 | 코드 |
 | --- | --- | --- | --- | --- |
-| 가입 | 소셜 로그인 식별자 | Codemit | Authentication — 실명과 무관 | `backend/accounts/social.py`, [ADR-0013](../adr/0013-social-login-only.md) |
+| 가입 | 소셜 로그인 식별자, 제공자가 인증한 이메일(내려줄 때만) | Codemit | Authentication — 실명과 무관. 이메일은 계정 연결의 신뢰 근거로만 쓰고 화면에 노출하지 않는다([ADR-0049](../adr/0049-identity-stays-on-social-uid-and-only-verified-email-links-accounts.md)) | `backend/accounts/social.py`, `backend/accounts/models.py` `SocialAccount.email`, [ADR-0013](../adr/0013-social-login-only.md) |
 | 가입(카카오, 닉네임 제공에 동의했을 때만) | 카카오 닉네임 | Codemit | 클래스 가입 시 이름 기본값 — 다른 사람에게 따로 노출되지 않는다 | `backend/accounts/models.py` `SocialAccount.nickname`, #390 |
-| Submission 제출 · Contest 개최 | 실명·생년월일·CI·DI·전화번호 | 포트원 본인확인 → Codemit 저장 | 만 19세 확인, 자전거래 차단, 통지 | `backend/verification/models.py` `Verification`, [ADR-0011](../adr/0011-verification-at-action-time-and-adults-only.md) |
+| 공모전 개최·참가 시(무료 공모전에서도 받는다) | 공개용 이름·소개(선택) | Codemit | 개최자·참가자 공개 프로필 | `backend/accounts/models.py` `SponsorProfile`/`DeveloperProfile` |
+| 유료 공모전에 Submission 제출 · Contest 개최 | 실명·생년월일·CI·DI·전화번호 | 포트원 본인확인 → Codemit 저장 | 만 19세 확인, 자전거래 차단, 통지 | `backend/verification/models.py` `Verification`, [ADR-0011](../adr/0011-verification-at-action-time-and-adults-only.md) |
 | Payout 확정 | 주민등록번호 | Codemit | 지급명세서 ([tax.md](tax.md)) | `backend/payouts/models.py` `TaxIdentity` |
 | Payout 확정 후 Seller 등록 | 이름·이메일·전화번호·계좌, 본인인증·KYC | **토스가 직접** — Codemit 는 `sellerId` 만 | 지급대행사 자신의 의무 | [ADR-0020](../adr/0020-seller-registration-happens-after-payout-is-confirmed.md) |
+
+**"유료 공모전에" 줄은 지금 아무도 지나지 않는다(#472).** `_require_verification_
+unless_free`(`backend/contests/submission_api.py`)가 무료 공모전이면 본인확인도
+동일인 제출 차단도 건너뛰고, 무료 개최(`create_free_contest`)는 `Verification` 대신
+`HostingPermission`만 본다(ADR-0048) — 그리고 지금 유료 공모전 스위치가 꺼져 있어
+(`CODEMIT_PAID_CONTEST_PRODUCT_ENABLED=false`, staging·prod) 유료 개최·제출 자체가
+404다. 그래서 실명·생년월일·CI·DI·전화번호는 지금 이 표의 다른 행과 달리 **실제로
+수집되지 않는다** — 만 19세 제한과 자전거래 차단은 그때까지 무료 공모전·강의실
+둘 다 자기신고에 의존한다([contracts-and-ip.md](contracts-and-ip.md) 참고, 예전에는
+강의실만 자기신고라고 적었으나 틀렸다). `Payout`·`Seller` 두 행도 같은 이유로 지금은
+일어나지 않는다 — Payout 자체가 상금이 있는 유료 공모전에서만 생긴다.
 
 CI 를 주지 않는 본인확인 수단(카카오 통합인증)은 본인확인으로 인정하지 않는다 —
 빈 CI 가 같은 해시로 뭉쳐 남남을 동일인으로 오차단한 사고가 있었다
@@ -41,7 +53,7 @@ CI 로 본인확인이 들어오면 거부한다 — 성인으로 확인받아 �
 
 | 사건 | 무엇이 지워지는가 | 무엇이 남는가 | 코드 |
 | --- | --- | --- | --- |
-| **탈퇴** (Withdrawal) | CI·DI·전화번호·표시 이름·소개 즉시. Seller(#50, ADR-0020)의 연락처(전화번호·이메일)도 즉시(#171). 계정은 비활성화 | Contest·Submission·원장·Payout. 거래가 있었으면 실명·생년월일이 RetainedIdentity 로. Seller 의 등록 식별자(`seller_id`)·상태는 과거 Payout 의 감사 추적을 위해 남는다. `TaxIdentity`(주민등록번호)는 별도 세무 보존 규칙이라 건드리지 않는다([tax.md](tax.md)) | `backend/accounts/withdrawal.py` |
+| **탈퇴** (Withdrawal) | CI·DI·전화번호·표시 이름·소개 즉시. **계정 이메일과 소셜 로그인 이메일·닉네임도 즉시**(#472 확인 — `SocialAccount.erase_identity`, 위 표에 추가한 두 항목의 파기 짝이다). Seller(#50, ADR-0020)의 연락처(전화번호·이메일)도 즉시(#171). 계정은 비활성화 | Contest·Submission·원장·Payout. 거래가 있었으면 실명·생년월일이 RetainedIdentity 로. Seller 의 등록 식별자(`seller_id`)·상태는 과거 Payout 의 감사 추적을 위해 남는다. `TaxIdentity`(주민등록번호)는 별도 세무 보존 규칙이라 건드리지 않는다([tax.md](tax.md)) | `backend/accounts/withdrawal.py` |
 | **2년 무행위** | 신원만 (위와 같은 항목). 계정·로그인·Submission 은 그대로, 다음 행위 때 재확인 | 위와 같음 | `backend/accounts/dormancy.py` `DORMANCY_PERIOD` |
 | **보존 만료** (5년) | RetainedIdentity 행 | — | `retained-identity-purge` 스캔(`backend/accounts/dormancy.py`, Celery beat 가 등록부에서 파생해 돌린다) |
 
@@ -85,16 +97,28 @@ CI 로 본인확인이 들어오면 거부한다 — 성인으로 확인받아 �
 
 ## 위탁과 제3자 제공
 
-개인정보처리방침이 열거해야 할 상대들이다. 방침 문서 자체는 아직 없다(열린 항목 1).
+개인정보처리방침이 열거해야 할 상대들이다. 화면은 이제 있다(`frontend/app/privacy`,
+공모전·강의실 둘 다 이 화면으로 안내한다, #472) — 다만 아래 표에서 유료 공모전에만
+걸리는 상대는 그 화면에 이름을 적지 않고 자리만 남겼다(6절), 지금 실제로 위탁이
+시작되지 않았기 때문이다.
 
 | 상대 | 무엇이 나가는가 | 성격 |
 | --- | --- | --- |
-| 포트원 (KG이니시스 통합인증) | 본인확인 요청 — 실명·생년월일·CI·DI 가 **들어온다** | 위탁 |
-| 토스페이먼츠 | 결제 정보, Seller 등록 시 이름·이메일·전화번호 | 위탁 (지급대행은 토스 자신의 의무이기도 하다) |
-| 카카오 (알림톡) · SMS 사업자 | 전화번호, 통지 본문 | 위탁 |
-| 소셜 로그인 제공자 | 로그인 식별자 | 제공받음 |
+| 포트원 (KG이니시스 통합인증) | 본인확인 요청 — 실명·생년월일·CI·DI 가 **들어온다** | 위탁, **지금은 발생하지 않음** — 유료 공모전 전용(아래 「지금 실제로 일어나지 않는 것」) |
+| 토스페이먼츠 | 결제 정보, Seller 등록 시 이름·이메일·전화번호 | 위탁 (지급대행은 토스 자신의 의무이기도 하다), **지금은 발생하지 않음** |
+| 알리고 (문자·카카오 알림톡 발송대행사, #472 확인 — `backend/notifications/adapters_aligo.py`) | 전화번호, 통지 본문 | 위탁, **지금은 발생하지 않음** — 아래 참고 |
+| 소셜 로그인 제공자 | 로그인 식별자, 인증된 이메일 | 제공받음 |
 | 오브젝트 스토리지 (S3/OCI) | 제출 파일·소스, 운영팀 알림 첨부 이미지(#419 — 비공개 버킷, 받는 사람·보낸 운영자만 열람) | 위탁 |
-| **OpenAI** | **제출 소스코드와 자가 응답** — AI 채점 프롬프트에 선별된 소스 파일이 통째로 들어간다 | 위탁 + **국외 이전** — 열린 항목 7 |
+| **OpenAI** | **제출 소스코드와 자가 응답** — AI 채점 프롬프트에 선별된 소스 파일이 통째로 들어간다 | 위탁 + **국외 이전** — 화면에 적었다(#472). 공모전은 Codemit 자신의 계정으로, 강의실은 **그 클래스 강사 본인의 계정**으로 나간다(ADR-0043) — 이 구분도 화면에 있다 |
+
+**"지금은 발생하지 않음" 셋의 공통 원인 — 연락처 자체가 없다(#472 확인).**
+`PhoneContact`(알리고가 실제로 보낼 번호)를 채우는 곳은 `backend/verification/
+api.py`의 본인확인 완료 처리 한 곳뿐이다. 위 절에서 고친 대로 본인확인은 지금
+유료 공모전에만 걸리고 그 경로가 꺼져 있으므로, 어떤 이용자도 `PhoneContact`를
+갖지 않는다 — 문자·알림톡 채널로 나갈 전화번호 자체가 없다는 뜻이다. 클래스·공모전
+알림(채점 완료·예산 경고 등)은 그래서 지금 전부 서비스 화면 안의 알림(웹)으로만
+보이고, 클래스 알림 넷은 애초에 문자 채널을 시도조차 하지 않는다(`is_internal_
+only`, `backend/notifications/models.py`).
 
 ## 통지 — 정보통신망법
 
@@ -123,12 +147,13 @@ Notification 은 거래성과 광고성으로 나뉘고 **광고성만 사전 �
 
 ## 열린 항목
 
-1. **개인정보처리방침이 없다.** 위 표의 수집 항목·시점·보존 기간·위탁 상대를
-   열거하는 문서가 저장소에도 화면에도 없다.
-7. **소스가 OpenAI 로 나간다.** 개인정보 측면(소스에 개인정보가 섞여 있을 수 있다)과
-   저작물·영업비밀 측면 양쪽에서 Developer 에게 고지돼야 하고, 국외 이전 항목으로
-   방침에 들어가야 한다. ADR-0022 는 LLM 이 쓴 판정 근거(`reasoning`)에 소스 조각이
-   딸려 나오는 경계까지 측정해 두었다 — 고지에 그 구분이 들어가야 한다.
+1. ~~개인정보처리방침이 없다.~~ **#472 로 닫혔다** — `frontend/app/privacy`가 위 표의
+   수집 항목·시점·보존 기간·위탁 상대를 코드에서 다시 확인해 열거한다. 강의실
+   (`classroom/`)은 별도 사본을 두지 않고 이 화면으로 링크만 보낸다.
+7. ~~소스가 OpenAI 로 나간다.~~ **#472 로 닫혔다** — 방침 4절이 소스 전체가 채점을
+   위해 국외로 나간다는 것과, 공모전(플랫폼 계정)·강의실(강사 본인 계정)의 차이를
+   적었다. ADR-0022 가 측정한 `reasoning` 경계(판정에 쓰인 조각만 새고 무관한
+   주석·리터럴은 새지 않는다)도 같은 절에 반영했다.
 9. **정당하게 CI 가 바뀌는 사람이 잠긴다.** 주민등록번호 변경(유출 피해, 성별정정)과
    계정 탈취 후 진짜 주인의 복구는 CI 가 바뀌어 「다른 사람」으로 거부된다. 사람의
    판단 경로(고객센터)가 생길 때까지 거부가 기본이고, 그때까지 이들은 새 계정을

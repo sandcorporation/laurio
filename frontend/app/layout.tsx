@@ -8,6 +8,7 @@ import "./globals.css";
 import { webAppOrigin } from "@/lib/seo/origin";
 import { THEME_COOKIE, parseThemePreference, themeAttribute } from "@/lib/theme/preference";
 
+import { SiteFooter } from "./components/site-footer";
 import { SiteHeader } from "./components/site-header";
 
 // 본문 서체는 Pretendard, 등폭은 IBM Plex Mono 다.
@@ -103,6 +104,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       <body>
         <SiteHeader themePreference={themePreference} />
         {children}
+        <SiteFooter />
       </body>
     </html>
   );

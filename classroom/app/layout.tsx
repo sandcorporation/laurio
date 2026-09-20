@@ -13,6 +13,7 @@ import { THEME_COOKIE, parseThemePreference, themeAttribute } from "@/lib/theme/
 import { AccountMenu } from "./components/account-menu";
 import { NotificationBell } from "./components/notification-bell";
 import { LogoMark } from "./components/logo-mark";
+import { SiteFooter } from "./components/site-footer";
 import { ThemeToggle } from "./components/theme-toggle";
 
 import "./globals.css";
@@ -111,6 +112,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               </div>
             </header>
             {children}
+            <SiteFooter />
           </EventStreamProvider>
         </MeProvider>
       </body>
