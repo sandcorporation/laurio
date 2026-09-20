@@ -10,14 +10,13 @@ CONTEXT.md 「강의실」, ADR-0037).
 
 from __future__ import annotations
 
-import json
-
 import pytest
 from django.contrib.auth import get_user_model
 from django.test import override_settings
 
 from classroom.models import Class, ClassroomScore, ClassroomScoringAttempt
 from notifications.models import Notification, NotificationType
+from tests.classroom_scenarios import respond_with_verdict, track_vendor_calls
 
 CLASSES_URL = "/api/classroom/classes"
 SCAN_URL = "/api/internal/scans/classroom-submission-scoring"
@@ -25,9 +24,10 @@ SCAN_URL = "/api/internal/scans/classroom-submission-scoring"
 
 @pytest.fixture(autouse=True)
 def _force_real_scoring_adapter():
-    # 이 파일은 core.llm_scoring.requests.post를 모킹해 OpenAIScoringAdapter
-    # 경로 자체를 검증한다 — CLASSROOM_SCORING_ADAPTER_MODE 기본값(fake)이
-    # 그 경로를 안 타므로 강제한다(#340, ADR-0043).
+    # 이 파일은 실물 OpenAIScoringAdapter 경로 자체를 검증한다 —
+    # CLASSROOM_SCORING_ADAPTER_MODE 기본값(fake)이 그 경로를 안 타므로
+    # 강제한다(#340, ADR-0043). 벤더 응답은 respond_with_verdict(#469,
+    # tests.classroom_scenarios)로 흉내 낸다.
     with override_settings(CLASSROOM_SCORING_ADAPTER_MODE="core.llm_scoring.OpenAIScoringAdapter"):
         yield
 
@@ -148,43 +148,6 @@ def _patch_class(client, access: str, class_id: int, payload: dict) -> dict:
     return response.json()
 
 
-class _FakeResponse:
-    def __init__(self, status_code: int, json_data) -> None:
-        self.status_code = status_code
-        self._json_data = json_data
-        self.text = json.dumps(json_data) if json_data is not None else ""
-
-    def json(self):
-        if self._json_data is None:
-            raise ValueError("no json body")
-        return self._json_data
-
-
-def _openai_success_body(item_id: int, *, is_met: bool = True, total_tokens: int = 0) -> dict:
-    return {
-        "model": "gpt-4o-mini-2024-07-18",
-        "choices": [
-            {
-                "finish_reason": "stop",
-                "message": {
-                    "content": json.dumps(
-                        {
-                            "verdicts": [
-                                {
-                                    "requirement_id": item_id,
-                                    "is_met": is_met,
-                                    "reasoning": "판정 근거",
-                                }
-                            ]
-                        }
-                    )
-                },
-            }
-        ],
-        "usage": {"prompt_tokens": total_tokens, "completion_tokens": 0, "total_tokens": total_tokens},
-    }
-
-
 def _run_scan(client) -> dict:
     from django.conf import settings
 
@@ -239,10 +202,7 @@ def test_instructor_sets_budget_and_warning_threshold(client, db):
 def test_scoring_success_accumulates_usage_on_the_class(client, db, monkeypatch):
     ctx = _setup_submission(client)
     _patch_class(client, ctx["instructor"]["access"], ctx["class_id"], {"token_budget": 1000})
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: _FakeResponse(200, _openai_success_body(ctx["item_id"], total_tokens=120)),
-    )
+    respond_with_verdict(monkeypatch, ctx["item_id"], total_tokens=120)
 
     _run_scan(client)
 
@@ -259,10 +219,7 @@ def test_warning_notification_fires_when_threshold_crossed(client, db, monkeypat
         ctx["class_id"],
         {"token_budget": 100, "token_budget_warning_threshold_percent": 50},
     )
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: _FakeResponse(200, _openai_success_body(ctx["item_id"], total_tokens=60)),
-    )
+    respond_with_verdict(monkeypatch, ctx["item_id"], total_tokens=60)
 
     _run_scan(client)
 
@@ -284,10 +241,7 @@ def test_warning_notification_does_not_fire_below_threshold(client, db, monkeypa
         ctx["class_id"],
         {"token_budget": 100, "token_budget_warning_threshold_percent": 80},
     )
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: _FakeResponse(200, _openai_success_body(ctx["item_id"], total_tokens=60)),
-    )
+    respond_with_verdict(monkeypatch, ctx["item_id"], total_tokens=60)
 
     _run_scan(client)
 
@@ -307,10 +261,7 @@ def test_warning_notification_fires_only_once_per_budget_cycle(client, db, monke
     participant = _login(client, uid="participant-1")
     _join(client, participant["access"], _join_code(client, instructor["access"], class_id))
 
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: _FakeResponse(200, _openai_success_body(item_id, total_tokens=600)),
-    )
+    respond_with_verdict(monkeypatch, item_id, total_tokens=600)
 
     _submit_repository(client, participant["access"], class_id, problem_id, "https://github.com/a/one")
     _run_scan(client)
@@ -329,16 +280,12 @@ def test_budget_reached_stops_new_scoring_but_submission_is_still_accepted(clien
     ctx = _setup_submission(client)
     Class.objects.filter(id=ctx["class_id"]).update(token_budget=100, token_usage_total=100)
 
-    called = []
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: called.append(1) or _FakeResponse(200, _openai_success_body(ctx["item_id"])),
-    )
+    calls = track_vendor_calls(monkeypatch)
 
     result = _run_scan(client)
 
     assert result["count"] == 0
-    assert not called
+    assert not calls
     assert ClassroomScore.objects.count() == 0
     assert ClassroomScoringAttempt.objects.count() == 0
 
@@ -375,10 +322,7 @@ def test_refilling_the_budget_resumes_scoring_for_queued_attempts(client, db, mo
     ctx = _setup_submission(client)
     Class.objects.filter(id=ctx["class_id"]).update(token_budget=100, token_usage_total=100)
 
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: _FakeResponse(200, _openai_success_body(ctx["item_id"], total_tokens=10)),
-    )
+    respond_with_verdict(monkeypatch, ctx["item_id"], total_tokens=10)
 
     blocked = _run_scan(client)
     assert blocked["count"] == 0
@@ -398,10 +342,7 @@ def test_repatching_the_same_budget_does_not_reopen_the_warning_cycle(client, db
         ctx["class_id"],
         {"token_budget": 100, "token_budget_warning_threshold_percent": 50},
     )
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: _FakeResponse(200, _openai_success_body(ctx["item_id"], total_tokens=60)),
-    )
+    respond_with_verdict(monkeypatch, ctx["item_id"], total_tokens=60)
     _run_scan(client)
     assert (
         Notification.objects.filter(

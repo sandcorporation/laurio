@@ -23,6 +23,7 @@ from django.contrib.auth import get_user_model
 from django.test import override_settings
 
 from core.events import FakeEventBus
+from tests.classroom_scenarios import respond_with_transient_failure
 
 CLASSES_URL = "/api/classroom/classes"
 SCAN_URL = "/api/internal/scans/classroom-submission-scoring"
@@ -359,15 +360,6 @@ def test_attempt_submitted_does_not_reach_other_participants_or_other_class_inst
     assert FakeEventBus._queues.get(_user_id("other-instructor"), []) == []
 
 
-class _FakeResponse:
-    def __init__(self, status_code: int, json_data=None) -> None:
-        self.status_code = status_code
-        self._json_data = json_data or {}
-
-    def json(self):
-        return self._json_data
-
-
 def test_platform_failure_path_also_publishes_attempt_scored(
     client, db, monkeypatch, django_capture_on_commit_callbacks
 ):
@@ -390,10 +382,7 @@ def test_platform_failure_path_also_publishes_attempt_scored(
             "https://github.com/octocat/hello-world",
         )
 
-        monkeypatch.setattr(
-            "core.llm_scoring.requests.post",
-            lambda *a, **k: _FakeResponse(500, {"error": {"message": "boom"}}),
-        )
+        respond_with_transient_failure(monkeypatch, status_code=500, message="boom")
 
         for _ in range(5):
             _run_scan(client, django_capture_on_commit_callbacks)

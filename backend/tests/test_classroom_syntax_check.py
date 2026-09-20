@@ -16,6 +16,8 @@ import zipfile
 from django.conf import settings
 from django.test import override_settings
 
+from tests.classroom_scenarios import fail_if_vendor_is_called
+
 CLASSES_URL = "/api/classroom/classes"
 SCAN_URL = "/api/internal/scans/classroom-submission-scoring"
 
@@ -220,10 +222,7 @@ def test_valid_python_does_not_send_syntax_check_to_the_vendor(client, db, monke
     """파서로 끝나면 벤더 요청에 기본 항목이 실리지 않는다(#407) — 여기서는
     fake 어댑터가 애초에 네트워크로 나가지 않는 것으로 같은 사실을 본다."""
 
-    def _fail_if_called(*args, **kwargs):
-        raise AssertionError("네트워크로 나갔다 — 파서 판정에 벤더 호출이 섞였다.")
-
-    monkeypatch.setattr("core.llm_scoring.requests.post", _fail_if_called)
+    fail_if_vendor_is_called(monkeypatch)
     files = {"app.py": _VALID_SOURCE}
     ctx = _setup_submission(client, files=files)
 

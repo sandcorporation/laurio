@@ -14,12 +14,13 @@
 from __future__ import annotations
 
 import io
-import json
 import zipfile
 
 import pytest
 from django.conf import settings
 from django.test import override_settings
+
+from tests.classroom_scenarios import respond_with_verdicts
 
 CLASSES_URL = "/api/classroom/classes"
 SCAN_URL = "/api/internal/scans/classroom-submission-scoring"
@@ -132,28 +133,6 @@ def _mine(client, access: str, class_id: int, problem_id: int) -> dict:
     return response.json()
 
 
-class _FakeResponse:
-    def __init__(self, status_code: int, json_data) -> None:
-        self.status_code = status_code
-        self._json_data = json_data
-        self.text = json.dumps(json_data) if json_data is not None else ""
-
-    def json(self):
-        return self._json_data
-
-
-def _openai_success_body(verdicts: list[dict]) -> dict:
-    return {
-        "model": "gpt-4o-mini-2024-07-18",
-        "choices": [
-            {
-                "finish_reason": "stop",
-                "message": {"content": json.dumps({"verdicts": verdicts})},
-            }
-        ],
-    }
-
-
 REPO_URL = "https://github.com/octocat/syntax-check-ai-fallback"
 CHECKLIST_LABEL = "print가 있다"
 
@@ -192,13 +171,8 @@ def test_js_syntax_error_fails_the_base_item_via_tree_sitter(client, db, monkeyp
     files = {"app.js": _JS_SYNTAX_ERROR}
     ctx = _setup(client, files=files)
     sent = []
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: sent.append(k["json"])
-        or _FakeResponse(
-            200,
-            _openai_success_body([{"requirement_id": ctx["item_id"], "is_met": True, "reasoning": "충족"}]),
-        ),
+    respond_with_verdicts(
+        monkeypatch, [{"requirement_id": ctx["item_id"], "is_met": True, "reasoning": "충족"}], capture=sent
     )
 
     _run_scan_with_files(client, files)
@@ -220,13 +194,8 @@ def test_valid_js_and_ts_are_satisfied_without_asking_the_vendor_about_syntax(
     files = {filename: content}
     ctx = _setup(client, files=files)
     sent = []
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: sent.append(k["json"])
-        or _FakeResponse(
-            200,
-            _openai_success_body([{"requirement_id": ctx["item_id"], "is_met": True, "reasoning": "충족"}]),
-        ),
+    respond_with_verdicts(
+        monkeypatch, [{"requirement_id": ctx["item_id"], "is_met": True, "reasoning": "충족"}], capture=sent
     )
 
     _run_scan_with_files(client, files)
@@ -252,19 +221,14 @@ def test_language_without_a_parser_asks_the_vendor_in_the_same_request(client, d
     sent = []
     ctx = _setup(client, files={"index.php": _PHP_VALID})
 
-    def _respond(url, *, headers, json, timeout):
-        sent.append(json)
-        return _FakeResponse(
-            200,
-            _openai_success_body(
-                [
-                    {"requirement_id": ctx["item_id"], "is_met": True, "reasoning": "충족"},
-                    {"requirement_id": -1, "is_met": True, "reasoning": "PHP 파일에 구문 오류가 없습니다."},
-                ]
-            ),
-        )
-
-    monkeypatch.setattr("core.llm_scoring.requests.post", _respond)
+    respond_with_verdicts(
+        monkeypatch,
+        [
+            {"requirement_id": ctx["item_id"], "is_met": True, "reasoning": "충족"},
+            {"requirement_id": -1, "is_met": True, "reasoning": "PHP 파일에 구문 오류가 없습니다."},
+        ],
+        capture=sent,
+    )
 
     result = _run_scan_with_files(client, {"index.php": _PHP_VALID})
 
@@ -286,22 +250,17 @@ def test_language_without_a_parser_asks_the_vendor_in_the_same_request(client, d
 def test_language_without_a_parser_can_be_judged_as_a_syntax_error(client, db, monkeypatch):
     ctx = _setup(client, files={"index.php": "<?php this is not php"})
 
-    def _respond(url, *, headers, json, timeout):
-        return _FakeResponse(
-            200,
-            _openai_success_body(
-                [
-                    {"requirement_id": ctx["item_id"], "is_met": True, "reasoning": "충족"},
-                    {
-                        "requirement_id": -1,
-                        "is_met": False,
-                        "reasoning": "index.php 3번째 줄에서 구문 오류가 있습니다.",
-                    },
-                ]
-            ),
-        )
-
-    monkeypatch.setattr("core.llm_scoring.requests.post", _respond)
+    respond_with_verdicts(
+        monkeypatch,
+        [
+            {"requirement_id": ctx["item_id"], "is_met": True, "reasoning": "충족"},
+            {
+                "requirement_id": -1,
+                "is_met": False,
+                "reasoning": "index.php 3번째 줄에서 구문 오류가 있습니다.",
+            },
+        ],
+    )
 
     _run_scan_with_files(client, {"index.php": "<?php this is not php"})
 
@@ -323,19 +282,14 @@ def test_grammar_not_prefetched_falls_back_to_ai_without_downloading(client, db,
     ctx = _setup(client, files=files)
     sent = []
 
-    def _respond(url, *, headers, json, timeout):
-        sent.append(json)
-        return _FakeResponse(
-            200,
-            _openai_success_body(
-                [
-                    {"requirement_id": ctx["item_id"], "is_met": True, "reasoning": "충족"},
-                    {"requirement_id": -1, "is_met": True, "reasoning": "구문 오류가 없습니다."},
-                ]
-            ),
-        )
-
-    monkeypatch.setattr("core.llm_scoring.requests.post", _respond)
+    respond_with_verdicts(
+        monkeypatch,
+        [
+            {"requirement_id": ctx["item_id"], "is_met": True, "reasoning": "충족"},
+            {"requirement_id": -1, "is_met": True, "reasoning": "구문 오류가 없습니다."},
+        ],
+        capture=sent,
+    )
 
     _run_scan_with_files(client, files)
 
