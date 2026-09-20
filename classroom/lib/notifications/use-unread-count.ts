@@ -43,11 +43,10 @@ export function useUnreadCount(): UnreadCountState {
 
   const reload = useCallback(() => {
     if (!isReady) return;
-    fetchUnreadCount()
-      .then((res) => setCount(res.count))
-      .catch(() => {
-        // 일시적인 조회 실패는 배지를 지우지 않는다 — 다음 폴링이 다시 맞춘다.
-      });
+    // 일시적인 조회 실패는 배지를 지우지 않는다 — 다음 폴링이 다시 맞춘다.
+    fetchUnreadCount().then((result) => {
+      if (result.ok) setCount(result.data.count);
+    });
   }, [isReady]);
 
   useEffect(() => {

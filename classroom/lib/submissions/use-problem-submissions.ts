@@ -2,7 +2,9 @@
 
 // 강사가 보는 제출 현황 상태 (#291). 강사 본인의 클래스가 아니거나 문제를
 // 찾을 수 없으면 백엔드가 404를 준다 — `use-my-problem.ts`와 같은 이유로 그
-// 사실을 "notFound"로 구별한다.
+// 사실을 "notFound"로 구별한다. 그 클래스의 강사만 200을 받는다(#291 AC) — 이
+// 요청 자체는 어디에도 기록되지 않는다(ADR-0040, 참여자의 소스 열람 이력이
+// 없는 것과 같은 이유). 공유 클라이언트 위에 선다(#462).
 //
 // **새 제출과 채점 결과가 새로고침 없이 나타난다**(#383, ADR-0046). 이
 // 문제의 `attempt-submitted`(새 시도가 생겼다)·`attempt-scored`(그 시도의
@@ -10,9 +12,11 @@
 // 그리지 않고 기존 API를 다시 부른다. 스트림이 끊기면 「채점 중」 시도가
 // 있는 동안만 `use-my-problem.ts`와 같은 간격으로 폴링으로 물러나고, 다시
 // 연결되면 한 번 재조회한다.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
-import { BackendError } from "@/lib/backend/client";
+import { useBackendQuery } from "@codemit/bff-client";
+
+import { bffClient } from "@/lib/bff/client";
 import { useEventStream } from "@/lib/events/stream-context";
 import { decideStreamRefresh } from "@/lib/events/policy";
 import {
@@ -21,7 +25,7 @@ import {
   type StreamConnectionState,
 } from "@/lib/events/types";
 
-import { fetchProblemSubmissions, type InstructorSubmissionRow } from "./api";
+import type { InstructorSubmissionRow } from "./api";
 
 export type ProblemSubmissionsState =
   | { status: "loading" }
@@ -33,29 +37,21 @@ export type ProblemSubmissionsState =
 //: `use-my-problem.ts`의 FALLBACK_POLL_MS와 같은 값·같은 이유다.
 const FALLBACK_POLL_MS = 4_000;
 
+const NOT_FOUND = Symbol("problem-submissions-not-found");
+
 export function useProblemSubmissions(classId: number, problemId: number) {
-  const [state, setState] = useState<ProblemSubmissionsState>({ status: "loading" });
+  const { state: queryState, reload: refetch } = useBackendQuery<
+    InstructorSubmissionRow[] | typeof NOT_FOUND
+  >(bffClient, `/api/backend/classroom/classes/${classId}/problems/${problemId}/submissions`, {
+    onFailure: (failure) => (failure.status === 404 ? NOT_FOUND : undefined),
+  });
+  // `refetch-keeps-screen.test.ts`가 이 이름의 로컬 선언을 찾는다.
+  const reload = useCallback(() => {
+    refetch();
+  }, [refetch]);
+
   const { connectionState, subscribe } = useEventStream();
   const previousConnectionState = useRef<StreamConnectionState>(connectionState);
-
-  const reload = useCallback(() => {
-    fetchProblemSubmissions(classId, problemId)
-      .then((submissions) => setState({ status: "ready", submissions }))
-      .catch((error: unknown) => {
-        if (error instanceof BackendError && error.status === 404) {
-          setState({ status: "notFound" });
-        } else {
-          setState((prev) => (prev.status === "ready" ? prev : { status: "error" }));
-        }
-      });
-  }, [classId, problemId]);
-
-  useEffect(() => {
-    // 보고 있는 대상이 바뀔 때만 화면을 비운다 — 다시 불러오기(`reload`)는 새 응답이
-    // 올 때까지 이미 그린 화면을 둔다(lib/rendering/refetch-keeps-screen.test.ts).
-    setState({ status: "loading" });
-    reload();
-  }, [reload]);
 
   // 이 문제의 attempt-submitted·attempt-scored만 반응한다 — 다른 문제·다른
   // 클래스의 신호는 무시한다(각 화면은 자기와 관계있는 신호에만 반응한다,
@@ -79,7 +75,9 @@ export function useProblemSubmissions(classId: number, problemId: number) {
   }, [connectionState, reload]);
 
   const hasPendingAttempt =
-    state.status === "ready" && state.submissions.some((s) => s.status === "pending");
+    queryState.status === "ready" &&
+    queryState.data !== NOT_FOUND &&
+    queryState.data.some((s) => s.status === "pending");
 
   useEffect(() => {
     if (connectionState === "open") return; // 연결됨: 폴링 없음.
@@ -87,6 +85,20 @@ export function useProblemSubmissions(classId: number, problemId: number) {
     const timer = setInterval(reload, FALLBACK_POLL_MS);
     return () => clearInterval(timer);
   }, [connectionState, hasPendingAttempt, reload]);
+
+  // useMemo 없이 매 렌더 새 객체를 만들면 이 값을 effect 의존성으로 쓰는
+  // 호출부가 폭주할 수 있다(#462 코드 리뷰).
+  const state: ProblemSubmissionsState = useMemo(
+    () =>
+      queryState.status === "loading"
+        ? { status: "loading" }
+        : queryState.status === "error"
+          ? { status: "error" }
+          : queryState.data === NOT_FOUND
+            ? { status: "notFound" }
+            : { status: "ready", submissions: queryState.data },
+    [queryState],
+  );
 
   return { state, reload };
 }

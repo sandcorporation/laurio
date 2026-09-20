@@ -563,6 +563,7 @@ services:
       - codemit-dev-classroom-node-modules:/app/node_modules
       - codemit-dev-classroom-app-node-modules:/app/classroom/node_modules
       - codemit-dev-classroom-shared-node-modules:/app/packages/bff-shared/node_modules
+      - codemit-dev-classroom-bff-client-node-modules:/app/packages/bff-client/node_modules
       - codemit-dev-classroom-markdown-node-modules:/app/packages/markdown/node_modules
       - codemit-dev-classroom-route-audit-node-modules:/app/packages/route-audit/node_modules
       - codemit-dev-classroom-next:/app/classroom/.next
@@ -595,6 +596,7 @@ volumes:
   codemit-dev-classroom-node-modules:
   codemit-dev-classroom-app-node-modules:
   codemit-dev-classroom-shared-node-modules:
+  codemit-dev-classroom-bff-client-node-modules:
   codemit-dev-classroom-markdown-node-modules:
   codemit-dev-classroom-route-audit-node-modules:
   codemit-dev-classroom-next:

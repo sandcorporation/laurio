@@ -1,5 +1,7 @@
-// 참여자 명단·내보내기 백엔드 호출 (#281).
-import { backendJson } from "@/lib/backend/client";
+// 참여자 명단·내보내기 백엔드 호출 (#281). 공유 클라이언트 위에 선다(#462).
+import type { ApiResult } from "@codemit/bff-client";
+
+import { bffClient } from "@/lib/bff/client";
 
 export type MemberRow = {
   id: number;
@@ -9,12 +11,8 @@ export type MemberRow = {
   is_instructor: boolean;
 };
 
-export function fetchMembers(classId: number): Promise<MemberRow[]> {
-  return backendJson<MemberRow[]>(`/classroom/classes/${classId}/members`);
-}
-
-export function expelMember(classId: number, memberId: number): Promise<MemberRow> {
-  return backendJson<MemberRow>(`/classroom/classes/${classId}/members/${memberId}/expel`, {
-    method: "POST",
-  });
+export function expelMember(classId: number, memberId: number): Promise<ApiResult<MemberRow>> {
+  return bffClient.post<MemberRow>(
+    `/api/backend/classroom/classes/${classId}/members/${memberId}/expel`,
+  );
 }

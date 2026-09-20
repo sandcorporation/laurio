@@ -1,6 +1,9 @@
 // 참여자 제출 백엔드 호출 (#286/#287/#288/#388). 강사 전용 `problems/api.ts`와
-// 달리 여기는 참여자가 자기 시도만 보고 낸다.
-import { backendJson } from "@/lib/backend/client";
+// 달리 여기는 참여자가 자기 시도만 보고 낸다. 공유 클라이언트 위에
+// 선다(#462).
+import type { ApiResult } from "@codemit/bff-client";
+
+import { apiRequest, bffClient } from "@/lib/bff/client";
 import type { ChecklistItemRow, GradingStrictness, SubmissionFormat } from "@/lib/problems/api";
 
 export type ProblemMine = {
@@ -128,26 +131,17 @@ export type ProblemSubmissions = {
   viewing_as_instructor: boolean;
 };
 
-export function fetchMyProblem(classId: number, problemId: number): Promise<ProblemSubmissions> {
-  return backendJson<ProblemSubmissions>(
-    `/classroom/classes/${classId}/problems/${problemId}/mine`,
-  );
-}
-
-export function fetchMyProblems(classId: number): Promise<MyProblems> {
-  return backendJson<MyProblems>(`/classroom/classes/${classId}/problems/mine`);
-}
-
 // 참여자 본인이 그 클래스에서 불릴 이름을 스스로 바꾼다(#372) — 강사는 이
 // 엔드포인트에 닿지 못한다, 항상 요청자 자신의 행만 바뀐다.
 export function renameMyself(
   classId: number,
   displayName: string,
-): Promise<{ display_name: string }> {
-  return backendJson<{ display_name: string }>(`/classroom/classes/${classId}/members/me`, {
-    method: "PATCH",
-    body: JSON.stringify({ display_name: displayName }),
-  });
+): Promise<ApiResult<{ display_name: string }>> {
+  return apiRequest<{ display_name: string }>(
+    `/api/backend/classroom/classes/${classId}/members/me`,
+    "PATCH",
+    { display_name: displayName },
+  );
 }
 
 export function submitAttempt(
@@ -156,10 +150,10 @@ export function submitAttempt(
   // 이 시도에서 고른 형식(#373) — 문제가 형식을 하나만 열어 뒀어도 화면이
   // 그 값을 그대로 싣는다, 서버는 문제의 허용 목록 밖이면 거절한다.
   input: { submission_format: SubmissionFormat; value: string; content_type?: string | null },
-): Promise<ClassroomSubmissionRow> {
-  return backendJson<ClassroomSubmissionRow>(
-    `/classroom/classes/${classId}/problems/${problemId}/submissions`,
-    { method: "POST", body: JSON.stringify(input) },
+): Promise<ApiResult<ClassroomSubmissionRow>> {
+  return bffClient.post<ClassroomSubmissionRow>(
+    `/api/backend/classroom/classes/${classId}/problems/${problemId}/submissions`,
+    input,
   );
 }
 
@@ -185,14 +179,3 @@ export type InstructorSubmissionRow = {
   pending_reason: PendingReason;
 };
 
-// 그 클래스의 강사만 200을 받는다 — 참여자나 남의 강사는 404다(#291 AC). 이
-// 요청 자체는 어디에도 기록되지 않는다(ADR-0040, 참여자의 소스 열람 이력이
-// 없는 것과 같은 이유).
-export function fetchProblemSubmissions(
-  classId: number,
-  problemId: number,
-): Promise<InstructorSubmissionRow[]> {
-  return backendJson<InstructorSubmissionRow[]>(
-    `/classroom/classes/${classId}/problems/${problemId}/submissions`,
-  );
-}

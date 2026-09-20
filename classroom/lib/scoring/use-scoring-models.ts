@@ -1,10 +1,14 @@
 "use client";
 
 // 채점 모델 목록 상태 (#285, #401 — 클래스 기준). 「클래스 설정」과 「문제
-// 만들기·편집」이 함께 쓴다.
-import { useCallback, useEffect, useState } from "react";
+// 만들기·편집」이 함께 쓴다. 공유 클라이언트 위에 선다(#462).
+import { useCallback, useMemo } from "react";
 
-import { fetchScoringModels, type ScoringModelCatalog, type ScoringModelRow } from "./api";
+import { useBackendQuery } from "@codemit/bff-client";
+
+import { bffClient } from "@/lib/bff/client";
+
+import type { ScoringModelCatalog, ScoringModelRow } from "./api";
 
 export type { ScoringModelRow };
 
@@ -14,36 +18,31 @@ export type ScoringModelsState =
   | { status: "ready"; models: ScoringModelRow[]; source: "live" | "fallback"; unavailableReason: "no_api_key" | "fetch_failed" | null };
 
 export function useScoringModels(classId: number): { state: ScoringModelsState; reload: () => void } {
-  const [state, setState] = useState<ScoringModelsState>({ status: "loading" });
+  const { state: queryState, reload: refetch } = useBackendQuery<ScoringModelCatalog>(
+    bffClient,
+    `/api/backend/classroom/classes/${classId}/scoring-models`,
+  );
+  // `refetch-keeps-screen.test.ts`가 이 이름의 로컬 선언을 찾는다.
+  const reload = useCallback(() => {
+    refetch();
+  }, [refetch]);
 
-  const load = useCallback(() => {
-    let cancelled = false;
-    fetchScoringModels(classId)
-      .then((catalog: ScoringModelCatalog) => {
-        if (!cancelled) {
-          setState({
-            status: "ready",
-            models: catalog.models,
-            source: catalog.source,
-            unavailableReason: catalog.unavailable_reason,
-          });
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setState({ status: "error" });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [classId]);
+  // useMemo 없이 매 렌더 새 객체를 만들면 이 값을 effect 의존성으로 쓰는
+  // 호출부가 폭주할 수 있다(#462 코드 리뷰).
+  const state: ScoringModelsState = useMemo(
+    () =>
+      queryState.status === "loading"
+        ? { status: "loading" }
+        : queryState.status === "error"
+          ? { status: "error" }
+          : {
+              status: "ready",
+              models: queryState.data.models,
+              source: queryState.data.source,
+              unavailableReason: queryState.data.unavailable_reason,
+            },
+    [queryState],
+  );
 
-  useEffect(() => {
-    // 클래스 키를 막 저장한 뒤의 `reload()`는 이미 그린 목록을 그대로 두고
-    // 새 응답이 오면 바꾼다(`useClass`의 같은 관용구) — 보고 있는 클래스가
-    // 바뀔 때만 "loading"으로 비운다.
-    setState({ status: "loading" });
-    return load();
-  }, [load]);
-
-  return { state, reload: load };
+  return { state, reload };
 }

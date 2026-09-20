@@ -43,16 +43,16 @@ export default function MyTemplatesPage() {
 
   function reloadProblems() {
     setProblemState({ status: "loading" });
-    fetchMyProblemTemplates()
-      .then((templates) => setProblemState({ status: "ready", templates }))
-      .catch(() => setProblemState({ status: "error" }));
+    fetchMyProblemTemplates().then((result) => {
+      setProblemState(result.ok ? { status: "ready", templates: result.data } : { status: "error" });
+    });
   }
 
   function reloadClasses() {
     setClassState({ status: "loading" });
-    fetchMyClassTemplates()
-      .then((templates) => setClassState({ status: "ready", templates }))
-      .catch(() => setClassState({ status: "error" }));
+    fetchMyClassTemplates().then((result) => {
+      setClassState(result.ok ? { status: "ready", templates: result.data } : { status: "error" });
+    });
   }
 
   useEffect(() => {
@@ -63,27 +63,25 @@ export default function MyTemplatesPage() {
   async function handleTakedownProblem(shareCode: string) {
     setTakingDown(shareCode);
     setTakedownError(null);
-    try {
-      await takedownProblemTemplate(shareCode);
+    const result = await takedownProblemTemplate(shareCode);
+    if (result.ok) {
       reloadProblems();
-    } catch {
-      setTakedownError("내리지 못했습니다. 잠시 후 다시 시도해주세요.");
-    } finally {
-      setTakingDown(null);
+    } else {
+      setTakedownError(result.detail);
     }
+    setTakingDown(null);
   }
 
   async function handleTakedownClass(shareCode: string) {
     setTakingDown(shareCode);
     setTakedownError(null);
-    try {
-      await takedownClassTemplate(shareCode);
+    const result = await takedownClassTemplate(shareCode);
+    if (result.ok) {
       reloadClasses();
-    } catch {
-      setTakedownError("내리지 못했습니다. 잠시 후 다시 시도해주세요.");
-    } finally {
-      setTakingDown(null);
+    } else {
+      setTakedownError(result.detail);
     }
+    setTakingDown(null);
   }
 
   return (

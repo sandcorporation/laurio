@@ -25,7 +25,6 @@ import {
   PageShell,
   buttonClass,
 } from "@/app/components/ui";
-import { BackendError } from "@/lib/backend/client";
 import { publishClassAsTemplate, takedownClassTemplate } from "@/lib/class-templates/api";
 import {
   deleteClass,
@@ -80,30 +79,28 @@ function ClassTemplatePublishCard({
     event.preventDefault();
     setPublishError(null);
     setPublishing(true);
-    try {
-      const template = await publishClassAsTemplate(classId, publisherDisplayName.trim());
-      setLiveTemplate(liveTemplateFrom(template));
+    const result = await publishClassAsTemplate(classId, publisherDisplayName.trim());
+    if (result.ok) {
+      setLiveTemplate(liveTemplateFrom(result.data));
       setJustTakenDown(false);
-    } catch {
-      setPublishError("템플릿으로 공개하지 못했습니다. 잠시 후 다시 시도해주세요.");
-    } finally {
-      setPublishing(false);
+    } else {
+      setPublishError(result.detail);
     }
+    setPublishing(false);
   }
 
   async function handleTakedown() {
     if (!liveTemplate) return;
     setTakedownError(null);
     setTakingDown(true);
-    try {
-      const template = await takedownClassTemplate(liveTemplate.shareCode);
-      setLiveTemplate(liveTemplateFrom(template));
+    const result = await takedownClassTemplate(liveTemplate.shareCode);
+    if (result.ok) {
+      setLiveTemplate(liveTemplateFrom(result.data));
       setJustTakenDown(true);
-    } catch {
-      setTakedownError("내리지 못했습니다. 잠시 후 다시 시도해주세요.");
-    } finally {
-      setTakingDown(false);
+    } else {
+      setTakedownError(result.detail);
     }
+    setTakingDown(false);
   }
 
   return (
@@ -229,11 +226,11 @@ function DeleteClassCard({ classId, classroom }: { classId: number; classroom: C
   async function handleDelete() {
     setError(null);
     setDeleting(true);
-    try {
-      await deleteClass(classId);
+    const result = await deleteClass(classId);
+    if (result.ok) {
       router.push("/");
-    } catch (err) {
-      setError(err instanceof BackendError ? err.message : "클래스를 지우지 못했습니다.");
+    } else {
+      setError(result.detail);
       setDeleting(false);
     }
   }
@@ -433,49 +430,46 @@ export default function ClassSettingsPage() {
     event.preventDefault();
     setKeySaving(true);
     setKeyError(null);
-    try {
-      await setOpenAIKey(classId, apiKey);
+    const result = await setOpenAIKey(classId, apiKey);
+    if (result.ok) {
       setApiKey("");
       reload();
       // 키가 바뀌면 그 키로 실제로 쓸 수 있는 모델이 달라진다(#401) — 이
       // 화면을 떠나지 않아도 모델 선택지가 새 키 기준으로 바로 갱신된다.
       reloadModels();
-    } catch (err) {
-      setKeyError(err instanceof BackendError ? err.message : "키를 저장하지 못했습니다.");
-    } finally {
-      setKeySaving(false);
+    } else {
+      setKeyError(result.detail);
     }
+    setKeySaving(false);
   }
 
   async function handleNameSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setNameSaving(true);
     setNameError(null);
-    try {
-      if (namesPatch !== null) await updateClass(classId, namesPatch);
+    const result = namesPatch !== null ? await updateClass(classId, namesPatch) : null;
+    if (result === null || result.ok) {
       reload();
-    } catch (err) {
-      setNameError(err instanceof BackendError ? err.message : "이름을 저장하지 못했습니다.");
-    } finally {
-      setNameSaving(false);
+    } else {
+      setNameError(result.detail);
     }
+    setNameSaving(false);
   }
 
   async function handleModelSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setModelSaving(true);
     setModelError(null);
-    try {
-      await updateClass(classId, {
-        default_model: defaultModel,
-        default_reasoning_effort: defaultReasoningEffort,
-      });
+    const result = await updateClass(classId, {
+      default_model: defaultModel,
+      default_reasoning_effort: defaultReasoningEffort,
+    });
+    if (result.ok) {
       reload();
-    } catch (err) {
-      setModelError(err instanceof BackendError ? err.message : "기본 모델을 저장하지 못했습니다.");
-    } finally {
-      setModelSaving(false);
+    } else {
+      setModelError(result.detail);
     }
+    setModelSaving(false);
   }
 
   async function handleBudgetSubmit(event: FormEvent<HTMLFormElement>) {
@@ -492,17 +486,16 @@ export default function ClassSettingsPage() {
     }
     setBudgetSaving(true);
     setBudgetError(null);
-    try {
-      await updateClass(classId, {
-        token_budget: parsedBudget,
-        token_budget_warning_threshold_percent: parsedThreshold,
-      });
+    const result = await updateClass(classId, {
+      token_budget: parsedBudget,
+      token_budget_warning_threshold_percent: parsedThreshold,
+    });
+    if (result.ok) {
       reload();
-    } catch (err) {
-      setBudgetError(err instanceof BackendError ? err.message : "채점 예산을 저장하지 못했습니다.");
-    } finally {
-      setBudgetSaving(false);
+    } else {
+      setBudgetError(result.detail);
     }
+    setBudgetSaving(false);
   }
 
   return (

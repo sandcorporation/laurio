@@ -15,7 +15,6 @@ import type { ChangeEvent, FormEvent } from "react";
 
 import { ErrorNote, PageShell, buttonClass } from "@/app/components/ui";
 import { ProblemParticipantView } from "@/app/components/ProblemParticipantView";
-import { BackendError } from "@/lib/backend/client";
 import { useMe } from "@/lib/auth/use-me";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { submitAttempt } from "@/lib/submissions/api";
@@ -119,19 +118,18 @@ export default function ProblemSubmitPage() {
   ) {
     setSubmitting(true);
     setSubmitError(null);
-    try {
-      await submitAttempt(classId, problemId, {
-        submission_format: submissionFormat,
-        value,
-        content_type: contentType,
-      });
+    const result = await submitAttempt(classId, problemId, {
+      submission_format: submissionFormat,
+      value,
+      content_type: contentType,
+    });
+    if (result.ok) {
       setRepositoryUrl("");
       reload();
-    } catch (err) {
-      setSubmitError(err instanceof BackendError ? err.message : "제출하지 못했습니다.");
-    } finally {
-      setSubmitting(false);
+    } else {
+      setSubmitError(result.detail);
     }
+    setSubmitting(false);
   }
 
   async function handleRepositorySubmit(event: FormEvent<HTMLFormElement>) {

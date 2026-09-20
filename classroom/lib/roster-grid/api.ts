@@ -1,5 +1,5 @@
-// 참여자 × 문제 격자 백엔드 호출 (#290).
-import { backendJson } from "@/lib/backend/client";
+// 참여자 × 문제 격자 타입 (#290) — 실제 호출은 `use-roster-grid.ts`가
+// 공유 클라이언트로 한다(#462).
 
 // "needs_setup"(#434, 예전 "no_api_key")은 그 클래스에 채점 키가 아예
 // 없거나 거부됐거나, 이 문제의 채점 모델이 거부돼(#403) 미채점 시도가
@@ -42,7 +42,3 @@ export type RosterGrid = {
   problems: GridProblemStats[];
   members: GridMemberRow[];
 };
-
-export function fetchRosterGrid(classId: number): Promise<RosterGrid> {
-  return backendJson<RosterGrid>(`/classroom/classes/${classId}/roster-grid`);
-}

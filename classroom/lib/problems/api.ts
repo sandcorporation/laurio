@@ -1,5 +1,8 @@
-// Problem·체크리스트 백엔드 호출 (#282/#283/#285/#326/#386).
-import { backendJson } from "@/lib/backend/client";
+// Problem·체크리스트 백엔드 호출 (#282/#283/#285/#326/#386). 공유 클라이언트
+// 위에 선다(#462).
+import type { ApiResult } from "@codemit/bff-client";
+
+import { apiRequest, bffClient } from "@/lib/bff/client";
 import type { GradingStrictness } from "@/lib/problems/grading-guideline";
 
 export type SubmissionFormat = "source" | "repository";
@@ -93,10 +96,6 @@ export type ProblemRow = {
   available_transitions: ProblemTransitionRow[];
 };
 
-export function fetchProblems(classId: number): Promise<ProblemRow[]> {
-  return backendJson<ProblemRow[]>(`/classroom/classes/${classId}/problems`);
-}
-
 export function createProblem(
   classId: number,
   input: {
@@ -124,11 +123,8 @@ export function createProblem(
     // 경우를 누르기 전에 이미 막아 둔다.
     open?: boolean;
   },
-): Promise<ProblemRow> {
-  return backendJson<ProblemRow>(`/classroom/classes/${classId}/problems`, {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
+): Promise<ApiResult<ProblemRow>> {
+  return bffClient.post<ProblemRow>(`/api/backend/classroom/classes/${classId}/problems`, input);
 }
 
 export function updateProblem(
@@ -144,49 +140,54 @@ export function updateProblem(
     grading_guideline_text: string;
     syntax_check_enabled: boolean;
   }>,
-): Promise<ProblemRow> {
-  return backendJson<ProblemRow>(`/classroom/classes/${classId}/problems/${problemId}`, {
-    method: "PATCH",
-    body: JSON.stringify(patch),
-  });
+): Promise<ApiResult<ProblemRow>> {
+  return apiRequest<ProblemRow>(
+    `/api/backend/classroom/classes/${classId}/problems/${problemId}`,
+    "PATCH",
+    patch,
+  );
 }
 
-export function reorderProblems(classId: number, problemIds: number[]): Promise<ProblemRow[]> {
-  return backendJson<ProblemRow[]>(`/classroom/classes/${classId}/problems/reorder`, {
-    method: "POST",
-    body: JSON.stringify({ problem_ids: problemIds }),
-  });
+export function reorderProblems(
+  classId: number,
+  problemIds: number[],
+): Promise<ApiResult<ProblemRow[]>> {
+  return bffClient.post<ProblemRow[]>(
+    `/api/backend/classroom/classes/${classId}/problems/reorder`,
+    { problem_ids: problemIds },
+  );
 }
 
-export function openProblem(classId: number, problemId: number): Promise<ProblemRow> {
-  return backendJson<ProblemRow>(`/classroom/classes/${classId}/problems/${problemId}/open`, {
-    method: "POST",
-  });
+export function openProblem(classId: number, problemId: number): Promise<ApiResult<ProblemRow>> {
+  return bffClient.post<ProblemRow>(
+    `/api/backend/classroom/classes/${classId}/problems/${problemId}/open`,
+  );
 }
 
 // 열린 문제를 참여자에게서 거둔다(#405) — 제출 유무와 무관하다. 이미 낸
 // 참여자는 그 문제를 읽기 전용으로 계속 보되 새로 낼 수는 없다.
-export function hideProblem(classId: number, problemId: number): Promise<ProblemRow> {
-  return backendJson<ProblemRow>(`/classroom/classes/${classId}/problems/${problemId}/hide`, {
-    method: "POST",
-  });
+export function hideProblem(classId: number, problemId: number): Promise<ApiResult<ProblemRow>> {
+  return bffClient.post<ProblemRow>(
+    `/api/backend/classroom/classes/${classId}/problems/${problemId}/hide`,
+  );
 }
 
 // 숨긴 문제를 되돌린다(#405) — `openProblem`과 같은 필수 항목 규칙을 다시
 // 따른다: 그 사이 체크리스트가 비었으면 서버가 400으로 거절한다.
-export function reopenProblem(classId: number, problemId: number): Promise<ProblemRow> {
-  return backendJson<ProblemRow>(`/classroom/classes/${classId}/problems/${problemId}/reopen`, {
-    method: "POST",
-  });
+export function reopenProblem(classId: number, problemId: number): Promise<ApiResult<ProblemRow>> {
+  return bffClient.post<ProblemRow>(
+    `/api/backend/classroom/classes/${classId}/problems/${problemId}/reopen`,
+  );
 }
 
 // 아무도 내지 않은 문제, 또는 강사 자신만 내본 문제를 없던 일로 한다
 // (#430/#431, ADR-0050) — 참여자의 시도(내보낸 사람 포함)가 남아 있으면
 // 백엔드가 403으로 거절한다.
-export function deleteProblem(classId: number, problemId: number): Promise<void> {
-  return backendJson<void>(`/classroom/classes/${classId}/problems/${problemId}`, {
-    method: "DELETE",
-  });
+export function deleteProblem(classId: number, problemId: number): Promise<ApiResult<void>> {
+  return apiRequest<void>(
+    `/api/backend/classroom/classes/${classId}/problems/${problemId}`,
+    "DELETE",
+  );
 }
 
 // 체크리스트·채점 설정은 함께 오고 제출물·시도·Score는 애초에 따라오지
@@ -195,11 +196,11 @@ export function copyProblem(
   classId: number,
   problemId: number,
   targetClassId: number,
-): Promise<ProblemRow> {
-  return backendJson<ProblemRow>(`/classroom/classes/${classId}/problems/${problemId}/copy`, {
-    method: "POST",
-    body: JSON.stringify({ target_class_id: targetClassId }),
-  });
+): Promise<ApiResult<ProblemRow>> {
+  return bffClient.post<ProblemRow>(
+    `/api/backend/classroom/classes/${classId}/problems/${problemId}/copy`,
+    { target_class_id: targetClassId },
+  );
 }
 
 // 새 문제 화면의 「이미 있는 문제로 시작하기」 시트, 「내 다른 클래스에서」
@@ -224,25 +225,24 @@ export type ImportableProblemRow = {
   checklist_items: ImportableChecklistItem[];
 };
 
-export function fetchImportableProblems(classId: number): Promise<ImportableProblemRow[]> {
-  return backendJson<ImportableProblemRow[]>(
-    `/classroom/classes/${classId}/problems/from-other-classes`,
+export function fetchImportableProblems(
+  classId: number,
+): Promise<ApiResult<ImportableProblemRow[]>> {
+  return bffClient.get<ImportableProblemRow[]>(
+    `/api/backend/classroom/classes/${classId}/problems/from-other-classes`,
   );
 }
 
 function checklistItemsPath(classId: number, problemId: number): string {
-  return `/classroom/classes/${classId}/problems/${problemId}/checklist-items`;
+  return `/api/backend/classroom/classes/${classId}/problems/${problemId}/checklist-items`;
 }
 
 export function createChecklistItem(
   classId: number,
   problemId: number,
   input: { label: string; required: boolean },
-): Promise<ChecklistItemRow> {
-  return backendJson<ChecklistItemRow>(checklistItemsPath(classId, problemId), {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
+): Promise<ApiResult<ChecklistItemRow>> {
+  return bffClient.post<ChecklistItemRow>(checklistItemsPath(classId, problemId), input);
 }
 
 export function updateChecklistItem(
@@ -250,26 +250,28 @@ export function updateChecklistItem(
   problemId: number,
   itemId: number,
   patch: Partial<{ label: string; required: boolean }>,
-): Promise<ChecklistItemRow> {
-  return backendJson<ChecklistItemRow>(`${checklistItemsPath(classId, problemId)}/${itemId}`, {
-    method: "PATCH",
-    body: JSON.stringify(patch),
-  });
+): Promise<ApiResult<ChecklistItemRow>> {
+  return apiRequest<ChecklistItemRow>(
+    `${checklistItemsPath(classId, problemId)}/${itemId}`,
+    "PATCH",
+    patch,
+  );
 }
 
-export function deleteChecklistItem(classId: number, problemId: number, itemId: number): Promise<void> {
-  return backendJson<void>(`${checklistItemsPath(classId, problemId)}/${itemId}`, {
-    method: "DELETE",
-  });
+export function deleteChecklistItem(
+  classId: number,
+  problemId: number,
+  itemId: number,
+): Promise<ApiResult<void>> {
+  return apiRequest<void>(`${checklistItemsPath(classId, problemId)}/${itemId}`, "DELETE");
 }
 
 export function reorderChecklistItems(
   classId: number,
   problemId: number,
   itemIds: number[],
-): Promise<ChecklistItemRow[]> {
-  return backendJson<ChecklistItemRow[]>(`${checklistItemsPath(classId, problemId)}/reorder`, {
-    method: "POST",
-    body: JSON.stringify({ item_ids: itemIds }),
+): Promise<ApiResult<ChecklistItemRow[]>> {
+  return bffClient.post<ChecklistItemRow[]>(`${checklistItemsPath(classId, problemId)}/reorder`, {
+    item_ids: itemIds,
   });
 }

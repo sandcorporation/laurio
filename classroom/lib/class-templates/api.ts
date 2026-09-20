@@ -1,7 +1,10 @@
 // 클래스 템플릿 백엔드 호출 (#319) — 문제 템플릿(`lib/problem-templates/api.ts`)과
 // 같은 모양이다. 새로 정한 것은 클래스 단위로 무엇이 담기고 무엇이 안 담기는가뿐이라
-// (#319 body), 신고 관련 호출은 여기 없다 — #319 AC에 없다.
-import { backendJson } from "@/lib/backend/client";
+// (#319 body), 신고 관련 호출은 여기 없다 — #319 AC에 없다. 공유 클라이언트 위에
+// 선다(#462).
+import type { ApiResult } from "@codemit/bff-client";
+
+import { bffClient } from "@/lib/bff/client";
 
 import type { ClassRow } from "@/lib/classes/api";
 import type { TemplateChecklistItemRow } from "@/lib/problem-templates/api";
@@ -45,42 +48,40 @@ export type Page<T> = { items: T[]; count: number };
 export function publishClassAsTemplate(
   classId: number,
   publisherDisplayName: string,
-): Promise<ClassTemplateRow> {
-  return backendJson<ClassTemplateRow>(`/classroom/classes/${classId}/publish-template`, {
-    method: "POST",
-    body: JSON.stringify({ publisher_display_name: publisherDisplayName }),
-  });
+): Promise<ApiResult<ClassTemplateRow>> {
+  return bffClient.post<ClassTemplateRow>(
+    `/api/backend/classroom/classes/${classId}/publish-template`,
+    { publisher_display_name: publisherDisplayName },
+  );
 }
 
 export function fetchClassTemplates(
   query: { q?: string; page?: number } = {},
-): Promise<Page<ClassTemplateListItem>> {
+): Promise<ApiResult<Page<ClassTemplateListItem>>> {
   const params = new URLSearchParams();
   if (query.q) params.set("q", query.q);
   if (query.page) params.set("page", String(query.page));
   const qs = params.toString();
-  return backendJson<Page<ClassTemplateListItem>>(
-    `/classroom/class-templates${qs ? `?${qs}` : ""}`,
+  return bffClient.get<Page<ClassTemplateListItem>>(
+    `/api/backend/classroom/class-templates${qs ? `?${qs}` : ""}`,
   );
 }
 
-export function fetchMyClassTemplates(): Promise<ClassTemplateRow[]> {
-  return backendJson<ClassTemplateRow[]>("/classroom/class-templates/mine");
+export function fetchMyClassTemplates(): Promise<ApiResult<ClassTemplateRow[]>> {
+  return bffClient.get<ClassTemplateRow[]>("/api/backend/classroom/class-templates/mine");
 }
 
-export function fetchClassTemplate(shareCode: string): Promise<ClassTemplateRow> {
-  return backendJson<ClassTemplateRow>(`/classroom/class-templates/${shareCode}`);
-}
-
-export function importClassTemplate(shareCode: string, name: string): Promise<ClassRow> {
-  return backendJson<ClassRow>(`/classroom/class-templates/${shareCode}/import`, {
-    method: "POST",
-    body: JSON.stringify({ name }),
+export function importClassTemplate(
+  shareCode: string,
+  name: string,
+): Promise<ApiResult<ClassRow>> {
+  return bffClient.post<ClassRow>(`/api/backend/classroom/class-templates/${shareCode}/import`, {
+    name,
   });
 }
 
-export function takedownClassTemplate(shareCode: string): Promise<ClassTemplateRow> {
-  return backendJson<ClassTemplateRow>(`/classroom/class-templates/${shareCode}/takedown`, {
-    method: "POST",
-  });
+export function takedownClassTemplate(shareCode: string): Promise<ApiResult<ClassTemplateRow>> {
+  return bffClient.post<ClassTemplateRow>(
+    `/api/backend/classroom/class-templates/${shareCode}/takedown`,
+  );
 }

@@ -18,7 +18,7 @@ import type { ReactNode } from "react";
 import { MarkdownView } from "@codemit/markdown";
 
 import { Badge, EmptyState, ErrorNote, INPUT_CLASS, buttonClass } from "@/app/components/ui";
-import { BackendError } from "@/lib/backend/client";
+import { unwrap } from "@/lib/bff/client";
 import {
   fetchMyProblemTemplates,
   fetchProblemTemplate,
@@ -56,7 +56,7 @@ export function TemplatePickerSheet({
   const [publicCommittedQuery, setPublicCommittedQuery] = useState("");
   const publicState = useLoadable(
     tab === "public",
-    () => fetchProblemTemplates({ q: publicCommittedQuery || undefined }).then((result) => result.items),
+    () => unwrap(fetchProblemTemplates({ q: publicCommittedQuery || undefined })).then((page) => page.items),
     [publicCommittedQuery],
   );
   const selectedPublicItem =
@@ -67,7 +67,7 @@ export function TemplatePickerSheet({
   // --- 내가 올린 것 ---------------------------------------------------------
   const mineState = useLoadable(
     tab === "mine",
-    () => fetchMyProblemTemplates().then((items) => items.filter((t) => !t.taken_down)),
+    () => unwrap(fetchMyProblemTemplates()).then((items) => items.filter((t) => !t.taken_down)),
     [],
   );
   const selectedMineItem =
@@ -76,7 +76,11 @@ export function TemplatePickerSheet({
       : null;
 
   // --- 내 다른 클래스에서 ----------------------------------------------------
-  const otherState = useLoadable(tab === "other-classes", () => fetchImportableProblems(classId), [classId]);
+  const otherState = useLoadable(
+    tab === "other-classes",
+    () => unwrap(fetchImportableProblems(classId)),
+    [classId],
+  );
   const selectedOtherItem =
     tab === "other-classes" && otherState.status === "ready"
       ? (otherState.data.find((i) => `other:${i.id}` === selectedKey) ?? null)
@@ -87,7 +91,7 @@ export function TemplatePickerSheet({
   // 것/내 다른 클래스에서는 목록 자체에 이미 다 있다).
   const publicDetailState = useLoadable(
     selectedPublicItem !== null,
-    () => fetchProblemTemplate(selectedPublicItem!.share_code),
+    () => unwrap(fetchProblemTemplate(selectedPublicItem!.share_code)),
     [selectedPublicItem?.share_code],
   );
 
@@ -115,20 +119,19 @@ export function TemplatePickerSheet({
     if (!preview) return;
     setImporting(true);
     setImportError(null);
-    try {
-      const problem = selectedPublicItem
-        ? await importProblemTemplate(selectedPublicItem.share_code, classId)
-        : selectedMineItem
-          ? await importProblemTemplate(selectedMineItem.share_code, classId)
-          : selectedOtherItem
-            ? await copyProblem(selectedOtherItem.classroom_id, selectedOtherItem.id, classId)
-            : null;
-      if (!problem) return;
-      onImported(problem);
-    } catch (err) {
-      setImportError(err instanceof BackendError ? err.message : "가져오지 못했습니다. 잠시 후 다시 시도해주세요.");
-    } finally {
-      setImporting(false);
+    const result = selectedPublicItem
+      ? await importProblemTemplate(selectedPublicItem.share_code, classId)
+      : selectedMineItem
+        ? await importProblemTemplate(selectedMineItem.share_code, classId)
+        : selectedOtherItem
+          ? await copyProblem(selectedOtherItem.classroom_id, selectedOtherItem.id, classId)
+          : null;
+    setImporting(false);
+    if (!result) return;
+    if (result.ok) {
+      onImported(result.data);
+    } else {
+      setImportError(result.detail);
     }
   }
 

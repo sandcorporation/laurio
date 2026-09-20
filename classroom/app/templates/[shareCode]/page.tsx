@@ -22,7 +22,6 @@ import {
   PageShell,
   buttonClass,
 } from "@/app/components/ui";
-import { BackendError } from "@/lib/backend/client";
 import { defaultCopyTarget, selectCopyTargets } from "@/lib/classes/copy-targets";
 import { useMyClasses } from "@/lib/classes/use-my-classes";
 import { importProblemTemplate, reportProblemTemplate, takedownProblemTemplate } from "@/lib/problem-templates/api";
@@ -100,14 +99,11 @@ export default function ProblemTemplatePreviewPage() {
     event.preventDefault();
     setImportError(null);
     setImporting(true);
-    try {
-      const problem = await importProblemTemplate(shareCode, Number(targetClassId));
-      router.push(`/classes/${problem.classroom_id}/problems/${problem.id}`);
-    } catch (err) {
-      setImportError(
-        err instanceof BackendError ? err.message : "가져오지 못했습니다. 잠시 후 다시 시도해주세요.",
-      );
-    } finally {
+    const result = await importProblemTemplate(shareCode, Number(targetClassId));
+    if (result.ok) {
+      router.push(`/classes/${result.data.classroom_id}/problems/${result.data.id}`);
+    } else {
+      setImportError(result.detail);
       setImporting(false);
     }
   }
@@ -116,32 +112,26 @@ export default function ProblemTemplatePreviewPage() {
     event.preventDefault();
     setReportError(null);
     setReportSubmitting(true);
-    try {
-      await reportProblemTemplate(shareCode, reportReason.trim());
+    const result = await reportProblemTemplate(shareCode, reportReason.trim());
+    if (result.ok) {
       setReportDone(true);
       setReportOpen(false);
-    } catch (err) {
-      if (err instanceof BackendError) {
-        setReportError(err.message);
-      } else {
-        setReportError("신고를 접수하지 못했습니다. 잠시 후 다시 시도해주세요.");
-      }
-    } finally {
-      setReportSubmitting(false);
+    } else {
+      setReportError(result.detail);
     }
+    setReportSubmitting(false);
   }
 
   async function handleTakedown() {
     setTakedownError(null);
     setTakingDown(true);
-    try {
-      await takedownProblemTemplate(shareCode);
+    const result = await takedownProblemTemplate(shareCode);
+    if (result.ok) {
       reload();
-    } catch {
-      setTakedownError("내리지 못했습니다. 잠시 후 다시 시도해주세요.");
-    } finally {
-      setTakingDown(false);
+    } else {
+      setTakedownError(result.detail);
     }
+    setTakingDown(false);
   }
 
   return (

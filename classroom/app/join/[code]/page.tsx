@@ -22,7 +22,6 @@ import {
   Num,
   buttonClass,
 } from "@/app/components/ui";
-import { BackendError } from "@/lib/backend/client";
 import { useMe } from "@/lib/auth/use-me";
 import { joinClass } from "@/lib/join/api";
 import { useJoinPreview } from "@/lib/join/use-join-preview";
@@ -30,7 +29,6 @@ import { useJoinPreview } from "@/lib/join/use-join-preview";
 type SubmitState =
   | { status: "idle" }
   | { status: "submitting" }
-  | { status: "needsLogin" }
   | { status: "error"; message: string }
   | { status: "done"; classId: number; className: string; displayName: string };
 
@@ -69,22 +67,19 @@ export default function JoinPage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmit({ status: "submitting" });
-    try {
-      const result = await joinClass(code, displayName.trim());
+    // 세션이 죽은 채로 보내면 `bffClient`가 공개 앱 로그인으로 보낸다(#462) —
+    // 조회든 변경이든 401은 항상 같은 경로다. 그 사이 잠깐 아래 실패
+    // 문구가 보일 수 있지만 곧 이동이 이어진다.
+    const result = await joinClass(code, displayName.trim());
+    if (result.ok) {
       setSubmit({
         status: "done",
-        classId: result.class_id,
-        className: result.class_name,
-        displayName: result.display_name,
+        classId: result.data.class_id,
+        className: result.data.class_name,
+        displayName: result.data.display_name,
       });
-    } catch (error) {
-      if (error instanceof BackendError && error.status === 401) {
-        setSubmit({ status: "needsLogin" });
-      } else if (error instanceof BackendError) {
-        setSubmit({ status: "error", message: error.message });
-      } else {
-        setSubmit({ status: "error", message: "가입하지 못했습니다. 잠시 후 다시 시도해주세요." });
-      }
+    } else {
+      setSubmit({ status: "error", message: result.detail });
     }
   }
 
@@ -188,11 +183,11 @@ export default function JoinPage() {
               이 클래스는 보관되어 더 이상 가입할 수 없습니다. 지난 기록은 참여자에게 그대로 남습니다.
             </span>
           </Note>
-        ) : submit.status === "needsLogin" || me.status === "error" ? (
+        ) : me.status === "error" ? (
           // 로그인하지 않은 사람은 이름 칸을 아예 보지 않는다(#387 AC) — 적은
-          // 이름이 로그인 왕복 사이에 사라지는 일 자체가 없다. `submit.status
-          // === "needsLogin"`는 로그인된 채로 폼을 보다가 세션이 만료된
-          // 경우의 대비로 남는다(#385 Further Notes).
+          // 이름이 로그인 왕복 사이에 사라지는 일 자체가 없다. 로그인된 채로
+          // 폼을 보다가 세션이 만료되면 제출 시 `bffClient`가 곧장 공개 앱
+          // 로그인으로 보낸다(#462, #385 Further Notes).
           <div className="flex flex-col gap-3">
             <Note>
               <span data-testid="join-needs-login">

@@ -1,5 +1,9 @@
-// 가입 링크 미리보기·가입 (#280).
-import { backendJson } from "@/lib/backend/client";
+// 가입 링크 미리보기·가입 (#280). 공유 클라이언트 위에 선다(#462) — 이
+// 엔드포인트들은 `auth=None`(백엔드 `classroom/api.py`)이라 비로그인 방문자도
+// 그대로 부를 수 있다.
+import type { ApiResult } from "@codemit/bff-client";
+
+import { bffClient } from "@/lib/bff/client";
 
 export type JoinPreview = {
   class_id: number;
@@ -28,13 +32,8 @@ export type JoinResult = {
   display_name: string;
 };
 
-export function fetchJoinPreview(code: string): Promise<JoinPreview> {
-  return backendJson<JoinPreview>(`/classroom/join/${code}`);
-}
-
-export function joinClass(code: string, displayName: string): Promise<JoinResult> {
-  return backendJson<JoinResult>(`/classroom/join/${code}`, {
-    method: "POST",
-    body: JSON.stringify({ display_name: displayName }),
+export function joinClass(code: string, displayName: string): Promise<ApiResult<JoinResult>> {
+  return bffClient.post<JoinResult>(`/api/backend/classroom/join/${code}`, {
+    display_name: displayName,
   });
 }

@@ -58,14 +58,14 @@ export default function NotificationsPage() {
   useEffect(() => {
     let cancelled = false;
 
-    fetchMyNotifications()
-      .then((items) => {
-        if (cancelled) return;
-        setLoad({ status: "ready", items });
-      })
-      .catch(() => {
-        if (!cancelled) setLoad({ status: "error" });
-      });
+    fetchMyNotifications().then((result) => {
+      if (cancelled) return;
+      if (result.ok) {
+        setLoad({ status: "ready", items: result.data });
+      } else {
+        setLoad({ status: "error" });
+      }
+    });
 
     return () => {
       cancelled = true;
@@ -85,43 +85,35 @@ export default function NotificationsPage() {
   }
 
   async function handleMarkOneRead(notificationId: number) {
-    try {
-      const updated = await markOneRead(notificationId);
-      if (updated.read_at) {
-        applyRead([updated.id], updated.read_at);
-        broadcastNotificationsRead();
-      }
-    } catch {
-      // 읽음 처리 실패는 이동을 막지 않는다 — 다음에 다시 눌러 재시도할 수 있다.
+    // 읽음 처리 실패는 이동을 막지 않는다 — 다음에 다시 눌러 재시도할 수 있다.
+    const result = await markOneRead(notificationId);
+    if (result.ok && result.data.read_at) {
+      applyRead([result.data.id], result.data.read_at);
+      broadcastNotificationsRead();
     }
   }
 
   async function handleMarkGroupRead(ids: number[]) {
     if (ids.length === 0) return;
-    try {
-      await markManyRead(ids);
+    // 읽음 처리 실패는 이동을 막지 않는다 — 다음에 다시 눌러 재시도할 수 있다.
+    const result = await markManyRead(ids);
+    if (result.ok) {
       applyRead(ids, new Date().toISOString());
       broadcastNotificationsRead();
-    } catch {
-      // 읽음 처리 실패는 이동을 막지 않는다 — 다음에 다시 눌러 재시도할 수 있다.
     }
   }
 
   async function handleMarkAllRead() {
     setMarkingAll(true);
-    try {
-      await markAllRead();
-      if (load.status === "ready") {
-        const now = new Date().toISOString();
-        const unreadIds = load.items.filter((n) => n.read_at === null).map((n) => n.id);
-        applyRead(unreadIds, now);
-        broadcastNotificationsRead();
-      }
-    } catch {
-      // 실패해도 화면은 그대로 — 다시 눌러 재시도할 수 있다.
-    } finally {
-      setMarkingAll(false);
+    // 실패해도 화면은 그대로 — 다시 눌러 재시도할 수 있다.
+    const result = await markAllRead();
+    if (result.ok && load.status === "ready") {
+      const now = new Date().toISOString();
+      const unreadIds = load.items.filter((n) => n.read_at === null).map((n) => n.id);
+      applyRead(unreadIds, now);
+      broadcastNotificationsRead();
     }
+    setMarkingAll(false);
   }
 
   if (load.status === "loading") {

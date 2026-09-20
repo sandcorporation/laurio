@@ -89,12 +89,11 @@ export default function ClassTemplatePreviewPage() {
     event.preventDefault();
     setImportError(null);
     setImporting(true);
-    try {
-      const newClass = await importClassTemplate(shareCode, name.trim());
-      router.push(`/classes/${newClass.id}`);
-    } catch {
-      setImportError("가져오지 못했습니다. 잠시 후 다시 시도해주세요.");
-    } finally {
+    const result = await importClassTemplate(shareCode, name.trim());
+    if (result.ok) {
+      router.push(`/classes/${result.data.id}`);
+    } else {
+      setImportError(result.detail);
       setImporting(false);
     }
   }
@@ -102,14 +101,13 @@ export default function ClassTemplatePreviewPage() {
   async function handleTakedown() {
     setTakedownError(null);
     setTakingDown(true);
-    try {
-      await takedownClassTemplate(shareCode);
+    const result = await takedownClassTemplate(shareCode);
+    if (result.ok) {
       reload();
-    } catch {
-      setTakedownError("내리지 못했습니다. 잠시 후 다시 시도해주세요.");
-    } finally {
-      setTakingDown(false);
+    } else {
+      setTakedownError(result.detail);
     }
+    setTakingDown(false);
   }
 
   return (

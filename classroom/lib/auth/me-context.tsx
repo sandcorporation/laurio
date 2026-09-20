@@ -13,33 +13,49 @@
 // 않는다는 것은 `useUnreadCount`가 이 Context의 `status`를 보고 판단하는
 // 문제이지, 조회가 하나냐 둘이냐와는 무관하다. 합치기 전에도 후에도 `status`가
 // `"ready"`가 되기 전에는 개수를 묻지 않는다.
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+//
+// 공유 클라이언트 위에 선다(#462) — `unauthorizedIsAnswer: true`를 준다:
+// 이 Provider는 `/login`·`/join/{code}`처럼 로그인 없이도 열리는 화면에서도
+// 마운트되므로(RootLayout), 익명 방문자의 401을 `bffClient`가 곧장
+// 로그인으로 튕기면 그 화면 자체가 열리지 않는다(공개 앱
+// `notification-bell.tsx`의 같은 경고).
+import { createContext, useContext, useMemo, type ReactNode } from "react";
 
-import { backendJson } from "@/lib/backend/client";
+import { useBackendQuery } from "@codemit/bff-client";
+
+import { bffClient } from "@/lib/bff/client";
 
 export type MeState =
   | { status: "loading" }
   | { status: "error" }
   | { status: "ready"; userId: number; username: string; email: string };
 
+type MeOut = { id: number; username: string; email: string };
+
 const MeContext = createContext<MeState | null>(null);
 
 export function MeProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<MeState>({ status: "loading" });
+  const { state: queryState } = useBackendQuery<MeOut>(bffClient, "/api/backend/accounts/me", {
+    unauthorizedIsAnswer: true,
+  });
 
-  useEffect(() => {
-    let cancelled = false;
-    backendJson<{ id: number; username: string; email: string }>("/accounts/me")
-      .then(({ id, username, email }) => {
-        if (!cancelled) setState({ status: "ready", userId: id, username, email: email ?? "" });
-      })
-      .catch(() => {
-        if (!cancelled) setState({ status: "error" });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // useMemo 없이 매 렌더 새 객체를 만들면 이 값을 그대로 쓰는 소비자
+  // (`useEventStream`의 `isReady` 판정 등)가 불필요하게 다시 돈다 — 이
+  // Context 는 트리 전체가 나눠 읽으므로 그 값이 특히 잘 퍼진다(#462 코드 리뷰).
+  const state: MeState = useMemo(
+    () =>
+      queryState.status === "loading"
+        ? { status: "loading" }
+        : queryState.status === "error"
+          ? { status: "error" }
+          : {
+              status: "ready",
+              userId: queryState.data.id,
+              username: queryState.data.username,
+              email: queryState.data.email ?? "",
+            },
+    [queryState],
+  );
 
   return <MeContext.Provider value={state}>{children}</MeContext.Provider>;
 }
