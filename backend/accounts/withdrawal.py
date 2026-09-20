@@ -220,36 +220,18 @@ def execute_withdrawal(user) -> Withdrawal:
     verification = getattr(user, "verification", None)
     if verification is not None:
         # 실명·생년월일을 지우기 **전에** 거래 이력을 확인해야 한다 — 순서를
-        # 바꾸면 옮길 값이 이미 사라진 뒤에 옮기려는 꼴이 된다.
+        # 바꾸면 옮길 값이 이미 사라진 뒤에 옮기려는 꼴이 된다. 무엇을 비우고
+        # 보존하는지는 여기서 모른다(#470) — `verification.purge.purge_identity`가
+        # 그 유일한 자리이고, 휴면 파기(`accounts.dormancy._purge_dormant_identity`)도
+        # 같은 함수를 부른다.
+        # APP-BOUNDARY-EXCEPTION: 파기 절차를 그 앱의 서비스 함수가 든다(#470)
+        from verification.purge import purge_identity
+
         basis = _transaction_basis(user)
-        if basis is not None:
-            # APP-BOUNDARY-EXCEPTION: 보존할 실명을 본인확인 기록에서 옮긴다
-            from verification.models import (
-                RETAINED_IDENTITY_RETENTION_PERIOD,
-                RetainedIdentity,
-            )
+        purge_identity(verification, as_of=now, cause="withdrawal", transaction_basis=basis)
 
-            reason, retained_because_id = basis
-            retained = RetainedIdentity(
-                user=user,
-                reason=reason,
-                retained_because_id=retained_because_id,
-                retained_until=now + RETAINED_IDENTITY_RETENTION_PERIOD,
-            )
-            retained.real_name = verification.real_name
-            retained.birth_date = verification.birth_date
-            retained.save()
-
-        verification.status = verification.Status.WITHDRAWN
-        verification.reason = "탈퇴로 신원이 파기되었습니다."
-        verification.real_name_encrypted = ""
-        verification.birth_date_encrypted = ""
-        verification.ci_encrypted = ""
-        verification.ci_hash = ""
-        verification.di_encrypted = ""
-        verification.verified_at = None
-        verification.save()
-
+    # verification이 없어도(한 번도 본인확인하지 않은 계정) 전화번호는 지운다 —
+    # purge_identity는 Verification이 있을 때만 불리므로 이 줄은 그 밖에 있다.
     PhoneContact.objects.filter(user=user).delete()
 
     sponsor_profile = getattr(user, "sponsor_profile", None)

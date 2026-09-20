@@ -187,6 +187,8 @@ class RetainedIdentity(models.Model):
     **「거래가 있었다」의 판정 기준은 `accounts.withdrawal._transaction_basis`
     한 곳에만 있다** — 「탈퇴할 수 있는가」(`accounts.withdrawal.blocking_reasons`,
     진행 중인가)와는 다른 질문(있었는가)이라는 것이 이 모듈 분리로 드러난다.
+    이 행을 실제로 만드는 자리는 `verification.purge.purge_identity`(#470) —
+    탈퇴와 휴면 파기가 그 함수를 통해서만 이 행을 만든다.
     """
 
     class Reason(models.TextChoices):

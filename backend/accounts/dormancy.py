@@ -9,10 +9,13 @@
 비활성화되지 않고 로그인도 그대로 된다). 돌아와서 개최·제출을 하려 할 때
 본인확인을 한 번 더 요구받을 뿐이다(ADR-0011의 "행위 시점" 원칙 그대로).
 
-**같은 판정처를 재사용한다.** 거래가 있었으면 실명을 `RetainedIdentity`로
-옮기는 것(`accounts.withdrawal._transaction_basis`)과, 진행 중인 거래가 있으면
-건드리지 않는 것(`accounts.withdrawal.blocking_reasons`)은 `Withdrawal`이 이미
-푼 문제와 같다 — 갈라 두면 언젠가 두 경로가 다른 답을 하게 된다.
+**같은 판정처·같은 파기 절차를 재사용한다.** 거래가 있었는가(`accounts.
+withdrawal._transaction_basis`)와 진행 중인 거래가 있으면 건드리지 않는 것
+(`accounts.withdrawal.blocking_reasons`)은 `Withdrawal`이 이미 푼 문제와 같다 —
+갈라 두면 언젠가 두 경로가 다른 답을 하게 된다. 실제로 무엇을 비우고 보존하는지
+(`Verification`의 8 필드, `RetainedIdentity` 생성)도 `verification.purge.
+purge_identity`(#470) 한 곳뿐이다 — `execute_withdrawal`과 이 모듈은 그 함수를
+`cause`로만 구별해 부른다.
 
 두 스캔은 core.scans 등록부의 항목이다(#138) — `identity-dormancy-purge` 와
 `retained-identity-purge`. 마지막 행위 시각은 저장하지 않고 후보 쿼리가 SQL 에서
@@ -84,10 +87,14 @@ def _purge_dormant_identity(verification, as_of, ctx):
     거의 도달하지 않는 방어선이다: Contest 한 사이클(최대 몇 주)이 2년보다 훨씬
     짧아, 그 안에 스케줄러가 자동으로 정리한다(ADR-0003). 걸리면 이번 스캔에서는
     건너뛰고 다음 스캔이 다시 본다 — 파기하지 않는 쪽 실수가 되돌리기 쉽다.
+
+    무엇을 비우고 보존하는지는 여기서 모른다(#470) — `verification.purge.
+    purge_identity`가 그 유일한 자리이고, `execute_withdrawal`도 같은 함수를
+    부른다.
     """
 
-    # APP-BOUNDARY-EXCEPTION: 파기 대상이 본인확인 기록 자체다
-    from verification.models import RETAINED_IDENTITY_RETENTION_PERIOD, RetainedIdentity, Verification
+    # APP-BOUNDARY-EXCEPTION: 파기 절차를 그 앱의 서비스 함수가 든다(#470)
+    from verification.purge import purge_identity
 
     user = verification.user
     if blocking_reasons(user):
@@ -95,28 +102,7 @@ def _purge_dormant_identity(verification, as_of, ctx):
 
     with transaction.atomic():
         basis = _transaction_basis(user)
-        if basis is not None and not RetainedIdentity.objects.filter(user=user).exists():
-            reason, retained_because_id = basis
-            retained = RetainedIdentity(
-                user=user,
-                reason=reason,
-                retained_because_id=retained_because_id,
-                retained_until=as_of + RETAINED_IDENTITY_RETENTION_PERIOD,
-            )
-            retained.real_name = verification.real_name
-            retained.birth_date = verification.birth_date
-            retained.save()
-
-        verification.status = Verification.Status.EXPIRED
-        verification.reason = "2년간 행위가 없어 신원이 파기되었습니다."
-        verification.real_name_encrypted = ""
-        verification.birth_date_encrypted = ""
-        verification.ci_encrypted = ""
-        verification.ci_hash = ""
-        verification.di_encrypted = ""
-        verification.verified_at = None
-        verification.save()
-
+        purge_identity(verification, as_of=as_of, cause="dormancy", transaction_basis=basis)
         PhoneContact.objects.filter(user=user).delete()
 
     return {"user_id": user.id, "verification_id": verification.id}
