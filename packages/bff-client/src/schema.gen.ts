@@ -428,8 +428,8 @@ export interface paths {
         /**
          * List Members
          * @description 강사만 본다 — 참여자는 자기 클래스든 남의 클래스든 명단에 닿지
-         *     못한다(#281 AC "참여자는 남의 명단을 볼 수 없다"), `_get_owned_class_or_404`가
-         *     강사가 아닌 모든 요청을 404로 돌리는 것과 같은 문이다.
+         *     못한다(#281 AC "참여자는 남의 명단을 볼 수 없다"), `instructor_scope.
+         *     class_scope`가 강사가 아닌 모든 요청을 404로 돌리는 것과 같은 문이다.
          */
         get: operations["classroom_api_list_members"];
         put?: never;
@@ -759,9 +759,11 @@ export interface paths {
          *     이유).
          *
          *     **대상 클래스가 보관됐으면 403이다**(#326 AC "보관된 클래스에서는
-         *     가져올 수 없다", #438) — `classroom.participation.assert_class_mutable`이
+         *     가져올 수 없다", #438) — `instructor_scope.class_scope(..., write=True)`가
          *     `problem_templates.import_template`과 같은 규칙을 여기서도 지킨다: 보관은
-         *     읽기 전용이라는 뜻이라 복사도 예외가 아니다.
+         *     읽기 전용이라는 뜻이라 복사도 예외가 아니다. 원본은 읽기만 하므로
+         *     `write=False`다 — 보관된 클래스에서 다른 곳으로 복사해 가져오는 것은
+         *     막지 않는다(위 `list_importable_problems`와 같은 원칙).
          */
         post: operations["classroom_api_copy_problem"];
         delete?: never;
@@ -862,8 +864,10 @@ export interface paths {
         /**
          * Publish Template
          * @description 자기 문제를 템플릿으로 공개한다(#316). 원본 소유권 검사는 강사 전용
-         *     엔드포인트와 같은 `_get_owned_class_or_404`/`_get_owned_problem_or_404`를
-         *     그대로 쓴다 — 남의 문제면 404다.
+         *     엔드포인트와 같은 강사 범위(`instructor_scope.problem_scope`)를 그대로
+         *     쓴다 — 남의 문제면 404다. 공개는 원본을 바꾸지 않는 사본을 뜨는 것이라
+         *     `classroom.participation` 「열어 두는 것」의 "클래스 템플릿 공개"와 같은
+         *     이유로 `write=False`다.
          *
          *     **같은 문제에 살아 있는 템플릿이 이미 있으면 새로 만들지 않는다**(#333
          *     AC) — 그 템플릿을 200으로 그대로 돌려준다. 새로 만들었을 때만 201이다.
@@ -945,7 +949,9 @@ export interface paths {
          * Publish Class Template
          * @description 자기 클래스를 통째로 템플릿으로 공개한다(#319) — 문제들과 그 순서,
          *     각 문제의 체크리스트가 함께 담긴다. 소유권 검사는 문제 템플릿과 같은
-         *     `_get_owned_class_or_404`를 그대로 쓴다 — 남의 클래스면 404다.
+         *     강사 범위(`instructor_scope.class_scope`)를 그대로 쓴다 — 남의 클래스면
+         *     404다. 공개는 원본을 바꾸지 않으므로 `publish_template`과 같은 이유로
+         *     `write=False`다.
          *
          *     **같은 클래스에 살아 있는 템플릿이 이미 있으면 새로 만들지 않는다**(#333
          *     AC) — `publish_template`과 같은 규율, 200/201로 새로 만들었는지를 구별한다.
@@ -992,7 +998,7 @@ export interface paths {
          * @description 「클래스 설정」과 문제 만들기·편집이 선택지를 채우는 자리(#401) —
          *     예전 전역 `GET /scoring-models`(#285)를 대신한다: 키가 클래스에 있으므로
          *     "이 클래스의 키로 실제로 쓸 수 있는 모델"은 클래스 기준으로만 답할 수
-         *     있다. 남의 클래스는 404다(`_get_owned_class_or_404`와 같은 규율).
+         *     있다. 남의 클래스는 404다(`instructor_scope.class_scope`와 같은 규율).
          */
         get: operations["classroom_api_list_class_scoring_models"];
         put?: never;
@@ -1180,7 +1186,7 @@ export interface paths {
          *
          *     **보관된 클래스로는 가져올 수 없다**(#438) — 보관은 읽기 전용이라는
          *     뜻이고, 가져오기는 그 클래스에 새 내용을 만드는 일이다
-         *     (`classroom.participation.assert_class_mutable`, `Class.archived_at`
+         *     (`instructor_scope.class_scope(..., write=True)`, `Class.archived_at`
          *     docstring).
          */
         post: operations["classroom_template_api_import_template"];

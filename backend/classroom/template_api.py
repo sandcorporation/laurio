@@ -22,9 +22,9 @@ from ninja.pagination import PageNumberPagination, paginate
 
 from accounts.middleware import jwt_auth
 
-from .api import _get_owned_class_or_404, _get_owned_problem_or_404, _serialize_class, _serialize_problem
+from .api import _serialize_class, _serialize_problem
+from .instructor_scope import class_scope, problem_scope
 from .models import ClassTemplate, ProblemTemplate, ProblemTemplateReport
-from .participation import assert_class_mutable
 from .schemas import (
     ClassOut,
     ClassTemplateListItemOut,
@@ -104,14 +104,15 @@ def publish_template(
     request, class_id: int, problem_id: int, payload: PublishTemplateIn
 ):
     """자기 문제를 템플릿으로 공개한다(#316). 원본 소유권 검사는 강사 전용
-    엔드포인트와 같은 `_get_owned_class_or_404`/`_get_owned_problem_or_404`를
-    그대로 쓴다 — 남의 문제면 404다.
+    엔드포인트와 같은 강사 범위(`instructor_scope.problem_scope`)를 그대로
+    쓴다 — 남의 문제면 404다. 공개는 원본을 바꾸지 않는 사본을 뜨는 것이라
+    `classroom.participation` 「열어 두는 것」의 "클래스 템플릿 공개"와 같은
+    이유로 `write=False`다.
 
     **같은 문제에 살아 있는 템플릿이 이미 있으면 새로 만들지 않는다**(#333
     AC) — 그 템플릿을 200으로 그대로 돌려준다. 새로 만들었을 때만 201이다."""
 
-    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
-    problem = _get_owned_problem_or_404(class_obj, problem_id)
+    problem = problem_scope(class_id, problem_id, request.auth_user.id, write=False).problem
 
     template, created = publish_problem_as_template(
         problem,
@@ -179,12 +180,11 @@ def import_template(request, share_code: str, payload: ImportTemplateIn):
 
     **보관된 클래스로는 가져올 수 없다**(#438) — 보관은 읽기 전용이라는
     뜻이고, 가져오기는 그 클래스에 새 내용을 만드는 일이다
-    (`classroom.participation.assert_class_mutable`, `Class.archived_at`
+    (`instructor_scope.class_scope(..., write=True)`, `Class.archived_at`
     docstring)."""
 
     template = _get_visible_template_or_404(share_code)
-    target_class = _get_owned_class_or_404(payload.target_class_id, request.auth_user.id)
-    assert_class_mutable(target_class)
+    target_class = class_scope(payload.target_class_id, request.auth_user.id, write=True).class_obj
 
     problem = import_problem_template(template, target_class)
     return 201, _serialize_problem(problem, target_class)
@@ -305,12 +305,14 @@ def _get_class_template_by_share_code_or_404(share_code: str) -> ClassTemplate:
 def publish_class_template(request, class_id: int, payload: PublishTemplateIn):
     """자기 클래스를 통째로 템플릿으로 공개한다(#319) — 문제들과 그 순서,
     각 문제의 체크리스트가 함께 담긴다. 소유권 검사는 문제 템플릿과 같은
-    `_get_owned_class_or_404`를 그대로 쓴다 — 남의 클래스면 404다.
+    강사 범위(`instructor_scope.class_scope`)를 그대로 쓴다 — 남의 클래스면
+    404다. 공개는 원본을 바꾸지 않으므로 `publish_template`과 같은 이유로
+    `write=False`다.
 
     **같은 클래스에 살아 있는 템플릿이 이미 있으면 새로 만들지 않는다**(#333
     AC) — `publish_template`과 같은 규율, 200/201로 새로 만들었는지를 구별한다."""
 
-    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
     template, created = publish_class_as_template(
         class_obj,
         published_by_id=request.auth_user.id,
