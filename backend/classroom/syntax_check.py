@@ -44,12 +44,22 @@ import sys
 import zipfile
 from dataclasses import dataclass
 
+from core.llm_scoring import RequirementInput, RequirementVerdict, SourceFile
 from core.source_selection import ALLOWED_EXTENSIONS, EXCLUDED_DIR_FRAGMENTS
 
 #: 판정 기록에서 강사가 만든 체크리스트 항목(`ChecklistItem.id`, 항상 양의
 #: autoincrement 값이다)과 절대 겹치지 않는 고정 식별자 — 화면·API·채점
 #: 요청이 이 값으로 "이건 플랫폼 기본 항목이다"를 구별한다.
 SYNTAX_CHECK_ITEM_ID = -1
+
+#: 문법 검사 기본 항목을 AI에게 물을 때 쓰는 요구사항 문구(#409, #464로 여기
+#: 옮겨왔다 — `SyntaxCheckPass`가 프롬프트 조각·합성 요구 항목을 함께 갖는
+#: 자리라서다). 강사가 만든 체크리스트 항목과 나란히 requirement_id로 판정을
+#: 받되, 그 자체가 무엇을 묻는지는 이 고정 문구로 정해진다(강사가 바꿀 수 없다).
+SYNTAX_CHECK_AI_REQUIREMENT_TEXT = (
+    "아래 「문법 검사 대상 파일」에 나열된 파일들이 프로그램으로서 구문 오류 없이 "
+    "읽히는가(실행 여부가 아니라 구문만 본다)"
+)
 
 #: 파일 하나의 크기 상한(#408 AC "크기·시간 제한에 걸린 파일이 워커를 멈추지
 #: 않는다"). 이 값을 넘으면 파서가 판정하지 않는다 — AI가 대신 본다(#409).
@@ -389,3 +399,106 @@ def build_ai_verdict(*, is_met: bool, reasoning: str) -> dict:
     달리 파일·줄을 구조로 뽑아낼 신뢰할 근거가 없다)."""
 
     return {"is_met": is_met, "reasoning": reasoning, "judged_by": "ai", "findings": []}
+
+
+@dataclass(frozen=True)
+class SyntaxCheckPass:
+    """이 시도의 문법 검사 기본 항목 한 번의 판정 경로 — 파서 실행·AI 폴백
+    결정·합성 요구 항목·프롬프트 조각·응답에서 판정 뽑기를 한 자리에 모은다
+    (#464). `classroom.scoring.score_classroom_submission_once`가 세 토막으로
+    나눠 갖고 있던 것이 이 객체 하나를 거쳐 가게 된다 — 켜짐·꺼짐·파서 판정·
+    AI 판정 네 갈래는 그대로다.
+
+    `resolved`가 채워져 있으면(꺼짐, 또는 파서가 이미 끝냈다) 이 시도는 더
+    묻지 않는다. 비어 있으면 `unresolved`에 담긴 파일들을 채점 요청에 얹어
+    AI에게 물어야 한다 — `needs_ai_fallback`이 그 갈림길이다."""
+
+    resolved: dict | None
+    unresolved: tuple[SyntaxCheckFile, ...] = ()
+
+    @property
+    def needs_ai_fallback(self) -> bool:
+        return bool(self.unresolved)
+
+    def checklist_line(self) -> str | None:
+        """체크리스트 나열에 끼워 넣을 한 줄 — AI에게 물을 파일이 있을 때만
+        존재한다(`_build_prompt`가 그 자리에 그대로 이어 붙인다)."""
+
+        if not self.needs_ai_fallback:
+            return None
+        return (
+            f"- requirement_id={SYNTAX_CHECK_ITEM_ID} (필수, 채점 지침과 무관): "
+            f"{SYNTAX_CHECK_AI_REQUIREMENT_TEXT}"
+        )
+
+    def source_section_lines(self) -> list[str]:
+        """「제출된 소스」 뒤에 이어 붙일 "문법 검사 대상 파일" 구획 — AI에게
+        물을 파일이 있을 때만 뜻이 있다."""
+
+        if not self.needs_ai_fallback:
+            return []
+        lines = [
+            "",
+            f"문법 검사 대상 파일 — requirement_id={SYNTAX_CHECK_ITEM_ID}는 오직 아래 "
+            "파일들만 보고 판정하세요(위 「제출된 소스」의 다른 파일은 이 항목과 무관합니다):",
+        ]
+        for f in self.unresolved:
+            lines.append(f"# {f.path}")
+            lines.append(f.content if f.content.strip() else "(빈 파일)")
+        return lines
+
+    def synthetic_requirement(self) -> RequirementInput | None:
+        """벤더 요청에 얹을 합성 요구 항목 — AI에게 물을 파일이 있을 때만."""
+
+        if not self.needs_ai_fallback:
+            return None
+        return RequirementInput(
+            requirement_id=SYNTAX_CHECK_ITEM_ID,
+            text=SYNTAX_CHECK_AI_REQUIREMENT_TEXT,
+            grade="필수",
+            self_reported_met=False,
+            evidence=[],
+        )
+
+    def extra_source_files(self, *, asset_id: int, asset_label: str) -> list[SourceFile]:
+        """파서가 판정하지 못해 AI에게 넘긴 파일만 딱 그만큼 소스 목록에 더한다
+        — 프롬프트(`source_section_lines`)가 이 항목을 그 파일들로만 판정하라고
+        이미 못박았으므로, 벤더로 나가는 실제 정보와도 맞아떨어진다."""
+
+        if not self.needs_ai_fallback:
+            return []
+        return [
+            SourceFile(path=f.path, content=f.content, asset_id=asset_id, asset_label=asset_label)
+            for f in self.unresolved
+        ]
+
+    def resolve(self, verdicts: list[RequirementVerdict]) -> dict | None:
+        """채점 응답에서 이 항목의 최종 판정을 뽑는다 — 꺼졌으면 `None`, 파서가
+        이미 끝냈으면 그 판정, AI에게 물었으면 응답에서 뽑아 만든다.
+
+        `OpenAIScoringAdapter`는 요청에 실린 모든 requirement_id의 판정이
+        없으면 예외를 던지므로(그 클래스 docstring), `needs_ai_fallback`이면
+        `verdicts`에 이 항목이 반드시 있다."""
+
+        if not self.needs_ai_fallback:
+            return self.resolved
+        ai_verdict = next(v for v in verdicts if v.requirement_id == SYNTAX_CHECK_ITEM_ID)
+        return build_ai_verdict(is_met=ai_verdict.is_met, reasoning=ai_verdict.reasoning)
+
+
+#: 문법 검사가 꺼진 문제의 판정 경로 — 파서도 AI도 묻지 않는다.
+DISABLED_SYNTAX_CHECK = SyntaxCheckPass(resolved=None)
+
+
+def run_syntax_check(raw_source: bytes, *, enabled: bool) -> SyntaxCheckPass:
+    """제출 원본으로 문법 검사 기본 항목의 판정 경로를 결정한다(#408/#409) —
+    파서가 오류를 찾았거나 판정 못한 파일이 없으면 그 자리에서 끝나고
+    (`resolved`가 채워진다), 판정 못한 파일이 남았을 때만 AI에게 넘긴다
+    (`unresolved`)."""
+
+    if not enabled:
+        return DISABLED_SYNTAX_CHECK
+    outcome = run_parser_syntax_check(raw_source)
+    if outcome.has_error or not outcome.unresolved:
+        return SyntaxCheckPass(resolved=build_parser_verdict(outcome))
+    return SyntaxCheckPass(resolved=None, unresolved=tuple(outcome.unresolved))

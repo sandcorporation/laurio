@@ -314,8 +314,7 @@ def test_oversized_python_file_does_not_hang_or_crash_the_worker(client, db):
     파서가 판정하지 못한 파일은 AI 판정으로 넘어간다(#409 AC "크기 초과·파서
     실패 파일도 AI 판정으로 넘어간다"), 워커가 멈추거나 죽지 않는다."""
 
-    from classroom.scoring import SYNTAX_CHECK_AI_REQUIREMENT_TEXT
-    from classroom.syntax_check import MAX_SYNTAX_CHECK_FILE_BYTES
+    from classroom.syntax_check import MAX_SYNTAX_CHECK_FILE_BYTES, SYNTAX_CHECK_AI_REQUIREMENT_TEXT
 
     # FakeClassroomScoringAdapter는 항목의 문구가 소스에 그대로 등장하는지로
     # 판정한다 — AI에게 넘어간 기본 항목도 같은 규칙이라, 그 문구를 파일에
