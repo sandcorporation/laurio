@@ -38,8 +38,9 @@ CLASS_ARCHIVED_MESSAGE = "이 클래스는 보관되어 더 이상 바꿀 수 �
 def assert_class_mutable(class_obj: Class) -> None:
     """이 클래스에 새 내용을 만들거나 바꿀 수 있는가 — 보관되면 403으로
     거절한다(#438). 대상이 강사 자신의 클래스인지는 호출부가
-    `_get_owned_class_or_404`로 이미 확인했다는 전제 위에 선다 — 이 함수는
-    소유권이 아니라 보관 여부만 본다."""
+    `classroom.instructor_scope.class_scope`/`problem_scope`로 이미
+    확인했다는 전제 위에 선다(#463) — 이 함수는 소유권이 아니라 보관
+    여부만 보고, 그 두 함수가 `write=True`일 때만 이 함수를 부른다."""
 
     if class_obj.archived_at is not None:
         raise HttpError(403, CLASS_ARCHIVED_MESSAGE)

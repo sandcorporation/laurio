@@ -1,9 +1,13 @@
 """Problem 상태 전이 표 — 열린 문제는 필수 항목을 잃지 않는다 (#440, spec
-#432, `contests.transitions`(#255)와 같은 모양).
+#432, `contests.transitions`(#255)와 같은 모양). 표가 전이를 직접 실행한다
+(#468, spec #461).
 
 핵심 대상: 전이 표(초안→열림, 열림→숨김, 숨김→열림)가 허용하지 않는 전이를
 거절하고, 열린·숨긴 문제의 마지막 필수 항목 삭제·필수 해제를 422로 막으며,
-문제 응답이 지금 가능한 전이와 막힌 이유를 준다.
+문제 응답이 지금 가능한 전이와 막힌 이유를 준다. 아래쪽 절(「화면의 이유와
+거절의 이유가 같다」)은 그 「막힌 이유」가 실제 거절과 갈리지 않는다는 것을
+고정한다 — `classroom.problem_transitions.execute_transition`과
+`available_transitions`가 같은 `PROBLEM_TRANSITIONS`를 읽기 때문이다.
 """
 
 from __future__ import annotations
@@ -271,3 +275,75 @@ def test_archived_class_reports_blocked_transition_regardless_of_status(client, 
     assert len(transitions) == 1
     assert transitions[0]["name"] == "hide"
     assert transitions[0]["blocked_reason"] == "archived"
+
+
+# --- 화면의 이유와 거절의 이유가 같다 (#468 AC) -------------------------------
+#
+# `available_transitions`(GET, 화면이 미리 읽는 자리)가 말하는 blocked_reason과
+# 실제 전이 호출(POST)의 결과가 갈리지 않는다는 것을 고정한다 — 둘 다
+# `classroom.problem_transitions.PROBLEM_TRANSITIONS` 하나를 읽으므로 갈릴 수
+# 없어야 한다.
+
+
+def test_transition_reported_as_open_actually_succeeds(client, db):
+    """`blocked_reason`이 `None`이면(「열 수 있다」) 실제로 그 전이가
+    성공하고, 문제의 새 상태가 GET이 말한 `to_state`와 같다."""
+
+    instructor = login(client)
+    class_id = create_class(client, instructor["access"])
+    problem = create_open_problem(client, instructor["access"], class_id, open=False)
+
+    reported = _get_problem(client, instructor["access"], class_id, problem.id).json()
+    transition = reported["available_transitions"][0]
+    assert transition["blocked_reason"] is None
+
+    response = _open(client, instructor["access"], class_id, problem.id)
+    assert response.status_code == 200
+    assert response.json()["status"] == transition["to_state"]
+
+
+def test_transition_reported_as_blocked_by_no_required_item_is_rejected_for_the_same_reason(
+    client, db
+):
+    """`blocked_reason`이 "no_required_item"이면 실제 호출도 그 이유(필수
+    항목 없음)로 거절된다 — `NO_REQUIRED_ITEM_MESSAGE` 문구는
+    `create_problem`의 「바로 연다」와 같은 자리(`problem_transitions.
+    NO_REQUIRED_ITEM_MESSAGE`)에서 온다."""
+
+    instructor = login(client)
+    class_id = create_class(client, instructor["access"])
+    created = client.post(
+        f"{CLASSES_URL}/{class_id}/problems",
+        data={"title": "체크리스트 없음", "submission_formats": ["repository"]},
+        content_type="application/json",
+        **auth_header(instructor["access"]),
+    )
+    assert created.status_code == 201
+    problem_id = created.json()["id"]
+
+    reported = _get_problem(client, instructor["access"], class_id, problem_id).json()
+    transition = reported["available_transitions"][0]
+    assert transition["blocked_reason"] == "no_required_item"
+
+    response = _open(client, instructor["access"], class_id, problem_id)
+    assert response.status_code == 400
+    assert response.json()["detail"] == "필수 항목이 하나도 없는 문제는 열 수 없습니다."
+
+
+def test_transition_reported_as_blocked_by_archived_is_rejected_for_the_same_reason(client, db):
+    """`blocked_reason`이 "archived"면 실제 호출도 보관 때문에 거절된다 —
+    다만 그 거절은 `execute_transition`이 아니라 라우트 첫 줄의 강사 범위
+    (`instructor_scope.problem_scope(..., write=True)`)에서 먼저 난다(403).
+    `execute_transition` 자신은 보관을 모른다(모듈 docstring)."""
+
+    instructor = login(client)
+    class_id = create_class(client, instructor["access"])
+    problem = create_open_problem(client, instructor["access"], class_id)
+    archive_class(client, instructor["access"], class_id)
+
+    reported = _get_problem(client, instructor["access"], class_id, problem.id).json()
+    transition = reported["available_transitions"][0]
+    assert transition["blocked_reason"] == "archived"
+
+    response = _hide(client, instructor["access"], class_id, problem.id)
+    assert response.status_code == 403

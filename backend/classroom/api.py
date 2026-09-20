@@ -99,22 +99,22 @@ from .schemas import (
 )
 from . import pending_scoring
 from .events import publish_attempt_submitted
+from .instructor_scope import class_scope, owned_problem_or_404, problem_scope
 from .participation import (
     SUBMIT_BLOCKED_ARCHIVED,
     SUBMIT_BLOCKED_EXPELLED,
     SUBMIT_BLOCKED_HIDDEN,
     SUBMIT_BLOCKED_VIEWING_AS_INSTRUCTOR,
-    assert_class_mutable,
     instructor_can_submit,
     participant_membership_blocked_reason,
     participant_submit_blocked_reason,
     visible_problems_queryset,
 )
 from .problem_transitions import (
-    assert_has_required_item,
+    NO_REQUIRED_ITEM_MESSAGE,
     assert_required_item_floor,
-    assert_transition_from_state,
     available_transitions,
+    execute_transition,
 )
 from .scoring import check_scoring_key
 from .scoring_model_catalog import get_scoring_model_catalog
@@ -546,28 +546,13 @@ def _serialize_instructor_submission(
     )
 
 
-def _get_owned_class_or_404(class_id: int, user_id: int) -> Class:
-    """강사 본인의 클래스만 돌려준다. 남의 것은 「없다」로 답한다 — 목록에도
-    상세에도 나오지 않아야 한다는 AC(#278)를 403이 아니라 404로 지킨다."""
-
-    try:
-        return Class.objects.get(id=class_id, instructor_id=user_id)
-    except Class.DoesNotExist as exc:
-        raise HttpError(404, "클래스를 찾을 수 없습니다.") from exc
-
-
-def _get_owned_problem_or_404(classroom_obj: Class, problem_id: int) -> Problem:
-    try:
-        return classroom_obj.problems.get(id=problem_id)
-    except Problem.DoesNotExist as exc:
-        raise HttpError(404, "문제를 찾을 수 없습니다.") from exc
-
-
 # --- Class -------------------------------------------------------------------
 
 
 @router.post("/classes", response={201: ClassOut}, auth=jwt_auth)
 def create_class(request: HttpRequest, payload: ClassIn):
+    # 범위 밖이다 — 아직 없는 자원에는 열 문이 없다(`instructor_scope`의
+    # class_scope/problem_scope는 이미 있는 클래스를 여는 문이다).
     class_obj = Class.objects.create(
         instructor_id=request.auth_user.id,
         name=payload.name,
@@ -613,7 +598,7 @@ def list_joined_classes(request: HttpRequest):
 
 @router.get("/classes/{class_id}", response={200: ClassOut, 404: ErrorOut}, auth=jwt_auth)
 def get_class(request: HttpRequest, class_id: int):
-    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
     return 200, _serialize_class(class_obj)
 
 
@@ -621,7 +606,9 @@ def get_class(request: HttpRequest, class_id: int):
     "/classes/{class_id}", response={200: ClassOut, 404: ErrorOut, 422: ErrorOut}, auth=jwt_auth
 )
 def update_class(request: HttpRequest, class_id: int, payload: ClassPatchIn):
-    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    # 클래스 설정은 보관 뒤에도 고칠 수 있다(`classroom.participation`
+    # 모듈 docstring 「열어 두는 것」) — write=False, 소유권·존재만 본다.
+    class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
 
     if payload.default_model is not None:
         _validate_scoring_model_choice(
@@ -682,7 +669,9 @@ def set_class_openai_key(request: HttpRequest, class_id: int, payload: OpenAIKey
     상태를 "미검증"으로 남긴다 — 막으려는 것은 오타이지 벤더의 그 순간
     가용성이 아니다."""
 
-    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    # 클래스 설정과 같은 이유로 보관 뒤에도 키는 고칠 수 있다(`update_class`
+    # 와 같은 판단, `classroom.participation` 「열어 두는 것」).
+    class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
 
     raw_key = payload.api_key.strip()
     if not raw_key:
@@ -711,7 +700,10 @@ def copy_class_view(request: HttpRequest, class_id: int):
     순서 그대로 따라오고, 참여자·제출물·Score·OpenAI 키는 따라오지 않는다
     (`services.copy_class` docstring 참고)."""
 
-    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    # 원본이 보관됐어도 복사해서 새로 여는 것은 막지 않는다(`classroom.
+    # participation` 「열어 두는 것」의 "복사해서 새로 열기") — 새 클래스가
+    # 결과물이지 원본을 바꾸지 않는다.
+    class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
     new_class = copy_class(class_obj, request.auth_user.id)
     return 201, _serialize_class(new_class)
 
@@ -725,9 +717,9 @@ def list_class_scoring_models(request: HttpRequest, class_id: int):
     """「클래스 설정」과 문제 만들기·편집이 선택지를 채우는 자리(#401) —
     예전 전역 `GET /scoring-models`(#285)를 대신한다: 키가 클래스에 있으므로
     "이 클래스의 키로 실제로 쓸 수 있는 모델"은 클래스 기준으로만 답할 수
-    있다. 남의 클래스는 404다(`_get_owned_class_or_404`와 같은 규율)."""
+    있다. 남의 클래스는 404다(`instructor_scope.class_scope`와 같은 규율)."""
 
-    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
     catalog = get_scoring_model_catalog(class_obj)
     return 200, ScoringModelCatalogOut(
         models=[
@@ -754,7 +746,9 @@ def regenerate_join_link(request: HttpRequest, class_id: int):
     순간부터 어떤 클래스도 가리키지 않는다 — 링크가 새어 나갔을 때 강사가
     쓸 수 있는 유일한 조치다."""
 
-    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    # 보관된 클래스라도 링크 재발급 자체는 막지 않는다 — 가입은 `join_class`
+    # 가 보관을 따로 막으므로 여기서 또 막을 이유가 없다.
+    class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
     class_obj.join_code = _generate_join_code()
     class_obj.save(update_fields=["join_code"])
     return 200, JoinLinkOut(join_code=class_obj.join_code)
@@ -767,7 +761,9 @@ def archive_class(request: HttpRequest, class_id: int):
     「Class」). 이미 보관된 클래스를 다시 보관해도 오류를 내지 않는다(멱등,
     `expel_member`와 같은 관용구)."""
 
-    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    # 보관 자체를 여는 동작이라 보관 여부로 스스로를 막을 수 없다(이미
+    # 보관됐어도 멱등하게 통과).
+    class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
     if class_obj.archived_at is None:
         class_obj.archived_at = timezone.now()
         class_obj.save(update_fields=["archived_at"])
@@ -782,7 +778,9 @@ def unarchive_class(request: HttpRequest, class_id: int):
     있다") — `archived_at`을 지우면 그대로 진행중이다, 보관 이력을 따로
     남기지 않는다."""
 
-    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    # 보관을 되돌리는 동작 자체다(`classroom.participation` 「열어 두는
+    # 것」의 "보관 되돌리기") — 보관 여부로 막으면 되돌릴 수 없게 된다.
+    class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
     if class_obj.archived_at is not None:
         class_obj.archived_at = None
         class_obj.save(update_fields=["archived_at"])
@@ -804,7 +802,9 @@ def delete_class(request: HttpRequest, class_id: int):
     클래스에서 공개한 템플릿(`ProblemTemplate`·`ClassTemplate`)은 `Class`를
     가리키지 않는, 공개 시점에 뜬 사본이라 영향받지 않는다(#316·#319)."""
 
-    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    # 클래스 삭제 자체다(`classroom.participation` 「열어 두는 것」) — 제출이
+    # 있으면 아래에서 따로 거절하므로 보관 여부는 이 경로를 막지 않는다.
+    class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
     if ClassroomSubmission.objects.filter(problem__classroom=class_obj).exists():
         raise HttpError(403, "제출이 있는 클래스는 지울 수 없습니다. 대신 보관해주세요.")
     class_obj.delete()
@@ -922,10 +922,10 @@ def _serialize_member(member: ClassMember, *, instructor_id: int) -> MemberOut:
 )
 def list_members(request: HttpRequest, class_id: int):
     """강사만 본다 — 참여자는 자기 클래스든 남의 클래스든 명단에 닿지
-    못한다(#281 AC "참여자는 남의 명단을 볼 수 없다"), `_get_owned_class_or_404`가
-    강사가 아닌 모든 요청을 404로 돌리는 것과 같은 문이다."""
+    못한다(#281 AC "참여자는 남의 명단을 볼 수 없다"), `instructor_scope.
+    class_scope`가 강사가 아닌 모든 요청을 404로 돌리는 것과 같은 문이다."""
 
-    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
     members = class_obj.members.all()
     return 200, [_serialize_member(m, instructor_id=class_obj.instructor_id) for m in members]
 
@@ -939,7 +939,9 @@ def expel_member(request: HttpRequest, class_id: int, member_id: int):
     """행을 지우지 않는다 — 표시만 한다(#281). 이미 내보낸 사람을 다시
     내보내도 오류를 내지 않고 그대로 둔다(멱등)."""
 
-    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    # 보관된 클래스에서도 명단 정리는 열어 둔다 — 새 가입·새 제출처럼 새
+    # 활동을 만드는 것이 아니라 이미 있는 명단을 표시만 바꾸는 것이다.
+    class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
     try:
         member = class_obj.members.get(id=member_id)
     except ClassMember.DoesNotExist as exc:
@@ -1030,7 +1032,7 @@ def get_roster_grid(request: HttpRequest, class_id: int):
     그대로 재사용해 문제 중심 탭(`list_problems`)과 정확히 같은 값을 낸다(AC) —
     계산을 두 번 쓰지 않는다."""
 
-    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
     problems = list(class_obj.problems.prefetch_related("checklist_items").all())
     members = list(class_obj.members.all())
     active_member_ids = _active_member_ids(class_obj)
@@ -1096,8 +1098,7 @@ def create_problem(request: HttpRequest, class_id: int, payload: ProblemIn):
     같은 규칙) 문제 자체를 만들지 않고 거부한다("실패하면 문제도 안
     생긴다")."""
 
-    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
-    assert_class_mutable(class_obj)
+    class_obj = class_scope(class_id, request.auth_user.id, write=True).class_obj
 
     submission_formats = _validate_submission_formats(payload.submission_formats)
 
@@ -1112,7 +1113,7 @@ def create_problem(request: HttpRequest, class_id: int, payload: ProblemIn):
     )
 
     if payload.open and not any(item.required for item in payload.checklist_items):
-        raise HttpError(400, "필수 항목이 하나도 없는 문제는 열 수 없습니다.")
+        raise HttpError(400, NO_REQUIRED_ITEM_MESSAGE)
 
     with transaction.atomic():
         next_order = class_obj.problems.count()
@@ -1143,7 +1144,7 @@ def create_problem(request: HttpRequest, class_id: int, payload: ProblemIn):
 def list_problems(request: HttpRequest, class_id: int):
     """강사 본인의 클래스 문제 전부(초안 + 열림), 순서대로."""
 
-    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
+    class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
     problems = class_obj.problems.prefetch_related("checklist_items").all()
     active_member_ids = _active_member_ids(class_obj)
     blocking_problem_ids = _problem_ids_blocking_deletion(class_obj)
@@ -1167,8 +1168,7 @@ def reorder_problems(request: HttpRequest, class_id: int, payload: ProblemReorde
     다른)에서 405로 막힌다. 이 파일의 라우트 등록 순서가 그래서 이렇다: 정적
     세그먼트 전부 → 동적 `{problem_id}` 전부."""
 
-    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
-    assert_class_mutable(class_obj)
+    class_obj = class_scope(class_id, request.auth_user.id, write=True).class_obj
     problems = {p.id: p for p in class_obj.problems.all()}
 
     if set(payload.problem_ids) != set(problems):
@@ -1209,7 +1209,7 @@ def list_importable_problems(request: HttpRequest, class_id: int):
     곳으로 복사해 가져오는 것과는 무관하다 — 읽기는 보관 뒤에도 남는다는
     같은 원칙이다."""
 
-    _get_owned_class_or_404(class_id, request.auth_user.id)
+    class_scope(class_id, request.auth_user.id, write=False)
 
     problems = (
         Problem.objects.filter(classroom__instructor_id=request.auth_user.id)
@@ -1312,9 +1312,8 @@ def list_my_problems(request: HttpRequest, class_id: int):
 def get_problem(request: HttpRequest, class_id: int, problem_id: int):
     """문제 편집 화면이 초기값을 채우는 자리."""
 
-    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
-    problem = _get_owned_problem_or_404(class_obj, problem_id)
-    return 200, _serialize_problem(problem, class_obj)
+    scope = problem_scope(class_id, problem_id, request.auth_user.id, write=False)
+    return 200, _serialize_problem(scope.problem, scope.class_obj)
 
 
 @router.patch(
@@ -1323,9 +1322,8 @@ def get_problem(request: HttpRequest, class_id: int, problem_id: int):
     auth=jwt_auth,
 )
 def update_problem(request: HttpRequest, class_id: int, problem_id: int, payload: ProblemPatchIn):
-    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
-    problem = _get_owned_problem_or_404(class_obj, problem_id)
-    assert_class_mutable(class_obj)
+    scope = problem_scope(class_id, problem_id, request.auth_user.id, write=True)
+    class_obj, problem = scope.class_obj, scope.problem
 
     submission_formats = (
         _validate_submission_formats(payload.submission_formats)
@@ -1410,9 +1408,10 @@ def delete_problem(request: HttpRequest, class_id: int, problem_id: int):
     함께 지우면 알림이 append-only가 아니게 된다). 공모전의 `Score`·원장에는
     닿지 않는다(강의실과 공모전은 서로 다른 앱 경계, ADR-0037/0039)."""
 
-    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
-    problem = _get_owned_problem_or_404(class_obj, problem_id)
-    assert_class_mutable(class_obj)
+    scope = problem_scope(class_id, problem_id, request.auth_user.id, write=True)
+    class_obj, problem = scope.class_obj, scope.problem
+    # 지울 수 있는가는 소유권·존재·보관과는 다른 축의 판정이다(ADR-0050) —
+    # 「그 문제 × 강사 자신」으로 닫힌 필터라 강사 범위(위)와 합치지 않는다.
     if not _problem_deletable(problem, class_obj):
         raise HttpError(403, "지울 수 없습니다 — 대신 숨겨주세요.")
     # 채점을 걷는 것과 문제를 지우는 것, 둘이 한 트랜잭션이어야 한다 — 둘로
@@ -1436,16 +1435,9 @@ def open_problem(request: HttpRequest, class_id: int, problem_id: int):
     않아 막는다(#283 AC). 전이 표(`classroom.problem_transitions`, #440)가
     「초안에서만」과 「필수 항목이 있어야」 두 조건을 함께 정한다."""
 
-    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
-    problem = _get_owned_problem_or_404(class_obj, problem_id)
-    assert_class_mutable(class_obj)
-
-    assert_transition_from_state("open", problem, wrong_state_message="초안만 열 수 있습니다.")
-    assert_has_required_item(problem, message="필수 항목이 하나도 없는 문제는 열 수 없습니다.")
-
-    problem.status = Problem.Status.OPEN
-    problem.save(update_fields=["status", "updated_at"])
-    return 200, _serialize_problem(problem, class_obj)
+    scope = problem_scope(class_id, problem_id, request.auth_user.id, write=True)
+    problem = execute_transition("open", scope.problem)
+    return 200, _serialize_problem(problem, scope.class_obj)
 
 
 @router.post(
@@ -1458,15 +1450,9 @@ def hide_problem(request: HttpRequest, class_id: int, problem_id: int):
     →숨김만 허용한다: 초안은 애초에 참여자에게 보인 적이 없어 거둘 것이
     없고, 이미 숨긴 문제를 다시 숨기는 것도 뜻이 없다."""
 
-    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
-    problem = _get_owned_problem_or_404(class_obj, problem_id)
-    assert_class_mutable(class_obj)
-
-    assert_transition_from_state("hide", problem, wrong_state_message="열린 문제만 숨길 수 있습니다.")
-
-    problem.status = Problem.Status.HIDDEN
-    problem.save(update_fields=["status", "updated_at"])
-    return 200, _serialize_problem(problem, class_obj)
+    scope = problem_scope(class_id, problem_id, request.auth_user.id, write=True)
+    problem = execute_transition("hide", scope.problem)
+    return 200, _serialize_problem(problem, scope.class_obj)
 
 
 @router.post(
@@ -1479,23 +1465,16 @@ def reopen_problem(request: HttpRequest, class_id: int, problem_id: int):
     되돌린다. `open_problem`과 같은 필수 항목 규칙을 다시 확인한다: 그
     사이 강사가 체크리스트를 비웠으면 통과가 정의되지 않아 열 수 없다."""
 
-    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
-    problem = _get_owned_problem_or_404(class_obj, problem_id)
-    assert_class_mutable(class_obj)
-
-    assert_transition_from_state("reopen", problem, wrong_state_message="숨긴 문제만 다시 열 수 있습니다.")
-    assert_has_required_item(problem, message="필수 항목이 하나도 없는 문제는 열 수 없습니다.")
-
-    problem.status = Problem.Status.OPEN
-    problem.save(update_fields=["status", "updated_at"])
-    return 200, _serialize_problem(problem, class_obj)
+    scope = problem_scope(class_id, problem_id, request.auth_user.id, write=True)
+    problem = execute_transition("reopen", scope.problem)
+    return 200, _serialize_problem(problem, scope.class_obj)
 
 
 # --- Submission (참여자, #286) --------------------------------------------------
 
 
 def _get_member_or_404(class_id: int, user_id: int) -> ClassMember:
-    """강사 전용 엔드포인트의 `_get_owned_class_or_404`와 같은 존재-숨김
+    """강사 전용 엔드포인트의 `instructor_scope.class_scope`와 같은 존재-숨김
     규칙을 참여자 쪽에서 지킨다 — 참여자가 아니면 그 문제가 아예 없는 것처럼
     404를 받는다(#286 AC "그 클래스의 참여자가 아니면 제출할 수 없다"). 강사
     본인도 ClassMember 행이 없으면(가입 링크로 자기 클래스에 들어온 적이
@@ -1632,10 +1611,14 @@ def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
     명단·달성률·토큰 예산이 강사를 세지 않는 것은 그대로다(#290 — 강사 행은
     격자에 표시만 되고 집계에서 빠진다)."""
 
+    # 강사 전용 라우트가 아니다 — 참여자와 강사가 같은 주소를 걷는 혼합
+    # 라우트라 `instructor_scope.class_scope`(404로 존재를 숨기는 강사 전용
+    # 문)가 아니라 `.filter(...).first()`로 확인한다: 강사가 아니면 아래
+    # 참여자 경로로 그대로 흘러간다.
     instructor_class = Class.objects.filter(id=class_id, instructor_id=request.auth_user.id).first()
     if instructor_class is not None:
         class_obj = instructor_class
-        problem = _get_owned_problem_or_404(class_obj, problem_id)
+        problem = owned_problem_or_404(class_obj, problem_id)
         member = ClassMember.objects.filter(
             classroom=class_obj, user_id=request.auth_user.id
         ).first()
@@ -1714,7 +1697,7 @@ def create_classroom_submission(
     # 상태들이 각각 404·403이다 — 그래서 문제를 찾는 질의부터 갈린다.
     instructor_class = Class.objects.filter(id=class_id, instructor_id=request.auth_user.id).first()
     if instructor_class is not None:
-        problem = _get_owned_problem_or_404(instructor_class, problem_id)
+        problem = owned_problem_or_404(instructor_class, problem_id)
         blocked_reason = _instructor_submit_blocked_reason(instructor_class, problem)
         if blocked_reason == SUBMIT_BLOCKED_ARCHIVED:
             raise HttpError(403, "이 클래스는 보관되어 새 제출을 받지 않습니다.")
@@ -1832,8 +1815,8 @@ def list_problem_submissions(request: HttpRequest, class_id: int, problem_id: in
     메서드로만 갈린다 — `/join/{join_code}`가 GET(누구나)·POST(로그인)로
     갈리는 것과 같은 모양이다."""
 
-    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
-    problem = _get_owned_problem_or_404(class_obj, problem_id)
+    scope = problem_scope(class_id, problem_id, request.auth_user.id, write=False)
+    class_obj, problem = scope.class_obj, scope.problem
     checklist_items = list(problem.checklist_items.all())
 
     submissions = (
@@ -1866,14 +1849,15 @@ def copy_problem(request: HttpRequest, class_id: int, problem_id: int, payload: 
     이유).
 
     **대상 클래스가 보관됐으면 403이다**(#326 AC "보관된 클래스에서는
-    가져올 수 없다", #438) — `classroom.participation.assert_class_mutable`이
+    가져올 수 없다", #438) — `instructor_scope.class_scope(..., write=True)`가
     `problem_templates.import_template`과 같은 규칙을 여기서도 지킨다: 보관은
-    읽기 전용이라는 뜻이라 복사도 예외가 아니다."""
+    읽기 전용이라는 뜻이라 복사도 예외가 아니다. 원본은 읽기만 하므로
+    `write=False`다 — 보관된 클래스에서 다른 곳으로 복사해 가져오는 것은
+    막지 않는다(위 `list_importable_problems`와 같은 원칙)."""
 
-    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
-    problem = _get_owned_problem_or_404(class_obj, problem_id)
-    target_class = _get_owned_class_or_404(payload.target_class_id, request.auth_user.id)
-    assert_class_mutable(target_class)
+    source = problem_scope(class_id, problem_id, request.auth_user.id, write=False)
+    problem = source.problem
+    target_class = class_scope(payload.target_class_id, request.auth_user.id, write=True).class_obj
 
     copy = copy_problem_to_class(problem, target_class)
     return 201, _serialize_problem(copy, target_class)
@@ -1897,9 +1881,7 @@ def _get_owned_checklist_item_or_404(problem: Problem, item_id: int) -> Checklis
 def create_checklist_item(
     request: HttpRequest, class_id: int, problem_id: int, payload: ChecklistItemIn
 ):
-    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
-    problem = _get_owned_problem_or_404(class_obj, problem_id)
-    assert_class_mutable(class_obj)
+    problem = problem_scope(class_id, problem_id, request.auth_user.id, write=True).problem
 
     next_order = problem.checklist_items.count()
     item = ChecklistItem.objects.create(
@@ -1919,9 +1901,7 @@ def reorder_checklist_items(
     """정적 세그먼트("reorder")라 `{item_id}` 동적 라우트보다 먼저 등록한다
     (파일 상단 docstring 참고)."""
 
-    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
-    problem = _get_owned_problem_or_404(class_obj, problem_id)
-    assert_class_mutable(class_obj)
+    problem = problem_scope(class_id, problem_id, request.auth_user.id, write=True).problem
     items = {i.id: i for i in problem.checklist_items.all()}
 
     if set(payload.item_ids) != set(items):
@@ -1952,10 +1932,8 @@ def update_checklist_item(
     필수 항목을 필수 해제하면 422로 거절한다(초안은 예외, `classroom.
     problem_transitions.assert_required_item_floor`)."""
 
-    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
-    problem = _get_owned_problem_or_404(class_obj, problem_id)
+    problem = problem_scope(class_id, problem_id, request.auth_user.id, write=True).problem
     item = _get_owned_checklist_item_or_404(problem, item_id)
-    assert_class_mutable(class_obj)
 
     if payload.required is False and item.required:
         remaining = problem.checklist_items.filter(required=True).exclude(id=item.id).count()
@@ -1983,10 +1961,8 @@ def delete_checklist_item(request: HttpRequest, class_id: int, problem_id: int, 
     `assert_required_item_floor`와 같은 이유, `update_checklist_item`과
     같은 규율(초안은 예외)."""
 
-    class_obj = _get_owned_class_or_404(class_id, request.auth_user.id)
-    problem = _get_owned_problem_or_404(class_obj, problem_id)
+    problem = problem_scope(class_id, problem_id, request.auth_user.id, write=True).problem
     item = _get_owned_checklist_item_or_404(problem, item_id)
-    assert_class_mutable(class_obj)
 
     if item.required:
         remaining = problem.checklist_items.filter(required=True).exclude(id=item.id).count()
