@@ -256,7 +256,7 @@ def _make_own_prefix_contest_with_award(uid: str, *, run_id: str, age=timedelta(
     "나이가 아니라 run_id로 가른다"는 것을 증명하는 테스트는 이 값을 크게
     줘서 오래됐어도 무관함을 보인다."""
 
-    from accounts.management.commands.seed_e2e_operator_queues import TITLE_PREFIX
+    from appeals.management.commands.seed_e2e_operator_queues import TITLE_PREFIX
 
     User = get_user_model()
     sponsor_user = User.objects.create_user(username=f"stale-sponsor-{uid}")
@@ -321,7 +321,7 @@ def test_clear_stale_seed_contests_removes_a_different_runs_own_prefix_data_only
     )
     # 이 호출이 방금 만든 own-prefix Contest(seed_pending_appeal, run-current 태그)만
     # 남아야 한다.
-    from accounts.management.commands.seed_e2e_operator_queues import TITLE_PREFIX
+    from appeals.management.commands.seed_e2e_operator_queues import TITLE_PREFIX
 
     fresh_own_prefix = Contest.objects.filter(title__startswith=TITLE_PREFIX)
     assert fresh_own_prefix.count() == 1, list(fresh_own_prefix.values_list("title", flat=True))
@@ -358,7 +358,7 @@ def test_running_the_seed_twice_in_a_row_does_not_push_a_fresh_own_prefix_contes
 
     monkeypatch.setenv("CODEMIT_E2E_RUN_ID", "run-same")
 
-    from accounts.management.commands.seed_e2e_operator_queues import TITLE_PREFIX
+    from appeals.management.commands.seed_e2e_operator_queues import TITLE_PREFIX
 
     call_command("seed_e2e_operator_queues", only="appeal")
     first_titles = set(

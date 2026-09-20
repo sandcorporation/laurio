@@ -29,11 +29,11 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
+from contests.lifecycle_notifications import notify_award_result
 from contests.models import Contest, ContestSubmission
 from contests.transitions import claim_contest_transition
 from core.clock import Clock
 from handovers.models import Handover
-from notifications.lifecycle import notify_award_result
 from policies.scope import current_policy
 
 from .models import Award

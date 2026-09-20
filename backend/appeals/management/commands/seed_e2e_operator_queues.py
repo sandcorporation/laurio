@@ -14,6 +14,15 @@ Escrow 해제·Seller 등록 같은 불변식이 서비스 계층 여러 곳에 
 UID에 타임스탬프를 섞어 충돌을 피한다). 그래서 이 명령을 쓰는 e2e 스펙은 절대
 카운트를 고정값으로 단언하지 않고, "부르기 전 baseline 대비 정확히 1씩 늘었다"는
 증분으로 검증해야 한다.
+
+**원래 `accounts`에 있었다(#465 전까지).** Operator 모델이 그 앱에 있다는 것
+말고는 이 명령의 내용(Award·Contest·ledger·scoring·appeals·payouts 픽스처)과
+`accounts`는 무관했다 — 공유층이 공모전 가족 다섯 앱을 부르며 매 줄에 앱 경계
+예외 표시를 달아야 했던 자리다. 심판 대기 이의가 세 큐 중
+첫째이자 이름의 유래이고, 이의 상세 시드(`seed_e2e_operator_appeal.py`)도 같은
+파일의 헬퍼에 의존해 함께 옮겨, `appeals`(공모전 가족)로 옮기면 나머지 참조는
+전부 가족 내부 참조가 된다. 명령 이름은 그대로다 — e2e·`core.e2e_seeds`
+등록부가 이름으로만 부른다.
 """
 
 from __future__ import annotations
@@ -31,16 +40,11 @@ from django.core.management.base import BaseCommand, CommandError
 from django.test import Client
 from django.utils import timezone
 
-# APP-BOUNDARY-EXCEPTION: 이의 큐에 넣을 Award 를 심는다
 from awards.models import Award
-# APP-BOUNDARY-EXCEPTION: 큐의 재료인 Contest 를 심는다
 from contests.models import Category, Contest, DeliverableType
-# APP-BOUNDARY-EXCEPTION: 심은 Contest 를 심사 상태로 옮긴다
 from contests.transitions import claim_contest_transition
-# APP-BOUNDARY-EXCEPTION: 다시 심기 전에 e2e 원장 행을 걷는다
 from ledger.models import hard_delete_e2e_fixture_rows
 from policies.scope import current_policy
-# APP-BOUNDARY-EXCEPTION: 이의를 걸 수 있게 Score 를 심는다
 from scoring.models import Score
 
 CONTESTS_URL = "/api/contests"
@@ -200,7 +204,6 @@ def _clear_stale_seed_contests() -> int:
     if not stale_contest_ids:
         return 0
 
-    # APP-BOUNDARY-EXCEPTION: e2e 시드가 이의 큐를 심는다
     from appeals.models import AppealRuling, SourceReading
 
     Award.objects.filter(contest_id__in=stale_contest_ids).delete()
@@ -479,9 +482,7 @@ def clear_queues() -> dict:
     이 명령이 만든 Contest·Payout에 한정된 삭제라 감사 기록 보존을 신경 쓸
     대상이 아니다.
     """
-    # APP-BOUNDARY-EXCEPTION: e2e 시드가 이의 큐를 심는다
     from appeals.models import Appeal, SourceReading
-    # APP-BOUNDARY-EXCEPTION: e2e 시드가 지급 큐를 심는다
     from payouts.models import Payout
 
     # 심판 대기(pending) Appeal 이라 AppealRuling 은 없지만, **SourceReading 은

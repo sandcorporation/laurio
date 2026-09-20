@@ -11,13 +11,16 @@ compose를 새로 띄우면 그 목록이 전부 비어 있어 아무것도 진�
 매 기동마다 migrate 다음 단계로 이 커맨드를 부른다(docker/compose.dev.yaml).
 staging/prod compose는 부르지 않는다 — 실제 카테고리·요구형태 확정은 TBD고
 (REQUEST.md), 운영자가 admin에서 직접 채운다.
+
+**원래 `core`에 있었다(#465 전까지).** 심는 것이 Category·DeliverableType
+뿐이라 `contests`가 맞는 자리다 — 공유층이 공모전 하나만 아는 코드를 들고 있을
+이유가 없었다. 명령 이름은 그대로다(`docker/compose.dev.yaml`이 이름으로 부른다).
 """
 
 from __future__ import annotations
 
 from django.core.management.base import BaseCommand
 
-# APP-BOUNDARY-EXCEPTION: dev 시드가 공모전을 심는 것이 이 명령의 목적이다
 from contests.models import Category, DeliverableType
 
 _CATEGORIES = ["엔터테인먼트", "교육", "게임", "라이프스타일"]

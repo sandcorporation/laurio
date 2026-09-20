@@ -50,7 +50,7 @@ class CreateNotificationIn(Schema):
     notification_type: NotificationType
     # 이 알림이 무엇에 관한 것인지(대상 Contest, 금액 등)를 담는 구조화된 맥락(#19).
     # 내부 테스트/도구용 엔드포인트라 선택 입력이다 — 실제 lifecycle 연결은
-    # notifications.lifecycle이 create_notification을 Python 레벨에서 직접 부른다.
+    # contests.lifecycle_notifications가 create_notification을 Python 레벨에서 직접 부른다.
     context: dict | None = None
 
 

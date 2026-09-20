@@ -17,14 +17,14 @@ class NotificationsConfig(AppConfig):
         register(checks.check_notification_sms_adapter_mode)
         register(checks.check_notification_lms_adapter_mode)
 
-        # Contest 라이프사이클 통지 스캔 다섯(#19, #138) — 등록부에 올라 각자 자기 예산으로 돈다.
         from core.scans import register_scan
 
-        from .lifecycle import LIFECYCLE_SCANS
         from .services import NOTIFICATION_SCANS
 
-        # 야간 큐 발송·stuck-QUEUED 재선점(#10, #139)도 등록부 항목이다.
-        for spec in (*NOTIFICATION_SCANS, *LIFECYCLE_SCANS):
+        # 야간 큐 발송·stuck-QUEUED 재선점(#10, #139)도 등록부 항목이다. Contest
+        # 라이프사이클 통지 스캔 다섯은 #465 로 `contests`(`contests.apps.
+        # ContestsConfig.ready`)가 등록한다 — 이 앱은 자기가 아는 원시 도구만 돈다.
+        for spec in NOTIFICATION_SCANS:
             register_scan(spec)
 
 

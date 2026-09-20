@@ -313,7 +313,7 @@ class Contest(models.Model):
     # 보냈는지 표시한다. null이면 아직 안 보냈다는 뜻이고, 값이 차면 그 시각에
     # (조건부 UPDATE로) 정확히 한 번만 보냈다는 뜻이다 — 스캔이 몇 번 겹쳐 돌아도
     # 중복 발송을 막는 근거가 이 컬럼 자체다(core.transitions.claim_transition과
-    # 같은 정신, notifications.lifecycle의 각 send_due_* 스캔이 쓴다).
+    # 같은 정신, contests.lifecycle_notifications의 각 스캔이 쓴다).
     deadline_reminder_sent_at = models.DateTimeField(null=True, blank=True)
     judging_end_reminder_sent_at = models.DateTimeField(null=True, blank=True)
     distribution_final_warning_sent_at = models.DateTimeField(null=True, blank=True)

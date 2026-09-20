@@ -35,12 +35,12 @@ from django.db.models import Q
 from django.db import transaction
 
 from appeals.models import Appeal
+from contests.lifecycle_notifications import notify_distribution_shares
 from contests.models import Contest, ContestSubmission
 from core.clock import Clock
 from core.contest_switch import paid_contest_product_enabled
 from ledger.models import Account, EntrySide
 from ledger.services import LineInput, post_journal_entry
-from notifications.lifecycle import notify_distribution_shares
 from payouts.adapters import PayoutError, get_adapter
 from payouts.models import Payout
 from payouts.progress import advance

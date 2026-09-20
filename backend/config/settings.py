@@ -1074,7 +1074,8 @@ OPENSEARCH_URL = _env("OPENSEARCH_URL", "http://127.0.0.1:9200")
 #
 # 마감·심사기간 종료·Distribution이 다가올 때 Sponsor·Developer에게 미리 알린다.
 # 실제 발송(즉시/야간 연기/대체발송)은 notifications.services(#18)가 그대로
-# 담당한다 — 여기서는 "언제 그 알림을 만들 것인가"만 정한다(notifications.lifecycle).
+# 담당한다 — 여기서는 "언제 그 알림을 만들 것인가"만 정한다
+# (contests.lifecycle_notifications, #465 전까지는 notifications.lifecycle).
 # 세 리드타임(마감 임박·심사 종료 임박·Distribution 최종 경고) 모두 더 이상
 # 여기 없다(#78, ADR-0023) — `policies.models.PlatformPolicy`의
 # deadline_reminder_lead_hours·judging_end_reminder_lead_hours·

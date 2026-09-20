@@ -6,10 +6,16 @@ docstring 이 왜 스위트 시작이 유일하게 안전한 시점인지 적어
 경합이 성립하지 않는다). 이 명령은 **그 관용구를 Category·DeliverableType·정책 단일 행으로
 넓힌 것**이고, 같은 시점에 같은 방식으로 돈다.
 
-**왜 `seed_e2e_contests` 안에 넣지 않았나.** 그 명령은 contests 앱의 시드다. 정책 단일 행은
-policies 앱에 있고, 「공모전 시드가 플랫폼 수수료율을 되돌린다」는 배선은 다음에 읽는 사람이
-납득할 수 없다. 그래서 두 앱을 다 아는 자리(core)에 청소만 하는 명령을 따로 둔다 — 사람이
-쌓인 것을 한 번에 걷을 때도 이 하나만 부르면 된다.
+**왜 `seed_e2e_contests` 안에 넣지 않았나.** 정책 단일 행은 policies 앱에 있고, 「공모전
+시드가 플랫폼 수수료율을 되돌린다」는 배선은 다음에 읽는 사람이 납득할 수 없다. 그래서
+청소만 하는 명령을 따로 둔다 — 사람이 쌓인 것을 한 번에 걷을 때도 이 하나만 부르면 된다.
+
+**원래 `core`에 있었다(#465 전까지).** 그때는 「Category·DeliverableType(contests)과
+정책(policies) 둘 다 아는 자리가 필요하다」가 core에 두는 근거였다 — 하지만 공모전 가족
+(`contests`)은 공유층(`policies`)을 예외 표시 없이 부를 수 있으므로(공유층이 기능 앱을
+부르는 방향만 표시가 필요하다) 그 근거는 성립하지 않았다. `contests`로 옮기면 청소
+대상(Category·DeliverableType)이 사는 바로 그 앱에서, `policies` 참조에 표시를 달 일도
+없이 돈다.
 
 **무엇이 「e2e 가 만든 것」인가.** 이름이 `e2e` 또는 `[e2e` 로 시작하는 행이다(대소문자
 무시). 실측한 dev DB 에는 서로 다른 시절이 남긴 세 모양이 함께 있었다 —
@@ -29,10 +35,9 @@ from django.db import transaction
 from django.db.models import Q
 from django.db.models.deletion import ProtectedError
 
-from accounts.management.commands.seed_e2e_operator_queues import (
+from appeals.management.commands.seed_e2e_operator_queues import (
     _refuse_in_deployed_environment,
 )
-# APP-BOUNDARY-EXCEPTION: e2e 정리는 Contest 를 먼저 걷어야 기준데이터가 풀린다
 from contests.models import Category, DeliverableType, DeliverableTypeChange
 from policies.models import PlatformPolicy
 from policies.services import UPDATABLE_FIELDS

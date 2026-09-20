@@ -28,12 +28,12 @@ class Award(models.Model):
     awarded_at = models.DateTimeField()
     created_at = models.DateTimeField(auto_now_add=True)
 
-    # 결과 알림(notifications.lifecycle.notify_award_result) 완료 표식(#19 리뷰
+    # 결과 알림(contests.lifecycle_notifications.notify_award_result) 완료 표식(#19 리뷰
     # 지적 3). Award가 만들어질 때는 항상 비어 있다 — 그 직후 즉시 경로가 알림을
     # 성공적으로 시도한 뒤에만 채워진다. 비어 있는 채로 남은 Award는 즉시 경로가
     # (프로세스 강제종료 등으로) 끝까지 완료되지 못했다는 뜻이고,
-    # `notifications.lifecycle.send_pending_award_result_notices`가 이 필드를
-    # 근거로 그런 Award를 다시 찾아 마저 알린다 — "발송하고 잊어버리는" 방식이
+    # `contests.lifecycle_notifications`의 `award-result-notice-recovery` 스캔이 이
+    # 필드를 근거로 그런 Award를 다시 찾아 마저 알린다 — "발송하고 잊어버리는" 방식이
     # 아니라 언젠가 누군가 실제로 재시도한다는 보장이다.
     result_notice_sent_at = models.DateTimeField(null=True, blank=True)
 

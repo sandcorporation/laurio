@@ -86,6 +86,15 @@ class ContestsConfig(AppConfig):
             )
         )
 
+        # Contest 수명주기 통지 스캔 다섯(#19, #138) — 예전엔 `notifications` 앱에
+        # 있었다(#465): 공유층이 공모전 하나만 아는 코드를 들고 있던 자리라 여기로
+        # 옮겼다. 이름·주기·동작은 그대로다 — beat·tick·단건 호출이 보는 이름이
+        # 바뀌지 않는다.
+        from .lifecycle_notifications import LIFECYCLE_SCANS
+
+        for lifecycle_spec in LIFECYCLE_SCANS:
+            register_scan(lifecycle_spec)
+
         # ContestImage 최적화 — 썸네일·본문용 webp 파생본 (#235, ADR-0031/0032).
         from .image_optimization import CONTEST_IMAGE_OPTIMIZATION_SCAN
 

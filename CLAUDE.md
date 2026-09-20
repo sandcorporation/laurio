@@ -861,11 +861,17 @@ cd backend && CODEMIT_DB_PORT=55432 uv run pytest
 - **공유층**(`accounts`·`core`·`policies`·`storage`·`notifications`·`submissions`,
   #270 이 마지막을 더했다)**이 기능 앱을 부르면 막히되, 같은 줄이나 바로 앞 줄의
   `APP-BOUNDARY-EXCEPTION: <이유>` 로 열린다** — **이유가 비면 표시 자체가
-  실패한다**(`scripts/check_screen_language.py` 와 같은 관용구). 지금 **41줄**이 나오는데
+  실패한다**(`scripts/check_screen_language.py` 와 같은 관용구). 지금 **25줄**이 나오는데
   그중 **9줄은 검사 파일 자신**(독스트링·정규식·오류 문구·합성 픽스처)이고 실제 표시는
-  **32곳**, 다시 그중 **13곳은 시드·백필 관리 명령**이라 런타임 코드의 표시는 **19곳**이다
-  (2026-09-20 확인). 대부분 순환을 끊으려 일부러 함수 안에 넣은 지연 import 라, 이 티켓은
-  지우지 않고 사유를 적어 세어지게만 했다.
+  **16곳**이다(2026-09-20 확인, #465·#470). 시드·백필 관리 명령이 달던 예외 13곳은
+  그 명령을 내용이 속한 공모전 가족 앱(`appeals`·`contests`)으로 옮기며 전부
+  사라졌다 — 등록부(`core.e2e_seeds`)가 명령의 위치를 모르므로 이름은 그대로다.
+  공모전 수명주기 알림(`notifications.lifecycle` → `contests.lifecycle_notifications`)도
+  같은 이유로 옮겨 3곳이 사라졌다. 남은 16곳은 대부분 순환을 끊으려 일부러 함수
+  안에 넣은 지연 import 라, 지우지 않고 사유를 적어 세어지게만 했다 — 탈퇴·휴면
+  신원 파기는 이제 `verification.purge.purge_identity` 한 곳만 부르지만(#470),
+  그 호출 자체도 공유층(`accounts`)이 기능 앱(`verification`)을 부르는 것이라
+  표시는 남는다(`accounts/dormancy.py`·`accounts/withdrawal.py`).
   `grep -rn "APP-BOUNDARY-EXCEPTION" backend/` 로 나오는 그 숫자가 경계의 건강
   지표다 — 늘면 공유층이 기능으로 오염되는 중이라는 뜻이다.
 

@@ -16,6 +16,10 @@ append-only라 잘못 남은 정정은 지울 수 없다). e2e가 이 명령을 
 계정을 잠근다"로 지적받아 고친 것과 정확히 같은 부류의 부작용이다. 이 명령은
 개수를 세는 도구일 뿐 시딩이 아니므로, 그런 부작용 없이 `JournalEntry`를
 직접 세는 편이 맞다.
+
+**원래 `accounts`에 있었다(#465 전까지).** 이의 심판 e2e 전용 도구라는 것 말고는
+`accounts`와 무관했다 — `appeals`로 옮기면 `Contest`·`JournalEntry` 참조가 공모전
+가족 내부 참조가 된다. 명령 이름은 그대로다.
 """
 
 from __future__ import annotations
@@ -24,9 +28,7 @@ import json
 
 from django.core.management.base import BaseCommand
 
-# APP-BOUNDARY-EXCEPTION: 공모전별로 원장 건수를 센다
 from contests.models import Contest
-# APP-BOUNDARY-EXCEPTION: 세는 대상이 원장 분개다
 from ledger.models import JournalEntry
 
 from .seed_e2e_operator_queues import _refuse_in_deployed_environment
