@@ -1,5 +1,6 @@
-"""Problem 상태 전이 표 — 초안 → 열림, 열림 → 숨김, 숨김 → 열림 하나씩
-(#440, spec #432, `contests.transitions`(#255)와 같은 모양의 선언).
+"""Problem 상태 전이 표 — 초안 → 열림, 열림 → 숨김, 숨김 → 열림 하나씩,
+그리고 그 표가 전이를 직접 실행한다 (#440·#468, spec #432/#461,
+`contests.transitions`(#255)와 같은 모양의 선언).
 
 **Contest 표의 무게를 그대로 옮기지 않는다.** Problem 에는 시간 기반 스캔
 전이가 없다 — 셋 다 강사의 명시적 행위(`POST .../open`·`.../hide`·
@@ -9,8 +10,30 @@
 왜 막혔는가」뿐이다.
 
 **막힌 이유는 우선순위가 있다** — 보관 → 필수 항목 없음. 클래스가 보관되면
-그 자체로 아무 전이도 못 하므로(`classroom.participation.
-assert_class_mutable`, #438) 필수 항목이 있고 없고는 뜻이 없어진다.
+그 자체로 아무 전이도 못 하므로(`classroom.instructor_scope.problem_scope`,
+#463) 필수 항목이 있고 없고는 뜻이 없어진다. **다만 이 우선순위는
+`available_transitions`(화면이 미리 읽는 자리)만의 것이다** — `execute_transition`
+은 보관을 아예 모른다: 그 확인은 라우트 첫 줄의 강사 범위 호출이 이미 끝내고
+왔다는 전제 위에 선다. 그래서 실행이 실제로 거절하는 이유(상태·필수 항목)와
+화면이 미리 보여준 이유가 갈릴 자리가 없다 — 둘 다 `PROBLEM_TRANSITIONS`
+하나를 읽는다.
+
+**표가 전이를 직접 실행한다(#468).** 예전에는 호출부(`classroom.api`)가
+`assert_transition_from_state`·`assert_has_required_item`을 따로 부른 뒤
+`problem.status = edge.to_state; problem.save(...)`를 열기·숨기기·다시 열기
+세 라우트에 각각 다시 적었다. 지금은 `execute_transition(name, problem)`
+하나가 상태 확인 → 필수 항목 확인 → 상태 쓰기 → 저장까지 끝내고, 거절
+문구도 간선(`ProblemTransition.wrong_state_message`)에 있다 — 라우트는
+문구를 다시 타이핑하지 않는다.
+
+**전이를 하나 더할 때 고칠 곳은 딱 둘이다 — 표 한 줄과 라우트 하나.**
+① `PROBLEM_TRANSITIONS`에 간선(`from_state`·`to_state`, 필요하면
+`requires_required_item`과 `wrong_state_message`)을 하나 적는다. ②
+`classroom.api`에 `POST .../{그 이름}` 라우트를 하나 더해 첫 줄에서 강사
+범위(`instructor_scope.problem_scope(..., write=True)`)를 열고
+`execute_transition("그 이름", problem)`을 부른다. `execute_transition`
+자신도 `available_transitions`도 고치지 않는다 — 둘 다 표를 읽을 뿐이라
+새 간선을 저절로 안다.
 
 **전이가 아니라 불변식도 하나 있다.** 열린·숨긴 문제는 필수 항목을 하나
 이상 유지해야 한다 — 마지막 필수 항목을 지우거나 필수를 해제하면 그 순간
@@ -34,6 +57,12 @@ from .models import Class, Problem
 BLOCKED_ARCHIVED = "archived"
 BLOCKED_NO_REQUIRED_ITEM = "no_required_item"
 
+#: 필수 항목이 하나도 없는 문제를 열려고 할 때의 문구 — 문제 만들기의
+#: "바로 연다"(`classroom.api.create_problem`)와 `execute_transition`의
+#: open·reopen 두 자리가 예전에는 이 문장을 각자 들고 있었다(#468 AC "여러
+#: 곳에 복사돼 있던 것도 한 곳이 된다").
+NO_REQUIRED_ITEM_MESSAGE = "필수 항목이 하나도 없는 문제는 열 수 없습니다."
+
 
 @dataclass(frozen=True)
 class ProblemTransition:
@@ -44,6 +73,9 @@ class ProblemTransition:
     #: (초안→열림, 숨김→열림)만 그렇다. HIDDEN으로 가는 전이(열림→숨김)는
     #: 요구하지 않는다 — 이미 있던 항목을 그대로 들고 숨는 것뿐이다.
     requires_required_item: bool = False
+    #: 지금 상태에서 부를 수 없을 때(`from_state`가 안 맞을 때) 낼 문구 —
+    #: `execute_transition`이 그대로 싣는다.
+    wrong_state_message: str = ""
 
 
 #: 이름 → 간선. 지금 그래프는 상태마다 나가는 간선이 정확히 하나씩이라
@@ -52,11 +84,24 @@ class ProblemTransition:
 #: 갈래가 늘어도 이 표만 고치면 된다.
 PROBLEM_TRANSITIONS: dict[str, ProblemTransition] = {
     "open": ProblemTransition(
-        name="open", from_state=Problem.Status.DRAFT, to_state=Problem.Status.OPEN, requires_required_item=True
+        name="open",
+        from_state=Problem.Status.DRAFT,
+        to_state=Problem.Status.OPEN,
+        requires_required_item=True,
+        wrong_state_message="초안만 열 수 있습니다.",
     ),
-    "hide": ProblemTransition(name="hide", from_state=Problem.Status.OPEN, to_state=Problem.Status.HIDDEN),
+    "hide": ProblemTransition(
+        name="hide",
+        from_state=Problem.Status.OPEN,
+        to_state=Problem.Status.HIDDEN,
+        wrong_state_message="열린 문제만 숨길 수 있습니다.",
+    ),
     "reopen": ProblemTransition(
-        name="reopen", from_state=Problem.Status.HIDDEN, to_state=Problem.Status.OPEN, requires_required_item=True
+        name="reopen",
+        from_state=Problem.Status.HIDDEN,
+        to_state=Problem.Status.OPEN,
+        requires_required_item=True,
+        wrong_state_message="숨긴 문제만 다시 열 수 있습니다.",
     ),
 }
 
@@ -101,19 +146,26 @@ def available_transitions(problem: Problem, class_obj: Class) -> list[Transition
     ]
 
 
-def assert_transition_from_state(name: str, problem: Problem, *, wrong_state_message: str) -> None:
-    """`name` 전이가 지금 상태에서 부를 수 있는 것인지 확인한다 — 아니면
-    `wrong_state_message`로 400. 실제 문구는 호출부(`classroom.api`)가 이미
-    참여자에게 보여 온 것을 그대로 넘긴다 — 이 표는 from_state만 판정한다."""
+def execute_transition(name: str, problem: Problem) -> Problem:
+    """`name` 전이를 지금 상태에서 실행한다 — 상태 확인 → 필수 항목 확인 →
+    상태 쓰기 → 저장까지 표가 갖는다(#468). 호출부(`classroom.api`)는 강사
+    범위(`instructor_scope.problem_scope(..., write=True)`)로 보관 확인까지
+    끝낸 뒤 이 함수 하나만 부른다 — 그 뒤로 거절 문구의 유일한 출처는
+    `PROBLEM_TRANSITIONS`다.
+
+    보관을 이 함수가 다시 보지 않는 이유는 모듈 docstring에 있다 — 화면이
+    미리 읽는 `available_transitions`와 실행이 같은 표를 읽으므로 "지금 막힌
+    이유"와 "실제로 거절하는 이유"가 갈릴 수 없다."""
 
     edge = PROBLEM_TRANSITIONS[name]
     if problem.status != edge.from_state:
-        raise HttpError(400, wrong_state_message)
+        raise HttpError(400, edge.wrong_state_message)
+    if edge.requires_required_item and not has_required_item(problem):
+        raise HttpError(400, NO_REQUIRED_ITEM_MESSAGE)
 
-
-def assert_has_required_item(problem: Problem, *, message: str) -> None:
-    if not has_required_item(problem):
-        raise HttpError(400, message)
+    problem.status = edge.to_state
+    problem.save(update_fields=["status", "updated_at"])
+    return problem
 
 
 def required_item_floor_message(status: str) -> str:

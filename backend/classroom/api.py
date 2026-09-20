@@ -111,10 +111,10 @@ from .participation import (
     visible_problems_queryset,
 )
 from .problem_transitions import (
-    assert_has_required_item,
+    NO_REQUIRED_ITEM_MESSAGE,
     assert_required_item_floor,
-    assert_transition_from_state,
     available_transitions,
+    execute_transition,
 )
 from .scoring import check_scoring_key
 from .scoring_model_catalog import get_scoring_model_catalog
@@ -1113,7 +1113,7 @@ def create_problem(request: HttpRequest, class_id: int, payload: ProblemIn):
     )
 
     if payload.open and not any(item.required for item in payload.checklist_items):
-        raise HttpError(400, "필수 항목이 하나도 없는 문제는 열 수 없습니다.")
+        raise HttpError(400, NO_REQUIRED_ITEM_MESSAGE)
 
     with transaction.atomic():
         next_order = class_obj.problems.count()
@@ -1436,14 +1436,8 @@ def open_problem(request: HttpRequest, class_id: int, problem_id: int):
     「초안에서만」과 「필수 항목이 있어야」 두 조건을 함께 정한다."""
 
     scope = problem_scope(class_id, problem_id, request.auth_user.id, write=True)
-    class_obj, problem = scope.class_obj, scope.problem
-
-    assert_transition_from_state("open", problem, wrong_state_message="초안만 열 수 있습니다.")
-    assert_has_required_item(problem, message="필수 항목이 하나도 없는 문제는 열 수 없습니다.")
-
-    problem.status = Problem.Status.OPEN
-    problem.save(update_fields=["status", "updated_at"])
-    return 200, _serialize_problem(problem, class_obj)
+    problem = execute_transition("open", scope.problem)
+    return 200, _serialize_problem(problem, scope.class_obj)
 
 
 @router.post(
@@ -1457,13 +1451,8 @@ def hide_problem(request: HttpRequest, class_id: int, problem_id: int):
     없고, 이미 숨긴 문제를 다시 숨기는 것도 뜻이 없다."""
 
     scope = problem_scope(class_id, problem_id, request.auth_user.id, write=True)
-    class_obj, problem = scope.class_obj, scope.problem
-
-    assert_transition_from_state("hide", problem, wrong_state_message="열린 문제만 숨길 수 있습니다.")
-
-    problem.status = Problem.Status.HIDDEN
-    problem.save(update_fields=["status", "updated_at"])
-    return 200, _serialize_problem(problem, class_obj)
+    problem = execute_transition("hide", scope.problem)
+    return 200, _serialize_problem(problem, scope.class_obj)
 
 
 @router.post(
@@ -1477,14 +1466,8 @@ def reopen_problem(request: HttpRequest, class_id: int, problem_id: int):
     사이 강사가 체크리스트를 비웠으면 통과가 정의되지 않아 열 수 없다."""
 
     scope = problem_scope(class_id, problem_id, request.auth_user.id, write=True)
-    class_obj, problem = scope.class_obj, scope.problem
-
-    assert_transition_from_state("reopen", problem, wrong_state_message="숨긴 문제만 다시 열 수 있습니다.")
-    assert_has_required_item(problem, message="필수 항목이 하나도 없는 문제는 열 수 없습니다.")
-
-    problem.status = Problem.Status.OPEN
-    problem.save(update_fields=["status", "updated_at"])
-    return 200, _serialize_problem(problem, class_obj)
+    problem = execute_transition("reopen", scope.problem)
+    return 200, _serialize_problem(problem, scope.class_obj)
 
 
 # --- Submission (참여자, #286) --------------------------------------------------
