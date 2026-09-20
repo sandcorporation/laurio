@@ -113,16 +113,6 @@ export default async function ContestDetailPage({ params }: { params: Promise<Pa
           }
         />
 
-        {contest.is_free && (
-          <p
-            className="border border-rule bg-surface px-4 py-3 text-sm leading-relaxed text-ink/80"
-            data-testid="free-contest-source-access-notice"
-          >
-            무료 공모전입니다 — 상금 없이 열리며, 개최자가 설명에 적은 보상은 플랫폼이
-            보증하지 않습니다. 수상작의 소스는 개최자가 볼 수 있습니다.
-          </p>
-        )}
-
         {/* 코디네이터 메모(#448 후속) — 세 칸이 390px 에서 겹쳤다: 상금 칸의
             `text-2xl font-mono`가 약 98px 칸(3열 균등폭에서 gap-6 을 뺀 값)보다
             넓어, 'D-5' 같은 짧은 값에서도 재현됐다. `sm` 아래는 한 열로 접어
@@ -262,6 +252,23 @@ export default async function ContestDetailPage({ params }: { params: Promise<Pa
             </ul>
           )}
         </section>
+
+        {/* 무료 공모전의 단서를 **페이지 맨 아래**에 작은 글씨로 둔다(2026-09-20).
+            예전에는 제목 바로 아래 테두리 친 상자였는데, 공모전을 보러 온 사람이
+            제일 먼저 읽는 것이 「플랫폼이 보증하지 않습니다」가 되어 공고 자체를
+            가렸다. 감추는 것이 아니라 **순서를 바꾼 것**이다 — 같은 문구가 같은
+            페이지에 그대로 있고(서버가 그린다, ADR-0015), 상금 칸의 「무료」와
+            헤더의 「무료 공모전」 배지가 위에서 이미 그 사실을 말한다. 약관·면책의
+            자리는 본문 아래라는 것이 보통 공고의 관례다. */}
+        {contest.is_free && (
+          <p
+            className="border-t border-rule pt-4 text-xs leading-relaxed text-ink/60"
+            data-testid="free-contest-source-access-notice"
+          >
+            무료 공모전입니다 — 상금 없이 열리며, 개최자가 설명에 적은 보상은 플랫폼이
+            보증하지 않습니다. 수상작의 소스는 개최자가 볼 수 있습니다.
+          </p>
+        )}
       </div>
     </PageShell>
   );
