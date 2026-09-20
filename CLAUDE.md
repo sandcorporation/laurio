@@ -802,7 +802,7 @@ cd backend && CODEMIT_DB_PORT=55432 uv run python manage.py prune_e2e_junk
 `global-setup.ts` 의 순서가 그래서 그 순서다.
 
 **스위트는 기본으로 병렬 실행된다**(#104). `pyproject.toml` 의 `addopts` 가 `-n auto` 를
-준다 — 실측(이 머신, 당시 1192건 — 지금 2365건 통과·1건 skip(실시간 신호의 자원 사용을 걷어낸 #453 까지, 2026-09-18). Assignment 가 #205~#212 로
+준다 — 실측(이 머신, 당시 1192건 — 지금 2381건 통과·1건 skip(얕은 자리 다섯을 깊게 만든 #461 까지, 2026-09-20). Assignment 가 #205~#212 로
 1312건에서 1377건까지, staging 검증이 낳은 #214~#217 로 1388건까지, 저장소만으로
 제출하고 채점 시점에 박제하는 #218~#220 으로 1407건까지, 채점 상한과 화면 열한 개
 (#213·#221~#231)로 1463건까지, 종류 게이트(#232)로 1467건까지, 공모전 이미지
@@ -883,8 +883,11 @@ cd backend && CODEMIT_DB_PORT=55432 uv run pytest
   신원 파기는 이제 `verification.purge.purge_identity` 한 곳만 부르지만(#470),
   그 호출 자체도 공유층(`accounts`)이 기능 앱(`verification`)을 부르는 것이라
   표시는 남는다(`accounts/dormancy.py`·`accounts/withdrawal.py`).
-  `grep -rn "APP-BOUNDARY-EXCEPTION" backend/` 로 나오는 그 숫자가 경계의 건강
-  지표다 — 늘면 공유층이 기능으로 오염되는 중이라는 뜻이다.
+  `grep -rn "APP-BOUNDARY-EXCEPTION" backend/` 로 나오는 숫자가 경계의 건강
+  지표다 — 늘면 공유층이 기능으로 오염되는 중이라는 뜻이다. **그 grep 은 지금
+  27줄인데 실제 표시는 위 16곳이다** — 나머지는 검사기 자신이 들고 있는 문자열
+  (`tests/test_app_boundaries.py`)과 같은 관용구를 설명하는 문장이라, 세려면
+  검사기와 문서를 뺀다.
 
 **`INSTALLED_APPS` 에 앱을 더하면 그 표에 분류를 적기 전까지 빨갛다.** 한 방향으로만
 그렇다 — 표는 아직 설치되지 않은 앱(`classroom`)을 미리 이름 지을 수 있다.
