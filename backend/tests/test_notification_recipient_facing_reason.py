@@ -110,7 +110,7 @@ def test_recipient_facing_list_does_not_leak_vendor_or_internal_text(client):
 
     _make_all_channels_exhausted_notification(user)
 
-    body = client.get(ME_URL, **_auth_header(pair)).json()
+    body = client.get(ME_URL, **_auth_header(pair)).json()["items"]
     assert len(body) == 1
     dispatches = body[0]["dispatches"]
     assert len(dispatches) == 3
@@ -134,7 +134,7 @@ def test_recipient_facing_list_still_shows_channel_status_and_attempt_time(clien
 
     notification = _make_all_channels_exhausted_notification(user)
 
-    body = client.get(ME_URL, **_auth_header(pair)).json()
+    body = client.get(ME_URL, **_auth_header(pair)).json()["items"]
     dispatches = {d["channel"]: d for d in body[0]["dispatches"]}
 
     assert set(dispatches) == {"alimtalk", "sms", "lms"}
@@ -195,6 +195,6 @@ def test_recipient_facing_reason_is_generated_from_one_place_per_status(client):
         failure_reason=_LEAKY_REASONS["lms"],
     )
 
-    body = client.get(ME_URL, **_auth_header(pair)).json()
+    body = client.get(ME_URL, **_auth_header(pair)).json()["items"]
     reasons_by_channel = {d["channel"]: d["failure_reason"] for d in body[0]["dispatches"]}
     assert reasons_by_channel["sms"] == reasons_by_channel["lms"]

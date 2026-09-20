@@ -11,12 +11,14 @@
     "test": "pnpm run test:unit"
   },
   "dependencies": {
+    "@codemit/bff-client": "workspace:*",
     "@codemit/bff-shared": "workspace:*",
     "@codemit/markdown": "workspace:*",
     "@sentry/nextjs": "^10.74.0",
     "@toast-ui/editor": "^3.2.2",
     "lucide-react": "^1.46.0",
     "next": "^15.5.0",
+    "openapi-fetch": "^0.13.8",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

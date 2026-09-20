@@ -2487,8 +2487,8 @@ export interface paths {
          *     그만큼 는다. `pk__in` 을 `recipient=request.auth_user` 로 좁혀서만 갱신한다 —
          *     남의 알림 id 가 섞여 들어와도 그 행만 조용히 걸러진다(에러를 내지 않는다,
          *     `mark_all_read`가 이미 받는 값이 `recipient` 로만 갇혀 있는 것과 같은 모양).
-         *     `NOTIFICATION_HISTORY_MAX_LIMIT`(위, 응답 상한)과 같은 이유로 요청 하나의
-         *     id 개수도 그 값으로 잘라낸다 — 무제한 입력을 그대로 쿼리에 넣지 않는다.
+         *     무제한 입력을 그대로 쿼리에 넣지 않도록 `MARK_MANY_MAX_IDS`로 요청 하나의
+         *     id 개수를 잘라낸다.
          */
         post: operations["notifications_api_mark_many_read"];
         delete?: never;
@@ -2509,9 +2509,15 @@ export interface paths {
          * @description 로그인한 사용자(Sponsor 포함) 자신에게 발송된 Notification 이력.
          *
          *     채널·시각·결과·실패사유가 담긴 dispatches를 포함해 그대로 노출한다 — ADR-0009가
-         *     요구하는 "연락받은 적 없다"는 항의에 대한 방어선이 이 화면이다(#19 AC). 최신순
-         *     으로, `limit`/`offset`으로 페이지를 넘긴다 — `limit`은
-         *     NOTIFICATION_HISTORY_MAX_LIMIT을 넘지 않게 잘라낸다(#19 리뷰 지적 5).
+         *     요구하는 "연락받은 적 없다"는 항의에 대한 방어선이 이 화면이다(#19 AC).
+         *
+         *     **커서(keyset)로 끝까지 읽힌다**(#151, #466) — `after`가 없으면 처음부터,
+         *     있으면 그 다음부터다. 예전에는 `limit`/`offset`으로 최신 `NOTIFICATION_
+         *     HISTORY_PAGE_SIZE`건만 읽혔고 「더 보기」가 없어 그 뒤의 안 읽은 알림은 이
+         *     화면에 존재하지 않았다 — 헤더 배지(`/unread-count`, 전체를 센다)와 어긋나는
+         *     바로 그 결함이다. 읽을 수 없는 커서는 조용히 처음부터가 아니라 422다 —
+         *     그러면 「더 보기」를 눌렀는데 목록이 처음으로 되돌아간 것처럼 보인다
+         *     (`payouts.api.list_payouts_for_operator`와 같은 이유).
          *
          *     `classroom_only=true`면 강의실 알림(`CLASSROOM_NOTIFICATION_TYPES`)만
          *     돌려준다(#304) — 강의실 화면이 이 값으로 부른다. 기본값(`False`)은 강의실
@@ -5863,6 +5869,15 @@ export interface components {
             status: string;
             /** Title */
             title?: string | null;
+        };
+        /** NotificationPageOut */
+        NotificationPageOut: {
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["NotificationOut"][];
+            /** Next */
+            next: string | null;
         };
         /**
          * NotificationType
@@ -10685,8 +10700,7 @@ export interface operations {
     notifications_api_list_my_notifications: {
         parameters: {
             query?: {
-                limit?: number;
-                offset?: number;
+                after?: string | null;
                 classroom_only?: boolean;
             };
             header?: never;
@@ -10701,7 +10715,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotificationOut"][];
+                    "application/json": components["schemas"]["NotificationPageOut"];
                 };
             };
         };

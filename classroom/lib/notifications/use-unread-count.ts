@@ -10,44 +10,43 @@
 // 머물러 종이 아예 뜨지 않는다 — 위 컴포넌트 참고).
 //
 // **새로고침 없이 곧바로 맞춰진다**(#381, ADR-0046) — `notification-changed`
-// 신호(그 알림을 받는 사람에게만 온다)를 받으면 `use-my-problem.ts`와 같은
-// 자리에서 다시 불러온다. 신호 자체에는 무엇이 바뀌었는지 싣지 않는다 —
-// 다른 탭에서 읽음 처리한 경우도 서버가 같은 신호를 그 사람의 스트림 전부에
-// 흘려주므로 이 탭도 함께 맞춰진다. **스트림이 없거나 끊기면 기존 30초
-// 폴링으로 물러난다**(`decideStreamRefresh` — 벨은 이 간격을 쓴다고 그 함수의
-// 테스트에도 이미 적혀 있다) — 연결돼 있는 동안은 불필요한 폴링을 하지
-// 않는다.
-import { useCallback, useEffect, useRef, useState } from "react";
+// 신호(그 알림을 받는 사람에게만 온다)를 받으면 다시 불러온다. 신호
+// 자체에는 무엇이 바뀌었는지 싣지 않는다 — 다른 탭에서 읽음 처리한 경우도
+// 서버가 같은 신호를 그 사람의 스트림 전부에 흘려주므로 이 탭도 함께
+// 맞춰진다. 구독·재연결 재조회·폴링 배선은 `useRealtimeRefresh`(#467)
+// 하나가 진다 — 세션이 확인되기 전에는 `waiting`을 거짓으로 줘 폴링도 하지
+// 않는다(신호도 어차피 그 전엔 오지 않는다, `EventStreamProvider`의 같은 게이트).
+import { useCallback, useEffect, useState } from "react";
 
 import { useMe } from "@/lib/auth/use-me";
-import { decideStreamRefresh } from "@/lib/events/policy";
-import { useEventStream } from "@/lib/events/stream-context";
-import { NOTIFICATION_CHANGED, type StreamConnectionState } from "@/lib/events/types";
+import { useRealtimeRefresh } from "@/lib/events/use-realtime-refresh";
+import { NOTIFICATION_CHANGED, type StreamEvent } from "@/lib/events/types";
 
 import { fetchUnreadCount } from "./api";
 import { subscribeToNotificationsRead } from "./read-bus";
 
-const POLL_INTERVAL_MS = 30_000;
+const FALLBACK_POLL_MS = 30_000;
 
 export type UnreadCountState =
   | { status: "hidden" }
   | { status: "loading" }
   | { status: "ready"; count: number };
 
+function isNotificationChanged(event: StreamEvent): boolean {
+  return event.kind === NOTIFICATION_CHANGED;
+}
+
 export function useUnreadCount(): UnreadCountState {
   const me = useMe();
   const isReady = me.status === "ready";
   const [count, setCount] = useState<number | null>(null);
-  const { connectionState, subscribe } = useEventStream();
-  const previousConnectionState = useRef<StreamConnectionState>(connectionState);
 
   const reload = useCallback(() => {
     if (!isReady) return;
-    fetchUnreadCount()
-      .then((res) => setCount(res.count))
-      .catch(() => {
-        // 일시적인 조회 실패는 배지를 지우지 않는다 — 다음 폴링이 다시 맞춘다.
-      });
+    // 일시적인 조회 실패는 배지를 지우지 않는다 — 다음 폴링이 다시 맞춘다.
+    fetchUnreadCount().then((result) => {
+      if (result.ok) setCount(result.data.count);
+    });
   }, [isReady]);
 
   useEffect(() => {
@@ -56,31 +55,12 @@ export function useUnreadCount(): UnreadCountState {
 
   // 이 사람에게 온 notification-changed에만 반응한다 — 신호 자체에는
   // 무엇이 바뀌었는지 실려 있지 않으므로 다시 물어보는 것이 유일한 방법이다.
-  useEffect(() => {
-    if (!isReady) return;
-    return subscribe((event) => {
-      if (event.kind !== NOTIFICATION_CHANGED) return;
-      reload();
-    });
-  }, [subscribe, reload, isReady]);
-
-  useEffect(() => {
-    if (!isReady) return;
-    const decision = decideStreamRefresh(
-      previousConnectionState.current,
-      connectionState,
-      POLL_INTERVAL_MS,
-    );
-    previousConnectionState.current = connectionState;
-    if (decision.refetchNow) reload();
-  }, [connectionState, reload, isReady]);
-
-  useEffect(() => {
-    if (!isReady) return;
-    if (connectionState === "open") return; // 연결됨: 폴링 없음 — 신호가 대신한다.
-    const timer = setInterval(reload, POLL_INTERVAL_MS);
-    return () => clearInterval(timer);
-  }, [connectionState, reload, isReady]);
+  useRealtimeRefresh({
+    matches: isNotificationChanged,
+    waiting: isReady,
+    fallbackPollMs: FALLBACK_POLL_MS,
+    reload,
+  });
 
   useEffect(() => {
     if (!isReady) return;

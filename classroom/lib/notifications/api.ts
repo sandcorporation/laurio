@@ -1,10 +1,10 @@
 // 강의실 알림 백엔드 호출 (#304). 공유 엔드포인트(`/api/notifications/*`,
 // backend `notifications/api.py`)를 공개 앱과 나눠 쓰되, `classroom_only=true`를
 // 언제나 붙인다 — 목록도, 안 읽은 개수도, 읽음 처리도 강의실 알림
-// (`CLASSROOM_NOTIFICATION_TYPES`)만 본다. 이 앱은 아직 `@codemit/bff-client`를
-// 쓰지 않으므로(`lib/backend/client.ts`) 타입도 여기서 손으로 적는다 —
-// `lib/submissions/api.ts`와 같은 패턴이다.
-import { backendJson } from "@/lib/backend/client";
+// (`CLASSROOM_NOTIFICATION_TYPES`)만 본다. 공유 클라이언트 위에 선다(#462).
+import type { ApiResult } from "@codemit/bff-client";
+
+import { bffClient } from "@/lib/bff/client";
 
 export type NotificationDispatchRow = {
   id: number;
@@ -37,22 +37,28 @@ export type NotificationRow = {
 export type UnreadCount = { count: number };
 export type MarkAllRead = { marked_count: number };
 
-const PAGE_SIZE = 50;
+// 커서(keyset) 목록 응답(#151, #466) — `usePagedList`(패키지 hooks.ts)가
+// 기대하는 `{items, count, next}` 계약 그대로다.
+export type NotificationPage = {
+  items: NotificationRow[];
+  count: number;
+  next: string | null;
+};
 
-export function fetchMyNotifications(limit: number = PAGE_SIZE, offset = 0): Promise<NotificationRow[]> {
-  return backendJson<NotificationRow[]>(
-    `/notifications/me?classroom_only=true&limit=${limit}&offset=${offset}`,
-  );
+// `after`가 없으면 처음부터, 있으면 그 다음부터다(#466) — 예전에는 최신
+// 50건만 읽어(`limit`/`offset`) 51번째 이후의 안 읽은 알림이 이 화면에
+// 존재하지 않았다(헤더 배지는 전체를 세므로 서로 어긋났다).
+export function fetchMyNotifications(after?: string | null): Promise<ApiResult<NotificationPage>> {
+  const cursor = after ? `&after=${encodeURIComponent(after)}` : "";
+  return bffClient.get<NotificationPage>(`/api/backend/notifications/me?classroom_only=true${cursor}`);
 }
 
-export function fetchUnreadCount(): Promise<UnreadCount> {
-  return backendJson<UnreadCount>("/notifications/unread-count?classroom_only=true");
+export function fetchUnreadCount(): Promise<ApiResult<UnreadCount>> {
+  return bffClient.get<UnreadCount>("/api/backend/notifications/unread-count?classroom_only=true");
 }
 
-export function markAllRead(): Promise<MarkAllRead> {
-  return backendJson<MarkAllRead>("/notifications/mark-read?classroom_only=true", {
-    method: "POST",
-  });
+export function markAllRead(): Promise<ApiResult<MarkAllRead>> {
+  return bffClient.post<MarkAllRead>("/api/backend/notifications/mark-read?classroom_only=true");
 }
 
 // 알림 하나를 지목해 읽음으로 표시한다(#345) — 링크를 눌러 그 화면으로 갈 때,
@@ -60,10 +66,8 @@ export function markAllRead(): Promise<MarkAllRead> {
 // 없다 — 이 엔드포인트는 이미 그 사람 소유의 알림 id 하나만 다루므로(백엔드
 // `mark_one_read`가 `recipient=request.auth_user`로 조회한다), 어느 제품
 // 것인지는 id 자체가 이미 정해 준다.
-export function markOneRead(notificationId: number): Promise<NotificationRow> {
-  return backendJson<NotificationRow>(`/notifications/${notificationId}/mark-read`, {
-    method: "POST",
-  });
+export function markOneRead(notificationId: number): Promise<ApiResult<NotificationRow>> {
+  return bffClient.post<NotificationRow>(`/api/backend/notifications/${notificationId}/mark-read`);
 }
 
 // 알림 여러 개를 한 번에 지목해 읽음으로 표시한다(#345) — 묶음(#305)의 머리글을
@@ -71,9 +75,8 @@ export function markOneRead(notificationId: number): Promise<NotificationRow> {
 // `markOneRead`를 따로 부르면 시도가 쌓일수록 요청 수가 그만큼 는다. 이쪽도
 // `classroom_only`가 필요 없다 — id들 자체가 `recipient=request.auth_user`로
 // 좁혀진다(백엔드 `mark_many_read`).
-export function markManyRead(notificationIds: number[]): Promise<MarkAllRead> {
-  return backendJson<MarkAllRead>("/notifications/mark-read-many", {
-    method: "POST",
-    body: JSON.stringify({ notification_ids: notificationIds }),
+export function markManyRead(notificationIds: number[]): Promise<ApiResult<MarkAllRead>> {
+  return bffClient.post<MarkAllRead>("/api/backend/notifications/mark-read-many", {
+    notification_ids: notificationIds,
   });
 }

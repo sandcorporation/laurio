@@ -27,7 +27,6 @@ import {
   PageShell,
   buttonClass,
 } from "@/app/components/ui";
-import { BackendError } from "@/lib/backend/client";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { renameMyself, type ProblemListItem } from "@/lib/submissions/api";
 import { useMyProblems } from "@/lib/submissions/use-my-problems";
@@ -119,15 +118,14 @@ function MyDisplayName({
     event.preventDefault();
     setSaving(true);
     setError(null);
-    try {
-      await renameMyself(classId, nameInput.trim());
+    const result = await renameMyself(classId, nameInput.trim());
+    if (result.ok) {
       setEditing(false);
       onRenamed();
-    } catch (err) {
-      setError(err instanceof BackendError ? err.message : "이름을 바꾸지 못했습니다.");
-    } finally {
-      setSaving(false);
+    } else {
+      setError(result.detail);
     }
+    setSaving(false);
   }
 
   function cancel() {

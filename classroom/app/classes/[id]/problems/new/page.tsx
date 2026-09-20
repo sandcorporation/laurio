@@ -26,7 +26,6 @@ import { MarkdownEditor } from "@/app/components/MarkdownEditor";
 import { ProblemParticipantView } from "@/app/components/ProblemParticipantView";
 import { ProblemSettingsForm } from "@/app/components/ProblemSettingsForm";
 import { TemplatePickerSheet } from "@/app/components/TemplatePickerSheet";
-import { BackendError } from "@/lib/backend/client";
 import { useClass } from "@/lib/classes/use-class";
 import { createProblem, type ProblemRow, type SubmissionFormat } from "@/lib/problems/api";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
@@ -129,26 +128,22 @@ export default function NewProblemPage() {
     if (!isGradingGuidelineValid(gradingGuideline)) return;
     setSubmitting(true);
     setError(null);
-    try {
-      const created = await createProblem(classId, {
-        title: title.trim(),
-        description,
-        submission_formats: submissionFormats,
-        model,
-        reasoning_effort: reasoningEffort,
-        grading_strictness: gradingGuideline.grading_strictness,
-        grading_guideline_text: gradingGuideline.grading_guideline_text,
-        checklist_items: items.map((item) => ({ label: item.label, required: item.required })),
-        syntax_check_enabled: syntaxCheckEnabled,
-        open,
-      });
-      router.push(`/classes/${classId}/problems/${created.id}`);
-    } catch (err) {
-      if (err instanceof BackendError) {
-        setError(err.message);
-      } else {
-        setError("문제를 만들지 못했습니다. 잠시 후 다시 시도해주세요.");
-      }
+    const result = await createProblem(classId, {
+      title: title.trim(),
+      description,
+      submission_formats: submissionFormats,
+      model,
+      reasoning_effort: reasoningEffort,
+      grading_strictness: gradingGuideline.grading_strictness,
+      grading_guideline_text: gradingGuideline.grading_guideline_text,
+      checklist_items: items.map((item) => ({ label: item.label, required: item.required })),
+      syntax_check_enabled: syntaxCheckEnabled,
+      open,
+    });
+    if (result.ok) {
+      router.push(`/classes/${classId}/problems/${result.data.id}`);
+    } else {
+      setError(result.detail);
       setSubmitting(false);
     }
   }

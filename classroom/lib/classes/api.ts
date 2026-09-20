@@ -1,5 +1,9 @@
-// Class 백엔드 호출 (#278/#279/#284/#285).
-import { backendJson } from "@/lib/backend/client";
+// Class 백엔드 호출 (#278/#279/#284/#285). 공유 BFF 클라이언트를 쓴다(#462) —
+// 401·`detail` 파싱은 `bffClient`가 소유하고, 여기는 `ApiResult`를 그대로
+// 돌려준다.
+import type { ApiResult } from "@codemit/bff-client";
+
+import { apiRequest, bffClient } from "@/lib/bff/client";
 
 // 이 클래스를 원본으로 하는, 지금 살아 있는(내리지 않은) 클래스 템플릿
 // (#333) — 없으면 `null`이다. 클래스 설정 화면이 새로고침 뒤에도 공개 상태를
@@ -45,10 +49,6 @@ export type ClassRow = {
   published_template: PublishedClassTemplateSummary | null;
 };
 
-export function fetchMyClasses(): Promise<ClassRow[]> {
-  return backendJson<ClassRow[]>("/classroom/classes");
-}
-
 // 「내가 참여자로 들어간 클래스」한 줄(#328) — 강사 전용 `ClassRow`와 달리
 // join_code·OpenAI 키·토큰 예산이 없다. 남의 클래스를 관리하는 정보가 아니라
 // "나는 이 클래스에 어떤 상태로 있는가"만 담는다.
@@ -64,20 +64,13 @@ export type JoinedClassRow = {
   expelled: boolean;
 };
 
-// 본인이 강사인 클래스는 여기 나오지 않는다 — `fetchMyClasses`가 이미 그
-// 클래스를 「연 것」으로 보여준다(백엔드 `list_joined_classes` docstring).
-export function fetchJoinedClasses(): Promise<JoinedClassRow[]> {
-  return backendJson<JoinedClassRow[]>("/classroom/classes/joined");
-}
-
-export function fetchClass(classId: number): Promise<ClassRow> {
-  return backendJson<ClassRow>(`/classroom/classes/${classId}`);
-}
-
-export function createClass(name: string, instructorDisplayName: string): Promise<ClassRow> {
-  return backendJson<ClassRow>("/classroom/classes", {
-    method: "POST",
-    body: JSON.stringify({ name, instructor_display_name: instructorDisplayName }),
+export function createClass(
+  name: string,
+  instructorDisplayName: string,
+): Promise<ApiResult<ClassRow>> {
+  return bffClient.post<ClassRow>("/api/backend/classroom/classes", {
+    name,
+    instructor_display_name: instructorDisplayName,
   });
 }
 
@@ -91,49 +84,43 @@ export function updateClass(
     token_budget: number;
     token_budget_warning_threshold_percent: number;
   }>,
-): Promise<ClassRow> {
-  return backendJson<ClassRow>(`/classroom/classes/${classId}`, {
-    method: "PATCH",
-    body: JSON.stringify(patch),
-  });
+): Promise<ApiResult<ClassRow>> {
+  return apiRequest<ClassRow>(`/api/backend/classroom/classes/${classId}`, "PATCH", patch);
 }
 
 // 채점 키는 저장 뒤 다시 보이지 않는다(#284) — 응답도 언제나 마스킹된
 // `ClassRow`뿐이다.
-export function setOpenAIKey(classId: number, apiKey: string): Promise<ClassRow> {
-  return backendJson<ClassRow>(`/classroom/classes/${classId}/openai-key`, {
-    method: "PUT",
-    body: JSON.stringify({ api_key: apiKey }),
+export function setOpenAIKey(classId: number, apiKey: string): Promise<ApiResult<ClassRow>> {
+  return apiRequest<ClassRow>(`/api/backend/classroom/classes/${classId}/openai-key`, "PUT", {
+    api_key: apiKey,
   });
 }
 
 // 가입 링크를 다시 뽑는다(#279) — 이전 코드는 그 순간부터 어떤 클래스도
 // 가리키지 않는다.
-export function regenerateJoinLink(classId: number): Promise<{ join_code: string }> {
-  return backendJson<{ join_code: string }>(`/classroom/classes/${classId}/join-link/regenerate`, {
-    method: "POST",
-  });
+export function regenerateJoinLink(classId: number): Promise<ApiResult<{ join_code: string }>> {
+  return bffClient.post<{ join_code: string }>(
+    `/api/backend/classroom/classes/${classId}/join-link/regenerate`,
+  );
 }
 
 // 지난 기수로 다음 기수를 연다(#293) — 문제·체크리스트·채점 설정이
 // 순서 그대로 따라오고, 참여자·제출물·Score·OpenAI 키는 따라오지 않는다.
-export function copyClass(classId: number): Promise<ClassRow> {
-  return backendJson<ClassRow>(`/classroom/classes/${classId}/copy`, {
-    method: "POST",
-  });
+export function copyClass(classId: number): Promise<ApiResult<ClassRow>> {
+  return bffClient.post<ClassRow>(`/api/backend/classroom/classes/${classId}/copy`);
 }
 
 // 보관 — 수업이 끝나면 닫되 읽기는 남긴다(#294). 되돌릴 수 있다.
-export function archiveClass(classId: number): Promise<ClassRow> {
-  return backendJson<ClassRow>(`/classroom/classes/${classId}/archive`, { method: "POST" });
+export function archiveClass(classId: number): Promise<ApiResult<ClassRow>> {
+  return bffClient.post<ClassRow>(`/api/backend/classroom/classes/${classId}/archive`);
 }
 
-export function unarchiveClass(classId: number): Promise<ClassRow> {
-  return backendJson<ClassRow>(`/classroom/classes/${classId}/unarchive`, { method: "POST" });
+export function unarchiveClass(classId: number): Promise<ApiResult<ClassRow>> {
+  return bffClient.post<ClassRow>(`/api/backend/classroom/classes/${classId}/unarchive`);
 }
 
 // 삭제 — 없던 일로 한다(#330). 보관과 달리 되돌릴 수 없다. 제출이 하나라도
 // 있으면 백엔드가 거절한다(403) — 그때는 보관을 쓴다.
-export function deleteClass(classId: number): Promise<void> {
-  return backendJson<void>(`/classroom/classes/${classId}`, { method: "DELETE" });
+export function deleteClass(classId: number): Promise<ApiResult<void>> {
+  return apiRequest<void>(`/api/backend/classroom/classes/${classId}`, "DELETE");
 }

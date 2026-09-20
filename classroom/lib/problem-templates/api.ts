@@ -1,5 +1,7 @@
-// 문제 템플릿 백엔드 호출 (#316/#318/#320/#389).
-import { backendJson } from "@/lib/backend/client";
+// 문제 템플릿 백엔드 호출 (#316/#318/#320/#389). 공유 클라이언트 위에 선다(#462).
+import type { ApiResult } from "@codemit/bff-client";
+
+import { bffClient } from "@/lib/bff/client";
 
 import type { GradingStrictness, ProblemRow, SubmissionFormat } from "@/lib/problems/api";
 
@@ -42,55 +44,57 @@ export function publishProblemAsTemplate(
   classId: number,
   problemId: number,
   publisherDisplayName: string,
-): Promise<ProblemTemplateRow> {
-  return backendJson<ProblemTemplateRow>(
-    `/classroom/classes/${classId}/problems/${problemId}/publish-template`,
-    {
-      method: "POST",
-      body: JSON.stringify({ publisher_display_name: publisherDisplayName }),
-    },
+): Promise<ApiResult<ProblemTemplateRow>> {
+  return bffClient.post<ProblemTemplateRow>(
+    `/api/backend/classroom/classes/${classId}/problems/${problemId}/publish-template`,
+    { publisher_display_name: publisherDisplayName },
   );
 }
 
 export function fetchProblemTemplates(
   query: { q?: string; page?: number } = {},
-): Promise<Page<ProblemTemplateListItem>> {
+): Promise<ApiResult<Page<ProblemTemplateListItem>>> {
   const params = new URLSearchParams();
   if (query.q) params.set("q", query.q);
   if (query.page) params.set("page", String(query.page));
   const qs = params.toString();
-  return backendJson<Page<ProblemTemplateListItem>>(
-    `/classroom/problem-templates${qs ? `?${qs}` : ""}`,
+  return bffClient.get<Page<ProblemTemplateListItem>>(
+    `/api/backend/classroom/problem-templates${qs ? `?${qs}` : ""}`,
   );
 }
 
-export function fetchMyProblemTemplates(): Promise<ProblemTemplateRow[]> {
-  return backendJson<ProblemTemplateRow[]>("/classroom/problem-templates/mine");
+export function fetchMyProblemTemplates(): Promise<ApiResult<ProblemTemplateRow[]>> {
+  return bffClient.get<ProblemTemplateRow[]>("/api/backend/classroom/problem-templates/mine");
 }
 
-export function fetchProblemTemplate(shareCode: string): Promise<ProblemTemplateRow> {
-  return backendJson<ProblemTemplateRow>(`/classroom/problem-templates/${shareCode}`);
+export function fetchProblemTemplate(shareCode: string): Promise<ApiResult<ProblemTemplateRow>> {
+  return bffClient.get<ProblemTemplateRow>(`/api/backend/classroom/problem-templates/${shareCode}`);
 }
 
 export function importProblemTemplate(
   shareCode: string,
   targetClassId: number,
-): Promise<ProblemRow> {
-  return backendJson<ProblemRow>(`/classroom/problem-templates/${shareCode}/import`, {
-    method: "POST",
-    body: JSON.stringify({ target_class_id: targetClassId }),
-  });
+): Promise<ApiResult<ProblemRow>> {
+  return bffClient.post<ProblemRow>(
+    `/api/backend/classroom/problem-templates/${shareCode}/import`,
+    { target_class_id: targetClassId },
+  );
 }
 
-export function takedownProblemTemplate(shareCode: string): Promise<ProblemTemplateRow> {
-  return backendJson<ProblemTemplateRow>(`/classroom/problem-templates/${shareCode}/takedown`, {
-    method: "POST",
-  });
+export function takedownProblemTemplate(
+  shareCode: string,
+): Promise<ApiResult<ProblemTemplateRow>> {
+  return bffClient.post<ProblemTemplateRow>(
+    `/api/backend/classroom/problem-templates/${shareCode}/takedown`,
+  );
 }
 
-export function reportProblemTemplate(shareCode: string, reason: string): Promise<{ reported: boolean }> {
-  return backendJson<{ reported: boolean }>(`/classroom/problem-templates/${shareCode}/report`, {
-    method: "POST",
-    body: JSON.stringify({ reason }),
-  });
+export function reportProblemTemplate(
+  shareCode: string,
+  reason: string,
+): Promise<ApiResult<{ reported: boolean }>> {
+  return bffClient.post<{ reported: boolean }>(
+    `/api/backend/classroom/problem-templates/${shareCode}/report`,
+    { reason },
+  );
 }

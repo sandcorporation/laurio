@@ -30,7 +30,7 @@ operator_router = Router(tags=["operator", "notifications"], auth=OperatorAuth()
 _MIN_QUERY_LENGTH = 1
 _MAX_SEARCH_RESULTS = 20
 # 이력 목록 한 번이 돌려줄 수 있는 최대 건수 — `notifications.api.
-# NOTIFICATION_HISTORY_MAX_LIMIT`과 같은 이유(무제한 응답을 만들지 않는다).
+# NOTIFICATION_HISTORY_PAGE_SIZE`와 같은 이유(무제한 응답을 만들지 않는다).
 _HISTORY_MAX_LIMIT = 100
 
 

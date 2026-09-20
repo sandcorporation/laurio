@@ -68,7 +68,7 @@ def test_me_without_scope_excludes_classroom_notifications(client, db):
 
     response = client.get(ME_URL, **_auth_header(session["access"]))
 
-    ids = {row["id"] for row in response.json()}
+    ids = {row["id"] for row in response.json()["items"]}
     assert ids == {contest_id}
     assert classroom_id not in ids
 
@@ -78,7 +78,7 @@ def test_me_with_classroom_only_lists_only_classroom_notifications(client, db):
 
     response = client.get(f"{ME_URL}?classroom_only=true", **_auth_header(session["access"]))
 
-    ids = {row["id"] for row in response.json()}
+    ids = {row["id"] for row in response.json()["items"]}
     assert ids == {classroom_id}
     assert contest_id not in ids
 

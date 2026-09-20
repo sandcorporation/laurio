@@ -17,6 +17,7 @@ from ninja.errors import HttpError
 from accounts.middleware import jwt_auth
 from core.auth import InternalAuth
 from core.clock import Clock
+from core.keyset import decode_cursor, keyset_page
 
 from . import operator_notice_images
 from .models import (
@@ -33,13 +34,17 @@ router = Router(tags=["internal", "notifications"], auth=InternalAuth())
 # 엔드포인트(#19 AC) — 위 `router`와 달리 InternalAuth가 아니라 jwt_auth를 쓴다.
 public_router = Router(tags=["notifications"])
 
-# GET /notifications/me 한 번이 돌려줄 수 있는 최대 건수(#19 리뷰 지적 5). 오래
-# 진행된 Contest는 dispatches까지 함께 직렬화하는 이 응답이 무제한이면 요청이
-# 느려지거나 타임아웃난다 — core.transitions.DEFAULT_BATCH_SIZE 등과 같은
-# "무제한 스캔/응답을 만들지 않는다"는 이 코드베이스의 관용구를 조회 엔드포인트에도
-# 그대로 적용한다.
-NOTIFICATION_HISTORY_MAX_LIMIT = 100
-NOTIFICATION_HISTORY_DEFAULT_LIMIT = 50
+# GET /notifications/me 한 페이지의 건수(#151, #466) — 커서(keyset) 페이지네이션의
+# page_size다. 오래 진행된 Contest는 dispatches까지 함께 직렬화하는 이 응답이
+# 무제한이면 요청이 느려지거나 타임아웃난다 — core.transitions.DEFAULT_BATCH_SIZE
+# 등과 같은 "무제한 스캔/응답을 만들지 않는다"는 이 코드베이스의 관용구를 조회
+# 엔드포인트에도 그대로 적용한다. **끝까지는 「더 보기」로 간다**(#466) — 예전에는
+# 이 값이 곧 상한이라 51번째 이후의 알림은 이 화면에 존재하지 않았다.
+NOTIFICATION_HISTORY_PAGE_SIZE = 50
+# 알림 여러 개를 한 번에 지목하는 `mark-read-many`의 입력 상한(#19 리뷰 지적 5) —
+# 위 페이지 크기와는 별개다: 화면 하나(강의실 알림 묶음)가 한 번에 지목할 수
+# 있는 개수의 상한이지, 목록 조회의 페이지 크기가 아니다.
+MARK_MANY_MAX_IDS = 100
 
 
 class CreateNotificationIn(Schema):
@@ -200,23 +205,35 @@ def create(request, payload: CreateNotificationIn):
     return _serialize(notification)
 
 
+class NotificationPageOut(Schema):
+    items: list[NotificationOut]
+    # 이 페이지의 길이가 아니라 이 필터(recipient·classroom_only)에 맞는 **전체**
+    # 건수다 — 헤더 배지(`/unread-count`)와 같은 사실을 가리키는지 화면이
+    # 확인할 수 있어야 한다(#466 AC).
+    count: int
+    # 더 있으면 다음 커서, 없으면 null — `usePagedList`(패키지 hooks.ts)가
+    # 이 값의 유무로만 "더 있는가"를 판정한다(#151과 같은 계약).
+    next: str | None
+
+
 # 정적 경로("/types/")는 반드시
 # "/{notification_id}" 보다 먼저 등록한다. django-ninja/Django의 URL 매칭은 등록
 # 순서를 따르므로, 동적 경로가 먼저 있으면 그 문자열들이 그 경로에 먼저 매치해
 # 405를 낸다.
-@public_router.get("/me", response=list[NotificationOut], auth=jwt_auth)
-def list_my_notifications(
-    request,
-    limit: int = NOTIFICATION_HISTORY_DEFAULT_LIMIT,
-    offset: int = 0,
-    classroom_only: bool = False,
-):
+@public_router.get("/me", response=NotificationPageOut, auth=jwt_auth)
+def list_my_notifications(request, after: str | None = None, classroom_only: bool = False):
     """로그인한 사용자(Sponsor 포함) 자신에게 발송된 Notification 이력.
 
     채널·시각·결과·실패사유가 담긴 dispatches를 포함해 그대로 노출한다 — ADR-0009가
-    요구하는 "연락받은 적 없다"는 항의에 대한 방어선이 이 화면이다(#19 AC). 최신순
-    으로, `limit`/`offset`으로 페이지를 넘긴다 — `limit`은
-    NOTIFICATION_HISTORY_MAX_LIMIT을 넘지 않게 잘라낸다(#19 리뷰 지적 5).
+    요구하는 "연락받은 적 없다"는 항의에 대한 방어선이 이 화면이다(#19 AC).
+
+    **커서(keyset)로 끝까지 읽힌다**(#151, #466) — `after`가 없으면 처음부터,
+    있으면 그 다음부터다. 예전에는 `limit`/`offset`으로 최신 `NOTIFICATION_
+    HISTORY_PAGE_SIZE`건만 읽혔고 「더 보기」가 없어 그 뒤의 안 읽은 알림은 이
+    화면에 존재하지 않았다 — 헤더 배지(`/unread-count`, 전체를 센다)와 어긋나는
+    바로 그 결함이다. 읽을 수 없는 커서는 조용히 처음부터가 아니라 422다 —
+    그러면 「더 보기」를 눌렀는데 목록이 처음으로 되돌아간 것처럼 보인다
+    (`payouts.api.list_payouts_for_operator`와 같은 이유).
 
     `classroom_only=true`면 강의실 알림(`CLASSROOM_NOTIFICATION_TYPES`)만
     돌려준다(#304) — 강의실 화면이 이 값으로 부른다. 기본값(`False`)은 강의실
@@ -225,15 +242,23 @@ def list_my_notifications(
     섞이지 않는 것은 이 분기 하나가 전부다.
     """
 
-    limit = max(1, min(limit, NOTIFICATION_HISTORY_MAX_LIMIT))
-    offset = max(0, offset)
+    if after is not None and decode_cursor(after) is None:
+        raise HttpError(422, "읽을 수 없는 커서입니다.")
 
     notifications = Notification.objects.filter(recipient=request.auth_user)
     notifications = _scope_by_classroom(notifications, classroom_only)
     notifications = notifications.select_related("operator_notice").prefetch_related(
         "dispatches"
-    ).order_by("-created_at")[offset : offset + limit]
-    return [_serialize(n, for_recipient=True) for n in notifications]
+    ).order_by("-created_at", "-id")
+
+    items, next_cursor = keyset_page(
+        notifications, after=after, page_size=NOTIFICATION_HISTORY_PAGE_SIZE
+    )
+    return {
+        "items": [_serialize(n, for_recipient=True) for n in items],
+        "count": notifications.count(),
+        "next": next_cursor,
+    }
 
 
 @public_router.get("/unread-count", response=UnreadCountOut, auth=jwt_auth)
@@ -327,10 +352,10 @@ def mark_many_read(request, payload: MarkManyReadIn):
     그만큼 는다. `pk__in` 을 `recipient=request.auth_user` 로 좁혀서만 갱신한다 —
     남의 알림 id 가 섞여 들어와도 그 행만 조용히 걸러진다(에러를 내지 않는다,
     `mark_all_read`가 이미 받는 값이 `recipient` 로만 갇혀 있는 것과 같은 모양).
-    `NOTIFICATION_HISTORY_MAX_LIMIT`(위, 응답 상한)과 같은 이유로 요청 하나의
-    id 개수도 그 값으로 잘라낸다 — 무제한 입력을 그대로 쿼리에 넣지 않는다."""
+    무제한 입력을 그대로 쿼리에 넣지 않도록 `MARK_MANY_MAX_IDS`로 요청 하나의
+    id 개수를 잘라낸다."""
 
-    ids = payload.notification_ids[:NOTIFICATION_HISTORY_MAX_LIMIT]
+    ids = payload.notification_ids[:MARK_MANY_MAX_IDS]
     qs = Notification.objects.filter(pk__in=ids, recipient=request.auth_user, read_at__isnull=True)
     # 갱신 전에 판정한다 — `read_at`을 이미 채운 뒤에는 이 필터가 더 이상 그
     # 갱신 대상 집합과 같은 행을 가리키지 않을 이유는 없지만(update가 유형을

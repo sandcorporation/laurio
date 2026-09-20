@@ -18,10 +18,17 @@
 // 가 묶는다. 정렬은 그 묶음 단위로 "안 읽은 것이 위, 그 안에서 최신순"이다
 // (AC) — 백엔드는 최신순으로만 주므로(공개 앱과 계약을 공유해 그 순서를
 // 바꾸지 않는다), "안 읽은 것을 위로"는 여기서 안정 정렬로 한 번 더 가른다.
+//
+// **커서(keyset)로 끝까지 읽힌다**(#151, #466) — 예전에는 최신 50건만 읽어
+// 51번째 이후의 안 읽은 알림이 이 화면에 존재하지 않았다(헤더 종은 전체를
+// 센다). `usePagedList`(패키지 공유 훅)를 쓰지 않는 이유는 공개 앱 콘솔
+// 알림(`app/console/notifications/page.tsx`)과 같다 — 「모두 읽음」·「하나
+// 읽음」이 서버를 다시 불러오지 않고 로컬에서 `read_at`만 바꾸는 자리
+// (`applyRead`)가 그 훅에는 없다.
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import { Card, EmptyState, ErrorNote, PageHeader, PageShell } from "@/app/components/ui";
+import { Card, EmptyState, ErrorNote, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
 import { useTeacherClassGate } from "@/lib/classes/use-teacher-class-gate";
 import {
   fetchMyNotifications,
@@ -42,35 +49,55 @@ import {
 } from "@/lib/notifications/group";
 import { notificationHref } from "@/lib/notifications/link";
 import { broadcastNotificationsRead } from "@/lib/notifications/read-bus";
+import { useUnreadCount } from "@/lib/notifications/use-unread-count";
 
 type LoadState =
   | { status: "loading" }
   | { status: "error" }
-  | { status: "ready"; items: NotificationRow[] };
+  | { status: "ready"; items: NotificationRow[]; nextCursor: string | null };
 
 export default function NotificationsPage() {
   const [load, setLoad] = useState<LoadState>({ status: "loading" });
+  const [loadingMore, setLoadingMore] = useState(false);
   const [markingAll, setMarkingAll] = useState(false);
   // 강사인 클래스가 있는가 — 채점 예산 경고는 강사에게만 오므로(#295) 빈
   // 상태 문구가 그것을 언급할지 여기 판정으로 가른다(#343).
   const teacherGate = useTeacherClassGate();
+  // 헤더 종과 같은 조회다(#466 AC "배지 수와 목록이 같은 사실을 가리킨다") —
+  // 「모두 읽음」 버튼을 지금 로드된 페이지의 안 읽은 줄 수로만 보이면, 1페이지를
+  // 전부 읽어도 2페이지 너머에 안 읽은 알림이 남아 있을 때 버튼이 먼저 사라진다.
+  const unreadCountState = useUnreadCount();
 
   useEffect(() => {
     let cancelled = false;
 
-    fetchMyNotifications()
-      .then((items) => {
-        if (cancelled) return;
-        setLoad({ status: "ready", items });
-      })
-      .catch(() => {
-        if (!cancelled) setLoad({ status: "error" });
-      });
+    fetchMyNotifications().then((result) => {
+      if (cancelled) return;
+      if (result.ok) {
+        setLoad({ status: "ready", items: result.data.items, nextCursor: result.data.next });
+      } else {
+        setLoad({ status: "error" });
+      }
+    });
 
     return () => {
       cancelled = true;
     };
   }, []);
+
+  async function loadMore() {
+    if (load.status !== "ready" || load.nextCursor === null) return;
+    setLoadingMore(true);
+    const result = await fetchMyNotifications(load.nextCursor);
+    if (result.ok) {
+      setLoad({
+        status: "ready",
+        items: [...load.items, ...result.data.items],
+        nextCursor: result.data.next,
+      });
+    }
+    setLoadingMore(false);
+  }
 
   function applyRead(ids: number[], readAt: string) {
     if (ids.length === 0) return;
@@ -85,43 +112,35 @@ export default function NotificationsPage() {
   }
 
   async function handleMarkOneRead(notificationId: number) {
-    try {
-      const updated = await markOneRead(notificationId);
-      if (updated.read_at) {
-        applyRead([updated.id], updated.read_at);
-        broadcastNotificationsRead();
-      }
-    } catch {
-      // 읽음 처리 실패는 이동을 막지 않는다 — 다음에 다시 눌러 재시도할 수 있다.
+    // 읽음 처리 실패는 이동을 막지 않는다 — 다음에 다시 눌러 재시도할 수 있다.
+    const result = await markOneRead(notificationId);
+    if (result.ok && result.data.read_at) {
+      applyRead([result.data.id], result.data.read_at);
+      broadcastNotificationsRead();
     }
   }
 
   async function handleMarkGroupRead(ids: number[]) {
     if (ids.length === 0) return;
-    try {
-      await markManyRead(ids);
+    // 읽음 처리 실패는 이동을 막지 않는다 — 다음에 다시 눌러 재시도할 수 있다.
+    const result = await markManyRead(ids);
+    if (result.ok) {
       applyRead(ids, new Date().toISOString());
       broadcastNotificationsRead();
-    } catch {
-      // 읽음 처리 실패는 이동을 막지 않는다 — 다음에 다시 눌러 재시도할 수 있다.
     }
   }
 
   async function handleMarkAllRead() {
     setMarkingAll(true);
-    try {
-      await markAllRead();
-      if (load.status === "ready") {
-        const now = new Date().toISOString();
-        const unreadIds = load.items.filter((n) => n.read_at === null).map((n) => n.id);
-        applyRead(unreadIds, now);
-        broadcastNotificationsRead();
-      }
-    } catch {
-      // 실패해도 화면은 그대로 — 다시 눌러 재시도할 수 있다.
-    } finally {
-      setMarkingAll(false);
+    // 실패해도 화면은 그대로 — 다시 눌러 재시도할 수 있다.
+    const result = await markAllRead();
+    if (result.ok && load.status === "ready") {
+      const now = new Date().toISOString();
+      const unreadIds = load.items.filter((n) => n.read_at === null).map((n) => n.id);
+      applyRead(unreadIds, now);
+      broadcastNotificationsRead();
     }
+    setMarkingAll(false);
   }
 
   if (load.status === "loading") {
@@ -134,7 +153,7 @@ export default function NotificationsPage() {
     );
   }
 
-  const unreadCount = load.status === "ready" ? load.items.filter((n) => n.read_at === null).length : 0;
+  const unreadCount = unreadCountState.status === "ready" ? unreadCountState.count : 0;
 
   return (
     <PageShell>
@@ -191,6 +210,18 @@ export default function NotificationsPage() {
           ))}
         </ul>
       )}
+
+      {load.status === "ready" && load.nextCursor !== null ? (
+        <button
+          type="button"
+          onClick={loadMore}
+          disabled={loadingMore}
+          data-testid="notifications-load-more"
+          className={`mt-4 self-start ${buttonClass("secondary")}`}
+        >
+          {loadingMore ? "불러오는 중..." : "더 보기"}
+        </button>
+      ) : null}
     </PageShell>
   );
 }

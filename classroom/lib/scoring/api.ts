@@ -1,8 +1,7 @@
-// 채점 모델 카탈로그 (#285, #401). 클래스 기본값·문제별 덮어쓰기가 고를 수
+// 채점 모델 카탈로그 타입 (#285, #401). 클래스 기본값·문제별 덮어쓰기가 고를 수
 // 있는 모델과 각 모델의 컨텍스트 크기 — 강사 본인의 클래스 키로 실제로 쓸 수
-// 있는 모델만 나온다(예전 전역 목록을 대신한다).
-import { backendJson } from "@/lib/backend/client";
-
+// 있는 모델만 나온다(예전 전역 목록을 대신한다). 실제 호출은
+// `use-scoring-models.ts`가 공유 클라이언트로 한다(#462).
 export type ScoringModelRow = {
   id: string;
   label: string;
@@ -20,7 +19,3 @@ export type ScoringModelCatalog = {
   // `source`가 "fallback"일 때만 값이 있다 — "no_api_key" | "fetch_failed".
   unavailable_reason: "no_api_key" | "fetch_failed" | null;
 };
-
-export function fetchScoringModels(classId: number): Promise<ScoringModelCatalog> {
-  return backendJson<ScoringModelCatalog>(`/classroom/classes/${classId}/scoring-models`);
-}

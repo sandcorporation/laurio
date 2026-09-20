@@ -7,8 +7,23 @@
 import * as Sentry from "@sentry/nextjs";
 import { useCallback, useState } from "react";
 
-import { backendJson } from "@/lib/backend/client";
+import type { ApiFailure } from "@codemit/bff-client";
+
+import { bffClient, unwrap } from "@/lib/bff/client";
 import { describeUploadFailure, type UploadFailureContext } from "./upload-failure";
+
+function isApiFailure(error: unknown): error is ApiFailure {
+  return typeof error === "object" && error !== null && "ok" in error && !(error as ApiFailure).ok;
+}
+
+/** 서버가 준 실패면 그 문구를 그대로 쓰고(#462 — 배열 detail 도 이미 사람이
+ * 읽는 문자열로 좁혀져 온다), 그 밖의 오류(네트워크·업로드 자체의 실패)는
+ * `Error.message`를 쓴다. */
+function uploadErrorMessage(error: unknown): string {
+  if (isApiFailure(error)) return error.detail;
+  if (error instanceof Error) return error.message;
+  return "업로드에 실패했습니다.";
+}
 
 export type UploadStatus = "idle" | "uploading" | "done" | "error";
 
@@ -91,10 +106,12 @@ export function useSourceUpload(targetRef: string | null) {
       const contentType = file.type || null;
       setState({ status: "uploading", error: null, objectKey: null, contentType });
       try {
-        const presigned = await backendJson<PresignedUpload>("/storage/uploads", {
-          method: "POST",
-          body: JSON.stringify({ target_ref: targetRef, content_type: contentType }),
-        });
+        const presigned = await unwrap(
+          bffClient.post<PresignedUpload>("/api/backend/storage/uploads", {
+            target_ref: targetRef,
+            content_type: contentType,
+          }),
+        );
         if (presigned.max_size_bytes !== null && file.size > presigned.max_size_bytes) {
           const megabytes = Math.round((presigned.max_size_bytes / (1024 * 1024)) * 10) / 10;
           throw new Error(`파일이 너무 큽니다. 최대 ${megabytes}MB까지 업로드할 수 있습니다.`);
@@ -103,8 +120,12 @@ export function useSourceUpload(targetRef: string | null) {
         setState({ status: "done", error: null, objectKey: presigned.object_key, contentType });
         return { objectKey: presigned.object_key, contentType };
       } catch (error) {
-        const message = error instanceof Error ? error.message : "업로드에 실패했습니다.";
-        setState({ status: "error", error: message, objectKey: null, contentType: null });
+        setState({
+          status: "error",
+          error: uploadErrorMessage(error),
+          objectKey: null,
+          contentType: null,
+        });
         throw error;
       }
     },

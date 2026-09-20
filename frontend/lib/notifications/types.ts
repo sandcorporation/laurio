@@ -7,3 +7,6 @@ export type NotificationOut = components["schemas"]["NotificationOut"];
 export type NotificationDispatchOut = components["schemas"]["DispatchOut"];
 export type UnreadCountOut = components["schemas"]["UnreadCountOut"];
 export type MarkAllReadOut = components["schemas"]["MarkAllReadOut"];
+// 커서(keyset) 페이지네이션 응답(#151, #466) — `usePagedList`(패키지 hooks.ts)가
+// 기대하는 `{items, count, next}` 계약 그대로다.
+export type NotificationPageOut = components["schemas"]["NotificationPageOut"];

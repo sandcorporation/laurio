@@ -1,7 +1,8 @@
 "use client";
 
 // 공개 클래스 템플릿 검색 목록 상태 (#319) —
-// `problem-templates/use-problem-templates.ts`와 같은 모양이다.
+// `problem-templates/use-problem-templates.ts`와 같은 모양이다. 공유
+// 클라이언트 위에 선다(#462).
 import { useEffect, useState } from "react";
 
 import { fetchClassTemplates, type ClassTemplateListItem } from "./api";
@@ -19,20 +20,20 @@ export function useClassTemplates(q: string) {
   useEffect(() => {
     let cancelled = false;
     setState({ status: "loading" });
-    fetchClassTemplates({ q: q || undefined, page: 1 })
-      .then((result) => {
-        if (cancelled) return;
-        setState({
-          status: "ready",
-          items: result.items,
-          count: result.count,
-          page: 1,
-          hasMore: result.items.length < result.count,
-        });
-      })
-      .catch(() => {
-        if (!cancelled) setState({ status: "error" });
+    fetchClassTemplates({ q: q || undefined, page: 1 }).then((result) => {
+      if (cancelled) return;
+      if (!result.ok) {
+        setState({ status: "error" });
+        return;
+      }
+      setState({
+        status: "ready",
+        items: result.data.items,
+        count: result.data.count,
+        page: 1,
+        hasMore: result.data.items.length < result.data.count,
       });
+    });
     return () => {
       cancelled = true;
     };
@@ -42,12 +43,13 @@ export function useClassTemplates(q: string) {
     if (state.status !== "ready" || !state.hasMore) return;
     const nextPage = state.page + 1;
     const result = await fetchClassTemplates({ q: q || undefined, page: nextPage });
+    if (!result.ok) return;
     setState({
       status: "ready",
-      items: [...state.items, ...result.items],
-      count: result.count,
+      items: [...state.items, ...result.data.items],
+      count: result.data.count,
       page: nextPage,
-      hasMore: state.items.length + result.items.length < result.count,
+      hasMore: state.items.length + result.data.items.length < result.data.count,
     });
   }
 

@@ -28,11 +28,11 @@ export default function NewClassPage() {
     event.preventDefault();
     setSubmitting(true);
     setError(null);
-    try {
-      const created = await createClass(name.trim(), instructorDisplayName.trim());
-      router.push(`/classes/${created.id}`);
-    } catch {
-      setError("클래스를 만들지 못했습니다. 잠시 후 다시 시도해주세요.");
+    const result = await createClass(name.trim(), instructorDisplayName.trim());
+    if (result.ok) {
+      router.push(`/classes/${result.data.id}`);
+    } else {
+      setError(result.detail);
       setSubmitting(false);
     }
   }

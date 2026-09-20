@@ -205,11 +205,11 @@ export default function ClassDetailPage() {
   async function handleCopyClass() {
     setCopyError(null);
     setCopying(true);
-    try {
-      const copy = await copyClass(classId);
-      router.push(`/classes/${copy.id}`);
-    } catch {
-      setCopyError("클래스를 복사하지 못했습니다. 잠시 후 다시 시도해주세요.");
+    const result = await copyClass(classId);
+    if (result.ok) {
+      router.push(`/classes/${result.data.id}`);
+    } else {
+      setCopyError(result.detail);
       setCopying(false);
     }
   }

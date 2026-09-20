@@ -1,12 +1,15 @@
 "use client";
 
 // 클래스 템플릿 하나의 미리보기 상태 (#319) —
-// `problem-templates/use-template-preview.ts`와 같은 모양이다.
-import { useEffect, useState } from "react";
+// `problem-templates/use-template-preview.ts`와 같은 모양이다. 공유
+// 클라이언트 위에 선다(#462).
+import { useCallback, useMemo } from "react";
 
-import { BackendError } from "@/lib/backend/client";
+import { useBackendQuery } from "@codemit/bff-client";
 
-import { fetchClassTemplate, type ClassTemplateRow } from "./api";
+import { bffClient } from "@/lib/bff/client";
+
+import type { ClassTemplateRow } from "./api";
 
 export type ClassTemplatePreviewState =
   | { status: "loading" }
@@ -14,28 +17,27 @@ export type ClassTemplatePreviewState =
   | { status: "error" }
   | { status: "ready"; template: ClassTemplateRow };
 
+const GONE = Symbol("class-template-gone");
+
 export function useClassTemplatePreview(shareCode: string) {
-  const [state, setState] = useState<ClassTemplatePreviewState>({ status: "loading" });
+  const { state: queryState, reload: refetch } = useBackendQuery<ClassTemplateRow | typeof GONE>(
+    bffClient,
+    `/api/backend/classroom/class-templates/${shareCode}`,
+    { onFailure: (failure) => (failure.status === 404 ? GONE : undefined) },
+  );
+  // `refetch-keeps-screen.test.ts`가 이 이름의 로컬 선언을 찾는다.
+  const reload = useCallback(() => {
+    refetch();
+  }, [refetch]);
 
-  function reload() {
-    fetchClassTemplate(shareCode)
-      .then((template) => setState({ status: "ready", template }))
-      .catch((error) => {
-        if (error instanceof BackendError && error.status === 404) {
-          setState({ status: "gone" });
-        } else {
-          setState((prev) => (prev.status === "ready" ? prev : { status: "error" }));
-        }
-      });
-  }
-
-  useEffect(() => {
-    // 보고 있는 대상이 바뀔 때만 화면을 비운다 — 다시 불러오기(`reload`)는 새 응답이
-    // 올 때까지 이미 그린 화면을 둔다(lib/rendering/refetch-keeps-screen.test.ts).
-    setState({ status: "loading" });
-    reload();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shareCode]);
+  // useMemo 없이 매 렌더 새 객체를 만들면 이 값을 effect 의존성으로 쓰는
+  // 호출부(미리보기 화면의 이름 초기값 채우기)가 폭주할 수 있다(#462 코드 리뷰).
+  const state: ClassTemplatePreviewState = useMemo(() => {
+    if (queryState.status === "loading") return { status: "loading" };
+    if (queryState.status === "error") return { status: "error" };
+    if (queryState.data === GONE) return { status: "gone" };
+    return { status: "ready", template: queryState.data };
+  }, [queryState]);
 
   return { state, reload };
 }

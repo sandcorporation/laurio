@@ -294,7 +294,7 @@ def _run_lifecycle_scan(client) -> dict:
 def _my_notifications(client, access: str) -> list[dict]:
     response = client.get(MY_NOTIFICATIONS_URL, **_auth_header(access))
     assert response.status_code == 200, response.content
-    return response.json()
+    return response.json()["items"]
 
 
 def _extend(client, sponsor: dict, contest_id: int) -> dict:

@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { establishClassroomSession } from "./lib/cross-app-session";
+
 // 강의실 01(#276) — 미들웨어 가드와 BFF 프록시 허용목록(ADR-0016/0038).
 //
 // 시임 규약(ADR-0017/0021, playwright.config.ts 상단 주석)을 그대로 따른다:
@@ -61,5 +63,45 @@ test.describe("BFF 프록시 허용목록 — 기본은 거부다 (ADR-0016, #27
     // 것이고, 그러면 참여자가 소스를 낼 때 자기 User pk 를 얻지 못한다(#286).
     const res = await request.get("/api/backend/accounts/me");
     expect(res.status()).toBe(401);
+  });
+});
+
+test.describe("죽은 세션 — 공유 BFF 클라이언트가 로그인으로 보낸다 (#462)", () => {
+  // 미들웨어는 쿠키의 "존재"만 본다(hasSessionCookie) — 쿠키가 있지만
+  // 값이 죽어 있으면(리프레시까지 실패) 렌더링 전에는 막히지 않고, 화면이
+  // 뜬 뒤 백엔드를 부르는 순간 401 을 받는다. 예전에는 그 401 을 화면마다
+  // 손으로 쓴 클라이언트가 "찾을 수 없습니다"로만 보여줬다 — 아무도 로그인
+  // 으로 보내지 않았다(#461 문제 진술). 지금은 공유 BFF 클라이언트
+  // (`@codemit/bff-client`)가 그 자리를 대신해 곧장 로그인으로 보낸다.
+  test("쿠키는 있지만 죽은 세션으로 열면 강의실 자신의 /login 을 거쳐 공개 앱 로그인으로 간다", async ({
+    page,
+  }) => {
+    // 먼저 정상 세션을 세워 강의실이 실제로 화면을 그린다는 것을 확인한다
+    // — 그래야 아래 리다이렉트가 "애초에 못 열어서"가 아니라 "열었다가
+    // 401 을 받아서"라고 말할 수 있다.
+    await establishClassroomSession(page, `e2e-classroom-dead-session-${Date.now()}`);
+    await page.goto("/");
+    await expect(page).toHaveURL("/");
+
+    // 세션을 죽인다 — 리프레시까지 실패하는 상황을 흉내 내려고 값 자체를
+    // 못 쓰게 만든다(서명이 깨진 문자열). 미들웨어는 이 쿠키의 존재만
+    // 보므로 이 시점에도 렌더링 자체는 막히지 않는다.
+    await page.context().addCookies([
+      { name: "codemit_access", value: "dead.dead.dead", url: page.url(), httpOnly: true, sameSite: "Lax" },
+      { name: "codemit_refresh", value: "dead.dead.dead", url: page.url(), httpOnly: true, sameSite: "Lax" },
+    ]);
+
+    // 「내 클래스」 조회(`useMyClasses`)가 401 을 받고, 공유 BFF 클라이언트가
+    // 조회든 변경이든 같은 한 경로 — 이 앱 자신의 `/login` — 로 보낸다.
+    // 거기서 공개 앱 로그인으로 다시 보내며 돌아올 자리(`next_origin`·`next`)
+    // 를 함께 싣는다(#297 후속·#334) — 로그인을 마치면 이 화면으로 돌아온다.
+    await page.goto("/");
+    await page.waitForURL(/\/login\?next=/);
+    const loginLink = page.getByTestId("classroom-login-link");
+    await expect(loginLink).toBeVisible();
+    const href = await loginLink.getAttribute("href");
+    expect(href).toContain("/login?");
+    expect(href).toContain("next_origin=");
+    expect(href).toContain("next=");
   });
 });

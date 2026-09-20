@@ -14,13 +14,17 @@
 // 다시 불러오지 않는다("새 알림" 표시가 그 사이 사라지면 안 되므로). 성공
 // 즉시 헤더 벨에게 `read-bus` 이벤트로 알려 배지를 곧바로 줄인다.
 //
-// **페이지네이션은 `limit`/`offset`을 손으로 늘린다** — `usePagedList`(패키지
-// 공유 훅)는 커서 계약(`{items, count, next}`)을 전제하는데 이 엔드포인트는
-// 그보다 먼저 있던 `limit`/`offset` 계약이라(#19) 이 티켓이 그 계약을 바꾸지
-// 않는 한 맞지 않는다 — 새 화면 하나를 위해 기존 API 계약을 바꾸는 대신
-// 화면이 그 계약에 맞춘다.
+// **커서(keyset)로 끝까지 읽힌다**(#151, #466) — 예전에는 `limit`/`offset`을
+// 손으로 늘렸고 51번째 이후의 안 읽은 알림은 이 화면에 존재하지 않았다.
+// `usePagedList`(패키지 공유 훅)를 그대로 쓰지 않는 이유: 그 훅은 「모두
+// 읽음」·「하나 읽음」이 서버 값을 다시 받지 않고 로컬에서 즉시
+// `read_at`만 바꾸는 이 화면의 관용구(아래 `applyRead`)를 위한 갱신 자리를
+// 주지 않는다 — 다시 불러오면 "새 알림" 표시가 그 사이 사라진다. 그래서
+// 페이지를 쌓는 로직은 같은 커서 계약으로 손으로 유지한다.
 import Link from "next/link";
 import { useEffect, useState } from "react";
+
+import { useBackendQuery } from "@codemit/bff-client";
 
 import { Badge, EmptyState, ErrorNote, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";
@@ -32,15 +36,13 @@ import {
   describeNotification,
   formatDateTime,
 } from "@/lib/notifications/format";
-import { broadcastNotificationsRead } from "@/lib/notifications/read-bus";
-import type { MarkAllReadOut, NotificationOut } from "@/lib/notifications/types";
-
-const PAGE_SIZE = 20;
+import { broadcastNotificationsRead, subscribeToNotificationsRead } from "@/lib/notifications/read-bus";
+import type { MarkAllReadOut, NotificationOut, NotificationPageOut, UnreadCountOut } from "@/lib/notifications/types";
 
 type LoadState =
   | { status: "loading" }
   | { status: "error" }
-  | { status: "ready"; items: NotificationOut[]; hasMore: boolean };
+  | { status: "ready"; items: NotificationOut[]; nextCursor: string | null };
 
 export default function NotificationsPage() {
   const session = useSession();
@@ -48,25 +50,38 @@ export default function NotificationsPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [markingAll, setMarkingAll] = useState(false);
 
+  // 헤더 배지와 같은 조회다(#466 AC "배지 수와 목록이 같은 사실을 가리킨다") —
+  // 「모두 읽음」 버튼을 지금 로드된 페이지의 안 읽은 줄 수로 보이면, 1페이지를
+  // 전부 읽은 뒤에도 2페이지 너머에 안 읽은 알림이 남아 있을 때 버튼이 먼저
+  // 사라지는 같은 결함이 반복된다.
+  const unreadCountPath =
+    session.status === "authenticated" ? "/api/backend/notifications/unread-count" : null;
+  const { state: unreadCountState, reload: reloadUnreadCount } = useBackendQuery<UnreadCountOut>(
+    bffClient,
+    unreadCountPath,
+  );
+
   useEffect(() => {
     if (session.status !== "authenticated") return;
     let cancelled = false;
 
-    bffClient
-      .get<NotificationOut[]>(`/api/backend/notifications/me?limit=${PAGE_SIZE}&offset=0`)
-      .then((res) => {
-        if (cancelled) return;
-        if (!res.ok) {
-          setLoad({ status: "error" });
-          return;
-        }
-        setLoad({ status: "ready", items: res.data, hasMore: res.data.length === PAGE_SIZE });
-      });
+    bffClient.get<NotificationPageOut>("/api/backend/notifications/me").then((res) => {
+      if (cancelled) return;
+      if (!res.ok) {
+        setLoad({ status: "error" });
+        return;
+      }
+      setLoad({ status: "ready", items: res.data.items, nextCursor: res.data.next });
+    });
 
     return () => {
       cancelled = true;
     };
   }, [session.status]);
+
+  useEffect(() => {
+    return subscribeToNotificationsRead(reloadUnreadCount);
+  }, [reloadUnreadCount]);
 
   function applyRead(updated: Map<number, string>) {
     setLoad((current) => {
@@ -104,17 +119,16 @@ export default function NotificationsPage() {
   }
 
   async function loadMore() {
-    if (load.status !== "ready") return;
+    if (load.status !== "ready" || load.nextCursor === null) return;
     setLoadingMore(true);
-    const offset = load.items.length;
-    const res = await bffClient.get<NotificationOut[]>(
-      `/api/backend/notifications/me?limit=${PAGE_SIZE}&offset=${offset}`,
+    const res = await bffClient.get<NotificationPageOut>(
+      `/api/backend/notifications/me?after=${encodeURIComponent(load.nextCursor)}`,
     );
     if (res.ok) {
       setLoad({
         status: "ready",
-        items: [...load.items, ...res.data],
-        hasMore: res.data.length === PAGE_SIZE,
+        items: [...load.items, ...res.data.items],
+        nextCursor: res.data.next,
       });
     }
     setLoadingMore(false);
@@ -129,7 +143,9 @@ export default function NotificationsPage() {
     );
   }
 
-  const unreadCount = load.status === "ready" ? load.items.filter((n) => n.read_at === null).length : 0;
+  // 헤더 배지와 같은 값이다 — 로드된 페이지만 보면 1페이지를 전부 읽어도
+  // 2페이지 너머에 안 읽은 알림이 남아 있을 때 버튼이 먼저 사라진다(#466 AC).
+  const unreadCount = unreadCountState.status === "ready" ? unreadCountState.data.count : 0;
 
   return (
     <PageShell>
@@ -176,7 +192,7 @@ export default function NotificationsPage() {
             ))}
           </ul>
 
-          {load.hasMore && (
+          {load.nextCursor !== null && (
             <button
               type="button"
               onClick={loadMore}

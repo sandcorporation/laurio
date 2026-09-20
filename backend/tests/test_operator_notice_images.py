@@ -117,7 +117,7 @@ def test_list_response_has_image_flag_only_no_signed_url(client, db):
     assert sent.status_code == 200, sent.content
     assert sent.json()["has_image"] is True
 
-    listing = client.get(ME_URL, **_auth_header(session["access"])).json()
+    listing = client.get(ME_URL, **_auth_header(session["access"])).json()["items"]
     assert len(listing) == 1
     row = listing[0]
     assert row["has_image"] is True
@@ -133,7 +133,7 @@ def test_notice_without_image_has_image_false(client, db):
 
     _send(operator, recipient_id=recipient_id)
 
-    row = client.get(ME_URL, **_auth_header(session["access"])).json()[0]
+    row = client.get(ME_URL, **_auth_header(session["access"])).json()["items"][0]
     assert row["has_image"] is False
 
 
