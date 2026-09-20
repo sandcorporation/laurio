@@ -973,16 +973,16 @@ Operator 계정은 `backend/accounts/management/commands/seed_e2e_operator.py`
 착오로 이걸 다시 발견했다. 워크트리 코드를 치려면 백엔드도 임시로 띄운다:
 
 ```bash
-cd <worktree>/backend
-CODEMIT_DB_PORT=55432 STORAGE_BACKEND=s3 uv run python manage.py runserver 0.0.0.0:58101 &
-cd ../frontend
-CODEMIT_API_BASE_URL=http://127.0.0.1:58101 pnpm exec next dev -p 53201 &
-CODEMIT_E2E_BASE_URL=http://127.0.0.1:53201 CODEMIT_E2E_NAMESPACE=c2 pnpm exec playwright test --project=public
-kill %1 %2
+cd <worktree>
+./scripts/dev-server.sh start backend        # 포트를 출력한다
+CODEMIT_API_BASE_URL=http://127.0.0.1:<그 포트> ./scripts/dev-server.sh start front
+CODEMIT_E2E_BASE_URL=http://127.0.0.1:<앱 포트> CODEMIT_E2E_NAMESPACE=c2 \
+  pnpm exec playwright test --project=public
+./scripts/dev-server.sh stop-all
 ```
 
-`STORAGE_BACKEND=s3` 를 주는 이유는 dev compose 의 backend 가 그렇게 뜨기 때문이다
-(업로드 e2e 가 실물 MinIO 를 쳐야 한다) — 빼면 업로드 스펙만 갈린다.
+`STORAGE_BACKEND=s3` 는 도구가 알아서 준다 — dev compose 의 backend 가 그렇게 뜨기
+때문이다(업로드 e2e 가 실물 MinIO 를 쳐야 한다). 빼면 업로드 스펙만 갈린다.
 
 **워크트리에서 일한다면 e2e 가 당신 코드를 치지 않는다.** `playwright.config.ts`
 에 `webServer` 가 없는 것은 의도다(ADR-0021 — 테스트가 앱의 수명을 소유하지
@@ -993,14 +993,36 @@ kill %1 %2
 워크트리 코드로 검증하려면 그 워크트리에서 임시 Next 서버를 띄우고 baseURL 을
 그쪽으로 돌린다 — 백엔드는 이미 떠 있는 것을 그대로 쓴다:
 
+**`scripts/dev-server.sh` 로 띄우고 걷는다 — 손으로 `&` 와 `kill %1` 을 쓰지 않는다**
+(2026-09-20). 포트는 이 워크트리의 `dev-env.sh` 값 +10 으로 스스로 고르므로 compose
+스택과도, 다른 워크트리와도 부딪히지 않는다.
+
 ```bash
-cd <worktree>/frontend
-CODEMIT_API_BASE_URL=http://127.0.0.1:58000 pnpm exec next dev -p 53100 &
-CODEMIT_E2E_BASE_URL=http://127.0.0.1:53100 pnpm exec playwright test --project=public
-kill %1
+cd <worktree>
+./scripts/dev-server.sh start front          # baseURL 을 출력한다
+CODEMIT_E2E_BASE_URL=http://127.0.0.1:<그 포트> pnpm exec playwright test --project=public
+./scripts/dev-server.sh stop-all             # 끝나면 반드시
 ```
 
-끝나면 반드시 죽인다 — 남겨 두면 다음 체인이 그 포트에서 막힌다.
+**옛 처방(`... &` 뒤에 `kill %1`)은 에이전트에게 성립하지 않는다.** 잡 테이블은 그
+셸에만 있는데 에이전트는 **Bash 호출마다 새 셸**이라, 나중 호출의 `kill %1` 은
+아무것도 죽이지 않는다 — 지켜질 수 없는 규칙이었다. 2026-09-20 에 병렬 체인 다섯이
+그렇게 남긴 호스트 `next dev` **14개가 15.0 GiB** 를 먹어 RSS 25/26 GiB·스왑 8 GiB 중
+88 KB 만 남았고, sshd 가 `Maxstartups` 로 연결을 버려 **SSH 로 들어갈 수 없었다**
+(커널 OOM 은 `oom_score_adj` 가 높은 chrome 만 죽였을 뿐 원인은 안 건드렸다).
+
+그래서 이 도구는 **PID 파일**로 관리한다 — 어느 셸에서든 걷을 수 있다. 그리고 죽일 때
+**나무 전체를 죽인다**: `pnpm exec next dev` 는 자식으로 진짜 `next-server` 를 낳으므로
+부모만 죽이면 메모리를 쥔 쪽이 그대로 남는다(실측으로 3단계까지 함께 죽는 것을
+확인했다). 다른 명령도 있다 — `list`(이 머신에 뜬 것 전부, **이 도구 밖에서 뜬 것까지**
+보여준다)·`reap`(워크트리가 사라진 고아를 걷는다, 5분마다 타이머가 부른다)·`stop <대상>`.
+
+**주 워크트리에서는 안 뜬다 — 그게 맞다.** dev 컨테이너가 이 체크아웃에 root 로 `.next`
+를 써 두어 호스트 `next dev` 가 `EACCES` 로 죽는데, 주 워크트리는 애초에 컨테이너가
+서빙하므로 호스트에서 띄울 대상이 아니다. 도구가 그 경우를 알아보고 이유를 적는다.
+
+**이 머신에는 그 위에 메모리 한도도 걸려 있다** — 자세한 값과 근거는 커밋되지 않는
+`CLAUDE.local.md` 에 있다(사용자 슬라이스만 제한하고 docker 는 `system.slice` 라 밖이다).
 
 **e2e 는 로컬에서 돌리지 않는다 — CI 가 돌린다.**
 
