@@ -19,6 +19,12 @@
 // 하나를 믿지 않고 `beforeSend` 에서 직접 지운다 — 「보내지 않는다」는 약속을 지키는
 // 것은 이 함수다.
 //
+// **남의 코드가 던진 것도 보내지 않는다**(#471, 2026-09-20). 브라우저 확장의 콘텐츠
+// 스크립트가 던진 처리되지 않은 promise 거절을 우리 전역 핸들러가 잡아 강의실
+// 프로젝트로 보냈고, 하루 만에 prod 미해결 목록이 그 예외 하나로 통째로 찼다
+// (GlitchTip 오류 62·63, 합쳐 14건). 우리 화면은 멀쩡했다 — 그대로 두면 진짜 5xx 가
+// 소음에 묻힌다(백엔드가 의도한 4xx 를 버리는 것과 같은 이유다).
+//
 // 이 파일은 세 앱(frontend·operator·classroom)에 같은 내용으로 복사돼 있다 —
 // 토큰·로고와 같은 방식이다(공유 패키지로 빼지 않는 이유는 CLAUDE.md
 // 「프론트엔드」의 손으로 관리되는 목록 셋 참고). 여섯 진입점(앱마다
@@ -42,6 +48,14 @@ type ScrubbableEvent = {
   [key: string]: unknown;
 };
 
+/**
+ * 이 SDK 가 어느 쪽에서 도는가. 진입점이 직접 말한다 — 이벤트를 보고 추측하지
+ * 않는다(`platform` 은 SDK 버전에 따라 `beforeSend` 시점에 아직 비어 있을 수
+ * 있고, 서버 이벤트를 브라우저로 잘못 보면 아래 제3자 판정이 **우리 서버 오류를**
+ * 버린다). 새 진입점이 생기면 이 인자를 적기 전까지 타입이 빨갛다.
+ */
+export type SentryRuntime = "browser" | "server";
+
 /** 이 헤더는 그대로 자격증명이거나 사용자를 특정한다 — 이름으로 지운다. */
 const CREDENTIAL_HEADERS = new Set([
   "cookie",
@@ -51,6 +65,44 @@ const CREDENTIAL_HEADERS = new Set([
   "x-internal-token",
   "x-operator-origin",
 ]);
+
+/**
+ * 우리 브라우저 번들의 프레임. 정규화된 `app:///_next/…` 와 정규화 전의
+ * `https://…/_next/…` 를 함께 본다.
+ *
+ * **`app:///` 로 시작하는 것만으로는 우리 코드가 아니다** — 그 접두어는 SDK 가
+ * 오리진을 떼어낸 흔적이다(`clientNormalizationIntegration` 이
+ * `filename.replace(new URL(filename).origin, "app://")` 를 한다). 확장의
+ * `chrome-extension://<id>/executors/200.js` 도 같은 방식으로
+ * `app:///executors/200.js` 가 된다 — #471 이 그 값이었다. 우리 빌드가 내보내는
+ * 파일은 전부 `/_next/` 아래다.
+ */
+const OUR_BROWSER_FRAME = /\/_next\//;
+
+/**
+ * 스택이 **전부** 우리 번들 밖인 브라우저 오류인가.
+ *
+ * **좁게 막는다.** 「우리 프레임이 하나도 없으면 버린다」로 넓히면 스택이 아예
+ * 없는 우리 오류(교차 오리진의 `Script error.`, 잘린 스택)까지 함께 사라진다 —
+ * 오류 수집의 기본 실패 모양이 「조용히 아무 일도 안 일어난다」라 그 대가가 가장
+ * 위험하다. 그래서 프레임이 하나도 없으면 **보낸다**, 이름 없는 프레임(익명 함수
+ * 등)이 섞여 있어도 **보낸다**. 판정이 확실한 자리만 버린다.
+ */
+export function isThirdPartyBrowserError(event: ScrubbableEvent): boolean {
+  const values = (event as { exception?: { values?: unknown } }).exception?.values;
+  if (!Array.isArray(values)) return false;
+
+  const frames = values.flatMap((value) => {
+    const candidate = (value as { stacktrace?: { frames?: unknown } } | null)?.stacktrace?.frames;
+    return Array.isArray(candidate) ? candidate : [];
+  });
+  if (frames.length === 0) return false;
+
+  return frames.every((frame) => {
+    const filename = (frame as { filename?: unknown } | null)?.filename;
+    return typeof filename === "string" && !OUR_BROWSER_FRAME.test(filename);
+  });
+}
 
 /**
  * 오류 하나를 보내기 전에 자격증명과 요청 본문을 걷어낸다.
@@ -84,7 +136,10 @@ export function scrubSensitiveRequestData<T extends ScrubbableEvent>(event: T): 
 }
 
 /** SDK 를 켤 때 쓸 설정. DSN 이 비어 있으면 null — 그러면 켜지 않는다. */
-export function buildSentryOptions(env: Record<string, string | undefined>): {
+export function buildSentryOptions(
+  env: Record<string, string | undefined>,
+  runtime: SentryRuntime,
+): {
   dsn: string;
   environment: string;
   release: string | undefined;
@@ -92,7 +147,8 @@ export function buildSentryOptions(env: Record<string, string | undefined>): {
   sendDefaultPii: false;
   // SDK 가 요구하는 모양 그대로 내보낸다 — 우리 쪽 시그니처를 제네릭으로 두면
   // `Sentry.init` 이 받지 않는다(타입 불일치로 세 앱 typecheck 가 전부 빨개졌다).
-  beforeSend: (event: ErrorEvent) => ErrorEvent;
+  // null 을 돌려주면 그 이벤트는 보내지 않는다.
+  beforeSend: (event: ErrorEvent) => ErrorEvent | null;
 } | null {
   const dsn = (env.NEXT_PUBLIC_SENTRY_DSN ?? "").trim();
   if (dsn === "") return null;
@@ -105,7 +161,13 @@ export function buildSentryOptions(env: Record<string, string | undefined>): {
     sendDefaultPii: false,
     // SDK 의 `ErrorEvent` 는 색인 시그니처가 없어 위 제네릭 제약을 만족하지 않는다 —
     // 경계에서 한 번만 맞춰 주고, 걷어내는 논리는 그대로 그 함수 하나다.
-    beforeSend: (event: ErrorEvent) =>
-      scrubSensitiveRequestData(event as unknown as ScrubbableEvent) as unknown as ErrorEvent,
+    beforeSend: (event: ErrorEvent) => {
+      const scrubbed = scrubSensitiveRequestData(event as unknown as ScrubbableEvent);
+      // 제3자 판정은 브라우저에서만 한다 — 서버 이벤트의 프레임은 `/_next/` 가 아닌
+      // 곳(`.next/server`·`node_modules`)에 있어서, 여기서 함께 보면 우리 서버 오류가
+      // 통째로 버려진다.
+      if (runtime === "browser" && isThirdPartyBrowserError(scrubbed)) return null;
+      return scrubbed as unknown as ErrorEvent;
+    },
   };
 }
