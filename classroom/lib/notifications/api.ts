@@ -37,18 +37,20 @@ export type NotificationRow = {
 export type UnreadCount = { count: number };
 export type MarkAllRead = { marked_count: number };
 
-const PAGE_SIZE = 50;
+// 커서(keyset) 목록 응답(#151, #466) — `usePagedList`(패키지 hooks.ts)가
+// 기대하는 `{items, count, next}` 계약 그대로다.
+export type NotificationPage = {
+  items: NotificationRow[];
+  count: number;
+  next: string | null;
+};
 
-// `limit`/`offset` — #466 이 커서로 옮길 때까지의 자리다(스펙 #461 체인 A).
-// 최신 50건만 읽으므로 헤더 배지(전체 안 읽음 수)와 어긋날 수 있다는 것이
-// 그 티켓의 문제 진술이다.
-export function fetchMyNotifications(
-  limit: number = PAGE_SIZE,
-  offset = 0,
-): Promise<ApiResult<NotificationRow[]>> {
-  return bffClient.get<NotificationRow[]>(
-    `/api/backend/notifications/me?classroom_only=true&limit=${limit}&offset=${offset}`,
-  );
+// `after`가 없으면 처음부터, 있으면 그 다음부터다(#466) — 예전에는 최신
+// 50건만 읽어(`limit`/`offset`) 51번째 이후의 안 읽은 알림이 이 화면에
+// 존재하지 않았다(헤더 배지는 전체를 세므로 서로 어긋났다).
+export function fetchMyNotifications(after?: string | null): Promise<ApiResult<NotificationPage>> {
+  const cursor = after ? `&after=${encodeURIComponent(after)}` : "";
+  return bffClient.get<NotificationPage>(`/api/backend/notifications/me?classroom_only=true${cursor}`);
 }
 
 export function fetchUnreadCount(): Promise<ApiResult<UnreadCount>> {

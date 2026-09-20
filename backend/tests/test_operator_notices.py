@@ -75,7 +75,7 @@ def test_operator_sends_and_recipient_sees_title_and_body_in_list(client, db):
 
     listing = client.get(ME_URL, **_auth_header(session["access"]))
     assert listing.status_code == 200
-    rows = listing.json()
+    rows = listing.json()["items"]
     assert len(rows) == 1
     row = rows[0]
     assert row["notification_type"] == NotificationType.OPERATOR_NOTICE
@@ -230,4 +230,4 @@ def test_classroom_notification_count_excludes_operator_notice(client, db):
     _send(operator, recipient_id=recipient_id)
 
     classroom_only = client.get(f"{ME_URL}?classroom_only=true", **_auth_header(session["access"]))
-    assert classroom_only.json() == []
+    assert classroom_only.json()["items"] == []

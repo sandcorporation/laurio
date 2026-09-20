@@ -99,7 +99,7 @@ def test_new_notification_is_unread_and_counted(client):
     count = client.get(UNREAD_COUNT_URL, **_auth_header(pair)).json()["count"]
     assert count == 1
 
-    me = client.get(ME_URL, **_auth_header(pair)).json()
+    me = client.get(ME_URL, **_auth_header(pair)).json()["items"]
     assert len(me) == 1
     assert me[0]["read_at"] is None
 
@@ -120,7 +120,7 @@ def test_opening_the_list_marks_everything_unread_as_read_and_clears_the_badge(c
     assert mark_response.json()["marked_count"] == 2
 
     assert client.get(UNREAD_COUNT_URL, **_auth_header(pair)).json()["count"] == 0
-    me = client.get(ME_URL, **_auth_header(pair)).json()
+    me = client.get(ME_URL, **_auth_header(pair)).json()["items"]
     assert all(row["read_at"] is not None for row in me)
 
 
@@ -166,7 +166,7 @@ def test_a_users_mark_read_never_touches_another_users_notifications(client):
 
     assert attacker_marked == 0
     assert client.get(UNREAD_COUNT_URL, **_auth_header(victim)).json()["count"] == 1
-    victim_me = client.get(ME_URL, **_auth_header(victim)).json()
+    victim_me = client.get(ME_URL, **_auth_header(victim)).json()["items"]
     assert victim_me[0]["read_at"] is None
 
 
@@ -177,7 +177,7 @@ def test_a_users_me_list_never_includes_another_users_notifications(client):
     _create_notification(client, recipient_id=victim_id)
 
     attacker = _login(client, "bell-list-attacker")
-    attacker_me = client.get(ME_URL, **_auth_header(attacker)).json()
+    attacker_me = client.get(ME_URL, **_auth_header(attacker)).json()["items"]
 
     assert attacker_me == []
 
@@ -221,7 +221,7 @@ def test_read_state_is_independent_of_delivery_status(client):
     mark_response = client.post(MARK_READ_URL, **_auth_header(pair))
     assert mark_response.json()["marked_count"] == 1
 
-    me = client.get(ME_URL, **_auth_header(pair)).json()
+    me = client.get(ME_URL, **_auth_header(pair)).json()["items"]
     assert len(me) == 1
     assert me[0]["status"] == Notification.Status.FAILED
     assert me[0]["read_at"] is not None
@@ -262,7 +262,7 @@ def test_deferred_notification_is_still_visible_and_markable_as_read(client):
     mark_response = client.post(MARK_READ_URL, **_auth_header(pair))
     assert mark_response.json()["marked_count"] == 1
 
-    me = client.get(ME_URL, **_auth_header(pair)).json()
+    me = client.get(ME_URL, **_auth_header(pair)).json()["items"]
     assert me[0]["status"] == Notification.Status.DEFERRED
     assert me[0]["read_at"] is not None
 
@@ -289,7 +289,7 @@ def test_mark_one_read_marks_only_that_notification(client):
     assert response.json()["read_at"] is not None
 
     assert client.get(UNREAD_COUNT_URL, **_auth_header(pair)).json()["count"] == 1
-    me = {row["id"]: row for row in client.get(ME_URL, **_auth_header(pair)).json()}
+    me = {row["id"]: row for row in client.get(ME_URL, **_auth_header(pair)).json()["items"]}
     assert me[first["id"]]["read_at"] is not None
     other_id = next(pk for pk in me if pk != first["id"])
     assert me[other_id]["read_at"] is None
@@ -319,7 +319,7 @@ def test_mark_one_read_on_another_users_notification_is_404(client):
     response = client.post(_mark_one_url(created["id"]), **_auth_header(attacker))
 
     assert response.status_code == 404
-    victim_me = client.get(ME_URL, **_auth_header(victim)).json()
+    victim_me = client.get(ME_URL, **_auth_header(victim)).json()["items"]
     assert victim_me[0]["read_at"] is None
 
 
@@ -371,7 +371,7 @@ def test_mark_many_read_marks_only_the_listed_ids(client):
     assert response.status_code == 200
     assert response.json()["marked_count"] == 2
 
-    me = {row["id"]: row for row in client.get(ME_URL, **_auth_header(pair)).json()}
+    me = {row["id"]: row for row in client.get(ME_URL, **_auth_header(pair)).json()["items"]}
     assert me[first["id"]]["read_at"] is not None
     assert me[second["id"]]["read_at"] is not None
     assert me[third["id"]]["read_at"] is None
@@ -399,5 +399,5 @@ def test_mark_many_read_ignores_another_users_ids(client):
     assert response.status_code == 200
     assert response.json()["marked_count"] == 1
 
-    victim_me = client.get(ME_URL, **_auth_header(victim)).json()
+    victim_me = client.get(ME_URL, **_auth_header(victim)).json()["items"]
     assert victim_me[0]["read_at"] is None
