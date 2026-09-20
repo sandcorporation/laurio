@@ -861,9 +861,11 @@ cd backend && CODEMIT_DB_PORT=55432 uv run pytest
 - **공유층**(`accounts`·`core`·`policies`·`storage`·`notifications`·`submissions`,
   #270 이 마지막을 더했다)**이 기능 앱을 부르면 막히되, 같은 줄이나 바로 앞 줄의
   `APP-BOUNDARY-EXCEPTION: <이유>` 로 열린다** — **이유가 비면 표시 자체가
-  실패한다**(`scripts/check_screen_language.py` 와 같은 관용구). 지금 **41곳**이고
-  대부분 순환을 끊으려 일부러 함수 안에 넣은 지연 import 라, 이 티켓은 지우지 않고
-  사유를 적어 세어지게만 했다.
+  실패한다**(`scripts/check_screen_language.py` 와 같은 관용구). 지금 **41줄**이 나오는데
+  그중 **9줄은 검사 파일 자신**(독스트링·정규식·오류 문구·합성 픽스처)이고 실제 표시는
+  **32곳**, 다시 그중 **13곳은 시드·백필 관리 명령**이라 런타임 코드의 표시는 **19곳**이다
+  (2026-09-20 확인). 대부분 순환을 끊으려 일부러 함수 안에 넣은 지연 import 라, 이 티켓은
+  지우지 않고 사유를 적어 세어지게만 했다.
   `grep -rn "APP-BOUNDARY-EXCEPTION" backend/` 로 나오는 그 숫자가 경계의 건강
   지표다 — 늘면 공유층이 기능으로 오염되는 중이라는 뜻이다.
 
@@ -887,9 +889,12 @@ Next.js + React. 저장소 루트가 pnpm 워크스페이스다(운영자 앱 04
 그 멤버다 — `packages/bff-shared`(서버 쪽: 경로 순회 방어·Origin 검증·허용목록 검사
 함수·백엔드 전달 기계. 허용목록의 **내용**은 앱마다 자기 파일에 남는다),
 `packages/bff-client`(브라우저 쪽, #146: 인증 구역 호출의 클라이언트·`ApiResult`·
-`normalizeDetail`·`useBackendQuery`/`usePagedList`·생성 타입 `schema.gen.ts` — 강의실은
-아직 이 패키지를 쓰지 않는다, 백엔드 프록시 허용목록이 비어 있어 화면이 아직 그 클라이언트를
-쓸 일이 없다), 그리고 `packages/markdown`(설명 마크다운 렌더러, ADR-0047 — 2026-09-16
+`normalizeDetail`·`useBackendQuery`/`usePagedList`·생성 타입 `schema.gen.ts` — **강의실은
+아직 이 패키지를 쓰지 않는다**, 대신 같은 일을 하는 훅 23개를 자기 `lib/` 에 손으로 들고
+있다. 예전에 적어 둔 이유(「프록시 허용목록이 비어 있어 화면이 그 클라이언트를 쓸 일이
+없다」)는 **더 이상 사실이 아니다** — 허용목록에 접두어가 다섯이고 화면 21장이 그 프록시로
+호출한다(2026-09-20 확인). 그 사본의 대가도 실측됐다: 401 을 로그인으로 보내는 동작이
+강의실에만 없다), 그리고 `packages/markdown`(설명 마크다운 렌더러, ADR-0047 — 2026-09-16
 에 강의실에서 옮겼다: 강의실의 문제 설명과 공개 앱의 공모전 설명이 **같은 허용 목록
 스키마와 같은 화면 조각**을 쓴다. 본문은 서버 컴포넌트가 그리고 복사·파일로 저장 버튼만
 클라이언트 조각이라 공개 표면의 SSR 이 깨지지 않는다, ADR-0015). 테스트 전용
@@ -1066,7 +1071,7 @@ pnpm --dir frontend exec playwright test --project=public e2e/payout.spec.ts -g 
 pnpm --dir frontend test            # 전체 (102건이던 시절 약 1.8분 — 지금 132건)
 pnpm --dir frontend test:public     # 공개 앱만 (74건이던 시절 약 1.4분 — 지금 89건)
 pnpm --dir frontend test:operator   # 운영자 앱만 (28건이던 시절 약 25초 — 지금 31건)
-pnpm --dir frontend test:classroom  # 강의실만 (6건이던 시절 CI 첫 실행 1.7초 — 지금 12건)
+pnpm --dir frontend test:classroom  # 강의실만 (6건이던 시절 CI 첫 실행 1.7초 — 지금 20건)
 ```
 
 **로그인은 공개 앱 하나뿐이고, 끝나면 온 곳으로 돌려보낸다**(#297 후속). 강의실은
