@@ -6,8 +6,8 @@ Contest 라이프사이클 이벤트(마감 임박·심사기간 종료 임박·
 경고·Award/Distribution 결과)에 올바르게 연결됐는지, 그리고 Sponsor가 자신의
 발송 이력을 HTTP로 조회할 수 있는지만 다룬다.
 
-이 프로젝트의 유일한 테스트 시임은 HTTP다 — notifications.lifecycle의 함수를
-테스트에서 직접 부르지 않는다.
+이 프로젝트의 유일한 테스트 시임은 HTTP다 — contests.lifecycle_notifications(#465
+전까지 notifications.lifecycle)의 함수를 테스트에서 직접 부르지 않는다.
 """
 
 from __future__ import annotations
@@ -23,8 +23,8 @@ from django.test import override_settings
 from django.utils import timezone
 
 from contests.models import Contest
+import contests.lifecycle_notifications as lifecycle_module
 import core.scans as scans_module
-import notifications.lifecycle as lifecycle_module
 from core.models import ClockOverride
 from distributions.models import Distribution
 from notifications.models import Notification, NotificationType
@@ -424,7 +424,7 @@ def test_deadline_reminder_lead_time_follows_policy_change_not_a_hardcoded_defau
     test_deadline_reminder_does_not_fire_before_lead_window가 그보다도 훨씬
     이른 4일 전으로 그 경계를 이미 증명한다). 리드타임을 72시간으로 늘리면
     같은 "마감 60시간 전"이 창 안으로 들어와 알림이 나가야 한다 — 소비처
-    (`notifications.lifecycle.send_due_deadline_reminders`)가 여전히 24시간을
+    (`contests.lifecycle_notifications._send_deadline_reminder`)가 여전히 24시간을
     하드코딩하고 있다면 이 테스트가 실제로 빨개진다.
     """
 
@@ -1094,7 +1094,7 @@ def test_deadline_reminder_recovers_remaining_developers_after_mid_fanout_crash(
     죽으면, 이미 받은 사람은 다시 받지 않고 못 받은 사람만 다음 스캔이 안전하게
     마저 보낸다(#19 리뷰 지적 2). 여기서는 3명 중 1명만 알리고 죽는 상황을
     `_participating_developer_users`가 예외를 던지도록 흉내낸다 — 이 예외는
-    notifications.lifecycle의 개별 알림 헬퍼(_safe_notify*)가 아니라 팬아웃
+    contests.lifecycle_notifications의 개별 알림 헬퍼(_safe_notify*)가 아니라 팬아웃
     루프 자체에서 나므로, 삼켜지지 않고 이 Contest의 "완료 표시"를 막는다.
     """
 

@@ -19,6 +19,11 @@ Score 도 원장도 이 값을 읽지 않는다. 그래서 나중에 채워 넣�
 없다」이므로 건너뛴다.
 
 **멱등하다.** 이미 채워진 행은 조회 자체에서 빠지므로 몇 번을 돌려도 같다.
+
+`submissions.models.SubmissionAsset` 참조에 앱 경계 예외 표시가 붙어 있었다
+(#465 전까지) — 그런데 `submissions` 는 공유층이다(`tests.test_app_boundaries.
+SHARED`, #270). 규칙 B 는 공유층이 **기능 앱**을 부를 때만 막으므로 이 참조는
+애초에 위반이 아니었다 — 표시만 지웠다, 옮길 이유가 없다.
 """
 
 from __future__ import annotations
@@ -28,7 +33,6 @@ from django.core.management.base import BaseCommand
 from storage.adapters import get_storage_adapter
 from storage.filenames import is_unknown_content_type
 from storage.sniffing import SNIFF_BYTES, sniff_content_type
-# APP-BOUNDARY-EXCEPTION: 백필 대상이 제출물 자료 행 자체다
 from submissions.models import SubmissionAsset
 
 

@@ -26,6 +26,13 @@
 자기 몫을 넘길 때마다 뒤의 복구 스캔이 굶었다(#51 3차 코드리뷰 지적 4). 이제 그 구조
 자체가 없다. 팬아웃 **안쪽**의 예산 확인은 `core.scans.budget_exhausted(ctx)` 로 한다 —
 예산으로 중단된 Contest 는 완료 표시가 없으므로 다음 실행이 안전하게 이어받는다.
+
+**원래 `notifications.lifecycle`이었다(#465 전까지).** 내용이 전부 Contest 수명주기라
+공유층(`notifications`)이 한 제품만 아는 코드를 들고 있는 자리였다 — 다른 제품(강의실)은
+자기 앱 안에 알림 연결을 둔다. `contests`로 옮긴 뒤에는 `Contest`·`Award`·
+`DistributionShare` 참조가 전부 공모전 가족 내부 참조가 되어 앱 경계 예외 표시가
+필요 없다. 스캔 이름 다섯·등록 순서·동작은 한 글자도 바꾸지 않았다 — beat·tick·
+`/api/internal/scans/{name}` 이 보는 이름이 그대로다.
 """
 
 from __future__ import annotations
@@ -37,20 +44,20 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
-# APP-BOUNDARY-EXCEPTION: 수명주기 알림이 공모전의 상태 전이에서 나온다
-from contests.models import Contest
 from core import scans
 from core.clock import Clock
 from core.scans import ScanSpec
+from notifications.models import NotificationType
+# `_safe_notify`/`_safe_notify_once`는 원래 notifications.lifecycle(이 모듈의 예전
+# 자리)에서 정의됐다(#19). #169가 지급 알림 스캔(`payouts.notifications`)에서도 같은
+# "예외를 삼킨다"·"dedup_context로 한 번만 만든다" 관용구가 필요해 `notifications.
+# services`로 옮겼다 — 이름은 이 모듈의 나머지 호출부(아래 다섯 스캔)가 안 바뀌도록
+# 그대로 별칭한다.
+from notifications.services import notify_once as _safe_notify_once
+from notifications.services import notify_safely as _safe_notify
 from policies.scope import current_policy
 
-from .models import NotificationType
-# `_safe_notify`/`_safe_notify_once`는 원래 이 모듈에서 정의됐다(#19). #169가
-# 지급 알림 스캔(`payouts.notifications`)에서도 같은 "예외를 삼킨다"·"dedup_context로
-# 한 번만 만든다" 관용구가 필요해 `notifications.services`로 옮겼다 — 이름은
-# 이 모듈의 나머지 호출부(아래 다섯 스캔)가 안 바뀌도록 그대로 별칭한다.
-from .services import notify_once as _safe_notify_once
-from .services import notify_safely as _safe_notify
+from .models import Contest
 
 logger = logging.getLogger(__name__)
 
@@ -271,7 +278,6 @@ def _send_final_warning(contest, as_of, ctx):
 
 
 def _pending_award_notices(as_of, ctx):
-    # APP-BOUNDARY-EXCEPTION: 선정 알림의 재료가 Award 다
     from awards.models import Award
 
     return Award.objects.filter(result_notice_sent_at__isnull=True).select_related(
@@ -288,7 +294,6 @@ def _recover_award_notice(award, as_of, ctx):
 
 
 def _pending_share_notices(as_of, ctx):
-    # APP-BOUNDARY-EXCEPTION: 배분 알림의 재료가 DistributionShare 다
     from distributions.models import DistributionShare
 
     return DistributionShare.objects.filter(result_notice_sent_at__isnull=True).select_related(
