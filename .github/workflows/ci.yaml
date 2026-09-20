@@ -1095,7 +1095,14 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build the production frontend image (runner stage)
-        run: docker build -f docker/frontend.Dockerfile --target runner -t codemit-frontend-runner-ci .
+        run: |
+          # 문의 주소는 빌드 인자로 굳는다(#472 후속) — 여기서 CI 전용 값을 주고,
+          # 아래에서 그 값이 구운 /privacy 에 실제로 실렸는지 본다. 빌드 인자 →
+          # 번들 → 화면까지가 한 번에 끊기는 자리라(#297 과 같은 종류) 구운
+          # 이미지에서만 드러난다.
+          docker build -f docker/frontend.Dockerfile --target runner \
+            --build-arg NEXT_PUBLIC_SUPPORT_EMAIL=ci-guard@example.test \
+            -t codemit-frontend-runner-ci .
 
       # 이 레포가 이미 두 번 겪은 사고(CLAUDE.md 「이미 데인 곳」) — .dockerignore
       # 패턴이 파일에 적혀 있다는 것만으로는 증명이 아니다. 가짜 시크릿과 가짜
@@ -1308,6 +1315,24 @@ jobs:
             docker logs frontend-boot-ok
             exit 1
           fi
+
+      # **방침의 문의처가 구운 이미지에 실렸는가**(#472 후속). 개인정보 보호책임자와
+      # 문의처는 방침의 필수 기재사항인데(개인정보 보호법 제30조 제1항) 그 값은
+      # 빌드 인자로 굳으므로, 인자를 빠뜨린 이미지는 **주소 없이 조용히** 배포된다
+      # — dev 도 위 healthz 확인도 이것을 못 본다. 위 빌드 단계가 준 CI 전용 값이
+      # 그대로 나오는지 본다(파이프로 찾지 않는 이유는 classroom-deploy-guard 의
+      # 같은 자리 주석 참고 — grep -q 의 조기 종료가 pipefail 과 만나면 찾고도
+      # 실패로 읽힌다).
+      - name: The privacy policy carries a contact address baked at build time
+        run: |
+          set -euo pipefail
+          html=$(curl -sS --max-time 10 http://127.0.0.1:3100/privacy)
+          [[ "$html" == *"ci-guard@example.test"* ]] || {
+            echo "::error::구운 /privacy 에 문의 주소가 없다 — NEXT_PUBLIC_SUPPORT_EMAIL 빌드 인자가 빠졌는가?"
+            printf '%s' "$html" | head -c 2000
+            exit 1
+          }
+          echo "방침이 빌드 인자의 문의 주소를 싣는다"
 
 
       - name: Tear down the boot-guard container
@@ -1727,6 +1752,7 @@ jobs:
             NEXT_PUBLIC_PORTONE_STORE_ID=${{ vars.STAGING_PORT_ONE_V2_STORE_ID }}
             NEXT_PUBLIC_PORTONE_CHANNEL_KEY=${{ vars.STAGING_KG_INICIS_CHANNEL_KEY }}
             NEXT_PUBLIC_TOSS_CLIENT_KEY=${{ vars.STAGING_TOSS_CLIENT_KEY }}
+            NEXT_PUBLIC_SUPPORT_EMAIL=${{ vars.STAGING_SUPPORT_EMAIL }}
             NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED=${{ vars.STAGING_CODEMIT_CONTEST_PRODUCT_ENABLED }}
             NEXT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED=${{ vars.STAGING_CODEMIT_PAID_CONTEST_PRODUCT_ENABLED }}
             NEXT_PUBLIC_SENTRY_DSN=${{ vars[format('STAGING_SENTRY_DSN_{0}', matrix.dsn)] }}
@@ -1823,6 +1849,7 @@ jobs:
             NEXT_PUBLIC_PORTONE_STORE_ID=${{ vars.PROD_PORT_ONE_V2_STORE_ID }}
             NEXT_PUBLIC_PORTONE_CHANNEL_KEY=${{ vars.PROD_KG_INICIS_CHANNEL_KEY }}
             NEXT_PUBLIC_TOSS_CLIENT_KEY=${{ vars.PROD_TOSS_CLIENT_KEY }}
+            NEXT_PUBLIC_SUPPORT_EMAIL=${{ vars.PROD_SUPPORT_EMAIL }}
             NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED=${{ vars.PROD_CODEMIT_CONTEST_PRODUCT_ENABLED }}
             NEXT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED=${{ vars.PROD_CODEMIT_PAID_CONTEST_PRODUCT_ENABLED }}
             NEXT_PUBLIC_SENTRY_DSN=${{ vars[format('PROD_SENTRY_DSN_{0}', matrix.dsn)] }}

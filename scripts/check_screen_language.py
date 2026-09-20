@@ -54,6 +54,26 @@ SCAN_DIRS = ["frontend/app", "frontend/components", "frontend/lib", "classroom/a
 # (위 모듈 docstring의 「내부 어휘도 같은 방식으로 막는다」 참고, #308).
 INTERNAL_VOCAB = ["불변식", "멱등", "스냅샷", "상태 전이", "전이 그래프", "감사 추적"]
 
+# **문서·화면이 자기 구현을 설명하는 문장**(2026-09-21). 이용약관과
+# 개인정보처리방침의 첫 판에 「유료 공모전을 여는 시점에 채우는 조항」 같은 절과
+# 「그 조항은 8절에 자리만 남겨 두었고, 기능을 열 때 채웁니다」 같은 문장이
+# 들어가 「다른 서비스와 달리 사족이 많고 이상하다」는 지적을 받았다. 이것은
+# 저장소 문서(`docs/legal/`·주석)의 말투이지 **이용자가 읽는 화면의 말투가
+# 아니다** — 화면은 지금 참인 사실만 말하고, 아직 없는 것은 **적지 않는다**.
+# 오탐을 만들지 않도록 「이 자리는 나중에 채운다」는 뜻으로만 쓰이는 토막만
+# 넣는다. 정말 필요하면 다른 항목과 같은 `SCREEN-LANGUAGE-EXCEPTION` 으로 연다.
+META_PHRASES = [
+    "자리만 남",
+    "자리 표시",
+    "채울 자리",
+    "나중에 채우",
+    "열 때 채우",
+    "아직 구현",
+    "미구현",
+    "추후 구현",
+    "TODO",
+]
+
 TERM_HEADER_RE = re.compile(r"^\*\*([A-Za-z][A-Za-z0-9]*)\*\*:\s*$")
 SCREEN_NAME_RE = re.compile(r"^_화면에서_:\s*(.+)$")
 
@@ -224,6 +244,13 @@ def check_file(path: Path, terms: list[Term]) -> list[str]:
                 f"{path}:{lineno}: 영어 도메인 용어 `{term.name}` 가 화면 문자열에 있다 — {fix}"
             )
 
+        for phrase in META_PHRASES:
+            if phrase in line:
+                problems.append(
+                    f"{path}:{lineno}: 화면이 자기 구현을 설명하는 문장이다(`{phrase}`) — "
+                    f"지금 참인 사실만 남기고, 아직 없는 것은 적지 말 것."
+                )
+
         for pattern, label in ((ADR_REF_RE, "ADR 번호"), (ISSUE_REF_RE, "이슈 번호")):
             if pattern.search(line):
                 problems.append(
@@ -265,7 +292,10 @@ def main() -> int:
         print(f"\n{len(files)}개 파일 중 {len(problems)}건 문제.")
         return 1
 
-    print(f"공개 앱 파일 {len(files)}개 전부 화면 문자열에 영어 도메인 용어·ADR/이슈 번호가 없다.")
+    print(
+        f"공개 앱 파일 {len(files)}개 전부 화면 문자열에 영어 도메인 용어·ADR/이슈 번호·"
+        "자기 구현을 설명하는 문장이 없다."
+    )
     return 0
 
 

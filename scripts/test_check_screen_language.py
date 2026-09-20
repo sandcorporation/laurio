@@ -109,5 +109,39 @@ class CheckFileInternalVocabTest(unittest.TestCase):
         self.assertEqual(internal_problems, [])
 
 
+
+class MetaPhraseTest(unittest.TestCase):
+    """화면이 자기 구현을 설명하는 문장을 막는다(2026-09-21).
+
+    약관·방침의 첫 판이 「…는 8절에 자리만 남겨 두었고, 기능을 열 때 채웁니다」
+    처럼 **문서가 자기 자신을 설명하는** 문장을 싣고 있었다. 사용자가 읽는
+    화면은 지금 참인 사실만 말한다.
+    """
+
+    def _problems(self, source: str) -> list[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "page.tsx"
+            path.write_text(source, encoding="utf-8")
+            return csl.check_file(path, csl.load_terms())
+
+    def test_placeholder_sentence_is_blocked(self) -> None:
+        source = '<p>그 조항은 8절에 자리만 남겨 두었고, 기능을 열 때 채웁니다.</p>\n'
+        problems = self._problems(source)
+        self.assertTrue(problems, "자리 표시 문장이 통과했다")
+        self.assertIn("자기 구현을 설명하는 문장", problems[0])
+
+    def test_ordinary_sentence_is_not_blocked(self) -> None:
+        """「자리」·「채우」가 들어간 정상 문구는 통과해야 한다."""
+        source = '<p>남은 자리가 없습니다. 빈 칸을 채우고 다시 시도해주세요.</p>\n'
+        self.assertEqual(self._problems(source), [])
+
+    def test_exception_marker_opens_it(self) -> None:
+        source = (
+            "{/* SCREEN-LANGUAGE-EXCEPTION: 운영자에게만 보이는 안내다 */}\n"
+            "<p>이 값은 아직 구현되지 않았습니다.</p>\n"
+        )
+        self.assertEqual(self._problems(source), [])
+
+
 if __name__ == "__main__":
     unittest.main()

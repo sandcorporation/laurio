@@ -388,6 +388,11 @@ services:
       # 컨테이너 안에서는 compose 네트워크 이름으로 백엔드에 붙는다. 호스트에서
       # `pnpm dev` 로 돌릴 때는 이 값이 없어 settings 의 기본값(127.0.0.1:58000)이 쓰인다.
       CODEMIT_API_BASE_URL: http://backend:8000
+      # 약관·방침이 싣는 문의 주소(#472 후속). 배포에서는 빌드 인자로 굳지만
+      # (`docker/frontend.Dockerfile`, 저장소 변수 STAGING_/PROD_SUPPORT_EMAIL)
+      # dev 는 `next dev` 라 런타임 env 를 그대로 읽는다 — 값이 없으면 방침의
+      # 문의처가 주소 없이 그려지므로 dev 전용 값을 준다.
+      NEXT_PUBLIC_SUPPORT_EMAIL: dev@example.test
       # 카카오 OAuth 앱 자격증명(#95/#96) — **dev는 일부러 비워 둔다**(코드리뷰
       # 지적, 되돌림). 예전에 여기 더미 값을 채웠더니 dev에서 카카오 버튼을
       # 누르면 authorize가 실제로 그 더미 client_id로 카카오

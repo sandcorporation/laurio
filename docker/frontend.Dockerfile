@@ -75,6 +75,12 @@ ENV NEXT_PUBLIC_PORTONE_CHANNEL_KEY=${NEXT_PUBLIC_PORTONE_CHANNEL_KEY}
 # 것은 #115의 범위다.
 ARG NEXT_PUBLIC_TOSS_CLIENT_KEY=""
 ENV NEXT_PUBLIC_TOSS_CLIENT_KEY=${NEXT_PUBLIC_TOSS_CLIENT_KEY}
+# 약관·방침이 싣는 문의 주소(#472 후속) — 개인정보 보호책임자와 문의처는 방침의
+# 필수 기재사항이라(개인정보 보호법 제30조 제1항) 값을 코드에 박지 않고 여기서
+# 받는다. 비어 있어도 빌드는 죽지 않는다: dev/CI 는 주소 없이 그리고, 배포
+# 이미지에 값이 빠진 것은 frontend-deploy-guard 가 구운 /privacy 에서 잡는다.
+ARG NEXT_PUBLIC_SUPPORT_EMAIL=""
+ENV NEXT_PUBLIC_SUPPORT_EMAIL=${NEXT_PUBLIC_SUPPORT_EMAIL}
 # 공모전 제품 스위치(#271, `frontend/lib/contest-switch.ts`) — 기본값 "true"라
 # ARG를 안 주는 dev/CI 빌드는 지금과 똑같이 공모전이 보인다. staging·prod는
 # compose 파일이 이 build.args를 겹쳐 준다.
