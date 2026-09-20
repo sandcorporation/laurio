@@ -10,11 +10,11 @@
 
 from __future__ import annotations
 
-import json
-
 import pytest
 from django.conf import settings
 from django.test import override_settings
+
+from tests.classroom_scenarios import respond_with_verdict
 
 CLASSES_URL = "/api/classroom/classes"
 SCAN_URL = "/api/internal/scans/classroom-submission-scoring"
@@ -127,22 +127,6 @@ class _FakeResponse:
 
     def json(self):
         return self._json_data
-
-
-def _openai_success_body(item_id: int) -> dict:
-    return {
-        "model": "gpt-5-mini-2026-01-01",
-        "choices": [
-            {
-                "finish_reason": "stop",
-                "message": {
-                    "content": json.dumps(
-                        {"verdicts": [{"requirement_id": item_id, "is_met": True, "reasoning": "판정 근거"}]}
-                    )
-                },
-            }
-        ],
-    }
 
 
 def _run_scan(client) -> dict:
@@ -313,10 +297,7 @@ def test_is_reasoning_flags_are_reported_on_class_and_problem(client, db):
 def test_reasoning_model_request_omits_temperature_and_sends_reasoning_effort(client, db, monkeypatch):
     ctx = _setup_submission(client, model="gpt-5-mini", reasoning_effort="high")
     sent = []
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: sent.append(k) or _FakeResponse(200, _openai_success_body(ctx["item_id"])),
-    )
+    respond_with_verdict(monkeypatch, ctx["item_id"], capture_call=sent)
 
     _run_scan(client)
 
@@ -350,10 +331,7 @@ def test_reasoning_model_falls_back_to_the_class_default_reasoning_effort(client
     )["id"]
 
     sent = []
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: sent.append(k) or _FakeResponse(200, _openai_success_body(item_id)),
-    )
+    respond_with_verdict(monkeypatch, item_id, capture_call=sent)
     _run_scan(client)
 
     assert sent[0]["json"]["reasoning_effort"] == "medium"
@@ -362,10 +340,7 @@ def test_reasoning_model_falls_back_to_the_class_default_reasoning_effort(client
 def test_non_reasoning_model_request_is_unchanged(client, db, monkeypatch):
     ctx = _setup_submission(client, model="gpt-4.1", reasoning_effort="high")
     sent = []
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: sent.append(k) or _FakeResponse(200, _openai_success_body(ctx["item_id"])),
-    )
+    respond_with_verdict(monkeypatch, ctx["item_id"], capture_call=sent)
 
     _run_scan(client)
 
@@ -380,10 +355,7 @@ def test_classroom_scoring_requests_use_a_longer_timeout(client, db, monkeypatch
 
     ctx = _setup_submission(client, model="gpt-4.1")
     sent = []
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: sent.append(k) or _FakeResponse(200, _openai_success_body(ctx["item_id"])),
-    )
+    respond_with_verdict(monkeypatch, ctx["item_id"], capture_call=sent)
 
     _run_scan(client)
 

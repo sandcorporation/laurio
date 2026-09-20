@@ -10,7 +10,6 @@ AI 판정과 근거를 함께 본다. 다운로드 파일명이 참여자 이름
 
 from __future__ import annotations
 
-import json
 import uuid
 from urllib.parse import quote as urlquote
 
@@ -18,6 +17,7 @@ import pytest
 from django.conf import settings
 from django.test import override_settings
 
+from tests.classroom_scenarios import respond_with_verdicts
 
 CLASSES_URL = "/api/classroom/classes"
 SCAN_URL = "/api/internal/scans/classroom-submission-scoring"
@@ -25,9 +25,10 @@ SCAN_URL = "/api/internal/scans/classroom-submission-scoring"
 
 @pytest.fixture(autouse=True)
 def _force_real_scoring_adapter():
-    # 이 파일은 core.llm_scoring.requests.post를 모킹해 OpenAIScoringAdapter
-    # 경로 자체를 검증한다 — CLASSROOM_SCORING_ADAPTER_MODE 기본값(fake)이
-    # 그 경로를 안 타므로 강제한다(#340, ADR-0043).
+    # 이 파일은 실물 OpenAIScoringAdapter 경로 자체를 검증한다 —
+    # CLASSROOM_SCORING_ADAPTER_MODE 기본값(fake)이 그 경로를 안 타므로
+    # 강제한다(#340, ADR-0043). 벤더 응답은 respond_with_verdict(#469,
+    # tests.classroom_scenarios)로 흉내 낸다.
     with override_settings(CLASSROOM_SCORING_ADAPTER_MODE="core.llm_scoring.OpenAIScoringAdapter"):
         yield
 
@@ -153,30 +154,6 @@ def _list_submissions(client, access: str, class_id: int, problem_id: int):
     return response
 
 
-class _FakeResponse:
-    def __init__(self, status_code: int, json_data) -> None:
-        self.status_code = status_code
-        self._json_data = json_data
-        self.text = json.dumps(json_data) if json_data is not None else ""
-
-    def json(self):
-        if self._json_data is None:
-            raise ValueError("no json body")
-        return self._json_data
-
-
-def _openai_body(verdicts: list[dict]) -> dict:
-    return {
-        "model": "gpt-4o-mini-2024-07-18",
-        "choices": [
-            {
-                "finish_reason": "stop",
-                "message": {"content": json.dumps({"verdicts": verdicts})},
-            }
-        ],
-    }
-
-
 def _run_scan(client) -> None:
     response = client.post(SCAN_URL, content_type="application/json", **_internal_headers())
     assert response.status_code == 200, response.content
@@ -290,14 +267,9 @@ def test_instructor_sees_the_ai_verdict_and_its_reasoning_once_scored(client, db
     assert row["status"] == "pending"
     assert row["score"] is None
 
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: _FakeResponse(
-            200,
-            _openai_body(
-                [{"requirement_id": problem["required_id"], "is_met": True, "reasoning": "테스트 코드가 있다"}]
-            ),
-        ),
+    respond_with_verdicts(
+        monkeypatch,
+        [{"requirement_id": problem["required_id"], "is_met": True, "reasoning": "테스트 코드가 있다"}],
     )
     _run_scan(client)
 

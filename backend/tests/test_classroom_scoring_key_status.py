@@ -10,42 +10,29 @@ ADR-0045).
 `test_classroom_openai_key.py`(#284)가 이미 덮는 마스킹·암호화 자체는 다시
 검증하지 않는다 — 이 파일은 그 저장에 새로 끼어든 검증 한 번과 상태 값만
 본다.
+
+**공용 시나리오 빌더(#433, #469) 위로 옮겼다** — `tests/classroom_scenarios.py` 참고.
 """
 
 from __future__ import annotations
 
 import pytest
+import requests
 from django.test import override_settings
 
 from classroom.models import Class
-
-CLASSES_URL = "/api/classroom/classes"
-
-
-def _login(client, uid="instructor-1", email=None):
-    email = email or f"{uid}@example.com"
-    response = client.post(
-        "/api/auth/social/kakao/login",
-        data={"access_token": f"{uid}:{email}"},
-        content_type="application/json",
-    )
-    assert response.status_code == 200
-    return response.json()
-
-
-def _auth_header(access: str) -> dict:
-    return {"HTTP_AUTHORIZATION": f"Bearer {access}"}
-
-
-def _create_class(client, access: str, name: str = "웹 스터디") -> int:
-    response = client.post(
-        CLASSES_URL,
-        data={"name": name, "instructor_display_name": "강사"},
-        content_type="application/json",
-        **_auth_header(access),
-    )
-    assert response.status_code == 201
-    return response.json()["id"]
+from core.crypto import decrypt
+from tests.classroom_scenarios import (
+    CLASSES_URL,
+    auth_header,
+    create_class,
+    force_real_scoring_adapter,
+    get_class,
+    login,
+    raise_models_endpoint_network_error,
+    respond_to_models_endpoint,
+    track_vendor_calls,
+)
 
 
 def _key_url(class_id: int) -> str:
@@ -53,25 +40,17 @@ def _key_url(class_id: int) -> str:
 
 
 def _set_key(client, access: str, class_id: int, key: str):
+    """`tests.classroom_scenarios.set_key`와 달리 상태 코드를 스스로
+    단언하지 않는다 — 이 파일은 422·200 양쪽을 다 살펴야 한다."""
+
     return client.put(
-        _key_url(class_id),
-        data={"api_key": key},
-        content_type="application/json",
-        **_auth_header(access),
+        _key_url(class_id), data={"api_key": key}, content_type="application/json", **auth_header(access)
     )
-
-
-class _FakeResponse:
-    def __init__(self, status_code: int) -> None:
-        self.status_code = status_code
-
-    def json(self):
-        return {}
 
 
 @pytest.fixture(autouse=True)
 def _force_real_scoring_adapter():
-    with override_settings(CLASSROOM_SCORING_ADAPTER_MODE="core.llm_scoring.OpenAIScoringAdapter"):
+    with force_real_scoring_adapter():
         yield
 
 
@@ -80,8 +59,8 @@ def test_fake_adapter_always_answers_valid(client, db):
     가짜 키 저장 흐름이 그대로 돈다."""
 
     with override_settings(CLASSROOM_SCORING_ADAPTER_MODE="fake"):
-        pair = _login(client)
-        class_id = _create_class(client, pair["access"])
+        pair = login(client)
+        class_id = create_class(client, pair["access"], with_key=False)
 
         response = _set_key(client, pair["access"], class_id, "sk-fake-anything")
 
@@ -90,10 +69,10 @@ def test_fake_adapter_always_answers_valid(client, db):
 
 
 def test_a_valid_key_is_saved_as_verified(client, db, monkeypatch):
-    monkeypatch.setattr("core.llm_scoring.requests.get", lambda *a, **k: _FakeResponse(200))
+    respond_to_models_endpoint(monkeypatch)
 
-    pair = _login(client)
-    class_id = _create_class(client, pair["access"])
+    pair = login(client)
+    class_id = create_class(client, pair["access"], with_key=False)
 
     response = _set_key(client, pair["access"], class_id, "sk-good-key")
 
@@ -105,12 +84,10 @@ def test_a_valid_key_is_saved_as_verified(client, db, monkeypatch):
 
 @pytest.mark.parametrize("status_code", [401, 403])
 def test_a_rejected_key_is_refused_with_422(client, db, monkeypatch, status_code):
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.get", lambda *a, **k: _FakeResponse(status_code)
-    )
+    respond_to_models_endpoint(monkeypatch, status_code=status_code)
 
-    pair = _login(client)
-    class_id = _create_class(client, pair["access"])
+    pair = login(client)
+    class_id = create_class(client, pair["access"], with_key=False)
 
     response = _set_key(client, pair["access"], class_id, "sk-bad-key")
 
@@ -124,15 +101,13 @@ def test_a_rejected_key_is_refused_with_422(client, db, monkeypatch, status_code
 def test_a_rejected_new_key_does_not_evict_the_working_old_key(client, db, monkeypatch):
     """오타로 친 새 키가 멀쩡한 옛 키를 밀어내지 않는다(AC)."""
 
-    from core.crypto import decrypt
-
-    monkeypatch.setattr("core.llm_scoring.requests.get", lambda *a, **k: _FakeResponse(200))
-    pair = _login(client)
-    class_id = _create_class(client, pair["access"])
+    respond_to_models_endpoint(monkeypatch)
+    pair = login(client)
+    class_id = create_class(client, pair["access"], with_key=False)
     good = _set_key(client, pair["access"], class_id, "sk-good-old-key")
     assert good.status_code == 200
 
-    monkeypatch.setattr("core.llm_scoring.requests.get", lambda *a, **k: _FakeResponse(401))
+    respond_to_models_endpoint(monkeypatch, status_code=401)
     bad = _set_key(client, pair["access"], class_id, "sk-typo-key")
     assert bad.status_code == 422
 
@@ -153,19 +128,15 @@ def test_unreachable_vendor_saves_as_unverified(client, db, monkeypatch, failure
     """타임아웃·5xx·네트워크 오류는 저장을 막지 않는다 — 상태만 "미검증"으로
     남는다(AC)."""
 
-    import requests
+    if failure == "network":
+        raise_models_endpoint_network_error(monkeypatch, requests.ConnectionError("network unreachable"))
+    elif failure == "timeout":
+        raise_models_endpoint_network_error(monkeypatch, requests.Timeout("timed out"))
+    else:
+        respond_to_models_endpoint(monkeypatch, status_code=500)
 
-    def _raise_or_respond(*a, **k):
-        if failure == "network":
-            raise requests.ConnectionError("network unreachable")
-        if failure == "timeout":
-            raise requests.Timeout("timed out")
-        return _FakeResponse(500)
-
-    monkeypatch.setattr("core.llm_scoring.requests.get", _raise_or_respond)
-
-    pair = _login(client)
-    class_id = _create_class(client, pair["access"])
+    pair = login(client)
+    class_id = create_class(client, pair["access"], with_key=False)
 
     response = _set_key(client, pair["access"], class_id, "sk-cant-verify")
 
@@ -176,13 +147,11 @@ def test_unreachable_vendor_saves_as_unverified(client, db, monkeypatch, failure
 
 
 def test_a_class_without_a_key_has_no_key_status(client, db):
-    pair = _login(client)
-    class_id = _create_class(client, pair["access"])
+    pair = login(client)
+    class_id = create_class(client, pair["access"], with_key=False)
 
-    response = client.get(f"{CLASSES_URL}/{class_id}", **_auth_header(pair["access"]))
+    body = get_class(client, pair["access"], class_id)
 
-    assert response.status_code == 200
-    body = response.json()
     assert body["has_openai_key"] is False
     assert body["openai_key_status"] is None
 
@@ -191,15 +160,12 @@ def test_key_check_never_calls_the_scoring_endpoint(client, db, monkeypatch):
     """키 확인은 채점 요청(`/chat/completions`)이 아니라 모델 목록 조회처럼
     프롬프트·토큰이 필요 없는 값싼 확인이어야 한다."""
 
-    called_post = []
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post", lambda *a, **k: called_post.append(1)
-    )
-    monkeypatch.setattr("core.llm_scoring.requests.get", lambda *a, **k: _FakeResponse(200))
+    calls = track_vendor_calls(monkeypatch)
+    respond_to_models_endpoint(monkeypatch)
 
-    pair = _login(client)
-    class_id = _create_class(client, pair["access"])
+    pair = login(client)
+    class_id = create_class(client, pair["access"], with_key=False)
     response = _set_key(client, pair["access"], class_id, "sk-good-key")
 
     assert response.status_code == 200
-    assert not called_post
+    assert not calls

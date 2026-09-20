@@ -9,6 +9,8 @@ CONTEXT.md 「Problem」).
 
 from __future__ import annotations
 
+from tests.classroom_scenarios import fail_if_vendor_is_called
+
 CLASSES_URL = "/api/classroom/classes"
 
 
@@ -155,10 +157,7 @@ def test_hidden_bundle_carries_pass_status(client, db, monkeypatch):
         "https://github.com/octocat/fake-clone-marker-pass",
     )
 
-    def _fail_if_called(*args, **kwargs):
-        raise AssertionError("fake 경로인데 네트워크로 나갔다.")
-
-    monkeypatch.setattr("core.llm_scoring.requests.post", _fail_if_called)
+    fail_if_vendor_is_called(monkeypatch)
     # 체크리스트 문구를 fake 저장소 소스에 등장하는 문구로 맞춘다.
     problem_detail = client.get(
         f"{CLASSES_URL}/{class_id}/problems/{problem_id}", **_auth_header(instructor["access"])

@@ -16,6 +16,8 @@ import zipfile
 from django.conf import settings
 from django.test import override_settings
 
+from tests.classroom_scenarios import fail_if_vendor_is_called
+
 CLASSES_URL = "/api/classroom/classes"
 SCAN_URL = "/api/internal/scans/classroom-submission-scoring"
 
@@ -220,10 +222,7 @@ def test_valid_python_does_not_send_syntax_check_to_the_vendor(client, db, monke
     """파서로 끝나면 벤더 요청에 기본 항목이 실리지 않는다(#407) — 여기서는
     fake 어댑터가 애초에 네트워크로 나가지 않는 것으로 같은 사실을 본다."""
 
-    def _fail_if_called(*args, **kwargs):
-        raise AssertionError("네트워크로 나갔다 — 파서 판정에 벤더 호출이 섞였다.")
-
-    monkeypatch.setattr("core.llm_scoring.requests.post", _fail_if_called)
+    fail_if_vendor_is_called(monkeypatch)
     files = {"app.py": _VALID_SOURCE}
     ctx = _setup_submission(client, files=files)
 
@@ -314,8 +313,7 @@ def test_oversized_python_file_does_not_hang_or_crash_the_worker(client, db):
     파서가 판정하지 못한 파일은 AI 판정으로 넘어간다(#409 AC "크기 초과·파서
     실패 파일도 AI 판정으로 넘어간다"), 워커가 멈추거나 죽지 않는다."""
 
-    from classroom.scoring import SYNTAX_CHECK_AI_REQUIREMENT_TEXT
-    from classroom.syntax_check import MAX_SYNTAX_CHECK_FILE_BYTES
+    from classroom.syntax_check import MAX_SYNTAX_CHECK_FILE_BYTES, SYNTAX_CHECK_AI_REQUIREMENT_TEXT
 
     # FakeClassroomScoringAdapter는 항목의 문구가 소스에 그대로 등장하는지로
     # 판정한다 — AI에게 넘어간 기본 항목도 같은 규칙이라, 그 문구를 파일에

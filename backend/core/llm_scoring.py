@@ -334,7 +334,7 @@ def _extract_openai_error_fields(response: Any) -> tuple[str, str]:
 
 
 def _describe_openai_http_error(
-    response: Any, *, submission_id: int, error_type: str = "", error_code: str = ""
+    response: Any, *, context: str, error_type: str = "", error_code: str = ""
 ) -> str:
     """벤더가 명시적으로 거부했을 때(4xx/5xx)의 예외 메시지를 만든다.
 
@@ -346,17 +346,84 @@ def _describe_openai_http_error(
     `_extract_openai_error_fields`로 뽑아 뒀으면(`score`가 모델 거부 판정에
     쓰려고 먼저 부른다) 다시 파싱하지 않게 그대로 받는다 — 생략하면 이 함수가
     직접 뽑는다.
+
+    `context`는 이 왕복이 무엇이었는지 가리키는 식별자뿐이다(#469 —
+    `_openai_round_trip`이 채점(submission=…)·키 확인·모델 목록 조회 셋에
+    같은 이 함수를 쓴다) — 벤더 원문은 여전히 담지 않는다.
     """
 
     if not error_type and not error_code:
         error_type, error_code = _extract_openai_error_fields(response)
-    base = f"OpenAI 채점 호출이 실패했다(status={response.status_code}, submission={submission_id})"
+    base = f"OpenAI 호출이 실패했다(status={response.status_code}, {context})"
     details = ", ".join(
         part
         for part in [f"type={error_type}" if error_type else "", f"code={error_code}" if error_code else ""]
         if part
     )
     return f"{base}, {details})." if details else f"{base})."
+
+
+def _classify_openai_error(response: Any, *, context: str) -> Exception:
+    """벤더 응답을 다섯 갈래(정상·권한 거부·모델 거부·영구 실패·일시 실패) 중
+    성공이 아닌 넷으로 갈라 그에 맞는 예외를 만든다(#469) — 성공(200)은
+    `_openai_round_trip`이 이 함수를 부르지 않는다."""
+
+    error_type, error_code = _extract_openai_error_fields(response)
+    message = _describe_openai_http_error(
+        response, context=context, error_type=error_type, error_code=error_code
+    )
+    if response.status_code in _OPENAI_AUTH_HTTP_STATUSES:
+        return LLMAdapterAuthError(message)
+    if (
+        response.status_code in _OPENAI_MODEL_REJECTION_HTTP_STATUSES
+        and error_code in _OPENAI_MODEL_REJECTION_ERROR_CODES
+    ):
+        return LLMAdapterModelRejectedError(message)
+    if response.status_code in _OPENAI_PERMANENT_HTTP_STATUSES:
+        return LLMAdapterPermanentError(message)
+    return LLMAdapterError(message)
+
+
+def _openai_round_trip(
+    method: str,
+    url: str,
+    *,
+    api_key: str,
+    timeout: float,
+    json_body: dict | None = None,
+    context: str = "",
+) -> Any:
+    """벤더(OpenAI) 왕복 하나 — 헤더·타임아웃·예외 변환을 여기 한 곳이 갖는다
+    (#469). 채점(`OpenAIScoringAdapter.score`)·키 확인(`OpenAIScoringAdapter.
+    check_key`)·모델 목록 조회(`list_openai_models`) 셋이 모두 이 함수를
+    거친다 — 셋이 각자 헤더·타임아웃을 다시 쓰지 않는다.
+
+    성공(200)이면 응답을 그대로 돌려준다. 그 밖은 `_classify_openai_error`가
+    가른 예외를 던진다 — 호출자는 그 타입만 본다. 네트워크 자체가 실패하면
+    (타임아웃·연결 끊김) 재시도해도 결과가 달라질 수 있으니 `LLMAdapterError`
+    (일시 실패)로 옮겨 던진다."""
+
+    headers = {"Authorization": f"Bearer {api_key}"}
+    kwargs: dict[str, Any] = {"headers": headers, "timeout": timeout}
+    if json_body is not None:
+        headers["Content-Type"] = "application/json"
+        kwargs["json"] = json_body
+
+    # `requests.post`/`requests.get`을 이름으로 부른다 — `requests.request`가
+    # 아니다: 기존 테스트(#469 이전부터)가 전부 `requests.post`/`.get` 이름을
+    # 직접 monkeypatch해 왔고, 그 경계는 이번 티켓의 범위가 아니다.
+    send = requests.post if method == "POST" else requests.get
+    try:
+        response = send(url, **kwargs)
+    except requests.RequestException as exc:
+        detail = f", {context}" if context else ""
+        raise LLMAdapterError(
+            f"OpenAI 호출이 네트워크 오류로 실패했다({type(exc).__name__}{detail})."
+        ) from None
+
+    if response.status_code == 200:
+        return response
+    raise _classify_openai_error(response, context=context)
 
 
 def _parse_openai_scoring_response(
@@ -564,40 +631,14 @@ class OpenAIScoringAdapter:
         else:
             payload["temperature"] = self._temperature
 
-        try:
-            response = requests.post(
-                _OPENAI_CHAT_COMPLETIONS_URL,
-                headers={
-                    "Authorization": f"Bearer {self._api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-                timeout=self._timeout,
-            )
-        except requests.RequestException as exc:
-            raise LLMAdapterError(
-                f"OpenAI 채점 호출이 네트워크 오류로 실패했다({type(exc).__name__}, "
-                f"submission={scoring_input.submission_id})."
-            ) from None
-
-        if response.status_code != 200:
-            error_type, error_code = _extract_openai_error_fields(response)
-            message = _describe_openai_http_error(
-                response,
-                submission_id=scoring_input.submission_id,
-                error_type=error_type,
-                error_code=error_code,
-            )
-            if response.status_code in _OPENAI_AUTH_HTTP_STATUSES:
-                raise LLMAdapterAuthError(message)
-            if (
-                response.status_code in _OPENAI_MODEL_REJECTION_HTTP_STATUSES
-                and error_code in _OPENAI_MODEL_REJECTION_ERROR_CODES
-            ):
-                raise LLMAdapterModelRejectedError(message)
-            if response.status_code in _OPENAI_PERMANENT_HTTP_STATUSES:
-                raise LLMAdapterPermanentError(message)
-            raise LLMAdapterError(message)
+        response = _openai_round_trip(
+            "POST",
+            _OPENAI_CHAT_COMPLETIONS_URL,
+            api_key=self._api_key,
+            timeout=self._timeout,
+            json_body=payload,
+            context=f"submission={scoring_input.submission_id}",
+        )
 
         try:
             body = response.json()
@@ -631,19 +672,18 @@ class OpenAIScoringAdapter:
         """
 
         try:
-            response = requests.get(
+            _openai_round_trip(
+                "GET",
                 _OPENAI_MODELS_URL,
-                headers={"Authorization": f"Bearer {self._api_key}"},
+                api_key=self._api_key,
                 timeout=self._timeout,
+                context="key-check",
             )
-        except requests.RequestException:
-            return LLMKeyCheckStatus.UNVERIFIED
-
-        if response.status_code in _OPENAI_AUTH_HTTP_STATUSES:
+        except LLMAdapterAuthError:
             return LLMKeyCheckStatus.REJECTED
-        if response.status_code == 200:
-            return LLMKeyCheckStatus.VALID
-        return LLMKeyCheckStatus.UNVERIFIED
+        except LLMAdapterError:
+            return LLMKeyCheckStatus.UNVERIFIED
+        return LLMKeyCheckStatus.VALID
 
 
 def list_openai_models(api_key: str, *, timeout: float = _OPENAI_REQUEST_TIMEOUT_SECONDS) -> list[str] | None:
@@ -655,18 +695,18 @@ def list_openai_models(api_key: str, *, timeout: float = _OPENAI_REQUEST_TIMEOUT
     이다 — 호출자가 "키 없음"과 "조회 실패"를 이미 구별해 쥐고 있으므로,
     이 함수는 그 둘을 가르지 않고 성공/실패만 말한다(`OpenAIScoringAdapter.
     check_key`가 REJECTED/UNVERIFIED를 가르는 것과 다른 자리 — 이 함수는
-    모델 목록이 필요할 뿐 키 상태를 판정하지 않는다)."""
+    모델 목록이 필요할 뿐 키 상태를 판정하지 않는다).
+
+    `check_key`와 같은 왕복(`_openai_round_trip`, GET `/v1/models`)을 쓴다
+    (#469) — 둘은 실제로 같은 응답에서 나온다. 다만 몸통 파싱은 이 함수만
+    한다: `check_key`는 상태 코드만 보고, 이 함수는 응답 몸통의 `data`
+    배열까지 봐야 하기 때문이다."""
 
     try:
-        response = requests.get(
-            _OPENAI_MODELS_URL,
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=timeout,
+        response = _openai_round_trip(
+            "GET", _OPENAI_MODELS_URL, api_key=api_key, timeout=timeout, context="model-list"
         )
-    except requests.RequestException:
-        return None
-
-    if response.status_code != 200:
+    except LLMAdapterError:
         return None
 
     try:

@@ -25,6 +25,7 @@ from django.test import Client
 from classroom import tasks as classroom_tasks
 from classroom.models import ClassroomScore, ClassroomScoringAttempt
 from classroom.scoring import FakeClassroomScoringAdapter
+from tests.classroom_scenarios import track_vendor_calls
 
 CLASSES_URL = "/api/classroom/classes"
 SCAN_URL = "/api/internal/scans/classroom-submission-scoring"
@@ -312,10 +313,7 @@ def test_internal_score_endpoint_skips_a_submission_whose_class_has_no_key(clien
     AC) — "시도했는데 실패했다"가 아니므로 `ClassroomScoringAttempt`도 남기지
     않는다."""
 
-    called = []
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post", lambda *a, **k: called.append(1)
-    )
+    calls = track_vendor_calls(monkeypatch)
     ctx = _setup_submission(client, with_key=False)
 
     response = client.post(
@@ -324,7 +322,7 @@ def test_internal_score_endpoint_skips_a_submission_whose_class_has_no_key(clien
 
     assert response.status_code == 200
     assert response.json()["status"] == "not_a_candidate"
-    assert not called
+    assert not calls
     assert ClassroomScore.objects.count() == 0
     assert ClassroomScoringAttempt.objects.count() == 0
     mine = _mine(client, ctx["participant"]["access"], ctx["class_id"], ctx["problem_id"])

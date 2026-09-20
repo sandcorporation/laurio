@@ -13,6 +13,7 @@ from __future__ import annotations
 from django.conf import settings
 
 from classroom.models import Problem
+from tests.classroom_scenarios import fail_if_vendor_is_called
 
 CLASSES_URL = "/api/classroom/classes"
 SCAN_URL = "/api/internal/scans/classroom-submission-scoring"
@@ -417,10 +418,7 @@ def test_a_submission_made_before_hiding_is_still_scored_by_the_scan(client, db,
     """#405 AC "제출 뒤 문제를 숨겨도 그 시도가 스캔에서 끝까지 채점된다" —
     채점 경로가 Problem.status 를 보지 않는다는 것을 스캔 하나로 고정한다."""
 
-    def _fail_if_called(*args, **kwargs):
-        raise AssertionError("fake 경로인데 네트워크로 나갔다.")
-
-    monkeypatch.setattr("core.llm_scoring.requests.post", _fail_if_called)
+    fail_if_vendor_is_called(monkeypatch)
 
     instructor = _login(client, uid="instructor-1")
     class_id = _create_class(client, instructor["access"])

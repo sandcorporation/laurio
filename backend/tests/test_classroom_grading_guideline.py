@@ -9,18 +9,17 @@
 
 **벤더로 나가는 요청을 가로채는 방식은 `test_classroom_scoring.py`와 같다** —
 `CLASSROOM_SCORING_ADAPTER_MODE`를 `OpenAIScoringAdapter`로 강제하고
-`core.llm_scoring.requests.post`를 monkeypatch한다.
+`tests.classroom_scenarios.respond_with_verdict`(#469)로 벤더 응답을 흉내 낸다.
 """
 
 from __future__ import annotations
-
-import json
 
 import pytest
 from django.conf import settings
 from django.test import override_settings
 
 from classroom.models import ClassroomScore, Problem
+from tests.classroom_scenarios import respond_with_verdict
 
 CLASSES_URL = "/api/classroom/classes"
 SCAN_URL = "/api/internal/scans/classroom-submission-scoring"
@@ -258,36 +257,6 @@ def test_unrelated_edits_leave_the_guideline_untouched(client, db):
 # --- 채점 프롬프트 (#386 AC) -----------------------------------------------------
 
 
-class _FakeResponse:
-    def __init__(self, status_code: int, json_data) -> None:
-        self.status_code = status_code
-        self._json_data = json_data
-        self.text = json.dumps(json_data) if json_data is not None else ""
-
-    def json(self):
-        return self._json_data
-
-
-def _openai_success_body(item_id: int, *, is_met: bool = True) -> dict:
-    return {
-        "model": "gpt-4o-mini-2024-07-18",
-        "choices": [
-            {
-                "finish_reason": "stop",
-                "message": {
-                    "content": json.dumps(
-                        {
-                            "verdicts": [
-                                {"requirement_id": item_id, "is_met": is_met, "reasoning": "판정 근거"}
-                            ]
-                        }
-                    )
-                },
-            }
-        ],
-    }
-
-
 @pytest.fixture(autouse=True)
 def _force_real_scoring_adapter():
     with override_settings(CLASSROOM_SCORING_ADAPTER_MODE="core.llm_scoring.OpenAIScoringAdapter"):
@@ -386,11 +355,7 @@ def _setup_submission(client, **problem_overrides):
 def test_the_prompt_carries_the_preset_sentence_for_strict(client, db, monkeypatch):
     ctx = _setup_submission(client, grading_strictness="strict")
     sent = []
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: sent.append(k["json"])
-        or _FakeResponse(200, _openai_success_body(ctx["item_id"])),
-    )
+    respond_with_verdict(monkeypatch, ctx["item_id"], capture=sent)
 
     _run_scan(client)
 
@@ -401,11 +366,7 @@ def test_the_prompt_carries_the_preset_sentence_for_strict(client, db, monkeypat
 def test_the_prompt_carries_the_preset_sentence_for_lenient(client, db, monkeypatch):
     ctx = _setup_submission(client, grading_strictness="lenient")
     sent = []
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: sent.append(k["json"])
-        or _FakeResponse(200, _openai_success_body(ctx["item_id"])),
-    )
+    respond_with_verdict(monkeypatch, ctx["item_id"], capture=sent)
 
     _run_scan(client)
 
@@ -417,11 +378,7 @@ def test_the_prompt_carries_the_instructors_custom_sentence(client, db, monkeypa
     sentence = "함수 이름은 solve 여야 하지만 출력 형식은 자유롭게 판정한다."
     ctx = _setup_submission(client, grading_strictness="custom", grading_guideline_text=sentence)
     sent = []
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: sent.append(k["json"])
-        or _FakeResponse(200, _openai_success_body(ctx["item_id"])),
-    )
+    respond_with_verdict(monkeypatch, ctx["item_id"], capture=sent)
 
     _run_scan(client)
 
@@ -437,11 +394,7 @@ def test_the_fixed_instructions_still_ride_alongside_the_guideline(client, db, m
     sentence = "정확히 solve 라는 이름의 함수가 있어야 한다."
     ctx = _setup_submission(client, grading_strictness="custom", grading_guideline_text=sentence)
     sent = []
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: sent.append(k["json"])
-        or _FakeResponse(200, _openai_success_body(ctx["item_id"])),
-    )
+    respond_with_verdict(monkeypatch, ctx["item_id"], capture=sent)
 
     _run_scan(client)
 
@@ -456,10 +409,7 @@ def test_changing_the_guideline_does_not_alter_a_score_already_made(client, db, 
     """지침을 바꿔도 이미 매긴 판정은 조회에서 그대로다(ADR-0006, #386 AC)."""
 
     ctx = _setup_submission(client, grading_strictness="normal")
-    monkeypatch.setattr(
-        "core.llm_scoring.requests.post",
-        lambda *a, **k: _FakeResponse(200, _openai_success_body(ctx["item_id"], is_met=True)),
-    )
+    respond_with_verdict(monkeypatch, ctx["item_id"], is_met=True)
     _run_scan(client)
     score_before = ClassroomScore.objects.get(submission_id=ctx["submission_id"])
 

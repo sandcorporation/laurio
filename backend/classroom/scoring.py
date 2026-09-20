@@ -46,6 +46,7 @@ Appeal을 모른다). **벤더가 키 자체를 거절했을 때(401·403,
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
 from django.conf import settings
 from django.db import models, transaction
@@ -89,13 +90,7 @@ from .models import (
     Problem,
 )
 from .scoring_models import is_reasoning_model_id, matches_naming_rule
-from .syntax_check import (
-    SYNTAX_CHECK_ITEM_ID,
-    SyntaxCheckFile,
-    build_ai_verdict,
-    build_parser_verdict,
-    run_parser_syntax_check,
-)
+from .syntax_check import SYNTAX_CHECK_ITEM_ID, SyntaxCheckPass, run_syntax_check
 
 logger = logging.getLogger(__name__)
 
@@ -235,22 +230,13 @@ def _requirement_inputs(checklist_items: list[ChecklistItem]) -> list[Requiremen
     ]
 
 
-#: 문법 검사 기본 항목을 AI에게 물을 때 쓰는 요구사항 문구(#409) — 강사가
-#: 만든 체크리스트 항목과 나란히 requirement_id로 판정을 받되, 그 자체가
-#: 무엇을 묻는지는 이 고정 문구로 정해진다(강사가 바꿀 수 없다).
-SYNTAX_CHECK_AI_REQUIREMENT_TEXT = (
-    "아래 「문법 검사 대상 파일」에 나열된 파일들이 프로그램으로서 구문 오류 없이 "
-    "읽히는가(실행 여부가 아니라 구문만 본다)"
-)
-
-
 def _build_prompt(
     submission: ClassroomSubmission,
     checklist_items: list[ChecklistItem],
     source_text: str,
     *,
     asset_kind: str,
-    syntax_check_unresolved: list[SyntaxCheckFile] = (),
+    syntax_check: SyntaxCheckPass,
 ) -> str:
     problem = submission.problem
     guideline_text = effective_grading_guideline_text(
@@ -289,16 +275,14 @@ def _build_prompt(
     for item in checklist_items:
         grade = "필수" if item.required else "선택"
         lines.append(f"- requirement_id={item.id} ({grade}): {item.label}")
-    if syntax_check_unresolved:
-        # 문법 검사 기본 항목(#409) — 파서가 판정하지 못한 파일만 AI에게
-        # 묻는다(파서가 이미 오류를 찾았으면 이 자리 자체가 생기지 않는다,
-        # `classroom.scoring.score_classroom_submission_once`). 채점
-        # 지침(위)과 무관하게, 오직 구문이 올바른가만 본다 — 요구의 뜻을
-        # 달성했는가를 묻는 다른 항목들과는 판정 기준 자체가 다르다.
-        lines.append(
-            f"- requirement_id={SYNTAX_CHECK_ITEM_ID} (필수, 채점 지침과 무관): "
-            f"{SYNTAX_CHECK_AI_REQUIREMENT_TEXT}"
-        )
+    # 문법 검사 기본 항목(#409) — 파서가 판정하지 못한 파일만 AI에게 묻는다
+    # (파서가 이미 오류를 찾았거나 검사가 꺼져 있으면 이 줄 자체가 생기지
+    # 않는다, `SyntaxCheckPass.checklist_line`). 채점 지침(위)과 무관하게,
+    # 오직 구문이 올바른가만 본다 — 요구의 뜻을 달성했는가를 묻는 다른
+    # 항목들과는 판정 기준 자체가 다르다.
+    checklist_line = syntax_check.checklist_line()
+    if checklist_line is not None:
+        lines.append(checklist_line)
     lines.append("")
     # 문제가 아니라 **이 시도가 실제로 낸** 자료의 형식을 적는다(#373 AC) —
     # 둘 다 열린 문제에서는 문제의 값(목록)이 프롬프트 한 줄로 뭉개지지
@@ -306,15 +290,7 @@ def _build_prompt(
     lines.append(f"제출 형식: {asset_kind}")
     lines.append("제출된 소스:")
     lines.append(source_text if source_text.strip() else "(제출된 소스에서 읽을 수 있는 텍스트가 없습니다)")
-    if syntax_check_unresolved:
-        lines.append("")
-        lines.append(
-            f"문법 검사 대상 파일 — requirement_id={SYNTAX_CHECK_ITEM_ID}는 오직 아래 "
-            "파일들만 보고 판정하세요(위 「제출된 소스」의 다른 파일은 이 항목과 무관합니다):"
-        )
-        for f in syntax_check_unresolved:
-            lines.append(f"# {f.path}")
-            lines.append(f.content if f.content.strip() else "(빈 파일)")
+    lines.extend(syntax_check.source_section_lines())
     return "\n".join(lines)
 
 
@@ -346,6 +322,38 @@ def _source_text_for(raw: bytes, asset: SubmissionAsset) -> str:
 
     files = select_source_files([(asset.id, asset.label, raw)])
     return "\n\n".join(f"# {f.path}\n{f.content}" for f in files)
+
+
+@dataclass(frozen=True)
+class _ScoringSource:
+    """채점 입력 — 소스(스토리지)와 저장소(GitHub) 갈래를 하나로 읽는다(#464).
+    성공하면 `raw`·`text`가 채워지고, 실패하면(둘 다 재시도 대상이지 영구
+    실패가 아니다) `failure_status`·`error`가 채워진다."""
+
+    raw: bytes | None
+    text: str | None
+    failure_status: str | None = None
+    error: str | None = None
+
+    @property
+    def ready(self) -> bool:
+        return self.failure_status is None
+
+
+def _read_scoring_source(submission: ClassroomSubmission, asset: SubmissionAsset) -> _ScoringSource:
+    """`_read_raw_source`(원본 바이트, 소스/저장소 갈래)와 `_source_text_for`
+    (LLM 프롬프트용 선별)를 한 번에 — 호출부는 갈래를 다시 모르고 결과 하나만
+    본다."""
+
+    try:
+        raw = _read_raw_source(submission, asset)
+    except _SourceNotReady as exc:
+        return _ScoringSource(raw=None, text=None, failure_status="source_not_ready", error=str(exc))
+    except GitHubAdapterError as exc:
+        return _ScoringSource(
+            raw=None, text=None, failure_status="repository_unreachable", error=str(exc)
+        )
+    return _ScoringSource(raw=raw, text=_source_text_for(raw, asset))
 
 
 def _scoring_cap_reached(submission: ClassroomSubmission) -> bool:
@@ -506,6 +514,45 @@ def _finalize_platform_failure(submission: ClassroomSubmission, checklist_items:
     return score
 
 
+def _record_scoring_attempt(
+    submission: ClassroomSubmission, *, error: str, permanent: bool = False
+) -> None:
+    """실패를 시도 기록으로 남긴다 — 예외 메시지는 항상 2000자로 자른다(#464:
+    이전에는 여섯 곳 중 소스 준비 실패(`_SourceNotReady`) 기록 하나만 이
+    자르기를 빠뜨리고 있었다)."""
+
+    ClassroomScoringAttempt.objects.create(submission=submission, error=error[:2000], permanent=permanent)
+
+
+def _finalize_if_capped(
+    submission: ClassroomSubmission, checklist_items: list[ChecklistItem]
+) -> ClassroomScore | None:
+    """상한(`SCORING_FAILURE_LIMIT`)에 닿았으면 플랫폼 자동 미달로 굳히고 그
+    `ClassroomScore`를 돌려준다 — 아니면 `None`."""
+
+    if _scoring_cap_reached(submission):
+        return _finalize_platform_failure(submission, checklist_items)
+    return None
+
+
+def _record_failure_and_finalize(
+    submission: ClassroomSubmission,
+    checklist_items: list[ChecklistItem],
+    *,
+    error: str,
+    permanent: bool = False,
+    status_if_not_capped: str,
+) -> dict:
+    """실패를 기록하고, 상한에 닿았으면 플랫폼 자동 미달로 굳힌다(#464) — 네
+    곳이 반복하던 3줄(자르기·상한 판정·자동 미달 굳히기)을 한 곳으로 모은다."""
+
+    _record_scoring_attempt(submission, error=error, permanent=permanent)
+    score = _finalize_if_capped(submission, checklist_items)
+    if score is not None:
+        return {"submission_id": submission.id, "status": "cap_reached", "score_id": score.id}
+    return {"submission_id": submission.id, "status": status_if_not_capped}
+
+
 def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
     """이 시도를 정확히 한 번만 채점한다. 이미 `ClassroomScore`가 있으면 그대로
     돌아온다 — 재채점 코드 경로는 없다(ADR-0006).
@@ -520,9 +567,9 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
     class_obj = problem.classroom
     checklist_items = list(problem.checklist_items.all())
 
-    if _scoring_cap_reached(submission):
-        score = _finalize_platform_failure(submission, checklist_items)
-        return {"submission_id": submission.id, "status": "cap_reached", "score_id": score.id}
+    capped_score = _finalize_if_capped(submission, checklist_items)
+    if capped_score is not None:
+        return {"submission_id": submission.id, "status": "cap_reached", "score_id": capped_score.id}
 
     # 후보 쿼리(pending_scoring.pending_submissions)가 이미 이 셋을 걸러
     # 고르지만, 같은 배치 안에서 앞선 행이 방금 이 클래스의 예산을 다
@@ -550,45 +597,31 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
 
     asset = submission.assets.get()
 
-    try:
-        raw_source = _read_raw_source(submission, asset)
-    except _SourceNotReady as exc:
-        ClassroomScoringAttempt.objects.create(submission=submission, error=str(exc))
-        return {"submission_id": submission.id, "status": "source_not_ready"}
-    except GitHubAdapterError as exc:
-        ClassroomScoringAttempt.objects.create(submission=submission, error=str(exc)[:2000])
-        return {"submission_id": submission.id, "status": "repository_unreachable"}
+    source = _read_scoring_source(submission, asset)
+    if not source.ready:
+        _record_scoring_attempt(submission, error=source.error)
+        return {"submission_id": submission.id, "status": source.failure_status}
 
-    source_text = _source_text_for(raw_source, asset)
-
-    # 문법 검사 기본 항목(#408/#409) — 강사가 이 문제에서 꺼 두면(#410) 아예
-    # 판정하지 않는다(`None`으로 남아 "이 시도에는 그 항목이 없다"는 뜻이
-    # 된다). 켜져 있으면 파서가 먼저 본다 — 오류를 찾았거나(`has_error`)
-    # 판정 못한 파일이 하나도 없으면 그 자리에서 끝난다(파서 판정은 토큰을
-    # 쓰지 않는다). 판정 못한 파일이 남았을 때만 그 파일들을 AI에게 묻는다
-    # (`syntax_check_unresolved`) — 채점 요청을 보낸 뒤 그 응답에서
+    # 문법 검사 기본 항목(#408/#409, #464) — 강사가 이 문제에서 꺼 두면(#410)
+    # `syntax_check.needs_ai_fallback`이 애초에 거짓이다. 켜져 있으면 파서가
+    # 먼저 본다 — 오류를 찾았거나 판정 못한 파일이 하나도 없으면 그 자리에서
+    # 끝난다(파서 판정은 토큰을 쓰지 않는다). 판정 못한 파일이 남았을 때만
+    # 그 파일들을 AI에게 묻는다 — 채점 요청을 보낸 뒤 그 응답에서
     # requirement_id로 마저 채운다(추가 벤더 호출을 만들지 않는다, #409).
-    syntax_check_result: dict | None = None
-    syntax_check_unresolved: list[SyntaxCheckFile] = []
-    if problem.syntax_check_enabled:
-        parser_outcome = run_parser_syntax_check(raw_source)
-        if parser_outcome.has_error or not parser_outcome.unresolved:
-            syntax_check_result = build_parser_verdict(parser_outcome)
-        else:
-            syntax_check_unresolved = parser_outcome.unresolved
+    syntax_check = run_syntax_check(source.raw, enabled=problem.syntax_check_enabled)
 
     model = problem.effective_model()
     if not matches_naming_rule(model):
         # Problem.model·Class.default_model은 저장 시점에 검증되지만(classroom.api),
         # 채점 시점의 이름 규칙이 그 사이 좁혀졌을 수 있다 — 재시도로 나을 수
         # 없는 설정 오류다.
-        ClassroomScoringAttempt.objects.create(
-            submission=submission, error=f"알 수 없는 채점 모델: {model!r}", permanent=True
+        return _record_failure_and_finalize(
+            submission,
+            checklist_items,
+            error=f"알 수 없는 채점 모델: {model!r}",
+            permanent=True,
+            status_if_not_capped="failed_permanently",
         )
-        if _scoring_cap_reached(submission):
-            score = _finalize_platform_failure(submission, checklist_items)
-            return {"submission_id": submission.id, "status": "cap_reached", "score_id": score.id}
-        return {"submission_id": submission.id, "status": "failed_permanently"}
 
     # 추론 모델(GPT-5 이후)일 때만 뜻이 있다(#402, CONTEXT.md 「추론 강도」) —
     # 아니면 채점 호출은 지금처럼 temperature 0을 쓴다(`_scoring_adapter`에
@@ -598,9 +631,9 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
     prompt = _build_prompt(
         submission,
         checklist_items,
-        source_text,
+        source.text,
         asset_kind=asset.kind,
-        syntax_check_unresolved=syntax_check_unresolved,
+        syntax_check=syntax_check,
     )
     requirements = _requirement_inputs(checklist_items)
     # 문법 검사 대상 파일도 소스 목록에 얹는다(#409) — OpenAIScoringAdapter는
@@ -610,34 +643,15 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
     source_files = [
         SourceFile(
             path=f"asset-{asset.id}",
-            content=source_text,
+            content=source.text,
             asset_id=asset.id,
             asset_label=asset.label,
-        )
+        ),
+        *syntax_check.extra_source_files(asset_id=asset.id, asset_label=asset.label),
     ]
-    if syntax_check_unresolved:
-        # 파서가 없거나 제한에 걸려 AI에게 넘긴 파일만 딱 그만큼 추가한다 —
-        # 프롬프트(`_build_prompt`)가 이 항목을 그 파일들로만 판정하라고
-        # 이미 못박았으므로, 벤더로 나가는 실제 정보와도 맞아떨어진다.
-        requirements = [
-            *requirements,
-            RequirementInput(
-                requirement_id=SYNTAX_CHECK_ITEM_ID,
-                text=SYNTAX_CHECK_AI_REQUIREMENT_TEXT,
-                grade="필수",
-                self_reported_met=False,
-                evidence=[],
-            ),
-        ]
-        source_files = [
-            *source_files,
-            *[
-                SourceFile(
-                    path=f.path, content=f.content, asset_id=asset.id, asset_label=asset.label
-                )
-                for f in syntax_check_unresolved
-            ],
-        ]
+    synthetic_requirement = syntax_check.synthetic_requirement()
+    if synthetic_requirement is not None:
+        requirements = [*requirements, synthetic_requirement]
     scoring_input = ScoringInput(
         submission_id=submission.id,
         # ScoringInput.contest_id는 공모전 전용 필드지만 core.llm_scoring이
@@ -680,17 +694,17 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
         _mark_scoring_model_rejected(problem)
         return {"submission_id": submission.id, "status": "model_rejected"}
     except LLMAdapterPermanentError as exc:
-        ClassroomScoringAttempt.objects.create(submission=submission, error=str(exc)[:2000], permanent=True)
-        if _scoring_cap_reached(submission):
-            score = _finalize_platform_failure(submission, checklist_items)
-            return {"submission_id": submission.id, "status": "cap_reached", "score_id": score.id}
-        return {"submission_id": submission.id, "status": "failed_permanently"}
+        return _record_failure_and_finalize(
+            submission,
+            checklist_items,
+            error=str(exc),
+            permanent=True,
+            status_if_not_capped="failed_permanently",
+        )
     except LLMAdapterError as exc:
-        ClassroomScoringAttempt.objects.create(submission=submission, error=str(exc)[:2000])
-        if _scoring_cap_reached(submission):
-            score = _finalize_platform_failure(submission, checklist_items)
-            return {"submission_id": submission.id, "status": "cap_reached", "score_id": score.id}
-        return {"submission_id": submission.id, "status": "failed"}
+        return _record_failure_and_finalize(
+            submission, checklist_items, error=str(exc), status_if_not_capped="failed"
+        )
 
     _record_token_usage(class_obj, output.total_tokens)
 
@@ -699,13 +713,7 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
         for v in output.verdicts
         if v.requirement_id != SYNTAX_CHECK_ITEM_ID
     ]
-    if syntax_check_unresolved:
-        # 파서가 판정하지 못한 파일이 있어 AI에게 물었다(#409) — 그 판정을
-        # 강사 항목(reasoning)과 섞지 않고 syntax_check_result로 따로 뽑는다.
-        # OpenAIScoringAdapter는 요청에 실린 모든 requirement_id의 판정이
-        # 없으면 예외를 던지므로(그 클래스 docstring) 여기 반드시 있다.
-        ai_verdict = next(v for v in output.verdicts if v.requirement_id == SYNTAX_CHECK_ITEM_ID)
-        syntax_check_result = build_ai_verdict(is_met=ai_verdict.is_met, reasoning=ai_verdict.reasoning)
+    syntax_check_result = syntax_check.resolve(output.verdicts)
     with transaction.atomic():
         score = ClassroomScore.objects.create(
             submission=submission,
@@ -754,8 +762,8 @@ def _score_one(submission, as_of, ctx):
             "ClassroomSubmission(pk=%s) 채점 처리 중 예외, 다음 건으로 계속", submission.id
         )
         is_permanent = isinstance(exc, LLMAdapterPermanentError)
-        ClassroomScoringAttempt.objects.create(
-            submission=submission, error=f"{type(exc).__name__}: {exc}"[:2000], permanent=is_permanent
+        _record_scoring_attempt(
+            submission, error=f"{type(exc).__name__}: {exc}", permanent=is_permanent
         )
         status = "failed_permanently" if is_permanent else "failed"
         return {"submission_id": submission.id, "status": status, "error": str(exc)}

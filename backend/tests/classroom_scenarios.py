@@ -384,26 +384,71 @@ class FakeVendorResponse:
         return self._json_data
 
 
+def openai_verdicts_body(
+    verdicts: list[dict], *, model: str = DEFAULT_OPENAI_MODEL_VERSION, total_tokens: int = 0
+) -> dict:
+    """`verdicts`는 벤더 응답 그대로의 모양
+    (`[{"requirement_id": ..., "is_met": ..., "reasoning": ...}, ...]`) —
+    체크리스트 항목이 여럿인 시도를 한 번에 채점하는 테스트가 쓴다.
+    `total_tokens`는 채점 예산(#295)을 확인하는 테스트가 쓴다 — 기본값 0은
+    "이 응답은 사용량을 보고하지 않았다"는 뜻이라 예산에 더해지지 않는다."""
+
+    body: dict = {
+        "model": model,
+        "choices": [
+            {"finish_reason": "stop", "message": {"content": json.dumps({"verdicts": verdicts})}}
+        ],
+    }
+    if total_tokens:
+        body["usage"] = {
+            "prompt_tokens": total_tokens,
+            "completion_tokens": 0,
+            "total_tokens": total_tokens,
+        }
+    return body
+
+
 def openai_success_body(
     item_id: int,
     *,
     is_met: bool = True,
     reasoning: str = "판정 근거",
     model: str = DEFAULT_OPENAI_MODEL_VERSION,
+    total_tokens: int = 0,
 ) -> dict:
-    return {
-        "model": model,
-        "choices": [
-            {
-                "finish_reason": "stop",
-                "message": {
-                    "content": json.dumps(
-                        {"verdicts": [{"requirement_id": item_id, "is_met": is_met, "reasoning": reasoning}]}
-                    )
-                },
-            }
-        ],
-    }
+    return openai_verdicts_body(
+        [{"requirement_id": item_id, "is_met": is_met, "reasoning": reasoning}],
+        model=model,
+        total_tokens=total_tokens,
+    )
+
+
+def respond_with_verdicts(
+    client_monkeypatch,
+    verdicts: list[dict],
+    *,
+    model: str = DEFAULT_OPENAI_MODEL_VERSION,
+    total_tokens: int = 0,
+    capture: list | None = None,
+    capture_call: list | None = None,
+) -> None:
+    """다음 스캔에서 체크리스트 항목마다 주어진 판정을 그대로 돌려주는 성공
+    응답을 흉내 낸다(`respond_with_verdict`의 다항목 판). `capture`를 주면
+    벤더로 나간 요청 본문(`json`)만 그 목록에 쌓는다(프롬프트 내용을 확인하는
+    테스트용). `capture_call`을 주면 `requests.post`에 실제로 건 인자
+    전체(`headers`·`json`·`timeout`)를 쌓는다 — 타임아웃·헤더처럼 본문 밖의
+    것을 확인하는 테스트용(#469, `capture`와 동시에 줄 수 있다)."""
+
+    body = openai_verdicts_body(verdicts, model=model, total_tokens=total_tokens)
+
+    def _handler(*args, **kwargs):
+        if capture is not None:
+            capture.append(kwargs["json"])
+        if capture_call is not None:
+            capture_call.append(kwargs)
+        return FakeVendorResponse(200, body)
+
+    client_monkeypatch.setattr("core.llm_scoring.requests.post", _handler)
 
 
 def respond_with_verdict(
@@ -411,20 +456,21 @@ def respond_with_verdict(
     item_id: int,
     *,
     is_met: bool = True,
+    total_tokens: int = 0,
     capture: list | None = None,
+    capture_call: list | None = None,
 ) -> None:
     """다음 스캔에서 그 항목을 통과(`is_met=True`)·미달로 판정하는 성공 응답을
     흉내 낸다. `capture`를 주면 벤더로 나간 요청 본문을 그 목록에 쌓는다(프롬프트
     내용을 확인하는 테스트용)."""
 
-    body = openai_success_body(item_id, is_met=is_met)
-
-    def _handler(*args, **kwargs):
-        if capture is not None:
-            capture.append(kwargs["json"])
-        return FakeVendorResponse(200, body)
-
-    client_monkeypatch.setattr("core.llm_scoring.requests.post", _handler)
+    respond_with_verdicts(
+        client_monkeypatch,
+        [{"requirement_id": item_id, "is_met": is_met, "reasoning": "판정 근거"}],
+        total_tokens=total_tokens,
+        capture=capture,
+        capture_call=capture_call,
+    )
 
 
 def respond_with_key_rejection(
@@ -480,3 +526,83 @@ def fail_if_vendor_is_called(client_monkeypatch) -> None:
         raise AssertionError("fake 경로인데 core.llm_scoring.requests.post 가 불렸다 — 네트워크로 나갔다.")
 
     client_monkeypatch.setattr("core.llm_scoring.requests.post", _fail)
+
+
+def raise_vendor_network_error(client_monkeypatch, exc: Exception) -> None:
+    """벤더 채점 호출(POST)이 네트워크 오류로 실패한다 — 타임아웃·연결 끊김
+    등, 재시도하면 풀릴 수 있는 실패다."""
+
+    def _raise(*args, **kwargs):
+        raise exc
+
+    client_monkeypatch.setattr("core.llm_scoring.requests.post", _raise)
+
+
+def track_vendor_calls(client_monkeypatch, *, status_code: int = 200, body: dict | None = None) -> list:
+    """"이 시나리오에서는 벤더(POST)가 아예 불리지 않아야 한다"를 보는
+    테스트가 쓴다. 예외를 던지는 `fail_if_vendor_is_called`와 달리, 실제로
+    불렸을 때 그 사실이 목록에 남아 테스트 본문에서 평범한 assertion으로
+    확인할 수 있다 — 스캔의 넓은 `except Exception`이 예외를 삼켜 확인이
+    안 되는 것을 피한다(`classroom.scoring._score_one`)."""
+
+    calls: list = []
+
+    def _handler(*args, **kwargs):
+        calls.append(kwargs.get("json"))
+        return FakeVendorResponse(status_code, body or {})
+
+    client_monkeypatch.setattr("core.llm_scoring.requests.post", _handler)
+    return calls
+
+
+# --- 벤더 응답 흉내 — 키 확인·모델 목록(GET /v1/models) ---------------------
+#
+# 저장 시점 키 확인(`OpenAIScoringAdapter.check_key`)과 모델 목록 조회
+# (`list_openai_models`)는 같은 왕복을 공유한다(#469) — 흉내도 하나로 합친다.
+
+
+class FakeVendorModelsResponse:
+    def __init__(self, status_code: int, model_ids: list[str] | None = None) -> None:
+        self.status_code = status_code
+        self._model_ids = model_ids
+
+    def json(self):
+        if self._model_ids is None:
+            return {}
+        return {"data": [{"id": model_id} for model_id in self._model_ids]}
+
+
+def respond_to_models_endpoint(
+    client_monkeypatch, *, status_code: int = 200, model_ids: list[str] | None = None
+) -> None:
+    """GET `/v1/models` 응답을 고른다 — 키 확인은 `status_code`만 본다(#354).
+    모델 목록 조회(#401)는 `status_code`가 200일 때 `model_ids`까지 본다."""
+
+    client_monkeypatch.setattr(
+        "core.llm_scoring.requests.get",
+        lambda *a, **k: FakeVendorModelsResponse(status_code, model_ids),
+    )
+
+
+def raise_models_endpoint_network_error(client_monkeypatch, exc: Exception) -> None:
+    """GET `/v1/models`이 네트워크 오류로 실패한다 — 키 확인은 "미검증"으로
+    저장되고, 모델 목록 조회는 저장소의 기본 목록으로 물러난다."""
+
+    def _raise(*args, **kwargs):
+        raise exc
+
+    client_monkeypatch.setattr("core.llm_scoring.requests.get", _raise)
+
+
+def track_models_endpoint_calls(client_monkeypatch, *, model_ids: list[str] | None = None) -> list:
+    """"벤더(GET)가 몇 번 불리는가"를 보는 테스트가 쓴다(#401 AC "같은 키로
+    두 번 물으면 벤더를 한 번만 부른다") — `track_vendor_calls`의 GET 쪽."""
+
+    calls: list = []
+
+    def _handler(*args, **kwargs):
+        calls.append(1)
+        return FakeVendorModelsResponse(200, model_ids)
+
+    client_monkeypatch.setattr("core.llm_scoring.requests.get", _handler)
+    return calls
