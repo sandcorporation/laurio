@@ -68,6 +68,12 @@ server_reset_query_always = 1
 ; 분당 한 줄씩 나오는 stats 줄(대기 클라이언트·평균 대기 시간)이 그대로 보여준다.
 log_connections = 0
 log_disconnections = 0
+; 서버 로그인이 한 번 실패하면 다시 시도하기까지 기다리는 초(기본 15). 그동안
+; 기다리던 클라이언트는 곧바로 「server login has been failing, try again later
+; (server_login_retry)」를 받는다 — 배포가 db 를 다시 만들 때 0.4초 비었던 DB 가
+; 15초짜리 장애가 됐다(GlitchTip 오류 68, 재현은 backend/tests/
+; test_pgbouncer_config.py). 1초면 DB 가 돌아온 다음 초에 붙는다.
+server_login_retry = 1
 INI
 
 exec pgbouncer "$CONFIG_DIR/pgbouncer.ini"
