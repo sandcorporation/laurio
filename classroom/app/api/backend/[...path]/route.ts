@@ -7,6 +7,7 @@ import type { NextRequest } from "next/server";
 import { clearSessionCookies, setSessionCookies } from "@/lib/auth/cookies";
 import { assertSameOrigin } from "@/lib/auth/origin";
 import { isAllowedBackendPath } from "@/lib/proxy/allowlist";
+import { unlessClientLeft } from "@/lib/proxy/client-left";
 import { endQuietlyOnUpstreamError } from "@/lib/proxy/event-stream";
 import { forwardToBackend } from "@/lib/proxy/forward";
 
@@ -32,7 +33,10 @@ async function handle(request: NextRequest, path: string[]): Promise<NextRespons
   const originDenied = assertSameOrigin(request);
   if (originDenied) return originDenied;
 
-  const result = await forwardToBackend(request, backendPath);
+  // 브라우저가 위쪽 응답 전에 떠났으면 받을 사람이 없다 — 오류로 올리지 않고
+  // 빈 응답으로 끝낸다(`lib/proxy/client-left.ts`, GlitchTip 65).
+  const result = await unlessClientLeft(request.signal, () => forwardToBackend(request, backendPath));
+  if (result === null) return new NextResponse(null, { status: 499 });
   const contentType = result.response.headers.get("content-type") ?? "application/json";
 
   // 실시간 신호 SSE(ADR-0046)는 끝까지 모이지 않는 응답이다 — 아래
