@@ -32,11 +32,27 @@ class MeOut(Schema):
     has_developer_profile: bool
 
 
-class ProfileIn(Schema):
-    """필드가 아예 안 왔으면(None) 손대지 않고, ""가 명시적으로 왔으면 비운다.
+class SponsorProfileIn(Schema):
+    """개최자 공개용 표시 이름·소개(spec #474, #478) — `POST
+    /api/accounts/sponsor-profile`의 입력이다. 필드가 아예 안 왔으면(None)
+    손대지 않고, ""가 명시적으로 왔으면 비운다.
 
     "안 보냄"과 "빈 값으로 지움"을 구분해야 한 필드만 바꾸는 부분 업데이트가
-    다른 필드를 조용히 지우지 않는다.
+    다른 필드를 조용히 지우지 않는다. `display_name`은 개발자 표시 이름
+    (`DeveloperProfileIn`)과 필드 모양이 같지만, 공개 공모전 목록·상세에
+    뜨는 별개의 이름이라 금칙어 규칙 표(`core.banned_word_rules.RULES`)에
+    각자 따로 등록된다.
+    """
+
+    display_name: str | None = Field(default=None, max_length=100)
+    bio: str | None = None
+
+
+class DeveloperProfileIn(Schema):
+    """개발자 표시 이름·소개(spec #474, #478) — `POST
+    /api/accounts/developer-profile`의 입력이다. `SponsorProfileIn`과 필드
+    모양은 같지만, 공개 개발자 프로필·심사 비교 화면에 뜨는 별개의 이름이다
+    — 위 독스트링 참고.
     """
 
     display_name: str | None = Field(default=None, max_length=100)

@@ -35,6 +35,7 @@ import Link from "next/link";
 import { ErrorNote, INPUT_CLASS, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
+import { checkDisplayNameForBannedWords } from "@/lib/profile/display-name-check";
 
 type ProfileOut = { display_name: string; bio: string };
 
@@ -156,6 +157,14 @@ function RoleSection({ role }: { role: Role }) {
 
   async function handleSave() {
     if (save.status === "saving") return; // 중복 클릭 방지 — 버튼도 disabled 지만 방어로 한 번 더.
+    // 제출을 누르는 순간에만 검사한다 — 타이핑 중에는 부르지 않는다(spec
+    // #474, #478). 서버가 진짜 문이고(#478) 이건 편의라, 여기서 걸러도
+    // 걸러지지 않아도 서버가 같은 이유로 다시 거절한다.
+    const bannedWordMessage = checkDisplayNameForBannedWords(displayName);
+    if (bannedWordMessage) {
+      setSave({ status: "error", message: bannedWordMessage });
+      return;
+    }
     setSave({ status: "saving" });
     const result = await bffClient.post<ProfileOut>(`/api/backend/accounts/${copy.path}`, {
       display_name: displayName,

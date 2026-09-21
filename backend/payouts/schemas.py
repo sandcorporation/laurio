@@ -117,7 +117,7 @@ class SellerContactSubmitIn(Schema):
 
     **둘 다 선택 입력이다** — 부분 제출을 허용한다(전화번호만, 이메일만).
     `None`은 "이 필드는 안 보냈다"(손대지 않는다)를 뜻하고, 엔드포인트가 둘 다
-    `None`이면 422 로 거부한다(`accounts.schemas.ProfileIn`과 같은 "안 보냄"과
+    `None`이면 422 로 거부한다(`accounts.schemas.SponsorProfileIn`과 같은 "안 보냄"과
     "빈 값" 구분 관용구 — 다만 여기는 "빈 문자열로 지운다"는 개념 자체가 없다,
     연락처는 비우는 별도 API 가 없다). **빈 문자열도 "안 보냄"과 같이 취급하지
     않고 422 로 거부한다** — `email=""` 을 허용하면 그 요청이 "안 보냄"(None)과

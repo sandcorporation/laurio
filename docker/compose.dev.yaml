@@ -435,6 +435,7 @@ services:
       # 바인드 마운트가 그대로 남아 옛(또는 없는) node_modules 가 노출된다.
       - codemit-dev-web-node-modules:/app/node_modules
       - codemit-dev-web-frontend-node-modules:/app/frontend/node_modules
+      - codemit-dev-web-banned-words-node-modules:/app/packages/banned-words/node_modules
       - codemit-dev-web-shared-node-modules:/app/packages/bff-shared/node_modules
       - codemit-dev-web-bff-client-node-modules:/app/packages/bff-client/node_modules
       - codemit-dev-web-markdown-node-modules:/app/packages/markdown/node_modules
@@ -586,6 +587,7 @@ volumes:
   codemit-dev-db:
   codemit-dev-web-node-modules:
   codemit-dev-web-frontend-node-modules:
+  codemit-dev-web-banned-words-node-modules:
   codemit-dev-web-shared-node-modules:
   codemit-dev-web-bff-client-node-modules:
   codemit-dev-web-markdown-node-modules:

@@ -11,18 +11,21 @@ from django.http import HttpRequest
 from ninja import Router
 from ninja.errors import HttpError
 
+from core.banned_words import BannedWordViolation, find_banned_word_violation
+
 from .identity import attach_social_account, decide_email, find_linkable_user, refresh_social_account
 from .middleware import jwt_auth
 from .operators import OperatorInvariantError, assert_can_use_social_login
 from .models import DeveloperProfile, SocialAccount, SponsorProfile
 from .sanitize import sanitize_free_text
 from .schemas import (
+    DeveloperProfileIn,
     LogoutIn,
     MeOut,
-    ProfileIn,
     ProfileOut,
     RefreshIn,
     SocialLoginIn,
+    SponsorProfileIn,
     TokenPairOut,
     WithdrawalEligibilityOut,
     WithdrawalOut,
@@ -157,11 +160,33 @@ def me(request: HttpRequest):
     )
 
 
-def _apply_profile_update(profile, payload: ProfileIn) -> None:
+def _reject_if_banned_display_name(display_name: str | None) -> None:
+    """공개용 표시 이름(개최자 공개용 이름·개발자 표시 이름, spec #474, #478)에
+    금칙어가 있으면 거절한다 — 둘 다 로그인 없이 열리는 화면(공모전 목록·상세,
+    공개 개발자 프로필)에 뜨므로 이름 필드로 사칭·욕설 목록을 둘 다 건다
+    (`core.banned_word_rules.RULES`의 `("accounts", "SponsorProfileIn"|
+    "DeveloperProfileIn", "display_name")` 항목). `display_name`이 안
+    왔거나(None) 빈 문자열이면 검사하지 않는다 — "안 보냄"과 "명시적으로
+    비움"은 애초에 거절할 값이 없다.
+
+    걸린 낱말 자체는 응답에 담지 않는다 — classroom의
+    `_reject_if_banned_member_name`과 같은 문구를 그대로 쓴다."""
+
+    if not display_name:
+        return
+    violation = find_banned_word_violation(display_name, check_impersonation=True)
+    if violation is BannedWordViolation.IMPERSONATION:
+        raise HttpError(422, "이름에는 운영진을 뜻하는 말을 쓸 수 없습니다.")
+    if violation is BannedWordViolation.PROFANITY:
+        raise HttpError(422, "이름에 욕설을 쓸 수 없습니다.")
+
+
+def _apply_profile_update(profile, payload: SponsorProfileIn | DeveloperProfileIn) -> None:
     """None(안 보냄)과 ""(명시적으로 비움)을 구분해 보내진 필드만 갱신한다."""
 
     changed = False
     if payload.display_name is not None:
+        _reject_if_banned_display_name(payload.display_name)
         profile.display_name = sanitize_free_text(payload.display_name)
         changed = True
     if payload.bio is not None:
@@ -172,7 +197,7 @@ def _apply_profile_update(profile, payload: ProfileIn) -> None:
 
 
 @router.post("/accounts/sponsor-profile", response=ProfileOut, auth=jwt_auth)
-def ensure_sponsor_profile(request: HttpRequest, payload: ProfileIn):
+def ensure_sponsor_profile(request: HttpRequest, payload: SponsorProfileIn):
     """Sponsor 프로필을 필요할 때 처음으로 만든다(지연 생성, get-or-create)."""
 
     profile, _created = SponsorProfile.objects.get_or_create(user=request.auth_user)
@@ -181,7 +206,7 @@ def ensure_sponsor_profile(request: HttpRequest, payload: ProfileIn):
 
 
 @router.post("/accounts/developer-profile", response=ProfileOut, auth=jwt_auth)
-def ensure_developer_profile(request: HttpRequest, payload: ProfileIn):
+def ensure_developer_profile(request: HttpRequest, payload: DeveloperProfileIn):
     """Developer 프로필을 필요할 때 처음으로 만든다(지연 생성, get-or-create)."""
 
     profile, _created = DeveloperProfile.objects.get_or_create(user=request.auth_user)
