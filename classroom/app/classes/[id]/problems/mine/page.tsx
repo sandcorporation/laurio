@@ -27,6 +27,7 @@ import {
   PageShell,
   buttonClass,
 } from "@/app/components/ui";
+import { checkDisplayNameForBannedWords } from "@/lib/members/display-name-check";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { renameMyself, type ProblemListItem } from "@/lib/submissions/api";
 import { useMyProblems } from "@/lib/submissions/use-my-problems";
@@ -116,9 +117,18 @@ function MyDisplayName({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const trimmedName = nameInput.trim();
+    // 제출을 누르는 순간에만 검사한다 — 타이핑 중에는 부르지 않는다(spec
+    // #474, #476). 서버가 진짜 문이고(#475) 이건 편의라, 여기서 걸러도
+    // 걸러지지 않아도 서버가 같은 이유로 다시 거절한다.
+    const bannedWordMessage = checkDisplayNameForBannedWords(trimmedName);
+    if (bannedWordMessage) {
+      setError(bannedWordMessage);
+      return;
+    }
     setSaving(true);
     setError(null);
-    const result = await renameMyself(classId, nameInput.trim());
+    const result = await renameMyself(classId, trimmedName);
     if (result.ok) {
       setEditing(false);
       onRenamed();

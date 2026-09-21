@@ -16,6 +16,7 @@ import {
   buttonClass,
 } from "@/app/components/ui";
 import { createClass } from "@/lib/classes/api";
+import { checkDisplayNameForBannedWords } from "@/lib/members/display-name-check";
 
 export default function NewClassPage() {
   const router = useRouter();
@@ -26,9 +27,18 @@ export default function NewClassPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const trimmedInstructorDisplayName = instructorDisplayName.trim();
+    // 제출을 누르는 순간에만 검사한다 — 서버가 진짜 문이고(spec #474,
+    // #475/#477) 이건 편의다. 이 이름은 로그인하지 않은 사람도 보는 가입
+    // 미리보기에 뜨므로 노출이 가장 크다.
+    const bannedWordMessage = checkDisplayNameForBannedWords(trimmedInstructorDisplayName);
+    if (bannedWordMessage) {
+      setError(bannedWordMessage);
+      return;
+    }
     setSubmitting(true);
     setError(null);
-    const result = await createClass(name.trim(), instructorDisplayName.trim());
+    const result = await createClass(name.trim(), trimmedInstructorDisplayName);
     if (result.ok) {
       router.push(`/classes/${result.data.id}`);
     } else {

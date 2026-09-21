@@ -465,7 +465,9 @@ export interface paths {
          *     내보내진 참여자와 보관된 클래스는 `create_classroom_submission`과 같은
          *     이유로 403이다 — 화면이 이미 그 사실을 알려준 뒤라 존재를 숨길 필요가
          *     없다. 검증 규칙(빈 이름·100자 초과)은 가입 때와 같은
-         *     `ClassMemberDisplayName`을 그대로 쓴다.
+         *     `ClassMemberDisplayName`을 그대로 쓴다. 금칙어 검사(spec #474, #475)도
+         *     가입 때와 같다 — 가입할 때만 막으면 그 뒤에 사칭 이름으로 바꾸면
+         *     그만이기 때문이다.
          */
         patch: operations["classroom_api_rename_myself"];
         trace?: never;
@@ -871,6 +873,10 @@ export interface paths {
          *
          *     **같은 문제에 살아 있는 템플릿이 이미 있으면 새로 만들지 않는다**(#333
          *     AC) — 그 템플릿을 200으로 그대로 돌려준다. 새로 만들었을 때만 201이다.
+         *
+         *     공개자 이름은 템플릿 갤러리를 로그인한 모두가 보므로 금칙어 검사를
+         *     받는다(spec #474, #477) — `publish_problem_as_template`이 사본을 뜨기
+         *     전에 막는다.
          */
         post: operations["classroom_template_api_publish_template"];
         delete?: never;
@@ -955,6 +961,10 @@ export interface paths {
          *
          *     **같은 클래스에 살아 있는 템플릿이 이미 있으면 새로 만들지 않는다**(#333
          *     AC) — `publish_template`과 같은 규율, 200/201로 새로 만들었는지를 구별한다.
+         *
+         *     공개자 이름 검사도 `publish_template`과 같다(spec #474, #477) —
+         *     `PublishTemplateIn`을 그대로 공유하므로 규칙 표의 같은 줄이 두
+         *     엔드포인트를 함께 막는다.
          */
         post: operations["classroom_template_api_publish_class_template"];
         delete?: never;
@@ -7847,6 +7857,15 @@ export interface operations {
                     "application/json": components["schemas"]["ClassOut"];
                 };
             };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
         };
     };
     classroom_api_list_joined_classes: {
@@ -8910,6 +8929,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorOut"];
                 };
             };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
         };
     };
     classroom_api_reopen_problem: {
@@ -9074,6 +9102,15 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

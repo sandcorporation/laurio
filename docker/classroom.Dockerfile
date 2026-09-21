@@ -16,6 +16,9 @@ WORKDIR /app
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY classroom/package.json ./classroom/package.json
+# 금칙어(사칭·욕설) 판정 순수 함수 + 백엔드에서 생성된 목록(spec #474, #476,
+# ADR-0051) — 가입·이름 변경 폼이 제출 전에 이 패키지로 미리 검사한다.
+COPY packages/banned-words/package.json ./packages/banned-words/package.json
 COPY packages/bff-shared/package.json ./packages/bff-shared/package.json
 COPY packages/bff-client/package.json ./packages/bff-client/package.json
 # 마크다운 렌더러(#313, 2026-09-16 에 강의실에서 패키지로 옮겼다) — 공개 앱의 공모전
@@ -33,6 +36,7 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 # target: dev로 고른다). ----
 FROM base AS dev
 COPY classroom/ ./classroom/
+COPY packages/banned-words/ ./packages/banned-words/
 COPY packages/bff-shared/ ./packages/bff-shared/
 COPY packages/bff-client/ ./packages/bff-client/
 COPY packages/markdown/ ./packages/markdown/
@@ -44,6 +48,7 @@ CMD ["pnpm", "dev"]
 # ---- builder: 프로덕션 산출물을 만든다. ----
 FROM base AS builder
 COPY classroom/ ./classroom/
+COPY packages/banned-words/ ./packages/banned-words/
 COPY packages/bff-shared/ ./packages/bff-shared/
 COPY packages/bff-client/ ./packages/bff-client/
 COPY packages/markdown/ ./packages/markdown/

@@ -1,0 +1,21 @@
+{
+  "name": "@codemit/banned-words",
+  "version": "0.0.0",
+  "private": true,
+  "description": "금칙어(사칭·욕설) 판정 순수 함수 + 백엔드에서 생성된 목록(spec #474, #475/#476, ADR-0051). 목록의 원본은 backend/core/banned_words.py다 — 이 패키지의 src/generated/는 손으로 고치지 않는다.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "generate": "node scripts/generate-banned-words.mjs",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^5.0.0"
+  }
+}
