@@ -181,6 +181,20 @@ def _reject_if_banned_display_name(display_name: str | None) -> None:
         raise HttpError(422, "이름에 욕설을 쓸 수 없습니다.")
 
 
+def _reject_if_banned_bio(bio: str | None) -> None:
+    """공개 소개글(개최자 공개용 소개·개발자 소개, #480)에 욕설이 있으면
+    거절한다 — 표시 이름과 같은 화면(공모전 목록·상세, 공개 개발자 프로필)에
+    뜨는 공개 본문이라 `classroom._reject_if_banned_public_text`와 같은
+    이유로 사칭 목록은 걸지 않는다 — 「관리자입니다」 같은 자기소개 문장이
+    막히면 안 된다. 안 왔거나(None) 빈 문자열이면 검사하지 않는다."""
+
+    if not bio:
+        return
+    violation = find_banned_word_violation(bio, check_impersonation=False)
+    if violation is BannedWordViolation.PROFANITY:
+        raise HttpError(422, "소개에 욕설을 쓸 수 없습니다.")
+
+
 def _apply_profile_update(profile, payload: SponsorProfileIn | DeveloperProfileIn) -> None:
     """None(안 보냄)과 ""(명시적으로 비움)을 구분해 보내진 필드만 갱신한다."""
 
@@ -190,6 +204,7 @@ def _apply_profile_update(profile, payload: SponsorProfileIn | DeveloperProfileI
         profile.display_name = sanitize_free_text(payload.display_name)
         changed = True
     if payload.bio is not None:
+        _reject_if_banned_bio(payload.bio)
         profile.bio = sanitize_free_text(payload.bio)
         changed = True
     if changed:

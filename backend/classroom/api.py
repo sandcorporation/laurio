@@ -1162,6 +1162,10 @@ def create_problem(request: HttpRequest, class_id: int, payload: ProblemIn):
     _reject_if_banned_public_text(payload.description, "설명")
     for item_in in payload.checklist_items:
         _reject_if_banned_public_text(item_in.label, "체크리스트 항목")
+    # 참여자도 어떤 기준으로 판정되는지 알고 제출해야 하므로(#385 User Story
+    # 18) 참여자에게도 보인다 — 체크리스트 항목과 같은 노출(빠뜨렸던 것을
+    # #480 구조 검사가 잡았다).
+    _reject_if_banned_public_text(grading_guideline_text, "채점 지침")
 
     if payload.open and not any(item.required for item in payload.checklist_items):
         raise HttpError(400, NO_REQUIRED_ITEM_MESSAGE)
@@ -1402,6 +1406,8 @@ def update_problem(request: HttpRequest, class_id: int, problem_id: int, payload
             if payload.grading_guideline_text is not None
             else problem.grading_guideline_text,
         )
+        # 참여자에게도 보이는 자리다(`create_problem`과 같은 이유, #480).
+        _reject_if_banned_public_text(grading_guideline_text, "채점 지침")
 
     update_fields = []
     if payload.title is not None:

@@ -39,8 +39,12 @@ fail-closed 라 구멍은 아니지만 원인을 찾기 어렵다.
 「이름」)에 금칙어(사칭·욕설)가 있으면 422 로 거절한다**(spec #474, #478) —
 둘 다 로그인 없이 열리는 화면(공개 공모전 목록·상세, 공개 개발자 프로필)에
 뜨기 때문이다. `POST` 가 생성과 수정을 겸하므로 처음 정할 때도, 나중에
-사칭으로 바꾸려 할 때도 같은 검사를 받는다. 어느 필드가 검사 대상인지는
-`backend/core/banned_word_rules.py` 표에 있다.
+사칭으로 바꾸려 할 때도 같은 검사를 받는다. **`bio`(소개글)는 욕설만
+본다**(spec #474, #480) — 이름이 아니라 `display_name`과 같은 화면에 뜨는
+공개 본문이라 「제 직업은 관리자입니다」 같은 문장이 막히면 안 되기
+때문이다. 어느 필드가 검사 대상인지는 `backend/core/banned_word_rules.py`
+표에 있다 — 그 표가 규칙 표와 어긋나지 않는지는 `tests/
+test_banned_word_field_registration.py`(#480)가 매 커밋 확인한다.
 
 **계정을 가리키는 것은 소셜 계정 `(제공자, 제공자 식별자)` 하나다**(ADR-0049,
 CONTEXT.md 「소셜 계정」). 이메일은 로그인에서 사람을 찾는 데 쓰지 않는다 — 없을
@@ -86,7 +90,7 @@ CONTEXT.md 「소셜 계정」). 이메일은 로그인에서 사람을 찾는 �
 | `POST /api/contests/free` | 무료 개최(#415) — 본인확인·결제 없이, 개최 권한만 |
 | `POST /api/contests/{id}/publish` | 무료 공모전 공개(#415) — 결제 대신 개최 권한이 연다, 요구사항이 없거나 개최자 표시 이름이 없으면 422(#447) |
 | `GET /api/contests/mine` | 내가 연 것 |
-| `POST`·`PATCH`·`DELETE .../requirements[/{id}]` | 요구사항 — `PATCH /contests/{id}`와 같은 문(DRAFT·PUBLISHED, #473) |
+| `POST`·`PATCH`·`DELETE .../requirements[/{id}]` | 요구사항 — `PATCH /contests/{id}`와 같은 문(DRAFT·PUBLISHED, #473). 문구(`text`)는 공개 제목·설명과 같은 노출이라 욕설이면 422다(spec #474, #480) — 상세 화면에서 로그인 없이 보인다 |
 | `.../requirement-chat/messages` | 요구사항을 LLM 과 함께 다듬는다 — 새 턴 보내기는 DRAFT뿐, 대화 이력 읽기는 상태 무관 |
 | `POST .../images/upload-url` · `images` · `PATCH`·`DELETE .../images/{id}` | 이미지 — DRAFT뿐(#473 이후에도 넓히지 않았다) |
 | `POST .../views` | 조회 기록 |

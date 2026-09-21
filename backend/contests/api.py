@@ -295,6 +295,9 @@ def create_contest(request: HttpRequest, payload: ContestCreateIn):
     for requirement in payload.requirements:
         if requirement.grade not in _VALID_GRADES:
             raise HttpError(422, "요구사항 등급은 필수 또는 선택 중 하나여야 합니다.")
+        # 공모전 상세에서 참가자 전부가 로그인 없이 보는 공개 본문이다 —
+        # 제목·설명과 같은 노출(빠뜨렸던 것을 #480 구조 검사가 잡았다).
+        _reject_if_banned_public_text(requirement.text, "요구사항")
 
     sanitized_title = sanitize_free_text(payload.title)
     sanitized_description = sanitize_free_text(payload.description)
@@ -405,6 +408,9 @@ def create_free_contest(request: HttpRequest, payload: FreeContestCreateIn):
     for requirement in payload.requirements:
         if requirement.grade not in _VALID_GRADES:
             raise HttpError(422, "요구사항 등급은 필수 또는 선택 중 하나여야 합니다.")
+        # 공모전 상세에서 참가자 전부가 로그인 없이 보는 공개 본문이다 —
+        # 제목·설명과 같은 노출(빠뜨렸던 것을 #480 구조 검사가 잡았다).
+        _reject_if_banned_public_text(requirement.text, "요구사항")
 
     sanitized_title = sanitize_free_text(payload.title)
     sanitized_description = sanitize_free_text(payload.description)
@@ -1530,6 +1536,7 @@ def add_requirement(request: HttpRequest, contest_id: int, payload: RequirementC
     sanitized_text = sanitize_free_text(payload.text)
     if not sanitized_text:
         raise HttpError(422, "요구사항 내용이 비어 있습니다.")
+    _reject_if_banned_public_text(sanitized_text, "요구사항")
 
     next_order = contest.requirements.count()
     requirement = Requirement.objects.create(
@@ -1579,6 +1586,7 @@ def update_requirement(
         sanitized = sanitize_free_text(payload.text)
         if not sanitized:
             raise HttpError(422, "요구사항 내용이 비어 있습니다.")
+        _reject_if_banned_public_text(sanitized, "요구사항")
         requirement.text = sanitized
     if payload.order is not None:
         requirement.order = payload.order

@@ -22,7 +22,12 @@ from ninja.pagination import PageNumberPagination, paginate
 
 from accounts.middleware import jwt_auth
 
-from .api import _reject_if_banned_name, _serialize_class, _serialize_problem
+from .api import (
+    _reject_if_banned_name,
+    _reject_if_banned_public_text,
+    _serialize_class,
+    _serialize_problem,
+)
 from .instructor_scope import class_scope, problem_scope
 from .models import ClassTemplate, ProblemTemplate, ProblemTemplateReport
 from .schemas import (
@@ -388,6 +393,9 @@ def import_class_template_view(request, share_code: str, payload: ImportClassTem
     들어오며, 채점 모델은 대상(새 클래스)의 기본값을 따른다. 새 클래스는
     자기만의 새 가입 코드를 갖는다 — 원본의 것이 따라오지 않는다."""
 
+    # 가져가는 사람이 새로 붙이는 클래스 이름이다 — `classroom.ClassIn.name`과
+    # 같은 필드(빠뜨렸던 것을 #480 구조 검사가 잡았다), 같은 규칙을 쓴다.
+    _reject_if_banned_public_text(payload.name, "클래스 이름")
     template = _get_visible_class_template_or_404(share_code)
     new_class = import_class_template(
         template, instructor_id=request.auth_user.id, name=payload.name

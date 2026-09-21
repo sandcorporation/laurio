@@ -915,6 +915,39 @@ cd backend && CODEMIT_DB_PORT=55432 uv run pytest
 환경의 운영자 세션과 조회 카운터를 통째로 지웠다(`RedisCache.clear()` 는 FLUSHDB 다).
 LocMem 으로 바뀌면서 그 경로 자체가 사라졌다.
 
+**빠뜨린 필드는 구조 테스트가 막는다**(#480, spec #474, `tests/
+test_banned_word_field_registration.py`) — 사용자가 적는 이름·제목·본문에 금칙어
+(사칭·욕설)를 거절하는 장치(`core.banned_words`)가 어느 필드에 적용되는지는
+`core.banned_word_rules.RULES` 한 표가 든다. 이 구조 테스트가 백엔드 입력 스키마
+(django-ninja `Schema`, 이름이 `In`으로 끝나는 관례 — `payload:` 타입 주석이 전부 이
+접미사를 쓴다)를 `ninja.Schema.__subclasses__()`로 훑어 문자열·문자열 목록 필드를 전부
+모으고 그 표와 대조한다. **등록되지 않은 필드가 있으면 빨갛다** — 앞으로 사용자 입력을
+받는 새 필드를 더하면, 금칙어 검사를 어떻게 할지 정하기 전까지 이 테스트가 막는다.
+앱 경계 테스트(`tests/test_app_boundaries.py`)와 같은 관용구를 쓴다: 아직 설치되지 않은
+스키마는 표에 없어도 되지만(스캔 대상이 아니므로), 스캔되는 스키마가 표에 없으면
+안 된다는 한 방향의 강제다. `test_no_stale_registrations`가 반대 방향(표에는 있는데
+더는 스캔되지 않는 죽은 항목)도 잡는다.
+
+**면제는 이유가 있어야 한다.** `BannedWordRule(checks_impersonation=False,
+checks_profanity=False, exempt_reason="...")` 로 적는다 — 둘 다 거짓인데
+`exempt_reason`이 비어 있으면 실패한다(`scripts/check_screen_language.py`의
+`SCREEN-LANGUAGE-EXCEPTION`과 같은 관용구). 이유 없는 면제는 잊힌 누락과 구별되지
+않기 때문이다. 검사를 거는 쪽(`checks_impersonation`·`checks_profanity` 중 하나라도
+참)은 반대로 `exempt_reason`을 비워야 한다 — 검사와 면제 이유가 동시에 있으면 어느
+쪽이 실제 동작인지 코드를 읽어야만 안다. 면제 사유는 크게 셋이다: **운영자 표면**
+(운영자 공지·이의 심판 사유·정책/기준데이터 변경 사유 — 운영진이 진짜 운영진이라
+사칭이 성립하지 않고, 신고된 표현을 그대로 인용해야 할 때가 있다), **당사자만 읽는
+글**(이의제기 사유·템플릿 신고 사유 — 운영자만 읽고, 권리를 행사하는 길이라 낱말로
+막을 자리가 아니다), **자유 텍스트가 아닌 것**(식별자·URL·object key·자격증명·벤더
+웹훅 페이로드·정해진 값 집합 중 하나로 고정된 값 등).
+
+**#480 이 이 표를 완성하며 실제로 빠진 검사 여덟 줄(네 자리)도 찾았다** — 면제를
+적으려 훑다가 이미 검사하는 필드와 같은 범주(공개 이름·공개 본문)인데 어느 티켓에도
+없던 자리였다: 클래스 템플릿을 가져올 때 새로 붙이는 이름, 채점 지침 `"custom"` 문장
+(만들 때·고칠 때), 공모전 요구사항 문구(만들 때 인라인·따로 추가·수정), 개최자·개발자
+공개 소개글(`bio`). 면제 대신 실제 검사를 걸었다 — `core.banned_word_rules` 모듈
+docstring 과 `tests/test_banned_word_gap_fields.py` 가 경위와 HTTP 검증을 남긴다.
+
 ## 프론트엔드
 
 Next.js + React. 저장소 루트가 pnpm 워크스페이스다(운영자 앱 04 #62, ADR-0021) —
