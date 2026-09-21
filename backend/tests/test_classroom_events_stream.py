@@ -161,3 +161,55 @@ def test_stream_ends_when_its_maximum_lifetime_has_passed(client, db, monkeypatc
     # 이 테스트의 단언이고(무한 루프면 위 break 가 51 을 돌려준다), 0 은 그
     # 상한이 루프 **앞**에서 걸린다는 뜻이다.
     assert asyncio.run(drain()) == 0
+
+
+def test_stream_ends_quietly_when_the_redis_connection_drops(client, db, monkeypatch, settings):
+    """배포가 redis 를 바꿔 끼우면 흐르던 스트림이 오류 없이 끝난다(GlitchTip
+    오류 67). prod 에서는 폴링이 「Connection closed by server」 뒤 재접속을
+    「Connection refused」로 받고, 스트림을 닫는 `UNSUBSCRIBE` 도 같은 이유로
+    실패해 그 예외가 ASGI 핸들러까지 새어 오류로 보고됐다.
+
+    실물 어댑터(`RedisEventBus`)를 그대로 쓰고 redis-py 의 pubsub 이 그 두
+    자리에서 내는 예외만 흉내 낸다 — 서버를 실제로 죽이는 재현은 임시
+    redis 컨테이너를 `docker stop` 하는 스크립트로 했다(수정 전 예외 사슬이
+    prod 이벤트와 같다, 수정 후 스트림이 끝난다)."""
+
+    import redis.asyncio.client as redis_asyncio_client
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    settings.EVENT_BUS_ADAPTER_MODE = "core.events_redis.RedisEventBus"
+    settings.EVENT_BUS_REDIS_URL = "redis://127.0.0.1:1/2"  # 아무도 듣지 않는다
+
+    polls = []
+
+    async def _subscribe(self, *args, **kwargs):
+        return None
+
+    async def _get_message(self, *args, **kwargs):
+        polls.append(True)
+        if len(polls) == 1:
+            return None
+        raise RedisConnectionError("Error 111 connecting to redis:6379. Connection refused.")
+
+    async def _unsubscribe(self, *args, **kwargs):
+        raise RedisConnectionError("Error 111 connecting to redis:6379. Connection refused.")
+
+    monkeypatch.setattr(redis_asyncio_client.PubSub, "subscribe", _subscribe)
+    monkeypatch.setattr(redis_asyncio_client.PubSub, "get_message", _get_message)
+    monkeypatch.setattr(redis_asyncio_client.PubSub, "unsubscribe", _unsubscribe)
+    monkeypatch.setattr("classroom.api._SSE_KEEPALIVE_SECONDS", 0.01)
+    user = _login(client, "redis-restart-viewer")
+
+    response = client.get(STREAM_URL, **_auth_header(user["access"]))
+    assert response.status_code == 200
+
+    async def drain() -> list[bytes]:
+        chunks: list[bytes] = []
+        async for chunk in response.streaming_content:
+            chunks.append(chunk)
+            if len(chunks) > 50:
+                break
+        return chunks
+
+    chunks = asyncio.run(drain())
+    assert chunks == [b": keep-alive\n\n"]

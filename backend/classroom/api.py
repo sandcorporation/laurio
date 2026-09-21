@@ -36,7 +36,7 @@ from accounts.middleware import jwt_auth
 from accounts.models import SocialAccount
 from core.banned_words import BannedWordViolation, find_banned_word_violation
 from core.crypto import encrypt
-from core.events import Event, get_event_bus
+from core.events import Event, EventBusDisconnected, get_event_bus
 from core.llm_scoring import LLMKeyCheckStatus
 from storage.adapters import get_storage_adapter
 from storage.filenames import build_download_filename, safe_download_base_name
@@ -2112,14 +2112,21 @@ async def _stream_events_for(recipient_id: int):
 
     bus = get_event_bus()
     deadline = time.monotonic() + _SSE_MAX_LIFETIME_SECONDS
-    async with bus.subscribe(recipient_id) as subscription:
-        while time.monotonic() < deadline:
-            events = await subscription.poll(timeout=_SSE_KEEPALIVE_SECONDS)
-            if not events:
-                yield b": keep-alive\n\n"
-                continue
-            for event in events:
-                yield _format_sse_event(event)
+    try:
+        async with bus.subscribe(recipient_id) as subscription:
+            while time.monotonic() < deadline:
+                events = await subscription.poll(timeout=_SSE_KEEPALIVE_SECONDS)
+                if not events:
+                    yield b": keep-alive\n\n"
+                    continue
+                for event in events:
+                    yield _format_sse_event(event)
+    except EventBusDisconnected:
+        # 배포가 redis 를 바꿔 끼우는 몇 초에 흐르던 스트림이 다 여기로 온다
+        # (GlitchTip 오류 67). 스트림을 끝내면 브라우저가 다시 연결하고, 그
+        # 사이 화면은 폴링으로 맞춰진다 — 오류로 보낼 일이 아니다. 구독 자체를
+        # 못 여는 것(redis 가 계속 없다)은 여기 오지 않고 그대로 오류로 간다.
+        logger.warning("실시간 신호 버스 연결이 끊겨 스트림을 끝낸다", exc_info=True)
 
 
 @router.get("/events/stream", auth=jwt_auth)

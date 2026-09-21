@@ -44,6 +44,13 @@ class Event:
     payload: dict
 
 
+class EventBusDisconnected(Exception):
+    """구독 도중 버스와의 연결이 끊겼다 — 어댑터가 자기 벤더 예외를 이것으로
+    바꿔 올린다(스트림이 `redis` 를 몰라도 되게). 받는 쪽(SSE 스트림)은 이것을
+    오류로 보지 않고 스트림을 끝낸다: 신호는 진실의 출처가 아니고(ADR-0046),
+    브라우저의 `EventSource` 는 끊기면 스스로 다시 연결한다."""
+
+
 @runtime_checkable
 class EventSubscription(Protocol):
     """`EventBus.subscribe()`가 돌려주는 구독 하나 — **비동기** 컨텍스트

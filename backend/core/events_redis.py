@@ -21,7 +21,12 @@ import redis
 import redis.asyncio as redis_asyncio
 from django.conf import settings
 
-from .events import Event
+from .events import Event, EventBusDisconnected
+
+#: 연결이 끊겼다는 뜻의 예외들 — 배포가 redis 컨테이너를 바꿔 끼우는 몇 초에
+#: 실제로 나는 것이 이 둘이다(GlitchTip 오류 67: 「Connection closed by
+#: server」 뒤 재접속이 「Connection refused」).
+_DISCONNECTED = (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError)
 
 _CHANNEL_PREFIX = "codemit-events:"
 
@@ -42,7 +47,10 @@ class RedisSubscription:
         self._recipient_id = recipient_id
 
     async def poll(self, *, timeout: float) -> list[Event]:
-        message = await self._pubsub.get_message(timeout=timeout, ignore_subscribe_messages=True)
+        try:
+            message = await self._pubsub.get_message(timeout=timeout, ignore_subscribe_messages=True)
+        except _DISCONNECTED as error:
+            raise EventBusDisconnected(str(error)) from error
         if message is None or message.get("type") != "message":
             return []
         data = json.loads(message["data"])
@@ -56,8 +64,15 @@ class RedisSubscription:
         # AC "연결을 닫으면 구독이 정리된다" — unsubscribe 없이 close()만 해도
         # 커넥션이 끊기지만, 명시적으로 구독을 풀어야 close() 도중 서버에
         # 남은 미확인 상태가 없다.
-        await self._pubsub.unsubscribe()
-        await self._pubsub.aclose()
+        # 연결이 이미 죽었으면(서버가 사라졌다) 풀 구독도 없다 — UNSUBSCRIBE 를
+        # 보내려는 재접속이 거부돼 스트림을 닫는 자리에서 예외가 새던 것이
+        # GlitchTip 오류 67 의 마지막 고리였다. close 는 그래도 한다.
+        try:
+            await self._pubsub.unsubscribe()
+        except _DISCONNECTED:
+            pass
+        finally:
+            await self._pubsub.aclose()
 
 
 class RedisEventBus:
