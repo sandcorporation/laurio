@@ -4,8 +4,9 @@
 시작(`payments.api.initiate_payment`, 결제로 공개되는 경로) 둘 다 이 문 앞에서
 같은 조건을 본다 — 공개된 뒤 참가자에게 개최자가 익명으로 보이지 않게
 하기 위해서다. 초안 생성·수정(`create_contest`/`create_free_contest`/
-`update_draft_contest`)은 이 확인을 거치지 않는다 — 아직 아무도 그 이름을
-볼 일이 없기 때문이다.
+`update_contest`)은 이 확인을 거치지 않는다 — draft에서는 아직 아무도 그
+이름을 볼 일이 없고, published에서 다시 고칠 때는 표시 이름이 이미 공개를
+통과했을 때만 도달할 수 있는 상태이기 때문이다(#473).
 
 `accounts`(공유층)에 둔 이유는 `contests`·`payments` 둘 다 이 조건을
 그대로 써야 하기 때문이다 — 한쪽에만 두면 다른 쪽이 복붙하거나 지연

@@ -1,13 +1,17 @@
 "use client";
 
-// 브리프 수정 패널 (#113, 부모 #110).
+// 브리프 수정 패널 (#113, 부모 #110; 제출을 받는 동안의 편집은 #473, ADR-0051).
 //
-// 결제가 문을 닫기 전까지는 제목·설명·카테고리·요구형태·상금·마감을 전부 고칠
-// 수 있다. 이 컴포넌트는 순전히 폼이다 — 저장이 실제로 무엇을 바꾸는지(파생값
-// 재계산 포함)는 전부 백엔드(`PATCH /contests/{id}`)가 판정한다. 이 화면은
-// 그 결과를 그대로 받아 부모(draft/page.tsx)에게 새 Contest를 돌려줄 뿐, 최소
-// 상금이나 미달 여부를 스스로 계산하지 않는다(#113 AC — "판정은 백엔드가
-// 한다").
+// DRAFT는 결제가 문을 닫기 전까지, PUBLISHED는 마감이 문을 닫기 전까지 제목·
+// 설명·카테고리·요구형태·마감을 고칠 수 있다. 이 컴포넌트는 순전히 폼이다 —
+// 저장이 실제로 무엇을 바꾸는지(파생값 재계산 포함)는 전부 백엔드(`PATCH
+// /contests/{id}`)가 판정한다. 이 화면은 그 결과를 그대로 받아 부모(draft/
+// page.tsx)에게 새 Contest를 돌려줄 뿐, 최소 상금이나 미달 여부를 스스로
+// 계산하지 않는다(#113 AC — "판정은 백엔드가 한다").
+//
+// **상금은 PUBLISHED에서는 애초에 칸을 그리지 않는다** — 무료 공모전이 상금
+// 칸을 감추는 것과 같은 이유(사고 예방)다: 이미 결제·Escrow가 확정한 금액이라
+// 백엔드도 이 상태에서는 `prize`가 오면 422로 거절한다.
 import { useState } from "react";
 
 import { DescriptionField } from "@/app/components/description-field";
@@ -104,11 +108,15 @@ export function BriefEditPanel({
     }));
   }
 
+  // PUBLISHED에서는 상금 칸 자체를 그리지 않는다(아래) — 결제·Escrow가 이미
+  // 확정한 금액이라 이 폼이 다시 열 대상이 아니다.
+  const isDraft = contest.status === "draft";
+  const canEditPrize = isDraft && !contest.is_free;
   const prizeNumber = Number(form.prize);
   const formInvalidReason =
     form.categoryId === ""
       ? "카테고리를 선택해주세요."
-      : !contest.is_free && (!Number.isFinite(prizeNumber) || prizeNumber <= 0)
+      : canEditPrize && (!Number.isFinite(prizeNumber) || prizeNumber <= 0)
         ? "상금은 0보다 큰 금액이어야 합니다."
         : form.deliverableTypeIds.length === 0
           ? "요구형태를 하나 이상 선택해주세요."
@@ -135,7 +143,7 @@ export function BriefEditPanel({
       title: form.title.trim(),
       category_id: form.categoryId,
       deliverable_type_ids: form.deliverableTypeIds,
-      ...(contest.is_free ? {} : { prize: prizeNumber }),
+      ...(canEditPrize ? { prize: prizeNumber } : {}),
       deadline_at: new Date(form.deadlineAt).toISOString(),
       description: form.description,
     });
@@ -147,10 +155,12 @@ export function BriefEditPanel({
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm font-semibold">브리프</p>
-          {/* 결제 전까지는 무엇이든 고칠 수 있다는 것이 화면에서 읽혀야 한다
-              (#113 AC) — 언제부터 못 고치는지 알고 결제를 누른다. */}
+          {/* 언제까지 고칠 수 있는지가 화면에서 읽혀야 한다(#113 AC, #473) —
+              DRAFT는 결제가, PUBLISHED는 마감이 문을 닫는다. */}
           <p className="text-xs text-ink/50" data-testid="draft-editable-notice">
-            결제 전까지는 자유롭게 고칠 수 있습니다 — 결제가 끝나면 잠깁니다.
+            {isDraft
+              ? "마감 전까지는 자유롭게 고칠 수 있습니다 — 결제 뒤에도 계속 고칠 수 있습니다."
+              : "마감 전까지는 자유롭게 고칠 수 있습니다 — 이미 제출한 참가자에게는 바뀐 내용이 알림으로 갑니다."}
           </p>
         </div>
         {!editing && (
@@ -243,7 +253,7 @@ export function BriefEditPanel({
             ))}
           </fieldset>
 
-          {!contest.is_free && (
+          {canEditPrize && (
             <label className="flex flex-col gap-1 text-sm">
               상금 (원)
               <input
@@ -262,6 +272,7 @@ export function BriefEditPanel({
             <input
               type="datetime-local"
               value={form.deadlineAt}
+              min={toLocalDatetimeInput(new Date().toISOString())}
               onChange={(event) => setForm((prev) => ({ ...prev, deadlineAt: event.target.value }))}
               data-testid="draft-edit-deadline"
               className={INPUT_CLASS}

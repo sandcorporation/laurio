@@ -29,6 +29,8 @@ export function describeNotification(notification: NotificationOut): string {
       return `참가하신 '${contestTitle}' 공모전에서 수상하셨습니다!`;
     case "scoring_complete":
       return `제출하신 '${contestTitle}' 공모전 채점이 완료됐습니다 — 이의제기 기간이 시작됩니다.`;
+    case "contest_updated":
+      return `참가하신 '${contestTitle}' 공모전의 내용이 바뀌었습니다 — 바뀐 조건을 확인해주세요.`;
     case "appeal_ruled":
       return "제기하신 이의 심판이 완료됐습니다.";
     case "new_contest_in_category":

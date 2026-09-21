@@ -72,15 +72,16 @@ CONTEXT.md 「소셜 계정」). 이메일은 로그인에서 사람을 찾는 �
 | `GET /api/contests` | 공개 목록 — 참가 가능한 것이 기본, `closed=1` 로 마감된 것, `q` 로 검색(#449) |
 | `GET /api/contests/home` | 홈 큐레이션 |
 | `GET /api/contests/{id}` | 상세 — 로그인 없이 열린다 |
-| `POST /api/contests` · `PATCH /api/contests/{id}` | 개최(유료)·초안 수정 |
+| `POST /api/contests` | 개최(유료) |
+| `PATCH /api/contests/{id}` | 브리프 수정 — DRAFT는 결제 전까지, PUBLISHED는 마감 전까지(제출을 받는 동안, #473, ADR-0051). 마감 뒤(CLOSED 이후)는 409 |
 | `POST /api/contests/quote` | 개최 견적(유료) |
 | `GET /api/contests/free/hosting-permission` | 내 무료 공모전 개최 권한(#415) |
 | `POST /api/contests/free` | 무료 개최(#415) — 본인확인·결제 없이, 개최 권한만 |
 | `POST /api/contests/{id}/publish` | 무료 공모전 공개(#415) — 결제 대신 개최 권한이 연다, 요구사항이 없거나 개최자 표시 이름이 없으면 422(#447) |
 | `GET /api/contests/mine` | 내가 연 것 |
-| `POST`·`PATCH`·`DELETE .../requirements[/{id}]` | 요구사항 |
-| `.../requirement-chat/messages` | 요구사항을 LLM 과 함께 다듬는다 |
-| `POST .../images/upload-url` · `images` · `PATCH`·`DELETE .../images/{id}` | 이미지 |
+| `POST`·`PATCH`·`DELETE .../requirements[/{id}]` | 요구사항 — `PATCH /contests/{id}`와 같은 문(DRAFT·PUBLISHED, #473) |
+| `.../requirement-chat/messages` | 요구사항을 LLM 과 함께 다듬는다 — 새 턴 보내기는 DRAFT뿐, 대화 이력 읽기는 상태 무관 |
+| `POST .../images/upload-url` · `images` · `PATCH`·`DELETE .../images/{id}` | 이미지 — DRAFT뿐(#473 이후에도 넓히지 않았다) |
 | `POST .../views` | 조회 기록 |
 | `GET .../metrics` | 개최자용 지표 |
 | `POST .../reopen` | 재개최 |
@@ -109,6 +110,17 @@ handovers·payouts·submissions 앱 소관 — 이미 존재하는 공모전을 
 표면이라 두 스위치와 무관하게 열려 있다)는 예외다. 기본은 둘 다 켜짐이고
 staging·prod 배포만 유료 스위치를 끈다(`CLAUDE.md` 「배포」). 닫히는 표면의
 전체 목록은 `core.contest_switch` 모듈 docstring 이 든다.
+
+**제출을 받는 동안(published)에도 브리프·요구사항을 고칠 수 있다**(#473,
+ADR-0051). 예전에는 공개하는 순간 통째로 잠겼다. 지금은 마감(closed 이후)이
+그 문이다 — Score가 마감 직후 한 번만 만들어지는 불변 스냅샷이라서다
+(ADR-0006). `prize`는 이 문이 열어주는 대상이 아니다(PUBLISHED에서 오면
+422) — 이미 결제·Escrow가 확정한 금액이고, 요구형태가 바뀌어도 개최 시점에
+굳은 `required_minimum_prize`·`is_underfunded` 스냅샷은 다시 계산하지 않는다.
+AI grill 대화(새 턴 보내기)와 이미지 CRUD는 그대로 DRAFT뿐이다. PUBLISHED에서
+실제로 바뀐 필드가 있으면 `ContestChange`(누가·언제·무엇을 남기는 이력,
+DeliverableTypeChange와 같은 규율)가 남고 이미 제출한 참가자 전원에게
+`NotificationType.CONTEST_UPDATED` 알림이 간다 — 「알림」절 참고.
 
 ### 제출
 
@@ -472,7 +484,7 @@ CI의 `pytest` 잡이 매번 같은 텍스트를 재생성해 이 블록과 글�
 
 ## 알림
 
-종류는 열둘이다 — 마감 임박 · 심사기간 종료 임박 · Distribution 최종 경고 · 결과 · 채점 완료 ·
+종류는 열셋이다 — 마감 임박 · 심사기간 종료 임박 · Distribution 최종 경고 · 결과 · 채점 완료 ·
 이의 심판 완료 · 관심 카테고리 신규 공모전 · 지급이 당신을 기다린다 · 강의실 채점 예산 경고
 (#295, 강사가 클래스의 토큰 예산을 정했을 때 임계를 넘으면 그 강사에게 간다) · 강의실 제출
 채점 완료(#303, 낸 사람에게 매 시도마다 간다) · 강의실 채점 키 거부(#356, ADR-0045 — 벤더가
@@ -482,7 +494,9 @@ CI의 `pytest` 잡이 매번 같은 텍스트를 재생성해 이 블록과 글�
 보낸다. 문자 채널을 시도하지 않고 앱 안에서만 보인다는 점에서 강의실 셋과 같은
 성질(`is_internal_only`)이지만, 강의실 알림이 아니라 공모전 쪽 알림이라
 `CLASSROOM_NOTIFICATION_TYPES`에는 들지 않는다 — 강의실에서는 세지도 보이지도
-않고 공개 앱 알림 목록·벨에는 그대로 뜬다).
+않고 공개 앱 알림 목록·벨에는 그대로 뜬다) · 공모전 내용 변경(#473, ADR-0051 —
+제출을 받는 동안 개최자가 브리프·요구사항을 고치면 이미 제출한 참가자 전원에게
+간다, 거래성이라 옵트인이 필요 없다).
 
 **운영팀 알림은 운영자 API 셋으로 오간다**(#418) — 계정 검색(이메일·닉네임,
 `is_staff` 계정은 대상에서 뺀다), 보내기(받는 사람 한 명·제목 필수·본문
@@ -591,7 +605,7 @@ fake 이거나 임포트되지 않으면 부팅 자체를 거부한다** — 컨
 | --- | --- |
 | `accounts` | SocialAccount · AccountLink · SponsorProfile · DeveloperProfile · PhoneContact · RefreshToken · BlacklistedToken · Withdrawal |
 | `verification` | Verification · VerificationRequest · RetainedIdentity · IdentityReading |
-| `contests` | Contest · Category · DeliverableType · Requirement · ContestImage · RequirementChatMessage · JudgingExtensionPayment · ContestSubmission(#270, `submissions.Submission`의 공모전 자식) · 변경 이력 셋 |
+| `contests` | Contest · Category · DeliverableType · Requirement · ContestImage · RequirementChatMessage · JudgingExtensionPayment · ContestSubmission(#270, `submissions.Submission`의 공모전 자식) · 변경 이력 넷(CategoryChange · DeliverableTypeChange · HostingPermissionChange · ContestChange, #473) |
 | `submissions`(공유층 — #270, ADR-0039) | Submission(부모) · SubmissionAsset · RequirementResponse · Evidence |
 | `scoring` | Score · ScoringAttempt |
 | `repositories` | RepositorySnapshot |

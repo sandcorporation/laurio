@@ -1,10 +1,13 @@
-"""DRAFT Contest 편집 — 결제가 문을 닫기 전까지는 무엇이든 고칠 수 있다 (#113, 부모 #110).
+"""Contest 브리프 편집 — DRAFT는 결제 전까지, PUBLISHED는 마감 전까지 고칠 수
+있다 (#113, 부모 #110; 제출 기간 중 편집은 #473, ADR-0051).
 
 `PATCH /api/contests/{contest_id}`가 첫 번째 Contest 편집 엔드포인트다. 상태
-게이트는 `contests.api._get_owned_draft_contest`가 진다 — 소유자가 아니면 404
-("있는지가 아니라 없는지"), DRAFT가 아니면 409("분명히 거절당한다"). 요구형태나
-상금을 바꾸면 최소 제안 상금 합계·상금미달 배지를 다시 계산하고, 이미 붙인
-Requirement는 요구형태가 바뀌어도 지우지 않는다.
+게이트는 `contests.api._get_owned_content_editable_contest`가 진다 — 소유자가
+아니면 404("있는지가 아니라 없는지"), 마감 이후(CLOSED 이후)면 409("분명히
+거절당한다"). 요구형태나 상금을 바꾸면(DRAFT에서만) 최소 제안 상금 합계·
+상금미달 배지를 다시 계산하고, 이미 붙인 Requirement는 요구형태가 바뀌어도
+지우지 않는다. PUBLISHED 편집·변경 이력·알림은 test_contest_content_edit_
+while_published.py가 다룬다.
 """
 
 from __future__ import annotations
@@ -275,9 +278,12 @@ def test_minimum_prize_recompute_matches_the_deliverable_types_the_response_list
 
 
 @pytest.mark.django_db
-def test_only_draft_can_be_updated_no_status_silently_passes(client, category, landing_type):
+def test_only_content_editable_statuses_can_be_updated_no_status_silently_passes(
+    client, category, landing_type
+):
     """`Contest.Status`를 순회한다 — 고정된 상태 목록이 아니라 실제 enum을 돈다
-    (test_home_curation.py와 같은 관용구). DRAFT를 뺀 모든 상태가 409여야 한다."""
+    (test_home_curation.py와 같은 관용구). DRAFT·PUBLISHED(제출을 받는 동안,
+    #473)는 200, 마감 이후(CLOSED·AWARDED·JUDGING_ENDED)는 409여야 한다."""
     pair = _login(client)
     _verify(client, pair["access"], ci="sponsor-ci-6")
 
@@ -294,8 +300,10 @@ def test_only_draft_can_be_updated_no_status_silently_passes(client, category, l
             **_auth_header(pair["access"]),
         )
 
-        if status == Contest.Status.DRAFT:
-            assert response.status_code == 200, f"DRAFT는 고칠 수 있어야 한다: {response.json()}"
+        if status in (Contest.Status.DRAFT, Contest.Status.PUBLISHED):
+            assert response.status_code == 200, (
+                f"{status} 상태는 고칠 수 있어야 한다: {response.json()}"
+            )
         else:
             assert response.status_code == 409, (
                 f"{status} 상태는 조용히 통과하면 안 된다: {response.status_code} {response.json()}"

@@ -13,13 +13,15 @@
 // 컴포넌트가 마운트 시 항상 GET으로 백엔드에서 다시 조회한다는 뜻이다
 // (payment/page.tsx와 같은 관용구).
 //
-// **이 티켓은 읽기까지다** — 브리프 필드(제목·카테고리·요구형태·상금·마감)를
-// 고치는 화면은 #113의 몫이다. 여기서 실제로 계속 바뀌는 것은 기존 Phase B와
-// 같이 AI grill 대화와 Requirement 체크리스트뿐이다.
+// 브리프 필드(제목·카테고리·요구형태·마감·설명)는 #113의 `BriefEditPanel`이
+// 고친다. Requirement 체크리스트 CRUD는 이 화면의 핵심이다.
 //
-// **결제가 끝나면 이 화면으로의 편집 이동이 닫힌다**(spec #110) — Contest가
-// draft를 벗어나면 대화·체크리스트 UI를 그리지 않고, 공개된 공모전으로 가는
-// 링크만 남긴다.
+// **제출을 받는 동안(published)에도 이 화면에서 계속 고칠 수 있다**(#473,
+// ADR-0051) — 예전에는 결제(또는 무료 공개)가 끝나는 순간 이 화면 전체가
+// 「닫힘」으로 바뀌었다. 지금은 **마감**(closed 이후)이 그 문이다. published
+// 에서는 AI grill 대화(새 체크리스트를 처음부터 함께 만드는 자리)와 이미지
+// CRUD만 계속 닫혀 있다 — 그 둘을 열지 않은 이유는 `contests.api.
+// _get_owned_draft_contest`의 독스트링에 있다.
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -50,15 +52,20 @@ import { GrillChatPanel } from "../../_components/grill-chat-panel";
 import { RequirementDraftPanel } from "../../_components/requirement-draft-panel";
 import type { ContestImage } from "@/lib/upload/use-contest-image-upload";
 
+// 마감 뒤(closed 이후)다 — Score가 이미 그 체크리스트를 근거로 만들어졌거나
+// 만들어질 참이라(ADR-0006) 더 이상 고칠 것이 없다(#473, ADR-0051).
+// draft·published는 둘 다 계속 고칠 수 있으므로 여기 들지 않는다.
+const CONTENT_LOCKED_STATUSES = new Set(["closed", "judging_ended", "awarded"]);
+
 type LoadState =
   | { status: "loading" }
-  // 존재하지 않거나 남의 draft다 — 두 경우를 구별하지 않는다(#111 AC: "있는지가
+  // 존재하지 않거나 남의 Contest다 — 두 경우를 구별하지 않는다(#111 AC: "있는지가
   // 아니라 없는지로 단언한다"). GET /contests/{id}가 이미 이 두 경우를 같은
   // 404로 합친다.
   | { status: "not-found" }
   | { status: "error"; message: string }
-  // draft를 벗어난 Contest다 — 결제가 끝나 공개됐다(또는 그 이후 상태다).
-  // 이 화면에서 더 이상 고칠 것이 없으므로 대화·체크리스트를 그리지 않는다.
+  // 마감 뒤다 — 이 화면에서 더 이상 고칠 것이 없으므로 대화·체크리스트를
+  // 그리지 않는다.
   | { status: "closed"; contest: ContestDetail }
   | { status: "ready"; contest: ContestDetail };
 
@@ -114,7 +121,7 @@ export default function ContestDraftPage() {
         return setLoad({ status: "error", message: "공모전 정보를 해석하지 못했습니다." });
       }
 
-      if (contest.data.status !== "draft") {
+      if (CONTENT_LOCKED_STATUSES.has(contest.data.status)) {
         return setLoad({ status: "closed", contest: contest.data });
       }
 
@@ -424,10 +431,12 @@ export default function ContestDraftPage() {
         <h1 className="mt-4 text-2xl font-semibold" data-testid="draft-closed-heading">
           {load.contest.title}
         </h1>
+        {/* 마감이 이유다(#473) — Score가 이미 이 체크리스트를 근거로
+            만들어졌거나 만들어질 참이라, 그 뒤에 조건이 바뀌면 이의 심판이
+            무엇을 근거로 판정했는지 재현할 수 없다. */}
         <p className="mt-6" data-testid="draft-closed">
-          {load.contest.is_free
-            ? "이미 공개된 무료 공모전입니다. 더 이상 브리프나 요구사항을 수정할 수 없습니다."
-            : "이미 결제가 완료되어 공개된 공모전입니다. 더 이상 브리프나 요구사항을 수정할 수 없습니다."}
+          마감된 공모전입니다. 채점이 지금의 요구사항을 근거로 진행되므로 더 이상 브리프나 요구사항을
+          수정할 수 없습니다.
         </p>
         <Link
           href={`/contests/${contestId}`}
@@ -442,6 +451,7 @@ export default function ContestDraftPage() {
 
   const { contest } = load;
   const contestForPanel = { ...contest, requirements };
+  const isDraft = contest.status === "draft";
 
   return (
     <main className="flex min-h-screen flex-col" data-testid="draft-phase-b">
@@ -458,22 +468,36 @@ export default function ContestDraftPage() {
         onDismissDeliverableTypesChangedNotice={() => setDeliverableTypesChangedNotice(false)}
         onSave={handleSaveBrief}
       />
-      <ContestImagePanel
-        contestId={contest.id}
-        images={images}
-        editable
-        onImagesChange={setImages}
-      />
-      <div className="grid flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_452px]">
-        <GrillChatPanel
-          messages={messages}
-          proposals={proposals}
-          onSend={handleSendChat}
-          onAddProposal={(proposal) => void handleAddRequirement(proposal.text, proposal.grade, proposal)}
-          sending={sending}
-          chatError={chatError}
-          turnLimitReached={turnLimitReached}
+      {/* 이미지 CRUD는 여전히 DRAFT뿐이다 — `contests.api._get_owned_draft_
+          contest` 독스트링이 이유를 적는다(#473). */}
+      {isDraft && (
+        <ContestImagePanel
+          contestId={contest.id}
+          images={images}
+          editable
+          onImagesChange={setImages}
         />
+      )}
+      <div
+        className={
+          isDraft
+            ? "grid flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_452px]"
+            : "grid flex-1 grid-cols-1 lg:grid-cols-[452px]"
+        }
+      >
+        {/* AI grill 대화도 여전히 DRAFT뿐이다 — 이미 확정된 체크리스트를
+            처음부터 다시 대화로 만드는 자리라서다(같은 독스트링). */}
+        {isDraft && (
+          <GrillChatPanel
+            messages={messages}
+            proposals={proposals}
+            onSend={handleSendChat}
+            onAddProposal={(proposal) => void handleAddRequirement(proposal.text, proposal.grade, proposal)}
+            sending={sending}
+            chatError={chatError}
+            turnLimitReached={turnLimitReached}
+          />
+        )}
         <RequirementDraftPanel
           contest={contestForPanel}
           requirements={requirements}

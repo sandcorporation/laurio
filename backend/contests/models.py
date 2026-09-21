@@ -530,6 +530,22 @@ Contest.Status.EDITABLE = Classification(
     },
     question="초안으로서 고칠 수 있는가",
 )
+# 제출을 받는 동안(published)에도 브리프·요구사항을 고칠 수 있다(#473, ADR-0051) —
+# `EDITABLE`(DRAFT뿐)과 다른 질문이다. 마감 뒤(CLOSED 이후)에는 채점 스냅샷(Score)이
+# 이미 그 체크리스트를 근거로 만들어졌으므로 잠근다(ADR-0006). `prize`는 이 질문이
+# 열어주는 대상이 아니다 — 결제·Escrow가 이미 확정한 금액이라 여기서 다시 열지
+# 않는다(`contests.api._get_owned_content_editable_contest`가 이 질문을 쓰고,
+# `update_contest`가 prize는 별도로 status==DRAFT 조건으로 다시 막는다).
+Contest.Status.CONTENT_EDITABLE = Classification(
+    {
+        _S.DRAFT: True,
+        _S.PUBLISHED: True,
+        _S.CLOSED: False,
+        _S.AWARDED: False,
+        _S.JUDGING_ENDED: False,
+    },
+    question="제출을 받는 동안 개최자가 브리프·요구사항을 고칠 수 있는가",
+)
 # Assignment 는 결제 자체가 없다 — DRAFT 를 벗어나는 사건이 Sponsor 의 「열기」다.
 Contest.Status.PAYABLE = Classification(
     {
@@ -661,6 +677,48 @@ class Requirement(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return self.text
+
+
+class ContestChange(models.Model):
+    """Contest 브리프·요구사항에 대한 한 번의 변경 사건 — 누가·언제·무엇을·무엇으로
+    (#473, ADR-0051).
+
+    `DeliverableTypeChange`·`CategoryChange`와 같은 규율(ADR-0023 준용)이다.
+    **제출을 받는 동안(published)에 고친 것만 남긴다** — DRAFT는 아직 아무도
+    그 조건을 보고 참가하지 않았으니 감사 흔적으로서의 무게가 없다
+    (`contests.api._record_contest_change`가 이 조건을 본다). `action`이
+    브리프 수정과 요구사항 추가·수정·삭제를 구별한다 — 브리프 수정의
+    `before`/`after`는 바뀐 필드만 담는 dict이고, 요구사항 이벤트는 그
+    요구사항 한 항목의 스냅샷(추가·수정은 `after`, 삭제는 `before`)을 담는다.
+
+    `contest`는 CASCADE다 — `DeliverableType`과 달리 이 이력은 그 Contest를
+    벗어나서는 뜻이 없고, e2e·데모 시드의 재시드 정리(`seed_e2e_contests`·
+    `seed_demo_contests`가 이름 접두어로 걸러 `Contest.objects.filter(...).
+    delete()`한다)가 그 Contest를 지울 때 함께 지워져야 한다. 「누가 바꿨는가」는
+    별도 FK로 남기지 않는다 — 이 표면은
+    소유자(`contests.api._get_owned_contest`)만 통과하므로 항상
+    `contest.sponsor`와 같고, 감사 목적의 이중 기록이 아니라 중복이 된다.
+    """
+
+    class Action(models.TextChoices):
+        UPDATED = "updated", "브리프 수정"
+        REQUIREMENT_ADDED = "requirement_added", "요구사항 추가"
+        REQUIREMENT_UPDATED = "requirement_updated", "요구사항 수정"
+        REQUIREMENT_REMOVED = "requirement_removed", "요구사항 삭제"
+
+    contest = models.ForeignKey(Contest, related_name="changes", on_delete=models.CASCADE)
+    action = models.CharField(max_length=32, choices=Action.choices)
+    before = models.JSONField()
+    after = models.JSONField()
+    changed_at = models.DateTimeField()
+
+    class Meta:
+        verbose_name = "공모전 변경 이력"
+        verbose_name_plural = "공모전 변경 이력"
+        ordering = ["-changed_at", "-id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ContestChange({self.action}, contest_id={self.contest_id})"
 
 
 class ContestImage(models.Model):

@@ -53,6 +53,11 @@ class NotificationType(models.TextChoices):
     # 안에서만 보이고 문자 채널로 나가지 않으며(`is_internal_only`), 강의실
     # 알림이 아니라 `CLASSROOM_NOTIFICATION_TYPES`에 넣지 않는다.
     OPERATOR_NOTICE = "operator_notice", "운영팀 알림"
+    # 제출을 받는 동안(published) 개최자가 브리프·요구사항을 고쳤다(#473,
+    # ADR-0051) — 이미 낸 참가자 전원에게 간다. 거래성이다: 광고가 아니라
+    # 자신이 참가한 조건이 실제로 바뀌었다는 사실 통지라 옵트인이 필요 없다
+    # (SCORING_COMPLETE·APPEAL_RULED와 같은 분류).
+    CONTEST_UPDATED = "contest_updated", "공모전 내용 변경"
 
 
 #: 강의실 제품이 만드는 알림 유형 전부(#304) — 클래스 알림 화면·종 배지가 이
@@ -176,6 +181,15 @@ NOTIFICATION_TYPE_FLAGS: dict[str, dict[str, bool]] = {
         "is_promotional": False,
         "is_quiet_hours_exempt": False,
         "is_internal_only": True,
+    },
+    # 참가한 공모전의 조건이 바뀌었다는 사실 통지다 — 거래성이고 옵트인이
+    # 필요 없다. DEADLINE_REMINDER 등 같은 수신자 집합(참가 중인 Developer)을
+    # 대상으로 하는 다른 라이프사이클 유형과 같은 채널 취급을 받는다.
+    NotificationType.CONTEST_UPDATED: {
+        "is_transactional": True,
+        "is_promotional": False,
+        "is_quiet_hours_exempt": False,
+        "is_internal_only": False,
     },
 }
 

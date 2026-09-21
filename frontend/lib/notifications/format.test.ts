@@ -35,6 +35,14 @@ describe("describeNotification", () => {
     expect(text).toContain("채점이 완료됐습니다");
   });
 
+  it("공모전 내용 변경 알림을 그대로 렌더한다(#473)", () => {
+    const text = describeNotification(
+      row({ notification_type: "contest_updated", context: { contest_title: "473 공모전" } }),
+    );
+    expect(text).toContain("473 공모전");
+    expect(text).toContain("내용이 바뀌었습니다");
+  });
+
   it("운영팀 알림은 제목을 그대로 보여준다(#418)", () => {
     const text = describeNotification(
       row({ notification_type: "operator_notice", title: "기프티콘을 보내드립니다" }),

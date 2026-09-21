@@ -27,7 +27,8 @@ staging·prod 배포(`docker/compose.staging.yaml`/`docker/compose.prod.yaml`)�
 
 - `contests.api`의 전부 — 공모전 목록·상세·홈 큐레이션·내가 개최한 목록·조회수
   기록(`list_contests`/`get_contest`/`get_home_curation`/`list_my_sponsored_
-  contests`/`record_contest_view`), Contest 수정(`update_draft_contest`), 요구사항
+  contests`/`record_contest_view`), Contest 수정(`update_contest`, #473부터
+  DRAFT뿐 아니라 PUBLISHED에도 연다), 요구사항
   AI grill 대화, Requirement CRUD, 공모전 이미지 CRUD, 무료 개최·공개(`create_
   free_contest`/`publish_free_contest`/`get_own_hosting_permission`, #415).
   그리고 **유료 스위치가 닫는 것 전부**(아래) — 공모전 스위치가 꺼지면 유료

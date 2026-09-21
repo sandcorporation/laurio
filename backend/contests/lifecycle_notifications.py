@@ -351,6 +351,34 @@ LIFECYCLE_SCANS = (
 )
 
 
+# --- 내용 변경 알림 (#473, ADR-0051) -----------------------------------------------
+
+
+def notify_contest_updated(contest: Contest) -> None:
+    """제출을 받는 동안(published) 개최자가 브리프·요구사항을 고친 직후,
+    이미 낸 참가자 전원에게 「조건이 바뀌었다」고 알린다.
+
+    호출자(`contests.api._record_contest_change`)가 이미 `ContestChange`를
+    커밋한 뒤에만 불러야 한다 — `notify_award_result`와 같은 자리(#19 AC,
+    ADR-0009)다. 참가자마다 정확히 한 번(요청 하나당 한 번)만 보내면 되므로
+    스캔이 아니라 이 자리에서 직접 팬아웃한다 — dedup 표시가 필요 없다: 재시도가
+    아니라 새 수정이 있을 때마다 다시 알리는 것이 맞는 동작이다.
+    """
+
+    try:
+        for dev_user in _participating_developer_users(contest):
+            _safe_notify(
+                recipient=dev_user,
+                notification_type=NotificationType.CONTEST_UPDATED,
+                context={"contest_id": contest.id, "contest_title": contest.title},
+            )
+    except Exception:  # noqa: BLE001 - 알림 실패가 호출자의 응답을 막으면 안 된다.
+        logger.exception(
+            "Contest(pk=%s) 내용 변경 알림 팬아웃 중 예외 — 변경 자체는 이미 커밋됐다",
+            getattr(contest, "pk", None),
+        )
+
+
 # --- 결과 알림: Award / Distribution ----------------------------------------------
 
 

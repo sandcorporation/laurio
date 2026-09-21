@@ -63,6 +63,12 @@ def render_message(notification: Notification) -> str:
             "이의제기 기간이 시작됩니다 — codemit에서 확인하세요."
         )
 
+    if notification_type == NotificationType.CONTEST_UPDATED:
+        return (
+            f"{_BRAND_PREFIX} 참가하신 '{contest_title}' Contest의 내용이 바뀌었습니다. "
+            "codemit에서 바뀐 조건을 확인하세요."
+        )
+
     if notification_type == NotificationType.APPEAL_RULED:
         return f"{_BRAND_PREFIX} 제기하신 이의 심판이 완료됐습니다. codemit에서 결과를 확인하세요."
 

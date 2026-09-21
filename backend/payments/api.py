@@ -136,7 +136,7 @@ def initiate_payment(request: HttpRequest, payload: InitiatePaymentIn):
             .first()
         )
         if payment is not None:
-            # 방어선 두 번째 층 — 첫 번째는 contests.api.update_draft_contest가 상금을
+            # 방어선 두 번째 층 — 첫 번째는 contests.api.update_contest가 상금을
             # 바꾸는 그 순간 REQUESTED Payment를 맞춰준다. **불변식: REQUESTED Payment는
             # 그것이 속한 Contest와 다른 금액을 가질 수 없다** — 그렇지 않으면
             # Escrow(Payment.prize_amount)와 실제 Payout(Contest.prize)이 서로 다른

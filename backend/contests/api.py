@@ -57,9 +57,11 @@ from payments.models import Payment
 from policies.scope import current_policy
 from verification.models import Verification
 
+from .lifecycle_notifications import notify_contest_updated
 from .models import (
     Category,
     Contest,
+    ContestChange,
     ContestImage,
     ContestSubmission,
     DeliverableType,
@@ -777,22 +779,22 @@ def get_contest(request: HttpRequest, contest_id: int):
 
 
 @router.patch("/contests/{contest_id}", response=ContestOut, auth=jwt_auth)
-def update_draft_contest(request: HttpRequest, contest_id: int, payload: ContestUpdateIn):
-    """결제가 문을 닫기 전까지는 draft를 무엇이든 고칠 수 있다 (#113, 부모 #110).
+def update_contest(request: HttpRequest, contest_id: int, payload: ContestUpdateIn):
+    """DRAFT는 결제가 문을 닫기 전까지, PUBLISHED는 마감이 문을 닫기 전까지
+    브리프를 고칠 수 있다 (#113, 부모 #110; 제출 기간 중 편집은 #473, ADR-0051).
 
-    지금까지 Contest를 고치는 엔드포인트 자체가 없었다 — 브리프를 잘못 써도,
-    요구형태를 다시 고르고 싶어도 돌아갈 자리가 없었다. 이 엔드포인트가 첫
-    번째다. 게이트는 `_get_owned_draft_contest`가 진다 — 소유자가 아니면
-    404("있는지가 아니라 없는지"), DRAFT가 아니면 409("분명히 거절당한다").
+    게이트는 `_get_owned_content_editable_contest`가 진다 — 소유자가 아니면
+    404("있는지가 아니라 없는지"), CONTENT_EDITABLE을 벗어났으면(CLOSED 이후)
+    409("분명히 거절당한다").
 
-    **돈에 닿는 값을 바꾸면 파생값을 다시 계산한다.** 요구형태(`deliverable_
-    type_ids`)나 상금(`prize`)이 바뀌면 `required_minimum_prize`(최소 제안 상금
-    합계)와 `is_underfunded`(상금미달 배지)를 새로 구한다 — 그 값은 "개최 시점의
-    스냅샷"인데 DRAFT는 아직 개최된 것이 아니므로 다시 계산하는 것이 원래 의미에
-    맞다(결제가 그 스냅샷을 굳힌다). `required_minimum_prize`는 항상 **지금의**
-    DeliverableType.minimum_prize에서 다시 합산한다 — 운영자가 그 사이 최소
-    상금을 바꿨을 수도 있고, DRAFT는 아직 그 변경을 반영해도 되는 상태이기
-    때문이다.
+    **돈에 닿는 값(`prize`)은 PUBLISHED에서는 아예 받지 않는다.** DRAFT에서
+    바뀌면 `required_minimum_prize`(최소 제안 상금 합계)와 `is_underfunded`
+    (상금미달 배지)를 새로 구한다 — 그 값은 "개최 시점의 스냅샷"인데 DRAFT는
+    아직 개최된 것이 아니므로 다시 계산하는 것이 원래 의미에 맞다(결제가 그
+    스냅샷을 굳힌다). PUBLISHED에서는 이미 결제·Escrow가 그 금액을 확정했으므로
+    `prize`가 오면 422로 거절하고, `deliverable_type_ids`가 바뀌어도 그 스냅샷은
+    다시 계산하지 않는다(굳어진 값 그대로 둔다) — 상금·개최 조건이 이미 굳은
+    뒤에 배지 판정만 조용히 바뀌면 안 된다.
 
     **이미 붙인 Requirement는 요구형태를 바꿔도 지우지 않는다** — 자유 텍스트라
     구조적으로 무효가 되지 않고, 그것을 쓴 사람이 Sponsor 자신이다(spec #110
@@ -802,30 +804,64 @@ def update_draft_contest(request: HttpRequest, contest_id: int, payload: Contest
     **무료 공모전은 `prize`를 받지 않는다(#415, ADR-0048).** 상금·결제·Escrow가
     아예 없는 공모전이라 바꿀 대상 자체가 없다 — 화면이 이 필드를 아예 감추는
     것과 별개로(사고 예방), 여기서도 거절한다(방어).
+
+    **마감은 지금보다 뒤로만 옮길 수 있다(#473).** 이미 지난 시각으로 바꾸면
+    422다 — DRAFT든 PUBLISHED든 같다. 스캔이 다음 틱에 그 마감을 보고 곧바로
+    닫아버리는 것보다, 조작 시점에 분명히 거절하는 편이 낫다.
+
+    **`published`에서 실제로 바뀐 필드가 있으면 `ContestChange`를 남기고 이미
+    제출한 참가자에게 알린다** (`_record_contest_change`) — DRAFT에서는 남기지
+    않는다(위 함수 독스트링 참고).
     """
 
-    contest = _get_owned_draft_contest(request, contest_id)
+    contest = _get_owned_content_editable_contest(request, contest_id)
+
+    if contest.status != Contest.Status.DRAFT and payload.prize is not None:
+        raise HttpError(
+            422,
+            "제출을 받는 동안에는 상금을 바꿀 수 없습니다 — 이미 결제로 확정된 금액입니다.",
+        )
 
     if contest.is_free and payload.prize is not None:
         raise HttpError(422, "무료 공모전은 상금을 설정할 수 없습니다.")
+
+    if payload.deadline_at is not None and payload.deadline_at <= Clock.now():
+        raise HttpError(422, "마감은 지금보다 뒤여야 합니다.")
+
+    before: dict = {}
+    after: dict = {}
 
     with transaction.atomic():
         if payload.title is not None:
             sanitized_title = sanitize_free_text(payload.title)
             if not sanitized_title:
                 raise HttpError(422, "제목이 비어 있습니다.")
+            if sanitized_title != contest.title:
+                before["title"] = contest.title
+                after["title"] = sanitized_title
             contest.title = sanitized_title
 
         if payload.description is not None:
-            contest.description = sanitize_free_text(payload.description)
+            sanitized_description = sanitize_free_text(payload.description)
+            if sanitized_description != contest.description:
+                before["description"] = contest.description
+                after["description"] = sanitized_description
+            contest.description = sanitized_description
 
         if payload.category_id is not None:
             try:
-                contest.category = Category.objects.get(id=payload.category_id, is_active=True)
+                category = Category.objects.get(id=payload.category_id, is_active=True)
             except Category.DoesNotExist as exc:
                 raise HttpError(422, "존재하지 않는 카테고리입니다.") from exc
+            if category.id != contest.category_id:
+                before["category_id"] = contest.category_id
+                after["category_id"] = category.id
+            contest.category = category
 
         if payload.deadline_at is not None:
+            if payload.deadline_at != contest.deadline_at:
+                before["deadline_at"] = contest.deadline_at.isoformat()
+                after["deadline_at"] = payload.deadline_at.isoformat()
             contest.deadline_at = payload.deadline_at
 
         deliverable_types_changed = False
@@ -839,14 +875,28 @@ def update_draft_contest(request: HttpRequest, contest_id: int, payload: Contest
             )
             if len(deliverable_types) != len(set(payload.deliverable_type_ids)):
                 raise HttpError(422, "존재하지 않는 산출물 종류가 포함되어 있습니다.")
+            previous_type_ids = sorted(contest.deliverable_types.values_list("id", flat=True))
+            new_type_ids = sorted(dt.id for dt in deliverable_types)
+            if previous_type_ids != new_type_ids:
+                before["deliverable_type_ids"] = previous_type_ids
+                after["deliverable_type_ids"] = new_type_ids
             contest.deliverable_types.set(deliverable_types)
             deliverable_types_changed = True
 
         if payload.prize is not None:
+            if payload.prize != contest.prize:
+                before["prize"] = contest.prize
+                after["prize"] = payload.prize
             contest.prize = payload.prize
 
-        if not contest.is_free and (deliverable_types_changed or payload.prize is not None):
-            # 무료 공모전은 상금 개념 자체가 없다(#415) — `prize`는 위에서 이미
+        if (
+            contest.status == Contest.Status.DRAFT
+            and not contest.is_free
+            and (deliverable_types_changed or payload.prize is not None)
+        ):
+            # PUBLISHED에서는 이 스냅샷을 다시 계산하지 않는다 — 위 함수
+            # 독스트링 참고(결제·Escrow가 이미 그 금액을 확정했다). 무료
+            # 공모전은 상금 개념 자체가 없다(#415) — `prize`는 위에서 이미
             # 거절했고, 요구형태가 바뀌어도 `required_minimum_prize`·
             # `is_underfunded`는 항상 0/False로 남는다(생성 때와 같은 값).
             # 지금 붙어 있는 deliverable_types를 있는 그대로 합산한다 —
@@ -865,7 +915,7 @@ def update_draft_contest(request: HttpRequest, contest_id: int, payload: Contest
 
         contest.save()
 
-        if payload.prize is not None:
+        if contest.status == Contest.Status.DRAFT and payload.prize is not None:
             # 결제가 문을 닫기 전까지는 결제 화면을 먼저 열어(POST /payments가
             # REQUESTED Payment를 만든다) 상금을 확인한 뒤에도 초안으로 돌아가
             # 다시 고칠 수 있다(#111의 "요구사항으로 돌아가기"). Escrow는
@@ -876,16 +926,20 @@ def update_draft_contest(request: HttpRequest, contest_id: int, payload: Contest
             # Payment는 그것이 속한 Contest와 다른 금액을 가질 수 없다.** PAID는
             # 이미 굳어진(그리고 Contest를 published로 넘긴) 스냅샷이라 손대지
             # 않는다 — PAID가 존재한다는 것 자체가 이 Contest가 더 이상 DRAFT가
-            # 아니라는 뜻이라 이 엔드포인트에 도달하지도 않는다
-            # (_get_owned_draft_contest가 먼저 409로 막는다).
+            # 아니라는 뜻이라 이 분기에 도달하지도 않는다(위에서 이미 prize를
+            # 거절했다).
             Payment.objects.filter(
                 contest=contest, status=Payment.Status.REQUESTED
             ).update(prize_amount=contest.prize)
 
+    if after:
+        _record_contest_change(contest, ContestChange.Action.UPDATED, before=before, after=after)
+
     contest.refresh_from_db()
-    # draft는 결제 전까지 참가할 수 없다 — annotate 대신 직접 0을 채운다
-    # (create_contest/reopen_contest와 같은 이유, _serialize_contest 참고).
-    contest.submission_count = 0
+    # DRAFT는 결제 전까지 참가할 수 없으므로 항상 0이지만, PUBLISHED는(#473)
+    # 이미 참가작이 있을 수 있다 — create_contest/reopen_contest(둘 다 방금
+    # 만든 draft라 0이 맞다)와 달리 여기서는 실제로 세야 한다.
+    contest.submission_count = contest.submissions.count()
     return _serialize_contest(contest)
 
 
@@ -1243,18 +1297,22 @@ def _get_owned_contest(request: HttpRequest, contest_id: int) -> Contest:
 
 
 def _get_owned_draft_contest(request: HttpRequest, contest_id: int) -> Contest:
-    """AI grill 대화 전송·Requirement CRUD·`update_draft_contest`(Prize·Category 편집)가
-    공통으로 쓰는 소유권·상태 게이트 — 셋 다 **공모전** 전용 표면이다.
+    """AI grill 대화 전송·이미지 CRUD가 공통으로 쓰는 소유권·상태 게이트 — 소유자라도
+    DRAFT를 벗어난 Contest는 막는다.
 
-    읽기 전용 조회(`_get_owned_contest`)와 달리 여기는 상태를 무언가 바꾸는
-    엔드포인트용이라, 소유자라도 DRAFT를 벗어난 Contest는 편집을 막는다 — 공개된
-    뒤 체크리스트가 흔들리면 제출·심사·채점이 기준으로 삼는 대상 자체가 바뀌어
-    버린다.
+    **이 문은 #473 이후에도 그대로 DRAFT뿐이다.** 브리프·요구사항은 제출을 받는
+    동안(published)에도 열렸지만(`_get_owned_content_editable_contest`), AI
+    grill과 이미지는 열지 않기로 했다 — AI grill은 "체크리스트를 처음부터 함께
+    만드는" 대화 스캐폴드라 이미 확정된 체크리스트를 직접 고치는 지금의 CRUD와
+    쓰임이 겹치고, 이미지는 공개된 뒤에도 바뀌면 마감·채점과 무관하게 화면에 이미
+    노출된 자료가 조용히 바뀌는 모양이라 이번 티켓의 근거(제출·심사·채점 기준의
+    안정성)가 곧바로 적용되지 않는다. 둘 다 넓히지 않는 편이 이 티켓의 범위를
+    "브리프 필드·요구사항 체크리스트"로 좁게 유지한다.
 
     **`Contest.Status.EDITABLE`이 아니라 `status == DRAFT`를 직접 비교한다.**
-    이 게이트가 지키는 세 엔드포인트는 Prize·Category·AI grill 대화를 다루고,
-    그 전부가 결제 전 초안에서만 말이 된다(#207 코드리뷰 회귀:
-    test_only_draft_can_be_updated_no_status_silently_passes).
+    이 게이트가 지키는 엔드포인트들이 결제 전 초안에서만 말이 되는 표면이기
+    때문이다(#207 코드리뷰 회귀: test_only_draft_can_be_updated_no_status_
+    silently_passes).
     """
 
     contest = _get_owned_contest(request, contest_id)
@@ -1263,6 +1321,55 @@ def _get_owned_draft_contest(request: HttpRequest, contest_id: int) -> Contest:
         raise HttpError(409, "공개된 공모전의 요구사항 체크리스트는 더 이상 수정할 수 없습니다.")
 
     return contest
+
+
+def _get_owned_content_editable_contest(request: HttpRequest, contest_id: int) -> Contest:
+    """`update_contest`(브리프)·Requirement CRUD가 공통으로 쓰는 소유권·상태 게이트
+    (#473, ADR-0051).
+
+    `_get_owned_draft_contest`보다 넓다 — DRAFT뿐 아니라 제출을 받는 동안
+    (PUBLISHED)에도 통과시킨다(`Contest.Status.CONTENT_EDITABLE`). 마감 뒤
+    (CLOSED·AWARDED·JUDGING_ENDED)에는 그대로 막는다 — 채점 스냅샷(`Score`)이
+    이미 그 체크리스트를 근거로 만들어졌고 그것은 append-only라(ADR-0006), 그
+    뒤에 기준이 바뀌면 이의 심판이 "무엇을 근거로 판정했는가"를 재현할 수 없다.
+    """
+
+    contest = _get_owned_contest(request, contest_id)
+
+    if not Contest.Status.CONTENT_EDITABLE(contest.status):
+        raise HttpError(
+            409,
+            "마감된 공모전은 더 이상 수정할 수 없습니다 — 채점이 이미 지금의 요구사항을 "
+            "근거로 진행되었거나 진행됩니다.",
+        )
+
+    return contest
+
+
+def _record_contest_change(
+    contest: Contest,
+    action: "ContestChange.Action",
+    *,
+    before: dict,
+    after: dict,
+) -> None:
+    """`ContestChange` 한 행을 남기고, 공개된(제출을 받는) Contest면 참가자에게도
+    알린다 (#473, ADR-0051).
+
+    **published일 때만 남긴다.** DRAFT 수정은 아직 아무도 그 조건을 보고
+    참가하지 않았으니 감사 흔적으로서의 무게가 없다 — 결제 전에는 "무엇이든
+    몇 번이든 고칠 수 있다"는 것이 이 저장소의 원래 전제(CONTEXT.md 「Contest」)이고,
+    그 경로에 이력·알림을 얹으면 소음만 늘어난다.
+    """
+
+    if contest.status != Contest.Status.PUBLISHED:
+        return
+
+    now = Clock.now()
+    ContestChange.objects.create(
+        contest=contest, action=action, before=before, after=after, changed_at=now
+    )
+    notify_contest_updated(contest)
 
 
 def _turn_out(message: RequirementChatMessage) -> RequirementChatTurnOut:
@@ -1384,9 +1491,14 @@ def list_requirement_chat_messages(request: HttpRequest, contest_id: int):
     "/contests/{contest_id}/requirements", response=RequirementOut, auth=jwt_auth
 )
 def add_requirement(request: HttpRequest, contest_id: int, payload: RequirementCreateIn):
-    """AI 제안을 그대로, 또는 Sponsor가 고쳐 쓴 문구로 체크리스트에 실제로 추가한다."""
+    """AI 제안을 그대로, 또는 Sponsor가 고쳐 쓴 문구로 체크리스트에 실제로 추가한다.
 
-    contest = _get_owned_draft_contest(request, contest_id)
+    게이트는 `_get_owned_content_editable_contest` — DRAFT뿐 아니라 제출을 받는
+    동안(PUBLISHED)에도 연다(#473, ADR-0051). PUBLISHED에서 실제로 추가되면
+    `ContestChange`를 남기고 이미 제출한 참가자에게 알린다.
+    """
+
+    contest = _get_owned_content_editable_contest(request, contest_id)
 
     if payload.grade not in _VALID_GRADES:
         raise HttpError(422, "요구사항 등급은 필수 또는 선택 중 하나여야 합니다.")
@@ -1402,6 +1514,12 @@ def add_requirement(request: HttpRequest, contest_id: int, payload: RequirementC
         grade=payload.grade,
         order=next_order,
     )
+    _record_contest_change(
+        contest,
+        ContestChange.Action.REQUIREMENT_ADDED,
+        before={},
+        after={"id": requirement.id, "text": requirement.text, "grade": requirement.grade},
+    )
     return RequirementOut(
         id=requirement.id, text=requirement.text, grade=requirement.grade, order=requirement.order
     )
@@ -1415,14 +1533,19 @@ def add_requirement(request: HttpRequest, contest_id: int, payload: RequirementC
 def update_requirement(
     request: HttpRequest, contest_id: int, requirement_id: int, payload: RequirementUpdateIn
 ):
-    """Sponsor가 AI 제안이든 기존 항목이든 문구·등급·순서를 직접 고친다."""
+    """Sponsor가 AI 제안이든 기존 항목이든 문구·등급·순서를 직접 고친다.
 
-    contest = _get_owned_draft_contest(request, contest_id)
+    게이트는 `add_requirement`와 같은 `_get_owned_content_editable_contest`
+    (#473, ADR-0051)."""
+
+    contest = _get_owned_content_editable_contest(request, contest_id)
 
     try:
         requirement = contest.requirements.get(id=requirement_id)
     except Requirement.DoesNotExist as exc:
         raise HttpError(404, "요구사항을 찾을 수 없습니다.") from exc
+
+    before = {"text": requirement.text, "grade": requirement.grade}
 
     if payload.grade is not None:
         if payload.grade not in _VALID_GRADES:
@@ -1437,6 +1560,15 @@ def update_requirement(
         requirement.order = payload.order
 
     requirement.save(update_fields=["text", "grade", "order"])
+
+    after = {"text": requirement.text, "grade": requirement.grade}
+    if after != before:
+        _record_contest_change(
+            contest,
+            ContestChange.Action.REQUIREMENT_UPDATED,
+            before={"id": requirement.id, **before},
+            after={"id": requirement.id, **after},
+        )
     return RequirementOut(
         id=requirement.id, text=requirement.text, grade=requirement.grade, order=requirement.order
     )
@@ -1444,16 +1576,23 @@ def update_requirement(
 
 @router.delete("/contests/{contest_id}/requirements/{requirement_id}", auth=jwt_auth)
 def delete_requirement(request: HttpRequest, contest_id: int, requirement_id: int):
-    """Sponsor가 AI 제안이든 기존 항목이든 체크리스트에서 뺀다."""
+    """Sponsor가 AI 제안이든 기존 항목이든 체크리스트에서 뺀다.
 
-    contest = _get_owned_draft_contest(request, contest_id)
+    게이트는 `add_requirement`와 같은 `_get_owned_content_editable_contest`
+    (#473, ADR-0051)."""
+
+    contest = _get_owned_content_editable_contest(request, contest_id)
 
     try:
         requirement = contest.requirements.get(id=requirement_id)
     except Requirement.DoesNotExist as exc:
         raise HttpError(404, "요구사항을 찾을 수 없습니다.") from exc
 
+    removed = {"id": requirement.id, "text": requirement.text, "grade": requirement.grade}
     requirement.delete()
+    _record_contest_change(
+        contest, ContestChange.Action.REQUIREMENT_REMOVED, before=removed, after={}
+    )
     return {"success": True}
 
 
@@ -1465,6 +1604,10 @@ def delete_requirement(request: HttpRequest, contest_id: int, requirement_id: in
 # assignment_api`)도 한때 같은 함수들을 자신의 게이트(`_get_owned_editable_
 # assignment`)로 불렀지만(#236) #361로 걷혔다 — 「무엇을 고칠 수 있는가」는
 # 게이트가 답하고 「어떻게 고치는가」는 이 모듈이 답한다는 경계는 그대로다.
+#
+# **#473(ADR-0051)이 브리프·요구사항을 PUBLISHED에도 열었지만 이미지는 열지
+# 않았다** — 여전히 `_get_owned_draft_contest`(DRAFT뿐)를 쓴다. 그 함수의
+# 독스트링이 이유를 적는다.
 
 
 @router.post(

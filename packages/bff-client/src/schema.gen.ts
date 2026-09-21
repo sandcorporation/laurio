@@ -1553,22 +1553,22 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * Update Draft Contest
-         * @description 결제가 문을 닫기 전까지는 draft를 무엇이든 고칠 수 있다 (#113, 부모 #110).
+         * Update Contest
+         * @description DRAFT는 결제가 문을 닫기 전까지, PUBLISHED는 마감이 문을 닫기 전까지
+         *     브리프를 고칠 수 있다 (#113, 부모 #110; 제출 기간 중 편집은 #473, ADR-0051).
          *
-         *     지금까지 Contest를 고치는 엔드포인트 자체가 없었다 — 브리프를 잘못 써도,
-         *     요구형태를 다시 고르고 싶어도 돌아갈 자리가 없었다. 이 엔드포인트가 첫
-         *     번째다. 게이트는 `_get_owned_draft_contest`가 진다 — 소유자가 아니면
-         *     404("있는지가 아니라 없는지"), DRAFT가 아니면 409("분명히 거절당한다").
+         *     게이트는 `_get_owned_content_editable_contest`가 진다 — 소유자가 아니면
+         *     404("있는지가 아니라 없는지"), CONTENT_EDITABLE을 벗어났으면(CLOSED 이후)
+         *     409("분명히 거절당한다").
          *
-         *     **돈에 닿는 값을 바꾸면 파생값을 다시 계산한다.** 요구형태(`deliverable_
-         *     type_ids`)나 상금(`prize`)이 바뀌면 `required_minimum_prize`(최소 제안 상금
-         *     합계)와 `is_underfunded`(상금미달 배지)를 새로 구한다 — 그 값은 "개최 시점의
-         *     스냅샷"인데 DRAFT는 아직 개최된 것이 아니므로 다시 계산하는 것이 원래 의미에
-         *     맞다(결제가 그 스냅샷을 굳힌다). `required_minimum_prize`는 항상 **지금의**
-         *     DeliverableType.minimum_prize에서 다시 합산한다 — 운영자가 그 사이 최소
-         *     상금을 바꿨을 수도 있고, DRAFT는 아직 그 변경을 반영해도 되는 상태이기
-         *     때문이다.
+         *     **돈에 닿는 값(`prize`)은 PUBLISHED에서는 아예 받지 않는다.** DRAFT에서
+         *     바뀌면 `required_minimum_prize`(최소 제안 상금 합계)와 `is_underfunded`
+         *     (상금미달 배지)를 새로 구한다 — 그 값은 "개최 시점의 스냅샷"인데 DRAFT는
+         *     아직 개최된 것이 아니므로 다시 계산하는 것이 원래 의미에 맞다(결제가 그
+         *     스냅샷을 굳힌다). PUBLISHED에서는 이미 결제·Escrow가 그 금액을 확정했으므로
+         *     `prize`가 오면 422로 거절하고, `deliverable_type_ids`가 바뀌어도 그 스냅샷은
+         *     다시 계산하지 않는다(굳어진 값 그대로 둔다) — 상금·개최 조건이 이미 굳은
+         *     뒤에 배지 판정만 조용히 바뀌면 안 된다.
          *
          *     **이미 붙인 Requirement는 요구형태를 바꿔도 지우지 않는다** — 자유 텍스트라
          *     구조적으로 무효가 되지 않고, 그것을 쓴 사람이 Sponsor 자신이다(spec #110
@@ -1578,8 +1578,16 @@ export interface paths {
          *     **무료 공모전은 `prize`를 받지 않는다(#415, ADR-0048).** 상금·결제·Escrow가
          *     아예 없는 공모전이라 바꿀 대상 자체가 없다 — 화면이 이 필드를 아예 감추는
          *     것과 별개로(사고 예방), 여기서도 거절한다(방어).
+         *
+         *     **마감은 지금보다 뒤로만 옮길 수 있다(#473).** 이미 지난 시각으로 바꾸면
+         *     422다 — DRAFT든 PUBLISHED든 같다. 스캔이 다음 틱에 그 마감을 보고 곧바로
+         *     닫아버리는 것보다, 조작 시점에 분명히 거절하는 편이 낫다.
+         *
+         *     **`published`에서 실제로 바뀐 필드가 있으면 `ContestChange`를 남기고 이미
+         *     제출한 참가자에게 알린다** (`_record_contest_change`) — DRAFT에서는 남기지
+         *     않는다(위 함수 독스트링 참고).
          */
-        patch: operations["contests_api_update_draft_contest"];
+        patch: operations["contests_api_update_contest"];
         trace?: never;
     };
     "/api/contests/{contest_id}/award": {
@@ -1985,6 +1993,10 @@ export interface paths {
         /**
          * Add Requirement
          * @description AI 제안을 그대로, 또는 Sponsor가 고쳐 쓴 문구로 체크리스트에 실제로 추가한다.
+         *
+         *     게이트는 `_get_owned_content_editable_contest` — DRAFT뿐 아니라 제출을 받는
+         *     동안(PUBLISHED)에도 연다(#473, ADR-0051). PUBLISHED에서 실제로 추가되면
+         *     `ContestChange`를 남기고 이미 제출한 참가자에게 알린다.
          */
         post: operations["contests_api_add_requirement"];
         delete?: never;
@@ -2006,6 +2018,9 @@ export interface paths {
         /**
          * Delete Requirement
          * @description Sponsor가 AI 제안이든 기존 항목이든 체크리스트에서 뺀다.
+         *
+         *     게이트는 `add_requirement`와 같은 `_get_owned_content_editable_contest`
+         *     (#473, ADR-0051).
          */
         delete: operations["contests_api_delete_requirement"];
         options?: never;
@@ -2013,6 +2028,9 @@ export interface paths {
         /**
          * Update Requirement
          * @description Sponsor가 AI 제안이든 기존 항목이든 문구·등급·순서를 직접 고친다.
+         *
+         *     게이트는 `add_requirement`와 같은 `_get_owned_content_editable_contest`
+         *     (#473, ADR-0051).
          */
         patch: operations["contests_api_update_requirement"];
         trace?: never;
@@ -5110,15 +5128,19 @@ export interface components {
         ContestSort: "deadline" | "prize" | "relevance";
         /**
          * ContestUpdateIn
-         * @description DRAFT Contest를 고치는 요청 (#113, 부모 #110).
+         * @description Contest 브리프를 고치는 요청 (#113, 부모 #110; 제출 기간 중 편집은 #473,
+         *     ADR-0051).
          *
          *     전부 선택 필드다 — Sponsor가 한 화면에서 한 번에 몇 개를 고치든, 건드리지
          *     않은 필드는 `None`으로 와서 그대로 둔다(부분 갱신). `deliverable_type_ids`가
          *     `None`이 아니라 빈 리스트로 오면 `create_contest`와 같은 이유로 422다 —
          *     산출물 종류를 전부 비우는 것은 유효한 개최 상태가 아니다.
          *
-         *     결제가 문을 닫기 전(DRAFT)에만 이 스키마가 쓰인다 — 게이트는
-         *     `_get_owned_draft_contest`가 진다(소유자가 아니면 404, DRAFT가 아니면 409).
+         *     DRAFT뿐 아니라 제출을 받는 동안(PUBLISHED)에도 쓰인다 — 게이트는
+         *     `_get_owned_content_editable_contest`가 진다(소유자가 아니면 404, 마감
+         *     이후(CLOSED 이후)면 409). **`prize`는 PUBLISHED에서는 받지 않는다** — 이미
+         *     결제·Escrow가 확정한 금액이라 `contests.api.update_contest`가 422로
+         *     거절한다. `deadline_at`은 지금 시각보다 뒤여야 한다(이미 지난 시각은 422).
          */
         ContestUpdateIn: {
             /** Category Id */
@@ -5888,7 +5910,7 @@ export interface components {
          *     해둔다. User Story 80~89 에 나오는 유형 중 최소 집합을 담았다.
          * @enum {string}
          */
-        NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "scoring_complete" | "appeal_ruled" | "new_contest_in_category" | "payout_awaits_you" | "classroom_token_budget_warning" | "classroom_submission_scored" | "classroom_scoring_key_rejected" | "operator_notice";
+        NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "scoring_complete" | "appeal_ruled" | "new_contest_in_category" | "payout_awaits_you" | "classroom_token_budget_warning" | "classroom_submission_scored" | "classroom_scoring_key_rejected" | "operator_notice" | "contest_updated";
         /** OpenAIKeyIn */
         OpenAIKeyIn: {
             /** Api Key */
@@ -9674,7 +9696,7 @@ export interface operations {
             };
         };
     };
-    contests_api_update_draft_contest: {
+    contests_api_update_contest: {
         parameters: {
             query?: never;
             header?: never;

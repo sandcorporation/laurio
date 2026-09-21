@@ -2,12 +2,11 @@
 
 // 공모전 초안 패널 — 오른쪽 컬럼 (FE-12, #37, design/Brief.dc.html).
 //
-// 제목·요구형태·상금은 Contest 생성 시점(POST /api/contests)에 이미 확정되어
-// 있다 — 백엔드에 Contest 필드를 고치는 엔드포인트가 없으므로 여기서는 그
-// 값들을 그대로 보여주기만 한다(REQUEST.md "관통 원칙"과 별개로, 이건 단지
-// 이 API 표면의 현재 범위다). 실제로 이 화면에서 계속 바뀌는 것은
-// Requirement 체크리스트뿐이고, 그 CRUD가 이 패널의 핵심이다 — AI는 제안하고
-// Sponsor가 최종 결정한다.
+// 제목·요구형태·상금은 왼쪽의 `BriefEditPanel`이 고친다(#113) — 이 패널은
+// 그 값들을 그대로 보여주기만 한다. 이 패널이 직접 다루는 것은 Requirement
+// 체크리스트 CRUD뿐이다 — AI는 제안하고 Sponsor가 최종 결정한다. 아래
+// 발행 자리(공개하기/결제하러 가기/제출 중 안내)만 `contest.status`로
+// 갈린다(#473, ADR-0051).
 import { useState } from "react";
 import Link from "next/link";
 
@@ -402,57 +401,79 @@ export function RequirementDraftPanel({
       </div>
 
       <div className="flex flex-col gap-2 border-t border-rule px-7 py-5">
-        <SponsorDisplayNameGate
-          displayName={contest.sponsor_display_name ?? null}
-          onSave={onSaveSponsorDisplayName}
-          saving={savingSponsorDisplayName}
-          error={sponsorDisplayNameError}
-        />
-        {contest.is_free ? (
+        {contest.status === "draft" ? (
           <>
-            <p
-              className="text-center text-xs leading-relaxed text-ink/50"
-              data-testid="grill-free-publish-notice"
-            >
-              {requirements.length === 0
-                ? "요구사항을 하나 이상 적어야 공개할 수 있습니다"
-                : !contest.sponsor_display_name
-                  ? "개최자 표시 이름을 먼저 등록해야 공개할 수 있습니다"
-                  : "본인확인·결제 없이 바로 공개됩니다"}
-            </p>
-            {publishError && (
-              <ErrorNote>
-                <span data-testid="grill-free-publish-error">{publishError}</span>
-              </ErrorNote>
+            <SponsorDisplayNameGate
+              displayName={contest.sponsor_display_name ?? null}
+              onSave={onSaveSponsorDisplayName}
+              saving={savingSponsorDisplayName}
+              error={sponsorDisplayNameError}
+            />
+            {contest.is_free ? (
+              <>
+                <p
+                  className="text-center text-xs leading-relaxed text-ink/50"
+                  data-testid="grill-free-publish-notice"
+                >
+                  {requirements.length === 0
+                    ? "요구사항을 하나 이상 적어야 공개할 수 있습니다"
+                    : !contest.sponsor_display_name
+                      ? "개최자 표시 이름을 먼저 등록해야 공개할 수 있습니다"
+                      : "본인확인·결제 없이 바로 공개됩니다"}
+                </p>
+                {publishError && (
+                  <ErrorNote>
+                    <span data-testid="grill-free-publish-error">{publishError}</span>
+                  </ErrorNote>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void onPublish?.()}
+                  disabled={
+                    publishing || !onPublish || requirements.length === 0 || !contest.sponsor_display_name
+                  }
+                  data-testid="grill-publish-free-contest"
+                  className={`mt-1 ${buttonClass("primary", "sm")}`}
+                >
+                  {publishing ? "공개하는 중..." : "공개하기"}
+                </button>
+              </>
+            ) : (
+              <>
+                <p
+                  className="text-center text-xs leading-relaxed text-ink/50"
+                  data-testid="grill-payment-required-notice"
+                >
+                  결제가 끝나야 공모전이 공개됩니다
+                </p>
+                {/* URL을 직접 쳐야만 결제로 닿는 경로가 되지 않도록(#86), 초안을 만든
+                    바로 그 자리에서 결제 화면으로 이어간다. */}
+                <Link
+                  href={`/console/contests/${contest.id}/payment`}
+                  data-testid="grill-go-to-payment"
+                  className="mt-1 block text-center text-xs font-semibold underline"
+                >
+                  결제하러 가기
+                </Link>
+              </>
             )}
-            <button
-              type="button"
-              onClick={() => void onPublish?.()}
-              disabled={
-                publishing || !onPublish || requirements.length === 0 || !contest.sponsor_display_name
-              }
-              data-testid="grill-publish-free-contest"
-              className={`mt-1 ${buttonClass("primary", "sm")}`}
-            >
-              {publishing ? "공개하는 중..." : "공개하기"}
-            </button>
           </>
         ) : (
+          // published — 제출을 받는 동안이다(#473, ADR-0051). 공개·결제
+          // 자리는 이미 지났으니 대신 공개 상세로 이어간다.
           <>
             <p
               className="text-center text-xs leading-relaxed text-ink/50"
-              data-testid="grill-payment-required-notice"
+              data-testid="grill-published-notice"
             >
-              결제가 끝나야 공모전이 공개됩니다
+              제출을 받고 있습니다 — 마감 전까지 계속 고칠 수 있습니다.
             </p>
-            {/* URL을 직접 쳐야만 결제로 닿는 경로가 되지 않도록(#86), 초안을 만든
-                바로 그 자리에서 결제 화면으로 이어간다. */}
             <Link
-              href={`/console/contests/${contest.id}/payment`}
-              data-testid="grill-go-to-payment"
+              href={`/contests/${contest.id}`}
+              data-testid="grill-view-published-contest"
               className="mt-1 block text-center text-xs font-semibold underline"
             >
-              결제하러 가기
+              공모전 보기
             </Link>
           </>
         )}

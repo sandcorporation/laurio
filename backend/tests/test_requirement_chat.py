@@ -11,8 +11,12 @@
   않고 사과 응답으로 감성한다.
 - Sponsor가 입력한 텍스트는 신뢰할 수 없는 입력이다 — scoring이 이미 만든
   프롬프트 인젝션 방어(core.prompt_safety)를 그대로 재사용한다.
-- 체크리스트 편집은 Contest가 DRAFT일 때만 허용된다 — 공개된 뒤에는 흔들리면
-  안 된다. 타인의 Contest는 draft든 아니든 404로 존재 자체를 숨긴다.
+- **AI grill 대화**(새 턴 보내기)는 Contest가 DRAFT일 때만 허용된다 — 공개된
+  뒤에는 대화로 처음부터 체크리스트를 만드는 것이 더 이상 말이 되지 않는다.
+  **요구사항 체크리스트 CRUD 자체**는 다른 문이다 — 제출을 받는 동안
+  (published)에도 열려 있다(#473, ADR-0051, test_contest_content_edit_while_
+  published.py가 그 변경 이력·알림을 다룬다). 마감 뒤(closed 이후)에는 둘 다
+  막는다. 타인의 Contest는 어떤 상태든 404로 존재 자체를 숨긴다.
 """
 
 from __future__ import annotations
@@ -302,12 +306,46 @@ def test_edit_nonexistent_requirement_on_own_contest_returns_404(client, draft_c
 
 
 @pytest.mark.django_db
-def test_requirement_crud_rejected_after_contest_published(client, draft_contest):
+def test_requirement_crud_allowed_while_published(client, draft_contest):
+    """제출을 받는 동안(published)에는 요구사항 CRUD가 그대로 열린다 (#473,
+    ADR-0051) — AI grill 대화 전송(위 test_chat_on_published_contest_is_
+    rejected_with_409_not_500)과 다른 문이다."""
     sponsor, contest = draft_contest
     requirement = Requirement.objects.create(
         contest_id=contest["id"], text="기존 항목", grade="required", order=0
     )
     Contest.objects.filter(id=contest["id"]).update(status=Contest.Status.PUBLISHED)
+
+    add_resp = client.post(
+        _requirements_url(contest["id"]),
+        data={"text": "새 항목", "grade": "required"},
+        content_type="application/json",
+        **_auth_header(sponsor["access"]),
+    )
+    edit_resp = client.patch(
+        _requirements_url(contest["id"], requirement.id),
+        data={"text": "바뀐 항목"},
+        content_type="application/json",
+        **_auth_header(sponsor["access"]),
+    )
+    delete_resp = client.delete(
+        _requirements_url(contest["id"], requirement.id), **_auth_header(sponsor["access"])
+    )
+
+    assert add_resp.status_code == 200
+    assert edit_resp.status_code == 200
+    assert delete_resp.status_code == 200
+
+
+@pytest.mark.django_db
+def test_requirement_crud_rejected_after_contest_closed(client, draft_contest):
+    """마감 뒤(#473 범위 밖 — closed 이후)에는 그대로 막는다 — 채점 스냅샷이
+    이미 그 체크리스트를 근거로 만들어졌다(ADR-0006)."""
+    sponsor, contest = draft_contest
+    requirement = Requirement.objects.create(
+        contest_id=contest["id"], text="기존 항목", grade="required", order=0
+    )
+    Contest.objects.filter(id=contest["id"]).update(status=Contest.Status.CLOSED)
 
     add_resp = client.post(
         _requirements_url(contest["id"]),

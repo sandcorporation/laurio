@@ -40,6 +40,7 @@ def test_contest_status_sets_are_the_ones_the_call_sites_used_to_spell_out():
     assert S.REFUNDABLE.statuses == {S.CLOSED, S.JUDGING_ENDED}
     assert S.REOPENABLE.statuses == {S.CLOSED, S.JUDGING_ENDED}
     assert S.EDITABLE.statuses == {S.DRAFT}
+    assert S.CONTENT_EDITABLE.statuses == {S.DRAFT, S.PUBLISHED}
     assert S.PAYABLE.statuses == {S.DRAFT}
     assert S.BLOCKS_SPONSOR_WITHDRAWAL.statuses == {S.PUBLISHED, S.CLOSED}
     assert S.HAS_AWARD.statuses == {S.AWARDED}

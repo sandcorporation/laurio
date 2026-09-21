@@ -303,15 +303,19 @@ class FreeContestCreateIn(Schema):
 
 
 class ContestUpdateIn(Schema):
-    """DRAFT Contest를 고치는 요청 (#113, 부모 #110).
+    """Contest 브리프를 고치는 요청 (#113, 부모 #110; 제출 기간 중 편집은 #473,
+    ADR-0051).
 
     전부 선택 필드다 — Sponsor가 한 화면에서 한 번에 몇 개를 고치든, 건드리지
     않은 필드는 `None`으로 와서 그대로 둔다(부분 갱신). `deliverable_type_ids`가
     `None`이 아니라 빈 리스트로 오면 `create_contest`와 같은 이유로 422다 —
     산출물 종류를 전부 비우는 것은 유효한 개최 상태가 아니다.
 
-    결제가 문을 닫기 전(DRAFT)에만 이 스키마가 쓰인다 — 게이트는
-    `_get_owned_draft_contest`가 진다(소유자가 아니면 404, DRAFT가 아니면 409).
+    DRAFT뿐 아니라 제출을 받는 동안(PUBLISHED)에도 쓰인다 — 게이트는
+    `_get_owned_content_editable_contest`가 진다(소유자가 아니면 404, 마감
+    이후(CLOSED 이후)면 409). **`prize`는 PUBLISHED에서는 받지 않는다** — 이미
+    결제·Escrow가 확정한 금액이라 `contests.api.update_contest`가 422로
+    거절한다. `deadline_at`은 지금 시각보다 뒤여야 한다(이미 지난 시각은 422).
     """
 
     title: str | None = Field(default=None, max_length=200)
