@@ -465,7 +465,9 @@ export interface paths {
          *     내보내진 참여자와 보관된 클래스는 `create_classroom_submission`과 같은
          *     이유로 403이다 — 화면이 이미 그 사실을 알려준 뒤라 존재를 숨길 필요가
          *     없다. 검증 규칙(빈 이름·100자 초과)은 가입 때와 같은
-         *     `ClassMemberDisplayName`을 그대로 쓴다.
+         *     `ClassMemberDisplayName`을 그대로 쓴다. 금칙어 검사(spec #474, #475)도
+         *     가입 때와 같다 — 가입할 때만 막으면 그 뒤에 사칭 이름으로 바꾸면
+         *     그만이기 때문이다.
          */
         patch: operations["classroom_api_rename_myself"];
         trace?: never;
