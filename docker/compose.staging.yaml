@@ -65,6 +65,19 @@
 # (ADR-0046 결과, "신호는 진실의 출처가 아니다").
 name: codemit-staging
 
+# **컨테이너 로그를 무제한으로 쌓지 않는다**(2026-09-21). 도커 기본 json-file 은 크기
+# 제한이 없어 오래 떠 있는 컨테이너 하나가 호스트 디스크를 먹는다 — sub 에는 이 저장소
+# 밖의 컨테이너 로그가 319M·106M 쌓여 있었고, 디스크가 차면 DB·빌드·배포가 한꺼번에
+# 멈춘다. 컨테이너당 20MB × 5개(최대 100MB)만 남긴다. 호스트 daemon.json 에도 같은
+# 기본값을 써 두었지만 그것은 데몬이 다시 떠야 읽히므로(두 호스트 모두 live-restore
+# 가 꺼져 있어 재시작이 곧 전 컨테이너 재시작이다), 우리 서비스는 여기서 직접 건다 —
+# 다음 배포의 컨테이너 교체부터 적용된다.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 x-backend-env: &backend-env
   # --- 배포 타깃(config/settings.py의 IS_DEPLOYED_ENVIRONMENT/IS_PRODUCTION_DEPLOYMENT
   # 가드가 이 값을 본다) ---
@@ -277,6 +290,7 @@ x-backend-env: &backend-env
 
 services:
   db:
+    logging: *default-logging
     image: postgres:17-alpine
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?staging POSTGRES_DB 를 .env.staging 에 설정하라}
@@ -297,6 +311,7 @@ services:
     restart: unless-stopped
 
   redis: # Celery 브로커 + 결과 백엔드(ADR-0003). beat/worker 전용 — 호스트에 공개하지 않는다.
+    logging: *default-logging
     image: redis:7-alpine
     # AOF 는 기본으로 꺼져 있다. 세션을 여기 얹었으므로(#43) 켜지 않으면 RDB
     # 스냅샷 창 안의 재시작이 조사 중인 운영자를 전부 튕긴다 — dev 와 같은 이유다.
@@ -320,6 +335,7 @@ services:
   # 백업하지 않는다 — `db-backups/`처럼 오브젝트 스토리지에 올리는 코드가
   # 없다.
   search:
+    logging: *default-logging
     image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-search:${CODEMIT_IMAGE_TAG:-local}-amd64
     build:
       context: ..
@@ -357,6 +373,7 @@ services:
   # 직접 가리키던 이전 상태로 즉시 돌아간다 — 이 서비스 자체를 지울 필요는
   # 없다. **호스트 포트를 내지 않는다** — search 와 같은 원칙, 내부망 전용.
   pgbouncer:
+    logging: *default-logging
     image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-pgbouncer:${CODEMIT_IMAGE_TAG:-local}-amd64
     build:
       context: ..
@@ -378,6 +395,7 @@ services:
       retries: 20
 
   backend:
+    logging: *default-logging
     # **이미지는 CI 가 굽고 여기서는 받기만 한다**(2026-09-17). amd64 태그는 이 호스트의
     # 아키텍처다 — staging(sub)은 amd64, prod(oracle)는 arm64. backend·celery-worker·
     # celery-beat·events 넷이 **같은 이미지 이름**을 쓴다 — 예전에는 공유 태그가 없어
@@ -408,6 +426,7 @@ services:
              gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3"
 
   celery-worker:
+    logging: *default-logging
     image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-backend:${CODEMIT_IMAGE_TAG:-local}-amd64
     build:
       context: ..
@@ -428,6 +447,7 @@ services:
     command: celery -A config worker --loglevel info
 
   celery-beat:
+    logging: *default-logging
     image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-backend:${CODEMIT_IMAGE_TAG:-local}-amd64
     build:
       context: ..
@@ -458,6 +478,7 @@ services:
   # worker·beat가 스캔용 어댑터를 안 쓰면서도 같은 환경을 받는 것과 같은
   # 이유). `migrate`는 여기서 부르지 않는다 — backend가 이미 부른다(같은 DB).
   events:
+    logging: *default-logging
     image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-backend:${CODEMIT_IMAGE_TAG:-local}-amd64
     build:
       context: ..
@@ -500,6 +521,7 @@ services:
   # 죽인다 — restart: unless-stopped라도 값이 안 채워지면 재시작을 반복할 뿐 절대
   # 뜨지 않는다(의도된 동작).
   frontend:
+    logging: *default-logging
     # `-staging` — NEXT_PUBLIC_* 가 빌드 때 굳으므로 앱 이미지는 환경마다 따로다.
     # CI 가 저장소 변수 STAGING_* 로 굽는다(아래 build args 는 비상용 로컬 빌드용).
     image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-frontend:${CODEMIT_IMAGE_TAG:-local}-staging
@@ -632,6 +654,7 @@ services:
   # compose 수준의 방어다. e2e(frontend/e2e/operator/proxy.spec.ts)가 런타임에서
   # 같은 사실을 한 번 더 증명한다.
   operator:
+    logging: *default-logging
     image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-operator:${CODEMIT_IMAGE_TAG:-local}-staging
     build:
       context: ..
@@ -679,6 +702,7 @@ services:
   # CODEMIT_CLASSROOM_ORIGIN·CODEMIT_API_BASE_URL·CODEMIT_SESSION_COOKIE_DOMAIN이
   # 비어 있으면 이 컨테이너를 그 자리에서 죽인다.
   classroom:
+    logging: *default-logging
     image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-classroom:${CODEMIT_IMAGE_TAG:-local}-staging
     build:
       context: ..

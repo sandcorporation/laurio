@@ -546,6 +546,38 @@ pg_restore --clean --if-exists --no-owner -h <host> -U codemit -d codemit codemi
 cd backend && uv run python manage.py create_operator <아이디> --superuser
 ```
 
+**살아 있는지는 oracle 의 Prometheus 가 본다**(2026-09-21). 그 전에는 **prod 가 죽어도
+아무도 몰랐다** — GlitchTip 은 오류가 **도착해야** 아는 장치라 프로세스가 죽거나 디스크가
+차서 응답을 못 하면 조용하다. 감시 스택은 **이 저장소 밖**이다: oracle 의
+`/server/prometheus`(별도 compose — Prometheus 30일·Grafana·node-exporter·cadvisor, sub2 같은
+다른 호스트도 같이 보는 공용 스택)에 사람이 손으로 둔다. Jenkins·GlitchTip 과 같은 취급이다.
+
+- **무엇을 보나**: blackbox 프로브 6개(prod·staging × 공개 앱 `/contests`·강의실 `/login`·
+  운영자 앱) — `/contests` 는 서버 렌더링이 백엔드를 불러야 200 이라 **백엔드·DB 생존까지**
+  본다. 호스트 지표는 세 호스트(oracle·sub·sub2)의 node-exporter, 컨테이너 재시작은 oracle
+  의 cadvisor(**prod 만** — sub 는 CI 러너와 배포가 컨테이너를 늘 만들고 지워 재시작이
+  정상이다).
+- **언제 울리나**(`prometheus/alerts.yml`, 7개): 응답 없음 2분 · sub 호스트 다운 2분 ·
+  루트 디스크 85%(경고)/95%(위험) · 가용 메모리 10% 미만 5분 · 스왑 90% 이상 · prod 컨테이너
+  15분에 3회 재시작. prod 는 `critical`, staging 은 `warning` 이다.
+- **어디로**: Alertmanager 가 **빌드 알림과 같은 Discord 채널**로 보낸다(채널을 늘리면 안
+  보는 채널이 생긴다). 웹훅은 `alertmanager/discord_webhook`(chmod 600)에만 있고 설정
+  파일에는 없다 — 바꾸려면 그 파일 한 줄을 고친다(재시작 불필요, 보낼 때마다 읽는다).
+- **감시자가 prod 위에 있다는 사각지대**는 GlitchTip(sub) 의 uptime 모니터가 교차로 본다 —
+  oracle 이 통째로 죽으면 Prometheus 도 같이 죽기 때문이다. 반대로 sub 가 죽으면 위
+  `HostDown` 이 잡는다. 서로가 서로를 본다.
+- **닿는지 확인하는 법**: Alertmanager 에 시험 경보를 넣는다(`POST /api/v2/alerts`, 3분 뒤
+  해소 메시지가 한 번 더 온다). 2026-09-21 에 그렇게 확인했다 — 발송 1·실패 0.
+
+**컨테이너 로그는 무제한으로 쌓이지 않는다**(2026-09-21). 도커 기본 json-file 은 크기
+제한이 없어 sub 에는 이 저장소 밖의 컨테이너 로그가 319M·106M 쌓여 있었다. 두 배포
+compose 의 서비스 11개 전부에 `x-logging`(20MB × 5개)을 걸었다 — **다음 배포의 컨테이너
+교체부터** 적용된다. 두 호스트의 `/etc/docker/daemon.json` 에도 같은 기본값을 써 두었지만
+**데몬이 다시 떠야 읽힌다** — 두 호스트 모두 `live-restore` 가 꺼져 있어 데몬 재시작이 곧
+전 컨테이너 재시작이라 일부러 하지 않았다(다음 재부팅·도커 업그레이드 때 적용된다).
+**배포하면 이전 컨테이너의 로그가 함께 사라진다는 점은 그대로다** — 컨테이너를 바꿔 끼우면
+그 로그 파일도 지워진다.
+
 **오류는 자체 GlitchTip 으로 모인다**(2026-09-16). 예전에는 백엔드 로그가 컨테이너
 stdout 에만 남고 세 앱에는 오류를 받을 자리조차 없어(`error.tsx` 도 없었다), 배포된
 5xx 가 아무도 모르는 채로 며칠 났다. 지금은 Sentry SDK 로 보내는데 받는 쪽이

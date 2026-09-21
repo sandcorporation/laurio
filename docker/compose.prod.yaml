@@ -65,6 +65,19 @@
 # 없어도 다른 기능은 모두 그대로 동작하고 강의실 화면만 폴링으로 물러난다.
 name: codemit-prod
 
+# **컨테이너 로그를 무제한으로 쌓지 않는다**(2026-09-21). 도커 기본 json-file 은 크기
+# 제한이 없어 오래 떠 있는 컨테이너 하나가 호스트 디스크를 먹는다 — sub 에는 이 저장소
+# 밖의 컨테이너 로그가 319M·106M 쌓여 있었고, 디스크가 차면 DB·빌드·배포가 한꺼번에
+# 멈춘다. 컨테이너당 20MB × 5개(최대 100MB)만 남긴다. 호스트 daemon.json 에도 같은
+# 기본값을 써 두었지만 그것은 데몬이 다시 떠야 읽히므로(두 호스트 모두 live-restore
+# 가 꺼져 있어 재시작이 곧 전 컨테이너 재시작이다), 우리 서비스는 여기서 직접 건다 —
+# 다음 배포의 컨테이너 교체부터 적용된다.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 x-backend-env: &backend-env
   # --- 배포 타깃 ---
   # config/settings.py: production은 IS_DEPLOYED_ENVIRONMENT(fake 어댑터 금지)에
@@ -260,6 +273,7 @@ x-backend-env: &backend-env
 
 services:
   db:
+    logging: *default-logging
     image: postgres:17-alpine
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?prod POSTGRES_DB 를 .env.prod 에 설정하라}
@@ -278,6 +292,7 @@ services:
     restart: unless-stopped
 
   redis: # Celery 브로커 + 결과 백엔드(ADR-0003). beat/worker 전용 — 호스트에 공개하지 않는다.
+    logging: *default-logging
     image: redis:7-alpine
     # AOF 는 기본으로 꺼져 있다. 세션을 여기 얹었으므로(#43) 켜지 않으면 RDB
     # 스냅샷 창 안의 재시작이 조사 중인 운영자를 전부 튕긴다 — dev 와 같은 이유다.
@@ -296,6 +311,7 @@ services:
   # 태그(이 호스트=oracle의 아키텍처), 단일 노드·JVM 힙 1GB·컨테이너 메모리
   # 한도 2GB, 보안 플러그인 끔, 호스트 포트를 내지 않는다.
   search:
+    logging: *default-logging
     image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-search:${CODEMIT_IMAGE_TAG:-local}-arm64
     build:
       context: ..
@@ -331,6 +347,7 @@ services:
   # — search와 반대로 이 서비스가 죽으면 그 넷은 애초에 뜨지 못한다(그 넷의
   # depends_on이 `service_healthy`로 기다린다, search는 `service_started`뿐이다).
   pgbouncer:
+    logging: *default-logging
     image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-pgbouncer:${CODEMIT_IMAGE_TAG:-local}-arm64
     build:
       context: ..
@@ -352,6 +369,7 @@ services:
       retries: 20
 
   backend:
+    logging: *default-logging
     # **이미지는 CI 가 굽고 여기서는 받기만 한다**(2026-09-17). arm64 태그는 이 호스트의
     # 아키텍처다 — staging(sub)은 amd64, prod(oracle)는 arm64. backend·celery-worker·
     # celery-beat·events 넷이 **같은 이미지 이름**을 쓴다 — 예전에는 공유 태그가 없어
@@ -386,6 +404,7 @@ services:
              gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 4"
 
   celery-worker:
+    logging: *default-logging
     image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-backend:${CODEMIT_IMAGE_TAG:-local}-arm64
     build:
       context: ..
@@ -404,6 +423,7 @@ services:
     command: celery -A config worker --loglevel info
 
   celery-beat:
+    logging: *default-logging
     image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-backend:${CODEMIT_IMAGE_TAG:-local}-arm64
     build:
       context: ..
@@ -428,6 +448,7 @@ services:
   # 앞에 설 이유가 없으므로 ports: 를 열지 않는다(호스트에도, 127.0.0.1
   # 에도 publish하지 않는다 — compose 네트워크 안에서만 닿는다).
   events:
+    logging: *default-logging
     image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-backend:${CODEMIT_IMAGE_TAG:-local}-arm64
     build:
       context: ..
@@ -469,6 +490,7 @@ services:
   # 비어 있으면 이 컨테이너를 그 자리에서 죽인다 — restart: unless-stopped라도
   # 값이 안 채워지면 재시작을 반복할 뿐 절대 뜨지 않는다(의도된 동작).
   frontend:
+    logging: *default-logging
     # `-prod` — NEXT_PUBLIC_* 가 빌드 때 굳으므로 앱 이미지는 환경마다 따로다.
     # CI 가 저장소 변수 PROD_* 로 굽는다(아래 build args 는 비상용 로컬 빌드용).
     image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-frontend:${CODEMIT_IMAGE_TAG:-local}-prod
@@ -572,6 +594,7 @@ services:
   # 구조적으로 불가능하다. 이 티켓의 핵심 위험(오리진 정합성)에 대한 compose
   # 수준의 방어다.
   operator:
+    logging: *default-logging
     image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-operator:${CODEMIT_IMAGE_TAG:-local}-prod
     build:
       context: ..
@@ -613,6 +636,7 @@ services:
   # frontend·operator 서비스와 같은 산출물 모양이고 같은 부팅 가드 원칙을
   # 따른다(classroom/instrumentation.ts).
   classroom:
+    logging: *default-logging
     image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-classroom:${CODEMIT_IMAGE_TAG:-local}-prod
     build:
       context: ..
