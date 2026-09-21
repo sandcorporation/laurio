@@ -62,6 +62,12 @@ ignore_startup_parameters = extra_float_digits
 ; 주석 참고).
 server_reset_query = DISCARD ALL
 server_reset_query_always = 1
+; 연결·끊김을 한 줄씩 찍지 않는다(2026-09-21). 트랜잭션 모드에서는 요청마다 짧은
+; 연결이 드나들어, prod 로그를 Loki 로 모으자마자 이 풀러가 **시간당 492줄**로 전체의
+; 절반 가까이를 차지한 것이 보였다 — 그중 진단에 쓰인 줄은 없었다. 연결 문제는
+; 분당 한 줄씩 나오는 stats 줄(대기 클라이언트·평균 대기 시간)이 그대로 보여준다.
+log_connections = 0
+log_disconnections = 0
 INI
 
 exec pgbouncer "$CONFIG_DIR/pgbouncer.ini"

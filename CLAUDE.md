@@ -583,6 +583,43 @@ compose 의 서비스 11개 전부에 `x-logging`(20MB × 5개)을 걸었다 —
 `service`·`env`). **staging 은 모으지 않는다** — sub 는 CI 러너와 배포가 컨테이너를 늘 만들고
 지워 거기서는 `docker logs` 로 본다(그래서 staging 은 여전히 배포하면 이전 로그가 사라진다).
 
+**배포 환경의 백엔드 로그는 한 줄 JSON 이고, 요청마다 id 가 붙는다**(2026-09-21).
+`config/settings.py` 의 LOGGING 이 배포 여부(`IS_DEPLOYED_ENVIRONMENT`)로 포매터를 고른다 —
+staging·prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`message`·
+`request_id`, 예외는 같은 줄의 `exc`), dev 는 지금처럼 사람이 읽는 한 줄 포맷이다. Loki 에서는
+`{service="backend"} | json | request_id="…"` 로 한 요청의 줄만 뽑는다.
+
+- **요청 id 는 세 곳에 같은 값이다**(`core/request_id.py`): 그 요청 동안의 **모든 로그 레코드**
+  (필터가 아니라 레코드 팩토리가 붙여 어느 핸들러로 가든 빠지지 않는다), **GlitchTip 태그**
+  `request_id`, **응답 헤더** `X-Request-ID`. 그래서 GlitchTip 오류 하나에서 태그 값을 복사해
+  Loki 로 그 요청의 앞뒤 로그를 찾는다. 앞단이 모양이 맞는 `X-Request-ID`(영숫자·`._-`, 64자
+  이하)를 주면 그대로 잇고, 아니면 새로 만든다 — 모양만 막아 로그 주입을 끊는다.
+- **id 는 요청이 완전히 끝날 때(`request_finished`) 지운다** — 미들웨어가 돌아올 때 지우면,
+  Django 가 4xx·5xx 경고(`django.request` 의 「Not Found」 등)를 **체인이 끝난 뒤에** 찍기
+  때문에 사후 진단에서 제일 먼저 찾는 그 줄이 id 없이 나간다(실제로 테스트가 그렇게 잡았다).
+
+**prod 백엔드의 요청량·지연·상태코드는 `/metrics` 로 나간다**(2026-09-21, `core/metrics.py`).
+**대시보드용**이다 — 경보는 걸지 않는다(5xx 는 GlitchTip 이 이미 울린다).
+
+- **내부 이름으로 온 요청에만 답한다** — Host 가 `INTERNAL_SERVICE_HOSTS`(`backend`·`events`)가
+  아니면 404(존재를 알려주지 않는다). 공개 프록시는 공개 도메인을 Host 로 넘기고, 세 앱의 BFF
+  허용목록에 이 경로가 없고, 백엔드 포트는 호스트 127.0.0.1 에만 열려 있다 — 세 겹 중 이
+  파일이 마지막 하나를 지킨다. 감시 스택은 compose 네트워크 안에서 `backend:8000` 으로 긁는다.
+- **gunicorn 워커 넷을 합산한다** — prod compose 가 backend 에만 `PROMETHEUS_MULTIPROC_DIR`
+  를 주고 뜰 때마다 비우며, 죽은 워커 정리는 `config/gunicorn.conf.py` 의 `child_exit` 가
+  한다(워커가 각자 카운터를 들면 긁을 때마다 무작위 워커 하나의 값이 와서 튄다). 워커 넷에
+  40번 보낸 뒤 긁으면 세 번 모두 같은 합계가 나오는 것을 실측으로 확인했다. staging 은 긁지
+  않으므로 그 설정이 없다.
+- **라벨은 URL 패턴이다, 실제 경로가 아니다** — `resolver_match.route`(`api/contests/
+  <int:contest_id>` 꼴)로 세고 맞지 않은 요청은 `unmatched` 하나로 모은다. 실제 경로를 쓰면
+  공모전 수만큼 시계열이 생긴다.
+
+**로그 소음 둘을 걷었다**(2026-09-21, Loki 로 처음 보였다). pgbouncer 가 트랜잭션 모드에서
+연결·끊김마다 한 줄씩 **시간당 492줄**(prod 전체의 절반 가까이)을 찍어 `log_connections`·
+`log_disconnections` 를 껐다(분당 stats 줄은 남긴다). 그리고 모을 정적 파일이 없어 `STATIC_ROOT`
+가 만들어지지 않자 WhiteNoise 가 프로세스마다 `No directory at` 경고를 찍어, settings 가 빈
+디렉터리를 만든다.
+
 **오류는 자체 GlitchTip 으로 모인다**(2026-09-16). 예전에는 백엔드 로그가 컨테이너
 stdout 에만 남고 세 앱에는 오류를 받을 자리조차 없어(`error.tsx` 도 없었다), 배포된
 5xx 가 아무도 모르는 채로 며칠 났다. 지금은 Sentry SDK 로 보내는데 받는 쪽이
@@ -853,7 +890,7 @@ cd backend && CODEMIT_DB_PORT=55432 uv run python manage.py prune_e2e_junk
 `global-setup.ts` 의 순서가 그래서 그 순서다.
 
 **스위트는 기본으로 병렬 실행된다**(#104). `pyproject.toml` 의 `addopts` 가 `-n auto` 를
-준다 — 실측(이 머신, 당시 1192건 — 지금 2469건 통과·1건 skip(사용자가 적는 이름·제목·본문의 금칙어를 막은 #475~#480 까지, 2026-09-21). Assignment 가 #205~#212 로
+준다 — 실측(이 머신, 당시 1192건 — 지금 2482건 통과·1건 skip(요청 id·배포 JSON 로그·prod 지표를 더한 로깅·모니터링 4단계까지, 2026-09-21). Assignment 가 #205~#212 로
 1312건에서 1377건까지, staging 검증이 낳은 #214~#217 로 1388건까지, 저장소만으로
 제출하고 채점 시점에 박제하는 #218~#220 으로 1407건까지, 채점 상한과 화면 열한 개
 (#213·#221~#231)로 1463건까지, 종류 게이트(#232)로 1467건까지, 공모전 이미지

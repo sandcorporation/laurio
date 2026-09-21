@@ -5,7 +5,7 @@
 Django + django-ninja. 하나의 `NinjaAPI` 에 라우터를 붙여 `/api` 아래로 낸다
 (`backend/config/api.py`). **HTTP 가 유일한 시임이다** — 테스트도 이 스택을 통과해 들어온다.
 
-## 표면이 넷이다
+## 표면이 다섯이다
 
 경로 접두어가 곧 「누가 부르는가」다. 인증 방식도, 실패했을 때 무엇이 막히는지도 다르다.
 
@@ -15,6 +15,7 @@ Django + django-ninja. 하나의 `NinjaAPI` 에 라우터를 붙여 `/api` 아�
 | 운영자 | `/api/operator/…` | 운영자 앱 | Django 세션 쿠키 + Origin 검증 미들웨어 |
 | 내부 | `/api/internal/…` | Celery beat·운영자의 수동 tick | `X-Internal-Token` |
 | 스토리지 | `/api/storage/…` | 브라우저(업로드·다운로드 URL 발급) | JWT |
+| 지표 | `/metrics` | oracle 의 감시 스택(Prometheus, compose 네트워크 안에서 `backend:8000`) | 없음 — Host 가 내부 서비스 이름일 때만 답하고 나머지는 404 |
 
 **운영자 표면은 기본 거부다.** 라우터 자체가 거부로 시작하고 Origin 검증이 경로 접두어로
 걸린다. 그 오리진이 어긋나면 로그인을 포함한 모든 운영자 변경 요청이 조용히 403 이 된다 —

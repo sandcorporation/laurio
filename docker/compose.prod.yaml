@@ -389,7 +389,9 @@ services:
       # backend는 떠야 한다(DB 검색으로 물러난다).
       search:
         condition: service_started
-    environment: *backend-env
+    environment:
+      <<: *backend-env
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus-multiproc
     ports:
       # 코디네이터 리뷰 지적: 0.0.0.0으로 publish하면 SECURE_PROXY_SSL_HEADER가
       # 신뢰하는 X-Forwarded-Proto를 인터넷 아무나 위조해 SSL 리다이렉트를 우회하고
@@ -398,10 +400,14 @@ services:
       # 수 있게 막는다. 그 프록시가 없는 상태로 이 스택만 올리면 backend는 호스트
       # 자신에서만 curl로 확인할 수 있다 — 이게 의도된 동작이다.
       - "127.0.0.1:${CODEMIT_API_PORT:-8000}:8000"
+    # 워커 넷의 지표를 합산하려고 prometheus_client 의 다중 프로세스 모드를 쓴다
+    # (2026-09-21, core/metrics.py) — 디렉터리는 뜰 때마다 비운다(이전 기동의 죽은 워커
+    # 파일이 남으면 합산이 오염된다). 죽은 워커 정리는 config/gunicorn.conf.py 가 한다.
     command: >
-      sh -c "python manage.py migrate --noinput &&
+      sh -c "rm -rf \"$$PROMETHEUS_MULTIPROC_DIR\" && mkdir -p \"$$PROMETHEUS_MULTIPROC_DIR\" &&
+             python manage.py migrate --noinput &&
              python manage.py collectstatic --noinput &&
-             gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 4"
+             gunicorn -c config/gunicorn.conf.py config.wsgi:application --bind 0.0.0.0:8000 --workers 4"
 
   celery-worker:
     logging: *default-logging

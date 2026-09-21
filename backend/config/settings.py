@@ -173,6 +173,12 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    # 요청 id(2026-09-21, core/request_id.py) — 가장 바깥이어야 체인 중간에서 나간 응답에도
+    # 헤더가 붙고, 그 사이의 모든 로그가 같은 id 를 갖는다.
+    "core.request_id.RequestIdMiddleware",
+    # 요청량·지연·상태코드(core/metrics.py) — 바깥쪽에 두어야 체인 전체가 걸린 시간과
+    # 체인 중간에서 결정된 최종 상태코드를 잰다.
+    "core.metrics.MetricsMiddleware",
     # 가장 바깥쪽에 둔다 — CommonMiddleware의 APPEND_SLASH 301, CsrfViewMiddleware의
     # 403 등 체인 중간에서 반환되는 응답도 이 미들웨어를 반드시 한 번 더 거쳐 나가므로
     # CSP 헤더가 모든 응답에 실제로 붙는다(ADR-0012 — 세 보완책 중 하나라도 빠지면
@@ -544,6 +550,14 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+# **빈 디렉터리라도 있게 한다**(2026-09-21). admin 을 내린 뒤(#46) 이 백엔드에는 모을 정적
+# 파일이 없어 `collectstatic` 이 이 디렉터리를 만들지 않는다 — 그러면 WhiteNoise 가
+# 프로세스가 뜰 때마다 `No directory at: …/staticfiles/` 경고를 찍었다(prod 에서 gunicorn
+# 워커 넷·events 하나, Loki 로 처음 보였다). 쓸 수 없는 파일시스템이면 경고를 그대로 둔다.
+try:
+    STATIC_ROOT.mkdir(parents=True, exist_ok=True)
+except OSError:
+    pass
 # whitenoise가 collectstatic 산출물을 직접 서빙한다(위 MIDDLEWARE 참고). Manifest
 # 변형(WhiteNoiseStorage/CompressedManifestStaticFilesStorage)은 collectstatic이
 # 돌지 않은 dev에서 매니페스트 조회 실패로 {% static %}이 예외를 던질 수 있어
@@ -636,9 +650,15 @@ LOGGING = {
     "disable_existing_loggers": False,
     "formatters": {
         "standard": {"format": "[{asctime}] {levelname} {name}: {message}", "style": "{"},
+        # 배포 환경은 한 줄 JSON(2026-09-21, core/json_logging.py) — prod 로그를 모으는
+        # Loki 가 필드로 거를 수 있게 한다. dev 는 사람이 읽는 위 포맷 그대로다.
+        "json": {"()": "core.json_logging.JsonFormatter"},
     },
     "handlers": {
-        "console": {"class": "logging.StreamHandler", "formatter": "standard"},
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "json" if IS_DEPLOYED_ENVIRONMENT else "standard",
+        },
     },
     "root": {"handlers": ["console"], "level": "INFO"},
     "loggers": {

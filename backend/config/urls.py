@@ -8,7 +8,10 @@
 from django.urls import path
 
 from config.api import api
+from core.metrics import metrics_view
 
 urlpatterns = [
     path("api/", api.urls),
+    # 감시 스택이 긁는 자리(2026-09-21) — 내부 이름으로 온 요청에만 답한다(core/metrics.py).
+    path("metrics", metrics_view),
 ]

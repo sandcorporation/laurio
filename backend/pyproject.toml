@@ -52,6 +52,7 @@ dependencies = [
     # 이 패키지 없이 DB만으로 돌아가므로 dev·CI 는 이 의존성을 네트워크로 쓰지
     # 않는다 — 실물 OpenSearch에 붙을 때만 TCP 를 연다.
     "opensearch-py>=2.8.0",
+    "prometheus-client>=0.26.0",
 ]
 
 [tool.uv]

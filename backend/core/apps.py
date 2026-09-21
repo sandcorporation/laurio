@@ -29,3 +29,8 @@ class CoreConfig(AppConfig):
         register(checks.check_llm_adapter_mode)
         register(checks.check_github_adapter_mode)
         register(checks.check_event_bus_adapter_mode)
+
+        # 모든 로그 레코드에 요청 id 를 붙인다(2026-09-21, core/request_id.py).
+        from .request_id import install_log_record_factory
+
+        install_log_record_factory()
