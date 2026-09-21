@@ -5,14 +5,18 @@
 // classroom 엔드포인트가 허용목록에 추가되는 순간 바로 쓰인다.
 import type { NextRequest } from "next/server";
 
-import { buildForwardHeaders, extractForwardBody, forwardRequest } from "@codemit/bff-shared";
+import {
+  buildForwardHeaders,
+  extractForwardBody,
+  forwardRequest,
+  retryWhileConnectionRefused,
+} from "@codemit/bff-shared";
 
 import { backendBaseUrl, eventsBaseUrl } from "@/lib/auth/backend";
 import { REFRESH_COOKIE, type TokenPair } from "@/lib/auth/cookies";
 import { isExpired } from "@/lib/auth/jwt";
 import { refreshTokenPair } from "@/lib/auth/refresh";
 import { resolveAccessToken } from "@/lib/auth/session";
-import { retryWhileConnectionRefused } from "@/lib/proxy/connect-retry";
 
 export interface ForwardResult {
   response: Response;
@@ -48,7 +52,8 @@ export async function forwardToBackend(
   // ADR-0046)이 이 앱에만 있어서 여기만 신호를 넘긴다. 없으면 탭을 닫거나
   // 새로고침할 때마다 이벤트 서비스에 끝나지 않는 요청이 하나씩 쌓이고, 그
   // 요청이 쥔 DB 연결도 함께 쌓인다(prod 에서 100개까지 갔다). 배포 중 위쪽이
-  // 잠깐 없어 연결이 거부되면 몇 초 물러서서 다시 보낸다(`connect-retry.ts`).
+  // 잠깐 없어 연결이 거부되면 몇 초 물러서서 다시 보낸다(`@codemit/bff-shared`
+  // 의 `connect-retry.ts`).
   const send = () =>
     retryWhileConnectionRefused(
       () => forwardRequest(request.method, url, headers, body, request.signal),

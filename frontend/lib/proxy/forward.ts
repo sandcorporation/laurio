@@ -8,7 +8,12 @@
 // 401을 낸다.
 import type { NextRequest } from "next/server";
 
-import { buildForwardHeaders, extractForwardBody, forwardRequest } from "@codemit/bff-shared";
+import {
+  buildForwardHeaders,
+  extractForwardBody,
+  forwardRequest,
+  retryWhileConnectionRefused,
+} from "@codemit/bff-shared";
 
 import { backendBaseUrl } from "@/lib/auth/backend";
 import { REFRESH_COOKIE, type TokenPair } from "@/lib/auth/cookies";
@@ -50,7 +55,14 @@ export async function forwardToBackend(
   // (extractForwardBody 주석 참고).
   const body = await extractForwardBody(request);
 
-  let response = await forwardRequest(request.method, url, headers, body);
+  // 배포 중 backend 가 잠깐 없어 연결이 거부되면 몇 초 물러서서 다시 보낸다
+  // (`@codemit/bff-shared` 의 `connect-retry.ts`, GlitchTip 74). 연결 거부만이라
+  // POST 가 두 번 처리될 일은 없다.
+  const send = () =>
+    retryWhileConnectionRefused(() => forwardRequest(request.method, url, headers, body), {
+      signal: request.signal,
+    });
+  let response = await send();
 
   // 액세스가 exp상 유효해 보였는데도 백엔드가 401을 낸 드문 경우(다른 탭에서
   // 방금 로그아웃, 시계 오차 등) — 이번 요청에서 아직 리프레시를 안 했다면 한 번
@@ -61,7 +73,7 @@ export async function forwardToBackend(
       try {
         const pair = await refreshTokenPair(refreshCookie);
         headers.set("authorization", `Bearer ${pair.access}`);
-        response = await forwardRequest(request.method, url, headers, body);
+        response = await send();
         refreshedPair = pair;
       } catch {
         shouldClearCookies = true;
