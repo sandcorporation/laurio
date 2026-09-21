@@ -42,3 +42,54 @@ def test_events_without_an_exception_pass_through():
     event = {"event_id": "x", "message": "직접 보낸 메시지"}
 
     assert drop_expected_error(event, {}) is event
+
+
+def _celery_reconnect_hint(retries: int) -> dict:
+    """celery 워커가 브로커(Redis)를 잃고 다시 붙으려 할 때 남기는 ERROR 로그 레코드.
+
+    `celery.worker.consumer.consumer.Consumer.ensure_connected` 가 재시도마다
+    부르는 것과 같은 템플릿·인자다 — Sentry 의 로깅 통합은 이 레코드를 hint 의
+    `log_record` 로 넘긴다.
+    """
+
+    import logging
+
+    from celery.worker.consumer.consumer import CONNECTION_ERROR, CONNECTION_RETRY_STEP
+
+    record = logging.LogRecord(
+        name="celery.worker.consumer.consumer",
+        level=logging.ERROR,
+        pathname=__file__,
+        lineno=0,
+        msg=CONNECTION_ERROR,
+        args=(
+            "redis://redis:6379/0",
+            ConnectionError("Error 111 connecting to redis:6379. Connection refused."),
+            CONNECTION_RETRY_STEP.format(when="in 2.00 seconds", retries=retries, max_retries=100),
+        ),
+        exc_info=None,
+    )
+    return {"log_record": record}
+
+
+def test_broker_blip_during_deploy_is_not_an_error():
+    """배포가 Redis 를 바꿔 끼우는 몇 초 — 워커는 스스로 다시 붙는다(GlitchTip 오류 66).
+
+    `deploy.sh` 의 `up -d db redis` 는 compose 에서 redis 설정이 바뀌면 컨테이너를
+    다시 만들고, 그 사이 떠 있던 워커가 첫 재시도에서 ERROR 를 남긴다 — 2초 뒤
+    「Connected」로 끝나는 일이 staging·prod 에 오류로 한 건씩 남았다.
+    """
+
+    event = {"event_id": "x"}
+
+    assert drop_expected_error(event, _celery_reconnect_hint(1)) is None
+    assert drop_expected_error(event, _celery_reconnect_hint(4)) is None
+
+
+def test_broker_outage_that_lasts_is_still_sent():
+    """재시도가 쌓이면(배포의 몇 초가 아니다) 그대로 보낸다 — 진짜 장애를 잃지 않는다."""
+
+    event = {"event_id": "x"}
+
+    assert drop_expected_error(event, _celery_reconnect_hint(5)) is event
+    assert drop_expected_error(event, _celery_reconnect_hint(100)) is event

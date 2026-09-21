@@ -20,11 +20,16 @@ SDK 가 꺼진 채로 돈다 — 테스트가 네트워크를 치지 않는다�
 - **정상적인 거절은 오류가 아니다.** 422(입력 검증)·404·403 은 사용자가 잘못
   요청했을 때 우리가 의도적으로 내는 응답이라, 그걸 다 보내면 진짜 사고가 그
   소음에 묻힌다(`drop_expected_error`). 5xx 와 처리되지 않은 예외만 보낸다.
+- **배포가 Redis 를 바꿔 끼우는 몇 초도 오류가 아니다.** celery 워커는 브로커를
+  잃으면 재시도마다 ERROR 로그를 남기고 스스로 다시 붙는다 — 그 첫 몇 번은
+  보내지 않고, 재시도가 쌓이면(진짜 장애) 그대로 보낸다
+  (`_is_transient_broker_reconnect`, GlitchTip 오류 66).
 """
 
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
 
 #: 어느 배포에서 났는지 — GlitchTip 의 environment 필터가 이 값을 쓴다.
@@ -40,13 +45,50 @@ def _status_code_of(exc: BaseException) -> int | None:
     return status if isinstance(status, int) else None
 
 
+#: celery 소비자가 브로커에 다시 붙으려 할 때 남기는 로그의 로거 이름·템플릿 머리.
+_CELERY_CONSUMER_LOGGER = "celery.worker.consumer.consumer"
+_CELERY_CONNECTION_ERROR_HEAD = "consumer: Cannot connect to "
+#: 「Trying again in 2.00 seconds... (1/100)」의 앞 숫자 — 몇 번째 재시도인가.
+_RETRY_COUNT = re.compile(r"\((\d+)/\d+\)")
+#: 이 횟수 **미만**의 재시도는 보내지 않는다. celery 의 재시도 간격이 2·4·6·8초로
+#: 늘어나므로 넷째까지가 약 20초다 — 배포가 redis 컨테이너를 다시 만드는 시간보다
+#: 넉넉하고, 그보다 오래 못 붙으면 배포의 틈이 아니라 장애다.
+_TRANSIENT_BROKER_RETRIES = 5
+
+
+def _is_transient_broker_reconnect(hint: dict[str, Any]) -> bool:
+    """celery 워커가 브로커를 잠깐 잃고 다시 붙는 중인 로그 레코드인가.
+
+    판정 근거는 로그 레코드의 로거 이름과 **포맷 전 템플릿**이다(메시지 본문이
+    아니다 — 인자에 섞이는 연결 주소·예외 문구가 달라도 갈리지 않게). 재시도
+    횟수를 읽지 못하면(「Trying to reconnect...」 갈래 등) 보낸다 — 모르는 것을
+    버리지 않는다. 재시도가 끝내 실패하면 워커가 「Unrecoverable error」를
+    CRITICAL 로 남기고 죽으므로 그것도 그대로 보내진다.
+    """
+
+    record = hint.get("log_record")
+    if record is None or getattr(record, "name", None) != _CELERY_CONSUMER_LOGGER:
+        return False
+    if not str(getattr(record, "msg", "")).startswith(_CELERY_CONNECTION_ERROR_HEAD):
+        return False
+    args = getattr(record, "args", None)
+    if not isinstance(args, tuple) or not args:
+        return False
+    match = _RETRY_COUNT.search(str(args[-1]))
+    return match is not None and int(match.group(1)) < _TRANSIENT_BROKER_RETRIES
+
+
 def drop_expected_error(event: dict[str, Any], hint: dict[str, Any]) -> dict[str, Any] | None:
     """`before_send` — 의도한 4xx 응답이면 버리고(None), 그 밖이면 그대로 보낸다.
 
     판정 근거는 예외 객체다: django-ninja 의 `HttpError` 와 Django 의 `Http404`·
     `PermissionDenied`·`SuspiciousOperation` 이 모두 status 로 환산되는 예외다.
-    `hint` 에 예외가 없는 이벤트(로그 레코드 등)는 그대로 보낸다.
+    `hint` 에 예외가 없는 이벤트(로그 레코드 등)는 그대로 보낸다 — 배포 중
+    브로커 재접속 로그(`_is_transient_broker_reconnect`)만 예외다.
     """
+
+    if _is_transient_broker_reconnect(hint):
+        return None
 
     exc_info = hint.get("exc_info")
     if not exc_info:
