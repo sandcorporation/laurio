@@ -17,6 +17,7 @@ import {
 } from "@/app/components/ui";
 import { createClass } from "@/lib/classes/api";
 import { checkDisplayNameForBannedWords } from "@/lib/members/display-name-check";
+import { checkPublicTextForBannedWords } from "@/lib/moderation/public-text-check";
 
 export default function NewClassPage() {
   const router = useRouter();
@@ -29,9 +30,16 @@ export default function NewClassPage() {
     event.preventDefault();
     const trimmedInstructorDisplayName = instructorDisplayName.trim();
     // 제출을 누르는 순간에만 검사한다 — 서버가 진짜 문이고(spec #474,
-    // #475/#477) 이건 편의다. 이 이름은 로그인하지 않은 사람도 보는 가입
-    // 미리보기에 뜨므로 노출이 가장 크다.
-    const bannedWordMessage = checkDisplayNameForBannedWords(trimmedInstructorDisplayName);
+    // #475/#477/#479) 이건 편의다. 강사 이름은 로그인하지 않은 사람도 보는
+    // 가입 미리보기에 뜨므로 노출이 가장 크고, 클래스 이름은 욕설만 본다.
+    const instructorNameBannedWordMessage = checkDisplayNameForBannedWords(
+      trimmedInstructorDisplayName,
+    );
+    if (instructorNameBannedWordMessage) {
+      setError(instructorNameBannedWordMessage);
+      return;
+    }
+    const bannedWordMessage = checkPublicTextForBannedWords(name.trim(), "클래스 이름");
     if (bannedWordMessage) {
       setError(bannedWordMessage);
       return;

@@ -15,8 +15,9 @@ WORKDIR /app
 # package.json은 운영자 앱 05(#63)가 그 디렉터리를 만들 때 여기 추가한다.
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY frontend/package.json ./frontend/package.json
-# 금칙어(사칭·욕설) 판정 순수 함수(spec #474, #478, ADR-0051) — 개최자 공개용
-# 이름·개발자 표시 이름을 제출 전에 미리 검사한다. `app/console/profile/`이
+# 금칙어(사칭·욕설) 판정 순수 함수(spec #474, #478, #479, ADR-0051) — 개최자
+# 공개용 이름·개발자 표시 이름, 공모전 제목·설명 폼이 제출 전에 이 패키지로
+# 미리 검사한다. 원본은 backend/core/banned_words.py다. `app/console/profile/`이
 # 이 타입을 쓰므로 빠지면 builder 의 타입 검사가 통째로 깨진다.
 COPY packages/banned-words/package.json ./packages/banned-words/package.json
 COPY packages/bff-shared/package.json ./packages/bff-shared/package.json

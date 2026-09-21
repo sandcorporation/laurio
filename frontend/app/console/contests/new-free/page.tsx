@@ -22,6 +22,7 @@ import { DescriptionField } from "@/app/components/description-field";
 import { ErrorNote, INPUT_CLASS, PageShell, buttonClass } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
+import { checkPublicTextForBannedWords } from "@/lib/contests/banned-words-check";
 import type { Category, DeliverableType } from "@/lib/contests/grill-types";
 
 import { ContestStageStepper } from "../_components/contest-stage-stepper";
@@ -130,6 +131,18 @@ export default function NewFreeContestBriefPage() {
     }
     if (!brief.deadlineAt) {
       setCreateError("마감 기한을 선택해주세요.");
+      return;
+    }
+    // 제출을 누르는 순간에만 검사한다 — 타이핑 중에는 부르지 않는다(spec
+    // #474, #479). 서버가 진짜 문이다.
+    const titleBannedWordMessage = checkPublicTextForBannedWords(title, "제목");
+    if (titleBannedWordMessage) {
+      setCreateError(titleBannedWordMessage);
+      return;
+    }
+    const descriptionBannedWordMessage = checkPublicTextForBannedWords(brief.description, "설명");
+    if (descriptionBannedWordMessage) {
+      setCreateError(descriptionBannedWordMessage);
       return;
     }
 

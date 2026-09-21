@@ -1,5 +1,5 @@
 """사용자 입력 문자열 필드마다 금칙어 판정을 어떻게 적용하는지 적는 표
-(spec #474, #475, #478).
+(spec #474, #475, #477, #478, #479).
 
 앱·입력 스키마 클래스 이름·필드 이름이 키다. **등록되지 않은 사용자 입력
 문자열 필드가 있으면 안 된다** — 그 구조 검사(백엔드 입력 스키마를 정적으로
@@ -13,7 +13,11 @@
 고칠 때), 문제 템플릿·클래스 템플릿 공개자 이름(둘 다 같은 입력 스키마
 `PublishTemplateIn`을 쓴다) — 을 더했다. #478 이 개최자 공개용 이름·개발자
 표시 이름(둘 다 프로필을 만들 때·나중에 고칠 때가 같은 `POST` 하나라 줄이
-하나씩이다)을 더했다. 제목·본문 필드들은 뒤 티켓(#479)이 줄을 더한다.
+하나씩이다)을 더했다. #479 가 공개 제목·본문 넷(공모전 제목·설명, 문제
+제목·설명, 클래스 이름, 체크리스트 항목)을 더했다 — **이 넷은 사칭 목록을
+걸지 않는다**, 「관리자 페이지 만들기」는 정당한 문제 제목이고 「운영자
+대시보드」는 정당한 공모전 제목이다(spec #474 Implementation Decisions).
+나머지 필드의 면제는 #480 이 채운다.
 """
 
 from __future__ import annotations
@@ -58,5 +62,48 @@ RULES: dict[tuple[str, str, str], BannedWordRule] = {
     ),
     ("accounts", "DeveloperProfileIn", "display_name"): BannedWordRule(
         checks_impersonation=True, checks_profanity=True
+    ),
+    # --- 공개 제목·본문(#479) — 사칭 목록은 걸지 않는다 ------------------------
+    ("contests", "ContestCreateIn", "title"): BannedWordRule(
+        checks_impersonation=False, checks_profanity=True
+    ),
+    ("contests", "ContestCreateIn", "description"): BannedWordRule(
+        checks_impersonation=False, checks_profanity=True
+    ),
+    ("contests", "FreeContestCreateIn", "title"): BannedWordRule(
+        checks_impersonation=False, checks_profanity=True
+    ),
+    ("contests", "FreeContestCreateIn", "description"): BannedWordRule(
+        checks_impersonation=False, checks_profanity=True
+    ),
+    ("contests", "ContestUpdateIn", "title"): BannedWordRule(
+        checks_impersonation=False, checks_profanity=True
+    ),
+    ("contests", "ContestUpdateIn", "description"): BannedWordRule(
+        checks_impersonation=False, checks_profanity=True
+    ),
+    ("classroom", "ClassIn", "name"): BannedWordRule(
+        checks_impersonation=False, checks_profanity=True
+    ),
+    ("classroom", "ClassPatchIn", "name"): BannedWordRule(
+        checks_impersonation=False, checks_profanity=True
+    ),
+    ("classroom", "ProblemIn", "title"): BannedWordRule(
+        checks_impersonation=False, checks_profanity=True
+    ),
+    ("classroom", "ProblemIn", "description"): BannedWordRule(
+        checks_impersonation=False, checks_profanity=True
+    ),
+    ("classroom", "ProblemPatchIn", "title"): BannedWordRule(
+        checks_impersonation=False, checks_profanity=True
+    ),
+    ("classroom", "ProblemPatchIn", "description"): BannedWordRule(
+        checks_impersonation=False, checks_profanity=True
+    ),
+    ("classroom", "ChecklistItemIn", "label"): BannedWordRule(
+        checks_impersonation=False, checks_profanity=True
+    ),
+    ("classroom", "ChecklistItemPatchIn", "label"): BannedWordRule(
+        checks_impersonation=False, checks_profanity=True
     ),
 }

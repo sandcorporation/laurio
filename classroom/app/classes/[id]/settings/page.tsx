@@ -42,6 +42,7 @@ import {
 import { useClass } from "@/lib/classes/use-class";
 import { checkDisplayNameForBannedWords } from "@/lib/members/display-name-check";
 import { useMembers } from "@/lib/members/use-members";
+import { checkPublicTextForBannedWords } from "@/lib/moderation/public-text-check";
 import { useProblems } from "@/lib/problems/use-problems";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { isSelectedModelReasoning, REASONING_EFFORT_OPTIONS } from "@/lib/scoring/reasoning";
@@ -454,16 +455,22 @@ export default function ClassSettingsPage() {
 
   async function handleNameSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    // 제출을 누르는 순간에만 검사한다 — 서버가 진짜 문이고(spec #474,
-    // #477) 이건 편의다. 이 이름은 가입 미리보기에도 뜨므로 만들 때만
-    // 막으면 그 뒤에 바꾸면 그만이다.
-    const bannedWordMessage =
-      namesPatch?.instructor_display_name !== undefined
-        ? checkDisplayNameForBannedWords(namesPatch.instructor_display_name)
-        : null;
-    if (bannedWordMessage) {
-      setNameError(bannedWordMessage);
-      return;
+    // 제출을 누르는 순간에만 검사한다 — 서버가 진짜 문이고(spec #474, #477,
+    // #479) 이건 편의다. 강사 이름은 가입 미리보기에도 뜨므로 만들 때만
+    // 막으면 그 뒤에 바꾸면 그만이고, 클래스 이름은 욕설만 본다.
+    if (namesPatch?.instructor_display_name !== undefined) {
+      const bannedWordMessage = checkDisplayNameForBannedWords(namesPatch.instructor_display_name);
+      if (bannedWordMessage) {
+        setNameError(bannedWordMessage);
+        return;
+      }
+    }
+    if (namesPatch?.name !== undefined) {
+      const bannedWordMessage = checkPublicTextForBannedWords(namesPatch.name, "클래스 이름");
+      if (bannedWordMessage) {
+        setNameError(bannedWordMessage);
+        return;
+      }
     }
     setNameSaving(true);
     setNameError(null);

@@ -45,6 +45,7 @@ from contests.search import search_contests
 from contests.sponsorship import sponsored_contest_queryset
 from accounts.models import SponsorProfile
 from accounts.sanitize import sanitize_free_text
+from core.banned_words import BannedWordViolation, find_banned_word_violation
 from core.clock import Clock
 from core.contest_switch import (
     require_contest_product_enabled,
@@ -129,6 +130,17 @@ _MAX_CHAT_HISTORY_TURNS = 200
 # 전체는 `/contests`(#39, 필터·정렬·페이지네이션을 이미 갖고 있다)의 몫이다.
 # 이전 자리표시 홈(#93)이 전체를 12건으로 잘랐던 것과 같은 정신이다.
 _HOME_BUCKET_LIMIT = 6
+
+
+def _reject_if_banned_public_text(value: str, field_label: str) -> None:
+    """공모전 제목·설명에 욕설이 있으면 거절한다(spec #474, #479) — 사칭
+    목록은 걸지 않는다: 「운영자 대시보드」는 정당한 공모전 제목이다
+    (`core.banned_word_rules.RULES`의 `("contests", ...)` 항목들). 로그인 없이
+    열리는 목록·상세가 그대로 그리는 값이라 저장 전에 막는다."""
+
+    violation = find_banned_word_violation(value, check_impersonation=False)
+    if violation is BannedWordViolation.PROFANITY:
+        raise HttpError(422, f"{field_label}에 욕설을 쓸 수 없습니다.")
 
 
 def _minimum_total(deliverable_type_ids: list[int]) -> int:
@@ -284,6 +296,11 @@ def create_contest(request: HttpRequest, payload: ContestCreateIn):
         if requirement.grade not in _VALID_GRADES:
             raise HttpError(422, "요구사항 등급은 필수 또는 선택 중 하나여야 합니다.")
 
+    sanitized_title = sanitize_free_text(payload.title)
+    sanitized_description = sanitize_free_text(payload.description)
+    _reject_if_banned_public_text(sanitized_title, "제목")
+    _reject_if_banned_public_text(sanitized_description, "설명")
+
     sponsor_profile, _created = SponsorProfile.objects.get_or_create(user=request.auth_user)
 
     minimum_total = sum(dt.minimum_prize for dt in deliverable_types)
@@ -294,9 +311,9 @@ def create_contest(request: HttpRequest, payload: ContestCreateIn):
     with transaction.atomic():
         contest = Contest.objects.create(
             sponsor=sponsor_profile,
-            title=sanitize_free_text(payload.title),
+            title=sanitized_title,
             category=category,
-            description=sanitize_free_text(payload.description),
+            description=sanitized_description,
             prize=payload.prize,
             deadline_at=payload.deadline_at,
             status=Contest.Status.DRAFT,
@@ -389,14 +406,19 @@ def create_free_contest(request: HttpRequest, payload: FreeContestCreateIn):
         if requirement.grade not in _VALID_GRADES:
             raise HttpError(422, "요구사항 등급은 필수 또는 선택 중 하나여야 합니다.")
 
+    sanitized_title = sanitize_free_text(payload.title)
+    sanitized_description = sanitize_free_text(payload.description)
+    _reject_if_banned_public_text(sanitized_title, "제목")
+    _reject_if_banned_public_text(sanitized_description, "설명")
+
     sponsor_profile, _created = SponsorProfile.objects.get_or_create(user=request.auth_user)
 
     with transaction.atomic():
         contest = Contest.objects.create(
             sponsor=sponsor_profile,
-            title=sanitize_free_text(payload.title),
+            title=sanitized_title,
             category=category,
-            description=sanitize_free_text(payload.description),
+            description=sanitized_description,
             prize=0,
             deadline_at=payload.deadline_at,
             status=Contest.Status.DRAFT,
@@ -836,6 +858,7 @@ def update_contest(request: HttpRequest, contest_id: int, payload: ContestUpdate
             sanitized_title = sanitize_free_text(payload.title)
             if not sanitized_title:
                 raise HttpError(422, "제목이 비어 있습니다.")
+            _reject_if_banned_public_text(sanitized_title, "제목")
             if sanitized_title != contest.title:
                 before["title"] = contest.title
                 after["title"] = sanitized_title
@@ -843,6 +866,7 @@ def update_contest(request: HttpRequest, contest_id: int, payload: ContestUpdate
 
         if payload.description is not None:
             sanitized_description = sanitize_free_text(payload.description)
+            _reject_if_banned_public_text(sanitized_description, "설명")
             if sanitized_description != contest.description:
                 before["description"] = contest.description
                 after["description"] = sanitized_description
