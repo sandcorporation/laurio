@@ -32,6 +32,7 @@
 // 없으므로 이 검사는 그 쪽에서 아무 영향이 없다.
 import createClient from "openapi-fetch";
 
+import { retryWhileConnectionRefused } from "@codemit/bff-shared";
 import type { paths } from "@codemit/bff-client/schema";
 
 if (typeof window !== "undefined") {
@@ -54,4 +55,14 @@ function backendBaseUrl(): string {
   return process.env.CODEMIT_API_BASE_URL ?? "http://127.0.0.1:58000";
 }
 
-export const backendClient = createClient<paths>({ baseUrl: backendBaseUrl() });
+// 배포 중 backend 가 잠깐 없어 연결이 거부되면 몇 초 물러서서 다시 보낸다
+// (`@codemit/bff-shared` 의 `connect-retry.ts`, GlitchTip 75). BFF 중계와 같은
+// 함수·같은 예산이다 — 서버 컴포넌트가 백엔드에 직접 붙는 이 길에만 그 장치가
+// 없어 `/contests`·sitemap 이 그 틈에 500 을 냈다. 매번 `clone()` 으로 보내야
+// 본문이 있는 요청도 다시 보낼 수 있다. `fetch` 는 호출 때 읽는다 — Next 가
+// 서버에서 전역 `fetch` 를 감싸 두므로 모듈을 읽는 순간의 값을 붙잡지 않는다.
+export const backendClient = createClient<paths>({
+  baseUrl: backendBaseUrl(),
+  fetch: (request) =>
+    retryWhileConnectionRefused(() => fetch(request.clone()), { signal: request.signal }),
+});
