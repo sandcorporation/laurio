@@ -11,6 +11,7 @@
     "test": "pnpm run test:unit"
   },
   "dependencies": {
+    "@codemit/banned-words": "workspace:*",
     "@codemit/bff-client": "workspace:*",
     "@codemit/bff-shared": "workspace:*",
     "@codemit/markdown": "workspace:*",

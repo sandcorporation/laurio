@@ -25,6 +25,7 @@ import {
 import { useMe } from "@/lib/auth/use-me";
 import { joinClass } from "@/lib/join/api";
 import { useJoinPreview } from "@/lib/join/use-join-preview";
+import { checkDisplayNameForBannedWords } from "@/lib/members/display-name-check";
 
 type SubmitState =
   | { status: "idle" }
@@ -66,11 +67,20 @@ export default function JoinPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const trimmedName = displayName.trim();
+    // 제출을 누르는 순간에만 검사한다 — 타이핑 중에는 부르지 않는다(spec
+    // #474, #476). 서버가 진짜 문이고(#475) 이건 편의라, 여기서 걸러도
+    // 걸러지지 않아도 서버가 같은 이유로 다시 거절한다.
+    const bannedWordMessage = checkDisplayNameForBannedWords(trimmedName);
+    if (bannedWordMessage) {
+      setSubmit({ status: "error", message: bannedWordMessage });
+      return;
+    }
     setSubmit({ status: "submitting" });
     // 세션이 죽은 채로 보내면 `bffClient`가 공개 앱 로그인으로 보낸다(#462) —
     // 조회든 변경이든 401은 항상 같은 경로다. 그 사이 잠깐 아래 실패
     // 문구가 보일 수 있지만 곧 이동이 이어진다.
-    const result = await joinClass(code, displayName.trim());
+    const result = await joinClass(code, trimmedName);
     if (result.ok) {
       setSubmit({
         status: "done",
