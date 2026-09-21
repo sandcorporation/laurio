@@ -239,10 +239,17 @@ export function RequirementDraftPanel({
 
   return (
     <aside className="flex flex-col bg-surface" data-testid="grill-draft-panel">
+      {/* **머리말이 지금 상태를 말한다**(#473 후속). 공개된 뒤에도 이 패널이
+          열리게 되면서(ADR-0051) published 인 공모전에 「공모전 초안 · 임시
+          저장됨」이라고 적히는 일이 생겼다 — 이미 공개돼 참가자가 보고 있는
+          공모전을 초안이라 부르면 개최자가 자기가 무엇을 고치는 중인지 잘못
+          안다. */}
       <div className="flex items-center justify-between border-b border-rule px-7 py-5">
-        <p className="text-sm font-semibold">공모전 초안</p>
+        <p className="text-sm font-semibold">
+          {contest.status === "draft" ? "공모전 초안" : "공개된 공모전"}
+        </p>
         <p className="text-xs text-ink/50" data-testid="grill-draft-autosaved">
-          임시 저장됨
+          {contest.status === "draft" ? "임시 저장됨" : "제출 받는 중"}
         </p>
       </div>
 
@@ -326,7 +333,9 @@ export function RequirementDraftPanel({
         <div data-testid="grill-requirement-list">
           {requirements.length === 0 && (
             <p className="border-t border-rule px-7 py-4 text-sm text-ink/50" data-testid="grill-requirement-empty">
-              아직 체크리스트가 없습니다 — AI와 대화하거나 직접 추가해 보세요.
+              {contest.status === "draft"
+                ? "아직 체크리스트가 없습니다 — AI와 대화하거나 직접 추가해 보세요."
+                : "아직 체크리스트가 없습니다 — 직접 추가해 보세요."}
             </p>
           )}
           {requirements.map((requirement) => (

@@ -455,9 +455,15 @@ export default function ContestDraftPage() {
 
   return (
     <main className="flex min-h-screen flex-col" data-testid="draft-phase-b">
-      <div className="border-b border-rule px-8 py-3">
-        <ContestStageStepper current="requirements" variant={contest.is_free ? "free" : "paid"} />
-      </div>
+      {/* **개최 단계 표시는 개최가 끝나기 전까지다**(#473 후속). 공개된 뒤에도 이
+          화면이 열리면서(ADR-0051) 이미 공개된 공모전에 「3. 공개」가 남은 단계처럼
+          보이는 일이 생겼다 — 그 줄이 말하는 것은 「여기까지 왔다」이므로 다 온
+          뒤에는 지운다. 지금 무엇을 할 수 있는지는 아래 패널이 말한다. */}
+      {contest.status === "draft" && (
+        <div className="border-b border-rule px-8 py-3">
+          <ContestStageStepper current="requirements" variant={contest.is_free ? "free" : "paid"} />
+        </div>
+      )}
       <BriefEditPanel
         contest={contest}
         categories={categories}

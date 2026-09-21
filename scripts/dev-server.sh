@@ -41,6 +41,15 @@ _derived_port() {
   echo $((base + 10))
 }
 
+_stack_port() {
+  # 같은 스크립트가 주는 **그 체크아웃의 compose 스택 포트**(+10 하지 않는다).
+  # `_derived_port` 와 달리 컨테이너가 실제로 듣고 있는 번호다.
+  local var="$1" value
+  value="$(cd "$here" && sh docker/dev-env.sh 2>/dev/null | sed -n "s/^export $var=//p" | head -1)"
+  [ -n "$value" ] || return 1
+  echo "$value"
+}
+
 _pidfile() { echo "$run_dir/$tag.$1.pid"; }
 
 _alive() { [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null; }
@@ -67,10 +76,24 @@ cmd_start() {
   if [ "$what" = "backend" ]; then
     # dev compose 의 backend 가 MinIO 를 물고 뜨므로 같은 모양으로 띄운다 — 빼면
     # 업로드 경로만 갈린다(`CLAUDE.md` 의 같은 주의).
-    ( cd "$dir" && CODEMIT_DB_PORT="${CODEMIT_DB_PORT:-55432}" STORAGE_BACKEND=s3 \
+    # **DB 포트를 5432x 로 고정해 두지 않는다**(2026-09-21). 예전 기본값이
+    # `55432` 였는데 그건 **주 워크트리의 공유 dev DB** 다 — 격리된 워크트리에서
+    # 이 스크립트로 백엔드를 띄운 에이전트가 자기 것인 줄 알고 사람의 dev DB 에
+    # 테스트 Contest 와 계정을 만들었다(#473 작업 중, raw SQL 로 되돌렸다).
+    # 이제 `docker/dev-env.sh` 가 **이 체크아웃에** 준 값을 쓴다 — 주 워크트리에서는
+    # 그 값이 그대로 55432 라 동작이 같고, 워크트리에서는 자기 스택을 가리킨다.
+    local db_port
+    db_port="${CODEMIT_DB_PORT:-$(_stack_port CODEMIT_DB_PORT || true)}"
+    if [ -z "$db_port" ]; then
+      echo "CODEMIT_DB_PORT 를 정할 수 없다 — docker/dev-env.sh 가 값을 주지 않았다." >&2
+      return 1
+    fi
+    ( cd "$dir" && CODEMIT_DB_PORT="$db_port" STORAGE_BACKEND=s3 \
         nohup uv run python manage.py runserver "0.0.0.0:$port" >"$log" 2>&1 & echo $! >"$pidfile" )
   else
-    ( cd "$dir" && CODEMIT_API_BASE_URL="${CODEMIT_API_BASE_URL:-http://127.0.0.1:58000}" \
+    # 같은 이유로 백엔드 주소도 **이 스크립트가 띄우는 백엔드**를 가리킨다 —
+    # 예전 기본값 `58000` 은 주 워크트리의 컨테이너였다.
+    ( cd "$dir" && CODEMIT_API_BASE_URL="${CODEMIT_API_BASE_URL:-http://127.0.0.1:$(_derived_port CODEMIT_API_PORT)}" \
         nohup pnpm exec next dev -p "$port" >"$log" 2>&1 & echo $! >"$pidfile" )
   fi
   echo "$port" >"$run_dir/$tag.$what.port"

@@ -18,14 +18,33 @@ Contest·그 카테고리·요구형태·개최자 표시 이름이 바뀌면 �
 
 from __future__ import annotations
 
+import logging
+
 from django.db import transaction
+
+logger = logging.getLogger(__name__)
 
 
 def _enqueue_one(contest_id: int) -> None:
     def _delay() -> None:
         from .tasks import index_contest
 
-        index_contest.delay(contest_id)
+        # **큐에 못 넣는 것이 Contest 저장을 실패시키면 안 된다**(2026-09-21).
+        # `on_commit` 콜백에서 난 예외는 `transaction.atomic()` 의 출구로 새어
+        # 나가 요청이 통째로 500 이 된다 — 브로커(Redis)가 잠깐 없을 때
+        # **공모전을 고치지도 공개하지도 못하게** 된다. 실제로 그렇게 났다
+        # (#473 통합 검증 중, 브로커 없는 임시 서버에서 `PATCH /api/contests/1`
+        # 이 500 이고 수정이 롤백됐다).
+        #
+        # 검색은 없어도 서비스가 도는 자리다 — 목록 API 는 색인이 죽어 있으면
+        # DB 검색으로 물러나고(`contests.search.search_contests`), 매일 도는
+        # `contest-search-reindex` 스캔이 빠진 문서를 다시 채운다. 그래서 여기서는
+        # 삼키고 기록만 남긴다 — 알림 팬아웃이 호출자의 응답을 막지 않는 것과
+        # 같은 원칙이다(`notifications.services`).
+        try:
+            index_contest.delay(contest_id)
+        except Exception:  # noqa: BLE001 - 색인 큐잉 실패가 저장을 되돌리면 안 된다.
+            logger.exception("Contest(pk=%s) 색인 큐잉 실패 — 저장 자체는 끝났다", contest_id)
 
     transaction.on_commit(_delay)
 
@@ -56,6 +75,11 @@ def sponsor_display_name_saved(sender, instance, **kwargs) -> None:
 
         contest_ids = Contest.objects.filter(sponsor_id=sponsor_id).values_list("id", flat=True)
         for contest_id in contest_ids:
-            index_contest.delay(contest_id)
+            # 위 `_enqueue_one` 과 같은 이유로 삼킨다 — 개최자 표시 이름 하나를
+            # 바꾸다 브로커가 없어 저장이 통째로 실패하면 안 된다.
+            try:
+                index_contest.delay(contest_id)
+            except Exception:  # noqa: BLE001 - 색인 큐잉 실패가 저장을 되돌리면 안 된다.
+                logger.exception("Contest(pk=%s) 색인 큐잉 실패 — 저장 자체는 끝났다", contest_id)
 
     transaction.on_commit(_enqueue_all)

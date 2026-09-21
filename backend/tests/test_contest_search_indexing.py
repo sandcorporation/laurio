@@ -249,3 +249,27 @@ def test_search_contests_reports_the_fallback_to_the_error_collector(
     assert result == [hit.id]
     assert len(captured) == 1
     assert isinstance(captured[0], search_module.ContestSearchUnavailable)
+
+
+def test_a_broker_that_is_down_does_not_undo_the_save(
+    db, sponsor, games, web, monkeypatch, django_capture_on_commit_callbacks
+):
+    """**큐에 못 넣는 것이 저장을 되돌리면 안 된다**(2026-09-21).
+
+    색인 큐잉은 `transaction.on_commit` 콜백이라, 거기서 난 예외는
+    `transaction.atomic()` 의 출구로 새어 나가 **요청 전체가 500** 이 된다. 실제로
+    그렇게 났다 — #473 통합 검증 중 브로커 없는 서버에서 `PATCH /api/contests/{id}`
+    가 500 이고 수정이 롤백됐다. 검색은 없어도 도는 자리다(목록 API 는 색인이
+    죽으면 DB 검색으로 물러나고, 매일 도는 재색인 스캔이 빠진 문서를 채운다).
+    """
+
+    def _broker_is_down(contest_id):
+        raise OSError("브로커에 붙을 수 없다")
+
+    monkeypatch.setattr(contests_tasks.index_contest, "delay", _broker_is_down)
+
+    with django_capture_on_commit_callbacks(execute=True):
+        contest = _contest(sponsor, games, [web], title="브로커가 없어도 저장된다")
+
+    contest.refresh_from_db()
+    assert contest.title == "브로커가 없어도 저장된다"
