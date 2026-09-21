@@ -583,7 +583,9 @@ compose 의 서비스 11개 전부에 `x-logging`(20MB × 5개)을 걸었다 —
 `service`·`env`). **staging 은 모으지 않는다** — sub 는 CI 러너와 배포가 컨테이너를 늘 만들고
 지워 거기서는 `docker logs` 로 본다(그래서 staging 은 여전히 배포하면 이전 로그가 사라진다).
 
-**배포 환경의 백엔드 로그는 한 줄 JSON 이고, 요청마다 id 가 붙는다**(2026-09-21).
+**배포 환경에서 Django 가 찍는 로그는 한 줄 JSON 이고, 요청마다 id 가 붙는다**(2026-09-21).
+gunicorn 자신의 줄(워커 기동 등)과 Celery 자신의 줄은 각자 포맷 그대로다 — 그 둘은 Django 의
+LOGGING 을 지나지 않는다.
 `config/settings.py` 의 LOGGING 이 배포 여부(`IS_DEPLOYED_ENVIRONMENT`)로 포매터를 고른다 —
 staging·prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`message`·
 `request_id`, 예외는 같은 줄의 `exc`), dev 는 지금처럼 사람이 읽는 한 줄 포맷이다. Loki 에서는
@@ -604,7 +606,11 @@ staging·prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`
 - **내부 이름으로 온 요청에만 답한다** — Host 가 `INTERNAL_SERVICE_HOSTS`(`backend`·`events`)가
   아니면 404(존재를 알려주지 않는다). 공개 프록시는 공개 도메인을 Host 로 넘기고, 세 앱의 BFF
   허용목록에 이 경로가 없고, 백엔드 포트는 호스트 127.0.0.1 에만 열려 있다 — 세 겹 중 이
-  파일이 마지막 하나를 지킨다. 감시 스택은 compose 네트워크 안에서 `backend:8000` 으로 긁는다.
+  파일이 마지막 하나를 지킨다. 감시 스택은 compose 네트워크 안에서 `backend:8000` 으로 긁는다 —
+  그래서 oracle 의 prometheus 컨테이너가 **prod 네트워크(`codemit-prod_default`)에도 붙어 있다**.
+  그 동안에는 prod 에서 `docker compose down` 을 하면 그 네트워크를 지우지 못한다는 경고가 난다
+  (배포는 `up -d` 만 써서 영향이 없다). 배포 직후 요청이 가장 많은 경로는 헤더 알림 벨의
+  `api/notifications/unread-count` 폴링이었다(2026-09-21 실측) — 백엔드 부하를 볼 때 첫 자리다.
 - **gunicorn 워커 넷을 합산한다** — prod compose 가 backend 에만 `PROMETHEUS_MULTIPROC_DIR`
   를 주고 뜰 때마다 비우며, 죽은 워커 정리는 `config/gunicorn.conf.py` 의 `child_exit` 가
   한다(워커가 각자 카운터를 들면 긁을 때마다 무작위 워커 하나의 값이 와서 튄다). 워커 넷에
