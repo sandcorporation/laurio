@@ -5250,6 +5250,19 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /**
+         * DeveloperProfileIn
+         * @description 개발자 표시 이름·소개(spec #474, #478) — `POST
+         *     /api/accounts/developer-profile`의 입력이다. `SponsorProfileIn`과 필드
+         *     모양은 같지만, 공개 개발자 프로필·심사 비교 화면에 뜨는 별개의 이름이다
+         *     — 위 독스트링 참고.
+         */
+        DeveloperProfileIn: {
+            /** Bio */
+            bio?: string | null;
+            /** Display Name */
+            display_name?: string | null;
+        };
         /** DeveloperPublicProfileOut */
         DeveloperPublicProfileOut: {
             /** Bio */
@@ -6644,19 +6657,6 @@ export interface components {
             /** To State */
             to_state: string;
         };
-        /**
-         * ProfileIn
-         * @description 필드가 아예 안 왔으면(None) 손대지 않고, ""가 명시적으로 왔으면 비운다.
-         *
-         *     "안 보냄"과 "빈 값으로 지움"을 구분해야 한 필드만 바꾸는 부분 업데이트가
-         *     다른 필드를 조용히 지우지 않는다.
-         */
-        ProfileIn: {
-            /** Bio */
-            bio?: string | null;
-            /** Display Name */
-            display_name?: string | null;
-        };
         /** ProfileOut */
         ProfileOut: {
             /** Bio */
@@ -7091,7 +7091,7 @@ export interface components {
          *
          *     **둘 다 선택 입력이다** — 부분 제출을 허용한다(전화번호만, 이메일만).
          *     `None`은 "이 필드는 안 보냈다"(손대지 않는다)를 뜻하고, 엔드포인트가 둘 다
-         *     `None`이면 422 로 거부한다(`accounts.schemas.ProfileIn`과 같은 "안 보냄"과
+         *     `None`이면 422 로 거부한다(`accounts.schemas.SponsorProfileIn`과 같은 "안 보냄"과
          *     "빈 값" 구분 관용구 — 다만 여기는 "빈 문자열로 지운다"는 개념 자체가 없다,
          *     연락처는 비우는 별도 API 가 없다). **빈 문자열도 "안 보냄"과 같이 취급하지
          *     않고 422 로 거부한다** — `email=""` 을 허용하면 그 요청이 "안 보냄"(None)과
@@ -7191,6 +7191,24 @@ export interface components {
          * @enum {string}
          */
         SponsorNextAction: "pay_to_publish" | "publish_free_draft" | "judge_and_award" | "accept_handover" | "awaiting_submissions" | "awaiting_scoring" | "awaiting_appeal_ruling" | "awaiting_distribution" | "awaiting_payout" | "no_submissions" | "contest_complete";
+        /**
+         * SponsorProfileIn
+         * @description 개최자 공개용 표시 이름·소개(spec #474, #478) — `POST
+         *     /api/accounts/sponsor-profile`의 입력이다. 필드가 아예 안 왔으면(None)
+         *     손대지 않고, ""가 명시적으로 왔으면 비운다.
+         *
+         *     "안 보냄"과 "빈 값으로 지움"을 구분해야 한 필드만 바꾸는 부분 업데이트가
+         *     다른 필드를 조용히 지우지 않는다. `display_name`은 개발자 표시 이름
+         *     (`DeveloperProfileIn`)과 필드 모양이 같지만, 공개 공모전 목록·상세에
+         *     뜨는 별개의 이름이라 금칙어 규칙 표(`core.banned_word_rules.RULES`)에
+         *     각자 따로 등록된다.
+         */
+        SponsorProfileIn: {
+            /** Bio */
+            bio?: string | null;
+            /** Display Name */
+            display_name?: string | null;
+        };
         /**
          * SubmissionAssetIn
          * @description 제출 페이로드가 담는 자료 하나 (#190).
@@ -7494,7 +7512,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ProfileIn"];
+                "application/json": components["schemas"]["DeveloperProfileIn"];
             };
         };
         responses: {
@@ -7538,7 +7556,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ProfileIn"];
+                "application/json": components["schemas"]["SponsorProfileIn"];
             };
         };
         responses: {

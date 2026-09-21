@@ -71,6 +71,9 @@ importers:
 
   frontend:
     dependencies:
+      '@codemit/banned-words':
+        specifier: workspace:*
+        version: link:../packages/banned-words
       '@codemit/bff-client':
         specifier: workspace:*
         version: link:../packages/bff-client

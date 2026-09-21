@@ -15,6 +15,7 @@
     "generate:api": "pnpm --dir ../packages/bff-client generate:api"
   },
   "dependencies": {
+    "@codemit/banned-words": "workspace:*",
     "@codemit/bff-client": "workspace:*",
     "@codemit/bff-shared": "workspace:*",
     "@codemit/markdown": "workspace:*",

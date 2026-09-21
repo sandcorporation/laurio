@@ -1,5 +1,5 @@
 """사용자 입력 문자열 필드마다 금칙어 판정을 어떻게 적용하는지 적는 표
-(spec #474, #475).
+(spec #474, #475, #478).
 
 앱·입력 스키마 클래스 이름·필드 이름이 키다. **등록되지 않은 사용자 입력
 문자열 필드가 있으면 안 된다** — 그 구조 검사(백엔드 입력 스키마를 정적으로
@@ -11,8 +11,9 @@
 #475 가 클래스 참여자 이름(가입 때·나중에 바꿀 때 둘 다)을 담았고, #477 이
 강의실의 나머지 이름 세 곳 — 클래스가 들고 있는 강사 이름(만들 때·설정에서
 고칠 때), 문제 템플릿·클래스 템플릿 공개자 이름(둘 다 같은 입력 스키마
-`PublishTemplateIn`을 쓴다) — 을 더했다. 개최자 공개용 이름·개발자 표시
-이름과 제목·본문 필드들은 뒤 티켓들(#478~#479)이 줄을 더한다.
+`PublishTemplateIn`을 쓴다) — 을 더했다. #478 이 개최자 공개용 이름·개발자
+표시 이름(둘 다 프로필을 만들 때·나중에 고칠 때가 같은 `POST` 하나라 줄이
+하나씩이다)을 더했다. 제목·본문 필드들은 뒤 티켓(#479)이 줄을 더한다.
 """
 
 from __future__ import annotations
@@ -50,6 +51,12 @@ RULES: dict[tuple[str, str, str], BannedWordRule] = {
     #: 클래스 템플릿 공개(`publish_class_template`)가 같은 입력 스키마를
     #: 쓰므로 한 줄이 둘 다 검사한다.
     ("classroom", "PublishTemplateIn", "publisher_display_name"): BannedWordRule(
+        checks_impersonation=True, checks_profanity=True
+    ),
+    ("accounts", "SponsorProfileIn", "display_name"): BannedWordRule(
+        checks_impersonation=True, checks_profanity=True
+    ),
+    ("accounts", "DeveloperProfileIn", "display_name"): BannedWordRule(
         checks_impersonation=True, checks_profanity=True
     ),
 }
