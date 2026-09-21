@@ -566,6 +566,15 @@ cd backend && uv run python manage.py create_operator <아이디> --superuser
 - **감시자가 prod 위에 있다는 사각지대**는 GlitchTip(sub) 의 uptime 모니터가 교차로 본다 —
   oracle 이 통째로 죽으면 Prometheus 도 같이 죽기 때문이다. 반대로 sub 가 죽으면 위
   `HostDown` 이 잡는다. 서로가 서로를 본다.
+- **한 화면에서 본다** — Grafana 대시보드 **「Codemit prod」**(`/d/codemit-prod`, 저장소 밖
+  `/server/prometheus/grafana/dashboards/codemit-prod.json` 을 프로비저닝이 30초마다 다시 읽는다).
+  줄 다섯이다: 서비스 생존(프로브·지금 울리는 경보) · prod 백엔드 요청(초당·상태코드·지연
+  p50/95/99·5xx 비율·경로별 상위) · 호스트 자원 · prod 컨테이너(메모리·재시작) · prod 로그(서비스별
+  줄 수·오류·**요청 id 로 찾기** — GlitchTip 오류의 `request_id` 태그 값을 맨 위 입력칸에 넣는다).
+  호스트 일반 지표는 원래 있던 node-exporter·cadvisor 대시보드가 맡으므로 여기에는 codemit 에만
+  있는 것을 둔다. **오류 패널은 우리 서비스만 본다** — 처음에 「exception」으로 넓게 걸었더니
+  OpenSearch 의 JVM 기동 인자(`-XX:+ShowCodeDetailsInExceptionMessages`)가 걸려, Django JSON 의
+  ERROR 이상·파이썬 `Traceback`·Celery `: ERROR/` 로 좁혔다.
 - **닿는지 확인하는 법**: Alertmanager 에 시험 경보를 넣는다(`POST /api/v2/alerts`, 3분 뒤
   해소 메시지가 한 번 더 온다). 2026-09-21 에 그렇게 확인했다 — 발송 1·실패 0.
 
