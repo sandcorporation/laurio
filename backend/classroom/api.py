@@ -550,10 +550,13 @@ def _serialize_instructor_submission(
 # --- Class -------------------------------------------------------------------
 
 
-@router.post("/classes", response={201: ClassOut}, auth=jwt_auth)
+@router.post("/classes", response={201: ClassOut, 422: ErrorOut}, auth=jwt_auth)
 def create_class(request: HttpRequest, payload: ClassIn):
     # 범위 밖이다 — 아직 없는 자원에는 열 문이 없다(`instructor_scope`의
     # class_scope/problem_scope는 이미 있는 클래스를 여는 문이다).
+    # 강사 이름은 로그인하지 않은 사람도 보는 가입 미리보기에 뜨므로
+    # 만드는 시점에 막는다(spec #474, #477).
+    _reject_if_banned_name(payload.instructor_display_name)
     class_obj = Class.objects.create(
         instructor_id=request.auth_user.id,
         name=payload.name,
@@ -623,6 +626,9 @@ def update_class(request: HttpRequest, class_id: int, payload: ClassPatchIn):
         class_obj.name = payload.name
         update_fields.append("name")
     if payload.instructor_display_name is not None:
+        # 만들 때만 막으면 그 뒤에 사칭 이름으로 바꾸면 그만이다(spec #474,
+        # #477) — 참여자 이름을 바꿀 때(`rename_myself`)와 같은 이유.
+        _reject_if_banned_name(payload.instructor_display_name)
         class_obj.instructor_display_name = payload.instructor_display_name
         update_fields.append("instructor_display_name")
     if payload.default_model is not None and payload.default_model != class_obj.default_model:
@@ -875,18 +881,21 @@ def preview_join(request: HttpRequest, join_code: str):
     )
 
 
-def _reject_if_banned_member_name(display_name: str) -> None:
-    """클래스 참여자가 그 클래스에서 불릴 이름에 금칙어가 있으면 거절한다
-    (spec #474, #475) — 가입 때(`join_class`)와 나중에 스스로 바꿀 때
-    (`rename_myself`) 둘 다 이 검사 하나를 그대로 쓴다. 이름 필드라 사칭·
-    욕설 목록을 둘 다 건다(`core.banned_word_rules.RULES`의
-    `("classroom", "JoinIn"|"MemberRenameIn", "display_name")` 항목).
+def _reject_if_banned_name(name: str) -> None:
+    """강의실에서 사람 이름으로 불리는 자리에 금칙어가 있으면 거절한다
+    (spec #474, #475, #477) — 클래스 참여자 이름(가입 때 `join_class`·
+    나중에 스스로 바꿀 때 `rename_myself`), 클래스가 들고 있는 강사 이름
+    (만들 때 `create_class`·설정에서 고칠 때 `update_class`), 템플릿
+    공개자 이름(`classroom.template_api`의 `publish_template`·
+    `publish_class_template`)이 전부 이 검사 하나를 그대로 쓴다. 이름
+    필드라 사칭·욕설 목록을 둘 다 건다(`core.banned_word_rules.RULES`가
+    호출부마다 어느 입력 스키마·필드인지 표로 든다).
 
     걸린 낱말 자체는 응답에 담지 않는다 — 그러면 욕설이 오류 토스트로 화면에
     렌더되고, 금칙어 목록이 한 번에 하나씩 캐낼 수 있는 사전이 된다. 대신
     무엇이 걸렸는지 종류만 말한다."""
 
-    violation = find_banned_word_violation(display_name, check_impersonation=True)
+    violation = find_banned_word_violation(name, check_impersonation=True)
     if violation is BannedWordViolation.IMPERSONATION:
         raise HttpError(422, "이름에는 운영진을 뜻하는 말을 쓸 수 없습니다.")
     if violation is BannedWordViolation.PROFANITY:
@@ -913,7 +922,7 @@ def join_class(request: HttpRequest, join_code: str, payload: JoinIn):
     class_obj = _get_class_by_join_code_or_404(join_code)
     if class_obj.archived_at is not None:
         raise HttpError(403, "이 클래스는 보관되어 더 이상 가입할 수 없습니다.")
-    _reject_if_banned_member_name(payload.display_name)
+    _reject_if_banned_name(payload.display_name)
     member, _created = ClassMember.objects.get_or_create(
         classroom=class_obj,
         user_id=request.auth_user.id,
@@ -1001,7 +1010,7 @@ def rename_myself(request: HttpRequest, class_id: int, payload: MemberRenameIn):
         raise HttpError(403, "이 클래스는 보관되어 이름을 바꿀 수 없습니다.")
     if reason == SUBMIT_BLOCKED_EXPELLED:
         raise HttpError(403, "더 이상 이 클래스의 참여자가 아닙니다.")
-    _reject_if_banned_member_name(payload.display_name)
+    _reject_if_banned_name(payload.display_name)
 
     member.display_name = payload.display_name
     member.save(update_fields=["display_name"])

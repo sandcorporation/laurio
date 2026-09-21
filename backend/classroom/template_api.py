@@ -22,7 +22,7 @@ from ninja.pagination import PageNumberPagination, paginate
 
 from accounts.middleware import jwt_auth
 
-from .api import _serialize_class, _serialize_problem
+from .api import _reject_if_banned_name, _serialize_class, _serialize_problem
 from .instructor_scope import class_scope, problem_scope
 from .models import ClassTemplate, ProblemTemplate, ProblemTemplateReport
 from .schemas import (
@@ -97,7 +97,7 @@ def _get_template_by_share_code_or_404(share_code: str) -> ProblemTemplate:
 
 @router.post(
     "/classes/{class_id}/problems/{problem_id}/publish-template",
-    response={200: ProblemTemplateOut, 201: ProblemTemplateOut, 404: ErrorOut},
+    response={200: ProblemTemplateOut, 201: ProblemTemplateOut, 404: ErrorOut, 422: ErrorOut},
     auth=jwt_auth,
 )
 def publish_template(
@@ -110,9 +110,14 @@ def publish_template(
     이유로 `write=False`다.
 
     **같은 문제에 살아 있는 템플릿이 이미 있으면 새로 만들지 않는다**(#333
-    AC) — 그 템플릿을 200으로 그대로 돌려준다. 새로 만들었을 때만 201이다."""
+    AC) — 그 템플릿을 200으로 그대로 돌려준다. 새로 만들었을 때만 201이다.
+
+    공개자 이름은 템플릿 갤러리를 로그인한 모두가 보므로 금칙어 검사를
+    받는다(spec #474, #477) — `publish_problem_as_template`이 사본을 뜨기
+    전에 막는다."""
 
     problem = problem_scope(class_id, problem_id, request.auth_user.id, write=False).problem
+    _reject_if_banned_name(payload.publisher_display_name)
 
     template, created = publish_problem_as_template(
         problem,
@@ -299,7 +304,7 @@ def _get_class_template_by_share_code_or_404(share_code: str) -> ClassTemplate:
 
 @router.post(
     "/classes/{class_id}/publish-template",
-    response={200: ClassTemplateOut, 201: ClassTemplateOut, 404: ErrorOut},
+    response={200: ClassTemplateOut, 201: ClassTemplateOut, 404: ErrorOut, 422: ErrorOut},
     auth=jwt_auth,
 )
 def publish_class_template(request, class_id: int, payload: PublishTemplateIn):
@@ -310,9 +315,14 @@ def publish_class_template(request, class_id: int, payload: PublishTemplateIn):
     `write=False`다.
 
     **같은 클래스에 살아 있는 템플릿이 이미 있으면 새로 만들지 않는다**(#333
-    AC) — `publish_template`과 같은 규율, 200/201로 새로 만들었는지를 구별한다."""
+    AC) — `publish_template`과 같은 규율, 200/201로 새로 만들었는지를 구별한다.
+
+    공개자 이름 검사도 `publish_template`과 같다(spec #474, #477) —
+    `PublishTemplateIn`을 그대로 공유하므로 규칙 표의 같은 줄이 두
+    엔드포인트를 함께 막는다."""
 
     class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
+    _reject_if_banned_name(payload.publisher_display_name)
     template, created = publish_class_as_template(
         class_obj,
         published_by_id=request.auth_user.id,

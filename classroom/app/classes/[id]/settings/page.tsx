@@ -40,6 +40,7 @@ import {
   type OpenAIKeyCheckResult,
 } from "@/lib/classes/openai-key-check";
 import { useClass } from "@/lib/classes/use-class";
+import { checkDisplayNameForBannedWords } from "@/lib/members/display-name-check";
 import { useMembers } from "@/lib/members/use-members";
 import { useProblems } from "@/lib/problems/use-problems";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
@@ -77,9 +78,17 @@ function ClassTemplatePublishCard({
 
   async function handlePublish(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const trimmedPublisherDisplayName = publisherDisplayName.trim();
+    // 제출을 누르는 순간에만 검사한다 — 서버가 진짜 문이고(spec #474,
+    // #477) 이건 편의다. 템플릿 갤러리는 로그인한 모두가 본다.
+    const bannedWordMessage = checkDisplayNameForBannedWords(trimmedPublisherDisplayName);
+    if (bannedWordMessage) {
+      setPublishError(bannedWordMessage);
+      return;
+    }
     setPublishError(null);
     setPublishing(true);
-    const result = await publishClassAsTemplate(classId, publisherDisplayName.trim());
+    const result = await publishClassAsTemplate(classId, trimmedPublisherDisplayName);
     if (result.ok) {
       setLiveTemplate(liveTemplateFrom(result.data));
       setJustTakenDown(false);
@@ -445,6 +454,17 @@ export default function ClassSettingsPage() {
 
   async function handleNameSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // 제출을 누르는 순간에만 검사한다 — 서버가 진짜 문이고(spec #474,
+    // #477) 이건 편의다. 이 이름은 가입 미리보기에도 뜨므로 만들 때만
+    // 막으면 그 뒤에 바꾸면 그만이다.
+    const bannedWordMessage =
+      namesPatch?.instructor_display_name !== undefined
+        ? checkDisplayNameForBannedWords(namesPatch.instructor_display_name)
+        : null;
+    if (bannedWordMessage) {
+      setNameError(bannedWordMessage);
+      return;
+    }
     setNameSaving(true);
     setNameError(null);
     const result = namesPatch !== null ? await updateClass(classId, namesPatch) : null;

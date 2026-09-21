@@ -30,6 +30,7 @@ import { selectCopyTargets } from "@/lib/classes/copy-targets";
 import { isDeleteConfirmationTyped } from "@/lib/classes/delete-confirmation";
 import { useClass } from "@/lib/classes/use-class";
 import { useMyClasses } from "@/lib/classes/use-my-classes";
+import { checkDisplayNameForBannedWords } from "@/lib/members/display-name-check";
 import { useMutationRequest } from "@/lib/mutations/use-mutation-request";
 import { publishProblemAsTemplate, takedownProblemTemplate } from "@/lib/problem-templates/api";
 import {
@@ -446,7 +447,15 @@ export default function EditProblemPage() {
 
   function handlePublish(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    void publishMutation.run(() => publishProblemAsTemplate(classId, problemId, publisherDisplayName.trim()), {
+    const trimmedPublisherDisplayName = publisherDisplayName.trim();
+    // 제출을 누르는 순간에만 검사한다 — 서버가 진짜 문이고(spec #474,
+    // #477) 이건 편의다. 템플릿 갤러리는 로그인한 모두가 본다.
+    const bannedWordMessage = checkDisplayNameForBannedWords(trimmedPublisherDisplayName);
+    if (bannedWordMessage) {
+      publishMutation.setError(bannedWordMessage);
+      return;
+    }
+    void publishMutation.run(() => publishProblemAsTemplate(classId, problemId, trimmedPublisherDisplayName), {
       fallbackMessage: "템플릿으로 공개하지 못했습니다. 잠시 후 다시 시도해주세요.",
       reload,
       onSuccess: (template) => {
