@@ -27,6 +27,7 @@ import { ProblemParticipantView } from "@/app/components/ProblemParticipantView"
 import { ProblemSettingsForm } from "@/app/components/ProblemSettingsForm";
 import { TemplatePickerSheet } from "@/app/components/TemplatePickerSheet";
 import { useClass } from "@/lib/classes/use-class";
+import { checkPublicTextForBannedWords } from "@/lib/moderation/public-text-check";
 import { createProblem, type ProblemRow, type SubmissionFormat } from "@/lib/problems/api";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
 
@@ -126,6 +127,26 @@ export default function NewProblemPage() {
   async function submitProblem(open: boolean) {
     if (title.trim() === "") return;
     if (!isGradingGuidelineValid(gradingGuideline)) return;
+    // 제출을 누르는 순간에만 검사한다 — 타이핑 중에는 부르지 않는다(spec
+    // #474, #479). 서버가 진짜 문이라 여기서 걸러도 걸러지지 않아도 서버가
+    // 같은 이유로 다시 거절한다.
+    const titleBannedWordMessage = checkPublicTextForBannedWords(title.trim(), "제목");
+    if (titleBannedWordMessage) {
+      setError(titleBannedWordMessage);
+      return;
+    }
+    const descriptionBannedWordMessage = checkPublicTextForBannedWords(description, "설명");
+    if (descriptionBannedWordMessage) {
+      setError(descriptionBannedWordMessage);
+      return;
+    }
+    for (const item of items) {
+      const itemBannedWordMessage = checkPublicTextForBannedWords(item.label, "체크리스트 항목");
+      if (itemBannedWordMessage) {
+        setError(itemBannedWordMessage);
+        return;
+      }
+    }
     setSubmitting(true);
     setError(null);
     const result = await createProblem(classId, {

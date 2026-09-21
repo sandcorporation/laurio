@@ -550,10 +550,11 @@ def _serialize_instructor_submission(
 # --- Class -------------------------------------------------------------------
 
 
-@router.post("/classes", response={201: ClassOut}, auth=jwt_auth)
+@router.post("/classes", response={201: ClassOut, 422: ErrorOut}, auth=jwt_auth)
 def create_class(request: HttpRequest, payload: ClassIn):
     # 범위 밖이다 — 아직 없는 자원에는 열 문이 없다(`instructor_scope`의
     # class_scope/problem_scope는 이미 있는 클래스를 여는 문이다).
+    _reject_if_banned_public_text(payload.name, "클래스 이름")
     class_obj = Class.objects.create(
         instructor_id=request.auth_user.id,
         name=payload.name,
@@ -620,6 +621,7 @@ def update_class(request: HttpRequest, class_id: int, payload: ClassPatchIn):
 
     update_fields = []
     if payload.name is not None:
+        _reject_if_banned_public_text(payload.name, "클래스 이름")
         class_obj.name = payload.name
         update_fields.append("name")
     if payload.instructor_display_name is not None:
@@ -893,6 +895,18 @@ def _reject_if_banned_member_name(display_name: str) -> None:
         raise HttpError(422, "이름에 욕설을 쓸 수 없습니다.")
 
 
+def _reject_if_banned_public_text(value: str, field_label: str) -> None:
+    """클래스 이름·문제 제목·설명·체크리스트 항목에 욕설이 있으면 거절한다
+    (spec #474, #479) — 사칭 목록은 걸지 않는다: 「관리자 페이지 만들기」는
+    정당한 문제 제목이다(`core.banned_word_rules.RULES`의
+    `("classroom", ...)` 항목들). 클래스 이름은 가입 미리보기에, 나머지는
+    그 클래스의 참여자 전부에게 로그인 없이도 보인다."""
+
+    violation = find_banned_word_violation(value, check_impersonation=False)
+    if violation is BannedWordViolation.PROFANITY:
+        raise HttpError(422, f"{field_label}에 욕설을 쓸 수 없습니다.")
+
+
 @router.post(
     "/join/{join_code}",
     response={200: JoinResultOut, 403: ErrorOut, 404: ErrorOut, 422: ErrorOut},
@@ -1134,6 +1148,11 @@ def create_problem(request: HttpRequest, class_id: int, payload: ProblemIn):
     grading_strictness, grading_guideline_text = _validate_grading_guideline(
         payload.grading_strictness, payload.grading_guideline_text
     )
+
+    _reject_if_banned_public_text(payload.title, "제목")
+    _reject_if_banned_public_text(payload.description, "설명")
+    for item_in in payload.checklist_items:
+        _reject_if_banned_public_text(item_in.label, "체크리스트 항목")
 
     if payload.open and not any(item.required for item in payload.checklist_items):
         raise HttpError(400, NO_REQUIRED_ITEM_MESSAGE)
@@ -1377,9 +1396,11 @@ def update_problem(request: HttpRequest, class_id: int, problem_id: int, payload
 
     update_fields = []
     if payload.title is not None:
+        _reject_if_banned_public_text(payload.title, "제목")
         problem.title = payload.title
         update_fields.append("title")
     if payload.description is not None:
+        _reject_if_banned_public_text(payload.description, "설명")
         problem.description = payload.description
         update_fields.append("description")
     if submission_formats is not None:
@@ -1898,13 +1919,15 @@ def _get_owned_checklist_item_or_404(problem: Problem, item_id: int) -> Checklis
 
 @router.post(
     "/classes/{class_id}/problems/{problem_id}/checklist-items",
-    response={201: ChecklistItemOut, 404: ErrorOut},
+    response={201: ChecklistItemOut, 404: ErrorOut, 422: ErrorOut},
     auth=jwt_auth,
 )
 def create_checklist_item(
     request: HttpRequest, class_id: int, problem_id: int, payload: ChecklistItemIn
 ):
     problem = problem_scope(class_id, problem_id, request.auth_user.id, write=True).problem
+
+    _reject_if_banned_public_text(payload.label, "체크리스트 항목")
 
     next_order = problem.checklist_items.count()
     item = ChecklistItem.objects.create(
@@ -1964,6 +1987,7 @@ def update_checklist_item(
 
     update_fields = []
     if payload.label is not None:
+        _reject_if_banned_public_text(payload.label, "체크리스트 항목")
         item.label = payload.label
         update_fields.append("label")
     if payload.required is not None:

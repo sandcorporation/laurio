@@ -41,6 +41,7 @@ import {
 } from "@/lib/classes/openai-key-check";
 import { useClass } from "@/lib/classes/use-class";
 import { useMembers } from "@/lib/members/use-members";
+import { checkPublicTextForBannedWords } from "@/lib/moderation/public-text-check";
 import { useProblems } from "@/lib/problems/use-problems";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { isSelectedModelReasoning, REASONING_EFFORT_OPTIONS } from "@/lib/scoring/reasoning";
@@ -445,6 +446,15 @@ export default function ClassSettingsPage() {
 
   async function handleNameSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // 제출을 누르는 순간에만 검사한다(spec #474, #479) — 강사 이름은 다른
+    // 체인(#477)의 몫이라 여기서는 클래스 이름만 본다. 서버가 진짜 문이다.
+    if (namesPatch?.name !== undefined) {
+      const bannedWordMessage = checkPublicTextForBannedWords(namesPatch.name, "클래스 이름");
+      if (bannedWordMessage) {
+        setNameError(bannedWordMessage);
+        return;
+      }
+    }
     setNameSaving(true);
     setNameError(null);
     const result = namesPatch !== null ? await updateClass(classId, namesPatch) : null;

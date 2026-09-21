@@ -30,6 +30,7 @@ import { selectCopyTargets } from "@/lib/classes/copy-targets";
 import { isDeleteConfirmationTyped } from "@/lib/classes/delete-confirmation";
 import { useClass } from "@/lib/classes/use-class";
 import { useMyClasses } from "@/lib/classes/use-my-classes";
+import { checkPublicTextForBannedWords } from "@/lib/moderation/public-text-check";
 import { useMutationRequest } from "@/lib/mutations/use-mutation-request";
 import { publishProblemAsTemplate, takedownProblemTemplate } from "@/lib/problem-templates/api";
 import {
@@ -331,6 +332,19 @@ export default function EditProblemPage() {
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!isGradingGuidelineValid(gradingGuideline)) return;
+    // 제출을 누르는 순간에만 검사한다 — 타이핑 중에는 부르지 않는다(spec
+    // #474, #479). 서버가 진짜 문이라 여기서 걸러도 걸러지지 않아도 서버가
+    // 같은 이유로 다시 거절한다.
+    const titleBannedWordMessage = checkPublicTextForBannedWords(title.trim(), "제목");
+    if (titleBannedWordMessage) {
+      mainSave.setError(titleBannedWordMessage);
+      return;
+    }
+    const descriptionBannedWordMessage = checkPublicTextForBannedWords(description, "설명");
+    if (descriptionBannedWordMessage) {
+      mainSave.setError(descriptionBannedWordMessage);
+      return;
+    }
     void mainSave.run(
       () =>
         updateProblem(classId, problemId, {
@@ -368,6 +382,12 @@ export default function EditProblemPage() {
 
   function handleAddItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // 제출을 누르는 순간에만 검사한다(spec #474, #479) — 서버가 진짜 문이다.
+    const bannedWordMessage = checkPublicTextForBannedWords(newItemLabel.trim(), "체크리스트 항목");
+    if (bannedWordMessage) {
+      checklistMutation.setError(bannedWordMessage);
+      return;
+    }
     void checklistMutation.run(
       () => createChecklistItem(classId, problemId, { label: newItemLabel.trim(), required: newItemRequired }),
       {
@@ -382,6 +402,13 @@ export default function EditProblemPage() {
   }
 
   function handleItemLabelSave(itemId: number, label: string) {
+    // 입력칸이 포커스를 잃는 순간이 이 화면의 "제출"이다(spec #474, #479) —
+    // 서버가 진짜 문이다.
+    const bannedWordMessage = checkPublicTextForBannedWords(label, "체크리스트 항목");
+    if (bannedWordMessage) {
+      checklistMutation.setError(bannedWordMessage);
+      return;
+    }
     void checklistMutation.run(() => updateChecklistItem(classId, problemId, itemId, { label }), {
       fallbackMessage: "항목을 저장하지 못했습니다. 잠시 후 다시 시도해주세요.",
       reload,

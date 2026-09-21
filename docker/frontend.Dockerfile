@@ -15,6 +15,10 @@ WORKDIR /app
 # package.json은 운영자 앱 05(#63)가 그 디렉터리를 만들 때 여기 추가한다.
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY frontend/package.json ./frontend/package.json
+# 금칙어(사칭·욕설) 판정 순수 함수(spec #474, #479) — 공모전 제목·설명 폼이
+# 제출 전에 이 패키지로 미리 검사한다. 원본은 backend/core/banned_words.py다
+# (ADR-0051).
+COPY packages/banned-words/package.json ./packages/banned-words/package.json
 COPY packages/bff-shared/package.json ./packages/bff-shared/package.json
 COPY packages/bff-client/package.json ./packages/bff-client/package.json
 # 마크다운 렌더러(#313, 2026-09-16 에 강의실에서 패키지로 옮겼다) — 공개 앱의 공모전
@@ -34,6 +38,7 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 # 여기서 COPY하는 소스는 최초 기동 전까지의 스냅샷일 뿐이다. ----
 FROM base AS dev
 COPY frontend/ ./frontend/
+COPY packages/banned-words/ ./packages/banned-words/
 COPY packages/bff-shared/ ./packages/bff-shared/
 COPY packages/bff-client/ ./packages/bff-client/
 COPY packages/markdown/ ./packages/markdown/
@@ -50,6 +55,7 @@ CMD ["pnpm", "dev"]
 # 그대로 보존한다 — 아래 runner 스테이지가 그 구조를 그대로 옮겨 담는 이유다. ----
 FROM base AS builder
 COPY frontend/ ./frontend/
+COPY packages/banned-words/ ./packages/banned-words/
 COPY packages/bff-shared/ ./packages/bff-shared/
 COPY packages/bff-client/ ./packages/bff-client/
 COPY packages/markdown/ ./packages/markdown/

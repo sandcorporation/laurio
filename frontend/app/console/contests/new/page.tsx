@@ -21,6 +21,7 @@ import { ErrorNote, INPUT_CLASS, PageShell, buttonClass } from "@/app/components
 import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
 import { formatPrize } from "@/lib/contest-format";
+import { checkPublicTextForBannedWords } from "@/lib/contests/banned-words-check";
 import type { Category, DeliverableType, VerificationStatusOut } from "@/lib/contests/grill-types";
 
 import {
@@ -287,6 +288,19 @@ export default function NewContestGrillPage() {
     }
     if (!brief.deadlineAt) {
       setCreateError("마감 기한을 선택해주세요.");
+      return;
+    }
+    // 제출을 누르는 순간에만 검사한다 — 타이핑 중에는 부르지 않는다(spec
+    // #474, #479). 서버가 진짜 문이라(`_reject_if_banned_public_text`) 여기서
+    // 걸러도 걸러지지 않아도 서버가 같은 이유로 다시 거절한다.
+    const titleBannedWordMessage = checkPublicTextForBannedWords(title, "제목");
+    if (titleBannedWordMessage) {
+      setCreateError(titleBannedWordMessage);
+      return;
+    }
+    const descriptionBannedWordMessage = checkPublicTextForBannedWords(brief.description, "설명");
+    if (descriptionBannedWordMessage) {
+      setCreateError(descriptionBannedWordMessage);
       return;
     }
 

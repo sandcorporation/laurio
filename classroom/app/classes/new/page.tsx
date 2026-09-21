@@ -16,6 +16,7 @@ import {
   buttonClass,
 } from "@/app/components/ui";
 import { createClass } from "@/lib/classes/api";
+import { checkPublicTextForBannedWords } from "@/lib/moderation/public-text-check";
 
 export default function NewClassPage() {
   const router = useRouter();
@@ -26,6 +27,14 @@ export default function NewClassPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // 제출을 누르는 순간에만 검사한다 — 타이핑 중에는 부르지 않는다(spec
+    // #474, #479). 서버가 진짜 문이라 여기서 걸러도 걸러지지 않아도 서버가
+    // 같은 이유로 다시 거절한다.
+    const bannedWordMessage = checkPublicTextForBannedWords(name.trim(), "클래스 이름");
+    if (bannedWordMessage) {
+      setError(bannedWordMessage);
+      return;
+    }
     setSubmitting(true);
     setError(null);
     const result = await createClass(name.trim(), instructorDisplayName.trim());

@@ -13,6 +13,7 @@ import { useState } from "react";
 import { DescriptionField } from "@/app/components/description-field";
 import { ErrorNote, INPUT_CLASS, buttonClass } from "@/app/components/ui";
 import { formatPrize } from "@/lib/contest-format";
+import { checkPublicTextForBannedWords } from "@/lib/contests/banned-words-check";
 import type { Category, ContestDetail, DeliverableType } from "@/lib/contests/grill-types";
 
 export type BriefEditPatch = {
@@ -127,6 +128,17 @@ export function BriefEditPanel({
       // 바뀌어 버튼 disabled 판정과 어긋나는 순간에도 조용히 아무 일도 안
       // 하지 않는다 — 왜 저장되지 않았는지를 반드시 알린다.
       setValidationError(formInvalidReason ?? "카테고리를 선택해주세요.");
+      return;
+    }
+    // 제출을 누르는 순간에만 검사한다(spec #474, #479) — 서버가 진짜 문이다.
+    const titleBannedWordMessage = checkPublicTextForBannedWords(form.title.trim(), "제목");
+    if (titleBannedWordMessage) {
+      setValidationError(titleBannedWordMessage);
+      return;
+    }
+    const descriptionBannedWordMessage = checkPublicTextForBannedWords(form.description, "설명");
+    if (descriptionBannedWordMessage) {
+      setValidationError(descriptionBannedWordMessage);
       return;
     }
     setValidationError(null);

@@ -22,7 +22,12 @@ const nextConfig: NextConfig = {
   // packages/bff-shared는 별도로 빌드되지 않는 워크스페이스 소스 패키지다
   // (main이 ./src/index.ts를 직접 가리킨다) — Next의 webpack/SWC 로더가 이
   // 패키지도 앱 코드처럼 컴파일하게 한다.
-  transpilePackages: ["@codemit/bff-shared", "@codemit/bff-client", "@codemit/markdown"],
+  transpilePackages: [
+    "@codemit/banned-words",
+    "@codemit/bff-shared",
+    "@codemit/bff-client",
+    "@codemit/markdown",
+  ],
   // 공개 표면은 서버에서 렌더링되어야 색인된다(ADR-0015). 실수로 클라이언트
   // 렌더링이 되면 조용히 깨지므로, e2e 가 JS 를 끈 HTML 을 직접 확인한다.
   reactStrictMode: true,
