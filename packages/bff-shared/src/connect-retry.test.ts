@@ -76,6 +76,30 @@ describe("retryWhileConnectionRefused", () => {
     ).rejects.toThrow("fetch failed");
   });
 
+  // GlitchTip 64 (2026-09-21) — 예산을 늘린 뒤에도 같은 제목으로 다시 올라왔는데
+  // 원인이 달랐다: `getaddrinfo ENOTFOUND backend`. compose 가 옛 컨테이너를 지우고
+  // 새 것을 만드는 사이에는 포트가 닫힌 것이 아니라 **이름 자체가 없다.** 이름이
+  // 풀리지 않았으니 연결도 맺어지지 않았고, 연결 거부와 똑같이 다시 보내도 된다.
+  // `.invalid` 는 언제나 풀리지 않는 이름이라(RFC 6761) 진짜 resolver 가 낸 예외다.
+  it("배포 중 backend 이름이 잠깐 풀리지 않다가 돌아오면 그 응답을 돌려준다", async () => {
+    const port = await freePort();
+    listenLater(port, 0);
+    let calls = 0;
+
+    const response = await retryWhileConnectionRefused(
+      () => {
+        calls += 1;
+        return calls <= 2
+          ? fetch("http://backend.invalid:8000/api/notifications/unread-count")
+          : fetch(`http://127.0.0.1:${port}/api/notifications/unread-count`);
+      },
+      { delaysMs: [50, 50, 50, 50] },
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls).toBe(3);
+  });
+
   it("연결 거부가 아닌 실패는 다시 보내지 않는다 — 요청이 이미 닿았을 수 있다", async () => {
     let calls = 0;
     const reset = Object.assign(new TypeError("fetch failed"), {

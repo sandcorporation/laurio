@@ -19,9 +19,15 @@
 // 그래서 예산을 `run_scan` 이 쓰는 것과 같은 자릿수(2·4·8초, 합쳐 약 14초)까지
 // 늘렸다. 여전히 상한은 아니다 — 이보다 긴 틈이면 예외를 그대로 낸다.
 //
-// **연결 거부만 다시 보낸다.** 연결이 맺어지지 않았으니 요청은 어디에도 닿지
+// **연결 거부(와 이름이 안 풀린 것)만 다시 보낸다.** 연결이 맺어지지 않았으니 요청은 어디에도 닿지
 // 않았고, POST 도 두 번 처리될 일이 없다. 연결 뒤에 끊긴 것(ECONNRESET 등)은
 // 요청이 이미 처리됐을 수 있어 다시 보내지 않는다.
+//
+// **이름이 풀리지 않는 것도 같은 틈이다**(2026-09-21, GlitchTip 64 가 예산을 늘린
+// 뒤에 다시 올라왔다 — 알림 수, 원인 `getaddrinfo ENOTFOUND backend`). compose 가
+// 옛 컨테이너를 지우고 새 것을 만드는 사이에는 포트가 닫힌 것이 아니라 `backend`
+// 라는 이름 자체가 도커 DNS 에 없다. 이름이 안 풀렸으니 연결도 맺어지지 않았고,
+// 그래서 연결 거부와 똑같이 다시 보내도 된다.
 //
 // **공개 앱 BFF 도 같은 틈에 같은 예외를 냈다**(2026-09-21, GlitchTip 74 — 알림 수
 // 3건). 강의실에만 있던 이 함수를 공유 패키지로 옮겨 두 앱이 같은 예산을 쓴다.
@@ -32,11 +38,14 @@
 
 export const DEFAULT_DELAYS_MS = [250, 500, 1000, 2000, 4000, 8000] as const;
 
+// 연결이 맺어지기 전에 난 실패만 — 요청이 어디에도 닿지 않았다는 것이 확실한 것.
+const NOT_CONNECTED_CODES: ReadonlySet<unknown> = new Set(["ECONNREFUSED", "ENOTFOUND"]);
+
 function isConnectionRefused(error: unknown): boolean {
   if (!(error instanceof TypeError)) return false;
   const cause = (error as { cause?: unknown }).cause;
   return (
-    typeof cause === "object" && cause !== null && (cause as { code?: unknown }).code === "ECONNREFUSED"
+    typeof cause === "object" && cause !== null && NOT_CONNECTED_CODES.has((cause as { code?: unknown }).code)
   );
 }
 
