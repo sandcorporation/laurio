@@ -1316,8 +1316,14 @@ jobs:
           # 컨테이너 포트를 러너 호스트에 열지 않고, 그 컨테이너의 네트워크에 curl 을 붙여 친다 —
           # mac 러너(Docker Desktop 위의 컨테이너)에서는 호스트에 연 포트가 러너의 127.0.0.1 로
           # 닿는다는 보장이 없다. 이 모양은 sub·mac 어디서나 같다.
-          c() { docker run --rm --network container:frontend-boot-ok curlimages/curl:8.11.1 "$@"; }
-          docker pull -q curlimages/curl:8.11.1 >/dev/null
+          # 125 는 curl 이 아니라 도커 데몬의 실패(위 lease 오류 등)다 — 그때만 다시 띄운다.
+          c() { for _ in 1 2 3; do rc=0; docker run --rm --network container:frontend-boot-ok curlimages/curl:8.11.1 "$@" || rc=$?; [ "$rc" -ne 125 ] && return "$rc"; sleep 2; done; return 125; }
+          # 이미 있으면 받지 않는다 — mac 의 Docker Desktop 에서 `docker pull` 이 같은 시각의 정리
+          # (builder prune)와 겹쳐 `unable to lease content` 로 세 잡이 함께 죽었다(8cc3039).
+          for _ in 1 2 3; do
+            docker image inspect curlimages/curl:8.11.1 >/dev/null 2>&1 && break
+            docker pull -q curlimages/curl:8.11.1 >/dev/null 2>&1 || sleep 3
+          done
           docker rm -f frontend-boot-ok >/dev/null 2>&1 || true
           docker run -d --name frontend-boot-ok \
             -e CODEMIT_DEPLOYMENT_TARGET=production \
@@ -1405,8 +1411,14 @@ jobs:
           # 컨테이너 포트를 러너 호스트에 열지 않고, 그 컨테이너의 네트워크에 curl 을 붙여 친다 —
           # mac 러너(Docker Desktop 위의 컨테이너)에서는 호스트에 연 포트가 러너의 127.0.0.1 로
           # 닿는다는 보장이 없다. 이 모양은 sub·mac 어디서나 같다.
-          c() { docker run --rm --network container:frontend-boot-ok curlimages/curl:8.11.1 "$@"; }
-          docker pull -q curlimages/curl:8.11.1 >/dev/null
+          # 125 는 curl 이 아니라 도커 데몬의 실패(위 lease 오류 등)다 — 그때만 다시 띄운다.
+          c() { for _ in 1 2 3; do rc=0; docker run --rm --network container:frontend-boot-ok curlimages/curl:8.11.1 "$@" || rc=$?; [ "$rc" -ne 125 ] && return "$rc"; sleep 2; done; return 125; }
+          # 이미 있으면 받지 않는다 — mac 의 Docker Desktop 에서 `docker pull` 이 같은 시각의 정리
+          # (builder prune)와 겹쳐 `unable to lease content` 로 세 잡이 함께 죽었다(8cc3039).
+          for _ in 1 2 3; do
+            docker image inspect curlimages/curl:8.11.1 >/dev/null 2>&1 && break
+            docker pull -q curlimages/curl:8.11.1 >/dev/null 2>&1 || sleep 3
+          done
           html=$(c -sS --max-time 10 http://127.0.0.1:3000/privacy)
           [[ "$html" == *"ci-guard@example.test"* ]] || {
             echo "::error::구운 /privacy 에 문의 주소가 없다 — NEXT_PUBLIC_SUPPORT_EMAIL 빌드 인자가 빠졌는가?"
@@ -1529,8 +1541,14 @@ jobs:
           # 컨테이너 포트를 러너 호스트에 열지 않고, 그 컨테이너의 네트워크에 curl 을 붙여 친다 —
           # mac 러너(Docker Desktop 위의 컨테이너)에서는 호스트에 연 포트가 러너의 127.0.0.1 로
           # 닿는다는 보장이 없다. 이 모양은 sub·mac 어디서나 같다.
-          c() { docker run --rm --network container:operator-boot-ok curlimages/curl:8.11.1 "$@"; }
-          docker pull -q curlimages/curl:8.11.1 >/dev/null
+          # 125 는 curl 이 아니라 도커 데몬의 실패(위 lease 오류 등)다 — 그때만 다시 띄운다.
+          c() { for _ in 1 2 3; do rc=0; docker run --rm --network container:operator-boot-ok curlimages/curl:8.11.1 "$@" || rc=$?; [ "$rc" -ne 125 ] && return "$rc"; sleep 2; done; return 125; }
+          # 이미 있으면 받지 않는다 — mac 의 Docker Desktop 에서 `docker pull` 이 같은 시각의 정리
+          # (builder prune)와 겹쳐 `unable to lease content` 로 세 잡이 함께 죽었다(8cc3039).
+          for _ in 1 2 3; do
+            docker image inspect curlimages/curl:8.11.1 >/dev/null 2>&1 && break
+            docker pull -q curlimages/curl:8.11.1 >/dev/null 2>&1 || sleep 3
+          done
           docker rm -f operator-boot-ok >/dev/null 2>&1 || true
           docker run -d --name operator-boot-ok \
             -e CODEMIT_DEPLOYMENT_TARGET=production \
@@ -1694,8 +1712,14 @@ jobs:
           # 컨테이너 포트를 러너 호스트에 열지 않고, 그 컨테이너의 네트워크에 curl 을 붙여 친다 —
           # mac 러너(Docker Desktop 위의 컨테이너)에서는 호스트에 연 포트가 러너의 127.0.0.1 로
           # 닿는다는 보장이 없다. 이 모양은 sub·mac 어디서나 같다.
-          c() { docker run --rm --network container:classroom-boot-ok curlimages/curl:8.11.1 "$@"; }
-          docker pull -q curlimages/curl:8.11.1 >/dev/null
+          # 125 는 curl 이 아니라 도커 데몬의 실패(위 lease 오류 등)다 — 그때만 다시 띄운다.
+          c() { for _ in 1 2 3; do rc=0; docker run --rm --network container:classroom-boot-ok curlimages/curl:8.11.1 "$@" || rc=$?; [ "$rc" -ne 125 ] && return "$rc"; sleep 2; done; return 125; }
+          # 이미 있으면 받지 않는다 — mac 의 Docker Desktop 에서 `docker pull` 이 같은 시각의 정리
+          # (builder prune)와 겹쳐 `unable to lease content` 로 세 잡이 함께 죽었다(8cc3039).
+          for _ in 1 2 3; do
+            docker image inspect curlimages/curl:8.11.1 >/dev/null 2>&1 && break
+            docker pull -q curlimages/curl:8.11.1 >/dev/null 2>&1 || sleep 3
+          done
           docker rm -f classroom-boot-ok >/dev/null 2>&1 || true
           docker run -d --name classroom-boot-ok \
             -e CODEMIT_DEPLOYMENT_TARGET=production \
@@ -1735,8 +1759,14 @@ jobs:
           # 컨테이너 포트를 러너 호스트에 열지 않고, 그 컨테이너의 네트워크에 curl 을 붙여 친다 —
           # mac 러너(Docker Desktop 위의 컨테이너)에서는 호스트에 연 포트가 러너의 127.0.0.1 로
           # 닿는다는 보장이 없다. 이 모양은 sub·mac 어디서나 같다.
-          c() { docker run --rm --network container:classroom-boot-ok curlimages/curl:8.11.1 "$@"; }
-          docker pull -q curlimages/curl:8.11.1 >/dev/null
+          # 125 는 curl 이 아니라 도커 데몬의 실패(위 lease 오류 등)다 — 그때만 다시 띄운다.
+          c() { for _ in 1 2 3; do rc=0; docker run --rm --network container:classroom-boot-ok curlimages/curl:8.11.1 "$@" || rc=$?; [ "$rc" -ne 125 ] && return "$rc"; sleep 2; done; return 125; }
+          # 이미 있으면 받지 않는다 — mac 의 Docker Desktop 에서 `docker pull` 이 같은 시각의 정리
+          # (builder prune)와 겹쳐 `unable to lease content` 로 세 잡이 함께 죽었다(8cc3039).
+          for _ in 1 2 3; do
+            docker image inspect curlimages/curl:8.11.1 >/dev/null 2>&1 && break
+            docker pull -q curlimages/curl:8.11.1 >/dev/null 2>&1 || sleep 3
+          done
           html=$(c -sS --max-time 10 http://127.0.0.1:3000/login)
           # **파이프로 찾지 않는다**(2026-09-20). 예전에는 `echo "$html" | grep -q …`
           # 였는데, `grep -q` 는 첫 일치에서 곧바로 끝나므로 HTML 이 파이프 버퍼(64KB)
