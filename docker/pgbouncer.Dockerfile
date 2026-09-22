@@ -9,6 +9,10 @@
 # (docker-entrypoint.sh) — dev·staging·prod 가 가리키는 실제 DB 호스트가
 # 다르기 때문이다(search 의 DISABLE_SECURITY_PLUGIN 처럼 "이미지는 하나,
 # 런타임 값으로 갈린다"는 같은 관용구).
+#
+# 이 파일이나 docker/pgbouncer/ 를 바꾸면 배포가 풀러를 갈아 끼우고, 그 전에
+# backend·celery-worker·celery-beat·events 를 먼저 내린다(deploy.sh 의 cmd_up,
+# #481~#484) — 몇 초의 502 가 그 대가다.
 FROM debian:bookworm-slim
 
 # netcat-openbsd 는 compose 헬스체크(`nc -z`)용이다 — pgbouncer 자신은 ping
