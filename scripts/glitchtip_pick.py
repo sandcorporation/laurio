@@ -289,6 +289,89 @@ def _environments_of(issue: dict) -> set[str]:
     return set()
 
 
+#: 재발을 이미 다시 집은 기록 — `{오류 id: 그때의 lastSeen}`. 같은 재발을 매분 또 집지
+#: 않으려는 자리다. 새 이벤트가 오면 lastSeen 이 바뀌어 다시 집힌다.
+REGRESSION_LEDGER = pathlib.Path("~/.codemit/glitchtip-regressions.json").expanduser()
+
+#: 수정 커밋을 찾을 때 거슬러 볼 main 커밋 수. 수정은 대개 최근이다.
+FIX_LOOKBACK = 600
+
+_TRAILER = re.compile(r"^[ \t]*GlitchTip:[ \t]*(\d+)[ \t]*$", re.MULTILINE | re.IGNORECASE)
+
+
+def _latest_fixes() -> dict[str, str]:
+    """`origin/main` 에서 오류마다 **가장 최근의** 수정 커밋 sha 를 모은다.
+
+    커밋 메시지의 `GlitchTip: <id>` 줄로 찾는다 — 해결 표시(`glitchtip_resolve.py`)가
+    읽는 것과 같은 줄이다. 한 오류를 두 번 고쳤으면 **최신 것**이 기준이다: 옛 수정만
+    포함한 코드에서 난 이벤트는 「최신 수정 이전의 코드」이지 재발이 아니다.
+    """
+
+    def git(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["git", "-C", str(_repo_root()), *args], capture_output=True, text=True, timeout=TIMEOUT_SECONDS
+        )
+
+    git("fetch", "origin", "main", "-q")
+    log = git("log", "origin/main", f"-n{FIX_LOOKBACK}", "--format=%H%x00%B%x01")
+    fixes: dict[str, str] = {}
+    for entry in log.stdout.split("\x01"):
+        sha, _, body = entry.strip().partition("\x00")
+        for issue_id in _TRAILER.findall(body):
+            # git log 은 최신순이라 처음 본 것이 최신 수정이다.
+            fixes.setdefault(issue_id, sha)
+    return fixes
+
+
+def _contains(release: str, fix: str) -> bool:
+    """`release` 가 `fix` 를 포함하는가 — 즉 그 이벤트가 수정이 든 코드에서 났는가."""
+
+    return (
+        subprocess.run(
+            ["git", "-C", str(_repo_root()), "merge-base", "--is-ancestor", fix, release],
+            capture_output=True,
+        ).returncode
+        == 0
+    )
+
+
+def _load_ledger() -> dict[str, str]:
+    try:
+        return json.loads(REGRESSION_LEDGER.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _regression_of(issue: dict, fixes: dict[str, str], ledger: dict[str, str]) -> str | None:
+    """클레임된 오류가 **아직 다시 집지 않은 재발**이면 그 수정 커밋 sha 를 돌려준다.
+
+    **왜 필요한가.** 「코멘트가 하나라도 있으면 집지 않는다」는 사람의 메모를 존중하려고
+    둔 규칙인데, 정할 때 **재발을 고려하지 않았다.** 자동 진단이 고치고 CI 가 닫은 오류가
+    고친 코드에서 다시 나면 GlitchTip 이 스스로 미해결로 되살리는데, 클레임 코멘트가
+    남아 있어 **자동화가 영영 다시 보지 않았다** — 오류 64 가 그랬다(2026-09-22).
+
+    **재발의 판정은 「최신 이벤트의 release 가 우리 최신 수정을 포함하는가」다.** 오류 64
+    에서 실측으로 확인했다: 마지막 이벤트의 release 3037fa2 가 수정 4ac6986 을 포함했다.
+    포함하지 않으면 그 이벤트는 수정이 배포되기 전의 옛 코드에서 난 것이라 재발이 아니다 —
+    그걸 재발로 보면 배포 대기 5~10분 사이에 이미 고친 오류를 또 집는다.
+
+    **수정 커밋이 없으면 재발이 아니다.** 사람이 메모를 달았거나 자동 진단이 재현하지
+    못하고 사람에게 넘긴 오류다 — 그 규칙은 그대로 존중한다.
+    """
+
+    issue_id = str(issue.get("id"))
+    fix = fixes.get(issue_id)
+    if not fix:
+        return None
+    release = ((issue.get("lastRelease") or {}) or {}).get("version") or ""
+    if not release or not _contains(release, fix):
+        return None
+    if ledger.get(issue_id) == issue.get("lastSeen"):
+        # 이 발생 시각에서 이미 다시 집었다. 새 이벤트가 오면 lastSeen 이 바뀐다.
+        return None
+    return fix
+
+
 def _pick(args: argparse.Namespace) -> dict | None:
     query_parts = [] if args.any_status else ["is:unresolved"]
     params = {
@@ -305,13 +388,23 @@ def _pick(args: argparse.Namespace) -> dict | None:
     if status != 200 or not isinstance(issues, list):
         raise RuntimeError(f"이슈 목록을 받지 못했다: {status} {str(issues)[:200]}")
 
+    fixes: dict[str, str] | None = None  # 클레임된 후보가 나올 때만 git 을 친다.
+    ledger = _load_ledger()
+
     for issue in issues:
         # 우리가 일부러 던지는 예외는 진단 대상이 아니다.
         if (issue.get("metadata") or {}).get("type") in DELIBERATE_EXCEPTION_TYPES:
             continue
-        # 이미 손 댄 것은 건너뛴다 — 클레임이 곧 이 값이다.
+        issue.pop("_regression_of", None)
+        # 이미 손 댄 것은 건너뛴다 — 클레임이 곧 이 값이다. **다만 수정한 코드에서
+        # 재발한 것은 다시 집는다**(`_regression_of`).
         if not args.any_claimed and int(issue.get("numComments") or 0) > 0:
-            continue
+            if fixes is None:
+                fixes = _latest_fixes()
+            previous_fix = _regression_of(issue, fixes, ledger)
+            if not previous_fix:
+                continue
+            issue["_regression_of"] = previous_fix
         if not args.any_environment and TARGET_ENVIRONMENT not in _environments_of(issue):
             continue
         return issue
@@ -377,6 +470,9 @@ def main() -> int:
         "environments": sorted(_environments_of(issue)),
         # 어느 커밋의 코드에서 났는가 — `SENTRY_RELEASE` 가 커밋 SHA 다.
         "release": ((issue.get("lastRelease") or {}) or {}).get("version"),
+        # **재발이면 지난번 수정 커밋**이다 — 세션은 「처음 보는 오류」가 아니라 「고쳤는데
+        # 그 코드에서 또 난 오류」를 받는 것이므로, 그 수정이 무엇을 놓쳤는지부터 봐야 한다.
+        "regression_of": issue.get("_regression_of"),
     }
 
     if not args.dry_run:
@@ -384,7 +480,12 @@ def main() -> int:
             f"issues/{issue['id']}/comments/",
             _TOKEN,
             method="POST",
-            body={"data": {"text": f"{CLAIM_PREFIX} 이 오류를 자동 진단이 집었습니다. 결과를 이 이슈에 다시 적습니다."}},
+            body={"data": {"text": (
+                f"{CLAIM_PREFIX} 이 오류가 **수정이 들어간 코드에서 재발**해 자동 진단이 다시 "
+                f"집었습니다(지난 수정 `{picked['regression_of'][:12]}`). 결과를 이 이슈에 다시 적습니다."
+                if picked["regression_of"]
+                else f"{CLAIM_PREFIX} 이 오류를 자동 진단이 집었습니다. 결과를 이 이슈에 다시 적습니다."
+            )}},
         )
         if status != 201:
             # 클레임에 실패하면 **집지 않는다** — 클레임 없이 진단하면 다음 분이 같은
@@ -396,6 +497,14 @@ def main() -> int:
         claim_file = pathlib.Path(args.claim_file).expanduser()
         claim_file.parent.mkdir(parents=True, exist_ok=True)
         claim_file.write_text(json.dumps(picked, ensure_ascii=False, indent=2))
+
+    if picked["regression_of"] and not args.dry_run:
+        # 이 발생 시각에서 다시 집었다고 적는다 — 적지 않으면 세션이 끝나 잠금이 풀린
+        # 다음 분에 **같은 재발을 또 집는다**(재현 실패로 미해결인 채 남으니까).
+        ledger = _load_ledger()
+        ledger[str(picked["id"])] = picked["lastSeen"]
+        REGRESSION_LEDGER.parent.mkdir(parents=True, exist_ok=True)
+        REGRESSION_LEDGER.write_text(json.dumps(ledger, ensure_ascii=False, indent=2))
 
     if holds_lock:
         # **클레임이 성공한 뒤에만 잠근다.** 앞에서 실패해 `return 1` 한 경로에 잠금이

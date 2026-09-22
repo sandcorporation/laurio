@@ -42,9 +42,10 @@ on:
 #
 # **그래서 main 에 빠르게 연달아 push 하면 중간 커밋은 CI 를 아예 못 받는다.** 마지막
 # 커밋만 초록이면 그 앞의 것들은 검증되지 않은 채 지나간다. `production` 승격은
-# 「CI 를 통과한 main 커밋」만 따라가므로 안전하지만, `glitchtip-resolve` 처럼 **그
-# 커밋의 push 이벤트에만 붙어 있는 잡은 기회를 영구히 잃는다**(그 잡 정의 옆 주석
-# 참고). 자동화가 push 한 직후에는 사람이 몇 분 기다린다.
+# 「CI 를 통과한 main 커밋」만 따라가므로 안전하다. **그 커밋의 push 에만 붙은 잡은
+# 기회를 잃는다** — `glitchtip-resolve` 가 그랬고, 지금은 범위를 「직전에 그 잡이
+# 성공한 실행 이후」로 잡아 다음 실행이 줍는다(그 잡 정의 옆 주석 참고). 그런 잡을
+# 새로 만들 때는 같은 문제를 같은 방식으로 풀어야 한다.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: false
@@ -449,20 +450,25 @@ jobs:
   # 것은 뒤쪽이다). 스크립트는 어떤 실패에도 exit 0 한다: 이미 머지된 수정을
   # 되돌릴 수는 없고, 표시 실패는 배포를 세울 일이 아니다(이유는 그 파일에).
   #
-  # **이 잡은 그 커밋의 push 이벤트에만 붙어 있다 — 기회가 한 번뿐이다.** 위
-  # concurrency 주석의 「pending 은 하나만」 때문에, 이 커밋의 실행이 대기 중에
-  # 취소되면 `GlitchTip:` 줄은 아무도 읽지 않는다. 다음 push 의 범위
-  # (`before..sha`)는 이 커밋을 포함하지 않으므로 저절로 만회되지도 않는다.
-  # 그리고 자동 진단은 클레임 코멘트 때문에 그 오류를 다시 집지 않으므로, 오류가
-  # 조용히 영구 미해결로 남는다.
+  # **범위는 「직전에 이 잡이 성공한 실행 이후」다**(2026-09-22). 예전에는
+  # `before..sha` 였는데, 위 concurrency 주석의 「pending 은 하나만」 때문에 대기
+  # 중에 취소된 커밋은 다음 push 의 범위에도 들지 않아 **영영 읽히지 않았다.**
+  # 9-18 에 이 구멍을 적으며 「자동화가 push 한 직후엔 사람이 기다린다」를 완화책으로
+  # 뒀는데, 정작 **자동화 자신이** 2분 간격으로 셋을 밀어 가운데 오류 75 가 남았다 —
+  # 사람이 기다리는 규칙으로는 막을 수 없는 경우였다.
   #
-  # **놓친 것은 손으로 만회한다** — 범위를 직접 주면 된다(스크립트가 그 형태다):
+  # 지금은 취소된 커밋을 **다음에 이 잡이 성공하는 실행이 줍는다.** 그러면서도 넓은
+  # 창의 위험(재발을 숨기는 것)은 없다: 기준이 「이 잡이 성공한 실행」이라 커밋 하나는
+  # 그런 실행 **하나에만** 속하고, 한 번 읽힌 커밋은 다시 읽히지 않는다. 기준을 「실행
+  # 전체가 초록」으로 잡지 않은 이유도 같다 — 테스트는 초록인데 e2e 가 빨개 실행이
+  # 실패하면 이 잡은 이미 돌아서 닫았는데, 그 실행을 빼면 다음에 같은 커밋을 다시 읽어
+  # 그 사이 재발한 오류를 해결로 덮는다.
   #
-  #   scripts/glitchtip_resolve.py <놓친커밋>~1 <놓친커밋>
+  # 둘 다 실제 실행으로 재현해 확인했다: 오류 75 를 놓쳤던 실행(52d0fea)은 새 방식으로
+  # 75·77 을 둘 다 줍고, 그다음 실행은 기준을 52d0fea 로 잡아 둘을 다시 읽지 않는다.
   #
-  # 일부러 넓은 창을 매번 훑지 않는다: GlitchTip 은 해결된 오류가 재발하면 스스로
-  # 미해결로 되돌리는데, 옛 커밋의 줄을 매 push 마다 다시 읽으면 그렇게 되살아난
-  # 오류를 계속 해결로 덮어 **재발을 숨긴다**. 놓치는 것보다 나쁘다.
+  # 손으로 만회해야 할 일이 생기면 범위를 직접 준다: `scripts/glitchtip_resolve.py
+  # <놓친커밋>~1 <놓친커밋>`.
   # **push 직후 GlitchTip 에 「수정이 들어갔다」를 적는다 — `needs` 가 없다.**
   # 해결 표시는 `needs: test` 뒤에 오므로 push 와 GlitchTip 사이에 5~10분이 있다
   # (실측: 커밋 05:03:19 → 표시 05:11:06). 그 사이 화면은 **「아직 안 닫혔다」와
@@ -501,18 +507,20 @@ jobs:
           # 체크아웃(기본값 depth 1)에서는 `before..sha` 가 성립하지 않는다.
           fetch-depth: 0
 
-      - name: Errors fixed by this push are closed in GlitchTip
+      - name: Errors fixed since this job last succeeded are closed in GlitchTip
         env:
           GLITCHTIP_TOKEN_FOR_AUTOMATION: ${{ secrets.GLITCHTIP_TOKEN_FOR_AUTOMATION }}
+          # 직전에 이 잡이 성공한 실행을 찾으려고 Actions API 를 읽는다. 저장소의
+          # 기본 워크플로 토큰 권한(read)으로 충분하다.
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
-          # 첫 push 나 force push 면 `before` 가 0000… 이다 — 그때는 HEAD 커밋
-          # 하나만 본다(없는 범위를 물어보면 git 이 죽는다).
-          BASE="${{ github.event.before }}"
-          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ] \
-             || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
-            BASE="${{ github.sha }}~1"
-          fi
-          python3 scripts/glitchtip_resolve.py "$BASE" "${{ github.sha }}"
+          # 범위는 `before..sha` 가 아니라 **직전에 이 잡이 성공한 실행 이후**다
+          # (2026-09-22). 짧은 간격으로 연달아 push 하면 가운데 실행이 대기 중에
+          # 취소되는데(위 concurrency 주석), `before..sha` 는 그 커밋을 포함하지 않아
+          # 그 커밋의 `GlitchTip:` 줄이 영영 읽히지 않았다 — 자동 진단이 2분 간격으로
+          # 셋을 밀어 오류 75 가 그렇게 남았다. 이유와 재발을 덮지 않는 근거는
+          # 스크립트의 `_last_resolved_head` 에 있다. 찾지 못하면 이 커밋 하나만 본다.
+          python3 scripts/glitchtip_resolve.py auto "${{ github.sha }}"
 
   frontend-pure-unit-tests:
     runs-on: [self-hosted, sub]
