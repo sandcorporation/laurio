@@ -281,7 +281,7 @@ mac 러너는 Apple Silicon 의 Docker Desktop 위 러너 컨테이너(Linux/ARM
   환경마다 따로 굽는다 — 그 값의 원본은 서버 env 가 아니라 **저장소 변수 `STAGING_*`·
   `PROD_*`** 다(조직이 free 요금제라 비공개 저장소의 environment 기능을 못 써 접두어로
   가른다). 값을 바꾸면 CI 를 다시 돌려야 이미지에 반영된다.
-- **mac 이 꺼져 있으면 두 이미지 잡이 줄을 서고, staging 배포와 production 승격이 함께
+- **mac 이 꺼져 있으면 두 이미지 잡(과 deploy-guard 셋)이 줄을 서고, staging 배포와 production 승격이 함께
   기다린다** — 위 비상구로 옮긴다. oracle 에서 굽는 대안은 prod 서버를 느리게 해서 버렸다.
 - **서버는 배포 에이전트 컨테이너에 한 번 저장해 둔 ghcr 로그인으로 받는다**(read:packages
   classic PAT). 두 컨테이너(sub 의 `jenkins`, oracle 의 `jenkins-desktop-agent`) 모두
@@ -1589,11 +1589,25 @@ Problem Statement 를 읽고 「어댑터 실제 구현은 스토리지 하나�
 
 ## CI 는 셀프호스티드 러너에서, 프로덕션 이미지로 돈다
 
-GitHub 호스티드 러너는 과금이 막혀 못 쓴다. 19개 잡 중 17개가 `runs-on: [self-hosted, sub]` —
-staging 배포 호스트와 **같은 머신**이다. 나머지 둘(`images-staging`·`images-prod`)은 mac 러너
+GitHub 호스티드 러너는 과금이 막혀 못 쓴다. 20개 잡 중 15개가 `runs-on: [self-hosted, sub]` —
+staging 배포 호스트와 **같은 머신**이다. 나머지 다섯은 mac 러너
 (`[self-hosted, ARM64, mac-arm]` — sub 와 같은 `myoung34/github-runner` 컨테이너, 조직 범위)에서
-배포 이미지를 굽는다(위 「이미지는 CI 가 굽는다」, 비상구 `IMAGE_BUILDER=sub`). 러너 컨테이너는 `--network host` 로 돌고 호스트
+돈다: 배포 이미지를 굽는 둘(`images-staging`·`images-prod`, 위 「이미지는 CI 가 굽는다」)과
+프로덕션 이미지를 구워 띄워 보는 deploy-guard 셋이다. 다섯 모두 비상구 `IMAGE_BUILDER=sub` 하나로
+함께 sub 로 돌아간다. 러너 컨테이너는 `--network host` 로 돌고 호스트
 docker 소켓을 물어 컨테이너를 바깥에 띄운다(DooD).
+
+**deploy-guard 셋을 mac 으로 옮긴 이유는 sub 의 디스크다**(2026-09-22). 강의실의 순수 함수
+테스트 세 건이 각각 5초씩 멈춰 CI 가 빨갛게 났는데(재실행하니 초록), 그 순간 sub 는 가용
+메모리가 17GB 넘게 남은 채 **디스크 대기(iowait)가 전 코어 평균 51%, IO 압박(PSI)이 68%**
+였다(oracle Prometheus 의 sub node-exporter). 같은 30초에 `frontend-deploy-guard` 가 Next 이미지를
+굽고 있었다 — 메모리가 아니라 이미지 레이어 쓰기가 같은 SATA SSD 를 막았다. Next 빌드 한 번은
+앱마다 2.5~3.5GB(프로세스 트리 RSS 합)를 쓰고, worker 수(`experimental.cpus`)를 줄여도 최대치가
+줄지 않는다 — 대부분을 webpack 을 도는 주 프로세스 하나가 쥔다. **그래서 deploy-guard 는
+컨테이너 포트를 호스트에 열지 않는다** — mac 러너(Docker Desktop 위의 컨테이너)에서 호스트에 연
+포트가 러너의 `127.0.0.1` 로 닿는다는 보장이 없어, 띄운 컨테이너의 네트워크에 curl 컨테이너를
+붙여(`--network container:<이름>`) 친다. sub-docker-cleanup 이 mac 에 닿지 않으므로 구운 이미지는
+잡이 스스로 지운다. **이 잡들은 PR 에서도 돈다** — mac 이 꺼져 있으면 PR 의 CI 도 줄을 선다.
 
 **CI 는 `docker/compose.ci.yaml` 을 dev compose 위에 겹쳐 쓴다 — 지우면 CI 가 깨진다.**
 `compose.dev.yaml` 의 `..:/app` 은 **개발용 핫리로드 장치**다. 러너 안에서 그 상대 경로는
@@ -1611,7 +1625,8 @@ docker 소켓을 물어 컨테이너를 바깥에 띄운다(DooD).
 **로컬에서 스위트를 돌릴 때만** 해당한다.
 
 **이미지를 굽는 잡 뒤에는 도커 디스크를 비운다**(2026-09-17). sub 의 compose 빌드 잡
-일곱(`celery-broker`·e2e 셋·deploy-guard 셋)이 커밋마다 같은 이름으로 다시 구워 태그 잃은
+일곱(`celery-broker`·e2e 셋·deploy-guard 셋 — deploy-guard 는 2026-09-22 부터 mac 에서 돌고
+비상구일 때만 sub 로 온다)이 커밋마다 같은 이름으로 다시 구워 태그 잃은
 이미지와 빌드 캐시가 쌓였다(정리 전 캐시 107GB). 러너 셋이 같은 호스트 데몬을 쓰므로
 `sub-docker-cleanup` 잡 하나가 그 일곱 뒤에(결과와 무관하게) 태그 잃은 이미지와 **하루 넘게
 안 쓴** 빌드 캐시를 지운다. 이미지 잡 둘(mac, 비상구 sub)도 끝에 같은 정리를 하되, 데몬의

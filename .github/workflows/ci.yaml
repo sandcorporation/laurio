@@ -1161,7 +1161,7 @@ jobs:
   # 직접 끊는 이유이자, 이 잡이 "빌드가 성공했다"가 아니라 "컨테이너가 실제로
   # 죽는다"를 확인하는 이유다.
   frontend-deploy-guard:
-    runs-on: [self-hosted, sub]
+    runs-on: ${{ fromJSON(vars.IMAGE_BUILDER == 'sub' && '["self-hosted", "sub"]' || '["self-hosted", "ARM64", "mac-arm"]') }}
 
     steps:
       - uses: actions/checkout@v4
@@ -1313,6 +1313,11 @@ jobs:
       - name: Boots with a complete production config and forces Secure cookies
         run: |
           set -euo pipefail
+          # 컨테이너 포트를 러너 호스트에 열지 않고, 그 컨테이너의 네트워크에 curl 을 붙여 친다 —
+          # mac 러너(Docker Desktop 위의 컨테이너)에서는 호스트에 연 포트가 러너의 127.0.0.1 로
+          # 닿는다는 보장이 없다. 이 모양은 sub·mac 어디서나 같다.
+          c() { docker run --rm --network container:frontend-boot-ok curlimages/curl:8.11.1 "$@"; }
+          docker pull -q curlimages/curl:8.11.1 >/dev/null
           docker rm -f frontend-boot-ok >/dev/null 2>&1 || true
           docker run -d --name frontend-boot-ok \
             -e CODEMIT_DEPLOYMENT_TARGET=production \
@@ -1323,7 +1328,6 @@ jobs:
             -e KAKAO_SECRET_KEY=ci-guard-only-kakao-secret-key \
             -e KAKAO_REDIRECT_URI=https://codemit.example/api/auth/social/kakao/callback \
             -e NEXT_PUBLIC_TOSS_CLIENT_KEY=ci-guard-only-toss-client-key \
-            -p 3100:3000 \
             codemit-frontend-runner-ci
 
           # 백엔드가 없어 /healthz 는 503(degraded)이 정상이다 — 여기서 보는 건
@@ -1349,7 +1353,7 @@ jobs:
           # 정말 비어 있는 극단적인 경우를 위한 방어로 `${status:-000}`만 쓴다.
           status="000"
           for _ in $(seq 1 20); do
-            status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3100/healthz 2>/dev/null || true)
+            status=$(c -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/healthz 2>/dev/null || true)
             status="${status:-000}"
             [ "$status" = "000" ] || break
             sleep 1
@@ -1365,7 +1369,7 @@ jobs:
           # frontend/app/api/auth/logout/route.ts는 access 쿠키가 없으면 백엔드를
           # 부르지 않고 곧바로 clearSessionCookies를 실어 응답한다 — 그래서 백엔드
           # 없이도 이 경로 하나로 쿠키 속성을 직접 관찰할 수 있다.
-          set_cookie=$(curl -s -D - -o /dev/null -X POST http://127.0.0.1:3100/api/auth/logout \
+          set_cookie=$(c -s -D - -o /dev/null -X POST http://127.0.0.1:3000/api/auth/logout \
             -H "Origin: https://codemit.example")
           echo "$set_cookie"
           echo "$set_cookie" | grep -qi "codemit_access=.*Secure" \
@@ -1379,8 +1383,8 @@ jobs:
           # 서빙)나 위 healthz 확인에는 전혀 보이지 않는다. 실제로 카카오 로그인
           # 버튼 이미지가 prod 에서 그렇게 깨졌다. 이미지 최적화 경로(next/image
           # 가 실제로 쓰는 주소)까지 함께 본다.
-          asset=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3100/kakao/kakao_login_large_wide.png 2>/dev/null || true)
-          optimized=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:3100/_next/image?url=%2Fkakao%2Fkakao_login_large_wide.png&w=640&q=75" 2>/dev/null || true)
+          asset=$(c -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/kakao/kakao_login_large_wide.png 2>/dev/null || true)
+          optimized=$(c -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:3000/_next/image?url=%2Fkakao%2Fkakao_login_large_wide.png&w=640&q=75" 2>/dev/null || true)
           echo "public asset: ${asset:-000} / optimized: ${optimized:-000}"
           if [ "${asset:-000}" != "200" ] || [ "${optimized:-000}" != "200" ]; then
             echo "::error::public/ 의 정적 자산이 프로덕션 이미지에서 서빙되지 않는다(원본=${asset:-000}, 최적화=${optimized:-000}) — Dockerfile 의 public 복사를 확인한다"
@@ -1398,7 +1402,12 @@ jobs:
       - name: The privacy policy carries a contact address baked at build time
         run: |
           set -euo pipefail
-          html=$(curl -sS --max-time 10 http://127.0.0.1:3100/privacy)
+          # 컨테이너 포트를 러너 호스트에 열지 않고, 그 컨테이너의 네트워크에 curl 을 붙여 친다 —
+          # mac 러너(Docker Desktop 위의 컨테이너)에서는 호스트에 연 포트가 러너의 127.0.0.1 로
+          # 닿는다는 보장이 없다. 이 모양은 sub·mac 어디서나 같다.
+          c() { docker run --rm --network container:frontend-boot-ok curlimages/curl:8.11.1 "$@"; }
+          docker pull -q curlimages/curl:8.11.1 >/dev/null
+          html=$(c -sS --max-time 10 http://127.0.0.1:3000/privacy)
           [[ "$html" == *"ci-guard@example.test"* ]] || {
             echo "::error::구운 /privacy 에 문의 주소가 없다 — NEXT_PUBLIC_SUPPORT_EMAIL 빌드 인자가 빠졌는가?"
             printf '%s' "$html" | head -c 2000
@@ -1409,7 +1418,13 @@ jobs:
 
       - name: Tear down the boot-guard container
         if: always()
-        run: docker rm -f frontend-boot-ok >/dev/null 2>&1 || true
+        # mac 러너에는 sub-docker-cleanup 이 닿지 않는다 — 구운 이미지는 잡이 스스로 지운다.
+        # 빌드 캐시는 남긴다(다음 커밋의 빌드가 쓴다) — 하루 넘게 안 쓴 것만 이미지 잡의
+        # 끝 정리와 같은 방식으로 비운다.
+        run: |
+          docker rm -f frontend-boot-ok >/dev/null 2>&1 || true
+          docker rmi -f codemit-frontend-runner-ci >/dev/null 2>&1 || true
+          docker builder prune -f --builder default --filter until=24h >/dev/null 2>&1 || true
 
       - name: Dump container state on failure
         if: failure()
@@ -1426,7 +1441,7 @@ jobs:
   # 직접 프로세스를 끊는다(#38에서 이미 확인된 "Next가 throw를 삼킨다"는 사실이
   # 이 앱에도 그대로 적용된다) — 이 잡은 그게 실제로 그런지 직접 관찰한다.
   operator-deploy-guard:
-    runs-on: [self-hosted, sub]
+    runs-on: ${{ fromJSON(vars.IMAGE_BUILDER == 'sub' && '["self-hosted", "sub"]' || '["self-hosted", "ARM64", "mac-arm"]') }}
 
     steps:
       - uses: actions/checkout@v4
@@ -1511,12 +1526,16 @@ jobs:
       - name: Boots with a complete production config and forces Secure cookies
         run: |
           set -euo pipefail
+          # 컨테이너 포트를 러너 호스트에 열지 않고, 그 컨테이너의 네트워크에 curl 을 붙여 친다 —
+          # mac 러너(Docker Desktop 위의 컨테이너)에서는 호스트에 연 포트가 러너의 127.0.0.1 로
+          # 닿는다는 보장이 없다. 이 모양은 sub·mac 어디서나 같다.
+          c() { docker run --rm --network container:operator-boot-ok curlimages/curl:8.11.1 "$@"; }
+          docker pull -q curlimages/curl:8.11.1 >/dev/null
           docker rm -f operator-boot-ok >/dev/null 2>&1 || true
           docker run -d --name operator-boot-ok \
             -e CODEMIT_DEPLOYMENT_TARGET=production \
             -e CODEMIT_OPERATOR_ORIGIN=https://operator.codemit.example \
             -e CODEMIT_API_BASE_URL=http://127.0.0.1:1 \
-            -p 3101:3000 \
             codemit-operator-runner-ci
 
           # 백엔드가 없어 /healthz 는 503(degraded)이 정상이다 — 여기서 보는 건
@@ -1538,7 +1557,7 @@ jobs:
           # break한다.
           status="000"
           for _ in $(seq 1 20); do
-            status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3101/healthz 2>/dev/null || true)
+            status=$(c -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/healthz 2>/dev/null || true)
             status="${status:-000}"
             [ "$status" = "000" ] || break
             sleep 1
@@ -1554,7 +1573,7 @@ jobs:
           # 켜지는지. operator/app/api/auth/logout/route.ts는 세션 쿠키가 없으면
           # 백엔드를 부르지 않고 곧바로 clearSessionCookie를 실어 응답한다 — 그래서
           # 백엔드 없이도 이 경로 하나로 쿠키 속성을 직접 관찰할 수 있다.
-          set_cookie=$(curl -s -D - -o /dev/null -X POST http://127.0.0.1:3101/api/auth/logout \
+          set_cookie=$(c -s -D - -o /dev/null -X POST http://127.0.0.1:3000/api/auth/logout \
             -H "Origin: https://operator.codemit.example")
           echo "$set_cookie"
           echo "$set_cookie" | grep -qi "codemit_operator_session=.*Secure" \
@@ -1563,7 +1582,13 @@ jobs:
 
       - name: Tear down the boot-guard container
         if: always()
-        run: docker rm -f operator-boot-ok >/dev/null 2>&1 || true
+        # mac 러너에는 sub-docker-cleanup 이 닿지 않는다 — 구운 이미지는 잡이 스스로 지운다.
+        # 빌드 캐시는 남긴다(다음 커밋의 빌드가 쓴다) — 하루 넘게 안 쓴 것만 이미지 잡의
+        # 끝 정리와 같은 방식으로 비운다.
+        run: |
+          docker rm -f operator-boot-ok >/dev/null 2>&1 || true
+          docker rmi -f codemit-operator-runner-ci >/dev/null 2>&1 || true
+          docker builder prune -f --builder default --filter until=24h >/dev/null 2>&1 || true
 
       - name: Dump container state on failure
         if: failure()
@@ -1592,7 +1617,7 @@ jobs:
   # 관찰할 별도 경로가 없으므로 그 스텝은 옮기지 않는다 — Secure 플래그 자체는
   # classroom/lib/auth/cookies.test.ts 의 유닛 테스트가 이미 고정하고 있다.
   classroom-deploy-guard:
-    runs-on: [self-hosted, sub]
+    runs-on: ${{ fromJSON(vars.IMAGE_BUILDER == 'sub' && '["self-hosted", "sub"]' || '["self-hosted", "ARM64", "mac-arm"]') }}
 
     steps:
       - uses: actions/checkout@v4
@@ -1666,6 +1691,11 @@ jobs:
       - name: Boots with a complete production config
         run: |
           set -euo pipefail
+          # 컨테이너 포트를 러너 호스트에 열지 않고, 그 컨테이너의 네트워크에 curl 을 붙여 친다 —
+          # mac 러너(Docker Desktop 위의 컨테이너)에서는 호스트에 연 포트가 러너의 127.0.0.1 로
+          # 닿는다는 보장이 없다. 이 모양은 sub·mac 어디서나 같다.
+          c() { docker run --rm --network container:classroom-boot-ok curlimages/curl:8.11.1 "$@"; }
+          docker pull -q curlimages/curl:8.11.1 >/dev/null
           docker rm -f classroom-boot-ok >/dev/null 2>&1 || true
           docker run -d --name classroom-boot-ok \
             -e CODEMIT_DEPLOYMENT_TARGET=production \
@@ -1673,7 +1703,6 @@ jobs:
             -e CODEMIT_API_BASE_URL=http://127.0.0.1:1 \
             -e CODEMIT_SESSION_COOKIE_DOMAIN=.codemit.example \
             -e CODEMIT_WEB_ORIGIN=https://codemit.example \
-            -p 3102:3000 \
             codemit-classroom-runner-ci
 
           # 백엔드가 없어 /healthz 는 503(degraded)이 정상이다 — 여기서 보는 건
@@ -1682,7 +1711,7 @@ jobs:
           # 쓰지 않는 이유는 frontend-deploy-guard와 같다(#70 코드리뷰 지적).
           status="000"
           for _ in $(seq 1 20); do
-            status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3102/healthz 2>/dev/null || true)
+            status=$(c -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/healthz 2>/dev/null || true)
             status="${status:-000}"
             [ "$status" = "000" ] || break
             sleep 1
@@ -1703,7 +1732,12 @@ jobs:
       - name: Runtime config is read at request time, not baked into the build
         run: |
           set -euo pipefail
-          html=$(curl -sS --max-time 10 http://127.0.0.1:3102/login)
+          # 컨테이너 포트를 러너 호스트에 열지 않고, 그 컨테이너의 네트워크에 curl 을 붙여 친다 —
+          # mac 러너(Docker Desktop 위의 컨테이너)에서는 호스트에 연 포트가 러너의 127.0.0.1 로
+          # 닿는다는 보장이 없다. 이 모양은 sub·mac 어디서나 같다.
+          c() { docker run --rm --network container:classroom-boot-ok curlimages/curl:8.11.1 "$@"; }
+          docker pull -q curlimages/curl:8.11.1 >/dev/null
+          html=$(c -sS --max-time 10 http://127.0.0.1:3000/login)
           # **파이프로 찾지 않는다**(2026-09-20). 예전에는 `echo "$html" | grep -q …`
           # 였는데, `grep -q` 는 첫 일치에서 곧바로 끝나므로 HTML 이 파이프 버퍼(64KB)
           # 보다 커지면 아직 쓰고 있던 `echo` 가 SIGPIPE 로 죽고, `pipefail` 이 그것을
@@ -1721,7 +1755,13 @@ jobs:
 
       - name: Tear down the boot-guard container
         if: always()
-        run: docker rm -f classroom-boot-ok >/dev/null 2>&1 || true
+        # mac 러너에는 sub-docker-cleanup 이 닿지 않는다 — 구운 이미지는 잡이 스스로 지운다.
+        # 빌드 캐시는 남긴다(다음 커밋의 빌드가 쓴다) — 하루 넘게 안 쓴 것만 이미지 잡의
+        # 끝 정리와 같은 방식으로 비운다.
+        run: |
+          docker rm -f classroom-boot-ok >/dev/null 2>&1 || true
+          docker rmi -f codemit-classroom-runner-ci >/dev/null 2>&1 || true
+          docker builder prune -f --builder default --filter until=24h >/dev/null 2>&1 || true
 
       - name: Dump container state on failure
         if: failure()
