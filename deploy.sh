@@ -519,13 +519,37 @@ cmd_up() {
   # 아래 up 은 전부 $UP_FLAGS(registry 면 --no-build)를 붙인다.
 
   if [ "$BUILD_PGBOUNCER" = true ]; then
-    # backend·celery-worker·celery-beat·events 넷보다 먼저 올린다 — 그 넷의
-    # compose depends_on이 이 서비스를 `service_healthy`로 기다린다(search와
-    # 반대로 이 서비스가 죽으면 그 넷은 애초에 뜨지 못한다, 위 헤더 주석
-    # "pgbouncer는 필수 경로다"). 실제로 붙었는지는 아래 backend 그룹을 올린
-    # 뒤 `cmd_health pgbouncer`가 확인한다.
+    # **풀러를 바꾸기 전에, 풀러를 거쳐 DB 에 붙어 있는 넷을 먼저 내린다**
+    # (2026-09-22, #481~#484). 예전에는 옛 backend 넷이 풀러에 연결된 채로
+    # 풀러를 갈아 끼워서, 그때 날아가던 질의가 전부
+    # `server closed the connection unexpectedly` 로 끊겨 **prod 사용자에게 500**
+    # 이 나갔다 — 9-21 배포에서 공모전 목록 화면 한 번이 동시에 보낸 요청 셋이
+    # 같은 밀리초에 그렇게 죽었다(GlitchTip 70·71·72·73). #482 가 재현 스크립트로
+    # 세 번 돌려 세 번 모두 그 메시지로 죽는 것을 보였다.
+    #
+    # 먼저 내리면 사용자가 받는 것이 **바뀐다**: 그 몇 초 동안 backend 가 없으니
+    # 앞단 프록시가 502 를 낸다. 여전히 실패지만 **요청 도중에 끊기는 500 이 아니라
+    # 닿지 않는 502** 라 반쯤 처리된 요청이 없고, 우리 코드가 던진 예외가 아니므로
+    # GlitchTip 에도 오르지 않는다(자동 진단이 매 배포마다 같은 오류를 또 집지
+    # 않는다). `stop` 은 SIGTERM 이라 gunicorn 이 받던 요청을 마저 끝내고 내린다.
+    #
+    # backend 를 먼저 내리는 이유는 HTTP 를 받는 쪽이라 거기부터 새 요청을 멈춰야
+    # 해서다. events 의 SSE 는 끊기면 화면이 폴링으로 물러난다(ADR-0046).
+    log "풀러를 바꾼다 — 그 전에 backend·celery-worker·celery-beat·events 를 내린다"
+    $COMPOSE stop backend celery-worker celery-beat events
     # shellcheck disable=SC2086
     $COMPOSE up -d --no-deps $UP_FLAGS pgbouncer
+    # **풀러가 다시 들을 때까지 넷을 올리지 않는다.** 먼저 올리면 첫 요청들이 또
+    # 끊긴다 — 막으려던 것이 바로 그것이다. 풀러가 끝내 안 뜨면 여기서 배포가
+    # 실패로 끝나고 넷은 내려간 채 남는다: 넷은 풀러 없이는 어차피 DB 에 닿지
+    # 못하므로(위 헤더 주석 "pgbouncer는 필수 경로다") 켜 두어도 500 만 낸다.
+    cmd_health pgbouncer
+    if [ "$BUILD_BACKEND" != true ]; then
+      # 이 배포가 backend 를 바꾸지 않으면 아래 블록이 넷을 올리지 않는다 —
+      # 내린 그 컨테이너를 그대로 다시 켠다(`start` 는 다시 만들지 않으므로 이미지가
+      # 바뀌지 않는다). 바꾸는 배포면 아래 블록이 새 이미지로 올린다.
+      $COMPOSE start backend celery-worker celery-beat events
+    fi
   fi
 
   if [ "$BUILD_SEARCH" = true ]; then
