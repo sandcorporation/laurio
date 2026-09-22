@@ -342,7 +342,9 @@ def _load_ledger() -> dict[str, str]:
         return {}
 
 
-def _regression_of(issue: dict, fixes: dict[str, str], ledger: dict[str, str]) -> str | None:
+def _regression_of(
+    issue: dict, fixes: dict[str, str], ledger: dict[str, str], environment: str | None
+) -> str | None:
     """클레임된 오류가 **아직 다시 집지 않은 재발**이면 그 수정 커밋 sha 를 돌려준다.
 
     **왜 필요한가.** 「코멘트가 하나라도 있으면 집지 않는다」는 사람의 메모를 존중하려고
@@ -357,6 +359,13 @@ def _regression_of(issue: dict, fixes: dict[str, str], ledger: dict[str, str]) -
 
     **수정 커밋이 없으면 재발이 아니다.** 사람이 메모를 달았거나 자동 진단이 재현하지
     못하고 사람에게 넘긴 오류다 — 그 규칙은 그대로 존중한다.
+
+    **재발한 그 이벤트가 prod 에서 났어야 한다**(`environment`). 이슈의 환경 집합
+    (`_environments_of`)은 「prod 에서 난 **적이 있는가**」라 재발 판정에는 맞지 않는다 —
+    한 번이라도 prod 에서 났던 오류는 staging 에서만 재발해도 통과한다. 실제로 그랬다
+    (2026-09-22): staging 배포가 backend 를 몇 초 내린 창의 `fetch failed`(오류 74)를
+    prod 재발로 집어 세션을 띄웠다. `environment` 가 None 이면(`--any-environment`)
+    보지 않는다.
     """
 
     issue_id = str(issue.get("id"))
@@ -369,7 +378,21 @@ def _regression_of(issue: dict, fixes: dict[str, str], ledger: dict[str, str]) -
     if ledger.get(issue_id) == issue.get("lastSeen"):
         # 이 발생 시각에서 이미 다시 집었다. 새 이벤트가 오면 lastSeen 이 바뀐다.
         return None
+    if environment is not None and _latest_event_environment(issue) != environment:
+        return None
     return fix
+
+
+def _latest_event_environment(issue: dict) -> str | None:
+    """최신 이벤트의 `environment` 태그 값. 물어볼 수 없으면 None(= 재발로 보지 않는다)."""
+
+    status, event = _request(f"issues/{issue['id']}/events/latest/", _TOKEN)
+    if status != 200 or not isinstance(event, dict):
+        return None
+    for tag in event.get("tags") or []:
+        if tag.get("key") == "environment":
+            return tag.get("value")
+    return None
 
 
 def _pick(args: argparse.Namespace) -> dict | None:
@@ -401,7 +424,9 @@ def _pick(args: argparse.Namespace) -> dict | None:
         if not args.any_claimed and int(issue.get("numComments") or 0) > 0:
             if fixes is None:
                 fixes = _latest_fixes()
-            previous_fix = _regression_of(issue, fixes, ledger)
+            previous_fix = _regression_of(
+                issue, fixes, ledger, None if args.any_environment else TARGET_ENVIRONMENT
+            )
             if not previous_fix:
                 continue
             issue["_regression_of"] = previous_fix
