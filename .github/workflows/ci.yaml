@@ -499,6 +499,14 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     needs: test
     runs-on: [self-hosted, sub]
+    # **`actions: read` 를 명시해야 한다**(2026-09-22). 저장소 기본 워크플로 권한이
+    # `read` 인데, GitHub 에서 그 값은 「저장소 콘텐츠와 패키지 읽기」만 뜻하고
+    # **Actions 실행 목록은 포함하지 않는다** — 명시하지 않았더니 실행 목록 API 가
+    # 403 을 냈다. 잡에 권한을 적으면 적은 것만 받으므로 체크아웃용 `contents` 도 함께
+    # 적는다.
+    permissions:
+      actions: read
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
@@ -510,8 +518,7 @@ jobs:
       - name: Errors fixed since this job last succeeded are closed in GlitchTip
         env:
           GLITCHTIP_TOKEN_FOR_AUTOMATION: ${{ secrets.GLITCHTIP_TOKEN_FOR_AUTOMATION }}
-          # 직전에 이 잡이 성공한 실행을 찾으려고 Actions API 를 읽는다. 저장소의
-          # 기본 워크플로 토큰 권한(read)으로 충분하다.
+          # 직전에 이 잡이 성공한 실행을 찾으려고 Actions API 를 읽는다(위 permissions).
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           # 범위는 `before..sha` 가 아니라 **직전에 이 잡이 성공한 실행 이후**다
@@ -519,8 +526,14 @@ jobs:
           # 취소되는데(위 concurrency 주석), `before..sha` 는 그 커밋을 포함하지 않아
           # 그 커밋의 `GlitchTip:` 줄이 영영 읽히지 않았다 — 자동 진단이 2분 간격으로
           # 셋을 밀어 오류 75 가 그렇게 남았다. 이유와 재발을 덮지 않는 근거는
-          # 스크립트의 `_last_resolved_head` 에 있다. 찾지 못하면 이 커밋 하나만 본다.
-          python3 scripts/glitchtip_resolve.py auto "${{ github.sha }}"
+          # 스크립트의 `_last_resolved_head` 에 있다.
+          #
+          # **API 가 실패하면 옛 범위(`before..sha`)로 물러난다** — 옛 방식보다 나빠지지
+          # 않으려는 것이다. 처음에는 「이 커밋 하나만」으로 물러나게 했는데, 권한이 없어
+          # 실제로 물러났을 때 그건 **push 하나에 담긴 여러 커밋 중 마지막만 읽는 것**이라
+          # 고치기 전보다 좁았다.
+          python3 scripts/glitchtip_resolve.py auto "${{ github.sha }}" \
+            --fallback-base "${{ github.event.before }}"
 
   frontend-pure-unit-tests:
     runs-on: [self-hosted, sub]

@@ -198,6 +198,11 @@ def main() -> int:
         help="이 커밋 다음부터 본다. `auto` 면 직전에 이 잡이 성공한 실행의 커밋부터 본다(CI 용)",
     )
     parser.add_argument("head", help="이 커밋까지 본다")
+    parser.add_argument(
+        "--fallback-base",
+        default="",
+        help="`auto` 가 직전 성공 지점을 찾지 못했을 때 쓸 시작점(CI 는 push 의 before 를 준다)",
+    )
     parser.add_argument("--dry-run", action="store_true", help="쓰지 않고 무엇을 할지만 적는다")
     parser.add_argument(
         "--ack",
@@ -219,9 +224,22 @@ def main() -> int:
             base = found
             print(f"범위: 직전에 이 잡이 성공한 {found[:12]} 이후")
         else:
-            # 첫 실행이거나 이력이 갈라졌다 — 이 커밋 하나만 본다(없는 범위를 물으면 git 이 죽는다).
-            base = f"{args.head}~1"
-            print(f"범위: 직전 성공 지점을 찾지 못해 이 커밋 하나만 본다({'없음' if not found else '조상 아님'})")
+            # **옛 범위(push 의 before)로 물러난다** — 옛 방식보다 나빠지지 않으려는 것이다.
+            # 처음에는 「이 커밋 하나만」으로 물러났는데, 권한이 없어 실제로 물러났을 때
+            # push 하나의 여러 커밋 중 마지막만 읽어 고치기 전보다 좁았다(2026-09-22).
+            # before 가 없거나(0000…, 첫 push) 이 저장소에 없으면 그때만 이 커밋 하나다.
+            fallback = args.fallback_base.strip()
+            usable = (
+                fallback
+                and set(fallback) != {"0"}
+                and subprocess.run(
+                    ["git", "cat-file", "-e", f"{fallback}^{{commit}}"], capture_output=True
+                ).returncode == 0
+            )
+            base = fallback if usable else f"{args.head}~1"
+            reason = "없음" if not found else "조상 아님"
+            where = f"push 의 before({fallback[:12]}) 이후" if usable else "이 커밋 하나만"
+            print(f"범위: 직전 성공 지점을 찾지 못해({reason}) {where} 본다")
 
     issue_ids = _issue_ids(base, args.head)
     if not issue_ids:
