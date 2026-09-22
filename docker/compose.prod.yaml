@@ -392,14 +392,11 @@ services:
     environment:
       <<: *backend-env
       PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus-multiproc
-    ports:
-      # 코디네이터 리뷰 지적: 0.0.0.0으로 publish하면 SECURE_PROXY_SSL_HEADER가
-      # 신뢰하는 X-Forwarded-Proto를 인터넷 아무나 위조해 SSL 리다이렉트를 우회하고
-      # secure 쿠키를 평문으로 받아낼 수 있다. 127.0.0.1에만 publish해, 같은 호스트에
-      # 떠 있는 TLS 종단 리버스 프록시(아직 이 저장소에는 없다 — 별도 티켓)만 접근할
-      # 수 있게 막는다. 그 프록시가 없는 상태로 이 스택만 올리면 backend는 호스트
-      # 자신에서만 curl로 확인할 수 있다 — 이게 의도된 동작이다.
-      - "127.0.0.1:${CODEMIT_API_PORT:-8000}:8000"
+    # **호스트 포트를 열지 않는다**(#485). 배포는 이 서비스를 잠시 둘로 늘려 새 것을 먼저
+    # 띄운 뒤 옛 것을 내린다(deploy.sh 의 rolling_replace) — 같은 서비스 둘이 한 호스트
+    # 포트를 잡을 수 없다. 이 포트를 쓰던 곳이 없었다: 배포 헬스 체크는 컨테이너 안에서
+    # 치고, 세 앱은 compose 네트워크의 `backend:8000` 으로 간다. 내부 API 를 손으로 칠
+    # 때는 `docker exec <이 컨테이너>` 안에서 친다(CLAUDE.md).
     # 워커 넷의 지표를 합산하려고 prometheus_client 의 다중 프로세스 모드를 쓴다
     # (2026-09-21, core/metrics.py) — 디렉터리는 뜰 때마다 비운다(이전 기동의 죽은 워커
     # 파일이 남으면 합산이 오염된다). 죽은 워커 정리는 config/gunicorn.conf.py 가 한다.

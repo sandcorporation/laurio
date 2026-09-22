@@ -418,8 +418,11 @@ services:
       search:
         condition: service_started
     environment: *backend-env
-    ports:
-      - "${CODEMIT_API_PORT:-8000}:8000"
+    # **호스트 포트를 열지 않는다**(#485). 배포는 이 서비스를 잠시 둘로 늘려 새 것을 먼저
+    # 띄운 뒤 옛 것을 내린다(deploy.sh 의 rolling_replace) — 같은 서비스 둘이 한 호스트
+    # 포트를 잡을 수 없다. 이 포트를 쓰던 곳이 없었다: 배포 헬스 체크는 컨테이너 안에서
+    # 치고, 세 앱은 compose 네트워크의 `backend:8000` 으로 간다. 내부 API 를 손으로 칠
+    # 때는 `docker exec <이 컨테이너>` 안에서 친다(CLAUDE.md).
     command: >
       sh -c "python manage.py migrate --noinput &&
              python manage.py collectstatic --noinput &&

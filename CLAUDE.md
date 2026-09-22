@@ -71,8 +71,9 @@ celery-beat와 같은 `x-backend-env`(STORAGE_*·PAYMENT_* 등 이 프로세스�
 예외가 staging 백엔드 프로젝트의 최다 이슈가 됐다(6건). 기동 명령에
 `--lifespan off` 를 붙이는 대안은 compose 세 곳에 같은 말을 적어야 해서 버렸다.
 
-**배포 중 몇 초는 backend 가 없다 — beat 의 tick 이 그때 죽는다.** `deploy.sh` 가
-backend 컨테이너를 바꿔 끼우는 사이 `core.run_scan`·`classroom.score_attempt` 의
+**새 마이그레이션이나 풀러가 든 배포에서는 몇 초 backend 가 없다 — beat 의 tick 이 그때
+죽는다.** (그 밖의 배포는 겹쳐 바꿔 창이 없다 — 아래 「backend·events 는 겹쳐 바꾼다」.)
+`deploy.sh` 가 backend 컨테이너를 내리고 올리는 사이 `core.run_scan`·`classroom.score_attempt` 의
 내부 HTTP 호출이 `Connection refused` 로 실패했다(수집기를 붙인 첫날 3건). 스캔은
 두 번 쏴도 한 번만 통과하므로(ADR-0003) 두 태스크가 **연결·타임아웃 실패만** 몇 번
 물러서서 재시도한다 — 2xx 가 아닌 응답(서버가 대답은 했다)은 재시도하지 않고 그대로
@@ -220,8 +221,10 @@ staging 은 실물 어댑터라 해당 없음), 배포 환경의 시계는 실�
 `payment-refund-request` 가 같은 `as_of` 안에서 연달아 돌아 토스에 실제 취소까지 갔다.
 이걸 모르고 tick 만 쏘면 「아무것도 안 움직인다」로 보인다.
 
-**내부 API 를 루프백으로 칠 때는 Host 헤더를 붙인다.** `127.0.0.1:8000` 으로 치면 Host 가
-`ALLOWED_HOSTS` 에 없어 Django 가 **400** 을 낸다 — gunicorn 은 멀쩡한데 400 만 온다.
+**내부 API 는 컨테이너 안에서 치고, Host 헤더를 붙인다.** staging·prod 의 backend 는 호스트
+포트를 열지 않는다(#485 — 아래 「backend·events 는 겹쳐 바꾼다」) — `docker exec
+codemit-staging-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 Host 가
+`ALLOWED_HOSTS` 에 없으면 Django 가 **400** 을 낸다 — gunicorn 은 멀쩡한데 400 만 온다.
 `DJANGO_ALLOWED_HOSTS` 의 첫 항목을 쓴다(배포 헬스 체크가 이미 그렇게 한다).
 
 **운영자 앱(`operator/`)도 두 compose 파일에 뜬다**(#70). 공개 앱(`frontend`)과
@@ -350,6 +353,28 @@ ghcr-prune.yaml`, 2026-09-20). 레지스트리에 쌓이는 옛 버전을 아무
 하나로 끝난다. **되돌릴 수 없지만 돌고 있는 서비스는 영향이 없다**: 배포된
 이미지는 이미 그 호스트에 있고, 지워서 잃는 것은 그 커밋으로 pull 해 되돌리는
 길뿐이다(최근 몇 커밋은 남는다).
+
+**backend·events 는 겹쳐 바꾼다 — 배포 중에도 요청이 끊기지 않는다**(#485, 2026-09-22).
+예전에는 컨테이너를 내리고 새로 올려, 배포마다 공개 앱이 13~16초 동안 500 을 냈다(staging
+실측, GlitchTip 64·74·75 — BFF 재시도 예산 약 15.8초보다 길었다). 지금은 `deploy.sh` 의
+`rolling_replace` 가 서비스를 잠시 둘로 늘려(`--scale 2 --no-recreate`) 새 것이
+`/api/health` 에 답한 뒤에야 옛 것을 멈추고, 새 것의 이름을 옛 이름(`…-backend-1`)으로
+되돌린다 — 그래서 `docker exec codemit-staging-backend-1` 은 배포 뒤에도 그대로다. 새 것이
+150초 안에 답하지 않으면 새 것만 지우고 배포가 실패로 끝난다 — **옛 것은 계속 요청을
+받는다.** celery-worker·beat 는 지금처럼 내리고 올린다(beat 는 하나여야 하고 태스크는 Redis
+에서 기다린다).
+
+- **물러서는 배포가 셋이다** — 배포 범위에 `backend/*/migrations/` 변경이 있을 때(겹친 몇
+  초 동안 옛 코드가 새 스키마 위에서 돌면 없는 컬럼을 찾는다), 풀러를 바꿀 때(넷을 먼저
+  내린다 — 「풀러를 바꿔 끼울 때는」), 겹칠 옛 컨테이너가 없을 때. 그때는 예전처럼 내리고
+  올려 몇 초 창이 생긴다. `deploy.sh plan` 이 어느 쪽인지와 이유를 출력한다.
+- **그래서 호스트 포트가 없다** — 같은 서비스 둘이 한 호스트 포트를 잡을 수 없다. 쓰는 곳이
+  없었다: 배포 헬스 체크는 컨테이너 안에서 치고 세 앱은 `backend:8000` 으로 간다. staging 의
+  `api.laurio.honeycombpizza.link`(저장소 밖 npmplus → 호스트 8000)는 남은 로그 사흘 동안
+  인증서 확인 말고는 스캐너뿐이었다 — 포트가 닫히며 끊긴다.
+- **실측**(세 호스트의 compose 2.33·5.1·5.5, 장난감 서비스): 둘인 동안 DNS 가 둘을 번갈아
+  돌려주고, 옛 것을 멈추는 7초 동안 699번 중 연결 거부 1번 — BFF 가 연결 거부를 다시
+  보낸다.
 
 `deploy.sh` 는 **바뀐 것만 바꿔 끼운다** — 이미지 태그가 커밋마다 달라서 계획 없이 `up` 하면
 바뀌지 않은 서비스까지 전부 다시 뜨기 때문이다(CI 는 매 커밋 여섯 이미지를 다 올리므로 어느

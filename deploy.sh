@@ -367,6 +367,23 @@ cmd_plan() {
     fi
   fi
 
+  # **backend·events 를 겹쳐 바꿀 수 있는가**(#485). 겹쳐 바꾸면 옛 컨테이너가 새
+  # 컨테이너와 몇 초 함께 요청을 받는다 — 그 사이 새 컨테이너가 스키마를 바꾸면 옛 코드가
+  # 없는 컬럼을 찾다 500 을 낸다. 그래서 **새 마이그레이션이 든 배포만** 지금까지의
+  # 방식(내리고 올리기, 몇 초 창)으로 물러선다. 풀러를 바꾸는 배포는 위에서 넷을 먼저
+  # 내리므로 겹칠 옛 컨테이너가 없고, 없는 컨테이너·첫 배포도 겹칠 대상이 없다.
+  ROLLING_BACKEND=true
+  ROLLING_REASON=""
+  if [ "$EVERYTHING" = true ]; then
+    ROLLING_BACKEND=false; ROLLING_REASON="직전 배포 표식이 없다"
+  elif touched '^backend/[^/]+/migrations/'; then
+    ROLLING_BACKEND=false; ROLLING_REASON="새 마이그레이션이 있다"
+  elif [ "$BUILD_PGBOUNCER" = true ]; then
+    ROLLING_BACKEND=false; ROLLING_REASON="풀러를 바꾼다"
+  elif missing backend || missing events; then
+    ROLLING_BACKEND=false; ROLLING_REASON="겹칠 옛 컨테이너가 없다"
+  fi
+
   if [ "$STALE" = true ]; then
     BUILD_BACKEND=false
     BUILD_FRONTEND=false
@@ -391,6 +408,7 @@ cmd_plan() {
     echo "BUILD_CLASSROOM=$BUILD_CLASSROOM"
     echo "BUILD_SEARCH=$BUILD_SEARCH"
     echo "BUILD_PGBOUNCER=$BUILD_PGBOUNCER"
+    echo "ROLLING_BACKEND=$ROLLING_BACKEND"
     echo "PLANNED_COMMIT=$($GIT rev-parse HEAD)"
   } > "$PLAN_FILE"
 
@@ -404,6 +422,13 @@ cmd_plan() {
   echo "  classroom                                     : $(plan_word "$BUILD_CLASSROOM")"
   echo "  search                                        : $(plan_word "$BUILD_SEARCH")"
   echo "  pgbouncer                                     : $(plan_word "$BUILD_PGBOUNCER")"
+  if [ "$BUILD_BACKEND" = true ]; then
+    if [ "$ROLLING_BACKEND" = true ]; then
+      echo "  backend·events 교체 방식                      : 겹쳐 바꾼다(끊김 없음)"
+    else
+      echo "  backend·events 교체 방식                      : 내리고 올린다 — ${ROLLING_REASON}"
+    fi
+  fi
   if [ "$ANY" = false ]; then
     log "바뀐 것이 없다. 배포할 것이 없다."
   fi
@@ -504,6 +529,72 @@ build_planned_in_background() {
   fi
 }
 
+# Django(backend·events)가 요청을 받는지 한 번 본다. $1 은 exec 앞부분(`$COMPOSE exec -T
+# backend` 또는 `docker exec <id>`), $2 는 포트. 헤더를 붙이는 이유는 cmd_health 주석에 있다.
+django_answers() {
+  # shellcheck disable=SC2086
+  $1 python -c "import os,urllib.request,sys; host=(os.environ.get('DJANGO_ALLOWED_HOSTS') or '').split(',')[0].strip() or '127.0.0.1'; req=urllib.request.Request('http://127.0.0.1:${2}/api/health', headers={'Host': host, 'X-Forwarded-Proto': 'https'}); sys.exit(0 if urllib.request.urlopen(req, timeout=3).status==200 else 1)" 2>/dev/null
+}
+
+# **새 것을 먼저 띄우고 옛 것을 내린다**(#485). 예전에는 컨테이너를 내리고 새로 올려,
+# 배포마다 공개 앱이 13~16초 동안 500 을 냈다(staging 실측, GlitchTip 64·74·75 —
+# BFF 재시도 예산 약 15.8초보다 길었다).
+#
+# 1. 서비스를 잠시 둘로 늘린다(`--scale 2 --no-recreate`) — 옛 것은 그대로 두고 새 설정·
+#    이미지로 하나를 더 띄운다. 그 사이 도커 DNS 는 서비스 이름에 둘을 함께 돌려준다.
+# 2. **새 것이 /api/health 에 200 을 낼 때까지** 기다린다. 끝내 안 뜨면 새 것을 지우고
+#    실패로 끝낸다 — 옛 것은 그대로 요청을 받는다(예전에는 이때 서비스가 비었다).
+# 3. 옛 것을 멈춘다(SIGTERM — gunicorn 은 받던 요청을 마저 끝낸다). 멈추는 사이 옛
+#    것으로 간 새 연결은 거부될 수 있는데, BFF 가 연결 거부를 다시 보낸다(`packages/
+#    bff-shared`). 세 호스트의 compose(2.33·5.1·5.5)에서 실측: 멈추는 7초 동안 699번 중
+#    거부 1번.
+# 4. 새 것의 이름을 옛 이름(`…-backend-1`)으로 바꾼다 — compose 는 이름이 아니라 라벨로
+#    컨테이너를 찾으므로 그대로 동작하고, 사람이 쓰는 `docker exec codemit-staging-backend-1`
+#    이 배포마다 `-2`·`-1` 로 번갈아 바뀌지 않는다. 다음 교체의 번호는 compose 가 라벨의
+#    최댓값 다음으로 매겨 이름이 겹치지 않는다(같은 실측).
+#
+# **호스트 포트를 열지 않는다** — 같은 서비스 둘이 한 호스트 포트를 잡을 수 없다. 그래서
+# 두 배포 compose 의 backend 에 ports 가 없다(헬스 체크는 원래 컨테이너 안에서 친다).
+# $1 서비스, $2 컨테이너 안 포트, $3 멈출 때 기다리는 초.
+rolling_replace() {
+  svc=$1; port=$2; grace=$3
+  old=$($COMPOSE ps -q "$svc")
+  if [ "$(printf '%s\n' "$old" | grep -c .)" -ne 1 ]; then
+    log "$svc 컨테이너가 하나가 아니다 — 내리고 올린다"
+    # shellcheck disable=SC2086
+    $COMPOSE up -d --no-deps $UP_FLAGS "$svc"
+    return 0
+  fi
+  old_name=$(docker inspect -f '{{.Name}}' "$old" | tr -d /)
+
+  log "$svc 겹쳐 바꾼다 — 새 것을 먼저 띄운다"
+  # shellcheck disable=SC2086
+  $COMPOSE up -d --no-deps $UP_FLAGS --no-recreate --scale "$svc=2" "$svc"
+  new=$($COMPOSE ps -q "$svc" | grep -v "$old" | head -1)
+  if [ -z "$new" ]; then
+    echo "$svc 의 새 컨테이너가 뜨지 않았다 — 옛 것은 그대로 둔다."
+    exit 1
+  fi
+
+  i=0
+  until django_answers "docker exec $new" "$port"; do
+    i=$((i + 1))
+    if [ "$i" -ge 30 ]; then
+      echo "$svc 의 새 컨테이너가 150초 안에 응답하지 않았다 — 새 것을 지우고 옛 것을 그대로 둔다."
+      docker logs --tail 120 "$new" || true
+      docker rm -f "$new" >/dev/null 2>&1 || true
+      exit 1
+    fi
+    sleep 5
+  done
+  log "$svc 새 것 응답 확인 — 옛 것을 내린다"
+
+  docker stop -t "$grace" "$old" >/dev/null
+  docker rm "$old" >/dev/null
+  docker rename "$new" "$old_name"
+  log "$svc 바꿨다 ($old_name)"
+}
+
 # ------------------------------------------------------------ 바꿔 끼운다
 
 cmd_up() {
@@ -570,10 +661,19 @@ cmd_up() {
     # backend 의 command 가 migrate 를 먼저 돌리므로, 나머지 셋은 그 뒤에
     # 올린다 — 새 마이그레이션이 필요한 코드가 아직 없는 스키마 위에서 스캔·
     # 스트림을 돌리는 창을 만들지 않는다.
-    # shellcheck disable=SC2086
-    $COMPOSE up -d --no-deps $UP_FLAGS backend
-    # shellcheck disable=SC2086
-    $COMPOSE up -d --no-deps $UP_FLAGS celery-worker celery-beat events
+    if [ "${ROLLING_BACKEND:-false}" = true ]; then
+      # 겹쳐 바꾼다(#485) — 아래 rolling_replace 주석. worker·beat 는 사용자 요청을
+      # 받지 않고(태스크는 Redis 에서 기다린다) beat 는 하나여야 하므로 지금처럼 바꾼다.
+      rolling_replace backend 8000 30
+      # shellcheck disable=SC2086
+      $COMPOSE up -d --no-deps $UP_FLAGS celery-worker celery-beat
+      rolling_replace events 8001 10
+    else
+      # shellcheck disable=SC2086
+      $COMPOSE up -d --no-deps $UP_FLAGS backend
+      # shellcheck disable=SC2086
+      $COMPOSE up -d --no-deps $UP_FLAGS celery-worker celery-beat events
+    fi
   fi
   # shellcheck disable=SC2086
   if [ "$BUILD_FRONTEND" = true ]; then $COMPOSE up -d --no-deps $UP_FLAGS frontend; fi
@@ -656,7 +756,7 @@ cmd_health() {
     else
       port=8000
       [ "$1" = events ] && port=8001
-      if $COMPOSE exec -T "$1" python -c "import os,urllib.request,sys; host=(os.environ.get('DJANGO_ALLOWED_HOSTS') or '').split(',')[0].strip() or '127.0.0.1'; req=urllib.request.Request('http://127.0.0.1:${port}/api/health', headers={'Host': host, 'X-Forwarded-Proto': 'https'}); sys.exit(0 if urllib.request.urlopen(req, timeout=3).status==200 else 1)" 2>/dev/null; then
+      if django_answers "$COMPOSE exec -T $1" "$port"; then
         log "$1 응답 확인"
         return 0
       fi
