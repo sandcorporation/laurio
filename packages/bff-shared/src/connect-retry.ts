@@ -29,6 +29,11 @@
 // 라는 이름 자체가 도커 DNS 에 없다. 이름이 안 풀렸으니 연결도 맺어지지 않았고,
 // 그래서 연결 거부와 똑같이 다시 보내도 된다.
 //
+// **「지금은 답할 수 없다」도 같은 틈이다**(2026-09-22, GlitchTip 74 가 ENOTFOUND 를
+// 더한 뒤에 다시 올라왔다 — 공개 앱 알림 수, 원인 `getaddrinfo EAI_AGAIN backend`).
+// 그 순간 도커 내장 DNS 가 「없다」 대신 「일시적 실패」로 답했다. 이것도 이름이
+// 안 풀려 연결이 맺어지기 전이라 다시 보내도 된다.
+//
 // **공개 앱 BFF 도 같은 틈에 같은 예외를 냈다**(2026-09-21, GlitchTip 74 — 알림 수
 // 3건). 강의실에만 있던 이 함수를 공유 패키지로 옮겨 두 앱이 같은 예산을 쓴다.
 //
@@ -39,7 +44,11 @@
 export const DEFAULT_DELAYS_MS = [250, 500, 1000, 2000, 4000, 8000] as const;
 
 // 연결이 맺어지기 전에 난 실패만 — 요청이 어디에도 닿지 않았다는 것이 확실한 것.
-const NOT_CONNECTED_CODES: ReadonlySet<unknown> = new Set(["ECONNREFUSED", "ENOTFOUND"]);
+const NOT_CONNECTED_CODES: ReadonlySet<unknown> = new Set([
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+]);
 
 function isConnectionRefused(error: unknown): boolean {
   if (!(error instanceof TypeError)) return false;

@@ -1,3 +1,4 @@
+import dns from "node:dns";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
@@ -98,6 +99,49 @@ describe("retryWhileConnectionRefused", () => {
 
     expect(response.status).toBe(200);
     expect(calls).toBe(3);
+  });
+
+  // GlitchTip 74 (2026-09-22) — ENOTFOUND 를 더한 뒤(a458d03)에도 같은 제목으로
+  // 다시 올라왔다: `getaddrinfo EAI_AGAIN backend`(공개 앱 알림 수, staging). 도커
+  // 내장 DNS 가 그 틈에 「없다」가 아니라 「지금은 답할 수 없다」로 답한 것이다.
+  // 이것도 이름이 안 풀려 연결이 맺어지기 전의 실패다. 진짜 resolver 로는 그
+  // 답을 불러낼 수 없어 `dns.lookup` 만 바꿔 끼운다 — fetch·undici 는 진짜라
+  // 예외의 모양(`fetch failed` ← `getaddrinfo EAI_AGAIN backend`)이 이벤트와 같다.
+  it("배포 중 backend 이름 조회가 잠깐 실패(EAI_AGAIN)했다가 돌아오면 그 응답을 돌려준다", async () => {
+    const port = await freePort();
+    listenLater(port, 0);
+    const realLookup = dns.lookup;
+    let failures = 0;
+    (dns as { lookup: unknown }).lookup = (
+      hostname: string,
+      options: unknown,
+      callback?: (...args: unknown[]) => void,
+    ) => {
+      const cb = (typeof options === "function" ? options : callback) as (...args: unknown[]) => void;
+      if (hostname === "backend" && failures < 2) {
+        failures += 1;
+        const error = Object.assign(new Error(`getaddrinfo EAI_AGAIN ${hostname}`), {
+          code: "EAI_AGAIN",
+          syscall: "getaddrinfo",
+          hostname,
+        });
+        process.nextTick(() => cb(error));
+        return;
+      }
+      const target = hostname === "backend" ? "127.0.0.1" : hostname;
+      return (realLookup as (...args: unknown[]) => void)(target, options, callback);
+    };
+
+    try {
+      const response = await retryWhileConnectionRefused(
+        () => fetch(`http://backend:${port}/api/notifications/unread-count`),
+        { delaysMs: [50, 50, 50, 50] },
+      );
+      expect(response.status).toBe(200);
+      expect(failures).toBe(2);
+    } finally {
+      (dns as { lookup: unknown }).lookup = realLookup;
+    }
   });
 
   it("연결 거부가 아닌 실패는 다시 보내지 않는다 — 요청이 이미 닿았을 수 있다", async () => {
