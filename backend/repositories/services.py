@@ -27,7 +27,7 @@ from datetime import timedelta
 from django.db.models import Q
 
 from core.scans import ScanSpec
-from submissions.models import SubmissionAsset
+from submissions.models import Submission, SubmissionAsset
 
 from .adapters import get_github_adapter
 
@@ -42,6 +42,11 @@ def _pending_repository_assets(as_of, ctx):
     return (
         SubmissionAsset.objects.filter(
             kind=SubmissionAsset.Kind.REPOSITORY,
+            # 강의실 제출물은 공모전 Score 가 영영 생기지 않아, 제품으로 가르지 않으면
+            # 한 시간마다 영원히 후보가 된다 — 쓰는 곳도 없는 값을 위해 GitHub 호출이
+            # 제출 수만큼 끝없이 쌓여 prod 의 API 한도를 막았다(GlitchTip 오류 80).
+            # 강의실 채점은 채점 시점에 `check_public` 을 직접 부른다.
+            submission__product=Submission.Product.CONTEST,
             submission__score__isnull=True,
         )
         .exclude(submission__scoring_attempts__permanent=True)
