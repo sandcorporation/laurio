@@ -863,3 +863,36 @@ class OAuthToken(models.Model):
     expires_at = models.DateTimeField(null=True, blank=True)
     #: 갱신 토큰이 새것으로 바뀌었거나, 회수(RFC 7009)된 시각.
     revoked_at = models.DateTimeField(null=True, blank=True)
+
+
+class ConnectedAppWrite(models.Model):
+    """연결된 앱이 강사 대신 한 쓰기 하나 — 언제·어느 앱이·어느 도구로·무엇을 바꿨는가
+    (ADR-0052 「쓰기만 기록한다」, #514, CONTEXT.md 「연결된 앱」).
+
+    **성공한 쓰기만 남는다.** MCP 디스패치(`classroom.mcp`)가 쓰기 도구를 그 기록과 한
+    트랜잭션 안에서 부르고, 도구가 거절하면(보관된 클래스·금칙어·없는 전이 등) 기록도
+    함께 되돌린다. **읽기는 남기지 않는다** — 참여자의 제출을 몇 번 읽었는지는 세지 않는다
+    (ADR-0040).
+
+    **대상은 외래 키가 아니라 번호로 적는다.** 문제·클래스는 나중에 지워질 수 있는데
+    (#515), 지운 뒤에도 「무엇을 했는가」는 되짚을 수 있어야 한다 — 그래서 `summary` 에
+    그 시점의 제목 같은 사람이 읽을 말을 함께 남긴다."""
+
+    instructor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="connected_app_writes", on_delete=models.CASCADE
+    )
+    connected_app = models.ForeignKey(ConnectedApp, related_name="writes", on_delete=models.CASCADE)
+    #: 부른 MCP 도구 이름(`create_problem` 등).
+    tool = models.CharField(max_length=64)
+    target_class_id = models.BigIntegerField(null=True, blank=True)
+    target_problem_id = models.BigIntegerField(null=True, blank=True)
+    #: 사람이 읽을 한 줄 — 그 시점의 문제 제목, 바꾼 칸 이름 등.
+    summary = models.CharField(max_length=300, blank=True, default="")
+    created_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [models.Index(fields=["instructor", "-created_at"], name="classroom_capw_instr_idx")]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ConnectedAppWrite(id={self.pk}, tool={self.tool})"

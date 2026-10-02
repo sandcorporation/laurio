@@ -12,7 +12,9 @@
 
 **도구는 화면과 같은 서비스 함수를 부른다.** `list_my_classes` 는 강사 화면의 「내
 클래스」와 같은 `classroom.services.instructor_classes` 를 쓴다 — 무엇이 보이는가를
-두 표면이 따로 정하지 않는다. 읽기는 기록하지 않는다(ADR-0040·0052).
+두 표면이 따로 정하지 않는다. 읽기는 기록하지 않는다(ADR-0040·0052). 문제를 만들고 고치는
+쓰기 도구는 `classroom.mcp_problem_tools` 에 있고, 디스패치가 그 성공마다 같은 트랜잭션에서
+`ConnectedAppWrite` 한 줄을 남긴다(#514, `classroom.mcp_tool` docstring).
 
 **호출 상한**: 강사 한 명당 분당 `CLASSROOM_MCP_CALLS_PER_MINUTE` 번. 넘으면 JSON-RPC
 오류로 몇 초 뒤에 다시 하라고 알린다(`Retry-After` 도 함께). 분은 `Clock.now()` 로
@@ -23,17 +25,19 @@ from __future__ import annotations
 
 import base64
 import json
-from collections.abc import Callable
-from dataclasses import dataclass
 
 from django.conf import settings
 from django.core.cache import caches
+from django.db import transaction
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from ninja.errors import HttpError
 
 from core.clock import Clock
 
+from .connected_app_writes import record_write
+from .mcp_problem_tools import PROBLEM_TOOLS
+from .mcp_tool import Tool, ToolInputError, WriteResult
 from .models import ConnectedApp
 from .oauth import SCOPE, authenticate_access_token, protected_resource_metadata_url, public_origin
 from .services import instructor_classes
@@ -63,33 +67,6 @@ INSTRUCTIONS = (
 
 
 # --- 도구 ---------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class Tool:
-    name: str
-    title: str
-    description: str
-    input_schema: dict
-    output_schema: dict
-    read_only: bool
-    handler: Callable[[ConnectedApp, dict], dict]
-
-    def describe(self) -> dict:
-        return {
-            "name": self.name,
-            "title": self.title,
-            "description": self.description,
-            "inputSchema": self.input_schema,
-            "outputSchema": self.output_schema,
-            "annotations": {
-                "title": self.title,
-                "readOnlyHint": self.read_only,
-                "destructiveHint": False,
-                "idempotentHint": self.read_only,
-                "openWorldHint": False,
-            },
-        }
 
 
 def _list_my_classes(grant: ConnectedApp, arguments: dict) -> dict:
@@ -169,7 +146,8 @@ TOOLS: dict[str, Tool] = {
             },
             read_only=True,
             handler=_list_my_classes,
-        )
+        ),
+        *PROBLEM_TOOLS,
     ]
 }
 
@@ -258,12 +236,28 @@ def _call_tool(grant: ConnectedApp, params: dict) -> dict:
     if not isinstance(arguments, dict):
         raise RpcError(INVALID_PARAMS, "arguments 는 객체여야 합니다.")
     try:
-        structured = tool.handler(grant, arguments)
-    except HttpError as error:
-        # 화면 API 가 4xx 로 거절할 자리(남의 클래스 404, 잘못된 입력 422 …)는 도구 오류로
-        # 돌려준다 — 프로토콜 오류가 아니라 모델이 읽고 고쳐 부를 수 있는 결과다(MCP 「Tool
-        # Execution Errors」).
-        return {"content": [{"type": "text", "text": str(error)}], "isError": True}
+        if tool.read_only:
+            structured = tool.handler(grant, arguments)
+        else:
+            # 쓰기와 그 기록은 한 트랜잭션이다 — 도구가 거절하면 기록도 남지 않고,
+            # 기록이 실패하면 쓰기도 되돌아간다(`classroom.mcp_tool` docstring).
+            with transaction.atomic():
+                outcome = tool.handler(grant, arguments)
+                if not isinstance(outcome, WriteResult):
+                    raise TypeError(f"쓰기 도구 {tool.name} 는 WriteResult 를 돌려줘야 합니다.")
+                record_write(
+                    grant,
+                    tool.name,
+                    class_id=outcome.class_id,
+                    problem_id=outcome.problem_id,
+                    summary=outcome.summary,
+                )
+            structured = outcome.structured
+    except (HttpError, ToolInputError) as exc:
+        # 화면 API 가 4xx 로 거절할 자리(남의 클래스 404, 잘못된 입력 422, 보관 잠금 …)와
+        # 인자 모양이 틀린 것은 도구 오류로 돌려준다 — 프로토콜 오류가 아니라 모델이 읽고
+        # 고쳐 부를 수 있는 결과다(MCP 「Tool Execution Errors」). 문장은 화면이 받는 것과 같다.
+        return {"content": [{"type": "text", "text": str(exc)}], "isError": True}
     return {
         "content": [{"type": "text", "text": json.dumps(structured, ensure_ascii=False)}],
         "structuredContent": structured,
