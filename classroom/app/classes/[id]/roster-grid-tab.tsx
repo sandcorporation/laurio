@@ -34,7 +34,7 @@ function ContestEntryMark({ entry, inline = false }: { entry: "current" | "enter
   return (
     <span
       aria-hidden
-      className={`${inline ? "block" : "absolute -right-1.5 -top-1.5"} h-[7px] w-[7px] rounded-full border border-attention ${
+      className={`${inline ? "block" : "absolute -right-1.5 -top-1.5"} h-[7px] w-[7px] border border-attention ${
         entry === "current" ? "bg-attention" : "bg-surface"
       }`}
     />
