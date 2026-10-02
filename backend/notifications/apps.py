@@ -1,7 +1,7 @@
 from django.apps import AppConfig
+from django.core.checks import Error, register
 
 from core.adapters import BOOT_CHECK_TAG
-from django.core.checks import Error, register
 
 
 class NotificationsConfig(AppConfig):

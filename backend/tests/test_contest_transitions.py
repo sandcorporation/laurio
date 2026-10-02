@@ -35,7 +35,6 @@ from contests.transitions import (
     contest_transition_spec,
 )
 from core.clock import Clock
-from tests.ast_scan_support import BACKEND_ROOT, python_sources
 
 # contests.transitions 가 이름으로 받는 세 함수 — 각자 어느 표에서 이름을 찾는지.
 _NAME_LOOKUP_FUNCTIONS = {
@@ -179,21 +178,20 @@ def _declared_name_calls(tree: ast.AST) -> list[tuple[str, str]]:
     return found
 
 
-def test_every_call_site_uses_a_name_the_declaration_actually_has():
+def test_every_call_site_uses_a_name_the_declaration_actually_has(backend_sources):
     """문자열 이름이 옛 안전성(오타 나면 import 시점에 죽는 enum 속성 접근)을 잃는
     대가로 얻는 것 — 오타가 나면 그 자리를 실행할 때까지 몰랐다. 코드베이스 전체를
     정적으로 훑어 그 대가를 좁힌다: 선언에 없는 이름을 쓰는 자리가 있으면 지금
     당장(그 코드가 실행되기 한참 전에) 여기서 잡는다."""
 
-    # `python_sources()` 는 tests/ 전체를 건너뛴다 — 이 파일 자신이 일부러 잘못된
+    # `backend_sources`(`python_sources()`)는 tests/ 전체를 건너뛴다 — 이 파일 자신이 일부러 잘못된
     # 이름("no-such-edge" 등)으로 KeyError 를 확인하므로, 이 검사에 끼면 안 된다.
     offenders = []
-    for path in python_sources():
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        for func_name, name in _declared_name_calls(tree):
+    for source in backend_sources:
+        for func_name, name in _declared_name_calls(source.tree):
             table = _NAME_LOOKUP_FUNCTIONS[func_name]
             if name not in table:
-                offenders.append(f"{path.relative_to(BACKEND_ROOT)}: {func_name}({name!r})")
+                offenders.append(f"{source.relative}: {func_name}({name!r})")
 
     assert not offenders, (
         "선언에 없는 이름으로 contests.transitions 함수를 부르는 자리가 있다(런타임에 "

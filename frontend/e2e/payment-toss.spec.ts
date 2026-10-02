@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { createDraftContest } from "./lib/contests-api";
 import { establishDeveloperSession, establishVerification } from "./lib/session";
 
 // 토스 결제창 — 위젯을 쓸지는 PG 어댑터 모드가 가른다 (#112, #114, spec #110).
@@ -27,69 +28,12 @@ import { establishDeveloperSession, establishVerification } from "./lib/session"
 //    아예 부르지 않으므로 이 제약이 없다.
 
 async function login(page: import("@playwright/test").Page, seed: string): Promise<void> {
-  await establishDeveloperSession(page, seed);
+  // 화면을 열지 않는다 — 초안은 API 로 깔고 결제 화면으로 곧장 간다(시험 하나 3초 한도).
+  await establishDeveloperSession(page, seed, null);
 }
 
 async function verify(page: import("@playwright/test").Page, seed: string): Promise<void> {
   await establishVerification(page, seed);
-}
-
-async function findByName(
-  page: import("@playwright/test").Page,
-  path: string,
-  name: string,
-): Promise<number> {
-  const id = await page.evaluate(
-    async ({ path, name }) => {
-      const res = await fetch(path);
-      const list = (await res.json()) as { id: number; name: string }[];
-      return list.find((item) => item.name === name)?.id ?? null;
-    },
-    { path, name },
-  );
-  expect(id, `"${name}"을(를) ${path}에서 찾지 못했다`).not.toBeNull();
-  return id as number;
-}
-
-function futureLocalDatetime(daysAhead: number): string {
-  const d = new Date(Date.now() + daysAhead * 24 * 60 * 60 * 1000);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-/** payment.spec.ts의 createDraftViaForm과 같은 헬퍼 — 화면 URL에는 id가
- * 없다(grill.spec.ts부터 반복되는 관용구). */
-async function createDraftViaForm(
-  page: import("@playwright/test").Page,
-  runId: string,
-  prize = 5_000_000,
-): Promise<number> {
-  const categoryId = await findByName(page, "/api/backend/contests/categories", "게임");
-  const deliverableTypeId = await findByName(
-    page,
-    "/api/backend/contests/deliverable-types",
-    "웹 서비스",
-  );
-
-  await page.goto("/console/contests/new");
-  await expect(page.getByTestId("grill-brief-heading")).toBeVisible();
-
-  await page.getByTestId("grill-brief-title").fill(`[E2E] 토스 결제 테스트 ${runId}`);
-  await page.getByTestId("grill-brief-category").selectOption(String(categoryId));
-  await page.getByTestId(`grill-brief-deliverable-type-${deliverableTypeId}-checkbox`).check();
-  await page.getByTestId("grill-brief-prize").fill(String(prize));
-  await page.getByTestId("grill-brief-deadline").fill(futureLocalDatetime(10));
-
-  const [response] = await Promise.all([
-    page.waitForResponse(
-      (res) => res.url().endsWith("/api/backend/contests") && res.request().method() === "POST",
-    ),
-    page.getByTestId("grill-brief-submit").click(),
-  ]);
-  const body = (await response.json()) as { id: number };
-
-  await expect(page.getByTestId("grill-draft-panel")).toBeVisible();
-  return body.id;
 }
 
 /** 결제 화면으로 이동해 initiate_payment 응답을 그대로 돌려준다 — 서버가
@@ -146,7 +90,7 @@ test.describe("결제창에서 돌아온 뒤 — URL 파라미터 인식 자체�
     const runId = `${Date.now()}`;
     await login(page, `pay-toss-mismatch-${runId}`);
     await verify(page, `pay-toss-mismatch-${runId}`);
-    const contestId = await createDraftViaForm(page, runId, 5_000_000);
+    const contestId = await createDraftContest(page, `[E2E] 토스 결제 테스트 ${runId}`, 5_000_000);
 
     const payment = await gotoPaymentAndReadResponse(page, contestId);
     const mismatchedOrderId = "00000000-0000-0000-0000-000000000000";

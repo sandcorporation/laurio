@@ -831,6 +831,11 @@ jobs:
       # 여기서 다시 적지 않는다(두 곳에 적으면 한쪽만 고쳤을 때 조용히 갈린다).
       - name: Run e2e against the running apps
         working-directory: frontend
+        # 일꾼 둘 — e2e 잡 셋이 한 호스트(12코어)에서 동시에 도므로 잡마다 코어 넷 몫이다.
+        # 기본값(코어의 절반 = 여섯)이면 잡 셋이 일꾼 열여덟을 띄워 시험 하나 3초 한도
+        # (`playwright.config.ts`)를 경합만으로 넘는다(2026-10-02).
+        env:
+          PLAYWRIGHT_WORKERS: "2"
         run: pnpm run test:public
 
       - name: Dump stack logs on failure
@@ -999,6 +1004,11 @@ jobs:
       # 여기서 다시 적지 않는다(두 곳에 적으면 한쪽만 고쳤을 때 조용히 갈린다).
       - name: Run e2e against the running apps
         working-directory: frontend
+        # 일꾼 둘 — e2e 잡 셋이 한 호스트(12코어)에서 동시에 도므로 잡마다 코어 넷 몫이다.
+        # 기본값(코어의 절반 = 여섯)이면 잡 셋이 일꾼 열여덟을 띄워 시험 하나 3초 한도
+        # (`playwright.config.ts`)를 경합만으로 넘는다(2026-10-02).
+        env:
+          PLAYWRIGHT_WORKERS: "2"
         run: pnpm run test:operator
 
       - name: Dump stack logs on failure
@@ -1124,6 +1134,11 @@ jobs:
 
       - name: Run e2e against the running apps
         working-directory: frontend
+        # 일꾼 둘 — e2e 잡 셋이 한 호스트(12코어)에서 동시에 도므로 잡마다 코어 넷 몫이다.
+        # 기본값(코어의 절반 = 여섯)이면 잡 셋이 일꾼 열여덟을 띄워 시험 하나 3초 한도
+        # (`playwright.config.ts`)를 경합만으로 넘는다(2026-10-02).
+        env:
+          PLAYWRIGHT_WORKERS: "2"
         run: pnpm run test:classroom
 
       - name: Dump stack logs on failure

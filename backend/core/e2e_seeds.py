@@ -33,6 +33,12 @@ class SeedEntry:
     # 남의 것으로 보고 지운다. 서브프로세스 시절에는 프로세스가 호출마다 새로 떠서
     # 이 위험이 없었다.
     required: frozenset[str] = frozenset()
+    # 시드 입구(`core.api`)가 같은 이름의 호출을 한 줄로 세우는가. 기본은 세운다 —
+    # 「지우고 다시 넣는」 시드는 동시에 돌면 유일 제약에 걸린다(그 자리 주석).
+    # **매번 고유한 이름으로 새 행만 만드는 시드만** 끈다: 줄을 세우면 병렬
+    # 워커들이 그 시드를 하나씩 기다려 e2e 시험 하나 3초 한도를 넘는다
+    # (2026-10-02, 이의 시드 셋이 0.4·1.0·1.2초로 줄을 섰다).
+    serialized: bool = True
 
 
 E2E_SEED_REGISTRY: dict[str, SeedEntry] = {
@@ -56,6 +62,12 @@ E2E_SEED_REGISTRY: dict[str, SeedEntry] = {
         command="seed_e2e_operator_appeal",
         # 이 시드도 `_own_title_prefix` 로 자기 것을 가르므로 run_id 를 받는다.
         options=frozenset({"rule", "run_id"}),
+        # 개최자·개발자·공모전이 전부 호출마다 새 uuid 라 서로 부딪히지 않는다. 앞머리의
+        # 「다른 실행이 남긴 것 걷기」는 스위트 시작에 global-setup 이 이미 한 번 해 둬서
+        # 실행 도중에는 걸을 것이 없다. `rule` 을 주면 공유 심판 계정을 get_or_create
+        # 하므로 그 호출은 동시에 처음 만들 때 부딪힐 수 있다 — 지금 e2e 는 `rule` 을
+        # 쓰지 않는다; 쓰게 되면 이 값을 다시 켠다.
+        serialized=False,
     ),
     # **심지 않고 걷기만 하는 것도 여기 둔다** (#183). 스위트 시작에 한 번 불려
     # e2e 가 남긴 Category·DeliverableType 을 지우고 정책 단일 행을 기준값으로

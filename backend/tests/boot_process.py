@@ -81,7 +81,8 @@ def _child(argv: list[str], env: dict[str, str], conn) -> None:
     with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
         try:
             if argv[0] == "-c":
-                exec(compile(argv[1], "<string>", "exec"), {"__name__": "__main__"})
+                # `python -c <코드>` 와 같은 일 — 코드는 이 저장소의 시험이 쓴 문자열뿐이다.
+                exec(compile(argv[1], "<string>", "exec"), {"__name__": "__main__"})  # noqa: S102
             else:
                 from django.core.management import execute_from_command_line
 

@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { findIdByName } from "./lib/contests-api";
 import { establishDeveloperSession, establishVerification, publicOrigin } from "./lib/session";
 
 // ContestImage — 공개 버킷과 CDN (#234, ADR-0032).
@@ -24,18 +25,6 @@ const ONE_PIXEL_PNG = Buffer.from(
   "base64",
 );
 
-async function findIdByName(
-  request: import("@playwright/test").APIRequestContext,
-  path: string,
-  name: string,
-): Promise<number> {
-  const res = await request.get(path);
-  const list = (await res.json()) as { id: number; name: string }[];
-  const found = list.find((item) => item.name === name);
-  expect(found, `"${name}"을(를) ${path}에서 찾지 못했다`).toBeTruthy();
-  return (found as { id: number }).id;
-}
-
 test("개최자가 올린 이미지가 공개 상세에 서버 렌더링되고, 로그아웃 상태에서도 실제로 로드된다", async ({
   page,
   request,
@@ -57,7 +46,8 @@ test("개최자가 올린 이미지가 공개 상세에 서버 렌더링되고, 
   const api = page.context().request;
   const sameOrigin = { origin: publicOrigin() };
   const runId = `${Date.now()}`;
-  await establishDeveloperSession(page, `img-${runId}`);
+  // 화면을 열지 않는다 — 준비는 전부 API 로 하고 화면은 아래 두 컨텍스트가 연다.
+  await establishDeveloperSession(page, `img-${runId}`, null);
   await establishVerification(page, `img-${runId}`);
 
   const categoryId = await findIdByName(api, "/api/backend/contests/categories", "게임");
@@ -144,22 +134,17 @@ test("개최자가 올린 이미지가 공개 상세에 서버 렌더링되고, 
   const anonymousContext = await page.context().browser()!.newContext();
   try {
     const anonymousPage = await anonymousContext.newPage();
+    // 이미지 응답을 **화면을 열기 전에** 기다리기 시작한다(2026-10-02). 예전에는 연 다음에
+    // 기다려 그 사건을 놓치곤 했고, 그러면 15초를 다 채운 뒤 `.catch` 로 넘어가 CI 에서
+    // 이 시험 하나가 17초였다. 새 컨텍스트라 캐시가 없으니 응답은 반드시 온다.
+    const imageResponse = anonymousPage.waitForResponse((res) => res.url() === image.url);
     await anonymousPage.goto(`/contests/${contestId}`);
-    const imageResponse = await anonymousPage.waitForResponse(
-      (res) => res.url() === image.url,
-      { timeout: 15_000 },
-    ).catch(() => null);
+    expect((await imageResponse).status(), "공개 이미지 버킷에서 anonymous read가 거부됐다").toBe(200);
 
-    // 브라우저가 그 이미지를 이미 로드해 캐시했을 수도 있으므로(waitForResponse가
-    // 이벤트를 놓치는 경우), 직접 한 번 더 요청해 상태 코드로 확정한다 — 이
-    // 요청도 같은 컨텍스트(로그인 쿠키 없음)에서 나간다.
+    // 응답 형식은 같은 컨텍스트(로그인 쿠키 없음)에서 직접 한 번 더 요청해 확정한다.
     const direct = await anonymousContext.request.get(image.url);
-    expect(direct.status(), "공개 이미지 버킷에서 anonymous read가 거부됐다").toBe(200);
+    expect(direct.status()).toBe(200);
     expect(direct.headers()["content-type"]).toContain("image/png");
-
-    if (imageResponse) {
-      expect(imageResponse.status()).toBe(200);
-    }
   } finally {
     await anonymousContext.close();
   }

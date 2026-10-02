@@ -46,7 +46,7 @@ from pathlib import Path
 
 from django.conf import settings
 
-from tests.ast_scan_support import BACKEND_ROOT, python_sources
+from tests.ast_scan_support import BACKEND_ROOT
 
 #: 두 제품이 나눠 쓰는 층. 여기서 기능 앱으로 내려가는 것이 규칙 B 가 막는 방향이다.
 #: `submissions`가 #270(ADR-0039)로 여기 합류했다 — `Submission`(부모)이 공모전을
@@ -103,12 +103,12 @@ def _module_app(module: str) -> str:
     return module.split(".", 1)[0]
 
 
-def references(source: str) -> list[Reference]:
+def references(source: str, tree: ast.AST | None = None) -> list[Reference]:
     """소스 하나가 다른 앱을 가리키는 지점 전부. 파일을 읽지 않는다 — 합성 소스로
     빨강을 고정할 수 있어야 하기 때문이다(한 번도 빨개지지 않는 검사는 통과하는 검사와
     구별되지 않는다)."""
 
-    tree = ast.parse(source)
+    tree = tree if tree is not None else ast.parse(source)
     found: list[Reference] = []
 
     for node in ast.walk(tree):
@@ -174,7 +174,7 @@ def app_of(path: Path) -> str | None:
     return parts[0] if len(parts) > 1 and parts[0] in CLASSIFIED_APPS else None
 
 
-def violations(source: str, *, app: str) -> list[str]:
+def violations(source: str, *, app: str, tree: ast.AST | None = None) -> list[str]:
     """`app` 에 속한 소스 하나의 경계 위반 전부. 사람이 읽을 문장으로 돌려준다."""
 
     markers, covers = _exception_markers(source)
@@ -183,7 +183,7 @@ def violations(source: str, *, app: str) -> list[str]:
     for line in sorted(line for line, reason in markers.items() if not reason):
         problems.append(f"{line}줄: 예외 표시에 이유가 없다 — `APP-BOUNDARY-EXCEPTION: <이유>`")
 
-    for ref in references(source):
+    for ref in references(source, tree):
         if ref.app == app:
             continue
 
@@ -215,26 +215,27 @@ def violations(source: str, *, app: str) -> list[str]:
     return problems
 
 
-def _scan_repository() -> list[str]:
+def _scan_repository(sources) -> list[str]:
+    """`sources` 는 세션 픽스처 `backend_sources`(이미 읽고 파싱한 소스 전부)다."""
+
     reported: list[str] = []
-    for path in python_sources():
-        app = app_of(path)
+    for source in sources:
+        app = app_of(BACKEND_ROOT / source.relative)
         if app is None:
             continue
-        rel = path.relative_to(BACKEND_ROOT)
-        for problem in violations(path.read_text(encoding="utf-8"), app=app):
-            reported.append(f"{rel}:{problem}")
+        for problem in violations(source.text, app=app, tree=source.tree):
+            reported.append(f"{source.relative}:{problem}")
     return reported
 
 
 # --- 저장소 전체 -----------------------------------------------------------------
 
 
-def test_the_boundary_holds_across_the_repository():
+def test_the_boundary_holds_across_the_repository(backend_sources):
     """지금 저장소가 이 표를 지킨다. 실패 메시지가 어느 파일 어느 줄인지와 무엇을 해야
     하는지를 말한다 — 규칙만 있고 길이 없으면 다음 사람이 표에서 규칙을 지운다."""
 
-    problems = _scan_repository()
+    problems = _scan_repository(backend_sources)
     assert not problems, "앱 경계 위반:\n" + "\n".join(problems)
 
 

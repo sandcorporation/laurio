@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+
+import { createDraftContest, findIdByName } from "./lib/contests-api";
 import { establishDeveloperSession, establishVerification } from "./lib/session";
 
 // 결제 화면 — 벤더 없이 자리를 세운다 (#86, spec #82).
@@ -10,28 +12,12 @@ import { establishDeveloperSession, establishVerification } from "./lib/session"
 // 밖이다(#87).
 
 async function login(page: import("@playwright/test").Page, seed: string): Promise<void> {
-  await establishDeveloperSession(page, seed);
+  // 화면을 열지 않는다 — 이 파일의 시험은 각자 자기 화면으로 곧장 간다(시험 하나 3초 한도).
+  await establishDeveloperSession(page, seed, null);
 }
 
 async function verify(page: import("@playwright/test").Page, seed: string): Promise<void> {
   await establishVerification(page, seed);
-}
-
-async function findByName(
-  page: import("@playwright/test").Page,
-  path: string,
-  name: string,
-): Promise<number> {
-  const id = await page.evaluate(
-    async ({ path, name }) => {
-      const res = await fetch(path);
-      const list = (await res.json()) as { id: number; name: string }[];
-      return list.find((item) => item.name === name)?.id ?? null;
-    },
-    { path, name },
-  );
-  expect(id, `"${name}"을(를) ${path}에서 찾지 못했다`).not.toBeNull();
-  return id as number;
 }
 
 function futureLocalDatetime(daysAhead: number): string {
@@ -47,12 +33,11 @@ async function createDraftViaForm(
   runId: string,
   prize = 5_000_000,
 ): Promise<number> {
-  const categoryId = await findByName(page, "/api/backend/contests/categories", "게임");
-  const deliverableTypeId = await findByName(
-    page,
-    "/api/backend/contests/deliverable-types",
-    "웹 서비스",
-  );
+  const api = page.context().request;
+  const [categoryId, deliverableTypeId] = await Promise.all([
+    findIdByName(api, "/api/backend/contests/categories", "게임"),
+    findIdByName(api, "/api/backend/contests/deliverable-types", "웹 서비스"),
+  ]);
 
   await page.goto("/console/contests/new");
   await expect(page.getByTestId("grill-brief-heading")).toBeVisible();
@@ -76,10 +61,15 @@ async function createDraftViaForm(
 }
 
 test.describe("개최 → 결제 화면 → 공개", () => {
-  test("초안 패널에서 결제 화면으로 이어가 결제하면 공모전이 공개된다", async ({ page }) => {
+  // 예전에는 한 시험이 개최 폼부터 공개까지를 다 걸었다 — 시험 하나 3초 한도(2026-10-02)
+  // 때문에 둘로 나눴고 단언은 하나도 버리지 않았다: 폼에서 결제 화면까지는 이 시험이,
+  // 결제 화면에서 공개까지는 다음 시험이 본다.
+  test("개최 폼으로 만든 초안 패널에 결제로 이어가는 진입점이 있고, 누르면 그 결제 화면으로 간다", async ({
+    page,
+  }) => {
     const runId = `${Date.now()}`;
-    await login(page, `pay-happy-${runId}`);
-    await verify(page, `pay-happy-${runId}`);
+    await login(page, `pay-entry-${runId}`);
+    await verify(page, `pay-entry-${runId}`);
 
     const contestId = await createDraftViaForm(page, runId, 5_000_000);
 
@@ -88,6 +78,15 @@ test.describe("개최 → 결제 화면 → 공개", () => {
     await expect(page.getByTestId("grill-go-to-payment")).toBeVisible();
     await page.getByTestId("grill-go-to-payment").click();
     await expect(page).toHaveURL(new RegExp(`/console/contests/${contestId}/payment`));
+  });
+
+  test("결제 화면에서 결제하면 공모전이 공개된다", async ({ page }) => {
+    const runId = `${Date.now()}`;
+    await login(page, `pay-happy-${runId}`);
+    await verify(page, `pay-happy-${runId}`);
+    const contestId = await createDraftContest(page, `[E2E] 결제 테스트 ${runId}`, 5_000_000);
+
+    await page.goto(`/console/contests/${contestId}/payment`);
 
     // 무엇에 대한 얼마인지가 화면에 있다 — 상금·개최비·합계.
     await expect(page.getByTestId("payment-heading")).toContainText(`[E2E] 결제 테스트 ${runId}`);
@@ -126,7 +125,7 @@ test.describe("개최 → 결제 화면 → 공개", () => {
     const runId = `${Date.now()}`;
     await login(page, `pay-owner-${runId}`);
     await verify(page, `pay-owner-${runId}`);
-    const contestId = await createDraftViaForm(page, runId);
+    const contestId = await createDraftContest(page, `[E2E] 결제 테스트 ${runId}`);
 
     // 다른 계정으로 로그인해 같은 Contest의 결제 화면을 직접 연다.
     await login(page, `pay-stranger-${runId}`);

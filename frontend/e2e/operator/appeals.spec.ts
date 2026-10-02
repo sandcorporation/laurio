@@ -19,11 +19,6 @@ import { establishOperatorSession } from "../lib/session";
 // 마커·사유 문자열을 대상으로만 이루어진다 — 절대 "목록 전체가 N건"같은 절대
 // 개수를 가정하지 않는다.
 
-async function loginAsOperator(page: Page, username: string): Promise<void> {
-  await establishOperatorSession(page, username, E2E_OPERATOR_PASSWORD);
-  await expect(page.getByTestId("operator-home-heading")).toBeVisible();
-}
-
 /** 목록 로딩이 끝나길 기다린다 — 셋 중 하나(목록·빈 상태·실패)가 뜰 때까지.
  * home.spec.ts의 readQueueValue와 같은 이유: locator.all()/count()는 자동
  * 대기하지 않으므로, 로딩이 끝났다는 것을 먼저 보장하지 않고 행을 세면
@@ -47,13 +42,13 @@ test.describe("소스는 접혀 있다(#66 핵심, ADR-0022)", () => {
   test("펼치면 소스가 보이고, 그 행위가 Developer 쪽 열람 기록에 실제로 한 건을 남긴다", async ({
     page,
   }) => {
-    const operator = await seedE2eOperator();
-    const seeded = await seedE2eOperatorAppeal();
+    // 둘은 서로 모르는 시드라 함께 보낸다 — 시험 하나 3초 한도(2026-10-02).
+    const [operator, seeded] = await Promise.all([seedE2eOperator(), seedE2eOperatorAppeal()]);
 
     const before = await sourceReadingCount(seeded.submission_id, seeded.dev_access);
 
-    await loginAsOperator(page, operator.username);
-    await page.goto(`/appeals/${seeded.appeal_id}`);
+    // 홈을 거치지 않고 이의 화면으로 바로 간다(`establishOperatorSession` 의 `path`).
+    await establishOperatorSession(page, operator.username, E2E_OPERATOR_PASSWORD, `/appeals/${seeded.appeal_id}`);
     await expect(page.getByTestId("appeal-source-warning")).toBeVisible();
 
     await page.getByTestId("appeal-source-reveal-button").click();
@@ -71,17 +66,22 @@ test.describe("소스는 접혀 있다(#66 핵심, ADR-0022)", () => {
   test("같은 이의를 다시 펼치면 열람 기록이 하나 더 쌓인다 — 사건이지 상태가 아니다", async ({
     page,
   }) => {
-    const operator = await seedE2eOperator();
-    const seeded = await seedE2eOperatorAppeal();
+    const [operator, seeded] = await Promise.all([seedE2eOperator(), seedE2eOperatorAppeal()]);
 
-    await loginAsOperator(page, operator.username);
-    await page.goto(`/appeals/${seeded.appeal_id}`);
-    await page.getByTestId("appeal-source-reveal-button").click();
-    await expect(page.getByTestId("appeal-source-content")).toContainText(seeded.source_marker);
+    await establishOperatorSession(page, operator.username, E2E_OPERATOR_PASSWORD, `/appeals/${seeded.appeal_id}`);
+
+    // 첫 번째 펼침은 화면이 부르는 바로 그 요청(운영자 BFF 를 거친다)으로 깐다 —
+    // 「화면에서 펼치면 한 건이 남는다」는 바로 위 시험이 화면으로 보고, 이 시험이 보는
+    // 것은 **같은 이의를 또 펼치면 또 남는다**는 것이다. 예전에는 펼치기·새로고침·
+    // 펼치기를 전부 화면으로 해 시험 하나 3초 한도를 넘었다(2026-10-02).
+    const first = await page.context().request.post(`/api/backend/operator/appeals/${seeded.appeal_id}/source`, {
+      headers: { origin: new URL(page.url()).origin },
+    });
+    expect(first.status()).toBe(200);
+    expect((await first.json()).prompt).toContain(seeded.source_marker);
 
     const afterFirst = await sourceReadingCount(seeded.submission_id, seeded.dev_access);
 
-    await page.reload();
     await page.getByTestId("appeal-source-reveal-button").click();
     await expect(page.getByTestId("appeal-source-content")).toContainText(seeded.source_marker);
 
@@ -106,13 +106,11 @@ async function readPendingAppealsCount(page: Page): Promise<number> {
 
 test.describe("이의 심판 — 인용·기각과 감사 추적(#67)", () => {
   test("인용이 만든 정정이 원장에 실제로 반영됐음을 확인한다", async ({ page }) => {
-    const operator = await seedE2eOperator();
-    const seeded = await seedE2eOperatorAppeal();
+    const [operator, seeded] = await Promise.all([seedE2eOperator(), seedE2eOperatorAppeal()]);
 
     const before = await ledgerEntryCount(seeded.contest_id);
 
-    await loginAsOperator(page, operator.username);
-    await page.goto(`/appeals/${seeded.appeal_id}`);
+    await establishOperatorSession(page, operator.username, E2E_OPERATOR_PASSWORD, `/appeals/${seeded.appeal_id}`);
     await page.getByTestId("ruling-note").fill("정정이 원장에 반영되는지 확인.");
     await page.getByTestId("ruling-correction-amount").fill("7777");
     await page.getByTestId("ruling-uphold-button").click();

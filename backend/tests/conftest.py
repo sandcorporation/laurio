@@ -13,6 +13,10 @@
 전후 비운다.
 """
 
+import os
+import resource
+import time
+
 import pytest
 from django.core.cache import caches
 
@@ -21,7 +25,6 @@ from contests.view_flush_store import InMemoryChangedContestsStore
 from core.events import FakeEventBus
 from payments.adapters import FakePGAdapter
 from storage.adapters.fake import FakeStorageAdapter
-
 
 # --- 시험 하나의 CPU 한도 ----------------------------------------------------
 #
@@ -34,10 +37,6 @@ from storage.adapters.fake import FakeStorageAdapter
 # 한도는 `CODEMIT_TEST_CPU_LIMIT`(초, 기본 1.0)이고 CI 는 1.5 를 준다. 0 이면
 # 끈다. Postgres 가 질의를 처리하는 시간은 다른 프로세스라 여기 잡히지 않는다.
 
-import os
-import resource
-import time
-
 _CPU_LIMIT_SECONDS = float(os.environ.get("CODEMIT_TEST_CPU_LIMIT", "1.0"))
 
 
@@ -48,6 +47,41 @@ def _cpu_seconds() -> float:
     # forkserver 자식은 이 프로세스의 자식이 아니라 RUSAGE_CHILDREN 에 안 잡힌다
     # — 자식이 돌려준 몫을 더한다(`tests/boot_process.py`).
     return time.process_time() + children.ru_utime + children.ru_stime + charged_cpu_seconds()
+
+
+# --- 로컬에서 한 번에 돌리는 시험 수 --------------------------------------------
+#
+# 로컬(개발 머신)에서는 한 번에 400개를 넘게 돌리지 않는다(2026-10-02). 전체는 브랜치
+# PR 의 CI 가 돌린다 — 이 머신은 여러 에이전트와 다른 프로젝트가 나눠 쓰고, 전체를
+# 로컬에서 돌리면 남의 시험까지 흔든다. 입구는 `scripts/test.sh backend` 다(코어 고정·
+# 동시 실행 둘까지). CI(`CI` 환경변수)와 `CODEMIT_FULL_TESTS=1` 은 이 제한을 받지 않는다.
+
+_LOCAL_TEST_LIMIT = 400
+
+
+def _local_limit_message(count: int) -> str:
+    return (
+        f"시험 {count}개를 한 번에 돌리려 했다 — 로컬은 {_LOCAL_TEST_LIMIT}개까지다. 파일·키워드로 "
+        "좁히고(예: scripts/test.sh backend tests/test_x.py), 전체는 브랜치 PR 의 CI 로 본다. "
+        "정말 필요하면 CODEMIT_FULL_TESTS=1."
+    )
+
+
+def _local_limit_applies() -> bool:
+    return not (os.environ.get("CI") or os.environ.get("CODEMIT_FULL_TESTS"))
+
+
+def pytest_collection_modifyitems(session, config, items):
+    # xdist 워커는 각자 전체를 수집한다 — 판정은 아래 컨트롤러 걸이가 한 번 한다.
+    if hasattr(config, "workerinput") or config.pluginmanager.hasplugin("dsession"):
+        return
+    if _local_limit_applies() and len(items) > _LOCAL_TEST_LIMIT:
+        raise pytest.UsageError(_local_limit_message(len(items)))
+
+
+def pytest_xdist_node_collection_finished(node, ids):
+    if _local_limit_applies() and len(ids) > _LOCAL_TEST_LIMIT:
+        pytest.exit(_local_limit_message(len(ids)), returncode=4)
 
 
 @pytest.hookimpl(wrapper=True)
@@ -72,6 +106,31 @@ def pytest_runtest_makereport(item, call):
                 " (CODEMIT_TEST_CPU_LIMIT). 원인을 찾아 줄인다; 한도를 늘리지 않는다."
             )
     return report
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _load_urlconf_before_any_test():
+    """URLconf 를 워커마다 시험 전에 한 번 적재한다(2026-10-02).
+
+    Django 는 URLconf 를 첫 요청에서야 읽는데, 그 한 번이 라우터 179개의 pydantic
+    스키마를 만드느라 CPU 0.5초 넘게 든다. 그대로 두면 워커마다 **처음 요청을 보낸
+    시험** 하나가 그 비용을 혼자 내서 시험 하나 CPU 한도를 넘는다 — 어느 시험이
+    처음일지는 실행마다 달라 빌드마다 다른 시험이 떨어진다. 세션 픽스처는 준비
+    단계라 한도가 재지 않는다."""
+
+    from django.urls import get_resolver
+
+    assert get_resolver().url_patterns  # 읽는 것 자체가 목적이다 — 적재를 일으킨다
+
+
+@pytest.fixture(scope="session")
+def backend_sources():
+    """백엔드 소스 전부의 원문과 구문 트리(`tests/ast_scan_support.py`) — 구조 시험들이
+    워커마다 한 번만 읽고 파싱한다. 세션 픽스처라 시험 하나의 CPU 한도 밖이다."""
+
+    from tests.ast_scan_support import parse_python_sources
+
+    return parse_python_sources()
 
 
 class _StubKeyCheckResponse:

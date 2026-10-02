@@ -7,7 +7,7 @@ Python + uv, Django + django-ninja, PostgreSQL. 백엔드는 `backend/`, 컨테�
 ```bash
 docker compose -f docker/compose.dev.yaml up          # 전체 스택
 docker compose -f docker/compose.dev.yaml up -d db redis   # 테스트용 인프라
-cd backend && uv run pytest                           # 테스트
+scripts/test.sh backend tests/test_x.py              # 테스트(로컬은 400개까지, 전체는 PR CI)
 ```
 
 **공개 포트가 표준이 아니다.** compose 기본값이 5432·8000·6379·3000을 통째로 비켜 잡아
@@ -881,7 +881,7 @@ docker/compose.dev.yaml exec backend uv run pytest`(또는 컨테이너 안 셸�
 쳐야 하기 때문 — FE-09, #34). 항상 호스트에서 돌린다:
 
 ```bash
-cd backend && CODEMIT_DB_PORT=55432 uv run pytest   # 포트는 쓰는 스택에 맞춰 바꾼다
+scripts/test.sh backend tests/test_x.py   # 호스트에서 돈다 — 포트는 dev-env.sh 가 고른다
 ```
 
 dev compose의 `db` 서비스는 호스트 포트로 이미 노출돼 있으므로 호스트의 `uv run
@@ -1049,8 +1049,7 @@ ADR-0018 은 **운영**에서 세션이 Redis 에 산다고 정한 것이고, �
 운영자 로그인 e2e 가 실물 스택으로 계속 덮는다.
 
 ```bash
-docker compose -f docker/compose.dev.yaml up -d db   # pytest 에 필요한 것은 이것뿐이다
-cd backend && CODEMIT_DB_PORT=55432 uv run pytest
+scripts/test.sh backend tests/test_x.py   # db 하나만 띄우고(스크립트가 한다) 그 위에서 돈다
 ```
 
 **앱 경계는 테스트가 지킨다**(#269, ADR-0037). `tests/test_app_boundaries.py` 가 백엔드
@@ -1234,7 +1233,43 @@ CODEMIT_E2E_BASE_URL=http://127.0.0.1:<그 포트> pnpm exec playwright test --p
 **이 머신에는 그 위에 메모리 한도도 걸려 있다** — 자세한 값과 근거는 커밋되지 않는
 `CLAUDE.local.md` 에 있다(사용자 슬라이스만 제한하고 docker 는 `system.slice` 라 밖이다).
 
-**e2e 는 로컬에서 돌리지 않는다 — CI 가 돌린다.**
+**로컬 시험의 입구는 `scripts/test.sh` 하나다**(2026-10-02, web-rpg 의 `deploy/test.sh` 와
+같은 방식). `scripts/test.sh backend [pytest 인자]` · `scripts/test.sh e2e [playwright 인자]`.
+
+- **기계 전체에서 동시에 둘까지 돈다** — 셋째는 빈 칸을 기다린다(`/tmp/codemit-test-slots`
+  의 flock, 워크트리가 달라도 같은 칸을 센다). 이 머신은 여러 에이전트와 다른 프로젝트가
+  나눠 쓴다.
+- **한 칸은 호스트 코어의 1/3 을 고정해 쓴다**(12코어면 4) — pytest·Playwright 는 `taskset`,
+  e2e 스택 컨테이너는 `docker update --cpuset-cpus`. 몫 제한(`--cpus`)이 아니라 코어를 못
+  박는다: 몫이 차면 0.1초씩 통째로 멈춰 시험이 흔들린다(web-rpg 실측).
+- **한 번에 400개를 넘게 돌리지 않는다** — pytest 는 `tests/conftest.py` 가 수집 단계에서,
+  e2e 는 스크립트가 `--list` 로 미리 세어 거절한다. `CI` 환경변수가 있으면(=CI) 제한이 없고,
+  로컬에서 정말 필요하면 `CODEMIT_FULL_TESTS=1`.
+- **전체 시험은 브랜치 PR 의 CI 로 본다** — 아래 「티켓을 닫는 기준」.
+- **e2e 는 CI 와 같은 프로덕션 이미지 스택**(`compose.dev` + `compose.ci`)을 이 워크트리 전용
+  이름(`<dev-env 프로젝트>-e2e`)으로 굽고 띄우고, 끝나면 지운다. 되풀이할 때는
+  `CODEMIT_E2E_KEEP=1` 로 남기고, 다 쓰면 `scripts/test.sh e2e-down`. 일꾼은 코어 둘에 하나다.
+
+**e2e 시험 하나는 3초 안에 끝나고, 재시도하지 않는다**(2026-10-02, `playwright.config.ts`
+의 `timeout: 3_000`·`retries: 0`). 재시도가 흔들리는 시험을 초록으로 덮고 있었다 — 강의실
+「죽은 세션」 시험이 CI 에서 30초 타임아웃으로 떨어졌다가 재시도로 통과한 것이 로그에만
+남았다. **흔들리는 시험은 지우지 않고 원인을 고친다**(그 시험의 원인은 앞 화면의 주기 조회가
+쿠키를 죽인 직후 스스로 로그인으로 이동해 시험의 다음 이동과 부딪힌 것이었다). 넘으면 한도를
+늘리지 않고 줄인다 — 이번에 쓴 방법:
+
+- **준비는 화면이 아니라 API 로** — 개최 폼을 화면으로 채우던 결제 시험은 초안을
+  `e2e/lib/contests-api.ts` 로 깐다(폼 자체는 시험 하나가 화면으로 걷는다). 로그인
+  도우미(`establishDeveloperSession`·`establishOperatorSession`)는 열 화면을 받는다 —
+  목적지로 바로 가거나(`path`) 아무 화면도 열지 않는다(`null`).
+- **긴 시험은 나누되 단언은 버리지 않는다** — 결제 「개최 → 공개」를 「폼 → 결제 화면」과
+  「결제 화면 → 공개」로 나눴다.
+- **사건을 놓치지 않게 먼저 기다린다** — 응답 대기는 화면을 열기 **전에** 건다(공모전
+  이미지 시험이 응답을 놓치고 15초를 채우던 것이 CI 의 17초였다).
+- **서버 쪽 비용** — dev·CI 는 빠른 비밀번호 해셔를 쓴다(운영자 시드 1.06 → 0.08초,
+  로그인 0.55 → 0.23초; 배포는 PBKDF2 그대로, `config/settings.py`). dev·CI 의 Postgres 는
+  `synchronous_commit=off`(시드 하나가 커밋 대기로 1.5초를 썼다). CI 의 e2e 백엔드는
+  `runserver` 가 아니라 gunicorn 넷이다(`compose.ci.yaml`). CI 의 e2e 잡 셋은 한 호스트에서
+  동시에 돌므로 잡마다 일꾼 둘이다(`PLAYWRIGHT_WORKERS`).
 
 **e2e 시드는 입구에서 줄을 선다**(2026-09-18, CI #242). Playwright 는 시드를 스펙 파일마다
 `beforeAll` 에서 부르고 `fullyParallel` 로 워커 여럿을 쓰는데, 시드들은 「기존 e2e 데이터를
@@ -1244,7 +1279,9 @@ CODEMIT_E2E_BASE_URL=http://127.0.0.1:<그 포트> pnpm exec playwright test --p
 이름별 `pg_advisory_xact_lock` 을 잡아 그 창을 닫는다. 시드 하나가 0.25초라 워커 여섯이
 줄을 서도 최악 1.5초이고 호출부의 하한은 30초다. 호출부를 하나씩 고치지 않고 입구에 둔
 이유는 같은 경쟁이 시드마다 다른 제약으로 되살아나기 때문이다(스폰서·심사 스폰서·개발자·
-기준데이터가 모두 같은 「지우고 넣기」 모양이다).
+기준데이터가 모두 같은 「지우고 넣기」 모양이다). **매번 새 행만 만드는 시드는 등록부가
+줄에서 뺀다**(`SeedEntry.serialized=False`, 2026-10-02 — 이의 시드 셋이 0.4·1.0·1.2초로 줄을
+서서 시험 하나 3초 한도를 넘었다).
 
 **그 실패는 한 번 진단이 불가능했다.** `frontend/e2e/lib/seed-http.ts` 가 오류 본문을
 400자에서 잘라 역추적의 머리만 남기고 정작 원인 줄(psycopg 예외 클래스와 `DETAIL:`)을
@@ -1262,10 +1299,8 @@ CODEMIT_E2E_BASE_URL=http://127.0.0.1:<그 포트> pnpm exec playwright test --p
 정하지 「언제 돌리는가」를 정하지 않는다.
 
 **e2e 스펙은 개발 중에 쓰지 않는다.** 티켓이 끝날 때 1~2개만 남긴다. 무엇을 남기는지는
-아래 「남길 것」이 정한다. 새로 쓴 스펙도 **로컬에서 돌리지 않는다** — CI 가 처음 돌린다.
-
-**예외는 하나다: e2e 자체를 고치는 작업.** 스펙을 지우거나 헬퍼를 바꾸는 티켓에서는 e2e 가
-작업의 **대상**이므로 돌려 봐야 결과를 안다. 기능 개발에는 해당하지 않는다.
+아래 「남길 것」이 정한다. 새로 쓴 스펙은 그 파일만 `scripts/test.sh e2e <파일>` 로 한 번
+돌려 3초 안에 드는지 보고, 나머지는 PR 의 CI 가 돌린다.
 
 ### 남길 것 — ADR-0017 의 세 위험 + 핵심 흐름
 
@@ -1287,9 +1322,12 @@ ADR-0017 은 프론트에만 있는 위험을 셋으로 못 박았다. 여기 �
 
 ### 티켓을 닫는 기준
 
-로컬 게이트는 셋이다 — **백엔드 `pytest`**, **세 앱 `typecheck`**, **에이전트가 브라우저로
-걸어본 결과**. 통과하면 머지하고 **push 한다**. 다음 티켓을 시작하기 전에 CI 결과를 확인해
-보고한다.
+로컬 게이트는 셋이다 — **바꾼 자리의 백엔드 시험**(`scripts/test.sh backend <파일…>`,
+400개까지), **세 앱 `typecheck`**, **에이전트가 브라우저로 걸어본 결과**. **전체 시험은
+브랜치 PR 의 CI 로 본다**(2026-10-02) — 브랜치를 push 하고 초안 PR 을 열어 CI 가 초록이면 그
+커밋을 main 으로 push 한다(PR 은 CI 를 돌리는 그릇이라 따로 머지 버튼을 누르지 않는다 —
+커밋이 main 에 들어가면 GitHub 이 저절로 머지된 것으로 표시한다). 다음 티켓을 시작하기 전에
+main 의 CI 결과를 확인해 보고한다.
 
 **push 를 빠뜨리면 CI 는 아무것도 보지 않는다.** 실제로 그런 적이 있다 — 하루 작업 20커밋이
 푸시되지 않은 채 쌓였고, 그 사이 CI 잡 하나가 21시간 빨간 것도 아무도 몰랐다. e2e 를 CI 에
@@ -1315,18 +1353,18 @@ ADR-0017 은 프론트에만 있는 위험을 셋으로 못 박았다. 여기 �
 | --- | --- | --- |
 | red→green 반복 | 백엔드 테스트 파일 하나 | **12초** |
 | red→green 반복 | 브라우저로 화면 하나 걸어보기 | **수 초** |
-| 티켓 커밋 직전 | `pytest` 전체 | 1분 28초 |
+| 티켓 커밋 직전 | 바꾼 자리의 `pytest` | 수 초 ~ 수십 초 |
 | 티켓 커밋 직전 | 세 앱 `typecheck` | 각 10~20초 |
-| CI (push 후) | 전체 | 백엔드 + e2e |
+| 브랜치 PR 의 CI | 전체 | 백엔드 + e2e |
 
-로컬에서 `pnpm --dir frontend test` 를 돌리지 않는다. 스크립트는 CI 와 e2e 자체를 고치는
-작업을 위해 남아 있다.
+로컬에서 `pnpm --dir frontend test`(전체)를 돌리지 않는다 — 로컬 e2e 는 `scripts/test.sh
+e2e` 로 파일·프로젝트를 좁혀 돌린다. 그 스크립트들은 CI 가 쓴다.
 
 **이번엔 전부 이 머신에서 다시 쟀다** — 옛 표의 e2e 수치는 이전 머신(WSL) 것이었다.
 
 ```bash
-cd backend && CODEMIT_DB_PORT=<포트> uv run pytest tests/test_payouts.py -q
-pnpm --dir frontend exec playwright test --project=public e2e/payout.spec.ts -g "상금 그대로가"
+scripts/test.sh backend tests/test_payouts.py -q
+scripts/test.sh e2e --project=public e2e/payout.spec.ts -g "상금 그대로가"
 ```
 
 안쪽 고리에서 전체를 돌리면 **한 번의 red→green 이 4초가 아니라 7분**이 된다. 슬라이스
