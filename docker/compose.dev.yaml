@@ -69,7 +69,11 @@ services:
   # **하나뿐**이다 — codemit-dev 를 public으로 만들거나 정책을 고치는 코드는 이 스택
   # 어디에도 없다.
   minio:
-    image: minio/minio:latest
+    # 공식 minio/minio·minio/mc 는 Docker Hub 에서 내려갔다(2026-10-02 pull 이 「repository does not
+    # exist」, quay.io 도 401) — 그때까지는 각 머신에 캐시된 옛 이미지로만 떴다. 같은 소스를 계속
+    # 빌드해 올리는 Pigsty 의 이미지로 바꿨다(mc 도 들어 있어 아래 healthcheck 가 그대로다). 태그를
+    # 고정해 둔다 — latest 로 두면 바뀐 줄 모른 채 스택마다 다른 판으로 뜬다.
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     environment:
       <<: *default-minio-env
     ports:
@@ -95,7 +99,7 @@ services:
   # 익명 읽기를 건다 — 정책이 버킷 단위이므로 이미지 쪽 설정을 아무리 잘못 써도
   # codemit-dev에는 닿지 못한다(ADR-0032 "가르는 것은 버킷이지 접두어가 아니다").
   minio-init:
-    image: minio/mc:latest
+    image: pgsty/mc:RELEASE.2026-09-16T00-00-00Z
     depends_on:
       minio:
         condition: service_healthy
