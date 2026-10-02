@@ -7475,7 +7475,7 @@ export interface components {
              */
             date: string;
             /** Problems */
-            problems: components["schemas"]["UsageProblemDayOut"][];
+            problems: components["schemas"]["UsageProblemCellOut"][];
             /** Submissions */
             submissions: number;
             /** Submitters */
@@ -7494,6 +7494,7 @@ export interface components {
             end_date: string;
             /** Name */
             name: string;
+            period_total: components["schemas"]["UsageClassPeriodTotalOut"];
             /** Problems */
             problems: components["schemas"]["UsageProblemOut"][];
             /**
@@ -7501,6 +7502,19 @@ export interface components {
              * Format: date
              */
             start_date: string;
+        };
+        /**
+         * UsageClassPeriodTotalOut
+         * @description 날짜 × 문제 표의 합계 줄 — 제출자 수는 날마다의 값을 더한 것이 아니라 기간 전체에서
+         *     겹치지 않게 센 사람 수다(`UsageTotalsOut.submitters` 와 같은 뜻).
+         */
+        UsageClassPeriodTotalOut: {
+            /** Problems */
+            problems: components["schemas"]["UsageProblemCellOut"][];
+            /** Submissions */
+            submissions: number;
+            /** Submitters */
+            submitters: number;
         };
         /** UsageDailyOut */
         UsageDailyOut: {
@@ -7534,8 +7548,8 @@ export interface components {
             /** Submitters */
             submitters: number;
         };
-        /** UsageProblemDayOut */
-        UsageProblemDayOut: {
+        /** UsageProblemCellOut */
+        UsageProblemCellOut: {
             /** Problem Id */
             problem_id: number;
             /** Submissions */

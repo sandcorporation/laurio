@@ -14,7 +14,7 @@
 // 옆 막대는 기간 안 최댓값 대비 길이의 div 다 — 차트 의존성을 들이지 않는다.
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { type FormEvent, Suspense, useState } from "react";
+import { Suspense } from "react";
 
 import { PageHeader } from "@/app/components/page-header";
 import { Panel } from "@/app/components/panel";
@@ -24,6 +24,8 @@ import { periodFromSearchParams, periodQuery, type UsagePeriod } from "@/lib/usa
 import type { DailyUsage, UsageDay } from "@/lib/usage/types";
 import { useClassUsage } from "@/lib/usage/use-class-usage";
 import { useDailyUsage } from "@/lib/usage/use-daily-usage";
+
+import { UsagePeriodForm } from "./period-form";
 
 const COL = {
   date: "w-[116px]",
@@ -42,52 +44,6 @@ function Count({ value, testId }: { value: number; testId?: string }) {
     <span data-testid={testId} className={`font-mono ${value === 0 ? "text-ink/30" : ""}`}>
       {value}
     </span>
-  );
-}
-
-function PeriodForm({ initial, onApply }: { initial: UsagePeriod; onApply: (p: UsagePeriod) => void }) {
-  const [from, setFrom] = useState(initial.from ?? "");
-  const [to, setTo] = useState(initial.to ?? "");
-
-  function handleSubmit(event: FormEvent) {
-    event.preventDefault();
-    onApply({ from: from || null, to: to || null });
-  }
-
-  return (
-    <form
-      onSubmit={handleSubmit}
-      data-testid="usage-period-form"
-      className="flex flex-wrap items-end gap-2"
-    >
-      <label className="flex flex-col gap-[5px]">
-        <span className="text-[11.5px] text-ink/45">시작일</span>
-        <input
-          type="date"
-          data-testid="usage-period-from"
-          value={from}
-          onChange={(e) => setFrom(e.target.value)}
-          className="border border-rule bg-paper px-[11px] py-[7px] text-[13px] text-ink"
-        />
-      </label>
-      <label className="flex flex-col gap-[5px]">
-        <span className="text-[11.5px] text-ink/45">종료일</span>
-        <input
-          type="date"
-          data-testid="usage-period-to"
-          value={to}
-          onChange={(e) => setTo(e.target.value)}
-          className="border border-rule bg-paper px-[11px] py-[7px] text-[13px] text-ink"
-        />
-      </label>
-      <button
-        type="submit"
-        data-testid="usage-period-apply"
-        className="bg-ink px-4 py-2 text-[13px] font-medium text-paper"
-      >
-        보기
-      </button>
-    </form>
   );
 }
 
@@ -213,7 +169,7 @@ function UsageInner() {
       />
       <div className="flex flex-1 flex-col gap-4 p-4 sm:p-8">
         <div className="flex flex-wrap items-end justify-between gap-3">
-          <PeriodForm key={formKey} initial={shown} onApply={applyPeriod} />
+          <UsagePeriodForm key={formKey} initial={shown} onApply={applyPeriod} />
           {(period.from || period.to) && (
             <Link href="/usage" data-testid="usage-period-reset" className="text-[12px] text-ink/62 hover:text-ink">
               최근 30일로
