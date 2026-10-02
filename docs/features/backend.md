@@ -396,8 +396,11 @@ PostgreSQL `DataError` 로 깨진다). 예전 허용 목록은
 뒤 실패하면 그 파일 자리에 「(열 수 없는 ○○ 파일 — 내용을 읽지 못했다)」 한 줄이
 남아 채점자가 「없다」로 오판하지 않는다. 플러그인의 예외는 그 플러그인만, 시간
 상한(10초)·입력 상한(20MB)은 그 파일만 건너뛰고 선별은 계속한다. 쓸 수 없는 경로는
-`manage.py check` 가 거절한다(`core.E004`·`core.E005`, dev 에서도). **기본값은 빈
-목록이다** — 그러면 예전처럼 버려진다.
+`manage.py check` 가 거절한다(`core.E004`·`core.E005`, dev 에서도). 플러그인은
+지금 Packet Tracer(`.pkt`, #497 — `core.source_converters.packet_tracer`, 해독은
+Unpacket 에서 들여온 MIT 코드) 하나다. **기본값은 dev·CI 가 Packet Tracer, 배포
+환경이 빈 목록이고**, staging·prod compose 도 `SOURCE_CONVERTERS: ""` 로 명시해
+끈다(Cisco 약관 검토 #498 전까지) — 목록이 비면 읽을 수 없는 파일은 예전처럼 버려진다.
 
 **통과는 필수 항목을 전부 충족했다는 판정이다**(#288, CONTEXT.md 「통과」) — 문제마다
 합격선을 따로 두지 않는다. 그래서 필수 항목이 하나도 없는 문제는 통과가 정의되지
