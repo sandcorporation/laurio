@@ -7,12 +7,33 @@
 생기고, 5분마다 훑어 새 push 를 찾는다. 결과는 GitHub 커밋 상태로 남는다. 같은 브랜치에 새로
 push 하면 옛 빌드를 끊는다.
 
+**PR 마다** — sub 검사만 돌고, 초록이면 그 커밋을 줄 세운다:
+
 | 단계 | 노드 | 하는 일 |
 | --- | --- | --- |
 | 변경 | sub(`laurio-staging`) | `scripts/ci/changed.sh` — 문서(`.md`·`docs/`)만 바뀌었으면 시험을 건너뛰고 문서 검사만 |
 | 시험(병렬) | sub | `scripts/ci/sub-checks.sh` — Django `check`·`check --deploy`, pytest 전체(junit), 생성물 최신성 둘, ADR·화면 언어 검사, 단위 시험 여섯, 세 앱 typecheck |
-| | macos | `scripts/ci/macos-sweep.sh`(중단된 앞 빌드가 남긴 `jenkins-codemit-pr-*` 스택·볼륨과 사흘 넘은 빌드 캐시를 걷는다 — 중단은 trap 을 건너뛰어, 남은 볼륨이 Docker VM 을 채우자 MinIO 가 `XMinioStorageFull` 로 업로드를 거절했다, 2026-10-03) → `scripts/ci/e2e.sh`(세 앱 프로덕션 이미지 스택 + 세 프로젝트) → `scripts/ci/celery-broker.sh` |
-| 병합 | sub | 초록이면 열린 PR 을 `main` 에 rebase 병합(`automerge.py`, 상태 `codemit/automerge`) → 그 범위의 `GlitchTip:` 줄 해결 표시 |
+| 줄 서기 | sub | 초록이면 머리 커밋의 상태 `codemit/automerge` 를 `pending`(「다음 묶음을 기다린다」)으로 두고 `codemit-train` 을 부른다 |
+
+**묶음마다** — Jenkins `codemit-train`(Pipeline, `Jenkinsfile.train`, 2026-10-03)이 줄 선 PR 을
+최신 `main` 위에 차례로 쌓아 **한 번** 시험하고 초록이면 차례로 합친다. PR CI 가 부르고, 10분마다
+스스로도 돈다. 규칙은 `scripts/ci/train.py` 머리말에 있다.
+
+| 단계 | 노드 | 하는 일 |
+| --- | --- | --- |
+| 묶기 | sub | 열린 main PR 중 머리 커밋이 줄에 선 것(초안·`hold` 는 빼고, 8개까지)을 번호 순으로 cherry-pick 해 쌓는다. 얹히지 않는 PR 은 `failure` 로 돌려보낸다 |
+| 시험(병렬) | sub | 같은 계획으로 다시 쌓고(트리 해시 확인) `scripts/ci/sub-checks.sh` |
+| | macos | 같은 계획으로 다시 쌓고 `scripts/ci/macos-sweep.sh`(중단된 앞 빌드가 남긴 `jenkins-codemit-pr-*`·`jenkins-codemit-train-*` 스택·볼륨과 사흘 넘은 빌드 캐시를 걷는다 — 중단은 trap 을 건너뛰어, 남은 볼륨이 Docker VM 을 채우자 MinIO 가 `XMinioStorageFull` 로 업로드를 거절했다, 2026-10-03) → `scripts/ci/e2e.sh`(세 앱 프로덕션 이미지 스택 + 세 프로젝트) → `scripts/ci/celery-broker.sh` |
+| 병합 | sub | 초록이면 차례로 rebase 병합(`sha` 로 머리를 고정 — 그 사이 push 된 PR 에서 멈춘다) → 합친 범위의 `GlitchTip:` 줄 해결 표시 → 남은 줄이 있으면 다음 묶음 |
+| 붉으면 | sub | 둘 이상이면 앞의 절반으로 다시 돈다. 하나만 묶은 시험이 붉으면 그 PR 에 `failure` |
+
+- **왜 묶나**(2026-10-03). PR 마다 macos e2e 를 따로 돌리면 이미지 셋 굽기 포함 약 8분이 노드
+  실행기 하나에 줄을 서(PR 넷이면 32분), 각 PR 은 자기가 갈라진 **옛 main** 위에서만 시험됐다 —
+  먼저 합쳐진 PR 과 충돌하는 PR 이 초록인 채 남았다(#530 이 #531·#532 와 그렇게 충돌했다).
+- **줄에서 빠지는 법·돌아오는 법.** 새로 push 하면 새 커밋에는 상태가 없어 저절로 빠지고, PR CI
+  가 다시 세운다. `failure` 를 받은 커밋은 PR CI 를 다시 돌리면(`POST /job/codemit-pr/job/<브랜치>/build`)
+  줄로 돌아온다 — 인프라 고장으로 붉은 묶음이 가르기 끝에 PR 하나를 억울하게 잡았을 때의 길이다.
+  초안을 풀거나 `hold` 를 떼면 다시 빌드하지 않아도 다음 묶음이 데려간다.
 
 - **노드는 실행기가 하나라 통째로 쓴다.** 예전에는 GitHub Actions 의 셀프호스티드 러너
   셋(sub)이 sub 의 코어를 제한 없이 나눠 써, 이미지 빌드와 겹친 시험이 경합만으로 한도를
@@ -26,7 +47,7 @@ push 하면 옛 빌드를 끊는다.
   다이어그램 최신성 시험이 그것을 읽는다(빼먹었을 때 넷이 「파일이 없다」로 빨갰다).
 - **실측**(2026-10-02, 첫 초록): sub 쪽 전체 약 3분(pytest 2489건 47초), macos e2e 공개 14초 ·
   운영자 4초 · 강의실 4초(이미지 굽기 제외).
-- **잡 설정은 저장소 밖이다** — Multibranch 잡·자격증명(`github-sandcorporation-token` 은
+- **잡 설정은 저장소 밖이다** — Multibranch 잡·묶음 잡 `codemit-train`(Pipeline, `*/main` 의 `Jenkinsfile.train`)·자격증명(`github-sandcorporation-token` 은
   fine-grained PAT: 저장소 읽기·PR·커밋 상태·Contents 쓰기, `glitchtip-automation-token`)은 사람이
   Jenkins 에 만든다. Jenkins 설정을 API 로 고칠 때는 `Content-Type: application/xml;
   charset=utf-8` 을 붙인다 — 없으면 한글이 Latin-1 로 읽혀 500 이 난다.

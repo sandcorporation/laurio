@@ -250,8 +250,9 @@ git push -u origin "$(git rev-parse --abbrev-ref HEAD)"
 gh pr create --base main --fill
 ```
 
-Jenkins `codemit-pr` 가 그 분기의 시험을 돌리고, 초록이면 PR 을 `main` 에 rebase 병합한 뒤
-그 범위의 `GlitchTip:` 줄을 읽어 해결 표시한다(`Jenkinsfile.pr` 의 병합 단계). 초안으로 열거나
+Jenkins `codemit-pr` 가 그 분기의 sub 검사를 돌려 줄 세우고, 묶음 병합 큐 `codemit-train` 이
+최신 `main` 위에서 e2e 까지 시험해 초록이면 PR 을 `main` 에 rebase 병합한 뒤 그 범위의 `GlitchTip:`
+줄을 읽어 해결 표시한다(`Jenkinsfile.train` 의 병합 단계). 초안으로 열거나
 `hold` 라벨을 붙이면 병합하지 않는다 — 6단계처럼 사람에게 넘길 분기는 PR 을 열지 않는다.
 
 ### 8. 보고서에 셋을 적는다
