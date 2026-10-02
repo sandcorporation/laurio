@@ -14,11 +14,30 @@
 // 첫 열을 붙여 두지(sticky) 않았다 — 운영자 표는 행마다 맨 앞 열(이름·날짜)이 짧아
 // 넘겨도 한 화면에 행의 뜻이 남고, 붙인 열은 줄무늬·누름 배경을 따로 칠해야 해
 // 행 모양이 갈라진다. 필요해지면 화면마다 판단한다(#523).
+//
+// `maxHeight` 를 주면 세로로도 이 틀 안에서 넘긴다(#494, 클래스 사용 현황) — 행이 많은
+// 표가 머리 줄(`sticky top-0`)을 붙여 두려면 세로 스크롤도 같은 상자 안이어야 한다.
+// 바깥 상자가 가로만 넘기면 붙인 머리 줄은 그 상자를 기준으로 붙어 화면을 내려도
+// 따라오지 않는다. 주지 않으면 지금처럼 가로만 넘긴다.
 import type { ReactNode } from "react";
 
-export function TableScroll({ minWidth, children }: { minWidth: number; children: ReactNode }) {
+export function TableScroll({
+  minWidth,
+  maxHeight,
+  testId,
+  children,
+}: {
+  minWidth: number;
+  maxHeight?: string;
+  testId?: string;
+  children: ReactNode;
+}) {
   return (
-    <div className="overflow-x-auto">
+    <div
+      data-testid={testId}
+      className={maxHeight ? "overflow-auto" : "overflow-x-auto"}
+      style={maxHeight ? { maxHeight } : undefined}
+    >
       <div style={{ minWidth }}>{children}</div>
     </div>
   );
