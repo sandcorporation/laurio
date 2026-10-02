@@ -9,6 +9,7 @@ from classroom.api import router as classroom_router
 from classroom.internal_api import router as classroom_internal_router
 from classroom.template_api import router as classroom_template_router
 from classroom.template_operator_api import operator_router as classroom_template_operator_router
+from classroom.usage_operator_api import usage_operator_router as classroom_usage_operator_router
 from contests.api import router as contests_router
 from contests.operator_api import operator_router as contests_operator_router
 from contests.submission_api import router as submissions_router
@@ -72,6 +73,7 @@ api.add_router("/operator", policies_operator_router)
 api.add_router("/operator", contests_operator_router)
 api.add_router("/operator", verification_operator_router)
 api.add_router("/operator", classroom_template_operator_router)
+api.add_router("/operator", classroom_usage_operator_router)
 api.add_router("/operator", notifications_operator_router)
 
 api.add_router("/storage", storage_router)

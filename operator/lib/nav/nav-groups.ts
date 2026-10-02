@@ -1,7 +1,7 @@
 // 왼쪽 내비 — 「할 일 · 기준 · 운영」 셋으로 묶은 **한 곳에 선언된 데이터**(#422,
 // 부모 #421). 지금 내가 처리해야 하는 일(이의·지급·신고)과, 바꾸면 서비스가
 // 흔들리는 기준데이터(정책·카테고리·산출물 종류)와, 계정·권한·알림·무료
-// 공모전(운영)을 한 바구니에 담지 않는다 — `docs/design/operator/_lib.py` 의
+// 공모전·사용 현황(운영)을 한 바구니에 담지 않는다 — `docs/design/operator/_lib.py` 의
 // `NAV` 와 같은 묶음·순서다.
 //
 // **순수 데이터다.** `Sidebar` 가 이 배열을 그려 화면을 만들지만, 이 파일
@@ -58,6 +58,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { label: "개최 권한", href: "/hosting-permissions", testId: "nav-hosting-permissions" },
       { label: "운영팀 알림", href: "/notifications", testId: "nav-notifications" },
       { label: "무료 공모전", href: "/contests/free", testId: "nav-free-contests" },
+      { label: "사용 현황", href: "/usage", testId: "nav-usage" },
     ],
   },
 ];
