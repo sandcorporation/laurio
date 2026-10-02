@@ -45,6 +45,14 @@ class ContestsConfig(AppConfig):
 
         from . import checks
 
+        # 「공모전 문제」가 건너오는 공유층 카탈로그(#547, ADR-0054) — 강의실은 이 앱을
+        # 임포트하지 못하므로 공모전 쪽이 구현을 등록한다.
+        from core.contest_catalog import register_contest_catalog
+
+        from .classroom_catalog import ContestClassroomCatalog
+
+        register_contest_catalog(ContestClassroomCatalog())
+
         # LLM_REQUIREMENT_CHAT_ADAPTER_MODE 부팅 가드(#83) — 전이 등록과는 별개
         # 관심사지만, 이 앱의 ready()가 이미 지연 임포트 원칙(모델을 여기서
         # 불러오는 이유)을 지키고 있으므로 같은 자리에 등록한다.

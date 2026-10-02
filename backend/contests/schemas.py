@@ -300,6 +300,8 @@ class FreeContestCreateIn(Schema):
     description: str = ""
     deadline_at: datetime
     requirements: list[RequirementIn] = []
+    # 「클래스에서 들여오기」 허용 (#547, ADR-0054).
+    allows_classroom_import: bool = False
 
 
 class ContestUpdateIn(Schema):
@@ -324,6 +326,8 @@ class ContestUpdateIn(Schema):
     description: str | None = None
     prize: int | None = Field(default=None, gt=0)
     deadline_at: datetime | None = None
+    # 「클래스에서 들여오기」 허용 (#547) — 무료 공모전만 받는다(유료는 422).
+    allows_classroom_import: bool | None = None
 
 
 class ContestOut(Schema):
@@ -340,6 +344,8 @@ class ContestOut(Schema):
     # 무료 공모전인가(#415, ADR-0048) — 참이면 상금·결제·Escrow가 없다. 화면은
     # 이 값으로 「무료 공모전」 표시를 붙이고 상금 관련 표시를 감춘다.
     is_free: bool = False
+    # 「클래스에서 들여오기」 허용 (#547, ADR-0054) — 무료 공모전에서만 참일 수 있다.
+    allows_classroom_import: bool = False
     requirements: list[RequirementOut]
     # Sponsor가 붙인 참고 이미지 (#234, ADR-0032) — 순서대로 온다. 빈 목록이면
     # 화면이 "이미지가 없는 게 의도됐다"로 그린다(spec #225 user story 15).

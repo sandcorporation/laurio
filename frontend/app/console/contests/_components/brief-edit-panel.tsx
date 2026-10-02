@@ -20,6 +20,8 @@ import { formatPrize } from "@/lib/contest-format";
 import { checkPublicTextForBannedWords } from "@/lib/contests/banned-words-check";
 import type { Category, ContestDetail, DeliverableType } from "@/lib/contests/grill-types";
 
+import { ClassroomImportField } from "./classroom-import-field";
+
 export type BriefEditPatch = {
   title: string;
   category_id: number;
@@ -29,6 +31,8 @@ export type BriefEditPatch = {
   prize?: number;
   deadline_at: string;
   description: string;
+  // 「클래스에서 들여오기」 허용(#547, ADR-0054) — 무료 공모전만 보낸다(유료는 백엔드가 422).
+  allows_classroom_import?: boolean;
 };
 
 export interface BriefEditPanelProps {
@@ -57,6 +61,7 @@ type FormState = {
   prize: string;
   deadlineAt: string;
   description: string;
+  allowsClassroomImport: boolean;
 };
 
 function formFromContest(contest: ContestDetail): FormState {
@@ -67,6 +72,7 @@ function formFromContest(contest: ContestDetail): FormState {
     prize: String(contest.prize),
     deadlineAt: toLocalDatetimeInput(contest.deadline_at),
     description: contest.description,
+    allowsClassroomImport: contest.allows_classroom_import ?? false,
   };
 }
 
@@ -158,6 +164,7 @@ export function BriefEditPanel({
       ...(canEditPrize ? { prize: prizeNumber } : {}),
       deadline_at: new Date(form.deadlineAt).toISOString(),
       description: form.description,
+      ...(contest.is_free ? { allows_classroom_import: form.allowsClassroomImport } : {}),
     });
     if (ok) setEditing(false);
   }
@@ -290,6 +297,14 @@ export function BriefEditPanel({
               className={INPUT_CLASS}
             />
           </label>
+
+          {contest.is_free && (
+            <ClassroomImportField
+              checked={form.allowsClassroomImport}
+              onChange={(next) => setForm((prev) => ({ ...prev, allowsClassroomImport: next }))}
+              testId="draft-edit-classroom-import"
+            />
+          )}
 
           <DescriptionField
             label="설명 (선택)"
