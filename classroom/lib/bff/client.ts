@@ -12,14 +12,11 @@
 // 돌아온다. `?next=` 는 그 화면이 이미 검증한다(lib/auth/next-path.ts) — 여기서는
 // 실어 보내기만 한다.
 
-import { createBffClient } from "@codemit/bff-client";
+import { createBffClient, createLoginRedirect } from "@codemit/bff-client";
 import type { ApiResult } from "@codemit/bff-client";
 
-function goToLogin(): void {
-  if (typeof window === "undefined") return;
-  const next = window.location.pathname + window.location.search;
-  window.location.replace(`/login?next=${encodeURIComponent(next)}`);
-}
+// 한 화면의 요청 여럿이 함께 401 을 받아도 이동은 한 번이다(#501, 패키지의 `login-redirect`).
+const goToLogin = createLoginRedirect();
 
 export const bffClient = createBffClient({ onUnauthorized: goToLogin });
 
