@@ -6,12 +6,9 @@
 // 「조용한 갱신」이 없다 — 401 이면 그 자리에서 로그인으로 보낸다. `?next=` 를 붙여 로그인 뒤
 // 하던 자리로 돌아온다.
 
-import { createBffClient } from "@codemit/bff-client";
+import { createBffClient, createLoginRedirect } from "@codemit/bff-client";
 
-function goToLogin(): void {
-  if (typeof window === "undefined") return;
-  const next = window.location.pathname + window.location.search;
-  window.location.replace(`/login?next=${encodeURIComponent(next)}`);
-}
+// 한 화면의 요청 여럿이 함께 401 을 받아도 이동은 한 번이다(#501, 패키지의 `login-redirect`).
+const goToLogin = createLoginRedirect();
 
 export const bffClient = createBffClient({ onUnauthorized: goToLogin });

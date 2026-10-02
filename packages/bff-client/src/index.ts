@@ -6,6 +6,8 @@
 export { createBffClient, toBffPath } from "./client";
 export type { BffClient, BffClientOptions, BffRequestInit } from "./client";
 export { useBackendQuery, usePagedList } from "./hooks";
+export { createLoginRedirect } from "./login-redirect";
+export type { LoginNavigator, LoginRedirectOptions } from "./login-redirect";
 export type { BackendQueryOptions, PagedListState, QueryState } from "./hooks";
 export { FALLBACK_DETAIL, codeForStatus, normalizeDetail } from "./result";
 export type { ApiFailure, ApiResult, ApiSuccess } from "./result";

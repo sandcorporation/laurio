@@ -9,13 +9,10 @@
 //   전체 페이지 이동(`window.location`)인 이유는 둘이다: 세션이 죽은 뒤 React 트리를 살려 둘 이유가
 //   없고, 훅 밖(변경 호출 함수)에서도 같은 클라이언트를 써야 해 `useRouter` 에 묶을 수 없다.
 
-import { createBffClient } from "@codemit/bff-client";
+import { createBffClient, createLoginRedirect } from "@codemit/bff-client";
 
-function goToLogin(): void {
-  if (typeof window === "undefined") return;
-  const next = window.location.pathname + window.location.search;
-  window.location.replace(`/login?next=${encodeURIComponent(next)}`);
-}
+// 한 화면의 요청 여럿이 함께 401 을 받아도 이동은 한 번이다(#501, 패키지의 `login-redirect`).
+const goToLogin = createLoginRedirect();
 
 export const bffClient = createBffClient({
   revive: () => fetch("/api/auth/session", { cache: "no-store" }),
