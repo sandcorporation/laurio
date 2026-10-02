@@ -268,11 +268,21 @@ ssh sub 'docker exec codemit-staging-backend-1 python manage.py sentry_smoke'
   곧 `origin/main` 이라 그 판정을 통과했고, 진단 중인 세션이 첫 커밋 전에 다음 분
   precheck 에 워크트리째 사라졌다. 지금은 문이 셋이다:
   **(1)** 잠금이 살아 있으면 청소를 아예 하지 않는다(청소가 잠금 확인 **뒤로** 갔다),
-  **(2)** 팁이 `origin/main` 과 같은 분기는 「아무것도 안 했다」로 보고 건드리지 않되
+  **(2)** 제 커밋이 없는 분기는 「아무것도 안 했다」로 보고 건드리지 않되
   `--lock-ttl-minutes`(기본 45분)보다 오래 식은 것만 걷는다(재현 실패로 커밋 없이 끝난
   워크트리가 영원히 남지 않게), **(3)** 머지 안 된 것은 그대로 남긴다 — 게이트에 걸려
   사람에게 넘긴 분기가 정확히 그 모양이다.
   사람 워크트리(`chain-*`·`int-*`)는 접두어가 달라 대상이 아니다. `--no-tidy` 로 끈다.
+  **「머지됨」은 sha 가 아니라 변경으로 본다**(2026-10-03, `_branch_state`) — Jenkins 가 PR 을
+  rebase 병합해 `main` 의 커밋 sha 가 분기와 달라서, 옛 `merge-base --is-ancestor` 판정으로는
+  병합된 자동 진단 분기가 하나도 걷히지 않았다. 지금은 `git cherry` 로 분기 커밋이 전부 같은
+  변경으로 `main` 에 들어갔는지 본다(`scripts/test_glitchtip_pick.py` 가 고정한다).
+- **precheck 는 주 체크아웃의 스크립트를 돈다 — 그 체크아웃은 저절로 앞서 나가지 않는다.**
+  automation 의 precheck 가 `/home/sandring/workspace/laurio/scripts/glitchtip_pick.py` 를 절대
+  경로로 부르고 토큰도 그 체크아웃의 `.env` 에서 읽는다. 2026-10-02 부터 `main` 은 PR 로만
+  들어가 주 체크아웃에서 커밋하는 사람이 없으므로, 이 스크립트를 고친 PR 이 병합돼도 **주
+  체크아웃을 `git pull` 하기 전까지 스케줄러는 옛 스크립트를 돈다.** (세션 쪽 스킬은 실행마다
+  `origin/main` 에서 새 워크트리를 만들어 늘 최신이다.)
 - **GlitchTip 을 눈으로 읽을 때는 `scripts/glitchtip_get.py` 를 쓴다 — `curl` 로 치지
   않는다.** GlitchTip 의 오류 응답은 `{"detail": "Permission denied"}`·`{"detail":
   "Not Found"}` 라서, 그대로 파싱해 필드를 찾으면 **빈 값이 나오고 그것을 「값이 없다」로

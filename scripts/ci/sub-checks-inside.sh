@@ -54,6 +54,7 @@ step "금칙어 생성물 최신성" same_after packages/banned-words/src/genera
 step "ADR 상태" python3 scripts/check_adr_status.py
 step "화면 언어" python3 scripts/check_screen_language.py
 step "화면 언어 검사기 자체" python3 scripts/test_check_screen_language.py
+step "GlitchTip precheck 청소 판정" python3 scripts/test_glitchtip_pick.py
 step "백엔드 오류 문구 언어" python3 scripts/check_backend_error_language.py
 for pkg in packages/bff-shared packages/markdown packages/banned-words; do
   step "단위 시험 $pkg" pnpm --dir "$pkg" run test
