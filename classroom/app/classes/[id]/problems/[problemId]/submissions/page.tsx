@@ -160,51 +160,58 @@ export default function ProblemSubmissionsPage() {
                   data-testid={`instructor-submission-row-${submission.id}`}
                   className="px-4 py-4"
                 >
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                    <span
-                      data-testid={`instructor-submission-row-${submission.id}-member`}
-                      className="text-[14px] font-medium"
-                    >
-                      {submission.member_display_name}
-                    </span>
-                    <span
-                      data-testid={`instructor-submission-row-${submission.id}-attempt`}
-                      className="text-[12px] text-ink/45"
-                    >
-                      <Num>{submission.attempt_number}</Num>번째 시도
-                    </span>
-
-                    {submission.status === "pending" ? (
-                      <span data-testid={`instructor-submission-row-${submission.id}-status`}>
-                        <Badge
-                          tone={
-                            submission.pending_reason === "no_api_key" ||
-                            submission.pending_reason === "model_rejected"
-                              ? "attention"
-                              : "neutral"
-                          }
+                  {/* 두 칸으로 나눈다 — 왼쪽은 누가·몇 번째·배지, 오른쪽은 여는 버튼. 한 줄에
+                      흘려 두면 배지 수에 따라 버튼이 같은 줄에 붙기도 하고 다음 줄로 밀리기도
+                      해서 좁은 화면에서 버튼 자리가 줄마다 달랐다. */}
+                  <div className="flex items-start gap-3">
+                    <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                      <div className="flex flex-wrap items-baseline gap-x-2">
+                        <span
+                          data-testid={`instructor-submission-row-${submission.id}-member`}
+                          className="text-[14px] font-medium"
                         >
-                          {submission.pending_reason ? "채점 대기" : "채점 중"}
-                        </Badge>
-                      </span>
-                    ) : (
-                      <span data-testid={`instructor-submission-row-${submission.id}-status`}>
-                        <Badge tone={submission.passed ? "verified" : "attention"}>
-                          채점 완료 · {submission.passed ? "통과" : "미통과"}
-                        </Badge>
-                      </span>
-                    )}
-
-                    {(() => {
-                      const entry = instructorEntryBadge(submission);
-                      return entry ? (
-                        <span data-testid={`instructor-submission-row-${submission.id}-contest-entry`}>
-                          <Badge tone={entry.tone}>{entry.label}</Badge>
+                          {submission.member_display_name}
                         </span>
-                      ) : null;
-                    })()}
+                        <span
+                          data-testid={`instructor-submission-row-${submission.id}-attempt`}
+                          className="text-[12px] text-ink/45"
+                        >
+                          <Num>{submission.attempt_number}</Num>번째 시도
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {submission.status === "pending" ? (
+                          <span data-testid={`instructor-submission-row-${submission.id}-status`}>
+                            <Badge
+                              tone={
+                                submission.pending_reason === "no_api_key" ||
+                                submission.pending_reason === "model_rejected"
+                                  ? "attention"
+                                  : "neutral"
+                              }
+                            >
+                              {submission.pending_reason ? "채점 대기" : "채점 중"}
+                            </Badge>
+                          </span>
+                        ) : (
+                          <span data-testid={`instructor-submission-row-${submission.id}-status`}>
+                            <Badge tone={submission.passed ? "verified" : "attention"}>
+                              채점 완료 · {submission.passed ? "통과" : "미통과"}
+                            </Badge>
+                          </span>
+                        )}
+                        {(() => {
+                          const entry = instructorEntryBadge(submission);
+                          return entry ? (
+                            <span data-testid={`instructor-submission-row-${submission.id}-contest-entry`}>
+                              <Badge tone={entry.tone}>{entry.label}</Badge>
+                            </span>
+                          ) : null;
+                        })()}
+                      </div>
+                    </div>
 
-                    <span className="ml-auto shrink-0">
+                    <span className="shrink-0">
                       {submission.submission_format === "repository" ? (
                         <a
                           href={submission.value}
