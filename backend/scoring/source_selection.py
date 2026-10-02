@@ -15,15 +15,17 @@
 from __future__ import annotations
 
 from core.source_selection import (
-    ALLOWED_EXTENSIONS,
     EXCLUDED_DIR_FRAGMENTS,
+    EXCLUDED_FILE_NAMES,
+    EXCLUDED_SUFFIXES,
     MAX_SOURCE_BYTES,
     select_source_files,
 )
 
 __all__ = [
-    "ALLOWED_EXTENSIONS",
     "EXCLUDED_DIR_FRAGMENTS",
+    "EXCLUDED_FILE_NAMES",
+    "EXCLUDED_SUFFIXES",
     "MAX_SOURCE_BYTES",
     "select_source_files",
 ]

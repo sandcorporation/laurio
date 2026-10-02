@@ -11,8 +11,13 @@ ADR-0014의 소비: "대형 프로젝트의 소스는 채점 컨텍스트 비용
 파일을 선별하는 전략이 필요하다"를 여기서 만족시킨다.
 
 전략:
-1. 업로드된 소스가 zip 아카이브면 소스 확장자만, 흔한 벤더·빌드 디렉터리(node_modules,
-   .git, dist, build, vendor 등)는 제외하고 연다.
+1. 업로드된 소스가 zip 아카이브면 흔한 벤더·빌드 디렉터리(node_modules, .git, dist,
+   build, vendor 등)와 **예산만 먹는 것으로 알려진 파일**(잠금 파일·압축된 번들·
+   소스맵·이미지·아카이브 등)을 빼고 연다. 그 밖의 파일은 확장자와 무관하게 후보다
+   — 「코드 확장자만」 고르던 허용 목록을 2026-10-02 에 차단 목록으로 뒤집었다.
+   허용 목록은 `.txt`(Packet Tracer 장비 설정)·`Dockerfile`·확장자 없는
+   `README` 를 조용히 버렸고, staging 의 `octocat/Hello-World` 는 그 때문에
+   「채점할 파일 0개」가 됐다(ADR-0031). 바이너리는 3번이 따로 거른다.
 2. 전체 선택량이 `MAX_SOURCE_BYTES`를 넘지 않도록 예산을 두고, 예산이 바닥나면 그
    자리에서 선별을 멈춘다(마지막 파일은 잘려서라도 담을 수 있는 만큼만 담는다).
    압축 해제 자체도 예산만큼만 한다(`ZipExtFile.read(budget)`로 스트리밍 read) —
@@ -53,15 +58,33 @@ from core.llm_scoring import SourceFile
 # 한도에 묶인 기술값이지 사업이 정하는 값이 아니다(ADR-0027).
 MAX_SOURCE_BYTES = 300_000
 
-ALLOWED_EXTENSIONS = {
-    ".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".kt", ".kts", ".go", ".rb",
-    ".php", ".rs", ".c", ".cc", ".cpp", ".h", ".hpp", ".swift", ".cs", ".m",
-    ".html", ".css", ".scss", ".vue", ".svelte", ".json", ".yaml", ".yml", ".md",
-    ".sql", ".sh",
-}
+#: 이름 그대로 빼는 파일(소문자로 비교한다) — 사람이 쓰지 않은 잠금 파일이다. 수백 KB 가 흔하고,
+#: 선별은 경로 이름 순서로 예산을 채우므로 이것 하나가 코드의 차례를 통째로
+#: 빼앗는다.
+EXCLUDED_FILE_NAMES = frozenset({
+    "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "npm-shrinkwrap.json",
+    "bun.lockb", "uv.lock", "poetry.lock", "pipfile.lock", "cargo.lock",
+    "gemfile.lock", "composer.lock", "go.sum", "gradle.lockfile",
+    # 맥 Finder 가 디렉터리마다 남기는 메타데이터 — 사람이 쓴 것이 아니다.
+    ".ds_store",
+})
+
+#: 끝이 이것이면 빼는 파일. 압축된 번들과 소스맵은 텍스트지만 읽을 수 없는
+#: 기계 산출물이고, 나머지는 바이너리다 — 바이너리는 디코딩이 어차피 거르지만
+#: 이름으로 먼저 빼면 예산만큼 읽어 보지도 않는다(우연히 UTF-8 로 읽히는
+#: 바이너리가 프롬프트에 섞이는 것도 막는다).
+EXCLUDED_SUFFIXES = (
+    ".min.js", ".min.css", ".map",
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".tif", ".tiff",
+    ".pdf", ".zip", ".tar", ".gz", ".tgz", ".bz2", ".xz", ".7z", ".rar",
+    ".jar", ".war", ".class", ".pyc", ".o", ".a", ".so", ".dll", ".exe", ".dylib",
+    ".woff", ".woff2", ".ttf", ".otf", ".eot",
+    ".mp3", ".mp4", ".mov", ".avi", ".webm", ".wav",
+    ".sqlite", ".sqlite3", ".db",
+)
 
 EXCLUDED_DIR_FRAGMENTS = (
-    "node_modules/", ".git/", "dist/", "build/", "vendor/", "__pycache__/",
+    "node_modules/", ".git/", "dist/", "build/", "vendor/", "__pycache__/", "__macosx/",
     ".venv/", "venv/", "target/", ".next/", "coverage/", ".gradle/", ".idea/",
 )
 
@@ -71,17 +94,38 @@ EXCLUDED_DIR_FRAGMENTS = (
 _MAX_UTF8_TRIM = 3
 
 
-def _is_selectable(path: str) -> bool:
+def is_excluded_path(path: str) -> bool:
+    """사람이 쓴 소스가 아니라고 알려진 경로인가 — 벤더·빌드 디렉터리, 잠금
+    파일, 압축 번들·소스맵·바이너리. 채점 선별과 문법 검사(`classroom.
+    syntax_check`)가 같은 판정을 쓴다: 잠금 파일(`package-lock.json`)은
+    `.json` 이라 문법 검사의 코드 확장자에도 걸리는데, 그쪽이 따로 거르지
+    않으면 생성물에 「구문 오류가 있는가」를 AI 에게 묻고 그 본문을 프롬프트에
+    싣는다."""
+
     lower = path.lower()
     if any(fragment in lower for fragment in EXCLUDED_DIR_FRAGMENTS):
-        return False
-    return any(lower.endswith(ext) for ext in ALLOWED_EXTENSIONS)
+        return True
+    if lower.rsplit("/", 1)[-1] in EXCLUDED_FILE_NAMES:
+        return True
+    return lower.endswith(EXCLUDED_SUFFIXES)
+
+
+def _is_selectable(path: str) -> bool:
+    return not is_excluded_path(path)
 
 
 def _decode_utf8_prefix(data: bytes) -> str | None:
     """budget 경계에서 멀티바이트 시퀀스가 잘렸을 수 있으니 끝에서 최대 3바이트까지
-    떼어내며 재시도한다. 그래도 실패하면 진짜 바이너리로 보고 None을 돌려준다."""
+    떼어내며 재시도한다. 그래도 실패하면 진짜 바이너리로 보고 None을 돌려준다.
 
+    **NUL 바이트가 있으면 디코딩하기 전에 바이너리로 본다**(2026-10-02, git 의
+    판정과 같다). NUL 은 UTF-8 로 유효해서 디코딩만으로는 걸리지 않는데, 그대로
+    프롬프트에 실리면 채점 결과(`prompt`)를 저장하는 순간 PostgreSQL 이 text 에
+    NUL 을 받지 않아 `DataError` 로 채점 전체가 깨진다. 확장자 허용 목록이 있던
+    동안은 맥 zip 의 `__MACOSX/._*` 같은 파일이 우연히 걸러져 이 길이 안 보였다."""
+
+    if b"\x00" in data:
+        return None
     for trim in range(0, _MAX_UTF8_TRIM + 1):
         chunk = data[: len(data) - trim] if trim else data
         try:

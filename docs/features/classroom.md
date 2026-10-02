@@ -150,8 +150,12 @@ syntax_check_enabled`(기본 켜짐) 하나로 켜고 끌 뿐 체크리스트 �
 실행되는 코드가 아닌 문제라면 끄세요」라는 짧은 안내와 함께.
 
 - **먼저 파서가 본다.** 채점할 때 제출 아카이브(저장소 제출은 채점 시점
-  박제본)의 코드 파일 전부를 확인한다 — 대상 확장자·제외 디렉터리
-  (`node_modules`·`.git`·`dist` 등)는 기존 소스 선별과 같은 목록이다.
+  박제본)의 코드 파일 전부를 확인한다 — 대상은 코드 확장자(`.py`·`.js`·
+  `.java`·`.json`·`.md` 등, `classroom.syntax_check.ALL_SYNTAX_CHECK_EXTENSIONS`)
+  뿐이라 채점 근거로는 들어가는 `.txt`·`.cfg` 같은 텍스트는 문법 판정을 받지
+  않는다. 제외 디렉터리(`node_modules`·`.git`·`dist` 등)와 잠금 파일·압축
+  번들은 소스 선별과 같은 판정(`core.source_selection.is_excluded_path`)으로
+  뺀다.
   파이썬은 파이썬 표준 파서(`ast.parse`)로, JS·TS·Java·Go·C/C++·Kotlin·
   Ruby는 tree-sitter 문법으로 구문 트리만 만든다 — **코드를 절대 실행하지
   않는다.** 오류가 하나라도 있으면 미충족이고, 근거에 파일 경로·줄 번호·

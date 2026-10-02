@@ -293,13 +293,14 @@ def test_private_repository_is_never_cloned_and_scoring_relies_on_source_alone(
 def test_repository_snapshot_is_kept_even_when_source_selection_picks_no_file_from_it(
     client, category, landing_type
 ):
-    """clone은 성공했지만 그 저장소의 파일이 확장자 화이트리스트를 하나도 통과하지
+    """clone은 성공했지만 그 저장소의 파일이 소스 선별을 하나도 통과하지
     못해 채점 근거로 선택되지 않았다면(=`Score.scored_assets`에 없다), 그래도
     스냅샷은 남아야 한다(#224, ADR-0031 「clone 한 커밋은 전부 남긴다」) —
     「이 저장소를 언제 어느 커밋으로 받았는가」와 「그중 무엇이 채점에 쓰였는가」는
     다른 질문이다. staging에서 `octocat/Hello-World`가 실제로 이 경로를 밟았다 —
     확장자 없는 파일(README)만 있어 선별이 하나도 못 골랐는데, 박제본은 만들어졌고
-    스냅샷은 없었다.
+    스냅샷은 없었다. (선별이 차단 목록으로 뒤집힌 2026-10-02 부터 README 는
+    선택된다 — 이 테스트는 여전히 차단되는 잠금 파일로 같은 경로를 만든다.)
     """
 
     deadline = timezone.now() + timedelta(hours=1)
@@ -315,12 +316,12 @@ def test_repository_snapshot_is_kept_even_when_source_selection_picks_no_file_fr
 
     repo_url = _repository_url("public-org")
 
-    # README(확장자 없음)는 source_selection.ALLOWED_EXTENSIONS 어디에도 걸리지
-    # 않아 선별에서 통째로 빠진다 — octocat/Hello-World가 staging에서 실제로
-    # 이 모양이었다. 소스 자료는 하나도 내지 않는다(저장소만 낸 제출) — ADR-0030의
+    # 잠금 파일은 `core.source_selection.EXCLUDED_FILE_NAMES` 에 걸려 선별에서
+    # 통째로 빠진다 — octocat/Hello-World 가 staging 에서 밟은 「clone 은 됐는데
+    # 고를 파일이 없다」 경로를 그대로 만든다. 소스 자료는 하나도 내지 않는다(저장소만 낸 제출) — ADR-0030의
     # 박제 조건과 이 티켓의 스냅샷 조건이 같은 clone 위에서 함께 성립하는지를
     # 이 테스트가 함께 고정한다.
-    with override_settings(GITHUB_FAKE_REPO_FILES={repo_url: {"README": "Hello World!\n"}}):
+    with override_settings(GITHUB_FAKE_REPO_FILES={repo_url: {"package-lock.json": "{}\n"}}):
         response = client.post(
             f"{CONTESTS_URL}/{contest['id']}/submissions",
             data={

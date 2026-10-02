@@ -225,6 +225,62 @@ def test_source_submission_is_scored_from_the_uploaded_object(client, db, monkey
     assert score.reasoning == [{"checklist_item_id": problem.item_id, "is_met": True, "reasoning": "판정 근거"}]
 
 
+def test_text_files_outside_code_extensions_reach_the_model_but_known_noise_does_not(
+    client, db, monkeypatch
+):
+    """소스 선별은 허용 목록이 아니라 차단 목록이다(2026-10-02) — 읽히는 텍스트는
+    기본으로 채점에 들어가고, 예산만 먹는 것으로 알려진 파일만 빠진다.
+
+    계기는 Packet Tracer 과제다: 장비 설정(`show running-config`)을 `.txt` 로
+    묶어 내면 예전 허용 목록에 `.txt` 가 없어 채점자가 빈 소스를 받았다.
+    `Dockerfile`·`README`(확장자 없음)도 같은 이유로 빠졌었다."""
+
+    instructor = login(client, uid="instructor-1")
+    class_id = create_class(client, instructor["access"])
+    problem = create_open_problem(client, instructor["access"], class_id, submission_formats=["source"])
+    participant = login(client, uid="participant-1")
+    join_class(client, participant["access"], class_id, instructor_access=instructor["access"])
+    submit_source(
+        client,
+        participant["access"],
+        class_id,
+        problem.id,
+        participant_user_id=user_id("participant-1"),
+        files={
+            "configs/R1.txt": "hostname R1 CONFIG_TXT_MARKER\n",
+            "configs/SW1.cfg": "hostname SW1 CONFIG_CFG_MARKER\n",
+            "Dockerfile": "FROM python DOCKERFILE_MARKER\n",
+            "README": "README_MARKER\n",
+            "package-lock.json": "LOCKFILE_TRAP_MARKER",
+            "static/app.min.js": "MINIFIED_TRAP_MARKER",
+            "static/app.js.map": "SOURCEMAP_TRAP_MARKER",
+            "logo.png": "IMAGE_TRAP_MARKER",
+            # 맥에서 만든 zip 에 섞이는 메타데이터 — NUL 바이트도 UTF-8 로는
+            # 유효해서, 허용 목록이 우연히 막아 주던 것을 이제 따로 막아야 한다.
+            "__MACOSX/configs/._R1.txt": "\x00\x05\x16\x07APPLEDOUBLE_TRAP_MARKER",
+            "notes.bin": "\x00\x00NUL_BINARY_TRAP_MARKER",
+        },
+    )
+
+    captured_prompts: list = []
+    respond_with_verdict(monkeypatch, problem.item_id, is_met=True, capture=captured_prompts)
+
+    run_scan(client)
+
+    prompt = captured_prompts[0]["messages"][1]["content"]
+    for marker in ("CONFIG_TXT_MARKER", "CONFIG_CFG_MARKER", "DOCKERFILE_MARKER", "README_MARKER"):
+        assert marker in prompt
+    for trap in (
+        "LOCKFILE_TRAP_MARKER",
+        "MINIFIED_TRAP_MARKER",
+        "SOURCEMAP_TRAP_MARKER",
+        "IMAGE_TRAP_MARKER",
+        "APPLEDOUBLE_TRAP_MARKER",
+        "NUL_BINARY_TRAP_MARKER",
+    ):
+        assert trap not in prompt
+
+
 def test_source_not_yet_in_storage_retries_instead_of_failing(client, db, monkeypatch):
     instructor = login(client, uid="instructor-1")
     class_id = create_class(client, instructor["access"])

@@ -247,6 +247,25 @@ def test_language_without_a_parser_asks_the_vendor_in_the_same_request(client, d
     assert all(r["checklist_item_id"] != -1 for r in score["reasoning"])
 
 
+def test_plain_text_files_are_not_sent_for_a_syntax_verdict(client, db, monkeypatch):
+    """소스 선별이 텍스트를 넓게 받게 된 뒤에도(2026-10-02) 문법 검사의 대상은
+    코드 확장자뿐이다 — 장비 설정 `.txt` 에 「구문 오류가 있는가」를 AI 에게
+    묻지 않는다. 문법이라는 개념이 없는 파일이다."""
+
+    files = {"main.py": "print('ok')\n", "configs/R1.txt": "hostname R1\n"}
+    ctx = _setup(client, files=files)
+    sent = []
+    respond_with_verdicts(
+        monkeypatch, [{"requirement_id": ctx["item_id"], "is_met": True, "reasoning": "충족"}], capture=sent
+    )
+
+    _run_scan_with_files(client, files)
+
+    prompt_text = sent[0]["messages"][1]["content"]
+    assert "hostname R1" in prompt_text  # 채점 근거로는 들어간다
+    assert "requirement_id=-1" not in prompt_text  # 문법 판정은 묻지 않는다
+
+
 def test_language_without_a_parser_can_be_judged_as_a_syntax_error(client, db, monkeypatch):
     ctx = _setup(client, files={"index.php": "<?php this is not php"})
 

@@ -45,7 +45,7 @@ import zipfile
 from dataclasses import dataclass
 
 from core.llm_scoring import RequirementInput, RequirementVerdict, SourceFile
-from core.source_selection import ALLOWED_EXTENSIONS, EXCLUDED_DIR_FRAGMENTS
+from core.source_selection import is_excluded_path
 
 #: 판정 기록에서 강사가 만든 체크리스트 항목(`ChecklistItem.id`, 항상 양의
 #: autoincrement 값이다)과 절대 겹치지 않는 고정 식별자 — 화면·API·채점
@@ -73,13 +73,23 @@ SYNTAX_CHECK_TIMEOUT_SECONDS = 5.0
 #: 붙드는 것을 막는 안전판이다(파일 하나하나는 이미 크기·시간 상한이 있다).
 MAX_SYNTAX_CHECK_FILES = 200
 
-#: 파서가 판정하는 코드 확장자 전부 — 소스 선택과 같은 목록
-#: (`core.source_selection.ALLOWED_EXTENSIONS`)이다. 이 중 파이썬은 표준
-#: 파서로, `TREE_SITTER_LANGUAGE_BY_EXTENSION`에 있는 여덟 언어는
-#: tree-sitter로 확인하고, 나머지(#409 AC가 「파서가 없는 언어」라 부르는
+#: 문법 검사 대상인 코드 확장자 전부. 이 중 파이썬은 표준 파서로,
+#: `TREE_SITTER_LANGUAGE_BY_EXTENSION`에 있는 여덟 언어는 tree-sitter로
+#: 확인하고, 나머지(#409 AC가 「파서가 없는 언어」라 부르는
 #: .php·.rs·.swift·.cs·.m·.html·.css·.scss·.vue·.svelte·.json·.yaml·.yml·
 #: .md·.sql·.sh)는 `unresolved`로 남아 AI가 본다.
-ALL_SYNTAX_CHECK_EXTENSIONS = frozenset(ALLOWED_EXTENSIONS)
+#:
+#: **소스 선별과 따로 산다**(2026-10-02). 예전에는 소스 선별의 허용 목록
+#: (`ALLOWED_EXTENSIONS`)을 그대로 빌려 썼는데, 그 선별이 차단 목록으로
+#: 뒤집혀 `.txt`·`.cfg` 같은 텍스트도 채점 근거로 받게 됐다. 그 목록을
+#: 그대로 따라가면 문법이라는 개념이 없는 장비 설정 파일에까지 「구문 오류가
+#: 있는가」를 AI에게 묻게 된다 — 그래서 그때의 목록을 여기 고정했다.
+ALL_SYNTAX_CHECK_EXTENSIONS = frozenset({
+    ".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".kt", ".kts", ".go", ".rb",
+    ".php", ".rs", ".c", ".cc", ".cpp", ".h", ".hpp", ".swift", ".cs", ".m",
+    ".html", ".css", ".scss", ".vue", ".svelte", ".json", ".yaml", ".yml", ".md",
+    ".sql", ".sh",
+})
 
 PYTHON_EXTENSIONS = frozenset({".py"})
 
@@ -134,9 +144,9 @@ class ParserSyntaxCheckOutcome:
 
 
 def _is_code_path(path: str, extensions: frozenset[str]) -> bool:
-    lower = path.lower()
-    if any(fragment in lower for fragment in EXCLUDED_DIR_FRAGMENTS):
+    if is_excluded_path(path):
         return False
+    lower = path.lower()
     return any(lower.endswith(ext) for ext in extensions)
 
 

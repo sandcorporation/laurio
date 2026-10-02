@@ -344,6 +344,18 @@ llm_scoring`(#274)에 이어 `core.repository_adapters`(GitHub 저장소 clone·
 `docker/*.env.example`을 건드리지 않기 위해서다, #274와 같은 판단) — 공모전
 채점·저장소 스캔 동작은 그대로다.
 
+**채점에 실리는 파일은 「코드 확장자만」이 아니라 「알려진 잡음만 뺀 텍스트 전부」다**
+(2026-10-02, `core.source_selection`). zip 안에서 벤더·빌드 디렉터리(`node_modules`·
+`dist` 등), 잠금 파일(`package-lock.json`·`uv.lock` 등), 압축 번들·소스맵(`.min.js`·
+`.map`), 이미지·아카이브·폰트 같은 바이너리 확장자, 맥 zip 의 `__MACOSX/`·`.DS_Store`
+만 빼고, 나머지는 NUL 바이트 없이 UTF-8 로 읽히면 경로 이름 순서로 예산
+(`MAX_SOURCE_BYTES`, 약 300KB)까지 싣는다(NUL 이 프롬프트에 실리면 채점 결과 저장이
+PostgreSQL `DataError` 로 깨진다). 예전 허용 목록은
+`.txt`(Packet Tracer 장비 설정)·`Dockerfile`·확장자 없는 `README` 를 조용히 버렸다.
+공모전과 강의실 채점이 같은 모듈을 쓴다. 대가는 예산이다 — 목록에 없는 큰 텍스트
+(데이터 CSV 등)가 경로 순서상 앞에 있으면 코드의 몫을 먹는다; 그런 파일이 실제로
+문제가 되면 `EXCLUDED_FILE_NAMES`·`EXCLUDED_SUFFIXES` 에 한 줄 더한다.
+
 **통과는 필수 항목을 전부 충족했다는 판정이다**(#288, CONTEXT.md 「통과」) — 문제마다
 합격선을 따로 두지 않는다. 그래서 필수 항목이 하나도 없는 문제는 통과가 정의되지
 않아 `open`으로 전이할 수 없다. 이미 열린 문제도 강사가 언제든 체크리스트를 고칠 수
