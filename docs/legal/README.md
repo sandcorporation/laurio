@@ -17,7 +17,7 @@
 | --- | --- | --- |
 | [commerce-and-payments.md](commerce-and-payments.md) | 전자상거래법 · 전자금융거래법 · 여신전문금융업법 | 사업자 요건, 상금 예치·지급 구조, 환불, 자전거래, 거래 기록 5년 보존 |
 | [tax.md](tax.md) | 소득세법 | 기타소득 원천징수, 과세최저한, 지급명세서, 주민등록번호 수집, 원장의 예수금 계정 |
-| [personal-data.md](personal-data.md) | 개인정보 보호법 · 정보통신망법 · CI 고시 | 수집 시점과 항목, 암호화, 탈퇴·휴면 파기, 보존 신원 분리, 열람 기록, 위탁·국외 이전, 통지 동의와 야간 차단 |
+| [personal-data.md](personal-data.md) | 개인정보 보호법 · 정보통신망법 · CI 고시 | 수집 시점과 항목, 암호화, 탈퇴·휴면 파기, 보존 신원 분리, 열람 기록, 위탁·국외 이전, 강사가 연결한 앱으로의 전달, 통지 동의와 야간 차단 |
 | [contracts-and-ip.md](contracts-and-ip.md) | 민법 · 저작권법 · 약관규제법 | 만 19세 제한, 선정작·탈락작 저작권, 소스 비공개, AI 채점 이의, **약관·고지에 들어가야 할 항목 목록** |
 
 ## 법 → 코드 빠른 표
@@ -31,6 +31,7 @@
 | 불필요해진 개인정보는 지체 없이 파기 (개인정보 보호법 21조) | 탈퇴 = 신원 파기, 2년 무행위 = 신원만 파기 ([ADR-0025](../adr/0025-withdrawal-erases-identity-not-the-account.md)) | `backend/accounts/withdrawal.py`, `backend/accounts/dormancy.py` |
 | 거래 기록은 5년 보존 (전자상거래법 시행령) | 거래가 있던 사람의 실명·생년월일만 별도 테이블에 5년 | `backend/verification/models.py` `RETAINED_IDENTITY_RETENTION_PERIOD`, `RetainedIdentity` |
 | 광고성 정보는 사전 동의, 야간 전송 별도 동의 (정보통신망법) | 광고성만 옵트인, 21~08시는 거래성까지 연기 ([ADR-0010](../adr/0010-quiet-hours-defer-not-drop.md)) | `backend/notifications/models.py` `NotificationOptIn`, `is_promotional` |
+| 수탁자가 아닌 곳으로 나가는 개인정보도 방침에 밝힌다 (개인정보 보호법 제30조) | 강사가 연결한 앱으로의 전달을 위탁(5절)이 아니라 제3자 제공 절(4절)의 예외로 적는다 ([ADR-0052](../adr/0052-instructors-connect-ai-apps-through-our-own-oauth-and-mcp.md)) | `frontend/app/privacy` 4절, `frontend/app/terms` 제6·7·10조 |
 | 통신판매중개자 표시·고지 의무 | 약관·방침 화면은 열었다(#472) — 통신판매중개자 표시 자체는 사업자 등록이 끝나고 유료 공모전을 열 때 채운다 | `frontend/app/terms` 8절 |
 
 ## 열린 항목 종합
@@ -49,3 +50,5 @@
 | 8 | 발주자의 「탈락작 마스킹 없는 공개」 동의를 코드가 기록하지 않는다 | contracts-and-ip | 미구현 |
 | 9 | 정당하게 CI 가 바뀐 사람(주민등록번호 변경, 계정 탈취 복구)을 위한 사람의 판단 경로가 없다 | personal-data | 미구현 |
 | 10 | 발신주의(발송 이력이 통지의 증거) 조항이 개인 Sponsor 에게 불공정 약관으로 다퉈질 여지 | contracts-and-ip | 확인 필요 |
+| 11 | 강사가 연결한 앱으로 참여자 제출물이 바깥 운영사에 가는 것 — 위탁이 아니라고 보고 방침 4절에 적었다. 제3자 제공(제17조)·국외 이전(제28조의8) 근거가 따로 필요한지 | personal-data | 변호사 확인 필요 |
+| 12 | 연결된 앱 조항을 「불리한 개정」(30일 공지)으로 다뤘다 — 공지 기간과 기능 공개 시점이 맞는지, 제10조 ⑤ 면책이 약관규제법 제7조를 넘지 않는지 | contracts-and-ip | 확인 필요 |
