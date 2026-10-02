@@ -4,7 +4,7 @@
 // AI 앱의 목록과 끊기. 계정 메뉴에서 들어온다. 끊으면 그 앱의 토큰이 곧바로 거절된다.
 import { useEffect, useState } from "react";
 
-import { Card, EmptyState, ErrorNote, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
+import { Card, CardHeader, EmptyState, ErrorNote, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
 import {
   appDisplayName,
   disconnectConnectedApp,
@@ -19,6 +19,58 @@ const DATE_FORMAT = new Intl.DateTimeFormat("ko-KR", { year: "numeric", month: "
 
 function formatDate(value: string): string {
   return DATE_FORMAT.format(new Date(value));
+}
+
+/** 연결 주소 — AI 앱의 커넥터 설정에 붙여 넣을 MCP 주소. 가입 링크 카드(클래스 상세)와 같은
+ *  모양이다: 주소 상자·복사·「복사됨」. 주소는 지금 열린 강의실 오리진에서 만든다 — 앞단
+ *  프록시 뒤에서도 브라우저가 친 주소가 곧 바깥 주소다. */
+function ConnectAddress({ url }: { url: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader title="연결 주소" hint="AI 앱의 커넥터 설정에 이 주소를 붙여 넣으세요" />
+      <div className="flex flex-col gap-3 p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <p
+            data-testid="connected-apps-mcp-url"
+            className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap border border-rule bg-paper px-3 py-2 font-mono text-[13px]"
+          >
+            {url}
+          </p>
+          <button
+            type="button"
+            data-testid="connected-apps-mcp-url-copy"
+            onClick={copy}
+            disabled={!url}
+            className={buttonClass("secondary", "sm")}
+          >
+            복사
+          </button>
+          {copied ? (
+            <span data-testid="connected-apps-mcp-url-copied" className="text-[12px] text-verified">
+              복사됨
+            </span>
+          ) : null}
+        </div>
+        <ol className="list-decimal space-y-1 pl-5 text-[12.5px] leading-relaxed text-ink/60">
+          <li>Claude 같은 AI 앱에서 커넥터(MCP 서버)를 추가하는 화면을 열고 이 주소를 붙여 넣습니다.</li>
+          <li>강의실 로그인 화면이 열리면 로그인한 뒤 허락합니다.</li>
+          <li>허락한 앱은 아래 목록에 나타나고, 언제든 끊을 수 있습니다.</li>
+        </ol>
+      </div>
+    </Card>
+  );
 }
 
 export default function ConnectedAppsPage() {
@@ -66,7 +118,10 @@ export default function ConnectedAppsPage() {
         </div>
       ) : null}
 
-      <Card>
+      <ConnectAddress url={mcpUrl} />
+
+      <Card className="mt-4">
+        <CardHeader title="허락한 앱" />
         {state.status === "loading" ? (
           <EmptyState>불러오는 중…</EmptyState>
         ) : state.status === "error" ? (
@@ -128,12 +183,6 @@ export default function ConnectedAppsPage() {
         )}
       </Card>
 
-      <p className="mt-4 text-[12.5px] leading-relaxed text-ink/60">
-        Claude 같은 AI 앱의 커넥터 설정에 이 주소를 넣고 강의실 로그인으로 허락하면 연결됩니다:{" "}
-        <span className="font-mono text-ink" data-testid="connected-apps-mcp-url">
-          {mcpUrl}
-        </span>
-      </p>
     </PageShell>
   );
 }
