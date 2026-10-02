@@ -58,6 +58,21 @@ def _cpu_seconds() -> float:
 
 _LOCAL_TEST_LIMIT = 400
 
+# **로컬 실행은 `scripts/test.sh` 를 거쳐야만 한다**(2026-10-02). 동시 둘·코어 1/3 은 그 스크립트가
+# 지키는데, 호스트에서 `uv run pytest` 를 바로 치면 `-n auto` 로 코어를 전부 쓰며 그 둘을 건너뛰었다.
+# 스크립트는 칸을 잡은 뒤 `CODEMIT_TEST_ENTRY` 를 내보낸다. CI(`CI` 환경변수)는 자기 노드를 통째로
+# 쓰므로 예외다.
+
+
+def pytest_configure(config):
+    if os.environ.get("CI") or os.environ.get("CODEMIT_TEST_ENTRY"):
+        return
+    pytest.exit(
+        "로컬 백엔드 시험은 scripts/test.sh 로만 돌린다 — 예) scripts/test.sh backend tests/test_x.py "
+        "(기계 전체 동시 둘·코어 1/3 을 그 스크립트가 지킨다). 전체는 브랜치 PR 의 CI 로 본다.",
+        returncode=4,
+    )
+
 
 def _local_limit_message(count: int) -> str:
     return (

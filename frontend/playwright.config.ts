@@ -19,6 +19,15 @@ import { defineConfig, devices } from "@playwright/test";
 // 갖는다 — 허용목록의 내용이 앱마다 갈려 있다는 사실(ADR-0021)이 여기서도 같은
 // 모양으로 반복된다.
 
+// **로컬 실행은 `scripts/test.sh e2e` 를 거쳐야만 한다**(2026-10-02) — 그 스크립트가 기계 전체 동시
+// 둘·코어 1/3 을 지키고, 이 워크트리 코드로 구운 프로덕션 이미지 스택을 띄운다. 칸을 잡은 뒤
+// `CODEMIT_TEST_ENTRY` 를 내보낸다. CI(Jenkins 의 scripts/ci/e2e.sh)도 같은 표식을 준다.
+if (!process.env.CI && !process.env.CODEMIT_TEST_ENTRY) {
+  throw new Error(
+    "로컬 e2e 는 scripts/test.sh e2e 로만 돌린다 — 예) scripts/test.sh e2e --project=operator e2e/operator/appeals.spec.ts",
+  );
+}
+
 const publicBaseURL = process.env.CODEMIT_E2E_BASE_URL ?? "http://127.0.0.1:53000";
 const operatorBaseURL = process.env.CODEMIT_OPERATOR_E2E_BASE_URL ?? "http://127.0.0.1:53001";
 const classroomBaseURL = process.env.CODEMIT_CLASSROOM_E2E_BASE_URL ?? "http://127.0.0.1:53002";

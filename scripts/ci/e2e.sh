@@ -6,6 +6,8 @@
 # 끝나면(성공·실패·중단 모두) 스택을 지운다. 프로젝트 하나가 실패해도 나머지는 끝까지 돈다.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
+# playwright.config 의 입구 검사 — 이 노드는 Jenkins 가 통째로 쓰므로 test.sh 의 칸을 거치지 않는다.
+export CODEMIT_TEST_ENTRY="scripts/ci/e2e.sh"
 
 project=$(printf '%s' "${CODEMIT_CI_RUN_ID:-codemit-e2e-$$}-e2e" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9-' '-' | cut -c1-60)
 C=(docker compose -p "$project" -f docker/compose.dev.yaml -f docker/compose.ci.yaml)

@@ -108,7 +108,7 @@ gh issue list --search "<증상 낱말>" --state all --limit 10   # 전에 누�
 1. **백엔드 pytest** — 이 저장소의 유일한 백엔드 시임은 HTTP 다. 실제 요청으로 그
    엔드포인트를 친다. 모델 메서드·서비스 클래스를 직접 부르지 않는다.
    ```bash
-   cd backend && CODEMIT_DB_PORT=55432 uv run pytest tests/<파일>.py -q
+   scripts/test.sh backend tests/<파일>.py -q   # pytest 를 바로 치면 conftest 가 거절한다
    ```
 2. **브라우저로 그 화면을 걷는다** — 프론트 오류(`codemit-frontend`·
    `codemit-classroom`·`codemit-operator`)면 dev 스택을 띄워 사람이 걸을 경로를 그대로
@@ -159,7 +159,7 @@ GlitchTip 상태는 건드리지 않는다 — 미해결로 남는 것이 맞다
 `docs/ops/ticket-done.md`(「티켓을 닫는 기준」) 그대로다. 로컬 게이트 셋:
 
 ```bash
-cd backend && CODEMIT_DB_PORT=55432 uv run pytest
+scripts/test.sh backend tests/<바꾼 자리>.py   # 로컬은 400개까지 — 전체는 PR 의 Jenkins CI
 pnpm --dir frontend typecheck && pnpm --dir operator typecheck && pnpm --dir classroom typecheck
 ```
 
