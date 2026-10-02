@@ -34,7 +34,7 @@ export const metadata = {
   description: "Codemit 서비스의 이용 조건과 절차, 서비스와 회원의 권리·의무를 정한 약관입니다.",
 };
 
-const EFFECTIVE_DATE = "2026년 11월 3일";
+const EFFECTIVE_DATE = "2026년 10월 3일";
 const PREVIOUS_EFFECTIVE_DATE = "2026년 9월 21일";
 
 function Article({ title, children }: { title: string; children: ReactNode }) {

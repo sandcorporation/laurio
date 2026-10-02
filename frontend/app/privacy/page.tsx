@@ -31,7 +31,7 @@ export const metadata = {
   description: "Codemit 이 수집하는 개인정보 항목과 보유 기간, 위탁·국외 이전 상대를 밝힙니다.",
 };
 
-const EFFECTIVE_DATE = "2026년 11월 3일";
+const EFFECTIVE_DATE = "2026년 10월 3일";
 const PREVIOUS_EFFECTIVE_DATE = "2026년 9월 21일";
 
 function Article({ title, children }: { title: string; children: ReactNode }) {
