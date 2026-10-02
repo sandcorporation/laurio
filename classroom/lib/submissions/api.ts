@@ -4,7 +4,7 @@
 import type { ApiResult } from "@codemit/bff-client";
 
 import { apiRequest, bffClient } from "@/lib/bff/client";
-import type { ChecklistItemRow, GradingStrictness, SubmissionFormat } from "@/lib/problems/api";
+import type { ChecklistItemRow, GradingStrictness, ProblemContest, SubmissionFormat } from "@/lib/problems/api";
 
 export type ProblemMine = {
   id: number;
@@ -21,6 +21,10 @@ export type ProblemMine = {
   // 앞에 「소스에 문법 오류가 없다」와 「기본」 표시를 둔다.
   syntax_check_enabled: boolean;
   checklist_items: ChecklistItemRow[];
+  // 공모전 문제면 그 공모전의 지금 상태(#548), 아니면 null.
+  contest: ProblemContest | null;
+  // 공모전 문제의 수업용 안내(#548) — 설명 위에 보인다.
+  instructor_note: string;
   // 이 문제를 한 번이라도 통과한 적이 있는가(#288) — 최신 시도가 아니라
   // 시도 전체의 OR. 한 번 통과하면 나중에 미통과가 나와도 계속 참이다.
   passed: boolean;

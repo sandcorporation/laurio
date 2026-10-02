@@ -98,6 +98,18 @@ PROBLEM_FIELD_TRANSFER_TABLE: tuple[ProblemFieldTransferRule, ...] = (
     ProblemFieldTransferRule("grading_strictness", copies=True, templates=True),
     ProblemFieldTransferRule("grading_guideline_text", copies=True, templates=True),
     ProblemFieldTransferRule("syntax_check_enabled", copies=True, templates=True),
+    ProblemFieldTransferRule(
+        "contest_id",
+        copies=True,
+        templates=False,
+        note="공모전 문제(#548) — 복사본도 그 공모전을 따라간다. 템플릿은 공모전 문제를 받지 않는다",
+    ),
+    ProblemFieldTransferRule(
+        "instructor_note",
+        copies=True,
+        templates=False,
+        note="공모전 문제의 수업용 안내(#548) — 템플릿은 공모전 문제를 받지 않는다",
+    ),
     ProblemFieldTransferRule("created_at", copies=False, templates=False, note="시각 — auto_now_add"),
     ProblemFieldTransferRule("updated_at", copies=False, templates=False, note="시각 — auto_now"),
 )
@@ -169,7 +181,12 @@ def copy_problem_to_class(problem: Problem, target_class: Class) -> Problem:
     )
     ChecklistItem.objects.bulk_create(
         ChecklistItem(
-            problem=copy, label=item.label, required=item.required, order=item.order
+            problem=copy,
+            label=item.label,
+            required=item.required,
+            order=item.order,
+            # 공모전 문제의 항목은 복사본에서도 같은 Requirement 를 따라간다(#548).
+            contest_requirement_id=item.contest_requirement_id,
         )
         for item in problem.checklist_items.all()
     )

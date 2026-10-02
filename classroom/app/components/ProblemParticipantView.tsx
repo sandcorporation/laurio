@@ -90,6 +90,8 @@ type ProblemParticipantViewProps = (InteractiveProps | PreviewProps) & {
    *  푼 적이 없으므로 「통과」/「미통과」 어느 쪽도 사실이 아니다. */
   passed?: boolean;
   description: string;
+  // 공모전 문제의 수업용 안내(#548) — 설명 위에 보인다. 공모전 문제가 아니면 빈 문자열.
+  instructorNote?: string;
   checklistItems: ParticipantChecklistItem[];
   /** 문법 검사 기본 항목의 켜짐 여부(#408) — 참이면 체크리스트 맨 앞에
    *  「소스에 문법 오류가 없다」와 「기본」 표시를 둔다. */
@@ -158,6 +160,7 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
     titleTestId,
     passed,
     description,
+    instructorNote = "",
     checklistItems,
     syntaxCheckEnabled,
     gradingStrictness,
@@ -222,6 +225,14 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
           설명 → 체크리스트 → 제출 → 내 시도다: 시도가 쌓여도 제출 칸이 밀려나지 않는다. */}
       <div className="flex flex-col gap-5">
         <div className="flex min-w-0 flex-col gap-5">
+          {instructorNote.trim() === "" ? null : (
+            <Card>
+              <CardHeader title="수업용 안내" />
+              <div className="p-4" data-testid="my-problem-instructor-note">
+                <MarkdownView markdown={instructorNote} fileBaseName={title} />
+              </div>
+            </Card>
+          )}
           {description.trim() === "" ? null : (
             <Card>
               <CardHeader title="설명" />

@@ -20,6 +20,15 @@ class ClassroomConfig(AppConfig):
         from .scoring import CLASSROOM_SUBMISSION_SCORING_SCAN
 
         register_scan(CLASSROOM_SUBMISSION_SCORING_SCAN)
+        # 공모전 문제(#548, ADR-0054) — 공개 중인 무료 공모전의 원본이 바뀌면 그 공모전을
+        # 들여온 문제가 따라간다. 신호는 공유층에 있어 공모전 앱을 임포트하지 않는다.
+        from core.contest_catalog import contest_source_changed
+
+        from .contest_problems import on_contest_source_changed
+
+        contest_source_changed.connect(
+            on_contest_source_changed, dispatch_uid="classroom.contest_problems.source_changed"
+        )
         # 연결된 앱(ADR-0052, #512) — 90일 동안 쓰지 않은 허락을 끊고, 아무도 허락하지
         # 않은 등록을 걷는다. 탈퇴·휴면이면 그 자리에서 끊는다(`accounts.signals`).
         from accounts.signals import user_became_dormant, user_withdrawn

@@ -47,6 +47,7 @@ from .schemas import (
     ReportResultOut,
     ReportTemplateIn,
 )
+from .contest_problems import TEMPLATE_BLOCKED_MESSAGE
 from .services import (
     import_problem_template,
     publish_class_as_template,
@@ -63,6 +64,9 @@ def publish_problem_template_checked(
     공개(`classroom.mcp_destructive_tools`, #515)가 함께 부른다."""
 
     _reject_if_banned_name(publisher_display_name)
+    # 공모전 문제의 제목·설명·요구사항은 개최자의 글이라 공개 사본으로 뜨지 않는다(#548).
+    if problem.contest_id is not None:
+        raise HttpError(422, TEMPLATE_BLOCKED_MESSAGE)
     return publish_problem_as_template(
         problem, published_by_id=published_by_id, publisher_display_name=publisher_display_name
     )
@@ -74,6 +78,8 @@ def publish_class_template_checked(
     """`publish_problem_template_checked` 의 클래스 판(화면 `publish_class_template`)."""
 
     _reject_if_banned_name(publisher_display_name)
+    if class_obj.problems.filter(contest_id__isnull=False).exists():
+        raise HttpError(422, TEMPLATE_BLOCKED_MESSAGE)
     return publish_class_as_template(
         class_obj, published_by_id=published_by_id, publisher_display_name=publisher_display_name
     )

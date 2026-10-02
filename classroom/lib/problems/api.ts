@@ -94,7 +94,38 @@ export type ProblemRow = {
   // 이 배열로 열기·숨기기·다시 열기 버튼을 그리고, 화면 안에서 상태별
   // 버튼을 다시 계산하지 않는다.
   available_transitions: ProblemTransitionRow[];
+  // 공모전 문제면 그 공모전의 지금 상태(#548), 아니면 null — 제목·설명·체크리스트는
+  // 공모전을 따라가고 강사는 고치지 못한다(CONTEXT.md 「공모전 문제」).
+  contest: ProblemContest | null;
+  // 공모전 문제의 수업용 안내(#548).
+  instructor_note: string;
 };
+
+export type ProblemContest = {
+  contest_id: number;
+  // 지금 「공모전에도 내기」를 받는가 — 공개 중 · 마감 전 · 개최자가 허용 중.
+  accepts_entries: boolean;
+  deadline_at: string | null;
+};
+
+// 문제 만들기의 「공모전에서 들여오기」(#548) — 개최자가 클래스에서 들여오기를 허용한
+// 공개 중 · 마감 전 무료 공모전.
+export type ImportableContestRow = {
+  contest_id: number;
+  title: string;
+  deadline_at: string;
+  requirement_count: number;
+};
+
+export function fetchImportableContests(classId: number): Promise<ApiResult<ImportableContestRow[]>> {
+  return bffClient.get<ImportableContestRow[]>(`/api/backend/classroom/classes/${classId}/importable-contests`);
+}
+
+export function importContestProblem(classId: number, contestId: number): Promise<ApiResult<ProblemRow>> {
+  return bffClient.post<ProblemRow>(`/api/backend/classroom/classes/${classId}/problems/from-contest`, {
+    contest_id: contestId,
+  });
+}
 
 export function createProblem(
   classId: number,
@@ -139,6 +170,8 @@ export function updateProblem(
     grading_strictness: GradingStrictness;
     grading_guideline_text: string;
     syntax_check_enabled: boolean;
+    // 공모전 문제의 수업용 안내(#548) — 공모전 문제가 아니면 서버가 422.
+    instructor_note: string;
   }>,
 ): Promise<ApiResult<ProblemRow>> {
   return apiRequest<ProblemRow>(

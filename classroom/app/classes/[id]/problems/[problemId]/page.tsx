@@ -225,6 +225,8 @@ export default function EditProblemPage() {
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  // 공모전 문제의 수업용 안내(#548) — 제목·설명은 공모전을 따라가 고칠 수 없으므로 이 칸에 덧붙인다.
+  const [instructorNote, setInstructorNote] = useState("");
   const [submissionFormats, setSubmissionFormats] = useState<SubmissionFormat[]>(["source"]);
   const [model, setModel] = useState("");
   const [reasoningEffort, setReasoningEffort] = useState("");
@@ -281,6 +283,7 @@ export default function EditProblemPage() {
     if (state.status === "ready") {
       setTitle(state.problem.title);
       setDescription(state.problem.description);
+      setInstructorNote(state.problem.instructor_note);
       setSubmissionFormats(state.problem.submission_formats);
       setModel(state.problem.model);
       setReasoningEffort(state.problem.reasoning_effort);
@@ -318,6 +321,9 @@ export default function EditProblemPage() {
   // participation.assert_class_mutable`), 이 disable 은 편의일 뿐 문 자체는
   // 여전히 백엔드다.
   const isArchived = classState.status === "ready" && classState.classroom.archived;
+  // 공모전 문제(#548) — 제목·설명·체크리스트는 공모전을 따라가고 여기서 고칠 수 없다.
+  const contest = problem.contest;
+  const followsContest = contest !== null;
   const archivedReason = "이 클래스는 보관되어 바꿀 수 없습니다.";
   // 지금 상태에서 나갈 수 있는 전이 — 그래프가 상태마다 간선을 하나만
   // 두므로(#440) 배열의 유일한 원소만 본다. 문제가 끝 상태를 갖지 않는
@@ -341,6 +347,11 @@ export default function EditProblemPage() {
       mainSave.setError(titleBannedWordMessage);
       return;
     }
+    const noteBannedWordMessage = checkPublicTextForBannedWords(instructorNote, "수업용 안내");
+    if (followsContest && noteBannedWordMessage) {
+      mainSave.setError(noteBannedWordMessage);
+      return;
+    }
     const descriptionBannedWordMessage = checkPublicTextForBannedWords(description, "설명");
     if (descriptionBannedWordMessage) {
       mainSave.setError(descriptionBannedWordMessage);
@@ -349,8 +360,8 @@ export default function EditProblemPage() {
     void mainSave.run(
       () =>
         updateProblem(classId, problemId, {
-          title: title.trim(),
-          description,
+          // 공모전 문제는 제목·설명을 보내지 않는다 — 서버가 거절한다(#548). 대신 수업용 안내를 보낸다.
+          ...(followsContest ? { instructor_note: instructorNote } : { title: title.trim(), description }),
           submission_formats: submissionFormats,
           // 모델 값을 불러온 값과 다를 때만 보낸다(#437) — 백엔드는 이 필드가
           // 오면 값이 같아도 「모델 거부」 표시를 푼다(#403 AC), 그래서 제목
@@ -723,6 +734,19 @@ export default function EditProblemPage() {
           <div className="flex min-w-0 flex-1 flex-col gap-5">
             <Card>
               <CardHeader title="문제" />
+              {contest !== null ? (
+                <div className="border-b border-rule bg-surface px-4 py-3">
+                  <Note tone="neutral">
+                    <span data-testid="edit-problem-contest-note">
+                      공모전 문제입니다 — 제목·설명·체크리스트는 공모전을 따라가고, 개최자가 고치면 함께
+                      바뀝니다.{" "}
+                      {contest.accepts_entries
+                        ? "참여자는 낼 때 이 공모전에도 낼 수 있습니다."
+                        : "공모전이 마감됐거나 개최자가 허용을 거둬 지금은 공모전에 낼 수 없습니다. 문제는 그대로 쓸 수 있습니다."}
+                    </span>
+                  </Note>
+                </div>
+              ) : null}
               <form id="edit-problem-form" onSubmit={handleSubmit} className="flex flex-col gap-5 p-4">
                 <div className="flex flex-col gap-1.5">
                   <label htmlFor="problem-title">
@@ -734,16 +758,17 @@ export default function EditProblemPage() {
                     value={title}
                     onChange={(event) => setTitle(event.target.value)}
                     required
-                    disabled={isArchived}
+                    disabled={isArchived || followsContest}
                     className={INPUT_CLASS}
                   />
                 </div>
 
                 <div className="flex flex-col gap-1.5">
                   <FieldLabel>설명</FieldLabel>
-                  {isArchived ? (
+                  {isArchived || followsContest ? (
                     // 보관된 클래스는 읽기 전용이다(#438) — Toast UI 에디터에는 읽기
                     // 전용 모드가 없어, 참여자가 보는 것과 같은 렌더러로 보여준다.
+                    // 공모전 문제의 설명도 공모전을 따라가므로 같은 모양으로 읽기만 한다(#548).
                     <div
                       data-testid="edit-problem-description-readonly"
                       className="border border-rule bg-paper px-4 py-3"
@@ -764,6 +789,32 @@ export default function EditProblemPage() {
                     />
                   )}
                 </div>
+
+                {followsContest ? (
+                  <div className="flex flex-col gap-1.5">
+                    <FieldLabel>수업용 안내</FieldLabel>
+                    <p className="text-[12px] text-ink/50">
+                      참여자에게 설명 위에 보입니다 — 이 클래스에서만 덧붙이는 말을 적어 주세요.
+                    </p>
+                    {isArchived ? (
+                      <div data-testid="edit-problem-instructor-note-readonly" className="border border-rule bg-paper px-4 py-3">
+                        {instructorNote.trim() === "" ? (
+                          <p className="text-[13px] text-ink/45">수업용 안내가 없습니다.</p>
+                        ) : (
+                          <MarkdownView markdown={instructorNote} fileBaseName={title} />
+                        )}
+                      </div>
+                    ) : (
+                      <MarkdownEditor
+                        id="problem-instructor-note"
+                        label="수업용 안내"
+                        testId="edit-problem-instructor-note-input"
+                        value={instructorNote}
+                        onChange={setInstructorNote}
+                      />
+                    )}
+                  </div>
+                ) : null}
               </form>
             </Card>
 
@@ -818,7 +869,7 @@ export default function EditProblemPage() {
                       <input
                         data-testid={`checklist-item-${item.id}-label-input`}
                         defaultValue={item.label}
-                        disabled={isArchived}
+                        disabled={isArchived || followsContest}
                         onBlur={(event) => {
                           if (event.target.value.trim() !== "" && event.target.value !== item.label) {
                             handleItemLabelSave(item.id, event.target.value.trim());
@@ -831,12 +882,13 @@ export default function EditProblemPage() {
                           type="checkbox"
                           data-testid={`checklist-item-${item.id}-required-input`}
                           checked={item.required}
-                          disabled={isArchived}
+                          disabled={isArchived || followsContest}
                           onChange={(event) => handleItemRequiredToggle(item.id, event.target.checked)}
                           className="accent-attention"
                         />
                         필수
                       </label>
+                      {followsContest ? null : (
                       <span className="flex shrink-0 gap-1">
                         <button
                           type="button"
@@ -866,11 +918,19 @@ export default function EditProblemPage() {
                           삭제
                         </button>
                       </span>
+                      )}
                     </li>
                   ))}
                 </ul>
               )}
 
+              {followsContest ? (
+                <div className="border-t border-rule px-4 py-3">
+                  <span data-testid="checklist-follows-contest-note" className="text-[12px] text-ink/50">
+                    공모전의 요구사항 그대로입니다 — 항목을 더하거나 고치려면 수업용 안내에 덧붙여 주세요.
+                  </span>
+                </div>
+              ) : (
               <form onSubmit={handleAddItem} className="flex flex-wrap items-center gap-2 border-t border-rule p-4">
                 <label htmlFor="new-item-label" className="sr-only">
                   새 항목
@@ -905,6 +965,7 @@ export default function EditProblemPage() {
                   추가
                 </button>
               </form>
+              )}
 
               {checklistMutation.error ? (
                 <div className="border-t border-rule p-4">
@@ -1023,6 +1084,16 @@ export default function EditProblemPage() {
               </div>
             </Card>
 
+            {followsContest ? (
+              // 공모전 문제의 제목·설명·요구사항은 개최자의 글이라 템플릿으로 공개하지 않는다(#548).
+              <Card>
+                <CardHeader title="템플릿으로 공개" hint="다른 강사에게 공유" />
+                <p data-testid="publish-template-contest-note" className="p-4 text-[12px] leading-relaxed text-ink/60">
+                  공모전 문제는 템플릿으로 공개할 수 없습니다 — 제목·설명·요구사항은 개최자의 글입니다. 다른
+                  클래스로 복사하면 복사본도 같은 공모전을 따라갑니다.
+                </p>
+              </Card>
+            ) : (
             <Card>
               <CardHeader title="템플릿으로 공개" hint="다른 강사에게 공유" />
               <div className="flex flex-col gap-2.5 p-4">
@@ -1111,6 +1182,7 @@ export default function EditProblemPage() {
                 </span>
               </div>
             </Card>
+            )}
 
             <DeleteProblemCard
               classId={classId}
@@ -1180,6 +1252,7 @@ export default function EditProblemPage() {
               eyebrow={previewEyebrow}
               title={title.trim() === "" ? "(제목 없음)" : title}
               description={description}
+              instructorNote={followsContest ? instructorNote : ""}
               checklistItems={problem.checklist_items}
               syntaxCheckEnabled={problem.syntax_check_enabled}
               gradingStrictness={gradingGuideline.grading_strictness}

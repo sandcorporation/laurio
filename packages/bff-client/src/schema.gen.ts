@@ -396,6 +396,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/importable-contests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Importable Contests
+         * @description 새 문제 화면의 「공모전에서 들여오기」(#548) — 개최자가 「클래스에서 들여오기」를 허용한
+         *     공개 중 · 마감 전 무료 공모전. 강의실은 공모전 앱을 모르므로 공유층 카탈로그가 답한다
+         *     (ADR-0054).
+         */
+        get: operations["classroom_api_list_importable_contests"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/join-link/regenerate": {
         parameters: {
             query?: never;
@@ -542,6 +564,27 @@ export interface paths {
          *     생긴다").
          */
         post: operations["classroom_api_create_problem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/classes/{class_id}/problems/from-contest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Contest As Problem
+         * @description 허용된 무료 공모전을 「공모전 문제」 초안으로 들여온다(#548, CONTEXT.md). 제목·설명·
+         *     체크리스트는 그 공모전을 따라간다. 들여올 수 없으면(마감·허용 안 함·없음) 422.
+         */
+        post: operations["classroom_api_import_contest_as_problem"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4808,6 +4851,7 @@ export interface components {
             checklist_items: components["schemas"]["ChecklistItemOut"][];
             /** Classroom Id */
             classroom_id: number;
+            contest?: components["schemas"]["ProblemContestOut"] | null;
             /** Description */
             description: string;
             /** Grading Guideline Text */
@@ -4816,6 +4860,11 @@ export interface components {
             grading_strictness: string;
             /** Id */
             id: number;
+            /**
+             * Instructor Note
+             * @default
+             */
+            instructor_note: string;
             /**
              * Passed
              * @default false
@@ -5717,10 +5766,32 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** ImportContestIn */
+        ImportContestIn: {
+            /** Contest Id */
+            contest_id: number;
+        };
         /** ImportTemplateIn */
         ImportTemplateIn: {
             /** Target Class Id */
             target_class_id: number;
+        };
+        /**
+         * ImportableContestOut
+         * @description 들여올 수 있는 무료 공모전 한 줄(#548).
+         */
+        ImportableContestOut: {
+            /** Contest Id */
+            contest_id: number;
+            /**
+             * Deadline At
+             * Format: date-time
+             */
+            deadline_at: string;
+            /** Requirement Count */
+            requirement_count: number;
+            /** Title */
+            title: string;
         };
         /**
          * ImportableProblemOut
@@ -6641,6 +6712,19 @@ export interface components {
             /** Withholding Tax Bps */
             withholding_tax_bps?: number | null;
         };
+        /**
+         * ProblemContestOut
+         * @description 공모전 문제가 따라가는 공모전의 지금 상태(#548) — 강의실은 공모전 앱을 모르므로
+         *     공유층 카탈로그가 답한 것만 싣는다.
+         */
+        ProblemContestOut: {
+            /** Accepts Entries */
+            accepts_entries: boolean;
+            /** Contest Id */
+            contest_id: number;
+            /** Deadline At */
+            deadline_at?: string | null;
+        };
         /** ProblemCopyIn */
         ProblemCopyIn: {
             /** Target Class Id */
@@ -6707,6 +6791,7 @@ export interface components {
             checklist_items: components["schemas"]["ChecklistItemOut"][];
             /** Classroom Id */
             classroom_id: number;
+            contest?: components["schemas"]["ProblemContestOut"] | null;
             /**
              * Deletable
              * @default false
@@ -6732,6 +6817,11 @@ export interface components {
             grading_strictness: string;
             /** Id */
             id: number;
+            /**
+             * Instructor Note
+             * @default
+             */
+            instructor_note: string;
             /**
              * Member Count
              * @default 0
@@ -6779,6 +6869,8 @@ export interface components {
             grading_guideline_text?: string | null;
             /** Grading Strictness */
             grading_strictness?: string | null;
+            /** Instructor Note */
+            instructor_note?: string | null;
             /** Model */
             model?: string | null;
             /** Reasoning Effort */
@@ -8424,6 +8516,37 @@ export interface operations {
             };
         };
     };
+    classroom_api_list_importable_contests: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportableContestOut"][];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     classroom_api_regenerate_join_link: {
         parameters: {
             query?: never;
@@ -8677,6 +8800,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_import_contest_as_problem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportContestIn"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemOut"];
                 };
             };
             /** @description Not Found */

@@ -21,6 +21,7 @@ from ninja.errors import HttpError
 
 from core.banned_words import BannedWordViolation, find_banned_word_violation
 
+from .contest_problems import is_contest_problem, reject_if_locked
 from .models import ChecklistItem, Class, Problem
 from .problem_transitions import NO_REQUIRED_ITEM_MESSAGE, assert_required_item_floor
 from .schemas import ChecklistItemIn, ChecklistItemPatchIn, ProblemIn, ProblemPatchIn
@@ -204,7 +205,17 @@ def update_problem(class_obj: Class, problem: Problem, payload: ProblemPatchIn) 
         # 참여자에게도 보이는 자리다(`create_problem`과 같은 이유, #480).
         reject_banned_public_text(grading_guideline_text, "채점 지침")
 
+    # 공모전 문제는 제목·설명이 공모전을 따라간다(#548) — 대신 수업용 안내를 쓴다.
+    if payload.title is not None or payload.description is not None:
+        reject_if_locked(problem)
+    if payload.instructor_note is not None and not is_contest_problem(problem):
+        raise HttpError(422, "수업용 안내는 공모전 문제에만 둡니다 — 설명에 적어 주세요.")
+
     update_fields = []
+    if payload.instructor_note is not None:
+        reject_banned_public_text(payload.instructor_note, "수업용 안내")
+        problem.instructor_note = payload.instructor_note
+        update_fields.append("instructor_note")
     if payload.title is not None:
         reject_banned_public_text(payload.title, "제목")
         problem.title = payload.title
@@ -266,6 +277,7 @@ def owned_checklist_item_or_404(problem: Problem, item_id: int) -> ChecklistItem
 
 
 def add_checklist_item(problem: Problem, payload: ChecklistItemIn) -> ChecklistItem:
+    reject_if_locked(problem)
     reject_banned_public_text(payload.label, "체크리스트 항목")
     return ChecklistItem.objects.create(
         problem=problem,
@@ -281,6 +293,7 @@ def update_checklist_item(problem: Problem, item_id: int, payload: ChecklistItem
     problem_transitions.assert_required_item_floor`)."""
 
     item = owned_checklist_item_or_404(problem, item_id)
+    reject_if_locked(problem)
 
     if payload.required is False and item.required:
         remaining = problem.checklist_items.filter(required=True).exclude(id=item.id).count()
@@ -306,6 +319,7 @@ def delete_checklist_item(problem: Problem, item_id: int) -> ChecklistItem:
     돌려준다 — 기록이 무엇을 지웠는지 적을 수 있게."""
 
     item = owned_checklist_item_or_404(problem, item_id)
+    reject_if_locked(problem)
 
     if item.required:
         remaining = problem.checklist_items.filter(required=True).exclude(id=item.id).count()
@@ -318,6 +332,7 @@ def delete_checklist_item(problem: Problem, item_id: int) -> ChecklistItem:
 
 
 def reorder_checklist_items(problem: Problem, item_ids: list[int]) -> list[ChecklistItem]:
+    reject_if_locked(problem)
     items = {i.id: i for i in problem.checklist_items.all()}
     if set(item_ids) != set(items):
         raise HttpError(422, "이 문제의 체크리스트 항목과 일치하지 않습니다.")
