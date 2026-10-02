@@ -30,6 +30,12 @@ ADR-0014의 소비: "대형 프로젝트의 소스는 채점 컨텍스트 비용
 4. zip이 아니면(단일 텍스트 파일처럼 온 경우) 원문을 예산까지만 담는다 — 실제
    업로드는 아카이브가 보통이지만, 이 분기가 있어야 선별 전략이 입력 형태 하나에
    의존해 깨지지 않는다.
+5. 3번이 버리는 파일은 버리기 전에 등록된 변환 플러그인(`core.source_converters`,
+   설정 `SOURCE_CONVERTERS`)에게 묻는다(#496). 플러그인이 「내 형식」이라며 낸
+   텍스트는 같은 소스의 큐 앞에 끼워져 다른 파일과 같은 예산·라운드로빈을 받는다.
+   형식을 확정한 뒤 실패하면 그 파일 자리에 「열 수 없는 ○○ 파일」 한 줄을 남긴다
+   — 채점자가 「설정이 없다」로 오판하지 않게. 플러그인의 예외·시간 상한·입력
+   크기 상한은 그 파일 하나로 끝나고 선별은 계속된다.
 
 **소스가 여럿이면 라운드로빈으로 나눠 담는다(#191).** 제출작이 `SubmissionAsset`
 목록을 담게 되면서(ADR-0027) 채점 입력도 목록이 됐다 — 순서대로 채우면 첫 소스가
@@ -41,13 +47,23 @@ ADR-0014의 소비: "대형 프로젝트의 소스는 채점 컨텍스트 비용
 
 from __future__ import annotations
 
+import collections
+import concurrent.futures
 import contextlib
 import io
+import logging
 import zipfile
 from dataclasses import dataclass
-from typing import Callable, Iterator
+from typing import Callable
 
 from core.llm_scoring import SourceFile
+from core.source_converters import (
+    SourceConversionFailed,
+    SourceConverter,
+    registered_converters,
+)
+
+logger = logging.getLogger(__name__)
 
 # LLM 컨텍스트 비용을 억제하는 예산. 정확한 토큰 수가 아니라 대략적인 바이트
 # 상한이다. gpt-4o-mini(128K 토큰)를 기준으로 보수적으로 3~4바이트/토큰 환산해
@@ -87,6 +103,15 @@ EXCLUDED_DIR_FRAGMENTS = (
     "node_modules/", ".git/", "dist/", "build/", "vendor/", "__pycache__/", "__macosx/",
     ".venv/", "venv/", "target/", ".next/", "coverage/", ".gradle/", ".idea/",
 )
+
+#: 변환 플러그인에게 넘기는 파일 하나의 상한 — 그보다 큰 파일은 묻지 않고 버린다.
+#: 저장소 zip 다운로드 상한(`core.repository_adapters._MAX_CLONE_DOWNLOAD_BYTES`)과
+#: 같은 값이다: 그 이상은 어차피 한 제출 안에 들어오지 않는다.
+MAX_CONVERTER_INPUT_BYTES = 20_000_000
+
+#: 변환 플러그인 하나가 파일 하나에 쓸 수 있는 시간. 넘기면 그 파일만 버리고 선별을
+#: 계속한다 — 워커가 플러그인 하나에 붙잡히지 않게.
+CONVERTER_TIMEOUT_SECONDS = 10.0
 
 # UTF-8 멀티바이트 시퀀스는 최대 4바이트다 — 경계에서 최대 3바이트만 잘려나갈 수
 # 있으므로, 그 범위 안에서만 재시도하면 "진짜 바이너리"와 "경계에서 잘린 텍스트"를
@@ -142,6 +167,64 @@ class _Candidate:
 
     path: str
     reader: Callable[[int], bytes]
+    #: 원본 파일인가 — 변환 결과·「열 수 없는」 줄은 다시 플러그인에게 묻지 않는다.
+    convertible: bool = True
+
+
+def _text_candidate(path: str, text: str) -> _Candidate:
+    encoded = text.encode("utf-8")
+    return _Candidate(path=path, reader=lambda budget: encoded[:budget], convertible=False)
+
+
+def _run_converter(converter: SourceConverter, raw: bytes, path: str):
+    """시간 상한 안에서 플러그인 하나를 돌린다. 파이썬은 스레드를 죽일 수 없으므로
+    상한을 넘긴 플러그인은 뒤에서 끝까지 돌지만, 선별은 기다리지 않고 넘어간다 —
+    플러그인 쪽이 자기 작업을 묶어 둘 책임이 있다(압축 해제 상한 등)."""
+
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        future = executor.submit(converter.convert, raw, path=path)
+        return future.result(timeout=CONVERTER_TIMEOUT_SECONDS)
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
+def _convert(candidate: _Candidate, converters: tuple[SourceConverter, ...]) -> list[_Candidate]:
+    """UTF-8로 못 읽은 원본 파일 하나를 플러그인들에게 차례로 묻는다. 아무도
+    맡지 않으면 빈 목록 — 예전처럼 그 파일은 버려진다."""
+
+    raw = candidate.reader(MAX_CONVERTER_INPUT_BYTES + 1)
+    if len(raw) > MAX_CONVERTER_INPUT_BYTES:
+        logger.warning("변환하기에 너무 큰 파일을 건너뛴다(path=%s).", candidate.path)
+        return []
+
+    for converter in converters:
+        try:
+            converted = _run_converter(converter, raw, candidate.path)
+        except SourceConversionFailed as exc:
+            logger.info("변환 실패(형식 확정 뒤, path=%s): %s", candidate.path, exc)
+            return [
+                _text_candidate(
+                    candidate.path,
+                    f"(열 수 없는 {converter.format_name} 파일 — 내용을 읽지 못했다)",
+                )
+            ]
+        except concurrent.futures.TimeoutError:
+            logger.warning(
+                "변환 플러그인 %s 이 시간 상한을 넘겼다(path=%s).",
+                type(converter).__name__,
+                candidate.path,
+            )
+            return []
+        except Exception:
+            logger.exception(
+                "변환 플러그인 %s 이 예외를 던졌다(path=%s).", type(converter).__name__, candidate.path
+            )
+            continue
+        if converted is None:
+            continue
+        return [_text_candidate(f"{candidate.path}/{f.name}", f.content) for f in converted]
+    return []
 
 
 def _zip_candidates(raw: bytes, stack: contextlib.ExitStack) -> list[_Candidate]:
@@ -191,18 +274,19 @@ def select_source_files(
 
     files: list[SourceFile] = []
     budget = max_bytes
+    converters = registered_converters()
 
     with contextlib.ExitStack() as stack:
-        queues: list[tuple[int, str, Iterator[_Candidate]]] = []
+        queues: list[tuple[int, str, collections.deque[_Candidate]]] = []
         for asset_id, label, raw in sources:
             candidates = _source_candidates(raw, stack)
             if candidates:
-                queues.append((asset_id, label, iter(candidates)))
+                queues.append((asset_id, label, collections.deque(candidates)))
 
         while queues and budget > 0:
             round_queues = queues
             round_size = len(round_queues)
-            next_queues: list[tuple[int, str, Iterator[_Candidate]]] = []
+            next_queues: list[tuple[int, str, collections.deque[_Candidate]]] = []
 
             for index, (asset_id, label, queue) in enumerate(round_queues):
                 if budget <= 0:
@@ -216,13 +300,17 @@ def select_source_files(
                 # 별도의 감소 카운터가 필요 없다.
                 share = max(budget // (round_size - index), 1)
 
-                candidate = next(queue, None)
-                if candidate is None:
+                if not queue:
                     continue  # 이 소스는 다 소진됐다 — 이번 라운드부터 회전에서 뺀다.
+                candidate = queue.popleft()
 
                 content_bytes = candidate.reader(min(share, budget))
                 text = _decode_utf8_prefix(content_bytes)
-                if text is not None:
+                if text is None and candidate.convertible and converters:
+                    # 변환 결과를 이 소스의 큐 앞에 끼운다 — 이번 차례는 묻는 데
+                    # 썼으니, 결과는 다음 라운드부터 다른 파일과 같은 몫을 받는다.
+                    queue.extendleft(reversed(_convert(candidate, converters)))
+                elif text is not None:
                     files.append(
                         SourceFile(
                             path=candidate.path,

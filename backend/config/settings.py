@@ -992,6 +992,14 @@ LLM_REQUIREMENT_CHAT_FAKE_RAISING_CONTEST_IDS = [
     int(x) for x in _env("LLM_REQUIREMENT_CHAT_FAKE_RAISING_CONTEST_IDS", "").split(",") if x
 ]
 
+# --- 소스 변환 플러그인 (#496, #495) -----------------------------------------------
+#
+# 소스 선별이 UTF-8로 못 읽은 파일을 넘겨받아 채점용 텍스트로 바꾸는 플러그인의
+# dotted path 목록(쉼표로 구분, 적힌 순서대로 묻는다). 기본값은 빈 목록 — 그러면
+# 읽을 수 없는 파일은 예전처럼 버려진다. 쓸 수 없는 경로는 부팅 검사
+# (`core.source_converters.check_source_converters`)가 거절한다.
+SOURCE_CONVERTERS = [p.strip() for p in _env("SOURCE_CONVERTERS", "").split(",") if p.strip()]
+
 # --- GitHub 저장소 어댑터 (#193, ADR-0007, ADR-0027) --------------------------------
 #
 # LLM_ADAPTER_MODE와 같은 원칙: 기본값은 항상 fake다. dev/CI는 네트워크 없이
