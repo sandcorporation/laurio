@@ -10,7 +10,7 @@
 
 **전부 쓰기 도구다**(`read_only=False`) — 디스패치가 성공한 호출마다 `ConnectedAppWrite`
 한 줄을 남긴다(`classroom.mcp_tool` docstring). 되돌릴 수 있는 쓰기라 `destructiveHint`
-는 붙이지 않는다. 문제 삭제는 여기 없다 — 두 단계 확인과 함께 #515 가 연다.
+는 붙이지 않는다. 문제 삭제는 두 단계 확인 도구라 `classroom.mcp_destructive_tools` 에 있다(#515).
 """
 
 from __future__ import annotations

@@ -29,7 +29,7 @@ from .api import (
     _serialize_problem,
 )
 from .instructor_scope import class_scope, problem_scope
-from .models import ClassTemplate, ProblemTemplate, ProblemTemplateReport
+from .models import Class, ClassTemplate, Problem, ProblemTemplate, ProblemTemplateReport
 from .schemas import (
     ClassOut,
     ClassTemplateListItemOut,
@@ -54,6 +54,29 @@ from .services import (
 )
 
 router = Router(tags=["classroom", "templates"])
+
+
+def publish_problem_template_checked(
+    problem: Problem, *, published_by_id: int, publisher_display_name: str
+) -> tuple[ProblemTemplate, bool]:
+    """공개자 이름 금칙어 검사 → 사본 뜨기. 화면(`publish_template`)과 연결된 앱의 두 단계
+    공개(`classroom.mcp_destructive_tools`, #515)가 함께 부른다."""
+
+    _reject_if_banned_name(publisher_display_name)
+    return publish_problem_as_template(
+        problem, published_by_id=published_by_id, publisher_display_name=publisher_display_name
+    )
+
+
+def publish_class_template_checked(
+    class_obj: Class, *, published_by_id: int, publisher_display_name: str
+) -> tuple[ClassTemplate, bool]:
+    """`publish_problem_template_checked` 의 클래스 판(화면 `publish_class_template`)."""
+
+    _reject_if_banned_name(publisher_display_name)
+    return publish_class_as_template(
+        class_obj, published_by_id=published_by_id, publisher_display_name=publisher_display_name
+    )
 
 
 def _serialize_template(template: ProblemTemplate, *, viewer_id: int | None = None) -> ProblemTemplateOut:
@@ -122,12 +145,8 @@ def publish_template(
     전에 막는다."""
 
     problem = problem_scope(class_id, problem_id, request.auth_user.id, write=False).problem
-    _reject_if_banned_name(payload.publisher_display_name)
-
-    template, created = publish_problem_as_template(
-        problem,
-        published_by_id=request.auth_user.id,
-        publisher_display_name=payload.publisher_display_name,
+    template, created = publish_problem_template_checked(
+        problem, published_by_id=request.auth_user.id, publisher_display_name=payload.publisher_display_name
     )
     status = 201 if created else 200
     return status, _serialize_template(template, viewer_id=request.auth_user.id)
@@ -327,11 +346,8 @@ def publish_class_template(request, class_id: int, payload: PublishTemplateIn):
     엔드포인트를 함께 막는다."""
 
     class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
-    _reject_if_banned_name(payload.publisher_display_name)
-    template, created = publish_class_as_template(
-        class_obj,
-        published_by_id=request.auth_user.id,
-        publisher_display_name=payload.publisher_display_name,
+    template, created = publish_class_template_checked(
+        class_obj, published_by_id=request.auth_user.id, publisher_display_name=payload.publisher_display_name
     )
     status = 201 if created else 200
     return status, _serialize_class_template(template, viewer_id=request.auth_user.id)

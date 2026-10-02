@@ -896,3 +896,31 @@ class ConnectedAppWrite(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"ConnectedAppWrite(id={self.pk}, tool={self.tool})"
+
+
+class ConnectedAppConfirmation(models.Model):
+    """연결된 앱이 되돌릴 수 없는 도구(#515)를 실행하기 전에 받는 확인 표 한 장.
+
+    첫 호출이 미리보기와 함께 표를 내주고, 같은 도구를 **같은 인자로** 그 표와 함께 다시
+    부르면 실행된다(`classroom.mcp_confirmation`). 표 자체는 저장하지 않고 해시만 둔다 —
+    이 행을 읽을 수 있는 사람도 표를 다시 만들 수 없다.
+
+    **한 번만, 그 앱·그 도구·그 인자에만, 짧게.** 인자는 `arguments_digest`(표를 뺀 인자의
+    정규화 JSON 의 SHA-256)로 묶는다 — 대상 번호가 인자에 있으므로 다른 대상에는 쓰이지
+    않는다. 실행이 성공한 트랜잭션에서 `used_at` 이 찍힌다; 실행이 거절되면(그 사이 참여자가
+    냈다 등) 쓰기와 함께 되돌아가 표가 남지만, 같은 대상·같은 인자에만 쓰이고 시간이 지나면
+    끝난다."""
+
+    connected_app = models.ForeignKey(ConnectedApp, related_name="confirmations", on_delete=models.CASCADE)
+    tool = models.CharField(max_length=64)
+    arguments_digest = models.CharField(max_length=64)
+    token_hash = models.CharField(max_length=64, unique=True)
+    created_at = models.DateTimeField()
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ConnectedAppConfirmation(id={self.pk}, tool={self.tool})"

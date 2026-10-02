@@ -14,7 +14,9 @@
 클래스」와 같은 `classroom.services.instructor_classes` 를 쓴다 — 무엇이 보이는가를
 두 표면이 따로 정하지 않는다. 읽기는 기록하지 않는다(ADR-0040·0052). 문제를 만들고 고치는
 쓰기 도구는 `classroom.mcp_problem_tools` 에 있고, 디스패치가 그 성공마다 같은 트랜잭션에서
-`ConnectedAppWrite` 한 줄을 남긴다(#514, `classroom.mcp_tool` docstring).
+`ConnectedAppWrite` 한 줄을 남긴다(#514, `classroom.mcp_tool` docstring). 되돌릴 수 없는 도구
+(삭제·내보내기·템플릿 공개)는 `classroom.mcp_destructive_tools` 에 있고 두 단계다 — 확인 표
+없이 불리면 미리보기(`Preview`)만 돌려주고 기록하지 않는다(#515).
 
 **호출 상한**: 강사 한 명당 분당 `CLASSROOM_MCP_CALLS_PER_MINUTE` 번. 넘으면 JSON-RPC
 오류로 몇 초 뒤에 다시 하라고 알린다(`Retry-After` 도 함께). 분은 `Clock.now()` 로
@@ -38,12 +40,13 @@ from core.clock import Clock
 
 from .connected_app_writes import record_write
 from .mcp_problem_tools import PROBLEM_TOOLS
-from .mcp_tool import Tool, ToolInputError, WriteResult
+from .mcp_tool import Preview, Tool, ToolInputError, WriteResult
 from .models import ConnectedApp
 from .oauth import SCOPE, authenticate_access_token, protected_resource_metadata_url, public_origin
 from .services import instructor_classes
 from .mcp_read_tools import READ_TOOL_SPECS
 from .mcp_report_tools import REPORT_TOOL_SPECS, TOOL_CALLS_PER_MINUTE_SETTINGS
+from .mcp_destructive_tools import DESTRUCTIVE_TOOLS
 
 SERVER_NAME = "codemit-classroom"
 SERVER_VERSION = "1.0.0"
@@ -161,6 +164,10 @@ for _spec in READ_TOOL_SPECS:
 for _spec in REPORT_TOOL_SPECS:
     TOOLS[_spec["name"]] = Tool(**_spec, read_only=True)
 
+# 되돌릴 수 없는 도구(#515) — 두 단계 확인. 처리기는 `mcp_destructive_tools` 에 산다.
+for _tool in DESTRUCTIVE_TOOLS:
+    TOOLS[_tool.name] = _tool
+
 
 # --- JSON-RPC 바탕 -------------------------------------------------------------
 
@@ -249,15 +256,19 @@ def _call_tool(grant: ConnectedApp, params: dict) -> dict:
             # 기록이 실패하면 쓰기도 되돌아간다(`classroom.mcp_tool` docstring).
             with transaction.atomic():
                 outcome = tool.handler(grant, arguments)
-                if not isinstance(outcome, WriteResult):
+                if tool.destructive and isinstance(outcome, Preview):
+                    # 두 단계의 첫 단계 — 실행된 것이 없으므로 기록하지 않는다(#515).
+                    pass
+                elif not isinstance(outcome, WriteResult):
                     raise TypeError(f"쓰기 도구 {tool.name} 는 WriteResult 를 돌려줘야 합니다.")
-                record_write(
-                    grant,
-                    tool.name,
-                    class_id=outcome.class_id,
-                    problem_id=outcome.problem_id,
-                    summary=outcome.summary,
-                )
+                else:
+                    record_write(
+                        grant,
+                        tool.name,
+                        class_id=outcome.class_id,
+                        problem_id=outcome.problem_id,
+                        summary=outcome.summary,
+                    )
             structured = outcome.structured
     except (HttpError, ToolInputError) as exc:
         # 화면 API 가 4xx 로 거절할 자리(남의 클래스 404, 잘못된 입력 422, 보관 잠금 …)와

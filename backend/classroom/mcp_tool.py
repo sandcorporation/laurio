@@ -13,6 +13,10 @@
 오류가 아니라 `isError: true` 인 도구 결과로 돌려준다 — MCP 규격이 「모델이 읽고 고쳐
 다시 부를 수 있는 실패」를 그렇게 싣게 한다. 문구는 화면이 받는 것과 같은 문장이다.
 
+**되돌릴 수 없는 쓰기 도구(`destructive=True`, #515)는 두 단계다.** 확인 표 없이 불리면
+`Preview`(미리보기 + 표)를 돌려주고, 디스패치는 그것을 기록하지 않는다. 표와 함께 다시
+불려 실행되면 다른 쓰기처럼 `WriteResult` 를 돌려주고 기록된다(`classroom.mcp_confirmation`).
+
 이 모듈이 `classroom.mcp` 밖에 있는 이유는 순환 import 를 피하기 위해서다 — 도구
 모듈이 `Tool` 을 가져가고, `classroom.mcp` 가 도구 모듈의 목록을 가져간다.
 """
@@ -40,6 +44,15 @@ class WriteResult:
 
 
 @dataclass(frozen=True)
+class Preview:
+    """되돌릴 수 없는 도구(#515)가 확인 표 없이 불렸을 때 돌려주는 것 — 무엇이 사라지거나
+    나가는지와 확인 표. **쓰기가 아니다**: 디스패치는 이것을 기록하지 않는다(실행된 것이
+    없다). 할 일이 없을 때(이미 내보낸 참여자, 이미 공개된 템플릿)도 이것으로 돌려준다."""
+
+    structured: dict
+
+
+@dataclass(frozen=True)
 class Tool:
     name: str
     title: str
@@ -47,7 +60,7 @@ class Tool:
     input_schema: dict
     output_schema: dict
     read_only: bool
-    handler: Callable[[ConnectedApp, dict], dict | WriteResult]
+    handler: Callable[[ConnectedApp, dict], dict | WriteResult | Preview]
     #: 되돌릴 수 없는 쓰기인가 — MCP `destructiveHint`. 문제를 만들고 고치는 것처럼
     #: 다시 고쳐 되돌릴 수 있는 쓰기는 거짓이다.
     destructive: bool = False
