@@ -121,7 +121,7 @@ from .scoring import check_scoring_key
 from .scoring_model_catalog import get_scoring_model_catalog
 from .scoring_models import is_fallback_model, is_reasoning_model_id, is_valid_reasoning_effort
 from .submission_target_refs import source_target_ref
-from .services import copy_class, copy_problem_to_class
+from .services import copy_class, copy_problem_to_class, instructor_classes
 from .tasks import score_attempt
 
 logger = logging.getLogger(__name__)
@@ -570,7 +570,7 @@ def create_class(request: HttpRequest, payload: ClassIn):
 def list_my_classes(request: HttpRequest):
     """「내 클래스」— 본인이 강사인 것만. 남의 클래스는 여기 나오지 않는다."""
 
-    classes = Class.objects.filter(instructor_id=request.auth_user.id)
+    classes = instructor_classes(request.auth_user.id)
     return 200, [_serialize_class(c) for c in classes]
 
 

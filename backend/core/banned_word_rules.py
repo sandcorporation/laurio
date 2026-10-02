@@ -621,4 +621,46 @@ RULES: dict[tuple[str, str, str], BannedWordRule] = {
             "이 표에 없고, 이 티켓 범위 밖이다. 아직 검사하지 않는다."
         ),
     ),
+    # 연결된 앱의 동의 화면이 「허락」·「거절」을 보낼 때(#512, ADR-0052) — 전부 외부
+    # 앱이 인가 요청에 실어 온 OAuth 값을 그대로 되돌려 보내는 자리다.
+    ("classroom", "AuthorizationDecisionIn", "client_id"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="OAuth 인가 요청의 식별자·주소·PKCE 값 — 사람이 짓는 문구가 아니다.",
+    ),
+    ("classroom", "AuthorizationDecisionIn", "redirect_uri"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="OAuth 인가 요청의 식별자·주소·PKCE 값 — 사람이 짓는 문구가 아니다.",
+    ),
+    ("classroom", "AuthorizationDecisionIn", "response_type"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="OAuth 인가 요청의 식별자·주소·PKCE 값 — 사람이 짓는 문구가 아니다.",
+    ),
+    ("classroom", "AuthorizationDecisionIn", "code_challenge"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="OAuth 인가 요청의 식별자·주소·PKCE 값 — 사람이 짓는 문구가 아니다.",
+    ),
+    ("classroom", "AuthorizationDecisionIn", "code_challenge_method"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="OAuth 인가 요청의 식별자·주소·PKCE 값 — 사람이 짓는 문구가 아니다.",
+    ),
+    ("classroom", "AuthorizationDecisionIn", "state"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="OAuth 인가 요청의 식별자·주소·PKCE 값 — 사람이 짓는 문구가 아니다.",
+    ),
+    ("classroom", "AuthorizationDecisionIn", "scope"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="OAuth 인가 요청의 식별자·주소·PKCE 값 — 사람이 짓는 문구가 아니다.",
+    ),
+    ("classroom", "AuthorizationDecisionIn", "resource"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="OAuth 인가 요청의 식별자·주소·PKCE 값 — 사람이 짓는 문구가 아니다.",
+    ),
 }

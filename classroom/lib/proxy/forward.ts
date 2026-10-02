@@ -13,6 +13,7 @@ import {
 } from "@codemit/bff-shared";
 
 import { backendBaseUrl, eventsBaseUrl } from "@/lib/auth/backend";
+import { classroomOrigin } from "@/lib/auth/public-app";
 import { REFRESH_COOKIE, type TokenPair } from "@/lib/auth/cookies";
 import { isExpired } from "@/lib/auth/jwt";
 import { refreshTokenPair } from "@/lib/auth/refresh";
@@ -31,6 +32,10 @@ export async function forwardToBackend(
   const resolution = await resolveAccessToken(request);
 
   const headers = buildForwardHeaders(request);
+  // 연결된 앱의 동의 화면(ADR-0052, #512)이 만드는 인가 코드는 이 앱의 공개 주소에
+  // 묶인다 — 백엔드가 그 주소를 알도록 싣는다(`lib/connected-apps/gateway.ts`와 같다).
+  const publicOrigin = classroomOrigin(request.headers.get("host"), request.headers.get("x-forwarded-proto"));
+  if (publicOrigin) headers.set("x-codemit-public-origin", publicOrigin);
 
   let refreshedPair: TokenPair | null = null;
   let shouldClearCookies = false;

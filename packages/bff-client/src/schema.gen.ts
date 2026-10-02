@@ -1041,6 +1041,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/connected-apps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Connected Apps
+         * @description 지금 살아 있는 연결만 — 끊긴 것은 목록에서 사라진다.
+         */
+        get: operations["classroom_connected_app_api_list_connected_apps"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/connected-apps/{connected_app_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Disconnect Connected App */
+        delete: operations["classroom_connected_app_api_disconnect_connected_app"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/events/stream": {
         parameters: {
             query?: never;
@@ -1107,6 +1144,24 @@ export interface paths {
          *     사실을 403으로 정직하게 답한다.
          */
         post: operations["classroom_api_join_class"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/oauth/authorize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Preview Authorization */
+        get: operations["classroom_connected_app_api_preview_authorization"];
+        put?: never;
+        /** Decide Authorization */
+        post: operations["classroom_connected_app_api_decide_authorization"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4177,6 +4232,51 @@ export interface components {
             /** Value */
             value: string;
         };
+        /** AuthorizationDecisionIn */
+        AuthorizationDecisionIn: {
+            /** Approve */
+            approve: boolean;
+            /** Client Id */
+            client_id: string;
+            /** Code Challenge */
+            code_challenge: string;
+            /** Code Challenge Method */
+            code_challenge_method: string;
+            /** Redirect Uri */
+            redirect_uri: string;
+            /**
+             * Resource
+             * @default
+             */
+            resource: string;
+            /**
+             * Response Type
+             * @default code
+             */
+            response_type: string;
+            /**
+             * Scope
+             * @default
+             */
+            scope: string;
+            /**
+             * State
+             * @default
+             */
+            state: string;
+        };
+        /** AuthorizationPreviewOut */
+        AuthorizationPreviewOut: {
+            /** Client Name */
+            client_name: string;
+            /** Redirect Host */
+            redirect_host: string;
+        };
+        /** AuthorizationRedirectOut */
+        AuthorizationRedirectOut: {
+            /** Redirect To */
+            redirect_to: string;
+        };
         /** AwardIn */
         AwardIn: {
             /** Submission Id */
@@ -4887,6 +4987,20 @@ export interface components {
             seller_simulate?: string | null;
             /** Simulate */
             simulate?: string | null;
+        };
+        /** ConnectedAppOut */
+        ConnectedAppOut: {
+            /**
+             * Connected At
+             * Format: date-time
+             */
+            connected_at: string;
+            /** Id */
+            id: number;
+            /** Last Used At */
+            last_used_at?: string | null;
+            /** Name */
+            name: string;
         };
         /** ContestBalanceOut */
         ContestBalanceOut: {
@@ -9240,6 +9354,55 @@ export interface operations {
             };
         };
     };
+    classroom_connected_app_api_list_connected_apps: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectedAppOut"][];
+                };
+            };
+        };
+    };
+    classroom_connected_app_api_disconnect_connected_app: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connected_app_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     classroom_api_stream_events: {
         parameters: {
             query?: never;
@@ -9333,6 +9496,68 @@ export interface operations {
             };
             /** @description Unprocessable Content */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_connected_app_api_preview_authorization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthorizationPreviewOut"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_connected_app_api_decide_authorization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AuthorizationDecisionIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthorizationRedirectOut"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };

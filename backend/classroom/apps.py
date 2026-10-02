@@ -20,6 +20,17 @@ class ClassroomConfig(AppConfig):
         from .scoring import CLASSROOM_SUBMISSION_SCORING_SCAN
 
         register_scan(CLASSROOM_SUBMISSION_SCORING_SCAN)
+        # 연결된 앱(ADR-0052, #512) — 90일 동안 쓰지 않은 허락을 끊고, 아무도 허락하지
+        # 않은 등록을 걷는다. 탈퇴·휴면이면 그 자리에서 끊는다(`accounts.signals`).
+        from accounts.signals import user_became_dormant, user_withdrawn
+
+        from .connected_app_signals import revoke_on_dormancy, revoke_on_withdrawal
+        from .oauth import CONNECTED_APP_EXPIRY_SCAN, UNUSED_CLIENT_SCAN
+
+        register_scan(CONNECTED_APP_EXPIRY_SCAN)
+        register_scan(UNUSED_CLIENT_SCAN)
+        user_withdrawn.connect(revoke_on_withdrawal, dispatch_uid="classroom-connected-app-withdrawal")
+        user_became_dormant.connect(revoke_on_dormancy, dispatch_uid="classroom-connected-app-dormancy")
         # 어댑터 모드 부팅 가드(#340, ADR-0043) — `core.apps.CoreConfig.ready()`와
         # 같은 이유로 여기서 등록한다(django.setup() 이후에만 평가돼야 한다).
         register(checks.check_classroom_scoring_adapter_mode, BOOT_CHECK_TAG)

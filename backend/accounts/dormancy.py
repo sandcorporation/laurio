@@ -34,6 +34,7 @@ from django.db.models.functions import Greatest
 from core.scans import ScanSpec
 
 from .models import PhoneContact
+from .signals import user_became_dormant
 from .withdrawal import _transaction_basis, blocking_reasons
 
 # 개인정보 유효기간제(휴면 1년 의무)는 2023년 9월 폐지되어 기간은 자율이다(ADR-0025).
@@ -104,6 +105,8 @@ def _purge_dormant_identity(verification, as_of, ctx):
         basis = _transaction_basis(user)
         purge_identity(verification, as_of=as_of, cause="dormancy", transaction_basis=basis)
         PhoneContact.objects.filter(user=user).delete()
+        # 휴면이 된 강사의 「연결된 앱」 등 — 받는 쪽이 끊는다(#512, ADR-0052).
+        user_became_dormant.send(sender=_purge_dormant_identity, user=user)
 
     return {"user_id": user.id, "verification_id": verification.id}
 

@@ -40,6 +40,7 @@ from django.db import models, transaction
 from core.clock import Clock
 
 from .models import DeveloperProfile, PhoneContact, SponsorProfile, Withdrawal
+from .signals import user_withdrawn
 
 
 
@@ -273,5 +274,8 @@ def execute_withdrawal(user) -> Withdrawal:
     user.email = ""
     user.is_active = False
     user.save(update_fields=["email", "is_active"])
+
+    # 이 계정에 묶인 기능 앱의 것(강의실 「연결된 앱」 등)을 받는 쪽이 정리한다(#512).
+    user_withdrawn.send(sender=execute_withdrawal, user=user)
 
     return Withdrawal.objects.create(user=user, withdrawn_at=now)
