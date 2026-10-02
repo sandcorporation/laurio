@@ -1700,8 +1700,11 @@ push 하면 옛 빌드를 끊는다.
   Jenkins 에 만든다. Jenkins 설정을 API 로 고칠 때는 `Content-Type: application/xml;
   charset=utf-8` 을 붙인다 — 없으면 한글이 Latin-1 로 읽혀 500 이 난다.
 - **GitHub Actions 에는 이미지 빌드와 부팅 가드만 남았다**(`images.yaml`, 호스티드 러너 — 위
-  「배포」 절). 부팅 가드 셋은 프로덕션 이미지를 구워 배포 설정 없이는 죽고 완전한 설정으로는
-  뜨는지 본다 — 컨테이너 포트를 러너에 열지 않고 띄운 컨테이너의 네트워크에 curl 컨테이너를
+  「배포」 절). 부팅 가드 셋은 **images-staging 이 올린 바로 그 이미지를 ghcr 에서 받아**
+  배포 설정 없이는 죽고 완전한 설정으로는 뜨는지 본다(2026-10-02 — 예전에는 같은 Dockerfile 을
+  CI 전용 값으로 따로 구워, 검사한 것과 배포되는 것이 달랐다). 방침의 문의 주소는 저장소 변수
+  `STAGING_SUPPORT_EMAIL` 이 실렸는지로, `.dockerignore` 는 가짜 시크릿을 심은 **빌드 컨텍스트**
+  (`COPY . /ctx` 만 하는 이미지)로 본다. 컨테이너 포트를 러너에 열지 않고 띄운 컨테이너의 네트워크에 curl 컨테이너를
   붙여(`--network container:<이름>`) 친다(러너가 컨테이너일 때도 같은 모양이다).
 
 **CI 는 `docker/compose.ci.yaml` 을 dev compose 위에 겹쳐 쓴다 — 지우면 CI 가 깨진다.**
