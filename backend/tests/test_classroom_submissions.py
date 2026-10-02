@@ -211,6 +211,36 @@ def test_repository_value_must_be_a_github_url(client, db):
     assert response.status_code == 422
 
 
+def test_a_repository_url_is_stored_without_its_trailing_git_or_slash(client, db):
+    """같은 저장소를 가리키는 모양을 한 가지로 남긴다 — 제출 화면이 먼저 정리하지만, 화면을
+    거치지 않은 요청도 같은 값이 된다."""
+
+    instructor = _login(client, uid="instructor-1")
+    class_id = _create_class(client, instructor["access"])
+    problem_id = _create_open_problem(client, instructor["access"], class_id, "repository")
+    participant = _login(client, uid="participant-1")
+    _join(client, participant["access"], _join_code(client, instructor["access"], class_id))
+
+    response = _submit(
+        client, participant["access"], class_id, problem_id, "https://github.com/octocat/hello.git/"
+    )
+
+    assert response.status_code == 201, response.content
+    assert response.json()["value"] == "https://github.com/octocat/hello"
+
+
+def test_an_ssh_repository_address_is_refused(client, db):
+    instructor = _login(client, uid="instructor-1")
+    class_id = _create_class(client, instructor["access"])
+    problem_id = _create_open_problem(client, instructor["access"], class_id, "repository")
+    participant = _login(client, uid="participant-1")
+    _join(client, participant["access"], _join_code(client, instructor["access"], class_id))
+
+    response = _submit(client, participant["access"], class_id, problem_id, "git@github.com:octocat/hello.git")
+
+    assert response.status_code == 422
+
+
 def test_a_format_the_problem_does_not_allow_is_rejected_even_if_it_is_a_valid_value(client, db):
     """#373 AC — 화면을 우회해도 서버가 거절한다. 소스만 여는 문제에 저장소를
     골라 내면, 그 값 자체는 멀쩡한 GitHub URL이라도 422다."""

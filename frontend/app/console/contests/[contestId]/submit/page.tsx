@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
+import { checkGithubRepositoryUrl } from "@codemit/bff-client/repository-url";
 import type { components } from "@codemit/bff-client/schema";
 
 import { ErrorNote, PageHeader, PageShell, SectionHeading, buttonClass } from "@/app/components/ui";
@@ -84,13 +85,19 @@ function unknownKindAssetsOf(assets: SubmissionOut["assets"]): SubmissionOut["as
 // 불러써야 "실제로 보낼 자산"과 "화면이 채워졌다고 말하는 것"이 갈리지
 // 않는다 — 갈리면 참가자가 테스트 계정만 채우고 데모 URL을 비웠을 때
 // 화면은 "채워졌다"고 말하지만 저장은 그 행을 통째로 버리는 사고가 난다.
+function repositoryValue(raw: string): string {
+  const check = checkGithubRepositoryUrl(raw);
+  return check !== null && check.ok ? check.url : raw.trim();
+}
+
 function rowsToAssetsIn(rows: EditableAsset[], kind: string): SubmissionIn["assets"] {
   return rows
     .filter((row) => row.value.trim() !== "")
     .map((row, index) => ({
       ...(row.id != null ? { id: row.id } : {}),
       kind,
-      value: row.value.trim(),
+      // 저장소는 끝의 .git·슬래시 같은 것을 정리한 주소로 보낸다(강의실과 같은 판정).
+      value: kind === "repository" ? repositoryValue(row.value) : row.value.trim(),
       label: row.label.trim(),
       test_account: kind === "demo_url" ? row.testAccount.trim() : "",
       order: index,
@@ -490,6 +497,12 @@ export default function SubmitPage() {
         status: "error",
         message: "소스코드 또는 GitHub 저장소 중 최소 하나가 필요합니다.",
       });
+      return;
+    }
+    // 저장소 주소가 SSH·파일 주소 같은 모양이면 서버에 보내기 전에 막는다 — 그 칸 아래에
+    // 이미 이유와 고칠 주소가 떠 있다.
+    if (repositoryAssets.some((row) => checkGithubRepositoryUrl(row.value)?.ok === false)) {
+      setSaveState({ status: "error", message: "저장소 주소를 확인해 주세요 — 칸 아래에 이유가 있습니다." });
       return;
     }
     // 무료 공모전(#416) — 동의 없이는 서버가 어차피 422로 거절하지만, 폼

@@ -2,14 +2,15 @@
   "name": "@codemit/bff-client",
   "version": "0.0.0",
   "private": true,
-  "description": "브라우저 쪽 BFF 클라이언트 (#146, #122) — 인증 구역 호출의 interface 를 한 곳에: createBffClient(revive·401→onUnauthorized) · ApiResult · normalizeDetail · useBackendQuery · usePagedList · 백엔드 OpenAPI 에서 생성한 타입(schema.gen.ts). bff-shared(서버 쪽 라우트 핸들러용)와 섞지 않는다.",
+  "description": "브라우저 쪽 BFF 클라이언트 (#146, #122) — 인증 구역 호출의 interface 를 한 곳에: createBffClient(revive·401→onUnauthorized) · ApiResult · normalizeDetail · useBackendQuery · usePagedList · 백엔드 OpenAPI 에서 생성한 타입(schema.gen.ts) · 제출 전 GitHub 저장소 주소 판정(repository-url). bff-shared(서버 쪽 라우트 핸들러용)와 섞지 않는다.",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
     "./schema": "./src/schema.gen.ts",
-    "./login-redirect": "./src/login-redirect.ts"
+    "./login-redirect": "./src/login-redirect.ts",
+    "./repository-url": "./src/repository-url.ts"
   },
   "scripts": {
     "generate:api": "node scripts/generate-api-types.mjs"

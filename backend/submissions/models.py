@@ -79,6 +79,18 @@ GITHUB_REPO_URL_PATTERN = re.compile(
 )
 
 
+def normalize_github_repo_url(url: str) -> str:
+    """끝의 `/`·`.git` 을 뗀다 — 같은 저장소를 가리키는 모양을 한 가지로 저장한다. 제출 화면이
+    보내기 전에 같은 정리를 하지만(`@codemit/bff-client/repository-url`), 화면을 거치지 않은
+    요청도 같은 값으로 남게 서버도 한다. GitHub 은 `.git` 으로 끝나는 저장소 이름을 허용하지
+    않아 떼어도 다른 저장소가 되지 않는다(#537). 형식 검사는 `GITHUB_REPO_URL_PATTERN` 이 한다."""
+
+    value = url.strip().rstrip("/")
+    if value.lower().endswith(".git") and not value.endswith("/.git"):
+        value = value[: -len(".git")]
+    return value.rstrip("/")
+
+
 #: `test_account`를 붙일 수 있는 종류. `SubmissionAsset.Meta.constraints`가 읽어야
 #: 하는데 `Meta`는 클래스 본문 안에서 평가되어 `SubmissionAsset` 이름이 아직 없으므로
 #: 모듈 수준에 둔다 — 같은 사실을 제약과 클래스 속성이 따로 적는 것을 막는다.

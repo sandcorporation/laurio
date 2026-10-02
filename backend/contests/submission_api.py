@@ -71,6 +71,7 @@ from submissions.models import (
     RequirementResponse,
     Submission,
     SubmissionAsset,
+    normalize_github_repo_url,
 )
 from submissions.schemas import (
     AssetSummaryOut,
@@ -394,6 +395,7 @@ def _clean_assets_in(
                     "속하지 않습니다.",
                 )
         elif item.kind == SubmissionAsset.Kind.REPOSITORY:
+            value = normalize_github_repo_url(value)
             if not GITHUB_REPO_URL_PATTERN.match(value):
                 raise HttpError(
                     422,
