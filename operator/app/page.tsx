@@ -16,6 +16,7 @@ import { useRouter } from "next/navigation";
 import { Badge } from "@/app/components/badge";
 import { PageHeader } from "@/app/components/page-header";
 import { Panel } from "@/app/components/panel";
+import { TableScroll } from "@/app/components/table-scroll";
 import { useSession } from "@/lib/auth/use-session";
 import { appealsDetail, payoutsDetail } from "@/lib/home/queue-row-detail";
 import { useQueueCounts } from "@/lib/home/use-queue-counts";
@@ -122,7 +123,7 @@ export default function OperatorHome() {
 
   if (session.status === "loading") {
     return (
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         <p data-testid="session-loading">불러오는 중...</p>
       </div>
     );
@@ -198,7 +199,7 @@ export default function OperatorHome() {
           </button>
         }
       />
-      <div className="flex flex-1 flex-col gap-[18px] p-8">
+      <div className="flex flex-1 flex-col gap-[18px] p-4 sm:p-8">
         <div className="flex items-center gap-2 text-[12.5px] text-ink/62">
           <span data-testid="operator-home-grade">
             {session.user.is_superuser ? "상위 등급" : "일반 등급"}
@@ -217,10 +218,12 @@ export default function OperatorHome() {
         )}
 
         <div data-testid="operator-home-queues" className="border border-rule bg-surface">
-          <TodoTableHead />
-          {rows.map((row, i) => (
-            <TodoRowView key={row.testId} row={row} index={i} />
-          ))}
+          <TableScroll minWidth={560}>
+            <TodoTableHead />
+            {rows.map((row, i) => (
+              <TodoRowView key={row.testId} row={row} index={i} />
+            ))}
+          </TableScroll>
         </div>
 
         <Panel
@@ -253,31 +256,33 @@ export default function OperatorHome() {
           )}
           {recentChanges.status === "loaded" && recentChanges.changes.length > 0 && (
             <div data-testid="recent-changes-table">
-              <div className="flex gap-3.5 border-b border-rule px-4 py-2.5 text-[11px] tracking-[0.06em] text-ink/30">
-                <div className="w-[110px] shrink-0">무엇</div>
-                <div className="min-w-0 flex-1">무슨 값이 어떻게</div>
-                <div className="w-[110px] shrink-0">누가</div>
-                {/* `toLocaleString("ko-KR")` 이 「2026. 9. 15. 오후 3:19:00」 까지 낸다 —
-                    130px 에서는 넓은 화면에서도 끝이 잘렸다(2026-09-16 스크린샷). 형식을
-                    줄이지 않고 칸을 넓힌다: 다른 이력 표들과 같은 형식이어야 한다. */}
-                <div className="w-[206px] shrink-0">언제</div>
-              </div>
-              {recentChanges.changes.map((change, i) => (
-                <div
-                  key={change.key}
-                  data-testid={`recent-changes-row-${change.key}`}
-                  className={`flex gap-3.5 border-b border-rule px-4 py-2.5 text-[13px] last:border-b-0 ${
-                    i % 2 === 1 ? "bg-ink/[2%]" : ""
-                  }`}
-                >
-                  <div className="w-[110px] shrink-0 truncate">{change.what}</div>
-                  <div className="min-w-0 flex-1 truncate">{change.summary}</div>
-                  <div className="w-[110px] shrink-0 truncate font-mono">{change.operatorUsername}</div>
-                  <div className="w-[206px] shrink-0 truncate font-mono text-ink/62">
-                    {new Date(change.changedAt).toLocaleString("ko-KR")}
-                  </div>
+              <TableScroll minWidth={680}>
+                <div className="flex gap-3.5 border-b border-rule px-4 py-2.5 text-[11px] tracking-[0.06em] text-ink/30">
+                  <div className="w-[110px] shrink-0">무엇</div>
+                  <div className="min-w-0 flex-1">무슨 값이 어떻게</div>
+                  <div className="w-[110px] shrink-0">누가</div>
+                  {/* `toLocaleString("ko-KR")` 이 「2026. 9. 15. 오후 3:19:00」 까지 낸다 —
+                      130px 에서는 넓은 화면에서도 끝이 잘렸다(2026-09-16 스크린샷). 형식을
+                      줄이지 않고 칸을 넓힌다: 다른 이력 표들과 같은 형식이어야 한다. */}
+                  <div className="w-[206px] shrink-0">언제</div>
                 </div>
-              ))}
+                {recentChanges.changes.map((change, i) => (
+                  <div
+                    key={change.key}
+                    data-testid={`recent-changes-row-${change.key}`}
+                    className={`flex gap-3.5 border-b border-rule px-4 py-2.5 text-[13px] last:border-b-0 ${
+                      i % 2 === 1 ? "bg-ink/[2%]" : ""
+                    }`}
+                  >
+                    <div className="w-[110px] shrink-0 truncate">{change.what}</div>
+                    <div className="min-w-0 flex-1 truncate">{change.summary}</div>
+                    <div className="w-[110px] shrink-0 truncate font-mono">{change.operatorUsername}</div>
+                    <div className="w-[206px] shrink-0 truncate font-mono text-ink/62">
+                      {new Date(change.changedAt).toLocaleString("ko-KR")}
+                    </div>
+                  </div>
+                ))}
+              </TableScroll>
             </div>
           )}
         </Panel>

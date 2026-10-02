@@ -188,7 +188,7 @@ function UsageInner() {
 
   if (session.status === "loading") {
     return (
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         <p data-testid="session-loading">불러오는 중...</p>
       </div>
     );

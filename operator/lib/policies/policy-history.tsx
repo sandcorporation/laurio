@@ -7,6 +7,8 @@
 import { POLICY_FIELD_LABELS } from "./types";
 import type { PolicyChangeEntry, PolicyField } from "./types";
 
+import { TableScroll } from "@/app/components/table-scroll";
+
 function formatDiff(change: PolicyChangeEntry): string {
   const fields = Object.keys(change.after) as PolicyField[];
   return fields
@@ -36,43 +38,45 @@ export function PolicyHistoryTable({ changes }: { changes: PolicyChangeEntry[] }
 
   return (
     <div data-testid="policy-history-table" className="border border-rule bg-surface">
-      <div className="flex gap-3.5 border-b border-rule px-4 py-2.5 text-[11px] tracking-[0.06em] text-ink/30">
-        <div className={COL.operator}>누가</div>
-        <div className={COL.changedAt}>언제</div>
-        <div className="min-w-0 flex-1">무엇을 무엇으로</div>
-        <div className={COL.reason}>왜</div>
-      </div>
-      {changes.map((change, i) => (
-        <div
-          key={change.id}
-          data-testid={`policy-history-row-${change.id}`}
-          className={`flex gap-3.5 border-b border-rule px-4 py-2.5 text-[13px] last:border-b-0 ${
-            i % 2 === 1 ? "bg-ink/[2%]" : ""
-          }`}
-        >
-          <div
-            className={`${COL.operator} shrink-0 truncate font-mono`}
-            data-testid={`policy-history-row-${change.id}-operator`}
-          >
-            {change.operator_username}
-          </div>
-          <div
-            className={`${COL.changedAt} shrink-0 truncate font-mono text-ink/62`}
-            data-testid={`policy-history-row-${change.id}-changed-at`}
-          >
-            {new Date(change.changed_at).toLocaleString("ko-KR")}
-          </div>
-          <div className="min-w-0 flex-1 truncate" data-testid={`policy-history-row-${change.id}-diff`}>
-            {formatDiff(change)}
-          </div>
-          <div
-            className={`${COL.reason} shrink-0 truncate text-ink/62`}
-            data-testid={`policy-history-row-${change.id}-reason`}
-          >
-            {change.reason}
-          </div>
+      <TableScroll minWidth={760}>
+        <div className="flex gap-3.5 border-b border-rule px-4 py-2.5 text-[11px] tracking-[0.06em] text-ink/30">
+          <div className={COL.operator}>누가</div>
+          <div className={COL.changedAt}>언제</div>
+          <div className="min-w-0 flex-1">무엇을 무엇으로</div>
+          <div className={COL.reason}>왜</div>
         </div>
-      ))}
+        {changes.map((change, i) => (
+          <div
+            key={change.id}
+            data-testid={`policy-history-row-${change.id}`}
+            className={`flex gap-3.5 border-b border-rule px-4 py-2.5 text-[13px] last:border-b-0 ${
+              i % 2 === 1 ? "bg-ink/[2%]" : ""
+            }`}
+          >
+            <div
+              className={`${COL.operator} shrink-0 truncate font-mono`}
+              data-testid={`policy-history-row-${change.id}-operator`}
+            >
+              {change.operator_username}
+            </div>
+            <div
+              className={`${COL.changedAt} shrink-0 truncate font-mono text-ink/62`}
+              data-testid={`policy-history-row-${change.id}-changed-at`}
+            >
+              {new Date(change.changed_at).toLocaleString("ko-KR")}
+            </div>
+            <div className="min-w-0 flex-1 truncate" data-testid={`policy-history-row-${change.id}-diff`}>
+              {formatDiff(change)}
+            </div>
+            <div
+              className={`${COL.reason} shrink-0 truncate text-ink/62`}
+              data-testid={`policy-history-row-${change.id}-reason`}
+            >
+              {change.reason}
+            </div>
+          </div>
+        ))}
+      </TableScroll>
     </div>
   );
 }

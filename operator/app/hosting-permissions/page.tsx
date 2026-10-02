@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation";
 
 import { PageHeader } from "@/app/components/page-header";
 import { Panel } from "@/app/components/panel";
+import { TableScroll } from "@/app/components/table-scroll";
 import { useSession } from "@/lib/auth/use-session";
 import { useGrantedHostingPermissionAccounts } from "@/lib/hosting-permissions/use-granted-accounts";
 import { useHostingPermissionHistory } from "@/lib/hosting-permissions/use-history";
@@ -50,7 +51,7 @@ export default function HostingPermissionsPage() {
 
   if (session.status === "loading") {
     return (
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         <p data-testid="hosting-permissions-loading">불러오는 중...</p>
       </div>
     );
@@ -65,7 +66,7 @@ export default function HostingPermissionsPage() {
         title="무료 공모전 개최 권한"
         description="유료 공모전은 결제가 개최를 거르지만, 무료 공모전에는 그 문이 없다 — 사람을 지정해 대신 선다."
       />
-      <div className="flex flex-1 flex-col gap-[18px] p-8">
+      <div className="flex flex-1 flex-col gap-[18px] p-4 sm:p-8">
         {!canEdit && (
           <p role="alert" data-testid="hosting-permissions-edit-forbidden" className="text-[13px] text-attention">
             권한을 켜고 끄려면 상위 등급 Operator 권한이 필요합니다. 지금은 조회만
@@ -98,16 +99,18 @@ export default function HostingPermissionsPage() {
           )}
           {state.status === "loaded" && state.accounts.length > 0 && (
             <div data-testid="hosting-permission-granted-table">
-              <HostingPermissionTableHead />
-              {state.accounts.map((account) => (
-                <HostingPermissionAccountRow
-                  key={account.user_id}
-                  account={account}
-                  canEdit={canEdit}
-                  onChanged={handleChanged}
-                  onSessionExpired={handleSessionExpired}
-                />
-              ))}
+              <TableScroll minWidth={680}>
+                <HostingPermissionTableHead />
+                {state.accounts.map((account) => (
+                  <HostingPermissionAccountRow
+                    key={account.user_id}
+                    account={account}
+                    canEdit={canEdit}
+                    onChanged={handleChanged}
+                    onSessionExpired={handleSessionExpired}
+                  />
+                ))}
+              </TableScroll>
             </div>
           )}
         </Panel>

@@ -31,7 +31,7 @@ export default function ErrorScreen({ error, reset }: { error: Error & { digest?
         titleTestId="error-heading"
         description="잠시 후 다시 시도해주세요. 계속 같은 화면이 나오면 기록된 오류를 확인하세요."
       />
-      <div className="flex flex-wrap gap-2 p-8">
+      <div className="flex flex-wrap gap-2 p-4 sm:p-8">
         <button
           type="button"
           onClick={reset}

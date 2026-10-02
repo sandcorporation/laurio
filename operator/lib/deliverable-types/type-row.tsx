@@ -149,7 +149,7 @@ export function TypeRow({
       </div>
 
       {mode === "editing" && (
-        <div data-testid={`${rowTestId}-edit-form`} className="flex items-center gap-2">
+        <div data-testid={`${rowTestId}-edit-form`} className="flex flex-wrap items-center gap-2">
           <label className="flex items-center gap-1.5 text-[12.5px] text-ink/62">
             이유
             <input
@@ -180,7 +180,7 @@ export function TypeRow({
       )}
 
       {mode === "deactivating" && (
-        <div data-testid={`${rowTestId}-deactivate-form`} className="flex items-center gap-2">
+        <div data-testid={`${rowTestId}-deactivate-form`} className="flex flex-wrap items-center gap-2">
           <label className="flex items-center gap-1.5 text-[12.5px] text-ink/62">
             이유
             <input

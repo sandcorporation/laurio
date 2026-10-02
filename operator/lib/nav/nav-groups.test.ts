@@ -6,7 +6,7 @@ import * as path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { NAV_GROUPS } from "./nav-groups";
+import { NAV_GROUPS, isActiveHref, totalQueueCount } from "./nav-groups";
 
 const APP_DIR = path.resolve(__dirname, "..", "..", "app");
 
@@ -48,5 +48,27 @@ describe("내비 데이터 (#422)", () => {
         }
       }
     }
+  });
+});
+
+describe("지금 보는 화면 판정", () => {
+  it("항목 주소와 그 하위 경로를 지금 화면으로 본다", () => {
+    expect(isActiveHref("/appeals", "/appeals")).toBe(true);
+    expect(isActiveHref("/appeals/12", "/appeals")).toBe(true);
+  });
+
+  it("앞부분만 같은 다른 주소는 지금 화면이 아니다", () => {
+    expect(isActiveHref("/appeals-archive", "/appeals")).toBe(false);
+    expect(isActiveHref("/", "/appeals")).toBe(false);
+  });
+});
+
+describe("접힌 내비의 건수 합 (#523)", () => {
+  it("「할 일」 세 항목의 건수를 더한다", () => {
+    expect(totalQueueCount({ pendingAppeals: 2, blockedPayouts: 3, reportedTemplates: 1 })).toBe(6);
+  });
+
+  it("밀린 일이 없으면 0 이다", () => {
+    expect(totalQueueCount({ pendingAppeals: 0, blockedPayouts: 0, reportedTemplates: 0 })).toBe(0);
   });
 });

@@ -130,7 +130,7 @@ export function PolicyEditor({
       <div className="flex flex-col gap-2">
         {POLICY_FIELDS.map((field) => (
           <div key={field} className="flex items-center justify-between gap-4">
-            <label htmlFor={`policy-input-${field}`} className="text-[13px] text-ink/62">
+            <label htmlFor={`policy-input-${field}`} className="min-w-0 text-[13px] text-ink/62">
               {POLICY_FIELD_LABELS[field]}
             </label>
             <input
@@ -138,7 +138,7 @@ export function PolicyEditor({
               data-testid={`policy-input-${field}`}
               value={inputs[field]}
               onChange={(event) => handleChange(field, event.target.value)}
-              className="w-[180px] border border-rule bg-paper px-2.5 py-1.5 text-right font-mono text-[13px] text-ink"
+              className="w-[140px] shrink-0 border border-rule bg-paper px-2.5 py-1.5 text-right font-mono text-[13px] text-ink sm:w-[180px]"
             />
           </div>
         ))}

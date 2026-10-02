@@ -60,7 +60,7 @@ export default function AppealDetailPage() {
 
   if (session.status === "loading") {
     return (
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         <p data-testid="session-loading">불러오는 중...</p>
       </div>
     );
@@ -69,7 +69,7 @@ export default function AppealDetailPage() {
 
   if (state.status === "loading") {
     return (
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         <p data-testid="appeal-detail-loading">불러오는 중...</p>
       </div>
     );
@@ -84,7 +84,7 @@ export default function AppealDetailPage() {
 
   if (state.status === "not-found") {
     return (
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         <p data-testid="appeal-detail-not-found">이의를 찾을 수 없습니다.</p>
       </div>
     );
@@ -92,7 +92,7 @@ export default function AppealDetailPage() {
 
   if (state.status === "error") {
     return (
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         <p role="alert" data-testid="appeal-detail-error">
           이의를 불러오지 못했습니다.
         </p>
@@ -139,7 +139,7 @@ export default function AppealDetailPage() {
             : "확정하면 되돌릴 수 없다 — 원장에 남는다."
         }
       />
-      <div className="flex flex-1 items-start gap-[18px] p-8">
+      <div className="flex flex-1 flex-col gap-[18px] p-4 sm:p-8 lg:flex-row lg:items-start">
         <div className="flex min-w-0 flex-1 flex-col gap-[18px]">
           <section
             data-testid="appeal-detail-reason-section"
@@ -248,7 +248,7 @@ export default function AppealDetailPage() {
           </section>
         </div>
 
-        <div className="flex w-[420px] shrink-0 flex-col gap-[18px]">
+        <div className="flex flex-col gap-[18px] lg:w-[420px] lg:shrink-0">
           <section className="border border-rule bg-surface">
             <div className="border-b border-rule px-4 py-3 text-[14px] font-semibold">심판</div>
 

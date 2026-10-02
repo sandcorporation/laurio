@@ -16,6 +16,7 @@ import { Suspense } from "react";
 
 import { Badge } from "@/app/components/badge";
 import { PageHeader } from "@/app/components/page-header";
+import { TableScroll } from "@/app/components/table-scroll";
 import { useSession } from "@/lib/auth/use-session";
 import { useAppealList } from "@/lib/appeals/use-appeal-list";
 import type { AppealStatus } from "@/lib/appeals/types";
@@ -41,7 +42,7 @@ function FilterTabs({
   onSelect: (value: AppealStatus | "all") => void;
 }) {
   return (
-    <nav data-testid="appeals-status-filter" className="flex gap-2">
+    <nav data-testid="appeals-status-filter" className="flex flex-wrap gap-2">
       {STATUS_OPTIONS.map((option) => {
         const active = filter === option.value;
         return (
@@ -94,7 +95,7 @@ function AppealsListInner() {
 
   if (session.status === "loading") {
     return (
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         <p data-testid="session-loading">불러오는 중...</p>
       </div>
     );
@@ -109,7 +110,7 @@ function AppealsListInner() {
         titleTestId="appeals-heading"
         description="밀린 이의를 훑고 한 건을 눌러 심판한다."
       />
-      <div className="flex flex-1 flex-col gap-4 p-8">
+      <div className="flex flex-1 flex-col gap-4 p-4 sm:p-8">
         <FilterTabs filter={filter} onSelect={handleFilterChange} />
 
         {state.status === "loading" && <p data-testid="appeals-list-loading">불러오는 중...</p>}
@@ -126,48 +127,50 @@ function AppealsListInner() {
 
         {state.status === "loaded" && state.appeals.length > 0 && (
           <div data-testid="appeals-list" className="border border-rule bg-surface">
-            <TableHead />
-            {state.appeals.map((appeal, i) => (
-              <Link
-                key={appeal.id}
-                href={`/appeals/${appeal.id}`}
-                data-testid={`appeal-row-${appeal.id}`}
-                className={`flex items-center gap-3.5 border-b border-rule px-4 py-2.5 text-[13px] ${
-                  i % 2 === 1 ? "bg-ink/[2%]" : ""
-                }`}
-              >
-                <div
-                  className={`${COL.submission} shrink-0 truncate font-mono text-[13px]`}
-                  data-testid={`appeal-row-${appeal.id}-submission`}
+            <TableScroll minWidth={600}>
+              <TableHead />
+              {state.appeals.map((appeal, i) => (
+                <Link
+                  key={appeal.id}
+                  href={`/appeals/${appeal.id}`}
+                  data-testid={`appeal-row-${appeal.id}`}
+                  className={`flex items-center gap-3.5 border-b border-rule px-4 py-2.5 text-[13px] ${
+                    i % 2 === 1 ? "bg-ink/[2%]" : ""
+                  }`}
                 >
-                  Submission #{appeal.submission_id}
-                </div>
-                <div className={`${COL.status} shrink-0`}>
-                  <Badge tone="neutral" testId={`appeal-row-${appeal.id}-status`}>
-                    {appealStatusLabel(appeal.status)}
-                  </Badge>
-                </div>
-                <div
-                  className={`${COL.createdAt} shrink-0 truncate text-[12.5px] text-ink/62`}
-                  data-testid={`appeal-row-${appeal.id}-created-at`}
-                >
-                  {new Date(appeal.created_at).toLocaleString("ko-KR")}
-                </div>
-                <div className="min-w-0 flex-1">
-                  {/* **이 심판이 돈을 막고 있다**(#74). 배분은 이의가 심판될
-                      때까지 기다리므로, 밀린 심판 하나가 그 Contest 참가자
-                      전원의 배분을 붙잡는다. 큐를 하나로 유지하되(두 번째
-                      큐를 만들지 않는다) 그 행에 표시를 단다. 배분·심판
-                      여부 어느 쪽도 "충족/미충족" 판정이 아니므로 중립
-                      배지다(#423 scope fence). */}
-                  {appeal.is_holding_distribution ? (
-                    <Badge tone="neutral" testId={`appeal-row-${appeal.id}-holding`}>
-                      배분 보류 중
+                  <div
+                    className={`${COL.submission} shrink-0 truncate font-mono text-[13px]`}
+                    data-testid={`appeal-row-${appeal.id}-submission`}
+                  >
+                    Submission #{appeal.submission_id}
+                  </div>
+                  <div className={`${COL.status} shrink-0`}>
+                    <Badge tone="neutral" testId={`appeal-row-${appeal.id}-status`}>
+                      {appealStatusLabel(appeal.status)}
                     </Badge>
-                  ) : null}
-                </div>
-              </Link>
-            ))}
+                  </div>
+                  <div
+                    className={`${COL.createdAt} shrink-0 truncate text-[12.5px] text-ink/62`}
+                    data-testid={`appeal-row-${appeal.id}-created-at`}
+                  >
+                    {new Date(appeal.created_at).toLocaleString("ko-KR")}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    {/* **이 심판이 돈을 막고 있다**(#74). 배분은 이의가 심판될
+                        때까지 기다리므로, 밀린 심판 하나가 그 Contest 참가자
+                        전원의 배분을 붙잡는다. 큐를 하나로 유지하되(두 번째
+                        큐를 만들지 않는다) 그 행에 표시를 단다. 배분·심판
+                        여부 어느 쪽도 "충족/미충족" 판정이 아니므로 중립
+                        배지다(#423 scope fence). */}
+                    {appeal.is_holding_distribution ? (
+                      <Badge tone="neutral" testId={`appeal-row-${appeal.id}-holding`}>
+                        배분 보류 중
+                      </Badge>
+                    ) : null}
+                  </div>
+                </Link>
+              ))}
+            </TableScroll>
           </div>
         )}
       </div>

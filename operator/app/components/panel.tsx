@@ -17,7 +17,7 @@ export function Panel({
 }) {
   return (
     <div className="border border-rule bg-surface">
-      <div className="flex items-center justify-between gap-3 border-b border-rule px-[15px] py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rule px-[15px] py-3">
         <div className="text-[14px] font-semibold">
           {title}
           {meta && <span className="ml-[9px] text-[12.5px] font-normal text-ink/45">{meta}</span>}

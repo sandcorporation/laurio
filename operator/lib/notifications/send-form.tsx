@@ -31,7 +31,7 @@ const SECONDARY_BUTTON =
 function StepIndicator({ current }: { current: Step }) {
   const currentIndex = STEP_ORDER.indexOf(current);
   return (
-    <div data-testid="operator-notice-steps" className="flex items-end gap-[26px]">
+    <div data-testid="operator-notice-steps" className="flex flex-wrap items-end gap-x-[26px] gap-y-2">
       {STEP_ORDER.map((step, index) => {
         const isCurrent = step === current;
         const isPast = index < currentIndex;
@@ -197,7 +197,7 @@ export function SendOperatorNoticeForm({
               <ul data-testid="operator-notice-search-results" className="flex flex-col divide-y divide-rule border border-rule">
                 {results.map((recipient) => (
                   <li key={recipient.id} className="flex items-center justify-between gap-3 px-[12px] py-[10px] text-[13px]">
-                    <span>
+                    <span className="min-w-0 [overflow-wrap:anywhere]">
                       {recipient.display_name} <span className="text-ink/45">({recipient.email})</span>
                     </span>
                     <button
@@ -220,7 +220,7 @@ export function SendOperatorNoticeForm({
         <Panel title="운영팀 알림 보내기" meta="한 번에 한 사람">
           <form onSubmit={handleConfirm} data-testid="operator-notice-compose-form" className="flex flex-col gap-[14px] p-[15px]">
             <div className="flex items-center justify-between gap-3 border border-rule bg-paper px-3 py-[10px]">
-              <p data-testid="operator-notice-selected-recipient" className="text-[13px]">
+              <p data-testid="operator-notice-selected-recipient" className="min-w-0 text-[13px] [overflow-wrap:anywhere]">
                 {selected.display_name} <span className="text-ink/45">· {selected.email}</span>
               </p>
               <button

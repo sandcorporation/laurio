@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { Badge } from "@/app/components/badge";
+import { TableScroll } from "@/app/components/table-scroll";
 
 import { freeContestStatusLabel } from "./status-label";
 import { operatorNoticeComposeHref } from "./notify-link";
@@ -32,43 +33,45 @@ function TableHead() {
 export function FreeContestListTable({ contests }: { contests: FreeContest[] }) {
   return (
     <div data-testid="free-contest-list-table" className="border border-rule bg-surface">
-      <TableHead />
-      {contests.map((contest, i) => (
-        <div
-          key={contest.id}
-          data-testid={`free-contest-row-${contest.id}`}
-          className={`flex items-center gap-3.5 border-b border-rule px-4 py-2.5 text-[13px] last:border-b-0 ${
-            i % 2 === 1 ? "bg-ink/[2%]" : ""
-          }`}
-        >
-          <div className="min-w-0 flex-1 truncate">{contest.title}</div>
-          <div className={`${COL.status} shrink-0`}>
-            <Badge testId={`free-contest-status-${contest.id}`}>
-              {freeContestStatusLabel(contest.status)}
-            </Badge>
-          </div>
-          <div className={`${COL.deadline} shrink-0 truncate font-mono text-[12.5px] text-ink/62`}>
-            {new Date(contest.deadline_at).toLocaleString("ko-KR")}
-          </div>
+      <TableScroll minWidth={840}>
+        <TableHead />
+        {contests.map((contest, i) => (
           <div
-            className={`${COL.winner} shrink-0 truncate`}
-            data-testid={`free-contest-winner-${contest.id}`}
+            key={contest.id}
+            data-testid={`free-contest-row-${contest.id}`}
+            className={`flex items-center gap-3.5 border-b border-rule px-4 py-2.5 text-[13px] last:border-b-0 ${
+              i % 2 === 1 ? "bg-ink/[2%]" : ""
+            }`}
           >
-            {contest.winner ? contest.winner.nickname || contest.winner.email : "-"}
+            <div className="min-w-0 flex-1 truncate">{contest.title}</div>
+            <div className={`${COL.status} shrink-0`}>
+              <Badge testId={`free-contest-status-${contest.id}`}>
+                {freeContestStatusLabel(contest.status)}
+              </Badge>
+            </div>
+            <div className={`${COL.deadline} shrink-0 truncate font-mono text-[12.5px] text-ink/62`}>
+              {new Date(contest.deadline_at).toLocaleString("ko-KR")}
+            </div>
+            <div
+              className={`${COL.winner} shrink-0 truncate`}
+              data-testid={`free-contest-winner-${contest.id}`}
+            >
+              {contest.winner ? contest.winner.nickname || contest.winner.email : "-"}
+            </div>
+            <div className={`${COL.action} shrink-0`}>
+              {contest.winner && (
+                <Link
+                  href={operatorNoticeComposeHref(contest.winner)}
+                  data-testid={`free-contest-notify-${contest.id}`}
+                  className="inline-block border border-rule bg-surface px-2.5 py-1 text-[12px] text-ink"
+                >
+                  운영팀 알림 보내기
+                </Link>
+              )}
+            </div>
           </div>
-          <div className={`${COL.action} shrink-0`}>
-            {contest.winner && (
-              <Link
-                href={operatorNoticeComposeHref(contest.winner)}
-                data-testid={`free-contest-notify-${contest.id}`}
-                className="inline-block border border-rule bg-surface px-2.5 py-1 text-[12px] text-ink"
-              >
-                운영팀 알림 보내기
-              </Link>
-            )}
-          </div>
-        </div>
-      ))}
+        ))}
+      </TableScroll>
     </div>
   );
 }

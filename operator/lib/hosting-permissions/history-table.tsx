@@ -6,6 +6,8 @@
 import { actionLabel } from "./types";
 import type { HostingPermissionChangeEntry } from "./types";
 
+import { TableScroll } from "@/app/components/table-scroll";
+
 const COL = {
   action: "w-[80px]",
   operator: "w-[120px]",
@@ -39,26 +41,28 @@ export function HostingPermissionHistoryTable({
 
   return (
     <div data-testid="hosting-permission-history-table">
-      <TableHead />
-      {changes.map((change, i) => (
-        <div
-          key={change.id}
-          data-testid={`hosting-permission-history-row-${change.id}`}
-          className={`flex items-center gap-3.5 border-b border-rule px-4 py-2.5 text-[13px] ${
-            i % 2 === 1 ? "bg-ink/[2%]" : ""
-          }`}
-        >
-          <div className="min-w-0 flex-1 truncate">{change.user_email}</div>
-          <div className={`${COL.action} shrink-0`}>{actionLabel(change.action)}</div>
-          <div className={`${COL.operator} shrink-0 truncate font-mono`}>{change.operator_username}</div>
-          <div className={`${COL.changedAt} shrink-0 truncate font-mono text-[12.5px]`}>
-            {new Date(change.changed_at).toLocaleString("ko-KR")}
+      <TableScroll minWidth={720}>
+        <TableHead />
+        {changes.map((change, i) => (
+          <div
+            key={change.id}
+            data-testid={`hosting-permission-history-row-${change.id}`}
+            className={`flex items-center gap-3.5 border-b border-rule px-4 py-2.5 text-[13px] ${
+              i % 2 === 1 ? "bg-ink/[2%]" : ""
+            }`}
+          >
+            <div className="min-w-0 flex-1 truncate">{change.user_email}</div>
+            <div className={`${COL.action} shrink-0`}>{actionLabel(change.action)}</div>
+            <div className={`${COL.operator} shrink-0 truncate font-mono`}>{change.operator_username}</div>
+            <div className={`${COL.changedAt} shrink-0 truncate font-mono text-[12.5px]`}>
+              {new Date(change.changed_at).toLocaleString("ko-KR")}
+            </div>
+            <div className="min-w-0 flex-1 truncate text-ink/62" data-testid={`hosting-permission-history-row-${change.id}-reason`}>
+              {change.reason}
+            </div>
           </div>
-          <div className="min-w-0 flex-1 truncate text-ink/62" data-testid={`hosting-permission-history-row-${change.id}-reason`}>
-            {change.reason}
-          </div>
-        </div>
-      ))}
+        ))}
+      </TableScroll>
     </div>
   );
 }

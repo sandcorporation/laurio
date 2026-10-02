@@ -18,6 +18,7 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 
 import { Badge } from "@/app/components/badge";
 import { PageHeader } from "@/app/components/page-header";
+import { TableScroll } from "@/app/components/table-scroll";
 import { useSession } from "@/lib/auth/use-session";
 import { daysWaitingLabel, waitingBadgeLabel, whoseTurn } from "@/lib/payouts/payout-waiting";
 import { retryPayoutForOperator } from "@/lib/payouts/actions";
@@ -157,7 +158,7 @@ function FilterTabs({ filter, onSelect }: { filter: BlockedOnFilter; onSelect: (
   ];
 
   return (
-    <nav data-testid="payout-filters" className="flex gap-2">
+    <nav data-testid="payout-filters" className="flex flex-wrap gap-2">
       {tabs.map((tab) => {
         const active = filter === tab.value;
         return (
@@ -201,7 +202,7 @@ function PayoutQueueContent() {
 
   if (session.status === "loading") {
     return (
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         <p data-testid="session-loading">불러오는 중...</p>
       </div>
     );
@@ -220,7 +221,7 @@ function PayoutQueueContent() {
         title="지급 큐"
         description="대기는 실패가 아니다 — 누구 차례인지가 이 표의 핵심이다."
       />
-      <div className="flex flex-1 flex-col gap-4 p-8">
+      <div className="flex flex-1 flex-col gap-4 p-4 sm:p-8">
         <FilterTabs filter={filter} onSelect={selectFilter} />
 
         {queue.status === "loading" && <p data-testid="payout-queue-loading">불러오는 중...</p>}
@@ -244,15 +245,17 @@ function PayoutQueueContent() {
             </p>
 
             <div data-testid="payout-queue-list" className="border border-rule bg-surface">
-              <TableHead />
-              {queue.rows.map((payout, i) => (
-                <PayoutRow
-                  key={payout.idempotency_key}
-                  payout={payout}
-                  zebra={i % 2 === 1}
-                  onRetried={refetchAfterRetry}
-                />
-              ))}
+              <TableScroll minWidth={800}>
+                <TableHead />
+                {queue.rows.map((payout, i) => (
+                  <PayoutRow
+                    key={payout.idempotency_key}
+                    payout={payout}
+                    zebra={i % 2 === 1}
+                    onRetried={refetchAfterRetry}
+                  />
+                ))}
+              </TableScroll>
             </div>
 
             {/* 목록은 페이지네이션된다(#149). */}

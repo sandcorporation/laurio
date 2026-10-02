@@ -62,3 +62,24 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     ],
   },
 ];
+
+/** 지금 보는 화면이 이 항목 아래인가 — 항목 주소 그 자체이거나 그 하위 경로. */
+export function isActiveHref(pathname: string, href: string): boolean {
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+/**
+ * 「할 일」 건수의 합 — 좁은 화면에서 내비가 접혀 있을 때 머리의 메뉴 버튼 옆에
+ * 이 한 숫자만 보인다(#523). 항목별 건수는 메뉴를 열면 각 줄에 그대로 있다.
+ * 어느 항목을 더할지는 `countKey` 가 붙은 항목이 정한다 — 키를 손으로 나열하지 않아야
+ * 「할 일」에 항목이 늘 때 이 합이 조용히 빠뜨리지 않는다.
+ */
+export function totalQueueCount(counts: NavQueueCounts): number {
+  let total = 0;
+  for (const group of NAV_GROUPS) {
+    for (const item of group.items) {
+      if (item.countKey) total += counts[item.countKey];
+    }
+  }
+  return total;
+}
