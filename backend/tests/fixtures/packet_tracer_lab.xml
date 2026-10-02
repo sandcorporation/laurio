@@ -1,0 +1,134 @@
+<PACKETTRACER5>
+ <VERSION>8.2.2.0400</VERSION>
+ <NETWORK>
+  <DEVICES>
+   <DEVICE>
+    <ENGINE>
+     <TYPE customModel="" model="2911">Router</TYPE>
+     <NAME translate="true">R1</NAME>
+     <MODULE>
+      <SLOT>
+       <MODULE>
+        <PORT>
+         <TYPE>eCopperGigabitEthernet</TYPE>
+         <IP>192.168.10.1</IP>
+         <SUBNET>255.255.255.0</SUBNET>
+         <PORT_DHCP_ENABLE>false</PORT_DHCP_ENABLE>
+        </PORT>
+       </MODULE>
+      </SLOT>
+     </MODULE>
+     <SAVE_REF_ID>save-ref-id:1</SAVE_REF_ID>
+     <RUNNINGCONFIG>
+      <LINE>!</LINE>
+      <LINE>hostname R1</LINE>
+      <LINE>!</LINE>
+      <LINE>!</LINE>
+      <LINE>interface GigabitEthernet0/0</LINE>
+      <LINE> ip address 192.168.10.1 255.255.255.0</LINE>
+      <LINE>!</LINE>
+      <LINE>end</LINE>
+     </RUNNINGCONFIG>
+    </ENGINE>
+    <WORKSPACE>
+     <LOGICAL>
+      <X>PLACEMENT_TRAP_MARKER</X>
+     </LOGICAL>
+    </WORKSPACE>
+   </DEVICE>
+   <DEVICE>
+    <ENGINE>
+     <TYPE customModel="" model="2960-24TT">Switch</TYPE>
+     <NAME translate="true">SW1</NAME>
+     <SAVE_REF_ID>save-ref-id:2</SAVE_REF_ID>
+     <RUNNINGCONFIG>
+      <LINE>hostname SW1</LINE>
+      <LINE>interface FastEthernet0/1</LINE>
+      <LINE> switchport access vlan 10</LINE>
+     </RUNNINGCONFIG>
+    </ENGINE>
+   </DEVICE>
+   <DEVICE>
+    <ENGINE>
+     <TYPE customModel="" model="PC-PT">Pc</TYPE>
+     <NAME translate="true">PC1</NAME>
+     <MODULE>
+      <SLOT>
+       <MODULE>
+        <PORT>
+         <TYPE>eCopperFastEthernet</TYPE>
+         <IP>192.168.10.11</IP>
+         <SUBNET>255.255.255.0</SUBNET>
+         <PORT_DHCP_ENABLE>false</PORT_DHCP_ENABLE>
+        </PORT>
+       </MODULE>
+      </SLOT>
+     </MODULE>
+     <SAVE_REF_ID>save-ref-id:3</SAVE_REF_ID>
+     <GATEWAY>192.168.10.1</GATEWAY>
+     <DNS_CLIENT>
+      <SERVER_IP>8.8.8.8</SERVER_IP>
+     </DNS_CLIENT>
+    </ENGINE>
+   </DEVICE>
+   <DEVICE>
+    <ENGINE>
+     <TYPE customModel="" model="PC-PT">Pc</TYPE>
+     <NAME translate="true">PC2</NAME>
+     <MODULE>
+      <SLOT>
+       <MODULE>
+        <PORT>
+         <TYPE>eCopperFastEthernet</TYPE>
+         <IP></IP>
+         <SUBNET></SUBNET>
+         <PORT_DHCP_ENABLE>true</PORT_DHCP_ENABLE>
+        </PORT>
+       </MODULE>
+      </SLOT>
+     </MODULE>
+     <SAVE_REF_ID>save-ref-id:4</SAVE_REF_ID>
+     <GATEWAY></GATEWAY>
+    </ENGINE>
+   </DEVICE>
+  </DEVICES>
+  <LINKS>
+   <LINK>
+    <TYPE>eCopper</TYPE>
+    <CABLE>
+     <FROM>save-ref-id:1</FROM>
+     <PORT>GigabitEthernet0/0</PORT>
+     <TO>save-ref-id:2</TO>
+     <PORT>GigabitEthernet0/1</PORT>
+     <TYPE>eStraightThrough</TYPE>
+    </CABLE>
+   </LINK>
+   <LINK>
+    <TYPE>eCopper</TYPE>
+    <CABLE>
+     <FROM>save-ref-id:3</FROM>
+     <PORT>FastEthernet0</PORT>
+     <TO>save-ref-id:2</TO>
+     <PORT>FastEthernet0/1</PORT>
+     <TYPE>eStraightThrough</TYPE>
+    </CABLE>
+   </LINK>
+   <LINK>
+    <TYPE>eCopper</TYPE>
+    <CABLE>
+     <FROM>save-ref-id:4</FROM>
+     <PORT>FastEthernet0</PORT>
+     <TO>save-ref-id:2</TO>
+     <PORT>FastEthernet0/2</PORT>
+     <TYPE>eStraightThrough</TYPE>
+    </CABLE>
+   </LINK>
+  </LINKS>
+ </NETWORK>
+ <PHYSICALWORKSPACE>
+  <NAME>PHYSICAL_WORKSPACE_TRAP_MARKER</NAME>
+ </PHYSICALWORKSPACE>
+ <OPTIONS>
+  <ANIMATION>OPTIONS_TRAP_MARKER</ANIMATION>
+ </OPTIONS>
+</PACKETTRACER5>

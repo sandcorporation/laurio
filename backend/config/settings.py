@@ -995,10 +995,22 @@ LLM_REQUIREMENT_CHAT_FAKE_RAISING_CONTEST_IDS = [
 # --- 소스 변환 플러그인 (#496, #495) -----------------------------------------------
 #
 # 소스 선별이 UTF-8로 못 읽은 파일을 넘겨받아 채점용 텍스트로 바꾸는 플러그인의
-# dotted path 목록(쉼표로 구분, 적힌 순서대로 묻는다). 기본값은 빈 목록 — 그러면
-# 읽을 수 없는 파일은 예전처럼 버려진다. 쓸 수 없는 경로는 부팅 검사
+# dotted path 목록(쉼표로 구분, 적힌 순서대로 묻는다). 목록이 비면 읽을 수 없는
+# 파일은 예전처럼 버려진다. 쓸 수 없는 경로는 부팅 검사
 # (`core.source_converters.check_source_converters`)가 거절한다.
-SOURCE_CONVERTERS = [p.strip() for p in _env("SOURCE_CONVERTERS", "").split(",") if p.strip()]
+#
+# dev·CI 기본값에는 Packet Tracer(#497)가 켜져 있고, **배포 환경의 기본값은 빈
+# 목록이다** — Cisco 약관 검토(#498)가 끝나기 전에는 staging·prod 에서 켜지 않는다.
+# `_env` 가 아니라 `os.environ.get` 인 이유: 빈 문자열을 「미설정」이 아니라 「빈
+# 목록」으로 읽어야 compose 가 명시적으로 끌 수 있다.
+_DEFAULT_SOURCE_CONVERTERS = (
+    "" if IS_DEPLOYED_ENVIRONMENT else "core.source_converters.packet_tracer.PacketTracerConverter"
+)
+SOURCE_CONVERTERS = [
+    p.strip()
+    for p in os.environ.get("SOURCE_CONVERTERS", _DEFAULT_SOURCE_CONVERTERS).split(",")
+    if p.strip()
+]
 
 # --- GitHub 저장소 어댑터 (#193, ADR-0007, ADR-0027) --------------------------------
 #

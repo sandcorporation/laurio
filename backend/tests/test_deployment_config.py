@@ -884,3 +884,31 @@ def test_unhandled_errors_reach_stdout_so_docker_logs_shows_them():
         "배포에서 500 이 docker logs 에 남지 않는다는 뜻이다. "
         f"stdout={result.stdout!r} stderr={result.stderr!r}"
     )
+
+
+@pytest.mark.parametrize(
+    "env_builder, expected",
+    [
+        (_production_env, "[]"),
+        (_staging_env, "[]"),
+        (lambda: {"CODEMIT_DEPLOYMENT_TARGET": "development"},
+         "['core.source_converters.packet_tracer.PacketTracerConverter']"),
+    ],
+    ids=["production", "staging", "development"],
+)
+def test_packet_tracer_conversion_is_off_in_deployed_environments_by_default(env_builder, expected):
+    """Packet Tracer 해독(#497)은 Cisco 약관 검토(#498) 전까지 배포 환경에서 꺼져 있다 —
+    compose 가 `SOURCE_CONVERTERS: ""` 를 빠뜨려도 기본값이 빈 목록이어야 한다."""
+
+    import os
+
+    env = {k: v for k, v in os.environ.items() if k != "SOURCE_CONVERTERS"}
+    program = (
+        "import django; django.setup();"
+        "from django.conf import settings;"
+        "print('CONVERTERS=' + repr(settings.SOURCE_CONVERTERS))"
+    )
+    result = boot_process.run(["-c", program], {**env, **env_builder()})
+
+    assert result.returncode == 0, result.stderr
+    assert f"CONVERTERS={expected}" in result.stdout
