@@ -11,7 +11,8 @@
 // 것만 둔다). 문서만 바뀌었으면 문서 검사만 한다(scripts/ci/changed.sh).
 //
 // 자동 병합: 빌드가 SUCCESS 면 이 브랜치의 열린 main PR 을 이 커밋으로 rebase 병합한다(초안·hold
-// 라벨은 빼고, scripts/ci/automerge.py). main 에 들어가면 GitHub Actions 가 이미지를 굽는다.
+// 라벨은 빼고, scripts/ci/automerge.py). 합쳤으면 그 범위의 `GlitchTip:` 줄을 해결 표시한다.
+// main 에 들어가면 GitHub Actions(images.yaml)가 이미지를 굽고 `staging` 을 앞당긴다.
 pipeline {
   agent none
 
@@ -104,8 +105,22 @@ pipeline {
       }
       agent { label 'laurio-staging' }
       steps {
+        sh 'rm -f .automerge-merged'
         withCredentials([usernamePassword(credentialsId: 'github-sandcorporation-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
           sh 'python3 scripts/ci/automerge.py "$BRANCH_NAME" "$(git rev-parse HEAD)"'
+        }
+        // 합쳤으면 그 PR 범위(main 에서 갈라진 뒤의 커밋)의 `GlitchTip: <id>` 줄을 해결 표시한다.
+        // 「고쳤다」의 판정이 곧 이 병합이다 — 시험이 초록이고 main 에 들어갔다. 예전에는 main 의
+        // Actions 가 push 범위를 다시 추려야 했다(취소된 실행이 범위를 놓쳐 오류 75 가 남았다).
+        // 범위가 PR 하나로 정확히 닫히므로 그 문제가 없다. 토큰이 없으면 스크립트가 넘어간다.
+        script {
+          if (fileExists('.automerge-merged')) {
+            catchError(buildResult: null, stageResult: null, message: 'GlitchTip 표시 실패 — 병합과 무관하다') {
+              withCredentials([string(credentialsId: 'glitchtip-automation-token', variable: 'GLITCHTIP_TOKEN_FOR_AUTOMATION')]) {
+                sh 'python3 scripts/glitchtip_resolve.py "$(git merge-base origin/main HEAD)" HEAD'
+              }
+            }
+          }
         }
       }
     }

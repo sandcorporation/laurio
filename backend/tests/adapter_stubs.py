@@ -2,8 +2,8 @@
 
 실물 벤더 클래스(#85 PortOne, #87 Toss, #57 Seller 등록, #88 OpenAI)는 아직
 없다. 이 모듈은 "완전한 production/staging 환경이 부팅되는가"를 검증하는
-테스트(`tests/test_deployment_config.py`)와 CI의 `deploy-check` 잡
-(`.github/workflows/ci.yaml`)이 dotted path로 가리킬, 각 Protocol을 구조적으로
+테스트(`tests/test_deployment_config.py`)와 PR CI 의 `check --deploy` 단계
+(`scripts/ci/deploy-check.env`)가 dotted path로 가리킬, 각 Protocol을 구조적으로
 만족하는 최소 구현체를 담는다.
 
 **Django 모델이나 앱 레지스트리가 필요한 것은 아무것도 임포트하지 않는다.**

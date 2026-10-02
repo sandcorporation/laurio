@@ -7,6 +7,9 @@
 (그 사이 새로 push 됐다). 결과는 그 커밋의 GitHub 상태 `codemit/automerge` 로 남긴다 — 빌드
 자체의 초록·빨강은 시험이 정하고, 병합이 실패해도 빌드를 빨갛게 만들지 않는다(실패 이유는 이
 상태의 설명과 콘솔에 있다). 표준 라이브러리만 쓴다 — Jenkins 컨테이너에는 gh 가 없다.
+
+합쳤으면 `.automerge-merged` 파일을 남긴다 — Jenkinsfile.pr 이 그것을 보고 그 PR 범위의
+`GlitchTip:` 줄을 해결 표시한다(합치지 않은 빌드는 표시하지 않는다).
 """
 
 from __future__ import annotations
@@ -78,6 +81,8 @@ def main() -> int:
     )
     if code == 200:
         status(sha, "success", f"#{number} 을 main 에 rebase 병합했다")
+        with open(".automerge-merged", "w") as marker:
+            marker.write(f"{number}\n")
     else:
         message = result.get("message") if isinstance(result, dict) else result
         status(sha, "failure", f"#{number} 병합 실패({code}): {message}")

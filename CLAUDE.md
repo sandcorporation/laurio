@@ -243,14 +243,27 @@ codemit-staging-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 
 반드시 다른 서브도메인을 쓴다 — 같은 오리진을 공유하면 공개 앱이 뚫렸을 때
 운영자 세션 쿠키까지 노출될 길이 생긴다.
 
-**`production` 브랜치는 CI 를 통과한 `main` 커밋만 따라간다.** `main` 에 push 해 CI
-워크플로가 초록으로 끝나면 `.github/workflows/promote-production.yaml` 이 그 커밋으로
-`production` 을 **fast-forward** 한다 — 머지 커밋을 만들지 않으므로 `production` 은 언제나
-「CI 를 통과한 main 의 어느 커밋」 그 자체다. push 는 저장소 **배포 키**(쓰기, secret
-`PROMOTE_DEPLOY_KEY`)로 한다 — Actions 토큰은 워크플로 파일을 바꾼 커밋을 push 하지 못해
-그런 커밋의 승격이 막혔다(2026-09-17). 늦게 끝난 옛 커밋의 CI 는 건너뛰고,
-`production` 이 `main` 에서 갈라져 있으면 밀어붙이지 않고 빨갛게 멈춘다. **`production` 에
-직접 커밋하지 않는다.** prod 배포는 `Jenkinsfile.production` 이 맡는다 — `production` 브랜치
+**커밋이 prod 까지 가는 길은 넷이다**(2026-10-02):
+
+1. **브랜치 → PR → `main`.** Jenkins `codemit-pr`(Multibranch, `Jenkinsfile.pr`)가 브랜치마다
+   전체 시험을 돌리고(아래 「CI 는 Jenkins 에서 돈다」), 초록이면 그 브랜치의 열린 PR 을 `main`
+   에 **rebase 병합**한다(초안·`hold` 라벨은 빼고, `scripts/ci/automerge.py`). **`main` 에 직접
+   push 하지 않는다** — 그러면 시험 없이 이미지가 구워져 staging 까지 간다.
+2. **`main` → `staging`.** GitHub Actions(`.github/workflows/images.yaml`, 호스티드 러너)가
+   이미지 열둘과 부팅 가드 셋을 돌리고, 다 초록이면 `staging` 을 그 커밋으로 **fast-forward**
+   한다(저장소 **배포 키**, secret `PROMOTE_DEPLOY_KEY` — Actions 토큰은 워크플로 파일을 바꾼
+   커밋을 push 하지 못한다, 2026-09-17).
+3. **`staging` → staging 배포.** 웹훅이 Jenkins `laurio` 잡(`Jenkinsfile`)을 부른다.
+4. **staging 초록 → `production` → prod 배포.** 그 잡이 끝에서 `production` 을 같은 커밋으로
+   fast-forward 하고(`scripts/ci/fast_forward.py`, Jenkins 자격증명 `github-sandcorporation-token`),
+   웹훅이 `codemit` 잡(`Jenkinsfile.production`)을 부른다.
+
+`staging`·`production` 은 머지 커밋을 만들지 않으므로 언제나 `main` 의 어느 커밋 그 자체다.
+늦게 끝난 옛 커밋은 건너뛰고, 브랜치가 `main` 에서 갈라져 있으면 밀어붙이지 않고 빨갛게
+멈춘다. **두 브랜치에 직접 커밋하지 않는다.** (예전에는 main 의 Actions CI 가 시험까지 돌리고
+초록이면 `promote-production.yaml` 이 `production` 을 앞당겼다 — staging 을 거치지 않았다.)
+
+prod 배포의 `Jenkinsfile.production` 은 `production` 브랜치
 빌드일 때만 `deploy.sh prod <명령>` 을 단계별로 부르는 얇은 껍데기이고, **sub 의 Jenkins(staging 과 같은 컨트롤러)에
 붙은 에이전트 `oracle`** 에서 돈다(라벨 `oracle`). 에이전트는 Oracle A1 호스트의 `jenkins-desktop-agent`
 컨테이너(root·호스트 docker 소켓, 이미지 정의는 호스트 `/server/jenkins`)이고, 이제 **이미지를 굽지
@@ -261,49 +274,44 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
 `/home/jenkins/agent`, 잡 이름은 `codemit` 이어야 호스트의 `/var/jenkins_home/workspace/codemit` 에 둔
 `docker/.env.prod`(chmod 600)·배포 표식을 쓴다. 잡·노드·`.env.prod` 는 저장소 밖에서 사람이 만든다.
 
-**이미지는 CI 가 굽는다 — staging·prod 서버는 받기만 한다**(2026-09-17). 예전에는 CI 가
-구운 이미지는 테스트에만 쓰고 버렸고, 배포는 각 서버가 다시 구웠다 — prod(oracle)는
-배포마다 제 CPU 로 Next 빌드 셋을 돌렸다. 지금은 main 의 CI 가 커밋마다 여섯 이미지를
-ghcr(`ghcr.io/sandcorporation/codemit-*`, 비공개)에 올린다:
+**이미지는 GitHub Actions 가 굽는다 — staging·prod 서버는 받기만 한다**(2026-09-17, 러너는
+2026-10-02 부터 호스티드). 예전에는 배포마다 각 서버가 다시 구웠다 — prod(oracle)는 배포마다
+제 CPU 로 Next 빌드 셋을 돌렸다. 지금은 `main` 에 들어온 커밋마다 여섯 이미지를
+ghcr(`ghcr.io/sandcorporation/codemit-*`, 비공개)에 올린다(`images.yaml`):
 
 | 잡 | 러너 | 태그 |
 | --- | --- | --- |
-| `images-staging` | **mac** — amd64 는 Docker Desktop 의 에뮬레이션 | `codemit-backend:<sha>-amd64`, 세 앱 `:<sha>-staging`, `codemit-search:<sha>-amd64`(#450/#451), `codemit-pgbouncer:<sha>-amd64`(#453/#458) |
-| `images-prod` | **mac** — arm64 제 속도 | `codemit-backend:<sha>-arm64`, 세 앱 `:<sha>-prod`, `codemit-search:<sha>-arm64`(#450/#451), `codemit-pgbouncer:<sha>-arm64`(#453/#458) |
+| `images-staging` | `ubuntu-latest`(amd64) | `codemit-backend:<sha>-amd64`, 세 앱 `:<sha>-staging`, `codemit-search:<sha>-amd64`(#450/#451), `codemit-pgbouncer:<sha>-amd64`(#453/#458) |
+| `images-prod` | `ubuntu-24.04-arm`(arm64) | `codemit-backend:<sha>-arm64`, 세 앱 `:<sha>-prod`, `codemit-search:<sha>-arm64`(#450/#451), `codemit-pgbouncer:<sha>-arm64`(#453/#458) |
 
-mac 러너는 Apple Silicon 의 Docker Desktop 위 러너 컨테이너(Linux/ARM64, 라벨 `mac-arm`)다.
-잡은 서비스마다 하나(matrix, staging 6 + prod 6)라 mac 러너 수(3)만큼 동시에 굽는다.
-**둘 다 mac 인 이유는 sub 의 디스크다**(2026-09-17) — sub 는 테스트 잡과 staging 스택이
-캐시 없는 SATA SSD(86% 참) 하나를 나눠 쓰는데, 빌드를 얹자 CPU·메모리는 남는데 디스크
-대기가 14~84% 로 치솟았다. **mac 이 없을 때의 비상구는 저장소 변수 `IMAGE_BUILDER=sub`**
-다 — 두 잡이 sub 로 옮겨 가 arm64 는 QEMU 로(느리게) 굽는다. 줄 서 있던 실행은 변수를 바꾼
-뒤 다시 돌리고, mac 이 돌아오면 변수를 지운다.
+잡은 서비스마다 하나(matrix, staging 6 + prod 6)이고 각자 제 아키텍처로 굽는다 — 에뮬레이션이
+없다. 캐시는 레지스트리(`codemit-buildcache`)에 있어 VM 이 매번 새것이어도 맞는다. 예전에는
+셀프호스티드 mac(그 전에는 sub)이 구웠다 — sub 는 테스트 잡과 staging 스택이 SATA SSD 하나를
+나눠 써 빌드를 얹자 디스크 대기가 14~84% 로 치솟았고, 호스티드는 그때 결제 문제로 못 썼다.
+**arm64 호스티드를 못 쓰게 되면** 저장소 변수 `ARM_RUNNER_LABELS` 에 다른 러너 라벨을 JSON 으로
+적는다(예: `["self-hosted","ARM64","mac-arm"]`).
 
 - **backend·search 는 환경을 가리지 않아 아키텍처로만 가른다**(#450/#451 — search 는
   Next 앱이 아니라 `NEXT_PUBLIC_*` 처럼 굳는 값이 없다). 세 앱은 `NEXT_PUBLIC_*` 가 굳으므로
   환경마다 따로 굽는다 — 그 값의 원본은 서버 env 가 아니라 **저장소 변수 `STAGING_*`·
   `PROD_*`** 다(조직이 free 요금제라 비공개 저장소의 environment 기능을 못 써 접두어로
   가른다). 값을 바꾸면 CI 를 다시 돌려야 이미지에 반영된다.
-- **mac 이 꺼져 있으면 두 이미지 잡(과 deploy-guard 셋)이 줄을 서고, staging 배포와 production 승격이 함께
-  기다린다** — 위 비상구로 옮긴다. oracle 에서 굽는 대안은 prod 서버를 느리게 해서 버렸다.
 - **서버는 배포 에이전트 컨테이너에 한 번 저장해 둔 ghcr 로그인으로 받는다**(read:packages
   classic PAT). 두 컨테이너(sub 의 `jenkins`, oracle 의 `jenkins-desktop-agent`) 모두
   `/root/.docker` 가 named volume 이라 컨테이너를 다시 만들어도 남는다(oracle 은 2026-09-17
   에 `jenkins_docker` 를 붙였다). 로그인이 없으면 `deploy.sh preflight` 가 멈추고, PAT 가
   만료되면 pull 에서 멈춘다. ghcr 는 git SSH 키로 인증할 수 없다.
-- 사람 작업(mac 러너·PAT·Jenkins 토큰·저장소 변수)은 `scripts/ghcr-setup-wizard.sh` 가
-  단계별로 안내한다. ghcr·CI 가 막혔을 때의 비상구는 서버에서
+- 사람 작업(PAT·Jenkins 토큰·저장소 변수)은 `scripts/ghcr-setup-wizard.sh` 가 단계별로
+  안내한다(그 안의 mac 러너·`deploy-staging` 단계는 2026-10-02 이전 구조의 것이다). ghcr·CI 가 막혔을 때의 비상구는 서버에서
   `DEPLOY_IMAGE_SOURCE=build sh ./deploy.sh <대상>` — 예전처럼 그 자리에서 굽는다.
 
-**staging 배포는 CI 가 부른다.** Jenkins 잡(`/var/jenkins_home/jobs/laurio`)은 **Pipeline**
-이고(`<flow-definition>`, `scriptPath: Jenkinsfile`), 브랜치 지정은 `*/main` 이다. main 의
-CI 에서 `images-staging` 과 나머지 잡이 전부 초록이면 `deploy-staging` 잡이
-`buildWithParameters` 로 **`DEPLOY_SHA`** 를 채워 부르고(러너와 Jenkins 가 같은 호스트라
-`vars.JENKINS_URL` 은 루프백), 파이프라인은 워크스페이스를 그 커밋으로 되돌려 배포한다 —
-빨간 커밋은 staging 에도 가지 않는다. 예전 트리거인 GitHub 웹훅(`GitHubPushTrigger`)은
-이미지가 올라가기 **전에** 잡을 부르므로, 웹훅으로 불린 빌드는 아무것도 하지 않고
-끝난다(켜 둬도 해가 없다). 늦게 도착한 옛 커밋의 호출은 `deploy.sh plan` 이 「더 새 커밋이
-이미 배포돼 있다」로 건너뛰고, 배포 표식도 뒤로 옮기지 않는다.
+**staging 배포는 `staging` 브랜치가 부른다**(2026-10-02). Jenkins 잡(`/var/jenkins_home/jobs/laurio`)은
+**Pipeline** 이고(`<flow-definition>`, `scriptPath: Jenkinsfile`), 브랜치 지정은 `*/staging`,
+트리거는 GitHub 웹훅(`GitHubPushTrigger`)이다. `images.yaml` 이 이미지를 다 올린 **뒤에** 그
+브랜치를 움직이므로 웹훅이 잡을 부르는 순간 이미지는 ghcr 에 있다. 늦게 도착한 옛 커밋은
+`deploy.sh plan` 이 「더 새 커밋이 이미 배포돼 있다」로 건너뛰고, 배포 표식도 뒤로 옮기지
+않는다. 초록이면 끝에서 `production` 을 같은 커밋으로 앞당긴다(위 넷째 길). 예전에는 main 의
+CI 가 `buildWithParameters` 로 `DEPLOY_SHA` 를 채워 불렀다(그때 브랜치 지정은 `*/main`).
 
 **실제로 굽는 것은 `Jenkinsfile` 이 단계마다 부르는 `deploy.sh` 의 명령이다.** 두
 Jenkinsfile 이 「(staging 은 대상 확인 →) Preflight → 변경 계획 → 이미지(서비스별 병렬 pull) →
@@ -327,10 +335,10 @@ Jenkinsfile 만 고쳤다가 빌드가 `cannot open ./deploy.sh` 로 통째로 �
 `catchError` 와 `|| true` 가 그것을 보장하므로, 자격증명이 없는 Jenkins 에서도 배포는
 그대로 돈다.
 
-**「다른 프로젝트가 빌드된 뒤에」 트리거도 Pipeline 에서 된다** — `triggers { upstream(...) }`
-를 Jenkinsfile 에 적으면 된다. 다만 지금은 쓰지 않는다: staging 은 CI 가 모든 잡이 초록일
-때 원격으로 부르고, prod 는 승격된 커밋이 `production` 에 올라갈 때 도므로 두 잡이 서로
-다른 커밋을 다룬다 — 「staging 뒤에 prod」로 이으면 오히려 어긋난다.
+**「다른 프로젝트가 빌드된 뒤에」 트리거(`triggers { upstream(...) }`)는 쓰지 않는다** — prod
+잡은 staging 잡의 **커밋**을 따라가야 하는데, upstream 트리거는 prod 잡이 자기 브랜치의 끝을
+배포하게 한다. 그래서 staging 잡이 `production` 브랜치를 그 커밋으로 옮기고, prod 잡은 자기
+브랜치의 웹훅으로 돈다.
 
 **배포 끝에 호스트의 도커 디스크를 비운다**(`deploy.sh <대상> prune`, 2026-09-17). 커밋마다
 ghcr 에서 새 태그를 받으니 옛 커밋 이미지가 쌓이고, oracle 에는 ghcr 이전에 굽던 빌드 캐시가
@@ -340,19 +348,18 @@ ghcr 에서 새 태그를 받으니 옛 커밋 이미지가 쌓이고, oracle �
 이미지는 건드리지 않는다(`image prune -a` 를 쓰지 않는다). 정리는 무엇이 실패해도 0 으로
 끝나 배포를 실패로 만들지 않는다. 되돌리기는 ghcr 에서 다시 받는다.
 
-**그 정리는 호스트 디스크만 비운다 — ghcr 쪽은 따로 지운다**(`.github/workflows/
-ghcr-prune.yaml`, 2026-09-20). 레지스트리에 쌓이는 옛 버전을 아무도 걷지 않아
-**쓰기가 403 으로 막혔다**: 09-18 까지 초록이던 이미지 잡이 09-20 부터 전부 ghcr
-토큰 교환에서 403 을 받아 **배포가 이틀 멈췄다**. 그때 실측이 이미지 여섯 99 버전 ·
-빌드 캐시(`codemit-buildcache`) **176 버전**이다 — 캐시 쪽은 대부분 태그 없는
-블롭이라 화면에서 보이지도 않는다. **읽기는 그대로 됐다**(배포 에이전트 PAT 로
-매니페스트 조회 성공) — 쓰기만 막히는 것이 용량 초과의 모양이다. 지금은 매일
-새벽 4시(서울)와 손으로(`workflow_dispatch`) 도는 잡이 패키지마다 최근 것만
-남기고 지운다(이미지 12·캐시 10, 입력으로 바꾼다). **레지스트리 쓰기가 막혀도 이
-삭제는 된다** — 용량을 줄이는 길까지 막지는 않으므로 새 PAT 없이 `GITHUB_TOKEN`
-하나로 끝난다. **되돌릴 수 없지만 돌고 있는 서비스는 영향이 없다**: 배포된
-이미지는 이미 그 호스트에 있고, 지워서 잃는 것은 그 커밋으로 pull 해 되돌리는
-길뿐이다(최근 몇 커밋은 남는다).
+**그 정리는 호스트 디스크만 비운다 — ghcr 쪽은 따로 지운다**(2026-09-20, Jenkins 잡
+`codemit-ghcr-prune` — `Jenkinsfile.ghcr-prune`·`scripts/ci/ghcr_prune.py`, 2026-10-02 에 Actions
+에서 옮겼다). 레지스트리에 쌓이는 옛 버전을 아무도 걷지 않아 **쓰기가 403 으로 막혔다**:
+09-18 까지 초록이던 이미지 잡이 09-20 부터 전부 ghcr 토큰 교환에서 403 을 받아 **배포가 이틀
+멈췄다**. 그때 실측이 이미지 여섯 99 버전 · 빌드 캐시(`codemit-buildcache`) **176 버전**이다 —
+캐시 쪽은 대부분 태그 없는 블롭이라 화면에서 보이지도 않는다. **읽기는 그대로 됐다** — 쓰기만
+막히는 것이 용량 초과의 모양이다. 지금은 매일 새벽 4시(서울)와 손으로 도는 잡이 패키지마다
+최근 것만 남기고 지운다(이미지 12·캐시 10, 파라미터로 바꾼다, `DRY_RUN` 도 있다). **레지스트리
+쓰기가 막혀도 이 삭제는 된다.** 토큰은 Jenkins 자격증명 `ghcr-prune-token` — **classic PAT**
+(`read:packages`·`delete:packages`)여야 한다(fine-grained 토큰은 패키지 API 에 닿지 못한다).
+**되돌릴 수 없지만 돌고 있는 서비스는 영향이 없다**: 배포된 이미지는 이미 그 호스트에 있고,
+지워서 잃는 것은 그 커밋으로 pull 해 되돌리는 길뿐이다(최근 몇 커밋은 남는다).
 
 **backend·events 는 겹쳐 바꾼다 — 배포 중에도 요청이 끊기지 않는다**(#485, 2026-09-22).
 예전에는 컨테이너를 내리고 새로 올려, 배포마다 공개 앱이 13~16초 동안 500 을 냈다(staging
@@ -794,24 +801,15 @@ ssh sub 'docker exec codemit-staging-backend-1 python manage.py sentry_smoke'
   하나가 「사고가 아니다」라고 스스로 적힌 예외를 재현하려 애쓴다. 판정은
   `metadata.type`(예외 클래스 이름)으로 한다, 제목 문자열이 아니다 — 그 메시지는
   한국어라 바뀌면 조용히 샌다. 목록은 `DELIBERATE_EXCEPTION_TYPES` 한 자리다.
-- **해결 표시는 CI 가 한다.** 세션은 커밋 메시지 마지막 줄에 `GlitchTip: <id>` 를 적고
-  push 만 하고, 그 줄을 읽어 이슈를 resolved 로 돌리는 것은 `main` 의 CI 다 — 「고친 것
-  같다」와 「고쳤다」를 가르는 자리다. **그래서 push 와 표시 사이에 5~10분이 있다**
-  (실측: 커밋 05:03:19 → 표시 05:11:06 — `needs: test` 가 백엔드 전체 테스트를
-  기다린다). 그 사이 화면은 「아직 안 닫혔다」와 「배선이 고장났다」를 구별해 주지
-  않으므로, `needs` 없이 push 직후 도는 `glitchtip-ack` 잡이 **코멘트로 그것만**
-  적는다(상태는 건드리지 않는다). 그 코멘트도 클레임으로 세어지므로, 사람이 손으로
-  `GlitchTip:` 줄을 적은 오류는 그때부터 자동 진단이 집지 않는다 — 사람이 보고 있다는
-  뜻이라 받아들인 대가다.
-- **해결 표시의 범위는 「직전에 그 잡이 성공한 실행 이후」다**(2026-09-22). 예전에는
-  `before..sha` 였는데, 짧은 간격으로 연달아 push 하면 가운데 실행이 대기 중에 **취소**되고
-  (GitHub 은 concurrency 그룹에 pending 을 하나만 둔다) 다음 실행의 범위가 그 커밋을
-  포함하지 않아 **그 수정의 해결 표시가 영영 빠졌다.** 9-18 에 「자동화가 push 한 직후엔
-  사람이 기다린다」를 완화책으로 적었는데 정작 **자동화 자신이** 2분 간격으로 셋을 밀어
-  오류 75 가 그렇게 남았다. 기준을 「실행 전체가 초록」이 아니라 「그 잡이 성공」으로
-  잡은 이유는 재발을 덮지 않기 위해서다 — 커밋 하나가 그 잡이 성공한 실행 하나에만
-  속해야 한 번 읽힌 커밋이 다시 읽히지 않는다. 오류 75 를 놓쳤던 실행을 재현해 새
-  방식이 75 를 줍고, 그다음 실행은 다시 읽지 않는 것까지 확인했다.
+- **해결 표시는 PR 병합이 한다**(2026-10-02). 세션은 커밋 메시지 마지막 줄에
+  `GlitchTip: <id>` 를 적고 **분기를 push 해 PR 을 연다**(`main` 에 직접 넣지 않는다). Jenkins
+  `codemit-pr` 가 시험을 돌려 초록이면 PR 을 `main` 에 병합하고, **곧바로 그 PR 범위**
+  (`merge-base..HEAD`)의 줄을 읽어 이슈를 resolved 로 돌린다(`Jenkinsfile.pr` 의 병합 단계,
+  자격증명 `glitchtip-automation-token`) — 「고친 것 같다」와 「고쳤다」를 가르는 자리다.
+  범위가 PR 하나로 정확히 닫히므로 옛 방식의 두 문제가 없다: push 와 표시 사이의 5~10분
+  공백(그래서 두던 `glitchtip-ack` 예고 코멘트)과, 연달아 push 할 때 취소된 실행이 범위를
+  놓치던 것(오류 75 — 그래서 범위를 「직전에 그 잡이 성공한 실행 이후」로 잡았다,
+  `glitchtip_resolve.py` 의 `auto` 모드가 그 흔적이다).
 - **배경 세션은 「지금」을 말하는 문서를 고칠 수 없다.** 평소 티켓이라면 「티켓을 닫는
   기준」이 `CLAUDE.md`·`CONTEXT.md`·`docs/features/` 를 같은 커밋에서 고치라고 하는데,
   아무도 보고 있지 않은 세션에는 그 규칙을 적용하지 않는다 — 그 셋(과 `docs/adr/`)이
@@ -1269,7 +1267,7 @@ CODEMIT_E2E_BASE_URL=http://127.0.0.1:<그 포트> pnpm exec playwright test --p
   로그인 0.55 → 0.23초; 배포는 PBKDF2 그대로, `config/settings.py`). dev·CI 의 Postgres 는
   `synchronous_commit=off`(시드 하나가 커밋 대기로 1.5초를 썼다). CI 의 e2e 백엔드는
   `runserver` 가 아니라 gunicorn 넷이다(`compose.ci.yaml`). CI 의 e2e 잡 셋은 한 호스트에서
-  동시에 돌므로 잡마다 일꾼 둘이다(`PLAYWRIGHT_WORKERS`).
+  노드를 통째로 쓰므로 일꾼은 코어의 1/3 이다(`scripts/ci/e2e.sh` 의 `PLAYWRIGHT_WORKERS`).
 
 **e2e 시드는 입구에서 줄을 선다**(2026-09-18, CI #242). Playwright 는 시드를 스펙 파일마다
 `beforeAll` 에서 부르고 `fullyParallel` 로 워커 여럿을 쓰는데, 시드들은 「기존 e2e 데이터를
@@ -1324,10 +1322,11 @@ ADR-0017 은 프론트에만 있는 위험을 셋으로 못 박았다. 여기 �
 
 로컬 게이트는 셋이다 — **바꾼 자리의 백엔드 시험**(`scripts/test.sh backend <파일…>`,
 400개까지), **세 앱 `typecheck`**, **에이전트가 브라우저로 걸어본 결과**. **전체 시험은
-브랜치 PR 의 CI 로 본다**(2026-10-02) — 브랜치를 push 하고 초안 PR 을 열어 CI 가 초록이면 그
-커밋을 main 으로 push 한다(PR 은 CI 를 돌리는 그릇이라 따로 머지 버튼을 누르지 않는다 —
-커밋이 main 에 들어가면 GitHub 이 저절로 머지된 것으로 표시한다). 다음 티켓을 시작하기 전에
-main 의 CI 결과를 확인해 보고한다.
+브랜치 PR 의 CI 로 본다**(2026-10-02) — 브랜치를 push 하고 `main` 으로 PR 을 연다. Jenkins
+`codemit-pr` 가 초록이면 **그 PR 을 스스로 `main` 에 rebase 병합한다** — 사람이 머지 버튼을
+누르지 않고, `main` 에 직접 push 하지 않는다(시험 없이 이미지가 구워져 staging 까지 간다).
+병합을 막으려면 초안으로 열거나 `hold` 라벨을 붙인다. 다음 티켓을 시작하기 전에 PR 의 결과
+(빌드·`codemit/automerge` 상태)와 이어지는 이미지·staging 배포를 확인해 보고한다.
 
 **push 를 빠뜨리면 CI 는 아무것도 보지 않는다.** 실제로 그런 적이 있다 — 하루 작업 20커밋이
 푸시되지 않은 채 쌓였고, 그 사이 CI 잡 하나가 21시간 빨간 것도 아무도 몰랐다. e2e 를 CI 에
@@ -1670,27 +1669,40 @@ Problem Statement 를 읽고 「어댑터 실제 구현은 스토리지 하나�
 통째로 멈춘다(`dispatch-tickets` 가 이미 금지한다). 그리고 되돌릴 수 없거나 바깥으로 나가는
 행위는 선택지가 아니라 **확인**이 먼저다.
 
-## CI 는 셀프호스티드 러너에서, 프로덕션 이미지로 돈다
+## CI 는 Jenkins 에서 돈다 — 브랜치마다, 노드를 통째로
 
-GitHub 호스티드 러너는 과금이 막혀 못 쓴다. 20개 잡 중 15개가 `runs-on: [self-hosted, sub]` —
-staging 배포 호스트와 **같은 머신**이다. 나머지 다섯은 mac 러너
-(`[self-hosted, ARM64, mac-arm]` — sub 와 같은 `myoung34/github-runner` 컨테이너, 조직 범위)에서
-돈다: 배포 이미지를 굽는 둘(`images-staging`·`images-prod`, 위 「이미지는 CI 가 굽는다」)과
-프로덕션 이미지를 구워 띄워 보는 deploy-guard 셋이다. 다섯 모두 비상구 `IMAGE_BUILDER=sub` 하나로
-함께 sub 로 돌아간다. 러너 컨테이너는 `--network host` 로 돌고 호스트
-docker 소켓을 물어 컨테이너를 바깥에 띄운다(DooD).
+**시험은 Jenkins `codemit-pr`(Multibranch, `Jenkinsfile.pr`)가 돌린다**(2026-10-02). GitHub
+소스 `sandcorporation/laurio` 의 브랜치(`main`·`staging`·`production` 은 뺀다)마다 하위 잡이
+생기고, 5분마다 훑어 새 push 를 찾는다. 결과는 GitHub 커밋 상태로 남는다. 같은 브랜치에 새로
+push 하면 옛 빌드를 끊는다.
 
-**deploy-guard 셋을 mac 으로 옮긴 이유는 sub 의 디스크다**(2026-09-22). 강의실의 순수 함수
-테스트 세 건이 각각 5초씩 멈춰 CI 가 빨갛게 났는데(재실행하니 초록), 그 순간 sub 는 가용
-메모리가 17GB 넘게 남은 채 **디스크 대기(iowait)가 전 코어 평균 51%, IO 압박(PSI)이 68%**
-였다(oracle Prometheus 의 sub node-exporter). 같은 30초에 `frontend-deploy-guard` 가 Next 이미지를
-굽고 있었다 — 메모리가 아니라 이미지 레이어 쓰기가 같은 SATA SSD 를 막았다. Next 빌드 한 번은
-앱마다 2.5~3.5GB(프로세스 트리 RSS 합)를 쓰고, worker 수(`experimental.cpus`)를 줄여도 최대치가
-줄지 않는다 — 대부분을 webpack 을 도는 주 프로세스 하나가 쥔다. **그래서 deploy-guard 는
-컨테이너 포트를 호스트에 열지 않는다** — mac 러너(Docker Desktop 위의 컨테이너)에서 호스트에 연
-포트가 러너의 `127.0.0.1` 로 닿는다는 보장이 없어, 띄운 컨테이너의 네트워크에 curl 컨테이너를
-붙여(`--network container:<이름>`) 친다. sub-docker-cleanup 이 mac 에 닿지 않으므로 구운 이미지는
-잡이 스스로 지운다. **이 잡들은 PR 에서도 돈다** — mac 이 꺼져 있으면 PR 의 CI 도 줄을 선다.
+| 단계 | 노드 | 하는 일 |
+| --- | --- | --- |
+| 변경 | sub(`laurio-staging`) | `scripts/ci/changed.sh` — 문서(`.md`·`docs/`)만 바뀌었으면 시험을 건너뛰고 문서 검사만 |
+| 시험(병렬) | sub | `scripts/ci/sub-checks.sh` — Django `check`·`check --deploy`, pytest 전체(junit), 생성물 최신성 둘, ADR·화면 언어 검사, 단위 시험 여섯, 세 앱 typecheck |
+| | macos | `scripts/ci/e2e.sh`(세 앱 프로덕션 이미지 스택 + 세 프로젝트) → `scripts/ci/celery-broker.sh` |
+| 병합 | sub | 초록이면 열린 PR 을 `main` 에 rebase 병합(`automerge.py`, 상태 `codemit/automerge`) → 그 범위의 `GlitchTip:` 줄 해결 표시 |
+
+- **노드는 실행기가 하나라 통째로 쓴다.** 예전에는 GitHub Actions 의 셀프호스티드 러너
+  셋(sub)이 sub 의 코어를 제한 없이 나눠 써, 이미지 빌드와 겹친 시험이 경합만으로 한도를
+  넘었다(#499 의 첫 CI — 공개 e2e 10건·단위 2건 타임아웃). 오래 걸리는 e2e 를 성능이 좋은
+  macos 에, 짧은 것을 staging 배포와 실행기를 나눠 쓰는 sub 에 둔다.
+- **sub 의 Jenkins 는 컨테이너라 node·pnpm·uv 가 없다** — 그래서 sub 쪽은 저장소를 담은
+  시험 이미지(`docker/ci.Dockerfile`)를 굽고 사이드카 postgres(tmpfs·fsync 끔)와 같은 망에서
+  `scripts/ci/sub-checks-inside.sh` 를 돈다. 바인드 마운트는 쓰지 않는다(컨테이너와 호스트의
+  경로가 다르다, 아래 「Jenkins 는 staging 배포 호스트에 있다」). 그 이미지는 루트
+  `.dockerignore` 대신 `docker/ci.Dockerfile.dockerignore` 를 읽어 **문서를 들인다** — 문서 검사와
+  다이어그램 최신성 시험이 그것을 읽는다(빼먹었을 때 넷이 「파일이 없다」로 빨갰다).
+- **실측**(2026-10-02, 첫 초록): sub 쪽 전체 약 3분(pytest 2489건 47초), macos e2e 공개 14초 ·
+  운영자 4초 · 강의실 4초(이미지 굽기 제외).
+- **잡 설정은 저장소 밖이다** — Multibranch 잡·자격증명(`github-sandcorporation-token` 은
+  fine-grained PAT: 저장소 읽기·PR·커밋 상태·Contents 쓰기, `glitchtip-automation-token`)은 사람이
+  Jenkins 에 만든다. Jenkins 설정을 API 로 고칠 때는 `Content-Type: application/xml;
+  charset=utf-8` 을 붙인다 — 없으면 한글이 Latin-1 로 읽혀 500 이 난다.
+- **GitHub Actions 에는 이미지 빌드와 부팅 가드만 남았다**(`images.yaml`, 호스티드 러너 — 위
+  「배포」 절). 부팅 가드 셋은 프로덕션 이미지를 구워 배포 설정 없이는 죽고 완전한 설정으로는
+  뜨는지 본다 — 컨테이너 포트를 러너에 열지 않고 띄운 컨테이너의 네트워크에 curl 컨테이너를
+  붙여(`--network container:<이름>`) 친다(러너가 컨테이너일 때도 같은 모양이다).
 
 **CI 는 `docker/compose.ci.yaml` 을 dev compose 위에 겹쳐 쓴다 — 지우면 CI 가 깨진다.**
 `compose.dev.yaml` 의 `..:/app` 은 **개발용 핫리로드 장치**다. 러너 안에서 그 상대 경로는
@@ -1707,33 +1719,11 @@ docker 소켓을 물어 컨테이너를 바깥에 띄운다(DooD).
 친다 — 배포되는 것과 테스트되는 것이 같아졌다. 위 `next dev` 메모리 주의는 이제
 **로컬에서 스위트를 돌릴 때만** 해당한다.
 
-**이미지를 굽는 잡 뒤에는 도커 디스크를 비운다**(2026-09-17). sub 의 compose 빌드 잡
-일곱(`celery-broker`·e2e 셋·deploy-guard 셋 — deploy-guard 는 2026-09-22 부터 mac 에서 돌고
-비상구일 때만 sub 로 온다)이 커밋마다 같은 이름으로 다시 구워 태그 잃은
-이미지와 빌드 캐시가 쌓였다(정리 전 캐시 107GB). 러너 셋이 같은 호스트 데몬을 쓰므로
-`sub-docker-cleanup` 잡 하나가 그 일곱 뒤에(결과와 무관하게) 태그 잃은 이미지와 **하루 넘게
-안 쓴** 빌드 캐시를 지운다. 이미지 잡 둘(mac, 비상구 sub)도 끝에 같은 정리를 하되, 데몬의
-기본 빌더를 `--builder default` 로 박는다 — 그 잡에서는 setup-buildx 가 자기 빌더를 기본으로
-골라 둬서, 안 박으면 곧 지워질 그 빌더만 비운다(자기 빌더는 그 액션의 뒷정리가 상태째 지운다).
+**스택마다 이름을 갈라 준다.** e2e 와 celery-broker 의 compose 프로젝트 이름은 빌드
+식별자(`CODEMIT_CI_RUN_ID` — 빌드 태그 + 시작 시각)에서 나오고, 포트는 compose 가 비어 있는 것을
+고른다. 끝나면(성공·실패·중단 모두) `down -v` 로 지운다.
 
-**잡마다 스택을 갈라 준다.** compose 를 쓰는 네 잡(`celery-broker`·e2e 셋 — 공개·운영자·
-강의실, #277)이 한 러너에서 겹치므로 각자 다른 `COMPOSE_PROJECT_NAME` 과 포트 슬롯을
-잡는다 — 안 그러면 서로의 컨테이너를 `down -v` 로 지운다. 뒷정리는 `if: always()` 로 건다.
-
-**pytest 잡에 redis 서비스가 없다.** 테스트 세션 캐시가 LocMem 이라(위 「테스트는 서로를
-밟지 않는다」) 필요가 없어졌다. postgres 는 호스트 포트를 고정하지 않는다(#243) —
-러너 호스트의 5432 는 이미 점유돼 있고, 고정값 자체도 이 워크플로의 다른 ref 실행과
-동시에 그 번호를 다시 잡으려다 죽은 적이 있어서 Docker 가 그때 비어 있는 포트를
-골라 쓰게 두고, 잡 안에서 `${{ job.services.postgres.ports['5432'] }}` 로 읽는다.
-
-실측(당시 9잡 전부 초록, 2026-09-05): 전체 **6분**. `adr-status`·`screen-language` 가 늘어
-11잡이 됐고, `frontend-e2e-classroom`(#277)이 늘어 12잡, `classroom-deploy-guard`(#296)가
-늘어 13잡, 배포 이미지 둘과 staging 호출(`images-staging`·`images-prod`·`deploy-staging`,
-2026-09-17)이 늘어 16잡, 도커 디스크 정리(`sub-docker-cleanup`, 같은 날)가 늘어 17잡,
-GlitchTip 해결 표시와 그 예고(`glitchtip-resolve`·`glitchtip-ack`, 2026-09-18)가 늘어 지금은 19잡이다(강의실 e2e·이미지 잡 실측은 아직 없다 — CI 첫 실행이 잰다). e2e 운영자 4분 ·
-공개 3분 · `celery-broker` 2분 · `pytest` 1분 · 나머지 여덟은 각 1분 미만.
-
-**`screen-language` 잡**(#267, #268)은 스텝 둘로 두 표면을 막는다. 첫 스텝
+**화면 언어 검사**(#267, #268 — PR CI 의 sub 단계)는 스텝 둘로 두 표면을 막는다. 첫 스텝
 (`scripts/check_screen_language.py`)은 공개 앱(`frontend/`)의 화면 문자열에
 `CONTEXT.md` 가 정한 영어 도메인 용어(`Sponsor`·`Contest`·`Escrow` 등)나
 `ADR-숫자`·`#숫자` 참조가 있으면 막는다. 둘째 스텝(`scripts/

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """`main` 에 들어온 커밋이 고친 GlitchTip 이슈를 해결 표시한다 (2026-09-18).
 
-CI 의 `glitchtip-resolve` 잡이 부른다. 읽는 것은 **커밋 메시지의 마지막 줄 형식**
+Jenkins `codemit-pr` 의 병합 단계(Jenkinsfile.pr)가 PR 을 main 에 합친 직후 그 PR 범위로
+부른다(2026-10-02 — 그 전에는 main 의 Actions 잡이 `auto` 범위로 불렀다). 읽는 것은 **커밋 메시지의 마지막 줄 형식**
 하나다:
 
     GlitchTip: 42

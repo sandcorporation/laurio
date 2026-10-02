@@ -7,8 +7,8 @@
 // 왜 backend 만 갈면 안 되는지는 전부 그 파일의 주석에 있다.
 //
 // **무엇이 이 잡을 부르는가.** `production` 브랜치다. 그 브랜치는 사람이 커밋하지 않고,
-// main 의 CI 가 초록으로 끝난 커밋만 `.github/workflows/promote-production.yaml` 이
-// fast-forward 한다(CLAUDE.md 「배포」). 그래서 잡의 브랜치 지정은 `*/production` 이고,
+// staging 배포(Jenkinsfile)가 초록으로 끝난 커밋만 그 잡이 fast-forward 한다(2026-10-02 —
+// 그 전에는 main 의 CI 가 초록이면 Actions 의 promote-production 이 앞당겼다). 그래서 잡의 브랜치 지정은 `*/production` 이고,
 // 트리거는 staging 과 같은 GitHub 웹훅(GitHubPushTrigger)을 쓴다. 잡 설정(scriptPath:
 // Jenkinsfile.production)은 저장소 밖의 Jenkins 에 사람이 만든다.
 //

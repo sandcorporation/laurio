@@ -15,13 +15,23 @@ trap 'exit 130' INT TERM
 # 브로커 드라이버가 이미지에 들어 있다.
 "${C[@]}" exec -T celery-worker python -c "import redis, kombu; print('redis', redis.__version__, 'kombu', kombu.__version__)" || exit 1
 
-# worker 가 브로커에 붙었다.
+# worker 가 브로커에 붙었다. 판정은 출력을 받아 둔 뒤 문자열로 한다 — `… | grep -q` 는 pipefail
+# 아래에서 grep 이 먼저 끝나 앞 명령이 SIGPIPE 로 죽으면 찾고도 실패로 읽힌다(옛 Actions 셸에는
+# pipefail 이 없었다).
 ok=0
+ping=""
 for _ in $(seq 1 30); do
-  if "${C[@]}" exec -T celery-worker celery -A config inspect ping | grep -q pong; then ok=1; break; fi
+  ping=$("${C[@]}" exec -T celery-worker celery -A config inspect ping 2>&1 || true)
+  if [[ "$ping" == *pong* ]]; then ok=1; break; fi
   sleep 3
 done
-[ "$ok" = 1 ] || { echo "worker 가 브로커에 붙지 못했다"; "${C[@]}" logs celery-worker | tail -50; exit 1; }
+if [ "$ok" != 1 ]; then
+  echo "worker 가 브로커에 붙지 못했다 — 마지막 ping:"
+  printf '%s\n' "$ping"
+  echo "--- worker 기동 로그(앞부분)"
+  "${C[@]}" logs --no-log-prefix celery-worker | head -60
+  exit 1
+fi
 echo "worker: pong"
 
 # beat 가 쏜 태스크를 worker 가 실행한다.
@@ -29,7 +39,8 @@ TASK_NAME=$("${C[@]}" exec -T celery-worker python -c "from core.tasks import ru
 [ -n "$TASK_NAME" ] || { echo "core.tasks.run_scan 의 태스크 이름을 읽지 못했다"; exit 1; }
 echo "찾는 태스크: $TASK_NAME"
 for _ in $(seq 1 40); do
-  if "${C[@]}" logs celery-worker | grep -q "${TASK_NAME}.*succeeded"; then
+  logs=$("${C[@]}" logs celery-worker 2>&1 || true)
+  if grep -q "${TASK_NAME}.*succeeded" <<<"$logs"; then
     echo "beat -> worker 경로 확인"
     exit 0
   fi
