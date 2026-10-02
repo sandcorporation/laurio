@@ -209,13 +209,25 @@ def _offenses_in(tree: ast.AST) -> list[str]:
     return offenses
 
 
-def test_contest_status_is_never_written_outside_contests_transitions():
-    offenders = []
+@pytest.fixture(scope="module")
+def parsed_sources() -> list[tuple[Path, ast.AST]]:
+    """백엔드 소스 전부의 구문 트리 — 이 파일의 두 시험이 같은 것을 한 번만
+    읽는다(2026-10-02). 각자 파싱하던 때는 그것만으로 시험 하나가 CPU 1초를
+    넘었다."""
+
+    parsed = []
     for path in python_sources():
         relative = path.relative_to(BACKEND_ROOT)
         if relative in ALLOWED:
             continue
-        for offense in _offenses_in(ast.parse(path.read_text(encoding="utf-8"))):
+        parsed.append((relative, ast.parse(path.read_text(encoding="utf-8"))))
+    return parsed
+
+
+def test_contest_status_is_never_written_outside_contests_transitions(parsed_sources):
+    offenders = []
+    for relative, tree in parsed_sources:
+        for offense in _offenses_in(tree):
             offenders.append(f"{relative} — {offense}")
 
     assert not offenders, (
@@ -280,7 +292,7 @@ def _creation_status_literals(tree: ast.AST) -> list[tuple[int, str]]:
     return found
 
 
-def test_every_literal_creation_status_is_declared_in_creation_states():
+def test_every_literal_creation_status_is_declared_in_creation_states(parsed_sources):
     """`contests/transitions.py` 의 `CREATION_STATES` 는 손으로 든 값이다 — 실제
     `Contest.objects.create(status=Contest.Status.<이름>, ...)` 호출부와 정적으로
     갈리지 않는지 여기서 확인한다. 리터럴로 안 쓰고 변수를 넘기는 자리(시드)는
@@ -292,11 +304,8 @@ def test_every_literal_creation_status_is_declared_in_creation_states():
     declared_names = {status.name for status in CREATION_STATES}
 
     offenders = []
-    for path in python_sources():
-        relative = path.relative_to(BACKEND_ROOT)
-        if relative in ALLOWED:
-            continue
-        for lineno, name in _creation_status_literals(ast.parse(path.read_text(encoding="utf-8"))):
+    for relative, tree in parsed_sources:
+        for lineno, name in _creation_status_literals(tree):
             if name not in declared_names:
                 offenders.append(f"{relative}:{lineno} — status=Contest.Status.{name}")
 

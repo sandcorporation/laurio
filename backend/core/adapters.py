@@ -104,6 +104,15 @@ def resolve_adapter(
     return adapter_cls(**(factory_kwargs or {}))
 
 
+#: 이 저장소가 직접 등록하는 부팅 검사(어댑터 바인딩·스토리지·알림 종류)에 붙이는
+#: 태그. 운영 부팅(`manage.py check`/`migrate`/`runserver`)은 태그와 무관하게 전부
+#: 돌린다 — 태그가 바꾸는 것은 `check --tag codemit` 으로 이 검사들**만** 고를 수
+#: 있다는 것 하나다. `tests/test_deployment_config.py` 가 그렇게 해서 URLconf
+#: 적재(라우터 179개의 pydantic 스키마, 검사 한 번 CPU의 절반)를 건너뛴다
+#: (2026-10-02, 시험 하나 CPU 1초 한도).
+BOOT_CHECK_TAG = "codemit"
+
+
 def check_adapter_mode(*, setting_name: str, protocol: type) -> list[Error]:
     """배포 환경에서 어댑터 모드 값이 "fake"도 아니고 실제로 쓸 수도 없으면 `Error`를 낸다 (#83).
 

@@ -1,5 +1,7 @@
 from django.apps import AppConfig
 
+from core.adapters import BOOT_CHECK_TAG
+
 
 class VerificationConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
@@ -11,4 +13,4 @@ class VerificationConfig(AppConfig):
 
         from . import checks
 
-        register(checks.check_verification_adapter_mode)
+        register(checks.check_verification_adapter_mode, BOOT_CHECK_TAG)

@@ -1,5 +1,7 @@
 from django.apps import AppConfig
 
+from core.adapters import BOOT_CHECK_TAG
+
 
 class ContestsConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
@@ -46,9 +48,9 @@ class ContestsConfig(AppConfig):
         # LLM_REQUIREMENT_CHAT_ADAPTER_MODE 부팅 가드(#83) — 전이 등록과는 별개
         # 관심사지만, 이 앱의 ready()가 이미 지연 임포트 원칙(모델을 여기서
         # 불러오는 이유)을 지키고 있으므로 같은 자리에 등록한다.
-        register(checks.check_llm_requirement_chat_adapter_mode)
+        register(checks.check_llm_requirement_chat_adapter_mode, BOOT_CHECK_TAG)
         # SEARCH_ADAPTER_MODE 부팅 가드(#451) — 같은 자리, 같은 이유.
-        register(checks.check_search_adapter_mode)
+        register(checks.check_search_adapter_mode, BOOT_CHECK_TAG)
 
         from datetime import timedelta
 

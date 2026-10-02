@@ -14,18 +14,21 @@
 check`(부팅 파이프라인 그 자체)로 검증되는 것과 같은 원칙을, 서브프로세스로
 `manage.py check`를 직접 실행해 종료 코드와 에러 메시지를 확인하는 방식으로
 두 갈래 모두에 적용한다.
+
+그 「서브프로세스」는 2026-10-02 부터 미리 데워 둔 forkserver 의 자식이다
+(`tests/boot_process.py`) — 시험마다 파이썬을 새로 띄우던 비용이 시험 하나
+CPU 1초 한도를 넘었다. 자식 안에서 설정·앱·검사 등록부는 처음부터 평가된다.
 """
 
 from __future__ import annotations
 
 import subprocess
-import sys
-from pathlib import Path
 
 import pytest
 from django.test import override_settings
 
-BACKEND_DIR = Path(__file__).resolve().parent.parent
+from core.adapters import BOOT_CHECK_TAG
+from tests import boot_process
 
 # 50자 이상 · 고유 문자 5종 이상 · "django-insecure-" 접두 아님 — production
 # SECRET_KEY 강도 가드(config/settings.py)를 통과하는 값.
@@ -139,20 +142,25 @@ def _staging_env(**overrides: str) -> dict[str, str]:
 
 
 def _run_check(env: dict[str, str], *, deploy: bool = False) -> subprocess.CompletedProcess:
+    """새 프로세스에서 `manage.py check` 를 돌린다(`tests/boot_process.py` — 매번
+    파이썬을 새로 띄우지 않는다).
+
+    `--tag codemit`, 즉 **이 저장소가 등록한 부팅 검사만** 돈다
+    (`core.adapters.BOOT_CHECK_TAG`). 설정 모듈 임포트·`django.setup()`·검사
+    등록부는 그대로 거치므로 이 파일이 보는 가드 두 갈래가 전부 평가되고, 빠지는
+    것은 URLconf 적재(라우터 179개의 pydantic 스키마 — 한 번에 CPU 0.4초)를
+    부르는 Django 내장 검사뿐이다. `deploy=True` 는 `--deploy` 의 보안 검사
+    (`security` 태그 — 이 파일이 보는 다섯 경고가 전부 여기 있다)를 더한다.
+    URLconf 가 배포 설정으로 실제로 적재되는지는 CI 의 deploy-guard 셋이 구운
+    이미지를 띄워 본다."""
+
     import os
 
     full_env = {**os.environ, **env}
-    args = [sys.executable, "manage.py", "check"]
+    args = ["check", "--tag", BOOT_CHECK_TAG]
     if deploy:
-        args.append("--deploy")
-    return subprocess.run(
-        args,
-        cwd=BACKEND_DIR,
-        env=full_env,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
+        args += ["--deploy", "--tag", "security"]
+    return boot_process.run(args, full_env)
 
 
 # --- production: 다섯 개의 check --deploy 경고가 실제로 해소됐는지 --------------------
@@ -263,14 +271,7 @@ def test_development_target_still_boots_with_every_adapter_fake():
     }
     env.pop("CODEMIT_DEPLOYMENT_TARGET", None)
 
-    result = subprocess.run(
-        [sys.executable, "manage.py", "check", "--fail-level", "WARNING"],
-        cwd=BACKEND_DIR,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
+    result = boot_process.run(["check", "--fail-level", "WARNING", "--tag", BOOT_CHECK_TAG], env)
 
     assert result.returncode == 0, result.stderr
 
@@ -857,14 +858,7 @@ def test_unhandled_errors_reach_stdout_so_docker_logs_shows_them():
         # 깨진다.
         ".error('CODEMIT_REQUEST_ERROR_MARKER')"
     )
-    result = subprocess.run(
-        [sys.executable, "-c", program],
-        cwd=BACKEND_DIR,
-        env={**os.environ, **_staging_env()},
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
+    result = boot_process.run(["-c", program], {**os.environ, **_staging_env()})
 
     assert "CODEMIT_REQUEST_ERROR_MARKER" in (result.stdout + result.stderr), (
         "django.request 의 ERROR 가 프로세스 stdout/stderr 어디에도 나오지 않는다 — "

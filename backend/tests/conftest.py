@@ -23,6 +23,57 @@ from payments.adapters import FakePGAdapter
 from storage.adapters.fake import FakeStorageAdapter
 
 
+# --- 시험 하나의 CPU 한도 ----------------------------------------------------
+#
+# 시험 하나의 본문(call 단계)이 쓴 CPU 시간이 한도를 넘으면 실패로 바꾼다
+# (2026-10-02). 벽시계가 아니라 CPU 로 재는 이유: 벽시계는 CI 가 붐빌 때
+# 한도 근처의 시험이 빌드마다 번갈아 떨어진다. 자식 프로세스 몫
+# (`RUSAGE_CHILDREN` — 문법 검사가 파일마다 서브프로세스를 띄운다)도 더한다.
+# 준비(픽스처)는 재지 않는다 — 그쪽은 따로 줄인다.
+#
+# 한도는 `CODEMIT_TEST_CPU_LIMIT`(초, 기본 1.0)이고 CI 는 1.5 를 준다. 0 이면
+# 끈다. Postgres 가 질의를 처리하는 시간은 다른 프로세스라 여기 잡히지 않는다.
+
+import os
+import resource
+import time
+
+_CPU_LIMIT_SECONDS = float(os.environ.get("CODEMIT_TEST_CPU_LIMIT", "1.0"))
+
+
+def _cpu_seconds() -> float:
+    from tests.boot_process import charged_cpu_seconds
+
+    children = resource.getrusage(resource.RUSAGE_CHILDREN)
+    # forkserver 자식은 이 프로세스의 자식이 아니라 RUSAGE_CHILDREN 에 안 잡힌다
+    # — 자식이 돌려준 몫을 더한다(`tests/boot_process.py`).
+    return time.process_time() + children.ru_utime + children.ru_stime + charged_cpu_seconds()
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_call(item):
+    started = _cpu_seconds()
+    try:
+        return (yield)
+    finally:
+        item._codemit_cpu_seconds = _cpu_seconds() - started
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(item, call):
+    report = yield
+    spent = getattr(item, "_codemit_cpu_seconds", None)
+    if report.when == "call" and spent is not None:
+        report.user_properties.append(("cpu_seconds", round(spent, 3)))
+        if _CPU_LIMIT_SECONDS > 0 and spent > _CPU_LIMIT_SECONDS and report.passed:
+            report.outcome = "failed"
+            report.longrepr = (
+                f"시험 본문이 CPU {spent:.2f}초를 썼다 — 한도 {_CPU_LIMIT_SECONDS:.2f}초"
+                " (CODEMIT_TEST_CPU_LIMIT). 원인을 찾아 줄인다; 한도를 늘리지 않는다."
+            )
+    return report
+
+
 class _StubKeyCheckResponse:
     def __init__(self, status_code: int = 200) -> None:
         self.status_code = status_code

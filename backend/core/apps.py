@@ -1,5 +1,7 @@
 from django.apps import AppConfig
 
+from core.adapters import BOOT_CHECK_TAG
+
 
 class CoreConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
@@ -26,9 +28,9 @@ class CoreConfig(AppConfig):
 
         from . import checks
 
-        register(checks.check_llm_adapter_mode)
-        register(checks.check_github_adapter_mode)
-        register(checks.check_event_bus_adapter_mode)
+        register(checks.check_llm_adapter_mode, BOOT_CHECK_TAG)
+        register(checks.check_github_adapter_mode, BOOT_CHECK_TAG)
+        register(checks.check_event_bus_adapter_mode, BOOT_CHECK_TAG)
 
         # 모든 로그 레코드에 요청 id 를 붙인다(2026-09-21, core/request_id.py).
         from .request_id import install_log_record_factory

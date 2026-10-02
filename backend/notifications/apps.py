@@ -1,4 +1,6 @@
 from django.apps import AppConfig
+
+from core.adapters import BOOT_CHECK_TAG
 from django.core.checks import Error, register
 
 
@@ -7,15 +9,15 @@ class NotificationsConfig(AppConfig):
     name = "notifications"
 
     def ready(self):
-        register(check_notification_type_flags_cover_all_types)
+        register(check_notification_type_flags_cover_all_types, BOOT_CHECK_TAG)
 
         # #89: 알림 채널 셋(알림톡/SMS/LMS)도 나머지 여섯 어댑터와 같은 부팅
         # 가드를 받는다 — import·인스턴스화·계약 충족을 실제로 검증한다.
         from . import checks
 
-        register(checks.check_notification_alimtalk_adapter_mode)
-        register(checks.check_notification_sms_adapter_mode)
-        register(checks.check_notification_lms_adapter_mode)
+        register(checks.check_notification_alimtalk_adapter_mode, BOOT_CHECK_TAG)
+        register(checks.check_notification_sms_adapter_mode, BOOT_CHECK_TAG)
+        register(checks.check_notification_lms_adapter_mode, BOOT_CHECK_TAG)
 
         from core.scans import register_scan
 

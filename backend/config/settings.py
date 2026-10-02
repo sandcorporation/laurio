@@ -836,6 +836,12 @@ if _RUNNING_TESTS:
     # synchronously`)이 테스트 환경에서만 깨지기 때문이다.
     CELERY_BROKER_URL = "memory://"
     CELERY_RESULT_BACKEND = "cache+memory://"
+    # 비밀번호 해시는 일부러 느리다(PBKDF2 수십만 회) — 운영자 계정을 만들고
+    # 로그인하는 테스트가 그것만으로 한 번에 CPU 0.3초 넘게 썼고, 운영자 테스트
+    # 대부분이 시험 하나 CPU 1초 한도(`tests/conftest.py`)를 넘은 원인이 이것
+    # 하나였다(2026-10-02). 테스트가 보는 것은 「맞는 비밀번호로만 들어간다」이지
+    # 해시 알고리즘의 강도가 아니다 — Django 문서가 테스트에 권하는 그대로다.
+    PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 
 # --- Notification 어댑터 (티켓 17, ADR-0007 / ADR-0009) ------------------------------
 #

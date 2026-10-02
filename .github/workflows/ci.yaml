@@ -180,8 +180,12 @@ jobs:
         working-directory: backend
         run: uv run python manage.py prefetch_syntax_grammars --skip-checks
 
+      # 시험 하나의 CPU 한도(`backend/tests/conftest.py`)는 로컬 1초, 여기서는 1.5초다
+      # — 러너는 다른 잡과 호스트를 나눠 써 같은 시험의 CPU 시간도 조금 늘어난다.
       - name: Run tests
         working-directory: backend
+        env:
+          CODEMIT_TEST_CPU_LIMIT: "1.5"
         run: uv run pytest
 
   deploy-check:

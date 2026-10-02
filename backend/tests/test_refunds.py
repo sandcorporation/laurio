@@ -754,17 +754,27 @@ def test_pending_refund_is_reconciled_by_a_later_scan_without_calling_refund_aga
 
 
 @pytest.mark.django_db
-def test_refund_scan_is_bounded_by_batch_size(client, category, landing_type):
+def test_refund_scan_is_bounded_by_batch_size(client, category, landing_type, monkeypatch):
     """한 스캔이 처리하는 후보 수가 배치 상한으로 제한된다 — 무제한 스캔은
     백로그가 쌓였을 때 이 엔드포인트를 호출하는 HTTP 요청 자체를 타임아웃으로
-    몰아넣는다."""
+    몰아넣는다.
+
+    상한을 2 로 줄여서 본다(2026-10-02). 실제 값(50)으로 보면 공모전 53개를
+    HTTP 로 개최해야 해 시험 하나가 CPU 4초를 썼다 — 이 시험이 고정하는 것은
+    「상한에서 멈추고 다음 스캔이 나머지를 줍는다」이지 상한의 크기가 아니다."""
+
+    import dataclasses
 
     from core.scans import SCAN_REGISTRY
 
-    REFUND_BATCH_SIZE = SCAN_REGISTRY["payment-refund-request"].batch_size
-    assert REFUND_BATCH_SIZE > 0
+    spec = SCAN_REGISTRY["payment-refund-request"]
+    assert spec.batch_size > 0
+    REFUND_BATCH_SIZE = 2
+    monkeypatch.setitem(
+        SCAN_REGISTRY, spec.name, dataclasses.replace(spec, batch_size=REFUND_BATCH_SIZE)
+    )
 
-    total = REFUND_BATCH_SIZE + 3
+    total = REFUND_BATCH_SIZE + 1  # 잔여분이 다음 스캔 한 번에 들어가는 크기
     deadline = timezone.now() + timedelta(hours=1)
     order_ids = []
     for i in range(total):

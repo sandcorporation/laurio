@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from django.apps import AppConfig
 
+from core.adapters import BOOT_CHECK_TAG
+
 
 class StorageConfig(AppConfig):
     name = "storage"
@@ -12,4 +14,4 @@ class StorageConfig(AppConfig):
 
         from . import checks
 
-        register(checks.check_storage_backend_is_importable)
+        register(checks.check_storage_backend_is_importable, BOOT_CHECK_TAG)

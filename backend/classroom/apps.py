@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from django.apps import AppConfig
 
+from core.adapters import BOOT_CHECK_TAG
+
 
 class ClassroomConfig(AppConfig):
     name = "classroom"
@@ -20,4 +22,4 @@ class ClassroomConfig(AppConfig):
         register_scan(CLASSROOM_SUBMISSION_SCORING_SCAN)
         # 어댑터 모드 부팅 가드(#340, ADR-0043) — `core.apps.CoreConfig.ready()`와
         # 같은 이유로 여기서 등록한다(django.setup() 이후에만 평가돼야 한다).
-        register(checks.check_classroom_scoring_adapter_mode)
+        register(checks.check_classroom_scoring_adapter_mode, BOOT_CHECK_TAG)
