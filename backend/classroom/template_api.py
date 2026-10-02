@@ -22,12 +22,13 @@ from ninja.pagination import PageNumberPagination, paginate
 
 from accounts.middleware import jwt_auth
 
-from .api import (
-    _reject_if_banned_name,
-    _reject_if_banned_public_text,
-    _serialize_class,
-    _serialize_problem,
+from .api import _serialize_class, _serialize_problem
+from .class_authoring import (
+    TEMPLATE_GONE_MESSAGE,
+    import_class_template_as,
+    visible_problem_template_or_404,
 )
+from .class_authoring import reject_banned_name as _reject_if_banned_name
 from .instructor_scope import class_scope, problem_scope
 from .models import Class, ClassTemplate, Problem, ProblemTemplate, ProblemTemplateReport
 from .schemas import (
@@ -47,7 +48,6 @@ from .schemas import (
     ReportTemplateIn,
 )
 from .services import (
-    import_class_template,
     import_problem_template,
     publish_class_as_template,
     publish_problem_as_template,
@@ -100,18 +100,9 @@ def _serialize_template(template: ProblemTemplate, *, viewer_id: int | None = No
     )
 
 
-def _get_visible_template_or_404(share_code: str) -> ProblemTemplate:
-    """내려진 템플릿은 링크로도 열리지 않는다(#320 AC) — 가져오기·신고처럼
-    「내려진 뒤에는 누구도 상호작용할 수 없다」가 성립해야 하는 엔드포인트가
-    쓴다. 미리보기(`get_problem_template`)는 올린 사람 본인에게는 예외를
-    두므로 이 함수를 쓰지 않는다."""
-
-    try:
-        return ProblemTemplate.objects.prefetch_related("checklist_items").get(
-            share_code=share_code, taken_down_at__isnull=True
-        )
-    except ProblemTemplate.DoesNotExist as exc:
-        raise HttpError(404, "이 템플릿은 더 이상 사용할 수 없습니다.") from exc
+# 내려진 템플릿은 링크로도 열리지 않는다(#320 AC) — 가져오기·신고가 쓰는 문은
+# 연결된 앱과 한 벌이라 `class_authoring` 에 산다(#516).
+_get_visible_template_or_404 = visible_problem_template_or_404
 
 
 def _get_template_by_share_code_or_404(share_code: str) -> ProblemTemplate:
@@ -120,7 +111,7 @@ def _get_template_by_share_code_or_404(share_code: str) -> ProblemTemplate:
             share_code=share_code
         )
     except ProblemTemplate.DoesNotExist as exc:
-        raise HttpError(404, "이 템플릿은 더 이상 사용할 수 없습니다.") from exc
+        raise HttpError(404, TEMPLATE_GONE_MESSAGE) from exc
 
 
 @router.post(
@@ -194,7 +185,7 @@ def get_problem_template(request, share_code: str):
 
     template = _get_template_by_share_code_or_404(share_code)
     if template.taken_down_at is not None and template.published_by_id != request.auth_user.id:
-        raise HttpError(404, "이 템플릿은 더 이상 사용할 수 없습니다.")
+        raise HttpError(404, TEMPLATE_GONE_MESSAGE)
     return 200, _serialize_template(template, viewer_id=request.auth_user.id)
 
 
@@ -305,25 +296,13 @@ def _serialize_class_template(template: ClassTemplate, *, viewer_id: int | None 
     )
 
 
-def _get_visible_class_template_or_404(share_code: str) -> ClassTemplate:
-    """`_get_visible_template_or_404`와 같은 이유 — 내려진 템플릿은 가져오기
-    등에서 링크로도 열리지 않는다."""
-
-    try:
-        return ClassTemplate.objects.prefetch_related("problems__checklist_items").get(
-            share_code=share_code, taken_down_at__isnull=True
-        )
-    except ClassTemplate.DoesNotExist as exc:
-        raise HttpError(404, "이 템플릿은 더 이상 사용할 수 없습니다.") from exc
-
-
 def _get_class_template_by_share_code_or_404(share_code: str) -> ClassTemplate:
     try:
         return ClassTemplate.objects.prefetch_related("problems__checklist_items").get(
             share_code=share_code
         )
     except ClassTemplate.DoesNotExist as exc:
-        raise HttpError(404, "이 템플릿은 더 이상 사용할 수 없습니다.") from exc
+        raise HttpError(404, TEMPLATE_GONE_MESSAGE) from exc
 
 
 @router.post(
@@ -394,7 +373,7 @@ def get_class_template(request, share_code: str):
 
     template = _get_class_template_by_share_code_or_404(share_code)
     if template.taken_down_at is not None and template.published_by_id != request.auth_user.id:
-        raise HttpError(404, "이 템플릿은 더 이상 사용할 수 없습니다.")
+        raise HttpError(404, TEMPLATE_GONE_MESSAGE)
     return 200, _serialize_class_template(template, viewer_id=request.auth_user.id)
 
 
@@ -409,13 +388,8 @@ def import_class_template_view(request, share_code: str, payload: ImportClassTem
     들어오며, 채점 모델은 대상(새 클래스)의 기본값을 따른다. 새 클래스는
     자기만의 새 가입 코드를 갖는다 — 원본의 것이 따라오지 않는다."""
 
-    # 가져가는 사람이 새로 붙이는 클래스 이름이다 — `classroom.ClassIn.name`과
-    # 같은 필드(빠뜨렸던 것을 #480 구조 검사가 잡았다), 같은 규칙을 쓴다.
-    _reject_if_banned_public_text(payload.name, "클래스 이름")
-    template = _get_visible_class_template_or_404(share_code)
-    new_class = import_class_template(
-        template, instructor_id=request.auth_user.id, name=payload.name
-    )
+    # 이름 금칙어 검사·내려진 템플릿 404 는 `class_authoring` 이 한다(연결된 앱과 한 벌).
+    new_class = import_class_template_as(share_code, request.auth_user.id, payload)
     return 201, _serialize_class(new_class)
 
 

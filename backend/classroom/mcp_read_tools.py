@@ -62,9 +62,16 @@ def _problem_id(arguments: dict) -> int:
     return _int_argument(arguments, "problem_id", "문제")
 
 
+def class_view(class_obj) -> dict:
+    """연결된 앱이 보는 클래스 하나 — 화면 응답에서 키의 가린 표시만 뺀다. 클래스를 바꾸는
+    도구(`classroom.mcp_class_tools`)도 결과를 이 모양으로 돌려준다."""
+
+    return _as_screen_json(_serialize_class(class_obj).model_dump(exclude=_CLASS_FIELDS_WITHHELD))
+
+
 def _get_class(grant: ConnectedApp, arguments: dict) -> dict:
     class_obj = class_scope(_class_id(arguments), grant.instructor_id, write=False).class_obj
-    return _as_screen_json(_serialize_class(class_obj).model_dump(exclude=_CLASS_FIELDS_WITHHELD))
+    return class_view(class_obj)
 
 
 def _list_problems(grant: ConnectedApp, arguments: dict) -> dict:
@@ -205,6 +212,35 @@ _PARTICIPANT_OBJECT = {
 }
 
 
+CLASS_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "id": {"type": "integer", "description": "클래스 번호"},
+        "name": {"type": "string", "description": "클래스 이름"},
+        "instructor_display_name": {"type": "string", "description": "참여자에게 보이는 강사 이름"},
+        "join_code": {"type": "string", "description": "가입 링크의 코드"},
+        "created_at": _DATETIME,
+        "archived": {"type": "boolean", "description": "보관된 클래스인가 — 참이면 새 가입·새 제출이 닫히고 문제를 바꿀 수 없다"},
+        "default_model": {"type": "string", "description": "기본 채점 모델"},
+        "default_model_is_reasoning": {"type": "boolean"},
+        "default_reasoning_effort": {"type": "string", "description": "기본 추론 강도(low·medium·high)"},
+        "has_openai_key": {"type": "boolean", "description": "채점에 쓸 OpenAI 키가 들어 있는가"},
+        "openai_key_status": {
+            "type": ["string", "null"],
+            "description": "키가 있을 때만 — verified 확인됨, unverified 확인 전, rejected 거부됨",
+        },
+        "token_budget": {**_NULLABLE_INT, "description": "채점 토큰 예산. null 이면 무제한"},
+        "token_budget_warning_threshold_percent": {"type": "integer", "description": "경고 알림 임계(예산 대비 %)"},
+        "token_usage_total": {**_COUNT, "description": "지금까지 채점에 쓴 토큰"},
+        "token_budget_remaining": {**_NULLABLE_INT, "description": "남은 토큰. 예산이 없으면 null"},
+        "token_budget_exhausted": {"type": "boolean", "description": "예산이 다 떨어져 채점이 멈춰 있는가"},
+        "has_submissions": {"type": "boolean", "description": "어느 문제에든 제출이 하나라도 있는가"},
+        "published_template": _TEMPLATE_SUMMARY,
+    },
+    "required": ["id", "name", "archived", "has_openai_key", "token_usage_total"],
+}
+
+
 READ_TOOL_SPECS: list[dict] = [
     {
         "name": "get_class",
@@ -215,33 +251,7 @@ READ_TOOL_SPECS: list[dict] = [
             "경고 임계, 제출이 있는가, 공개된 템플릿. 내가 강사가 아닌 클래스는 찾을 수 없다고 답한다."
         ),
         "input_schema": _CLASS_ONLY_INPUT,
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "id": {"type": "integer", "description": "클래스 번호"},
-                "name": {"type": "string", "description": "클래스 이름"},
-                "instructor_display_name": {"type": "string", "description": "참여자에게 보이는 강사 이름"},
-                "join_code": {"type": "string", "description": "가입 링크의 코드"},
-                "created_at": _DATETIME,
-                "archived": {"type": "boolean", "description": "보관된 클래스인가 — 참이면 새 가입·새 제출이 닫히고 문제를 바꿀 수 없다"},
-                "default_model": {"type": "string", "description": "기본 채점 모델"},
-                "default_model_is_reasoning": {"type": "boolean"},
-                "default_reasoning_effort": {"type": "string", "description": "기본 추론 강도(low·medium·high)"},
-                "has_openai_key": {"type": "boolean", "description": "채점에 쓸 OpenAI 키가 들어 있는가"},
-                "openai_key_status": {
-                    "type": ["string", "null"],
-                    "description": "키가 있을 때만 — verified 확인됨, unverified 확인 전, rejected 거부됨",
-                },
-                "token_budget": {**_NULLABLE_INT, "description": "채점 토큰 예산. null 이면 무제한"},
-                "token_budget_warning_threshold_percent": {"type": "integer", "description": "경고 알림 임계(예산 대비 %)"},
-                "token_usage_total": {**_COUNT, "description": "지금까지 채점에 쓴 토큰"},
-                "token_budget_remaining": {**_NULLABLE_INT, "description": "남은 토큰. 예산이 없으면 null"},
-                "token_budget_exhausted": {"type": "boolean", "description": "예산이 다 떨어져 채점이 멈춰 있는가"},
-                "has_submissions": {"type": "boolean", "description": "어느 문제에든 제출이 하나라도 있는가"},
-                "published_template": _TEMPLATE_SUMMARY,
-            },
-            "required": ["id", "name", "archived", "has_openai_key", "token_usage_total"],
-        },
+        "output_schema": CLASS_OUTPUT_SCHEMA,
         "handler": _get_class,
     },
     {

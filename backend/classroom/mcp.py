@@ -39,6 +39,7 @@ from ninja.errors import HttpError
 from core.clock import Clock
 
 from .connected_app_writes import record_write
+from .mcp_class_tools import CLASS_TOOLS
 from .mcp_problem_tools import PROBLEM_TOOLS
 from .mcp_tool import Preview, Tool, ToolInputError, WriteResult
 from .models import ConnectedApp
@@ -166,6 +167,9 @@ for _spec in REPORT_TOOL_SPECS:
 
 # 되돌릴 수 없는 도구(#515) — 두 단계 확인. 처리기는 `mcp_destructive_tools` 에 산다.
 for _tool in DESTRUCTIVE_TOOLS:
+
+# 클래스를 다루는 쓰기 도구(#516) — `mcp_class_tools` 에 산다. 등록부 끝에 덧붙인다.
+for _tool in CLASS_TOOLS:
     TOOLS[_tool.name] = _tool
 
 
