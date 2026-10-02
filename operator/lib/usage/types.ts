@@ -5,3 +5,4 @@ import type { components } from "@codemit/bff-client/schema";
 
 export type DailyUsage = components["schemas"]["UsageDailyOut"];
 export type UsageDay = components["schemas"]["UsageDayOut"];
+export type ClassUsage = components["schemas"]["ClassUsageOut"];
