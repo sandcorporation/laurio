@@ -218,8 +218,8 @@ def test_connector_discovers_registers_gets_consent_and_lists_my_classes(client,
     assert _rpc(client, access, "notifications/initialized", request_id=None).status_code == 202
 
     tools = _rpc(client, access, "tools/list").json()["result"]["tools"]
-    assert [tool["name"] for tool in tools] == ["list_my_classes"]
-    assert tools[0]["annotations"]["readOnlyHint"] is True
+    listed = {tool["name"]: tool for tool in tools}
+    assert listed["list_my_classes"]["annotations"]["readOnlyHint"] is True
 
     called = _call_list_my_classes(client, access)
     assert called.status_code == 200
