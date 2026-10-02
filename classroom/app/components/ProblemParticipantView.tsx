@@ -14,7 +14,7 @@
 // 않는다 — 실제로 제출된 적 없는 초안이므로 빈 목록이 사실과도 맞는다).
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { ChangeEvent, FormEvent } from "react";
+import type { ChangeEvent, FormEvent, ReactNode } from "react";
 
 import { MarkdownView } from "@codemit/markdown";
 
@@ -33,6 +33,7 @@ import {
 import type { UploadStatus } from "@/lib/submissions/use-source-upload";
 import type { ClassroomSubmissionRow, SubmitBlockedReason } from "@/lib/submissions/api";
 import { attemptIdFromHash, splitAttempts } from "@/lib/submissions/attempt-fold";
+import { attemptEntryLabel } from "@/lib/submissions/contest-entry";
 import type { GradingStrictness, SubmissionFormat } from "@/lib/problems/api";
 import { gradingGuidelineText, gradingStrictnessLabel } from "@/lib/problems/grading-guideline";
 
@@ -70,6 +71,9 @@ type InteractiveProps = {
   submitError: string | null;
   uploadStatus: UploadStatus;
   uploadError: string | null;
+  /** 공모전 문제의 「공모전에도 내기」 칸(#549) — 제출 입력 위에 선다. 공모전 문제가 아니거나
+   *  공모전이 지금 받지 않으면 비운다. */
+  contestEntry?: ReactNode;
 };
 
 type PreviewProps = {
@@ -406,6 +410,17 @@ function SubmissionRow({
         </span>
       </div>
 
+      {submission.contest_entry ? (
+        <p
+          data-testid={`submission-row-${submission.id}-contest-entry`}
+          className={`mt-2 text-[12.5px] leading-relaxed ${
+            submission.contest_entry.status === "rejected" ? "text-attention" : "text-ink/60"
+          }`}
+        >
+          {attemptEntryLabel(submission.contest_entry)}
+        </p>
+      ) : null}
+
       {submission.status === "pending" && submission.pending_reason === "budget_exhausted" ? (
         <p className="mt-2.5 text-[12.5px] leading-relaxed text-ink/60">
           이 클래스의 채점 예산이 소진되어 잠시 멈췄습니다.{" "}
@@ -514,6 +529,7 @@ function InteractiveSubmissionForm(
     uploadStatus,
     uploadError,
     submissionFormats,
+    contestEntry,
   } = props;
 
   // 둘 다 열린 문제는 형식 선택을 먼저 보인다(#373 AC) — 하나만 열린
@@ -560,6 +576,8 @@ function InteractiveSubmissionForm(
           </span>
         </ErrorNote>
       ) : needsFormatChoice ? (
+        <>
+        {contestEntry}
         <div data-testid="submission-format-picker" className="flex flex-col gap-2.5">
           <FieldLabel>낼 형식을 고르세요</FieldLabel>
           <div className="flex flex-col gap-2">
@@ -581,6 +599,7 @@ function InteractiveSubmissionForm(
             </button>
           </div>
         </div>
+        </>
       ) : (
         <>
           {submissionFormats.length > 1 ? (
@@ -593,6 +612,8 @@ function InteractiveSubmissionForm(
               다른 형식으로 내기
             </button>
           ) : null}
+
+          {contestEntry}
 
           {resolvedFormat === "repository" ? (
             <form onSubmit={onRepositorySubmit} className="flex flex-col gap-3">

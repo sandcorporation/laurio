@@ -112,6 +112,12 @@ router = Router(tags=["submissions"])
 
 _EVIDENCE_KINDS = {choice for choice, _label in Evidence.Kind.choices}
 
+#: 무료 공모전 제출의 소스 열람 동의가 없을 때의 거절 문장 — 강의실의 「공모전에도 내기」
+#: (#549, `contests.classroom_entries`)도 같은 문장을 받는다.
+SOURCE_ACCESS_CONSENT_REQUIRED_MESSAGE = (
+    "수상작의 소스는 개최자가 볼 수 있습니다 — 동의해야 제출할 수 있습니다."
+)
+
 
 # --- 가드 -------------------------------------------------------------------
 
@@ -155,10 +161,7 @@ def _resolve_source_access_consent(contest: Contest, payload: SubmissionIn):
     if not contest.is_free:
         return None
     if not payload.source_access_consent:
-        raise HttpError(
-            422,
-            "수상작의 소스는 개최자가 볼 수 있습니다 — 동의해야 제출할 수 있습니다.",
-        )
+        raise HttpError(422, SOURCE_ACCESS_CONSENT_REQUIRED_MESSAGE)
     return Clock.now()
 
 
@@ -594,27 +597,10 @@ def _replace_requirement_responses(
       경로를 만들지 않는다**(#190) — 이 갈래를 함께 뭉개면 그 방어가 사라진다.
     """
 
-    valid_requirement_ids = set(
-        Requirement.objects.filter(contest=contest).values_list("id", flat=True)
-    )
     own_asset_ids = set(submission.assets.values_list("id", flat=True))
-
-    seen_ids: set[int] = set()
-    for item in responses_in:
-        if item.requirement_id in seen_ids:
-            raise HttpError(422, "같은 요구사항에 대한 응답이 중복되었습니다.")
-        seen_ids.add(item.requirement_id)
-        if item.requirement_id not in valid_requirement_ids:
-            raise HttpError(422, "이 제출 대상에 속하지 않은 요구사항입니다.")
-        for evidence in item.evidence:
-            if evidence.kind not in _EVIDENCE_KINDS:
-                raise HttpError(422, f"알 수 없는 근거 종류입니다: {evidence.kind}")
-            if (
-                evidence.asset_id is not None
-                and evidence.asset_id not in own_asset_ids
-                and evidence.asset_id not in removed_asset_ids
-            ):
-                raise HttpError(422, "이 제출물에 속하지 않은 자료를 근거로 지정했습니다.")
+    validate_requirement_responses(
+        contest, responses_in, own_asset_ids=own_asset_ids, removed_asset_ids=removed_asset_ids
+    )
 
     # 편집 UI가 매번 체크리스트 전체를 다시 제출하는 형태와 맞춘다 — 부분 갱신이
     # 아니라 이 Submission의 자가 응답 전체를 새로 쓴다.
@@ -638,6 +624,37 @@ def _replace_requirement_responses(
                 for e in item.evidence
             ]
         )
+
+
+def validate_requirement_responses(
+    contest: Contest,
+    responses_in,
+    *,
+    own_asset_ids: set[int],
+    removed_asset_ids: set[int],
+) -> None:
+    """자가 응답의 모양을 본다 — 아무것도 쓰지 않는다. 강의실의 「공모전에도 내기」(#549)가
+    시도를 만들기 전에 같은 검사로 미리 거른다(`contests.classroom_entries`)."""
+
+    valid_requirement_ids = set(
+        Requirement.objects.filter(contest=contest).values_list("id", flat=True)
+    )
+    seen_ids: set[int] = set()
+    for item in responses_in:
+        if item.requirement_id in seen_ids:
+            raise HttpError(422, "같은 요구사항에 대한 응답이 중복되었습니다.")
+        seen_ids.add(item.requirement_id)
+        if item.requirement_id not in valid_requirement_ids:
+            raise HttpError(422, "이 제출 대상에 속하지 않은 요구사항입니다.")
+        for evidence in item.evidence:
+            if evidence.kind not in _EVIDENCE_KINDS:
+                raise HttpError(422, f"알 수 없는 근거 종류입니다: {evidence.kind}")
+            if (
+                evidence.asset_id is not None
+                and evidence.asset_id not in own_asset_ids
+                and evidence.asset_id not in removed_asset_ids
+            ):
+                raise HttpError(422, "이 제출물에 속하지 않은 자료를 근거로 지정했습니다.")
 
 
 # --- 직렬화 -------------------------------------------------------------------

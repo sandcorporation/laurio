@@ -87,3 +87,15 @@ describe("describeNotification — 알 수 없는 유형", () => {
     expect(text).toBe("새 알림이 있습니다.");
   });
 });
+
+describe("classroom_contest_entry_rejected (#549)", () => {
+  it("공모전에는 내지 못했다는 것과 그 이유를 말한다", () => {
+    const text = describeNotification(
+      row({
+        notification_type: "classroom_contest_entry_rejected",
+        context: { problem_title: "할 일 웹앱", attempt_number: 3, reason: "마감됐습니다" },
+      }),
+    );
+    expect(text).toBe("'할 일 웹앱' 3번째 시도는 공모전에는 내지 못했습니다 — 마감됐습니다. 클래스 제출과 채점은 그대로입니다.");
+  });
+});

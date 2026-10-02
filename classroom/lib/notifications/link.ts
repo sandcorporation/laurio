@@ -18,6 +18,8 @@ export function notificationHref(notification: NotificationRow): string | null {
   const context = (notification.context ?? {}) as Record<string, unknown>;
 
   switch (notification.notification_type) {
+    // 공모전에 내지 못한 시도(#549)도 낸 사람에게 가므로 같은 시도 줄로 보낸다.
+    case "classroom_contest_entry_rejected":
     case "classroom_submission_scored": {
       const classId = context.class_id;
       const problemId = context.problem_id;

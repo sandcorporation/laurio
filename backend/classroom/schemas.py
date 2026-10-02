@@ -443,6 +443,91 @@ class ClassroomProblemMineOut(Schema):
     passed: bool = False
 
 
+class ContestEntryEvidenceIn(Schema):
+    """근거 한 줄 — 공모전 직접 제출의 Evidence 와 같은 모양이다(#549). 자료를 가리키는 칸은
+    없다: 이 시도의 자료는 아직 공모전 쪽 id 가 없다."""
+
+    kind: str
+    value: str = Field(max_length=500)
+
+
+class ContestEntryResponseIn(Schema):
+    requirement_id: int
+    is_met: bool = False
+    note: str = Field(default="", max_length=1000)
+    evidence: list[ContestEntryEvidenceIn] = []
+
+
+class ContestEntryAssetIn(Schema):
+    """선택 자료 하나 — 데모 주소·시연 영상·스크린샷. 영상·스크린샷은 `ContestEntryFormOut.
+    upload_target_refs` 의 업로드 대상에 먼저 올린 object_key 다."""
+
+    kind: str
+    value: str = Field(max_length=2000)
+    label: str = Field(default="", max_length=200)
+    content_type: str = Field(default="", max_length=255)
+
+
+class ContestEntryIn(Schema):
+    """「공모전에도 내기」(#549, CONTEXT.md) — 공모전에 직접 낼 때와 같은 칸이다."""
+
+    #: 「수상작의 소스는 개최자가 볼 수 있습니다」 — 무료 공모전 직접 제출과 같은 동의.
+    source_access_consent: bool = False
+    #: 그 공모전에 이미 낸 제출이 있을 때 「이 시도로 바뀝니다」를 확인했는가.
+    replace_existing: bool = False
+    requirement_responses: list[ContestEntryResponseIn] = []
+    optional_assets: list[ContestEntryAssetIn] = []
+
+
+class ContestEntryEvidenceOut(Schema):
+    kind: str
+    value: str
+
+
+class ContestEntryResponseOut(Schema):
+    is_met: bool
+    note: str
+    evidence: list[ContestEntryEvidenceOut]
+
+
+class ContestEntryRequirementOut(Schema):
+    requirement_id: int
+    text: str
+    required: bool
+    #: 직전 공모전 제출의 응답 — 요구사항이 그사이 새로 생겼으면 None(빈칸).
+    previous: ContestEntryResponseOut | None = None
+
+
+class ContestEntryAssetOut(Schema):
+    kind: str
+    value: str
+    label: str
+    content_type: str
+
+
+class ContestEntryFormOut(Schema):
+    """「공모전에도 내기」 칸을 그리는 데 필요한 것(#549). 공모전이 지금 받지 않으면
+    `accepts_entries` 가 거짓이고 나머지는 비어 있다 — 화면은 스위치를 감춘다."""
+
+    contest_id: int
+    accepts_entries: bool
+    deadline_at: datetime | None = None
+    #: 그 공모전에 이미 낸 제출이 있는가(직접 냈든 다른 클래스에서 냈든) — 참이면 화면이
+    #: 「이 시도로 바뀝니다」 확인을 받는다.
+    has_entry: bool = False
+    requirements: list[ContestEntryRequirementOut] = []
+    optional_assets: list[ContestEntryAssetOut] = []
+    #: 선택 자료 종류(demo_video·screenshot) → 그 사람의 공모전 업로드 대상.
+    upload_target_refs: dict[str, str] = {}
+
+
+class ClassroomContestEntryOut(Schema):
+    #: "pending" | "entered" | "rejected"
+    status: str
+    #: 공모전이 받지 않았을 때 그 이유. 받았으면 빈 문자열.
+    reason: str
+
+
 class ClassroomSubmissionIn(Schema):
     #: 이 시도에서 고른 형식(#373) — 문제의 허용 목록에 있어야 한다, 없으면
     #: 422다. 문제가 형식을 하나만 열어 뒀어도 화면이 그 값을 그대로 보낸다
@@ -454,6 +539,8 @@ class ClassroomSubmissionIn(Schema):
     #: 업로드 발급 시 받은 content-type(#241과 같은 이유) — 소스가 아니면
     #: 무시한다. 다운로드 파일명의 확장자를 유도한다.
     content_type: str | None = None
+    #: 공모전 문제에서 「공모전에도 내기」를 켰을 때만 싣는다(#549). 강사 자신의 시도는 422.
+    contest_entry: ContestEntryIn | None = None
 
 
 class ClassroomChecklistVerdictOut(Schema):
@@ -528,6 +615,8 @@ class ClassroomSubmissionOut(Schema):
     #: 보인다") — 강사 화면만 셋을 다르게 말하며, 강사가 무엇을 해야
     #: 풀리는가(키를 넣는다/예산을 늘린다/모델을 바꾼다)가 다를 뿐이다.
     pending_reason: str | None = None
+    #: 이 시도를 「공모전에도 내기」로 냈을 때만 채워진다(#549) — 끄고 낸 시도는 None.
+    contest_entry: ClassroomContestEntryOut | None = None
 
 
 class ClassroomProblemSubmissionsOut(Schema):

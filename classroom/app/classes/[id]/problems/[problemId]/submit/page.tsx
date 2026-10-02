@@ -10,14 +10,22 @@
 // 제출 요청을 보내는 배선만 맡는다.
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 
 import { ErrorNote, PageShell, buttonClass } from "@/app/components/ui";
+import { ContestEntryFields } from "@/app/components/ContestEntryFields";
 import { ProblemParticipantView } from "@/app/components/ProblemParticipantView";
 import { useMe } from "@/lib/auth/use-me";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
-import { submitAttempt } from "@/lib/submissions/api";
+import { fetchContestEntryForm, submitAttempt } from "@/lib/submissions/api";
+import {
+  buildEntryPayload,
+  entryBlockedReason,
+  initialEntryState,
+  type ContestEntryForm,
+  type ContestEntryState,
+} from "@/lib/submissions/contest-entry";
 import { useMyProblem } from "@/lib/submissions/use-my-problem";
 import { useSourceUpload } from "@/lib/submissions/use-source-upload";
 
@@ -61,6 +69,27 @@ export default function ProblemSubmitPage() {
   const targetRef =
     me.status === "ready" ? sourceTargetRef(problemId, me.userId) : null;
   const { state: uploadState, upload } = useSourceUpload(targetRef);
+
+  // 「공모전에도 내기」(#549) — 공모전이 지금 받는 공모전 문제에서, 참여자에게만 연다.
+  const offersContestEntry =
+    state.status === "ready" &&
+    !state.data.viewing_as_instructor &&
+    state.data.problem.contest?.accepts_entries === true;
+  const [entryForm, setEntryForm] = useState<ContestEntryForm | null>(null);
+  const [entryState, setEntryState] = useState<ContestEntryState | null>(null);
+  const loadEntryForm = useCallback(async () => {
+    const result = await fetchContestEntryForm(classId, problemId);
+    if (result.ok && result.data.accepts_entries) {
+      setEntryForm(result.data);
+      setEntryState(initialEntryState(result.data));
+    } else {
+      setEntryForm(null);
+      setEntryState(null);
+    }
+  }, [classId, problemId]);
+  useEffect(() => {
+    if (offersContestEntry) void loadEntryForm();
+  }, [offersContestEntry, loadEntryForm]);
 
   useClassroomTabTitle({
     screenName: "문제 제출",
@@ -111,6 +140,9 @@ export default function ProblemSubmitPage() {
   // 제출 경로를 그대로 쓴다. 잠기는 것은 초안·숨김·보관뿐이다.
   const submitLocked = submitBlockedReason !== null;
 
+  const entryOn = entryForm !== null && entryState !== null && entryState.on;
+  const entryBlocked = entryOn ? entryBlockedReason(entryForm, entryState) : null;
+
   async function submitValue(
     submissionFormat: "source" | "repository",
     value: string,
@@ -118,14 +150,19 @@ export default function ProblemSubmitPage() {
   ) {
     setSubmitting(true);
     setSubmitError(null);
+    const contestEntry =
+      entryForm !== null && entryState !== null ? buildEntryPayload(entryForm, entryState) : null;
     const result = await submitAttempt(classId, problemId, {
       submission_format: submissionFormat,
       value,
       content_type: contentType,
+      contest_entry: contestEntry,
     });
     if (result.ok) {
       setRepositoryUrl("");
       reload();
+      // 공모전에 냈으면 「이미 낸 제출」이 생겼다 — 칸을 새로 읽어 다음 시도의 확인을 받는다.
+      if (contestEntry !== null) void loadEntryForm();
     } else {
       setSubmitError(result.detail);
     }
@@ -138,6 +175,10 @@ export default function ProblemSubmitPage() {
     // 않는다 — 백엔드도 같은 이유로 거절하므로 이 잠금은 헛걸음을 줄이는
     // 것일 뿐 유일한 문이 아니다.
     if (submitLocked) return;
+    if (entryBlocked) {
+      setSubmitError(entryBlocked);
+      return;
+    }
     await submitValue("repository", repositoryUrl.trim());
   }
 
@@ -145,6 +186,11 @@ export default function ProblemSubmitPage() {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file || submitLocked) return;
+    if (entryBlocked) {
+      // 파일을 올리기 전에 막는다 — 올린 뒤 거절되면 같은 파일을 다시 골라야 한다.
+      setSubmitError(entryBlocked);
+      return;
+    }
     try {
       const uploaded = await upload(file);
       await submitValue("source", uploaded.objectKey, uploaded.contentType);
@@ -187,6 +233,19 @@ export default function ProblemSubmitPage() {
         submitError={submitError}
         uploadStatus={uploadState.status}
         uploadError={uploadState.error}
+        contestEntry={
+          entryForm !== null && entryState !== null ? (
+            <ContestEntryFields
+              form={entryForm}
+              state={entryState}
+              onChange={(next) => {
+                setEntryState(next);
+                setSubmitError(null);
+              }}
+              disabled={submitting}
+            />
+          ) : null
+        }
       />
     </PageShell>
   );

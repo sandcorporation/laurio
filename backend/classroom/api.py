@@ -34,7 +34,7 @@ from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
 from accounts.models import SocialAccount
-from core.contest_catalog import contest_catalog
+from core.contest_catalog import EntryAsset, contest_catalog
 from core.crypto import encrypt
 from core.events import Event, EventBusDisconnected, get_event_bus
 from core.keyset import decode_cursor, encode_cursor
@@ -52,6 +52,13 @@ from .models import (
     ClassTemplate,
     Problem,
     ProblemTemplate,
+)
+from .contest_entries import (
+    INSTRUCTOR_ENTRY_MESSAGE,
+    contest_entry_form,
+    contest_entry_out,
+    prepare_contest_entry,
+    request_contest_entry,
 )
 from .contest_problems import contest_state, import_contest_problem
 from .schemas import (
@@ -79,6 +86,7 @@ from .schemas import (
     ClassroomScoreOut,
     ClassroomSubmissionIn,
     ClassroomSubmissionOut,
+    ContestEntryFormOut,
     ClassroomSyntaxCheckFindingOut,
     ClassroomSyntaxCheckOut,
     ErrorOut,
@@ -426,6 +434,7 @@ def _serialize_classroom_submission(
         score=_serialize_score(score) if score is not None else None,
         passed=problem.is_score_passed(score, checklist_items=checklist_items),
         pending_reason=pending_reason,
+        contest_entry=contest_entry_out(submission),
     )
 
 
@@ -1488,6 +1497,24 @@ def _instructor_submit_blocked_reason(class_obj: Class, problem: Problem) -> str
 
 
 @router.get(
+    "/classes/{class_id}/problems/{problem_id}/contest-entry",
+    response={200: ContestEntryFormOut, 403: ErrorOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def get_contest_entry_form(request: HttpRequest, class_id: int, problem_id: int):
+    """참여자의 「공모전에도 내기」 칸(#549) — 직전 공모전 제출로 미리 채운다. 공모전 문제가
+    아니면 404. 강사 자신의 시도는 낼 수 없으므로 강사에게는 403이다."""
+
+    if Class.objects.filter(id=class_id, instructor_id=request.auth_user.id).exists():
+        raise HttpError(403, INSTRUCTOR_ENTRY_MESSAGE)
+    member = _get_member_or_404(class_id, request.auth_user.id)
+    problem = _get_visible_problem_for_participant_or_404(class_id, problem_id, member)
+    if problem.contest_id is None:
+        raise HttpError(404, "공모전 문제가 아닙니다.")
+    return 200, contest_entry_form(problem, request.auth_user.id)
+
+
+@router.get(
     "/classes/{class_id}/problems/{problem_id}/mine",
     response={200: ClassroomProblemSubmissionsOut, 404: ErrorOut},
     auth=jwt_auth,
@@ -1602,7 +1629,7 @@ def create_classroom_submission(
         if blocked_reason == SUBMIT_BLOCKED_ARCHIVED:
             raise HttpError(403, "이 클래스는 보관되어 새 제출을 받지 않습니다.")
         member = _get_submitting_member_or_404(class_id, request.auth_user.id)
-        return _create_submission_row(request, problem, member, payload)
+        return _create_submission_row(request, problem, member, payload, as_instructor=True)
 
     member = _get_member_or_404(class_id, request.auth_user.id)
     problem = _get_visible_problem_for_participant_or_404(class_id, problem_id, member)
@@ -1627,10 +1654,10 @@ def create_classroom_submission(
         # 낼 수는 없다. 다시 열면(`reopen_problem`) 이 분기를 벗어난다.
         raise HttpError(403, "강사가 숨긴 문제라 새로 낼 수 없습니다.")
 
-    return _create_submission_row(request, problem, member, payload)
+    return _create_submission_row(request, problem, member, payload, as_instructor=False)
 
 
-def _create_submission_row(request: HttpRequest, problem, member, payload):
+def _create_submission_row(request: HttpRequest, problem, member, payload, *, as_instructor: bool):
     """값을 검증하고 시도 하나를 만든다 — 참여자와 강사(2026-09-17)가 같은
     코드를 지난다. 「낼 수 있는가」는 호출부가 이미 서로 다른 기준으로
     판정했다(참여자는 보관·내보냄·숨김, 강사는 보관 하나)."""
@@ -1655,6 +1682,15 @@ def _create_submission_row(request: HttpRequest, problem, member, payload):
         if not GITHUB_REPO_URL_PATTERN.match(value):
             raise HttpError(422, "저장소는 https://github.com/<owner>/<repo> 형식만 받습니다.")
         asset_kind = SubmissionAsset.Kind.REPOSITORY
+
+    # 「공모전에도 내기」(#549) — 시도를 만들기 전에 거른다. 끄고 낸 시도면 None.
+    contest_entry = prepare_contest_entry(
+        problem=problem,
+        user_id=request.auth_user.id,
+        entry_in=payload.contest_entry,
+        scoring_asset=EntryAsset(kind=asset_kind, value=value, content_type=content_type),
+        as_instructor=as_instructor,
+    )
 
     with transaction.atomic():
         # 시도 번호는 참여자 행을 잠그고 센다 — 같은 참여자가 같은 문제에
@@ -1686,6 +1722,15 @@ def _create_submission_row(request: HttpRequest, problem, member, payload):
         # 때문이다. dev·CI는 워커가 없어 이 태스크가 실제로 돌지 않고
         # (#40), 큐에 쌓인 채 스캔이 안전망으로 대신 줍는다.
         transaction.on_commit(lambda: _enqueue_immediate_scoring(submission.id))
+        if contest_entry is not None:
+            # 커밋된 뒤 공모전에 보낸다 — 결과는 신호로 돌아와 이 시도에 남는다.
+            request_contest_entry(submission, contest_entry)
+
+    if contest_entry is not None:
+        # 결과 신호가 커밋 콜백 안에서 이미 돌아왔다 — 응답에 그 결과를 싣는다.
+        submission.refresh_from_db(
+            fields=["contest_entry_status", "contest_entry_reason", "contest_entry_resolved_at"]
+        )
 
     # 방금 만든 시도는 아직 채점되지 않아 언제나 passed=False다
     # (`Problem.is_score_passed`가 `score is None`을 바로 거짓으로 본다).

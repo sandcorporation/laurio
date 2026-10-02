@@ -12,9 +12,16 @@ from datetime import datetime
 from django.db.models import Q
 
 from core.clock import Clock
-from core.contest_catalog import ContestRequirementSource, ContestSource, ImportableContest
+from core.contest_catalog import (
+    ContestEntry,
+    ContestEntryContext,
+    ContestRequirementSource,
+    ContestSource,
+    ImportableContest,
+)
 from core.contest_switch import contest_product_enabled
 
+from . import classroom_entries
 from .models import Contest
 
 
@@ -66,12 +73,7 @@ class ContestClassroomCatalog:
         )
         if contest is None:
             return None
-        accepts = (
-            contest_product_enabled()
-            and contest.allows_classroom_import
-            and contest.status == Contest.Status.PUBLISHED
-            and contest.deadline_at > Clock.now()
-        )
+        accepts = classroom_entries.accepts_entries(contest)
         return ContestSource(
             contest_id=contest.pk,
             title=contest.title,
@@ -85,3 +87,9 @@ class ContestClassroomCatalog:
                 for r in contest.requirements.all()
             ),
         )
+
+    def entry_context(self, contest_id: int, user_id: int) -> ContestEntryContext | None:
+        return classroom_entries.entry_context(contest_id, user_id)
+
+    def check_entry(self, entry: ContestEntry) -> str | None:
+        return classroom_entries.check_entry(entry)

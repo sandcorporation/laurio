@@ -156,6 +156,13 @@ DeliverableTypeChange와 같은 규율)가 남고 이미 제출한 참가자 전
 - 공개 중인 무료 공모전의 제목·설명·마감·Requirement 가 바뀌거나 허용이 바뀌면 커밋 뒤
   `contest_source_changed` 신호가 나간다. 공모전 제품 스위치가 꺼지면 목록은 비고 아무것도
   받지 않는다.
+- **「공모전에도 내기」**(#549). 강의실이 공모전 문제의 시도를 커밋한 뒤
+  `contest_entry_requested` 로 내기 하나를 보내면, 공모전 쪽(`contests.classroom_entries`)이
+  직접 제출과 같은 검증(마감 전·허용·소스 열람 동의·근거 모양·필수 자료)을 거쳐 그 사람의
+  ContestSubmission 을 만들거나 통째로 바꾸고 `contest_entry_resolved` 로 답한다. 시도의 소스는
+  공모전 업로드 대상으로 복사한다. 공모전 제출에는 클래스를 가리키는 칸이 없다 — 직접 낸 것과
+  구별되지 않는다. 강의실이 시도를 만들기 전에 거를 수 있는 것은 카탈로그의 `check_entry` 가
+  미리 답하고(422), 미리 채울 값은 `entry_context` 가 준다.
 
 **무료 공모전 제출은 본인확인 대신 소스 열람 동의를 요구한다**(#416, ADR-0048).
 `contest.is_free`면 `POST`·`PUT .../submissions[/me]`가 본인확인·자전거래 검사를

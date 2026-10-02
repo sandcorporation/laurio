@@ -5,6 +5,7 @@ import type { ApiResult } from "@codemit/bff-client";
 
 import { apiRequest, bffClient } from "@/lib/bff/client";
 import type { ChecklistItemRow, GradingStrictness, ProblemContest, SubmissionFormat } from "@/lib/problems/api";
+import type { ContestEntryForm, ContestEntryInput } from "./contest-entry";
 
 export type ProblemMine = {
   id: number;
@@ -109,6 +110,14 @@ export type ClassroomSubmissionRow = {
   // 이 시도 하나가 통과인가(#288) — 미채점("pending")이면 항상 거짓이다.
   passed: boolean;
   pending_reason: PendingReason;
+  // 「공모전에도 내기」로 낸 시도면 그 결과(#549), 끄고 낸 시도면 null.
+  contest_entry: AttemptContestEntry | null;
+};
+
+export type AttemptContestEntry = {
+  status: "pending" | "entered" | "rejected";
+  // 공모전이 받지 않았을 때 그 이유.
+  reason: string;
 };
 
 // 참여자가 지금 새로 낼 수 없는 이유 하나, 낼 수 있으면 `null`(#439). 우선순위는
@@ -153,7 +162,13 @@ export function submitAttempt(
   problemId: number,
   // 이 시도에서 고른 형식(#373) — 문제가 형식을 하나만 열어 뒀어도 화면이
   // 그 값을 그대로 싣는다, 서버는 문제의 허용 목록 밖이면 거절한다.
-  input: { submission_format: SubmissionFormat; value: string; content_type?: string | null },
+  input: {
+    submission_format: SubmissionFormat;
+    value: string;
+    content_type?: string | null;
+    // 공모전 문제에서 「공모전에도 내기」를 켰을 때만(#549).
+    contest_entry?: ContestEntryInput | null;
+  },
 ): Promise<ApiResult<ClassroomSubmissionRow>> {
   return bffClient.post<ClassroomSubmissionRow>(
     `/api/backend/classroom/classes/${classId}/problems/${problemId}/submissions`,
@@ -183,3 +198,13 @@ export type InstructorSubmissionRow = {
   pending_reason: PendingReason;
 };
 
+
+// 참여자의 「공모전에도 내기」 칸(#549) — 직전 공모전 제출로 미리 채운 값이 실린다.
+export function fetchContestEntryForm(
+  classId: number,
+  problemId: number,
+): Promise<ApiResult<ContestEntryForm>> {
+  return bffClient.get<ContestEntryForm>(
+    `/api/backend/classroom/classes/${classId}/problems/${problemId}/contest-entry`,
+  );
+}

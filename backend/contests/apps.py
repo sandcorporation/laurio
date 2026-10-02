@@ -47,11 +47,16 @@ class ContestsConfig(AppConfig):
 
         # 「공모전 문제」가 건너오는 공유층 카탈로그(#547, ADR-0054) — 강의실은 이 앱을
         # 임포트하지 못하므로 공모전 쪽이 구현을 등록한다.
-        from core.contest_catalog import register_contest_catalog
+        from core.contest_catalog import contest_entry_requested, register_contest_catalog
 
         from .classroom_catalog import ContestClassroomCatalog
+        from .classroom_entries import on_contest_entry_requested
 
         register_contest_catalog(ContestClassroomCatalog())
+        # 「공모전에도 내기」(#549) — 강의실이 보낸 내기를 받아 결과 신호로 답한다.
+        contest_entry_requested.connect(
+            on_contest_entry_requested, dispatch_uid="contests-classroom-entry"
+        )
 
         # LLM_REQUIREMENT_CHAT_ADAPTER_MODE 부팅 가드(#83) — 전이 등록과는 별개
         # 관심사지만, 이 앱의 ready()가 이미 지연 임포트 원칙(모델을 여기서

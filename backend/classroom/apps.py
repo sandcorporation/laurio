@@ -29,6 +29,14 @@ class ClassroomConfig(AppConfig):
         contest_source_changed.connect(
             on_contest_source_changed, dispatch_uid="classroom.contest_problems.source_changed"
         )
+        # 「공모전에도 내기」(#549) — 공모전 쪽의 결과를 그 시도에 남긴다.
+        from core.contest_catalog import contest_entry_resolved
+
+        from .contest_entries import on_contest_entry_resolved
+
+        contest_entry_resolved.connect(
+            on_contest_entry_resolved, dispatch_uid="classroom.contest_entries.resolved"
+        )
         # 연결된 앱(ADR-0052, #512) — 90일 동안 쓰지 않은 허락을 끊고, 아무도 허락하지
         # 않은 등록을 걷는다. 탈퇴·휴면이면 그 자리에서 끊는다(`accounts.signals`).
         from accounts.signals import user_became_dormant, user_withdrawn

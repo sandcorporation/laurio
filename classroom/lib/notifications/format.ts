@@ -37,6 +37,15 @@ export function describeNotification(notification: NotificationRow): string {
       const className = typeof context.class_name === "string" ? context.class_name : "클래스";
       return `'${className}' 클래스의 채점 키가 거부되어 채점이 멈췄습니다 — 클래스 설정에서 새 키를 저장해 주세요.`;
     }
+    case "classroom_contest_entry_rejected": {
+      const problemTitle =
+        typeof context.problem_title === "string" ? context.problem_title : "문제";
+      const attemptNumber =
+        typeof context.attempt_number === "number" ? context.attempt_number : null;
+      const reason = typeof context.reason === "string" && context.reason ? ` — ${context.reason}` : "";
+      const attemptLabel = attemptNumber !== null ? `${attemptNumber}번째 시도` : "시도";
+      return `'${problemTitle}' ${attemptLabel}는 공모전에는 내지 못했습니다${reason}. 클래스 제출과 채점은 그대로입니다.`;
+    }
     default:
       return "새 알림이 있습니다.";
   }
