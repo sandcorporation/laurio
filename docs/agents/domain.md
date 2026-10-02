@@ -40,7 +40,7 @@ Multi-context repo (presence of `CONTEXT-MAP.md` at the root):
 
 ## ADRs are history — only two files describe the present
 
-**`CONTEXT.md` and the repo root's `CLAUDE.md` are the only documents that describe how
+**`CONTEXT.md` and the repo root's `CLAUDE.md` (with its annex `docs/ops/`) are the only documents that describe how
 things are *now*.** Everything else — every ADR, `REQUEST.md`, every closed issue and spec
 — records a judgement **as of the day it was written**.
 

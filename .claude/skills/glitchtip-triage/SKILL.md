@@ -96,8 +96,8 @@ gh issue list --search "<증상 낱말>" --state all --limit 10   # 전에 누�
 - **기존 티켓** — 같은 증상의 닫힌 티켓이 있으면 그 안에 원인과 결론이 이미 있다.
 
 **닫힌 티켓·스펙의 현재형 서술을 현재 상태로 인용하지 않는다.** 그 문장은 그것이 쓰인
-날의 사실이다 — 이 저장소는 그걸로 실제 사고를 한 번 겪었다(`CLAUDE.md` 의 「어느 문서가
-「지금」을 말하는가」). **지금**을 말하는 것은 `CLAUDE.md`·`CONTEXT.md`·`docs/features/`
+날의 사실이다 — 이 저장소는 그걸로 실제 사고를 한 번 겪었다(`docs/ops/which-docs-are-current.md`).
+**지금**을 말하는 것은 `CLAUDE.md`(와 `docs/ops/`)·`CONTEXT.md`·`docs/features/`
 셋과 코드·설정 파일뿐이다.
 
 ### 3. 재현 루프를 만든다 — 이것이 이 스킬의 전부다
@@ -156,7 +156,7 @@ GlitchTip 상태는 건드리지 않는다 — 미해결로 남는 것이 맞다
 
 ### 5. 재현되면 — 회귀 테스트를 먼저, 그 다음 수정
 
-`CLAUDE.md` 의 「티켓을 닫는 기준」 그대로다. 로컬 게이트 셋:
+`docs/ops/ticket-done.md`(「티켓을 닫는 기준」) 그대로다. 로컬 게이트 셋:
 
 ```bash
 cd backend && CODEMIT_DB_PORT=55432 uv run pytest
@@ -168,7 +168,7 @@ pnpm --dir frontend typecheck && pnpm --dir operator typecheck && pnpm --dir cla
 
 ### 6. 사람을 부르는 자리 — 「지금」을 말하는 문서에 손이 가면 멈춘다
 
-평소 티켓이라면 `CLAUDE.md` 의 「티켓을 닫는 기준」이 **문서를 같은 커밋에서 고치라**고
+평소 티켓이라면 `docs/ops/ticket-done.md` 가 **문서를 같은 커밋에서 고치라**고
 한다. **당신은 그렇게 하지 않는다.** 아무도 보고 있지 않은 세션이 「지금」을 말하는 문서를
 고치면, 그 문서가 틀렸을 때 대신 참을 말해 줄 것이 저장소에 없다.
 
@@ -176,7 +176,7 @@ pnpm --dir frontend typecheck && pnpm --dir operator typecheck && pnpm --dir cla
 
 | 경로 | 그것을 고쳐야 한다는 뜻 |
 | --- | --- |
-| `CLAUDE.md` | 저장소를 굴리는 방식이 바뀐다 |
+| `CLAUDE.md`·`docs/ops/` | 저장소를 굴리는 방식이 바뀐다 |
 | `CONTEXT.md` | 낱말의 뜻이 바뀐다 |
 | `docs/features/` | 서비스가 하는 일이 바뀐다 — 즉 버그 수정이 아니다 |
 | `docs/adr/` | **설계 결정**이 필요하다 — 당신이 할 일이 아니다 |

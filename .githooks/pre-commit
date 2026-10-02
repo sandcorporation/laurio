@@ -11,7 +11,7 @@ cd "$repo_root"
 
 # **배경 진단 세션은 「지금」을 말하는 문서를 고칠 수 없다**(2026-09-18).
 # `.claude/skills/glitchtip-triage/` 를 따르는 세션은 아무도 보고 있지 않은 채
-# `main` 에 push 한다 — 그 세션이 CLAUDE.md·CONTEXT.md·docs/features·docs/adr 를
+# `main` 에 push 한다 — 그 세션이 CLAUDE.md·docs/ops·CONTEXT.md·docs/features·docs/adr 를
 # 고치면, 이 저장소에서 「지금」을 말하는 유일한 문서들이 사람의 판단 없이 바뀐다.
 # 그런 변경은 사람에게 넘긴다(스킬의 「사람을 부르는 자리」).
 #
@@ -24,7 +24,7 @@ cd "$repo_root"
 # **이것은 벽이 아니라 감속방턱이다** — `--no-verify` 로 넘어간다(이 훅의 다른
 # 검사와 같다). 인젝션된 텍스트에 대한 벽은 읽기 전용 토큰과 경로 울타리이고,
 # 이 검사가 잡는 것은 **정직한 생각없는 수정**이다.
-guarded_docs_regex='^(CLAUDE\.md|CONTEXT\.md|docs/features/|docs/adr/)'
+guarded_docs_regex='^(CLAUDE\.md|docs/ops/|CONTEXT\.md|docs/features/|docs/adr/)'
 current_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')"
 
 if [ "${CODEMIT_UNATTENDED:-}" = "1" ] || case "$current_branch" in auto-*) true ;; *) false ;; esac; then
