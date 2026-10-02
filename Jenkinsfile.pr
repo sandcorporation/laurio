@@ -1,0 +1,113 @@
+// 브랜치·PR 시험 (2026-10-02) — 배포하지 않고 시험만 돌린다. 결과는 GitHub 커밋 상태로 남는다.
+//
+// 잡 `codemit-pr` 은 Multibranch(GitHub 소스 sandcorporation/laurio, main·staging·production 을 뺀
+// 브랜치)다 — 브랜치마다 하위 잡이 따로 생긴다. 예전에는 GitHub Actions 가 sub 의 러너 셋에서 시험을
+// 돌렸는데, 러너들이 sub 의 모든 코어를 제한 없이 나눠 써 이미지 빌드와 시험이 겹치면 시험 하나
+// 3초 한도를 경합만으로 넘었다(#499 의 첫 CI). Jenkins 노드는 실행기가 하나라 한 노드에서 두 일이
+// 겹치지 않는다 — 그래서 노드를 통째로 쓴다.
+//
+// 노드 분담: 오래 걸리는 e2e(프로덕션 이미지 셋 굽기 + 세 프로젝트)와 celery-broker 는 macos,
+// 백엔드·단위 시험·생성물·문서·타입 검사는 sub(내장 노드 — staging 배포와 실행기를 나눠 쓰므로 짧은
+// 것만 둔다). 문서만 바뀌었으면 문서 검사만 한다(scripts/ci/changed.sh).
+//
+// 자동 병합: 빌드가 SUCCESS 면 이 브랜치의 열린 main PR 을 이 커밋으로 rebase 병합한다(초안·hold
+// 라벨은 빼고, scripts/ci/automerge.py). main 에 들어가면 GitHub Actions 가 이미지를 굽는다.
+pipeline {
+  agent none
+
+  environment {
+    // 시험 자원 이름 — 브랜치를 지웠다 다시 만들어 빌드 번호가 되풀이돼도 겹치지 않게 시작 시각을 붙인다.
+    CODEMIT_CI_RUN_ID = "${env.BUILD_TAG}-${currentBuild.startTimeInMillis}"
+  }
+
+  options {
+    timestamps()
+    // 같은 브랜치에 새로 push 하면 그 브랜치의 옛 빌드만 끊는다.
+    disableConcurrentBuilds(abortPrevious: true)
+    timeout(time: 45, unit: 'MINUTES')
+    buildDiscarder(logRotator(numToKeepStr: '20'))
+  }
+
+  stages {
+    stage('변경') {
+      agent { label 'laurio-staging' }
+      steps {
+        script {
+          def plan = sh(
+            returnStdout: true,
+            // origin/main 은 잡 설정의 refspec 이 체크아웃 때 함께 받아 둔다.
+            script: 'scripts/ci/changed.sh "$(git merge-base origin/main HEAD 2>/dev/null)"',
+          ).trim()
+          env.RUN_TESTS = plan.tokenize('=')[1]
+          echo "돌릴 것: ${plan}"
+          def subject = sh(returnStdout: true, script: 'git log -1 --format=%s').trim()
+          currentBuild.description = subject.length() > 90 ? subject.substring(0, 90) + '…' : subject
+        }
+      }
+    }
+
+    stage('시험') {
+      failFast false
+      parallel {
+        stage('sub — 백엔드·단위·검사') {
+          when {
+            beforeAgent true
+            expression { env.RUN_TESTS == '1' }
+          }
+          agent { label 'laurio-staging' }
+          steps {
+            sh 'bash scripts/ci/sub-checks.sh'
+          }
+          post {
+            always {
+              junit keepProperties: true, testResults: 'test-results/backend-junit.xml', allowEmptyResults: true
+              archiveArtifacts artifacts: 'test-results/summary.txt', allowEmptyArchive: true
+            }
+          }
+        }
+        stage('macos — e2e·celery') {
+          when {
+            beforeAgent true
+            expression { env.RUN_TESTS == '1' }
+          }
+          agent { label 'macos' }
+          steps {
+            // e2e 가 붉어도 celery-broker 는 돈다 — 어디가 깨졌는지 한 번에 본다.
+            catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+              sh 'bash scripts/ci/e2e.sh'
+            }
+            sh 'bash scripts/ci/celery-broker.sh'
+          }
+          post {
+            always {
+              archiveArtifacts artifacts: 'test-results/**', allowEmptyArchive: true
+            }
+          }
+        }
+        stage('문서만') {
+          when {
+            beforeAgent true
+            expression { env.RUN_TESTS == '0' }
+          }
+          agent { label 'laurio-staging' }
+          steps {
+            sh 'python3 scripts/check_adr_status.py'
+          }
+        }
+      }
+    }
+
+    stage('병합') {
+      when {
+        beforeAgent true
+        expression { currentBuild.currentResult == 'SUCCESS' }
+      }
+      agent { label 'laurio-staging' }
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'github-farrar142-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
+          sh 'python3 scripts/ci/automerge.py "$BRANCH_NAME" "$(git rev-parse HEAD)"'
+        }
+      }
+    }
+  }
+}

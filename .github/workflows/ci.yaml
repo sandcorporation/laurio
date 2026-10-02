@@ -3,7 +3,8 @@ name: CI
 on:
   push:
     branches: [main]
-  pull_request:
+  # PR 시험은 Jenkins `codemit-pr`(Jenkinsfile.pr)이 돌린다(2026-10-02) — 여기 러너 셋이 sub 의
+  # 코어를 제한 없이 나눠 써 이미지 빌드와 시험이 겹치면 시험 한도를 경합만으로 넘었다.
 
 # **잡을 셀프호스티드 러너(`sub`)에서 돌린다.** GitHub 호스티드 러너가 계정 결제
 # 문제로 잡을 시작조차 못 하게 되면서(9잡 전부 2~3초 만에 "The job was not started
