@@ -969,8 +969,14 @@ def list_members(request: HttpRequest, class_id: int):
     class_scope`가 강사가 아닌 모든 요청을 404로 돌리는 것과 같은 문이다."""
 
     class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
-    members = class_obj.members.all()
-    return 200, [_serialize_member(m, instructor_id=class_obj.instructor_id) for m in members]
+    return 200, _serialize_members(class_obj)
+
+
+def _serialize_members(class_obj: Class) -> list[MemberOut]:
+    """참여자 명단 — 화면(`list_members`)과 연결된 앱의 읽기 도구
+    (`classroom.mcp_read_tools`, #513)가 함께 부른다."""
+
+    return [_serialize_member(m, instructor_id=class_obj.instructor_id) for m in class_obj.members.all()]
 
 
 @router.post(
@@ -1079,6 +1085,14 @@ def get_roster_grid(request: HttpRequest, class_id: int):
     계산을 두 번 쓰지 않는다."""
 
     class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
+    return 200, _build_roster_grid(class_obj)
+
+
+def _build_roster_grid(class_obj: Class) -> ClassroomRosterGridOut:
+    """명단 격자 한 벌 — 화면(`get_roster_grid`)과 연결된 앱의 읽기 도구
+    (`classroom.mcp_read_tools`, #513)가 함께 부른다. 범위 확인은 부르는 쪽이
+    먼저 끝낸다."""
+
     problems = list(class_obj.problems.prefetch_related("checklist_items").all())
     members = list(class_obj.members.all())
     active_member_ids = _active_member_ids(class_obj)
@@ -1127,7 +1141,7 @@ def get_roster_grid(request: HttpRequest, class_id: int):
             )
         )
 
-    return 200, ClassroomRosterGridOut(problems=problem_stats, members=member_rows)
+    return ClassroomRosterGridOut(problems=problem_stats, members=member_rows)
 
 
 # --- Problem -------------------------------------------------------------------
@@ -1200,10 +1214,17 @@ def list_problems(request: HttpRequest, class_id: int):
     """강사 본인의 클래스 문제 전부(초안 + 열림), 순서대로."""
 
     class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
+    return 200, _serialize_problem_list(class_obj)
+
+
+def _serialize_problem_list(class_obj: Class) -> list[ProblemOut]:
+    """클래스의 문제 전부를 순서대로 — 화면(`list_problems`)과 연결된 앱의 읽기
+    도구(`classroom.mcp_read_tools`, #513)가 함께 부른다."""
+
     problems = class_obj.problems.prefetch_related("checklist_items").all()
     active_member_ids = _active_member_ids(class_obj)
     blocking_problem_ids = _problem_ids_blocking_deletion(class_obj)
-    return 200, [
+    return [
         _serialize_problem(
             p, class_obj, active_member_ids=active_member_ids, blocking_problem_ids=blocking_problem_ids
         )

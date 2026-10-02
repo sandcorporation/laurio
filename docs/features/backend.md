@@ -451,6 +451,18 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 | 도구 | 하는 일 |
 | --- | --- |
 | `list_my_classes`(읽기) | 내가 강사인 클래스 — 이름·보관 여부·참여자 수(강사 본인과 내보낸 사람 제외)·문제 수(열림·초안·숨김별). 강사 화면의 「내 클래스」와 같은 서비스 함수(`classroom.services.instructor_classes`)를 부른다 |
+| `get_class`(읽기, `class_id`) | 클래스 상세 — 화면의 `GET …/classes/{id}` 와 같은 값에서 OpenAI 키의 가린 표시(`openai_key_masked`)만 뺀다. 키는 있는가(`has_openai_key`)와 상태만, 예산·사용량·남은 양·기본 모델·가입 코드·보관 여부 |
+| `list_problems`(읽기, `class_id`) | 문제 전부(초안·열림·숨김) — 화면의 `GET …/problems` 와 같은 값(설명·체크리스트·채점 설정·제출 형식·상태와 할 수 있는 전이·달성률·지울 수 있는가) |
+| `get_problem`(읽기, `class_id`·`problem_id`) | 문제 하나 — 화면의 `GET …/problems/{id}` 와 같은 값 |
+| `list_participants`(읽기, `class_id`) | 참여자 명단 — 화면의 `GET …/members` 와 같은 값(클래스에서 불릴 이름·가입 시각·내보냄·강사 본인 자리). 이메일 없음 |
+| `get_roster_grid`(읽기, `class_id`) | 명단 격자 — 화면의 `GET …/roster-grid` 와 같은 값(문제별 달성률 + 참여자 × 문제 칸의 통과 이력) |
+
+읽기 도구 다섯(#513)은 화면 라우트와 **같은 함수**를 부른다 — 범위는 `instructor_scope`
+(`write=False`)가, 값은 `classroom.api` 의 직렬화 함수가 정하고, 화면과 같은 인코더로 내보내
+시각의 모양까지 같다. 남의 클래스·문제는 화면처럼 「찾을 수 없습니다」이고, 보관된 클래스도
+화면처럼 읽힌다. 화면이 4xx 로 거절할 자리(없음·잘못된 인자)는 프로토콜 오류가 아니라 도구
+오류(`isError: true`, 본문은 화면과 같은 한국어 문구)로 돌려준다. 처리기는 `classroom.mcp_read_tools`
+에 산다.
 
 **읽기는 기록하지 않는다**(ADR-0040). 「마지막으로 쓴 날」만 허락에 남는다.
 

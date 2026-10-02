@@ -30,12 +30,14 @@ from django.conf import settings
 from django.core.cache import caches
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
+from ninja.errors import HttpError
 
 from core.clock import Clock
 
 from .models import ConnectedApp
 from .oauth import SCOPE, authenticate_access_token, protected_resource_metadata_url, public_origin
 from .services import instructor_classes
+from .mcp_read_tools import READ_TOOL_SPECS
 
 SERVER_NAME = "codemit-classroom"
 SERVER_VERSION = "1.0.0"
@@ -171,6 +173,10 @@ TOOLS: dict[str, Tool] = {
     ]
 }
 
+# 읽기 도구(#513) — 처리기와 명세는 `mcp_read_tools` 에 산다. 등록부 끝에 덧붙인다.
+for _spec in READ_TOOL_SPECS:
+    TOOLS[_spec["name"]] = Tool(**_spec, read_only=True)
+
 
 # --- JSON-RPC 바탕 -------------------------------------------------------------
 
@@ -251,7 +257,13 @@ def _call_tool(grant: ConnectedApp, params: dict) -> dict:
     arguments = params.get("arguments") or {}
     if not isinstance(arguments, dict):
         raise RpcError(INVALID_PARAMS, "arguments 는 객체여야 합니다.")
-    structured = tool.handler(grant, arguments)
+    try:
+        structured = tool.handler(grant, arguments)
+    except HttpError as error:
+        # 화면 API 가 4xx 로 거절할 자리(남의 클래스 404, 잘못된 입력 422 …)는 도구 오류로
+        # 돌려준다 — 프로토콜 오류가 아니라 모델이 읽고 고쳐 부를 수 있는 결과다(MCP 「Tool
+        # Execution Errors」).
+        return {"content": [{"type": "text", "text": str(error)}], "isError": True}
     return {
         "content": [{"type": "text", "text": json.dumps(structured, ensure_ascii=False)}],
         "structuredContent": structured,
