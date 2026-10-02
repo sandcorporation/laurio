@@ -73,6 +73,8 @@ pipeline {
           }
           agent { label 'macos' }
           steps {
+            // 중단된 앞 빌드가 남긴 스택·디스크부터 걷는다(trap 은 중단 때 돌지 못한다).
+            sh 'bash scripts/ci/macos-sweep.sh'
             // e2e 가 붉어도 celery-broker 는 돈다 — 어디가 깨졌는지 한 번에 본다.
             catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
               sh 'bash scripts/ci/e2e.sh'
