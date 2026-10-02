@@ -44,8 +44,9 @@ celery-beat와 같은 `x-backend-env`(STORAGE_*·PAYMENT_* 등 이 프로세스�
 예외가 staging 백엔드 프로젝트의 최다 이슈가 됐다(6건). 기동 명령에
 `--lifespan off` 를 붙이는 대안은 compose 세 곳에 같은 말을 적어야 해서 버렸다.
 
-**새 마이그레이션이나 풀러가 든 배포에서는 몇 초 backend 가 없다 — beat 의 tick 이 그때
-죽는다.** (그 밖의 배포는 겹쳐 바꿔 창이 없다 — 아래 「backend·events 는 겹쳐 바꾼다」.)
+**물러서는 배포(표식 단 마이그레이션·풀러 교체)에서는 backend 가 잠시 없다 — beat 의 tick 이
+그때 죽는다.** (새 마이그레이션도 표식이 없으면 먼저 돌리고 겹쳐 바꿔 창이 없다 —
+[배포](deploy.md)의 「backend·events 는 겹쳐 바꾼다」, ADR-0053.)
 `deploy.sh` 가 backend 컨테이너를 내리고 올리는 사이 `core.run_scan`·`classroom.score_attempt` 의
 내부 HTTP 호출이 `Connection refused` 로 실패했다(수집기를 붙인 첫날 3건). 스캔은
 두 번 쏴도 한 번만 통과하므로(ADR-0003) 두 태스크가 **연결·타임아웃 실패만** 몇 번

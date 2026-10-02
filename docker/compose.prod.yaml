@@ -404,9 +404,12 @@ services:
     # 워커 넷의 지표를 합산하려고 prometheus_client 의 다중 프로세스 모드를 쓴다
     # (2026-09-21, core/metrics.py) — 디렉터리는 뜰 때마다 비운다(이전 기동의 죽은 워커
     # 파일이 남으면 합산이 오염된다). 죽은 워커 정리는 config/gunicorn.conf.py 가 한다.
+    # **migrate 는 여기서 부르지 않는다**(#526, ADR-0053) — deploy.sh 가 넷을 바꾸기 전에
+    # 새 이미지의 일회성 컨테이너에서 한 번 돌린다(run_migrations). 기동 때 돌리면 겹쳐
+    # 바꾸는 동안 스키마가 바뀌는 시점을 배포가 고르지 못한다. 그래서 이 compose 로 손수
+    # 처음 띄우는 DB 는 `docker compose run --rm backend python manage.py migrate` 를 먼저 친다.
     command: >
       sh -c "rm -rf \"$$PROMETHEUS_MULTIPROC_DIR\" && mkdir -p \"$$PROMETHEUS_MULTIPROC_DIR\" &&
-             python manage.py migrate --noinput &&
              python manage.py collectstatic --noinput &&
              gunicorn -c config/gunicorn.conf.py config.wsgi:application --bind 0.0.0.0:8000 --workers 4"
 

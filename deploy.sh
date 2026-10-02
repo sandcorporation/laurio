@@ -141,6 +141,11 @@ PLAN_FILE=".jenkins-${TARGET}-plan"
 # 것이므로 이 저장소만 예외로 둔다.
 GIT="git -c safe.directory=$PWD"
 
+# 뒤로 호환되지 않는 마이그레이션의 표식(ADR-0053). 파일 어디든 이 모양의 주석 한 줄이면
+# 그 마이그레이션이 든 배포는 겹쳐 바꾸지 않는다. 같은 문자열을
+# `backend/tests/test_migration_rolling_safety.py` 가 읽는다 — 바꾸면 둘을 같이 고친다.
+UNSAFE_MIGRATION_MARKER='^[[:space:]]*#[[:space:]]*ROLLING-DEPLOY-UNSAFE:'
+
 log() { echo "[deploy:${TARGET}] $*"; }
 
 # 서비스 이름 → compose 서비스들. backend 는 넷을 함께 받는다(아래 build 의 주석).
@@ -367,17 +372,42 @@ cmd_plan() {
     fi
   fi
 
-  # **backend·events 를 겹쳐 바꿀 수 있는가**(#485). 겹쳐 바꾸면 옛 컨테이너가 새
-  # 컨테이너와 몇 초 함께 요청을 받는다 — 그 사이 새 컨테이너가 스키마를 바꾸면 옛 코드가
-  # 없는 컬럼을 찾다 500 을 낸다. 그래서 **새 마이그레이션이 든 배포만** 지금까지의
-  # 방식(내리고 올리기, 몇 초 창)으로 물러선다. 풀러를 바꾸는 배포는 위에서 넷을 먼저
-  # 내리므로 겹칠 옛 컨테이너가 없고, 없는 컨테이너·첫 배포도 겹칠 대상이 없다.
+  # **backend·events 를 겹쳐 바꿀 수 있는가**(#485, #526·ADR-0053). 겹쳐 바꾸면 옛
+  # 컨테이너가 새 컨테이너와 몇 초 함께 요청을 받는다. 마이그레이션은 그 전에 새 이미지의
+  # 일회성 컨테이너가 돌리므로(아래 run_migrations) **그 몇 초 동안 옛 코드가 새 스키마
+  # 위에서 돈다** — 그래서 마이그레이션은 뒤로 호환되게 쓴다(ADR-0053: 추가는 그대로,
+  # 삭제·이름 바꾸기·NOT NULL 은 다음 배포로 나눈다). 지키지 못한 마이그레이션은 파일에
+  # `# ROLLING-DEPLOY-UNSAFE: <이유>` 를 달고, 그 표식이 배포 범위에 있으면 예전처럼
+  # 넷을 내리고 올린다(`backend/tests/test_migration_rolling_safety.py` 가 표식 없는 위험
+  # 연산을 막는다).
+  #
+  # 예전에는 **새 마이그레이션이 든 배포 전부가** 내리고 올렸다. 그 창이 공개 앱 재시도
+  # 예산(약 15.8초)보다 길어 `/contests` 가 500 을 냈다(2026-10-02 prod, `0014_connected_apps`
+  # — GlitchTip 75·83).
+  #
+  # 직전 배포 표식이 없으면 범위를 몰라 표식을 찾을 수 없다. 풀러를 바꾸는 배포는 위에서
+  # 넷을 먼저 내리므로 겹칠 옛 컨테이너가 없고, 없는 컨테이너도 겹칠 대상이 없다.
+  MIGRATIONS=false
+  if [ "$EVERYTHING" = true ] || touched '^backend/[^/]+/migrations/'; then
+    MIGRATIONS=true
+  fi
+  UNSAFE_MIGRATIONS=""
+  if [ "$EVERYTHING" = false ]; then
+    for f in $(grep -E '^backend/[^/]+/migrations/[^/]+\.py$' "$CHANGED_FILE" || true); do
+      # 지워진 파일(배포 범위 안에서 사라진 것)은 볼 것이 없다.
+      [ -f "$f" ] || continue
+      if grep -qE "$UNSAFE_MIGRATION_MARKER" "$f"; then
+        UNSAFE_MIGRATIONS="$UNSAFE_MIGRATIONS $f"
+      fi
+    done
+  fi
+
   ROLLING_BACKEND=true
   ROLLING_REASON=""
   if [ "$EVERYTHING" = true ]; then
-    ROLLING_BACKEND=false; ROLLING_REASON="직전 배포 표식이 없다"
-  elif touched '^backend/[^/]+/migrations/'; then
-    ROLLING_BACKEND=false; ROLLING_REASON="새 마이그레이션이 있다"
+    ROLLING_BACKEND=false; ROLLING_REASON="직전 배포 표식이 없다(범위를 몰라 뒤로 호환되지 않는 마이그레이션을 찾을 수 없다)"
+  elif [ -n "$UNSAFE_MIGRATIONS" ]; then
+    ROLLING_BACKEND=false; ROLLING_REASON="뒤로 호환되지 않는 마이그레이션(ROLLING-DEPLOY-UNSAFE):${UNSAFE_MIGRATIONS}"
   elif [ "$BUILD_PGBOUNCER" = true ]; then
     ROLLING_BACKEND=false; ROLLING_REASON="풀러를 바꾼다"
   elif missing backend || missing events; then
@@ -423,10 +453,12 @@ cmd_plan() {
   echo "  search                                        : $(plan_word "$BUILD_SEARCH")"
   echo "  pgbouncer                                     : $(plan_word "$BUILD_PGBOUNCER")"
   if [ "$BUILD_BACKEND" = true ]; then
-    if [ "$ROLLING_BACKEND" = true ]; then
+    if [ "$ROLLING_BACKEND" = true ] && [ "$MIGRATIONS" = true ]; then
+      echo "  backend·events 교체 방식                      : 마이그레이션을 먼저 돌리고 겹쳐 바꾼다(끊김 없음)"
+    elif [ "$ROLLING_BACKEND" = true ]; then
       echo "  backend·events 교체 방식                      : 겹쳐 바꾼다(끊김 없음)"
     else
-      echo "  backend·events 교체 방식                      : 내리고 올린다 — ${ROLLING_REASON}"
+      echo "  backend·events 교체 방식                      : 넷을 내리고 마이그레이션을 돌린 뒤 올린다 — ${ROLLING_REASON}"
     fi
   fi
   if [ "$ANY" = false ]; then
@@ -595,6 +627,32 @@ rolling_replace() {
   log "$svc 바꿨다 ($old_name)"
 }
 
+# **새 이미지의 일회성 컨테이너에서 migrate 를 돌린다**(#526, ADR-0053). `run --rm` 은
+# backend 서비스와 같은 이미지·환경·네트워크로 컨테이너 하나를 띄웠다 지운다 — 떠 있는
+# backend 와 별개라 겹쳐 바꾸기 전에 스키마를 먼저 바꿀 수 있다. 한 배포에 한 번만, 이
+# 컨테이너 하나만 돌린다 — Django 마이그레이션은 둘이 동시에 돌면 안전하지 않은데, 배포
+# compose 의 backend 기동 command 에서 migrate 를 뺐으므로 겹친 두 backend 가 같이 돌릴
+# 일이 없다.
+#
+# **풀러를 거친다**(POSTGRES_HOST=pgbouncer, 트랜잭션 모드). 예전에도 backend 의 기동
+# command 가 같은 경로로 migrate 를 돌려 왔고(10-02 prod 의 `0014_connected_apps` 도 그렇게
+# 적용됐다), Django 의 migrate 는 마이그레이션 하나를 트랜잭션 하나로 돌리며 세션 상태
+# (서버측 커서·advisory lock·SET)에 기대지 않는다 — `tests/test_pgbouncer_live.py` 가 풀러
+# 너머로 마이그레이션을 처음부터 돌려 확인한다. 풀러에는 질의·유휴 트랜잭션 시간 제한이
+# 없다(docker/pgbouncer/docker-entrypoint.sh). `--no-deps` 인 이유: db·redis·풀러는 cmd_up 이
+# 이미 세웠고, 의존 서비스를 여기서 다시 세우게 두면 search 등을 건드릴 수 있다.
+#
+# prod 의 backend 환경에는 PROMETHEUS_MULTIPROC_DIR 가 있다 — 그 디렉터리가 없으면 지표를
+# 만드는 코드가 실패할 수 있어, 있을 때만 만든다(staging 은 그 값이 없다).
+run_migrations() {
+  log "마이그레이션 — 새 이미지($(echo "$CODEMIT_IMAGE_TAG" | cut -c1-12))의 일회성 컨테이너에서"
+  # shellcheck disable=SC2016
+  $COMPOSE run --rm --no-deps -T backend \
+    sh -c 'if [ -n "${PROMETHEUS_MULTIPROC_DIR:-}" ]; then mkdir -p "$PROMETHEUS_MULTIPROC_DIR"; fi; exec python manage.py migrate --noinput' \
+    || return 1
+  log "마이그레이션 끝"
+}
+
 # ------------------------------------------------------------ 바꿔 끼운다
 
 cmd_up() {
@@ -658,10 +716,19 @@ cmd_up() {
     # 남는다 — 앞의 둘은 스캔으로 상태를 진행시키는 주체고, events 는 강의실
     # 실시간 신호를 여는 주체다(ADR-0046, #380).
     #
-    # backend 의 command 가 migrate 를 먼저 돌리므로, 나머지 셋은 그 뒤에
-    # 올린다 — 새 마이그레이션이 필요한 코드가 아직 없는 스키마 위에서 스캔·
-    # 스트림을 돌리는 창을 만들지 않는다.
+    # **마이그레이션은 여기서, 넷을 바꾸기 전에 한 번 돌린다**(#526, ADR-0053). 예전에는
+    # backend 의 command 가 기동 때 migrate 를 돌렸는데, 그러면 겹쳐 바꾸는 동안 새
+    # 컨테이너가 스키마를 바꾸는 시점을 배포가 고르지 못하고, 실패해도 옛 것이 이미
+    # 내려간 뒤에야 안다. 지금 배포 compose 의 backend 는 migrate 를 부르지 않는다.
     if [ "${ROLLING_BACKEND:-false}" = true ]; then
+      # 옛 넷은 그대로 요청을 받는 채로 스키마를 먼저 바꾼다 — 마이그레이션이 뒤로
+      # 호환되므로 옛 코드는 새 스키마 위에서 그대로 돈다(표식이 붙은 것은 plan 이
+      # 이 길로 보내지 않는다). 실패하면 아무것도 내리지 않고 끝낸다.
+      if ! run_migrations; then
+        echo "마이그레이션이 실패했다 — 옛 backend·worker·beat·events 는 그대로 요청을 받는다."
+        echo "실패한 것 앞의 마이그레이션은 이미 적용됐을 수 있다(뒤로 호환되므로 옛 코드는 그대로 돈다)."
+        exit 1
+      fi
       # 겹쳐 바꾼다(#485) — 아래 rolling_replace 주석. worker·beat 는 사용자 요청을
       # 받지 않고(태스크는 Redis 에서 기다린다) beat 는 하나여야 하므로 지금처럼 바꾼다.
       rolling_replace backend 8000 30
@@ -669,6 +736,20 @@ cmd_up() {
       $COMPOSE up -d --no-deps $UP_FLAGS celery-worker celery-beat
       rolling_replace events 8001 10
     else
+      # **넷을 먼저 내리고 마이그레이션을 돌린다.** 뒤로 호환되지 않는 마이그레이션(표식)은
+      # 옛 코드가 새 스키마 위에서 한순간도 돌면 안 된다 — 예전 순서(backend 만 다시
+      # 만들고 그 기동 command 가 migrate)는 그 사이 옛 worker·beat·events 를 새 스키마
+      # 위에 남겼다. 풀러를 바꾸는 배포면 위에서 이미 내려가 있다(stop 은 그대로 지나간다).
+      log "backend·celery-worker·celery-beat·events 를 내리고 마이그레이션을 돌린다 — 이 동안 backend 가 없다"
+      $COMPOSE stop backend celery-worker celery-beat events
+      if ! run_migrations; then
+        # 내린 그 컨테이너(옛 이미지)를 되살린다 — 서비스가 통째로 비는 것보다 낫다.
+        # Postgres 의 DDL 은 트랜잭션이라 실패한 마이그레이션 자체는 되감겼지만, 그 앞의
+        # 것은 적용됐을 수 있다. 사람이 `showmigrations` 로 보고 판단한다.
+        echo "마이그레이션이 실패했다 — 내렸던 옛 컨테이너를 다시 켠다. 앞선 마이그레이션은 적용됐을 수 있다."
+        $COMPOSE start backend celery-worker celery-beat events || true
+        exit 1
+      fi
       # shellcheck disable=SC2086
       $COMPOSE up -d --no-deps $UP_FLAGS backend
       # shellcheck disable=SC2086
