@@ -55,7 +55,9 @@
 **precheck 는 이 스크립트를 절대 경로로 부른다.** automation 의 precheck 가 어느
 디렉터리에서 도는지는 약속되지 않았고, 이 스크립트는 토큰을 **자기 위치 기준**의 `.env`
 에서 읽는다 — 절대 경로로 부르면 주 워크트리의 `.env` 와 주 워크트리에 커밋된 이 파일이
-쓰인다. 즉 이 스크립트를 고치려면 `main` 에 머지해야 스케줄러가 본다(그게 맞는 동작이다).
+쓰인다. 즉 이 스크립트를 고치면 `main` 에 병합한 뒤 **주 체크아웃을 `git pull` 해야**
+스케줄러가 본다 — 2026-10-02 부터 주 체크아웃에서 `main` 에 직접 커밋하지 않으므로(PR 로만
+들어간다) 그 체크아웃은 누가 당겨 주지 않으면 그대로 멈춰 있다.
 """
 
 from __future__ import annotations
@@ -171,6 +173,42 @@ def _a_session_holds_the_lock(lock_path: pathlib.Path, ttl_minutes: float) -> bo
     return False
 
 
+def _branch_state(repo: pathlib.Path, branch: str, base: str = "origin/main") -> str:
+    """`branch` 가 `base` 에 대해 어떤 모양인가 — `"empty"`·`"merged"`·`"unmerged"`.
+
+    - `"empty"` — `base` 에 없는 제 커밋이 하나도 없다. 막 만들어져 아직 커밋하지 않은
+      세션의 분기가 이 모양이다(만든 뒤 `main` 이 앞서 나가도 마찬가지다).
+    - `"merged"` — 제 커밋이 전부 **같은 변경으로** `base` 에 들어가 있다.
+    - `"unmerged"` — 그 밖. 사람에게 넘긴 분기·아직 병합 안 된 PR 이 이 모양이다.
+
+    **「조상인가」로 보지 않는 이유**(2026-10-03). 2026-10-02 부터 PR 은 Jenkins 가
+    **rebase 병합**한다(`scripts/ci/automerge.py`) — `main` 에 들어간 커밋은 sha 가 새로
+    생기므로 분기 팁은 영영 `main` 의 조상이 되지 않는다. 옛 판정(`merge-base
+    --is-ancestor`)으로는 병합된 자동 진단 분기가 「머지 안 됨」으로 보여 하나도 걷히지
+    않는다. 그래서 `git cherry` 의 patch-id 비교로 「같은 변경이 들어갔는가」를 본다.
+    그리고 옛 판정은 커밋 없는 분기라도 `main` 이 앞서 나가 있으면 팁이 `main` 과 달라
+    「머지됨」으로 곧장 걷었다 — 도는 세션의 워크트리를 지우던 #459 의 모양 그대로다.
+    「제 커밋이 있는가」를 먼저 물어 그 경로를 닫는다.
+    """
+
+    def git(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=TIMEOUT_SECONDS
+        )
+
+    own = git("rev-list", "--count", f"{base}..{branch}")
+    if own.returncode != 0:
+        return "unmerged"  # 물어볼 수 없으면 남긴다 — 걷는 쪽이 되돌릴 수 없다.
+    if int(own.stdout.strip() or "0") == 0:
+        return "empty"
+    cherry = git("cherry", base, branch)
+    if cherry.returncode != 0:
+        return "unmerged"
+    if any(line.startswith("+") for line in cherry.stdout.splitlines()):
+        return "unmerged"
+    return "merged"
+
+
 def _sweep_merged_automation_worktrees(min_idle_minutes: float) -> list[str]:
     """머지가 끝난 자동 진단 워크트리를 걷는다 — 실행마다 하나씩 쌓이기 때문이다.
 
@@ -179,11 +217,11 @@ def _sweep_merged_automation_worktrees(min_idle_minutes: float) -> list[str]:
     분기는 팁이 곧 `origin/main`** 이라 그 판정을 그대로 통과했다. 그리고 청소가 잠금
     확인보다 먼저 돌아서, 진단 중인 세션이 첫 커밋 전에 다음 분 precheck 에 워크트리째
     치워졌다(`Working directory ... was deleted`). 재현에 1분 넘게 걸리는 세션은 사실상
-    전부 걸리는 결함이었다. 지금은 문이 둘이다:
+    전부 걸리는 결함이었다. 지금은 문이 둘이다(「커밋이 없다」의 판정은 `_branch_state`):
 
     1. **잠금이 살아 있으면 이 함수를 아예 부르지 않는다**(`main` 이 잠금 확인 뒤로
        옮겼다) — 도는 세션의 워크트리에는 손이 닿지 않는다.
-    2. **팁이 `origin/main` 과 같은 분기는 「아무것도 안 했다」로 보고 건드리지
+    2. **제 커밋이 없는 분기는 「아무것도 안 했다」로 보고 건드리지
        않는다** — 잠금이 어떤 이유로 없더라도(TTL 만료 직후 등) 방금 만들어진
        워크트리가 살아남는다. 다만 그러면 재현 실패로 커밋 없이 끝난 워크트리가
        영원히 남으므로, **`min_idle_minutes` 보다 오래 손대지 않은 것만** 걷는다.
@@ -196,8 +234,9 @@ def _sweep_merged_automation_worktrees(min_idle_minutes: float) -> list[str]:
     **매분 도는 것이 이 precheck 하나뿐이라 청소도 여기서 한다.** 별 cron 을 더하는
     것보다 낫다 — 청소할 것이 있는 시점과 이것이 도는 시점이 정확히 같다.
 
-    **머지된 것만 걷는다.** 브랜치 팁이 `origin/main` 의 조상이면 그 안의 작업은 이미
-    `main` 에 있다. 조상이 아니면 그대로 둔다 — 게이트에 걸려 사람에게 넘긴 분기
+    **머지된 것만 걷는다.** 분기의 커밋이 전부 같은 변경으로 `origin/main` 에 들어가
+    있으면 그 안의 작업은 이미 `main` 에 있다(`_branch_state` — rebase 병합이라 sha 가
+    아니라 변경으로 본다). 아니면 그대로 둔다 — 게이트에 걸려 사람에게 넘긴 분기
     (스킬의 「사람을 부르는 자리」)가 정확히 그 모양이고, 그건 사람이 이어받을 것이다.
 
     **무엇이 실패해도 진단을 멈추지 않는다.** 청소가 안 된 것과 오류를 못 집는 것은
@@ -220,8 +259,7 @@ def _sweep_merged_automation_worktrees(min_idle_minutes: float) -> list[str]:
         if listing.returncode != 0:
             return swept
 
-        main_tip = git("rev-parse", "origin/main").stdout.strip()
-        if not main_tip:
+        if git("rev-parse", "--verify", "-q", "origin/main").returncode != 0:
             return swept
 
         path = None
@@ -237,13 +275,14 @@ def _sweep_merged_automation_worktrees(min_idle_minutes: float) -> list[str]:
             if not branch.startswith("auto-"):
                 continue
 
+            state = _branch_state(_repo_root(), branch)
             # 머지되지 않았으면 남긴다 — 게이트에 걸려 사람에게 넘긴 분기가 그 모양이다.
-            if git("merge-base", "--is-ancestor", branch, "origin/main").returncode != 0:
+            if state == "unmerged":
                 continue
 
-            # 팁이 origin/main 이면 **아직 아무것도 커밋하지 않은** 것이다. 도는 세션의
+            # 제 커밋이 없으면 **아직 아무것도 커밋하지 않은** 것이다. 도는 세션의
             # 워크트리가 정확히 이 모양이라, 손대기 전에 충분히 식었는지 본다.
-            if git("rev-parse", branch).stdout.strip() == main_tip:
+            if state == "empty":
                 try:
                     idle = (time.time() - pathlib.Path(here).stat().st_mtime) / 60
                 except OSError:
