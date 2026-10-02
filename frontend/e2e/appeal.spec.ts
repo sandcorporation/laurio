@@ -7,7 +7,8 @@ import { seedE2eContests } from "./lib/seed";
 import { establishDeveloperSession } from "./lib/session";
 
 async function login(page: import("@playwright/test").Page, seed: string): Promise<void> {
-  await establishDeveloperSession(page, seed);
+  // 화면을 열지 않는다 — 두 시험 다 바로 이의 화면으로 간다(시험 하나 3초 한도).
+  await establishDeveloperSession(page, seed, null);
 }
 
 test("이의를 접수하면 폼이 사라지고 접수된 이의가 보인다", async ({ page }) => {

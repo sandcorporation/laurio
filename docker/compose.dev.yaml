@@ -17,6 +17,12 @@ x-minio-env: &default-minio-env
 services:
   db:
     image: postgres:17-alpine
+    # 커밋마다 디스크 동기화를 기다리지 않는다(2026-10-02). e2e 시드 하나가 질의
+    # 187개를 자동 커밋으로 내는데, SATA SSD 위에서 커밋 하나가 fsync 대기로 약
+    # 8ms 라 시드 한 번에 1.5초를 그 대기로 썼다(e2e 시험 하나 3초 한도). 데이터를
+    # 망가뜨리지 않는 설정이다 — DB 가 갑자기 죽으면 마지막 몇 트랜잭션만 잃는다.
+    # dev·CI 의 버릴 수 있는 DB 에만 둔다; 배포 compose 의 db 는 기본값(on)이다.
+    command: ["postgres", "-c", "synchronous_commit=off"]
     environment:
       <<: *default-postgres-env
     ports:

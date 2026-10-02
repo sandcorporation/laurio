@@ -134,9 +134,16 @@ def e2e_seed(request, name: str):
         # **트랜잭션 잠금이라 스스로 풀린다** — 요청이 어떻게 끝나든(예외 포함)
         # 커밋·롤백과 함께 놓인다. 시드 하나가 실측 0.25초라 워커 여섯이 줄을
         # 서도 최악 1.5초이고, 호출부의 하한은 30초다.
+        #
+        # **줄을 세우지 않아도 되는 시드는 등록부가 표시한다**(`SeedEntry.serialized`,
+        # 2026-10-02) — 매번 새 행만 만드는 시드까지 세우면 병렬 워커가 그 시드를
+        # 하나씩 기다린다.
         with transaction.atomic():
-            with connection.cursor() as cursor:
-                cursor.execute("SELECT pg_advisory_xact_lock(%s, %s)", [_SEED_LOCK_NAMESPACE, _seed_lock_key(name)])
+            if entry.serialized:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT pg_advisory_xact_lock(%s, %s)", [_SEED_LOCK_NAMESPACE, _seed_lock_key(name)]
+                    )
             call_command(entry.command, stdout=out, **options)
     except CommandError as exc:
         # 명령의 거부(배포 환경·잘못된 네임스페이스 등)는 500 이 아니라 4xx 다 —

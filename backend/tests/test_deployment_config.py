@@ -173,6 +173,25 @@ def test_production_config_passes_check_deploy_with_zero_warnings():
     assert "System check identified no issues" in result.stdout
 
 
+@pytest.mark.parametrize("env_builder", [_production_env, _staging_env])
+def test_deployed_environments_hash_passwords_with_the_slow_default(env_builder):
+    """dev·CI 는 빠른 해셔로 비밀번호를 만든다(`config/settings.py`, 시험 시간 때문이다)
+    — 그 분기가 배포 환경으로 새면 운영자 비밀번호가 MD5 로 저장된다. 배포 두 환경이
+    Django 기본값(PBKDF2)을 그대로 쓰는지 본다."""
+
+    import os
+
+    program = (
+        "import django; django.setup();"
+        "from django.contrib.auth.hashers import get_hasher;"
+        "print('HASHER=' + get_hasher().algorithm)"
+    )
+    result = boot_process.run(["-c", program], {**os.environ, **env_builder()})
+
+    assert result.returncode == 0, result.stderr
+    assert "HASHER=pbkdf2_sha256" in result.stdout
+
+
 @pytest.mark.parametrize("secret_key", ["short", "x" * 60, "django-insecure-" + "x" * 60])
 def test_production_config_refuses_weak_secret_key(secret_key):
     result = _run_check(_production_env(DJANGO_SECRET_KEY=secret_key))

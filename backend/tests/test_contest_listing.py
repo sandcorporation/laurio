@@ -136,14 +136,38 @@ def test_filter_and_sort_stay_correct_past_the_old_200_item_ceiling(
     뒤 거르므로 게임 몇십 건이 조용히 사라졌다.
     """
 
-    game_ids = {
-        _publish(
-            sponsor, games, [web], title=f"게임 {i:03d}", prize=1_000_000 + i, days=i + 1
-        ).id
-        for i in range(210)
-    }
-    for i in range(30):
-        _publish(sponsor, productivity, [web], title=f"생산성 {i:03d}", prize=500_000, days=1)
+    # 240건을 한 번에 넣는다(2026-10-02) — `_publish` 를 240번 부르면 공모전과 종류
+    # 연결이 한 줄씩 들어가 시험 하나가 CPU 1초 한도에 닿았다. 이 시험이 보는 것은
+    # 목록 API 의 필터·정렬·쪽 나누기라 저장 시그널(검색 색인)은 관계가 없다 —
+    # 검색어 없는 목록은 DB 에서 읽는다.
+    now = timezone.now()
+    created = Contest.objects.bulk_create(
+        [
+            Contest(
+                sponsor=sponsor,
+                title=f"게임 {i:03d}",
+                category=games,
+                prize=1_000_000 + i,
+                deadline_at=now + timedelta(days=i + 1),
+                status=Contest.Status.PUBLISHED,
+            )
+            for i in range(210)
+        ]
+        + [
+            Contest(
+                sponsor=sponsor,
+                title=f"생산성 {i:03d}",
+                category=productivity,
+                prize=500_000,
+                deadline_at=now + timedelta(days=1),
+                status=Contest.Status.PUBLISHED,
+            )
+            for i in range(30)
+        ]
+    )
+    Link = Contest.deliverable_types.through
+    Link.objects.bulk_create([Link(contest_id=c.id, deliverabletype_id=web.id) for c in created])
+    game_ids = {c.id for c in created[:210]}
 
     seen: list[int] = []
     prizes: list[int] = []

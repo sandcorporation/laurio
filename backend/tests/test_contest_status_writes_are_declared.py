@@ -76,8 +76,6 @@ from pathlib import Path
 
 import pytest
 
-from tests.ast_scan_support import BACKEND_ROOT, python_sources
-
 #: Contest.status 를 직접 다뤄도 되는 유일한 자리 — 선언과 claim 함수가 사는 곳.
 #: 새 예외가 필요해지면 여기 더한다(그 판단의 이유도 함께 적는다).
 ALLOWED = {
@@ -209,19 +207,12 @@ def _offenses_in(tree: ast.AST) -> list[str]:
     return offenses
 
 
-@pytest.fixture(scope="module")
-def parsed_sources() -> list[tuple[Path, ast.AST]]:
-    """백엔드 소스 전부의 구문 트리 — 이 파일의 두 시험이 같은 것을 한 번만
-    읽는다(2026-10-02). 각자 파싱하던 때는 그것만으로 시험 하나가 CPU 1초를
-    넘었다."""
+@pytest.fixture
+def parsed_sources(backend_sources) -> list[tuple[Path, ast.AST]]:
+    """백엔드 소스 전부의 구문 트리에서 허용된 자리(`ALLOWED`)를 뺀 것 — 파싱은 세션
+    픽스처 `backend_sources` 가 워커마다 한 번 한다(2026-10-02)."""
 
-    parsed = []
-    for path in python_sources():
-        relative = path.relative_to(BACKEND_ROOT)
-        if relative in ALLOWED:
-            continue
-        parsed.append((relative, ast.parse(path.read_text(encoding="utf-8"))))
-    return parsed
+    return [(source.relative, source.tree) for source in backend_sources if source.relative not in ALLOWED]
 
 
 def test_contest_status_is_never_written_outside_contests_transitions(parsed_sources):

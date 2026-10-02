@@ -37,7 +37,15 @@ function operatorOrigin(): string {
 
 /** 공개 앱: dev seed 로그인(`SOCIAL_AUTH_MODE=fake`)을 화면 없이 통과한다.
  * `seed` 는 로그인 폼의 `fake-login-seed` 에 넣던 값 그대로다. */
-export async function establishDeveloperSession(page: Page, seed: string): Promise<void> {
+export async function establishDeveloperSession(
+  page: Page,
+  seed: string,
+  /** 로그인 뒤 열 화면. `null` 이면 아무 화면도 열지 않는다 — 준비를 전부 API
+   * (`page.context().request`)로 하는 시험은 화면 이동 0.5초를 아낀다(시험 하나 3초
+   * 한도, 2026-10-02). 그 경우 아래 「도착했는가」 확인도 없으니, 쿠키가 붙었는지는
+   * 바로 다음 API 호출의 401 이 알려 준다. */
+  open: string | null = "/console/participation",
+): Promise<void> {
   const response = await page.context().request.post("/api/auth/social/kakao/login", {
     // 폼이 만드는 것과 같은 형식이다(app/login/login-form.tsx) — 형식이 갈리면
     // FakeSocialAdapter 가 다른 사용자를 만든다.
@@ -69,7 +77,8 @@ export async function establishDeveloperSession(page: Page, seed: string): Promi
   // 무관한 그 화면으로는 "쿠키가 실제로 붙었는가"를 확인할 수 없다.
   // `/console/participation`은 여전히 미들웨어가 지키는 인증 구역이라 같은 역할을
   // 한다.
-  await page.goto("/console/participation");
+  if (open === null) return;
+  await page.goto(open);
   // **도착했는지 확인한다.** 그 사후조건을 잃으면, 라우트가 200 을 냈지만 브라우저가
   // 쿠키를 버린 경우(예: 배포 설정으로 띄운 앱이 http 위에서 `secure` 쿠키를 심는다)
   // 이 헬퍼가 성공을 보고하고 호출부가 엉뚱한 자리에서 알 수 없는 타임아웃으로 죽는다.
@@ -123,6 +132,10 @@ export async function establishOperatorSession(
   page: Page,
   username: string,
   password: string,
+  /** 로그인 뒤 열 화면. 기본은 홈 — 홈을 보지 않는 시험은 목적지를 바로 준다:
+   * 홈은 서버 렌더링이 큐 세 개를 불러 한 번에 0.6초쯤 들고, 시험 하나는 3초 안에
+   * 끝나야 한다(2026-10-02). */
+  path = "/",
 ): Promise<void> {
   const origin = operatorOrigin();
   const response = await page.context().request.post("/api/auth/login", {
@@ -138,6 +151,6 @@ export async function establishOperatorSession(
 
   // 공개 앱과 같은 이유로, 옛 로그인이 도착하던 자리(운영자 홈)에 둔다 — 호출부 대부분이
   // 곧바로 `operator-home-heading` 이 보이는지를 단언한다.
-  await page.goto("/");
+  await page.goto(path);
   await expect(page).not.toHaveURL(/\/login/);
 }

@@ -836,12 +836,22 @@ if _RUNNING_TESTS:
     # synchronously`)이 테스트 환경에서만 깨지기 때문이다.
     CELERY_BROKER_URL = "memory://"
     CELERY_RESULT_BACKEND = "cache+memory://"
-    # 비밀번호 해시는 일부러 느리다(PBKDF2 수십만 회) — 운영자 계정을 만들고
-    # 로그인하는 테스트가 그것만으로 한 번에 CPU 0.3초 넘게 썼고, 운영자 테스트
-    # 대부분이 시험 하나 CPU 1초 한도(`tests/conftest.py`)를 넘은 원인이 이것
-    # 하나였다(2026-10-02). 테스트가 보는 것은 「맞는 비밀번호로만 들어간다」이지
-    # 해시 알고리즘의 강도가 아니다 — Django 문서가 테스트에 권하는 그대로다.
-    PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
+
+# 비밀번호 해시는 일부러 느리다(PBKDF2 수십만 회) — **배포 환경에서만 그렇게 둔다**
+# (2026-10-02). dev·CI·pytest 는 빠른 해셔로 새 해시를 만든다: 운영자 계정 시드 한
+# 번이 서버에서 1.06초, 운영자 앱을 거친 로그인 한 번이 0.55초라 그것만으로 e2e
+# 시험 하나 3초 한도를 넘었고, pytest 의 운영자 시험 대부분이 시험 하나 CPU 1초
+# 한도(`tests/conftest.py`)를 넘은 원인도 이것이었다. 시험이 보는 것은 「맞는
+# 비밀번호로만 들어간다」이지 해시 알고리즘의 강도가 아니다(Django 문서가 테스트에
+# 권하는 그대로). 판정은 다른 배포 가드와 같은 `IS_DEPLOYED_ENVIRONMENT` 라
+# staging·prod 는 Django 기본값(PBKDF2)을 그대로 쓴다 — `tests/
+# test_deployment_config.py` 가 고정한다. PBKDF2 를 둘째로 남기는 이유는 이미 그
+# 해시로 저장된 dev 계정도 그대로 로그인되게 하려는 것이다.
+if not IS_DEPLOYED_ENVIRONMENT:
+    PASSWORD_HASHERS = [
+        "django.contrib.auth.hashers.MD5PasswordHasher",
+        "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+    ]
 
 # --- Notification 어댑터 (티켓 17, ADR-0007 / ADR-0009) ------------------------------
 #

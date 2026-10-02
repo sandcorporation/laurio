@@ -69,6 +69,15 @@ services:
     # 커널이 고르고 잡이 `docker compose port` 로 읽는다(#196).
     ports: !override
       - "8000"
+    # **배포처럼 gunicorn 워커 넷으로 돈다**(2026-10-02). dev 의 `runserver` 는
+    # 프로세스 하나라 Playwright 워커 여럿의 시드와 화면 요청이 GIL 하나를 두고
+    # 줄을 섰다 — 혼자 돌면 1.2초인 이의 시험이 병렬에서는 시드 대기만으로
+    # 3초(시험 하나 한도)를 넘었다. 코드가 이미지에 구워진 CI 에서는 자동
+    # 재시작도 필요 없다. 워커 수는 prod compose 와 같다.
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             python manage.py seed_dev_data &&
+             gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 4"
 
   # 이벤트 서비스(ADR-0046, #379) — `backend`와 같은 이유로 마운트를 걷는다.
   # dev 의 `--reload`(uvicorn watchfiles)는 코드가 이미지에 구워진 CI 에서는

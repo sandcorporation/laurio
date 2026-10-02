@@ -66,10 +66,19 @@ export default defineConfig({
   // (CLAUDE.md 가 이 변수로 워커를 낮추라고 안내하는데 그 말대로 하면 실행조차 안 됐다).
   workers: workersFromEnv(process.env.PLAYWRIGHT_WORKERS) ?? "50%",
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
+  // **재시도하지 않는다**(2026-10-02). 예전에는 CI 에서 한 번 재시도했는데, 그것이
+  // 흔들리는 시험을 초록으로 덮었다 — 강의실 「죽은 세션」 시험이 30초 타임아웃으로
+  // 떨어졌다가 재시도로 통과한 것이 로그에만 남아 아무도 보지 못했다. 흔들리는
+  // 시험은 지우지 않고 그 자리에서 원인을 고친다.
+  retries: 0,
+  // **시험 하나는 3초 안에 끝난다**(앞뒤 걸이 포함, 2026-10-02). 넘으면 한도를
+  // 늘리지 않고 원인을 줄인다 — 준비는 화면이 아니라 API 로, 기다림은 시간이 아니라
+  // 사건으로 한다.
+  timeout: 3_000,
   reporter: process.env.CI ? [["github"], ["list"]] : "list",
   use: {
-    trace: "on-first-retry",
+    // 재시도가 없으니 "on-first-retry" 는 영영 남지 않는다 — 실패한 시험의 것만 남긴다.
+    trace: "retain-on-failure",
   },
   projects: [
     {

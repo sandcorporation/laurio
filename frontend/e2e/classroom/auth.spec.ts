@@ -79,16 +79,26 @@ test.describe("죽은 세션 — 공유 BFF 클라이언트가 로그인으로 �
     // 먼저 정상 세션을 세워 강의실이 실제로 화면을 그린다는 것을 확인한다
     // — 그래야 아래 리다이렉트가 "애초에 못 열어서"가 아니라 "열었다가
     // 401 을 받아서"라고 말할 수 있다.
-    await establishClassroomSession(page, `e2e-classroom-dead-session-${Date.now()}`);
+    await establishClassroomSession(
+      page,
+      `e2e-classroom-dead-session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    );
     await page.goto("/");
     await expect(page).toHaveURL("/");
+
+    // 살아 있던 화면을 먼저 떠난다(2026-10-02). 그 화면은 계속 백엔드를 부른다(알림
+    // 벨의 주기 조회 등) — 아래에서 쿠키를 죽이면 **그 화면의** 다음 요청이 401 을
+    // 받아 스스로 로그인으로 가고, 그 이동이 이 시험의 다음 `goto` 와 부딪혀
+    // `ERR_ABORTED` 로 떨어졌다(40번에 3번, CI 에서는 재시도가 덮었다).
+    const classroomUrl = page.url();
+    await page.goto("about:blank");
 
     // 세션을 죽인다 — 리프레시까지 실패하는 상황을 흉내 내려고 값 자체를
     // 못 쓰게 만든다(서명이 깨진 문자열). 미들웨어는 이 쿠키의 존재만
     // 보므로 이 시점에도 렌더링 자체는 막히지 않는다.
     await page.context().addCookies([
-      { name: "codemit_access", value: "dead.dead.dead", url: page.url(), httpOnly: true, sameSite: "Lax" },
-      { name: "codemit_refresh", value: "dead.dead.dead", url: page.url(), httpOnly: true, sameSite: "Lax" },
+      { name: "codemit_access", value: "dead.dead.dead", url: classroomUrl, httpOnly: true, sameSite: "Lax" },
+      { name: "codemit_refresh", value: "dead.dead.dead", url: classroomUrl, httpOnly: true, sameSite: "Lax" },
     ]);
 
     // 「내 클래스」 조회(`useMyClasses`)가 401 을 받고, 공유 BFF 클라이언트가
@@ -96,7 +106,11 @@ test.describe("죽은 세션 — 공유 BFF 클라이언트가 로그인으로 �
     // 거기서 공개 앱 로그인으로 다시 보내며 돌아올 자리(`next_origin`·`next`)
     // 를 함께 싣는다(#297 후속·#334) — 로그인을 마치면 이 화면으로 돌아온다.
     await page.goto("/");
-    await page.waitForURL(/\/login\?next=/);
+    // 이동 사건(`waitForURL`)이 아니라 도착한 주소를 본다(2026-10-02). 이 화면은 요청
+    // 둘(내 클래스·알림 벨)이 함께 401 을 받아 같은 로그인 주소로 두 번 이동하는데,
+    // 두 번째가 첫 번째를 취소해 `waitForURL` 이 `ERR_ABORTED` 로 떨어졌다(80번에 1번).
+    // 이 시험이 고정하는 것은 「결국 로그인으로 간다」다.
+    await expect(page).toHaveURL(/\/login\?next=/);
     const loginLink = page.getByTestId("classroom-login-link");
     await expect(loginLink).toBeVisible();
     const href = await loginLink.getAttribute("href");
