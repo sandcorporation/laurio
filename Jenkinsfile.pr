@@ -104,7 +104,7 @@ pipeline {
       }
       agent { label 'laurio-staging' }
       steps {
-        withCredentials([usernamePassword(credentialsId: 'github-farrar142-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
+        withCredentials([usernamePassword(credentialsId: 'github-sandcorporation-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
           sh 'python3 scripts/ci/automerge.py "$BRANCH_NAME" "$(git rev-parse HEAD)"'
         }
       }
