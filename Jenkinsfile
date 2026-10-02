@@ -43,6 +43,13 @@ pipeline {
     DEPLOY_IMAGE_SOURCE = 'registry'
   }
 
+  parameters {
+    // 끄면 staging 에 배포만 하고 production 은 앞당기지 않는다 — prod 를 붙잡아 둘 때 손으로 쓴다.
+    // 웹훅 빌드는 기본값(켜짐)으로 돈다.
+    booleanParam(name: 'PROMOTE_PRODUCTION', defaultValue: true,
+                 description: '초록이면 production 을 이 커밋으로 앞당긴다(→ prod 배포)')
+  }
+
   options {
     timestamps()
     disableConcurrentBuilds()          // 같은 호스트의 같은 스택을 두 빌드가 밟지 않게
@@ -195,8 +202,14 @@ pipeline {
     // Workflows 쓰기도 있어야 한다). 실패하면 빌드가 빨갛다 — staging 은 바뀌었는데 prod 가 따라가지
     // 않은 상태라 사람이 봐야 한다.
     success {
-      withCredentials([usernamePassword(credentialsId: 'github-sandcorporation-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
-        sh 'python3 scripts/ci/fast_forward.py production "$(git -c safe.directory="$PWD" rev-parse HEAD)"'
+      script {
+        if (params.PROMOTE_PRODUCTION == false) {
+          echo 'PROMOTE_PRODUCTION 이 꺼져 있다 — production 은 그대로 둔다.'
+        } else {
+          withCredentials([usernamePassword(credentialsId: 'github-sandcorporation-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
+            sh 'python3 scripts/ci/fast_forward.py production "$(git -c safe.directory="$PWD" rev-parse HEAD)"'
+          }
+        }
       }
     }
     failure {
