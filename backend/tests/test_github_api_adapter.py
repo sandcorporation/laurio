@@ -8,7 +8,9 @@ URL 조립·파싱 로직이다(어느 django-ninja 라우터에도 매여 있�
 
 from __future__ import annotations
 
-from repositories.adapters import GitHubAPIAdapter
+import pytest
+
+from repositories.adapters import GitHubAPIAdapter, GitHubAdapterError
 
 
 class _FakeResponse:
@@ -66,3 +68,53 @@ def test_clone_percent_encodes_branch_names_that_contain_a_slash(monkeypatch):
     ]
     assert result.commit_sha == "a" * 40
     assert result.zip_bytes == b"PK\x03\x04fake-zip"
+
+
+def _public_repo_get(requested_urls: list[str]):
+    """`acme/widgets` 하나만 있는 GitHub — 그 밖의 경로는 실물처럼 404다."""
+
+    def fake_get(url, *args, **kwargs):
+        requested_urls.append(url)
+        if url == "https://api.github.com/repos/acme/widgets":
+            return _FakeResponse(
+                status_code=200, json_body={"default_branch": "main", "private": False}
+            )
+        if url == "https://api.github.com/repos/acme/widgets/branches/main":
+            return _FakeResponse(status_code=200, json_body={"commit": {"sha": "b" * 40}})
+        if url.startswith("https://codeload.github.com/acme/widgets/"):
+            return _FakeResponse(status_code=200, chunks=[b"PK\x03\x04fake-zip"])
+        return _FakeResponse(status_code=404)
+
+    return fake_get
+
+
+def test_a_dot_git_suffix_on_the_repository_url_is_not_part_of_the_repository_name(monkeypatch):
+    """`git clone`에 쓰는 모양(`https://github.com/acme/widgets.git`)을 그대로 내는
+    참여자가 많다 — GitHub REST API는 `/repos/acme/widgets.git`에 404를 주므로,
+    끝의 `.git`을 떼지 않으면 공개 저장소가 「비공개」로 확정되고 강의실 채점이
+    실패 상한까지 재시도하다 자동 미달로 끝난다(#537 — prod 21건). GitHub은
+    `.git`으로 끝나는 저장소 이름을 허용하지 않으므로 떼어도 다른 저장소를
+    가리키게 되지 않는다.
+    """
+
+    for url in ("https://github.com/acme/widgets.git", "https://github.com/acme/widgets.git/"):
+        requested_urls: list[str] = []
+        monkeypatch.setattr("requests.get", _public_repo_get(requested_urls))
+        adapter = GitHubAPIAdapter(token="")
+
+        assert adapter.check_public(url) is True
+        result = adapter.clone(url)
+
+        assert result.commit_sha == "b" * 40
+        assert result.zip_bytes == b"PK\x03\x04fake-zip"
+        assert not [u for u in requested_urls if "widgets.git" in u]
+
+
+def test_a_repository_name_that_is_only_dot_git_is_rejected_rather_than_emptied(monkeypatch):
+    """`.git`을 떼고 나면 이름이 비는 URL은 저장소가 아니다 — `/repos/acme/`를
+    치게 두지 않고 형식 오류로 거절한다(#537)."""
+
+    monkeypatch.setattr("requests.get", _public_repo_get([]))
+
+    with pytest.raises(GitHubAdapterError):
+        GitHubAPIAdapter(token="").check_public("https://github.com/acme/.git")

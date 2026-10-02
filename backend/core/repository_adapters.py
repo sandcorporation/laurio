@@ -118,6 +118,13 @@ def _parse_github_url(url: str) -> tuple[str, str]:
     if not GITHUB_REPO_URL_PATTERN.match(url):
         raise GitHubAdapterError(f"github.com 저장소 URL 형식이 아니다: {url!r}")
     owner, repo = url[len("https://github.com/") :].rstrip("/").split("/", 1)
+    # `git clone`에 쓰는 모양(`.../repo.git`)을 그대로 내는 참여자가 많다 — REST
+    # API는 `/repos/owner/repo.git`에 404를 주므로 떼지 않으면 공개 저장소가
+    # 비공개로 확정된다(#537). GitHub은 `.git`으로 끝나는 저장소 이름을 허용하지
+    # 않아 떼어도 다른 저장소를 가리키지 않는다.
+    repo = repo.removesuffix(".git")
+    if not repo:
+        raise GitHubAdapterError(f"github.com 저장소 URL 형식이 아니다: {url!r}")
     return owner, repo
 
 
