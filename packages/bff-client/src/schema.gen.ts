@@ -2854,6 +2854,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operator/classroom/usage/classes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Usage Classes
+         * @description 클래스마다 참여자·문제(열림/초안/숨김)·제출·제출한 학생·참여율(#493).
+         *
+         *     기간을 받지 않는다 — 클래스 전체 기간의 합계다. 보관된 클래스도 돌려주되
+         *     진행 중인 클래스 뒤에 둔다(각 묶음 안에서는 최근에 만든 것이 먼저).
+         */
+        get: operations["classroom_usage_operator_api_usage_classes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/operator/classroom/usage/daily": {
         parameters: {
             query?: never;
@@ -4500,6 +4523,40 @@ export interface components {
             syntax_check_enabled: boolean;
             /** Title */
             title: string;
+        };
+        /**
+         * ClassUsageOut
+         * @description 클래스 하나의 **전체 기간** 합계. 강사·학생을 가리키는 값은 없다 — 클래스
+         *     id 는 상세(#494)로 가는 주소에 쓰인다.
+         */
+        ClassUsageOut: {
+            /** Archived */
+            archived: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Participants */
+            participants: number;
+            /** Participants Submitted */
+            participants_submitted: number;
+            /** Participation Rate */
+            participation_rate: number | null;
+            /** Problems Draft */
+            problems_draft: number;
+            /** Problems Hidden */
+            problems_hidden: number;
+            /** Problems Open */
+            problems_open: number;
+            /** Submissions */
+            submissions: number;
+            /** Submitting Students */
+            submitting_students: number;
         };
         /** ClassroomChecklistVerdictOut */
         ClassroomChecklistVerdictOut: {
@@ -11320,6 +11377,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_usage_operator_api_usage_classes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassUsageOut"][];
                 };
             };
         };

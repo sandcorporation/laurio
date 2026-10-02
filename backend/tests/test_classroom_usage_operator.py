@@ -265,3 +265,132 @@ def test_the_response_carries_no_user_id_or_name(client, db):
     text = response.content.decode()
     for leaked in ("홍길동", "student-mail", "kakao:", "강사"):
         assert leaked not in text
+
+
+# --- 클래스 목록 (#493) ------------------------------------------------------
+
+CLASSES_USAGE_URL = "/api/operator/classroom/usage/classes"
+
+
+def _classes(operator: Client) -> list[dict]:
+    response = operator.get(CLASSES_USAGE_URL)
+    assert response.status_code == 200, response.content
+    return response.json()
+
+
+def _hide(client, access: str, class_id: int, problem_id: int) -> None:
+    response = client.post(
+        f"{CLASSES_URL}/{class_id}/problems/{problem_id}/hide",
+        content_type="application/json",
+        **auth_header(access),
+    )
+    assert response.status_code == 200, response.content
+
+
+def test_class_list_counts_participants_without_instructor_or_expelled(client, db):
+    instructor = login(client, "instructor")
+    stays = login(client, "stays")
+    leaves = login(client, "leaves")
+    quiet = login(client, "quiet")
+    class_id = create_class(client, instructor["access"])
+    problem = create_open_problem(client, instructor["access"], class_id)
+
+    join_class(client, instructor["access"], class_id, instructor_access=instructor["access"])
+    submit_repository(client, instructor["access"], class_id, problem.id)  # 강사 자신 — 빠진다
+    for who in (stays, leaves, quiet):
+        join_class(client, who["access"], class_id, instructor_access=instructor["access"])
+    submit_repository(client, stays["access"], class_id, problem.id)
+    submit_repository(client, stays["access"], class_id, problem.id)
+    submit_repository(client, leaves["access"], class_id, problem.id)
+    _expel(client, instructor["access"], class_id, "leaves")
+    operator = _operator_client()
+
+    (row,) = _classes(operator)
+
+    assert row["participants"] == 2  # stays, quiet — 강사·내보낸 학생 제외
+    assert row["submissions"] == 3  # stays 2 + leaves 1 — 내보낸 학생의 제출은 남는다
+    assert row["submitting_students"] == 2  # stays, leaves
+    assert row["participants_submitted"] == 1  # 참여율 분자에서 leaves 는 빠진다
+    assert row["participation_rate"] == 0.5
+
+
+def test_class_with_no_participants_has_no_participation_rate(client, db):
+    instructor = login(client, "instructor")
+    create_class(client, instructor["access"])
+    operator = _operator_client()
+
+    (row,) = _classes(operator)
+
+    assert row["participants"] == 0
+    assert row["participation_rate"] is None
+
+
+def test_problem_counts_split_by_open_draft_hidden(client, db):
+    instructor = login(client, "instructor")
+    class_id = create_class(client, instructor["access"])
+    create_open_problem(client, instructor["access"], class_id, title="열림1")
+    create_open_problem(client, instructor["access"], class_id, title="열림2")
+    hidden = create_open_problem(client, instructor["access"], class_id, title="숨김")
+    _hide(client, instructor["access"], class_id, hidden.id)
+    create_open_problem(client, instructor["access"], class_id, title="초안", open=False)
+    operator = _operator_client()
+
+    (row,) = _classes(operator)
+
+    assert (row["problems_open"], row["problems_draft"], row["problems_hidden"]) == (2, 1, 1)
+
+
+def test_archived_classes_are_listed_after_active_ones(client, db):
+    from tests.classroom_scenarios import archive_class
+
+    instructor = login(client, "instructor")
+    old_archived = create_class(client, instructor["access"], name="지난 기수")
+    active = create_class(client, instructor["access"], name="이번 기수")
+    archive_class(client, instructor["access"], old_archived)
+    operator = _operator_client()
+
+    rows = _classes(operator)
+
+    assert [(r["id"], r["archived"]) for r in rows] == [(active, False), (old_archived, True)]
+
+
+def test_class_list_carries_class_name_but_no_user_id_or_name(client, db):
+    instructor = login(client, "instructor", email="teacher-mail@example.com")
+    student = login(client, "student", email="student-mail@example.com")
+    class_id = create_class(client, instructor["access"], name="웹 스터디")
+    problem = create_open_problem(client, instructor["access"], class_id)
+    join_class(
+        client, student["access"], class_id, instructor_access=instructor["access"], display_name="홍길동"
+    )
+    submit_repository(client, student["access"], class_id, problem.id)
+    operator = _operator_client()
+
+    response = operator.get(CLASSES_USAGE_URL)
+    (row,) = response.json()
+
+    assert row["name"] == "웹 스터디"
+    assert set(row) == {
+        "id",
+        "name",
+        "created_at",
+        "archived",
+        "participants",
+        "problems_open",
+        "problems_draft",
+        "problems_hidden",
+        "submissions",
+        "submitting_students",
+        "participants_submitted",
+        "participation_rate",
+    }
+    text = response.content.decode()
+    for leaked in ("홍길동", "teacher-mail", "student-mail", "kakao:", "강사"):
+        assert leaked not in text
+
+
+def test_class_list_refuses_participants_and_opens_for_regular_operators(client, db):
+    participant = login(client, "student")
+
+    assert client.get(CLASSES_USAGE_URL, **auth_header(participant["access"])).status_code in (401, 403)
+    assert Client().get(CLASSES_USAGE_URL).status_code in (401, 403)
+    assert _operator_client("plain-operator").get(CLASSES_USAGE_URL).status_code == 200

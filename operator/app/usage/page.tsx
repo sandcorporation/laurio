@@ -6,8 +6,9 @@
 //
 // 기간은 주소(`?from=&to=`)에 산다 — 입력을 바꿔 「보기」를 누르면 주소가 바뀌고,
 // 주소가 바뀌면 표가 다시 온다. 주소가 비면 백엔드의 기본값(오늘을 포함한 최근
-// 30일)이 오고, 입력칸은 그 응답의 기간으로 채워진다. 이 화면 아래쪽의 클래스
-// 목록(#493)과 클래스 상세(#494)가 같은 기간 쿼리를 이어 받는다.
+// 30일)이 오고, 입력칸은 그 응답의 기간으로 채워진다. 아래쪽의 클래스 목록(#493)은
+// 기간과 무관한 전체 합계이고, 그 행이 여는 클래스 상세(#494)가 화면에 보이는
+// 기간을 주소로 이어 받는다.
 //
 // 표는 홈의 큐 표 관례를 따른다(flex 행, 열 너비 상수, 짝수 행 줄무늬). 제출 칸
 // 옆 막대는 기간 안 최댓값 대비 길이의 div 다 — 차트 의존성을 들이지 않는다.
@@ -18,8 +19,10 @@ import { type FormEvent, Suspense, useState } from "react";
 import { PageHeader } from "@/app/components/page-header";
 import { Panel } from "@/app/components/panel";
 import { useSession } from "@/lib/auth/use-session";
+import { ClassUsageList } from "@/lib/usage/class-list";
 import { periodFromSearchParams, periodQuery, type UsagePeriod } from "@/lib/usage/period";
 import type { DailyUsage, UsageDay } from "@/lib/usage/types";
+import { useClassUsage } from "@/lib/usage/use-class-usage";
 import { useDailyUsage } from "@/lib/usage/use-daily-usage";
 
 const COL = {
@@ -177,6 +180,7 @@ function UsageInner() {
   const searchParams = useSearchParams();
   const period = periodFromSearchParams(searchParams);
   const state = useDailyUsage(period, session.status === "authenticated");
+  const classes = useClassUsage(session.status === "authenticated");
 
   function applyPeriod(next: UsagePeriod) {
     router.replace(`/usage${periodQuery(next)}`);
@@ -232,6 +236,27 @@ function UsageInner() {
             </p>
           )}
           {state.status === "loaded" && <DailyTable usage={state.usage} />}
+        </Panel>
+
+        <Panel title="클래스" meta="클래스를 연 뒤 전체 — 위의 기간과 무관하다">
+          {classes.status === "loading" && (
+            <p data-testid="usage-classes-loading" className="px-4 py-3.5 text-[13px] text-ink/62">
+              불러오는 중...
+            </p>
+          )}
+          {classes.status === "error" && (
+            <p role="alert" data-testid="usage-classes-error" className="px-4 py-3.5 text-[13px] text-attention">
+              {classes.detail}
+            </p>
+          )}
+          {classes.status === "loaded" && classes.classes.length === 0 && (
+            <p data-testid="usage-classes-empty" className="px-4 py-3.5 text-[13px] text-ink/62">
+              아직 클래스가 없습니다.
+            </p>
+          )}
+          {classes.status === "loaded" && classes.classes.length > 0 && (
+            <ClassUsageList classes={classes.classes} period={shown} />
+          )}
         </Panel>
       </div>
     </>

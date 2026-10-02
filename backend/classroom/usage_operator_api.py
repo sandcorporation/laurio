@@ -191,3 +191,92 @@ def usage_daily(
         submitters=period_submissions.values("member__user_id").distinct().count(),
     )
     return UsageDailyOut(start_date=start, end_date=end, days=days, totals=totals)
+
+
+# --- 클래스 목록 (#493) ------------------------------------------------------
+
+
+class ClassUsageOut(Schema):
+    """클래스 하나의 **전체 기간** 합계. 강사·학생을 가리키는 값은 없다 — 클래스
+    id 는 상세(#494)로 가는 주소에 쓰인다."""
+
+    id: int
+    name: str
+    created_at: datetime
+    archived: bool
+    #: 지금 남아 있는 학생 — 강사 제외, 내보내지 않은 멤버.
+    participants: int
+    problems_open: int
+    problems_draft: int
+    problems_hidden: int
+    #: 강사 자신의 것을 뺀 제출. 내보낸 학생의 제출도 센다.
+    submissions: int
+    #: 위 제출을 낸 서로 다른 사람 — 내보낸 학생도 센다.
+    submitting_students: int
+    #: 지금 남아 있는 학생 중 한 번이라도 낸 사람 — 참여율의 분자.
+    participants_submitted: int
+    #: participants_submitted / participants. 참여자가 0 이면 값이 없다(0 이 아니다).
+    participation_rate: float | None
+
+
+def _count_by(queryset, key: str, **aggregates) -> dict:
+    rows = queryset.values(key).annotate(**aggregates).order_by()
+    return {row[key]: row for row in rows}
+
+
+@usage_operator_router.get("/classroom/usage/classes", response=list[ClassUsageOut])
+def usage_classes(request):
+    """클래스마다 참여자·문제(열림/초안/숨김)·제출·제출한 학생·참여율(#493).
+
+    기간을 받지 않는다 — 클래스 전체 기간의 합계다. 보관된 클래스도 돌려주되
+    진행 중인 클래스 뒤에 둔다(각 묶음 안에서는 최근에 만든 것이 먼저).
+    """
+
+    # 모듈 머리의 import 줄을 건드리지 않으려고(#494 가 같은 파일을 나란히 고친다) 여기서 부른다.
+    from .models import Class, Problem
+
+    participants = _count_by(
+        counted_class_joins().filter(expelled_at__isnull=True), "classroom_id", n=Count("id")
+    )
+    problems: dict[int, dict[str, int]] = {}
+    for row in Problem.objects.values("classroom_id", "status").annotate(n=Count("id")).order_by():
+        problems.setdefault(row["classroom_id"], {})[row["status"]] = row["n"]
+    submissions = _count_by(
+        counted_submissions(),
+        "member__classroom_id",
+        n=Count("id"),
+        people=Count("member__user_id", distinct=True),
+    )
+    submitted_now = _count_by(
+        counted_submissions().filter(member__expelled_at__isnull=True),
+        "member__classroom_id",
+        people=Count("member__user_id", distinct=True),
+    )
+
+    classes = sorted(
+        Class.objects.only("id", "name", "created_at", "archived_at"),
+        key=lambda c: (c.archived_at is not None, -c.created_at.timestamp()),
+    )
+    result: list[ClassUsageOut] = []
+    for c in classes:
+        n_participants = participants[c.id]["n"] if c.id in participants else 0
+        n_submitted_now = submitted_now[c.id]["people"] if c.id in submitted_now else 0
+        by_status = problems.get(c.id, {})
+        sub = submissions.get(c.id)
+        result.append(
+            ClassUsageOut(
+                id=c.id,
+                name=c.name,
+                created_at=c.created_at,
+                archived=c.archived_at is not None,
+                participants=n_participants,
+                problems_open=by_status.get(Problem.Status.OPEN, 0),
+                problems_draft=by_status.get(Problem.Status.DRAFT, 0),
+                problems_hidden=by_status.get(Problem.Status.HIDDEN, 0),
+                submissions=sub["n"] if sub else 0,
+                submitting_students=sub["people"] if sub else 0,
+                participants_submitted=n_submitted_now,
+                participation_rate=(n_submitted_now / n_participants) if n_participants else None,
+            )
+        )
+    return result
