@@ -61,8 +61,8 @@ export async function runSeed(name: string, options: Record<string, unknown> = {
  * `/api/internal/scans/{name}`) — BFF 는 `/api/internal/*`을 의도적으로 막으므로
  * (lib/proxy/allowlist.ts) 이 호출은 `runSeed`와 같은 이유로 백엔드를 직접 친다.
  *
- * **celery가 이 e2e 잡에 없다**(#40, `.github/workflows/ci.yaml`의
- * `frontend-e2e-public`은 `--profile celery`를 켜지 않는다) — 그래서 마감이
+ * **celery가 이 e2e 스택에 없다**(#40, `scripts/ci/e2e.sh` 는
+ * `--profile celery`를 켜지 않는다) — 그래서 마감이
  * 지난 뒤 저절로 도는 스캔이 없다. 시간 기반 전이(마감·채점,
  * ADR-0003)를 실제로 관찰해야 하는 스펙은 이 함수로 직접 스캔을 쏜다. */
 export async function runInternalScan(name: string): Promise<unknown> {

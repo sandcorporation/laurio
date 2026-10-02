@@ -17,7 +17,9 @@ if [ -z "$files" ]; then
   echo "TESTS=1"
   exit 0
 fi
-if printf '%s\n' "$files" | grep -qvE '(\.md$|^docs/)'; then
+# 파이프로 넘기지 않는다 — pipefail 아래에서 grep 이 먼저 끝나 printf 가 SIGPIPE 로 죽으면
+# 「문서만 바뀌었다」로 읽혀 시험을 건너뛴다.
+if grep -qvE '(\.md$|^docs/)' <<<"$files"; then
   echo "TESTS=1"
 else
   echo "TESTS=0"

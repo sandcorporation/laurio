@@ -10,15 +10,17 @@
 // `Jenkinsfile.production` 도 같은 단계를 갖는다 — 한쪽 단계를 바꾸면 다른 쪽도 같이
 // 고친다(다른 것은 agent 라벨·대상·prod 의 브랜치 검사뿐이다).
 //
-// **잡은 Pipeline 이다**(`scriptPath: Jenkinsfile`, 브랜치 `*/main`).
+// **잡은 Pipeline 이다**(`scriptPath: Jenkinsfile`, 브랜치 `*/staging`).
 //
-// **무엇이 이 잡을 부르는가**(2026-09-17). CI 다 — main 의 CI 가 staging 이미지를 ghcr 에
-// 올리고 나머지 잡이 전부 초록이면 `deploy-staging` 잡이 `buildWithParameters` 로
-// DEPLOY_SHA 를 채워 부른다. 그 커밋을 정확히 배포하려고 워크스페이스를 그 커밋으로
-// 되돌린다. 예전 트리거인 GitHub 웹훅은 이미지가 올라가기 **전에** 이 잡을 부르므로,
-// 웹훅으로 불린 빌드(DEPLOY_SHA 없음)는 아무것도 하지 않고 끝난다 — 잡 설정에서
-// 웹훅 트리거를 꺼도 되고 켜 둬도 해가 없다. 사람이 파라미터를 비우고 누르면 main 의
-// 끝을 배포한다(그 커밋의 이미지가 ghcr 에 있어야 한다).
+// **무엇이 이 잡을 부르는가**(2026-10-02). `staging` 브랜치의 push 다(GitHub 웹훅,
+// GitHubPushTrigger). 그 브랜치는 사람이 커밋하지 않는다 — main 에 들어온 커밋의 이미지 열둘과
+// 부팅 가드 셋이 GitHub Actions(images.yaml)에서 초록이면 그 워크플로가 `staging` 을 그 커밋으로
+// fast-forward 한다. 그래서 웹훅이 이 잡을 부르는 순간 이미지는 이미 ghcr 에 있다. 예전에는
+// main 의 CI 가 `buildWithParameters` 로 DEPLOY_SHA 를 채워 불렀다(그때 잡 브랜치는 `*/main`).
+//
+// **초록이면 `production` 을 같은 커밋으로 앞당긴다**(아래 post success, scripts/ci/fast_forward.py)
+// — 그것이 prod 잡(Jenkinsfile.production)을 부른다. staging 에서 실제로 떠서 헬스 체크를 통과한
+// 커밋만 prod 로 간다.
 
 def deployTarget = 'staging'
 
@@ -41,11 +43,6 @@ pipeline {
     DEPLOY_IMAGE_SOURCE = 'registry'
   }
 
-  parameters {
-    string(name: 'DEPLOY_SHA', defaultValue: '', trim: true,
-           description: 'CI 가 채운다 — 이 커밋(40자리)의 이미지로 배포한다. 비우면 main 의 끝.')
-  }
-
   options {
     timestamps()
     disableConcurrentBuilds()          // 같은 호스트의 같은 스택을 두 빌드가 밟지 않게
@@ -56,38 +53,25 @@ pipeline {
     stage('대상 확인') {
       steps {
         script {
-          def sha = params.DEPLOY_SHA ?: ''
-          if (!sha && !currentBuild.getBuildCauses('com.cloudbees.jenkins.GitHubPushCause').isEmpty()) {
-            env.SKIP_DEPLOY = 'true'
-            currentBuild.description = 'GitHub push — CI 가 이미지를 올린 뒤 다시 부른다'
-            echo 'GitHub 웹훅으로 불렸다 — 이 커밋의 이미지가 아직 없을 수 있어 배포하지 않는다.'
-            return
+          // 이 파일이 staging 이 아닌 브랜치로 잘못 돌면(잡 브랜치 지정 실수) 이미지가 없거나
+          // 승격되지 않은 커밋을 배포하고, 끝에서 그 커밋을 production 으로 앞당긴다. 멈춘다.
+          def branch = env.GIT_BRANCH ?: ''
+          if (!(branch == 'staging' || branch.endsWith('/staging'))) {
+            error("staging 브랜치만 staging 으로 배포한다 — 지금 브랜치: '${branch}'")
           }
-          if (sha) {
-            if (!(sha ==~ /[0-9a-f]{40}/)) {
-              error("DEPLOY_SHA 는 40자리 커밋 해시여야 한다: '${sha}'")
-            }
-            // 빌드 시작 때 체크아웃한 main 의 끝이 그 커밋을 품고 있어야 한다 — main 에
-            // 없는 커밋(강제 push 로 사라진 것 등)은 배포하지 않는다. fetch 는 하지 않는다:
-            // 잡의 체크아웃만 자격증명을 갖는다.
-            sh "git -c safe.directory=\"\$PWD\" merge-base --is-ancestor ${sha} HEAD"
-            sh "git -c safe.directory=\"\$PWD\" checkout --quiet --detach ${sha}"
-            currentBuild.description = sha.take(12)
-          }
+          currentBuild.description = (env.GIT_COMMIT ?: '').take(12)
         }
         sh 'git -c safe.directory="$PWD" log -1 --oneline'
       }
     }
 
     stage('Preflight') {
-      when { expression { env.SKIP_DEPLOY != 'true' } }
       steps {
         sh "sh ./deploy.sh ${deployTarget} preflight"
       }
     }
 
     stage('변경 계획') {
-      when { expression { env.SKIP_DEPLOY != 'true' } }
       steps {
         sh "sh ./deploy.sh ${deployTarget} plan"
         script {
@@ -160,7 +144,6 @@ pipeline {
     }
 
     stage('배포 표식') {
-      when { expression { env.SKIP_DEPLOY != 'true' } }
       steps {
         sh "sh ./deploy.sh ${deployTarget} mark"
       }
@@ -168,12 +151,8 @@ pipeline {
 
     // 옛 커밋의 ghcr 이미지·오래된 빌드 캐시를 지운다(deploy.sh prune). 실패해도
     // 배포를 실패로 만들지 않는다 — 명령 자신도 언제나 0 으로 끝나지만, 여기서도
-    // 실패를 삼킨다. **이 파일과 deploy.sh 가 다른 커밋에서 온다**(staging 잡은
-    // 파이프라인을 main 의 최신에서 읽고 deploy.sh 는 DEPLOY_SHA 를 체크아웃해
-    // 쓴다) — prune 이 생기기 전 커밋을 배포한 빌드가 「알 수 없는 명령」으로
-    // 빨갛게 끝났다(2026-09-17, 교체·확인·표식은 다 끝난 뒤였다).
+    // 실패를 삼킨다.
     stage('정리') {
-      when { expression { env.SKIP_DEPLOY != 'true' } }
       steps {
         sh "sh ./deploy.sh ${deployTarget} prune || echo '정리를 건너뛴다 — 배포 결과와 무관하다'"
       }
@@ -199,7 +178,7 @@ pipeline {
           script {
             def result = currentBuild.currentResult
             def mark = result == 'SUCCESS' ? '\u2705' : (result == 'ABORTED' ? '\u26aa' : '\u274c')
-            def sha = (env.DEPLOY_SHA ?: env.GIT_COMMIT ?: '').take(12)
+            def sha = (env.GIT_COMMIT ?: '').take(12)
             def took = currentBuild.durationString.replace(' and counting', '')
             def text = "${mark} ${TARGET_LABEL} 배포 ${result} — #${env.BUILD_NUMBER}" +
               (sha ? " (${sha})" : '') + " · ${took} · ${env.BUILD_URL}"
@@ -211,8 +190,17 @@ pipeline {
         }
       }
     }
+    // staging 에서 초록이었던 커밋을 prod 로 보낸다. `production` 이 움직이면 웹훅이 prod 잡을
+    // 부른다. 토큰은 PR CI 의 자동 병합과 같은 것이다(Contents 쓰기 — 워크플로 파일을 바꾼 커밋은
+    // Workflows 쓰기도 있어야 한다). 실패하면 빌드가 빨갛다 — staging 은 바뀌었는데 prod 가 따라가지
+    // 않은 상태라 사람이 봐야 한다.
+    success {
+      withCredentials([usernamePassword(credentialsId: 'github-sandcorporation-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
+        sh 'python3 scripts/ci/fast_forward.py production "$(git -c safe.directory="$PWD" rev-parse HEAD)"'
+      }
+    }
     failure {
-      echo '배포 실패 — 배포 표식은 옮기지 않았다. 다음 빌드가 같은 범위를 다시 시도한다.'
+      echo '배포 실패 — 배포 표식은 옮기지 않았고 production 도 앞당기지 않았다. 다음 빌드가 같은 범위를 다시 시도한다.'
     }
   }
 }

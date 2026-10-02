@@ -1,0 +1,895 @@
+name: Images
+
+# **main 에 들어온 커밋의 배포 이미지를 굽고, 다 되면 `staging` 브랜치를 앞당긴다**(2026-10-02).
+#
+# 시험은 여기서 돌지 않는다 — PR 이 Jenkins `codemit-pr`(Jenkinsfile.pr)에서 초록이어야 main 에
+# 들어오므로(자동 rebase 병합), main 의 커밋은 이미 시험을 통과한 것이다. 여기 남은 것은 GitHub
+# 호스티드 러너가 맡는 두 가지뿐이다: 배포 이미지(staging amd64 · prod arm64)와, 그 이미지가
+# 배포 설정 없이는 뜨지 않고 완전한 설정으로는 뜨는지 보는 부팅 가드 셋.
+#
+# 그다음은 Jenkins 다 — `staging` 이 움직이면 staging 배포(Jenkinsfile), 그것이 초록이면
+# Jenkins 가 `production` 을 같은 커밋으로 앞당기고 prod 배포(Jenkinsfile.production)가 돈다.
+#
+# **예전에는 셀프호스티드 러너(sub·mac)에서 시험까지 다 돌렸다.** 러너 셋이 sub 의 코어를 제한
+# 없이 나눠 써 이미지 빌드와 겹친 시험이 경합만으로 한도를 넘었고(#499 의 첫 CI), 호스티드는
+# 그때 결제 문제로 못 썼다. 지금은 호스티드가 다시 열려 이미지는 여기서, 시험은 노드를 통째로
+# 쓰는 Jenkins 에서 돈다.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 연달아 push 하면 대기 중이던 실행은 취소될 수 있다(GitHub 은 그룹에 pending 을 하나만 둔다).
+# 괜찮다 — `staging` 은 언제나 「이미지가 다 올라간 main 의 가장 새 커밋」으로만 가고, 그 커밋이
+# 앞선 커밋을 품는다.
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+
+  # 프론트 배포 부팅 가드 (FE-13, #38).
+  #
+  # ADR-0017은 이 프로젝트의 프론트 테스트 시임을 "실행 중인 Next 앱 하나"로
+  # 못박는다. 이 잡이 증명해야 하는 대상은 정반대다 — **앱이 뜨지 않는 것**이
+  # 관찰 대상이라, 실행 중인 앱을 치는 시임으로는 원천적으로 닿지 않는다.
+  # backend/tests/test_deployment_config.py가 같은 이유로 override_settings를
+  # 못 쓰고 subprocess로 `manage.py check`를 직접 실행하는 것과 동일한 예외
+  # 사유다. 그래서 여기서는 frontend.Dockerfile의 runner 스테이지(staging/prod가
+  # 실제로 배포하는 그 이미지)를 직접 빌드해 컨테이너로 띄우고, 프로세스
+  # 종료 코드와 로그를 확인한다.
+  #
+  # 이 형태를 고른 또 다른 이유: 처음에는 instrumentation.ts의 register()가
+  # 단순히 `throw`만 하면 될 줄 알았는데, standalone 산출물(`node server.js`)로
+  # 실제 재현해보니 Next가 그 에러를 "unhandledRejection"으로 로그만 찍고
+  # 삼켜 HTTP 서버가 계속 듣고 있었다 — 컨테이너는 Up 상태로 남고 모든 요청에
+  # 이유 없는 500만 내려줬다. "시끄럽게 실패한다"는 인수조건을 문자 그대로
+  # 어기는 조용한 실패였다. 실행 중인 프로세스를 직접 관찰하지 않았다면 이
+  # 회귀를 놓쳤을 것이다 — instrumentation.ts가 이제 `process.exit(1)`로
+  # 직접 끊는 이유이자, 이 잡이 "빌드가 성공했다"가 아니라 "컨테이너가 실제로
+  # 죽는다"를 확인하는 이유다.
+  frontend-deploy-guard:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the production frontend image (runner stage)
+        run: |
+          # 문의 주소는 빌드 인자로 굳는다(#472 후속) — 여기서 CI 전용 값을 주고,
+          # 아래에서 그 값이 구운 /privacy 에 실제로 실렸는지 본다. 빌드 인자 →
+          # 번들 → 화면까지가 한 번에 끊기는 자리라(#297 과 같은 종류) 구운
+          # 이미지에서만 드러난다.
+          docker build -f docker/frontend.Dockerfile --target runner \
+            --build-arg NEXT_PUBLIC_SUPPORT_EMAIL=ci-guard@example.test \
+            -t codemit-frontend-runner-ci .
+
+      # 이 레포가 이미 두 번 겪은 사고(CLAUDE.md 「이미 데인 곳」) — .dockerignore
+      # 패턴이 파일에 적혀 있다는 것만으로는 증명이 아니다. 가짜 시크릿과 가짜
+      # 호스트 node_modules를 실제로 심어서 이미지에 안 들어가는지 직접
+      # 확인한다.
+      #
+      # **경로를 build context 기준으로 정확히 맞춘다**(#70 코드리뷰 지적,
+      # 심각). 이 스텝은 저장소 루트에서 `docker build ... .`을 돌리므로
+      # frontend.Dockerfile의 `COPY frontend/ ./frontend/`가 시크릿을
+      # `/app/frontend/.env`에 놓는다 — `/app/.env`는 애초에 존재할 수 없는
+      # 경로라 그 단정은 항상 거짓으로 통과했다(뒤의 재귀 grep만 실질
+      # 커버리지였다). node_modules 검증도 이름만 약속하고 실제로는 아무
+      # node_modules도 없어(이 잡은 pnpm install을 돌리지 않는다) 아무것도
+      # 검증하지 않았다 — 마커 파일을 직접 만들어 넣는다.
+      - name: .dockerignore actually keeps secrets and host node_modules out of the image
+        run: |
+          set -euo pipefail
+          echo "OPENAI_API_KEY=sk-ci-guard-fake-secret-do-not-leak" > frontend/.env
+          mkdir -p frontend/node_modules/.ci-guard-marker
+          echo "host-node-modules-should-not-leak-into-image" > frontend/node_modules/.ci-guard-marker/marker.txt
+          docker build -f docker/frontend.Dockerfile --target builder -t codemit-frontend-builder-ci-guard .
+          docker run --rm --entrypoint sh codemit-frontend-builder-ci-guard -c '
+            set -e
+            if [ -f /app/frontend/.env ]; then
+              echo "FOUND /app/frontend/.env — .dockerignore가 시크릿을 막지 못했다" >&2
+              exit 1
+            fi
+            if [ -d /app/frontend/node_modules/.ci-guard-marker ]; then
+              echo "FOUND /app/frontend/node_modules/.ci-guard-marker — .dockerignore가 호스트 node_modules를 막지 못했다" >&2
+              exit 1
+            fi
+            if grep -rl "sk-ci-guard-fake-secret\|host-node-modules-should-not-leak-into-image" /app > /dev/null 2>&1; then
+              echo "가짜 시크릿 또는 host node_modules 마커가 이미지 어딘가에 들어갔다" >&2
+              exit 1
+            fi
+            echo "confirmed: .env and host node_modules excluded from the image"
+          '
+          rm -f frontend/.env
+          rm -rf frontend/node_modules/.ci-guard-marker
+          docker rmi codemit-frontend-builder-ci-guard
+
+      - name: Refuses to boot in production with missing config (and actually exits — not just logs)
+        run: |
+          set +e
+          output=$(timeout 60 docker run --rm -e CODEMIT_DEPLOYMENT_TARGET=production codemit-frontend-runner-ci 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
+            echo "::error::CODEMIT_WEB_ORIGIN/CODEMIT_API_BASE_URL 없이도 컨테이너가 죽지 않았다(status=$status) — 부팅 가드가 깨졌다"
+            exit 1
+          fi
+          echo "$output" | grep -q "CODEMIT_WEB_ORIGIN" || { echo "::error::에러 메시지에 원인(CODEMIT_WEB_ORIGIN)이 안 남는다"; exit 1; }
+          echo "$output" | grep -q "CODEMIT_API_BASE_URL" || { echo "::error::에러 메시지에 원인(CODEMIT_API_BASE_URL)이 안 남는다"; exit 1; }
+
+      - name: Refuses to boot in staging with only one required value missing
+        run: |
+          set +e
+          output=$(timeout 60 docker run --rm \
+            -e CODEMIT_DEPLOYMENT_TARGET=staging \
+            -e CODEMIT_WEB_ORIGIN=https://staging.codemit.example \
+            codemit-frontend-runner-ci 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
+            echo "::error::CODEMIT_API_BASE_URL 없이도 staging 컨테이너가 죽지 않았다(status=$status)"
+            exit 1
+          fi
+          echo "$output" | grep -q "CODEMIT_API_BASE_URL" || { echo "::error::에러 메시지에 원인이 안 남는다"; exit 1; }
+
+      # #95/#96 — 카카오 OAuth 앱 자격증명도 같은 부팅 가드 대상이다
+      # (instrumentation.ts REQUIRED_IN_DEPLOYED_ENVIRONMENTS). CODEMIT_WEB_ORIGIN/
+      # CODEMIT_API_BASE_URL은 채우고 카카오 자격증명만 비워 — 이 값들만으로도
+      # 독립적으로 부팅이 거부되는지 확인한다.
+      - name: Refuses to boot in production without kakao oauth credentials
+        run: |
+          set +e
+          output=$(timeout 60 docker run --rm \
+            -e CODEMIT_DEPLOYMENT_TARGET=production \
+            -e CODEMIT_WEB_ORIGIN=https://codemit.example \
+            -e CODEMIT_API_BASE_URL=http://127.0.0.1:1 \
+            codemit-frontend-runner-ci 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
+            echo "::error::카카오 자격증명 없이도 컨테이너가 죽지 않았다(status=$status) — 부팅 가드가 깨졌다"
+            exit 1
+          fi
+          echo "$output" | grep -q "KAKAO_REST_API_KEY" || { echo "::error::에러 메시지에 원인(KAKAO_REST_API_KEY)이 안 남는다"; exit 1; }
+          echo "$output" | grep -q "KAKAO_SECRET_KEY" || { echo "::error::에러 메시지에 원인(KAKAO_SECRET_KEY)이 안 남는다"; exit 1; }
+          echo "$output" | grep -q "KAKAO_REDIRECT_URI" || { echo "::error::에러 메시지에 원인(KAKAO_REDIRECT_URI)이 안 남는다"; exit 1; }
+
+      # #115 — 토스 결제창 클라이언트 키(NEXT_PUBLIC_TOSS_CLIENT_KEY)가 빌드타임에
+      # 비어 있으면 배포 환경에서 부팅 자체를 거부하는지 확인한다. 다른 필수값은
+      # 전부 채워 이 값 하나만으로 독립적으로 죽는지를 본다. codemit-frontend-runner-ci
+      # 는 build.args 없이(빈 문자열로) 지었으므로 이 시나리오 그대로다.
+      - name: Refuses to boot in production without a toss client key baked in
+        run: |
+          set +e
+          output=$(timeout 60 docker run --rm \
+            -e CODEMIT_DEPLOYMENT_TARGET=production \
+            -e CODEMIT_WEB_ORIGIN=https://codemit.example \
+            -e CODEMIT_API_BASE_URL=http://127.0.0.1:1 \
+            -e KAKAO_REST_API_KEY=ci-guard-only-kakao-rest-api-key \
+            -e KAKAO_SECRET_KEY=ci-guard-only-kakao-secret-key \
+            -e KAKAO_REDIRECT_URI=https://codemit.example/api/auth/social/kakao/callback \
+            codemit-frontend-runner-ci 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
+            echo "::error::토스 클라이언트 키 없이도 컨테이너가 죽지 않았다(status=$status) — 부팅 가드가 깨졌다"
+            exit 1
+          fi
+          echo "$output" | grep -q "NEXT_PUBLIC_TOSS_CLIENT_KEY" || { echo "::error::에러 메시지에 원인(NEXT_PUBLIC_TOSS_CLIENT_KEY)이 안 남는다"; exit 1; }
+
+      # #115 코드리뷰 지적 -- 이 값을 검증하겠다고 프로덕션 이미지를 두 번(빌드
+      # 인자 있이/없이) 굽지 않는다. pnpm build 가 다시 도는 두 번째 빌드는
+      # CI 시간을 그대로 배로 늘리는데, 이 부팅 가드가 실제로 읽는 것은 컨테이너의
+      # 런타임 env이지 브라우저 번들에 인라인된 값이 아니다(위에서 직접 측정해
+      # 확인한 사실 -- instrumentation.ts는 Next의 컴파일 그래프 밖에서 돈다).
+      # 그러니 KAKAO_*와 같은 방식으로 같은 이미지에 -e만 다르게 줘서 런타임
+      # env가 있을 때/없을 때 두 경우를 구분하면 충분하다 -- 이 스텝이 검증하는
+      # 건 부팅 가드가 이 이름의 env를 보고 옳게 판단하는가이지, 이 특정 빌드가
+      # 브라우저 번들에 값을 구웠는가가 아니다(후자는 docker/frontend.Dockerfile의
+      # ARG/ENV 선언이 전담하고, 이미 로컬에서 직접 --build-arg로 지어 확인했다
+      # -- 구조가 단순해 회귀 위험이 낮다).
+      # **머신이 남는다 — 잡이 자기 뒤를 치워야 한다.** 호스티드 러너는 VM 이
+      # 통째로 사라져 잔여물이 없지만, 셀프호스티드는 아니다. 앞선 실행이 이
+      # 스텝에서 실패해 컨테이너를 남기자 다음 실행이 `Conflict. The container
+      # name "/frontend-boot-ok" is already in use` 로 죽었다 — 원인은 이번 커밋이 아닌데
+      # 이번 실행이 빨갛게 나는, 진단이 가장 헷갈리는 모양이다.
+      # 시작 전에 지우고(멱등), 끝나면 성공·실패 무관하게 지운다.
+      - name: Boots with a complete production config and forces Secure cookies
+        run: |
+          set -euo pipefail
+          # 컨테이너 포트를 러너 호스트에 열지 않고, 그 컨테이너의 네트워크에 curl 을 붙여 친다 —
+          # 러너가 컨테이너일 때(셀프호스티드 mac 의 Docker Desktop 등)는 호스트에 연 포트가 러너의
+          # 127.0.0.1 로 닿는다는 보장이 없다. 이 모양은 어느 러너에서나 같다.
+          # 125 는 curl 이 아니라 도커 데몬의 실패(위 lease 오류 등)다 — 그때만 다시 띄운다.
+          c() { for _ in 1 2 3; do rc=0; docker run --rm --network container:frontend-boot-ok curlimages/curl:8.11.1 "$@" || rc=$?; [ "$rc" -ne 125 ] && return "$rc"; sleep 2; done; return 125; }
+          # 이미 있으면 받지 않는다 — mac 의 Docker Desktop 에서 `docker pull` 이 같은 시각의 정리
+          # (builder prune)와 겹쳐 `unable to lease content` 로 세 잡이 함께 죽었다(8cc3039).
+          for _ in 1 2 3; do
+            docker image inspect curlimages/curl:8.11.1 >/dev/null 2>&1 && break
+            docker pull -q curlimages/curl:8.11.1 >/dev/null 2>&1 || sleep 3
+          done
+          docker rm -f frontend-boot-ok >/dev/null 2>&1 || true
+          docker run -d --name frontend-boot-ok \
+            -e CODEMIT_DEPLOYMENT_TARGET=production \
+            -e CODEMIT_WEB_ORIGIN=https://codemit.example \
+            -e CODEMIT_API_BASE_URL=http://127.0.0.1:1 \
+            -e CODEMIT_SESSION_COOKIE_DOMAIN=.codemit.example \
+            -e KAKAO_REST_API_KEY=ci-guard-only-kakao-rest-api-key \
+            -e KAKAO_SECRET_KEY=ci-guard-only-kakao-secret-key \
+            -e KAKAO_REDIRECT_URI=https://codemit.example/api/auth/social/kakao/callback \
+            -e NEXT_PUBLIC_TOSS_CLIENT_KEY=ci-guard-only-toss-client-key \
+            codemit-frontend-runner-ci
+
+          # 백엔드가 없어 /healthz 는 503(degraded)이 정상이다 — 여기서 보는 건
+          # "완전한 설정에서는 프론트가 죽지 않고 응답한다"는 것뿐이다. 연결
+          # 자체가 안 되면(000) 컨테이너가 여전히 안 뜬 것이다.
+          #
+          # **`|| true` 가 없으면 재시도 루프가 한 번도 돌지 않는다.** `set -e`
+          # 아래에서 `status=$(curl ...)` 는 대입문의 종료 코드가 curl 의 것이라,
+          # 첫 시도가 실패하는 순간 셸이 그 자리에서 죽는다 — 컨테이너가 정상
+          # 부팅 중이어도 빨간불이 되고, 스텝은 curl 자신의 종료 코드(연결 실패 7,
+          # 수신 실패 56)로 끝난다. 실제로 그렇게 15회 연속 실패했다. 아래 주석이
+          # 경계하는 "000000" 문제는 `|| echo "000"` 이 출력을 하나 더 얹기 때문에
+          # 생기는 것이라, 출력을 얹지 않는 `|| true` 에는 없다.
+          #
+          # **`|| echo "000"`을 쓰지 않는다**(#70 코드리뷰 지적, 심각). curl은
+          # `-w`가 있으면 연결 실패 시에도 스스로 "000"을 쓰고 비정상 종료
+          # 코드로 끝낸다 — 그 위에 `|| echo "000"`을 얹으면 실패할 때마다
+          # "000"이 두 번(curl 자신 + echo) 이어져 "000000"이 되고, 그 값은
+          # 아래 `[ "$status" = "000" ]` 비교와 절대 같아지지 않아 **재시도
+          # 루프가 첫 시도에 곧장 break한다** — 컨테이너가 정상 부팅 중이어도
+          # 빨간불이 되고, "완전한 설정에서는 죽지 않는다"는 이 스텝의 관측
+          # 자체가 수행되지 않는다. curl 자신의 "000" 출력만 남기고, 그래도
+          # 정말 비어 있는 극단적인 경우를 위한 방어로 `${status:-000}`만 쓴다.
+          status="000"
+          for _ in $(seq 1 20); do
+            status=$(c -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/healthz 2>/dev/null || true)
+            status="${status:-000}"
+            [ "$status" = "000" ] || break
+            sleep 1
+          done
+          echo "healthz status: $status"
+          if [ "$status" != "200" ] && [ "$status" != "503" ]; then
+            echo "::error::완전한 프로덕션 설정인데도 컨테이너가 응답하지 않는다(status=$status)"
+            docker logs frontend-boot-ok
+            exit 1
+          fi
+
+          # ADR-0016 성립 조건 — production에서 쿠키의 Secure가 실제로 켜지는지.
+          # frontend/app/api/auth/logout/route.ts는 access 쿠키가 없으면 백엔드를
+          # 부르지 않고 곧바로 clearSessionCookies를 실어 응답한다 — 그래서 백엔드
+          # 없이도 이 경로 하나로 쿠키 속성을 직접 관찰할 수 있다.
+          set_cookie=$(c -s -D - -o /dev/null -X POST http://127.0.0.1:3000/api/auth/logout \
+            -H "Origin: https://codemit.example")
+          echo "$set_cookie"
+          echo "$set_cookie" | grep -qi "codemit_access=.*Secure" \
+            || { echo "::error::production인데 codemit_access 쿠키에 Secure가 없다"; exit 1; }
+          echo "$set_cookie" | grep -qi "codemit_refresh=.*Secure" \
+            || { echo "::error::production인데 codemit_refresh 쿠키에 Secure가 없다"; exit 1; }
+
+          # **public/ 의 정적 자산이 실제로 서빙되는가**(2026-09-16). standalone
+          # 산출물에는 public/ 이 들어가지 않으므로 Dockerfile 이 따로 옮겨야
+          # 한다 — 그 줄이 없으면 배포에서만 404 가 되고, dev(소스를 그대로
+          # 서빙)나 위 healthz 확인에는 전혀 보이지 않는다. 실제로 카카오 로그인
+          # 버튼 이미지가 prod 에서 그렇게 깨졌다. 이미지 최적화 경로(next/image
+          # 가 실제로 쓰는 주소)까지 함께 본다.
+          asset=$(c -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/kakao/kakao_login_large_wide.png 2>/dev/null || true)
+          optimized=$(c -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:3000/_next/image?url=%2Fkakao%2Fkakao_login_large_wide.png&w=640&q=75" 2>/dev/null || true)
+          echo "public asset: ${asset:-000} / optimized: ${optimized:-000}"
+          if [ "${asset:-000}" != "200" ] || [ "${optimized:-000}" != "200" ]; then
+            echo "::error::public/ 의 정적 자산이 프로덕션 이미지에서 서빙되지 않는다(원본=${asset:-000}, 최적화=${optimized:-000}) — Dockerfile 의 public 복사를 확인한다"
+            docker logs frontend-boot-ok
+            exit 1
+          fi
+
+      # **방침의 문의처가 구운 이미지에 실렸는가**(#472 후속). 개인정보 보호책임자와
+      # 문의처는 방침의 필수 기재사항인데(개인정보 보호법 제30조 제1항) 그 값은
+      # 빌드 인자로 굳으므로, 인자를 빠뜨린 이미지는 **주소 없이 조용히** 배포된다
+      # — dev 도 위 healthz 확인도 이것을 못 본다. 위 빌드 단계가 준 CI 전용 값이
+      # 그대로 나오는지 본다(파이프로 찾지 않는 이유는 classroom-deploy-guard 의
+      # 같은 자리 주석 참고 — grep -q 의 조기 종료가 pipefail 과 만나면 찾고도
+      # 실패로 읽힌다).
+      - name: The privacy policy carries a contact address baked at build time
+        run: |
+          set -euo pipefail
+          # 컨테이너 포트를 러너 호스트에 열지 않고, 그 컨테이너의 네트워크에 curl 을 붙여 친다 —
+          # 러너가 컨테이너일 때(셀프호스티드 mac 의 Docker Desktop 등)는 호스트에 연 포트가 러너의
+          # 127.0.0.1 로 닿는다는 보장이 없다. 이 모양은 어느 러너에서나 같다.
+          # 125 는 curl 이 아니라 도커 데몬의 실패(위 lease 오류 등)다 — 그때만 다시 띄운다.
+          c() { for _ in 1 2 3; do rc=0; docker run --rm --network container:frontend-boot-ok curlimages/curl:8.11.1 "$@" || rc=$?; [ "$rc" -ne 125 ] && return "$rc"; sleep 2; done; return 125; }
+          # 이미 있으면 받지 않는다 — mac 의 Docker Desktop 에서 `docker pull` 이 같은 시각의 정리
+          # (builder prune)와 겹쳐 `unable to lease content` 로 세 잡이 함께 죽었다(8cc3039).
+          for _ in 1 2 3; do
+            docker image inspect curlimages/curl:8.11.1 >/dev/null 2>&1 && break
+            docker pull -q curlimages/curl:8.11.1 >/dev/null 2>&1 || sleep 3
+          done
+          html=$(c -sS --max-time 10 http://127.0.0.1:3000/privacy)
+          [[ "$html" == *"ci-guard@example.test"* ]] || {
+            echo "::error::구운 /privacy 에 문의 주소가 없다 — NEXT_PUBLIC_SUPPORT_EMAIL 빌드 인자가 빠졌는가?"
+            printf '%s' "$html" | head -c 2000
+            exit 1
+          }
+          echo "방침이 빌드 인자의 문의 주소를 싣는다"
+
+
+      - name: Tear down the boot-guard container
+        if: always()
+        # 호스티드 VM 은 잡과 함께 사라지지만, 비상구로 셀프호스티드에서 돌 때를 위해 남긴다.
+        run: |
+          docker rm -f frontend-boot-ok >/dev/null 2>&1 || true
+          docker rmi -f codemit-frontend-runner-ci >/dev/null 2>&1 || true
+          docker builder prune -f --builder default --filter until=24h >/dev/null 2>&1 || true
+
+      - name: Dump container state on failure
+        if: failure()
+        run: docker ps -a
+
+  # 운영자 앱 배포 부팅 가드 (#70 — #63가 미룬 것을 여기서 켠다).
+  #
+  # frontend-deploy-guard와 정확히 같은 이유·같은 형태다: ADR-0021의 프론트 테스트
+  # 시임("실행 중인 앱 하나")으로는 "앱이 뜨지 않는 것" 자체를 증명할 수 없다.
+  # operator.Dockerfile의 runner 스테이지(staging/prod가 실제로 배포하는 그
+  # 이미지)를 직접 빌드해 컨테이너로 띄우고, 프로세스 종료 코드와 로그를 확인한다.
+  #
+  # operator/instrumentation.ts도 frontend와 같은 함정을 피해 process.exit(1)로
+  # 직접 프로세스를 끊는다(#38에서 이미 확인된 "Next가 throw를 삼킨다"는 사실이
+  # 이 앱에도 그대로 적용된다) — 이 잡은 그게 실제로 그런지 직접 관찰한다.
+  operator-deploy-guard:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the production operator image (runner stage)
+        run: docker build -f docker/operator.Dockerfile --target runner -t codemit-operator-runner-ci .
+
+      # frontend-deploy-guard와 같은 이유 — .dockerignore가 시크릿과 호스트
+      # node_modules를 실제로 막는지 이 앱에서도 직접 확인한다.
+      #
+      # **경로를 build context 기준으로 정확히 맞춘다**(#70 코드리뷰 지적,
+      # 심각). 이 스텝은 저장소 루트에서 `docker build ... .`을 돌리므로
+      # operator.Dockerfile의 `COPY operator/ ./operator/`가 시크릿을
+      # `/app/operator/.env`에 놓는다 — `/app/.env`는 애초에 존재할 수 없는
+      # 경로라 그 단정은 항상 거짓으로 통과했다. node_modules 검증도 이름만
+      # 약속하고 실제로는 아무 node_modules도 없어(이 잡은 pnpm install을
+      # 돌리지 않는다) 아무것도 검증하지 않았다 — 마커 파일을 직접 만들어
+      # 넣는다.
+      - name: .dockerignore actually keeps secrets and host node_modules out of the image
+        run: |
+          set -euo pipefail
+          echo "OPENAI_API_KEY=sk-ci-guard-fake-secret-do-not-leak" > operator/.env
+          mkdir -p operator/node_modules/.ci-guard-marker
+          echo "host-node-modules-should-not-leak-into-image" > operator/node_modules/.ci-guard-marker/marker.txt
+          docker build -f docker/operator.Dockerfile --target builder -t codemit-operator-builder-ci-guard .
+          docker run --rm --entrypoint sh codemit-operator-builder-ci-guard -c '
+            set -e
+            if [ -f /app/operator/.env ]; then
+              echo "FOUND /app/operator/.env — .dockerignore가 시크릿을 막지 못했다" >&2
+              exit 1
+            fi
+            if [ -d /app/operator/node_modules/.ci-guard-marker ]; then
+              echo "FOUND /app/operator/node_modules/.ci-guard-marker — .dockerignore가 호스트 node_modules를 막지 못했다" >&2
+              exit 1
+            fi
+            if grep -rl "sk-ci-guard-fake-secret\|host-node-modules-should-not-leak-into-image" /app > /dev/null 2>&1; then
+              echo "가짜 시크릿 또는 host node_modules 마커가 이미지 어딘가에 들어갔다" >&2
+              exit 1
+            fi
+            echo "confirmed: .env and host node_modules excluded from the image"
+          '
+          rm -f operator/.env
+          rm -rf operator/node_modules/.ci-guard-marker
+          docker rmi codemit-operator-builder-ci-guard
+
+      - name: Refuses to boot in production with missing config (and actually exits — not just logs)
+        run: |
+          set +e
+          output=$(timeout 60 docker run --rm -e CODEMIT_DEPLOYMENT_TARGET=production codemit-operator-runner-ci 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
+            echo "::error::CODEMIT_OPERATOR_ORIGIN/CODEMIT_API_BASE_URL 없이도 컨테이너가 죽지 않았다(status=$status) — 부팅 가드가 깨졌다"
+            exit 1
+          fi
+          echo "$output" | grep -q "CODEMIT_OPERATOR_ORIGIN" || { echo "::error::에러 메시지에 원인(CODEMIT_OPERATOR_ORIGIN)이 안 남는다"; exit 1; }
+          echo "$output" | grep -q "CODEMIT_API_BASE_URL" || { echo "::error::에러 메시지에 원인(CODEMIT_API_BASE_URL)이 안 남는다"; exit 1; }
+
+      - name: Refuses to boot in staging with only one required value missing
+        run: |
+          set +e
+          output=$(timeout 60 docker run --rm \
+            -e CODEMIT_DEPLOYMENT_TARGET=staging \
+            -e CODEMIT_OPERATOR_ORIGIN=https://operator.staging.codemit.example \
+            codemit-operator-runner-ci 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
+            echo "::error::CODEMIT_API_BASE_URL 없이도 staging 컨테이너가 죽지 않았다(status=$status)"
+            exit 1
+          fi
+          echo "$output" | grep -q "CODEMIT_API_BASE_URL" || { echo "::error::에러 메시지에 원인이 안 남는다"; exit 1; }
+
+      # **머신이 남는다 — 잡이 자기 뒤를 치워야 한다.** 호스티드 러너는 VM 이
+      # 통째로 사라져 잔여물이 없지만, 셀프호스티드는 아니다. 앞선 실행이 이
+      # 스텝에서 실패해 컨테이너를 남기자 다음 실행이 `Conflict. The container
+      # name "/operator-boot-ok" is already in use` 로 죽었다 — 원인은 이번 커밋이 아닌데
+      # 이번 실행이 빨갛게 나는, 진단이 가장 헷갈리는 모양이다.
+      # 시작 전에 지우고(멱등), 끝나면 성공·실패 무관하게 지운다.
+      - name: Boots with a complete production config and forces Secure cookies
+        run: |
+          set -euo pipefail
+          # 컨테이너 포트를 러너 호스트에 열지 않고, 그 컨테이너의 네트워크에 curl 을 붙여 친다 —
+          # 러너가 컨테이너일 때(셀프호스티드 mac 의 Docker Desktop 등)는 호스트에 연 포트가 러너의
+          # 127.0.0.1 로 닿는다는 보장이 없다. 이 모양은 어느 러너에서나 같다.
+          # 125 는 curl 이 아니라 도커 데몬의 실패(위 lease 오류 등)다 — 그때만 다시 띄운다.
+          c() { for _ in 1 2 3; do rc=0; docker run --rm --network container:operator-boot-ok curlimages/curl:8.11.1 "$@" || rc=$?; [ "$rc" -ne 125 ] && return "$rc"; sleep 2; done; return 125; }
+          # 이미 있으면 받지 않는다 — mac 의 Docker Desktop 에서 `docker pull` 이 같은 시각의 정리
+          # (builder prune)와 겹쳐 `unable to lease content` 로 세 잡이 함께 죽었다(8cc3039).
+          for _ in 1 2 3; do
+            docker image inspect curlimages/curl:8.11.1 >/dev/null 2>&1 && break
+            docker pull -q curlimages/curl:8.11.1 >/dev/null 2>&1 || sleep 3
+          done
+          docker rm -f operator-boot-ok >/dev/null 2>&1 || true
+          docker run -d --name operator-boot-ok \
+            -e CODEMIT_DEPLOYMENT_TARGET=production \
+            -e CODEMIT_OPERATOR_ORIGIN=https://operator.codemit.example \
+            -e CODEMIT_API_BASE_URL=http://127.0.0.1:1 \
+            codemit-operator-runner-ci
+
+          # 백엔드가 없어 /healthz 는 503(degraded)이 정상이다 — 여기서 보는 건
+          # "완전한 설정에서는 운영자 앱이 죽지 않고 응답한다"는 것뿐이다. 연결
+          # 자체가 안 되면(000) 컨테이너가 여전히 안 뜬 것이다.
+          #
+          # **`|| true` 가 없으면 재시도 루프가 한 번도 돌지 않는다.** `set -e`
+          # 아래에서 `status=$(curl ...)` 는 대입문의 종료 코드가 curl 의 것이라,
+          # 첫 시도가 실패하는 순간 셸이 그 자리에서 죽는다 — 컨테이너가 정상
+          # 부팅 중이어도 빨간불이 되고, 스텝은 curl 자신의 종료 코드(연결 실패 7,
+          # 수신 실패 56)로 끝난다. 실제로 그렇게 15회 연속 실패했다. 아래 주석이
+          # 경계하는 "000000" 문제는 `|| echo "000"` 이 출력을 하나 더 얹기 때문에
+          # 생기는 것이라, 출력을 얹지 않는 `|| true` 에는 없다.
+          #
+          # frontend-deploy-guard와 같은 이유로 `|| echo "000"`을 쓰지 않는다
+          # (#70 코드리뷰 지적, 심각 — 여기서 그대로 복사된 버그였다). curl은
+          # `-w`가 있으면 연결 실패 시에도 스스로 "000"을 쓴다 — `|| echo
+          # "000"`을 얹으면 "000000"이 되어 재시도 루프가 첫 시도에 곧장
+          # break한다.
+          status="000"
+          for _ in $(seq 1 20); do
+            status=$(c -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/healthz 2>/dev/null || true)
+            status="${status:-000}"
+            [ "$status" = "000" ] || break
+            sleep 1
+          done
+          echo "healthz status: $status"
+          if [ "$status" != "200" ] && [ "$status" != "503" ]; then
+            echo "::error::완전한 프로덕션 설정인데도 컨테이너가 응답하지 않는다(status=$status)"
+            docker logs operator-boot-ok
+            exit 1
+          fi
+
+          # ADR-0016/0019 성립 조건 — production에서 세션 쿠키의 Secure가 실제로
+          # 켜지는지. operator/app/api/auth/logout/route.ts는 세션 쿠키가 없으면
+          # 백엔드를 부르지 않고 곧바로 clearSessionCookie를 실어 응답한다 — 그래서
+          # 백엔드 없이도 이 경로 하나로 쿠키 속성을 직접 관찰할 수 있다.
+          set_cookie=$(c -s -D - -o /dev/null -X POST http://127.0.0.1:3000/api/auth/logout \
+            -H "Origin: https://operator.codemit.example")
+          echo "$set_cookie"
+          echo "$set_cookie" | grep -qi "codemit_operator_session=.*Secure" \
+            || { echo "::error::production인데 codemit_operator_session 쿠키에 Secure가 없다"; exit 1; }
+
+
+      - name: Tear down the boot-guard container
+        if: always()
+        # 호스티드 VM 은 잡과 함께 사라지지만, 비상구로 셀프호스티드에서 돌 때를 위해 남긴다.
+        run: |
+          docker rm -f operator-boot-ok >/dev/null 2>&1 || true
+          docker rmi -f codemit-operator-runner-ci >/dev/null 2>&1 || true
+          docker builder prune -f --builder default --filter until=24h >/dev/null 2>&1 || true
+
+      - name: Dump container state on failure
+        if: failure()
+        run: docker ps -a
+
+  # 강의실 배포 부팅 가드 (#296 — #277 이 강의실을 배포 파이프라인에 올리며
+  # 빠뜨린 잡을 채운다. 그 잡이 왜 있는지는 #166).
+  #
+  # frontend-deploy-guard·operator-deploy-guard 와 정확히 같은 이유·같은 형태다:
+  # ADR-0021 의 프론트 테스트 시임("실행 중인 앱 하나")으로는 "앱이 뜨지 않는 것"
+  # 자체를 증명할 수 없고, `typecheck` 는 호스트 node_modules 를 쓰며 e2e 는
+  # 로컬에서 안 돈다 — 워크스페이스 멤버 하나를 Dockerfile 의 COPY 에서
+  # 빠뜨려도 그 셋 중 누구도 못 잡는다(#166 이 그렇게 났다). classroom.Dockerfile
+  # 의 runner 스테이지(staging/prod 가 실제로 배포하는 그 이미지)를 직접 빌드해
+  # 컨테이너로 띄우고, 프로세스 종료 코드와 로그를 확인한다.
+  #
+  # classroom/instrumentation.ts 도 frontend·operator 와 같은 함정을 피해
+  # process.exit(1)로 직접 프로세스를 끊는다 — 이 잡은 그게 실제로 그런지
+  # 직접 관찰한다.
+  #
+  # **다른 두 잡과 다른 점 하나.** 강의실은 자기 로그인이 없다(ADR-0038) — 세션
+  # 쿠키는 공개 앱이 굽고, 강의실이 쿠키를 지우는 유일한 경로는 백엔드 프록시
+  # (app/api/backend/[...path]/route.ts)뿐인데 그 경로는 먼저 assertSameOrigin
+  # 을 지나 실제로 forwardToBackend 를 호출한다 — 백엔드 없이는 도달할 수 없다.
+  # frontend·operator 의 "Secure 쿠키" 스텝처럼 백엔드 없이 쿠키 속성만 따로
+  # 관찰할 별도 경로가 없으므로 그 스텝은 옮기지 않는다 — Secure 플래그 자체는
+  # classroom/lib/auth/cookies.test.ts 의 유닛 테스트가 이미 고정하고 있다.
+  classroom-deploy-guard:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the production classroom image (runner stage)
+        run: docker build -f docker/classroom.Dockerfile --target runner -t codemit-classroom-runner-ci .
+
+      # frontend-deploy-guard와 같은 이유 — .dockerignore가 시크릿과 호스트
+      # node_modules를 실제로 막는지 이 앱에서도 직접 확인한다.
+      - name: .dockerignore actually keeps secrets and host node_modules out of the image
+        run: |
+          set -euo pipefail
+          echo "OPENAI_API_KEY=sk-ci-guard-fake-secret-do-not-leak" > classroom/.env
+          mkdir -p classroom/node_modules/.ci-guard-marker
+          echo "host-node-modules-should-not-leak-into-image" > classroom/node_modules/.ci-guard-marker/marker.txt
+          docker build -f docker/classroom.Dockerfile --target builder -t codemit-classroom-builder-ci-guard .
+          docker run --rm --entrypoint sh codemit-classroom-builder-ci-guard -c '
+            set -e
+            if [ -f /app/classroom/.env ]; then
+              echo "FOUND /app/classroom/.env — .dockerignore가 시크릿을 막지 못했다" >&2
+              exit 1
+            fi
+            if [ -d /app/classroom/node_modules/.ci-guard-marker ]; then
+              echo "FOUND /app/classroom/node_modules/.ci-guard-marker — .dockerignore가 호스트 node_modules를 막지 못했다" >&2
+              exit 1
+            fi
+            if grep -rl "sk-ci-guard-fake-secret\|host-node-modules-should-not-leak-into-image" /app > /dev/null 2>&1; then
+              echo "가짜 시크릿 또는 host node_modules 마커가 이미지 어딘가에 들어갔다" >&2
+              exit 1
+            fi
+            echo "confirmed: .env and host node_modules excluded from the image"
+          '
+          rm -f classroom/.env
+          rm -rf classroom/node_modules/.ci-guard-marker
+          docker rmi codemit-classroom-builder-ci-guard
+
+      - name: Refuses to boot in production with missing config (and actually exits — not just logs)
+        run: |
+          set +e
+          output=$(timeout 60 docker run --rm -e CODEMIT_DEPLOYMENT_TARGET=production codemit-classroom-runner-ci 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
+            echo "::error::필수 설정 없이도 컨테이너가 죽지 않았다(status=$status) — 부팅 가드가 깨졌다"
+            exit 1
+          fi
+          echo "$output" | grep -q "CODEMIT_CLASSROOM_ORIGIN" || { echo "::error::에러 메시지에 원인(CODEMIT_CLASSROOM_ORIGIN)이 안 남는다"; exit 1; }
+          echo "$output" | grep -q "CODEMIT_API_BASE_URL" || { echo "::error::에러 메시지에 원인(CODEMIT_API_BASE_URL)이 안 남는다"; exit 1; }
+          echo "$output" | grep -q "CODEMIT_SESSION_COOKIE_DOMAIN" || { echo "::error::에러 메시지에 원인(CODEMIT_SESSION_COOKIE_DOMAIN)이 안 남는다"; exit 1; }
+
+      - name: Refuses to boot in staging with only one required value missing
+        run: |
+          set +e
+          output=$(timeout 60 docker run --rm \
+            -e CODEMIT_DEPLOYMENT_TARGET=staging \
+            -e CODEMIT_CLASSROOM_ORIGIN=https://classroom.staging.codemit.example \
+            codemit-classroom-runner-ci 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
+            echo "::error::CODEMIT_API_BASE_URL/CODEMIT_SESSION_COOKIE_DOMAIN 없이도 staging 컨테이너가 죽지 않았다(status=$status)"
+            exit 1
+          fi
+          echo "$output" | grep -q "CODEMIT_API_BASE_URL" || { echo "::error::에러 메시지에 원인(CODEMIT_API_BASE_URL)이 안 남는다"; exit 1; }
+          echo "$output" | grep -q "CODEMIT_SESSION_COOKIE_DOMAIN" || { echo "::error::에러 메시지에 원인(CODEMIT_SESSION_COOKIE_DOMAIN)이 안 남는다"; exit 1; }
+
+      # 머신이 남는다 — 잡이 자기 뒤를 치워야 한다(frontend-deploy-guard와 같은
+      # 이유). 시작 전에 지우고(멱등), 끝나면 성공·실패 무관하게 지운다.
+      - name: Boots with a complete production config
+        run: |
+          set -euo pipefail
+          # 컨테이너 포트를 러너 호스트에 열지 않고, 그 컨테이너의 네트워크에 curl 을 붙여 친다 —
+          # 러너가 컨테이너일 때(셀프호스티드 mac 의 Docker Desktop 등)는 호스트에 연 포트가 러너의
+          # 127.0.0.1 로 닿는다는 보장이 없다. 이 모양은 어느 러너에서나 같다.
+          # 125 는 curl 이 아니라 도커 데몬의 실패(위 lease 오류 등)다 — 그때만 다시 띄운다.
+          c() { for _ in 1 2 3; do rc=0; docker run --rm --network container:classroom-boot-ok curlimages/curl:8.11.1 "$@" || rc=$?; [ "$rc" -ne 125 ] && return "$rc"; sleep 2; done; return 125; }
+          # 이미 있으면 받지 않는다 — mac 의 Docker Desktop 에서 `docker pull` 이 같은 시각의 정리
+          # (builder prune)와 겹쳐 `unable to lease content` 로 세 잡이 함께 죽었다(8cc3039).
+          for _ in 1 2 3; do
+            docker image inspect curlimages/curl:8.11.1 >/dev/null 2>&1 && break
+            docker pull -q curlimages/curl:8.11.1 >/dev/null 2>&1 || sleep 3
+          done
+          docker rm -f classroom-boot-ok >/dev/null 2>&1 || true
+          docker run -d --name classroom-boot-ok \
+            -e CODEMIT_DEPLOYMENT_TARGET=production \
+            -e CODEMIT_CLASSROOM_ORIGIN=https://classroom.codemit.example \
+            -e CODEMIT_API_BASE_URL=http://127.0.0.1:1 \
+            -e CODEMIT_SESSION_COOKIE_DOMAIN=.codemit.example \
+            -e CODEMIT_WEB_ORIGIN=https://codemit.example \
+            codemit-classroom-runner-ci
+
+          # 백엔드가 없어 /healthz 는 503(degraded)이 정상이다 — 여기서 보는 건
+          # "완전한 설정에서는 강의실이 죽지 않고 응답한다"는 것뿐이다. 연결
+          # 자체가 안 되면(000) 컨테이너가 여전히 안 뜬 것이다. `|| echo "000"`을
+          # 쓰지 않는 이유는 frontend-deploy-guard와 같다(#70 코드리뷰 지적).
+          status="000"
+          for _ in $(seq 1 20); do
+            status=$(c -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/healthz 2>/dev/null || true)
+            status="${status:-000}"
+            [ "$status" = "000" ] || break
+            sleep 1
+          done
+          echo "healthz status: $status"
+          if [ "$status" != "200" ] && [ "$status" != "503" ]; then
+            echo "::error::완전한 프로덕션 설정인데도 컨테이너가 응답하지 않는다(status=$status)"
+            docker logs classroom-boot-ok
+            exit 1
+          fi
+
+      # 런타임 설정이 빌드에 박제되지 않는지 실제로 확인한다 (#297). 이 검사가
+      # 없어서 배포된 강의실의 로그인 링크가 `http://127.0.0.1:53000` 을 가리켰다 —
+      # 그 화면이 정적으로 구워져 **빌드 머신의** 환경(=비어 있음)을 읽었기 때문이다.
+      # dev 도 CI e2e 도 이것을 못 본다: 둘 다 CODEMIT_WEB_ORIGIN 이 비어 있어 dev
+      # 폴백이 「맞는 답」이라 통과한다. 프로덕션 이미지에 배포 설정을 물린 여기서만
+      # 드러난다. (구조 쪽은 classroom/lib/rendering/runtime-config.test.ts 가 본다.)
+      - name: Runtime config is read at request time, not baked into the build
+        run: |
+          set -euo pipefail
+          # 컨테이너 포트를 러너 호스트에 열지 않고, 그 컨테이너의 네트워크에 curl 을 붙여 친다 —
+          # 러너가 컨테이너일 때(셀프호스티드 mac 의 Docker Desktop 등)는 호스트에 연 포트가 러너의
+          # 127.0.0.1 로 닿는다는 보장이 없다. 이 모양은 어느 러너에서나 같다.
+          # 125 는 curl 이 아니라 도커 데몬의 실패(위 lease 오류 등)다 — 그때만 다시 띄운다.
+          c() { for _ in 1 2 3; do rc=0; docker run --rm --network container:classroom-boot-ok curlimages/curl:8.11.1 "$@" || rc=$?; [ "$rc" -ne 125 ] && return "$rc"; sleep 2; done; return 125; }
+          # 이미 있으면 받지 않는다 — mac 의 Docker Desktop 에서 `docker pull` 이 같은 시각의 정리
+          # (builder prune)와 겹쳐 `unable to lease content` 로 세 잡이 함께 죽었다(8cc3039).
+          for _ in 1 2 3; do
+            docker image inspect curlimages/curl:8.11.1 >/dev/null 2>&1 && break
+            docker pull -q curlimages/curl:8.11.1 >/dev/null 2>&1 || sleep 3
+          done
+          html=$(c -sS --max-time 10 http://127.0.0.1:3000/login)
+          # **파이프로 찾지 않는다**(2026-09-20). 예전에는 `echo "$html" | grep -q …`
+          # 였는데, `grep -q` 는 첫 일치에서 곧바로 끝나므로 HTML 이 파이프 버퍼(64KB)
+          # 보다 커지면 아직 쓰고 있던 `echo` 가 SIGPIPE 로 죽고, `pipefail` 이 그것을
+          # 파이프라인 실패로 읽어 **찾았는데도 빨개진다**. 실제로 그렇게 났다(#472 가
+          # 바닥글을 더해 HTML 이 그 문턱을 넘은 날) — 원인이 「값이 안 박혔다」로
+          # 보여서 진단이 한 번 어긋났다. bash 패턴 매칭에는 파이프가 없다.
+          [[ "$html" == *"https://codemit.example/login"* ]] \
+            || { echo "::error::/login 이 CODEMIT_WEB_ORIGIN 을 안 읽는다 — 빌드 시점 값이 구워졌는가?"; printf '%s' "$html" | head -c 4000; exit 1; }
+          if [[ "$html" == *"127.0.0.1"* ]]; then
+            echo "::error::/login HTML 에 로컬호스트가 남아 있다 — dev 폴백이 박제됐다(#297)"
+            printf '%s' "$html" | grep -o "http://127[^\"']*" | head -5 || true
+            exit 1
+          fi
+          echo "로그인 링크가 런타임 설정을 읽는다"
+
+      - name: Tear down the boot-guard container
+        if: always()
+        # 호스티드 VM 은 잡과 함께 사라지지만, 비상구로 셀프호스티드에서 돌 때를 위해 남긴다.
+        run: |
+          docker rm -f classroom-boot-ok >/dev/null 2>&1 || true
+          docker rmi -f codemit-classroom-runner-ci >/dev/null 2>&1 || true
+          docker builder prune -f --builder default --filter until=24h >/dev/null 2>&1 || true
+
+      - name: Dump container state on failure
+        if: failure()
+        run: docker ps -a
+
+  images-staging:
+    # ── 배포 이미지(2026-09-17) ──────────────────────────────────────────────
+    #
+    # **staging·prod 서버는 이미지를 굽지 않고 여기서 올린 것을 받는다**(deploy.sh 머리 주석).
+    # 커밋마다 네 이미지를 ghcr 에 올린다 — 태그의 sha 가 곧 배포 스크립트가 체크아웃한 커밋이다.
+    # 바뀌지 않은 서비스는 레지스트리 캐시(codemit-buildcache)에 맞아 금방 끝난다.
+    #
+    # **서비스마다 한 잡(matrix)이다** — 한 잡에서 넷을 차례로 굽던 때는 앱 셋이 줄을 섰다.
+    #
+    # **GitHub 호스티드 러너에서 굽는다**(2026-10-02). staging(amd64)은 `ubuntu-latest` 에서,
+    # prod(arm64)는 `ubuntu-24.04-arm` 에서 각자 제 아키텍처로 — 에뮬레이션이 없다. 예전에는 mac
+    # 러너(셀프호스티드)가 둘 다 구웠고 그 전에는 sub 였다(sub 의 디스크가 테스트와 함께 막혔다).
+    # 호스티드 VM 은 잡이 끝나면 사라지므로 도커 디스크 정리가 필요 없다.
+    #
+    # backend 는 환경을 가리지 않아 아키텍처만 가른다(`-amd64` = staging 호스트 sub 의 것).
+    # 세 앱은 NEXT_PUBLIC_* 가 빌드 때 굳으므로 환경마다 따로 굽는다(`-staging`). 그 값은
+    # 서버 env 파일이 아니라 저장소 변수 STAGING_* 에 있다 — 조직이 free 요금제라 비공개
+    # 저장소의 environment 기능을 못 쓴다. 값을 바꾸면 이 잡이 다시 돌아야 반영된다.
+    #
+    # 시험은 main 에 들어오기 전 Jenkins PR CI 가 끝냈다. 이 잡과 가드 셋이 다 초록이어야
+    # promote-staging 이 `staging` 을 앞당긴다.
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { service: backend, dsn: BACKEND, tag: amd64, target: '', paths: 'backend docker/backend.Dockerfile' }
+          - { service: frontend, dsn: FRONTEND, tag: staging, target: runner, paths: 'frontend packages package.json pnpm-workspace.yaml pnpm-lock.yaml docker/frontend.Dockerfile' }
+          - { service: operator, dsn: OPERATOR, tag: staging, target: runner, paths: 'operator packages package.json pnpm-workspace.yaml pnpm-lock.yaml docker/operator.Dockerfile' }
+          - { service: classroom, dsn: CLASSROOM, tag: staging, target: runner, paths: 'classroom packages package.json pnpm-workspace.yaml pnpm-lock.yaml docker/classroom.Dockerfile' }
+          # nori 플러그인을 넣은 OpenSearch(#450/#451, 부모 #444 스펙). backend와
+          # 같은 원칙으로 아키텍처로만 가른다 — 환경별로 굳는 값이 없다(Next
+          # 앱이 아니다). 소스는 이 Dockerfile 하나뿐이다.
+          - { service: search, dsn: SEARCH, tag: amd64, target: '', paths: 'docker/search.Dockerfile' }
+          # 연결 풀러(pgbouncer, #453/#457/#458). backend·search 와 같은 원칙으로
+          # 아키텍처로만 가른다 — 환경별로 굳는 값이 없다(Next 앱이 아니다).
+          # 소스는 Dockerfile 과 그 entrypoint 스크립트 하나뿐이다.
+          - { service: pgbouncer, dsn: PGBOUNCER, tag: amd64, target: '', paths: 'docker/pgbouncer.Dockerfile docker/pgbouncer' }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 아래 「앱 코드의 버전」이 경로별 마지막 커밋을 찾으려면 이력이 있어야 한다(8MB 남짓).
+          fetch-depth: 0
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # **앱의 release 는 HEAD 가 아니라 「그 이미지에 들어가는 코드를 마지막으로 바꾼 커밋」이다.**
+      # NEXT_PUBLIC_SENTRY_RELEASE 는 `pnpm build` 바로 앞에서 ENV 로 굳으므로, 커밋마다 달라지면
+      # 앱 코드가 그대로여도 Next 빌드가 캐시를 못 쓰고 처음부터 돈다(워크플로만 고친 커밋에서
+      # 앱마다 1.5~2.5분). 이 값이면 코드가 같을 때 캐시에 맞고, 오류 수집기의 release 도 그 코드의
+      # 실제 버전을 가리킨다. 이미지 **태그**는 여전히 HEAD sha 다(deploy.sh 가 그 이름으로 받는다).
+      - name: 앱 코드의 버전
+        id: code
+        run: echo "sha=$(git log -1 --format=%H -- ${{ matrix.paths }})" >> "$GITHUB_OUTPUT"
+
+      - name: ${{ matrix.service }} (${{ matrix.tag }})
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/${{ matrix.service }}.Dockerfile
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: ghcr.io/sandcorporation/codemit-${{ matrix.service }}:${{ github.sha }}-${{ matrix.tag }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:${{ matrix.service }}-${{ matrix.tag }}
+          cache-to: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:${{ matrix.service }}-${{ matrix.tag }},mode=max
+          # backend·search·pgbouncer 는 이 값들을 쓰지 않는다(쓰이지 않은 인자라는
+          # 경고만 남는다). SENTRY_DSN 은 앱마다 다른 프로젝트라 서비스 이름으로
+          # 변수를 고른다.
+          build-args: |
+            NEXT_PUBLIC_PORTONE_STORE_ID=${{ vars.STAGING_PORT_ONE_V2_STORE_ID }}
+            NEXT_PUBLIC_PORTONE_CHANNEL_KEY=${{ vars.STAGING_KG_INICIS_CHANNEL_KEY }}
+            NEXT_PUBLIC_TOSS_CLIENT_KEY=${{ vars.STAGING_TOSS_CLIENT_KEY }}
+            NEXT_PUBLIC_SUPPORT_EMAIL=${{ vars.STAGING_SUPPORT_EMAIL }}
+            NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED=${{ vars.STAGING_CODEMIT_CONTEST_PRODUCT_ENABLED }}
+            NEXT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED=${{ vars.STAGING_CODEMIT_PAID_CONTEST_PRODUCT_ENABLED }}
+            NEXT_PUBLIC_SENTRY_DSN=${{ vars[format('STAGING_SENTRY_DSN_{0}', matrix.dsn)] }}
+            NEXT_PUBLIC_SENTRY_ENVIRONMENT=staging
+            NEXT_PUBLIC_SENTRY_RELEASE=${{ steps.code.outputs.sha }}
+
+
+  images-prod:
+    # prod(oracle, arm64) 이미지 — 구조는 images-staging 과 같다(주석도 거기). arm64 호스티드
+    # 러너에서 제 속도로 굽는다. 그 러너를 못 쓰게 되면 저장소 변수 `ARM_RUNNER_LABELS` 에 다른
+    # 러너의 라벨을 JSON 으로 적는다(예: `["self-hosted","ARM64","mac-arm"]` — 셀프호스티드 mac).
+    runs-on: ${{ fromJSON(vars.ARM_RUNNER_LABELS || '"ubuntu-24.04-arm"') }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { service: backend, dsn: BACKEND, tag: arm64, target: '', paths: 'backend docker/backend.Dockerfile' }
+          - { service: frontend, dsn: FRONTEND, tag: prod, target: runner, paths: 'frontend packages package.json pnpm-workspace.yaml pnpm-lock.yaml docker/frontend.Dockerfile' }
+          - { service: operator, dsn: OPERATOR, tag: prod, target: runner, paths: 'operator packages package.json pnpm-workspace.yaml pnpm-lock.yaml docker/operator.Dockerfile' }
+          - { service: classroom, dsn: CLASSROOM, tag: prod, target: runner, paths: 'classroom packages package.json pnpm-workspace.yaml pnpm-lock.yaml docker/classroom.Dockerfile' }
+          - { service: search, dsn: SEARCH, tag: arm64, target: '', paths: 'docker/search.Dockerfile' }
+          - { service: pgbouncer, dsn: PGBOUNCER, tag: arm64, target: '', paths: 'docker/pgbouncer.Dockerfile docker/pgbouncer' }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 아래 「앱 코드의 버전」이 경로별 마지막 커밋을 찾으려면 이력이 있어야 한다(8MB 남짓).
+          fetch-depth: 0
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # **앱의 release 는 HEAD 가 아니라 「그 이미지에 들어가는 코드를 마지막으로 바꾼 커밋」이다.**
+      # NEXT_PUBLIC_SENTRY_RELEASE 는 `pnpm build` 바로 앞에서 ENV 로 굳으므로, 커밋마다 달라지면
+      # 앱 코드가 그대로여도 Next 빌드가 캐시를 못 쓰고 처음부터 돈다(워크플로만 고친 커밋에서
+      # 앱마다 1.5~2.5분). 이 값이면 코드가 같을 때 캐시에 맞고, 오류 수집기의 release 도 그 코드의
+      # 실제 버전을 가리킨다. 이미지 **태그**는 여전히 HEAD sha 다(deploy.sh 가 그 이름으로 받는다).
+      - name: 앱 코드의 버전
+        id: code
+        run: echo "sha=$(git log -1 --format=%H -- ${{ matrix.paths }})" >> "$GITHUB_OUTPUT"
+
+      - name: ${{ matrix.service }} (${{ matrix.tag }})
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/${{ matrix.service }}.Dockerfile
+          target: ${{ matrix.target }}
+          platforms: linux/arm64
+          push: true
+          provenance: false
+          tags: ghcr.io/sandcorporation/codemit-${{ matrix.service }}:${{ github.sha }}-${{ matrix.tag }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:${{ matrix.service }}-${{ matrix.tag }}
+          cache-to: type=registry,ref=ghcr.io/sandcorporation/codemit-buildcache:${{ matrix.service }}-${{ matrix.tag }},mode=max
+          # backend·search·pgbouncer 는 이 값들을 쓰지 않는다(쓰이지 않은 인자라는
+          # 경고만 남는다). SENTRY_DSN 은 앱마다 다른 프로젝트라 서비스 이름으로
+          # 변수를 고른다.
+          build-args: |
+            NEXT_PUBLIC_PORTONE_STORE_ID=${{ vars.PROD_PORT_ONE_V2_STORE_ID }}
+            NEXT_PUBLIC_PORTONE_CHANNEL_KEY=${{ vars.PROD_KG_INICIS_CHANNEL_KEY }}
+            NEXT_PUBLIC_TOSS_CLIENT_KEY=${{ vars.PROD_TOSS_CLIENT_KEY }}
+            NEXT_PUBLIC_SUPPORT_EMAIL=${{ vars.PROD_SUPPORT_EMAIL }}
+            NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED=${{ vars.PROD_CODEMIT_CONTEST_PRODUCT_ENABLED }}
+            NEXT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED=${{ vars.PROD_CODEMIT_PAID_CONTEST_PRODUCT_ENABLED }}
+            NEXT_PUBLIC_SENTRY_DSN=${{ vars[format('PROD_SENTRY_DSN_{0}', matrix.dsn)] }}
+            NEXT_PUBLIC_SENTRY_ENVIRONMENT=production
+            NEXT_PUBLIC_SENTRY_RELEASE=${{ steps.code.outputs.sha }}
+
+
+
+  promote-staging:
+    # **이미지 열둘과 부팅 가드 셋이 다 초록이면 `staging` 을 이 커밋으로 fast-forward 한다.**
+    # prod 이미지까지 기다리는 이유: staging 이 초록이면 Jenkins 가 곧바로 `production` 을 같은
+    # 커밋으로 앞당긴다 — 그때 prod 이미지가 ghcr 에 있어야 한다.
+    #
+    # push 는 GITHUB_TOKEN 이 아니라 저장소 배포 키(secret PROMOTE_DEPLOY_KEY)로 한다 — Actions
+    # 토큰은 `.github/workflows/` 를 바꾼 커밋을 push 하지 못한다(2026-09-17, 옛 promote-production
+    # 이 그렇게 막혔다). 늦게 끝난 옛 커밋의 실행은 아무것도 하지 않고, `staging` 이 main 에서
+    # 갈라져 있으면 밀어붙이지 않고 빨갛게 멈춘다.
+    needs:
+      - images-staging
+      - images-prod
+      - frontend-deploy-guard
+      - operator-deploy-guard
+      - classroom-deploy-guard
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ssh-key: ${{ secrets.PROMOTE_DEPLOY_KEY }}
+
+      - name: staging 을 이 커밋으로 앞당긴다
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "::error::$SHA 는 지금 main 에 없다 — 강제 push 로 사라진 커밋이면 올리지 않는다"
+            exit 1
+          fi
+          if git fetch origin staging 2>/dev/null; then
+            if git merge-base --is-ancestor "$SHA" origin/staging; then
+              echo "staging 이 이미 $SHA 를 품는다 — 더 새 커밋이 먼저 올라갔다. 할 일 없음."
+              exit 0
+            fi
+            if ! git merge-base --is-ancestor origin/staging "$SHA"; then
+              echo "::error::staging 이 main 에서 갈라져 있다 — fast-forward 할 수 없다"
+              git log --oneline "$SHA..origin/staging"
+              exit 1
+            fi
+          fi
+          git push origin "$SHA:refs/heads/staging"
+          echo "staging -> $SHA"
