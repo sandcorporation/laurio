@@ -26,7 +26,7 @@ export default function ProblemTemplateReportsPage() {
 
   if (session.status === "loading") {
     return (
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         <p data-testid="session-loading">불러오는 중...</p>
       </div>
     );
@@ -40,7 +40,7 @@ export default function ProblemTemplateReportsPage() {
         title="신고된 템플릿"
         description="내리면 이 목록에서 사라집니다 — 앞으로의 배포만 멈춥니다."
       />
-      <div className="flex flex-1 flex-col gap-4 p-8">
+      <div className="flex flex-1 flex-col gap-4 p-4 sm:p-8">
         <p data-testid="problem-template-reports-note" className="text-[12.5px] text-ink/62">
           내려도 이미 가져간 사람의 문제·클래스는 영향을 받지 않습니다 — 사본이기
           때문입니다. 여기서 내리는 것은 앞으로의 배포를 멈추는 일입니다.

@@ -13,6 +13,7 @@
 import { useEffect, useState } from "react";
 
 import { Panel } from "@/app/components/panel";
+import { TableScroll } from "@/app/components/table-scroll";
 
 import { searchHostingPermissionAccounts } from "./actions";
 import { HostingPermissionAccountRow } from "./account-row";
@@ -68,7 +69,7 @@ export function HostingPermissionAccountSearch({
     <Panel title="계정 검색">
       <div data-testid="hosting-permission-account-search" className="flex flex-col gap-[14px] p-[15px]">
         <div className="flex items-end gap-2">
-          <label className="flex flex-1 flex-col gap-[5px]">
+          <label className="flex min-w-0 flex-1 flex-col gap-[5px]">
             <span className="text-[11.5px] text-ink/45">이메일 또는 닉네임</span>
             <input
               data-testid="hosting-permission-search-query"
@@ -77,7 +78,7 @@ export function HostingPermissionAccountSearch({
               onKeyDown={(event) => {
                 if (event.key === "Enter") handleSearch();
               }}
-              className="border border-rule bg-paper px-[11px] py-2 text-[13px] text-ink"
+              className="w-full min-w-0 border border-rule bg-paper px-[11px] py-2 text-[13px] text-ink"
             />
           </label>
           <button
@@ -105,16 +106,18 @@ export function HostingPermissionAccountSearch({
 
         {state.status === "loaded" && state.accounts.length > 0 && (
           <div data-testid="hosting-permission-search-results" className="border border-rule">
-            <HostingPermissionTableHead />
-            {state.accounts.map((account) => (
-              <HostingPermissionAccountRow
-                key={account.user_id}
-                account={account}
-                canEdit={canEdit}
-                onChanged={handleRowChanged}
-                onSessionExpired={onSessionExpired}
-              />
-            ))}
+            <TableScroll minWidth={680}>
+              <HostingPermissionTableHead />
+              {state.accounts.map((account) => (
+                <HostingPermissionAccountRow
+                  key={account.user_id}
+                  account={account}
+                  canEdit={canEdit}
+                  onChanged={handleRowChanged}
+                  onSessionExpired={onSessionExpired}
+                />
+              ))}
+            </TableScroll>
           </div>
         )}
       </div>

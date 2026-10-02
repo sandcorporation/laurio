@@ -9,6 +9,7 @@
 import { useRouter } from "next/navigation";
 
 import { PageHeader } from "@/app/components/page-header";
+import { TableScroll } from "@/app/components/table-scroll";
 import { useSession } from "@/lib/auth/use-session";
 import { CreateOperatorForm } from "@/lib/operators/create-operator-form";
 import { OperatorRow } from "@/lib/operators/operator-row";
@@ -56,7 +57,7 @@ export default function OperatorsPage() {
 
   if (session.status === "loading" || state.status === "loading") {
     return (
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         <p data-testid="operators-loading">불러오는 중...</p>
       </div>
     );
@@ -69,7 +70,7 @@ export default function OperatorsPage() {
         title="운영자 계정 관리"
         description="상위 등급만 계정을 만들고 활성 여부를 바꿀 수 있습니다."
       />
-      <div className="flex flex-1 flex-col gap-4 p-8">
+      <div className="flex flex-1 flex-col gap-4 p-4 sm:p-8">
         {state.status === "forbidden" && (
           <p role="alert" data-testid="operators-forbidden" className="text-[13px] text-ink/62">
             이 화면은 상위 등급 Operator만 볼 수 있습니다. 계정 관리에는 상위 등급 권한이
@@ -93,16 +94,18 @@ export default function OperatorsPage() {
               </p>
             ) : (
               <div data-testid="operators-table" className="border border-rule bg-surface">
-                <TableHead />
-                {state.operators.map((operator, i) => (
-                  <OperatorRow
-                    key={operator.id}
-                    operator={operator}
-                    zebra={i % 2 === 1}
-                    onChanged={reload}
-                    onSessionExpired={handleSessionExpired}
-                  />
-                ))}
+                <TableScroll minWidth={560}>
+                  <TableHead />
+                  {state.operators.map((operator, i) => (
+                    <OperatorRow
+                      key={operator.id}
+                      operator={operator}
+                      zebra={i % 2 === 1}
+                      onChanged={reload}
+                      onSessionExpired={handleSessionExpired}
+                    />
+                  ))}
+                </TableScroll>
               </div>
             )}
           </>

@@ -19,7 +19,7 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div className="flex items-end justify-between gap-5 border-b border-rule bg-surface px-8 py-5">
+    <div className="flex flex-col gap-3 border-b border-rule bg-surface px-4 py-5 sm:flex-row sm:items-end sm:justify-between sm:gap-5 sm:px-8">
       <div>
         <p className="text-[10.5px] tracking-[0.1em] text-ink/30">{crumb}</p>
         <h1 data-testid={titleTestId} className="mt-1 text-[19px] font-semibold tracking-[-0.01em]">

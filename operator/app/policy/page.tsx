@@ -45,7 +45,7 @@ export default function PolicyPage() {
 
   if (session.status === "loading" || state.status === "loading") {
     return (
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         <p data-testid="policy-loading">불러오는 중...</p>
       </div>
     );
@@ -58,7 +58,7 @@ export default function PolicyPage() {
         title="플랫폼 정책"
         description="수수료·원천징수·개최비 같은 값이다. 배포 없이 바뀌고, 바뀔 때마다 이력이 남는다(ADR-0023)."
       />
-      <div className="flex flex-1 flex-col gap-6 p-8">
+      <div className="flex flex-1 flex-col gap-6 p-4 sm:p-8">
         {state.status === "error" && (
           <p role="alert" data-testid="policy-error" className="text-[13px] text-attention">
             정책값을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.
@@ -90,7 +90,7 @@ export default function PolicyPage() {
         )}
 
         <div>
-          <div className="flex items-baseline justify-between gap-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
             <h2 className="text-[15px] font-semibold tracking-[-0.01em]">변경 이력</h2>
             <p data-testid="policy-history-immutable-note" className="text-[12px] text-ink/62">
               이 이력은 고치거나 지울 수 없습니다.

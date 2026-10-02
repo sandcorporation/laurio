@@ -10,6 +10,7 @@
 import { useState } from "react";
 
 import { Badge } from "@/app/components/badge";
+import { TableScroll } from "@/app/components/table-scroll";
 
 import { fetchOperatorNoticeImageUrl } from "./actions";
 import type { OperatorNotice } from "./types";
@@ -62,39 +63,41 @@ export function OperatorNoticeHistoryTable({ notices }: { notices: OperatorNotic
   return (
     <>
       <div data-testid="operator-notices-table">
-        <TableHead />
-        {notices.map((notice, i) => (
-          <div
-            key={notice.notification_id}
-            data-testid={`operator-notice-row-${notice.notification_id}`}
-            className={`flex items-center gap-3.5 border-b border-rule px-4 py-2.5 text-[13px] ${
-              i % 2 === 1 ? "bg-ink/[2%]" : ""
-            }`}
-          >
-            <div className={`${COL.recipient} shrink-0 truncate font-mono`}>#{notice.recipient_id}</div>
-            <div className={`${COL.email} shrink-0 truncate`}>{notice.recipient_email}</div>
-            <div className="min-w-0 flex-1 truncate">{notice.title}</div>
-            <div className={`${COL.sentBy} shrink-0 truncate font-mono`}>{notice.sent_by}</div>
-            <div className={`${COL.sentAt} shrink-0 truncate font-mono text-[12.5px]`}>
-              {new Date(notice.created_at).toLocaleString("ko-KR")}
+        <TableScroll minWidth={880}>
+          <TableHead />
+          {notices.map((notice, i) => (
+            <div
+              key={notice.notification_id}
+              data-testid={`operator-notice-row-${notice.notification_id}`}
+              className={`flex items-center gap-3.5 border-b border-rule px-4 py-2.5 text-[13px] ${
+                i % 2 === 1 ? "bg-ink/[2%]" : ""
+              }`}
+            >
+              <div className={`${COL.recipient} shrink-0 truncate font-mono`}>#{notice.recipient_id}</div>
+              <div className={`${COL.email} shrink-0 truncate`}>{notice.recipient_email}</div>
+              <div className="min-w-0 flex-1 truncate">{notice.title}</div>
+              <div className={`${COL.sentBy} shrink-0 truncate font-mono`}>{notice.sent_by}</div>
+              <div className={`${COL.sentAt} shrink-0 truncate font-mono text-[12.5px]`}>
+                {new Date(notice.created_at).toLocaleString("ko-KR")}
+              </div>
+              <div className={`${COL.read} shrink-0`} data-testid={`operator-notice-read-${notice.notification_id}`}>
+                <Badge tone="neutral">{notice.read_at ? "읽음" : "안 읽음"}</Badge>
+              </div>
+              <div className={`${COL.image} shrink-0`}>
+                {notice.has_image && (
+                  <button
+                    type="button"
+                    data-testid={`operator-notice-view-image-${notice.notification_id}`}
+                    onClick={() => openImage(notice.notification_id)}
+                    className="border border-rule bg-surface px-2.5 py-1 text-[12px] text-ink"
+                  >
+                    이미지
+                  </button>
+                )}
+              </div>
             </div>
-            <div className={`${COL.read} shrink-0`} data-testid={`operator-notice-read-${notice.notification_id}`}>
-              <Badge tone="neutral">{notice.read_at ? "읽음" : "안 읽음"}</Badge>
-            </div>
-            <div className={`${COL.image} shrink-0`}>
-              {notice.has_image && (
-                <button
-                  type="button"
-                  data-testid={`operator-notice-view-image-${notice.notification_id}`}
-                  onClick={() => openImage(notice.notification_id)}
-                  className="border border-rule bg-surface px-2.5 py-1 text-[12px] text-ink"
-                >
-                  이미지
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
+          ))}
+        </TableScroll>
       </div>
       {imageError && (
         <p role="alert" data-testid="operator-notice-image-view-error" className="px-[15px] py-[10px] text-[12.5px] text-attention">

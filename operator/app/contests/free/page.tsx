@@ -23,7 +23,7 @@ export default function FreeContestsPage() {
 
   if (session.status === "loading" || state.status === "loading") {
     return (
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         <p data-testid="free-contests-loading">불러오는 중...</p>
       </div>
     );
@@ -36,7 +36,7 @@ export default function FreeContestsPage() {
         title="무료 공모전"
         description="상태·마감·수상자를 한눈에 보고, 수상자 옆에서 바로 알림으로 넘어갑니다."
       />
-      <div className="flex flex-1 flex-col gap-4 p-8">
+      <div className="flex flex-1 flex-col gap-4 p-4 sm:p-8">
         {state.status === "error" && (
           <p role="alert" data-testid="free-contests-error" className="text-[13px] text-attention">
             목록을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.

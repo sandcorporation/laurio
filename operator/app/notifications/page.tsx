@@ -37,7 +37,7 @@ function OperatorNotificationsPageInner() {
 
   if (session.status === "loading") {
     return (
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         <p data-testid="operator-notices-loading">불러오는 중...</p>
       </div>
     );
@@ -52,8 +52,8 @@ function OperatorNotificationsPageInner() {
         title="운영팀 알림"
         description="앱 안 알림으로만 간다 — 이미지는 비공개 저장소에 둔다."
       />
-      <div className="flex flex-1 flex-col gap-[18px] p-8">
-        <div className="flex items-start gap-[18px]">
+      <div className="flex flex-1 flex-col gap-[18px] p-4 sm:p-8">
+        <div className="flex flex-col gap-[18px] lg:flex-row lg:items-start">
           <div className="min-w-0 flex-1">
             <SendOperatorNoticeForm
               initialRecipient={initialRecipient}
@@ -61,7 +61,7 @@ function OperatorNotificationsPageInner() {
               onSessionExpired={handleSessionExpired}
             />
           </div>
-          <div className="flex w-[380px] shrink-0 flex-col gap-[18px]">
+          <div className="flex flex-col gap-[18px] lg:w-[380px] lg:shrink-0">
             <Panel title="이 화면의 약속">
               <div className="flex flex-col gap-[9px] px-[15px] py-[14px]">
                 <p className="text-[12px] leading-[1.65] text-ink/62">

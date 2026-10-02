@@ -67,7 +67,7 @@ export function ModerationForm({
         />
       </label>
 
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <button
           type="button"
           data-testid={`moderation-takedown-${templateId}`}

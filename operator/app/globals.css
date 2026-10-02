@@ -17,3 +17,14 @@
 body {
   @apply bg-paper text-ink font-sans;
 }
+
+/* 좁은 화면의 내비 덮개가 왼쪽에서 들어온다(#523, `app/components/sidebar.tsx`).
+ * `motion-safe:` 변형으로만 거므로 움직임 줄이기 설정에서는 그냥 나타난다. */
+@keyframes op-drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: none;
+  }
+}

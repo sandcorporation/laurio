@@ -13,7 +13,7 @@
 // 로그인 여부와 무관하게 항상 보인다 — 세션을 확인하지 않는다.
 import { useState } from "react";
 
-import { themeAttribute, type ThemePreference } from "@/lib/theme/preference";
+import { parseThemePreference, themeAttribute, type ThemePreference } from "@/lib/theme/preference";
 
 const OPTIONS: Array<{ value: ThemePreference; label: string }> = [
   { value: "system", label: "시스템" },
@@ -31,7 +31,15 @@ function applyThemeAttribute(preference: ThemePreference): void {
 }
 
 export function ThemeToggle({ initialPreference }: { initialPreference: ThemePreference }) {
-  const [preference, setPreference] = useState(initialPreference);
+  // 문서 루트의 표시가 지금 선택이다 — 좁은 화면의 메뉴 덮개는 열 때마다 이 버튼을
+  // 새로 그리므로(#523), 서버가 준 첫 값만 믿으면 덮개 안에서 바꾼 뒤 다시 열었을 때
+  // 옛 값을 보인다. 서버 렌더에서는 문서가 없으니 첫 값을 쓴다 — 첫 화면에서는
+  // 그 둘이 같다(RootLayout 이 같은 값으로 표시를 붙인다).
+  const [preference, setPreference] = useState<ThemePreference>(() =>
+    typeof document === "undefined"
+      ? initialPreference
+      : parseThemePreference(document.documentElement.getAttribute("data-theme")),
+  );
   const [open, setOpen] = useState(false);
 
   async function choose(next: ThemePreference) {
