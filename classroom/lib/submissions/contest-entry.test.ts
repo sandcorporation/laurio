@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   attemptEntryLabel,
+  gridEntryLabel,
+  instructorEntryBadge,
   buildEntryPayload,
   entryBlockedReason,
   initialEntryState,
@@ -79,5 +81,28 @@ describe("attemptEntryLabel", () => {
   it("결과를 말한다", () => {
     expect(attemptEntryLabel({ status: "entered", reason: "" })).toBe("공모전에도 냈습니다");
     expect(attemptEntryLabel({ status: "rejected", reason: "마감" })).toBe("공모전에는 내지 못했습니다 — 마감");
+  });
+});
+
+describe("instructorEntryBadge (#550)", () => {
+  it("지금 공모전 제출인 시도를 먼저 가린다", () => {
+    expect(instructorEntryBadge({ contest_entry: null, is_current_contest_entry: false })).toBeNull();
+    expect(
+      instructorEntryBadge({ contest_entry: { status: "entered" }, is_current_contest_entry: true })?.label,
+    ).toBe("지금 공모전 제출");
+    expect(
+      instructorEntryBadge({ contest_entry: { status: "entered" }, is_current_contest_entry: false })?.label,
+    ).toBe("공모전에도 냈음");
+    expect(
+      instructorEntryBadge({ contest_entry: { status: "rejected" }, is_current_contest_entry: false })?.tone,
+    ).toBe("attention");
+  });
+});
+
+describe("gridEntryLabel (#550)", () => {
+  it("칸의 공모전 표시를 말한다", () => {
+    expect(gridEntryLabel("current")).toContain("지금 공모전 제출");
+    expect(gridEntryLabel("entered")).toContain("냈었음");
+    expect(gridEntryLabel(null)).toBeNull();
   });
 });

@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from django.db import transaction
 from ninja.errors import HttpError
@@ -239,3 +239,67 @@ def contest_entry_out(submission: ClassroomSubmission) -> dict | None:
     if not submission.contest_entry_status:
         return None
     return {"status": submission.contest_entry_status, "reason": submission.contest_entry_reason}
+
+
+# --- 강사가 보는 표시 (#550) ----------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class EntryMarks:
+    """강사 화면이 시도에 다는 표시. 강사에게 보이는 것은 「냈는지와 어느 시도인지」뿐이다 —
+    근거·공모전 점수·수상 여부는 공모전 쪽의 것이라 여기 없다."""
+
+    #: 「공모전에도 냈다」로 받아들여진 시도.
+    entered: frozenset[int] = frozenset()
+    #: 그중 지금 그 공모전의 제출인 시도 — 사람·공모전마다 많아야 하나다.
+    current: frozenset[int] = frozenset()
+
+    def cell(self, attempt_ids) -> str | None:
+        """명단 격자 한 칸: "current"(지금 공모전 제출이 이 칸의 시도다) | "entered"(냈었지만
+        지금은 다른 시도·직접 고친 제출이다) | None."""
+
+        ids = set(attempt_ids)
+        if ids & self.current:
+            return "current"
+        if ids & self.entered:
+            return "entered"
+        return None
+
+
+def entry_marks(problems) -> EntryMarks:
+    """이 문제들의 시도에 달 표시. 「지금 공모전 제출」은 클래스 하나로 정해지지 않는다 — 같은
+    사람이 다른 클래스에서 더 나중에 냈거나 공모전에서 직접 고쳤으면 이 클래스의 시도는 아니다.
+    그래서 그 공모전의 받아들여진 시도 전부(클래스 무관)에서 가장 늦은 것을 고르고, 그 뒤에
+    공모전 제출이 고쳐지지 않았는지 공유층에 묻는다."""
+
+    contest_ids = {p.contest_id for p in problems if p.contest_id is not None}
+    if not contest_ids:
+        return EntryMarks()
+    rows = ClassroomSubmission.objects.filter(
+        problem__contest_id__in=contest_ids,
+        contest_entry_status=ClassroomSubmission.ContestEntryStatus.ENTERED,
+    ).values_list("id", "problem__contest_id", "user_id", "contest_entry_resolved_at")
+
+    entered: set[int] = set()
+    latest: dict[tuple[int, int], tuple] = {}
+    for attempt_id, contest_id, user_id, resolved_at in rows:
+        entered.add(attempt_id)
+        if resolved_at is None:
+            continue
+        key = (contest_id, user_id)
+        if key not in latest or (resolved_at, attempt_id) > latest[key]:
+            latest[key] = (resolved_at, attempt_id)
+
+    current: set[int] = set()
+    for contest_id in contest_ids:
+        users = {user_id for (c, user_id) in latest if c == contest_id}
+        if not users:
+            continue
+        updated = contest_catalog().entries_updated_at(contest_id, users)
+        for user_id in users:
+            resolved_at, attempt_id = latest[(contest_id, user_id)]
+            # 받아들여질 때 공모전 제출이 먼저 저장되고 결과가 뒤에 찍힌다 — 그 뒤에 고쳐졌으면
+            # (직접 수정) 이 시도는 더 이상 공모전 제출이 아니다. 지워졌으면 목록에 없다.
+            if user_id in updated and updated[user_id] <= resolved_at:
+                current.add(attempt_id)
+    return EntryMarks(entered=frozenset(entered), current=frozenset(current))

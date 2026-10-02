@@ -11,7 +11,8 @@
 // `aria-label` 과 범례가 진다.
 import { Badge, Card, EmptyState, ErrorNote } from "@/app/components/ui";
 import { describeAchievementRate, formatAchievementRate } from "@/lib/problems/achievement";
-import type { GridCellStatus } from "@/lib/roster-grid/api";
+import type { GridCell, GridCellStatus } from "@/lib/roster-grid/api";
+import { gridEntryLabel } from "@/lib/submissions/contest-entry";
 import { useRosterGrid } from "@/lib/roster-grid/use-roster-grid";
 
 const STATUS_LABEL: Record<GridCellStatus, string> = {
@@ -23,6 +24,23 @@ const STATUS_LABEL: Record<GridCellStatus, string> = {
 };
 
 /** 셀 하나의 모양. 리터럴 hex 없이 토큰 유틸리티로만 그린다. */
+function cellLabel(cell: GridCell): string {
+  const entry = gridEntryLabel(cell.contest_entry ?? null);
+  return entry ? `${STATUS_LABEL[cell.status]} · ${entry}` : STATUS_LABEL[cell.status];
+}
+
+/** 공모전에도 냈다는 표시(#550) — 칸 오른쪽 위의 작은 점. 지금 공모전 제출이면 채운다. */
+function ContestEntryMark({ entry, inline = false }: { entry: "current" | "entered"; inline?: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={`${inline ? "block" : "absolute -right-1.5 -top-1.5"} h-[7px] w-[7px] rounded-full border border-attention ${
+        entry === "current" ? "bg-attention" : "bg-surface"
+      }`}
+    />
+  );
+}
+
 function StatusMark({ status }: { status: GridCellStatus }) {
   if (status === "passed") return <span className="mx-auto block h-[15px] w-[15px] bg-verified" />;
   if (status === "attempted_not_passed")
@@ -81,6 +99,7 @@ export function RosterGridTab({ classId }: { classId: number }) {
   }
 
   const { problems, members } = state.grid;
+  const hasContestEntries = members.some((member) => member.cells.some((cell) => cell.contest_entry));
 
   if (problems.length === 0) {
     return (
@@ -161,10 +180,14 @@ export function RosterGridTab({ classId }: { classId: number }) {
                         className={CELL}
                         data-testid={`roster-grid-cell-${member.id}-${cell.problem_id}`}
                         data-status={cell.status}
-                        aria-label={STATUS_LABEL[cell.status]}
-                        title={STATUS_LABEL[cell.status]}
+                        data-contest-entry={cell.contest_entry ?? undefined}
+                        aria-label={cellLabel(cell)}
+                        title={cellLabel(cell)}
                       >
-                        <StatusMark status={cell.status} />
+                        <span className="relative mx-auto block w-fit">
+                          <StatusMark status={cell.status} />
+                          {cell.contest_entry ? <ContestEntryMark entry={cell.contest_entry} /> : null}
+                        </span>
                       </td>
                     ))}
                   </tr>
@@ -206,6 +229,22 @@ export function RosterGridTab({ classId }: { classId: number }) {
                 </li>
               ))}
             </ul>
+            {hasContestEntries ? (
+              <ul data-testid="roster-grid-contest-legend" className="flex flex-wrap items-center gap-x-5 gap-y-2">
+                <li className="flex items-center gap-2 text-[12px] text-ink/60">
+                  <span className="flex h-[15px] w-[15px] items-center justify-center">
+                    <ContestEntryMark entry="current" inline />
+                  </span>
+                  지금 공모전 제출
+                </li>
+                <li className="flex items-center gap-2 text-[12px] text-ink/60">
+                  <span className="flex h-[15px] w-[15px] items-center justify-center">
+                    <ContestEntryMark entry="entered" inline />
+                  </span>
+                  공모전에도 냈었음
+                </li>
+              </ul>
+            ) : null}
             <span className="ml-auto text-[11.5px] text-ink/40">
               강사 본인과 내보낸 사람은 달성률에서 빠집니다
             </span>

@@ -148,6 +148,11 @@ class ContestCatalog(Protocol):
     def check_entry(self, entry: ContestEntry) -> str | None:
         """받을 수 있는 내기인가 — 받을 수 있으면 None, 아니면 사람이 읽는 거절 이유."""
 
+    def entries_updated_at(self, contest_id: int, user_ids: set[int]) -> dict[int, datetime]:
+        """그 공모전에 제출이 있는 사람마다 그 제출을 마지막으로 고친 때 — 강사 화면(#550)이
+        「지금 공모전 제출인 시도」를 가린다: 그 시도가 받아들여진 뒤에 직접 고쳤으면 아니다.
+        시각만 건넨다 — 근거·점수·수상은 건너가지 않는다."""
+
 
 _NO_CATALOG_REASON = "공모전에 낼 수 없습니다."
 
@@ -164,6 +169,9 @@ class _EmptyCatalog:
 
     def check_entry(self, entry: ContestEntry) -> str | None:
         return _NO_CATALOG_REASON
+
+    def entries_updated_at(self, contest_id: int, user_ids: set[int]) -> dict[int, datetime]:
+        return {}
 
 
 _catalog: ContestCatalog = _EmptyCatalog()

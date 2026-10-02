@@ -55,6 +55,8 @@ from .models import (
 )
 from .contest_entries import (
     INSTRUCTOR_ENTRY_MESSAGE,
+    EntryMarks,
+    entry_marks,
     contest_entry_form,
     contest_entry_out,
     prepare_contest_entry,
@@ -464,6 +466,7 @@ def _serialize_instructor_submission(
     class_obj: Class,
     problem: Problem,
     checklist_items=None,
+    marks: EntryMarks | None = None,
 ) -> ClassroomInstructorSubmissionOut:
     download_url = (
         _instructor_source_download_url(
@@ -487,6 +490,8 @@ def _serialize_instructor_submission(
         score=_serialize_score(score) if score is not None else None,
         passed=problem.is_score_passed(score, checklist_items=checklist_items),
         pending_reason=_pending_reason(score, class_obj, problem),
+        contest_entry=contest_entry_out(submission),
+        is_current_contest_entry=marks is not None and submission.id in marks.current,
     )
 
 
@@ -1001,6 +1006,7 @@ def _build_roster_grid(class_obj: Class) -> ClassroomRosterGridOut:
             )
         )
 
+    marks = entry_marks(problems)
     member_rows = []
     for member in members:
         cells = [
@@ -1010,6 +1016,9 @@ def _build_roster_grid(class_obj: Class) -> ClassroomRosterGridOut:
                     submissions_by_key.get((problem.id, member.id), []),
                     class_obj,
                     problem,
+                ),
+                contest_entry=marks.cell(
+                    s.id for s in submissions_by_key.get((problem.id, member.id), [])
                 ),
             )
             for problem in problems
@@ -1770,6 +1779,7 @@ def list_problem_submissions(request: HttpRequest, class_id: int, problem_id: in
         .prefetch_related("assets")
         .order_by("member__display_name", "-attempt_number")
     )
+    marks = entry_marks([problem])
     return 200, [
         _serialize_instructor_submission(
             # `_mine`과 같은 이유로 리스트를 먼저 받아 prefetch 캐시를 쓴다.
@@ -1778,6 +1788,7 @@ def list_problem_submissions(request: HttpRequest, class_id: int, problem_id: in
             class_obj=class_obj,
             problem=problem,
             checklist_items=checklist_items,
+            marks=marks,
         )
         for s in submissions
     ]

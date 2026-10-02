@@ -53,7 +53,9 @@ from storage.adapters import get_storage_adapter
 from submissions.models import SubmissionAsset
 
 from .api import _active_member_ids, _cell_status, _pending_reason, _problem_pass_stats
+from .contest_entries import entry_marks
 from .instructor_scope import class_scope, problem_scope
+from .mcp_read_tools import CONTEST_ENTRY_CELL_SCHEMA
 from .models import ClassroomSubmission, ConnectedApp
 
 #: 채점 근거 한 줄의 글자 상한 — 리포트는 클래스 전체를 한 번에 담으므로 근거가 길면
@@ -156,6 +158,7 @@ def _get_participant_report(grant: ConnectedApp, arguments: dict) -> dict:
     active_member_ids = _active_member_ids(class_obj)
     checklists = {problem.id: list(problem.checklist_items.all()) for problem in problems}
 
+    marks = entry_marks(problems)
     submissions_by_key: dict[tuple[int, int], list[ClassroomSubmission]] = {}
     for submission in (
         ClassroomSubmission.objects.filter(problem__in=problems, member__in=members)
@@ -197,6 +200,10 @@ def _get_participant_report(grant: ConnectedApp, arguments: dict) -> dict:
                     "attempt_count": len(attempts),
                     "last_submitted_at": attempts[0].created_at if attempts else None,
                     "latest_submission_id": attempts[0].id if attempts else None,
+                    "contest_entry": marks.cell(a.id for a in attempts),
+                    "contest_entry_submission_id": next(
+                        (a.id for a in attempts if a.id in marks.current), None
+                    ),
                     "latest": (
                         _latest_attempt(attempts[0], class_obj, problem, checklists[problem.id])
                         if attempts
@@ -457,6 +464,11 @@ _REPORT_OUTPUT = {
                                 "latest_submission_id": {
                                     "type": ["integer", "null"],
                                     "description": "최신 시도의 제출 번호 — open_submission_source 에 넣는다",
+                                },
+                                "contest_entry": CONTEST_ENTRY_CELL_SCHEMA,
+                                "contest_entry_submission_id": {
+                                    "type": ["integer", "null"],
+                                    "description": "지금 그 공모전의 제출인 시도의 제출 번호. 이 칸에 없으면 null",
                                 },
                                 "latest": {
                                     "type": ["object", "null"],

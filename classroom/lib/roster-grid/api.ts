@@ -16,6 +16,9 @@ export type GridCellStatus =
 export type GridCell = {
   problem_id: number;
   status: GridCellStatus;
+  // 공모전 문제에서만(#550) — "current": 지금 공모전 제출이 이 칸의 시도다, "entered": 냈었지만
+  // 지금 제출은 다른 시도·직접 고친 것이다.
+  contest_entry?: "current" | "entered" | null;
 };
 
 export type GridProblemStats = {
