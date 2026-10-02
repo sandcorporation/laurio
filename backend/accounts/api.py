@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError, transaction
 from django.http import HttpRequest
 from ninja import Router
 from ninja.errors import HttpError
@@ -42,6 +43,38 @@ def _username_for(provider: str, provider_uid: str) -> str:
     return f"{provider}:{provider_uid}"[:150]
 
 
+def _find_social_account(profile) -> SocialAccount | None:
+    return (
+        SocialAccount.objects.select_related("user")
+        .filter(provider=profile.provider, provider_uid=profile.provider_uid)
+        .first()
+    )
+
+
+def _create_or_link_user(profile):
+    """소셜 계정이 아직 없는 사람의 첫 로그인 — **인증된 이메일이 같으면 기존 계정에
+    붙이고**(계정 연결, ADR-0049), 인증되지 않았거나 걸리는 계정이 하나가 아니면 새
+    계정을 만든다. 유일 제약(동시 첫 로그인, #500)은 호출부가 다룬다."""
+
+    linked_user = find_linkable_user(profile)
+    if linked_user is not None:
+        try:
+            assert_can_use_social_login(linked_user)
+        except OperatorInvariantError as exc:
+            raise HttpError(403, str(exc)) from exc
+        user = linked_user
+    else:
+        User = get_user_model()
+        user = User(
+            username=_username_for(profile.provider, profile.provider_uid),
+            email=decide_email(profile, for_user_id=None).email,
+        )
+        user.set_unusable_password()
+        user.save()
+    attach_social_account(user, profile, linked=linked_user is not None)
+    return user
+
+
 @router.post("/auth/social/{provider}/login", response=TokenPairOut, auth=None)
 def social_login(request: HttpRequest, provider: str, payload: SocialLoginIn):
     """카카오·GitHub·구글 access token으로 로그인(최초 로그인 시 가입까지 겸한다).
@@ -56,11 +89,20 @@ def social_login(request: HttpRequest, provider: str, payload: SocialLoginIn):
     except SocialLoginError as exc:
         raise HttpError(401, f"소셜 로그인에 실패했습니다: {exc}") from exc
 
-    social_account = (
-        SocialAccount.objects.select_related("user")
-        .filter(provider=profile.provider, provider_uid=profile.provider_uid)
-        .first()
-    )
+    social_account = _find_social_account(profile)
+    if social_account is None:
+        try:
+            # 새 계정을 만들거나 기존 계정에 붙이는 일을 한 savepoint 로 묶는다 —
+            # 같은 사람의 첫 로그인 둘이 동시에 들어오면(버튼 두 번, 두 탭) 둘 다
+            # 위에서 「없다」를 보고, 늦은 쪽은 사용자 이름·소셜 신원의 유일 제약에
+            # 걸린다(#500). 그때 이 savepoint 만 되돌리고, 먼저 만든 쪽의 소셜
+            # 계정으로 아래 「이미 있는 계정」 경로를 탄다.
+            with transaction.atomic():
+                user = _create_or_link_user(profile)
+        except IntegrityError:
+            social_account = _find_social_account(profile)
+            if social_account is None:
+                raise
     if social_account is not None:
         user = social_account.user
         # 서로소 불변식의 반대 방향(#42, ADR-0018). 부트스트랩 명령만 막으면 이미
@@ -88,25 +130,6 @@ def social_login(request: HttpRequest, provider: str, payload: SocialLoginIn):
         # 남지 않게 하기 위해서다. 동의를 철회했으면 빈 문자열로 와 비워진다.
         # 규칙은 `accounts/identity.py` 가 소유한다.
         refresh_social_account(social_account, profile)
-    else:
-        # **인증된 이메일이 같으면 기존 계정에 붙인다**(계정 연결, ADR-0049) —
-        # 인증되지 않았거나 걸리는 계정이 하나가 아니면 새 계정을 만든다.
-        linked_user = find_linkable_user(profile)
-        if linked_user is not None:
-            try:
-                assert_can_use_social_login(linked_user)
-            except OperatorInvariantError as exc:
-                raise HttpError(403, str(exc)) from exc
-            user = linked_user
-        else:
-            User = get_user_model()
-            user = User(
-                username=_username_for(profile.provider, profile.provider_uid),
-                email=decide_email(profile, for_user_id=None).email,
-            )
-            user.set_unusable_password()
-            user.save()
-        attach_social_account(user, profile, linked=linked_user is not None)
 
     pair = issue_token_pair(user.id)
     return TokenPairOut(access=pair.access, refresh=pair.refresh)

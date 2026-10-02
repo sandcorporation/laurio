@@ -116,3 +116,55 @@ def test_social_login_with_unverified_email_across_two_providers_creates_separat
     # 두 토큰 쌍이 서로 다른 사용자를 가리킨다 — 병합됐다면 둘 다 같은
     # user.id로 issue_token_pair가 불렸을 것이다.
     assert kakao_login.json()["access"] != google_login.json()["access"]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_two_simultaneous_first_logins_of_the_same_person_both_succeed(monkeypatch):
+    """같은 사람이 동시에 두 번 처음 로그인하면(버튼을 빠르게 두 번, 두 탭) 둘 다
+    「계정이 없다」를 보고 같은 사용자를 만들려 한다 — 늦은 쪽이 유일 제약에 걸려
+    500 을 받았다(#500). 둘 다 같은 계정으로 로그인해야 한다.
+
+    경쟁은 결정적으로 만든다: 두 요청이 각자 「소셜 계정이 없다」를 확인한 뒤
+    (`find_linkable_user` 는 그때만 불린다) 서로를 기다렸다가 함께 계정을 만든다.
+    스레드마다 자기 DB 연결·트랜잭션이라 실제 동시 요청과 같다.
+    """
+
+    import threading
+
+    from django.contrib.auth import get_user_model
+    from django.db import connection
+    from django.test import Client
+
+    import accounts.api as accounts_api
+
+    real_find = accounts_api.find_linkable_user
+    both_looked = threading.Barrier(2, timeout=10)
+
+    def wait_for_the_other(profile):
+        both_looked.wait()
+        return real_find(profile)
+
+    monkeypatch.setattr(accounts_api, "find_linkable_user", wait_for_the_other)
+
+    results: list = []
+
+    def log_in():
+        try:
+            response = Client(raise_request_exception=False).post(
+                "/api/auth/social/kakao/login",
+                data={"access_token": "race-1:race@example.com"},
+                content_type="application/json",
+            )
+            results.append(response.status_code)
+        finally:
+            connection.close()
+
+    threads = [threading.Thread(target=log_in) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+
+    assert results == [200, 200]
+    assert SocialAccount.objects.filter(provider="kakao", provider_uid="race-1").count() == 1
+    assert get_user_model().objects.filter(username="kakao:race-1").count() == 1
