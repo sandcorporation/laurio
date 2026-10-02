@@ -120,5 +120,9 @@ Score 는 불변 스냅샷이라 「그때 무엇을 근거로 판정했는가�
     Packet Tracer 약관(EULA)이 역공학·형식 해독을 금하는가, 그 조항이 **우리가 학생이
     올린 파일을 서버에서 읽는 것**에 닿는가 — 우리는 Packet Tracer 를 실행·배포하지
     않는다. (나) 들여온 코드의 고지 의무 — MIT 고지(`LICENSE`)와 Twofish 구현 머리의
-    Gladman 출처 고지를 그 디렉터리에 그대로 두었다. **판단 전까지 staging·prod 에서는
-    꺼져 있다**(`SOURCE_CONVERTERS: ""`, 배포 환경 기본값도 빈 목록) — dev·CI 에서만 돈다.
+    Gladman 출처 고지를 그 디렉터리에 그대로 두었다. **사용자 판단(2026-10-03): 약관에
+    면책 조항을 두고 켠다**(#498 — 원문 조사는 그 이슈 댓글). Cisco General Terms
+    §2.2(d)가 Cisco Offer 의 "decrypt" 를 금하고, Packet Tracer Offer Description §4.1 이
+    Networking Academy 밖의 수업 사용을 서면 승인 대상으로 둔다 — 그 위험을 법률가 확인
+    없이 떠안은 결정이라 항목은 열어 둔다. staging 에서 먼저 켰고, prod 는 확인 뒤
+    약관 개정과 함께 켠다.
