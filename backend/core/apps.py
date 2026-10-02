@@ -32,6 +32,11 @@ class CoreConfig(AppConfig):
         register(checks.check_github_adapter_mode, BOOT_CHECK_TAG)
         register(checks.check_event_bus_adapter_mode, BOOT_CHECK_TAG)
 
+        # 변환 플러그인 목록(#496) — 쓸 수 없는 경로는 첫 채점이 아니라 부팅에서 거절한다.
+        from .source_converters import check_source_converters
+
+        register(check_source_converters, BOOT_CHECK_TAG)
+
         # 모든 로그 레코드에 요청 id 를 붙인다(2026-09-21, core/request_id.py).
         from .request_id import install_log_record_factory
 

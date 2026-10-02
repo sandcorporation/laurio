@@ -1325,6 +1325,60 @@ def test_scored_assets_are_attributed_by_id_not_label(client, category, landing_
 
 
 @pytest.mark.django_db
+@override_settings(SOURCE_CONVERTERS=["tests.source_converter_doubles.MarkerConverter"])
+def test_contest_scoring_passes_unreadable_files_through_the_registered_converters(
+    client, category, landing_type
+):
+    """변환 플러그인 자리(#496)는 공유층의 소스 선별에 있다 — 강의실만이 아니라
+    공모전 채점도 같은 자리를 지난다(자세한 동작은 `test_source_converters.py`)."""
+
+    from tests.source_converter_doubles import fakebin
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    requirement_id = contest["requirements"][0]["id"]
+    dev = _verified_user(client, "dev-1", "dev-ci-1")
+
+    key = _source_object_key(contest["id"], dev["user_id"])
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("app.py", "def login():\n    # MARKER\n    pass\n")
+        zf.writestr("lab/topology.bin", fakebin("CONTEST_CONVERTED_MARKER"))
+    FakeStorageAdapter().write_object(key, buf.getvalue())
+
+    submit_resp = client.post(
+        f"{CONTESTS_URL}/{contest['id']}/submissions",
+        data={
+            "assets": [{"kind": "source", "value": key}],
+            "requirement_responses": [
+                {
+                    "requirement_id": requirement_id,
+                    "is_met": True,
+                    "evidence": [{"kind": "source_location", "value": "MARKER"}],
+                }
+            ],
+        },
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert submit_resp.status_code == 201, submit_resp.content
+
+    _close_contest(client, contest, deadline=deadline)
+    result = _run_pending(client)
+    assert result["rows"][0]["status"] == "scored"
+
+    prompt = Score.objects.get(submission_id=submit_resp.json()["id"]).prompt
+    assert "CONTEST_CONVERTED_MARKER" in prompt
+    assert "lab/topology.bin" in prompt
+
+
+@pytest.mark.django_db
 def test_missing_source_object_leaves_submission_unscored_for_next_scan(
     client, category, landing_type
 ):
