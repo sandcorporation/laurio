@@ -28,6 +28,7 @@
 // 쓴다(알림 종과 같은 이유, `use-unread-count.ts`). 로딩 중에는 아무것도 단언하지
 // 않고(로그인 여부가 아직 갈리지 않았다), 실패(401 등)면 로그인 링크로 대체한다.
 import Link from "next/link";
+import { UserRound } from "lucide-react";
 import { useState } from "react";
 
 import { useMe } from "@/lib/auth/use-me";
@@ -73,9 +74,11 @@ export function AccountMenuClient({
         onClick={() => setOpen((value) => !value)}
         data-testid="account-menu-trigger"
         aria-expanded={open}
-        className="border border-rule px-3 py-1.5 text-[13px] text-ink hover:border-ink"
+        aria-label="내 계정"
+        className="inline-flex h-[34px] items-center border border-rule px-2.5 text-[13px] text-ink hover:border-ink sm:px-3"
       >
-        내 계정
+        <UserRound aria-hidden size={16} className="sm:hidden" />
+        <span className="hidden sm:inline">내 계정</span>
       </button>
 
       {open && (

@@ -99,7 +99,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                 <Link
                   href="/"
                   data-testid="classroom-header-brand"
-                  className="flex items-center gap-2 text-[21px] font-bold tracking-[-0.01em] text-ink"
+                  className="flex items-center gap-2 whitespace-nowrap text-[21px] font-bold tracking-[-0.01em] text-ink"
                 >
                   <LogoMark className="h-6 w-6" />
                   Codemit <span className="text-[15px] font-normal text-ink/45">클래스</span>
