@@ -1,7 +1,8 @@
 // ghcr 옛 버전 정리 — 매일 새벽 4시(서울)와 손으로(2026-10-02). 논리는 scripts/ci/ghcr_prune.py 에.
 //
 // 잡 `codemit-ghcr-prune`(Pipeline, 브랜치 `*/main`, scriptPath 이 파일)은 저장소 밖의 Jenkins 에
-// 사람이 만든다. 자격증명 `ghcr-prune-token`(Secret file — 파일 내용이 토큰)은
+// 사람이 만든다. 자격증명 `ghcr-prune-token` 은 Secret text·Secret file·Username with password(비밀번호
+// 칸) 어느 종류여도 된다 — 종류를 바꿀 때마다 빌드가 멈췄다(2026-10-02). 그 값은
 // classic PAT(read:packages·delete:packages)이어야 한다 — fine-grained 토큰은 패키지 API 에 닿지 못한다. 예전에는 Actions
 // (.github/workflows/ghcr-prune.yaml)가 GITHUB_TOKEN 으로 했다.
 pipeline {
@@ -28,12 +29,28 @@ pipeline {
   stages {
     stage('정리') {
       steps {
-        withCredentials([file(credentialsId: 'ghcr-prune-token', variable: 'GH_TOKEN_FILE')]) {
-          sh '''
-            GH_TOKEN=$(tr -d '[:space:]' < "$GH_TOKEN_FILE") && export GH_TOKEN
-            python3 scripts/ci/ghcr_prune.py --keep-images "$KEEP_IMAGES" --keep-cache "$KEEP_CACHE" \
-              $( [ "$DRY_RUN" = true ] && echo --dry-run )
-          '''
+        script {
+          def prune = 'python3 scripts/ci/ghcr_prune.py --keep-images "$KEEP_IMAGES" --keep-cache "$KEEP_CACHE" $( [ "$DRY_RUN" = true ] && echo --dry-run )'
+          def fromFile = 'GH_TOKEN=$(tr -d "[:space:]" < "$GH_TOKEN_FILE") && export GH_TOKEN && '
+          // 자격증명 종류가 맞지 않으면 withCredentials 가 본문을 돌기 전에 실패한다 — 그 실패만 다음 종류로 넘긴다.
+          def kinds = [
+            [string(credentialsId: 'ghcr-prune-token', variable: 'GH_TOKEN'), ''],
+            [file(credentialsId: 'ghcr-prune-token', variable: 'GH_TOKEN_FILE'), fromFile],
+            [usernamePassword(credentialsId: 'ghcr-prune-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN'), ''],
+          ]
+          def ran = false
+          for (kind in kinds) {
+            if (ran) { break }
+            try {
+              withCredentials([kind[0]]) {
+                ran = true
+                sh(kind[1] + prune)
+              }
+            } catch (e) {
+              if (ran || !(e.message ?: '').contains('is of type')) { throw e }
+              echo 'ghcr-prune-token 이 이 종류가 아니다 — 다음 종류로 읽는다'
+            }
+          }
         }
       }
     }
