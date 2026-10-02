@@ -269,6 +269,13 @@ class ImportableContestOut(Schema):
     requirement_count: int
 
 
+class ImportableContestPageOut(Schema):
+    """들여오기 목록 한 쪽 — 마감 빠른 순 20개씩. `next` 를 `after` 로 넘기면 이어 받는다."""
+
+    items: list[ImportableContestOut]
+    next: str | None = None
+
+
 class ImportContestIn(Schema):
     contest_id: int
 
