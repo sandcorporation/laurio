@@ -763,6 +763,33 @@ export default function EditProblemPage() {
                   />
                 </div>
 
+                {/* 참여자 화면과 같은 순서 — 수업용 안내가 설명 위다. */}
+                {followsContest ? (
+                  <div className="flex flex-col gap-1.5">
+                    <FieldLabel>수업용 안내</FieldLabel>
+                    <p className="text-[12px] text-ink/50">
+                      참여자에게 설명 위에 보입니다 — 이 클래스에서만 덧붙이는 말을 적어 주세요.
+                    </p>
+                    {isArchived ? (
+                      <div data-testid="edit-problem-instructor-note-readonly" className="border border-rule bg-paper px-4 py-3">
+                        {instructorNote.trim() === "" ? (
+                          <p className="text-[13px] text-ink/45">수업용 안내가 없습니다.</p>
+                        ) : (
+                          <MarkdownView markdown={instructorNote} fileBaseName={title} />
+                        )}
+                      </div>
+                    ) : (
+                      <MarkdownEditor
+                        id="problem-instructor-note"
+                        label="수업용 안내"
+                        testId="edit-problem-instructor-note-input"
+                        value={instructorNote}
+                        onChange={setInstructorNote}
+                      />
+                    )}
+                  </div>
+                ) : null}
+
                 <div className="flex flex-col gap-1.5">
                   <FieldLabel>설명</FieldLabel>
                   {isArchived || followsContest ? (
@@ -789,32 +816,6 @@ export default function EditProblemPage() {
                     />
                   )}
                 </div>
-
-                {followsContest ? (
-                  <div className="flex flex-col gap-1.5">
-                    <FieldLabel>수업용 안내</FieldLabel>
-                    <p className="text-[12px] text-ink/50">
-                      참여자에게 설명 위에 보입니다 — 이 클래스에서만 덧붙이는 말을 적어 주세요.
-                    </p>
-                    {isArchived ? (
-                      <div data-testid="edit-problem-instructor-note-readonly" className="border border-rule bg-paper px-4 py-3">
-                        {instructorNote.trim() === "" ? (
-                          <p className="text-[13px] text-ink/45">수업용 안내가 없습니다.</p>
-                        ) : (
-                          <MarkdownView markdown={instructorNote} fileBaseName={title} />
-                        )}
-                      </div>
-                    ) : (
-                      <MarkdownEditor
-                        id="problem-instructor-note"
-                        label="수업용 안내"
-                        testId="edit-problem-instructor-note-input"
-                        value={instructorNote}
-                        onChange={setInstructorNote}
-                      />
-                    )}
-                  </div>
-                ) : null}
               </form>
             </Card>
 
