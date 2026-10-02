@@ -737,10 +737,24 @@ def delete_class(request: HttpRequest, class_id: int):
     # 클래스 삭제 자체다(`classroom.participation` 「열어 두는 것」) — 제출이
     # 있으면 아래에서 따로 거절하므로 보관 여부는 이 경로를 막지 않는다.
     class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
+    remove_class(class_obj)
+    return 204, None
+
+
+def ensure_class_deletable(class_obj: Class) -> None:
+    """제출이 하나라도 있으면 화면과 같은 문장으로 거절한다 — 화면(`delete_class`)과
+    연결된 앱의 두 단계 삭제(`classroom.mcp_destructive_tools`, #515)가 미리보기와
+    실행 양쪽에서 이 판정 하나를 부른다."""
+
     if ClassroomSubmission.objects.filter(problem__classroom=class_obj).exists():
         raise HttpError(403, "제출이 있는 클래스는 지울 수 없습니다. 대신 보관해주세요.")
+
+
+def remove_class(class_obj: Class) -> None:
+    """클래스를 지운다(`delete_class` docstring의 규칙 그대로) — 화면과 연결된 앱이 함께 쓴다."""
+
+    ensure_class_deletable(class_obj)
     class_obj.delete()
-    return 204, None
 
 
 # --- Join (#280) -----------------------------------------------------------------
@@ -902,16 +916,26 @@ def expel_member(request: HttpRequest, class_id: int, member_id: int):
     # 보관된 클래스에서도 명단 정리는 열어 둔다 — 새 가입·새 제출처럼 새
     # 활동을 만드는 것이 아니라 이미 있는 명단을 표시만 바꾸는 것이다.
     class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
+    member = expel_class_member(class_member_or_404(class_obj, member_id))
+    return 200, _serialize_member(member, instructor_id=class_obj.instructor_id)
+
+
+def class_member_or_404(class_obj: Class, member_id: int) -> ClassMember:
+    """그 클래스의 참여자 한 명 — 화면(`expel_member`)과 연결된 앱(#515)이 같은 문장으로 찾는다."""
+
     try:
-        member = class_obj.members.get(id=member_id)
+        return class_obj.members.get(id=member_id)
     except ClassMember.DoesNotExist as exc:
         raise HttpError(404, "참여자를 찾을 수 없습니다.") from exc
+
+
+def expel_class_member(member: ClassMember) -> ClassMember:
+    """내보낸다 — 행을 지우지 않고 표시만, 이미 내보낸 사람이면 그대로(`expel_member` docstring)."""
 
     if member.expelled_at is None:
         member.expelled_at = timezone.now()
         member.save(update_fields=["expelled_at"])
-
-    return 200, _serialize_member(member, instructor_id=class_obj.instructor_id)
+    return member
 
 
 @router.patch(
@@ -1282,11 +1306,23 @@ def delete_problem(request: HttpRequest, class_id: int, problem_id: int):
     닿지 않는다(강의실과 공모전은 서로 다른 앱 경계, ADR-0037/0039)."""
 
     scope = problem_scope(class_id, problem_id, request.auth_user.id, write=True)
-    class_obj, problem = scope.class_obj, scope.problem
-    # 지울 수 있는가는 소유권·존재·보관과는 다른 축의 판정이다(ADR-0050) —
-    # 「그 문제 × 강사 자신」으로 닫힌 필터라 강사 범위(위)와 합치지 않는다.
+    remove_problem(scope.class_obj, scope.problem)
+    return 204, None
+
+
+def ensure_problem_deletable(problem: Problem, class_obj: Class) -> None:
+    """지울 수 있는가는 소유권·존재·보관과는 다른 축의 판정이다(ADR-0050) —
+    「그 문제 × 강사 자신」으로 닫힌 필터라 강사 범위와 합치지 않는다. 화면과 연결된 앱의
+    두 단계 삭제(#515)가 미리보기와 실행 양쪽에서 이 판정 하나를 부른다."""
+
     if not _problem_deletable(problem, class_obj):
         raise HttpError(403, "지울 수 없습니다 — 대신 숨겨주세요.")
+
+
+def remove_problem(class_obj: Class, problem: Problem) -> None:
+    """문제를 지운다(`delete_problem` docstring의 규칙 그대로) — 화면과 연결된 앱이 함께 쓴다."""
+
+    ensure_problem_deletable(problem, class_obj)
     # 채점을 걷는 것과 문제를 지우는 것, 둘이 한 트랜잭션이어야 한다 — 둘로
     # 쪼개진 채 죽으면(#431이 채점 걷기를 더하며 새로 생긴 위험) 채점만 사라지고
     # 문제·시도는 남는 어중간한 상태가 생긴다.
@@ -1295,7 +1331,6 @@ def delete_problem(request: HttpRequest, class_id: int, problem_id: int):
             submission__problem=problem, submission__member__user_id=class_obj.instructor_id
         ).delete()
         problem.delete()
-    return 204, None
 
 
 @router.post(

@@ -82,7 +82,7 @@ def test_the_write_tools_are_listed_as_reversible_writes(client, db):
     _, _, token = _setup(client)
     tools = {tool["name"]: tool for tool in _rpc(client, token, "tools/list").json()["result"]["tools"]}
     assert set(WRITE_TOOLS) <= set(tools)
-    assert "delete_problem" not in tools  # 삭제는 두 단계 확인과 함께 따로 연다(#515)
+    assert "delete_problem" not in WRITE_TOOLS  # 삭제는 두 단계 확인 도구다(#515, test_classroom_mcp_destructive_tools)
     for name in WRITE_TOOLS:
         annotations = tools[name]["annotations"]
         assert annotations["readOnlyHint"] is False, name
