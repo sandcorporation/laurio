@@ -107,6 +107,11 @@ RULES: dict[tuple[str, str, str], BannedWordRule] = {
     ("classroom", "ProblemPatchIn", "description"): BannedWordRule(
         checks_impersonation=False, checks_profanity=True
     ),
+    # 공모전 문제의 수업용 안내(#548) — 참여자 화면에서 설명 위에 보이는 공개 본문이라 설명과
+    # 같은 검사를 건다(`problem_authoring.reject_banned_public_text`).
+    ("classroom", "ProblemPatchIn", "instructor_note"): BannedWordRule(
+        checks_impersonation=False, checks_profanity=True
+    ),
     ("classroom", "ChecklistItemIn", "label"): BannedWordRule(
         checks_impersonation=False, checks_profanity=True
     ),
@@ -620,6 +625,43 @@ RULES: dict[tuple[str, str, str], BannedWordRule] = {
             "이름·공개 제목/본문 다섯 자리(spec #474 v1 표)와 다른 범주라 "
             "이 표에 없고, 이 티켓 범위 밖이다. 아직 검사하지 않는다."
         ),
+    ),
+    # 「공모전에도 내기」(#549) — 공모전 직접 제출의 같은 칸(`submissions` 의 EvidenceIn·
+    # RequirementResponseIn·SubmissionAssetIn)을 강의실 쪽 스키마로 받는다. 이유도 그대로다.
+    ("classroom", "ContestEntryEvidenceIn", "kind"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason='"video_timestamp"|"screenshot"|"demo_path"|"source_location" 중 하나.',
+    ),
+    ("classroom", "ContestEntryEvidenceIn", "value"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="`submissions.EvidenceIn.value` 와 같다 — 제출자 본인과 개최자만 본다.",
+    ),
+    ("classroom", "ContestEntryResponseIn", "note"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="`submissions.RequirementResponseIn.note` 와 같다 — 제출자 본인과 개최자만 본다.",
+    ),
+    ("classroom", "ContestEntryAssetIn", "kind"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="선택 자료 종류 — demo_url·demo_video·screenshot 중 하나.",
+    ),
+    ("classroom", "ContestEntryAssetIn", "value"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="storage object_key 또는 외부 URL — 식별자.",
+    ),
+    ("classroom", "ContestEntryAssetIn", "content_type"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="MIME 타입 — 식별자.",
+    ),
+    ("classroom", "ContestEntryAssetIn", "label"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="`submissions.SubmissionAssetIn.label` 과 같다 — 아직 검사하지 않는 범주.",
     ),
     # 연결된 앱의 동의 화면이 「허락」·「거절」을 보낼 때(#512, ADR-0052) — 전부 외부
     # 앱이 인가 요청에 실어 온 OAuth 값을 그대로 되돌려 보내는 자리다.
