@@ -5,6 +5,7 @@
 // 로그인 여부가 확인되기 전에는 개수를 묻지 않는다는 규율까지 포함해서다
 // (`lib/notifications/use-unread-count.ts`). 세션이 없거나(익명 방문자가
 // `/login`·`/join/{code}`를 보는 중) 아직 로딩 중이면 종 자체가 없다.
+import { Bell } from "lucide-react";
 import Link from "next/link";
 
 import { useUnreadCount } from "@/lib/notifications/use-unread-count";
@@ -20,10 +21,11 @@ export function NotificationBell() {
     <Link
       href="/notifications"
       data-testid="classroom-notification-bell"
-      className="relative inline-flex items-center border border-rule px-3 py-1.5 text-[13px] text-ink hover:border-ink"
+      className="relative inline-flex h-[34px] items-center border border-rule px-2.5 text-[13px] text-ink hover:border-ink sm:px-3"
       aria-label={count > 0 ? `읽지 않은 알림 ${count}건` : "알림"}
     >
-      알림
+      <Bell aria-hidden size={16} className="sm:hidden" />
+      <span className="hidden sm:inline">알림</span>
       {count > 0 && (
         <span
           data-testid="classroom-notification-badge"

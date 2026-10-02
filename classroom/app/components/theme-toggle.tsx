@@ -16,6 +16,7 @@
 //
 // 로그인 여부와 무관하게 항상 보인다(spec #396 user story 9) — `AccountMenu`
 // 처럼 세션을 확인하지 않는다.
+import { Monitor, Moon, Sun } from "lucide-react";
 import { useState } from "react";
 
 import { themeAttribute, type ThemePreference } from "@/lib/theme/preference";
@@ -38,6 +39,11 @@ function applyThemeAttribute(preference: ThemePreference): void {
   // 저절로 다시 계산되지만, Toast UI 자신의 다크 클래스는 우리가 직접 붙였다
   // 떼야 해서 이벤트로 알려야 한다.
   broadcastThemeChange();
+}
+
+function ThemeIcon({ preference }: { preference: ThemePreference }) {
+  const Icon = preference === "light" ? Sun : preference === "dark" ? Moon : Monitor;
+  return <Icon aria-hidden size={16} className="sm:hidden" />;
 }
 
 export function ThemeToggle({ initialPreference }: { initialPreference: ThemePreference }) {
@@ -66,9 +72,12 @@ export function ThemeToggle({ initialPreference }: { initialPreference: ThemePre
         aria-haspopup="true"
         aria-expanded={open}
         aria-label={`테마: ${currentLabel}, 누르면 테마를 고른다`}
-        className="border border-rule px-3 py-1.5 text-[13px] text-ink hover:border-ink"
+        className="inline-flex h-[34px] items-center border border-rule px-2.5 text-[13px] text-ink hover:border-ink sm:px-3"
       >
-        테마: {currentLabel}
+        {/* 좁은 화면(390px)에서는 글이 줄바꿈되며 버튼이 위아래로 커져 아이콘만 둔다 —
+            이름은 aria-label 이 말한다. */}
+        <ThemeIcon preference={preference} />
+        <span className="hidden sm:inline">테마: {currentLabel}</span>
       </button>
 
       {open && (
