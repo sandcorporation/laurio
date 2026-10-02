@@ -2877,6 +2877,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operator/classroom/usage/classes/{class_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Usage Class Detail
+         * @description 클래스 하나의 문제별 표와 날짜 × 문제 표(#494). 집계 숫자만 돌려준다.
+         */
+        get: operations["classroom_usage_operator_api_usage_class_detail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/operator/classroom/usage/daily": {
         parameters: {
             query?: never;
@@ -7447,6 +7467,41 @@ export interface components {
             /** Upload Url */
             upload_url: string;
         };
+        /** UsageClassDayOut */
+        UsageClassDayOut: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Problems */
+            problems: components["schemas"]["UsageProblemDayOut"][];
+            /** Submissions */
+            submissions: number;
+            /** Submitters */
+            submitters: number;
+        };
+        /** UsageClassDetailOut */
+        UsageClassDetailOut: {
+            /** Archived */
+            archived: boolean;
+            /** Days */
+            days: components["schemas"]["UsageClassDayOut"][];
+            /**
+             * End Date
+             * Format: date
+             */
+            end_date: string;
+            /** Name */
+            name: string;
+            /** Problems */
+            problems: components["schemas"]["UsageProblemOut"][];
+            /**
+             * Start Date
+             * Format: date
+             */
+            start_date: string;
+        };
         /** UsageDailyOut */
         UsageDailyOut: {
             /** Days */
@@ -7478,6 +7533,34 @@ export interface components {
             submissions: number;
             /** Submitters */
             submitters: number;
+        };
+        /** UsageProblemDayOut */
+        UsageProblemDayOut: {
+            /** Problem Id */
+            problem_id: number;
+            /** Submissions */
+            submissions: number;
+            /** Submitters */
+            submitters: number;
+        };
+        /** UsageProblemOut */
+        UsageProblemOut: {
+            /** Failed Scoring Submissions */
+            failed_scoring_submissions: number;
+            /** First Submitted On */
+            first_submitted_on: string | null;
+            /** Last Submitted On */
+            last_submitted_on: string | null;
+            /** Problem Id */
+            problem_id: number;
+            /** Status */
+            status: string;
+            /** Submissions */
+            submissions: number;
+            /** Submitters */
+            submitters: number;
+            /** Title */
+            title: string;
         };
         /** UsageTotalsOut */
         UsageTotalsOut: {
@@ -11397,6 +11480,49 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClassUsageOut"][];
+                };
+            };
+        };
+    };
+    classroom_usage_operator_api_usage_class_detail: {
+        parameters: {
+            query?: {
+                from?: string | null;
+                to?: string | null;
+            };
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageClassDetailOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
                 };
             };
         };

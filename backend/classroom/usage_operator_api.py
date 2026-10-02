@@ -30,7 +30,7 @@ from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth import get_user_model
-from django.db.models import Count, F
+from django.db.models import Count, F, Max, Min
 from django.db.models.functions import TruncDate
 from django.utils import timezone
 from ninja import Query, Router, Schema
@@ -39,7 +39,7 @@ from ninja.errors import HttpError
 from core.clock import Clock
 from core.operator_auth import OperatorAuth
 
-from .models import ClassMember, ClassroomSubmission
+from .models import Class, ClassMember, ClassroomSubmission, Problem
 from .schemas import ErrorOut
 
 SEOUL = ZoneInfo("Asia/Seoul")
@@ -231,10 +231,6 @@ def usage_classes(request):
     기간을 받지 않는다 — 클래스 전체 기간의 합계다. 보관된 클래스도 돌려주되
     진행 중인 클래스 뒤에 둔다(각 묶음 안에서는 최근에 만든 것이 먼저).
     """
-
-    # 모듈 머리의 import 줄을 건드리지 않으려고(#494 가 같은 파일을 나란히 고친다) 여기서 부른다.
-    from .models import Class, Problem
-
     participants = _count_by(
         counted_class_joins().filter(expelled_at__isnull=True), "classroom_id", n=Count("id")
     )
@@ -280,3 +276,156 @@ def usage_classes(request):
             )
         )
     return result
+
+# --- 클래스 상세(#494) --------------------------------------------------------
+#
+# 문제별 표는 **클래스 전체 기간**을 센다 — 「아무도 안 낸 문제」를 찾는 표라 기간을
+# 받지 않는다. 날짜 × 문제 표만 `?from=&to=`(위 `resolve_period` 와 같은 규칙)를
+# 받는다. 세는 기준은 위 머리말 그대로다(강사가 자기 클래스에 낸 제출은 빼고,
+# 내보낸 학생의 제출은 센다). 보관된 클래스·숨긴 문제도 그대로 센다 — 그때 있었던
+# 활동이다(#491).
+
+
+class UsageProblemOut(Schema):
+    problem_id: int
+    title: str
+    #: 문제 상태 — `draft`(초안)·`open`(열림)·`hidden`(숨김).
+    status: str
+    submissions: int
+    submitters: int
+    #: 첫·마지막 제출의 서울 날짜. 제출이 없으면 null.
+    first_submitted_on: date | None
+    last_submitted_on: date | None
+    #: 채점 실패 시도(`ClassroomScoringAttempt`)가 하나 이상 남은 제출 수 —
+    #: 그 테이블은 실패한 시도만 적는다.
+    failed_scoring_submissions: int
+
+
+class UsageProblemDayOut(Schema):
+    problem_id: int
+    submissions: int
+    submitters: int
+
+
+class UsageClassDayOut(Schema):
+    date: date
+    #: 그날 이 클래스 전체의 제출 수·제출자 수(문제를 가리지 않고 센 서로 다른 사람).
+    submissions: int
+    submitters: int
+    #: `problems` 와 같은 순서로, 문제마다 한 칸 — 0 인 칸도 있다.
+    problems: list[UsageProblemDayOut]
+
+
+class UsageClassDetailOut(Schema):
+    name: str
+    archived: bool
+    start_date: date
+    end_date: date
+    problems: list[UsageProblemOut]
+    days: list[UsageClassDayOut]
+
+
+def _seoul_date(value: datetime | None) -> date | None:
+    return timezone.localtime(value, SEOUL).date() if value is not None else None
+
+
+@usage_operator_router.get(
+    "/classroom/usage/classes/{class_id}",
+    response={200: UsageClassDetailOut, 404: ErrorOut, 422: ErrorOut},
+)
+def usage_class_detail(
+    request,
+    class_id: int,
+    date_from: str | None = Query(None, alias="from"),
+    date_to: str | None = Query(None, alias="to"),
+):
+    """클래스 하나의 문제별 표와 날짜 × 문제 표(#494). 집계 숫자만 돌려준다."""
+
+    classroom = Class.objects.filter(pk=class_id).first()
+    if classroom is None:
+        raise HttpError(404, "클래스를 찾을 수 없습니다.")
+    start, end = resolve_period(date_from, date_to)
+    lower, upper = seoul_bounds(start, end)
+
+    problems = list(Problem.objects.filter(classroom=classroom).order_by("order", "id"))
+    class_submissions = counted_submissions().filter(problem__classroom=classroom)
+
+    totals = {
+        row["problem_id"]: row
+        for row in class_submissions.values("problem_id")
+        .annotate(
+            n=Count("id"),
+            people=Count("member__user_id", distinct=True),
+            first=Min("created_at"),
+            last=Max("created_at"),
+        )
+        .order_by()
+    }
+    failed = {
+        row["problem_id"]: row["n"]
+        for row in class_submissions.filter(classroom_scoring_attempts__isnull=False)
+        .values("problem_id")
+        .annotate(n=Count("id", distinct=True))
+        .order_by()
+    }
+
+    period_submissions = class_submissions.filter(created_at__gte=lower, created_at__lt=upper)
+    cells = {
+        (row["day"], row["problem_id"]): row
+        for row in period_submissions.annotate(day=TruncDate("created_at", tzinfo=SEOUL))
+        .values("day", "problem_id")
+        .annotate(n=Count("id"), people=Count("member__user_id", distinct=True))
+        .order_by()
+    }
+    per_day = _per_day(
+        period_submissions, "created_at", n=Count("id"), people=Count("member__user_id", distinct=True)
+    )
+
+    problem_rows = []
+    for problem in problems:
+        total = totals.get(problem.id)
+        problem_rows.append(
+            UsageProblemOut(
+                problem_id=problem.id,
+                title=problem.title,
+                status=problem.status,
+                submissions=total["n"] if total else 0,
+                submitters=total["people"] if total else 0,
+                first_submitted_on=_seoul_date(total["first"]) if total else None,
+                last_submitted_on=_seoul_date(total["last"]) if total else None,
+                failed_scoring_submissions=failed.get(problem.id, 0),
+            )
+        )
+
+    days: list[UsageClassDayOut] = []
+    day = start
+    while day <= end:
+        whole = per_day.get(day)
+        day_cells = []
+        for problem in problems:
+            cell = cells.get((day, problem.id))
+            day_cells.append(
+                UsageProblemDayOut(
+                    problem_id=problem.id,
+                    submissions=cell["n"] if cell else 0,
+                    submitters=cell["people"] if cell else 0,
+                )
+            )
+        days.append(
+            UsageClassDayOut(
+                date=day,
+                submissions=whole["n"] if whole else 0,
+                submitters=whole["people"] if whole else 0,
+                problems=day_cells,
+            )
+        )
+        day += timedelta(days=1)
+
+    return UsageClassDetailOut(
+        name=classroom.name,
+        archived=classroom.archived_at is not None,
+        start_date=start,
+        end_date=end,
+        problems=problem_rows,
+        days=days,
+    )
