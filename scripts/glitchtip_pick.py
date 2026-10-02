@@ -182,7 +182,7 @@ def _branch_state(repo: pathlib.Path, branch: str, base: str = "origin/main") ->
     - `"unmerged"` — 그 밖. 사람에게 넘긴 분기·아직 병합 안 된 PR 이 이 모양이다.
 
     **「조상인가」로 보지 않는 이유**(2026-10-03). 2026-10-02 부터 PR 은 Jenkins 가
-    **rebase 병합**한다(`scripts/ci/automerge.py`) — `main` 에 들어간 커밋은 sha 가 새로
+    **rebase 병합**한다(묶음 병합 큐 `scripts/ci/train.py`) — `main` 에 들어간 커밋은 sha 가 새로
     생기므로 분기 팁은 영영 `main` 의 조상이 되지 않는다. 옛 판정(`merge-base
     --is-ancestor`)으로는 병합된 자동 진단 분기가 「머지 안 됨」으로 보여 하나도 걷히지
     않는다. 그래서 `git cherry` 의 patch-id 비교로 「같은 변경이 들어갔는가」를 본다.

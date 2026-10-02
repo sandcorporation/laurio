@@ -5,7 +5,8 @@
 로컬 게이트는 셋이다 — **바꾼 자리의 백엔드 시험**(`scripts/test.sh backend <파일…>`,
 400개까지), **세 앱 `typecheck`**, **에이전트가 브라우저로 걸어본 결과**. **전체 시험은
 브랜치 PR 의 CI 로 본다**(2026-10-02) — 브랜치를 push 하고 `main` 으로 PR 을 연다. Jenkins
-`codemit-pr` 가 초록이면 **그 PR 을 스스로 `main` 에 rebase 병합한다** — 사람이 머지 버튼을
+`codemit-pr` 가 sub 검사를 통과한 커밋을 줄 세우고, 묶음 병합 큐 `codemit-train` 이 줄 선 PR 을
+최신 `main` 위에 묶어 e2e 까지 시험한 뒤 **스스로 `main` 에 rebase 병합한다**(2026-10-03) — 사람이 머지 버튼을
 누르지 않고, `main` 에 직접 push 하지 않는다(시험 없이 이미지가 구워져 staging 까지 간다).
 병합을 막으려면 초안으로 열거나 `hold` 라벨을 붙인다. 다음 티켓을 시작하기 전에 PR 의 결과
 (빌드·`codemit/automerge` 상태)와 이어지는 이미지·staging 배포를 확인해 보고한다.

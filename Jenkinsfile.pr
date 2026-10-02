@@ -6,13 +6,11 @@
 // 3초 한도를 경합만으로 넘었다(#499 의 첫 CI). Jenkins 노드는 실행기가 하나라 한 노드에서 두 일이
 // 겹치지 않는다 — 그래서 노드를 통째로 쓴다.
 //
-// 노드 분담: 오래 걸리는 e2e(프로덕션 이미지 셋 굽기 + 세 프로젝트)와 celery-broker 는 macos,
-// 백엔드·단위 시험·생성물·문서·타입 검사는 sub(내장 노드 — staging 배포와 실행기를 나눠 쓰므로 짧은
-// 것만 둔다). 문서만 바뀌었으면 문서 검사만 한다(scripts/ci/changed.sh).
-//
-// 자동 병합: 빌드가 SUCCESS 면 이 브랜치의 열린 main PR 을 이 커밋으로 rebase 병합한다(초안·hold
-// 라벨은 빼고, scripts/ci/automerge.py). 합쳤으면 그 범위의 `GlitchTip:` 줄을 해결 표시한다.
-// main 에 들어가면 GitHub Actions(images.yaml)가 이미지를 굽고 `staging` 을 앞당긴다.
+// 여기서는 sub 검사(백엔드·단위 시험·생성물·문서·타입 검사)만 돈다. 문서만 바뀌었으면 문서 검사만
+// 한다(scripts/ci/changed.sh). 초록이면 그 커밋을 **줄 세우고**(`codemit/automerge` = pending) 묶음
+// 병합 큐 `codemit-train`(Jenkinsfile.train)을 부른다 — e2e·celery 와 병합·GlitchTip 해결 표시는
+// 그 잡이 줄 선 PR 을 최신 main 위에 묶어 한 번에 한다(2026-10-03). 예전에는 PR 마다 macos 에서 e2e 를
+// 따로 돌리고 스스로 합쳤는데, PR 넷이면 줄 서서 32분이었고 서로 충돌하는 PR 이 둘 다 초록이었다.
 pipeline {
   agent none
 
@@ -66,27 +64,6 @@ pipeline {
             }
           }
         }
-        stage('macos — e2e·celery') {
-          when {
-            beforeAgent true
-            expression { env.RUN_TESTS == '1' }
-          }
-          agent { label 'macos' }
-          steps {
-            // 중단된 앞 빌드가 남긴 스택·디스크부터 걷는다(trap 은 중단 때 돌지 못한다).
-            sh 'bash scripts/ci/macos-sweep.sh'
-            // e2e 가 붉어도 celery-broker 는 돈다 — 어디가 깨졌는지 한 번에 본다.
-            catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-              sh 'bash scripts/ci/e2e.sh'
-            }
-            sh 'bash scripts/ci/celery-broker.sh'
-          }
-          post {
-            always {
-              archiveArtifacts artifacts: 'test-results/**', allowEmptyArchive: true
-            }
-          }
-        }
         stage('문서만') {
           when {
             beforeAgent true
@@ -100,29 +77,19 @@ pipeline {
       }
     }
 
-    stage('병합') {
+    stage('줄 서기') {
       when {
         beforeAgent true
         expression { currentBuild.currentResult == 'SUCCESS' }
       }
       agent { label 'laurio-staging' }
       steps {
-        sh 'rm -f .automerge-merged'
         withCredentials([usernamePassword(credentialsId: 'github-sandcorporation-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
-          sh 'python3 scripts/ci/automerge.py "$BRANCH_NAME" "$(git rev-parse HEAD)"'
+          sh 'python3 scripts/ci/train.py enqueue "$(git rev-parse HEAD)"'
         }
-        // 합쳤으면 그 PR 범위(main 에서 갈라진 뒤의 커밋)의 `GlitchTip: <id>` 줄을 해결 표시한다.
-        // 「고쳤다」의 판정이 곧 이 병합이다 — 시험이 초록이고 main 에 들어갔다. 예전에는 main 의
-        // Actions 가 push 범위를 다시 추려야 했다(취소된 실행이 범위를 놓쳐 오류 75 가 남았다).
-        // 범위가 PR 하나로 정확히 닫히므로 그 문제가 없다. 토큰이 없으면 스크립트가 넘어간다.
-        script {
-          if (fileExists('.automerge-merged')) {
-            catchError(buildResult: null, stageResult: null, message: 'GlitchTip 표시 실패 — 병합과 무관하다') {
-              withCredentials([string(credentialsId: 'glitchtip-automation-token', variable: 'GLITCHTIP_TOKEN_FOR_AUTOMATION')]) {
-                sh 'python3 scripts/glitchtip_resolve.py "$(git merge-base origin/main HEAD)" HEAD'
-              }
-            }
-          }
+        // 묶음 잡을 깨운다. 이미 돌고 있으면 줄에 하나로 합쳐지고, 없더라도 10분 cron 이 데려간다.
+        catchError(buildResult: null, stageResult: null, message: '묶음 잡을 부르지 못했다 — 10분 안에 스스로 돈다') {
+          build job: '/codemit-train', wait: false
         }
       }
     }

@@ -141,8 +141,9 @@ codemit-staging-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 
 **커밋이 prod 까지 가는 길은 넷이다**(2026-10-02):
 
 1. **브랜치 → PR → `main`.** Jenkins `codemit-pr`(Multibranch, `Jenkinsfile.pr`)가 브랜치마다
-   전체 시험을 돌리고(아래 「CI 는 Jenkins 에서 돈다」), 초록이면 그 브랜치의 열린 PR 을 `main`
-   에 **rebase 병합**한다(초안·`hold` 라벨은 빼고, `scripts/ci/automerge.py`). **`main` 에 직접
+   sub 검사를 돌려 초록이면 줄 세우고, 묶음 병합 큐 `codemit-train`(`Jenkinsfile.train`)이 줄 선
+   PR 을 최신 `main` 위에 묶어 e2e 까지 한 번 시험한 뒤 차례로 **rebase 병합**한다(초안·`hold`
+   라벨은 빼고, `scripts/ci/train.py` — 「CI 는 Jenkins 에서 돈다」). **`main` 에 직접
    push 하지 않는다** — 그러면 시험 없이 이미지가 구워져 staging 까지 간다.
 2. **`main` → `staging`.** GitHub Actions(`.github/workflows/images.yaml`, 호스티드 러너)가
    이미지 열둘과 부팅 가드 셋을 돌리고, 다 초록이면 `staging` 을 그 커밋으로 **fast-forward**
