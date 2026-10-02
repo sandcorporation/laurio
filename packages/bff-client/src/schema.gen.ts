@@ -5258,6 +5258,11 @@ export interface components {
         };
         /** ContestOut */
         ContestOut: {
+            /**
+             * Allows Classroom Import
+             * @default false
+             */
+            allows_classroom_import: boolean;
             category: components["schemas"]["CategoryOut"];
             /**
              * Created At
@@ -5364,6 +5369,8 @@ export interface components {
          *     거절한다. `deadline_at`은 지금 시각보다 뒤여야 한다(이미 지난 시각은 422).
          */
         ContestUpdateIn: {
+            /** Allows Classroom Import */
+            allows_classroom_import?: boolean | null;
             /** Category Id */
             category_id?: number | null;
             /** Deadline At */
@@ -5552,6 +5559,11 @@ export interface components {
          *     않는다(0을 받아 무시하는 것이 아니라 필드 자체가 없다).
          */
         FreeContestCreateIn: {
+            /**
+             * Allows Classroom Import
+             * @default false
+             */
+            allows_classroom_import: boolean;
             /** Category Id */
             category_id: number;
             /**

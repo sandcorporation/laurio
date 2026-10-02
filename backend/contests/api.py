@@ -47,6 +47,7 @@ from accounts.models import SponsorProfile
 from accounts.sanitize import sanitize_free_text
 from core.banned_words import BannedWordViolation, find_banned_word_violation
 from core.clock import Clock
+from core.contest_catalog import contest_source_changed
 from core.contest_switch import (
     require_contest_product_enabled,
     require_paid_contest_product_enabled,
@@ -186,6 +187,7 @@ def _serialize_contest(contest: Contest, auth_user: object | None = None) -> Con
         required_minimum_prize=contest.required_minimum_prize,
         is_underfunded=contest.is_underfunded,
         is_free=contest.is_free,
+        allows_classroom_import=contest.allows_classroom_import,
         requirements=[
             RequirementOut(id=r.id, text=r.text, grade=r.grade, order=r.order)
             for r in contest.requirements.all()
@@ -429,6 +431,7 @@ def create_free_contest(request: HttpRequest, payload: FreeContestCreateIn):
             deadline_at=payload.deadline_at,
             status=Contest.Status.DRAFT,
             is_free=True,
+            allows_classroom_import=payload.allows_classroom_import,
             required_minimum_prize=0,
             is_underfunded=False,
         )
@@ -853,6 +856,9 @@ def update_contest(request: HttpRequest, contest_id: int, payload: ContestUpdate
     if contest.is_free and payload.prize is not None:
         raise HttpError(422, "무료 공모전은 상금을 설정할 수 없습니다.")
 
+    if not contest.is_free and payload.allows_classroom_import is not None:
+        raise HttpError(422, "클래스에서 들여오기는 무료 공모전에서만 허용할 수 있습니다.")
+
     if payload.deadline_at is not None and payload.deadline_at <= Clock.now():
         raise HttpError(422, "마감은 지금보다 뒤여야 합니다.")
 
@@ -943,7 +949,19 @@ def update_contest(request: HttpRequest, contest_id: int, payload: ContestUpdate
             contest.required_minimum_prize = minimum_total
             contest.is_underfunded = contest.prize < minimum_total
 
+        # 「클래스에서 들여오기」 허용은 참가 조건이 아니라 강사에게 여는 문이라
+        # `ContestChange`·참가자 알림에 싣지 않는다 — 참가자에게 「공모전이 바뀌었다」는
+        # 소음이다. 이미 들여온 공모전 문제는 알아야 하므로 신호만 낸다(#547, ADR-0054).
+        import_allowance_changed = (
+            payload.allows_classroom_import is not None
+            and payload.allows_classroom_import != contest.allows_classroom_import
+        )
+        if payload.allows_classroom_import is not None:
+            contest.allows_classroom_import = payload.allows_classroom_import
+
         contest.save()
+        if import_allowance_changed:
+            _announce_contest_source_changed(contest)
 
         if contest.status == Contest.Status.DRAFT and payload.prize is not None:
             # 결제가 문을 닫기 전까지는 결제 화면을 먼저 열어(POST /payments가
@@ -1400,6 +1418,18 @@ def _record_contest_change(
         contest=contest, action=action, before=before, after=after, changed_at=now
     )
     notify_contest_updated(contest)
+    _announce_contest_source_changed(contest)
+
+
+def _announce_contest_source_changed(contest: Contest) -> None:
+    """공개 중인 무료 공모전의 원본이 바뀌었다고 공유층에 알린다 (#547, ADR-0054) — 그
+    공모전을 들여온 「공모전 문제」가 따라간다(#548). 커밋 뒤에 보낸다: 받는 쪽이 원본을
+    다시 읽을 때 새 값이 보여야 한다. 유료 공모전·초안은 들여올 수 없으니 알릴 것이 없다."""
+
+    if not contest.is_free or contest.status != Contest.Status.PUBLISHED:
+        return
+    contest_id = contest.pk
+    transaction.on_commit(lambda: contest_source_changed.send(sender=Contest, contest_id=contest_id))
 
 
 def _turn_out(message: RequirementChatMessage) -> RequirementChatTurnOut:

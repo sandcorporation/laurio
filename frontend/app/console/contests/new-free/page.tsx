@@ -25,6 +25,7 @@ import { useSession } from "@/lib/auth/use-session";
 import { checkPublicTextForBannedWords } from "@/lib/contests/banned-words-check";
 import type { Category, DeliverableType } from "@/lib/contests/grill-types";
 
+import { ClassroomImportField } from "../_components/classroom-import-field";
 import { ContestStageStepper } from "../_components/contest-stage-stepper";
 
 type LoadState =
@@ -39,6 +40,7 @@ type BriefForm = {
   deliverableTypeIds: number[];
   deadlineAt: string;
   description: string;
+  allowsClassroomImport: boolean;
 };
 
 const EMPTY_BRIEF: BriefForm = {
@@ -47,6 +49,7 @@ const EMPTY_BRIEF: BriefForm = {
   deliverableTypeIds: [],
   deadlineAt: "",
   description: "",
+  allowsClassroomImport: false,
 };
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -155,6 +158,7 @@ export default function NewFreeContestBriefPage() {
         description: brief.description,
         deadline_at: new Date(brief.deadlineAt).toISOString(),
         requirements: [],
+        allows_classroom_import: brief.allowsClassroomImport,
       });
 
       if (!created.ok) {
@@ -285,6 +289,12 @@ export default function NewFreeContestBriefPage() {
             className={INPUT_CLASS}
           />
         </label>
+
+        <ClassroomImportField
+          checked={brief.allowsClassroomImport}
+          onChange={(next) => setBrief((prev) => ({ ...prev, allowsClassroomImport: next }))}
+          testId="free-brief-classroom-import"
+        />
 
         <DescriptionField
           label="설명 · 보상 안내(선택)"

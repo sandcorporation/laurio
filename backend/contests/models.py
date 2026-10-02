@@ -276,6 +276,13 @@ class Contest(models.Model):
     # 항상 0/False다 — 상금 개념 자체가 없다.
     is_free = models.BooleanField(default=False)
 
+    # 「클래스에서 들여오기」 허용 (#547, ADR-0054) — 무료 공모전에서만 뜻이 있다. 켜면
+    # 강사가 이 공모전을 클래스의 「공모전 문제」로 들여오고, 참여자가 「공모전에도 내기」로
+    # 이 공모전에 낼 수 있다(CONTEXT.md). 공개 중에도 켜고 끈다(ADR-0051 과 같은 결) —
+    # 끄면 새 들여오기도, 이미 들여온 문제의 내기도 막힌다.
+    # db_default: 겹쳐 바꾸는 배포 동안 옛 코드의 INSERT 가 이 칸을 빼먹어도 된다(ADR-0053).
+    allows_classroom_import = models.BooleanField(default=False, db_default=False)
+
     # 심사기간 종료 시각 (#13, ADR-0003). CLOSED 전이가 일어나는 조건부 UPDATE 안에서
     # deadline_at + PlatformPolicy.judging_period_days(#78/ADR-0023)로 함께
     # 채워진다. 유료 연장은 이 컬럼만

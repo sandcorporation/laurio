@@ -86,10 +86,10 @@ CONTEXT.md 「소셜 계정」). 이메일은 로그인에서 사람을 찾는 �
 | `GET /api/contests/home` | 홈 큐레이션 |
 | `GET /api/contests/{id}` | 상세 — 로그인 없이 열린다 |
 | `POST /api/contests` | 개최(유료) |
-| `PATCH /api/contests/{id}` | 브리프 수정 — DRAFT는 결제 전까지, PUBLISHED는 마감 전까지(제출을 받는 동안, #473, ADR-0051). 마감 뒤(CLOSED 이후)는 409 |
+| `PATCH /api/contests/{id}` | 브리프 수정 — DRAFT는 결제 전까지, PUBLISHED는 마감 전까지(제출을 받는 동안, #473, ADR-0051). 마감 뒤(CLOSED 이후)는 409. 무료 공모전은 `allows_classroom_import` 도 켜고 끈다(유료는 422) — 참가 조건이 아니라 변경 이력·참가자 알림에 싣지 않는다(#547) |
 | `POST /api/contests/quote` | 개최 견적(유료) |
 | `GET /api/contests/free/hosting-permission` | 내 무료 공모전 개최 권한(#415) |
-| `POST /api/contests/free` | 무료 개최(#415) — 본인확인·결제 없이, 개최 권한만 |
+| `POST /api/contests/free` | 무료 개최(#415) — 본인확인·결제 없이, 개최 권한만. `allows_classroom_import` 로 「클래스에서 들여오기」를 허용한다(#547) |
 | `POST /api/contests/{id}/publish` | 무료 공모전 공개(#415) — 결제 대신 개최 권한이 연다, 요구사항이 없거나 개최자 표시 이름이 없으면 422(#447) |
 | `GET /api/contests/mine` | 내가 연 것 |
 | `POST`·`PATCH`·`DELETE .../requirements[/{id}]` | 요구사항 — `PATCH /contests/{id}`와 같은 문(DRAFT·PUBLISHED, #473). 문구(`text`)는 공개 제목·설명과 같은 노출이라 욕설이면 422다(spec #474, #480) — 상세 화면에서 로그인 없이 보인다 |
@@ -147,6 +147,15 @@ DeliverableTypeChange와 같은 규율)가 남고 이미 제출한 참가자 전
 | `GET`·`POST /api/submissions/{id}/appeal` | 이의 |
 | `GET`·`POST /api/submissions/{id}/build-assets` | 인수용 빌드 산출물 |
 | `GET .../source-readings` | 내 소스를 누가 열람했는가 |
+
+**「공모전 문제」가 건너오는 공유층 자리**(#547, ADR-0054). 강의실은 공모전 앱을 임포트하지
+못하므로(ADR-0037) `core.contest_catalog` 가 계약만 든다. 공모전 쪽이 구현을 등록하고
+(`contests.classroom_catalog`) 강의실이 읽는다.
+- 들여오기 목록: 공개 중 · 마감 전 · 「클래스에서 들여오기」 허용된 무료 공모전.
+- 공모전 하나의 원본: 제목·설명·Requirement·마감과, 지금 「공모전에도 내기」를 받는가. 마감 뒤에도 읽힌다.
+- 공개 중인 무료 공모전의 제목·설명·마감·Requirement 가 바뀌거나 허용이 바뀌면 커밋 뒤
+  `contest_source_changed` 신호가 나간다. 공모전 제품 스위치가 꺼지면 목록은 비고 아무것도
+  받지 않는다.
 
 **무료 공모전 제출은 본인확인 대신 소스 열람 동의를 요구한다**(#416, ADR-0048).
 `contest.is_free`면 `POST`·`PUT .../submissions[/me]`가 본인확인·자전거래 검사를
