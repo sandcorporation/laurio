@@ -18,7 +18,8 @@
 
 **호출 상한**: 강사 한 명당 분당 `CLASSROOM_MCP_CALLS_PER_MINUTE` 번. 넘으면 JSON-RPC
 오류로 몇 초 뒤에 다시 하라고 알린다(`Retry-After` 도 함께). 분은 `Clock.now()` 로
-가른다 — 시험이 시계를 다음 분으로 옮겨 풀리는 것을 본다.
+가른다 — 시험이 시계를 다음 분으로 옮겨 풀리는 것을 본다. 제출 소스 열기처럼 무거운 도구는
+그 위에 도구 자신의 분당 상한을 하나 더 받는다(#518, `mcp_report_tools.TOOL_CALLS_PER_MINUTE_SETTINGS`).
 """
 
 from __future__ import annotations
@@ -42,6 +43,7 @@ from .models import ConnectedApp
 from .oauth import SCOPE, authenticate_access_token, protected_resource_metadata_url, public_origin
 from .services import instructor_classes
 from .mcp_read_tools import READ_TOOL_SPECS
+from .mcp_report_tools import REPORT_TOOL_SPECS, TOOL_CALLS_PER_MINUTE_SETTINGS
 
 SERVER_NAME = "codemit-classroom"
 SERVER_VERSION = "1.0.0"
@@ -153,6 +155,10 @@ TOOLS: dict[str, Tool] = {
 
 # 읽기 도구(#513) — 처리기와 명세는 `mcp_read_tools` 에 산다. 등록부 끝에 덧붙인다.
 for _spec in READ_TOOL_SPECS:
+    TOOLS[_spec["name"]] = Tool(**_spec, read_only=True)
+
+# 참여자 리포트·제출 소스 열기(#518) — 처리기와 명세는 `mcp_report_tools` 에 산다.
+for _spec in REPORT_TOOL_SPECS:
     TOOLS[_spec["name"]] = Tool(**_spec, read_only=True)
 
 
@@ -294,12 +300,13 @@ def _dispatch(grant: ConnectedApp, method: str, params: dict, *, modern: bool) -
 # --- 호출 상한 -----------------------------------------------------------------
 
 
-def _rate_limited(instructor_id: int) -> int | None:
-    """상한을 넘었으면 다음 분까지 남은 초를, 아니면 None 을."""
+def _rate_limited(instructor_id: int, *, bucket: str | None = None, limit: int | None = None) -> int | None:
+    """상한을 넘었으면 다음 분까지 남은 초를, 아니면 None 을. `bucket` 을 주면 그 도구
+    하나의 상한(`limit`)을 따로 센다(#518 — 제출 소스 열기는 더 낮은 상한을 받는다)."""
 
     now = Clock.now()
     minute = int(now.timestamp()) // 60
-    key = f"mcp-calls:{instructor_id}:{minute}"
+    key = f"mcp-calls:{instructor_id}:{minute}" if bucket is None else f"mcp-calls:{instructor_id}:{bucket}:{minute}"
     cache = caches["rate_limits"]
     cache.add(key, 0, timeout=120)
     try:
@@ -307,9 +314,21 @@ def _rate_limited(instructor_id: int) -> int | None:
     except ValueError:  # 사이에 만료됐다 — 이 분의 첫 호출로 센다.
         cache.set(key, 1, timeout=120)
         count = 1
-    if count > settings.CLASSROOM_MCP_CALLS_PER_MINUTE:
+    if count > (settings.CLASSROOM_MCP_CALLS_PER_MINUTE if limit is None else limit):
         return 60 - int(now.timestamp()) % 60
     return None
+
+
+def _tool_rate_limited(instructor_id: int, method: str, params: dict) -> int | None:
+    """도구 자신의 분당 상한(`TOOL_CALLS_PER_MINUTE_SETTINGS`)이 있는 도구 호출이면 그것도 센다."""
+
+    name = params.get("name")
+    if method != "tools/call" or not isinstance(name, str):
+        return None
+    setting_name = TOOL_CALLS_PER_MINUTE_SETTINGS.get(name)
+    if setting_name is None:
+        return None
+    return _rate_limited(instructor_id, bucket=name, limit=getattr(settings, setting_name))
 
 
 # --- 뷰 -----------------------------------------------------------------------
@@ -363,6 +382,8 @@ def mcp_endpoint(request: HttpRequest) -> HttpResponse:
         return _error_response(request_id, RpcError(INVALID_PARAMS, "params 는 객체여야 합니다.", http_status=400))
 
     retry_after = _rate_limited(grant.instructor_id)
+    if retry_after is None:
+        retry_after = _tool_rate_limited(grant.instructor_id, method, params)
     if retry_after is not None:
         return _error_response(
             request_id,
