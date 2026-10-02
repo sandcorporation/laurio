@@ -46,6 +46,12 @@ class NotificationType(models.TextChoices):
     # rejected`) — 밀린 제출이 몇 건이든, tick이 몇 번을 돌든 상태 전이 한
     # 번에 하나다. 강사가 키를 고쳤다가 그 키도 거절당하면 그때 다시 간다.
     CLASSROOM_SCORING_KEY_REJECTED = "classroom_scoring_key_rejected", "강의실 채점 키 거부"
+    # 「공모전에도 내기」로 낸 시도를 공모전이 받지 않았다(#549) — 마감·허용 철회 경합 등.
+    # 낸 사람에게만 간다. 클래스 시도·판정은 그대로라 알림은 「공모전에는 내지 못했다」만 말한다.
+    CLASSROOM_CONTEST_ENTRY_REJECTED = (
+        "classroom_contest_entry_rejected",
+        "강의실 공모전 출품 실패",
+    )
     # Operator 가 한 사용자에게 직접 보내는 알림이다(#418, CONTEXT.md 「운영자
     # 알림」) — 무료 공모전 수상자에게 개최자 보상(기프티콘 등)을 전하는 것이
     # 첫 쓰임이다. 제목·본문·(선택) 이미지는 이 앱의 `OperatorNotice`가 담고,
@@ -70,6 +76,7 @@ CLASSROOM_NOTIFICATION_TYPES = frozenset(
         NotificationType.CLASSROOM_TOKEN_BUDGET_WARNING,
         NotificationType.CLASSROOM_SUBMISSION_SCORED,
         NotificationType.CLASSROOM_SCORING_KEY_REJECTED,
+        NotificationType.CLASSROOM_CONTEST_ENTRY_REJECTED,
     }
 )
 
@@ -166,6 +173,13 @@ NOTIFICATION_TYPE_FLAGS: dict[str, dict[str, bool]] = {
     # 필요 없다. 강의실 알림은 전부 서비스 안에서만이라는 같은 규칙을
     # 받는다(#301, #356).
     NotificationType.CLASSROOM_SCORING_KEY_REJECTED: {
+        "is_transactional": True,
+        "is_promotional": False,
+        "is_quiet_hours_exempt": False,
+        "is_internal_only": True,
+    },
+    # 낸 사람 자신의 제출에 대한 처리 결과다(#549) — 다른 강의실 알림과 같은 취급.
+    NotificationType.CLASSROOM_CONTEST_ENTRY_REJECTED: {
         "is_transactional": True,
         "is_promotional": False,
         "is_quiet_hours_exempt": False,

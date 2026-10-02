@@ -786,6 +786,27 @@ export interface paths {
         patch: operations["classroom_api_update_checklist_item"];
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/problems/{problem_id}/contest-entry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Contest Entry Form
+         * @description 참여자의 「공모전에도 내기」 칸(#549) — 직전 공모전 제출로 미리 채운다. 공모전 문제가
+         *     아니면 404. 강사 자신의 시도는 낼 수 없으므로 강사에게는 403이다.
+         */
+        get: operations["classroom_api_get_contest_entry_form"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/problems/{problem_id}/copy": {
         parameters: {
             query?: never;
@@ -4730,6 +4751,13 @@ export interface components {
             /** Reasoning */
             reasoning: string;
         };
+        /** ClassroomContestEntryOut */
+        ClassroomContestEntryOut: {
+            /** Reason */
+            reason: string;
+            /** Status */
+            status: string;
+        };
         /** ClassroomGridCellOut */
         ClassroomGridCellOut: {
             /** Problem Id */
@@ -4946,6 +4974,7 @@ export interface components {
         ClassroomSubmissionIn: {
             /** Content Type */
             content_type?: string | null;
+            contest_entry?: components["schemas"]["ContestEntryIn"] | null;
             /** Submission Format */
             submission_format: string;
             /** Value */
@@ -4955,6 +4984,7 @@ export interface components {
         ClassroomSubmissionOut: {
             /** Attempt Number */
             attempt_number: number;
+            contest_entry?: components["schemas"]["ClassroomContestEntryOut"] | null;
             /**
              * Created At
              * Format: date-time
@@ -5194,6 +5224,156 @@ export interface components {
             requirements: components["schemas"]["RequirementIn"][];
             /** Title */
             title: string;
+        };
+        /**
+         * ContestEntryAssetIn
+         * @description 선택 자료 하나 — 데모 주소·시연 영상·스크린샷. 영상·스크린샷은 `ContestEntryFormOut.
+         *     upload_target_refs` 의 업로드 대상에 먼저 올린 object_key 다.
+         */
+        ContestEntryAssetIn: {
+            /**
+             * Content Type
+             * @default
+             */
+            content_type: string;
+            /** Kind */
+            kind: string;
+            /**
+             * Label
+             * @default
+             */
+            label: string;
+            /** Value */
+            value: string;
+        };
+        /** ContestEntryAssetOut */
+        ContestEntryAssetOut: {
+            /** Content Type */
+            content_type: string;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Value */
+            value: string;
+        };
+        /**
+         * ContestEntryEvidenceIn
+         * @description 근거 한 줄 — 공모전 직접 제출의 Evidence 와 같은 모양이다(#549). 자료를 가리키는 칸은
+         *     없다: 이 시도의 자료는 아직 공모전 쪽 id 가 없다.
+         */
+        ContestEntryEvidenceIn: {
+            /** Kind */
+            kind: string;
+            /** Value */
+            value: string;
+        };
+        /** ContestEntryEvidenceOut */
+        ContestEntryEvidenceOut: {
+            /** Kind */
+            kind: string;
+            /** Value */
+            value: string;
+        };
+        /**
+         * ContestEntryFormOut
+         * @description 「공모전에도 내기」 칸을 그리는 데 필요한 것(#549). 공모전이 지금 받지 않으면
+         *     `accepts_entries` 가 거짓이고 나머지는 비어 있다 — 화면은 스위치를 감춘다.
+         */
+        ContestEntryFormOut: {
+            /** Accepts Entries */
+            accepts_entries: boolean;
+            /** Contest Id */
+            contest_id: number;
+            /** Deadline At */
+            deadline_at?: string | null;
+            /**
+             * Has Entry
+             * @default false
+             */
+            has_entry: boolean;
+            /**
+             * Optional Assets
+             * @default []
+             */
+            optional_assets: components["schemas"]["ContestEntryAssetOut"][];
+            /**
+             * Requirements
+             * @default []
+             */
+            requirements: components["schemas"]["ContestEntryRequirementOut"][];
+            /**
+             * Upload Target Refs
+             * @default {}
+             */
+            upload_target_refs: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * ContestEntryIn
+         * @description 「공모전에도 내기」(#549, CONTEXT.md) — 공모전에 직접 낼 때와 같은 칸이다.
+         */
+        ContestEntryIn: {
+            /**
+             * Optional Assets
+             * @default []
+             */
+            optional_assets: components["schemas"]["ContestEntryAssetIn"][];
+            /**
+             * Replace Existing
+             * @default false
+             */
+            replace_existing: boolean;
+            /**
+             * Requirement Responses
+             * @default []
+             */
+            requirement_responses: components["schemas"]["ContestEntryResponseIn"][];
+            /**
+             * Source Access Consent
+             * @default false
+             */
+            source_access_consent: boolean;
+        };
+        /** ContestEntryRequirementOut */
+        ContestEntryRequirementOut: {
+            previous?: components["schemas"]["ContestEntryResponseOut"] | null;
+            /** Required */
+            required: boolean;
+            /** Requirement Id */
+            requirement_id: number;
+            /** Text */
+            text: string;
+        };
+        /** ContestEntryResponseIn */
+        ContestEntryResponseIn: {
+            /**
+             * Evidence
+             * @default []
+             */
+            evidence: components["schemas"]["ContestEntryEvidenceIn"][];
+            /**
+             * Is Met
+             * @default false
+             */
+            is_met: boolean;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+            /** Requirement Id */
+            requirement_id: number;
+        };
+        /** ContestEntryResponseOut */
+        ContestEntryResponseOut: {
+            /** Evidence */
+            evidence: components["schemas"]["ContestEntryEvidenceOut"][];
+            /** Is Met */
+            is_met: boolean;
+            /** Note */
+            note: string;
         };
         /** ContestImageCreateIn */
         ContestImageCreateIn: {
@@ -6237,7 +6417,7 @@ export interface components {
          *     해둔다. User Story 80~89 에 나오는 유형 중 최소 집합을 담았다.
          * @enum {string}
          */
-        NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "scoring_complete" | "appeal_ruled" | "new_contest_in_category" | "payout_awaits_you" | "classroom_token_budget_warning" | "classroom_submission_scored" | "classroom_scoring_key_rejected" | "operator_notice" | "contest_updated";
+        NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "scoring_complete" | "appeal_ruled" | "new_contest_in_category" | "payout_awaits_you" | "classroom_token_budget_warning" | "classroom_submission_scored" | "classroom_scoring_key_rejected" | "classroom_contest_entry_rejected" | "operator_notice" | "contest_updated";
         /** OpenAIKeyIn */
         OpenAIKeyIn: {
             /** Api Key */
@@ -9277,6 +9457,47 @@ export interface operations {
             };
             /** @description Unprocessable Content */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_get_contest_entry_form: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+                problem_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContestEntryFormOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

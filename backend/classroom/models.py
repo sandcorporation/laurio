@@ -388,6 +388,27 @@ class ClassroomSubmission(Submission):
     #: 있게 값으로 남긴다.
     attempt_number = models.PositiveIntegerField()
 
+    class ContestEntryStatus(models.TextChoices):
+        """「공모전에도 내기」(#549, CONTEXT.md)의 결과 — 끄고 낸 시도는 빈 값이다."""
+
+        NONE = "", "내지 않음"
+        PENDING = "pending", "공모전에 내는 중"
+        ENTERED = "entered", "공모전에도 냈다"
+        REJECTED = "rejected", "공모전에는 내지 못했다"
+
+    #: 이 시도를 공모전에도 냈는가. 클래스 시도·판정과 무관하다 — 어느 쪽이든 시도는 남는다.
+    contest_entry_status = models.CharField(
+        max_length=10,
+        choices=ContestEntryStatus.choices,
+        blank=True,
+        default="",
+        db_default="",
+    )
+    #: 공모전이 받지 않았을 때 그 이유(공모전 쪽 문장 그대로).
+    contest_entry_reason = models.CharField(max_length=300, blank=True, default="", db_default="")
+    #: 결과가 정해진 때 — 강사 화면(#550)이 「지금 공모전 제출인 시도」를 가릴 때 쓴다.
+    contest_entry_resolved_at = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         ordering = ["-attempt_number"]
 
