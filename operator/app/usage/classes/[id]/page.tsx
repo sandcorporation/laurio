@@ -12,14 +12,16 @@
 //
 // 표는 `/usage` 의 날짜별 표와 같은 관례다(flex 행·열 너비 상수·짝수 행 줄무늬). 두 표
 // 모두 **표 안에서** 스크롤하고 머리 줄이 위에 붙어 있다 — 문제가 많거나 기간이 길어도
-// 지금 보는 숫자가 어느 열인지 잃지 않는다. 날짜 × 문제 표는 넓은 화면에서 날짜 열이
-// 왼쪽에(「전체」 열과 함께), 합계 줄이 아래에 붙는다.
+// 지금 보는 숫자가 어느 열인지 잃지 않는다. 날짜 × 문제 표는 날짜 열이 왼쪽에(넓은
+// 화면에서는 「전체」 열과 함께), 합계 줄이 아래에 붙는다. 틀은 공용 `TableScroll` 에 높이를
+// 묶어(`maxHeight`) 쓴다 — 붙인 머리 줄이 세로 스크롤과 같은 상자 안에 있어야 한다.
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { type ReactNode, Suspense } from "react";
 
 import { Badge } from "@/app/components/badge";
 import { PageHeader } from "@/app/components/page-header";
+import { TableScroll } from "@/app/components/table-scroll";
 import { useSession } from "@/lib/auth/use-session";
 import {
   CLASS_DETAIL_TABS,
@@ -47,14 +49,20 @@ const PROBLEM_COL = {
   failed: "w-[72px]",
 };
 
+/** 날짜 × 문제 표의 열 너비(px) — 표의 최소 너비(`TableScroll` 의 `minWidth`)를 이 합으로
+ * 잡는다. 클래스 이름은 Tailwind 가 읽을 수 있게 아래에 같은 값으로 적는다. */
+const GRID_PX = { date: 140, total: 84, problem: 104 };
 const GRID_COL = {
   date: "w-[140px]",
   total: "w-[84px]",
   problem: "w-[104px]",
 };
 
-/** 표가 화면을 넘으면 표 안에서 스크롤한다 — 머리 줄이 위에 붙어 있도록 높이를 묶는다. */
-const TABLE_SCROLL = "max-h-[68vh] overflow-auto";
+/** 표가 화면을 넘으면 표 안에서 스크롤한다 — 머리 줄이 위에 붙어 있도록 높이를 묶는다
+ * (`TableScroll` 의 `maxHeight`). */
+const TABLE_MAX_HEIGHT = "68vh";
+/** 문제별 표가 읽히는 가장 좁은 너비 — 고정 열 합(52+64+76+104+104+72) + 여백·간격 + 문제 이름. */
+const PROBLEM_TABLE_MIN_WIDTH = 720;
 const HEAD_ROW = "sticky top-0 z-10 bg-surface";
 
 const NUM = "font-mono tabular-nums";
@@ -156,8 +164,8 @@ function ProblemsPanel({ usage }: { usage: ClassUsage }) {
           채점 실패 <b className={`${NUM} font-semibold ${failed > 0 ? "text-attention" : "text-ink"}`}>{failed}</b>건
         </span>
       </div>
-      <div className={TABLE_SCROLL}>
-        <div data-testid="usage-problem-table" className="min-w-[720px]">
+      <TableScroll minWidth={PROBLEM_TABLE_MIN_WIDTH} maxHeight={TABLE_MAX_HEIGHT}>
+        <div data-testid="usage-problem-table">
           <div
             className={`${HEAD_ROW} flex items-center gap-3.5 border-b border-rule px-4 py-2.5 text-[11px] tracking-[0.06em] text-ink/30`}
           >
@@ -173,7 +181,7 @@ function ProblemsPanel({ usage }: { usage: ClassUsage }) {
             <ProblemRow key={problem.problem_id} problem={problem} index={i} />
           ))}
         </div>
-      </div>
+      </TableScroll>
       <Footnote>
         클래스가 열린 뒤 전체 기간을 센다. 채점 실패는 채점에 한 번이라도 실패한 제출의 수다.
       </Footnote>
@@ -199,8 +207,9 @@ function Cell({ submissions, submitters, testId }: { submissions: number; submit
   );
 }
 
-const DATE_CELL = `${GRID_COL.date} shrink-0 border-r border-rule bg-surface sm:sticky sm:left-0`;
-/** 「전체」 열도 날짜 열 바로 옆에 붙는다 — left 값은 날짜 열 너비(`GRID_COL.date`)와 같다. */
+const DATE_CELL = `${GRID_COL.date} sticky left-0 shrink-0 border-r border-rule bg-surface`;
+/** 날짜 열은 늘 왼쪽에 붙는다. 「전체」 열은 그 옆에 붙되 좁은 화면(sm 아래)에서는 붙이지
+ * 않는다 — 둘을 다 붙이면 문제 칸이 한 칸도 남지 않는다. left 값은 날짜 열 너비와 같다. */
 const TOTAL_CELL = `${GRID_COL.total} shrink-0 border-r border-rule bg-surface sm:sticky sm:left-[140px]`;
 
 function GridRow({ day, index }: { day: ClassUsageDay; index: number }) {
@@ -234,8 +243,12 @@ function DateByProblemTable({ usage }: { usage: ClassUsage }) {
   const total = usage.period_total;
 
   return (
-    <div data-testid="usage-grid-scroll" className={TABLE_SCROLL}>
-      <div data-testid="usage-grid-table" className="w-max min-w-full">
+    <TableScroll
+      testId="usage-grid-scroll"
+      minWidth={GRID_PX.date + GRID_PX.total + GRID_PX.problem * usage.problems.length}
+      maxHeight={TABLE_MAX_HEIGHT}
+    >
+      <div data-testid="usage-grid-table">
         <div
           className={`${HEAD_ROW} flex items-stretch border-b border-rule text-[11px] leading-[15px] tracking-[0.02em] text-ink/45`}
         >
@@ -275,7 +288,7 @@ function DateByProblemTable({ usage }: { usage: ClassUsage }) {
           ))}
         </div>
       </div>
-    </div>
+    </TableScroll>
   );
 }
 
