@@ -196,6 +196,10 @@ export type InstructorSubmissionRow = {
   // (#346) — 강사도 "학생이 안 낸 것"과 "냈는데 강사 본인이 키를 안 넣어
   // 멈춘 것"을 구별해야 한다.
   pending_reason: PendingReason;
+  // 「공모전에도 내기」로 낸 시도면 그 결과(#550). 근거·공모전 점수·수상은 없다.
+  contest_entry: AttemptContestEntry | null;
+  // 이 시도가 지금 그 공모전의 제출인가 — 켜고 낸 가장 최근 시도이고 그 뒤에 직접 고치지 않았다.
+  is_current_contest_entry: boolean;
 };
 
 

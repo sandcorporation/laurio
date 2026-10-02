@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 
 from django.db import IntegrityError, transaction
 from ninja.errors import HttpError
@@ -206,6 +207,14 @@ def entry_context(contest_id: int, user_id: int) -> ContestEntryContext | None:
         responses=responses,
         optional_assets=optional_assets,
         upload_target_refs=upload_target_refs,
+    )
+
+
+def entries_updated_at(contest_id: int, user_ids: set[int]) -> dict[int, datetime]:
+    return dict(
+        ContestSubmission.objects.filter(
+            contest_id=contest_id, developer__user_id__in=user_ids
+        ).values_list("developer__user_id", "updated_at")
     )
 
 

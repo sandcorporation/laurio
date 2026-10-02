@@ -677,6 +677,9 @@ class ClassroomGridCellOut(Schema):
     #: 셀은 강사가 직접 손대기 전까지는 절대 바뀌지 않는다
     #: (`classroom.pending_scoring.needs_setup`).
     status: str
+    #: 공모전 문제에서만(#550): "current" — 지금 그 공모전의 제출이 이 칸의 시도다,
+    #: "entered" — 공모전에도 냈었지만 지금 제출은 다른 시도·직접 고친 것이다, None — 낸 적 없다.
+    contest_entry: str | None = None
 
 
 class ClassroomGridMemberOut(Schema):
@@ -714,6 +717,12 @@ class ClassroomInstructorSubmissionOut(Schema):
     #: (#346) — 강사도 "학생이 안 낸 것"과 "냈는데 강사 본인이 키를 안 넣어
     #: 멈춘 것"을 구별해야 한다.
     pending_reason: str | None = None
+    #: 「공모전에도 내기」로 낸 시도면 그 결과(#549·#550), 아니면 None. 근거·공모전 점수·수상
+    #: 여부는 공모전 쪽의 것이라 실리지 않는다.
+    contest_entry: ClassroomContestEntryOut | None = None
+    #: 이 시도가 지금 그 공모전의 제출인가(#550) — 켜고 낸 가장 최근 시도이고 그 뒤에 직접
+    #: 고치지 않았다.
+    is_current_contest_entry: bool = False
 
 
 class ClassroomProblemListItemOut(Schema):

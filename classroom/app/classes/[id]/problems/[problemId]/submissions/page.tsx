@@ -26,6 +26,7 @@ import { useClass } from "@/lib/classes/use-class";
 import { useProblem } from "@/lib/problems/use-problem";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { useProblemSubmissions } from "@/lib/submissions/use-problem-submissions";
+import { instructorEntryBadge } from "@/lib/submissions/contest-entry";
 
 export default function ProblemSubmissionsPage() {
   const params = useParams<{ id: string; problemId: string }>();
@@ -193,6 +194,15 @@ export default function ProblemSubmissionsPage() {
                         </Badge>
                       </span>
                     )}
+
+                    {(() => {
+                      const entry = instructorEntryBadge(submission);
+                      return entry ? (
+                        <span data-testid={`instructor-submission-row-${submission.id}-contest-entry`}>
+                          <Badge tone={entry.tone}>{entry.label}</Badge>
+                        </span>
+                      ) : null;
+                    })()}
 
                     <span className="ml-auto shrink-0">
                       {submission.submission_format === "repository" ? (

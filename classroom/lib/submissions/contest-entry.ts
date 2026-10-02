@@ -120,3 +120,29 @@ export function attemptEntryLabel(entry: { status: string; reason: string }): st
   if (entry.status === "pending") return "공모전에 내는 중";
   return entry.reason ? `공모전에는 내지 못했습니다 — ${entry.reason}` : "공모전에는 내지 못했습니다";
 }
+
+// --- 강사가 보는 표시 (#550) ---------------------------------------------------
+// 강사에게는 「냈는지와 어느 시도인지」만 보인다 — 근거·공모전 점수·수상은 공모전 쪽의 것이다.
+
+export type InstructorEntryBadge = { label: string; tone: "verified" | "neutral" | "attention" };
+
+/** 제출 현황의 시도 한 줄에 다는 표시. 공모전에 내지 않은 시도면 null. */
+export function instructorEntryBadge(row: {
+  contest_entry: { status: string } | null;
+  is_current_contest_entry: boolean;
+}): InstructorEntryBadge | null {
+  if (row.contest_entry === null) return null;
+  if (row.is_current_contest_entry) return { label: "지금 공모전 제출", tone: "verified" };
+  if (row.contest_entry.status === "entered") return { label: "공모전에도 냈음", tone: "neutral" };
+  if (row.contest_entry.status === "pending") return { label: "공모전에 내는 중", tone: "neutral" };
+  return { label: "공모전에는 못 냄", tone: "attention" };
+}
+
+export type GridContestEntry = "current" | "entered" | null;
+
+/** 명단 격자 한 칸의 공모전 표시 문구 — 칸의 title·aria-label 에 덧붙인다. */
+export function gridEntryLabel(entry: GridContestEntry): string | null {
+  if (entry === "current") return "지금 공모전 제출인 시도가 있음";
+  if (entry === "entered") return "공모전에도 냈었음(지금 제출은 다른 시도)";
+  return null;
+}

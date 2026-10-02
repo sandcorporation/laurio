@@ -4760,6 +4760,8 @@ export interface components {
         };
         /** ClassroomGridCellOut */
         ClassroomGridCellOut: {
+            /** Contest Entry */
+            contest_entry?: string | null;
             /** Problem Id */
             problem_id: number;
             /** Status */
@@ -4788,6 +4790,7 @@ export interface components {
         ClassroomInstructorSubmissionOut: {
             /** Attempt Number */
             attempt_number: number;
+            contest_entry?: components["schemas"]["ClassroomContestEntryOut"] | null;
             /**
              * Created At
              * Format: date-time
@@ -4797,6 +4800,11 @@ export interface components {
             download_url?: string | null;
             /** Id */
             id: number;
+            /**
+             * Is Current Contest Entry
+             * @default false
+             */
+            is_current_contest_entry: boolean;
             /** Member Display Name */
             member_display_name: string;
             /** Member Id */

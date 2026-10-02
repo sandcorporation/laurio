@@ -94,6 +94,18 @@ def _get_roster_grid(grant: ConnectedApp, arguments: dict) -> dict:
     return _as_screen_json(_build_roster_grid(class_obj))
 
 
+#: 명단 격자·참여자 리포트가 함께 쓰는 「공모전에도 냈다」 칸(#550).
+CONTEST_ENTRY_CELL_SCHEMA = {
+    "type": ["string", "null"],
+    "enum": ["current", "entered", None],
+    "description": (
+        "공모전 문제에서만 — current: 지금 그 공모전의 제출이 이 칸의 시도다, entered: 공모전에도 "
+        "냈었지만 지금 제출은 다른 시도·직접 고친 것이다, null: 낸 적 없다. 근거·공모전 점수·수상은 "
+        "알려 주지 않는다"
+    ),
+}
+
+
 # --- 입력·출력 모양 ----------------------------------------------------------------
 
 _CLASS_ID = {"type": "integer", "description": "클래스 번호(내 클래스 목록의 id)"}
@@ -354,6 +366,7 @@ READ_TOOL_SPECS: list[dict] = [
                                                 "not_submitted",
                                             ],
                                         },
+                                        "contest_entry": CONTEST_ENTRY_CELL_SCHEMA,
                                     },
                                     "required": ["problem_id", "status"],
                                 },

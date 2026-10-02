@@ -93,3 +93,6 @@ class ContestClassroomCatalog:
 
     def check_entry(self, entry: ContestEntry) -> str | None:
         return classroom_entries.check_entry(entry)
+
+    def entries_updated_at(self, contest_id: int, user_ids: set[int]) -> dict[int, datetime]:
+        return classroom_entries.entries_updated_at(contest_id, user_ids)
