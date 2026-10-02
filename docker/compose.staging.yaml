@@ -224,9 +224,10 @@ x-backend-env: &backend-env
   # 것이라 없어도 부팅을 막지 않는다(ADR-0027 — read-only 토큰을 받지 않는다는
   # 결정은 참가자 자격증명 이야기이지 이 값과는 다른 층위다).
   GITHUB_API_TOKEN: ${GITHUB_API_TOKEN:-}
-  # 소스 변환 플러그인(#496) — Packet Tracer(#497)는 Cisco 약관 검토(#498)가 끝나기
-  # 전까지 끈다. 빈 문자열이 「빈 목록」이다(config/settings.py 의 SOURCE_CONVERTERS).
-  SOURCE_CONVERTERS: ""
+  # 소스 변환 플러그인(#496) — Packet Tracer(#497)를 켠다(#498: 사용자 판단, 약관에
+  # 면책 조항을 두고 켠다 — docs/legal/contracts-and-ip.md 열린 항목 13). staging 에서
+  # 실제 .pkt 채점을 확인한 뒤 prod 를 켠다. 끄려면 빈 문자열("")로 둔다.
+  SOURCE_CONVERTERS: core.source_converters.packet_tracer.PacketTracerConverter
 
   # --- 알림 채널 어댑터 (ADR-0007/0009) ---
   # 코디네이터 리뷰 지적: 여기 존재하지 않는 클래스 이름(RealAlimtalkAdapter 등)을
