@@ -58,10 +58,13 @@ Operator 계정은 `backend/accounts/management/commands/seed_e2e_operator.py`
 cd <worktree>
 ./scripts/dev-server.sh start backend        # 포트를 출력한다
 CODEMIT_API_BASE_URL=http://127.0.0.1:<그 포트> ./scripts/dev-server.sh start front
-CODEMIT_E2E_BASE_URL=http://127.0.0.1:<앱 포트> CODEMIT_E2E_NAMESPACE=c2 \
-  pnpm exec playwright test --project=public
+# … 브라우저로 걷는다 …
 ./scripts/dev-server.sh stop-all
 ```
+
+e2e 스펙을 워크트리 코드로 돌릴 때는 `scripts/test.sh e2e <파일>` 이다 — 이 워크트리로 구운
+프로덕션 이미지 스택을 따로 띄운다. **`playwright test` 를 바로 치면 설정 파일이 거절한다**
+(2026-10-02, `CODEMIT_TEST_ENTRY` — 백엔드 pytest 도 같다).
 
 `STORAGE_BACKEND=s3` 는 도구가 알아서 준다 — dev compose 의 backend 가 그렇게 뜨기
 때문이다(업로드 e2e 가 실물 MinIO 를 쳐야 한다). 빼면 업로드 스펙만 갈린다.
@@ -81,8 +84,7 @@ CODEMIT_E2E_BASE_URL=http://127.0.0.1:<앱 포트> CODEMIT_E2E_NAMESPACE=c2 \
 
 ```bash
 cd <worktree>
-./scripts/dev-server.sh start front          # baseURL 을 출력한다
-CODEMIT_E2E_BASE_URL=http://127.0.0.1:<그 포트> pnpm exec playwright test --project=public
+./scripts/dev-server.sh start front          # 주소를 출력한다 — 브라우저로 걷는다
 ./scripts/dev-server.sh stop-all             # 끝나면 반드시
 ```
 
@@ -109,6 +111,9 @@ CODEMIT_E2E_BASE_URL=http://127.0.0.1:<그 포트> pnpm exec playwright test --p
 **로컬 시험의 입구는 `scripts/test.sh` 하나다**(2026-10-02, web-rpg 의 `deploy/test.sh` 와
 같은 방식). `scripts/test.sh backend [pytest 인자]` · `scripts/test.sh e2e [playwright 인자]`.
 
+- **다른 길은 막혀 있다**(2026-10-02) — 스크립트가 칸을 잡은 뒤 `CODEMIT_TEST_ENTRY` 를 내보내고,
+  그 표식이 없으면(`CI` 도 없으면) `backend/tests/conftest.py`·`frontend/playwright.config.ts` 가
+  시작 전에 거절한다. 바로 친 `uv run pytest` 는 `-n auto` 로 코어를 전부 썼다.
 - **기계 전체에서 동시에 둘까지 돈다** — 셋째는 빈 칸을 기다린다(`/tmp/codemit-test-slots`
   의 flock, 워크트리가 달라도 같은 칸을 센다). 이 머신은 여러 에이전트와 다른 프로젝트가
   나눠 쓴다.

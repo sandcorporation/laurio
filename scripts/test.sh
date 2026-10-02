@@ -62,6 +62,8 @@ done
 first=$(((slot - 1) * CPUS % NCPU))
 CPUSET="$first-$((first + CPUS - 1))"
 echo "시험 칸 $slot — 코어 $CPUSET (호스트 ${NCPU}코어의 1/3)"
+# conftest·playwright.config 가 이 표식이 없는 로컬 실행을 거절한다 — 칸을 건너뛴 실행을 막는다.
+export CODEMIT_TEST_ENTRY="scripts/test.sh 칸 $slot"
 
 case "$kind" in
   backend)
