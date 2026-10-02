@@ -25,6 +25,7 @@ import { isGradingGuidelineValid, type GradingGuidelineValue } from "@/app/compo
 import { MarkdownEditor } from "@/app/components/MarkdownEditor";
 import { ProblemParticipantView } from "@/app/components/ProblemParticipantView";
 import { ProblemSettingsForm } from "@/app/components/ProblemSettingsForm";
+import { ContestPickerSheet } from "@/app/components/ContestPickerSheet";
 import { TemplatePickerSheet } from "@/app/components/TemplatePickerSheet";
 import { useClass } from "@/lib/classes/use-class";
 import { checkPublicTextForBannedWords } from "@/lib/moderation/public-text-check";
@@ -72,6 +73,8 @@ export default function NewProblemPage() {
   // 나면 이 화면(빈 초안 폼)은 더 볼 일이 없다 — 가져온 문제의 편집
   // 화면으로 곧장 보낸다.
   const [pickerOpen, setPickerOpen] = useState(false);
+  // 「공모전에서 들여오기」(#548) — 템플릿과 같은 자리, 들여온 뒤 그 문제의 편집 화면으로 간다.
+  const [contestPickerOpen, setContestPickerOpen] = useState(false);
 
   function handleImported(problem: ProblemRow) {
     router.push(`/classes/${classId}/problems/${problem.id}`);
@@ -219,6 +222,24 @@ export default function NewProblemPage() {
             className={buttonClass("secondary")}
           >
             템플릿에서 가져오기
+          </button>
+        </div>
+
+        <div className="flex items-center justify-between gap-4 border border-rule bg-surface p-4">
+          <div>
+            <p className="text-[14px] font-semibold">공모전에서 들여오기</p>
+            <p className="mt-1 text-[12px] leading-relaxed text-ink/60">
+              개최자가 허용한 무료 공모전을 문제로 씁니다. 참여자는 낸 풀이를 그 공모전에도 낼 수
+              있습니다 — 제목·설명·체크리스트는 공모전을 따라갑니다.
+            </p>
+          </div>
+          <button
+            type="button"
+            data-testid="open-contest-picker"
+            onClick={() => setContestPickerOpen(true)}
+            className={buttonClass("secondary")}
+          >
+            공모전 고르기
           </button>
         </div>
 
@@ -525,6 +546,14 @@ export default function NewProblemPage() {
         <TemplatePickerSheet
           classId={classId}
           onClose={() => setPickerOpen(false)}
+          onImported={handleImported}
+        />
+      ) : null}
+
+      {contestPickerOpen ? (
+        <ContestPickerSheet
+          classId={classId}
+          onClose={() => setContestPickerOpen(false)}
           onImported={handleImported}
         />
       ) : null}

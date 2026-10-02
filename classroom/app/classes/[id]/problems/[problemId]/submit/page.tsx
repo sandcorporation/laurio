@@ -169,6 +169,7 @@ export default function ProblemSubmitPage() {
         // 뒤에는 참여자와 똑같이 자기 결과를 본다.
         passed={viewingAsInstructor && submissions.length === 0 ? undefined : problem.passed}
         description={problem.description}
+        instructorNote={problem.instructor_note}
         checklistItems={problem.checklist_items}
         syntaxCheckEnabled={problem.syntax_check_enabled}
         gradingStrictness={problem.grading_strictness}

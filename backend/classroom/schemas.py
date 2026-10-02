@@ -231,6 +231,8 @@ class ProblemPatchIn(Schema):
     #: 필드를 생략하면(`None`) 바꾸지 않는다. 보내면 그 값으로 켜고 끈다
     #: (#410) — 켜고 꺼도 이미 매긴 판정은 바뀌지 않는다(ADR-0006).
     syntax_check_enabled: bool | None = None
+    #: 공모전 문제의 수업용 안내(#548). 공모전 문제가 아니면 422다.
+    instructor_note: str | None = Field(default=None, max_length=5000)
 
 
 class ProblemTransitionOut(Schema):
@@ -246,6 +248,29 @@ class ProblemTransitionOut(Schema):
     #: `None`이면 지금 바로 부를 수 있다. 아니면 "archived"(클래스가
     #: 보관됨) | "no_required_item"(필수 체크리스트 항목이 하나도 없음).
     blocked_reason: str | None = None
+
+
+class ProblemContestOut(Schema):
+    """공모전 문제가 따라가는 공모전의 지금 상태(#548) — 강의실은 공모전 앱을 모르므로
+    공유층 카탈로그가 답한 것만 싣는다."""
+
+    contest_id: int
+    #: 지금 「공모전에도 내기」를 받는가 — 공개 중 · 마감 전 · 개최자가 허용 중.
+    accepts_entries: bool
+    deadline_at: datetime | None = None
+
+
+class ImportableContestOut(Schema):
+    """들여올 수 있는 무료 공모전 한 줄(#548)."""
+
+    contest_id: int
+    title: str
+    deadline_at: datetime
+    requirement_count: int
+
+
+class ImportContestIn(Schema):
+    contest_id: int
 
 
 class ProblemOut(Schema):
@@ -309,6 +334,10 @@ class ProblemOut(Schema):
     #: 화면은 이 목록으로 열기·숨기기·다시 열기 버튼을 그리고, 화면 안에서
     #: 상태별 버튼을 다시 계산하지 않는다.
     available_transitions: list[ProblemTransitionOut] = []
+    #: 공모전 문제면 그 공모전의 지금 상태(#548), 아니면 None.
+    contest: ProblemContestOut | None = None
+    #: 공모전 문제의 수업용 안내(#548).
+    instructor_note: str = ""
 
 
 class ProblemReorderIn(Schema):
@@ -388,6 +417,10 @@ class ClassroomProblemMineOut(Schema):
     title: str
     description: str
     submission_formats: list[str]
+    #: 공모전 문제면 그 공모전의 지금 상태(#548), 아니면 None.
+    contest: ProblemContestOut | None = None
+    #: 공모전 문제의 수업용 안내(#548).
+    instructor_note: str = ""
     #: 채점 지침 단계(#388, CONTEXT.md 「채점 지침」) — 참여자도 어떤 기준으로
     #: 판정되는지 알고 제출해야 한다(#385 User Story 18).
     grading_strictness: str

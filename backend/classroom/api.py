@@ -34,6 +34,7 @@ from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
 from accounts.models import SocialAccount
+from core.contest_catalog import contest_catalog
 from core.crypto import encrypt
 from core.events import Event, EventBusDisconnected, get_event_bus
 from core.llm_scoring import LLMKeyCheckStatus
@@ -51,9 +52,13 @@ from .models import (
     Problem,
     ProblemTemplate,
 )
+from .contest_problems import contest_state, import_contest_problem
 from .schemas import (
     ChecklistItemIn,
     ChecklistItemOut,
+    ImportableContestOut,
+    ImportContestIn,
+    ProblemContestOut,
     ChecklistItemPatchIn,
     ChecklistReorderIn,
     ClassIn,
@@ -304,7 +309,14 @@ def _serialize_problem(
             ProblemTransitionOut(name=t.name, to_state=t.to_state, blocked_reason=t.blocked_reason)
             for t in available_transitions(problem, class_obj)
         ],
+        contest=_contest_out(problem),
+        instructor_note=problem.instructor_note,
     )
+
+
+def _contest_out(problem: Problem) -> ProblemContestOut | None:
+    state = contest_state(problem)
+    return ProblemContestOut(**state) if state is not None else None
 
 
 def _serialize_problem_mine(problem: Problem, *, passed: bool = False) -> ClassroomProblemMineOut:
@@ -314,6 +326,8 @@ def _serialize_problem_mine(problem: Problem, *, passed: bool = False) -> Classr
         title=problem.title,
         description=problem.description,
         submission_formats=problem.submission_formats,
+        contest=_contest_out(problem),
+        instructor_note=problem.instructor_note,
         grading_strictness=problem.grading_strictness,
         grading_guideline_text=problem.grading_guideline_text,
         syntax_check_enabled=problem.syntax_check_enabled,
@@ -1068,6 +1082,42 @@ def reorder_problems(request: HttpRequest, class_id: int, payload: ProblemReorde
         )
         for p in ordered
     ]
+
+
+@router.get(
+    "/classes/{class_id}/importable-contests",
+    response={200: list[ImportableContestOut], 404: ErrorOut},
+    auth=jwt_auth,
+)
+def list_importable_contests(request: HttpRequest, class_id: int):
+    """새 문제 화면의 「공모전에서 들여오기」(#548) — 개최자가 「클래스에서 들여오기」를 허용한
+    공개 중 · 마감 전 무료 공모전. 강의실은 공모전 앱을 모르므로 공유층 카탈로그가 답한다
+    (ADR-0054)."""
+
+    class_scope(class_id, request.auth_user.id, write=False)
+    return 200, [
+        ImportableContestOut(
+            contest_id=c.contest_id,
+            title=c.title,
+            deadline_at=c.deadline_at,
+            requirement_count=c.requirement_count,
+        )
+        for c in contest_catalog().list_importable()
+    ]
+
+
+@router.post(
+    "/classes/{class_id}/problems/from-contest",
+    response={201: ProblemOut, 404: ErrorOut, 422: ErrorOut},
+    auth=jwt_auth,
+)
+def import_contest_as_problem(request: HttpRequest, class_id: int, payload: ImportContestIn):
+    """허용된 무료 공모전을 「공모전 문제」 초안으로 들여온다(#548, CONTEXT.md). 제목·설명·
+    체크리스트는 그 공모전을 따라간다. 들여올 수 없으면(마감·허용 안 함·없음) 422."""
+
+    class_obj = class_scope(class_id, request.auth_user.id, write=True).class_obj
+    problem = import_contest_problem(class_obj, payload.contest_id)
+    return 201, _serialize_problem(problem, class_obj)
 
 
 @router.get(

@@ -251,6 +251,14 @@ class Problem(models.Model):
     #: 문제에서는 강사가 끌 수 있다(#410).
     syntax_check_enabled = models.BooleanField(default=True)
 
+    #: 「공모전 문제」라면 그 무료 공모전의 번호(#548, ADR-0054). FK 가 아니다 — 강의실은
+    #: 공모전 앱을 임포트하지 못하므로(ADR-0037) 원본은 `core.contest_catalog` 로 읽는다.
+    #: 이 칸이 있으면 제목·설명·체크리스트가 그 공모전을 따라가고 강사는 고치지 못한다.
+    contest_id = models.PositiveBigIntegerField(null=True, blank=True)
+    #: 강사가 공모전 문제에 덧붙이는 수업용 안내(#548) — 설명을 고치지 못하는 대신 쓰는 칸.
+    #: db_default: 겹쳐 바꾸는 배포 동안 옛 코드의 INSERT 가 이 칸을 빼먹어도 된다(ADR-0053).
+    instructor_note = models.TextField(blank=True, default="", db_default="")
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -401,9 +409,13 @@ class ChecklistItem(models.Model):
     """
 
     problem = models.ForeignKey(Problem, related_name="checklist_items", on_delete=models.CASCADE)
-    label = models.CharField(max_length=200)
+    #: 500 — 공모전 문제의 항목은 공모전 Requirement 문구(최대 500자)를 그대로 옮긴다(#548).
+    label = models.CharField(max_length=500)
     required = models.BooleanField(default=True)
     order = models.PositiveIntegerField(default=0)
+    #: 공모전 문제의 항목이면 따라가는 Requirement 의 번호(#548) — 원본이 바뀔 때 어느 항목을
+    #: 고칠지 이 번호로 찾는다. 강사가 직접 만든 항목은 비어 있다.
+    contest_requirement_id = models.PositiveBigIntegerField(null=True, blank=True)
 
     class Meta:
         ordering = ["order", "id"]
