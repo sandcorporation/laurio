@@ -6,7 +6,7 @@ Next.js + React. 저장소 루트가 pnpm 워크스페이스다(운영자 앱 04
 락파일은 루트의 `pnpm-lock.yaml` 하나뿐이고, 공개 앱(`frontend/`, 위치·패키지 이름
 변경 없음)·운영자 앱(`operator/`)·강의실 앱(`classroom/`, #276)·공유 패키지 셋이
 그 멤버다 — `packages/bff-shared`(서버 쪽: 경로 순회 방어·Origin 검증·허용목록 검사
-함수·백엔드 전달 기계. 허용목록의 **내용**은 앱마다 자기 파일에 남는다),
+함수·백엔드 전달 기계. 허용목록의 **내용**은 앱마다 자기 파일에 남는다, ADR-0021),
 `packages/bff-client`(브라우저 쪽, #146: 인증 구역 호출의 클라이언트·`ApiResult`·
 `normalizeDetail`·`useBackendQuery`/`usePagedList`·생성 타입 `schema.gen.ts` — **강의실도
 이제 이 패키지를 쓴다**(#462). 손으로 다시 쓴 클라이언트(`lib/backend/client.ts`)와
@@ -21,8 +21,7 @@ Next.js + React. 저장소 루트가 pnpm 워크스페이스다(운영자 앱 04
 `packages/route-audit`(#166)도 멤버지만 화면 코드는 아니다. 명령은 그대로다 — 워크스페이스가 생겨도 `pnpm --dir <앱>` 호출법은
 바뀌지 않는다.
 
-테스트 시임은 **앱마다 하나**다(ADR-0021, ADR-0017 개정) — 앱이 셋(#276부터 강의실이
-더해졌다)이어도 그 아래로 내려가는 컴포넌트 테스트·모킹은 없다. `docker compose -f
+테스트 시임은 **앱마다 하나**다(ADR-0021·0026). `docker compose -f
 docker/compose.dev.yaml up` 으로 세 앱이 다 뜬 스택을 띄운 뒤 `pnpm --dir frontend test`
 로 Playwright 가 프로젝트 셋으로 세 앱을 한 번에 친다(공개 앱 스펙은
 `frontend/e2e/*.spec.ts`, 운영자 앱 스펙은 `frontend/e2e/operator/*.spec.ts`, 강의실
@@ -43,10 +42,8 @@ dev(localhost, 포트로 앱을 가른다)에서 재현할 수 없고, 실제 �
 아니라 공개 앱도 띄운다** — 빼면 그 헬퍼가 `ECONNREFUSED 127.0.0.1:53000` 으로 죽는다
 (#318 이 그 스펙을 더한 뒤 main 에서 여섯 번 연속 그렇게 빨갛게 났다).
 
-**운영자 앱은 인증의 모양이 다르다**(#63, ADR-0018/0019). 공개 앱은 쿠키의 JWT를
-`Authorization` 헤더로 바꿔 달지만, 운영자 앱은 Django 세션 쿠키
-(`codemit_operator_session`, `backend/config/settings.py`)를 이름으로만 골라
-중계한다 — 브라우저의 Cookie 헤더를 통째로 넘기지 않는다. e2e 가 로그인할
+**운영자 앱은 인증의 모양이 다르다**(#63, ADR-0016·0018·0019) — 세션 쿠키 이름은
+`codemit_operator_session`(`backend/config/settings.py`)이다. e2e 가 로그인할
 Operator 계정은 `backend/accounts/management/commands/seed_e2e_operator.py`
 (멱등)로 만든다 — 사람이 쓰는 `create_operator` 부트스트랩 명령과 달리 반복
 실행에 안전하다.
@@ -180,14 +177,10 @@ CODEMIT_E2E_BASE_URL=http://127.0.0.1:<그 포트> pnpm exec playwright test --p
 
 ## 남길 것 — ADR-0017 의 세 위험 + 핵심 흐름
 
-ADR-0017 은 프론트에만 있는 위험을 셋으로 못 박았다. 여기 해당하면 **반드시** 남긴다:
-
-1. **공개 페이지가 실제로 서버 렌더링되는가** — JS 를 끈 HTML 에 백엔드 값이 있는가.
-   페이지 하나에 `"use client"` 가 붙는 것만으로 조용히 깨진다.
-2. **인증 구역이 실제로 막히는가** — 미들웨어 가드. 다만 이것은 `matcher` 하나에 걸린
-   함수 하나라, **전용 스펙에서 한 번만** 본다. 화면마다 반복하지 않는다.
-3. **프록시 허용목록과 Origin 검증이 실제로 막는가** — 뚫리면 ADR-0016 이 무효다.
-   백엔드에 대응 테스트가 **없다**.
+ADR-0017 의 세 위험(공개 페이지 SSR·인증 구역 가드·프록시 허용목록과 Origin 검증)에
+해당하면 **반드시** 남긴다. 다만 가드는 `matcher` 하나에 걸린 함수 하나라 **전용 스펙에서
+한 번만** 본다 — 화면마다 반복하지 않는다. 허용목록·Origin 검증은 백엔드에 대응 테스트가
+**없다**.
 
 그 밖에는 **핵심 흐름**만 남긴다: **돈이 움직이거나 보안이 새는 곳**(결제·지급·이의
 심판과 원장·탈퇴·소스 열람)과 **앱마다 유저스토리 한 벌**.

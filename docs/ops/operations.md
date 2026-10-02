@@ -3,15 +3,14 @@
 `CLAUDE.md` 의 부록이다 — 거기서 앵커로 가리키고, 같은 「지금」을 말한다.
 
 **Django admin 은 없다**(#46, ADR-0019). `/admin/` 은 마운트되지 않고 각 앱의
-`admin.py` 도 없다 — admin 은 모델 행을 직접 편집할 수 있어서, `Appeal`·
-`AppealRuling` 을 그 화면에서 고칠 수 있는 한 감사 추적에 우회로가 남는다.
+`admin.py` 도 없다.
 
 사람이 판단하는 행위는 `/api/operator/*` 로만 한다. 그 API 에는 이제 화면이 있다
 (`operator/`, #63) — 이의 심판·지급·정책·산출물 종류·카테고리(#231)·무료 공모전
 개최 권한(#414, ADR-0048)·운영자 계정이 각각 한 화면씩이다. 화면이 없는 조작만
 운영자가 HTTP 로 직접 친다.
 
-개발 중 데이터를 훑던 수단도 함께 사라졌다. 대신 이렇게 한다:
+데이터는 이렇게 훑는다:
 
 ```bash
 cd backend && uv run python manage.py shell      # ORM 으로 조회
@@ -30,8 +29,7 @@ docker compose -f docker/compose.dev.yaml exec db psql -U codemit -d codemit
 pg_restore --clean --if-exists --no-owner -h <host> -U codemit -d codemit codemit-YYYYMMDD-HHMMSS.dump
 ```
 
-첫 Operator 는 관리 명령으로 만든다 — 계정 관리 화면이 없기 때문이다.
-`createsuperuser` 는 쓰지 않는다(Operator 와 참가자가 서로소라는 불변식을 모른다):
+첫 Operator 는 관리 명령으로 만든다 — `createsuperuser` 는 쓰지 않는다(ADR-0018·0019):
 
 ```bash
 cd backend && uv run python manage.py create_operator <아이디> --superuser

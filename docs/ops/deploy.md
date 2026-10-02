@@ -22,8 +22,7 @@
 저장소 밖의 수작업으로 있어야 실제로 열린다 — storage.honeycombpizza.link의 버킷 생성과
 같은 종류의 바깥 작업이다). **그 MinIO 안에 버킷이 둘이다**(#233, ADR-0032) — 제출물이 사는
 비공개 버킷과, 공모전 이미지만 사는 **익명 읽기 버킷**(`codemit-staging-public-images`)이다.
-서버가 아니라 버킷을 가른다: 공개 읽기 정책이 버킷 단위라 이미지 쪽 설정을 잘못해도
-소스에 닿지 못한다. 버킷 생성·정책·CORS 는 이 저장소 밖의 수작업이다. 어댑터가 전부
+버킷 생성·정책·CORS 는 이 저장소 밖의 수작업이다. 어댑터가 전부
 실물 구현이다: `PortOneV2VerificationAdapter`(#85) ·
 `TossPGAdapter`(#87) · `TossPayoutAdapter`·`TossSellerAdapter`(#57) ·
 `OpenAIScoringAdapter`(#88) · `OpenAIRequirementChatAdapter` ·
@@ -36,9 +35,7 @@
 각 dotted path 는 `docker/staging.env.example` 에 그대로 적혀 있다.
 
 **staging·prod는 공모전 켜짐·유료 공모전 꺼짐이다**(#271/#413, ADR-0037을
-ADR-0048이 amend). 처음에는 공모전을 통째로 껐지만(방향이 강의실로 틀어져서),
-이제 돈을 다루지 않는 **무료 공모전**만 다시 열었다 — 결제·본인확인·환불·배분·
-지급·인수인계 같은 유료 경로는 여전히 운영하지 않는다. 그래서 스위치가 둘이다:
+ADR-0048이 amend). 스위치가 둘이다:
 
 - **공모전** — `CODEMIT_CONTEST_PRODUCT_ENABLED`(기본값 켜짐, `CODEMIT_DEPLOYMENT_
   TARGET`과 무관한 독립 값). staging·prod도 이제 기본 켜짐이다(dev·CI는 원래부터
@@ -48,8 +45,7 @@ ADR-0048이 amend). 처음에는 공모전을 통째로 껐지만(방향이 강�
   겹쳐 쓴다 — dev·CI는 건드리지 않으므로 둘 다 켜진 채다(기존 유료 공모전
   테스트가 계속 초록인 이유).
 
-코드도 데이터도 하나도 지우지 않았다 — Score의 PROTECT 때문에 지울 수도 없고(아래
-「테스트」 절의 「채점이 한 번 돈 뒤에는」), 닫는 것은 표면뿐이다:
+코드도 데이터도 지우지 않았다(ADR-0048) — 닫는 것은 표면뿐이다:
 
 - **백엔드가 거절한다(진짜 문).** 공모전 스위치가 꺼지면 목록·상세·홈 큐레이션·
   내가 개최한 목록·조회수 기록, Contest 수정, 요구사항 AI grill, 공모전 이미지가
@@ -84,8 +80,7 @@ ADR-0048이 amend). 처음에는 공모전을 통째로 껐지만(방향이 강�
 `STAGING_`/`PROD_CODEMIT_PAID_CONTEST_PRODUCT_ENABLED` 도 `true` 로 바꾼 뒤 CI 를 다시
 돌려 배포한다 — frontend 는 그 값을 빌드 인자로 굽고, 굽는 곳이 CI 라 원본이 저장소
 변수다(아래 「이미지는 CI 가 굽는다」, `docker/frontend.Dockerfile`). ADR을 새로 쓰지 않는다 — 되돌리기가 환경변수 한
-줄이라 「되돌리기 어렵다」에 해당하지 않는다(방향 전환 자체의 근거는 ADR-0037·
-ADR-0048에 있다).
+줄이다(ADR-0037·ADR-0048).
 
 **그래도 가드는 그대로다.** `core.adapters.check_adapter_mode`(`django.core.checks` 로
 등록되어 `django.setup()` 이후 `manage.py migrate`/`check`/`runserver` 부팅 파이프라인에서
@@ -302,8 +297,7 @@ OpenSearch 이미지 자체만 바뀐다. `docker/pgbouncer.Dockerfile`·`docker
 
 **이벤트 서비스가 없어도 배포는 실패로 끝나지 않는다 — 다만 헬스 체크는 있다.**
 `events` 는 `backend`·`celery-worker`·`celery-beat` 와 같은 무게로 받고 바꿔
-끼우지만, 그 프로세스가 죽으면 강의실 화면만 폴링으로 물러난다(ADR-0046 결과 —
-스트림은 진실의 출처가 아니다). 그래도 `deploy.sh` 는 다른 서비스와 똑같이
+끼우지만, 그 프로세스가 죽으면 강의실 화면만 폴링으로 물러난다(ADR-0046). 그래도 `deploy.sh` 는 다른 서비스와 똑같이
 `/api/health` 로 응답을 확인한다 — 옛 코드가 조용히 계속 도는 것과, 프로세스가
 아예 죽어 있는 것은 다른 문제이고 후자는 배포 실패로 다뤄야 하기 때문이다.
 

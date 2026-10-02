@@ -5,8 +5,7 @@
 **이벤트 서비스는 `backend`와 같은 이미지를 ASGI로 띄우는 별도 프로세스다**
 (ADR-0046) — 강의실이 새로고침 없이 화면을 갱신하는 SSE 엔드포인트
 (`/api/classroom/events/stream`) 하나만 연다. 기존 API(`backend`)는 그대로
-동기 gunicorn/`runserver`다 — SSE 연결 하나가 그 워커 풀을 붙잡지 않게
-스트림만 갈랐다. 강의실 BFF는 이 경로만 `CODEMIT_EVENTS_BASE_URL`
+동기 gunicorn/`runserver`다. 강의실 BFF는 이 경로만 `CODEMIT_EVENTS_BASE_URL`
 (`classroom/lib/auth/backend.ts`)로 이 서비스에 보내고 나머지는 전부
 `backend`로 보낸다. 신호 자체는 `EVENT_BUS_ADAPTER_MODE`(dev·CI 기본값
 `core.events_redis.RedisEventBus`, pytest 기본값은 `fake`)가 고르는 Redis
@@ -35,9 +34,8 @@ celery-beat와 같은 `x-backend-env`(STORAGE_*·PAYMENT_* 등 이 프로세스�
 전체)에 대해 버퍼링을 끄고, 유휴 연결을 짧게 끊지 않도록 타임아웃도 넉넉히
 잡아야 한다 — storage.honeycombpizza.link의 버킷 생성과 같은 종류의 저장소 밖
 수작업이다(위 「staging 은 떠 있다」의 TLS 종단 프록시 문단 참고). 설정을
-잊으면 강의실 실시간 갱신이 "가끔 늦게 온다" 또는 "아예 안 온다"로 보이고,
-화면은 스트림이 끊기거나 막히면 폴링으로 물러나도록 설계돼 있어 기능 자체가
-멈추지는 않는다(ADR-0046 결과 — "신호는 진실의 출처가 아니다").
+잊으면 강의실 실시간 갱신이 "가끔 늦게 온다" 또는 "아예 안 온다"로 보인다 —
+화면이 폴링으로 물러나 기능 자체는 멈추지 않는다(ADR-0046).
 
 **이벤트 서비스의 ASGI 진입점이 lifespan 을 직접 받는다**(2026-09-16,
 `backend/config/asgi.py`). Django 의 ASGI 핸들러는 HTTP 가 아닌 scope 를 보면
