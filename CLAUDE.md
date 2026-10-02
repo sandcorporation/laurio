@@ -1565,6 +1565,8 @@ docker build -f docker/operator.Dockerfile --target runner -t y .
 `operator/`·`classroom/` 에는 아직 `public/` 이 없다 — 생기면 같은 줄을 그 Dockerfile
 에도 더한다.
 
+**세 앱의 프로덕션 빌드는 Turbopack 이고, 그래서 지우면 안 되는 의존성이 둘 있다** → [`docs/ops/next-build.md`](docs/ops/next-build.md).
+
 **API 타입은 손으로 쓰지 않는다.** `packages/bff-client/src/schema.gen.ts` 는
 `pnpm --dir frontend generate:api`(`packages/bff-client/scripts/generate-api-types.mjs`)가
 백엔드의 OpenAPI 스키마에서 생성해 커밋한 산출물이다. 이 명령은 **스택이 필요

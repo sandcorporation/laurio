@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --port 3000",
-    "build": "next build",
+    "build": "next build --turbopack",
     "start": "next start --port 3000",
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run",
@@ -20,10 +20,12 @@
     "@codemit/bff-shared": "workspace:*",
     "@codemit/markdown": "workspace:*",
     "@sentry/nextjs": "^10.74.0",
+    "import-in-the-middle": "3.5.1",
     "next": "^15.5.0",
     "openapi-fetch": "^0.13.8",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "require-in-the-middle": "8.0.1"
   },
   "devDependencies": {
     "@codemit/route-audit": "workspace:*",
