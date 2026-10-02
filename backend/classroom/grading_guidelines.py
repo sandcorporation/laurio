@@ -35,8 +35,8 @@ PRESET_GRADING_GUIDELINE_TEXT: dict[str, str] = {
 def effective_grading_guideline_text(strictness: str, custom_text: str) -> str:
     """채점 프롬프트에 실릴 실제 문장 — 세 단계는 저장소 문장을, 직접
     입력(`"custom"`)은 강사가 쓴 문장을 그대로 쓴다. 알 수 없는 단계가 들어오면
-    KeyError다 — 저장 전에 API가 이미 검증했으므로(`classroom.api.
-    _validate_grading_guideline`) 여기 닿을 때는 항상 유효하다."""
+    KeyError다 — 저장 전에 API가 이미 검증했으므로(`classroom.problem_authoring.
+    validate_grading_guideline`) 여기 닿을 때는 항상 유효하다."""
 
     if strictness == "custom":
         return custom_text

@@ -456,6 +456,12 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 | `get_problem`(읽기, `class_id`·`problem_id`) | 문제 하나 — 화면의 `GET …/problems/{id}` 와 같은 값 |
 | `list_participants`(읽기, `class_id`) | 참여자 명단 — 화면의 `GET …/members` 와 같은 값(클래스에서 불릴 이름·가입 시각·내보냄·강사 본인 자리). 이메일 없음 |
 | `get_roster_grid`(읽기, `class_id`) | 명단 격자 — 화면의 `GET …/roster-grid` 와 같은 값(문제별 달성률 + 참여자 × 문제 칸의 통과 이력) |
+| `create_problem`(쓰기) | 문제 만들기 — 설명·제출 형식·체크리스트·채점 설정을 한 번에, `open` 이면 바로 연다(#514) |
+| `update_problem`(쓰기) | 문제 고치기 — 보낸 칸만 바뀐다 |
+| `add_checklist_item` · `update_checklist_item` · `delete_checklist_item` · `reorder_checklist_items`(쓰기) | 체크리스트 항목 더하기·고치기·지우기·순서 바꾸기 |
+| `open_problem` · `hide_problem` · `reopen_problem`(쓰기) | 문제 열기·숨기기·다시 열기 — 전이 표(`classroom.problem_transitions`) 그대로 |
+| `reorder_problems`(쓰기) | 문제 순서 바꾸기 |
+| `copy_problem`(쓰기) | 문제를 내 다른 클래스로 복사 — 복사본은 초안, 보관된 클래스에서 꺼내 갈 수는 있고 넣을 수는 없다 |
 
 읽기 도구 다섯(#513)은 화면 라우트와 **같은 함수**를 부른다 — 범위는 `instructor_scope`
 (`write=False`)가, 값은 `classroom.api` 의 직렬화 함수가 정하고, 화면과 같은 인코더로 내보내
@@ -464,7 +470,18 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 오류(`isError: true`, 본문은 화면과 같은 한국어 문구)로 돌려준다. 처리기는 `classroom.mcp_read_tools`
 에 산다.
 
-**읽기는 기록하지 않는다**(ADR-0040). 「마지막으로 쓴 날」만 허락에 남는다.
+**쓰기 도구는 화면 라우트와 같은 함수를 부른다**(#514). 도구마다 화면과 같은 강사 범위
+(`instructor_scope`, 남의 클래스는 「없다」·보관된 클래스는 잠금)를 열고, 화면 라우트가 부르는
+`classroom.problem_authoring`(만들기·고치기·체크리스트·순서)·전이 표·복사 함수를 그대로 부른다.
+인자도 화면의 입력 스키마로 검증한다 — 그래서 금칙어·필수 항목 하한·없는 전이가 **화면과 같은
+문장으로** 거절된다 — 읽기 도구와 같은 도구 오류(`isError: true`)다. 모르는 인자 이름은 조용히
+버리지 않고 거절한다. 처리기는 `classroom.mcp_problem_tools` 에 산다. 문제 삭제는 아직 MCP 에 없다.
+
+**쓰기만 기록한다**(ADR-0052). 쓰기 도구가 성공할 때마다 `ConnectedAppWrite` 한 줄 — 강사·연결된
+앱·도구 이름·대상 클래스/문제 번호·한 줄 요약(그 시점의 제목, 고친 칸)·시각 — 이 그 쓰기와 같은
+트랜잭션에 남는다. 거절된 시도는 남지 않는다. 대상은 번호로 적어 문제를 지운 뒤에도 남는다.
+**읽기는 기록하지 않는다**(ADR-0040). 「마지막으로 쓴 날」만 허락에 남는다. 이 기록을 보여 주는
+화면은 아직 없다.
 
 ### 스토리지와 알림
 
