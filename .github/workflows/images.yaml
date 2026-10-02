@@ -18,6 +18,12 @@ name: Images
 on:
   push:
     branches: [main]
+    # 문서만 바뀐 push 는 굽지 않는다 — 이미지에 들어가는 것이 없다(2026-10-02). 그런 커밋은 staging·
+    # production 을 앞당기지 않고, 다음 코드 커밋이 올라갈 때 함께 따라간다. 하나라도 다른 파일이
+    # 섞이면 돈다. Jenkins PR CI 도 같은 기준으로 시험을 건너뛴다(scripts/ci/changed.sh).
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
   workflow_dispatch:
 
 # 연달아 push 하면 대기 중이던 실행은 취소될 수 있다(GitHub 은 그룹에 pending 을 하나만 둔다).

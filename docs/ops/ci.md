@@ -30,6 +30,7 @@ push 하면 옛 빌드를 끊는다.
   fine-grained PAT: 저장소 읽기·PR·커밋 상태·Contents 쓰기, `glitchtip-automation-token`)은 사람이
   Jenkins 에 만든다. Jenkins 설정을 API 로 고칠 때는 `Content-Type: application/xml;
   charset=utf-8` 을 붙인다 — 없으면 한글이 Latin-1 로 읽혀 500 이 난다.
+- **문서(`*.md`·`docs/`)만 바뀐 커밋은 시험도 이미지도 건너뛴다** — PR CI 는 `scripts/ci/changed.sh`, 이미지는 `images.yaml` 의 `paths-ignore`. 그런 커밋은 staging·production 을 앞당기지 않고 다음 코드 커밋과 함께 간다.
 - **GitHub Actions 에는 이미지 빌드와 부팅 가드만 남았다**(`images.yaml`, 호스티드 러너 — 위
   「배포」 절). 부팅 가드 셋은 **images-staging 이 올린 바로 그 이미지를 ghcr 에서 받아**
   배포 설정 없이는 죽고 완전한 설정으로는 뜨는지 본다(2026-10-02 — 예전에는 같은 Dockerfile 을
