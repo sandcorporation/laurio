@@ -404,6 +404,9 @@ CLASSROOM_WEB_ORIGIN = _env("CODEMIT_CLASSROOM_ORIGIN", "").rstrip("/")
 
 # 연결된 앱이 강사 한 명당 1분에 부를 수 있는 MCP 요청 수(ADR-0052).
 CLASSROOM_MCP_CALLS_PER_MINUTE = int(_env("CODEMIT_CLASSROOM_MCP_CALLS_PER_MINUTE", "120"))
+# 그 위에 「제출 소스 열기」 도구 하나가 따로 받는 분당 상한(#518) — 응답 하나가 소스를
+# 통째로 싣는 무거운 도구라 전체 상한보다 낮게 둔다(`classroom.mcp_report_tools`).
+CLASSROOM_MCP_SOURCE_CALLS_PER_MINUTE = int(_env("CODEMIT_CLASSROOM_MCP_SOURCE_CALLS_PER_MINUTE", "20"))
 
 if IS_DEPLOYED_ENVIRONMENT and not OPERATOR_WEB_ORIGIN:
     # 비어 있으면 Host 헤더 유도로 떨어지는데, `SECURE_PROXY_SSL_HEADER` 는
