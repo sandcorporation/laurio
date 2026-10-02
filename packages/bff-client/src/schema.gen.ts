@@ -2854,6 +2854,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operator/classroom/usage/daily": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Usage Daily
+         * @description 날짜별 가입·클래스 가입·강의실 제출·제출자 수(#492). 기간의 모든 날이 한 줄씩 온다.
+         */
+        get: operations["classroom_usage_operator_api_usage_daily"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/operator/contests/free": {
         parameters: {
             query?: never;
@@ -7370,6 +7390,49 @@ export interface components {
             /** Upload Url */
             upload_url: string;
         };
+        /** UsageDailyOut */
+        UsageDailyOut: {
+            /** Days */
+            days: components["schemas"]["UsageDayOut"][];
+            /**
+             * End Date
+             * Format: date
+             */
+            end_date: string;
+            /**
+             * Start Date
+             * Format: date
+             */
+            start_date: string;
+            totals: components["schemas"]["UsageTotalsOut"];
+        };
+        /** UsageDayOut */
+        UsageDayOut: {
+            /** Class Joins */
+            class_joins: number;
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Signups */
+            signups: number;
+            /** Submissions */
+            submissions: number;
+            /** Submitters */
+            submitters: number;
+        };
+        /** UsageTotalsOut */
+        UsageTotalsOut: {
+            /** Class Joins */
+            class_joins: number;
+            /** Signups */
+            signups: number;
+            /** Submissions */
+            submissions: number;
+            /** Submitters */
+            submitters: number;
+        };
         /**
          * VerificationStartOut
          * @description 서버가 발급한 identityVerificationId(#85 코드리뷰 지적 1).
@@ -11248,6 +11311,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_usage_operator_api_usage_daily: {
+        parameters: {
+            query?: {
+                from?: string | null;
+                to?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageDailyOut"];
                 };
             };
             /** @description Unprocessable Content */
