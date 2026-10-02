@@ -407,7 +407,7 @@ export interface paths {
          * List Importable Contests
          * @description 새 문제 화면의 「공모전에서 들여오기」(#548) — 개최자가 「클래스에서 들여오기」를 허용한
          *     공개 중 · 마감 전 무료 공모전. 강의실은 공모전 앱을 모르므로 공유층 카탈로그가 답한다
-         *     (ADR-0054).
+         *     (ADR-0054). `q` 는 제목 검색, `after` 는 앞 쪽의 `next` — 마감 빠른 순으로 20개씩 준다.
          */
         get: operations["classroom_api_list_importable_contests"];
         put?: never;
@@ -5794,6 +5794,16 @@ export interface components {
             title: string;
         };
         /**
+         * ImportableContestPageOut
+         * @description 들여오기 목록 한 쪽 — 마감 빠른 순 20개씩. `next` 를 `after` 로 넘기면 이어 받는다.
+         */
+        ImportableContestPageOut: {
+            /** Items */
+            items: components["schemas"]["ImportableContestOut"][];
+            /** Next */
+            next?: string | null;
+        };
+        /**
          * ImportableProblemOut
          * @description 새 문제 화면의 「이미 있는 문제로 시작하기」 시트, 「내 다른
          *     클래스에서」 탭 한 줄(#326) — 강사 본인이 **다른** 클래스에 가진
@@ -8518,7 +8528,10 @@ export interface operations {
     };
     classroom_api_list_importable_contests: {
         parameters: {
-            query?: never;
+            query?: {
+                q?: string;
+                after?: string | null;
+            };
             header?: never;
             path: {
                 class_id: number;
@@ -8533,11 +8546,20 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ImportableContestOut"][];
+                    "application/json": components["schemas"]["ImportableContestPageOut"];
                 };
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -7,6 +7,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
+from django.db.models import Q
+
 from core.clock import Clock
 from core.contest_catalog import ContestRequirementSource, ContestSource, ImportableContest
 from core.contest_switch import contest_product_enabled
@@ -15,7 +19,13 @@ from .models import Contest
 
 
 class ContestClassroomCatalog:
-    def list_importable(self) -> list[ImportableContest]:
+    def list_importable(
+        self,
+        *,
+        query: str = "",
+        after: tuple[datetime, int] | None = None,
+        limit: int | None = None,
+    ) -> list[ImportableContest]:
         if not contest_product_enabled():
             return []
         contests = (
@@ -28,6 +38,15 @@ class ContestClassroomCatalog:
             .prefetch_related("requirements")
             .order_by("deadline_at", "id")
         )
+        if query.strip():
+            contests = contests.filter(title__icontains=query.strip())
+        if after is not None:
+            deadline_at, contest_id = after
+            contests = contests.filter(
+                Q(deadline_at__gt=deadline_at) | Q(deadline_at=deadline_at, id__gt=contest_id)
+            )
+        if limit is not None:
+            contests = contests[:limit]
         return [
             ImportableContest(
                 contest_id=c.pk,

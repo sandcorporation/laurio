@@ -37,6 +37,7 @@ from accounts.models import SocialAccount
 from core.contest_catalog import contest_catalog
 from core.crypto import encrypt
 from core.events import Event, EventBusDisconnected, get_event_bus
+from core.keyset import decode_cursor, encode_cursor
 from core.llm_scoring import LLMKeyCheckStatus
 from storage.adapters import get_storage_adapter
 from storage.filenames import build_download_filename, safe_download_base_name
@@ -57,6 +58,7 @@ from .schemas import (
     ChecklistItemIn,
     ChecklistItemOut,
     ImportableContestOut,
+    ImportableContestPageOut,
     ImportContestIn,
     ProblemContestOut,
     ChecklistItemPatchIn,
@@ -1084,26 +1086,43 @@ def reorder_problems(request: HttpRequest, class_id: int, payload: ProblemReorde
     ]
 
 
+#: 들여오기 목록 한 쪽의 크기(#548) — 공모전이 수백 개여도 시트가 한 번에 다 받지 않는다.
+IMPORTABLE_CONTESTS_PAGE_SIZE = 20
+
+
 @router.get(
     "/classes/{class_id}/importable-contests",
-    response={200: list[ImportableContestOut], 404: ErrorOut},
+    response={200: ImportableContestPageOut, 404: ErrorOut, 422: ErrorOut},
     auth=jwt_auth,
 )
-def list_importable_contests(request: HttpRequest, class_id: int):
+def list_importable_contests(
+    request: HttpRequest, class_id: int, q: str = "", after: str | None = None
+):
     """새 문제 화면의 「공모전에서 들여오기」(#548) — 개최자가 「클래스에서 들여오기」를 허용한
     공개 중 · 마감 전 무료 공모전. 강의실은 공모전 앱을 모르므로 공유층 카탈로그가 답한다
-    (ADR-0054)."""
+    (ADR-0054). `q` 는 제목 검색, `after` 는 앞 쪽의 `next` — 마감 빠른 순으로 20개씩 준다."""
 
     class_scope(class_id, request.auth_user.id, write=False)
-    return 200, [
-        ImportableContestOut(
-            contest_id=c.contest_id,
-            title=c.title,
-            deadline_at=c.deadline_at,
-            requirement_count=c.requirement_count,
-        )
-        for c in contest_catalog().list_importable()
-    ]
+    cursor = decode_cursor(after) if after else None
+    if after and cursor is None:
+        raise HttpError(422, "잘못된 목록 위치입니다. 처음부터 다시 불러 주세요.")
+    rows = contest_catalog().list_importable(
+        query=q[:100], after=cursor, limit=IMPORTABLE_CONTESTS_PAGE_SIZE + 1
+    )
+    page = rows[:IMPORTABLE_CONTESTS_PAGE_SIZE]
+    has_more = len(rows) > IMPORTABLE_CONTESTS_PAGE_SIZE
+    return 200, ImportableContestPageOut(
+        items=[
+            ImportableContestOut(
+                contest_id=c.contest_id,
+                title=c.title,
+                deadline_at=c.deadline_at,
+                requirement_count=c.requirement_count,
+            )
+            for c in page
+        ],
+        next=encode_cursor(page[-1].deadline_at, page[-1].contest_id) if has_more else None,
+    )
 
 
 @router.post(

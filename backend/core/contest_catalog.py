@@ -62,15 +62,22 @@ class ImportableContest:
 
 @runtime_checkable
 class ContestCatalog(Protocol):
-    def list_importable(self) -> list[ImportableContest]:
-        """지금 들여올 수 있는 무료 공모전 — 공개 중 · 마감 전 · 허용 켜짐, 마감 빠른 순."""
+    def list_importable(
+        self,
+        *,
+        query: str = "",
+        after: tuple[datetime, int] | None = None,
+        limit: int | None = None,
+    ) -> list[ImportableContest]:
+        """지금 들여올 수 있는 무료 공모전 — 공개 중 · 마감 전 · 허용 켜짐, 마감 빠른 순.
+        `query` 는 제목에 든 글자, `after` 는 (마감, 번호) 커서 — 그 뒤부터 `limit` 개."""
 
     def get_source(self, contest_id: int) -> ContestSource | None:
         """공모전 하나의 원본. 무료 공모전이 아니거나 한 번도 공개된 적이 없으면 None."""
 
 
 class _EmptyCatalog:
-    def list_importable(self) -> list[ImportableContest]:
+    def list_importable(self, *, query="", after=None, limit=None) -> list[ImportableContest]:
         return []
 
     def get_source(self, contest_id: int) -> ContestSource | None:

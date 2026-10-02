@@ -89,9 +89,60 @@ def test_instructor_lists_only_contests_the_host_opened_to_classes(client, world
     )
 
     assert response.status_code == 200
-    assert [(c["contest_id"], c["title"], c["requirement_count"]) for c in response.json()] == [
+    assert [(c["contest_id"], c["title"], c["requirement_count"]) for c in response.json()["items"]] == [
         (world["contest"]["id"], "할 일 웹앱", 2)
     ]
+    assert response.json()["next"] is None
+
+
+def _importable(client, world, **params):
+    response = client.get(
+        f"{CLASSES_URL}/{world['class_id']}/importable-contests",
+        params,
+        **auth_header(world["instructor"]["access"]),
+    )
+    assert response.status_code == 200, response.content
+    return response.json()
+
+
+def test_a_long_list_comes_twenty_at_a_time_in_deadline_order(client, world, category, landing_type):
+    """공모전이 많아도 시트가 한 번에 다 받지 않는다 — 마감 빠른 순 20개씩, `next` 로 이어 받는다."""
+
+    now = timezone.now()
+    for day in range(1, 25):
+        _free_contest(
+            client, world["host"], category, landing_type,
+            title=f"공모전 {day:02d}", deadline_at=now + timedelta(days=day),
+        )
+
+    first = _importable(client, world)
+    second = _importable(client, world, after=first["next"])
+
+    assert len(first["items"]) == 20
+    assert first["next"] is not None
+    titles = [c["title"] for c in first["items"] + second["items"]]
+    assert len(titles) == 25 and len(set(titles)) == 25
+    deadlines = [c["deadline_at"] for c in first["items"] + second["items"]]
+    assert deadlines == sorted(deadlines)
+    assert second["next"] is None
+
+
+def test_the_list_is_searchable_by_title(client, world, category, landing_type):
+    _free_contest(client, world["host"], category, landing_type, title="날씨 앱 만들기")
+
+    found = _importable(client, world, q="날씨")
+
+    assert [c["title"] for c in found["items"]] == ["날씨 앱 만들기"]
+
+
+def test_a_broken_cursor_is_refused(client, world):
+    response = client.get(
+        f"{CLASSES_URL}/{world['class_id']}/importable-contests",
+        {"after": "not-a-cursor"},
+        **auth_header(world["instructor"]["access"]),
+    )
+
+    assert response.status_code == 422
 
 
 def test_imported_problem_follows_the_contest_title_description_and_requirements(client, world):

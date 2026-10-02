@@ -117,8 +117,20 @@ export type ImportableContestRow = {
   requirement_count: number;
 };
 
-export function fetchImportableContests(classId: number): Promise<ApiResult<ImportableContestRow[]>> {
-  return bffClient.get<ImportableContestRow[]>(`/api/backend/classroom/classes/${classId}/importable-contests`);
+// 마감 빠른 순 20개씩 — `next` 를 `after` 로 넘기면 이어 받는다. `query` 는 제목 검색.
+export type ImportableContestPage = { items: ImportableContestRow[]; next: string | null };
+
+export function fetchImportableContests(
+  classId: number,
+  { query = "", after = null }: { query?: string; after?: string | null } = {},
+): Promise<ApiResult<ImportableContestPage>> {
+  const params = new URLSearchParams();
+  if (query.trim()) params.set("q", query.trim());
+  if (after) params.set("after", after);
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
+  return bffClient.get<ImportableContestPage>(
+    `/api/backend/classroom/classes/${classId}/importable-contests${suffix}`,
+  );
 }
 
 export function importContestProblem(classId: number, contestId: number): Promise<ApiResult<ProblemRow>> {
