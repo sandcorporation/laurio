@@ -1,6 +1,6 @@
 # Classroom 은 경계지 서비스가 아니다
 
-Status: Amended by ADR-0048 (2026-09-10 결정)
+Status: Amended by ADR-0048, ADR-0054 (2026-09-10 결정)
 
 과제-제출 쪽을 `classroom.laurio.…` 라는 별도 제품으로 세운다. 공모전은 나중을 위한
 기능이 되고 당분간 그쪽에 손을 대지 않는다.
