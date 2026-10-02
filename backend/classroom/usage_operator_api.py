@@ -301,7 +301,7 @@ class UsageProblemOut(Schema):
     failed_scoring_submissions: int
 
 
-class UsageProblemDayOut(Schema):
+class UsageProblemCellOut(Schema):
     problem_id: int
     submissions: int
     submitters: int
@@ -313,7 +313,17 @@ class UsageClassDayOut(Schema):
     submissions: int
     submitters: int
     #: `problems` 와 같은 순서로, 문제마다 한 칸 — 0 인 칸도 있다.
-    problems: list[UsageProblemDayOut]
+    problems: list[UsageProblemCellOut]
+
+
+class UsageClassPeriodTotalOut(Schema):
+    """날짜 × 문제 표의 합계 줄 — 제출자 수는 날마다의 값을 더한 것이 아니라 기간 전체에서
+    겹치지 않게 센 사람 수다(`UsageTotalsOut.submitters` 와 같은 뜻)."""
+
+    submissions: int
+    submitters: int
+    #: `problems` 와 같은 순서로, 문제마다 한 칸.
+    problems: list[UsageProblemCellOut]
 
 
 class UsageClassDetailOut(Schema):
@@ -323,6 +333,7 @@ class UsageClassDetailOut(Schema):
     end_date: date
     problems: list[UsageProblemOut]
     days: list[UsageClassDayOut]
+    period_total: UsageClassPeriodTotalOut
 
 
 def _seoul_date(value: datetime | None) -> date | None:
@@ -380,6 +391,13 @@ def usage_class_detail(
     per_day = _per_day(
         period_submissions, "created_at", n=Count("id"), people=Count("member__user_id", distinct=True)
     )
+    period_by_problem = {
+        row["problem_id"]: row
+        for row in period_submissions.values("problem_id")
+        .annotate(n=Count("id"), people=Count("member__user_id", distinct=True))
+        .order_by()
+    }
+    period_whole = period_submissions.aggregate(n=Count("id"), people=Count("member__user_id", distinct=True))
 
     problem_rows = []
     for problem in problems:
@@ -405,7 +423,7 @@ def usage_class_detail(
         for problem in problems:
             cell = cells.get((day, problem.id))
             day_cells.append(
-                UsageProblemDayOut(
+                UsageProblemCellOut(
                     problem_id=problem.id,
                     submissions=cell["n"] if cell else 0,
                     submitters=cell["people"] if cell else 0,
@@ -428,4 +446,16 @@ def usage_class_detail(
         end_date=end,
         problems=problem_rows,
         days=days,
+        period_total=UsageClassPeriodTotalOut(
+            submissions=period_whole["n"],
+            submitters=period_whole["people"],
+            problems=[
+                UsageProblemCellOut(
+                    problem_id=problem.id,
+                    submissions=period_by_problem[problem.id]["n"] if problem.id in period_by_problem else 0,
+                    submitters=period_by_problem[problem.id]["people"] if problem.id in period_by_problem else 0,
+                )
+                for problem in problems
+            ],
+        ),
     )

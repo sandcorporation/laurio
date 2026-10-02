@@ -185,6 +185,33 @@ def test_the_date_by_problem_table_covers_every_day_and_cuts_on_seoul_dates(clie
     assert _problem(body, second.id)["last_submitted_on"] == "2026-09-24"
 
 
+def test_the_period_total_counts_distinct_submitters_across_days(client, db):
+    instructor, student, class_id = _class_with_student(client)
+    other = login(client, "other")
+    join_class(client, other["access"], class_id, instructor_access=instructor["access"])
+    first = create_open_problem(client, instructor["access"], class_id, title="1주차")
+    second = create_open_problem(client, instructor["access"], class_id, title="2주차")
+    yesterday = submit_repository(client, student["access"], class_id, first.id)
+    submit_repository(client, student["access"], class_id, first.id)
+    submit_repository(client, other["access"], class_id, first.id)
+    outside = submit_repository(client, other["access"], class_id, second.id)
+    ClassroomSubmission.objects.update(created_at=NOON_UTC)
+    ClassroomSubmission.objects.filter(pk=yesterday["id"]).update(created_at=NOON_UTC - timedelta(days=1))
+    ClassroomSubmission.objects.filter(pk=outside["id"]).update(created_at=NOON_UTC - timedelta(days=10))
+    operator = _operator_client()
+
+    body = _detail(operator, class_id, **{"from": "2026-09-25", "to": "2026-09-26"})
+
+    assert body["period_total"] == {
+        "submissions": 3,
+        "submitters": 2,  # 날마다의 1 + 2 가 아니다, 기간 밖 제출은 빠진다
+        "problems": [
+            {"problem_id": first.id, "submissions": 3, "submitters": 2},
+            {"problem_id": second.id, "submissions": 0, "submitters": 0},
+        ],
+    }
+
+
 def test_problem_totals_ignore_the_period(client, db):
     instructor, student, class_id = _class_with_student(client)
     problem = create_open_problem(client, instructor["access"], class_id)
@@ -247,7 +274,8 @@ def test_the_response_carries_no_user_or_submission_ids_or_names(client, db):
     response = operator.get(_url(class_id))
     body = response.json()
 
-    assert set(body) == {"name", "archived", "start_date", "end_date", "problems", "days"}
+    assert set(body) == {"name", "archived", "start_date", "end_date", "problems", "days", "period_total"}
+    assert set(body["period_total"]) == {"submissions", "submitters", "problems"}
     assert body["name"] == "웹 스터디"
     assert body["archived"] is False
     assert set(body["problems"][0]) == {
