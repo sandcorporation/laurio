@@ -305,7 +305,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("enqueue").add_argument("sha")
-    sub.add_parser("plan").add_argument("--max", type=int, default=0)
+    sub.add_parser("plan").add_argument("--max", type=lambda v: int(v or 0), default=0)  # 첫 빌드는 매개변수가 아직 없어 빈 값이다
     sub.add_parser("assemble")
     sub.add_parser("merge")
     sub.add_parser("fail")

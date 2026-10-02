@@ -35,7 +35,7 @@ pipeline {
       agent { label 'laurio-staging' }
       steps {
         withCredentials([usernamePassword(credentialsId: 'github-sandcorporation-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
-          sh 'python3 scripts/ci/train.py plan --max "$MAX_PRS"'
+          sh 'python3 scripts/ci/train.py plan --max "${MAX_PRS:-0}"'
         }
         stash name: 'plan', includes: 'train.plan'
         script {
