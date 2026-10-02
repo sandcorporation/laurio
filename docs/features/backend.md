@@ -5,7 +5,7 @@
 Django + django-ninja. 하나의 `NinjaAPI` 에 라우터를 붙여 `/api` 아래로 낸다
 (`backend/config/api.py`). **HTTP 가 유일한 시임이다** — 테스트도 이 스택을 통과해 들어온다.
 
-## 표면이 다섯이다
+## 표면이 여섯이다
 
 경로 접두어가 곧 「누가 부르는가」다. 인증 방식도, 실패했을 때 무엇이 막히는지도 다르다.
 
@@ -15,6 +15,7 @@ Django + django-ninja. 하나의 `NinjaAPI` 에 라우터를 붙여 `/api` 아�
 | 운영자 | `/api/operator/…` | 운영자 앱 | Django 세션 쿠키 + Origin 검증 미들웨어 |
 | 내부 | `/api/internal/…` | Celery beat·운영자의 수동 tick | `X-Internal-Token` |
 | 스토리지 | `/api/storage/…` | 브라우저(업로드·다운로드 URL 발급) | JWT |
+| 연결된 앱 | `/api/classroom/mcp` · `/api/classroom/oauth/{metadata/*,register,token,revoke}` | 외부 AI 앱(강의실 앱이 `/mcp`·`/.well-known/oauth-*`·`/oauth/*` 를 넘긴다) | MCP 는 OAuth 접근 토큰(Bearer), 메타데이터·등록은 없음, 토큰·회수는 OAuth 클라이언트 인증 |
 | 지표 | `/metrics` | oracle 의 감시 스택(Prometheus, compose 네트워크 안에서 `backend:8000`) | 없음 — Host 가 내부 서비스 이름일 때만 답하고 나머지는 404 |
 
 **운영자 표면은 기본 거부다.** 라우터 자체가 거부로 시작하고 Origin 검증이 경로 접두어로
@@ -409,6 +410,50 @@ PostgreSQL `DataError` 로 깨진다). 예전 허용 목록은
 "no_required_item")를 실어, 수정 화면은 이 값으로 버튼을 그리고 화면 안의
 전이 계산을 갖지 않는다.
 
+### 연결된 앱 — OAuth 와 MCP(#512, ADR-0052)
+
+강사가 claude.ai 같은 외부 AI 앱에 강의실 `/mcp` 주소 하나를 넣고 강의실 로그인으로
+허락하면, 그 앱이 MCP 로 강의실을 부른다. **백엔드가 MCP 서버와 OAuth 2.1 인가 서버를
+함께 연다** — 바깥 주소는 강의실 도메인이고(backend 는 배포에서 호스트 포트가 없다)
+강의실 앱이 넘겨준다. 메타데이터의 issuer·resource 는 강의실 공개 오리진이다
+(`CODEMIT_CLASSROOM_ORIGIN`, 비어 있으면 강의실 앱이 실어 보낸 오리진).
+
+| | |
+| --- | --- |
+| `GET /api/classroom/oauth/metadata/protected-resource` | 보호 자원 메타데이터(RFC 9728) — 바깥에서는 `/.well-known/oauth-protected-resource`(와 뒤에 `/mcp`를 붙인 꼴) |
+| `GET /api/classroom/oauth/metadata/authorization-server` | 인가 서버 메타데이터(RFC 8414) — 바깥에서는 `/.well-known/oauth-authorization-server` |
+| `POST /api/classroom/oauth/register` | 동적 클라이언트 등록(RFC 7591). 인증 없음 |
+| `GET` · `POST /api/classroom/oauth/authorize` | 동의 화면이 요청을 확인받고(GET) 허락·거절을 보낸다(POST — 앱으로 돌아갈 주소를 돌려준다). 강의실 로그인(JWT) |
+| `POST /api/classroom/oauth/token` | 인가 코드(+PKCE)·갱신 토큰을 토큰으로 바꾼다 |
+| `POST /api/classroom/oauth/revoke` | 토큰 회수(RFC 7009) |
+| `POST /api/classroom/mcp` | MCP(Streamable HTTP, 상태 없음). GET·DELETE 는 405 |
+| `GET /api/classroom/connected-apps` · `DELETE …/{id}` | 「연결된 앱」 목록과 끊기. 강의실 로그인(JWT) |
+
+**규칙**: PKCE 는 S256 만, `resource` 는 이 서버의 `/mcp` 하나만 받는다(다른 서버 몫의
+토큰을 여기서 받아 갈 수 없다). 평문 http 돌아갈 주소는 같은 기계(127.0.0.1·localhost)만
+등록된다. 공개 클라이언트(`none`)와 비밀을 받는 클라이언트(`client_secret_post`·
+`client_secret_basic`) 둘 다 된다. 인가 응답에 `iss` 를 싣는다(RFC 9207).
+
+**토큰**: 접근 토큰 1시간, 갱신 토큰은 쓸 때마다 새것으로 바뀌고 이미 바뀐 것을 다시 내면
+거절된다(연결을 통째로 끊지는 않는다). 토큰·인가 코드(5분, 한 번)는 **해시로만** 저장된다.
+**허락(`ConnectedApp`) 하나가 문이다** — 범위는 그 강사의 모든 Class 하나뿐이고, 같은 앱에
+다시 허락하면 살아 있는 허락을 이어 쓴다. 끊기·90일 동안 한 번도 안 부름(스캔)·탈퇴·
+휴면 신원 파기(`accounts.signals` 를 강의실이 받는다) 가운데 하나라도 일어나면 그 허락에서
+나온 토큰이 그 순간부터 전부 거절된다.
+
+**MCP**: 요청 하나가 POST 하나, 응답은 늘 JSON 하나다 — 세션·SSE 를 만들지 않는다. MCP
+2026-07-28 의 요청마다 버전을 싣는 방식(`params._meta`, 헤더와 본문 대조, `server/discover`)과
+그 전 판(2025-03-26 ~ 2025-11-25)의 `initialize` 방식을 함께 받는다. 토큰이 없거나 틀리면
+401 과 `WWW-Authenticate: Bearer resource_metadata="…"` 로 어디서 허락받을지 알린다. Origin
+헤더가 실려 오면 강의실 오리진이어야 한다. **강사당 분당 120번**(`CODEMIT_CLASSROOM_MCP_
+CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시 하라고 알린다(`Retry-After`).
+
+| 도구 | 하는 일 |
+| --- | --- |
+| `list_my_classes`(읽기) | 내가 강사인 클래스 — 이름·보관 여부·참여자 수(강사 본인과 내보낸 사람 제외)·문제 수(열림·초안·숨김별). 강사 화면의 「내 클래스」와 같은 서비스 함수(`classroom.services.instructor_classes`)를 부른다 |
+
+**읽기는 기록하지 않는다**(ADR-0040). 「마지막으로 쓴 날」만 허락에 남는다.
+
 ### 스토리지와 알림
 
 | | |
@@ -428,11 +473,11 @@ PostgreSQL `DataError` 로 깨진다). 예전 허용 목록은
 심사 비교·공개 프로필이 그 URL을 자료 목록에 이미 실어 보낸다 — 화면이 별도로 발급받지
 않는다.
 
-## 스스로 도는 일 — 스캔 27개
+## 스스로 도는 일 — 스캔 29개
 
 **시간은 시임이 아니라 주입 가능한 의존성이다**(ADR-0003). 시각이 지났다고 상태가 저절로
 바뀌지 않는다 — 스캔이 조건부 UPDATE 로 옮긴다. 등록부가 곧 beat 스케줄이고, 대부분 60초
-주기다 — 예외는 조회수 옮기기(10분)와 검색 전체 재색인(하루 주기)이다(아래).
+주기다 — 예외는 조회수 옮기기(10분)·검색 전체 재색인(하루 주기)·연결된 앱 정리 둘(1시간)이다(아래).
 
 | 무엇을 | 스캔 |
 | --- | --- |
@@ -444,6 +489,7 @@ PostgreSQL `DataError` 로 깨진다). 예전 허용 목록은
 | 배분·지급 | `distribution-create` · `distribution-share-payout` · `handover-release` · `payout-awaits-you` · `seller-registration-recovery` |
 | 알림 | `notification-dispatch-deferred` · `notification-reclaim-stuck` · `deadline-reminder` · `judging-end-reminder` · `distribution-final-warning` · `award-result-notice-recovery` · `distribution-result-notice-recovery` |
 | 개인정보 | `identity-dormancy-purge` · `retained-identity-purge` |
+| 연결된 앱 | `classroom-connected-app-expiry`(#512 — 90일 동안 한 번도 부르지 않은 허락을 끊는다, 1시간 주기) · `classroom-oauth-client-cleanup`(아무도 허락하지 않은 채 하루가 지난 동적 등록을 지운다, 1시간 주기) |
 | 자료 | `demo-video-retention-purge` |
 | 검색 | `contest-search-reindex`(#450 — 하루 주기, 다른 스캔과 다르다. 저장·변경 시점의 단건 색인은 스캔이 아니라 Celery 태스크 `contests.index_contest`가 맡는다, 아래 「바깥 세계」) |
 | 관측 | `db-connection-usage`(#455 — DB 연결 사용률이 임계(기본 80%)를 넘으면 오류 수집기로 보낸다. 넘은 상태가 이어지는 동안은 간격(기본 15분)에 한 번만 보낸다 — 둘 다 환경변수로 조절한다, `core.db_connection_scan`) |

@@ -264,6 +264,10 @@ x-backend-env: &backend-env
   # 운영자 앱의 오리진(#43). 비면 부팅이 거부된다 — Host 헤더 유도는
   # 리버스 프록시 구성에 따라 어긋나 모든 변경 요청이 403 이 된다.
   CODEMIT_OPERATOR_ORIGIN: ${CODEMIT_OPERATOR_ORIGIN:?CODEMIT_OPERATOR_ORIGIN 을 설정해야 한다}
+  # 강의실 앱의 공개 오리진(#512, ADR-0052) — 연결된 앱의 OAuth·MCP 메타데이터가
+  # issuer·resource 로 내보내는 주소다. 강의실 서비스와 **같은 `.env` 줄**이다. 비어도
+  # 부팅은 막지 않는다 — 그때는 강의실 앱이 실어 보낸 자기 오리진을 쓴다.
+  CODEMIT_CLASSROOM_ORIGIN: ${CODEMIT_CLASSROOM_ORIGIN:-}
   SESSION_REDIS_URL: redis://redis:6379/1
   CELERY_BROKER_URL: redis://redis:6379/0
   CELERY_RESULT_BACKEND: redis://redis:6379/0

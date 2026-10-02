@@ -1,7 +1,7 @@
 "use client";
 
 // 헤더의 계정 메뉴 (#306, #376) — 클래스 앱에는 자기 계정을 볼 곳이 전혀 없었다.
-// 지금 프로필·공모전으로 가기·로그아웃으로 가는 문을 연다.
+// 지금 프로필·연결된 앱(#512)·공모전으로 가기·로그아웃으로 가는 문을 연다.
 //
 // **공개 앱과 같은 모양이다**(#376, spec #371) — 두 앱의 계정 버튼이 다르게
 // 동작하고 이름도 달랐던 것(공모전 앱 「내 콘솔」 / 강의실은 username)이 #371의
@@ -98,6 +98,13 @@ export function AccountMenuClient({
             >
               프로필
             </a>
+            <Link
+              href="/connected-apps"
+              data-testid="account-menu-connected-apps-link"
+              className="px-3 py-2 text-ink hover:bg-paper"
+            >
+              연결된 앱
+            </Link>
             <a
               href={publicAppUrl}
               data-testid="account-menu-contests-link"

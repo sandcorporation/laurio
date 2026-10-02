@@ -364,6 +364,21 @@ CACHES = {
             "LOCATION": SESSION_REDIS_URL,
         }
     ),
+    # 연결된 앱의 호출 상한(ADR-0052, #512) — 강사당 분당 횟수를 센다. gunicorn 워커가
+    # 넷이라 프로세스마다 갈리는 LocMem 으로는 상한이 네 배가 되므로 배포에서는 세션과
+    # 같은 Redis 를 접두어만 갈라 쓴다. 테스트는 세션과 같은 이유로 LocMem 이다.
+    "rate_limits": (
+        {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": f"codemit-rate-limits-{_CHECKOUT_TOKEN}",
+        }
+        if _RUNNING_TESTS
+        else {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": SESSION_REDIS_URL,
+            "KEY_PREFIX": "rate",
+        }
+    ),
 }
 
 SESSION_ENGINE = "django.contrib.sessions.backends.cache"
@@ -380,6 +395,15 @@ SESSION_COOKIE_SAMESITE = "Lax"
 # 리버스 프록시 구성에 흔들리지 않는다. 비어 있으면 요청이 실제로 도착한 주소로
 # 조립한다(dev·테스트).
 OPERATOR_WEB_ORIGIN = _env("CODEMIT_OPERATOR_ORIGIN", "")
+
+# 강의실 앱의 공개 오리진(ADR-0052, #512) — 연결된 앱의 OAuth·MCP 메타데이터가 issuer·
+# resource 로 내보내는 주소다. backend 는 배포에서 호스트 포트가 없어 바깥에서는 강의실
+# 도메인으로만 닿는다. 비어 있으면(dev·테스트) 강의실 BFF 가 실어 보낸 자기 오리진을,
+# 그것도 없으면 요청이 도착한 주소를 쓴다(`classroom.oauth.public_origin`).
+CLASSROOM_WEB_ORIGIN = _env("CODEMIT_CLASSROOM_ORIGIN", "").rstrip("/")
+
+# 연결된 앱이 강사 한 명당 1분에 부를 수 있는 MCP 요청 수(ADR-0052).
+CLASSROOM_MCP_CALLS_PER_MINUTE = int(_env("CODEMIT_CLASSROOM_MCP_CALLS_PER_MINUTE", "120"))
 
 if IS_DEPLOYED_ENVIRONMENT and not OPERATOR_WEB_ORIGIN:
     # 비어 있으면 Host 헤더 유도로 떨어지는데, `SECURE_PROXY_SSL_HEADER` 는

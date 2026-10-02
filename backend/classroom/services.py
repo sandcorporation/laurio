@@ -29,6 +29,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from django.db import IntegrityError, transaction
+from django.db.models import Count, F, Q
 
 from .models import (
     ChecklistItem,
@@ -352,3 +353,27 @@ def import_class_template(template: ClassTemplate, *, instructor_id: int, name: 
             for item in template_problem.checklist_items.all()
         )
     return new_class
+
+
+def instructor_classes(instructor_id: int):
+    """「내 클래스」 — 본인이 강사인 클래스만, 화면 목록과 같은 순서로(#278).
+
+    강사 화면(`GET /api/classroom/classes`)과 연결된 앱의 `list_my_classes`
+    도구(`classroom.mcp`, ADR-0052)가 함께 부른다 — 두 표면이 「누구의 클래스가
+    보이는가」를 따로 정하지 않게 한 곳에 둔다. 도구가 쓰는 세는 값(참여자 수·
+    상태별 문제 수)을 주석으로 단다: 참여자는 강사 본인과 내보내진 사람을 빼고
+    센다(CONTEXT.md 「달성률」의 분모와 같은 사람들)."""
+
+    active_members = Q(members__expelled_at__isnull=True) & ~Q(members__user_id=F("instructor_id"))
+    return Class.objects.filter(instructor_id=instructor_id).annotate(
+        participant_count=Count("members", filter=active_members, distinct=True),
+        open_problem_count=Count(
+            "problems", filter=Q(problems__status=Problem.Status.OPEN), distinct=True
+        ),
+        draft_problem_count=Count(
+            "problems", filter=Q(problems__status=Problem.Status.DRAFT), distinct=True
+        ),
+        hidden_problem_count=Count(
+            "problems", filter=Q(problems__status=Problem.Status.HIDDEN), distinct=True
+        ),
+    ).order_by("-created_at", "-id")
