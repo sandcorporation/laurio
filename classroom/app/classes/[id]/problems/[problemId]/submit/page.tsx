@@ -13,6 +13,8 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 
+import { checkGithubRepositoryUrl } from "@codemit/bff-client/repository-url";
+
 import { ErrorNote, PageShell, buttonClass } from "@/app/components/ui";
 import { ContestEntryFields } from "@/app/components/ContestEntryFields";
 import { ProblemParticipantView } from "@/app/components/ProblemParticipantView";
@@ -179,7 +181,10 @@ export default function ProblemSubmitPage() {
       setSubmitError(entryBlocked);
       return;
     }
-    await submitValue("repository", repositoryUrl.trim());
+    // 끝의 .git·슬래시 같은 것은 정리된 주소로 보낸다 — 거부할 모양이면 버튼이 이미 잠겨 있다.
+    const repository = checkGithubRepositoryUrl(repositoryUrl);
+    if (repository === null || !repository.ok) return;
+    await submitValue("repository", repository.url);
   }
 
   async function handleSourceFile(event: ChangeEvent<HTMLInputElement>) {

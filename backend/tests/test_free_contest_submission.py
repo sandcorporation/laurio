@@ -440,3 +440,22 @@ def test_free_submission_before_deadline_can_still_be_edited_without_verificatio
     )
     assert me_resp.status_code == 200, me_resp.content
     assert me_resp.json()["next_action"] == "can_edit_submission"
+
+
+def test_a_repository_url_is_stored_without_its_trailing_git_or_slash(client, category, landing_type):
+    _host, contest = _free_published_contest(client, category=category, landing_type=landing_type)
+    dev = _hosted_user(client, "free-sub-dev-dotgit")
+
+    response = client.post(
+        f"{CONTESTS_URL}/{contest['id']}/submissions",
+        data={
+            "assets": [{"kind": "repository", "value": "https://github.com/me/todo.git/"}],
+            "requirement_responses": [],
+            "source_access_consent": True,
+        },
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+
+    assert response.status_code == 201, response.content
+    assert [a["value"] for a in response.json()["assets"]] == ["https://github.com/me/todo"]

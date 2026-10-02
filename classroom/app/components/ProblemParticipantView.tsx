@@ -16,6 +16,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ChangeEvent, FormEvent, ReactNode } from "react";
 
+import { checkGithubRepositoryUrl } from "@codemit/bff-client/repository-url";
 import { MarkdownView } from "@codemit/markdown";
 
 import {
@@ -538,6 +539,7 @@ function InteractiveSubmissionForm(
     submissionFormats.length === 1 ? submissionFormats[0] : null,
   );
   const resolvedFormat = chosenFormat ?? submissionFormats[0];
+  const repositoryCheck = checkGithubRepositoryUrl(repositoryUrl);
   const needsFormatChoice = submissionFormats.length > 1 && chosenFormat === null;
 
   return (
@@ -621,21 +623,46 @@ function InteractiveSubmissionForm(
                 <label htmlFor="repository-url">
                   <FieldLabel>GitHub 저장소 주소</FieldLabel>
                 </label>
+                {/* type=url 이면 SSH 주소(git@…)를 브라우저가 제 말로 막아 아래 안내가 묻힌다 —
+                    글 칸으로 두고 판정은 `checkGithubRepositoryUrl` 이 한다. */}
                 <input
                   id="repository-url"
                   data-testid="repository-url-input"
-                  type="url"
+                  type="text"
+                  inputMode="url"
+                  autoCapitalize="off"
+                  spellCheck={false}
                   placeholder="https://github.com/owner/repo"
                   value={repositoryUrl}
                   onChange={(event) => onRepositoryUrlChange(event.target.value)}
                   required
+                  aria-invalid={repositoryCheck !== null && !repositoryCheck.ok}
                   className={`${INPUT_CLASS} font-mono`}
                 />
+                {repositoryCheck !== null && !repositoryCheck.ok ? (
+                  <p data-testid="repository-url-invalid" className="text-[12px] leading-relaxed text-attention">
+                    {repositoryCheck.message}
+                    {repositoryCheck.suggestion ? (
+                      <>
+                        {" "}
+                        <button
+                          type="button"
+                          data-testid="repository-url-suggestion"
+                          onClick={() => onRepositoryUrlChange(repositoryCheck.suggestion ?? "")}
+                          className="font-mono underline"
+                        >
+                          {repositoryCheck.suggestion}
+                        </button>
+                        로 바꾸기
+                      </>
+                    ) : null}
+                  </p>
+                ) : null}
               </div>
               <button
                 type="submit"
                 data-testid="submit-repository"
-                disabled={submitting || repositoryUrl.trim() === ""}
+                disabled={submitting || repositoryCheck === null || !repositoryCheck.ok}
                 className={`${buttonClass("primary")} w-full`}
               >
                 {submitting ? "제출하는 중..." : "제출하기"}

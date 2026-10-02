@@ -10,6 +10,8 @@
 // 를 의도적으로 막는다(운영자 세션이 새는 길을 새로 만들지 않기 위해서다, #43).
 // 그래서 이 화면은 상한을 하드코딩해 미리 막는 대신 "추가"를 항상 허용하고,
 // 넘치면 서버가 저장 시점에 422 로 알리는 문구를 그대로 보여준다(submit-error).
+import { checkGithubRepositoryUrl } from "@codemit/bff-client/repository-url";
+
 import { ErrorNote, INPUT_CLASS, buttonClass } from "@/app/components/ui";
 import { UploadField } from "@/components/upload/upload-field";
 
@@ -50,11 +52,6 @@ export function createEmptyAsset(): EditableAsset {
   return { key: `new-${Date.now()}-${localKeySeq}`, value: "", label: "", testAccount: "" };
 }
 
-// 백엔드 submissions/models.py의 GITHUB_REPO_URL_PATTERN과 같은 모양 — 서버
-// 검증을 대신하지 않는다(그건 여전히 서버가 한다), 저장 전에 같은 실수를
-// 미리 보여줄 뿐이다.
-const GITHUB_REPO_URL_PATTERN =
-  /^https:\/\/github\.com\/[A-Za-z0-9._-]{1,100}\/[A-Za-z0-9._-]{1,100}\/?$/;
 
 // 시연 영상 파일의 보관 시점(#262) — 예측 가능해지도록 파기 전에 미리
 // 알려준다("파기를 미리 말한다", 결정문). 알림을 새로 만들지 않는 대신
@@ -213,10 +210,11 @@ export function AssetKindSection({
 
       <div className="flex flex-col gap-3">
         {rows.map((row, index) => {
-          const repoInvalid =
-            kind === "repository" &&
-            row.value.trim() !== "" &&
-            !GITHUB_REPO_URL_PATTERN.test(row.value.trim());
+          // 강의실 제출 화면과 같은 판정(@codemit/bff-client/repository-url) — 서버 검증을
+          // 대신하지 않고, 저장 전에 같은 실수(SSH 주소·파일 주소)를 바로 말해 준다. 끝의
+          // .git·슬래시는 실수가 아니라 저장할 때 정리한다(page.tsx 의 rowsToAssetsIn).
+          const repoCheck = kind === "repository" ? checkGithubRepositoryUrl(row.value) : null;
+          const repoInvalid = repoCheck !== null && !repoCheck.ok ? repoCheck : null;
 
           return (
             <div
@@ -351,7 +349,22 @@ export function AssetKindSection({
                   className="text-xs text-attention"
                   data-testid={`${testIdPrefix}-${index}-invalid`}
                 >
-                  저장소는 https://github.com/&lt;owner&gt;/&lt;repo&gt; 형식만 받습니다.
+                  {repoInvalid.message}
+                  {repoInvalid.suggestion ? (
+                    <>
+                      {" "}
+                      <button
+                        type="button"
+                        data-testid={`${testIdPrefix}-${index}-suggestion`}
+                        disabled={disabled}
+                        onClick={() => update(index, { value: repoInvalid.suggestion ?? "", isPublic: null })}
+                        className="font-mono underline"
+                      >
+                        {repoInvalid.suggestion}
+                      </button>
+                      로 바꾸기
+                    </>
+                  ) : null}
                 </p>
               )}
 

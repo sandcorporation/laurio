@@ -41,7 +41,12 @@ from core.keyset import decode_cursor, encode_cursor
 from core.llm_scoring import LLMKeyCheckStatus
 from storage.adapters import get_storage_adapter
 from storage.filenames import build_download_filename, safe_download_base_name
-from submissions.models import GITHUB_REPO_URL_PATTERN, Submission, SubmissionAsset
+from submissions.models import (
+    GITHUB_REPO_URL_PATTERN,
+    Submission,
+    SubmissionAsset,
+    normalize_github_repo_url,
+)
 
 from .models import (
     ChecklistItem,
@@ -1688,6 +1693,7 @@ def _create_submission_row(request: HttpRequest, problem, member, payload, *, as
         asset_kind = SubmissionAsset.Kind.SOURCE
         content_type = (payload.content_type or "").strip()
     else:
+        value = normalize_github_repo_url(value)
         if not GITHUB_REPO_URL_PATTERN.match(value):
             raise HttpError(422, "저장소는 https://github.com/<owner>/<repo> 형식만 받습니다.")
         asset_kind = SubmissionAsset.Kind.REPOSITORY
