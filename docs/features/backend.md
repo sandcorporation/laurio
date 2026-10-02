@@ -399,9 +399,9 @@ PostgreSQL `DataError` 로 깨진다). 예전 허용 목록은
 `manage.py check` 가 거절한다(`core.E004`·`core.E005`, dev 에서도). 플러그인은
 지금 Packet Tracer(`.pkt`, #497 — `core.source_converters.packet_tracer`, 해독은
 Unpacket 에서 들여온 MIT 코드) 하나다. **기본값은 dev·CI 가 Packet Tracer, 배포
-환경이 빈 목록이고**, 배포 compose 가 값을 명시한다 — staging 은 Packet Tracer 를
-켜고, prod 는 `SOURCE_CONVERTERS: ""` 로 끈다(#498: staging 확인 뒤 켠다). 목록이
-비면 읽을 수 없는 파일은 예전처럼 버려진다.
+환경이 빈 목록이고**, 배포 compose 두 파일이 Packet Tracer 를 명시해 켠다(#498 —
+이용약관 제6조 ⑤·제10조 ⑥과 짝이다, 끌 때 함께 거둔다). 목록이 비면 읽을 수 없는
+파일은 예전처럼 버려진다.
 
 **통과는 필수 항목을 전부 충족했다는 판정이다**(#288, CONTEXT.md 「통과」) — 문제마다
 합격선을 따로 두지 않는다. 그래서 필수 항목이 하나도 없는 문제는 통과가 정의되지
