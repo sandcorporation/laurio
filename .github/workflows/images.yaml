@@ -51,59 +51,67 @@ jobs:
   # 죽는다"를 확인하는 이유다.
   frontend-deploy-guard:
     runs-on: ubuntu-latest
+    # **배포되는 그 이미지를 검사한다**(2026-10-02). images-staging 이 ghcr 에 올린 이 커밋의
+    # staging 이미지를 받아 옛 이름으로 태그한다 — 뒤의 검사는 그 이름을 쓴다. 예전에는 가드가
+    # 같은 Dockerfile 을 CI 전용 값으로 따로 구워, 검사한 것과 배포되는 것이 달랐고 Next 빌드를
+    # 두 번(runner·builder) 더 돌렸다.
+    needs: images-staging
+    permissions:
+      contents: read
+      packages: read
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build the production frontend image (runner stage)
-        run: |
-          # 문의 주소는 빌드 인자로 굳는다(#472 후속) — 여기서 CI 전용 값을 주고,
-          # 아래에서 그 값이 구운 /privacy 에 실제로 실렸는지 본다. 빌드 인자 →
-          # 번들 → 화면까지가 한 번에 끊기는 자리라(#297 과 같은 종류) 구운
-          # 이미지에서만 드러난다.
-          docker build -f docker/frontend.Dockerfile --target runner \
-            --build-arg NEXT_PUBLIC_SUPPORT_EMAIL=ci-guard@example.test \
-            -t codemit-frontend-runner-ci .
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 이 레포가 이미 두 번 겪은 사고(CLAUDE.md 「이미 데인 곳」) — .dockerignore
-      # 패턴이 파일에 적혀 있다는 것만으로는 증명이 아니다. 가짜 시크릿과 가짜
-      # 호스트 node_modules를 실제로 심어서 이미지에 안 들어가는지 직접
-      # 확인한다.
-      #
-      # **경로를 build context 기준으로 정확히 맞춘다**(#70 코드리뷰 지적,
-      # 심각). 이 스텝은 저장소 루트에서 `docker build ... .`을 돌리므로
-      # frontend.Dockerfile의 `COPY frontend/ ./frontend/`가 시크릿을
-      # `/app/frontend/.env`에 놓는다 — `/app/.env`는 애초에 존재할 수 없는
-      # 경로라 그 단정은 항상 거짓으로 통과했다(뒤의 재귀 grep만 실질
-      # 커버리지였다). node_modules 검증도 이름만 약속하고 실제로는 아무
-      # node_modules도 없어(이 잡은 pnpm install을 돌리지 않는다) 아무것도
-      # 검증하지 않았다 — 마커 파일을 직접 만들어 넣는다.
-      - name: .dockerignore actually keeps secrets and host node_modules out of the image
+      - name: Pull the staging frontend image this commit deploys
+        run: |
+          image=ghcr.io/sandcorporation/codemit-frontend:${{ github.sha }}-staging
+          docker pull -q "$image"
+          docker tag "$image" codemit-frontend-runner-ci
+
+      # **.dockerignore 가 시크릿과 호스트 node_modules 를 빌드 컨텍스트에서 실제로 빼는가.**
+      # 패턴이 파일에 적혀 있다는 것만으로는 증명이 아니라(CLAUDE.md 「이미 데인 곳」) 가짜
+      # 시크릿과 가짜 node_modules 표식을 심어 본다. 예전에는 builder 스테이지를 통째로 다시
+      # 구워 그 안을 뒤졌는데, 컨텍스트에 들어오지 않은 것은 어느 스테이지에도 닿지 못하므로
+      # **컨텍스트 자체**(`COPY . /ctx` 만 하는 이미지)를 보는 편이 더 넓고 몇 초면 끝난다.
+      # 표준 입력의 Dockerfile 은 루트 .dockerignore 를 쓴다 — 그래서 이 앱의 Dockerfile 전용
+      # ignore(`docker/frontend.Dockerfile.dockerignore`)가 생기면 이 검사가 그것을 못 본다고 멈춘다.
+      - name: .dockerignore actually keeps secrets and host node_modules out of the build context
         run: |
           set -euo pipefail
+          if [ -e docker/frontend.Dockerfile.dockerignore ]; then
+            echo "::error::docker/frontend.Dockerfile.dockerignore 가 생겼다 — 이 검사는 루트 .dockerignore 만 본다. 검사를 그 파일에 맞춰 고친다"
+            exit 1
+          fi
           echo "OPENAI_API_KEY=sk-ci-guard-fake-secret-do-not-leak" > frontend/.env
           mkdir -p frontend/node_modules/.ci-guard-marker
           echo "host-node-modules-should-not-leak-into-image" > frontend/node_modules/.ci-guard-marker/marker.txt
-          docker build -f docker/frontend.Dockerfile --target builder -t codemit-frontend-builder-ci-guard .
-          docker run --rm --entrypoint sh codemit-frontend-builder-ci-guard -c '
+          printf 'FROM busybox:1.36\nCOPY . /ctx\n' | docker build -q -f - -t codemit-frontend-context-probe . >/dev/null
+          docker run --rm codemit-frontend-context-probe sh -c '
             set -e
-            if [ -f /app/frontend/.env ]; then
-              echo "FOUND /app/frontend/.env — .dockerignore가 시크릿을 막지 못했다" >&2
+            if [ -f /ctx/frontend/.env ]; then
+              echo "FOUND frontend/.env — .dockerignore가 시크릿을 막지 못했다" >&2
               exit 1
             fi
-            if [ -d /app/frontend/node_modules/.ci-guard-marker ]; then
-              echo "FOUND /app/frontend/node_modules/.ci-guard-marker — .dockerignore가 호스트 node_modules를 막지 못했다" >&2
+            if [ -d /ctx/frontend/node_modules/.ci-guard-marker ]; then
+              echo "FOUND frontend/node_modules/.ci-guard-marker — .dockerignore가 호스트 node_modules를 막지 못했다" >&2
               exit 1
             fi
-            if grep -rl "sk-ci-guard-fake-secret\|host-node-modules-should-not-leak-into-image" /app > /dev/null 2>&1; then
-              echo "가짜 시크릿 또는 host node_modules 마커가 이미지 어딘가에 들어갔다" >&2
+            if grep -rl "sk-ci-guard-fake-secret\|host-node-modules-should-not-leak-into-image" /ctx > /dev/null 2>&1; then
+              echo "가짜 시크릿 또는 host node_modules 마커가 빌드 컨텍스트 어딘가에 들어갔다" >&2
               exit 1
             fi
-            echo "confirmed: .env and host node_modules excluded from the image"
+            echo "confirmed: .env and host node_modules excluded from the build context"
           '
           rm -f frontend/.env
           rm -rf frontend/node_modules/.ci-guard-marker
-          docker rmi codemit-frontend-builder-ci-guard
+          docker rmi codemit-frontend-context-probe >/dev/null
 
       - name: Refuses to boot in production with missing config (and actually exits — not just logs)
         run: |
@@ -158,11 +166,12 @@ jobs:
           echo "$output" | grep -q "KAKAO_SECRET_KEY" || { echo "::error::에러 메시지에 원인(KAKAO_SECRET_KEY)이 안 남는다"; exit 1; }
           echo "$output" | grep -q "KAKAO_REDIRECT_URI" || { echo "::error::에러 메시지에 원인(KAKAO_REDIRECT_URI)이 안 남는다"; exit 1; }
 
-      # #115 — 토스 결제창 클라이언트 키(NEXT_PUBLIC_TOSS_CLIENT_KEY)가 빌드타임에
-      # 비어 있으면 배포 환경에서 부팅 자체를 거부하는지 확인한다. 다른 필수값은
-      # 전부 채워 이 값 하나만으로 독립적으로 죽는지를 본다. codemit-frontend-runner-ci
-      # 는 build.args 없이(빈 문자열로) 지었으므로 이 시나리오 그대로다.
-      - name: Refuses to boot in production without a toss client key baked in
+      # #115 — 토스 결제창 클라이언트 키(NEXT_PUBLIC_TOSS_CLIENT_KEY)가 비어 있으면 배포
+      # 환경에서 부팅 자체를 거부하는지 확인한다. 다른 필수값은 전부 채워 이 값 하나만으로
+      # 독립적으로 죽는지를 본다. 받은 staging 이미지에는 실제 키가 ENV 로 구워져 있으므로
+      # 실행할 때 비운다 — 부팅 가드는 런타임 ENV 를 읽는다(docker/frontend.Dockerfile 의
+      # runner 스테이지 주석).
+      - name: Refuses to boot in production without a toss client key
         run: |
           set +e
           output=$(timeout 60 docker run --rm \
@@ -172,6 +181,7 @@ jobs:
             -e KAKAO_REST_API_KEY=ci-guard-only-kakao-rest-api-key \
             -e KAKAO_SECRET_KEY=ci-guard-only-kakao-secret-key \
             -e KAKAO_REDIRECT_URI=https://codemit.example/api/auth/social/kakao/callback \
+            -e NEXT_PUBLIC_TOSS_CLIENT_KEY= \
             codemit-frontend-runner-ci 2>&1)
           status=$?
           set -e
@@ -290,13 +300,16 @@ jobs:
       # **방침의 문의처가 구운 이미지에 실렸는가**(#472 후속). 개인정보 보호책임자와
       # 문의처는 방침의 필수 기재사항인데(개인정보 보호법 제30조 제1항) 그 값은
       # 빌드 인자로 굳으므로, 인자를 빠뜨린 이미지는 **주소 없이 조용히** 배포된다
-      # — dev 도 위 healthz 확인도 이것을 못 본다. 위 빌드 단계가 준 CI 전용 값이
-      # 그대로 나오는지 본다(파이프로 찾지 않는 이유는 classroom-deploy-guard 의
+      # — dev 도 위 healthz 확인도 이것을 못 본다. 받은 staging 이미지에 저장소 변수
+      # STAGING_SUPPORT_EMAIL 이 그대로 나오는지 본다 — 변수가 비어 있어도 빨갛다(파이프로 찾지 않는 이유는 classroom-deploy-guard 의
       # 같은 자리 주석 참고 — grep -q 의 조기 종료가 pipefail 과 만나면 찾고도
       # 실패로 읽힌다).
       - name: The privacy policy carries a contact address baked at build time
+        env:
+          SUPPORT_EMAIL: ${{ vars.STAGING_SUPPORT_EMAIL }}
         run: |
           set -euo pipefail
+          [ -n "$SUPPORT_EMAIL" ] || { echo "::error::저장소 변수 STAGING_SUPPORT_EMAIL 이 비어 있다 — 방침에 문의 주소 없이 배포된다"; exit 1; }
           # 컨테이너 포트를 러너 호스트에 열지 않고, 그 컨테이너의 네트워크에 curl 을 붙여 친다 —
           # 러너가 컨테이너일 때(셀프호스티드 mac 의 Docker Desktop 등)는 호스트에 연 포트가 러너의
           # 127.0.0.1 로 닿는다는 보장이 없다. 이 모양은 어느 러너에서나 같다.
@@ -309,7 +322,7 @@ jobs:
             docker pull -q curlimages/curl:8.11.1 >/dev/null 2>&1 || sleep 3
           done
           html=$(c -sS --max-time 10 http://127.0.0.1:3000/privacy)
-          [[ "$html" == *"ci-guard@example.test"* ]] || {
+          [[ "$html" == *"$SUPPORT_EMAIL"* ]] || {
             echo "::error::구운 /privacy 에 문의 주소가 없다 — NEXT_PUBLIC_SUPPORT_EMAIL 빌드 인자가 빠졌는가?"
             printf '%s' "$html" | head -c 2000
             exit 1
@@ -319,11 +332,10 @@ jobs:
 
       - name: Tear down the boot-guard container
         if: always()
-        # 호스티드 VM 은 잡과 함께 사라지지만, 비상구로 셀프호스티드에서 돌 때를 위해 남긴다.
+        # 호스티드 VM 은 잡과 함께 사라지지만, 셀프호스티드로 옮겨 돌 때를 위해 남긴다.
         run: |
           docker rm -f frontend-boot-ok >/dev/null 2>&1 || true
           docker rmi -f codemit-frontend-runner-ci >/dev/null 2>&1 || true
-          docker builder prune -f --builder default --filter until=24h >/dev/null 2>&1 || true
 
       - name: Dump container state on failure
         if: failure()
@@ -341,50 +353,67 @@ jobs:
   # 이 앱에도 그대로 적용된다) — 이 잡은 그게 실제로 그런지 직접 관찰한다.
   operator-deploy-guard:
     runs-on: ubuntu-latest
+    # **배포되는 그 이미지를 검사한다**(2026-10-02). images-staging 이 ghcr 에 올린 이 커밋의
+    # staging 이미지를 받아 옛 이름으로 태그한다 — 뒤의 검사는 그 이름을 쓴다. 예전에는 가드가
+    # 같은 Dockerfile 을 CI 전용 값으로 따로 구워, 검사한 것과 배포되는 것이 달랐고 Next 빌드를
+    # 두 번(runner·builder) 더 돌렸다.
+    needs: images-staging
+    permissions:
+      contents: read
+      packages: read
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build the production operator image (runner stage)
-        run: docker build -f docker/operator.Dockerfile --target runner -t codemit-operator-runner-ci .
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      # frontend-deploy-guard와 같은 이유 — .dockerignore가 시크릿과 호스트
-      # node_modules를 실제로 막는지 이 앱에서도 직접 확인한다.
-      #
-      # **경로를 build context 기준으로 정확히 맞춘다**(#70 코드리뷰 지적,
-      # 심각). 이 스텝은 저장소 루트에서 `docker build ... .`을 돌리므로
-      # operator.Dockerfile의 `COPY operator/ ./operator/`가 시크릿을
-      # `/app/operator/.env`에 놓는다 — `/app/.env`는 애초에 존재할 수 없는
-      # 경로라 그 단정은 항상 거짓으로 통과했다. node_modules 검증도 이름만
-      # 약속하고 실제로는 아무 node_modules도 없어(이 잡은 pnpm install을
-      # 돌리지 않는다) 아무것도 검증하지 않았다 — 마커 파일을 직접 만들어
-      # 넣는다.
-      - name: .dockerignore actually keeps secrets and host node_modules out of the image
+      - name: Pull the staging operator image this commit deploys
+        run: |
+          image=ghcr.io/sandcorporation/codemit-operator:${{ github.sha }}-staging
+          docker pull -q "$image"
+          docker tag "$image" codemit-operator-runner-ci
+
+      # **.dockerignore 가 시크릿과 호스트 node_modules 를 빌드 컨텍스트에서 실제로 빼는가.**
+      # 패턴이 파일에 적혀 있다는 것만으로는 증명이 아니라(CLAUDE.md 「이미 데인 곳」) 가짜
+      # 시크릿과 가짜 node_modules 표식을 심어 본다. 예전에는 builder 스테이지를 통째로 다시
+      # 구워 그 안을 뒤졌는데, 컨텍스트에 들어오지 않은 것은 어느 스테이지에도 닿지 못하므로
+      # **컨텍스트 자체**(`COPY . /ctx` 만 하는 이미지)를 보는 편이 더 넓고 몇 초면 끝난다.
+      # 표준 입력의 Dockerfile 은 루트 .dockerignore 를 쓴다 — 그래서 이 앱의 Dockerfile 전용
+      # ignore(`docker/operator.Dockerfile.dockerignore`)가 생기면 이 검사가 그것을 못 본다고 멈춘다.
+      - name: .dockerignore actually keeps secrets and host node_modules out of the build context
         run: |
           set -euo pipefail
+          if [ -e docker/operator.Dockerfile.dockerignore ]; then
+            echo "::error::docker/operator.Dockerfile.dockerignore 가 생겼다 — 이 검사는 루트 .dockerignore 만 본다. 검사를 그 파일에 맞춰 고친다"
+            exit 1
+          fi
           echo "OPENAI_API_KEY=sk-ci-guard-fake-secret-do-not-leak" > operator/.env
           mkdir -p operator/node_modules/.ci-guard-marker
           echo "host-node-modules-should-not-leak-into-image" > operator/node_modules/.ci-guard-marker/marker.txt
-          docker build -f docker/operator.Dockerfile --target builder -t codemit-operator-builder-ci-guard .
-          docker run --rm --entrypoint sh codemit-operator-builder-ci-guard -c '
+          printf 'FROM busybox:1.36\nCOPY . /ctx\n' | docker build -q -f - -t codemit-operator-context-probe . >/dev/null
+          docker run --rm codemit-operator-context-probe sh -c '
             set -e
-            if [ -f /app/operator/.env ]; then
-              echo "FOUND /app/operator/.env — .dockerignore가 시크릿을 막지 못했다" >&2
+            if [ -f /ctx/operator/.env ]; then
+              echo "FOUND operator/.env — .dockerignore가 시크릿을 막지 못했다" >&2
               exit 1
             fi
-            if [ -d /app/operator/node_modules/.ci-guard-marker ]; then
-              echo "FOUND /app/operator/node_modules/.ci-guard-marker — .dockerignore가 호스트 node_modules를 막지 못했다" >&2
+            if [ -d /ctx/operator/node_modules/.ci-guard-marker ]; then
+              echo "FOUND operator/node_modules/.ci-guard-marker — .dockerignore가 호스트 node_modules를 막지 못했다" >&2
               exit 1
             fi
-            if grep -rl "sk-ci-guard-fake-secret\|host-node-modules-should-not-leak-into-image" /app > /dev/null 2>&1; then
-              echo "가짜 시크릿 또는 host node_modules 마커가 이미지 어딘가에 들어갔다" >&2
+            if grep -rl "sk-ci-guard-fake-secret\|host-node-modules-should-not-leak-into-image" /ctx > /dev/null 2>&1; then
+              echo "가짜 시크릿 또는 host node_modules 마커가 빌드 컨텍스트 어딘가에 들어갔다" >&2
               exit 1
             fi
-            echo "confirmed: .env and host node_modules excluded from the image"
+            echo "confirmed: .env and host node_modules excluded from the build context"
           '
           rm -f operator/.env
           rm -rf operator/node_modules/.ci-guard-marker
-          docker rmi codemit-operator-builder-ci-guard
+          docker rmi codemit-operator-context-probe >/dev/null
 
       - name: Refuses to boot in production with missing config (and actually exits — not just logs)
         run: |
@@ -487,11 +516,10 @@ jobs:
 
       - name: Tear down the boot-guard container
         if: always()
-        # 호스티드 VM 은 잡과 함께 사라지지만, 비상구로 셀프호스티드에서 돌 때를 위해 남긴다.
+        # 호스티드 VM 은 잡과 함께 사라지지만, 셀프호스티드로 옮겨 돌 때를 위해 남긴다.
         run: |
           docker rm -f operator-boot-ok >/dev/null 2>&1 || true
           docker rmi -f codemit-operator-runner-ci >/dev/null 2>&1 || true
-          docker builder prune -f --builder default --filter until=24h >/dev/null 2>&1 || true
 
       - name: Dump container state on failure
         if: failure()
@@ -521,41 +549,67 @@ jobs:
   # classroom/lib/auth/cookies.test.ts 의 유닛 테스트가 이미 고정하고 있다.
   classroom-deploy-guard:
     runs-on: ubuntu-latest
+    # **배포되는 그 이미지를 검사한다**(2026-10-02). images-staging 이 ghcr 에 올린 이 커밋의
+    # staging 이미지를 받아 옛 이름으로 태그한다 — 뒤의 검사는 그 이름을 쓴다. 예전에는 가드가
+    # 같은 Dockerfile 을 CI 전용 값으로 따로 구워, 검사한 것과 배포되는 것이 달랐고 Next 빌드를
+    # 두 번(runner·builder) 더 돌렸다.
+    needs: images-staging
+    permissions:
+      contents: read
+      packages: read
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build the production classroom image (runner stage)
-        run: docker build -f docker/classroom.Dockerfile --target runner -t codemit-classroom-runner-ci .
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      # frontend-deploy-guard와 같은 이유 — .dockerignore가 시크릿과 호스트
-      # node_modules를 실제로 막는지 이 앱에서도 직접 확인한다.
-      - name: .dockerignore actually keeps secrets and host node_modules out of the image
+      - name: Pull the staging classroom image this commit deploys
+        run: |
+          image=ghcr.io/sandcorporation/codemit-classroom:${{ github.sha }}-staging
+          docker pull -q "$image"
+          docker tag "$image" codemit-classroom-runner-ci
+
+      # **.dockerignore 가 시크릿과 호스트 node_modules 를 빌드 컨텍스트에서 실제로 빼는가.**
+      # 패턴이 파일에 적혀 있다는 것만으로는 증명이 아니라(CLAUDE.md 「이미 데인 곳」) 가짜
+      # 시크릿과 가짜 node_modules 표식을 심어 본다. 예전에는 builder 스테이지를 통째로 다시
+      # 구워 그 안을 뒤졌는데, 컨텍스트에 들어오지 않은 것은 어느 스테이지에도 닿지 못하므로
+      # **컨텍스트 자체**(`COPY . /ctx` 만 하는 이미지)를 보는 편이 더 넓고 몇 초면 끝난다.
+      # 표준 입력의 Dockerfile 은 루트 .dockerignore 를 쓴다 — 그래서 이 앱의 Dockerfile 전용
+      # ignore(`docker/classroom.Dockerfile.dockerignore`)가 생기면 이 검사가 그것을 못 본다고 멈춘다.
+      - name: .dockerignore actually keeps secrets and host node_modules out of the build context
         run: |
           set -euo pipefail
+          if [ -e docker/classroom.Dockerfile.dockerignore ]; then
+            echo "::error::docker/classroom.Dockerfile.dockerignore 가 생겼다 — 이 검사는 루트 .dockerignore 만 본다. 검사를 그 파일에 맞춰 고친다"
+            exit 1
+          fi
           echo "OPENAI_API_KEY=sk-ci-guard-fake-secret-do-not-leak" > classroom/.env
           mkdir -p classroom/node_modules/.ci-guard-marker
           echo "host-node-modules-should-not-leak-into-image" > classroom/node_modules/.ci-guard-marker/marker.txt
-          docker build -f docker/classroom.Dockerfile --target builder -t codemit-classroom-builder-ci-guard .
-          docker run --rm --entrypoint sh codemit-classroom-builder-ci-guard -c '
+          printf 'FROM busybox:1.36\nCOPY . /ctx\n' | docker build -q -f - -t codemit-classroom-context-probe . >/dev/null
+          docker run --rm codemit-classroom-context-probe sh -c '
             set -e
-            if [ -f /app/classroom/.env ]; then
-              echo "FOUND /app/classroom/.env — .dockerignore가 시크릿을 막지 못했다" >&2
+            if [ -f /ctx/classroom/.env ]; then
+              echo "FOUND classroom/.env — .dockerignore가 시크릿을 막지 못했다" >&2
               exit 1
             fi
-            if [ -d /app/classroom/node_modules/.ci-guard-marker ]; then
-              echo "FOUND /app/classroom/node_modules/.ci-guard-marker — .dockerignore가 호스트 node_modules를 막지 못했다" >&2
+            if [ -d /ctx/classroom/node_modules/.ci-guard-marker ]; then
+              echo "FOUND classroom/node_modules/.ci-guard-marker — .dockerignore가 호스트 node_modules를 막지 못했다" >&2
               exit 1
             fi
-            if grep -rl "sk-ci-guard-fake-secret\|host-node-modules-should-not-leak-into-image" /app > /dev/null 2>&1; then
-              echo "가짜 시크릿 또는 host node_modules 마커가 이미지 어딘가에 들어갔다" >&2
+            if grep -rl "sk-ci-guard-fake-secret\|host-node-modules-should-not-leak-into-image" /ctx > /dev/null 2>&1; then
+              echo "가짜 시크릿 또는 host node_modules 마커가 빌드 컨텍스트 어딘가에 들어갔다" >&2
               exit 1
             fi
-            echo "confirmed: .env and host node_modules excluded from the image"
+            echo "confirmed: .env and host node_modules excluded from the build context"
           '
           rm -f classroom/.env
           rm -rf classroom/node_modules/.ci-guard-marker
-          docker rmi codemit-classroom-builder-ci-guard
+          docker rmi codemit-classroom-context-probe >/dev/null
 
       - name: Refuses to boot in production with missing config (and actually exits — not just logs)
         run: |
@@ -670,11 +724,10 @@ jobs:
 
       - name: Tear down the boot-guard container
         if: always()
-        # 호스티드 VM 은 잡과 함께 사라지지만, 비상구로 셀프호스티드에서 돌 때를 위해 남긴다.
+        # 호스티드 VM 은 잡과 함께 사라지지만, 셀프호스티드로 옮겨 돌 때를 위해 남긴다.
         run: |
           docker rm -f classroom-boot-ok >/dev/null 2>&1 || true
           docker rmi -f codemit-classroom-runner-ci >/dev/null 2>&1 || true
-          docker builder prune -f --builder default --filter until=24h >/dev/null 2>&1 || true
 
       - name: Dump container state on failure
         if: failure()
@@ -845,7 +898,7 @@ jobs:
 
 
   promote-staging:
-    # **이미지 열둘과 부팅 가드 셋이 다 초록이면 `staging` 을 이 커밋으로 fast-forward 한다.**
+    # **이미지 열둘과 (그 staging 이미지를 받아 본) 부팅 가드 셋이 다 초록이면 `staging` 을 이 커밋으로 fast-forward 한다.**
     # prod 이미지까지 기다리는 이유: staging 이 초록이면 Jenkins 가 곧바로 `production` 을 같은
     # 커밋으로 앞당긴다 — 그때 prod 이미지가 ghcr 에 있어야 한다.
     #
