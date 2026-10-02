@@ -83,8 +83,10 @@ def test_the_class_tools_are_listed_as_reversible_writes(client, db):
     _, _, token = _setup(client)
     tools = _tools(client, token)
     assert set(CLASS_TOOLS) <= set(tools)
-    # 삭제·공개는 두 단계 확인과 함께 따로 연다(#515).
-    assert not {"delete_class", "publish_class_template", "publish_problem_template"} & set(tools)
+    # 삭제·공개는 이 묶음이 아니라 두 단계 확인 도구로 열린다(#515).
+    for name in ("delete_class", "publish_class_template", "publish_problem_template"):
+        assert name not in CLASS_TOOLS, name
+        assert tools[name]["annotations"]["destructiveHint"] is True, name
     for name in CLASS_TOOLS:
         annotations = tools[name]["annotations"]
         assert annotations["readOnlyHint"] is False, name

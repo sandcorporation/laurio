@@ -167,6 +167,7 @@ for _spec in REPORT_TOOL_SPECS:
 
 # 되돌릴 수 없는 도구(#515) — 두 단계 확인. 처리기는 `mcp_destructive_tools` 에 산다.
 for _tool in DESTRUCTIVE_TOOLS:
+    TOOLS[_tool.name] = _tool
 
 # 클래스를 다루는 쓰기 도구(#516) — `mcp_class_tools` 에 산다. 등록부 끝에 덧붙인다.
 for _tool in CLASS_TOOLS:
