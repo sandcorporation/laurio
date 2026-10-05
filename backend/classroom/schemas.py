@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from ninja import Field, Schema
 
@@ -95,6 +95,10 @@ class ClassOut(Schema):
     #: `None`이다 — 클래스 설정 화면이 이 값으로 공개 폼과 공개된 상태를
     #: 새로고침 뒤에도 정확히 가른다.
     published_template: PublishedTemplateSummaryOut | None = None
+    #: 부른 사람이 이 클래스에서 무엇인가(#561, CONTEXT.md 「공동 강사」) — "owner"(소유자)
+    #: 또는 "co_instructor"(공동 강사). 화면이 이 값으로 소유자 전용 컨트롤(채점 키·예산·
+    #: 클래스 삭제)을 감추고 클래스 목록에 「공동 강사」를 표시한다.
+    role: Literal["owner", "co_instructor"]
 
 
 class OpenAIKeyIn(Schema):
@@ -378,6 +382,44 @@ class JoinPreviewOut(Schema):
     #: 카카오가 아닌 제공자) `None`이다 — 화면은 그때 이름 칸을 그냥 비워
     #: 둔다.
     suggested_name: str | None = None
+
+
+class CoInstructorInviteOut(Schema):
+    """만든 공동 강사 초대 하나(#561) — 링크는 화면이 `token`으로 조립한다(가입 링크와 같다)."""
+
+    id: int
+    token: str
+    created_at: datetime
+    expires_at: datetime
+
+
+class CoInstructorInvitePreviewOut(Schema):
+    """초대 링크를 연 사람이 보는 것(#561) — 로그인하지 않아도 열린다."""
+
+    class_id: int
+    class_name: str
+    #: 이 클래스에서 불리는 강사 이름들 — 소유자 먼저. 빈 이름은 빠진다.
+    instructor_names: list[str]
+    #: "pending"|"accepted"|"expired"|"cancelled" — 대기가 아니면 수락되지 않는다.
+    status: Literal["pending", "accepted", "expired", "cancelled"]
+    #: 대기가 아닐 때 그 사실을 말하는 문장 — 대기면 `None`.
+    status_message: str | None = None
+    expires_at: datetime
+    archived: bool = False
+    #: 로그인한 사람이 이미 이 클래스의 강사인가(소유자 포함) — 로그인하지 않았으면 거짓.
+    already_instructor: bool = False
+    #: 이름 칸 기본값으로 쓸 제안 이름 — 가입 미리보기의 `suggested_name`과 같다.
+    suggested_name: str | None = None
+
+
+class CoInstructorAcceptIn(Schema):
+    #: 이 클래스에서 불릴 강사 이름 — 가입 미리보기에 이 이름이 보인다.
+    display_name: str = Field(min_length=1, max_length=100)
+
+
+class CoInstructorAcceptOut(Schema):
+    class_id: int
+    class_name: str
 
 
 class JoinIn(Schema):

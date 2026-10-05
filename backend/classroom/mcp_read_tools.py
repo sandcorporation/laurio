@@ -62,16 +62,16 @@ def _problem_id(arguments: dict) -> int:
     return _int_argument(arguments, "problem_id", "문제")
 
 
-def class_view(class_obj) -> dict:
+def class_view(class_obj, viewer_id: int) -> dict:
     """연결된 앱이 보는 클래스 하나 — 화면 응답에서 키의 가린 표시만 뺀다. 클래스를 바꾸는
     도구(`classroom.mcp_class_tools`)도 결과를 이 모양으로 돌려준다."""
 
-    return _as_screen_json(_serialize_class(class_obj).model_dump(exclude=_CLASS_FIELDS_WITHHELD))
+    return _as_screen_json(_serialize_class(class_obj, viewer_id=viewer_id).model_dump(exclude=_CLASS_FIELDS_WITHHELD))
 
 
 def _get_class(grant: ConnectedApp, arguments: dict) -> dict:
     class_obj = class_scope(_class_id(arguments), grant.instructor_id, write=False, owner=False).class_obj
-    return class_view(class_obj)
+    return class_view(class_obj, grant.instructor_id)
 
 
 def _list_problems(grant: ConnectedApp, arguments: dict) -> dict:

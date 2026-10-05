@@ -58,6 +58,11 @@ RULES: dict[tuple[str, str, str], BannedWordRule] = {
     ("classroom", "ClassPatchIn", "instructor_display_name"): BannedWordRule(
         checks_impersonation=True, checks_profanity=True
     ),
+    #: 공동 강사가 수락할 때 정하는, 이 클래스에서 불릴 강사 이름(#561) — 소유자의
+    #: 강사 이름과 같은 자리라 같은 검사를 건다.
+    ("classroom", "CoInstructorAcceptIn", "display_name"): BannedWordRule(
+        checks_impersonation=True, checks_profanity=True
+    ),
     #: 템플릿 공개자 이름(#477) — 문제 템플릿 공개(`publish_template`)와
     #: 클래스 템플릿 공개(`publish_class_template`)가 같은 입력 스키마를
     #: 쓰므로 한 줄이 둘 다 검사한다.

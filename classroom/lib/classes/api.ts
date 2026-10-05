@@ -47,6 +47,9 @@ export type ClassRow = {
   // 판정해 내려준다. 참이면 삭제할 수 없고 보관만 된다.
   has_submissions: boolean;
   published_template: PublishedClassTemplateSummary | null;
+  // 부른 사람이 이 클래스에서 무엇인가(#561) — 공동 강사에게는 소유자 전용 컨트롤
+  // (채점 키·예산·클래스 삭제)을 감추고, 클래스 목록에 「공동 강사」를 표시한다.
+  role: "owner" | "co_instructor";
 };
 
 // 「내가 참여자로 들어간 클래스」한 줄(#328) — 강사 전용 `ClassRow`와 달리

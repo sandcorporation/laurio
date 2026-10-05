@@ -13,6 +13,14 @@ export const ORPHAN_ALLOWLIST: OrphanAllowlistEntry[] = [
       "주소다 — 이 앱 안의 <Link>가 이 라우트로 이어질 이유가 없다.",
   },
   {
+    route: "/invite/[token]",
+    reason:
+      // SCREEN-LANGUAGE-EXCEPTION: route-audit 도구가 읽는 개발자용 근거 문서이지
+      // 사용자에게 렌더링되는 화면 문자열이 아니다 — 이슈 번호가 바로 그 근거다.
+      "공동 강사 초대 링크(#561)는 강사가 클래스 상세에서 복사해 앱 밖으로 건네는 " +
+      "주소다 — 가입 링크와 같이 이 앱 안의 <Link>가 이 라우트로 이어질 이유가 없다.",
+  },
+  {
     route: "/class-templates",
     reason:
       // SCREEN-LANGUAGE-EXCEPTION: route-audit 도구가 읽는 개발자용 근거 문서이지

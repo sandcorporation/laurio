@@ -33,6 +33,7 @@ from storage.adapters.fake import FakeStorageAdapter
 
 CLASSES_URL = "/api/classroom/classes"
 JOIN_URL = "/api/classroom/join"
+CO_INSTRUCTOR_INVITES_URL = "/api/classroom/co-instructor-invites"
 SCAN_URL = "/api/internal/scans/classroom-submission-scoring"
 
 #: 벤더 응답 분기 자체를 검증하는 파일이 강제로 켜는 실물 어댑터(#340,
@@ -163,6 +164,57 @@ def join_class(
     """가장 흔한 모양 — 강사 접근 토큰으로 참가 코드를 읽어 그대로 참여한다."""
 
     join(client, access, join_code(client, instructor_access, class_id), display_name=display_name)
+
+
+# --- 공동 강사 (#561) ------------------------------------------------------
+
+
+def create_co_instructor_invite(client, access: str, class_id: int) -> dict:
+    """강사(소유자 또는 공동 강사)가 초대 하나를 만든다 — `token`·`expires_at` 이 든다."""
+
+    response = client.post(
+        f"{CLASSES_URL}/{class_id}/co-instructor-invites",
+        content_type="application/json",
+        **auth_header(access),
+    )
+    assert response.status_code == 201, response.content
+    return response.json()
+
+
+def preview_co_instructor_invite(client, token: str, access: str | None = None):
+    """초대 미리보기 응답 그대로 — 로그인하지 않은 방문자는 `access=None`."""
+
+    headers = auth_header(access) if access else {}
+    return client.get(f"{CO_INSTRUCTOR_INVITES_URL}/{token}", **headers)
+
+
+def accept_co_instructor_invite(client, access: str, token: str, *, display_name: str = "공동 강사"):
+    """수락 응답 그대로 — 거절(404·409·410)을 보는 테스트가 상태 코드를 직접 본다."""
+
+    return client.post(
+        f"{CO_INSTRUCTOR_INVITES_URL}/{token}/accept",
+        data={"display_name": display_name},
+        content_type="application/json",
+        **auth_header(access),
+    )
+
+
+def add_co_instructor(
+    client, owner_access: str, class_id: int, co_access: str, *, display_name: str = "공동 강사"
+) -> None:
+    """가장 흔한 모양 — 소유자가 초대를 만들고 그 사람이 곧장 수락한다."""
+
+    token = create_co_instructor_invite(client, owner_access, class_id)["token"]
+    response = accept_co_instructor_invite(client, co_access, token, display_name=display_name)
+    assert response.status_code == 200, response.content
+
+
+def list_taught_classes(client, access: str) -> list:
+    """강사 화면의 「내 클래스」(소유한 것과 공동 강사인 것)."""
+
+    response = client.get(CLASSES_URL, **auth_header(access))
+    assert response.status_code == 200, response.content
+    return response.json()
 
 
 # --- 문제 --------------------------------------------------------------

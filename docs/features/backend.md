@@ -239,15 +239,18 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 
 | | |
 | --- | --- |
-| `POST`·`GET /api/classroom/classes[/{id}]` | 클래스를 열고 내 것만 본다 |
+| `POST`·`GET /api/classroom/classes[/{id}]` | 클래스를 열고 내가 강사인 것만 본다 — 소유한 것과 공동 강사인 것, 어느 쪽인지 `role` 이 말한다(#561) |
 | `GET /api/classroom/classes/joined` | 참여자로 들어간 클래스 — 본인이 강사인 클래스는 여기 겹쳐 나오지 않는다(#328) |
-| `PATCH /api/classroom/classes/{id}` | 이름·기본 채점 모델·기본 추론 강도를 고친다(#402) |
+| `PATCH /api/classroom/classes/{id}` | 이름·기본 채점 모델·기본 추론 강도를 고친다(#402) — 예산 칸과 소유자의 강사 이름 칸은 소유자만 |
 | `PUT /api/classroom/classes/{id}/openai-key` | 강사 본인의 채점 키를 저장한다 — 마스킹된 값만 돌려준다(#284) |
 | `GET /api/classroom/classes/{id}/scoring-models` | 그 클래스의 키로 실제로 쓸 수 있는 채점 모델·컨텍스트 크기·추론 모델 여부(#401, 예전 전역 `/scoring-models`를 대신한다) |
 | `POST /api/classroom/classes/{id}/join-link/regenerate` | 가입 링크를 다시 뽑는다 — 이전 코드는 죽는다(#279) |
 | `POST .../archive`·`.../unarchive` | 클래스를 보관하고 되돌린다 — 지우지 않는다(#294) |
 | `DELETE /api/classroom/classes/{id}` | 클래스를 지운다 — 어느 문제에도 제출이 없을 때만, 되돌릴 수 없다(#330) |
 | `GET`·`POST /api/classroom/join/{code}` | 가입 링크 미리보기(인증 불필요)와 가입(#280) |
+| `POST /api/classroom/classes/{id}/co-instructor-invites` | 공동 강사 초대를 하나 만든다 — 강사 누구나, 보관된 클래스에서도, 여러 개를 동시에(#561) |
+| `GET /api/classroom/co-instructor-invites/{token}` | 초대 미리보기(인증 불필요) — 클래스 이름·강사 이름들·상태(대기·수락됨·만료·취소됨), 쓸 수 없으면 그 문장(#561) |
+| `POST /api/classroom/co-instructor-invites/{token}/accept` | 초대를 쓰고 공동 강사가 된다 — 이 클래스에서 불릴 강사 이름이 필요하다. 1회용(410), 7일 만료(410), 이미 강사면 409 이고 초대는 남는다(#561) |
 | `GET /api/classroom/classes/{id}/members` | 참여자 명단 — 강사 전용(#281) |
 | `POST .../members/{id}/expel` | 참여자를 내보낸다 — 행은 지우지 않는다(#281) |
 | `GET .../roster-grid` | 참여자 × 문제 격자 — 셀마다 통과 이력, 달성률 행은 `problems` 목록과 같은 계산을 재사용한다(#290) |
@@ -306,10 +309,24 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 없는 것처럼 404를 받는다 — 403이 아니다, 목록에도 상세에도 존재를 드러내지 않는다.
 `.../problems/mine`·`.../problems/{id}/mine`·`.../submissions`만 예외다(#286/#288) —
 `ClassMember`인지, 그 문제가 열려 있는지를 같은 404로 가른다. 내보내진(`expelled`)
-참여자는 새 시도만 403으로 막힌다. 강사 가운데 **소유자**만 하는 일이 따로 있다 —
-채점 키 저장, 예산 칸(상한·경고 임계)을 고치는 설정, 클래스 삭제(ADR-0055). 강사이지만
-소유자가 아니면 403이다(`classroom.instructor_scope` 의 `owner=True`). 지금은 클래스의
-강사가 소유자 한 명뿐이라 이 갈림이 드러나는 사람이 없다.
+참여자는 새 시도만 403으로 막힌다.
+
+**강사는 소유자 한 명과 공동 강사 여럿이다**(#561, ADR-0055, `classroom.instructors`).
+소유자는 `Class.instructor`, 공동 강사는 공동 강사 초대를 수락해 생긴 `ClassCoInstructor`
+행이다. 강사 전용 라우트는 강사 누구에게나 같은 답을 준다 — 소유자만 하는 일이 따로 있다:
+채점 키 저장, 예산 칸(상한·경고 임계)과 소유자의 강사 이름 칸을 고치는 설정, 클래스 삭제.
+공동 강사가 부르면 403이다(클래스는 보이므로 404 가 아니다, `classroom.instructor_scope` 의
+`owner=True`). 강사 전용 라우트 전부를 세 사람(소유자·공동 강사·남)으로 훑는 표가
+`tests/test_classroom_co_instructor_permissions.py` 에 있다. 달성률 분모·명단·격자에서 빠지는
+「강사」는 지금 강사인 사람 전원이다 — 참여자였다가 공동 강사가 된 사람도 빠지고, 그 사람의
+지난 시도는 남는다. 공동 강사와 소유자의 시도만 있는 문제는 지울 수 있다. 강사용 실시간
+신호(참여자의 새 시도)도 강사 전원에게 간다.
+
+**공동 강사 초대는 1회용이다**(#561, `classroom.co_instructors`). 수락은 한 트랜잭션에서
+초대 행을 잠그고 「아직 대기인가」를 다시 본 뒤에야 공동 강사 행을 만든다 — 같은 링크를 둘이
+동시에 눌러도 한 사람만 된다. 만료는 만든 때 + 7일(주입 가능한 시계, ADR-0003). 상태는
+따로 저장하지 않고 수락·취소·만료 시각에서 읽는다. 보관된 클래스에서도 만들고 수락한다.
+연결된 앱(MCP)에는 초대 도구가 없다(ADR-0055).
 
 **보관(`archived_at`)은 지우지 않는다**(#294) — `.../unarchive`로 언제든 되돌아온다.
 **보관은 읽기 전용이라는 뜻이다**(#438, `classroom.participation.assert_class_mutable`).
@@ -539,9 +556,9 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 
 **도구가 닿는 클래스는 화면과 같은 판정으로 고른다**(#560, ADR-0055). 연결된 앱의 주인이
 「강사인」 클래스(`classroom.instructors`)가 범위이고, 명단·리포트의 「강사 자리」 표시와 삭제
-미리보기의 「강사 자신의 시도」도 같은 판정이다. 소유자 전용 일 — 클래스 삭제, 설정의 예산 칸 —
-은 소유자일 때만이고 아니면 화면과 같은 문장으로 거절된다. 지금은 강사가 소유자 한 명뿐이라
-이 갈림이 드러나는 사람이 없다. 구조 테스트(`tests/test_classroom_instructor_scope_structure.py`)가
+미리보기의 「강사 자신의 시도」도 같은 판정이다 — 공동 강사가 연결한 앱도 공동 강사인 클래스에
+닿는다(#561). 소유자 전용 일 — 클래스 삭제, 설정의 예산 칸과 소유자의 강사 이름 칸 — 은
+소유자일 때만이고 아니면 화면과 같은 문장으로 거절된다. 공동 강사 초대 도구는 없다. 구조 테스트(`tests/test_classroom_instructor_scope_structure.py`)가
 도구 모듈에 `Class.instructor` 직접 참조가 없고 소유자 확인이 그 두 도구에만 있음을 지킨다.
 
 **클래스 도구도 같다**(#516). 화면 라우트와 같은 범위를 같은 `write` 값으로 연다 — 설정·복사·
