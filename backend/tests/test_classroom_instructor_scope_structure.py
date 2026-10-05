@@ -307,22 +307,29 @@ def test_every_owner_only_entry_has_a_reason():
 # 이벤트·채점 알림·제출 해석기·탈퇴는 `instructor`/`instructor_id` 를 직접 비교·필터하지
 # 않는다. 남는 자리는 **소유자 자체**를 뜻하는 곳뿐이고 아래 표에 이유가 있다.
 #
-# 연결된 앱(`mcp*`·`oauth*`·`connected_app*`)은 다음 티켓(#560)의 몫이라 아직 훑지 않는다 —
-# 그쪽의 `grant.instructor_id` 는 Class 가 아니라 ConnectedApp 의 주인(계정)이다.
+# 연결된 앱(`mcp*`·`oauth*`·`connected_app*`)도 같은 스캔을 받는다(#560). 그쪽에는 Class 가
+# 아닌 `instructor` 가 하나 더 있다 — **연결된 앱(`ConnectedApp`)의 주인(계정)**이다. 도구
+# 처리기가 받는 `grant` 가 그 ConnectedApp 이라 `grant.instructor_id` 는 「누가 부르는가」이지
+# 「이 클래스의 강사인가」가 아니다 — 그래서 `grant` 위의 속성은 잡지 않는다
+# (`_CONNECTED_APP_RECEIVERS`). OAuth·쓰기 기록이 ConnectedApp 을 주인으로 고르는 자리는
+# 아래 표에 함수별로 이유가 있다.
 # ---------------------------------------------------------------------------
 
 _DIRECT_REFERENCE_SKIPPED = {"instructors.py", "models.py"}
-_DIRECT_REFERENCE_SKIPPED_PREFIXES = ("mcp", "oauth", "connected_app")
 
 _DIRECT_REFERENCE_FILES = sorted(
     [
         path.relative_to(BACKEND_ROOT)
         for path in (BACKEND_ROOT / "classroom").glob("*.py")
         if path.name not in _DIRECT_REFERENCE_SKIPPED
-        and not path.name.startswith(_DIRECT_REFERENCE_SKIPPED_PREFIXES)
     ]
     + [Path("submissions/resolvers.py"), Path("accounts/withdrawal.py")]
 )
+
+#: 이 이름의 변수는 ConnectedApp 이다 — 그 `instructor`/`instructor_id` 는 연결된 앱의 주인(계정)이다.
+_CONNECTED_APP_RECEIVERS = {"grant"}
+
+_CONNECTED_APP_OWNER = "ConnectedApp 의 주인(계정)을 고른다 — Class 의 강사가 아니다(연결된 앱의 주인은 계정, #560)."
 
 #: (파일, 함수 이름) → 왜 소유자 자체를 뜻하는가.
 DIRECT_INSTRUCTOR_ALLOWLIST: dict[Path, dict[str, str]] = {
@@ -341,6 +348,17 @@ DIRECT_INSTRUCTOR_ALLOWLIST: dict[Path, dict[str, str]] = {
     Path("accounts/withdrawal.py"): {
         "_instructor_has_class_in_progress": "탈퇴 차단은 **소유한** 클래스만 센다(CONTEXT.md 「공동 강사」) — 공동 강사 자리는 탈퇴로 빠진다.",
     },
+    Path("classroom/oauth.py"): {
+        "issue_code": _CONNECTED_APP_OWNER,
+        "refresh": _CONNECTED_APP_OWNER,
+        "authenticate_access_token": _CONNECTED_APP_OWNER,
+        "disconnect": _CONNECTED_APP_OWNER,
+        "revoke_all_for_user": _CONNECTED_APP_OWNER,
+        "active_connected_apps": _CONNECTED_APP_OWNER,
+    },
+    Path("classroom/connected_app_writes.py"): {
+        "record_write": "쓰기 기록의 주인은 연결된 앱의 주인(계정)이다 — 어느 클래스의 강사인가와 무관하다.",
+    },
 }
 
 _INSTRUCTOR_LOOKUP = re.compile(r"(^|__)instructor(_id)?$")
@@ -358,7 +376,11 @@ def _direct_instructor_references(tree: ast.AST) -> list[tuple[str, int]]:
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 name = child.name
             hit = (
-                (isinstance(child, ast.Attribute) and child.attr in ("instructor", "instructor_id"))
+                (
+                    isinstance(child, ast.Attribute)
+                    and child.attr in ("instructor", "instructor_id")
+                    and not (isinstance(child.value, ast.Name) and child.value.id in _CONNECTED_APP_RECEIVERS)
+                )
                 or (isinstance(child, ast.keyword) and child.arg and _INSTRUCTOR_LOOKUP.search(child.arg))
                 or (
                     isinstance(child, ast.Constant)
@@ -422,7 +444,61 @@ def test_the_direct_reference_shapes_are_caught(source: str):
         "def f(c):\n    return c.instructor_display_name\n",
         "def f(m, c):\n    return MemberOut(is_instructor=is_instructor(c, m.user_id))\n",
         "def f(r, p, m, x):\n    return _create_submission_row(r, p, m, x, as_instructor=True)\n",
+        # 연결된 앱의 주인(계정) — 도구가 「누가 부르는가」를 범위에 넘기는 모양.
+        "def f(grant, a):\n    return class_scope(a, grant.instructor_id, write=False, owner=False)\n",
     ],
 )
 def test_the_lookalikes_are_not_caught(source: str):
     assert not _direct_instructor_references(ast.parse(source))
+
+
+def test_a_class_instructor_reached_through_the_grant_is_still_caught():
+    """`grant` 를 건너뛰는 것은 그 위의 속성 하나뿐이다 — 거기서 Class 로 내려가면 잡힌다."""
+
+    source = "def f(grant, c):\n    return Problem.objects.filter(classroom__instructor_id=grant.instructor_id)\n"
+    assert _direct_instructor_references(ast.parse(source))
+
+
+# ---------------------------------------------------------------------------
+# 연결된 앱의 소유자 전용 도구 (#560, spec #558)
+#
+# 연결된 앱은 화면과 같은 일을 하되 소유자 전용 일은 소유자일 때만이다. 도구 처리기는
+# 라우트가 아니라 `_<도구 이름>` 함수라 `OWNER_ONLY_ROUTES` 와 같은 표를 처리기 이름으로 둔다.
+# ---------------------------------------------------------------------------
+
+_MCP_TOOL_FILES = sorted(
+    path.relative_to(BACKEND_ROOT) for path in (BACKEND_ROOT / "classroom").glob("mcp*_tools.py")
+)
+
+#: (파일, 처리기 이름) → 어떻게 소유자를 확인하는가. 표 밖의 처리기는 소유자를 확인하지 않는다.
+OWNER_ONLY_MCP_TOOLS: dict[Path, dict[str, str]] = {
+    Path("classroom/mcp_destructive_tools.py"): {
+        "_delete_class": "화면의 delete_class 와 같다 — class_scope(owner=True).",
+    },
+    Path("classroom/mcp_class_tools.py"): {
+        "_update_class_settings": "화면의 update_class 와 같다 — 예산 칸을 보낼 때만 scope.require_owner().",
+    },
+}
+
+
+def _top_level_defs(tree: ast.Module) -> dict[str, ast.FunctionDef]:
+    return {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+
+
+def test_mcp_owner_only_tools_pass_through_the_owner_scope():
+    missing = []
+    for relative_path, owner_only in OWNER_ONLY_MCP_TOOLS.items():
+        defs = _top_level_defs(ast.parse((BACKEND_ROOT / relative_path).read_text(encoding="utf-8")))
+        stale = set(owner_only) - set(defs)
+        assert not stale, f"{relative_path}의 OWNER_ONLY_MCP_TOOLS에 없는 함수가 남아 있다: {stale}"
+        missing += [f"{relative_path} — {name}" for name, reason in owner_only.items() if not reason.strip() or not _checks_owner(defs[name])]
+    assert not missing, f"소유자 전용 도구가 소유자를 확인하지 않는다(또는 이유가 비었다): {missing}"
+
+
+def test_mcp_tools_outside_the_owner_only_table_do_not_check_owner():
+    extra = []
+    for relative_path in _MCP_TOOL_FILES:
+        owner_only = OWNER_ONLY_MCP_TOOLS.get(relative_path, {})
+        defs = _top_level_defs(ast.parse((BACKEND_ROOT / relative_path).read_text(encoding="utf-8")))
+        extra += [f"{relative_path} — {name}" for name, node in defs.items() if name not in owner_only and _checks_owner(node)]
+    assert not extra, f"OWNER_ONLY_MCP_TOOLS 밖에서 소유자를 확인한다(표에 이유와 함께 올리거나 걷는다): {extra}"
