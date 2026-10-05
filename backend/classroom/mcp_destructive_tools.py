@@ -32,6 +32,7 @@ from .api import (
     remove_problem,
 )
 from .instructor_scope import class_scope, problem_scope
+from .instructors import instructor_user_ids, is_instructor
 from .mcp_confirmation import CONFIRMATION_ARGUMENT, CONFIRMATION_SCHEMA, needs_confirmation, presented, redeem
 from .mcp_problem_tools import _check_arguments, _id, _object, _parse
 from .mcp_tool import Preview, Tool, WriteResult
@@ -113,8 +114,9 @@ def _delete_problem(grant: ConnectedApp, arguments: dict) -> Preview | WriteResu
     ensure_problem_deletable(problem, class_obj)
 
     checklist_count = problem.checklist_items.count()
+    # 「강사 자신의 시도」는 화면의 삭제 판정(`classroom.api._problem_deletable`)과 같은 사람들이다.
     own_attempts = ClassroomSubmission.objects.filter(
-        problem=problem, member__user_id=class_obj.instructor_id
+        problem=problem, member__user_id__in=instructor_user_ids(class_obj)
     ).count()
     template_kept = ProblemTemplate.objects.filter(source_problem=problem, taken_down_at__isnull=True).exists()
     preview = {
@@ -159,7 +161,8 @@ def _delete_class(grant: ConnectedApp, arguments: dict) -> Preview | WriteResult
 
     problems = list(class_obj.problems.order_by("order", "id"))
     members = list(class_obj.members.all())
-    participants = [m for m in members if m.user_id != class_obj.instructor_id]
+    instructor_ids = instructor_user_ids(class_obj)
+    participants = [m for m in members if m.user_id not in instructor_ids]
     expelled = sum(1 for m in participants if m.expelled_at is not None)
     template_kept = ClassTemplate.objects.filter(source_class=class_obj, taken_down_at__isnull=True).exists()
     preview = {
@@ -211,7 +214,7 @@ def _member_out(member: ClassMember, class_obj: Class) -> dict:
         "display_name": member.display_name,
         "joined_at": member.joined_at.isoformat(),
         "expelled": member.expelled_at is not None,
-        "is_instructor": member.user_id == class_obj.instructor_id,
+        "is_instructor": is_instructor(class_obj, member.user_id),
     }
 
 

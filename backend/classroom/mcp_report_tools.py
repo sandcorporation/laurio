@@ -55,6 +55,7 @@ from submissions.models import SubmissionAsset
 from .api import _active_member_ids, _cell_status, _pending_reason, _problem_pass_stats
 from .contest_entries import entry_marks
 from .instructor_scope import class_scope, problem_scope
+from .instructors import classes_taught_by, is_instructor
 from .mcp_read_tools import CONTEST_ENTRY_CELL_SCHEMA
 from .models import ClassroomSubmission, ConnectedApp
 
@@ -215,7 +216,7 @@ def _get_participant_report(grant: ConnectedApp, arguments: dict) -> dict:
             {
                 "id": member.id,
                 "display_name": member.display_name,
-                "is_instructor": member.user_id == class_obj.instructor_id,
+                "is_instructor": is_instructor(class_obj, member.user_id),
                 "expelled": member.expelled_at is not None,
                 "problems": cells,
             }
@@ -319,7 +320,9 @@ def _scored_content(submission: ClassroomSubmission) -> tuple[str | None, bool]:
 def _open_submission_source(grant: ConnectedApp, arguments: dict) -> dict:
     submission_id = _int_argument(arguments, "submission_id", "제출")
     submission = (
-        ClassroomSubmission.objects.filter(id=submission_id, problem__classroom__instructor_id=grant.instructor_id)
+        ClassroomSubmission.objects.filter(
+            id=submission_id, problem__classroom__in=classes_taught_by(grant.instructor_id)
+        )
         .select_related("problem", "member", "classroom_score")
         .first()
     )
@@ -340,7 +343,7 @@ def _open_submission_source(grant: ConnectedApp, arguments: dict) -> dict:
             "id": submission.member.id,
             "display_name": submission.member.display_name,
             "expelled": submission.member.expelled_at is not None,
-            "is_instructor": submission.member.user_id == scope.class_obj.instructor_id,
+            "is_instructor": is_instructor(scope.class_obj, submission.member.user_id),
         },
         "attempt_number": submission.attempt_number,
         "submitted_at": submission.created_at,
