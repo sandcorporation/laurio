@@ -246,7 +246,7 @@ _CREATE_PROBLEM_INPUT = _object(
 def _create_problem(grant: ConnectedApp, arguments: dict) -> WriteResult:
     _check_arguments(arguments, _CREATE_PROBLEM_INPUT)
     payload = _parse(ProblemIn, _without(arguments, "class_id"))
-    class_obj = class_scope(_id(arguments, "class_id"), grant.instructor_id, write=True).class_obj
+    class_obj = class_scope(_id(arguments, "class_id"), grant.instructor_id, write=True, owner=False).class_obj
     problem = problem_authoring.create_problem(class_obj, payload)
     opened = " — 바로 열었다" if payload.open else ""
     return WriteResult(
@@ -278,7 +278,7 @@ def _update_problem(grant: ConnectedApp, arguments: dict) -> WriteResult:
     _check_arguments(arguments, _UPDATE_PROBLEM_INPUT)
     payload = _parse(ProblemPatchIn, _without(arguments, "class_id", "problem_id"))
     scope = problem_scope(
-        _id(arguments, "class_id"), _id(arguments, "problem_id"), grant.instructor_id, write=True
+        _id(arguments, "class_id"), _id(arguments, "problem_id"), grant.instructor_id, write=True, owner=False
     )
     problem = problem_authoring.update_problem(scope.class_obj, scope.problem, payload)
     changed = ", ".join(sorted(payload.model_fields_set)) or "없음"
@@ -297,7 +297,7 @@ def _transition_handler(name: str):
     def handler(grant: ConnectedApp, arguments: dict) -> WriteResult:
         _check_arguments(arguments, _PROBLEM_REF_INPUT)
         scope = problem_scope(
-            _id(arguments, "class_id"), _id(arguments, "problem_id"), grant.instructor_id, write=True
+            _id(arguments, "class_id"), _id(arguments, "problem_id"), grant.instructor_id, write=True, owner=False
         )
         problem = execute_transition(name, scope.problem)
         return WriteResult(
@@ -326,7 +326,7 @@ _REORDER_PROBLEMS_INPUT = _object(
 def _reorder_problems(grant: ConnectedApp, arguments: dict) -> WriteResult:
     _check_arguments(arguments, _REORDER_PROBLEMS_INPUT)
     problem_ids = _ids(arguments, "problem_ids")
-    class_obj = class_scope(_id(arguments, "class_id"), grant.instructor_id, write=True).class_obj
+    class_obj = class_scope(_id(arguments, "class_id"), grant.instructor_id, write=True, owner=False).class_obj
     ordered = problem_authoring.reorder_problems(class_obj, problem_ids)
     return WriteResult(
         structured={
@@ -357,9 +357,9 @@ def _copy_problem(grant: ConnectedApp, arguments: dict) -> WriteResult:
     # 화면의 복사(`classroom.api.copy_problem`)와 같은 두 문 — 원본은 읽기만 하므로
     # 보관된 클래스에서도 꺼내 가고, 넣는 쪽은 보관이면 거절한다.
     source = problem_scope(
-        _id(arguments, "class_id"), _id(arguments, "problem_id"), grant.instructor_id, write=False
+        _id(arguments, "class_id"), _id(arguments, "problem_id"), grant.instructor_id, write=False, owner=False
     )
-    target_class = class_scope(_id(arguments, "target_class_id"), grant.instructor_id, write=True).class_obj
+    target_class = class_scope(_id(arguments, "target_class_id"), grant.instructor_id, write=True, owner=False).class_obj
     copy = copy_problem_to_class(source.problem, target_class)
     return WriteResult(
         structured={"problem": _problem_out(copy, target_class)},
@@ -386,7 +386,7 @@ def _add_checklist_item(grant: ConnectedApp, arguments: dict) -> WriteResult:
     _check_arguments(arguments, _ADD_ITEM_INPUT)
     payload = _parse(ChecklistItemIn, _without(arguments, "class_id", "problem_id"))
     scope = problem_scope(
-        _id(arguments, "class_id"), _id(arguments, "problem_id"), grant.instructor_id, write=True
+        _id(arguments, "class_id"), _id(arguments, "problem_id"), grant.instructor_id, write=True, owner=False
     )
     item = problem_authoring.add_checklist_item(scope.problem, payload)
     return WriteResult(
@@ -413,7 +413,7 @@ def _update_checklist_item(grant: ConnectedApp, arguments: dict) -> WriteResult:
     _check_arguments(arguments, _UPDATE_ITEM_INPUT)
     payload = _parse(ChecklistItemPatchIn, _without(arguments, "class_id", "problem_id", "item_id"))
     scope = problem_scope(
-        _id(arguments, "class_id"), _id(arguments, "problem_id"), grant.instructor_id, write=True
+        _id(arguments, "class_id"), _id(arguments, "problem_id"), grant.instructor_id, write=True, owner=False
     )
     item = problem_authoring.update_checklist_item(scope.problem, _id(arguments, "item_id"), payload)
     return WriteResult(
@@ -433,7 +433,7 @@ _DELETE_ITEM_INPUT = _object(
 def _delete_checklist_item(grant: ConnectedApp, arguments: dict) -> WriteResult:
     _check_arguments(arguments, _DELETE_ITEM_INPUT)
     scope = problem_scope(
-        _id(arguments, "class_id"), _id(arguments, "problem_id"), grant.instructor_id, write=True
+        _id(arguments, "class_id"), _id(arguments, "problem_id"), grant.instructor_id, write=True, owner=False
     )
     item = problem_authoring.delete_checklist_item(scope.problem, _id(arguments, "item_id"))
     return WriteResult(
@@ -462,7 +462,7 @@ def _reorder_checklist_items(grant: ConnectedApp, arguments: dict) -> WriteResul
     _check_arguments(arguments, _REORDER_ITEMS_INPUT)
     item_ids = _ids(arguments, "item_ids")
     scope = problem_scope(
-        _id(arguments, "class_id"), _id(arguments, "problem_id"), grant.instructor_id, write=True
+        _id(arguments, "class_id"), _id(arguments, "problem_id"), grant.instructor_id, write=True, owner=False
     )
     ordered = problem_authoring.reorder_checklist_items(scope.problem, item_ids)
     return WriteResult(

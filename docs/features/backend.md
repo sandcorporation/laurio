@@ -306,7 +306,10 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 없는 것처럼 404를 받는다 — 403이 아니다, 목록에도 상세에도 존재를 드러내지 않는다.
 `.../problems/mine`·`.../problems/{id}/mine`·`.../submissions`만 예외다(#286/#288) —
 `ClassMember`인지, 그 문제가 열려 있는지를 같은 404로 가른다. 내보내진(`expelled`)
-참여자는 새 시도만 403으로 막힌다.
+참여자는 새 시도만 403으로 막힌다. 강사 가운데 **소유자**만 하는 일이 따로 있다 —
+채점 키 저장, 예산 칸(상한·경고 임계)을 고치는 설정, 클래스 삭제(ADR-0055). 강사이지만
+소유자가 아니면 403이다(`classroom.instructor_scope` 의 `owner=True`). 지금은 클래스의
+강사가 소유자 한 명뿐이라 이 갈림이 드러나는 사람이 없다.
 
 **보관(`archived_at`)은 지우지 않는다**(#294) — `.../unarchive`로 언제든 되돌아온다.
 **보관은 읽기 전용이라는 뜻이다**(#438, `classroom.participation.assert_class_mutable`).

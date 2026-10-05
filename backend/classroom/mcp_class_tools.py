@@ -77,7 +77,7 @@ def _copy_class(grant: ConnectedApp, arguments: dict) -> WriteResult:
     _check_arguments(arguments, _CLASS_REF_INPUT)
     # 화면의 복사(`classroom.api.copy_class_view`)와 같은 문 — 원본을 바꾸지 않으므로
     # 보관된 클래스도 복사해 새로 연다.
-    source = class_scope(_id(arguments, "class_id"), grant.instructor_id, write=False).class_obj
+    source = class_scope(_id(arguments, "class_id"), grant.instructor_id, write=False, owner=False).class_obj
     new_class = copy_class(source, grant.instructor_id)
     return _class_result(new_class, f"「{new_class.name}」 — 클래스 {source.id}에서 복사")
 
@@ -88,7 +88,7 @@ def _copy_class(grant: ConnectedApp, arguments: dict) -> WriteResult:
 def _archive_handler(archive: bool):
     def handler(grant: ConnectedApp, arguments: dict) -> WriteResult:
         _check_arguments(arguments, _CLASS_REF_INPUT)
-        class_obj = class_scope(_id(arguments, "class_id"), grant.instructor_id, write=False).class_obj
+        class_obj = class_scope(_id(arguments, "class_id"), grant.instructor_id, write=False, owner=False).class_obj
         if archive:
             class_authoring.archive_class(class_obj)
         else:
@@ -134,7 +134,10 @@ def _update_class_settings(grant: ConnectedApp, arguments: dict) -> WriteResult:
     _check_arguments(arguments, _UPDATE_CLASS_INPUT)
     payload = _parse(ClassPatchIn, _without(arguments, "class_id"))
     # 화면의 설정 고치기(`classroom.api.update_class`)와 같은 문 — 보관 뒤에도 고친다.
-    class_obj = class_scope(_id(arguments, "class_id"), grant.instructor_id, write=False).class_obj
+    scope = class_scope(_id(arguments, "class_id"), grant.instructor_id, write=False, owner=False)
+    if class_authoring.touches_budget(payload):
+        scope.require_owner()
+    class_obj = scope.class_obj
     class_authoring.update_class(class_obj, payload)
     changed = ", ".join(sorted(payload.model_fields_set)) or "없음"
     return _class_result(class_obj, f"「{class_obj.name}」 — 고친 칸: {changed}")
@@ -146,7 +149,7 @@ def _update_class_settings(grant: ConnectedApp, arguments: dict) -> WriteResult:
 def _regenerate_join_link(grant: ConnectedApp, arguments: dict) -> WriteResult:
     _check_arguments(arguments, _CLASS_REF_INPUT)
     # 화면과 같다 — 보관된 클래스라도 재발급은 막지 않는다(가입은 `join_class` 가 따로 막는다).
-    class_obj = class_scope(_id(arguments, "class_id"), grant.instructor_id, write=False).class_obj
+    class_obj = class_scope(_id(arguments, "class_id"), grant.instructor_id, write=False, owner=False).class_obj
     class_authoring.regenerate_join_link(class_obj)
     # 새 코드 자체는 기록에 남기지 않는다 — 기록은 「무엇을 했나」이지 링크 보관소가 아니다.
     return WriteResult(
@@ -175,7 +178,7 @@ def _import_problem_template(grant: ConnectedApp, arguments: dict) -> WriteResul
     # 화면(`classroom.template_api.import_template`)과 같은 순서 — 템플릿이 살아 있는지
     # 먼저, 그다음 넣을 클래스(보관이면 거절).
     template = class_authoring.visible_problem_template_or_404(_share_code(arguments))
-    target_class = class_scope(_id(arguments, "target_class_id"), grant.instructor_id, write=True).class_obj
+    target_class = class_scope(_id(arguments, "target_class_id"), grant.instructor_id, write=True, owner=False).class_obj
     problem = import_problem_template(template, target_class)
     return WriteResult(
         structured={"problem": _problem_out(problem, target_class)},

@@ -31,6 +31,7 @@
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 import pytest
@@ -175,3 +176,253 @@ def test_the_known_bypass_shapes_are_caught(source: str):
     tree = ast.parse(source)
     (func,) = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]
     assert not _has_write_true_scope_call(func)
+
+
+# ---------------------------------------------------------------------------
+# 「강사인가」와 「소유자인가」 (#559, spec #558, ADR-0055)
+#
+# 강사 전용 범위는 `write`와 같은 관용구로 `owner`도 키워드 전용·기본값 없이
+# 받는다 — 호출부가 "이 라우트가 소유자 전용인가"를 매번 답한다. 소유자 전용은
+# `CONTEXT.md` 「공동 강사」가 말하는 넷뿐이다: 채점 키·예산, 클래스 삭제,
+# (앞으로 생길) 소유권 이전·공동 강사 내보내기. 지금은 소유자 = 강사라 응답이
+# 같지만, 공동 강사가 생기면(#561) 이 표 밖의 라우트는 공동 강사에게도 열리고
+# 이 표 안의 라우트만 403 을 낸다 — 그 경계를 사람의 주의가 아니라 이 스캔이 지킨다.
+# ---------------------------------------------------------------------------
+
+#: 강사 범위를 부르는 라우트 파일 전부 — 연결된 앱(MCP) 도구도 같은 함수를 부른다.
+_SCOPE_CALLER_FILES = sorted(
+    path.relative_to(BACKEND_ROOT)
+    for path in (BACKEND_ROOT / "classroom").glob("*.py")
+    if path.name != "instructor_scope.py"
+)
+
+#: (파일, 라우트 이름) → 어떻게 소유자를 확인하는가. 이 표 밖의 라우트는 소유자
+#: 확인을 하면 안 된다(공동 강사에게 막히는 강사 전용 라우트가 남지 않게).
+OWNER_ONLY_ROUTES: dict[Path, dict[str, str]] = {
+    Path("classroom/api.py"): {
+        "set_class_openai_key": "채점 키는 소유자의 비용이다 — class_scope(owner=True).",
+        "delete_class": "클래스의 존폐는 소유자 몫이다 — class_scope(owner=True).",
+        "update_class": (
+            "클래스 설정 전체는 강사 누구나 고치지만 예산 칸(token_budget·경고 임계)을 보낼 때만 "
+            "소유자 전용이다 — class_scope(owner=False) 뒤 scope.require_owner()."
+        ),
+    },
+    Path("classroom/template_api.py"): {},
+}
+
+
+def _scope_calls(node: ast.AST) -> list[ast.Call]:
+    return [
+        call
+        for call in ast.walk(node)
+        if isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Name)
+        and call.func.id in _SCOPE_CALL_NAMES
+    ]
+
+
+def _literal_kw(call: ast.Call, name: str):
+    for kw in call.keywords:
+        if kw.arg == name:
+            return kw.value.value if isinstance(kw.value, ast.Constant) else ...
+    return None
+
+
+def _checks_owner(node: ast.AST) -> bool:
+    """`owner=True` 리터럴 범위 호출이나 `.require_owner()` 호출이 몸통에 있으면 참."""
+
+    if any(_literal_kw(call, "owner") is True for call in _scope_calls(node)):
+        return True
+    return any(
+        isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Attribute)
+        and call.func.attr == "require_owner"
+        for call in ast.walk(node)
+    )
+
+
+def _route_defs(tree: ast.AST) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
+    return [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and any(
+            isinstance(dec, ast.Call)
+            and isinstance(dec.func, ast.Attribute)
+            and dec.func.attr in ("get", "post", "patch", "put", "delete")
+            for dec in node.decorator_list
+        )
+    ]
+
+
+def test_every_scope_call_states_owner_explicitly_as_a_literal():
+    """`write` 와 같다 — 안 적어서(또는 변수로 넘겨서) 소유자 전용 여부가 흐려지는 경로를 없앤다."""
+
+    offenders = []
+    for relative_path in _SCOPE_CALLER_FILES:
+        tree = ast.parse((BACKEND_ROOT / relative_path).read_text(encoding="utf-8"))
+        for call in _scope_calls(tree):
+            if _literal_kw(call, "owner") not in (True, False):
+                offenders.append(f"{relative_path}:{call.lineno}")
+    assert not offenders, f"owner=True/False 를 리터럴로 적지 않은 강사 범위 호출: {offenders}"
+
+
+def test_owner_only_routes_pass_through_the_owner_scope():
+    """키·예산·삭제 라우트는 소유자 범위를 지난다."""
+
+    missing = []
+    for relative_path, owner_only in OWNER_ONLY_ROUTES.items():
+        tree = ast.parse((BACKEND_ROOT / relative_path).read_text(encoding="utf-8"))
+        routes = {node.name: node for node in _route_defs(tree)}
+        stale = set(owner_only) - set(routes)
+        assert not stale, f"{relative_path}의 OWNER_ONLY_ROUTES에 라우트가 아닌 이름이 남아 있다: {stale}"
+        missing += [f"{relative_path} — {name}" for name in owner_only if not _checks_owner(routes[name])]
+    assert not missing, f"소유자 전용 라우트가 소유자를 확인하지 않는다: {missing}"
+
+
+def test_routes_outside_the_owner_only_table_do_not_check_owner():
+    """표 밖의 강사 전용 라우트는 공동 강사에게도 열려야 한다 — 소유자 확인이 숨어 들면 빨개진다."""
+
+    extra = []
+    for relative_path, owner_only in OWNER_ONLY_ROUTES.items():
+        tree = ast.parse((BACKEND_ROOT / relative_path).read_text(encoding="utf-8"))
+        extra += [
+            f"{relative_path} — {node.name}"
+            for node in _route_defs(tree)
+            if node.name not in owner_only and _checks_owner(node)
+        ]
+    assert not extra, f"OWNER_ONLY_ROUTES 밖에서 소유자를 확인한다(표에 이유와 함께 올리거나 걷는다): {extra}"
+
+
+def test_every_owner_only_entry_has_a_reason():
+    empty = [f"{p}:{n}" for p, table in OWNER_ONLY_ROUTES.items() for n, r in table.items() if not r.strip()]
+    assert not empty, f"이유 없는 OWNER_ONLY_ROUTES 항목: {empty}"
+
+
+# ---------------------------------------------------------------------------
+# `Class.instructor` 를 직접 두드리는 자리 (#559)
+#
+# 「이 사람이 이 클래스의 강사인가」·「소유자인가」는 `classroom.instructors` 한 곳이
+# 답한다. 공동 강사가 생기면 그 모듈의 「강사인가」만 넓히면 되도록, 화면 API·서비스·
+# 이벤트·채점 알림·제출 해석기·탈퇴는 `instructor`/`instructor_id` 를 직접 비교·필터하지
+# 않는다. 남는 자리는 **소유자 자체**를 뜻하는 곳뿐이고 아래 표에 이유가 있다.
+#
+# 연결된 앱(`mcp*`·`oauth*`·`connected_app*`)은 다음 티켓(#560)의 몫이라 아직 훑지 않는다 —
+# 그쪽의 `grant.instructor_id` 는 Class 가 아니라 ConnectedApp 의 주인(계정)이다.
+# ---------------------------------------------------------------------------
+
+_DIRECT_REFERENCE_SKIPPED = {"instructors.py", "models.py"}
+_DIRECT_REFERENCE_SKIPPED_PREFIXES = ("mcp", "oauth", "connected_app")
+
+_DIRECT_REFERENCE_FILES = sorted(
+    [
+        path.relative_to(BACKEND_ROOT)
+        for path in (BACKEND_ROOT / "classroom").glob("*.py")
+        if path.name not in _DIRECT_REFERENCE_SKIPPED
+        and not path.name.startswith(_DIRECT_REFERENCE_SKIPPED_PREFIXES)
+    ]
+    + [Path("submissions/resolvers.py"), Path("accounts/withdrawal.py")]
+)
+
+#: (파일, 함수 이름) → 왜 소유자 자체를 뜻하는가.
+DIRECT_INSTRUCTOR_ALLOWLIST: dict[Path, dict[str, str]] = {
+    Path("classroom/class_authoring.py"): {
+        "create_class": "새 클래스의 소유자를 정한다 — 만드는 사람이 소유자다.",
+        "import_class_template_as": "템플릿을 가져온 사람이 새 클래스의 소유자다(services.import_class_template 로 넘긴다).",
+    },
+    Path("classroom/services.py"): {
+        "copy_class": "복사한 사람이 새 클래스의 소유자다 — 공동 강사는 따라가지 않는다(CONTEXT.md 「공동 강사 초대」).",
+        "import_class_template": "copy_class 와 같다 — 가져온 사람이 새 클래스의 소유자다.",
+    },
+    Path("classroom/scoring.py"): {
+        "_record_token_usage": "예산 경고의 수신자 — 키·예산 알림은 소유자에게만 간다(비용이 그 사람의 몫, ADR-0055).",
+        "_mark_scoring_key_rejected": "키 거부 알림의 수신자 — _record_token_usage 와 같은 이유.",
+    },
+    Path("accounts/withdrawal.py"): {
+        "_instructor_has_class_in_progress": "탈퇴 차단은 **소유한** 클래스만 센다(CONTEXT.md 「공동 강사」) — 공동 강사 자리는 탈퇴로 빠진다.",
+    },
+}
+
+_INSTRUCTOR_LOOKUP = re.compile(r"(^|__)instructor(_id)?$")
+
+
+def _direct_instructor_references(tree: ast.AST) -> list[tuple[str, int]]:
+    """`x.instructor`·`x.instructor_id`·`instructor=`/`classroom__instructor_id=` 키워드·
+    `F("instructor_id")` 꼴 문자열을, 그것을 품은 가장 안쪽 함수 이름과 함께 돌려준다."""
+
+    found: list[tuple[str, int]] = []
+
+    def visit(node: ast.AST, owner: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            name = owner
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                name = child.name
+            hit = (
+                (isinstance(child, ast.Attribute) and child.attr in ("instructor", "instructor_id"))
+                or (isinstance(child, ast.keyword) and child.arg and _INSTRUCTOR_LOOKUP.search(child.arg))
+                or (
+                    isinstance(child, ast.Constant)
+                    and isinstance(child.value, str)
+                    and _INSTRUCTOR_LOOKUP.search(child.value)
+                )
+            )
+            if hit:
+                found.append((name, getattr(child, "lineno", getattr(node, "lineno", 0))))
+            visit(child, name)
+
+    visit(tree, "<module>")
+    return found
+
+
+def test_class_instructor_is_read_only_through_the_two_predicates():
+    offenders = []
+    for relative_path in _DIRECT_REFERENCE_FILES:
+        allow = DIRECT_INSTRUCTOR_ALLOWLIST.get(relative_path, {})
+        tree = ast.parse((BACKEND_ROOT / relative_path).read_text(encoding="utf-8"))
+        offenders += [
+            f"{relative_path}:{line} — {func}"
+            for func, line in _direct_instructor_references(tree)
+            if func not in allow
+        ]
+    assert not offenders, (
+        "Class.instructor 를 직접 비교·필터한다 — classroom.instructors 의 「강사인가」"
+        "(is_instructor·classes_taught_by·instructor_user_ids·is_instructor_q)나 「소유자인가」"
+        f"(is_owner·classes_owned_by)를 거치거나, 소유자 자체를 뜻하면 표에 이유와 함께 올린다: {offenders}"
+    )
+
+
+def test_direct_instructor_allowlist_is_not_stale():
+    stale = []
+    for relative_path, allow in DIRECT_INSTRUCTOR_ALLOWLIST.items():
+        assert relative_path in _DIRECT_REFERENCE_FILES, relative_path
+        tree = ast.parse((BACKEND_ROOT / relative_path).read_text(encoding="utf-8"))
+        hits = {func for func, _ in _direct_instructor_references(tree)}
+        stale += [f"{relative_path}:{name}" for name, reason in allow.items() if name not in hits or not reason.strip()]
+    assert not stale, f"더 이상 직접 참조하지 않거나 이유가 빈 항목: {stale}"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "def f(c, u):\n    return c.instructor_id == u\n",
+        "def f(u):\n    return Class.objects.filter(instructor_id=u)\n",
+        "def f(u):\n    return Class.objects.filter(instructor=u)\n",
+        "def f(u):\n    return Problem.objects.filter(classroom__instructor_id=u)\n",
+        "def f():\n    return ClassMember.objects.exclude(user_id=F('classroom__instructor_id'))\n",
+        "def f(c):\n    return c.instructor\n",
+    ],
+)
+def test_the_direct_reference_shapes_are_caught(source: str):
+    assert _direct_instructor_references(ast.parse(source))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "def f(c):\n    return c.instructor_display_name\n",
+        "def f(m, c):\n    return MemberOut(is_instructor=is_instructor(c, m.user_id))\n",
+        "def f(r, p, m, x):\n    return _create_submission_row(r, p, m, x, as_instructor=True)\n",
+    ],
+)
+def test_the_lookalikes_are_not_caught(source: str):
+    assert not _direct_instructor_references(ast.parse(source))

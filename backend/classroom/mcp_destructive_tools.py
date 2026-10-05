@@ -108,7 +108,7 @@ _DELETE_PROBLEM_INPUT = _object(
 
 def _delete_problem(grant: ConnectedApp, arguments: dict) -> Preview | WriteResult:
     _check_arguments(arguments, _DELETE_PROBLEM_INPUT)
-    scope = problem_scope(_id(arguments, "class_id"), _id(arguments, "problem_id"), grant.instructor_id, write=True)
+    scope = problem_scope(_id(arguments, "class_id"), _id(arguments, "problem_id"), grant.instructor_id, write=True, owner=False)
     class_obj, problem = scope.class_obj, scope.problem
     ensure_problem_deletable(problem, class_obj)
 
@@ -153,8 +153,8 @@ _DELETE_CLASS_INPUT = _object({"class_id": _CLASS_ID, CONFIRMATION_ARGUMENT: CON
 
 def _delete_class(grant: ConnectedApp, arguments: dict) -> Preview | WriteResult:
     _check_arguments(arguments, _DELETE_CLASS_INPUT)
-    # 화면(`classroom.api.delete_class`)과 같다 — 보관된 클래스도 지울 수 있다.
-    class_obj = class_scope(_id(arguments, "class_id"), grant.instructor_id, write=False).class_obj
+    # 화면(`classroom.api.delete_class`)과 같다 — 보관된 클래스도 지울 수 있고, 소유자만 지운다(ADR-0055).
+    class_obj = class_scope(_id(arguments, "class_id"), grant.instructor_id, write=False, owner=True).class_obj
     ensure_class_deletable(class_obj)
 
     problems = list(class_obj.problems.order_by("order", "id"))
@@ -218,7 +218,7 @@ def _member_out(member: ClassMember, class_obj: Class) -> dict:
 def _expel_member(grant: ConnectedApp, arguments: dict) -> Preview | WriteResult:
     _check_arguments(arguments, _EXPEL_INPUT)
     # 화면(`classroom.api.expel_member`)과 같다 — 보관된 클래스에서도 명단 정리는 열려 있다.
-    class_obj = class_scope(_id(arguments, "class_id"), grant.instructor_id, write=False).class_obj
+    class_obj = class_scope(_id(arguments, "class_id"), grant.instructor_id, write=False, owner=False).class_obj
     member = class_member_or_404(class_obj, _id(arguments, "member_id"))
     if member.expelled_at is not None:
         return _nothing_to_do("이미 내보낸 참여자입니다.", member=_member_out(member, class_obj))
@@ -292,7 +292,7 @@ _PUBLISH_PROBLEM_INPUT = _object(
 def _publish_problem_template(grant: ConnectedApp, arguments: dict) -> Preview | WriteResult:
     _check_arguments(arguments, _PUBLISH_PROBLEM_INPUT)
     # 화면(`classroom.template_api.publish_template`)과 같다 — 원본을 바꾸지 않으므로 보관이어도 된다.
-    scope = problem_scope(_id(arguments, "class_id"), _id(arguments, "problem_id"), grant.instructor_id, write=False)
+    scope = problem_scope(_id(arguments, "class_id"), _id(arguments, "problem_id"), grant.instructor_id, write=False, owner=False)
     class_obj, problem = scope.class_obj, scope.problem
     publisher = _publisher_name(arguments)
     live = ProblemTemplate.objects.filter(source_problem=problem, taken_down_at__isnull=True).first()
@@ -338,7 +338,7 @@ _PUBLISH_CLASS_INPUT = _object(
 def _publish_class_template(grant: ConnectedApp, arguments: dict) -> Preview | WriteResult:
     _check_arguments(arguments, _PUBLISH_CLASS_INPUT)
     # 화면(`classroom.template_api.publish_class_template`)과 같다.
-    class_obj = class_scope(_id(arguments, "class_id"), grant.instructor_id, write=False).class_obj
+    class_obj = class_scope(_id(arguments, "class_id"), grant.instructor_id, write=False, owner=False).class_obj
     publisher = _publisher_name(arguments)
     live = ClassTemplate.objects.filter(source_class=class_obj, taken_down_at__isnull=True).first()
     if live is not None:

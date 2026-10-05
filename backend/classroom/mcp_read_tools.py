@@ -70,27 +70,27 @@ def class_view(class_obj) -> dict:
 
 
 def _get_class(grant: ConnectedApp, arguments: dict) -> dict:
-    class_obj = class_scope(_class_id(arguments), grant.instructor_id, write=False).class_obj
+    class_obj = class_scope(_class_id(arguments), grant.instructor_id, write=False, owner=False).class_obj
     return class_view(class_obj)
 
 
 def _list_problems(grant: ConnectedApp, arguments: dict) -> dict:
-    class_obj = class_scope(_class_id(arguments), grant.instructor_id, write=False).class_obj
+    class_obj = class_scope(_class_id(arguments), grant.instructor_id, write=False, owner=False).class_obj
     return {"problems": _as_screen_json(_serialize_problem_list(class_obj))}
 
 
 def _get_problem(grant: ConnectedApp, arguments: dict) -> dict:
-    scope = problem_scope(_class_id(arguments), _problem_id(arguments), grant.instructor_id, write=False)
+    scope = problem_scope(_class_id(arguments), _problem_id(arguments), grant.instructor_id, write=False, owner=False)
     return _as_screen_json(_serialize_problem(scope.problem, scope.class_obj))
 
 
 def _list_participants(grant: ConnectedApp, arguments: dict) -> dict:
-    class_obj = class_scope(_class_id(arguments), grant.instructor_id, write=False).class_obj
+    class_obj = class_scope(_class_id(arguments), grant.instructor_id, write=False, owner=False).class_obj
     return {"participants": _as_screen_json(_serialize_members(class_obj))}
 
 
 def _get_roster_grid(grant: ConnectedApp, arguments: dict) -> dict:
-    class_obj = class_scope(_class_id(arguments), grant.instructor_id, write=False).class_obj
+    class_obj = class_scope(_class_id(arguments), grant.instructor_id, write=False, owner=False).class_obj
     return _as_screen_json(_build_roster_grid(class_obj))
 
 
