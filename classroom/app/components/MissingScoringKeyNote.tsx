@@ -22,8 +22,9 @@ export function MissingScoringKeyNote({
   noteTestId: string;
   settingsLinkTestId: string;
   /** 키가 아예 없을 때는 "넣기"가 맞지만, 있는데 거부됐을 때는 "바꾸기"다
-   *  (#355) — 기본값은 예전 문구 그대로다. */
-  actionLabel?: string;
+   *  (#355) — 기본값은 예전 문구 그대로다. `null`이면 링크를 그리지 않는다 —
+   *  키를 바꿀 수 없는 공동 강사(#561)에게 갈 곳 없는 버튼을 보이지 않으려고. */
+  actionLabel?: string | null;
   /** 클래스 설정 화면의 어느 카드로 스크롤할지(`id` 속성) — 채점 키 문제는
    *  "scoring-key"(기본값), 채점 모델 거부(#403)는 "scoring-model"이다. */
   settingsAnchor?: string;
@@ -34,13 +35,15 @@ export function MissingScoringKeyNote({
         <span data-testid={noteTestId} className="flex-1">
           {message}
         </span>
-        <Link
-          href={`/classes/${classId}/settings#${settingsAnchor}`}
-          data-testid={settingsLinkTestId}
-          className={buttonClass("secondary", "sm")}
-        >
-          {actionLabel}
-        </Link>
+        {actionLabel !== null ? (
+          <Link
+            href={`/classes/${classId}/settings#${settingsAnchor}`}
+            data-testid={settingsLinkTestId}
+            className={buttonClass("secondary", "sm")}
+          >
+            {actionLabel}
+          </Link>
+        ) : null}
       </div>
     </Note>
   );

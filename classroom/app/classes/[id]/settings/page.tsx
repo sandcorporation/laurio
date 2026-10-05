@@ -431,6 +431,9 @@ export default function ClassSettingsPage() {
   }
 
   const { classroom } = state;
+  // 채점 키·예산·클래스 삭제·소유자의 강사 이름은 소유자만 바꾼다(#561, ADR-0055) — 공동
+  // 강사에게는 그 입력을 그리지 않고, 지금 값과 「소유자만」이라는 사실만 보여 준다.
+  const isOwner = classroom.role === "owner";
   const namesPatch = classNamesPatch(
     { name: classroom.name, instructorDisplayName: classroom.instructor_display_name },
     { name: classNameDraft, instructorDisplayName },
@@ -530,7 +533,11 @@ export default function ClassSettingsPage() {
       <PageHeader
         eyebrow={classroom.name}
         title="클래스 설정"
-        description="클래스·강사 이름, 채점 키와 모델·예산, 템플릿 공개까지 이 클래스의 설정을 여기서 관리합니다."
+        description={
+          isOwner
+            ? "클래스·강사 이름, 채점 키와 모델·예산, 템플릿 공개까지 이 클래스의 설정을 여기서 관리합니다."
+            : "클래스 이름과 채점 모델, 템플릿 공개를 여기서 관리합니다. 채점 키·예산과 클래스 삭제는 소유자가 맡습니다."
+        }
         actions={
           <Link href={`/classes/${classId}`} className={buttonClass()}>
             클래스로 돌아가기
@@ -540,7 +547,10 @@ export default function ClassSettingsPage() {
 
       <div className="flex flex-col gap-5">
         <Card>
-          <CardHeader title="이름" hint="참여자 화면과 가입 미리보기에 이 이름들이 보입니다" />
+          <CardHeader
+            title="이름"
+            hint={isOwner ? "참여자 화면과 가입 미리보기에 이 이름들이 보입니다" : "참여자 화면과 가입 미리보기에 이 이름이 보입니다"}
+          />
           <div className="flex flex-col gap-3 p-4">
             <form onSubmit={handleNameSubmit} className="flex flex-col gap-3">
               <div className="flex flex-col gap-1.5">
@@ -557,24 +567,26 @@ export default function ClassSettingsPage() {
                   className={INPUT_CLASS}
                 />
               </div>
-              <div className="flex flex-col gap-1.5">
-                <label htmlFor="class-instructor-display-name-input">
-                  <FieldLabel>이 클래스에서 불릴 강사 이름</FieldLabel>
-                </label>
-                <input
-                  id="class-instructor-display-name-input"
-                  data-testid="class-instructor-display-name-input"
-                  value={instructorDisplayName}
-                  onChange={(event) => setInstructorDisplayName(event.target.value)}
-                  required
-                  maxLength={100}
-                  className={INPUT_CLASS}
-                />
-                <span className="text-[11.5px] leading-relaxed text-ink/45">
-                  참여자 명단과 제출물에 보이는 이름과는 별개입니다 — 그곳은 참여자 본인이 정한
-                  이름을 그대로 씁니다.
-                </span>
-              </div>
+              {isOwner ? (
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="class-instructor-display-name-input">
+                    <FieldLabel>이 클래스에서 불릴 강사 이름</FieldLabel>
+                  </label>
+                  <input
+                    id="class-instructor-display-name-input"
+                    data-testid="class-instructor-display-name-input"
+                    value={instructorDisplayName}
+                    onChange={(event) => setInstructorDisplayName(event.target.value)}
+                    required
+                    maxLength={100}
+                    className={INPUT_CLASS}
+                  />
+                  <span className="text-[11.5px] leading-relaxed text-ink/45">
+                    참여자 명단과 제출물에 보이는 이름과는 별개입니다 — 그곳은 참여자 본인이 정한
+                    이름을 그대로 씁니다.
+                  </span>
+                </div>
+              ) : null}
               <div className="flex justify-end">
                 <button
                   type="submit"
@@ -627,54 +639,62 @@ export default function ClassSettingsPage() {
                   </p>
                 )}
 
-                <form onSubmit={handleKeySubmit} className="flex flex-col gap-2.5">
-                  <label htmlFor="openai-api-key">
-                    <FieldLabel>새 채점 키</FieldLabel>
-                  </label>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <input
-                      id="openai-api-key"
-                      data-testid="openai-key-input"
-                      type="password"
-                      value={apiKey}
-                      onChange={(event) => setApiKey(event.target.value)}
-                      required
-                      className={`${INPUT_CLASS} min-w-[240px] flex-1 font-mono`}
-                      placeholder="sk-..."
-                    />
-                    <button
-                      type="submit"
-                      data-testid="openai-key-submit"
-                      disabled={keySaving || apiKey.trim() === ""}
-                      className={buttonClass("primary")}
-                    >
-                      {keySaving ? "저장하는 중..." : "저장"}
-                    </button>
-                  </div>
-                  {/* 저장을 누르기 전에 브라우저가 먼저 말해준다(#357) — 문이
-                      아니라 안내다, 판정과 무관하게 위 저장 버튼은 항상 눌린다. */}
-                  {liveKeyCheck === "checking" ? (
-                    <p data-testid="openai-key-live-check" className="text-[12px] text-ink/45">
-                      확인하는 중...
-                    </p>
-                  ) : liveKeyCheck === "valid" ? (
-                    <p data-testid="openai-key-live-check">
-                      <Badge tone="verified">이 키를 쓸 수 있습니다</Badge>
-                    </p>
-                  ) : liveKeyCheck === "invalid" ? (
-                    <p data-testid="openai-key-live-check">
-                      <Badge tone="attention">이 키는 쓸 수 없습니다</Badge>
-                    </p>
-                  ) : liveKeyCheck === "unknown" ? (
-                    <p data-testid="openai-key-live-check">
-                      <Badge tone="neutral">지금은 확인할 수 없습니다</Badge>
-                    </p>
-                  ) : null}
-                  <span className="text-[11.5px] leading-relaxed text-ink/45">
-                    저장 뒤에는 다시 볼 수 없습니다 — 화면에도 로그에도 남지 않고, 채점 요청을 보낼
-                    때만 복호화됩니다. 참여자에게는 어떤 형태로도 보이지 않습니다.
-                  </span>
-                </form>
+                {!isOwner ? (
+                  <Note>
+                    <span data-testid="openai-key-owner-only">
+                      채점 키는 소유자만 바꿀 수 있습니다 — 채점 비용이 소유자의 몫입니다.
+                    </span>
+                  </Note>
+                ) : (
+                  <form onSubmit={handleKeySubmit} className="flex flex-col gap-2.5">
+                    <label htmlFor="openai-api-key">
+                      <FieldLabel>새 채점 키</FieldLabel>
+                    </label>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        id="openai-api-key"
+                        data-testid="openai-key-input"
+                        type="password"
+                        value={apiKey}
+                        onChange={(event) => setApiKey(event.target.value)}
+                        required
+                        className={`${INPUT_CLASS} min-w-[240px] flex-1 font-mono`}
+                        placeholder="sk-..."
+                      />
+                      <button
+                        type="submit"
+                        data-testid="openai-key-submit"
+                        disabled={keySaving || apiKey.trim() === ""}
+                        className={buttonClass("primary")}
+                      >
+                        {keySaving ? "저장하는 중..." : "저장"}
+                      </button>
+                    </div>
+                    {/* 저장을 누르기 전에 브라우저가 먼저 말해준다(#357) — 문이
+                        아니라 안내다, 판정과 무관하게 위 저장 버튼은 항상 눌린다. */}
+                    {liveKeyCheck === "checking" ? (
+                      <p data-testid="openai-key-live-check" className="text-[12px] text-ink/45">
+                        확인하는 중...
+                      </p>
+                    ) : liveKeyCheck === "valid" ? (
+                      <p data-testid="openai-key-live-check">
+                        <Badge tone="verified">이 키를 쓸 수 있습니다</Badge>
+                      </p>
+                    ) : liveKeyCheck === "invalid" ? (
+                      <p data-testid="openai-key-live-check">
+                        <Badge tone="attention">이 키는 쓸 수 없습니다</Badge>
+                      </p>
+                    ) : liveKeyCheck === "unknown" ? (
+                      <p data-testid="openai-key-live-check">
+                        <Badge tone="neutral">지금은 확인할 수 없습니다</Badge>
+                      </p>
+                    ) : null}
+                    <span className="text-[11.5px] leading-relaxed text-ink/45">
+                      저장 뒤에는 다시 볼 수 없습니다 — 화면에도 로그에도 남지 않고, 채점 요청을 보낼
+                      때만 복호화됩니다. 참여자에게는 어떤 형태로도 보이지 않습니다.
+                    </span>
+                  </form>
+                )}
                 {keyError ? (
                   <ErrorNote>
                     <span data-testid="openai-key-error">{keyError}</span>
@@ -699,7 +719,9 @@ export default function ClassSettingsPage() {
                       <Note>
                         <span data-testid="scoring-models-unavailable-note">
                           {modelsState.unavailableReason === "no_api_key"
-                            ? "키를 넣으면 이 키로 쓸 수 있는 모델을 보여드립니다 — 지금은 기본 목록입니다."
+                            ? isOwner
+                              ? "키를 넣으면 이 키로 쓸 수 있는 모델을 보여드립니다 — 지금은 기본 목록입니다."
+                              : "소유자가 키를 넣으면 그 키로 쓸 수 있는 모델을 보여드립니다 — 지금은 기본 목록입니다."
                             : "지금은 모델 목록을 확인할 수 없어 기본 목록을 보여드립니다."}
                         </span>
                       </Note>
@@ -813,61 +835,73 @@ export default function ClassSettingsPage() {
                   </div>
                 )}
 
-                <form onSubmit={handleBudgetSubmit} className="flex flex-col gap-3">
-                  <div className="flex flex-wrap items-end gap-3">
-                    <div className="flex min-w-[200px] flex-1 flex-col gap-1.5">
-                      <label htmlFor="token-budget-input">
-                        <FieldLabel>예산 한도(토큰)</FieldLabel>
-                      </label>
-                      <input
-                        id="token-budget-input"
-                        data-testid="token-budget-input"
-                        type="number"
-                        min={1}
-                        step={1}
-                        value={tokenBudget}
-                        onChange={(event) => setTokenBudget(event.target.value)}
-                        placeholder="예: 1000000"
-                        className={`${INPUT_CLASS} font-mono`}
-                      />
+                {!isOwner ? (
+                  <Note>
+                    <span data-testid="token-budget-owner-only">
+                      예산 한도와 경고 기준은 소유자만 바꿀 수 있습니다.
+                    </span>
+                  </Note>
+                ) : (
+                  <form onSubmit={handleBudgetSubmit} className="flex flex-col gap-3">
+                    <div className="flex flex-wrap items-end gap-3">
+                      <div className="flex min-w-[200px] flex-1 flex-col gap-1.5">
+                        <label htmlFor="token-budget-input">
+                          <FieldLabel>예산 한도(토큰)</FieldLabel>
+                        </label>
+                        <input
+                          id="token-budget-input"
+                          data-testid="token-budget-input"
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={tokenBudget}
+                          onChange={(event) => setTokenBudget(event.target.value)}
+                          placeholder="예: 1000000"
+                          className={`${INPUT_CLASS} font-mono`}
+                        />
+                      </div>
+                      <div className="flex w-[150px] flex-col gap-1.5">
+                        <label htmlFor="token-budget-warning-threshold-input">
+                          <FieldLabel>경고 기준(%)</FieldLabel>
+                        </label>
+                        <input
+                          id="token-budget-warning-threshold-input"
+                          data-testid="token-budget-warning-threshold-input"
+                          type="number"
+                          min={1}
+                          max={100}
+                          step={1}
+                          value={warningThreshold}
+                          onChange={(event) => setWarningThreshold(event.target.value)}
+                          className={`${INPUT_CLASS} font-mono`}
+                        />
+                      </div>
+                      <button
+                        type="submit"
+                        data-testid="token-budget-submit"
+                        disabled={budgetSaving || tokenBudget.trim() === ""}
+                        className={buttonClass("primary")}
+                      >
+                        {budgetSaving ? "저장하는 중..." : "저장"}
+                      </button>
                     </div>
-                    <div className="flex w-[150px] flex-col gap-1.5">
-                      <label htmlFor="token-budget-warning-threshold-input">
-                        <FieldLabel>경고 기준(%)</FieldLabel>
-                      </label>
-                      <input
-                        id="token-budget-warning-threshold-input"
-                        data-testid="token-budget-warning-threshold-input"
-                        type="number"
-                        min={1}
-                        max={100}
-                        step={1}
-                        value={warningThreshold}
-                        onChange={(event) => setWarningThreshold(event.target.value)}
-                        className={`${INPUT_CLASS} font-mono`}
-                      />
-                    </div>
-                    <button
-                      type="submit"
-                      data-testid="token-budget-submit"
-                      disabled={budgetSaving || tokenBudget.trim() === ""}
-                      className={buttonClass("primary")}
-                    >
-                      {budgetSaving ? "저장하는 중..." : "저장"}
-                    </button>
-                  </div>
-                  {budgetError ? (
-                    <ErrorNote>
-                      <span data-testid="token-budget-error">{budgetError}</span>
-                    </ErrorNote>
-                  ) : null}
-                </form>
+                    {budgetError ? (
+                      <ErrorNote>
+                        <span data-testid="token-budget-error">{budgetError}</span>
+                      </ErrorNote>
+                    ) : null}
+                  </form>
+                )}
 
-                <Note>
-                  기준에 닿으면 <b className="text-ink">서비스 안 알림</b>으로 알립니다 — 메일이나 문자가
-                  아니라 이 서비스에 들어오면 보이는 알림입니다. 한도에 닿아도 제출은 계속 쌓이고,
-                  예산을 채우면 쌓인 시도부터 순서대로 이어서 채점됩니다.
-                </Note>
+                {/* 예산 경고 알림은 소유자에게만 간다(ADR-0055) — 공동 강사에게 「알립니다」는
+                    거짓이 된다. */}
+                {isOwner ? (
+                  <Note>
+                    기준에 닿으면 <b className="text-ink">서비스 안 알림</b>으로 알립니다 — 메일이나 문자가
+                    아니라 이 서비스에 들어오면 보이는 알림입니다. 한도에 닿아도 제출은 계속 쌓이고,
+                    예산을 채우면 쌓인 시도부터 순서대로 이어서 채점됩니다.
+                  </Note>
+                ) : null}
               </div>
             </CardSection>
           </div>
@@ -878,7 +912,7 @@ export default function ClassSettingsPage() {
           initialPublishedTemplate={classroom.published_template}
         />
 
-        <DeleteClassCard classId={classId} classroom={classroom} />
+        {isOwner ? <DeleteClassCard classId={classId} classroom={classroom} /> : null}
       </div>
     </PageShell>
   );

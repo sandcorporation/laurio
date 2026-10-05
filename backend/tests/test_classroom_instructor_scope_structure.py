@@ -56,6 +56,8 @@ ALLOWLIST: dict[Path, dict[str, str]] = {
         "expel_member": "보관된 클래스에서도 명단 정리는 연다(새 활동을 만들지 않는다) — class_scope(write=False)만 부른다.",
         "rename_myself": "참여자 본인이 여는 문이다 — 강사 전용 범위 밖(_get_member_or_404를 쓴다).",
         "create_classroom_submission": "참여자와 강사가 같은 주소를 걷는 혼합 라우트다 — 강사 분기도 class_scope/problem_scope가 아니라 .filter(...).first()로 존재를 숨기지 않는다(get_my_problem과 같은 이유).",
+        "create_co_instructor_invite": "사람을 들이는 일은 클래스의 존폐 쪽이라 보관된 클래스에서도 연다(CONTEXT.md 「공동 강사」, #561) — class_scope(write=False)만 부른다.",
+        "accept_co_instructor_invite": "초대받은 사람이 여는 문이다 — 아직 강사가 아니므로 강사 전용 범위 밖이고, 보관된 클래스에서도 수락한다(#561). 초대 토큰과 행 잠금이 문이다(classroom.co_instructors).",
         "copy_problem": "원본(problem_scope write=False)과 대상(class_scope write=True) 둘을 부른다 — write=True 호출이 있어 이 표에 없어도 통과하지만, 원본 쪽 write=False 호출이 있다는 것을 여기 남겨 둔다.",
     },
     Path("classroom/template_api.py"): {
@@ -184,9 +186,9 @@ def test_the_known_bypass_shapes_are_caught(source: str):
 # 강사 전용 범위는 `write`와 같은 관용구로 `owner`도 키워드 전용·기본값 없이
 # 받는다 — 호출부가 "이 라우트가 소유자 전용인가"를 매번 답한다. 소유자 전용은
 # `CONTEXT.md` 「공동 강사」가 말하는 넷뿐이다: 채점 키·예산, 클래스 삭제,
-# (앞으로 생길) 소유권 이전·공동 강사 내보내기. 지금은 소유자 = 강사라 응답이
-# 같지만, 공동 강사가 생기면(#561) 이 표 밖의 라우트는 공동 강사에게도 열리고
-# 이 표 안의 라우트만 403 을 낸다 — 그 경계를 사람의 주의가 아니라 이 스캔이 지킨다.
+# (앞으로 생길) 소유권 이전·공동 강사 내보내기. 이 표 밖의 라우트는 공동 강사(#561)에게도
+# 열리고 이 표 안의 라우트만 403 을 낸다 — 그 경계를 사람의 주의가 아니라 이 스캔이 지킨다.
+# 실제 응답은 `tests/test_classroom_co_instructor_permissions.py`가 HTTP 로 본다.
 # ---------------------------------------------------------------------------
 
 #: 강사 범위를 부르는 라우트 파일 전부 — 연결된 앱(MCP) 도구도 같은 함수를 부른다.
@@ -203,8 +205,8 @@ OWNER_ONLY_ROUTES: dict[Path, dict[str, str]] = {
         "set_class_openai_key": "채점 키는 소유자의 비용이다 — class_scope(owner=True).",
         "delete_class": "클래스의 존폐는 소유자 몫이다 — class_scope(owner=True).",
         "update_class": (
-            "클래스 설정 전체는 강사 누구나 고치지만 예산 칸(token_budget·경고 임계)을 보낼 때만 "
-            "소유자 전용이다 — class_scope(owner=False) 뒤 scope.require_owner()."
+            "클래스 설정 전체는 강사 누구나 고치지만 예산 칸(token_budget·경고 임계)이나 소유자의 "
+            "강사 이름 칸(#561)을 보낼 때만 소유자 전용이다 — class_scope(owner=False) 뒤 scope.require_owner()."
         ),
     },
     Path("classroom/template_api.py"): {},
@@ -476,7 +478,7 @@ OWNER_ONLY_MCP_TOOLS: dict[Path, dict[str, str]] = {
         "_delete_class": "화면의 delete_class 와 같다 — class_scope(owner=True).",
     },
     Path("classroom/mcp_class_tools.py"): {
-        "_update_class_settings": "화면의 update_class 와 같다 — 예산 칸을 보낼 때만 scope.require_owner().",
+        "_update_class_settings": "화면의 update_class 와 같다 — 예산 칸이나 소유자의 강사 이름 칸을 보낼 때만 scope.require_owner().",
     },
 }
 

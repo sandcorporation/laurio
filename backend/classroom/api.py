@@ -34,6 +34,7 @@ from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
 from accounts.models import SocialAccount
+from core.clock import Clock
 from core.contest_catalog import EntryAsset, contest_catalog
 from core.crypto import encrypt
 from core.events import Event, EventBusDisconnected, get_event_bus
@@ -97,6 +98,10 @@ from .schemas import (
     ClassroomSyntaxCheckFindingOut,
     ClassroomSyntaxCheckOut,
     ErrorOut,
+    CoInstructorAcceptIn,
+    CoInstructorAcceptOut,
+    CoInstructorInviteOut,
+    CoInstructorInvitePreviewOut,
     ImportableProblemOut,
     JoinedClassOut,
     JoinIn,
@@ -121,7 +126,7 @@ from .schemas import (
 from . import pending_scoring
 from .events import publish_attempt_submitted
 from .instructor_scope import class_scope, owned_problem_or_404, problem_scope
-from .instructors import classes_taught_by, instructor_user_ids, is_instructor
+from .instructors import classes_taught_by, instructor_display_name_of, instructor_user_ids, is_instructor, is_owner
 from .participation import (
     SUBMIT_BLOCKED_ARCHIVED,
     SUBMIT_BLOCKED_EXPELLED,
@@ -132,7 +137,7 @@ from .participation import (
     participant_submit_blocked_reason,
     visible_problems_queryset,
 )
-from . import class_authoring, problem_authoring
+from . import class_authoring, co_instructors, problem_authoring
 from .problem_transitions import available_transitions, execute_transition
 from .scoring import check_scoring_key
 from .scoring_model_catalog import get_scoring_model_catalog
@@ -173,7 +178,9 @@ def _live_problem_template(problem: Problem) -> ProblemTemplate | None:
     return problem.templates.filter(taken_down_at__isnull=True).first()
 
 
-def _serialize_class(class_obj: Class) -> ClassOut:
+def _serialize_class(class_obj: Class, *, viewer_id: int) -> ClassOut:
+    """`viewer_id`는 부른 사람 — 그 사람이 소유자인지 공동 강사인지(`role`)를 싣는다(#561)."""
+
     has_key = class_obj.has_scoring_key()
     token_budget_remaining = (
         max(class_obj.token_budget - class_obj.token_usage_total, 0)
@@ -200,6 +207,7 @@ def _serialize_class(class_obj: Class) -> ClassOut:
         token_budget_exhausted=class_obj.token_budget_exhausted(),
         has_submissions=ClassroomSubmission.objects.filter(problem__classroom=class_obj).exists(),
         published_template=_published_template_summary(_live_class_template(class_obj)),
+        role="owner" if is_owner(class_obj, viewer_id) else "co_instructor",
     )
 
 
@@ -511,7 +519,7 @@ def create_class(request: HttpRequest, payload: ClassIn):
     # class_scope/problem_scope는 이미 있는 클래스를 여는 문이다). 금칙어 검사는
     # `class_authoring.create_class`가 한다(연결된 앱과 한 벌, #516).
     class_obj = class_authoring.create_class(request.auth_user.id, payload)
-    return 201, _serialize_class(class_obj)
+    return 201, _serialize_class(class_obj, viewer_id=request.auth_user.id)
 
 
 @router.get("/classes", response={200: list[ClassOut]}, auth=jwt_auth)
@@ -519,7 +527,7 @@ def list_my_classes(request: HttpRequest):
     """「내 클래스」— 본인이 강사인 것만. 남의 클래스는 여기 나오지 않는다."""
 
     classes = instructor_classes(request.auth_user.id)
-    return 200, [_serialize_class(c) for c in classes]
+    return 200, [_serialize_class(c, viewer_id=request.auth_user.id) for c in classes]
 
 
 @router.get("/classes/joined", response={200: list[JoinedClassOut]}, auth=jwt_auth)
@@ -552,27 +560,30 @@ def list_joined_classes(request: HttpRequest):
 @router.get("/classes/{class_id}", response={200: ClassOut, 404: ErrorOut}, auth=jwt_auth)
 def get_class(request: HttpRequest, class_id: int):
     class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
-    return 200, _serialize_class(class_obj)
+    return 200, _serialize_class(class_obj, viewer_id=request.auth_user.id)
 
 
 @router.patch(
-    "/classes/{class_id}", response={200: ClassOut, 404: ErrorOut, 422: ErrorOut}, auth=jwt_auth
+    "/classes/{class_id}",
+    response={200: ClassOut, 403: ErrorOut, 404: ErrorOut, 422: ErrorOut},
+    auth=jwt_auth,
 )
 def update_class(request: HttpRequest, class_id: int, payload: ClassPatchIn):
     # 클래스 설정은 보관 뒤에도 고칠 수 있다(`classroom.participation`
     # 모듈 docstring 「열어 두는 것」) — write=False, 소유권·존재만 본다.
     scope = class_scope(class_id, request.auth_user.id, write=False, owner=False)
-    if class_authoring.touches_budget(payload):
-        # 예산은 소유자의 비용이다(ADR-0055) — 이름·모델 같은 나머지 칸은 강사 누구나.
+    if class_authoring.touches_owner_only_fields(payload):
+        # 예산은 소유자의 비용이고(ADR-0055) 강사 이름 칸은 소유자의 이름이다(#561) —
+        # 클래스 이름·모델 같은 나머지 칸은 강사 누구나.
         scope.require_owner()
     class_obj = scope.class_obj
     class_authoring.update_class(class_obj, payload)
-    return 200, _serialize_class(class_obj)
+    return 200, _serialize_class(class_obj, viewer_id=request.auth_user.id)
 
 
 @router.put(
     "/classes/{class_id}/openai-key",
-    response={200: ClassOut, 404: ErrorOut, 422: ErrorOut},
+    response={200: ClassOut, 403: ErrorOut, 404: ErrorOut, 422: ErrorOut},
     auth=jwt_auth,
 )
 def set_class_openai_key(request: HttpRequest, class_id: int, payload: OpenAIKeyIn):
@@ -609,7 +620,7 @@ def set_class_openai_key(request: HttpRequest, class_id: int, payload: OpenAIKey
     class_obj.save(
         update_fields=["openai_api_key_encrypted", "openai_api_key_last4", "openai_api_key_status"]
     )
-    return 200, _serialize_class(class_obj)
+    return 200, _serialize_class(class_obj, viewer_id=request.auth_user.id)
 
 
 @router.post("/classes/{class_id}/copy", response={201: ClassOut, 404: ErrorOut}, auth=jwt_auth)
@@ -623,7 +634,7 @@ def copy_class_view(request: HttpRequest, class_id: int):
     # 결과물이지 원본을 바꾸지 않는다.
     class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
     new_class = copy_class(class_obj, request.auth_user.id)
-    return 201, _serialize_class(new_class)
+    return 201, _serialize_class(new_class, viewer_id=request.auth_user.id)
 
 
 @router.get(
@@ -682,7 +693,7 @@ def archive_class(request: HttpRequest, class_id: int):
     # 보관됐어도 멱등하게 통과).
     class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
     class_authoring.archive_class(class_obj)
-    return 200, _serialize_class(class_obj)
+    return 200, _serialize_class(class_obj, viewer_id=request.auth_user.id)
 
 
 @router.post(
@@ -697,7 +708,7 @@ def unarchive_class(request: HttpRequest, class_id: int):
     # 것」의 "보관 되돌리기") — 보관 여부로 막으면 되돌릴 수 없게 된다.
     class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
     class_authoring.unarchive_class(class_obj)
-    return 200, _serialize_class(class_obj)
+    return 200, _serialize_class(class_obj, viewer_id=request.auth_user.id)
 
 
 @router.delete(
@@ -753,6 +764,18 @@ def _get_class_by_join_code_or_404(join_code: str) -> Class:
         raise HttpError(404, "이 가입 링크는 더 이상 사용할 수 없습니다.") from exc
 
 
+def _suggested_name(auth_user) -> str | None:
+    """이름 칸 기본값으로 쓸 제안 이름 — 로그인한 사람의 카카오 닉네임(#390). 가입
+    미리보기와 공동 강사 초대 미리보기가 같은 값을 쓴다."""
+
+    if auth_user is None:
+        return None
+    social_account = SocialAccount.objects.filter(user_id=auth_user.id).first()
+    if social_account is not None and social_account.nickname:
+        return social_account.nickname
+    return None
+
+
 @router.get("/join/{join_code}", response={200: JoinPreviewOut, 404: ErrorOut}, auth=None)
 def preview_join(request: HttpRequest, join_code: str):
     """가입 여부와 무관하게 누구나 본다 — 계정이 없는 사람이 가입할지 먼저
@@ -780,11 +803,7 @@ def preview_join(request: HttpRequest, join_code: str):
     # 애초에 누구의 닉네임인지가 없다. 카카오만 닉네임을 채우므로(#189가
     # GitHub·구글을 켤 때까지) 다른 제공자·미동의 사용자는 빈 문자열이 와
     # `suggested_name`도 `None`으로 떨어진다.
-    suggested_name = None
-    if auth_user is not None:
-        social_account = SocialAccount.objects.filter(user_id=auth_user.id).first()
-        if social_account is not None and social_account.nickname:
-            suggested_name = social_account.nickname
+    suggested_name = _suggested_name(auth_user)
     # `members.count()`는 강사 본인이 가입했으면 그 행도 센다 — CONTEXT.md
     # 「ClassMember」가 강사를 빼라고 정한 것은 **달성률**의 분모뿐이다(그
     # 계산은 아직 없는 티켓의 몫이다). 이 미리보기의 "참여자 수"는 그
@@ -836,6 +855,68 @@ def join_class(request: HttpRequest, join_code: str, payload: JoinIn):
     return 200, JoinResultOut(
         class_id=class_obj.id, class_name=class_obj.name, display_name=member.display_name
     )
+
+
+# --- 공동 강사 초대 (#561, CONTEXT.md 「공동 강사 초대」) -----------------------------
+
+
+@router.post(
+    "/classes/{class_id}/co-instructor-invites",
+    response={201: CoInstructorInviteOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def create_co_instructor_invite(request: HttpRequest, class_id: int):
+    """강사(소유자 또는 공동 강사)가 1회용 초대 링크를 하나 만든다 — 7일 뒤 만료되고, 여러 개를
+    동시에 열어 둘 수 있다."""
+
+    # 사람을 들이는 일은 클래스의 존폐 쪽이라 보관된 클래스에서도 연다(CONTEXT.md
+    # 「공동 강사」) — write=False. 소유자 전용이 아니다(ADR-0055: 초대는 강사 누구나).
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
+    invite = co_instructors.create_invite(class_obj, request.auth_user.id)
+    return 201, CoInstructorInviteOut(
+        id=invite.id, token=invite.token, created_at=invite.created_at, expires_at=invite.expires_at
+    )
+
+
+@router.get(
+    "/co-instructor-invites/{token}",
+    response={200: CoInstructorInvitePreviewOut, 404: ErrorOut},
+    auth=None,
+)
+def preview_co_instructor_invite(request: HttpRequest, token: str):
+    """초대 링크를 연 사람이 무엇을 수락하는지 본다 — 로그인하지 않아도 열린다(가입 링크
+    미리보기와 같다). 쓰였거나 만료·취소된 초대도 404 로 숨기지 않고 그 상태를 말한다 —
+    받은 사람이 초대한 사람에게 새 링크를 부탁할 수 있게."""
+
+    invite = co_instructors.invite_or_404(token)
+    class_obj = invite.classroom
+    status = invite.status_at(Clock.now())
+    auth_user = getattr(request, "auth_user", None)
+    return 200, CoInstructorInvitePreviewOut(
+        class_id=class_obj.id,
+        class_name=class_obj.name,
+        instructor_names=co_instructors.instructor_names(class_obj),
+        status=status,
+        status_message=co_instructors.not_pending_message(status),
+        expires_at=invite.expires_at,
+        archived=class_obj.archived_at is not None,
+        already_instructor=auth_user is not None and is_instructor(class_obj, auth_user.id),
+        suggested_name=_suggested_name(auth_user),
+    )
+
+
+@router.post(
+    "/co-instructor-invites/{token}/accept",
+    response={200: CoInstructorAcceptOut, 404: ErrorOut, 409: ErrorOut, 410: ErrorOut, 422: ErrorOut},
+    auth=jwt_auth,
+)
+def accept_co_instructor_invite(request: HttpRequest, token: str, payload: CoInstructorAcceptIn):
+    """초대를 쓰고 그 클래스의 공동 강사가 된다 — 1회용이라 행을 잠그고 다시 확인한다
+    (`classroom.co_instructors.accept_invite`). 이미 강사면 409 이고 초대는 남는다.
+    참여자였던 사람도 수락할 수 있다 — 참여자 행은 그대로 두고 집계에서만 빠진다."""
+
+    class_obj = co_instructors.accept_invite(token, request.auth_user.id, payload.display_name)
+    return 200, CoInstructorAcceptOut(class_id=class_obj.id, class_name=class_obj.name)
 
 
 # --- Member (#281) ---------------------------------------------------------------
@@ -1428,7 +1509,8 @@ def _get_submitting_member_or_404(class_id: int, user_id: int) -> ClassMember:
     참여자 행을 가리키므로 행이 필요하다 — 예전에는 강사가 **가입 링크로 자기
     클래스에 들어간 적이 있을 때만** 그 행이 있었고, 그래서 자기 문제를 내
     보려면 링크를 스스로 열어야 했다(그 사실을 아는 사람이 없었다). 이름은
-    클래스에 이미 적어 둔 강사 이름을 그대로 쓴다.
+    클래스에 이미 적어 둔 그 강사의 이름(소유자면 클래스의 강사 이름, 공동 강사면
+    수락할 때 정한 이름)을 그대로 쓴다.
 
     보관된 클래스에서는 행을 만들지 않는다 — 읽기 전용이라 어차피 제출이
     403이고, 없던 행을 남기지 않는 편이 정직하다."""
@@ -1449,7 +1531,7 @@ def _get_submitting_member_or_404(class_id: int, user_id: int) -> ClassMember:
     member, _created = ClassMember.objects.get_or_create(
         classroom=class_obj,
         user_id=user_id,
-        defaults={"display_name": class_obj.instructor_display_name or "강사"},
+        defaults={"display_name": instructor_display_name_of(class_obj, user_id) or "강사"},
     )
     member.classroom = class_obj
     return member

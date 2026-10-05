@@ -56,6 +56,10 @@ export function middleware(request: NextRequest) {
   return NextResponse.next();
 }
 
+// **공동 강사 초대 링크(`/invite/{token}`)도 뺀다**(#561) — 가입 링크와 같은 이유다. 받은
+// 사람이 로그인하기 전에 어느 클래스의 초대인지 보고, 로그인 링크가 이 주소로 돌아온다.
+// 수락 자체는 로그인을 요구한다(백엔드 `accept_co_instructor_invite`).
+//
 // **연결된 앱의 바깥 주소도 뺀다**(ADR-0052, #512). `/mcp`·`/.well-known/oauth-*`·
 // `/oauth/{register,token,revoke}`는 claude.ai 같은 외부 앱이 서버에서 부르는
 // 자리라 로그인 쿠키가 없다 — 공개(메타데이터·등록)이거나 앱 자신의 Bearer 토큰으로
@@ -64,6 +68,6 @@ export function middleware(request: NextRequest) {
 // 돌아온다.
 export const config = {
   matcher: [
-    "/((?!login|join|api|healthz|_next/static|_next/image|favicon.ico|icon|apple-icon|robots.txt|sitemap.xml|opengraph-image|mcp|\\.well-known|oauth/register|oauth/token|oauth/revoke).*)",
+    "/((?!login|join|invite|api|healthz|_next/static|_next/image|favicon.ico|icon|apple-icon|robots.txt|sitemap.xml|opengraph-image|mcp|\\.well-known|oauth/register|oauth/token|oauth/revoke).*)",
   ],
 };

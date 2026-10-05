@@ -374,6 +374,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/co-instructor-invites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Co Instructor Invite
+         * @description 강사(소유자 또는 공동 강사)가 1회용 초대 링크를 하나 만든다 — 7일 뒤 만료되고, 여러 개를
+         *     동시에 열어 둘 수 있다.
+         */
+        post: operations["classroom_api_create_co_instructor_invite"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/copy": {
         parameters: {
             query?: never;
@@ -1099,6 +1120,50 @@ export interface paths {
          *     남기지 않는다.
          */
         post: operations["classroom_api_unarchive_class"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/co-instructor-invites/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview Co Instructor Invite
+         * @description 초대 링크를 연 사람이 무엇을 수락하는지 본다 — 로그인하지 않아도 열린다(가입 링크
+         *     미리보기와 같다). 쓰였거나 만료·취소된 초대도 404 로 숨기지 않고 그 상태를 말한다 —
+         *     받은 사람이 초대한 사람에게 새 링크를 부탁할 수 있게.
+         */
+        get: operations["classroom_api_preview_co_instructor_invite"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/co-instructor-invites/{token}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept Co Instructor Invite
+         * @description 초대를 쓰고 그 클래스의 공동 강사가 된다 — 1회용이라 행을 잠그고 다시 확인한다
+         *     (`classroom.co_instructors.accept_invite`). 이미 강사면 409 이고 초대는 남는다.
+         *     참여자였던 사람도 수락할 수 있다 — 참여자 행은 그대로 두고 집계에서만 빠진다.
+         */
+        post: operations["classroom_api_accept_co_instructor_invite"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4601,6 +4666,11 @@ export interface components {
             /** Openai Key Status */
             openai_key_status?: string | null;
             published_template?: components["schemas"]["PublishedTemplateSummaryOut"] | null;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "owner" | "co_instructor";
             /** Token Budget */
             token_budget?: number | null;
             /**
@@ -5050,6 +5120,74 @@ export interface components {
             judged_by: string;
             /** Reasoning */
             reasoning: string;
+        };
+        /** CoInstructorAcceptIn */
+        CoInstructorAcceptIn: {
+            /** Display Name */
+            display_name: string;
+        };
+        /** CoInstructorAcceptOut */
+        CoInstructorAcceptOut: {
+            /** Class Id */
+            class_id: number;
+            /** Class Name */
+            class_name: string;
+        };
+        /**
+         * CoInstructorInviteOut
+         * @description 만든 공동 강사 초대 하나(#561) — 링크는 화면이 `token`으로 조립한다(가입 링크와 같다).
+         */
+        CoInstructorInviteOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Id */
+            id: number;
+            /** Token */
+            token: string;
+        };
+        /**
+         * CoInstructorInvitePreviewOut
+         * @description 초대 링크를 연 사람이 보는 것(#561) — 로그인하지 않아도 열린다.
+         */
+        CoInstructorInvitePreviewOut: {
+            /**
+             * Already Instructor
+             * @default false
+             */
+            already_instructor: boolean;
+            /**
+             * Archived
+             * @default false
+             */
+            archived: boolean;
+            /** Class Id */
+            class_id: number;
+            /** Class Name */
+            class_name: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Instructor Names */
+            instructor_names: string[];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "accepted" | "expired" | "cancelled";
+            /** Status Message */
+            status_message?: string | null;
+            /** Suggested Name */
+            suggested_name?: string | null;
         };
         /** ComparisonEntryOut */
         ComparisonEntryOut: {
@@ -8632,6 +8770,15 @@ export interface operations {
                     "application/json": components["schemas"]["ClassOut"];
                 };
             };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -8670,6 +8817,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClassOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_create_co_instructor_invite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoInstructorInviteOut"];
                 };
             };
             /** @description Not Found */
@@ -8926,6 +9104,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClassOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
                 };
             };
             /** @description Not Found */
@@ -9992,6 +10179,99 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_preview_co_instructor_invite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoInstructorInvitePreviewOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_accept_co_instructor_invite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoInstructorAcceptIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoInstructorAcceptOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Gone */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

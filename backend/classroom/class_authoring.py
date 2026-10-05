@@ -66,11 +66,20 @@ def create_class(instructor_id: int, payload: ClassIn) -> Class:
     )
 
 
-def touches_budget(payload: ClassPatchIn) -> bool:
-    """이 설정 고치기가 예산 칸(상한·경고 임계)을 건드리는가 — 예산은 소유자의 비용이라
-    그때만 소유자 전용이다(ADR-0055). 화면과 연결된 앱이 같은 판단을 쓴다."""
+def touches_owner_only_fields(payload: ClassPatchIn) -> bool:
+    """이 설정 고치기가 소유자 전용 칸을 건드리는가 — 그때만 소유자 전용이다. 화면과 연결된
+    앱이 같은 판단을 쓴다.
 
-    return payload.token_budget is not None or payload.token_budget_warning_threshold_percent is not None
+    - 예산 칸(상한·경고 임계): 예산은 소유자의 비용이다(ADR-0055).
+    - 강사 이름(`instructor_display_name`): 이 칸은 **소유자의** 강사 이름이다 — 공동 강사가
+      보내면 남의 이름을 바꾸게 된다. 공동 강사의 이름은 수락할 때 정한 그 사람의 것이다
+      (`ClassCoInstructor.display_name`, #561)."""
+
+    return (
+        payload.token_budget is not None
+        or payload.token_budget_warning_threshold_percent is not None
+        or payload.instructor_display_name is not None
+    )
 
 
 def update_class(class_obj: Class, payload: ClassPatchIn) -> Class:

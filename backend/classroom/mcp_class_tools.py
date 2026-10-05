@@ -51,8 +51,10 @@ def _share_code(arguments: dict) -> str:
     return value
 
 
-def _class_result(class_obj, summary: str) -> WriteResult:
-    return WriteResult(structured={"class": class_view(class_obj)}, class_id=class_obj.id, summary=summary)
+def _class_result(grant: ConnectedApp, class_obj, summary: str) -> WriteResult:
+    return WriteResult(
+        structured={"class": class_view(class_obj, grant.instructor_id)}, class_id=class_obj.id, summary=summary
+    )
 
 
 # --- 만들기·복사 ------------------------------------------------------------------
@@ -67,7 +69,7 @@ def _create_class(grant: ConnectedApp, arguments: dict) -> WriteResult:
     _check_arguments(arguments, _CREATE_CLASS_INPUT)
     payload = _parse(ClassIn, arguments)
     class_obj = class_authoring.create_class(grant.instructor_id, payload)
-    return _class_result(class_obj, f"「{class_obj.name}」")
+    return _class_result(grant, class_obj, f"「{class_obj.name}」")
 
 
 _CLASS_REF_INPUT = _object({"class_id": _CLASS_ID}, ["class_id"])
@@ -79,7 +81,7 @@ def _copy_class(grant: ConnectedApp, arguments: dict) -> WriteResult:
     # 보관된 클래스도 복사해 새로 연다.
     source = class_scope(_id(arguments, "class_id"), grant.instructor_id, write=False, owner=False).class_obj
     new_class = copy_class(source, grant.instructor_id)
-    return _class_result(new_class, f"「{new_class.name}」 — 클래스 {source.id}에서 복사")
+    return _class_result(grant, new_class, f"「{new_class.name}」 — 클래스 {source.id}에서 복사")
 
 
 # --- 보관 ----------------------------------------------------------------------
@@ -93,7 +95,7 @@ def _archive_handler(archive: bool):
             class_authoring.archive_class(class_obj)
         else:
             class_authoring.unarchive_class(class_obj)
-        return _class_result(class_obj, f"「{class_obj.name}」")
+        return _class_result(grant, class_obj, f"「{class_obj.name}」")
 
     return handler
 
@@ -135,12 +137,12 @@ def _update_class_settings(grant: ConnectedApp, arguments: dict) -> WriteResult:
     payload = _parse(ClassPatchIn, _without(arguments, "class_id"))
     # 화면의 설정 고치기(`classroom.api.update_class`)와 같은 문 — 보관 뒤에도 고친다.
     scope = class_scope(_id(arguments, "class_id"), grant.instructor_id, write=False, owner=False)
-    if class_authoring.touches_budget(payload):
+    if class_authoring.touches_owner_only_fields(payload):
         scope.require_owner()
     class_obj = scope.class_obj
     class_authoring.update_class(class_obj, payload)
     changed = ", ".join(sorted(payload.model_fields_set)) or "없음"
-    return _class_result(class_obj, f"「{class_obj.name}」 — 고친 칸: {changed}")
+    return _class_result(grant, class_obj, f"「{class_obj.name}」 — 고친 칸: {changed}")
 
 
 # --- 가입 링크 ---------------------------------------------------------------------
@@ -202,7 +204,7 @@ def _import_class_template(grant: ConnectedApp, arguments: dict) -> WriteResult:
     share_code = _share_code(arguments)
     payload = _parse(ImportClassTemplateIn, _without(arguments, "share_code"))
     new_class = class_authoring.import_class_template_as(share_code, grant.instructor_id, payload)
-    return _class_result(new_class, f"「{new_class.name}」 — 템플릿 {share_code}에서 가져옴")
+    return _class_result(grant, new_class, f"「{new_class.name}」 — 템플릿 {share_code}에서 가져옴")
 
 
 # --- 등록 ----------------------------------------------------------------------

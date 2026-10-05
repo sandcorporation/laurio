@@ -396,7 +396,7 @@ def import_class_template_view(request, share_code: str, payload: ImportClassTem
 
     # 이름 금칙어 검사·내려진 템플릿 404 는 `class_authoring` 이 한다(연결된 앱과 한 벌).
     new_class = import_class_template_as(share_code, request.auth_user.id, payload)
-    return 201, _serialize_class(new_class)
+    return 201, _serialize_class(new_class, viewer_id=request.auth_user.id)
 
 
 @router.post(

@@ -85,8 +85,17 @@ function ClassList({
               >
                 {classroom.name}
               </Link>
-              <div className="mt-1 text-[12px] text-ink/45">
-                <Num>{new Date(classroom.created_at).toLocaleDateString("ko-KR")}</Num> 만듦
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-[12px] text-ink/45">
+                {/* 소유한 클래스와 공동 강사인 클래스가 한 목록에 섞인다(#561) — 어느 쪽인지
+                    가른다. 소유자 쪽은 지금까지처럼 아무 표시도 없다. */}
+                {classroom.role === "co_instructor" ? (
+                  <span data-testid={`classroom-row-${classroom.id}-co-instructor-badge`}>
+                    <Badge>공동 강사</Badge>
+                  </span>
+                ) : null}
+                <span>
+                  <Num>{new Date(classroom.created_at).toLocaleDateString("ko-KR")}</Num> 만듦
+                </span>
               </div>
             </div>
             {archived ? (

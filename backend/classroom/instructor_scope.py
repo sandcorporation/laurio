@@ -36,9 +36,10 @@
 호출부마다 답하게 한다. 소유자 전용은 넷뿐이다(`CONTEXT.md` 「공동 강사」): 채점 키·예산,
 클래스 삭제, 소유권 이전, 공동 강사 내보내기. 강사이지만 소유자가 아니면 403 이다 —
 클래스는 보이므로 404 로 숨기지 않는다. 순서는 강사 확인(404) → 문제 존재(404) → 소유자
-(403) → 보관(403)이다. 한 라우트 안에서 일부 칸만 소유자 전용이면(클래스 설정의 예산 칸)
-`owner=False`로 연 뒤 그 칸에서 `InstructorScope.require_owner()`를 부른다. 지금은
-소유자 = 강사라 어느 쪽도 응답을 바꾸지 않는다 — 공동 강사가 생기면(#561) 이 표시가 갈린다.
+(403) → 보관(403)이다. 한 라우트 안에서 일부 칸만 소유자 전용이면(클래스 설정의 예산 칸·소유자의 강사 이름 칸)
+`owner=False`로 연 뒤 그 칸에서 `InstructorScope.require_owner()`를 부른다. 공동 강사(#561)가
+이 표시로 갈린다 — 강사 전용 라우트 전부를 공동 강사로 훑는 표는
+`tests/test_classroom_co_instructor_permissions.py`에 있다.
 `tests/test_classroom_instructor_scope_structure.py`의 `OWNER_ONLY_ROUTES`가 그 넷만
 소유자를 확인하는지 지킨다.
 """

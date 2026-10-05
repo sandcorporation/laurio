@@ -335,9 +335,10 @@ class ClassMember(models.Model):
     쓸 수 있어야 한다). `user`는 `accounts.DeveloperProfile`이 아니라
     `User`를 바로 가리킨다 — `Class.instructor`와 같은 이유(ADR-0037)다.
 
-    강사 본인도 자기 클래스에 들어와 이 모델의 행이 될 수 있다 — 그때를
-    구별하는 플래그는 두지 않는다: `classroom.instructor_id == user_id`로
-    즉시 판별되므로 중복 상태를 만들 이유가 없다.
+    강사 본인도 자기 클래스에 들어와 이 모델의 행이 될 수 있다(참여자였다가 공동
+    강사가 된 사람도, #561) — 그때를 구별하는 플래그는 두지 않는다:
+    `classroom.instructors.is_instructor`가 즉시 판별하므로 중복 상태를 만들 이유가
+    없다.
     """
 
     classroom = models.ForeignKey(Class, related_name="members", on_delete=models.CASCADE)
@@ -363,6 +364,86 @@ class ClassMember(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"ClassMember(classroom_id={self.classroom_id}, user_id={self.user_id})"
+
+
+class ClassCoInstructor(models.Model):
+    """소유자가 아닌 강사 한 사람(#561, CONTEXT.md 「공동 강사」, ADR-0055).
+
+    소유자는 지금처럼 `Class.instructor` 하나다 — 이 행은 그 밖의 강사다. 클래스를
+    꾸리는 일은 소유자와 똑같이 하고(문은 `classroom.instructors.classes_taught_by`),
+    소유자 전용 넷(채점 키·예산, 클래스 삭제, 소유권 이전, 공동 강사 내보내기)만
+    막힌다(`classroom.instructor_scope`의 `owner=True`). 공동 강사 초대
+    (`CoInstructorInvite`)를 수락해야만 생긴다.
+
+    참여자였던 사람이 수락해도 그 사람의 `ClassMember` 행은 그대로 둔다 — 「강사인가」
+    판정이 이 행을 보므로 집계(달성률 분모·명단)에서 저절로 빠지고, 지난 시도는 남는다."""
+
+    classroom = models.ForeignKey(Class, related_name="co_instructors", on_delete=models.CASCADE)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="co_instructed_classes", on_delete=models.CASCADE
+    )
+    #: 이 클래스에서 불릴 강사 이름 — 소유자의 `Class.instructor_display_name`과 같은
+    #: 자리다(수락할 때 정한다).
+    display_name = models.CharField(max_length=100)
+    accepted_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ["accepted_at", "id"]
+        constraints = [
+            models.UniqueConstraint(fields=["classroom", "user"], name="unique_class_co_instructor")
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ClassCoInstructor(classroom_id={self.classroom_id}, user_id={self.user_id})"
+
+
+#: 공동 강사 초대가 열려 있는 기간(CONTEXT.md 「공동 강사 초대」).
+CO_INSTRUCTOR_INVITE_TTL_DAYS = 7
+
+
+class CoInstructorInvite(models.Model):
+    """공동 강사 초대 — 사람 하나에게 건네는 **1회용** 링크(#561, CONTEXT.md
+    「공동 강사 초대」).
+
+    가입 링크(`Class.join_code`, 여러 사람이 쓰고 다시 뽑으면 죽는다)와 다르다: 초대는
+    권한 그 자체라 한 번 쓰이면 남아 있으면 안 된다. 상태는 따로 두지 않고 아래 값들에서
+    읽는다(`status_at`) — 수락했으면 수락됨, 취소했으면 취소됨, 만료 시각이 지났으면 만료,
+    아니면 대기. 수락은 이 행을 잠그고 「아직 대기인가」를 다시 확인한다
+    (`classroom.co_instructors.accept_invite`). 시각은 `Clock.now()`로 채운다 — 시험이
+    시계를 옮겨 만료를 본다(ADR-0003)."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "대기"
+        ACCEPTED = "accepted", "수락됨"
+        EXPIRED = "expired", "만료"
+        CANCELLED = "cancelled", "취소됨"
+
+    classroom = models.ForeignKey(Class, related_name="co_instructor_invites", on_delete=models.CASCADE)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, related_name="+", on_delete=models.CASCADE)
+    #: 추측 불가능한 토큰 — 가입 코드와 같은 생성 방식이다(`_generate_join_code`).
+    token = models.CharField(max_length=32, unique=True, default=_generate_join_code)
+    created_at = models.DateTimeField()
+    expires_at = models.DateTimeField()
+    accepted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="+", null=True, blank=True, on_delete=models.SET_NULL
+    )
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"CoInstructorInvite(id={self.pk}, classroom_id={self.classroom_id})"
+
+    def status_at(self, now) -> str:
+        if self.accepted_at is not None:
+            return self.Status.ACCEPTED
+        if self.cancelled_at is not None:
+            return self.Status.CANCELLED
+        if now >= self.expires_at:
+            return self.Status.EXPIRED
+        return self.Status.PENDING
 
 
 class ClassroomSubmission(Submission):
