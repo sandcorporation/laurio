@@ -141,7 +141,7 @@ def publish_template(
     받는다(spec #474, #477) — `publish_problem_as_template`이 사본을 뜨기
     전에 막는다."""
 
-    problem = problem_scope(class_id, problem_id, request.auth_user.id, write=False).problem
+    problem = problem_scope(class_id, problem_id, request.auth_user.id, write=False, owner=False).problem
     template, created = publish_problem_template_checked(
         problem, published_by_id=request.auth_user.id, publisher_display_name=payload.publisher_display_name
     )
@@ -210,7 +210,7 @@ def import_template(request, share_code: str, payload: ImportTemplateIn):
     docstring)."""
 
     template = _get_visible_template_or_404(share_code)
-    target_class = class_scope(payload.target_class_id, request.auth_user.id, write=True).class_obj
+    target_class = class_scope(payload.target_class_id, request.auth_user.id, write=True, owner=False).class_obj
 
     problem = import_problem_template(template, target_class)
     return 201, _serialize_problem(problem, target_class)
@@ -330,7 +330,7 @@ def publish_class_template(request, class_id: int, payload: PublishTemplateIn):
     `PublishTemplateIn`을 그대로 공유하므로 규칙 표의 같은 줄이 두
     엔드포인트를 함께 막는다."""
 
-    class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
     template, created = publish_class_template_checked(
         class_obj, published_by_id=request.auth_user.id, publisher_display_name=payload.publisher_display_name
     )

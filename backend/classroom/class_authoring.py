@@ -66,6 +66,13 @@ def create_class(instructor_id: int, payload: ClassIn) -> Class:
     )
 
 
+def touches_budget(payload: ClassPatchIn) -> bool:
+    """이 설정 고치기가 예산 칸(상한·경고 임계)을 건드리는가 — 예산은 소유자의 비용이라
+    그때만 소유자 전용이다(ADR-0055). 화면과 연결된 앱이 같은 판단을 쓴다."""
+
+    return payload.token_budget is not None or payload.token_budget_warning_threshold_percent is not None
+
+
 def update_class(class_obj: Class, payload: ClassPatchIn) -> Class:
     """클래스 설정을 고친다 — 보낸 칸만. 보관 뒤에도 고칠 수 있다(`classroom.participation`
     모듈 docstring 「열어 두는 것」) — 호출부가 `class_scope(write=False)` 로 연다."""

@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from core.events import Event, publish_after_commit
 
+from .instructors import instructor_user_ids
+
 #: 강의실 시도가 새로 생겼다(#383 AC). 그 시도를 낸 참여자와 그 클래스
 #: 강사에게 간다 — 다른 클래스 강사·다른 참여자에게는 가지 않는다.
 ATTEMPT_SUBMITTED = "attempt-submitted"
@@ -46,7 +48,7 @@ def publish_attempt_submitted(submission) -> None:
         "problem_id": problem.id,
         "submission_id": submission.id,
     }
-    for recipient_id in {member.user_id, problem.classroom.instructor_id}:
+    for recipient_id in {member.user_id, *instructor_user_ids(problem.classroom)}:
         event = Event(kind=ATTEMPT_SUBMITTED, recipient_id=recipient_id, payload=payload)
         publish_after_commit(event)
 
@@ -87,7 +89,7 @@ def publish_attempt_scored(submission) -> None:
         "problem_id": problem.id,
         "submission_id": submission.id,
     }
-    recipient_ids = {problem.classroom.instructor_id}
+    recipient_ids = set(instructor_user_ids(problem.classroom))
     if member.expelled_at is None:
         recipient_ids.add(member.user_id)
     for recipient_id in recipient_ids:

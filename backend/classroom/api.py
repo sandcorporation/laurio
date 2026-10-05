@@ -121,6 +121,7 @@ from .schemas import (
 from . import pending_scoring
 from .events import publish_attempt_submitted
 from .instructor_scope import class_scope, owned_problem_or_404, problem_scope
+from .instructors import classes_taught_by, instructor_user_ids, is_instructor
 from .participation import (
     SUBMIT_BLOCKED_ARCHIVED,
     SUBMIT_BLOCKED_EXPELLED,
@@ -207,12 +208,12 @@ def _serialize_checklist_item(item: ChecklistItem) -> ChecklistItemOut:
 
 
 def _active_member_ids(class_obj: Class) -> set[int]:
-    """달성률의 분모를 이루는 참여자 id — 강사 본인과 내보내진 사람은 뺀다
-    (#289, CONTEXT.md 「달성률」)."""
+    """달성률의 분모를 이루는 참여자 id — 강사(지금 강사인 사람 전원)와 내보내진 사람은
+    뺀다(#289, CONTEXT.md 「달성률」·「공동 강사」)."""
 
     return set(
         class_obj.members.filter(expelled_at__isnull=True)
-        .exclude(user_id=class_obj.instructor_id)
+        .exclude(user_id__in=instructor_user_ids(class_obj))
         .values_list("id", flat=True)
     )
 
@@ -248,8 +249,9 @@ def _problem_pass_stats(problem: Problem, active_member_ids: set[int]) -> tuple[
 
 
 def _problem_ids_blocking_deletion(class_obj: Class) -> set[int]:
-    """강사 자신이 아닌 누군가의 시도가 하나라도 달린 문제 id 집합(#431,
-    ADR-0050) — **내보낸 참여자의 시도도 포함한다**(`member__expelled_at`을
+    """지금 강사인 사람이 아닌 누군가의 시도가 하나라도 달린 문제 id 집합(#431,
+    ADR-0050 — ADR-0055 대로 떠난 공동 강사의 시도는 내보낸 참여자의 것이라 막는다)
+    — **내보낸 참여자의 시도도 포함한다**(`member__expelled_at`을
     보지 않는다, ADR-0050의 경계: 내보내면 지울 수 있게 되는 우회를 막는다).
     목록 화면(`list_problems`/`reorder_problems`)이 문제마다 따로 질의하지
     않도록 클래스 전체를 한 번에 묻는다 — `_active_member_ids`와 같은 배치
@@ -257,7 +259,7 @@ def _problem_ids_blocking_deletion(class_obj: Class) -> set[int]:
 
     return set(
         ClassroomSubmission.objects.filter(problem__classroom=class_obj)
-        .exclude(member__user_id=class_obj.instructor_id)
+        .exclude(member__user_id__in=instructor_user_ids(class_obj))
         .values_list("problem_id", flat=True)
     )
 
@@ -268,7 +270,7 @@ def _problem_deletable(
     """이 문제를 지금 지울 수 있는가(#430/#431, ADR-0050) — 강사 자신이 아닌
     누군가의 시도가 하나도 없을 때 참이다.
 
-    강사 판정은 `member__user_id == class_obj.instructor_id`로 한다 — 「그
+    강사 판정은 `member__user_id ∈ instructor_user_ids(class_obj)`로 한다 — 「그
     시도가 어느 멤버십의 것인가」가 아니라 「그 시도를 낸 사람이 강사
     자신인가」로 좁게 본다(#431 Further Notes가 정한 더 좁은 쪽). 두 판정은
     `unique_classroom_member` 제약(클래스 하나에 유저 하나당 멤버십 하나) 아래
@@ -282,7 +284,7 @@ def _problem_deletable(
         return problem.id not in blocking_problem_ids
     return not (
         ClassroomSubmission.objects.filter(problem=problem)
-        .exclude(member__user_id=class_obj.instructor_id)
+        .exclude(member__user_id__in=instructor_user_ids(class_obj))
         .exists()
     )
 
@@ -530,7 +532,7 @@ def list_joined_classes(request: HttpRequest):
 
     memberships = (
         ClassMember.objects.filter(user_id=request.auth_user.id)
-        .exclude(classroom__instructor_id=request.auth_user.id)
+        .exclude(classroom__in=classes_taught_by(request.auth_user.id))
         .select_related("classroom")
         .order_by("-joined_at")
     )
@@ -549,7 +551,7 @@ def list_joined_classes(request: HttpRequest):
 
 @router.get("/classes/{class_id}", response={200: ClassOut, 404: ErrorOut}, auth=jwt_auth)
 def get_class(request: HttpRequest, class_id: int):
-    class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
     return 200, _serialize_class(class_obj)
 
 
@@ -559,7 +561,11 @@ def get_class(request: HttpRequest, class_id: int):
 def update_class(request: HttpRequest, class_id: int, payload: ClassPatchIn):
     # 클래스 설정은 보관 뒤에도 고칠 수 있다(`classroom.participation`
     # 모듈 docstring 「열어 두는 것」) — write=False, 소유권·존재만 본다.
-    class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
+    scope = class_scope(class_id, request.auth_user.id, write=False, owner=False)
+    if class_authoring.touches_budget(payload):
+        # 예산은 소유자의 비용이다(ADR-0055) — 이름·모델 같은 나머지 칸은 강사 누구나.
+        scope.require_owner()
+    class_obj = scope.class_obj
     class_authoring.update_class(class_obj, payload)
     return 200, _serialize_class(class_obj)
 
@@ -581,8 +587,9 @@ def set_class_openai_key(request: HttpRequest, class_id: int, payload: OpenAIKey
     가용성이 아니다."""
 
     # 클래스 설정과 같은 이유로 보관 뒤에도 키는 고칠 수 있다(`update_class`
-    # 와 같은 판단, `classroom.participation` 「열어 두는 것」).
-    class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
+    # 와 같은 판단, `classroom.participation` 「열어 두는 것」). 키는 소유자의 비용이라
+    # 소유자 전용이다(ADR-0055).
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=True).class_obj
 
     raw_key = payload.api_key.strip()
     if not raw_key:
@@ -614,7 +621,7 @@ def copy_class_view(request: HttpRequest, class_id: int):
     # 원본이 보관됐어도 복사해서 새로 여는 것은 막지 않는다(`classroom.
     # participation` 「열어 두는 것」의 "복사해서 새로 열기") — 새 클래스가
     # 결과물이지 원본을 바꾸지 않는다.
-    class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
     new_class = copy_class(class_obj, request.auth_user.id)
     return 201, _serialize_class(new_class)
 
@@ -630,7 +637,7 @@ def list_class_scoring_models(request: HttpRequest, class_id: int):
     "이 클래스의 키로 실제로 쓸 수 있는 모델"은 클래스 기준으로만 답할 수
     있다. 남의 클래스는 404다(`instructor_scope.class_scope`와 같은 규율)."""
 
-    class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
     catalog = get_scoring_model_catalog(class_obj)
     return 200, ScoringModelCatalogOut(
         models=[
@@ -659,7 +666,7 @@ def regenerate_join_link(request: HttpRequest, class_id: int):
 
     # 보관된 클래스라도 링크 재발급 자체는 막지 않는다 — 가입은 `join_class`
     # 가 보관을 따로 막으므로 여기서 또 막을 이유가 없다.
-    class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
     class_authoring.regenerate_join_link(class_obj)
     return 200, JoinLinkOut(join_code=class_obj.join_code)
 
@@ -673,7 +680,7 @@ def archive_class(request: HttpRequest, class_id: int):
 
     # 보관 자체를 여는 동작이라 보관 여부로 스스로를 막을 수 없다(이미
     # 보관됐어도 멱등하게 통과).
-    class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
     class_authoring.archive_class(class_obj)
     return 200, _serialize_class(class_obj)
 
@@ -688,7 +695,7 @@ def unarchive_class(request: HttpRequest, class_id: int):
 
     # 보관을 되돌리는 동작 자체다(`classroom.participation` 「열어 두는
     # 것」의 "보관 되돌리기") — 보관 여부로 막으면 되돌릴 수 없게 된다.
-    class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
     class_authoring.unarchive_class(class_obj)
     return 200, _serialize_class(class_obj)
 
@@ -709,8 +716,9 @@ def delete_class(request: HttpRequest, class_id: int):
     가리키지 않는, 공개 시점에 뜬 사본이라 영향받지 않는다(#316·#319)."""
 
     # 클래스 삭제 자체다(`classroom.participation` 「열어 두는 것」) — 제출이
-    # 있으면 아래에서 따로 거절하므로 보관 여부는 이 경로를 막지 않는다.
-    class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
+    # 있으면 아래에서 따로 거절하므로 보관 여부는 이 경로를 막지 않는다. 클래스의
+    # 존폐는 소유자 몫이다(ADR-0055).
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=True).class_obj
     remove_class(class_obj)
     return 204, None
 
@@ -833,13 +841,13 @@ def join_class(request: HttpRequest, join_code: str, payload: JoinIn):
 # --- Member (#281) ---------------------------------------------------------------
 
 
-def _serialize_member(member: ClassMember, *, instructor_id: int) -> MemberOut:
+def _serialize_member(member: ClassMember, class_obj: Class) -> MemberOut:
     return MemberOut(
         id=member.id,
         display_name=member.display_name,
         joined_at=member.joined_at,
         expelled=member.expelled_at is not None,
-        is_instructor=member.user_id == instructor_id,
+        is_instructor=is_instructor(class_obj, member.user_id),
     )
 
 
@@ -851,7 +859,7 @@ def list_members(request: HttpRequest, class_id: int):
     못한다(#281 AC "참여자는 남의 명단을 볼 수 없다"), `instructor_scope.
     class_scope`가 강사가 아닌 모든 요청을 404로 돌리는 것과 같은 문이다."""
 
-    class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
     return 200, _serialize_members(class_obj)
 
 
@@ -859,7 +867,7 @@ def _serialize_members(class_obj: Class) -> list[MemberOut]:
     """참여자 명단 — 화면(`list_members`)과 연결된 앱의 읽기 도구
     (`classroom.mcp_read_tools`, #513)가 함께 부른다."""
 
-    return [_serialize_member(m, instructor_id=class_obj.instructor_id) for m in class_obj.members.all()]
+    return [_serialize_member(m, class_obj) for m in class_obj.members.all()]
 
 
 @router.post(
@@ -873,9 +881,9 @@ def expel_member(request: HttpRequest, class_id: int, member_id: int):
 
     # 보관된 클래스에서도 명단 정리는 열어 둔다 — 새 가입·새 제출처럼 새
     # 활동을 만드는 것이 아니라 이미 있는 명단을 표시만 바꾸는 것이다.
-    class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
     member = expel_class_member(class_member_or_404(class_obj, member_id))
-    return 200, _serialize_member(member, instructor_id=class_obj.instructor_id)
+    return 200, _serialize_member(member, class_obj)
 
 
 def class_member_or_404(class_obj: Class, member_id: int) -> ClassMember:
@@ -977,7 +985,7 @@ def get_roster_grid(request: HttpRequest, class_id: int):
     그대로 재사용해 문제 중심 탭(`list_problems`)과 정확히 같은 값을 낸다(AC) —
     계산을 두 번 쓰지 않는다."""
 
-    class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
     return 200, _build_roster_grid(class_obj)
 
 
@@ -1032,7 +1040,7 @@ def _build_roster_grid(class_obj: Class) -> ClassroomRosterGridOut:
             ClassroomGridMemberOut(
                 id=member.id,
                 display_name=member.display_name,
-                is_instructor=member.user_id == class_obj.instructor_id,
+                is_instructor=is_instructor(class_obj, member.user_id),
                 expelled=member.expelled_at is not None,
                 cells=cells,
             )
@@ -1055,7 +1063,7 @@ def create_problem(request: HttpRequest, class_id: int, payload: ProblemIn):
     같은 규칙) 문제 자체를 만들지 않고 거부한다("실패하면 문제도 안
     생긴다")."""
 
-    class_obj = class_scope(class_id, request.auth_user.id, write=True).class_obj
+    class_obj = class_scope(class_id, request.auth_user.id, write=True, owner=False).class_obj
     problem = problem_authoring.create_problem(class_obj, payload)
     return 201, _serialize_problem(problem, class_obj)
 
@@ -1066,7 +1074,7 @@ def create_problem(request: HttpRequest, class_id: int, payload: ProblemIn):
 def list_problems(request: HttpRequest, class_id: int):
     """강사 본인의 클래스 문제 전부(초안 + 열림), 순서대로."""
 
-    class_obj = class_scope(class_id, request.auth_user.id, write=False).class_obj
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
     return 200, _serialize_problem_list(class_obj)
 
 
@@ -1097,7 +1105,7 @@ def reorder_problems(request: HttpRequest, class_id: int, payload: ProblemReorde
     다른)에서 405로 막힌다. 이 파일의 라우트 등록 순서가 그래서 이렇다: 정적
     세그먼트 전부 → 동적 `{problem_id}` 전부."""
 
-    class_obj = class_scope(class_id, request.auth_user.id, write=True).class_obj
+    class_obj = class_scope(class_id, request.auth_user.id, write=True, owner=False).class_obj
     ordered = problem_authoring.reorder_problems(class_obj, payload.problem_ids)
     active_member_ids = _active_member_ids(class_obj)
     blocking_problem_ids = _problem_ids_blocking_deletion(class_obj)
@@ -1125,7 +1133,7 @@ def list_importable_contests(
     공개 중 · 마감 전 무료 공모전. 강의실은 공모전 앱을 모르므로 공유층 카탈로그가 답한다
     (ADR-0054). `q` 는 제목 검색, `after` 는 앞 쪽의 `next` — 마감 빠른 순으로 20개씩 준다."""
 
-    class_scope(class_id, request.auth_user.id, write=False)
+    class_scope(class_id, request.auth_user.id, write=False, owner=False)
     cursor = decode_cursor(after) if after else None
     if after and cursor is None:
         raise HttpError(422, "잘못된 목록 위치입니다. 처음부터 다시 불러 주세요.")
@@ -1157,7 +1165,7 @@ def import_contest_as_problem(request: HttpRequest, class_id: int, payload: Impo
     """허용된 무료 공모전을 「공모전 문제」 초안으로 들여온다(#548, CONTEXT.md). 제목·설명·
     체크리스트는 그 공모전을 따라간다. 들여올 수 없으면(마감·허용 안 함·없음) 422."""
 
-    class_obj = class_scope(class_id, request.auth_user.id, write=True).class_obj
+    class_obj = class_scope(class_id, request.auth_user.id, write=True, owner=False).class_obj
     problem = import_contest_problem(class_obj, payload.contest_id)
     return 201, _serialize_problem(problem, class_obj)
 
@@ -1180,10 +1188,10 @@ def list_importable_problems(request: HttpRequest, class_id: int):
     곳으로 복사해 가져오는 것과는 무관하다 — 읽기는 보관 뒤에도 남는다는
     같은 원칙이다."""
 
-    class_scope(class_id, request.auth_user.id, write=False)
+    class_scope(class_id, request.auth_user.id, write=False, owner=False)
 
     problems = (
-        Problem.objects.filter(classroom__instructor_id=request.auth_user.id)
+        Problem.objects.filter(classroom__in=classes_taught_by(request.auth_user.id))
         .exclude(classroom_id=class_id)
         .select_related("classroom")
         .prefetch_related("checklist_items")
@@ -1283,7 +1291,7 @@ def list_my_problems(request: HttpRequest, class_id: int):
 def get_problem(request: HttpRequest, class_id: int, problem_id: int):
     """문제 편집 화면이 초기값을 채우는 자리."""
 
-    scope = problem_scope(class_id, problem_id, request.auth_user.id, write=False)
+    scope = problem_scope(class_id, problem_id, request.auth_user.id, write=False, owner=False)
     return 200, _serialize_problem(scope.problem, scope.class_obj)
 
 
@@ -1293,7 +1301,7 @@ def get_problem(request: HttpRequest, class_id: int, problem_id: int):
     auth=jwt_auth,
 )
 def update_problem(request: HttpRequest, class_id: int, problem_id: int, payload: ProblemPatchIn):
-    scope = problem_scope(class_id, problem_id, request.auth_user.id, write=True)
+    scope = problem_scope(class_id, problem_id, request.auth_user.id, write=True, owner=False)
     problem = problem_authoring.update_problem(scope.class_obj, scope.problem, payload)
     return 200, _serialize_problem(problem, scope.class_obj)
 
@@ -1320,7 +1328,7 @@ def delete_problem(request: HttpRequest, class_id: int, problem_id: int):
     함께 지우면 알림이 append-only가 아니게 된다). 공모전의 `Score`·원장에는
     닿지 않는다(강의실과 공모전은 서로 다른 앱 경계, ADR-0037/0039)."""
 
-    scope = problem_scope(class_id, problem_id, request.auth_user.id, write=True)
+    scope = problem_scope(class_id, problem_id, request.auth_user.id, write=True, owner=False)
     remove_problem(scope.class_obj, scope.problem)
     return 204, None
 
@@ -1343,7 +1351,7 @@ def remove_problem(class_obj: Class, problem: Problem) -> None:
     # 문제·시도는 남는 어중간한 상태가 생긴다.
     with transaction.atomic():
         ClassroomScore.objects.filter(
-            submission__problem=problem, submission__member__user_id=class_obj.instructor_id
+            submission__problem=problem, submission__member__user_id__in=instructor_user_ids(class_obj)
         ).delete()
         problem.delete()
 
@@ -1358,7 +1366,7 @@ def open_problem(request: HttpRequest, class_id: int, problem_id: int):
     않아 막는다(#283 AC). 전이 표(`classroom.problem_transitions`, #440)가
     「초안에서만」과 「필수 항목이 있어야」 두 조건을 함께 정한다."""
 
-    scope = problem_scope(class_id, problem_id, request.auth_user.id, write=True)
+    scope = problem_scope(class_id, problem_id, request.auth_user.id, write=True, owner=False)
     problem = execute_transition("open", scope.problem)
     return 200, _serialize_problem(problem, scope.class_obj)
 
@@ -1373,7 +1381,7 @@ def hide_problem(request: HttpRequest, class_id: int, problem_id: int):
     →숨김만 허용한다: 초안은 애초에 참여자에게 보인 적이 없어 거둘 것이
     없고, 이미 숨긴 문제를 다시 숨기는 것도 뜻이 없다."""
 
-    scope = problem_scope(class_id, problem_id, request.auth_user.id, write=True)
+    scope = problem_scope(class_id, problem_id, request.auth_user.id, write=True, owner=False)
     problem = execute_transition("hide", scope.problem)
     return 200, _serialize_problem(problem, scope.class_obj)
 
@@ -1388,7 +1396,7 @@ def reopen_problem(request: HttpRequest, class_id: int, problem_id: int):
     되돌린다. `open_problem`과 같은 필수 항목 규칙을 다시 확인한다: 그
     사이 강사가 체크리스트를 비웠으면 통과가 정의되지 않아 열 수 없다."""
 
-    scope = problem_scope(class_id, problem_id, request.auth_user.id, write=True)
+    scope = problem_scope(class_id, problem_id, request.auth_user.id, write=True, owner=False)
     problem = execute_transition("reopen", scope.problem)
     return 200, _serialize_problem(problem, scope.class_obj)
 
@@ -1432,7 +1440,7 @@ def _get_submitting_member_or_404(class_id: int, user_id: int) -> ClassMember:
     except ClassMember.DoesNotExist:
         pass
 
-    class_obj = Class.objects.filter(id=class_id, instructor_id=user_id).first()
+    class_obj = classes_taught_by(user_id).filter(id=class_id).first()
     if class_obj is None:
         raise HttpError(404, "문제를 찾을 수 없습니다.")
     if class_obj.archived_at is not None:
@@ -1519,7 +1527,7 @@ def get_contest_entry_form(request: HttpRequest, class_id: int, problem_id: int)
     """참여자의 「공모전에도 내기」 칸(#549) — 직전 공모전 제출로 미리 채운다. 공모전 문제가
     아니면 404. 강사 자신의 시도는 낼 수 없으므로 강사에게는 403이다."""
 
-    if Class.objects.filter(id=class_id, instructor_id=request.auth_user.id).exists():
+    if classes_taught_by(request.auth_user.id).filter(id=class_id).exists():
         raise HttpError(403, INSTRUCTOR_ENTRY_MESSAGE)
     member = _get_member_or_404(class_id, request.auth_user.id)
     problem = _get_visible_problem_for_participant_or_404(class_id, problem_id, member)
@@ -1540,7 +1548,7 @@ def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
 
     **그 클래스의 강사가 부르면 달리 대한다**(#429) — 참여자가 실제로 걷는
     이 주소 그대로 「학생 화면으로」가 연다. 상태(초안·열림·숨김)와 무관하게
-    문제를 내려준다. 강사 판정은 `instructor_id`만 본다.
+    문제를 내려준다. 강사 판정은 `classroom.instructors.classes_taught_by`가 한다.
 
     **열린 문제에는 강사도 낸다**(2026-09-17, #429 개정). 예전에는 이 분기가
     시도 목록을 언제나 빈 배열로 주고 제출을 막힌 것으로 표시해, 강사가 자기
@@ -1556,7 +1564,7 @@ def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
     # 라우트라 `instructor_scope.class_scope`(404로 존재를 숨기는 강사 전용
     # 문)가 아니라 `.filter(...).first()`로 확인한다: 강사가 아니면 아래
     # 참여자 경로로 그대로 흘러간다.
-    instructor_class = Class.objects.filter(id=class_id, instructor_id=request.auth_user.id).first()
+    instructor_class = classes_taught_by(request.auth_user.id).filter(id=class_id).first()
     if instructor_class is not None:
         class_obj = instructor_class
         problem = owned_problem_or_404(class_obj, problem_id)
@@ -1636,7 +1644,7 @@ def create_classroom_submission(
     # **강사와 참여자는 다른 문을 지난다**(2026-09-17, #429 개정). 강사는 자기
     # 문제를 상태와 무관하게 내 볼 수 있고(초안·열림·숨김), 참여자에게는 그
     # 상태들이 각각 404·403이다 — 그래서 문제를 찾는 질의부터 갈린다.
-    instructor_class = Class.objects.filter(id=class_id, instructor_id=request.auth_user.id).first()
+    instructor_class = classes_taught_by(request.auth_user.id).filter(id=class_id).first()
     if instructor_class is not None:
         problem = owned_problem_or_404(instructor_class, problem_id)
         blocked_reason = _instructor_submit_blocked_reason(instructor_class, problem)
@@ -1775,7 +1783,7 @@ def list_problem_submissions(request: HttpRequest, class_id: int, problem_id: in
     메서드로만 갈린다 — `/join/{join_code}`가 GET(누구나)·POST(로그인)로
     갈리는 것과 같은 모양이다."""
 
-    scope = problem_scope(class_id, problem_id, request.auth_user.id, write=False)
+    scope = problem_scope(class_id, problem_id, request.auth_user.id, write=False, owner=False)
     class_obj, problem = scope.class_obj, scope.problem
     checklist_items = list(problem.checklist_items.all())
 
@@ -1817,9 +1825,9 @@ def copy_problem(request: HttpRequest, class_id: int, problem_id: int, payload: 
     `write=False`다 — 보관된 클래스에서 다른 곳으로 복사해 가져오는 것은
     막지 않는다(위 `list_importable_problems`와 같은 원칙)."""
 
-    source = problem_scope(class_id, problem_id, request.auth_user.id, write=False)
+    source = problem_scope(class_id, problem_id, request.auth_user.id, write=False, owner=False)
     problem = source.problem
-    target_class = class_scope(payload.target_class_id, request.auth_user.id, write=True).class_obj
+    target_class = class_scope(payload.target_class_id, request.auth_user.id, write=True, owner=False).class_obj
 
     copy = copy_problem_to_class(problem, target_class)
     return 201, _serialize_problem(copy, target_class)
@@ -1836,7 +1844,7 @@ def copy_problem(request: HttpRequest, class_id: int, problem_id: int, payload: 
 def create_checklist_item(
     request: HttpRequest, class_id: int, problem_id: int, payload: ChecklistItemIn
 ):
-    problem = problem_scope(class_id, problem_id, request.auth_user.id, write=True).problem
+    problem = problem_scope(class_id, problem_id, request.auth_user.id, write=True, owner=False).problem
     item = problem_authoring.add_checklist_item(problem, payload)
     return 201, _serialize_checklist_item(item)
 
@@ -1852,7 +1860,7 @@ def reorder_checklist_items(
     """정적 세그먼트("reorder")라 `{item_id}` 동적 라우트보다 먼저 등록한다
     (파일 상단 docstring 참고)."""
 
-    problem = problem_scope(class_id, problem_id, request.auth_user.id, write=True).problem
+    problem = problem_scope(class_id, problem_id, request.auth_user.id, write=True, owner=False).problem
     ordered = problem_authoring.reorder_checklist_items(problem, payload.item_ids)
     return 200, [_serialize_checklist_item(i) for i in ordered]
 
@@ -1873,7 +1881,7 @@ def update_checklist_item(
     필수 항목을 필수 해제하면 422로 거절한다(초안은 예외, `classroom.
     problem_transitions.assert_required_item_floor`)."""
 
-    problem = problem_scope(class_id, problem_id, request.auth_user.id, write=True).problem
+    problem = problem_scope(class_id, problem_id, request.auth_user.id, write=True, owner=False).problem
     item = problem_authoring.update_checklist_item(problem, item_id, payload)
     return 200, _serialize_checklist_item(item)
 
@@ -1888,7 +1896,7 @@ def delete_checklist_item(request: HttpRequest, class_id: int, problem_id: int, 
     `assert_required_item_floor`와 같은 이유, `update_checklist_item`과
     같은 규율(초안은 예외)."""
 
-    problem = problem_scope(class_id, problem_id, request.auth_user.id, write=True).problem
+    problem = problem_scope(class_id, problem_id, request.auth_user.id, write=True, owner=False).problem
     problem_authoring.delete_checklist_item(problem, item_id)
     return 204, None
 

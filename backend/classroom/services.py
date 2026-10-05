@@ -29,7 +29,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from django.db import IntegrityError, transaction
-from django.db.models import Count, F, Q
+from django.db.models import Count, Q
+
+from .instructors import classes_taught_by, is_instructor_q
 
 from .models import (
     ChecklistItem,
@@ -378,11 +380,12 @@ def instructor_classes(instructor_id: int):
     강사 화면(`GET /api/classroom/classes`)과 연결된 앱의 `list_my_classes`
     도구(`classroom.mcp`, ADR-0052)가 함께 부른다 — 두 표면이 「누구의 클래스가
     보이는가」를 따로 정하지 않게 한 곳에 둔다. 도구가 쓰는 세는 값(참여자 수·
-    상태별 문제 수)을 주석으로 단다: 참여자는 강사 본인과 내보내진 사람을 빼고
-    센다(CONTEXT.md 「달성률」의 분모와 같은 사람들)."""
+    상태별 문제 수)을 주석으로 단다: 참여자는 강사와 내보내진 사람을 빼고
+    센다(CONTEXT.md 「달성률」의 분모와 같은 사람들). 「본인이 강사인가」·「그 가입이
+    강사의 것인가」는 `classroom.instructors` 가 답한다(#559)."""
 
-    active_members = Q(members__expelled_at__isnull=True) & ~Q(members__user_id=F("instructor_id"))
-    return Class.objects.filter(instructor_id=instructor_id).annotate(
+    active_members = Q(members__expelled_at__isnull=True) & ~is_instructor_q(user="members__user_id")
+    return classes_taught_by(instructor_id).annotate(
         participant_count=Count("members", filter=active_members, distinct=True),
         open_problem_count=Count(
             "problems", filter=Q(problems__status=Problem.Status.OPEN), distinct=True

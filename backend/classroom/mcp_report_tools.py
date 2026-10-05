@@ -147,10 +147,10 @@ def _get_participant_report(grant: ConnectedApp, arguments: dict) -> dict:
     class_id = _int_argument(arguments, "class_id", "클래스")
     problem_id = _int_argument(arguments, "problem_id", "문제", required=False)
     if problem_id is None:
-        class_obj = class_scope(class_id, grant.instructor_id, write=False).class_obj
+        class_obj = class_scope(class_id, grant.instructor_id, write=False, owner=False).class_obj
         problems = list(class_obj.problems.prefetch_related("checklist_items").all())
     else:
-        scope = problem_scope(class_id, problem_id, grant.instructor_id, write=False)
+        scope = problem_scope(class_id, problem_id, grant.instructor_id, write=False, owner=False)
         class_obj = scope.class_obj
         problems = list(class_obj.problems.prefetch_related("checklist_items").filter(id=problem_id))
 
@@ -326,7 +326,7 @@ def _open_submission_source(grant: ConnectedApp, arguments: dict) -> dict:
     if submission is None:
         raise HttpError(404, "제출을 찾을 수 없습니다.")
     # 화면과 같은 문으로 한 번 더 — 소유권·존재를 `instructor_scope` 가 정한다(읽기라 보관은 보지 않는다).
-    scope = problem_scope(submission.problem.classroom_id, submission.problem_id, grant.instructor_id, write=False)
+    scope = problem_scope(submission.problem.classroom_id, submission.problem_id, grant.instructor_id, write=False, owner=False)
     asset = submission.assets.order_by("order", "id").first()
     if asset is None:
         raise HttpError(404, "제출을 찾을 수 없습니다.")

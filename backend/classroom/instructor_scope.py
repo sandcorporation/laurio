@@ -29,6 +29,18 @@
 "넓히면 근거가 사라진다"고 못 박아 뒀다. 이 모듈은 그 필터를 참조하지도,
 `InstructorScope`에 담지도 않는다 — 범위를 연 뒤에도 삭제 가능 여부는
 `classroom.api`가 여전히 따로 묻는다.
+
+**강사인가, 소유자인가 (#559, ADR-0055).** 문을 여는 것은 「이 클래스의 **강사**인가」
+(`classroom.instructors.classes_taught_by`)다 — 강사가 아니면 404. 그 위에 `owner`
+인자가 `write`와 같은 관용구(키워드 전용, 기본값 없음)로 「이 라우트가 **소유자** 전용인가」를
+호출부마다 답하게 한다. 소유자 전용은 넷뿐이다(`CONTEXT.md` 「공동 강사」): 채점 키·예산,
+클래스 삭제, 소유권 이전, 공동 강사 내보내기. 강사이지만 소유자가 아니면 403 이다 —
+클래스는 보이므로 404 로 숨기지 않는다. 순서는 강사 확인(404) → 문제 존재(404) → 소유자
+(403) → 보관(403)이다. 한 라우트 안에서 일부 칸만 소유자 전용이면(클래스 설정의 예산 칸)
+`owner=False`로 연 뒤 그 칸에서 `InstructorScope.require_owner()`를 부른다. 지금은
+소유자 = 강사라 어느 쪽도 응답을 바꾸지 않는다 — 공동 강사가 생기면(#561) 이 표시가 갈린다.
+`tests/test_classroom_instructor_scope_structure.py`의 `OWNER_ONLY_ROUTES`가 그 넷만
+소유자를 확인하는지 지킨다.
 """
 
 from __future__ import annotations
@@ -37,8 +49,12 @@ from dataclasses import dataclass
 
 from ninja.errors import HttpError
 
+from .instructors import classes_taught_by, is_owner
 from .models import Class, Problem
 from .participation import assert_class_mutable
+
+#: 공동 강사가 소유자 전용 일을 부를 때의 거절 문구 — 화면과 연결된 앱이 같은 문장을 낸다.
+OWNER_ONLY_MESSAGE = "클래스 소유자만 할 수 있습니다."
 
 
 @dataclass(frozen=True)
@@ -50,15 +66,23 @@ class InstructorScope:
     """
 
     class_obj: Class
+    #: 부른 사람이 이 클래스의 소유자인가(#559) — `require_owner`가 본다.
+    is_owner: bool
     problem: Problem | None = None
 
+    def require_owner(self) -> None:
+        """소유자가 아니면 403. 클래스는 보이므로(강사다) 404 로 숨기지 않는다."""
 
-def _owned_class_or_404(class_id: int, user_id: int) -> Class:
-    """강사 본인의 클래스만 돌려준다. 남의 것은 「없다」로 답한다 — 목록에도
+        if not self.is_owner:
+            raise HttpError(403, OWNER_ONLY_MESSAGE)
+
+
+def _taught_class_or_404(class_id: int, user_id: int) -> Class:
+    """부른 사람이 강사인 클래스만 돌려준다. 남의 것은 「없다」로 답한다 — 목록에도
     상세에도 나오지 않아야 한다는 AC(#278)를 403이 아니라 404로 지킨다."""
 
     try:
-        return Class.objects.get(id=class_id, instructor_id=user_id)
+        return classes_taught_by(user_id).get(id=class_id)
     except Class.DoesNotExist as exc:
         raise HttpError(404, "클래스를 찾을 수 없습니다.") from exc
 
@@ -70,28 +94,36 @@ def _owned_problem_or_404(class_obj: Class, problem_id: int) -> Problem:
         raise HttpError(404, "문제를 찾을 수 없습니다.") from exc
 
 
-def class_scope(class_id: int, user_id: int, *, write: bool) -> InstructorScope:
-    """클래스 하나만 다루는 강사 전용 라우트가 첫 줄에서 부른다. `write=True`면
-    소유권·존재 확인 뒤에 보관 확인까지 건다 — `assert_class_mutable`과 같은
-    거절 문구를 낸다."""
-
-    class_obj = _owned_class_or_404(class_id, user_id)
+def _open(
+    class_obj: Class, user_id: int, *, write: bool, owner: bool, problem: Problem | None = None
+) -> InstructorScope:
+    scope = InstructorScope(
+        class_obj=class_obj, is_owner=is_owner(class_obj, user_id), problem=problem
+    )
+    if owner:
+        scope.require_owner()
     if write:
         assert_class_mutable(class_obj)
-    return InstructorScope(class_obj=class_obj)
+    return scope
 
 
-def problem_scope(class_id: int, problem_id: int, user_id: int, *, write: bool) -> InstructorScope:
+def class_scope(class_id: int, user_id: int, *, write: bool, owner: bool) -> InstructorScope:
+    """클래스 하나만 다루는 강사 전용 라우트가 첫 줄에서 부른다. `owner=True`면 강사
+    확인 뒤에 소유자 확인(403)을, `write=True`면 그 뒤에 보관 확인까지 건다 —
+    `assert_class_mutable`과 같은 거절 문구를 낸다."""
+
+    return _open(_taught_class_or_404(class_id, user_id), user_id, write=write, owner=owner)
+
+
+def problem_scope(class_id: int, problem_id: int, user_id: int, *, write: bool, owner: bool) -> InstructorScope:
     """클래스 밑의 문제 하나를 다루는 강사 전용 라우트가 첫 줄에서 부른다.
-    순서는 클래스 소유권 → 문제 존재 → (쓰기라면) 보관 아님이다 — 문제가
-    이 클래스의 것인지부터 확인해야 남의 클래스의 문제 id를 넣어도 404로
-    막힌다."""
+    순서는 강사 확인 → 문제 존재 → (소유자 전용이면) 소유자 → (쓰기라면) 보관
+    아님이다 — 문제가 이 클래스의 것인지부터 확인해야 남의 클래스의 문제 id를
+    넣어도 404로 막힌다."""
 
-    class_obj = _owned_class_or_404(class_id, user_id)
+    class_obj = _taught_class_or_404(class_id, user_id)
     problem = _owned_problem_or_404(class_obj, problem_id)
-    if write:
-        assert_class_mutable(class_obj)
-    return InstructorScope(class_obj=class_obj, problem=problem)
+    return _open(class_obj, user_id, write=write, owner=owner, problem=problem)
 
 
 def owned_problem_or_404(class_obj: Class, problem_id: int) -> Problem:

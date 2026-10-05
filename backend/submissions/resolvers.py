@@ -47,6 +47,8 @@ from django.conf import settings
 from awards.services import sponsor_user_id_if_awarded
 # APP-BOUNDARY-EXCEPTION: 강의실 모양(problem_id를 품는다) target_ref를 판정하려면 그 Problem이 실제로 있는지, 그 참여자가 지금 낼 수 있는지 확인해야 한다(#286, #439, ADR-0039)
 from classroom.models import ClassMember, Problem as ClassroomProblem
+# APP-BOUNDARY-EXCEPTION: 위와 같은 이유 — 그 사람이 이 클래스의 강사인가를 여기서 다시 판정하지 않고 강의실의 판정에 묻는다(#559)
+from classroom.instructors import is_instructor
 # APP-BOUNDARY-EXCEPTION: 위와 같은 이유 — 낼 수 있는가(보관·내보냄·숨김)를 여기서 다시 판정하지 않고 참여 정책 모듈에 묻는다(#439)
 from classroom.participation import can_submit, instructor_can_submit
 # APP-BOUNDARY-EXCEPTION: 위 awards와 같은 이유 — Award 존재 여부로 Handover 가시성을 판정하려면 지금은 Contest를 직접 조회해야 한다
@@ -146,7 +148,7 @@ class SubmissionTargetStateResolver:
         if problem is None:
             return _DENY
 
-        if problem.classroom.instructor_id == user_id:
+        if is_instructor(problem.classroom, user_id):
             # 강사는 참여자 행이 있든 없든 강사 기준으로 본다(2026-09-17) —
             # 상태(초안·열림·숨김)는 보지 않고 보관만 막는다. 행이 있다고
             # 참여자 규칙(숨김 403)에 걸리면 같은 사람이 같은 문제에 대해

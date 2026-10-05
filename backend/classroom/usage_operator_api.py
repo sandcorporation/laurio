@@ -30,7 +30,7 @@ from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth import get_user_model
-from django.db.models import Count, F, Max, Min
+from django.db.models import Count, Max, Min
 from django.db.models.functions import TruncDate
 from django.utils import timezone
 from ninja import Query, Router, Schema
@@ -39,6 +39,7 @@ from ninja.errors import HttpError
 from core.clock import Clock
 from core.operator_auth import OperatorAuth
 
+from .instructors import is_instructor_q
 from .models import Class, ClassMember, ClassroomSubmission, Problem
 from .schemas import ErrorOut
 
@@ -116,13 +117,15 @@ def seoul_bounds(start: date, end: date) -> tuple[datetime, datetime]:
 def counted_class_joins():
     """세는 클래스 가입 — 강사가 자기 클래스에 든 가입만 뺀다(내보내진 가입은 남긴다)."""
 
-    return ClassMember.objects.exclude(user_id=F("classroom__instructor_id"))
+    return ClassMember.objects.exclude(is_instructor_q(user="user_id", classroom="classroom"))
 
 
 def counted_submissions():
     """세는 강의실 제출 — 그 클래스의 강사가 낸 것만 뺀다(내보낸 학생의 제출은 남긴다)."""
 
-    return ClassroomSubmission.objects.exclude(member__user_id=F("problem__classroom__instructor_id"))
+    return ClassroomSubmission.objects.exclude(
+        is_instructor_q(user="member__user_id", classroom="problem__classroom")
+    )
 
 
 def _per_day(queryset, field: str, **aggregates) -> dict[date, dict]:
