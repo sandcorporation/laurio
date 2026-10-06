@@ -233,6 +233,9 @@ def _serialize_class(class_obj: Class, *, viewer_id: int) -> ClassOut:
             else None
         ),
         scoring_quota_exhausted=has_key and class_obj.scoring_quota_exhausted_at is not None,
+        scoring_server_unreachable=(
+            has_key and compatible and class_obj.scoring_server_unreachable_at is not None
+        ),
         archived=class_obj.archived_at is not None,
         token_budget=class_obj.token_budget,
         token_budget_warning_threshold_percent=class_obj.token_budget_warning_threshold_percent,
@@ -671,6 +674,7 @@ def set_class_openai_key(request: HttpRequest, class_id: int, payload: OpenAIKey
     # 크레딧을 보지 않으므로(`/v1/models`) 여기서 풀고, 다음 tick 의 채점이 실제로 확인한다.
     # 아직 바닥이면 그 채점이 다시 멈추고 다시 알린다.
     class_obj.scoring_quota_exhausted_at = None
+    class_obj.scoring_server_unreachable_at = None
     # OpenAI 키를 저장하면 연결이 「OpenAI 키」로 바뀌고 호환 서버 주소는 지운다(#601).
     class_obj.scoring_connection_kind = Class.ScoringConnectionKind.OPENAI_KEY
     class_obj.scoring_server_url = ""
@@ -688,6 +692,9 @@ def _save_scoring_connection(request: HttpRequest, class_obj: Class) -> None:
         openai_api_key_last4=class_obj.openai_api_key_last4,
         openai_api_key_status=class_obj.openai_api_key_status,
         scoring_quota_exhausted_at=None,
+        # 호환 서버에 닿지 않아 멈춰 있었다면(#603) 다시 저장이 「고쳤다」는 신호다 — 저장 전
+        # 확인이 이미 그 서버에 닿았다.
+        scoring_server_unreachable_at=None,
     )
     if not saved:
         raise HttpError(403, OWNER_ONLY_MESSAGE)
@@ -721,6 +728,7 @@ def set_class_compatible_server(request: HttpRequest, class_id: int, payload: Co
     class_obj.openai_api_key_last4 = auth_value[-4:] if auth_value else ""
     class_obj.openai_api_key_status = Class.ScoringKeyStatus.VERIFIED
     class_obj.scoring_quota_exhausted_at = None
+    class_obj.scoring_server_unreachable_at = None
     _save_scoring_connection(request, class_obj)
 
     connection = scoring_connection.connection_for(class_obj)

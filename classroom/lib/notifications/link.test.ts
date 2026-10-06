@@ -80,6 +80,15 @@ describe("notificationHref — classroom_scoring_quota_exhausted", () => {
   });
 });
 
+describe("notificationHref — classroom_scoring_server_unreachable", () => {
+  it("그 클래스의 설정 화면 채점 연결 자리로 간다(#603)", () => {
+    const href = notificationHref(
+      row({ notification_type: "classroom_scoring_server_unreachable", context: { class_id: 7 } }),
+    );
+    expect(href).toBe("/classes/7/settings#scoring-key");
+  });
+});
+
 describe("notificationHref — 알 수 없는 유형", () => {
   it("크래시 대신 null을 돌려준다", () => {
     expect(notificationHref(row({ notification_type: "unknown_type" }))).toBeNull();

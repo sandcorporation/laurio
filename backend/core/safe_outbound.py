@@ -51,7 +51,10 @@ class OutboundReason(enum.StrEnum):
     NOT_HTTPS = "not_https"
     NOT_PUBLIC = "not_public"
     DNS_FAILED = "dns_failed"
-    UNREACHABLE = "unreachable"  # 연결 거부·타임아웃·끊김
+    UNREACHABLE = "unreachable"  # 연결 거부·연결 타임아웃·연결 끊김
+    #: 닿았는데 답을 제때·끝까지 받지 못했다(읽기 타임아웃·끊긴 몸통, #603) — 위의 것들과 달리
+    #: 서버가 요청을 받았다. 강의실 채점은 이것만 실패 시도로 세고 나머지는 「연결 불가」로 멈춘다.
+    RESPONSE_FAILED = "response_failed"
     CERTIFICATE = "certificate"
     REDIRECT = "redirect"
     OFFLINE = "offline"  # fake 스위치 — dev·CI 는 나가지 않는다
@@ -62,6 +65,13 @@ class OutboundRefused(Exception):
         self.reason = reason
         self.detail = detail
         super().__init__(f"{reason.value}: {detail}" if detail else reason.value)
+
+    @property
+    def reached(self) -> bool:
+        """요청이 서버에 닿았는가(#603) — 닿지 않았으면(이름·주소·연결·인증서·리다이렉트) 그
+        서버의 문제라 다시 시도해도 같다."""
+
+        return self.reason is OutboundReason.RESPONSE_FAILED
 
 
 #: 이름만 보고 내부로 판정하는 꼬리 — 공인 DNS 에 없거나(RFC 6761·6762·8375) 클라우드 내부 이름이다.
@@ -176,8 +186,12 @@ class SafeOutbound:
             )
         except requests.exceptions.SSLError as exc:
             raise OutboundRefused(OutboundReason.CERTIFICATE, str(exc)) from None
-        except requests.RequestException as exc:
+        except requests.exceptions.ConnectionError as exc:
+            # 연결 타임아웃(`ConnectTimeout`)도 여기다 — 연결 자체가 서지 않았다.
             raise OutboundRefused(OutboundReason.UNREACHABLE, type(exc).__name__) from None
+        except requests.RequestException as exc:
+            # 읽기 타임아웃·끊긴 몸통 — 연결은 섰고 서버가 요청을 받았다(#603).
+            raise OutboundRefused(OutboundReason.RESPONSE_FAILED, type(exc).__name__) from None
         finally:
             session.close()
 

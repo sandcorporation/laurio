@@ -359,7 +359,7 @@ DIRECT_INSTRUCTOR_ALLOWLIST: dict[Path, dict[str, str]] = {
     Path("classroom/scoring.py"): {
         "_record_token_usage": "예산 경고의 수신자 — 키·예산 알림은 소유자에게만 간다(비용이 그 사람의 몫, ADR-0055).",
         "_mark_scoring_key_rejected": "키 거부 알림의 수신자 — _record_token_usage 와 같은 이유.",
-        "_mark_scoring_quota_exhausted": "크레딧 소진 알림의 수신자 — 크레딧은 소유자의 비용이다(#586).",
+        "_mark_scoring_paused": "크레딧 소진·서버 연결 불가 알림의 수신자 — 크레딧도 서버도 소유자의 것이다(#586, #603).",
     },
     Path("classroom/ownership_transfers.py"): {
         "accept": "소유권 이전 수락이 소유자 자체를 바꾼다(CONTEXT.md 「소유권 이전」, #564) — 넘긴 사람을 읽어 공동 강사로 남기고 받는 사람을 소유자로 쓴다.",

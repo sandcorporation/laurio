@@ -252,6 +252,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length)
+        if self.path == "/slow":
+            self.server.release.wait(2)  # 시험이 끝나면 풀린다 — 손님이 먼저 포기한다.
+            return
         if self.path == "/redirect":
             self.send_response(302)
             self.send_header("Location", "https://169.254.169.254/latest/meta-data/")
@@ -276,6 +279,7 @@ def _serve(cert_pem: bytes, key_pem: bytes, tmp_path, name: str):
     context.load_cert_chain(tmp_path / f"{name}.crt", tmp_path / f"{name}.key")
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
     server.last_sni = None
+    server.release = threading.Event()
 
     def remember_sni(sock, server_name, ctx):
         server.last_sni = server_name
@@ -308,6 +312,7 @@ def tls(tmp_path_factory):
     good = _serve(*leaf(HOST), tmp_path, "good")
     wrong = _serve(*leaf("someone-else.example.test"), tmp_path, "wrong")
     yield {"ca": str(ca_path), "good": good.server_address[1], "wrong": wrong.server_address[1]}
+    good.release.set()
     good.shutdown()
     wrong.shutdown()
 
@@ -368,6 +373,16 @@ def test_closed_port_is_unreachable():
     with pytest.raises(OutboundRefused) as caught:
         outbound.post_json(f"https://{HOST}:{port}/v1", {}, headers={}, timeout=1)
     assert caught.value.reason is OutboundReason.UNREACHABLE
+    assert caught.value.reached is False
+
+
+@REAL_MODE
+def test_a_server_that_takes_the_request_but_answers_too_late_is_reached(tls):
+    # 연결은 섰다 — 「닿지 않음」(연결 거부·연결 타임아웃)과 갈라야 강의실이 실패로 센다(#603).
+    with pytest.raises(OutboundRefused) as caught:
+        _local(tls).post_json(f"https://{HOST}:{tls['good']}/slow", {}, headers={}, timeout=0.2)
+    assert caught.value.reason is OutboundReason.RESPONSE_FAILED
+    assert caught.value.reached is True
 
 
 @override_settings(CLASSROOM_SCORING_ADAPTER_MODE="fake")

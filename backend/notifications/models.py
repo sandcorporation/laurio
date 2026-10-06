@@ -53,6 +53,12 @@ class NotificationType(models.TextChoices):
         "classroom_scoring_quota_exhausted",
         "강의실 채점 크레딧 소진",
     )
+    # 강의실 채점 연결의 호환 서버에 닿지 않는다(#603) — 크레딧 소진과 같은 규율로 소유자에게만,
+    # 채점이 **멈추는 순간**에만 한 번 간다(`classroom.scoring._mark_scoring_server_unreachable`).
+    CLASSROOM_SCORING_SERVER_UNREACHABLE = (
+        "classroom_scoring_server_unreachable",
+        "강의실 채점 서버 연결 불가",
+    )
     # 「공모전에도 내기」로 낸 시도를 공모전이 받지 않았다(#549) — 마감·허용 철회 경합 등.
     # 낸 사람에게만 간다. 클래스 시도·판정은 그대로라 알림은 「공모전에는 내지 못했다」만 말한다.
     CLASSROOM_CONTEST_ENTRY_REJECTED = (
@@ -100,6 +106,7 @@ CLASSROOM_NOTIFICATION_TYPES = frozenset(
         NotificationType.CLASSROOM_SUBMISSION_SCORED,
         NotificationType.CLASSROOM_SCORING_KEY_REJECTED,
         NotificationType.CLASSROOM_SCORING_QUOTA_EXHAUSTED,
+        NotificationType.CLASSROOM_SCORING_SERVER_UNREACHABLE,
         NotificationType.CLASSROOM_CONTEST_ENTRY_REJECTED,
         NotificationType.CLASSROOM_OWNERSHIP_TRANSFER_REQUESTED,
         NotificationType.CLASSROOM_OWNERSHIP_TRANSFER_ACCEPTED,
@@ -207,6 +214,13 @@ NOTIFICATION_TYPE_FLAGS: dict[str, dict[str, bool]] = {
     },
     # 소유자 본인의 계정 문제(크레딧 소진)에 대한 경고다(#586) — 키 거부와 같은 취급.
     NotificationType.CLASSROOM_SCORING_QUOTA_EXHAUSTED: {
+        "is_transactional": True,
+        "is_promotional": False,
+        "is_quiet_hours_exempt": False,
+        "is_internal_only": True,
+    },
+    # 소유자 본인의 서버 문제(연결 불가)에 대한 경고다(#603) — 크레딧 소진과 같은 취급.
+    NotificationType.CLASSROOM_SCORING_SERVER_UNREACHABLE: {
         "is_transactional": True,
         "is_promotional": False,
         "is_quiet_hours_exempt": False,

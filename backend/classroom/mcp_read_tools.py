@@ -371,6 +371,10 @@ CLASS_OUTPUT_SCHEMA = {
             "type": "boolean",
             "description": "채점 키의 OpenAI 크레딧이 떨어져 채점이 멈춰 있는가 — 충전하면 이어진다",
         },
+        "scoring_server_unreachable": {
+            "type": "boolean",
+            "description": "채점 연결의 호환 서버에 닿지 않아 채점이 멈춰 있는가 — 서버가 돌아오면 이어진다",
+        },
         "token_budget": {**_NULLABLE_INT, "description": "채점 토큰 예산. null 이면 무제한"},
         "token_budget_warning_threshold_percent": {"type": "integer", "description": "경고 알림 임계(예산 대비 %)"},
         "token_usage_total": {**_COUNT, "description": "지금까지 채점에 쓴 토큰"},

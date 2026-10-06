@@ -127,6 +127,7 @@ REFUSAL_MESSAGES: dict[str, str] = {
     OutboundReason.DNS_FAILED: "주소의 이름을 찾지 못했습니다 — 철자를 확인해주세요.",
     OutboundReason.CERTIFICATE: "서버 인증서를 확인하지 못했습니다 — 정식 인증서가 있어야 합니다(자체 서명은 안 됩니다).",
     OutboundReason.UNREACHABLE: "서버에 닿지 않습니다 — 서버가 켜져 있고 바깥에서 열려 있는지 확인해주세요.",
+    OutboundReason.RESPONSE_FAILED: "서버가 제때 답하지 않았습니다 — 서버가 요청을 처리하고 있는지 확인해주세요.",
     OutboundReason.REDIRECT: "서버가 다른 주소로 넘기려 했습니다 — 넘어가는 최종 주소를 넣어주세요.",
     OutboundReason.OFFLINE: "지금은 바깥 서버에 닿을 수 없습니다.",
     AUTH_FAILED: "서버가 인증 값을 거절했습니다 — Bearer 값을 확인해주세요.",

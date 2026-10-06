@@ -38,6 +38,8 @@ export type ClassRow = {
   openai_key_status: "verified" | "unverified" | "rejected" | null;
   // 키의 OpenAI 크레딧이 떨어져 채점이 멈춰 있는가(#586) — 키가 있을 때만 참일 수 있다.
   scoring_quota_exhausted: boolean;
+  // 채점 연결의 호환 서버에 닿지 않아 채점이 멈춰 있는가(#603) — 호환 서버 연결일 때만 참일 수 있다.
+  scoring_server_unreachable: boolean;
   // 채점 연결의 종류(#601) — 「OpenAI 키」 또는 「호환 서버」.
   scoring_connection_kind: "openai_key" | "compatible_server";
   // 호환 서버의 호스트 — 공동 강사도 읽는다.
