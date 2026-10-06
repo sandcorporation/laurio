@@ -14,9 +14,19 @@ SDK 가 꺼진 채로 돈다 — 테스트가 네트워크를 치지 않는다�
 
 - **사용자 식별은 내부 id 하나뿐이다**(`accounts.middleware` 와
   `core.operator_auth` 가 붙인다). 이메일·이름·IP 는 붙이지 않는다.
-- **요청 본문과 쿠키·헤더의 인증 값**은 SDK 설정으로 아예 막는다
-  (`max_request_body_size="never"`) — 제출 소스나 OpenAI 키가 오류에 실려 나갈
-  길을 없앤다.
+- **스택 프레임의 지역 변수는 보내지 않는다**(`include_local_variables=False`,
+  #590). SDK 기본값은 프레임마다 지역 변수를 싣는다 — 채점 경로의 `raw_key`·
+  `headers`(강사 OpenAI 키가 든 `Authorization: Bearer`), `call_internal` 의
+  `X-Internal-Token`, 들어온 요청 객체의 로그인 토큰이 그 길로 평문으로 실렸다
+  (GlitchTip 오류 67~91). 이름 목록으로 골라 지우는 방식은 새 변수·dict 안의
+  값마다 다시 뚫리므로 통째로 끈다. 잃은 진단 정보는 진입점(채점·스캔·제출)이
+  **식별자만** 태그·컨텍스트로 메운다(`tag_error_scope`) — 키·소스·프롬프트 같은
+  값은 싣지 않는다. `request_id` 태그로 Loki 로그와 이어진다(`core.request_id`).
+- **요청 본문과 쿠키·인증 헤더**는 SDK 설정(`max_request_body_size="never"`)에
+  더해 `scrub_secrets` 가 보내기 직전에 직접 지운다 — SDK 의 기본 필터는
+  `Authorization`·`Cookie` 는 지우지만 우리 내부 헤더 `X-Internal-Token` 은 모른다.
+  프레임 변수도 거기서 한 번 더 지운다(설정 하나를 믿지 않는다 — 프론트엔드
+  `scrubSensitiveRequestData` 와 같은 원칙, #460).
 - **정상적인 거절은 오류가 아니다.** 422(입력 검증)·404·403 은 사용자가 잘못
   요청했을 때 우리가 의도적으로 내는 응답이라, 그걸 다 보내면 진짜 사고가 그
   소음에 묻힌다(`drop_expected_error`). 5xx 와 처리되지 않은 예외만 보낸다.
@@ -107,6 +117,81 @@ def drop_expected_error(event: dict[str, Any], hint: dict[str, Any]) -> dict[str
     return event
 
 
+#: 이벤트에서 지우는 요청 헤더(소문자). 프론트엔드 `CREDENTIAL_HEADERS` 와 같은 목록이다.
+_CREDENTIAL_HEADERS = frozenset(
+    {
+        "cookie",
+        "set-cookie",
+        "authorization",
+        "proxy-authorization",
+        "x-internal-token",
+        "x-operator-origin",
+    }
+)
+
+
+def _drop_frame_vars(container: Any) -> None:
+    """`exception.values[]`·`threads.values[]` 의 프레임에서 `vars` 를 지운다."""
+
+    values = container.get("values") if isinstance(container, dict) else None
+    for value in values or ():
+        frames = ((value or {}).get("stacktrace") or {}).get("frames") or ()
+        for frame in frames:
+            if isinstance(frame, dict):
+                frame.pop("vars", None)
+
+
+def scrub_secrets(event: dict[str, Any]) -> dict[str, Any]:
+    """보내기 직전에 자격증명이 실릴 수 있는 자리를 지운다(#590).
+
+    요청의 쿠키·본문은 통째로, 헤더는 `_CREDENTIAL_HEADERS` 에 든 이름만(대소문자
+    무시), 스택 프레임의 지역 변수는 전부. `include_local_variables=False` 가 이미
+    프레임 변수를 막지만 그 설정 하나가 빠지는 날을 대비해 여기서도 지운다.
+    """
+
+    request = event.get("request")
+    if isinstance(request, dict):
+        request.pop("cookies", None)
+        request.pop("data", None)
+        headers = request.get("headers")
+        if isinstance(headers, dict):
+            for name in list(headers):
+                if str(name).lower() in _CREDENTIAL_HEADERS:
+                    del headers[name]
+    _drop_frame_vars(event.get("exception"))
+    _drop_frame_vars(event.get("threads"))
+    return event
+
+
+def before_send(event: dict[str, Any], hint: dict[str, Any]) -> dict[str, Any] | None:
+    """SDK 의 `before_send` — 의도한 거절·배포 중 소음은 버리고, 남은 것은 비밀을 지워 보낸다."""
+
+    kept = drop_expected_error(event, hint)
+    return None if kept is None else scrub_secrets(kept)
+
+
+def sentry_init_options(dsn: str) -> dict[str, Any]:
+    """`sentry_sdk.init` 에 넘기는 설정 — 시험이 같은 설정으로 전송만 흉내 내 켠다."""
+
+    from sentry_sdk.integrations.celery import CeleryIntegration
+    from sentry_sdk.integrations.django import DjangoIntegration
+
+    return {
+        "dsn": dsn,
+        "environment": os.environ.get(_ENVIRONMENT_ENV, "development"),
+        "release": os.environ.get(_RELEASE_ENV, "").strip() or None,
+        "integrations": [DjangoIntegration(), CeleryIntegration()],
+        # 오류만 보낸다 — 성능 추적은 켜지 않았다(GlitchTip 이 리플레이를 받지
+        # 못하는 것과 달리 트레이싱은 받지만, 지금 필요한 것은 오류다).
+        "traces_sample_rate": 0.0,
+        "send_default_pii": False,
+        # 프레임 지역 변수에 키·토큰이 평문으로 실렸다(#590) — 위 모듈 docstring.
+        "include_local_variables": False,
+        "max_request_body_size": "never",
+        "before_send": before_send,
+    }
+
+
 def configure_sentry() -> bool:
     """DSN 이 있으면 SDK 를 켠다. 켰으면 True.
 
@@ -120,21 +205,8 @@ def configure_sentry() -> bool:
         return False
 
     import sentry_sdk
-    from sentry_sdk.integrations.celery import CeleryIntegration
-    from sentry_sdk.integrations.django import DjangoIntegration
 
-    sentry_sdk.init(
-        dsn=dsn,
-        environment=os.environ.get(_ENVIRONMENT_ENV, "development"),
-        release=os.environ.get(_RELEASE_ENV, "").strip() or None,
-        integrations=[DjangoIntegration(), CeleryIntegration()],
-        # 오류만 보낸다 — 성능 추적은 켜지 않았다(GlitchTip 이 리플레이를 받지
-        # 못하는 것과 달리 트레이싱은 받지만, 지금 필요한 것은 오류다).
-        traces_sample_rate=0.0,
-        send_default_pii=False,
-        max_request_body_size="never",
-        before_send=drop_expected_error,
-    )
+    sentry_sdk.init(**sentry_init_options(dsn))
     return True
 
 
@@ -169,3 +241,22 @@ def set_sentry_user_id(user_id: int | str | None) -> None:
         sentry_sdk.set_user(None)
         return
     sentry_sdk.set_user({"id": str(user_id)})
+
+
+def tag_error_scope(context: str, **identifiers: int | str | None) -> None:
+    """이 요청·태스크에서 나는 오류에 **식별자만** 붙인다(#590) — 태그와 `context` 한 묶음.
+
+    프레임 지역 변수를 끈 대신(`include_local_variables=False`) 어느 클래스·문제·
+    제출·스캔·모델에서 났는지를 여기서 남긴다. 넘기는 값은 번호·이름 같은 식별자뿐이다
+    — 키·소스·프롬프트·토큰을 넘기지 않는다. None 은 건너뛴다. SDK 가 꺼져 있으면
+    (DSN 없는 dev·CI) 무해하다.
+    """
+
+    try:
+        import sentry_sdk
+    except ModuleNotFoundError:  # pragma: no cover - 의존성은 항상 설치된다
+        return
+    kept = {name: value for name, value in identifiers.items() if value is not None}
+    for name, value in kept.items():
+        sentry_sdk.set_tag(name, str(value))
+    sentry_sdk.set_context(context, kept)

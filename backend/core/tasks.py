@@ -63,6 +63,9 @@ def run_scan(name: str) -> dict:
     """등록부(`core.scans.SCAN_REGISTRY`)의 스캔 하나 — beat 스케줄이 스캔마다 이 태스크를
     이름과 함께 등록한다(#137). 등록부 밖의 이름은 엔드포인트가 404 로 거부한다."""
 
+    from core.observability import tag_error_scope
+
+    tag_error_scope("scan", scan=name)
     return call_internal(f"/api/internal/scans/{name}")
 
 

@@ -40,6 +40,7 @@ from core.crypto import encrypt
 from core.events import Event, EventBusDisconnected, get_event_bus
 from core.keyset import decode_cursor, encode_cursor
 from core.llm_scoring import LLMKeyCheckStatus
+from core.observability import tag_error_scope
 from storage.adapters import get_storage_adapter
 from storage.filenames import build_download_filename, safe_download_base_name
 from submissions.models import (
@@ -1997,6 +1998,8 @@ def create_classroom_submission(
     (ADR-0039, CONTEXT.md 「Problem」). 근거 연결도 자가 체크도 없다: 소스
     또는 저장소 값 하나만 받는다."""
 
+    # 오류에는 식별자만 싣는다(#590) — 제출 값은 요청 본문이라 원래 보내지 않는다.
+    tag_error_scope("classroom_submission", class_id=class_id, problem_id=problem_id)
     # **강사와 참여자는 다른 문을 지난다**(2026-09-17, #429 개정). 강사는 자기
     # 문제를 상태와 무관하게 내 볼 수 있고(초안·열림·숨김), 참여자에게는 그
     # 상태들이 각각 404·403이다 — 그래서 문제를 찾는 질의부터 갈린다.

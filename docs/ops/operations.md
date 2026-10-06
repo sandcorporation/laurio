@@ -155,7 +155,19 @@ sentry.io 가 아니라 **우리가 띄운 GlitchTip**
   쿠키·요청 본문을 지우고 **헤더는 이름을 아는 것만 남긴다** — 새 헤더의 기본값이
   「보낸다」이면 다음 누출이 조용히 또 생기기 때문이다. 세 앱의 여섯 진입점이 전부
   `buildSentryOptions` 를 지나므로 그 한 자리가 서버·브라우저 양쪽을 덮고, 두 앱의
-  `sentry-options.test.ts` 가 그 동작을 고정한다(운영자 앱은 테스트 파일이 없다). **의도한 4xx 도 보내지 않는다** — 422·404·
+  `sentry-options.test.ts` 가 그 동작을 고정한다(운영자 앱은 테스트 파일이 없다).
+  **백엔드는 스택 프레임의 지역 변수를 보내지 않는다**(#590, 2026-10-06) — Python SDK 의
+  기본값은 프레임마다 지역 변수를 싣는데, 그 길로 강사 OpenAI 키(채점 경로의 `raw_key`·
+  `headers`), `X-Internal-Token`(`call_internal`), 이용자 로그인 토큰(요청 객체)이 평문으로
+  나갔다(GlitchTip 오류 67~91, 사람이 지웠다). 이름 목록으로 골라 지우지 않고
+  `include_local_variables=False` 로 통째로 끄며, `core.observability.before_send` 가
+  쿠키·요청 본문·인증 헤더(`Authorization`·`X-Internal-Token` 등, SDK 기본 필터는
+  `X-Internal-Token` 을 모른다)와 프레임 변수를 보내기 직전에 한 번 더 지운다.
+  잃은 진단 정보는 채점·스캔·제출 진입점이 **식별자만**(클래스·문제·제출 번호, 채점
+  모델, 스캔 이름) 태그·컨텍스트로 메운다(`tag_error_scope`) — 그리고 `request_id` 태그로
+  Loki 로그를 찾는다. `backend/tests/test_observability_secrets.py` 가 운영과 같은 설정에
+  전송만 흉내 내 「보내질 이벤트에 키·토큰이 없다」를 고정한다. 세 앱의 Node SDK 는
+  지역 변수를 기본으로 싣지 않는다(`includeLocalVariables` 기본 꺼짐). **의도한 4xx 도 보내지 않는다** — 422·404·
   403 은 우리가 일부러 내는 응답이라, 그걸 다 보내면 진짜 5xx 가 소음에 묻힌다
   (`core.observability.drop_expected_error`, `backend/tests/test_observability.py` 가
   그 규칙을 고정한다). **남의 코드가 던진 것도 보내지 않는다**(#471, 2026-09-20) —
@@ -207,7 +219,14 @@ ssh sub 'docker exec codemit-staging-backend-1 python manage.py sentry_smoke'
 - **「손 댔다」는 GlitchTip 코멘트다.** 이슈 목록 응답의 `numComments` 가 그 값이라 목록
   API 한 번으로 갈리고, 사람이 같은 사실을 GlitchTip 화면에서 본다. 새 상태 상자를 만들지
   않았다. **판정은 내용이 아니라 개수다** — 쓰기 토큰으로는 코멘트를 달 수만 있고 읽을
-  수 없다(`GET issues/{id}/comments/` 가 `Permission denied`, 실측). 그래서 **코멘트가
+  수 없다(`GET issues/{id}/comments/` 가 `Permission denied`, 실측). **그런데 이슈를
+  지울 수는 있다** — `DELETE issues/{id}/` 가 이 토큰으로 204 였다(2026-10-06, #590 에서
+  비밀이 실린 이슈 11개를 지울 때 실측). 스코프는 `event:write` 하나뿐인데도 그렇다 —
+  코멘트를 달려면 그 스코프가 있어야 하므로 「코멘트만 쓰는」 토큰은 없다. 그래서 토큰을
+  그대로 두고, 그 토큰을 쥐는 것이 세션이 아니라 스크립트 둘(`glitchtip_pick.py` 는
+  코멘트, `glitchtip_resolve.py` 는 해결 표시와 코멘트 — 둘 다 지우는 호출이 없다)이라는
+  데 기댄다 — 세션에는 여전히 읽기 토큰만 준다. 루트 `.env` 의 이 값은
+  이슈를 지울 수 있는 값으로 다룬다. 그래서 **코멘트가
   하나라도 있으면 집지 않는다**: 사람이 메모를 달아 둔 오류를 자동화가 가져가지 않는 것이
   오히려 맞다. 대가는 무심코 단 코멘트가 그 오류를 영구히 빼는 것이고, 되돌리려면 사람이
   화면에서 지워야 한다(`event:admin` 이 필요하고 이 토큰에는 일부러 없다 — 실제로 한 번
