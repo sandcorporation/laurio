@@ -1,6 +1,7 @@
 """연결된 앱이 클래스를 다루는 MCP 도구들 (#516, spec #511 User Stories 5·6·10).
 
-만들기·복사·보관·보관 되돌리기·설정 고치기·가입 링크 다시 발급·템플릿 가져오기(문제·클래스).
+만들기·복사·보관·보관 되돌리기·설정 고치기·내 강사 이름 바꾸기(#576)·가입 링크 다시 발급·
+템플릿 가져오기(문제·클래스).
 
 **화면과 규칙이 한 벌이다.** 도구마다 화면 라우트와 같은 강사 범위(`class_scope`)를 같은
 `write` 값으로 연다 — 보관 뒤에도 열려 있는 것(설정·복사·보관 되돌리기·링크 재발급,
@@ -22,13 +23,13 @@
 
 from __future__ import annotations
 
-from . import class_authoring
+from . import class_authoring, co_instructors
 from .instructor_scope import class_scope
 from .mcp_problem_tools import _PROBLEM_RESULT, _check_arguments, _id, _object, _parse, _problem_out, _without
 from .mcp_read_tools import CLASS_OUTPUT_SCHEMA, class_view
 from .mcp_tool import Tool, ToolInputError, WriteResult
 from .models import ConnectedApp
-from .schemas import ClassIn, ClassPatchIn, ImportClassTemplateIn
+from .schemas import ClassIn, ClassPatchIn, ImportClassTemplateIn, InstructorNameIn
 from .scoring_models import REASONING_EFFORT_CHOICES
 from .services import copy_class, import_problem_template
 
@@ -108,7 +109,10 @@ _UPDATE_CLASS_INPUT = _object(
         "name": _CLASS_NAME,
         "instructor_display_name": {
             **_INSTRUCTOR_DISPLAY_NAME,
-            "description": "소유자가 이 클래스에서 강사로 불릴 이름 — 소유자만 고친다.",
+            "description": (
+                "소유자가 이 클래스에서 강사로 불릴 이름 — 소유자만 고친다. 내 강사 이름은 "
+                "rename_my_instructor_name 으로 바꾼다."
+            ),
         },
         "default_model": {
             "type": "string",
@@ -146,6 +150,34 @@ def _update_class_settings(grant: ConnectedApp, arguments: dict) -> WriteResult:
     class_authoring.update_class(class_obj, payload)
     changed = ", ".join(sorted(payload.model_fields_set)) or "없음"
     return _class_result(grant, class_obj, f"「{class_obj.name}」 — 고친 칸: {changed}")
+
+
+# --- 내 강사 이름 (#576) -------------------------------------------------------------
+
+_RENAME_MY_INSTRUCTOR_NAME_INPUT = _object(
+    {
+        "class_id": _CLASS_ID,
+        "display_name": {
+            **_INSTRUCTOR_DISPLAY_NAME,
+            "description": "이 클래스에서 내가 강사로 불릴 이름 — 강사 목록과 가입 미리보기에 뜬다.",
+        },
+    },
+    ["class_id", "display_name"],
+)
+
+
+def _rename_my_instructor_name(grant: ConnectedApp, arguments: dict) -> WriteResult:
+    _check_arguments(arguments, _RENAME_MY_INSTRUCTOR_NAME_INPUT)
+    payload = _parse(InstructorNameIn, _without(arguments, "class_id"))
+    # 화면의 `PATCH .../instructors/me`(`classroom.api.rename_my_instructor_name`)와 같은 문 —
+    # 소유자든 공동 강사든, 보관 뒤에도. 바꾸는 자리는 grant 의 강사 자신뿐이다.
+    class_obj = class_scope(_id(arguments, "class_id"), grant.instructor_id, write=False, owner=False).class_obj
+    row = co_instructors.rename_myself(class_obj, grant.instructor_id, payload.display_name)
+    return WriteResult(
+        structured={"class_id": class_obj.id, "display_name": row["display_name"], "role": row["role"]},
+        class_id=class_obj.id,
+        summary=f"「{class_obj.name}」 — 내 강사 이름: {row['display_name']}",
+    )
 
 
 # --- 가입 링크 ---------------------------------------------------------------------
@@ -268,12 +300,38 @@ CLASS_TOOLS: list[Tool] = [
             "클래스의 이름·강사로 불릴 이름·기본 채점 모델·기본 추론 강도·채점 토큰 예산·경고 임계를 고친다. "
             "보낸 칸만 바뀐다. 보관된 클래스도 고칠 수 있다. 채점 토큰 예산·경고 임계·강사로 불릴 이름(소유자의 "
             "이름이다)은 소유자만 고친다 — 공동 강사가 그 칸을 보내면 아무것도 바뀌지 않고 거절된다. "
+            "소유자든 공동 강사든 내 강사 이름은 rename_my_instructor_name 으로 바꾼다. "
             "OpenAI 키는 이 도구로 넣거나 바꿀 수 없다 — 소유자가 화면에서만 넣는다."
         ),
         input_schema=_UPDATE_CLASS_INPUT,
         output_schema=_CLASS_RESULT,
         read_only=False,
         handler=_update_class_settings,
+        idempotent=True,
+    ),
+    Tool(
+        name="rename_my_instructor_name",
+        title="내 강사 이름 바꾸기",
+        description=(
+            "이 클래스에서 내가 강사로 불릴 이름을 바꾼다 — 소유자든 공동 강사든 자기 이름만 바뀌고, 다른 "
+            "강사의 이름은 바꿀 수 없다. 바뀐 이름은 강사 목록과 가입 미리보기에 뜬다. 보관된 클래스에서도 "
+            "바꿀 수 있다."
+        ),
+        input_schema=_RENAME_MY_INSTRUCTOR_NAME_INPUT,
+        output_schema=_object(
+            {
+                "class_id": {"type": "integer", "description": "클래스 번호"},
+                "display_name": {"type": "string", "description": "바뀐 내 강사 이름"},
+                "role": {
+                    "type": "string",
+                    "enum": ["owner", "co_instructor"],
+                    "description": "이 클래스에서 내 역할 — owner 소유자, co_instructor 공동 강사",
+                },
+            },
+            ["class_id", "display_name", "role"],
+        ),
+        read_only=False,
+        handler=_rename_my_instructor_name,
         idempotent=True,
     ),
     Tool(
