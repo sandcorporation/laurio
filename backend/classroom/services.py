@@ -97,6 +97,12 @@ PROBLEM_FIELD_TRANSFER_TABLE: tuple[ProblemFieldTransferRule, ...] = (
         templates=False,
         note="비용 결정은 가져간 사람이 한다 — 어디서도 옮기지 않는다",
     ),
+    ProblemFieldTransferRule(
+        "model_marked_reasoning",
+        copies=True,
+        templates=False,
+        note="「추론 모델」 스위치(#602) — 그 모델과 함께 간다",
+    ),
     ProblemFieldTransferRule("grading_strictness", copies=True, templates=True),
     ProblemFieldTransferRule("grading_guideline_text", copies=True, templates=True),
     ProblemFieldTransferRule("syntax_check_enabled", copies=True, templates=True),

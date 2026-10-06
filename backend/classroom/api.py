@@ -167,11 +167,13 @@ router = Router(tags=["classroom"])
 _KEY_MASK_PREFIX = "••••••••"
 
 
-def _sends_reasoning_effort(class_obj: Class, model_id: str) -> bool:
-    """화면이 「추론 강도」 칸을 보일지 — 채점 요청에 그 값을 실을 때만(호환 서버는 싣지 않는다, #601)."""
+def _sends_reasoning_effort(class_obj: Class, model_id: str, *, marked_reasoning: bool) -> bool:
+    """화면이 「추론 강도」 칸을 보일지 — 채점 요청에 그 값을 실을 때만. 호환 서버는 이름으로 알 수
+    없어 「추론 모델」 스위치(`marked_reasoning`, #602)를 따른다(`ScoringConnection.
+    sends_reasoning_effort` 와 같은 판단)."""
 
     if class_obj.scoring_connection_kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER:
-        return False
+        return marked_reasoning
     return is_reasoning_model_id(model_id)
 
 
@@ -216,7 +218,9 @@ def _serialize_class(class_obj: Class, *, viewer_id: int) -> ClassOut:
         join_code=class_obj.join_code,
         created_at=class_obj.created_at,
         default_model=class_obj.default_model,
-        default_model_is_reasoning=_sends_reasoning_effort(class_obj, class_obj.default_model),
+        default_model_is_reasoning=_sends_reasoning_effort(
+            class_obj, class_obj.default_model, marked_reasoning=class_obj.default_model_marked_reasoning
+        ),
         default_reasoning_effort=class_obj.default_reasoning_effort,
         has_openai_key=has_key,
         openai_key_masked=(
@@ -372,7 +376,10 @@ def _serialize_problem(
         order=problem.order,
         model=problem.model,
         effective_model=effective_model,
-        effective_model_is_reasoning=_sends_reasoning_effort(class_obj, effective_model),
+        effective_model_is_reasoning=_sends_reasoning_effort(
+            class_obj, effective_model, marked_reasoning=problem.effective_model_marked_reasoning()
+        ),
+        model_is_reasoning=problem.model_marked_reasoning,
         reasoning_effort=problem.reasoning_effort,
         effective_reasoning_effort=effective_reasoning_effort,
         scoring_model_rejected=problem.scoring_model_rejected_at is not None,

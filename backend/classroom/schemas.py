@@ -34,6 +34,9 @@ class ClassPatchIn(Schema):
     #: 채점 모델이 추론 모델일 때만 뜻이 있는 기본 추론 강도(#402) —
     #: "low"|"medium"|"high". 필드를 생략하면 바꾸지 않는다.
     default_reasoning_effort: str | None = None
+    #: 「호환 서버」의 기본 모델이 추론 모델인가 — 소유자의 「추론 모델」 스위치(#602). 켜면 채점
+    #: 호출에 추론 강도가 실린다. 「OpenAI 키」 연결은 이름으로 판단해 이 값을 보지 않는다.
+    default_model_is_reasoning: bool | None = None
     #: 채점 토큰 예산 상한(#295). 필드를 생략하면(`None`) 바꾸지 않는다 —
     #: 기존 PATCH 관례 그대로다. 이 API에는 "다시 무제한으로 되돌리는" 값이
     #: 없다 — 그 요구가 아직 없어 짓지 않는다.
@@ -285,6 +288,8 @@ class ProblemIn(Schema):
     #: `model`과 같은 모양. 채점 모델이 추론 모델이 아니면 저장은 되어도
     #: 채점에는 쓰이지 않는다.
     reasoning_effort: str = ""
+    #: 이 문제 자신의 모델(`model`)이 추론 모델인가 — 「호환 서버」의 「추론 모델」 스위치(#602).
+    model_is_reasoning: bool = False
     #: 채점 지침 단계(#386, CONTEXT.md 「채점 지침」) —
     #: "strict"|"normal"|"lenient"|"custom" 중 하나. 기본은 "normal"이다.
     #: 모르는 값은 422다.
@@ -317,6 +322,8 @@ class ProblemPatchIn(Schema):
     #: 따르게 한다 — `model`과 같은 관례(#402). `None`(필드 생략)은
     #: 바꾸지 않는다.
     reasoning_effort: str | None = None
+    #: 「호환 서버」의 「추론 모델」 스위치(#602) — `ProblemIn.model_is_reasoning` 과 같다.
+    model_is_reasoning: bool | None = None
     #: 필드를 생략하면(`None`) 바꾸지 않는다. 보내면 `ProblemIn`과 같은
     #: 규칙(#386) — 모르는 값·빈 직접 입력 문장은 422다.
     grading_strictness: str | None = None
@@ -395,6 +402,8 @@ class ProblemOut(Schema):
     #: `effective_model`이 추론 모델(GPT-5 이후)인가(#402) — 화면이 이
     #: 값으로 「추론 강도」 칸을 보일지 정한다.
     effective_model_is_reasoning: bool = False
+    #: 이 문제 자신의 모델에 켠 「추론 모델」 스위치(#602, 호환 서버) — `model` 이 비면 뜻이 없다.
+    model_is_reasoning: bool = False
     #: 이 문제 자신의 추론 강도(#402). 빈 문자열이면 클래스 기본값을
     #: 따른다는 뜻이다 — `model`/`effective_model`과 같은 모양.
     reasoning_effort: str = ""

@@ -10,6 +10,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { ReasoningModelSwitch } from "@/app/components/ReasoningModelSwitch";
 import { ScoringConnectionSection } from "@/app/components/ScoringConnectionSection";
 import { BudgetAttemptsHint, ClassScoringCostTable } from "@/app/components/ScoringCost";
 import type { FormEvent } from "react";
@@ -44,7 +45,7 @@ import { useMembers } from "@/lib/members/use-members";
 import { checkPublicTextForBannedWords } from "@/lib/moderation/public-text-check";
 import { useProblems } from "@/lib/problems/use-problems";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
-import { isSelectedModelReasoning, REASONING_EFFORT_OPTIONS } from "@/lib/scoring/reasoning";
+import { isSelectedModelReasoning, MODEL_PROBE_NOTE, REASONING_EFFORT_OPTIONS } from "@/lib/scoring/reasoning";
 import { useScoringCost } from "@/lib/scoring/use-scoring-cost";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
 import { liveTemplateFrom, type LiveTemplate } from "@/lib/problem-templates/live-state";
@@ -345,6 +346,8 @@ export default function ClassSettingsPage() {
 
   const [defaultModel, setDefaultModel] = useState("");
   const [defaultReasoningEffort, setDefaultReasoningEffort] = useState("low");
+  // 「호환 서버」의 「추론 모델」 스위치(#602) — 이름으로 알 수 없어 강사가 정한다.
+  const [defaultModelIsReasoning, setDefaultModelIsReasoning] = useState(false);
   const [modelSaving, setModelSaving] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
 
@@ -367,6 +370,7 @@ export default function ClassSettingsPage() {
     if (state.status === "ready") {
       setDefaultModel(state.classroom.default_model);
       setDefaultReasoningEffort(state.classroom.default_reasoning_effort);
+      setDefaultModelIsReasoning(state.classroom.default_model_is_reasoning);
       setClassNameDraft(state.classroom.name);
       setInstructorDisplayName(state.classroom.my_instructor_display_name);
       setTokenBudget(
@@ -407,12 +411,14 @@ export default function ClassSettingsPage() {
   // 그리지 않고, 지금 값과 「소유자만」이라는 사실만 보여 준다. 강사 이름은 누구나 **자기**
   // 것을 바꾼다(#565) — 이 칸은 보는 사람의 이름이다.
   const isOwner = classroom.role === "owner";
+  const isCompatibleServer = classroom.scoring_connection_kind === "compatible_server";
   const selectedIsReasoning =
     modelsState.status === "ready" &&
     isSelectedModelReasoning(
       defaultModel,
       modelsState.models,
       defaultModel === classroom.default_model ? classroom.default_model_is_reasoning : false,
+      isCompatibleServer ? defaultModelIsReasoning : undefined,
     );
   const namesPatch = classNamesPatch(
     { name: classroom.name, instructorDisplayName: classroom.my_instructor_display_name },
@@ -462,6 +468,7 @@ export default function ClassSettingsPage() {
     const result = await updateClass(classId, {
       default_model: defaultModel,
       default_reasoning_effort: defaultReasoningEffort,
+      ...(isCompatibleServer ? { default_model_is_reasoning: defaultModelIsReasoning } : {}),
     });
     if (result.ok) {
       reload();
@@ -670,6 +677,23 @@ export default function ClassSettingsPage() {
                       모델마다 한 번에 받을 수 있는 소스의 양이 다릅니다 — 긴 문제에 작은 모델을 고르면
                       소스 뒷부분이 잘린 채 채점됩니다.
                     </span>
+                    {isCompatibleServer ? (
+                      <>
+                        <span
+                          data-testid="class-default-model-probe-note"
+                          className="text-[11.5px] leading-relaxed text-ink/45"
+                        >
+                          {MODEL_PROBE_NOTE}
+                        </span>
+                        <div className="border-t border-rule pt-3">
+                          <ReasoningModelSwitch
+                            checked={defaultModelIsReasoning}
+                            onChange={setDefaultModelIsReasoning}
+                            testId="class-default-reasoning-switch"
+                          />
+                        </div>
+                      </>
+                    ) : null}
                     {selectedIsReasoning ? (
                       <div className="flex flex-col gap-1.5 border-t border-rule pt-3">
                         <label htmlFor="class-default-reasoning-effort">

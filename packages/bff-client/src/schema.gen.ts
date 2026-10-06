@@ -4959,6 +4959,8 @@ export interface components {
         ClassPatchIn: {
             /** Default Model */
             default_model?: string | null;
+            /** Default Model Is Reasoning */
+            default_model_is_reasoning?: boolean | null;
             /** Default Reasoning Effort */
             default_reasoning_effort?: string | null;
             /** Instructor Display Name */
@@ -7442,6 +7444,11 @@ export interface components {
              */
             model: string;
             /**
+             * Model Is Reasoning
+             * @default false
+             */
+            model_is_reasoning: boolean;
+            /**
              * Open
              * @default false
              */
@@ -7513,6 +7520,11 @@ export interface components {
             member_count: number;
             /** Model */
             model: string;
+            /**
+             * Model Is Reasoning
+             * @default false
+             */
+            model_is_reasoning: boolean;
             /** Order */
             order: number;
             /** Pass Rate */
@@ -7557,6 +7569,8 @@ export interface components {
             instructor_note?: string | null;
             /** Model */
             model?: string | null;
+            /** Model Is Reasoning */
+            model_is_reasoning?: boolean | null;
             /** Reasoning Effort */
             reasoning_effort?: string | null;
             /** Submission Formats */

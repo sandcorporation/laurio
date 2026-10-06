@@ -26,4 +26,10 @@ describe("isSelectedModelReasoning", () => {
   it("카탈로그에 없는 id는 거짓으로 본다", () => {
     expect(isSelectedModelReasoning("gpt-6", MODELS, true)).toBe(false);
   });
+
+  it("호환 서버의 「추론 모델」 스위치 값이 있으면 카탈로그 대신 그 값을 쓴다", () => {
+    expect(isSelectedModelReasoning("gpt-4.1-mini", MODELS, false, true)).toBe(true);
+    expect(isSelectedModelReasoning("gpt-5-mini", MODELS, false, false)).toBe(false);
+    expect(isSelectedModelReasoning("", MODELS, true, false)).toBe(true);
+  });
 });

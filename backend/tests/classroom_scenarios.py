@@ -393,6 +393,7 @@ def create_open_problem(
     submission_formats: list[str] | None = None,
     model: str = "",
     reasoning_effort: str = "",
+    model_is_reasoning: bool = False,
     required_labels: list[str] | None = None,
     optional_labels: list[str] | None = None,
     syntax_check_enabled: bool = True,
@@ -416,6 +417,8 @@ def create_open_problem(
         payload["model"] = model
     if reasoning_effort:
         payload["reasoning_effort"] = reasoning_effort
+    if model_is_reasoning:
+        payload["model_is_reasoning"] = True
 
     created = client.post(
         f"{CLASSES_URL}/{class_id}/problems",
@@ -851,6 +854,8 @@ class FakeCompatibleServer:
     - `refuse`: 모든 요청을 이 이유(`OutboundReason`)로 거부한다 — 닿지 않음·인증서 등.
     - `verdicts`: 채점 요청에 돌려줄 판정 몸통(`openai_verdicts_body` 모양).
     - `error`: 채점 요청에서 던질 예외(예상 못한 실패).
+    - `keeps_format`: 모델 시험 호출(#602)에 판정 형식대로 답하는가 — 거짓이면 글로만 답한다.
+      시험 호출은 `verdicts` 와 상관없이 이 값으로 답한다(`probe_requests` 로 따로 센다).
     """
 
     def __init__(
@@ -861,13 +866,26 @@ class FakeCompatibleServer:
         refuse=None,
         verdicts: dict | None = None,
         error: Exception | None = None,
+        keeps_format: bool = True,
     ) -> None:
         self.model_ids = model_ids
         self.accepted_auth = accepted_auth
         self.refuse = refuse
         self.verdicts = verdicts
         self.error = error
+        self.keeps_format = keeps_format
         self.requests: list[dict] = []
+
+    @property
+    def probe_requests(self) -> list[dict]:
+        from classroom.scoring_model_probe import PROBE_PROMPT
+
+        return [r for r in self.requests if r["json"] and r["json"]["messages"][-1]["content"] == PROBE_PROMPT]
+
+    @property
+    def scoring_requests(self) -> list[dict]:
+        probes = self.probe_requests
+        return [r for r in self.requests if r["method"] == "POST" and r not in probes]
 
     def install(self, monkeypatch) -> "FakeCompatibleServer":
         monkeypatch.setattr("classroom.scoring_connection.SafeOutbound", lambda: self)
@@ -897,6 +915,14 @@ class FakeCompatibleServer:
             if self.model_ids is None:
                 return FakeVendorResponse(404, {"error": {"message": "not found"}})
             return FakeVendorModelsResponse(200, list(self.model_ids))
+        from classroom.scoring_model_probe import PROBE_PROMPT, PROBE_REQUIREMENT_ID
+
+        if json is not None and json["messages"][-1]["content"] == PROBE_PROMPT:
+            if not self.keeps_format:
+                return FakeVendorResponse(
+                    200, {"choices": [{"finish_reason": "stop", "message": {"content": "Sure! hello is printed."}}]}
+                )
+            return FakeVendorResponse(200, openai_success_body(PROBE_REQUIREMENT_ID, model=json["model"]))
         if self.error is not None:
             raise self.error
         return FakeVendorResponse(200, self.verdicts)

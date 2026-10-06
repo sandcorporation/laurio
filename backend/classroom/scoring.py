@@ -195,7 +195,11 @@ class FakeClassroomScoringAdapter:
 
 
 def _scoring_adapter(
-    *, connection: ScoringConnection, model: str, reasoning_effort: str | None = None
+    *,
+    connection: ScoringConnection,
+    model: str,
+    reasoning_effort: str | None = None,
+    timeout: float = CLASSROOM_SCORING_VENDOR_TIMEOUT_SECONDS,
 ) -> LLMScoringAdapter:
     """실제 OpenAI 어댑터 또는 결정적 fake 어댑터를 고른다(#340, ADR-0043).
 
@@ -238,7 +242,8 @@ def _scoring_adapter(
             # 공모전의 20초가 아니라 3분이다 — 강의실 채점은 Celery 워커 안에서 돌아
             # 내부 HTTP 요청(30초)·gunicorn `--timeout` 에 묶이지 않는다(#582, ADR-0056).
             # #581(오류 87)까지는 그 요청 안에서 돌아 20초로 줄여 두었다.
-            "timeout": CLASSROOM_SCORING_VENDOR_TIMEOUT_SECONDS,
+            # 모델 시험 호출(#602)은 저장 요청 안에서 돌아 더 짧게 준다.
+            "timeout": timeout,
         },
     )
 
@@ -768,7 +773,9 @@ def score_classroom_submission_once(
     # 아니면 채점 호출은 지금처럼 temperature 0을 쓴다(`_scoring_adapter`에
     # `None`을 넘긴다).
     reasoning_effort = (
-        problem.effective_reasoning_effort() if connection.sends_reasoning_effort(model) else None
+        problem.effective_reasoning_effort()
+        if connection.sends_reasoning_effort(model, marked_reasoning=problem.effective_model_marked_reasoning())
+        else None
     )
 
     prompt = _build_prompt(

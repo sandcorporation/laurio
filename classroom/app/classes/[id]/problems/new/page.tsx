@@ -57,6 +57,8 @@ export default function NewProblemPage() {
   const [model, setModel] = useState("");
   // 빈 문자열이 「클래스 기본값을 따릅니다」다 — `model`과 같은 관례(#402).
   const [reasoningEffort, setReasoningEffort] = useState("");
+  // 「호환 서버」의 「추론 모델」 스위치(#602) — 이 문제 자신의 모델에만 뜻이 있다.
+  const [modelIsReasoning, setModelIsReasoning] = useState(false);
   const { state: modelsState } = useScoringModels(classId);
   // 채점 지침(#386) — 기본은 「보통」, 백엔드 기본값과 같다.
   const [gradingGuideline, setGradingGuideline] = useState<GradingGuidelineValue>({
@@ -160,6 +162,7 @@ export default function NewProblemPage() {
       submission_formats: submissionFormats,
       model,
       reasoning_effort: reasoningEffort,
+      model_is_reasoning: model !== "" && modelIsReasoning,
       grading_strictness: gradingGuideline.grading_strictness,
       grading_guideline_text: gradingGuideline.grading_guideline_text,
       checklist_items: items.map((item) => ({ label: item.label, required: item.required })),
@@ -323,6 +326,11 @@ export default function NewProblemPage() {
           onReasoningEffortChange={setReasoningEffort}
           defaultModelIsReasoning={
             classState.status === "ready" ? classState.classroom.default_model_is_reasoning : false
+          }
+          reasoningSwitch={
+            classState.status === "ready" && classState.classroom.scoring_connection_kind === "compatible_server"
+              ? { checked: modelIsReasoning, onChange: setModelIsReasoning }
+              : undefined
           }
           classDefaults={
             classState.status === "ready"
