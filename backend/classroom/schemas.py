@@ -89,8 +89,18 @@ class ClassOut(Schema):
     #: 채점 모델이 추론 모델일 때만 뜻이 있는 기본 추론 강도(#402) —
     #: "low"|"medium"|"high".
     default_reasoning_effort: str
+    #: 채점 연결이 있는가 — 이름은 예전 그대로지만 「호환 서버」(#601)여도 참이다(주소가 있으면).
     has_openai_key: bool
+    #: 「OpenAI 키」 연결의 끝 네 자리 마스킹 — 호환 서버면 `None`.
     openai_key_masked: str | None = None
+    #: 채점 연결의 종류(#601) — "openai_key" | "compatible_server".
+    scoring_connection_kind: str = "openai_key"
+    #: 호환 서버의 호스트 — 공동 강사도 읽는다(종류와 호스트만, #601).
+    scoring_server_host: str | None = None
+    #: 호환 서버의 주소 전체 — 소유자에게만 싣는다.
+    scoring_server_url: str | None = None
+    #: 호환 서버 인증 값의 끝 네 자리 마스킹 — 소유자에게만, 값을 비워 둔 서버면 `None`.
+    scoring_auth_masked: str | None = None
     #: 키가 있을 때만 뜻이 있다("verified"|"unverified"|"rejected") — 키가
     #: 없으면 `None`이다(#354). `Class.ScoringKeyStatus`의 값 그대로다.
     openai_key_status: str | None = None
@@ -130,6 +140,14 @@ class ClassOut(Schema):
 
 class OpenAIKeyIn(Schema):
     api_key: str = Field(min_length=1, max_length=400)
+
+
+class CompatibleServerIn(Schema):
+    """「호환 서버」 채점 연결(#601, ADR-0058) — OpenAI 호환 주소와 `Authorization: Bearer` 값.
+    인증 값은 비워 둘 수 있다(그 서버가 인증을 받지 않으면)."""
+
+    server_url: str = Field(min_length=1, max_length=500)
+    auth_value: str = Field(default="", max_length=400)
 
 
 class JoinedClassOut(Schema):

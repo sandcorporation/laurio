@@ -819,3 +819,84 @@ def track_models_endpoint_calls(client_monkeypatch, *, model_ids: list[str] | No
 
     client_monkeypatch.setattr("core.llm_scoring.requests.get", _handler)
     return calls
+
+
+# --- 호환 서버 (#601) --------------------------------------------------------
+
+
+def put_compatible_server(client, access: str, class_id: int, server_url: str, auth_value: str = ""):
+    return client.put(
+        f"{CLASSES_URL}/{class_id}/compatible-server",
+        data={"server_url": server_url, "auth_value": auth_value},
+        content_type="application/json",
+        **auth_header(access),
+    )
+
+
+def set_compatible_server(client, access: str, class_id: int, server_url: str, auth_value: str = "") -> dict:
+    response = put_compatible_server(client, access, class_id, server_url, auth_value)
+    assert response.status_code == 200, response.content
+    return response.json()
+
+
+class FakeCompatibleServer:
+    """강사의 호환 서버를 흉내 낸다 — `classroom.scoring_connection.SafeOutbound` 자리에 꽂는다.
+
+    호환 서버로 나가는 왕복은 전부 안전한 바깥 호출(`core.safe_outbound`)을 거치므로, 그 경계
+    너머(강사의 서버)를 여기서 고른다. 주소 확인(`check`)은 진짜 모듈에 맡기되 이름은 공인
+    IP 하나로 풀린 것으로 친다. `requests` 는 OpenAI 키 연결 몫이라 이 흉내와 섞이지 않는다.
+
+    - `model_ids`: `GET …/models` 가 내놓는 목록(`None` 이면 목록을 주지 않는다 — 404).
+    - `accepted_auth`: 이 값의 Bearer 만 받는다(`None` 이면 인증을 보지 않는다).
+    - `refuse`: 모든 요청을 이 이유(`OutboundReason`)로 거부한다 — 닿지 않음·인증서 등.
+    - `verdicts`: 채점 요청에 돌려줄 판정 몸통(`openai_verdicts_body` 모양).
+    - `error`: 채점 요청에서 던질 예외(예상 못한 실패).
+    """
+
+    def __init__(
+        self,
+        *,
+        model_ids: list[str] | None = None,
+        accepted_auth: str | None = None,
+        refuse=None,
+        verdicts: dict | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self.model_ids = model_ids
+        self.accepted_auth = accepted_auth
+        self.refuse = refuse
+        self.verdicts = verdicts
+        self.error = error
+        self.requests: list[dict] = []
+
+    def install(self, monkeypatch) -> "FakeCompatibleServer":
+        monkeypatch.setattr("classroom.scoring_connection.SafeOutbound", lambda: self)
+        return self
+
+    def check(self, url: str):
+        from core.safe_outbound import SafeOutbound
+
+        return SafeOutbound(resolver=lambda host, port: ["93.184.216.34"]).check(url)
+
+    def get(self, url, *, headers, timeout):
+        return self.request("GET", url, headers=headers, timeout=timeout)
+
+    def post_json(self, url, body, *, headers, timeout):
+        return self.request("POST", url, headers=headers, timeout=timeout, json=body)
+
+    def request(self, method, url, *, headers, timeout, json=None):
+        from core.safe_outbound import OutboundRefused
+
+        self.check(url)
+        self.requests.append({"method": method, "url": url, "headers": dict(headers), "json": json})
+        if self.refuse is not None:
+            raise OutboundRefused(self.refuse, "흉내")
+        if self.accepted_auth is not None and headers.get("Authorization") != f"Bearer {self.accepted_auth}":
+            return FakeVendorResponse(401, {"error": {"message": "unauthorized"}})
+        if url.endswith("/models"):
+            if self.model_ids is None:
+                return FakeVendorResponse(404, {"error": {"message": "not found"}})
+            return FakeVendorModelsResponse(200, list(self.model_ids))
+        if self.error is not None:
+            raise self.error
+        return FakeVendorResponse(200, self.verdicts)

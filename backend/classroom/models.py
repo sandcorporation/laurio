@@ -41,11 +41,12 @@ class Class(models.Model):
         REJECTED = "rejected", "거부됨"
 
     class ScoringConnectionKind(models.TextChoices):
-        """이 클래스의 채점이 모델에 닿는 길(#599, CONTEXT.md 「채점 연결」). 지금은
-        「OpenAI 키」 하나뿐이다 — 호환 서버(ADR-0058)는 #601 이 더한다. 주소·인증 값은
+        """이 클래스의 채점이 모델에 닿는 길(#599, CONTEXT.md 「채점 연결」) — 「OpenAI 키」
+        또는 「호환 서버」(#601, ADR-0058). 주소·인증 값은
         `classroom.scoring_connection.connection_for` 가 이 값으로 고른다."""
 
         OPENAI_KEY = "openai_key", "OpenAI 키"
+        COMPATIBLE_SERVER = "compatible_server", "호환 서버"
 
     #: 이 클래스를 연 강사. `accounts.SponsorProfile`이 아니라 `User`를 바로
     #: 가리킨다 — 프로필을 쓰지 않기로 한 것 자체가 ADR-0037의 합의다.
@@ -97,11 +98,16 @@ class Class(models.Model):
         default=ScoringConnectionKind.OPENAI_KEY,
         db_default=ScoringConnectionKind.OPENAI_KEY,
     )
+    #: 「호환 서버」 연결의 주소(#601) — OpenAI 호환 API 의 base URL(`…/v1`). 저장할 때
+    #: `core.safe_outbound` 로 https·공인 주소인지 확인했다. 「OpenAI 키」 연결이면 비어 있다.
+    #: 호환 서버의 `Authorization: Bearer` 값은 키 칸(`openai_api_key_encrypted`·`_last4`)에
+    #: 암호화해 둔다 — 비워 둔 서버면 그 칸도 비어 있다(`has_scoring_key` 가 종류별로 가른다).
+    scoring_server_url = models.CharField(max_length=500, blank=True, default="", db_default="")
 
     #: 이 클래스의 기본 채점 모델(#285, #401). 문제가 자기 값을 갖지 않으면
     #: 이 값을 쓴다 — 그 클래스의 키로 실제로 쓸 수 있는 모델만 저장된다
     #: (`classroom.scoring_model_catalog.get_scoring_model_catalog`로 검증).
-    default_model = models.CharField(max_length=50, default=DEFAULT_SCORING_MODEL)
+    default_model = models.CharField(max_length=200, default=DEFAULT_SCORING_MODEL)
 
     #: 추론 강도 세 단계(#402, CONTEXT.md 「추론 강도」) — 채점 모델이 추론
     #: 모델(GPT-5 이후)일 때만 뜻이 있다. 문제가 자기 값을 갖지 않으면 이
@@ -165,6 +171,9 @@ class Class(models.Model):
         채점되지 않는 시도가 "정상적으로 채점을 기다리는 중"으로 잘못
         보인다(bare truthiness는 공백 문자열도 "있다"로 본다)."""
 
+        if self.scoring_connection_kind == self.ScoringConnectionKind.COMPATIBLE_SERVER:
+            # 호환 서버는 인증 값을 비워 둘 수 있다(#601) — 연결이 있는가는 주소로 가른다.
+            return bool((self.scoring_server_url or "").strip())
         return bool((self.openai_api_key_encrypted or "").strip())
 
     def scoring_key_unusable(self, *, ignore_quota: bool = False) -> bool:
@@ -232,7 +241,7 @@ class Problem(models.Model):
     #: 따른다 — API가 그 둘을 합쳐 `effective_model`로 내려준다. 지난 채점의
     #: 근거는 이 필드가 아니라 그 채점(Score)이 그 시점에 남긴 값이 지킨다 —
     #: 여기를 바꿔도 이미 산출된 판정은 다시 계산되지 않는다.
-    model = models.CharField(max_length=50, blank=True, default="")
+    model = models.CharField(max_length=200, blank=True, default="")
 
     #: 벤더가 이 문제의 채점 모델을 그 클래스의 키로 거부한 시각(#403,
     #: CONTEXT.md 「채점 모델」 "그 시도는 채점하지 못한 것으로 남는다") —

@@ -444,6 +444,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/compatible-server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Class Compatible Server
+         * @description 채점 연결을 「호환 서버」로 저장한다(#601, ADR-0058) — 소유자 전용(ADR-0055).
+         *
+         *     저장 전에 안전한 바깥 호출로 그 서버의 모델 목록을 한 번 받아 닿는지·인증이 맞는지 본다.
+         *     거부·실패는 이유별 한 문장으로 422 이고, DB 의 기존 연결은 그대로 남는다. 인증 값은 OpenAI
+         *     키와 같은 칸에 암호화해 두고 끝 네 자리만 보인다 — 이전 연결(OpenAI 키)의 값은 덮여
+         *     지워진다. 응답 어디에도 인증 값 원문을 싣지 않는다.
+         */
+        put: operations["classroom_api_set_class_compatible_server"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/copy": {
         parameters: {
             query?: never;
@@ -4895,11 +4920,22 @@ export interface components {
              * @enum {string}
              */
             role: "owner" | "co_instructor";
+            /** Scoring Auth Masked */
+            scoring_auth_masked?: string | null;
+            /**
+             * Scoring Connection Kind
+             * @default openai_key
+             */
+            scoring_connection_kind: string;
             /**
              * Scoring Quota Exhausted
              * @default false
              */
             scoring_quota_exhausted: boolean;
+            /** Scoring Server Host */
+            scoring_server_host?: string | null;
+            /** Scoring Server Url */
+            scoring_server_url?: string | null;
             /** Token Budget */
             token_budget?: number | null;
             /**
@@ -5446,6 +5482,20 @@ export interface components {
             developer_id: number;
             /** Submission Id */
             submission_id: number;
+        };
+        /**
+         * CompatibleServerIn
+         * @description 「호환 서버」 채점 연결(#601, ADR-0058) — OpenAI 호환 주소와 `Authorization: Bearer` 값.
+         *     인증 값은 비워 둘 수 있다(그 서버가 인증을 받지 않으면).
+         */
+        CompatibleServerIn: {
+            /**
+             * Auth Value
+             * @default
+             */
+            auth_value: string;
+            /** Server Url */
+            server_url: string;
         };
         /**
          * CompletionDistributionOut
@@ -9321,6 +9371,59 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_set_class_compatible_server: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompatibleServerIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

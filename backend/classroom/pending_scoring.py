@@ -112,7 +112,15 @@ def pending_submissions(as_of, ctx) -> QuerySet[ClassroomSubmission]:
         ClassroomSubmission.objects.filter(
             classroom_score__isnull=True,
         )
-        .exclude(problem__classroom__openai_api_key_encrypted="")
+        # 채점 연결이 없는 클래스 — `Class.has_scoring_key` 와 같은 기준(호환 서버는 주소로, #601).
+        .exclude(
+            models.Q(problem__classroom__scoring_connection_kind=Class.ScoringConnectionKind.COMPATIBLE_SERVER)
+            & models.Q(problem__classroom__scoring_server_url="")
+        )
+        .exclude(
+            ~models.Q(problem__classroom__scoring_connection_kind=Class.ScoringConnectionKind.COMPATIBLE_SERVER)
+            & models.Q(problem__classroom__openai_api_key_encrypted="")
+        )
         .exclude(problem__classroom__openai_api_key_status=Class.ScoringKeyStatus.REJECTED)
         .exclude(problem__scoring_model_rejected_at__isnull=False)
         .exclude(problem__classroom__scoring_quota_exhausted_at__gt=as_of - QUOTA_RECHECK_INTERVAL)

@@ -15,7 +15,8 @@ export type ScoringModelCatalog = {
   models: ScoringModelRow[];
   // "live"(그 클래스의 키로 실제로 조회했다) | "fallback"(저장소의 작은
   // 목록).
-  source: "live" | "fallback";
-  // `source`가 "fallback"일 때만 값이 있다 — "no_api_key" | "fetch_failed".
-  unavailable_reason: "no_api_key" | "fetch_failed" | null;
+  // "manual"(호환 서버가 목록을 주지 않았다 — 모델 이름을 직접 넣는다, #601).
+  source: "live" | "fallback" | "manual";
+  // `source`가 "fallback"·"manual"일 때만 값이 있다.
+  unavailable_reason: "no_api_key" | "fetch_failed" | "no_model_list" | null;
 };

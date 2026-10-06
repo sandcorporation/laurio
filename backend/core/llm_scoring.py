@@ -37,12 +37,14 @@ import json
 import os
 from dataclasses import dataclass
 from enum import Enum
+from collections.abc import Callable
 from typing import Any, Protocol, runtime_checkable
 
 import requests
 from django.conf import settings
 
 from core.adapters import resolve_adapter
+from core.safe_outbound import OutboundRefused
 
 
 @dataclass(frozen=True)
@@ -249,6 +251,12 @@ _CHAT_COMPLETIONS_PATH = "/chat/completions"
 _MODELS_PATH = "/models"
 
 
+#: 벤더 왕복을 대신 보내는 함수(#601) — `core.safe_outbound.SafeOutbound.request` 모양
+#: (`method, url, *, headers, timeout, json`). 주지 않으면 `requests` 로 바로 나간다(OpenAI).
+#: 강의실의 「호환 서버」 연결은 강사가 적은 주소라 안전한 바깥 호출을 넘긴다(ADR-0058).
+Transport = Callable[..., Any]
+
+
 def _endpoint(base_url: str | None, path: str) -> str:
     return (base_url or OPENAI_API_BASE_URL).rstrip("/") + path
 
@@ -429,6 +437,7 @@ def _openai_round_trip(
     timeout: float,
     json_body: dict | None = None,
     context: str = "",
+    transport: Transport | None = None,
 ) -> Any:
     """벤더(OpenAI) 왕복 하나 — 헤더·타임아웃·예외 변환을 여기 한 곳이 갖는다
     (#469). 채점(`OpenAIScoringAdapter.score`)·키 확인(`OpenAIScoringAdapter.
@@ -440,11 +449,22 @@ def _openai_round_trip(
     (타임아웃·연결 끊김) 재시도해도 결과가 달라질 수 있으니 `LLMAdapterError`
     (일시 실패)로 옮겨 던진다."""
 
-    headers = {"Authorization": f"Bearer {api_key}"}
+    # 호환 서버는 인증 값을 비워 둘 수 있다(#601) — 그때는 헤더를 싣지 않는다.
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     kwargs: dict[str, Any] = {"headers": headers, "timeout": timeout}
     if json_body is not None:
         headers["Content-Type"] = "application/json"
         kwargs["json"] = json_body
+
+    if transport is not None:
+        try:
+            response = transport(method, url, **kwargs)
+        except OutboundRefused as exc:
+            detail = f", {context}" if context else ""
+            raise LLMAdapterError(f"호환 서버 호출이 실패했다({exc.reason.value}{detail}).") from None
+        if response.status_code == 200:
+            return response
+        raise _classify_openai_error(response, context=context)
 
     # `requests.post`/`requests.get`을 이름으로 부른다 — `requests.request`가
     # 아니다: 기존 테스트(#469 이전부터)가 전부 `requests.post`/`.get` 이름을
@@ -628,9 +648,12 @@ class OpenAIScoringAdapter:
         #: 이 어댑터가 부를 API 의 base URL(#599). 주지 않으면 OpenAI 다 — 공모전은 이 인자를
         #: 주지 않는다. 강의실은 채점 연결이 주는 주소를 넘긴다.
         base_url: str | None = None,
+        #: 왕복을 대신 보내는 함수(#601, `Transport`). 강의실의 호환 서버 연결만 준다 — 그
+        #: 연결은 인증 값을 비워 둘 수 있어 빈 키로도 만들어진다.
+        transport: Transport | None = None,
     ) -> None:
         api_key = api_key if api_key is not None else (os.environ.get("OPEN_AI_API_KEY") or "")
-        if not api_key:
+        if not api_key and transport is None:
             raise LLMAdapterError(
                 "OPEN_AI_API_KEY가 비어 있다 — 실물 OpenAI 채점 어댑터는 자격증명 없이 "
                 "생성할 수 없다."
@@ -645,6 +668,7 @@ class OpenAIScoringAdapter:
         self._reasoning_effort = reasoning_effort
         self._timeout = timeout
         self._base_url = base_url
+        self._transport = transport
         # 부팅 가드(core.adapters.check_adapter_mode)의 isinstance(LLMScoringAdapter)
         # 검사가 요구하는 자리 — 실제 호출에 쓰인 모델 식별자는 매 score() 호출마다
         # OpenAI 응답의 "model" 필드에서 새로 읽어 ScoringOutput.model_version으로
@@ -679,6 +703,7 @@ class OpenAIScoringAdapter:
             timeout=self._timeout,
             json_body=payload,
             context=f"submission={scoring_input.submission_id}",
+            transport=self._transport,
         )
 
         try:
@@ -719,6 +744,7 @@ class OpenAIScoringAdapter:
                 api_key=self._api_key,
                 timeout=self._timeout,
                 context="key-check",
+                transport=self._transport,
             )
         except LLMAdapterAuthError:
             return LLMKeyCheckStatus.REJECTED
@@ -732,6 +758,7 @@ def list_openai_models(
     *,
     base_url: str | None = None,
     timeout: float = _OPENAI_REQUEST_TIMEOUT_SECONDS,
+    transport: Transport | None = None,
 ) -> list[str] | None:
     """이 키로 `/v1/models`를 조회해 모델 id 목록을 돌려준다(#401) —
     `classroom.scoring_model_catalog`가 이 목록을 규칙으로 거른다
@@ -757,6 +784,7 @@ def list_openai_models(
             api_key=api_key,
             timeout=timeout,
             context="model-list",
+            transport=transport,
         )
     except LLMAdapterError:
         return None
