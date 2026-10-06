@@ -57,6 +57,7 @@ ALLOWLIST: dict[Path, dict[str, str]] = {
         "rename_myself": "참여자 본인이 여는 문이다 — 강사 전용 범위 밖(_get_member_or_404를 쓴다).",
         "create_classroom_submission": "참여자와 강사가 같은 주소를 걷는 혼합 라우트다 — 강사 분기도 class_scope/problem_scope가 아니라 .filter(...).first()로 존재를 숨기지 않는다(get_my_problem과 같은 이유).",
         "create_co_instructor_invite": "사람을 들이는 일은 클래스의 존폐 쪽이라 보관된 클래스에서도 연다(CONTEXT.md 「공동 강사」, #561) — class_scope(write=False)만 부른다.",
+        "cancel_co_instructor_invite": "초대 만들기와 같은 이유 — 사람을 들이는 일은 보관과 무관하다(CONTEXT.md 「공동 강사」, #562). 강사 누구나 취소한다 — class_scope(write=False, owner=False)만 부른다.",
         "accept_co_instructor_invite": "초대받은 사람이 여는 문이다 — 아직 강사가 아니므로 강사 전용 범위 밖이고, 보관된 클래스에서도 수락한다(#561). 초대 토큰과 행 잠금이 문이다(classroom.co_instructors).",
         "copy_problem": "원본(problem_scope write=False)과 대상(class_scope write=True) 둘을 부른다 — write=True 호출이 있어 이 표에 없어도 통과하지만, 원본 쪽 write=False 호출이 있다는 것을 여기 남겨 둔다.",
     },

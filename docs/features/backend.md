@@ -249,6 +249,9 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 | `DELETE /api/classroom/classes/{id}` | 클래스를 지운다 — 어느 문제에도 제출이 없을 때만, 되돌릴 수 없다(#330) |
 | `GET`·`POST /api/classroom/join/{code}` | 가입 링크 미리보기(인증 불필요)와 가입(#280) |
 | `POST /api/classroom/classes/{id}/co-instructor-invites` | 공동 강사 초대를 하나 만든다 — 강사 누구나, 보관된 클래스에서도, 여러 개를 동시에(#561) |
+| `GET /api/classroom/classes/{id}/instructors` | 강사 목록 — 소유자 먼저, 그다음 공동 강사를 수락한 순서로(이름·역할·수락한 때·나인가). 강사 누구나, 보관된 클래스에서도(#562) |
+| `GET /api/classroom/classes/{id}/co-instructor-invites` | 아직 쓰이지 않은 공동 강사 초대 — 수락·만료·취소된 것은 빠진다. 만든 사람의 강사 이름과 토큰(다시 복사용)을 싣는다. 강사 누구나(#562) |
+| `POST /api/classroom/classes/{id}/co-instructor-invites/{invite_id}/cancel` | 대기 중인 초대를 취소한다 — 강사 누구나, 누가 만든 초대든, 보관된 클래스에서도. 다른 클래스의 초대는 404, 이미 쓰였거나 만료·취소됐으면 409(#562) |
 | `GET /api/classroom/co-instructor-invites/{token}` | 초대 미리보기(인증 불필요) — 클래스 이름·강사 이름들·상태(대기·수락됨·만료·취소됨), 쓸 수 없으면 그 문장(#561) |
 | `POST /api/classroom/co-instructor-invites/{token}/accept` | 초대를 쓰고 공동 강사가 된다 — 이 클래스에서 불릴 강사 이름이 필요하다. 1회용(410), 7일 만료(410), 이미 강사면 409 이고 초대는 남는다(#561) |
 | `GET /api/classroom/classes/{id}/members` | 참여자 명단 — 강사 전용(#281) |
@@ -325,7 +328,9 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 **공동 강사 초대는 1회용이다**(#561, `classroom.co_instructors`). 수락은 한 트랜잭션에서
 초대 행을 잠그고 「아직 대기인가」를 다시 본 뒤에야 공동 강사 행을 만든다 — 같은 링크를 둘이
 동시에 눌러도 한 사람만 된다. 만료는 만든 때 + 7일(주입 가능한 시계, ADR-0003). 상태는
-따로 저장하지 않고 수락·취소·만료 시각에서 읽는다. 보관된 클래스에서도 만들고 수락한다.
+따로 저장하지 않고 수락·취소·만료 시각에서 읽는다. 보관된 클래스에서도 만들고 보고 취소하고
+수락한다. 취소는 행을 지우지 않고 시각을 찍는다 — 수락과 같은 행 잠금이라 둘이 겹쳐도 한쪽만
+이기고, 취소된 링크는 미리보기에서 「취소된 초대」로 보이고 수락은 410 이다(#562).
 연결된 앱(MCP)에는 초대 도구가 없다(ADR-0055).
 
 **보관(`archived_at`)은 지우지 않는다**(#294) — `.../unarchive`로 언제든 되돌아온다.

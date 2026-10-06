@@ -11,6 +11,23 @@ export type CoInstructorInvite = {
   expires_at: string;
 };
 
+// 대기 중인 초대 한 줄(#562) — 클래스 관리 「강사」 영역의 목록. 새것 먼저.
+export type PendingCoInstructorInvite = CoInstructorInvite & {
+  // 만든 강사의 이 클래스에서의 강사 이름 — 이름을 정하지 않은 소유자면 빈 문자열.
+  created_by_name: string;
+  created_by_me: boolean;
+};
+
+// 강사 목록 한 줄(#562) — 소유자 먼저, 그다음 공동 강사를 수락한 순서로.
+export type ClassInstructor = {
+  // 이름을 정하지 않은 소유자면 빈 문자열.
+  display_name: string;
+  role: "owner" | "co_instructor";
+  // 공동 강사가 초대를 수락한 때 — 소유자는 `null`.
+  accepted_at: string | null;
+  is_me: boolean;
+};
+
 export type CoInstructorInviteStatus = "pending" | "accepted" | "expired" | "cancelled";
 
 export type CoInstructorInvitePreview = {
@@ -34,6 +51,23 @@ export type CoInstructorAcceptResult = { class_id: number; class_name: string };
 export function createCoInstructorInvite(classId: number): Promise<ApiResult<CoInstructorInvite>> {
   return bffClient.post<CoInstructorInvite>(
     `/api/backend/classroom/classes/${classId}/co-instructor-invites`,
+    {},
+  );
+}
+
+export function classInstructorsPath(classId: number): string {
+  return `/api/backend/classroom/classes/${classId}/instructors`;
+}
+
+export function pendingCoInstructorInvitesPath(classId: number): string {
+  return `/api/backend/classroom/classes/${classId}/co-instructor-invites`;
+}
+
+/** 대기 중인 초대를 취소한다(#562) — 강사 누구나, 누가 만든 초대든. 취소한 링크는 「취소된
+ *  초대」로 보이고 수락되지 않는다. */
+export function cancelCoInstructorInvite(classId: number, inviteId: number): Promise<ApiResult<undefined>> {
+  return bffClient.post<undefined>(
+    `/api/backend/classroom/classes/${classId}/co-instructor-invites/${inviteId}/cancel`,
     {},
   );
 }
