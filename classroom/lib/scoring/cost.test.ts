@@ -33,6 +33,7 @@ function estimate(partial: Partial<ScoringCostEstimate>): ScoringCostEstimate {
     unit: "krw",
     basis: "class",
     sample_count: 40,
+    min_sample_count: 3,
     avg_prompt_chars: 55_000,
     avg_input_tokens: 16_667,
     participant_count: 18,
@@ -89,12 +90,17 @@ describe("예상 채점 비용 적기 (#591)", () => {
       "이 문제 시도 23건 평균 · 소스 약 5.5만 자(입력 약 1.7만 토큰)",
     );
     expect(costBasisText(estimate({}), "problem")).toBe(
-      "이 문제는 아직 시도가 없어 클래스 평균으로 셈했습니다 · 소스 약 5.5만 자(입력 약 1.7만 토큰)",
+      "이 문제는 시도가 3건 미만이라 클래스 시도 40건 평균으로 셈했습니다 · 소스 약 5.5만 자(입력 약 1.7만 토큰)",
     );
-    expect(costBasisText(estimate({}), "class")).toBe("이 클래스 시도 평균 · 소스 약 5.5만 자(입력 약 1.7만 토큰)");
-    expect(
-      costBasisText(estimate({ basis: "source_sizes", avg_prompt_chars: null, avg_input_tokens: null }), "class"),
-    ).toBe("이 클래스에 아직 시도가 없어 소스 크기별로 셈했습니다");
+    expect(costBasisText(estimate({}), "class")).toBe("이 클래스 시도 40건 평균 · 소스 약 5.5만 자(입력 약 1.7만 토큰)");
+    const bySize = { basis: "source_sizes", avg_prompt_chars: null, avg_input_tokens: null } as const;
+    expect(costBasisText(estimate({ ...bySize, sample_count: 0 }), "class")).toBe(
+      "이 클래스에 아직 시도가 없어 소스 크기별로 셈했습니다",
+    );
+    // 시험 삼아 낸 몇 건으로 평균을 내지 않는다(#617) — 그 기준을 말한다.
+    expect(costBasisText(estimate({ ...bySize, sample_count: 2 }), "problem")).toBe(
+      "이 클래스 시도가 2건뿐이라 소스 크기별로 셈했습니다 · 평균은 3건부터 냅니다",
+    );
   });
 
   it("예산 칸의 토큰을 시도 1건의 토큰으로 나눈다 — 소스 크기별이면 가운데 크기로", () => {

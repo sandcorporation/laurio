@@ -102,7 +102,9 @@ def test_an_openai_key_class_still_prices_in_won(client, db):
 def test_after_attempts_a_problem_shows_tokens_per_attempt_and_per_problem(client, db, monkeypatch, real_adapter):
     fake, instructor, class_id = _compatible_class(client, monkeypatch)
     problem = create_open_problem(client, instructor["access"], class_id, model="my-team/coder-7b")
-    _score_one(client, fake, instructor, class_id, problem, total_tokens=900)
+    # 평균은 시도 3건부터다(#617) — 참여자 셋이 한 번씩.
+    for uid in ("participant-1", "participant-2", "participant-3"):
+        _score_one(client, fake, instructor, class_id, problem, total_tokens=900, uid=uid)
 
     estimate = _estimate(client, instructor["access"], class_id, problem.id)
 

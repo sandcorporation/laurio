@@ -39,14 +39,14 @@ function ratioText(row: ScoringCostRow): string {
   return row.ratio_to_baseline === null ? "—" : formatRatio(row.ratio_to_baseline, row.open_ended);
 }
 
-// 표의 줄: 단가를 아는 줄 + 지금 고른 설정(단가를 몰라도 한 줄, 「비용 미확인」).
+// 표의 줄: 이 키로 쓸 수 있는 모델 전부(카탈로그 순서, #617). 표가 길어 지금 고른 설정은 맨 위로
+// 올린다 — 서버 줄에 없으면(아직 저장하지 않은 선택) 「비용 미확인」 한 줄로.
 function tableRows(
   estimate: ScoringCostEstimate,
   modelId: string,
   reasoningEffort: string,
   isReasoning: boolean,
 ): { rows: ScoringCostRow[]; current: ScoringCostRow } {
-  const priced = estimate.rows.filter((row) => row.priced);
   const found = findCostRow(estimate, modelId, reasoningEffort);
   const current: ScoringCostRow = found ?? {
     model_id: modelId,
@@ -59,7 +59,7 @@ function tableRows(
     ratio_to_baseline: null,
     by_source_size: [],
   };
-  return { rows: current.priced ? priced : [...priced, current], current };
+  return { rows: [current, ...estimate.rows.filter((row) => row !== found)], current };
 }
 
 const CELL = "border-b border-rule/60 px-3.5 py-2.5";
@@ -92,6 +92,8 @@ export function ClassScoringCostTable({
   }
   const { rows, current } = tableRows(estimate, modelId, reasoningEffort, isReasoning);
   const bySize = estimate.basis === "source_sizes";
+  // 참여자가 없으면 「문제 하나」 칸을 뺀다 — 0명으로 곱한 값은 뜻이 없다(#617).
+  const hasParticipants = estimate.participant_count > 0;
   const isCurrent = (row: ScoringCostRow) =>
     row.model_id === current.model_id && row.reasoning_effort === current.reasoning_effort;
 
@@ -117,12 +119,14 @@ export function ClassScoringCostTable({
                   ])
                 : [
                     ["시도 1건", row.per_attempt ? formatKrw(row.per_attempt.krw, row.open_ended) : "—"],
-                    [
-                      `문제 하나 · ${estimate.participant_count}명`,
-                      row.per_problem_krw && estimate.participant_count > 0
-                        ? formatKrw(row.per_problem_krw, row.open_ended)
-                        : "—",
-                    ],
+                    ...(hasParticipants
+                      ? ([
+                          [
+                            `문제 하나 · ${estimate.participant_count}명`,
+                            row.per_problem_krw ? formatKrw(row.per_problem_krw, row.open_ended) : "—",
+                          ],
+                        ] as [string, string][])
+                      : []),
                     ["배율", ratioText(row)],
                   ];
             return (
@@ -166,9 +170,11 @@ export function ClassScoringCostTable({
                 ) : (
                   <>
                     <th className={`${HEAD_CELL} text-right font-normal`}>시도 1건</th>
-                    <th className={`${HEAD_CELL} text-right font-normal`}>
-                      문제 하나 · {estimate.participant_count}명
-                    </th>
+                    {hasParticipants ? (
+                      <th className={`${HEAD_CELL} text-right font-normal`}>
+                        문제 하나 · {estimate.participant_count}명
+                      </th>
+                    ) : null}
                     <th className={`${HEAD_CELL} text-right font-normal`}>배율</th>
                   </>
                 )}
@@ -191,7 +197,7 @@ export function ClassScoringCostTable({
                       </span>
                     </td>
                     {!row.priced ? (
-                      <td colSpan={3} className={`${CELL} text-right text-[12.5px] text-ink/45`}>
+                      <td colSpan={bySize ? estimate.source_size_bands.length : hasParticipants ? 3 : 2} className={`${CELL} text-right text-[12.5px] text-ink/45`}>
                         {UNPRICED}
                       </td>
                     ) : bySize ? (
@@ -205,11 +211,11 @@ export function ClassScoringCostTable({
                         <td className={NUM_CELL}>
                           {row.per_attempt ? formatKrw(row.per_attempt.krw, row.open_ended) : "—"}
                         </td>
-                        <td className={NUM_CELL}>
-                          {row.per_problem_krw && estimate.participant_count > 0
-                            ? formatKrw(row.per_problem_krw, row.open_ended)
-                            : "—"}
-                        </td>
+                        {hasParticipants ? (
+                          <td className={NUM_CELL}>
+                            {row.per_problem_krw ? formatKrw(row.per_problem_krw, row.open_ended) : "—"}
+                          </td>
+                        ) : null}
                         <td className={NUM_CELL}>{ratioText(row)}</td>
                       </>
                     )}
@@ -221,8 +227,10 @@ export function ClassScoringCostTable({
         </div>
         <p className="px-3.5 py-2.5 text-[11.5px] leading-relaxed text-ink/45">
           {bySize
-            ? `채점은 시도 하나에 한 번이고, 비용은 제출 소스의 길이에 거의 비례합니다. 참여자가 내기 시작하면 이 클래스의 실제 평균으로 바뀝니다. ${BILLING_NOTE}`
-            : `채점은 시도 하나에 한 번입니다. 「문제 하나」는 참여자 ${estimate.participant_count}명이 한 사람당 ${formatAttemptsPerParticipant(estimate.attempts_per_participant)} 낸다고 보고 셈했습니다. ${BILLING_NOTE} 추론 모델은 문제와 소스에 따라 크게 달라집니다.`}
+            ? `채점은 시도 하나에 한 번이고, 비용은 제출 소스의 길이에 거의 비례합니다. 시도가 ${estimate.min_sample_count}건 쌓이면 이 클래스의 실제 평균으로 바뀝니다. ${BILLING_NOTE}`
+            : hasParticipants
+              ? `채점은 시도 하나에 한 번입니다. 「문제 하나」는 참여자 ${estimate.participant_count}명이 한 사람당 ${formatAttemptsPerParticipant(estimate.attempts_per_participant)} 낸다고 보고 셈했습니다. ${BILLING_NOTE} 추론 모델은 문제와 소스에 따라 크게 달라집니다.`
+              : `채점은 시도 하나에 한 번입니다. 문제 하나의 비용은 참여자가 들어오면 보입니다. ${BILLING_NOTE} 추론 모델은 문제와 소스에 따라 크게 달라집니다.`}
         </p>
       </div>
 
@@ -324,11 +332,15 @@ export function ProblemScoringCost({
   } else {
     cells = [
       { label: "시도 1건", value: row.per_attempt ? formatKrw(row.per_attempt.krw, row.open_ended) : "—" },
-      {
-        label: `참여자 ${estimate.participant_count}명 · 1인 ${formatAttemptsPerParticipant(estimate.attempts_per_participant)}`,
-        value:
-          row.per_problem_krw && estimate.participant_count > 0 ? formatKrw(row.per_problem_krw, row.open_ended) : "—",
-      },
+      // 참여자가 없으면 이 칸을 뺀다 — 0명으로 곱한 값은 뜻이 없다(#617).
+      ...(estimate.participant_count > 0
+        ? [
+            {
+              label: `참여자 ${estimate.participant_count}명 · 1인 ${formatAttemptsPerParticipant(estimate.attempts_per_participant)}`,
+              value: row.per_problem_krw ? formatKrw(row.per_problem_krw, row.open_ended) : "—",
+            },
+          ]
+        : []),
       {
         label: `${estimate.baseline_model_id} 대비`,
         value: ratioText(row),
@@ -361,7 +373,7 @@ export function ProblemScoringCost({
         </span>
       </div>
       {cells.length > 0 ? (
-        <div className="grid grid-cols-1 @[420px]:grid-cols-3">
+        <div className={`grid grid-cols-1 ${cells.length === 3 ? "@[420px]:grid-cols-3" : "@[420px]:grid-cols-2"}`}>
           {cells.map((cell, index) => (
             <CostCell key={cell.label} {...cell} last={index === cells.length - 1} />
           ))}
