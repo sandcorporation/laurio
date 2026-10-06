@@ -267,6 +267,21 @@ ghcr 에서 새 태그를 받으니 옛 커밋 이미지가 쌓이고, oracle �
 받는다.** celery-worker·beat 는 지금처럼 내리고 올린다(beat 는 하나여야 하고 태스크는 Redis
 에서 기다린다).
 
+**강의실 채점 워커 `celery-scoring` 은 맨 끝에, 최대 4분 걸려 바뀐다**(#582, ADR-0056).
+강의실 채점은 이 서비스 안에서 직접 돈다 — backend 와 같은 이미지로 큐 `classroom-scoring`
+하나만 소비하는 prefork 워커(동시성 8, 미리 가져오기 1, 메모리 약 1GB)이고, 기존
+`celery-worker` 는 `-Q celery` 로 그 큐를 소비하지 않는다(스캔·알림·백업·색인). 벤더를
+3분까지 기다리므로 `stop_grace_period: 4m` 이다 — `up -d` 가 옛 컨테이너에 SIGTERM 을
+보내면 워커는 새 태스크를 받지 않고 채점 중인 것을 마저 끝낸다. 그래서 `deploy.sh` 는
+backend·worker·beat·events 를 다 바꾼 **뒤에** 이 서비스를 바꾼다 — 앞에 두면 사용자 요청을
+받는 쪽의 교체가 그만큼 늦어진다. 그동안 새 채점 태스크는 Redis 에서 기다린다(채점이
+늦어질 뿐 잃지 않는다). 물러서는 배포·풀러 교체에서는 이 서비스를 **먼저 따로** 내린다 —
+backend 가 아직 요청을 받는 동안 그 4분을 쓰고, backend 가 없는 창을 늘리지 않는다. 그래도
+4분 안에 끝나지 않아 SIGKILL 로 끊긴 채점은 기록 없이 남고, 「큐에 넣은 시각」 5분이 지난 뒤
+60초 스캔이 다시 넣는다. **트랜잭션을 쥔 채 벤더를 기다린다**(`_score_one` 의 행 잠금) —
+동시에 채점 중인 시도 수만큼(최대 8) 풀러의 서버 연결(`PGBOUNCER_DEFAULT_POOL_SIZE` 기본
+20)을 그동안 쥔다.
+
 - **새 마이그레이션은 먼저 돌리고 겹쳐 바꾼다**(#526, ADR-0053). `deploy.sh` 가 새 이미지의
   일회성 컨테이너(`compose run --rm backend`, 풀러 경유)에서 `migrate` 를 돌리는 동안 옛
   컨테이너는 그대로 요청을 받는다. 성공해야 겹쳐 바꾸고, 실패하면 아무것도 내리지 않고
@@ -294,8 +309,8 @@ ghcr 에서 새 태그를 받으니 옛 커밋 이미지가 쌓이고, oracle �
 서비스든 받을 이미지는 있다). 기준점은 `.jenkins-staging-deployed`
 (gitignore, 빌드 디렉터리에 남는다 — 시크릿과 같은 전제). 그 파일이 없거나 그것이
 가리키는 커밋이 저장소에 없으면 전부 바꿔 끼운다. 경로 → 서비스 팬아웃은 1:1 이 아니다:
-`backend/` 는 **backend + celery-worker + celery-beat + events**(#380, ADR-0046)를
-함께 간다(넷이 한 이미지 이름을 쓴다, 2026-09-17 — 예전에는 공유 `image:` 태그가 없어
+`backend/` 는 **backend + celery-worker + celery-beat + events + celery-scoring**(#380,
+ADR-0046, #582)을 함께 간다(다섯이 한 이미지 이름을 쓴다, 2026-09-17 — 예전에는 공유 `image:` 태그가 없어
 **이미지가 넷**이었고, `build backend` 만 하면 나머지 셋이 옛 이미지에 남아 배포가 초록으로
 끝난 채 스캔·강의실 실시간 신호만 옛 코드로 돌았다),
 `packages/` **아래 무엇이든** 과 `pnpm-lock.yaml`·`pnpm-workspace.yaml`·루트
@@ -339,7 +354,7 @@ rebuild_contest_search_index`)가 전체 재색인을 한 번 강제한다 — �
 
 **연결 풀러(pgbouncer)가 죽으면 검색·이벤트 서비스와 반대로 배포가 실패로
 끝난다 — 그리고 그래야 맞다**(#453/#458). `backend`·`celery-worker`·
-`celery-beat`·`events` 넷은 이제 DB 를 직접 가리키지 않고 `pgbouncer` 를
+`celery-beat`·`events` 넷(과 채점 워커 `celery-scoring`)은 이제 DB 를 직접 가리키지 않고 `pgbouncer` 를
 가리킨다(`POSTGRES_HOST=pgbouncer`) — search 처럼 시작 순서만 기다리는
 `service_started` 가 아니라 `db` 와 같은 `service_healthy` 로 그 넷의
 `depends_on` 에 걸려 있다. **DB(`db`) 자신은 살아 있어도 풀러가 죽어 있으면
@@ -410,7 +425,9 @@ docker compose -f docker/compose.dev.yaml up -d
 
 **Celery 는 dev 기본 기동에 없다**(#40). beat 가 60초마다 쏘는 스캔이 마감 전이·채점·
 배분·환불을 실제로 진행시켜, e2e 가 심은 데이터를 테스트 도중에 다른 상태로
-옮겨버리기 때문이다. 스캔 경로를 돌려보고 싶을 때만 프로필로 켠다:
+옮겨버리기 때문이다. 워커가 없어도 태스크는 돈다 — dev·CI 는 `CELERY_TASK_ALWAYS_EAGER`
+라 `.delay()` 자리에서 그대로 실행된다(#582, [개발 환경](dev-environment.md)). 스캔
+경로를 돌려보고 싶을 때만 프로필로 켠다:
 
 ```bash
 docker compose -f docker/compose.dev.yaml --profile celery up -d

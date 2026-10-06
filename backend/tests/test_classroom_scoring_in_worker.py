@@ -23,7 +23,9 @@ from datetime import timedelta
 
 import pytest
 import requests
+import yaml
 from celery.exceptions import SoftTimeLimitExceeded
+from django.conf import settings
 from django.db import connections
 from django.test import Client
 from django.utils import timezone
@@ -45,6 +47,8 @@ from tests.classroom_scenarios import (
     run_scan,
     submit_repository,
 )
+
+REPO_ROOT = settings.BASE_DIR.parent
 
 
 def _class_with_open_problem(client) -> dict:
@@ -269,3 +273,30 @@ def test_two_tasks_for_the_same_attempt_call_the_vendor_once(django_db_blocker, 
 
         assert vendor_calls == [submitted["id"]]
         assert ClassroomScore.objects.filter(submission_id=submitted["id"]).count() == 1
+
+
+# --- 배포 구성 -----------------------------------------------------------------
+
+
+@pytest.mark.parametrize("target", ["staging", "prod"])
+def test_deployed_compose_runs_a_scoring_worker_and_the_general_worker_does_not_score(target):
+    compose = yaml.safe_load(
+        (REPO_ROOT / "docker" / f"compose.{target}.yaml").read_text(encoding="utf-8")
+    )
+    services = compose["services"]
+    scoring = services["celery-scoring"]
+    general = services["celery-worker"]
+
+    assert "-Q classroom-scoring" in scoring["command"]
+    assert "--concurrency 8" in scoring["command"]
+    assert "-Q celery" in general["command"]
+    assert "classroom-scoring" not in general["command"]
+    assert scoring["image"] == services["backend"]["image"]
+    # 따뜻한 종료가 채점 중인 태스크(hard 한도까지)를 마저 끝낼 시간.
+    grace_minutes = int(scoring["stop_grace_period"].rstrip("m"))
+    assert grace_minutes * 60 >= classroom_tasks.score_attempt.time_limit
+
+
+def test_deploy_script_replaces_the_scoring_worker_with_the_backend_image():
+    deploy = (REPO_ROOT / "deploy.sh").read_text(encoding="utf-8")
+    assert 'backend) echo "backend celery-worker celery-beat events celery-scoring" ;;' in deploy
