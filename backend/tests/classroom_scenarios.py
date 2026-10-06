@@ -699,6 +699,38 @@ def respond_with_transient_failure(
     )
 
 
+#: 2026-10-06 클래스 5 가 실제로 받은 응답의 모양(#586) — 크레딧이 바닥난 키.
+QUOTA_EXHAUSTED_BODY = {
+    "error": {
+        "message": "You exceeded your current quota, please check your plan and billing details.",
+        "type": "insufficient_quota",
+        "code": "credit_balance_exhausted",
+    }
+}
+
+#: 요청 빈도 제한(#586) — 크레딧과 무관하게 잠시 뒤 풀린다.
+RATE_LIMITED_BODY = {
+    "error": {
+        "message": "Rate limit reached for requests",
+        "type": "requests",
+        "code": "rate_limit_exceeded",
+    }
+}
+
+
+def respond_with_quota_exhausted(client_monkeypatch) -> list:
+    """키의 OpenAI 크레딧이 떨어졌다(429 `insufficient_quota`, #586). 불린 횟수를 세는
+    목록을 돌려준다 — 「그동안 벤더를 부르지 않는다」를 평범한 assertion 으로 본다."""
+
+    return track_vendor_calls(client_monkeypatch, status_code=429, body=QUOTA_EXHAUSTED_BODY)
+
+
+def respond_with_rate_limit(client_monkeypatch) -> list:
+    """요청 빈도 제한에 걸렸다(429 `rate_limit_exceeded`, #586)."""
+
+    return track_vendor_calls(client_monkeypatch, status_code=429, body=RATE_LIMITED_BODY)
+
+
 def fail_if_vendor_is_called(client_monkeypatch) -> None:
     """fake 어댑터 경로를 검증하는 테스트가 쓴다 — 네트워크로 나가면 그 자체가
     결함이므로 호출을 실패로 만든다."""

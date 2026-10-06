@@ -191,6 +191,7 @@ def accept(class_obj: Class, user_id: int, transfer_id: int) -> Class:
         locked.openai_api_key_encrypted = ""
         locked.openai_api_key_last4 = ""
         locked.openai_api_key_status = Class.ScoringKeyStatus.UNVERIFIED
+        locked.scoring_quota_exhausted_at = None
         locked.save(
             update_fields=[
                 "instructor",
@@ -198,6 +199,7 @@ def accept(class_obj: Class, user_id: int, transfer_id: int) -> Class:
                 "openai_api_key_encrypted",
                 "openai_api_key_last4",
                 "openai_api_key_status",
+                "scoring_quota_exhausted_at",
             ]
         )
         transfer.accepted_at = now
