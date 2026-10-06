@@ -123,17 +123,12 @@ def test_a_problem_made_by_the_app_is_what_the_screen_shows_and_leaves_one_recor
 
     (screen,) = list_problems(client, instructor["access"], class_id)
     assert screen["id"] == created["id"]
-    for key in (
-        "title",
-        "description",
-        "status",
-        "submission_formats",
-        "grading_strictness",
-        "grading_guideline_text",
-        "syntax_check_enabled",
-    ):
+    for key in ("title", "status", "submission_formats", "grading_strictness", "syntax_check_enabled"):
         assert screen[key] == created[key], key
     assert [i["label"] for i in screen["checklist_items"]] == ["합을 출력한다", "테스트가 있다"]
+    # 원문은 응답에 다시 싣지 않는다(#579) — 저장은 됐고, 읽으려면 get_problem 이다.
+    assert "description" not in created and "grading_guideline_text" not in created
+    assert (screen["description"], screen["grading_guideline_text"]) == ("## 문제\n두 정수를 더한다.", "출력 형식은 느슨하게 본다.")
 
     (record,) = ConnectedAppWrite.objects.all()
     grant = ConnectedApp.objects.get()
@@ -296,11 +291,11 @@ def test_editing_reordering_and_copying(client, db):
     assert item == {"id": first.item_ids[1], "label": "나 고침", "required": True, "order": 1}
 
     reordered = _ok(client, token, "reorder_checklist_items", {**ref, "item_ids": list(reversed(first.item_ids))})
-    assert [i["label"] for i in reordered["problem"]["checklist_items"]] == ["나 고침", "가"]
+    assert [i["label"] for i in reordered["checklist_items"]] == ["나 고침", "가"]
 
     deleted = _ok(client, token, "delete_checklist_item", {**ref, "item_id": first.item_ids[0]})
     assert deleted["deleted_item_id"] == first.item_ids[0]
-    assert [i["label"] for i in deleted["problem"]["checklist_items"]] == ["나 고침"]
+    assert [i["label"] for i in deleted["checklist_items"]] == ["나 고침"]
 
     problems = _ok(client, token, "reorder_problems", {"class_id": class_id, "problem_ids": [second.id, first.id]})["problems"]
     assert [p["id"] for p in problems] == [second.id, first.id]
@@ -358,3 +353,95 @@ def test_misshapen_arguments_are_refused_without_writing(client, db):
         client, token, "create_problem", {"class_id": class_id, "title": "", "submission_formats": ["source"]}
     )
     assert not ConnectedAppWrite.objects.exists()
+
+
+# --- 응답 크기(#579) ---------------------------------------------------------------
+
+_LONG_DESCRIPTION = "## 문제\n두 정수를 입력받아 합을 출력한다. 입력은 한 줄에 공백으로 나뉜 두 정수다.\n\n" * 30
+_GUIDELINE = "출력 형식의 공백 차이는 느슨하게 보고 경계값 처리를 꼼꼼히 본다."
+
+
+def _text_bytes(client, token: str, name: str, arguments: dict) -> tuple[dict, int]:
+    result = _call(client, token, name, arguments)
+    assert result["isError"] is False, result
+    text = result["content"][0]["text"]
+    assert _LONG_DESCRIPTION.strip()[:40] not in text, name  # 설명 원문이 실리지 않는다
+    assert _GUIDELINE not in text, name  # 채점 지침 원문도
+    return result["structuredContent"], len(text.encode())
+
+
+def test_each_write_answers_in_the_size_of_its_task(client, db):
+    instructor, class_id, token = _setup(client)
+    target = create_class(client, instructor["access"], name="다음 학기", with_key=False)
+
+    created, _ = _text_bytes(
+        client,
+        token,
+        "create_problem",
+        {
+            "class_id": class_id,
+            "title": "두 수의 합",
+            "description": _LONG_DESCRIPTION,
+            "submission_formats": ["source"],
+            "checklist_items": [{"label": "합을 출력한다"}],
+            "grading_strictness": "custom",
+            "grading_guideline_text": _GUIDELINE,
+        },
+    )
+    problem = created["problem"]
+    assert (problem["title"], problem["status"], problem["grading_strictness"]) == ("두 수의 합", "draft", "custom")
+    assert [i["label"] for i in problem["checklist_items"]] == ["합을 출력한다"]
+    ref = {"class_id": class_id, "problem_id": problem["id"]}
+
+    full = _ok(client, token, "get_problem", ref)
+    assert full["description"] == _LONG_DESCRIPTION  # 원문은 상세에서 읽는다
+    full_bytes = len(_call(client, token, "get_problem", ref)["content"][0]["text"].encode())
+
+    # 상태 바꾸기 — 번호·제목·상태·상태 바꾸기만.
+    opened, opened_bytes = _text_bytes(client, token, "open_problem", ref)
+    assert opened == {
+        "problem": {
+            "id": problem["id"],
+            "title": "두 수의 합",
+            "status": "open",
+            "available_transitions": [{"name": "hide", "to_state": "hidden", "blocked_reason": None}],
+        }
+    }
+    assert opened_bytes * 10 < full_bytes
+    assert set(_text_bytes(client, token, "hide_problem", ref)[0]["problem"]) == set(opened["problem"])
+    assert _text_bytes(client, token, "reopen_problem", ref)[0]["problem"]["status"] == "open"
+
+    # 체크리스트 — 바뀐 항목과 그 문제의 항목 목록만.
+    added, added_bytes = _text_bytes(client, token, "add_checklist_item", {**ref, "label": "테스트가 있다", "required": False})
+    item_id = added["item"]["id"]
+    assert added == {
+        "item": {"id": item_id, "label": "테스트가 있다", "required": False, "order": 1},
+        "problem_id": problem["id"],
+        "checklist_items": [
+            {"id": problem["checklist_items"][0]["id"], "label": "합을 출력한다", "required": True, "order": 0},
+            added["item"],
+        ],
+    }
+    assert added_bytes * 5 < full_bytes
+    updated, _ = _text_bytes(client, token, "update_checklist_item", {**ref, "item_id": item_id, "label": "테스트를 둔다"})
+    assert set(updated) == {"item", "problem_id", "checklist_items"}
+    first_id = problem["checklist_items"][0]["id"]
+    reordered, _ = _text_bytes(client, token, "reorder_checklist_items", {**ref, "item_ids": [item_id, first_id]})
+    assert set(reordered) == {"problem_id", "checklist_items"}
+    assert [i["id"] for i in reordered["checklist_items"]] == [item_id, first_id]
+    deleted, _ = _text_bytes(client, token, "delete_checklist_item", {**ref, "item_id": item_id})
+    assert deleted == {
+        "deleted_item_id": item_id,
+        "problem_id": problem["id"],
+        "checklist_items": [{"id": first_id, "label": "합을 출력한다", "required": True, "order": 1}],
+    }  # 지워도 남은 항목의 순서 값은 그대로다(화면과 같다)
+
+    # 만들기·고치기·복사 — 원문을 뺀 요약.
+    edited, edited_bytes = _text_bytes(client, token, "update_problem", {**ref, "description": _LONG_DESCRIPTION + "끝."})
+    assert edited["problem"]["id"] == problem["id"]
+    assert edited_bytes * 3 < full_bytes
+    copied, _ = _text_bytes(client, token, "copy_problem", {**ref, "target_class_id": target})
+    assert (copied["problem"]["class_id"], copied["problem"]["status"]) == (target, "draft")
+    assert _ok(client, token, "get_problem", {"class_id": target, "problem_id": copied["problem"]["id"]})[
+        "grading_guideline_text"
+    ] == _GUIDELINE

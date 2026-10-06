@@ -29,6 +29,24 @@ from tests.test_classroom_connected_apps import _connect, _rpc
 
 CLASSES_URL = "/api/classroom/classes"
 READ_TOOLS = ["get_class", "list_problems", "get_problem", "list_participants", "get_roster_grid"]
+#: 문제 목록이 화면의 문제 한 줄에서 그대로 옮겨 싣는 칸(#579) — 여기에 항목 수가 더해진다.
+LIST_PROBLEM_KEYS = [
+    "id",
+    "title",
+    "status",
+    "order",
+    "submission_formats",
+    "scoring_model_rejected",
+    "passed_count",
+    "member_count",
+    "pass_rate",
+    "deletable",
+    "available_transitions",
+]
+
+
+def tools_by_name(client, token: str) -> dict:
+    return {tool["name"]: tool for tool in _rpc(client, token, "tools/list").json()["result"]["tools"]}
 KEY = "sk-test-secret-key-9f3a"
 
 
@@ -121,9 +139,19 @@ def test_each_read_tool_returns_what_the_screen_returns(client, db):
     assert tool_class == {k: v for k, v in screen_class.items() if k != "openai_key_masked"}
     assert tool_class["token_budget"] == 50000
 
+    # 목록은 문제마다 요약만 싣는다(#579) — 설명·체크리스트 원문은 get_problem 에서 읽는다.
     problems = _structured(client, token, "list_problems", class_id=class_id)["problems"]
-    assert problems == list_problems(client, access, class_id)
+    screen_problems = list_problems(client, access, class_id)
+    assert problems == [
+        {
+            **{key: screen[key] for key in LIST_PROBLEM_KEYS},
+            "checklist_item_count": len(screen["checklist_items"]),
+        }
+        for screen in screen_problems
+    ]
     assert [p["status"] for p in problems] == ["open", "draft"]
+    assert problems[0]["checklist_item_count"] == 2
+    assert "get_problem" in tools_by_name(client, token)["list_problems"]["description"]
 
     for problem in (opened, draft):
         tool_problem = _structured(client, token, "get_problem", class_id=class_id, problem_id=problem.id)
