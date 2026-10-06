@@ -68,7 +68,7 @@ def test_scan_scores_a_passing_submission_without_any_network_call(client, db, m
     result = run_scan(client)
 
     assert result["count"] == 1
-    assert result["rows"][0]["status"] == "scored"
+    assert result["rows"][0]["status"] == "queued"
     mine_out = mine(client, ctx["participant"]["access"], ctx["class_id"], ctx["problem_id"])
     submission_out = mine_out["submissions"][0]
     assert submission_out["status"] == "scored"

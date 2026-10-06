@@ -5,15 +5,14 @@
 수신자가 `transaction.on_commit`으로 큐에 넣는다(`classroom.api`가 즉시 채점을
 큐에 넣는 것과 같은 규율).
 
-`core.tasks.backup_database`와 같은 모양이다 — `classroom.tasks.score_attempt`
-(스캔과 후보 조건·락을 공유해야 해서 내부 인증 HTTP를 거친다)와 달리, 이
-작업은 공유할 것이 없는 단순 멱등 갱신(같은 공모전을 두 번 색인해도 결과가
-같다)이라 HTTP 경계를 하나 더 두는 비용을 낼 이유가 없다 — 워커 안에서
-`contests.search.get_search_adapter()`를 직접 부른다.
+`core.tasks.backup_database`와 같은 모양이다 — 공유할 것이 없는 단순 멱등
+갱신(같은 공모전을 두 번 색인해도 결과가 같다)이라 HTTP 경계를 하나 더 두는
+비용을 낼 이유가 없다 — 워커 안에서 `contests.search.get_search_adapter()`를
+직접 부른다.
 
-dev·CI는 Celery 워커가 없다(#40) — `.delay()`는 큐에 쌓이기만 하고 아무도
-소비하지 않는다. 안전망은 매일 밤 전체 재색인 스캔(`contest-search-reindex`,
-`contests/apps.py`)이다.
+dev·CI는 태스크가 eager 다(#582, `CELERY_TASK_ALWAYS_EAGER`) — `.delay()`
+자리에서 그대로 색인한다(기본 검색 어댑터는 fake 다). 배포의 안전망은 매일 밤
+전체 재색인 스캔(`contest-search-reindex`, `contests/apps.py`)이다.
 """
 
 from __future__ import annotations

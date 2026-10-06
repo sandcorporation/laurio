@@ -144,12 +144,11 @@ from .participation import (
 )
 from . import class_authoring, co_instructors, ownership_transfers, problem_authoring
 from .problem_transitions import available_transitions, execute_transition
-from .scoring import check_scoring_key
+from .scoring import check_scoring_key, enqueue_scoring
 from .scoring_model_catalog import get_scoring_model_catalog
 from .scoring_models import is_reasoning_model_id
 from .submission_target_refs import source_target_ref
 from .services import copy_class, copy_problem_to_class, instructor_classes
-from .tasks import score_attempt
 
 logger = logging.getLogger(__name__)
 
@@ -1886,17 +1885,20 @@ def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
 
 
 def _enqueue_immediate_scoring(submission_id: int) -> None:
-    """시도 하나의 즉시 채점 작업을 큐에 넣는다(#378, ADR-0046). **발행이 실패해도
-    제출을 실패시키지 않는다** — 이 콜백은 트랜잭션이 커밋된 뒤에 돌므로 시도는 이미
-    저장됐고, 60초 스캔이 그 시도를 줍는다(안전망). 여기서 예외가 튀면 참여자는
-    저장된 시도에 500 을 받고 다시 내 시도가 중복된다 — 브로커(Redis)가 재시작 중이거나
-    호스트 runserver 의 기본 브로커 주소가 비어 있을 때 실제로 그렇게 된다."""
+    """시도 하나의 채점 태스크를 큐에 넣는다(#378, #582, ADR-0056) — 큐에 넣은 시각도 함께
+    찍어 60초 스캔이 같은 시도를 또 넣지 않게 한다(`classroom.scoring.enqueue_scoring`).
+    dev·CI(eager)에서는 이 자리에서 채점까지 끝난다.
+
+    **발행이 실패해도 제출을 실패시키지 않는다** — 이 콜백은 트랜잭션이 커밋된 뒤에 돌므로
+    시도는 이미 저장됐고, 60초 스캔이 그 시도를 줍는다(안전망). 여기서 예외가 튀면 참여자는
+    저장된 시도에 500 을 받고 다시 내 시도가 중복된다 — 브로커(Redis)가 재시작 중일 때 실제로
+    그렇게 된다."""
 
     try:
-        score_attempt.delay(submission_id)
+        enqueue_scoring(submission_id, as_of=Clock.now())
     except Exception:  # noqa: BLE001 — 어떤 브로커 오류든 스캔이 대신 줍는다
         logger.warning(
-            "강의실 즉시 채점 작업을 큐에 넣지 못했다 — 스캔이 줍는다 (submission_id=%s)",
+            "강의실 채점 작업을 큐에 넣지 못했다 — 스캔이 줍는다 (submission_id=%s)",
             submission_id,
             exc_info=True,
         )
@@ -2011,12 +2013,11 @@ def _create_submission_row(request: HttpRequest, problem, member, payload, *, as
         # 수 있게 한다. 커밋 뒤 발행 규율은 `publish_attempt_submitted`
         # 안에 있다(아래 즉시 채점 큐잉과 같은 이유로 `on_commit`을 쓴다).
         publish_attempt_submitted(submission)
-        # 이 시도의 채점을 곧바로 큐에 넣는다(#378, ADR-0046) — 60초 스캔을
+        # 이 시도의 채점을 곧바로 큐에 넣는다(#378, #582) — 60초 스캔을
         # 기다리지 않는다. `on_commit`인 이유는 트랜잭션이 아직 커밋되지
         # 않았을 때 태스크가 먼저 돌면(워커가 있는 배포 환경에서는 그럴 수
-        # 있다) 내부 엔드포인트가 아직 존재하지 않는 시도를 채점하려 들기
-        # 때문이다. dev·CI는 워커가 없어 이 태스크가 실제로 돌지 않고
-        # (#40), 큐에 쌓인 채 스캔이 안전망으로 대신 줍는다.
+        # 있다) 채점 워커가 아직 존재하지 않는 시도를 찾다 건너뛰기 때문이다.
+        # dev·CI는 eager 라 이 콜백 안에서 채점까지 끝난다(ADR-0056).
         transaction.on_commit(lambda: _enqueue_immediate_scoring(submission.id))
         if contest_entry is not None:
             # 커밋된 뒤 공모전에 보낸다 — 결과는 신호로 돌아와 이 시도에 남는다.

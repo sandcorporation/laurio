@@ -11,7 +11,6 @@ import asyncio
 
 import requests
 
-from classroom.tasks import score_attempt
 from config.asgi import application
 from core.tasks import run_scan
 
@@ -41,10 +40,12 @@ def test_internal_http_tasks_retry_connection_failures():
     refused` 로 죽었다. 스캔은 두 번 쏴도 한 번만 통과하므로(ADR-0003) 다시 쏘는
     것이 안전하다 — 연결·타임아웃만 재시도하고, 끝까지 실패하면 예외를 낸다."""
 
-    for task in (run_scan, score_attempt):
-        assert task.max_retries and task.max_retries > 0, task.name
-        assert requests.ConnectionError in task.autoretry_for, task.name
-        assert requests.Timeout in task.autoretry_for, task.name
-        # 응답이 2xx 가 아닌 것(=서버가 대답은 했다)은 재시도하지 않는다 — 그건
-        # 진짜 실패이고, 삼키지 않는다는 원칙이 그대로 적용된다.
-        assert requests.HTTPError not in task.autoretry_for, task.name
+    # 강의실 채점 태스크(`classroom.score_attempt`)는 #582 부터 내부 HTTP 를 부르지 않고
+    # 워커 안에서 채점한다(ADR-0056) — 이 재시도의 대상이 아니다.
+    task = run_scan
+    assert task.max_retries and task.max_retries > 0, task.name
+    assert requests.ConnectionError in task.autoretry_for, task.name
+    assert requests.Timeout in task.autoretry_for, task.name
+    # 응답이 2xx 가 아닌 것(=서버가 대답은 했다)은 재시도하지 않는다 — 그건
+    # 진짜 실패이고, 삼키지 않는다는 원칙이 그대로 적용된다.
+    assert requests.HTTPError not in task.autoretry_for, task.name

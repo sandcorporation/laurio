@@ -67,7 +67,7 @@ def test_model_rejection_does_not_create_a_score(client, db, monkeypatch, status
 
     result = run_scan(client)
 
-    assert result["rows"][0]["status"] == "model_rejected"
+    assert result["rows"][0]["status"] == "queued"
     assert not ClassroomScore.objects.filter(submission_id=ctx["submission_id"]).exists()
 
 
@@ -120,7 +120,7 @@ def test_key_rejection_is_unaffected_regression(client, db, monkeypatch, status_
 
     result = run_scan(client)
 
-    assert result["rows"][0]["status"] == "key_rejected"
+    assert result["rows"][0]["status"] == "queued"
     assert Class.objects.get(id=ctx["class_id"]).openai_api_key_status == Class.ScoringKeyStatus.REJECTED
     assert Problem.objects.get(id=ctx["problem_id"]).scoring_model_rejected_at is None
 

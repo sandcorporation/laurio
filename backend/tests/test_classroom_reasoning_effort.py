@@ -350,9 +350,9 @@ def test_non_reasoning_model_request_is_unchanged(client, db, monkeypatch):
     assert "reasoning_effort" not in payload
 
 
-def test_classroom_scoring_requests_use_the_contest_default_timeout(client, db, monkeypatch):
-    """강의실 채점도 내부 호출(30초) 안에서 도므로 공모전과 같은 20초 기본값을
-    쓴다(#581, GlitchTip 오류 87) — 추론 모델이라고 늘리지 않는다(#582 전까지)."""
+def test_classroom_scoring_requests_wait_longer_than_the_contest_default(client, db, monkeypatch):
+    """강의실 채점은 Celery 워커 안에서 돌아 내부 호출(30초) 예산에 묶이지 않는다(#582,
+    ADR-0056) — 추론 모델의 느린 응답을 3분까지 기다린다. 공모전은 20초 그대로다."""
 
     ctx = _setup_submission(client, model="gpt-4.1")
     sent = []
@@ -360,7 +360,8 @@ def test_classroom_scoring_requests_use_the_contest_default_timeout(client, db, 
 
     _run_scan(client)
 
-    assert sent[0]["timeout"] == llm_scoring._OPENAI_REQUEST_TIMEOUT_SECONDS == 20
+    assert sent[0]["timeout"] == 180
+    assert llm_scoring._OPENAI_REQUEST_TIMEOUT_SECONDS == 20
 
 
 # --- 공모전 채점 불변 --------------------------------------------------------------

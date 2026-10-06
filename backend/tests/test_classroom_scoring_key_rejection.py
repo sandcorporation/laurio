@@ -68,7 +68,7 @@ def test_rejected_key_does_not_create_a_score(client, db, monkeypatch, status_co
 
     result = run_scan(client)
 
-    assert result["rows"][0]["status"] == "key_rejected"
+    assert result["rows"][0]["status"] == "queued"
     assert not ClassroomScore.objects.filter(submission_id=ctx["submission_id"]).exists()
 
 

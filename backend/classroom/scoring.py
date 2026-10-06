@@ -1,9 +1,12 @@
 """강의실 채점 (#287, #340, ADR-0006, ADR-0031, ADR-0037, ADR-0039, ADR-0043).
 
 **제출 즉시 비동기로 채점한다** — 마감이 없으니 "마감 직후 1회"(`scoring.
-services`, ADR-0006)가 성립하지 않는다. 대신 스캔(`CLASSROOM_SUBMISSION_SCORING_SCAN`)이
-매 tick마다 아직 `ClassroomScore`가 없는 시도를 찾아 채점한다 — Score가 시도당
-정확히 하나만 생기고 다시 채점되지 않는다는 계약(ADR-0006)은 그대로다.
+services`, ADR-0006)가 성립하지 않는다. 제출이 커밋되면 그 시도의 채점 태스크
+(`classroom.tasks.score_attempt`)가 큐에 들어가고, 스캔(`CLASSROOM_SUBMISSION_SCORING_SCAN`)이
+매 tick마다 아직 `ClassroomScore`가 없는 시도를 찾아 **큐에 넣기만 한다**(안전망) — 채점은
+그 태스크가 Celery 워커 안에서 한다(#582, ADR-0056). 큐에 넣는 자리는 `enqueue_scoring`
+하나다. Score가 시도당 정확히 하나만 생기고 다시 채점되지 않는다는 계약(ADR-0006)은
+그대로다.
 
 **강사 본인의 OpenAI 키로 돈다**(CONTEXT.md 「Class」) — 플랫폼의
 `LLM_ADAPTER_MODE`/`OPEN_AI_API_KEY`(공모전이 쓰는 값)를 거치지 않는다.
@@ -47,6 +50,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import timedelta
 
 from django.conf import settings
 from django.db import models, transaction
@@ -97,6 +101,20 @@ logger = logging.getLogger(__name__)
 #: ADR-0031과 같은 개념(`scoring.services.SCORING_FAILURE_LIMIT`) — 강의실에는
 #: 마감이 없어 "마감 후 6시간 유예"가 성립하지 않으므로 횟수만 본다.
 SCORING_FAILURE_LIMIT = 5
+
+#: 강의실 채점의 벤더 타임아웃(#582, ADR-0056) — 공모전의 20초(`core.llm_scoring`
+#: 기본값)보다 길다. 공모전 채점은 내부 HTTP 요청을 받은 gunicorn 워커 안에서 돌아 그
+#: 요청 예산(30초)에 묶이지만, 강의실 채점은 Celery 워커 안에서 직접 돌아 그 예산이 없다.
+#: 300KB 소스를 추론 모델(높은 추론 강도)이 읽는 응답도 담기는 값이다. 바깥을 태스크의
+#: soft·hard 한도(`classroom.tasks`)와 큐 창(`SCORING_QUEUE_WINDOW`)이 차례로 감싼다 —
+#: 이 값을 늘리면 그 셋도 함께 늘린다(`tests/test_classroom_scoring_in_worker.py`).
+CLASSROOM_SCORING_VENDOR_TIMEOUT_SECONDS = 180
+
+#: 큐에 넣은 시각이 이만큼 지나지 않은 시도는 스캔이 다시 넣지 않는다(#582) — 태스크의
+#: hard 한도(4분)에 여유 1분. 태스크는 처리를 마치면 그 시각을 비우므로, 이 창이 뜻을 갖는
+#: 것은 태스크가 아직 큐에서 기다리거나 돌고 있을 때, 그리고 워커가 죽어 태스크를 잃었을
+#: 때(그 시도는 이 창이 지난 뒤 다시 줍힌다)뿐이다.
+SCORING_QUEUE_WINDOW = timedelta(minutes=5)
 
 #: 강의실 참가자에게 자동 미달을 설명하는 문구 — `submissions.scoring_basis`의
 #: 것을 그대로 쓰지 않는다(그쪽은 "이의를 제기할 수 있다"고 말하는데 강의실에는
@@ -187,20 +205,10 @@ def _scoring_adapter(
             "api_key": api_key,
             "model": model,
             "reasoning_effort": reasoning_effort,
-            # 벤더 타임아웃을 주지 않는다 — 공모전과 같은 `core.llm_scoring` 기본값
-            # (20초)을 쓴다(#581, GlitchTip 오류 87). 강의실 채점도 Celery 워커가
-            # 아니라 내부 HTTP 요청을 받은 gunicorn 워커 안에서 돈다: 즉시 채점
-            # (`classroom.tasks.score_attempt`)과 60초 안전망 스캔 둘 다
-            # `core.tasks.call_internal`로 30초 예산을 걸고 부르고, gunicorn 도
-            # `--timeout` 기본값 30초에 워커를 죽인다. #402 가 「워커 작업이라 그
-            # 제약과 무관하다」며 120초로 늘렸을 때 벤더가 30초보다 늦으면 워커가
-            # 채점 도중 죽어 `ClassroomScoringAttempt`도 남지 않았다 — 실패 한도에
-            # 닿지 않은 채 재시도·매 tick 마다 벤더를 다시 불렀다. 20초면 늦은
-            # 응답도 실패한 시도로 남고 `SCORING_FAILURE_LIMIT`회에 플랫폼 미달로
-            # 끝난다. 값을 따로 들지 않는 것은 두 채점이 같은 30초 예산 안에서
-            # 돌기 때문이다(그 근거는 `core.llm_scoring` 상수 주석에 있다).
-            # 추론 모델에 더 긴 시간을 주려면 채점을 그 예산 밖(Celery 워커 안)으로
-            # 옮겨야 한다 — #582.
+            # 공모전의 20초가 아니라 3분이다 — 강의실 채점은 Celery 워커 안에서 돌아
+            # 내부 HTTP 요청(30초)·gunicorn `--timeout` 에 묶이지 않는다(#582, ADR-0056).
+            # #581(오류 87)까지는 그 요청 안에서 돌아 20초로 줄여 두었다.
+            "timeout": CLASSROOM_SCORING_VENDOR_TIMEOUT_SECONDS,
         },
     )
 
@@ -740,11 +748,55 @@ def _pending_submissions(as_of, ctx):
     return pending_scoring.pending_submissions(as_of, ctx)
 
 
-def _score_one(submission, as_of, ctx):
-    """스캔·즉시 채점(#378) 두 경로가 공유하는 행 하나 처리.
+def enqueue_scoring(submission_id: int, *, as_of) -> bool:
+    """이 시도의 채점 태스크를 큐에 넣고 그 시각을 찍는다(#582, ADR-0056) — 즉시 채점
+    (`classroom.api`)과 60초 스캔이 함께 쓰는 유일한 자리다.
 
-    두 경로가 같은 시도를 동시에 집을 수 있어(스캔 tick 과 제출 직후 Celery
-    태스크가 겹치는 것이 정상적인 경합이다) 실제 채점(네트워크 호출 포함) 앞에
+    큐에 넣은 시각이 비었거나 `SCORING_QUEUE_WINDOW` 보다 오래됐을 때만 넣는다. 그 판정과
+    찍기를 조건부 UPDATE 하나로 한다(ADR-0003) — 두 스캔이나 스캔과 즉시 채점이 겹쳐도 한
+    쪽만 이긴다. 넣었으면 `True`.
+
+    찍기가 커밋된 뒤에 `.delay()` 한다 — 이 함수는 트랜잭션 밖(제출의 `on_commit` 콜백,
+    스캔의 행 처리)에서 불리고 UPDATE 는 자동 커밋이다. eager(dev·CI)면 `.delay()` 안에서
+    채점이 끝나고 태스크가 그 시각을 비운다. 발행이 실패하면 찍은 시각을 되돌리고 예외를
+    낸다 — 그대로 두면 스캔이 5분 동안 그 시도를 건너뛴다."""
+
+    from .tasks import score_attempt
+
+    claimed = (
+        ClassroomSubmission.objects.filter(pk=submission_id)
+        .filter(
+            models.Q(scoring_queued_at__isnull=True)
+            | models.Q(scoring_queued_at__lte=as_of - SCORING_QUEUE_WINDOW)
+        )
+        .update(scoring_queued_at=as_of)
+    )
+    if not claimed:
+        return False
+    try:
+        score_attempt.delay(submission_id)
+    except Exception:
+        ClassroomSubmission.objects.filter(pk=submission_id, scoring_queued_at=as_of).update(
+            scoring_queued_at=None
+        )
+        raise
+    return True
+
+
+def _queue_one(submission, as_of, ctx):
+    """스캔의 행 하나 처리 — 채점하지 않고 큐에 넣기만 한다(#582). 큐 창 안이라 넣지
+    않았으면 `None`("이번엔 아무 일도 없었다")."""
+
+    if not enqueue_scoring(submission.pk, as_of=as_of):
+        return None
+    return {"submission_id": submission.pk, "status": "queued"}
+
+
+def _score_one(submission, as_of, ctx):
+    """채점 태스크(`classroom.tasks.score_attempt`)의 행 하나 처리.
+
+    같은 시도의 태스크가 둘 돌 수 있어(즉시 채점과 스캔이 넣은 태스크가 겹치거나
+    메시지가 재전달될 때) 실제 채점(네트워크 호출 포함) 앞에
     행을 잠근다 — `select_for_update(skip_locked=True)` 로, 다른 쪽이 이미
     잡고 있으면 기다리지 않고 그 자리에서 `None`("이번엔 아무 일도 없었다")을
     돌려준다. 잠금을 채점이 끝날 때까지(LLM 호출 포함) 들고 있는 이유는 락을
@@ -777,37 +829,34 @@ def _score_one(submission, as_of, ctx):
 CLASSROOM_SUBMISSION_SCORING_SCAN = ScanSpec(
     name="classroom-submission-scoring",
     candidates=_pending_submissions,
-    handle_row=_score_one,
+    handle_row=_queue_one,
     order_by=("attempt_count", "id"),
-    # 실행 하나에 시도 하나만 채점한다(GlitchTip 오류 91). 이 스캔은
-    # `call_internal`(30초)이 부른 gunicorn 요청 안에서 돌고, 시도 하나가 벤더를
-    # 20초(`_OPENAI_REQUEST_TIMEOUT_SECONDS`)까지 기다린다 — 뼈대의 시간 예산은
-    # 행 **사이**에서만 확인되므로, 예산 직전에 시작한 둘째 행이 다시 벤더를
-    # 기다리면 30초를 넘겨 워커가 채점 도중 죽는다. 즉시 채점(#378)이 주 경로이고
-    # 이 스캔은 안전망이라, 쌓인 시도는 tick 마다 하나씩 줍는다. 채점을 그 예산
-    # 밖으로 옮기면(#582) 이 상한도 다시 본다.
-    batch_size=1,
+    # 스캔은 큐에 넣기만 하므로(#582) 배치는 뼈대 기본값이다. 오류 91 때는 이 스캔이
+    # gunicorn 요청 안에서 시도를 이어 채점해 30초를 넘겨 `batch_size=1` 로 막았었다.
 )
 
 
 def score_classroom_attempt(submission_id: int) -> dict:
-    """즉시 채점 진입점(#378) — 내부 엔드포인트(`classroom.internal_api`)가
-    부른다. 스캔과 **같은 후보 조건**(`_pending_submissions`)·**같은 행 처리
-    함수**(`_score_one`, 잠금 포함)를 그대로 재사용한다 — 조건을 복제하지
-    않는다.
+    """채점 태스크(`classroom.tasks.score_attempt`)의 본문(#378, #582) — 스캔과 **같은 후보
+    조건**(`_pending_submissions`)으로 시도를 고르고 `_score_one`(잠금 포함)으로 채점한다.
 
-    시도가 그 조건 밖이면(키 없음·거부·예산 정지·이미 채점됨) 시도로 남기지
-    않고 조용히 건너뛴다 — 스캔 tick 사이의 경합과 같은 이유다: 강사가 제출
-    직후 곧바로 키를 지웠거나, 스캔이 이미 채점을 끝냈을 수 있다."""
+    시도가 그 조건 밖이면(키 없음·거부·예산 정지·이미 채점됨) 시도로 남기지 않고 조용히
+    건너뛴다 — 큐에서 기다리는 사이 강사가 키를 지웠거나 다른 태스크가 이미 채점을 끝냈을
+    수 있다.
+
+    처리를 마치면(채점·실패 기록·건너뜀) 큐에 넣은 시각을 비운다 — 실패한 시도는 5분이
+    아니라 다음 스캔 tick 에 다시 들어간다. 다른 태스크가 잠그고 있으면(`locked_elsewhere`)
+    비우지 않는다 — 그 태스크가 끝나며 비운다."""
 
     as_of = Clock.now()
     ctx: dict = {}
     try:
         submission = _pending_submissions(as_of, ctx).get(pk=submission_id)
     except ClassroomSubmission.DoesNotExist:
-        return {"submission_id": submission_id, "status": "not_a_candidate"}
-
-    result = _score_one(submission, as_of, ctx)
-    if result is None:
-        return {"submission_id": submission_id, "status": "locked_elsewhere"}
+        result = {"submission_id": submission_id, "status": "not_a_candidate"}
+    else:
+        result = _score_one(submission, as_of, ctx)
+        if result is None:
+            return {"submission_id": submission_id, "status": "locked_elsewhere"}
+    ClassroomSubmission.objects.filter(pk=submission_id).update(scoring_queued_at=None)
     return result

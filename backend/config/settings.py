@@ -826,7 +826,23 @@ INTERNAL_API_BASE_URL = _env("INTERNAL_API_BASE_URL", "http://127.0.0.1:8000")
 CELERY_BROKER_URL = _env("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")
 CELERY_RESULT_BACKEND = _env("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
 CELERY_TIMEZONE = TIME_ZONE
-CELERY_TASK_ALWAYS_EAGER = _env_bool("CELERY_TASK_ALWAYS_EAGER", False)
+# **dev·CI 는 태스크를 큐에 넣는 자리에서 그대로 돌린다**(#582, ADR-0056). 강의실 채점은
+# Celery 태스크 하나로만 돌고 즉시 채점·60초 스캔은 그 태스크를 큐에 넣기만 하므로, 워커가
+# 없는 dev·CI 에서 큐에 넣고 끝내면 아무것도 채점되지 않는다. eager 면 채점 경로가 환경마다
+# 갈리지 않는다(흉내 어댑터라 빠르다). 배포 환경은 꺼져 있어야 한다 — 켜지면 채점이 다시
+# gunicorn 요청 안에서 돈다(오류 87). 아래에서 부팅을 거부한다. dev compose 의 celery-worker·
+# beat 는 이 값을 false 로 받는다 — beat 가 쏜 태스크를 beat 자신이 돌리면 안 된다.
+CELERY_TASK_ALWAYS_EAGER = _env_bool("CELERY_TASK_ALWAYS_EAGER", not IS_DEPLOYED_ENVIRONMENT)
+if IS_DEPLOYED_ENVIRONMENT and CELERY_TASK_ALWAYS_EAGER:
+    raise ImproperlyConfigured(
+        "배포 환경에서 CELERY_TASK_ALWAYS_EAGER 가 켜져 있다 — 강의실 채점이 워커가 아니라 "
+        "요청 안에서 돌게 된다(#582, ADR-0056). 값을 지운다."
+    )
+#: 강의실 채점만 자기 큐로 간다(#582) — 배포의 `celery-scoring` 서비스만 이 큐를 소비하고,
+#: 스캔·알림·백업을 맡는 `celery-worker` 는 기본 큐(`celery`)만 소비한다. 3분까지 벤더를
+#: 기다리는 채점이 60초 스캔 태스크를 막지 않는다.
+CLASSROOM_SCORING_QUEUE = "classroom-scoring"
+CELERY_TASK_ROUTES = {"classroom.score_attempt": {"queue": CLASSROOM_SCORING_QUEUE}}
 
 # --- DB 백업 (core.backups) ----------------------------------------------------------
 # 매일 새벽 2시 pg_dump 결과를 비공개 버킷 db-backups/ 에 올린다. pg_dump 는 서버와 같은
@@ -852,15 +868,11 @@ DB_CONNECTION_ALERT_THRESHOLD = float(_env("DB_CONNECTION_ALERT_THRESHOLD", "0.8
 DB_CONNECTION_ALERT_INTERVAL_SECONDS = int(_env("DB_CONNECTION_ALERT_INTERVAL_SECONDS", "900"))
 
 if _RUNNING_TESTS:
-    # #378부터 요청 처리 코드(강의실 제출)가 실제로 `.delay()`를 부른다 — 그
-    # 전까지는 beat 만 태스크를 보냈다. pytest 에는 Redis 가 없다(위 세션
-    # 캐시와 같은 전제, "테스트는 서로를 밟지 않는다"). `.delay()`가 그 사실과
-    # 부딪히지 않도록 브로커를 kombu 의 인메모리 트랜스포트로 바꾼다 — 발행은
-    # 성공하되(워커가 있는 것처럼 요청이 실패하지 않는다) 아무도 소비하지
-    # 않는다, dev·CI 가 워커 없이 도는 것과 정확히 같은 모양이다(#40). eager
-    # 로 바꾸지 않는 이유는 그러면 태스크가 요청 안에서 곧바로 실행돼 "제출은
-    # 동기로 채점하지 않는다"는 계약(`test_submitting_does_not_score_
-    # synchronously`)이 테스트 환경에서만 깨지기 때문이다.
+    # pytest 에는 Redis 가 없다(위 세션 캐시와 같은 전제, "테스트는 서로를 밟지
+    # 않는다"). 태스크는 dev·CI 와 같이 eager 로 큐에 넣는 자리에서 돈다(#582) —
+    # 환경변수가 무엇이든 시험은 그 모양으로 고정한다. 브로커는 혹시 eager 를 끈
+    # 시험이 발행해도 Redis 를 찾지 않게 kombu 의 인메모리 트랜스포트로 둔다.
+    CELERY_TASK_ALWAYS_EAGER = True
     CELERY_BROKER_URL = "memory://"
     CELERY_RESULT_BACKEND = "cache+memory://"
 

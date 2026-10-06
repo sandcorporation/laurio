@@ -209,6 +209,17 @@ def test_production_config_refuses_debug_true():
     assert "ImproperlyConfigured" in result.stderr
 
 
+def test_production_config_refuses_eager_celery_tasks():
+    """eager 면 강의실 채점이 워커가 아니라 요청 안에서 돈다 — 오류 87 로 되돌아간다(#582,
+    ADR-0056). dev·CI 의 기본값이 켜짐이라 배포에서 새면 안 된다."""
+
+    result = _run_check(_production_env(CELERY_TASK_ALWAYS_EAGER="true"))
+
+    assert result.returncode != 0
+    assert "CELERY_TASK_ALWAYS_EAGER" in result.stderr
+    assert "ImproperlyConfigured" in result.stderr
+
+
 # --- staging: 강도 가드는 면제되지만 fake 어댑터 가드는 production과 동일 -------------
 
 

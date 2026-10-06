@@ -442,7 +442,7 @@ def test_a_submission_made_before_hiding_is_still_scored_by_the_scan(client, db,
     scan = client.post(SCAN_URL, content_type="application/json", **_internal_headers())
     assert scan.status_code == 200, scan.content
     assert scan.json()["count"] == 1
-    assert scan.json()["rows"][0]["status"] == "scored"
+    assert scan.json()["rows"][0]["status"] == "queued"
 
     mine = client.get(_mine_url(class_id, problem_id), **_auth_header(participant["access"]))
     assert mine.status_code == 200
