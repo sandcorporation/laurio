@@ -405,6 +405,8 @@ class PendingCoInstructorInviteOut(CoInstructorInviteOut):
 class ClassInstructorOut(Schema):
     """강사 목록의 한 줄(#562) — 소유자 먼저, 그다음 공동 강사를 수락한 순서로."""
 
+    #: 공동 강사 줄의 id — 소유자가 내보낼 때 쓴다(#563). 소유자 줄은 `None`.
+    co_instructor_id: int | None = None
     #: 이 클래스에서 불리는 강사 이름 — 이름을 정하지 않은 소유자는 빈 문자열.
     display_name: str
     role: Literal["owner", "co_instructor"]

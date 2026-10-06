@@ -16,6 +16,13 @@
 (`roster`)과 대기 중인 초대(`pending_invites`)를 보여 주고, 누가 만든 초대든 취소한다
 (`cancel_invite`). 취소는 행을 지우지 않고 시각을 찍는다 — 링크를 연 사람이 「취소된
 초대」라는 사실을 볼 수 있어야 해서다.
+
+**떠나는 길은 셋이고 정리는 하나다**(#563). 공동 강사가 스스로 떠나기(`leave`), 소유자의
+내보내기(`remove_by_owner`), 탈퇴(`leave_all_on_withdrawal`, `accounts.signals.user_withdrawn`)
+모두 `depart` 하나를 한 트랜잭션에서 탄다 — 공동 강사 자리를 지우고, 그 사람의 참여자 행이
+있으면 내보낸 참여자로 표시하고(점검용 시도가 달성률에 섞이지 않게, 그 시도는 문제 삭제를
+막는다 — ADR-0050), 그 사람이 만든 대기 중 초대를 취소한다. 소유자는 떠날 수 없다(넘기거나
+보관·삭제한다). 보관과 무관하다.
 """
 
 from __future__ import annotations
@@ -23,16 +30,20 @@ from __future__ import annotations
 from datetime import timedelta
 
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from ninja.errors import HttpError
 
 from core.clock import Clock
 
 from .class_authoring import reject_banned_name
 from .instructors import is_instructor, is_owner
-from .models import CO_INSTRUCTOR_INVITE_TTL_DAYS, Class, ClassCoInstructor, CoInstructorInvite
+from .models import CO_INSTRUCTOR_INVITE_TTL_DAYS, Class, ClassCoInstructor, ClassMember, CoInstructorInvite
 
 #: 이미 그 클래스의 강사인 사람이 수락하려 할 때 — 미리보기 화면도 같은 말을 쓴다.
 ALREADY_INSTRUCTOR_MESSAGE = "이미 이 클래스의 강사입니다."
+
+#: 소유자가 떠나려 할 때 — 화면이 같은 안내를 미리 보여 준다. 소유권 이전(#564)이 생기면 「넘기기」를 더한다.
+OWNER_CANNOT_LEAVE_MESSAGE = "소유자는 클래스를 떠날 수 없습니다. 수업을 끝내려면 클래스를 보관하거나 삭제하세요."
 
 #: 쓸 수 없는 초대의 상태별 문장 — 초대한 사람에게 새 링크를 부탁하라고 말한다.
 _NOT_PENDING_MESSAGES = {
@@ -89,6 +100,7 @@ def roster(class_obj: Class, viewer_id: int) -> list[dict]:
     ]
     rows += [
         {
+            "co_instructor_id": row.id,
             "display_name": row.display_name,
             "role": "co_instructor",
             "accepted_at": row.accepted_at,
@@ -99,13 +111,17 @@ def roster(class_obj: Class, viewer_id: int) -> list[dict]:
     return rows
 
 
+def _pending_q(now):
+    """대기 중인 초대 — 수락되지 않았고, 취소되지 않았고, 만료되지 않았다(`status_at` 의 대기와 같다)."""
+
+    return Q(accepted_at__isnull=True, cancelled_at__isnull=True, expires_at__gt=now)
+
+
 def pending_invites(class_obj: Class) -> list[tuple[CoInstructorInvite, str]]:
     """아직 쓰이지 않은 초대와 만든 사람의 강사 이름 — 새것 먼저. 수락·취소·만료는 빠진다."""
 
     now = Clock.now()
-    invites = class_obj.co_instructor_invites.filter(
-        accepted_at__isnull=True, cancelled_at__isnull=True, expires_at__gt=now
-    )
+    invites = class_obj.co_instructor_invites.filter(_pending_q(now))
     # 만든 사람의 이름은 강사 목록에서 한 번에 찾는다 — 초대마다 묻지 않는다.
     names = dict(class_obj.co_instructors.values_list("user_id", "display_name"))
 
@@ -173,3 +189,58 @@ def accept_invite(token: str, user_id: int, display_name: str) -> Class:
         invite.accepted_at = now
         invite.save(update_fields=["accepted_by", "accepted_at"])
     return class_obj
+
+
+# --- 떠나기 (#563) -----------------------------------------------------------------
+
+
+def depart(row: ClassCoInstructor) -> None:
+    """공동 강사 한 사람이 클래스에서 빠진다 — 세 길(떠나기·내보내기·탈퇴)이 모두 이 함수를
+    탄다. 한 트랜잭션에서:
+
+    1. 공동 강사 자리를 지운다 — 그 순간부터 「강사인가」가 거짓이라 강사 라우트가 404 다.
+    2. 그 사람의 참여자 행이 있으면 내보낸 참여자로 표시한다(이미 내보냈으면 그대로). 강사일
+       때 집계에서 빠지던 점검용 시도가 「지금 배우는 사람」으로 돌아오지 않게 하고, 그 시도는
+       내보낸 참여자의 시도로 남아 문제 삭제를 막는다(ADR-0050).
+    3. 그 사람이 만든 대기 중 초대를 취소한다 — 더 믿지 않는 사람이 나눠 준 링크로 누가
+       들어오지 않게. 수락과 같은 행을 `UPDATE` 가 잠그므로 겹친 수락은 한쪽만 이긴다.
+
+    소유권 이전(#564)의 「받는 사람이 떠나면 대기 요청이 사라진다」도 이 자리에 붙는다."""
+
+    now = Clock.now()
+    with transaction.atomic():
+        ClassCoInstructor.objects.filter(id=row.id).delete()
+        ClassMember.objects.filter(
+            classroom_id=row.classroom_id, user_id=row.user_id, expelled_at__isnull=True
+        ).update(expelled_at=now)
+        CoInstructorInvite.objects.filter(
+            _pending_q(now), classroom_id=row.classroom_id, created_by_id=row.user_id
+        ).update(cancelled_at=now)
+
+
+def leave(class_obj: Class, user_id: int) -> None:
+    """부른 강사가 스스로 떠난다. 소유자는 409 — 보관하거나 삭제한다(넘기기는 #564)."""
+
+    if is_owner(class_obj, user_id):
+        raise HttpError(409, OWNER_CANNOT_LEAVE_MESSAGE)
+    row = ClassCoInstructor.objects.filter(classroom_id=class_obj.id, user_id=user_id).first()
+    if row is not None:
+        depart(row)
+
+
+def remove_by_owner(class_obj: Class, co_instructor_id: int) -> None:
+    """소유자가 공동 강사 한 사람을 내보낸다. 이 클래스의 공동 강사 줄이 아니면 404."""
+
+    row = ClassCoInstructor.objects.filter(classroom_id=class_obj.id, id=co_instructor_id).first()
+    if row is None:
+        raise HttpError(404, "이 클래스에 그런 공동 강사가 없습니다.")
+    depart(row)
+
+
+def leave_all_on_withdrawal(sender, user, **kwargs) -> None:
+    """탈퇴하면 공동 강사인 클래스 전부에서 빠진다(`accounts.signals.user_withdrawn`). 탈퇴
+    트랜잭션 안에서 불린다 — 여기서 실패하면 탈퇴도 되돌아간다. 소유한 클래스는 건드리지
+    않는다(보관하지 않은 소유 클래스는 탈퇴를 막고, 보관한 것은 소유자에게 남는다)."""
+
+    for row in ClassCoInstructor.objects.filter(user_id=user.id):
+        depart(row)

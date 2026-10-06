@@ -52,6 +52,7 @@ class World:
     member_id: int
     share_code: str
     invite_id: int
+    co_instructor_id: int
 
 
 def _post(client, access, url, body=None):
@@ -82,6 +83,8 @@ def world(client, db) -> World:
         {"publisher_display_name": "강사"},
     )
     invite = _post(client, owner["access"], f"{CLASSES_URL}/{class_id}/co-instructor-invites")
+    instructors = client.get(f"{CLASSES_URL}/{class_id}/instructors", **auth_header(owner["access"])).json()
+    co_instructor_id = next(row["co_instructor_id"] for row in instructors if row["role"] == "co_instructor")
     return World(
         access={"owner": owner["access"], "co_instructor": co["access"], "stranger": stranger["access"]},
         class_id=class_id,
@@ -92,6 +95,7 @@ def world(client, db) -> World:
         member_id=member_id,
         share_code=published["share_code"],
         invite_id=invite["id"],
+        co_instructor_id=co_instructor_id,
     )
 
 
@@ -106,6 +110,8 @@ class Route:
     #: 소유자가 받는 응답 코드 — 공동 강사도 같다(소유자 전용 줄이 아니면).
     status: int
     owner_only: bool = False
+    #: 공동 강사가 받는 응답이 소유자와 다른 줄(떠나기 — 소유자는 떠날 수 없다). 비면 `status`.
+    co_status: int | None = None
 
 
 def _c(w: World) -> str:
@@ -145,6 +151,16 @@ ROUTES: list[Route] = [
         lambda w: f"{_c(w)}/co-instructor-invites/{w.invite_id}/cancel",
         None,
         204,
+    ),
+    # 떠나기(#563) — 소유자는 떠날 수 없어 409, 공동 강사는 떠난다.
+    Route("leave_class", "post", lambda w: f"{_c(w)}/instructors/me/leave", None, 409, co_status=204),
+    Route(
+        "remove_co_instructor",
+        "post",
+        lambda w: f"{_c(w)}/co-instructors/{w.co_instructor_id}/remove",
+        None,
+        204,
+        owner_only=True,
     ),
     Route("publish_class_template", "post", lambda w: f"{_c(w)}/publish-template", lambda w: {"publisher_display_name": "강사"}, 201),
     # 명단
@@ -240,7 +256,8 @@ def test_instructors_get_the_owners_answer_and_only_owner_only_routes_refuse_a_c
         assert response.status_code == 403, response.content
         assert _detail(response) == OWNER_ONLY_MESSAGE
     else:
-        assert response.status_code == route.status, response.content
+        expected = route.co_status if who == "co_instructor" and route.co_status is not None else route.status
+        assert response.status_code == expected, response.content
         assert _detail(response) != OWNER_ONLY_MESSAGE
 
 

@@ -6,6 +6,12 @@
 // 만들고, 누가 만든 초대든 복사하고 취소한다. 보관된 클래스에서도 된다(사람을 들이는 일은
 // 클래스의 존폐 쪽이다). 여러 개를 만들어도 앞의 것이 죽지 않는다 — 가입 링크의
 // 「다시 뽑기」와 다르다.
+//
+// 떠나기·내보내기(#563): 소유자는 공동 강사 줄마다 「내보내기」를, 공동 강사는 맨 아래
+// 「이 클래스 떠나기」를 본다. 둘 다 한 번 더 확인한다. 소유자는 떠날 수 없어 그 자리에
+// 대신 할 일(보관·삭제)을 말한다.
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { useBackendQuery } from "@codemit/bff-client";
@@ -17,7 +23,9 @@ import {
   classInstructorsPath,
   coInstructorInviteUrl,
   createCoInstructorInvite,
+  leaveClass,
   pendingCoInstructorInvitesPath,
+  removeCoInstructor,
   type ClassInstructor,
   type PendingCoInstructorInvite,
 } from "@/lib/co-instructors/api";
@@ -31,21 +39,73 @@ function formatWhen(iso: string): string {
   });
 }
 
-function InstructorRow({ instructor }: { instructor: ClassInstructor }) {
+function InstructorRow({
+  instructor,
+  canRemove,
+  confirming,
+  removing,
+  onAskRemove,
+  onRemove,
+  onKeep,
+}: {
+  instructor: ClassInstructor;
+  // 부른 사람이 소유자이고 이 줄이 공동 강사일 때만 참이다.
+  canRemove: boolean;
+  confirming: boolean;
+  removing: boolean;
+  onAskRemove: () => void;
+  onRemove: () => void;
+  onKeep: () => void;
+}) {
   const owner = instructor.role === "owner";
+  const name = instructor.display_name || (owner ? "이름을 정하지 않은 소유자" : "이름 없음");
   return (
-    <li data-testid="class-instructor-row" className="flex flex-wrap items-center gap-x-2.5 gap-y-1 px-4 py-2.5">
-      <span data-testid="class-instructor-name" className="text-[13.5px]">
-        {instructor.display_name || (owner ? "이름을 정하지 않은 소유자" : "이름 없음")}
-      </span>
-      {instructor.is_me ? <span className="text-[12px] text-ink/45">나</span> : null}
-      <span data-testid="class-instructor-role">
-        <Badge tone={owner ? "verified" : "neutral"}>{owner ? "소유자" : "공동 강사"}</Badge>
-      </span>
-      {instructor.accepted_at ? (
-        <span className="ml-auto text-[12px] text-ink/45">
-          {formatWhen(instructor.accepted_at)} 수락
+    <li data-testid="class-instructor-row" className="flex flex-col gap-2 px-4 py-2.5">
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+        <span data-testid="class-instructor-name" className="text-[13.5px]">
+          {name}
         </span>
+        {instructor.is_me ? <span className="text-[12px] text-ink/45">나</span> : null}
+        <span data-testid="class-instructor-role">
+          <Badge tone={owner ? "verified" : "neutral"}>{owner ? "소유자" : "공동 강사"}</Badge>
+        </span>
+        <span className="ml-auto flex items-center gap-2.5">
+          {instructor.accepted_at ? (
+            <span className="text-[12px] text-ink/45">{formatWhen(instructor.accepted_at)} 수락</span>
+          ) : null}
+          {canRemove && !confirming ? (
+            <button
+              type="button"
+              data-testid="co-instructor-remove"
+              onClick={onAskRemove}
+              className={buttonClass("danger", "sm")}
+            >
+              내보내기
+            </button>
+          ) : null}
+        </span>
+      </div>
+      {canRemove && confirming ? (
+        <div data-testid="co-instructor-remove-confirm" className="flex flex-col gap-2 border border-rule bg-paper px-3 py-2.5">
+          <p className="text-[12.5px] leading-relaxed text-ink/70">
+            {name}님을 내보낼까요? 이 클래스를 더는 다룰 수 없고, {name}님이 만든 아직 쓰이지 않은 초대도
+            함께 취소됩니다. 이 클래스에서 낸 시도가 있으면 내보낸 참여자의 기록으로 남고 달성률에는 들지 않습니다.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              data-testid="co-instructor-remove-confirm-button"
+              onClick={onRemove}
+              disabled={removing}
+              className={buttonClass("dangerFilled", "sm")}
+            >
+              {removing ? "내보내는 중..." : "내보내기"}
+            </button>
+            <button type="button" onClick={onKeep} disabled={removing} className={buttonClass("secondary", "sm")}>
+              그대로 두기
+            </button>
+          </div>
+        </div>
       ) : null}
     </li>
   );
@@ -100,8 +160,97 @@ function PendingInviteRow({
   );
 }
 
+function LeaveSection({ classId, owner }: { classId: number; owner: boolean }) {
+  const router = useRouter();
+  const [confirming, setConfirming] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function leave() {
+    setLeaving(true);
+    setError(null);
+    const result = await leaveClass(classId);
+    if (result.ok) {
+      // 떠난 클래스는 더 열리지 않는다 — 내 클래스 목록으로 간다.
+      router.replace("/");
+      return;
+    }
+    setError(result.detail);
+    setLeaving(false);
+  }
+
+  if (owner) {
+    return (
+      <CardSection title="이 클래스 떠나기">
+        <p data-testid="class-leave-owner-note" className="px-4 pb-4 pt-2 text-[12.5px] leading-relaxed text-ink/60">
+          소유자는 클래스를 떠날 수 없습니다. 수업을 끝내려면 이 화면에서 클래스를 보관하고, 없던 일로
+          하려면{" "}
+          <Link href={`/classes/${classId}/settings`} className="underline underline-offset-2">
+            클래스 설정
+          </Link>
+          에서 삭제하세요.
+        </p>
+      </CardSection>
+    );
+  }
+
+  return (
+    <CardSection title="이 클래스 떠나기">
+      <div className="flex flex-col gap-3 px-4 pb-4 pt-2">
+        {confirming ? (
+          <div data-testid="class-leave-confirm" className="flex flex-col gap-2 border border-rule bg-paper px-3 py-2.5">
+            <p className="text-[12.5px] leading-relaxed text-ink/70">
+              이 클래스를 떠날까요? 내 클래스 목록에서 사라지고, 다시 함께 가르치려면 새 초대를 받아야
+              합니다. 내가 만든 아직 쓰이지 않은 초대는 취소되고, 이 클래스에서 낸 시도는 지워지지 않고
+              남습니다.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                data-testid="class-leave-confirm-button"
+                onClick={() => void leave()}
+                disabled={leaving}
+                className={buttonClass("dangerFilled", "sm")}
+              >
+                {leaving ? "떠나는 중..." : "떠나기"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirming(false)}
+                disabled={leaving}
+                className={buttonClass("secondary", "sm")}
+              >
+                그대로 있기
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span className="text-[12px] leading-relaxed text-ink/45">
+              공동 강사는 언제든 스스로 떠날 수 있습니다.
+            </span>
+            <button
+              type="button"
+              data-testid="class-leave"
+              onClick={() => setConfirming(true)}
+              className={buttonClass("danger", "sm")}
+            >
+              떠나기
+            </button>
+          </div>
+        )}
+        {error ? (
+          <ErrorNote>
+            <span data-testid="class-leave-error">{error}</span>
+          </ErrorNote>
+        ) : null}
+      </div>
+    </CardSection>
+  );
+}
+
 export function InstructorsSection({ classId }: { classId: number }) {
-  const { state: rosterState } = useBackendQuery<ClassInstructor[]>(bffClient, classInstructorsPath(classId));
+  const { state: rosterState, reload: reloadRoster } = useBackendQuery<ClassInstructor[]>(bffClient, classInstructorsPath(classId));
   const { state: invitesState, reload: reloadInvites } = useBackendQuery<PendingCoInstructorInvite[]>(
     bffClient,
     pendingCoInstructorInvitesPath(classId),
@@ -110,6 +259,26 @@ export function InstructorsSection({ classId }: { classId: number }) {
   const [cancellingId, setCancellingId] = useState<number | null>(null);
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmingRemoveId, setConfirmingRemoveId] = useState<number | null>(null);
+  const [removingId, setRemovingId] = useState<number | null>(null);
+
+  const roster = rosterState.status === "ready" ? rosterState.data : [];
+  const me = roster.find((instructor) => instructor.is_me);
+  const iAmOwner = me?.role === "owner";
+
+  async function remove(coInstructorId: number) {
+    setRemovingId(coInstructorId);
+    setError(null);
+    const result = await removeCoInstructor(classId, coInstructorId);
+    if (!result.ok) {
+      setError(result.detail);
+    }
+    // 내보낸 사람이 만든 대기 초대도 취소되므로 둘 다 다시 읽는다.
+    reloadRoster();
+    reloadInvites();
+    setConfirmingRemoveId(null);
+    setRemovingId(null);
+  }
 
   async function create() {
     setCreating(true);
@@ -153,9 +322,21 @@ export function InstructorsSection({ classId }: { classId: number }) {
       <div className="divide-y divide-rule">
         {rosterState.status === "ready" ? (
           <ul data-testid="class-instructors" className="divide-y divide-rule">
-            {rosterState.data.map((instructor, index) => (
-              <InstructorRow key={index} instructor={instructor} />
-            ))}
+            {rosterState.data.map((instructor) => {
+              const id = instructor.co_instructor_id;
+              return (
+                <InstructorRow
+                  key={id ?? "owner"}
+                  instructor={instructor}
+                  canRemove={iAmOwner && id !== null}
+                  confirming={id !== null && confirmingRemoveId === id}
+                  removing={id !== null && removingId === id}
+                  onAskRemove={() => setConfirmingRemoveId(id)}
+                  onRemove={() => id !== null && void remove(id)}
+                  onKeep={() => setConfirmingRemoveId(null)}
+                />
+              );
+            })}
           </ul>
         ) : rosterState.status === "error" ? (
           <div className="px-4 py-3">
@@ -193,7 +374,7 @@ export function InstructorsSection({ classId }: { classId: number }) {
             <div className="flex flex-wrap items-center justify-between gap-3 px-4">
               <span className="text-[12px] leading-relaxed text-ink/45">
                 링크는 7일 뒤 만료됩니다. 여러 사람을 초대하려면 사람마다 하나씩 만드세요. 수락한 사람은
-                문제·명단·보관을 소유자와 똑같이 다루고, 채점 키·예산과 클래스 삭제는 소유자만 합니다.
+                문제·명단·보관을 소유자와 똑같이 다루고, 채점 키·예산, 클래스 삭제, 공동 강사 내보내기는 소유자만 합니다.
               </span>
               <button
                 type="button"
@@ -214,6 +395,7 @@ export function InstructorsSection({ classId }: { classId: number }) {
             ) : null}
           </div>
         </CardSection>
+        {me ? <LeaveSection classId={classId} owner={iAmOwner} /> : null}
       </div>
     </Card>
   );

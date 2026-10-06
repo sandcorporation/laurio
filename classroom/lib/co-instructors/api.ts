@@ -20,6 +20,8 @@ export type PendingCoInstructorInvite = CoInstructorInvite & {
 
 // 강사 목록 한 줄(#562) — 소유자 먼저, 그다음 공동 강사를 수락한 순서로.
 export type ClassInstructor = {
+  // 공동 강사 줄의 id — 소유자가 내보낼 때 쓴다(#563). 소유자 줄은 `null`.
+  co_instructor_id: number | null;
   // 이름을 정하지 않은 소유자면 빈 문자열.
   display_name: string;
   role: "owner" | "co_instructor";
@@ -68,6 +70,19 @@ export function pendingCoInstructorInvitesPath(classId: number): string {
 export function cancelCoInstructorInvite(classId: number, inviteId: number): Promise<ApiResult<undefined>> {
   return bffClient.post<undefined>(
     `/api/backend/classroom/classes/${classId}/co-instructor-invites/${inviteId}/cancel`,
+    {},
+  );
+}
+
+/** 공동 강사가 스스로 클래스를 떠난다(#563). 소유자는 409 — 화면은 소유자에게 이 버튼을 그리지 않는다. */
+export function leaveClass(classId: number): Promise<ApiResult<undefined>> {
+  return bffClient.post<undefined>(`/api/backend/classroom/classes/${classId}/instructors/me/leave`, {});
+}
+
+/** 소유자가 공동 강사를 내보낸다(#563) — 소유자 전용. 떠나기와 같은 정리를 한다. */
+export function removeCoInstructor(classId: number, coInstructorId: number): Promise<ApiResult<undefined>> {
+  return bffClient.post<undefined>(
+    `/api/backend/classroom/classes/${classId}/co-instructors/${coInstructorId}/remove`,
     {},
   );
 }

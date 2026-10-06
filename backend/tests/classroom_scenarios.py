@@ -235,6 +235,26 @@ def cancel_co_instructor_invite(client, access: str, class_id: int, invite_id: i
     )
 
 
+def leave_class(client, access: str, class_id: int):
+    """공동 강사가 스스로 떠난다(#563) — 응답 그대로, 거절(소유자의 409)을 보는 테스트가 본다."""
+
+    return client.post(
+        f"{CLASSES_URL}/{class_id}/instructors/me/leave",
+        content_type="application/json",
+        **auth_header(access),
+    )
+
+
+def remove_co_instructor(client, access: str, class_id: int, co_instructor_id: int):
+    """소유자가 공동 강사를 내보낸다(#563) — 응답 그대로. `co_instructor_id` 는 강사 목록 줄의 `id`."""
+
+    return client.post(
+        f"{CLASSES_URL}/{class_id}/co-instructors/{co_instructor_id}/remove",
+        content_type="application/json",
+        **auth_header(access),
+    )
+
+
 def list_taught_classes(client, access: str) -> list:
     """강사 화면의 「내 클래스」(소유한 것과 공동 강사인 것)."""
 
