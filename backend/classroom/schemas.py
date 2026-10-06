@@ -393,6 +393,27 @@ class CoInstructorInviteOut(Schema):
     expires_at: datetime
 
 
+class PendingCoInstructorInviteOut(CoInstructorInviteOut):
+    """대기 중인 초대 하나(#562) — 클래스 관리 「강사」 영역의 목록 줄."""
+
+    #: 만든 강사의 이 클래스에서의 강사 이름 — 비어 있을 수 있다(이름을 정하지 않은 소유자).
+    created_by_name: str
+    #: 부른 사람이 만든 초대인가.
+    created_by_me: bool
+
+
+class ClassInstructorOut(Schema):
+    """강사 목록의 한 줄(#562) — 소유자 먼저, 그다음 공동 강사를 수락한 순서로."""
+
+    #: 이 클래스에서 불리는 강사 이름 — 이름을 정하지 않은 소유자는 빈 문자열.
+    display_name: str
+    role: Literal["owner", "co_instructor"]
+    #: 공동 강사가 초대를 수락한 때 — 소유자는 `None`.
+    accepted_at: datetime | None = None
+    #: 부른 사람 자신인가.
+    is_me: bool
+
+
 class CoInstructorInvitePreviewOut(Schema):
     """초대 링크를 연 사람이 보는 것(#561) — 로그인하지 않아도 열린다."""
 

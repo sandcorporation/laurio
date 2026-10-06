@@ -10,7 +10,12 @@
 수락은 409 이고 초대는 쓰이지 않는다 — 다른 사람에게 줄 수 있게 남는다.
 
 **보관과 무관하다.** 사람을 들이는 일은 클래스의 존폐 쪽이라 보관된 클래스에서도
-만들고 수락한다(`CONTEXT.md` 「공동 강사」).
+만들고, 보고, 취소하고, 수락한다(`CONTEXT.md` 「공동 강사」).
+
+**보는 것과 취소도 강사 누구나다**(#562) — 클래스 관리의 「강사」 영역이 강사 목록
+(`roster`)과 대기 중인 초대(`pending_invites`)를 보여 주고, 누가 만든 초대든 취소한다
+(`cancel_invite`). 취소는 행을 지우지 않고 시각을 찍는다 — 링크를 연 사람이 「취소된
+초대」라는 사실을 볼 수 있어야 해서다.
 """
 
 from __future__ import annotations
@@ -23,7 +28,7 @@ from ninja.errors import HttpError
 from core.clock import Clock
 
 from .class_authoring import reject_banned_name
-from .instructors import is_instructor
+from .instructors import is_instructor, is_owner
 from .models import CO_INSTRUCTOR_INVITE_TTL_DAYS, Class, ClassCoInstructor, CoInstructorInvite
 
 #: 이미 그 클래스의 강사인 사람이 수락하려 할 때 — 미리보기 화면도 같은 말을 쓴다.
@@ -67,6 +72,66 @@ def instructor_names(class_obj: Class) -> list[str]:
     names = [class_obj.instructor_display_name]
     names += list(class_obj.co_instructors.values_list("display_name", flat=True))
     return [name for name in names if name]
+
+
+def roster(class_obj: Class, viewer_id: int) -> list[dict]:
+    """강사 목록 — 줄마다 강사 이름·역할·수락한 때·부른 사람 자신인가. 소유자 먼저(수락한 때
+    없음), 그다음 공동 강사를 수락한 순서로. 소유자의 이름이 비어 있으면 빈 문자열 그대로다 —
+    화면이 고른다."""
+
+    rows = [
+        {
+            "display_name": class_obj.instructor_display_name,
+            "role": "owner",
+            "accepted_at": None,
+            "is_me": is_owner(class_obj, viewer_id),
+        }
+    ]
+    rows += [
+        {
+            "display_name": row.display_name,
+            "role": "co_instructor",
+            "accepted_at": row.accepted_at,
+            "is_me": row.user_id == viewer_id,
+        }
+        for row in class_obj.co_instructors.all()
+    ]
+    return rows
+
+
+def pending_invites(class_obj: Class) -> list[tuple[CoInstructorInvite, str]]:
+    """아직 쓰이지 않은 초대와 만든 사람의 강사 이름 — 새것 먼저. 수락·취소·만료는 빠진다."""
+
+    now = Clock.now()
+    invites = class_obj.co_instructor_invites.filter(
+        accepted_at__isnull=True, cancelled_at__isnull=True, expires_at__gt=now
+    )
+    # 만든 사람의 이름은 강사 목록에서 한 번에 찾는다 — 초대마다 묻지 않는다.
+    names = dict(class_obj.co_instructors.values_list("user_id", "display_name"))
+
+    def name_of(user_id: int) -> str:
+        return class_obj.instructor_display_name if is_owner(class_obj, user_id) else names.get(user_id, "")
+
+    return [(invite, name_of(invite.created_by_id)) for invite in invites]
+
+
+def cancel_invite(class_obj: Class, invite_id: int) -> None:
+    """대기 중인 초대를 취소한다. 이 클래스의 초대가 아니면 404, 이미 쓰였거나 만료·취소됐으면
+    409(그 상태의 문장) — 수락과 같은 행 잠금으로, 수락과 취소가 겹쳐도 한쪽만 이긴다."""
+
+    with transaction.atomic():
+        invite = (
+            CoInstructorInvite.objects.select_for_update()
+            .filter(classroom_id=class_obj.id, id=invite_id)
+            .first()
+        )
+        if invite is None:
+            raise HttpError(404, "이 클래스에 그런 초대가 없습니다.")
+        message = not_pending_message(invite.status_at(Clock.now()))
+        if message is not None:
+            raise HttpError(409, message)
+        invite.cancelled_at = Clock.now()
+        invite.save(update_fields=["cancelled_at"])
 
 
 def accept_invite(token: str, user_id: int, display_name: str) -> Class:

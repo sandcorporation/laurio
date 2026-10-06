@@ -102,6 +102,8 @@ from .schemas import (
     CoInstructorAcceptOut,
     CoInstructorInviteOut,
     CoInstructorInvitePreviewOut,
+    ClassInstructorOut,
+    PendingCoInstructorInviteOut,
     ImportableProblemOut,
     JoinedClassOut,
     JoinIn,
@@ -876,6 +878,59 @@ def create_co_instructor_invite(request: HttpRequest, class_id: int):
     return 201, CoInstructorInviteOut(
         id=invite.id, token=invite.token, created_at=invite.created_at, expires_at=invite.expires_at
     )
+
+
+@router.get(
+    "/classes/{class_id}/instructors",
+    response={200: list[ClassInstructorOut], 404: ErrorOut},
+    auth=jwt_auth,
+)
+def list_class_instructors(request: HttpRequest, class_id: int):
+    """클래스 관리 「강사」 영역의 강사 목록 — 강사 누구나 본다, 보관된 클래스에서도(#562)."""
+
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
+    return 200, [ClassInstructorOut(**row) for row in co_instructors.roster(class_obj, request.auth_user.id)]
+
+
+@router.get(
+    "/classes/{class_id}/co-instructor-invites",
+    response={200: list[PendingCoInstructorInviteOut], 404: ErrorOut},
+    auth=jwt_auth,
+)
+def list_pending_co_instructor_invites(request: HttpRequest, class_id: int):
+    """아직 쓰이지 않은 공동 강사 초대 — 강사 누구나 본다(누가 만들었든), 보관된 클래스에서도
+    (#562). 수락·만료·취소된 초대는 빠진다. 링크를 다시 복사할 수 있게 토큰도 싣는다 — 이
+    클래스의 강사는 어차피 새 초대를 만들 수 있으므로 더 넓히는 것이 없다."""
+
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
+    viewer_id = request.auth_user.id
+    return 200, [
+        PendingCoInstructorInviteOut(
+            id=invite.id,
+            token=invite.token,
+            created_at=invite.created_at,
+            expires_at=invite.expires_at,
+            created_by_name=created_by_name,
+            created_by_me=invite.created_by_id == viewer_id,
+        )
+        for invite, created_by_name in co_instructors.pending_invites(class_obj)
+    ]
+
+
+@router.post(
+    "/classes/{class_id}/co-instructor-invites/{invite_id}/cancel",
+    response={204: None, 404: ErrorOut, 409: ErrorOut},
+    auth=jwt_auth,
+)
+def cancel_co_instructor_invite(request: HttpRequest, class_id: int, invite_id: int):
+    """대기 중인 초대를 취소한다 — 강사 누구나, 누가 만든 초대든, 보관된 클래스에서도(#562).
+    취소한 링크는 「취소된 초대」로 보이고 수락되지 않는다. 남의 클래스·다른 클래스의 초대는
+    404, 이미 쓰였거나 만료·취소됐으면 409."""
+
+    # 초대 만들기와 같은 이유로 write=False — 사람을 들이는 일은 보관과 무관하다.
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
+    co_instructors.cancel_invite(class_obj, invite_id)
+    return 204, None
 
 
 @router.get(

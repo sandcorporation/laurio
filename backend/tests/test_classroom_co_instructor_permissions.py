@@ -51,6 +51,7 @@ class World:
     hidden_problem_id: int
     member_id: int
     share_code: str
+    invite_id: int
 
 
 def _post(client, access, url, body=None):
@@ -80,6 +81,7 @@ def world(client, db) -> World:
         f"{CLASSES_URL}/{class_id}/problems/{problem.id}/publish-template",
         {"publisher_display_name": "강사"},
     )
+    invite = _post(client, owner["access"], f"{CLASSES_URL}/{class_id}/co-instructor-invites")
     return World(
         access={"owner": owner["access"], "co_instructor": co["access"], "stranger": stranger["access"]},
         class_id=class_id,
@@ -89,6 +91,7 @@ def world(client, db) -> World:
         hidden_problem_id=hidden.id,
         member_id=member_id,
         share_code=published["share_code"],
+        invite_id=invite["id"],
     )
 
 
@@ -134,6 +137,15 @@ ROUTES: list[Route] = [
     Route("unarchive_class", "post", lambda w: f"{_c(w)}/unarchive", None, 200),
     Route("delete_class", "delete", _c, None, 204, owner_only=True),
     Route("create_co_instructor_invite", "post", lambda w: f"{_c(w)}/co-instructor-invites", None, 201),
+    Route("list_class_instructors", "get", lambda w: f"{_c(w)}/instructors", None, 200),
+    Route("list_pending_co_instructor_invites", "get", lambda w: f"{_c(w)}/co-instructor-invites", None, 200),
+    Route(
+        "cancel_co_instructor_invite",
+        "post",
+        lambda w: f"{_c(w)}/co-instructor-invites/{w.invite_id}/cancel",
+        None,
+        204,
+    ),
     Route("publish_class_template", "post", lambda w: f"{_c(w)}/publish-template", lambda w: {"publisher_display_name": "강사"}, 201),
     # 명단
     Route("list_members", "get", lambda w: f"{_c(w)}/members", None, 200),

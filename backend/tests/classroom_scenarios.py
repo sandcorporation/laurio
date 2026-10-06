@@ -209,6 +209,32 @@ def add_co_instructor(
     assert response.status_code == 200, response.content
 
 
+def list_instructors(client, access: str, class_id: int) -> list:
+    """클래스 관리 「강사」 영역의 강사 목록 — 소유자 먼저, 그다음 공동 강사를 수락한 순서로."""
+
+    response = client.get(f"{CLASSES_URL}/{class_id}/instructors", **auth_header(access))
+    assert response.status_code == 200, response.content
+    return response.json()
+
+
+def list_pending_co_instructor_invites(client, access: str, class_id: int) -> list:
+    """아직 쓰이지 않은 공동 강사 초대 목록 — 수락·만료·취소된 것은 빠진다."""
+
+    response = client.get(f"{CLASSES_URL}/{class_id}/co-instructor-invites", **auth_header(access))
+    assert response.status_code == 200, response.content
+    return response.json()
+
+
+def cancel_co_instructor_invite(client, access: str, class_id: int, invite_id: int):
+    """취소 응답 그대로 — 거절(404·409)을 보는 테스트가 상태 코드를 직접 본다."""
+
+    return client.post(
+        f"{CLASSES_URL}/{class_id}/co-instructor-invites/{invite_id}/cancel",
+        content_type="application/json",
+        **auth_header(access),
+    )
+
+
 def list_taught_classes(client, access: str) -> list:
     """강사 화면의 「내 클래스」(소유한 것과 공동 강사인 것)."""
 

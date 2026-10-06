@@ -25,7 +25,6 @@ import {
 } from "@/app/components/ui";
 import { MissingScoringKeyNote } from "@/app/components/MissingScoringKeyNote";
 import { copyClass } from "@/lib/classes/api";
-import { coInstructorInviteUrl, createCoInstructorInvite, type CoInstructorInvite } from "@/lib/co-instructors/api";
 import { joinLinkAvailability } from "@/lib/classes/join-link";
 import {
   shouldShowMissingScoringKeyBanner,
@@ -36,6 +35,7 @@ import { describeAchievementRate, formatAchievementRate } from "@/lib/problems/a
 import { useProblems } from "@/lib/problems/use-problems";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 
+import { InstructorsSection } from "./instructors-section";
 import { RosterGridTab } from "./roster-grid-tab";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -131,110 +131,6 @@ function JoinLinkSection({
           ) : null}
         </div>
       )}
-    </Card>
-  );
-}
-
-// 공동 강사 초대(#561, CONTEXT.md 「공동 강사 초대」) — 함께 가르칠 사람에게 건넬 1회용
-// 링크를 만든다. 소유자든 공동 강사든 만들 수 있고, 보관된 클래스에서도 된다(사람을
-// 들이는 일은 클래스의 존폐 쪽이다). 여러 개를 만들어도 앞의 것이 죽지 않는다 — 가입
-// 링크의 「다시 뽑기」와 다르다.
-function CoInstructorInviteSection({ classId }: { classId: number }) {
-  const [invite, setInvite] = useState<CoInstructorInvite | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const url = invite && typeof window !== "undefined" ? coInstructorInviteUrl(window.location.origin, invite.token) : "";
-
-  async function create() {
-    setCreating(true);
-    setError(null);
-    setCopied(false);
-    const result = await createCoInstructorInvite(classId);
-    if (result.ok) {
-      setInvite(result.data);
-    } else {
-      setError(result.detail);
-    }
-    setCreating(false);
-  }
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      setCopied(false);
-    }
-  }
-
-  return (
-    <Card>
-      <CardHeader title="공동 강사 초대" hint="함께 가르칠 사람에게 건넬 링크입니다 — 한 사람이 한 번만 쓸 수 있습니다" />
-      <div className="flex flex-col gap-3 p-4">
-        {invite ? (
-          <>
-            <div className="flex flex-wrap items-center gap-2">
-              <p
-                data-testid="co-instructor-invite-link"
-                className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap border border-rule bg-paper px-3 py-2 font-mono text-[13px]"
-              >
-                {url}
-              </p>
-              <button
-                type="button"
-                data-testid="co-instructor-invite-copy"
-                onClick={copy}
-                className={buttonClass("primary", "sm")}
-              >
-                복사
-              </button>
-              {copied ? (
-                <span data-testid="co-instructor-invite-copied" className="text-[12px] text-verified">
-                  복사됨
-                </span>
-              ) : null}
-            </div>
-            <p data-testid="co-instructor-invite-expiry" className="text-[11.5px] leading-relaxed text-ink/45">
-              <Num>{new Date(invite.expires_at).toLocaleString("ko-KR")}</Num>까지 쓸 수 있습니다. 수락한
-              사람은 문제·명단·보관을 소유자와 똑같이 다루고, 채점 키·예산과 클래스 삭제는 소유자만
-              합니다.
-            </p>
-            <div>
-              <button
-                type="button"
-                data-testid="co-instructor-invite-create"
-                onClick={create}
-                disabled={creating}
-                className={buttonClass("secondary", "sm")}
-              >
-                {creating ? "만드는 중..." : "한 사람 더 초대하기"}
-              </button>
-            </div>
-          </>
-        ) : (
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <span className="text-[12.5px] text-ink/60">
-              링크는 7일 뒤 만료됩니다. 여러 사람을 초대하려면 사람마다 하나씩 만드세요.
-            </span>
-            <button
-              type="button"
-              data-testid="co-instructor-invite-create"
-              onClick={create}
-              disabled={creating}
-              className={buttonClass("secondary", "sm")}
-            >
-              {creating ? "만드는 중..." : "초대 링크 만들기"}
-            </button>
-          </div>
-        )}
-        {error ? (
-          <ErrorNote>
-            <span data-testid="co-instructor-invite-error">{error}</span>
-          </ErrorNote>
-        ) : null}
-      </div>
     </Card>
   );
 }
@@ -460,7 +356,7 @@ export default function ClassDetailPage() {
           onRegenerate={regenerateJoinCode}
         />
 
-        <CoInstructorInviteSection classId={classId} />
+        <InstructorsSection classId={classId} />
 
         {/* 클래스 상세의 두 탭(#290) — 「문제 중심」은 문제마다 달성률을 보여주고
             (#289), 「참여자별 현황」은 참여자 × 문제 격자로 누가 막혔는지 보여준다.
