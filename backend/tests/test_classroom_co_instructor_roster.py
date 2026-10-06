@@ -190,3 +190,25 @@ def test_an_archived_class_still_lists_and_cancels(client, db):
     assert [row["id"] for row in list_pending_co_instructor_invites(client, co["access"], class_id)] == [invite["id"]]
     assert cancel_co_instructor_invite(client, co["access"], class_id, invite["id"]).status_code == 204
     assert list_pending_co_instructor_invites(client, co["access"], class_id) == []
+
+
+def test_the_giver_of_an_ownership_transfer_is_listed_as_having_handed_over_not_accepted(client, db):
+    """넘긴 사람은 초대를 수락해 들어온 사람이 아니다(#565) — 그 줄의 시각은 「넘긴 때」로 읽힌다."""
+
+    from tests.classroom_scenarios import transfer_ownership
+
+    owner = login(client, "owner")
+    co = login(client, "co")
+    helper = login(client, "helper")
+    class_id = create_class(client, owner["access"])
+    add_co_instructor(client, owner["access"], class_id, co["access"], display_name="보조 강사")
+    add_co_instructor(client, owner["access"], class_id, helper["access"], display_name="조교")
+    transfer_ownership(client, owner["access"], class_id, co["access"], recipient_name="보조 강사")
+
+    roster = list_instructors(client, co["access"], class_id)
+
+    assert [(row["display_name"], row["role"], row["joined_by"]) for row in roster] == [
+        ("보조 강사", "owner", None),
+        ("조교", "co_instructor", "invite"),
+        ("강사", "co_instructor", "ownership_transfer"),
+    ]

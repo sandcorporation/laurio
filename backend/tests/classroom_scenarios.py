@@ -255,6 +255,26 @@ def remove_co_instructor(client, access: str, class_id: int, co_instructor_id: i
     )
 
 
+def rename_my_instructor_name(client, access: str, class_id: int, display_name: str):
+    """강사 한 사람이 이 클래스에서 불릴 **자기** 강사 이름을 바꾼다(#565) — 응답 그대로."""
+
+    return client.patch(
+        f"{CLASSES_URL}/{class_id}/instructors/me",
+        data={"display_name": display_name},
+        content_type="application/json",
+        **auth_header(access),
+    )
+
+
+def join_preview(client, code: str, access: str | None = None) -> dict:
+    """가입 링크 미리보기 — 로그인하지 않은 방문자는 `access=None`."""
+
+    headers = auth_header(access) if access else {}
+    response = client.get(f"/api/classroom/join/{code}", **headers)
+    assert response.status_code == 200, response.content
+    return response.json()
+
+
 # --- 소유권 이전 (#564) ----------------------------------------------------
 
 

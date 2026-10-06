@@ -58,6 +58,7 @@ ALLOWLIST: dict[Path, dict[str, str]] = {
         "create_classroom_submission": "참여자와 강사가 같은 주소를 걷는 혼합 라우트다 — 강사 분기도 class_scope/problem_scope가 아니라 .filter(...).first()로 존재를 숨기지 않는다(get_my_problem과 같은 이유).",
         "create_co_instructor_invite": "사람을 들이는 일은 클래스의 존폐 쪽이라 보관된 클래스에서도 연다(CONTEXT.md 「공동 강사」, #561) — class_scope(write=False)만 부른다.",
         "cancel_co_instructor_invite": "초대 만들기와 같은 이유 — 사람을 들이는 일은 보관과 무관하다(CONTEXT.md 「공동 강사」, #562). 강사 누구나 취소한다 — class_scope(write=False, owner=False)만 부른다.",
+        "rename_my_instructor_name": "강사 이름은 클래스 설정과 같은 쪽이라 보관된 클래스에서도 바꾼다(#565, update_class 와 같은 이유) — class_scope(write=False, owner=False)만 부르고, 쓰는 자리는 부른 사람 자신의 자리뿐이다(classroom.co_instructors.rename_myself).",
         "leave_class": "사람이 드나드는 일은 보관과 무관하다 — 공동 강사는 보관된 클래스에서도 떠난다(CONTEXT.md 「공동 강사」, #563). class_scope(write=False, owner=False)만 부르고, 소유자의 떠나기는 classroom.co_instructors.leave 가 409 로 거절한다.",
         "request_ownership_transfer": "소유권 이전은 사람의 자리를 바꾸는 일이라 보관과 무관하다 — 보관된 클래스도 넘긴다(CONTEXT.md 「소유권 이전」, #564). 소유자 전용이라 class_scope(write=False, owner=True).",
         "cancel_ownership_transfer": "request_ownership_transfer 와 같은 이유 — class_scope(write=False, owner=True).",

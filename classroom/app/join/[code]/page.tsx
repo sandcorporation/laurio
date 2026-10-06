@@ -137,6 +137,9 @@ export default function JoinPage() {
   }
 
   const { preview: info } = preview;
+  // 강사 전원의 이름(#565) — 소유자 먼저. 이 칸을 모르는 옛 백엔드면 소유자의 이름 하나로 읽는다.
+  const instructorNames =
+    info.instructor_display_names ?? (info.instructor_display_name ? [info.instructor_display_name] : []);
 
   if (submit.status === "done") {
     return (
@@ -165,9 +168,9 @@ export default function JoinPage() {
         {info.class_name}
       </h1>
       <p className="mt-2 flex flex-wrap items-center gap-x-1.5 text-[13px] text-ink/60">
-        {info.instructor_display_name ? (
+        {instructorNames.length > 0 ? (
           <>
-            <span data-testid="join-preview-instructor">강사 {info.instructor_display_name}</span>
+            <span data-testid="join-preview-instructor">강사 {instructorNames.join(", ")}</span>
             <span aria-hidden>·</span>
           </>
         ) : null}

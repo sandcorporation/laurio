@@ -91,7 +91,10 @@ function InstructorRow({
         </span>
         <span className="ml-auto flex items-center gap-2.5">
           {instructor.accepted_at ? (
-            <span className="text-[12px] text-ink/45">{formatWhen(instructor.accepted_at)} 수락</span>
+            <span className="text-[12px] text-ink/45">
+              {formatWhen(instructor.accepted_at)}{" "}
+              {instructor.joined_by === "ownership_transfer" ? "소유권 넘김" : "수락"}
+            </span>
           ) : null}
           {canTransfer && !confirming ? (
             <button

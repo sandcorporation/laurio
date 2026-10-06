@@ -75,6 +75,10 @@ class ClassOut(Schema):
     #: 빈 문자열이면(#299) 이 필드가 생기기 전에 만들어진 클래스다 — 가입
     #: 미리보기가 그 줄을 생략한다.
     instructor_display_name: str
+    #: 부른 사람 자신이 이 클래스에서 불리는 강사 이름(#565) — 소유자면 위 칸과 같고, 공동
+    #: 강사면 그 사람의 이름이다. 클래스 설정의 「내 강사 이름」 칸이 이 값으로 시작한다
+    #: (바꾸기는 `PATCH .../instructors/me`).
+    my_instructor_display_name: str = ""
     join_code: str
     created_at: datetime
     default_model: str
@@ -385,6 +389,10 @@ class JoinPreviewOut(Schema):
     #: 응답 어디에도 싣지 않는다. `None`이면(이 필드가 생기기 전에 만들어진
     #: 클래스, 아직 강사가 정하지 않음) 화면이 이 줄 자체를 생략한다.
     instructor_display_name: str | None = None
+    #: 강사 전원(소유자 + 공동 강사)이 이 클래스에서 불리는 이름 — 소유자 먼저, 그다음 공동
+    #: 강사를 수락한 순서로(#565). 빈 이름은 빠지고, 다 비면 빈 목록이라 화면이 그 줄을
+    #: 생략한다. 위 `instructor_display_name`(소유자의 이름만)은 이 칸 전의 화면을 위해 남는다.
+    instructor_display_names: list[str] = []
     problem_count: int
     participant_count: int
     #: 보관된 클래스인가(#294). 죽은 링크(404)와 달리 미리보기 자체는 계속
@@ -430,8 +438,11 @@ class ClassInstructorOut(Schema):
     #: 이 클래스에서 불리는 강사 이름 — 이름을 정하지 않은 소유자는 빈 문자열.
     display_name: str
     role: Literal["owner", "co_instructor"]
-    #: 공동 강사가 초대를 수락한 때 — 소유자는 `None`.
+    #: 공동 강사가 된 때 — 초대를 수락한 때, 또는 소유권을 넘겨 공동 강사가 된 때. 소유자는 `None`.
     accepted_at: datetime | None = None
+    #: 어떻게 공동 강사가 됐나(#565) — "invite"(초대를 수락했다) 또는 "ownership_transfer"(소유자였다가
+    #: 넘겼다). 화면이 위 시각을 「수락」과 「소유권 넘김」으로 갈라 읽는다. 소유자는 `None`.
+    joined_by: Literal["invite", "ownership_transfer"] | None = None
     #: 부른 사람 자신인가.
     is_me: bool
 
@@ -453,6 +464,14 @@ class CoInstructorInvitePreviewOut(Schema):
     already_instructor: bool = False
     #: 이름 칸 기본값으로 쓸 제안 이름 — 가입 미리보기의 `suggested_name`과 같다.
     suggested_name: str | None = None
+
+
+class InstructorNameIn(Schema):
+    """부른 강사 자신의 강사 이름(#565) — `PATCH .../instructors/me`. 다른 강사를 가리킬 칸이
+    없다(그 사람의 자리에만 쓴다)."""
+
+    #: 이 클래스에서 불릴 강사 이름 — 가입 미리보기에 이 이름이 보인다.
+    display_name: str = Field(min_length=1, max_length=100)
 
 
 class CoInstructorAcceptIn(Schema):

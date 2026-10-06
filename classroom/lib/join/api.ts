@@ -12,6 +12,9 @@ export type JoinPreview = {
   // 이상 여기 실리지 않는다. `null`이면(강사가 아직 정하지 않은 예전
   // 클래스) 화면이 이 줄 자체를 생략한다.
   instructor_display_name: string | null;
+  // 강사 전원(소유자 먼저, 그다음 공동 강사)의 강사 이름(#565) — 빈 이름은 빠져 있고, 다
+  // 비면 빈 목록이라 화면이 그 줄을 생략한다.
+  instructor_display_names: string[];
   problem_count: number;
   participant_count: number;
   // 보관된 클래스인가(#294) — 참이면 화면이 가입 폼 대신 "끝났다" 안내를

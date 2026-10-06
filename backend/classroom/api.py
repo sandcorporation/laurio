@@ -103,6 +103,7 @@ from .schemas import (
     CoInstructorInviteOut,
     CoInstructorInvitePreviewOut,
     ClassInstructorOut,
+    InstructorNameIn,
     PendingCoInstructorInviteOut,
     ImportableProblemOut,
     JoinedClassOut,
@@ -195,6 +196,7 @@ def _serialize_class(class_obj: Class, *, viewer_id: int) -> ClassOut:
         id=class_obj.id,
         name=class_obj.name,
         instructor_display_name=class_obj.instructor_display_name,
+        my_instructor_display_name=instructor_display_name_of(class_obj, viewer_id),
         join_code=class_obj.join_code,
         created_at=class_obj.created_at,
         default_model=class_obj.default_model,
@@ -839,6 +841,7 @@ def preview_join(request: HttpRequest, join_code: str):
         class_id=class_obj.id,
         class_name=class_obj.name,
         instructor_display_name=class_obj.instructor_display_name or None,
+        instructor_display_names=co_instructors.instructor_names(class_obj),
         problem_count=class_obj.problems.count(),
         participant_count=class_obj.members.count(),
         archived=class_obj.archived_at is not None,
@@ -955,6 +958,26 @@ def cancel_co_instructor_invite(request: HttpRequest, class_id: int, invite_id: 
     class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
     co_instructors.cancel_invite(class_obj, invite_id)
     return 204, None
+
+
+@router.patch(
+    "/classes/{class_id}/instructors/me",
+    response={200: ClassInstructorOut, 404: ErrorOut, 422: ErrorOut},
+    auth=jwt_auth,
+)
+def rename_my_instructor_name(request: HttpRequest, class_id: int, payload: InstructorNameIn):
+    """부른 강사가 이 클래스에서 불릴 **자기** 강사 이름을 바꾼다(#565) — 소유자든 공동
+    강사든, 보관된 클래스에서도(클래스 설정과 같은 쪽). 응답은 강사 목록의 그 사람 줄이다.
+
+    클래스 설정(`PATCH /classes/{id}`)의 `instructor_display_name` 이 아니라 따로 둔 이유: 그
+    칸은 읽을 때(`ClassOut`·참여자의 클래스 목록·연결된 앱)나 쓸 때나 **소유자의** 이름이다.
+    공동 강사가 보낸 같은 칸을 「보는 사람의 자리」로 바꿔 쓰면 같은 이름의 칸이 쓰는 사람마다
+    다른 사람을 가리키고, 써 넣은 값이 응답의 같은 칸에 돌아오지 않는다. 여기는 경로가 `me` 라
+    다른 강사를 가리킬 자리 자체가 없다."""
+
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
+    row = co_instructors.rename_myself(class_obj, request.auth_user.id, payload.display_name)
+    return 200, ClassInstructorOut(**row)
 
 
 @router.post(

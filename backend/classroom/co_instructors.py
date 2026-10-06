@@ -109,12 +109,21 @@ def roster(class_obj: Class, viewer_id: int) -> list[dict]:
             "is_me": is_owner(class_obj, viewer_id),
         }
     ]
+    # 소유권을 넘긴 사람의 공동 강사 줄은 초대를 수락해 생긴 것이 아니다(#565) — 수락이 그 줄을
+    # 이전 수락 시각으로 새로 만든다(`ownership_transfers.accept`). 그 (넘긴 사람, 시각) 짝으로
+    # 알아본다 — 그 뒤 떠났다가 초대로 다시 들어오면 줄과 시각이 새로 생겨 「초대」로 읽힌다.
+    handed_over = set(
+        class_obj.ownership_transfers.filter(accepted_at__isnull=False).values_list(
+            "requested_by_id", "accepted_at"
+        )
+    )
     rows += [
         {
             "co_instructor_id": row.id,
             "display_name": row.display_name,
             "role": "co_instructor",
             "accepted_at": row.accepted_at,
+            "joined_by": "ownership_transfer" if (row.user_id, row.accepted_at) in handed_over else "invite",
             "is_me": row.user_id == viewer_id,
         }
         for row in class_obj.co_instructors.all()
@@ -200,6 +209,52 @@ def accept_invite(token: str, user_id: int, display_name: str) -> Class:
         invite.accepted_at = now
         invite.save(update_fields=["accepted_by", "accepted_at"])
     return class_obj
+
+
+# --- 내 강사 이름 (#565) ------------------------------------------------------------
+
+
+NOT_INSTRUCTOR_MESSAGE = "이 클래스의 강사가 아닙니다."
+
+
+def rename_myself(class_obj: Class, user_id: int, display_name: str) -> dict:
+    """부른 강사가 이 클래스에서 불릴 **자기** 강사 이름을 바꾼다 — 소유자면
+    `Class.instructor_display_name`, 공동 강사면 자기 `ClassCoInstructor.display_name`.
+    다른 강사를 가리킬 인자가 없으므로 남의 이름은 닿지 않는다. 돌려주는 것은 강사 목록의
+    그 사람 줄이다.
+
+    소유권 이전 수락(`ownership_transfers.accept`)이 두 자리를 맞바꾸는 사이에 겹칠 수 있다 —
+    같은 잠금 순서(공동 강사 줄 → 클래스)로 자리를 다시 읽고 쓴다. 수락이 먼저 끝났으면 바뀐
+    자리에 쓴다(이름은 사람을 따라간다). 그 사이 떠났으면 404."""
+
+    reject_banned_name(display_name)
+    with transaction.atomic():
+        row = (
+            ClassCoInstructor.objects.select_for_update()
+            .filter(classroom_id=class_obj.id, user_id=user_id)
+            .first()
+        )
+        if row is None:
+            locked = Class.objects.select_for_update().get(id=class_obj.id)
+            if is_owner(locked, user_id):
+                locked.instructor_display_name = display_name
+                locked.save(update_fields=["instructor_display_name"])
+                return _my_roster_row(locked, user_id)
+            # 겹친 이전 수락이 방금 이 사람을 공동 강사로 옮겼을 수 있다 — 클래스 잠금 뒤 다시 본다.
+            row = (
+                ClassCoInstructor.objects.select_for_update()
+                .filter(classroom_id=class_obj.id, user_id=user_id)
+                .first()
+            )
+            if row is None:
+                raise HttpError(404, NOT_INSTRUCTOR_MESSAGE)
+        row.display_name = display_name
+        row.save(update_fields=["display_name"])
+    return _my_roster_row(class_obj, user_id)
+
+
+def _my_roster_row(class_obj: Class, user_id: int) -> dict:
+    return next(row for row in roster(class_obj, user_id) if row["is_me"])
 
 
 # --- 떠나기 (#563) -----------------------------------------------------------------

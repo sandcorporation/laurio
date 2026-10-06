@@ -26,8 +26,10 @@ export type ClassInstructor = {
   // 이름을 정하지 않은 소유자면 빈 문자열.
   display_name: string;
   role: "owner" | "co_instructor";
-  // 공동 강사가 초대를 수락한 때 — 소유자는 `null`.
+  // 공동 강사가 된 때(초대를 수락했거나 소유권을 넘겼을 때) — 소유자는 `null`.
   accepted_at: string | null;
+  // 어떻게 공동 강사가 됐나(#565) — 넘긴 사람의 줄은 「수락」이 아니라 「소유권 넘김」으로 읽힌다.
+  joined_by: "invite" | "ownership_transfer" | null;
   is_me: boolean;
 };
 

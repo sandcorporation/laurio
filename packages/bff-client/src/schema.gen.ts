@@ -508,6 +508,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/instructors/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Rename My Instructor Name
+         * @description 부른 강사가 이 클래스에서 불릴 **자기** 강사 이름을 바꾼다(#565) — 소유자든 공동
+         *     강사든, 보관된 클래스에서도(클래스 설정과 같은 쪽). 응답은 강사 목록의 그 사람 줄이다.
+         *
+         *     클래스 설정(`PATCH /classes/{id}`)의 `instructor_display_name` 이 아니라 따로 둔 이유: 그
+         *     칸은 읽을 때(`ClassOut`·참여자의 클래스 목록·연결된 앱)나 쓸 때나 **소유자의** 이름이다.
+         *     공동 강사가 보낸 같은 칸을 「보는 사람의 자리」로 바꿔 쓰면 같은 이름의 칸이 쓰는 사람마다
+         *     다른 사람을 가리키고, 써 넣은 값이 응답의 같은 칸에 돌아오지 않는다. 여기는 경로가 `me` 라
+         *     다른 강사를 가리킬 자리 자체가 없다.
+         */
+        patch: operations["classroom_api_rename_my_instructor_name"];
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/instructors/me/leave": {
         parameters: {
             query?: never;
@@ -4810,6 +4837,8 @@ export interface components {
             display_name: string;
             /** Is Me */
             is_me: boolean;
+            /** Joined By */
+            joined_by?: ("invite" | "ownership_transfer") | null;
             /**
              * Role
              * @enum {string}
@@ -4850,6 +4879,11 @@ export interface components {
             instructor_display_name: string;
             /** Join Code */
             join_code: string;
+            /**
+             * My Instructor Display Name
+             * @default
+             */
+            my_instructor_display_name: string;
             /** Name */
             name: string;
             /** Openai Key Masked */
@@ -6370,6 +6404,15 @@ export interface components {
             /** Page Size */
             page_size?: number | null;
         };
+        /**
+         * InstructorNameIn
+         * @description 부른 강사 자신의 강사 이름(#565) — `PATCH .../instructors/me`. 다른 강사를 가리킬 칸이
+         *     없다(그 사람의 자리에만 쓴다).
+         */
+        InstructorNameIn: {
+            /** Display Name */
+            display_name: string;
+        };
         /** JoinIn */
         JoinIn: {
             /** Display Name */
@@ -6398,6 +6441,11 @@ export interface components {
             class_name: string;
             /** Instructor Display Name */
             instructor_display_name?: string | null;
+            /**
+             * Instructor Display Names
+             * @default []
+             */
+            instructor_display_names: string[];
             /** Participant Count */
             participant_count: number;
             /** Problem Count */
@@ -9308,6 +9356,50 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_rename_my_instructor_name: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InstructorNameIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassInstructorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
