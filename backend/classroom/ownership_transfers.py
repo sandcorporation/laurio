@@ -22,6 +22,10 @@ ADR-0055, `CONTEXT.md` 「소유권 이전」).
 요청 행 하나만 잠그고, 요청은 클래스 행을 잠가 「대기 하나」를 지킨다.
 
 **보관과 무관하다** — 사람을 들이고 내보내고 넘기는 일은 클래스의 존폐 쪽이다.
+
+**요청·수락·거절은 당사자에게 알린다**(#575) — 요청은 받는 사람에게, 수락·거절은 요청한 사람에게.
+취소·만료는 알리지 않는다. 알림은 트랜잭션이 끝난(커밋된) 뒤 `notify_safely` 로 보낸다 — 알림이
+실패해도 이전은 그대로이고, 롤백된 요청이 알림을 남기지도 않는다.
 """
 
 from __future__ import annotations
@@ -33,6 +37,8 @@ from django.db.models import Q
 from ninja.errors import HttpError
 
 from core.clock import Clock
+from notifications.models import NotificationType
+from notifications.services import notify_safely
 
 from .instructor_scope import OWNER_ONLY_MESSAGE
 from .instructors import is_owner
@@ -83,23 +89,40 @@ def request(class_obj: Class, owner_id: int, co_instructor_id: int) -> Ownership
         locked = Class.objects.select_for_update().get(id=class_obj.id)
         if not is_owner(locked, owner_id):
             raise HttpError(403, OWNER_ONLY_MESSAGE)
-        row = ClassCoInstructor.objects.filter(classroom_id=locked.id, id=co_instructor_id).first()
+        # 받는 사람을 함께 읽어 둔다 — 커밋 뒤의 알림이 따로 조회하다 실패해 응답을 깨지 않게.
+        row = (
+            ClassCoInstructor.objects.select_related("user")
+            .filter(classroom_id=locked.id, id=co_instructor_id)
+            .first()
+        )
         if row is None:
             raise HttpError(404, NO_SUCH_CO_INSTRUCTOR_MESSAGE)
         if locked.ownership_transfers.filter(pending_q(now)).exists():
             raise HttpError(409, ALREADY_PENDING_MESSAGE)
-        return OwnershipTransfer.objects.create(
+        transfer = OwnershipTransfer.objects.create(
             classroom=locked,
             requested_by_id=owner_id,
             recipient_id=row.user_id,
             requested_at=now,
             expires_at=now + timedelta(days=OWNERSHIP_TRANSFER_TTL_DAYS),
         )
+    notify_safely(
+        recipient=row.user,
+        notification_type=NotificationType.CLASSROOM_OWNERSHIP_TRANSFER_REQUESTED,
+        context={
+            "class_id": locked.id,
+            "class_name": locked.name,
+            "requester_display_name": locked.instructor_display_name,
+            "expires_at": transfer.expires_at.isoformat(),
+        },
+    )
+    return transfer
 
 
 def _transfer_or_404(class_obj: Class, transfer_id: int, *, lock: bool) -> OwnershipTransfer:
-    qs = OwnershipTransfer.objects.filter(classroom_id=class_obj.id, id=transfer_id)
-    transfer = (qs.select_for_update() if lock else qs).first()
+    # 요청한 사람을 함께 읽어 둔다(수락·거절 알림의 수신자) — 잠그는 것은 요청 행 하나뿐이다.
+    qs = OwnershipTransfer.objects.select_related("requested_by").filter(classroom_id=class_obj.id, id=transfer_id)
+    transfer = (qs.select_for_update(of=("self",)) if lock else qs).first()
     if transfer is None:
         raise HttpError(404, NO_SUCH_TRANSFER_MESSAGE)
     return transfer
@@ -128,6 +151,14 @@ def decline(class_obj: Class, user_id: int, transfer_id: int) -> None:
         _raise_unless_pending(transfer)
         transfer.declined_at = Clock.now()
         transfer.save(update_fields=["declined_at"])
+        locked = Class.objects.get(id=class_obj.id)
+        row = ClassCoInstructor.objects.filter(classroom_id=locked.id, user_id=user_id).first()
+    _notify_requester(
+        transfer,
+        locked,
+        NotificationType.CLASSROOM_OWNERSHIP_TRANSFER_DECLINED,
+        recipient_display_name=row.display_name if row is not None else "",
+    )
 
 
 def accept(class_obj: Class, user_id: int, transfer_id: int) -> Class:
@@ -171,4 +202,26 @@ def accept(class_obj: Class, user_id: int, transfer_id: int) -> Class:
         )
         transfer.accepted_at = now
         transfer.save(update_fields=["accepted_at"])
+    _notify_requester(
+        transfer,
+        locked,
+        NotificationType.CLASSROOM_OWNERSHIP_TRANSFER_ACCEPTED,
+        recipient_display_name=locked.instructor_display_name,
+    )
     return locked
+
+
+def _notify_requester(
+    transfer: OwnershipTransfer, class_obj: Class, notification_type: str, *, recipient_display_name: str
+) -> None:
+    """요청한(넘긴) 사람에게 받는 사람의 답을 알린다 — 트랜잭션이 끝난 뒤에 부른다."""
+
+    notify_safely(
+        recipient=transfer.requested_by,
+        notification_type=notification_type,
+        context={
+            "class_id": class_obj.id,
+            "class_name": class_obj.name,
+            "recipient_display_name": recipient_display_name,
+        },
+    )

@@ -6803,7 +6803,7 @@ export interface components {
          *     해둔다. User Story 80~89 에 나오는 유형 중 최소 집합을 담았다.
          * @enum {string}
          */
-        NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "scoring_complete" | "appeal_ruled" | "new_contest_in_category" | "payout_awaits_you" | "classroom_token_budget_warning" | "classroom_submission_scored" | "classroom_scoring_key_rejected" | "classroom_contest_entry_rejected" | "operator_notice" | "contest_updated";
+        NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "scoring_complete" | "appeal_ruled" | "new_contest_in_category" | "payout_awaits_you" | "classroom_token_budget_warning" | "classroom_submission_scored" | "classroom_scoring_key_rejected" | "classroom_contest_entry_rejected" | "classroom_ownership_transfer_requested" | "classroom_ownership_transfer_accepted" | "classroom_ownership_transfer_declined" | "operator_notice" | "contest_updated";
         /** OpenAIKeyIn */
         OpenAIKeyIn: {
             /** Api Key */

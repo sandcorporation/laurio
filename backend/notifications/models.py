@@ -52,6 +52,22 @@ class NotificationType(models.TextChoices):
         "classroom_contest_entry_rejected",
         "강의실 공모전 출품 실패",
     )
+    # 소유권 이전(#564)의 요청·수락·거절이 당사자에게 닿는다(#575). 요청은 받는 공동 강사에게,
+    # 수락·거절은 요청한(넘긴) 사람에게만 간다. 취소·만료는 알리지 않는다 — 취소는 요청한 사람이
+    # 스스로 한 일이고, 만료는 거절과 같은 결과라 클래스 화면의 카드가 사라지는 것으로 충분하다.
+    # 만드는 쪽(`classroom.ownership_transfers`)이 이 앱을 모른 채 유형 이름만 쓴다.
+    CLASSROOM_OWNERSHIP_TRANSFER_REQUESTED = (
+        "classroom_ownership_transfer_requested",
+        "강의실 소유권 이전 요청",
+    )
+    CLASSROOM_OWNERSHIP_TRANSFER_ACCEPTED = (
+        "classroom_ownership_transfer_accepted",
+        "강의실 소유권 이전 수락",
+    )
+    CLASSROOM_OWNERSHIP_TRANSFER_DECLINED = (
+        "classroom_ownership_transfer_declined",
+        "강의실 소유권 이전 거절",
+    )
     # Operator 가 한 사용자에게 직접 보내는 알림이다(#418, CONTEXT.md 「운영자
     # 알림」) — 무료 공모전 수상자에게 개최자 보상(기프티콘 등)을 전하는 것이
     # 첫 쓰임이다. 제목·본문·(선택) 이미지는 이 앱의 `OperatorNotice`가 담고,
@@ -77,6 +93,9 @@ CLASSROOM_NOTIFICATION_TYPES = frozenset(
         NotificationType.CLASSROOM_SUBMISSION_SCORED,
         NotificationType.CLASSROOM_SCORING_KEY_REJECTED,
         NotificationType.CLASSROOM_CONTEST_ENTRY_REJECTED,
+        NotificationType.CLASSROOM_OWNERSHIP_TRANSFER_REQUESTED,
+        NotificationType.CLASSROOM_OWNERSHIP_TRANSFER_ACCEPTED,
+        NotificationType.CLASSROOM_OWNERSHIP_TRANSFER_DECLINED,
     }
 )
 
@@ -180,6 +199,28 @@ NOTIFICATION_TYPE_FLAGS: dict[str, dict[str, bool]] = {
     },
     # 낸 사람 자신의 제출에 대한 처리 결과다(#549) — 다른 강의실 알림과 같은 취급.
     NotificationType.CLASSROOM_CONTEST_ENTRY_REJECTED: {
+        "is_transactional": True,
+        "is_promotional": False,
+        "is_quiet_hours_exempt": False,
+        "is_internal_only": True,
+    },
+    # 소유권 이전의 요청·결과(#575) — 당사자 자신의 클래스에 관한 사실 통지라 거래성이고 옵트인이
+    # 필요 없다. 다른 강의실 알림과 같은 규칙으로 서비스 안에서만 보인다(#301): 요청은 7일 동안
+    # 열려 있어 밤에 휴대폰을 울릴 만큼 급하지 않고, 받는 사람은 클래스 목록의 배지와 클래스
+    # 화면의 카드로도 안다.
+    NotificationType.CLASSROOM_OWNERSHIP_TRANSFER_REQUESTED: {
+        "is_transactional": True,
+        "is_promotional": False,
+        "is_quiet_hours_exempt": False,
+        "is_internal_only": True,
+    },
+    NotificationType.CLASSROOM_OWNERSHIP_TRANSFER_ACCEPTED: {
+        "is_transactional": True,
+        "is_promotional": False,
+        "is_quiet_hours_exempt": False,
+        "is_internal_only": True,
+    },
+    NotificationType.CLASSROOM_OWNERSHIP_TRANSFER_DECLINED: {
         "is_transactional": True,
         "is_promotional": False,
         "is_quiet_hours_exempt": False,

@@ -46,9 +46,41 @@ export function describeNotification(notification: NotificationRow): string {
       const attemptLabel = attemptNumber !== null ? `${attemptNumber}번째 시도` : "시도";
       return `'${problemTitle}' ${attemptLabel}는 공모전에는 내지 못했습니다${reason}. 클래스 제출과 채점은 그대로입니다.`;
     }
+    // 소유권 이전(#575) — 요청은 받는 공동 강사가, 수락·거절은 요청한 사람이 받는다.
+    case "classroom_ownership_transfer_requested": {
+      const className = typeof context.class_name === "string" ? context.class_name : "클래스";
+      const requester =
+        typeof context.requester_display_name === "string" && context.requester_display_name
+          ? `${context.requester_display_name}님이`
+          : "소유자가";
+      const until =
+        typeof context.expires_at === "string" ? `${formatShortDateTime(context.expires_at)}까지` : "7일 안에";
+      return `${requester} '${className}' 클래스의 소유권을 나에게 넘기려 합니다 — 넘겨받으면 지금 채점 키가 비워져 내 채점 키를 넣어야 채점이 이어집니다. ${until} 클래스 화면에서 수락하거나 거절해 주세요.`;
+    }
+    case "classroom_ownership_transfer_accepted": {
+      const className = typeof context.class_name === "string" ? context.class_name : "클래스";
+      const recipient = recipientSubject(context);
+      return `${recipient} '${className}' 클래스의 소유권을 넘겨받았습니다 — 이제 나는 이 클래스의 공동 강사입니다.`;
+    }
+    case "classroom_ownership_transfer_declined": {
+      const className = typeof context.class_name === "string" ? context.class_name : "클래스";
+      const recipient = recipientSubject(context);
+      return `${recipient} '${className}' 클래스의 소유권 이전 요청을 거절했습니다 — 소유권은 그대로 나에게 있습니다.`;
+    }
     default:
       return "새 알림이 있습니다.";
   }
+}
+
+// 이름이 없으면 조사가 달라진다(님이 · 공동 강사가) — 소유권 이전 카드와 같은 규칙.
+function recipientSubject(context: Record<string, unknown>): string {
+  return typeof context.recipient_display_name === "string" && context.recipient_display_name
+    ? `${context.recipient_display_name}님이`
+    : "받는 공동 강사가";
+}
+
+function formatShortDateTime(iso: string): string {
+  return new Date(iso).toLocaleString("ko-KR", { month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 export function formatDateTime(iso: string): string {
