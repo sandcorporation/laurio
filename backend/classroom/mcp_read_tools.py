@@ -28,12 +28,14 @@ import json
 from ninja.errors import HttpError
 from ninja.responses import NinjaJSONEncoder
 
+from . import scoring_cost
 from .api import (
     _build_roster_grid,
     _serialize_class,
     _serialize_members,
     _serialize_problem,
     _serialize_problem_list,
+    scoring_cost_estimate,
 )
 from .instructor_scope import class_scope, problem_scope
 from .models import ConnectedApp
@@ -71,9 +73,42 @@ def class_view(class_obj, viewer_id: int) -> dict:
     return _as_screen_json(_serialize_class(class_obj, viewer_id=viewer_id).model_dump(exclude=_CLASS_FIELDS_WITHHELD))
 
 
+def _cost_summary(estimate: scoring_cost.CostEstimate, model_id: str, reasoning_effort: str) -> dict:
+    """화면의 예상 채점 비용표에서 **지금 설정 한 줄만** 짧게(#591, #579 의 크기 원칙) —
+    다른 모델과 견주려면 강사가 화면에서 본다."""
+
+    row = estimate.row_for(model_id, reasoning_effort)
+    summary: dict = {
+        "basis": estimate.basis,
+        "model": model_id,
+        "reasoning_effort": row.reasoning_effort if row is not None else None,
+        "priced": row is not None and row.priced,
+    }
+    if row is None or not row.priced:
+        return summary
+    if row.per_attempt is not None:
+        summary["per_attempt_krw"] = round(row.per_attempt.krw)
+        summary["per_problem_krw"] = round(row.per_problem_krw)
+        summary["participant_count"] = estimate.participant_count
+        summary["attempts_per_participant"] = round(estimate.attempts_per_participant, 1)
+    else:
+        summary["per_attempt_krw_by_source_chars"] = {
+            str(chars): round(cost.krw) for chars, cost in zip(scoring_cost.SOURCE_SIZE_BANDS, row.by_source_size)
+        }
+    summary["ratio_to_gpt_4_1_mini"] = round(row.ratio_to_baseline, 1)
+    summary["open_ended"] = row.open_ended
+    return summary
+
+
 def _get_class(grant: ConnectedApp, arguments: dict) -> dict:
     class_obj = class_scope(_class_id(arguments), grant.instructor_id, write=False, owner=False).class_obj
-    return class_view(class_obj, grant.instructor_id)
+    estimate = scoring_cost_estimate(class_obj)
+    return {
+        **class_view(class_obj, grant.instructor_id),
+        "scoring_cost_estimate": _cost_summary(
+            estimate, class_obj.default_model, class_obj.default_reasoning_effort
+        ),
+    }
 
 
 #: 문제 목록이 화면의 문제 한 줄에서 그대로 옮겨 싣는 칸(#579). 설명·채점 지침·체크리스트
@@ -108,7 +143,14 @@ def _list_problems(grant: ConnectedApp, arguments: dict) -> dict:
 
 def _get_problem(grant: ConnectedApp, arguments: dict) -> dict:
     scope = problem_scope(_class_id(arguments), _problem_id(arguments), grant.instructor_id, write=False, owner=False)
-    return _as_screen_json(_serialize_problem(scope.problem, scope.class_obj))
+    problem = scope.problem
+    estimate = scoring_cost_estimate(scope.class_obj, problem)
+    return {
+        **_as_screen_json(_serialize_problem(problem, scope.class_obj)),
+        "scoring_cost_estimate": _cost_summary(
+            estimate, problem.effective_model(), problem.effective_reasoning_effort()
+        ),
+    }
 
 
 def _list_participants(grant: ConnectedApp, arguments: dict) -> dict:
@@ -158,6 +200,47 @@ _TEMPLATE_SUMMARY = {
         "created_at": _DATETIME,
     },
 }
+
+_SCORING_COST_ESTIMATE = {
+    "type": "object",
+    "description": (
+        "지금 설정(모델·추론 강도)으로 채점할 때의 예상 비용 — 어림이고, 실제 청구액은 OpenAI 사용량 화면이 "
+        "기준이다. 채점은 시도 하나에 한 번이다"
+    ),
+    "properties": {
+        "basis": {
+            "type": "string",
+            "enum": ["problem", "class", "source_sizes"],
+            "description": (
+                "셈의 기준 — problem 이 문제의 지난 시도 평균 길이, class 클래스 전체 평균, source_sizes 아직 "
+                "시도가 없어 소스 크기별"
+            ),
+        },
+        "model": {"type": "string"},
+        "reasoning_effort": {"type": ["string", "null"], "description": "추론 모델일 때만"},
+        "priced": {"type": "boolean", "description": "거짓이면 이 모델의 단가를 몰라 비용을 셈하지 못했다"},
+        "per_attempt_krw": {"type": "integer", "description": "시도 1건(원)"},
+        "per_problem_krw": {"type": "integer", "description": "문제 하나(참여자 수 × 1인 평균 시도 수, 원)"},
+        "participant_count": _COUNT,
+        "attempts_per_participant": {"type": "number", "description": "1인 평균 시도 수(클래스 실측, 없으면 2.5)"},
+        "per_attempt_krw_by_source_chars": {
+            "type": "object",
+            "description": "basis 가 source_sizes 일 때 — 소스 글자 수별 시도 1건(원)",
+            "additionalProperties": {"type": "integer"},
+        },
+        "ratio_to_gpt_4_1_mini": {"type": "number", "description": "gpt-4.1-mini 대비 배율"},
+        "open_ended": {"type": "boolean", "description": "참이면 위로 열린 어림(추론 강도 높음)"},
+    },
+    "required": ["basis", "model", "priced"],
+}
+
+
+
+def _with_cost_estimate(schema: dict) -> dict:
+    """`get_class`·`get_problem` 만 예상 채점 비용을 싣는다 — 클래스를 바꾸는 도구의 결과에는 없다."""
+
+    return {**schema, "properties": {**schema["properties"], "scoring_cost_estimate": _SCORING_COST_ESTIMATE}}
+
 
 _CLASS_ONLY_INPUT = {
     "type": "object",
@@ -307,10 +390,11 @@ READ_TOOL_SPECS: list[dict] = [
         "description": (
             "클래스 하나의 설정을 돌려준다 — 이름, 내 역할(소유자·공동 강사), 소유자의 강사 이름, 가입 코드, 보관 여부, 기본 채점 모델과 "
             "추론 강도, OpenAI 키가 있는가(키 값은 주지 않는다)와 그 상태, 채점 토큰 예산·사용량·남은 양·"
-            "경고 임계, 제출이 있는가, 공개된 템플릿. 내가 강사가 아닌 클래스는 찾을 수 없다고 답한다."
+            "경고 임계, 제출이 있는가, 공개된 템플릿, 기본 모델·추론 강도로 채점할 때의 예상 비용(시도 1건·문제 "
+            "하나, 원). 내가 강사가 아닌 클래스는 찾을 수 없다고 답한다."
         ),
         "input_schema": _CLASS_ONLY_INPUT,
-        "output_schema": CLASS_OUTPUT_SCHEMA,
+        "output_schema": _with_cost_estimate(CLASS_OUTPUT_SCHEMA),
         "handler": _get_class,
     },
     {
@@ -334,7 +418,8 @@ READ_TOOL_SPECS: list[dict] = [
         "title": "문제 상세",
         "description": (
             "문제 하나의 상세를 돌려준다 — 설명(마크다운 원문)·체크리스트·채점 설정(모델·추론 강도·채점 "
-            "지침·문법 검사)·상태와 지금 할 수 있는 상태 바꾸기·제출 형식·달성률·지울 수 있는가."
+            "지침·문법 검사)·상태와 지금 할 수 있는 상태 바꾸기·제출 형식·달성률·지울 수 있는가, 그리고 이 문제가 "
+            "실제로 쓸 모델로 채점할 때의 예상 비용(시도 1건·참여자 전체, 원)."
         ),
         "input_schema": {
             "type": "object",
@@ -342,7 +427,7 @@ READ_TOOL_SPECS: list[dict] = [
             "required": ["class_id", "problem_id"],
             "additionalProperties": False,
         },
-        "output_schema": _PROBLEM_OBJECT,
+        "output_schema": _with_cost_estimate(_PROBLEM_OBJECT),
         "handler": _get_problem,
     },
     {

@@ -174,6 +174,51 @@ class ScoringModelCatalogOut(Schema):
     unavailable_reason: str | None = None
 
 
+class ScoringCostAttemptOut(Schema):
+    """시도 1건의 어림(#591) — 원화와 그 시도가 예산에서 쓸 토큰."""
+
+    krw: float
+    tokens: int
+
+
+class ScoringCostRowOut(Schema):
+    """예상 채점 비용표의 한 줄(#591) — 모델 하나(추론 모델이면 강도 하나)."""
+
+    model_id: str
+    #: 추론 모델이면 low·medium·high, 아니면 `None`.
+    reasoning_effort: str | None = None
+    #: 단가표에 있는가 — 거짓이면 화면은 「비용 미확인」이다.
+    priced: bool
+    #: 위로 열린 어림인가(추론 강도 높음) — 화면은 「약 N원~」.
+    open_ended: bool = False
+    #: 이 문제·클래스 평균 길이에서 시도 1건. 기준이 소스 크기별이면 `None`.
+    per_attempt: ScoringCostAttemptOut | None = None
+    #: 참여자 수 × 1인 평균 시도 수 × 시도 1건.
+    per_problem_krw: float | None = None
+    #: gpt-4.1-mini 대비 배율.
+    ratio_to_baseline: float | None = None
+    #: `source_size_bands` 순서의 시도 1건(단가가 없으면 빈 목록).
+    by_source_size: list[ScoringCostAttemptOut] = []
+
+
+class ScoringCostEstimateOut(Schema):
+    """강사가 모델·추론 강도를 고를 때 미리 보는 예상 채점 비용(#591, CONTEXT.md
+    「예상 채점 비용」). `basis` — problem(이 문제의 지난 시도 평균) | class(클래스 평균) |
+    source_sizes(아직 시도가 없어 소스 크기별)."""
+
+    basis: str
+    sample_count: int
+    avg_prompt_chars: int | None = None
+    avg_input_tokens: int | None = None
+    participant_count: int
+    attempts_per_participant: float
+    attempts_per_participant_measured: bool
+    source_size_bands: list[int]
+    baseline_model_id: str
+    krw_per_usd: int
+    rows: list[ScoringCostRowOut]
+
+
 class JoinLinkOut(Schema):
     join_code: str
 

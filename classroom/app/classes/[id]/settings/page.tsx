@@ -9,6 +9,8 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+
+import { BudgetAttemptsHint, ClassScoringCostTable } from "@/app/components/ScoringCost";
 import type { FormEvent } from "react";
 
 import {
@@ -47,6 +49,7 @@ import { checkPublicTextForBannedWords } from "@/lib/moderation/public-text-chec
 import { useProblems } from "@/lib/problems/use-problems";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { isSelectedModelReasoning, REASONING_EFFORT_OPTIONS } from "@/lib/scoring/reasoning";
+import { useScoringCost } from "@/lib/scoring/use-scoring-cost";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
 import { liveTemplateFrom, type LiveTemplate } from "@/lib/problem-templates/live-state";
 
@@ -342,6 +345,7 @@ export default function ClassSettingsPage() {
   const classId = Number(params.id);
   const { state, reload } = useClass(classId);
   const { state: modelsState, reload: reloadModels } = useScoringModels(classId);
+  const costState = useScoringCost(classId);
 
   const [apiKey, setApiKey] = useState("");
   const [keySaving, setKeySaving] = useState(false);
@@ -436,6 +440,13 @@ export default function ClassSettingsPage() {
   // 그리지 않고, 지금 값과 「소유자만」이라는 사실만 보여 준다. 강사 이름은 누구나 **자기**
   // 것을 바꾼다(#565) — 이 칸은 보는 사람의 이름이다.
   const isOwner = classroom.role === "owner";
+  const selectedIsReasoning =
+    modelsState.status === "ready" &&
+    isSelectedModelReasoning(
+      defaultModel,
+      modelsState.models,
+      defaultModel === classroom.default_model ? classroom.default_model_is_reasoning : false,
+    );
   const namesPatch = classNamesPatch(
     { name: classroom.name, instructorDisplayName: classroom.my_instructor_display_name },
     { name: classNameDraft, instructorDisplayName },
@@ -776,7 +787,7 @@ export default function ClassSettingsPage() {
                       모델마다 한 번에 받을 수 있는 소스의 양이 다릅니다 — 긴 문제에 작은 모델을 고르면
                       소스 뒷부분이 잘린 채 채점됩니다.
                     </span>
-                    {isSelectedModelReasoning(defaultModel, modelsState.models, defaultModel === classroom.default_model ? classroom.default_model_is_reasoning : false) ? (
+                    {selectedIsReasoning ? (
                       <div className="flex flex-col gap-1.5 border-t border-rule pt-3">
                         <label htmlFor="class-default-reasoning-effort">
                           <FieldLabel>기본 추론 강도</FieldLabel>
@@ -799,6 +810,14 @@ export default function ClassSettingsPage() {
                         </span>
                       </div>
                     ) : null}
+                    <div className="border-t border-rule pt-3">
+                      <ClassScoringCostTable
+                        state={costState}
+                        modelId={defaultModel}
+                        reasoningEffort={defaultReasoningEffort}
+                        isReasoning={selectedIsReasoning}
+                      />
+                    </div>
                   </form>
                 )}
                 {modelError ? (
@@ -877,6 +896,12 @@ export default function ClassSettingsPage() {
                           onChange={(event) => setTokenBudget(event.target.value)}
                           placeholder="예: 1000000"
                           className={`${INPUT_CLASS} font-mono`}
+                        />
+                        <BudgetAttemptsHint
+                          state={costState}
+                          modelId={defaultModel}
+                          reasoningEffort={defaultReasoningEffort}
+                          budgetText={tokenBudget}
                         />
                       </div>
                       <div className="flex w-[150px] flex-col gap-1.5">

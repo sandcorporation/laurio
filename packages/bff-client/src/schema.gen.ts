@@ -1280,6 +1280,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/scoring-cost": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Class Scoring Cost
+         * @description 「클래스 설정 › 채점」과 「문제 설정 › 채점 모델」이 보이는 예상 채점 비용(#591).
+         *     `problem_id` 를 주면 그 문제의 지난 시도부터 기준으로 삼는다. 남의 클래스·문제는 404다.
+         */
+        get: operations["classroom_api_get_class_scoring_cost"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/scoring-models": {
         parameters: {
             query?: never;
@@ -7978,6 +7999,73 @@ export interface components {
          */
         ScoringBasis: "ai_judged" | "no_scoring_input" | "platform_failure";
         /**
+         * ScoringCostAttemptOut
+         * @description 시도 1건의 어림(#591) — 원화와 그 시도가 예산에서 쓸 토큰.
+         */
+        ScoringCostAttemptOut: {
+            /** Krw */
+            krw: number;
+            /** Tokens */
+            tokens: number;
+        };
+        /**
+         * ScoringCostEstimateOut
+         * @description 강사가 모델·추론 강도를 고를 때 미리 보는 예상 채점 비용(#591, CONTEXT.md
+         *     「예상 채점 비용」). `basis` — problem(이 문제의 지난 시도 평균) | class(클래스 평균) |
+         *     source_sizes(아직 시도가 없어 소스 크기별).
+         */
+        ScoringCostEstimateOut: {
+            /** Attempts Per Participant */
+            attempts_per_participant: number;
+            /** Attempts Per Participant Measured */
+            attempts_per_participant_measured: boolean;
+            /** Avg Input Tokens */
+            avg_input_tokens?: number | null;
+            /** Avg Prompt Chars */
+            avg_prompt_chars?: number | null;
+            /** Baseline Model Id */
+            baseline_model_id: string;
+            /** Basis */
+            basis: string;
+            /** Krw Per Usd */
+            krw_per_usd: number;
+            /** Participant Count */
+            participant_count: number;
+            /** Rows */
+            rows: components["schemas"]["ScoringCostRowOut"][];
+            /** Sample Count */
+            sample_count: number;
+            /** Source Size Bands */
+            source_size_bands: number[];
+        };
+        /**
+         * ScoringCostRowOut
+         * @description 예상 채점 비용표의 한 줄(#591) — 모델 하나(추론 모델이면 강도 하나).
+         */
+        ScoringCostRowOut: {
+            /**
+             * By Source Size
+             * @default []
+             */
+            by_source_size: components["schemas"]["ScoringCostAttemptOut"][];
+            /** Model Id */
+            model_id: string;
+            /**
+             * Open Ended
+             * @default false
+             */
+            open_ended: boolean;
+            per_attempt?: components["schemas"]["ScoringCostAttemptOut"] | null;
+            /** Per Problem Krw */
+            per_problem_krw?: number | null;
+            /** Priced */
+            priced: boolean;
+            /** Ratio To Baseline */
+            ratio_to_baseline?: number | null;
+            /** Reasoning Effort */
+            reasoning_effort?: string | null;
+        };
+        /**
          * ScoringModelCatalogOut
          * @description 클래스 기준 채점 모델 선택지(#401) — 기존 전역 `GET
          *     /classroom/scoring-models`를 대신한다. `source`가 "fallback"이면
@@ -10806,6 +10894,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClassroomRosterGridOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_get_class_scoring_cost: {
+        parameters: {
+            query?: {
+                problem_id?: number | null;
+            };
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScoringCostEstimateOut"];
                 };
             };
             /** @description Not Found */
