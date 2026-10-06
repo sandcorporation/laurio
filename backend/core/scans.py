@@ -145,6 +145,10 @@ def run_scan(name: str, *, as_of=None, ctx: dict | None = None, params: dict | N
     """
 
     spec = SCAN_REGISTRY[name]
+    # 오류에 어느 스캔인지 남긴다(#590) — 프레임 지역 변수는 보내지 않는다.
+    from core.observability import tag_error_scope
+
+    tag_error_scope("scan", scan=name)
     if spec.enabled is not None and not spec.enabled():
         # 이름은 등록부에 있지만 지금은 꺼져 있다(#271) — 없는 스캔을 부른 것과
         # 같은 예외로 통일한다. `is_scan_active`를 먼저 확인하지 않고 직접

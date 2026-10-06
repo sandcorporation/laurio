@@ -80,6 +80,7 @@ from core.llm_scoring import (
     ScoringOutput,
     SourceFile,
 )
+from core.observability import tag_error_scope
 from core.repository_adapters import GitHubAdapterError, get_github_adapter
 from core.scans import ScanSpec
 from core.source_selection import select_source_files
@@ -708,6 +709,13 @@ def score_classroom_submission_once(
     syntax_check = run_syntax_check(source.raw, enabled=problem.syntax_check_enabled)
 
     model = problem.effective_model()
+    tag_error_scope(
+        "classroom_scoring",
+        submission_id=submission.id,
+        class_id=class_obj.pk,
+        problem_id=problem.id,
+        scoring_model=model,
+    )
     if not matches_naming_rule(model):
         # Problem.model·Class.default_model은 저장 시점에 검증되지만(classroom.api),
         # 채점 시점의 이름 규칙이 그 사이 좁혀졌을 수 있다 — 재시도로 나을 수
@@ -944,6 +952,8 @@ def score_classroom_attempt(submission_id: int) -> dict:
     아니라 다음 스캔 tick 에 다시 들어간다. 다른 태스크가 잠그고 있으면(`locked_elsewhere`)
     비우지 않는다 — 그 태스크가 끝나며 비운다."""
 
+    # 오류에는 식별자만 싣는다(#590) — 프레임 지역 변수(키·소스)는 보내지 않는다.
+    tag_error_scope("classroom_scoring", submission_id=submission_id)
     as_of = Clock.now()
     ctx: dict = {}
     try:
@@ -952,6 +962,12 @@ def score_classroom_attempt(submission_id: int) -> dict:
         result = {"submission_id": submission_id, "status": "not_a_candidate"}
     else:
         class_obj = submission.problem.classroom
+        tag_error_scope(
+            "classroom_scoring",
+            submission_id=submission_id,
+            class_id=class_obj.pk,
+            problem_id=submission.problem_id,
+        )
         if class_obj.scoring_quota_exhausted_at is not None:
             # 크레딧이 바닥난 클래스가 다시 확인 간격을 넘겨 후보에 들었다(#586) — 같은 클래스의
             # 시도 중 하나만 벤더를 부른다. 진 쪽은 시도로 남기지 않고 건너뛴다.
