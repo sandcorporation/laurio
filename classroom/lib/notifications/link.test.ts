@@ -76,3 +76,19 @@ describe("notificationHref — 알 수 없는 유형", () => {
     expect(notificationHref(row({ notification_type: "unknown_type" }))).toBeNull();
   });
 });
+
+describe("notificationHref — 소유권 이전 (#575)", () => {
+  it.each([
+    "classroom_ownership_transfer_requested",
+    "classroom_ownership_transfer_accepted",
+    "classroom_ownership_transfer_declined",
+  ])("%s 는 그 클래스 화면으로 간다", (notification_type) => {
+    expect(notificationHref(row({ notification_type, context: { class_id: 7 } }))).toBe("/classes/7");
+  });
+
+  it("클래스 id가 없으면 링크를 짓지 않는다", () => {
+    expect(
+      notificationHref(row({ notification_type: "classroom_ownership_transfer_requested", context: {} })),
+    ).toBeNull();
+  });
+});

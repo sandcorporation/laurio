@@ -39,6 +39,15 @@ export function notificationHref(notification: NotificationRow): string | null {
       if (typeof classId !== "number") return null;
       return `/classes/${classId}/settings#scoring-key`;
     }
+    // 소유권 이전(#575) — 받는 사람은 클래스 화면 맨 위의 요청 카드로, 넘긴 사람은 강사 카드가
+    // 있는 같은 화면으로 간다.
+    case "classroom_ownership_transfer_requested":
+    case "classroom_ownership_transfer_accepted":
+    case "classroom_ownership_transfer_declined": {
+      const classId = context.class_id;
+      if (typeof classId !== "number") return null;
+      return `/classes/${classId}`;
+    }
     default:
       return null;
   }

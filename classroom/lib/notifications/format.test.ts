@@ -99,3 +99,51 @@ describe("classroom_contest_entry_rejected (#549)", () => {
     expect(text).toBe("'할 일 웹앱' 3번째 시도는 공모전에는 내지 못했습니다 — 마감됐습니다. 클래스 제출과 채점은 그대로입니다.");
   });
 });
+
+describe("소유권 이전 알림 (#575)", () => {
+  it("요청은 누가 어느 클래스를 넘기려 하는지, 키가 비워진다는 것, 언제까지인지를 말한다", () => {
+    const text = describeNotification(
+      row({
+        notification_type: "classroom_ownership_transfer_requested",
+        context: {
+          class_name: "알고리즘 1반",
+          requester_display_name: "주강사",
+          expires_at: "2026-10-13T03:00:00Z",
+        },
+      }),
+    );
+    expect(text).toContain("주강사님이 '알고리즘 1반' 클래스의 소유권을 나에게 넘기려 합니다");
+    expect(text).toContain("채점 키가 비워져");
+    expect(text).toContain("까지 클래스 화면에서 수락하거나 거절해 주세요");
+  });
+
+  it("요청한 사람의 강사 이름이 비어 있으면 「소유자가」로 말한다", () => {
+    const text = describeNotification(
+      row({
+        notification_type: "classroom_ownership_transfer_requested",
+        context: { class_name: "알고리즘 1반", requester_display_name: "" },
+      }),
+    );
+    expect(text.startsWith("소유자가 '알고리즘 1반'")).toBe(true);
+  });
+
+  it("수락은 넘긴 사람에게 이제 공동 강사라는 것을 말한다", () => {
+    const text = describeNotification(
+      row({
+        notification_type: "classroom_ownership_transfer_accepted",
+        context: { class_name: "알고리즘 1반", recipient_display_name: "보조 강사" },
+      }),
+    );
+    expect(text).toBe("보조 강사님이 '알고리즘 1반' 클래스의 소유권을 넘겨받았습니다 — 이제 나는 이 클래스의 공동 강사입니다.");
+  });
+
+  it("거절은 소유자가 그대로라는 것을 말한다", () => {
+    const text = describeNotification(
+      row({
+        notification_type: "classroom_ownership_transfer_declined",
+        context: { class_name: "알고리즘 1반", recipient_display_name: "보조 강사" },
+      }),
+    );
+    expect(text).toBe("보조 강사님이 '알고리즘 1반' 클래스의 소유권 이전 요청을 거절했습니다 — 소유권은 그대로 나에게 있습니다.");
+  });
+});
