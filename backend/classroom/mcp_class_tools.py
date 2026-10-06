@@ -11,10 +11,10 @@
 부른다. 인자는 화면 입력 스키마(`ClassIn`·`ClassPatchIn`·`ImportTemplateIn`·
 `ImportClassTemplateIn`)로 검증하므로 금칙어가 덮는 칸도 화면과 같다.
 
-**OpenAI 키는 여기 없다**(#511 「OpenAI 키」). 키를 넣거나 바꾸거나 지우는 도구가 없고,
-설정 고치기의 입력 스키마에도 키 칸이 없어 `api_key` 같은 인자는 「알 수 없는 인자」로
-거절된다 — 비밀값이 대화 기록과 AI 업체에 남지 않는다. 결과의 클래스도 키의 가린 표시
-없이 「키가 있는가」만 싣는다(`mcp_read_tools.class_view`).
+**채점 연결은 여기 없다**(#511 「OpenAI 키」, #605). OpenAI 키든 호환 서버든 넣거나 바꾸거나
+지우는 도구가 없고, 설정 고치기의 입력 스키마에도 연결 칸이 없어 `api_key`·`scoring_server_url`
+같은 인자는 「알 수 없는 인자」로 거절된다 — 비밀값이 대화 기록과 AI 업체에 남지 않는다. 결과의
+클래스도 값 조각 없이 「연결이 있는가」·종류·호스트만 싣는다(`mcp_read_tools.class_view`).
 
 **전부 쓰기 도구다**(`read_only=False`) — 디스패치가 성공한 호출마다 `ConnectedAppWrite`
 한 줄을 남긴다(`classroom.mcp_tool` docstring). 클래스 삭제·템플릿 공개는 두 단계 확인과
@@ -125,7 +125,7 @@ _UPDATE_CLASS_INPUT = _object(
         },
         "default_model": {
             "type": "string",
-            "description": "기본 채점 모델 — 자기 모델을 정하지 않은 문제가 따른다. 클래스의 OpenAI 키로 쓸 수 있는 모델이어야 한다.",
+            "description": "기본 채점 모델 — 자기 모델을 정하지 않은 문제가 따른다. 클래스의 채점 연결로 쓸 수 있는 모델이어야 한다.",
         },
         "default_reasoning_effort": {
             "type": "string",
@@ -259,7 +259,7 @@ CLASS_TOOLS: list[Tool] = [
         title="클래스 만들기",
         description=(
             "새 클래스를 만든다 — 이름과 강사로 불릴 이름. 새 클래스에는 가입 코드가 생기고, 채점에 쓸 "
-            "OpenAI 키는 들어 있지 않다(키는 강사가 화면에서만 넣는다)."
+            "채점 연결(OpenAI 키·호환 서버)은 들어 있지 않다(소유자가 화면에서만 넣는다)."
         ),
         input_schema=_CREATE_CLASS_INPUT,
         output_schema=_CLASS_RESULT,
@@ -271,7 +271,7 @@ CLASS_TOOLS: list[Tool] = [
         title="클래스 복사해서 새로 열기",
         description=(
             "클래스 하나를 문제·체크리스트·채점 설정과 함께 복사해 새 클래스로 연다. 이름 뒤에 「 사본」이 "
-            "붙고, 새 가입 코드가 생긴다. 참여자·제출·OpenAI 키는 따라오지 않는다. 보관된 클래스도 복사할 수 있다."
+            "붙고, 새 가입 코드가 생긴다. 참여자·제출·채점 연결(OpenAI 키·호환 서버)은 따라오지 않는다. 보관된 클래스도 복사할 수 있다."
         ),
         input_schema=_CLASS_REF_INPUT,
         output_schema=_CLASS_RESULT,
@@ -310,7 +310,7 @@ CLASS_TOOLS: list[Tool] = [
             "보낸 칸만 바뀐다. 보관된 클래스도 고칠 수 있다. 채점 토큰 예산·경고 임계·강사로 불릴 이름(소유자의 "
             "이름이다)은 소유자만 고친다 — 공동 강사가 그 칸을 보내면 아무것도 바뀌지 않고 거절된다. "
             "소유자든 공동 강사든 내 강사 이름은 rename_my_instructor_name 으로 바꾼다. "
-            "OpenAI 키는 이 도구로 넣거나 바꿀 수 없다 — 소유자가 화면에서만 넣는다."
+            "채점 연결(OpenAI 키·호환 서버)은 이 도구로 넣거나 바꿀 수 없다 — 소유자가 화면에서만 넣는다."
         ),
         input_schema=_UPDATE_CLASS_INPUT,
         output_schema=_CLASS_RESULT,
@@ -379,7 +379,7 @@ CLASS_TOOLS: list[Tool] = [
         title="클래스 템플릿 가져오기",
         description=(
             "공개된 클래스 템플릿을 새 클래스로 가져온다 — 이름은 직접 정하고, 문제들은 순서 그대로 초안으로 "
-            "들어온다. 새 가입 코드가 생기고 OpenAI 키는 들어 있지 않다."
+            "들어온다. 새 가입 코드가 생기고 채점 연결(OpenAI 키·호환 서버)은 들어 있지 않다."
         ),
         input_schema=_IMPORT_CLASS_TEMPLATE_INPUT,
         output_schema=_CLASS_RESULT,

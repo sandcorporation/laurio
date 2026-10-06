@@ -153,7 +153,7 @@ _CHECKLIST_ITEM_IN = {
 }
 _MODEL = {
     "type": "string",
-    "description": "이 문제만의 채점 모델. 빈 문자열이면 클래스 기본값을 따른다. 클래스의 OpenAI 키로 쓸 수 있는 모델이어야 한다.",
+    "description": "이 문제만의 채점 모델. 빈 문자열이면 클래스 기본값을 따른다. 클래스의 채점 연결로 쓸 수 있는 모델이어야 한다.",
 }
 _REASONING_EFFORT = {
     "type": "string",
