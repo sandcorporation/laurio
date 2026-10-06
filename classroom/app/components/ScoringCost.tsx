@@ -14,12 +14,17 @@ import {
   formatKrw,
   formatManCount,
   formatRatio,
+  formatTokens,
   type ScoringCostEstimate,
   type ScoringCostRow,
 } from "@/lib/scoring/cost";
 import type { ScoringCostState } from "@/lib/scoring/use-scoring-cost";
 
 const BILLING_NOTE = "실제 청구액은 OpenAI 사용량 화면이 기준입니다.";
+// 호환 서버(#604) — 단가를 몰라 토큰으로만 보인다.
+const TOKEN_NOTE =
+  "호환 서버는 단가를 알 수 없어 토큰으로만 셈합니다. 채점 예산도 토큰으로 세고, 서버가 사용량을 알려 주지 않으면 프롬프트 길이로 어림해 셉니다.";
+const BAND_NAMES = ["작은 과제", "보통", "큰 프로젝트"];
 const UNPRICED = "비용 미확인";
 
 function CurrentBadge() {
@@ -50,6 +55,7 @@ function tableRows(
     open_ended: false,
     per_attempt: null,
     per_problem_krw: null,
+    per_problem_tokens: null,
     ratio_to_baseline: null,
     by_source_size: [],
   };
@@ -73,6 +79,17 @@ export function ClassScoringCostTable({
 }) {
   if (state.status !== "ready") return null;
   const { estimate } = state;
+  if (estimate.unit === "tokens") {
+    return (
+      <TokenEstimate
+        estimate={estimate}
+        modelId={modelId}
+        scope="class"
+        testIdPrefix="class"
+        title="예상 채점 사용량"
+      />
+    );
+  }
   const { rows, current } = tableRows(estimate, modelId, reasoningEffort, isReasoning);
   const bySize = estimate.basis === "source_sizes";
   const isCurrent = (row: ScoringCostRow) =>
@@ -280,6 +297,17 @@ export function ProblemScoringCost({
 }) {
   if (state.status !== "ready") return null;
   const { estimate } = state;
+  if (estimate.unit === "tokens") {
+    return (
+      <TokenEstimate
+        estimate={estimate}
+        modelId={modelId}
+        scope="problem"
+        testIdPrefix={testIdPrefix}
+        title="이 문제의 예상 채점 사용량"
+      />
+    );
+  }
   const row = findCostRow(estimate, modelId, reasoningEffort);
   const baseline = findCostRow(estimate, estimate.baseline_model_id, "");
   const bySize = estimate.basis === "source_sizes";
@@ -359,6 +387,70 @@ export function ProblemScoringCost({
       <p className="border-t border-rule px-3.5 py-2.5 text-[11.5px] leading-relaxed text-ink/45">
         체크리스트 전부를 시도 하나에 한 번에 판정합니다. 소스가 길수록, 추론 강도가 높을수록 비용이 커집니다.{" "}
         {BILLING_NOTE}
+      </p>
+    </div>
+  );
+}
+
+/** 호환 서버 클래스(#604) — 원화·배율·「더 싼 모델로 바꾸기」 없이 지금 설정의 토큰만. */
+function TokenEstimate({
+  estimate,
+  modelId,
+  scope,
+  testIdPrefix,
+  title,
+}: {
+  estimate: ScoringCostEstimate;
+  modelId: string;
+  scope: "class" | "problem";
+  testIdPrefix: string;
+  title: string;
+}) {
+  // 토큰 어림은 모델 이름이 아니라 실을 추론 강도로만 갈린다 — 아직 저장하지 않은 모델을 골라도
+  // 지금 설정의 줄로 보인다.
+  const row = estimate.rows.find((candidate) => candidate.model_id === modelId) ?? estimate.rows[0] ?? null;
+  let cells: { label: string; value: string }[] = [];
+  if (row && estimate.basis === "source_sizes") {
+    cells = estimate.source_size_bands.map((chars, index) => ({
+      label: `시도 1건 · ${BAND_NAMES[index] ?? ""} · 소스 약 ${formatManCount(chars)} 자`,
+      value: row.by_source_size[index] ? formatTokens(row.by_source_size[index].tokens, row.open_ended) : "—",
+    }));
+  } else if (row) {
+    cells = [
+      { label: "시도 1건", value: row.per_attempt ? formatTokens(row.per_attempt.tokens, row.open_ended) : "—" },
+      {
+        label: `문제 하나 · 참여자 ${estimate.participant_count}명 · 1인 ${formatAttemptsPerParticipant(estimate.attempts_per_participant)}`,
+        value:
+          row.per_problem_tokens && estimate.participant_count > 0
+            ? formatTokens(row.per_problem_tokens, row.open_ended)
+            : "—",
+      },
+    ];
+  }
+  return (
+    <div data-testid={`${testIdPrefix}-scoring-cost`} className="@container mt-1 border border-rule">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-rule px-3.5 py-3">
+        <h3 className="text-[13.5px] font-semibold">{title}</h3>
+        <span data-testid={`${testIdPrefix}-scoring-cost-basis`} className="text-[11.5px] text-ink/45">
+          {costBasisText(estimate, scope)}
+        </span>
+      </div>
+      <div className="flex flex-wrap items-center border-b border-rule px-3.5 py-2.5 text-[13px]">
+        <span className="font-semibold">{modelId}</span>
+        <CurrentBadge />
+      </div>
+      {cells.length > 0 ? (
+        <div className={`grid grid-cols-1 ${cells.length === 3 ? "@[420px]:grid-cols-3" : "@[420px]:grid-cols-2"}`}>
+          {cells.map((cell, index) => (
+            <CostCell key={cell.label} {...cell} last={index === cells.length - 1} />
+          ))}
+        </div>
+      ) : null}
+      <p
+        data-testid={`${testIdPrefix}-scoring-cost-token-note`}
+        className="border-t border-rule px-3.5 py-2.5 text-[11.5px] leading-relaxed text-ink/45"
+      >
+        {TOKEN_NOTE}
       </p>
     </div>
   );

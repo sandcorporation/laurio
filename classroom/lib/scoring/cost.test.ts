@@ -8,6 +8,7 @@ import {
   formatKrw,
   formatManCount,
   formatRatio,
+  formatTokens,
   type ScoringCostEstimate,
   type ScoringCostRow,
 } from "./cost";
@@ -20,6 +21,7 @@ function row(partial: Partial<ScoringCostRow>): ScoringCostRow {
     open_ended: false,
     per_attempt: null,
     per_problem_krw: null,
+    per_problem_tokens: null,
     ratio_to_baseline: 1,
     by_source_size: [],
     ...partial,
@@ -28,6 +30,7 @@ function row(partial: Partial<ScoringCostRow>): ScoringCostRow {
 
 function estimate(partial: Partial<ScoringCostEstimate>): ScoringCostEstimate {
   return {
+    unit: "krw",
     basis: "class",
     sample_count: 40,
     avg_prompt_chars: 55_000,
@@ -107,5 +110,25 @@ describe("예상 채점 비용 적기 (#591)", () => {
     expect(attemptsWithinBudget("176500", bySize)).toBe(10);
     expect(attemptsWithinBudget("", measured)).toBeNull();
     expect(attemptsWithinBudget("500000", null)).toBeNull();
+  });
+});
+
+describe("호환 서버 — 토큰으로 (#604)", () => {
+  it("토큰은 만 단위로 줄여 「약 N만 토큰」으로 적는다", () => {
+    expect(formatTokens(18_652)).toBe("약 1.9만 토큰");
+    expect(formatTokens(5_530)).toBe("약 5,530 토큰");
+    expect(formatTokens(22_500, true)).toBe("약 2.3만 토큰~");
+  });
+
+  it("토큰 줄은 강도가 이미 풀려 있어 모델로 찾고, 예산 안 시도 수도 그 토큰으로 센다", () => {
+    const tokenRow = row({
+      priced: false,
+      ratio_to_baseline: null,
+      per_attempt: { krw: null, tokens: 20_000 },
+      per_problem_tokens: 900_000,
+    });
+    const found = findCostRow(estimate({ unit: "tokens", rows: [tokenRow] }), "gpt-4.1-mini", "medium");
+    expect(found).toBe(tokenRow);
+    expect(attemptsWithinBudget("1000000", found)).toBe(50);
   });
 });

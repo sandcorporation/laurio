@@ -302,4 +302,10 @@ def test_get_class_and_get_problem_carry_a_short_cost_estimate_for_the_current_s
 
     patch_class(client, access, class_id, {"default_model": "gpt-4o"})
     unpriced = _structured(client, token, "get_class", class_id=class_id)["scoring_cost_estimate"]
-    assert unpriced == {"basis": "source_sizes", "model": "gpt-4o", "reasoning_effort": None, "priced": False}
+    assert unpriced == {
+        "basis": "source_sizes",
+        "unit": "krw",
+        "model": "gpt-4o",
+        "reasoning_effort": None,
+        "priced": False,
+    }

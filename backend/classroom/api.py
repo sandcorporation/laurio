@@ -244,6 +244,7 @@ def _serialize_class(class_obj: Class, *, viewer_id: int) -> ClassOut:
         token_budget=class_obj.token_budget,
         token_budget_warning_threshold_percent=class_obj.token_budget_warning_threshold_percent,
         token_usage_total=class_obj.token_usage_total,
+        token_usage_estimated=class_obj.token_usage_estimated,
         token_budget_remaining=token_budget_remaining,
         token_budget_exhausted=class_obj.token_budget_exhausted(),
         has_submissions=ClassroomSubmission.objects.filter(problem__classroom=class_obj).exists(),
@@ -786,8 +787,8 @@ def list_class_scoring_models(request: HttpRequest, class_id: int):
     )
 
 
-def _cost_attempt_out(cost: scoring_cost.AttemptCost) -> ScoringCostAttemptOut:
-    return ScoringCostAttemptOut(krw=cost.krw, tokens=cost.total_tokens)
+def _cost_attempt_out(cost: scoring_cost.AttemptCost, unit: str) -> ScoringCostAttemptOut:
+    return ScoringCostAttemptOut(krw=cost.krw if unit == "krw" else None, tokens=cost.total_tokens)
 
 
 def scoring_cost_estimate(class_obj: Class, problem: Problem | None = None) -> scoring_cost.CostEstimate:
@@ -798,6 +799,40 @@ def scoring_cost_estimate(class_obj: Class, problem: Problem | None = None) -> s
     current = [class_obj.default_model]
     if problem is not None:
         current.append(problem.effective_model())
+    if class_obj.scoring_connection_kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER:
+        # 호환 서버는 단가를 모른다(#604) — 지금 설정만, 채점 요청에 실을 강도로 토큰을 센다.
+        settings = [
+            (
+                class_obj.default_model,
+                _sent_effort(
+                    class_obj,
+                    class_obj.default_model,
+                    class_obj.default_reasoning_effort,
+                    marked_reasoning=class_obj.default_model_marked_reasoning,
+                ),
+            )
+        ]
+        if problem is not None:
+            model = problem.effective_model()
+            settings.append(
+                (
+                    model,
+                    _sent_effort(
+                        class_obj,
+                        model,
+                        problem.effective_reasoning_effort(),
+                        marked_reasoning=problem.effective_model_marked_reasoning(),
+                    ),
+                )
+            )
+        return scoring_cost.estimate(
+            class_obj,
+            participant_count=len(_active_member_ids(class_obj)),
+            catalog_model_ids=[],
+            current_model_ids=current,
+            problem=problem,
+            token_settings=settings,
+        )
     return scoring_cost.estimate(
         class_obj,
         participant_count=len(_active_member_ids(class_obj)),
@@ -807,8 +842,18 @@ def scoring_cost_estimate(class_obj: Class, problem: Problem | None = None) -> s
     )
 
 
+def _sent_effort(class_obj: Class, model_id: str, effort: str | None, *, marked_reasoning: bool) -> str | None:
+    """채점 요청에 실을 추론 강도 — 싣지 않으면 `None`(호환 서버의 토큰 어림이 출력을 이것으로 고른다)."""
+
+    if not _sends_reasoning_effort(class_obj, model_id, marked_reasoning=marked_reasoning):
+        return None
+    return effort or "low"
+
+
 def _serialize_scoring_cost(estimate: scoring_cost.CostEstimate) -> ScoringCostEstimateOut:
+    unit = estimate.unit
     return ScoringCostEstimateOut(
+        unit=unit,
         basis=estimate.basis,
         sample_count=estimate.sample_count,
         avg_prompt_chars=estimate.avg_prompt_chars,
@@ -829,10 +874,11 @@ def _serialize_scoring_cost(estimate: scoring_cost.CostEstimate) -> ScoringCostE
                 reasoning_effort=row.reasoning_effort,
                 priced=row.priced,
                 open_ended=row.open_ended,
-                per_attempt=_cost_attempt_out(row.per_attempt) if row.per_attempt is not None else None,
+                per_attempt=_cost_attempt_out(row.per_attempt, unit) if row.per_attempt is not None else None,
                 per_problem_krw=row.per_problem_krw,
+                per_problem_tokens=row.per_problem_tokens,
                 ratio_to_baseline=row.ratio_to_baseline,
-                by_source_size=[_cost_attempt_out(c) for c in row.by_source_size],
+                by_source_size=[_cost_attempt_out(c, unit) for c in row.by_source_size],
             )
             for row in estimate.rows
         ],

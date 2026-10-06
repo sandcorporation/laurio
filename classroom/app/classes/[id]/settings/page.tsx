@@ -780,6 +780,16 @@ export default function ClassSettingsPage() {
                   </div>
                 )}
 
+                {classroom.token_usage_estimated > 0 ? (
+                  <p data-testid="token-usage-estimated" className="text-[12.5px] leading-relaxed text-ink/60">
+                    {classroom.token_budget === null
+                      ? `지금까지 ${classroom.token_usage_total.toLocaleString("ko-KR")} 토큰을 썼습니다. `
+                      : ""}
+                    이 가운데 {classroom.token_usage_estimated.toLocaleString("ko-KR")} 토큰은 어림입니다 — 서버가
+                    사용량을 알려 주지 않아 프롬프트 길이로 셈했습니다.
+                  </p>
+                ) : null}
+
                 {!isOwner ? (
                   <Note>
                     <span data-testid="token-budget-owner-only">

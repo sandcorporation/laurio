@@ -53,6 +53,8 @@ export type ClassRow = {
   token_budget: number | null;
   token_budget_warning_threshold_percent: number;
   token_usage_total: number;
+  // `token_usage_total` 가운데 서버가 사용량을 주지 않아 프롬프트 길이로 어림한 몫(#604).
+  token_usage_estimated: number;
   // `token_budget - token_usage_total` — 예산이 없으면(무제한) `null`이다.
   token_budget_remaining: number | null;
   // 지금 채점이 예산 때문에 멈춰 있는가.
