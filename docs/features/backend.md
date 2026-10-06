@@ -882,6 +882,12 @@ fake 이거나 임포트되지 않으면 부팅 자체를 거부한다** — 컨
 | 강의실 실시간 신호(#380, ADR-0046 — 벤더 연동이 아니라 우리 자신의 Redis 위에서 도는 코드, dev·CI 는 결정적 fake) | `EVENT_BUS_ADAPTER_MODE` |
 | 공모전 검색 — **OpenSearch**(#450/#451, 부모 #444 스펙 — nori 한국어 분석기, 판(backing index) + 별칭으로 끊김 없는 전체 재색인, 연결 실패·시간 초과 시 DB 검색으로 물러남, dev·CI 는 결정적 fake) | `SEARCH_ADAPTER_MODE` |
 
+**강사가 적은 주소로 나가는 요청은 `core.safe_outbound` 하나를 거친다**(#600, ADR-0058) —
+https 만, 공인 IP 로 풀리는 이름만(사설·루프백·링크로컬·CGNAT·예약·멀티캐스트·IPv6 ULA·
+IPv4-mapped·docker 내부 이름은 거부), 푼 그 IP 로 직접 붙고 TLS(SNI·인증서 이름)는 원래 이름으로
+검증한다, 리다이렉트는 따라가지 않는다. 거부는 이유별(`OutboundReason`)이고, fake 스위치
+(`CLASSROOM_SCORING_ADAPTER_MODE`)에서는 나가지도 이름을 풀지도 않는다. 채점 경로에 잇는 것은 #601.
+
 **색인은 두 경로로 맞는다.** 저장·변경(Contest 저장, 요구형태 M2M 변경,
 `SponsorProfile.display_name` 변경)마다 Celery 태스크 `contests.index_contest`가
 트랜잭션 커밋 뒤 그 공모전 하나만 다시 색인한다(dev·CI는 태스크가 eager 라 그
