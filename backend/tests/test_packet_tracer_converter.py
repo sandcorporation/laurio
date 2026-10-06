@@ -59,7 +59,8 @@ def _scored_prompt(client, monkeypatch, *, files=None, raw_bytes=b"") -> str:
 
     result = run_scan(client)
 
-    assert result["rows"][0]["status"] == "scored", result
+    # 스캔은 큐에 넣기만 하고(#582) 채점은 그 자리에서 eager 로 끝난다 — 프롬프트가 증거다.
+    assert result["rows"][0]["status"] == "queued", result
     return captured[0]["messages"][1]["content"]
 
 
