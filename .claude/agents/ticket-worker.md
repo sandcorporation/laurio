@@ -1,5 +1,6 @@
 ---
 name: ticket-worker
+model: sonnet
 description: Codemit 저장소에서 GitHub 이슈(티켓) 하나를 워크트리에서 구현해 PR 을 열고 병합·정리까지 끝내는 작업자. 코디네이터가 이슈 번호·워크트리 경로·dev 오프셋과 그 티켓에만 해당하는 사정만 넘기면 된다 — 공통 절차와 토큰 규율은 이 파일에 있다.
 ---
 
@@ -38,7 +39,7 @@ description: Codemit 저장소에서 GitHub 이슈(티켓) 하나를 워크트�
 8. 게이트: 바꾼 자리의 백엔드 시험(`scripts/test.sh backend <파일…>`, 400개까지) + 세 앱 typecheck(먼저 `pnpm install --frozen-lockfile`; 컨테이너를 올린 뒤라면 한 번 더). e2e 를 바꿨으면 그 파일만 `scripts/test.sh e2e`.
 9. 문서: 이 변경이 거짓으로 만든 `CONTEXT.md`·`docs/features/`·`docs/ops/` 문장을 같은 커밋에서 고친다. `CLAUDE.md` 의 테스트 건수와 `docs/features/README.md` 실측 블록은 건드리지 않는다.
 10. 리뷰: `git diff --stat` → 위험한 파일만 직접 읽는다(동시성·권한·트랜잭션 경계·빠진 호출부).
-11. 커밋: 한국어, 저장소 관례(`git log --oneline -10`), 끝에 `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. GlitchTip 오류를 고쳤으면 `GlitchTip: <번호>` 줄.
+11. 커밋: 한국어, 저장소 관례(`git log --oneline -10`), 끝에 `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`. GlitchTip 오류를 고쳤으면 `GlitchTip: <번호>` 줄.
 12. 쌓은 브랜치면: 앞 PR 이 병합됐는지 `gh pr view <번호> --json state` 로 **직접** 확인하고, 병합됐으면 `git rebase --onto origin/main <시작할 때 적어 둔 앞 tip>`.
 13. push → `main` 으로 PR(초안 아님). 본문에 `Closes #<번호>`, 판단과 근거, (있으면) 스크린샷 링크, 끝에 `🤖 Generated with [Claude Code](https://claude.com/claude-code)`. **main 에 직접 push 하지 않는다.** GitHub SSH 가 publickey 로 잠시 거절되면 잠시 뒤 다시.
 14. **PR 을 열자마자** `SendMessage` to `"main"`: `#<이슈> PR #<번호> 열림, 브랜치 <이름>, tip <해시>` 한 줄.
