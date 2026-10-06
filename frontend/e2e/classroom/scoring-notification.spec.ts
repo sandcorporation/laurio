@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { runInternalScan } from "../lib/seed-http";
+import { drainClassroomScoringScan } from "../lib/seed-http";
 import { classroomApi, establishClassroomSession } from "./lib/cross-app-session";
 
 // 강의실 — 채점이 끝나면 알림이 오고, 그 알림을 누르면 그 시도로 간다
@@ -22,7 +22,7 @@ import { classroomApi, establishClassroomSession } from "./lib/cross-app-session
 // 준비 단계는 시임 규약(ADR-0017/0021)대로 `classroomApi`로 백엔드 API를
 // 직접 친다 — 화면으로 클래스·문제·체크리스트를 만드는 것은 각자의 전용
 // 스펙(problem-templates.spec.ts 등)이 이미 덮는다. 스캔도 화면이 아니라
-// `runInternalScan`으로 직접 돌린다(#40 — celery가 이 e2e 잡에 없다).
+// `drainClassroomScoringScan`으로 직접 돌린다(#40 — celery가 이 e2e 잡에 없다).
 
 test("채점이 끝나면 알림이 오고, 그 알림을 누르면 그 시도로 간다", async ({ page }) => {
   const seed = `scoring-notification-${test.info().workerIndex}-${Date.now()}`;
@@ -81,7 +81,7 @@ test("채점이 끝나면 알림이 오고, 그 알림을 누르면 그 시도�
   expect(submitResponse.ok()).toBeTruthy();
   const submissionId = (await submitResponse.json()).id as number;
 
-  await runInternalScan("classroom-submission-scoring");
+  await drainClassroomScoringScan();
 
   await page.goto("/notifications");
   await expect(page.getByTestId("notifications-heading")).toBeVisible();

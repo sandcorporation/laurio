@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { runInternalScan } from "../lib/seed-http";
+import { drainClassroomScoringScan } from "../lib/seed-http";
 import { classroomApi, establishClassroomSession } from "./lib/cross-app-session";
 
 // 강의실 — 참여자 「내 시도」가 새로고침 없이 「채점 완료」로 바뀐다
@@ -70,7 +70,7 @@ test("제출 화면을 연 채로 채점이 끝나면 새로고침 없이 「채
 
   // 화면은 그대로 열어 둔 채로, 스캔만 API로 직접 돌린다(#40 — celery가 이
   // e2e 잡에 없다).
-  await runInternalScan("classroom-submission-scoring");
+  await drainClassroomScoringScan();
 
   // page.reload()를 호출하지 않는다 — 이벤트 서비스가 attempt-scored를
   // 밀어주고, 화면이 그 신호를 받아 기존 API를 다시 불러 이 값이 바뀐다.

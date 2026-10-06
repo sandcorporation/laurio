@@ -105,6 +105,8 @@ def _a_scored_class(client, monkeypatch):
                 {"requirement_id": optional, "is_met": True, "reasoning": "주석이 있다."},
             ],
         )
+        # 스캔은 실행 하나에 시도 하나를 채점한다(GlitchTip 오류 91) — 쌓인 둘에 두 번.
+        run_scan(client)
         run_scan(client)
     # 스캔을 다시 돌리지 않아 이 시도는 채점을 기다린다.
     submit_source(

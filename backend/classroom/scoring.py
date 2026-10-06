@@ -779,6 +779,14 @@ CLASSROOM_SUBMISSION_SCORING_SCAN = ScanSpec(
     candidates=_pending_submissions,
     handle_row=_score_one,
     order_by=("attempt_count", "id"),
+    # 실행 하나에 시도 하나만 채점한다(GlitchTip 오류 91). 이 스캔은
+    # `call_internal`(30초)이 부른 gunicorn 요청 안에서 돌고, 시도 하나가 벤더를
+    # 20초(`_OPENAI_REQUEST_TIMEOUT_SECONDS`)까지 기다린다 — 뼈대의 시간 예산은
+    # 행 **사이**에서만 확인되므로, 예산 직전에 시작한 둘째 행이 다시 벤더를
+    # 기다리면 30초를 넘겨 워커가 채점 도중 죽는다. 즉시 채점(#378)이 주 경로이고
+    # 이 스캔은 안전망이라, 쌓인 시도는 tick 마다 하나씩 줍는다. 채점을 그 예산
+    # 밖으로 옮기면(#582) 이 상한도 다시 본다.
+    batch_size=1,
 )
 
 
