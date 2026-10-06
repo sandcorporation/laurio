@@ -856,6 +856,7 @@ def _serialize_scoring_cost(estimate: scoring_cost.CostEstimate) -> ScoringCostE
         unit=unit,
         basis=estimate.basis,
         sample_count=estimate.sample_count,
+        min_sample_count=scoring_cost.MIN_SAMPLE_COUNT,
         avg_prompt_chars=estimate.avg_prompt_chars,
         avg_input_tokens=(
             scoring_cost.tokens_for_chars(estimate.avg_prompt_chars)

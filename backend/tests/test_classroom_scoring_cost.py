@@ -72,15 +72,48 @@ def test_gpt_5_5_charges_more_once_the_input_passes_the_long_context_line():
 
 
 def test_a_model_missing_from_the_price_table_has_no_cost():
-    assert scoring_cost.attempt_cost("gpt-4o", None, prompt_chars=10_000) is None
-    assert scoring_cost.attempt_cost("gpt-5-mini", "low", prompt_chars=10_000) is None
+    assert scoring_cost.attempt_cost("gpt-6", None, prompt_chars=10_000) is None
+    assert scoring_cost.attempt_cost("gpt-5.6-mini", "low", prompt_chars=10_000) is None
+
+
+@pytest.mark.parametrize(
+    ("model_id", "input_usd", "output_usd"),
+    [
+        ("gpt-4o", 2.50, 10.00),
+        ("gpt-4o-mini", 0.15, 0.60),
+        ("gpt-4.1-nano", 0.10, 0.40),
+        ("gpt-5", 1.25, 10.00),
+        ("gpt-5.1", 1.25, 10.00),
+        ("gpt-5-mini", 0.25, 2.00),
+        ("gpt-5-nano", 0.05, 0.40),
+        ("gpt-5.2", 1.75, 14.00),
+        ("gpt-5.4", 2.50, 15.00),
+        ("gpt-5.4-mini", 0.75, 4.50),
+        ("gpt-5.4-nano", 0.20, 1.25),
+    ],
+)
+def test_every_model_the_catalog_knows_has_a_price(model_id, input_usd, output_usd):
+    cost = scoring_cost.attempt_cost(model_id, "low", prompt_chars=33_000)
+    assert cost is not None
+    assert cost.usd == pytest.approx((cost.input_tokens * input_usd + cost.output_tokens * output_usd) / 1e6)
+
+
+def test_the_price_table_covers_every_model_with_a_known_context_window():
+    from classroom.scoring_models import _KNOWN_CONTEXT_WINDOWS
+
+    assert set(_KNOWN_CONTEXT_WINDOWS) <= set(scoring_cost.PRICES)
+
+
+def test_gpt_5_4_charges_more_past_272k_input_tokens():
+    above = scoring_cost.attempt_cost("gpt-5.4", "low", prompt_chars=int(272_000 * scoring_cost.CHARS_PER_TOKEN) + 3_300)
+    assert above.usd == pytest.approx(above.input_tokens * 5.00 / 1e6 + above.output_tokens * 22.50 / 1e6)
 
 
 def test_the_ratio_is_against_gpt_4_1_mini_at_the_same_length():
     assert scoring_cost.ratio_to_baseline("gpt-4.1-mini", None, prompt_chars=55_000) == pytest.approx(1.0)
     ratio = scoring_cost.ratio_to_baseline("gpt-5.5", "medium", prompt_chars=55_000)
     assert 25 < ratio < 33
-    assert scoring_cost.ratio_to_baseline("gpt-4o", None, prompt_chars=55_000) is None
+    assert scoring_cost.ratio_to_baseline("gpt-6", None, prompt_chars=55_000) is None
 
 
 # --- 기준(HTTP) -----------------------------------------------------------------
@@ -142,27 +175,30 @@ def test_a_class_without_attempts_prices_attempts_by_source_size(client, db):
     ]
 
 
-def test_only_models_the_key_can_use_appear_and_reasoning_models_get_a_row_per_effort(client, db):
+def test_every_model_the_key_can_use_appears_in_catalog_order_with_a_row_per_reasoning_effort(client, db):
     instructor = login(client, uid="instructor-1")
     class_id = create_class(client, instructor["access"])
+    catalog = client.get(f"{CLASSES_URL}/{class_id}/scoring-models", **auth_header(instructor["access"])).json()
 
     estimate = _estimate(client, instructor["access"], class_id)
 
-    keys = {(r["model_id"], r["reasoning_effort"]) for r in estimate["rows"]}
-    assert ("gpt-4.1-mini", None) in keys
-    assert {("gpt-5.5", "low"), ("gpt-5.5", "medium"), ("gpt-5.5", "high")} <= keys
-    # 단가표에 없는 모델은 표에 줄을 만들지 않는다 — 지금 설정이 아니면.
+    assert list(dict.fromkeys(r["model_id"] for r in estimate["rows"])) == [m["id"] for m in catalog["models"]]
+    keys = [(r["model_id"], r["reasoning_effort"]) for r in estimate["rows"]]
+    assert ("gpt-4o-mini", None) in keys
+    assert [k for k in keys if k[0] == "gpt-5.5"] == [("gpt-5.5", "low"), ("gpt-5.5", "medium"), ("gpt-5.5", "high")]
     assert all(r["priced"] for r in estimate["rows"])
-    assert "gpt-4o" not in {r["model_id"] for r in estimate["rows"]}
+    assert _row(estimate, "gpt-4o-mini")["by_source_size"][0]["krw"] > 0
 
 
-def test_the_current_setting_gets_a_row_even_without_a_price(client, db):
+def test_the_current_setting_gets_a_row_even_without_a_price(client, db, monkeypatch):
+    monkeypatch.delitem(scoring_cost.PRICES, "gpt-4o")
     instructor = login(client, uid="instructor-1")
     class_id = create_class(client, instructor["access"])
     patch_class(client, instructor["access"], class_id, {"default_model": "gpt-4o"})
 
     estimate = _estimate(client, instructor["access"], class_id)
 
+    assert [r["model_id"] for r in estimate["rows"] if not r["priced"]] == ["gpt-4o"]
     row = _row(estimate, "gpt-4o")
     assert row["priced"] is False
     assert row["per_attempt"] is None
@@ -201,20 +237,45 @@ def test_a_problem_with_attempts_is_priced_from_its_own_average_prompt(client, d
     assert mini["ratio_to_baseline"] == pytest.approx(1.0)
 
 
-def test_a_problem_without_attempts_falls_back_to_the_class_average(client, db, monkeypatch):
+def test_a_problem_with_fewer_than_three_attempts_falls_back_to_the_class_average(client, db, monkeypatch):
     instructor = login(client, uid="instructor-1")
     class_id = create_class(client, instructor["access"])
     scored = create_open_problem(client, instructor["access"], class_id, title="1주차", submission_formats=["source"])
     fresh = create_open_problem(client, instructor["access"], class_id, title="2주차", submission_formats=["source"])
     alice = _participant(client, instructor["access"], class_id, "participant-1")
-    length = _score_source(client, monkeypatch, alice, "participant-1", scored, "x = 1\n" * 3_000)
+    lengths = [
+        _score_source(client, monkeypatch, alice, "participant-1", scored, "x = 1\n" * 3_000),
+        _score_source(client, monkeypatch, alice, "participant-1", scored, "y = 1\n" * 3_000),
+        _score_source(client, monkeypatch, alice, "participant-1", fresh, "z = 1\n" * 1_000),
+    ]
 
     estimate = _estimate(client, instructor["access"], class_id, fresh.id)
 
     assert estimate["basis"] == "class"
-    assert estimate["avg_prompt_chars"] == length
+    assert estimate["min_sample_count"] == 3
+    assert estimate["sample_count"] == 3
+    assert estimate["avg_prompt_chars"] == round(sum(lengths) / 3)
     # 클래스 설정 화면(문제 없이)도 같은 클래스 평균을 쓴다.
     assert _estimate(client, instructor["access"], class_id)["basis"] == "class"
+
+
+def test_a_class_with_fewer_than_three_attempts_is_priced_by_source_size(client, db, monkeypatch):
+    # 시험 삼아 낸 짧은 제출 몇 건이 비용을 실제보다 훨씬 작게 보이게 하지 않는다(#617).
+    instructor = login(client, uid="instructor-1")
+    class_id = create_class(client, instructor["access"])
+    problem = create_open_problem(client, instructor["access"], class_id, submission_formats=["source"])
+    alice = _participant(client, instructor["access"], class_id, "participant-1")
+    _score_source(client, monkeypatch, alice, "participant-1", problem, "a = 1\n")
+    _score_source(client, monkeypatch, alice, "participant-1", problem, "b = 1\n")
+
+    for estimate in (
+        _estimate(client, instructor["access"], class_id, problem.id),
+        _estimate(client, instructor["access"], class_id),
+    ):
+        assert estimate["basis"] == "source_sizes"
+        assert estimate["sample_count"] == 2
+        assert estimate["avg_prompt_chars"] is None
+        assert _row(estimate, "gpt-4.1-mini")["per_attempt"] is None
 
 
 def test_platform_auto_failures_do_not_count_as_prompts(client, db, monkeypatch):

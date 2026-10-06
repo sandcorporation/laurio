@@ -30,7 +30,10 @@ export type ScoringCostEstimate = {
   // krw — OpenAI 단가로 원화, tokens — 호환 서버라 단가를 몰라 토큰만.
   unit: "krw" | "tokens";
   basis: "problem" | "class" | "source_sizes";
+  // 그 기준의 시도 수 — source_sizes 면 클래스 시도 수(평균을 내기에 모자란 수).
   sample_count: number;
+  // 평균을 낼 최소 시도 수 — 이보다 적으면 다음 기준으로 내려간다(#617).
+  min_sample_count: number;
   avg_prompt_chars: number | null;
   avg_input_tokens: number | null;
   participant_count: number;
@@ -107,13 +110,16 @@ export function costBasisText(estimate: ScoringCostEstimate, scope: "class" | "p
     estimate.avg_prompt_chars !== null && estimate.avg_input_tokens !== null
       ? `소스 약 ${formatManCount(estimate.avg_prompt_chars)} 자(입력 약 ${formatManCount(estimate.avg_input_tokens)} 토큰)`
       : "";
-  if (estimate.basis === "problem") return `이 문제 시도 ${estimate.sample_count}건 평균 · ${size}`;
+  const n = estimate.sample_count;
+  const min = estimate.min_sample_count;
+  if (estimate.basis === "problem") return `이 문제 시도 ${n}건 평균 · ${size}`;
   if (estimate.basis === "class") {
     return scope === "problem"
-      ? `이 문제는 아직 시도가 없어 클래스 평균으로 셈했습니다 · ${size}`
-      : `이 클래스 시도 평균 · ${size}`;
+      ? `이 문제는 시도가 ${min}건 미만이라 클래스 시도 ${n}건 평균으로 셈했습니다 · ${size}`
+      : `이 클래스 시도 ${n}건 평균 · ${size}`;
   }
-  return "이 클래스에 아직 시도가 없어 소스 크기별로 셈했습니다";
+  if (n === 0) return "이 클래스에 아직 시도가 없어 소스 크기별로 셈했습니다";
+  return `이 클래스 시도가 ${n}건뿐이라 소스 크기별로 셈했습니다 · 평균은 ${min}건부터 냅니다`;
 }
 
 export function formatAttemptsPerParticipant(n: number): string {

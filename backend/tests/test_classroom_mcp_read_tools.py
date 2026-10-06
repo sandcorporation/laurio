@@ -10,8 +10,11 @@ from __future__ import annotations
 import json
 
 import pytest
+
 from django.apps import apps
 from django.core.cache import caches
+
+from classroom import scoring_cost
 
 from tests.classroom_scenarios import (
     archive_class,
@@ -278,7 +281,7 @@ def test_reading_leaves_no_record(client, db):
     assert _row_counts() == before
 
 
-def test_get_class_and_get_problem_carry_a_short_cost_estimate_for_the_current_setting(client, db):
+def test_get_class_and_get_problem_carry_a_short_cost_estimate_for_the_current_setting(client, db, monkeypatch):
     """#591 — 지금 설정 한 줄만 싣는다(#579 의 크기 원칙). 시도가 없으면 소스 크기별이다."""
 
     instructor = login(client, uid="instructor-1")
@@ -300,6 +303,8 @@ def test_get_class_and_get_problem_carry_a_short_cost_estimate_for_the_current_s
     assert (problem_estimate["model"], problem_estimate["reasoning_effort"]) == ("gpt-4.1-mini", None)
     assert problem_estimate["ratio_to_gpt_4_1_mini"] == 1.0
 
+    # 카탈로그의 모델은 모두 단가가 있다(#617) — 단가표에서 하나를 빼 「비용 미확인」을 만든다.
+    monkeypatch.delitem(scoring_cost.PRICES, "gpt-4o")
     patch_class(client, access, class_id, {"default_model": "gpt-4o"})
     unpriced = _structured(client, token, "get_class", class_id=class_id)["scoring_cost_estimate"]
     assert unpriced == {
