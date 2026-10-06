@@ -247,9 +247,10 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 | `POST /api/classroom/classes/{id}/join-link/regenerate` | 가입 링크를 다시 뽑는다 — 이전 코드는 죽는다(#279) |
 | `POST .../archive`·`.../unarchive` | 클래스를 보관하고 되돌린다 — 지우지 않는다(#294) |
 | `DELETE /api/classroom/classes/{id}` | 클래스를 지운다 — 어느 문제에도 제출이 없을 때만, 되돌릴 수 없다(#330) |
-| `GET`·`POST /api/classroom/join/{code}` | 가입 링크 미리보기(인증 불필요)와 가입(#280) |
+| `GET`·`POST /api/classroom/join/{code}` | 가입 링크 미리보기(인증 불필요 — 강사 전원의 강사 이름, 소유자 먼저·빈 이름 빼고, #565)와 가입(#280) |
 | `POST /api/classroom/classes/{id}/co-instructor-invites` | 공동 강사 초대를 하나 만든다 — 강사 누구나, 보관된 클래스에서도, 여러 개를 동시에(#561) |
-| `GET /api/classroom/classes/{id}/instructors` | 강사 목록 — 소유자 먼저, 그다음 공동 강사를 수락한 순서로(이름·역할·수락한 때·나인가, 공동 강사 줄의 id). 강사 누구나, 보관된 클래스에서도(#562) |
+| `GET /api/classroom/classes/{id}/instructors` | 강사 목록 — 소유자 먼저, 그다음 공동 강사를 수락한 순서로(이름·역할·공동 강사가 된 때와 그 길 — 초대 수락 또는 소유권을 넘김(#565) — ·나인가, 공동 강사 줄의 id). 강사 누구나, 보관된 클래스에서도(#562) |
+| `PATCH /api/classroom/classes/{id}/instructors/me` | 부른 강사가 이 클래스에서 불릴 **자기** 강사 이름을 바꾼다 — 소유자든 공동 강사든, 보관된 클래스에서도. 경로에 다른 강사를 가리킬 자리가 없다(#565) |
 | `POST /api/classroom/classes/{id}/instructors/me/leave` | 공동 강사가 스스로 떠난다 — 보관된 클래스에서도. 소유자는 409(#563) |
 | `POST /api/classroom/classes/{id}/co-instructors/{co_instructor_id}/remove` | 공동 강사를 내보낸다 — 소유자 전용(공동 강사는 403), 보관된 클래스에서도(#563) |
 | `POST /api/classroom/classes/{id}/ownership-transfers` | 소유권 이전을 요청한다 — 소유자 전용, 받는 사람은 이 클래스의 공동 강사 줄(`co_instructor_id`). 클래스마다 대기 하나(409), 7일 만료, 보관된 클래스에서도(#564) |
@@ -323,7 +324,9 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 소유자는 `Class.instructor`, 공동 강사는 공동 강사 초대를 수락해 생긴 `ClassCoInstructor`
 행이다. 강사 전용 라우트는 강사 누구에게나 같은 답을 준다 — 소유자만 하는 일이 따로 있다:
 채점 키 저장, 예산 칸(상한·경고 임계)과 소유자의 강사 이름 칸을 고치는 설정, 클래스 삭제,
-소유권 이전 요청·취소, 공동 강사 내보내기.
+소유권 이전 요청·취소, 공동 강사 내보내기. 설정의 강사 이름 칸은 **소유자의** 이름이라 소유자만 고치고,
+공동 강사는 자기 이름을 `PATCH .../instructors/me` 로 바꾼다(#565 — 같은 칸이 부르는 사람마다 다른 사람을
+가리키지 않게).
 공동 강사가 부르면 403이다(클래스는 보이므로 404 가 아니다, `classroom.instructor_scope` 의
 `owner=True`). 강사 전용 라우트 전부를 세 사람(소유자·공동 강사·남)으로 훑는 표가
 `tests/test_classroom_co_instructor_permissions.py` 에 있다. 달성률 분모·명단·격자에서 빠지는

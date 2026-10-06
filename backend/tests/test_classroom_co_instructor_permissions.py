@@ -158,6 +158,14 @@ ROUTES: list[Route] = [
         None,
         204,
     ),
+    # 내 강사 이름(#565) — 강사 누구나 자기 이름만. 소유자의 이름 칸(위 update_class 줄)은 소유자 전용.
+    Route(
+        "rename_my_instructor_name",
+        "patch",
+        lambda w: f"{_c(w)}/instructors/me",
+        lambda w: {"display_name": "새 강사 이름"},
+        200,
+    ),
     # 떠나기(#563) — 소유자는 떠날 수 없어 409, 공동 강사는 떠난다.
     Route("leave_class", "post", lambda w: f"{_c(w)}/instructors/me/leave", None, 409, co_status=204),
     Route(

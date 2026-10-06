@@ -20,6 +20,9 @@ export type ClassRow = {
   // 강사가 이 클래스에서 불릴 이름(#299) — 가입 미리보기에만 쓰인다. 빈
   // 문자열이면 이 필드가 생기기 전에 만들어진 클래스다.
   instructor_display_name: string;
+  // 부른 사람 자신이 이 클래스에서 불리는 강사 이름(#565) — 소유자면 위 칸과 같고, 공동
+  // 강사면 그 사람의 이름이다. 바꾸기는 `renameMyInstructorName`.
+  my_instructor_display_name: string;
   join_code: string;
   created_at: string;
   default_model: string;
@@ -104,6 +107,14 @@ export function updateClass(
   }>,
 ): Promise<ApiResult<ClassRow>> {
   return apiRequest<ClassRow>(`/api/backend/classroom/classes/${classId}`, "PATCH", patch);
+}
+
+// 부른 강사 자신의 강사 이름을 바꾼다(#565) — 소유자든 공동 강사든 자기 자리에만 쓴다.
+// 클래스 설정의 `instructor_display_name` 은 소유자의 이름 칸이라 공동 강사에게는 닫혀 있다.
+export function renameMyInstructorName(classId: number, displayName: string): Promise<ApiResult<unknown>> {
+  return apiRequest<unknown>(`/api/backend/classroom/classes/${classId}/instructors/me`, "PATCH", {
+    display_name: displayName,
+  });
 }
 
 // 채점 키는 저장 뒤 다시 보이지 않는다(#284) — 응답도 언제나 마스킹된

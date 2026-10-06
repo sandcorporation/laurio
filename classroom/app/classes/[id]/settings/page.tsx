@@ -28,6 +28,7 @@ import {
 import { publishClassAsTemplate, takedownClassTemplate } from "@/lib/class-templates/api";
 import {
   deleteClass,
+  renameMyInstructorName,
   setOpenAIKey,
   updateClass,
   type ClassRow,
@@ -396,7 +397,7 @@ export default function ClassSettingsPage() {
       setDefaultModel(state.classroom.default_model);
       setDefaultReasoningEffort(state.classroom.default_reasoning_effort);
       setClassNameDraft(state.classroom.name);
-      setInstructorDisplayName(state.classroom.instructor_display_name);
+      setInstructorDisplayName(state.classroom.my_instructor_display_name);
       setTokenBudget(
         state.classroom.token_budget === null ? "" : String(state.classroom.token_budget),
       );
@@ -431,11 +432,12 @@ export default function ClassSettingsPage() {
   }
 
   const { classroom } = state;
-  // 채점 키·예산·클래스 삭제·소유자의 강사 이름은 소유자만 바꾼다(#561, ADR-0055) — 공동
-  // 강사에게는 그 입력을 그리지 않고, 지금 값과 「소유자만」이라는 사실만 보여 준다.
+  // 채점 키·예산·클래스 삭제는 소유자만 바꾼다(#561, ADR-0055) — 공동 강사에게는 그 입력을
+  // 그리지 않고, 지금 값과 「소유자만」이라는 사실만 보여 준다. 강사 이름은 누구나 **자기**
+  // 것을 바꾼다(#565) — 이 칸은 보는 사람의 이름이다.
   const isOwner = classroom.role === "owner";
   const namesPatch = classNamesPatch(
-    { name: classroom.name, instructorDisplayName: classroom.instructor_display_name },
+    { name: classroom.name, instructorDisplayName: classroom.my_instructor_display_name },
     { name: classNameDraft, instructorDisplayName },
   );
 
@@ -477,12 +479,18 @@ export default function ClassSettingsPage() {
     }
     setNameSaving(true);
     setNameError(null);
-    const result = namesPatch !== null ? await updateClass(classId, namesPatch) : null;
-    if (result === null || result.ok) {
-      reload();
-    } else {
-      setNameError(result.detail);
+    // 클래스 이름은 클래스 설정으로, 강사 이름은 부른 사람 자신의 자리로(#565) 보낸다.
+    let failure: string | null = null;
+    if (namesPatch?.name !== undefined) {
+      const result = await updateClass(classId, { name: namesPatch.name });
+      if (!result.ok) failure = result.detail;
     }
+    if (failure === null && namesPatch?.instructor_display_name !== undefined) {
+      const result = await renameMyInstructorName(classId, namesPatch.instructor_display_name);
+      if (!result.ok) failure = result.detail;
+    }
+    setNameError(failure);
+    reload();
     setNameSaving(false);
   }
 
@@ -536,7 +544,7 @@ export default function ClassSettingsPage() {
         description={
           isOwner
             ? "클래스·강사 이름, 채점 키와 모델·예산, 템플릿 공개까지 이 클래스의 설정을 여기서 관리합니다."
-            : "클래스 이름과 채점 모델, 템플릿 공개를 여기서 관리합니다. 채점 키·예산과 클래스 삭제는 소유자가 맡습니다."
+            : "클래스 이름과 내 강사 이름, 채점 모델, 템플릿 공개를 여기서 관리합니다. 채점 키·예산과 클래스 삭제는 소유자가 맡습니다."
         }
         actions={
           <Link href={`/classes/${classId}`} className={buttonClass()}>
@@ -549,7 +557,11 @@ export default function ClassSettingsPage() {
         <Card>
           <CardHeader
             title="이름"
-            hint={isOwner ? "참여자 화면과 가입 미리보기에 이 이름들이 보입니다" : "참여자 화면과 가입 미리보기에 이 이름이 보입니다"}
+            hint={
+              isOwner
+                ? "참여자 화면과 가입 미리보기에 이 이름들이 보입니다"
+                : "가입 미리보기에 내 강사 이름이 소유자의 이름과 함께 보입니다"
+            }
           />
           <div className="flex flex-col gap-3 p-4">
             <form onSubmit={handleNameSubmit} className="flex flex-col gap-3">
@@ -567,26 +579,24 @@ export default function ClassSettingsPage() {
                   className={INPUT_CLASS}
                 />
               </div>
-              {isOwner ? (
-                <div className="flex flex-col gap-1.5">
-                  <label htmlFor="class-instructor-display-name-input">
-                    <FieldLabel>이 클래스에서 불릴 강사 이름</FieldLabel>
-                  </label>
-                  <input
-                    id="class-instructor-display-name-input"
-                    data-testid="class-instructor-display-name-input"
-                    value={instructorDisplayName}
-                    onChange={(event) => setInstructorDisplayName(event.target.value)}
-                    required
-                    maxLength={100}
-                    className={INPUT_CLASS}
-                  />
-                  <span className="text-[11.5px] leading-relaxed text-ink/45">
-                    참여자 명단과 제출물에 보이는 이름과는 별개입니다 — 그곳은 참여자 본인이 정한
-                    이름을 그대로 씁니다.
-                  </span>
-                </div>
-              ) : null}
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="class-instructor-display-name-input">
+                  <FieldLabel>이 클래스에서 불릴 내 강사 이름</FieldLabel>
+                </label>
+                <input
+                  id="class-instructor-display-name-input"
+                  data-testid="class-instructor-display-name-input"
+                  value={instructorDisplayName}
+                  onChange={(event) => setInstructorDisplayName(event.target.value)}
+                  required
+                  maxLength={100}
+                  className={INPUT_CLASS}
+                />
+                <span className="text-[11.5px] leading-relaxed text-ink/45">
+                  참여자 명단과 제출물에 보이는 이름과는 별개입니다 — 그곳은 참여자 본인이 정한
+                  이름을 그대로 씁니다.
+                </span>
+              </div>
               <div className="flex justify-end">
                 <button
                   type="submit"
