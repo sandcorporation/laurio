@@ -16,6 +16,7 @@ import logging
 import re
 
 from core.json_logging import JsonFormatter
+from core.request_id import current_request_id
 
 HEX32 = re.compile(r"^[0-9a-f]{32}$")
 
@@ -67,6 +68,19 @@ def test_logs_written_during_a_request_carry_its_id(client, caplog):
     records = [r for r in caplog.records if r.name == "django.request"]
     assert records, "요청 안에서 로그가 하나도 남지 않았다"
     assert {r.request_id for r in records} == {response["X-Request-ID"]}
+
+
+def test_a_finished_request_leaves_no_id_behind(client):
+    """요청이 끝나면 id 가 비워진다 — 다음 요청 전까지 요청 밖 로그가 지난 요청의 id 를 달지 않게(#610)."""
+
+    response = client.get("/api/no-such-route-for-request-id-test")
+
+    assert response.status_code == 404
+    assert current_request_id() is None
+    record = logging.getLogger("codemit.test").makeRecord(
+        "codemit.test", logging.INFO, __file__, 1, "요청 뒤", None, None
+    )
+    assert record.request_id == "-"
 
 
 def test_logs_outside_a_request_get_a_placeholder():

@@ -23,6 +23,7 @@ from django.core.cache import caches
 from contests.search import FakeContestSearchAdapter
 from contests.view_flush_store import InMemoryChangedContestsStore
 from core.events import FakeEventBus
+from core.request_id import _current as _request_id_var
 from payments.adapters import FakePGAdapter
 from storage.adapters.fake import FakeStorageAdapter
 
@@ -197,6 +198,23 @@ def _reset_fake_event_bus():
     FakeEventBus._queues.clear()
     yield
     FakeEventBus._queues.clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_request_id():
+    """요청 id(`core.request_id`)를 시험마다 비운다(#610).
+
+    운영에서는 지울 필요가 없다 — 요청이 끝나면 `request_finished` 가 같은 컨텍스트에서
+    지우고(WSGI), ASGI 는 요청마다 태스크 컨텍스트가 따로라 다음 요청으로 넘어가지 않는다.
+    시험에서만 새는 길이 하나 있다: 테스트 클라이언트로 받은 **비동기 스트리밍 응답**을
+    `asyncio.run` 으로 읽으면, 응답을 닫으며 쏘는 `request_finished` 가 그 이벤트 루프의
+    **복사된** 컨텍스트에서 돈다. 지우기는 복사본에만 닿고 시험 스레드에는 그 요청의 id 가
+    남아, 같은 워커에서 다음에 도는 시험의 요청 밖 로그에 붙는다.
+    """
+
+    _request_id_var.set(None)
+    yield
+    _request_id_var.set(None)
 
 
 @pytest.fixture(autouse=True)
