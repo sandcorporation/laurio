@@ -128,7 +128,7 @@ def _delete_problem(grant: ConnectedApp, arguments: dict) -> Preview | WriteResu
         "published_template_kept": template_kept,
         "summary": (
             f"문제 「{problem.title}」와 체크리스트 항목 {checklist_count}개가 사라진다. "
-            + (f"강사 자신이 내본 시도 {own_attempts}개와 그 채점도 함께 사라진다. " if own_attempts else "")
+            + (f"강사(소유자·공동 강사)가 내본 시도 {own_attempts}개와 그 채점도 함께 사라진다. " if own_attempts else "")
             + "참여자의 시도는 없다. "
             + ("공개한 템플릿은 사본이라 그대로 남는다. " if template_kept else "")
             + "되돌릴 수 없다."
@@ -142,7 +142,7 @@ def _delete_problem(grant: ConnectedApp, arguments: dict) -> Preview | WriteResu
             structured={"status": "done", "deleted_problem": {"id": arguments["problem_id"], "title": title}},
             class_id=class_obj.id,
             problem_id=arguments["problem_id"],
-            summary=f"「{title}」 삭제 — 체크리스트 {checklist_count}개, 강사 자신의 시도 {own_attempts}개",
+            summary=f"「{title}」 삭제 — 체크리스트 {checklist_count}개, 강사의 시도 {own_attempts}개",
         )
 
     return _two_steps(grant, "delete_problem", arguments, preview, execute)
@@ -405,7 +405,7 @@ DESTRUCTIVE_TOOLS: list[Tool] = [
         "delete_problem",
         "문제 삭제",
         "문제를 체크리스트와 함께 지운다. 참여자의 시도(내보낸 참여자 포함)가 하나라도 있으면 지울 수 없다 — "
-        "그때는 숨긴다. 강사 자신만 내본 문제는 지울 수 있고 그 시도와 채점도 함께 사라진다. "
+        "그때는 숨긴다. 강사(소유자·공동 강사)만 내본 문제는 지울 수 있고 그 시도와 채점도 함께 사라진다. "
         "보관된 클래스에서는 할 수 없다.",
         _DELETE_PROBLEM_INPUT,
         _delete_problem,
@@ -413,7 +413,8 @@ DESTRUCTIVE_TOOLS: list[Tool] = [
     _tool(
         "delete_class",
         "클래스 삭제",
-        "클래스를 문제·체크리스트·참여자 가입과 함께 지운다. 제출이 하나라도 있으면 지울 수 없다 — 그때는 보관한다.",
+        "클래스를 문제·체크리스트·참여자 가입과 함께 지운다. 제출이 하나라도 있으면 지울 수 없다 — 그때는 보관한다. "
+        "소유자만 지울 수 있다 — 공동 강사가 부르면 거절된다.",
         _DELETE_CLASS_INPUT,
         _delete_class,
     ),

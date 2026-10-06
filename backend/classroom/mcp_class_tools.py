@@ -106,7 +106,10 @@ _UPDATE_CLASS_INPUT = _object(
     {
         "class_id": _CLASS_ID,
         "name": _CLASS_NAME,
-        "instructor_display_name": _INSTRUCTOR_DISPLAY_NAME,
+        "instructor_display_name": {
+            **_INSTRUCTOR_DISPLAY_NAME,
+            "description": "소유자가 이 클래스에서 강사로 불릴 이름 — 소유자만 고친다.",
+        },
         "default_model": {
             "type": "string",
             "description": "기본 채점 모델 — 자기 모델을 정하지 않은 문제가 따른다. 클래스의 OpenAI 키로 쓸 수 있는 모델이어야 한다.",
@@ -263,8 +266,9 @@ CLASS_TOOLS: list[Tool] = [
         title="클래스 설정 고치기",
         description=(
             "클래스의 이름·강사로 불릴 이름·기본 채점 모델·기본 추론 강도·채점 토큰 예산·경고 임계를 고친다. "
-            "보낸 칸만 바뀐다. 보관된 클래스도 고칠 수 있다. OpenAI 키는 이 도구로 넣거나 바꿀 수 없다 — "
-            "강사가 화면에서만 넣는다."
+            "보낸 칸만 바뀐다. 보관된 클래스도 고칠 수 있다. 채점 토큰 예산·경고 임계·강사로 불릴 이름(소유자의 "
+            "이름이다)은 소유자만 고친다 — 공동 강사가 그 칸을 보내면 아무것도 바뀌지 않고 거절된다. "
+            "OpenAI 키는 이 도구로 넣거나 바꿀 수 없다 — 소유자가 화면에서만 넣는다."
         ),
         input_schema=_UPDATE_CLASS_INPUT,
         output_schema=_CLASS_RESULT,

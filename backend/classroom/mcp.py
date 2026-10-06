@@ -39,6 +39,7 @@ from ninja.errors import HttpError
 from core.clock import Clock
 
 from .connected_app_writes import record_write
+from .instructors import is_owner
 from .mcp_class_tools import CLASS_TOOLS
 from .mcp_problem_tools import PROBLEM_TOOLS
 from .mcp_tool import Preview, Tool, ToolInputError, WriteResult
@@ -67,7 +68,8 @@ HEADER_MISMATCH = -32020
 UNSUPPORTED_PROTOCOL_VERSION = -32022
 
 INSTRUCTIONS = (
-    "Codemit 강의실에서 내가 강사인 클래스를 다루는 도구들이다. 클래스는 보관될 수 있고, "
+    "Codemit 강의실에서 내가 강사인 클래스를 다루는 도구들이다. 강사는 소유자 한 명과 공동 강사들이고, "
+    "둘은 같은 일을 하되 채점 키·예산과 클래스 삭제는 소유자만 한다. 클래스는 보관될 수 있고, "
     "문제는 열림·초안·숨김 중 하나다. 클래스에 가입한 사람은 「참여자」라고 부른다."
 )
 
@@ -83,6 +85,7 @@ def _list_my_classes(grant: ConnectedApp, arguments: dict) -> dict:
                 "id": c.id,
                 "name": c.name,
                 "archived": c.archived_at is not None,
+                "role": "owner" if is_owner(c, grant.instructor_id) else "co_instructor",
                 "participant_count": c.participant_count,
                 "problem_count": c.open_problem_count + c.draft_problem_count + c.hidden_problem_count,
                 "problem_counts": {
@@ -98,6 +101,11 @@ def _list_my_classes(grant: ConnectedApp, arguments: dict) -> dict:
 
 
 _COUNT = {"type": "integer", "minimum": 0}
+_ROLE = {
+    "type": "string",
+    "enum": ["owner", "co_instructor"],
+    "description": "이 클래스에서 내 역할 — owner 소유자, co_instructor 공동 강사. 채점 키·예산·클래스 삭제는 소유자만 한다.",
+}
 
 TOOLS: dict[str, Tool] = {
     tool.name: tool
@@ -106,9 +114,9 @@ TOOLS: dict[str, Tool] = {
             name="list_my_classes",
             title="내 클래스 목록",
             description=(
-                "내가 강사인 클래스를 최근에 만든 순서로 돌려준다. 클래스마다 이름, 보관 여부, "
-                "참여자 수(강사 본인과 내보낸 참여자는 세지 않는다), 문제 수(열림·초안·숨김별)를 담는다. "
-                "참여자 이름이나 제출물은 담지 않는다."
+                "내가 강사(소유자 또는 공동 강사)인 클래스를 최근에 만든 순서로 돌려준다. 클래스마다 이름, "
+                "내 역할(owner 소유자·co_instructor 공동 강사), 보관 여부, 참여자 수(강사와 내보낸 참여자는 "
+                "세지 않는다), 문제 수(열림·초안·숨김별)를 담는다. 참여자 이름이나 제출물은 담지 않는다."
             ),
             input_schema={"type": "object", "properties": {}, "additionalProperties": False},
             output_schema={
@@ -122,6 +130,7 @@ TOOLS: dict[str, Tool] = {
                                 "id": {"type": "integer", "description": "클래스 번호"},
                                 "name": {"type": "string", "description": "클래스 이름"},
                                 "archived": {"type": "boolean", "description": "보관된 클래스인가"},
+                                "role": _ROLE,
                                 "participant_count": {**_COUNT, "description": "참여자 수"},
                                 "problem_count": {**_COUNT, "description": "문제 수(모든 상태)"},
                                 "problem_counts": {
@@ -140,6 +149,7 @@ TOOLS: dict[str, Tool] = {
                                 "id",
                                 "name",
                                 "archived",
+                                "role",
                                 "participant_count",
                                 "problem_count",
                                 "problem_counts",
