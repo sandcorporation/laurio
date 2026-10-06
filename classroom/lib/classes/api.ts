@@ -50,6 +50,21 @@ export type ClassRow = {
   // 부른 사람이 이 클래스에서 무엇인가(#561) — 공동 강사에게는 소유자 전용 컨트롤
   // (채점 키·예산·클래스 삭제)을 감추고, 클래스 목록에 「공동 강사」를 표시한다.
   role: "owner" | "co_instructor";
+  // 대기 중인 소유권 이전 요청(#564) — 없으면 `null`. 강사 누구나 본다.
+  pending_ownership_transfer: PendingOwnershipTransfer | null;
+};
+
+// 소유자가 공동 강사 한 사람에게 보낸 소유권 이전 요청(#564, CONTEXT.md 「소유권 이전」).
+export type PendingOwnershipTransfer = {
+  id: number;
+  // 받는 사람의 공동 강사 줄 id — 강사 목록 줄의 `co_instructor_id` 와 짝짓는다.
+  recipient_co_instructor_id: number | null;
+  // 받는 공동 강사가 이 클래스에서 불리는 강사 이름.
+  recipient_display_name: string;
+  // 부른 사람이 받는 사람인가 — 참이면 클래스 화면이 수락·거절을 묻는다.
+  recipient_is_me: boolean;
+  requested_at: string;
+  expires_at: string;
 };
 
 // 「내가 참여자로 들어간 클래스」한 줄(#328) — 강사 전용 `ClassRow`와 달리

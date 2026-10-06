@@ -654,6 +654,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/ownership-transfers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request Ownership Transfer
+         * @description 소유자가 공동 강사 한 사람에게 소유권 이전을 요청한다 — 클래스마다 대기 하나, 7일 뒤 만료.
+         *     이 클래스의 공동 강사 줄이 아니면 404, 이미 대기 중이면 409.
+         */
+        post: operations["classroom_api_request_ownership_transfer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/classes/{class_id}/ownership-transfers/{transfer_id}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept Ownership Transfer
+         * @description 받는 공동 강사가 수락한다 — 그 순간 소유자가 되고, 넘긴 사람은 공동 강사로 남고, 채점 키가
+         *     비워진다(`classroom.ownership_transfers.accept`). 응답은 새 소유자가 보는 클래스다.
+         */
+        post: operations["classroom_api_accept_ownership_transfer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/classes/{class_id}/ownership-transfers/{transfer_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Ownership Transfer
+         * @description 소유자가 대기 중인 이전 요청을 취소한다. 끝난 요청이면 409.
+         */
+        post: operations["classroom_api_cancel_ownership_transfer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/classes/{class_id}/ownership-transfers/{transfer_id}/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decline Ownership Transfer
+         * @description 받는 공동 강사가 거절한다. 아무것도 바뀌지 않고 요청만 끝난다.
+         */
+        post: operations["classroom_api_decline_ownership_transfer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/problems": {
         parameters: {
             query?: never;
@@ -4774,6 +4856,7 @@ export interface components {
             openai_key_masked?: string | null;
             /** Openai Key Status */
             openai_key_status?: string | null;
+            pending_ownership_transfer?: components["schemas"]["PendingOwnershipTransferOut"] | null;
             published_template?: components["schemas"]["PublishedTemplateSummaryOut"] | null;
             /**
              * Role
@@ -6955,6 +7038,11 @@ export interface components {
             scored_assets: components["schemas"]["ScoredAssetOut"][];
             scoring_basis: components["schemas"]["ScoringBasis"];
         };
+        /** OwnershipTransferIn */
+        OwnershipTransferIn: {
+            /** Co Instructor Id */
+            co_instructor_id: number;
+        };
         /** PagedClassTemplateListItemOut */
         PagedClassTemplateListItemOut: {
             /** Count */
@@ -7077,6 +7165,27 @@ export interface components {
             id: number;
             /** Token */
             token: string;
+        };
+        /** PendingOwnershipTransferOut */
+        PendingOwnershipTransferOut: {
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Id */
+            id: number;
+            /** Recipient Co Instructor Id */
+            recipient_co_instructor_id?: number | null;
+            /** Recipient Display Name */
+            recipient_display_name: string;
+            /** Recipient Is Me */
+            recipient_is_me: boolean;
+            /**
+             * Requested At
+             * Format: date-time
+             */
+            requested_at: string;
         };
         /** PolicyChangeOut */
         PolicyChangeOut: {
@@ -9437,6 +9546,205 @@ export interface operations {
             };
             /** @description Unprocessable Content */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_request_ownership_transfer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OwnershipTransferIn"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PendingOwnershipTransferOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_accept_ownership_transfer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+                transfer_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_cancel_ownership_transfer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+                transfer_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_decline_ownership_transfer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+                transfer_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

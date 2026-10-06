@@ -21,8 +21,8 @@
 내보내기(`remove_by_owner`), 탈퇴(`leave_all_on_withdrawal`, `accounts.signals.user_withdrawn`)
 모두 `depart` 하나를 한 트랜잭션에서 탄다 — 공동 강사 자리를 지우고, 그 사람의 참여자 행이
 있으면 내보낸 참여자로 표시하고(점검용 시도가 달성률에 섞이지 않게, 그 시도는 문제 삭제를
-막는다 — ADR-0050), 그 사람이 만든 대기 중 초대를 취소한다. 소유자는 떠날 수 없다(넘기거나
-보관·삭제한다). 보관과 무관하다.
+막는다 — ADR-0050), 그 사람이 만든 대기 중 초대를 취소하고, 그 사람에게 온 대기 중 소유권 이전
+요청을 지운다(#564). 소유자는 떠날 수 없다(넘기거나 보관·삭제한다). 보관과 무관하다.
 """
 
 from __future__ import annotations
@@ -37,13 +37,24 @@ from core.clock import Clock
 
 from .class_authoring import reject_banned_name
 from .instructors import is_instructor, is_owner
-from .models import CO_INSTRUCTOR_INVITE_TTL_DAYS, Class, ClassCoInstructor, ClassMember, CoInstructorInvite
+from .models import (
+    CO_INSTRUCTOR_INVITE_TTL_DAYS,
+    Class,
+    ClassCoInstructor,
+    ClassMember,
+    CoInstructorInvite,
+    OwnershipTransfer,
+)
+from .ownership_transfers import pending_q as ownership_pending_q
 
 #: 이미 그 클래스의 강사인 사람이 수락하려 할 때 — 미리보기 화면도 같은 말을 쓴다.
 ALREADY_INSTRUCTOR_MESSAGE = "이미 이 클래스의 강사입니다."
 
-#: 소유자가 떠나려 할 때 — 화면이 같은 안내를 미리 보여 준다. 소유권 이전(#564)이 생기면 「넘기기」를 더한다.
-OWNER_CANNOT_LEAVE_MESSAGE = "소유자는 클래스를 떠날 수 없습니다. 수업을 끝내려면 클래스를 보관하거나 삭제하세요."
+#: 소유자가 떠나려 할 때 — 화면이 같은 안내를 미리 보여 준다.
+OWNER_CANNOT_LEAVE_MESSAGE = (
+    "소유자는 클래스를 떠날 수 없습니다. 공동 강사에게 소유권을 넘기면 공동 강사가 되어 떠날 수 있고, "
+    "수업을 끝내려면 클래스를 보관하거나 삭제하세요."
+)
 
 #: 쓸 수 없는 초대의 상태별 문장 — 초대한 사람에게 새 링크를 부탁하라고 말한다.
 _NOT_PENDING_MESSAGES = {
@@ -194,7 +205,7 @@ def accept_invite(token: str, user_id: int, display_name: str) -> Class:
 # --- 떠나기 (#563) -----------------------------------------------------------------
 
 
-def depart(row: ClassCoInstructor) -> None:
+def depart(row: ClassCoInstructor) -> bool:
     """공동 강사 한 사람이 클래스에서 빠진다 — 세 길(떠나기·내보내기·탈퇴)이 모두 이 함수를
     탄다. 한 트랜잭션에서:
 
@@ -204,11 +215,20 @@ def depart(row: ClassCoInstructor) -> None:
        내보낸 참여자의 시도로 남아 문제 삭제를 막는다(ADR-0050).
     3. 그 사람이 만든 대기 중 초대를 취소한다 — 더 믿지 않는 사람이 나눠 준 링크로 누가
        들어오지 않게. 수락과 같은 행을 `UPDATE` 가 잠그므로 겹친 수락은 한쪽만 이긴다.
+    4. 그 사람에게 온 대기 중 소유권 이전 요청을 지운다(#564) — 받는 사람이 떠나면 요청이
+       사라진다(`CONTEXT.md` 「소유권 이전」).
 
-    소유권 이전(#564)의 「받는 사람이 떠나면 대기 요청이 사라진다」도 이 자리에 붙는다."""
+    공동 강사 줄을 먼저 잠근다 — 이전 수락(`ownership_transfers.accept`)과 같은 잠금 순서라
+    둘이 겹쳐도 한쪽만 이긴다. 줄이 이미 없으면(겹친 수락이 줄을 바꿨거나 먼저 떠났다) 아무것도
+    하지 않고 거짓을 돌려준다."""
 
     now = Clock.now()
     with transaction.atomic():
+        if ClassCoInstructor.objects.select_for_update().filter(id=row.id).first() is None:
+            return False
+        OwnershipTransfer.objects.filter(
+            ownership_pending_q(now), classroom_id=row.classroom_id, recipient_id=row.user_id
+        ).delete()
         ClassCoInstructor.objects.filter(id=row.id).delete()
         ClassMember.objects.filter(
             classroom_id=row.classroom_id, user_id=row.user_id, expelled_at__isnull=True
@@ -216,10 +236,11 @@ def depart(row: ClassCoInstructor) -> None:
         CoInstructorInvite.objects.filter(
             _pending_q(now), classroom_id=row.classroom_id, created_by_id=row.user_id
         ).update(cancelled_at=now)
+    return True
 
 
 def leave(class_obj: Class, user_id: int) -> None:
-    """부른 강사가 스스로 떠난다. 소유자는 409 — 보관하거나 삭제한다(넘기기는 #564)."""
+    """부른 강사가 스스로 떠난다. 소유자는 409 — 넘기거나 보관·삭제한다."""
 
     if is_owner(class_obj, user_id):
         raise HttpError(409, OWNER_CANNOT_LEAVE_MESSAGE)
@@ -232,9 +253,8 @@ def remove_by_owner(class_obj: Class, co_instructor_id: int) -> None:
     """소유자가 공동 강사 한 사람을 내보낸다. 이 클래스의 공동 강사 줄이 아니면 404."""
 
     row = ClassCoInstructor.objects.filter(classroom_id=class_obj.id, id=co_instructor_id).first()
-    if row is None:
+    if row is None or not depart(row):
         raise HttpError(404, "이 클래스에 그런 공동 강사가 없습니다.")
-    depart(row)
 
 
 def leave_all_on_withdrawal(sender, user, **kwargs) -> None:

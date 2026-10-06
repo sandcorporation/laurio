@@ -446,6 +446,56 @@ class CoInstructorInvite(models.Model):
         return self.Status.PENDING
 
 
+#: 소유권 이전 요청이 열려 있는 기간(CONTEXT.md 「소유권 이전」).
+OWNERSHIP_TRANSFER_TTL_DAYS = 7
+
+
+class OwnershipTransfer(models.Model):
+    """소유자가 공동 강사 한 사람에게 클래스를 넘기겠다는 요청(#564, CONTEXT.md 「소유권 이전」,
+    ADR-0055).
+
+    **받는 사람이 수락해야 넘어간다** — 수락하면 채점 키가 비워지므로(비용이 그 사람의 몫이 된다)
+    모르는 사이에 떠넘길 수 없다. 클래스마다 대기 중인 요청은 하나다 — 요청은 클래스 행을 잠그고
+    「대기 중인 것이 있는가」를 본다(`classroom.ownership_transfers.request`). 상태는 따로 두지 않고
+    아래 값들에서 읽는다(`status_at`, `CoInstructorInvite`와 같은 관용구). 받는 사람이 클래스를
+    떠나면(떠나기·내보내기·탈퇴) 대기 중인 요청은 행째 사라진다(`co_instructors.depart`)."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "대기"
+        ACCEPTED = "accepted", "수락됨"
+        DECLINED = "declined", "거절됨"
+        CANCELLED = "cancelled", "취소됨"
+        EXPIRED = "expired", "만료"
+
+    classroom = models.ForeignKey(Class, related_name="ownership_transfers", on_delete=models.CASCADE)
+    #: 요청한 소유자 — 기록이다. 판정은 지금의 `Class.instructor`를 본다.
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, related_name="+", on_delete=models.CASCADE)
+    #: 받는 공동 강사(계정). 요청할 때 이 클래스의 공동 강사여야 한다.
+    recipient = models.ForeignKey(settings.AUTH_USER_MODEL, related_name="+", on_delete=models.CASCADE)
+    requested_at = models.DateTimeField()
+    expires_at = models.DateTimeField()
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    declined_at = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-requested_at", "-id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"OwnershipTransfer(id={self.pk}, classroom_id={self.classroom_id})"
+
+    def status_at(self, now) -> str:
+        if self.accepted_at is not None:
+            return self.Status.ACCEPTED
+        if self.declined_at is not None:
+            return self.Status.DECLINED
+        if self.cancelled_at is not None:
+            return self.Status.CANCELLED
+        if now >= self.expires_at:
+            return self.Status.EXPIRED
+        return self.Status.PENDING
+
+
 class ClassroomSubmission(Submission):
     """`submissions.Submission`의 강의실 자식(#286, ADR-0039) — 부모와 테이블·pk를
     나눠 갖는 다중 테이블 상속이다(`contests.ContestSubmission`과 같은 모양).

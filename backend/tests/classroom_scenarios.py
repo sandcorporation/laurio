@@ -255,6 +255,69 @@ def remove_co_instructor(client, access: str, class_id: int, co_instructor_id: i
     )
 
 
+# --- 소유권 이전 (#564) ----------------------------------------------------
+
+
+def co_instructor_id_of(client, access: str, class_id: int, display_name: str) -> int:
+    """강사 목록에서 그 이름의 공동 강사 줄 id — 이전 요청·내보내기가 받는 사람을 이것으로 고른다."""
+
+    rows = [
+        r for r in list_instructors(client, access, class_id)
+        if r["role"] == "co_instructor" and r["display_name"] == display_name
+    ]
+    assert len(rows) == 1, rows
+    return rows[0]["co_instructor_id"]
+
+
+def request_ownership_transfer(client, access: str, class_id: int, co_instructor_id: int):
+    """소유자가 공동 강사 한 사람에게 이전을 요청한다 — 응답 그대로(거절을 보는 테스트가 본다)."""
+
+    return client.post(
+        f"{CLASSES_URL}/{class_id}/ownership-transfers",
+        data={"co_instructor_id": co_instructor_id},
+        content_type="application/json",
+        **auth_header(access),
+    )
+
+
+def _transfer_action(client, access: str, class_id: int, transfer_id: int, action: str):
+    return client.post(
+        f"{CLASSES_URL}/{class_id}/ownership-transfers/{transfer_id}/{action}",
+        content_type="application/json",
+        **auth_header(access),
+    )
+
+
+def accept_ownership_transfer(client, access: str, class_id: int, transfer_id: int):
+    return _transfer_action(client, access, class_id, transfer_id, "accept")
+
+
+def decline_ownership_transfer(client, access: str, class_id: int, transfer_id: int):
+    return _transfer_action(client, access, class_id, transfer_id, "decline")
+
+
+def cancel_ownership_transfer(client, access: str, class_id: int, transfer_id: int):
+    return _transfer_action(client, access, class_id, transfer_id, "cancel")
+
+
+def pending_ownership_transfer(client, access: str, class_id: int) -> dict | None:
+    """클래스 화면이 보는 대기 중 이전 요청 — 없으면 `None`."""
+
+    return get_class(client, access, class_id)["pending_ownership_transfer"]
+
+
+def transfer_ownership(
+    client, owner_access: str, class_id: int, recipient_access: str, *, recipient_name: str = "공동 강사"
+) -> None:
+    """가장 흔한 모양 — 소유자가 요청하고 받는 공동 강사가 곧장 수락한다."""
+
+    co_id = co_instructor_id_of(client, owner_access, class_id, recipient_name)
+    requested = request_ownership_transfer(client, owner_access, class_id, co_id)
+    assert requested.status_code == 201, requested.content
+    accepted = accept_ownership_transfer(client, recipient_access, class_id, requested.json()["id"])
+    assert accepted.status_code == 200, accepted.content
+
+
 def list_taught_classes(client, access: str) -> list:
     """강사 화면의 「내 클래스」(소유한 것과 공동 강사인 것)."""
 

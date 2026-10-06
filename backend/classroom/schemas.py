@@ -52,6 +52,23 @@ class PublishedTemplateSummaryOut(Schema):
     created_at: datetime
 
 
+class PendingOwnershipTransferOut(Schema):
+    id: int
+    #: 받는 사람의 공동 강사 줄 id — 강사 목록 줄(`ClassInstructorOut.co_instructor_id`)과 짝짓는다.
+    recipient_co_instructor_id: int | None = None
+    #: 받는 공동 강사가 이 클래스에서 불리는 강사 이름.
+    recipient_display_name: str
+    #: 부른 사람이 받는 사람인가.
+    recipient_is_me: bool
+    requested_at: datetime
+    expires_at: datetime
+
+
+class OwnershipTransferIn(Schema):
+    #: 받는 사람 — 강사 목록 줄의 `co_instructor_id`.
+    co_instructor_id: int
+
+
 class ClassOut(Schema):
     id: int
     name: str
@@ -99,6 +116,9 @@ class ClassOut(Schema):
     #: 또는 "co_instructor"(공동 강사). 화면이 이 값으로 소유자 전용 컨트롤(채점 키·예산·
     #: 클래스 삭제)을 감추고 클래스 목록에 「공동 강사」를 표시한다.
     role: Literal["owner", "co_instructor"]
+    #: 대기 중인 소유권 이전 요청(#564) — 없으면 `None`. 강사 누구나 본다: 소유자는 취소하고,
+    #: 받는 공동 강사(`recipient_is_me`)는 클래스 화면에서 수락하거나 거절한다.
+    pending_ownership_transfer: PendingOwnershipTransferOut | None = None
 
 
 class OpenAIKeyIn(Schema):

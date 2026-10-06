@@ -93,6 +93,12 @@ function ClassList({
                     <Badge>공동 강사</Badge>
                   </span>
                 ) : null}
+                {/* 나에게 온 소유권 이전 요청(#564) — 클래스 화면에서 답한다. */}
+                {classroom.pending_ownership_transfer?.recipient_is_me ? (
+                  <span data-testid={`classroom-row-${classroom.id}-ownership-transfer-badge`}>
+                    <Badge tone="attention">소유권 이전 요청</Badge>
+                  </span>
+                ) : null}
                 <span>
                   <Num>{new Date(classroom.created_at).toLocaleDateString("ko-KR")}</Num> 만듦
                 </span>

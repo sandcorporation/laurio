@@ -36,6 +36,7 @@ import { useProblems } from "@/lib/problems/use-problems";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 
 import { InstructorsSection } from "./instructors-section";
+import { OwnershipTransferAcceptedNote, OwnershipTransferOffer } from "./ownership-transfer-offer";
 import { RosterGridTab } from "./roster-grid-tab";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -191,7 +192,9 @@ function ArchiveSection({
 export default function ClassDetailPage() {
   const params = useParams<{ id: string }>();
   const classId = Number(params.id);
-  const { state: classState, regenerateJoinCode, setArchived } = useClass(classId);
+  const { state: classState, reload: reloadClass, regenerateJoinCode, setArchived } = useClass(classId);
+  // 방금 소유권을 넘겨받았는가(#564) — 키 넣기로 가는 안내를 한 번 보인다.
+  const [justTookOver, setJustTookOver] = useState(false);
   const { state: problemsState, move } = useProblems(classId);
   const [tab, setTab] = useState<DetailTab>("problems");
   const router = useRouter();
@@ -304,6 +307,20 @@ export default function ClassDetailPage() {
           </ErrorNote>
         ) : null}
 
+        {/* 나에게 온 소유권 이전 요청(#564) — 답을 기다리는 일이라 맨 위에 둔다. */}
+        {classroom.pending_ownership_transfer?.recipient_is_me ? (
+          <OwnershipTransferOffer
+            classId={classId}
+            transfer={classroom.pending_ownership_transfer}
+            ownerName={classroom.instructor_display_name}
+            onDone={(accepted) => {
+              setJustTookOver(accepted);
+              reloadClass();
+            }}
+          />
+        ) : null}
+        {justTookOver && classroom.role === "owner" ? <OwnershipTransferAcceptedNote classId={classId} /> : null}
+
         <ArchiveSection
           archived={classroom.archived}
           archiveError={classState.archiveError}
@@ -317,7 +334,7 @@ export default function ClassDetailPage() {
             길만 준다 — 같은 사실을 두 곳에 다른 말로 적지 않는다.
             보관된 클래스는 새 제출을 안 받으므로 "제출해도 채점되지
             않습니다"는 일어날 수 없는 일이다 — 뜨지 않는다(#352). */}
-        {shouldShowMissingScoringKeyBanner(classroom) ? (
+        {shouldShowMissingScoringKeyBanner(classroom) && !(justTookOver && classroom.role === "owner") ? (
           <MissingScoringKeyNote
             classId={classId}
             message={
@@ -356,7 +373,13 @@ export default function ClassDetailPage() {
           onRegenerate={regenerateJoinCode}
         />
 
-        <InstructorsSection classId={classId} />
+        {/* 역할과 대기 요청이 바뀌면(넘겨받기·요청·취소) 강사 목록을 처음부터 다시 읽는다. */}
+        <InstructorsSection
+          key={`${classroom.role}-${classroom.pending_ownership_transfer?.id ?? "none"}`}
+          classId={classId}
+          pendingTransfer={classroom.pending_ownership_transfer}
+          onTransferChanged={reloadClass}
+        />
 
         {/* 클래스 상세의 두 탭(#290) — 「문제 중심」은 문제마다 달성률을 보여주고
             (#289), 「참여자별 현황」은 참여자 × 문제 격자로 누가 막혔는지 보여준다.

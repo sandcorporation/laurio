@@ -53,6 +53,7 @@ class World:
     share_code: str
     invite_id: int
     co_instructor_id: int
+    transfer_id: int
 
 
 def _post(client, access, url, body=None):
@@ -85,6 +86,10 @@ def world(client, db) -> World:
     invite = _post(client, owner["access"], f"{CLASSES_URL}/{class_id}/co-instructor-invites")
     instructors = client.get(f"{CLASSES_URL}/{class_id}/instructors", **auth_header(owner["access"])).json()
     co_instructor_id = next(row["co_instructor_id"] for row in instructors if row["role"] == "co_instructor")
+    # 공동 강사에게 온 대기 중 소유권 이전 요청(#564) — 수락·거절·취소 줄이 이것을 쓴다.
+    transfer = _post(
+        client, owner["access"], f"{CLASSES_URL}/{class_id}/ownership-transfers", {"co_instructor_id": co_instructor_id}
+    )
     return World(
         access={"owner": owner["access"], "co_instructor": co["access"], "stranger": stranger["access"]},
         class_id=class_id,
@@ -96,6 +101,7 @@ def world(client, db) -> World:
         share_code=published["share_code"],
         invite_id=invite["id"],
         co_instructor_id=co_instructor_id,
+        transfer_id=transfer["id"],
     )
 
 
@@ -162,6 +168,26 @@ ROUTES: list[Route] = [
         204,
         owner_only=True,
     ),
+    # 소유권 이전(#564) — 요청·취소는 소유자 전용. 세계에 이미 대기 요청이 있어 소유자의 새 요청은 409.
+    Route(
+        "request_ownership_transfer",
+        "post",
+        lambda w: f"{_c(w)}/ownership-transfers",
+        lambda w: {"co_instructor_id": w.co_instructor_id},
+        409,
+        owner_only=True,
+    ),
+    Route(
+        "cancel_ownership_transfer",
+        "post",
+        lambda w: f"{_c(w)}/ownership-transfers/{w.transfer_id}/cancel",
+        None,
+        204,
+        owner_only=True,
+    ),
+    # 수락·거절은 받는 사람(이 세계의 공동 강사) 본인만 — 소유자는 받는 사람이 아니라 403.
+    Route("accept_ownership_transfer", "post", lambda w: f"{_c(w)}/ownership-transfers/{w.transfer_id}/accept", None, 403, co_status=200),
+    Route("decline_ownership_transfer", "post", lambda w: f"{_c(w)}/ownership-transfers/{w.transfer_id}/decline", None, 403, co_status=204),
     Route("publish_class_template", "post", lambda w: f"{_c(w)}/publish-template", lambda w: {"publisher_display_name": "강사"}, 201),
     # 명단
     Route("list_members", "get", lambda w: f"{_c(w)}/members", None, 200),
