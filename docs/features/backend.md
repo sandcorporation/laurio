@@ -244,6 +244,7 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 | `PATCH /api/classroom/classes/{id}` | 이름·기본 채점 모델·기본 추론 강도를 고친다(#402) — 예산 칸과 소유자의 강사 이름 칸은 소유자만 |
 | `PUT /api/classroom/classes/{id}/openai-key` | 강사 본인의 채점 키를 저장한다 — 마스킹된 값만 돌려준다(#284) |
 | `GET /api/classroom/classes/{id}/scoring-models` | 그 클래스의 키로 실제로 쓸 수 있는 채점 모델·컨텍스트 크기·추론 모델 여부(#401, 예전 전역 `/scoring-models`를 대신한다) |
+| `GET /api/classroom/classes/{id}/scoring-cost[?problem_id=]` | 예상 채점 비용(#591) — 그 키로 쓸 수 있는 모델(추론 모델은 강도별)의 시도 1건·문제 하나·gpt-4.1-mini 대비 배율. 기준은 그 문제의 지난 시도 평균 → 클래스 평균 → 소스 크기별, 셈은 `classroom.scoring_cost` |
 | `POST /api/classroom/classes/{id}/join-link/regenerate` | 가입 링크를 다시 뽑는다 — 이전 코드는 죽는다(#279) |
 | `POST .../archive`·`.../unarchive` | 클래스를 보관하고 되돌린다 — 지우지 않는다(#294) |
 | `DELETE /api/classroom/classes/{id}` | 클래스를 지운다 — 어느 문제에도 제출이 없을 때만, 되돌릴 수 없다(#330) |
@@ -558,9 +559,9 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 | 도구 | 하는 일 |
 | --- | --- |
 | `list_my_classes`(읽기) | 내가 강사인 클래스(소유한 것과 공동 강사인 것) — 이름·내 역할(`role`: owner·co_instructor, #566)·보관 여부·참여자 수(강사와 내보낸 사람 제외)·문제 수(열림·초안·숨김별). 강사 화면의 「내 클래스」와 같은 서비스 함수(`classroom.services.instructor_classes`)를 부른다 |
-| `get_class`(읽기, `class_id`) | 클래스 상세 — 화면의 `GET …/classes/{id}` 와 같은 값에서 OpenAI 키의 가린 표시(`openai_key_masked`)만 뺀다. 내 역할(`role`), 키는 있는가(`has_openai_key`)와 상태만, 예산·사용량·남은 양·기본 모델·가입 코드·보관 여부 |
+| `get_class`(읽기, `class_id`) | 클래스 상세 — 화면의 `GET …/classes/{id}` 와 같은 값에서 OpenAI 키의 가린 표시(`openai_key_masked`)만 뺀다. 내 역할(`role`), 키는 있는가(`has_openai_key`)와 상태만, 예산·사용량·남은 양·기본 모델·가입 코드·보관 여부, 그리고 기본 모델·추론 강도의 예상 채점 비용 한 줄(`scoring_cost_estimate`, #591 — 화면에는 없는 칸) |
 | `list_problems`(읽기, `class_id`) | 문제 전부(초안·열림·숨김)의 **요약**(#579) — 화면의 `GET …/problems` 한 줄에서 제목·상태·할 수 있는 전이·순서·제출 형식·달성률(통과 수·참여자 수)·채점 모델 거부·지울 수 있는가만 옮기고 체크리스트 항목 수를 더한다. 설명·체크리스트·채점 설정은 싣지 않는다 — `get_problem` 으로 읽는다(도구 설명이 그렇게 말한다) |
-| `get_problem`(읽기, `class_id`·`problem_id`) | 문제 하나의 상세 — 화면의 `GET …/problems/{id}` 와 같은 값(설명 원문·체크리스트·채점 설정까지) |
+| `get_problem`(읽기, `class_id`·`problem_id`) | 문제 하나의 상세 — 화면의 `GET …/problems/{id}` 와 같은 값(설명 원문·체크리스트·채점 설정까지)에 이 문제가 실제로 쓸 설정의 예상 채점 비용 한 줄(`scoring_cost_estimate`, #591)을 더한다 |
 | `list_participants`(읽기, `class_id`) | 참여자 명단 — 화면의 `GET …/members` 와 같은 값(클래스에서 불릴 이름·가입 시각·내보냄·강사(소유자·공동 강사) 자리). 이메일 없음 |
 | `get_roster_grid`(읽기, `class_id`) | 명단 격자 — 화면의 `GET …/roster-grid` 와 같은 값(문제별 달성률 + 참여자 × 문제 칸의 통과 이력, 공모전 문제면 「공모전에도 냈다」 표시 #550) |
 | `create_problem`(쓰기) | 문제 만들기 — 설명·제출 형식·체크리스트·채점 설정을 한 번에, `open` 이면 바로 연다(#514). 결과는 문제 요약(번호·클래스·제목·상태·순서·제출 형식·채점 지침 단계·모델·추론 강도·문법 검사·체크리스트·할 수 있는 전이) — **설명·채점 지침 원문은 싣지 않는다**(#579) |

@@ -22,6 +22,7 @@ from tests.classroom_scenarios import (
     join_class,
     list_problems,
     login,
+    patch_class,
     roster_grid,
     submit_repository,
 )
@@ -136,7 +137,10 @@ def test_each_read_tool_returns_what_the_screen_returns(client, db):
     assert screen_class["has_openai_key"] is True
     assert screen_class["openai_key_masked"]  # 화면에는 끝 네 자리가 보인다
     tool_class = _structured(client, token, "get_class", class_id=class_id)
+    # 화면에 없는 칸은 예상 채점 비용 하나다(#591) — 화면은 따로 `scoring-cost` 로 읽는다.
+    class_estimate = tool_class.pop("scoring_cost_estimate")
     assert tool_class == {k: v for k, v in screen_class.items() if k != "openai_key_masked"}
+    assert class_estimate["model"] == screen_class["default_model"]
     assert tool_class["token_budget"] == 50000
 
     # 목록은 문제마다 요약만 싣는다(#579) — 설명·체크리스트 원문은 get_problem 에서 읽는다.
@@ -155,7 +159,9 @@ def test_each_read_tool_returns_what_the_screen_returns(client, db):
 
     for problem in (opened, draft):
         tool_problem = _structured(client, token, "get_problem", class_id=class_id, problem_id=problem.id)
+        problem_estimate = tool_problem.pop("scoring_cost_estimate")
         assert tool_problem == _screen(client, access, f"{class_id}/problems/{problem.id}")
+        assert problem_estimate["model"] == tool_problem["effective_model"]
     stack = _structured(client, token, "get_problem", class_id=class_id, problem_id=opened.id)
     assert [(i["label"], i["required"]) for i in stack["checklist_items"]] == [
         ("테스트가 있다", True),
@@ -268,3 +274,30 @@ def test_reading_leaves_no_record(client, db):
     _call(client, token, "get_class", class_id=class_id + 999)  # 거절된 읽기도 마찬가지
 
     assert _row_counts() == before
+
+
+def test_get_class_and_get_problem_carry_a_short_cost_estimate_for_the_current_setting(client, db):
+    """#591 — 지금 설정 한 줄만 싣는다(#579 의 크기 원칙). 시도가 없으면 소스 크기별이다."""
+
+    instructor = login(client, uid="instructor-1")
+    access = instructor["access"]
+    class_id = create_class(client, access)
+    patch_class(client, access, class_id, {"default_model": "gpt-5.5", "default_reasoning_effort": "medium"})
+    problem = create_open_problem(client, access, class_id, model="gpt-4.1-mini")
+    token = _connect(client, access)["access_token"]
+
+    class_estimate = _structured(client, token, "get_class", class_id=class_id)["scoring_cost_estimate"]
+    assert class_estimate["basis"] == "source_sizes"
+    assert (class_estimate["model"], class_estimate["reasoning_effort"]) == ("gpt-5.5", "medium")
+    assert set(class_estimate["per_attempt_krw_by_source_chars"]) == {"10000", "50000", "200000"}
+    assert class_estimate["ratio_to_gpt_4_1_mini"] > 20
+
+    problem_estimate = _structured(client, token, "get_problem", class_id=class_id, problem_id=problem.id)[
+        "scoring_cost_estimate"
+    ]
+    assert (problem_estimate["model"], problem_estimate["reasoning_effort"]) == ("gpt-4.1-mini", None)
+    assert problem_estimate["ratio_to_gpt_4_1_mini"] == 1.0
+
+    patch_class(client, access, class_id, {"default_model": "gpt-4o"})
+    unpriced = _structured(client, token, "get_class", class_id=class_id)["scoring_cost_estimate"]
+    assert unpriced == {"basis": "source_sizes", "model": "gpt-4o", "reasoning_effort": None, "priced": False}

@@ -30,6 +30,7 @@ import { TemplatePickerSheet } from "@/app/components/TemplatePickerSheet";
 import { useClass } from "@/lib/classes/use-class";
 import { checkPublicTextForBannedWords } from "@/lib/moderation/public-text-check";
 import { createProblem, type ProblemRow, type SubmissionFormat } from "@/lib/problems/api";
+import { useScoringCost } from "@/lib/scoring/use-scoring-cost";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
 
 type DraftChecklistItem = {
@@ -44,6 +45,7 @@ export default function NewProblemPage() {
   // 미리보기 눈썹이 참여자 화면과 같이 클래스 이름을 말한다(#372 후속). 불러오는 중에는
   // 비워 둔다 — 「클래스」 같은 자리표시를 잠깐 보였다 바꾸면 깜빡임만 는다.
   const { state: classState } = useClass(classId);
+  const costState = useScoringCost(classId);
   const previewEyebrow = classState.status === "ready" ? classState.classroom.name : "";
   const router = useRouter();
 
@@ -322,6 +324,15 @@ export default function NewProblemPage() {
           defaultModelIsReasoning={
             classState.status === "ready" ? classState.classroom.default_model_is_reasoning : false
           }
+          classDefaults={
+            classState.status === "ready"
+              ? {
+                  model: classState.classroom.default_model,
+                  reasoningEffort: classState.classroom.default_reasoning_effort,
+                }
+              : null
+          }
+          costState={costState}
           gradingGuideline={gradingGuideline}
           onGradingGuidelineChange={setGradingGuideline}
         />

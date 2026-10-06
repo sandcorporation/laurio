@@ -38,7 +38,7 @@ _CACHE_KEY_PREFIX = "classroom:scoring-models:"
 _CACHE_TTL_SECONDS = 300
 
 #: dev·CI(`CLASSROOM_SCORING_ADAPTER_MODE=fake`)에서 실제 벤더 대신 쓰는 고정
-#: 목록 — 4o·4.1 계열과 추론 모델(gpt-5, gpt-5-mini)을 섞어, 키를 넣으면
+#: 목록 — 4o·4.1 계열과 추론 모델(gpt-5.5, gpt-5, gpt-5-mini)을 섞어, 키를 넣으면
 #: "live" 카탈로그가 어떻게 보이는지(추론 강도 칸 포함)를 네트워크 없이도
 #: 확인할 수 있게 한다.
 _FAKE_VENDOR_MODEL_IDS = (
@@ -47,6 +47,7 @@ _FAKE_VENDOR_MODEL_IDS = (
     "gpt-4.1",
     "gpt-4.1-mini",
     "gpt-4.1-nano",
+    "gpt-5.5",
     "gpt-5",
     "gpt-5-mini",
 )

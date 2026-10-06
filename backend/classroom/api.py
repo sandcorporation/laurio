@@ -123,6 +123,9 @@ from .schemas import (
     ProblemTemplateChecklistItemOut,
     ProblemTransitionOut,
     PublishedTemplateSummaryOut,
+    ScoringCostAttemptOut,
+    ScoringCostEstimateOut,
+    ScoringCostRowOut,
     ScoringModelCatalogOut,
     ScoringModelOut,
     OwnershipTransferIn,
@@ -145,6 +148,7 @@ from .participation import (
 from . import class_authoring, co_instructors, ownership_transfers, problem_authoring
 from .problem_transitions import available_transitions, execute_transition
 from .scoring import check_scoring_key, enqueue_scoring
+from . import scoring_cost
 from .scoring_model_catalog import get_scoring_model_catalog
 from .scoring_models import is_reasoning_model_id
 from .submission_target_refs import source_target_ref
@@ -696,6 +700,77 @@ def list_class_scoring_models(request: HttpRequest, class_id: int):
         source=catalog.source,
         unavailable_reason=catalog.unavailable_reason,
     )
+
+
+def _cost_attempt_out(cost: scoring_cost.AttemptCost) -> ScoringCostAttemptOut:
+    return ScoringCostAttemptOut(krw=cost.krw, tokens=cost.total_tokens)
+
+
+def scoring_cost_estimate(class_obj: Class, problem: Problem | None = None) -> scoring_cost.CostEstimate:
+    """이 클래스(와 문제)의 예상 채점 비용(#591) — 화면 API 와 연결된 앱이 같은 값을 읽는다.
+    줄은 이 키로 쓸 수 있는 모델(`get_scoring_model_catalog`)만, 지금 설정(클래스 기본값과
+    이 문제가 실제로 쓸 모델)은 단가를 몰라도 한 줄을 받는다."""
+
+    current = [class_obj.default_model]
+    if problem is not None:
+        current.append(problem.effective_model())
+    return scoring_cost.estimate(
+        class_obj,
+        participant_count=len(_active_member_ids(class_obj)),
+        catalog_model_ids=[c.id for c in get_scoring_model_catalog(class_obj).models],
+        current_model_ids=current,
+        problem=problem,
+    )
+
+
+def _serialize_scoring_cost(estimate: scoring_cost.CostEstimate) -> ScoringCostEstimateOut:
+    return ScoringCostEstimateOut(
+        basis=estimate.basis,
+        sample_count=estimate.sample_count,
+        avg_prompt_chars=estimate.avg_prompt_chars,
+        avg_input_tokens=(
+            scoring_cost.tokens_for_chars(estimate.avg_prompt_chars)
+            if estimate.avg_prompt_chars is not None
+            else None
+        ),
+        participant_count=estimate.participant_count,
+        attempts_per_participant=estimate.attempts_per_participant,
+        attempts_per_participant_measured=estimate.attempts_per_participant_measured,
+        source_size_bands=list(scoring_cost.SOURCE_SIZE_BANDS),
+        baseline_model_id=scoring_cost.BASELINE_MODEL,
+        krw_per_usd=scoring_cost.KRW_PER_USD,
+        rows=[
+            ScoringCostRowOut(
+                model_id=row.model_id,
+                reasoning_effort=row.reasoning_effort,
+                priced=row.priced,
+                open_ended=row.open_ended,
+                per_attempt=_cost_attempt_out(row.per_attempt) if row.per_attempt is not None else None,
+                per_problem_krw=row.per_problem_krw,
+                ratio_to_baseline=row.ratio_to_baseline,
+                by_source_size=[_cost_attempt_out(c) for c in row.by_source_size],
+            )
+            for row in estimate.rows
+        ],
+    )
+
+
+@router.get(
+    "/classes/{class_id}/scoring-cost",
+    response={200: ScoringCostEstimateOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def get_class_scoring_cost(request: HttpRequest, class_id: int, problem_id: int | None = None):
+    """「클래스 설정 › 채점」과 「문제 설정 › 채점 모델」이 보이는 예상 채점 비용(#591).
+    `problem_id` 를 주면 그 문제의 지난 시도부터 기준으로 삼는다. 남의 클래스·문제는 404다."""
+
+    if problem_id is None:
+        scope = class_scope(class_id, request.auth_user.id, write=False, owner=False)
+        problem = None
+    else:
+        scope = problem_scope(class_id, problem_id, request.auth_user.id, write=False, owner=False)
+        problem = scope.problem
+    return 200, _serialize_scoring_cost(scoring_cost_estimate(scope.class_obj, problem))
 
 
 @router.post(

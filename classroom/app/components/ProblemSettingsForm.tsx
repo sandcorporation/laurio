@@ -25,8 +25,10 @@ import {
   GradingGuidelineEditor,
   type GradingGuidelineValue,
 } from "@/app/components/GradingGuidelineEditor";
+import { ProblemScoringCost } from "@/app/components/ScoringCost";
 import type { SubmissionFormat } from "@/lib/problems/api";
 import { isSelectedModelReasoning, REASONING_EFFORT_OPTIONS } from "@/lib/scoring/reasoning";
+import type { ScoringCostState } from "@/lib/scoring/use-scoring-cost";
 import type { ScoringModelsState } from "@/lib/scoring/use-scoring-models";
 
 // 「이 모델로 다시 시도」 자리(#437) — 수정 화면에서 `problem.scoring_model_rejected`일
@@ -51,6 +53,8 @@ export function ProblemSettingsForm({
   onReasoningEffortChange,
   effectiveReasoningEffort,
   defaultModelIsReasoning,
+  classDefaults,
+  costState,
   gradingGuideline,
   onGradingGuidelineChange,
   disabled = false,
@@ -71,6 +75,10 @@ export function ProblemSettingsForm({
   /** 실제로 적용될 추론 강도(수정 화면만) — `reasoningEffort`가 빈 문자열일 때만 보인다. */
   effectiveReasoningEffort?: string;
   defaultModelIsReasoning: boolean;
+  /** 클래스 기본 모델·추론 강도 — 「클래스 기본값을 따릅니다」를 풀어 예상 비용을 찾는다(#591). */
+  classDefaults: { model: string; reasoningEffort: string } | null;
+  /** 이 문제의 예상 채점 비용(#591). */
+  costState: ScoringCostState;
   gradingGuideline: GradingGuidelineValue;
   onGradingGuidelineChange: (value: GradingGuidelineValue) => void;
   /** 보관된 클래스의 수정 화면(#438) — 모든 입력과 재시도 버튼을 잠근다.
@@ -200,6 +208,17 @@ export function ProblemSettingsForm({
             문제 설명이 길면 컨텍스트가 작은 모델은 뒷부분이 잘린 채 채점됩니다 — 그래서
             문제마다 다른 모델을 고를 수 있습니다.
           </span>
+          {modelsState.status === "ready" && classDefaults ? (
+            <ProblemScoringCost
+              state={costState}
+              testIdPrefix={testIdPrefix}
+              modelId={model || classDefaults.model}
+              reasoningEffort={reasoningEffort || classDefaults.reasoningEffort}
+              isReasoning={isSelectedModelReasoning(model, modelsState.models, defaultModelIsReasoning)}
+              selectableModelIds={modelsState.models.map((option) => option.id)}
+              onUseBaseline={() => onModelChange("gpt-4.1-mini")}
+            />
+          ) : null}
           {modelsState.status === "ready" &&
           isSelectedModelReasoning(model, modelsState.models, defaultModelIsReasoning) ? (
             <div className="flex flex-col gap-1.5 border-t border-rule pt-3">

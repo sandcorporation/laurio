@@ -51,6 +51,7 @@ import {
 } from "@/lib/problems/api";
 import { useProblem } from "@/lib/problems/use-problem";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
+import { useScoringCost } from "@/lib/scoring/use-scoring-cost";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
 import { liveTemplateFrom, type LiveTemplate } from "@/lib/problem-templates/live-state";
 
@@ -221,6 +222,7 @@ export default function EditProblemPage() {
 
   const { state, reload } = useProblem(classId, problemId);
   const { state: modelsState } = useScoringModels(classId);
+  const costState = useScoringCost(classId, problemId);
   const myClassesState = useMyClasses();
 
   const [title, setTitle] = useState("");
@@ -1010,6 +1012,15 @@ export default function EditProblemPage() {
               defaultModelIsReasoning={
                 classState.status === "ready" ? classState.classroom.default_model_is_reasoning : false
               }
+              classDefaults={
+                classState.status === "ready"
+                  ? {
+                      model: classState.classroom.default_model,
+                      reasoningEffort: classState.classroom.default_reasoning_effort,
+                    }
+                  : null
+              }
+              costState={costState}
               gradingGuideline={gradingGuideline}
               disabled={isArchived}
               onGradingGuidelineChange={setGradingGuideline}
