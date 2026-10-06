@@ -123,6 +123,8 @@ class ClassOut(Schema):
     token_budget_warning_threshold_percent: int
     #: 지금까지 실제로 쓴 토큰 누적합.
     token_usage_total: int
+    #: `token_usage_total` 가운데 서버가 usage 를 주지 않아 프롬프트 길이로 어림한 몫(#604).
+    token_usage_estimated: int = 0
     #: `token_budget - token_usage_total` — 예산이 없으면(무제한) `None`이다.
     token_budget_remaining: int | None = None
     #: 지금 채점이 예산 때문에 멈춰 있는가 — 강사 화면이 이 값 하나로
@@ -200,9 +202,9 @@ class ScoringModelCatalogOut(Schema):
 
 
 class ScoringCostAttemptOut(Schema):
-    """시도 1건의 어림(#591) — 원화와 그 시도가 예산에서 쓸 토큰."""
+    """시도 1건의 어림(#591) — 원화와 그 시도가 예산에서 쓸 토큰. 호환 서버는 원화가 `None`(#604)."""
 
-    krw: float
+    krw: float | None = None
     tokens: int
 
 
@@ -220,6 +222,8 @@ class ScoringCostRowOut(Schema):
     per_attempt: ScoringCostAttemptOut | None = None
     #: 참여자 수 × 1인 평균 시도 수 × 시도 1건.
     per_problem_krw: float | None = None
+    #: 같은 셈을 토큰으로 — `unit` 이 tokens(호환 서버)일 때만(#604).
+    per_problem_tokens: int | None = None
     #: gpt-4.1-mini 대비 배율.
     ratio_to_baseline: float | None = None
     #: `source_size_bands` 순서의 시도 1건(단가가 없으면 빈 목록).
@@ -229,8 +233,10 @@ class ScoringCostRowOut(Schema):
 class ScoringCostEstimateOut(Schema):
     """강사가 모델·추론 강도를 고를 때 미리 보는 예상 채점 비용(#591, CONTEXT.md
     「예상 채점 비용」). `basis` — problem(이 문제의 지난 시도 평균) | class(클래스 평균) |
-    source_sizes(아직 시도가 없어 소스 크기별)."""
+    source_sizes(아직 시도가 없어 소스 크기별). `unit` — krw(OpenAI 키, 단가표로 원화) |
+    tokens(호환 서버, 단가를 몰라 지금 설정만 토큰으로, #604)."""
 
+    unit: str = "krw"
     basis: str
     sample_count: int
     avg_prompt_chars: int | None = None

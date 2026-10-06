@@ -4952,6 +4952,11 @@ export interface components {
             token_budget_remaining?: number | null;
             /** Token Budget Warning Threshold Percent */
             token_budget_warning_threshold_percent: number;
+            /**
+             * Token Usage Estimated
+             * @default 0
+             */
+            token_usage_estimated: number;
             /** Token Usage Total */
             token_usage_total: number;
         };
@@ -8069,11 +8074,11 @@ export interface components {
         ScoringBasis: "ai_judged" | "no_scoring_input" | "platform_failure";
         /**
          * ScoringCostAttemptOut
-         * @description 시도 1건의 어림(#591) — 원화와 그 시도가 예산에서 쓸 토큰.
+         * @description 시도 1건의 어림(#591) — 원화와 그 시도가 예산에서 쓸 토큰. 호환 서버는 원화가 `None`(#604).
          */
         ScoringCostAttemptOut: {
             /** Krw */
-            krw: number;
+            krw?: number | null;
             /** Tokens */
             tokens: number;
         };
@@ -8081,7 +8086,8 @@ export interface components {
          * ScoringCostEstimateOut
          * @description 강사가 모델·추론 강도를 고를 때 미리 보는 예상 채점 비용(#591, CONTEXT.md
          *     「예상 채점 비용」). `basis` — problem(이 문제의 지난 시도 평균) | class(클래스 평균) |
-         *     source_sizes(아직 시도가 없어 소스 크기별).
+         *     source_sizes(아직 시도가 없어 소스 크기별). `unit` — krw(OpenAI 키, 단가표로 원화) |
+         *     tokens(호환 서버, 단가를 몰라 지금 설정만 토큰으로, #604).
          */
         ScoringCostEstimateOut: {
             /** Attempts Per Participant */
@@ -8106,6 +8112,11 @@ export interface components {
             sample_count: number;
             /** Source Size Bands */
             source_size_bands: number[];
+            /**
+             * Unit
+             * @default krw
+             */
+            unit: string;
         };
         /**
          * ScoringCostRowOut
@@ -8127,6 +8138,8 @@ export interface components {
             per_attempt?: components["schemas"]["ScoringCostAttemptOut"] | null;
             /** Per Problem Krw */
             per_problem_krw?: number | null;
+            /** Per Problem Tokens */
+            per_problem_tokens?: number | null;
             /** Priced */
             priced: boolean;
             /** Ratio To Baseline */

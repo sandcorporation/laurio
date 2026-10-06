@@ -1,8 +1,12 @@
 // 예상 채점 비용 (#591) — 셈은 백엔드(`classroom.scoring_cost`)가 하고, 화면은 고른
 // 모델·강도의 줄을 찾아 원화·배율을 사람 말로 적기만 한다. 여기 있는 것은 그 찾기와
 // 적기다 — 단가·토큰 어림을 화면에 따로 두지 않는다.
+//
+// 호환 서버 클래스(`unit` 이 tokens, #604)는 단가를 몰라 원화·배율이 없다 — 지금 설정만
+// 토큰으로 온다(`krw` 는 null).
 
-export type ScoringCostAttempt = { krw: number; tokens: number };
+// 원화는 OpenAI 키 클래스만 — 호환 서버는 null.
+export type ScoringCostAttempt = { krw: number | null; tokens: number };
 
 export type ScoringCostRow = {
   model_id: string;
@@ -15,12 +19,16 @@ export type ScoringCostRow = {
   // 이 문제·클래스 평균 길이에서 시도 1건. 소스 크기별 기준이면 null.
   per_attempt: ScoringCostAttempt | null;
   per_problem_krw: number | null;
+  // 같은 셈을 토큰으로 — 호환 서버(unit tokens)일 때만.
+  per_problem_tokens: number | null;
   ratio_to_baseline: number | null;
   // `source_size_bands` 순서의 시도 1건.
   by_source_size: ScoringCostAttempt[];
 };
 
 export type ScoringCostEstimate = {
+  // krw — OpenAI 단가로 원화, tokens — 호환 서버라 단가를 몰라 토큰만.
+  unit: "krw" | "tokens";
   basis: "problem" | "class" | "source_sizes";
   sample_count: number;
   avg_prompt_chars: number | null;
@@ -68,7 +76,8 @@ function roundKrw(krw: number): number {
   return Math.round(krw / 100) * 100;
 }
 
-export function formatKrw(krw: number, openEnded = false): string {
+export function formatKrw(krw: number | null, openEnded = false): string {
+  if (krw === null) return "—";
   return `약 ${roundKrw(krw).toLocaleString("ko-KR")}원${openEnded ? "~" : ""}`;
 }
 
@@ -82,6 +91,10 @@ export function formatManCount(count: number): string {
   if (count < 10_000) return count.toLocaleString("ko-KR");
   const man = Math.round(count / 1_000) / 10;
   return `${man.toLocaleString("ko-KR")}만`;
+}
+
+export function formatTokens(tokens: number, openEnded = false): string {
+  return `약 ${formatManCount(tokens)} 토큰${openEnded ? "~" : ""}`;
 }
 
 export function sourceBandLabel(chars: number): string {

@@ -144,6 +144,11 @@ class Class(models.Model):
     #: 채점 호출이 끝날 때마다 OpenAI 응답이 보고한 만큼만 더해진다 —
     #: 실패한 호출(인증 오류 등, 토큰을 쓰지 않고 끝난 시도)은 더하지 않는다.
     token_usage_total = models.PositiveIntegerField(default=0)
+    #: `token_usage_total` 가운데 어림으로 더한 몫(#604) — 호환 서버가 응답에 usage 를 주지
+    #: 않으면 프롬프트 길이로 어림해 더하고(`classroom.scoring_cost.estimated_usage_tokens`), 화면이
+    #: 사용량이 일부 어림임을 밝힌다. 예산 판정은 이 몫을 따로 보지 않는다 — 합계로 센다.
+    #: db_default: 겹쳐 바꾸는 배포 동안 옛 코드의 INSERT 가 이 칸을 빼먹어도 된다(ADR-0053).
+    token_usage_estimated = models.PositiveIntegerField(default=0, db_default=0)
     #: 경고 임계를 넘겨 강사에게 알림을 보낸 시각(#295). 강사가 `token_budget`을
     #: 바꾸면(새 예산 주기로 본다) 이 값을 지워, 다음 임계 통과에서 다시
     #: 알릴 수 있게 한다 — 그러지 않으면 한 번 경고한 뒤로는 예산을 아무리

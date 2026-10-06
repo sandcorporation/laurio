@@ -81,10 +81,13 @@ def _cost_summary(estimate: scoring_cost.CostEstimate, model_id: str, reasoning_
     row = estimate.row_for(model_id, reasoning_effort)
     summary: dict = {
         "basis": estimate.basis,
+        "unit": estimate.unit,
         "model": model_id,
         "reasoning_effort": row.reasoning_effort if row is not None else None,
         "priced": row is not None and row.priced,
     }
+    if estimate.unit == "tokens":
+        return _token_summary(summary, estimate, row)
     if row is None or not row.priced:
         return summary
     if row.per_attempt is not None:
@@ -97,6 +100,24 @@ def _cost_summary(estimate: scoring_cost.CostEstimate, model_id: str, reasoning_
             str(chars): round(cost.krw) for chars, cost in zip(scoring_cost.SOURCE_SIZE_BANDS, row.by_source_size)
         }
     summary["ratio_to_gpt_4_1_mini"] = round(row.ratio_to_baseline, 1)
+    summary["open_ended"] = row.open_ended
+    return summary
+
+
+def _token_summary(summary: dict, estimate: scoring_cost.CostEstimate, row) -> dict:
+    """호환 서버(#604) — 단가를 몰라 원화·배율 없이 토큰만."""
+
+    if row is None:
+        return summary
+    if row.per_attempt is not None:
+        summary["per_attempt_tokens"] = row.per_attempt.total_tokens
+        summary["per_problem_tokens"] = row.per_problem_tokens
+        summary["participant_count"] = estimate.participant_count
+        summary["attempts_per_participant"] = round(estimate.attempts_per_participant, 1)
+    else:
+        summary["per_attempt_tokens_by_source_chars"] = {
+            str(chars): cost.total_tokens for chars, cost in zip(scoring_cost.SOURCE_SIZE_BANDS, row.by_source_size)
+        }
     summary["open_ended"] = row.open_ended
     return summary
 
@@ -206,7 +227,7 @@ _SCORING_COST_ESTIMATE = {
     "type": "object",
     "description": (
         "지금 설정(모델·추론 강도)으로 채점할 때의 예상 비용 — 어림이고, 실제 청구액은 OpenAI 사용량 화면이 "
-        "기준이다. 채점은 시도 하나에 한 번이다"
+        "기준이다. 채점은 시도 하나에 한 번이다. 호환 서버 클래스(unit 이 tokens)는 단가를 몰라 토큰만 준다"
     ),
     "properties": {
         "basis": {
@@ -216,6 +237,11 @@ _SCORING_COST_ESTIMATE = {
                 "셈의 기준 — problem 이 문제의 지난 시도 평균 길이, class 클래스 전체 평균, source_sizes 아직 "
                 "시도가 없어 소스 크기별"
             ),
+        },
+        "unit": {
+            "type": "string",
+            "enum": ["krw", "tokens"],
+            "description": "krw 면 OpenAI 단가로 원화, tokens 면 호환 서버라 단가를 몰라 토큰만",
         },
         "model": {"type": "string"},
         "reasoning_effort": {"type": ["string", "null"], "description": "추론 모델일 때만"},
@@ -227,6 +253,13 @@ _SCORING_COST_ESTIMATE = {
         "per_attempt_krw_by_source_chars": {
             "type": "object",
             "description": "basis 가 source_sizes 일 때 — 소스 글자 수별 시도 1건(원)",
+            "additionalProperties": {"type": "integer"},
+        },
+        "per_attempt_tokens": {"type": "integer", "description": "unit 이 tokens 일 때 — 시도 1건(토큰)"},
+        "per_problem_tokens": {"type": "integer", "description": "unit 이 tokens 일 때 — 문제 하나(토큰)"},
+        "per_attempt_tokens_by_source_chars": {
+            "type": "object",
+            "description": "unit 이 tokens 이고 basis 가 source_sizes 일 때 — 소스 글자 수별 시도 1건(토큰)",
             "additionalProperties": {"type": "integer"},
         },
         "ratio_to_gpt_4_1_mini": {"type": "number", "description": "gpt-4.1-mini 대비 배율"},
@@ -391,6 +424,10 @@ CLASS_OUTPUT_SCHEMA = {
         "token_budget": {**_NULLABLE_INT, "description": "채점 토큰 예산. null 이면 무제한"},
         "token_budget_warning_threshold_percent": {"type": "integer", "description": "경고 알림 임계(예산 대비 %)"},
         "token_usage_total": {**_COUNT, "description": "지금까지 채점에 쓴 토큰"},
+        "token_usage_estimated": {
+            **_COUNT,
+            "description": "token_usage_total 가운데 서버가 사용량을 주지 않아 프롬프트 길이로 어림한 몫",
+        },
         "token_budget_remaining": {**_NULLABLE_INT, "description": "남은 토큰. 예산이 없으면 null"},
         "token_budget_exhausted": {"type": "boolean", "description": "예산이 다 떨어져 채점이 멈춰 있는가"},
         "has_submissions": {"type": "boolean", "description": "어느 문제에든 제출이 하나라도 있는가"},

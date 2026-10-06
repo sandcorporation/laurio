@@ -245,7 +245,7 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 | `PUT /api/classroom/classes/{id}/openai-key` | 강사 본인의 채점 키를 저장한다 — 마스킹된 값만 돌려준다(#284). 채점 연결이 「OpenAI 키」가 되고 호환 서버 주소는 지워진다(#601) |
 | `PUT /api/classroom/classes/{id}/compatible-server` | 채점 연결을 「호환 서버」로 저장한다(#601, ADR-0058) — 소유자 전용. 주소(https·공인)와 `Authorization: Bearer` 값(비워 둘 수 있다). 저장 전에 `core.safe_outbound` 로 그 서버의 `…/models` 를 한 번 받아 보고, 거부·실패는 이유별 한 문장의 422(https 아님·공인 주소 아님·이름 못 찾음·인증서·닿지 않음·리다이렉트·인증 실패). 인증 값은 키 칸에 암호화해 두고 끝 네 자리만 소유자에게 보인다. 공동 강사의 `ClassOut` 에는 종류와 호스트만 실린다 |
 | `GET /api/classroom/classes/{id}/scoring-models` | 그 클래스의 키로 실제로 쓸 수 있는 채점 모델·컨텍스트 크기·추론 모델 여부(#401, 예전 전역 `/scoring-models`를 대신한다). 호환 서버면 그 서버의 목록을 거르지 않고, 목록을 주지 않으면 `source="manual"` — 모델 이름을 직접 넣는다(#601) |
-| `GET /api/classroom/classes/{id}/scoring-cost[?problem_id=]` | 예상 채점 비용(#591) — 그 키로 쓸 수 있는 모델(추론 모델은 강도별)의 시도 1건·문제 하나·gpt-4.1-mini 대비 배율. 기준은 그 문제의 지난 시도 평균 → 클래스 평균 → 소스 크기별, 셈은 `classroom.scoring_cost` |
+| `GET /api/classroom/classes/{id}/scoring-cost[?problem_id=]` | 예상 채점 비용(#591) — 그 키로 쓸 수 있는 모델(추론 모델은 강도별)의 시도 1건·문제 하나·gpt-4.1-mini 대비 배율. 기준은 그 문제의 지난 시도 평균 → 클래스 평균 → 소스 크기별, 셈은 `classroom.scoring_cost`. 호환 서버 클래스는 `unit="tokens"` — 지금 설정 줄만, 원화·배율 없이 토큰(#604) |
 | `POST /api/classroom/classes/{id}/join-link/regenerate` | 가입 링크를 다시 뽑는다 — 이전 코드는 죽는다(#279) |
 | `POST .../archive`·`.../unarchive` | 클래스를 보관하고 되돌린다 — 지우지 않는다(#294) |
 | `DELETE /api/classroom/classes/{id}` | 클래스를 지운다 — 어느 문제에도 제출이 없을 때만, 되돌릴 수 없다(#330) |

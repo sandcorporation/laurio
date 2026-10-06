@@ -92,7 +92,7 @@ from storage.adapters import get_storage_adapter
 from submissions.models import SubmissionAsset
 from submissions.scoring_basis import PLATFORM_FAILURE_MODEL_VERSION
 
-from . import pending_scoring
+from . import pending_scoring, scoring_cost
 from .events import publish_attempt_scored
 from .grading_guidelines import effective_grading_guideline_text
 from .models import (
@@ -417,7 +417,7 @@ def _scoring_cap_reached(submission: ClassroomSubmission) -> bool:
     return (counts["total"] or 0) >= SCORING_FAILURE_LIMIT
 
 
-def _record_token_usage(class_obj: Class, total_tokens: int) -> None:
+def _record_token_usage(class_obj: Class, total_tokens: int, *, estimated: bool = False) -> None:
     """이 클래스의 누적 토큰 사용량에 더하고, 경고 임계를 **처음** 넘는
     순간에만 강사에게 서비스 내부 알림을 보낸다(#295).
 
@@ -427,7 +427,10 @@ def _record_token_usage(class_obj: Class, total_tokens: int) -> None:
 
     `select_for_update`로 잠그고 다시 읽어 누적하는 이유는 같은 tick 안에서도
     한 클래스의 시도 여러 개가 순서대로 처리되기 때문이다 — 그냥 파이썬 값에
-    더하면 경합 없이도 마지막에 처리된 시도의 계산이 앞선 것들을 덮어쓴다."""
+    더하면 경합 없이도 마지막에 처리된 시도의 계산이 앞선 것들을 덮어쓴다.
+
+    `estimated` 면(호환 서버가 usage 를 주지 않아 어림한 값, #604) 같은 양을
+    `token_usage_estimated` 에도 더한다 — 예산·경고는 합계로 똑같이 센다."""
 
     if total_tokens <= 0:
         return
@@ -437,6 +440,9 @@ def _record_token_usage(class_obj: Class, total_tokens: int) -> None:
         locked = Class.objects.select_for_update().get(pk=class_obj.pk)
         locked.token_usage_total += total_tokens
         update_fields = ["token_usage_total"]
+        if estimated:
+            locked.token_usage_estimated += total_tokens
+            update_fields.append("token_usage_estimated")
 
         if (
             locked.token_budget is not None
@@ -870,7 +876,12 @@ def score_classroom_submission_once(
             submission, checklist_items, error=str(exc), status_if_not_capped="failed"
         )
 
-    _record_token_usage(class_obj, output.total_tokens)
+    used_tokens, estimated = output.total_tokens, False
+    if used_tokens <= 0 and connection.kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER:
+        # 호환 서버는 usage 를 주지 않을 수 있다(#604) — 세지 않으면 예산이 돌지 않으니 예상
+        # 비용과 같은 셈으로 어림해 더하고, 어림한 몫을 따로 남긴다. OpenAI 는 늘 usage 를 준다.
+        used_tokens, estimated = scoring_cost.estimated_usage_tokens(prompt, reasoning_effort), True
+    _record_token_usage(class_obj, used_tokens, estimated=estimated)
     if pause_recheck:
         _clear_scoring_pause(class_obj)
 

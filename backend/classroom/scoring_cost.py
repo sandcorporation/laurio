@@ -10,6 +10,11 @@
 글자 수로 어림하고(`CHARS_PER_TOKEN`), 출력 토큰은 상수로 둔다(`*_OUTPUT_TOKENS`). #585 가
 시도마다 실제 토큰을 남기면 그 평균으로 바꾼다.
 
+**호환 서버는 토큰만이다**(#604). 단가를 모른다 — 서버가 OpenAI 와 같은 모델 이름을 내놓아도
+그 값을 받는다는 보장이 없다. 그래서 그 클래스의 표는 지금 설정만 원화·배율 없이 토큰으로
+보이고(`unit="tokens"`), 서버가 usage 를 주지 않은 시도는 같은 어림(`estimated_usage_tokens`)으로
+예산에 더해진다.
+
 **셈의 기준은 내려간다**: 이 문제의 지난 시도 평균 프롬프트 길이 → (그게 없으면) 이
 클래스 전체 평균 → (그것도 없으면) 소스 크기별(약 1만·5만·20만 자). 플랫폼 전체 평균은
 쓰지 않는다 — 과제 성격이 클래스마다 달라 오해를 산다. 플랫폼 자동 미달
@@ -104,6 +109,25 @@ def tokens_for_chars(chars: int) -> int:
     return round(chars / CHARS_PER_TOKEN)
 
 
+def attempt_tokens(reasoning_effort: str | None, *, prompt_chars: int) -> AttemptCost:
+    """시도 하나가 쓸 토큰만 — 단가를 모르는 호환 서버(#604). `reasoning_effort` 는 채점 요청에
+    실을 값 그대로다(`None` 이면 추론하지 않는 출력으로 센다)."""
+
+    output_tokens = NON_REASONING_OUTPUT_TOKENS if reasoning_effort is None else REASONING_OUTPUT_TOKENS[reasoning_effort]
+    return AttemptCost(
+        input_tokens=tokens_for_chars(prompt_chars),
+        output_tokens=output_tokens,
+        usd=0.0,
+        open_ended=reasoning_effort in _OPEN_ENDED_EFFORTS,
+    )
+
+
+def estimated_usage_tokens(prompt: str, reasoning_effort: str | None) -> int:
+    """응답에 usage 가 없을 때 이 시도를 예산에 더할 어림(#604) — 예상 비용과 같은 셈이다."""
+
+    return attempt_tokens(reasoning_effort, prompt_chars=len(prompt)).total_tokens
+
+
 def _effort_for(model_id: str, reasoning_effort: str | None) -> str | None:
     return (reasoning_effort or "low") if is_reasoning_model_id(model_id) else None
 
@@ -152,6 +176,8 @@ class CostRow:
     #: 기준 길이(문제·클래스 평균)에서 시도 1건 — 소스 크기별 기준이면 `None`.
     per_attempt: AttemptCost | None
     per_problem_krw: float | None
+    #: 참여자 수 × 1인 평균 시도 수 × 시도 1건의 토큰 — 토큰으로 셈한 표(호환 서버)에서만.
+    per_problem_tokens: int | None
     ratio_to_baseline: float | None
     #: `SOURCE_SIZE_BANDS` 순서의 시도 1건 — 단가가 없으면 빈 튜플.
     by_source_size: tuple[AttemptCost, ...]
@@ -167,8 +193,13 @@ class CostEstimate:
     attempts_per_participant: float
     attempts_per_participant_measured: bool
     rows: tuple[CostRow, ...]
+    #: "krw"(OpenAI 키 — 단가표로 원화) | "tokens"(호환 서버 — 단가를 몰라 토큰만, #604)
+    unit: str = "krw"
 
     def row_for(self, model_id: str, reasoning_effort: str | None) -> CostRow | None:
+        if self.unit == "tokens":
+            # 토큰 줄의 강도는 이미 「채점 요청에 실을 값」으로 풀려 있다 — 모델로만 찾는다.
+            return next((r for r in self.rows if r.model_id == model_id), None)
         effort = _effort_for(model_id, reasoning_effort)
         return next((r for r in self.rows if r.model_id == model_id and r.reasoning_effort == effort), None)
 
@@ -214,6 +245,7 @@ def estimate(
     catalog_model_ids: list[str],
     current_model_ids: list[str],
     problem: Problem | None = None,
+    token_settings: list[tuple[str, str | None]] | None = None,
 ) -> CostEstimate:
     """이 클래스(와 문제)의 예상 채점 비용표.
 
@@ -232,6 +264,21 @@ def estimate(
             basis = "class"
 
     attempts, measured = _attempts_per_participant(class_obj)
+
+    if token_settings is not None:
+        return CostEstimate(
+            basis=basis,
+            sample_count=sample_count,
+            avg_prompt_chars=avg_chars,
+            participant_count=participant_count,
+            attempts_per_participant=attempts,
+            attempts_per_participant_measured=measured,
+            rows=tuple(
+                _token_row(model_id, effort, avg_chars, participant_count * attempts)
+                for model_id, effort in dict.fromkeys(token_settings)
+            ),
+            unit="tokens",
+        )
 
     model_ids = [m for m in catalog_model_ids if m in PRICES]
     model_ids += [m for m in current_model_ids if m and m not in model_ids]
@@ -257,6 +304,7 @@ def estimate(
                 per_problem_krw=(
                     per_attempt.krw * participant_count * attempts if per_attempt is not None else None
                 ),
+                per_problem_tokens=None,
                 ratio_to_baseline=ratio_to_baseline(model_id, effort, prompt_chars=reference_chars),
                 by_source_size=bands,
             )
@@ -273,4 +321,21 @@ def estimate(
         attempts_per_participant=attempts,
         attempts_per_participant_measured=measured,
         rows=tuple(rows),
+    )
+
+
+def _token_row(model_id: str, effort: str | None, avg_chars: int | None, attempts_in_problem: float) -> CostRow:
+    per_attempt = attempt_tokens(effort, prompt_chars=avg_chars) if avg_chars is not None else None
+    return CostRow(
+        model_id=model_id,
+        reasoning_effort=effort,
+        priced=False,
+        open_ended=effort in _OPEN_ENDED_EFFORTS,
+        per_attempt=per_attempt,
+        per_problem_krw=None,
+        per_problem_tokens=(
+            round(per_attempt.total_tokens * attempts_in_problem) if per_attempt is not None else None
+        ),
+        ratio_to_baseline=None,
+        by_source_size=tuple(attempt_tokens(effort, prompt_chars=chars) for chars in SOURCE_SIZE_BANDS),
     )
