@@ -394,13 +394,19 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 모양이다(공모전의 `submission:<contest_id>:<developer_user_id>:<slot>`과는 접두어로
 갈린다, `submissions.resolvers.SubmissionTargetStateResolver`).
 
-**제출 즉시 비동기로 채점된다**(#287, #378, ADR-0046) — 제출이 커밋되면 그 시도
-하나를 채점하는 Celery 작업이 곧바로 큐에 들어가고, `classroom-submission-scoring`
-스캔(60초 주기, `ClassroomScore`가 아직 없고 그 클래스에 키가 있는 시도를 찾는다)이
-안전망으로 그대로 남아 유실·실패한 작업을 대신 줍는다. 둘 다 스캔이 행 하나를
-처리하는 것과 같은 함수·같은 후보 조건을 쓰고, 행을 잠가(ADR-0006) 겹쳐도
-Score가 둘 생기지 않는다. 워커가 없는 dev·CI(#40)는 즉시 작업이 돌지 않아 스캔을
-직접 불러야 진행된다 — 강사 본인의 키·그 문제의 모델로 친다는 사실은 그대로다.
+**제출 즉시 비동기로 채점된다**(#287, #378, #582, ADR-0046, ADR-0056) — 채점하는 길은
+Celery 태스크 `classroom.score_attempt` 하나이고, 그 태스크가 채점 전용 워커
+(`celery-scoring`, 큐 `classroom-scoring`) 안에서 직접 채점한다 — 내부 HTTP 를 거치지
+않는다. 제출이 커밋되면 그 시도의 태스크가 곧바로 큐에 들어가고,
+`classroom-submission-scoring` 스캔(60초 주기, `ClassroomScore`가 아직 없고 그 클래스에
+키가 있는 시도를 찾는다)이 안전망으로 남아 그런 시도를 **큐에 넣기만** 한다. 넣을 때마다
+시도에 「큐에 넣은 시각」(`scoring_queued_at`)을 찍고, 그 시각이 5분 안이면 스캔이 다시
+넣지 않는다 — 태스크가 처리를 마치면 비우므로 실패한 시도는 다음 tick 에, 워커가 죽어
+잃은 태스크는 5분 뒤에 다시 줍힌다. 같은 시도의 태스크가 둘 돌아도 행을 잠가(ADR-0006)
+벤더는 한 번, Score 는 하나다. 벤더 타임아웃은 3분, 태스크 한도는 soft 210초·hard 240초다.
+dev·CI 는 태스크가 eager(`CELERY_TASK_ALWAYS_EAGER`)라 제출·스캔 요청 안에서 흉내
+어댑터로 채점이 끝난다(배포 환경은 그 값이 켜지면 부팅을 거부한다) — 강사 본인의 키·그
+문제의 모델로 친다는 사실은 그대로다.
 `classroom.ClassroomScore`·`ClassroomScoringAttempt`가
 `scoring.Score`·`ScoringAttempt`와 같은 규율(ADR-0006 「시도당 하나, 재채점 없음」)을
 따르는 강의실 전용 테이블이다 — `scoring`·`ledger`가 공모전 가족이라 그 모델을
@@ -866,8 +872,8 @@ fake 이거나 임포트되지 않으면 부팅 자체를 거부한다** — 컨
 
 **색인은 두 경로로 맞는다.** 저장·변경(Contest 저장, 요구형태 M2M 변경,
 `SponsorProfile.display_name` 변경)마다 Celery 태스크 `contests.index_contest`가
-트랜잭션 커밋 뒤 그 공모전 하나만 다시 색인한다(dev·CI는 워커가 없어 큐에
-쌓이기만 한다, #40) — 안전망으로 스캔 `contest-search-reindex`가 매일 전체를
+트랜잭션 커밋 뒤 그 공모전 하나만 다시 색인한다(dev·CI는 태스크가 eager 라 그
+자리에서 바로 색인한다, #582) — 안전망으로 스캔 `contest-search-reindex`가 매일 전체를
 다시 만든다(위 「스스로 도는 일」). `manage.py rebuild_contest_search_index`로
 사람이 직접 한 번 돌릴 수도 있다.
 

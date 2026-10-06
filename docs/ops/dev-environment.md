@@ -47,11 +47,20 @@ celery-beat와 같은 `x-backend-env`(STORAGE_*·PAYMENT_* 등 이 프로세스�
 **물러서는 배포(표식 단 마이그레이션·풀러 교체)에서는 backend 가 잠시 없다 — beat 의 tick 이
 그때 죽는다.** (새 마이그레이션도 표식이 없으면 먼저 돌리고 겹쳐 바꿔 창이 없다 —
 [배포](deploy.md)의 「backend·events 는 겹쳐 바꾼다」, ADR-0053.)
-`deploy.sh` 가 backend 컨테이너를 내리고 올리는 사이 `core.run_scan`·`classroom.score_attempt` 의
+`deploy.sh` 가 backend 컨테이너를 내리고 올리는 사이 `core.run_scan` 의
 내부 HTTP 호출이 `Connection refused` 로 실패했다(수집기를 붙인 첫날 3건). 스캔은
-두 번 쏴도 한 번만 통과하므로(ADR-0003) 두 태스크가 **연결·타임아웃 실패만** 몇 번
+두 번 쏴도 한 번만 통과하므로(ADR-0003) 그 태스크가 **연결·타임아웃 실패만** 몇 번
 물러서서 재시도한다 — 2xx 가 아닌 응답(서버가 대답은 했다)은 재시도하지 않고 그대로
-실패로 남긴다.
+실패로 남긴다. (강의실 채점 태스크 `classroom.score_attempt` 는 #582 부터 내부 HTTP 를
+부르지 않고 워커 안에서 직접 채점한다 — ADR-0056.)
+
+**dev·CI 는 Celery 태스크가 eager 다**(#582, ADR-0056) — `CELERY_TASK_ALWAYS_EAGER` 의
+기본값이 배포가 아닌 곳에서 켜짐이라, `.delay()` 자리에서 태스크가 그대로 돈다. 강의실
+채점은 태스크 하나로만 돌기 때문에(즉시 채점과 60초 스캔은 큐에 넣기만 한다) 워커 없는
+dev 에서도 제출 요청·스캔 요청 안에서 흉내 어댑터로 채점이 끝난다. `--profile celery` 의
+worker·beat 는 이 값을 `false` 로 받는다 — beat 가 쏜 태스크를 beat 자신이 돌리면
+`scripts/ci/celery-broker.sh` 가 보는 beat → worker 경로가 끊긴다. 배포 환경은 이 값이
+켜지면 부팅을 거부한다.
 
 호스트에서 `uv run pytest`를 돌릴 때 붙는 DB 포트 기본값도 `CODEMIT_DB_PORT`를 따라간다
 (`backend/config/settings.py`). 컨테이너 안에서는 compose가 `POSTGRES_*`를 직접 주입한다.

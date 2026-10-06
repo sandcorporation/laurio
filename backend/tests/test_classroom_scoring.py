@@ -64,7 +64,10 @@ def _setup_submission(client, *, submission_format="repository", with_key=True):
     }
 
 
-def test_submitting_does_not_score_synchronously(client, db):
+def test_a_submission_is_pending_until_its_scoring_task_runs(client, db):
+    """제출 요청 자체는 채점하지 않는다 — 커밋 뒤 큐에 넣은 태스크가 채점한다(#582). 이
+    시험의 `db` 픽스처는 커밋 콜백을 돌리지 않아 그 태스크가 큐에 들어가지 않는다."""
+
     ctx = _setup_submission(client)
 
     mine_out = mine(client, ctx["participant"]["access"], ctx["class_id"], ctx["problem_id"])
@@ -189,14 +192,16 @@ def test_repository_submission_is_scored_from_the_cloned_source(client, db, monk
     assert "app.py" in captured_prompts[0]["messages"][1]["content"]
 
 
-def test_score_appears_in_the_scan_result_rows(client, db, monkeypatch):
+def test_scan_result_rows_report_the_queued_attempt(client, db, monkeypatch):
+    """스캔은 채점하지 않고 채점 태스크를 큐에 넣기만 한다(#582) — 결과 행이 그 사실을
+    말한다. 채점 결과는 시도 화면(`mine`)이 말한다."""
+
     ctx = _setup_submission(client)
     respond_with_verdict(monkeypatch, ctx["item_id"], is_met=True)
 
     result = run_scan(client)
 
-    assert result["rows"][0]["status"] == "scored"
-    assert result["rows"][0]["submission_id"] == ctx["submission_id"]
+    assert result["rows"] == [{"submission_id": ctx["submission_id"], "status": "queued"}]
 
 
 def test_source_submission_is_scored_from_the_uploaded_object(client, db, monkeypatch):
@@ -305,7 +310,7 @@ def test_source_not_yet_in_storage_retries_instead_of_failing(client, db, monkey
 
     # 후보로는 집혔지만("아직" 상태를 남기는 것도 처리다) LLM은 부르지 않는다 —
     # 소스가 없는 채로 채점을 시도해 점수를 만들면 안 된다.
-    assert result["rows"][0]["status"] == "source_not_ready"
+    assert result["rows"][0]["status"] == "queued"
     assert not called
     assert ClassroomScore.objects.filter(submission_id=submitted["id"]).count() == 0
     assert ClassroomScoringAttempt.objects.filter(
@@ -438,7 +443,7 @@ def test_each_attempt_gets_its_own_notification(client, db, monkeypatch):
 def test_notification_creation_failure_does_not_prevent_scoring(client, db, monkeypatch):
     """AC: "알림 만들기가 실패해도 채점 자체는 그대로 끝난다." — 알림 쪽이
     죽어도(`create_notification`이 예외로 죽는 극단적인 경우) `ClassroomScore`는
-    이미 커밋된 채로 남고, 스캔 결과도 정상 종결(`scored`)로 보고된다."""
+    이미 커밋된 채로 남고, 스캔도 깨지지 않는다."""
 
     ctx = _setup_submission(client)
     respond_with_verdict(monkeypatch, ctx["item_id"], is_met=True)
@@ -450,7 +455,7 @@ def test_notification_creation_failure_does_not_prevent_scoring(client, db, monk
     result = run_scan(client)
 
     assert result["count"] == 1
-    assert result["rows"][0]["status"] == "scored"
+    assert result["failed"] == []
     assert ClassroomScore.objects.filter(submission_id=ctx["submission_id"]).exists()
     assert not Notification.objects.filter(
         notification_type=NotificationType.CLASSROOM_SUBMISSION_SCORED

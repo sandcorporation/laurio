@@ -539,6 +539,11 @@ class ClassroomSubmission(Submission):
     contest_entry_reason = models.CharField(max_length=300, blank=True, default="", db_default="")
     #: 결과가 정해진 때 — 강사 화면(#550)이 「지금 공모전 제출인 시도」를 가릴 때 쓴다.
     contest_entry_resolved_at = models.DateTimeField(null=True, blank=True)
+    #: 이 시도의 채점 태스크를 큐에 넣은 시각(#582, ADR-0056) — 비어 있으면 큐에 없다.
+    #: 즉시 채점과 60초 스캔이 둘 다 찍고, 태스크가 처리를 마치면 비운다. 찍힌 지
+    #: `classroom.scoring.SCORING_QUEUE_WINDOW`(5분) 안이면 스캔이 다시 넣지 않는다 —
+    #: 워커가 죽어 잃은 태스크만 그 뒤에 다시 줍힌다.
+    scoring_queued_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-attempt_number"]

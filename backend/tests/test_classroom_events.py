@@ -319,17 +319,21 @@ def test_submission_publishes_attempt_submitted_to_the_submitter_and_the_instruc
         "submission_id": submitted["id"],
     }
 
+    # 커밋 뒤에는 채점 태스크도 큐에 들어가고, eager 인 시험에서는 그 자리에서 채점까지
+    # 끝나 attempt-scored 가 뒤따른다(#582) — 여기서 보는 것은 제출 신호뿐이다.
     participant_id = _user_id("participant-1")
-    participant_events = FakeEventBus._queues.get(participant_id, [])
+    participant_events = [
+        e for e in FakeEventBus._queues.get(participant_id, []) if e.kind == "attempt-submitted"
+    ]
     assert len(participant_events) == 1
-    assert participant_events[0].kind == "attempt-submitted"
     assert participant_events[0].recipient_id == participant_id
     assert participant_events[0].payload == expected_payload
 
     instructor_id = _user_id("instructor-1")
-    instructor_events = FakeEventBus._queues.get(instructor_id, [])
+    instructor_events = [
+        e for e in FakeEventBus._queues.get(instructor_id, []) if e.kind == "attempt-submitted"
+    ]
     assert len(instructor_events) == 1
-    assert instructor_events[0].kind == "attempt-submitted"
     assert instructor_events[0].recipient_id == instructor_id
     assert instructor_events[0].payload == expected_payload
 
@@ -418,7 +422,8 @@ def test_a_failing_bus_does_not_break_scoring(client, db, monkeypatch, django_ca
 
     result = _run_scan(client, django_capture_on_commit_callbacks)
 
-    assert result["rows"][0]["status"] == "scored"
+    assert result["rows"][0]["status"] == "queued"
+    assert result["failed"] == []
     assert ClassroomScore.objects.filter(submission_id=submitted["id"]).exists()
 
 

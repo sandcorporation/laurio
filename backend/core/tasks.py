@@ -7,8 +7,18 @@ ADR-0003: 스캔 진입점은 내부 인증 HTTP 엔드포인트다 — 워커·
 「엔드포인트는 있는데 아무도 부르지 않는」 스캔(#23 코디네이터 리뷰가 잡았던 사고)은 표현
 자체가 불가능하다.
 
-`call_internal`은 같은 모양(내부 인증 HTTP POST 한 번)을 쓰는 다른 앱의 즉시 실행 태스크도
-재사용한다(#378, `classroom.tasks.score_attempt`) — 그래서 이름 앞의 밑줄을 뗐다.
+**예외가 둘 있다 — 워커 안에서 직접 도는 태스크.** 내부 HTTP 를 거치면 그 일이 gunicorn
+요청 하나(`call_internal` 30초, gunicorn `--timeout` 30초) 안에 들어야 한다. 그보다 길 수
+있는 일은 워커 안에서 직접 돈다:
+
+- `core.backup_database`(아래) — `pg_dump` 가 30초를 넘길 수 있다.
+- `classroom.score_attempt`(#582, ADR-0056) — 강의실 채점은 벤더(추론 모델)를 3분까지
+  기다린다. 「두 번 쏴도 한 번만 통과한다」는 HTTP 경로 대신 `classroom.scoring._score_one`
+  의 행 잠금(`select_for_update(skip_locked)`)과 「이미 채점됨」 확인이 지킨다. 그 태스크로
+  가는 길(즉시 채점·60초 스캔)은 큐에 넣기만 하고, 스캔 자체는 여전히 이 HTTP 경로로 돈다.
+
+`call_internal`은 #378 부터 #582 전까지 강의실 즉시 채점 태스크도 썼다 — 그래서 이름 앞의
+밑줄을 뗐다. 지금은 스캔 태스크만 부른다.
 """
 
 import requests

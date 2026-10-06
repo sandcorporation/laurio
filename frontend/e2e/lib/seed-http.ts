@@ -86,17 +86,3 @@ export async function runInternalScan(name: string): Promise<unknown> {
     throw new Error(`내부 스캔(${name})이 JSON 을 내지 않았다: ${text.slice(0, 400)}`);
   }
 }
-
-/**
- * 강의실 채점 스캔을 쌓인 시도가 없을 때까지 돌린다. 그 스캔은 실행 하나에 시도
- * 하나만 채점하므로(GlitchTip 오류 91 — 내부 호출 30초 안에 벤더 대기를 하나만 둔다)
- * 한 번 부르는 것으로는 이 스펙의 시도가 채점된다는 보장이 없다 — 병렬 워커의 다른
- * 스펙이 먼저 낸 시도가 앞에 설 수 있다.
- */
-export async function drainClassroomScoringScan(maxRuns = 50): Promise<void> {
-  for (let run = 0; run < maxRuns; run += 1) {
-    const result = (await runInternalScan("classroom-submission-scoring")) as { count: number };
-    if (result.count === 0) return;
-  }
-  throw new Error(`강의실 채점 스캔을 ${maxRuns}번 돌려도 쌓인 시도가 남았다`);
-}
