@@ -27,6 +27,7 @@ import { MissingScoringKeyNote } from "@/app/components/MissingScoringKeyNote";
 import { copyClass } from "@/lib/classes/api";
 import { joinLinkAvailability } from "@/lib/classes/join-link";
 import {
+  shouldShowExhaustedCreditBanner,
   shouldShowMissingScoringKeyBanner,
   shouldShowRejectedScoringKeyBanner,
 } from "@/lib/classes/missing-scoring-key-banner";
@@ -363,6 +364,21 @@ export default function ClassDetailPage() {
             noteTestId="classroom-rejected-api-key-banner"
             settingsLinkTestId="classroom-rejected-api-key-settings-link"
             actionLabel={classroom.role === "owner" ? "클래스 설정에서 바꾸기" : null}
+          />
+        ) : null}
+
+        {/* 키는 유효한데 크레딧이 떨어진 경우(#586) — 갈아 끼울 것이 아니라 충전할 것이다. */}
+        {shouldShowExhaustedCreditBanner(classroom) ? (
+          <MissingScoringKeyNote
+            classId={classId}
+            message={
+              classroom.role === "owner"
+                ? "채점 키의 OpenAI 크레딧이 떨어져 채점이 멈췄습니다 — 충전하면 밀린 제출부터 이어서 채점됩니다."
+                : "채점 키의 OpenAI 크레딧이 떨어져 채점이 멈췄습니다 — 소유자가 충전하면 밀린 제출부터 이어서 채점됩니다."
+            }
+            noteTestId="classroom-exhausted-credit-banner"
+            settingsLinkTestId="classroom-exhausted-credit-settings-link"
+            actionLabel={classroom.role === "owner" ? "클래스 설정 열기" : null}
           />
         ) : null}
 

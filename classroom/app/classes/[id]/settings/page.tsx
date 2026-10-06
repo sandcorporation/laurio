@@ -634,6 +634,15 @@ export default function ClassSettingsPage() {
                       벤더가 이 키를 거절했습니다 — 새 키를 저장해야 채점이 다시 시작됩니다.
                     </span>
                   </p>
+                ) : classroom.scoring_quota_exhausted ? (
+                  <p data-testid="openai-key-status" className="flex flex-wrap items-center gap-2.5 text-[13.5px]">
+                    <Badge tone="attention">크레딧 소진</Badge>
+                    <span className="font-mono text-ink/60">{classroom.openai_key_masked}</span>
+                    <span className="text-ink/60">
+                      이 키의 OpenAI 크레딧이 떨어져 채점이 멈췄습니다 — 충전한 뒤 키를 다시 저장하면 바로
+                      이어지고, 저장하지 않아도 10분 안에 다시 확인해 이어집니다.
+                    </span>
+                  </p>
                 ) : classroom.openai_key_status === "unverified" ? (
                   <p data-testid="openai-key-status" className="flex flex-wrap items-center gap-2.5 text-[13.5px]">
                     <Badge tone="neutral">미검증</Badge>

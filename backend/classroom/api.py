@@ -204,6 +204,7 @@ def _serialize_class(class_obj: Class, *, viewer_id: int) -> ClassOut:
         has_openai_key=has_key,
         openai_key_masked=_mask_from_last4(class_obj.openai_api_key_last4) if has_key else None,
         openai_key_status=class_obj.openai_api_key_status if has_key else None,
+        scoring_quota_exhausted=has_key and class_obj.scoring_quota_exhausted_at is not None,
         archived=class_obj.archived_at is not None,
         token_budget=class_obj.token_budget,
         token_budget_warning_threshold_percent=class_obj.token_budget_warning_threshold_percent,
@@ -638,12 +639,17 @@ def set_class_openai_key(request: HttpRequest, class_id: int, payload: OpenAIKey
         if check_result == LLMKeyCheckStatus.VALID
         else Class.ScoringKeyStatus.UNVERIFIED
     )
+    # 크레딧이 바닥나 멈춰 있었다면(#586) 다시 저장하는 것이 「충전했다」는 신호다 — 키 확인은
+    # 크레딧을 보지 않으므로(`/v1/models`) 여기서 풀고, 다음 tick 의 채점이 실제로 확인한다.
+    # 아직 바닥이면 그 채점이 다시 멈추고 다시 알린다.
+    class_obj.scoring_quota_exhausted_at = None
     # 벤더 확인을 기다리는 사이 소유권이 넘어갔을 수 있다(#564) — 넘긴 사람의 키가 새 소유자의
     # 클래스에 남지 않게, 저장은 「지금도 부른 사람이 소유자인가」를 조건으로 한 번에 한다.
     saved = classes_owned_by(request.auth_user.id).filter(id=class_obj.id).update(
         openai_api_key_encrypted=class_obj.openai_api_key_encrypted,
         openai_api_key_last4=class_obj.openai_api_key_last4,
         openai_api_key_status=class_obj.openai_api_key_status,
+        scoring_quota_exhausted_at=None,
     )
     if not saved:
         raise HttpError(403, OWNER_ONLY_MESSAGE)

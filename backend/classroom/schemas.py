@@ -94,6 +94,9 @@ class ClassOut(Schema):
     #: 키가 있을 때만 뜻이 있다("verified"|"unverified"|"rejected") — 키가
     #: 없으면 `None`이다(#354). `Class.ScoringKeyStatus`의 값 그대로다.
     openai_key_status: str | None = None
+    #: 이 키의 OpenAI 크레딧이 바닥나 채점이 멈춰 있는가(#586) — 키가 있을 때만 참일 수
+    #: 있다. 키 상태와 따로다: 키는 그대로 유효하고, 충전하면 같은 키로 이어진다.
+    scoring_quota_exhausted: bool = False
     #: 강사가 보관했는가(#294) — 참이면 새 가입·새 제출이 닫히고 읽기만
     #: 남는다. `archived_at`이 아니라 이 값을 내려주는 이유는 화면이 정확한
     #: 시각을 쓰지 않기 때문이다(진행중/보관 여부만 갈라 보이면 된다).

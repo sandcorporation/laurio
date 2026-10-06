@@ -74,6 +74,13 @@ class Class(models.Model):
     openai_api_key_status = models.CharField(
         max_length=10, choices=ScoringKeyStatus.choices, default=ScoringKeyStatus.UNVERIFIED
     )
+    #: 벤더가 이 키의 크레딧이 바닥났다고 마지막으로 답한 시각(#586) — null 이면 정상이다.
+    #: 키 상태(`openai_api_key_status`)와 따로 둔다: 키는 그대로 유효하고 충전하면 같은 키로
+    #: 이어진다. 값이 있으면 채점 대기 사유는 「키」다(`scoring_key_unusable`). 소유자가 키를
+    #: 다시 저장하면 지워지고, 그러지 않아도 스캔이 `classroom.scoring.QUOTA_RECHECK_INTERVAL`
+    #: 마다 대기 시도 하나로 다시 쳐 본다 — 그 시도가 채점되면 지워지고, 또 소진이면 이 값이
+    #: 그 시각으로 밀린다(다음 확인까지의 간격을 이 값 하나가 잰다).
+    scoring_quota_exhausted_at = models.DateTimeField(null=True, blank=True, default=None)
 
     #: 이 클래스의 기본 채점 모델(#285, #401). 문제가 자기 값을 갖지 않으면
     #: 이 값을 쓴다 — 그 클래스의 키로 실제로 쓸 수 있는 모델만 저장된다
@@ -144,14 +151,19 @@ class Class(models.Model):
 
         return bool((self.openai_api_key_encrypted or "").strip())
 
-    def scoring_key_unusable(self) -> bool:
-        """지금 이 클래스의 채점이 키 때문에 멈춰 있는가(#355) — 키가 아예
-        없거나(`has_scoring_key()`가 거짓) 벤더가 거절해 "거부됨" 상태다.
+    def scoring_key_unusable(self, *, ignore_quota: bool = False) -> bool:
+        """지금 이 클래스의 채점이 키 때문에 멈춰 있는가(#355, #586) — 키가 아예
+        없거나(`has_scoring_key()`가 거짓) 벤더가 거절해 "거부됨" 상태거나, 그 키의
+        크레딧이 바닥났다(`scoring_quota_exhausted_at`).
         `classroom.pending_scoring`(#434)의 스캔 후보 쿼리·채점 직전 확인·
         화면의 `pending_reason`·격자 칸 상태가 모두 이 기준 하나를 따라야
         어긋나지 않는다."""
 
-        return not self.has_scoring_key() or self.openai_api_key_status == self.ScoringKeyStatus.REJECTED
+        return (
+            not self.has_scoring_key()
+            or self.openai_api_key_status == self.ScoringKeyStatus.REJECTED
+            or (self.scoring_quota_exhausted_at is not None and not ignore_quota)
+        )
 
 
 class Problem(models.Model):
@@ -932,6 +944,10 @@ class ClassroomScoringAttempt(models.Model):
     #: LLMAdapterPermanentError`와 같은 뜻). True면 유예 없이 바로 실패 상한에
     #: 도달한 것으로 본다(ADR-0031과 같은 규율).
     permanent = models.BooleanField(default=False)
+    #: 벤더의 요청 빈도 제한(429 `rate_limit_exceeded`)으로 실패했고, 실패 한도에 세지
+    #: 않는 시도인가(#586). 첫 빈도 제한에서 `classroom.scoring.RATE_LIMIT_GRACE` 안의 것만
+    #: 참이다 — 그 뒤의 빈도 제한은 거짓으로 남아 보통 실패처럼 센다(채점은 반드시 끝난다).
+    rate_limited = models.BooleanField(default=False, db_default=False)
 
     class Meta:
         ordering = ["-attempted_at"]

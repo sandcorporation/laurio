@@ -332,6 +332,35 @@ def test_non_200_status_raises_llm_adapter_error(monkeypatch):
     assert not isinstance(exc_info.value, LLMAdapterPermanentError)
 
 
+@pytest.mark.parametrize(
+    ("error_type", "error_code", "expected"),
+    [
+        # 2026-10-06 클래스 5 가 받은 실제 모양(#586).
+        ("insufficient_quota", "credit_balance_exhausted", "quota"),
+        ("insufficient_quota", "insufficient_quota", "quota"),
+        ("requests", "rate_limit_exceeded", "rate"),
+        ("", "", "rate"),
+    ],
+)
+def test_429_tells_exhausted_credit_from_rate_limits_and_both_stay_retryable(
+    monkeypatch, error_type, error_code, expected
+):
+    """크레딧 소진과 빈도 제한을 벤더의 type/code 로 가른다(#586). 둘 다 일시 실패의 부분집합이라
+    `except LLMAdapterError` 로 잡는 공모전 채점은 지금처럼 재시도한다."""
+
+    from core.llm_scoring import LLMAdapterQuotaExhaustedError, LLMAdapterRateLimitedError
+
+    error_body = {"error": {"message": "...", "type": error_type, "code": error_code}}
+    monkeypatch.setattr("scoring.adapters.requests.post", lambda *a, **k: _FakeResponse(429, error_body))
+
+    with pytest.raises(LLMAdapterError) as exc_info:
+        OpenAIScoringAdapter().score(_scoring_input(requirement_ids=[10]))
+
+    expected_type = LLMAdapterQuotaExhaustedError if expected == "quota" else LLMAdapterRateLimitedError
+    assert type(exc_info.value) is expected_type
+    assert not isinstance(exc_info.value, LLMAdapterPermanentError)
+
+
 def test_400_status_raises_permanent_error(monkeypatch):
     error_body = {"error": {"message": "model not found", "type": "invalid_request_error"}}
 

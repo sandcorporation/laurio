@@ -34,7 +34,8 @@ export function notificationHref(notification: NotificationRow): string | null {
       if (typeof classId !== "number") return null;
       return `/classes/${classId}/settings#token-budget`;
     }
-    case "classroom_scoring_key_rejected": {
+    case "classroom_scoring_key_rejected":
+    case "classroom_scoring_quota_exhausted": {
       const classId = context.class_id;
       if (typeof classId !== "number") return null;
       return `/classes/${classId}/settings#scoring-key`;

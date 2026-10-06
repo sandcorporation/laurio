@@ -154,6 +154,20 @@ class LLMAdapterModelRejectedError(LLMAdapterPermanentError):
     뺀다."""
 
 
+class LLMAdapterQuotaExhaustedError(LLMAdapterError):
+    """벤더가 이 키의 크레딧이 바닥났다고 답했다(429 `insufficient_quota`, #586) — 일시
+    실패(`LLMAdapterError`)의 부분집합이다. 시간이 지나도 저절로 풀리지 않고 키 주인이
+    충전해야 풀린다는 점이 다른 429 와 갈린다. `scoring`(공모전)은 이 하위 클래스를 몰라도
+    된다 — `except LLMAdapterError` 가 그대로 잡아 지금처럼 재시도한다(ADR-0037 의 경계).
+    `classroom.scoring` 만 먼저 잡아 그 클래스의 채점을 멈춘다(채점 대기 사유 「키」)."""
+
+
+class LLMAdapterRateLimitedError(LLMAdapterError):
+    """벤더가 요청 빈도 제한에 걸렸다고 답했다(크레딧 소진이 아닌 429, #586) — 잠시 뒤
+    저절로 풀린다. 공모전은 이 하위 클래스를 모른 채 `LLMAdapterError` 로 재시도한다.
+    `classroom.scoring` 은 이 실패를 일정 시간 동안 실패 한도에 세지 않는다."""
+
+
 class LLMKeyCheckStatus(str, Enum):
     """저장 시점에 벤더에게 키를 확인해 본 결과(#354) — `classroom.models.
     Class.ScoringKeyStatus`로 저장되는 값과는 어휘가 다르다(이쪽은 "이번
@@ -278,6 +292,13 @@ _OPENAI_AUTH_HTTP_STATUSES = frozenset({401, 403})
 _OPENAI_MODEL_REJECTION_HTTP_STATUSES = frozenset({400, 404})
 _OPENAI_MODEL_REJECTION_ERROR_CODES = frozenset({"model_not_found"})
 
+# 크레딧 소진(#586) — 같은 429 라도 빈도 제한과 갈라야 한다. 판정은 `error.type`·`error.code`
+# (벤더가 고정된 값만 쓰는 라벨)로만 한다. OpenAI 는 `type=insufficient_quota` 에 `code` 를
+# `insufficient_quota` 로 주기도, `credit_balance_exhausted` 로 주기도 한다(2026-10-06 실제 응답은
+# 뒤의 것) — 둘 중 하나라도 맞으면 소진이다.
+_OPENAI_RATE_LIMIT_HTTP_STATUS = 429
+_OPENAI_QUOTA_EXHAUSTED_LABELS = frozenset({"insufficient_quota", "credit_balance_exhausted"})
+
 
 def _openai_verdict_response_schema() -> dict:
     """OpenAI Structured Outputs용 JSON 스키마.
@@ -367,8 +388,8 @@ def _describe_openai_http_error(
 
 
 def _classify_openai_error(response: Any, *, context: str) -> Exception:
-    """벤더 응답을 다섯 갈래(정상·권한 거부·모델 거부·영구 실패·일시 실패) 중
-    성공이 아닌 넷으로 갈라 그에 맞는 예외를 만든다(#469) — 성공(200)은
+    """벤더 응답을 일곱 갈래(정상·권한 거부·모델 거부·크레딧 소진·빈도 제한·영구 실패·
+    일시 실패) 중 성공이 아닌 여섯으로 갈라 그에 맞는 예외를 만든다(#469, #586) — 성공(200)은
     `_openai_round_trip`이 이 함수를 부르지 않는다."""
 
     error_type, error_code = _extract_openai_error_fields(response)
@@ -382,6 +403,10 @@ def _classify_openai_error(response: Any, *, context: str) -> Exception:
         and error_code in _OPENAI_MODEL_REJECTION_ERROR_CODES
     ):
         return LLMAdapterModelRejectedError(message)
+    if response.status_code == _OPENAI_RATE_LIMIT_HTTP_STATUS:
+        if {error_type, error_code} & _OPENAI_QUOTA_EXHAUSTED_LABELS:
+            return LLMAdapterQuotaExhaustedError(message)
+        return LLMAdapterRateLimitedError(message)
     if response.status_code in _OPENAI_PERMANENT_HTTP_STATUSES:
         return LLMAdapterPermanentError(message)
     return LLMAdapterError(message)

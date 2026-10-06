@@ -40,6 +40,11 @@ Appeal을 모른다). **벤더가 키 자체를 거절했을 때(401·403,
 않고, 그 클래스의 채점 키 상태를 "거부됨"으로 바꿔 스캔 후보에서 뺀다 —
 강사가 새 키를 저장할 때까지 그 제출물은 키가 없는 클래스의 것과 같은
 자리에서 기다린다.
+**키의 크레딧이 떨어졌을 때(429 `insufficient_quota`)도 같은 자리다**(#586, ADR-0057) —
+실패로 세지 않고 `Class.scoring_quota_exhausted_at`을 찍어 멈춘다. 그 키는 유효하므로
+소유자가 다시 저장하거나, `QUOTA_RECHECK_INTERVAL`마다 대기 시도 하나가 다시 쳐 보고
+채점되면 풀린다. 요청 빈도 제한(그 밖의 429)은 `RATE_LIMIT_UNCOUNTED_ATTEMPTS`번까지
+실패 한도에 세지 않는다.
 
 **저장소(repository) 형식은 GitHub에서 직접 읽는다** — 공개가 아니거나 clone이
 실패하면 소스와 같은 이유로 재시도 대상일 뿐이다(참가자 귀책·플랫폼 귀책을
@@ -64,6 +69,8 @@ from core.llm_scoring import (
     LLMAdapterError,
     LLMAdapterModelRejectedError,
     LLMAdapterPermanentError,
+    LLMAdapterQuotaExhaustedError,
+    LLMAdapterRateLimitedError,
     LLMKeyCheckStatus,
     LLMScoringAdapter,
     OpenAIScoringAdapter,
@@ -115,6 +122,19 @@ CLASSROOM_SCORING_VENDOR_TIMEOUT_SECONDS = 180
 #: 것은 태스크가 아직 큐에서 기다리거나 돌고 있을 때, 그리고 워커가 죽어 태스크를 잃었을
 #: 때(그 시도는 이 창이 지난 뒤 다시 줍힌다)뿐이다.
 SCORING_QUEUE_WINDOW = timedelta(minutes=5)
+
+#: 크레딧이 바닥난 클래스를 다시 쳐 보는 간격(#586). 그동안 그 클래스의 시도는 스캔 후보가
+#: 아니다. 간격이 지나면 대기 시도 **하나**만 벤더를 부른다(`_claim_quota_recheck`) — 다시
+#: 확인도 강사 키로 나가는 채점 호출이라, 클래스마다 10분에 한 번을 넘지 않는다. 충전 직후
+#: 바로 잇고 싶은 소유자는 키를 다시 저장하면 된다(그 자리에서 풀린다).
+QUOTA_RECHECK_INTERVAL = pending_scoring.QUOTA_RECHECK_INTERVAL
+
+#: 요청 빈도 제한(429 `rate_limit_exceeded`)으로 실패한 시도를 실패 한도에 세지 않는 횟수
+#: (#586). 빈도 제한은 참여자의 탓도 소스의 탓도 아니고 잠시 뒤 풀리므로 다시 시도하되 세지
+#: 않는다. 다만 끝없이 미루지 않도록 이 횟수를 넘은 빈도 제한부터는 보통 실패로 센다 — 실패한
+#: 시도는 60초 스캔이 다시 넣으므로 이 횟수는 적어도 한 시간이다(ADR-0031 「채점은 반드시
+#: 끝난다」).
+RATE_LIMIT_UNCOUNTED_ATTEMPTS = 60
 
 #: 강의실 참가자에게 자동 미달을 설명하는 문구 — `submissions.scoring_basis`의
 #: 것을 그대로 쓰지 않는다(그쪽은 "이의를 제기할 수 있다"고 말하는데 강의실에는
@@ -374,7 +394,8 @@ def _scoring_cap_reached(submission: ClassroomSubmission) -> bool:
     (모듈 docstring)."""
 
     counts = submission.classroom_scoring_attempts.aggregate(
-        total=Count("id"), permanent=Count("id", filter=models.Q(permanent=True))
+        total=Count("id", filter=models.Q(rate_limited=False)),
+        permanent=Count("id", filter=models.Q(permanent=True)),
     )
     if counts["permanent"]:
         return True
@@ -454,6 +475,64 @@ def _mark_scoring_key_rejected(class_obj: Class) -> None:
             notification_type=NotificationType.CLASSROOM_SCORING_KEY_REJECTED,
             context={"class_id": locked.id, "class_name": locked.name},
         )
+
+
+def _mark_scoring_quota_exhausted(class_obj: Class) -> None:
+    """벤더가 이 클래스 키의 크레딧이 바닥났다고 답했다(#586) — 그 시각을 남기고, **새로
+    멈춘 순간에만** 소유자에게 알린다(`_mark_scoring_key_rejected`와 같은 규율). 이미 멈춰
+    있으면(다시 확인한 시도가 또 소진을 받았으면) 시각만 밀어 다음 확인을 간격만큼 미룬다.
+    수신자는 소유자(`Class.instructor`)뿐이다 — 크레딧은 소유자의 비용이다(ADR-0055)."""
+
+    newly_exhausted = False
+    with transaction.atomic():
+        locked = Class.objects.select_for_update().get(pk=class_obj.pk)
+        newly_exhausted = locked.scoring_quota_exhausted_at is None
+        locked.scoring_quota_exhausted_at = Clock.now()
+        locked.save(update_fields=["scoring_quota_exhausted_at"])
+
+    if newly_exhausted:
+        notify_safely(
+            recipient=locked.instructor,
+            notification_type=NotificationType.CLASSROOM_SCORING_QUOTA_EXHAUSTED,
+            context={"class_id": locked.id, "class_name": locked.name},
+        )
+
+
+def _claim_quota_recheck(class_id: int, *, as_of) -> bool:
+    """크레딧이 바닥난 클래스를 이 시도로 다시 쳐 볼 차례를 잡는다(#586). 마지막 소진 시각이
+    `QUOTA_RECHECK_INTERVAL` 보다 오래됐을 때만 이기고, 이긴 쪽이 그 시각을 지금으로 민다 —
+    조건부 UPDATE 하나라 같은 클래스의 태스크 여럿 중 하나만 벤더를 부른다. 행 잠금을
+    채점(벤더 대기) 동안 쥐지 않도록 채점 트랜잭션 밖에서 부른다."""
+
+    return bool(
+        Class.objects.filter(
+            pk=class_id, scoring_quota_exhausted_at__lte=as_of - QUOTA_RECHECK_INTERVAL
+        ).update(scoring_quota_exhausted_at=as_of)
+    )
+
+
+def _clear_scoring_quota_exhausted(class_obj: Class) -> None:
+    """다시 확인한 시도가 채점됐다 — 크레딧이 돌아왔다(#586). 쌓인 시도는 다음 tick 부터
+    후보에 다시 든다. 알림은 없다 — 시도마다 가는 채점 완료 알림이 그 사실을 말한다."""
+
+    Class.objects.filter(pk=class_obj.pk).update(scoring_quota_exhausted_at=None)
+
+
+def _record_rate_limited(
+    submission: ClassroomSubmission, checklist_items: list[ChecklistItem], *, error: str
+) -> dict:
+    """빈도 제한으로 실패했다(#586) — `RATE_LIMIT_UNCOUNTED_ATTEMPTS` 번까지는 실패 한도에
+    세지 않는 시도로 남기고, 그 뒤로는 보통 실패처럼 센다."""
+
+    uncounted = submission.classroom_scoring_attempts.filter(rate_limited=True).count()
+    if uncounted < RATE_LIMIT_UNCOUNTED_ATTEMPTS:
+        ClassroomScoringAttempt.objects.create(
+            submission=submission, error=error[:2000], rate_limited=True
+        )
+        return {"submission_id": submission.id, "status": "rate_limited"}
+    return _record_failure_and_finalize(
+        submission, checklist_items, error=error, status_if_not_capped="failed"
+    )
 
 
 def _mark_scoring_model_rejected(problem) -> None:
@@ -566,9 +645,14 @@ def _record_failure_and_finalize(
     return {"submission_id": submission.id, "status": status_if_not_capped}
 
 
-def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
+def score_classroom_submission_once(
+    submission: ClassroomSubmission, *, quota_recheck: bool = False
+) -> dict:
     """이 시도를 정확히 한 번만 채점한다. 이미 `ClassroomScore`가 있으면 그대로
     돌아온다 — 재채점 코드 경로는 없다(ADR-0006).
+
+    `quota_recheck`는 크레딧이 바닥난 클래스를 이 시도로 다시 쳐 볼 차례를 잡았다는 뜻이다
+    (`_claim_quota_recheck`, #586) — 그때만 크레딧 소진을 막는 사유로 보지 않는다.
 
     `scoring.services.score_submission_once`처럼 예외를 밖으로 던지지 않는다 —
     모든 실패는 `ClassroomScoringAttempt`에 남고 상태 문자열로 돌아온다."""
@@ -594,7 +678,7 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
     # 될 수 있다(#434).
     problem = Problem.objects.select_related("classroom").get(pk=problem.pk)
     class_obj = problem.classroom
-    reason = pending_scoring.blocking_reason(class_obj, problem)
+    reason = pending_scoring.blocking_reason(class_obj, problem, ignore_quota=quota_recheck)
     if reason == pending_scoring.NO_API_KEY:
         # 시도로 남기지 않고 조용히 건너뛴다("아직 시도하지 않았다"는 사실
         # 그대로, 「실패했다」가 아니다) — 화면의 `pending_reason`과 같은
@@ -706,6 +790,14 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
         # 이 값이 풀려 다음 시도부터 다시 채점 후보에 든다.
         _mark_scoring_model_rejected(problem)
         return {"submission_id": submission.id, "status": "model_rejected"}
+    except LLMAdapterQuotaExhaustedError:
+        # 키의 크레딧이 바닥났다(#586) — 소유자의 계정 문제이지 이 제출물의 결함이 아니다.
+        # key_rejected 와 같은 규율로 ClassroomScoringAttempt 를 남기지 않는다(실패 한도에
+        # 닿지 않는다). 그 클래스는 다시 확인 간격 동안 스캔 후보에서 빠진다.
+        _mark_scoring_quota_exhausted(class_obj)
+        return {"submission_id": submission.id, "status": "quota_exhausted"}
+    except LLMAdapterRateLimitedError as exc:
+        return _record_rate_limited(submission, checklist_items, error=str(exc))
     except LLMAdapterPermanentError as exc:
         return _record_failure_and_finalize(
             submission,
@@ -720,6 +812,8 @@ def score_classroom_submission_once(submission: ClassroomSubmission) -> dict:
         )
 
     _record_token_usage(class_obj, output.total_tokens)
+    if quota_recheck:
+        _clear_scoring_quota_exhausted(class_obj)
 
     reasoning = [
         {"checklist_item_id": v.requirement_id, "is_met": v.is_met, "reasoning": v.reasoning}
@@ -813,7 +907,9 @@ def _score_one(submission, as_of, ctx):
             )
             if locked is None:
                 return None
-            return score_classroom_submission_once(locked)
+            return score_classroom_submission_once(
+                locked, quota_recheck=ctx.get("quota_recheck", False)
+            )
     except Exception as exc:  # noqa: BLE001 - 한 행의 실패가 나머지 배치를 막으면 안 된다.
         logger.exception(
             "ClassroomSubmission(pk=%s) 채점 처리 중 예외, 다음 건으로 계속", submission.id
@@ -855,8 +951,16 @@ def score_classroom_attempt(submission_id: int) -> dict:
     except ClassroomSubmission.DoesNotExist:
         result = {"submission_id": submission_id, "status": "not_a_candidate"}
     else:
-        result = _score_one(submission, as_of, ctx)
-        if result is None:
-            return {"submission_id": submission_id, "status": "locked_elsewhere"}
+        class_obj = submission.problem.classroom
+        if class_obj.scoring_quota_exhausted_at is not None:
+            # 크레딧이 바닥난 클래스가 다시 확인 간격을 넘겨 후보에 들었다(#586) — 같은 클래스의
+            # 시도 중 하나만 벤더를 부른다. 진 쪽은 시도로 남기지 않고 건너뛴다.
+            ctx["quota_recheck"] = _claim_quota_recheck(class_obj.pk, as_of=as_of)
+        if class_obj.scoring_quota_exhausted_at is not None and not ctx["quota_recheck"]:
+            result = {"submission_id": submission_id, "status": "quota_exhausted"}
+        else:
+            result = _score_one(submission, as_of, ctx)
+            if result is None:
+                return {"submission_id": submission_id, "status": "locked_elsewhere"}
     ClassroomSubmission.objects.filter(pk=submission_id).update(scoring_queued_at=None)
     return result

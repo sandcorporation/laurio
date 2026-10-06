@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  shouldShowExhaustedCreditBanner,
   shouldShowMissingScoringKeyBanner,
   shouldShowRejectedScoringKeyBanner,
 } from "./missing-scoring-key-banner";
@@ -62,5 +63,30 @@ describe("shouldShowRejectedScoringKeyBanner", () => {
         openai_key_status: "rejected",
       }),
     ).toBe(false);
+  });
+});
+
+describe("shouldShowExhaustedCreditBanner", () => {
+  const base = {
+    archived: false,
+    has_openai_key: true,
+    openai_key_status: "verified" as const,
+    scoring_quota_exhausted: true,
+  };
+
+  it("진행중 · 크레딧 소진 — 뜬다(#586)", () => {
+    expect(shouldShowExhaustedCreditBanner(base)).toBe(true);
+  });
+
+  it("진행중 · 크레딧 남음 — 안 뜬다", () => {
+    expect(shouldShowExhaustedCreditBanner({ ...base, scoring_quota_exhausted: false })).toBe(false);
+  });
+
+  it("키가 거부됐으면 거부 배너의 몫이다", () => {
+    expect(shouldShowExhaustedCreditBanner({ ...base, openai_key_status: "rejected" })).toBe(false);
+  });
+
+  it("보관됨 — 새 제출을 안 받으니 안 뜬다", () => {
+    expect(shouldShowExhaustedCreditBanner({ ...base, archived: true })).toBe(false);
   });
 });

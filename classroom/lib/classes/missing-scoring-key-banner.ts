@@ -18,3 +18,19 @@ export function shouldShowRejectedScoringKeyBanner(classroom: {
 }): boolean {
   return !classroom.archived && classroom.has_openai_key && classroom.openai_key_status === "rejected";
 }
+
+// 키는 유효한데 그 키의 OpenAI 크레딧이 떨어진 상태(#586) — 갈아 끼울 것이 아니라 충전할
+// 것이라 거부 배너와 다른 배너다. 거부됨이 함께면 거부 배너가 먼저다(새 키가 필요하다).
+export function shouldShowExhaustedCreditBanner(classroom: {
+  archived: boolean;
+  has_openai_key: boolean;
+  openai_key_status: "verified" | "unverified" | "rejected" | null;
+  scoring_quota_exhausted: boolean;
+}): boolean {
+  return (
+    !classroom.archived &&
+    classroom.has_openai_key &&
+    classroom.openai_key_status !== "rejected" &&
+    classroom.scoring_quota_exhausted
+  );
+}

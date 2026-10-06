@@ -81,6 +81,18 @@ describe("describeNotification — classroom_scoring_key_rejected", () => {
   });
 });
 
+describe("describeNotification — classroom_scoring_quota_exhausted", () => {
+  it("크레딧이 떨어져 멈췄고, 충전하면 이어지며, 참여자 시도는 미달이 되지 않는다고 말한다(#586)", () => {
+    const text = describeNotification(
+      row({ notification_type: "classroom_scoring_quota_exhausted", context: { class_name: "알고리즘 1반" } }),
+    );
+    expect(text).toContain("알고리즘 1반");
+    expect(text).toContain("크레딧이 떨어져");
+    expect(text).toContain("충전하면");
+    expect(text).toContain("미달로 처리되지 않습니다");
+  });
+});
+
 describe("describeNotification — 알 수 없는 유형", () => {
   it("크래시 대신 일반 문구로 폴백한다", () => {
     const text = describeNotification(row({ notification_type: "unknown_type" }));
