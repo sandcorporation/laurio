@@ -14,6 +14,7 @@ import pytest
 from django.conf import settings
 from django.test import override_settings
 
+from core import llm_scoring
 from tests.classroom_scenarios import respond_with_verdict
 
 CLASSES_URL = "/api/classroom/classes"
@@ -349,9 +350,9 @@ def test_non_reasoning_model_request_is_unchanged(client, db, monkeypatch):
     assert "reasoning_effort" not in payload
 
 
-def test_classroom_scoring_requests_use_a_longer_timeout(client, db, monkeypatch):
-    """강의실 채점은 워커 작업이라 beat의 30초 제약과 무관하다(모듈 docstring)
-    — 공모전이 쓰는 20초 기본값보다 넉넉해야 한다."""
+def test_classroom_scoring_requests_use_the_contest_default_timeout(client, db, monkeypatch):
+    """강의실 채점도 내부 호출(30초) 안에서 도므로 공모전과 같은 20초 기본값을
+    쓴다(#581, GlitchTip 오류 87) — 추론 모델이라고 늘리지 않는다(#582 전까지)."""
 
     ctx = _setup_submission(client, model="gpt-4.1")
     sent = []
@@ -359,7 +360,7 @@ def test_classroom_scoring_requests_use_a_longer_timeout(client, db, monkeypatch
 
     _run_scan(client)
 
-    assert sent[0]["timeout"] > 20
+    assert sent[0]["timeout"] == llm_scoring._OPENAI_REQUEST_TIMEOUT_SECONDS == 20
 
 
 # --- 공모전 채점 불변 --------------------------------------------------------------

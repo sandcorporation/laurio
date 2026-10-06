@@ -238,7 +238,9 @@ _OPENAI_DEFAULT_TEMPERATURE = 0
 # 느린 호출로도 그 예산을 넘겼고, 워커가 SIGKILL되면 진행 중이던 요청은
 # ScoringAttempt를 남길 기회조차 없이 사라진다 — 다음 beat(60초 뒤)가 같은
 # 앞머리 Submission들을 다시 집어 똑같이 죽는 사고가 반복된다. 20초로 줄여
-# 프롬프트 구성·DB 조회 등 나머지 오버헤드에 10초 여유를 남긴다.
+# 프롬프트 구성·DB 조회 등 나머지 오버헤드에 10초 여유를 남긴다. 강의실 채점도
+# 같은 예산 안에서 돌아(즉시 채점 태스크도 call_internal 이다) 이 값을 그대로 쓴다
+# (#581, `classroom.scoring._scoring_adapter`).
 _OPENAI_REQUEST_TIMEOUT_SECONDS = 20
 _OPENAI_SYSTEM_PROMPT = (
     # 공모전과 강의실이 함께 쓴다 — 제품 이름을 적지 않는다(무엇을 채점하는지는
