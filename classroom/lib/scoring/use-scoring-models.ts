@@ -15,7 +15,7 @@ export type { ScoringModelRow };
 export type ScoringModelsState =
   | { status: "loading" }
   | { status: "error" }
-  | { status: "ready"; models: ScoringModelRow[]; source: "live" | "fallback"; unavailableReason: "no_api_key" | "fetch_failed" | null };
+  | { status: "ready"; models: ScoringModelRow[]; source: ScoringModelCatalog["source"]; unavailableReason: ScoringModelCatalog["unavailable_reason"] };
 
 export function useScoringModels(classId: number): { state: ScoringModelsState; reload: () => void } {
   const { state: queryState, reload: refetch } = useBackendQuery<ScoringModelCatalog>(

@@ -170,6 +170,18 @@ export function ProblemSettingsForm({
                   </span>
                 </Note>
               ) : null}
+              {modelsState.source === "manual" ? (
+                // 호환 서버가 모델 목록을 주지 않았다(#601) — 그 서버의 모델 이름을 직접 넣는다.
+                <input
+                  id={`${testIdPrefix}-model`}
+                  data-testid={`${testIdPrefix}-model-input`}
+                  value={model}
+                  onChange={(event) => onModelChange(event.target.value)}
+                  className={`${INPUT_CLASS} font-mono`}
+                  placeholder="비워 두면 클래스 기본값을 따릅니다"
+                  maxLength={200}
+                />
+              ) : (
               <select
                 id={`${testIdPrefix}-model`}
                 data-testid={`${testIdPrefix}-model-select`}
@@ -193,6 +205,7 @@ export function ProblemSettingsForm({
                   </option>
                 ))}
               </select>
+              )}
             </>
           ) : (
             <p data-testid={`${testIdPrefix}-model-loading`} className="text-[13px] text-ink/45">

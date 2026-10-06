@@ -242,8 +242,9 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 | `POST`·`GET /api/classroom/classes[/{id}]` | 클래스를 열고 내가 강사인 것만 본다 — 소유한 것과 공동 강사인 것, 어느 쪽인지 `role` 이 말한다(#561) |
 | `GET /api/classroom/classes/joined` | 참여자로 들어간 클래스 — 본인이 강사인 클래스는 여기 겹쳐 나오지 않는다(#328) |
 | `PATCH /api/classroom/classes/{id}` | 이름·기본 채점 모델·기본 추론 강도를 고친다(#402) — 예산 칸과 소유자의 강사 이름 칸은 소유자만 |
-| `PUT /api/classroom/classes/{id}/openai-key` | 강사 본인의 채점 키를 저장한다 — 마스킹된 값만 돌려준다(#284) |
-| `GET /api/classroom/classes/{id}/scoring-models` | 그 클래스의 키로 실제로 쓸 수 있는 채점 모델·컨텍스트 크기·추론 모델 여부(#401, 예전 전역 `/scoring-models`를 대신한다) |
+| `PUT /api/classroom/classes/{id}/openai-key` | 강사 본인의 채점 키를 저장한다 — 마스킹된 값만 돌려준다(#284). 채점 연결이 「OpenAI 키」가 되고 호환 서버 주소는 지워진다(#601) |
+| `PUT /api/classroom/classes/{id}/compatible-server` | 채점 연결을 「호환 서버」로 저장한다(#601, ADR-0058) — 소유자 전용. 주소(https·공인)와 `Authorization: Bearer` 값(비워 둘 수 있다). 저장 전에 `core.safe_outbound` 로 그 서버의 `…/models` 를 한 번 받아 보고, 거부·실패는 이유별 한 문장의 422(https 아님·공인 주소 아님·이름 못 찾음·인증서·닿지 않음·리다이렉트·인증 실패). 인증 값은 키 칸에 암호화해 두고 끝 네 자리만 소유자에게 보인다. 공동 강사의 `ClassOut` 에는 종류와 호스트만 실린다 |
+| `GET /api/classroom/classes/{id}/scoring-models` | 그 클래스의 키로 실제로 쓸 수 있는 채점 모델·컨텍스트 크기·추론 모델 여부(#401, 예전 전역 `/scoring-models`를 대신한다). 호환 서버면 그 서버의 목록을 거르지 않고, 목록을 주지 않으면 `source="manual"` — 모델 이름을 직접 넣는다(#601) |
 | `GET /api/classroom/classes/{id}/scoring-cost[?problem_id=]` | 예상 채점 비용(#591) — 그 키로 쓸 수 있는 모델(추론 모델은 강도별)의 시도 1건·문제 하나·gpt-4.1-mini 대비 배율. 기준은 그 문제의 지난 시도 평균 → 클래스 평균 → 소스 크기별, 셈은 `classroom.scoring_cost` |
 | `POST /api/classroom/classes/{id}/join-link/regenerate` | 가입 링크를 다시 뽑는다 — 이전 코드는 죽는다(#279) |
 | `POST .../archive`·`.../unarchive` | 클래스를 보관하고 되돌린다 — 지우지 않는다(#294) |
@@ -359,7 +360,7 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 행을 잠가 클래스마다 대기 하나를 지키고, 만료는 요청한 때 + 7일, 상태는 수락·거절·취소·만료
 시각에서 읽는다. 수락은 한 트랜잭션이다: `Class.instructor` 가 받는 사람으로 바뀌고, 받는
 사람의 공동 강사 줄이 사라지고 넘긴 사람이 공동 강사가 된다(강사 이름은 각자의 것을 들고
-자리만 바꾼다), 채점 키(암호문·끝 네 자리·상태)가 비워진다. 예산·사용량·경고 시각은
+자리만 바꾼다), 채점 키(암호문·끝 네 자리·상태)가 비워진다 — 호환 서버였으면 주소도 비우고 연결은 「OpenAI 키」로 돌아간다(#601). 예산·사용량·경고 시각은
 그대로다 — 키가 빈 동안 낸 시도는 채점 대기 사유 「키」(`no_api_key`)로 기다리다 새 소유자가
 키를 넣으면 채점된다. 그 순간부터 소유자 전용은 새 소유자에게 열리고 넘긴 사람에게는 403
 이다. 키 저장은 「지금도 소유자인가」를 조건으로 쓰므로 수락과 겹친 넘긴 사람의 키 저장은

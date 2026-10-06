@@ -192,6 +192,10 @@ def accept(class_obj: Class, user_id: int, transfer_id: int) -> Class:
         locked.openai_api_key_last4 = ""
         locked.openai_api_key_status = Class.ScoringKeyStatus.UNVERIFIED
         locked.scoring_quota_exhausted_at = None
+        # 호환 서버(#601)도 넘긴 사람의 것이다 — 인증 값만 지우고 주소를 남기면 새 소유자의
+        # 채점이 넘긴 사람의 서버로 계속 나간다.
+        locked.scoring_connection_kind = Class.ScoringConnectionKind.OPENAI_KEY
+        locked.scoring_server_url = ""
         locked.save(
             update_fields=[
                 "instructor",
@@ -200,6 +204,8 @@ def accept(class_obj: Class, user_id: int, transfer_id: int) -> Class:
                 "openai_api_key_last4",
                 "openai_api_key_status",
                 "scoring_quota_exhausted_at",
+                "scoring_connection_kind",
+                "scoring_server_url",
             ]
         )
         transfer.accepted_at = now

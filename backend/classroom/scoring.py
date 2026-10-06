@@ -101,7 +101,6 @@ from .models import (
     Problem,
 )
 from .scoring_connection import ScoringConnection, connection_for, openai_key_connection
-from .scoring_models import matches_naming_rule
 from .syntax_check import SYNTAX_CHECK_ITEM_ID, SyntaxCheckPass, run_syntax_check
 
 logger = logging.getLogger(__name__)
@@ -228,6 +227,8 @@ def _scoring_adapter(
         factory_kwargs={
             "api_key": connection.auth_value(),
             "base_url": connection.base_url,
+            # 호환 서버는 안전한 바깥 호출로만 나간다(#601, ADR-0058) — OpenAI 키 연결은 `None`.
+            "transport": connection.transport(),
             "model": model,
             "reasoning_effort": reasoning_effort,
             # 공모전의 20초가 아니라 3분이다 — 강의실 채점은 Celery 워커 안에서 돌아
@@ -722,7 +723,7 @@ def score_classroom_submission_once(
         problem_id=problem.id,
         scoring_model=model,
     )
-    if not matches_naming_rule(model):
+    if not connection.accepts_model_name(model):
         # Problem.model·Class.default_model은 저장 시점에 검증되지만(classroom.api),
         # 채점 시점의 이름 규칙이 그 사이 좁혀졌을 수 있다 — 재시도로 나을 수
         # 없는 설정 오류다.

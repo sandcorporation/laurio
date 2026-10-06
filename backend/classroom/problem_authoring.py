@@ -87,6 +87,11 @@ def validate_scoring_model_choice(class_obj: Class, model_id: str, *, current_va
     Implementation Decisions)."""
 
     catalog = get_scoring_model_catalog(class_obj)
+    if catalog.source == "manual":
+        # 호환 서버가 목록을 주지 않았다(#601) — 소유자가 그 서버의 모델 이름을 직접 넣는다.
+        if model_id.strip() and model_id == model_id.strip() and len(model_id) <= 200:
+            return
+        raise HttpError(422, "모델 이름을 200자 안으로, 앞뒤 공백 없이 넣어주세요.")
     if catalog.source == "live":
         if any(choice.id == model_id for choice in catalog.models):
             return

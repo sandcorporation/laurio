@@ -116,6 +116,7 @@ from .schemas import (
     MemberRenameIn,
     MemberRenameOut,
     OpenAIKeyIn,
+    CompatibleServerIn,
     ProblemCopyIn,
     ProblemIn,
     ProblemOut,
@@ -150,7 +151,8 @@ from . import class_authoring, co_instructors, ownership_transfers, problem_auth
 from .problem_transitions import available_transitions, execute_transition
 from .scoring import check_scoring_key, enqueue_scoring
 from . import scoring_cost
-from .scoring_model_catalog import get_scoring_model_catalog
+from .scoring_model_catalog import get_scoring_model_catalog, remember_model_ids
+from . import scoring_connection
 from .scoring_models import is_reasoning_model_id
 from .submission_target_refs import source_target_ref
 from .services import copy_class, copy_problem_to_class, instructor_classes
@@ -163,6 +165,14 @@ router = Router(tags=["classroom"])
 #: `Class.openai_api_key_encrypted`를 다시 풀지 않는다(#284, 파일 상단 라우터
 #: docstring과 같은 이유: 복호화는 채점 요청을 보낼 때만 한다).
 _KEY_MASK_PREFIX = "••••••••"
+
+
+def _sends_reasoning_effort(class_obj: Class, model_id: str) -> bool:
+    """화면이 「추론 강도」 칸을 보일지 — 채점 요청에 그 값을 실을 때만(호환 서버는 싣지 않는다, #601)."""
+
+    if class_obj.scoring_connection_kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER:
+        return False
+    return is_reasoning_model_id(model_id)
 
 
 def _mask_from_last4(last4: str) -> str:
@@ -191,6 +201,8 @@ def _serialize_class(class_obj: Class, *, viewer_id: int) -> ClassOut:
     """`viewer_id`는 부른 사람 — 그 사람이 소유자인지 공동 강사인지(`role`)를 싣는다(#561)."""
 
     has_key = class_obj.has_scoring_key()
+    compatible = has_key and class_obj.scoring_connection_kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER
+    viewer_is_owner = is_owner(class_obj, viewer_id)
     token_budget_remaining = (
         max(class_obj.token_budget - class_obj.token_usage_total, 0)
         if class_obj.token_budget is not None
@@ -204,11 +216,22 @@ def _serialize_class(class_obj: Class, *, viewer_id: int) -> ClassOut:
         join_code=class_obj.join_code,
         created_at=class_obj.created_at,
         default_model=class_obj.default_model,
-        default_model_is_reasoning=is_reasoning_model_id(class_obj.default_model),
+        default_model_is_reasoning=_sends_reasoning_effort(class_obj, class_obj.default_model),
         default_reasoning_effort=class_obj.default_reasoning_effort,
         has_openai_key=has_key,
-        openai_key_masked=_mask_from_last4(class_obj.openai_api_key_last4) if has_key else None,
+        openai_key_masked=(
+            _mask_from_last4(class_obj.openai_api_key_last4) if has_key and not compatible else None
+        ),
         openai_key_status=class_obj.openai_api_key_status if has_key else None,
+        scoring_connection_kind=class_obj.scoring_connection_kind,
+        # 공동 강사는 종류와 호스트만 읽는다(#601) — 주소 전체·인증 값 마스킹은 소유자에게만.
+        scoring_server_host=scoring_connection.server_host(class_obj.scoring_server_url) if compatible else None,
+        scoring_server_url=class_obj.scoring_server_url if compatible and viewer_is_owner else None,
+        scoring_auth_masked=(
+            _mask_from_last4(class_obj.openai_api_key_last4)
+            if compatible and viewer_is_owner and class_obj.openai_api_key_last4
+            else None
+        ),
         scoring_quota_exhausted=has_key and class_obj.scoring_quota_exhausted_at is not None,
         archived=class_obj.archived_at is not None,
         token_budget=class_obj.token_budget,
@@ -218,7 +241,7 @@ def _serialize_class(class_obj: Class, *, viewer_id: int) -> ClassOut:
         token_budget_exhausted=class_obj.token_budget_exhausted(),
         has_submissions=ClassroomSubmission.objects.filter(problem__classroom=class_obj).exists(),
         published_template=_published_template_summary(_live_class_template(class_obj)),
-        role="owner" if is_owner(class_obj, viewer_id) else "co_instructor",
+        role="owner" if viewer_is_owner else "co_instructor",
         pending_ownership_transfer=_pending_ownership_transfer_out(class_obj, viewer_id),
     )
 
@@ -346,7 +369,7 @@ def _serialize_problem(
         order=problem.order,
         model=problem.model,
         effective_model=effective_model,
-        effective_model_is_reasoning=is_reasoning_model_id(effective_model),
+        effective_model_is_reasoning=_sends_reasoning_effort(class_obj, effective_model),
         reasoning_effort=problem.reasoning_effort,
         effective_reasoning_effort=effective_reasoning_effort,
         scoring_model_rejected=problem.scoring_model_rejected_at is not None,
@@ -648,9 +671,19 @@ def set_class_openai_key(request: HttpRequest, class_id: int, payload: OpenAIKey
     # 크레딧을 보지 않으므로(`/v1/models`) 여기서 풀고, 다음 tick 의 채점이 실제로 확인한다.
     # 아직 바닥이면 그 채점이 다시 멈추고 다시 알린다.
     class_obj.scoring_quota_exhausted_at = None
+    # OpenAI 키를 저장하면 연결이 「OpenAI 키」로 바뀌고 호환 서버 주소는 지운다(#601).
+    class_obj.scoring_connection_kind = Class.ScoringConnectionKind.OPENAI_KEY
+    class_obj.scoring_server_url = ""
     # 벤더 확인을 기다리는 사이 소유권이 넘어갔을 수 있다(#564) — 넘긴 사람의 키가 새 소유자의
     # 클래스에 남지 않게, 저장은 「지금도 부른 사람이 소유자인가」를 조건으로 한 번에 한다.
+    _save_scoring_connection(request, class_obj)
+    return 200, _serialize_class(class_obj, viewer_id=request.auth_user.id)
+
+
+def _save_scoring_connection(request: HttpRequest, class_obj: Class) -> None:
     saved = classes_owned_by(request.auth_user.id).filter(id=class_obj.id).update(
+        scoring_connection_kind=class_obj.scoring_connection_kind,
+        scoring_server_url=class_obj.scoring_server_url,
         openai_api_key_encrypted=class_obj.openai_api_key_encrypted,
         openai_api_key_last4=class_obj.openai_api_key_last4,
         openai_api_key_status=class_obj.openai_api_key_status,
@@ -658,6 +691,41 @@ def set_class_openai_key(request: HttpRequest, class_id: int, payload: OpenAIKey
     )
     if not saved:
         raise HttpError(403, OWNER_ONLY_MESSAGE)
+
+
+@router.put(
+    "/classes/{class_id}/compatible-server",
+    response={200: ClassOut, 403: ErrorOut, 404: ErrorOut, 422: ErrorOut},
+    auth=jwt_auth,
+)
+def set_class_compatible_server(request: HttpRequest, class_id: int, payload: CompatibleServerIn):
+    """채점 연결을 「호환 서버」로 저장한다(#601, ADR-0058) — 소유자 전용(ADR-0055).
+
+    저장 전에 안전한 바깥 호출로 그 서버의 모델 목록을 한 번 받아 닿는지·인증이 맞는지 본다.
+    거부·실패는 이유별 한 문장으로 422 이고, DB 의 기존 연결은 그대로 남는다. 인증 값은 OpenAI
+    키와 같은 칸에 암호화해 두고 끝 네 자리만 보인다 — 이전 연결(OpenAI 키)의 값은 덮여
+    지워진다. 응답 어디에도 인증 값 원문을 싣지 않는다."""
+
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=True).class_obj
+
+    server_url = scoring_connection.normalize_server_url(payload.server_url)
+    auth_value = payload.auth_value.strip()
+    try:
+        model_ids = scoring_connection.probe_compatible_server(server_url, auth_value)
+    except scoring_connection.CompatibleServerRefused as exc:
+        raise HttpError(422, exc.message) from None
+
+    class_obj.scoring_connection_kind = Class.ScoringConnectionKind.COMPATIBLE_SERVER
+    class_obj.scoring_server_url = server_url
+    class_obj.openai_api_key_encrypted = encrypt(auth_value) if auth_value else ""
+    class_obj.openai_api_key_last4 = auth_value[-4:] if auth_value else ""
+    class_obj.openai_api_key_status = Class.ScoringKeyStatus.VERIFIED
+    class_obj.scoring_quota_exhausted_at = None
+    _save_scoring_connection(request, class_obj)
+
+    connection = scoring_connection.connection_for(class_obj)
+    if connection is not None:
+        remember_model_ids(connection, model_ids)
     return 200, _serialize_class(class_obj, viewer_id=request.auth_user.id)
 
 

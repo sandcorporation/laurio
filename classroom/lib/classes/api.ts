@@ -38,6 +38,13 @@ export type ClassRow = {
   openai_key_status: "verified" | "unverified" | "rejected" | null;
   // 키의 OpenAI 크레딧이 떨어져 채점이 멈춰 있는가(#586) — 키가 있을 때만 참일 수 있다.
   scoring_quota_exhausted: boolean;
+  // 채점 연결의 종류(#601) — 「OpenAI 키」 또는 「호환 서버」.
+  scoring_connection_kind: "openai_key" | "compatible_server";
+  // 호환 서버의 호스트 — 공동 강사도 읽는다.
+  scoring_server_host: string | null;
+  // 호환 서버의 주소 전체와 인증 값 끝 네 자리 — 소유자에게만 온다.
+  scoring_server_url: string | null;
+  scoring_auth_masked: string | null;
   // 강사가 보관했는가(#294) — 참이면 새 가입·새 제출이 닫히고 읽기만 남는다.
   archived: boolean;
   // `null`이면 무제한(#295) — 강사가 아직 예산을 정하지 않았다는 뜻이다.
@@ -124,6 +131,19 @@ export function renameMyInstructorName(classId: number, displayName: string): Pr
 export function setOpenAIKey(classId: number, apiKey: string): Promise<ApiResult<ClassRow>> {
   return apiRequest<ClassRow>(`/api/backend/classroom/classes/${classId}/openai-key`, "PUT", {
     api_key: apiKey,
+  });
+}
+
+// 채점 연결을 「호환 서버」로 저장한다(#601) — 서버가 저장 전에 그 주소에 한 번 닿아 보고,
+// 거부되면 이유를 한 문장으로 돌려준다(`detail`). 인증 값은 비워 둘 수 있다.
+export function setCompatibleServer(
+  classId: number,
+  serverUrl: string,
+  authValue: string,
+): Promise<ApiResult<ClassRow>> {
+  return apiRequest<ClassRow>(`/api/backend/classroom/classes/${classId}/compatible-server`, "PUT", {
+    server_url: serverUrl,
+    auth_value: authValue,
   });
 }
 

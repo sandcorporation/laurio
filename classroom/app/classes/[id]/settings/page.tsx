@@ -10,6 +10,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { ScoringConnectionSection } from "@/app/components/ScoringConnectionSection";
 import { BudgetAttemptsHint, ClassScoringCostTable } from "@/app/components/ScoringCost";
 import type { FormEvent } from "react";
 
@@ -31,17 +32,12 @@ import { publishClassAsTemplate, takedownClassTemplate } from "@/lib/class-templ
 import {
   deleteClass,
   renameMyInstructorName,
-  setOpenAIKey,
   updateClass,
   type ClassRow,
   type PublishedClassTemplateSummary,
 } from "@/lib/classes/api";
 import { isDeleteConfirmationTyped } from "@/lib/classes/delete-confirmation";
 import { classNamesPatch } from "@/lib/classes/name-patch";
-import {
-  checkOpenAIKeyFromBrowser,
-  type OpenAIKeyCheckResult,
-} from "@/lib/classes/openai-key-check";
 import { useClass } from "@/lib/classes/use-class";
 import { checkDisplayNameForBannedWords } from "@/lib/members/display-name-check";
 import { useMembers } from "@/lib/members/use-members";
@@ -347,35 +343,6 @@ export default function ClassSettingsPage() {
   const { state: modelsState, reload: reloadModels } = useScoringModels(classId);
   const costState = useScoringCost(classId);
 
-  const [apiKey, setApiKey] = useState("");
-  const [keySaving, setKeySaving] = useState(false);
-  const [keyError, setKeyError] = useState<string | null>(null);
-  // 저장 전에 브라우저가 직접 벤더에게 물어 미리 말한다(#357) — 문이
-  // 아니라 안내다, 저장 버튼은 이 값과 무관하게 항상 눌린다. 타자 한
-  // 글자마다 치지 않고 입력이 멎은 뒤 한 번만 친다.
-  const [liveKeyCheck, setLiveKeyCheck] = useState<OpenAIKeyCheckResult | "checking" | "idle">(
-    "idle",
-  );
-
-  useEffect(() => {
-    const trimmed = apiKey.trim();
-    if (trimmed === "") {
-      setLiveKeyCheck("idle");
-      return;
-    }
-    setLiveKeyCheck("checking");
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      checkOpenAIKeyFromBrowser(trimmed).then((result) => {
-        if (!cancelled) setLiveKeyCheck(result);
-      });
-    }, 600);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [apiKey]);
-
   const [defaultModel, setDefaultModel] = useState("");
   const [defaultReasoningEffort, setDefaultReasoningEffort] = useState("low");
   const [modelSaving, setModelSaving] = useState(false);
@@ -451,23 +418,6 @@ export default function ClassSettingsPage() {
     { name: classroom.name, instructorDisplayName: classroom.my_instructor_display_name },
     { name: classNameDraft, instructorDisplayName },
   );
-
-  async function handleKeySubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setKeySaving(true);
-    setKeyError(null);
-    const result = await setOpenAIKey(classId, apiKey);
-    if (result.ok) {
-      setApiKey("");
-      reload();
-      // 키가 바뀌면 그 키로 실제로 쓸 수 있는 모델이 달라진다(#401) — 이
-      // 화면을 떠나지 않아도 모델 선택지가 새 키 기준으로 바로 갱신된다.
-      reloadModels();
-    } else {
-      setKeyError(result.detail);
-    }
-    setKeySaving(false);
-  }
 
   async function handleNameSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -554,8 +504,8 @@ export default function ClassSettingsPage() {
         title="클래스 설정"
         description={
           isOwner
-            ? "클래스·강사 이름, 채점 키와 모델·예산, 템플릿 공개까지 이 클래스의 설정을 여기서 관리합니다."
-            : "클래스 이름과 내 강사 이름, 채점 모델, 템플릿 공개를 여기서 관리합니다. 채점 키·예산과 클래스 삭제는 소유자가 맡습니다."
+            ? "클래스·강사 이름, 채점 연결과 모델·예산, 템플릿 공개까지 이 클래스의 설정을 여기서 관리합니다."
+            : "클래스 이름과 내 강사 이름, 채점 모델, 템플릿 공개를 여기서 관리합니다. 채점 연결·예산과 클래스 삭제는 소유자가 맡습니다."
         }
         actions={
           <Link href={`/classes/${classId}`} className={buttonClass()}>
@@ -628,110 +578,19 @@ export default function ClassSettingsPage() {
         </Card>
 
         <Card>
-          <CardHeader title="채점" hint="누구의 키로, 어떤 모델로, 얼마까지 채점할지" />
+          <CardHeader title="채점" hint="어디로, 어떤 모델로, 얼마까지 채점할지" />
           <div className="divide-y divide-rule">
-            <CardSection id="scoring-key" title="채점 키" hint="이 클래스의 채점에만 쓰입니다">
-              <div className="flex flex-col gap-4 p-4">
-                {!classroom.has_openai_key ? (
-                  <p data-testid="openai-key-status" className="flex flex-wrap items-center gap-2.5 text-[13.5px]">
-                    <Badge tone="attention">없음</Badge>
-                    <span className="text-ink/60">키가 없으면 이 클래스의 제출은 채점되지 않습니다.</span>
-                  </p>
-                ) : classroom.openai_key_status === "rejected" ? (
-                  <p data-testid="openai-key-status" className="flex flex-wrap items-center gap-2.5 text-[13.5px]">
-                    <Badge tone="attention">거부됨</Badge>
-                    <span className="font-mono text-ink/60">{classroom.openai_key_masked}</span>
-                    <span className="text-ink/60">
-                      벤더가 이 키를 거절했습니다 — 새 키를 저장해야 채점이 다시 시작됩니다.
-                    </span>
-                  </p>
-                ) : classroom.scoring_quota_exhausted ? (
-                  <p data-testid="openai-key-status" className="flex flex-wrap items-center gap-2.5 text-[13.5px]">
-                    <Badge tone="attention">크레딧 소진</Badge>
-                    <span className="font-mono text-ink/60">{classroom.openai_key_masked}</span>
-                    <span className="text-ink/60">
-                      이 키의 OpenAI 크레딧이 떨어져 채점이 멈췄습니다 — 충전한 뒤 키를 다시 저장하면 바로
-                      이어지고, 저장하지 않아도 10분 안에 다시 확인해 이어집니다.
-                    </span>
-                  </p>
-                ) : classroom.openai_key_status === "unverified" ? (
-                  <p data-testid="openai-key-status" className="flex flex-wrap items-center gap-2.5 text-[13.5px]">
-                    <Badge tone="neutral">미검증</Badge>
-                    <span className="font-mono text-ink/60">{classroom.openai_key_masked}</span>
-                    <span className="text-ink/60">
-                      저장할 때 벤더에 닿지 못해 확인하지 못했습니다 — 채점 시도에서 다시 확인됩니다.
-                    </span>
-                  </p>
-                ) : (
-                  <p data-testid="openai-key-status" className="flex items-center gap-2.5 text-[13.5px]">
-                    <Badge tone="verified">확인함</Badge>
-                    <span className="font-mono text-ink/60">{classroom.openai_key_masked}</span>
-                  </p>
-                )}
-
-                {!isOwner ? (
-                  <Note>
-                    <span data-testid="openai-key-owner-only">
-                      채점 키는 소유자만 바꿀 수 있습니다 — 채점 비용이 소유자의 몫입니다.
-                    </span>
-                  </Note>
-                ) : (
-                  <form onSubmit={handleKeySubmit} className="flex flex-col gap-2.5">
-                    <label htmlFor="openai-api-key">
-                      <FieldLabel>새 채점 키</FieldLabel>
-                    </label>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <input
-                        id="openai-api-key"
-                        data-testid="openai-key-input"
-                        type="password"
-                        value={apiKey}
-                        onChange={(event) => setApiKey(event.target.value)}
-                        required
-                        className={`${INPUT_CLASS} min-w-[240px] flex-1 font-mono`}
-                        placeholder="sk-..."
-                      />
-                      <button
-                        type="submit"
-                        data-testid="openai-key-submit"
-                        disabled={keySaving || apiKey.trim() === ""}
-                        className={buttonClass("primary")}
-                      >
-                        {keySaving ? "저장하는 중..." : "저장"}
-                      </button>
-                    </div>
-                    {/* 저장을 누르기 전에 브라우저가 먼저 말해준다(#357) — 문이
-                        아니라 안내다, 판정과 무관하게 위 저장 버튼은 항상 눌린다. */}
-                    {liveKeyCheck === "checking" ? (
-                      <p data-testid="openai-key-live-check" className="text-[12px] text-ink/45">
-                        확인하는 중...
-                      </p>
-                    ) : liveKeyCheck === "valid" ? (
-                      <p data-testid="openai-key-live-check">
-                        <Badge tone="verified">이 키를 쓸 수 있습니다</Badge>
-                      </p>
-                    ) : liveKeyCheck === "invalid" ? (
-                      <p data-testid="openai-key-live-check">
-                        <Badge tone="attention">이 키는 쓸 수 없습니다</Badge>
-                      </p>
-                    ) : liveKeyCheck === "unknown" ? (
-                      <p data-testid="openai-key-live-check">
-                        <Badge tone="neutral">지금은 확인할 수 없습니다</Badge>
-                      </p>
-                    ) : null}
-                    <span className="text-[11.5px] leading-relaxed text-ink/45">
-                      저장 뒤에는 다시 볼 수 없습니다 — 화면에도 로그에도 남지 않고, 채점 요청을 보낼
-                      때만 복호화됩니다. 참여자에게는 어떤 형태로도 보이지 않습니다.
-                    </span>
-                  </form>
-                )}
-                {keyError ? (
-                  <ErrorNote>
-                    <span data-testid="openai-key-error">{keyError}</span>
-                  </ErrorNote>
-                ) : null}
-              </div>
-            </CardSection>
+            <ScoringConnectionSection
+              key={`${classroom.scoring_connection_kind}:${classroom.scoring_server_url ?? ""}`}
+              classroom={classroom}
+              isOwner={isOwner}
+              onSaved={() => {
+                reload();
+                // 연결이 바뀌면 그 연결로 실제로 쓸 수 있는 모델이 달라진다(#401, #601) — 이 화면을
+                // 떠나지 않아도 모델 선택지가 바로 갱신된다.
+                reloadModels();
+              }}
+            />
 
             <CardSection id="scoring-model" title="기본 채점 모델" hint="문제가 자기 모델을 갖지 않으면 이 값을 씁니다">
               <div className="flex flex-col gap-3 p-4">
@@ -755,11 +614,28 @@ export default function ClassSettingsPage() {
                             : "지금은 모델 목록을 확인할 수 없어 기본 목록을 보여드립니다."}
                         </span>
                       </Note>
+                    ) : modelsState.source === "manual" ? (
+                      <Note>
+                        <span data-testid="scoring-models-unavailable-note">
+                          이 서버는 모델 목록을 주지 않습니다 — 서버에서 쓰는 모델 이름을 그대로 넣어주세요.
+                        </span>
+                      </Note>
                     ) : null}
                     <label htmlFor="class-default-model">
                       <FieldLabel>기본 모델</FieldLabel>
                     </label>
                     <div className="flex flex-wrap items-center gap-2">
+                      {modelsState.source === "manual" ? (
+                        <input
+                          id="class-default-model"
+                          data-testid="class-default-model-input"
+                          value={defaultModel}
+                          onChange={(event) => setDefaultModel(event.target.value)}
+                          required
+                          maxLength={200}
+                          className={`${INPUT_CLASS} min-w-[280px] flex-1 font-mono`}
+                        />
+                      ) : (
                       <select
                         id="class-default-model"
                         data-testid="class-default-model-select"
@@ -767,6 +643,12 @@ export default function ClassSettingsPage() {
                         onChange={(event) => setDefaultModel(event.target.value)}
                         className={`${INPUT_CLASS} min-w-[280px] flex-1`}
                       >
+                        {/* 연결을 바꾼 뒤 지금 값이 그 연결의 목록에 없으면(#601) 고르라고 먼저 말한다. */}
+                        {modelsState.models.some((model) => model.id === defaultModel) ? null : (
+                          <option value={defaultModel} disabled>
+                            {defaultModel} · 이 연결에서 쓸 수 없습니다 — 모델을 고르세요
+                          </option>
+                        )}
                         {modelsState.models.map((model) => (
                           <option key={model.id} value={model.id} data-testid={`scoring-model-option-${model.id}`}>
                             {model.label} · 컨텍스트{" "}
@@ -774,6 +656,7 @@ export default function ClassSettingsPage() {
                           </option>
                         ))}
                       </select>
+                      )}
                       <button
                         type="submit"
                         data-testid="class-default-model-submit"
