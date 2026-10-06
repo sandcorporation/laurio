@@ -28,6 +28,7 @@ import { copyClass } from "@/lib/classes/api";
 import { joinLinkAvailability } from "@/lib/classes/join-link";
 import {
   shouldShowExhaustedCreditBanner,
+  shouldShowUnreachableServerBanner,
   shouldShowMissingScoringKeyBanner,
   shouldShowRejectedScoringKeyBanner,
 } from "@/lib/classes/missing-scoring-key-banner";
@@ -378,6 +379,21 @@ export default function ClassDetailPage() {
             }
             noteTestId="classroom-exhausted-credit-banner"
             settingsLinkTestId="classroom-exhausted-credit-settings-link"
+            actionLabel={classroom.role === "owner" ? "클래스 설정 열기" : null}
+          />
+        ) : null}
+
+        {/* 호환 서버에 닿지 않는 경우(#603) — 서버를 살리거나 주소를 고칠 것이다. */}
+        {shouldShowUnreachableServerBanner(classroom) ? (
+          <MissingScoringKeyNote
+            classId={classId}
+            message={
+              classroom.role === "owner"
+                ? "채점 서버에 닿지 않아 채점이 멈췄습니다 — 서버가 다시 열리면 밀린 제출부터 이어서 채점됩니다. 참여자의 시도는 미달로 처리되지 않습니다."
+                : "채점 서버에 닿지 않아 채점이 멈췄습니다 — 소유자의 서버가 다시 열리면 밀린 제출부터 이어서 채점됩니다."
+            }
+            noteTestId="classroom-unreachable-server-banner"
+            settingsLinkTestId="classroom-unreachable-server-settings-link"
             actionLabel={classroom.role === "owner" ? "클래스 설정 열기" : null}
           />
         ) : null}

@@ -28,6 +28,8 @@ function ConnectionStatus({ classroom }: { classroom: ClassRow }) {
       <p data-testid="scoring-connection-status" className={STATUS_CLASS}>
         {classroom.openai_key_status === "rejected" ? (
           <Badge tone="attention">거부됨</Badge>
+        ) : classroom.scoring_server_unreachable ? (
+          <Badge tone="attention">연결 불가</Badge>
         ) : (
           <Badge tone="verified">호환 서버</Badge>
         )}
@@ -40,6 +42,11 @@ function ConnectionStatus({ classroom }: { classroom: ClassRow }) {
         {classroom.openai_key_status === "rejected" ? (
           <span className="text-ink/60">
             서버가 인증 값을 거절했습니다 — 다시 저장해야 채점이 다시 시작됩니다.
+          </span>
+        ) : classroom.scoring_server_unreachable ? (
+          <span className="text-ink/60">
+            이 서버에 닿지 않아 채점이 멈췄습니다 — 서버를 살린 뒤 다시 저장하면 바로 이어지고, 저장하지
+            않아도 10분 안에 다시 확인해 이어집니다.
           </span>
         ) : null}
       </p>

@@ -34,3 +34,19 @@ export function shouldShowExhaustedCreditBanner(classroom: {
     classroom.scoring_quota_exhausted
   );
 }
+
+// 채점 연결의 호환 서버에 닿지 않는 상태(#603) — 크레딧 소진과 같은 모양으로 멈춘다. 서버를
+// 살리거나 주소를 고칠 것이라 다른 배너다. 거부됨이 함께면 거부 배너가 먼저다.
+export function shouldShowUnreachableServerBanner(classroom: {
+  archived: boolean;
+  has_openai_key: boolean;
+  openai_key_status: "verified" | "unverified" | "rejected" | null;
+  scoring_server_unreachable: boolean;
+}): boolean {
+  return (
+    !classroom.archived &&
+    classroom.has_openai_key &&
+    classroom.openai_key_status !== "rejected" &&
+    classroom.scoring_server_unreachable
+  );
+}

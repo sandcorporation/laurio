@@ -89,6 +89,11 @@ class Class(models.Model):
     #: 마다 대기 시도 하나로 다시 쳐 본다 — 그 시도가 채점되면 지워지고, 또 소진이면 이 값이
     #: 그 시각으로 밀린다(다음 확인까지의 간격을 이 값 하나가 잰다).
     scoring_quota_exhausted_at = models.DateTimeField(null=True, blank=True, default=None)
+    #: 채점 연결의 호환 서버에 닿지 않는다고 마지막으로 확인한 시각(#603) — null 이면 정상이다.
+    #: 크레딧 소진과 같은 모양으로 멈춘다: 값이 있으면 채점 대기 사유는 「키」, 소유자가 연결을
+    #: 다시 저장하면 지워지고, 스캔이 `QUOTA_RECHECK_INTERVAL` 마다 대기 시도 하나로 다시 쳐 본다.
+    #: 닿았는데 늦거나 몸통이 깨진 것은 여기 오지 않는다(실패 시도로 센다).
+    scoring_server_unreachable_at = models.DateTimeField(null=True, blank=True, default=None)
 
     #: 채점 연결의 종류(#599). 키 칸들(`openai_api_key_*`)과 크레딧 소진 시각은 이 연결의
     #: 인증 값과 상태다 — 키 상태(ADR-0045)·크레딧 멈춤(ADR-0057)은 연결의 상태로 읽힌다.
@@ -176,10 +181,16 @@ class Class(models.Model):
             return bool((self.scoring_server_url or "").strip())
         return bool((self.openai_api_key_encrypted or "").strip())
 
-    def scoring_key_unusable(self, *, ignore_quota: bool = False) -> bool:
-        """지금 이 클래스의 채점이 키 때문에 멈춰 있는가(#355, #586) — 키가 아예
+    def scoring_paused(self) -> bool:
+        """채점이 다시 확인을 기다리며 멈춰 있는가(#586, #603) — 크레딧 소진이나 호환 서버
+        연결 불가. 둘 다 연결 자체는 그대로라 다시 확인으로 풀릴 수 있다."""
+
+        return self.scoring_quota_exhausted_at is not None or self.scoring_server_unreachable_at is not None
+
+    def scoring_key_unusable(self, *, ignore_pause: bool = False) -> bool:
+        """지금 이 클래스의 채점이 키 때문에 멈춰 있는가(#355, #586, #603) — 키가 아예
         없거나(`has_scoring_key()`가 거짓) 벤더가 거절해 "거부됨" 상태거나, 그 키의
-        크레딧이 바닥났다(`scoring_quota_exhausted_at`).
+        크레딧이 바닥났거나 호환 서버에 닿지 않는다(`scoring_paused`).
         `classroom.pending_scoring`(#434)의 스캔 후보 쿼리·채점 직전 확인·
         화면의 `pending_reason`·격자 칸 상태가 모두 이 기준 하나를 따라야
         어긋나지 않는다."""
@@ -187,7 +198,7 @@ class Class(models.Model):
         return (
             not self.has_scoring_key()
             or self.openai_api_key_status == self.ScoringKeyStatus.REJECTED
-            or (self.scoring_quota_exhausted_at is not None and not ignore_quota)
+            or (self.scoring_paused() and not ignore_pause)
         )
 
 

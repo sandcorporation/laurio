@@ -170,6 +170,14 @@ class LLMAdapterRateLimitedError(LLMAdapterError):
     `classroom.scoring` 은 이 실패를 일정 시간 동안 실패 한도에 세지 않는다."""
 
 
+class LLMAdapterUnreachableError(LLMAdapterError):
+    """호환 서버에 닿지 않았다(#603) — 이름이 풀리지 않거나, 연결이 서지 않거나, 인증서가
+    맞지 않거나, 막힌 주소로 풀렸거나, 리다이렉트로 답했다(`core.safe_outbound.OutboundRefused.
+    reached` 가 거짓). 일시 실패의 하위 예외라 이 클래스를 모르는 호출자는 지금처럼 다룬다.
+    `classroom.scoring` 은 먼저 잡아 그 클래스의 채점을 멈춘다 — 서버 주인이 고쳐야 풀린다.
+    닿았는데 늦거나 몸통이 깨진 것은 이 예외가 아니다(보통 `LLMAdapterError`)."""
+
+
 class LLMKeyCheckStatus(str, Enum):
     """저장 시점에 벤더에게 키를 확인해 본 결과(#354) — `classroom.models.
     Class.ScoringKeyStatus`로 저장되는 값과는 어휘가 다르다(이쪽은 "이번
@@ -461,7 +469,8 @@ def _openai_round_trip(
             response = transport(method, url, **kwargs)
         except OutboundRefused as exc:
             detail = f", {context}" if context else ""
-            raise LLMAdapterError(f"호환 서버 호출이 실패했다({exc.reason.value}{detail}).") from None
+            error = LLMAdapterError if exc.reached else LLMAdapterUnreachableError
+            raise error(f"호환 서버 호출이 실패했다({exc.reason.value}{detail}).") from None
         if response.status_code == 200:
             return response
         raise _classify_openai_error(response, context=context)

@@ -28,7 +28,7 @@ MODEL_REJECTED = "model_rejected"
 BUDGET_EXHAUSTED = "budget_exhausted"
 
 
-def blocking_reason(class_obj: Class, problem: Problem, *, ignore_quota: bool = False) -> str | None:
+def blocking_reason(class_obj: Class, problem: Problem, *, ignore_pause: bool = False) -> str | None:
     """이 클래스·이 문제의 시도가 지금 채점될 수 없는 이유(있으면 하나만).
 
     이미 `ClassroomScore`가 있는지는 이 함수의 책임이 아니다 — 부르는 쪽이
@@ -36,10 +36,11 @@ def blocking_reason(class_obj: Class, problem: Problem, *, ignore_quota: bool = 
     부르고, `pending_reason`은 `score is not None`이면 이 함수를 부르지도
     않는다).
 
-    `ignore_quota`는 채점 태스크가 크레딧 소진 클래스를 다시 쳐 볼 차례를 잡았을 때만
-    참이다(`classroom.scoring._claim_quota_recheck`, #586) — 화면은 언제나 거짓으로 본다."""
+    `ignore_pause`는 채점 태스크가 멈춘 클래스(크레딧 소진·서버 연결 불가)를 다시 쳐 볼 차례를
+    잡았을 때만 참이다(`classroom.scoring._claim_pause_recheck`, #586, #603) — 화면은 언제나
+    거짓으로 본다."""
 
-    if class_obj.scoring_key_unusable(ignore_quota=ignore_quota):
+    if class_obj.scoring_key_unusable(ignore_pause=ignore_pause):
         return NO_API_KEY
     if problem.scoring_model_rejected_at is not None:
         return MODEL_REJECTED
@@ -94,9 +95,9 @@ def pending_submissions(as_of, ctx) -> QuerySet[ClassroomSubmission]:
     항상 앞선다, ADR-0031) — 예산이 차서 쌓인 시도부터 다시 도는 것도 이
     정렬 하나로 이미 "쌓인 순서대로"가 된다.
 
-    크레딧이 바닥난 클래스(#586)는 마지막 소진에서 `QUOTA_RECHECK_INTERVAL`이 지나기
-    전까지만 뺀다 — 지나면 후보에 들어 그중 하나가 다시 쳐 본다(`classroom.scoring.
-    score_classroom_attempt`). 화면의 대기 사유는 그 사이에도 「키」다(`blocking_reason`).
+    크레딧이 바닥났거나 호환 서버에 닿지 않는 클래스(#586, #603)는 마지막 확인에서
+    `QUOTA_RECHECK_INTERVAL`이 지나기 전까지만 뺀다 — 지나면 후보에 들어 그중 하나가 다시 쳐
+    본다(`classroom.scoring.score_classroom_attempt`). 화면의 대기 사유는 그 사이에도 「키」다(`blocking_reason`).
     `attempt_count`는 빈도 제한으로 세지 않은 시도를 빼고 센다 — 실패 한도와 같은 기준이다.
     """
 
@@ -124,6 +125,7 @@ def pending_submissions(as_of, ctx) -> QuerySet[ClassroomSubmission]:
         .exclude(problem__classroom__openai_api_key_status=Class.ScoringKeyStatus.REJECTED)
         .exclude(problem__scoring_model_rejected_at__isnull=False)
         .exclude(problem__classroom__scoring_quota_exhausted_at__gt=as_of - QUOTA_RECHECK_INTERVAL)
+        .exclude(problem__classroom__scoring_server_unreachable_at__gt=as_of - QUOTA_RECHECK_INTERVAL)
         .exclude(
             models.Q(problem__classroom__token_budget__isnull=False)
             & models.Q(

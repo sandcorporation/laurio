@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   shouldShowExhaustedCreditBanner,
+  shouldShowUnreachableServerBanner,
   shouldShowMissingScoringKeyBanner,
   shouldShowRejectedScoringKeyBanner,
 } from "./missing-scoring-key-banner";
@@ -88,5 +89,30 @@ describe("shouldShowExhaustedCreditBanner", () => {
 
   it("보관됨 — 새 제출을 안 받으니 안 뜬다", () => {
     expect(shouldShowExhaustedCreditBanner({ ...base, archived: true })).toBe(false);
+  });
+});
+
+describe("shouldShowUnreachableServerBanner", () => {
+  const base = {
+    archived: false,
+    has_openai_key: true,
+    openai_key_status: "verified" as const,
+    scoring_server_unreachable: true,
+  };
+
+  it("진행중 · 호환 서버에 닿지 않음 — 뜬다(#603)", () => {
+    expect(shouldShowUnreachableServerBanner(base)).toBe(true);
+  });
+
+  it("서버에 닿으면 안 뜬다", () => {
+    expect(shouldShowUnreachableServerBanner({ ...base, scoring_server_unreachable: false })).toBe(false);
+  });
+
+  it("인증 값이 거부됐으면 거부 배너의 몫이다", () => {
+    expect(shouldShowUnreachableServerBanner({ ...base, openai_key_status: "rejected" })).toBe(false);
+  });
+
+  it("보관됨 — 새 제출을 안 받으니 안 뜬다", () => {
+    expect(shouldShowUnreachableServerBanner({ ...base, archived: true })).toBe(false);
   });
 });

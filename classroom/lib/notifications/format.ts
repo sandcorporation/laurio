@@ -41,6 +41,10 @@ export function describeNotification(notification: NotificationRow): string {
       const className = typeof context.class_name === "string" ? context.class_name : "클래스";
       return `'${className}' 클래스 채점 키의 OpenAI 크레딧이 떨어져 채점이 멈췄습니다 — 충전하면 밀린 제출부터 이어서 채점됩니다. 참여자의 시도는 미달로 처리되지 않습니다.`;
     }
+    case "classroom_scoring_server_unreachable": {
+      const className = typeof context.class_name === "string" ? context.class_name : "클래스";
+      return `'${className}' 클래스의 채점 서버에 닿지 않아 채점이 멈췄습니다 — 서버가 다시 열리면 밀린 제출부터 이어서 채점됩니다. 참여자의 시도는 미달로 처리되지 않습니다.`;
+    }
     case "classroom_contest_entry_rejected": {
       const problemTitle =
         typeof context.problem_title === "string" ? context.problem_title : "문제";

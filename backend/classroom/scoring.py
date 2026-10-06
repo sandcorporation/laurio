@@ -43,7 +43,9 @@ Appeal을 모른다). **벤더가 키 자체를 거절했을 때(401·403,
 **키의 크레딧이 떨어졌을 때(429 `insufficient_quota`)도 같은 자리다**(#586, ADR-0057) —
 실패로 세지 않고 `Class.scoring_quota_exhausted_at`을 찍어 멈춘다. 그 키는 유효하므로
 소유자가 다시 저장하거나, `QUOTA_RECHECK_INTERVAL`마다 대기 시도 하나가 다시 쳐 보고
-채점되면 풀린다. 요청 빈도 제한(그 밖의 429)은 `RATE_LIMIT_UNCOUNTED_ATTEMPTS`번까지
+채점되면 풀린다. **호환 서버에 닿지 않을 때도 같은 모양이다**(#603) — 이름·연결·인증서·막힌
+주소·리다이렉트면 `Class.scoring_server_unreachable_at`을 찍어 멈춘다. 닿았는데 늦거나 몸통이
+깨지면 보통 실패로 센다. 요청 빈도 제한(그 밖의 429)은 `RATE_LIMIT_UNCOUNTED_ATTEMPTS`번까지
 실패 한도에 세지 않는다.
 
 **저장소(repository) 형식은 GitHub에서 직접 읽는다** — 공개가 아니거나 clone이
@@ -70,6 +72,7 @@ from core.llm_scoring import (
     LLMAdapterPermanentError,
     LLMAdapterQuotaExhaustedError,
     LLMAdapterRateLimitedError,
+    LLMAdapterUnreachableError,
     LLMKeyCheckStatus,
     LLMScoringAdapter,
     OpenAIScoringAdapter,
@@ -123,10 +126,11 @@ CLASSROOM_SCORING_VENDOR_TIMEOUT_SECONDS = 180
 #: 때(그 시도는 이 창이 지난 뒤 다시 줍힌다)뿐이다.
 SCORING_QUEUE_WINDOW = timedelta(minutes=5)
 
-#: 크레딧이 바닥난 클래스를 다시 쳐 보는 간격(#586). 그동안 그 클래스의 시도는 스캔 후보가
-#: 아니다. 간격이 지나면 대기 시도 **하나**만 벤더를 부른다(`_claim_quota_recheck`) — 다시
-#: 확인도 강사 키로 나가는 채점 호출이라, 클래스마다 10분에 한 번을 넘지 않는다. 충전 직후
-#: 바로 잇고 싶은 소유자는 키를 다시 저장하면 된다(그 자리에서 풀린다).
+#: 크레딧이 바닥났거나 호환 서버에 닿지 않는 클래스를 다시 쳐 보는 간격(#586, #603). 그동안
+#: 그 클래스의 시도는 스캔 후보가 아니다. 간격이 지나면 대기 시도 **하나**만 벤더를 부른다
+#: (`_claim_pause_recheck`) — 다시 확인도 강사 연결로 나가는 채점 호출이라, 클래스마다 10분에
+#: 한 번을 넘지 않는다. 충전하거나 서버를 고친 직후 바로 잇고 싶은 소유자는 연결을 다시
+#: 저장하면 된다(그 자리에서 풀린다).
 QUOTA_RECHECK_INTERVAL = pending_scoring.QUOTA_RECHECK_INTERVAL
 
 #: 요청 빈도 제한(429 `rate_limit_exceeded`)으로 실패한 시도를 실패 한도에 세지 않는 횟수
@@ -483,45 +487,69 @@ def _mark_scoring_key_rejected(class_obj: Class) -> None:
         )
 
 
-def _mark_scoring_quota_exhausted(class_obj: Class) -> None:
-    """벤더가 이 클래스 키의 크레딧이 바닥났다고 답했다(#586) — 그 시각을 남기고, **새로
-    멈춘 순간에만** 소유자에게 알린다(`_mark_scoring_key_rejected`와 같은 규율). 이미 멈춰
-    있으면(다시 확인한 시도가 또 소진을 받았으면) 시각만 밀어 다음 확인을 간격만큼 미룬다.
-    수신자는 소유자(`Class.instructor`)뿐이다 — 크레딧은 소유자의 비용이다(ADR-0055)."""
+#: 채점을 멈추게 하는 두 시각(#586, #603) — 크레딧 소진·호환 서버 연결 불가. 둘 다 같은
+#: 모양으로 멈추고, 같은 간격으로 다시 쳐 보고, 다시 확인한 시도가 채점되면 함께 풀린다.
+QUOTA_EXHAUSTED_AT = "scoring_quota_exhausted_at"
+SERVER_UNREACHABLE_AT = "scoring_server_unreachable_at"
+PAUSE_FIELDS = (QUOTA_EXHAUSTED_AT, SERVER_UNREACHABLE_AT)
 
-    newly_exhausted = False
+_PAUSE_NOTIFICATIONS = {
+    QUOTA_EXHAUSTED_AT: NotificationType.CLASSROOM_SCORING_QUOTA_EXHAUSTED,
+    SERVER_UNREACHABLE_AT: NotificationType.CLASSROOM_SCORING_SERVER_UNREACHABLE,
+}
+
+
+def _mark_scoring_paused(class_obj: Class, field: str) -> None:
+    """이 클래스의 채점을 멈춘다 — 벤더가 크레딧이 바닥났다고 답했거나(#586) 호환 서버에 닿지
+    않았다(#603). 그 시각을 남기고, **새로 멈춘 순간에만** 소유자에게 알린다
+    (`_mark_scoring_key_rejected`와 같은 규율). 이미 멈춰 있으면(다시 확인한 시도가 또 같은
+    답을 받았으면) 시각만 밀어 다음 확인을 간격만큼 미룬다. 수신자는 소유자(`Class.instructor`)
+    뿐이다 — 크레딧도 서버도 소유자의 것이다(ADR-0055).
+
+    크레딧 소진은 서버에 닿았다는 뜻이기도 하다 — 그때는 연결 불가 시각을 지운다."""
+
+    newly_paused = False
     with transaction.atomic():
         locked = Class.objects.select_for_update().get(pk=class_obj.pk)
-        newly_exhausted = locked.scoring_quota_exhausted_at is None
-        locked.scoring_quota_exhausted_at = Clock.now()
-        locked.save(update_fields=["scoring_quota_exhausted_at"])
+        newly_paused = getattr(locked, field) is None
+        setattr(locked, field, Clock.now())
+        update_fields = [field]
+        if field == QUOTA_EXHAUSTED_AT and locked.scoring_server_unreachable_at is not None:
+            locked.scoring_server_unreachable_at = None
+            update_fields.append(SERVER_UNREACHABLE_AT)
+        locked.save(update_fields=update_fields)
 
-    if newly_exhausted:
+    if newly_paused:
         notify_safely(
             recipient=locked.instructor,
-            notification_type=NotificationType.CLASSROOM_SCORING_QUOTA_EXHAUSTED,
+            notification_type=_PAUSE_NOTIFICATIONS[field],
             context={"class_id": locked.id, "class_name": locked.name},
         )
 
 
-def _claim_quota_recheck(class_id: int, *, as_of) -> bool:
-    """크레딧이 바닥난 클래스를 이 시도로 다시 쳐 볼 차례를 잡는다(#586). 마지막 소진 시각이
-    `QUOTA_RECHECK_INTERVAL` 보다 오래됐을 때만 이기고, 이긴 쪽이 그 시각을 지금으로 민다 —
-    조건부 UPDATE 하나라 같은 클래스의 태스크 여럿 중 하나만 벤더를 부른다. 행 잠금을
-    채점(벤더 대기) 동안 쥐지 않도록 채점 트랜잭션 밖에서 부른다."""
+def _claim_pause_recheck(class_obj: Class, *, as_of) -> bool:
+    """멈춘 클래스(크레딧 소진·서버 연결 불가)를 이 시도로 다시 쳐 볼 차례를 잡는다(#586,
+    #603). 찍힌 시각이 모두 `QUOTA_RECHECK_INTERVAL` 보다 오래됐을 때만 이기고, 이긴 쪽이 그
+    시각들을 지금으로 민다 — 조건부 UPDATE 하나라 같은 클래스의 태스크 여럿 중 하나만 벤더를
+    부른다. 행 잠금을 채점(벤더 대기) 동안 쥐지 않도록 채점 트랜잭션 밖에서 부른다."""
 
+    paused = [field for field in PAUSE_FIELDS if getattr(class_obj, field) is not None]
+    if not paused:
+        return False
+    due = as_of - QUOTA_RECHECK_INTERVAL
     return bool(
-        Class.objects.filter(
-            pk=class_id, scoring_quota_exhausted_at__lte=as_of - QUOTA_RECHECK_INTERVAL
-        ).update(scoring_quota_exhausted_at=as_of)
+        Class.objects.filter(pk=class_obj.pk, **{f"{field}__lte": due for field in paused}).update(
+            **{field: as_of for field in paused}
+        )
     )
 
 
-def _clear_scoring_quota_exhausted(class_obj: Class) -> None:
-    """다시 확인한 시도가 채점됐다 — 크레딧이 돌아왔다(#586). 쌓인 시도는 다음 tick 부터
-    후보에 다시 든다. 알림은 없다 — 시도마다 가는 채점 완료 알림이 그 사실을 말한다."""
+def _clear_scoring_pause(class_obj: Class) -> None:
+    """다시 확인한 시도가 채점됐다 — 크레딧이 돌아왔고 서버에도 닿는다(#586, #603). 쌓인
+    시도는 다음 tick 부터 후보에 다시 든다. 알림은 없다 — 시도마다 가는 채점 완료 알림이 그
+    사실을 말한다."""
 
-    Class.objects.filter(pk=class_obj.pk).update(scoring_quota_exhausted_at=None)
+    Class.objects.filter(pk=class_obj.pk).update(**{field: None for field in PAUSE_FIELDS})
 
 
 def _record_rate_limited(
@@ -652,13 +680,14 @@ def _record_failure_and_finalize(
 
 
 def score_classroom_submission_once(
-    submission: ClassroomSubmission, *, quota_recheck: bool = False
+    submission: ClassroomSubmission, *, pause_recheck: bool = False
 ) -> dict:
     """이 시도를 정확히 한 번만 채점한다. 이미 `ClassroomScore`가 있으면 그대로
     돌아온다 — 재채점 코드 경로는 없다(ADR-0006).
 
-    `quota_recheck`는 크레딧이 바닥난 클래스를 이 시도로 다시 쳐 볼 차례를 잡았다는 뜻이다
-    (`_claim_quota_recheck`, #586) — 그때만 크레딧 소진을 막는 사유로 보지 않는다.
+    `pause_recheck`는 멈춘 클래스(크레딧 소진·서버 연결 불가)를 이 시도로 다시 쳐 볼 차례를
+    잡았다는 뜻이다(`_claim_pause_recheck`, #586, #603) — 그때만 그 멈춤을 막는 사유로 보지
+    않는다.
 
     `scoring.services.score_submission_once`처럼 예외를 밖으로 던지지 않는다 —
     모든 실패는 `ClassroomScoringAttempt`에 남고 상태 문자열로 돌아온다."""
@@ -684,7 +713,7 @@ def score_classroom_submission_once(
     # 될 수 있다(#434).
     problem = Problem.objects.select_related("classroom").get(pk=problem.pk)
     class_obj = problem.classroom
-    reason = pending_scoring.blocking_reason(class_obj, problem, ignore_quota=quota_recheck)
+    reason = pending_scoring.blocking_reason(class_obj, problem, ignore_pause=pause_recheck)
     if reason == pending_scoring.NO_API_KEY:
         # 시도로 남기지 않고 조용히 건너뛴다("아직 시도하지 않았다"는 사실
         # 그대로, 「실패했다」가 아니다) — 화면의 `pending_reason`과 같은
@@ -811,8 +840,14 @@ def score_classroom_submission_once(
         # 키의 크레딧이 바닥났다(#586) — 소유자의 계정 문제이지 이 제출물의 결함이 아니다.
         # key_rejected 와 같은 규율로 ClassroomScoringAttempt 를 남기지 않는다(실패 한도에
         # 닿지 않는다). 그 클래스는 다시 확인 간격 동안 스캔 후보에서 빠진다.
-        _mark_scoring_quota_exhausted(class_obj)
+        _mark_scoring_paused(class_obj, QUOTA_EXHAUSTED_AT)
         return {"submission_id": submission.id, "status": "quota_exhausted"}
+    except LLMAdapterUnreachableError:
+        # 호환 서버에 닿지 않았다(#603) — 이름·연결·인증서·막힌 주소·리다이렉트. 소유자의 서버
+        # 문제이지 이 제출물의 결함이 아니다 — 크레딧 소진과 같은 자리로 멈춘다. 닿았는데 늦거나
+        # 몸통이 깨진 것은 이 예외가 아니라 아래 `LLMAdapterError`(실패 시도)로 간다.
+        _mark_scoring_paused(class_obj, SERVER_UNREACHABLE_AT)
+        return {"submission_id": submission.id, "status": "server_unreachable"}
     except LLMAdapterRateLimitedError as exc:
         return _record_rate_limited(submission, checklist_items, error=str(exc))
     except LLMAdapterPermanentError as exc:
@@ -829,8 +864,8 @@ def score_classroom_submission_once(
         )
 
     _record_token_usage(class_obj, output.total_tokens)
-    if quota_recheck:
-        _clear_scoring_quota_exhausted(class_obj)
+    if pause_recheck:
+        _clear_scoring_pause(class_obj)
 
     reasoning = [
         {"checklist_item_id": v.requirement_id, "is_met": v.is_met, "reasoning": v.reasoning}
@@ -925,7 +960,7 @@ def _score_one(submission, as_of, ctx):
             if locked is None:
                 return None
             return score_classroom_submission_once(
-                locked, quota_recheck=ctx.get("quota_recheck", False)
+                locked, pause_recheck=ctx.get("pause_recheck", False)
             )
     except Exception as exc:  # noqa: BLE001 - 한 행의 실패가 나머지 배치를 막으면 안 된다.
         logger.exception(
@@ -977,12 +1012,13 @@ def score_classroom_attempt(submission_id: int) -> dict:
             class_id=class_obj.pk,
             problem_id=submission.problem_id,
         )
-        if class_obj.scoring_quota_exhausted_at is not None:
-            # 크레딧이 바닥난 클래스가 다시 확인 간격을 넘겨 후보에 들었다(#586) — 같은 클래스의
-            # 시도 중 하나만 벤더를 부른다. 진 쪽은 시도로 남기지 않고 건너뛴다.
-            ctx["quota_recheck"] = _claim_quota_recheck(class_obj.pk, as_of=as_of)
-        if class_obj.scoring_quota_exhausted_at is not None and not ctx["quota_recheck"]:
-            result = {"submission_id": submission_id, "status": "quota_exhausted"}
+        if class_obj.scoring_paused():
+            # 멈춘 클래스(크레딧 소진·서버 연결 불가)가 다시 확인 간격을 넘겨 후보에 들었다
+            # (#586, #603) — 같은 클래스의 시도 중 하나만 벤더를 부른다. 진 쪽은 시도로 남기지
+            # 않고 건너뛴다.
+            ctx["pause_recheck"] = _claim_pause_recheck(class_obj, as_of=as_of)
+        if class_obj.scoring_paused() and not ctx["pause_recheck"]:
+            result = {"submission_id": submission_id, "status": "scoring_paused"}
         else:
             result = _score_one(submission, as_of, ctx)
             if result is None:
