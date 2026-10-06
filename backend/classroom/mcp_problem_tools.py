@@ -11,6 +11,10 @@
 **전부 쓰기 도구다**(`read_only=False`) — 디스패치가 성공한 호출마다 `ConnectedAppWrite`
 한 줄을 남긴다(`classroom.mcp_tool` docstring). 되돌릴 수 있는 쓰기라 `destructiveHint`
 는 붙이지 않는다. 문제 삭제는 두 단계 확인 도구라 `classroom.mcp_destructive_tools` 에 있다(#515).
+
+**결과는 할 일에 맞는 크기다**(#579). 상태 바꾸기는 번호·제목·새 상태·다음 전이만, 체크리스트
+도구는 바뀐 항목과 그 문제의 항목 목록만, 만들기·고치기·복사는 설명·채점 지침 원문을 뺀 요약을
+돌려준다 — 설명 마크다운이 호출마다 대화에 다시 실리지 않도록. 원문은 `get_problem` 이 준다.
 """
 
 from __future__ import annotations
@@ -75,26 +79,52 @@ def _item_out(item: ChecklistItem) -> dict:
     return {"id": item.id, "label": item.label, "required": item.required, "order": item.order}
 
 
+def _transitions_out(problem: Problem, class_obj: Class) -> list[dict]:
+    return [
+        {"name": t.name, "to_state": t.to_state, "blocked_reason": t.blocked_reason}
+        for t in available_transitions(problem, class_obj)
+    ]
+
+
+def _items_out(problem: Problem) -> list[dict]:
+    return [_item_out(item) for item in problem.checklist_items.all()]
+
+
 def _problem_out(problem: Problem, class_obj: Class) -> dict:
+    """만들기·고치기·복사의 결과 — 문제 요약. **설명·채점 지침 원문은 싣지 않는다**(#579):
+    방금 앱이 보낸 글을 그대로 되돌려 대화를 채울 이유가 없고, 원문은 `get_problem` 이 준다."""
+
     return {
         "id": problem.id,
         "class_id": problem.classroom_id,
         "title": problem.title,
-        "description": problem.description,
         "status": problem.status,
         "order": problem.order,
         "submission_formats": list(problem.submission_formats),
         "grading_strictness": problem.grading_strictness,
-        "grading_guideline_text": problem.grading_guideline_text,
         "model": problem.model,
         "reasoning_effort": problem.reasoning_effort,
         "syntax_check_enabled": problem.syntax_check_enabled,
-        "checklist_items": [_item_out(item) for item in problem.checklist_items.all()],
-        "available_transitions": [
-            {"name": t.name, "to_state": t.to_state, "blocked_reason": t.blocked_reason}
-            for t in available_transitions(problem, class_obj)
-        ],
+        "checklist_items": _items_out(problem),
+        "available_transitions": _transitions_out(problem, class_obj),
     }
+
+
+def _transition_out(problem: Problem, class_obj: Class) -> dict:
+    """상태 바꾸기의 결과 — 번호·제목·새 상태와 다음에 할 수 있는 상태 바꾸기만(#579)."""
+
+    return {
+        "id": problem.id,
+        "title": problem.title,
+        "status": problem.status,
+        "available_transitions": _transitions_out(problem, class_obj),
+    }
+
+
+def _checklist_out(problem: Problem) -> dict:
+    """체크리스트 도구의 결과에 붙는 그 문제의 항목 목록(#579) — 설명·채점 설정은 빠진다."""
+
+    return {"problem_id": problem.id, "checklist_items": _items_out(problem)}
 
 
 # --- 스키마 조각 ------------------------------------------------------------------
@@ -154,57 +184,72 @@ _ITEM_OUT = {
     },
     "required": ["id", "label", "required", "order"],
 }
+_STATUS_OUT = {
+    "type": "string",
+    "enum": [v for v, _ in Problem.Status.choices],
+    "description": "draft(초안, 참여자에게 안 보임)·open(열림)·hidden(숨김)",
+}
+_TRANSITIONS_OUT = {
+    "type": "array",
+    "description": "지금 부를 수 있는 상태 바꾸기. blocked_reason 이 있으면 막혀 있다(archived·no_required_item).",
+    "items": {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "enum": list(PROBLEM_TRANSITIONS)},
+            "to_state": {"type": "string"},
+            "blocked_reason": {"type": ["string", "null"]},
+        },
+        "required": ["name", "to_state", "blocked_reason"],
+    },
+}
 _PROBLEM_OUT = {
     "type": "object",
-    "description": "문제 하나 — 화면의 문제 편집과 같은 값",
+    "description": "문제 요약 — 설명·채점 지침 원문은 싣지 않는다. 원문은 get_problem 으로 읽는다.",
     "properties": {
         "id": {"type": "integer", "description": "문제 번호"},
         "class_id": {"type": "integer", "description": "클래스 번호"},
         "title": {"type": "string"},
-        "description": {"type": "string"},
-        "status": {
-            "type": "string",
-            "enum": [v for v, _ in Problem.Status.choices],
-            "description": "draft(초안, 참여자에게 안 보임)·open(열림)·hidden(숨김)",
-        },
+        "status": _STATUS_OUT,
         "order": {"type": "integer", "description": "클래스 안의 순서(0부터)"},
         "submission_formats": {"type": "array", "items": {"type": "string"}},
         "grading_strictness": {"type": "string"},
-        "grading_guideline_text": {"type": "string"},
         "model": {"type": "string"},
         "reasoning_effort": {"type": "string"},
         "syntax_check_enabled": {"type": "boolean"},
         "checklist_items": {"type": "array", "items": _ITEM_OUT},
-        "available_transitions": {
-            "type": "array",
-            "description": "지금 부를 수 있는 상태 바꾸기. blocked_reason 이 있으면 막혀 있다(archived·no_required_item).",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string", "enum": list(PROBLEM_TRANSITIONS)},
-                    "to_state": {"type": "string"},
-                    "blocked_reason": {"type": ["string", "null"]},
-                },
-                "required": ["name", "to_state", "blocked_reason"],
-            },
-        },
+        "available_transitions": _TRANSITIONS_OUT,
     },
     "required": [
         "id",
         "class_id",
         "title",
-        "description",
         "status",
         "order",
         "submission_formats",
         "grading_strictness",
-        "grading_guideline_text",
         "model",
         "reasoning_effort",
         "syntax_check_enabled",
         "checklist_items",
         "available_transitions",
     ],
+    "additionalProperties": False,
+}
+_TRANSITION_OUT = {
+    "type": "object",
+    "description": "상태를 바꾼 문제 — 번호·제목·새 상태·다음에 할 수 있는 상태 바꾸기",
+    "properties": {
+        "id": {"type": "integer", "description": "문제 번호"},
+        "title": {"type": "string"},
+        "status": _STATUS_OUT,
+        "available_transitions": _TRANSITIONS_OUT,
+    },
+    "required": ["id", "title", "status", "available_transitions"],
+    "additionalProperties": False,
+}
+_CHECKLIST_OUT = {
+    "problem_id": {"type": "integer", "description": "문제 번호"},
+    "checklist_items": {"type": "array", "items": _ITEM_OUT, "description": "그 문제의 체크리스트 항목 전부, 순서대로"},
 }
 
 
@@ -213,7 +258,13 @@ def _object(properties: dict, required: list[str]) -> dict:
 
 
 _PROBLEM_RESULT = _object({"problem": _PROBLEM_OUT}, ["problem"])
-_ITEM_RESULT = _object({"item": _ITEM_OUT, "problem": _PROBLEM_OUT}, ["item", "problem"])
+_TRANSITION_RESULT = _object({"problem": _TRANSITION_OUT}, ["problem"])
+_ITEM_RESULT = _object({"item": _ITEM_OUT, **_CHECKLIST_OUT}, ["item", *_CHECKLIST_OUT])
+_CHECKLIST_RESULT = _object(_CHECKLIST_OUT, list(_CHECKLIST_OUT))
+_DELETED_ITEM_RESULT = _object(
+    {"deleted_item_id": {"type": "integer", "description": "지운 항목 번호"}, **_CHECKLIST_OUT},
+    ["deleted_item_id", *_CHECKLIST_OUT],
+)
 
 # --- 문제 ----------------------------------------------------------------------
 
@@ -301,7 +352,7 @@ def _transition_handler(name: str):
         )
         problem = execute_transition(name, scope.problem)
         return WriteResult(
-            structured={"problem": _problem_out(problem, scope.class_obj)},
+            structured={"problem": _transition_out(problem, scope.class_obj)},
             class_id=scope.class_obj.id,
             problem_id=problem.id,
             summary=f"「{problem.title}」",
@@ -390,7 +441,7 @@ def _add_checklist_item(grant: ConnectedApp, arguments: dict) -> WriteResult:
     )
     item = problem_authoring.add_checklist_item(scope.problem, payload)
     return WriteResult(
-        structured={"item": _item_out(item), "problem": _problem_out(scope.problem, scope.class_obj)},
+        structured={"item": _item_out(item), **_checklist_out(scope.problem)},
         class_id=scope.class_obj.id,
         problem_id=scope.problem.id,
         summary=f"항목 {item.id} 「{item.label}」",
@@ -417,7 +468,7 @@ def _update_checklist_item(grant: ConnectedApp, arguments: dict) -> WriteResult:
     )
     item = problem_authoring.update_checklist_item(scope.problem, _id(arguments, "item_id"), payload)
     return WriteResult(
-        structured={"item": _item_out(item), "problem": _problem_out(scope.problem, scope.class_obj)},
+        structured={"item": _item_out(item), **_checklist_out(scope.problem)},
         class_id=scope.class_obj.id,
         problem_id=scope.problem.id,
         summary=f"항목 {item.id} 「{item.label}」 — 고친 칸: {', '.join(sorted(payload.model_fields_set)) or '없음'}",
@@ -437,7 +488,7 @@ def _delete_checklist_item(grant: ConnectedApp, arguments: dict) -> WriteResult:
     )
     item = problem_authoring.delete_checklist_item(scope.problem, _id(arguments, "item_id"))
     return WriteResult(
-        structured={"deleted_item_id": item.id, "problem": _problem_out(scope.problem, scope.class_obj)},
+        structured={"deleted_item_id": item.id, **_checklist_out(scope.problem)},
         class_id=scope.class_obj.id,
         problem_id=scope.problem.id,
         summary=f"항목 {item.id} 「{item.label}」",
@@ -466,7 +517,7 @@ def _reorder_checklist_items(grant: ConnectedApp, arguments: dict) -> WriteResul
     )
     ordered = problem_authoring.reorder_checklist_items(scope.problem, item_ids)
     return WriteResult(
-        structured={"problem": _problem_out(scope.problem, scope.class_obj)},
+        structured=_checklist_out(scope.problem),
         class_id=scope.class_obj.id,
         problem_id=scope.problem.id,
         summary="새 순서: " + ", ".join(str(i.id) for i in ordered),
@@ -476,6 +527,9 @@ def _reorder_checklist_items(grant: ConnectedApp, arguments: dict) -> WriteResul
 # --- 등록 ----------------------------------------------------------------------
 
 _ARCHIVED_NOTE = "보관된 클래스에서는 할 수 없다."
+_SUMMARY_NOTE = "결과는 문제 요약이다 — 설명·채점 지침 원문은 싣지 않으니 원문은 get_problem 으로 읽는다."
+_CHECKLIST_NOTE = "결과는 바뀐 항목과 그 문제의 항목 목록이다."
+_TRANSITION_NOTE = "결과는 문제의 번호·제목·새 상태와 다음에 할 수 있는 상태 바꾸기다."
 
 PROBLEM_TOOLS: list[Tool] = [
     Tool(
@@ -484,7 +538,7 @@ PROBLEM_TOOLS: list[Tool] = [
         description=(
             "클래스에 문제를 하나 만든다 — 제목·설명·제출 형식·체크리스트·채점 설정을 한 번에. "
             "기본은 초안(참여자에게 안 보임)이고, open 을 참으로 주면 바로 연다(필수 체크리스트 항목이 "
-            f"하나 이상 있어야 한다). 새 문제는 클래스의 맨 뒤에 붙는다. {_ARCHIVED_NOTE}"
+            f"하나 이상 있어야 한다). 새 문제는 클래스의 맨 뒤에 붙는다. {_ARCHIVED_NOTE} {_SUMMARY_NOTE}"
         ),
         input_schema=_CREATE_PROBLEM_INPUT,
         output_schema=_PROBLEM_RESULT,
@@ -497,7 +551,7 @@ PROBLEM_TOOLS: list[Tool] = [
         description=(
             "문제의 제목·설명·제출 형식·채점 모델·추론 강도·채점 지침·문법 검사를 고친다. 보낸 칸만 "
             "바뀌고 보내지 않은 칸은 그대로다. 체크리스트는 체크리스트 도구로 고친다. "
-            f"{_ARCHIVED_NOTE}"
+            f"{_ARCHIVED_NOTE} {_SUMMARY_NOTE}"
         ),
         input_schema=_UPDATE_PROBLEM_INPUT,
         output_schema=_PROBLEM_RESULT,
@@ -507,7 +561,7 @@ PROBLEM_TOOLS: list[Tool] = [
     Tool(
         name="add_checklist_item",
         title="체크리스트 항목 더하기",
-        description=f"문제의 체크리스트 맨 뒤에 항목을 하나 더한다. {_ARCHIVED_NOTE}",
+        description=f"문제의 체크리스트 맨 뒤에 항목을 하나 더한다. {_ARCHIVED_NOTE} {_CHECKLIST_NOTE}",
         input_schema=_ADD_ITEM_INPUT,
         output_schema=_ITEM_RESULT,
         read_only=False,
@@ -518,7 +572,7 @@ PROBLEM_TOOLS: list[Tool] = [
         title="체크리스트 항목 고치기",
         description=(
             "체크리스트 항목의 문장이나 필수 여부를 고친다. 열린·숨긴 문제의 마지막 필수 항목은 필수를 "
-            f"풀 수 없다. {_ARCHIVED_NOTE}"
+            f"풀 수 없다. {_ARCHIVED_NOTE} {_CHECKLIST_NOTE}"
         ),
         input_schema=_UPDATE_ITEM_INPUT,
         output_schema=_ITEM_RESULT,
@@ -530,21 +584,22 @@ PROBLEM_TOOLS: list[Tool] = [
         title="체크리스트 항목 지우기",
         description=(
             "체크리스트 항목을 하나 지운다. 열린·숨긴 문제의 마지막 필수 항목은 지울 수 없다. "
-            f"{_ARCHIVED_NOTE}"
+            f"{_ARCHIVED_NOTE} 결과는 지운 항목 번호와 남은 항목 목록이다."
         ),
         input_schema=_DELETE_ITEM_INPUT,
-        output_schema=_object(
-            {"deleted_item_id": {"type": "integer"}, "problem": _PROBLEM_OUT}, ["deleted_item_id", "problem"]
-        ),
+        output_schema=_DELETED_ITEM_RESULT,
         read_only=False,
         handler=_delete_checklist_item,
     ),
     Tool(
         name="reorder_checklist_items",
         title="체크리스트 순서 바꾸기",
-        description=f"문제의 체크리스트 항목 순서를 바꾼다. 항목 번호 전부를 새 순서로 보낸다. {_ARCHIVED_NOTE}",
+        description=(
+            "문제의 체크리스트 항목 순서를 바꾼다. 항목 번호 전부를 새 순서로 보낸다. "
+            f"{_ARCHIVED_NOTE} 결과는 새 순서의 항목 목록이다."
+        ),
         input_schema=_REORDER_ITEMS_INPUT,
-        output_schema=_PROBLEM_RESULT,
+        output_schema=_CHECKLIST_RESULT,
         read_only=False,
         handler=_reorder_checklist_items,
         idempotent=True,
@@ -554,10 +609,10 @@ PROBLEM_TOOLS: list[Tool] = [
         title="문제 열기",
         description=(
             "초안인 문제를 열어 참여자에게 보이고 제출을 받는다. 필수 체크리스트 항목이 하나 이상 "
-            f"있어야 한다. {_ARCHIVED_NOTE}"
+            f"있어야 한다. {_ARCHIVED_NOTE} {_TRANSITION_NOTE}"
         ),
         input_schema=_PROBLEM_REF_INPUT,
-        output_schema=_PROBLEM_RESULT,
+        output_schema=_TRANSITION_RESULT,
         read_only=False,
         handler=_transition_handler("open"),
     ),
@@ -566,10 +621,10 @@ PROBLEM_TOOLS: list[Tool] = [
         title="문제 숨기기",
         description=(
             "열린 문제를 참여자에게서 거둔다. 지난 시도와 통과는 그대로 남고, 다시 열 수 있다. "
-            f"{_ARCHIVED_NOTE}"
+            f"{_ARCHIVED_NOTE} {_TRANSITION_NOTE}"
         ),
         input_schema=_PROBLEM_REF_INPUT,
-        output_schema=_PROBLEM_RESULT,
+        output_schema=_TRANSITION_RESULT,
         read_only=False,
         handler=_transition_handler("hide"),
     ),
@@ -578,10 +633,10 @@ PROBLEM_TOOLS: list[Tool] = [
         title="문제 다시 열기",
         description=(
             "숨긴 문제를 다시 연다. 필수 체크리스트 항목이 하나 이상 있어야 한다. "
-            f"{_ARCHIVED_NOTE}"
+            f"{_ARCHIVED_NOTE} {_TRANSITION_NOTE}"
         ),
         input_schema=_PROBLEM_REF_INPUT,
-        output_schema=_PROBLEM_RESULT,
+        output_schema=_TRANSITION_RESULT,
         read_only=False,
         handler=_transition_handler("reopen"),
     ),
@@ -620,7 +675,8 @@ PROBLEM_TOOLS: list[Tool] = [
         title="문제를 다른 클래스로 복사",
         description=(
             "문제 하나를 체크리스트·채점 설정과 함께 내 다른 클래스로 복사한다. 복사본은 언제나 초안으로 "
-            "그 클래스의 맨 뒤에 붙는다. 참여자의 시도는 따라가지 않는다. 보관된 클래스로는 복사할 수 없다."
+            "그 클래스의 맨 뒤에 붙는다. 참여자의 시도는 따라가지 않는다. 보관된 클래스로는 복사할 수 없다. "
+            f"{_SUMMARY_NOTE}"
         ),
         input_schema=_COPY_PROBLEM_INPUT,
         output_schema=_PROBLEM_RESULT,

@@ -6,10 +6,12 @@
 똑같이 「없다」다 — 값은 `classroom.api` 의 직렬화 함수가 만든다. 무엇이 보이는가를
 두 표면이 따로 정하지 않는다.
 
-**화면과 다른 것은 하나다**: 클래스 상세에서 OpenAI 키의 가린 표시
+**화면과 다른 것은 둘이다.** 클래스 상세에서 OpenAI 키의 가린 표시
 (`openai_key_masked`, 끝 네 자리)를 뺀다. 연결된 앱이 보는 것은 「키가 있는가」와 그
 상태뿐이다(#511 「OpenAI 키」) — 키의 어느 조각도 대화 기록과 AI 업체로 가지 않는다.
-이메일은 화면 응답에도 없다(참여자는 클래스에서 불릴 이름으로만 나온다).
+이메일은 화면 응답에도 없다(참여자는 클래스에서 불릴 이름으로만 나온다). 그리고 문제 목록은
+화면의 한 줄에서 **요약 칸만 옮긴다**(#579) — 설명·체크리스트 원문은 `get_problem` 이 준다.
+값은 여전히 화면의 직렬화 함수가 만들고, 이 모듈은 칸을 고르기만 한다.
 
 **읽기는 아무것도 남기지 않는다**(ADR-0040). 이 모듈의 처리기는 질의만 한다 —
 `tests/test_classroom_mcp_read_tools.py` 가 호출 앞뒤의 모든 테이블 행 수가 같음을 고정한다.
@@ -74,9 +76,34 @@ def _get_class(grant: ConnectedApp, arguments: dict) -> dict:
     return class_view(class_obj, grant.instructor_id)
 
 
+#: 문제 목록이 화면의 문제 한 줄에서 그대로 옮겨 싣는 칸(#579). 설명·채점 지침·체크리스트
+#: 원문은 빠지고 항목 수(`checklist_item_count`)가 더해진다 — 문제 열다섯 개 클래스의 목록이
+#: 수십 KB 가 되지 않도록. 원문은 `get_problem` 이 준다.
+_LIST_PROBLEM_FIELDS = (
+    "id",
+    "title",
+    "status",
+    "order",
+    "submission_formats",
+    "scoring_model_rejected",
+    "passed_count",
+    "member_count",
+    "pass_rate",
+    "deletable",
+    "available_transitions",
+)
+
+
+def _problem_summary(screen: dict) -> dict:
+    return {
+        **{key: screen[key] for key in _LIST_PROBLEM_FIELDS},
+        "checklist_item_count": len(screen["checklist_items"]),
+    }
+
+
 def _list_problems(grant: ConnectedApp, arguments: dict) -> dict:
     class_obj = class_scope(_class_id(arguments), grant.instructor_id, write=False, owner=False).class_obj
-    return {"problems": _as_screen_json(_serialize_problem_list(class_obj))}
+    return {"problems": [_problem_summary(p) for p in _as_screen_json(_serialize_problem_list(class_obj))]}
 
 
 def _get_problem(grant: ConnectedApp, arguments: dict) -> dict:
@@ -211,6 +238,17 @@ _PROBLEM_OBJECT = {
     "required": ["id", "classroom_id", "title", "description", "submission_formats", "status", "checklist_items"],
 }
 
+_PROBLEM_SUMMARY_OBJECT = {
+    "type": "object",
+    "description": "문제 요약 — 설명·채점 설정·체크리스트는 get_problem 으로 읽는다",
+    "properties": {
+        **{key: _PROBLEM_OBJECT["properties"][key] for key in _LIST_PROBLEM_FIELDS},
+        "checklist_item_count": {**_COUNT, "description": "체크리스트 항목 수"},
+    },
+    "required": [*_LIST_PROBLEM_FIELDS, "checklist_item_count"],
+    "additionalProperties": False,
+}
+
 _PARTICIPANT_OBJECT = {
     "type": "object",
     "properties": {
@@ -275,14 +313,14 @@ READ_TOOL_SPECS: list[dict] = [
         "name": "list_problems",
         "title": "문제 목록",
         "description": (
-            "클래스의 문제 전부를 순서대로 돌려준다 — 초안·열림·숨김 모두. 문제마다 설명, 체크리스트, "
-            "채점 설정(모델·추론 강도·채점 지침·문법 검사), 받는 제출 형식, 상태와 지금 할 수 있는 상태 "
-            "바꾸기, 달성률, 지울 수 있는가를 담는다."
+            "클래스의 문제 전부를 순서대로 돌려준다 — 초안·열림·숨김 모두. 문제마다 요약만 담는다: 제목, "
+            "상태와 지금 할 수 있는 상태 바꾸기, 순서, 받는 제출 형식, 체크리스트 항목 수, 달성률, 채점 모델이 "
+            "거부됐는가, 지울 수 있는가. 설명·체크리스트·채점 설정은 담지 않으니 문제마다 get_problem 으로 읽는다."
         ),
         "input_schema": _CLASS_ONLY_INPUT,
         "output_schema": {
             "type": "object",
-            "properties": {"problems": {"type": "array", "items": _PROBLEM_OBJECT}},
+            "properties": {"problems": {"type": "array", "items": _PROBLEM_SUMMARY_OBJECT}},
             "required": ["problems"],
         },
         "handler": _list_problems,
@@ -291,8 +329,8 @@ READ_TOOL_SPECS: list[dict] = [
         "name": "get_problem",
         "title": "문제 상세",
         "description": (
-            "문제 하나를 돌려준다 — 문제 목록의 한 줄과 같은 모양이다(설명·체크리스트·채점 설정·상태·"
-            "제출 형식·달성률)."
+            "문제 하나의 상세를 돌려준다 — 설명(마크다운 원문)·체크리스트·채점 설정(모델·추론 강도·채점 "
+            "지침·문법 검사)·상태와 지금 할 수 있는 상태 바꾸기·제출 형식·달성률·지울 수 있는가."
         ),
         "input_schema": {
             "type": "object",

@@ -545,16 +545,16 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 | --- | --- |
 | `list_my_classes`(읽기) | 내가 강사인 클래스(소유한 것과 공동 강사인 것) — 이름·내 역할(`role`: owner·co_instructor, #566)·보관 여부·참여자 수(강사와 내보낸 사람 제외)·문제 수(열림·초안·숨김별). 강사 화면의 「내 클래스」와 같은 서비스 함수(`classroom.services.instructor_classes`)를 부른다 |
 | `get_class`(읽기, `class_id`) | 클래스 상세 — 화면의 `GET …/classes/{id}` 와 같은 값에서 OpenAI 키의 가린 표시(`openai_key_masked`)만 뺀다. 내 역할(`role`), 키는 있는가(`has_openai_key`)와 상태만, 예산·사용량·남은 양·기본 모델·가입 코드·보관 여부 |
-| `list_problems`(읽기, `class_id`) | 문제 전부(초안·열림·숨김) — 화면의 `GET …/problems` 와 같은 값(설명·체크리스트·채점 설정·제출 형식·상태와 할 수 있는 전이·달성률·지울 수 있는가) |
-| `get_problem`(읽기, `class_id`·`problem_id`) | 문제 하나 — 화면의 `GET …/problems/{id}` 와 같은 값 |
+| `list_problems`(읽기, `class_id`) | 문제 전부(초안·열림·숨김)의 **요약**(#579) — 화면의 `GET …/problems` 한 줄에서 제목·상태·할 수 있는 전이·순서·제출 형식·달성률(통과 수·참여자 수)·채점 모델 거부·지울 수 있는가만 옮기고 체크리스트 항목 수를 더한다. 설명·체크리스트·채점 설정은 싣지 않는다 — `get_problem` 으로 읽는다(도구 설명이 그렇게 말한다) |
+| `get_problem`(읽기, `class_id`·`problem_id`) | 문제 하나의 상세 — 화면의 `GET …/problems/{id}` 와 같은 값(설명 원문·체크리스트·채점 설정까지) |
 | `list_participants`(읽기, `class_id`) | 참여자 명단 — 화면의 `GET …/members` 와 같은 값(클래스에서 불릴 이름·가입 시각·내보냄·강사(소유자·공동 강사) 자리). 이메일 없음 |
 | `get_roster_grid`(읽기, `class_id`) | 명단 격자 — 화면의 `GET …/roster-grid` 와 같은 값(문제별 달성률 + 참여자 × 문제 칸의 통과 이력, 공모전 문제면 「공모전에도 냈다」 표시 #550) |
-| `create_problem`(쓰기) | 문제 만들기 — 설명·제출 형식·체크리스트·채점 설정을 한 번에, `open` 이면 바로 연다(#514) |
-| `update_problem`(쓰기) | 문제 고치기 — 보낸 칸만 바뀐다 |
-| `add_checklist_item` · `update_checklist_item` · `delete_checklist_item` · `reorder_checklist_items`(쓰기) | 체크리스트 항목 더하기·고치기·지우기·순서 바꾸기 |
-| `open_problem` · `hide_problem` · `reopen_problem`(쓰기) | 문제 열기·숨기기·다시 열기 — 전이 표(`classroom.problem_transitions`) 그대로 |
+| `create_problem`(쓰기) | 문제 만들기 — 설명·제출 형식·체크리스트·채점 설정을 한 번에, `open` 이면 바로 연다(#514). 결과는 문제 요약(번호·클래스·제목·상태·순서·제출 형식·채점 지침 단계·모델·추론 강도·문법 검사·체크리스트·할 수 있는 전이) — **설명·채점 지침 원문은 싣지 않는다**(#579) |
+| `update_problem`(쓰기) | 문제 고치기 — 보낸 칸만 바뀐다. 결과는 `create_problem` 과 같은 요약 |
+| `add_checklist_item` · `update_checklist_item` · `delete_checklist_item` · `reorder_checklist_items`(쓰기) | 체크리스트 항목 더하기·고치기·지우기·순서 바꾸기. 결과는 바뀐 항목(지우기면 지운 번호)과 그 문제의 항목 목록(`problem_id`·`checklist_items`)뿐 — 설명·채점 설정은 없다(#579) |
+| `open_problem` · `hide_problem` · `reopen_problem`(쓰기) | 문제 열기·숨기기·다시 열기 — 전이 표(`classroom.problem_transitions`) 그대로. 결과는 번호·제목·새 상태·할 수 있는 전이만(#579) |
 | `reorder_problems`(쓰기) | 문제 순서 바꾸기 |
-| `copy_problem`(쓰기) | 문제를 내 다른 클래스로 복사 — 복사본은 초안, 보관된 클래스에서 꺼내 갈 수는 있고 넣을 수는 없다 |
+| `copy_problem`(쓰기) | 문제를 내 다른 클래스로 복사 — 복사본은 초안, 보관된 클래스에서 꺼내 갈 수는 있고 넣을 수는 없다. 결과는 복사본의 요약(`create_problem` 과 같은 모양) |
 | `get_participant_report`(읽기, `class_id`·선택 `problem_id`) | 참여자 리포트 — 참여자(격자와 같은 범위, 강사(소유자·공동 강사) 자리·내보낸 참여자도 표시와 함께) × 문제마다 통과 이력(격자의 칸)·시도 수·마지막 제출 시각·최신 시도의 제출 번호와 판정(충족 항목 수, 항목별 근거 300자까지, 문법 검사). 문제 줄에는 체크리스트와 달성률. 숫자는 격자·문제별 제출 목록과 같은 함수에서 나온다. 공모전 문제의 칸에는 「공모전에도 냈다」(`contest_entry`: current·entered)와 지금 공모전 제출인 시도의 번호(#550) — 근거·공모전 점수·수상은 없다. 소스·이메일 없음 |
 | `open_submission_source`(읽기, `submission_id`) | 제출 소스 열기 — 내 클래스의 제출 하나. 소스(zip)는 텍스트 파일 내용을 파일당 20,000바이트·전체 120,000바이트까지, 목록은 500개까지 싣고 넘으면 `truncated` 로 잘렸다고 표시한다. 바이너리와 의존성·빌드 폴더·잠금 파일(채점 선별과 같은 판정)은 경로·크기만. 저장소 제출은 URL 과, 채점됐다면 채점 때 채점기가 본 소스(그 시도의 채점 프롬프트 「제출된 소스」 구획 — 저장소는 커밋을 박제하지 않아 이것이 유일한 사본이다). 남의 제출은 「제출을 찾을 수 없습니다」 |
 | `delete_problem`(쓰기·두 단계) | 문제 삭제 — 미리보기: 제목·상태·체크리스트 수·강사(소유자·공동 강사)의 시도 수(그 채점도 사라진다)·공개한 템플릿이 남는가. 참여자 시도(내보낸 사람 포함)가 있거나 보관된 클래스면 표 없이 화면 문장으로 거절(#515) |
@@ -567,8 +567,13 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 | `update_class_settings`(쓰기) | 클래스 설정 고치기 — 이름·강사로 불릴 이름·기본 채점 모델·기본 추론 강도·채점 토큰 예산·경고 임계 중 보낸 칸만. 보관된 클래스도 고친다. 예산 칸과 강사로 불릴 이름(소유자의 이름)은 소유자만 — 공동 강사가 보내면 아무것도 바뀌지 않고 거절된다(내 강사 이름은 아래 도구로). **키 칸이 없다** |
 | `rename_my_instructor_name`(쓰기, `class_id`·`display_name`) | 내 강사 이름 바꾸기(#576) — 부른 강사(소유자든 공동 강사든) **자기** 이 클래스에서 불릴 이름만. 화면의 `PATCH …/instructors/me` 와 같은 `co_instructors.rename_myself` 를 부르고, 다른 강사를 가리킬 인자가 없다. 보관된 클래스도 된다. 금칙어·빈 이름은 화면과 같은 문장으로 거절 |
 | `regenerate_join_link`(쓰기) | 가입 링크 다시 발급 — 이전 코드는 곧바로 죽는다. 보관된 클래스도 된다 |
-| `import_problem_template`(쓰기) | 공개된 문제 템플릿을 내 클래스의 초안 문제로 가져오기 — 보관된 클래스로는 안 된다 |
+| `import_problem_template`(쓰기) | 공개된 문제 템플릿을 내 클래스의 초안 문제로 가져오기 — 보관된 클래스로는 안 된다. 결과는 `create_problem` 과 같은 요약 |
 | `import_class_template`(쓰기) | 공개된 클래스 템플릿을 새 클래스로 가져오기 — 이름은 직접 정한다 |
+
+**응답은 할 일에 맞는 크기다**(#579). 원문(설명·채점 지침)은 `get_problem` 하나만 싣는다 — 상태
+하나를 바꾸거나 체크리스트 한 줄을 고칠 때마다 설명 마크다운이 대화에 다시 실리지 않도록. 모든
+도구의 실제 응답이 자기 `outputSchema` 를 만족하는지는 MCP 시험이 부르는 도구 호출마다 저절로
+검사된다(`tests/mcp_output_schema.py`).
 
 읽기 도구 다섯(#513)은 화면 라우트와 **같은 함수**를 부른다 — 범위는 `instructor_scope`
 (`write=False`)가, 값은 `classroom.api` 의 직렬화 함수가 정하고, 화면과 같은 인코더로 내보내

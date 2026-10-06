@@ -25,7 +25,16 @@ from __future__ import annotations
 
 from . import class_authoring, co_instructors
 from .instructor_scope import class_scope
-from .mcp_problem_tools import _PROBLEM_RESULT, _check_arguments, _id, _object, _parse, _problem_out, _without
+from .mcp_problem_tools import (
+    _PROBLEM_RESULT,
+    _SUMMARY_NOTE,
+    _check_arguments,
+    _id,
+    _object,
+    _parse,
+    _problem_out,
+    _without,
+)
 from .mcp_read_tools import CLASS_OUTPUT_SCHEMA, class_view
 from .mcp_tool import Tool, ToolInputError, WriteResult
 from .models import ConnectedApp
@@ -357,7 +366,8 @@ CLASS_TOOLS: list[Tool] = [
         title="문제 템플릿 가져오기",
         description=(
             "공개된 문제 템플릿을 내 클래스의 새 문제로 가져온다 — 초안으로 맨 뒤에 붙고, 체크리스트가 순서 "
-            "그대로 따라온다. 채점 모델은 클래스 기본값을 따른다. 보관된 클래스로는 가져올 수 없다."
+            "그대로 따라온다. 채점 모델은 클래스 기본값을 따른다. 보관된 클래스로는 가져올 수 없다. "
+            f"{_SUMMARY_NOTE}"
         ),
         input_schema=_IMPORT_PROBLEM_TEMPLATE_INPUT,
         output_schema=_PROBLEM_RESULT,

@@ -21,6 +21,7 @@ from django.test import override_settings
 from django.utils import timezone
 
 from core.models import ClockOverride
+from tests.mcp_output_schema import assert_matches_output_schema
 from tests.classroom_scenarios import (
     archive_class,
     auth_header,
@@ -141,7 +142,13 @@ def _rpc(client, token: str | None, method: str, params: dict | None = None, *, 
     extra = {"HTTP_ACCEPT": "application/json, text/event-stream", **(headers or {})}
     if token:
         extra["HTTP_AUTHORIZATION"] = f"Bearer {token}"
-    return client.post(MCP_URL, data=json.dumps(message), content_type="application/json", **extra)
+    response = client.post(MCP_URL, data=json.dumps(message), content_type="application/json", **extra)
+    # 성공한 도구 호출은 저절로 자기 outputSchema 와 맞춰 본다(#579) — MCP 시험 전부가 이 길로 부른다.
+    if method == "tools/call" and response.status_code == 200 and isinstance(params, dict):
+        result = response.json().get("result") or {}
+        if result.get("isError") is False and "structuredContent" in result:
+            assert_matches_output_schema(params["name"], result["structuredContent"])
+    return response
 
 
 def _call_list_my_classes(client, token: str):
