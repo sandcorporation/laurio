@@ -40,6 +40,13 @@ class Class(models.Model):
         UNVERIFIED = "unverified", "미검증"
         REJECTED = "rejected", "거부됨"
 
+    class ScoringConnectionKind(models.TextChoices):
+        """이 클래스의 채점이 모델에 닿는 길(#599, CONTEXT.md 「채점 연결」). 지금은
+        「OpenAI 키」 하나뿐이다 — 호환 서버(ADR-0058)는 #601 이 더한다. 주소·인증 값은
+        `classroom.scoring_connection.connection_for` 가 이 값으로 고른다."""
+
+        OPENAI_KEY = "openai_key", "OpenAI 키"
+
     #: 이 클래스를 연 강사. `accounts.SponsorProfile`이 아니라 `User`를 바로
     #: 가리킨다 — 프로필을 쓰지 않기로 한 것 자체가 ADR-0037의 합의다.
     instructor = models.ForeignKey(
@@ -81,6 +88,15 @@ class Class(models.Model):
     #: 마다 대기 시도 하나로 다시 쳐 본다 — 그 시도가 채점되면 지워지고, 또 소진이면 이 값이
     #: 그 시각으로 밀린다(다음 확인까지의 간격을 이 값 하나가 잰다).
     scoring_quota_exhausted_at = models.DateTimeField(null=True, blank=True, default=None)
+
+    #: 채점 연결의 종류(#599). 키 칸들(`openai_api_key_*`)과 크레딧 소진 시각은 이 연결의
+    #: 인증 값과 상태다 — 키 상태(ADR-0045)·크레딧 멈춤(ADR-0057)은 연결의 상태로 읽힌다.
+    scoring_connection_kind = models.CharField(
+        max_length=20,
+        choices=ScoringConnectionKind.choices,
+        default=ScoringConnectionKind.OPENAI_KEY,
+        db_default=ScoringConnectionKind.OPENAI_KEY,
+    )
 
     #: 이 클래스의 기본 채점 모델(#285, #401). 문제가 자기 값을 갖지 않으면
     #: 이 값을 쓴다 — 그 클래스의 키로 실제로 쓸 수 있는 모델만 저장된다

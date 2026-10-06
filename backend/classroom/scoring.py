@@ -63,7 +63,6 @@ from django.db.models import Count
 
 from core.adapters import resolve_adapter
 from core.clock import Clock
-from core.crypto import decrypt
 from core.llm_scoring import (
     LLMAdapterAuthError,
     LLMAdapterError,
@@ -101,7 +100,8 @@ from .models import (
     ClassroomSubmission,
     Problem,
 )
-from .scoring_models import is_reasoning_model_id, matches_naming_rule
+from .scoring_connection import ScoringConnection, connection_for, openai_key_connection
+from .scoring_models import matches_naming_rule
 from .syntax_check import SYNTAX_CHECK_ITEM_ID, SyntaxCheckPass, run_syntax_check
 
 logger = logging.getLogger(__name__)
@@ -192,14 +192,14 @@ class FakeClassroomScoringAdapter:
 
 
 def _scoring_adapter(
-    *, api_key: str, model: str, reasoning_effort: str | None = None
+    *, connection: ScoringConnection, model: str, reasoning_effort: str | None = None
 ) -> LLMScoringAdapter:
     """실제 OpenAI 어댑터 또는 결정적 fake 어댑터를 고른다(#340, ADR-0043).
 
     강사 본인의 키로 직접 어댑터를 만드는 원칙(모듈 docstring)은 바뀌지 않는다
     — 이 함수가 가르는 것은 "누구 키로 도는가"가 아니라 "그 키로 실제로
     네트워크에 나가는가"뿐이다. `CLASSROOM_SCORING_ADAPTER_MODE`가 fake면
-    (배포되지 않은 환경의 기본값) `api_key`·`model`·`reasoning_effort`를 그대로
+    (배포되지 않은 환경의 기본값) `connection`·`model`·`reasoning_effort`를 그대로
     무시하고 `FakeClassroomScoringAdapter`를 쓴다(`core.adapters.resolve_adapter`가
     fake_factory를 언제나 인자 없이 부른다) — 배포 환경에서는 이 값이 fake일 수
     없다(`config.settings`가 부팅 시점에 거부한다).
@@ -213,7 +213,10 @@ def _scoring_adapter(
     `OpenAIScoringAdapter`를 하드코딩하면, 부팅 가드(`classroom.checks.
     check_classroom_scoring_adapter_mode`)가 검증한 그 dotted path가 실제로는
     쓰이지 않는 채로 조용히 무시된다(#340 코드리뷰 지적) — 검증한 값과 도는
-    값이 어긋난다."""
+    값이 어긋난다.
+
+    주소와 인증 값은 채점 연결(`connection`, #599)이 준다 — 이 함수는 OpenAI 주소를 모른다.
+    인증 값은 fake 모드에서도 여기서 풀린다(예전에도 호출부가 풀어 넘겼다)."""
 
     return resolve_adapter(
         mode=settings.CLASSROOM_SCORING_ADAPTER_MODE,
@@ -223,7 +226,8 @@ def _scoring_adapter(
             "실물 어댑터는 core.llm_scoring.OpenAIScoringAdapter다(#340, ADR-0043)."
         ),
         factory_kwargs={
-            "api_key": api_key,
+            "api_key": connection.auth_value(),
+            "base_url": connection.base_url,
             "model": model,
             "reasoning_effort": reasoning_effort,
             # 공모전의 20초가 아니라 3분이다 — 강의실 채점은 Celery 워커 안에서 돌아
@@ -242,7 +246,7 @@ def check_scoring_key(*, api_key: str) -> LLMKeyCheckStatus:
     확인에 쓰이지 않는다(OpenAI의 키 확인은 모델과 무관한 엔드포인트를
     친다) — `_scoring_adapter`의 인자 모양만 맞추려고 빈 문자열을 넘긴다."""
 
-    adapter = _scoring_adapter(api_key=api_key, model="")
+    adapter = _scoring_adapter(connection=openai_key_connection(api_key), model="")
     return adapter.check_key()
 
 
@@ -691,7 +695,9 @@ def score_classroom_submission_once(
     if reason == pending_scoring.BUDGET_EXHAUSTED:
         # no_key와 같은 규율 — 시도로 남기지 않고 조용히 건너뛴다.
         return {"submission_id": submission.id, "status": "budget_exhausted"}
-    raw_key = (class_obj.openai_api_key_encrypted or "").strip()
+    connection = connection_for(class_obj)
+    if connection is None:  # pragma: no cover - 위의 `blocking_reason` 이 같은 기준(`has_scoring_key`)으로 이미 걸렀다.
+        return {"submission_id": submission.id, "status": "no_key"}
 
     asset = submission.assets.get()
 
@@ -731,7 +737,9 @@ def score_classroom_submission_once(
     # 추론 모델(GPT-5 이후)일 때만 뜻이 있다(#402, CONTEXT.md 「추론 강도」) —
     # 아니면 채점 호출은 지금처럼 temperature 0을 쓴다(`_scoring_adapter`에
     # `None`을 넘긴다).
-    reasoning_effort = problem.effective_reasoning_effort() if is_reasoning_model_id(model) else None
+    reasoning_effort = (
+        problem.effective_reasoning_effort() if connection.sends_reasoning_effort(model) else None
+    )
 
     prompt = _build_prompt(
         submission,
@@ -775,7 +783,7 @@ def score_classroom_submission_once(
 
     try:
         adapter = _scoring_adapter(
-            api_key=decrypt(raw_key), model=model, reasoning_effort=reasoning_effort
+            connection=connection, model=model, reasoning_effort=reasoning_effort
         )
         output = adapter.score(scoring_input)
     except LLMAdapterAuthError:

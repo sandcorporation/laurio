@@ -239,10 +239,19 @@ class FakeLLMScoringAdapter:
         return ScoringOutput(verdicts=verdicts, model_version=self.model_version)
 
 
-_OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
+#: OpenAI API 의 base URL. 공모전 채점은 언제나 이 주소를 쓴다. 강의실 채점은 클래스의
+#: 채점 연결(`classroom.scoring_connection`, #599)이 주소를 넘긴다 — 「OpenAI 키」 연결은
+#: 이 값 그대로다. 아래 두 경로는 이 base 뒤에 붙는다.
+OPENAI_API_BASE_URL = "https://api.openai.com/v1"
+_CHAT_COMPLETIONS_PATH = "/chat/completions"
 #: 키 확인 전용(#354) — 채점 요청과 달리 모델·프롬프트가 필요 없는 가장 값싼
 #: 인증 확인 엔드포인트다.
-_OPENAI_MODELS_URL = "https://api.openai.com/v1/models"
+_MODELS_PATH = "/models"
+
+
+def _endpoint(base_url: str | None, path: str) -> str:
+    return (base_url or OPENAI_API_BASE_URL).rstrip("/") + path
+
 _OPENAI_DEFAULT_MODEL = "gpt-4o-mini"
 _OPENAI_DEFAULT_TEMPERATURE = 0
 
@@ -616,6 +625,9 @@ class OpenAIScoringAdapter:
         #: 모델이 추론 모델일 때 이 값을 넘긴다.
         reasoning_effort: str | None = None,
         timeout: float = _OPENAI_REQUEST_TIMEOUT_SECONDS,
+        #: 이 어댑터가 부를 API 의 base URL(#599). 주지 않으면 OpenAI 다 — 공모전은 이 인자를
+        #: 주지 않는다. 강의실은 채점 연결이 주는 주소를 넘긴다.
+        base_url: str | None = None,
     ) -> None:
         api_key = api_key if api_key is not None else (os.environ.get("OPEN_AI_API_KEY") or "")
         if not api_key:
@@ -632,6 +644,7 @@ class OpenAIScoringAdapter:
             self._temperature = float(raw_temperature) if raw_temperature else _OPENAI_DEFAULT_TEMPERATURE
         self._reasoning_effort = reasoning_effort
         self._timeout = timeout
+        self._base_url = base_url
         # 부팅 가드(core.adapters.check_adapter_mode)의 isinstance(LLMScoringAdapter)
         # 검사가 요구하는 자리 — 실제 호출에 쓰인 모델 식별자는 매 score() 호출마다
         # OpenAI 응답의 "model" 필드에서 새로 읽어 ScoringOutput.model_version으로
@@ -661,7 +674,7 @@ class OpenAIScoringAdapter:
 
         response = _openai_round_trip(
             "POST",
-            _OPENAI_CHAT_COMPLETIONS_URL,
+            _endpoint(self._base_url, _CHAT_COMPLETIONS_PATH),
             api_key=self._api_key,
             timeout=self._timeout,
             json_body=payload,
@@ -702,7 +715,7 @@ class OpenAIScoringAdapter:
         try:
             _openai_round_trip(
                 "GET",
-                _OPENAI_MODELS_URL,
+                _endpoint(self._base_url, _MODELS_PATH),
                 api_key=self._api_key,
                 timeout=self._timeout,
                 context="key-check",
@@ -714,7 +727,12 @@ class OpenAIScoringAdapter:
         return LLMKeyCheckStatus.VALID
 
 
-def list_openai_models(api_key: str, *, timeout: float = _OPENAI_REQUEST_TIMEOUT_SECONDS) -> list[str] | None:
+def list_openai_models(
+    api_key: str,
+    *,
+    base_url: str | None = None,
+    timeout: float = _OPENAI_REQUEST_TIMEOUT_SECONDS,
+) -> list[str] | None:
     """이 키로 `/v1/models`를 조회해 모델 id 목록을 돌려준다(#401) —
     `classroom.scoring_model_catalog`가 이 목록을 규칙으로 거른다
     (`classroom.scoring_models.build_catalog`).
@@ -725,6 +743,8 @@ def list_openai_models(api_key: str, *, timeout: float = _OPENAI_REQUEST_TIMEOUT
     check_key`가 REJECTED/UNVERIFIED를 가르는 것과 다른 자리 — 이 함수는
     모델 목록이 필요할 뿐 키 상태를 판정하지 않는다).
 
+    `base_url`을 주지 않으면 OpenAI 다(#599) — 강의실은 채점 연결의 주소를 넘긴다.
+
     `check_key`와 같은 왕복(`_openai_round_trip`, GET `/v1/models`)을 쓴다
     (#469) — 둘은 실제로 같은 응답에서 나온다. 다만 몸통 파싱은 이 함수만
     한다: `check_key`는 상태 코드만 보고, 이 함수는 응답 몸통의 `data`
@@ -732,7 +752,11 @@ def list_openai_models(api_key: str, *, timeout: float = _OPENAI_REQUEST_TIMEOUT
 
     try:
         response = _openai_round_trip(
-            "GET", _OPENAI_MODELS_URL, api_key=api_key, timeout=timeout, context="model-list"
+            "GET",
+            _endpoint(base_url, _MODELS_PATH),
+            api_key=api_key,
+            timeout=timeout,
+            context="model-list",
         )
     except LLMAdapterError:
         return None
