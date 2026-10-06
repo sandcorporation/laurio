@@ -206,6 +206,23 @@ cmd_preflight() {
 
 # ------------------------------------------------------- 무엇이 바뀌었나
 
+# 직전 배포($PREVIOUS)의 compose 와 지금 것에서 풀러의 렌더된 정의가 다른가. 옛 파일은
+# 지금 파일과 같은 디렉터리에 잠깐 꺼내 둔다 — 상대 경로(`build.context: ..`)와 프로젝트
+# 이름이 같은 자리에서 풀려야 두 렌더가 비교된다. 무엇이든 실패하면 「바뀌었다」(참)다.
+pooler_definition_changed() {
+  previous_compose="docker/.jenkins-${TARGET}-previous-compose.yaml"
+  if ! $GIT show "${PREVIOUS}:${COMPOSE_FILE}" > "$previous_compose" 2>/dev/null; then
+    rm -f "$previous_compose"
+    return 0
+  fi
+  before=$(docker compose -f "$previous_compose" --env-file "$ENV_FILE" config pgbouncer 2>/dev/null)
+  before_status=$?
+  rm -f "$previous_compose"
+  [ "$before_status" -eq 0 ] || return 0
+  after=$($COMPOSE config pgbouncer 2>/dev/null) || return 0
+  [ "$before" != "$after" ]
+}
+
 cmd_plan() {
   # 직전 성공 배포와 비교한다. 그것이 없으면(첫 배포·이력 유실) 전부 바뀐 것으로
   # 본다 — 모르면 굽는 쪽이 안전하다.
@@ -299,6 +316,13 @@ cmd_plan() {
 
     # compose 파일 자체가 바뀌면 어느 서비스의 환경이 바뀌었는지 알 수 없다.
     # 전부 다시 세운다.
+    #
+    # **풀러만은 정의가 실제로 바뀌었을 때만 바꾼다**(2026-10-06, GlitchTip 64 재발).
+    # 풀러를 바꾸는 배포는 backend·events 를 겹쳐 바꾸지 못하고 내렸다 올린다(아래
+    # ROLLING_BACKEND). #582 가 다른 서비스(celery-scoring)만 더했는데도 이 줄이 풀러까지
+    # 바꾸게 해 prod 에서 이벤트 서비스 이름이 16초 넘게 안 풀렸고, BFF 재시도 예산(약
+    # 15.8초)을 넘겨 강의실이 500 을 냈다. 직전 배포의 compose 와 지금 것을 compose 자신이
+    # 렌더한 풀러 정의(그것이 기대는 db 포함)로 비교한다 — 렌더하지 못하면 바뀐 것으로 본다.
     if touched "^docker/compose\.${TARGET}\.yaml\$"; then
       log "compose.${TARGET}.yaml 이 바뀌었다 — 전부 다시 세운다."
       BUILD_BACKEND=true
@@ -306,7 +330,11 @@ cmd_plan() {
       BUILD_OPERATOR=true
       BUILD_CLASSROOM=true
       BUILD_SEARCH=true
-      BUILD_PGBOUNCER=true
+      if pooler_definition_changed; then
+        BUILD_PGBOUNCER=true
+      else
+        log "풀러(pgbouncer)의 정의는 그대로다 — 풀러는 바꾸지 않는다."
+      fi
     fi
   fi
 
