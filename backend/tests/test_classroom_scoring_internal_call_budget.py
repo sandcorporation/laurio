@@ -25,10 +25,12 @@ from __future__ import annotations
 
 from urllib.parse import urlparse
 
+import requests
 from django.conf import settings
 from django.test import Client
 
 from classroom import tasks as classroom_tasks
+from core import tasks as core_tasks
 from tests.classroom_scenarios import (
     FakeVendorResponse,
     create_class,
@@ -108,4 +110,55 @@ def test_immediate_scoring_vendor_timeout_fits_inside_the_internal_call_budget(
         f"벤더를 {vendor_timeout}초까지 기다리는 채점이 {internal_timeout}초 안에 답해야 하는 "
         "내부 호출 안에서 돈다 — 느린 벤더 응답이면 gunicorn 워커가 채점 도중 죽고 "
         "시도 기록도 남지 않는다(GlitchTip 오류 87)"
+    )
+
+
+def test_safety_net_scan_scores_within_the_internal_call_budget_even_with_slow_vendor(
+    client, db, monkeypatch
+):
+    """GlitchTip 오류 91 — 위 테스트는 시도 하나를 채점하는 즉시 채점 경로만 본다. 안전망
+    스캔은 한 요청 안에서 쌓인 시도를 **차례로** 채점하고, 스캔의 시간 예산(20초)은 행
+    **사이**에서만 확인된다. 그래서 벤더 응답이 저마다 타임아웃 안이어도(예: 19초씩) 예산
+    직전에 시작한 다음 행이 다시 벤더를 기다리며 30초를 넘겨, gunicorn 이 그 워커를
+    죽였다(prod 에서 `SystemExit: 1`, 셋째 행 채점 도중).
+
+    벤더가 응답마다 자기 타임아웃 바로 아래(1초 전)까지 걸린다고 두고, 스캔 요청 하나가
+    벤더를 기다린 시간을 단조 시계로 잰다."""
+
+    instructor = login(client, uid="instructor-1")
+    class_id = create_class(client, instructor["access"])
+    problem = create_open_problem(
+        client, instructor["access"], class_id, required_labels=["README 가 있다"]
+    )
+    monkeypatch.setattr(classroom_tasks.score_attempt, "delay", lambda *args, **kwargs: None)
+    for uid in ("participant-1", "participant-2", "participant-3"):
+        participant = login(client, uid=uid)
+        join_class(client, participant["access"], class_id, instructor_access=instructor["access"])
+        submit_repository(client, participant["access"], class_id, problem.id)
+
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(
+        "core.scans.time", type("_FakeTime", (), {"monotonic": staticmethod(lambda: clock["now"])})
+    )
+    seen = _route_requests(monkeypatch, problem.item_id)
+    vendor_waits: list[float] = []
+    route = requests.post
+
+    def _slow_vendor(url, **kwargs):
+        if not url.startswith(settings.INTERNAL_API_BASE_URL):
+            waited = kwargs["timeout"] - 1
+            vendor_waits.append(waited)
+            clock["now"] += waited
+        return route(url, **kwargs)
+
+    monkeypatch.setattr("requests.post", _slow_vendor)
+    with force_real_scoring_adapter():
+        core_tasks.run_scan("classroom-submission-scoring")
+
+    [internal_timeout] = seen["internal"]
+    assert vendor_waits, "스캔이 아무 시도도 채점하지 않았다"
+    assert sum(vendor_waits) + _OVERHEAD_MARGIN_SECONDS <= internal_timeout, (
+        f"안전망 스캔 요청 하나가 벤더를 {sum(vendor_waits)}초({len(vendor_waits)}건) 기다린다 — "
+        f"{internal_timeout}초 안에 답해야 하는 내부 호출 안에서다. gunicorn 이 채점 도중 워커를 "
+        "죽인다(GlitchTip 오류 91)"
     )
