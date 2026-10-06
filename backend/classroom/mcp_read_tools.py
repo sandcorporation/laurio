@@ -183,13 +183,13 @@ _PROBLEM_OBJECT = {
                 "required": ["id", "label", "required", "order"],
             },
         },
-        "passed_count": {**_COUNT, "description": "한 번이라도 통과한 참여자 수(강사 본인·내보낸 참여자 제외)"},
-        "member_count": {**_COUNT, "description": "참여자 수(강사 본인·내보낸 참여자 제외)"},
+        "passed_count": {**_COUNT, "description": "한 번이라도 통과한 참여자 수(강사(소유자·공동 강사)·내보낸 참여자 제외)"},
+        "member_count": {**_COUNT, "description": "참여자 수(강사(소유자·공동 강사)·내보낸 참여자 제외)"},
         "pass_rate": _PASS_RATE,
         "published_template": _TEMPLATE_SUMMARY,
         "deletable": {
             "type": "boolean",
-            "description": "지금 지울 수 있는가 — 강사 본인이 아닌 누군가의 시도가 하나라도 있으면 거짓",
+            "description": "지금 지울 수 있는가 — 강사(소유자·공동 강사)가 아닌 누군가의 시도가 하나라도 있으면 거짓",
         },
         "available_transitions": {
             "type": "array",
@@ -218,7 +218,7 @@ _PARTICIPANT_OBJECT = {
         "display_name": {"type": "string", "description": "이 클래스에서 불릴 이름"},
         "joined_at": {**_DATETIME, "description": "가입한 시각(ISO 8601)"},
         "expelled": {"type": "boolean", "description": "내보낸 참여자인가 — 기록은 남고 새 제출만 막힌다"},
-        "is_instructor": {"type": "boolean", "description": "강사 본인의 참여 자리인가"},
+        "is_instructor": {"type": "boolean", "description": "강사(소유자·공동 강사)가 참여자로도 들어온 자리인가 — 집계에서 빠진다"},
     },
     "required": ["id", "display_name", "joined_at", "expelled", "is_instructor"],
 }
@@ -229,7 +229,12 @@ CLASS_OUTPUT_SCHEMA = {
     "properties": {
         "id": {"type": "integer", "description": "클래스 번호"},
         "name": {"type": "string", "description": "클래스 이름"},
-        "instructor_display_name": {"type": "string", "description": "참여자에게 보이는 강사 이름"},
+        "instructor_display_name": {"type": "string", "description": "소유자의 강사 이름 — 참여자에게 보인다"},
+        "role": {
+            "type": "string",
+            "enum": ["owner", "co_instructor"],
+            "description": "이 클래스에서 내 역할 — owner 소유자, co_instructor 공동 강사. 채점 키·예산·클래스 삭제는 소유자만 한다",
+        },
         "join_code": {"type": "string", "description": "가입 링크의 코드"},
         "created_at": _DATETIME,
         "archived": {"type": "boolean", "description": "보관된 클래스인가 — 참이면 새 가입·새 제출이 닫히고 문제를 바꿀 수 없다"},
@@ -258,7 +263,7 @@ READ_TOOL_SPECS: list[dict] = [
         "name": "get_class",
         "title": "클래스 상세",
         "description": (
-            "클래스 하나의 설정을 돌려준다 — 이름, 강사로 불릴 이름, 가입 코드, 보관 여부, 기본 채점 모델과 "
+            "클래스 하나의 설정을 돌려준다 — 이름, 내 역할(소유자·공동 강사), 소유자의 강사 이름, 가입 코드, 보관 여부, 기본 채점 모델과 "
             "추론 강도, OpenAI 키가 있는가(키 값은 주지 않는다)와 그 상태, 채점 토큰 예산·사용량·남은 양·"
             "경고 임계, 제출이 있는가, 공개된 템플릿. 내가 강사가 아닌 클래스는 찾을 수 없다고 답한다."
         ),
@@ -303,7 +308,7 @@ READ_TOOL_SPECS: list[dict] = [
         "title": "참여자 명단",
         "description": (
             "클래스의 참여자 명단을 돌려준다 — 참여자마다 이 클래스에서 불릴 이름, 가입한 시각, 내보냈는가, "
-            "강사 본인의 자리인가. 이메일 같은 계정 정보는 담지 않는다."
+            "강사(소유자·공동 강사)의 자리인가. 이메일 같은 계정 정보는 담지 않는다."
         ),
         "input_schema": _CLASS_ONLY_INPUT,
         "output_schema": {

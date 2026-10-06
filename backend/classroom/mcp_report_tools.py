@@ -6,7 +6,7 @@ CONTEXT.md 「참여자 리포트」).
 (체크리스트 항목별 충족과 근거)을 담는다. **숫자를 따로 세지 않는다**: 칸의 상태는 격자와
 같은 `classroom.api._cell_status`, 달성률은 `_problem_pass_stats`, 통과는
 `Problem.is_score_passed`, 미채점 사유는 `_pending_reason` — 화면이 쓰는 그 함수들이다.
-참여자 범위도 격자와 같다(강사 본인 자리·내보낸 참여자도 표시와 함께 나온다). 소스는 담지
+참여자 범위도 격자와 같다(강사(소유자·공동 강사) 자리·내보낸 참여자도 표시와 함께 나온다). 소스는 담지
 않고, 대신 (참여자, 문제)의 최신 제출 번호를 줘서 아래 도구로 하나씩 열게 한다.
 
 **제출 소스 열기**(`open_submission_source`)는 제출 하나를 연다. 그 강사의 클래스에 달린
@@ -438,8 +438,8 @@ _REPORT_OUTPUT = {
                             "required": ["id", "label", "required"],
                         },
                     },
-                    "passed_count": {**_COUNT, "description": "한 번이라도 통과한 참여자 수(강사 본인·내보낸 참여자 제외)"},
-                    "member_count": {**_COUNT, "description": "참여자 수(강사 본인·내보낸 참여자 제외)"},
+                    "passed_count": {**_COUNT, "description": "한 번이라도 통과한 참여자 수(강사(소유자·공동 강사)·내보낸 참여자 제외)"},
+                    "member_count": {**_COUNT, "description": "참여자 수(강사(소유자·공동 강사)·내보낸 참여자 제외)"},
                     "pass_rate": {"type": ["number", "null"], "description": "달성률. 참여자가 없으면 null"},
                 },
                 "required": ["id", "title", "status", "checklist_items", "passed_count", "member_count"],
@@ -452,7 +452,7 @@ _REPORT_OUTPUT = {
                 "properties": {
                     "id": {"type": "integer", "description": "참여자 번호"},
                     "display_name": {"type": "string", "description": "이 클래스에서 불릴 이름"},
-                    "is_instructor": {"type": "boolean", "description": "강사 본인의 참여 자리인가"},
+                    "is_instructor": {"type": "boolean", "description": "강사(소유자·공동 강사)가 참여자로도 들어온 자리인가 — 집계에서 빠진다"},
                     "expelled": {"type": "boolean", "description": "내보낸 참여자인가 — 기록은 남는다"},
                     "problems": {
                         "type": "array",
@@ -580,7 +580,7 @@ REPORT_TOOL_SPECS: list[dict] = [
             "클래스 하나의 참여자 × 문제 요약 — 누가 어디서 막혔는지. 참여자마다 문제별로 통과 이력(명단 격자와 "
             "같다), 시도 수, 마지막 제출 시각, 최신 시도의 제출 번호와 판정(충족한 체크리스트 항목 수와 항목별 "
             f"근거, 근거는 {REASONING_MAX_CHARS}자까지)을 담는다. 참여자는 이 클래스에서 불릴 이름으로만 나오고 "
-            "강사 본인 자리·내보낸 참여자도 표시와 함께 나온다. 소스는 담지 않는다 — 제출 번호로 "
+            "강사(소유자·공동 강사) 자리·내보낸 참여자도 표시와 함께 나온다. 소스는 담지 않는다 — 제출 번호로 "
             "open_submission_source 를 불러 연다. problem_id 를 주면 그 문제 하나만 담는다."
         ),
         "input_schema": {
