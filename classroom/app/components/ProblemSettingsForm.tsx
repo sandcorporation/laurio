@@ -25,9 +25,10 @@ import {
   GradingGuidelineEditor,
   type GradingGuidelineValue,
 } from "@/app/components/GradingGuidelineEditor";
+import { ReasoningModelSwitch } from "@/app/components/ReasoningModelSwitch";
 import { ProblemScoringCost } from "@/app/components/ScoringCost";
 import type { SubmissionFormat } from "@/lib/problems/api";
-import { isSelectedModelReasoning, REASONING_EFFORT_OPTIONS } from "@/lib/scoring/reasoning";
+import { isSelectedModelReasoning, MODEL_PROBE_NOTE, REASONING_EFFORT_OPTIONS } from "@/lib/scoring/reasoning";
 import type { ScoringCostState } from "@/lib/scoring/use-scoring-cost";
 import type { ScoringModelsState } from "@/lib/scoring/use-scoring-models";
 
@@ -53,6 +54,7 @@ export function ProblemSettingsForm({
   onReasoningEffortChange,
   effectiveReasoningEffort,
   defaultModelIsReasoning,
+  reasoningSwitch,
   classDefaults,
   costState,
   gradingGuideline,
@@ -75,6 +77,8 @@ export function ProblemSettingsForm({
   /** 실제로 적용될 추론 강도(수정 화면만) — `reasoningEffort`가 빈 문자열일 때만 보인다. */
   effectiveReasoningEffort?: string;
   defaultModelIsReasoning: boolean;
+  /** 「호환 서버」 클래스일 때만 — 이 문제 자신의 모델의 「추론 모델」 스위치(#602). */
+  reasoningSwitch?: { checked: boolean; onChange: (value: boolean) => void };
   /** 클래스 기본 모델·추론 강도 — 「클래스 기본값을 따릅니다」를 풀어 예상 비용을 찾는다(#591). */
   classDefaults: { model: string; reasoningEffort: string } | null;
   /** 이 문제의 예상 채점 비용(#591). */
@@ -85,6 +89,9 @@ export function ProblemSettingsForm({
    *  `<fieldset disabled>` 하나가 안의 입력·선택·버튼을 전부 막는다. */
   disabled?: boolean;
 }) {
+  const isReasoning =
+    modelsState.status === "ready" &&
+    isSelectedModelReasoning(model, modelsState.models, defaultModelIsReasoning, reasoningSwitch?.checked);
   return (
     <fieldset
       disabled={disabled}
@@ -217,23 +224,25 @@ export function ProblemSettingsForm({
               실제로 쓰일 모델: <span className="font-mono">{effectiveModel}</span>
             </p>
           ) : null}
+          {reasoningSwitch ? (
+            <span data-testid={`${testIdPrefix}-model-probe-note`} className="text-[11.5px] leading-relaxed text-ink/45">
+              {MODEL_PROBE_NOTE}
+            </span>
+          ) : null}
           <span className="text-[11.5px] leading-relaxed text-ink/45">
             문제 설명이 길면 컨텍스트가 작은 모델은 뒷부분이 잘린 채 채점됩니다 — 그래서
             문제마다 다른 모델을 고를 수 있습니다.
           </span>
-          {modelsState.status === "ready" && classDefaults ? (
-            <ProblemScoringCost
-              state={costState}
-              testIdPrefix={testIdPrefix}
-              modelId={model || classDefaults.model}
-              reasoningEffort={reasoningEffort || classDefaults.reasoningEffort}
-              isReasoning={isSelectedModelReasoning(model, modelsState.models, defaultModelIsReasoning)}
-              selectableModelIds={modelsState.models.map((option) => option.id)}
-              onUseBaseline={() => onModelChange("gpt-4.1-mini")}
-            />
+          {reasoningSwitch && model !== "" ? (
+            <div className="flex flex-col gap-1.5 border-t border-rule pt-3">
+              <ReasoningModelSwitch
+                checked={reasoningSwitch.checked}
+                onChange={reasoningSwitch.onChange}
+                testId={`${testIdPrefix}-reasoning-switch`}
+              />
+            </div>
           ) : null}
-          {modelsState.status === "ready" &&
-          isSelectedModelReasoning(model, modelsState.models, defaultModelIsReasoning) ? (
+          {isReasoning ? (
             <div className="flex flex-col gap-1.5 border-t border-rule pt-3">
               <label htmlFor={`${testIdPrefix}-reasoning-effort`}>
                 <FieldLabel>추론 강도</FieldLabel>
@@ -266,6 +275,17 @@ export function ProblemSettingsForm({
                 높을수록 느리고 채점 예산을 더 씁니다.
               </span>
             </div>
+          ) : null}
+          {modelsState.status === "ready" && classDefaults ? (
+            <ProblemScoringCost
+              state={costState}
+              testIdPrefix={testIdPrefix}
+              modelId={model || classDefaults.model}
+              reasoningEffort={reasoningEffort || classDefaults.reasoningEffort}
+              isReasoning={isReasoning}
+              selectableModelIds={modelsState.models.map((option) => option.id)}
+              onUseBaseline={() => onModelChange("gpt-4.1-mini")}
+            />
           ) : null}
         </div>
       </Card>

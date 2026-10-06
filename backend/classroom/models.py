@@ -122,6 +122,11 @@ class Class(models.Model):
     default_reasoning_effort = models.CharField(
         max_length=10, choices=REASONING_EFFORT_CHOICES, default=DEFAULT_REASONING_EFFORT
     )
+    #: 「호환 서버」의 기본 모델이 추론 모델인가 — 소유자가 「추론 모델」 스위치로 정한다(#602,
+    #: 이름으로 알 수 없다). 켜면 채점 호출에 `default_reasoning_effort` 가 실린다
+    #: (`classroom.scoring_connection.ScoringConnection.sends_reasoning_effort`). 「OpenAI 키」
+    #: 연결은 이 값을 보지 않는다 — 이름으로 판단한다. db_default: ADR-0053.
+    default_model_marked_reasoning = models.BooleanField(default=False, db_default=False)
 
     #: 가입 링크의 코드(#279). 다시 뽑으면 이 값이 새 무작위 문자열로
     #: 바뀌어 이전 값은 어떤 클래스도 가리키지 않게 된다 — 그래서 별도
@@ -272,6 +277,9 @@ class Problem(models.Model):
     #: `model`과 다른 지점: `copy_problem_to_class`는 `model`은 그대로
     #: 복사하되 이 필드는 만지지 않아 새 행이 기본값("")으로 시작한다.
     reasoning_effort = models.CharField(max_length=10, blank=True, default="")
+    #: 이 문제 자신의 모델(`model`)이 추론 모델인가 — 「호환 서버」에서 강사가 정한다(#602).
+    #: `model` 이 비어 있으면 뜻이 없다(클래스의 `default_model_marked_reasoning` 을 따른다).
+    model_marked_reasoning = models.BooleanField(default=False, db_default=False)
 
     #: 채점 지침 단계(#386, CONTEXT.md 「채점 지침」) — 체크리스트 항목을
     #: 얼마나 글자 그대로 따질지. 기본은 「보통」이다: 「hello world 를
@@ -333,6 +341,13 @@ class Problem(models.Model):
         값이 무엇인가"만 답한다."""
 
         return self.reasoning_effort or self.classroom.default_reasoning_effort
+
+    def effective_model_marked_reasoning(self) -> bool:
+        """`effective_model` 이 「추론 모델」로 표시됐는가(#602) — 호환 서버에서만 뜻이 있다."""
+
+        if self.model:
+            return self.model_marked_reasoning
+        return self.classroom.default_model_marked_reasoning
 
     def is_score_passed(self, score, checklist_items=None) -> bool:
         """이 채점 하나가 이 문제에서 **통과**인가(#288, CONTEXT.md 「통과」,

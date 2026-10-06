@@ -113,6 +113,8 @@ export function updateClass(
     instructor_display_name: string;
     default_model: string;
     default_reasoning_effort: string;
+    // 「호환 서버」의 「추론 모델」 스위치(#602) — OpenAI 키 연결은 서버가 이름으로 판단한다.
+    default_model_is_reasoning: boolean;
     token_budget: number;
     token_budget_warning_threshold_percent: number;
   }>,

@@ -98,7 +98,7 @@ def test_a_saved_server_lists_its_models_unfiltered_and_scores_with_the_chosen_m
 
     assert run_scan(client)["count"] == 1
 
-    scoring = [r for r in fake.requests if r["method"] == "POST"]
+    scoring = fake.scoring_requests
     assert len(scoring) == 1
     assert scoring[0]["url"] == f"{SERVER_URL}/chat/completions"
     assert scoring[0]["headers"]["Authorization"] == "Bearer tok-secret-9876"
@@ -163,7 +163,7 @@ def test_a_server_without_a_model_list_takes_a_typed_model_name(client, db, monk
     _submit(client, instructor, class_id, problem)
     run_scan(client)
 
-    scoring = [r for r in fake.requests if r["method"] == "POST"]
+    scoring = fake.scoring_requests
     assert scoring[0]["json"]["model"] == "local-coder"
     # 인증 값을 비워 둔 서버에는 Authorization 을 싣지 않는다.
     assert "Authorization" not in scoring[0]["headers"]
@@ -199,7 +199,7 @@ def test_the_auth_value_never_appears_raw_in_responses_logs_or_error_events(
     finally:
         sentry_sdk.get_global_scope().set_client(None)
 
-    assert any(r["method"] == "POST" for r in fake.requests)  # 채점 요청은 실제로 나갔다
+    assert fake.scoring_requests  # 채점 요청은 실제로 나갔다
     assert events  # 채점 실패가 오류 이벤트로 잡혔다 — 그 이벤트에도 값이 없어야 한다
     stored = Class.objects.get(id=class_id).openai_api_key_encrypted
     assert token not in stored and decrypt(stored) == token

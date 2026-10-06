@@ -25,6 +25,7 @@ from core.banned_words import BannedWordViolation, find_banned_word_violation
 from .models import Class, ClassTemplate, ProblemTemplate, _generate_join_code
 from .problem_authoring import (
     reject_banned_public_text,
+    probe_scoring_model_choice,
     validate_reasoning_effort,
     validate_scoring_model_choice,
 )
@@ -90,6 +91,22 @@ def update_class(class_obj: Class, payload: ClassPatchIn) -> Class:
         validate_scoring_model_choice(class_obj, payload.default_model, current_value=class_obj.default_model)
     if payload.default_reasoning_effort is not None:
         validate_reasoning_effort(payload.default_reasoning_effort)
+    next_model = payload.default_model if payload.default_model is not None else class_obj.default_model
+    next_marked = (
+        payload.default_model_is_reasoning
+        if payload.default_model_is_reasoning is not None
+        else class_obj.default_model_marked_reasoning
+    )
+    # 모델을 새로 고르거나 「추론 모델」 스위치를 바꿨을 때만 시험한다(#602) — 화면은 저장마다 지금
+    # 값을 다시 보내므로, 그대로인 선택까지 서버에 묻지 않는다.
+    if next_model != class_obj.default_model or next_marked != class_obj.default_model_marked_reasoning:
+        probe_scoring_model_choice(
+            class_obj,
+            next_model,
+            reasoning_effort=(
+                (payload.default_reasoning_effort or class_obj.default_reasoning_effort) if next_marked else None
+            ),
+        )
 
     update_fields = []
     if payload.name is not None:
@@ -114,6 +131,9 @@ def update_class(class_obj: Class, payload: ClassPatchIn) -> Class:
     if payload.default_reasoning_effort is not None:
         class_obj.default_reasoning_effort = payload.default_reasoning_effort
         update_fields.append("default_reasoning_effort")
+    if payload.default_model_is_reasoning is not None:
+        class_obj.default_model_marked_reasoning = payload.default_model_is_reasoning
+        update_fields.append("default_model_marked_reasoning")
     if payload.token_budget is not None and payload.token_budget != class_obj.token_budget:
         class_obj.token_budget = payload.token_budget
         update_fields.append("token_budget")

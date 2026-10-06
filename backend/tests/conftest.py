@@ -242,6 +242,16 @@ def _reset_fake_search_adapter():
 
 
 @pytest.fixture(autouse=True)
+def _reset_default_cache():
+    """기본 캐시(LocMem, 이 프로세스 안)를 시험마다 비운다 — 강의실 모델 목록·모델 시험 호출
+    결과가 연결 단위로 캐시돼(#601, #602) 같은 서버 주소를 쓰는 시험끼리 결과가 샜다(#603)."""
+
+    caches["default"].clear()
+    yield
+    caches["default"].clear()
+
+
+@pytest.fixture(autouse=True)
 def _reset_operator_sessions():
     """Operator 세션은 실제 Redis 에 산다(#43) — DB 처럼 롤백되지 않는다.
 

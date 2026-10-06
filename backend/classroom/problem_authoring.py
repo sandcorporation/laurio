@@ -26,6 +26,8 @@ from .models import ChecklistItem, Class, Problem
 from .problem_transitions import NO_REQUIRED_ITEM_MESSAGE, assert_required_item_floor
 from .schemas import ChecklistItemIn, ChecklistItemPatchIn, ProblemIn, ProblemPatchIn
 from .scoring_model_catalog import get_scoring_model_catalog
+from .scoring_connection import connection_for
+from .scoring_model_probe import ScoringModelProbeFailed, ensure_model_keeps_scoring_format
 from .scoring_models import is_fallback_model, is_valid_reasoning_effort
 
 # --- 검증 ----------------------------------------------------------------------
@@ -106,6 +108,18 @@ def validate_scoring_model_choice(class_obj: Class, model_id: str, *, current_va
     )
 
 
+def probe_scoring_model_choice(class_obj: Class, model_id: str, *, reasoning_effort: str | None) -> None:
+    """호환 서버면 이 모델이 채점 형식을 지키는지 시험 호출로 확인한다(#602) — 못 지키면 422 와
+    이유 문장. 클래스 기본·문제별 모델이 이 함수 하나를 쓴다(`validate_scoring_model_choice` 와
+    같은 이유). 「OpenAI 키」 연결은 아무것도 하지 않는다. `reasoning_effort` 는 채점 때 실릴 값
+    그대로다 — 「추론 모델」 스위치가 꺼져 있으면 `None`."""
+
+    try:
+        ensure_model_keeps_scoring_format(connection_for(class_obj), model_id, reasoning_effort=reasoning_effort)
+    except ScoringModelProbeFailed as exc:
+        raise HttpError(422, exc.message) from None
+
+
 def validate_reasoning_effort(value: str) -> None:
     if not is_valid_reasoning_effort(value):
         raise HttpError(422, f"알 수 없는 추론 강도입니다: {value}")
@@ -136,10 +150,19 @@ def create_problem(class_obj: Class, payload: ProblemIn) -> Problem:
 
     # 편집(`update_problem`)과 같은 규칙이다 — 두 자리가 갈리면 만들 때는
     # 통과한 값이 고칠 때 거절되는 상태가 생긴다.
-    if payload.model:
-        validate_scoring_model_choice(class_obj, payload.model, current_value="")
     if payload.reasoning_effort:
         validate_reasoning_effort(payload.reasoning_effort)
+    if payload.model:
+        validate_scoring_model_choice(class_obj, payload.model, current_value="")
+        probe_scoring_model_choice(
+            class_obj,
+            payload.model,
+            reasoning_effort=(
+                (payload.reasoning_effort or class_obj.default_reasoning_effort)
+                if payload.model_is_reasoning
+                else None
+            ),
+        )
     grading_strictness, grading_guideline_text = validate_grading_guideline(
         payload.grading_strictness, payload.grading_guideline_text
     )
@@ -165,6 +188,7 @@ def create_problem(class_obj: Class, payload: ProblemIn) -> Problem:
             submission_formats=submission_formats,
             model=payload.model,
             reasoning_effort=payload.reasoning_effort,
+            model_marked_reasoning=payload.model_is_reasoning,
             grading_strictness=grading_strictness,
             grading_guideline_text=grading_guideline_text,
             syntax_check_enabled=payload.syntax_check_enabled,
@@ -190,6 +214,22 @@ def update_problem(class_obj: Class, problem: Problem, payload: ProblemPatchIn) 
         validate_scoring_model_choice(class_obj, payload.model, current_value=problem.model)
     if payload.reasoning_effort:
         validate_reasoning_effort(payload.reasoning_effort)
+    next_model = payload.model if payload.model is not None else problem.model
+    next_marked = (
+        payload.model_is_reasoning if payload.model_is_reasoning is not None else problem.model_marked_reasoning
+    )
+    # 자기 모델을 새로 고르거나 「추론 모델」 스위치를 바꿨을 때만 시험한다(#602) — 화면은 저장마다
+    # 지금 값을 다시 보내므로, 그대로인 선택까지 서버에 묻지 않는다.
+    if next_model and (next_model != problem.model or next_marked != problem.model_marked_reasoning):
+        probe_scoring_model_choice(
+            class_obj,
+            next_model,
+            reasoning_effort=(
+                (payload.reasoning_effort or problem.reasoning_effort or class_obj.default_reasoning_effort)
+                if next_marked
+                else None
+            ),
+        )
 
     # 두 칸 중 하나라도 보내면 둘 다 함께 검증한다 — "문장은 직접 입력일
     # 때만 비어 있지 않다"는 두 칸을 함께 봐야 판단할 수 있는 불변식이라,
@@ -232,6 +272,9 @@ def update_problem(class_obj: Class, problem: Problem, payload: ProblemPatchIn) 
     if submission_formats is not None:
         problem.submission_formats = submission_formats
         update_fields.append("submission_formats")
+    if payload.model_is_reasoning is not None:
+        problem.model_marked_reasoning = payload.model_is_reasoning
+        update_fields.append("model_marked_reasoning")
     if payload.model is not None:
         problem.model = payload.model
         update_fields.append("model")

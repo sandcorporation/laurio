@@ -232,6 +232,8 @@ export default function EditProblemPage() {
   const [submissionFormats, setSubmissionFormats] = useState<SubmissionFormat[]>(["source"]);
   const [model, setModel] = useState("");
   const [reasoningEffort, setReasoningEffort] = useState("");
+  // 「호환 서버」의 「추론 모델」 스위치(#602) — 이 문제 자신의 모델에만 뜻이 있다.
+  const [modelIsReasoning, setModelIsReasoning] = useState(false);
   // 채점 지침(#386) — 불러온 문제 값으로 아래 effect가 채운다.
   const [gradingGuideline, setGradingGuideline] = useState<GradingGuidelineValue>({
     grading_strictness: "normal",
@@ -289,6 +291,7 @@ export default function EditProblemPage() {
       setSubmissionFormats(state.problem.submission_formats);
       setModel(state.problem.model);
       setReasoningEffort(state.problem.reasoning_effort);
+      setModelIsReasoning(state.problem.model_is_reasoning);
       setGradingGuideline({
         grading_strictness: state.problem.grading_strictness,
         grading_guideline_text: state.problem.grading_guideline_text,
@@ -373,6 +376,8 @@ export default function EditProblemPage() {
           // 칸의 「이 모델로 다시 시도」(`handleRetryModel`)를 쓴다.
           ...(model !== problem.model ? { model } : {}),
           reasoning_effort: reasoningEffort,
+          // 스위치는 값이 바뀌었을 때만 보낸다 — 바뀌면 서버가 그 모델을 다시 시험한다(#602).
+          ...(modelIsReasoning !== problem.model_is_reasoning ? { model_is_reasoning: modelIsReasoning } : {}),
           grading_strictness: gradingGuideline.grading_strictness,
           grading_guideline_text: gradingGuideline.grading_guideline_text,
         }),
@@ -1011,6 +1016,12 @@ export default function EditProblemPage() {
               effectiveReasoningEffort={problem.effective_reasoning_effort}
               defaultModelIsReasoning={
                 classState.status === "ready" ? classState.classroom.default_model_is_reasoning : false
+              }
+              reasoningSwitch={
+                classState.status === "ready" &&
+                classState.classroom.scoring_connection_kind === "compatible_server"
+                  ? { checked: modelIsReasoning, onChange: setModelIsReasoning }
+                  : undefined
               }
               classDefaults={
                 classState.status === "ready"

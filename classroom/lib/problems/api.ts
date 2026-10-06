@@ -63,6 +63,8 @@ export type ProblemRow = {
   // `effective_model`이 추론 모델(GPT-5 이후)인가(#402) — 서버가 판정해
   // 내려준다.
   effective_model_is_reasoning: boolean;
+  // 이 문제 자신의 모델에 켠 「추론 모델」 스위치(#602, 호환 서버).
+  model_is_reasoning: boolean;
   // 이 문제 자신의 추론 강도. 빈 문자열이면 클래스 기본값을 따른다(#402).
   reasoning_effort: string;
   // 실제로 채점에 쓰일 추론 강도.
@@ -154,6 +156,8 @@ export function createProblem(
     model?: string;
     // 이 문제만의 추론 강도(#402). 빈 문자열이면 클래스 기본값을 따른다.
     reasoning_effort?: string;
+    // 「호환 서버」에서 이 문제 자신의 모델이 추론 모델인가(#602).
+    model_is_reasoning?: boolean;
     // 채점 지침 단계(#386). 생략하면 서버 기본값("normal")이 된다.
     grading_strictness?: GradingStrictness;
     // grading_strictness가 "custom"일 때의 문장 — 그 밖의 단계에서 보내도
@@ -179,6 +183,7 @@ export function updateProblem(
     submission_formats: SubmissionFormat[];
     model: string;
     reasoning_effort: string;
+    model_is_reasoning: boolean;
     grading_strictness: GradingStrictness;
     grading_guideline_text: string;
     syntax_check_enabled: boolean;

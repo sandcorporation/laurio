@@ -241,7 +241,7 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 | --- | --- |
 | `POST`·`GET /api/classroom/classes[/{id}]` | 클래스를 열고 내가 강사인 것만 본다 — 소유한 것과 공동 강사인 것, 어느 쪽인지 `role` 이 말한다(#561) |
 | `GET /api/classroom/classes/joined` | 참여자로 들어간 클래스 — 본인이 강사인 클래스는 여기 겹쳐 나오지 않는다(#328) |
-| `PATCH /api/classroom/classes/{id}` | 이름·기본 채점 모델·기본 추론 강도를 고친다(#402) — 예산 칸과 소유자의 강사 이름 칸은 소유자만 |
+| `PATCH /api/classroom/classes/{id}` | 이름·기본 채점 모델·기본 추론 강도·「추론 모델」 스위치(`default_model_is_reasoning`, 호환 서버만 뜻이 있다, #602)를 고친다(#402) — 예산 칸과 소유자의 강사 이름 칸은 소유자만. 호환 서버에서 모델이나 스위치가 바뀌면 시험 호출(`classroom.scoring_model_probe`)이 채점과 같은 `json_schema` 판정 하나를 받아 보고, 못 지키면 이유 문장의 422. 통과는 (연결, 모델, 추론 여부) 단위로 하루 캐시한다 |
 | `PUT /api/classroom/classes/{id}/openai-key` | 강사 본인의 채점 키를 저장한다 — 마스킹된 값만 돌려준다(#284). 채점 연결이 「OpenAI 키」가 되고 호환 서버 주소는 지워진다(#601) |
 | `PUT /api/classroom/classes/{id}/compatible-server` | 채점 연결을 「호환 서버」로 저장한다(#601, ADR-0058) — 소유자 전용. 주소(https·공인)와 `Authorization: Bearer` 값(비워 둘 수 있다). 저장 전에 `core.safe_outbound` 로 그 서버의 `…/models` 를 한 번 받아 보고, 거부·실패는 이유별 한 문장의 422(https 아님·공인 주소 아님·이름 못 찾음·인증서·닿지 않음·리다이렉트·인증 실패). 인증 값은 키 칸에 암호화해 두고 끝 네 자리만 소유자에게 보인다. 공동 강사의 `ClassOut` 에는 종류와 호스트만 실린다 |
 | `GET /api/classroom/classes/{id}/scoring-models` | 그 클래스의 키로 실제로 쓸 수 있는 채점 모델·컨텍스트 크기·추론 모델 여부(#401, 예전 전역 `/scoring-models`를 대신한다). 호환 서버면 그 서버의 목록을 거르지 않고, 목록을 주지 않으면 `source="manual"` — 모델 이름을 직접 넣는다(#601) |
@@ -266,7 +266,7 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 | `POST .../members/{id}/expel` | 참여자를 내보낸다 — 행은 지우지 않는다(#281) |
 | `GET .../roster-grid` | 참여자 × 문제 격자 — 셀마다 통과 이력, 달성률 행은 `problems` 목록과 같은 계산을 재사용한다(#290) |
 | `POST`·`GET /api/classroom/classes/{id}/problems[/{id}]` | 문제를 만들고 고친다 — 마감 필드가 없다, 채점 지침(#386)도 함께 받는다 |
-| `PATCH .../problems/{id}` | 제목·설명·제출 형식·채점 모델·추론 강도(#402)·채점 지침(#386)을 고친다 |
+| `PATCH .../problems/{id}` | 제목·설명·제출 형식·채점 모델·추론 강도(#402)·「추론 모델」 스위치(`model_is_reasoning`, #602)·채점 지침(#386)을 고친다 — 호환 서버면 자기 모델을 고르거나 스위치를 바꿀 때 클래스 기본과 같은 시험 호출을 거친다(만들 때도) |
 | `POST .../problems/reorder` | 클래스 상세의 문제 순서를 바꾼다 |
 | `POST .../problems/{id}/open`·`.../hide`·`.../reopen` | 초안→열림→숨김→열림 전이(#440, `classroom.problem_transitions`) — 표에 없는 상태에서 부르면 400, 열림·숨김으로 가는 전이는 필수 체크리스트 항목이 없으면 400 |
 | `DELETE .../problems/{id}` | 문제를 지운다 — 참여자의 시도(내보낸 사람 포함)가 없을 때만, 강사 자신의 시도만 있으면 그 채점도 함께 지운다, 되돌릴 수 없다(#430/#431, ADR-0050) |

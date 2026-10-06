@@ -93,7 +93,7 @@ def _attempts(client, ctx) -> list[dict]:
 
 
 def _scoring_calls(fake) -> int:
-    return sum(1 for r in fake.requests if r["method"] == "POST")
+    return len(fake.scoring_requests)
 
 
 def _notification_types(client, access: str) -> list[str]:

@@ -78,12 +78,13 @@ class ScoringConnection:
             return bool(model_id.strip())
         return matches_naming_rule(model_id)
 
-    def sends_reasoning_effort(self, model_id: str) -> bool:
+    def sends_reasoning_effort(self, model_id: str, *, marked_reasoning: bool) -> bool:
         """채점 요청에 추론 강도를 실을지(#402) — OpenAI 키 연결은 모델 이름이 추론 모델일 때만.
-        호환 서버는 싣지 않는다(이름 규칙이 OpenAI 것이 아니다 — 켜는 스위치는 #602)."""
+        호환 서버는 이름으로 알 수 없어 소유자의 「추론 모델」 스위치(`marked_reasoning`, #602)를
+        따른다."""
 
         if self.kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER:
-            return False
+            return marked_reasoning
         return is_reasoning_model_id(model_id)
 
 
@@ -135,7 +136,14 @@ REFUSAL_MESSAGES: dict[str, str] = {
 
 #: dev·CI(fake 스위치)에서 호환 서버가 내놓는 것으로 치는 모델 목록 — OpenAI 이름 규칙에 맞지
 #: 않는 이름을 섞어, 목록을 거르지 않는다는 것이 네트워크 없이도 보이게 한다.
-FAKE_COMPATIBLE_MODEL_IDS = ("llama-3.1-8b-instruct", "qwen2.5-coder-32b-instruct", "gpt-4o-mini")
+#: `tinyllama-1.1b-chat` 은 모델 시험 호출(#602)에서 형식을 못 지키는 것으로 친다
+#: (`classroom.scoring_model_probe.FAKE_FORMAT_FAILING_MODEL_IDS`).
+FAKE_COMPATIBLE_MODEL_IDS = (
+    "llama-3.1-8b-instruct",
+    "qwen2.5-coder-32b-instruct",
+    "gpt-4o-mini",
+    "tinyllama-1.1b-chat",
+)
 
 
 class CompatibleServerRefused(Exception):
