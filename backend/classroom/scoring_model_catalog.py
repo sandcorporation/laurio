@@ -6,7 +6,8 @@
 FALLBACK_SCORING_MODEL_CHOICES`와 「조회하지 못했다」는 이유를 돌려준다.
 
 **같은 키의 조회 결과는 짧게(분 단위) 캐시한다**(#401 AC "같은 키로 두 번
-물으면 벤더를 한 번만 부른다") — 캐시 키는 암호화된 값의 해시다: 원문 키를
+물으면 벤더를 한 번만 부른다") — 캐시 키는 채점 연결(#599)의 종류·주소·암호화된
+값의 해시다(`ScoringConnection.cache_identity`): 원문 키를
 캐시 키에 쓰지 않고, 그래도 키를 바꾸면(=암호문이 바뀌면) 캐시가 갈린다.
 Fernet 암호화는 매 호출 비결정적(#284)이라 같은 클래스가 같은 키를 계속
 쓰는 동안에는 저장된 암호문이 그대로라 캐시가 안정적으로 맞는다.
@@ -21,17 +22,16 @@ Fernet 암호화는 매 호출 비결정적(#284)이라 같은 클래스가 같�
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 
 from django.conf import settings
 from django.core.cache import cache
 
 from core.adapters import is_fake_adapter_binding
-from core.crypto import decrypt
 from core.llm_scoring import list_openai_models
 
 from .models import Class
+from .scoring_connection import ScoringConnection, connection_for
 from .scoring_models import FALLBACK_SCORING_MODEL_CHOICES, ScoringModelChoice, build_catalog
 
 _CACHE_KEY_PREFIX = "classroom:scoring-models:"
@@ -53,10 +53,10 @@ _FAKE_VENDOR_MODEL_IDS = (
 )
 
 
-def _list_vendor_models(api_key: str) -> list[str] | None:
+def _list_vendor_models(connection: ScoringConnection) -> list[str] | None:
     if is_fake_adapter_binding(settings.CLASSROOM_SCORING_ADAPTER_MODE):
         return list(_FAKE_VENDOR_MODEL_IDS)
-    return list_openai_models(api_key)
+    return list_openai_models(connection.auth_value(), base_url=connection.base_url)
 
 
 @dataclass(frozen=True)
@@ -77,19 +77,16 @@ def _fallback(reason: str) -> ScoringModelCatalog:
     )
 
 
-def _cache_key(encrypted_key: str) -> str:
-    return _CACHE_KEY_PREFIX + hashlib.sha256(encrypted_key.encode("utf-8")).hexdigest()
-
-
 def get_scoring_model_catalog(class_obj: Class) -> ScoringModelCatalog:
-    if not class_obj.has_scoring_key():
+    connection = connection_for(class_obj)
+    if connection is None:
         return _fallback("no_api_key")
 
-    encrypted = class_obj.openai_api_key_encrypted
-    cache_key = _cache_key(encrypted)
+    # 연결(종류·주소·암호문)이 같으면 같은 목록이다 — 캐시가 맞으면 인증 값을 풀지 않는다.
+    cache_key = _CACHE_KEY_PREFIX + connection.cache_identity
     vendor_ids = cache.get(cache_key)
     if vendor_ids is None:
-        vendor_ids = _list_vendor_models(decrypt(encrypted))
+        vendor_ids = _list_vendor_models(connection)
         if vendor_ids is None:
             return _fallback("fetch_failed")
         cache.set(cache_key, vendor_ids, timeout=_CACHE_TTL_SECONDS)
