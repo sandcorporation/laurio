@@ -141,3 +141,18 @@ export function attemptsWithinBudget(budgetText: string, row: ScoringCostRow | n
   if (!tokens) return null;
   return Math.floor(budget / tokens);
 }
+
+/**
+ * 접힌 「모델별 예상 채점 비용」 표의 머리줄(#619) — 펼치지 않아도 지금 설정의 시도 1건 비용이
+ * 보인다. 기준이 소스 크기별이면 가운데(「보통」) 크기로 적는다.
+ */
+export function classCostSummary(estimate: ScoringCostEstimate, current: ScoringCostRow): string {
+  const head = `지금 설정 ${costRowLabel(current)}`;
+  if (!current.priced) return `${head} · 비용 미확인`;
+  if (current.per_attempt) return `${head} · 시도 1건 ${formatKrw(current.per_attempt.krw, current.open_ended)}`;
+  const middle = Math.floor(current.by_source_size.length / 2);
+  const cost = current.by_source_size[middle];
+  const chars = estimate.source_size_bands[middle];
+  if (!cost || chars === undefined) return `${head} · 비용 미확인`;
+  return `${head} · 소스 약 ${formatManCount(chars)} 자면 시도 1건 ${formatKrw(cost.krw, current.open_ended)}`;
+}

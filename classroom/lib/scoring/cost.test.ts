@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   attemptsWithinBudget,
+  classCostSummary,
   costBasisText,
   costRowLabel,
   findCostRow,
@@ -136,5 +137,35 @@ describe("호환 서버 — 토큰으로 (#604)", () => {
     const found = findCostRow(estimate({ unit: "tokens", rows: [tokenRow] }), "gpt-4.1-mini", "medium");
     expect(found).toBe(tokenRow);
     expect(attemptsWithinBudget("1000000", found)).toBe(50);
+  });
+});
+
+describe("접힌 비용 표의 머리줄 (#619)", () => {
+  it("지금 설정의 시도 1건 비용을 한 줄로 — 추론 모델은 강도까지", () => {
+    expect(classCostSummary(estimate({}), row({ model_id: "gpt-4o-mini", per_attempt: { krw: 3.2, tokens: 19_000 } }))).toBe(
+      "지금 설정 gpt-4o-mini · 시도 1건 약 3원",
+    );
+    expect(
+      classCostSummary(
+        estimate({}),
+        row({ model_id: "gpt-5.1", reasoning_effort: "high", open_ended: true, per_attempt: { krw: 212, tokens: 31_000 } }),
+      ),
+    ).toBe("지금 설정 gpt-5.1 · 추론 높음 · 시도 1건 약 210원~");
+  });
+
+  it("소스 크기별이면 가운데 크기로, 단가가 없으면 「비용 미확인」", () => {
+    const bySize = row({
+      by_source_size: [
+        { krw: 8, tokens: 5_500 },
+        { krw: 14, tokens: 17_650 },
+        { krw: 40, tokens: 63_000 },
+      ],
+    });
+    expect(classCostSummary(estimate({ basis: "source_sizes" }), bySize)).toBe(
+      "지금 설정 gpt-4.1-mini · 소스 약 5만 자면 시도 1건 약 14원",
+    );
+    expect(classCostSummary(estimate({}), row({ model_id: "o3", priced: false, ratio_to_baseline: null }))).toBe(
+      "지금 설정 o3 · 비용 미확인",
+    );
   });
 });

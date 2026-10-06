@@ -4,9 +4,12 @@
 // 하나가 얼마인지 보인다. 「클래스 설정 › 채점」은 모델별 표를, 「문제 설정 › 채점 모델」은
 // 이 문제가 실제로 쓸 설정 한 줄을 보인다. 값은 서버가 셈한 것(`useScoringCost`)이고, 이
 // 파일은 고른 모델·강도의 줄을 찾아 적기만 한다(`lib/scoring/cost.ts`).
+import { useEffect, useId, useState } from "react";
+
 import { Badge, buttonClass } from "@/app/components/ui";
 import {
   attemptsWithinBudget,
+  classCostSummary,
   costBasisText,
   costRowLabel,
   findCostRow,
@@ -18,6 +21,7 @@ import {
   type ScoringCostEstimate,
   type ScoringCostRow,
 } from "@/lib/scoring/cost";
+import { readCostTableOpen, writeCostTableOpen } from "@/lib/scoring/cost-table-open";
 import type { ScoringCostState } from "@/lib/scoring/use-scoring-cost";
 
 const BILLING_NOTE = "실제 청구액은 OpenAI 사용량 화면이 기준입니다.";
@@ -77,6 +81,19 @@ export function ClassScoringCostTable({
   reasoningEffort: string;
   isReasoning: boolean;
 }) {
+  // 표는 길어(#617) 기본은 접어 두고 머리줄에 지금 설정의 시도 1건만 보인다(#619). 펼친 상태는
+  // 그 브라우저가 기억한다 — 서버 렌더와 어긋나지 않게 첫 그림은 접힘, 붙은 뒤에 읽는다.
+  const [open, setOpen] = useState(false);
+  const panelId = useId();
+  useEffect(() => {
+    setOpen(readCostTableOpen(browserStorage()));
+  }, []);
+  function toggle() {
+    const next = !open;
+    setOpen(next);
+    writeCostTableOpen(browserStorage(), next);
+  }
+
   if (state.status !== "ready") return null;
   const { estimate } = state;
   if (estimate.unit === "tokens") {
@@ -100,138 +117,157 @@ export function ClassScoringCostTable({
   return (
     <div className="flex flex-col gap-3">
       <div data-testid="class-scoring-cost" className="border border-rule">
-        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-rule px-3.5 py-3">
-          <h3 className="text-[13.5px] font-semibold">모델별 예상 채점 비용</h3>
-          <span data-testid="class-scoring-cost-basis" className="text-[11.5px] text-ink/45">
-            {costBasisText(estimate, "class")}
-          </span>
-        </div>
-        {/* 좁은 화면은 줄마다 세로로 — 네 칸 표가 390px 에 들어가지 않는다. */}
-        <ul className="sm:hidden">
-          {rows.map((row) => {
-            const selected = isCurrent(row);
-            const values: [string, string][] = !row.priced
-              ? []
-              : bySize
-                ? row.by_source_size.map((cost, index) => [
-                    `소스 약 ${formatManCount(estimate.source_size_bands[index] ?? 0)} 자`,
-                    formatKrw(cost.krw, row.open_ended),
-                  ])
-                : [
-                    ["시도 1건", row.per_attempt ? formatKrw(row.per_attempt.krw, row.open_ended) : "—"],
-                    ...(hasParticipants
-                      ? ([
-                          [
-                            `문제 하나 · ${estimate.participant_count}명`,
-                            row.per_problem_krw ? formatKrw(row.per_problem_krw, row.open_ended) : "—",
-                          ],
-                        ] as [string, string][])
-                      : []),
-                    ["배율", ratioText(row)],
-                  ];
-            return (
-              <li
-                key={`${row.model_id}:${row.reasoning_effort ?? ""}`}
-                className={`flex flex-col gap-1.5 border-b border-rule/60 px-3.5 py-2.5 text-[13px] ${selected ? "bg-paper" : ""}`}
-              >
-                <span className="inline-flex flex-wrap items-center">
-                  <span className={selected ? "font-semibold" : ""}>{costRowLabel(row)}</span>
-                  {selected ? <CurrentBadge /> : null}
-                </span>
-                {row.priced ? (
-                  <dl className="grid grid-cols-3 gap-2">
-                    {values.map(([label, value]) => (
-                      <div key={label} className="flex min-w-0 flex-col">
-                        <dt className="text-[11px] text-ink/45">{label}</dt>
-                        <dd className="whitespace-nowrap font-mono text-[12.5px]">{value}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                ) : (
-                  <span className="text-[12.5px] text-ink/45">{UNPRICED}</span>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-        <div className="hidden sm:block">
-          <table className="w-full border-collapse text-[13px]">
-            <thead>
-              <tr>
-                <th className={`${HEAD_CELL} text-left font-normal`}>{bySize ? "모델 · 시도 1건" : "모델"}</th>
-                {bySize ? (
-                  estimate.source_size_bands.map((chars, index) => (
-                    <th key={chars} className={`${HEAD_CELL} text-right font-normal`}>
-                      {["작은 과제", "보통", "큰 프로젝트"][index] ?? ""}
-                      <br />
-                      소스 약 {formatManCount(chars)} 자
-                    </th>
-                  ))
-                ) : (
-                  <>
-                    <th className={`${HEAD_CELL} text-right font-normal`}>시도 1건</th>
-                    {hasParticipants ? (
-                      <th className={`${HEAD_CELL} text-right font-normal`}>
-                        문제 하나 · {estimate.participant_count}명
+        <h3>
+          <button
+            type="button"
+            data-testid="class-scoring-cost-toggle"
+            aria-expanded={open}
+            aria-controls={panelId}
+            onClick={toggle}
+            className={`flex w-full items-start justify-between gap-3 px-3.5 py-3 text-left ${open ? "border-b border-rule" : ""}`}
+          >
+            <span className="flex min-w-0 flex-col gap-1">
+              <span className="text-[13.5px] font-semibold">모델별 예상 채점 비용</span>
+              <span data-testid="class-scoring-cost-summary" className="text-[13px]">
+                {classCostSummary(estimate, current)}
+              </span>
+              <span data-testid="class-scoring-cost-basis" className="text-[11.5px] text-ink/45">
+                {costBasisText(estimate, "class")}
+              </span>
+            </span>
+            <span className="shrink-0 whitespace-nowrap text-[12px] text-ink/45">
+              {open ? "접기" : `모델 ${rows.length}개 펼치기`}
+            </span>
+          </button>
+        </h3>
+        <div id={panelId} hidden={!open} data-testid="class-scoring-cost-panel">
+          {/* 좁은 화면은 줄마다 세로로 — 네 칸 표가 390px 에 들어가지 않는다. */}
+          <ul className="sm:hidden">
+            {rows.map((row) => {
+              const selected = isCurrent(row);
+              const values: [string, string][] = !row.priced
+                ? []
+                : bySize
+                  ? row.by_source_size.map((cost, index) => [
+                      `소스 약 ${formatManCount(estimate.source_size_bands[index] ?? 0)} 자`,
+                      formatKrw(cost.krw, row.open_ended),
+                    ])
+                  : [
+                      ["시도 1건", row.per_attempt ? formatKrw(row.per_attempt.krw, row.open_ended) : "—"],
+                      ...(hasParticipants
+                        ? ([
+                            [
+                              `문제 하나 · ${estimate.participant_count}명`,
+                              row.per_problem_krw ? formatKrw(row.per_problem_krw, row.open_ended) : "—",
+                            ],
+                          ] as [string, string][])
+                        : []),
+                      ["배율", ratioText(row)],
+                    ];
+              return (
+                <li
+                  key={`${row.model_id}:${row.reasoning_effort ?? ""}`}
+                  className={`flex flex-col gap-1.5 border-b border-rule/60 px-3.5 py-2.5 text-[13px] ${selected ? "bg-paper" : ""}`}
+                >
+                  <span className="inline-flex flex-wrap items-center">
+                    <span className={selected ? "font-semibold" : ""}>{costRowLabel(row)}</span>
+                    {selected ? <CurrentBadge /> : null}
+                  </span>
+                  {row.priced ? (
+                    <dl className="grid grid-cols-3 gap-2">
+                      {values.map(([label, value]) => (
+                        <div key={label} className="flex min-w-0 flex-col">
+                          <dt className="text-[11px] text-ink/45">{label}</dt>
+                          <dd className="whitespace-nowrap font-mono text-[12.5px]">{value}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  ) : (
+                    <span className="text-[12.5px] text-ink/45">{UNPRICED}</span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+          <div className="hidden sm:block">
+            <table className="w-full border-collapse text-[13px]">
+              <thead>
+                <tr>
+                  <th className={`${HEAD_CELL} text-left font-normal`}>{bySize ? "모델 · 시도 1건" : "모델"}</th>
+                  {bySize ? (
+                    estimate.source_size_bands.map((chars, index) => (
+                      <th key={chars} className={`${HEAD_CELL} text-right font-normal`}>
+                        {["작은 과제", "보통", "큰 프로젝트"][index] ?? ""}
+                        <br />
+                        소스 약 {formatManCount(chars)} 자
                       </th>
-                    ) : null}
-                    <th className={`${HEAD_CELL} text-right font-normal`}>배율</th>
-                  </>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => {
-                const selected = isCurrent(row);
-                const tone = selected ? "bg-paper font-medium" : "";
-                return (
-                  <tr
-                    key={`${row.model_id}:${row.reasoning_effort ?? ""}`}
-                    data-testid={`class-scoring-cost-row-${row.model_id}${row.reasoning_effort ? `-${row.reasoning_effort}` : ""}`}
-                    className={tone}
-                  >
-                    <td className={CELL}>
-                      <span className="inline-flex flex-wrap items-center">
-                        <span className={selected ? "font-semibold" : ""}>{costRowLabel(row)}</span>
-                        {selected ? <CurrentBadge /> : null}
-                      </span>
-                    </td>
-                    {!row.priced ? (
-                      <td colSpan={bySize ? estimate.source_size_bands.length : hasParticipants ? 3 : 2} className={`${CELL} text-right text-[12.5px] text-ink/45`}>
-                        {UNPRICED}
+                    ))
+                  ) : (
+                    <>
+                      <th className={`${HEAD_CELL} text-right font-normal`}>시도 1건</th>
+                      {hasParticipants ? (
+                        <th className={`${HEAD_CELL} text-right font-normal`}>
+                          문제 하나 · {estimate.participant_count}명
+                        </th>
+                      ) : null}
+                      <th className={`${HEAD_CELL} text-right font-normal`}>배율</th>
+                    </>
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => {
+                  const selected = isCurrent(row);
+                  const tone = selected ? "bg-paper font-medium" : "";
+                  return (
+                    <tr
+                      key={`${row.model_id}:${row.reasoning_effort ?? ""}`}
+                      data-testid={`class-scoring-cost-row-${row.model_id}${row.reasoning_effort ? `-${row.reasoning_effort}` : ""}`}
+                      className={tone}
+                    >
+                      <td className={CELL}>
+                        <span className="inline-flex flex-wrap items-center">
+                          <span className={selected ? "font-semibold" : ""}>{costRowLabel(row)}</span>
+                          {selected ? <CurrentBadge /> : null}
+                        </span>
                       </td>
-                    ) : bySize ? (
-                      row.by_source_size.map((cost, index) => (
-                        <td key={index} className={NUM_CELL}>
-                          {formatKrw(cost.krw, row.open_ended)}
+                      {!row.priced ? (
+                        <td colSpan={bySize ? estimate.source_size_bands.length : hasParticipants ? 3 : 2} className={`${CELL} text-right text-[12.5px] text-ink/45`}>
+                          {UNPRICED}
                         </td>
-                      ))
-                    ) : (
-                      <>
-                        <td className={NUM_CELL}>
-                          {row.per_attempt ? formatKrw(row.per_attempt.krw, row.open_ended) : "—"}
-                        </td>
-                        {hasParticipants ? (
-                          <td className={NUM_CELL}>
-                            {row.per_problem_krw ? formatKrw(row.per_problem_krw, row.open_ended) : "—"}
+                      ) : bySize ? (
+                        row.by_source_size.map((cost, index) => (
+                          <td key={index} className={NUM_CELL}>
+                            {formatKrw(cost.krw, row.open_ended)}
                           </td>
-                        ) : null}
-                        <td className={NUM_CELL}>{ratioText(row)}</td>
-                      </>
-                    )}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                        ))
+                      ) : (
+                        <>
+                          <td className={NUM_CELL}>
+                            {row.per_attempt ? formatKrw(row.per_attempt.krw, row.open_ended) : "—"}
+                          </td>
+                          {hasParticipants ? (
+                            <td className={NUM_CELL}>
+                              {row.per_problem_krw ? formatKrw(row.per_problem_krw, row.open_ended) : "—"}
+                            </td>
+                          ) : null}
+                          <td className={NUM_CELL}>{ratioText(row)}</td>
+                        </>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="px-3.5 py-2.5 text-[11.5px] leading-relaxed text-ink/45">
+            {bySize
+              ? `채점은 시도 하나에 한 번이고, 비용은 제출 소스의 길이에 거의 비례합니다. 시도가 ${estimate.min_sample_count}건 쌓이면 이 클래스의 실제 평균으로 바뀝니다. ${BILLING_NOTE}`
+              : hasParticipants
+                ? `채점은 시도 하나에 한 번입니다. 「문제 하나」는 참여자 ${estimate.participant_count}명이 한 사람당 ${formatAttemptsPerParticipant(estimate.attempts_per_participant)} 낸다고 보고 셈했습니다. ${BILLING_NOTE} 추론 모델은 문제와 소스에 따라 크게 달라집니다.`
+                : `채점은 시도 하나에 한 번입니다. 문제 하나의 비용은 참여자가 들어오면 보입니다. ${BILLING_NOTE} 추론 모델은 문제와 소스에 따라 크게 달라집니다.`}
+          </p>
         </div>
-        <p className="px-3.5 py-2.5 text-[11.5px] leading-relaxed text-ink/45">
-          {bySize
-            ? `채점은 시도 하나에 한 번이고, 비용은 제출 소스의 길이에 거의 비례합니다. 시도가 ${estimate.min_sample_count}건 쌓이면 이 클래스의 실제 평균으로 바뀝니다. ${BILLING_NOTE}`
-            : hasParticipants
-              ? `채점은 시도 하나에 한 번입니다. 「문제 하나」는 참여자 ${estimate.participant_count}명이 한 사람당 ${formatAttemptsPerParticipant(estimate.attempts_per_participant)} 낸다고 보고 셈했습니다. ${BILLING_NOTE} 추론 모델은 문제와 소스에 따라 크게 달라집니다.`
-              : `채점은 시도 하나에 한 번입니다. 문제 하나의 비용은 참여자가 들어오면 보입니다. ${BILLING_NOTE} 추론 모델은 문제와 소스에 따라 크게 달라집니다.`}
-        </p>
       </div>
 
       {isReasoning && current.priced && current.ratio_to_baseline !== null ? (
@@ -247,6 +283,14 @@ export function ClassScoringCostTable({
       ) : null}
     </div>
   );
+}
+
+function browserStorage(): Storage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
 }
 
 /** 예산 칸 아래 한 줄 — 「이 한도면 시도 약 N건」. */
