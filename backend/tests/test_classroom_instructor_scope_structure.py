@@ -47,6 +47,7 @@ ALLOWLIST: dict[Path, dict[str, str]] = {
         "create_class": "아직 없는 클래스를 만드는 라우트다 — 열 문이 없다(생성은 범위 밖, contests.transitions의 CREATION_STATES와 같은 경계).",
         "update_class": "클래스 설정은 보관 뒤에도 고친다(participation 모듈 docstring 「열어 두는 것」) — class_scope(write=False)만 부른다.",
         "set_class_openai_key": "update_class와 같은 이유 — 클래스 설정, class_scope(write=False)만 부른다.",
+        "set_class_compatible_server": "set_class_openai_key와 같은 이유 — 채점 연결은 클래스 설정이다(#601).",
         "copy_class_view": "원본을 바꾸지 않고 복사해 새로 여는 것이다(participation 「복사해서 새로 열기」) — class_scope(write=False)만 부른다.",
         "regenerate_join_link": "보관된 클래스라도 링크 재발급은 막지 않는다(가입 자체는 join_class가 따로 막는다) — class_scope(write=False)만 부른다.",
         "archive_class": "보관을 여는 동작 자신이라 보관 여부로 스스로를 막을 수 없다 — class_scope(write=False)만 부른다.",
@@ -211,6 +212,7 @@ _SCOPE_CALLER_FILES = sorted(
 OWNER_ONLY_ROUTES: dict[Path, dict[str, str]] = {
     Path("classroom/api.py"): {
         "set_class_openai_key": "채점 키는 소유자의 비용이다 — class_scope(owner=True).",
+        "set_class_compatible_server": "채점 연결(호환 서버)도 소유자의 비용과 신뢰다 — class_scope(owner=True).",
         "delete_class": "클래스의 존폐는 소유자 몫이다 — class_scope(owner=True).",
         "request_ownership_transfer": "소유권 이전은 소유자 몫이다(CONTEXT.md 「소유권 이전」, #564) — class_scope(owner=True).",
         "cancel_ownership_transfer": "이전 요청 취소도 소유자 몫이다(#564) — class_scope(owner=True).",

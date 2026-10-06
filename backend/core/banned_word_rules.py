@@ -380,6 +380,16 @@ RULES: dict[tuple[str, str, str], BannedWordRule] = {
         checks_profanity=False,
         exempt_reason="강사가 넣는 OpenAI API 키 — 자격증명, 화면에 노출되지 않는다.",
     ),
+    ("classroom", "CompatibleServerIn", "server_url"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="강사 호환 채점 서버의 주소 — 안전한 바깥 호출이 모양을 검사하고, 공동 강사에게는 호스트만 보인다.",
+    ),
+    ("classroom", "CompatibleServerIn", "auth_value"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="강사 호환 채점 서버의 Bearer 값 — 자격증명, 화면에 노출되지 않는다.",
+    ),
     ("classroom", "ClassPatchIn", "default_model"): BannedWordRule(
         checks_impersonation=False,
         checks_profanity=False,
