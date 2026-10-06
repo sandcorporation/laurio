@@ -56,7 +56,14 @@ type ScrubbableEvent = {
  */
 export type SentryRuntime = "browser" | "server";
 
-/** 이 헤더는 그대로 자격증명이거나 사용자를 특정한다 — 이름으로 지운다. */
+/**
+ * 이 헤더는 그대로 자격증명이거나 사용자를 특정한다 — 이름으로 지운다(소문자).
+ * 백엔드 `core.observability._CREDENTIAL_HEADERS` 와 같은 목록이다.
+ *
+ * **차단 목록이라 목록에 없는 헤더는 보내진다.** 자격증명을 싣는 헤더를 새로
+ * 만들면 이 목록(세 앱의 사본 셋)과 백엔드 목록에 함께 더한다 — 더하지 않으면
+ * 그 값이 GlitchTip 에 평문으로 실린다.
+ */
 const CREDENTIAL_HEADERS = new Set([
   "cookie",
   "set-cookie",
@@ -107,9 +114,9 @@ export function isThirdPartyBrowserError(event: ScrubbableEvent): boolean {
 /**
  * 오류 하나를 보내기 전에 자격증명과 요청 본문을 걷어낸다.
  *
- * **지우는 쪽으로 틀렸다(allow-list 가 아니라 deny-list 가 아니다).** `cookies` 와
- * 요청 본문(`data`)은 통째로 버리고, 헤더는 **이름을 아는 것만 남긴다** — 새 헤더가
- * 생겼을 때 기본값이 「보낸다」이면 다음 누출이 조용히 또 생긴다.
+ * `cookies` 와 요청 본문(`data`)은 통째로 버리고, 헤더는 **차단 목록**이다 —
+ * `CREDENTIAL_HEADERS` 에 든 이름만(대소문자 무시) 지우고 나머지 헤더는 그대로
+ * 보낸다. 백엔드 `core.observability.scrub_secrets`(#590)와 같은 방식·같은 목록이다.
  */
 export function scrubSensitiveRequestData<T extends ScrubbableEvent>(event: T): T {
   const request = event.request;

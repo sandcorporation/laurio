@@ -152,8 +152,12 @@ sentry.io 가 아니라 **우리가 띄운 GlitchTip**
   이벤트에는 요청이 그대로 붙어 `codemit_access`·`codemit_refresh` JWT 가 **평문으로**
   나갔다(refresh 수명 14일이라 그 값 하나로 로그인이 된다). 지금은
   `lib/observability/sentry-options.ts` 의 `beforeSend`(`scrubSensitiveRequestData`)가
-  쿠키·요청 본문을 지우고 **헤더는 이름을 아는 것만 남긴다** — 새 헤더의 기본값이
-  「보낸다」이면 다음 누출이 조용히 또 생기기 때문이다. 세 앱의 여섯 진입점이 전부
+  쿠키·요청 본문을 통째로 지우고, **헤더는 차단 목록**이다 — `CREDENTIAL_HEADERS`
+  (`cookie`·`set-cookie`·`authorization`·`proxy-authorization`·`x-internal-token`·
+  `x-operator-origin`, 대소문자 무시)만 지우고 나머지 헤더는 그대로 보낸다. 백엔드
+  `core.observability._CREDENTIAL_HEADERS` 와 같은 목록이다. **차단 목록이라 자격증명을
+  싣는 헤더를 새로 만들면 두 자리(세 앱의 사본과 백엔드)에 함께 더해야 한다** — 빠뜨리면
+  그 값이 GlitchTip 에 평문으로 실린다. 세 앱의 여섯 진입점이 전부
   `buildSentryOptions` 를 지나므로 그 한 자리가 서버·브라우저 양쪽을 덮고, 두 앱의
   `sentry-options.test.ts` 가 그 동작을 고정한다(운영자 앱은 테스트 파일이 없다).
   **백엔드는 스택 프레임의 지역 변수를 보내지 않는다**(#590, 2026-10-06) — Python SDK 의
