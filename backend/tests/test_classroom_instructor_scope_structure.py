@@ -58,6 +58,8 @@ ALLOWLIST: dict[Path, dict[str, str]] = {
         "create_classroom_submission": "참여자와 강사가 같은 주소를 걷는 혼합 라우트다 — 강사 분기도 class_scope/problem_scope가 아니라 .filter(...).first()로 존재를 숨기지 않는다(get_my_problem과 같은 이유).",
         "create_co_instructor_invite": "사람을 들이는 일은 클래스의 존폐 쪽이라 보관된 클래스에서도 연다(CONTEXT.md 「공동 강사」, #561) — class_scope(write=False)만 부른다.",
         "cancel_co_instructor_invite": "초대 만들기와 같은 이유 — 사람을 들이는 일은 보관과 무관하다(CONTEXT.md 「공동 강사」, #562). 강사 누구나 취소한다 — class_scope(write=False, owner=False)만 부른다.",
+        "leave_class": "사람이 드나드는 일은 보관과 무관하다 — 공동 강사는 보관된 클래스에서도 떠난다(CONTEXT.md 「공동 강사」, #563). class_scope(write=False, owner=False)만 부르고, 소유자의 떠나기는 classroom.co_instructors.leave 가 409 로 거절한다.",
+        "remove_co_instructor": "떠나기와 같은 이유 — 보관된 클래스에서도 공동 강사를 내보낸다(#563). 소유자 전용이라 class_scope(write=False, owner=True)를 부른다.",
         "accept_co_instructor_invite": "초대받은 사람이 여는 문이다 — 아직 강사가 아니므로 강사 전용 범위 밖이고, 보관된 클래스에서도 수락한다(#561). 초대 토큰과 행 잠금이 문이다(classroom.co_instructors).",
         "copy_problem": "원본(problem_scope write=False)과 대상(class_scope write=True) 둘을 부른다 — write=True 호출이 있어 이 표에 없어도 통과하지만, 원본 쪽 write=False 호출이 있다는 것을 여기 남겨 둔다.",
     },
@@ -205,6 +207,7 @@ OWNER_ONLY_ROUTES: dict[Path, dict[str, str]] = {
     Path("classroom/api.py"): {
         "set_class_openai_key": "채점 키는 소유자의 비용이다 — class_scope(owner=True).",
         "delete_class": "클래스의 존폐는 소유자 몫이다 — class_scope(owner=True).",
+        "remove_co_instructor": "공동 강사 내보내기는 소유자 몫이다(CONTEXT.md 「공동 강사」, #563) — class_scope(owner=True).",
         "update_class": (
             "클래스 설정 전체는 강사 누구나 고치지만 예산 칸(token_budget·경고 임계)이나 소유자의 "
             "강사 이름 칸(#561)을 보낼 때만 소유자 전용이다 — class_scope(owner=False) 뒤 scope.require_owner()."

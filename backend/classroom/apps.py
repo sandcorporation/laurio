@@ -48,6 +48,10 @@ class ClassroomConfig(AppConfig):
         register_scan(UNUSED_CLIENT_SCAN)
         user_withdrawn.connect(revoke_on_withdrawal, dispatch_uid="classroom-connected-app-withdrawal")
         user_became_dormant.connect(revoke_on_dormancy, dispatch_uid="classroom-connected-app-dormancy")
+        # 공동 강사(#563) — 탈퇴하면 공동 강사인 클래스에서 떠나기와 같은 정리로 빠진다.
+        from .co_instructors import leave_all_on_withdrawal
+
+        user_withdrawn.connect(leave_all_on_withdrawal, dispatch_uid="classroom-co-instructor-withdrawal")
         # 어댑터 모드 부팅 가드(#340, ADR-0043) — `core.apps.CoreConfig.ready()`와
         # 같은 이유로 여기서 등록한다(django.setup() 이후에만 평가돼야 한다).
         register(checks.check_classroom_scoring_adapter_mode, BOOT_CHECK_TAG)

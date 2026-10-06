@@ -423,6 +423,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/co-instructors/{co_instructor_id}/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove Co Instructor
+         * @description 소유자가 공동 강사를 내보낸다(#563) — 소유자 전용, 보관된 클래스에서도. 떠나기와 같은
+         *     정리를 한다(`classroom.co_instructors.depart`).
+         */
+        post: operations["classroom_api_remove_co_instructor"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/copy": {
         parameters: {
             query?: never;
@@ -481,6 +502,27 @@ export interface paths {
         get: operations["classroom_api_list_class_instructors"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/classes/{class_id}/instructors/me/leave": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Leave Class
+         * @description 공동 강사가 스스로 클래스를 떠난다(#563) — 보관된 클래스에서도. 떠난 뒤에는 그 클래스가
+         *     목록에서 사라지고 강사 라우트가 404 다. 소유자는 409 — 넘기거나 보관·삭제한다.
+         */
+        post: operations["classroom_api_leave_class"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4680,6 +4722,8 @@ export interface components {
         ClassInstructorOut: {
             /** Accepted At */
             accepted_at?: string | null;
+            /** Co Instructor Id */
+            co_instructor_id?: number | null;
             /** Display Name */
             display_name: string;
             /** Is Me */
@@ -9020,6 +9064,45 @@ export interface operations {
             };
         };
     };
+    classroom_api_remove_co_instructor: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+                co_instructor_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     classroom_api_copy_class_view: {
         parameters: {
             query?: never;
@@ -9116,6 +9199,44 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_leave_class: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -933,6 +933,35 @@ def cancel_co_instructor_invite(request: HttpRequest, class_id: int, invite_id: 
     return 204, None
 
 
+@router.post(
+    "/classes/{class_id}/instructors/me/leave",
+    response={204: None, 404: ErrorOut, 409: ErrorOut},
+    auth=jwt_auth,
+)
+def leave_class(request: HttpRequest, class_id: int):
+    """공동 강사가 스스로 클래스를 떠난다(#563) — 보관된 클래스에서도. 떠난 뒤에는 그 클래스가
+    목록에서 사라지고 강사 라우트가 404 다. 소유자는 409 — 넘기거나 보관·삭제한다."""
+
+    # 사람이 드나드는 일은 보관과 무관하다(초대와 같다) — write=False.
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
+    co_instructors.leave(class_obj, request.auth_user.id)
+    return 204, None
+
+
+@router.post(
+    "/classes/{class_id}/co-instructors/{co_instructor_id}/remove",
+    response={204: None, 403: ErrorOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def remove_co_instructor(request: HttpRequest, class_id: int, co_instructor_id: int):
+    """소유자가 공동 강사를 내보낸다(#563) — 소유자 전용, 보관된 클래스에서도. 떠나기와 같은
+    정리를 한다(`classroom.co_instructors.depart`)."""
+
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=True).class_obj
+    co_instructors.remove_by_owner(class_obj, co_instructor_id)
+    return 204, None
+
+
 @router.get(
     "/co-instructor-invites/{token}",
     response={200: CoInstructorInvitePreviewOut, 404: ErrorOut},
