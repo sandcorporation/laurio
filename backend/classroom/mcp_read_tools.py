@@ -6,9 +6,10 @@
 똑같이 「없다」다 — 값은 `classroom.api` 의 직렬화 함수가 만든다. 무엇이 보이는가를
 두 표면이 따로 정하지 않는다.
 
-**화면과 다른 것은 둘이다.** 클래스 상세에서 OpenAI 키의 가린 표시
-(`openai_key_masked`, 끝 네 자리)를 뺀다. 연결된 앱이 보는 것은 「키가 있는가」와 그
-상태뿐이다(#511 「OpenAI 키」) — 키의 어느 조각도 대화 기록과 AI 업체로 가지 않는다.
+**화면과 다른 것은 둘이다.** 클래스 상세에서 채점 연결의 값 조각을 뺀다 — OpenAI 키의 가린
+표시(`openai_key_masked`, 끝 네 자리), 호환 서버의 주소 전체(`scoring_server_url`)와 인증
+값의 가린 표시(`scoring_auth_masked`). 연결된 앱이 보는 것은 「연결이 있는가」·그 상태·종류·
+호스트뿐이다(#511 「OpenAI 키」, #605) — 값의 어느 조각도 대화 기록과 AI 업체로 가지 않는다.
 이메일은 화면 응답에도 없다(참여자는 클래스에서 불릴 이름으로만 나온다). 그리고 문제 목록은
 화면의 한 줄에서 **요약 칸만 옮긴다**(#579) — 설명·체크리스트 원문은 `get_problem` 이 준다.
 값은 여전히 화면의 직렬화 함수가 만들고, 이 모듈은 칸을 고르기만 한다.
@@ -41,7 +42,7 @@ from .instructor_scope import class_scope, problem_scope
 from .models import ConnectedApp
 
 #: 화면 응답에는 있지만 연결된 앱에게는 주지 않는 클래스 필드.
-_CLASS_FIELDS_WITHHELD = {"openai_key_masked"}
+_CLASS_FIELDS_WITHHELD = {"openai_key_masked", "scoring_server_url", "scoring_auth_masked"}
 
 
 def _as_screen_json(value):
@@ -362,10 +363,22 @@ CLASS_OUTPUT_SCHEMA = {
         "default_model": {"type": "string", "description": "기본 채점 모델"},
         "default_model_is_reasoning": {"type": "boolean"},
         "default_reasoning_effort": {"type": "string", "description": "기본 추론 강도(low·medium·high)"},
-        "has_openai_key": {"type": "boolean", "description": "채점에 쓸 OpenAI 키가 들어 있는가"},
+        "has_openai_key": {
+            "type": "boolean",
+            "description": "채점 연결(OpenAI 키든 호환 서버든)이 들어 있는가 — 이름은 예전 그대로다",
+        },
+        "scoring_connection_kind": {
+            "type": "string",
+            "enum": ["openai_key", "compatible_server"],
+            "description": "채점 연결의 종류 — openai_key OpenAI 키, compatible_server 강사가 둔 호환 서버",
+        },
+        "scoring_server_host": {
+            "type": ["string", "null"],
+            "description": "호환 서버일 때만 그 호스트 — 주소 경로·인증 값은 주지 않는다",
+        },
         "openai_key_status": {
             "type": ["string", "null"],
-            "description": "키가 있을 때만 — verified 확인됨, unverified 확인 전, rejected 거부됨",
+            "description": "연결이 있을 때만 — verified 확인됨, unverified 확인 전, rejected 거부됨",
         },
         "scoring_quota_exhausted": {
             "type": "boolean",
@@ -389,7 +402,7 @@ READ_TOOL_SPECS: list[dict] = [
         "title": "클래스 상세",
         "description": (
             "클래스 하나의 설정을 돌려준다 — 이름, 내 역할(소유자·공동 강사), 소유자의 강사 이름, 가입 코드, 보관 여부, 기본 채점 모델과 "
-            "추론 강도, OpenAI 키가 있는가(키 값은 주지 않는다)와 그 상태, 채점 토큰 예산·사용량·남은 양·"
+            "추론 강도, 채점 연결이 있는가와 그 상태·종류(OpenAI 키·호환 서버)·호환 서버의 호스트(키·주소·인증 값은 주지 않는다), 채점 토큰 예산·사용량·남은 양·"
             "경고 임계, 제출이 있는가, 공개된 템플릿, 기본 모델·추론 강도로 채점할 때의 예상 비용(시도 1건·문제 "
             "하나, 원). 내가 강사가 아닌 클래스는 찾을 수 없다고 답한다."
         ),

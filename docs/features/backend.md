@@ -276,7 +276,7 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 | `GET .../problems/{id}/mine` | 참여자가 보는 문제 하나 + 본인의 시도 목록(#286) |
 | `POST .../problems/{id}/submissions` | 참여자가 소스 또는 저장소로 낸다 — 낼 때마다 새 시도가 쌓인다(#286) |
 | `POST .../problems/{id}/copy` | 문제를 자기 다른 클래스로 복사한다 — 체크리스트·채점 설정은 따라오고 제출물·시도·Score는 없다, 복사본은 언제나 초안이다(#292) |
-| `POST /api/classroom/classes/{id}/copy` | 클래스를 복사해 다음 기수를 연다 — 문제·체크리스트·채점 설정이 순서대로 따라오고 참여자·제출물·Score·OpenAI 키는 따라오지 않는다(#293) |
+| `POST /api/classroom/classes/{id}/copy` | 클래스를 복사해 다음 기수를 연다 — 문제·체크리스트·채점 설정이 순서대로 따라오고 참여자·제출물·Score·채점 연결(OpenAI 키·호환 서버 주소와 인증 값)은 따라오지 않는다(#293, #605) |
 | `POST .../problems/{id}/publish-template` | 문제를 공개 시점의 사본(템플릿)으로 뜬다 — 원본을 고치거나 지워도 바뀌지 않는다, 채점 모델은 담기지 않는다(#316) |
 | `GET /api/classroom/problem-templates` | 공개된 템플릿을 제목 검색·최신순으로 찾는다, 페이지네이션(#318) |
 | `GET .../problem-templates/mine` | 내가 올린 템플릿 전부(내려간 것 포함) — 내리기 화면이 여기서 고른다(#316) |
@@ -560,7 +560,7 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 | 도구 | 하는 일 |
 | --- | --- |
 | `list_my_classes`(읽기) | 내가 강사인 클래스(소유한 것과 공동 강사인 것) — 이름·내 역할(`role`: owner·co_instructor, #566)·보관 여부·참여자 수(강사와 내보낸 사람 제외)·문제 수(열림·초안·숨김별). 강사 화면의 「내 클래스」와 같은 서비스 함수(`classroom.services.instructor_classes`)를 부른다 |
-| `get_class`(읽기, `class_id`) | 클래스 상세 — 화면의 `GET …/classes/{id}` 와 같은 값에서 OpenAI 키의 가린 표시(`openai_key_masked`)만 뺀다. 내 역할(`role`), 키는 있는가(`has_openai_key`)와 상태만, 예산·사용량·남은 양·기본 모델·가입 코드·보관 여부, 그리고 기본 모델·추론 강도의 예상 채점 비용 한 줄(`scoring_cost_estimate`, #591 — 화면에는 없는 칸) |
+| `get_class`(읽기, `class_id`) | 클래스 상세 — 화면의 `GET …/classes/{id}` 와 같은 값에서 채점 연결의 값 조각(`openai_key_masked`·`scoring_server_url`·`scoring_auth_masked`)을 뺀다(#605). 내 역할(`role`), 채점 연결이 있는가(`has_openai_key` — 이름은 예전 그대로, 호환 서버여도 참)와 상태·종류(`scoring_connection_kind`)·호환 서버의 호스트(`scoring_server_host`)만, 예산·사용량·남은 양·기본 모델·가입 코드·보관 여부, 그리고 기본 모델·추론 강도의 예상 채점 비용 한 줄(`scoring_cost_estimate`, #591 — 화면에는 없는 칸) |
 | `list_problems`(읽기, `class_id`) | 문제 전부(초안·열림·숨김)의 **요약**(#579) — 화면의 `GET …/problems` 한 줄에서 제목·상태·할 수 있는 전이·순서·제출 형식·달성률(통과 수·참여자 수)·채점 모델 거부·지울 수 있는가만 옮기고 체크리스트 항목 수를 더한다. 설명·체크리스트·채점 설정은 싣지 않는다 — `get_problem` 으로 읽는다(도구 설명이 그렇게 말한다) |
 | `get_problem`(읽기, `class_id`·`problem_id`) | 문제 하나의 상세 — 화면의 `GET …/problems/{id}` 와 같은 값(설명 원문·체크리스트·채점 설정까지)에 이 문제가 실제로 쓸 설정의 예상 채점 비용 한 줄(`scoring_cost_estimate`, #591)을 더한다 |
 | `list_participants`(읽기, `class_id`) | 참여자 명단 — 화면의 `GET …/members` 와 같은 값(클래스에서 불릴 이름·가입 시각·내보냄·강사(소유자·공동 강사) 자리). 이메일 없음 |
@@ -578,13 +578,13 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 | `expel_member`(쓰기·두 단계) | 참여자 내보내기 — 미리보기: 클래스에서 불릴 이름·가입 시각·강사인가·시도 수. 이미 내보낸 사람이면 `nothing_to_do` |
 | `publish_problem_template` · `publish_class_template`(쓰기·두 단계) | 문제 하나·클래스 통째를 템플릿으로 공개 — 미리보기: 공개될 사본의 범위(옮겨지는 것·안 옮겨지는 것, 클래스면 초안·숨김 문제까지 전부의 제목)·공개자 이름·누가 보는가. 공개자 이름 금칙어는 미리보기에서 화면 문장으로 거절, 살아 있는 템플릿이 이미 있으면 `nothing_to_do` |
 | `create_class`(쓰기) | 클래스 만들기 — 이름·강사로 불릴 이름(#516). 키 없이 시작한다 |
-| `copy_class`(쓰기) | 클래스 복사해서 새로 열기 — 화면의 복사와 같다(「 사본」, 새 가입 코드, 참여자·제출·키는 따라오지 않음). 보관된 클래스도 복사한다 |
+| `copy_class`(쓰기) | 클래스 복사해서 새로 열기 — 화면의 복사와 같다(「 사본」, 새 가입 코드, 참여자·제출·채점 연결은 따라오지 않음). 보관된 클래스도 복사한다 |
 | `archive_class` · `unarchive_class`(쓰기) | 클래스 보관·보관 되돌리기 — 멱등 |
 | `update_class_settings`(쓰기) | 클래스 설정 고치기 — 이름·강사로 불릴 이름·기본 채점 모델·기본 추론 강도·채점 토큰 예산·경고 임계 중 보낸 칸만. 보관된 클래스도 고친다. 예산 칸과 강사로 불릴 이름(소유자의 이름)은 소유자만 — 공동 강사가 보내면 아무것도 바뀌지 않고 거절된다(내 강사 이름은 아래 도구로). **키 칸이 없다** |
 | `rename_my_instructor_name`(쓰기, `class_id`·`display_name`) | 내 강사 이름 바꾸기(#576) — 부른 강사(소유자든 공동 강사든) **자기** 이 클래스에서 불릴 이름만. 화면의 `PATCH …/instructors/me` 와 같은 `co_instructors.rename_myself` 를 부르고, 다른 강사를 가리킬 인자가 없다. 보관된 클래스도 된다. 금칙어·빈 이름은 화면과 같은 문장으로 거절 |
 | `regenerate_join_link`(쓰기) | 가입 링크 다시 발급 — 이전 코드는 곧바로 죽는다. 보관된 클래스도 된다 |
 | `import_problem_template`(쓰기) | 공개된 문제 템플릿을 내 클래스의 초안 문제로 가져오기 — 보관된 클래스로는 안 된다. 결과는 `create_problem` 과 같은 요약 |
-| `import_class_template`(쓰기) | 공개된 클래스 템플릿을 새 클래스로 가져오기 — 이름은 직접 정한다 |
+| `import_class_template`(쓰기) | 공개된 클래스 템플릿을 새 클래스로 가져오기 — 이름은 직접 정한다, 채점 연결 없이 시작한다 |
 
 **응답은 할 일에 맞는 크기다**(#579). 원문(설명·채점 지침)은 `get_problem` 하나만 싣는다 — 상태
 하나를 바꾸거나 체크리스트 한 줄을 고칠 때마다 설명 마크다운이 대화에 다시 실리지 않도록. 모든
@@ -630,9 +630,9 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 보관과 되돌리기·링크 재발급은 보관된 클래스에서도 열려 있고, 문제 템플릿 가져오기는 보관된
 클래스면 화면과 같은 문장으로 거절한다. 만들기·설정·보관·링크·템플릿 가져오기의 몸통은
 `classroom.class_authoring` 하나를 화면 라우트(`classroom.api`·`classroom.template_api`)와 함께
-부른다. 처리기는 `classroom.mcp_class_tools` 에 산다. **OpenAI 키를 넣거나 바꾸거나 지우는
-도구는 없다** — 설정 고치기에 `api_key` 같은 인자를 주면 「알 수 없는 인자」로 통째로 거절되고,
-결과의 클래스도 키의 가린 표시 없이 「있는가」만 싣는다. 클래스 삭제·템플릿 공개는 위 두 단계
+부른다. 처리기는 `classroom.mcp_class_tools` 에 산다. **채점 연결(OpenAI 키·호환 서버)을
+넣거나 바꾸거나 지우는 도구는 없다**(#605) — 설정 고치기에 `api_key`·`scoring_server_url` 같은 인자를
+주면 「알 수 없는 인자」로 통째로 거절되고, 결과의 클래스도 값 조각 없이 「있는가」·종류·호스트만 싣는다. 클래스 삭제·템플릿 공개는 위 두 단계
 도구가 맡는다.
 
 **쓰기만 기록한다**(ADR-0052). 쓰기 도구가 성공할 때마다 `ConnectedAppWrite` 한 줄 — 강사·연결된

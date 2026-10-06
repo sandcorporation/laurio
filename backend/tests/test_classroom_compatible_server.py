@@ -261,3 +261,78 @@ def test_handing_the_class_over_drops_the_server(client, db, monkeypatch):
     taken = get_class(client, co["access"], class_id)
     assert taken["has_openai_key"] is False
     assert taken["scoring_server_host"] is None
+
+
+# --- 채점 연결은 따라가지 않는다(#605) ---------------------------------------------------
+
+
+def _assert_no_connection(seen: dict) -> None:
+    """「OpenAI 키·없음」 — 새 클래스가 아무 채점 연결 없이 시작한 모양."""
+
+    assert seen["has_openai_key"] is False
+    assert seen["scoring_connection_kind"] == "openai_key"
+    assert seen["scoring_server_host"] is None
+    assert seen["scoring_server_url"] is None
+    assert seen["scoring_auth_masked"] is None
+
+
+def test_a_copied_class_starts_without_the_server(client, db, monkeypatch):
+    _, instructor, class_id, _ = _class_with_compatible_server(client, monkeypatch, auth_value="owner-token-4321")
+
+    copied = client.post(f"{CLASSES_URL}/{class_id}/copy", **auth_header(instructor["access"]))
+    assert copied.status_code == 201, copied.content
+
+    _assert_no_connection(get_class(client, instructor["access"], copied.json()["id"]))
+    assert Class.objects.get(id=copied.json()["id"]).scoring_server_url == ""
+
+
+def test_a_class_imported_from_a_template_starts_without_the_server(client, db, monkeypatch):
+    _, instructor, class_id, _ = _class_with_compatible_server(client, monkeypatch, auth_value="owner-token-4321")
+    published = client.post(
+        f"{CLASSES_URL}/{class_id}/publish-template",
+        data={"publisher_display_name": "김강사"},
+        content_type="application/json",
+        **auth_header(instructor["access"]),
+    )
+    assert published.status_code in (200, 201), published.content
+    other = login(client, uid="instructor-2")
+
+    imported = client.post(
+        f"/api/classroom/class-templates/{published.json()['share_code']}/import",
+        data={"name": "가져온 클래스"},
+        content_type="application/json",
+        **auth_header(other["access"]),
+    )
+    assert imported.status_code == 201, imported.content
+
+    _assert_no_connection(get_class(client, other["access"], imported.json()["id"]))
+
+
+def test_a_connected_app_reads_only_kind_and_host_and_cannot_change_the_connection(client, db, monkeypatch):
+    from tests.test_classroom_connected_apps import _connect, _rpc
+
+    _, instructor, class_id, _ = _class_with_compatible_server(client, monkeypatch, auth_value="owner-token-4321")
+    token = _connect(client, instructor["access"])["access_token"]
+
+    read = _rpc(client, token, "tools/call", {"name": "get_class", "arguments": {"class_id": class_id}})
+    seen = read.json()["result"]["structuredContent"]
+    assert seen["has_openai_key"] is True
+    assert seen["scoring_connection_kind"] == "compatible_server"
+    assert seen["scoring_server_host"] == "llm.example.com"
+    assert "scoring_server_url" not in seen
+    assert "scoring_auth_masked" not in seen
+    body = read.content.decode("utf-8")
+    assert "/v1" not in body and "4321" not in body
+
+    for arguments in (
+        {"scoring_server_url": "https://other.example.com/v1"},
+        {"scoring_connection_kind": "openai_key"},
+        {"openai_api_key": "sk-new"},
+    ):
+        changed = _rpc(
+            client, token, "tools/call", {"name": "update_class_settings", "arguments": {"class_id": class_id, **arguments}}
+        )
+        assert changed.json()["result"]["isError"] is True, arguments
+    tool_names = {tool["name"] for tool in _rpc(client, token, "tools/list").json()["result"]["tools"]}
+    assert not {name for name in tool_names if "key" in name or "server" in name or "connection" in name}
+    assert Class.objects.get(id=class_id).scoring_server_url == SERVER_URL

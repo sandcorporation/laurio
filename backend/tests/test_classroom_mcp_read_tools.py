@@ -1,7 +1,7 @@
 """연결된 앱의 읽기 도구 (#513, 부모 #511, ADR-0052·ADR-0040).
 
 강사 화면의 API 와 MCP 도구를 **같은 HTTP 로** 나란히 부르고 값을 대조한다 — 두 표면이 같은
-함수를 부른다는 것을 결과로 고정한다. 화면과 다른 것은 클래스 상세의 OpenAI 키 가린 표시 하나다
+함수를 부른다는 것을 결과로 고정한다. 화면과 다른 것은 클래스 상세의 채점 연결 값 조각(키 가린 표시·호환 서버 주소)이다
 (연결된 앱에는 「있는가」만 간다).
 """
 
@@ -139,7 +139,9 @@ def test_each_read_tool_returns_what_the_screen_returns(client, db):
     tool_class = _structured(client, token, "get_class", class_id=class_id)
     # 화면에 없는 칸은 예상 채점 비용 하나다(#591) — 화면은 따로 `scoring-cost` 로 읽는다.
     class_estimate = tool_class.pop("scoring_cost_estimate")
-    assert tool_class == {k: v for k, v in screen_class.items() if k != "openai_key_masked"}
+    # 채점 연결의 값 조각(키 끝 네 자리, 호환 서버 주소·인증 가림, #605)은 화면에만 있다.
+    withheld = {"openai_key_masked", "scoring_server_url", "scoring_auth_masked"}
+    assert tool_class == {k: v for k, v in screen_class.items() if k not in withheld}
     assert class_estimate["model"] == screen_class["default_model"]
     assert tool_class["token_budget"] == 50000
 
