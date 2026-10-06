@@ -98,14 +98,6 @@ logger = logging.getLogger(__name__)
 #: 마감이 없어 "마감 후 6시간 유예"가 성립하지 않으므로 횟수만 본다.
 SCORING_FAILURE_LIMIT = 5
 
-#: 강의실 채점 요청의 타임아웃(#402) — `core.llm_scoring`의 기본값(20초)은
-#: beat의 internal 엔드포인트 30초 제약에 맞춘 것인데(그 모듈 상단 상수
-#: 주석 참고), 강의실 채점은 Celery 워커 작업이라 그 제약과 무관하다(모듈
-#: docstring). 추론 모델(GPT-5 계열)은 응답이 더 느려 그 기본값으로는 정상
-#: 요청도 타임아웃으로 실패할 수 있다 — 추론 모델 여부와 무관하게 이 값
-#: 하나로 넉넉히 잡는다(모델마다 갈라 관리할 값이 아니다).
-_CLASSROOM_SCORING_REQUEST_TIMEOUT_SECONDS = 120
-
 #: 강의실 참가자에게 자동 미달을 설명하는 문구 — `submissions.scoring_basis`의
 #: 것을 그대로 쓰지 않는다(그쪽은 "이의를 제기할 수 있다"고 말하는데 강의실에는
 #: 이의제기가 없다).
@@ -195,7 +187,20 @@ def _scoring_adapter(
             "api_key": api_key,
             "model": model,
             "reasoning_effort": reasoning_effort,
-            "timeout": _CLASSROOM_SCORING_REQUEST_TIMEOUT_SECONDS,
+            # 벤더 타임아웃을 주지 않는다 — 공모전과 같은 `core.llm_scoring` 기본값
+            # (20초)을 쓴다(#581, GlitchTip 오류 87). 강의실 채점도 Celery 워커가
+            # 아니라 내부 HTTP 요청을 받은 gunicorn 워커 안에서 돈다: 즉시 채점
+            # (`classroom.tasks.score_attempt`)과 60초 안전망 스캔 둘 다
+            # `core.tasks.call_internal`로 30초 예산을 걸고 부르고, gunicorn 도
+            # `--timeout` 기본값 30초에 워커를 죽인다. #402 가 「워커 작업이라 그
+            # 제약과 무관하다」며 120초로 늘렸을 때 벤더가 30초보다 늦으면 워커가
+            # 채점 도중 죽어 `ClassroomScoringAttempt`도 남지 않았다 — 실패 한도에
+            # 닿지 않은 채 재시도·매 tick 마다 벤더를 다시 불렀다. 20초면 늦은
+            # 응답도 실패한 시도로 남고 `SCORING_FAILURE_LIMIT`회에 플랫폼 미달로
+            # 끝난다. 값을 따로 들지 않는 것은 두 채점이 같은 30초 예산 안에서
+            # 돌기 때문이다(그 근거는 `core.llm_scoring` 상수 주석에 있다).
+            # 추론 모델에 더 긴 시간을 주려면 채점을 그 예산 밖(Celery 워커 안)으로
+            # 옮겨야 한다 — #582.
         },
     )
 
