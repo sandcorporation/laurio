@@ -9,7 +9,12 @@
 //
 // 떠나기·내보내기(#563): 소유자는 공동 강사 줄마다 「내보내기」를, 공동 강사는 맨 아래
 // 「이 클래스 떠나기」를 본다. 둘 다 한 번 더 확인한다. 소유자는 떠날 수 없어 그 자리에
-// 대신 할 일(보관·삭제)을 말한다.
+// 대신 할 일(넘기기·보관·삭제)을 말한다.
+//
+// 소유권 이전(#564, CONTEXT.md 「소유권 이전」): 소유자는 공동 강사 줄마다 「소유권 넘기기」를
+// 보고, 넘기면 채점 키가 비워진다는 것을 확인한 뒤 요청한다. 요청은 클래스마다 하나라 대기 중이면
+// 받는 사람의 줄에 「이전 요청 대기」와 (소유자에게) 「요청 취소」가 붙는다. 받는 사람의 수락·거절은
+// 클래스 화면 맨 위의 `OwnershipTransferOffer` 가 묻는다.
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -18,8 +23,11 @@ import { useBackendQuery } from "@codemit/bff-client";
 
 import { Badge, Card, CardHeader, CardSection, ErrorNote, buttonClass } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";
+import type { PendingOwnershipTransfer } from "@/lib/classes/api";
 import {
   cancelCoInstructorInvite,
+  cancelOwnershipTransfer,
+  requestOwnershipTransfer,
   classInstructorsPath,
   coInstructorInviteUrl,
   createCoInstructorInvite,
@@ -39,22 +47,34 @@ function formatWhen(iso: string): string {
   });
 }
 
+type RowConfirm = "remove" | "transfer" | null;
+
 function InstructorRow({
   instructor,
   canRemove,
   confirming,
-  removing,
-  onAskRemove,
+  busy,
+  transferPending,
+  canTransfer,
+  onAsk,
   onRemove,
+  onTransfer,
+  onCancelTransfer,
   onKeep,
 }: {
   instructor: ClassInstructor;
   // 부른 사람이 소유자이고 이 줄이 공동 강사일 때만 참이다.
   canRemove: boolean;
-  confirming: boolean;
-  removing: boolean;
-  onAskRemove: () => void;
+  confirming: RowConfirm;
+  busy: boolean;
+  // 이 줄의 사람에게 대기 중인 소유권 이전 요청이 있으면 그 요청.
+  transferPending: PendingOwnershipTransfer | null;
+  // 소유자이고 이 줄이 공동 강사이며 클래스에 대기 중인 요청이 없을 때만 참이다.
+  canTransfer: boolean;
+  onAsk: (what: Exclude<RowConfirm, null>) => void;
   onRemove: () => void;
+  onTransfer: () => void;
+  onCancelTransfer: () => void;
   onKeep: () => void;
 }) {
   const owner = instructor.role === "owner";
@@ -73,11 +93,21 @@ function InstructorRow({
           {instructor.accepted_at ? (
             <span className="text-[12px] text-ink/45">{formatWhen(instructor.accepted_at)} 수락</span>
           ) : null}
+          {canTransfer && !confirming ? (
+            <button
+              type="button"
+              data-testid="ownership-transfer-start"
+              onClick={() => onAsk("transfer")}
+              className={buttonClass("secondary", "sm")}
+            >
+              소유권 넘기기
+            </button>
+          ) : null}
           {canRemove && !confirming ? (
             <button
               type="button"
               data-testid="co-instructor-remove"
-              onClick={onAskRemove}
+              onClick={() => onAsk("remove")}
               className={buttonClass("danger", "sm")}
             >
               내보내기
@@ -85,7 +115,57 @@ function InstructorRow({
           ) : null}
         </span>
       </div>
-      {canRemove && confirming ? (
+      {transferPending ? (
+        <div
+          data-testid="ownership-transfer-pending"
+          className="flex flex-wrap items-center justify-between gap-2 border border-rule bg-paper px-3 py-2"
+        >
+          <span className="flex flex-wrap items-center gap-2 text-[12.5px] text-ink/70">
+            <Badge tone="attention">소유권 이전 대기</Badge>
+            {instructor.is_me
+              ? `${formatWhen(transferPending.expires_at)}까지 답할 수 있습니다.`
+              : `${name}님의 수락을 기다립니다 · ${formatWhen(transferPending.expires_at)}에 만료`}
+          </span>
+          {canRemove ? (
+            <button
+              type="button"
+              data-testid="ownership-transfer-cancel"
+              onClick={onCancelTransfer}
+              disabled={busy}
+              className={buttonClass("secondary", "sm")}
+            >
+              {busy ? "취소하는 중..." : "요청 취소"}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      {canTransfer && confirming === "transfer" ? (
+        <div data-testid="ownership-transfer-confirm" className="flex flex-col gap-2 border border-rule bg-paper px-3 py-2.5">
+          <p className="text-[12.5px] leading-relaxed text-ink/70">
+            {name}님에게 이 클래스의 소유권을 넘길까요? {name}님이 수락해야 넘어가고, 수락하면 {name}님이
+            소유자가 되고 나는 공동 강사로 남습니다.
+          </p>
+          <p className="text-[12.5px] leading-relaxed text-ink/70">
+            넘어가는 순간 지금 채점 키가 비워져, 새 소유자가 자기 키를 넣을 때까지 참여자의 제출은 채점되지
+            않고 기다립니다. 예산과 지금까지 쓴 양은 그대로 남습니다. 요청은 7일 동안 유효합니다.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              data-testid="ownership-transfer-confirm-button"
+              onClick={onTransfer}
+              disabled={busy}
+              className={buttonClass("primary", "sm")}
+            >
+              {busy ? "요청하는 중..." : "이전 요청 보내기"}
+            </button>
+            <button type="button" onClick={onKeep} disabled={busy} className={buttonClass("secondary", "sm")}>
+              그만두기
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {canRemove && confirming === "remove" ? (
         <div data-testid="co-instructor-remove-confirm" className="flex flex-col gap-2 border border-rule bg-paper px-3 py-2.5">
           <p className="text-[12.5px] leading-relaxed text-ink/70">
             {name}님을 내보낼까요? 이 클래스를 더는 다룰 수 없고, {name}님이 만든 아직 쓰이지 않은 초대도
@@ -96,12 +176,12 @@ function InstructorRow({
               type="button"
               data-testid="co-instructor-remove-confirm-button"
               onClick={onRemove}
-              disabled={removing}
+              disabled={busy}
               className={buttonClass("dangerFilled", "sm")}
             >
-              {removing ? "내보내는 중..." : "내보내기"}
+              {busy ? "내보내는 중..." : "내보내기"}
             </button>
-            <button type="button" onClick={onKeep} disabled={removing} className={buttonClass("secondary", "sm")}>
+            <button type="button" onClick={onKeep} disabled={busy} className={buttonClass("secondary", "sm")}>
               그대로 두기
             </button>
           </div>
@@ -183,8 +263,9 @@ function LeaveSection({ classId, owner }: { classId: number; owner: boolean }) {
     return (
       <CardSection title="이 클래스 떠나기">
         <p data-testid="class-leave-owner-note" className="px-4 pb-4 pt-2 text-[12.5px] leading-relaxed text-ink/60">
-          소유자는 클래스를 떠날 수 없습니다. 수업을 끝내려면 이 화면에서 클래스를 보관하고, 없던 일로
-          하려면{" "}
+          소유자는 클래스를 떠날 수 없습니다. 떠나려면 먼저 위 강사 목록에서 공동 강사에게 소유권을
+          넘기세요 — 넘기면 공동 강사가 되어 떠날 수 있습니다. 수업을 끝내려면 이 화면에서 클래스를
+          보관하고, 없던 일로 하려면{" "}
           <Link href={`/classes/${classId}/settings`} className="underline underline-offset-2">
             클래스 설정
           </Link>
@@ -249,7 +330,17 @@ function LeaveSection({ classId, owner }: { classId: number; owner: boolean }) {
   );
 }
 
-export function InstructorsSection({ classId }: { classId: number }) {
+export function InstructorsSection({
+  classId,
+  pendingTransfer,
+  onTransferChanged,
+}: {
+  classId: number;
+  // 클래스의 대기 중 소유권 이전 요청 — 클래스 응답(`ClassRow`)에서 온다.
+  pendingTransfer: PendingOwnershipTransfer | null;
+  // 요청·취소 뒤 클래스를 다시 읽는다.
+  onTransferChanged: () => void;
+}) {
   const { state: rosterState, reload: reloadRoster } = useBackendQuery<ClassInstructor[]>(bffClient, classInstructorsPath(classId));
   const { state: invitesState, reload: reloadInvites } = useBackendQuery<PendingCoInstructorInvite[]>(
     bffClient,
@@ -259,15 +350,39 @@ export function InstructorsSection({ classId }: { classId: number }) {
   const [cancellingId, setCancellingId] = useState<number | null>(null);
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [confirmingRemoveId, setConfirmingRemoveId] = useState<number | null>(null);
-  const [removingId, setRemovingId] = useState<number | null>(null);
+  // 한 번에 한 줄의 한 확인만 연다 — 내보내기 또는 소유권 넘기기.
+  const [confirming, setConfirming] = useState<{ id: number; what: Exclude<RowConfirm, null> } | null>(null);
+  const [busyId, setBusyId] = useState<number | null>(null);
 
   const roster = rosterState.status === "ready" ? rosterState.data : [];
   const me = roster.find((instructor) => instructor.is_me);
   const iAmOwner = me?.role === "owner";
 
+  async function transfer(coInstructorId: number) {
+    setBusyId(coInstructorId);
+    setError(null);
+    const result = await requestOwnershipTransfer(classId, coInstructorId);
+    if (!result.ok) {
+      setError(result.detail);
+    }
+    setConfirming(null);
+    setBusyId(null);
+    onTransferChanged();
+  }
+
+  async function cancelTransfer(coInstructorId: number, transferId: number) {
+    setBusyId(coInstructorId);
+    setError(null);
+    const result = await cancelOwnershipTransfer(classId, transferId);
+    if (!result.ok) {
+      setError(result.detail);
+    }
+    setBusyId(null);
+    onTransferChanged();
+  }
+
   async function remove(coInstructorId: number) {
-    setRemovingId(coInstructorId);
+    setBusyId(coInstructorId);
     setError(null);
     const result = await removeCoInstructor(classId, coInstructorId);
     if (!result.ok) {
@@ -276,8 +391,10 @@ export function InstructorsSection({ classId }: { classId: number }) {
     // 내보낸 사람이 만든 대기 초대도 취소되므로 둘 다 다시 읽는다.
     reloadRoster();
     reloadInvites();
-    setConfirmingRemoveId(null);
-    setRemovingId(null);
+    setConfirming(null);
+    setBusyId(null);
+    // 내보낸 사람에게 온 대기 이전 요청도 사라진다.
+    onTransferChanged();
   }
 
   async function create() {
@@ -324,16 +441,24 @@ export function InstructorsSection({ classId }: { classId: number }) {
           <ul data-testid="class-instructors" className="divide-y divide-rule">
             {rosterState.data.map((instructor) => {
               const id = instructor.co_instructor_id;
+              const pendingHere =
+                pendingTransfer !== null && id !== null && pendingTransfer.recipient_co_instructor_id === id
+                  ? pendingTransfer
+                  : null;
               return (
                 <InstructorRow
                   key={id ?? "owner"}
                   instructor={instructor}
                   canRemove={iAmOwner && id !== null}
-                  confirming={id !== null && confirmingRemoveId === id}
-                  removing={id !== null && removingId === id}
-                  onAskRemove={() => setConfirmingRemoveId(id)}
+                  confirming={id !== null && confirming?.id === id ? confirming.what : null}
+                  busy={id !== null && busyId === id}
+                  transferPending={pendingHere}
+                  canTransfer={iAmOwner && id !== null && pendingTransfer === null}
+                  onAsk={(what) => id !== null && setConfirming({ id, what })}
                   onRemove={() => id !== null && void remove(id)}
-                  onKeep={() => setConfirmingRemoveId(null)}
+                  onTransfer={() => id !== null && void transfer(id)}
+                  onCancelTransfer={() => id !== null && pendingHere && void cancelTransfer(id, pendingHere.id)}
+                  onKeep={() => setConfirming(null)}
                 />
               );
             })}
@@ -374,7 +499,7 @@ export function InstructorsSection({ classId }: { classId: number }) {
             <div className="flex flex-wrap items-center justify-between gap-3 px-4">
               <span className="text-[12px] leading-relaxed text-ink/45">
                 링크는 7일 뒤 만료됩니다. 여러 사람을 초대하려면 사람마다 하나씩 만드세요. 수락한 사람은
-                문제·명단·보관을 소유자와 똑같이 다루고, 채점 키·예산, 클래스 삭제, 공동 강사 내보내기는 소유자만 합니다.
+                문제·명단·보관을 소유자와 똑같이 다루고, 채점 키·예산, 클래스 삭제, 소유권 이전, 공동 강사 내보내기는 소유자만 합니다.
               </span>
               <button
                 type="button"

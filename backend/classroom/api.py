@@ -124,11 +124,13 @@ from .schemas import (
     PublishedTemplateSummaryOut,
     ScoringModelCatalogOut,
     ScoringModelOut,
+    OwnershipTransferIn,
+    PendingOwnershipTransferOut,
 )
 from . import pending_scoring
 from .events import publish_attempt_submitted
-from .instructor_scope import class_scope, owned_problem_or_404, problem_scope
-from .instructors import classes_taught_by, instructor_display_name_of, instructor_user_ids, is_instructor, is_owner
+from .instructor_scope import OWNER_ONLY_MESSAGE, class_scope, owned_problem_or_404, problem_scope
+from .instructors import classes_owned_by, classes_taught_by, instructor_display_name_of, instructor_user_ids, is_instructor, is_owner
 from .participation import (
     SUBMIT_BLOCKED_ARCHIVED,
     SUBMIT_BLOCKED_EXPELLED,
@@ -139,7 +141,7 @@ from .participation import (
     participant_submit_blocked_reason,
     visible_problems_queryset,
 )
-from . import class_authoring, co_instructors, problem_authoring
+from . import class_authoring, co_instructors, ownership_transfers, problem_authoring
 from .problem_transitions import available_transitions, execute_transition
 from .scoring import check_scoring_key
 from .scoring_model_catalog import get_scoring_model_catalog
@@ -210,6 +212,22 @@ def _serialize_class(class_obj: Class, *, viewer_id: int) -> ClassOut:
         has_submissions=ClassroomSubmission.objects.filter(problem__classroom=class_obj).exists(),
         published_template=_published_template_summary(_live_class_template(class_obj)),
         role="owner" if is_owner(class_obj, viewer_id) else "co_instructor",
+        pending_ownership_transfer=_pending_ownership_transfer_out(class_obj, viewer_id),
+    )
+
+
+def _pending_ownership_transfer_out(class_obj: Class, viewer_id: int) -> PendingOwnershipTransferOut | None:
+    pending = ownership_transfers.pending_for(class_obj)
+    if pending is None:
+        return None
+    transfer, recipient_row = pending
+    return PendingOwnershipTransferOut(
+        id=transfer.id,
+        recipient_co_instructor_id=recipient_row.id if recipient_row is not None else None,
+        recipient_display_name=recipient_row.display_name if recipient_row is not None else "",
+        recipient_is_me=transfer.recipient_id == viewer_id,
+        requested_at=transfer.requested_at,
+        expires_at=transfer.expires_at,
     )
 
 
@@ -619,9 +637,15 @@ def set_class_openai_key(request: HttpRequest, class_id: int, payload: OpenAIKey
         if check_result == LLMKeyCheckStatus.VALID
         else Class.ScoringKeyStatus.UNVERIFIED
     )
-    class_obj.save(
-        update_fields=["openai_api_key_encrypted", "openai_api_key_last4", "openai_api_key_status"]
+    # 벤더 확인을 기다리는 사이 소유권이 넘어갔을 수 있다(#564) — 넘긴 사람의 키가 새 소유자의
+    # 클래스에 남지 않게, 저장은 「지금도 부른 사람이 소유자인가」를 조건으로 한 번에 한다.
+    saved = classes_owned_by(request.auth_user.id).filter(id=class_obj.id).update(
+        openai_api_key_encrypted=class_obj.openai_api_key_encrypted,
+        openai_api_key_last4=class_obj.openai_api_key_last4,
+        openai_api_key_status=class_obj.openai_api_key_status,
     )
+    if not saved:
+        raise HttpError(403, OWNER_ONLY_MESSAGE)
     return 200, _serialize_class(class_obj, viewer_id=request.auth_user.id)
 
 
@@ -959,6 +983,66 @@ def remove_co_instructor(request: HttpRequest, class_id: int, co_instructor_id: 
 
     class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=True).class_obj
     co_instructors.remove_by_owner(class_obj, co_instructor_id)
+    return 204, None
+
+
+# --- 소유권 이전 (#564, CONTEXT.md 「소유권 이전」) -----------------------------------
+#
+# 넷 다 보관과 무관하다(write=False) — 사람을 들이고 내보내고 넘기는 일은 클래스의 존폐 쪽이다.
+
+
+@router.post(
+    "/classes/{class_id}/ownership-transfers",
+    response={201: PendingOwnershipTransferOut, 403: ErrorOut, 404: ErrorOut, 409: ErrorOut},
+    auth=jwt_auth,
+)
+def request_ownership_transfer(request: HttpRequest, class_id: int, payload: OwnershipTransferIn):
+    """소유자가 공동 강사 한 사람에게 소유권 이전을 요청한다 — 클래스마다 대기 하나, 7일 뒤 만료.
+    이 클래스의 공동 강사 줄이 아니면 404, 이미 대기 중이면 409."""
+
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=True).class_obj
+    ownership_transfers.request(class_obj, request.auth_user.id, payload.co_instructor_id)
+    return 201, _pending_ownership_transfer_out(class_obj, request.auth_user.id)
+
+
+@router.post(
+    "/classes/{class_id}/ownership-transfers/{transfer_id}/cancel",
+    response={204: None, 403: ErrorOut, 404: ErrorOut, 409: ErrorOut},
+    auth=jwt_auth,
+)
+def cancel_ownership_transfer(request: HttpRequest, class_id: int, transfer_id: int):
+    """소유자가 대기 중인 이전 요청을 취소한다. 끝난 요청이면 409."""
+
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=True).class_obj
+    ownership_transfers.cancel(class_obj, request.auth_user.id, transfer_id)
+    return 204, None
+
+
+@router.post(
+    "/classes/{class_id}/ownership-transfers/{transfer_id}/accept",
+    response={200: ClassOut, 403: ErrorOut, 404: ErrorOut, 409: ErrorOut},
+    auth=jwt_auth,
+)
+def accept_ownership_transfer(request: HttpRequest, class_id: int, transfer_id: int):
+    """받는 공동 강사가 수락한다 — 그 순간 소유자가 되고, 넘긴 사람은 공동 강사로 남고, 채점 키가
+    비워진다(`classroom.ownership_transfers.accept`). 응답은 새 소유자가 보는 클래스다."""
+
+    # 받는 사람은 공동 강사다 — 소유자 전용 문이 아니라 「받는 사람인가」를 모듈이 본다(403).
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
+    class_obj = ownership_transfers.accept(class_obj, request.auth_user.id, transfer_id)
+    return 200, _serialize_class(class_obj, viewer_id=request.auth_user.id)
+
+
+@router.post(
+    "/classes/{class_id}/ownership-transfers/{transfer_id}/decline",
+    response={204: None, 403: ErrorOut, 404: ErrorOut, 409: ErrorOut},
+    auth=jwt_auth,
+)
+def decline_ownership_transfer(request: HttpRequest, class_id: int, transfer_id: int):
+    """받는 공동 강사가 거절한다. 아무것도 바뀌지 않고 요청만 끝난다."""
+
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
+    ownership_transfers.decline(class_obj, request.auth_user.id, transfer_id)
     return 204, None
 
 

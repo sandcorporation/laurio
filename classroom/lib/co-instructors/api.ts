@@ -3,6 +3,7 @@
 import type { ApiResult } from "@codemit/bff-client";
 
 import { bffClient } from "@/lib/bff/client";
+import type { ClassRow, PendingOwnershipTransfer } from "@/lib/classes/api";
 
 export type CoInstructorInvite = {
   id: number;
@@ -85,6 +86,35 @@ export function removeCoInstructor(classId: number, coInstructorId: number): Pro
     `/api/backend/classroom/classes/${classId}/co-instructors/${coInstructorId}/remove`,
     {},
   );
+}
+
+/** 소유자가 공동 강사 한 사람에게 소유권 이전을 요청한다(#564) — 클래스마다 대기 하나. */
+export function requestOwnershipTransfer(
+  classId: number,
+  coInstructorId: number,
+): Promise<ApiResult<PendingOwnershipTransfer>> {
+  return bffClient.post<PendingOwnershipTransfer>(`/api/backend/classroom/classes/${classId}/ownership-transfers`, {
+    co_instructor_id: coInstructorId,
+  });
+}
+
+function ownershipTransferAction(classId: number, transferId: number, action: "accept" | "decline" | "cancel") {
+  return `/api/backend/classroom/classes/${classId}/ownership-transfers/${transferId}/${action}`;
+}
+
+/** 소유자가 대기 중인 이전 요청을 취소한다(#564). */
+export function cancelOwnershipTransfer(classId: number, transferId: number): Promise<ApiResult<undefined>> {
+  return bffClient.post<undefined>(ownershipTransferAction(classId, transferId, "cancel"), {});
+}
+
+/** 받는 공동 강사가 수락한다(#564) — 곧바로 소유자가 되고 채점 키가 비워진다. */
+export function acceptOwnershipTransfer(classId: number, transferId: number): Promise<ApiResult<ClassRow>> {
+  return bffClient.post<ClassRow>(ownershipTransferAction(classId, transferId, "accept"), {});
+}
+
+/** 받는 공동 강사가 거절한다(#564). */
+export function declineOwnershipTransfer(classId: number, transferId: number): Promise<ApiResult<undefined>> {
+  return bffClient.post<undefined>(ownershipTransferAction(classId, transferId, "decline"), {});
 }
 
 export function acceptCoInstructorInvite(

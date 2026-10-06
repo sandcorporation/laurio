@@ -252,6 +252,9 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 | `GET /api/classroom/classes/{id}/instructors` | 강사 목록 — 소유자 먼저, 그다음 공동 강사를 수락한 순서로(이름·역할·수락한 때·나인가, 공동 강사 줄의 id). 강사 누구나, 보관된 클래스에서도(#562) |
 | `POST /api/classroom/classes/{id}/instructors/me/leave` | 공동 강사가 스스로 떠난다 — 보관된 클래스에서도. 소유자는 409(#563) |
 | `POST /api/classroom/classes/{id}/co-instructors/{co_instructor_id}/remove` | 공동 강사를 내보낸다 — 소유자 전용(공동 강사는 403), 보관된 클래스에서도(#563) |
+| `POST /api/classroom/classes/{id}/ownership-transfers` | 소유권 이전을 요청한다 — 소유자 전용, 받는 사람은 이 클래스의 공동 강사 줄(`co_instructor_id`). 클래스마다 대기 하나(409), 7일 만료, 보관된 클래스에서도(#564) |
+| `POST /api/classroom/classes/{id}/ownership-transfers/{transfer_id}/cancel` | 대기 중인 이전 요청을 취소한다 — 소유자 전용, 끝난 요청이면 409(#564) |
+| `POST .../ownership-transfers/{transfer_id}/accept`·`.../decline` | 받는 공동 강사 본인만(다른 강사는 403) 수락·거절한다 — 수락하면 곧바로 소유자가 되고 응답은 새 소유자가 보는 클래스다. 끝난 요청이면 409(#564) |
 | `GET /api/classroom/classes/{id}/co-instructor-invites` | 아직 쓰이지 않은 공동 강사 초대 — 수락·만료·취소된 것은 빠진다. 만든 사람의 강사 이름과 토큰(다시 복사용)을 싣는다. 강사 누구나(#562) |
 | `POST /api/classroom/classes/{id}/co-instructor-invites/{invite_id}/cancel` | 대기 중인 초대를 취소한다 — 강사 누구나, 누가 만든 초대든, 보관된 클래스에서도. 다른 클래스의 초대는 404, 이미 쓰였거나 만료·취소됐으면 409(#562) |
 | `GET /api/classroom/co-instructor-invites/{token}` | 초대 미리보기(인증 불필요) — 클래스 이름·강사 이름들·상태(대기·수락됨·만료·취소됨), 쓸 수 없으면 그 문장(#561) |
@@ -320,7 +323,7 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 소유자는 `Class.instructor`, 공동 강사는 공동 강사 초대를 수락해 생긴 `ClassCoInstructor`
 행이다. 강사 전용 라우트는 강사 누구에게나 같은 답을 준다 — 소유자만 하는 일이 따로 있다:
 채점 키 저장, 예산 칸(상한·경고 임계)과 소유자의 강사 이름 칸을 고치는 설정, 클래스 삭제,
-공동 강사 내보내기.
+소유권 이전 요청·취소, 공동 강사 내보내기.
 공동 강사가 부르면 403이다(클래스는 보이므로 404 가 아니다, `classroom.instructor_scope` 의
 `owner=True`). 강사 전용 라우트 전부를 세 사람(소유자·공동 강사·남)으로 훑는 표가
 `tests/test_classroom_co_instructor_permissions.py` 에 있다. 달성률 분모·명단·격자에서 빠지는
@@ -340,9 +343,23 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 스스로 떠나기, 소유자의 내보내기, 탈퇴(`accounts.signals.user_withdrawn` 을 받는다) 모두 한
 트랜잭션에서 같은 일을 한다: 공동 강사 자리를 지우고(그 순간 그 클래스가 목록에서 사라지고
 강사 라우트가 404 다), 그 사람의 참여자 행이 있으면 내보낸 참여자로 표시하고, 그 사람이 만든
-대기 중 초대를 취소한다. 강사일 때 집계에서 빠지던 점검용 시도는 내보낸 참여자의 시도가 되어
+대기 중 초대를 취소하고, 그 사람에게 온 대기 중 소유권 이전 요청을 지운다(#564). 강사일 때 집계에서 빠지던 점검용 시도는 내보낸 참여자의 시도가 되어
 달성률은 떠나기 전과 같고, 그 시도가 있는 문제는 지울 수 없다(ADR-0050). 소유자는 떠날 수
 없다(409). 탈퇴 차단은 소유한 클래스만 세므로 공동 강사만 맡은 사람의 탈퇴는 막히지 않는다.
+
+**소유권 이전은 받는 사람이 수락해야 끝난다**(#564, `classroom.ownership_transfers`, ADR-0055).
+소유자가 공동 강사 한 사람에게 요청하면 클래스 응답(`ClassOut.pending_ownership_transfer`)에
+대기 요청이 실려 강사 누구나 보고, 받는 사람에게는 `recipient_is_me` 가 참이다. 요청은 클래스
+행을 잠가 클래스마다 대기 하나를 지키고, 만료는 요청한 때 + 7일, 상태는 수락·거절·취소·만료
+시각에서 읽는다. 수락은 한 트랜잭션이다: `Class.instructor` 가 받는 사람으로 바뀌고, 받는
+사람의 공동 강사 줄이 사라지고 넘긴 사람이 공동 강사가 된다(강사 이름은 각자의 것을 들고
+자리만 바꾼다), 채점 키(암호문·끝 네 자리·상태)가 비워진다. 예산·사용량·경고 시각은
+그대로다 — 키가 빈 동안 낸 시도는 채점 대기 사유 「키」(`no_api_key`)로 기다리다 새 소유자가
+키를 넣으면 채점된다. 그 순간부터 소유자 전용은 새 소유자에게 열리고 넘긴 사람에게는 403
+이다. 키 저장은 「지금도 소유자인가」를 조건으로 쓰므로 수락과 겹친 넘긴 사람의 키 저장은
+403 으로 끝나고 키가 남지 않는다. 잠금 순서는 공동 강사 줄 → 요청 → 클래스 하나라 수락과
+취소·거절·떠나기가 겹쳐도 한쪽만 이긴다. 연결된 앱(ConnectedApp)은 계정의 것이라 건드리지
+않는다. 연결된 앱(MCP)에는 이전 도구가 없다(ADR-0055).
 
 **보관(`archived_at`)은 지우지 않는다**(#294) — `.../unarchive`로 언제든 되돌아온다.
 **보관은 읽기 전용이라는 뜻이다**(#438, `classroom.participation.assert_class_mutable`).
